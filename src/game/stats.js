@@ -10,7 +10,7 @@
 //   execute   extra damage to enemies under 35% health                    trapCd / trapRoot   Vault Trap cooldown x (1 - .), root + s
 //   rainCd / rainN   Arrow Rain cooldown x (1 - .), extra arrows          iframe           untouchable seconds after a dodge roll
 // restore() puts the engine's own numbers back (the sandbox plays exactly as before).
-import {SPEED} from '../../sprites/player.js';
+import {SPEED} from '../../concepts/sprites/player.js';
 import {itemById, augmentById} from './items.js';
 
 export const BASE_HP = 100, BASE_REGEN = .4;

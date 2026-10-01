@@ -1,6 +1,6 @@
 # Architecture: how the game is built, the rules every change follows, and the road there
 
-Status: 2026-10-01. Written from a measured profile of the HD-2D game (`concepts/render3d/`) and a read-through of every
+Status: 2026-10-01. Written from a measured profile of the HD-2D game (`concepts/render3d/`, now `src/`) and a read-through of every
 module it runs. Section 1 says where we stand, section 2 is the target, sections 3-5 are the rules (performance, code,
 working in parallel), section 6 is the migration plan. The measured details behind section 1 (which module writes which
 field, every event, every duplicate) are in `docs/ARCH_AUDIT_2026-10-01.md`.
@@ -215,7 +215,7 @@ and gameplay can be tested without drawing anything.
 ### 2.3 Folder layout (after the migration)
 
 ```
-src/                     the game (today: concepts/render3d)
+src/                     the game (moved from concepts/render3d on 2026-10-01)
   index.html, main.js    boot only (~100 lines): load content, create services, register systems, start the loop
   core/                  loop.js (phases + fixed step), events.js (bus + catalog), input.js (actions + bindings),
                          flags.js (every URL flag and setting, documented), perf.js, rng.js, mathx.js, color.js, assets.js
@@ -277,7 +277,7 @@ Milliseconds of main-thread CPU per frame on the dev machine. They add up to 4 m
 | **frame (JS total)** | | **4.0 ms**, and p95 frame time <= 6.5 ms (165 Hz = 6.06) |
 | GPU | `G.render` GPU time at 1440p | 3 ms |
 
-The numbers live in `concepts/render3d/core/perf.js` (`BUDGET`). Change them only on purpose, in a commit that says why.
+The numbers live in `src/core/perf.js` (`BUDGET`). Change them only on purpose, in a commit that says why.
 
 ### 3.2 The tools
 

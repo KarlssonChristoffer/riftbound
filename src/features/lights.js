@@ -29,8 +29,8 @@
 // FEATURE CONTRACT (main.js): create(host) -> F with update / frame / lights / onArrowHit / interact / biomeChanged.
 // It sits BEFORE combat in the feature order: onArrowHit sees the hit first (to catch fire) and returns nothing, so
 // combat still resolves it. Props it adds (sconces, the campfire, the beacon) live in host.props like the layout's.
-import {ART} from '../../sprites/arena/biomes.js';
-import {STREAM, PLAY} from '../../sprites/arena/layout.js';
+import {ART} from '../../concepts/sprites/arena/biomes.js';
+import {STREAM, PLAY} from '../../concepts/sprites/arena/layout.js';
 import * as WORLD from '../world.js';
 import {geoOf, M4, along} from './kit3d.js';
 import {createFires} from './firesim.js';

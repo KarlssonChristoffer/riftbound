@@ -6,7 +6,7 @@
 # Writes <root>/packed/: albedo_<k>.png, normals_<k>.png, depth_<k>.png (sim sets only), packed.json:
 #   {w, h, per: poses per sheet, sheets, depth: bool, sig: signature of poses.json (stale check),
 #    poses: {name: [sheet, row]}, meta: {name: {bones, sim}}}
-# The loader (concepts/render3d/atlas.js) falls back to the per-file load when packed.json is missing or stale.
+# The loader (src/atlas.js) falls back to the per-file load when packed.json is missing or stale.
 # Re-run after any re-render of the atlas.
 import json, os, sys, hashlib
 from PIL import Image

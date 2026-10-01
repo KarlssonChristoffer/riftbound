@@ -1,6 +1,6 @@
 // PERF BENCH: the game's frame budget, checked like a test (docs/ARCHITECTURE.md, "Performance").
 // Starts its own dev server and a headless Chrome on the real GPU (ANGLE / D3D11, no vsync, no frame cap), loads each
-// scenario, lets it settle, then reads the in-game profiler (concepts/render3d/core/perf.js) for `--secs` seconds plus
+// scenario, lets it settle, then reads the in-game profiler (src/core/perf.js) for `--secs` seconds plus
 // GPU time (timer queries round G.render). Prints one row per scenario, compares with tools/perf/baseline.json and
 // exits 1 when a scenario is over budget or a system got clearly slower than the baseline.
 //
@@ -11,7 +11,7 @@
 //            --q inst=0   extra URL parameters for every scenario (an A/B of a switch)   --only day,run   several
 //            --throttle 3 (the CPU slowed 3x, ~a mid laptop: then the target is p95 <= 16.7 ms, not the budgets; no baseline compare)
 //            env CHROME = path to chrome.exe
-//   --path concepts/render3d_ab/   bench another copy of the page (an A/B: the old version of a file in a copied folder)
+//   --path src_ab/   bench another copy of the page (an A/B: the old version of a file in a copied folder)
 //
 // Run it before committing anything that touches the frame (a feature, the renderer, the host). Headless Chrome on the
 // dev machine is ~10-20% faster than a visible window; the budgets in perf.js already account for that.
@@ -23,7 +23,7 @@ import {fileURLToPath} from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..'), BASE = join(ROOT, 'tools', 'perf', 'baseline.json');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; }, flag = k => process.argv.includes('--' + k);
-const PAGE = arg('path', 'concepts/render3d/').replace(/^\/|\/?$/g, '') + '/', RUNS = Math.max(1, +arg('runs', flag('save') ? 3 : 1)), THROTTLE = +arg('throttle', 1), EXTRA = arg('q', ''), SECS = +arg('secs', 6), PORT = +arg('port', 8139), [W, H] = arg('res', '1920x1080').split('x').map(Number), ONLY = arg('only', '');
+const PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, '') + '/', RUNS = Math.max(1, +arg('runs', flag('save') ? 3 : 1)), THROTTLE = +arg('throttle', 1), EXTRA = arg('q', ''), SECS = +arg('secs', 6), PORT = +arg('port', 8139), [W, H] = arg('res', '1920x1080').split('x').map(Number), ONLY = arg('only', '');
 const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 
 // ---- scenarios: a page query + an optional driver (runs in the page once it's ready)

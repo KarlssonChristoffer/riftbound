@@ -1,6 +1,6 @@
 # Riftbound: working rules for every session
 
-The game is the HD-2D page in `concepts/render3d/` (pixel sprites in a real 3D world, free camera). Its architecture,
+The game is the HD-2D page in `src/` (open `http://localhost:<port>/src/`) (pixel sprites in a real 3D world, free camera). Its architecture,
 standards and migration plan are in **`docs/ARCHITECTURE.md`**; read it before changing the frame, the host or a
 feature. The measured inventory behind it is `docs/ARCH_AUDIT_2026-10-01.md`.
 
@@ -8,7 +8,7 @@ Rules that apply to every change now:
 
 - **Measure.** Anything that runs every frame gets checked with `node tools/perf/bench.mjs` (headless Chrome on the
   GPU, compared with `tools/perf/baseline.json`) before it's committed; put the before/after in the commit message.
-  In the game, F3 (or `?perf=1`) shows ms per system against the budget. Budgets: `concepts/render3d/core/perf.js`.
+  In the game, F3 (or `?perf=1`) shows ms per system against the budget. Budgets: `src/core/perf.js`.
   Run the bench on a quiet machine; it warns when other work is competing for the CPU.
 - **No per-frame allocation, no per-frame CPU pixel work** (`getImageData`, software rasterising, repainting a canvas
   and re-uploading it), **no scans over all props**. Update on change, cache by version, preallocate.

@@ -41,11 +41,11 @@ import * as THREE from 'three';
 import {createGfx, DEG} from './gfx.js';
 import {buildWorld, texOf, WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, PROP_TOP} from './world.js';
 import {loadAtlas} from './atlas.js';
-import {BIOMES} from '../sprites/arena/biomes.js';
-import {createLighting} from '../sprites/arena/lighting.js';
-import {ClothRig, depthOf, CLOTH_PARAMS} from '../sprites/cloth.js';
-import {createArmor} from '../sprites/arena/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
-import {createPlayer, atlasOf, BUSY} from '../sprites/player.js';
+import {BIOMES} from '../concepts/sprites/arena/biomes.js';
+import {createLighting} from '../concepts/sprites/arena/lighting.js';
+import {ClothRig, depthOf, CLOTH_PARAMS} from '../concepts/sprites/cloth.js';
+import {createArmor} from '../concepts/sprites/arena/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
+import {createPlayer, atlasOf, BUSY} from '../concepts/sprites/player.js';
 import {createGame} from './game/game.js';
 import {createPerf} from './core/perf.js';   // the frame profiler: per-system ms against the budget (F3, ?perf=1)
 import {createEnv, SEASONS, WEATHER} from './sim/env.js';   // the world clock: time of day, seasons, weather
@@ -58,7 +58,7 @@ const t00 = performance.now();
 const FEATURES = ['wind', 'windlines', 'weather', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)
 
 // ---------------------------------------------------------------- the Ranger: loadouts (packed atlases)
-const LOADOUTS = [['ranger basic', '../sprites/out/outfits/ranger_basic/'], ['ranger + cloth sim', '../sprites/out/outfits/ranger_sim/'], ['bare body', '../sprites/out/skel/']];
+const LOADOUTS = [['ranger basic', '../concepts/sprites/out/outfits/ranger_basic/'], ['ranger + cloth sim', '../concepts/sprites/out/outfits/ranger_sim/'], ['bare body', '../concepts/sprites/out/skel/']];
 // default: the runtime cloth (cloak + scarf tail answer the wind; ?set=basic = the baked cloak)
 let loadI = {basic: 0, body: 2, sim: 1}[Q.get('set')] ?? 1;
 $('#load').textContent = 'Loading the Ranger…';

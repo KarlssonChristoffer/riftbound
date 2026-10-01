@@ -9,11 +9,11 @@
 //   lights   from the biome's sprites (braziers, torches, crystals) and ground (lava, runes), in metres
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from '../sprites/arena/layout.js';
+import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from '../concepts/sprites/arena/layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
-const GLB = '../sprites/out/render3d/glb/', YAW = '../sprites/out/render3d/props_yaw/';
+const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
 
 // ---------------------------------------------------------------- the pixelizer's palettes (props_pixelize.py BIOMES)
 const RED = ['d8573e', 'a8342b', '72222a', '3e1420'], HAZ = ['f2d060', 'd8a830', '9a7020', '4e3812'], GOLD = ['ffe89a', 'e0b040', 'a87a24', '5a3e14'];
