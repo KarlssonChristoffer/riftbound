@@ -164,14 +164,16 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
   // the south ravine: very dark ground pixels near the south edge drop away
   const px = gq.getImageData(0, 0, WPX, HPX).data;
   const dark = (x, z) => { const i = (Math.min(HPX - 1, Math.max(0, Math.round(z * PPM))) * WPX + Math.min(WPX - 1, Math.max(0, Math.round(x * PPM)))) * 4; return px[i] * .3 + px[i + 1] * .55 + px[i + 2] * .15 < 40; };
-  const S = .25, NX = Math.round(WM / S), NZ = Math.round(HM / S);
+  // the grid runs SKIRT m past the world on every side (edge texels stretched outward): the camera keeps the flat
+  // ground inside the world, but lowered ground (the south ravine) projects further down the screen than that
+  const S = .25, SKIRT = 6, NX = Math.round((WM + 2 * SKIRT) / S), NZ = Math.round((HM + 2 * SKIRT) / S);
   const hAt = (x, z) => {
     if (z > HM - 7 && dark(x, z) && dark(x, z + .2) && dark(x, z - .2)) return -3.5;
     if (inStream(x, z)) return WATER_H;
     return 0;
   };
   const pos = [], uv = [], idx = [];
-  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) { const x = i * S, z = j * S; pos.push(x, hAt(x, z), z); uv.push(x / WM, z / HM); }
+  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) { const x = i * S - SKIRT, z = j * S - SKIRT; pos.push(x, hAt(x, z), z); uv.push(x / WM, z / HM); }
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) { const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
   const gGeo = new THREE.BufferGeometry(); gGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); gGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   gGeo.setIndex(idx); gGeo.computeVertexNormals();

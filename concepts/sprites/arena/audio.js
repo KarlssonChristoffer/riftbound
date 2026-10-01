@@ -8,7 +8,8 @@
 //                                              //   arrows turning .stuck = thuds, brutes landing a hop = stomps,
 //                                              //   combat.dbg.zones / .traps growing = rain volley cast / trap laid
 //   AU.update(dt, player, events)              // every simulation step, with the SAME events array atmos gets (not spliced here)
-//                                              //   player {x, y, z, vx, vy, state, t, aim, biome, time, cam}
+//                                              //   player {x, y, z, vx, vy, state, t, aim, biome, time, cam, screenX?}
+//                                              //   screenX(x, y) -> view px: optional, pans by the screen when the camera turns (3D page)
 //                                              //   aim = LMB held; biome = 'ruins'|'ember'|'frost'|'rift'; time = 'day'|'dusk'|'night'
 //   AU.toggle() -> muted                       // host maps key 'm' (remembered per viewer in localStorage)
 //   AU.setVolume(k, 0..1) / AU.volumes      // k: master | music | sfx | amb (pause menu > Sound; remembered in localStorage)
@@ -647,9 +648,12 @@ export function createAudio(ctx, host = {}) {
     return musicOn;
   }
   let L = {x: 0, y: 0, cam: null};   // the listener (player) for positions
+  // pan by the sound's screen x. Optional player.screenX(x, y) -> view px (a host whose camera turns, e.g. the 3D page);
+  // without it: world x against the camera (the arena), so the arena sounds exactly as before
   function at(x, y) {
-    const VW = ctx.VW || 480, PPM = ctx.PPM || 16, cx = L.cam ? L.cam.x + VW / 2 : L.x * PPM;
-    return {pan: clamp((x * PPM - cx) / (VW / 2) * .7, -.8, .8), d: Math.hypot(x - L.x, y - L.y)};
+    const VW = ctx.VW || 480, PPM = ctx.PPM || 16;
+    const dx = L.screenX ? L.screenX(x, y) - VW / 2 : x * PPM - (L.cam ? L.cam.x + VW / 2 : L.x * PPM);
+    return {pan: clamp(dx / (VW / 2) * .7, -.8, .8), d: Math.hypot(x - L.x, y - L.y)};
   }
   function fire(name, x, y, o = {}) { try { SFX[name](E, {...at(x ?? L.x, y ?? L.y), ...o}); } catch (e) { console.warn('audio:', name, e); } }
   function play(name, o = {}) { unlock(); if (E && SFX[name]) fire(name, L.x, L.y, {surf: bedId || 'ruins', ...o}); }
@@ -669,7 +673,7 @@ export function createAudio(ctx, host = {}) {
 
   function run(dt, pl, events, arrows) {
     const t = E.ac.currentTime, surf = SURF[pl.biome] || 'ruins';
-    L = {x: pl.x, y: pl.y, cam: pl.cam};
+    L = {x: pl.x, y: pl.y, cam: pl.cam, screenX: pl.screenX};
     // ---- ambient bed + stream ----
     if (pl.biome !== bedId) { bed?.stop(t); bed = makeBed(E, SURF[pl.biome] || 'ruins', t); bedId = pl.biome;
       E.revOut.gain.setTargetAtTime({ruins: .22, ember: .15, frost: .3, rift: .45}[bedId] ?? .22, t, .5); }

@@ -61,9 +61,38 @@ export function createDraw(host, core) {
     }
   }
 
+  // ---------------- the waterline ----------------
+  // a sunk crate / a floating barrel meets the water: a 1 px foam line along its footprint at the water's height and
+  // a slow ripple ring (the arena cut its sprite at the waterline and added a foam row). On the ground layer, so only the
+  // water pixels around the prop show it: the prop itself covers the rest
+  const FOAM = '#d6e8ec', RIPPLE = '#b9d7dd';
+  function seg(q, ax, ay, bx, by, c) {
+    const n = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay))));
+    for (let i = 0; i <= n; i++) { q.fillStyle = c; q.fillRect(Math.round(ax + (bx - ax) * i / n), Math.round(ay + (by - ay) * i / n), 1, 1); }
+  }
+  function outline(q, x, y, h, crate, grow, c) {
+    const P = [];
+    if (crate) { const s = .37 + grow; P.push([x - s, y - s], [x + s, y - s], [x + s, y + s], [x - s, y + s]); }
+    else { const r = .31 + grow; for (let i = 0; i < 20; i++) { const a = i / 20 * TAU; P.push([x + Math.cos(a) * r, y + Math.sin(a) * r]); } }
+    const S = P.map(([px_, py_]) => { const v = proj(px_, py_, h); return [v[0], v[1]]; });
+    for (let i = 0; i < S.length; i++) { const a = S[i], b = S[(i + 1) % S.length]; seg(q, a[0], a[1], b[0], b[1], c); }
+  }
+  function waterline() {
+    const wh = host.world.waterH ?? -.18, t = core.simT, S = host.layout.stream;
+    for (const q of host.props) {
+      // in the channel (inStream says false right ON a sunk crate: it became a stepping stone, dry footing)
+      if (!q.sink || q.gone || q.broken || !S || Math.abs(q.x - S.cx(q.y)) > S.w(q.y) / 2 + .4) continue;
+      const crate = q.kind === 'crate', g = G();
+      outline(g, q.x, q.y, wh, crate, 0, FOAM);
+      const k = (t * .8 + q.x * .37) % 1;   // one ring at a time, drifting out and fading
+      g.globalAlpha = (1 - k) * .55; outline(g, q.x, q.y, wh, crate, .05 + k * .3, RIPPLE); g.globalAlpha = 1;
+    }
+  }
+
   // ---------------- the world, every rendered frame ----------------
   function frame() {
     basis();
+    waterline();
     const simT = core.simT;
     // brutes: the painted card's facing (16 steps, the biome's convention) from the world facing, seen from this camera
     for (const b of core.brutes) {

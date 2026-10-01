@@ -27,16 +27,17 @@ const OUTS = `layout(location = 0) out vec4 o0;\nlayout(location = 1) out vec4 o
 const MESH_VS = HEAD + `
 in vec3 position; in vec3 normal; in float aPart; in float aFam; in float aBias; in float aFixed;
 uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
-out vec3 vN; out vec3 vW; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed;
+out vec3 vN; out vec3 vW; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed;
 void main() {
   vec4 w = modelMatrix * vec4(position, 1.);
   vW = w.xyz; vN = mat3(modelMatrix) * normal;
+  vNL = normal; vPL = position;   // the prop's own frame: moss stays where it grew when the prop tips and rolls
   fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed;
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
 const MESH_FS = HEAD + OUTS + `
-in vec3 vN; in vec3 vW; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed;
-uniform sampler2D uRamps; uniform vec3 uLArt; uniform float uObj, uFlash;
+in vec3 vN; in vec3 vW; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed;
+uniform sampler2D uRamps; uniform vec3 uLArt; uniform float uObj, uFlash; uniform vec2 uSeed;
 uniform vec3 uCover;      // x: amount (0 = none), y: up threshold, z: cover family
 uniform vec2 uEmitFam;    // families that glow in this biome (-1 = none)
 float hsh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -48,9 +49,11 @@ void main() {
   int tone;
   if (fFixed >= 0.) tone = int(fFixed);
   else { float d = dot(n, uLArt) + fBias; tone = d > .62 ? 0 : d > .12 ? 1 : 2; }
-  // biome cover (moss / ash / snow) on what faces up: patchy, never on the glow / void families
-  if (uCover.x > 0. && n.y > uCover.y && fFixed < 0.) {
-    float c = vn(vW.xz * 7.) * .7 + vn(vW.xz * 19. + 3.) * .3;
+  // biome cover (moss / ash / snow) on what faces up AT REST (the prop's own frame, so it tips and rolls with it):
+  // patchy, never on the glow / void families; the pattern is seeded per object
+  if (uCover.x > 0. && normalize(vNL).y > uCover.y && fFixed < 0.) {
+    vec2 q = vPL.xz + uSeed;   // uSeed = where the mesh was placed: continuous across wall segments, fixed on a rolling barrel
+    float c = vn(q * 7.) * .7 + vn(q * 19. + 3.) * .3;
     if (c > 1. - uCover.x * 2.6) fam = uCover.z;
   }
   vec3 alb = texelFetch(uRamps, ivec2(tone, int(fam + .5)), 0).rgb;
@@ -414,7 +417,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   let frameNo = 0;
 
   // ---- materials
-  const meshMat = obj => raw(MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uCover: U.cover, uEmitFam: U.emitFam});
+  const meshMat = (obj, seed) => raw(MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam});
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
   const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0}) => raw(SURF_VS, SURF_FS, {
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
@@ -456,7 +459,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   }
   // a live ramp mesh (+ its shadow caster). setMatrix moves both; setGeometry swaps the model (a breakable's stage)
   function mesh(geom, obj, matrix) {
-    const gm = new THREE.Mesh(geom, meshMat(obj)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gScene.add(gm);
+    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]))); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gScene.add(gm);
     const sm = new THREE.Mesh(geom, shadowMeshMat); sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sScene.add(sm);
     return {gm, sm,
       setVisible(v) { gm.visible = v; sm.visible = v; },

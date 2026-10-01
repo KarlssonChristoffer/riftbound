@@ -72,7 +72,7 @@ const TUNE = {
   clouds: {on: true, tileM: [40, 30], cover: .31, core: .19, s: [.24, .12], time: {day: 1, dusk: .55, night: 0}, speed: 1.9, none: ['rift'],
     mixC: .45 /* 3D: the mix colour = shadow colour x this (approximates the arena's multiply) */},
   shafts: {on: true, max: 5, lenMax: 120, el: [38, 62], time: {day: .85, dusk: 1, night: .5}, night: ['frost', 'rift'], motes: 9, yawStep: 1 /* 3D: deg */},
-  refl: {on: true, alpha: .6, tint: .38, ripple: 1, reach: 2.5, glowDim: .5, bed: -.18 /* 3D: the stream bed's height (m) */},
+  refl: {on: true, alpha: .6, tint: .38, ripple: 1, reach: 2.5, glowDim: .5, bed: -.18 /* 3D: the stream bed's height (m) = world.waterH */},
   haze: {on: true},
 };
 
@@ -454,7 +454,7 @@ export async function create(host) {
 
   // ================================================================ WATER: masks, puddles, reflections, sky glint
   // masks are TOP-DOWN (R = PPM texels per metre, like the world's ground canvas) and projected per frame
-  const WA = {key: '', mask: null, mpat: null, lava: null, lpat: null, yEnd: 0, shrink: 0, puddles: [], near: [], gpx: null, gw: 0, gh: 0, used: false, n: 0};
+  const WA = {key: '', mask: null, mpat: null, lava: null, lpat: null, yEnd: 0, shrink: 0, puddles: [], near: [], plane: new Map(), gpx: null, gw: 0, gh: 0, used: false, n: 0};
   const [RA, ra] = mk(VW, VH), [RB, rb] = mk(VW, VH), [MS, ms] = mk(VW, VH), [EM, em] = mk(VW, VH), [SK, sk] = mk(VW, VH), [HZ, hz] = mk(VW, VH);
   const SKY = sk.createImageData(VW, VH), skyDirty = [];
   function topMask(yEnd, half, cuts) {   // the stream's row spans (half-width function of y), minus cuts(q, R)
@@ -471,7 +471,7 @@ export async function create(host) {
   function buildWater() {
     const key = biome + '|' + (host.world?.groundCanvas ? host.world.groundCanvas.width : 0);
     if (WA.key === key) return;
-    Object.assign(WA, {key, mask: null, mpat: null, lava: null, lpat: null, puddles: [], near: [], gpx: null});
+    Object.assign(WA, {key, mask: null, mpat: null, lava: null, lpat: null, puddles: [], near: [], plane: new Map(), gpx: null});
     const S = host.layout?.stream; if (!S) return;
     if (biome === 'ember') { WA.lava = topMask(27.6, my => S.w(my) / 2 + .18); return; }
     if (!(biome === 'ruins' || biome === 'frost')) return;
@@ -492,7 +492,8 @@ export async function create(host) {
       if ((p.z || 0) > .05 || /^wall_/.test(p.kind)) continue;
       const nearStream = p.y < WA.yEnd + 1 && Math.abs(p.x - S.cx(p.y)) - S.w(p.y) / 2 < TUNE.refl.reach;
       const nearPud = WA.puddles.some(u => Math.abs(p.x - u.x) < 2.6 && p.y > u.y - 3.4 && p.y < u.y + .3);
-      if (nearStream || nearPud) WA.near.push(p);
+      // the water plane it mirrors about: the stream's surface (the lowered bed) or a puddle (ground level)
+      if (nearStream || nearPud) { WA.near.push(p); WA.plane.set(p, nearStream ? TUNE.refl.bed : 0); }
     }
     // the ground's own pixels (top-down), for the sky glint (additive before the light = ground texel + sky)
     const gc = host.world?.groundCanvas;
@@ -634,15 +635,17 @@ export async function create(host) {
     for (const p of WA.near) {
       if (p.gone) continue;
       const it = host.itemOf(p), sp = it?.sp || host.biome.sprite?.(p, host.ctxO); if (!sp || !sp.img) continue;   // live 3D prop: its painted stand-in
-      const z0 = p.z || 0, [ax, ay] = proj(p.x, p.y, z0 + (p.h || 0)), gy = Math.round(proj(p.x, p.y, z0)[1]);
+      const z0 = p.z || 0, [ax, ay] = proj(p.x, p.y, z0 + (p.h || 0)), gy = Math.round(proj(p.x, p.y, z0 + (WA.plane.get(p) ?? 0))[1]);
       const dx = Math.round(ax) - sp.pivot[0] * z, dy = Math.round(ay) - sp.pivot[1] * z;
       if (mirror(sp.img, 0, 0, sp.img.width, sp.img.height, dx, dy, gy)) { const e = emitImageOf(p, sp); if (e) flames.push({e, dx, dy, gy, w: sp.img.width * z, h: sp.img.height * z}); }
     }
-    // the Ranger: body + cloak + bow as drawn this frame, flipped about the ground under him (airborne: 2 x height lower)
+    // the Ranger: body + cloak + bow as drawn this frame, flipped about the water plane next to him (the stream's lowered
+    // surface, or ground level at a puddle; airborne: 2 x height lower)
     const P = host.P, pl = host.player;
     if (P && !(P.sink > 0) && !(P.blink && Math.floor(P.blink * 12) % 2) && near(pl.x, pl.y, 3.2)) {
       // (playerSprite's h is the player's height above the ground; the canvas size is img.width / img.height)
-      const ps = host.playerSprite(), ground = host.elev ? host.elev(ps.x, ps.y) : 0, [ax, ay] = proj(ps.x, ps.y, ps.h), gy = Math.round(proj(ps.x, ps.y, ground)[1]);
+      const ps = host.playerSprite(), Sx = host.layout.stream, byStream = WA.mask && Math.abs(ps.x - Sx.cx(ps.y)) - Sx.w(ps.y) / 2 < 3.2,
+        plane = byStream ? TUNE.refl.bed : (host.elev ? host.elev(ps.x, ps.y) : 0), [ax, ay] = proj(ps.x, ps.y, ps.h), gy = Math.round(proj(ps.x, ps.y, plane)[1]);
       mirror(ps.img, 0, 0, ps.img.width, ps.img.height, Math.round(ax) - ps.px * z, Math.round(ay) - ps.py * z, gy);
     }
     if (bx1 > bx0) {

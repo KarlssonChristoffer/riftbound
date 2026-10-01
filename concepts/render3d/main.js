@@ -27,7 +27,7 @@
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE.
 import * as THREE from 'three';
 import {createGfx, DEG} from './gfx.js';
-import {buildWorld, texOf, PLAY, TRAIL, elev, inStream, PLATEAUS} from './world.js';
+import {buildWorld, texOf, WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS} from './world.js';
 import {loadAtlas} from './atlas.js';
 import {BIOMES} from '../sprites/arena/biomes.js';
 import {createLighting} from '../sprites/arena/lighting.js';
@@ -377,10 +377,20 @@ function applyMood(PX, PY, t) {
 // ---------------------------------------------------------------- camera target: eased (look-ahead), snapped to the pixel lattice
 const T = new THREE.Vector3(), Ts = new THREE.Vector3();
 let camInit = false;
-function snapTarget(ox, oy) {   // ox, oy: px offset (feel, shake) applied in the view, then snapped
-  const [vx, vy] = toView(T.x, T.z), z = zoom;
-  const sx = Math.round((vx * PPM + ox) * z) / (PPM * z), S = Math.round((vy * PPMY - T.y * PPMH + oy) * z), vy2 = (S / z + T.y * PPMH) / PPMY;
-  const [X, Zw] = toWorld(sx, vy2); Ts.set(X, T.y, Zw);
+// ox, oy: px offset (feel, shake) applied in the view; then the visible GROUND stays inside the world (the arena
+// clamps its camera to the world the same way: no void past the edge), then the target snaps to the pixel lattice
+function snapTarget(ox, oy) {
+  const z = zoom, h = T.y, lift = h * PPMH / PPMY;   // the ground at screen centre lies `lift` m further back than the target
+  let [vx, vy] = toView(T.x, T.z); vx += ox / PPM; vy += oy / PPMY;
+  // the view's ground rectangle: half extents in the view frame, then its world-axis extents at this yaw
+  const hx = VW / (2 * PPM * z), hy = VH / (2 * PPMY * z), c = Math.abs(Math.cos(yaw)), s = Math.abs(Math.sin(yaw));
+  const ex = hx * c + hy * s, ez = hx * s + hy * c;
+  let [gx, gz] = toWorld(vx, vy - lift);
+  gx = ex * 2 >= WORLD.WM ? WORLD.WM / 2 : Math.min(WORLD.WM - ex, Math.max(ex, gx));
+  gz = ez * 2 >= WORLD.HM ? WORLD.HM / 2 : Math.min(WORLD.HM - ez, Math.max(ez, gz));
+  [vx, vy] = toView(gx, gz); vy += lift;
+  const sx = Math.round(vx * PPM * z) / (PPM * z), S = Math.round((vy * PPMY - h * PPMH) * z), vy2 = (S / z + h * PPMH) / PPMY;
+  const [X, Zw] = toWorld(sx, vy2); Ts.set(X, h, Zw);
 }
 
 // ---------------------------------------------------------------- input

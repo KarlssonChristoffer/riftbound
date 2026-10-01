@@ -24,9 +24,9 @@
 //                   ('ground'): before the light, on ground pixels only, so every sprite / prop covers them (the arena's
 //                   ground canvas). The far layers keep their parallax: each step they are carried along by (1 - par) of
 //                   the camera's move, so they scroll slower than the world
-//   glow (fireflies, embers, motes, lava drops, glowing rings / stream bits)  -> host.layer('front') at the arena's
-//                   alpha (its view-sized emitter canvas always overlapped the player, so lighting.apply drew it straight
-//                   over the lit frame at 1.25 - lum(ambient) x .95, clamped .3..1: faint by day, full at night)
+//   glow (fireflies, embers, motes, lava drops, glowing rings / stream bits)  -> depth-tested EMISSIVE points at each
+//                   particle's own depth (walls and props in front hide them), dithered to the arena's glow alpha
+//                   (1.25 - lum(ambient) x .95, clamped .3..1: faint by day, full at night)
 //   shard edges     the shard cards' emit image (glow x (1 - light), depth-correct)
 //   footprints, shard shadows (the arena multiplied them into the ground)  -> host.layer('ground') with the multiply
 //                   baked in: the ground texel under the pixel (world.groundCanvas) x the tone
@@ -172,9 +172,27 @@ export async function create(host) {
 
   // ---------- drawing: colour buckets per layer (batched fillRects), points ----------
   const BG = new Map(), BE = new Map();   // 'ground', 'emit'
-  const put = (bk, c, x, y, w = 1, h = 1) => { let a = bk.get(c); if (!a) bk.set(c, a = []); a.push(x, y, w, h); };
+  // glow pixels remember the world point they were projected from (GA, set by the caller via glowAt): they're drawn as
+  // depth-tested emissive points, so walls and props in front hide them (a screen overlay glowed through walls)
+  let GA = [0, 0, 0, 0, 0];
+  const glowAt = (x, y, h) => { GA = [x, y, h, SX(x, y, h), SY(x, y, h)]; };
+  const GL = [];
+  const put = (bk, c, x, y, w = 1, h = 1) => { if (bk === BE) { GL.push(c, x, y, w, h, GA); return; } let a = bk.get(c); if (!a) bk.set(c, a = []); a.push(x, y, w, h); };
   function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); a.length = 0; } }
   const any = bk => { for (const a of bk.values()) if (a.length) return true; return false; };
+  const GO = {size: 1, alpha: 1, emit: true}, RGBC = new Map(), rgbc = c => { let v = RGBC.get(c); if (!v) RGBC.set(c, v = host.rgb(c)); return v; };
+  function flushGlow() {   // the glow buffer -> emissive points at their particle's depth (alpha: the arena's glow strength, dithered)
+    const z = V.z, ca = Math.cos(host.yaw), sa = Math.sin(host.yaw);
+    GO.size = z; GO.alpha = glowA();
+    for (let k = 0; k < GL.length; k += 6) {
+      const c = rgbc(GL[k]), X = GL[k + 1], Y = GL[k + 2], w = GL[k + 3], h = GL[k + 4], [ax, ay, ah, aX, aY] = GL[k + 5];
+      for (let j = 0; j < h; j += z) for (let i = 0; i < w; i += z) {
+        const dX = (X + i + z / 2 - aX) / z / PPM, dY = (Y + j + z / 2 - aY) / z / PPMY;   // screen right / down (along the ground) -> world
+        host.point(ax + dX * ca + dY * sa, ay - dX * sa + dY * ca, ah, c, GO);
+      }
+    }
+    GL.length = 0;
+  }
   // a layer pixel at art offset (dx, dy) from a projected point, w x h art px (zoom scales art px)
   const lp = (bk, c, X, Y, dx = 0, dy = 0, w = 1, h = 1) => put(bk, c, X + dx * V.z, Y + dy * V.z, w * V.z, h * V.z);
   const PO = {size: 1};
@@ -329,6 +347,7 @@ export async function create(host) {
         const sw = K.sway && !(p.rest > 0) ? Math.round(Math.sin(T * K.sway[1] + p.ph * TAU) * K.sway[0]) : 0;
         const X0 = SX(p.x, p.y, p.h), Y0 = SY(p.x, p.y, p.h), X = Math.floor(X0) + sw * V.z, Y = Math.floor(Y0);
         if (!inView(X, Y, 3 * V.z)) continue;
+        if (pass === 'emit') glowAt(p.x, p.y, p.h);
         const pal = p.pal || K.pal, n = pal.length, i = shade(K, p, n);
         if (i < 0) continue;
         const c = pal[i], c2 = pal[Math.min(n - 1, i + 1)];
@@ -441,12 +460,14 @@ export async function create(host) {
       const k = r.t / r.life, n0 = r.pal.length, c = r.pal[Math.min(n0 - 1, Math.floor(k * n0))];
       if (r.flash) {
         const X = Math.floor(SX(r.x, r.y, WATER_H + .3)), Y = Math.floor(SY(r.x, r.y, WATER_H + .3));
+        if (emit) glowAt(r.x, r.y, WATER_H + .3);
         lp(bk, r.pal[0], X, Y, -1, 0, 3, 1); lp(bk, r.pal[0], X, Y, 0, -1, 1, 3); lp(bk, r.pal[2], X, Y, -2, 0); lp(bk, r.pal[2], X, Y, 2, 0); continue;
       }
       const e = 1 - (1 - k) * (1 - k), rad = r.r0 + (r.r1 - r.r0) * e, n = Math.max(8, Math.round(TAU * rad * PPM / 1.4));
       for (let i = 0; i < n; i++) {
         const a = i / n * TAU, wx = r.x + Math.cos(a) * rad, wy = r.y + Math.sin(a) * rad * .8;
         if (!r.noclip && !wet(wx, wy)) continue;
+        if (emit) glowAt(wx, wy, WATER_H);
         lp(bk, c, Math.floor(SX(wx, wy, WATER_H)), Math.floor(SY(wx, wy, WATER_H)));
       }
     }
@@ -517,6 +538,7 @@ export async function create(host) {
       if (K.k !== 'suck' && K.k !== 'mist' && !wet(wx, p.y)) continue;   // clipped to the channel (and off the stones)
       const x = Math.floor(SX(wx, p.y, WATER_H + p.h)), y = Math.floor(SY(wx, p.y, WATER_H + p.h));
       if (!inView(x, y, 4 * V.z)) continue;
+      if (pass === 'emit') glowAt(wx, p.y, WATER_H + p.h);
       const pal = K.pal, n = pal.length, a = p.life ? p.t / p.life : 0, io = Math.min(p.t / .35, (p.life - p.t) / .35), fi = io >= 1 ? 0 : io > .5 ? 1 : 2;
       switch (K.k) {
         case 'flow':
@@ -551,7 +573,7 @@ export async function create(host) {
       if (!inView(X0, Y0, 2 * V.z)) continue;
       const n = q.pal.length, big = q.t < q.life * q.hold, w = big ? q.px : Math.max(1, q.px - 1), h = big ? q.py : Math.max(1, q.py - 1);
       const c = q.pal[Math.min(n - 1, Math.floor(q.t / q.life * n))];
-      if (emit) { lp(BE, c, Math.floor(X0), Math.floor(Y0), -(w >> 1), -(h >> 1), w, h); continue; }
+      if (emit) { glowAt(q.x, q.y, q.h); lp(BE, c, Math.floor(X0), Math.floor(Y0), -(w >> 1), -(h >> 1), w, h); continue; }
       // a w x h block of lit pixels: one point of the smaller size, two when the block is a pixel longer one way
       const m = Math.min(w, h);
       pp(q.x, q.y, q.h, c, 0, 0, m);
@@ -714,7 +736,7 @@ export async function create(host) {
       // over the lit frame at alpha 1.25 - lum(ambient) x .95 (clamped .3..1): faint by day, full at night. Same here
       if (F.weather) drawKinds('emit');
       drawFx(true); drawStream(Vs, 'emit'); drawRings(true);
-      if (any(BE)) { const q = host.layer('front'); q.save(); q.globalAlpha = glowA(); flush(BE, q); q.restore(); }
+      flushGlow();   // depth-tested emissive points (hidden behind walls / props)
       tick(t0);
     },
     hd(q, scale) {
