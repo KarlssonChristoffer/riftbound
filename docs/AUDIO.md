@@ -340,3 +340,41 @@ Each one is a pure picker returning `[{buffer, gain, rate, delay}]`.
   - `ksDamp`, `arrowWhoosh`, `gait` / `force` / `load` (the GRF), `band` (footstep.js / bow_release.js)
   - the circular loop toolkit: `fold`, `circBiquad`, `loopLfo`, `poissonT` (stream.js)
   - `addBurst`
+- **Library expansion (2026-10-01):** 26 recipes, 436/436 variants pass, after two listening passes.
+  - New families: combat (arrow_fly, arrow_stick, explosion, trap, stomp), character/loot/UI (cloth, bow_draw, coin, chest, magic, climb, ui), world (wind, fire, lava, rift, creature, ice, prop), plus `plunk` (the 5/5 splashes, kept by request).
+  - After "white noise in every nature sound, everything too high", every recipe was darkened under the hard brightness rules in `audio/forge/RECIPE_GUIDE.md`.
+  - `metrics.js` gained `hf4kDb` (energy above 4 kHz re total). All loop textures now sit at -22..-115 dB.
+  - `dsp.js` gained `warm()`. The lab plays loops at -34 LUFS (ambience level) and one-shots at -24.
+  - Renamed cases keep their old draws through `seedAs` (case) / `seedId` (recipe).
+- **Phase 2 (runtime): wired 2026-10-01.** `audio/runtime/`: bakery.js + bake.worker.js (Worker baking, 2 workers), engine.js (bus tree + limiter, voices/coalescing/stealing, distance, reverb per biome, loops, snapshots), events.js (all 29 arena sound names → forge recipes, levels, limits, prefetch priorities, AMBIENCE beds/spots/emitters per biome×time), director.js (post / prefetch / ambience / continuous creak + roll).
+  - `arena/audio.js` creates the runtime at load and tries `director.post()` first, falling back to its legacy synth. The legacy chain, the music and the forge all end in the forge engine's master. Forge beds take over from the legacy bed when baked.
+  - `?forge=0` = legacy only, for A/B.
+  - Live headless test: 88 banks baked in 6 s (69 MB); 25/25 gameplay sounds played from the forge, 0 fallbacks, 0 errors.
+  - Contract and API: `audio/runtime/CONTRACT.md`. Gaps: no lava/rift plop one-shots, roll is chained one-shots, no crystal arrow_stick, no IndexedDB cache, Firefox/Safari untested.
+- **Phase 3 (screen-bound ambience + gaps): 2026-10-01.** After the user's "too much happening that isn't on screen; random sounds in my ear":
+  - audio.js passes `off` (metres beyond the view edge) with every sound, and the visible torches/braziers as `sources`.
+  - events.js `SPATIAL` gives each event a category:
+    - world: -6 dB per metre off-screen, cut at 2 m
+    - combat: -3 dB per metre, cut at 6 m, plus a low-pass
+    - player / ui: never touched
+  - Random close spot calls are removed. Wildlife sounds only via the wildlife system's events. What remains are rare distant `calls` (≤ -30 dB, low-passed, panned wide; budget 2 per 10 s), plus a quiet insects bed.
+  - Visible torches/braziers get fire emitters (4 nearest).
+  - Ambience ducks with combat intensity; beds are 2.5 dB quieter.
+  - Ambient one-shots per minute: night 29–31 → ~2, day 9 → 1–2.
+  - New recipes: insects (night/dusk/day loops), prop_roll (stone/dirt loop; speed sets rate and gain), arrow_stick/crystal, splash/lava and splash/rift.
+- **Phase 4 (loudness pass): 2026-10-01.** Measured with `node tools/sfx/mixmeter.mjs`, which taps the engine buses in the live arena. The user's report was "pretty damn loud ambience noise". The cause was MUSIC, not the beds: the idle pad (detuned sawtooth chords) played at -24 LUFS-M, about 25 dB over the wind bed and almost as loud as combat.
+  - **Fixes:**
+    - Music master 0.25 → 0.1; the idle (pad-only) state a further -4.4 dB.
+    - Pads darker, with less detune (the beating read as buzz/noise); music reverb send .45 → .25.
+    - Stream / lava / rift-crack emitters -4 dB; torch / brazier emitters -4 dB; rift drone -3.5 dB.
+  - **Mix targets (momentary-max LUFS at master 100%)** and measured results after the fixes:
+
+    | Layer | Target | Measured |
+    |---|---|---|
+    | combat SFX | -20..-22 | -22 |
+    | music, exploring / combat | about -34 | -36.7 idle, -33 in combat |
+    | ambience beds | -42..-50 | -44 ember, -48 ruins / frost, rift now about -45 |
+    | stream at the bank | about -40 | -40 |
+    | fires | about -44 | -44 |
+    | idle mix | about 14 dB under combat | -36 |
+  - **Open:** the absolute level. Integrated play loudness is about -27 LUFS, quieter than the web norm of -16..-18. If the user wants the whole game louder, raise the forge engine's master: the limiter handles peaks.
