@@ -1,5 +1,6 @@
 // DEV TOOLS: things for building the game, not playing it. The colliders overlay (Shift+G), the debug HUD (top left,
-// dev mode), the tree lineup (?lineup=trees). Loaded by the boot; nothing in the game imports this.
+// dev mode), the tree lineup (?lineup=trees). Loaded by the boot, which hands it to the engine as E.dev; nothing in the
+// game imports this.
 import {PLAY} from '../world/world.js';
 import {DEG} from '../render/gfx.js';
 import {SNAP_NAME} from '../render/camera.js';

@@ -5,7 +5,7 @@
 // OWNS: the loadout + atlas state (SP, rig, FW / FH / PIV / ND / DIRS; `atlas` is the live object player.js reads),
 //   the hero card, the composite canvases, the armour, the hair cache.
 // READS (app): P, PL, player, yaw, zoom, opt, cam, arrows, feat('wind'), toView.  BUDGET: char group (0.5 ms).
-//   const hero = createHero({G, set, loadI, ctxO, app}); hero.stepCloth(dt, clothPos) in the sim step;
+//   const hero = createHero({G, set, loadI, ctxO, app}); hero.moveCloth(dx, dy) + hero.stepCloth(dt) in the sim step;
 //   hero.compose(PX, PY) -> sinkPx in draw (before world.update); hero.drawHDBow(hq, sc) on the HD overlay
 import {texOf} from '../world/world.js';
 import {loadAtlas} from '../render/atlas.js';
@@ -74,8 +74,11 @@ export function createHero({G, set, loadI, ctxO, app}) {
     $('#load').classList.add('hidden');
   }
 
-  // the cloak in the wind: the wind feature's cloth numbers (or a calm breeze), then the sim (120 Hz substeps)
-  function stepCloth(dt, clothPos, perf) {
+  // the cloak in the wind: the wind feature's cloth numbers (or a calm breeze), then the sim (120 Hz substeps).
+  // clothPos: the Ranger's motion in the view frame, without the camera's turns (moveCloth, each sim step)
+  const clothPos = [0, 0];
+  const moveCloth = (dx, dy) => { clothPos[0] += dx; clothPos[1] += dy; };
+  function stepCloth(dt, perf) {
     if (!rig.active) return;
     const P = app.P, W = app.feat('wind');
     Object.assign(CLOTH_PARAMS, W?.on && W.cloth?.() || CLOTH_CALM);
@@ -178,6 +181,6 @@ export function createHero({G, set, loadI, ctxO, app}) {
   // the Ranger as drawn this frame, for afterimages / reflections (host.playerSprite)
   const sprite = () => { const P = app.P, player = app.player; return {img: charCv, nrm: nrmCv, px: PIV[0] + CX, py: PIV[1] + CY, x: player.x, y: player.y, h: P.z, frame: P.frame, face: P.face}; };
 
-  return {atlas, card, armor, toggleArmour, switchLoadout, stepCloth, compose, drawHDBow, sprite,
+  return {atlas, card, armor, toggleArmour, switchLoadout, moveCloth, stepCloth, compose, drawHDBow, sprite,
     get SP() { return SP; }, get rig() { return rig; }, get ND() { return ND; }, get set() { return set; }, get loadI() { return loadI; }, get loadName() { return LOADOUTS[loadI][0]; }};
 }

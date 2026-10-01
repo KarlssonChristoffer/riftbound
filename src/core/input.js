@@ -1,0 +1,56 @@
+// INPUT: the keyboard and the mouse. Keys go to the menu while paused, to the game alone while host.lock (or a dev key
+// outside dev mode), else to the features (F.onKey, then their hotkey toggles), then the player's own keys, then the dev
+// keys (dev/devkeys.js, handed in by the boot as E.dev). The mouse: the cursor in the view (at zoom 1, as player.js
+// reads it), the bow (LMB), abilities (RMB), turning the camera by dragging with the middle button, the wheel's zoom.
+// OWNS: the drag (dragging, dragX, dragYaw: the yaw the drag asks for since the last sim step).
+// WRITES: keys, mouse (the shared input state player.js reads).  READS: E (main.js).
+//   const input = createInput(E); input.dragging / takeYaw() (the loop: the drag's yaw, once) / look(dx) (the menu's
+//   backdrop drag) / cancelDrag()
+import {BUSY} from '../sim/player/player.js';
+
+export function createInput(E) {
+  const {canvas, keys, mouse, cv, host, features, PL, P, pa, perf, applyOpts, setYaw} = E, {DEV_KEYS, abKey, devKey} = E.dev;
+  let dragging = false, dragX = 0, dragYaw = 0;
+  addEventListener('keydown', e => {
+    const k = e.key.toLowerCase(), pause = E.pause;
+    if (k === 'escape') { if (!e.repeat) pause.toggle(); return; }
+    if (k === 'f3') { e.preventDefault(); if (!e.repeat) { perf.toggle(); pause.menu.refresh(); } return; }   // the frame profiler
+    if (pause.paused) { pause.menu.key(k, e); return; }   // the menu has the keys: arrows, Tab, Enter
+    if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'tab'].includes(k)) e.preventDefault();
+    if (e.repeat) return;
+    // locked (menus, death, travel) or a dev key outside dev mode: only the game hears it
+    if (host.lock || (!host.dev && (DEV_KEYS.has(k) || (e.shiftKey && /^Digit[1-6]$/.test(e.code))))) { E.game.onKey?.(k, e); return; }
+    if (abKey(e, E)) { applyOpts(); return; }   // renderer A/B (Shift + 1..6)
+    keys.add(k);
+    for (const f of features) if (f.onKey?.(k, e)) return;
+    for (const f of features) if (f.key && f.key === k && f.toggle) { f.toggle(); return; }
+    if (k === ' ') PL.onSpace();
+    if (k === 'e') { if (!pa.nearProp() && pa.climbSpotW() && Math.abs(cv.yaw) > 1e-6 && !BUSY.has(P.state)) pa.assist = {back: cv.yaw, phase: 'in'}; else PL.onInteractKey(); }
+    if (k >= '1' && k <= '4' && !BUSY.has(P.state)) features.some(f => f.ability?.(+k));
+    devKey(k, e, E);
+    if (k === 'home') setYaw(0);
+    applyOpts();
+  });
+  addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys.delete(k); if (k === 'e') PL.onInteractUp(); });
+  addEventListener('blur', () => { keys.clear(); mouse.down = false; dragging = false; });
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect(), s = r.width / cv.VW, mx = (e.clientX - r.left) / s, my = (e.clientY - r.top) / s;
+    mouse.x = cv.VW / 2 + (mx - cv.VW / 2) / cv.zoom; mouse.y = cv.VH / 2 + (my - cv.VH / 2) / cv.zoom;   // the player reads the screen at zoom 1
+    if (dragging) { dragYaw += (e.clientX - dragX) * -.006; dragX = e.clientX; }
+  });
+  canvas.addEventListener('mousedown', e => {
+    if (E.pause.paused || host.lock) return;
+    if (e.button === 0) { PL.press(); mouse.down = true; }
+    if (e.button === 1) { e.preventDefault(); dragging = true; dragX = e.clientX; }
+    if (e.button === 2 && !BUSY.has(P.state)) features.some(f => f.ability?.('rmb'));
+  });
+  addEventListener('mouseup', e => { if (e.button === 0) { if (!E.pause.paused) PL.release(); mouse.down = false; } if (e.button === 1) dragging = false; });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); cv.onWheel(e); }, {passive: false});
+  return {
+    get dragging() { return dragging; },
+    takeYaw() { const d = dragYaw; dragYaw = 0; return d; },
+    look(dx) { dragYaw += dx * -.006; },
+    cancelDrag() { dragging = false; },
+  };
+}
