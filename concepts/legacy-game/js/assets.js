@@ -4,7 +4,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {FBXLoader} from 'three/addons/loaders/FBXLoader.js';
 import {TOYS, toyRig, toyDriver} from './toys.js';
 
-const A = '../assets/';
+const A = '../../assets/';
 // Heroes are humanoids so they can all share one animation set:
 //  - warden / pyromancer: Mixamo characters (Paladin J Nordstrom, Knight D Pelegrini), Mixamo skeleton
 //  - ranger / voidblade: Quaternius Universal Base Character head + Modular Fantasy Ranger outfit (CC0), Unreal-mannequin skeleton

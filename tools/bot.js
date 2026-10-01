@@ -1,7 +1,7 @@
 // Dev-only autopilot for balance testing. Eval on the game page, then: bot.start(classIndexOrId); bot.chunk(3000) until s !== 'running'; bot.restore() afterwards.
 // start() backs up the save and resets it (clean=true) so talents/relics from earlier runs don't skew the numbers; restore() puts the real save back.
 window.run=n=>{for(let i=0;i<n;i++)__step(1/60)};
-window.bot={log:[],errs:[],minHp:1,stag:0,start(ci,clean=true){import('/game/js/audio.js').then(A=>{if(!A.toggleMute())A.toggleMute()}); // bot runs are silent
+window.bot={log:[],errs:[],minHp:1,stag:0,start(ci,clean=true){import('/concepts/legacy-game/js/audio.js').then(A=>{if(!A.toggleMute())A.toggleMute()}); // bot runs are silent
  const K='riftbound.save.v1';if(clean){try{const v=localStorage.getItem(K);if(v!==null&&localStorage.getItem(K+'.botbackup')===null)localStorage.setItem(K+'.botbackup',v)}catch(x){}__meta.resetSave()}this.log=[];this.errs=[];this.minHp=1;this.bt=0;this.stag=0;this.lastBiome=0;__hub.autoPush=true;__hub.start(ci);run(5)},
  restore(){const K='riftbound.save.v1';try{const v=localStorage.getItem(K+'.botbackup');if(v!==null){localStorage.setItem(K,v);localStorage.removeItem(K+'.botbackup');return 'restored - reload the page'}}catch(x){}return 'no backup'},
  chunk(n=900){const G=__G;for(let i=0;i<n;i++){if(G.state==='over')return this.report('over');const h=G.hero;

@@ -61,7 +61,7 @@ const qs = new URLSearchParams(location.search); if (qs.get('viewH')) CAM.viewH 
 if (S.gfx) Object.assign(gfx, S.gfx); // for this page only, not saved
 if (new URLSearchParams(location.search).get('rows')) gfx.rows = +new URLSearchParams(location.search).get('rows');
 if (S.real) await loadAssets(null, S.want);
-const greyModel = S.grey && (await new GLTFLoader().loadAsync('../assets/' + S.grey)).scene;
+const greyModel = S.grey && (await new GLTFLoader().loadAsync('../../assets/' + S.grey)).scene;
 
 // a small ruins room with the game's floor, walls and torches
 const scene = newScene();
