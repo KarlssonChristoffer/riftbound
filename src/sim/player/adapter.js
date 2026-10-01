@@ -137,8 +137,20 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   function teleport(x, y) {
     const [vx, vy] = toView(x, y);
     Object.assign(P, {x: vx, y: vy, z: elev(x, y), vx: 0, vy: 0, state: 'idle', t: 0, sink: 0, leap: null, hold: null});
-    cv.snap();
+    cv.snap(); snap();
   }
-  return {PL, P, player, blocked, syncPlateaus, turnFrame, toWorldEvent, hoverTarget, nearProp, climbSpotW, stepAssist, teleport,
+  // DRAWING BETWEEN SIM STEPS (core/loop.js, the fixed step): snap() at each step's start notes where he was, in the
+  // WORLD (a camera turn between steps doesn't move him there); lerpBegin(alpha) puts P alpha of the way to where he is
+  // now, in the current view frame, for the draw; lerpEnd() puts the true P back
+  let l0 = NaN, l1 = NaN, l2 = NaN, c0 = 0, c1 = 0, c2 = 0, lerping = false;
+  function snap() { l0 = player.x; l1 = player.y; l2 = P.z; }
+  function lerpBegin(k) {
+    if (k >= 1 || l0 !== l0) return;
+    const x = player.x, y = player.y, z = P.z; if (x === l0 && y === l1 && z === l2) return;
+    c0 = P.x; c1 = P.y; c2 = P.z; lerping = true;
+    const [vx, vy] = toView(l0 + (x - l0) * k, l1 + (y - l1) * k); P.x = vx; P.y = vy; P.z = l2 + (z - l2) * k;
+  }
+  function lerpEnd() { if (!lerping) return; P.x = c0; P.y = c1; P.z = c2; lerping = false; }
+  return {PL, P, player, blocked, syncPlateaus, turnFrame, toWorldEvent, hoverTarget, nearProp, climbSpotW, stepAssist, teleport, snap, lerpBegin, lerpEnd,
     tick() { hoverKey++; }, get assist() { return A.assist; }, set assist(v) { A.assist = v; }};
 }

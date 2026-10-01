@@ -1,10 +1,15 @@
-// LOOP: the frame. step(dt) moves the world on in two passes (docs/ARCHITECTURE.md rule 5, sim vs view):
-//   SIM: the clock, the player, arrows, then every feature's update() (the truth: always, even with its visuals off)
-//   VIEW: the cloak, then every feature's view() (presentation: reads the finished sim, writes only its own state)
-// Paused, only the views of the features that declare `ambient` run (nature goes on behind the menu); in hitstop, only
-// the F.always updates. draw(t) renders (the camera, the hero's card, props, features' frame(), lights, the GPU
-// passes, the HD overlay). One step + one draw per animation frame, dt capped at 50 ms.
-// OWNS: the frame's timing (last, lastDt, fps, the HUD's refresh), hitstop (freeze), the season's leaf ramp version.
+// LOOP: the frame (docs/ARCHITECTURE.md rules 4 + 5). Each animation frame (dt capped at 50 ms):
+//   the CAMERA turns (keys, drag, the snap ease, the climb assist), at the frame's rate
+//   the SIM catches up in FIXED steps of 1/60 s (simStep: the clock, the player, arrows, every feature's update()), so
+//     it plays the same at 40 fps and at 240, slow motion (host.timeScale) is exact and a seeded run replays. It runs
+//     up to one step ahead of real time (alpha below), never behind; at most MAX_STEPS a frame (a stall drops the rest)
+//   the VIEWS follow once (the cloak, every feature's view() with the frame's time and all its steps' events)
+//   draw(t) renders the world ALPHA of the way from the last step's start to its end (entities, arrows, the player:
+//     their lerpBegin / lerpEnd), so motion is smooth on a 144 / 165 Hz screen; at 60 fps alpha is 1 (no blending)
+// Paused, only the views of the features that declare `ambient` run (nature goes on behind the menu); in hitstop, the
+// sim steps run only the F.always updates and the views hold (a freeze frame).
+// OWNS: the frame's timing (last, lastDt, fps, the HUD's refresh), the sim's clock (acc, alpha), hitstop (freeze), the
+//   season's leaf ramp version.
 // READS: E (main.js; E.dev: the colliders overlay + the debug HUD).  BUDGET: core/perf.js (F3).
 //   const loop = createLoop(E); loop.start() / hitstop(sec) / run(n, dt) (tests: n steps + draws without rAF) / hud()
 import {ROT_SPEED} from '../render/camera.js';
@@ -17,6 +22,25 @@ export function createLoop(E) {
   const promptCtx = {host, pa, features, G};   // ui/prompt.js
   let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null, freeze = 0;
   let views = E.flags.get('views') !== '0';   // ?views=0: the sim alone (tools/test/simview.mjs: it must come out the same)
+  const SIM_DT = 1 / 60, MAX_STEPS = 4;
+  let acc = 0, alpha = 1;   // acc: real time the sim is behind (<= 0: ahead); alpha: where the draw sits in the last step
+  const frameEvs = [];      // every event of this frame's sim steps, for the views
+  // ONE fixed sim step
+  function simStep(dt) {
+    stage.ents.sync(); pa.snap();   // the grid follows what moved; where everything was at the step's start (the draw)
+    perf.begin('env', 'sim'); env.step(dt); perf.end('env');   // the world clock first: everything after reads this step's time / weather
+    if (freeze > 0) { freeze -= dt; for (const f of features) if (f.always) f.update?.(dt, []); return; }
+    const n0 = events.length, px0 = P.x, py0 = P.y;
+    perf.begin('player.step', 'sim'); PL.step(dt); perf.end('player.step');
+    for (let i = n0; i < events.length; i++) pa.toWorldEvent(events[i]);   // the player's events are in the view frame
+    hero.moveCloth(P.x - px0, P.y - py0);   // its motion in the view frame, without the camera's turns
+    perf.begin('arrows', 'sim'); proj.step(dt); perf.end('arrows');
+    const evs = events.splice(0);
+    if (host.dev) checkEvents(evs);   // a type not in the catalog warns once (dev mode)
+    for (const f of features) f.update?.(dt, evs);
+    for (let i = 0; i < evs.length; i++) frameEvs.push(evs[i]);
+  }
+  // ONE frame: the camera, the sim's fixed steps, the views
   function step(dt) {
     pa.tick();
     // camera rotation: keys / middle-drag, then (in a step mode) ease onto the nearest step once you let go.
@@ -30,24 +54,24 @@ export function createLoop(E) {
     const y0 = cv.yaw; cv.setYaw(ny); pa.syncPlateaus();
     cv.stepSampling(dt, cv.yaw !== y0);
     if (paused) { pause.stepPaused(dt); return; }   // the game stands still, nature goes on
-    dt *= host.timeScale; if (dt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
-    stage.ents.sync();   // the grid follows what moved last step (world/entities.js)
-    perf.begin('env', 'sim'); env.step(dt); perf.end('env');   // the world clock first: everything after reads this step's time / weather
-    if (freeze > 0) { freeze -= dt; for (const f of features) if (f.always) f.update?.(dt, []); return; }
-    const n0 = events.length, px0 = P.x, py0 = P.y;
-    perf.begin('player.step', 'sim'); PL.step(dt); perf.end('player.step');
-    for (let i = n0; i < events.length; i++) pa.toWorldEvent(events[i]);   // the player's events are in the view frame
-    hero.moveCloth(P.x - px0, P.y - py0);   // its motion in the view frame, without the camera's turns
-    perf.begin('arrows', 'sim'); proj.step(dt); perf.end('arrows');
-    if (views) hero.stepCloth(dt, perf);
-    const evs = events.splice(0);
-    if (host.dev) checkEvents(evs);   // a type not in the catalog warns once (dev mode)
-    for (const f of features) f.update?.(dt, evs);              // SIM
-    if (views) for (const f of features) if (f.on !== false) f.view?.(dt, evs);   // VIEW
-    cv.stepShake(dt);
+    const sdt = dt * host.timeScale; if (sdt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
+    const held = freeze > 0;   // hitstop: the sim steps run the F.always updates only, the views hold
+    acc += sdt; frameEvs.length = 0;
+    for (let n = 0; acc > 1e-9 && n < MAX_STEPS; n++) { simStep(SIM_DT); acc -= SIM_DT; }
+    if (acc > 0) acc = 0;   // still behind after MAX_STEPS (a stall): let it go rather than spiral
+    alpha = 1 + acc / SIM_DT;
+    if (!views || held) return;
+    hero.stepCloth(sdt, perf);
+    for (const f of features) if (f.on !== false) f.view?.(sdt, frameEvs);   // VIEW
+    cv.stepShake(sdt);
   }
+  // the draw: the world alpha of the way through the last sim step (put back after)
   function draw(t) {
     pa.tick();
+    pa.lerpBegin(alpha); stage.ents.lerpBegin(alpha); proj.lerpBegin(alpha);
+    try { render(t); } finally { proj.lerpEnd(); stage.ents.lerpEnd(); pa.lerpEnd(); }
+  }
+  function render(t) {
     cv.stepZoom(lastDt);
     const [PX, PY] = [player.x, player.y];
     cv.follow(lastDt, PX, PY, P, cam);   // the camera eases after him (render/camera.js)

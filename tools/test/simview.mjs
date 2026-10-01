@@ -6,6 +6,9 @@
 // (position, hp, broken, gone), arrows, enemies, gold, the run, the clock and the weather.
 // A difference means some sim decision reads presentation state or draws from Math.random (core/rng.js).
 // Camera feel (flow) and screen shake move the cursor's frame, so both runs turn them off.
+// FRAME RATE (the fixed step, phase 4.3): the 'keys' scenario (keyboard and world-space input only: the cursor is read
+// through a camera that moves differently at another frame rate) also runs at 240 and 30 frames a second: the sim
+// must come out the same as at 60 (its inputs change on even sixtieths, where every rate has a frame).
 //   node tools/test/simview.mjs            options: --only sandbox,run --port 8142
 import {spawn} from 'node:child_process';
 import {mkdtempSync} from 'node:fs';
@@ -55,6 +58,17 @@ const SCENARIOS = [
       R.keys.add(k % 2 ? 'a' : 'd'); await frames(20); R.keys.clear();
     }
     await frames(300);`],
+  // keyboard + world-space input only, so it can run at any frame rate: walking, sprinting, the sparring brutes hop at
+  // you, a fire arrow (spawned, not aimed) into the crate cluster, a roll
+  ['keys', 'mode=sandbox&daymin=0&hour=11&weather=fair&flow=0', `
+    await frames(30);
+    R.keys.add('d'); await frames(60); R.keys.delete('d'); R.keys.add('s'); await frames(40); R.keys.delete('s');
+    R.keys.add('shift'); R.keys.add('a'); await frames(80); R.keys.clear(); await frames(20);
+    const bru = R.world.props.find(p => p.kind === 'brute'); R.host.teleport(bru.x + 2, bru.y); await frames(240);
+    const crates = R.world.props.filter(p => p.kind === 'crate' && !p.broken), near = c => crates.filter(o => o !== c && Math.hypot(o.x - c.x, o.y - c.y) < 1.4).length;
+    const cr = crates.sort((a, b) => near(b) - near(a))[0]; R.host.teleport(cr.x - 3.5, cr.y); await frames(20);
+    R.host.spawnArrow({x: cr.x - 2.5, y: cr.y, h: (cr.z || 0) + .5, vx: 22, vy: 0, vh: .4, dmg: 1, fire: 1}); await frames(600);
+    R.keys.add('w'); await frames(40); key(' '); await frames(60); R.keys.clear(); await frames(100);`, [240, 30]],
 ].filter(s => !ONLY || ONLY.split(',').includes(s[0]));
 
 const DIGEST = `(() => { const R = window.__r3d, core = R.host.feature('combat')?.core, g = R.game, f5 = v => typeof v === 'number' ? +v.toFixed(5) : v;
@@ -84,7 +98,7 @@ await send('Page.enable'); await send('Runtime.enable');
 await send('Emulation.setDeviceMetricsOverride', {width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false});
 await send('Page.addScriptToEvaluateOnNewDocument', {source: SHIM});
 
-async function runOnce(q, body) {
+async function runOnce(q, body, fps = 60) {
   logs.length = 0;
   await send('Page.navigate', {url: `http://localhost:${PORT}/src/?${q}`});
   let ok = false; for (let k = 0; k < 240; k++) { await sleep(250); try { if (await ev('!!(window.__r3d && window.__r3d.world)')) { ok = true; break; } } catch {} }
@@ -93,7 +107,9 @@ async function runOnce(q, body) {
   await ev(`(async () => {
     const R = window.__r3d; R.opt.shake = false;
     const trace = window.__trace = [], digest = () => ${DIGEST.replace(/`/g, '\`')};
-    let k = 0; const frames = async n => { for (let i = 0; i < n; i++) { window.__clock.advance(1000 / 60); R.step(1, 1 / 60); if (++k % 30 === 0) trace.push(digest()); } };
+    // frames(n): n sixtieths of a second, stepped as frames of 1 / FPS (a frame lands on every even sixtieth at 30 fps)
+    let k = 0, f = 0; const FPS = ${fps};
+    const frames = async n => { for (let i = 0; i < n; i++) { k++; while (f / FPS < k / 60 - 1e-9) { window.__clock.advance(1000 / FPS); R.step(1, 1 / FPS); f++; } if (k % 30 === 0) trace.push(digest()); } };
     ${AIM}
     ${body}
   })()`);
@@ -102,13 +118,12 @@ async function runOnce(q, body) {
 }
 
 let fail = 0;
-for (const [name, q, body] of SCENARIOS) {
-  const a = await runOnce(q, body), b = await runOnce(q + '&views=0', body);
-  if (a.error || b.error) { console.log(`${name}: did not load (${a.error || b.error})`); fail++; continue; }
+async function compare(name, a, b, label) {
+  if (a.error || b.error) { console.log(`${name}: did not load (${a.error || b.error})`); fail++; return; }
   const A = JSON.parse(a.digest), B = JSON.parse(b.digest), bad = Object.keys(A).filter(k => JSON.stringify(A[k]) !== JSON.stringify(B[k]));
   const broke = A.props.filter(p => p.split(',')[5] === '1').length, at = a.trace.findIndex((t, i) => t !== b.trace[i]);
   if (at >= 0 && !bad.length) bad.push('trace');
-  console.log(`${name}: ${bad.length ? 'SIM DIFFERS in ' + bad.join(', ') + (at >= 0 ? ` (first at step ${(at + 1) * 30})` : '') : 'sim identical'} · ${a.trace.length} trace points, ${A.hits} hits, ${broke} props broken, ${A.enemies.length} enemies, gold ${A.gold}, game ${JSON.stringify(A.game)}`);
+  console.log(`${name} (${label}): ${bad.length ? 'SIM DIFFERS in ' + bad.join(', ') + (at >= 0 ? ` (first at step ${(at + 1) * 30})` : '') : 'sim identical'} · ${a.trace.length} trace points, ${A.hits} hits, ${broke} props broken, ${A.enemies.length} enemies, gold ${A.gold}, game ${JSON.stringify(A.game)}`);
   const fireOf = t => t.map(x => (JSON.parse(x).fire || []).join('/')).filter((v, i, s) => v !== s[i - 1]).join(' ');
   console.log(`    fire (burning / ash) over time: views ${fireOf(a.trace)} | no views ${fireOf(b.trace)}`);
   console.log(`    views: ${a.fire.replace(/^.*?· (fire arrows)/, '$1')} | no views: ${b.fire.replace(/^.*?· (fire arrows)/, '$1')}`);
@@ -120,5 +135,10 @@ for (const [name, q, body] of SCENARIOS) {
   for (const l of [...a.logs, ...b.logs].slice(0, 4)) console.log('    ' + l);
   if (bad.length) fail++;
 }
-console.log(fail ? `\n${fail} scenario(s): the sim depends on its views` : '\nthe sim is independent of its views');
+for (const [name, q, body, rates = []] of SCENARIOS) {
+  const a = await runOnce(q, body);
+  await compare(name, a, await runOnce(q + '&views=0', body), 'vs no views');
+  for (const fps of rates) await compare(name, a, await runOnce(q, body, fps), `vs ${fps} fps`);
+}
+console.log(fail ? `\n${fail} comparison(s) differ: the sim depends on its views or the frame rate` : '\nthe sim is independent of its views and of the frame rate');
 ws.close(); quit(fail ? 1 : 0);

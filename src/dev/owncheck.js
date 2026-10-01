@@ -16,8 +16,9 @@ export const OWNERS = {
   breakable: ['@creator'], explode: ['@creator'], occluder: ['@creator'], light: ['@creator'], rail: ['@creator'], sparring: ['@creator'],
   home: CC, maxHp: CC, hunter: ['@creator'], interact: ['@creator'], t: ['@creator'], a: ['@creator'], lineup: ['@creator'], seed: ['@creator'],
   painted: ['@creator'],
-  // the body: where it is, how big its collider is. Combat simulates what moves (brutes, the prop physics)
-  x: CC, y: CC, z: CC, h: CC, r: CC,
+  // the body: where it is, how big its collider is. Combat simulates what moves (brutes, the prop physics); the registry
+  // draws it between sim steps (lerpBegin / lerpEnd: written back before anything else runs)
+  x: [...CC, 'entities'], y: [...CC, 'entities'], z: [...CC, 'entities'], h: [...CC, 'entities'], r: CC,
   // combat: damage, breaking, respawns, brutes, chests, the prop physics, the hit feedback
   hp: C, stage: C, broken: C, r0: C, respawnAt: C, resetAt: C, lit: C, dead: C, retired: C, faceW: C, squash: C, air: C, rooted: C,
   face: C, hpShow: C, opened: CC, lid: C, tip: C, tilt: C, vh: C, vx: C, vy: C, sink: C, sinkT: C, float: C, slide: C, stone: C,

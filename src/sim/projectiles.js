@@ -7,6 +7,7 @@
 // EMITS: arrow.hit, arrow.splash (core/events.js). BUDGET: part of sim.
 //   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH})
 //   proj.spawn(o) | proj.step(dt) | proj.draw(host) | proj.arrows / dust / hits
+//   proj.lerpBegin(alpha) / lerpEnd(): drawn between sim steps (an arrow's lx / ly / lh: where it was at the step's start)
 import {elev, inStream, PROP_TOP} from '../world/world.js';
 import {rgbOf} from '../core/color.js';
 
@@ -23,6 +24,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
   function step(dt) {
     const world = worldOf(), ents = entsOf();
     for (const a of arrows) {
+      a.lx = a.x; a.ly = a.y; a.lh = a.h;
       if (a.stuck) { a.life -= dt; continue; }
       a.x += a.vx * dt; a.y += a.vy * dt; a.h += a.vh * dt; a.vh -= .9 * dt; a.life -= dt;
       (a.trail ??= []).push([a.x, a.y, a.h]); if (a.trail.length > 7) a.trail.shift();
@@ -61,5 +63,15 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
     for (const q of dust) { const kk = q.t / q.life; host.point(q.x, q.y, q.h, DUST[kk < .4 ? 0 : kk < .75 ? 1 : 2]); }
     for (const p of pops) { const h = p.z + 1.7 + p.t * .5; for (const [dx, dh] of [[0, 0], [-1, 0], [1, 0], [0, 1], [0, -1]]) { const [vx, vy] = toWorld(dx / PPM, 0); host.point(p.x + vx, p.y + vy, h + dh / PPMH, POP, {emit: true}); } }
   }
-  return {arrows, pops, dust, spawn, step, draw, get hits() { return hits; }};
+  const lerped = [];
+  function lerpBegin(k) {
+    if (k >= 1) return;
+    for (const a of arrows) {
+      if (a.lx === undefined || (a.x === a.lx && a.y === a.ly && a.h === a.lh)) continue;
+      a.cx = a.x; a.cy = a.y; a.ch = a.h; lerped.push(a);
+      a.x = a.lx + (a.x - a.lx) * k; a.y = a.ly + (a.y - a.ly) * k; a.h = a.lh + (a.h - a.lh) * k;
+    }
+  }
+  function lerpEnd() { for (const a of lerped) { a.x = a.cx; a.y = a.cy; a.h = a.ch; } lerped.length = 0; }
+  return {arrows, pops, dust, spawn, step, draw, lerpBegin, lerpEnd, get hits() { return hits; }};
 }
