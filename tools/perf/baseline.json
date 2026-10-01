@@ -1,0 +1,2278 @@
+{
+ "date": "2026-10-01T17:31",
+ "commit": "f053677",
+ "gpu": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 (0x00002786) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+ "res": "1920x1080",
+ "calib": 287.1979000000283,
+ "results": {
+  "day": {
+   "fps": 381.8,
+   "frame": {
+    "p50": 2.5,
+    "p95": 3.9,
+    "p99": 4.8,
+    "max": 8.3,
+    "budget": 6.5
+   },
+   "js": {
+    "avg": 2.349,
+    "p95": 3.5,
+    "budget": 4
+   },
+   "groups": [
+    {
+     "group": "sim",
+     "avg": 0.286,
+     "budget": 1
+    },
+    {
+     "group": "char",
+     "avg": 0.221,
+     "budget": 0.5
+    },
+    {
+     "group": "view",
+     "avg": 0.91,
+     "budget": 1
+    },
+    {
+     "group": "render",
+     "avg": 0.884,
+     "budget": 1.2
+    },
+    {
+     "group": "ui",
+     "avg": 0.017,
+     "budget": 0.3
+    }
+   ],
+   "systems": [
+    {
+     "label": "G.render",
+     "group": "render",
+     "avg": 0.884,
+     "max": 1.9
+    },
+    {
+     "label": "world.update",
+     "group": "view",
+     "avg": 0.283,
+     "max": 0.8
+    },
+    {
+     "label": "lights.frame",
+     "group": "view",
+     "avg": 0.247,
+     "max": 0.5
+    },
+    {
+     "label": "depth.frame",
+     "group": "view",
+     "avg": 0.17,
+     "max": 0.6
+    },
+    {
+     "label": "hero.compose",
+     "group": "char",
+     "avg": 0.141,
+     "max": 1.1
+    },
+    {
+     "label": "lights.update",
+     "group": "sim",
+     "avg": 0.13,
+     "max": 0.6
+    },
+    {
+     "label": "cloth.sim",
+     "group": "char",
+     "avg": 0.08,
+     "max": 2.2
+    },
+    {
+     "label": "contact.frame",
+     "group": "view",
+     "avg": 0.068,
+     "max": 0.2
+    },
+    {
+     "label": "wind.update",
+     "group": "sim",
+     "avg": 0.04,
+     "max": 0.2
+    },
+    {
+     "label": "mood+lights",
+     "group": "view",
+     "avg": 0.035,
+     "max": 0.2
+    },
+    {
+     "label": "wildlife.update",
+     "group": "sim",
+     "avg": 0.03,
+     "max": 0.3
+    },
+    {
+     "label": "wind.frame",
+     "group": "view",
+     "avg": 0.025,
+     "max": 0.6
+    },
+    {
+     "label": "atmos.update",
+     "group": "sim",
+     "avg": 0.022,
+     "max": 0.2
+    },
+    {
+     "label": "wildlife.frame",
+     "group": "view",
+     "avg": 0.022,
+     "max": 0.2
+    },
+    {
+     "label": "atmos.frame",
+     "group": "view",
+     "avg": 0.02,
+     "max": 0.1
+    },
+    {
+     "label": "garden.frame",
+     "group": "view",
+     "avg": 0.014,
+     "max": 0.1
+    },
+    {
+     "label": "combat.update",
+     "group": "sim",
+     "avg": 0.013,
+     "max": 0.1
+    },
+    {
+     "label": "combat.hd",
+     "group": "ui",
+     "avg": 0.013,
+     "max": 0.1
+    },
+    {
+     "label": "combat.frame",
+     "group": "view",
+     "avg": 0.011,
+     "max": 0.1
+    },
+    {
+     "label": "arrows",
+     "group": "sim",
+     "avg": 0.01,
+     "max": 0.1
+    },
+    {
+     "label": "depth.update",
+     "group": "sim",
+     "avg": 0.009,
+     "max": 0.4
+    },
+    {
+     "label": "windlines.update",
+     "group": "sim",
+     "avg": 0.008,
+     "max": 0.2
+    },
+    {
+     "label": "flow.update",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "audio.update",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "env",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "flow.frame",
+     "group": "view",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "weather.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "weather.frame",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "garden.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.hd",
+     "group": "ui",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "flow.camera",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "lights.lights",
+     "group": "view",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "player.step",
+     "group": "sim",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "game.update",
+     "group": "sim",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.hd",
+     "group": "ui",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "wind.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "weather.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "garden.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "game.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "garden.hd",
+     "group": "ui",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "combat.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "flow.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    }
+   ],
+   "frames": 240,
+   "gpu": {
+    "p50": 0.34,
+    "p95": 0.98
+   },
+   "draws": 60,
+   "runs": [
+    1.928,
+    2.349,
+    2.573
+   ]
+  },
+  "night-fires": {
+   "fps": 450.9,
+   "frame": {
+    "p50": 2.1,
+    "p95": 3.2,
+    "p99": 3.8,
+    "max": 4,
+    "budget": 6.5
+   },
+   "js": {
+    "avg": 1.975,
+    "p95": 3,
+    "budget": 4
+   },
+   "groups": [
+    {
+     "group": "sim",
+     "avg": 0.268,
+     "budget": 1
+    },
+    {
+     "group": "char",
+     "avg": 0.192,
+     "budget": 0.5
+    },
+    {
+     "group": "view",
+     "avg": 0.749,
+     "budget": 1
+    },
+    {
+     "group": "render",
+     "avg": 0.712,
+     "budget": 1.2
+    },
+    {
+     "group": "ui",
+     "avg": 0.018,
+     "budget": 0.3
+    }
+   ],
+   "systems": [
+    {
+     "label": "G.render",
+     "group": "render",
+     "avg": 0.712,
+     "max": 1.6
+    },
+    {
+     "label": "world.update",
+     "group": "view",
+     "avg": 0.251,
+     "max": 0.6
+    },
+    {
+     "label": "lights.frame",
+     "group": "view",
+     "avg": 0.249,
+     "max": 0.7
+    },
+    {
+     "label": "lights.update",
+     "group": "sim",
+     "avg": 0.14,
+     "max": 0.4
+    },
+    {
+     "label": "hero.compose",
+     "group": "char",
+     "avg": 0.126,
+     "max": 0.4
+    },
+    {
+     "label": "contact.frame",
+     "group": "view",
+     "avg": 0.083,
+     "max": 0.3
+    },
+    {
+     "label": "cloth.sim",
+     "group": "char",
+     "avg": 0.066,
+     "max": 0.6
+    },
+    {
+     "label": "mood+lights",
+     "group": "view",
+     "avg": 0.038,
+     "max": 0.2
+    },
+    {
+     "label": "wind.frame",
+     "group": "view",
+     "avg": 0.03,
+     "max": 0.6
+    },
+    {
+     "label": "wind.update",
+     "group": "sim",
+     "avg": 0.027,
+     "max": 0.2
+    },
+    {
+     "label": "wildlife.update",
+     "group": "sim",
+     "avg": 0.025,
+     "max": 0.2
+    },
+    {
+     "label": "atmos.frame",
+     "group": "view",
+     "avg": 0.021,
+     "max": 0.1
+    },
+    {
+     "label": "combat.update",
+     "group": "sim",
+     "avg": 0.015,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.update",
+     "group": "sim",
+     "avg": 0.015,
+     "max": 0.1
+    },
+    {
+     "label": "garden.frame",
+     "group": "view",
+     "avg": 0.014,
+     "max": 0.1
+    },
+    {
+     "label": "combat.frame",
+     "group": "view",
+     "avg": 0.013,
+     "max": 0.1
+    },
+    {
+     "label": "depth.frame",
+     "group": "view",
+     "avg": 0.013,
+     "max": 0.1
+    },
+    {
+     "label": "flow.frame",
+     "group": "view",
+     "avg": 0.012,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.frame",
+     "group": "view",
+     "avg": 0.012,
+     "max": 0.1
+    },
+    {
+     "label": "combat.hd",
+     "group": "ui",
+     "avg": 0.011,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.update",
+     "group": "sim",
+     "avg": 0.01,
+     "max": 0.1
+    },
+    {
+     "label": "garden.update",
+     "group": "sim",
+     "avg": 0.008,
+     "max": 0.1
+    },
+    {
+     "label": "flow.update",
+     "group": "sim",
+     "avg": 0.008,
+     "max": 0.1
+    },
+    {
+     "label": "weather.update",
+     "group": "sim",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.hd",
+     "group": "ui",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "arrows",
+     "group": "sim",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "weather.frame",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "flow.camera",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.2
+    },
+    {
+     "label": "audio.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "env",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "player.step",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "game.update",
+     "group": "sim",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "game.hd",
+     "group": "ui",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "lights.lights",
+     "group": "view",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "game.frame",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "wind.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "garden.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "garden.hd",
+     "group": "ui",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "depth.update",
+     "group": "sim",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "weather.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "combat.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "flow.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    }
+   ],
+   "frames": 240,
+   "gpu": {
+    "p50": 0.25,
+    "p95": 0.85
+   },
+   "draws": 61,
+   "runs": [
+    1.56,
+    1.975,
+    2.265
+   ]
+  },
+  "walk": {
+   "fps": 480.2,
+   "frame": {
+    "p50": 1.9,
+    "p95": 3.2,
+    "p99": 4,
+    "max": 7.1,
+    "budget": 6.5
+   },
+   "js": {
+    "avg": 1.845,
+    "p95": 2.9,
+    "budget": 4
+   },
+   "groups": [
+    {
+     "group": "sim",
+     "avg": 0.247,
+     "budget": 1
+    },
+    {
+     "group": "char",
+     "avg": 0.182,
+     "budget": 0.5
+    },
+    {
+     "group": "view",
+     "avg": 0.815,
+     "budget": 1
+    },
+    {
+     "group": "render",
+     "avg": 0.554,
+     "budget": 1.2
+    },
+    {
+     "group": "ui",
+     "avg": 0.017,
+     "budget": 0.3
+    }
+   ],
+   "systems": [
+    {
+     "label": "G.render",
+     "group": "render",
+     "avg": 0.554,
+     "max": 1.5
+    },
+    {
+     "label": "lights.frame",
+     "group": "view",
+     "avg": 0.239,
+     "max": 0.5
+    },
+    {
+     "label": "world.update",
+     "group": "view",
+     "avg": 0.218,
+     "max": 0.7
+    },
+    {
+     "label": "depth.frame",
+     "group": "view",
+     "avg": 0.16,
+     "max": 0.5
+    },
+    {
+     "label": "hero.compose",
+     "group": "char",
+     "avg": 0.131,
+     "max": 0.5
+    },
+    {
+     "label": "lights.update",
+     "group": "sim",
+     "avg": 0.098,
+     "max": 0.3
+    },
+    {
+     "label": "contact.frame",
+     "group": "view",
+     "avg": 0.065,
+     "max": 0.3
+    },
+    {
+     "label": "cloth.sim",
+     "group": "char",
+     "avg": 0.051,
+     "max": 0.4
+    },
+    {
+     "label": "wind.update",
+     "group": "sim",
+     "avg": 0.039,
+     "max": 0.3
+    },
+    {
+     "label": "wildlife.update",
+     "group": "sim",
+     "avg": 0.033,
+     "max": 0.2
+    },
+    {
+     "label": "wind.frame",
+     "group": "view",
+     "avg": 0.029,
+     "max": 0.5
+    },
+    {
+     "label": "mood+lights",
+     "group": "view",
+     "avg": 0.029,
+     "max": 0.3
+    },
+    {
+     "label": "atmos.frame",
+     "group": "view",
+     "avg": 0.018,
+     "max": 0.2
+    },
+    {
+     "label": "atmos.update",
+     "group": "sim",
+     "avg": 0.017,
+     "max": 0.1
+    },
+    {
+     "label": "player.step",
+     "group": "sim",
+     "avg": 0.017,
+     "max": 0.2
+    },
+    {
+     "label": "flow.frame",
+     "group": "view",
+     "avg": 0.015,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.frame",
+     "group": "view",
+     "avg": 0.014,
+     "max": 0.3
+    },
+    {
+     "label": "garden.frame",
+     "group": "view",
+     "avg": 0.012,
+     "max": 0.1
+    },
+    {
+     "label": "combat.update",
+     "group": "sim",
+     "avg": 0.012,
+     "max": 0.1
+    },
+    {
+     "label": "combat.hd",
+     "group": "ui",
+     "avg": 0.012,
+     "max": 0.3
+    },
+    {
+     "label": "arrows",
+     "group": "sim",
+     "avg": 0.007,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.update",
+     "group": "sim",
+     "avg": 0.006,
+     "max": 0.1
+    },
+    {
+     "label": "combat.frame",
+     "group": "view",
+     "avg": 0.006,
+     "max": 0.1
+    },
+    {
+     "label": "garden.update",
+     "group": "sim",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "flow.update",
+     "group": "sim",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "weather.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "lights.lights",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.3
+    },
+    {
+     "label": "atmos.hd",
+     "group": "ui",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "flow.camera",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.2
+    },
+    {
+     "label": "env",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "game.update",
+     "group": "sim",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "game.hd",
+     "group": "ui",
+     "avg": 0.002,
+     "max": 0.3
+    },
+    {
+     "label": "weather.frame",
+     "group": "view",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "game.frame",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "garden.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "depth.update",
+     "group": "sim",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "audio.update",
+     "group": "sim",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "wind.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "weather.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "garden.hd",
+     "group": "ui",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "combat.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "flow.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "wildlife.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    }
+   ],
+   "frames": 240,
+   "gpu": {
+    "p50": 0.25,
+    "p95": 0.82
+   },
+   "draws": 57,
+   "runs": [
+    1.758,
+    1.845,
+    1.965
+   ]
+  },
+  "run": {
+   "fps": 364.1,
+   "frame": {
+    "p50": 2.7,
+    "p95": 4,
+    "p99": 4.6,
+    "max": 5,
+    "budget": 6.5
+   },
+   "js": {
+    "avg": 2.476,
+    "p95": 3.6,
+    "budget": 4
+   },
+   "groups": [
+    {
+     "group": "sim",
+     "avg": 0.274,
+     "budget": 1
+    },
+    {
+     "group": "char",
+     "avg": 0.188,
+     "budget": 0.5
+    },
+    {
+     "group": "view",
+     "avg": 1.011,
+     "budget": 1
+    },
+    {
+     "group": "render",
+     "avg": 0.897,
+     "budget": 1.2
+    },
+    {
+     "group": "ui",
+     "avg": 0.075,
+     "budget": 0.3
+    }
+   ],
+   "systems": [
+    {
+     "label": "G.render",
+     "group": "render",
+     "avg": 0.897,
+     "max": 2
+    },
+    {
+     "label": "lights.frame",
+     "group": "view",
+     "avg": 0.375,
+     "max": 1.2
+    },
+    {
+     "label": "world.update",
+     "group": "view",
+     "avg": 0.253,
+     "max": 0.7
+    },
+    {
+     "label": "depth.frame",
+     "group": "view",
+     "avg": 0.133,
+     "max": 0.3
+    },
+    {
+     "label": "hero.compose",
+     "group": "char",
+     "avg": 0.128,
+     "max": 0.3
+    },
+    {
+     "label": "lights.update",
+     "group": "sim",
+     "avg": 0.11,
+     "max": 0.3
+    },
+    {
+     "label": "contact.frame",
+     "group": "view",
+     "avg": 0.083,
+     "max": 0.3
+    },
+    {
+     "label": "wind.update",
+     "group": "sim",
+     "avg": 0.062,
+     "max": 0.7
+    },
+    {
+     "label": "game.hd",
+     "group": "ui",
+     "avg": 0.06,
+     "max": 0.2
+    },
+    {
+     "label": "cloth.sim",
+     "group": "char",
+     "avg": 0.06,
+     "max": 0.5
+    },
+    {
+     "label": "wind.frame",
+     "group": "view",
+     "avg": 0.055,
+     "max": 1.2
+    },
+    {
+     "label": "mood+lights",
+     "group": "view",
+     "avg": 0.032,
+     "max": 0.2
+    },
+    {
+     "label": "wildlife.update",
+     "group": "sim",
+     "avg": 0.025,
+     "max": 0.2
+    },
+    {
+     "label": "atmos.frame",
+     "group": "view",
+     "avg": 0.022,
+     "max": 0.1
+    },
+    {
+     "label": "combat.update",
+     "group": "sim",
+     "avg": 0.017,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.frame",
+     "group": "view",
+     "avg": 0.016,
+     "max": 0.1
+    },
+    {
+     "label": "combat.frame",
+     "group": "view",
+     "avg": 0.015,
+     "max": 0.2
+    },
+    {
+     "label": "atmos.update",
+     "group": "sim",
+     "avg": 0.013,
+     "max": 0.2
+    },
+    {
+     "label": "garden.frame",
+     "group": "view",
+     "avg": 0.01,
+     "max": 0.1
+    },
+    {
+     "label": "combat.hd",
+     "group": "ui",
+     "avg": 0.01,
+     "max": 0.1
+    },
+    {
+     "label": "player.step",
+     "group": "sim",
+     "avg": 0.01,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.update",
+     "group": "sim",
+     "avg": 0.006,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.hd",
+     "group": "ui",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "audio.update",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "arrows",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "garden.update",
+     "group": "sim",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "flow.update",
+     "group": "sim",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "flow.frame",
+     "group": "view",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "env",
+     "group": "sim",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "game.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "wind.lights",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "weather.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "weather.frame",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "flow.camera",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "depth.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "lights.lights",
+     "group": "view",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "garden.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "game.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "weather.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "garden.hd",
+     "group": "ui",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "combat.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "flow.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    }
+   ],
+   "frames": 240,
+   "gpu": {
+    "p50": 0.35,
+    "p95": 1.01
+   },
+   "draws": 63,
+   "runs": [
+    2.063,
+    2.476,
+    2.495
+   ]
+  },
+  "basic-cloak": {
+   "fps": 360.6,
+   "frame": {
+    "p50": 2.7,
+    "p95": 3.9,
+    "p99": 5,
+    "max": 9.3,
+    "budget": 6.5
+   },
+   "js": {
+    "avg": 2.474,
+    "p95": 3.5,
+    "budget": 4
+   },
+   "groups": [
+    {
+     "group": "sim",
+     "avg": 0.317,
+     "budget": 1
+    },
+    {
+     "group": "char",
+     "avg": 0.028,
+     "budget": 0.5
+    },
+    {
+     "group": "view",
+     "avg": 1.04,
+     "budget": 1
+    },
+    {
+     "group": "render",
+     "avg": 1.043,
+     "budget": 1.2
+    },
+    {
+     "group": "ui",
+     "avg": 0.017,
+     "budget": 0.3
+    }
+   ],
+   "systems": [
+    {
+     "label": "G.render",
+     "group": "render",
+     "avg": 1.043,
+     "max": 1.9
+    },
+    {
+     "label": "world.update",
+     "group": "view",
+     "avg": 0.359,
+     "max": 1
+    },
+    {
+     "label": "lights.frame",
+     "group": "view",
+     "avg": 0.273,
+     "max": 0.6
+    },
+    {
+     "label": "depth.frame",
+     "group": "view",
+     "avg": 0.183,
+     "max": 0.4
+    },
+    {
+     "label": "lights.update",
+     "group": "sim",
+     "avg": 0.16,
+     "max": 0.4
+    },
+    {
+     "label": "contact.frame",
+     "group": "view",
+     "avg": 0.073,
+     "max": 0.2
+    },
+    {
+     "label": "wind.update",
+     "group": "sim",
+     "avg": 0.049,
+     "max": 0.3
+    },
+    {
+     "label": "mood+lights",
+     "group": "view",
+     "avg": 0.035,
+     "max": 0.2
+    },
+    {
+     "label": "hero.compose",
+     "group": "char",
+     "avg": 0.028,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.update",
+     "group": "sim",
+     "avg": 0.027,
+     "max": 0.3
+    },
+    {
+     "label": "wind.frame",
+     "group": "view",
+     "avg": 0.026,
+     "max": 0.3
+    },
+    {
+     "label": "wildlife.frame",
+     "group": "view",
+     "avg": 0.023,
+     "max": 0.3
+    },
+    {
+     "label": "atmos.frame",
+     "group": "view",
+     "avg": 0.021,
+     "max": 0.3
+    },
+    {
+     "label": "garden.frame",
+     "group": "view",
+     "avg": 0.02,
+     "max": 0.5
+    },
+    {
+     "label": "combat.update",
+     "group": "sim",
+     "avg": 0.017,
+     "max": 0.2
+    },
+    {
+     "label": "atmos.update",
+     "group": "sim",
+     "avg": 0.016,
+     "max": 0.1
+    },
+    {
+     "label": "combat.frame",
+     "group": "view",
+     "avg": 0.012,
+     "max": 0.1
+    },
+    {
+     "label": "combat.hd",
+     "group": "ui",
+     "avg": 0.012,
+     "max": 0.2
+    },
+    {
+     "label": "arrows",
+     "group": "sim",
+     "avg": 0.009,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.update",
+     "group": "sim",
+     "avg": 0.008,
+     "max": 0.1
+    },
+    {
+     "label": "audio.update",
+     "group": "sim",
+     "avg": 0.006,
+     "max": 0.1
+    },
+    {
+     "label": "depth.update",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "env",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "flow.update",
+     "group": "sim",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "player.step",
+     "group": "sim",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "weather.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "lights.lights",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "garden.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.hd",
+     "group": "ui",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "flow.camera",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "garden.lights",
+     "group": "view",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "flow.frame",
+     "group": "view",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "game.update",
+     "group": "sim",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.frame",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.hd",
+     "group": "ui",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "weather.frame",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "garden.hd",
+     "group": "ui",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "combat.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "flow.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "wind.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "weather.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "wildlife.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    }
+   ],
+   "frames": 240,
+   "gpu": {
+    "p50": 0.34,
+    "p95": 1.33
+   },
+   "draws": 60,
+   "runs": [
+    1.917,
+    2.474,
+    2.537
+   ]
+  },
+  "storm": {
+   "fps": 332.2,
+   "frame": {
+    "p50": 2.9,
+    "p95": 4.3,
+    "p99": 4.7,
+    "max": 4.8,
+    "budget": 6.5
+   },
+   "js": {
+    "avg": 2.725,
+    "p95": 3.9,
+    "budget": 4
+   },
+   "groups": [
+    {
+     "group": "sim",
+     "avg": 0.321,
+     "budget": 1
+    },
+    {
+     "group": "char",
+     "avg": 0.245,
+     "budget": 0.5
+    },
+    {
+     "group": "view",
+     "avg": 1.031,
+     "budget": 1
+    },
+    {
+     "group": "render",
+     "avg": 1.06,
+     "budget": 1.2
+    },
+    {
+     "group": "ui",
+     "avg": 0.022,
+     "budget": 0.3
+    }
+   ],
+   "systems": [
+    {
+     "label": "G.render",
+     "group": "render",
+     "avg": 1.06,
+     "max": 2.2
+    },
+    {
+     "label": "world.update",
+     "group": "view",
+     "avg": 0.326,
+     "max": 1.1
+    },
+    {
+     "label": "lights.frame",
+     "group": "view",
+     "avg": 0.283,
+     "max": 0.9
+    },
+    {
+     "label": "depth.frame",
+     "group": "view",
+     "avg": 0.186,
+     "max": 0.4
+    },
+    {
+     "label": "hero.compose",
+     "group": "char",
+     "avg": 0.156,
+     "max": 0.3
+    },
+    {
+     "label": "lights.update",
+     "group": "sim",
+     "avg": 0.149,
+     "max": 0.5
+    },
+    {
+     "label": "cloth.sim",
+     "group": "char",
+     "avg": 0.089,
+     "max": 0.5
+    },
+    {
+     "label": "contact.frame",
+     "group": "view",
+     "avg": 0.076,
+     "max": 0.2
+    },
+    {
+     "label": "wind.update",
+     "group": "sim",
+     "avg": 0.056,
+     "max": 0.3
+    },
+    {
+     "label": "wind.frame",
+     "group": "view",
+     "avg": 0.036,
+     "max": 0.3
+    },
+    {
+     "label": "mood+lights",
+     "group": "view",
+     "avg": 0.033,
+     "max": 0.2
+    },
+    {
+     "label": "wildlife.update",
+     "group": "sim",
+     "avg": 0.029,
+     "max": 0.2
+    },
+    {
+     "label": "atmos.frame",
+     "group": "view",
+     "avg": 0.02,
+     "max": 0.2
+    },
+    {
+     "label": "weather.frame",
+     "group": "view",
+     "avg": 0.019,
+     "max": 0.1
+    },
+    {
+     "label": "combat.update",
+     "group": "sim",
+     "avg": 0.018,
+     "max": 0.1
+    },
+    {
+     "label": "combat.hd",
+     "group": "ui",
+     "avg": 0.017,
+     "max": 0.1
+    },
+    {
+     "label": "garden.frame",
+     "group": "view",
+     "avg": 0.016,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.update",
+     "group": "sim",
+     "avg": 0.013,
+     "max": 0.1
+    },
+    {
+     "label": "weather.update",
+     "group": "sim",
+     "avg": 0.012,
+     "max": 0.1
+    },
+    {
+     "label": "combat.frame",
+     "group": "view",
+     "avg": 0.012,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.frame",
+     "group": "view",
+     "avg": 0.012,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.update",
+     "group": "sim",
+     "avg": 0.01,
+     "max": 0.1
+    },
+    {
+     "label": "flow.update",
+     "group": "sim",
+     "avg": 0.007,
+     "max": 0.1
+    },
+    {
+     "label": "env",
+     "group": "sim",
+     "avg": 0.007,
+     "max": 0.1
+    },
+    {
+     "label": "arrows",
+     "group": "sim",
+     "avg": 0.007,
+     "max": 0.1
+    },
+    {
+     "label": "depth.update",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "flow.frame",
+     "group": "view",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.hd",
+     "group": "ui",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "flow.camera",
+     "group": "view",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "audio.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "game.hd",
+     "group": "ui",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "lights.lights",
+     "group": "view",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "garden.update",
+     "group": "sim",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "player.step",
+     "group": "sim",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "game.update",
+     "group": "sim",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.frame",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "garden.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "combat.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "game.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "wind.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "weather.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "garden.hd",
+     "group": "ui",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "flow.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "wildlife.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    }
+   ],
+   "frames": 240,
+   "gpu": {
+    "p50": 0.36,
+    "p95": 1.19
+   },
+   "draws": 61,
+   "runs": [
+    2.664,
+    2.725,
+    2.778
+   ]
+  },
+  "snow": {
+   "fps": 339.8,
+   "frame": {
+    "p50": 2.9,
+    "p95": 4.1,
+    "p99": 4.8,
+    "max": 5.1,
+    "budget": 6.5
+   },
+   "js": {
+    "avg": 2.677,
+    "p95": 3.8,
+    "budget": 4
+   },
+   "groups": [
+    {
+     "group": "sim",
+     "avg": 0.319,
+     "budget": 1
+    },
+    {
+     "group": "char",
+     "avg": 0.237,
+     "budget": 0.5
+    },
+    {
+     "group": "view",
+     "avg": 1.017,
+     "budget": 1
+    },
+    {
+     "group": "render",
+     "avg": 1.049,
+     "budget": 1.2
+    },
+    {
+     "group": "ui",
+     "avg": 0.02,
+     "budget": 0.3
+    }
+   ],
+   "systems": [
+    {
+     "label": "G.render",
+     "group": "render",
+     "avg": 1.049,
+     "max": 2.3
+    },
+    {
+     "label": "world.update",
+     "group": "view",
+     "avg": 0.323,
+     "max": 0.7
+    },
+    {
+     "label": "lights.frame",
+     "group": "view",
+     "avg": 0.282,
+     "max": 0.6
+    },
+    {
+     "label": "depth.frame",
+     "group": "view",
+     "avg": 0.188,
+     "max": 0.7
+    },
+    {
+     "label": "hero.compose",
+     "group": "char",
+     "avg": 0.15,
+     "max": 0.4
+    },
+    {
+     "label": "lights.update",
+     "group": "sim",
+     "avg": 0.145,
+     "max": 0.6
+    },
+    {
+     "label": "cloth.sim",
+     "group": "char",
+     "avg": 0.087,
+     "max": 0.7
+    },
+    {
+     "label": "contact.frame",
+     "group": "view",
+     "avg": 0.079,
+     "max": 0.2
+    },
+    {
+     "label": "wind.update",
+     "group": "sim",
+     "avg": 0.055,
+     "max": 0.8
+    },
+    {
+     "label": "mood+lights",
+     "group": "view",
+     "avg": 0.032,
+     "max": 0.2
+    },
+    {
+     "label": "wind.frame",
+     "group": "view",
+     "avg": 0.031,
+     "max": 0.4
+    },
+    {
+     "label": "weather.update",
+     "group": "sim",
+     "avg": 0.024,
+     "max": 0.2
+    },
+    {
+     "label": "wildlife.update",
+     "group": "sim",
+     "avg": 0.023,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.frame",
+     "group": "view",
+     "avg": 0.018,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.frame",
+     "group": "view",
+     "avg": 0.018,
+     "max": 0.1
+    },
+    {
+     "label": "garden.frame",
+     "group": "view",
+     "avg": 0.017,
+     "max": 0.1
+    },
+    {
+     "label": "combat.update",
+     "group": "sim",
+     "avg": 0.016,
+     "max": 0.1
+    },
+    {
+     "label": "combat.hd",
+     "group": "ui",
+     "avg": 0.011,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.update",
+     "group": "sim",
+     "avg": 0.01,
+     "max": 0.1
+    },
+    {
+     "label": "weather.frame",
+     "group": "view",
+     "avg": 0.009,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.update",
+     "group": "sim",
+     "avg": 0.008,
+     "max": 0.1
+    },
+    {
+     "label": "env",
+     "group": "sim",
+     "avg": 0.008,
+     "max": 0.1
+    },
+    {
+     "label": "arrows",
+     "group": "sim",
+     "avg": 0.008,
+     "max": 0.1
+    },
+    {
+     "label": "combat.frame",
+     "group": "view",
+     "avg": 0.007,
+     "max": 0.1
+    },
+    {
+     "label": "flow.update",
+     "group": "sim",
+     "avg": 0.006,
+     "max": 0.1
+    },
+    {
+     "label": "garden.update",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "atmos.hd",
+     "group": "ui",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "depth.update",
+     "group": "sim",
+     "avg": 0.005,
+     "max": 0.1
+    },
+    {
+     "label": "game.hd",
+     "group": "ui",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "flow.frame",
+     "group": "view",
+     "avg": 0.004,
+     "max": 0.1
+    },
+    {
+     "label": "audio.update",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "player.step",
+     "group": "sim",
+     "avg": 0.003,
+     "max": 0.1
+    },
+    {
+     "label": "lights.lights",
+     "group": "view",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "flow.camera",
+     "group": "view",
+     "avg": 0.002,
+     "max": 0.1
+    },
+    {
+     "label": "game.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "wind.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "combat.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "flow.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "wildlife.lights",
+     "group": "view",
+     "avg": 0.001,
+     "max": 0.1
+    },
+    {
+     "label": "game.update",
+     "group": "sim",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "game.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "windlines.frame",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "weather.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0
+    },
+    {
+     "label": "garden.lights",
+     "group": "view",
+     "avg": 0,
+     "max": 0.1
+    },
+    {
+     "label": "garden.hd",
+     "group": "ui",
+     "avg": 0,
+     "max": 0
+    }
+   ],
+   "frames": 240,
+   "gpu": {
+    "p50": 0.34,
+    "p95": 1.08
+   },
+   "draws": 61,
+   "runs": [
+    2.662,
+    2.677,
+    3.433
+   ]
+  }
+ }
+}

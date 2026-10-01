@@ -41,6 +41,7 @@ import {ClothRig, depthOf, CLOTH_PARAMS} from '../sprites/cloth.js';
 import {createArmor} from '../sprites/arena/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
 import {createPlayer, atlasOf, BUSY} from '../sprites/player.js';
 import {createGame} from './game/game.js';
+import {createPerf} from './core/perf.js';   // the frame profiler: per-system ms against the budget (F3, ?perf=1)
 import {createEnv, SEASONS, WEATHER} from './sim/env.js';   // the world clock: time of day, seasons, weather
 
 const $ = s => document.querySelector(s);
@@ -387,6 +388,7 @@ features.sort((a, b) => FEATURES.indexOf(a.name) - FEATURES.indexOf(b.name));
 mark('features', tp);
 // the game goes first: it sees keys, arrows, hits and interactions before the engine's features
 const game = await createGame(host); features.unshift(game);
+const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 world.hooks.card = cardHook;
 
@@ -493,6 +495,7 @@ addEventListener('keydown', e => {
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'tab'].includes(k)) e.preventDefault();
   if (e.repeat) return;
   if (k === 'escape') { togglePause(); return; }
+  if (k === 'f3') { e.preventDefault(); perf.toggle(); return; }   // the frame profiler
   if (paused) return;
   // locked (menus, death, travel) or a dev key outside dev mode: only the game hears it
   if (host.lock || (!host.dev && (DEV_KEYS.has(k) || (e.shiftKey && /^Digit[1-6]$/.test(e.code))))) { game.onKey?.(k, e); return; }
@@ -621,13 +624,13 @@ function step(dt) {
   env.step(dt);   // the world clock first: everything after reads this step's time / weather
   if (freeze > 0) { freeze -= dt; for (const f of features) if (f.always) f.update?.(dt, []); return; }
   const n0 = events.length, px0 = P.x, py0 = P.y;
-  PL.step(dt);
+  perf.begin('player.step', 'sim'); PL.step(dt); perf.end('player.step');
   for (let i = n0; i < events.length; i++) toWorldEvent(events[i]);   // the player's events are in the view frame
   clothPos[0] += P.x - px0; clothPos[1] += P.y - py0;               // its motion in the view frame, without the camera's turns
-  stepArrows(dt);
+  perf.begin('arrows', 'sim'); stepArrows(dt); perf.end('arrows');
   if (rig.active) {
     Object.assign(CLOTH_PARAMS, feat('wind')?.on && feat('wind').cloth?.() || CLOTH_CALM);
-    rig.update(dt, SP[P.frame]?.sim, P.face, clothPos);
+    perf.begin('cloth.sim', 'char'); rig.update(dt, SP[P.frame]?.sim, P.face, clothPos); perf.end('cloth.sim');
   }
   const evs = events.splice(0);
   for (const f of features) if (f.on !== false || f.always) f.update?.(dt, evs);
@@ -677,6 +680,7 @@ function draw(t) {
   const [tvx, tvy] = toView(Ts.x, Ts.z);
   cam.x = cam.fx = tvx * PPM - VW / 2; cam.y = cam.fy = tvy * PPMY - Ts.y * PPMH - VH / 2;
   // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in
+  perf.begin('hero.compose', 'char');
   const fr = SP[P.frame] ? P.frame : 'idle.0', sp = SP[fr];
   cq.clearRect(0, 0, 192, 160); nq.clearRect(0, 0, 192, 160);
   const sinkPx = Math.round((P.sink || 0) * 22);
@@ -687,6 +691,7 @@ function draw(t) {
   if (!sinkPx && !opt.hdBow) PL.drawPixelBow(cq, CX, CY);
   drawMetal(fr, sinkPx);
   G.tex(charCv, {dynamic: true}); G.tex(nrmCv, {dynamic: true});
+  perf.end('hero.compose');
   hero.g.uniforms.uHasNrm.value = sp.nrm ? 1 : 0;
   hero.u.uAnchor.value.set(PX, P.z, PY);
   hero.setVisible(!(P.blink && Math.floor(P.blink * 12) % 2));
@@ -694,7 +699,7 @@ function draw(t) {
   // props, hover pulse on the aimed target
   const hov = P.state === 'draw' ? hoverTarget()?.target : null;
   for (const it of world.items) it.hover = it.p === hov ? .16 + .08 * Math.sin(performance.now() / 110) : 0;
-  world.update(yaw);
+  perf.begin('world.update', 'view'); world.update(yaw); perf.end('world.update');
   // the season's leaves (env.leafRamp: changes a few times per season; a rebuilt world starts from the biome's own ramp)
   const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || world !== leafWorld)) { world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = world; }
   drawArrows();
@@ -708,14 +713,15 @@ function draw(t) {
     q.fillRect(mx - 3, my, 2, 1); q.fillRect(mx + 2, my, 2, 1); q.fillRect(mx, my - 3, 1, 2); q.fillRect(mx, my + 2, 1, 2);
   }
   if (opt.zones) drawZones();
-  applyMood(PX, PY, t);
-  G.render();
+  perf.begin('mood+lights', 'view'); applyMood(PX, PY, t); perf.end('mood+lights');
+  perf.begin('G.render', 'render'); G.render(); perf.end('G.render');
   // HD overlay
   const dpr = devicePixelRatio || 1, sc = scale * dpr;
   hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);
   for (const f of features) if (f.on !== false && f.hd && (!host.hudOff || f === game)) { hq.save(); f.hd(hq, sc); hq.restore(); }   // hudOff: the title
   if (opt.hdBow && !sinkPx) drawHDBow(sc);
   drawPrompt(sc);
+  perf.draw(hq, sc);
 }
 // the HD bow (J): player.js's display-resolution string, nocked arrow and flying arrows, drawn on the HD overlay. It works
 // in the view frame at zoom 1 (its own toS / cam), so arrows go in as view-frame copies and the zoom is a transform
@@ -756,7 +762,7 @@ function drawZones() {   // Shift+G: colliders (red), the playable rectangle (cy
 }
 function frame(now) {
   const dt = Math.max(0, Math.min(.05, (now - last) / 1000)); last = now; lastDt = dt;
-  step(dt); draw(now / 1000);
+  perf.frameStart(); step(dt); draw(now / 1000); perf.frameEnd();
   fps = fps * .95 + (dt > 0 ? 1 / dt : 60) * .05;
   if (now - hudT > 250) { hudT = now; hud(); }
   requestAnimationFrame(frame);
@@ -778,7 +784,7 @@ $('#load').classList.add('hidden');
 console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} s (${set.packed ? 'packed atlas' : 'per-file atlas'})`, JSON.stringify(TIMING));
 
 // debug handle for scripted tests (drive frames while the pane is hidden: rAF pauses there)
-window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout, TIMING,
+window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout, TIMING, perf,
   get world() { return world; }, get yaw() { return yaw; }, set zoom(v) { zoom = v; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { snapMode = i; },
   set props(m) { propMode = m; world.setMode(m); }, get rig() { return rig; },
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { lastDt = dt; step(dt); draw(performance.now() / 1000); } },
