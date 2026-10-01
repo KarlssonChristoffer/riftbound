@@ -47,6 +47,7 @@
 // props, arrows, events, biome, itemOf(p), toView, sprite, point, line, layer.
 // ART RULES (biomes.js / atmos.js): 1 texel = 1 screen px, no AA / dither / gradients on the pixel art; 4-tone ramps
 // [hi, base, shade, outline] lit from the screen's top-left; motion reads at 1x (a gust = 1-3 px of lean).
+import {flags} from '../core/flags.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -174,7 +175,7 @@ const CP = .34, SP_ = .94;   // sprite camera pitch 20 deg: toward-camera = (0, 
 
 export async function create(host) {
   const ctx = host.ctxO, G = host.G;
-  const Q = new URLSearchParams(location.search);
+  const Q = flags;
   const W = {name: 'wind', label: 'Wind', key: '5', on: Q.get('wind') !== '0', ms: 0, gust: 0, dir: [.94, .34], tune: TUNE, TUNE};
   { const l = Math.hypot(W.dir[0], W.dir[1]); W.dir = [W.dir[0] / l, W.dir[1] / l]; }
   const [UX, UY] = W.dir;

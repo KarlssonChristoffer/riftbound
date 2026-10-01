@@ -22,6 +22,7 @@
 //
 // createEnv({moods, biome, Q}) -> env. env.step(dt) once per sim step. Dev: setHour / setPart / setSeason / setWeather /
 // setDayMinutes; URL ?hour= ?season= ?weather= ?daymin= (0 = the clock stands still); ?time=day|dusk|night still works.
+import {flags} from '../core/flags.js';
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const smooth = t => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
 const lerp = (a, b, k) => a + (b - a) * k;
@@ -96,7 +97,7 @@ export const LEAF = {
 };
 const LEAF_RGB = Object.fromEntries(Object.entries(LEAF).map(([k, v]) => [k, v.map(hex)]));
 
-export function createEnv({moods, biome, Q = new URLSearchParams(location.search)}) {
+export function createEnv({moods, biome, Q = flags}) {
   const DAY = () => TUNE.dayMinutes * 60;   // real s per day
   const E = {TUNE, hour: 0, day: 0, t: 0, part: 'day', bucket: 'day', season: 'spring', seasonNext: 'summer', seasonK: 0,
     weather: 'fair', sky: {cloud: 0, rain: 0, snow: 0, fog: 0, storm: 0, wind: 1}, windLevel: 1,

@@ -45,6 +45,7 @@
 // toView, sprite, layer, world.groundCanvas.
 // ART RULES (biomes.js / atmos.js): 1 texel = 1 screen px, no AA / dither / gradients; small animals are 2-6 px with 2-3
 // frame animation, outlined in their own darkest tone; palettes harmonise with the biome. Motion reads at 1x.
+import {flags} from '../core/flags.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -245,7 +246,7 @@ const hex = s => { const n = parseInt(s.slice(1), 16); return [n >> 16 & 255, n 
 // ---------------------------------------------------------------- the module
 export async function create(host) {
   const ctx = host.ctxO, G = host.G;
-  const Q = new URLSearchParams(location.search);
+  const Q = flags;
   const WL = {name: 'wildlife', label: 'Wildlife', key: '6', on: Q.get('wildlife') !== '0', ms: 0, count: 0, T: TUNE, TUNE};
   let biome = null, time = 'day', need = true, needTime = false, wasNight = false, T = 0, acc = 0, P = null, seasonVer = -1, raining = false;
   let seed = 1;

@@ -15,6 +15,7 @@
 //            strokes (gfx fx blobs, depth faded against the pixel scene, like the HD flames), 'off'
 //   sound    a line passing close to the player gives a soft dark swish (windaudio.js swish), panned to its side
 // FEATURE CONTRACT (main.js): create(host) -> F: update (simulate), frame (draw), settings, onKey, hud.
+import {flags} from '../core/flags.js';
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const R = Math.random, rr = (a, b) => a + R() * (b - a);
@@ -39,7 +40,7 @@ export const TUNE = {
 };
 
 export async function create(host) {
-  const Q = new URLSearchParams(location.search), G = host.G, ctx = host.ctxO;
+  const Q = flags, G = host.G, ctx = host.ctxO;
   if (['hd', 'pixel', 'off'].includes(Q.get('windlines'))) TUNE.look = Q.get('windlines');
   const lines = [];
   const F = {name: 'windlines', label: 'Wind lines', on: true, TUNE, lines, ms: 0, fired: {}};   // fired: bursts per emitter kind (tests)

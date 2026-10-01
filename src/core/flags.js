@@ -1,0 +1,45 @@
+// FLAGS: every URL switch of the game, declared once (docs/ARCHITECTURE.md, code standards: "Flags in one place").
+// Reading one works like URLSearchParams.get: flags.get('wind') -> the raw string, or null when the URL doesn't set it.
+// Reading a switch that isn't declared below warns (once): add it here with a line saying what it does.
+// OWNS: the parsed URL query. READS: location.search. Nothing else in the game parses the URL.
+export const FLAG_DOCS = {
+  // ---- the game
+  mode:      'title (default) | sandbox | run: skip the title screen',
+  dev:       '1: dev keys + debug HUD in a run (the key left of 1 toggles them any time)',
+  biome:     'ruins | ember | frost | rift: the starting biome',
+  time:      'day | dusk | night: jump the world clock to that part of the day',
+  hour:      'the world clock\'s starting hour (0-24)',
+  season:    'spring | summer | autumn | winter: lock the season',
+  weather:   'a sim/env.js WEATHER state (clear, fair, cloudy, ..., storm, snow) to lock; 0 = no weather particles (atmos)',
+  daymin:    'real minutes per in-game day; 0 = the clock stands still',
+  at:        'x,y (m): start the player there',
+  yaw:       'the camera\'s starting yaw (deg)',
+  zoom:      '2: start zoomed in',
+  // ---- the player
+  set:       'basic | sim | body: the loadout (baked cloak / runtime cloth / bare body)',
+  bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
+  lantern:   '1: start with the lantern lit',
+  // ---- renderer A/B
+  snap:      '0 | 1 | 2: camera rotation free / 22.5 deg steps / 90 deg steps',
+  sampling:  'auto | nearest | smooth: ground texture sampling',
+  smooth:    '1: = sampling=smooth',
+  props:     'yaw: the 16-angle pre-rendered props instead of live 3D (reference)',
+  trees3d:   '0: painted tree cards instead of the procedural 3D trees',
+  debug:     'a debug view index (G cycles them)',
+  sshadow:   '0: every shadow caster in the per-frame sun shadow (no cached static map; an A/B)',
+  // ---- features (0 turns one off)
+  wind: '0: no wind', windlevel: 'calm | breeze | brisk | gale: lock the wind strength', windlines: '0 | hd | pixel: the wind lines',
+  wildlife: '0: no wildlife', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
+  contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
+  audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
+  // ---- tools
+  perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
+  lineup: 'trees: the procedural trees side by side for review',
+};
+const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+const warned = new Set();
+const check = name => { if (!(name in FLAG_DOCS) && !warned.has(name)) { warned.add(name); console.warn(`flags: '${name}' is not declared in core/flags.js`); } };
+export const flags = {
+  get(name) { check(name); return params.get(name); },
+  has(name) { check(name); return params.has(name); },
+};

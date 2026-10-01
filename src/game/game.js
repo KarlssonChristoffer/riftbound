@@ -20,8 +20,9 @@ import {rollItem, rollAugments} from './items.js';
 import {createHud} from '../ui/hud.js';
 import {createScreens} from '../ui/screens.js';
 import {loadSave, recordRun} from './save.js';
+import {flags} from '../core/flags.js';
 
-const Q = new URLSearchParams(location.search);
+const Q = flags;
 const TAU = Math.PI * 2;
 
 export async function createGame(host) {

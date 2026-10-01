@@ -49,6 +49,7 @@
 //             cards they could only fake alpha with an ordered dither, which at those levels read as scattered dots.
 //             Each frame the player's current silhouette is cut out of any ghost that overlaps him on screen, so a
 //             ghost never covers him (the arena sorted them just behind him).
+import {flags} from '../core/flags.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -118,7 +119,7 @@ const RGB8 = new Map(); const rgb8 = h => { let v = RGB8.get(h); if (!v) RGB8.se
 const ZERO = {x: 0, y: 0, g: 0};
 
 export async function create(host) {
-  const Q = new URLSearchParams(location.search);
+  const Q = flags;
   const {PPM, PPMY, PPMH} = host;
   let {VW, VH} = host;   // the view size: F.resize follows the window
   const F = {name: 'flow', label: 'Flow (camera, trails, marks)', key: '8', on: Q.get('flow') !== '0', ms: 0, TUNE, T: TUNE};

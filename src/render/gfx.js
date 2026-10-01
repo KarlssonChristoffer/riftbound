@@ -16,6 +16,7 @@
 //
 // World axes: X east, Y up, Z south (arena x, h, y). Metres.
 import * as THREE from 'three';
+import {flags} from '../core/flags.js';
 
 export const DEG = Math.PI / 180;
 const R_DEPTH = 120;   // metres of "nearness" mapped onto the depth range (the world is 62 x 30 m)
@@ -577,7 +578,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // (sunCam, layer 0) then holds only what moves: characters, cards, swaying trees, debris. A static prop that moves (a
   // hit wobble, a push, burning) casts into the per-frame map until it has been still STILL_FRAMES. ~180 -> ~55 shadow
   // draws a frame. ?sshadow=0 puts everything back in the per-frame map (A/B)
-  const STATIC_SHADOW = !/[?&]sshadow=0\b/.test(location.search);
+  const STATIC_SHADOW = flags.get('sshadow') !== '0';
   const SMS = 4096, SUN_STEP = .15 * DEG, STILL_FRAMES = 45, SBOX = [-6, 68, -4, 9, -6, 36];   // the world + its skirt (m)
   const shadowS = new THREE.WebGLRenderTarget(SMS, SMS, {minFilter: near, magFilter: near, depthBuffer: true, format: THREE.RedFormat,
     depthTexture: new THREE.DepthTexture(SMS, SMS, THREE.UnsignedIntType)});

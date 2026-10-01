@@ -50,9 +50,10 @@ import {createGame} from './game/game.js';
 import {createPerf} from './core/perf.js';   // the frame profiler: per-system ms against the budget (F3, ?perf=1)
 import {createEnv, SEASONS, WEATHER} from './sim/env.js';   // the world clock: time of day, seasons, weather
 import {createMenu} from './ui/menu.js';   // the pause / settings menu (Escape)
+import {flags} from './core/flags.js';
 
 const $ = s => document.querySelector(s);
-const Q = new URLSearchParams(location.search);
+const Q = flags;   // the URL switches (core/flags.js)
 let VW = 480, VH = 270;   // the view in art px: the window decides (fit, below)
 const t00 = performance.now();
 const FEATURES = ['wind', 'windlines', 'weather', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)

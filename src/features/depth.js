@@ -64,6 +64,7 @@
 // ART RULES (same as the arena): 1 texel = 1 screen px (x zoom), no AA / gradients; 4-tone ramps; the foreground is a
 // silhouette layer (2-3 dark tones + a 1 px rim on the sun side), calmer than the character.
 import {TAU, clamp, mod, mk, fit, hsh, vn, rng, rgb, css, PAL, SHAFT, WATER, PUDDLES, PUD_COL, KIT, SEED} from './depth/art.js';
+import {flags} from '../core/flags.js';
 
 const DEG = Math.PI / 180;
 // ============================================================ tunables (live: __r3d.features.find(f => f.name === 'depth').TUNE)
@@ -77,7 +78,7 @@ const TUNE = {
 };
 
 export async function create(host) {
-  const Q = new URLSearchParams(location.search);
+  const Q = flags;
   const {PPM, PPMY, PPMH} = host;
   let {VW, VH} = host;   // the view size: F.resize follows the window
   const F = {name: 'depth', label: 'Depth (foreground, clouds, shafts, reflections)', key: '7', on: Q.get('depth') !== '0', ms: 0, TUNE, debug: ''};

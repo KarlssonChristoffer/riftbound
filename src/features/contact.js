@@ -11,6 +11,7 @@
 //            brutes and enemies, trees, braziers, bushes ...) and every live mesh standing on a round footprint
 //            (crates, barrels, pots, pillars, posts). Rect props (walls) have their real 3D foot: no stamp.
 // CONTRACT: create(host) -> F with frame(); F.on / F.toggle() (in the menu as "Contact shadows"), ?contact=0 starts off.
+import {flags} from '../core/flags.js';
 const AO_A = .5, AO_PAD = 1, AO_H = .15, AO_HMIN = 1, AO_HMAX = 2, AO_DY = 1;   // the arena's numbers (lighting.js)
 const AO_RING = {pad: 2, h: 2, a: [.5, .22]};
 const AO_SKIRT = {w: 1.3, pad: 3, h: 2.2, a: .14};
@@ -18,7 +19,7 @@ const AO_AIR = 1.2;        // airborne: shrinks / fades over this height (m)
 const SKIP = new Set(['tuft', 'portal']);
 
 export async function create(host) {
-  const Q = new URLSearchParams(location.search);
+  const Q = flags;
   let VW = host.VW, VH = host.VH;   // the view size: F.resize follows the window
   const mk = (w, h, o) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const q = c.getContext('2d', o); q.imageSmoothingEnabled = false; return [c, q]; };
   const [mc, mq] = mk(VW, VH);   // this frame's mask (all stamps), then tinted

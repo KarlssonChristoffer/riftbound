@@ -38,6 +38,7 @@
 //
 // RULES the art follows (the arena's): every particle is 1-3 px of solid palette colour, no alpha, no AA; fading =
 // stepping through darker palette entries. Sizes scale with the host's zoom (zoom 2 = 2 x 2 px per art pixel).
+import {flags} from '../core/flags.js';
 
 const TAU = Math.PI * 2;
 // palettes are ordered bright -> dim; fades step toward the end
@@ -138,7 +139,7 @@ const rgbf = h => { let v = RGBF.get(h); if (!v) { const c = hex3(h); RGBF.set(h
 const lum = c => c[0] * .3 + c[1] * .55 + c[2] * .15;
 
 export async function create(host) {
-  const Q = new URLSearchParams(location.search);
+  const Q = flags;
   const {PPM, PPMY, PPMH} = host;
   let {VW, VH} = host;   // the view size: F.resize follows the window
   const F = {name: 'atmos', label: 'Weather', on: true, weather: Q.get('weather') !== '0', hdOn: Q.get('hd') !== '0', night: 1, ms: 0, count: 0,
