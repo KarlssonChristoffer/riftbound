@@ -619,21 +619,21 @@ export async function create(host) {
     // the PLAYER's own events: features push land / splash / ... too (with a prop or a kind); his carry his position
     const mine = e => !e.prop && !e.kind && Math.hypot(e.x - P.x, e.y - P.y) < .4;
     for (const e of evs || []) {
-      if ((e.type === 'land' || e.type === 'step' || e.type === 'jump' || e.type === 'splash') && !mine(e)) continue;
-      if (e.type === 'land' && P.state === 'land') {   // a real landing (sprint footfalls are 'land' too, big 2, state 'move')
+      if ((e.type === 'player.land' || e.type === 'player.step' || e.type === 'player.jump' || e.type === 'player.splash') && !mine(e)) continue;
+      if (e.type === 'player.land' && P.state === 'land') {   // a real landing (sprint footfalls are 'player.land' too, big 2, state 'move')
         if (e.big >= 3) { dip = Math.max(dip, K.dip); crescent(e.x, e.y, dirX, dirY, {rx: 5, ry: 3, span: 2.5, tone: 1, st: 20, dent: false}); }
         else if (e.big === 2) {
           const drop = prevState === 'fall' ? (P.fall0 ?? P.z) - P.z : 0;
           dip = Math.max(dip, prevState === 'fall' ? K.dipSoft + (K.dip - K.dipSoft) * clamp((drop - .3) / 1.5, 0, 1) : K.dipSoft);
           for (const s0 of ['L', 'R']) { const [x, y] = side({...e, foot: s0}); crescent(x, y, dirX, dirY, {tone: 1}); }
         }
-      } else if (e.type === 'land' && e.big === 2 && P.turn && /a$/.test(P.frame)) {   // turn plant: soil pushed toward the old momentum
+      } else if (e.type === 'player.land' && e.big === 2 && P.turn && /a$/.test(P.frame)) {   // turn plant: soil pushed toward the old momentum
         const [x, y] = side(e); crescent(x, y, dirX, dirY, {tone: 1});
-      } else if (e.type === 'jump') {   // take-off: a faint crescent behind the push
+      } else if (e.type === 'player.jump') {   // take-off: a faint crescent behind the push
         const L = P.leap; if (L) { const [ldx, ldy] = toW(L.dx, L.dy); crescent(e.x - ldx * .12, e.y - ldy * .12, -ldx, -ldy, {tone: 2}); }
-      } else if (e.type === 'splash' && !e.small && P.state === 'splash') { splashT = simT; wetFrom = -99; }   // HIS splash
-      else if (e.type === 'explode') scorch(e.x, e.y, e.r || 2);
-      if ((e.type === 'step' || e.type === 'land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
+      } else if (e.type === 'player.splash' && !e.small && P.state === 'splash') { splashT = simT; wetFrom = -99; }   // HIS splash
+      else if (e.type === 'combat.explode') scorch(e.x, e.y, e.r || 2);
+      if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }
     }

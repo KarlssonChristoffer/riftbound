@@ -328,14 +328,14 @@ export async function create(host) {
     flare(p.x, p.y, h, c, p === beacon ? 9 : 5, p === beacon ? 3 : 2.4, p === beacon ? 1.1 : .6);
     burst(p.x, p.y, h, p === beacon ? 40 : 18, FIRE, p === beacon ? 2.6 : 1.6);
     if (p === beacon) { p.opened = true; host.shake?.(2, .2); }
-    host.events.push({type: 'ignite', x: p.x, y: p.y, kind: p.kind});
+    host.events.push({type: 'fire.ignite', x: p.x, y: p.y, kind: p.kind});
   }
   function ignite(p) {
     if (burning.has(p) || p.broken || p.gone) return;
     const dur = BURNS[p.kind] ?? BURNS[p.breakable]; if (!dur) return;
     burning.set(p, {t: 0, dur: dur * rr(.9, 1.15), spread: 0, sd: R() * TAU});
     burst(p.x, p.y, (p.z || 0) + .5, 12);
-    host.events.push({type: 'ignite', x: p.x, y: p.y, kind: p.kind});
+    host.events.push({type: 'fire.ignite', x: p.x, y: p.y, kind: p.kind});
   }
   const candleSnuff = (c, quiet) => {
     if (!c.lit) return; c.lit = false; c.relight = rr(6, 9);
@@ -397,7 +397,7 @@ export async function create(host) {
       ashes.set(p, {t: 0, life: rr(22, 30), sd: b.sd, cr: 0});
       burst(p.x, p.y, base + .3, 18, FIRE, 1.4); ashPuff(p.x, p.y, base + .15, 12, .35);
       flare(p.x, p.y, base + .5, '#ff9a40', 4.5, 1, .4);
-      host.events.push({type: 'crackle', x: p.x, y: p.y, big: true});
+      host.events.push({type: 'fire.crackle', x: p.x, y: p.y, big: true});
     }
     for (const [p, e] of ashes) {
       if (!p.broken) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); if (e.gone) p.gone = false; ashes.delete(p); continue; }   // it came back
@@ -480,26 +480,26 @@ export async function create(host) {
     const c = Math.cos(L.a), s = Math.sin(L.a), pal = palOf(campCol());
     burst(camp.x + c * .1, camp.y + s * .1, .3, 16, pal, 1.4); ashPuff(camp.x, camp.y, .1, 5, .3);
     flare(camp.x, camp.y, .6, campCol(), 5.5, 1, .35); campFlare(.8, .6);
-    host.events.push({type: 'crackle', x: camp.x, y: camp.y, big: true});
+    host.events.push({type: 'fire.crackle', x: camp.x, y: camp.y, big: true});
   }
   function logFalls(L) {   // it falls in: a crash of sparks, a puff of ash, embers knocked out
     const lc = Math.cos(L.la), ls = Math.sin(L.la), pal = palOf(campCol());
     burst(camp.x, camp.y, .15, 22, pal, 2); ashPuff(camp.x + lc * .12, camp.y + ls * .12, .08, 9, .4);
     flare(camp.x, camp.y, .5, campCol(), 6, 1.2, .4); campFlare(1, 1);
     for (let i = 0; i < 6; i++) { const u = R(); drip(camp.x + lc * (.3 - u * .46), camp.y + ls * (.3 - u * .46), .12, 0, pal, {vx: rr(-.6, .6), vy: rr(-.6, .6), vh: rr(.6, 1.4)}); }
-    host.events.push({type: 'crackle', x: camp.x, y: camp.y, big: true}, {type: 'logFall', x: camp.x, y: camp.y});
+    host.events.push({type: 'fire.crackle', x: camp.x, y: camp.y, big: true}, {type: 'fire.logFall', x: camp.x, y: camp.y});
   }
   function tend() {   // E at the campfire: a log on from the pile, or (the teepee full / the pile empty) a stir
     if (canAdd()) {
       const L = newLog(freeSlot(), 1, 0, 'drop'); pile.n--;
       L.m = host.world.mesh(logGeo, logMatrix(L)); meshes.push(L.m);
-      host.events.push({type: 'addWood', x: camp.x, y: camp.y});
+      host.events.push({type: 'fire.addWood', x: camp.x, y: camp.y});
       return;
     }
     const pal = palOf(campCol());
     burst(camp.x, camp.y, .25, 26, pal, 2.2); flare(camp.x, camp.y, .6, campCol(), 6, 1, .45); campFlare(1, 1); ashPuff(camp.x, camp.y, .1, 6, .3);
     for (let i = 0; i < 4; i++) drip(camp.x + rr(-.15, .15), camp.y + rr(-.15, .15), .3, 0, pal, {vx: rr(-.9, .9), vy: rr(-.9, .9), vh: rr(1, 2)});
-    host.events.push({type: 'crackle', x: camp.x, y: camp.y, big: true});
+    host.events.push({type: 'fire.crackle', x: camp.x, y: camp.y, big: true});
   }
   function campVisuals() {   // the logs' poses and how burnt they are; the pile
     for (const L of logs) if (L.m) {
@@ -513,7 +513,7 @@ export async function create(host) {
   }
 
   function stepCandles(dt, evs) {
-    for (const e of evs) if (e.type === 'explode') for (const c of candles) if (Math.hypot(c.x - e.x, c.y - e.y) < (e.r || 2) * 1.8 + 1) candleSnuff(c);
+    for (const e of evs) if (e.type === 'combat.explode') for (const c of candles) if (Math.hypot(c.x - e.x, c.y - e.y) < (e.r || 2) * 1.8 + 1) candleSnuff(c);
     const pl = host.player;
     for (const c of candles) {
       if (pl.state === 'roll' && Math.hypot(c.x - pl.x, c.y - pl.y) < 1 && Math.abs(c.h - pl.z) < .6) candleSnuff(c);
@@ -742,7 +742,7 @@ export async function create(host) {
       const big = o.kind === 'camp' || o.kind === 'beacon' || o.kind === 'burn', pal = palOf(o.col), n = Math.round((big ? 16 : 9) * o.k);
       for (let i = 0; i < n; i++) { const a = R() * TAU, v = rr(.4, 1.6) * (big ? 1.3 : 1); parts.push({x: o.x + rr(-.08, .08), y: o.y + rr(-.06, .06), h: o.h + rr(.15, .4), vx: Math.cos(a) * v, vy: Math.sin(a) * v * .8, vh: rr(1.6, 3.4) * (big ? 1.2 : 1), t: 0, life: rr(.5, 1.2), k: 'spark', pal, g: 2.2}); }
       flare(o.x, o.y, o.h + .4, o.col, big ? 5.5 : 3.6, (big ? 1.1 : .8) * o.k, .28);
-      if (near(o.x, o.y, 14)) host.events.push({type: 'crackle', x: o.x, y: o.y, big});
+      if (near(o.x, o.y, 14)) host.events.push({type: 'fire.crackle', x: o.x, y: o.y, big});
     }
     if (F.on) {
       stepCandles(dt, evs); stepShrooms(dt); stepWisps(dt);

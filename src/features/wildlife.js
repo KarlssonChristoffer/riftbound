@@ -10,11 +10,11 @@
 //   ember  ash moths round braziers and lava, salamanders that dart and freeze, vulture SHADOWS circling overhead
 //   rift   drifting void jellies (glowing tips), eyes on walls / floor that track you and blink shut, schooling motes
 // NOISE (sprint / roll / landing steps, arrows flying past, hits, breaks, explosions, splashes) startles them exactly as
-// in the arena. AUDIBLE moments go to host.events for the audio feature (next step), names unchanged:
-//   {type: 'birds_scatter', x, y, n}  {type: 'wings', x, y}  {type: 'caw', x, y}  {type: 'fish_jump', x, y}
-//   {type: 'frog_jump', x, y}  {type: 'critter_dash', x, y}   (+ {type: 'splash', small, wl: true} for plops)
-// and, for the wind feature (not rate-limited, in view only): {type: 'bird_perch', x, y, h, prop, off, big, scared} when a
-// bird lands on (off false) / takes off from (off true) a prop's top; wind.js shakes a dying leaf off a crown
+// in the arena. AUDIBLE moments go to host.events for the audio feature (next step; the catalog: core/events.js):
+//   {type: 'wildlife.birds_scatter', x, y, n}  'wildlife.wings'  'wildlife.caw'  'wildlife.fish_jump'
+//   'wildlife.frog_jump'  'wildlife.critter_dash'  (+ {type: 'wildlife.splash', small, wl: true} for plops)
+// and, for the wind feature (not rate-limited, in view only): {type: 'wildlife.bird_perch', x, y, h, prop, off, big,
+// scared} when a bird lands on (off false) / takes off from (off true) a prop's top; wind.js shakes a dying leaf off a crown
 //
 // WHAT CHANGED FOR 3D (the simulation is the arena's, in world metres; only the view side moved):
 //   sprites    every animal is a camera-facing host.sprite from ONE atlas per biome (albedo + emit, same layout; glows
@@ -289,12 +289,12 @@ export async function create(host) {
     if (!WL.on || !host.events) return false;
     if (P && Math.hypot(x - P.x, y - P.y) > TUNE.earshot) return false;
     if ((CD[type] || 0) > 0) return false; CD[type] = TUNE.cool[type] || .3;
-    host.events.push(Object.assign({type, x, y}, extra)); return true;
+    host.events.push(Object.assign({type: 'wildlife.' + type, x, y}, extra)); return true;   // (core/events.js: wildlife.<type>)
   };
   const splash = (x, y) => emit('splash', x, y, {small: true, wl: true});
   // a bird landing on / leaving a prop's top (not rate-limited: one per bird, only in view): the wind feature shakes a
   // dying leaf (snow) off a crown or a bush
-  const perchEv = (b, s, off) => { if (WL.on && host.events && s.p && near(s.x, s.y)) host.events.push({type: 'bird_perch', x: s.x, y: s.y, h: s.h, prop: s.p, off, big: !!b.sp.solo, scared: !!b.f.scared}); };
+  const perchEv = (b, s, off) => { if (WL.on && host.events && s.p && near(s.x, s.y)) host.events.push({type: 'wildlife.bird_perch', x: s.x, y: s.y, h: s.h, prop: s.p, off, big: !!b.sp.solo, scared: !!b.f.scared}); };
 
   // ---------- perches: painted cards read their sprite's top row; 3D models are ray cast ----------
   const alphaCache = new WeakMap();
@@ -424,16 +424,17 @@ export async function create(host) {
     for (const e of evs || []) {
       let r = 0;
       switch (e.type) {
-        case 'hit': r = e.player ? N.hitMe : N.hit; break;
-        case 'break': r = N.break; break;
-        case 'explode': r = N.explode * (e.r || 2.4); break;
-        case 'splash': r = e.wl ? N.splashAnimal : e.small ? N.splashSmall : e.prop ? N.propSplash : N.splash; break;
-        case 'loot': r = N.loot; break; case 'open': r = N.open; break;
-        case 'land': r = e.prop ? N.propLand : e.big >= 3 ? N.landBig : e.big >= 2 ? N.land : 0; break;
-        case 'impact': case 'tip': case 'kick': r = N.impact; break;
-        case 'scrape': r = N.scrape; break;
-        case 'jump': r = N.jump; break;
-        case 'birds_scatter': r = N.scatter; break;
+        case 'player.hit': r = N.hitMe; break; case 'arrow.hit': r = N.hit; break;
+        case 'prop.break': r = N.break; break;
+        case 'combat.explode': r = N.explode * (e.r || 2.4); break;
+        case 'wildlife.splash': r = N.splashAnimal; break; case 'arrow.splash': r = N.splashSmall; break;
+        case 'prop.splash': r = N.propSplash; break; case 'player.splash': r = N.splash; break;
+        case 'combat.loot': r = N.loot; break; case 'chest.open': r = N.open; break;
+        case 'prop.land': r = N.propLand; break; case 'player.land': r = e.big >= 3 ? N.landBig : e.big >= 2 ? N.land : 0; break;
+        case 'prop.impact': case 'prop.tip': case 'prop.kick': r = N.impact; break;
+        case 'prop.scrape': r = N.scrape; break;
+        case 'player.jump': r = N.jump; break;
+        case 'wildlife.birds_scatter': r = N.scatter; break;
       }
       if (r > 0 && e.x !== undefined) noise.push({x: e.x, y: e.y, h: e.z ?? elev(e.x, e.y), r, ev: e.type});
     }

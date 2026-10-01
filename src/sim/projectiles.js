@@ -4,7 +4,7 @@
 // sticks in 3D tree bark, walls, solid props or the ground, splashes in the stream, then fades.
 // OWNS: arrows, pops, dust, the hit count. READS: the world (trees, elevation, stream), the entities (near: what an arrow
 // hits or sticks in), features' arrow hooks.
-// EMITS: hit, splash. BUDGET: part of sim.
+// EMITS: arrow.hit, arrow.splash (core/events.js). BUDGET: part of sim.
 //   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH})
 //   proj.spawn(o) | proj.step(dt) | proj.draw(host) | proj.arrows / dust / hits
 import {elev, inStream, PROP_TOP} from '../world/world.js';
@@ -30,7 +30,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
         if (p.broken || p.gone || !(p.target || p.hp > 0) || (a.hitSet && a.hitSet.has(p))) continue;
         const rel = a.h - (p.z || 0) - (p.h || 0);
         if (Math.hypot(p.x - a.x, p.y - a.y) < (p.hitR ?? .45) && rel > -.2 && rel < (p.hitH ?? 1.6)) {
-          hits++; pops.push({x: p.x, y: p.y, z: (p.z || 0) + (p.h || 0), t: 0}); events.push({type: 'hit', x: p.x, y: p.y, vx: a.vx, vy: a.vy, prop: p});
+          hits++; pops.push({x: p.x, y: p.y, z: (p.z || 0) + (p.h || 0), t: 0}); events.push({type: 'arrow.hit', x: p.x, y: p.y, vx: a.vx, vy: a.vy, prop: p});
           let r; for (const f of features) { r = f.onArrowHit?.(a, p); if (r) break; }
           if (r === 'pierce') (a.hitSet ??= new Set()).add(p); else { a.life = -9; break; }
         }
@@ -42,7 +42,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
       if (tree) { a.x = tree.x; a.y = tree.y; a.h = tree.h; a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
       else if (!a.stuck && ents.near(a.x, a.y, 0, nearS).some(p => !p.broken && !p.gone && !(a.hitSet && a.hitSet.has(p)) && !world.itemOf(p)?.pose && (p.rect ? a.x > p.rect[0] && a.x < p.rect[2] && a.y > p.rect[1] && a.y < p.rect[3] : p.r > .3 && Math.hypot(p.x - a.x, p.y - a.y) < p.r)
         && a.h > (p.z || 0) && a.h < (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5))) { a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
-      else if (!a.stuck && a.h <= ground && ground === 0 && inStream(a.x, a.y)) { a.life = -9; events.push({type: 'splash', x: a.x, y: a.y, small: true}); features.forEach(f => f.onArrowStuck?.(a)); }
+      else if (!a.stuck && a.h <= ground && ground === 0 && inStream(a.x, a.y)) { a.life = -9; events.push({type: 'arrow.splash', x: a.x, y: a.y, small: true}); features.forEach(f => f.onArrowStuck?.(a)); }
       else if (!a.stuck && (a.h <= ground || a.life <= 0)) { a.stuck = true; a.h = Math.max(ground, Math.min(a.h, ground + 2.4)); a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
     }
     for (let i = arrows.length - 1; i >= 0; i--) if (arrows[i].life <= -9 || (arrows[i].stuck && arrows[i].life <= 0)) arrows.splice(i, 1);

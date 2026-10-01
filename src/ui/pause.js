@@ -11,6 +11,7 @@ import {createMenu} from './menu.js';
 import {SNAP_NAME} from '../render/camera.js';
 import {SAMPLING, DEBUG} from '../render/options.js';
 import {SEASONS, WEATHER} from '../sim/env.js';
+import {check as checkEvents} from '../core/events.js';
 const $ = s => document.querySelector(s);
 
 const AMBIENT = new Set(['wind', 'windlines', 'weather', 'lights', 'garden', 'atmos', 'wildlife', 'depth', 'contact', 'audio']);
@@ -41,6 +42,7 @@ export function createPause(E) {
   function stepPaused(dt) {
     hero.stepCloth(dt);
     const evs = events.length ? events.splice(0) : NO_EVS;   // wildlife's calls, fire crackles: for the audio feature
+    if (host.dev) checkEvents(evs);
     for (const f of features) if (AMBIENT.has(f.name) && f.on !== false) f.update?.(dt, evs);
   }
   const pauseTurn = dt => E.game.mode === 'title' || performance.now() - lookT < LOOK_HOLD ? 0 : PAUSE_TURN * dt;   // (the title turns itself)

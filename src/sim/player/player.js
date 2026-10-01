@@ -23,7 +23,7 @@
 //            then draws nothing
 //   nearInteract(P) -> prop | null; onInteract(prop) -> bool   (E on chests etc.)
 //   dust(fx, fy, side, big)            a foot contact at world px (fx, fy); big 0 step, 1 turn push, 2 plant / land
-//   events []                          pushes {type: 'step'|'land'|'jump'|'splash', x, y, ...}
+//   events []                          pushes {type: 'player.step'|'player.land'|'player.jump'|'player.splash', x, y, ...} (core/events.js)
 //   shake(px, sec)
 import {ramps} from './harmonize.js';   // the character palette (pixel bow layer)
 export const AIM_H = 1.25;   // arrows fly at chest height
@@ -173,7 +173,7 @@ export function createPlayer(H) {
   }
   function puff(side, frameName, big = 1) {
     // at the landing foot, read from the rendered bone positions of the contact frame
-    ev({type: big > 1 ? 'land' : 'step', x: P.x, y: P.y, z: P.z, foot: side, big});
+    ev({type: big > 1 ? 'player.land' : 'player.step', x: P.x, y: P.y, z: P.z, foot: side, big});
     if (!H.dust || !A.SP[frameName]) return;
     const b = A.SP[frameName].bones[A.DIRS[P.face]], f = b[(side === 'L' ? 'Left' : 'Right') + 'Foot'];
     const [sx, sy] = T.toS(P.x, P.y, P.z);
@@ -203,7 +203,7 @@ export function createPlayer(H) {
     const dur = .36 + plan.dist * .05;
     P.leap = {x0: P.x, y0: P.y, dx, dy, dist: plan.dist, dur, top: .35 + plan.dist * .12, safe: plan.safe};
     P.state = 'leap'; P.t = 0; P.aimRoll = false; P.vx = dx * plan.dist / dur; P.vy = dy * plan.dist / dur;
-    ev({type: 'jump', x: P.x, y: P.y, z: P.z});
+    ev({type: 'player.jump', x: P.x, y: P.y, z: P.z});
     return true;
   }
   function startFall() { P.state = 'fall'; P.t = 0; P.vz = 0; P.fall0 = P.z; P.vx *= .8; P.vy *= .8; P.aimRoll = false; }
@@ -211,11 +211,11 @@ export function createPlayer(H) {
     P.state = 'land'; P.t = 0; P.z = elev(P.x, P.y);
     const f = A.SP[P.frame] ? P.frame : 'idle.0';
     puff('L', f, 2); puff('R', f, 1);
-    if (drop > 1.2) { H.shake?.(2, .18); ev({type: 'land', x: P.x, y: P.y, z: P.z, big: 3}); }
+    if (drop > 1.2) { H.shake?.(2, .18); ev({type: 'player.land', x: P.x, y: P.y, z: P.z, big: 3}); }
   }
   function splash(backTo) {
     P.state = 'splash'; P.t = 0; P.z = 0; P.back = backTo;
-    ev({type: 'splash', x: P.x, y: P.y}); H.shake?.(1, .12);
+    ev({type: 'player.splash', x: P.x, y: P.y}); H.shake?.(1, .12);
   }
   function climbSpot() {   // a climb spot within reach: from below (up) or from the top (down)
     for (const q of plateaus) for (const c of q.climbs || []) {

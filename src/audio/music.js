@@ -236,14 +236,14 @@ export function createMusic(ac, dest, {send = null, enabled = true, offline = fa
 
   // ---- intensity ----
   function heatUp(v, t) { heat = Math.min(1, heat + v); lastHeat = t; }
-  const HEAT = {hit: .22, break: .1, explode: .45, trap: .15, open: 0, loot: 0};
+  const HEAT = {'arrow.hit': .22, 'player.hit': .22, 'prop.break': .1, 'combat.explode': .45, 'combat.trap': .15, 'chest.open': 0, 'combat.loot': 0};   // (core/events.js)
   function update(t, s = {}) {
     const dt = clamp(t - clock, 0, .25); clock = t;
     if (s.biome && STYLES[s.biome] && s.biome !== styleId && (!pending || pending.id !== s.biome)) pending = {id: s.biome};
     time = s.time || 'day';
     for (const e of s.events || []) {
       if (HEAT[e.type]) heatUp(e.player ? .4 : HEAT[e.type], t);
-      if (e.type === 'open') stinger('open'); else if (e.type === 'loot' || e.type === 'coin') stinger('loot'); else if (e.type === 'respawn') stinger('respawn');
+      if (e.type === 'chest.open') stinger('open'); else if (e.type === 'combat.loot' || e.type === 'combat.coin') stinger('loot'); else if (e.type === 'brute.respawn' || e.type === 'prop.respawn') stinger('respawn');
     }
     if (s.stomps) heatUp(.12 * s.stomps, t);
     if (t - lastHeat > 6) heat = Math.max(0, heat - dt * .07);   // ~6 s of quiet, then it cools over ~12 s

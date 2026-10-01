@@ -5,6 +5,7 @@
 // READS: E (main.js; E.dev: the colliders overlay + the debug HUD).  BUDGET: core/perf.js (F3).
 //   const loop = createLoop(E); loop.start() / hitstop(sec) / run(n, dt) (tests: n steps + draws without rAF) / hud()
 import {ROT_SPEED} from '../render/camera.js';
+import {check as checkEvents} from './events.js';
 import {drawPrompt} from '../ui/prompt.js';
 
 export function createLoop(E) {
@@ -36,6 +37,7 @@ export function createLoop(E) {
     perf.begin('arrows', 'sim'); proj.step(dt); perf.end('arrows');
     hero.stepCloth(dt, perf);
     const evs = events.splice(0);
+    if (host.dev) checkEvents(evs);   // a type not in the catalog warns once (dev mode)
     for (const f of features) if (f.on !== false || f.always) f.update?.(dt, evs);
     cv.stepShake(dt);
   }

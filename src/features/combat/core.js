@@ -118,7 +118,7 @@ export function createCore(host) {
       const ang = R() * TAU, s = RR(.8, 2.4) * sp;
       coins.push({x, y, a: a + .3, vx: Math.sin(ang) * s, vy: Math.cos(ang) * s * .8, va: RR(3.5, 6), t: -i * .03, ph: R() * 4, rest: false, mag: false, spd: 0});
     }
-    if (n) events.push({type: 'loot', x, y, n});
+    if (n) events.push({type: 'combat.loot', x, y, n});
   }
   function puff(x, y, z, n = 10, r = .5) {   // dust ring (landing, respawn)
     for (let i = 0; i < n; i++) { const ang = i / n * TAU + R() * .4; part(x + Math.sin(ang) * r * .4, y + Math.cos(ang) * r * .3, z + .05, Math.sin(ang) * RR(1.2, 2.4), Math.cos(ang) * RR(.9, 1.8), RR(.2, .8), RR(.3, .55), DUST, {drag: 5}); }
@@ -153,7 +153,7 @@ export function createCore(host) {
   function breakProp(p, o = {}) {
     const pal = PAL[p.kind] || PAL.stone, hgt = HGT[p.kind] ?? 1, base = pz(p) + (p.h || 0);
     p.broken = true; p.stage = 2; p.hp = 0; p.r = 0;
-    events.push({type: 'break', x: p.x, y: p.y, kind: p.kind, who: p, ash: !!o.ash});
+    events.push({type: 'prop.break', x: p.x, y: p.y, kind: p.kind, who: p, ash: !!o.ash});
     // o.ash: burnt through (lights.js): it slumps into charcoal where it stood, nothing flies
     if (o.ash) chunks(p.x, p.y, base + .05, 9, PAL.char, {speed: .45, big: 0, up: .25, spreadH: .12});
     else chunks(p.x, p.y, base + hgt * .3, p.kind === 'pot' ? 12 : p.kind === 'crystal' ? 18 : 16, pal, {dir: o.dir, speed: 2.8, big: p.kind === 'pot' ? 1 : 2, spreadH: hgt * .7});
@@ -166,12 +166,12 @@ export function createCore(host) {
     }
     if (!p.sparring && T.propRespawn) p.respawnAt = simT + T.propRespawn;
     if (p.sparring) { const s = BS.get(p); s.dead = p.hunter ? -1 : T.bruteRespawn; s.hop = null; p.h = 0; p.air = false; p.rooted = false; }
-    if (p.hunter) { p.gone = true; dead.push(p); events.push({type: 'kill', x: p.x, y: p.y, who: p}); }   // an enemy: gone (its debris stays)
+    if (p.hunter) { p.gone = true; dead.push(p); events.push({type: 'enemy.kill', x: p.x, y: p.y, who: p}); }   // an enemy: gone (its debris stays)
     return true;
   }
   // an explosion: area damage with falloff, chain to barrels, knock the player, shake, hitstop, light, fire
   function explode(x, y, z, r, dmg, barrel) {
-    events.push({type: 'explode', x, y, r});
+    events.push({type: 'combat.explode', x, y, r});
     hitstop(T.hsBoom);
     const dP = Math.hypot(P.x - x, P.y - y);
     shake(Math.round(clamp(6 - dP * .35, 2, 5)), .35);
@@ -198,7 +198,7 @@ export function createCore(host) {
     if (Math.abs(P.z - z) < 1.2 && dP < r + .8 && !['climb', 'leap', 'fall'].includes(P.state) && !C.immune?.()) {
       const k = 1 - dP / (r + .8), ux = dP > .05 ? (P.x - x) / dP : 0, uy = dP > .05 ? (P.y - y) / dP : 1, sp = 6 + 9 * k;
       host.knock(ux * sp, uy * sp);
-      if (barrel) events.push({type: 'hurt', dmg: Math.round(dmg * .5 * (.4 + .6 * k)), by: 'blast', x: P.x, y: P.y});   // powder kegs hurt you too
+      if (barrel) events.push({type: 'player.hurt', dmg: Math.round(dmg * .5 * (.4 + .6 * k)), by: 'blast', x: P.x, y: P.y});   // powder kegs hurt you too
     }
   }
 
@@ -240,7 +240,7 @@ export function createCore(host) {
         flashing.add(b); Object.assign(s, {mode: 'idle', wait: .8, hop: null, root: 0, fail: 0, calm: 0});
         puff(b.x, b.y, pz(b), 16, .8);
         for (let i = 0; i < 8; i++) part(b.x + RR(-.3, .3), b.y, pz(b) + RR(.2, 1.3), RR(-.8, .8), 0, RR(.3, 1), RR(.3, .6), SMOKE, {sz: 2, drag: 2});
-        events.push({type: 'respawn', x: b.x, y: b.y});
+        events.push({type: 'brute.respawn', x: b.x, y: b.y});
       }
       return;
     }
@@ -297,8 +297,8 @@ export function createCore(host) {
       const ux = d > .05 ? (P.x - b.x) / d : 0, uy = d > .05 ? (P.y - b.y) / d : 1, kn = b.knock ?? T.bruteKnock;
       host.knock(ux * kn, uy * kn);
       shake(3, .18); hitstop(.06); s.wait += .35;
-      events.push({type: 'hit', x: P.x, y: P.y, vx: ux * 5, vy: uy * 5, player: true});
-      events.push({type: 'hurt', dmg: b.dmg ?? T.bruteDmg, by: b, x: P.x, y: P.y});
+      events.push({type: 'player.hit', x: P.x, y: P.y, vx: ux * 5, vy: uy * 5, player: true});
+      events.push({type: 'player.hurt', dmg: b.dmg ?? T.bruteDmg, by: b, x: P.x, y: P.y});
       for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + RR(.6, 1.2), ux * RR(1, 3) + RR(-1, 1), uy * RR(1, 3), RR(0, 2), RR(.15, .3), GOLD, {emit: true, drag: 4});
     } else if (d < 4) shake(1, .06);
     // stomping onto a trap sets it off
@@ -308,7 +308,7 @@ export function createCore(host) {
   // ---------------- traps ----------------
   function burstTrap(q) {
     q.done = true;
-    events.push({type: 'trap', x: q.x, y: q.y});
+    events.push({type: 'combat.trap', x: q.x, y: q.y});
     hitstop(.08); shake(3, .2);
     ring(q.x, q.y, q.z, T.trapR, .22, SPARK, true); ring(q.x, q.y, q.z, T.trapR * .6, .3, DUST, false);
     for (let i = 0; i < 12; i++) { const ang = i / 12 * TAU; q.spikes = q.spikes || []; q.spikes.push({x: q.x + Math.sin(ang) * RR(.3, T.trapR * .8), y: q.y + Math.cos(ang) * RR(.2, T.trapR * .6), t: -R() * .08}); }
@@ -439,7 +439,7 @@ export function createCore(host) {
       for (let i = 0; i < 14; i++) part(p.x, p.y, pz(p) + .5, RR(-1.5, 1.5), RR(-1, 1), RR(1, 3), RR(.3, .7), GOLD, {emit: true, drag: 3});
       light(p.x, p.y, pz(p) + .6, '#ffd27a', 2.8, 1.5, .7, .1);
       shake(2, .15); hitstop(.05);
-      events.push({type: 'open', x: p.x, y: p.y});
+      events.push({type: 'chest.open', x: p.x, y: p.y});
       return true;
     },
 
@@ -555,7 +555,7 @@ export function createCore(host) {
           if (l < .35) {
             S.gold++; S.goldPop = .25; coins[i] = coins[coins.length - 1]; coins.pop();
             part(P.x, P.y, P.z + .9, RR(-.6, .6), RR(-.3, .3), RR(1, 2), .25, GOLD, {emit: true});
-            if (S.gold % 5 === 0) events.push({type: 'coin', x: P.x, y: P.y});
+            if (S.gold % 5 === 0) events.push({type: 'combat.coin', x: P.x, y: P.y});
           }
           continue;
         }

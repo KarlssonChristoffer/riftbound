@@ -19,8 +19,9 @@
 // Props this feature drives (world.js shows them): stage, broken, hp, r, wob, flash, opened, lid, gone, x / y / z / h
 // (moves, hops, falls), face (brutes: the biome's 16-step SCREEN facing, from b.faceW), air, squash, rooted; tip / tilt /
 // sink (it.manageMatrix while set). It adds 2 extra crates by the stream to host.entities (+ world items).
-// Events (host.events, for audio / atmos): hit {player} / break {kind} / explode {r} / loot {n} / coin / open / trap /
-// respawn; prop events with prop: true: tip / kick / scrape / impact {speed} / land / splash / respawn.
+// Events (host.events; the catalog: core/events.js): player.hit / player.hurt / prop.break {kind} / combat.explode {r} /
+// combat.loot {n} / combat.coin / chest.open / combat.trap / brute.respawn / enemy.kill; the physics' prop.tip / kick /
+// scrape / impact {speed} / land / splash / respawn (prop: true).
 // Test handles: F.TUNE (= the arena's C.T), F.PROPS_TUNE (props3d T), F.AB, F.gold, F.cd, F.dbg (the arena's combat.dbg:
 // zones, traps, ... + props), F.seed(n), F.shove(q, vx, vy), F.ms (rolling ms per frame: update + frame + hd).
 import {createCore} from './combat/core.js';

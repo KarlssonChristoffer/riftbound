@@ -5,7 +5,8 @@
 // camera turns, the cursor's target (ARPG aim), the nearest interactable, and climbing at any camera angle (the camera
 // eases to north for the climb and back after: `assist`).
 // OWNS: PL (player.js) and P (its state), the aim memo, the climb assist.  READS: the world, the entities (near: what
-//   blocks him, what he can interact with), the camera, the hero's atlas, features' aimTarget / interact.  EMITS (via player.js): step, land, jump, splash (turned into world coordinates here).
+//   blocks him, what he can interact with), the camera, the hero's atlas, features' aimTarget / interact.
+// EMITS (via player.js): player.step / land / jump / splash (turned into world coordinates here; core/events.js).
 //   const pa = createPlayerHost({...}); const {PL, P, player} = pa
 import {createPlayer} from './player.js';
 import {PLAY, TRAIL, elev, inStream, PLATEAUS} from '../../world/world.js';

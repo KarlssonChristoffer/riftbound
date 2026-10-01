@@ -739,7 +739,7 @@ export function createAudio(ctx, host = {}) {
     }
     // ---- player state transitions ----
     const st = pl.state, landed = st === 'land' && prevState !== 'land';
-    const bigDrop = events.some(e => e.type === 'land' && e.big === 3), speed = Math.hypot(pl.vx || 0, pl.vy || 0);
+    const bigDrop = events.some(e => e.type === 'player.land' && e.big === 3), speed = Math.hypot(pl.vx || 0, pl.vy || 0);
     if (landed) fire('land', pl.x, pl.y, {surf, big: bigDrop ? 1 : 0});
     if (st === 'roll' && prevState !== 'roll') fire('roll', pl.x, pl.y, {surf});
     if (st === 'climb') { climbT -= dt; if (climbT <= 0) { fire('climb', pl.x, pl.y, {surf}); climbT = RR(.26, .34); } }
@@ -755,36 +755,34 @@ export function createAudio(ctx, host = {}) {
     // ---- events ----
     for (const e of events) {
       switch (e.type) {
-        case 'step': if (!landed) fire('step', e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)}); break;
-        case 'land':
-          if (e.kind) fire('propDrop', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf});   // a prop dropped off the plateau (props3d.js)
-          else if (!landed && e.big === 2) fire('step', e.x, e.y, {surf, k: 1.3, g: 1});   // sprint plant
-          break;
-        case 'jump': fire('jump', e.x, e.y, {surf}); break;
-        case 'splash': fire('splash', e.x, e.y, {surf, small: !!e.small}); break;
-        case 'hit': {
+        case 'player.step': if (!landed) fire('step', e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)}); break;
+        case 'prop.land': fire('propDrop', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;   // a prop dropped off the plateau (combat/props.js)
+        case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, {surf, k: 1.3, g: 1}); break;   // sprint plant
+        case 'player.jump': fire('jump', e.x, e.y, {surf}); break;
+        case 'player.splash': case 'arrow.splash': case 'prop.splash': case 'wildlife.splash': fire('splash', e.x, e.y, {surf, small: !!e.small}); break;
+        case 'arrow.hit': case 'player.hit': {
           const props = get(host.props) || [], p = !e.player && (e.prop || props.find(p => p.x === e.x && p.y === e.y));
           fire('hit', e.x, e.y, {mat: e.player ? 'body' : MAT[p?.kind] || 'wood'}); break;
         }
-        case 'break': fire('brk', e.x, e.y, {kind: e.kind}); break;
-        case 'explode': fire('explode', e.x, e.y, {r: e.r}); break;
-        case 'loot': fire('loot', e.x, e.y, {n: e.n}); break;
-        case 'coin': fire('coin', e.x, e.y); break;
-        case 'open': fire('open', e.x, e.y); break;
-        case 'trap': fire('trap', e.x, e.y); break;
-        case 'respawn': fire('respawn', e.x, e.y); break;
+        case 'prop.break': fire('brk', e.x, e.y, {kind: e.kind}); break;
+        case 'combat.explode': fire('explode', e.x, e.y, {r: e.r}); break;
+        case 'combat.loot': fire('loot', e.x, e.y, {n: e.n}); break;
+        case 'combat.coin': fire('coin', e.x, e.y); break;
+        case 'chest.open': fire('open', e.x, e.y); break;
+        case 'combat.trap': fire('trap', e.x, e.y); break;
+        case 'brute.respawn': case 'prop.respawn': fire('respawn', e.x, e.y); break;
         // physical props (arena/props3d.js)
-        case 'tip': fire('tip', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;
-        case 'kick': fire('kick', e.x, e.y, {mat: MAT[e.kind] || 'wood'}); break;
-        case 'scrape': fire('scrape', e.x, e.y, {surf}); break;
-        case 'impact': fire('hit', e.x, e.y, {mat: MAT[e.kind] || 'wood', g: clamp((e.speed || 3) / 5, .45, 1.4)}); break;
+        case 'prop.tip': fire('tip', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;
+        case 'prop.kick': fire('kick', e.x, e.y, {mat: MAT[e.kind] || 'wood'}); break;
+        case 'prop.scrape': fire('scrape', e.x, e.y, {surf}); break;
+        case 'prop.impact': fire('hit', e.x, e.y, {mat: MAT[e.kind] || 'wood', g: clamp((e.speed || 3) / 5, .45, 1.4)}); break;
         // wildlife (arena/wildlife.js)
-        case 'birds_scatter': fire('wings', e.x, e.y, {n: clamp(e.n || 3, 1, 8), surf}); break;
-        case 'wings': fire('wings', e.x, e.y, {n: 1, surf}); break;
-        case 'caw': fire('caw', e.x, e.y); break;
-        case 'fish_jump': fire('plop', e.x, e.y, {surf, fish: 1}); break;
-        case 'frog_jump': fire('plop', e.x, e.y, {surf, frog: 1}); break;
-        case 'critter_dash': fire('rustle', e.x, e.y, {surf}); break;
+        case 'wildlife.birds_scatter': fire('wings', e.x, e.y, {n: clamp(e.n || 3, 1, 8), surf}); break;
+        case 'wildlife.wings': fire('wings', e.x, e.y, {n: 1, surf}); break;
+        case 'wildlife.caw': fire('caw', e.x, e.y); break;
+        case 'wildlife.fish_jump': fire('plop', e.x, e.y, {surf, fish: 1}); break;
+        case 'wildlife.frog_jump': fire('plop', e.x, e.y, {surf, frog: 1}); break;
+        case 'wildlife.critter_dash': fire('rustle', e.x, e.y, {surf}); break;
       }
     }
     // ---- arrows: shots (new ones, grouped by ability) and thuds (newly stuck) ----

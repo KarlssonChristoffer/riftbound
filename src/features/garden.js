@@ -303,7 +303,7 @@ export async function create(host) {
     const d = Math.hypot(pl.x - LAN.ax, pl.y - LAN.ay), sp = Math.hypot(pl.vx, pl.vy);
     if (d < 1.1 && sp > .5) { fx += pl.vx * 1.4; fy += pl.vy * 1.4; }   // brushed past
     for (const a of host.arrows) if (!a.stuck && Math.hypot(a.x - LAN.ax, a.y - LAN.ay) < .5 && Math.abs(a.h - 1.7) < .5) { LAN.vx += a.vx * .05; LAN.vy += a.vy * .05; }
-    for (const e of evs) if (e.type === 'explode') { const dd = Math.hypot(e.x - LAN.ax, e.y - LAN.ay); if (dd < 10) { LAN.vx += (LAN.ax - e.x) / dd * 3 / (1 + dd * .3); LAN.vy += (LAN.ay - e.y) / dd * 3 / (1 + dd * .3); } }
+    for (const e of evs) if (e.type === 'combat.explode') { const dd = Math.hypot(e.x - LAN.ax, e.y - LAN.ay); if (dd < 10) { LAN.vx += (LAN.ax - e.x) / dd * 3 / (1 + dd * .3); LAN.vy += (LAN.ay - e.y) / dd * 3 / (1 + dd * .3); } }
     const k = 9.8 / LAN.len, c = 1.1;
     LAN.vx += (-k * Math.sin(LAN.tx) - c * LAN.vx + fx) * dt; LAN.vy += (-k * Math.sin(LAN.ty) - c * LAN.vy + fy) * dt;
     LAN.tx = clamp(LAN.tx + LAN.vx * dt, -1.1, 1.1); LAN.ty = clamp(LAN.ty + LAN.vy * dt, -1.1, 1.1);
@@ -366,7 +366,7 @@ export async function create(host) {
   F.interact = p => {
     if (p !== merchant) return false;
     say(TALK[M.ti++ % TALK.length]); M.wave = Math.max(M.wave, .7);
-    host.events.push({type: 'talk', x: MERCH.x, y: MERCH.y});
+    host.events.push({type: 'garden.talk', x: MERCH.x, y: MERCH.y});
     return true;
   };
   F.hd = (q, sc) => {   // his speech bubble, at display resolution over his hat

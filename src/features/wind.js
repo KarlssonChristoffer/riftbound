@@ -1148,10 +1148,10 @@ export async function create(host) {
   }
   function onEvents(evs) {
     for (const e of evs || []) {
-      if (e.type === 'hit' && e.prop && e.prop.kind === 'dummy') {   // the strips jump with the hit
+      if (e.type === 'arrow.hit' && e.prop && e.prop.kind === 'dummy') {   // the strips jump with the hit
         const v = Math.hypot(e.vx || 0, e.vy || 0) || 1;
         for (const it of decor) if (it.dummy === e.prop) for (const pc of it.pieces) kick(pc, (e.vx || 0) / v * 1.6, (e.vy || 0) / v * 1.2, .8, 1);
-      } else if (e.type === 'explode') {   // a blast wave: foliage whips, cloth billows away from it
+      } else if (e.type === 'combat.explode') {   // a blast wave: foliage whips, cloth billows away from it
         const r = (e.r || 2.4) * 2.5;
         const S = SHED[biome], loose = S?.kind === 'leaf' ? leafRate(S) : 0;
         for (const p of nearList()) {   // (only foliage that has swayed in view has a spring state to kick)
@@ -1166,7 +1166,7 @@ export async function create(host) {
           for (const pc of it.pieces) kick(pc, ux * k, uy * k, k * .5);
           if (it.lantern) { it.lantern.ox -= ux * k / 60; it.lantern.oy -= uy * k / 60; }
         }
-      } else if (e.type === 'bird_perch' && e.prop) {   // wildlife.js: a bird landed on / took off from a crown or a bush
+      } else if (e.type === 'wildlife.bird_perch' && e.prop) {   // wildlife.js: a bird landed on / took off from a crown or a bush
         const p = e.prop, F = flexOf(p); if (!F || p.kind === 'tuft' || !vis(p.x, p.y)) continue;
         const st = fst.get(p), tree = p.kind === 'tree';   // a crow / raven bobs a branch, a sparrow on a big oak barely does
         if (st) st.shake = Math.max(st.shake, (tree ? .14 : .4) * (e.big ? 2.6 : 1) * (e.off && e.scared ? 1.4 : 1));

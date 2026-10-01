@@ -12,7 +12,7 @@
 // FEATURE CONTRACT (features/<name>.js):
 //   export async function create(host) -> F
 //   F.name, F.on (bool), F.toggle?() (F.key: its hotkey, e.g. '5'), F.always (update during hitstop too)
-//   F.update?(dt, evs)          simulation step. evs = this step's events (player steps / lands / splashes, hits, ...)
+//   F.update?(dt, evs)          simulation step. evs = this step's events ({type: 'player.land', ...}: core/events.js)
 //   F.frame?(f)                 every rendered frame, camera set: push host.sprite / point / line, paint host.layer(...)
 //                               f = {dt, t (s)}
 //   F.lights?() -> [{x, y, h, color ('#rrggbb' | [r, g, b]), radius, intensity, flicker, id}]   arena coordinates

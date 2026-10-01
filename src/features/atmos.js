@@ -414,7 +414,7 @@ export async function create(host) {
         prints.push({x, y, z, t: 0, dx: dirX, dy: dirY});   // (the shape follows the stride ON SCREEN: picked when drawn)
         if (prints.length > 240) prints.shift();
       }
-      if (e.type === 'land' || e.big > 1) emitFx(e.x, e.y, z + .03, 7, SNOWPUFF);
+      if (e.type === 'player.land' || e.type === 'prop.land' || e.big > 1) emitFx(e.x, e.y, z + .03, 7, SNOWPUFF);
       else if (sp > 4) emitFx(x, y, z + .03, 2, SNOWPUFF);
     } else if (biome === 'ruins') {   // grass rustle: kicking through a tuft throws a few blades
       for (const p of host.entities.near(e.x, e.y, .6, nearT)) if (p.kind === 'tuft' && Math.abs(p.x - e.x) < .6 && Math.abs(p.y - e.y) < .45 && Math.abs((p.z || 0) - z) < .3) { emitFx(p.x, p.y, z + .05, 3, GRASS); break; }
@@ -439,7 +439,7 @@ export async function create(host) {
   }
   function smoke(e) {   // break: a light dust puff; explode: a dust ring + a smoke plume rising ~1.5 s
     const z = elevAt(e.x, e.y);
-    if (e.type === 'break') { emitFx(e.x, e.y, z + .25, 10, {pal: dustOf(), sp: [.4, 1.2], up: [.3, .9], life: [.5, .9], gr: 1, drag: 3, px: 2, hold: .5}, 0, 0, .4); return; }
+    if (e.type === 'prop.break') { emitFx(e.x, e.y, z + .25, 10, {pal: dustOf(), sp: [.4, 1.2], up: [.3, .9], life: [.5, .9], gr: 1, drag: 3, px: 2, hold: .5}, 0, 0, .4); return; }
     const r = e.r ?? 2.4;
     emitFx(e.x, e.y, z + .1, 16, {pal: dustOf(), sp: [r * 1.1, r * 1.5], up: [.2, .7], life: [.45, .7], gr: 2, drag: 4, px: 2, hold: .5, even: true});
     plumes.push({x: e.x, y: e.y, z, t: 0, dur: .7, n: Math.round(20 + r * 8)});
@@ -711,15 +711,15 @@ export async function create(host) {
       if (P.state === 'climb') for (let k = 16 * dt + R(); k >= 1; k--)   // grit trickling off the cliff face under the hands and feet
         emitFx(P.x + (R() - .5) * .6, P.y + .06, Math.max(.1, (P.z || 0) - .2 + R() * .8), 1, {pal: dustOf(), sp: [.1, .35], up: [-.2, .3], life: [.6, 1], gr: 4, drag: 1.5, px: 1});
       for (const e of evs || []) {
-        if (e.type === 'hit') {
+        if (e.type === 'arrow.hit' || e.type === 'player.hit') {
           const B = BURST[biome], v = Math.hypot(e.vx || 0, e.vy || 0) || 1;   // sprayed on along the arrow's flight
           if (B) emitFx(e.x, e.y + .02, elevAt(e.x, e.y) + 1.15 + R() * .25, B.n, B, (e.vx || 0) / v * 1.1, (e.vy || 0) / v * .8);
         }
-        else if (e.type === 'step' || e.type === 'land') foot(e);
-        else if (e.type === 'jump') { const z = elevAt(e.x, e.y); emitFx(e.x, e.y, z + .03, 3, biome === 'frost' ? SNOWPUFF : {pal: dustOf(), sp: [.3, .9], up: [.3, .8], life: [.3, .5], gr: 6, drag: 3}); }
-        else if (e.type === 'splash') splash(e);
-        else if (e.type === 'break' || e.type === 'explode') smoke(e);
-        else if (e.type === 'roll' && biome === 'frost') emitFx(e.x, e.y, elevAt(e.x, e.y) + .03, 4, SNOWPUFF);
+        else if (e.type === 'player.step' || e.type === 'player.land' || e.type === 'prop.land') foot(e);   // (a prop's drop leaves prints too: as before)
+        else if (e.type === 'player.jump') { const z = elevAt(e.x, e.y); emitFx(e.x, e.y, z + .03, 3, biome === 'frost' ? SNOWPUFF : {pal: dustOf(), sp: [.3, .9], up: [.3, .8], life: [.3, .5], gr: 6, drag: 3}); }
+        else if (e.type === 'player.splash' || e.type === 'arrow.splash' || e.type === 'prop.splash' || e.type === 'wildlife.splash') splash(e);
+        else if (e.type === 'prop.break' || e.type === 'combat.explode') smoke(e);
+        else if (e.type === 'player.roll' && biome === 'frost') emitFx(e.x, e.y, elevAt(e.x, e.y) + .03, 4, SNOWPUFF);
       }
       n += stepStream(dt);
       stepFx(dt);

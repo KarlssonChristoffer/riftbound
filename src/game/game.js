@@ -123,14 +123,14 @@ export async function createGame(host) {
   // ---------------------------------------------------------------- run events
   function onEvents(evs) {
     for (const e of evs) {
-      if (e.type === 'hurt' && phase !== 'dead') {
+      if (e.type === 'player.hurt' && phase !== 'dead') {
         const d = stats.hurt(e.dmg); P.raw.blink = .9;
         hud.float(P.x, P.y, P.z + 1.9, '-' + d, '#ff6a50', true);
         if (stats.S.hp <= 0) die();
-      } else if (e.type === 'kill' && e.who?.hunter) {
+      } else if (e.type === 'enemy.kill' && e.who?.hunter) {
         run.kills++;
         if (e.who.boss) hud.banner(`${e.who.name} defeated`, '', 2, '#f2d27a');
-      } else if (e.type === 'hit' && e.prop?.hunter) {
+      } else if (e.type === 'arrow.hit' && e.prop?.hunter) {
         if (stats.S.leech) { const h = stats.heal(stats.S.leech); if (h >= 1 && rng() < .5) hud.float(P.x, P.y, P.z + 2, '+' + Math.round(h), '#9af07a'); }
         if (stats.S.bleed && rng() < stats.S.bleed) { const b = bleeds.find(q => q.p === e.prop); if (b) b.left = 3; else bleeds.push({p: e.prop, left: 3, tick: .5}); }
       }

@@ -73,7 +73,7 @@ export async function createPropPhysics(host, core) {
     const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
     q.tip = {axis: Math.atan2(dx, dy) * 180 / Math.PI, phi: 0}; q.tilt = T.tiltT;
     q.x += dx * .28; q.y += dy * .28 * .8; q.vx = dx * speed; q.vy = dy * speed; q.h = (q.h || 0) + .08; q.vh = 1.2; q.wob = .6;
-    host.events.push({type: 'tip', prop: true, x: q.x, y: q.y, kind: q.kind});
+    host.events.push({type: 'prop.tip', prop: true, x: q.x, y: q.y, kind: q.kind});
   }
   function shove(q, vx, vy) {
     if (q.broken || q.gone || q.sink) return;
@@ -83,7 +83,7 @@ export async function createPropPhysics(host, core) {
   }
   function setAxis(q) { if (q.tip && speedOf(q) > .05) q.tip.axis = Math.atan2(q.vx, q.vy) * 180 / Math.PI; }
   function enterWater(q) {
-    host.events.push({type: 'splash', prop: true, x: q.x, y: q.y});
+    host.events.push({type: 'prop.splash', prop: true, x: q.x, y: q.y});
     if (q.kind === 'crate') {   // slides on into the water, sinks to its lid and stays: dry footing across the stream
       const S = stream(), l = speedOf(q) || 1, ux = q.vx / l, uy = q.vy / l;
       let tx = q.x + ux * .6, ty = q.y + uy * .6;
@@ -102,7 +102,7 @@ export async function createPropPhysics(host, core) {
     ents.moved(q);   // a jump home: the grid follows now, not next step
     if (q.kind === 'crate') q.push = !q.wall;
     if (q.gone === false && q.broken && q.goneBroken) { q.broken = false; q.goneBroken = false; }
-    if (!quiet) host.events.push({type: 'respawn', prop: true, x: q.x, y: q.y});
+    if (!quiet) host.events.push({type: 'prop.respawn', prop: true, x: q.x, y: q.y});
   }
   // a new stage: every movable prop back home, upright, dry, unbroken (combat restores hp / stage)
   function resetAll() { for (const q of mov) { q.broken = false; q.goneBroken = false; q.wasBroken = false; q.manage = false; resetHome(q, true); } }
@@ -127,7 +127,7 @@ export async function createPropPhysics(host, core) {
       q.vh = (q.vh || 0) - 18 * dt; q.h = Math.max(0, (q.h || 0) + q.vh * dt);
       if (q.h === 0) {
         const hard = q.vh < -5; q.vh = hard && q.tip ? 2.2 : 0; if (q.vh) q.h = .001;
-        if (hard) { host.events.push({type: 'land', prop: true, x: q.x, y: q.y, kind: q.kind}); if (q.kind === 'barrel_x') strike(q, 99, 0, 1); else strike(q, 8, 0, 1); }
+        if (hard) { host.events.push({type: 'prop.land', prop: true, x: q.x, y: q.y, kind: q.kind}); if (q.kind === 'barrel_x') strike(q, 99, 0, 1); else strike(q, 8, 0, 1); }
       }
     }
     const s = speedOf(q);
@@ -153,7 +153,7 @@ export async function createPropPhysics(host, core) {
       if (vn < 0) { q.vx -= 1.6 * vn * nxn; q.vy -= 1.6 * vn * nyn; }
       const k = q.tip ? .45 : .15; q.vx *= k; q.vy *= k;
       if (s > T.impact) {
-        host.events.push({type: 'impact', prop: true, x: q.x, y: q.y, kind: q.kind, speed: s});
+        host.events.push({type: 'prop.impact', prop: true, x: q.x, y: q.y, kind: q.kind, speed: s});
         if (hit === 'player') host.knock(-nxn * s * .7, -nyn * s * .7);
         else if (hittable(hit)) strike(hit, s * 5, -nxn * s, -nyn * s);
         if (q.kind === 'barrel_x' && s > T.boomImpact) strike(q, 99, q.vx, q.vy);
@@ -180,7 +180,7 @@ export async function createPropPhysics(host, core) {
         if (!q.tip && (rolling || vin > T.tipSpeed)) { tip(q, ux, uy, Math.min(T.tipMax, Math.max(3, Math.abs(vin) * .75 + (rolling ? 1.2 : 0)))); continue; }
         if (q.tip && speedOf(q) < 1 && (vin > .8 || (rolling && vin > 0) || (toward > .7 && ps > .3))) {
           const v = Math.min(T.kickMax, Math.max(T.kickMin, Math.max(vin, ps) * T.kick + (rolling ? 1.5 : 0))); q.vx = ux * v; q.vy = uy * v; setAxis(q);
-          q.tip.axis = Math.atan2(q.vx, q.vy) * 180 / Math.PI; host.events.push({type: 'kick', prop: true, x: q.x, y: q.y, kind: q.kind}); q.wob = .5;
+          q.tip.axis = Math.atan2(q.vx, q.vy) * 180 / Math.PI; host.events.push({type: 'prop.kick', prop: true, x: q.x, y: q.y, kind: q.kind}); q.wob = .5;
         }
         continue;
       }
@@ -188,7 +188,7 @@ export async function createPropPhysics(host, core) {
         q.pushT = (q.pushT || 0) + dt;
         if (q.pushT > T.pushDelay) {
           const ax = Math.abs(ix) >= Math.abs(iy) ? Math.sign(ix) : 0, ay = ax ? 0 : Math.sign(iy);   // grid-like: one axis at a time
-          if (ax * ux + ay * uy > .35) { q.vx = ax * T.pushV; q.vy = ay * T.pushV; q.pushing = true; if (!q.pushSnd || simT - q.pushSnd > .35) { q.pushSnd = simT; host.events.push({type: 'scrape', prop: true, x: q.x, y: q.y}); } }
+          if (ax * ux + ay * uy > .35) { q.vx = ax * T.pushV; q.vy = ay * T.pushV; q.pushing = true; if (!q.pushSnd || simT - q.pushSnd > .35) { q.pushSnd = simT; host.events.push({type: 'prop.scrape', prop: true, x: q.x, y: q.y}); } }
         }
       } else q.pushT = 0;
     }
@@ -234,8 +234,8 @@ export async function createPropPhysics(host, core) {
     simT += dt;
     for (const e of evs) {
       if (seen.has(e)) continue; seen.add(e);
-      if (e.type === 'break' && DEBRIS[e.kind]) { const [k, n] = DEBRIS[e.kind]; if (n) burst(e.x, e.y, host.elev(e.x, e.y), k, n); }
-      if (e.type === 'explode') {
+      if (e.type === 'prop.break' && DEBRIS[e.kind]) { const [k, n] = DEBRIS[e.kind]; if (n) burst(e.x, e.y, host.elev(e.x, e.y), k, n); }
+      if (e.type === 'combat.explode') {
         const reach = (e.r || 2.2) * 1.8;
         for (const q of mov) {
           if (q.broken || q.gone || q.sink) continue;
@@ -245,9 +245,9 @@ export async function createPropPhysics(host, core) {
         }
         burst(e.x, e.y, host.elev(e.x, e.y), 'iron', 2, [0, 0], 4);
       }
-      if (e.type === 'hit' && e.prop && (e.prop.kind === 'barrel') && !e.prop.tip && !e.prop.broken) {   // arrows knock wooden barrels over
+      if (e.type === 'arrow.hit' && e.prop && (e.prop.kind === 'barrel') && !e.prop.tip && !e.prop.broken) {   // arrows knock wooden barrels over
         const l = Math.hypot(e.vx, e.vy) || 1; tip(e.prop, e.vx / l, e.vy / l, T.arrowTip);
-      } else if (e.type === 'hit' && e.prop?.tip && speedOf(e.prop) < 1.5) {   // and give lying ones a nudge
+      } else if (e.type === 'arrow.hit' && e.prop?.tip && speedOf(e.prop) < 1.5) {   // and give lying ones a nudge
         const l = Math.hypot(e.vx, e.vy) || 1; e.prop.vx += e.vx / l * T.arrowTip; e.prop.vy += e.vy / l * T.arrowTip; setAxis(e.prop);
       }
     }
