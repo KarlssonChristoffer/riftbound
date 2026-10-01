@@ -13,7 +13,7 @@
   #hud b { color: var(--key); font-weight: 600; }
   #hud .row { white-space: nowrap; }
   #hud .dim { color: var(--dim); }
-  #help { position: fixed; right: 10px; top: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; pointer-events: none; }
+  #help { position: fixed; right: 10px; bottom: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; pointer-events: none; }
   #help td { padding: 0 8px 0 0; vertical-align: top; }
   #help td:first-child { color: var(--key); white-space: nowrap; }
   #load { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 14px; }
@@ -32,7 +32,7 @@
     <tr><td>Z / X</td><td>rotate camera · or drag with right mouse</td></tr>
     <tr><td>Wheel</td><td>zoom 1x / 2x · Home: reset rotation</td></tr>
     <tr><td>1</td><td>rotation: free / 22.5° steps / 90° steps</td></tr>
-    <tr><td>2</td><td>ground texture: nearest / smooth-pixel</td></tr>
+    <tr><td>2</td><td>ground texture: auto (crisp at rest, smooth while turning) / nearest / smooth-pixel</td></tr>
     <tr><td>3</td><td>prop outlines + seams on / off</td></tr>
     <tr><td>4</td><td>props: live 3D / pre-rendered 16 angles</td></tr>
     <tr><td>5</td><td>banded light on / off</td></tr>

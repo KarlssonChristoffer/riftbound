@@ -109,10 +109,22 @@ const hero = G.card({tex: charTex, w: FW, h: FH, px: PIV[0], py: PIV[1], type: 4
 const arrowLines = G.lines(128);
 
 // ---------------------------------------------------------------- toggles
-const opt = {smooth: Q.get('smooth') === '1', outline: true, banded: true, shadows: true, lantern: Q.get('lantern') === '1', debug: +(Q.get('debug') || 0), help: true};
+// ground sampling: 'auto' (the default) = crisp nearest pixels while the camera is still, smooth-pixel while it turns
+// (nearest crawls along diagonals under rotation); the two blend, so stopping doesn't pop
+const SAMPLING = ['auto', 'nearest', 'smooth'];
+const opt = {sampling: Q.get('smooth') === '1' ? 'smooth' : SAMPLING.includes(Q.get('sampling')) ? Q.get('sampling') : 'auto',
+  outline: true, banded: true, shadows: true, lantern: Q.get('lantern') === '1', debug: +(Q.get('debug') || 0), help: true};
 const DEBUG = ['final', 'albedo', 'normals', 'depth', 'object ids', 'sun shadow', 'light only'];
+const SMOOTH_IN = 12, SMOOTH_OUT = 3, TURN_HOLD = .12;   // fade rates (1/s): in fast when you start turning, out gently after
+let turnT = 0;
+function stepSampling(dt, turned) {
+  turnT = turned ? TURN_HOLD : Math.max(0, turnT - dt);
+  const want = opt.sampling === 'smooth' ? 1 : opt.sampling === 'nearest' ? 0 : turnT > 0 ? 1 : 0, u = G.U.smooth;
+  u.value = want > u.value ? Math.min(want, u.value + dt * SMOOTH_IN) : Math.max(want, u.value - dt * SMOOTH_OUT);
+}
 function applyOpts() {
-  G.U.smooth.value = opt.smooth ? 1 : 0; G.compU.uOutline.value = opt.outline ? 1 : 0; G.compU.uBanded.value = opt.banded ? 1 : 0;
+  if (opt.sampling !== 'auto') G.U.smooth.value = opt.sampling === 'smooth' ? 1 : 0;
+  G.compU.uOutline.value = opt.outline ? 1 : 0; G.compU.uBanded.value = opt.banded ? 1 : 0;
   G.compU.uShadowOn.value = opt.shadows ? 1 : 0; G.compU.uDebug.value = opt.debug; $('#help').classList.toggle('hidden', !opt.help);
 }
 applyOpts();
@@ -200,7 +212,7 @@ addEventListener('keydown', e => {
   if (k === ' ') PL.onSpace();
   if (k === 'e') PL.onInteractKey();
   if (k === '1') snapMode = (snapMode + 1) % 3;
-  if (k === '2') opt.smooth = !opt.smooth;
+  if (k === '2') opt.sampling = SAMPLING[(SAMPLING.indexOf(opt.sampling) + 1) % SAMPLING.length];
   if (k === '3') opt.outline = !opt.outline;
   if (k === '4') { propMode = propMode === 'live' ? 'yaw' : 'live'; world.setMode(propMode); }
   if (k === '5') opt.banded = !opt.banded;
@@ -233,7 +245,8 @@ function step(dt) {
   const rot = (keys.has('x') ? 1 : 0) - (keys.has('z') ? 1 : 0);
   let ny = yaw + rot * ROT_SPEED * dt + dragYaw; dragYaw = 0;
   if (!rot && !dragging && snapMode) { const s = SNAP[snapMode], tg = Math.round(ny / s) * s, d = tg - ny; ny = Math.abs(d) < .0015 ? tg : ny + d * (1 - Math.exp(-dt * 14)); }
-  setYaw(ny); syncPlateaus();
+  const y0 = yaw; setYaw(ny); syncPlateaus();
+  stepSampling(dt, yaw !== y0);
   PL.step(dt);
   stepArrows(dt);
   events.length = 0;
@@ -270,7 +283,7 @@ function hud() {
     `<div class="row"><b>HD-2D render test</b> · ${b.name} · ${TIMES[timeI]}${opt.lantern ? ' · lantern' : ''}</div>`,
     `<div class="row">camera <b>${deg.toFixed(1)}°</b> (${SNAP_NAME[snapMode]}) · zoom ${zoom}x · view <b>${DEBUG[opt.debug]}</b></div>`,
     `<div class="row">props <b>${propMode === 'live' ? 'live 3D' : '16-angle sprites'}</b> <span class="dim">(${world.liveCount} live, ${world.yawCount} with angles, ${world.cardCount} painted cards)</span></div>`,
-    `<div class="row">ground <b>${opt.smooth ? 'smooth-pixel' : 'nearest'}</b> · outlines <b>${opt.outline ? 'on' : 'off'}</b> · bands <b>${opt.banded ? 'on' : 'off'}</b> · shadows <b>${opt.shadows ? 'on' : 'off'}</b></div>`,
+    `<div class="row">ground <b>${opt.sampling === 'auto' ? `auto (${G.U.smooth.value > .5 ? 'smooth, turning' : 'crisp'})` : opt.sampling === 'smooth' ? 'smooth-pixel' : 'nearest'}</b> · outlines <b>${opt.outline ? 'on' : 'off'}</b> · bands <b>${opt.banded ? 'on' : 'off'}</b> · shadows <b>${opt.shadows ? 'on' : 'off'}</b></div>`,
     `<div class="row dim">${fps.toFixed(0)} fps · ${G.stats.ms.toFixed(1)} ms CPU per frame · ${G.stats.calls} draw calls</div>`,
     `<div class="row dim">player ${toWorld(P.x, P.y).map(v => v.toFixed(1)).join(', ')} · ${DIRS[P.face]} on screen · ${P.frame}</div>`,
   ].join('');

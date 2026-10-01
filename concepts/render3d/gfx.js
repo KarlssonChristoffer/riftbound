@@ -75,18 +75,15 @@ void main() {
 const SURF_FS = HEAD + OUTS + `
 in vec2 vUv; in vec3 vN;
 uniform sampler2D uTex, uEm; uniform vec2 uTexSize; uniform float uSmooth, uHasEm, uType, uObj;
-vec2 pxUv(vec2 uv) {
-  vec2 t = uv * uTexSize;
-  if (uSmooth < .5) return (floor(t) + .5) / uTexSize;                 // nearest (texel centre under bilinear)
-  vec2 s = floor(t + .5), d = max(fwidth(t), vec2(1e-4));
-  return (s + clamp((t - s) / d, -.5, .5)) / uTexSize;                 // sharp edges, blended only across texel seams
-}
+// uSmooth 0..1 blends the two samplings, so the host can fade between them (crisp at rest, smooth while turning)
 void main() {
-  vec2 uv = pxUv(vUv);
-  vec4 c = texture(uTex, uv);
+  vec2 t = vUv * uTexSize, s = floor(t + .5), d = max(fwidth(t), vec2(1e-4));
+  vec2 uvN = (floor(t) + .5) / uTexSize;                               // nearest (texel centre under bilinear)
+  vec2 uvS = (s + clamp((t - s) / d, -.5, .5)) / uTexSize;            // smooth-pixel: sharp, blended only across texel seams
+  vec4 c = uSmooth <= 0. ? texture(uTex, uvN) : uSmooth >= 1. ? texture(uTex, uvS) : mix(texture(uTex, uvN), texture(uTex, uvS), uSmooth);
   if (c.a < .5) discard;
   vec3 em = vec3(0.);
-  if (uHasEm > .5) { vec4 e = texture(uEm, uv); em = e.rgb * e.a; }
+  if (uHasEm > .5) { vec4 e = mix(texture(uEm, uvN), texture(uEm, uvS), uSmooth); em = e.rgb * e.a; }
   o0 = vec4(c.rgb, float(int(uType) * 4) / 255.);
   o1 = vec4(normalize(vN), uObj);
   o2 = vec4(em, 0.);
