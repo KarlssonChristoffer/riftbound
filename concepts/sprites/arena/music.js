@@ -35,16 +35,16 @@ const HUNGARIAN = [0, 2, 3, 6, 7, 8, 11];   // minor with a raised 4th and 7th: 
 // chord degrees (0 = i); each progression is 4 chords x 2 bars
 const STYLES = {
   ruins: {root: 50, scale: DORIAN, bpm: 84, progs: [[0, 3, 6, 0], [0, 6, 3, 4], [0, 4, 6, 3], [5, 3, 0, 6]],
-    pad: {wave: 'sawtooth', cut: 950, det: 7, oct: 0, g: .038}, arp: {inst: 'pluck', oct: 1, pat: 'rise'},
+    pad: {wave: 'sawtooth', cut: 700, det: 3, oct: 0, g: .026}, arp: {inst: 'pluck', oct: 1, pat: 'rise'},
     mel: {inst: 'flute', oct: 2, every: 2}, bass: {oct: -1}, drums: 'folk', level: 1},
   ember: {root: 50, scale: PHRYGIAN, bpm: 96, progs: [[0, 1, 0, 6], [0, 5, 1, 0], [0, 6, 5, 1]],
-    pad: {wave: 'sawtooth', cut: 620, det: 11, oct: -1, g: .04}, arp: {inst: 'pluck', oct: 0, pat: 'ostinato'},
+    pad: {wave: 'sawtooth', cut: 480, det: 4, oct: -1, g: .028}, arp: {inst: 'pluck', oct: 0, pat: 'ostinato'},
     mel: {inst: 'pluck', oct: 1, every: 2}, bass: {oct: -1}, drums: 'war', level: 1},
   frost: {root: 52, scale: AEOLIAN, bpm: 72, progs: [[0, 5, 2, 6], [0, 3, 5, 4], [5, 2, 6, 0]],
-    pad: {wave: 'triangle', cut: 2400, det: 5, oct: 1, g: .05}, arp: {inst: 'glock', oct: 1, pat: 'sparse'},
+    pad: {wave: 'triangle', cut: 1600, det: 3, oct: 1, g: .034}, arp: {inst: 'glock', oct: 1, pat: 'sparse'},
     mel: {inst: 'bell', oct: 1, every: 2}, bass: {oct: -1}, drums: 'soft', level: .9},
   rift: {root: 45, scale: HUNGARIAN, bpm: 66, progs: [[0, 1, 0, 5], [0, 3, 1, 0], [0, 5, 3, 1]],
-    pad: {wave: 'sawtooth', cut: 720, det: 16, oct: 0, g: .036}, arp: {inst: 'glock', oct: 1, pat: 'sparse'},
+    pad: {wave: 'sawtooth', cut: 560, det: 6, oct: 0, g: .026}, arp: {inst: 'glock', oct: 1, pat: 'sparse'},
     mel: {inst: 'flute', oct: 1, every: 3}, bass: {oct: -1}, drums: 'ritual', level: .95},
 };
 // arp: [step (16ths), chord-tone index]; tones = [root, 3rd, 5th, root+12, 3rd+12, 5th+12]
@@ -158,10 +158,10 @@ export function createMusic(ac, dest, {send = null, enabled = true, offline = fa
   // ---- graph: layers -> music bus -> dest (+ reverb send) ----
   const bus = ac.createGain(); bus.gain.value = enabled ? .0001 : 0;
   const vol = ac.createGain(); vol.gain.value = 1; bus.connect(vol); vol.connect(dest);   // the user's music volume (settings)
-  if (send) { const s = ac.createGain(); s.gain.value = .45; vol.connect(s); s.connect(send); }
+  if (send) { const s = ac.createGain(); s.gain.value = .25; vol.connect(s); s.connect(send); }
   const LAYERS = ['pad', 'arp', 'bass', 'mel', 'light', 'drums', 'sting'];
   const lay = {}; for (const k of LAYERS) { const g = ac.createGain(); g.gain.value = k === 'pad' || k === 'sting' ? 1 : 0; g.connect(bus); lay[k] = {g, on: k === 'pad' || k === 'sting'}; }
-  const MASTER = .25;   // music sits under the SFX and ALONGSIDE the beds (explore ≈ -26 dB RMS, beds -33..-41)
+  const MASTER = .1;   // Phase 4 mix: music sits well under the SFX (explore ≈ -34 LUFS-M in game; idle pad quieter still)
 
   // ---- state ----
   let style = STYLES.ruins, styleId = 'ruins', pending = null, time = 'day';
@@ -271,7 +271,7 @@ export function createMusic(ac, dest, {send = null, enabled = true, offline = fa
       lay[k].on = w;
       lay[k].g.gain.setTargetAtTime(w ? 1 : 0, t, w ? .08 : .6);
     }
-    const lv = MASTER * style.level * (night() ? .72 : dusk() ? .9 : 1) * (on ? 1 : 0);
+    const lv = MASTER * style.level * (night() ? .72 : dusk() ? .9 : 1) * (I < .2 ? .6 : 1) * (on ? 1 : 0);   // rest (pad only): -4.4 dB
     bus.gain.setTargetAtTime(Math.max(.0001, lv), t, on ? .8 : .5);
   }
 

@@ -3,6 +3,8 @@
 // CONTRACT (the host, arena.html, calls exactly these):
 //   export function createAudio(ctx, host) -> AU
 //   host = {arrows, props, combat, wind}       // each a value OR a getter () => value (the host may create them later).
+//                                              //   optional propsVersion: bump it when props are added / removed / change kind
+//                                              //   (sound-making props are cached in short lists; also refreshed once a second)
 //                                              //   wind (arena/wind.js): wind.gust 0..1 drives the beds' gusts; wind.on false = own random gusts
 //                                              //   Read only: new arrows = shots (arrow.ab 'multi'|'boom'|'rain'|'pierce'),
 //                                              //   arrows turning .stuck = thuds, brutes landing a hop = stomps,
@@ -34,6 +36,12 @@
 
 import {STREAM, elev as elevOf} from './layout.js';
 import {createMusic} from './music.js';   // the adaptive score, layered with the beds (U toggles it)
+// Phase 2 (docs/AUDIO.md): the Sound Forge runtime. Forge sounds baked in a Worker at load play first; this file's
+// synth below is the FALLBACK for anything not baked yet (or with ?forge=0, to compare).
+import {createEngine} from '../../../audio/runtime/engine.js';
+import {createBakery} from '../../../audio/runtime/bakery.js';
+import {createDirector} from '../../../audio/runtime/director.js';
+import {EVENTS, AMBIENCE} from '../../../audio/runtime/events.js';
 
 const R = Math.random, RR = (a, b) => a + R() * (b - a), J = p => 1 + (R() * 2 - 1) * p;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -43,7 +51,7 @@ const MAXV = 30;   // simultaneous SFX voices (priority 2 / 3 sounds may go 6 / 
 // ======================================================================================================================
 // ENGINE: one per AudioContext (live, or offline for level tests)
 // ======================================================================================================================
-function makeEngine(ac) {
+function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (the forge engine's master), else the speakers
   const sr = ac.sampleRate;
   // ---- noise buffers, rendered once; loops are cross-faded at the seam so filtered beds never click ----
   function noiseBuf(sec, kind) {
@@ -82,7 +90,7 @@ function makeEngine(ac) {
   const clip = ac.createWaveShaper(), CN = 2049, curve = new Float32Array(CN);
   for (let i = 0; i < CN; i++) { const x = i / (CN - 1) * 2 - 1, a = Math.abs(x); curve[i] = Math.sign(x) * (a < .6 ? a : .6 + .32 * Math.tanh((a - .6) / .32)); }
   clip.curve = curve;
-  out.connect(comp); comp.connect(clip); clip.connect(ac.destination);
+  out.connect(comp); comp.connect(clip); clip.connect(dest || ac.destination);
   const sfx = ac.createGain(); sfx.gain.value = .85; sfx.connect(out);
   const amb = ac.createGain(); amb.gain.value = 1; amb.connect(out);
   const conv = ac.createConvolver(); conv.buffer = impulse(1.7);
@@ -592,7 +600,7 @@ export function createAudio(ctx, host = {}) {
   const AC = typeof window !== 'undefined' ? (window.AudioContext || window.webkitAudioContext) : null;
   const q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
   const disabled = !AC || !!q.get('sheet') || q.get('audio') === '0';
-  let E = null, muted = false, bed = null, bedId = null, creak = null, roll = null, prevState = 'idle', prevK = 0, climbT = 0, musicOn = true;
+  let E = null, muted = false, bed = null, bedId = null, bedMuted = false, creak = null, roll = null, prevState = 'idle', prevK = 0, climbT = 0, musicOn = true;
   let nZones = 0, nTraps = 0;
   // settings (pause menu > Sound): slider values 0..1, mapped to gain as v² (perceptually even steps)
   const VOL = {master: 1, music: 1, sfx: 1, amb: 1}, MODES = {adaptive: null, explore: .3, combat: .85};
@@ -609,15 +617,26 @@ export function createAudio(ctx, host = {}) {
     update, toggle, toggleMusic, setVolume, setMusicMode, play};
   if (typeof window !== 'undefined') window.__audio = AU;   // debug handle
 
+  // the forge runtime starts at LOAD (the context stays suspended until a gesture) so banks bake before you play
+  let RT = null;   // {ac, EN (engine), B (bakery), D (director)}
+  const forgeOff = q.get('forge') === '0';
+  if (!disabled && !forgeOff) {
+    try {
+      const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac), B = createBakery(ac), D = createDirector(EN, B, {EVENTS, AMBIENCE});
+      try { EN.prepareReverbs?.(); } catch (e) {}
+      D.prefetch({biome: 'ruins'});
+      RT = {ac, EN, B, D}; AU.forge = RT;
+    } catch (e) { console.warn('audio: forge runtime unavailable, using the built-in synth', e); RT = null; }
+  }
   function unlock() {
     if (disabled) return;
     try {
       if (!E) {
-        E = makeEngine(new AC({latencyHint: 'interactive'}));
-        try { E.music = createMusic(E.ac, E.out, {send: E.revIn, enabled: musicOn}); } catch (e) { console.warn('audio: music unavailable', e); }
+        E = makeEngine(RT ? RT.ac : new AC({latencyHint: 'interactive'}), RT ? RT.EN.bus('master') : null);
+        try { E.music = createMusic(E.ac, RT ? RT.EN.bus('music') : E.out, {send: E.revIn, enabled: musicOn}); } catch (e) { console.warn('audio: music unavailable', e); }
         applyVolumes();
       }
-      if (!muted && E.ac.state !== 'running') E.ac.resume().catch(() => {});
+      if (!muted && E.ac.state !== 'running') { if (RT) RT.EN.unlock?.(); E.ac.resume().catch(() => {}); }
     } catch (e) { console.warn('audio: unavailable', e); }
   }
   if (!disabled && typeof addEventListener === 'function') {
@@ -634,7 +653,11 @@ export function createAudio(ctx, host = {}) {
   function applyVolumes() {
     if (!E) return;
     const t = E.ac.currentTime, g = v => v * v;
-    E.out.gain.setTargetAtTime(.9 * g(VOL.master), t, .03);
+    const db = v => 20 * Math.log10(Math.max(1e-4, v));
+    if (RT) {   // the forge engine owns master / sfx / ambience; the legacy chain feeds its master at a fixed level
+      E.out.gain.setTargetAtTime(.9, t, .03);
+      RT.EN.setBusDb('master', db(g(VOL.master))); RT.EN.setBusDb('sfx', db(g(VOL.sfx))); RT.EN.setBusDb('amb', db(g(VOL.amb)));
+    } else E.out.gain.setTargetAtTime(.9 * g(VOL.master), t, .03);
     E.sfx.gain.setTargetAtTime(.85 * g(VOL.sfx), t, .03);
     E.lv.amb = g(VOL.amb); E.amb.gain.setTargetAtTime(E.lv.amb, t, .03);
     E.music?.setVolume(g(VOL.music)); E.music?.force(MODES[musicMode]);
@@ -650,14 +673,37 @@ export function createAudio(ctx, host = {}) {
   let L = {x: 0, y: 0, cam: null};   // the listener (player) for positions
   // pan by the sound's screen x. Optional player.screenX(x, y) -> view px (a host whose camera turns, e.g. the 3D page);
   // without it: world x against the camera (the arena), so the arena sounds exactly as before
+  // off: metres beyond the edge of the VIEW (0 = on screen). Phase 3: what you hear should be on screen, so the director
+  // fades and culls sounds by how far off-screen their source is (docs/AUDIO.md §3.4).
   function at(x, y) {
-    const VW = ctx.VW || 480, PPM = ctx.PPM || 16;
+    const VW = ctx.VW || 480, VH = ctx.VH || 270, PPM = ctx.PPM || 16, PPMY = ctx.PPMY || PPM;
     const dx = L.screenX ? L.screenX(x, y) - VW / 2 : x * PPM - (L.cam ? L.cam.x + VW / 2 : L.x * PPM);
-    return {pan: clamp(dx / (VW / 2) * .7, -.8, .8), d: Math.hypot(x - L.x, y - L.y)};
+    const dy = L.screenX ? 0 : y * PPMY - (L.cam ? L.cam.y + VH / 2 : L.y * PPMY);
+    const off = Math.max(0, (Math.abs(dx) - VW / 2) / PPM, (Math.abs(dy) - VH / 2) / PPMY);
+    return {pan: clamp(dx / (VW / 2) * .7, -.8, .8), d: Math.hypot(x - L.x, y - L.y), off: +off.toFixed(2)};
   }
-  function fire(name, x, y, o = {}) { try { SFX[name](E, {...at(x ?? L.x, y ?? L.y), ...o}); } catch (e) { console.warn('audio:', name, e); } }
+  function fire(name, x, y, o = {}) {
+    const px = x ?? L.x, py = y ?? L.y, pos = at(px, py);
+    if (RT) { try { if (RT.D.post(name, {...pos, dist: pos.d, x: px, y: py, ...o})) return; } catch (e) { console.warn('audio: forge', name, e); } }
+    try { SFX[name](E, {...pos, ...o}); } catch (e) { console.warn('audio:', name, e); }   // legacy synth (not baked yet / ?forge=0)
+  }
   function play(name, o = {}) { unlock(); if (E && SFX[name]) fire(name, L.x, L.y, {surf: bedId || 'ruins', ...o}); }
 
+  // Props that can make sound (torches / braziers, brutes, barrels) are collected into short lists, rebuilt when the
+  // props array or host.propsVersion changes, and once a second as a safety net: no per-frame walk over every prop
+  // (docs/ARCHITECTURE.md rule). Every frame only touches these few.
+  const C = {props: null, ver: -1, tick: 0, fires: [], brutes: [], rollers: [], sources: []};
+  function candidates() {
+    const props = get(host.props) || [], ver = get(host.propsVersion) ?? props.length;
+    if (props === C.props && ver === C.ver && (++C.tick % 60)) return C;
+    C.props = props; C.ver = ver; C.tick = 0; C.fires.length = C.brutes.length = C.rollers.length = 0;
+    for (const p of props) {
+      if (p.kind === 'torch' || p.kind === 'brazier') C.fires.push(p);
+      else if (p.kind === 'brute') C.brutes.push(p);
+      if (p.tip !== undefined || /barrel/.test(p.kind || '')) C.rollers.push(p);
+    }
+    return C;
+  }
   function update(dt, pl, events) {
     const arrows = get(host.arrows) || [];
     if (!E || muted || E.ac.state !== 'running') {   // not started (no gesture yet / sheet mode) or muted: just keep up
@@ -675,12 +721,21 @@ export function createAudio(ctx, host = {}) {
     const t = E.ac.currentTime, surf = SURF[pl.biome] || 'ruins';
     L = {x: pl.x, y: pl.y, cam: pl.cam, screenX: pl.screenX};
     // ---- ambient bed + stream ----
-    if (pl.biome !== bedId) { bed?.stop(t); bed = makeBed(E, SURF[pl.biome] || 'ruins', t); bedId = pl.biome;
+    if (pl.biome !== bedId) { bed?.stop(t); bed = makeBed(E, SURF[pl.biome] || 'ruins', t); bedId = pl.biome; bedMuted = false;
       E.revOut.gain.setTargetAtTime({ruins: .22, ember: .15, frost: .3, rift: .45}[bedId] ?? .22, t, .5); }
     const sx = STREAM.cx(pl.y), sd = Math.max(0, Math.abs(pl.x - sx) - STREAM.w(pl.y) / 2);
     const prox = clamp(1 - sd / 18, 0, 1) ** 2;
     let W = null; try { W = get(host.wind); } catch (e) {}   // the getter may run before wind.js exists
-    bed.update({prox, sPan: at(sx, pl.y).pan, time: pl.time || 'day', gust: W && W.on !== false && typeof W.gust === 'number' ? W.gust : null}, t);
+    const gust = W && W.on !== false && typeof W.gust === 'number' ? W.gust : null;
+    bed.update({prox, sPan: at(sx, pl.y).pan, time: pl.time || 'day', gust}, t);
+    if (RT) {   // forge ambience (beds, spots, the stream emitter); the legacy bed fades out once forge beds play
+      // visible sound sources in the world (torches / braziers): the director gives each on-screen one an emitter
+      const cand = candidates(), sources = cand.sources; sources.length = 0;
+      for (const p of cand.fires) if (!p.broken) { const a = at(p.x, p.y); if (a.off < 3) sources.push({kind: p.kind, id: p, x: p.x, y: p.y, ...a}); }
+      RT.D.ambience.update({biome: pl.biome, time: pl.time || 'day', listener: {x: pl.x, y: pl.y}, stream: {prox, pan: at(sx, pl.y).pan}, gust, dt, sources, combat: E.music?.state?.I ?? 0});
+      const fb = (RT.D.ambience.state?.beds?.length || 0) > 0;
+      if (fb !== bedMuted) { bed.out.gain.cancelScheduledValues(t); bed.out.gain.setTargetAtTime(fb ? 0 : 1, t, .8); bedMuted = fb; }
+    }
     // ---- player state transitions ----
     const st = pl.state, landed = st === 'land' && prevState !== 'land';
     const bigDrop = events.some(e => e.type === 'land' && e.big === 3), speed = Math.hypot(pl.vx || 0, pl.vy || 0);
@@ -692,7 +747,7 @@ export function createAudio(ctx, host = {}) {
     const drawing = st === 'draw' && pl.aim;
     if (drawing) {
       const k = Math.min(1, (pl.t || 0) * 1.5);
-      if (!creak) { creak = makeCreak(E); prevK = k; }
+      if (!creak) { creak = (RT && RT.D.makeCreak?.()) || makeCreak(E); prevK = k; }
       creak.set(k, dt > 0 ? (k - prevK) / dt : 0, t, dt); prevK = k;
     } else if (creak) { creak.stop(t); creak = null; }
     prevState = st;
@@ -754,14 +809,14 @@ export function createAudio(ctx, host = {}) {
       nZones = C.zones?.length || 0; nTraps = C.traps?.length || 0;
     }
     let stomps = 0;
-    for (const p of get(host.props) || []) if (p.kind === 'brute') {
+    for (const p of candidates().brutes) {
       const was = air.get(p); air.set(p, !!p.air);
       if (was && !p.air && !p.broken) { fire('stomp', p.x, p.y, {surf}); stomps++; }
     }
     // ---- rolling barrels (props3d.js: p.tip set and moving) -> one rumble voice following the fastest nearby one ----
     let rb = null, rs = 0;
-    for (const p of get(host.props) || []) if (p.tip && !p.broken) { const sp = Math.hypot(p.vx || 0, p.vy || 0), a = at(p.x, p.y); if (sp > .3 && a.d < 25 && sp / (1 + a.d * .1) > rs) { rs = sp / (1 + a.d * .1); rb = {sp, ...a}; } }
-    if (rb) { if (!roll) roll = makeRoll(E); roll.set(rb.sp, rb.pan, rb.d, t, dt); }
+    for (const p of candidates().rollers) if (p.tip && !p.broken) { const sp = Math.hypot(p.vx || 0, p.vy || 0), a = at(p.x, p.y); if (sp > .3 && a.d < 25 && sp / (1 + a.d * .1) > rs) { rs = sp / (1 + a.d * .1); rb = {sp, ...a}; } }
+    if (rb) { if (!roll) roll = (RT && RT.D.makeRoll?.()) || makeRoll(E); roll.set(rb.sp, rb.pan, rb.d, t, dt, rb.off); }
     else if (roll) { roll.stop(t); roll = null; }
     // ---- music: follows the biome, time of day and how intense play is ----
     E.music?.update(t, {biome: pl.biome, time: pl.time || 'day', speed, drawing, events, stomps});
