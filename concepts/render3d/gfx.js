@@ -68,21 +68,35 @@ const SURF_VS = HEAD + `
 in vec3 position; in vec3 normal; in vec2 uv;
 uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
 uniform float uPlanar; uniform vec2 uWorld;
-out vec2 vUv; out vec3 vN;
+out vec2 vUv; out vec3 vN; out vec3 vW;
 void main() {
   vec4 w = modelMatrix * vec4(position, 1.);
   vUv = uPlanar > .5 ? w.xz / uWorld : uv;
-  vN = mat3(modelMatrix) * normal;
+  vN = mat3(modelMatrix) * normal; vW = w.xyz;
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
 const SURF_FS = HEAD + OUTS + `
-in vec2 vUv; in vec3 vN;
+in vec2 vUv; in vec3 vN; in vec3 vW;
 uniform sampler2D uTex, uEm; uniform vec2 uTexSize; uniform float uSmooth, uHasEm, uType, uObj;
+// steep ground (the ravine wall): a cliff texture (rock strata, the waterfall) by world x (z on east / west faces) and
+// depth below the bank, 1 texel = 1 px at yaw 0 (uPx = PPM, PPMH), repeating; drawn as a textured face (type 5)
+uniform sampler2D uCliff; uniform float uHasCliff, uCliffOff; uniform vec2 uCliffSize, uPx;
 // uSmooth 0..1 blends the two samplings, so the host can fade between them (crisp at rest, smooth while turning)
 void main() {
-  vec2 t = vUv * uTexSize, s = floor(t + .5), d = max(fwidth(t), vec2(1e-4));
+  vec2 t = vUv * uTexSize, s = floor(t + .5), d = max(fwidth(t), vec2(1e-4));   // (derivatives before any branch)
   vec2 uvN = (floor(t) + .5) / uTexSize;                               // nearest (texel centre under bilinear)
   vec2 uvS = (s + clamp((t - s) / d, -.5, .5)) / uTexSize;            // smooth-pixel: sharp, blended only across texel seams
+  // the triangle's own plane (the grid's smooth normals blend a 0.25 m cliff cell into its flat neighbours)
+  vec3 fn = normalize(cross(dFdx(vW), dFdy(vW))); if (dot(fn, vN) < 0.) fn = -fn;
+  if (uHasCliff > .5 && abs(fn.y) < .45) {
+    vec3 n = fn;
+    float along = abs(n.z) >= abs(n.x) ? vW.x : vW.z;
+    vec2 ct = vec2((along + uCliffOff) * uPx.x, -vW.y * uPx.y);
+    vec4 cc = texture(uCliff, (floor(ct) + .5) / uCliffSize);
+    o0 = vec4(cc.rgb, float(5 * 4) / 255.);
+    o1 = vec4(n, uObj); o2 = vec4(cc.a < .995 ? cc.rgb : vec3(0.), 0.);   // alpha 250: a glowing fall (lava)
+    return;
+  }
   vec4 c = uSmooth <= 0. ? texture(uTex, uvN) : uSmooth >= 1. ? texture(uTex, uvS) : mix(texture(uTex, uvN), texture(uTex, uvS), uSmooth);
   if (c.a < .5) discard;
   vec3 em = vec3(0.);
@@ -121,6 +135,7 @@ const CARD_FS = HEAD + OUTS + `
 in vec2 vUv; in vec2 vC; in vec2 vSp;
 uniform sampler2D uTex, uNrm, uEm; uniform vec4 uNrmRect, uRect; uniform vec2 uSize;
 uniform float uHasNrm, uHasEm, uType, uObj, uCamYaw, uFlash, uHasBend, uSway;
+uniform sampler2D uMetal; uniform float uHasMetal;   // the shiny-armour mask (R: 255 steel, 128 gold), aligned with uTex
 uniform float uBend[8];   // sway weight at height fractions 0 (bottom) .. 1 (top), 8 samples (the arena's per-row flex)
 void main() {
   vec2 C = vC, uv = vUv;
@@ -143,7 +158,9 @@ void main() {
   }
   o0 = vec4(c.rgb, float(int(uType) * 4) / 255.);
   o1 = vec4(n, uObj);
-  o2 = vec4(e.rgb * e.a + vec3(uFlash), 0.);
+  float metal = 0.;   // the character's metal (E.w for type 4): 2 steel, 1 gold
+  if (uHasMetal > .5) { float m = texture(uMetal, uv).r; metal = m > .7 ? 2. : m > .3 ? 1. : 0.; }
+  o2 = vec4(e.rgb * e.a + vec3(uFlash), metal);
 }`;
 const LINE_VS = HEAD + `
 in vec3 position; in vec4 color;   // a = emissive (1) or lit (0)
@@ -247,6 +264,9 @@ uniform vec3 uBg, uAmb, uSunDir, uShadowC, uFill, uGrade, uXCol;
 uniform float uShadowA, uShadowOn, uSunK, uBanded, uOutline, uGradeK, uEmin, uShadowTexel;
 uniform vec4 uFog;
 uniform vec3 uPlayer;   // the player's chest (receives sun shadow as one object: no self-shadow from its own card)
+// shiny armour: toward the viewer (the sprite camera, 20 deg pitch, turned with the yaw), the sun's glint colour / strength
+uniform vec3 uView, uSunC; uniform float uSunStr;
+float q3(float v) { return v < .12 ? 0. : v < .4 ? .35 : v < .75 ? .7 : 1.; }   // crisp glint steps
 uniform int uNL; uniform vec4 uLP[${NL}]; uniform vec4 uLC[${NL}];
 uniform int uNH; uniform vec4 uHalo[${NL}]; uniform vec3 uHaloC[${NL}];
 uniform int uDebug;
@@ -256,6 +276,8 @@ uniform sampler2D tGround, tPre, tEmitL, tAdd, tFront; uniform vec4 uLay; unifor
 // distort: where alpha is set, this pixel shows the scene from (x + 128 - R*255, y + G*255 - 128) (heat haze). The screen
 // layers after the light (post) stay put.
 uniform sampler2D tDistort; uniform float uLayD;
+// point-light occlusion: the top-down height map of the solid 3D things (depth from above: bigger = lower)
+uniform sampler2D tH; uniform mat4 uHPV; uniform float uPtShadow, uHBias;
 out vec4 oc;
 vec4 lay(sampler2D t, ivec2 p) { return texelFetch(t, ivec2(p.x, int(uRes.y) - 1 - p.y), 0); }
 vec3 post(vec3 col, ivec2 ip) {
@@ -270,6 +292,21 @@ float sunShadow(vec3 P, vec3 N) {
   vec4 lc = uLightPV * vec4(P + N * .06, 1.); vec3 sc = lc.xyz / lc.w * .5 + .5;
   if (any(lessThan(sc, vec3(0.))) || any(greaterThan(sc, vec3(1.)))) return 0.;
   return sc.z - .0006 > texture(tS, sc.xy).r ? 1. : 0.;
+}
+// 1 when something solid stands between S and the light: march the height map (0.15 m steps, stopping 0.25 m short
+// of the light, so a flame on a wall top or in a bracket isn't blocked by its own mount). A wall stops a torch behind it.
+float ptBlock(vec3 S, vec3 L) {
+  vec3 d = L - S; float len = length(d), end = len - .25;
+  if (end < .15) return 0.;
+  float n = min(48., ceil(end / .15));
+  vec3 a = (uHPV * vec4(S, 1.)).xyz * .5 + .5, b = (uHPV * vec4(S + d * (end / len), 1.)).xyz * .5 + .5;
+  for (int k = 1; k <= 48; k++) {
+    float t = float(k) / n; if (t > 1.) break;
+    vec3 c = mix(a, b, t);
+    if (c.x < 0. || c.y < 0. || c.x > 1. || c.y > 1.) continue;
+    if (c.z - uHBias > texture(tH, c.xy).r) return 1.;
+  }
+  return 0.;
 }
 void main() {
   ivec2 ip0 = ivec2(gl_FragCoord.xy), ip = ip0;
@@ -308,9 +345,11 @@ void main() {
 
   // ---- sun shadow, tinted toward the mood's shadow colour (the arena lays a tinted mask over the ground)
   float sh = 0.;
-  if (uShadowA > 0.) {
-    if (type == 5 && dot(N, uSunDir) < .03) sh = 1.;   // a cliff face turned away from the sun is in shade (the arena's rule)
-    else if (type == 2 && dot(N, uSunDir) < .08) sh = 0.;   // prop faces turned away: their ramp tone already shades them
+  // a cliff face turned away from the sun (plateau, ravine wall) is in SHADE, not in a cast shadow: the arena multiplies
+  // its light by FACE_SHADE (.62 by day, .8 at night) instead of tinting it toward the shadow colour (too dark, too blue)
+  bool faceAway = type == 5 && dot(N, uSunDir) < .03;
+  if (uShadowA > 0. && !faceAway) {
+    if (type == 2 && dot(N, uSunDir) < .08) sh = 0.;   // prop faces turned away: their ramp tone already shades them
     else if (uShadowOn > .5) {
       if (type == 4) sh = sunShadow(uPlayer + uSunDir * .5, vec3(0.)) * .75;
       else if (type != 3 && type != 7) sh = sunShadow(P, N);   // cards would shadow themselves through their own sun card
@@ -327,7 +366,10 @@ void main() {
     float t2 = (dot(dv, dv) + .0625 * dh * dh) / (r * r); if (t2 >= 1.) continue;
     float u = 1. - t2, f = u * u, shape = 1.;
     if (shaped && uLC[i].w < .5) shape = clamp(((dot(N, normalize(lp - P)) + .25) / 1.25) / .55, 0., 1.8);
-    pts += uLC[i].rgb * f * shape;
+    vec3 li = uLC[i].rgb * f * shape;
+    // blocked by a wall / prop between (the character as one object, from its chest, like the sun shadow)
+    if (uPtShadow > 0. && max(li.r, max(li.g, li.b)) > .004) li *= 1. - uPtShadow * ptBlock(type == 4 ? uPlayer : P + N * .1, lp);
+    pts += li;
   }
   vec3 e = uAmb, L = e + pts;
   float m = max(L.r, max(L.g, L.b)), K = min(.97, max(.72, max(e.r, max(e.g, e.b))));
@@ -344,11 +386,38 @@ void main() {
     else if (type != 4) s = max(s, .9);
     L *= s;
   }
+  if (faceAway) L *= uShadowA > 0. ? .62 : .8;
   if (type == 4) { alb = mix(alb, clamp(alb * uGrade, 0., 1.), uGradeK); L += min(uFill, L * .25); }
   vec3 col = alb * L;
   vec3 emit = E0.rgb;
   if (uLayE > .5) { vec4 el = lay(tEmitL, ip); emit += el.rgb * el.a; }
   col += emit * max(vec3(1.) - L, vec3(uEmin)) * 1.15;                   // emitters add back what the light took away
+  // ---- shiny armour (the arena's armor.js shine, on the GPU): metal pixels of the character (E.w 2 steel / 1 gold) get a
+  // quantised Blinn-Phong glint from every light and the sun, and reflect the sky (up) or the lit ground ~1.5 m away
+  // (down), stronger at grazing angles (fresnel). Added on top of the light, like the arena's 'lighter'
+  if (type == 4 && E0.w > .5) {
+    vec3 tint = E0.w < 1.5 ? vec3(1., .82, .45) : vec3(.9, .95, 1.), V = uView, acc = vec3(0.);
+    for (int i = 0; i < ${NL}; i++) {
+      if (i >= uNL) break; if (uLC[i].w > .5) continue;
+      vec3 d = uLP[i].xyz - P; float r = uLP[i].w, k = 1. - dot(d, d) / (r * r); if (k <= 0.) continue;
+      float nh = max(0., dot(N, normalize(normalize(d) + V))), st = k * k * 1.8;
+      acc += (q3(pow(nh, 30.) * st) * .9 + pow(nh, 6.) * st * .12) * uLC[i].rgb * tint;
+    }
+    if (uSunStr > 0.) { float nh = max(0., dot(N, normalize(uSunDir + V))); acc += (q3(pow(nh, 40.) * uSunStr) * .9 + pow(nh, 6.) * uSunStr * .12) * uSunC * tint; }
+    vec3 R = reflect(-V, N), sky = uAmb * vec3(.55, .6, .72), env;
+    if (R.y > .25) env = sky;
+    else {   // the lit ground ~1.5 m along the reflected ray: the ambient + the pools there
+      vec2 hz = R.xz; float hl = length(hz); vec3 G2 = vec3(P.x, 0., P.z) + vec3(hz.x, 0., hz.y) / max(hl, 1e-3) * 1.5 * min(1., hl), gl = uAmb;
+      for (int i = 0; i < ${NL}; i++) {
+        if (i >= uNL) break;
+        vec3 dv = G2 - uLP[i].xyz; float r = uLP[i].w, dh = dv.y; dv.y = 0.; float t2 = (dot(dv, dv) + .0625 * dh * dh) / (r * r); if (t2 >= 1.) continue;
+        float u = 1. - t2; gl += uLC[i].rgb * u * u;
+      }
+      vec3 gc = min(gl, vec3(1.6)) * .55; env = mix(gc, sky, R.y > 0. ? .5 : 0.);
+    }
+    acc += (.25 + .75 * pow(1. - max(0., dot(N, V)), 3.)) * .6 * env * tint;
+    col += acc;
+  }
   for (int i = 0; i < ${NL}; i++) {                                       // halos at the flames
     if (i >= uNH) break;
     vec2 dp = (vec2(ip0) + .5 - uHalo[i].xy); dp.y /= .9;
@@ -387,6 +456,16 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const shadow = new THREE.WebGLRenderTarget(SM, SM, {minFilter: near, magFilter: near, depthBuffer: true,
     depthTexture: new THREE.DepthTexture(SM, SM, THREE.UnsignedIntType)});
 
+  // point-light occlusion: the solid 3D things (live meshes, the plateau; not cards) seen from straight above, as depth.
+  // Covers the Proving Grounds (62 x 30 m) + 2 m. Re-rendered only when one of them moved, appeared or vanished.
+  const HM = {x0: -2, z0: -2, w: 66, d: 34, ppm: 16, top: 20, far: 30};
+  const hmap = new THREE.WebGLRenderTarget(HM.w * HM.ppm, HM.d * HM.ppm, {minFilter: near, magFilter: near, depthBuffer: true,
+    depthTexture: new THREE.DepthTexture(HM.w * HM.ppm, HM.d * HM.ppm, THREE.UnsignedIntType)});
+  const hCam = new THREE.OrthographicCamera(-HM.w / 2, HM.w / 2, HM.d / 2, -HM.d / 2, 0, HM.far);
+  hCam.position.set(HM.x0 + HM.w / 2, HM.top, HM.z0 + HM.d / 2); hCam.up.set(0, 0, -1); hCam.lookAt(HM.x0 + HM.w / 2, 0, HM.z0 + HM.d / 2);
+  hCam.layers.set(1); hCam.updateMatrixWorld(true);   // layer 1: the casters of the height map
+  let hDirty = true;
+
   const gScene = new THREE.Scene(), sScene = new THREE.Scene(), xScene = new THREE.Scene();
   gScene.matrixWorldAutoUpdate = sScene.matrixWorldAutoUpdate = xScene.matrixWorldAutoUpdate = true;
   const camera = new THREE.Camera();
@@ -419,9 +498,11 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // ---- materials
   const meshMat = (obj, seed) => raw(MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam});
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
-  const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0}) => raw(SURF_VS, SURF_FS, {
+  const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0}) => raw(SURF_VS, SURF_FS, {
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
-    uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)}}, {side: THREE.FrontSide});
+    uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)},
+    uCliff: {value: cliff}, uHasCliff: {value: cliff ? 1 : 0}, uCliffOff: {value: cliffOff}, uPx: U.px,
+    uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)}}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   const cardUniforms = o => ({
     uAnchor: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2(o.w, o.h)}, uPivot: {value: new THREE.Vector2(o.px, o.py)},
@@ -436,7 +517,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const u = cardUniforms(o);
     const g = raw(CARD_VS, CARD_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
       uNrmRect: {value: o.nrmRect || new THREE.Vector4(0, 0, 1, 1)}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0},
-      uType: {value: o.type ?? 3}, uObj: {value: o.obj ?? 0}, uFlash: {value: 0}, uBend: {value: new Float32Array(8).fill(1)}}, {side: THREE.DoubleSide});
+      uType: {value: o.type ?? 3}, uObj: {value: o.obj ?? 0}, uFlash: {value: 0}, uBend: {value: new Float32Array(8).fill(1)},
+      uMetal: {value: null}, uHasMetal: {value: 0}}, {side: THREE.DoubleSide});
     const gm = new THREE.Mesh(QUAD, g); gm.frustumCulled = false; gScene.add(gm);
     let sm = null, xm = null;
     if (o.shadow !== false) {
@@ -460,18 +542,19 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // a live ramp mesh (+ its shadow caster). setMatrix moves both; setGeometry swaps the model (a breakable's stage)
   function mesh(geom, obj, matrix) {
     const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]))); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gScene.add(gm);
-    const sm = new THREE.Mesh(geom, shadowMeshMat); sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sScene.add(sm);
+    const sm = new THREE.Mesh(geom, shadowMeshMat); sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.layers.enable(1); sScene.add(sm);
+    hDirty = true;
     return {gm, sm,
-      setVisible(v) { gm.visible = v; sm.visible = v; },
-      setMatrix(m) { gm.matrix.copy(m); sm.matrix.copy(m); gm.matrixWorldNeedsUpdate = sm.matrixWorldNeedsUpdate = true; },
-      setGeometry(g) { gm.geometry = g; sm.geometry = g; },
+      setVisible(v) { if (gm.visible !== v) hDirty = true; gm.visible = v; sm.visible = v; },
+      setMatrix(m) { if (!gm.matrix.equals(m)) hDirty = true; gm.matrix.copy(m); sm.matrix.copy(m); gm.matrixWorldNeedsUpdate = sm.matrixWorldNeedsUpdate = true; },
+      setGeometry(g) { if (gm.geometry !== g) hDirty = true; gm.geometry = g; sm.geometry = g; },
       set flash(k) { gm.material.uniforms.uFlash.value = k; },
-      dispose() { gScene.remove(gm); sScene.remove(sm); gm.material.dispose(); }};
+      dispose() { gScene.remove(gm); sScene.remove(sm); gm.material.dispose(); hDirty = true; }};
   }
   function surface(geom, opts, castShadow = true) {
     const gm = new THREE.Mesh(geom, surfMat(opts)); gScene.add(gm);
-    let sm = null; if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sScene.add(sm); }
-    return {gm, sm, dispose() { gScene.remove(gm); if (sm) sScene.remove(sm); gm.material.dispose(); }};
+    let sm = null; if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); sScene.add(sm); hDirty = true; }
+    return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sScene.remove(sm); hDirty = true; } gm.material.dispose(); }};
   }
   // ---- immediate-mode batches: filled every frame (G.line / G.point / G.sprite), drawn by render(), then emptied
   // lines: 1 px GL lines in world space (arrows, strings, streaks). color [r, g, b] 0..1, emit true = glows
@@ -573,10 +656,13 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     uShadowC: {value: new THREE.Vector3()}, uFill: {value: new THREE.Vector3()}, uGrade: {value: new THREE.Vector3(1, 1, 1)}, uXCol: {value: new THREE.Vector3(.17, .14, .21)},
     uShadowA: {value: 0}, uShadowOn: {value: 1}, uSunK: {value: .34}, uBanded: {value: 1}, uOutline: {value: 1}, uGradeK: {value: 0}, uEmin: {value: .1}, uShadowTexel: {value: 1 / SM},
     uFog: {value: new THREE.Vector4()}, uPlayer: {value: new THREE.Vector3()},
+    uView: {value: new THREE.Vector3(0, .342, .94)}, uSunC: {value: new THREE.Vector3(1, 1, 1)}, uSunStr: {value: 0},
     uNL: {value: 0}, uLP: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uLC: {value: Array.from({length: NL}, () => new THREE.Vector4())},
     uNH: {value: 0}, uHalo: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uHaloC: {value: Array.from({length: NL}, () => new THREE.Vector3())},
     tGround: {value: layers.ground.t}, tPre: {value: layers.pre.t}, tEmitL: {value: layers.emit.t}, tAdd: {value: layers.add.t}, tFront: {value: layers.front.t},
     uLay: {value: new THREE.Vector4()}, uLayE: {value: 0}, tDistort: {value: layers.distort.t}, uLayD: {value: 0},
+    tH: {value: hmap.depthTexture}, uHPV: {value: new THREE.Matrix4().multiplyMatrices(hCam.projectionMatrix, hCam.matrixWorldInverse)},
+    uPtShadow: {value: 1}, uHBias: {value: .03 / HM.far},
     uDebug: {value: 0},
   };
   const compScene = new THREE.Scene();
@@ -592,6 +678,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const A = 2 * PPM * zoom / VW, B = 2 * PPMH * zoom / VH, C = 2 * PPMY * zoom / VH, Nn = Math.hypot(PPMY, PPMH);
     camera.projectionMatrix.set(A, 0, 0, 0, 0, B, -C, 0, 0, -PPMY / Nn / R_DEPTH, -PPMH / Nn / R_DEPTH, 0, 0, 0, 0, 1);
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+    compU.uView.value.set(Math.sin(yaw) * .93969, .34202, Math.cos(yaw) * .93969);   // the sprite camera's toward-the-viewer
     U.camYaw.value = yaw;
   }
   // world -> internal-canvas px (y down), for halos / HUD / tests
@@ -623,6 +710,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     renderer.setClearColor(0x000000, 0);
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
       renderer.setRenderTarget(shadow); renderer.clear(true, true, false); renderer.render(sScene, sunCam);
+    }
+    if (hDirty && compU.uPtShadow.value > 0) {
+      renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sScene, hCam); hDirty = false;
     }
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
     const calls = renderer.info.render.calls;

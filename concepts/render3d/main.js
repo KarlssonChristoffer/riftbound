@@ -32,6 +32,7 @@ import {loadAtlas} from './atlas.js';
 import {BIOMES} from '../sprites/arena/biomes.js';
 import {createLighting} from '../sprites/arena/lighting.js';
 import {ClothRig, depthOf, CLOTH_PARAMS} from '../sprites/cloth.js';
+import {createArmor} from '../sprites/arena/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
 import {createPlayer, atlasOf, BUSY, AIM_H} from '../sprites/player.js';
 
 const $ = s => document.querySelector(s);
@@ -125,7 +126,7 @@ const PL = createPlayer({
   blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blockedW(X, Z, z, air); },
   elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
   inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
-  pixelBow: () => true,
+  pixelBow: () => !opt.hdBow,   // J: the bowstring + nocked / flying arrows at art pixels (default) or the HD overlay
   onShoot: a => { const [x, y] = toWorld(a.x, a.y), [vx, vy] = toWorld(a.vx, a.vy); spawnArrow({...a, x, y, vx, vy}); },
   aimTarget: () => { const t = hoverTarget(); if (!t) return null; const v = toView(t.x, t.y); return {x: v[0], y: v[1], h: t.h, target: t.target}; },
   nearInteract: () => nearProp(),
@@ -172,6 +173,36 @@ cq.imageSmoothingEnabled = nq.imageSmoothingEnabled = false;
 const CX = 48, CY = 40;   // where the 96 x 80 frame sits in the composite
 const hero = G.card({tex: texOf(charCv), nrm: texOf(nrmCv), w: 192, h: 160, px: PIV[0] + CX, py: PIV[1] + CY, type: 4, obj: 8, bias: .00125, xray: true});
 
+// SHINY ARMOUR (the arena's experiment; its X key turns the camera here, so it's I / the menu): armor.js repaints the
+// metal pixels dark steel / gold, and a METAL MASK aligned with the composite (255 steel, 128 gold, cleared under the
+// cloth cloak) tells the lighting pass where to add the glints and reflections (gfx.js COMP_FS)
+const armor = createArmor(ctxO);
+const metalCv = document.createElement('canvas'); metalCv.width = 192; metalCv.height = 160;
+const mq = metalCv.getContext('2d', {willReadFrequently: true}); mq.imageSmoothingEnabled = false;
+hero.g.uniforms.uMetal.value = texOf(metalCv);
+const maskImgs = {}, maskDir = () => LOADOUTS[loadI][1].replace('out/outfits/', 'out/experiments/armor/');
+function maskOf(pose) {   // the pose's mask sheet (loaded once; null while loading, false when this loadout has none)
+  const key = maskDir() + pose; if (key in maskImgs) return maskImgs[key];
+  maskImgs[key] = null; const i = new Image(); i.onload = () => { maskImgs[key] = i; }; i.onerror = () => { maskImgs[key] = false; }; i.src = key + '.png';
+  return null;
+}
+function toggleArmour() {
+  armor.toggle(); armor.setAtlas(LOADOUTS[loadI][1]);
+  if (armor.on) { armor.preload(Object.keys(SP)); Object.keys(SP).forEach(maskOf); }
+}
+function drawMetal(frame, sinkPx) {   // the metal mask of this frame into the composite's layout, minus what the cloak covers
+  mq.clearRect(0, 0, 192, 160);
+  const m = armor.on && !sinkPx ? maskOf(frame) : null;
+  hero.g.uniforms.uHasMetal.value = m ? 1 : 0; if (!m) return;
+  mq.drawImage(m, P.face * FW, 0, FW, FH, CX, CY, FW, FH);
+  if (rig.active) {
+    const id = mq.getImageData(CX, CY, FW, FH), d = id.data;
+    for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) { const k = (y * FW + x) * 4; if (d[k] && rig.covers(x, y)) d[k] = d[k + 1] = d[k + 2] = 0; }
+    mq.putImageData(id, CX, CY);
+  }
+  G.tex(metalCv, {dynamic: true});
+}
+
 async function switchLoadout(i) {
   loadI = ((i % LOADOUTS.length) + LOADOUTS.length) % LOADOUTS.length;
   $('#load').classList.remove('hidden'); $('#load').textContent = 'Loading ' + LOADOUTS[loadI][0] + '…';
@@ -181,6 +212,7 @@ async function switchLoadout(i) {
   if (ND !== old) { P.face = Math.round(P.face * ND / old) % ND; P.want = P.face; }
   rig.reset?.();
   hero.u.uPivot.value.set(PIV[0] + CX, PIV[1] + CY);
+  armor.setAtlas(LOADOUTS[loadI][1]); if (armor.on) { armor.preload(Object.keys(SP)); Object.keys(SP).forEach(maskOf); }
   $('#load').classList.add('hidden');
 }
 
@@ -268,6 +300,7 @@ function stepArrows(dt) {
 const ARROW = {shaft: rgbOf('#9a6c44'), head: rgbOf('#cfcbbf'), fletch: rgbOf('#efe4c8')};
 function drawArrows() {
   for (const a of arrows) {
+    if (opt.hdBow && !a.stuck) continue;   // HD bow: arrows in flight are drawn on the HD overlay (player.js drawHD)
     const l = Math.hypot(a.vx, a.vy, a.vh) || 1, dx = a.vx / l, dy = a.vy / l, dh = a.vh / l, k = a.stuck ? .45 : .72;
     host.line(a.x - dx * k, a.y - dy * k, a.h - dh * k, a.x - dx * .1, a.y - dy * .1, a.h - dh * .1, ARROW.shaft);
     host.line(a.x - dx * .1, a.y - dy * .1, a.h - dh * .1, a.x, a.y, a.h, ARROW.head);
@@ -314,7 +347,8 @@ world.hooks.card = cardHook;
 // ---------------------------------------------------------------- toggles
 const SAMPLING = ['auto', 'nearest', 'smooth'];
 const opt = {sampling: Q.get('smooth') === '1' ? 'smooth' : SAMPLING.includes(Q.get('sampling')) ? Q.get('sampling') : 'auto',
-  outline: true, banded: true, shadows: true, lantern: Q.get('lantern') === '1', debug: +(Q.get('debug') || 0), help: true, zones: false};
+  outline: true, banded: true, shadows: true, lantern: Q.get('lantern') === '1', debug: +(Q.get('debug') || 0), help: true, zones: false,
+  hdBow: Q.get('bow') === 'hd'};   // J: the HD bow overlay instead of the pixel bow (the arena's toggle)
 const DEBUG = ['final', 'albedo', 'normals', 'depth', 'object ids', 'sun shadow', 'light only'];
 const SMOOTH_IN = 12, SMOOTH_OUT = 3, TURN_HOLD = .12;
 let turnT = 0;
@@ -326,7 +360,7 @@ function stepSampling(dt, turned) {
 function applyOpts() {
   if (opt.sampling !== 'auto') G.U.smooth.value = opt.sampling === 'smooth' ? 1 : 0;
   G.compU.uOutline.value = opt.outline ? 1 : 0; G.compU.uBanded.value = opt.banded ? 1 : 0;
-  G.compU.uShadowOn.value = opt.shadows ? 1 : 0; G.compU.uDebug.value = opt.debug; $('#help').classList.toggle('hidden', !opt.help);
+  G.compU.uShadowOn.value = G.compU.uPtShadow.value = opt.shadows ? 1 : 0; G.compU.uDebug.value = opt.debug; $('#help').classList.toggle('hidden', !opt.help);
 }
 applyOpts();
 
@@ -344,6 +378,7 @@ function applyMood(PX, PY, t) {
   const az = m.sun.az * DEG, el = m.sun.el * DEG;
   sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el));
   G.setSun(sunDir);
+  U.uSunC.value.set(...(m.sun.c || [1, 1, 1])); U.uSunStr.value = m.sun.el > 2 ? (m.shadow.a > 0 ? 1 : .45) * (m.sun.k ?? .4) * 2.2 : 0;   // armour glints
   U.uSunK.value = m.sun.k; U.uShadowA.value = m.shadow.a > 0 && m.sun.el > 2 ? m.shadow.a : 0; U.uShadowC.value.set(...m.shadow.c);
   U.uFog.value.set(...m.fog);
   const la = Math.max(.02, lum(m.amb)), fk = lum(m.fill || [0, 0, 0]) / la * CHAR.fillK;
@@ -423,6 +458,8 @@ addEventListener('keydown', e => {
   if (k === 'l') opt.lantern = !opt.lantern;
   if (k === 'o') switchLoadout(loadI + 1);
   if (k === 'v') opt.banded = !opt.banded;
+  if (k === 'j') opt.hdBow = !opt.hdBow;
+  if (k === 'i') toggleArmour();
   if (k === 'r') { propMode = propMode === 'live' ? 'yaw' : 'live'; world.setMode(propMode); }
   if (k === 'g') { if (e.shiftKey) opt.zones = !opt.zones; else opt.debug = (opt.debug + 1) % DEBUG.length; }
   if (k === 'h') opt.help = !opt.help;
@@ -455,9 +492,10 @@ function renderMenu() {
   const rows = [];
   const btn = (label, value, act) => `<button data-act="${act}">${label}: <b>${value}</b></button>`;
   rows.push(`<h3>Renderer</h3>`, btn('Rotation', SNAP_NAME[snapMode], 'snap'), btn('Ground texture', opt.sampling, 'sampling'), btn('Prop outlines', opt.outline ? 'on' : 'off', 'outline'),
-    btn('Props', propMode === 'live' ? 'live 3D' : '16-angle sprites', 'props'), btn('Banded light', opt.banded ? 'on' : 'off', 'banded'), btn('Sun shadows', opt.shadows ? 'on' : 'off', 'shadows'),
+    btn('Props', propMode === 'live' ? 'live 3D' : '16-angle sprites', 'props'), btn('Banded light', opt.banded ? 'on' : 'off', 'banded'), btn('Shadows (sun + lights)', opt.shadows ? 'on' : 'off', 'shadows'),
     btn('Debug view', DEBUG[opt.debug], 'debug'));
-  rows.push(`<h3>World</h3>`, btn('Biome', BIOMES[biomeI].name, 'biome'), btn('Time', TIMES[timeI], 'time'), btn('Lantern', opt.lantern ? 'on' : 'off', 'lantern'), btn('Loadout', LOADOUTS[loadI][0], 'loadout'));
+  rows.push(`<h3>World</h3>`, btn('Biome', BIOMES[biomeI].name, 'biome'), btn('Time', TIMES[timeI], 'time'), btn('Lantern', opt.lantern ? 'on' : 'off', 'lantern'), btn('Loadout', LOADOUTS[loadI][0], 'loadout'),
+    btn('Bow', opt.hdBow ? 'HD overlay' : 'pixel art', 'hdbow'), btn('Shiny armour', armor.on ? 'on' : 'off', 'armour'));
   const fs = features.filter(f => f.toggle || f.settings);
   if (fs.length) {
     rows.push(`<h3>Features</h3>`);
@@ -481,6 +519,8 @@ $('#pause').addEventListener('click', e => {
   if (a === 'biome') setBiome(biomeI + 1);
   if (a === 'time') timeI = (timeI + 1) % TIMES.length;
   if (a === 'lantern') opt.lantern = !opt.lantern;
+  if (a === 'hdbow') opt.hdBow = !opt.hdBow;
+  if (a === 'armour') toggleArmour();
   if (a === 'loadout') switchLoadout(loadI + 1);
   if (a.startsWith('feat:')) features.filter(f => f.toggle || f.settings)[+a.slice(5)].toggle();
   if (a.startsWith('set:')) { const [, i, j] = a.split(':').map(Number), s = features.filter(f => f.toggle || f.settings)[i].settings()[j]; const o = s.options, c = o.indexOf(s.get()); s.set(o[(c + 1) % o.length]); }
@@ -541,10 +581,11 @@ function draw(t) {
   const fr = SP[P.frame] ? P.frame : 'idle.0', sp = SP[fr];
   cq.clearRect(0, 0, 192, 160); nq.clearRect(0, 0, 192, 160);
   const sinkPx = Math.round((P.sink || 0) * 22);
-  cq.drawImage(sp.img, P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx, FW, FH - sinkPx);
+  cq.drawImage(armor.albedo(fr, sp.img), P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx, FW, FH - sinkPx);   // (armor: metal repainted)
   if (sp.nrm) nq.drawImage(sp.nrm, P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx, FW, FH - sinkPx);
   if (rig.active && sp.depth && !sinkPx) rig.draw(cq, CX, CY, depthOf(sp.depth), P.face, nq);
-  if (!sinkPx) PL.drawPixelBow(cq, CX, CY);
+  if (!sinkPx && !opt.hdBow) PL.drawPixelBow(cq, CX, CY);
+  drawMetal(fr, sinkPx);
   G.tex(charCv, {dynamic: true}); G.tex(nrmCv, {dynamic: true});
   hero.g.uniforms.uHasNrm.value = sp.nrm ? 1 : 0;
   hero.u.uAnchor.value.set(PX, P.z, PY);
@@ -571,7 +612,20 @@ function draw(t) {
   const dpr = devicePixelRatio || 1, sc = scale * dpr;
   hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);
   for (const f of features) if (f.on !== false && f.hd) { hq.save(); f.hd(hq, sc); hq.restore(); }
+  if (opt.hdBow && !sinkPx) drawHDBow(sc);
   drawPrompt(sc);
+}
+// the HD bow (J): player.js's display-resolution string, nocked arrow and flying arrows, drawn on the HD overlay. It works
+// in the view frame at zoom 1 (its own toS / cam), so arrows go in as view-frame copies and the zoom is a transform
+function drawHDBow(sc) {
+  const z = zoom, s2 = sc * z, [px, py] = ctxO.toS(P.x, P.y, P.z);
+  const view = arrows.map(a => {
+    const [x, y] = toView(a.x, a.y), [vx, vy] = toView(a.vx, a.vy);
+    return {...a, x, y, vx, vy, trail: a.trail?.map(([tx, ty, th]) => { const [u, v] = toView(tx, ty); return [u, v, th]; })};
+  });
+  hq.save(); hq.translate(VW / 2 * sc * (1 - z), VH / 2 * sc * (1 - z));
+  PL.drawHD(hq, s2, (Math.round(px - cam.fx) - PIV[0]) * s2, (Math.round(py - cam.fy) - PIV[1]) * s2, view);
+  hq.restore();
 }
 function drawPrompt(sc) {   // "E climb" / "E open" over the thing you can interact with
   let at = null, txt = '';

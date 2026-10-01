@@ -8,7 +8,7 @@
 //   lights   from the biome's sprites (braziers, torches, crystals) and ground (lava, runes), in metres
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS} from '../sprites/arena/layout.js';
+import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from '../sprites/arena/layout.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../sprites/out/render3d/glb/', YAW = '../sprites/out/render3d/props_yaw/';
@@ -161,24 +161,78 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
   biome.paintGround(gq, ctxT);
   const groundEmit = biome.groundEmit, groundLights = (biome.groundLights || []).slice();
   const gTex = texOf(gc, true), eTex = groundEmit ? texOf(groundEmit, true) : null;
-  // the south ravine: very dark ground pixels near the south edge drop away
+  // the ground's pixels (the waterfall takes the stream's painted colour at the edge)
   const px = gq.getImageData(0, 0, WPX, HPX).data;
-  const dark = (x, z) => { const i = (Math.min(HPX - 1, Math.max(0, Math.round(z * PPM))) * WPX + Math.min(WPX - 1, Math.max(0, Math.round(x * PPM)))) * 4; return px[i] * .3 + px[i + 1] * .55 + px[i + 2] * .15 < 40; };
   // the grid runs SKIRT m past the world on every side (edge texels stretched outward): the camera keeps the flat
   // ground inside the world, but lowered ground (the south ravine) projects further down the screen than that
-  const S = .25, SKIRT = 6, NX = Math.round((WM + 2 * SKIRT) / S), NZ = Math.round((HM + 2 * SKIRT) / S);
-  const hAt = (x, z) => {
-    if (z > HM - 7 && dark(x, z) && dark(x, z + .2) && dark(x, z - .2)) return -3.5;
-    if (inStream(x, z)) return WATER_H;
-    return 0;
+  const S = .25, SKIRT = 6, NX = Math.round((WM + 2 * SKIRT) / S), NZ = Math.round((HM + 2 * SKIRT) / S), DROP = -3.5;
+  // the south edge, as the biome itself defines it: ruins and ember end in a RAVINE along their cliff line (the biome's
+  // hole() is y > cliff(x) - .3 there, or near the stream); frost ends in a flat frozen lake and the rift in its flat void,
+  // so they keep their ground. Inside the stream's band the line is interpolated from both banks (the waterfall)
+  const RAVINE = new Set(['ruins', 'ember']).has(biome.id);
+  const nearStream = (x, y) => Math.abs(x - STREAM.cx(y)) - STREAM.w(y) / 2 < .7;
+  const rawCliff = x => { for (let y = HM - 7; y < HM + .5; y += .05) if (biome.hole?.(x, y) && !nearStream(x, y)) return y + .3; return Infinity; };
+  const cliffCache = new Map();
+  const cliffZ = x => {
+    if (!RAVINE) return Infinity;
+    const k = Math.round(x * 8); let c = cliffCache.get(k); if (c !== undefined) return c;
+    const ys = HM - 2.4, hw = STREAM.w(ys) / 2 + .7, sc = STREAM.cx(ys);
+    if (Math.abs(x - sc) < hw) {   // the banks a little outside the band (the stream meanders: right on its edge it's still "near")
+      let a = rawCliff(sc - hw - .4), b = rawCliff(sc + hw + .4);
+      if (!isFinite(a)) a = b; if (!isFinite(b)) b = a; if (!isFinite(a)) a = b = HM - 2.2;
+      c = a + (b - a) * (x - (sc - hw)) / (2 * hw);
+    } else c = rawCliff(x);
+    cliffCache.set(k, c); return c;
   };
-  const pos = [], uv = [], idx = [];
-  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) { const x = i * S - SKIRT, z = j * S - SKIRT; pos.push(x, hAt(x, z), z); uv.push(x / WM, z / HM); }
+  const hAt = (x, z) => z >= cliffZ(x) ? DROP : inStream(x, z) ? WATER_H : 0;
+  // the grid follows the edge exactly: the last bank vertex of each column moves onto the edge line and the next one
+  // to just past it at the ravine's depth, so the wall is one smooth face (a plain 0.25 m grid made it a staircase)
+  const pos = [], uv = [];
+  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
+    const x = i * S - SKIRT; let z = j * S - SKIRT, h;
+    const cz = cliffZ(x);
+    if (z <= cz && z + S > cz) { z = cz - .001; h = inStream(x, z) ? WATER_H : 0; }   // the lip
+    else if (z > cz && z - S <= cz) { z = cz + .02; h = DROP; }                       // the foot
+    else h = hAt(x, z);
+    pos.push(x, h, z); uv.push(x / WM, z / HM);
+  }
+  const idx = [];
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) { const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
   const gGeo = new THREE.BufferGeometry(); gGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); gGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   gGeo.setIndex(idx); gGeo.computeVertexNormals();
   const world2 = new THREE.Vector2(WM, HM);
-  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0}, false); disposers.push(() => ground.dispose());
+  // the south ravine's wall (any steep ground): rock strata with the biome's grass / ash / snow lip, and a WATERFALL where
+  // the stream goes over the edge, in the stream's own painted colour (streaks, dark edges, foam at the foot). Indexed by
+  // world x (+ SKIRT) and depth below the bank: the ground shader maps it onto the steep cells (gfx.js SURF_FS)
+  const CL_H = 3.5, cliff = strataCanvas(WM + 2 * SKIRT, CL_H, PPM, PPMH, R.rock, R.cov, 11);
+  {
+    const q = cliff.getContext('2d', {willReadFrequently: true}), id = q.getImageData(0, 0, cliff.width, cliff.height), d = id.data, CH = cliff.height;
+    // where the stream glows (ember lava: the ground's emit layer), its fall glows too: alpha 250 marks emissive texels
+    const ge = groundEmit ? groundEmit.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, groundEmit.width, groundEmit.height).data : null;
+    const edgeZ = x => { for (let z = HM - 7; z < HM + SKIRT; z += .05) if (hAt(x, z) < -1) return z; return null; };
+    for (let cx = 0; cx < cliff.width; cx++) {
+      const x = cx / PPM - SKIRT, ze = edgeZ(x); if (ze === null) continue;
+      const zs = ze - .35, off = Math.abs(x - STREAM.cx(zs)) - STREAM.w(zs) / 2;
+      if (off > 0) continue;
+      const at = z => (Math.min(HPX - 1, Math.max(0, Math.round(z * PPM))) * WPX + Math.min(WPX - 1, Math.max(0, Math.round(x * PPM)))) * 4;
+      let gi = at(zs), glows = false;
+      if (ge) for (let z = zs - .6; z <= zs; z += 1 / PPM) {   // a glowing stream (lava): its brightest molten pixel near the edge
+        const k = at(z); if (ge[k + 3] > 0) glows = true;
+        if (px[k] * .3 + px[k + 1] * .55 + px[k + 2] * .15 > px[gi] * .3 + px[gi + 1] * .55 + px[gi + 2] * .15) gi = k;
+      }
+      if (!glows) gi = at(zs);
+      const base = [px[gi], px[gi + 1], px[gi + 2]], edge = off > -.08, streak = hsh(cx, 17) < .3;
+      for (let r = 0; r < CH; r++) {
+        const k = (r * cliff.width + cx) * 4, foam = r > CH - 6 && hsh(cx, r) < .6, lip = r < 2;
+        const m = foam ? .7 : lip ? .45 : edge ? -.3 : streak ? .3 : 0;   // + toward white, - darker
+        for (let c = 0; c < 3; c++) d[k + c] = m >= 0 ? base[c] + (255 - base[c]) * m : base[c] * (1 + m);
+        d[k + 3] = glows && !edge ? 250 : 255;
+      }
+    }
+    q.putImageData(id, 0, 0);
+  }
+  const cTex = texOf(cliff); cTex.wrapS = cTex.wrapT = THREE.RepeatWrapping; cTex.needsUpdate = true;
+  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0, cliff: cTex, cliffOff: SKIRT}, false); disposers.push(() => ground.dispose());
 
   // ---- plateau: top (the painted top, planar) + 4 strata faces
   for (const q of PLATEAUS) {

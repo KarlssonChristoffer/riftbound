@@ -68,7 +68,7 @@ import {TAU, clamp, mod, mk, fit, hsh, vn, rng, rgb, css, PAL, SHAFT, WATER, PUD
 const DEG = Math.PI / 180;
 // ============================================================ tunables (live: __r3d.features.find(f => f.name === 'depth').TUNE)
 const TUNE = {
-  fg: {on: true, fade: [1, .66, .34], fadeStep: .09, body: [-10, -50, 10, 2], sway: 1, hyst: .12 /* 3D: slot swap hysteresis */},
+  fg: {on: false /* off by default: the user found the screen-edge silhouettes didn't look good in 3D (menu / ?fg=1) */, fade: [1, .66, .34], fadeStep: .09, body: [-10, -50, 10, 2], sway: 1, hyst: .12 /* 3D: slot swap hysteresis */},
   clouds: {on: true, tileM: [40, 30], cover: .31, core: .19, s: [.24, .12], time: {day: 1, dusk: .55, night: 0}, speed: 1.9, none: ['rift'],
     mixC: .45 /* 3D: the mix colour = shadow colour x this (approximates the arena's multiply) */},
   shafts: {on: true, max: 5, lenMax: 120, el: [38, 62], time: {day: .85, dusk: 1, night: .5}, night: ['frost', 'rift'], motes: 9, yawStep: 1 /* 3D: deg */},
@@ -80,6 +80,8 @@ export async function create(host) {
   const Q = new URLSearchParams(location.search);
   const {VW, VH, PPM, PPMY, PPMH} = host;
   const F = {name: 'depth', label: 'Depth (foreground, clouds, shafts, reflections)', key: '7', on: Q.get('depth') !== '0', ms: 0, TUNE, debug: ''};
+  if (Q.get('fg') === '1') TUNE.fg.on = true;
+  F.settings = () => [{label: 'Foreground silhouettes', options: ['off', 'on'], get: () => TUNE.fg.on ? 'on' : 'off', set: v => { TUNE.fg.on = v === 'on'; }}];
   let T = 0, biome = '', acc = 0;
   const hist = new Float32Array(60); let hN = 0;
   const WM = () => host.ctxO.WM, HM = () => host.ctxO.HM;
