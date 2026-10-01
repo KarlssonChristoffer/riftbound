@@ -295,9 +295,6 @@ in vec3 position; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
 void main() { gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.); }`;
 // a swaying mesh casts its shadow from the same leaned (whole-pixel) pose the camera sees, minus the leaves the season
 // took (the same noise as MESH_FS)
-const SHADOW_INST_VS = HEAD + `
-in vec3 position; in mat4 iMat; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
-void main() { gl_Position = projectionMatrix * viewMatrix * modelMatrix * iMat * vec4(position, 1.); }`;
 const SHADOW_SWAY_VS = HEAD + SWAY + `
 in vec3 position; in float aFixed; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
 out vec3 vPL; flat out float fFixed;
@@ -328,6 +325,7 @@ const COMP_VS = HEAD + `in vec3 position; void main() { gl_Position = vec4(posit
 const COMP_FS = HEAD + `
 uniform sampler2D tA, tN, tE, tD, tS, tX, uRamps;
 uniform mat4 uInvPV, uLightPV;
+uniform sampler2D tSS; uniform mat4 uLightPVS; uniform float uSBias, uSOn;   // the static sun shadow (world-wide, cached): matrix, bias scale, on
 uniform vec2 uRes; uniform float uR;
 uniform vec3 uBg, uAmb, uSunDir, uShadowC, uFill, uGrade, uXCol;
 uniform float uShadowA, uShadowOn, uSunK, uBanded, uOutline, uGradeK, uEmin, uShadowTexel;
@@ -367,10 +365,14 @@ int typeAt(ivec2 p) { return int(texelFetch(tA, p, 0).a * 255. + .5) / 4; }
 // bias: in light depth (0..1 over the sun camera's 219 m). .0006 (13 cm along the ray) keeps props / the plateau from
 // shadowing themselves; the terrain casts nothing into the map, so it takes ~1 cm. Its 13 cm, bias x cos(el) along the
 // ground, was a visible GAP between a standing card's feet and the start of its shadow
+// two maps: tS (round the view, every frame: what moves) and tSS (the whole world, cached: what doesn't); in shadow in either
 float sunShadow(vec3 P, vec3 N, float bias) {
   vec4 lc = uLightPV * vec4(P + N * .06, 1.); vec3 sc = lc.xyz / lc.w * .5 + .5;
-  if (any(lessThan(sc, vec3(0.))) || any(greaterThan(sc, vec3(1.)))) return 0.;
-  return sc.z - bias > texture(tS, sc.xy).r ? 1. : 0.;
+  if (all(greaterThanEqual(sc, vec3(0.))) && all(lessThanEqual(sc, vec3(1.))) && sc.z - bias > texture(tS, sc.xy).r) return 1.;
+  if (uSOn < .5) return 0.;
+  vec4 ls = uLightPVS * vec4(P + N * .06, 1.); vec3 ss = ls.xyz / ls.w * .5 + .5;
+  if (any(lessThan(ss, vec3(0.))) || any(greaterThan(ss, vec3(1.)))) return 0.;
+  return ss.z - bias * uSBias > texture(tSS, ss.xy).r ? 1. : 0.;   // (bias is in the per-frame map's depth units: rescaled)
 }
 // 1 when something solid stands between S and the light: march the height map (about one texel, 7 cm, per step across
 // the ground, so a shadow edge cast over a long way stays a clean line), stopping 0.25 m short of the light, so a flame
@@ -569,6 +571,32 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   gScene.matrixWorldAutoUpdate = sScene.matrixWorldAutoUpdate = xScene.matrixWorldAutoUpdate = true;
   const camera = new THREE.Camera();
   const sunCam = new THREE.OrthographicCamera(-SHADOW_E, SHADOW_E, SHADOW_E, -SHADOW_E, 1, 220);
+  // STATIC SUN SHADOW: what doesn't move (world props made with mesh(..., {static: true}), the terrain: sScene layer 2,
+  // not 0) is drawn into a world-wide map that is re-rendered only when one of them appears / goes / changes model or
+  // starts / stops moving, or the sun has turned > SUN_STEP (the clock turns it ~.2 deg/s). The per-frame map round the view
+  // (sunCam, layer 0) then holds only what moves: characters, cards, swaying trees, debris. A static prop that moves (a
+  // hit wobble, a push, burning) casts into the per-frame map until it has been still STILL_FRAMES. ~180 -> ~55 shadow
+  // draws a frame. ?sshadow=0 puts everything back in the per-frame map (A/B)
+  const STATIC_SHADOW = !/[?&]sshadow=0\b/.test(location.search);
+  const SMS = 4096, SUN_STEP = .15 * DEG, STILL_FRAMES = 45, SBOX = [-6, 68, -4, 9, -6, 36];   // the world + its skirt (m)
+  const shadowS = new THREE.WebGLRenderTarget(SMS, SMS, {minFilter: near, magFilter: near, depthBuffer: true, format: THREE.RedFormat,
+    depthTexture: new THREE.DepthTexture(SMS, SMS, THREE.UnsignedIntType)});
+  const sunCamS = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2); sunCamS.layers.set(2);
+  let sDue = 0;   // the frame by which the static map must be re-rendered (Infinity: it's up to date)
+  const staticSoon = frames => { sDue = Math.min(sDue, frameNo + frames); };
+  const sDir = new THREE.Vector3(0, 2, 0), sunNow = new THREE.Vector3(0, 1, 0), _sc = new THREE.Vector3(), movers = new Set();
+  function fitStatic(d) {   // look along the sun at the world's centre; the ortho box = the world's 8 corners in light space
+    const cx = (SBOX[0] + SBOX[1]) / 2, cy = (SBOX[2] + SBOX[3]) / 2, cz = (SBOX[4] + SBOX[5]) / 2;
+    sunCamS.position.set(cx, cy, cz).addScaledVector(d, 100); sunCamS.lookAt(cx, cy, cz); sunCamS.updateMatrixWorld(true);
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, z0 = 1e9, z1 = -1e9;
+    for (let i = 0; i < 8; i++) {
+      _sc.set(SBOX[i & 1], SBOX[2 + (i >> 1 & 1)], SBOX[4 + (i >> 2 & 1)]).applyMatrix4(sunCamS.matrixWorldInverse);
+      x0 = Math.min(x0, _sc.x); x1 = Math.max(x1, _sc.x); y0 = Math.min(y0, _sc.y); y1 = Math.max(y1, _sc.y); z0 = Math.min(z0, _sc.z); z1 = Math.max(z1, _sc.z);
+    }
+    Object.assign(sunCamS, {left: x0, right: x1, top: y1, bottom: y0, near: -z1 - 1, far: -z0 + 1}); sunCamS.updateProjectionMatrix();
+    compU.uLightPVS.value.multiplyMatrices(sunCamS.projectionMatrix, sunCamS.matrixWorldInverse);
+    compU.uSBias.value = (sunCam.far - sunCam.near) / (sunCamS.far - sunCamS.near);   // the same metres of bias in its depth units
+  }
 
   // shared uniforms (one object, referenced by every material that needs it)
   const U = {
@@ -594,10 +622,11 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       t.minFilter = t.magFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
       t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true; t.__lin = linear; t.__frame = -1;
       texCache.set(img, t);
-    } else if (dynamic && t.__frame !== frameNo && (img.version === undefined || img.version !== t.__ver)) { t.needsUpdate = true; t.__frame = frameNo; t.__ver = img.version; }
+    } else if (dynamic && t.__frame !== frameNo && (img.version === undefined || img.version !== t.__ver)) { t.needsUpdate = true; t.__frame = frameNo; t.__ver = img.version; ups.push(t); }
     return t;
   }
   let frameNo = 0;
+  const ups = [];   // textures re-uploaded this frame (render() uploads them first, timed as stats.pass.upload)
 
   // ---- materials
   const MESH_VS = meshVS(false), MESH_SWAY_VS = meshVS(true);
@@ -680,14 +709,22 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
     const H = {sm, hm: matrix.clone()};             // hm: the matrix the height map was last rendered with
+    // o.static (world props): its shadow lives in the cached static map; while it moves it casts per frame (STATIC SUN SHADOW)
+    const S = STATIC_SHADOW && o.static && !sw ? {sm, still: 0, moving: false, back: false} : null;
+    if (S) { sm.layers.enable(2); sm.layers.disable(0); staticSoon(0); }
+    const inStatic = () => S && !S.moving;
     return {gm, sm,
-      setVisible(v) { if (gm.visible !== v && caster()) hDirty = true; gm.visible = v; sm.visible = v; },
+      setVisible(v) { if (gm.visible !== v) { if (caster()) hDirty = true; if (inStatic()) staticSoon(0); } gm.visible = v; sm.visible = v; },
       setMatrix(m) {
         if (gm.matrix.equals(m)) return;
         gm.matrix.copy(m); sm.matrix.copy(m); gm.matrixWorldNeedsUpdate = sm.matrixWorldNeedsUpdate = true;
         if (caster()) moved.add(H);   // render() decides whether that's enough to re-render the height map
+        if (S) {   // it moves: into the per-frame map now, out of the static one at its next re-render (soon)
+          S.still = 0; S.back = false;
+          if (!S.moving) { S.moving = true; sm.layers.enable(0); sm.layers.disable(2); movers.add(S); staticSoon(6); }
+        }
       },
-      setGeometry(g) { if (gm.geometry !== g && caster()) hDirty = true; gm.geometry = g; sm.geometry = g; },
+      setGeometry(g) { if (gm.geometry !== g) { if (caster()) hDirty = true; if (inStatic()) staticSoon(0); } gm.geometry = g; sm.geometry = g; },
       // burning wood: char 0..1 (blackens), glow 0..1 (ember veins), t (s: the veins crawl), ash 0..1 (settles on top)
       burn(char = 0, glow = 0, t = 0, ash = 0) { gm.material.uniforms.uBurn.value.set(char, glow, t, ash); },
       setLean(x, y) { if (!lean || (lean.value.x === x && lean.value.y === y)) return; lean.value.set(x, y); if (sm.layers.isEnabled(1)) hDirty = true; },
@@ -696,7 +733,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       setFlutter(x, y) { sw?.flut.value.set(x, y); },
       setRipple(kx, kz, ph, amp) { gm.material.uniforms.uRip.value.set(kx, kz, ph, amp); },
       set flash(k) { gm.material.uniforms.uFlash.value = k; },
-      dispose() { gScene.remove(gm); sScene.remove(sm); gm.material.dispose(); if (lean) sm.material.dispose(); hDirty = true; }};
+      dispose() { gScene.remove(gm); sScene.remove(sm); gm.material.dispose(); if (lean) sm.material.dispose(); hDirty = true; if (S) { movers.delete(S); staticSoon(0); } }};
   }
   // the height map is re-rendered when a caster moved more than ~a texel (6 cm) or turned / scaled more than ~1%, against
   // the matrix it was last rendered with: a hit wobble (2 px) or a burning crate set to two matrices a frame no longer
@@ -715,8 +752,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const M3 = [0, 1, 2, 4, 5, 6, 8, 9, 10];
   function surface(geom, opts, castShadow = true) {
     const gm = new THREE.Mesh(geom, surfMat(opts)); gScene.add(gm);
-    let sm = null; if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); sScene.add(sm); hDirty = true; }
-    return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sScene.remove(sm); hDirty = true; } gm.material.dispose(); }};
+    let sm = null;
+    if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); if (STATIC_SHADOW) { sm.layers.enable(2); sm.layers.disable(0); } sScene.add(sm); hDirty = true; staticSoon(0); }
+    return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sScene.remove(sm); hDirty = true; staticSoon(0); } gm.material.dispose(); }};
   }
   // ---- immediate-mode batches: filled every frame (G.line / G.point / G.sprite), drawn by render(), then emptied
   // lines: 1 px GL lines in world space (arrows, strings, streaks). color [r, g, b] 0..1, emit true = glows
@@ -820,6 +858,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     uRes: {value: new THREE.Vector2(VW, VH)}, uR: {value: R_DEPTH},
     uBg: {value: new THREE.Vector3(.1, .12, .11)}, uAmb: {value: new THREE.Vector3(1, 1, 1)}, uSunDir: {value: new THREE.Vector3(0, 1, 0)},
     uShadowC: {value: new THREE.Vector3()}, uFill: {value: new THREE.Vector3()}, uGrade: {value: new THREE.Vector3(1, 1, 1)}, uXCol: {value: new THREE.Vector3(.17, .14, .21)},
+    tSS: {value: shadowS.depthTexture}, uLightPVS: {value: new THREE.Matrix4()}, uSBias: {value: 1}, uSOn: {value: 1},
     uShadowA: {value: 0}, uShadowOn: {value: 1}, uSunK: {value: .34}, uBanded: {value: 1}, uOutline: {value: 1}, uGradeK: {value: 0}, uEmin: {value: .1}, uShadowTexel: {value: 1 / SM},
     uSoftFam: {value: -1},
     uSeasonM: {value: new THREE.Matrix3()}, uSeasonK: {value: 0}, uSnow: {value: 0}, uWet: {value: 0}, uFlashC: {value: new THREE.Vector3()},   // features/weather.js
@@ -950,7 +989,7 @@ void main() {
   // the caller wants for shadow length; main.js keeps the arena's longest shadow), default the same
   const _sl = new THREE.Vector3(), _sr = new THREE.Vector3(), _su = new THREE.Vector3();
   function setSun(dir, sdir = dir) {
-    compU.uSunDir.value.copy(dir);
+    compU.uSunDir.value.copy(dir); sunNow.copy(sdir).normalize();
     U.sunYaw.value = Math.atan2(dir.x, dir.z);   // cards turned so their face points at the sun (normal = (sin, 0, cos))
     const T = view.T, texel = 2 * SHADOW_E / SM;
     sunCam.position.copy(T).addScaledVector(sdir, 100); sunCam.lookAt(T); sunCam.updateMatrixWorld(true);
@@ -962,7 +1001,7 @@ void main() {
     compU.uLightPV.value.multiplyMatrices(sunCam.projectionMatrix, sunCam.matrixWorldInverse);
   }
 
-  const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0};
+  const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
   function render() {
     const t0 = performance.now();
     U.time.value = (t0 / 1000) % 3600;
@@ -974,16 +1013,36 @@ void main() {
     for (const L of layerList) if (L.used) L.t.needsUpdate = true;
     if (!hDirty && moved.size && movedEnough()) hDirty = true;
     renderer.setClearColor(0x000000, 0);
+    // stats.pass: CPU ms + draw calls of each pass this frame (F3 shows them; the bench reads them)
+    const PS = stats.pass; let tp = performance.now();
+    const lap = (k, calls) => { const t = performance.now(); PS[k] = t - tp; tp = t; if (calls !== undefined) PS[k + 'N'] = calls; };
+    lap('prep');
+    for (const t of ups) renderer.initTexture(t);
+    for (const L of layerList) if (L.used) renderer.initTexture(L.t);
+    ups.length = 0; lap('upload');
+    PS.shadowN = PS.hmapN = PS.shadowSN = 0; PS.shadowS = 0;
+    // movers that have been still long enough go back to the static map (switched over AT its re-render: no gap)
+    for (const S of movers) if (!S.back && ++S.still > STILL_FRAMES) { S.back = true; staticSoon(20); }
+    compU.uSOn.value = STATIC_SHADOW ? 1 : 0;
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
+      if (STATIC_SHADOW && (frameNo >= sDue || sunNow.dot(sDir) < Math.cos(SUN_STEP))) {
+        for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); movers.delete(S); }
+        sDir.copy(sunNow); fitStatic(sDir); sDue = Infinity;
+        renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sScene, sunCamS);
+        lap('shadowS', renderer.info.render.calls);
+      }
       renderer.setRenderTarget(shadow); renderer.clear(true, true, false); renderer.render(sScene, sunCam);
-    }
+      lap('shadow', renderer.info.render.calls);
+    } else PS.shadow = 0;
     if (hDirty && compU.uPtShadow.value > 0) {
       renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sScene, hCam); hDirty = false;
       for (const H of moved) H.hm.copy(H.sm.matrix);
-    }
+      lap('hmap', renderer.info.render.calls);
+    } else { PS.hmap = 0; tp = performance.now(); }
     moved.clear();
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
     const calls = renderer.info.render.calls;
+    lap('gbuf', calls);
     renderer.setRenderTarget(xray); renderer.clear(true, false, false); renderer.render(xScene, camera);
     compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
@@ -1002,6 +1061,7 @@ void main() {
         renderer.render(fxScene, camera);
       }
     } else { renderer.setRenderTarget(null); renderer.render(compScene, dummyCam); }
+    lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
     stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
     resetBatches(); for (const L of layerList) L.used = false; frameNo++;

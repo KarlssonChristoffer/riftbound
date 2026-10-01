@@ -61,6 +61,7 @@ export const CLOTH_MATERIALS = {
   Cloak: {weight: 2, bend: .9, damping: .985, flutter: .2, wave: 1, retain: [140, 18], bendBoth: true},
 };
 
+const CAP = 12;   // floats per body capsule in ClothRig.capF
 export class ClothRig {
   // PERFORMANCE (docs/ARCHITECTURE.md): update + draw run every frame, so they allocate nothing in steady state. Particles
   // are persistent [x, y, z] arrays moved in place, links and capsules are flat typed arrays, and draw() keeps its pixel
@@ -79,7 +80,7 @@ export class ClothRig {
     this.dz = 254 / (idx.cam.far - idx.cam.near);
     this.t = 0; this.acc = 0; this.origin = [0, 0, 0]; this.vel = [0, 0, 0];
     this.wnd = [0, 0, 0];                       // the substep's wind (#wind writes it)
-    this.capF = new Float64Array(8 * 16); this.nCap = 0;   // capsules: a, b - a, |b - a|^2 (or 1), radius
+    this.capF = new Float64Array(CAP * 16); this.nCap = 0;   // capsules: a, b - a, |b - a|^2 (or 1), radius, centre, half length
     this.canvas = document.createElement('canvas');
     this.canvas.getContext('2d', {willReadFrequently: true});   // CPU-backed: cheap to composite into a host's CPU canvas
   }
@@ -129,15 +130,16 @@ export class ClothRig {
     const fa = (this.idx.cam.yaw0 + 360 / this.N * face) * Math.PI / 180, fc = Math.cos(fa), fs = Math.sin(fa);
     // body capsules -> a, b - a, |b - a|^2 (|| 1), radius
     const caps = sim.caps, nc = caps.length;
-    if (this.capF.length < nc * 8) this.capF = new Float64Array(nc * 16);
+    if (this.capF.length < nc * CAP) this.capF = new Float64Array(nc * CAP * 2);
     const F = this.capF;
     for (let i = 0; i < nc; i++) {
-      const c = caps[i], o = i * 8;
+      const c = caps[i], o = i * CAP;
       const ax = fc * c[0] - fs * c[1] + ox, ay = fs * c[0] + fc * c[1] + oy, az = c[2] + 0;
       const bx = fc * c[3] - fs * c[4] + ox, by = fs * c[3] + fc * c[4] + oy, bz = c[5] + 0;
       const abx = bx - ax, aby = by - ay, abz = bz - az;
       F[o] = ax; F[o + 1] = ay; F[o + 2] = az; F[o + 3] = abx; F[o + 4] = aby; F[o + 5] = abz;
       F[o + 6] = abx * abx + aby * aby + abz * abz || 1; F[o + 7] = c[6];
+      F[o + 8] = ax + abx / 2; F[o + 9] = ay + aby / 2; F[o + 10] = az + abz / 2; F[o + 11] = Math.sqrt(abx * abx + aby * aby + abz * abz) / 2;
     }
     this.nCap = nc;
     for (const C of this.cloths) {
@@ -256,7 +258,11 @@ export class ClothRig {
 
   #collide(p) {
     const F = this.capF, th = CLOTH_PARAMS.thickness;
-    for (let ci = 0, o = 0; ci < this.nCap; ci++, o += 8) {
+    for (let ci = 0, o = 0; ci < this.nCap; ci++, o += CAP) {
+      // too far to touch? (outside the capsule's bounding sphere, a hair larger: the exact test below can't push it then.
+      // Skips most of the ~4000 hypot() calls per substep without changing any result)
+      const ex = p[0] - F[o + 8], ey = p[1] - F[o + 9], ez = p[2] - F[o + 10], R = F[o + 11] + F[o + 7] + th + 1e-6;
+      if (ex * ex + ey * ey + ez * ez > R * R) continue;
       const ax = F[o], ay = F[o + 1], az = F[o + 2], abx = F[o + 3], aby = F[o + 4], abz = F[o + 5];
       const t = Math.max(0, Math.min(1, ((p[0] - ax) * abx + (p[1] - ay) * aby + (p[2] - az) * abz) / F[o + 6]));
       const d0 = p[0] - (ax + abx * t), d1 = p[1] - (ay + aby * t), d2 = p[2] - (az + abz * t), l = Math.hypot(d0, d1, d2), r = F[o + 7] + th;
