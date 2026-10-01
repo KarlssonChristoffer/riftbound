@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Forge Lab</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#111014;--panel:#1a1920;--panel2:#15141a;--line:#34323d;--text:#e9e4da;--muted:#9a94a6;--dim:#6d6878;--accent:#c9a45a;--wave:#7fa7c9;--onset:#f2d27a;--warn:#e07a5f;--ok:#8dbf7d;--mono:ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,sans-serif}
+code,.mono{font-family:var(--mono)}
+.muted{color:var(--muted)}
+button{background:#26242e;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--accent)} button.on{background:var(--accent);color:#16141a;border-color:var(--accent)}
+button:disabled{opacity:.4;cursor:default;border-color:var(--line)}
+button:focus-visible,.card:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+input,select,textarea{background:#141319;color:var(--text);border:1px solid var(--line);border-radius:6px;font:inherit;padding:4px 6px}
+input[type=range]{padding:0;accent-color:var(--accent);vertical-align:middle}
+input[type=number]{width:54px}
+label{color:var(--muted);font-size:13px;white-space:nowrap}
+
+/* top bar */
+.top{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;justify-content:space-between;max-width:1440px;margin:0 auto;padding:18px 16px 12px}
+h1{font-size:18px;margin:0 0 2px;color:var(--accent)}
+p.sub{margin:0;color:var(--muted);font-size:13px;max-width:680px}
+.tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+#status{font:12px var(--mono);color:var(--muted);margin-right:4px}
+
+/* layout */
+.layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;max-width:1440px;margin:0 auto;padding:0 16px 40px}
+nav{position:sticky;top:10px;align-self:start;max-height:calc(100vh - 20px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 6px}
+nav .rec{margin:0 0 8px}
+nav .rid{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font:600 12.5px var(--mono);padding:2px 6px;color:var(--text)}
+nav .rid small{color:var(--dim);font-weight:400}
+nav .cases{display:flex;flex-direction:column;gap:1px}
+nav .case{display:flex;justify-content:space-between;align-items:center;gap:6px;width:100%;text-align:left;background:none;border:1px solid transparent;padding:3px 8px;border-radius:5px;color:var(--muted);font:12.5px var(--mono)}
+nav .case:hover{border-color:var(--line);color:var(--text)}
+nav .case.sel{background:#2a2530;border-color:var(--accent);color:var(--text)}
+nav .case .dot{font-size:10.5px;color:var(--accent)}
+nav .rec.missing .rid{color:var(--dim)}
+nav .rec.missing button{color:var(--dim);font:11.5px var(--mono);background:none;border:1px dashed var(--line);padding:2px 8px;width:100%;text-align:left}
+nav .rec.missing button.sel{border-color:var(--warn);color:var(--warn)}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:0 0 12px}
+.panel.err{border-color:var(--warn)}
+.panel.err b{color:var(--warn)}
+h2{font:600 15px var(--mono);margin:0}
+h3{font-size:13px;margin:18px 0 8px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.tags span{display:inline-block;font-size:11px;padding:1px 7px;border:1px solid var(--line);border-radius:10px;margin-left:6px;color:var(--muted);font-family:var(--mono)}
+.tags span.hot{border-color:var(--accent);color:var(--accent)}
+.ttl{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px}
+.desc{margin:4px 0 6px}
+.kv{font:12px/1.5 var(--mono);color:var(--muted);word-break:break-word}
+.kv b{color:var(--text);font-weight:500}
+.crit{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.crit span{font:11.5px var(--mono);padding:1px 7px;border-radius:10px;background:#221f29;color:var(--muted)}
+.summary{margin-top:8px;font:12.5px var(--mono);color:var(--text)}
+.summary .w{color:var(--warn)} .summary .g{color:var(--ok)}
+
+/* rating */
+.rate{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;align-items:center}
+.rate .lbl{color:var(--muted);font-size:13px}
+.rate .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.seg{display:inline-flex}
+.seg button{border-radius:0;margin-left:-1px;padding:4px 11px;min-width:34px}
+.seg button:first-child{border-radius:6px 0 0 6px;margin-left:0}
+.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button.on{position:relative;z-index:1}
+#note{width:100%;min-height:44px;resize:vertical}
+.saved{font:11.5px var(--mono);color:var(--dim);grid-column:1/-1}
+.saved .w{color:var(--warn)}
+small.hint{color:var(--dim);font-size:11.5px}
+
+/* toolbar */
+.bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.bar{justify-content:space-between}
+.bar .grp{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+#mgi{width:110px}
+details.params{margin:0 0 12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 14px}
+details.params summary{cursor:pointer;color:var(--muted);font-size:13px}
+details.params[open] summary{margin-bottom:8px}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px 16px}
+.pgrid label{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center;white-space:normal}
+.pgrid label span.v{font:12px var(--mono);color:var(--text)}
+.pgrid label input,.pgrid label select{grid-column:1/-1;width:100%}
+.pbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+
+/* cards */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;outline:none;min-width:0;transition:border-color .12s}
+.card.ref{background:#1b1a1f;border-style:dashed}
+.card.focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card.hit{border-color:var(--onset)}
+.card .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px;min-width:0}
+.card .name{font:600 12.5px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}
+.play{width:36px;height:30px;padding:0;flex:none}
+.card.playing .play{background:var(--accent);color:#16141a;border-color:var(--accent)}
+.x{padding:0 8px;height:24px;flex:none;color:var(--muted)}
+.badge{font:600 10.5px var(--mono);padding:1px 7px;border-radius:9px;border:1px solid var(--line);color:var(--muted);flex:none}
+.badge.pass{color:var(--ok);border-color:#3d5a3a}
+.badge.fail,.badge.error{color:var(--warn);border-color:#6a3a30}
+.badge.ref{color:var(--wave);border-color:#34506a}
+.spec{position:relative;cursor:pointer}
+.spec canvas{width:100%;aspect-ratio:480/176;height:auto;display:block;border-radius:4px;background:#0e0d12}
+.ph{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--accent);pointer-events:none;box-shadow:0 0 4px var(--accent)}
+.m{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:1px 8px;font:11.5px/1.4 var(--mono);color:var(--muted);margin-top:6px}
+.m b{color:var(--text);font-weight:600;white-space:nowrap}
+.m .bad,.m .bad b{color:var(--warn)}
+.fails{color:var(--warn);font:11.5px/1.35 var(--mono);margin-top:4px}
+.foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 8px;color:var(--dim);font:11px var(--mono);margin-top:5px}
+.foot .w{color:var(--warn)}
+.err{color:var(--warn);font:12px/1.4 var(--mono);white-space:pre-wrap;word-break:break-word}
+.refadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;font-size:13px;color:var(--muted)}
+.refadd select{max-width:100%}
+
+/* A/B */
+.ab{max-width:720px}
+.abrow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:10px 0}
+.abplay button{font:600 18px var(--mono);min-width:120px;padding:14px 18px}
+.abplay button.heard{border-color:#5a5466}
+.abans button{padding:8px 14px}
+#abnote{flex:1 1 220px;min-width:0}
+.reveal{font:12.5px/1.5 var(--mono);padding:8px 10px;border-radius:6px;background:#221f29;margin-top:8px}
+.reveal b{color:var(--accent)}
+.tally{font:12.5px/1.6 var(--mono);color:var(--muted);margin-top:12px}
+.tally b{color:var(--text)}
+
+.keys{max-width:1440px;margin:0 auto;padding:0 16px 30px;color:var(--dim);font-size:12px}
+kbd{font:11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--muted)}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#26242e;border:1px solid var(--accent);color:var(--text);padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:calc(100vw - 32px)}
+#toast.show{opacity:1}
+#toast.bad{border-color:var(--warn)}
+
+@media (max-width:820px){
+  .layout{grid-template-columns:minmax(0,1fr)}
+  nav{position:static;max-height:210px}
+  nav .cases{flex-direction:row;flex-wrap:wrap}
+  nav .case{width:auto}
+  .rate{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:420px){
+  .grid{grid-template-columns:minmax(0,1fr)}
+  .abplay button{min-width:0;flex:1}
+  .top .tools button{padding:5px 8px}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Forge Lab</h1>
+    <p class="sub">Audition the Sound Forge recipes, compare them with reference takes, and rate them. Ratings stay in this browser until you export them; the exported JSON is what the designer reads.</p>
+  </div>
+  <div class="tools">
+    <span id="status">loading…</span>
+    <button id="reload" title="Re-import the recipe files (picks up edits without a page reload)">Reload recipes</button>
+    <button id="copy">Copy JSON</button>
+    <button id="export" class="on">Export ratings</button>
+  </div>
+</header>
+<div class="layout">
+  <nav id="nav" aria-label="Recipes and cases"></nav>
+  <main id="main">
+    <div id="fatal"></div>
+    <section class="panel" id="head"></section>
+    <section class="panel" id="rating"></section>
+    <section class="panel bar" id="bar">
+      <span class="grp"><span class="seg" id="mode"><button data-mode="grid" class="on">Variants</button><button data-mode="ab">Blind A/B</button></span>
+      <label>seeds <input id="n" type="number" min="1" max="16" value="6"></label>
+      <button id="reroll" title="Render a fresh set of seeds">Re-roll seeds</button>
+      <span id="seedinfo" class="mono muted" style="font-size:12px"></span></span>
+      <span class="grp"><button id="mg" title="Fire every variant in a row with runtime jitter (pitch ±1 st, gain −2..0 dB)">Machine-gun ▶</button>
+      <label>every <input id="mgi" type="range" min="100" max="600" step="10" value="200"> <span id="mgv" class="mono">200 ms</span></label>
+      <label>rounds <select id="mgr"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+      <label>order <select id="mgo"><option value="rr">round-robin</option><option value="rnd">random, no repeat</option></select></label>
+      <button id="stop" title="Stop everything (Esc)">Stop</button></span>
+    </section>
+    <details class="params" id="params"><summary>Params: render custom settings</summary><div id="pbody"></div></details>
+    <div id="gridview">
+      <h3>Forge variants</h3>
+      <div class="grid" id="variants"></div>
+      <h3>References</h3>
+      <div class="refadd" id="refadd"></div>
+      <div class="grid" id="refs"></div>
+    </div>
+    <section class="panel ab" id="abview" hidden></section>
+  </main>
+</div>
+<p class="keys"><kbd>Space</kbd> play / stop the focused card · <kbd>1</kbd>–<kbd>5</kbd> realism · <kbd>←</kbd> <kbd>→</kbd> previous / next case · <kbd>↑</kbd> <kbd>↓</kbd> move between cards · <kbd>Esc</kbd> stop all · in A/B: <kbd>A</kbd> <kbd>B</kbd> play a side</p>
+<div id="toast" role="status"></div>
+<script>
+// Opened from disk: module scripts and fetches are blocked on file://, so say how to open it properly.
+if (location.protocol === 'file:') {
+  document.getElementById('fatal').innerHTML = '<section class="panel err"><b>Can\'t run from disk.</b><br>This page was opened from file://, where the browser blocks loading the forge modules and the sound files. Open it through the local server instead: <code>http://localhost:8126/audio/forge/lab.html</code> (start <code>play.bat</code> / <code>serve.py</code> if nothing is running).</section>';
+  document.getElementById('status').textContent = 'blocked (file://)';
+}
+</script>
+<script type="module" src="lab.js"></script>
+</body>
+</html>

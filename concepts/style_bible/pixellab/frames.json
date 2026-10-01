@@ -1,0 +1,404 @@
+[
+ {
+  "name": "Ranger (PixelLab, text only)",
+  "note": "create_character side view + template idle + v3 custom attack; figure 48 px tall",
+  "w": 46,
+  "h": 53,
+  "sheet": "pixellab/ranger_text.png",
+  "anims": {
+   "idle": [
+    [
+     0,
+     220
+    ],
+    [
+     1,
+     220
+    ],
+    [
+     2,
+     220
+    ],
+    [
+     3,
+     220
+    ]
+   ],
+   "attack": [
+    [
+     4,
+     100
+    ],
+    [
+     5,
+     90
+    ],
+    [
+     6,
+     90
+    ],
+    [
+     7,
+     110
+    ],
+    [
+     8,
+     70
+    ],
+    [
+     9,
+     140
+    ],
+    [
+     10,
+     120
+    ],
+    [
+     11,
+     110
+    ],
+    [
+     12,
+     160
+    ]
+   ]
+  }
+ },
+ {
+  "name": "Warden (PixelLab, text only)",
+  "note": "create_character side view + template idle + v3 custom attack; figure 51 px tall",
+  "w": 59,
+  "h": 58,
+  "sheet": "pixellab/warden_text.png",
+  "anims": {
+   "idle": [
+    [
+     0,
+     220
+    ],
+    [
+     1,
+     220
+    ],
+    [
+     2,
+     220
+    ],
+    [
+     3,
+     220
+    ]
+   ],
+   "attack": [
+    [
+     4,
+     100
+    ],
+    [
+     5,
+     90
+    ],
+    [
+     6,
+     90
+    ],
+    [
+     7,
+     110
+    ],
+    [
+     8,
+     70
+    ],
+    [
+     9,
+     140
+    ],
+    [
+     10,
+     120
+    ],
+    [
+     11,
+     110
+    ],
+    [
+     12,
+     160
+    ]
+   ]
+  }
+ },
+ {
+  "name": "Pyromancer (PixelLab, text only)",
+  "note": "create_character side view + template idle + v3 custom attack; figure 53 px tall",
+  "w": 62,
+  "h": 63,
+  "sheet": "pixellab/pyro_text.png",
+  "anims": {
+   "idle": [
+    [
+     0,
+     220
+    ],
+    [
+     1,
+     220
+    ],
+    [
+     2,
+     220
+    ],
+    [
+     3,
+     220
+    ]
+   ],
+   "attack": [
+    [
+     4,
+     100
+    ],
+    [
+     5,
+     90
+    ],
+    [
+     6,
+     90
+    ],
+    [
+     7,
+     110
+    ],
+    [
+     8,
+     70
+    ],
+    [
+     9,
+     140
+    ],
+    [
+     10,
+     120
+    ],
+    [
+     11,
+     110
+    ],
+    [
+     12,
+     160
+    ]
+   ]
+  }
+ },
+ {
+  "name": "Ranger (PixelLab, our frame as style ref)",
+  "note": "pro flash + style image, animate_image idle/attack; figure 30 px tall",
+  "w": 42,
+  "h": 33,
+  "sheet": "pixellab/ranger_styled.png",
+  "anims": {
+   "idle": [
+    [
+     0,
+     220
+    ],
+    [
+     1,
+     220
+    ],
+    [
+     2,
+     220
+    ],
+    [
+     3,
+     220
+    ],
+    [
+     4,
+     220
+    ]
+   ],
+   "attack": [
+    [
+     5,
+     100
+    ],
+    [
+     6,
+     90
+    ],
+    [
+     7,
+     90
+    ],
+    [
+     8,
+     110
+    ],
+    [
+     9,
+     70
+    ],
+    [
+     10,
+     140
+    ],
+    [
+     11,
+     120
+    ],
+    [
+     12,
+     110
+    ],
+    [
+     13,
+     160
+    ]
+   ]
+  }
+ },
+ {
+  "name": "Warden (PixelLab, our frame as style ref)",
+  "note": "pro flash + style image, animate_image idle/attack; figure 38 px tall",
+  "w": 37,
+  "h": 40,
+  "sheet": "pixellab/warden_styled.png",
+  "anims": {
+   "idle": [
+    [
+     0,
+     220
+    ],
+    [
+     1,
+     220
+    ],
+    [
+     2,
+     220
+    ],
+    [
+     3,
+     220
+    ],
+    [
+     4,
+     220
+    ]
+   ],
+   "attack": [
+    [
+     5,
+     100
+    ],
+    [
+     6,
+     90
+    ],
+    [
+     7,
+     90
+    ],
+    [
+     8,
+     110
+    ],
+    [
+     9,
+     70
+    ],
+    [
+     10,
+     140
+    ],
+    [
+     11,
+     120
+    ],
+    [
+     12,
+     110
+    ],
+    [
+     13,
+     160
+    ]
+   ]
+  }
+ },
+ {
+  "name": "Pyromancer (PixelLab, our frame as style ref)",
+  "note": "pro flash + style image, animate_image idle/attack; figure 36 px tall",
+  "w": 43,
+  "h": 39,
+  "sheet": "pixellab/pyro_styled.png",
+  "anims": {
+   "idle": [
+    [
+     0,
+     220
+    ],
+    [
+     1,
+     220
+    ],
+    [
+     2,
+     220
+    ],
+    [
+     3,
+     220
+    ],
+    [
+     4,
+     220
+    ]
+   ],
+   "attack": [
+    [
+     5,
+     100
+    ],
+    [
+     6,
+     90
+    ],
+    [
+     7,
+     90
+    ],
+    [
+     8,
+     110
+    ],
+    [
+     9,
+     70
+    ],
+    [
+     10,
+     140
+    ],
+    [
+     11,
+     120
+    ],
+    [
+     12,
+     110
+    ],
+    [
+     13,
+     160
+    ]
+   ]
+  }
+ }
+]

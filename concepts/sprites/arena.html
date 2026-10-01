@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proving Grounds</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#111014;--panel:rgba(20,19,24,.86);--line:#34323d;--text:#e9e4da;--muted:#9a94a6;--accent:#c9a45a}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,sans-serif;overflow:hidden}
+#wrap{position:fixed;inset:0;display:grid;place-items:center}
+#stage{position:relative}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+#over{position:absolute;inset:0;pointer-events:none}
+#hud{position:fixed;left:12px;top:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;max-width:300px}
+#hud h1{font-size:14px;margin:0 0 6px;color:var(--accent);letter-spacing:.04em}
+#hud-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#hud-toggle{border:0;background:none;color:var(--text);font:inherit;font-weight:700;letter-spacing:.02em;padding:0;cursor:pointer;text-align:left}
+#hud-toggle span{display:block;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:0}
+#hud .help{border:1px solid var(--line);border-radius:5px;background:#ffffff08;color:var(--muted);font:inherit;font-size:11px;padding:3px 7px;cursor:pointer}
+#hud dl{display:grid;grid-template-columns:auto 1fr;gap:1px 10px;margin:0}
+#hud dt{color:#f2d27a;font-weight:600;white-space:nowrap}#hud dd{margin:0;color:var(--muted)}
+#hud .stat{margin-top:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+#hud.min dl,#hud.min .stat{display:none}
+#load{position:fixed;inset:0;display:grid;place-items:center;color:var(--muted)}
+button,select{font:inherit}
+button{cursor:pointer}
+#pause{position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:24px;background:rgba(8,7,12,.72);backdrop-filter:blur(5px)}
+#pause[hidden]{display:none}
+.menu{display:grid;grid-template-columns:190px minmax(0,1fr);width:min(820px,calc(100vw - 32px));max-height:min(650px,calc(100vh - 32px));min-height:460px;overflow:hidden;border:1px solid #59515e;border-radius:12px;background:linear-gradient(145deg,#211e27,#15141b 70%);box-shadow:0 24px 90px #000a}
+.rail{display:flex;flex-direction:column;padding:22px 14px;border-right:1px solid var(--line);background:#ffffff05}
+.brand{padding:0 10px 20px}.brand small,.eyebrow{color:var(--accent);font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+.brand strong{display:block;margin-top:4px;font-size:19px;letter-spacing:.02em}
+.tabs{display:grid;gap:5px}.tab{border:0;border-radius:6px;padding:9px 10px;text-align:left;color:var(--muted);background:transparent}.tab:hover,.tab.active{color:var(--text);background:#ffffff10}.tab.active{box-shadow:inset 2px 0 var(--accent)}
+.resume{margin-top:auto;border:1px solid #dfbf73;border-radius:7px;padding:10px;background:#c9a45a;color:#201b12;font-weight:800}.resume:hover{background:#e0be72}
+.pane{overflow:auto;padding:24px 28px 22px}.pane-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:20px}.pane h2{margin:0;font-size:23px}.pane-head p{margin:5px 0 0;color:var(--muted)}
+.close-menu{border:1px solid var(--line);border-radius:6px;background:#ffffff08;color:var(--muted);padding:6px 9px}
+.section{display:none}.section.active{display:block}.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card{border:1px solid var(--line);border-radius:8px;padding:13px;background:#ffffff05}.card h3{margin:0 0 5px;font-size:13px;color:#f2d27a}.card p{margin:0;color:var(--muted);font-size:12px}
+.control-list{display:grid;gap:8px}.control-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:#ffffff04}.control-row label,.control-row .label{font-weight:650}.control-row small{display:block;color:var(--muted);font-size:11px;font-weight:400}.choice{display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end}.choice button,.select{border:1px solid var(--line);border-radius:5px;padding:6px 9px;background:#ffffff08;color:var(--text)}.choice button:hover,.choice button.selected,.select.selected{border-color:#c9a45a;color:#f2d27a;background:#c9a45a18}.select{min-width:130px}
+[data-setting="music-mode"]{flex-wrap:nowrap}.slider{display:flex;align-items:center;gap:10px}.slider input{width:200px;accent-color:#c9a45a;cursor:pointer}.slider output{min-width:38px;text-align:right;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.readout{color:var(--muted);font-size:12px;line-height:1.7;font-variant-numeric:tabular-nums}.readout strong{color:var(--text);font-weight:600}.menu-note{margin:14px 0 0;color:var(--muted);font-size:11px}
+@media(max-width:620px){#pause{padding:8px}.menu{grid-template-columns:1fr;grid-template-rows:auto 1fr;width:100%;min-height:0;max-height:calc(100vh - 16px)}.rail{padding:12px;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 4px 9px}.brand strong{font-size:16px}.tabs{grid-template-columns:repeat(5,1fr)}.tab{text-align:center;padding:7px 3px;font-size:12px}.resume{position:absolute;right:20px;top:16px;padding:7px 10px}.pane{padding:17px}.pane h2{font-size:20px}.cards{grid-template-columns:1fr}.control-row{align-items:flex-start;flex-direction:column;gap:8px}.choice{justify-content:flex-start}}
+</style>
+</head>
+<body>
+<div id="wrap"><div id="stage"><canvas id="screen"></canvas><canvas id="over"></canvas></div></div>
+<div id="hud" class="min">
+  <div id="hud-head"><button id="hud-toggle" type="button" aria-expanded="false">Proving grounds<span>Esc · pause menu</span></button><button class="help" id="help-toggle" type="button" aria-expanded="false">Controls</button></div>
+  <dl>
+    <dt>WASD / arrows</dt><dd>run</dd>
+    <dt>Shift (hold)</dt><dd>sprint</dd>
+    <dt>Q (hold)</dt><dd>walk</dd>
+    <dt>Mouse</dt><dd>aim</dd>
+    <dt>Hold LMB</dt><dd>draw the bow, release to shoot; while moving: light run (Q walk, Shift a bit faster)</dd>
+    <dt>RMB / 1 - 4</dt><dd>abilities (see the bar)</dd>
+    <dt>Space</dt><dd>dodge roll; toward water: leap (sprint to clear the wide part)</dd>
+    <dt>E</dt><dd>interact: climb at the ivy / ladder, open chests (hold elsewhere: wave)</dd>
+    <dt>C (hold)</dt><dd>crouch</dd>
+    <dt>B</dt><dd>bone overlay</dd>
+    <dt>F</dt><dd>foot debug: planted foot + contacts</dd>
+    <dt>Z</dt><dd>zoom: game view / close</dd>
+    <dt>P</dt><dd>ground projection: game 55° / sprite 20°</dd>
+    <dt>V</dt><dd>character light: smooth / banded (flat clusters)</dd>
+    <dt>J</dt><dd>bow + arrows: art pixels, lit (default) / HD overlay</dd>
+    <dt>O</dt><dd>switch loadout: ranger outfit / ranger + runtime cloak / bare body</dd>
+    <dt>N / Shift+N</dt><dd>next / previous biome: ruins / ember / frost / rift</dd>
+    <dt>T</dt><dd>time of day</dd>
+    <dt>L</dt><dd>lantern on the player</dd>
+    <dt>K</dt><dd>weather on / off</dd>
+    <dt>G</dt><dd>zone / collider debug</dd>
+    <dt>X</dt><dd>experiment: shiny armour</dd>
+    <dt>R</dt><dd>props: 3D-rendered + lit (default) / painted. Barrels tip and roll (shoot, sprint or roll into them, kick lying ones), push crates (one into the stream = a stepping stone)</dd>
+    <dt>M</dt><dd>sound on / off</dd>
+    <dt>U</dt><dd>music on / off (adaptive: calmer when exploring, drums in fights)</dd>
+    <dt>5 / 6 / 7 / 8</dt><dd>ambience on / off: wind · wildlife · depth (foreground, clouds, shafts, reflections) · flow (camera, trails, marks)</dd>
+    <dt>H</dt><dd>show / hide controls</dd>
+  </dl>
+  <div class="stat" id="stat"></div>
+</div>
+<div id="pause" hidden>
+  <div class="menu" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+    <aside class="rail">
+      <div class="brand"><small>Proving Grounds</small><strong id="menu-title">Paused</strong></div>
+      <nav class="tabs" aria-label="Pause menu">
+        <button class="tab active" data-tab="overview" type="button">Overview</button>
+        <button class="tab" data-tab="settings" type="button">Settings</button>
+        <button class="tab" data-tab="sound" type="button">Sound</button>
+        <button class="tab" data-tab="character" type="button">Character</button>
+        <button class="tab" data-tab="developer" type="button">Developer</button>
+      </nav>
+      <button class="resume" type="button" data-resume>Resume <span>· Esc</span></button>
+    </aside>
+    <main class="pane">
+      <header class="pane-head"><div><div class="eyebrow" id="section-kicker">Sandbox</div><h2 id="section-title">Quick overview</h2><p id="section-description">A paused snapshot of the current proving grounds.</p></div><button class="close-menu" type="button" data-resume aria-label="Resume game">✕</button></header>
+      <section class="section active" data-section="overview">
+        <div class="cards">
+          <article class="card"><h3>Movement</h3><p>WASD / arrows to run · Shift to sprint · Q to walk · Space to roll or leap.</p></article>
+          <article class="card"><h3>Combat</h3><p>Hold left mouse to draw and release to shoot · right mouse or 1–4 for abilities.</p></article>
+          <article class="card"><h3>World</h3><p>E to interact · N to change biome · T to change time · L for player lantern.</p></article>
+          <article class="card"><h3>Developer</h3><p>Use the Developer tab to inspect hit counts, toggle overlays, and compare environment setups.</p></article>
+        </div>
+        <p class="menu-note" id="overview-status"></p>
+      </section>
+      <section class="section" data-section="settings">
+        <div class="control-list">
+          <div class="control-row"><div><span class="label">Render size</span><small>Pixel resolution used by the game view</small></div><div class="choice" data-setting="resolution"><button type="button" data-value="0">Game view</button><button type="button" data-value="1">Close-up</button></div></div>
+          <div class="control-row"><div><span class="label">Ground projection</span><small>Movement feel and floor perspective</small></div><div class="choice" data-setting="projection"><button type="button" data-value="0">Game · 55°</button><button type="button" data-value="1">Sprite · 20°</button></div></div>
+          <div class="control-row"><div><span class="label">Time of day</span><small>Preview lighting in this biome</small></div><div class="choice" data-setting="time"></div></div>
+          <div class="control-row"><div><span class="label">Character lighting</span><small>Compare smooth shading with flat pixel clusters</small></div><div class="choice" data-setting="lighting"><button type="button" data-value="smooth">Smooth</button><button type="button" data-value="banded">Banded</button></div></div>
+          <div class="control-row"><div><span class="label">Player lantern</span><small>Carry a local light source</small></div><button class="select" data-toggle="lantern" type="button"></button></div>
+          <div class="control-row"><div><span class="label">Weather</span><small>Particles and fog</small></div><button class="select" data-toggle="weather" type="button"></button></div>
+          <div class="control-row"><div><span class="label">Ambience</span><small>Show-only layers · keys 5 · 6 · 7 · 8</small></div><div class="choice"><button type="button" data-toggle="amb-0"></button><button type="button" data-toggle="amb-1"></button><button type="button" data-toggle="amb-2"></button><button type="button" data-toggle="amb-3"></button></div></div>
+        </div>
+      </section>
+      <section class="section" data-section="sound">
+        <div class="control-list">
+          <div class="control-row"><div><span class="label">Sound</span><small>Everything on or off · M</small></div><div class="choice"><button type="button" data-toggle="sound"></button><button type="button" data-toggle="music"></button></div></div>
+          <div class="control-row"><div><label for="vol-master">Master volume</label><small>The whole mix</small></div><div class="slider"><input id="vol-master" type="range" min="0" max="100" step="1" data-volume="master"><output for="vol-master"></output></div></div>
+          <div class="control-row"><div><label for="vol-music">Music</label><small>The adaptive score · U toggles it</small></div><div class="slider"><input id="vol-music" type="range" min="0" max="100" step="1" data-volume="music"><output for="vol-music"></output></div></div>
+          <div class="control-row"><div><label for="vol-sfx">Effects</label><small>Bow, hits, breakables, footsteps</small></div><div class="slider"><input id="vol-sfx" type="range" min="0" max="100" step="1" data-volume="sfx"><output for="vol-sfx"></output></div></div>
+          <div class="control-row"><div><label for="vol-amb">Ambience</label><small>Wind, birds, drones, the stream</small></div><div class="slider"><input id="vol-amb" type="range" min="0" max="100" step="1" data-volume="amb"><output for="vol-amb"></output></div></div>
+          <div class="control-row"><div><span class="label">Music intensity</span><small>Adaptive follows play; the others hold a level</small></div><div class="choice" data-setting="music-mode"><button type="button" data-value="adaptive">Adaptive</button><button type="button" data-value="explore">Exploration</button><button type="button" data-value="combat">Combat</button></div></div>
+        </div>
+        <p class="menu-note" id="music-status"></p>
+      </section>
+      <section class="section" data-section="character">
+        <div class="eyebrow">Appearance</div>
+        <div class="control-row" style="margin:10px 0 16px"><div><span class="label">Loadout</span><small>Same skeleton and animation set across outfits</small></div><div class="choice" data-setting="loadout"></div></div>
+        <div class="eyebrow">Live character readout</div><div class="readout" id="character-readout"></div>
+      </section>
+      <section class="section" data-section="developer">
+        <div class="eyebrow">Scene setup</div>
+        <div class="control-row" style="margin:10px 0"><div><span class="label">Biome</span><small>Switch the environment while keeping this scene loaded</small></div><div class="choice" data-setting="biome"></div></div>
+        <div class="eyebrow" style="margin-top:18px">Debug overlays</div>
+        <div class="control-list" style="margin-top:10px">
+          <div class="control-row"><div><span class="label">Hit boxes and zones</span><small>Colliders, play bounds, climb marks</small></div><button class="select" data-toggle="zones" type="button"></button></div>
+          <div class="control-row"><div><span class="label">Skeleton bones</span><small>Draw the active frame's bone pivots</small></div><button class="select" data-toggle="bones" type="button"></button></div>
+          <div class="control-row"><div><span class="label">Foot contacts</span><small>Planted foot and gait phase while moving</small></div><button class="select" data-toggle="feet" type="button"></button></div>
+          <div class="control-row"><div><span class="label">Shiny armour experiment</span><small>Experimental specular layer</small></div><button class="select" data-toggle="armour" type="button"></button></div>
+          <div class="control-row"><div><span class="label">Bow string render</span><small>Pixel-art string or high-definition overlay</small></div><button class="select" data-toggle="pixel-bow" type="button"></button></div>
+        </div>
+        <div class="eyebrow" style="margin-top:18px">Runtime snapshot</div><div class="readout" id="dev-readout"></div>
+      </section>
+    </main>
+  </div>
+</div>
+<div id="load">Loading sprites…</div>
+<script type="module">
+// PROVING GROUNDS: the skeleton playground's player (player.js, shared with demo.html) in a small test arena.
+// The environment is split into modules so they can be built in parallel (each file states its contract):
+//   arena/layout.js   where things are, colliders (metres)      arena/biomes.js    how ground + props look per biome
+//   arena/lighting.js time of day, lights, shadows, lit player  arena/atmos.js     weather, particles, ground fx
+import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from './arena/layout.js';
+import {createProps3D, extraProps} from './arena/props3d.js';   // 3D-rendered props, lit per pixel + prop physics (R: on / off)
+import {createCombat} from './arena/combat.js';
+import {createArmor} from './arena/armor.js';   // experiment: shiny armour (X)
+import {BIOMES} from './arena/biomes.js';
+import {createLighting} from './arena/lighting.js';
+import {createAtmos} from './arena/atmos.js';
+import {createAudio} from './arena/audio.js';   // procedural sound (M mutes); a no-op until the first key / click
+import {ClothRig, depthOf, CLOTH_PARAMS} from './cloth.js';   // runtime cloak (owned by the physics/animation session)
+// ambience (show only, keys 5-8): one wind, wildlife, depth layers, motion + feel. See each file's contract.
+import {createWind} from './arena/wind.js';
+import {createWildlife} from './arena/wildlife.js';
+import {createDepth} from './arena/depth.js';
+import {createFlow} from './arena/flow.js';
+import {createPlayer, loadSet, atlasOf, BUSY, AIM_H} from './player.js';   // the player, shared with demo.html
+import {harmonizeSet, setHarmonized} from './harmonize.js';   // palette shim for atlases not yet re-pixelized (out/integration)
+// Feel test for the base skeleton. Sprites and clip metadata come from pixel_rig + pixelize (out/skel).
+// The player moves by its own physics (input, acceleration, collisions). The walk clip only follows:
+// its phase is the distance actually travelled divided by the stride measured in Blender, so the planted foot
+// stays put at any speed, when blocked, and when stopping. Facing uses only the 8 rendered directions and trails
+// the movement by one 45 deg step at a time.
+const $ = s => document.querySelector(s);
+// Loadouts: each is ONE atlas rendered with body + garments together (correct outlines/depth between layers),
+// switched as a whole when the loadout changes. Same skeleton, pivot and scale, so the clip metadata lines up.
+const LOADOUTS = [['ranger basic', 'out/outfits/ranger_basic/'], ['ranger + cloth sim', 'out/outfits/ranger_sim/'], ['bare body', 'out/skel/']];
+const LOAD_OPTS = {normals: true, ClothRig};   // normal maps for the lighting (in the background), cloth for sim sets
+let loadI = {body: 2, sim: 1}[new URLSearchParams(location.search).get('set')] ?? 0;
+let {idx, SP, CLIP, OV, rig} = harmonizeSet(await loadSet(LOADOUTS[loadI][1], LOAD_OPTS));
+setHarmonized(new URLSearchParams(location.search).get('harm') !== '0');   // baked sheets pass through unchanged
+const atlas = atlasOf({idx, SP, CLIP, OV});   // live: the player reads the current loadout through this object
+let {FW, FH, PIV, DIRS, ND} = atlas;
+async function setLoadout(i) {
+  if (i === loadI) return;
+  loadI = (i + LOADOUTS.length) % LOADOUTS.length;
+  ({idx, SP, CLIP, OV, rig} = harmonizeSet(await loadSet(LOADOUTS[loadI][1], LOAD_OPTS))); rig.reset?.();
+  const old = ND; Object.assign(atlas, atlasOf({idx, SP, CLIP, OV})); ({FW, FH, PIV, DIRS, ND} = atlas);
+  P.face = Math.round(P.face * ND / old) % ND; P.want = P.face;
+}
+async function switchLoadout() { await setLoadout(loadI + 1); }
+$('#load').remove();
+// metres -> screen px. Heights use the sprite camera's pitch; the ground depth uses either the game camera (55°,
+// natural-feeling movement, some foot slip going N/S) or the sprite camera (20°, feet exact, N/S movement squashed).
+const PPM = idx.fwd_px.E[0], PPMH = PPM * Math.cos(idx.pitch * Math.PI / 180);
+const PROJ = [['game 55°', PPM * Math.sin(55 * Math.PI / 180)], ['sprite 20°', idx.fwd_px.S[1]]];
+let projI = 0, PPMY = PROJ[0][1];
+
+// ---------------- view ----------------
+const RES = [[480, 270], [320, 180]];
+let resI = 0, VW, VH, scale;
+const cv = $('#screen'), g = cv.getContext('2d'), ov = $('#over'), og = ov.getContext('2d');
+function resize() {
+  [VW, VH] = RES[resI];
+  scale = Math.max(1, Math.floor(Math.min(innerWidth / VW, innerHeight / VH)));
+  cv.width = VW; cv.height = VH; cv.style.width = VW * scale + 'px'; cv.style.height = VH * scale + 'px';
+  ov.width = VW * scale; ov.height = VH * scale; ov.style.width = cv.style.width; ov.style.height = cv.style.height;
+  g.imageSmoothingEnabled = false;
+}
+addEventListener('resize', resize); resize();
+
+// ---------------- world (metres) ----------------
+const {WM, HM} = WORLD, WPX = Math.ceil(WM * PPM);
+let HPX = Math.ceil(HM * PPMY);
+const toS = (x, y, h = 0) => [x * PPM, y * PPMY - h * PPMH];
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const LEATHER = ['#9a6c44', '#6e4a2e', '#4a3020', '#261814'], HAIR = ['#b0703e', '#84502e', '#5c3522', '#2e1a16'], CHAR = ['#5e5860', '#423e48', '#2e2b34', '#18161c'];
+const layout = buildLayout(7), props = layout.props;
+extraProps(props);   // (before combat: it lists its hittables once)
+// ONE shared ctx object, updated in place (modules keep the reference): view size changes on Z, ground height on P
+const ctx = {}, makeCtx = () => Object.assign(ctx, {PPM, PPMY, PPMH, toS, WM, HM, WPX, HPX, VW, VH, PLAY, layout});
+makeCtx();
+const q0 = new URLSearchParams(location.search);
+let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === q0.get('biome'))), biome = BIOMES[biomeI];
+const lighting = createLighting(ctx), atmos = createAtmos(ctx), armor = createArmor(ctx);
+const audio = createAudio(ctx, {arrows: () => arrows, props, combat: () => combat, wind: () => wind});   // getters: created further down
+lighting.banded = q0.get('band') === '1';   // V toggles (integration step 2)
+// ---------------- AMBIENCE HOST: what the four show-only modules (wind, wildlife, depth, flow) can see ----------------
+// Getters: the modules exist from here on (setBiome / setTime notify them), but the player, arrows and camera are made
+// further down, so nothing may read them before the first update / draw.
+const AMB_HOST = {
+  props, layout, elev, inStream,
+  get P() { return P; }, get arrows() { return arrows; }, get events() { return events; }, get mouse() { return mouse; },
+  get wind() { return wind; },
+  cam: () => cam, biome: () => biome.id, time: () => lighting.TIMES[lighting.time], mood: () => lighting.mood(),
+  spriteOf: p => spriteOf(p), cursorAim: () => cursorAim(), shots: () => PL.shots,
+  // the current player frame: sheet + source rect; sx, sy = its pivot on the view this frame (same rounding as the draw)
+  player: () => { const PF = SP[P.frame] || SP['idle.0'], [x, y] = toS(P.x, P.y, P.z);
+    return {img: PF.img, nrm: PF.nrm, srcX: P.face * FW, w: FW, h: FH, pivot: PIV, sx: Math.round(x - cam.fx), sy: Math.round(y - cam.fy), frame: P.frame, face: P.face, nd: ND}; },
+  // body + runtime cloak (unlit albedo) with the frame's top-left at (x, y). Only BEFORE the player's own draw in a frame
+  // (ground pass / sortables behind him): the cloak's rig.covers() must end up describing the real draw
+  drawPlayer: (q, x, y) => { const PF = SP[P.frame] || SP['idle.0'];
+    q.drawImage(armor.albedo(P.frame, PF.img), P.face * FW, 0, FW, FH, x, y, FW, FH);
+    if (rig.active && PF.depth) rig.draw(q, x, y, depthOf(PF.depth), P.face); },
+};
+const wind = createWind(ctx, AMB_HOST), wildlife = createWildlife(ctx, AMB_HOST), depth = createDepth(ctx, AMB_HOST), flow = createFlow(ctx, AMB_HOST);
+const AMB = [wind, wildlife, depth, flow];
+atmos.windSrc = () => wind.on ? wind.atmosGust() : null;   // atmos's leaves / snow / fog ride the same gusts
+const CLOTH_CALM = {wind: [...CLOTH_PARAMS.wind], gust: CLOTH_PARAMS.gust};   // the cloak's own breeze when the wind is off
+const ground = document.createElement('canvas');
+function paintGround() {
+  HPX = Math.ceil(HM * PPMY); makeCtx(); ground.width = WPX; ground.height = HPX;
+  const q = ground.getContext('2d'); q.imageSmoothingEnabled = false;
+  biome.paintGround(q, ctx);
+}
+function setBiome(i) {
+  biomeI = (i + BIOMES.length) % BIOMES.length; biome = BIOMES[biomeI];
+  paintGround(); lighting.setBiome(biome.id); atmos.setBiome(biome.id);
+  for (const m of AMB) m.setBiome(biome.id);
+}
+setBiome(biomeI);
+// time of day lives in lighting; atmosphere follows it (fireflies mostly at night)
+function setTime(i) { lighting.setTime(i); const t = lighting.TIMES[lighting.time]; atmos.night = t === 'night' ? 1 : t === 'dusk' ? .6 : .2;
+  for (const m of AMB) m.setTime(t); }
+setTime(q0.get('time') ? Math.max(0, lighting.TIMES.indexOf(q0.get('time'))) : 0);
+function spriteCanvas(w, h, paint) { const c = document.createElement('canvas'); c.width = w; c.height = h; paint(c.getContext('2d')); return c; }
+const px = (q, c, x, y, w = 1, h = 1) => { q.fillStyle = c; q.fillRect(x, y, w, h); };
+const DUMMY = spriteCanvas(22, 44, q => {  // fallback training dummy (a biome may supply its own), pivot (11, 43), ~1.5 m
+  px(q, LEATHER[3], 9, 18, 4, 26); px(q, LEATHER[1], 10, 19, 2, 24); px(q, LEATHER[0], 10, 19, 1, 24);
+  px(q, HAIR[3], 3, 14, 16, 14); px(q, HAIR[1], 4, 15, 14, 12); px(q, HAIR[0], 5, 16, 5, 8); px(q, HAIR[2], 14, 17, 3, 9);
+  px(q, LEATHER[2], 4, 21, 14, 2);
+  px(q, CHAR[3], 6, 3, 10, 12); px(q, '#c8b48a', 7, 4, 8, 10); px(q, '#e0d0a8', 7, 4, 4, 5); px(q, '#9a8660', 13, 7, 2, 7);
+  px(q, '#a8342b', 9, 8, 4, 3); px(q, '#d8573e', 10, 9, 2, 1);
+});
+const DUMMY_SPRITE = {img: DUMMY, pivot: [11, 43]};
+// placeholder boxes for new prop kinds until the biome paints them (so mechanics can be tested before the art)
+const PH = {crate: [.8, .8, '#8a6a44'], barrel: [.6, .9, '#6e4a2e'], barrel_x: [.6, .9, '#a8342b'], pot: [.45, .55, '#b0703e'],
+  crystal: [.8, 1.3, '#9a7ae0'], chest: [.9, .6, '#c9a45a'], brute: [.7, 1.6, '#84502e']}, phCache = {};
+function placeholder(p) {
+  const d = PH[p.kind]; if (!d) return null;
+  const k = p.kind + (p.stage || 0) + (p.opened ? 'o' : ''); if (phCache[k]) return phCache[k];
+  const w = Math.round(d[0] * PPM), h = Math.round(d[1] * PPMH * (p.stage === 2 ? .25 : p.opened ? .7 : 1));
+  return (phCache[k] = {img: spriteCanvas(w, h, q => { px(q, '#18161c', 0, 0, w, h); px(q, d[2], 1, 1, w - 2, h - 2); px(q, '#ffffff33', 1, 1, w - 2, 2); }), pivot: [w >> 1, h - 1]});
+}
+const spriteOf = p => props3d?.sprite(p, biome.id, () => biome.sprite(p, ctx)) ?? biome.sprite(p, ctx) ?? (p.kind === 'dummy' ? DUMMY_SPRITE : placeholder(p));
+let props3d = null;   // created once combat exists (below)
+let showZones = false;
+const arrows = [], dust = [], pops = [], events = [];
+
+// ---------------- player ----------------
+let cam = {x: 0, y: 0, fx: null, fy: null};
+const keys = new Set(); let mouse = {x: 0, y: 0, down: false}, showBones = false, showFeet = false, hits = 0;
+const R_BODY = .25;
+// walkable = the arena (+3 m out of the gates) or the trail; never into water (unless leaping) or up a cliff.
+// Props only collide with things on their own level (a crate on the plateau doesn't block the ground below it).
+function blocked(x, y, z = P.z, air = false) {
+  const arena = x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3;
+  const trail = x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1;
+  if (!arena && !trail) return true;
+  if (!air && inStream(x, y)) return true;
+  if (elev(x, y) > z + .3) return true;   // cliff face from below
+  return props.some(p => !p.broken && Math.abs((p.z || 0) - z) < 1 && (p.rect ? x > p.rect[0] - R_BODY && x < p.rect[2] + R_BODY && y > p.rect[1] - R_BODY * .6 && y < p.rect[3] + R_BODY * .6
+    : p.r && Math.hypot(p.x - x, (p.y - y) * 1.6) < p.r + R_BODY));
+}
+// ARPG targeting: when the cursor is over something hittable (its sprite on screen), aim at THAT thing, at a height
+// inside its hit box. Low things (pots, crates) would otherwise be missed: the cursor is read at chest height.
+function hoverTarget() {
+  let best = null, by = -1e9;
+  for (const p of props) {
+    if (p.broken || !(p.target || p.hp > 0)) continue;
+    const sp = spriteOf(p); if (!sp) continue;
+    const [gx, gy] = toS(p.x, p.y, (p.z || 0) + (p.h || 0)), x0 = gx - cam.x - sp.pivot[0], y0 = gy - cam.y - sp.pivot[1];
+    if (mouse.x >= x0 - 2 && mouse.x < x0 + sp.img.width + 2 && mouse.y >= y0 - 2 && mouse.y < y0 + sp.img.height + 2 && p.y > by) { best = p; by = p.y; }   // front-most
+  }
+  return best;
+}
+let pixelBow = new URLSearchParams(location.search).get('bow') !== 'hd';   // J: bowstring, nocked + flying arrows at art pixels, lit (default) / HD overlay
+const PL = createPlayer({
+  ctx, atlas, keys, mouse, cam, blocked, elev, inStream, plateaus: PLATEAUS, events, pixelBow: () => pixelBow,
+  onShoot: a => arrows.push(a),
+  aimTarget: () => { const t = hoverTarget(); return t && {x: t.x, y: t.y, h: (t.z || 0) + (t.h || 0) + Math.min(AIM_H, (t.hitH ?? 1.6) * .55), target: t}; },
+  nearInteract: P => { let best = null, bd = 1.3;
+    for (const p of props) if (p.interact && !p.opened && Math.abs((p.z || 0) - P.z) < .5) { const d = Math.hypot(p.x - P.x, p.y - P.y); if (d < bd) { bd = d; best = p; } }
+    return best; },
+  onInteract: p => combat.interact(p),
+  dust: (fx, fy, side, big) => {
+    if (biome.dust === false) return;
+    for (let i = 0; i < 3 + big * 2; i++) dust.push({x: fx + (Math.random() - .5) * 3, y: fy, vx: (Math.random() - .5) * 14, vy: -Math.random() * 5, t: 0, life: .3 + Math.random() * .2});
+  },
+  shake: (a, sec) => shake(a, sec),
+});
+const P = PL.P; Object.assign(P, {x: layout.spawn.x, y: layout.spawn.y});
+const {step, tryLeap, interact, climbSpot, nearInteract, cursorAim, dirOf} = PL;
+// camera shake + hitstop (combat feel)
+let freeze = 0; const shakeS = {a: 0, t: 0};
+function shake(a, sec) { if (a >= shakeS.a * (shakeS.t > 0 ? 1 : 0)) { shakeS.a = a; shakeS.t = sec; } }
+window.__demo = {P, keys};  // debug handle (same name as demo.html so its test scripts work here)
+const combat = createCombat(ctx, {
+  props, arrows, P, events, elev, inStream, dirOf: (dx, dy) => dirOf(dx, dy),
+  spawnArrow: o => { arrows.push({life: 1.6, vh: 0, kind: 'arrow', ...o}); },
+  aim: () => cursorAim(),
+  hitstop: sec => { freeze = Math.max(freeze, sec); },
+  shake: (px, sec) => shake(px, sec),
+  knock: (vx, vy) => PL.knock(vx, vy),
+  play: (frame, sec) => PL.hold(frame, sec),
+});
+props3d = await createProps3D(ctx, {props, P, elev, inStream, stream: STREAM, moveInput: () => PL.moveInput(), combat, events,
+  knock: (vx, vy) => PL.knock(vx, vy)});
+let paused = false;
+const pauseMenu = $('#pause');
+const MENU_SECTIONS = {
+  overview: ['Sandbox', 'Quick overview', 'A paused snapshot of the current proving grounds.'],
+  settings: ['Options', 'Settings', 'Tune the view, lighting, and atmosphere.'],
+  sound: ['Options', 'Sound', 'Volumes, music, and how the score follows play.'],
+  character: ['Loadout', 'Character', 'Change the player appearance and inspect the live animation state.'],
+  developer: ['Diagnostics', 'Developer tools', 'Compare scene setups and reveal runtime overlays.'],
+};
+function menuTab(name) {
+  for (const b of pauseMenu.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === name);
+  for (const s of pauseMenu.querySelectorAll('[data-section]')) s.classList.toggle('active', s.dataset.section === name);
+  const [kicker, title, description] = MENU_SECTIONS[name] || MENU_SECTIONS.overview;
+  $('#section-kicker').textContent = kicker; $('#section-title').textContent = title; $('#section-description').textContent = description;
+}
+for (const b of pauseMenu.querySelectorAll('[data-tab]')) b.addEventListener('click', () => menuTab(b.dataset.tab));
+function togglePause(force) {
+  const next = force ?? !paused;
+  if (next === paused) return;
+  paused = next; pauseMenu.hidden = !paused;
+  if (paused) {
+    keys.clear(); PL.onInteractUp(); mouse.down = false;
+    // Cancelling an in-progress draw avoids an accidental arrow when the menu opens.
+    if (P.state === 'draw') { P.state = 'idle'; P.recover = 0; }
+    refreshMenu(); pauseMenu.querySelector('[data-resume]').focus();
+  } else $('#hud-toggle').focus();
+}
+function stateButton(el, active, on = 'On', off = 'Off') {
+  el.textContent = active ? on : off; el.classList.toggle('selected', !!active); el.setAttribute('aria-pressed', String(!!active));
+}
+function selectValue(root, value) {
+  for (const b of root.querySelectorAll('button[data-value]')) {
+    const selected = b.dataset.value === String(value);
+    b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected));
+  }
+}
+function refreshMenu() {
+  selectValue(pauseMenu.querySelector('[data-setting="resolution"]'), resI);
+  selectValue(pauseMenu.querySelector('[data-setting="projection"]'), projI);
+  selectValue(pauseMenu.querySelector('[data-setting="lighting"]'), lighting.banded ? 'banded' : 'smooth');
+  const time = pauseMenu.querySelector('[data-setting="time"]'); time.replaceChildren();
+  lighting.TIMES.forEach((name, i) => { const b = document.createElement('button'); b.type = 'button'; b.dataset.value = String(i); b.textContent = name[0].toUpperCase() + name.slice(1); time.append(b); });
+  selectValue(time, lighting.time);
+  const loadouts = pauseMenu.querySelector('[data-setting="loadout"]'); loadouts.replaceChildren();
+  LOADOUTS.forEach(([name], i) => { const b = document.createElement('button'); b.type = 'button'; b.dataset.value = String(i); b.textContent = name.replace('ranger ', '').replace(' + cloth sim', ' + cloak'); loadouts.append(b); });
+  selectValue(loadouts, loadI);
+  const biomes = pauseMenu.querySelector('[data-setting="biome"]'); biomes.replaceChildren();
+  BIOMES.forEach((b, i) => { const button = document.createElement('button'); button.type = 'button'; button.dataset.value = String(i); button.textContent = b.name; biomes.append(button); });
+  selectValue(biomes, biomeI);
+  stateButton(pauseMenu.querySelector('[data-toggle="lantern"]'), lighting.lantern);
+  stateButton(pauseMenu.querySelector('[data-toggle="weather"]'), atmos.on, 'Weather on', 'Weather off');
+  ['Wind', 'Wildlife', 'Depth', 'Flow'].forEach((n, i) => stateButton(pauseMenu.querySelector(`[data-toggle="amb-${i}"]`), AMB[i].on, n, n + ' off'));
+  stateButton(pauseMenu.querySelector('[data-toggle="sound"]'), !audio.muted, 'Sound on', 'Muted');
+  stateButton(pauseMenu.querySelector('[data-toggle="music"]'), audio.musicOn, 'Music on', 'Music off');
+  const vols = audio.volumes;
+  for (const el of pauseMenu.querySelectorAll('[data-volume]')) { el.value = Math.round(vols[el.dataset.volume] * 100); el.nextElementSibling.textContent = el.value + '%'; }
+  selectValue(pauseMenu.querySelector('[data-setting="music-mode"]'), audio.musicMode);
+  const ms = audio.music?.state;
+  $('#music-status').textContent = !audio.on ? 'Sound starts after your first key press or click.' : ms ? `Now playing: ${ms.biome} · ${ms.section} (intensity ${Math.round(ms.I * 100)}%)` : '';
+  stateButton(pauseMenu.querySelector('[data-toggle="zones"]'), showZones);
+  stateButton(pauseMenu.querySelector('[data-toggle="bones"]'), showBones);
+  stateButton(pauseMenu.querySelector('[data-toggle="feet"]'), showFeet);
+  stateButton(pauseMenu.querySelector('[data-toggle="armour"]'), armor.on);
+  stateButton(pauseMenu.querySelector('[data-toggle="pixel-bow"]'), pixelBow, 'Pixel-art', 'HD overlay');
+  $('#overview-status').textContent = `${biome.name} · ${lighting.TIMES[lighting.time]} · ${LOADOUTS[loadI][0]}`;
+  $('#character-readout').innerHTML = `<strong>Animation</strong> ${P.frame} · <strong>Facing</strong> ${DIRS[P.face]}<br><strong>Position</strong> ${P.x.toFixed(2)}, ${P.y.toFixed(2)} m · <strong>Height</strong> ${P.z.toFixed(2)} m<br><strong>Movement speed</strong> ${Math.hypot(P.vx, P.vy).toFixed(2)} m/s · <strong>State</strong> ${P.state}`;
+  $('#dev-readout').innerHTML = `<strong>Time</strong> ${lighting.TIMES[lighting.time]} · <strong>Resolution</strong> ${VW}×${VH}<br><strong>Hits / shots</strong> ${hits} / ${PL.shots} · <strong>Gold</strong> ${combat.gold}<br><strong>Lighting</strong> ${lighting.debug || '—'}<br><strong>Weather particles</strong> ${atmos.count}<br><strong>Ambience</strong> ${AMB.map((m, i) => `${['wind', 'wildlife', 'depth', 'flow'][i]} ${m.on ? m.ms.toFixed(2) + ' ms' : 'off'}`).join(' · ')}`;
+}
+pauseMenu.addEventListener('click', async e => {
+  const tab = e.target.closest('[data-tab]');
+  if (tab) { menuTab(tab.dataset.tab); return; }
+  if (e.target.closest('[data-resume]')) { togglePause(false); return; }
+  const choice = e.target.closest('button[data-value]');
+  if (choice) {
+    const group = choice.closest('[data-setting]'), value = choice.dataset.value;
+    if (!group) return;
+    if (group.dataset.setting === 'resolution') { resI = +value; resize(); makeCtx(); }
+    else if (group.dataset.setting === 'projection') { projI = +value; PPMY = PROJ[projI][1]; paintGround(); cam.fx = cam.fy = null; }
+    else if (group.dataset.setting === 'time') setTime(+value);
+    else if (group.dataset.setting === 'lighting') lighting.banded = value === 'banded';
+    else if (group.dataset.setting === 'loadout') await setLoadout(+value);
+    else if (group.dataset.setting === 'biome') setBiome(+value);
+    else if (group.dataset.setting === 'music-mode') audio.setMusicMode(value);
+    refreshMenu(); return;
+  }
+  const toggle = e.target.closest('[data-toggle]'); if (!toggle) return;
+  switch (toggle.dataset.toggle) {
+    case 'lantern': lighting.toggleLantern(); break;
+    case 'weather': atmos.toggle(); break;
+    case 'sound': audio.toggle(); break;
+    case 'music': audio.toggleMusic(); break;
+    case 'zones': showZones = !showZones; break;
+    case 'bones': showBones = !showBones; break;
+    case 'feet': showFeet = !showFeet; break;
+    case 'armour': toggleArmour(); break;
+    case 'pixel-bow': pixelBow = !pixelBow; break;
+    case 'amb-0': case 'amb-1': case 'amb-2': case 'amb-3': AMB[+toggle.dataset.toggle.slice(4)].toggle(); break;
+  }
+  refreshMenu();
+});
+function toggleArmour() { if (armor.toggle()) { armor.setAtlas(LOADOUTS[loadI][1]); armor.preload(Object.keys(SP)); } }
+$('#hud-toggle').addEventListener('click', () => $('#help-toggle').click());
+function toggleHelp() {
+  const hud = $('#hud'); hud.classList.toggle('min');
+  const expanded = !hud.classList.contains('min');
+  $('#help-toggle').setAttribute('aria-expanded', String(expanded)); $('#hud-toggle').setAttribute('aria-expanded', String(expanded));
+}
+$('#help-toggle').addEventListener('click', toggleHelp);
+pauseMenu.addEventListener('click', e => { if (e.target === pauseMenu) togglePause(false); });
+pauseMenu.addEventListener('input', e => {   // volume sliders apply live while dragging
+  const el = e.target.closest('[data-volume]'); if (!el) return;
+  audio.setVolume(el.dataset.volume, el.value / 100); el.nextElementSibling.textContent = el.value + '%';
+});
+pauseMenu.addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const focusable = [...pauseMenu.querySelectorAll('button:not(:disabled),[href],input,select,[tabindex]:not([tabindex="-1"])')].filter(el => el.getClientRects().length);
+  if (!focusable.length) return;
+  const first = focusable[0], last = focusable.at(-1);
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase(); if (!paused && [' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+  if (e.repeat) return;
+  if (q0.get('sheet')) return;
+  if (k === 'escape') { e.preventDefault(); togglePause(); return; }
+  if (paused) return;
+  keys.add(k);
+  if (k === ' ') PL.onSpace();   // roll (also while aiming), or leap toward water
+  if (k === 'e') PL.onInteractKey();
+  if (k >= '1' && k <= '4' && !BUSY.has(P.state)) combat.ability(+k);
+  if (k === 'b') showBones = !showBones;
+  if (k === 'f') showFeet = !showFeet;
+  if (k === 'z') { resI = 1 - resI; resize(); makeCtx(); }
+  if (k === 'p') { projI = 1 - projI; PPMY = PROJ[projI][1]; paintGround(); cam.fx = null; }
+  if (k === 'n') setBiome(biomeI + (e.shiftKey ? -1 : 1));
+  if (k === 't') setTime(lighting.time + 1);
+  if (k === 'l') lighting.toggleLantern();
+  if (k === 'k') atmos.toggle();
+  if (k === 'm') audio.toggle();
+  if (k === 'u') audio.toggleMusic();
+  if (k === 'g') showZones = !showZones;
+  if (k === 'x') toggleArmour();
+  if (k === 'h') toggleHelp();
+  if (k === 'o') switchLoadout();
+  if (k === 'v') lighting.banded = !lighting.banded;
+  if (k === 'j') pixelBow = !pixelBow;
+  if (k === 'r' && props3d) props3d.on = !props3d.on;   // 3D props / the biome's painted props (A/B)
+  if (k >= '5' && k <= '8') AMB[+k - 5].toggle();   // ambience A/B: 5 wind, 6 wildlife, 7 depth, 8 flow
+});
+addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys.delete(k); if (k === 'e') PL.onInteractUp(); });
+addEventListener('blur', () => { keys.clear(); mouse.down = false; });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+addEventListener('mousemove', e => { const r = cv.getBoundingClientRect(); mouse.x = (e.clientX - r.left) / scale; mouse.y = (e.clientY - r.top) / scale; });
+addEventListener('mousedown', e => { if (paused) return; if (e.button === 2 && !BUSY.has(P.state)) combat.ability('rmb'); if (e.button === 0) PL.press(); });
+addEventListener('mouseup', e => { if (!paused && e.button === 0) PL.release(); });
+
+function stepFx(dt) {
+  for (const a of arrows) {
+    if (a.stuck) { a.life -= dt; continue; }
+    a.x += a.vx * dt; a.y += a.vy * dt; a.h += a.vh * dt; a.vh -= .9 * dt;   // barely any drop within bow range a.life -= dt;
+    (a.trail ??= []).push([a.x, a.y, a.h]); if (a.trail.length > 7) a.trail.shift();
+    for (const p of props) {
+      if (p.broken || !(p.target || p.hp > 0) || (a.hitSet && a.hitSet.has(p))) continue;
+      const rel = a.h - (p.z || 0) - (p.h || 0);
+      if (Math.hypot(p.x - a.x, p.y - a.y) < (p.hitR ?? .45) && rel > -.2 && rel < (p.hitH ?? 1.6)) {
+        hits++; pops.push({x: p.x, y: p.y, z: p.z || 0, t: 0}); events.push({type: 'hit', x: p.x, y: p.y, vx: a.vx, vy: a.vy, prop: p});
+        if (combat.onArrowHit(a, p) === 'pierce') (a.hitSet ??= new Set()).add(p); else { a.life = -9; break; }
+      }
+    }
+    if (a.life <= -9) continue;
+    const ground = elev(a.x, a.y);
+    if (!a.stuck && props.some(p => !p.broken && !(a.hitSet && a.hitSet.has(p)) && (p.rect ? a.x > p.rect[0] && a.x < p.rect[2] && a.y > p.rect[1] && a.y < p.rect[3] : p.r > .3 && Math.hypot(p.x - a.x, (p.y - a.y) * 1.6) < p.r)
+      && a.h > (p.z || 0) && a.h < (p.z || 0) + (p.kind === 'wall_s' ? .5 : 2.5))) { a.stuck = true; a.life = 3; combat.onArrowStuck(a); }   // walls, pillars
+    else if (!a.stuck && a.h <= ground && ground === 0 && inStream(a.x, a.y)) { a.life = -9; events.push({type: 'splash', x: a.x, y: a.y, small: true}); combat.onArrowStuck(a); }
+    else if (!a.stuck && (a.h <= ground || a.life <= 0)) { a.stuck = true; a.h = Math.max(ground, Math.min(a.h, ground + 2.4)); a.life = 3; combat.onArrowStuck(a); }   // ground, cliff face
+  }
+  for (let i = arrows.length - 1; i >= 0; i--) if (arrows[i].life <= -9 || (arrows[i].stuck && arrows[i].life <= 0)) arrows.splice(i, 1);
+  for (const p of props) {
+    if (p.wob) p.wob = Math.max(0, p.wob - dt * 1.6);
+    if (p.rail) { const r = p.rail; p.x += r.dir * r.speed * dt; if (p.x > r.x1 || p.x < r.x0) { r.dir *= -1; p.x = Math.max(r.x0, Math.min(r.x1, p.x)); } }
+  }
+  combat.update(dt);
+  Object.assign(CLOTH_PARAMS, (wind.on && wind.cloth()) || CLOTH_CALM);   // the cloak catches the gust that is passing over him
+  if (rig.active) rig.update(dt, SP[P.frame]?.sim, P.face, [P.x, P.y]);
+  const evs = events.splice(0);   // one frame's events, shared by audio and atmos
+  props3d?.update(dt, evs);   // prop physics (tip / roll / push / float / debris); its own events land next frame
+  audio.update(dt, {x: P.x, y: P.y, z: P.z, vx: P.vx, vy: P.vy, state: P.state, t: P.t, aim: mouse.down, biome: biome.id, time: lighting.TIMES[lighting.time], cam}, evs);
+  atmos.update(dt, cam, {x: P.x, y: P.y, z: P.z, vx: P.vx, vy: P.vy, state: P.state}, evs);
+  for (const m of AMB) m.update(dt, evs);   // wind first: the others read it
+  for (let i = pops.length - 1; i >= 0; i--) if ((pops[i].t += dt) > .8) pops.splice(i, 1);
+  if (shakeS.t > 0) shakeS.t -= dt;
+  for (let i = dust.length - 1; i >= 0; i--) { const q = dust[i]; q.t += dt; q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= .9; if (q.t > q.life) dust.splice(i, 1); }
+}
+
+// ---------------- draw ----------------
+function shadow(x, y, w) {
+  g.fillStyle = 'rgba(12,16,10,.38)';
+  for (let r = -1; r <= 1; r++) { const hw = Math.round(w * Math.sqrt(1 - (r / 1.8) ** 2)); g.fillRect(x - hw, y + r, hw * 2, 1); }
+}
+function line(x0, y0, x1, y1, c) {
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1; let e = dx + dy;
+  g.fillStyle = c;
+  for (;;) { g.fillRect(x0, y0, 1, 1); if (x0 === x1 && y0 === y1) break; const e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+}
+// body + runtime cloak composite for lighting (albedo, normals): CPU-backed (lighting reads them back every frame),
+// sized for the cloth's raster margins (48 x 40 px around the frame); cleared on each call
+const LIT = {a: null, n: null, on: true};   // on: false = the old path (cloak drawn unlit on top), for A/B
+function litComp() {
+  const w = FW + 96, h = FH + 80;
+  for (const k of ['a', 'n']) {
+    if (!LIT[k]) { const c = document.createElement('canvas'); LIT[k] = c.getContext('2d', {willReadFrequently: true}); LIT[k].imageSmoothingEnabled = false; }
+    const q = LIT[k]; if (q.canvas.width !== w || q.canvas.height !== h) { q.canvas.width = w; q.canvas.height = h; q.imageSmoothingEnabled = false; } else q.clearRect(0, 0, w, h);
+  }
+  return [LIT.a, LIT.n];
+}
+// the flying arrows' air streaks as an emitter layer. 1.25 x the view wide ON PURPOSE: lighting.apply treats emitters wider
+// than 1.2 x the view as ground layers (emit x (1 - light), cut behind the player), so the streak is faint by day and
+// readable at night; a view-sized one would count as "in front of the player" and be added at full strength.
+const AE = {q: null, used: false};
+function arrowEmit() {
+  const w = Math.ceil(VW * 1.25), h = VH;
+  if (!AE.q) { const c = document.createElement('canvas'); AE.q = c.getContext('2d'); }
+  if (!AE.used) { const q = AE.q; if (q.canvas.width !== w || q.canvas.height !== h) { q.canvas.width = w; q.canvas.height = h; q.imageSmoothingEnabled = false; } else q.clearRect(0, 0, w, h); AE.used = true; }
+  return AE.q;
+}
+function render() {
+  AE.used = false;
+  const [pxs, pys] = toS(P.x, P.y, P.z);
+  // camera: eases after the player with a little look-ahead, snapped to whole pixels for drawing
+  const tx = Math.min(WPX - VW, Math.max(0, pxs + P.vx * PPM * .12 - VW / 2)), ty = Math.min(HPX - VH, Math.max(0, pys + P.vy * PPMY * .12 - 30 - VH / 2));
+  if (cam.fx === null) { cam.fx = tx; cam.fy = ty; }
+  if (!flow.camera(cam, tx, ty, camDt)) { const k = 1 - Math.exp(-camDt * 9); cam.fx += (tx - cam.fx) * k; cam.fy += (ty - cam.fy) * k; }   // flow (8): a spring with aim lean / kicks
+  const sk = shakeS.t > 0 ? shakeS.a * Math.min(1, shakeS.t * 8) : 0;   // shake: whole pixels, eases out
+  cam.x = Math.round(cam.fx + (Math.random() * 2 - 1) * sk); cam.y = Math.round(cam.fy + (Math.random() * 2 - 1) * sk);
+  g.drawImage(ground, cam.x, cam.y, VW, VH, 0, 0, VW, VH);
+  atmos.drawGround(g, cam);
+  depth.drawGround(g, cam); flow.drawGround(g, cam); wildlife.drawGround(g, cam);   // reflections, decals, animal shadows
+  // collect what is on screen: props (biome sprites), the player, arrows; lights and emitters on the way
+  const vis = [], lights = (biome.groundLights || []).map((l, i) => ({...l, id: l.id ?? 9000 + i})), emitters = [], casters = [];
+  if (biome.groundEmit) emitters.push({img: biome.groundEmit, x: -cam.x, y: -cam.y, wy: -1e9, ground: true});   // lava, runes: glow in the dark
+  for (const p of props) {
+    const [gx, gy] = toS(p.x, p.y, (p.z || 0) + (p.h || 0)), sx = Math.round(gx - cam.x), sy = Math.round(gy - cam.y);
+    const sp = spriteOf(p); if (!sp) continue;
+    if (sp.lights) for (const l of sp.lights) lights.push({...l, h: (l.h || 0) + (p.z || 0), x: p.x + (l.dx || 0), y: p.y + (l.dy || 0), id: props.indexOf(p) * 8 + sp.lights.indexOf(l)});
+    const w = sp.img.width, h = sp.img.height;
+    if (sx - sp.pivot[0] > VW + 8 || sx - sp.pivot[0] + w < -8 || sy - sp.pivot[1] > VH + 8 || sy - sp.pivot[1] + h < -8) continue;
+    vis.push({y: p.y, p, sp, sx, sy});
+    if (!p.outside || h > 20) casters.push({img: sp.img, sx, sy, pivot: sp.pivot, z: p.z || 0, prop: p});
+  }
+  const psx = Math.round(pxs - cam.fx), psy = Math.round(pys - cam.fy);
+  if (!SP[P.frame]) P.frame = 'idle.0';   // e.g. after switching to a loadout without that pose
+  const PF = SP[P.frame];
+  casters.push({img: PF.img, sx: psx, sy: psy, pivot: PIV, sw: FW, sh: FH, srcX: P.face * FW, player: true, z: P.z, ground: elev(P.x, P.y)});
+  for (const l of combat.lights()) lights.push(l);
+  for (const m of AMB) if (m.lights) for (const l of m.lights()) lights.push(l);   // hanging lanterns, arrow lights, ...
+  lighting.beginFrame(cam, lights, {x: P.x, y: P.y, z: P.z});
+  lighting.groundShadows(g, cam, casters);
+  const hovered = hoverTarget();
+  const list = vis.concat([{y: P.y, player: true}], arrows.map(a => ({y: a.y, a})), wind.sortables(cam), wildlife.sortables(cam), flow.sortables(cam));
+  list.sort((a, b) => a.y - b.y);
+  const occluded = [];   // occluder sprites drawn over the player: {img, x, y} view px (top-left)
+  for (const o of list) {
+    if (o.player) {
+      // relative to the UNROUNDED camera, rounded once: at a steady speed the offset is constant, so the sprite
+      // holds its screen pixel instead of toggling between two (double rounding made it look fuzzy)
+      if (!lighting.ao && P.state !== 'climb') {   // blob shadow (only when lighting's contact AO is off: A/B)
+        const gy = Math.round(toS(P.x, P.y, elev(P.x, P.y))[1] - cam.fy), air = P.z - elev(P.x, P.y);
+        shadow(psx, gy, Math.max(3, 7 - Math.round(air * 2)));
+      }
+      if (P.blink && Math.floor(P.blink * 12) % 2) continue;   // respawn blink
+      const sinkPx = Math.round((P.sink || 0) * 22);   // fell in the water: sink out of view
+      armor.setAtlas(LOADOUTS[loadI][1]);
+      if (LIT.on && rig.active && PF.depth && !sinkPx && PF.nrm?.complete && PF.nrm.naturalWidth) {
+        // runtime cloak: body + cloth composited (albedo and normals) and lit in ONE pass, so the cloak takes the same
+        // point lights, rim, fill, grade and bands as the body (drawn on top afterwards it only got the ambient)
+        const [qa, qn] = litComp(), CX = 48, CY = 40;
+        qa.drawImage(armor.albedo(P.frame, PF.img), P.face * FW, 0, FW, FH, CX, CY, FW, FH);
+        qn.drawImage(PF.nrm, P.face * FW, 0, FW, FH, CX, CY, FW, FH);
+        rig.draw(qa, CX, CY, depthOf(PF.depth), P.face, qn);
+        lighting.drawSprite(g, qa.canvas, qn.canvas, 0, 0, qa.canvas.width, qa.canvas.height, psx - PIV[0] - CX, psy - PIV[1] - CY, {x: P.x, y: P.y, z: P.z, face: P.face, nd: ND, fresh: true});
+      } else {
+        lighting.drawSprite(g, armor.albedo(P.frame, PF.img), PF.nrm || null, P.face * FW, 0, FW, FH - sinkPx, psx - PIV[0], psy - PIV[1] + sinkPx, {x: P.x, y: P.y, z: P.z, face: P.face});
+        if (rig.active && PF.depth) rig.draw(g, psx - PIV[0], psy - PIV[1], depthOf(PF.depth), P.face);
+      }
+      if (pixelBow && !sinkPx) PL.drawPixelBow(g, psx - PIV[0], psy - PIV[1]);   // before lighting.apply: lit like the scene
+    } else if (o.a) {
+      const a = o.a, [gx, gy] = toS(a.x, a.y), sx = gx - cam.x, sy = gy - cam.y;
+      const svx = a.vx * PPM, svy = a.vy * PPMY - (a.stuck ? -8 : a.vh) * PPMH, l = Math.hypot(svx, svy) || 1;
+      if (!a.stuck) { g.fillStyle = 'rgba(12,16,10,.35)'; g.fillRect(Math.round(sx), Math.round(sy), 2, 1); }
+      const hy = sy - a.h * PPMH, ux = svx / l, uy = svy / l, tail = a.stuck ? 5 : 9;
+      if (pixelBow && !a.stuck) PL.drawPixelArrow(g, a, arrowEmit());   // in flight: art pixels, depth-sorted, lit (J: HD overlay)
+      if (a.stuck) {   // stuck in the ground: a short pixel stub
+        line(sx - ux * tail, hy - uy * tail, sx, hy, LEATHER[0]);
+        g.fillStyle = '#e8e0cc'; g.fillRect(Math.round(sx - ux * tail), Math.round(hy - uy * tail), 1, 1);
+      }
+    } else if (o.draw) {   // ambience sortables: banners, animals, afterimages ({y, draw(g)})
+      o.draw(g);
+    } else {
+      const {p, sp, sx, sy} = o, wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0;
+      if (!lighting.ao && p.kind === 'dummy') shadow(sx, sy, 6);   // lighting's contact AO grounds props (L.ao)
+      if (!lighting.ao && p.kind === 'brute' && !p.broken) {   // on the ground under a hopping brute, shrinking with height
+        const gy = Math.round(toS(p.x, p.y, p.z || 0)[1] - cam.y); shadow(sx, gy, Math.max(3, 8 - Math.round((p.h || 0) * 4)));
+      }
+      if (sp.lit) lighting.drawSprite(g, sp.img, sp.nrm, 0, 0, sp.img.width, sp.img.height, sx - sp.pivot[0] + wob, sy - sp.pivot[1], {x: p.x, y: p.y, z: (p.z || 0) + (p.h || 0), prop: true});   // 3D prop: lit from its normals
+      else if (!wind.drawProp(g, sp, sx - sp.pivot[0] + wob, sy - sp.pivot[1], p)) g.drawImage(sp.img, sx - sp.pivot[0] + wob, sy - sp.pivot[1]);
+      if (p === hovered && P.state === 'draw') { g.save(); g.globalAlpha = .16 + .08 * Math.sin(performance.now() / 110); g.drawImage(whiteOf(sp.img), sx - sp.pivot[0] + wob, sy - sp.pivot[1]); g.restore(); }
+      if (p.flash > 0) { g.save(); g.globalAlpha = Math.min(1, p.flash); g.drawImage(whiteOf(sp.img), sx - sp.pivot[0] + wob, sy - sp.pivot[1]); g.restore(); }
+      if (sp.emit || wind.emitOf(p, sp)) emitters.push({img: wind.emitOf(p, sp) || sp.emit, x: sx - sp.pivot[0] + wob, y: sy - sp.pivot[1], wy: p.y});   // wy: world depth
+      // player behind a tall prop: remember what covers him, draw an x-ray of the hidden part afterwards
+      if (p.occluder && p.y > P.y) {
+        const ox = sx - sp.pivot[0] + wob, oy = sy - sp.pivot[1], px0 = psx - PIV[0], py0 = psy - PIV[1];
+        if (ox < px0 + FW && ox + sp.img.width > px0 && oy < py0 + FH && oy + sp.img.height > py0) occluded.push({img: sp.img, x: ox, y: oy});
+      }
+    }
+  }
+  combat.drawWorld(g, cam);
+  props3d?.drawWorld(g, cam, lighting, biome.id);   // tumbling 3D debris
+  atmos.drawFront(g, cam);
+  flow.drawFront(g, cam); wildlife.drawAir(g, cam);   // streaks / breath / drips, birds in flight: lit like the world
+  for (const q of dust) {  // dust: light pixels that fade to darker, then vanish
+    const k = q.t / q.life; g.fillStyle = k < .4 ? '#b8a888' : k < .75 ? '#8a7a60' : '#5e5444';
+    g.fillRect(Math.round(q.x - cam.x), Math.round(q.y - cam.y), 1, 1);
+  }
+  g.fillStyle = '#f2d27a';
+  for (const p of pops) { const [gx, gy] = toS(p.x, p.y, (p.z || 0) + 1.7); const x = Math.round(gx - cam.x), y = Math.round(gy - cam.y - p.t * 14); g.fillRect(x - 1, y, 3, 1); g.fillRect(x, y - 1, 1, 3); }
+  if (AE.used) emitters.push({img: AE.q.canvas, x: 0, y: 0});   // arrow streaks glow in the dark
+  depth.drawClouds(g, cam);   // cloud shadows over ground and sprites alike, before the light
+  lighting.apply(g, cam, emitters.concat(atmos.emitters(cam), combat.emitters(cam), wind.emitters(cam), wildlife.emitters(cam), depth.emitters(cam), flow.emitters(cam)));
+  if (armor.on && PF.nrm) armor.shine(g, {nrm: PF.nrm, pose: P.frame, srcX: P.face * FW, w: FW, h: FH - Math.round((P.sink || 0) * 22), dx: psx - PIV[0], dy: psy - PIV[1] + Math.round((P.sink || 0) * 22),
+    P, piv: PIV, lights, mood: lighting.mood(), lantern: lighting.lantern, lightAt: lighting.flatAt, pitch: idx.pitch, ppm: PPM, ppmy: PPMY, ppmh: PPMH,
+    cover: rig.active && PF.depth ? (x, y) => rig.covers(x, y) : null});   // glints + reflections on the metal (not through the cloak)
+  if (occluded.length) drawXray(PF, occluded, psx - PIV[0], psy - PIV[1]);   // after the light: readable at night too
+  depth.drawAfterLight(g, cam);   // light shafts, heat haze, then the foreground layer over everything
+  if (showZones) drawZones();
+  if (P.state === 'draw') {
+    const mx = Math.round(mouse.x), my = Math.round(mouse.y);
+    g.fillStyle = P.t > .5 ? '#f2d27a' : '#e9e4da';
+    g.fillRect(mx - 3, my, 2, 1); g.fillRect(mx + 2, my, 2, 1); g.fillRect(mx, my - 3, 1, 2); g.fillRect(mx, my + 2, 1, 2);
+  }
+  og.clearRect(0, 0, ov.width, ov.height);
+  const ox = (Math.round(pxs - cam.fx) - PIV[0]) * scale, oy = (Math.round(pys - cam.fy) - PIV[1]) * scale;
+  atmos.drawOver(og, cam, scale);
+  combat.drawOver(og, cam, scale);
+  drawPrompt();
+  PL.drawHD(og, scale, ox, oy, arrows);
+  if (showBones) {
+    og.lineWidth = 2; og.lineCap = 'round';
+    for (const [n, [hx, hy, tx, ty]] of Object.entries(SP[P.frame].bones[DIRS[P.face]])) {
+      og.strokeStyle = og.fillStyle = n.startsWith('Left') ? '#50dcff' : n.startsWith('Right') ? '#ff9640' : '#fff078';
+      og.beginPath(); og.moveTo(ox + hx * scale, oy + hy * scale); og.lineTo(ox + tx * scale, oy + ty * scale); og.stroke();
+      og.beginPath(); og.arc(ox + hx * scale, oy + hy * scale, 2.5, 0, 7); og.fill();
+    }
+  }
+  if (showFeet && P.state === 'move') {  // planted foot (filled) and the gait phase bar
+    const C = CLIP[P.gait], f = +P.frame.split('.')[1], b = SP[P.frame].bones[DIRS[P.face]];
+    for (const s of ['L', 'R']) {
+      const ft = b[(s === 'L' ? 'Left' : 'Right') + 'Foot'], x = ox + (ft[0] + ft[2]) / 2 * scale, y = oy + Math.max(ft[1], ft[3]) * scale;
+      og.strokeStyle = og.fillStyle = s === 'L' ? '#50dcff' : '#ff9640';
+      og.beginPath(); og.arc(x, y, 5, 0, 7); C.planted[f] === s ? og.fill() : og.stroke();
+    }
+    const w = 60 * scale / 3, bx = ox + PIV[0] * scale - w / 2, by = oy + (PIV[1] + 4) * scale;
+    og.fillStyle = 'rgba(0,0,0,.5)'; og.fillRect(bx, by, w, 6);
+    og.fillStyle = '#f2d27a'; og.fillRect(bx, by, w * P.ph, 6);
+    for (const c of C.contacts) { og.fillStyle = '#fff'; og.fillRect(bx + w * C.cum[c] / C.stride - 1, by - 3, 2, 12); }
+  }
+  $('#stat').textContent = (combat.hud ? combat.hud + ' · ' : '') + `${biome.name} · ${lighting.TIMES[lighting.time]} · ${P.frame} · facing ${DIRS[P.face]} · ${Math.hypot(P.vx, P.vy).toFixed(1)} m/s · ${LOADOUTS[loadI][0]}${lighting.banded ? ' · banded light' : ''}${pixelBow ? '' : ' · HD bow'}${armor.on ? ` · armour ${armor.ms.toFixed(2)} ms` : ''} · ground ${PROJ[projI][0]} · hits ${hits}/${PL.shots}` + (lighting.debug ? ' · ' + lighting.debug : '');
+}
+
+// X-RAY: where a tall prop (p.occluder) hides the player, show ONLY the hidden part as a flat dim silhouette with a
+// light 1 px rim, clipped to the occluder's own pixels. The prop stays solid (a whole-sprite ghost made him look
+// like he was inside the pillar), and you still see where you are and which way you face.
+const XRAY = {fill: '#2a2436', fillA: .4, rim: '#efe2c4', rimA: .85, M: 3};   // M: margin for the cloak / rim
+const [xsil, xs] = (() => { const c = document.createElement('canvas'); return [c, c.getContext('2d')]; })();
+const [xres, xr] = (() => { const c = document.createElement('canvas'); return [c, c.getContext('2d')]; })();
+function drawXray(PF, occ, x0, y0) {
+  const M = XRAY.M, w = FW + 2 * M, h = FH + 2 * M;
+  for (const c of [xsil, xres]) if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  // player silhouette (sprite + runtime cloak), flat fill colour
+  xs.globalCompositeOperation = 'source-over'; xs.clearRect(0, 0, w, h);
+  xs.drawImage(PF.img, P.face * FW, 0, FW, FH, M, M, FW, FH);
+  if (rig.active && PF.depth) rig.draw(xs, M, M, depthOf(PF.depth), P.face);
+  xs.globalCompositeOperation = 'source-in'; xs.fillStyle = XRAY.fill; xs.fillRect(0, 0, w, h);
+  // rim: the silhouette grown by 1 px (4-neighbour) minus itself, recoloured
+  xr.globalCompositeOperation = 'source-over'; xr.globalAlpha = 1; xr.clearRect(0, 0, w, h);
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) xr.drawImage(xsil, dx, dy);
+  xr.globalCompositeOperation = 'destination-out'; xr.drawImage(xsil, 0, 0);
+  xr.globalCompositeOperation = 'source-in'; xr.fillStyle = XRAY.rim; xr.fillRect(0, 0, w, h);
+  // body under the rim, then keep only what the occluders cover
+  xr.globalCompositeOperation = 'destination-over'; xr.globalAlpha = XRAY.fillA / XRAY.rimA; xr.drawImage(xsil, 0, 0);
+  xr.globalAlpha = 1; xr.globalCompositeOperation = 'destination-in';
+  const mask = occ.length === 1 ? null : (() => {   // several occluders: union them first (destination-in takes one image)
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const q = c.getContext('2d');
+    for (const o of occ) q.drawImage(o.img, o.x - x0 + M, o.y - y0 + M); return c; })();
+  if (mask) xr.drawImage(mask, 0, 0); else xr.drawImage(occ[0].img, occ[0].x - x0 + M, occ[0].y - y0 + M);
+  g.save(); g.globalAlpha = XRAY.rimA; g.drawImage(xres, x0 - M, y0 - M); g.restore();
+}
+
+const whites = new WeakMap();   // white silhouette of a sprite, for hit flashes
+function whiteOf(img) {
+  let c = whites.get(img); if (c) return c;
+  c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const q = c.getContext('2d'); q.drawImage(img, 0, 0); q.globalCompositeOperation = 'source-in'; q.fillStyle = '#fff8e8'; q.fillRect(0, 0, c.width, c.height);
+  whites.set(img, c); return c;
+}
+function drawPrompt() {   // "E climb" / "E open" over the thing you can interact with (HD text)
+  if (BUSY.has(P.state)) return;
+  const p = nearInteract(), cs = p ? null : climbSpot();
+  if (!p && !cs) return;
+  const [x, y] = p ? toS(p.x, p.y, (p.z || 0) + 1.1) : toS(cs.c.x, cs.q.y1, cs.dir > 0 ? 1.2 : cs.q.h + .4);
+  const label = p ? 'open' : cs.dir > 0 ? 'climb' : 'climb down';
+  const X = (x - cam.x) * scale, Y = (y - cam.y) * scale;
+  og.save(); og.font = `600 ${Math.max(12, scale * 4.5)}px system-ui, sans-serif`; og.textAlign = 'center'; og.textBaseline = 'middle';
+  const w = og.measureText('E  ' + label).width + 16, h = Math.max(20, scale * 7);
+  og.fillStyle = 'rgba(16,14,20,.78)'; og.fillRect(X - w / 2, Y - h / 2, w, h);
+  og.strokeStyle = 'rgba(242,210,122,.7)'; og.lineWidth = 1; og.strokeRect(X - w / 2 + .5, Y - h / 2 + .5, w - 1, h - 1);
+  og.fillStyle = '#f2d27a'; og.fillText('E', X - w / 2 + 12, Y); og.fillStyle = '#e9e4da'; og.textAlign = 'left'; og.fillText(label, X - w / 2 + 24, Y);
+  og.restore();
+}
+function drawZones() {   // G: colliders (red), marks (yellow), the playable rectangle (cyan)
+  const V = (x, y) => { const [a, b] = toS(x, y); return [Math.round(a - cam.x), Math.round(b - cam.y)]; };
+  g.save(); g.lineWidth = 1;
+  const [a, b] = V(PLAY.x0, PLAY.y0), [c, d] = V(PLAY.x1, PLAY.y1); g.strokeStyle = '#4de0e0'; g.strokeRect(a + .5, b + .5, c - a, d - b);
+  g.strokeStyle = '#ff5050';
+  for (const p of props) {
+    if (p.rect) { const [x0, y0] = V(p.rect[0], p.rect[1]), [x1, y1] = V(p.rect[2], p.rect[3]); g.strokeRect(x0 + .5, y0 + .5, x1 - x0, y1 - y0); }
+    else if (p.r) { const [x, y] = V(p.x, p.y); g.beginPath(); g.ellipse(x, y, (p.r) * PPM, p.r * PPMY / 1.6, 0, 0, 7); g.stroke(); }
+  }
+  g.strokeStyle = '#f2d27a';
+  for (const m of layout.marks) if (m.r) { const [x, y] = V(m.x, m.y); g.beginPath(); g.ellipse(x, y, m.r * PPM, m.r * PPMY, 0, 0, 7); g.stroke(); }
+  g.fillStyle = 'rgba(80,160,255,.35)';
+  for (let y = 0; y < HM; y += .25) { const w = layout.stream.w(y), c = layout.stream.cx(y), [a2, b2] = V(c - w / 2, y); g.fillRect(a2, b2, Math.round(w * PPM), Math.ceil(.25 * PPMY)); }
+  g.strokeStyle = '#c080ff';
+  for (const q of PLATEAUS) { const [a2, b2] = V(q.x0, q.y0), [c2, d2] = V(q.x1, q.y1); const hp = Math.round(q.h * PPMH);
+    g.strokeRect(a2 + .5, b2 - hp + .5, c2 - a2, d2 - b2); g.strokeRect(a2 + .5, d2 - hp + .5, c2 - a2, hp);
+    for (const c of q.climbs) { const [e2, f2] = V(c.x - c.w / 2, q.y1); g.fillStyle = 'rgba(120,255,120,.5)'; g.fillRect(e2, f2 - hp, Math.round(c.w * PPM), hp); } }
+  g.restore();
+}
+
+// ---------------- HD layer: thin, fast things drawn at screen resolution over the pixel art ----------------
+// The bowstring is left out of the pixel sprite; its tip -> nock -> tip path and per-sample visibility (hidden where
+// the body is in front) come from the render. It glows with tension while drawn and twangs after the shot.
+let last = performance.now();
+let camDt = 0;
+// debug handle for scripted tests (drive frames and read the canvas while the page is hidden)
+Object.assign(window.__demo, {step, stepFx, render, mouse, cursorGround: PL.cursorGround, cursorAim, PL, cam, dirOf, props, arrows, toS, layout, lighting, atmos, combat, setBiome, setTime, ctx, interact, tryLeap, blocked, LIT, wind, wildlife, depth, flow, AMB, AMB_HOST});
+Object.defineProperties(window.__demo, {armor: {get: () => armor}, biome: {get: () => biome}, rig: {get: () => rig}, ND: {get: () => ND}, DIRS: {get: () => DIRS}, SP: {get: () => SP}, OV: {get: () => OV},
+  camDt: {set: v => { camDt = v; }, get: () => camDt}});
+function frame(now) { const dt = Math.max(0, Math.min(.05, (now - last) / 1000)); last = now; camDt = dt;
+  if (!paused) { if (freeze > 0) freeze -= dt; else { step(dt); stepFx(dt); } }   // hitstop holds the world; the pause menu freezes it entirely
+  render(); requestAnimationFrame(frame); }
+if (q0.get('sheet') === 'props') propsSheet(); else if (q0.get('sheet') === 'armor') armorSheet(); else if (q0.get('sheet') === 'pivot') pivotSheet(); else if (q0.get('sheet') === 'combat') combatSheet(); else if (q0.get('sheet') === 'fx') fxSheet(); else if (q0.get('sheet')) contactSheet(); else requestAnimationFrame(frame);
+// ?sheet=armor: the shiny-armour experiment. Columns = lighting setups, rows = normal / armour, cropped around the
+// player at 3x (the cloth outfit loads its own masks too).
+async function armorSheet() {
+  await new Promise(r => setTimeout(r, 4000));
+  camDt = 10;
+  const Z = 3, CW = 80, CH = 76;
+  const grab = () => { const c = document.createElement('canvas'); c.width = CW * Z; c.height = CH * Z; const q = c.getContext('2d'); q.imageSmoothingEnabled = false;
+    const [px, py] = toS(P.x, P.y, P.z); q.drawImage(cv, Math.round(px - cam.x) - CW / 2, Math.round(py - cam.y) - CH + 8, CW, CH, 0, 0, CW * Z, CH * Z); return c; };
+  const aimAt = (dx, dy) => { const [sx, sy] = toS(P.x + dx, P.y + dy, AIM_H); mouse.x = sx - cam.fx; mouse.y = sy - cam.fy; };
+  const SC = [
+    ['ruins, day', 0, 'day', false, [20, 15.5], [3, 1]],
+    ['ruins, dusk', 0, 'dusk', false, [20, 15.5], [-3, 1]],
+    ['light garden, night', 0, 'night', false, [29.2, 16.6], [-2, 1.5]],
+    ['lantern, night', 0, 'night', true, [14, 12], [3, 2]],
+    ['ember, night (lava)', 1, 'night', false, [38.5, 19.8], [3, 1.5]],
+    ['frost, day', 2, 'day', false, [20, 15.5], [0, 3]],
+    ['rift, night', 3, 'night', false, [29.2, 16.6], [2, 1]],
+  ];
+  const sheet = document.createElement('canvas'); sheet.width = SC.length * CW * Z; sheet.height = 2 * CH * Z + 24; const sq = sheet.getContext('2d');
+  sq.fillStyle = '#16141a'; sq.fillRect(0, 0, sheet.width, sheet.height);
+  for (let i = 0; i < SC.length; i++) {
+    const [name, b, t, lan, at, aim] = SC[i];
+    setBiome(b); setTime(lighting.TIMES.indexOf(t)); if (lighting.lantern !== lan) lighting.toggleLantern();
+    for (let row = 0; row < 2; row++) {
+      if (armor.on !== (row === 1) && armor.toggle()) { armor.setAtlas(LOADOUTS[loadI][1]); armor.preload(Object.keys(SP)); }
+      Object.assign(P, {x: at[0], y: at[1], z: 0, vx: 0, vy: 0, state: 'idle', t: 0}); cam.fx = null; keys.clear();
+      PL.press(); for (let k = 0; k < 40; k++) { aimAt(aim[0], aim[1]); step(1 / 60); stepFx(1 / 60); render(); }
+      await new Promise(r => setTimeout(r, 400));   // masks load on first use
+      for (let k = 0; k < 4; k++) { aimAt(aim[0], aim[1]); step(1 / 60); stepFx(1 / 60); render(); }
+      sq.drawImage(grab(), i * CW * Z, 24 + row * CH * Z); PL.release(); for (let k = 0; k < 30; k++) { step(1 / 60); stepFx(1 / 60); }
+    }
+    sq.fillStyle = '#f2d27a'; sq.font = '600 13px system-ui'; sq.fillText(name, i * CW * Z + 8, 16);
+  }
+  document.body.innerHTML = ''; document.body.style.overflow = 'auto';
+  sheet.style.cssText = 'display:block'; document.body.appendChild(sheet);
+}
+// ?sheet=pivot: film strips of the player turning on the spot while aiming (a 180 flick, a slow 90 sweep), every
+// 2nd frame at 3x, cropped around him. Row labels on the left.
+async function pivotSheet() {
+  await new Promise(r => setTimeout(r, 3000));
+  camDt = 10; setBiome(0); lighting.setTime(0);
+  const aimAt = (dx, dy) => { const [sx, sy] = toS(P.x + dx, P.y + dy, AIM_H); mouse.x = sx - cam.fx; mouse.y = sy - cam.fy; };
+  const Z = 3, CW = 64, CH = 72, rows = [];
+  const grab = () => { const c = document.createElement('canvas'); c.width = CW * Z; c.height = CH * Z; const q = c.getContext('2d'); q.imageSmoothingEnabled = false;
+    const [px, py] = toS(P.x, P.y, P.z); q.drawImage(cv, Math.round(px - cam.x) - CW / 2, Math.round(py - cam.y) - CH + 6, CW, CH, 0, 0, CW * Z, CH * Z); return c; };
+  const film = (n, aim) => { const out = []; for (let i = 0; i < n; i++) { aim(i); step(1 / 60); stepFx(1 / 60); render(); if (i % 2 === 0) out.push(grab()); } return out; };
+  Object.assign(P, {x: 20, y: 15.5, z: 0, vx: 0, vy: 0, state: 'idle', face: A_N()}); cam.fx = null;
+  function A_N() { return Math.round(atlas.ND / 2); }
+  keys.clear(); aimAt(0, -4); PL.press(); film(30, () => aimAt(0, -4));
+  rows.push(['180 flick', film(44, () => aimAt(0, 4))]);
+  rows.push(['slow 180 sweep', film(150, i => { const a = Math.PI / 2 + Math.min(1, i / 130) * Math.PI; aimAt(Math.cos(a) * 4, Math.sin(a) * 4); })]);
+  rows.push(['small aim jitter', film(64, i => aimAt(-4 + Math.sin(i / 7) * .3, Math.cos(i / 9) * .6))]);
+  PL.release();
+  const WRAP = 16, lines = rows.map(r => Math.ceil(r[1].length / WRAP)), sheet = document.createElement('canvas');
+  sheet.width = 110 + WRAP * CW * Z; sheet.height = lines.reduce((a, b) => a + b, 0) * CH * Z; const sq = sheet.getContext('2d');
+  sq.fillStyle = '#16141a'; sq.fillRect(0, 0, sheet.width, sheet.height);
+  let y0 = 0;
+  rows.forEach(([name, fr], r) => { fr.forEach((c, i) => sq.drawImage(c, 110 + (i % WRAP) * CW * Z, y0 + Math.floor(i / WRAP) * CH * Z));
+    sq.fillStyle = '#f2d27a'; sq.font = '600 14px system-ui'; sq.fillText(name, 8, y0 + 24); sq.fillStyle = '#9a94a6'; sq.fillText('every 2nd frame', 8, y0 + 44);
+    y0 += lines[r] * CH * Z; });
+  document.body.innerHTML = ''; document.body.style.overflow = 'auto';
+  sheet.style.cssText = 'display:block'; document.body.appendChild(sheet);
+  window.__pivotSize = [sheet.width, sheet.height];
+}
+// ?sheet=combat: 2x2 scripted combat moments in the current biome (&biome=), 2x pixels WITH the HD layer (numbers,
+// ability bar, HP bars) composited on top.
+async function combatSheet() {
+  await new Promise(r => setTimeout(r, 3000));
+  camDt = 10;
+  const run = n => { for (let i = 0; i < n; i++) { step(1 / 60); stepFx(1 / 60); } render(); };
+  const put = (x, y, z = 0) => { Object.assign(P, {x, y, z, vx: 0, vy: 0, state: 'idle', t: 0}); cam.fx = null; run(3); };
+  const aimAt = (x, y, h = .5) => { const [sx, sy] = toS(x, y, h); mouse.x = sx - cam.fx; mouse.y = sy - cam.fy; };
+  const bx = props.filter(p => p.kind === 'barrel_x');
+  const SCENES = [
+    ['explosive arrow: barrel chain', () => { put(50.5, 21.5); aimAt(bx[0].x, bx[0].y); combat.ability(1); run(30); }],
+    ['arrow rain on the pots', () => { put(46, 19.5); aimAt(49.3, 17.3, 0); combat.ability(2); run(52); }],
+    ['multishot into the crates', () => { put(47.6, 18.6); aimAt(46.6, 14.7); combat.ability('rmb'); run(9); }],
+    ['sparring brute + piercing shot', () => { put(49.5, 21); const b = props.find(p => p.kind === 'brute'); aimAt(b.x, b.y, .8); combat.ability(3); run(24); aimAt(b.x, b.y, .8); mouse.down = true; P.state = 'draw'; P.t = 0; run(40); }],
+  ];
+  const W = VW * 2, H = VH * 2, sheet = document.createElement('canvas'); sheet.width = W * 2; sheet.height = H * 2;
+  const sq = sheet.getContext('2d');
+  for (let i = 0; i < SCENES.length; i++) {
+    SCENES[i][1]();
+    const x = (i % 2) * W, y = (i >> 1) * H;
+    sq.imageSmoothingEnabled = false; sq.drawImage(cv, x, y, W, H);
+    sq.imageSmoothingEnabled = true; sq.drawImage(ov, x, y, W, H);
+    sq.font = '600 13px system-ui'; const nm = SCENES[i][0];
+    sq.fillStyle = 'rgba(0,0,0,.6)'; sq.fillRect(x, y, sq.measureText(nm).width + 14, 20); sq.fillStyle = '#f2d27a'; sq.fillText(nm, x + 7, y + 14);
+  }
+  document.body.innerHTML = ''; document.body.style.overflow = 'auto';
+  sheet.style.cssText = 'display:block'; document.body.appendChild(sheet);
+}
+// ?sheet=fx: scripted moments for reviewing environment effects. Rows = biomes, columns = scenes; &time= applies.
+async function fxSheet() {
+  await new Promise(r => setTimeout(r, 3000));
+  camDt = 10;   // camera snaps
+  const run = (n, at) => { for (let i = 0; i < n; i++) { if (at && at[i]) events.push(...at[i]()); step(1 / 60); stepFx(1 / 60); } render(); };
+  const put = (x, y, z = 0, state = 'idle') => { Object.assign(P, {x, y, z, vx: 0, vy: 0, state, t: 0}); cam.fx = null; };
+  const SCENES = [
+    ['leap at the narrows', () => { put(37.9, 15); P.face = P.want = 4 * ND / 16; P.vx = 4.6; keys.add('d'); tryLeap(); run(14); keys.delete('d'); }],
+    ['splash (fell in)', () => { put(38.2, 20); P.face = 4 * ND / 16; P.vx = 4.6; keys.add('d'); tryLeap(); run(44); keys.delete('d'); }],
+    ['climbing the cliff', () => { put(51.5, 11.4); interact(); run(50); }],
+    ['explosion smoke in the yard', () => { put(49.5, 20.5); run(50, {0: () => [{type: 'explode', x: 53.6, y: 19.2, r: 2.4}], 10: () => [{type: 'break', x: 47, y: 18.4}]}); }],
+    ['big drop off the plateau', () => { put(46.5, 10.6, 2.4); keys.add('s'); run(40); keys.delete('s'); run(6); }],
+  ];
+  const sheet = document.createElement('canvas'); sheet.width = VW * SCENES.length; sheet.height = VH * BIOMES.length;
+  const sq = sheet.getContext('2d');
+  for (let b = 0; b < BIOMES.length; b++) {
+    setBiome(b); if (q0.get('time')) setTime(Math.max(0, lighting.TIMES.indexOf(q0.get('time'))));
+    for (let i = 0; i < SCENES.length; i++) { keys.clear(); run(30); SCENES[i][1](); sq.drawImage(cv, i * VW, b * VH); }
+  }
+  sq.font = '600 11px system-ui'; sq.fillStyle = '#f2d27a';
+  SCENES.forEach(([name], i) => { sq.fillStyle = 'rgba(0,0,0,.6)'; sq.fillRect(i * VW, 0, sq.measureText(name).width + 12, 16); sq.fillStyle = '#f2d27a'; sq.fillText(name, i * VW + 6, 12); });
+  document.body.innerHTML = ''; document.body.style.overflow = 'auto';
+  sheet.style.cssText = 'display:block;image-rendering:pixelated'; sheet.id = 'sheet'; document.body.appendChild(sheet);
+}
+// ?sheet=props: the 3D props' physical side as filmstrips (rows = scenes, columns = moments), 200 x 120 crops at 1:1
+// around the action. &biome= picks the biome.
+async function propsSheet() {
+  await new Promise(r => setTimeout(r, 3000));
+  camDt = 10;
+  const CW = 200, CH = 120, N = 5; let lit = false;
+  const run = n => { for (let i = 0; i < n; i++) { step(1 / 60); stepFx(1 / 60); } };
+  const put = (x, y, z = 0) => { Object.assign(P, {x, y, z, vx: 0, vy: 0, state: 'idle', t: 0}); cam.fx = null; };
+  const find = (k, x, y) => props.find(p => p.kind === k && Math.hypot(p.x - x, p.y - y) < .05);
+  const SCENES = [
+    ['sprint into a barrel', () => { put(52, 14.9); keys.add('d'); keys.add('shift'); }, [26, 6, 8, 14, 30], [56.4, 14.9]],
+    ['an arrow knocks one over', () => { put(51, 13.6); events.push({type: 'hit', prop: find('barrel', 55, 14.3), x: 55, y: 14.3, vx: 0, vy: 22}); }, [1, 4, 10, 18, 40], [55, 15.2]],
+    ['a kicked powder keg meets a crate', () => { put(51.5, 20.4); props3d.shove(find('barrel_x', 53.6, 19.2), 1.6, -4.2); }, [4, 8, 6, 8, 30], [54, 18.3]],
+    ['push a crate into the stream', () => { put(43.5, 20.2); keys.add('a'); }, [30, 25, 18, 20, 40], [41.9, 20.1]],
+    ['chest lid, night + lantern', () => { setTime(2); lit = lighting.toggleLantern(); put(59.1, 26.1); find('chest', 58, 25.5).opened = true; }, [1, 4, 5, 6, 30], [58, 25.3]],
+  ];
+  const sheet = document.createElement('canvas'); sheet.width = CW * N; sheet.height = CH * SCENES.length;
+  const sq = sheet.getContext('2d'); sq.imageSmoothingEnabled = false;
+  for (let s = 0; s < SCENES.length; s++) {
+    const [, setup, gaps, [fx, fy]] = SCENES[s];
+    keys.clear(); run(20); setup();
+    for (let f = 0; f < N; f++) {
+      run(gaps[f]); render();
+      const [gx, gy] = toS(fx, fy), x = Math.round(gx - cam.x - CW / 2), y = Math.round(gy - cam.y - CH * .6);
+      sq.drawImage(cv, x, y, CW, CH, f * CW, s * CH, CW, CH);
+    }
+    keys.clear(); setTime(0); if (lit) lit = lighting.toggleLantern();
+  }
+  sq.font = '600 10px system-ui';
+  SCENES.forEach(([name], i) => { sq.fillStyle = 'rgba(0,0,0,.6)'; sq.fillRect(0, i * CH, sq.measureText(name).width + 10, 14); sq.fillStyle = '#f2d27a'; sq.fillText(name, 5, i * CH + 10); });
+  document.body.innerHTML = ''; document.body.style.overflow = 'auto';
+  sheet.style.cssText = `display:block;image-rendering:pixelated;width:${sheet.width * 2}px`; sheet.id = 'sheet'; document.body.appendChild(sheet);
+}
+// ?sheet=1: a still overview for reviews: rows = biomes, columns = day / dusk / night, all at 1:1 pixels.
+// &at=x,y puts the player there (metres; default: the light garden), &lantern=1 lights him.
+async function contactSheet() {
+  await new Promise(r => setTimeout(r, 3000));   // normal maps load in the background
+  const [x, y] = (q0.get('at') || '28.5,16.2').split(',').map(Number), T = lighting.TIMES.length;
+  if (q0.get('lantern') === '1') lighting.toggleLantern();
+  const sheet = document.createElement('canvas'); sheet.width = VW * T; sheet.height = VH * BIOMES.length;
+  const sq = sheet.getContext('2d'); camDt = 1 / 60;
+  for (let b = 0; b < BIOMES.length; b++) { setBiome(b); for (let t = 0; t < T; t++) {
+    setTime(t); P.x = x; P.y = y; P.vx = P.vy = 0; cam.fx = null;
+    for (let i = 0; i < 40; i++) { step(1 / 60); stepFx(1 / 60); render(); }
+    sq.drawImage(cv, t * VW, b * VH);
+  } }
+  document.body.innerHTML = ''; document.body.style.overflow = 'auto';
+  sheet.style.cssText = 'display:block;image-rendering:pixelated'; sheet.id = 'sheet'; document.body.appendChild(sheet);
+}
+</script>
+</body>
+</html>

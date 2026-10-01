@@ -1,0 +1,14 @@
+# Generated or downloaded files: too big for git, regenerable or re-downloadable.
+# A one-time copy of each is in D:\Game-backup\2026-10-01\ (see the README there).
+concepts/sprites/out/
+audio/forge/out/
+assets/src/*.zip
+assets/src/base/
+assets/src/outfits/
+assets/kaykit/
+tmp/
+
+# Editor and tool leftovers
+*.blend1
+__pycache__/
+*.pyc

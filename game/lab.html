@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Riftbound character lab</title>
+<link rel="icon" href="data:,">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:Inter,system-ui,sans-serif;color:#f3eee6}
+#c{display:block;width:100vw;height:100vh}
+#world{position:fixed;inset:0;pointer-events:none}
+.bar{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:8px;background:rgba(10,8,14,.72);border:1px solid rgba(255,255,255,.12);border-radius:10px}
+.bar button{font:700 12px Inter;color:#cfc6b8;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:7px 11px;cursor:pointer}
+.bar button:hover{color:#fff;border-color:rgba(255,255,255,.35)}
+.bar button[aria-pressed="true"]{background:rgba(157,187,90,.28);border-color:#9dbb5a;color:#fff}
+.bar .sep{width:1px;background:rgba(255,255,255,.15);margin:0 4px}
+.lbl{position:absolute;transform:translate(-50%,0);text-align:center;white-space:nowrap;text-shadow:0 2px 4px #000,0 0 8px #000}
+.lbl b{display:block;font:700 17px Cinzel,serif;color:#e8f4d0}
+.lbl small{display:block;font:600 11px Inter;color:#cfc6b8;max-width:220px;white-space:normal;margin-top:2px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="world"></div>
+<div class="bar" id="bar">
+  <button data-mode="demo">Demo loop</button><button data-mode="idle">Idle</button><button data-mode="run">Run</button><button data-mode="shoot">Shoot</button>
+  <span class="sep"></span><button id="turn">Turntable</button><button id="zoom">Close-up</button><button id="outfit" hidden>Swap outfit</button><button id="stepped" hidden>Held poses (12 fps)</button>
+</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module" src="js/lab.js"></script>
+</body>
+</html>

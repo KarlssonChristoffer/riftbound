@@ -1,0 +1,51 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "game",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8123"
+      ],
+      "port": 8123
+    },
+    {
+      "name": "game-alt",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8124"
+      ],
+      "port": 8124
+    },
+    {
+      "name": "game-pixel",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8125"
+      ],
+      "port": 8125
+    },
+    {
+      "name": "arena",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8126"
+      ],
+      "port": 8126,
+      "url": "http://localhost:8126"
+    },
+    {
+      "name": "pro-test",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8127"
+      ],
+      "port": 8127
+    }
+  ]
+}

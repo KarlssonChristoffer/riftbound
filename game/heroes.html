@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Hero Viewer</title>
+<style>
+html,body{margin:0;height:100%;background:#15121a;color:#e8e2d0;font:13px system-ui,sans-serif;overflow:hidden}
+#c{position:fixed;inset:0;width:100%;height:100%}#world{display:none}
+#ui{position:fixed;left:12px;top:10px;display:flex;gap:6px;flex-wrap:wrap}
+button{background:#2a2433;color:#e8e2d0;border:1px solid #4a4058;border-radius:6px;padding:6px 10px;cursor:pointer}button.on{background:#6a4a20;border-color:#d4a640}
+#names{position:fixed;bottom:14px;left:0;right:0;display:flex;justify-content:space-around;font-weight:600;letter-spacing:.05em}
+</style></head><body>
+<canvas id="c"></canvas><div id="world"></div>
+<div id="ui"></div><div id="names"></div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+// Dev tool: shows the four heroes side by side playing the shared animation set.
+import {THREE, renderer, V} from './js/core.js';
+import {loadAssets, modelRig, makeDriver, driveUpdate, dplay, PROPS, ANIMS} from './js/assets.js';
+await loadAssets();
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x1d1824);
+scene.add(new THREE.HemisphereLight(0xcfd8ff, 0x2a2018, 1.2));
+const sun = new THREE.DirectionalLight(0xfff0dd, 2.2); sun.position.set(3, 6, 5); scene.add(sun);
+const rim = new THREE.DirectionalLight(0x8a70ff, 1.2); rim.position.set(-4, 3, -5); scene.add(rim);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(9, 48), new THREE.MeshStandardMaterial({color: 0x2c2632, roughness: .9})); floor.rotation.x = -Math.PI / 2; scene.add(floor);
+const cam = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, .1, 100); cam.position.set(0, 2.2, 9); cam.lookAt(0, 1, 0);
+const ids = ['warden', 'pyromancer', 'ranger', 'voidblade'], heroes = [];
+ids.forEach((id, i) => {
+  const m = modelRig(id, 1.85); m.root.position.x = (i - 1.5) * 1.9; scene.add(m.root);
+  const ent = {g: m.root, rig: m.rig, drv: makeDriver(m.rig), moving: false}; ent.prop = PROPS[id] && PROPS[id](m); heroes.push(ent);
+  document.getElementById('names').insertAdjacentHTML('beforeend', `<span>${id}</span>`);
+});
+const ui = document.getElementById('ui');
+for (const k of Object.keys(ANIMS).filter(k => !k.startsWith('e_'))) {
+  const b = document.createElement('button'); b.textContent = k; b.onclick = () => { [...ui.children].forEach(x => x.classList.remove('on')); b.classList.add('on'); heroes.forEach(h => { h.moving = k === 'run'; if (k !== 'run' && k !== 'idle') dplay(h.drv, k, true); }); }; ui.appendChild(b);
+}
+let turn = 0; addEventListener('keydown', e => { if (e.key === 'ArrowLeft') turn -= .4; if (e.key === 'ArrowRight') turn += .4; });
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); });
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), .05), t = clock.elapsedTime;
+  for (const h of heroes) { h.g.rotation.y = turn; driveUpdate(h, dt); h.prop && h.prop(h, t, dt); }
+  renderer.render(scene, cam);
+});
+window.__heroes = heroes;
+</script></body></html>

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Style Bible</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#1b1a20;--panel:#222129;--line:#34323d;--text:#e9e4da;--muted:#9a94a6}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,Segoe UI,sans-serif}
+main{max-width:1180px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}
+p.lead{color:var(--muted);margin:0 0 22px;max-width:760px}
+.bar{display:flex;gap:8px;align-items:center;margin-bottom:22px;color:var(--muted);font-size:13px}
+.bar button{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+.bar button[aria-pressed=true]{border-color:#c9a45a;color:#f2d27a}
+.fig{display:grid;grid-template-columns:220px 1fr;gap:20px;padding:20px 0;border-top:1px solid var(--line)}
+.fig h2{font-size:17px;margin:0 0 4px}
+.fig p{color:var(--muted);margin:0;font-size:13px}
+.anims{display:flex;flex-wrap:wrap;gap:22px;align-items:flex-end}
+.cell{display:flex;flex-direction:column;align-items:center;gap:6px}
+.cell small{color:var(--muted);font-size:12px}
+canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+.strip{margin-top:10px}
+h3.group{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#c9a45a;margin:34px 0 0}
+@media (max-width:700px){.fig{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<h1>Style bible: pixel sprites</h1>
+<p class="lead">Pure 2D pixel art, no game renderer. Judge only shape, pixel clusters, colour fields, shading and motion.
+Light from the top-left, occlusion shadows where one part sits in front of another, outlines in the darkest tone of each material.
+Each figure shows its idle loop and attack loop, the same sprite at true size, and every frame in a strip.</p>
+<div class="bar">Zoom <button data-z="4">4×</button><button data-z="6">6×</button><button data-z="8">8×</button></div>
+<div id="figs"></div>
+</main>
+<script type="module">
+const $ = s => document.querySelector(s);
+let zoom = 6;
+try { zoom = +localStorage.getItem('stylebible.zoom') || 6; } catch (e) {}
+const groups = [['Hand-authored (make.py)', 'frames.json'], ['PixelLab test (pixellab_import.py)', 'pixellab/frames.json']];
+const items = [];
+for (const [title, src] of groups) {
+  let figs; try { figs = await fetch(src).then(r => r.json()); } catch (e) { continue; }
+  $('#figs').appendChild(Object.assign(document.createElement('h3'), {className: 'group', textContent: title}));
+for (const f of figs) {
+  const img = new Image(); await new Promise((ok, err) => { img.onload = ok; img.onerror = err; img.src = f.sheet; });
+  const el = document.createElement('section'); el.className = 'fig';
+  el.innerHTML = `<div><h2>${f.name}</h2><p>${f.note}</p></div><div><div class="anims"></div><canvas class="strip"></canvas></div>`;
+  $('#figs').appendChild(el);
+  const row = el.querySelector('.anims');
+  for (const [name, frames] of Object.entries(f.anims)) {
+    for (const scale of ['zoom', 1]) {
+      const cell = document.createElement('div'); cell.className = 'cell';
+      const c = document.createElement('canvas'); c.width = f.w; c.height = f.h;
+      cell.append(c, Object.assign(document.createElement('small'), {textContent: scale === 1 ? `${name}, 1×` : name}));
+      row.appendChild(cell);
+      items.push({c, img, f, frames, scale, i: 0, t: 0});
+    }
+  }
+  items.push({strip: el.querySelector('.strip'), img, f});
+}
+}
+function layout() {
+  for (const it of items) {
+    if (it.strip) { const n = it.img.width / it.f.w; it.strip.width = it.img.width; it.strip.height = it.f.h;
+      it.strip.style.width = it.img.width * Math.max(2, zoom / 2) + 'px'; const g = it.strip.getContext('2d'); g.clearRect(0, 0, 1e4, 1e4); g.drawImage(it.img, 0, 0); continue; }
+    const s = it.scale === 1 ? 1 : zoom; it.c.style.width = it.f.w * s + 'px'; it.c.style.height = it.f.h * s + 'px';
+  }
+  document.querySelectorAll('[data-z]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.z === zoom));
+}
+document.querySelectorAll('[data-z]').forEach(b => b.onclick = () => { zoom = +b.dataset.z; try { localStorage.setItem('stylebible.zoom', zoom); } catch (e) {} layout(); });
+layout();
+let last = performance.now();
+(function tick(now) {
+  const dt = now - last; last = now;
+  for (const it of items) {
+    if (it.strip) continue;
+    it.t += dt;
+    while (it.t >= it.frames[it.i][1]) { it.t -= it.frames[it.i][1]; it.i = (it.i + 1) % it.frames.length; }
+    const g = it.c.getContext('2d'); g.clearRect(0, 0, it.f.w, it.f.h);
+    g.drawImage(it.img, it.frames[it.i][0] * it.f.w, 0, it.f.w, it.f.h, 0, 0, it.f.w, it.f.h);
+  }
+  requestAnimationFrame(tick);
+})(last);
+</script>
+</body>
+</html>

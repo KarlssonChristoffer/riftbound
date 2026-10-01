@@ -1,0 +1,19 @@
+{
+  "name": "ranger_codex_sprites_v1",
+  "status": "prototype",
+  "frameWidth": 96,
+  "frameHeight": 96,
+  "pivot": { "x": 48, "y": 80 },
+  "direction": "screen-right",
+  "rendering": "nearest-neighbor, no interpolation",
+  "poses": {
+    "idle": "idle.png",
+    "run": "run.png",
+    "aim": "aim.png"
+  },
+  "sheet": {
+    "file": "sheet.png",
+    "columns": 3,
+    "order": ["idle", "run", "aim"]
+  }
+}

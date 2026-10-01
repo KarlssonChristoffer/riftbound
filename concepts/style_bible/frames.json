@@ -1,0 +1,125 @@
+[
+ {
+  "name": "Ranger",
+  "note": "light and quick: hair mass and red scarf carry the read; draw, release streak, follow-through",
+  "w": 42,
+  "h": 36,
+  "sheet": "ranger.png",
+  "anims": {
+   "idle": [
+    [
+     0,
+     500
+    ],
+    [
+     1,
+     500
+    ]
+   ],
+   "attack": [
+    [
+     2,
+     250
+    ],
+    [
+     3,
+     350
+    ],
+    [
+     4,
+     80
+    ],
+    [
+     5,
+     250
+    ],
+    [
+     6,
+     400
+    ]
+   ]
+  }
+ },
+ {
+  "name": "Warden",
+  "note": "heavy: wide steel shoulders, round shield, teal tabard, red plume; overhead windup, crescent smear",
+  "w": 42,
+  "h": 36,
+  "sheet": "warden.png",
+  "anims": {
+   "idle": [
+    [
+     0,
+     600
+    ],
+    [
+     1,
+     600
+    ]
+   ],
+   "attack": [
+    [
+     2,
+     200
+    ],
+    [
+     3,
+     350
+    ],
+    [
+     4,
+     90
+    ],
+    [
+     5,
+     300
+    ],
+    [
+     6,
+     400
+    ]
+   ]
+  }
+ },
+ {
+  "name": "Pyromancer",
+  "note": "caster: hood with glowing eyes in shadow, bell sleeve, flame staff; charge, fire blast",
+  "w": 42,
+  "h": 36,
+  "sheet": "pyromancer.png",
+  "anims": {
+   "idle": [
+    [
+     0,
+     350
+    ],
+    [
+     1,
+     350
+    ]
+   ],
+   "attack": [
+    [
+     2,
+     200
+    ],
+    [
+     3,
+     400
+    ],
+    [
+     4,
+     120
+    ],
+    [
+     5,
+     250
+    ],
+    [
+     6,
+     400
+    ]
+   ]
+  }
+ }
+]

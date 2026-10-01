@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Skeleton Playground</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#111014;--panel:rgba(20,19,24,.86);--line:#34323d;--text:#e9e4da;--muted:#9a94a6;--accent:#c9a45a}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,sans-serif;overflow:hidden}
+#wrap{position:fixed;inset:0;display:grid;place-items:center}
+#stage{position:relative}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+#over{position:absolute;inset:0;pointer-events:none}
+#hud{position:fixed;left:12px;top:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;max-width:300px}
+#hud h1{font-size:14px;margin:0 0 6px;color:var(--accent);letter-spacing:.04em}
+#hud dl{display:grid;grid-template-columns:auto 1fr;gap:1px 10px;margin:0}
+#hud dt{color:#f2d27a;font-weight:600;white-space:nowrap}#hud dd{margin:0;color:var(--muted)}
+#hud .stat{margin-top:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+#hud.min dl,#hud.min .stat{display:none}
+#load{position:fixed;inset:0;display:grid;place-items:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="wrap"><div id="stage"><canvas id="screen"></canvas><canvas id="over"></canvas></div></div>
+<div id="hud">
+  <h1>Skeleton playground</h1>
+  <dl>
+    <dt>WASD / arrows</dt><dd>run</dd>
+    <dt>Shift (hold)</dt><dd>sprint</dd>
+    <dt>Q (hold)</dt><dd>walk</dd>
+    <dt>Mouse</dt><dd>aim</dd>
+    <dt>Hold LMB</dt><dd>draw the bow, release to shoot; while moving: light run (Q walk, Shift a bit faster)</dd>
+    <dt>Space</dt><dd>dodge roll</dd>
+    <dt>C (hold)</dt><dd>crouch</dd>
+    <dt>E (hold)</dt><dd>wave</dd>
+    <dt>B</dt><dd>bone overlay</dd>
+    <dt>F</dt><dd>foot debug: planted foot + contacts</dd>
+    <dt>Z</dt><dd>zoom: game view / close</dd>
+    <dt>P</dt><dd>ground projection: game 55° / sprite 20°</dd>
+    <dt>O</dt><dd>switch loadout: cloth sim / baked cloth / bare body</dd>
+    <dt>K</dt><dd>wind: calm / breeze / gale</dd>
+    <dt>H</dt><dd>hide this panel</dd>
+  </dl>
+  <div class="stat" id="stat"></div>
+</div>
+<div id="load">Loading sprites…</div>
+<script type="module">
+import {ClothRig, depthOf, CLOTH_PARAMS} from './cloth.js';
+import {createPlayer, loadSet, atlasOf} from './player.js';   // the player (movement, bow, HD bow layer), shared with arena.html
+// Feel test for the base skeleton. Sprites and clip metadata come from pixel_rig + pixelize (out/skel).
+// The player moves by its own physics (input, acceleration, collisions). The walk clip only follows:
+// its phase is the distance actually travelled divided by the stride measured in Blender, so the planted foot
+// stays put at any speed, when blocked, and when stopping. Facing uses only the 8 rendered directions and trails
+// the movement by one 45 deg step at a time.
+const $ = s => document.querySelector(s);
+// Loadouts: each is ONE atlas rendered with body + garments together (correct outlines/depth between layers),
+// switched as a whole when the loadout changes. Same skeleton, pivot and scale, so the clip metadata lines up.
+// ranger cloth sim: the cloak and scarf tail are not in the sprites; cloth.js simulates and draws them at runtime
+const LOADOUTS = [['ranger · cloth sim', 'out/outfits/ranger_sim/'], ['ranger · baked cloth', 'out/outfits/ranger_basic/'], ['bare body', 'out/skel/']];
+const LOAD_OPTS = {ClothRig};
+let loadI = {body: 2, baked: 1}[new URLSearchParams(location.search).get('set')] ?? 0;
+// the cloth-sim atlas may still be rendering: fall back to the baked one instead of hanging on a missing sheet
+// (no timer: a big atlas can take ~40 s in a hidden pane; a missing file still rejects once the loader's retries fail)
+const firstSet = i => loadSet(LOADOUTS[i][1], LOAD_OPTS);
+let {idx, SP, CLIP, OV, rig} = await firstSet(loadI).catch(e => { console.warn(LOADOUTS[loadI][0], 'unavailable:', e); loadI = 1; return loadSet(LOADOUTS[1][1], LOAD_OPTS); });
+const atlas = atlasOf({idx, SP, CLIP, OV});   // live: the player reads the current loadout through this object
+let {FW, FH, PIV, DIRS, ND} = atlas;
+async function switchLoadout() {
+  loadI = (loadI + 1) % LOADOUTS.length;
+  ({idx, SP, CLIP, OV, rig} = await loadSet(LOADOUTS[loadI][1], LOAD_OPTS)); rig.reset();
+  const old = ND; Object.assign(atlas, atlasOf({idx, SP, CLIP, OV})); ({FW, FH, PIV, DIRS, ND} = atlas);
+  P.face = Math.round(P.face * ND / old) % ND; P.want = P.face;
+}
+$('#load').remove();
+// metres -> screen px. Heights use the sprite camera's pitch; the ground depth uses either the game camera (55°,
+// natural-feeling movement, some foot slip going N/S) or the sprite camera (20°, feet exact, N/S movement squashed).
+const PPM = idx.fwd_px.E[0], PPMH = PPM * Math.cos(idx.pitch * Math.PI / 180);
+const PROJ = [['game 55°', PPM * Math.sin(55 * Math.PI / 180)], ['sprite 20°', idx.fwd_px.S[1]]];
+let projI = 0, PPMY = PROJ[0][1];
+
+// ---------------- view ----------------
+const RES = [[480, 270], [320, 180]];
+let resI = 0, VW, VH, scale;
+const cv = $('#screen'), g = cv.getContext('2d'), ov = $('#over'), og = ov.getContext('2d');
+function resize() {
+  [VW, VH] = RES[resI];
+  scale = Math.max(1, Math.floor(Math.min(innerWidth / VW, innerHeight / VH)));
+  cv.width = VW; cv.height = VH; cv.style.width = VW * scale + 'px'; cv.style.height = VH * scale + 'px';
+  ov.width = VW * scale; ov.height = VH * scale; ov.style.width = cv.style.width; ov.style.height = cv.style.height;
+  g.imageSmoothingEnabled = false;
+}
+addEventListener('resize', resize); resize();
+
+// ---------------- world (metres) ----------------
+const WM = 48, HM = 48, WPX = Math.ceil(WM * PPM);
+let HPX = Math.ceil(HM * PPMY);
+const toS = (x, y, h = 0) => [x * PPM, y * PPMY - h * PPMH];
+const ctx = {PPM, PPMY, PPMH, toS};   // live projection for the player (PPMY changes on P)
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const GREEN = ['#9aaa62', '#6c7e48', '#4a5836', '#283222'], LEATHER = ['#9a6c44', '#6e4a2e', '#4a3020', '#261814'],
+  HAIR = ['#b0703e', '#84502e', '#5c3522', '#2e1a16'], CHAR = ['#5e5860', '#423e48', '#2e2b34', '#18161c'];
+const ground = document.createElement('canvas');
+function paintGround() {
+  seed = 7; HPX = Math.ceil(HM * PPMY); ground.width = WPX; ground.height = HPX;
+  const q = ground.getContext('2d');
+  q.fillStyle = GREEN[2]; q.fillRect(0, 0, WPX, HPX);
+  for (let i = 0; i < WPX * HPX / 260; i++) {
+    const x = rnd() * WPX | 0, y = rnd() * HPX | 0, r = rnd();
+    if (r < .55) { q.fillStyle = GREEN[1]; q.fillRect(x, y, 2 + (rnd() * 5 | 0), 1); }
+    else if (r < .8) { q.fillStyle = GREEN[0]; q.fillRect(x, y, 1, 1); q.fillRect(x + 2, y, 1, 1); }
+    else { q.fillStyle = GREEN[3]; q.fillRect(x, y, 3 + (rnd() * 4 | 0), 1); }
+  }
+  for (let x = 0; x < WPX; x++) {  // dirt path
+    const y = HPX * .55 + Math.sin(x / 90) * 30 | 0;
+    q.fillStyle = '#6b5a40'; q.fillRect(x, y, 1, 12 + (Math.sin(x / 23) * 2 | 0));
+    if (rnd() < .3) { q.fillStyle = '#7d6a4c'; q.fillRect(x, y + (rnd() * 10 | 0), 2, 1); }
+  }
+  seed = 99;
+}
+paintGround();
+function spriteCanvas(w, h, paint) { const c = document.createElement('canvas'); c.width = w; c.height = h; paint(c.getContext('2d')); return c; }
+const px = (q, c, x, y, w = 1, h = 1) => { q.fillStyle = c; q.fillRect(x, y, w, h); };
+const DUMMY = spriteCanvas(22, 44, q => {  // training dummy, pivot (11, 43), ~1.5 m
+  px(q, LEATHER[3], 9, 18, 4, 26); px(q, LEATHER[1], 10, 19, 2, 24); px(q, LEATHER[0], 10, 19, 1, 24);
+  px(q, HAIR[3], 3, 14, 16, 14); px(q, HAIR[1], 4, 15, 14, 12); px(q, HAIR[0], 5, 16, 5, 8); px(q, HAIR[2], 14, 17, 3, 9);
+  px(q, LEATHER[2], 4, 21, 14, 2);
+  px(q, CHAR[3], 6, 3, 10, 12); px(q, '#c8b48a', 7, 4, 8, 10); px(q, '#e0d0a8', 7, 4, 4, 5); px(q, '#9a8660', 13, 7, 2, 7);
+  px(q, '#a8342b', 9, 8, 4, 3); px(q, '#d8573e', 10, 9, 2, 1);
+});
+const ROCK = spriteCanvas(18, 10, q => { px(q, CHAR[3], 2, 1, 14, 9); px(q, CHAR[1], 3, 2, 12, 7); px(q, CHAR[0], 4, 2, 6, 3); px(q, CHAR[2], 10, 5, 5, 3); });
+const BUSH = spriteCanvas(26, 18, q => {
+  px(q, GREEN[3], 1, 4, 24, 14); px(q, GREEN[2], 2, 5, 22, 12); px(q, GREEN[1], 3, 5, 14, 8); px(q, GREEN[0], 5, 6, 6, 3);
+  px(q, GREEN[3], 6, 2, 12, 3); px(q, GREEN[1], 7, 3, 10, 2);
+});
+const props = [];
+for (let i = 0; i < 6; i++) props.push({kind: 'dummy', x: 20 + (i % 3) * 2.6 + (i > 2 ? 1.3 : 0), y: 20 + (i > 2 ? 4 : 0), r: .3, wob: 0});
+for (let i = 0; i < 30; i++) { const k = rnd() < .5 ? 'rock' : 'bush'; props.push({kind: k, x: 1 + rnd() * (WM - 2), y: 2 + rnd() * (HM - 3), r: k === 'rock' ? .3 : 0}); }
+const arrows = [], dust = [], pops = [];
+
+// ---------------- player ----------------
+let cam = {x: 0, y: 0, fx: null, fy: null};
+const WINDS = [['breeze', {wind: [0.7, 0.25], gust: 1.1}], ['gale', {wind: [4.5, 1.2], gust: 3.5}], ['calm', {wind: [0, 0], gust: 0}]];
+let windI = 0;
+const keys = new Set(); let mouse = {x: 0, y: 0, down: false}, showBones = false, showFeet = false, hits = 0;
+const PL = createPlayer({
+  ctx, atlas, keys, mouse, cam,
+  blocked: (x, y) => blocked(x, y),
+  onShoot: a => arrows.push(a),
+  dust: (fx, fy, side, big) => {   // a foot contact: dust at the foot (world px)
+    for (let i = 0; i < 3 + big * 2; i++) dust.push({x: fx + (Math.random() - .5) * 3, y: fy, vx: (Math.random() - .5) * 14, vy: -Math.random() * 5, t: 0, life: .3 + Math.random() * .2});
+  },
+});
+const P = PL.P; Object.assign(P, {x: 14, y: 24});
+const {step, cursorAim, cursorGround, dirOf} = PL;
+window.__demo = {P, keys};  // debug handle
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase(); if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+  if (e.repeat) return; keys.add(k);
+  if (k === ' ') PL.onSpace();   // dodge roll, also while aiming: the draw is kept through the roll
+  if (k === 'b') showBones = !showBones;
+  if (k === 'f') showFeet = !showFeet;
+  if (k === 'z') { resI = 1 - resI; resize(); }
+  if (k === 'p') { projI = 1 - projI; PPMY = ctx.PPMY = PROJ[projI][1]; paintGround(); cam.fx = null; }
+  if (k === 'h') $('#hud').classList.toggle('min');
+  if (k === 'o') switchLoadout();
+  if (k === 'k') { windI = (windI + 1) % WINDS.length; Object.assign(CLOTH_PARAMS, WINDS[windI][1]); }
+});
+addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+addEventListener('blur', () => { keys.clear(); mouse.down = false; });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+addEventListener('mousemove', e => { const r = cv.getBoundingClientRect(); mouse.x = (e.clientX - r.left) / scale; mouse.y = (e.clientY - r.top) / scale; });
+addEventListener('mousedown', e => { if (e.button === 0) PL.press(); });
+addEventListener('mouseup', e => { if (e.button === 0) PL.release(); });
+
+// the world's collision (the player moves through player.js and asks this)
+const blocked = (x, y) => x < .4 || y < .6 || x > WM - .4 || y > HM - .3 ||
+  props.some(p => p.r && Math.hypot(p.x - x, (p.y - y) * 1.6) < p.r + .25);
+
+function stepFx(dt) {
+  if (rig.active && SP[P.frame]) rig.update(dt, SP[P.frame].sim, P.face, [P.x, P.y]);   // cloth follows the real motion
+  for (const a of arrows) {
+    if (a.stuck) { a.life -= dt; continue; }
+    a.x += a.vx * dt; a.y += a.vy * dt; a.h += a.vh * dt; a.vh -= .9 * dt;   // barely any drop within bow range a.life -= dt;
+    (a.trail ??= []).push([a.x, a.y, a.h]); if (a.trail.length > 7) a.trail.shift();
+    for (const p of props) if (p.kind === 'dummy' && Math.hypot(p.x - a.x, p.y - a.y) < .45 && a.h < 1.6) {
+      p.wob = 1; hits++; a.life = -9; pops.push({x: p.x, y: p.y, t: 0});
+      p.sv = (p.sv || 0) + Math.sign(a.vx * PPM || 1) * (22 + Math.hypot(a.vx, a.vy) * 1.2);   // knocked back the way the arrow flew
+      break;
+    }
+    if (a.life > -9 && (a.h <= 0 || a.life <= 0)) { a.stuck = true; a.h = Math.max(0, a.h); a.life = 3; }
+  }
+  for (let i = arrows.length - 1; i >= 0; i--) if (arrows[i].life <= -9 || (arrows[i].stuck && arrows[i].life <= 0)) arrows.splice(i, 1);
+  for (const p of props) if (p.wob) p.wob = Math.max(0, p.wob - dt * 1.6);
+  // springy props: a lean angle (px of sway at the top) on a damped spring; the player brushing past pushes bushes
+  const pv = Math.hypot(P.vx, P.vy);
+  for (const p of props) {
+    if (p.kind === 'rock') continue;
+    if (p.kind === 'bush' && pv > .8) {
+      const dx = p.x - P.x, dy = (p.y - P.y) * 1.6, d = Math.hypot(dx, dy);
+      if (d < .9) p.sv = (p.sv || 0) + (P.vx * .9 + Math.sign(dx) * pv * .5) * (1 - d / .9) * dt * 70;
+    }
+    const k = p.kind === 'bush' ? 90 : 140, c = p.kind === 'bush' ? 5 : 3.2;
+    p.sv = (p.sv || 0) + (-k * (p.sa || 0) - c * (p.sv || 0)) * dt; p.sa = Math.max(-5, Math.min(5, (p.sa || 0) + p.sv * dt));
+  }
+  for (let i = pops.length - 1; i >= 0; i--) if ((pops[i].t += dt) > .8) pops.splice(i, 1);
+  for (let i = dust.length - 1; i >= 0; i--) { const q = dust[i]; q.t += dt; q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= .9; if (q.t > q.life) dust.splice(i, 1); }
+}
+
+// ---------------- draw ----------------
+function shadow(x, y, w) {
+  g.fillStyle = 'rgba(12,16,10,.38)';
+  for (let r = -1; r <= 1; r++) { const hw = Math.round(w * Math.sqrt(1 - (r / 1.8) ** 2)); g.fillRect(x - hw, y + r, hw * 2, 1); }
+}
+// draw a sprite leaning: each row shifts in proportion to its height above the base (pixel-exact shear); rows below
+// `from` (the dummy's post in the ground) stay put
+function sheared(img, x, y, lean, from) {
+  const h = img.height, base = h - 1 - from;
+  if (Math.abs(lean) < .5) { g.drawImage(img, x, y); return; }
+  for (let r = 0; r < h; r++) {
+    const off = Math.round(lean * Math.max(0, (base - r) / base));
+    g.drawImage(img, 0, r, img.width, 1, x + off, y + r, img.width, 1);
+  }
+}
+function line(x0, y0, x1, y1, c) {
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1; let e = dx + dy;
+  g.fillStyle = c;
+  for (;;) { g.fillRect(x0, y0, 1, 1); if (x0 === x1 && y0 === y1) break; const e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+}
+function render() {
+  const [pxs, pys] = toS(P.x, P.y);
+  // camera: eases after the player with a little look-ahead, snapped to whole pixels for drawing
+  const tx = Math.min(WPX - VW, Math.max(0, pxs + P.vx * PPM * .12 - VW / 2)), ty = Math.min(HPX - VH, Math.max(0, pys + P.vy * PPMY * .12 - 30 - VH / 2));
+  if (cam.fx === null) { cam.fx = tx; cam.fy = ty; }
+  const k = 1 - Math.exp(-camDt * 9); cam.fx += (tx - cam.fx) * k; cam.fy += (ty - cam.fy) * k;
+  cam.x = Math.round(cam.fx); cam.y = Math.round(cam.fy);
+  g.drawImage(ground, cam.x, cam.y, VW, VH, 0, 0, VW, VH);
+  const list = props.map(p => ({y: p.y, p})).concat([{y: P.y, player: true}], arrows.map(a => ({y: a.y, a})));
+  list.sort((a, b) => a.y - b.y);
+  for (const o of list) {
+    if (o.player) {
+      // relative to the UNROUNDED camera, rounded once: at a steady speed the offset is constant, so the sprite
+      // holds its screen pixel instead of toggling between two (double rounding made it look fuzzy)
+      const sx = Math.round(pxs - cam.fx), sy = Math.round(pys - cam.fy);
+      shadow(sx, sy, 7);
+      if (!SP[P.frame]) P.frame = 'idle.0';   // e.g. after switching to a loadout without that pose
+      g.drawImage(SP[P.frame].img, P.face * FW, 0, FW, FH, sx - PIV[0], sy - PIV[1], FW, FH);
+      if (rig.active && SP[P.frame].depth) rig.draw(g, sx - PIV[0], sy - PIV[1], depthOf(SP[P.frame].depth), P.face);
+    } else if (o.a) {
+      const a = o.a, [gx, gy] = toS(a.x, a.y), sx = gx - cam.x, sy = gy - cam.y;
+      const svx = a.vx * PPM, svy = a.vy * PPMY - (a.stuck ? -8 : a.vh) * PPMH, l = Math.hypot(svx, svy) || 1;
+      if (!a.stuck) { g.fillStyle = 'rgba(12,16,10,.35)'; g.fillRect(Math.round(sx), Math.round(sy), 2, 1); }
+      const hy = sy - a.h * PPMH, ux = svx / l, uy = svy / l, tail = a.stuck ? 5 : 9;
+      if (a.stuck) {   // stuck in the ground: a short pixel stub
+        line(sx - ux * tail, hy - uy * tail, sx, hy, LEATHER[0]);
+        g.fillStyle = '#e8e0cc'; g.fillRect(Math.round(sx - ux * tail), Math.round(hy - uy * tail), 1, 1);
+      }
+    } else {
+      const p = o.p, [gx, gy] = toS(p.x, p.y), sx = Math.round(gx - cam.x), sy = Math.round(gy - cam.y);
+      if (sx < -30 || sx > VW + 30 || sy < -10 || sy > VH + 50) continue;
+      if (p.kind === 'dummy') { shadow(sx, sy, 6); sheared(DUMMY, sx - 11, sy - 43, p.sa || 0, 3); }
+      else if (p.kind === 'rock') g.drawImage(ROCK, sx - 9, sy - 8);
+      else sheared(BUSH, sx - 13, sy - 15, p.sa || 0, 0);
+    }
+  }
+  for (const q of dust) {  // dust: light pixels that fade to darker, then vanish
+    const k = q.t / q.life; g.fillStyle = k < .4 ? '#b8a888' : k < .75 ? '#8a7a60' : '#5e5444';
+    g.fillRect(Math.round(q.x - cam.x), Math.round(q.y - cam.y), 1, 1);
+  }
+  g.fillStyle = '#f2d27a';
+  for (const p of pops) { const [gx, gy] = toS(p.x, p.y, 1.7); const x = Math.round(gx - cam.x), y = Math.round(gy - cam.y - p.t * 14); g.fillRect(x - 1, y, 3, 1); g.fillRect(x, y - 1, 1, 3); }
+  if (P.state === 'draw') {
+    const mx = Math.round(mouse.x), my = Math.round(mouse.y);
+    g.fillStyle = P.t > .5 ? '#f2d27a' : '#e9e4da';
+    g.fillRect(mx - 3, my, 2, 1); g.fillRect(mx + 2, my, 2, 1); g.fillRect(mx, my - 3, 1, 2); g.fillRect(mx, my + 2, 1, 2);
+  }
+  og.clearRect(0, 0, ov.width, ov.height);
+  const ox = (Math.round(pxs - cam.fx) - PIV[0]) * scale, oy = (Math.round(pys - cam.fy) - PIV[1]) * scale;
+  PL.drawHD(og, scale, ox, oy, arrows);
+  if (showBones) {
+    og.lineWidth = 2; og.lineCap = 'round';
+    for (const [n, [hx, hy, tx, ty]] of Object.entries(SP[P.frame].bones[DIRS[P.face]])) {
+      og.strokeStyle = og.fillStyle = n.startsWith('Left') ? '#50dcff' : n.startsWith('Right') ? '#ff9640' : '#fff078';
+      og.beginPath(); og.moveTo(ox + hx * scale, oy + hy * scale); og.lineTo(ox + tx * scale, oy + ty * scale); og.stroke();
+      og.beginPath(); og.arc(ox + hx * scale, oy + hy * scale, 2.5, 0, 7); og.fill();
+    }
+  }
+  if (showFeet && P.state === 'move') {  // planted foot (filled) and the gait phase bar
+    const C = CLIP[P.gait], f = +P.frame.split('.')[1], b = SP[P.frame].bones[DIRS[P.face]];
+    for (const s of ['L', 'R']) {
+      const ft = b[(s === 'L' ? 'Left' : 'Right') + 'Foot'], x = ox + (ft[0] + ft[2]) / 2 * scale, y = oy + Math.max(ft[1], ft[3]) * scale;
+      og.strokeStyle = og.fillStyle = s === 'L' ? '#50dcff' : '#ff9640';
+      og.beginPath(); og.arc(x, y, 5, 0, 7); C.planted[f] === s ? og.fill() : og.stroke();
+    }
+    const w = 60 * scale / 3, bx = ox + PIV[0] * scale - w / 2, by = oy + (PIV[1] + 4) * scale;
+    og.fillStyle = 'rgba(0,0,0,.5)'; og.fillRect(bx, by, w, 6);
+    og.fillStyle = '#f2d27a'; og.fillRect(bx, by, w * P.ph, 6);
+    for (const c of C.contacts) { og.fillStyle = '#fff'; og.fillRect(bx + w * C.cum[c] / C.stride - 1, by - 3, 2, 12); }
+  }
+  $('#stat').textContent = `${P.frame} · facing ${DIRS[P.face]} · ${Math.hypot(P.vx, P.vy).toFixed(1)} m/s · ${LOADOUTS[loadI][0]} · ground ${PROJ[projI][0]} ·${rig.active ? ` wind ${WINDS[windI][0]} ·` : ''} hits ${hits}/${PL.shots}`;
+}
+
+// ---------------- HD layer: thin, fast things drawn at screen resolution over the pixel art ----------------
+// The bowstring is left out of the pixel sprite; its tip -> nock -> tip path and per-sample visibility (hidden where
+// the body is in front) come from the render. It glows with tension while drawn and twangs after the shot.
+let last = performance.now();
+let camDt = 0;
+// debug handle for scripted tests (drive frames and read the canvas while the page is hidden)
+Object.assign(window.__demo, {step, stepFx, render, mouse, cursorGround, cursorAim, cam, dirOf, props, arrows, toS, CLOTH_PARAMS, PL});
+Object.defineProperty(window.__demo, 'lastArrow', {get: () => PL.lastArrow});   // test hook (was set by the old hdNockedArrow)
+Object.defineProperties(window.__demo, {ND: {get: () => ND}, DIRS: {get: () => DIRS}, SP: {get: () => SP}, OV: {get: () => OV},
+  camDt: {set: v => { camDt = v; }, get: () => camDt}, rig: {get: () => rig}});
+function frame(now) { const dt = Math.max(0, Math.min(.05, (now - last) / 1000)); last = now; camDt = dt; step(dt); stepFx(dt); render(); requestAnimationFrame(frame); }
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

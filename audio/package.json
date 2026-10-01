@@ -1,0 +1,6 @@
+{
+  "name": "game-audio",
+  "private": true,
+  "type": "module",
+  "description": "The Sound Forge (seeded procedural SFX) and the game-audio runtime. Plain ES modules: the same files run in the browser and in Node (tools/sfx/forge.mjs). See docs/AUDIO.md."
+}

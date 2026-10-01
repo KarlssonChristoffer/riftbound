@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ranger Master Sprite</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#1b1a20;--panel:#222129;--line:#34323d;--text:#e9e4da;--muted:#9a94a6;--accent:#c9a45a}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,Segoe UI,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}
+.lead{color:var(--muted);margin:0 0 22px;max-width:760px}
+.gate{display:inline-block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.wrap{display:grid;grid-template-columns:auto 1fr;gap:32px;align-items:start}
+.big{position:relative;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+.side h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+.ones{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:26px}
+.one{display:flex;flex-direction:column;align-items:center;gap:6px}
+.one small,.cap{color:var(--muted);font-size:12px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.bar button{font:inherit;font-size:13px;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}
+.bar button[aria-pressed=true]{border-color:var(--accent);color:#f2d27a}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0 0 26px;font-size:14px}
+dt{color:var(--muted)}dd{margin:0}
+.pal{display:grid;grid-template-columns:70px repeat(4,28px);justify-content:start;gap:4px 6px;align-items:center;font-size:13px;margin-bottom:8px}
+.pal span.sw{width:28px;height:20px;border-radius:3px;border:1px solid #0006}
+@media (max-width:760px){.wrap{grid-template-columns:1fr}.big{overflow-x:auto}}
+section.rig{margin-top:56px;padding-top:28px;border-top:1px solid var(--line)}
+.pair{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end}
+.strip{overflow-x:auto;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:8px 0 4px}
+.dirs{display:flex;color:var(--muted);font-size:11px;margin:2px 10px 18px}
+.dirs span{text-align:center}
+code{font-size:13px;color:#d9c9a3}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-x:auto;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<div class="gate">Gate 1 · master sprite</div>
+<h1>Ranger — idle master</h1>
+<p class="lead">One frame, authored as layered parts. Every later animation frame gets derived from these exact pixels (they're stored per part in <code>ranger_master_layers.json</code>).
+Light from the top-left, large clusters, a local outline in each part's own darkest tone, no gradients or dither.</p>
+<div class="wrap">
+  <div>
+    <div class="big"><canvas id="big"></canvas></div>
+    <div class="bar">
+      <button id="grid" aria-pressed="false">Pixel grid</button>
+      <button id="piv" aria-pressed="false">Pivot + canvas</button>
+      <button data-bg="check" aria-pressed="true">Checker</button>
+      <button data-bg="#3a3f3a" aria-pressed="false">Ground</button>
+      <button data-bg="#c4b8a0" aria-pressed="false">Light</button>
+    </div>
+    <p class="cap">6× (nearest neighbour)</p>
+  </div>
+  <div class="side">
+    <h2>True size, 1×</h2>
+    <div class="ones" id="ones"></div>
+    <h2>2× for reference</h2>
+    <div class="ones" id="twos"></div>
+    <h2>Spec</h2>
+    <dl>
+      <dt>Canvas</dt><dd>48 × 64 px, transparent</dd>
+      <dt>View</dt><dd>Three-quarter top-down, facing south-east (mirror for south-west)</dd>
+      <dt>Pivot</dt><dd id="pv"></dd>
+      <dt>Figure</dt><dd>~60 px tall, head + hair ≈ 38%</dd>
+      <dt>Colours</dt><dd id="cc"></dd>
+    </dl>
+    <h2>Palette (hi · base · shade · outline)</h2>
+    <div class="pal" id="pal"></div>
+  </div>
+</div>
+
+<section class="rig">
+<div class="gate">Test · Blender pixel rig (not a gate)</div>
+<h2 style="font-size:20px;margin:0 0 4px">Same palette, rendered from a 3D model</h2>
+<p class="lead">The KitagawaGameDev method: Blender renders exact, un-antialiased ID / normal / depth passes through an ortho camera
+whose pixel grid is the 48×64 canvas, turning the character in 8 steps. <code>pixelize.py</code> then paints them with the master's
+own rules (these palette families, top-left light in 3 bands, interior lines, local outline, clean-up). Camera locked at 20° pitch. v6 = the round-2 mesh: bigger head with an open face (≈188 face px facing S vs the master's 169),
+1-px eyes, arms and bow swung out, scarf under the chin with the tunic edge tucked under, chest strap. v7 = the same model made angular: fewer ring segments, flat shading, saw-toothed fringe, pointed locks and hair clumps, tapered jaw; v7b = 8-sided hair cap. v8 = v7 re-proportioned athletic: ~3.3 heads tall, long legs, V-taper (shoulders 1.1 × , waist 0.72 ×), longer thinner arms, short tunic skirt and mid-thigh cape, longbow. Earlier rounds kept for comparison.
+Everything here is automatic; no pixel was touched by hand.</p>
+<div class="bar" id="setBar"></div>
+<div class="bar" id="layBar"></div>
+<div class="bar" id="dirBar"></div>
+<h3 style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:18px 0 8px">Master vs render, 6×</h3>
+<div class="pair" id="pair"></div>
+<h3 style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:26px 0 0">8 facings, 3× and 1×</h3>
+<div class="strip"><canvas id="strip3"></canvas></div>
+<div class="dirs" id="dirs3"></div>
+<div class="strip"><canvas id="strip1"></canvas></div>
+<p class="cap" id="rigInfo"></p>
+<h3 style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:26px 0 6px">Re-run</h3>
+<pre>D:\Blender\blender.exe -b --factory-startup --python tools/blender/pixel_rig.py -- --model tools/blender/ranger_v8.py --out concepts/sprites/out/render_v8
+python concepts/sprites/pixelize.py concepts/sprites/out/render_v8</pre>
+</section>
+</main>
+<script type="module">
+const $ = s => document.querySelector(s);
+const Z = 6;
+const img = new Image();
+await new Promise((ok, err) => { img.onload = ok; img.onerror = err; img.src = 'out/ranger_idle_master.png?' + Date.now(); });
+let layers = null;
+try { layers = await fetch('out/ranger_master_layers.json?' + Date.now()).then(r => r.json()); } catch (e) {}
+const W = img.width, H = img.height, pivot = layers ? layers.pivot : [W / 2, H - 2];
+let bg = 'check', grid = false, piv = false;
+
+function drawBig() {
+  const c = $('#big'); c.width = W * Z; c.height = H * Z;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  if (bg === 'check') {
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      g.fillStyle = (x + y) % 2 ? '#2b2a31' : '#34333b'; g.fillRect(x * Z, y * Z, Z, Z);
+    }
+  } else { g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height); }
+  g.drawImage(img, 0, 0, W * Z, H * Z);
+  if (grid) {
+    g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 1; g.beginPath();
+    for (let x = 1; x < W; x++) { g.moveTo(x * Z + .5, 0); g.lineTo(x * Z + .5, H * Z); }
+    for (let y = 1; y < H; y++) { g.moveTo(0, y * Z + .5); g.lineTo(W * Z, y * Z + .5); }
+    g.stroke();
+  }
+  if (piv) {
+    g.strokeStyle = '#f2d27a'; g.lineWidth = 1; g.strokeRect(.5, .5, W * Z - 1, H * Z - 1);
+    const px = pivot[0] * Z, py = pivot[1] * Z;
+    g.strokeStyle = '#7ee0ff'; g.beginPath(); g.moveTo(0, py + .5); g.lineTo(W * Z, py + .5); g.stroke();
+    g.fillStyle = '#7ee0ff'; g.beginPath(); g.arc(px, py, 4, 0, Math.PI * 2); g.fill();
+  }
+}
+function smalls(el, k) {
+  for (const [name, col] of [['dark', '#1e1c22'], ['ground', '#5c6850'], ['light', '#c4b8a0']]) {
+    const c = document.createElement('canvas'); c.width = W * k; c.height = H * k;
+    const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+    g.fillStyle = col; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, W * k, H * k);
+    const d = document.createElement('div'); d.className = 'one';
+    d.append(c, Object.assign(document.createElement('small'), {textContent: name}));
+    el.appendChild(d);
+  }
+}
+smalls($('#ones'), 1); smalls($('#twos'), 2); drawBig();
+
+$('#pv').textContent = `(${pivot[0]}, ${pivot[1]}) — canvas x centre, bottom edge of the boot soles`;
+const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+const cg = cv.getContext('2d'); cg.drawImage(img, 0, 0);
+const d = cg.getImageData(0, 0, W, H).data, set = new Set();
+for (let i = 0; i < d.length; i += 4) if (d[i + 3]) set.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+const fams = layers ? layers.families : {};
+$('#cc').textContent = `${set.size} used, from ${Object.keys(fams).length} colour families`;
+for (const [name, tones] of Object.entries(fams)) {
+  $('#pal').append(Object.assign(document.createElement('span'), {textContent: name}));
+  for (const t of tones) { const s = document.createElement('span'); s.className = 'sw'; s.style.background = '#' + t; s.title = '#' + t; $('#pal').append(s); }
+}
+
+$('#grid').onclick = e => { grid = !grid; e.target.setAttribute('aria-pressed', grid); drawBig(); };
+$('#piv').onclick = e => { piv = !piv; e.target.setAttribute('aria-pressed', piv); drawBig(); };
+for (const b of document.querySelectorAll('[data-bg]')) b.onclick = () => {
+  bg = b.dataset.bg; document.querySelectorAll('[data-bg]').forEach(x => x.setAttribute('aria-pressed', x === b)); drawBig();
+};
+</script>
+<script type="module">
+// Blender pixel rig test: sheets written by concepts/sprites/pixelize.py (one row, 8 dirs of 48x64)
+const $ = s => document.querySelector(s);
+const SETS = [['render_v8', 'v8 · athletic'], ['render_v7', 'v7 · angular'], ['render_v7b', 'v7b · blockier hair'], ['render_v6', 'v6 · smooth'], ['render_v5_p20', 'v5 · 20°'], ['render_v5', 'v5 · 30°'], ['render', 'v4 · 30°']];
+const LAYERS = [['ranger3d_sheet.png', 'Final'], ['ranger3d_raw_sheet.png', 'Bands only'], ['ranger3d_normals.png', 'Normal map']];
+const st = {set: SETS[0][0], lay: LAYERS[0][0], dir: 'SE'};
+const cache = {};
+const loadImg = src => cache[src] ??= new Promise((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = err; i.src = src + '?' + Date.now(); });
+const master = await loadImg('out/ranger_idle_master.png');
+let meta = null;
+
+function bar(el, items, key) {
+  for (const [v, label] of items) {
+    const b = document.createElement('button'); b.textContent = label; b.setAttribute('aria-pressed', st[key] === v);
+    b.onclick = () => { st[key] = v; el.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); draw(); };
+    el.appendChild(b);
+  }
+}
+function paintBg(g, w, h, z) {
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { g.fillStyle = (x + y) % 2 ? '#2b2a31' : '#34333b'; g.fillRect(x * z, y * z, z, z); }
+}
+function frame(src, sx, w, h, z, label) {
+  const c = document.createElement('canvas'); c.width = w * z; c.height = h * z;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false; paintBg(g, w, h, z);
+  g.drawImage(src, sx, 0, w, h, 0, 0, w * z, h * z);
+  const d = document.createElement('div'); d.className = 'one big';
+  d.append(c, Object.assign(document.createElement('small'), {textContent: label})); return d;
+}
+async function draw() {
+  meta = await fetch(`out/${st.set}/ranger3d_sheet.json?` + Date.now()).then(r => r.json());
+  const [W, H] = meta.frame, dirs = meta.dirs;
+  const sheet = await loadImg(`out/${st.set}/${st.lay}`);
+  const pair = $('#pair'); pair.innerHTML = '';
+  pair.append(frame(master, 0, W, H, 6, 'hand-made master'), frame(sheet, dirs.indexOf(st.dir) * W, W, H, 6, `render · ${st.dir}`));
+  for (const [id, z] of [['#strip3', 3], ['#strip1', 1]]) {
+    const c = $(id); c.width = W * 8 * z + (z > 1 ? 0 : 0); c.height = H * z;
+    const g = c.getContext('2d'); g.imageSmoothingEnabled = false; paintBg(g, W * 8, H, z);
+    g.drawImage(sheet, 0, 0, W * 8, H, 0, 0, W * 8 * z, H * z);
+  }
+  $('#dirs3').innerHTML = dirs.map(d => `<span style="width:${W * 3}px">${d}</span>`).join('');
+  $('#rigInfo').textContent = `${meta.colours} colours · camera yaw ${meta.camera.yaw}°, pitch ${meta.camera.pitch}° · pivot (${meta.pivot}) · source ${meta.source}`;
+}
+bar($('#setBar'), SETS, 'set'); bar($('#layBar'), LAYERS, 'lay');
+bar($('#dirBar'), ['S', 'SE', 'E', 'NE', 'N', 'NW', 'W', 'SW'].map(d => [d, d]), 'dir');
+draw();
+</script>
+</body>
+</html>
