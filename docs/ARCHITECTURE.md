@@ -203,12 +203,24 @@ and gameplay can be tested without drawing anything.
 3. **Game effects are modifiers, never overwrites.** Items and augments add `{stat: 'moveSpeed', mul: 1.1, from:
    'boots'}` to a modifier list; the player reads `stats.get('moveSpeed')`. Nothing writes another module's constants,
    so nothing needs restoring.
+   *As built (phase 4):* `host.mods` (core/modifiers.js): a source sets notes `{stat, add, mul}` (`mods.set('stats',
+   [...])`, `mods.clear('run')`); the owner turns its own authored base into the value when the notes change
+   (`value = (base + adds) x muls`): combat's tuning and cooldowns, the player's run speeds.
 4. **The simulation runs on a fixed timestep** (60 steps/s, rendering interpolates). Physics, fire spread and AI then
    behave the same at 40 fps and at 240 fps, slow motion is exact, and a seeded run can be replayed for a test.
+   *As built (phase 4):* core/loop.js steps the sim in fixed 1/60 s steps (up to one step ahead of real time, at most
+   4 a frame) and draws the world alpha of the way through the last step (the registry, the arrows and the player
+   blend for the draw and are put back). A sim decision draws from its system's own seeded generator (core/rng.js
+   `simSeed`), never Math.random, which is presentation's. Proven by tools/test/simview.mjs: the same input gives the
+   same sim at 30, 60 and 240 fps.
 5. **The frame has named phases, and systems declare theirs**: `input -> sim (fixed steps) -> view -> render -> ui`.
    Order inside a phase is declared (`after: ['env']`), not implied by an array's order.
-   *As built (phase 3):* each feature exports `order = {after, before}`; core/features.js sorts by it. The phases
-   themselves come with the fixed step and the sim / view split (phase 4).
+   *As built (phase 3):* each feature exports `order = {after, before}`; core/features.js sorts by it.
+   *As built (phase 4):* a frame is: the camera turns -> the SIM's fixed steps (each feature's `update`: the truth,
+   always, its visuals on or not) -> the VIEW (each feature's `view`, once, with the frame's time and all its steps'
+   events: presentation, it reads the finished sim and writes only its own state) -> the draw (`frame`, `lights`,
+   `hd`). Paused, the views of features declaring `ambient` go on. Proven by tools/test/simview.mjs: with `?views=0`
+   (no views, no drawing) the sim comes out the same.
 6. **Events go through one bus with a catalog.** `events.emit('prop.break', {...})`; every type is listed in
    `core/events.js` with its payload, emitter and listeners. Names are namespaced (`player.land` vs `prop.land`, no
    overloaded types). Events emitted during a phase are delivered at the end of that phase, deterministically.
@@ -289,7 +301,10 @@ never write each other's state. `dev/` reaches the engine only as `E.dev`, hande
 | who may write a field | `OWNERS` in dev/owncheck.js; `?owncheck=1` records every other writer with its file:line | creators fill an entity in before it joins; a system keeps its private per-entity state in its own fields (listed) or a WeakMap |
 | which events exist | `EVENTS` in core/events.js | add the type there with its emitter; dev mode warns otherwise |
 | the features' order | each feature's `export const order = {after, before}` (core/features.js sorts) | a cycle throws |
-| module state of another system | the owner's API: `world.propTop`, `setClothWind`, `STREAM.addStone / removeStone`, `PL.faceShot / flicker / regrid` | |
+| module state of another system | the owner's API: `world.propTop`, `setClothWind`, `STREAM.addStone / removeStone`, `PL.faceShot / flicker / regrid`; the renderer's `G.setOptions / setSmooth / setSeason / setGround / setFlash / setPlayer` | |
+| a game effect on another system's number | a note in `host.mods` (core/modifiers.js); the owner applies it | never write the number |
+| truth or looks | `F.update` (sim: own seeded generator, always runs) vs `F.view` (presentation: Math.random, after the sim, while `F.on`); `F.ambient` for while paused | tools/test/simview.mjs proves the split |
+| how much detail | menu > Graphics > Detail (`?detail=low`): low turns cosmetic views off (wind lines, wildlife, depth) | it can't change play: views don't feed the sim |
 
 ### 2.4 A system, concretely
 
@@ -339,13 +354,20 @@ The numbers live in `src/core/perf.js` (`BUDGET`). Change them only on purpose, 
 - **`node tools/perf/bench.mjs`**: five scenarios in headless Chrome on the real GPU, compared with
   `tools/perf/baseline.json`. It fails when a scenario is over budget or a system got 25% (and 0.1 ms) slower. It
   checks that the machine is quiet first: parallel sessions baking or capturing make every number 2-4x worse.
-  `--only night`, `--save` (new baseline after an intended change).
+  `--only night`, `--save` (new baseline after an intended change). It renders uncapped (hundreds of fps), so since
+  the fixed step (phase 4.3) the sim group shows its share per frame (60 steps a second spread over many frames);
+  F3 at 60 fps shows a step's full cost every frame.
 - **`node tools/test/golden.mjs --compare tmp/golden/ref4`**: a scripted tour (seeded `Math.random`, a virtual clock,
   no rAF) captured bit-exact: 16 PNGs + state digests by day, night, storm, snow and in a run. A refactor must leave
   every capture identical; a run that differs once and not again (seen right after a bench) is re-run before
   believing it. `--save <dir>` captures a new reference after an intended visual change.
 - **`node tools/test/smoke.mjs`**: keys, the menu, loadouts, biome switches, pause / resume, climbing at an angle, the
   camera, resizes, zoom, the title, 600 frames of a run, with no console errors.
+- **`node tools/test/simview.mjs`**: the sim / view split and the fixed step. Scripted sessions (the yard with a fire
+  that spreads, a run, keyboard-only play) run whole and with `?views=0`, and the keyboard one at 30 and 240 fps; the
+  sim state is compared every 30 steps (player, props, arrows, enemies, gold, the run, clock, weather, the fire). Any
+  difference fails it. It was proven sensitive: fire spread on Math.random, one spark on combat's sim generator, or
+  the old variable step each make it fail.
 
 ### 3.3 The rules
 
@@ -422,7 +444,7 @@ No rewrite. Each phase leaves the game playable, ends in a commit and a bench ru
 | **1. Performance, no restructure** (done 2026-10-01: day 4.15 -> 2.04 ms, see 1.1) | cloth: persistent buffers, bounding box, flat arrays; batches upload only written ranges; card frustum culling; `setMatrix` early-out + height-map dirty threshold; flame canvases upload on version; firesim pooling + on-screen culling; cached lights / colours in `applyMood` and `world.update`; cached player position; quantised shaft / cloud keys. Moved on: `preserveDrawingBuffer` (GPU-only cost; captures rely on it) and lights' `F.on` freeze (a sim / view split, phase 4) | day JS <= 2.5 ms, every scenario in budget: met |
 | **2. Move and split** (done 2026-10-01, commits 6fcee2c .. eed7783; the layout as built is in 2.3) | `concepts/render3d` -> `src/`; `main.js` 773 -> 191 lines (the boot) split into core / render / sim / view / world / ui / dev modules; the shared arena files forked into `src/`; one `mathx` / `rng` / `color` / `viewxf`; `flags.js`; three.js vendored; old `game/` -> `concepts/legacy-game`. New checks: `tools/test/golden.mjs` (bit-exact captures), `tools/test/smoke.mjs` | behaviour identical: met (16 golden captures identical after every step, smoke passes); bench unchanged: met (day JS 1.55 ms) |
 | **3. Entities, grid, events** (done 2026-10-01, commits 936195e .. 1a71971; how to use them: 2.3, "as built after phase 3") | the entity registry with live queries (combat's create-time snapshots gone); a uniform grid for collision / interaction / arrows / prop physics / brute spots / fire spread, live kind queries for the per-frame passes (run JS 1.56 -> 1.25 ms); namespaced events with the catalog (and the jump event's view-frame bug it exposed); the ownership table + `?owncheck=1`, and the cross-system writes it found fixed at their owners (torch mounting, soft plants, `gone`, hit feedback + rails, the cloak's wind, stepping stones, the player's facing / flicker); declared feature order. Left for phase 4 on purpose: stats.js / game.js tuning overwrites (modifiers), renderer uniform setters, ctxO's world fields, views that read sim state mid-step (wind's cloth strips), wind's own foliage index and wildlife's solids list onto the grid, the hover / contact passes over all items, `combat.enemies` allocating per read | no module writes another's entity fields: met (`?owncheck=1` over a sandbox session and a run: 0 violations, 0 added fields); golden identical but one intended 8 x 4 px change (ref3, see 3.4a) |
-| **4. Fixed step, sim / view split, modifiers** | fixed 60 Hz sim + interpolation; each mixed feature split (wind -> `env` wind field + foliage / leaves / audio views; lights -> `sim/fire` + `view/firefx`; ...); `stats.js` -> modifiers | sim runs headless in a test; quality tier "low" works |
+| **4. Fixed step, sim / view split, modifiers** (done 2026-10-01, commits d1afd86 .. e7d48cc) | modifiers (`host.mods`: stats.js / game.js no longer overwrite combat's tuning, cooldowns, gold or the player's speeds); every feature's step split into `update` (sim) and `view` (presentation), lights and combat split inside (the fire burns on with its lights toggled off); sim decisions on their systems' own seeded generators; a fixed 60 Hz sim with the draw blended between steps; the detail tier (low: no wind lines, wildlife, depth: day JS -22%); the renderer's settings through setters (the sampling blend had two writers); the enemies list made on change, not per read; wildlife and the cursor's aim through the registry. Left as they are on purpose: wind's own foliage index (a cache near the view, not per-call scans), the contact shadows' per-frame item pass, ctxO's world fields (filled by world.js at build) | sim runs headless in a test: met (tools/test/simview.mjs: identical without views and at 30 / 60 / 240 fps); quality tier "low" works: met (Graphics > Detail) |
 | **5. GPU-side visuals** (done 2026-10-01, see 1.1: shadow draws 188 -> 56, render -18 to -30% by day) | cached static shadow map + per-frame one for what moves (instancing built, measured, dropped); cloth collision early-out; per-pass stats, `--throttle`. Evaluated and deferred with reasons (1.1): cloth / fire on the GPU, layers in shaders, `preserveDrawingBuffer` | shadow draws ~halved: met (-70%); laptop-class target (CPU throttled 3x) holds 60 fps on average, the busiest moments touch it |
 
 Phases 1 and 5 make it fast; 2-4 make it changeable. Phase 1 can start right away and needs no freeze. Phases 2-3 are

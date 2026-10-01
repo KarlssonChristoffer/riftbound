@@ -17,6 +17,9 @@ Rules that apply to every change now:
   or randomness passes `node tools/test/simview.mjs` (the sim comes out the same without its views).
 - **Sim vs view.** `F.update` is the truth (always runs; its random draws come from the feature's own seeded generator,
   `core/rng.js`); `F.view` is presentation (after every update, may use Math.random, writes only its own state).
+  The sim runs in fixed 1/60 s steps (`core/loop.js`); never assume one update per frame or a frame-sized dt.
+- **Game effects are modifiers** (`host.mods`, `core/modifiers.js`): an item / augment / run rule sets notes on a stat;
+  the stat's owner applies them. Never write another system's number and restore it later.
 - **No per-frame allocation, no per-frame CPU pixel work** (`getImageData`, software rasterising, repainting a canvas
   and re-uploading it), **no scans over all props**. Update on change, cache by version, preallocate.
 - **One owner per piece of state.** Don't write fields on another module's objects, don't overwrite another module's
