@@ -29,7 +29,18 @@
 
 // Phase 1 ids are registered up front; a missing file is skipped with a warning. 'example' stays loadable by id
 // (node tools/sfx/forge.mjs example) but is kept out of the lab and 'all'.
-export const RECIPES = ['impact', 'crate_break', 'bow_release', 'footstep', 'stream', 'splash'];
+export const RECIPES = [
+  // phase 1 (rated 2026-10-01)
+  'impact', 'crate_break', 'bow_release', 'footstep', 'stream', 'splash', 'plunk',
+  // combat
+  'arrow_fly', 'arrow_stick', 'explosion', 'trap', 'stomp',
+  // character, loot, UI
+  'cloth', 'climb', 'bow_draw', 'coin', 'chest', 'magic', 'ui',
+  // world and ambience
+  'wind', 'fire', 'lava', 'creature', 'ice', 'rift', 'prop',
+  // phase 3
+  'insects', 'prop_roll',
+];
 export async function loadRecipes(ids = RECIPES) {
   const out = {};
   for (const id of ids) {
