@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HD-2D Render Test</title>
+<style>
+  :root { --bg: #0d0f0e; --ink: #e8e2d2; --dim: #9a937f; --key: #f0c060; --panel: rgba(14, 16, 15, .82); --line: rgba(232, 226, 210, .14); }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 12px/1.45 ui-monospace, Consolas, monospace; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  #screen { image-rendering: pixelated; display: block; background: #000; cursor: crosshair; }
+  #hud { position: fixed; left: 10px; top: 10px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; max-width: 420px; pointer-events: none; }
+  #hud b { color: var(--key); font-weight: 600; }
+  #hud .row { white-space: nowrap; }
+  #hud .dim { color: var(--dim); }
+  #help { position: fixed; right: 10px; top: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; pointer-events: none; }
+  #help td { padding: 0 8px 0 0; vertical-align: top; }
+  #help td:first-child { color: var(--key); white-space: nowrap; }
+  #load { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 14px; }
+  .hidden { display: none !important; }
+  @media (max-width: 720px) { #help { display: none; } #hud { max-width: calc(100vw - 40px); } }
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="wrap"><canvas id="screen"></canvas></div>
+<div id="hud"></div>
+<div id="help">
+  <table>
+    <tr><td>WASD</td><td>move (camera-relative) · Shift sprint · Q walk</td></tr>
+    <tr><td>Mouse</td><td>aim · hold LMB draw, release shoot · Space roll / leap</td></tr>
+    <tr><td>Z / X</td><td>rotate camera · or drag with right mouse</td></tr>
+    <tr><td>Wheel</td><td>zoom 1x / 2x · Home: reset rotation</td></tr>
+    <tr><td>1</td><td>rotation: free / 22.5° steps / 90° steps</td></tr>
+    <tr><td>2</td><td>ground texture: nearest / smooth-pixel</td></tr>
+    <tr><td>3</td><td>prop outlines + seams on / off</td></tr>
+    <tr><td>4</td><td>props: live 3D / pre-rendered 16 angles</td></tr>
+    <tr><td>5</td><td>banded light on / off</td></tr>
+    <tr><td>6</td><td>sun shadows on / off</td></tr>
+    <tr><td>T · N · L</td><td>time of day · biome · lantern</td></tr>
+    <tr><td>G</td><td>debug view (albedo, normals, depth, ids, shadow, light)</td></tr>
+    <tr><td>H</td><td>hide this help</td></tr>
+  </table>
+</div>
+<div id="load">Loading…</div>
+<script type="module" src="main.js"></script>
+</body>
+</html>

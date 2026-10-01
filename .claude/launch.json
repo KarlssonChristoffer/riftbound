@@ -39,6 +39,15 @@
       "url": "http://localhost:8126"
     },
     {
+      "name": "render3d",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8128"
+      ],
+      "port": 8128
+    },
+    {
       "name": "pro-test",
       "runtimeExecutable": "python",
       "runtimeArgs": [

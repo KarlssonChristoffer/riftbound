@@ -1,0 +1,250 @@
+// WORLD: the Proving Grounds rebuilt as a 3D scene for the HD-2D test, from the arena's own data.
+//   ground   the biome's painter, run TOP-DOWN (the same code with PPMY = PPM and PPMH = 0), on a height grid: the stream
+//            bed sits lower, the south ravine drops away
+//   plateau  a real block: its painted top, rock-strata faces
+//   props    live 3D meshes (Blender prop kit -> glb, toned on the GPU with the pixelizer's ramps and rules) or, for the
+//            A/B test, the same props pre-rendered at 16 yaws (cards); everything the kit doesn't model (trees, bushes,
+//            tufts, braziers, torches, dummies, brutes, crystal) stays a painted billboard card
+//   lights   from the biome's sprites (braziers, torches, crystals) and ground (lava, runes), in metres
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS} from '../sprites/arena/layout.js';
+
+const GLB = '../sprites/out/render3d/glb/', YAW = '../sprites/out/render3d/props_yaw/';
+
+// ---------------------------------------------------------------- the pixelizer's palettes (props_pixelize.py BIOMES)
+const RED = ['d8573e', 'a8342b', '72222a', '3e1420'], HAZ = ['f2d060', 'd8a830', '9a7020', '4e3812'], GOLD = ['ffe89a', 'e0b040', 'a87a24', '5a3e14'];
+const PAL = {
+  ruins: {wood: ['8c6c4a', '70543a', '543e2b', '35271c'], metal: ['a08650', '7a6438', '56452a', '352a1c'], clay: ['c8845a', 'a8643e', '7e472c', '4e2a1c'],
+    stone: ['a09c90', '868278', '6a675f', '46443e'], rock: ['7e786b', '666056', '504b44', '35322d'], rope: ['cdb577', 'ad935a', '877043', '594a2b'],
+    cover: ['7d9470', '627a58', '4b6048', '334436'], coverK: .08, coverT: .86},
+  ember: {wood: ['5a4a40', '43362f', '30261f', '1c1512'], metal: ['6c666a', '4d484d', '363237', '211e22'], clay: ['6a6078', '463e52', '2e2838', '18141e'],
+    stone: ['6c5656', '524042', '3e2f32', '261c1f'], rock: ['5f4b4b', '483839', '362a2c', '221a1c'], rope: ['8c7a5a', '6e5e44', '4e4230', '2e261c'],
+    cover: ['8c827b', '79716b', '655e59', '4a4441'], coverK: .16, coverT: .84},
+  frost: {wood: ['8a7c6e', '6d6055', '534841', '362f2b'], metal: ['9ea8b8', '768093', '586275', '39404f'], clay: ['cfdcea', 'a0b6d0', '7690b0', '4a5e80'],
+    stone: ['8494ad', '6a7a95', '55647e', '3a455c'], rock: ['717e90', '5a6679', '475264', '2f3747'], rope: ['c9bd94', 'a99c74', '857a58', '58503a'],
+    cover: ['eef3f8', 'd6dfeb', 'b4c2d6', '8795b2'], coverK: .5, coverT: .78},
+  rift: {wood: ['6a5680', '4e3e66', '392d4e', '221a31'], metal: ['6c5c8c', '4f4372', '3b3158', '251e39'], clay: ['7a64a8', '5a4886', '433466', '2a2044'],
+    stone: ['5e4e88', '46396a', '352b54', '211a36'], rock: ['4f4270', '3c3158', '2d2545', '1c1730'], rope: ['8a78a8', '6a5a88', '4e4268', '2e2644'], cover: null},
+};
+const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {ember: ['ffe08a', 'ffa040', 'e0541e', '6e1c12']}};
+export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover'];
+const hexrgb = h => [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
+const mix = (a, b, k) => a.map((x, i) => Math.round(x + (b[i] - x) * k));
+const ramp6 = r4 => { const r = r4.map(hexrgb); return [r[0], r[1], r[2], mix(r[3], r[2], .25), r[3], r[2]]; };   // + line, outline_shadow, outline_lit
+function palette(biome) {
+  const B = PAL[biome], P = {red: ramp6(RED), haz: ramp6(HAZ), gold: ramp6(GOLD)};
+  for (const k of ['wood', 'metal', 'clay', 'stone', 'rock', 'rope']) P[k] = ramp6(B[k]);
+  const w = P.wood; P.void = [...Array(3).fill(mix(w[4], [0, 0, 0], .3)), ...Array(3).fill(mix(w[4], [0, 0, 0], .45))];
+  P.cover = B.cover ? ramp6(B.cover) : P.stone;
+  const st = P.stone;
+  P.rune = EMIT.rune[biome] ? ramp6(EMIT.rune[biome]) : st;
+  P.crack = EMIT.crack[biome] ? ramp6(EMIT.crack[biome]) : [st[3], st[3], st[3], st[4], st[4], st[4]];
+  return P;
+}
+export function rampTexture(biome) {
+  const P = palette(biome), data = new Uint8Array(6 * FAMS.length * 4);
+  FAMS.forEach((f, j) => P[f].forEach((c, i) => data.set([...c, 255], (j * 6 + i) * 4)));
+  const t = new THREE.DataTexture(data, 6, FAMS.length, THREE.RGBAFormat); t.needsUpdate = true;
+  t.minFilter = t.magFilter = THREE.NearestFilter;
+  const B = PAL[biome];
+  return {tex: t, cover: B.cover ? [B.coverK, B.coverT, FAMS.indexOf('cover')] : [0, 1, 0],
+    emitFam: [EMIT.rune[biome] ? FAMS.indexOf('rune') : -1, EMIT.crack[biome] ? FAMS.indexOf('crack') : -1], rock: P.rock, cov: B.cover ? P.cover : null};
+}
+
+// ---------------------------------------------------------------- helpers
+const texCache = new WeakMap();
+export function texOf(img, linear = false) {
+  let t = texCache.get(img); if (t && t.__lin === linear) return t;
+  t = img instanceof HTMLCanvasElement ? new THREE.CanvasTexture(img) : new THREE.Texture(img);
+  t.flipY = false; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace;
+  t.minFilter = t.magFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true; t.__lin = linear;
+  texCache.set(img, t); return t;
+}
+const loadImg = src => new Promise((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => err(new Error(src)); i.src = src; });
+const hsh = (a, b = 0, c = 0) => { const s = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453; return s - Math.floor(s); };
+const rgbOf = c => { if (Array.isArray(c)) return c; let s = String(c || '#fff').replace('#', ''); if (s.length === 3) s = s.replace(/./g, m => m + m); const n = parseInt(s, 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
+
+// glb state -> merged non-indexed geometry with per-part attributes (part index, family, tone bias, fixed tone)
+const glbCache = {};
+async function loadGlbIndex() { try { return await fetch(GLB + 'index.json').then(r => r.ok ? r.json() : null); } catch { return null; } }
+async function glbGeometry(loader, state) {
+  if (state in glbCache) return glbCache[state];
+  const p = (async () => {
+    const gltf = await loader.loadAsync(GLB + state + '.glb'); gltf.scene.updateMatrixWorld(true);
+    const parts = []; gltf.scene.traverse(o => { if (o.isMesh) parts.push(o); });
+    const pos = [], nrm = [], aPart = [], aFam = [], aBias = [], aFixed = [];
+    const nm = new THREE.Matrix3();
+    parts.forEach((m, pi) => {
+      const [fam, , bias, flags = ''] = (m.material.name || 'stone|?|0|').split('|');
+      const fixed = (flags.match(/fixed(\d)/) || [])[1];
+      const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
+      const P = g.attributes.position, N = g.attributes.normal; nm.getNormalMatrix(m.matrixWorld);
+      const v = new THREE.Vector3(), n = new THREE.Vector3();
+      for (let i = 0; i < P.count; i++) {
+        v.fromBufferAttribute(P, i).applyMatrix4(m.matrixWorld); pos.push(v.x, v.y, v.z);
+        n.fromBufferAttribute(N, i).applyMatrix3(nm).normalize(); nrm.push(n.x, n.y, n.z);   // per-polygon normals as exported
+        aPart.push(pi % 64); aFam.push(Math.max(0, FAMS.indexOf(fam))); aBias.push(+bias || 0); aFixed.push(fixed === undefined ? -1 : +fixed);
+      }
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    geo.setAttribute('aPart', new THREE.Float32BufferAttribute(aPart, 1)); geo.setAttribute('aFam', new THREE.Float32BufferAttribute(aFam, 1));
+    geo.setAttribute('aBias', new THREE.Float32BufferAttribute(aBias, 1)); geo.setAttribute('aFixed', new THREE.Float32BufferAttribute(aFixed, 1));
+    geo.computeBoundingSphere();
+    return geo;
+  })().catch(e => { console.warn('glb', state, e.message); return null; });
+  return (glbCache[state] = p);
+}
+// the arena's kind -> prop-kit state (props3d.js stateOf, intact props only)
+const wallV = p => ((Math.round(p.x * 3) * 7 + Math.round(p.y * 5) * 13) >>> 0) % 4;
+const potV = p => ((Math.round(p.x * 7) + Math.round(p.y * 13)) & 1) ? 'pot_b' : 'pot';
+function stateOf(p) {
+  switch (p.kind) {
+    case 'crate': case 'barrel': case 'barrel_x': return p.kind;
+    case 'pot': return potV(p);
+    case 'chest': return 'chest_0';
+    case 'pillar': case 'pillar_broken': case 'rubble': case 'tower': case 'gatepost': return p.kind;
+    case 'rock': return 'rock_' + ((p.variant | 0) % 3);
+    case 'rock_big': return 'rock_big_' + ((p.variant | 0) % 3);
+    case 'wall_n': return 'wall_ew_' + wallV(p);
+    case 'wall_s': return 'wall_low_' + wallV(p);
+    case 'wall_w': case 'wall_e': return 'wall_ns_' + wallV(p);
+  }
+  return null;
+}
+// the 16-yaw pre-renders: state -> [frame base, yaw step offset]
+function yawOf(p, st) {
+  if (p.kind === 'wall_n') return ['wall_ew_0', 0];
+  if (p.kind === 'wall_w' || p.kind === 'wall_e') return ['wall_ew_0', 4];   // a N-S wall is the E-W wall turned 90 deg
+  if (['crate', 'barrel', 'pillar', 'tower'].includes(st)) return [st, 0];
+  if (st === 'rock_big_0') return ['rock_big_0', 0];
+  return null;
+}
+const WALL_ID = {wall_n: 2, wall_s: 3, wall_w: 4, wall_e: 5};
+
+// ---------------------------------------------------------------- strata texture for the plateau's faces
+function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {
+  const w = Math.max(1, Math.round(len * PPM)), h = Math.max(1, Math.round(hgt * PPMH)), c = document.createElement('canvas');
+  c.width = w; c.height = h; const q = c.getContext('2d'), id = q.createImageData(w, h), d = id.data;
+  for (let x = 0; x < w; x++) {
+    const hang = cov ? (hsh(Math.floor(x / 6), seed) > .45 ? 1 + (hsh(x, 7, seed) * 4 | 0) : 1) : 0;
+    for (let r = 0; r < h; r++) {
+      let col;
+      if (r < hang) col = cov[r === hang - 1 ? 2 : r ? 1 : 0];
+      else {
+        const ly = r + Math.round((hsh(Math.floor(x / 14), 94, seed) - .5) * 5), layer = Math.floor(ly / 9), inL = ((ly % 9) + 9) % 9;
+        const crackX = hsh(Math.floor(x / 11), layer, 96 + seed) < .35 && x % 11 === (hsh(layer, Math.floor(x / 11), 97 + seed) * 11 | 0);
+        const t = r === h - 1 ? 3 : inL === 0 ? (hsh(layer, 5, seed) < .5 ? 0 : 1) : inL >= 7 ? 2 : crackX ? 2 : hsh(layer, 9, seed) < .3 ? 2 : 1;
+        col = rock[t];
+      }
+      const i = (r * w + x) * 4; d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255;
+    }
+  }
+  q.putImageData(id, 0, 0); return c;
+}
+
+// ---------------------------------------------------------------- build
+export async function buildWorld(G, {biome, ctxO, PPM, PPMH}) {
+  const {WM, HM} = WORLD, layout = buildLayout(7), props = layout.props;
+  Object.assign(ctxO, {WM, HM, WPX: Math.ceil(WM * ctxO.PPM), HPX: Math.ceil(HM * ctxO.PPMY), PLAY, layout});
+  const disposers = [];
+  const R = rampTexture(biome.id);
+  G.U.ramps.value = R.tex; G.U.cover.value.set(...R.cover); G.U.emitFam.value.set(...R.emitFam);
+
+  // ---- ground: the biome's painter, top-down
+  const WPX = Math.ceil(WM * PPM), HPX = Math.ceil(HM * PPM);
+  const ctxT = {PPM, PPMY: PPM, PPMH: 0, toS: (x, y) => [x * PPM, y * PPM], WM, HM, WPX, HPX, PLAY, layout, VW: G.VW, VH: G.VH};
+  const gc = document.createElement('canvas'); gc.width = WPX; gc.height = HPX;
+  const gq = gc.getContext('2d', {willReadFrequently: true});
+  biome.paintGround(gq, ctxT);
+  const groundEmit = biome.groundEmit, groundLights = (biome.groundLights || []).slice();
+  const gTex = texOf(gc, true), eTex = groundEmit ? texOf(groundEmit, true) : null;
+  // the south ravine: very dark ground pixels near the south edge drop away
+  const px = gq.getImageData(0, 0, WPX, HPX).data;
+  const dark = (x, z) => { const i = (Math.min(HPX - 1, Math.max(0, Math.round(z * PPM))) * WPX + Math.min(WPX - 1, Math.max(0, Math.round(x * PPM)))) * 4; return px[i] * .3 + px[i + 1] * .55 + px[i + 2] * .15 < 40; };
+  const S = .25, NX = Math.round(WM / S), NZ = Math.round(HM / S);
+  const hAt = (x, z) => {
+    if (z > HM - 7 && dark(x, z) && dark(x, z + .2) && dark(x, z - .2)) return -3.5;
+    if (inStream(x, z)) return -.18;
+    return 0;
+  };
+  const pos = [], uv = [], idx = [];
+  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) { const x = i * S, z = j * S; pos.push(x, hAt(x, z), z); uv.push(x / WM, z / HM); }
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) { const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
+  const gGeo = new THREE.BufferGeometry(); gGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); gGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  gGeo.setIndex(idx); gGeo.computeVertexNormals();
+  const world2 = new THREE.Vector2(WM, HM);
+  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0}, false); disposers.push(() => ground.dispose());
+
+  // ---- plateau: top (the painted top, planar) + 4 strata faces
+  for (const q of PLATEAUS) {
+    const top = new THREE.PlaneGeometry(q.x1 - q.x0, q.y1 - q.y0); top.rotateX(-Math.PI / 2); top.translate((q.x0 + q.x1) / 2, q.h, (q.y0 + q.y1) / 2);
+    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1}); disposers.push(() => t.dispose());
+    const faces = [   // [len, centre x, centre z, rotation y]
+      [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y1, 0], [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y0, Math.PI],
+      [q.y1 - q.y0, q.x1, (q.y0 + q.y1) / 2, Math.PI / 2], [q.y1 - q.y0, q.x0, (q.y0 + q.y1) / 2, -Math.PI / 2]];
+    faces.forEach(([len, cx, cz, ry], k) => {
+      const geo = new THREE.PlaneGeometry(len, q.h); geo.translate(0, q.h / 2, 0); geo.rotateY(ry); geo.translate(cx, 0, cz);
+      const uvA = geo.attributes.uv; for (let i = 0; i < uvA.count; i++) uvA.setY(i, 1 - uvA.getY(i));   // canvas rows go down
+      const tex = texOf(strataCanvas(len, q.h, PPM, PPMH, R.rock, R.cov, k + 2), true);
+      const f = G.surface(geo, {tex, planar: false, type: 5, obj: 1}); disposers.push(() => f.dispose());
+    });
+  }
+
+  // ---- props
+  const loader = new GLTFLoader(), haveGlb = !!(await loadGlbIndex());
+  let yawIdx = null, yawAlb = null, yawNrm = null;
+  try {
+    yawIdx = await fetch(YAW + 'props.json').then(r => r.ok ? r.json() : null);
+    if (yawIdx) [yawAlb, yawNrm] = await Promise.all([loadImg(YAW + `props_${biome.id}.png`), loadImg(YAW + 'props_nrm.png')]);
+  } catch { yawIdx = null; }
+  const lights = groundLights.map((l, i) => ({x: l.x, y: l.h || 0, z: l.y, c: rgbOf(l.color), r: l.radius || 3, k: l.intensity ?? 1, flicker: l.flicker || 0, id: 100 + i}));
+  const items = [];   // {p, kind: 'mesh'|'card', live?, yaw?}
+  let nextId = 10;
+  const SHADOWLESS = new Set(['tuft']);
+  for (const p of props) {
+    const z0 = p.z || 0;
+    if (p.outside && biome.hole?.(p.x, p.y, ctxO)) continue;   // over the ravine / in the stream
+    const sp = biome.sprite(p, ctxO);
+    for (const l of sp?.lights || []) lights.push({x: p.x + (l.dx || 0), y: z0 + (l.h || 0), z: p.y + (l.dy || 0), c: rgbOf(l.color), r: l.radius || 4, k: l.intensity ?? 1, flicker: l.flicker || 0, id: lights.length});
+    const st = stateOf(p), geo = st && haveGlb ? await glbGeometry(loader, st) : null;
+    const obj = WALL_ID[p.kind] ?? nextId++;
+    const it = {p, st};
+    if (geo) {
+      it.live = G.mesh(geo, obj, new THREE.Matrix4().makeTranslation(p.x, z0, p.y));
+      const yw = yawIdx && yawOf(p, st);
+      if (yw && yawIdx.frames[yw[0] + '_y0']) {
+        it.yaw = {base: yw[0], off: yw[1], card: G.card({tex: texOf(yawAlb), nrm: texOf(yawNrm), w: 1, h: 1, px: 0, py: 0, type: 7, obj, bias: .0025})};
+        it.yaw.card.anchor = new THREE.Vector3(p.x, z0, p.y); it.yaw.card.setVisible(false);
+      }
+    } else if (sp) {
+      const c = G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1],
+        type: 3, obj, bias: .0025, shadow: !SHADOWLESS.has(p.kind)});
+      c.anchor = new THREE.Vector3(p.x, z0, p.y); it.card = c;
+    } else continue;
+    items.push(it);
+  }
+  disposers.push(() => items.forEach(it => { it.live?.dispose(); it.card?.dispose(); it.yaw?.card.dispose(); }));
+
+  // prop display mode: live 3D meshes, or the 16-yaw pre-renders where they exist
+  let mode = 'live';
+  const step = Math.PI / 8;
+  function setMode(m) { mode = m; for (const it of items) if (it.yaw) { it.live.setVisible(m === 'live'); it.yaw.card.setVisible(m === 'yaw'); } }
+  function update(yaw) {
+    if (mode !== 'yaw' || !yawIdx) return;
+    const k0 = -Math.round(yaw / step), AW = yawIdx.size[0], AH = yawIdx.size[1];
+    for (const it of items) {
+      if (!it.yaw) continue;
+      const k = (((k0 + it.yaw.off) % 16) + 16) % 16, f = yawIdx.frames[`${it.yaw.base}_y${k}`]; if (!f) continue;
+      const u = it.yaw.card.u, r = [f[0] / AW, f[1] / AH, f[2] / AW, f[3] / AH];
+      u.uRect.value.set(...r); it.yaw.card.g.uniforms.uNrmRect.value.set(...r);
+      u.uSize.value.set(f[2], f[3]); u.uPivot.value.set(f[4], f[5]);
+    }
+  }
+  const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length;
+  return {layout, props, lights, items, setMode, update, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc,
+    dispose() { disposers.forEach(f => f()); }};
+}
+export {WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS};
