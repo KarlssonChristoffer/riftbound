@@ -443,12 +443,17 @@ def courses(obs, x0, x1, z0, z1, depth, rows, seed, along='x', face=-1, deco=Tru
     return obs
 
 
+# masonry heights (m). These are the arena's; the 3D world's exporter (props3d_glb.py) raises them: a 1.2 m wall reads
+# as a garden wall once the camera turns and comes close. Block courses keep their size (the row count follows height)
+SIZES = {'wall': 1.2, 'low': .45, 'tower': 2.3, 'post': 1.62}
+
+
 def wall(v=0, low=False, along='x'):
     """A 1 m wall segment (1.04 m: neighbours overlap by a pixel), 0.5 m thick, coursed blocks + coping stones."""
-    H, D, L = (.45 if low else 1.2), .5, .52
+    H, D, L = (SIZES['low'] if low else SIZES['wall']), .5, .52
     obs = []
     top = H - .1
-    courses(obs, -L, L, 0, top, D - .04, 2 if low else 4, 300 + v * 17 + low * 5, along)
+    courses(obs, -L, L, 0, top, D - .04, max(2, round(top / .275)), 300 + v * 17 + low * 5, along)
     r = random.Random(400 + v)
     a = -L
     while a < L - .02:   # coping: long slabs, a little proud of both faces (one per segment along y: seen from above)
@@ -465,11 +470,11 @@ def wall(v=0, low=False, along='x'):
 
 
 def tower(v=0):
-    """1.5 m square, 2.3 m to the roof, a parapet of merlons round the edge, an arrow slit on the front."""
-    S, Hh = 1.5, 2.3
+    """1.5 m square, SIZES['tower'] (2.3 m) to the roof, a parapet of merlons round the edge, an arrow slit on the front."""
+    S, Hh = 1.5, SIZES['tower']
     obs = []
-    courses(obs, -S / 2, S / 2, 0, Hh, S, 7, 500 + v)
-    obs.append(box('Hole', (0, -S / 2 - .002, 1.45), (.09, .02, .45)))
+    courses(obs, -S / 2, S / 2, 0, Hh, S, round(Hh / .33), 500 + v)
+    obs.append(box('Hole', (0, -S / 2 - .002, Hh * .63), (.09, .02, .45)))
     obs.append(box('Coping', (0, 0, Hh + .06), (S + .06, S + .06, .12), .02))
     for side in range(4):
         for k in range(4):
@@ -480,9 +485,9 @@ def tower(v=0):
 
 
 def gatepost(v=0):
-    W, Hh = .72, 1.62
+    W, Hh = .72, SIZES['post']
     obs = []
-    courses(obs, -W / 2, W / 2, 0, Hh, W, 5, 600 + v)
+    courses(obs, -W / 2, W / 2, 0, Hh, W, round(Hh / .324), 600 + v)
     obs.append(box('Coping', (0, 0, Hh + .07), (W + .16, W + .16, .14), .025))
     obs.append(box('Coping', (0, 0, Hh + .19), (W - .1, W - .1, .1), .02))
     return obs

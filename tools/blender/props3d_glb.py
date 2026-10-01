@@ -15,6 +15,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 P3 = {'__name__': 'props3d_glb_lib', '__file__': os.path.join(HERE, 'props3d.py')}
 exec(open(os.path.join(HERE, 'props3d.py'), encoding='utf-8').read(), P3)
 PARTS, COL = P3['PARTS'], P3['COL']
+# the 3D world's masonry: walls well over the Ranger's head (1.8 m), the low south wall a hip-high parapet, the towers
+# and gateposts above the walls (the arena's 2D sizes stay in props3d.SIZES: --sizes arena exports those)
+SIZES_3D = {'wall': 2.4, 'low': .9, 'tower': 3.4, 'post': 2.6}
+if '--sizes' not in sys.argv or sys.argv[sys.argv.index('--sizes') + 1] != 'arena':
+    P3['SIZES'].update(SIZES_3D)
 
 # every state of the kit except the barrel tilt / roll frames (the 3D world tips and rolls the barrel mesh itself):
 # intact / damaged / broken stages, the chest's 5 lid angles, the debris chunks
