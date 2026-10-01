@@ -79,8 +79,8 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   cv.stepSampling = function stepSampling(dt, turned) {
     const opt = optOf();
     turnT = turned ? TURN_HOLD : Math.max(0, turnT - dt);
-    const want = opt.sampling === 'smooth' ? 1 : opt.sampling === 'nearest' ? 0 : turnT > 0 ? 1 : 0, u = G.U.smooth;
-    u.value = want > u.value ? Math.min(want, u.value + dt * SMOOTH_IN) : Math.max(want, u.value - dt * SMOOTH_OUT);
+    const want = opt.sampling === 'smooth' ? 1 : opt.sampling === 'nearest' ? 0 : turnT > 0 ? 1 : 0, v = G.smooth;
+    G.setSmooth(want > v ? Math.min(want, v + dt * SMOOTH_IN) : Math.max(want, v - dt * SMOOTH_OUT));   // (the one writer)
   };
 
   // ---- shake (menu > Graphics > Screen shake)

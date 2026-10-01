@@ -1078,7 +1078,20 @@ void main() {
     resetBatches(); for (const L of layerList) L.used = false; frameNo++;
   }
 
+  // SETTINGS other modules give the renderer (they call these; the uniforms stay the renderer's): the player options
+  // (render/options.js), the ground's sampling blend (render/camera.js), the weather's look and lightning
+  // (features/weather.js), where the player stands (view/hero.js: the composite lights him a hair apart)
+  function setOptions({outline, banded, shadows, debug}) {
+    compU.uOutline.value = outline ? 1 : 0; compU.uBanded.value = banded ? 1 : 0;
+    compU.uShadowOn.value = compU.uPtShadow.value = shadows ? 1 : 0; compU.uDebug.value = debug;
+  }
+  const setSmooth = v => { U.smooth.value = v; };
+  function setSeason(m) { compU.uSeasonM.value.set(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]); }
+  function setGround({tinted, snow, wet, leafK}) { compU.uSeasonK.value = tinted ? 1 : 0; compU.uSnow.value = snow; compU.uWet.value = wet; U.leafK.value = leafK; }
+  const setFlash = (r, g, b) => { compU.uFlashC.value.set(r, g, b); };
+  const setPlayer = (x, h, z) => { compU.uPlayer.value.set(x, h, z); };
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     setView, setSun, toScreen, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
-    fx, heat, setDisplay, resize, fxU, get display() { return DS; }};
+    fx, heat, setDisplay, resize, fxU, get display() { return DS; },
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer};
 }

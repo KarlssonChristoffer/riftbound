@@ -4,11 +4,11 @@
 //            lands as a splash on the ground or a ring on the stream
 //   snow     flakes (1 px points, a few 2 px near ones) drifting with the wind, where the biome has no snow of its own
 //            (atmos.js keeps the frost lands' snow and scales it by the weather)
-//   storm    lightning (env.sky.storm): the scene lit for an instant in two or three pulses (gfx uFlashC, strongest at
+//   storm    lightning (env.sky.storm): the scene lit for an instant in two or three pulses (gfx setFlash, strongest at
 //            night), now and then a bolt into the ground near the view (emissive world lines, a light at its foot), and
 //            the thunder after it (rainaudio.js, delayed by the distance: close = a crack, far = a rumble)
 //   ground   the season's colour matrix for green pixels (grass, bushes, tufts, leaf particles), lying snow, wet ground
-//            (gfx compU uSeasonM / uSeasonK / uSnow / uWet) and how full the crowns are (gfx U.leafK)
+//            (gfx setSeason / setGround: the season's colour matrix, tint, snow, wet) and how full the crowns are (leafK)
 // OWNS: its particles (preallocated typed arrays, capped), the flash and bolts. READS: host.env (sky, season, seasonK,
 // tinted, snowCover, wet, leafK), host.wind (at, the wind field), host.elev / inStream. EMITS: rainaudio.thunder.
 // BUDGET: ~0.15 ms per frame at full rain (900 drops + splashes), nothing without weather.
@@ -35,7 +35,7 @@ const SEASON_M = {
 // ORDER (core/features.js): rain slants with this step's wind
 export const order = {after: ['wind']};
 export async function create(host) {
-  const G = host.G, ctx = host.ctxO, U = G.compU;
+  const G = host.G, ctx = host.ctxO;
   const F = {name: 'weather', label: 'Weather fx (rain, snow, storms)', ambient: true, on: true, fx: true, TUNE, ms: 0, stats: {rain: 0, snow: 0, splash: 0, bolts: 0}};   // fx: the particles / bolts (the season / snow / wet look always follows the clock)
   // ---- particles: one pool each, structure of arrays
   const RN = TUNE.rain.max, rX = new Float32Array(RN), rY = new Float32Array(RN), rH = new Float32Array(RN), rV = new Float32Array(RN); let rn = 0;
@@ -86,16 +86,16 @@ export async function create(host) {
     aw?.thunder?.(dist, pan);
   }
   // ---- the season's look (env -> gfx): the colour matrix only on a change of season / blend step
-  let seasonKey = -1;
+  let seasonKey = -1; const GR = {tinted: false, snow: 0, wet: 0, leafK: 1};   // (the renderer's setters: render/gfx.js)
   const SEAS = ['spring', 'summer', 'autumn', 'winter'], MX = new Float32Array(9);
   function lookFromEnv(E) {
     const q = Math.round(E.seasonK * 16), key = (SEAS.indexOf(E.season) * 4 + SEAS.indexOf(E.seasonNext)) * 17 + q;
     if (key !== seasonKey) {
       seasonKey = key; const a = SEASON_M[E.season], b = SEASON_M[E.seasonNext], k = q / 16;
       for (let i = 0; i < 9; i++) MX[i] = a[i] + (b[i] - a[i]) * k;
-      U.uSeasonM.value.set(MX[0], MX[1], MX[2], MX[3], MX[4], MX[5], MX[6], MX[7], MX[8]);
+      G.setSeason(MX);
     }
-    U.uSeasonK.value = E.tinted ? 1 : 0; U.uSnow.value = E.snowCover; U.uWet.value = E.wet; G.U.leafK.value = E.leafK;
+    GR.tinted = E.tinted; GR.snow = E.snowCover; GR.wet = E.wet; GR.leafK = E.leafK; G.setGround(GR);
   }
 
   F.view = dt => {   // (the weather's state is the world clock's, sim/env.js: this is how it looks)
@@ -149,7 +149,7 @@ export async function create(host) {
       if (i >= PULSES.length - 1) flashT = -1; else { const [t0, a0] = PULSES[i], [t1, a1] = PULSES[i + 1]; fk = (a0 + (a1 - a0) * (flashT - t0) / (t1 - t0)) * flashK; }
     }
     const M = host.mood, lum = M ? M.amb[0] * .3 + M.amb[1] * .55 + M.amb[2] * .15 : 1, fs = TUNE.flash.day + (TUNE.flash.night - TUNE.flash.day) * clamp(1 - lum, 0, 1);
-    U.uFlashC.value.set(TUNE.flash.c[0] * fk * fs, TUNE.flash.c[1] * fk * fs, TUNE.flash.c[2] * fk * fs);
+    G.setFlash(TUNE.flash.c[0] * fk * fs, TUNE.flash.c[1] * fk * fs, TUNE.flash.c[2] * fk * fs);
     light.intensity = bolt.t >= 0 ? TUNE.bolt.light.intensity * (1 - bolt.t / TUNE.bolt.life) : 0;
     if (!F.fx) return;
     // rain: a short streak along the drop's motion (the wind slants it), two tones

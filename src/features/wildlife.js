@@ -393,13 +393,13 @@ export async function create(host) {
   }
 
   // ---------- ground: can a small animal stand here ----------
-  let solids = [];
+  const nearS = [];   // the grid's candidates (host.entities.near): what stands here
   function solid(x, y, z) {
     if (x < .6 || y < .6 || x > ctx.WM - .6 || y > ctx.HM - .6) return true;
     if (Math.abs(elev(x, y) - z) > .2) return true;
     if (z < .1 && inStream(x, y)) return true;
-    for (const p of solids) {
-      if (Math.abs(p.x - x) > 1.6 || p.broken || p.gone || Math.abs((p.z || 0) - z) > .8) continue;
+    for (const p of host.entities.near(x, y, .1, nearS)) {
+      if (p.broken || p.gone || Math.abs((p.z || 0) - z) > .8) continue;
       if (p.rect) { if (x > p.rect[0] - .06 && x < p.rect[2] + .06 && y > p.rect[1] - .06 && y < p.rect[3] + .06) return true; }
       else if (p.r > .05 && Math.hypot(p.x - x, (p.y - y) * 1.6) < p.r + .08) return true;
     }
@@ -1148,7 +1148,6 @@ export async function create(host) {
   function populate() {
     need = false; clearAll();
     biome = host.biome.id; props = host.props;
-    solids = props.filter(p => p.rect || p.r > .05 || ['crate', 'barrel', 'barrel_x', 'pot', 'chest'].includes(p.kind));
     R.seed({ruins: 101, ember: 211, frost: 307, rift: 401}[biome] || 1);
     groundAverage(); buildArt(); buildSpots(); prewarm();
     const C = CAST[biome] || {};

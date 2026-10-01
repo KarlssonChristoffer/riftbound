@@ -13,9 +13,8 @@ export function createOptions({G, flags: Q, dev}) {
     hdBow: Q.get('bow') === 'hd',   // J: the HD bow overlay instead of the pixel bow (the arena's toggle)
     shake: true};                   // screen shake (menu > Graphics)
   function apply() {
-    if (opt.sampling !== 'auto') G.U.smooth.value = opt.sampling === 'smooth' ? 1 : 0;
-    G.compU.uOutline.value = opt.outline ? 1 : 0; G.compU.uBanded.value = opt.banded ? 1 : 0;
-    G.compU.uShadowOn.value = G.compU.uPtShadow.value = opt.shadows ? 1 : 0; G.compU.uDebug.value = opt.debug; $('#help').classList.toggle('hidden', !opt.help || !dev());
+    G.setOptions(opt);   // (opt.sampling: the camera eases the ground's sampling to it, render/camera.js)
+    $('#help').classList.toggle('hidden', !opt.help || !dev());
   }
   return {opt, apply};
 }

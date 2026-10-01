@@ -160,7 +160,7 @@ export function createHero({G, set, loadI, ctxO, app}) {
     card.g.uniforms.uHasNrm.value = sp.nrm ? 1 : 0;
     card.u.uAnchor.value.set(PX, P.z, PY);
     card.setVisible(!(P.blink && Math.floor(P.blink * 12) % 2));
-    G.compU.uPlayer.value.set(PX, P.z + .9, PY);
+    G.setPlayer(PX, P.z + .9, PY);
     return sinkPx;
   }
 

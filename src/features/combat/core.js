@@ -90,6 +90,9 @@ export function createCore(host) {
   });
   const debris = [], coins = [], fx = [], rings = [], nums = [], lts = [], pending = [], brands = [], zones = [], traps = [];
   const dead = [];   // enemies killed this step: dropped from every list at the end of the step
+  // the run's hunting enemies, as a list: made anew only when one joins or falls (enemyVer), not on every read (the
+  // director, the game and the HUD read it several times a step and a frame)
+  let enemyList = [], enemyVer = 0, enemyAt = -1;
   const flashing = new Set();
   let simT = 0, lightN = 0, lastDir = [0, 1];
   const S = {gold: 0, goldPop: 0, hud: ''};
@@ -164,7 +167,7 @@ export function createCore(host) {
   }
   function breakProp(p, o = {}) {
     const pal = PAL[p.kind] || PAL.stone, hgt = HGT[p.kind] ?? 1, base = pz(p) + (p.h || 0);
-    p.broken = true; p.stage = 2; p.hp = 0; p.r = 0;
+    p.broken = true; p.stage = 2; p.hp = 0; p.r = 0; enemyVer++;
     events.push({type: 'prop.break', x: p.x, y: p.y, kind: p.kind, who: p, ash: !!o.ash});
     // o.ash: burnt through (lights.js): it slumps into charcoal where it stood, nothing flies
     if (o.ash) chunks(p.x, p.y, base + .05, 9, PAL.char, {speed: .45, big: 0, up: .25, spreadH: .12});
@@ -389,7 +392,7 @@ export function createCore(host) {
     if (!dead.length) return;
     for (const b of dead) {
       b.dead = true;
-      ents.remove(b);   // the world's list and every query
+      ents.remove(b); enemyVer++;   // the world's list and every query
       BS.delete(b); flashing.delete(b); host.world.removeItem?.(b);
     }
     dead.length = 0;
@@ -464,13 +467,13 @@ export function createCore(host) {
       const b = {kind: 'brute', z: 0, r: .35, stage: 0, target: true, sparring: true, hunter: true, ...o, maxHp: o.hp, home: [o.x, o.y]};
       Object.assign(b, {r0: b.r, h: 0, faceW: [P.x - b.x, P.y - b.y], squash: 0, air: false, flash: 1});
       BS.set(b, {mode: 'aggro', wait: o.wait ?? .6, hop: null, root: 0, dead: 0, land: 0, fail: 0});
-      ents.add(b); flashing.add(b);   // joins the world: hittables, colliders, brutes
+      ents.add(b); flashing.add(b); enemyVer++;   // joins the world: hittables, colliders, brutes
       puff(b.x, b.y, 0, 14, .7);
       host.world.addItem(b);
       return b;
     },
-    get enemies() { return brutes.filter(b => b.hunter && !b.broken); },
-    clearEnemies() { for (const b of brutes) if (b.hunter && !b.dead) { ents.hide(b); b.broken = true; dead.push(b); } drop(); },
+    get enemies() { if (enemyAt !== enemyVer) { enemyList = brutes.filter(b => b.hunter && !b.broken); enemyAt = enemyVer; } return enemyList; },
+    clearEnemies() { for (const b of brutes) if (b.hunter && !b.dead) { ents.hide(b); b.broken = true; dead.push(b); } enemyVer++; drop(); },
     // the yard's sparring pair sits out a run (retire true) and comes back after it
     retireYard(on) {
       for (const b of brutes) {

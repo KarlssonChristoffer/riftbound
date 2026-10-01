@@ -16,6 +16,7 @@ const R_BODY = .25;
 export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags, mods}) {
   const toView = cv.toView, toWorld = cv.toWorld;
   const nearB = [], nearI = [];   // the grid's candidates (world/entities.js near)
+  const aimable = ents().query('player.aim', p => p.hp > 0 || p.target || p.breakable);   // what the cursor can aim at (a live list)
   // collision in the world (round, so it doesn't change with the camera; the arena squashes it to match its 2D look)
   function blocked(x, y, z, air) {
     const arena = x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3;
@@ -89,12 +90,11 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     hoverAt = hoverKey; return (hoverMemo = hoverFind());
   }
   function hoverFind() {
-    const world = worldOf();
     for (const f of features) { const t = f.aimTarget?.(); if (t) return t; }
     let best = null, bn = -1e9, bh = 0;
     const mx = cv.VW / 2 + (mouse.x - cv.VW / 2) * cv.zoom, my = cv.VH / 2 + (mouse.y - cv.VH / 2) * cv.zoom;
-    for (const it of world.items) {
-      const p = it.p; if (p.broken || p.gone || !(p.target || p.hp > 0)) continue;
+    for (const p of aimable) {
+      if (p.broken || p.gone || !(p.target || p.hp > 0)) continue;
       const z0 = (p.z || 0) + (p.h || 0), hh = p.hitH ?? (p.kind === 'pot' ? .55 : p.kind === 'crate' ? .75 : 1.6), rr = Math.max(.3, p.hitR ?? p.r ?? .4);
       const [x0, y0] = G.toScreen(p.x, z0 + hh, p.y), [, y1] = G.toScreen(p.x, z0, p.y), w = rr * PPM * cv.zoom;
       if (mx > x0 - w - 2 && mx < x0 + w + 2 && my > y0 - 3 && my < y1 + 3) {
