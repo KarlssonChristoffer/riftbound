@@ -50,6 +50,8 @@ import {createGame} from './game/game.js';
 import {createPerf} from './core/perf.js';   // the frame profiler: per-system ms against the budget (F3, ?perf=1)
 import {createEnv, SEASONS, WEATHER} from './sim/env.js';   // the world clock: time of day, seasons, weather
 import {createMenu} from './ui/menu.js';   // the pause / settings menu (Escape)
+import {createLighting} from './render/lighting.js';
+import {createProjectiles} from './sim/projectiles.js';
 import {flags} from './core/flags.js';
 import {lum, rgbOf} from './core/color.js';
 import {toView as viewOf, toWorld as worldOf} from './render/viewxf.js';
@@ -104,16 +106,13 @@ function fit() {   // the window changed, or a zoom arrived (stepZoom): the view
 }
 fit(); addEventListener('resize', fit);
 
-const GRADE = {ruins: [1.039, 1.029, .818], ember: [1.166, .958, .82], frost: [.896, 1.013, 1.161], rift: [1.056, .792, 1.649]};
-const BG = {ruins: [.10, .13, .11], ember: [.11, .06, .05], frost: [.10, .12, .17], rift: [.06, .04, .10]};
-
 let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome')));
 // THE WORLD CLOCK (sim/env.js): time of day, seasons, weather, running in the background. It owns "what time is it":
 // host.time is its day / dusk / night bucket (dawn counts as dusk), host.mood its blended mood, host.setTime jumps it
 const env = createEnv({moods: MOODS, biome: () => BIOMES[biomeI].id, Q});
 let world = null, propMode = Q.get('props') === 'yaw' ? 'yaw' : 'live';
 let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+R rebuilds)
-const features = [];
+const features = [], events = [];
 // the wind sways painted foliage cards (per-row bend) and gives braziers / torches a live flame
 function cardHook(it, sp) { const w = features.find(f => f.name === 'wind'); return w?.on && w.card ? w.card(it, sp) : null; }
 // ... and leans the 3D trees (world.js leanTree: the lean at the top, whole pixels per vertex in the shader)
@@ -153,7 +152,7 @@ const SNAP = [0, 22.5 * DEG, 90 * DEG], SNAP_NAME = ['free', '22.5° steps', '90
 const toView = (X, Z, a = yaw) => viewOf(X, Z, a), toWorld = (vx, vy, a = yaw) => worldOf(vx, vy, a);   // (render/viewxf.js at this camera's yaw)
 
 // ---------------------------------------------------------------- the player
-const keys = new Set(), mouse = {x: VW / 2, y: VH / 2, down: false}, cam = {x: 0, y: 0, fx: 0, fy: 0}, events = [];
+const keys = new Set(), mouse = {x: VW / 2, y: VH / 2, down: false}, cam = {x: 0, y: 0, fx: 0, fy: 0};
 const R_BODY = .25;
 // collision in the world (round, so it doesn't change with the camera; the arena squashes it to match its 2D look)
 function blockedW(x, y, z, air) {
@@ -168,8 +167,9 @@ function blockedW(x, y, z, air) {
 // the plateau as the player sees it. Exact when the camera faces north; turned, the climb spot is handled by the host
 const plateausV = PLATEAUS.map(q => ({...q}));
 function syncPlateaus() { PLATEAUS.forEach((q, i) => Object.assign(plateausV[i], Math.abs(yaw) < 1e-6 ? {...q} : {h: q.h, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, climbs: []})); }
-const arrows = [], pops = [], dust = [];
-let hits = 0;
+// arrows, hit pops, footstep dust (sim/projectiles.js)
+const proj = createProjectiles({world: () => world, features, events, opt: () => opt, toWorld, PPM, PPMH});
+const {arrows, dust} = proj, spawnArrow = proj.spawn;
 const feat = name => features.find(f => f.name === name) || null;
 const PL = createPlayer({
   ctx: ctxO, atlas, keys, mouse, cam, events, plateaus: plateausV,
@@ -327,52 +327,6 @@ function stepAssist(dt, ny) {
   return ny;
 }
 
-// ---------------------------------------------------------------- arrows (arena convention), the arena's stepFx
-function spawnArrow(o) { const a = {life: 1.6, vh: 0, kind: 'arrow', ...o}; for (const f of features) f.arrow?.(a); arrows.push(a); }
-function stepArrows(dt) {
-  for (const a of arrows) {
-    if (a.stuck) { a.life -= dt; continue; }
-    a.x += a.vx * dt; a.y += a.vy * dt; a.h += a.vh * dt; a.vh -= .9 * dt; a.life -= dt;
-    (a.trail ??= []).push([a.x, a.y, a.h]); if (a.trail.length > 7) a.trail.shift();
-    for (const p of world.props) {
-      if (p.broken || p.gone || !(p.target || p.hp > 0) || (a.hitSet && a.hitSet.has(p))) continue;
-      const rel = a.h - (p.z || 0) - (p.h || 0);
-      if (Math.hypot(p.x - a.x, p.y - a.y) < (p.hitR ?? .45) && rel > -.2 && rel < (p.hitH ?? 1.6)) {
-        hits++; pops.push({x: p.x, y: p.y, z: (p.z || 0) + (p.h || 0), t: 0}); events.push({type: 'hit', x: p.x, y: p.y, vx: a.vx, vy: a.vy, prop: p});
-        let r; for (const f of features) { r = f.onArrowHit?.(a, p); if (r) break; }
-        if (r === 'pierce') (a.hitSet ??= new Set()).add(p); else { a.life = -9; break; }
-      }
-    }
-    if (a.life <= -9) continue;
-    const ground = elev(a.x, a.y);
-    // a 3D tree (trees3d.js) stops an arrow only in its trunk / big limbs, the tip in the bark; its round collider is skipped
-    const tree = world.treeHit?.(a.x - a.vx * dt, a.y - a.vy * dt, a.h - a.vh * dt, a.x, a.y, a.h);
-    if (tree) { a.x = tree.x; a.y = tree.y; a.h = tree.h; a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
-    else if (!a.stuck && world.props.some(p => !p.broken && !p.gone && !(a.hitSet && a.hitSet.has(p)) && !world.itemOf(p)?.pose && (p.rect ? a.x > p.rect[0] && a.x < p.rect[2] && a.y > p.rect[1] && a.y < p.rect[3] : p.r > .3 && Math.hypot(p.x - a.x, p.y - a.y) < p.r)
-      && a.h > (p.z || 0) && a.h < (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5))) { a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
-    else if (!a.stuck && a.h <= ground && ground === 0 && inStream(a.x, a.y)) { a.life = -9; events.push({type: 'splash', x: a.x, y: a.y, small: true}); features.forEach(f => f.onArrowStuck?.(a)); }
-    else if (!a.stuck && (a.h <= ground || a.life <= 0)) { a.stuck = true; a.h = Math.max(ground, Math.min(a.h, ground + 2.4)); a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
-  }
-  for (let i = arrows.length - 1; i >= 0; i--) if (arrows[i].life <= -9 || (arrows[i].stuck && arrows[i].life <= 0)) arrows.splice(i, 1);
-  for (const p of world.props) {
-    if (p.wob) p.wob = Math.max(0, p.wob - dt * 1.6);
-    if (p.flash) p.flash = Math.max(0, p.flash - dt * 6);
-    if (p.rail) { const r = p.rail; p.x += r.dir * r.speed * dt; if (p.x > r.x1 || p.x < r.x0) { r.dir *= -1; p.x = Math.max(r.x0, Math.min(r.x1, p.x)); } }
-  }
-  for (let i = pops.length - 1; i >= 0; i--) if ((pops[i].t += dt) > .8) pops.splice(i, 1);
-  for (let i = dust.length - 1; i >= 0; i--) { const q = dust[i]; q.t += dt; q.x += q.vx * dt; q.y += q.vy * dt; q.h += q.vh * dt; q.vx *= .9; q.vy *= .9; if (q.t > q.life) dust.splice(i, 1); }
-}
-const ARROW = {shaft: rgbOf('#9a6c44'), head: rgbOf('#cfcbbf'), fletch: rgbOf('#efe4c8')};
-function drawArrows() {
-  for (const a of arrows) {
-    if (opt.hdBow && !a.stuck) continue;   // HD bow: arrows in flight are drawn on the HD overlay (player.js drawHD)
-    const l = Math.hypot(a.vx, a.vy, a.vh) || 1, dx = a.vx / l, dy = a.vy / l, dh = a.vh / l, k = a.stuck ? .45 : .72;
-    host.line(a.x - dx * k, a.y - dy * k, a.h - dh * k, a.x - dx * .1, a.y - dy * .1, a.h - dh * .1, ARROW.shaft);
-    host.line(a.x - dx * .1, a.y - dy * .1, a.h - dh * .1, a.x, a.y, a.h, ARROW.head);
-    if (!a.stuck) host.line(a.x - dx * k, a.y - dy * k, a.h - dh * k, a.x - dx * (k - .1), a.y - dy * (k - .1), a.h - dh * (k - .1), ARROW.fletch);
-  }
-}
-const DUST = ['#b8a888', '#8a7a60', '#5e5444'].map(rgbOf), POP = rgbOf('#f2d27a');
 
 // ---------------------------------------------------------------- the host features see
 const host = {
@@ -389,7 +343,7 @@ const host = {
   line: (x0, y0, h0, x1, y1, h1, c, emit) => G.line(x0, h0, y0, x1, h1, y1, rgbOf(c), emit),
   layer: n => G.layer(n), rgb: rgbOf,
   get wind() { return feat('wind'); }, feature: feat,
-  get hits() { return hits; },
+  get hits() { return proj.hits; },
   // the menu (ui/menu.js): open it (the title's Settings), its wooden UI sounds (the audio feature), open or not
   get paused() { return paused; }, openMenu: () => togglePause(true), uiSound: n => feat('audio')?.ui?.(n),
   // game controls (game/game.js): dev keys + debug HUD on/off, player input locked, the simulation's speed, the world
@@ -443,76 +397,7 @@ function applyOpts() {
   G.compU.uShadowOn.value = G.compU.uPtShadow.value = opt.shadows ? 1 : 0; G.compU.uDebug.value = opt.debug; $('#help').classList.toggle('hidden', !opt.help || !host.dev);
 }
 applyOpts();
-
-// ---------------------------------------------------------------- mood + lights
-const HALO_A = .16, HALO_R = .3, LANTERN = {fwd: .22, side: .3, h: .95, c: [1, .76, .48], r: 4.2, k: 1, flicker: .2, id: -7};
-function flick(l, t) {
-  const f = l.flicker || 0; if (!f) return 1;
-  const s = (l.id ?? 0) * 12.9898 % 6.283, n = .5 * Math.sin(t * 7.3 + s) + .3 * Math.sin(t * 12.7 + s * 2.3) + .2 * Math.sin(t * 23.1 + s * 3.7);
-  return 1 - f * .22 * (1 + n);
-}
-const sunDir = new THREE.Vector3(), shadowDir = new THREE.Vector3();
-// the arena's longest sun shadow (lighting.js SUN_LEN_MAX): 1.7 m per metre of height. A low dusk sun (10-14 deg) still
-// LIGHTS from low down (warm grazing light, rims), but its shadows stop growing at this length: the true 1 / tan(el)
-// stretched trees and towers 4-6x their height across the map
-const SUN_LEN_MAX = 1.7, SHADOW_EL_MIN = Math.atan(1 / SUN_LEN_MAX);
-// applyMood's light records, reused every frame
-const LOUT = [], CAND = [], CW = [], FREC = [], colCache = new Map();
-let nL = 0;
-const colOf = c => { if (Array.isArray(c)) return c; let v = colCache.get(c); if (!v) colCache.set(c, v = rgbOf(c)); return v; };
-const byD = (a, b) => a.d - b.d;
-function putL(x, y, z, c, r, gain, flat) { const o = LOUT[nL] ??= {}; nL++; o.x = x; o.y = y; o.z = z; o.c = c; o.r = r; o.gain = gain; o.flat = flat; }
-function applyMood(PX, PY, t) {
-  const biome = BIOMES[biomeI].id, time = env.bucket, m = env.mood(biome), U = G.compU;   // the clock's blended mood
-  U.uAmb.value.set(...m.amb);
-  const az = m.sun.az * DEG, el = m.sun.el * DEG;
-  sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el));
-  const sel = Math.max(el, SHADOW_EL_MIN);
-  shadowDir.set(Math.sin(az) * Math.cos(sel), Math.sin(sel), -Math.cos(az) * Math.cos(sel));
-  G.setSun(sunDir, shadowDir);
-  U.uSunC.value.set(...(m.sun.c || [1, 1, 1])); U.uSunStr.value = m.sun.el > 2 ? (m.shadow.a > 0 ? 1 : .45) * (m.sun.k ?? .4) * 2.2 : 0;   // armour glints
-  U.uSunK.value = m.sun.k; U.uShadowA.value = m.shadow.a > 0 && m.sun.el > 2 ? m.shadow.a : 0; U.uShadowC.value.set(...m.shadow.c);
-  U.uFog.value.set(...m.fog);
-  const la = Math.max(.02, lum(m.amb)), fk = lum(m.fill || [0, 0, 0]) / la * CHAR.fillK;
-  U.uFill.value.set(...m.amb.map(v => v * fk)); U.uGrade.value.set(...GRADE[biome]); U.uGradeK.value = CHAR.gradeK[time] ?? 0;
-  const dark = Math.max(0, 1 - lum(m.amb));
-  U.uEmin.value = .1 + .2 * dark;
-  U.uBg.value.set(...BG[biome].map(v => v * (.35 + .65 * lum(m.amb))));
-  // lights: the lift (a flat pool at the player in dark scenes), the lantern, features' lights, the nearest world lights.
-  // (every record is reused frame to frame: LOUT goes to the shader, CAND holds the candidates, FREC copies features' lights)
-  nL = 0;
-  if (m.lift[0] + m.lift[1] + m.lift[2] > 0) putL(PX, P.z + .9, PY, m.lift, 1.7, 1, true);
-  if (opt.lantern) {
-    const a = player.faceAngle, fx = Math.sin(a), fy = Math.cos(a), fk2 = flick(LANTERN, t);
-    putL(PX + fx * LANTERN.fwd - fy * LANTERN.side, P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side, LANTERN.c, LANTERN.r * (1 + (fk2 - 1) * .15), fk2, false);
-  }
-  let nc = 0, nf = 0;
-  const cand = l => { const d = Math.hypot(l.x - PX, l.z - PY); if (d < 24 + l.r) { const w = CW[nc] ??= {l: null, d: 0}; w.l = l; w.d = d; CAND[nc++] = w; } };
-  for (const l of world.lights) cand(l);
-  for (const f of features) if (f.on !== false && f.lights) for (const l of f.lights()) {
-    const o = FREC[nf++] ??= {};
-    o.x = l.x; o.y = l.h || 0; o.z = l.y; o.c = colOf(l.color ?? l.c); o.r = l.radius || l.r || 3; o.k = l.intensity ?? l.k ?? 1; o.flicker = l.flicker || 0; o.id = l.id ?? 7000; o.jitter = l.jitter;
-    cand(o);
-  }
-  CAND.length = nc; CAND.sort(byD);   // nearest first (stable: ties keep the world-then-features order)
-  // a flame's light wanders a few cm (l.jitter, else from its flicker), so the shadows round a fire dance with it
-  for (let i = 0; i < nc && nL < 32; i++) {
-    const l = CAND[i].l, k = flick(l, t), j = l.jitter ?? (l.flicker || 0) * .035, s = (l.id ?? 0) * 7.13;
-    const jx = j ? j * (Math.sin(t * 11.3 + s) + Math.sin(t * 17.9 + s * 1.7) * .6) / 1.6 : 0, jz = j ? j * (Math.sin(t * 13.1 + s * 2.1) + Math.sin(t * 7.7 + s * .9) * .6) / 1.6 : 0;
-    putL(l.x + jx, l.y + Math.abs(jz) * .5, l.z + jz, l.c, l.r * (1 + (k - 1) * .15), l.k * k, false);
-  }
-  U.uNL.value = nL; let nh = 0;
-  for (let i = 0; i < nL; i++) {
-    const l = LOUT[i];
-    U.uLP.value[i].set(l.x, l.y, l.z, l.r); U.uLC.value[i].set(l.c[0] * l.gain, l.c[1] * l.gain, l.c[2] * l.gain, l.flat ? 1 : 0);
-    if (l.flat) continue;
-    const a = Math.min(.75, HALO_A * l.gain * (m.glow ?? 1) * (.3 + .7 * dark) + Math.max(0, l.gain - 1.5) * .12); if (a < .02) continue;
-    const [sx, sy] = G.toScreen(l.x, l.y, l.z);
-    U.uHalo.value[nh].set(sx, VH - sy, (HALO_R + .12 * Math.min(2, l.gain) + Math.max(0, l.gain - 1.3) * .35) * PPM * zoom, a); U.uHaloC.value[nh].set(l.c[0], l.c[1], l.c[2]); nh++;
-  }
-  U.uNH.value = nh;
-  return m;
-}
+const lighting = createLighting({G, host, features, opt});   // render/lighting.js: the mood + lights -> the composite
 
 // ---------------------------------------------------------------- camera target: eased (look-ahead), snapped to the pixel lattice
 const T = new THREE.Vector3(), Ts = new THREE.Vector3();
@@ -734,7 +619,7 @@ function step(dt) {
   perf.begin('player.step', 'sim'); PL.step(dt); perf.end('player.step');
   for (let i = n0; i < events.length; i++) toWorldEvent(events[i]);   // the player's events are in the view frame
   clothPos[0] += P.x - px0; clothPos[1] += P.y - py0;               // its motion in the view frame, without the camera's turns
-  perf.begin('arrows', 'sim'); stepArrows(dt); perf.end('arrows');
+  perf.begin('arrows', 'sim'); proj.step(dt); perf.end('arrows');
   if (rig.active) {
     Object.assign(CLOTH_PARAMS, feat('wind')?.on && feat('wind').cloth?.() || CLOTH_CALM);
     perf.begin('cloth.sim', 'char'); rig.update(dt, SP[P.frame]?.sim, P.face, clothPos); perf.end('cloth.sim');
@@ -843,9 +728,7 @@ function draw(t) {
   perf.begin('world.update', 'view'); world.update(yaw); perf.end('world.update');
   // the season's leaves (env.leafRamp: changes a few times per season; a rebuilt world starts from the biome's own ramp)
   const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || world !== leafWorld)) { world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = world; }
-  drawArrows();
-  for (const q of dust) { const kk = q.t / q.life; host.point(q.x, q.y, q.h, DUST[kk < .4 ? 0 : kk < .75 ? 1 : 2]); }
-  for (const p of pops) { const h = p.z + 1.7 + p.t * .5; for (const [dx, dh] of [[0, 0], [-1, 0], [1, 0], [0, 1], [0, -1]]) { const [vx, vy] = toWorld(dx / PPM, 0); host.point(p.x + vx, p.y + vy, h + dh / PPMH, POP, {emit: true}); } }
+  proj.draw(host);
   for (const f of features) if (f.on !== false) f.frame?.({dt: lastDt, t});
   // the aim reticle (pixel cross at the cursor, front layer)
   if (P.state === 'draw') {
@@ -854,7 +737,7 @@ function draw(t) {
     q.fillRect(mx - 3, my, 2, 1); q.fillRect(mx + 2, my, 2, 1); q.fillRect(mx, my - 3, 1, 2); q.fillRect(mx, my + 2, 1, 2);
   }
   if (opt.zones) drawZones();
-  perf.begin('mood+lights', 'view'); applyMood(PX, PY, t); perf.end('mood+lights');
+  perf.begin('mood+lights', 'view'); lighting.apply(PX, PY, t); perf.end('mood+lights');
   perf.begin('G.render', 'render'); G.render(); perf.end('G.render');
   // HD overlay
   const dpr = devicePixelRatio || 1, sc = scale * dpr;
@@ -918,7 +801,7 @@ function hud() {
     fh ? `<div class="row">${fh}</div>` : '',
     `<div class="row">camera <b>${deg.toFixed(1)}°</b> (${SNAP_NAME[snapMode]}) · zoom ${(scale * zoom / dsBase).toFixed(2)}x (${scale}:1)${opt.debug ? ` · view <b>${DEBUG[opt.debug]}</b>` : ''}</div>`,
     `<div class="row dim">features: ${features.map(f => `${f.name}${f.on === false ? ' (off)' : ''}`).join(', ') || 'none yet'}</div>`,
-    `<div class="row dim">${fps.toFixed(0)} fps · ${s.ms.toFixed(1)} ms CPU · ${s.calls} draws · ${s.sprites} sprites · ${s.points} pts · hits ${hits}/${PL.shots}</div>`,
+    `<div class="row dim">${fps.toFixed(0)} fps · ${s.ms.toFixed(1)} ms CPU · ${s.calls} draws · ${s.sprites} sprites · ${s.points} pts · hits ${proj.hits}/${PL.shots}</div>`,
   ].join('');
 }
 $('#load').classList.add('hidden');
