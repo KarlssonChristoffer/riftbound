@@ -16,7 +16,7 @@
 export const EVENTS = {
   'player.step':        ['sim/player/player.js',  'x, y, z, foot (L|R), big (0 walk, 1 turn)', 'atmos, flow, audio'],
   'player.land':        ['sim/player/player.js',  'x, y, z, foot?, big (2 sprint footfall / landing foot, 3 a drop > 1.2 m)', 'atmos, flow, wildlife, audio'],
-  'player.jump':        ['sim/player/player.js',  'x, y, z (sent from the key handler: still in the view frame)', 'atmos, flow, wildlife, audio'],
+  'player.jump':        ['sim/player/player.js',  'x, y, z (emitted from the Space key handler, turned there)', 'atmos, flow, wildlife, audio'],
   'player.splash':      ['sim/player/player.js',  'x, y', 'atmos, flow, wildlife, audio'],
   'player.roll':        ['(reserved: not emitted yet)', 'x, y', 'atmos (frost puff)'],
   'player.hit':         ['features/combat/core.js', 'x, y, vx, vy, player: true (a brute landed on him)', 'atmos, wildlife, audio, music'],

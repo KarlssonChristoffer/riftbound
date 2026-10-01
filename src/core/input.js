@@ -9,7 +9,7 @@
 import {BUSY} from '../sim/player/player.js';
 
 export function createInput(E) {
-  const {canvas, keys, mouse, cv, host, features, PL, P, pa, perf, applyOpts, setYaw} = E, {DEV_KEYS, abKey, devKey} = E.dev;
+  const {canvas, keys, mouse, cv, host, features, events, PL, P, pa, perf, applyOpts, setYaw} = E, {DEV_KEYS, abKey, devKey} = E.dev;
   let dragging = false, dragX = 0, dragYaw = 0;
   addEventListener('keydown', e => {
     const k = e.key.toLowerCase(), pause = E.pause;
@@ -24,7 +24,9 @@ export function createInput(E) {
     keys.add(k);
     for (const f of features) if (f.onKey?.(k, e)) return;
     for (const f of features) if (f.key && f.key === k && f.toggle) { f.toggle(); return; }
-    if (k === ' ') PL.onSpace();
+    if (k === ' ') {   // a leap's player.jump is emitted here, between steps: into world coordinates like the step's own
+      const n0 = events.length; PL.onSpace(); for (let i = n0; i < events.length; i++) pa.toWorldEvent(events[i]);
+    }
     if (k === 'e') { if (!pa.nearProp() && pa.climbSpotW() && Math.abs(cv.yaw) > 1e-6 && !BUSY.has(P.state)) pa.assist = {back: cv.yaw, phase: 'in'}; else PL.onInteractKey(); }
     if (k >= '1' && k <= '4' && !BUSY.has(P.state)) features.some(f => f.ability?.(+k));
     devKey(k, e, E);
