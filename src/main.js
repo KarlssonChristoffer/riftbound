@@ -40,12 +40,10 @@
 import * as THREE from 'three';
 import {createGfx, DEG} from './render/gfx.js';
 import {buildWorld, texOf, WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, PROP_TOP} from './world/world.js';
-import {loadAtlas} from './render/atlas.js';
 import {BIOMES} from './world/biomes.js';
 import {MOODS, TIMES, CHAR} from './content/moods.js';   // the lighting tables (forked from the arena's lighting.js)
-import {ClothRig, depthOf, CLOTH_PARAMS} from './view/cloth.js';
-import {createArmor} from './view/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
-import {createPlayer, atlasOf, BUSY} from './sim/player/player.js';
+import {createHero, loadLoadout} from './view/hero.js';   // the Ranger's card: loadouts, the composite, cloak, hair, armour, HD bow
+import {createPlayer, BUSY} from './sim/player/player.js';
 import {createGame} from './game/game.js';
 import {createPerf} from './core/perf.js';   // the frame profiler: per-system ms against the budget (F3, ?perf=1)
 import {createEnv, SEASONS, WEATHER} from './sim/env.js';   // the world clock: time of day, seasons, weather
@@ -63,16 +61,13 @@ const t00 = performance.now();
 const FEATURES = ['wind', 'windlines', 'weather', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)
 
 // ---------------------------------------------------------------- the Ranger: loadouts (packed atlases)
-const LOADOUTS = [['ranger basic', '../concepts/sprites/out/outfits/ranger_basic/'], ['ranger + cloth sim', '../concepts/sprites/out/outfits/ranger_sim/'], ['bare body', '../concepts/sprites/out/skel/']];
-// default: the runtime cloth (cloak + scarf tail answer the wind; ?set=basic = the baked cloak)
-let loadI = {basic: 0, body: 2, sim: 1}[Q.get('set')] ?? 1;
+// the loadout (view/hero.js LOADOUTS). Default: the runtime cloth (cloak + scarf tail answer the wind; ?set=basic = the baked cloak)
+const loadI = {basic: 0, body: 2, sim: 1}[Q.get('set')] ?? 1;
 $('#load').textContent = 'Loading the Ranger…';
 const TIMING = {}, mark = (k, t0) => { TIMING[k] = +((performance.now() - t0) / 1000).toFixed(2); };
 let tp = performance.now();
-let set = await loadAtlas(LOADOUTS[loadI][1], {ClothRig});
+const set = await loadLoadout(loadI);
 mark('atlas', tp);
-const atlas = atlasOf(set);
-let {SP} = set, rig = set.rig, {FW, FH, PIV, ND, DIRS} = atlas;
 const PPM = set.idx.fwd_px.E[0], PPMH = PPM * Math.cos(set.idx.pitch * DEG), PPMY = PPM * Math.sin(55 * DEG);
 // THE VIEW follows the window and the zoom. `scale` is the DISPLAY SCALE (screen px per art px, whole: the art stays crisp)
 // and the view is as many art px as fill the window at it, so a wide or ultrawide screen sees more of the world to the
@@ -113,6 +108,13 @@ const env = createEnv({moods: MOODS, biome: () => BIOMES[biomeI].id, Q});
 let world = null, propMode = Q.get('props') === 'yaw' ? 'yaw' : 'live';
 let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+R rebuilds)
 const features = [], events = [];
+// APP: the engine's own context for the modules split out of this file (view/hero.js, ...): live getters, so a module
+// reads the current yaw / zoom / player without this file passing them every call. (Features get `host`, below.)
+const app = {
+  get P() { return P; }, get PL() { return PL; }, get player() { return player; }, get yaw() { return yaw; }, get zoom() { return zoom; },
+  get VW() { return VW; }, get VH() { return VH; }, get opt() { return opt; }, get cam() { return cam; }, get arrows() { return arrows; },
+  feat: name => feat(name), toView: (x, y, a) => toView(x, y, a),
+};
 // the wind sways painted foliage cards (per-row bend) and gives braziers / torches a live flame
 function cardHook(it, sp) { const w = features.find(f => f.name === 'wind'); return w?.on && w.card ? w.card(it, sp) : null; }
 // ... and leans the 3D trees (world.js leanTree: the lean at the top, whole pixels per vertex in the shader)
@@ -171,8 +173,9 @@ function syncPlateaus() { PLATEAUS.forEach((q, i) => Object.assign(plateausV[i],
 const proj = createProjectiles({world: () => world, features, events, opt: () => opt, toWorld, PPM, PPMH});
 const {arrows, dust} = proj, spawnArrow = proj.spawn;
 const feat = name => features.find(f => f.name === name) || null;
+const hero = createHero({G, set, loadI, ctxO, app});
 const PL = createPlayer({
-  ctx: ctxO, atlas, keys, mouse, cam, events, plateaus: plateausV,
+  ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, plateaus: plateausV,
   blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blockedW(X, Z, z, air); },
   elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
   inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
@@ -197,8 +200,8 @@ function pwSync() { if (P.x !== pwA || P.y !== pwB || yaw !== pwYaw) { pwA = P.x
 const player = {
   get x() { pwSync(); return pwX; }, get y() { pwSync(); return pwY; }, get z() { return P.z; },
   get vx() { return toWorld(P.vx, P.vy)[0]; }, get vy() { return toWorld(P.vx, P.vy)[1]; },
-  get faceAngle() { return P.face * 2 * Math.PI / ND + yaw; },                          // world: 0 = south, +pi/2 = east
-  get face() { return (((Math.round(P.face + yaw / (2 * Math.PI / ND))) % ND) + ND) % ND; },   // world facing index (arena's dirOf)
+  get faceAngle() { return P.face * 2 * Math.PI / hero.ND + yaw; },                          // world: 0 = south, +pi/2 = east
+  get face() { const ND = hero.ND; return (((Math.round(P.face + yaw / (2 * Math.PI / ND))) % ND) + ND) % ND; },   // world facing index (arena's dirOf)
   get viewFace() { return P.face; }, get state() { return P.state; }, get t() { return P.t; }, get frame() { return P.frame; },
   get gait() { return P.gait; }, get sink() { return P.sink || 0; }, get aiming() { return P.state === 'draw'; }, get blink() { return P.blink || 0; },
   get raw() { return P; },
@@ -207,7 +210,7 @@ const player = {
 // the camera turned by d: everything the player keeps in view-frame coordinates turns with it
 let faceAcc = 0;
 function turnFrame(d) {
-  const c = Math.cos(d), s = Math.sin(d), rot = (x, y) => [x * c - y * s, x * s + y * c];
+  const ND = hero.ND, c = Math.cos(d), s = Math.sin(d), rot = (x, y) => [x * c - y * s, x * s + y * c];
   [P.x, P.y] = rot(P.x, P.y); [P.vx, P.vy] = rot(P.vx, P.vy);
   if (P.rollDir) P.rollDir = rot(...P.rollDir);
   if (P.back) P.back = rot(...P.back);
@@ -217,57 +220,6 @@ function turnFrame(d) {
   if (n) { P.face = (((P.face + n) % ND) + ND) % ND; P.want = (((P.want + n) % ND) + ND) % ND; faceAcc -= n; }
 }
 function setYaw(a) { if (a !== yaw) { turnFrame(a - yaw); yaw = a; } if (yaw > Math.PI) yaw -= 2 * Math.PI; else if (yaw <= -Math.PI) yaw += 2 * Math.PI; }
-
-// the Ranger's card: sprite (+ runtime cloak) + pixel bow composited every frame, normals likewise
-const charCv = document.createElement('canvas'), nrmCv = document.createElement('canvas');
-charCv.width = nrmCv.width = 192; charCv.height = nrmCv.height = 160;   // margins: the cloth sim swings past the frame
-const cq = charCv.getContext('2d', {willReadFrequently: true}), nq = nrmCv.getContext('2d', {willReadFrequently: true});
-cq.imageSmoothingEnabled = nq.imageSmoothingEnabled = false;
-const CX = 48, CY = 40;   // where the 96 x 80 frame sits in the composite
-const hero = G.card({tex: texOf(charCv), nrm: texOf(nrmCv), w: 192, h: 160, px: PIV[0] + CX, py: PIV[1] + CY, type: 4, obj: 8, bias: .00125, xray: true});
-
-// SHINY ARMOUR (the arena's experiment; its X key turns the camera here, so it's I / the menu): armor.js repaints the
-// metal pixels dark steel / gold, and a METAL MASK aligned with the composite (255 steel, 128 gold, cleared under the
-// cloth cloak) tells the lighting pass where to add the glints and reflections (gfx.js COMP_FS)
-const armor = createArmor(ctxO);
-const metalCv = document.createElement('canvas'); metalCv.width = 192; metalCv.height = 160;
-const mq = metalCv.getContext('2d', {willReadFrequently: true}); mq.imageSmoothingEnabled = false;
-hero.g.uniforms.uMetal.value = texOf(metalCv);
-const maskImgs = {}, maskDir = () => LOADOUTS[loadI][1].replace('out/outfits/', 'out/experiments/armor/');
-function maskOf(pose) {   // the pose's mask sheet (loaded once; null while loading, false when this loadout has none)
-  const key = maskDir() + pose; if (key in maskImgs) return maskImgs[key];
-  maskImgs[key] = null; const i = new Image(); i.onload = () => { maskImgs[key] = i; }; i.onerror = () => { maskImgs[key] = false; }; i.src = key + '.png';
-  return null;
-}
-function toggleArmour() {
-  armor.toggle(); armor.setAtlas(LOADOUTS[loadI][1]);
-  if (armor.on) { armor.preload(Object.keys(SP)); Object.keys(SP).forEach(maskOf); }
-}
-function drawMetal(frame, sinkPx) {   // the metal mask of this frame into the composite's layout, minus what the cloak covers
-  mq.clearRect(0, 0, 192, 160);
-  const m = armor.on && !sinkPx ? maskOf(frame) : null;
-  hero.g.uniforms.uHasMetal.value = m ? 1 : 0; if (!m) return;
-  mq.drawImage(m, P.face * FW, 0, FW, FH, CX, CY, FW, FH);
-  if (rig.active) {
-    const id = mq.getImageData(CX, CY, FW, FH), d = id.data;
-    for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) { const k = (y * FW + x) * 4; if (d[k] && rig.covers(x, y)) d[k] = d[k + 1] = d[k + 2] = 0; }
-    mq.putImageData(id, CX, CY);
-  }
-  G.tex(metalCv, {dynamic: true});
-}
-
-async function switchLoadout(i) {
-  loadI = ((i % LOADOUTS.length) + LOADOUTS.length) % LOADOUTS.length;
-  $('#load').classList.remove('hidden'); $('#load').textContent = 'Loading ' + LOADOUTS[loadI][0] + '…';
-  const s = await loadAtlas(LOADOUTS[loadI][1], {ClothRig});
-  const a = atlasOf(s), old = ND;
-  Object.assign(atlas, a); set = s; SP = s.SP; rig = s.rig; ({FW, FH, PIV, ND, DIRS} = a);
-  if (ND !== old) { P.face = Math.round(P.face * ND / old) % ND; P.want = P.face; }
-  rig.reset?.();
-  hero.u.uPivot.value.set(PIV[0] + CX, PIV[1] + CY);
-  armor.setAtlas(LOADOUTS[loadI][1]); if (armor.on) { armor.preload(Object.keys(SP)); Object.keys(SP).forEach(maskOf); }
-  $('#load').classList.add('hidden');
-}
 
 // ---------------------------------------------------------------- feel: shake, hitstop, knock
 let freeze = 0; const shakeS = {a: 0, t: 0};
@@ -358,7 +310,7 @@ const host = {
   // the Ranger as drawn this frame (sprite + runtime cloak + pixel bow, and its normals), for afterimages / reflections.
   // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame. Their
   // size is img.width / img.height; h is the player's height above the ground (metres), like every host h.
-  playerSprite: () => ({img: charCv, nrm: nrmCv, px: PIV[0] + CX, py: PIV[1] + CY, x: player.x, y: player.y, h: P.z, frame: P.frame, face: P.face}),
+  playerSprite: () => hero.sprite(),
 };
 
 // ---------------------------------------------------------------- features
@@ -449,10 +401,10 @@ addEventListener('keydown', e => {
   if (k === 't') env.nextPart();   // jump to dawn / day / dusk / night; the clock runs on from there
   if (k === 'n') setBiome(biomeI + (e.shiftKey ? -1 : 1));
   if (k === 'l') opt.lantern = !opt.lantern;
-  if (k === 'o') switchLoadout(loadI + 1);
+  if (k === 'o') hero.switchLoadout(hero.loadI + 1);
   if (k === 'v') opt.banded = !opt.banded;
   if (k === 'j') opt.hdBow = !opt.hdBow;
-  if (k === 'i') toggleArmour();
+  if (k === 'i') hero.toggleArmour();
   if (k === 'r' && e.shiftKey) { trees3d = !trees3d; setBiome(biomeI); }   // trees: procedural 3D <-> painted cards
   else if (k === 'r') { propMode = propMode === 'live' ? 'yaw' : 'live'; world.setMode(propMode); }
   if (k === 'g') { if (e.shiftKey) opt.zones = !opt.zones; else opt.debug = (opt.debug + 1) % DEBUG.length; }
@@ -509,7 +461,7 @@ const AMBIENT = new Set(['wind', 'windlines', 'weather', 'lights', 'garden', 'at
 const NO_EVS = [], PAUSE_TURN = .035, LOOK_HOLD = 3000;   // drift rad/s (the title turns at .07); ms after a drag before it drifts again
 let pauseYaw = 0, pauseGoal = 1, lookT = 0;
 function stepPaused(dt) {
-  if (rig.active) { Object.assign(CLOTH_PARAMS, feat('wind')?.on && feat('wind').cloth?.() || CLOTH_CALM); rig.update(dt, SP[P.frame]?.sim, P.face, clothPos); }
+  hero.stepCloth(dt, clothPos);
   const evs = events.length ? events.splice(0) : NO_EVS;   // wildlife's calls, fire crackles: for the audio feature
   for (const f of features) if (AMBIENT.has(f.name) && f.on !== false) f.update?.(dt, evs);
 }
@@ -555,9 +507,9 @@ function menuItems() {
   out.push({tab: 'controls', group: 'Camera', label: 'Camera turning', id: 'snap', keep: 'snap', ...pick(SNAP_NAME, () => SNAP_NAME[snapMode], v => { snapMode = SNAP_NAME.indexOf(v); })},
     {tab: 'controls', group: 'Keys', keys: KEYS});
   // Dev: the character, the world's dials, the renderer's A/B (each with its dev key)
-  dv('Character', {label: 'Loadout', key: 'O', value: () => LOADOUTS[loadI][0], run: d => switchLoadout(loadI + d)});
+  dv('Character', {label: 'Loadout', key: 'O', value: () => hero.loadName, run: d => hero.switchLoadout(hero.loadI + d)});
   dv('Character', {label: 'Bow', key: 'J', ...pick(['pixel art', 'HD overlay'], () => opt.hdBow ? 'HD overlay' : 'pixel art', v => { opt.hdBow = v === 'HD overlay'; })});
-  dv('Character', {label: 'Shiny armour', key: 'I', ...onOff(() => armor.on, v => { if (armor.on !== v) toggleArmour(); })});
+  dv('Character', {label: 'Shiny armour', key: 'I', ...onOff(() => hero.armor.on, v => { if (hero.armor.on !== v) hero.toggleArmour(); })});
   dv('Character', {label: 'Lantern', key: 'L', ...onOff(() => opt.lantern, v => { opt.lantern = v; })});
   dv('World', {label: 'Biome', key: 'N', value: () => BIOMES[biomeI].name, run: d => setBiome(biomeI + d)});
   dv('World', {label: 'Time', key: 'T', value: () => `${env.clock()} ${env.part}`, run: () => env.nextPart()});
@@ -620,69 +572,10 @@ function step(dt) {
   for (let i = n0; i < events.length; i++) toWorldEvent(events[i]);   // the player's events are in the view frame
   clothPos[0] += P.x - px0; clothPos[1] += P.y - py0;               // its motion in the view frame, without the camera's turns
   perf.begin('arrows', 'sim'); proj.step(dt); perf.end('arrows');
-  if (rig.active) {
-    Object.assign(CLOTH_PARAMS, feat('wind')?.on && feat('wind').cloth?.() || CLOTH_CALM);
-    perf.begin('cloth.sim', 'char'); rig.update(dt, SP[P.frame]?.sim, P.face, clothPos); perf.end('cloth.sim');
-  }
+  hero.stepCloth(dt, clothPos, perf);
   const evs = events.splice(0);
   for (const f of features) if (f.on !== false || f.always) f.update?.(dt, evs);
   if (shakeS.t > 0) shakeS.t -= dt;
-}
-const CLOTH_CALM = {wind: [...CLOTH_PARAMS.wind], gust: CLOTH_PARAMS.gust};
-// HAIR IN THE WIND: once the wind at the Ranger is more than a breeze (the wind feature's strength), the hair's edge pixels
-// stream downwind on the screen by a pixel or two and lift at the crown, flickering at 10 fps like the arena's flame licks.
-// Hair = the harmonized hair ramp (a57a58 / 845f46 / 624535, read off the ID passes), inside a box round the Head bone;
-// the normals go along, so the lighting treats the strands as hair.
-// No read-back per frame: each sprite frame + facing is read ONCE off its atlas (hairOf: the hair pixels in the box,
-// which neighbours are empty, their colours) and cached; a frame then only paints the few strands that stream, one
-// fillRect each, into the composite and its normals. (Where the cloak covers a pixel it is neither hair nor empty.)
-const HAIR = new Set([0xa57a58, 0x845f46, 0x624535]);
-const hh32 = (a, b, c) => { let n = Math.imul(a, 374761393) + Math.imul(b, 668265263) + Math.imul(c, 1442695041) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
-const HB = 26, hairCache = new WeakMap(), hairCv = document.createElement('canvas'), hairQ = hairCv.getContext('2d', {willReadFrequently: true}), HAIR_A = {x: 0, y: 0, g: 0};
-hairCv.width = HB; hairCv.height = HB * 2;
-const rgbaOf = (d, i) => `rgba(${d[i]},${d[i + 1]},${d[i + 2]},${(d[i + 3] / 255).toFixed(3)})`;
-// -> {bx, by (the box in frame px), n, x, y (box px), f (bits: empty at x-1, x+1, x-2, x+2, y-1), ca, cn (colours)}
-function hairOf(sp, face, hb) {
-  let byFace = hairCache.get(sp); if (!byFace) hairCache.set(sp, byFace = []);
-  if (byFace[face]) return byFace[face];
-  if (sp.img.complete === false) return null;   // (an atlas still loading: try again next frame)
-  const bx = Math.round((hb[0] + hb[2]) / 2) - 13, by = Math.round(Math.min(hb[1], hb[3])) - 6;
-  const sx0 = Math.max(0, bx), sy0 = Math.max(0, by), sx1 = Math.min(FW, bx + HB), sy1 = Math.min(FH, by + HB);   // (inside this facing's frame)
-  hairQ.clearRect(0, 0, HB, HB * 2);
-  if (sx1 > sx0 && sy1 > sy0) {
-    hairQ.drawImage(sp.img, face * FW + sx0, sy0, sx1 - sx0, sy1 - sy0, sx0 - bx, sy0 - by, sx1 - sx0, sy1 - sy0);
-    if (sp.nrm) hairQ.drawImage(sp.nrm, face * FW + sx0, sy0, sx1 - sx0, sy1 - sy0, sx0 - bx, HB + sy0 - by, sx1 - sx0, sy1 - sy0);
-  }
-  const all = hairQ.getImageData(0, 0, HB, HB * 2).data, nOff = HB * HB * 4, a = i => all[i + 3] > 0;
-  const xs = [], ys = [], fs = [], ca = [], cn = [];
-  for (let y = 1; y < HB; y++) for (let x = 1; x < HB - 1; x++) {
-    const i = (y * HB + x) * 4; if (!a(i) || !HAIR.has(all[i] << 16 | all[i + 1] << 8 | all[i + 2])) continue;
-    const f = (a(i - 4) ? 0 : 1) | (a(i + 4) ? 0 : 2) | (x >= 2 && !a(i - 8) ? 4 : 0) | (x + 2 < HB && !a(i + 8) ? 8 : 0) | (a(i - HB * 4) ? 0 : 16);
-    if (!f) continue;
-    xs.push(x); ys.push(y); fs.push(f); ca.push(rgbaOf(all, i)); cn.push(sp.nrm ? rgbaOf(all, nOff + i) : null);
-  }
-  return (byFace[face] = {bx, by, n: xs.length, x: Int16Array.from(xs), y: Int16Array.from(ys), f: Uint8Array.from(fs), ca, cn});
-}
-function hairWind(fr) {
-  const W = feat('wind'); if (!W?.on || !W.at) return;
-  const k = Math.min(1, Math.max(0, ((W.strength || 0) - 1.05) / 1.3)); if (k <= 0) return;
-  const sp = SP[fr], hb = sp?.bones?.[DIRS[P.face]]?.Head; if (!hb) return;
-  const a = W.at(player.x, player.y, HAIR_A), dir = Math.sign(a.x * Math.cos(yaw) - a.y * Math.sin(yaw)) || 1;   // downwind on screen
-  const H = hairOf(sp, P.face, hb); if (!H) return;
-  const x0 = CX + H.bx, y0 = CY + H.by, tk = Math.floor(performance.now() / 100), cl = rig.active ? rig : null;
-  const fOut = dir > 0 ? 2 : 1, fOut2 = dir > 0 ? 8 : 4;
-  for (let i = 0; i < H.n; i++) {
-    const x = H.x[i], y = H.y[i], f = H.f[i], fx = H.bx + x, fy = H.by + y;   // fx, fy: frame px (the cloak's covers())
-    if (cl && cl.covers(fx, fy)) continue;
-    const r = hh32(x0 + x, y0 + y, tk);
-    let n = 0, ux = 0, uy = 0;
-    if (f & fOut && r < k * .6 && !(cl && cl.covers(fx + dir, fy))) { n = k > .5 && f & fOut2 && r < (k - .5) * .5 && !(cl && cl.covers(fx + 2 * dir, fy)) ? 2 : 1; ux = dir; }   // a lock streams out
-    else if (f & 16 && r > 1 - k * .2 && !(cl && cl.covers(fx, fy - 1))) { n = 1; uy = -1; }   // a tuft lifts at the crown
-    for (let s = 1; s <= n; s++) {
-      cq.fillStyle = H.ca[i]; cq.fillRect(x0 + x + ux * s, y0 + y + uy * s, 1, 1);
-      if (H.cn[i]) { nq.fillStyle = H.cn[i]; nq.fillRect(x0 + x + ux * s, y0 + y + uy * s, 1, 1); }
-    }
-  }
 }
 const clothPos = [0, 0];
 function toWorldEvent(e) {
@@ -705,23 +598,8 @@ function draw(t) {
   snapTarget(ox, oy); G.setView(Ts, yaw, zoom);
   const [tvx, tvy] = toView(Ts.x, Ts.z);
   cam.x = cam.fx = tvx * PPM - VW / 2; cam.y = cam.fy = tvy * PPMY - Ts.y * PPMH - VH / 2;
-  // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in
-  perf.begin('hero.compose', 'char');
-  const fr = SP[P.frame] ? P.frame : 'idle.0', sp = SP[fr];
-  cq.clearRect(0, 0, 192, 160); nq.clearRect(0, 0, 192, 160);
-  const sinkPx = Math.round((P.sink || 0) * 22);
-  cq.drawImage(armor.albedo(fr, sp.img), P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx, FW, FH - sinkPx);   // (armor: metal repainted)
-  if (sp.nrm) nq.drawImage(sp.nrm, P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx, FW, FH - sinkPx);
-  if (rig.active && sp.depth && !sinkPx) rig.draw(cq, CX, CY, depthOf(sp.depth), P.face, nq);
-  if (!sinkPx) hairWind(fr);
-  if (!sinkPx && !opt.hdBow) PL.drawPixelBow(cq, CX, CY);
-  drawMetal(fr, sinkPx);
-  G.tex(charCv, {dynamic: true}); G.tex(nrmCv, {dynamic: true});
-  perf.end('hero.compose');
-  hero.g.uniforms.uHasNrm.value = sp.nrm ? 1 : 0;
-  hero.u.uAnchor.value.set(PX, P.z, PY);
-  hero.setVisible(!(P.blink && Math.floor(P.blink * 12) % 2));
-  G.compU.uPlayer.value.set(PX, P.z + .9, PY);
+  // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js)
+  const sinkPx = hero.compose(PX, PY, perf);
   // props, hover pulse on the aimed target
   const hov = P.state === 'draw' ? hoverTarget()?.target : null;
   for (const it of world.items) it.hover = it.p === hov ? .16 + .08 * Math.sin(performance.now() / 110) : 0;
@@ -743,21 +621,9 @@ function draw(t) {
   const dpr = devicePixelRatio || 1, sc = scale * dpr;
   hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);
   for (const f of features) if (f.on !== false && f.hd && (!host.hudOff || f === game)) { hq.save(); f.hd(hq, sc); hq.restore(); }   // hudOff: the title
-  if (opt.hdBow && !sinkPx) drawHDBow(sc);
+  if (opt.hdBow && !sinkPx) hero.drawHDBow(hq, sc);
   drawPrompt(sc);
   perf.draw(hq, sc);
-}
-// the HD bow (J): player.js's display-resolution string, nocked arrow and flying arrows, drawn on the HD overlay. It works
-// in the view frame at zoom 1 (its own toS / cam), so arrows go in as view-frame copies and the zoom is a transform
-function drawHDBow(sc) {
-  const z = zoom, s2 = sc * z, [px, py] = ctxO.toS(P.x, P.y, P.z);
-  const view = arrows.map(a => {
-    const [x, y] = toView(a.x, a.y), [vx, vy] = toView(a.vx, a.vy);
-    return {...a, x, y, vx, vy, trail: a.trail?.map(([tx, ty, th]) => { const [u, v] = toView(tx, ty); return [u, v, th]; })};
-  });
-  hq.save(); hq.translate(VW / 2 * sc * (1 - z), VH / 2 * sc * (1 - z));
-  PL.drawHD(hq, s2, (Math.round(px - cam.fx) - PIV[0]) * s2, (Math.round(py - cam.fy) - PIV[1]) * s2, view);
-  hq.restore();
 }
 function drawPrompt(sc) {   // "E climb" / "E open" over the thing you can interact with
   let at = null, txt = '';
@@ -797,7 +663,7 @@ function hud() {
   const b = BIOMES[biomeI], deg = ((yaw / DEG) % 360 + 360) % 360, s = G.stats;
   const fh = features.map(f => f.hud?.()).filter(Boolean).join(' · ');
   $('#hud').innerHTML = [
-    `<div class="row"><b>Proving Grounds 3D</b> · ${b.name} · ${env.label()}${opt.lantern ? ' · lantern' : ''} · ${LOADOUTS[loadI][0]}</div>`,
+    `<div class="row"><b>Proving Grounds 3D</b> · ${b.name} · ${env.label()}${opt.lantern ? ' · lantern' : ''} · ${hero.loadName}</div>`,
     fh ? `<div class="row">${fh}</div>` : '',
     `<div class="row">camera <b>${deg.toFixed(1)}°</b> (${SNAP_NAME[snapMode]}) · zoom ${(scale * zoom / dsBase).toFixed(2)}x (${scale}:1)${opt.debug ? ` · view <b>${DEBUG[opt.debug]}</b>` : ''}</div>`,
     `<div class="row dim">features: ${features.map(f => `${f.name}${f.on === false ? ' (off)' : ''}`).join(', ') || 'none yet'}</div>`,
@@ -808,9 +674,9 @@ $('#load').classList.add('hidden');
 console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} s (${set.packed ? 'packed atlas' : 'per-file atlas'})`, JSON.stringify(TIMING));
 
 // debug handle for scripted tests (drive frames while the pane is hidden: rAF pauses there)
-window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout, TIMING, perf,
+window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout: i => hero.switchLoadout(i), TIMING, perf,
   get world() { return world; }, get yaw() { return yaw; }, set zoom(v) { zoomTo(Math.round(dsBase * v)); }, get zoomState() { return {scale, zoom, dsBase, dsGoal}; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { snapMode = i; },
-  set props(m) { propMode = m; world.setMode(m); }, get rig() { return rig; },
+  set props(m) { propMode = m; world.setMode(m); }, get rig() { return hero.rig; },
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { lastDt = dt; step(dt); draw(performance.now() / 1000); } },
   applyOpts, hud};
 requestAnimationFrame(frame);
