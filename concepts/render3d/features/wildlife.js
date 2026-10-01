@@ -245,7 +245,7 @@ export async function create(host) {
   const ctx = host.ctxO, G = host.G;
   const Q = new URLSearchParams(location.search);
   const WL = {name: 'wildlife', label: 'Wildlife', key: '6', on: Q.get('wildlife') !== '0', ms: 0, count: 0, T: TUNE, TUNE};
-  let biome = null, time = 'day', need = true, needTime = false, wasNight = false, T = 0, acc = 0, P = null;
+  let biome = null, time = 'day', need = true, needTime = false, wasNight = false, T = 0, acc = 0, P = null, seasonVer = -1, raining = false;
   let seed = 1;
   const R = () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
   const rr = (a, b) => a + R() * (b - a), pick = a => a[R() * a.length | 0];
@@ -1129,6 +1129,11 @@ export async function create(host) {
   function clearAll() {
     flocks = []; birds = []; hoppers = []; lizards = []; frogs = []; fish = []; bugs = []; vultures = []; jellies = []; eyes = []; motes = []; school = null;
   }
+  // the season's say on who is out (ruins only: env.tinted), and rain's: butterflies like spring / summer and hide from rain,
+  // moths are gone in winter, frogs sleep through it
+  const SEASON_LIFE = {butterflies: {spring: 1.2, summer: 1, autumn: .35, winter: 0}, moths: {spring: .7, summer: 1, autumn: .6, winter: 0},
+    frogs: {spring: 1, summer: 1, autumn: .7, winter: 0}};
+  const lifeK = k => { const E = host.env; return E?.tinted ? SEASON_LIFE[k]?.[E.season] ?? 1 : 1; };
   function populate() {
     need = false; clearAll();
     biome = host.biome.id; props = host.props;
@@ -1147,7 +1152,8 @@ export async function create(host) {
     if (C.rabbits) { const bs = [...bushes].sort(() => R() - .5); for (let i = 0; i < C.rabbits && i < bs.length; i++) { const b = bs[i]; newHopper('rabbit', b.x + rr(-.8, .8), b.y + rr(.5, 1.2), b); } }
     if (C.hares) for (const [x, y] of [[11.5, 10], [49.5, 13.8], [27.5, 21.5]].slice(0, C.hares)) newHopper('hare', x, y, null);
     if (C.fish) for (let i = 0; i < C.fish; i++) newFish(rr(3, 28));
-    if (C.frogs) for (const y of [16.8, 20.5, 26.2].slice(0, C.frogs)) newFrog(y + rr(-.4, .4), R() < .5 ? -1 : 1);
+    const nFrogs = Math.round((C.frogs || 0) * lifeK('frogs'));
+    if (nFrogs) for (const y of [16.8, 20.5, 26.2].slice(0, nFrogs)) newFrog(y + rr(-.4, .4), R() < .5 ? -1 : 1);
     if (C.salamanders) for (const [x, y] of [[37, 13.5], [42.5, 19], [17, 12.5], [24, 19.5], [37.5, 22]].slice(0, C.salamanders)) newLizard(x, y);
     if (C.vultures) for (let i = 0; i < C.vultures; i++) newVulture(rr(16, 44), rr(11, 20));
     if (C.jellies) for (const [x, y] of [[14, 12], [26, 18.5], [38, 14], [50, 20.5]].slice(0, C.jellies)) newJelly(x, y);
@@ -1162,15 +1168,15 @@ export async function create(host) {
     if (biome === 'ruins' && time !== 'night') {
       const bushes = props.filter(p => p.kind === 'bush' && !p.outside), lg = host.layout.lightGarden;
       const anchors = bushes.map(b => [b.x, b.y]).concat(lg ? [[lg.x, lg.y], [lg.x - 1, lg.y + 1]] : []);
-      const n = time === 'day' ? C.butterflies || 0 : 2;
+      const n = Math.round((time === 'day' ? C.butterflies || 0 : 2) * lifeK('butterflies') * (raining ? 0 : 1));
       for (let i = 0; i < n; i++) { const [x, y] = pick(anchors); newBug('butterfly', 'bfly' + (i % 3), x + rr(-1, 1), y + rr(-.5, .5), rr(.5, 1.3)); }
     }
-    const nm = C.moths ? (time === 'night' ? C.moths : time === 'dusk' ? Math.max(1, C.moths - 1) : biome === 'ember' ? 1 : 0) : 0;
+    const nm = C.moths ? Math.round((time === 'night' ? C.moths : time === 'dusk' ? Math.max(1, C.moths - 1) : biome === 'ember' ? 1 : 0) * lifeK('moths')) : 0;
     if (nm) for (const L of lightSources()) for (let i = 0; i < (L.kind === 'lava' ? Math.max(1, nm - 1) : nm); i++)
       newBug('moth', biome === 'ember' ? 'ashmoth' : 'moth', L.x, L.y, L.h, L);
     vultures.forEach(v => v.off = time === 'night');
     for (const f of flocks) {
-      if (time === 'night' && f.mode === 'feed') {
+      if ((time === 'night' || raining) && f.mode === 'feed') {   // night, or rain: off the ground, under cover
         const c = centroid(f);
         if (near(c.x, c.y)) takeOff(f, false, 'roost'); else if (!placePerched(f)) takeOff(f, false, 'roost');
       } else if (time !== 'night' && wasNight && f.mode === 'perch') f.t = Math.min(f.t, rr(1, 5));
@@ -1328,6 +1334,13 @@ export async function create(host) {
       if (host.biome.id !== biome || host.props !== props) need = true;
       if (need) populate();
       if (host.time !== time) { time = host.time; needTime = true; }
+      // the world clock (sim/env.js): a new season repopulates (frogs sleep through winter), rain starting / stopping
+      // re-applies the time (butterflies hide, flocks take shelter)
+      const E = host.env;
+      if (E) {
+        if (E.ver.season !== seasonVer) { seasonVer = E.ver.season; if (seasonVer > 0 && !need) need = true; }
+        const wet = E.sky.rain > .35 || E.sky.storm > .3; if (wet !== raining) { raining = wet; needTime = true; }
+      }
       if (needTime) applyTime();
       for (const k in CD) if (CD[k] > 0) CD[k] -= dt;
       gatherNoise(evs);

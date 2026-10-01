@@ -52,6 +52,7 @@ const MESH_FS = HEAD + OUTS + `
 in vec3 vN; in vec3 vW; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed;
 uniform sampler2D uRamps; uniform vec3 uLArt; uniform float uObj, uFlash; uniform vec2 uSeed;
 uniform vec4 uRip;        // leaves only: (k x, k z, phase, amount) of a light wave rolling along the wind (0 = still)
+uniform float uLeafK;     // leaves only: how full the crowns are this season (1 = full)
 uniform vec3 uCover;      // x: amount (0 = none), y: up threshold, z: cover family
 uniform vec2 uEmitFam;    // families that glow in this biome (-1 = none)
 uniform vec4 uBurn;       // burning wood (mesh.burn): char, ember glow, time (s), ash; 0 = untouched
@@ -63,6 +64,9 @@ float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
 void main() {
+  // the season thins the crowns (uLeafK: sim/env.js leafK, 1 = full .. ~.07 = bare): leaves go in clumps of a few cm (a 3D
+  // noise in the model's frame, varied per tree by uSeed); the trees' shadow pass drops the same ones (SHADOW_SWAY_FS)
+  if (fFixed < -1.5 && uLeafK < .999 && vn3(vPL * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) > uLeafK * 1.1 - .05) discard;
   vec3 n = normalize(vN);
   float fam = fFam;
   int tone;
@@ -289,11 +293,23 @@ const ONE_OUT = `layout(location = 0) out vec4 o0;\n`;
 const SHADOW_MESH_VS = HEAD + `
 in vec3 position; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
 void main() { gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.); }`;
-// a swaying mesh casts its shadow from the same leaned (whole-pixel) pose the camera sees
+// a swaying mesh casts its shadow from the same leaned (whole-pixel) pose the camera sees, minus the leaves the season
+// took (the same noise as MESH_FS)
+const SHADOW_INST_VS = HEAD + `
+in vec3 position; in mat4 iMat; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
+void main() { gl_Position = projectionMatrix * viewMatrix * modelMatrix * iMat * vec4(position, 1.); }`;
 const SHADOW_SWAY_VS = HEAD + SWAY + `
-in vec3 position; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
-void main() { vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway(); gl_Position = projectionMatrix * viewMatrix * w; }`;
+in vec3 position; in float aFixed; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
+out vec3 vPL; flat out float fFixed;
+void main() { vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway(); vPL = position; fFixed = aFixed; gl_Position = projectionMatrix * viewMatrix * w; }`;
 const SHADOW_FS = HEAD + ONE_OUT + `void main() { o0 = vec4(1.); }`;
+const SHADOW_SWAY_FS = HEAD + ONE_OUT + `
+in vec3 vPL; flat in float fFixed; uniform float uLeafK; uniform vec2 uSeed;
+float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
+void main() { if (fFixed < -1.5 && uLeafK < .999 && vn3(vPL * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) > uLeafK * 1.1 - .05) discard; o0 = vec4(1.); }`;
 const SHADOW_CARD_FS = HEAD + ONE_OUT + `
 in vec2 vUv; in vec2 vC; uniform sampler2D uTex;
 void main() { if (texture(uTex, vUv).a < .5) discard; o0 = vec4(1.); }`;
@@ -316,6 +332,12 @@ uniform vec2 uRes; uniform float uR;
 uniform vec3 uBg, uAmb, uSunDir, uShadowC, uFill, uGrade, uXCol;
 uniform float uShadowA, uShadowOn, uSunK, uBanded, uOutline, uGradeK, uEmin, uShadowTexel;
 uniform float uSoftFam;   // a ramp family drawn without inner seams / occlusion lines (the trees' leaves; -1 = none)
+// the world clock (features/weather.js sets them): the season's colour matrix for green pixels + how much it applies,
+// lying snow 0..1, wet ground 0..1, the lightning flash (rgb light added for an instant)
+uniform mat3 uSeasonM; uniform float uSeasonK, uSnow, uWet; uniform vec3 uFlashC;
+float hC(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnC(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(hC(i), hC(i + vec2(1, 0)), f.x), mix(hC(i + vec2(0, 1)), hC(i + vec2(1, 1)), f.x), f.y); }
 uniform vec4 uFog;
 uniform vec3 uPlayer;   // the player's chest (receives sun shadow as one object: no self-shadow from its own card)
 // shiny armour: toward the viewer (the sprite camera, 20 deg pitch, turned with the yaw), the sun's glint colour / strength
@@ -404,6 +426,21 @@ void main() {
   if (uLay.x > .5 && (type == 1 || type == 5)) { vec4 g = lay(tGround, ip); alb = mix(alb, g.rgb, g.a); }
   if (uLay.y > .5) { vec4 g = lay(tPre, ip); alb = mix(alb, g.rgb, g.a); }
 
+  // ---- the world clock (sim/env.js via features/weather.js): the SEASON turns the green of the ground and of painted
+  // things (bushes, tufts, leaf particles: types 1 and 3) through uSeasonM, by how green the pixel is; SNOW lies on what
+  // faces up (ground, props, crowns), in patches fixed in the world, thickening with uSnow (not on the water); WET ground
+  // and props darken
+  if (uSeasonK > 0. && (type == 1 || type == 3)) { float g = clamp((alb.g - max(alb.r, alb.b)) * 7., 0., 1.) * uSeasonK; if (g > 0.) alb = mix(alb, clamp(uSeasonM * alb, 0., 1.), g); }
+  if (uSnow > 0. && (type == 1 || type == 2) && N.y > .55 && !(alb.b > alb.r + .05 && alb.b >= alb.g)) {
+    // patches at three scales (60 cm / 20 cm / 7 cm), the large one leading so mid cover reads as drifts, not camouflage.
+    // Snow settles in the darker joints first and keeps their darker tone, so the paving still shows through the snow
+    float l = dot(alb, vec3(.3, .55, .15)), n = vnC(P.xz * 1.6) * .64 + vnC(P.xz * 5.2 + 3.) * .24 + vnC(P.xz * 14. + 7.) * .12;
+    float e = 1. - uSnow * 1.25 + (1. - N.y) * .6 - (l < .24 ? .1 : 0.);
+    // (the bright tone keeps a trace of the ground's own light and dark, so deep snow isn't a flat sheet)
+    if (n > e) alb = n > e + .05 && l >= .24 ? vec3(.89, .92, .96) * clamp(.95 + (l - .32) * .35, .9, 1.) : vec3(.76, .81, .88);
+  }
+  if (uWet > 0. && (type == 1 || type == 2 || type == 5)) alb *= 1. - .17 * uWet;
+
   // ---- sun shadow, tinted toward the mood's shadow colour (the arena lays a tinted mask over the ground)
   float sh = 0.;
   // a cliff face turned away from the sun (plateau, ravine wall) is in SHADE, not in a cast shadow: the arena multiplies
@@ -450,6 +487,7 @@ void main() {
   if (faceAway) L *= uShadowA > 0. ? .62 : .8;
   if (type == 4) { alb = mix(alb, clamp(alb * uGrade, 0., 1.), uGradeK); L += min(uFill, L * .25); }
   vec3 col = alb * L;
+  col += alb * uFlashC;   // lightning: the whole scene lit for an instant (features/weather.js)
   vec3 emit = E0.rgb;
   if (uLayE > .5) { vec4 el = lay(tEmitL, ip); emit += el.rgb * el.a; }
   col += emit * max(vec3(1.) - L, vec3(uEmin)) * 1.15;                   // emitters add back what the light took away
@@ -540,6 +578,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     smooth: {value: 0},
     leanX: {value: new THREE.Vector3(1 / PPM, 0, 0)}, leanY: {value: new THREE.Vector3(0, 0, 1 / PPMY)},   // sway: m per art px (setView)
     time: {value: 0},   // s, for the leaves' flutter (render())
+    leafK: {value: 1},  // how full the crowns are this season (features/weather.js from sim/env.js leafK)
   };
   const raw = (vs, fs, uniforms, extra = {}) => new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
 
@@ -561,7 +600,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // ---- materials
   const MESH_VS = meshVS(false), MESH_SWAY_VS = meshVS(true);
   const meshMat = (obj, seed, sw = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
-    uRip: {value: new THREE.Vector4()}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})});
+    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})});
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
   const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0}) => raw(SURF_VS, SURF_FS, {
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
@@ -610,7 +649,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   function mesh(geom, obj, matrix, o = {}) {
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
     const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gScene.add(gm);
-    const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time}) : shadowMeshMat);
+    const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
+      uLeafK: U.leafK, uSeed: gm.material.uniforms.uSeed}) : shadowMeshMat);
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.layers.enable(1); sScene.add(sm);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
@@ -733,6 +773,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     uShadowC: {value: new THREE.Vector3()}, uFill: {value: new THREE.Vector3()}, uGrade: {value: new THREE.Vector3(1, 1, 1)}, uXCol: {value: new THREE.Vector3(.17, .14, .21)},
     uShadowA: {value: 0}, uShadowOn: {value: 1}, uSunK: {value: .34}, uBanded: {value: 1}, uOutline: {value: 1}, uGradeK: {value: 0}, uEmin: {value: .1}, uShadowTexel: {value: 1 / SM},
     uSoftFam: {value: -1},
+    uSeasonM: {value: new THREE.Matrix3()}, uSeasonK: {value: 0}, uSnow: {value: 0}, uWet: {value: 0}, uFlashC: {value: new THREE.Vector3()},   // features/weather.js
     uFog: {value: new THREE.Vector4()}, uPlayer: {value: new THREE.Vector3()},
     uView: {value: new THREE.Vector3(0, .342, .94)}, uSunC: {value: new THREE.Vector3(1, 1, 1)}, uSunStr: {value: 0},
     uNL: {value: 0}, uLP: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uLC: {value: Array.from({length: NL}, () => new THREE.Vector4())},

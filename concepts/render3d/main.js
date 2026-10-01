@@ -41,12 +41,13 @@ import {ClothRig, depthOf, CLOTH_PARAMS} from '../sprites/cloth.js';
 import {createArmor} from '../sprites/arena/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
 import {createPlayer, atlasOf, BUSY} from '../sprites/player.js';
 import {createGame} from './game/game.js';
+import {createEnv, SEASONS, WEATHER} from './sim/env.js';   // the world clock: time of day, seasons, weather
 
 const $ = s => document.querySelector(s);
 const Q = new URLSearchParams(location.search);
 const VW = 480, VH = 270;
 const t00 = performance.now();
-const FEATURES = ['wind', 'windlines', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)
+const FEATURES = ['wind', 'windlines', 'weather', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)
 
 // ---------------------------------------------------------------- the Ranger: loadouts (packed atlases)
 const LOADOUTS = [['ranger basic', '../sprites/out/outfits/ranger_basic/'], ['ranger + cloth sim', '../sprites/out/outfits/ranger_sim/'], ['bare body', '../sprites/out/skel/']];
@@ -85,7 +86,10 @@ const BG = {ruins: [.10, .13, .11], ember: [.11, .06, .05], frost: [.10, .12, .1
 const lum = c => c[0] * .3 + c[1] * .55 + c[2] * .15;
 const rgbOf = c => { if (Array.isArray(c)) return c; let s = String(c || '#fff').replace('#', ''); if (s.length === 3) s = s.replace(/./g, m => m + m); const n = parseInt(s, 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 
-let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome'))), timeI = Math.max(0, TIMES.indexOf(Q.get('time')));
+let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome')));
+// THE WORLD CLOCK (sim/env.js): time of day, seasons, weather, running in the background. It owns "what time is it":
+// host.time is its day / dusk / night bucket (dawn counts as dusk), host.mood its blended mood, host.setTime jumps it
+const env = createEnv({moods: MOODS, biome: () => BIOMES[biomeI].id, Q});
 let world = null, propMode = Q.get('props') === 'yaw' ? 'yaw' : 'live';
 let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+R rebuilds)
 const features = [];
@@ -343,7 +347,7 @@ const DUST = ['#b8a888', '#8a7a60', '#5e5444'].map(rgbOf), POP = rgbOf('#f2d27a'
 // ---------------------------------------------------------------- the host features see
 const host = {
   THREE, G, PPM, PPMY, PPMH, VW, VH, ctxO,
-  get world() { return world; }, get biome() { return BIOMES[biomeI]; }, get time() { return TIMES[timeI]; }, get mood() { return MOODS[BIOMES[biomeI].id][TIMES[timeI]]; },
+  get world() { return world; }, get biome() { return BIOMES[biomeI]; }, get time() { return env.bucket; }, get mood() { return env.mood(BIOMES[biomeI].id); }, env,
   get yaw() { return yaw; }, get zoom() { return zoom; }, get props() { return world.props; }, get layout() { return world.layout; },
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY,
   itemOf: p => world.itemOf(p), elev, inStream, blocked: (x, y, z = P.z, air = false) => blockedW(x, y, z, air),
@@ -358,8 +362,8 @@ const host = {
   get hits() { return hits; },
   // game controls (game/game.js): dev keys + debug HUD on/off, player input locked, the simulation's speed, the world
   dev: true, lock: false, timeScale: 1, hudOff: false, BIOMES, TIMES,
-  get biomeI() { return biomeI; }, get timeI() { return timeI; },
-  setBiome: i => setBiome(i), setTime: i => { timeI = i; }, setYaw: a => setYaw(a),
+  get biomeI() { return biomeI; }, get timeI() { return TIMES.indexOf(env.bucket); },
+  setBiome: i => setBiome(i), setTime: i => env.setPart(TIMES[i]), setYaw: a => setYaw(a),
   teleport(x, y) {   // put the player at world (x, y), standing, and snap the camera there
     const [vx, vy] = toView(x, y);
     Object.assign(P, {x: vx, y: vy, z: elev(x, y), vx: 0, vy: 0, state: 'idle', t: 0, sink: 0, leap: null, hold: null});
@@ -419,7 +423,7 @@ const sunDir = new THREE.Vector3(), shadowDir = new THREE.Vector3();
 // stretched trees and towers 4-6x their height across the map
 const SUN_LEN_MAX = 1.7, SHADOW_EL_MIN = Math.atan(1 / SUN_LEN_MAX);
 function applyMood(PX, PY, t) {
-  const biome = BIOMES[biomeI].id, time = TIMES[timeI], m = MOODS[biome][time], U = G.compU;
+  const biome = BIOMES[biomeI].id, time = env.bucket, m = env.mood(biome), U = G.compU;   // the clock's blended mood
   U.uAmb.value.set(...m.amb);
   const az = m.sun.az * DEG, el = m.sun.el * DEG;
   sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el));
@@ -509,7 +513,7 @@ addEventListener('keydown', e => {
   if (k === ' ') PL.onSpace();
   if (k === 'e') { if (!nearProp() && climbSpotW() && Math.abs(yaw) > 1e-6 && !BUSY.has(P.state)) assist = {back: yaw, phase: 'in'}; else PL.onInteractKey(); }
   if (k >= '1' && k <= '4' && !BUSY.has(P.state)) features.some(f => f.ability?.(+k));
-  if (k === 't') timeI = (timeI + 1) % TIMES.length;
+  if (k === 't') env.nextPart();   // jump to dawn / day / dusk / night; the clock runs on from there
   if (k === 'n') setBiome(biomeI + (e.shiftKey ? -1 : 1));
   if (k === 'l') opt.lantern = !opt.lantern;
   if (k === 'o') switchLoadout(loadI + 1);
@@ -554,7 +558,9 @@ function renderMenu() {
   rows.push(`<h3>Renderer</h3>`, btn('Rotation', SNAP_NAME[snapMode], 'snap'), btn('Ground texture', opt.sampling, 'sampling'), btn('Prop outlines', opt.outline ? 'on' : 'off', 'outline'),
     btn('Props', propMode === 'live' ? 'live 3D' : '16-angle sprites', 'props'), btn('Trees', trees3d ? '3D (grown)' : 'painted cards', 'trees'), btn('Banded light', opt.banded ? 'on' : 'off', 'banded'), btn('Shadows (sun + lights)', opt.shadows ? 'on' : 'off', 'shadows'),
     btn('Debug view', DEBUG[opt.debug], 'debug'));
-  if (host.dev) rows.push(`<h3>World</h3>`, btn('Biome', BIOMES[biomeI].name, 'biome'), btn('Time', TIMES[timeI], 'time'), btn('Lantern', opt.lantern ? 'on' : 'off', 'lantern'), btn('Loadout', LOADOUTS[loadI][0], 'loadout'),
+  if (host.dev) rows.push(`<h3>World</h3>`, btn('Biome', BIOMES[biomeI].name, 'biome'), btn('Time', `${env.clock()} ${env.part}`, 'time'),
+    btn('Season', env.seasonLock || `auto (${env.season})`, 'season'), btn('Weather', env.weatherLock || `auto (${env.weather})`, 'weather'),
+    btn('Day length', env.frozen ? 'stopped' : `${env.TUNE.dayMinutes} min`, 'daylen'), btn('Lantern', opt.lantern ? 'on' : 'off', 'lantern'), btn('Loadout', LOADOUTS[loadI][0], 'loadout'),
     btn('Bow', opt.hdBow ? 'HD overlay' : 'pixel art', 'hdbow'), btn('Shiny armour', armor.on ? 'on' : 'off', 'armour'));
   const fs = features.filter(f => f.toggle || f.settings);
   if (fs.length) {
@@ -580,7 +586,11 @@ $('#pause').addEventListener('click', e => {
   if (a === 'shadows') opt.shadows = !opt.shadows;
   if (a === 'debug') opt.debug = (opt.debug + 1) % DEBUG.length;
   if (a === 'biome') setBiome(biomeI + 1);
-  if (a === 'time') timeI = (timeI + 1) % TIMES.length;
+  if (a === 'time') env.nextPart();
+  const cyc = (o, cur, set) => set(o[(o.indexOf(cur) + 1) % o.length]);
+  if (a === 'season') cyc(['auto', ...SEASONS], env.seasonLock || 'auto', env.setSeason);
+  if (a === 'weather') cyc(['auto', ...Object.keys(WEATHER).filter(w => !WEATHER[w].precip || env.TUNE.precip)], env.weatherLock || 'auto', env.setWeather);
+  if (a === 'daylen') cyc([20, 5, 60, 0], env.frozen ? 0 : env.TUNE.dayMinutes, env.setDayMinutes);
   if (a === 'lantern') opt.lantern = !opt.lantern;
   if (a === 'hdbow') opt.hdBow = !opt.hdBow;
   if (a === 'armour') toggleArmour();
@@ -596,7 +606,7 @@ $('#pause').addEventListener('input', e => {
 
 // ---------------------------------------------------------------- frame
 const ROT_SPEED = 110 * DEG;
-let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60;
+let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null;
 function step(dt) {
   // camera rotation: keys / middle-drag, then (in a step mode) ease onto the nearest step once you let go.
   // A climb started at an angle eases the camera to north first, climbs, then returns.
@@ -608,6 +618,7 @@ function step(dt) {
   stepSampling(dt, yaw !== y0);
   if (paused) return;
   dt *= host.timeScale; if (dt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
+  env.step(dt);   // the world clock first: everything after reads this step's time / weather
   if (freeze > 0) { freeze -= dt; for (const f of features) if (f.always) f.update?.(dt, []); return; }
   const n0 = events.length, px0 = P.x, py0 = P.y;
   PL.step(dt);
@@ -684,6 +695,8 @@ function draw(t) {
   const hov = P.state === 'draw' ? hoverTarget()?.target : null;
   for (const it of world.items) it.hover = it.p === hov ? .16 + .08 * Math.sin(performance.now() / 110) : 0;
   world.update(yaw);
+  // the season's leaves (env.leafRamp: changes a few times per season; a rebuilt world starts from the biome's own ramp)
+  const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || world !== leafWorld)) { world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = world; }
   drawArrows();
   for (const q of dust) { const kk = q.t / q.life; host.point(q.x, q.y, q.h, DUST[kk < .4 ? 0 : kk < .75 ? 1 : 2]); }
   for (const p of pops) { const h = p.z + 1.7 + p.t * .5; for (const [dx, dh] of [[0, 0], [-1, 0], [1, 0], [0, 1], [0, -1]]) { const [vx, vy] = toWorld(dx / PPM, 0); host.point(p.x + vx, p.y + vy, h + dh / PPMH, POP, {emit: true}); } }
@@ -754,7 +767,7 @@ function hud() {
   const b = BIOMES[biomeI], deg = ((yaw / DEG) % 360 + 360) % 360, s = G.stats;
   const fh = features.map(f => f.hud?.()).filter(Boolean).join(' · ');
   $('#hud').innerHTML = [
-    `<div class="row"><b>Proving Grounds 3D</b> · ${b.name} · ${TIMES[timeI]}${opt.lantern ? ' · lantern' : ''} · ${LOADOUTS[loadI][0]}</div>`,
+    `<div class="row"><b>Proving Grounds 3D</b> · ${b.name} · ${env.label()}${opt.lantern ? ' · lantern' : ''} · ${LOADOUTS[loadI][0]}</div>`,
     fh ? `<div class="row">${fh}</div>` : '',
     `<div class="row">camera <b>${deg.toFixed(1)}°</b> (${SNAP_NAME[snapMode]}) · zoom ${zoom}x${opt.debug ? ` · view <b>${DEBUG[opt.debug]}</b>` : ''}</div>`,
     `<div class="row dim">features: ${features.map(f => `${f.name}${f.on === false ? ' (off)' : ''}`).join(', ') || 'none yet'}</div>`,
@@ -766,7 +779,7 @@ console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} 
 
 // debug handle for scripted tests (drive frames while the pane is hidden: rAF pauses there)
 window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout, TIMING,
-  get world() { return world; }, get yaw() { return yaw; }, set zoom(v) { zoom = v; }, set time(i) { timeI = i; }, set snap(i) { snapMode = i; },
+  get world() { return world; }, get yaw() { return yaw; }, set zoom(v) { zoom = v; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { snapMode = i; },
   set props(m) { propMode = m; world.setMode(m); }, get rig() { return rig; },
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { lastDt = dt; step(dt); draw(performance.now() / 1000); } },
   applyOpts, hud};

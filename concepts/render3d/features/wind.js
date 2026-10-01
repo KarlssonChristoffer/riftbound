@@ -180,13 +180,16 @@ export async function create(host) {
   // normalised: 1 = a full gust of a plain breeze), W.rustle {e, pan} (what the leaves around the player sound like)
   W.mode = MODES.includes(Q.get('windlevel')) ? Q.get('windlevel') : 'auto'; W.level = LEVELS[W.mode] ?? 1; W.strength = 0; W.rustle = {e: 0, pan: 0};
   let LV = W.level, spell = W.mode === 'auto' ? 'breeze' : W.mode, spellT = 20, wph = 0, wphQ = 0, wtick = -1;
+  // 'auto' follows the world clock's weather (host.env.windLevel: calm in fog, brisk on a windy day, a gale in a storm;
+  // sim/env.js owns it); without an env, its own spells as before
   function stepStrength(dt) {
-    if (W.mode === 'auto' && (spellT -= dt) <= 0) {
+    const env = host.env;
+    if (W.mode === 'auto' && !env && (spellT -= dt) <= 0) {
       let r = Math.random() * STRENGTH.auto.reduce((s, [, w]) => s + w, 0);
       for (const [k, w] of STRENGTH.auto) if ((r -= w) <= 0) { spell = k; break; }
       spellT = STRENGTH.dwell[0] + Math.random() * (STRENGTH.dwell[1] - STRENGTH.dwell[0]);
     }
-    const tg = LEVELS[W.mode === 'auto' ? spell : W.mode] ?? 1;
+    const tg = W.mode === 'auto' ? (env ? env.windLevel : LEVELS[spell]) : LEVELS[W.mode] ?? 1;
     LV += (tg - LV) * Math.min(1, dt / STRENGTH.ease); W.level = LV;
   }
   function setMode(m) { W.mode = m; if (m === 'auto') { spell = 'brisk'; spellT = STRENGTH.dwell[0]; } }
@@ -957,7 +960,7 @@ export async function create(host) {
         f = cr.r * .85 * Math.sqrt(Math.max(0, 1 - (o / cr.r) ** 2));
       }
       const base = {x: cx + RX * o + FX * f, y: cy + RY * o + FY * f + (R() - .5) * .1, h, t: 0, ph: R() * TAU, rest: 0};
-      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: S.pals[R() * S.pals.length | 0], vx: (R() - .5) * 1.4 + ax * .6, vy: (R() - .5) * .5, vh: why === 'arrow' ? .6 + R() * .8 : R() * .3, life: 9, g: 1.4, big: why === 'wind' && R() < .4});
+      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: leafPal(S), vx: (R() - .5) * 1.4 + ax * .6, vy: (R() - .5) * .5, vh: why === 'arrow' ? .6 + R() * .8 : R() * .3, life: 9, g: 1.4, big: why === 'wind' && R() < .4});
       else if (S.kind === 'snow') spawnPart({...base, kind: 'snow', pal: S.pal, vx: (R() - .5) * 1.6 + ax * .8, vy: (R() - .5) * .6, vh: .4 + R() * 1.1, life: .5 + R() * .45, g: 6});
       else if (S.kind === 'spark') {
         if (R() < .6) spawnPart({...base, kind: 'spark', pal: S.pal, emit: true, vx: (R() - .5) * .9 + ax * .5, vy: (R() - .5) * .3, vh: .5 + R() * .9, life: .6 + R() * .7, g: -.35});
@@ -969,6 +972,12 @@ export async function create(host) {
     if (biome === 'frost' && (p.kind === 'tree' || p.kind === 'bush') && R() < .75) shed(p, p.kind === 'tree' ? 3 + (R() * 3 | 0) : 1 + (R() * 2 | 0), 'gust');
     else if (biome === 'ruins' && p.kind === 'tree' && (p.variant | 0) !== 2 && R() < .5) shed(p, 1, 'gust');
   }
+  // ---- the season's leaves (host.env, sim/env.js): autumn sheds rust and gold, and many; winter has few left; spring /
+  // summer the odd green one. Indices into SHED.ruins.pals [green, green, yellow-green, rust-gold]
+  const SEASON_LEAF = {spring: [0, 1, 2], summer: [0, 1, 1, 2], autumn: [2, 3, 3, 3], winter: [3]};
+  const SEASON_SHED = {spring: .7, summer: .6, autumn: 2.2, winter: .25};
+  function leafPal(S) { const e = host.env, ix = e?.seasonal ? SEASON_LEAF[e.season] : null; return S.pals[ix ? ix[R() * ix.length | 0] : R() * S.pals.length | 0]; }
+  const leafRate = S => S.kind === 'leaf' && host.env?.seasonal ? SEASON_SHED[host.env.season] ?? 1 : 1;
   // ---- the feel of a strong wind: leaves torn off the crowns in gusts, leaves (snow, ash) blowing through the view from
   // upwind, and what the foliage around the player sounds like: W.rustle = {e: the agitation of the leafy crowns / bushes
   // near him (1 = one tree beside him in a full breeze gust), pan: where they are on screen, -1..1}
@@ -980,14 +989,14 @@ export async function create(host) {
       if (p.kind === 'tuft') continue;
       const F = flexOf(p); if (!F) continue;
       const leafy = !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins'), a = field(p.x, p.y);
-      if (leafy && S && lv > 0 && (S.kind === 'leaf' || S.kind === 'snow') && vis(p.x, p.y) && R() < dt * lv * a.g * STRENGTH.shed * (p.kind === 'tree' ? 1 : .3)) shed(p, 1, 'wind');
+      if (leafy && S && lv > 0 && (S.kind === 'leaf' || S.kind === 'snow') && vis(p.x, p.y) && R() < dt * lv * a.g * STRENGTH.shed * leafRate(S) * (p.kind === 'tree' ? 1 : .3)) shed(p, 1, 'wind');
       const d = Math.hypot(p.x - PL.x, p.y - PL.y); if (d > 16) continue;
       const st = fst.get(p), w = (p.kind === 'tree' ? (leafy ? 1 : .3) : .35) * (1 - d / 16) ** 2;
       const sp = Math.hypot(a.x, a.y) / vref(), ag = w * sp * sp * (.7 + .3 * Math.min(1, st ? Math.hypot(st.vx, st.vy) / 25 : 0));   // ~ wind speed^2: the gusts do the talking
       e += ag; ep += ag * clamp(((p.x - PL.x) * RX + (p.y - PL.y) * RY) / 7, -1, 1);
     }
     W.rustle.e = e; W.rustle.pan = e > 1e-4 ? ep / e : 0;
-    const air = S && biome !== 'rift' ? Math.max(0, LV - 1.1) * STRENGTH.airborne : 0;
+    const air = S && biome !== 'rift' ? Math.max(0, LV - 1.1) * STRENGTH.airborne * leafRate(S) : 0;
     if (air > 0) {
       const [cx, cy] = viewCentre(); airAcc += dt * air * (.25 + 1.6 * field(cx, cy).g);   // flurries ride the gust fronts
       while (airAcc >= 1) { airAcc -= 1; airborne(S); }
@@ -998,7 +1007,7 @@ export async function create(host) {
     const vx = VB.cx - wvx / n * ex - wvy / n * s, vy = VB.cy - wvy / n * ex + wvx / n * s;   // view frame
     const x = vx * RX + vy * FX, y = vx * RY + vy * FY, a = field(x, y), h = host.elev(x, y) + .3 + R() * 3.2;
     const base = {x, y, h, t: 0, ph: R() * TAU, rest: 0};
-    if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: S.pals[R() * S.pals.length | 0], vx: a.x, vy: a.y * .6, vh: (R() - .5) * .6, life: 12, g: 1.4, big: R() < .5});
+    if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: leafPal(S), vx: a.x, vy: a.y * .6, vh: (R() - .5) * .6, life: 12, g: 1.4, big: R() < .5});
     else if (S.kind === 'snow') spawnPart({...base, kind: 'snow', pal: S.pal, vx: a.x, vy: a.y * .6, vh: -.1 - R() * .3, life: 2.5 + R() * 1.5, g: .4});
     else if (S.kind === 'spark') spawnPart({...base, kind: 'ash', pal: S.ash, vx: a.x, vy: a.y * .6, vh: -.05 - R() * .2, life: 2.5 + R() * 1.5, g: .25});
   }
@@ -1129,7 +1138,7 @@ export async function create(host) {
     // the strength: B cycles the modes (dev key), the pause menu lists them
     onKey(k, e) { if (k !== 'b' || e?.shiftKey) return false; setMode(MODES[(MODES.indexOf(W.mode) + 1) % MODES.length]); return true; },   // (Shift+B: windlines.js)
     settings: () => [{label: 'Wind strength', options: MODES, get: () => W.mode, set: setMode}],
-    hud: () => W.on ? `wind ${W.mode}${W.mode === 'auto' ? ' (' + spell + ')' : ''} x${LV.toFixed(2)} · at you ${W.strength.toFixed(2)} · rustle ${W.rustle.e.toFixed(2)}` : '',
+    hud: () => W.on ? `wind ${W.mode}${W.mode === 'auto' ? ' (' + (host.env ? host.env.weather : spell) + ')' : ''} x${LV.toFixed(2)} · at you ${W.strength.toFixed(2)} · rustle ${W.rustle.e.toFixed(2)}` : '',
     biomeChanged() { setBiome(host.biome.id); },   // (main.js re-installs the card hook on the rebuilt world)
     update(dt, evs) {
       const t0 = performance.now();

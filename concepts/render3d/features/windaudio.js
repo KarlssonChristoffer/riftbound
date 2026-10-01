@@ -24,12 +24,12 @@ export const TUNE = {
 };
 
 // a seamless loop: n samples, the tail cross-faded into the head
-function loopBuf(ac, sec, fill) {
+export function loopBuf(ac, sec, fill) {   // (also used by rainaudio.js)
   const n = Math.round(sec * ac.sampleRate), X = Math.round(.08 * ac.sampleRate), raw = fill(n + X), b = ac.createBuffer(1, n, ac.sampleRate), o = b.getChannelData(0);
   for (let i = 0; i < n; i++) o[i] = i < X ? raw[i] * (i / X) + raw[n + i] * (1 - i / X) : raw[i];
   return b;
 }
-function pink(n) {   // Paul Kellet's filter, normalised to RMS .3
+export function pink(n) {   // Paul Kellet's filter, normalised to RMS .3
   const o = new Float32Array(n); let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, s = 0;
   for (let i = 0; i < n; i++) {
     const w = R() * 2 - 1;
@@ -47,7 +47,7 @@ function rough(sr) {
     return o;
   };
 }
-function burst(ac) {   // 16 ms of noise for the ticks (each tick filters and envelopes it)
+export function burst(ac) {   // 16 ms of noise for the ticks (each tick filters and envelopes it)
   const n = Math.round(.016 * ac.sampleRate), b = ac.createBuffer(1, n, ac.sampleRate), o = b.getChannelData(0);
   for (let i = 0; i < n; i++) o[i] = (R() * 2 - 1) * .5;
   return b;

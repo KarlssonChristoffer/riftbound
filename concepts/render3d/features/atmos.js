@@ -254,6 +254,19 @@ export async function create(host) {
     } else if (K.mode === 'float') { p.life = rr(K.life); p.h = rr([K.lo, K.hi]) + elevAt(p.x, p.y); p.vx = p.vy = p.vh = 0; if (init) p.t = R() * p.life; }
     else if (K.mode === 'firefly') { p.h = rr([K.lo, K.hi]) + elevAt(p.x, p.y); p.a = R() * TAU; p.f = .6 + R() * .7; }
   }
+  // THE WORLD CLOCK (sim/env.js host.env; render3d): how many of a kind's particles are out. The frost lands' snow follows
+  // the weather (a few flakes always), the ruins' leaves the season, pollen spring / summer and not in rain, fireflies
+  // summer nights (fewer in rain). Without a clock: all of them, as in the arena
+  const SEASON_KIND = {leaf: {spring: .35, summer: .45, autumn: 1, winter: .1}, pollen: {spring: 1, summer: .8, autumn: .25, winter: 0},
+    fly: {spring: .45, summer: 1, autumn: .3, winter: 0}};
+  function actOf(K) {
+    const E = host.env, n = K.ps.length; if (!E) return n;
+    let k = 1;
+    if (biome === 'frost' && K.id.startsWith('snow')) k = .12 + .88 * Math.min(1, E.sky.snow + E.sky.storm * .3);
+    else if (E.tinted && SEASON_KIND[K.id]) k = SEASON_KIND[K.id][E.season] ?? 1;
+    if (K.id === 'pollen' || K.id === 'fly') k *= 1 - .8 * E.sky.rain;
+    return Math.round(n * k);
+  }
   function populate() {
     need = false;
     s = {ruins: 11, ember: 23, frost: 37, rift: 51}[biome] || 1;
@@ -339,10 +352,11 @@ export async function create(host) {
   }
   function drawKinds(pass) {   // pass: 'ground' (layer) | 'front' (lit points) | 'emit' (glow layer)
     for (const K of kinds) {
-      const kp = K.emit ? 'emit' : K.pass || 'front';
+      const kp = K.emit ? 'emit' : K.pass || 'front', act = K.act ?? K.ps.length;
       if (kp !== pass && !(pass === 'ground' && K.rest)) continue;
       const bk = pass === 'emit' ? BE : BG;
-      for (const p of K.ps) {
+      for (let pi = 0; pi < act; pi++) {
+        const p = K.ps[pi];
         if (K.rest && (pass === 'ground') !== (p.rest > 0)) continue;   // resting leaves lie on the ground (behind sprites)
         const sw = K.sway && !(p.rest > 0) ? Math.round(Math.sin(T * K.sway[1] + p.ph * TAU) * K.sway[0]) : 0;
         const X0 = SX(p.x, p.y, p.h), Y0 = SY(p.x, p.y, p.h), X = Math.floor(X0) + sw * V.z, Y = Math.floor(Y0);
@@ -684,7 +698,7 @@ export async function create(host) {
       gust = ext ?? Math.max(0, (sn - .7) / 1.3); wind = W[0] + gust * W[1];
       fogX += wind * (FOG[biome]?.drift || 0) * dt + (biome === 'rift' ? .04 * dt : 0);
       let n = fx.length;
-      if (F.weather) { parallax(); for (const K of kinds) { for (const p of K.ps) stepP(K, p, dt); n += K.ps.length; } } else camW = null;
+      if (F.weather) { parallax(); for (const K of kinds) { K.act = actOf(K); for (let i = 0; i < K.act; i++) stepP(K, K.ps[i], dt); n += K.act; } } else camW = null;
       if (F.weather && biome === 'frost' && gust > .25 && R() < gust * 7 * dt) {   // spindrift: a gust lifts a little snow off the ground
         const [x, y] = fromVF(V.camx + R() * VW, V.camy + R() * VH);
         fx.push({x, y, h: elevAt(x, y) + .02, vx: wind * 1.3, vy: (R() - .5) * .3, vh: .5 + R() * .5, t: 0, life: .5 + R() * .5, gr: 1.6, drag: .3, pal: SNOW, px: 1, py: 1, hold: .4});

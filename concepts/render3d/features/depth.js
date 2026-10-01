@@ -269,7 +269,7 @@ export async function create(host) {
   }
 
   // ================================================================ CLOUD SHADOWS
-  const CL = {R: 0, lv: null, TW: 0, TH: 0, key: '', cv: null, pat: null, x: 0, y: 0};
+  const CL = {R: 0, val: null, H: null, lv: null, TW: 0, TH: 0, key: '', cover: -1, cv: null, pat: null, x: 0, y: 0};
   function buildCloudLevels() {   // the arena's level map, in world metres (tile 40 x 30 m, 1 texel = 1 / PPM m)
     const R = PPM, [TWm, THm] = TUNE.clouds.tileM, TW = Math.round(TWm * R), TH = Math.round(THm * R);
     const oct = [[3, 2, .56], [7, 5, .29], [15, 11, .15]].map(([nx, ny, w], k) => ({nx, ny, w, v: Float32Array.from({length: nx * ny}, (_, i) => hsh(i, k, 404))}));
@@ -284,17 +284,28 @@ export async function create(host) {
       }
       val[y * TW + x] = v; H[Math.min(1023, v * 1024 | 0)]++;
     }
-    const qf = f => { let n = 0; const want = val.length * (1 - f); for (let i = 0; i < 1024; i++) { n += H[i]; if (n >= want) return (i + 1) / 1024; } return 1; };
-    const tE = qf(TUNE.clouds.cover), tC = qf(TUNE.clouds.core), lv = new Uint8Array(TW * TH);
-    for (let i = 0; i < lv.length; i++) lv[i] = val[i] >= tC ? 2 : val[i] >= tE ? 1 : 0;
-    Object.assign(CL, {R, lv, TW, TH, key: ''});
+    Object.assign(CL, {R, val, H, lv: new Uint8Array(TW * TH), TW, TH, key: '', cover: -1});
   }
+  // the level map for a cover fraction (the noise field above is built once; this re-thresholds it, ~ms, on a change only)
+  function cloudLevels(cover) {
+    if (CL.cover === cover) return;
+    const {val, H, lv} = CL, core = cover * TUNE.clouds.core / TUNE.clouds.cover;
+    const qf = f => { let n = 0; const want = val.length * (1 - f); for (let i = 0; i < 1024; i++) { n += H[i]; if (n >= want) return (i + 1) / 1024; } return 1; };
+    const tE = qf(cover), tC = qf(core);
+    for (let i = 0; i < lv.length; i++) lv[i] = val[i] >= tC ? 2 : val[i] >= tE ? 1 : 0;
+    CL.cover = cover; CL.key = '';
+  }
+  // the sky's cover from the world clock (sim/env.js sky.cloud: clear = no cloud shadows, more as it clouds over; the
+  // shadows themselves soften as the sun does under an overcast sky), quantised to 1/16; the old fixed cover without a clock
+  const coverNow = () => { const E = host.env; if (!E) return TUNE.clouds.cover; const c = E.sky.cloud; return c < .08 ? 0 : Math.round(Math.min(.78, .08 + .62 * c) * 16) / 16; };
   function cloudTile() {
-    const tn = timeName(), k = (TUNE.clouds.time[tn] ?? 0) * (TUNE.clouds.none.includes(biome) ? 0 : 1), M = host.mood;
+    const tn = timeName(), k = (TUNE.clouds.time[tn] ?? 0) * (TUNE.clouds.none.includes(biome) ? 0 : 1), M = host.mood, cover = coverNow();
     const a = M ? M.shadow.a : 0, s = Math.min(1.2, a / .46) * k;
-    if (s <= .01) return null;
-    if (!CL.lv) buildCloudLevels();
-    const c = M.shadow.c, key = biome + tn + s.toFixed(3) + c.join() + TUNE.clouds.s.join() + TUNE.clouds.mixC;
+    if (s <= .01 || cover <= 0) return null;
+    if (!CL.val) buildCloudLevels();
+    cloudLevels(cover);
+    // (quantised: the clock blends the mood every frame; an exact key re-rendered the tile every frame)
+    const c = M.shadow.c, key = biome + tn + cover + (Math.round(s * 50) / 50) + c.map(v => Math.round(v * 64)).join() + TUNE.clouds.s.join() + TUNE.clouds.mixC;
     if (CL.key === key && CL.cv) return CL.cv;
     CL.key = key;
     const [cv, q] = CL.cv ? [CL.cv, CL.cv.getContext('2d')] : mk(CL.TW, CL.TH);
@@ -377,9 +388,12 @@ export async function create(host) {
     f.cq.putImageData(im, 0, 0);
     return {cv: f.cv, fx: Math.round(fx), fy: Math.round(fy), L, w, ux, uy, x0, y0, hw, ew};
   }
+  const sunAzQ = M => Math.round(M.sun.az / 2) * 2, sunElQ = M => Math.round(M.sun.el);
   function ensureShafts() {
     if (!SH.feet) SH.feet = shaftFeet();
-    const M = host.mood, tn = timeName(), key = biome + tn + (M ? M.sun.az + ',' + M.sun.el : '');
+    // (the sun in whole steps: the world clock moves it a little every frame, and an exact key re-rasterised every shaft
+    // every frame; in 2 deg / 1 deg steps they're redrawn every few seconds of game time)
+    const M = host.mood, tn = timeName(), key = biome + tn + (M ? sunAzQ(M) + ',' + sunElQ(M) : '');
     if (key === SH.key) return;
     SH.key = key; SH.col = null;
     for (const f of SH.feet) { f.tpl = null; f.tk = ''; }
@@ -392,7 +406,7 @@ export async function create(host) {
   function shaftOf(f) {
     const st = TUNE.shafts.yawStep * DEG, yk = Math.round(V.yaw / st), key = SH.key + '|' + yk;
     if (f.tk === key) return f.tpl;
-    const M = host.mood, az = M.sun.az * DEG, el = clamp(M.sun.el, TUNE.shafts.el[0], TUNE.shafts.el[1]) * DEG, cot = Math.cos(el) / Math.sin(el);
+    const M = host.mood, az = sunAzQ(M) * DEG, el = clamp(sunElQ(M), TUNE.shafts.el[0], TUNE.shafts.el[1]) * DEG, cot = Math.cos(el) / Math.sin(el);
     const a = yk * st, c = Math.cos(a), s = Math.sin(a);   // the bucket's yaw (not the exact one: no re-raster per frame)
     const hx = Math.sin(az) * cot * f.H, hy = -Math.cos(az) * cot * f.H;
     const dx = (hx * c - hy * s) * PPM, dy = (hx * s + hy * c) * PPMY - f.H * PPMH;   // right = (cos, -sin), toward = (sin, cos)
@@ -710,7 +724,7 @@ export async function create(host) {
     update(dt) {
       const t0 = performance.now();
       T += dt;
-      const dir = windDir(), v = TUNE.clouds.speed * (1 + .5 * gustNow()), [TWm, THm] = TUNE.clouds.tileM;
+      const dir = windDir(), v = TUNE.clouds.speed * (1 + .5 * gustNow()) * (host.env ? .6 + .4 * host.env.windLevel : 1), [TWm, THm] = TUNE.clouds.tileM;   // (a windy sky races)
       CL.x = mod(CL.x + dir[0] * v * dt, TWm); CL.y = mod(CL.y + dir[1] * v * dt, THm);   // metres (the arena: px)
       stepFG(dt); stepMotes(dt);
       acc += performance.now() - t0;

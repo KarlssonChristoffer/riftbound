@@ -393,6 +393,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length;
   return {layout, props, lights, items, setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc, trees3d,
     itemOf: p => byProp.get(p) || null,
+    // repaint one family of the ramp texture: r4 = 4 tones, rgb 0..1, light -> dark (+ the line / outline tones derived as
+    // ramp6 does). The seasons' leaves (sim/env.js leafRamp); call it on change, not per frame
+    setFamily(name, r4) {
+      const j = FAMS.indexOf(name), d = R.tex.image.data; if (j < 0) return;
+      const r = r4.map(c => c.map(v => Math.round(v * 255))), six = [r[0], r[1], r[2], mix(r[3], r[2], .25), r[3], r[2]];
+      for (let i = 0; i < 6; i++) d.set(six[i], (j * 6 + i) * 4);
+      R.tex.needsUpdate = true;
+    },
     // an arrow's step (arena coords) against the 3D trees' trunks and big limbs -> {x, y, h, prop} where it sticks | null.
     // A 3D tree stops arrows only there (its round collider is for walking; the crown lets arrows through)
     treeHit(x0, y0, h0, x1, y1, h1) {
