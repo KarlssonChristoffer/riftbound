@@ -3,12 +3,14 @@
 //            bed sits lower, the south ravine drops away
 //   plateau  a real block: its painted top, rock-strata faces
 //   props    live 3D meshes (Blender prop kit -> glb, toned on the GPU with the pixelizer's ramps and rules) or, for the
-//            A/B test, the same props pre-rendered at 16 yaws (cards); everything the kit doesn't model (trees, bushes,
-//            tufts, braziers, torches, dummies, brutes, crystal) stays a painted billboard card
+//            A/B test, the same props pre-rendered at 16 yaws (cards); trees are grown in the browser (trees3d.js: the
+//            biomes it has species for; trees3d: false = the painted cards); everything else the kit doesn't model
+//            (bushes, tufts, braziers, torches, dummies, brutes, crystal) stays a painted billboard card
 //   lights   from the biome's sprites (braziers, torches, crystals) and ground (lava, runes), in metres
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from '../sprites/arena/layout.js';
+import {treeModel, boneHit} from './trees3d.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../sprites/out/render3d/glb/', YAW = '../sprites/out/render3d/props_yaw/';
@@ -29,22 +31,29 @@ const PAL = {
     stone: ['5e4e88', '46396a', '352b54', '211a36'], rock: ['4f4270', '3c3158', '2d2545', '1c1730'], rope: ['8a78a8', '6a5a88', '4e4268', '2e2644'], cover: null},
 };
 const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {ember: ['ffe08a', 'ffa040', 'e0541e', '6e1c12']}};
-export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover'];
+// (bark, leaf: the procedural trees, trees3d.js; char, ash, ember: burning wood, gfx.js MESH_FS uBurn; appended, so the kit's
+// family indices stay put)
+export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember'];
 const hexrgb = h => [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
 const mix = (a, b, k) => a.map((x, i) => Math.round(x + (b[i] - x) * k));
 const ramp6 = r4 => { const r = r4.map(hexrgb); return [r[0], r[1], r[2], mix(r[3], r[2], .25), r[3], r[2]]; };   // + line, outline_shadow, outline_lit
-function palette(biome) {
+function palette(biome, style) {
   const B = PAL[biome], P = {red: ramp6(RED), haz: ramp6(HAZ), gold: ramp6(GOLD)};
   for (const k of ['wood', 'metal', 'clay', 'stone', 'rock', 'rope']) P[k] = ramp6(B[k]);
+  // the trees take the painted trees' own ramps (biomes.js STYLES: leaf / pine, bark)
+  const sr = k => style?.[k]?.h ? ramp6(style[k].h.map(h => h.replace('#', ''))) : null;
+  P.bark = sr('bark') || P.wood; P.leaf = sr('leaf') || sr('pine') || P.rock;
   const w = P.wood; P.void = [...Array(3).fill(mix(w[4], [0, 0, 0], .3)), ...Array(3).fill(mix(w[4], [0, 0, 0], .45))];
   P.cover = B.cover ? ramp6(B.cover) : P.stone;
+  P.char = ramp6(['3a3330', '26211f', '161312', '0c0a0a']); P.ash = ramp6(['8e8982', '75716b', '5e5a55', '403d3a']);
+  P.ember = ramp6(['ffc464', 'ff7c26', 'c0360e', '5a1406']);
   const st = P.stone;
   P.rune = EMIT.rune[biome] ? ramp6(EMIT.rune[biome]) : st;
   P.crack = EMIT.crack[biome] ? ramp6(EMIT.crack[biome]) : [st[3], st[3], st[3], st[4], st[4], st[4]];
   return P;
 }
-export function rampTexture(biome) {
-  const P = palette(biome), data = new Uint8Array(6 * FAMS.length * 4);
+export function rampTexture(biome, style = null) {
+  const P = palette(biome, style), data = new Uint8Array(6 * FAMS.length * 4);
   FAMS.forEach((f, j) => P[f].forEach((c, i) => data.set([...c, 255], (j * 6 + i) * 4)));
   const t = new THREE.DataTexture(data, 6, FAMS.length, THREE.RGBAFormat); t.needsUpdate = true;
   t.minFilter = t.magFilter = THREE.NearestFilter;
@@ -54,6 +63,7 @@ export function rampTexture(biome) {
 }
 
 // ---------------------------------------------------------------- helpers
+const _scl = new THREE.Vector3();
 let GT = null;   // the renderer: one texture cache for everything (gfx.js tex)
 export const texOf = (img, linear = false) => GT.tex(img, {linear});
 const loadImg = src => new Promise((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => err(new Error(src)); i.src = src; });
@@ -119,6 +129,8 @@ function yawOf(p, st) {
   return null;
 }
 const WALL_ID = {wall_n: 2, wall_s: 3, wall_w: 4, wall_e: 5};
+// masonry tops (m) as the 3D kit builds them (tools/blender/props3d_glb.py SIZES_3D; the arena's are lower)
+export const PROP_TOP = {wall_n: 2.4, wall_w: 2.4, wall_e: 2.4, wall_s: .9, tower: 3.9, gatepost: 2.85};
 
 // ---------------------------------------------------------------- strata texture for the plateau's faces
 function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {
@@ -142,7 +154,7 @@ function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {
 }
 
 // ---------------------------------------------------------------- build
-export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}) {
+export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null, trees3d = true}) {
   GT = G;
   // keep: the live prop list of the previous world (a biome switch): the items must point at the props gameplay uses
   const {WM, HM} = WORLD, layout = buildLayout(7);
@@ -150,8 +162,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
   const props = layout.props;
   Object.assign(ctxO, {WM, HM, WPX: Math.ceil(WM * ctxO.PPM), HPX: Math.ceil(HM * ctxO.PPMY), PLAY, layout});
   const disposers = [];
-  const R = rampTexture(biome.id);
+  const R = rampTexture(biome.id, biome.style);
   G.U.ramps.value = R.tex; G.U.cover.value.set(...R.cover); G.U.emitFam.value.set(...R.emitFam);
+  if (G.compU.uSoftFam) G.compU.uSoftFam.value = FAMS.indexOf('leaf');   // a crown's clumps meet in tone, not in lines
 
   // ---- ground: the biome's painter, top-down
   const WPX = Math.ceil(WM * PPM), HPX = Math.ceil(HM * PPM);
@@ -265,15 +278,21 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
   const SHADOWLESS = new Set(['tuft']);
   if (haveGlb) await Promise.all([...new Set(props.map(stateOf).filter(Boolean))].map(s => glbGeometry(loader, s)));   // all at once
   const cardOf = (sp, o) => G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1], type: 3, bias: .00125, ...o});
+  // procedural trees (trees3d.js): a live mesh instead of the painted card, turned and scaled per tree (it.pose)
+  const famOf = name => Math.max(0, FAMS.indexOf(name));
+  const treeOf = p => trees3d && p.kind === 'tree' && !p.painted ? treeModel(p, biome.id, famOf) : null;
+  const placeOf = (it, x, h, z, M) => it.pose ? M.makeRotationY(it.pose.yaw).scale(_scl.setScalar(it.pose.scale)).setPosition(x, h, z) : M.makeTranslation(x, h, z);
+  // a crown overhangs: in the top-down height map it would stand as a solid pillar and black out the light under it
+  const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose}); if (it.pose) m.sm.layers.disable(1); return m; };
   for (const p of props) {
     const z0 = p.z || 0;
     if (p.outside && biome.hole?.(p.x, p.y, ctxO)) continue;   // over the ravine / in the stream
     const sp = biome.sprite(p, ctxO);
-    const st = stateOf(p), geo = st && haveGlb ? await glbGeometry(loader, st) : null;
+    const tm = treeOf(p), st = stateOf(p), geo = tm ? tm.geo : st && haveGlb ? await glbGeometry(loader, st) : null;
     const obj = WALL_ID[p.kind] ?? nextId++;
-    const it = {p, st, obj, sp: null, hover: 0};
+    const it = {p, st, obj, sp: null, hover: 0, pose: tm};
     if (geo) {
-      it.live = G.mesh(geo, obj, new THREE.Matrix4().makeTranslation(p.x, z0, p.y));
+      it.live = liveOf(it, geo, p.x, z0, p.y);
       const yw = yawIdx && yawOf(p, st);
       if (yw && yawIdx.frames[yw[0] + '_y0']) {
         it.yaw = {base: yw[0], off: yw[1], card: G.card({tex: texOf(yawAlb), nrm: texOf(yawNrm), w: 1, h: 1, px: 0, py: 0, type: 7, obj, bias: .00125})};
@@ -291,10 +310,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
   // an item for a prop created later (a feature adds props to world.props: extra crates, respawns)
   async function addItem(p) {
     if (byProp.has(p)) return byProp.get(p);
-    const st = stateOf(p), geo = st && haveGlb ? await glbGeometry(loader, st) : null, sp = biome.sprite(p, ctxO), obj = nextId++;
+    const tm = treeOf(p), st = stateOf(p), geo = tm ? tm.geo : st && haveGlb ? await glbGeometry(loader, st) : null, sp = biome.sprite(p, ctxO), obj = nextId++;
     if (p.dead || byProp.has(p)) return byProp.get(p) || null;   // gone (or added) while the model loaded
-    const it = {p, st, obj, sp: null, hover: 0};
-    if (geo) it.live = G.mesh(geo, obj, new THREE.Matrix4().makeTranslation(p.x, p.z || 0, p.y));
+    const it = {p, st, obj, sp: null, hover: 0, pose: tm};
+    if (geo) it.live = liveOf(it, geo, p.x, p.z || 0, p.y);
     else if (sp) { it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind)}); it.sp = sp; } else return null;
     items.push(it); byProp.set(p, it); return it;
   }
@@ -314,8 +333,23 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
   const step = Math.PI / 8;
   function setMode(m) { mode = m; }
   // hooks for features: card(it, sp) -> {sway (px at the top), em (a live emit canvas, re-uploaded every frame)} | null
-  const hooks = {card: null};
+  //   mesh(it) -> {x, y (the lean at the top, metres, arena axes), shake (art px along the screen's x), flut (art px: the
+  //   leaf clumps' own dance), wx, wy (the wind's direction, arena axes), ph (rad), wave (tone bias)} | null: 3D trees
+  const hooks = {card: null, mesh: null};
   const M = new THREE.Matrix4();
+  // a 3D tree's lean on screen: art px (x right, y toward the camera), held until it moves TREE_HYST px (no 1 px flicker
+  // at a threshold, like the cards' hysteresis); the shader rounds it per vertex by the baked weights. The leaves dance on
+  // top of it (each clump on its own phase) and a band of light rolls through them along the wind (RIP_K: ~4 m waves)
+  const TREE_HYST = .5, RIP_K = 3.2;   // ~2 m light waves: two or three bands across a crown, not the whole crown blinking
+  function leanTree(it, yaw) {
+    const L = hooks.mesh?.(it), d = it.lean ||= {x: 0, y: 0};
+    let sx = 0, sy = 0;
+    if (L) { const c = Math.cos(yaw), s = Math.sin(yaw); sx = (L.x * c - L.y * s) * PPM; sy = (L.x * s + L.y * c) * ctxO.PPMY; }
+    if (!L || Math.hypot(sx - d.x, sy - d.y) > TREE_HYST) { d.x = sx; d.y = sy; }
+    it.live.setLean(d.x + (L?.shake || 0), d.y);
+    const f = L?.flut || 0; it.live.setFlutter?.(f, f * .5);
+    it.live.setRipple?.((L?.wx || 0) * RIP_K, (L?.wy || 0) * RIP_K, L?.ph || 0, L?.wave || 0);
+  }
   // every frame: follow the props (stage, lid, hop, wobble, flash, gone), collect their lights, pick the yaw frames
   function update(yaw) {
     lights.length = 0; for (const l of groundL) lights.push(l);
@@ -329,7 +363,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
       const useYaw = mode === 'yaw' && it.yaw && !p.stage && !it.manageMatrix && !p.gone;
       if (it.live) {
         const st = stateOf(p); if (st && st !== it.st) setState(it, st);
-        if (!it.manageMatrix) it.live.setMatrix(M.makeTranslation(p.x + wob / PPM, z0, p.y));
+        if (!it.manageMatrix) it.live.setMatrix(placeOf(it, p.x + wob / PPM, z0, p.y, M));
+        if (it.pose) leanTree(it, yaw);
         it.live.setVisible(!p.gone && !useYaw); it.live.flash = flash;
       }
       if (it.yaw) {
@@ -356,8 +391,17 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
     }
   }
   const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length;
-  return {layout, props, lights, items, setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc,
+  return {layout, props, lights, items, setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc, trees3d,
     itemOf: p => byProp.get(p) || null,
+    // an arrow's step (arena coords) against the 3D trees' trunks and big limbs -> {x, y, h, prop} where it sticks | null.
+    // A 3D tree stops arrows only there (its round collider is for walking; the crown lets arrows through)
+    treeHit(x0, y0, h0, x1, y1, h1) {
+      for (const it of items) {
+        const p = it.p; if (!it.pose || !it.live || p.gone || Math.abs(p.x - x1) > 3 || Math.abs(p.y - y1) > 3) continue;
+        const q = boneHit({x: p.x, y: p.y, z: p.z || 0, pose: it.pose}, x0, y0, h0, x1, y1, h1); if (q) { q.prop = p; return q; }
+      }
+      return null;
+    },
     glb: state => glbGeometry(loader, state),                   // Promise<geometry | null> (debris chunks, ...)
     // an extra live mesh owned by a feature (debris chunks): dispose it when done; a rebuild (biome switch) disposes the rest.
     // It doesn't block point lights unless o.occlude (tumbling chunks next to a blast threw black spikes everywhere)

@@ -344,19 +344,28 @@ export async function create(host) {
   }
   function spotXY(s) {   // cards face the camera, so a spot on one sits along the screen's x from its pivot
     if (!s.p) return;
-    if (s.card) { const o = s.dx / ctx.PPM; s.x = s.p.x + RX * o; s.y = s.p.y + RY * o; }
-    else { s.x = s.p.x + s.dx / ctx.PPM; s.y = s.p.y + s.dz; }
+    if (s.card) { const o = s.dx / ctx.PPM; s.x = s.p.x + RX * o; s.y = s.p.y + RY * o; return; }
+    const ps = poseOf(s.p);
+    if (!ps) { s.x = s.p.x + s.dx / ctx.PPM; s.y = s.p.y + s.dz; return; }
+    // a turned, scaled model (a 3D tree): the spot was found in the model's own frame (lx, dz): turn it into the world
+    const lx = (s.lx ?? s.dx / ctx.PPM) * ps.scale, lz = (s.dz || 0) * ps.scale, c = Math.cos(ps.yaw), sn = Math.sin(ps.yaw);
+    s.x = s.p.x + lx * c + lz * sn; s.y = s.p.y - lx * sn + lz * c;
   }
+  const poseOf = p => host.itemOf(p)?.pose || null;
   // where on the model's top the spot stands, once per model: flat tops (walls, rocks: PERCH.deep) `sink` px in from the
   // north edge like the arena's rows; crenellated / capped tops (towers, posts, pillars) on the highest point across
   // (the arena's topmost opaque pixel: a merlon, not the floor behind the parapet)
   function meshTop(s, geo) {
     if (s.geo === geo) return s.top;
     if (!geo.boundingBox) geo.computeBoundingBox();
-    const bb = geo.boundingBox, lx = s.dx / ctx.PPM; let z = Math.min(bb.min.z + .05 + s.sink / ctx.PPMY, bb.max.z - .05), top = NaN;
-    if (PERCH[s.kind]?.deep) for (let k = 0; k < 12 && z < bb.max.z; k++, z += .05) { top = topOf(geo, lx, z); if (top === top) break; }
+    // a turned, scaled model (a 3D tree, item.pose): searched in its own frame (the spot's px / scale), on the highest point
+    // across (a crown or a branch, not the first surface from its north edge); the height scales back
+    const ps = poseOf(s.p), sc = ps ? ps.scale : 1;
+    const bb = geo.boundingBox, lx = s.dx / ctx.PPM / sc; let z = Math.min(bb.min.z + .05 + s.sink / ctx.PPMY, bb.max.z - .05), top = NaN;
+    if (PERCH[s.kind]?.deep && !ps) for (let k = 0; k < 12 && z < bb.max.z; k++, z += .05) { top = topOf(geo, lx, z); if (top === top) break; }
     else for (let zz = bb.min.z + .04; zz < bb.max.z - .03; zz += .04) { const t = topOf(geo, lx, zz); if (t === t && !(t <= top)) { top = t; z = zz; } }
-    s.geo = geo; s.dz = z; s.top = top; return top;
+    if (ps && top === top) top -= s.sink / ctx.PPMH;   // settle into the leaves (the crown's top is ragged)
+    s.geo = geo; s.lx = lx; s.dz = z; s.top = top * sc; return s.top;
   }
   function spotPos(s) {   // refresh a spot's world point from the prop's current model / sprite
     if (!s.p) return true;

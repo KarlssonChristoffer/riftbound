@@ -33,24 +33,25 @@
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE.
 import * as THREE from 'three';
 import {createGfx, DEG} from './gfx.js';
-import {buildWorld, texOf, WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS} from './world.js';
+import {buildWorld, texOf, WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, PROP_TOP} from './world.js';
 import {loadAtlas} from './atlas.js';
 import {BIOMES} from '../sprites/arena/biomes.js';
 import {createLighting} from '../sprites/arena/lighting.js';
 import {ClothRig, depthOf, CLOTH_PARAMS} from '../sprites/cloth.js';
 import {createArmor} from '../sprites/arena/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
-import {createPlayer, atlasOf, BUSY, AIM_H} from '../sprites/player.js';
+import {createPlayer, atlasOf, BUSY} from '../sprites/player.js';
 import {createGame} from './game/game.js';
 
 const $ = s => document.querySelector(s);
 const Q = new URLSearchParams(location.search);
 const VW = 480, VH = 270;
 const t00 = performance.now();
-const FEATURES = ['wind', 'lights', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first)
+const FEATURES = ['wind', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)
 
 // ---------------------------------------------------------------- the Ranger: loadouts (packed atlases)
 const LOADOUTS = [['ranger basic', '../sprites/out/outfits/ranger_basic/'], ['ranger + cloth sim', '../sprites/out/outfits/ranger_sim/'], ['bare body', '../sprites/out/skel/']];
-let loadI = {body: 2, sim: 1}[Q.get('set')] ?? 0;
+// default: the runtime cloth (cloak + scarf tail answer the wind; ?set=basic = the baked cloak)
+let loadI = {basic: 0, body: 2, sim: 1}[Q.get('set')] ?? 1;
 $('#load').textContent = 'Loading the Ranger…';
 const TIMING = {}, mark = (k, t0) => { TIMING[k] = +((performance.now() - t0) / 1000).toFixed(2); };
 let tp = performance.now();
@@ -70,6 +71,7 @@ let scale = 1;
 function fit() {
   scale = Math.max(1, Math.floor(Math.min(innerWidth / VW, innerHeight / VH)));
   canvas.style.width = VW * scale + 'px'; canvas.style.height = VH * scale + 'px';
+  G.setDisplay?.(scale);   // the canvas at display size: the pixel image is blown up on the GPU, HD effects draw over it
   const dpr = devicePixelRatio || 1; hdc.width = VW * scale * dpr; hdc.height = VH * scale * dpr; hdc.style.width = canvas.style.width; hdc.style.height = canvas.style.height;
   const r = canvas.getBoundingClientRect(); hdc.style.left = r.left + 'px'; hdc.style.top = r.top + 'px';
 }
@@ -85,16 +87,19 @@ const rgbOf = c => { if (Array.isArray(c)) return c; let s = String(c || '#fff')
 
 let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome'))), timeI = Math.max(0, TIMES.indexOf(Q.get('time')));
 let world = null, propMode = Q.get('props') === 'yaw' ? 'yaw' : 'live';
+let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+R rebuilds)
 const features = [];
 // the wind sways painted foliage cards (per-row bend) and gives braziers / torches a live flame
 function cardHook(it, sp) { const w = features.find(f => f.name === 'wind'); return w?.on && w.card ? w.card(it, sp) : null; }
+// ... and leans the 3D trees (world.js leanTree: the lean at the top, whole pixels per vertex in the shader)
+function meshHook(it) { const w = features.find(f => f.name === 'wind'); return w?.on && w.mesh ? w.mesh(it) : null; }
 async function setBiome(i) {
   biomeI = ((i % BIOMES.length) + BIOMES.length) % BIOMES.length;
   $('#load').classList.remove('hidden'); $('#load').textContent = 'Building ' + BIOMES[biomeI].name + '…';
   const keep = world?.props;   // props keep their state (broken, opened, moved) across a biome switch
   world?.dispose();
-  world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH, props: keep});
-  world.hooks.card = cardHook;   // a rebuilt world has fresh hooks
+  world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH, props: keep, trees3d});
+  world.hooks.card = cardHook; world.hooks.mesh = meshHook;   // a rebuilt world has fresh hooks
   world.setMode(propMode);
   for (const f of features) f.biomeChanged?.();
   $('#load').classList.add('hidden');
@@ -102,6 +107,18 @@ async function setBiome(i) {
 tp = performance.now();
 await setBiome(biomeI);
 mark('world', tp);
+// ?lineup=trees: the procedural trees side by side for review, 3 rows of 5 (x 12 .. 26.4), each framed by standing 3.4 m
+// north of its middle (&at=19.2,6.6 / 13.1 / 19.6): oaks seeds 0-4 | oaks 5-7 + the painted oaks | dead 0-2 + the
+// painted dead tree (p.painted keeps a tree's card). They join world.props, so they survive N / Shift+R
+if (Q.get('lineup') === 'trees') {
+  const row = (y, list) => list.forEach(([variant, seed, painted], i) => {
+    const p = {kind: 'tree', x: 12 + i * 3.6, y, z: 0, variant, seed, painted, lineup: true, r: .3};
+    world.props.push(p); world.addItem(p);
+  });
+  row(10, [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]]);
+  row(16.5, [[0, 5], [0, 6], [0, 7], [0, 0, true], [1, 0, true]]);
+  row(23, [[2, 0], [2, 1], [2, 2], [2, 0, true]]);
+}
 
 // ---------------------------------------------------------------- the camera's frame
 let yaw = (+Q.get('yaw') || 0) * DEG, zoom = Q.get('zoom') === '2' ? 2 : 1, snapMode = +(Q.get('snap') ?? 0) || 0;
@@ -228,18 +245,22 @@ let freeze = 0; const shakeS = {a: 0, t: 0};
 function shake(a, sec) { if (a >= shakeS.a * (shakeS.t > 0 ? 1 : 0)) { shakeS.a = a; shakeS.t = sec; } }
 
 // ---------------------------------------------------------------- targets, interaction
-// ARPG targeting: the cursor over something hittable aims at it (front-most). -> {x, y, h (aim height), target} world
+// ARPG targeting: the cursor over something hittable aims at it (front-most), at the height the cursor points at on it
+// (head, chest or legs; kept inside its hit height). -> {x, y, h (aim height), target} world
 function hoverTarget() {
   for (const f of features) { const t = f.aimTarget?.(); if (t) return t; }
-  let best = null, bn = -1e9;
+  let best = null, bn = -1e9, bh = 0;
   const mx = VW / 2 + (mouse.x - VW / 2) * zoom, my = VH / 2 + (mouse.y - VH / 2) * zoom;
   for (const it of world.items) {
     const p = it.p; if (p.broken || p.gone || !(p.target || p.hp > 0)) continue;
     const z0 = (p.z || 0) + (p.h || 0), hh = p.hitH ?? (p.kind === 'pot' ? .55 : p.kind === 'crate' ? .75 : 1.6), rr = Math.max(.3, p.hitR ?? p.r ?? .4);
     const [x0, y0] = G.toScreen(p.x, z0 + hh, p.y), [, y1] = G.toScreen(p.x, z0, p.y), w = rr * PPM * zoom;
-    if (mx > x0 - w - 2 && mx < x0 + w + 2 && my > y0 - 3 && my < y1 + 3) { const n = toView(p.x, p.y)[1]; if (n > bn) { bn = n; best = p; } }
+    if (mx > x0 - w - 2 && mx < x0 + w + 2 && my > y0 - 3 && my < y1 + 3) {
+      const n = toView(p.x, p.y)[1];
+      if (n > bn) { bn = n; best = p; bh = z0 + hh * Math.max(.08, Math.min(.95, (y1 - my) / (y1 - y0 || 1))); }
+    }
   }
-  return best && {x: best.x, y: best.y, h: (best.z || 0) + (best.h || 0) + Math.min(AIM_H, (best.hitH ?? 1.6) * .55), target: best};
+  return best && {x: best.x, y: best.y, h: bh, target: best};
 }
 function nearProp() {
   let best = null, bd = 1.3; const px = player.x, py = player.y;
@@ -290,8 +311,11 @@ function stepArrows(dt) {
     }
     if (a.life <= -9) continue;
     const ground = elev(a.x, a.y);
-    if (!a.stuck && world.props.some(p => !p.broken && !p.gone && !(a.hitSet && a.hitSet.has(p)) && (p.rect ? a.x > p.rect[0] && a.x < p.rect[2] && a.y > p.rect[1] && a.y < p.rect[3] : p.r > .3 && Math.hypot(p.x - a.x, p.y - a.y) < p.r)
-      && a.h > (p.z || 0) && a.h < (p.z || 0) + (p.kind === 'wall_s' ? .5 : 2.5))) { a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
+    // a 3D tree (trees3d.js) stops an arrow only in its trunk / big limbs, the tip in the bark; its round collider is skipped
+    const tree = world.treeHit?.(a.x - a.vx * dt, a.y - a.vy * dt, a.h - a.vh * dt, a.x, a.y, a.h);
+    if (tree) { a.x = tree.x; a.y = tree.y; a.h = tree.h; a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
+    else if (!a.stuck && world.props.some(p => !p.broken && !p.gone && !(a.hitSet && a.hitSet.has(p)) && !world.itemOf(p)?.pose && (p.rect ? a.x > p.rect[0] && a.x < p.rect[2] && a.y > p.rect[1] && a.y < p.rect[3] : p.r > .3 && Math.hypot(p.x - a.x, p.y - a.y) < p.r)
+      && a.h > (p.z || 0) && a.h < (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5))) { a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
     else if (!a.stuck && a.h <= ground && ground === 0 && inStream(a.x, a.y)) { a.life = -9; events.push({type: 'splash', x: a.x, y: a.y, small: true}); features.forEach(f => f.onArrowStuck?.(a)); }
     else if (!a.stuck && (a.h <= ground || a.life <= 0)) { a.stuck = true; a.h = Math.max(ground, Math.min(a.h, ground + 2.4)); a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
   }
@@ -389,13 +413,19 @@ function flick(l, t) {
   const s = (l.id ?? 0) * 12.9898 % 6.283, n = .5 * Math.sin(t * 7.3 + s) + .3 * Math.sin(t * 12.7 + s * 2.3) + .2 * Math.sin(t * 23.1 + s * 3.7);
   return 1 - f * .22 * (1 + n);
 }
-const sunDir = new THREE.Vector3();
+const sunDir = new THREE.Vector3(), shadowDir = new THREE.Vector3();
+// the arena's longest sun shadow (lighting.js SUN_LEN_MAX): 1.7 m per metre of height. A low dusk sun (10-14 deg) still
+// LIGHTS from low down (warm grazing light, rims), but its shadows stop growing at this length: the true 1 / tan(el)
+// stretched trees and towers 4-6x their height across the map
+const SUN_LEN_MAX = 1.7, SHADOW_EL_MIN = Math.atan(1 / SUN_LEN_MAX);
 function applyMood(PX, PY, t) {
   const biome = BIOMES[biomeI].id, time = TIMES[timeI], m = MOODS[biome][time], U = G.compU;
   U.uAmb.value.set(...m.amb);
   const az = m.sun.az * DEG, el = m.sun.el * DEG;
   sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el));
-  G.setSun(sunDir);
+  const sel = Math.max(el, SHADOW_EL_MIN);
+  shadowDir.set(Math.sin(az) * Math.cos(sel), Math.sin(sel), -Math.cos(az) * Math.cos(sel));
+  G.setSun(sunDir, shadowDir);
   U.uSunC.value.set(...(m.sun.c || [1, 1, 1])); U.uSunStr.value = m.sun.el > 2 ? (m.shadow.a > 0 ? 1 : .45) * (m.sun.k ?? .4) * 2.2 : 0;   // armour glints
   U.uSunK.value = m.sun.k; U.uShadowA.value = m.shadow.a > 0 && m.sun.el > 2 ? m.shadow.a : 0; U.uShadowC.value.set(...m.shadow.c);
   U.uFog.value.set(...m.fog);
@@ -486,13 +516,14 @@ addEventListener('keydown', e => {
   if (k === 'v') opt.banded = !opt.banded;
   if (k === 'j') opt.hdBow = !opt.hdBow;
   if (k === 'i') toggleArmour();
-  if (k === 'r') { propMode = propMode === 'live' ? 'yaw' : 'live'; world.setMode(propMode); }
+  if (k === 'r' && e.shiftKey) { trees3d = !trees3d; setBiome(biomeI); }   // trees: procedural 3D <-> painted cards
+  else if (k === 'r') { propMode = propMode === 'live' ? 'yaw' : 'live'; world.setMode(propMode); }
   if (k === 'g') { if (e.shiftKey) opt.zones = !opt.zones; else opt.debug = (opt.debug + 1) % DEBUG.length; }
   if (k === 'h') opt.help = !opt.help;
   if (k === 'home') setYaw(0);
   applyOpts();
 });
-const DEV_KEYS = new Set(['n', 't', 'g', 'o', 'r', 'v', 'j', 'i', 'h', 'k', '5', '6', '7', '8']);   // sandbox / test keys
+const DEV_KEYS = new Set(['n', 't', 'g', 'o', 'r', 'v', 'j', 'i', 'h', 'k', '5', '6', '7', '8', '9', 'f', 'b']);   // sandbox / test keys (9: light sources, f: the flames' look, b: wind strength)
 addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys.delete(k); if (k === 'e') PL.onInteractUp(); });
 addEventListener('blur', () => { keys.clear(); mouse.down = false; dragging = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -521,7 +552,7 @@ function renderMenu() {
   const gm = features.flatMap(f => f.menu?.() || []);
   if (gm.length) rows.push(`<h3>Game</h3>`, `<button data-act="resume"><b>Resume</b></button>`, ...gm.map((m, i) => `<button data-act="menu:${i}"><b>${m.label}</b></button>`));
   rows.push(`<h3>Renderer</h3>`, btn('Rotation', SNAP_NAME[snapMode], 'snap'), btn('Ground texture', opt.sampling, 'sampling'), btn('Prop outlines', opt.outline ? 'on' : 'off', 'outline'),
-    btn('Props', propMode === 'live' ? 'live 3D' : '16-angle sprites', 'props'), btn('Banded light', opt.banded ? 'on' : 'off', 'banded'), btn('Shadows (sun + lights)', opt.shadows ? 'on' : 'off', 'shadows'),
+    btn('Props', propMode === 'live' ? 'live 3D' : '16-angle sprites', 'props'), btn('Trees', trees3d ? '3D (grown)' : 'painted cards', 'trees'), btn('Banded light', opt.banded ? 'on' : 'off', 'banded'), btn('Shadows (sun + lights)', opt.shadows ? 'on' : 'off', 'shadows'),
     btn('Debug view', DEBUG[opt.debug], 'debug'));
   if (host.dev) rows.push(`<h3>World</h3>`, btn('Biome', BIOMES[biomeI].name, 'biome'), btn('Time', TIMES[timeI], 'time'), btn('Lantern', opt.lantern ? 'on' : 'off', 'lantern'), btn('Loadout', LOADOUTS[loadI][0], 'loadout'),
     btn('Bow', opt.hdBow ? 'HD overlay' : 'pixel art', 'hdbow'), btn('Shiny armour', armor.on ? 'on' : 'off', 'armour'));
@@ -544,6 +575,7 @@ $('#pause').addEventListener('click', e => {
   if (a === 'sampling') opt.sampling = SAMPLING[(SAMPLING.indexOf(opt.sampling) + 1) % 3];
   if (a === 'outline') opt.outline = !opt.outline;
   if (a === 'props') { propMode = propMode === 'live' ? 'yaw' : 'live'; world.setMode(propMode); }
+  if (a === 'trees') { trees3d = !trees3d; setBiome(biomeI); }
   if (a === 'banded') opt.banded = !opt.banded;
   if (a === 'shadows') opt.shadows = !opt.shadows;
   if (a === 'debug') opt.debug = (opt.debug + 1) % DEBUG.length;
@@ -591,6 +623,30 @@ function step(dt) {
   if (shakeS.t > 0) shakeS.t -= dt;
 }
 const CLOTH_CALM = {wind: [...CLOTH_PARAMS.wind], gust: CLOTH_PARAMS.gust};
+// HAIR IN THE WIND: once the wind at the Ranger is more than a breeze (the wind feature's strength), the hair's edge pixels
+// stream downwind on the screen by a pixel or two and lift at the crown, flickering at 10 fps like the arena's flame licks.
+// Hair = the harmonized hair ramp (a57a58 / 845f46 / 624535, read off the ID passes), inside a box round the Head bone;
+// the normals go along, so the lighting treats the strands as hair
+const HAIR = new Set([0xa57a58, 0x845f46, 0x624535]);
+const hh32 = (a, b, c) => { let n = Math.imul(a, 374761393) + Math.imul(b, 668265263) + Math.imul(c, 1442695041) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+function hairWind(fr) {
+  const W = feat('wind'); if (!W?.on || !W.at) return;
+  const k = Math.min(1, Math.max(0, ((W.strength || 0) - 1.05) / 1.3)); if (k <= 0) return;
+  const hb = SP[fr]?.bones?.[DIRS[P.face]]?.Head; if (!hb) return;
+  const a = W.at(player.x, player.y), dir = Math.sign(a.x * Math.cos(yaw) - a.y * Math.sin(yaw)) || 1;   // downwind on screen
+  const w = 26, h = 26, x0 = CX + Math.round((hb[0] + hb[2]) / 2) - 13, y0 = CY + Math.round(Math.min(hb[1], hb[3])) - 6;
+  const A = cq.getImageData(x0, y0, w, h), N = nq.getImageData(x0, y0, w, h), d = A.data, nd = N.data, tk = Math.floor(performance.now() / 100);
+  const hair = i => d[i + 3] > 0 && HAIR.has(d[i] << 16 | d[i + 1] << 8 | d[i + 2]), set = [];
+  for (let y = 1; y < h; y++) for (let x = 1; x < w - 1; x++) {
+    const i = (y * w + x) * 4; if (!hair(i)) continue;
+    const j = i + dir * 4, up = i - w * 4, r = hh32(x0 + x, y0 + y, tk);
+    if (!d[j + 3] && r < k * .6) { set.push([j, i]); const j2 = j + dir * 4, xx = x + 2 * dir; if (k > .5 && xx >= 0 && xx < w && !d[j2 + 3] && r < (k - .5) * .5) set.push([j2, i]); }   // a lock streams out
+    else if (!d[up + 3] && r > 1 - k * .2) set.push([up, i]);   // a tuft lifts at the crown
+  }
+  if (!set.length) return;
+  for (const [j, i] of set) for (let c = 0; c < 4; c++) { d[j + c] = d[i + c]; nd[j + c] = nd[i + c]; }
+  cq.putImageData(A, x0, y0); nq.putImageData(N, x0, y0);
+}
 const clothPos = [0, 0];
 function toWorldEvent(e) {
   if (e.x !== undefined && e.y !== undefined) [e.x, e.y] = toWorld(e.x, e.y);
@@ -616,6 +672,7 @@ function draw(t) {
   cq.drawImage(armor.albedo(fr, sp.img), P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx, FW, FH - sinkPx);   // (armor: metal repainted)
   if (sp.nrm) nq.drawImage(sp.nrm, P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx, FW, FH - sinkPx);
   if (rig.active && sp.depth && !sinkPx) rig.draw(cq, CX, CY, depthOf(sp.depth), P.face, nq);
+  if (!sinkPx) hairWind(fr);
   if (!sinkPx && !opt.hdBow) PL.drawPixelBow(cq, CX, CY);
   drawMetal(fr, sinkPx);
   G.tex(charCv, {dynamic: true}); G.tex(nrmCv, {dynamic: true});

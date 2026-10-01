@@ -33,6 +33,7 @@
 //                       (host.layer('ground'))
 //   F.card(it, sp)      the host's card hook (main.js installs it as world.hooks.card): foliage -> {sway, bend}, brazier /
 //                       torch -> {sway: 0, em: live flame canvas}, anything else null (rigid props never sway)
+//   F.mesh(it)          the host's mesh hook (world.hooks.mesh): a 3D tree -> {x, y (lean m at the top), shake (px)}
 //   F.lights()          hanging lanterns (they swing: the pool moves)
 //   F.cloth()           {wind: [vx, vy] (view frame), gust} for CLOTH_PARAMS
 //   F.at(x, y) -> {x, y, g}   wind velocity m/s on the ground plane (arena x east, y south) + gust 0..1
@@ -77,6 +78,24 @@ const BIOME = {
   ember: {base: .12, gust: .35, sway: .5, fronts: {every: [5, 10], speed: [4, 5], len: [10, 18], amp: [.5, .9], edge: [2.5, 5], half: [14, 36]}, cloth: [.3, .8]},
   frost: {base: .45, gust: 2.1, sway: 1, fronts: {every: [1.6, 4], speed: [6, 8], len: [6, 11], amp: [.6, 1], edge: [1, 3], half: [12, 30]}, cloth: [.7, 2.2]},
   rift: {base: 0, gust: 1.1, sway: .85, pulse: {every: [5.5, 9], speed: [2, 2.6], len: [2.4, 3.4], amp: [.7, 1]}, cloth: [0, 1.6]},
+};
+// WIND STRENGTH (render3d): the weather of the wind, on top of the gust fronts. A multiplier on every wind speed the field
+// returns (base + gusts), so everything that reads the field feels it: foliage springs and 3D trees (lean, the leaves'
+// dance, light rolling through the crowns), shed and airborne leaves, cloth, the Ranger's cloak / scarf / hair (main.js),
+// the rustle and gust sound (audio.js). SHOW ONLY: the player is never pushed. 'auto' wanders between calm, breeze and
+// brisk spells (STRENGTH.dwell s each); B cycles the modes, the pause menu has them, ?windlevel=brisk starts there.
+const LEVELS = {calm: .35, breeze: 1, brisk: 2.1, gale: 3};
+const MODES = ['auto', 'calm', 'breeze', 'brisk', 'gale'];
+const STRENGTH = {
+  auto: [['breeze', .4], ['brisk', .45], ['calm', .15]],   // the spells 'auto' picks from (weights)
+  dwell: [25, 55],    // s per spell
+  ease: 4,            // s: a change of strength builds up / dies down over about this long
+  tree3d: 1.5,        // 3D trees lean this much more than the painted cards (a 4.5 m model, not a 3.5 px sprite top)
+  dance: 1.15,        // the leaves' own dance: art px per unit of (level x gust), beyond...
+  danceMin: .3,       // ...this much (a breeze between gusts leaves the crown still)
+  wave: .16,          // light rolling through the crowns: tone bias per unit of (level x gust), capped at .24
+  shed: 1.3,          // leaves shed per second per tree at a full gust, per unit of level above .75
+  airborne: 5,        // leaves (snow, ash) blown across the view per second, per unit of level above 1.1 (x .25 in a lull, x 1.85 in a gust)
 };
 // foliage flexibility per biome: null = rigid. px = max lean at the top, w = spring rad/s, z = damping, fq = flutter Hz,
 // curve = the arena's row weight profile (CURVES)
@@ -157,6 +176,20 @@ export async function create(host) {
   { const l = Math.hypot(W.dir[0], W.dir[1]); W.dir = [W.dir[0] / l, W.dir[1] / l]; }
   const [UX, UY] = W.dir;
   let biome = 'ruins', B = BIOME.ruins, T = 0, acc = 0;
+  // strength: W.mode (MODES), W.level (eased multiplier, LV here for the hot paths), W.strength (the wind at the player,
+  // normalised: 1 = a full gust of a plain breeze), W.rustle {e, pan} (what the leaves around the player sound like)
+  W.mode = MODES.includes(Q.get('windlevel')) ? Q.get('windlevel') : 'auto'; W.level = LEVELS[W.mode] ?? 1; W.strength = 0; W.rustle = {e: 0, pan: 0};
+  let LV = W.level, spell = W.mode === 'auto' ? 'breeze' : W.mode, spellT = 20, wph = 0, wphQ = 0, wtick = -1;
+  function stepStrength(dt) {
+    if (W.mode === 'auto' && (spellT -= dt) <= 0) {
+      let r = Math.random() * STRENGTH.auto.reduce((s, [, w]) => s + w, 0);
+      for (const [k, w] of STRENGTH.auto) if ((r -= w) <= 0) { spell = k; break; }
+      spellT = STRENGTH.dwell[0] + Math.random() * (STRENGTH.dwell[1] - STRENGTH.dwell[0]);
+    }
+    const tg = LEVELS[W.mode === 'auto' ? spell : W.mode] ?? 1;
+    LV += (tg - LV) * Math.min(1, dt / STRENGTH.ease); W.level = LV;
+  }
+  function setMode(m) { W.mode = m; if (m === 'auto') { spell = 'brisk'; spellT = STRENGTH.dwell[0]; } }
   let s = 1;   // seeded PRNG (mulberry32)
   const R = () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
   const rr = a => a[0] + R() * (a[1] - a[0]);
@@ -200,7 +233,7 @@ export async function create(host) {
     nextF -= dt;
     if (nextF <= 0) {
       if (B.pulse) { nextF = rr(B.pulse.every); fronts.push(newPulse()); }
-      else { nextF = rr(B.fronts.every); fronts.push(newFront(S0 - 4.5)); }
+      else { nextF = rr(B.fronts.every) / Math.sqrt(Math.max(.5, LV)); fronts.push(newFront(S0 - 4.5)); }   // windier: gusts come oftener
     }
     const end = B.pulse ? 48 : S1 + 4;
     for (let i = fronts.length - 1; i >= 0; i--) { const f = fronts[i]; f.F += f.v * dt; if (f.F - f.len - f.edge > end) fronts.splice(i, 1); }
@@ -216,7 +249,7 @@ export async function create(host) {
         const e = f.F + f.edge * Math.sin(a * f.k1 + f.p1 + T * f.w1) - d;
         if (e > 0 && e < f.len) q *= 1 - f.A * env(e, f.len);
       }
-      const g = 1 - q, v = g * B.gust; FA.x = dx / d * v; FA.y = dy / d * v; FA.g = g; return FA;
+      const g = 1 - q, v = g * B.gust * LV; FA.x = dx / d * v; FA.y = dy / d * v; FA.g = g; return FA;
     }
     const sA = x * UX + y * UY, tA = -x * UY + y * UX;
     for (const f of fronts) {
@@ -225,7 +258,7 @@ export async function create(host) {
       const lat = smooth((f.half - Math.abs(tA - f.tc)) / 4); if (lat <= 0) continue;
       q *= 1 - f.A * lat * env(e, f.len) * (.8 + .2 * Math.sin(tA * f.k3 + f.p3));
     }
-    const g = 1 - q, v = B.base + g * B.gust, tw = g * B.gust * .12 * Math.sin(T * 1.9 + sA * .5);
+    const g = 1 - q, v = (B.base + g * B.gust) * LV, tw = g * B.gust * LV * .12 * Math.sin(T * 1.9 + sA * .5);   // LV: the strength
     FA.x = UX * v - UY * tw; FA.y = UY * v + UX * tw; FA.g = g; return FA;
   }
   function seedField() {
@@ -299,7 +332,8 @@ export async function create(host) {
       let st = fst.get(p);
       if (!st) fst.set(p, st = {dx: 0, dy: 0, vx: 0, vy: 0, disp: 0, push: 0, shake: 0, ph: hsh(p.x * 100 | 0, p.y * 100 | 0) * TAU, g: 0, D: 0});
       const a = field(p.x, p.y), nx = a.x / VR * B.sway, ny = a.y / VR * B.sway;
-      const fl = (TUNE.idle + a.g * TUNE.flutter) * (.65 * Math.sin(T * F.fq * TAU + st.ph) + .35 * Math.sin(T * F.fq * TAU * 1.73 + st.ph * 2.1));
+      const fq = F.fq * (.85 + .15 * LV);   // a stronger wind flutters faster and harder
+      const fl = (TUNE.idle + a.g * TUNE.flutter) * (.55 + .45 * LV) * (.65 * Math.sin(T * fq * TAU + st.ph) + .35 * Math.sin(T * fq * TAU * 1.73 + st.ph * 2.1));
       let push = 0; const PU = TUNE.push[p.kind];
       if (PU && (spd > .8 || roll) && Math.abs((p.z || 0) - PL.z) < .5) {   // running / rolling past pushes it away from him
         const ox = p.x - PL.x, oy = p.y - PL.y, sx = ox * RX + oy * RY, sy = (ox * FX + oy * FY) * 1.3, dd = Math.hypot(sx, sy);
@@ -314,7 +348,7 @@ export async function create(host) {
       const tx = F.px * (nx + fl * RX) + st.push * RX, ty = F.px * (ny + fl * RY) + st.push * RY, w2 = F.w * F.w, zw = 2 * F.z * F.w;
       st.vx += (w2 * (tx - st.dx) - zw * st.vx) * dt; st.vy += (w2 * (ty - st.dy) - zw * st.vy) * dt;
       st.dx += st.vx * dt; st.dy += st.vy * dt;
-      const lim = F.px + 1.5, l = Math.hypot(st.dx, st.dy); if (l > lim) { st.dx *= lim / l; st.dy *= lim / l; }
+      const lim = F.px * Math.max(1, LV) + 1.5, l = Math.hypot(st.dx, st.dy); if (l > lim) { st.dx *= lim / l; st.dy *= lim / l; }
       st.shake *= Math.exp(-dt * 4.5);
       if (a.g > .62 && st.g <= .62) gustShed(p);   // a gust front arriving
       st.g = a.g;
@@ -395,6 +429,21 @@ export async function create(host) {
       if (!cv) return null; HK.sway = 0; HK.bend = null; HK.em = cv; return HK;
     }
     return null;
+  }
+  // the host's MESH hook: a 3D tree (render3d/trees3d.js) on the same spring as its card would be. {x, y: the lean at the
+  // top in metres (arena axes: the spring's px / PPM), shake: the arrow shudder, art px along the screen's x}. The host
+  // projects it, keeps the hysteresis, and the shader bends the model by its baked weights (stiff trunk, crown as a block)
+  // + the leaves' own dance (flut, art px) and a band of light rolling through them along the wind (wx, wy, ph, wave), both
+  // growing with the gust at the tree x the strength (a breeze between gusts leaves the crown still: STRENGTH.danceMin)
+  const MH = {x: 0, y: 0, shake: 0, flut: 0, wx: 1, wy: 0, ph: 0, wave: 0};
+  function mesh(it) {
+    const p = it.p; if (!W.on || !FOLK[p.kind]) return null;
+    const F = flexOf(p), st = F && fst.get(p); if (!st) return null;
+    const k = STRENGTH.tree3d / ctx.PPM, a = field(p.x, p.y), e = LV * (.25 + a.g), sp = Math.hypot(a.x, a.y) || 1;
+    MH.x = st.dx * k; MH.y = st.dy * k; MH.shake = st.shake > .05 ? st.shake * 1.7 * Math.sin(T * 44 + st.ph) : 0;
+    MH.flut = Math.min(3, Math.max(0, e * STRENGTH.dance - STRENGTH.danceMin));
+    MH.wx = a.x / sp; MH.wy = a.y / sp; MH.ph = wphQ; MH.wave = Math.min(.24, LV * a.g * STRENGTH.wave);
+    return MH;
   }
 
   // ================================================================ cloth decor (the arena's Verlet pieces)
@@ -884,15 +933,25 @@ export async function create(host) {
 
   // ================================================================ particles (shaken out of foliage)
   const parts = [];
-  function spawnPart(o) { if (parts.length < 180) parts.push(o); }
+  function spawnPart(o) { if (parts.length < 320) parts.push(o); }
+  // a 3D tree's crown in the world (render3d/trees3d.js shape.crown, turned and scaled like the model) | null
+  function crownOf(p) {
+    const ps = host.itemOf?.(p)?.pose, C = ps?.crown; if (!C) return null;
+    const c = Math.cos(ps.yaw), s = Math.sin(ps.yaw), k = ps.scale, z = p.z || 0;
+    return {x: p.x + (C.x * c + C.z * s) * k, y: p.y + (-C.x * s + C.z * c) * k, h0: z + C.y0 * k, h1: z + C.y1 * k, r: C.r * k};
+  }
   function shed(p, n, why) {
     const S = SHED[biome]; if (!S) return;
     const sp = host.biome.sprite(p, ctx), hTop = sp ? sp.pivot[1] / ctx.PPMH : .6, z = p.z || 0, tree = p.kind === 'tree';   // sprite top above the ground point
-    const a = field(p.x, p.y), ax = a.x, ay = a.y;
+    const a = field(p.x, p.y), ax = a.x, ay = a.y, cr = tree ? crownOf(p) : null;
     for (let i = 0; i < n; i++) {
-      const h = z + (tree ? hTop * (.35 + R() * .5) : hTop * (.45 + R() * .45)), o = (R() - .5) * (tree ? 1.6 : .6);   // across the crown, as seen
-      const base = {x: p.x + RX * o + FX * .02, y: p.y + RY * o + FY * .02 + (R() - .5) * .1, h, t: 0, ph: R() * TAU, rest: 0};
-      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: S.pals[R() * S.pals.length | 0], vx: (R() - .5) * 1.4 + ax * .6, vy: (R() - .5) * .5, vh: why === 'arrow' ? .6 + R() * .8 : R() * .3, life: 9, g: 1.4});
+      let h = z + (tree ? hTop * (.35 + R() * .5) : hTop * (.45 + R() * .45)), o = (R() - .5) * (tree ? 1.6 : .6), cx = p.x, cy = p.y, f = .02;   // across the crown, as seen
+      if (cr) {   // a 3D crown: from its own bulk, on the side facing the camera (inside it they'd stay hidden)
+        h = cr.h0 + (cr.h1 - cr.h0) * (.15 + R() * .7); o = (R() - .5) * cr.r * 1.6; cx = cr.x; cy = cr.y;
+        f = cr.r * .85 * Math.sqrt(Math.max(0, 1 - (o / cr.r) ** 2));
+      }
+      const base = {x: cx + RX * o + FX * f, y: cy + RY * o + FY * f + (R() - .5) * .1, h, t: 0, ph: R() * TAU, rest: 0};
+      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: S.pals[R() * S.pals.length | 0], vx: (R() - .5) * 1.4 + ax * .6, vy: (R() - .5) * .5, vh: why === 'arrow' ? .6 + R() * .8 : R() * .3, life: 9, g: 1.4, big: why === 'wind' && R() < .4});
       else if (S.kind === 'snow') spawnPart({...base, kind: 'snow', pal: S.pal, vx: (R() - .5) * 1.6 + ax * .8, vy: (R() - .5) * .6, vh: .4 + R() * 1.1, life: .5 + R() * .45, g: 6});
       else if (S.kind === 'spark') {
         if (R() < .6) spawnPart({...base, kind: 'spark', pal: S.pal, emit: true, vx: (R() - .5) * .9 + ax * .5, vy: (R() - .5) * .3, vh: .5 + R() * .9, life: .6 + R() * .7, g: -.35});
@@ -904,14 +963,61 @@ export async function create(host) {
     if (biome === 'frost' && (p.kind === 'tree' || p.kind === 'bush') && R() < .75) shed(p, p.kind === 'tree' ? 3 + (R() * 3 | 0) : 1 + (R() * 2 | 0), 'gust');
     else if (biome === 'ruins' && p.kind === 'tree' && (p.variant | 0) !== 2 && R() < .5) shed(p, 1, 'gust');
   }
+  // ---- the feel of a strong wind: leaves torn off the crowns in gusts, leaves (snow, ash) blowing through the view from
+  // upwind, and what the foliage around the player sounds like: W.rustle = {e: the agitation of the leafy crowns / bushes
+  // near him (1 = one tree beside him in a full breeze gust), pan: where they are on screen, -1..1}
+  let airAcc = 0;
+  function stepFeel(dt) {
+    const S = SHED[biome], lv = Math.max(0, LV - .75);
+    let e = 0, ep = 0;
+    for (const p of folList()) {
+      if (p.kind === 'tuft') continue;
+      const F = flexOf(p); if (!F) continue;
+      const leafy = !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins'), a = field(p.x, p.y);
+      if (leafy && S && lv > 0 && (S.kind === 'leaf' || S.kind === 'snow') && vis(p.x, p.y) && R() < dt * lv * a.g * STRENGTH.shed * (p.kind === 'tree' ? 1 : .3)) shed(p, 1, 'wind');
+      const d = Math.hypot(p.x - PL.x, p.y - PL.y); if (d > 16) continue;
+      const st = fst.get(p), w = (p.kind === 'tree' ? (leafy ? 1 : .3) : .35) * (1 - d / 16) ** 2;
+      const sp = Math.hypot(a.x, a.y) / vref(), ag = w * sp * sp * (.7 + .3 * Math.min(1, st ? Math.hypot(st.vx, st.vy) / 25 : 0));   // ~ wind speed^2: the gusts do the talking
+      e += ag; ep += ag * clamp(((p.x - PL.x) * RX + (p.y - PL.y) * RY) / 7, -1, 1);
+    }
+    W.rustle.e = e; W.rustle.pan = e > 1e-4 ? ep / e : 0;
+    const air = S && biome !== 'rift' ? Math.max(0, LV - 1.1) * STRENGTH.airborne : 0;
+    if (air > 0) {
+      const [cx, cy] = viewCentre(); airAcc += dt * air * (.25 + 1.6 * field(cx, cy).g);   // flurries ride the gust fronts
+      while (airAcc >= 1) { airAcc -= 1; airborne(S); }
+    } else airAcc = 0;
+  }
+  function airborne(S) {   // one leaf (flake, ash) entering from upwind of the view, at a random height
+    const wvx = UX * RX + UY * RY, wvy = UX * FX + UY * FY, n = Math.hypot(wvx, wvy) || 1, ex = Math.hypot(VB.hw, VB.hh) + 1.5, s = (R() * 2 - 1) * ex;
+    const vx = VB.cx - wvx / n * ex - wvy / n * s, vy = VB.cy - wvy / n * ex + wvx / n * s;   // view frame
+    const x = vx * RX + vy * FX, y = vx * RY + vy * FY, a = field(x, y), h = host.elev(x, y) + .3 + R() * 3.2;
+    const base = {x, y, h, t: 0, ph: R() * TAU, rest: 0};
+    if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: S.pals[R() * S.pals.length | 0], vx: a.x, vy: a.y * .6, vh: (R() - .5) * .6, life: 12, g: 1.4, big: R() < .5});
+    else if (S.kind === 'snow') spawnPart({...base, kind: 'snow', pal: S.pal, vx: a.x, vy: a.y * .6, vh: -.1 - R() * .3, life: 2.5 + R() * 1.5, g: .4});
+    else if (S.kind === 'spark') spawnPart({...base, kind: 'ash', pal: S.ash, vx: a.x, vy: a.y * .6, vh: -.05 - R() * .2, life: 2.5 + R() * 1.5, g: .25});
+  }
   function stepParts(dt) {
     for (let i = parts.length - 1; i >= 0; i--) {
       const q = parts[i]; q.t += dt;
-      if (q.rest > 0) { q.rest -= dt; if (q.rest <= 0) { parts[i] = parts[parts.length - 1]; parts.pop(); } continue; }
+      if (q.rest > 0) {
+        q.rest -= dt;
+        if (q.kind === 'leaf' && LV > 1.2) {   // a strong wind skitters a fallen leaf along the ground and lifts it off again
+          const a = field(q.x, q.y), sp = Math.hypot(a.x, a.y);
+          if (sp > 1.3) {
+            q.x += a.x * .35 * dt; q.y += a.y * .35 * dt;
+            if (R() < dt * (sp - 1.3) * 1.2) { q.rest = 0; q.vh = .5 + R() * .8; q.vx = a.x; q.vy = a.y * .6; q.t = Math.min(q.t, q.life - 4); continue; }
+          }
+        }
+        if (q.rest <= 0) { parts[i] = parts[parts.length - 1]; parts.pop(); }
+        continue;
+      }
       if (q.t >= q.life) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }
       const a = field(q.x, q.y);
-      if (q.kind === 'leaf') {   // flutters down, drifts with the wind
-        q.vh += (-.45 - q.vh) * Math.min(1, dt * 2.2); q.vx += (a.x * .9 + Math.sin(q.t * 3.1 + q.ph) * .5 - q.vx) * Math.min(1, dt * 2); q.vy += (a.y * .6 - q.vy) * Math.min(1, dt * 2);
+      if (q.kind === 'leaf') {   // flutters down, drifts with the wind; in a strong wind it loops, climbs and races (sw)
+        const sw = Math.max(0, Math.hypot(a.x, a.y) - .9), k = .9 + .5 * Math.max(0, LV - 1), c = Math.min(1, dt * 2);
+        q.vh += (-.45 + sw * .8 * Math.sin(q.t * 2.6 + q.ph * 3) - q.vh) * Math.min(1, dt * 2.2);
+        q.vx += (a.x * k + Math.sin(q.t * 3.1 + q.ph) * (.5 + sw * .6) - q.vx) * c;
+        q.vy += (a.y * .6 * k + Math.cos(q.t * 2.3 + q.ph * 2) * sw * .4 - q.vy) * c;
       } else { q.vh -= q.g * dt; const d = Math.exp(-dt * (q.kind === 'snow' ? 2.4 : 1.4)); q.vx = q.vx * d + a.x * (1 - d) * .8; q.vy *= d; }
       q.x += q.vx * dt; q.y += q.vy * dt; q.h += q.vh * dt;
       const gnd = host.elev(q.x, q.y);
@@ -940,7 +1046,11 @@ export async function create(host) {
       }
       if (!vis(q.x, q.y)) continue;
       const c = C3(partColour(q)); host.point(q.x, q.y, q.h, c, o);
-      if (q.kind === 'leaf' && !(q.rest > 0)) { const f = (T * 3 + q.ph * 4) & 3; if (f === 0) host.point(q.x + RX * dx, q.y + RY * dx, q.h, c, o); else if (f === 2) host.point(q.x, q.y, q.h - dh, c, o); }
+      if (q.kind === 'leaf' && !(q.rest > 0)) {   // tumbling: 2 x 1 / 1 x 2 / 1 x 1; a big leaf (strong wind) turns over faster as a 2 x 2 / L
+        const f = (T * (q.big ? 7 : 3) + q.ph * 4) & 3;
+        if (f === 0) host.point(q.x + RX * dx, q.y + RY * dx, q.h, c, o); else if (f === 2) host.point(q.x, q.y, q.h - dh, c, o);
+        if (q.big && f !== 1) host.point(q.x + RX * dx, q.y + RY * dx, q.h - dh, f === 3 ? C3(q.pal[1]) : c, o);
+      }
       else if (q.kind === 'leaf') host.point(q.x + RX * dx, q.y + RY * dx, q.h, c, o);
       else if (q.kind === 'snow' && q.t < q.life * .3) host.point(q.x + RX * dx, q.y + RY * dx, q.h, c, o);
     }
@@ -955,8 +1065,9 @@ export async function create(host) {
       for (const p of folList()) {
         if (p.kind === 'tuft' || !vis(p.x, p.y)) continue;
         const F = flexOf(p); if (!F) continue;
-        const [r, hMax] = p.kind === 'tree' ? TUNE.arrowTree : TUNE.arrowBush, z = p.z || 0;
-        if (Math.hypot(a.x - p.x, (a.y - p.y) * 1.3) > r || a.h < z + (p.kind === 'tree' ? .9 : 0) || a.h > z + hMax) continue;
+        const [r, hMax] = p.kind === 'tree' ? TUNE.arrowTree : TUNE.arrowBush, z = p.z || 0, cr = p.kind === 'tree' ? crownOf(p) : null;
+        if (cr) { if (Math.hypot(a.x - cr.x, a.y - cr.y) > cr.r || a.h < cr.h0 || a.h > cr.h1) continue; }   // a 3D crown: its own bounds
+        else if (Math.hypot(a.x - p.x, (a.y - p.y) * 1.3) > r || a.h < z + (p.kind === 'tree' ? .9 : 0) || a.h > z + hMax) continue;
         let S = shook.get(a); if (!S) shook.set(a, S = new Set()); if (S.has(p)) continue; S.add(p);
         const st = fst.get(p); if (st) { st.shake = 1; const k = Math.sign(sv || 1) * 30; st.vx += RX * k; st.vy += RY * k; }   // shudders along the screen's x
         shed(p, p.kind === 'tree' ? 4 + (R() * 3 | 0) : 3 + (R() * 3 | 0), 'arrow');
@@ -1009,18 +1120,24 @@ export async function create(host) {
   }
   Object.assign(W, {
     toggle() { W.on = !W.on; if (!W.on) { W.gust = 0; W.ms = 0; parts.length = 0; } return W.on; },
+    // the strength: B cycles the modes (dev key), the pause menu lists them
+    onKey(k) { if (k !== 'b') return false; setMode(MODES[(MODES.indexOf(W.mode) + 1) % MODES.length]); return true; },
+    settings: () => [{label: 'Wind strength', options: MODES, get: () => W.mode, set: setMode}],
+    hud: () => W.on ? `wind ${W.mode}${W.mode === 'auto' ? ' (' + spell + ')' : ''} x${LV.toFixed(2)} · at you ${W.strength.toFixed(2)} · rustle ${W.rustle.e.toFixed(2)}` : '',
     biomeChanged() { setBiome(host.biome.id); },   // (main.js re-installs the card hook on the rebuilt world)
     update(dt, evs) {
       const t0 = performance.now();
       W.ms = W.ms * .95 + acc * .05; acc = 0;
       dt = Math.min(.05, Math.max(0, dt || 0));
-      if (!W.on) { W.gust = 0; tick(t0); return; }
+      if (!W.on) { W.gust = 0; W.strength = 0; W.rustle.e = 0; tick(t0); return; }
       T += dt;
+      stepStrength(dt);
+      wph += dt * (3 + 5 * LV);   // with world.js RIP_K: the bands roll at ~1.5 + 1.5 LV m/s if (Math.floor(T * 12) !== wtick) { wtick = Math.floor(T * 12); wphQ = wph % 6283.19; }   // the light wave, stepped at 12 fps
       viewSync(); readPlayer();
       if (needDecor && host.props && ctx.PLAY) buildDecor();
       stepField(dt);
-      W.gust = PL.ok ? field(PL.x, PL.y).g : 0;
-      if (PL.ok) { stepFoliage(dt); arrowsThroughFoliage(); }
+      if (PL.ok) { const a = field(PL.x, PL.y); W.gust = a.g; W.strength = Math.hypot(a.x, a.y) / vref(); } else W.gust = W.strength = 0;
+      if (PL.ok) { stepFoliage(dt); arrowsThroughFoliage(); stepFeel(dt); }
       onEvents(evs);
       simAcc = Math.min(simAcc + dt, 3 / 60); nSim = 0;
       while (simAcc >= 1 / 60 - 1e-6) { stepDecor(1 / 60); simAcc -= 1 / 60; }
@@ -1044,7 +1161,7 @@ export async function create(host) {
       drawParts();
       tick(t0);
     },
-    card,
+    card, mesh,
     at(x, y) { if (!W.on) return {x: 0, y: 0, g: 0}; const a = field(x, y); return {x: a.x, y: a.y, g: a.g}; },
     lights() {
       if (!W.on || needDecor) return EMPTY;
@@ -1057,8 +1174,12 @@ export async function create(host) {
       if (!W.on || !PL.ok) return null;
       const a = field(PL.x, PL.y), C = B.cloth;
       let wx, wy, gust;
-      if (B.pulse) { wx = a.x * C[1] / (B.gust || 1) + .05; wy = a.y * C[1] / (B.gust || 1); gust = .2; }
-      else { const v = C[0] + a.g * C[1]; wx = UX * v; wy = UY * v; gust = .3; }
+      if (B.pulse) { wx = a.x * C[1] / (B.gust || 1) + .05; wy = a.y * C[1] / (B.gust || 1); gust = .2; }   // (a.x already carries LV)
+      else {   // the strength, as SHOW wind (like TUNE.clothV): the heavy wool cloak holds its drape against a real breeze, so a
+        // brisk / gale wind pushes harder than its speed (x1.6 / x2.2) and gusts more, or it never lifts (capped at 10 m/s)
+        const v = Math.min(10, (C[0] + a.g * C[1]) * LV * (1 + .6 * Math.max(0, LV - 1)));
+        wx = UX * v; wy = UY * v; gust = .3 + .5 * Math.max(0, LV - 1);
+      }
       const c = Math.cos(host.yaw), sn = Math.sin(host.yaw);
       return {wind: [wx * c - wy * sn, wx * sn + wy * c], gust};
     },

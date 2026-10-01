@@ -48,6 +48,15 @@
       "port": 8128
     },
     {
+      "name": "render3d-trees",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8131"
+      ],
+      "port": 8131
+    },
+    {
       "name": "pro-test",
       "runtimeExecutable": "python",
       "runtimeArgs": [
