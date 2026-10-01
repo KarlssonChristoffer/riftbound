@@ -46,7 +46,7 @@ const $ = s => document.querySelector(s);
 const Q = new URLSearchParams(location.search);
 const VW = 480, VH = 270;
 const t00 = performance.now();
-const FEATURES = ['wind', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)
+const FEATURES = ['wind', 'windlines', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)
 
 // ---------------------------------------------------------------- the Ranger: loadouts (packed atlases)
 const LOADOUTS = [['ranger basic', '../sprites/out/outfits/ranger_basic/'], ['ranger + cloth sim', '../sprites/out/outfits/ranger_sim/'], ['bare body', '../sprites/out/skel/']];

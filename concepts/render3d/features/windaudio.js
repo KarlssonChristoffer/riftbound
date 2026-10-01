@@ -8,7 +8,8 @@
 //   ticks    sparse grains (5-14 ms, band 1.6-3.2 kHz): single leaves slapping, the ONLY high frequencies, far under
 //   whoosh   the gust itself, around the player: pink noise through a band swept 170-600 Hz by the strength, under 1 kHz
 // The user's ear (audio/forge/RECIPE_GUIDE.md "Brightness rules"): no static hiss beds, continuous layers dark, highs only
-// as sparse grains, ambience level. createWindAudio(ac, dest) -> {update(dt, s | null), stop()}; s = {e, pan, strength}.
+// as sparse grains, ambience level. createWindAudio(ac, dest) -> {update(dt, s | null), swish(pan, k), stop()};
+// s = {e, pan, strength}. swish: a wind line (windlines.js) streaking past the player.
 // Levels: TUNE (linear gains into the ambience bus); measure(ac) renders a few seconds offline for level checks.
 const R = Math.random, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 export const TUNE = {
@@ -18,6 +19,7 @@ export const TUNE = {
   tick: .04,       // a leaf tick's peak gain
   ticks: 26,       // ticks per second at full agitation
   whoosh: .23,     // gain of the gust layer at strength 2.5 (it starts above strength .6)
+  swish: .3,       // peak gain of a wind line streaking past (x strength)
   smooth: .22,     // s: how fast the layers follow the wind
 };
 
@@ -78,6 +80,17 @@ export function createWindAudio(ac, dest) {
   }
   return {
     out,
+    // a wind line streaking past the player (windlines.js): pink noise through a band rising 330 -> 850 Hz and falling
+    // back, under 1.2 kHz, ~0.55 s, panned to its side. k 0..1 (the strength)
+    swish(panX = 0, k = 1) {
+      if (!alive) return;
+      const t = ac.currentTime + .01, s = ac.createBufferSource(); s.buffer = PK[R() * 3 | 0]; s.playbackRate.value = .9 + R() * .2;
+      const bp = biq('bandpass', 330, 1.1), lp = biq('lowpass', 1200, .6), g = ac.createGain(), p = pan(clamp(panX, -.9, .9)), A = TUNE.swish * k * (.7 + R() * .3);
+      bp.frequency.setValueAtTime(330, t); bp.frequency.exponentialRampToValueAtTime(850, t + .22); bp.frequency.exponentialRampToValueAtTime(380, t + .55);
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(A, t + .16); g.gain.exponentialRampToValueAtTime(.0005, t + .58);
+      if (p.pan) { p.pan.setValueAtTime(clamp(panX - .25, -.9, .9), t); p.pan.linearRampToValueAtTime(clamp(panX + .25, -.9, .9), t + .5); }
+      s.connect(bp); bp.connect(lp); lp.connect(g); g.connect(p); s.start(t, R() * 2); s.stop(t + .62); s.onended = () => { try { p.disconnect(); } catch (e) {} };
+    },
     update(dt, s) {
       if (!alive) return;
       const e = s ? Math.max(0, s.e || 0) : 0, panC = s ? clamp(s.pan || 0, -1, 1) : 0, st = s ? s.strength || 0 : 0;

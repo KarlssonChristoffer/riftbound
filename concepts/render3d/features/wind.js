@@ -468,7 +468,7 @@ export async function create(host) {
     }
     return {cols, rows, n, P, O: P.slice(), P0: P.slice(), N: new Float32Array(n * 3), U, V: Vv, D: Dd, pin, L: Float32Array.from(L),
       k: o.k, flut: o.flut ?? 1, waves: o.waves ?? 1, freq: o.freq ?? 2, seed: R() * TAU, iters: o.iters ?? 3, damp: o.damp ?? .985,
-      minY: o.minY ?? null, pat: o.pat || (() => 0), outline: o.outline || 'in', fray: !!o.fray, rope: o.rope ?? null, pinFn: o.pinFn || null,
+      minY: o.minY ?? null, minX: o.minX ?? null, pat: o.pat || (() => 0), outline: o.outline || 'in', fray: !!o.fray, rope: o.rope ?? null, pinFn: o.pinFn || null,
       SX: new Float32Array(n), SY: new Float32Array(n), ZT: new Float32Array(n), LM: new Float32Array(n), nRest: null, wind0: 0};
   }
   function normals(pc) {
@@ -504,6 +504,7 @@ export async function create(host) {
         if (wb) { P[b] -= dx * q; P[b + 1] -= dy * q; P[b + 2] -= dz * q; }
       }
       if (pc.minY !== null) for (let i = 0; i < n; i++) if (P[i * 3 + 1] < pc.minY) P[i * 3 + 1] = pc.minY;
+      if (pc.minX !== null) for (let i = 0; i < n; i++) if (P[i * 3] < pc.minX) P[i * 3] = pc.minX;   // (a cloth east of its pole)
     }
     for (let i = 0; i < n; i++) if (P[i * 3 + 2] < .03) P[i * 3 + 2] = .03;
     if (pc.cols > 1 && pc.rows > 1) normals(pc);
@@ -581,7 +582,7 @@ export async function create(host) {
     };
   }
   // a rod (the arena's rodSprite) as world lines: [x0, y, h] its left end (top row), wPx its length in px
-  const rodOf = (pal, x0, y, h, wPx) => ({x0, y, h, len: (wPx - 1) / ctx.PPM, c: pal.wood, m: pal.metal});
+  const rodOf = (pal, x0, y, h, wPx, alongY = false) => ({x0, y, h, len: (wPx - 1) / ctx.PPM, c: pal.wood, m: pal.metal, alongY});   // x0 / y: its start
   function wallBanner(x, yFace, pal) {
     const w = .5, len = .9, top = 1.12, wPx = w * ctx.PPM, lPx = len * ctx.PPMH;
     const pc = grid({cols: 5, rows: 8, org: [x - w / 2, yFace + .03, top], ax: [w, 0, 0], ay: [0, 0, -len], pin: r => r === 0,
@@ -590,13 +591,17 @@ export async function create(host) {
     it.anchor = [x, yFace + .06, top]; it.rods = [rodOf(pal, x - w / 2 - .05, yFace + .03, top + .02, Math.round(wPx) + 2)];
     return it;
   }
-  function standard(x, y, pal) {   // a freestanding banner pole with a crossbar (flanking the east gate)
+  // a freestanding banner pole with a crossbar (flanking the east gate). The banner FACES EAST / WEST, toward whoever comes
+  // through the gate (its crossbar runs north-south), and hangs on the pole's east side: the prevailing wind (W -> E) hits its
+  // face and swings it out, away from the pole (minX keeps it from passing through the pole on a west gust). (It used to
+  // span east-west: edge-on to the gate, and the wind blew along its plane, so it barely moved.)
+  function standard(x, y, pal) {
     const H = 2.45, w = .5, len = 1.05, wPx = w * ctx.PPM, lPx = len * ctx.PPMH, bar = H - .12;
-    const pc = grid({cols: 5, rows: 9, org: [x - w / 2, y + .06, bar - .03], ax: [w, 0, 0], ay: [0, 0, -len], pin: r => r === 0,
-      k: .9, flut: .6, waves: .8, freq: 1.3, minY: y + .045, pat: bannerPat(pal, wPx, lPx, {point: true, band: true}), fray: pal.fray});
-    const it = item('standard', x, y + .08, [pc], pal);
-    it.anchor = [x, y + .08, bar]; it.posts = [[DA.add(postSprite(pal.wood, pal.metal, Math.round(H * ctx.PPMH)).img, 1, Math.round(H * ctx.PPMH) + 1), x, y, 0]];
-    it.rods = [rodOf(pal, x - w / 2 - .09, y + .06, bar, Math.round(wPx) + 4)]; it.shadow = [x, y];
+    const pc = grid({cols: 5, rows: 9, org: [x + .06, y - w / 2, bar - .03], ax: [0, w, 0], ay: [0, 0, -len], pin: r => r === 0,
+      k: .9, flut: .6, waves: .8, freq: 1.3, minX: x + .045, pat: bannerPat(pal, wPx, lPx, {point: true, band: true}), fray: pal.fray});
+    const it = item('standard', x + .08, y, [pc], pal);
+    it.anchor = [x + .08, y, bar]; it.posts = [[DA.add(postSprite(pal.wood, pal.metal, Math.round(H * ctx.PPMH)).img, 1, Math.round(H * ctx.PPMH) + 1), x, y, 0]];
+    it.rods = [rodOf(pal, x + .06, y - w / 2 - .09, bar, Math.round(wPx) + 4, true)]; it.shadow = [x, y];
     return it;
   }
   // the tower's roof centre: the top of its 3D model (or the painted sprite's, like the arena, if it has none)
@@ -897,10 +902,11 @@ export async function create(host) {
     g.fillRect(X - 2 * z, Y, 5 * z, z); g.fillRect(X - z, Y + z, 3 * z, z);
   }
   function drawRod(r) {   // the arena's rod sprite as two world lines + knobs (it turns with the world, like the cloth)
-    const dh = 1 / ctx.PPMH, dx = 1 / ctx.PPM, x1 = r.x0 + r.len;
-    host.line(r.x0, r.y, r.h, x1, r.y, r.h, C3(r.c[1])); host.line(r.x0, r.y, r.h - dh, x1, r.y, r.h - dh, C3(r.c[3]));
-    host.point(r.x0 - dx, r.y, r.h, C3(r.m[0])); host.point(r.x0 - dx, r.y, r.h - dh, C3(r.m[2]));
-    host.point(x1 + dx, r.y, r.h, C3(r.m[0])); host.point(x1 + dx, r.y, r.h - dh, C3(r.m[2]));
+    const dh = 1 / ctx.PPMH, dx = 1 / ctx.PPM, ux = r.alongY ? 0 : 1, uy = r.alongY ? 1 : 0;   // along x (default) or y
+    const x0 = r.x0, y0 = r.y, x1 = x0 + ux * r.len, y1 = y0 + uy * r.len;
+    host.line(x0, y0, r.h, x1, y1, r.h, C3(r.c[1])); host.line(x0, y0, r.h - dh, x1, y1, r.h - dh, C3(r.c[3]));
+    host.point(x0 - ux * dx, y0 - uy * dx, r.h, C3(r.m[0])); host.point(x0 - ux * dx, y0 - uy * dx, r.h - dh, C3(r.m[2]));
+    host.point(x1 + ux * dx, y1 + uy * dx, r.h, C3(r.m[0])); host.point(x1 + ux * dx, y1 + uy * dx, r.h - dh, C3(r.m[2]));
   }
   function drawLantern(L) {
     const pal = L.pal, Rm = pal.wood, M = pal.metal, dh = 1 / ctx.PPMH, dx = 1 / ctx.PPM, x2 = L.x + (L.armPx + 2) * dx;
@@ -1121,7 +1127,7 @@ export async function create(host) {
   Object.assign(W, {
     toggle() { W.on = !W.on; if (!W.on) { W.gust = 0; W.ms = 0; parts.length = 0; } return W.on; },
     // the strength: B cycles the modes (dev key), the pause menu lists them
-    onKey(k) { if (k !== 'b') return false; setMode(MODES[(MODES.indexOf(W.mode) + 1) % MODES.length]); return true; },
+    onKey(k, e) { if (k !== 'b' || e?.shiftKey) return false; setMode(MODES[(MODES.indexOf(W.mode) + 1) % MODES.length]); return true; },   // (Shift+B: windlines.js)
     settings: () => [{label: 'Wind strength', options: MODES, get: () => W.mode, set: setMode}],
     hud: () => W.on ? `wind ${W.mode}${W.mode === 'auto' ? ' (' + spell + ')' : ''} x${LV.toFixed(2)} · at you ${W.strength.toFixed(2)} · rustle ${W.rustle.e.toFixed(2)}` : '',
     biomeChanged() { setBiome(host.biome.id); },   // (main.js re-installs the card hook on the rebuilt world)
@@ -1132,7 +1138,8 @@ export async function create(host) {
       if (!W.on) { W.gust = 0; W.strength = 0; W.rustle.e = 0; tick(t0); return; }
       T += dt;
       stepStrength(dt);
-      wph += dt * (3 + 5 * LV);   // with world.js RIP_K: the bands roll at ~1.5 + 1.5 LV m/s if (Math.floor(T * 12) !== wtick) { wtick = Math.floor(T * 12); wphQ = wph % 6283.19; }   // the light wave, stepped at 12 fps
+      wph += dt * (3 + 5 * LV);   // with world.js RIP_K: the bands roll at ~1.5 + 1.5 LV m/s
+      if (Math.floor(T * 12) !== wtick) { wtick = Math.floor(T * 12); wphQ = wph % 6283.19; }   // the light wave, stepped at 12 fps (fixed: this sat in the comment above)
       viewSync(); readPlayer();
       if (needDecor && host.props && ctx.PLAY) buildDecor();
       stepField(dt);
@@ -1162,7 +1169,8 @@ export async function create(host) {
       tick(t0);
     },
     card, mesh,
-    at(x, y) { if (!W.on) return {x: 0, y: 0, g: 0}; const a = field(x, y); return {x: a.x, y: a.y, g: a.g}; },
+    // (o: an object to fill instead of a new one: per-frame callers pass a scratch object, nothing is allocated)
+    at(x, y, o = null) { const r = o || {x: 0, y: 0, g: 0}; if (!W.on) { r.x = r.y = r.g = 0; return r; } const a = field(x, y); r.x = a.x; r.y = a.y; r.g = a.g; return r; },
     lights() {
       if (!W.on || needDecor) return EMPTY;
       const out = [];
