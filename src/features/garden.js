@@ -26,8 +26,8 @@ import {clamp} from '../core/mathx.js';
 
 const TAU = Math.PI * 2;
 const R = Math.random, rr = (a, b) => a + R() * (b - a);
-// how high these stop arrows (main.js reads world.js PROP_TOP)
-if (WORLD.PROP_TOP) Object.assign(WORLD.PROP_TOP, {stall: 1.05, merchant: 0, ruin: 2.4, bench: .5, goods: .75});
+// how high these stop arrows (world.js PROP_TOP, read by sim/projectiles.js)
+WORLD.propTop({stall: 1.05, merchant: 0, ruin: 2.4, bench: .5, goods: .75});
 
 // ---------------------------------------------------------------- where things stand (arena metres: x east, y south)
 const STALL = {x: 30.3, y: 9.62};      // the counter's front face (the stall faces west, its back against the east wall)

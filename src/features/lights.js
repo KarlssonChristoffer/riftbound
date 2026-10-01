@@ -36,9 +36,9 @@ import {geoOf, M4, along} from '../world/kit3d.js';
 import {createFires} from './firesim.js';
 import {clamp} from '../core/mathx.js';
 import {hex01 as rgb} from '../core/color.js';
-// how high our props stop arrows (main.js reads world.js PROP_TOP; 2.5 m otherwise): arrows fly over the campfire
+// how high our props stop arrows (world.js PROP_TOP, read by sim/projectiles.js; 2.5 m otherwise): arrows fly over the campfire
 // (they catch fire going through it), the beacon only stops them up to its basket
-if (WORLD.PROP_TOP) Object.assign(WORLD.PROP_TOP, {campfire: 0, beacon: 1.15, woodpile: .3});
+WORLD.propTop({campfire: 0, beacon: 1.15, woodpile: .3});
 
 const TAU = Math.PI * 2;
 const R = Math.random, rr = (a, b) => a + R() * (b - a);

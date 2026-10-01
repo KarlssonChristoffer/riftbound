@@ -35,6 +35,9 @@ export const STREAM = {
   w: y => { const n = Math.abs(y - 15); return n < 1.2 ? 1.4 : n < 2.4 ? 1.4 + (n - 1.2) / 1.2 * 1.5 : 2.9; },
   narrows: {y: 15},
   stones: [{x: 0, y: 23.4, r: .42}, {x: 0, y: 23.4, r: .42}],   // x filled in below (placed across the channel)
+  // dry footing added during play (a crate sunk to its lid: combat/props.js) and taken away again (it broke, reset)
+  addStone(o) { STREAM.stones.push(o); },
+  removeStone(o) { const i = STREAM.stones.indexOf(o); if (i >= 0) STREAM.stones.splice(i, 1); },
 };
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
 export const inStream = (x, y) => {

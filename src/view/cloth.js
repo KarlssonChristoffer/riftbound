@@ -37,6 +37,8 @@ function axisRot([x, y, z], a) {
 }
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
+// the wind the cloth feels (the hero sets it each sim step: the wind feature's numbers or a calm breeze)
+export function setClothWind({wind, gust}) { CLOTH_PARAMS.wind = wind; CLOTH_PARAMS.gust = gust; }
 export const CLOTH_PARAMS = {
   gravity: 9.8,
   drag: 1.1,        // 1/s, all directions: the cloth trails behind motion

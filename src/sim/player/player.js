@@ -758,6 +758,12 @@ export function createPlayer(H) {
     g.restore();
   }
 
-  return Object.assign(PL, {step, startRoll, shoot, tryLeap, leapPlan, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp,
+  // for the systems around him (they ask, they don't write P): face a shot along a view-frame direction (the string
+  // settles: twang 0), flicker as he's hurt (i-frames; the respawn's flicker too), re-count the facings for an atlas
+  // with another number of directions (a loadout switch)
+  const faceShot = (dx, dy) => { P.face = P.want = dirOf(dx, dy); P.twang = 0; };
+  const flicker = sec => { P.blink = sec; };
+  const regrid = (n0, n1) => { P.face = Math.round(P.face * n1 / n0) % n1; P.want = P.face; };
+  return Object.assign(PL, {step, startRoll, shoot, tryLeap, leapPlan, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, faceShot, flicker, regrid,
     press, release, hold, knock, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
 }

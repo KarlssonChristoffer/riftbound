@@ -130,6 +130,8 @@ function yawOf(p, st) {
 const WALL_ID = {wall_n: 2, wall_s: 3, wall_w: 4, wall_e: 5};
 // masonry tops (m) as the 3D kit builds them (tools/blender/props3d_glb.py SIZES_3D; the arena's are lower)
 export const PROP_TOP = {wall_n: 2.4, wall_w: 2.4, wall_e: 2.4, wall_s: .9, tower: 3.9, gatepost: 2.85};
+// a feature's own prop kinds: how high each stops arrows (registered once, at its module's load)
+export function propTop(table) { Object.assign(PROP_TOP, table); }
 
 // ---------------------------------------------------------------- strata texture for the plateau's faces
 function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {

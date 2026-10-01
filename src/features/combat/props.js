@@ -91,10 +91,10 @@ export async function createPropPhysics(host, core) {
       const lo = S.cx(ty) - S.w(ty) / 2 + .3, hi = S.cx(ty) + S.w(ty) / 2 - .3;
       tx = lo < hi ? Math.max(lo, Math.min(hi, tx)) : S.cx(ty);
       q.vx = q.vy = 0; q.sinkT = 0; q.float = false; q.r = 0; q.push = false; q.slide = [q.x, q.y, tx, ty];
-      q.stone = {x: tx, y: ty, r: .52}; S.stones.push(q.stone);
+      q.stone = {x: tx, y: ty, r: .52}; S.addStone(q.stone);
     } else { q.float = true; q.r = 0; q.sink = T.sinkFloat; }
   }
-  function dropStone(q) { if (q.stone) { const S = stream(), i = S.stones.indexOf(q.stone); if (i >= 0) S.stones.splice(i, 1); q.stone = null; } }
+  function dropStone(q) { if (q.stone) { stream().removeStone(q.stone); q.stone = null; } }
   function resetHome(q, quiet) {
     dropStone(q);
     [q.x, q.y, q.z] = q.home3;

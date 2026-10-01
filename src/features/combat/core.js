@@ -350,9 +350,8 @@ export function createCore(host) {
   function pose(frame, sec, A) {
     if (BUSYISH.has(P.state)) return;
     // face the shot: the player's facing lives in the camera's frame (host.P), so turn the world direction into it
-    const a = host.yaw, c = Math.cos(a), s = Math.sin(a), RP = host.P;
-    if (host.PL?.dirOf) RP.face = RP.want = host.PL.dirOf(A.dx * c - A.dy * s, A.dx * s + A.dy * c);
-    RP.twang = 0; host.play(frame, sec);
+    const a = host.yaw, c = Math.cos(a), s = Math.sin(a);
+    host.PL.faceShot(A.dx * c - A.dy * s, A.dx * s + A.dy * c); host.play(frame, sec);
   }
   const CAST = {
     rmb(A) {

@@ -124,7 +124,7 @@ export async function createGame(host) {
   function onEvents(evs) {
     for (const e of evs) {
       if (e.type === 'player.hurt' && phase !== 'dead') {
-        const d = stats.hurt(e.dmg); P.raw.blink = .9;
+        const d = stats.hurt(e.dmg); host.PL.flicker(.9);
         hud.float(P.x, P.y, P.z + 1.9, '-' + d, '#ff6a50', true);
         if (stats.S.hp <= 0) die();
       } else if (e.type === 'enemy.kill' && e.who?.hunter) {

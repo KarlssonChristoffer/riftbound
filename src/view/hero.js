@@ -9,7 +9,7 @@
 //   hero.compose(PX, PY) -> sinkPx in draw (before world.update); hero.drawHDBow(hq, sc) on the HD overlay
 import {texOf} from '../world/world.js';
 import {loadAtlas} from '../render/atlas.js';
-import {ClothRig, depthOf, CLOTH_PARAMS} from './cloth.js';
+import {ClothRig, depthOf, CLOTH_PARAMS, setClothWind} from './cloth.js';
 import {createArmor} from './armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
 import {atlasOf} from '../sim/player/player.js';
 
@@ -67,7 +67,7 @@ export function createHero({G, set, loadI, ctxO, app}) {
     const s = await loadAtlas(LOADOUTS[loadI][1], {ClothRig});
     const a = atlasOf(s), old = ND;
     Object.assign(atlas, a); set = s; SP = s.SP; rig = s.rig; ({FW, FH, PIV, ND, DIRS} = a);
-    if (ND !== old) { P.face = Math.round(P.face * ND / old) % ND; P.want = P.face; }
+    if (ND !== old) app.PL.regrid(old, ND);   // the facings re-counted for the new atlas (player.js)
     rig.reset?.();
     card.u.uPivot.value.set(PIV[0] + CX, PIV[1] + CY);
     armor.setAtlas(LOADOUTS[loadI][1]); if (armor.on) { armor.preload(Object.keys(SP)); Object.keys(SP).forEach(maskOf); }
@@ -81,7 +81,7 @@ export function createHero({G, set, loadI, ctxO, app}) {
   function stepCloth(dt, perf) {
     if (!rig.active) return;
     const P = app.P, W = app.feat('wind');
-    Object.assign(CLOTH_PARAMS, W?.on && W.cloth?.() || CLOTH_CALM);
+    setClothWind(W?.on && W.cloth?.() || CLOTH_CALM);
     perf?.begin('cloth.sim', 'char'); rig.update(dt, SP[P.frame]?.sim, P.face, clothPos); perf?.end('cloth.sim');
   }
 
