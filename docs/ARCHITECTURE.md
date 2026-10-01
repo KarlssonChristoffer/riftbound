@@ -238,6 +238,36 @@ tools/                   offline pipelines (Blender, pixelizer, atlas packer) + 
 docs/                    this file, the audit, AUDIO.md
 ```
 
+**As built after phase 2 (2026-10-01).** Phases 3-4 add what's missing (entities, grid, collide, events; the fixed step;
+the features split into sim / view and moved out of `features/`).
+
+```
+src/
+  index.html, main.js    the boot (191 lines): the loadout, camera, renderer, stage, clock, hero, player, arrows; the
+                         `host` features get (contract in main.js's header); the features; the engine context E; the loop
+  core/                  loop.js (step + draw + frame, hitstop), input.js (keys + mouse, the camera drag),
+                         features.js (FEATURES order + loading), flags.js, perf.js, mathx.js, rng.js, color.js
+  render/                gfx.js (the renderer), camera.js (size, zoom, yaw, follow, shake, sampling), viewxf.js,
+                         lighting.js (mood + lights -> the composite), options.js (opt + applying it), atlas.js
+  world/                 world.js (build + props), stage.js (biome, rebuilds, prop mode, trees), biomes.js, layout.js,
+                         trees3d.js, kit3d.js, nav.js
+  sim/                   env.js (clock, seasons, weather), projectiles.js (arrows, pops, dust),
+                         player/ (player.js, harmonize.js, adapter.js: the camera-frame bridge, climbing, the cursor)
+  view/                  hero.js (the Ranger's card: atlas, cloak, hair, armour, HD bow), cloth.js, armor.js
+  features/              the features as before (wind, weather, lights, garden, combat/, atmos, flow, wildlife, depth/, ...)
+  game/                  game.js, run.js, enemies.js, items.js, stats.js, save.js
+  ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js
+  audio/                 audio.js, music.js
+  content/               moods.js (MOODS, TIMES, CHAR)
+  dev/                   devtools.js (colliders, debug HUD, tree lineup), devkeys.js (dev keys, renderer A/B)
+  vendor/three/          three.js 0.170.0
+```
+
+Two contexts, on purpose: **`host`** is the features' API (stable, documented in main.js); **`E`** is the engine's own
+context for core/input, ui/pause and core/loop (what the boot made, by name). Both are filled by the boot only;
+modules read them and call the owners' APIs (`input.takeYaw()`, `loop.hitstop(s)`, `hero.moveCloth(dx, dy)`), they
+never write each other's state. `dev/` reaches the engine only as `E.dev`, handed in by the boot.
+
 ### 2.4 A system, concretely
 
 The existing feature contract is already close; the change is that a system says which layer and phase it lives in,
@@ -287,6 +317,12 @@ The numbers live in `src/core/perf.js` (`BUDGET`). Change them only on purpose, 
   `tools/perf/baseline.json`. It fails when a scenario is over budget or a system got 25% (and 0.1 ms) slower. It
   checks that the machine is quiet first: parallel sessions baking or capturing make every number 2-4x worse.
   `--only night`, `--save` (new baseline after an intended change).
+- **`node tools/test/golden.mjs --compare tmp/golden/ref2`**: a scripted tour (seeded `Math.random`, a virtual clock,
+  no rAF) captured bit-exact: 16 PNGs + state digests by day, night, storm, snow and in a run. A refactor must leave
+  every capture identical; a run that differs once and not again (seen right after a bench) is re-run before
+  believing it. `--save <dir>` captures a new reference after an intended visual change.
+- **`node tools/test/smoke.mjs`**: keys, the menu, loadouts, biome switches, pause / resume, climbing at an angle, the
+  camera, resizes, zoom, the title, 600 frames of a run, with no console errors.
 
 ### 3.3 The rules
 
@@ -360,7 +396,7 @@ No rewrite. Each phase leaves the game playable, ends in a commit and a bench ru
 |---|---|---|
 | **0. Measure** (done 2026-10-01) | F3 profiler, `tools/perf/bench.mjs` + baseline, this doc, the audit | the numbers in 1.1 |
 | **1. Performance, no restructure** (done 2026-10-01: day 4.15 -> 2.04 ms, see 1.1) | cloth: persistent buffers, bounding box, flat arrays; batches upload only written ranges; card frustum culling; `setMatrix` early-out + height-map dirty threshold; flame canvases upload on version; firesim pooling + on-screen culling; cached lights / colours in `applyMood` and `world.update`; cached player position; quantised shaft / cloud keys. Moved on: `preserveDrawingBuffer` (GPU-only cost; captures rely on it) and lights' `F.on` freeze (a sim / view split, phase 4) | day JS <= 2.5 ms, every scenario in budget: met |
-| **2. Move and split** (freeze) | `concepts/render3d` -> `src/`; split `main.js` into core / render / sim / view / ui / dev modules; fork the shared arena files into `src/`; one `mathx` / `rng` / `color` / `viewxf`; `flags.js`; vendor three.js; old `game/` -> `concepts/legacy-game` | behaviour identical (scripted A/B captures), bench unchanged |
+| **2. Move and split** (done 2026-10-01, commits 6fcee2c .. eed7783; the layout as built is in 2.3) | `concepts/render3d` -> `src/`; `main.js` 773 -> 191 lines (the boot) split into core / render / sim / view / world / ui / dev modules; the shared arena files forked into `src/`; one `mathx` / `rng` / `color` / `viewxf`; `flags.js`; three.js vendored; old `game/` -> `concepts/legacy-game`. New checks: `tools/test/golden.mjs` (bit-exact captures), `tools/test/smoke.mjs` | behaviour identical: met (16 golden captures identical after every step, smoke passes); bench unchanged: met (day JS 1.55 ms) |
 | **3. Entities, grid, events** (freeze) | props + enemies become entities with owned components; uniform grid for collision / arrows / aim / proximity; the ~60 ad-hoc prop fields mapped to components; namespaced events with the catalog; declared phases | no module writes another's fields (a dev-mode check freezes foreign writes) |
 | **4. Fixed step, sim / view split, modifiers** | fixed 60 Hz sim + interpolation; each mixed feature split (wind -> `env` wind field + foliage / leaves / audio views; lights -> `sim/fire` + `view/firefx`; ...); `stats.js` -> modifiers | sim runs headless in a test; quality tier "low" works |
 | **5. GPU-side visuals** (done 2026-10-01, see 1.1: shadow draws 188 -> 56, render -18 to -30% by day) | cached static shadow map + per-frame one for what moves (instancing built, measured, dropped); cloth collision early-out; per-pass stats, `--throttle`. Evaluated and deferred with reasons (1.1): cloth / fire on the GPU, layers in shaders, `preserveDrawingBuffer` | shadow draws ~halved: met (-70%); laptop-class target (CPU throttled 3x) holds 60 fps on average, the busiest moments touch it |
