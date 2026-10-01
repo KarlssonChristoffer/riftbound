@@ -1,0 +1,143 @@
+// PLAYER ADAPTER: the arena's player.js runs unchanged in the CAMERA'S frame ("view frame": x = screen right, y = toward
+// the camera), where the projection is exactly the arena's, so its aiming, cursor reading, facing and WASD work as they
+// are (WASD is camera-relative for free). This module is the bridge to the world: its collision / elevation / stream in
+// world coordinates, the world-frame view of him every system reads (`player`), turning his view-frame state when the
+// camera turns, the cursor's target (ARPG aim), the nearest interactable, and climbing at any camera angle (the camera
+// eases to north for the climb and back after: `assist`).
+// OWNS: PL (player.js) and P (its state), the aim memo, the climb assist.  READS: the world, the camera, the hero's atlas,
+//   features' aimTarget / interact.  EMITS (via player.js): step, land, jump, splash (turned into world coordinates here).
+//   const pa = createPlayerHost({...}); const {PL, P, player} = pa
+import {createPlayer} from './player.js';
+import {PLAY, TRAIL, elev, inStream, PLATEAUS} from '../../world/world.js';
+
+const R_BODY = .25;
+
+export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, biome, opt: optOf, proj, flags}) {
+  const toView = cv.toView, toWorld = cv.toWorld;
+  // collision in the world (round, so it doesn't change with the camera; the arena squashes it to match its 2D look)
+  function blocked(x, y, z, air) {
+    const world = worldOf();
+    const arena = x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3;
+    const trail = x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1;
+    if (!arena && !trail) return true;
+    if (!air && inStream(x, y)) return true;
+    if (elev(x, y) > z + .3) return true;
+    return world.props.some(p => !p.broken && !p.gone && Math.abs((p.z || 0) - z) < 1 && (p.rect ? x > p.rect[0] - R_BODY && x < p.rect[2] + R_BODY && y > p.rect[1] - R_BODY && y < p.rect[3] + R_BODY
+      : p.r && Math.hypot(p.x - x, p.y - y) < p.r + R_BODY));
+  }
+  // the plateau as the player sees it. Exact when the camera faces north; turned, the climb spot is handled here
+  const plateausV = PLATEAUS.map(q => ({...q}));
+  function syncPlateaus() { PLATEAUS.forEach((q, i) => Object.assign(plateausV[i], Math.abs(cv.yaw) < 1e-6 ? {...q} : {h: q.h, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, climbs: []})); }
+  const PL = createPlayer({
+    ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, plateaus: plateausV,
+    blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
+    elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
+    inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
+    pixelBow: () => !optOf().hdBow,   // J: the bowstring + nocked / flying arrows at art pixels (default) or the HD overlay
+    onShoot: a => { const [x, y] = toWorld(a.x, a.y), [vx, vy] = toWorld(a.vx, a.vy); proj.spawn({...a, x, y, vx, vy}); },
+    aimTarget: () => { const t = hoverTarget(); if (!t) return null; const v = toView(t.x, t.y); return {x: v[0], y: v[1], h: t.h, target: t.target}; },
+    nearInteract: () => nearProp(),
+    onInteract: p => features.some(f => f.interact?.(p)),
+    dust: (fx, fy, side, big) => {   // a foot contact at view-frame world px -> world metres
+      if (biome().dust === false) return;
+      const [sx, sy] = ctxO.toS(PL.P.x, PL.P.y, PL.P.z), dvx = (fx - sx) / PPM, dvy = (fy - sy) / PPMY, [x, y] = toWorld(PL.P.x + dvx, PL.P.y + dvy);
+      for (let i = 0; i < 3 + big * 2; i++) { const [vx, vy] = toWorld((Math.random() - .5) * .45, 0); proj.dust.push({x, y, h: PL.P.z + .02, vx, vy, vh: Math.random() * .2, t: 0, life: .3 + Math.random() * .2}); }
+    },
+    shake: (a, sec) => cv.shake(a, sec),
+  });
+  const P = PL.P;
+  { const at = (flags.get('at') || '').split(',').map(Number), sp = worldOf().layout.spawn, [vx, vy] = toView(at.length === 2 ? at[0] : sp.x, at.length === 2 ? at[1] : sp.y); P.x = vx; P.y = vy; P.z = elev(...toWorld(vx, vy)); }
+  // the player as features see it: world frame, live
+  // (x / y are read dozens of times a frame: computed once per move or turn, not per read)
+  let pwX = 0, pwY = 0, pwA = NaN, pwB = NaN, pwYaw = NaN;
+  function pwSync() { if (P.x !== pwA || P.y !== pwB || cv.yaw !== pwYaw) { pwA = P.x; pwB = P.y; pwYaw = cv.yaw; const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); pwX = P.x * c + P.y * s; pwY = -P.x * s + P.y * c; } }
+  const player = {
+    get x() { pwSync(); return pwX; }, get y() { pwSync(); return pwY; }, get z() { return P.z; },
+    get vx() { return toWorld(P.vx, P.vy)[0]; }, get vy() { return toWorld(P.vx, P.vy)[1]; },
+    get faceAngle() { return P.face * 2 * Math.PI / hero.ND + cv.yaw; },                          // world: 0 = south, +pi/2 = east
+    get face() { const ND = hero.ND; return (((Math.round(P.face + cv.yaw / (2 * Math.PI / ND))) % ND) + ND) % ND; },   // world facing index (arena's dirOf)
+    get viewFace() { return P.face; }, get state() { return P.state; }, get t() { return P.t; }, get frame() { return P.frame; },
+    get gait() { return P.gait; }, get sink() { return P.sink || 0; }, get aiming() { return P.state === 'draw'; }, get blink() { return P.blink || 0; },
+    get raw() { return P; },
+  };
+
+  // the camera turned by d: everything the player keeps in view-frame coordinates turns with it
+  let faceAcc = 0;
+  function turnFrame(d) {
+    const ND = hero.ND, c = Math.cos(d), s = Math.sin(d), rot = (x, y) => [x * c - y * s, x * s + y * c];
+    [P.x, P.y] = rot(P.x, P.y); [P.vx, P.vy] = rot(P.vx, P.vy);
+    if (P.rollDir) P.rollDir = rot(...P.rollDir);
+    if (P.back) P.back = rot(...P.back);
+    if (P.leap) { [P.leap.x0, P.leap.y0] = rot(P.leap.x0, P.leap.y0); [P.leap.dx, P.leap.dy] = rot(P.leap.dx, P.leap.dy); }
+    faceAcc -= d / (2 * Math.PI / ND);
+    const n = Math.round(faceAcc);
+    if (n) { P.face = (((P.face + n) % ND) + ND) % ND; P.want = (((P.want + n) % ND) + ND) % ND; faceAcc -= n; }
+  }
+  // the player's events are in the view frame: into the world's
+  function toWorldEvent(e) {
+    if (e.x !== undefined && e.y !== undefined) [e.x, e.y] = toWorld(e.x, e.y);
+    if (e.vx !== undefined && e.vy !== undefined) [e.vx, e.vy] = toWorld(e.vx, e.vy);
+  }
+
+  // ARPG targeting: the cursor over something hittable aims at it (front-most), at the height the cursor points at on it
+  // (head, chest or legs; kept inside its hit height). -> {x, y, h (aim height), target} world
+  let hoverKey = 0, hoverAt = -1, hoverMemo = null;   // hoverKey: bumped at the start of every step and draw (tick)
+  function hoverTarget() {
+    if (hoverAt === hoverKey) return hoverMemo;
+    hoverAt = hoverKey; return (hoverMemo = hoverFind());
+  }
+  function hoverFind() {
+    const world = worldOf();
+    for (const f of features) { const t = f.aimTarget?.(); if (t) return t; }
+    let best = null, bn = -1e9, bh = 0;
+    const mx = cv.VW / 2 + (mouse.x - cv.VW / 2) * cv.zoom, my = cv.VH / 2 + (mouse.y - cv.VH / 2) * cv.zoom;
+    for (const it of world.items) {
+      const p = it.p; if (p.broken || p.gone || !(p.target || p.hp > 0)) continue;
+      const z0 = (p.z || 0) + (p.h || 0), hh = p.hitH ?? (p.kind === 'pot' ? .55 : p.kind === 'crate' ? .75 : 1.6), rr = Math.max(.3, p.hitR ?? p.r ?? .4);
+      const [x0, y0] = G.toScreen(p.x, z0 + hh, p.y), [, y1] = G.toScreen(p.x, z0, p.y), w = rr * PPM * cv.zoom;
+      if (mx > x0 - w - 2 && mx < x0 + w + 2 && my > y0 - 3 && my < y1 + 3) {
+        const n = toView(p.x, p.y)[1];
+        if (n > bn) { bn = n; best = p; bh = z0 + hh * Math.max(.08, Math.min(.95, (y1 - my) / (y1 - y0 || 1))); }
+      }
+    }
+    return best && {x: best.x, y: best.y, h: bh, target: best};
+  }
+  function nearProp() {
+    const world = worldOf();
+    let best = null, bd = 1.3; const px = player.x, py = player.y;
+    for (const p of world.props) if (p.interact && !p.opened && Math.abs((p.z || 0) - P.z) < .5) { const d = Math.hypot(p.x - px, p.y - py); if (d < bd) { bd = d; best = p; } }
+    return best;
+  }
+  // climbing at any camera angle: the climb spot is checked in the world; the climb itself runs at yaw 0 (the camera
+  // eases there while you climb, and back to where it was after)
+  function climbSpotW() {   // player.js climbSpot, in the world
+    const x = player.x, y = player.y;
+    for (const q of PLATEAUS) for (const c of q.climbs || []) {
+      if (Math.abs(x - c.x) > c.w / 2 + .45) continue;
+      if (P.z < .05 && y >= q.y1 - .05 && y < q.y1 + 1.3) return true;
+      if (Math.abs(P.z - q.h) < .05 && y <= q.y1 && y > q.y1 - 1.3) return true;
+    }
+    return false;
+  }
+  const A = {assist: null};   // {back: yaw to return to, phase: 'in' | 'climb' | 'back'}
+  function stepAssist(dt, ny) {
+    const assist = A.assist, climbing = P.state === 'climb' || P.state === 'mantle';
+    if (assist.phase === 'in') {
+      ny = Math.abs(cv.yaw) < .004 ? 0 : cv.yaw * Math.exp(-dt * 12);
+      if (ny === 0) { cv.setYaw(0); syncPlateaus(); PL.onInteractKey(); PL.onInteractUp(); assist.phase = P.state === 'climb' ? 'climb' : 'back'; }
+    } else if (assist.phase === 'climb') { ny = 0; if (!climbing) assist.phase = 'back'; }
+    else {
+      const d = Math.atan2(Math.sin(assist.back - cv.yaw), Math.cos(assist.back - cv.yaw));
+      ny = Math.abs(d) < .002 ? assist.back : cv.yaw + d * (1 - Math.exp(-dt * 8)); if (Math.abs(d) < .002) A.assist = null;
+    }
+    return ny;
+  }
+  // put the player at world (x, y), standing, and snap the camera there
+  function teleport(x, y) {
+    const [vx, vy] = toView(x, y);
+    Object.assign(P, {x: vx, y: vy, z: elev(x, y), vx: 0, vy: 0, state: 'idle', t: 0, sink: 0, leap: null, hold: null});
+    cv.snap();
+  }
+  return {PL, P, player, blocked, syncPlateaus, turnFrame, toWorldEvent, hoverTarget, nearProp, climbSpotW, stepAssist, teleport,
+    tick() { hoverKey++; }, get assist() { return A.assist; }, set assist(v) { A.assist = v; }};
+}
