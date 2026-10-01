@@ -124,6 +124,7 @@ memo on them. Arrows get `trail stuck hitSet` (main), `_lt _id fire` (lights), `
 | loot, open, coin, trap, respawn | core (respawn also props) | wildlife, audio |
 | tip, kick, scrape, impact | props.js | wildlife, audio |
 | birds_scatter, wings, caw, fish_jump, frog_jump, critter_dash | wildlife | audio (birds_scatter also wildlife) |
+| bird_perch (a bird lands on / leaves a prop's top; added after the audit) | wildlife | wind (shakes dying leaves loose) |
 | ignite, crackle, logFall, addWood | lights | none |
 | talk | garden | none |
 | roll | never emitted | atmos (dead branch) |

@@ -13,9 +13,10 @@
 //   seasons  leafRamp(): the ruins' leaf ramp for the season (spring fresh, summer deep, autumn rust, winter withered),
 //            blended across a season's change; ver.leaf counts its changes (update on change, never per frame)
 //   ground   the weather's memory: snowCover (builds in snowfall, melts slowly in winter, fast in spring), wet (rain wets,
-//            the sun dries), leafK (how full the ruins' crowns are through the year); features/weather.js shows them
+//            the sun dries), leafK (how full the ruins' crowns are through the year); features/weather.js shows them.
+//            leafFall: how fast the leaves are dying now (0..1, the peak where autumn turns to winter; features/wind.js)
 // OWNS: the clock (t, hour, day), the season and its blend (+ year 0..4), the weather (state + eased channels), the
-// ground's memory (snowCover, wet, leafK), the blended moods.
+// ground's memory (snowCover, wet, leafK, leafFall), the blended moods.
 // READS: the biome id (biome()), the mood tables (moods, content). EMITS: nothing; ver.{part, season, weather, leaf} count
 // changes for whoever needs to react. BUDGET: ~0.01 ms per step, ~0.01 ms per mood(); no allocation after creation.
 //
@@ -42,6 +43,10 @@ export const TUNE = {
 // how full the ruins' crowns are through the year (year position 0..4 = spring .. winter): budding in spring, full in
 // summer, thinning through autumn, bare in winter
 const LEAF_YEAR = [[0, .12], [.65, 1], [2, 1], [2.55, .78], [2.95, .3], [3.1, .07], [3.85, .07], [4, .12]];
+// how fast the leaves are dying (year position -> 0..1, linear between): the odd dead one in summer, more and more through
+// autumn as LEAF_YEAR thins the crowns, the most where autumn turns into winter, the last few after; in spring the buds
+// push off a withered straggler. features/wind.js drops leaves at this rate and shakes them loose easier
+const LEAF_FALL = [[0, .04], [.5, .02], [1, .03], [1.6, .06], [2, .14], [2.5, .45], [2.9, .9], [3.05, 1], [3.2, .3], [3.4, .06], [3.85, .03], [4, .04]];
 export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
 export const PARTS = ['night', 'dawn', 'day', 'dusk'];
 // the day: [hour, mood] keyframes, smoothstepped between (dawn = dusk's mood, lit from the east)
@@ -95,7 +100,7 @@ export function createEnv({moods, biome, Q = new URLSearchParams(location.search
   const DAY = () => TUNE.dayMinutes * 60;   // real s per day
   const E = {TUNE, hour: 0, day: 0, t: 0, part: 'day', bucket: 'day', season: 'spring', seasonNext: 'summer', seasonK: 0,
     weather: 'fair', sky: {cloud: 0, rain: 0, snow: 0, fog: 0, storm: 0, wind: 1}, windLevel: 1,
-    year: 0, tinted: false, snowCover: 0, wet: 0, leafK: 1,   // year 0..4 (spring .. winter); tinted = the biome's colours follow the season
+    year: 0, tinted: false, snowCover: 0, wet: 0, leafK: 1, leafFall: 0,   // year 0..4 (spring .. winter); tinted = the biome's colours follow the season
     ver: {part: 0, season: 0, weather: 0, leaf: 0}, frozen: false, seasonLock: null, weatherLock: null};
   let spellLeft = 0, lastBiome = null, R = Math.random;
   // ---- persistence: {t (in-game hours since the start), weather, spellLeft}
@@ -129,6 +134,8 @@ export function createEnv({moods, biome, Q = new URLSearchParams(location.search
     E.year = E.seasonLock ? SEASONS.indexOf(E.seasonLock) + .5 : sf;
     let j = 0; while (j < LEAF_YEAR.length - 2 && E.year >= LEAF_YEAR[j + 1][0]) j++;
     const [y0, l0] = LEAF_YEAR[j], [y1, l1] = LEAF_YEAR[j + 1]; E.leafK = SEASONAL[b] ? lerp(l0, l1, smooth((E.year - y0) / (y1 - y0))) : 1;
+    j = 0; while (j < LEAF_FALL.length - 2 && E.year >= LEAF_FALL[j + 1][0]) j++;
+    const [f0, a0] = LEAF_FALL[j], [f1, a1] = LEAF_FALL[j + 1]; E.leafFall = SEASONAL[b] ? lerp(a0, a1, clamp((E.year - f0) / (f1 - f0), 0, 1)) : 0;
   }
   // the ground's memory: lying snow and wetness (in-game hours; only where the biome follows the seasons)
   function stepGround(dh) {

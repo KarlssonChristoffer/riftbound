@@ -13,6 +13,8 @@
 // in the arena. AUDIBLE moments go to host.events for the audio feature (next step), names unchanged:
 //   {type: 'birds_scatter', x, y, n}  {type: 'wings', x, y}  {type: 'caw', x, y}  {type: 'fish_jump', x, y}
 //   {type: 'frog_jump', x, y}  {type: 'critter_dash', x, y}   (+ {type: 'splash', small, wl: true} for plops)
+// and, for the wind feature (not rate-limited, in view only): {type: 'bird_perch', x, y, h, prop, off, big, scared} when a
+// bird lands on (off false) / takes off from (off true) a prop's top; wind.js shakes a dying leaf off a crown
 //
 // WHAT CHANGED FOR 3D (the simulation is the arena's, in world metres; only the view side moved):
 //   sprites    every animal is a camera-facing host.sprite from ONE atlas per biome (albedo + emit, same layout; glows
@@ -288,6 +290,9 @@ export async function create(host) {
     host.events.push(Object.assign({type, x, y}, extra)); return true;
   };
   const splash = (x, y) => emit('splash', x, y, {small: true, wl: true});
+  // a bird landing on / leaving a prop's top (not rate-limited: one per bird, only in view): the wind feature shakes a
+  // dying leaf (snow) off a crown or a bush
+  const perchEv = (b, s, off) => { if (WL.on && host.events && s.p && near(s.x, s.y)) host.events.push({type: 'bird_perch', x: s.x, y: s.y, h: s.h, prop: s.p, off, big: !!b.sp.solo, scared: !!b.f.scared}); };
 
   // ---------- perches: painted cards read their sprite's top row; 3D models are ray cast ----------
   const alphaCache = new WeakMap();
@@ -506,6 +511,7 @@ export async function create(host) {
     if (f.scared) { const s = f.sp.speed * rr(.75, 1); b.vx = ax / d * s + rr(-.8, .8); b.vy = ay / d * s * .8 + rr(-.8, .8); b.vh = rr(2.6, 3.6) * (f.sp.heavy ? .8 : 1); }
     else { b.vx = (f.cx - b.x) * .4 + rr(-.4, .4); b.vy = (f.cy - b.y) * .4 + rr(-.4, .4); b.vh = rr(1.4, 2.2); }
     if (Math.hypot(b.vx, b.vy) > .2) faceV(b, b.vx, b.vy);
+    if (b.lift) perchEv(b, b.lift, true);
     b.st = 'fly'; b.air = 0; b.spot = null; b.lift = null;
   }
   function settle(b) {
@@ -672,7 +678,7 @@ export async function create(host) {
       dvx = dx / (dxy || 1) * spd; dvy = dy / (dxy || 1) * spd; dvh = clamp(dh / tt, -2.8, 2.8);
       if (dxy > 2.5 && dh < 0) dvh = Math.max(dvh, -.5);
       agil *= 2.2;
-      if (d3 < .1 || (dxy < .16 && Math.abs(dh) < .2) || b.air > 12) { settle(b); if (f.birds.every(o => o.st !== 'fly')) emitLanding(f); return; }
+      if (d3 < .1 || (dxy < .16 && Math.abs(dh) < .2) || b.air > 12) { settle(b); if (b.spot) perchEv(b, b.spot, false); if (f.birds.every(o => o.st !== 'fly')) emitLanding(f); return; }
     } else {
       const rx = b.x - f.cx, ry = b.y - f.cy, d = Math.hypot(rx, ry) || .01, R0 = f.R + b.ro;
       const tx = -ry / d * f.dir, ty = rx / d * f.dir, pull = clamp((R0 - d) * .9, -2.2, 2.2);

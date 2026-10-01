@@ -26,8 +26,9 @@
 //
 // FEATURE CONTRACT (main.js): create(host) -> F
 //   F.name 'wind', F.key '5', F.on / F.toggle(), F.ms (rolling average cost per frame, update + frame + card hook)
-//   F.update(dt, evs)   field, foliage springs, cloth / lantern sims (60 Hz fixed), shed particles, events (dummy hits
-//                       kick the strips, explosions whip foliage and billow cloth)
+//   F.update(dt, evs)   field, foliage springs, cloth / lantern sims (60 Hz fixed), shed particles (+ the season's dying
+//                       leaves, env.leafFall), events (dummy hits kick the strips, explosions whip foliage and billow cloth,
+//                       a bird landing on / leaving a crown, wildlife.js 'bird_perch', knocks a dying leaf loose)
 //   F.frame(f)          cloth atlas raster + its cards, posts / lantern sprites, ropes / rods / chains (host.line),
 //                       shed particles (host.point; sparks / motes glow through host.layer('emit')), pole contact shadows
 //                       (host.layer('ground'))
@@ -96,6 +97,7 @@ const STRENGTH = {
   danceMin: .3,       // ...this much (a breeze between gusts leaves the crown still)
   wave: .16,          // light rolling through the crowns: tone bias per unit of (level x gust), capped at .24
   shed: 1.3,          // leaves shed per second per tree at a full gust, per unit of level above .75
+  fall: .3,           // dying leaves that let go by themselves in still air, per second per tree at env.leafFall 1 (autumn's end)
   airborne: 5,        // leaves (snow, ash) blown across the view per second, per unit of level above 1.1 (x .25 in a lull, x 1.85 in a gust)
 };
 // foliage flexibility per biome: null = rigid. px = max lean at the top, w = spring rad/s, z = damping, fq = flutter Hz,
@@ -119,7 +121,7 @@ const CURVES = {   // the arena's row weights: u = 0 at the sprite's base row ..
 };
 // shed particles per biome (bushes shaken by arrows, snow blown off in a gust)
 const SHED = {
-  ruins: {kind: 'leaf', pals: [['#6f8c68', '#577154', '#435a45'], ['#6f8c68', '#577154', '#435a45'], ['#a4ae52', '#7a8a3c', '#4e5c2a'], ['#d0a44a', '#a47a34', '#6c5024']]},
+  ruins: {kind: 'leaf', pals: [['#6f8c68', '#577154', '#435a45'], ['#6f8c68', '#577154', '#435a45'], ['#a4ae52', '#7a8a3c', '#4e5c2a'], ['#d0a44a', '#a47a34', '#6c5024'], ['#9c7650', '#76563a', '#503a28']]},
   ember: {kind: 'spark', pal: ['#ffd27e', '#f28a36', '#b8481c', '#5e200e'], ash: ['#a39a92', '#7c746e', '#57514d']},
   frost: {kind: 'snow', pal: ['#f2f6ff', '#c4d0e4', '#8e9cb8']},
   rift: {kind: 'mote', pal: ['#e4c8ff', '#ac80f2', '#7448c4', '#40247a']},
@@ -980,18 +982,22 @@ export async function create(host) {
     else { const c = Math.cos(ps.yaw), s = Math.sin(ps.yaw), k = ps.scale, z = p.z || 0; cr = {x: p.x + (C.x * c + C.z * s) * k, y: p.y + (-C.x * s + C.z * c) * k, h0: z + C.y0 * k, h1: z + C.y1 * k, r: C.r * k}; }
     crowns.set(it, cr); return cr;
   }
-  function shed(p, n, why) {
+  // why: 'wind' (torn off in a gust), 'gust' (a front arriving), 'arrow', 'blast', 'fall' (a dying leaf letting go by
+  // itself), 'bird' (knocked off where a bird lands / takes off: at = its spot {x, y, h})
+  function shed(p, n, why, at) {
     const S = SHED[biome]; if (!S) return;
     const sp = host.biome.sprite(p, ctx), hTop = sp ? sp.pivot[1] / ctx.PPMH : .6, z = p.z || 0, tree = p.kind === 'tree';   // sprite top above the ground point
-    const a = field(p.x, p.y), ax = a.x, ay = a.y, cr = tree ? crownOf(p) : null;
+    const a = field(p.x, p.y), ax = a.x, ay = a.y, cr = tree && !at ? crownOf(p) : null, soft = why === 'fall' || why === 'bird';
     for (let i = 0; i < n; i++) {
       let h = z + (tree ? hTop * (.35 + R() * .5) : hTop * (.45 + R() * .45)), o = (R() - .5) * (tree ? 1.6 : .6), cx = p.x, cy = p.y, f = .02;   // across the crown, as seen
-      if (cr) {   // a 3D crown: from its own bulk, on the side facing the camera (inside it they'd stay hidden)
+      if (at) { h = at.h - .04 - R() * .2; o = (R() - .5) * .4; cx = at.x; cy = at.y; f = .12 + R() * .16; }   // under the bird's feet, just on the camera side
+      else if (cr) {   // a 3D crown: from its own bulk, on the side facing the camera (inside it they'd stay hidden)
         h = cr.h0 + (cr.h1 - cr.h0) * (.15 + R() * .7); o = (R() - .5) * cr.r * 1.6; cx = cr.x; cy = cr.y;
         f = cr.r * .85 * Math.sqrt(Math.max(0, 1 - (o / cr.r) ** 2));
       }
       const base = {x: cx + RX * o + FX * f, y: cy + RY * o + FY * f + (R() - .5) * .1, h, t: 0, ph: R() * TAU, rest: 0};
-      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: leafPal(S), vx: (R() - .5) * 1.4 + ax * .6, vy: (R() - .5) * .5, vh: why === 'arrow' ? .6 + R() * .8 : R() * .3, life: 9, g: 1.4, big: why === 'wind' && R() < .4});
+      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: leafPal(S), vx: (R() - .5) * (soft ? .4 : 1.4) + ax * .6, vy: (R() - .5) * (soft ? .25 : .5),
+        vh: why === 'arrow' || why === 'blast' ? .6 + R() * .8 : why === 'fall' ? 0 : R() * .3, life: 4 + (h - z) * 2.5, g: 1.4, big: why === 'wind' && R() < .4, lie: soft ? 2.5 : 1});   // (long enough to reach the ground: it falls ~.45 m/s)
       else if (S.kind === 'snow') spawnPart({...base, kind: 'snow', pal: S.pal, vx: (R() - .5) * 1.6 + ax * .8, vy: (R() - .5) * .6, vh: .4 + R() * 1.1, life: .5 + R() * .45, g: 6});
       else if (S.kind === 'spark') {
         if (R() < .6) spawnPart({...base, kind: 'spark', pal: S.pal, emit: true, vx: (R() - .5) * .9 + ax * .5, vy: (R() - .5) * .3, vh: .5 + R() * .9, life: .6 + R() * .7, g: -.35});
@@ -999,16 +1005,29 @@ export async function create(host) {
       } else spawnPart({...base, kind: 'mote', pal: S.pal, emit: true, vx: (R() - .5) * .5, vy: (R() - .5) * .3, vh: .15 + R() * .35, life: 1 + R() * .9, g: -.08});
     }
   }
-  function gustShed(p) {   // a gust front hits: snow blows off frost pines / bushes, a leaf leaves a ruins tree now and then
+  function gustShed(p) {   // a gust front hits: snow blows off frost pines / bushes, a ruins tree lets go of a leaf or a few (autumn)
     if (biome === 'frost' && (p.kind === 'tree' || p.kind === 'bush') && R() < .75) shed(p, p.kind === 'tree' ? 3 + (R() * 3 | 0) : 1 + (R() * 2 | 0), 'gust');
-    else if (biome === 'ruins' && p.kind === 'tree' && (p.variant | 0) !== 2 && R() < .5) shed(p, 1, 'gust');
+    else if (biome === 'ruins' && p.kind === 'tree' && (p.variant | 0) !== 2) { const n = Math.floor(leafRate(SHED.ruins) * (.55 + R())); if (n > 0) shed(p, n, 'gust'); }
   }
-  // ---- the season's leaves (host.env, sim/env.js): autumn sheds rust and gold, and many; winter has few left; spring /
-  // summer the odd green one. Indices into SHED.ruins.pals [green, green, yellow-green, rust-gold]
-  const SEASON_LEAF = {spring: [0, 1, 2], summer: [0, 1, 1, 2], autumn: [2, 3, 3, 3], winter: [3]};
-  const SEASON_SHED = {spring: .7, summer: .6, autumn: 2.2, winter: .25};
-  function leafPal(S) { const e = host.env, ix = e?.seasonal ? SEASON_LEAF[e.season] : null; return S.pals[ix ? ix[R() * ix.length | 0] : R() * S.pals.length | 0]; }
-  const leafRate = S => S.kind === 'leaf' && host.env?.seasonal ? SEASON_SHED[host.env.season] ?? 1 : 1;
+  // ---- the season's leaves (host.env, sim/env.js): the leaves DIE through the year (env.leafFall: the odd one in summer,
+  // more and more through autumn, the most where autumn turns into winter, the last few after, as env.leafK thins the
+  // crowns). A dying leaf lets go by itself in still air (STRENGTH.fall) and far easier when something ruffles the crown: a
+  // gust, an arrow, a blast, a bird landing or taking off (wildlife.js 'bird_perch'). leafRate = how loose they are (~.85
+  // in summer, ~2 mid-autumn, ~3.2 at the peak, ~.2 on the bare winter crowns). Colours: half the crown's own (env.leafRamp),
+  // half browner than it (DYING: indices into SHED.ruins.pals [green, green, yellow-green, rust-gold, withered brown])
+  const DYING = {spring: [4, 2], summer: [2, 2, 3], autumn: [3, 4], winter: [4]};
+  let crownPal = null, crownV = -1;
+  const hex6 = c => '#' + c.map(v => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')).join('');
+  function leafPal(S) {
+    const e = host.env; if (!e?.seasonal) return S.pals[R() * S.pals.length | 0];
+    if (R() < .5) {
+      const lr = e.leafRamp?.();   // (blended across a season's change; rebuilt only when it changed)
+      if (lr) { if (e.ver.leaf !== crownV) { crownV = e.ver.leaf; crownPal = [hex6(lr[0]), hex6(lr[1]), hex6(lr[2])]; } return crownPal; }
+    }
+    const ix = DYING[e.season] || DYING.autumn; return S.pals[ix[R() * ix.length | 0]];
+  }
+  const leafRate = S => { const e = host.env; return S.kind === 'leaf' && e?.seasonal ? e.leafK * .6 + (e.leafFall || 0) * 3.2 : 1; };
+  const leafyTree = p => !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins');   // (a ruins dead tree has no leaves)
   // ---- the feel of a strong wind: leaves torn off the crowns in gusts, leaves (snow, ash) blowing through the view from
   // upwind, and what the foliage around the player sounds like: W.rustle = {e: the agitation of the leafy crowns / bushes
   // near him (1 = one tree beside him in a full breeze gust), pan: where they are on screen, -1..1}
@@ -1016,14 +1035,18 @@ export async function create(host) {
   function stepFeel(dt) {
     const S = SHED[biome], lv = Math.max(0, LV - .75);
     let e = 0, ep = 0;
-    const sheds = S && lv > 0 && (S.kind === 'leaf' || S.kind === 'snow');
+    const loose = S ? leafRate(S) : 1, fall = S?.kind === 'leaf' ? (host.env?.leafFall || 0) * STRENGTH.fall : 0;   // (dying leaves drop even in a calm)
+    const sheds = S && (lv > 0 || fall > 0) && (S.kind === 'leaf' || S.kind === 'snow');
     for (const p of nearList()) {
       if (p.kind === 'tuft') continue;
       const F = flexOf(p); if (!F) continue;
-      const leafy = !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins'), d = Math.hypot(p.x - PL.x, p.y - PL.y);
+      const leafy = leafyTree(p), d = Math.hypot(p.x - PL.x, p.y - PL.y);
       const sh = sheds && leafy && vis(p.x, p.y); if (!sh && d > 16) continue;   // (the wind field only where it's needed)
       const a = field(p.x, p.y);
-      if (sh && R() < dt * lv * a.g * STRENGTH.shed * leafRate(S) * (p.kind === 'tree' ? 1 : .3)) shed(p, 1, 'wind');
+      if (sh) {
+        const torn = lv * a.g * STRENGTH.shed * loose;
+        if (R() < dt * (torn + fall) * (p.kind === 'tree' ? 1 : .3)) shed(p, 1, R() * (torn + fall) < torn ? 'wind' : 'fall');
+      }
       if (d > 16) continue;
       const st = fst.get(p), w = (p.kind === 'tree' ? (leafy ? 1 : .3) : .35) * (1 - d / 16) ** 2;
       const sp = Math.hypot(a.x, a.y) / vref(), ag = w * sp * sp * (.7 + .3 * Math.min(1, st ? Math.hypot(st.vx, st.vy) / 25 : 0));   // ~ wind speed^2: the gusts do the talking
@@ -1071,7 +1094,7 @@ export async function create(host) {
       q.x += q.vx * dt; q.y += q.vy * dt; q.h += q.vh * dt;
       const gnd = host.elev(q.x, q.y);
       if (q.h <= gnd) {
-        if (q.kind === 'leaf' && !(gnd === 0 && host.inStream(q.x, q.y))) { q.h = gnd; q.rest = 1.2 + R() * 1.2; q.restMax = q.rest; }
+        if (q.kind === 'leaf' && !(gnd === 0 && host.inStream(q.x, q.y))) { q.h = gnd; q.rest = (1.2 + R() * 1.2) * (q.lie || 1); q.restMax = q.rest; }   // (a dead leaf lies a while, darkening)
         else { parts[i] = parts[parts.length - 1]; parts.pop(); }
       }
     }
@@ -1121,7 +1144,8 @@ export async function create(host) {
         else if (Math.hypot(a.x - p.x, (a.y - p.y) * 1.3) > r || a.h < z + (p.kind === 'tree' ? .9 : 0) || a.h > z + hMax) continue;
         let S = shook.get(a); if (!S) shook.set(a, S = new Set()); if (S.has(p)) continue; S.add(p);
         const st = fst.get(p); if (st) { st.shake = 1; const k = Math.sign(sv || 1) * 30; st.vx += RX * k; st.vy += RY * k; }   // shudders along the screen's x
-        shed(p, p.kind === 'tree' ? 4 + (R() * 3 | 0) : 3 + (R() * 3 | 0), 'arrow');
+        const S0 = SHED[biome], m = S0 ? clamp(.5 + .45 * leafRate(S0), .4, 2) : 1;   // (the season: a bare winter crown has few left, a dying autumn one many)
+        if (leafyTree(p)) shed(p, Math.round((p.kind === 'tree' ? 4 + (R() * 3 | 0) : 3 + (R() * 3 | 0)) * m), 'arrow');
       }
     }
   }
@@ -1132,10 +1156,12 @@ export async function create(host) {
         for (const it of decor) if (it.dummy === e.prop) for (const pc of it.pieces) kick(pc, (e.vx || 0) / v * 1.6, (e.vy || 0) / v * 1.2, .8, 1);
       } else if (e.type === 'explode') {   // a blast wave: foliage whips, cloth billows away from it
         const r = (e.r || 2.4) * 2.5;
+        const S = SHED[biome], loose = S?.kind === 'leaf' ? leafRate(S) : 0;
         for (const p of nearList()) {   // (only foliage that has swayed in view has a spring state to kick)
           const d = Math.hypot(p.x - e.x, p.y - e.y), st = fst.get(p); if (!st || d > r) continue;
           const k = Math.sign((p.x - e.x) * RX + (p.y - e.y) * RY || 1) * 90 * (1 - d / r);
           st.vx += RX * k; st.vy += RY * k; st.shake = Math.max(st.shake, .6 * (1 - d / r));
+          if (loose && p.kind !== 'tuft' && leafyTree(p)) { const n = Math.floor(loose * 2.5 * (1 - d / r) * (p.kind === 'tree' ? 1 : .4) + R()); if (n > 0) shed(p, n, 'blast'); }   // and the leaves that were ready to go
         }
         for (const it of decor) {
           const d = Math.hypot(it.x - e.x, it.y - e.y); if (d > r * 1.4) continue;
@@ -1143,6 +1169,14 @@ export async function create(host) {
           for (const pc of it.pieces) kick(pc, ux * k, uy * k, k * .5);
           if (it.lantern) { it.lantern.ox -= ux * k / 60; it.lantern.oy -= uy * k / 60; }
         }
+      } else if (e.type === 'bird_perch' && e.prop) {   // wildlife.js: a bird landed on / took off from a crown or a bush
+        const p = e.prop, F = flexOf(p); if (!F || p.kind === 'tuft' || !vis(p.x, p.y)) continue;
+        const st = fst.get(p), tree = p.kind === 'tree';   // a crow / raven bobs a branch, a sparrow on a big oak barely does
+        if (st) st.shake = Math.max(st.shake, (tree ? .14 : .4) * (e.big ? 2.6 : 1) * (e.off && e.scared ? 1.4 : 1));
+        const S = SHED[biome]; if (!S || (S.kind !== 'leaf' && S.kind !== 'snow') || !leafyTree(p)) continue;
+        // a dying leaf under its feet lets go (snow: a puff off the branch); taking off kicks harder than landing
+        const n = Math.floor((e.off ? .5 : .3) * (e.big ? 2 : 1) * (e.off && e.scared ? 1.4 : 1) * (S.kind === 'snow' ? 2 : leafRate(S)) * (tree ? 1 : .6) + R());
+        if (n > 0) shed(p, n, 'bird', e);
       }
     }
   }
