@@ -52,11 +52,10 @@ import {createLighting} from './render/lighting.js';
 import {createProjectiles} from './sim/projectiles.js';
 import {flags} from './core/flags.js';
 import {lum, rgbOf} from './core/color.js';
-import {toView as viewOf, toWorld as worldOf} from './render/viewxf.js';
+import {createCamera, ROT_SPEED, SNAP_NAME} from './render/camera.js';
 
 const $ = s => document.querySelector(s);
 const Q = flags;   // the URL switches (core/flags.js)
-let VW = 480, VH = 270;   // the view in art px: the window decides (fit, below)
 const t00 = performance.now();
 const FEATURES = ['wind', 'windlines', 'weather', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)
 
@@ -69,37 +68,18 @@ let tp = performance.now();
 const set = await loadLoadout(loadI);
 mark('atlas', tp);
 const PPM = set.idx.fwd_px.E[0], PPMH = PPM * Math.cos(set.idx.pitch * DEG), PPMY = PPM * Math.sin(55 * DEG);
-// THE VIEW follows the window and the zoom. `scale` is the DISPLAY SCALE (screen px per art px, whole: the art stays crisp)
-// and the view is as many art px as fill the window at it, so a wide or ultrawide screen sees more of the world to the
-// sides instead of black bars. The window's own scale (base: the biggest that still fits 480 x 270, the design) is the
-// default zoom; the wheel moves `scale` (zoom levels, below). Capped at the world's size (bars past that). A change
-// resizes the renderer (G.resize) and tells the features (F.resize?(VW, VH)); host.VW / VH and ctxO.VW / VH are current
-const VIEW = {w: 480, h: 270, maxW: Math.min(1920, Math.floor(WORLD.WM * PPM / 2) * 2), maxH: Math.min(1080, Math.floor(WORLD.HM * PPMY / 2) * 2)};
-const even = v => Math.floor(v / 2) * 2;
-const baseScale = () => Math.max(1, Math.floor(Math.min(innerWidth / VIEW.w, innerHeight / VIEW.h)));
-const viewAt = s => [Math.min(VIEW.maxW, even(innerWidth / s)), Math.min(VIEW.maxH, even(innerHeight / s))];
-// zoom levels: out to half the base scale (twice the world on screen), in to twice it. ?zoom=2 starts zoomed in
-const scaleRange = b => [Math.max(1, Math.ceil(b / 2)), b * 2];
-let dsBase = baseScale(), dsGoal = Q.get('zoom') === '2' ? dsBase * 2 : dsBase, scale = dsGoal;   // the window's scale, the wheel's goal, the view's scale now
-[VW, VH] = viewAt(scale);
-const ctxO = {PPM, PPMY, PPMH, toS: (x, y, h = 0) => [x * PPM, y * PPMY - h * PPMH], VW, VH};
+const ctxO = {PPM, PPMY, PPMH, toS: (x, y, h = 0) => [x * PPM, y * PPMY - h * PPMH], VW: 0, VH: 0};
+// THE CAMERA (render/camera.js): the view's size (window + zoom), the yaw, the target, shake, ground sampling. cv.VW / VH /
+// scale / zoom / yaw are read live from it; a turn of the yaw turns the player's view-frame state with it (turnFrame)
+const cv = createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: () => opt, onTurn: d => turnFrame(d), flags: Q});
 
+const features = [], events = [];
 const canvas = $('#screen');
-const G = createGfx(canvas, {VW, VH, PPM, PPMY, PPMH});
+const G = createGfx(canvas, {VW: cv.VW, VH: cv.VH, PPM, PPMY, PPMH});
 // the HD overlay: display resolution, over the pixel canvas (damage numbers, bars, prompts)
 const hdc = document.createElement('canvas'); hdc.id = 'hd'; hdc.style.cssText = 'position:absolute;pointer-events:none;image-rendering:auto';
 $('#wrap').appendChild(hdc); const hq = hdc.getContext('2d');
-function fit() {   // the window changed, or a zoom arrived (stepZoom): the view at `scale`
-  const b = baseScale();
-  if (b !== dsBase) { const [lo, hi] = scaleRange(b); dsGoal = Math.max(lo, Math.min(hi, Math.round(dsGoal * b / dsBase))); dsBase = b; scale = dsGoal; zoom = 1; }   // (the same zoom, relative)
-  const [w, h] = viewAt(scale);
-  if (w !== VW || h !== VH) { VW = ctxO.VW = w; VH = ctxO.VH = h; G.resize(w, h); for (const f of features) f.resize?.(w, h); }
-  canvas.style.width = VW * scale + 'px'; canvas.style.height = VH * scale + 'px';
-  G.setDisplay?.(scale);   // the canvas at display size: the pixel image is blown up on the GPU, HD effects draw over it
-  const dpr = devicePixelRatio || 1; hdc.width = VW * scale * dpr; hdc.height = VH * scale * dpr; hdc.style.width = canvas.style.width; hdc.style.height = canvas.style.height;
-  const r = canvas.getBoundingClientRect(); hdc.style.left = r.left + 'px'; hdc.style.top = r.top + 'px';
-}
-fit(); addEventListener('resize', fit);
+cv.attach({G, canvas, hdc, features}); cv.fit(); addEventListener('resize', () => cv.fit());
 
 let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome')));
 // THE WORLD CLOCK (sim/env.js): time of day, seasons, weather, running in the background. It owns "what time is it":
@@ -107,12 +87,11 @@ let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome')));
 const env = createEnv({moods: MOODS, biome: () => BIOMES[biomeI].id, Q});
 let world = null, propMode = Q.get('props') === 'yaw' ? 'yaw' : 'live';
 let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+R rebuilds)
-const features = [], events = [];
 // APP: the engine's own context for the modules split out of this file (view/hero.js, ...): live getters, so a module
 // reads the current yaw / zoom / player without this file passing them every call. (Features get `host`, below.)
 const app = {
-  get P() { return P; }, get PL() { return PL; }, get player() { return player; }, get yaw() { return yaw; }, get zoom() { return zoom; },
-  get VW() { return VW; }, get VH() { return VH; }, get opt() { return opt; }, get cam() { return cam; }, get arrows() { return arrows; },
+  get P() { return P; }, get PL() { return PL; }, get player() { return player; }, get yaw() { return cv.yaw; }, get zoom() { return cv.zoom; },
+  get VW() { return cv.VW; }, get VH() { return cv.VH; }, get opt() { return opt; }, get cam() { return cam; }, get arrows() { return arrows; },
   feat: name => feat(name), toView: (x, y, a) => toView(x, y, a),
 };
 // the wind sways painted foliage cards (per-row bend) and gives braziers / torches a live flame
@@ -147,14 +126,10 @@ if (Q.get('lineup') === 'trees') {
 }
 
 // ---------------------------------------------------------------- the camera's frame
-// zoom: the projection's extra scale ON TOP of `scale` (the display scale). 1 at rest; between zoom levels it carries the
-// easing (stepZoom). host.zoom is this (view px per art px), so features size their pixels right while it eases
-let yaw = (+Q.get('yaw') || 0) * DEG, zoom = 1, snapMode = +(Q.get('snap') ?? 0) || 0;
-const SNAP = [0, 22.5 * DEG, 90 * DEG], SNAP_NAME = ['free', '22.5° steps', '90° steps'];
-const toView = (X, Z, a = yaw) => viewOf(X, Z, a), toWorld = (vx, vy, a = yaw) => worldOf(vx, vy, a);   // (render/viewxf.js at this camera's yaw)
+const toView = cv.toView, toWorld = cv.toWorld;   // world <-> the camera's view frame at its yaw (render/viewxf.js)
 
 // ---------------------------------------------------------------- the player
-const keys = new Set(), mouse = {x: VW / 2, y: VH / 2, down: false}, cam = {x: 0, y: 0, fx: 0, fy: 0};
+const keys = new Set(), mouse = {x: cv.VW / 2, y: cv.VH / 2, down: false}, cam = {x: 0, y: 0, fx: 0, fy: 0};
 const R_BODY = .25;
 // collision in the world (round, so it doesn't change with the camera; the arena squashes it to match its 2D look)
 function blockedW(x, y, z, air) {
@@ -168,7 +143,7 @@ function blockedW(x, y, z, air) {
 }
 // the plateau as the player sees it. Exact when the camera faces north; turned, the climb spot is handled by the host
 const plateausV = PLATEAUS.map(q => ({...q}));
-function syncPlateaus() { PLATEAUS.forEach((q, i) => Object.assign(plateausV[i], Math.abs(yaw) < 1e-6 ? {...q} : {h: q.h, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, climbs: []})); }
+function syncPlateaus() { PLATEAUS.forEach((q, i) => Object.assign(plateausV[i], Math.abs(cv.yaw) < 1e-6 ? {...q} : {h: q.h, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, climbs: []})); }
 // arrows, hit pops, footstep dust (sim/projectiles.js)
 const proj = createProjectiles({world: () => world, features, events, opt: () => opt, toWorld, PPM, PPMH});
 const {arrows, dust} = proj, spawnArrow = proj.spawn;
@@ -196,12 +171,12 @@ const P = PL.P;
 // the player as features see it: world frame, live
 // (x / y are read dozens of times a frame: computed once per move or turn, not per read)
 let pwX = 0, pwY = 0, pwA = NaN, pwB = NaN, pwYaw = NaN;
-function pwSync() { if (P.x !== pwA || P.y !== pwB || yaw !== pwYaw) { pwA = P.x; pwB = P.y; pwYaw = yaw; const c = Math.cos(yaw), s = Math.sin(yaw); pwX = P.x * c + P.y * s; pwY = -P.x * s + P.y * c; } }
+function pwSync() { if (P.x !== pwA || P.y !== pwB || cv.yaw !== pwYaw) { pwA = P.x; pwB = P.y; pwYaw = cv.yaw; const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); pwX = P.x * c + P.y * s; pwY = -P.x * s + P.y * c; } }
 const player = {
   get x() { pwSync(); return pwX; }, get y() { pwSync(); return pwY; }, get z() { return P.z; },
   get vx() { return toWorld(P.vx, P.vy)[0]; }, get vy() { return toWorld(P.vx, P.vy)[1]; },
-  get faceAngle() { return P.face * 2 * Math.PI / hero.ND + yaw; },                          // world: 0 = south, +pi/2 = east
-  get face() { const ND = hero.ND; return (((Math.round(P.face + yaw / (2 * Math.PI / ND))) % ND) + ND) % ND; },   // world facing index (arena's dirOf)
+  get faceAngle() { return P.face * 2 * Math.PI / hero.ND + cv.yaw; },                          // world: 0 = south, +pi/2 = east
+  get face() { const ND = hero.ND; return (((Math.round(P.face + cv.yaw / (2 * Math.PI / ND))) % ND) + ND) % ND; },   // world facing index (arena's dirOf)
   get viewFace() { return P.face; }, get state() { return P.state; }, get t() { return P.t; }, get frame() { return P.frame; },
   get gait() { return P.gait; }, get sink() { return P.sink || 0; }, get aiming() { return P.state === 'draw'; }, get blink() { return P.blink || 0; },
   get raw() { return P; },
@@ -219,11 +194,10 @@ function turnFrame(d) {
   const n = Math.round(faceAcc);
   if (n) { P.face = (((P.face + n) % ND) + ND) % ND; P.want = (((P.want + n) % ND) + ND) % ND; faceAcc -= n; }
 }
-function setYaw(a) { if (a !== yaw) { turnFrame(a - yaw); yaw = a; } if (yaw > Math.PI) yaw -= 2 * Math.PI; else if (yaw <= -Math.PI) yaw += 2 * Math.PI; }
+const setYaw = cv.setYaw;
 
 // ---------------------------------------------------------------- feel: shake, hitstop, knock
-let freeze = 0; const shakeS = {a: 0, t: 0};
-function shake(a, sec) { if (opt.shake && a >= shakeS.a * (shakeS.t > 0 ? 1 : 0)) { shakeS.a = a; shakeS.t = sec; } }   // (menu > Graphics > Screen shake)
+let freeze = 0; const shake = cv.shake;   // (render/camera.js; menu > Graphics > Screen shake)
 
 // ---------------------------------------------------------------- targets, interaction
 // ARPG targeting: the cursor over something hittable aims at it (front-most), at the height the cursor points at on it
@@ -236,11 +210,11 @@ function hoverTarget() {
 function hoverFind() {
   for (const f of features) { const t = f.aimTarget?.(); if (t) return t; }
   let best = null, bn = -1e9, bh = 0;
-  const mx = VW / 2 + (mouse.x - VW / 2) * zoom, my = VH / 2 + (mouse.y - VH / 2) * zoom;
+  const mx = cv.VW / 2 + (mouse.x - cv.VW / 2) * cv.zoom, my = cv.VH / 2 + (mouse.y - cv.VH / 2) * cv.zoom;
   for (const it of world.items) {
     const p = it.p; if (p.broken || p.gone || !(p.target || p.hp > 0)) continue;
     const z0 = (p.z || 0) + (p.h || 0), hh = p.hitH ?? (p.kind === 'pot' ? .55 : p.kind === 'crate' ? .75 : 1.6), rr = Math.max(.3, p.hitR ?? p.r ?? .4);
-    const [x0, y0] = G.toScreen(p.x, z0 + hh, p.y), [, y1] = G.toScreen(p.x, z0, p.y), w = rr * PPM * zoom;
+    const [x0, y0] = G.toScreen(p.x, z0 + hh, p.y), [, y1] = G.toScreen(p.x, z0, p.y), w = rr * PPM * cv.zoom;
     if (mx > x0 - w - 2 && mx < x0 + w + 2 && my > y0 - 3 && my < y1 + 3) {
       const n = toView(p.x, p.y)[1];
       if (n > bn) { bn = n; best = p; bh = z0 + hh * Math.max(.08, Math.min(.95, (y1 - my) / (y1 - y0 || 1))); }
@@ -269,12 +243,12 @@ let assist = null;   // {back: yaw to return to, phase: 'in' | 'climb' | 'back'}
 function stepAssist(dt, ny) {
   const climbing = P.state === 'climb' || P.state === 'mantle';
   if (assist.phase === 'in') {
-    ny = Math.abs(yaw) < .004 ? 0 : yaw * Math.exp(-dt * 12);
+    ny = Math.abs(cv.yaw) < .004 ? 0 : cv.yaw * Math.exp(-dt * 12);
     if (ny === 0) { setYaw(0); syncPlateaus(); PL.onInteractKey(); PL.onInteractUp(); assist.phase = P.state === 'climb' ? 'climb' : 'back'; }
   } else if (assist.phase === 'climb') { ny = 0; if (!climbing) assist.phase = 'back'; }
   else {
-    const d = Math.atan2(Math.sin(assist.back - yaw), Math.cos(assist.back - yaw));
-    ny = Math.abs(d) < .002 ? assist.back : yaw + d * (1 - Math.exp(-dt * 8)); if (Math.abs(d) < .002) assist = null;
+    const d = Math.atan2(Math.sin(assist.back - cv.yaw), Math.cos(assist.back - cv.yaw));
+    ny = Math.abs(d) < .002 ? assist.back : cv.yaw + d * (1 - Math.exp(-dt * 8)); if (Math.abs(d) < .002) assist = null;
   }
   return ny;
 }
@@ -282,9 +256,9 @@ function stepAssist(dt, ny) {
 
 // ---------------------------------------------------------------- the host features see
 const host = {
-  THREE, G, PPM, PPMY, PPMH, get VW() { return VW; }, get VH() { return VH; }, ctxO,
+  THREE, G, PPM, PPMY, PPMH, get VW() { return cv.VW; }, get VH() { return cv.VH; }, ctxO,
   get world() { return world; }, get biome() { return BIOMES[biomeI]; }, get time() { return env.bucket; }, get mood() { return env.mood(BIOMES[biomeI].id); }, env,
-  get yaw() { return yaw; }, get zoom() { return zoom; }, get props() { return world.props; }, get layout() { return world.layout; },
+  get yaw() { return cv.yaw; }, get zoom() { return cv.zoom; }, get props() { return world.props; }, get layout() { return world.layout; },
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY,
   itemOf: p => world.itemOf(p), elev, inStream, blocked: (x, y, z = P.z, air = false) => blockedW(x, y, z, air),
   hitstop: sec => { freeze = Math.max(freeze, sec); }, shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); }, play: (frame, sec) => PL.hold(frame, sec),
@@ -305,7 +279,7 @@ const host = {
   teleport(x, y) {   // put the player at world (x, y), standing, and snap the camera there
     const [vx, vy] = toView(x, y);
     Object.assign(P, {x: vx, y: vy, z: elev(x, y), vx: 0, vy: 0, state: 'idle', t: 0, sink: 0, leap: null, hold: null});
-    camInit = false;
+    cv.snap();
   },
   // the Ranger as drawn this frame (sprite + runtime cloak + pixel bow, and its normals), for afterimages / reflections.
   // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame. Their
@@ -336,13 +310,6 @@ const opt = {sampling: Q.get('smooth') === '1' ? 'smooth' : SAMPLING.includes(Q.
   hdBow: Q.get('bow') === 'hd',   // J: the HD bow overlay instead of the pixel bow (the arena's toggle)
   shake: true};                   // screen shake (menu > Graphics)
 const DEBUG = ['final', 'albedo', 'normals', 'depth', 'object ids', 'sun shadow', 'light only'];
-const SMOOTH_IN = 12, SMOOTH_OUT = 3, TURN_HOLD = .12;
-let turnT = 0;
-function stepSampling(dt, turned) {
-  turnT = turned ? TURN_HOLD : Math.max(0, turnT - dt);
-  const want = opt.sampling === 'smooth' ? 1 : opt.sampling === 'nearest' ? 0 : turnT > 0 ? 1 : 0, u = G.U.smooth;
-  u.value = want > u.value ? Math.min(want, u.value + dt * SMOOTH_IN) : Math.max(want, u.value - dt * SMOOTH_OUT);
-}
 function applyOpts() {
   if (opt.sampling !== 'auto') G.U.smooth.value = opt.sampling === 'smooth' ? 1 : 0;
   G.compU.uOutline.value = opt.outline ? 1 : 0; G.compU.uBanded.value = opt.banded ? 1 : 0;
@@ -351,24 +318,6 @@ function applyOpts() {
 applyOpts();
 const lighting = createLighting({G, host, features, opt});   // render/lighting.js: the mood + lights -> the composite
 
-// ---------------------------------------------------------------- camera target: eased (look-ahead), snapped to the pixel lattice
-const T = new THREE.Vector3(), Ts = new THREE.Vector3();
-let camInit = false;
-// ox, oy: px offset (feel, shake) applied in the view; then the visible GROUND stays inside the world (the arena
-// clamps its camera to the world the same way: no void past the edge), then the target snaps to the pixel lattice
-function snapTarget(ox, oy) {
-  const z = zoom, h = T.y, lift = h * PPMH / PPMY;   // the ground at screen centre lies `lift` m further back than the target
-  let [vx, vy] = toView(T.x, T.z); vx += ox / PPM; vy += oy / PPMY;
-  // the view's ground rectangle: half extents in the view frame, then its world-axis extents at this yaw
-  const hx = VW / (2 * PPM * z), hy = VH / (2 * PPMY * z), c = Math.abs(Math.cos(yaw)), s = Math.abs(Math.sin(yaw));
-  const ex = hx * c + hy * s, ez = hx * s + hy * c;
-  let [gx, gz] = toWorld(vx, vy - lift);
-  gx = ex * 2 >= WORLD.WM ? WORLD.WM / 2 : Math.min(WORLD.WM - ex, Math.max(ex, gx));
-  gz = ez * 2 >= WORLD.HM ? WORLD.HM / 2 : Math.min(WORLD.HM - ez, Math.max(ez, gz));
-  [vx, vy] = toView(gx, gz); vy += lift;
-  const sx = Math.round(vx * PPM * z) / (PPM * z), S = Math.round((vy * PPMY - h * PPMH) * z), vy2 = (S / z + h * PPMH) / PPMY;
-  const [X, Zw] = toWorld(sx, vy2); Ts.set(X, h, Zw);
-}
 
 // ---------------------------------------------------------------- input
 let dragging = false, dragX = 0, dragYaw = 0, paused = false;
@@ -384,7 +333,7 @@ addEventListener('keydown', e => {
   // renderer A/B (Shift + 1..6): rotation steps, ground sampling, outlines, props live / 16-angle, bands, shadows
   if (e.shiftKey && /^Digit[1-6]$/.test(e.code)) {
     const d = +e.code.slice(5);
-    if (d === 1) snapMode = (snapMode + 1) % 3;
+    if (d === 1) cv.snapMode = (cv.snapMode + 1) % 3;
     if (d === 2) opt.sampling = SAMPLING[(SAMPLING.indexOf(opt.sampling) + 1) % SAMPLING.length];
     if (d === 3) opt.outline = !opt.outline;
     if (d === 4) { propMode = propMode === 'live' ? 'yaw' : 'live'; world.setMode(propMode); }
@@ -396,7 +345,7 @@ addEventListener('keydown', e => {
   for (const f of features) if (f.onKey?.(k, e)) return;
   for (const f of features) if (f.key && f.key === k && f.toggle) { f.toggle(); return; }
   if (k === ' ') PL.onSpace();
-  if (k === 'e') { if (!nearProp() && climbSpotW() && Math.abs(yaw) > 1e-6 && !BUSY.has(P.state)) assist = {back: yaw, phase: 'in'}; else PL.onInteractKey(); }
+  if (k === 'e') { if (!nearProp() && climbSpotW() && Math.abs(cv.yaw) > 1e-6 && !BUSY.has(P.state)) assist = {back: cv.yaw, phase: 'in'}; else PL.onInteractKey(); }
   if (k >= '1' && k <= '4' && !BUSY.has(P.state)) features.some(f => f.ability?.(+k));
   if (k === 't') env.nextPart();   // jump to dawn / day / dusk / night; the clock runs on from there
   if (k === 'n') setBiome(biomeI + (e.shiftKey ? -1 : 1));
@@ -417,8 +366,8 @@ addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys.delete(k); 
 addEventListener('blur', () => { keys.clear(); mouse.down = false; dragging = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('mousemove', e => {
-  const r = canvas.getBoundingClientRect(), s = r.width / VW, mx = (e.clientX - r.left) / s, my = (e.clientY - r.top) / s;
-  mouse.x = VW / 2 + (mx - VW / 2) / zoom; mouse.y = VH / 2 + (my - VH / 2) / zoom;   // the player reads the screen at zoom 1
+  const r = canvas.getBoundingClientRect(), s = r.width / cv.VW, mx = (e.clientX - r.left) / s, my = (e.clientY - r.top) / s;
+  mouse.x = cv.VW / 2 + (mx - cv.VW / 2) / cv.zoom; mouse.y = cv.VH / 2 + (my - cv.VH / 2) / cv.zoom;   // the player reads the screen at zoom 1
   if (dragging) { dragYaw += (e.clientX - dragX) * -.006; dragX = e.clientX; }
 });
 canvas.addEventListener('mousedown', e => {
@@ -428,28 +377,8 @@ canvas.addEventListener('mousedown', e => {
   if (e.button === 2 && !BUSY.has(P.state)) features.some(f => f.ability?.('rmb'));
 });
 addEventListener('mouseup', e => { if (e.button === 0) { if (!paused) PL.release(); mouse.down = false; } if (e.button === 1) dragging = false; });
-canvas.addEventListener('wheel', e => { e.preventDefault(); onWheel(e); }, {passive: false});
+canvas.addEventListener('wheel', e => { e.preventDefault(); cv.onWheel(e); }, {passive: false});
 
-// ---------------------------------------------------------------- zoom (the wheel)
-// LEVELS are whole display scales, so every zoom at rest is pixel-perfect (scaleRange: out to twice the world on screen,
-// in to twice the size). A wheel notch moves the goal one level; the view EASES there (in log space, so in and out feel
-// alike, ZOOM.ease per second) drawn at its current size with `zoom` as the in-between factor, and when it arrives it's
-// re-made at the new scale (fit): crisp again. Trackpads' small deltas add up to notches (ZOOM.notch). The camera
-// centres the Ranger's chest (FOCUS_H), so he stays put on screen while the world scales around him
-const ZOOM = {ease: 11, notch: 100, done: .004}, FOCUS_H = .9;
-let wheelAcc = 0, wheelT = 0;
-function zoomTo(goal) { const [lo, hi] = scaleRange(dsBase); dsGoal = Math.max(lo, Math.min(hi, goal)); }
-function onWheel(e) {
-  const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 300 : e.deltaY, now = performance.now();
-  if (now - wheelT > 400 || Math.sign(d) !== Math.sign(wheelAcc)) wheelAcc = 0;   // a new gesture, or turned around
-  wheelT = now; wheelAcc += d;
-  while (Math.abs(wheelAcc) >= ZOOM.notch) { zoomTo(dsGoal - Math.sign(wheelAcc)); wheelAcc -= Math.sign(wheelAcc) * ZOOM.notch; }   // up = in
-}
-function stepZoom(dt) {   // every rendered frame (the menu's backdrop zooms too)
-  const eff = scale * zoom; if (eff === dsGoal) return;
-  const le = Math.log(eff), lg = Math.log(dsGoal), l = Math.abs(lg - le) < ZOOM.done ? lg : le + (lg - le) * (1 - Math.exp(-dt * ZOOM.ease));
-  if (l === lg) { scale = dsGoal; zoom = 1; fit(); } else zoom = Math.exp(l) / scale;   // arrived: the view re-made at the goal scale
-}
 
 // ---------------------------------------------------------------- the menu (Escape): ui/menu.js draws it, these are its items
 // PAUSED, the game stands still (player, arrows, enemies, the run, the clock) but the world doesn't: the AMBIENT features
@@ -469,9 +398,9 @@ const pauseTurn = dt => game.mode === 'title' || performance.now() - lookT < LOO
 function togglePause(force, snd) {
   const was = paused; paused = force ?? !paused; if (paused === was) return;
   feat('audio')?.duck?.(paused);
-  if (paused) { keys.clear(); dragging = false; pauseYaw = yaw; pauseGoal = dsGoal; lookT = 0; menu.show(); return; }
-  menu.hide(snd); zoomTo(pauseGoal);   // back to the zoom you played at (it eases)
-  const d = Math.atan2(Math.sin(yaw - pauseYaw), Math.cos(yaw - pauseYaw));
+  if (paused) { keys.clear(); dragging = false; pauseYaw = cv.yaw; pauseGoal = cv.dsGoal; lookT = 0; menu.show(); return; }
+  menu.hide(snd); cv.zoomTo(pauseGoal);   // back to the zoom you played at (it eases)
+  const d = Math.atan2(Math.sin(cv.yaw - pauseYaw), Math.cos(cv.yaw - pauseYaw));
   if (game.mode !== 'title' && !assist && Math.abs(d) > .002) assist = {back: pauseYaw, phase: 'back'};   // back to where you were looking
 }
 
@@ -504,7 +433,7 @@ function menuItems() {
   out.push({tab: 'graphics', group: 'Display', label: 'Fullscreen', ...onOff(() => !!document.fullscreenElement, v => {
     try { (v ? document.documentElement.requestFullscreen?.().then(() => navigator.keyboard?.lock?.(['Escape'])) : document.fullscreenElement && document.exitFullscreen())?.catch?.(() => {}); } catch (e) {} })});
   out.push({tab: 'graphics', group: 'World', label: 'Shadows', id: 'shadows', keep: true, ...onOff(() => opt.shadows, v => { opt.shadows = v; })});
-  out.push({tab: 'controls', group: 'Camera', label: 'Camera turning', id: 'snap', keep: 'snap', ...pick(SNAP_NAME, () => SNAP_NAME[snapMode], v => { snapMode = SNAP_NAME.indexOf(v); })},
+  out.push({tab: 'controls', group: 'Camera', label: 'Camera turning', id: 'snap', keep: 'snap', ...pick(SNAP_NAME, () => SNAP_NAME[cv.snapMode], v => { cv.snapMode = SNAP_NAME.indexOf(v); })},
     {tab: 'controls', group: 'Keys', keys: KEYS});
   // Dev: the character, the world's dials, the renderer's A/B (each with its dev key)
   dv('Character', {label: 'Loadout', key: 'O', value: () => hero.loadName, run: d => hero.switchLoadout(hero.loadI + d)});
@@ -544,13 +473,12 @@ const menu = createMenu({
   groups: {graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys'], dev: ['Character', 'World', 'Renderer', 'Features', 'Tools']},
   resume: snd => togglePause(false, snd),
   look: dx => { dragYaw += dx * -.006; lookT = performance.now(); },
-  zoom: e => onWheel(e),
+  zoom: e => cv.onWheel(e),
 });
 menu.restore(Q);   // the player's remembered settings (Graphics, Controls)
 addEventListener('fullscreenchange', () => menu.refresh());
 
 // ---------------------------------------------------------------- frame
-const ROT_SPEED = 110 * DEG;
 let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null;
 function step(dt) {
   hoverKey++;
@@ -558,11 +486,11 @@ function step(dt) {
   // A climb started at an angle eases the camera to north first, climbs, then returns.
   const rot = (keys.has('x') ? 1 : 0) - (keys.has('z') ? 1 : 0);
   // paused: the menu's slow drift + dragging its backdrop
-  let ny = yaw + (paused ? pauseTurn(dt) + dragYaw : rot * ROT_SPEED * dt + dragYaw); dragYaw = 0;
+  let ny = cv.yaw + (paused ? pauseTurn(dt) + dragYaw : rot * ROT_SPEED * dt + dragYaw); dragYaw = 0;
   if (!paused && assist) ny = stepAssist(dt, ny);
-  else if (!paused && !rot && !dragging && snapMode) { const s = SNAP[snapMode], tg = Math.round(ny / s) * s, d = tg - ny; ny = Math.abs(d) < .0015 ? tg : ny + d * (1 - Math.exp(-dt * 14)); }
-  const y0 = yaw; setYaw(ny); syncPlateaus();
-  stepSampling(dt, yaw !== y0);
+  else if (!paused && !rot && !dragging && cv.snapMode) ny = cv.snapEase(ny, dt);
+  const y0 = cv.yaw; setYaw(ny); syncPlateaus();
+  cv.stepSampling(dt, cv.yaw !== y0);
   if (paused) { stepPaused(dt); return; }   // the game stands still, nature goes on
   dt *= host.timeScale; if (dt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
   perf.begin('env', 'sim'); env.step(dt); perf.end('env');   // the world clock first: everything after reads this step's time / weather
@@ -575,7 +503,7 @@ function step(dt) {
   hero.stepCloth(dt, clothPos, perf);
   const evs = events.splice(0);
   for (const f of features) if (f.on !== false || f.always) f.update?.(dt, evs);
-  if (shakeS.t > 0) shakeS.t -= dt;
+  cv.stepShake(dt);
 }
 const clothPos = [0, 0];
 function toWorldEvent(e) {
@@ -584,33 +512,22 @@ function toWorldEvent(e) {
 }
 function draw(t) {
   hoverKey++;
-  stepZoom(lastDt);
+  cv.stepZoom(lastDt);
   const [PX, PY] = [player.x, player.y];
-  // camera: eases after the player with a little look-ahead (the arena's), feel offsets from features, shake. It aims at
-  // his chest (FOCUS_H m up, as the ground point that projects there), so he's in the same spot on screen at every zoom
-  if (!camInit) { T.set(PX, P.z, PY); camInit = true; }
-  const [lvx, lvy] = toWorld(P.vx * .12, P.vy * .12 - FOCUS_H * PPMH / PPMY);
-  const k = 1 - Math.exp(-lastDt * 9); T.x += (PX + lvx - T.x) * k; T.y += (P.z - T.y) * k; T.z += (PY + lvy - T.z) * k;
-  let ox = 0, oy = 0;
-  for (const f of features) if (f.on !== false && f.camera) { const o = f.camera(lastDt); if (o) { ox += o.x || 0; oy += o.y || 0; } }
-  const sk = shakeS.t > 0 ? shakeS.a * Math.min(1, shakeS.t * 8) : 0;
-  ox += Math.round((Math.random() * 2 - 1) * sk); oy += Math.round((Math.random() * 2 - 1) * sk);
-  snapTarget(ox, oy); G.setView(Ts, yaw, zoom);
-  const [tvx, tvy] = toView(Ts.x, Ts.z);
-  cam.x = cam.fx = tvx * PPM - VW / 2; cam.y = cam.fy = tvy * PPMY - Ts.y * PPMH - VH / 2;
+  cv.follow(lastDt, PX, PY, P, cam);   // the camera eases after him (render/camera.js)
   // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js)
   const sinkPx = hero.compose(PX, PY, perf);
   // props, hover pulse on the aimed target
   const hov = P.state === 'draw' ? hoverTarget()?.target : null;
   for (const it of world.items) it.hover = it.p === hov ? .16 + .08 * Math.sin(performance.now() / 110) : 0;
-  perf.begin('world.update', 'view'); world.update(yaw); perf.end('world.update');
+  perf.begin('world.update', 'view'); world.update(cv.yaw); perf.end('world.update');
   // the season's leaves (env.leafRamp: changes a few times per season; a rebuilt world starts from the biome's own ramp)
   const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || world !== leafWorld)) { world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = world; }
   proj.draw(host);
   for (const f of features) if (f.on !== false) f.frame?.({dt: lastDt, t});
   // the aim reticle (pixel cross at the cursor, front layer)
   if (P.state === 'draw') {
-    const q = G.layer('front'), mx = Math.round(VW / 2 + (mouse.x - VW / 2) * zoom), my = Math.round(VH / 2 + (mouse.y - VH / 2) * zoom);
+    const q = G.layer('front'), mx = Math.round(cv.VW / 2 + (mouse.x - cv.VW / 2) * cv.zoom), my = Math.round(cv.VH / 2 + (mouse.y - cv.VH / 2) * cv.zoom);
     q.fillStyle = P.t > .5 ? '#f2d27a' : '#e9e4da';
     q.fillRect(mx - 3, my, 2, 1); q.fillRect(mx + 2, my, 2, 1); q.fillRect(mx, my - 3, 1, 2); q.fillRect(mx, my + 2, 1, 2);
   }
@@ -618,7 +535,7 @@ function draw(t) {
   perf.begin('mood+lights', 'view'); lighting.apply(PX, PY, t); perf.end('mood+lights');
   perf.begin('G.render', 'render'); G.render(); perf.end('G.render');
   // HD overlay
-  const dpr = devicePixelRatio || 1, sc = scale * dpr;
+  const dpr = devicePixelRatio || 1, sc = cv.scale * dpr;
   hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);
   for (const f of features) if (f.on !== false && f.hd && (!host.hudOff || f === game)) { hq.save(); f.hd(hq, sc); hq.restore(); }   // hudOff: the title
   if (opt.hdBow && !sinkPx) hero.drawHDBow(hq, sc);
@@ -660,12 +577,12 @@ function frame(now) {
 function hud() {
   $('#hud').classList.toggle('hidden', !host.dev); $('#help').classList.toggle('hidden', !host.dev || !opt.help);
   if (!host.dev) return;
-  const b = BIOMES[biomeI], deg = ((yaw / DEG) % 360 + 360) % 360, s = G.stats;
+  const b = BIOMES[biomeI], deg = ((cv.yaw / DEG) % 360 + 360) % 360, s = G.stats;
   const fh = features.map(f => f.hud?.()).filter(Boolean).join(' · ');
   $('#hud').innerHTML = [
     `<div class="row"><b>Proving Grounds 3D</b> · ${b.name} · ${env.label()}${opt.lantern ? ' · lantern' : ''} · ${hero.loadName}</div>`,
     fh ? `<div class="row">${fh}</div>` : '',
-    `<div class="row">camera <b>${deg.toFixed(1)}°</b> (${SNAP_NAME[snapMode]}) · zoom ${(scale * zoom / dsBase).toFixed(2)}x (${scale}:1)${opt.debug ? ` · view <b>${DEBUG[opt.debug]}</b>` : ''}</div>`,
+    `<div class="row">camera <b>${deg.toFixed(1)}°</b> (${SNAP_NAME[cv.snapMode]}) · zoom ${(cv.scale * cv.zoom / cv.dsBase).toFixed(2)}x (${cv.scale}:1)${opt.debug ? ` · view <b>${DEBUG[opt.debug]}</b>` : ''}</div>`,
     `<div class="row dim">features: ${features.map(f => `${f.name}${f.on === false ? ' (off)' : ''}`).join(', ') || 'none yet'}</div>`,
     `<div class="row dim">${fps.toFixed(0)} fps · ${s.ms.toFixed(1)} ms CPU · ${s.calls} draws · ${s.sprites} sprites · ${s.points} pts · hits ${proj.hits}/${PL.shots}</div>`,
   ].join('');
@@ -675,7 +592,7 @@ console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} 
 
 // debug handle for scripted tests (drive frames while the pane is hidden: rAF pauses there)
 window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout: i => hero.switchLoadout(i), TIMING, perf,
-  get world() { return world; }, get yaw() { return yaw; }, set zoom(v) { zoomTo(Math.round(dsBase * v)); }, get zoomState() { return {scale, zoom, dsBase, dsGoal}; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { snapMode = i; },
+  get world() { return world; }, get yaw() { return cv.yaw; }, set zoom(v) { cv.zoomTo(Math.round(cv.dsBase * v)); }, get zoomState() { return {scale: cv.scale, zoom: cv.zoom, dsBase: cv.dsBase, dsGoal: cv.dsGoal}; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { cv.snapMode = i; },
   set props(m) { propMode = m; world.setMode(m); }, get rig() { return hero.rig; },
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { lastDt = dt; step(dt); draw(performance.now() / 1000); } },
   applyOpts, hud};
