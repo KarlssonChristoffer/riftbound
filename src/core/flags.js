@@ -19,6 +19,7 @@ export const FLAG_DOCS = {
   set:       'basic | sim | body: the loadout (baked cloak / runtime cloth / bare body)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
   lantern:   '1: start with the lantern lit',
+  detail:    'low: the low detail tier (no wind lines, wildlife or depth layer; menu > Graphics > Detail)',
   // ---- renderer A/B
   snap:      '0 | 1 | 2: camera rotation free / 22.5 deg steps / 90 deg steps',
   sampling:  'auto | nearest | smooth: ground texture sampling',

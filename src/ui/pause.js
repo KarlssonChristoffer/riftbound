@@ -30,6 +30,9 @@ const CLAIM = {
   audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
     'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'}},
 };
+// DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
+// reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
+const LOW_OFF = ['windlines', 'wildlife', 'depth'];
 const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'sprint'], [['Q'], 'walk'], [['C'], 'crouch'], [['Space'], 'roll · leap'],
   [['LMB'], 'hold to draw, release to shoot'], [['RMB'], 'multishot'], [['1', '2', '3', '4'], 'abilities'], [['E'], 'open · talk · climb'],
   [['Z', 'X'], 'turn the camera (or drag with the middle button)'], [['Home'], 'reset the camera'], [['Wheel'], 'zoom in / out'],
@@ -37,7 +40,11 @@ const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'spr
 
 export function createPause(E) {
   const {cv, pa, hero, events, features, keys, feat, opt, stage, env, perf, host} = E;
-  let paused = false, pauseYaw = 0, pauseGoal = 1, lookT = 0;
+  let paused = false, pauseYaw = 0, pauseGoal = 1, lookT = 0, detail = 'high';
+  function setDetail(v) {
+    detail = v;
+    for (const n of LOW_OFF) { const f = feat(n); if (f?.toggle && (f.on !== false) !== (v === 'high')) f.toggle(); }
+  }
   function stepPaused(dt) {
     hero.stepCloth(dt);
     const evs = events.length ? events.splice(0) : NO_EVS;   // wildlife's calls, fire crackles: for the audio feature
@@ -63,6 +70,7 @@ export function createPause(E) {
     // (fullscreen keeps Escape for the menu: keyboard lock, where the browser has it; holding Esc still leaves fullscreen)
     out.push({tab: 'graphics', group: 'Display', label: 'Fullscreen', ...onOff(() => !!document.fullscreenElement, v => {
       try { (v ? document.documentElement.requestFullscreen?.().then(() => navigator.keyboard?.lock?.(['Escape'])) : document.fullscreenElement && document.exitFullscreen())?.catch?.(() => {}); } catch (e) {} })});
+    out.push({tab: 'graphics', group: 'Display', label: 'Detail', id: 'detail', keep: 'detail', ...pick(['high', 'low'], () => detail, setDetail)});
     out.push({tab: 'graphics', group: 'World', label: 'Shadows', id: 'shadows', keep: true, ...onOff(() => opt.shadows, v => { opt.shadows = v; })});
     out.push({tab: 'controls', group: 'Camera', label: 'Camera turning', id: 'snap', keep: 'snap', ...pick(SNAP_NAME, () => SNAP_NAME[cv.snapMode], v => { cv.snapMode = SNAP_NAME.indexOf(v); })},
       {tab: 'controls', group: 'Keys', keys: KEYS});
@@ -106,5 +114,6 @@ export function createPause(E) {
     look: dx => { E.input.look(dx); lookT = performance.now(); },
     zoom: e => cv.onWheel(e),
   });
-  return {stepPaused, pauseTurn, toggle, menu, get paused() { return paused; }};
+  if (E.flags.get('detail') === 'low') setDetail('low');
+  return {stepPaused, pauseTurn, toggle, menu, get paused() { return paused; }, get detail() { return detail; }};
 }

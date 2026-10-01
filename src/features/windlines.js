@@ -187,7 +187,8 @@ export async function create(host) {
     }
   };
   const LOOKS = ['pixel', 'hd', 'off'];
-  F.settings = () => [{label: 'Wind lines', options: LOOKS, get: () => TUNE.look, set: v => { TUNE.look = v; }}];
+  F.settings = () => [{label: 'Look', options: LOOKS, get: () => TUNE.look, set: v => { TUNE.look = v; }}];
+  F.toggle = () => { F.on = !F.on; clear(); };   // (menu > Graphics > Detail low turns it off)
   F.onKey = (k, e) => { if (k === 'b' && e?.shiftKey) { TUNE.look = LOOKS[(LOOKS.indexOf(TUNE.look) + 1) % LOOKS.length]; return true; } return false; };
   F.hud = () => TUNE.look === 'off' ? '' : `wind lines ${TUNE.look} ${lines.length}`;
   return F;
