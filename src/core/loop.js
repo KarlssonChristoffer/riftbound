@@ -26,6 +26,7 @@ export function createLoop(E) {
     cv.stepSampling(dt, cv.yaw !== y0);
     if (paused) { pause.stepPaused(dt); return; }   // the game stands still, nature goes on
     dt *= host.timeScale; if (dt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
+    stage.ents.sync();   // the grid follows what moved last step (world/entities.js)
     perf.begin('env', 'sim'); env.step(dt); perf.end('env');   // the world clock first: everything after reads this step's time / weather
     if (freeze > 0) { freeze -= dt; for (const f of features) if (f.always) f.update?.(dt, []); return; }
     const n0 = events.length, px0 = P.x, py0 = P.y;

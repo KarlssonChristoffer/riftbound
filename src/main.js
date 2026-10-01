@@ -33,7 +33,7 @@
 // THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
 // dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
 // host.setBiome / setTime / teleport / setYaw.
-// HOST (see `host` below): player, arrows, spawnArrow, events, props, itemOf, elev, inStream, blocked, layout,
+// HOST (see `host` below): player, arrows, spawnArrow, events, props, entities (add / remove / query / near), itemOf, elev, inStream, blocked, layout,
 //   hitstop, shake, knock, play, aim, mouse, keys, toView(x, y, h) -> view px, sprite, point, line, layer(name),
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE,
 //   paused (the menu is open), openMenu(), uiSound(name) (the menu's sounds: hover, click, confirm, back, open).
@@ -104,7 +104,7 @@ tp = performance.now();
 await stage.setBiome(stage.biomeI);
 mark('world', tp);
 const dev = {...devtools, ...devkeys};
-if (Q.get('lineup') === 'trees') dev.treeLineup(stage.world);   // the procedural trees side by side for review (dev/devtools.js)
+if (Q.get('lineup') === 'trees') dev.treeLineup(stage);   // the procedural trees side by side for review (dev/devtools.js)
 
 // ---------------------------------------------------------------- the camera's frame
 const toView = cv.toView, toWorld = cv.toWorld;   // world <-> the camera's view frame at its yaw (render/viewxf.js)
@@ -133,6 +133,8 @@ const host = {
   THREE, G, PPM, PPMY, PPMH, get VW() { return cv.VW; }, get VH() { return cv.VH; }, ctxO,
   get world() { return stage.world; }, get biome() { return stage.biome; }, get time() { return env.bucket; }, get mood() { return env.mood(stage.biome.id); }, env,
   get yaw() { return cv.yaw; }, get zoom() { return cv.zoom; }, get props() { return stage.world.props; }, get layout() { return stage.world.layout; },
+  // the entity registry (world/entities.js): add / remove props, live queries by kind, near(x, y, r); props = its list
+  get entities() { return stage.ents; }, get propsVersion() { return stage.ents.ver; },
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY,
   itemOf: p => stage.world.itemOf(p), elev, inStream, blocked: (x, y, z = P.z, air = false) => pa.blocked(x, y, z, air),
   hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); }, play: (frame, sec) => PL.hold(frame, sec),

@@ -25,9 +25,9 @@ const R_BODY = .25;
 const BARREL = {barrel: [.7052, .297], barrel_x: [.80084, .3102]};
 const CRATE_H = .725;
 
-export function extraProps(props) {
+export function extraProps(ents) {
   // two loose crates on the near bank of the stream's wide stretch: push one in to get a stepping stone
-  const out = [], add = (x, y) => { const p = {kind: 'crate', x, y, variant: 0, z: 0, breakable: 'crate', hp: 20, maxHp: 20, stage: 0, r: .34}; props.push(p); out.push(p); };
+  const out = [], add = (x, y) => { const p = {kind: 'crate', x, y, variant: 0, z: 0, breakable: 'crate', hp: 20, maxHp: 20, stage: 0, r: .34}; ents.add(p); out.push(p); };
   add(42.6, 20.2); add(43.2, 21.4);
   return out;
 }
@@ -40,9 +40,9 @@ export async function createPropPhysics(host, core) {
     sinkCrate: CRATE_H - .02, sinkFloat: .22,   // 3D: how deep a sunk crate / a floating barrel sits (the arena: .5 / .22)
   };
   const props = () => host.props, stream = () => host.layout.stream;
-  const mov = host.props.filter(p => MOVABLE.has(p.kind));
-  for (const p of mov) { p.home3 = [p.x, p.y, p.z || 0]; p.vx = 0; p.vy = 0; p.push = p.kind === 'crate' && !p.wall; p.idle = 0; }
-  const chests = host.props.filter(p => p.kind === 'chest');
+  // (live queries on the entity registry: a movable prop that joins later gets its physics state as it joins)
+  const mov = host.entities.query('props.movable', p => MOVABLE.has(p.kind), p => { p.home3 = [p.x, p.y, p.z || 0]; p.vx = 0; p.vy = 0; p.push = p.kind === 'crate' && !p.wall; p.idle = 0; });
+  const chests = host.entities.query('props.chest', p => p.kind === 'chest');
   let simT = 0, lastPV = [0, 0], lastPS = 0;
   const PLAY = host.ctxO.PLAY, TR = host.layout.trail;
   const inBounds = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TR.x0 && x < TR.x1 && y > TR.y0 && y < TR.y1);

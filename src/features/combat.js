@@ -18,7 +18,7 @@
 //   F.hud() -> 'gold N · cd ...'   F.biomeChanged()   F.dispose()
 // Props this feature drives (world.js shows them): stage, broken, hp, r, wob, flash, opened, lid, gone, x / y / z / h
 // (moves, hops, falls), face (brutes: the biome's 16-step SCREEN facing, from b.faceW), air, squash, rooted; tip / tilt /
-// sink (it.manageMatrix while set). It pushes 2 extra crates by the stream into host.props (+ world items).
+// sink (it.manageMatrix while set). It adds 2 extra crates by the stream to host.entities (+ world items).
 // Events (host.events, for audio / atmos): hit {player} / break {kind} / explode {r} / loot {n} / coin / open / trap /
 // respawn; prop events with prop: true: tip / kick / scrape / impact {speed} / land / splash / respawn.
 // Test handles: F.TUNE (= the arena's C.T), F.PROPS_TUNE (props3d T), F.AB, F.gold, F.cd, F.dbg (the arena's combat.dbg:
@@ -29,7 +29,7 @@ import {createDraw} from './combat/draw.js';
 
 export async function create(host) {
   // the 2 loose crates by the stream (the arena adds them before combat lists its hittables)
-  const extra = extraProps(host.props);
+  const extra = extraProps(host.entities);
   await Promise.all(extra.map(p => host.world.addItem(p)));
   const core = createCore(host);
   const phys = await createPropPhysics(host, core);

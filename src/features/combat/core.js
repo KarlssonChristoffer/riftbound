@@ -11,6 +11,9 @@
 //     frame, so the painted brute faces the player at any camera yaw. (The arena wrote a dir8 index into p.face, which
 //     biomes.js reads as a 16-step index: its brutes only ever faced right.)
 //   * Events go to host.events; the caller (combat.js) also hands this frame's new ones to the prop physics.
+//   * Its lists (hittables, colliders, chests, brutes, walls) are live queries on the entity registry (host.entities):
+//     a prop that joins the world later (a spawned enemy, the run's portal) is in them at once, and leaves them all
+//     with host.entities.remove. Each list's join() sets up combat's own fields for a newcomer.
 // Everything else (tuning T, ability table AB, palettes, timings, RNG and its seed) is the arena's.
 
 import {PLAY} from '../../world/world.js';
@@ -21,7 +24,7 @@ export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const SQ = 1;   // the arena's y squash for 2D distances (1.6); round in 3D
 
 export function createCore(host) {
-  const P = host.player, events = host.events, props = host.props;
+  const P = host.player, events = host.events, ents = host.entities;
   const R = parkMiller(90210), RR = (a, b) => a + R() * (b - a);   // (core/rng.js: the arena's generator and seed)
 
   // ---------------- tuning (the arena's C.T) ----------------
@@ -64,15 +67,15 @@ export function createCore(host) {
   const COINS = {pot: [1, 3], crate: [2, 4], barrel: [2, 5], barrel_x: [0, 2], crystal: [6, 9], brute: [3, 5]};
 
   // ---------------- state ----------------
-  const hittables = props.filter(p => p.hp > 0 || p.target || p.breakable);
-  const colliders = props.filter(p => p.r > 0 && !p.outside);
-  for (const p of hittables) p.r0 ??= p.r;
-  const chests = props.filter(p => p.interact === 'open');
-  const brutes = props.filter(p => p.kind === 'brute' || p.sparring), BS = new Map();
-  for (const b of brutes) {
+  const hittables = ents.query('combat.hittable', p => p.hp > 0 || p.target || p.breakable, p => { p.r0 ??= p.r; });
+  const colliders = ents.query('combat.collider', p => p.r > 0 && !p.outside);
+  const chests = ents.query('combat.chest', p => p.interact === 'open');
+  const BS = new Map();   // brute -> its fight state (spawnBrute sets an enemy's own before it joins)
+  const brutes = ents.query('combat.brute', p => p.kind === 'brute' || p.sparring, b => {
+    if (BS.has(b)) return;
     b.r0 = b.r; b.h = 0; b.faceW = [0, 1]; b.squash = 0; b.air = false; b.stage = 0; b.home ??= [b.x, b.y];
     BS.set(b, {mode: 'idle', wait: .5, hop: null, root: 0, dead: 0, land: 0});
-  }
+  });
   const debris = [], coins = [], fx = [], rings = [], nums = [], lts = [], pending = [], brands = [], zones = [], traps = [];
   const dead = [];   // enemies killed this step: dropped from every list at the end of the step
   const flashing = new Set();
@@ -202,7 +205,7 @@ export function createCore(host) {
   // ---------------- brutes ----------------
   // where a brute may stand: the trail (the yard's sparring brutes) or inside the arena's walls (enemies in a run)
   const TR = host.layout?.trail || {x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9};
-  const walls = props.filter(p => p.rect);
+  const walls = ents.query('combat.wall', p => p.rect);
   const inArea = (x, y) => (x > TR.x0 + .5 && x < TR.x1 - .5 && y > TR.y0 + .5 && y < TR.y1 - .4) || (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35);
   const inWall = (x, y, m) => walls.some(w => x > w.rect[0] - m && x < w.rect[2] + m && y > w.rect[1] - m && y < w.rect[3] + m);
   function freeSpot(b, x, y) {
@@ -375,7 +378,7 @@ export function createCore(host) {
     if (!dead.length) return;
     for (const b of dead) {
       b.dead = true;
-      for (const a of [props, hittables, colliders, brutes]) { const i = a.indexOf(b); if (i >= 0) a.splice(i, 1); }
+      ents.remove(b);   // the world's list and every query
       BS.delete(b); flashing.delete(b); host.world.removeItem?.(b);
     }
     dead.length = 0;
@@ -448,8 +451,8 @@ export function createCore(host) {
     spawnBrute(o) {
       const b = {kind: 'brute', z: 0, r: .35, stage: 0, target: true, sparring: true, hunter: true, ...o, maxHp: o.hp, home: [o.x, o.y]};
       Object.assign(b, {r0: b.r, h: 0, faceW: [P.x - b.x, P.y - b.y], squash: 0, air: false, flash: 1});
-      props.push(b); hittables.push(b); colliders.push(b); brutes.push(b); flashing.add(b);
       BS.set(b, {mode: 'aggro', wait: o.wait ?? .6, hop: null, root: 0, dead: 0, land: 0, fail: 0});
+      ents.add(b); flashing.add(b);   // joins the world: hittables, colliders, brutes
       puff(b.x, b.y, 0, 14, .7);
       host.world.addItem(b);
       return b;

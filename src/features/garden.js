@@ -260,7 +260,7 @@ export async function create(host) {
 
   // ================================================================ props (colliders, interaction, the biome's plants)
   const tag = (p, extra) => Object.assign(p, {garden: true}, extra);
-  const add = p => { props().push(p); return p; };
+  const add = p => host.entities.add(p);   // joins the world (world/entities.js)
   const SOFT = new Set(['bush', 'rock', 'tuft']);
   const soften = () => { for (const p of props()) if (SOFT.has(p.kind) && p.r) p.r = 0; };
   soften();

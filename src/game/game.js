@@ -107,10 +107,9 @@ export async function createGame(host) {
   // ---------------------------------------------------------------- the portal: a prop you interact with (E)
   function openPortal() {
     const r = host.layout.ring;
-    portal = {kind: 'portal', x: r.x, y: r.y - 2.2, z: 0, r: 0, interact: 'portal', opened: false, t: 0};
-    host.props.push(portal);
+    portal = host.entities.add({kind: 'portal', x: r.x, y: r.y - 2.2, z: 0, r: 0, interact: 'portal', opened: false, t: 0});
   }
-  function removePortal() { if (!portal) return; const i = host.props.indexOf(portal); if (i >= 0) host.props.splice(i, 1); portal = null; }
+  function removePortal() { if (!portal) return; host.entities.remove(portal); portal = null; }
 
   // a glowing dashed ring on the ground: one point per screen pixel round the ellipse, `on` of every `of` lit, turning
   function ring(x, y, r, col, turn, of, on) {

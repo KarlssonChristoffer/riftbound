@@ -189,7 +189,7 @@ export async function create(host) {
     const add = (x, y, nx, ny, unlit) => {
       if (props().some(q => q.kind === 'torch' && Math.hypot(q.x - x, q.y - y) < .3)) return;
       const p = {kind: 'torch', x, y, z: 0, variant: 0, r: 0, sconce: true, mount: [nx, ny], unlit: !!unlit, lightable: true};
-      props().push(p); added.push(p);
+      host.entities.add(p); added.push(p);
     };
     add(cx - 2.6, y0 + D, 0, 1); add(cx + 2.6, y0 + D, 0, 1);                // north gate, lit
     add(x0 + D, cy - 2.6, 1, 0, true); add(x0 + D, cy + 2.6, 1, 0, true);    // west gate, waiting for a fire arrow
@@ -199,11 +199,11 @@ export async function create(host) {
   // the campfire and the beacon are props too (they collide; the beacon is an E target)
   const clearAround = (x, y, r) => { for (const q of props()) if ((q.kind === 'tuft' || q.kind === 'bush' || q.kind === 'rock') && Math.hypot(q.x - x, q.y - y) < r) q.gone = true; };
   let camp = props().find(p => p.kind === 'campfire'), beacon = props().find(p => p.kind === 'beacon');
-  if (!camp) { camp = {kind: 'campfire', x: 50.8, y: 19.4, z: 0, r: .55}; props().push(camp); clearAround(camp.x, camp.y, 1.3); }
-  if (!beacon) { beacon = {kind: 'beacon', x: 49.6, y: 10.35, z: 2.4, r: .45, unlit: true, interact: 'light the beacon'}; props().push(beacon); clearAround(beacon.x, beacon.y, 1); }
+  if (!camp) { camp = host.entities.add({kind: 'campfire', x: 50.8, y: 19.4, z: 0, r: .55}); clearAround(camp.x, camp.y, 1.3); }
+  if (!beacon) { beacon = host.entities.add({kind: 'beacon', x: 49.6, y: 10.35, z: 2.4, r: .45, unlit: true, interact: 'light the beacon'}); clearAround(beacon.x, beacon.y, 1); }
   // the woodpile beside the campfire (a prop: it collides; arrows fly over it)
   let pile = props().find(p => p.kind === 'woodpile');
-  if (!pile) { pile = {kind: 'woodpile', x: camp.x + 1.05, y: camp.y - .32, z: 0, r: .3, a: 1.05}; props().push(pile); clearAround(pile.x, pile.y, .7); }
+  if (!pile) { pile = host.entities.add({kind: 'woodpile', x: camp.x + 1.05, y: camp.y - .32, z: 0, r: .3, a: 1.05}); clearAround(pile.x, pile.y, .7); }
   const PILE = [[-.115, .056], [0, .056], [.115, .056], [-.058, .154], [.058, .154], [0, .252]];   // its logs: [across, h], bottom up
   pile.n = PILE.length; camp.interact = 'tend the fire';
   const sconcesAdded = mountSconces();
