@@ -34,7 +34,6 @@ export async function createGame(host) {
   const stats = createStats(host, core), nav = createNav(host), hud = createHud(host), screens = createScreens({sound: n => host.uiSound?.(n)});
   const save = loadSave();
   const DEV = Q.get('dev') === '1';
-  const base = {propRespawn: core.T.propRespawn, chestReset: core.T.chestReset};
 
   let boot = null, mode = 'boot', phase = '', phaseT = 0, run = null, portal = null, deadT = 0, rollT = 0, wasRoll = false, shotN = 0, goldSeen = 0, goldFrac = 0;
   const bleeds = [];
@@ -62,7 +61,7 @@ export async function createGame(host) {
   function toSandbox() {
     endRunState(); screens.hide();
     mode = 'sandbox'; setPhase(''); host.dev = true; lock(false); host.timeScale = 1; host.hudOff = false;
-    stats.restore(); Object.assign(core.T, base); core.retireYard(false);
+    stats.restore(); host.mods.clear('run'); core.retireYard(false);
   }
   function endRunState() {   // leave a run: no enemies, no portal, the engine's own numbers
     director.stop(); core.clearEnemies(); removePortal(); bleeds.length = 0; hud.clear(); run = null;
@@ -70,8 +69,9 @@ export async function createGame(host) {
   async function startRun() {
     screens.hide(); endRunState();
     mode = 'run'; host.dev = DEV; host.timeScale = 1; host.hudOff = false;
-    stats.reset(); core.S.gold = 0; goldSeen = 0; goldFrac = 0; shotN = 0;
-    Object.assign(core.T, {propRespawn: 0, chestReset: 0}); core.retireYard(true);
+    stats.reset(); core.addGold(-core.gold); goldSeen = 0; goldFrac = 0; shotN = 0;
+    host.mods.set('run', [{stat: 'combat.propRespawn', mul: 0}, {stat: 'combat.chestReset', mul: 0}]);   // nothing restocks in a run
+    core.retireYard(true);
     run = {stage: 0, kills: 0, time: 0, gold: 0, wave: 0};
     await enterStage(0);
   }
@@ -145,12 +145,12 @@ export async function createGame(host) {
     }
   }
   function stepGold() {   // coins picked up x the gold stat (fractions carry over)
-    const g = core.S.gold;
+    const g = core.gold;
     if (g > goldSeen) {
       const d = g - goldSeen; goldFrac += d * (stats.S.gold - 1);
-      const add = Math.floor(goldFrac); goldFrac -= add; core.S.gold += add; run.gold += d + add;
+      const add = Math.floor(goldFrac); goldFrac -= add; core.addGold(add); run.gold += d + add;
     }
-    goldSeen = core.S.gold;
+    goldSeen = core.gold;
   }
 
   // ---------------------------------------------------------------- the feature
@@ -250,8 +250,8 @@ export async function createGame(host) {
       if (p === portal) { if (phase === 'portal') enterStage(run.stage + 1); return true; }
       if (p.interact === 'open' && !p.opened) {   // a chest: costs gold, gives an item
         const cost = chestCost();
-        if (core.S.gold < cost) { hud.float(p.x, p.y, 1.3, `need ${cost} gold`, '#e0604a'); return true; }
-        core.S.gold -= cost; goldSeen = core.S.gold;
+        if (core.gold < cost) { hud.float(p.x, p.y, 1.3, `need ${cost} gold`, '#e0604a'); return true; }
+        core.addGold(-cost); goldSeen = core.gold;
         core.interact(p, {coins: 0});
         const it = rollItem(rng, run.stage * .25); stats.addItem(it);
         hud.toast(it.name, it.desc, it.tier === 3 ? '#e8604a' : it.tier === 2 ? '#7ad07a' : '#f4efe4');
@@ -263,7 +263,7 @@ export async function createGame(host) {
     prompt(p) {
       if (mode !== 'run') return null;
       if (p === portal) return phase === 'portal' ? {text: `E  enter the portal · stage ${run.stage + 2}`, color: '#9ad0ff'} : null;
-      if (p.interact === 'open') { const c = chestCost(); return {text: `E  open · ${c} gold`, color: core.S.gold >= c ? '#f0c060' : '#e0604a'}; }
+      if (p.interact === 'open') { const c = chestCost(); return {text: `E  open · ${c} gold`, color: core.gold >= c ? '#f0c060' : '#e0604a'}; }
       return null;
     },
     onKey(k, e) {

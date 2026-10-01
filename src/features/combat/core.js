@@ -51,6 +51,16 @@ export function createCore(host) {
   };
   const SLOTS = ['rmb', 1, 2, 3, 4];
   for (const k of SLOTS) Object.assign(AB[k], {t: 0, ready: 0, deny: 0, cast: 0});
+  // MODIFIERS (core/modifiers.js, host.mods): items, augments and a run's rules leave notes on these; T / AB.cd are
+  // always this file's authored numbers (T0, CD0) with the notes applied, recomputed when the notes change
+  const MOD_T = ['crit', 'critMul', 'msN', 'boomR', 'boomBlast', 'rainN', 'trapRoot', 'propRespawn', 'chestReset'];
+  const T0 = {...T}, CD0 = Object.fromEntries(SLOTS.map(k => [k, AB[k].cd]));
+  function applyMods() {
+    const M = host.mods; if (!M) return;
+    for (const k of MOD_T) T[k] = M.value('combat.' + k, T0[k]);
+    for (const k of SLOTS) AB[k].cd = +M.value('combat.cd.' + k, CD0[k]).toFixed(2);
+  }
+  host.mods?.watch(applyMods);
 
   // ---------------- palettes (biome-neutral, 4 steps light -> dark) ----------------
   const PAL = {
@@ -390,6 +400,7 @@ export function createCore(host) {
     hittables, brutes, BS, chests,
     get simT() { return simT; },
     get gold() { return S.gold; },
+    addGold(n) { S.gold += n; },   // the game's gold rules: a run starts at 0, the gold stat's bonus, a chest's price
     get cd() { return Object.fromEntries(SLOTS.map(k => [k, +AB[k].t.toFixed(2)])); },
     dbg: {debris, coins, fx, rings, nums, lts, pending, brands, zones, traps, BS, brutes, hs},
     seed(n) { R.seed(n); },

@@ -1,5 +1,6 @@
-// THE PLAYER'S STATS in a run: base values + every item copy + every augment, turned into numbers, and pushed into the
-// systems that use them (the combat core's tuning and ability cooldowns, player.js's run speeds). Health lives here.
+// THE PLAYER'S STATS in a run: base values + every item copy + every augment, turned into numbers. Health and the
+// game's own numbers live here; what other systems own (the combat core's tuning and ability cooldowns, player.js's run
+// speeds) gets MODIFIER notes from the source 'stats' (core/modifiers.js): each owner applies them to its own numbers.
 //   dmg       arrow damage x (1 + dmg); explosions from arrows too       crit / critMul   added to combat's 15% / 2x
 //   hp, hpPct max health (+ flat, then x (1 + pct))                       regen            health per second
 //   speed     walk / run / sprint x (1 + speed)                           gold             coins picked up x (1 + gold)
@@ -9,16 +10,13 @@
 //   volley    extra arrows per bow shot (50% damage)                      waveHeal         share of max health healed per wave
 //   execute   extra damage to enemies under 35% health                    trapCd / trapRoot   Vault Trap cooldown x (1 - .), root + s
 //   rainCd / rainN   Arrow Rain cooldown x (1 - .), extra arrows          iframe           untouchable seconds after a dodge roll
-// restore() puts the engine's own numbers back (the sandbox plays exactly as before).
-import {SPEED} from '../sim/player/player.js';
+// restore() drops the notes (the sandbox plays with the engine's own numbers).
 import {itemById, augmentById} from './items.js';
 
 export const BASE_HP = 100, BASE_REGEN = .4;
 
 export function createStats(host, core) {
-  const T = core.T, AB = core.AB, SLOTS = core.SLOTS;
-  const base = {T: {crit: T.crit, critMul: T.critMul, msN: T.msN, boomR: T.boomR, boomBlast: T.boomBlast, rainN: T.rainN, trapRoot: T.trapRoot},
-    cd: Object.fromEntries(SLOTS.map(k => [k, AB[k].cd])), speed: {...SPEED}};
+  const SLOTS = core.SLOTS, mods = host.mods;
   const items = new Map(), augs = new Set();
   const S = {hp: BASE_HP, maxHp: BASE_HP, regen: BASE_REGEN, dmg: 1, gold: 1, leech: 0, bleed: 0, execute: 0, volley: 0, waveHeal: 0, iframe: 0, nthBoom: 0,
     hurtT: 0, healT: 0, hpShow: BASE_HP};
@@ -38,21 +36,21 @@ export function createStats(host, core) {
     S.leech = sum('leech'); S.bleed = Math.min(.8, sum('bleed')); S.execute = sum('execute'); S.volley = sum('volley');
     S.waveHeal = sum('waveHeal'); S.iframe = sum('iframe');
     const nb = sum('nthBoom'); S.nthBoom = nb ? Math.max(2, 7 - nb) : 0;
-    T.crit = base.T.crit + sum('crit'); T.critMul = base.T.critMul + sum('critMul'); T.msN = base.T.msN + sum('msN');
-    const bk = 1 + sum('boom'); T.boomR = base.T.boomR * bk; T.boomBlast = base.T.boomBlast * bk;
-    T.rainN = base.T.rainN + sum('rainN'); T.trapRoot = base.T.trapRoot + sum('trapRoot');
-    const cdr = (1 - (itemById('hourglass').stat.cdr)) ** (items.get('hourglass') || 0);
-    for (const k of SLOTS) AB[k].cd = +(base.cd[k] * cdr * (k === 2 ? 1 - sum('rainCd') : 1) * (k === 4 ? 1 - sum('trapCd') : 1)).toFixed(2);
-    const sp = Math.max(.5, 1 + sum('speed'));
-    for (const k of Object.keys(base.speed)) SPEED[k] = base.speed[k] * sp;
+    const bk = 1 + sum('boom'), cdr = (1 - (itemById('hourglass').stat.cdr)) ** (items.get('hourglass') || 0);
+    mods.set('stats', [
+      {stat: 'combat.crit', add: sum('crit')}, {stat: 'combat.critMul', add: sum('critMul')}, {stat: 'combat.msN', add: sum('msN')},
+      {stat: 'combat.boomR', mul: bk}, {stat: 'combat.boomBlast', mul: bk},
+      {stat: 'combat.rainN', add: sum('rainN')}, {stat: 'combat.trapRoot', add: sum('trapRoot')},
+      ...SLOTS.flatMap(k => [{stat: 'combat.cd.' + k, mul: cdr}, {stat: 'combat.cd.' + k, mul: k === 2 ? 1 - sum('rainCd') : 1},
+        {stat: 'combat.cd.' + k, mul: k === 4 ? 1 - sum('trapCd') : 1}]),
+      {stat: 'player.speed', mul: Math.max(.5, 1 + sum('speed'))},
+    ]);
   }
 
   const St = {
     S, items, augs,
     reset() { items.clear(); augs.clear(); Object.assign(S, {hp: BASE_HP, maxHp: BASE_HP, hpShow: BASE_HP, hurtT: 0, healT: 0}); apply(); },
-    restore() {   // the engine's own numbers (sandbox)
-      Object.assign(T, base.T); for (const k of SLOTS) AB[k].cd = base.cd[k]; Object.assign(SPEED, base.speed);
-    },
+    restore() { mods.clear('stats'); },   // the engine's own numbers (sandbox)
     addItem(it) { items.set(it.id, (items.get(it.id) || 0) + 1); apply(); },
     addAugment(a) { augs.add(a.id); apply(); },
     // the build in pick order, for the HUD: [{def, n, aug}]

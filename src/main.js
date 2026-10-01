@@ -34,7 +34,8 @@
 // THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
 // dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
 // host.setBiome / setTime / teleport / setYaw.
-// HOST (see `host` below): player, arrows, spawnArrow, events, props, entities (add / remove / query / near), itemOf, elev, inStream, blocked, layout,
+// HOST (see `host` below): player, arrows, spawnArrow, events, mods (modifiers), props, entities (add / remove / hide /
+//   query / near), itemOf, elev, inStream, blocked, layout,
 //   hitstop, shake, knock, play, aim, mouse, keys, toView(x, y, h) -> view px, sprite, point, line, layer(name),
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE,
 //   paused (the menu is open), openMenu(), uiSound(name) (the menu's sounds: hover, click, confirm, back, open).
@@ -53,6 +54,7 @@ import {createPause} from './ui/pause.js';   // the pause / settings menu (Escap
 import {createLighting} from './render/lighting.js';
 import {createProjectiles} from './sim/projectiles.js';
 import {flags} from './core/flags.js';
+import {createModifiers} from './core/modifiers.js';
 import {rgbOf} from './core/color.js';
 import {createCamera} from './render/camera.js';
 import {createStage} from './world/stage.js';
@@ -83,6 +85,7 @@ const ctxO = {PPM, PPMY, PPMH, toS: (x, y, h = 0) => [x * PPM, y * PPMY - h * PP
 const cv = createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: () => opt, onTurn: d => pa.turnFrame(d), flags: Q});
 
 const features = [], events = [];
+const mods = createModifiers();   // game effects as notes on the owners' stats (core/modifiers.js; host.mods)
 const canvas = $('#screen');
 const G = createGfx(canvas, {VW: cv.VW, VH: cv.VH, PPM, PPMY, PPMH});
 // the HD overlay: display resolution, over the pixel canvas (damage numbers, bars, prompts)
@@ -122,7 +125,7 @@ const hero = createHero({G, set, loadI, ctxO, app});
 // THE PLAYER (sim/player/adapter.js): player.js in the camera's frame, bridged to the world (collision, the world-frame
 // `player`, turning with the camera, the cursor's target, interaction, climbing at any angle)
 const pa = createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: () => stage.world, ents: () => stage.ents, biome: () => stage.biome,
-  opt: () => opt, proj, flags: Q});
+  opt: () => opt, proj, flags: Q, mods});
 const {PL, P, player} = pa;
 
 const setYaw = cv.setYaw, setBiome = i => stage.setBiome(i);
@@ -138,7 +141,7 @@ const host = {
   get yaw() { return cv.yaw; }, get zoom() { return cv.zoom; }, get props() { return stage.world.props; }, get layout() { return stage.world.layout; },
   // the entity registry (world/entities.js): add / remove props, live queries by kind, near(x, y, r); props = its list
   get entities() { return stage.ents; }, get propsVersion() { return stage.ents.ver; },
-  player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY,
+  player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY, mods,
   itemOf: p => stage.world.itemOf(p), elev, inStream, blocked: (x, y, z = P.z, air = false) => pa.blocked(x, y, z, air),
   hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); }, play: (frame, sec) => PL.hold(frame, sec),
   aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target}; },

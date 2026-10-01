@@ -13,7 +13,7 @@ import {PLAY, TRAIL, elev, inStream, PLATEAUS} from '../../world/world.js';
 
 const R_BODY = .25;
 
-export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags}) {
+export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags, mods}) {
   const toView = cv.toView, toWorld = cv.toWorld;
   const nearB = [], nearI = [];   // the grid's candidates (world/entities.js near)
   // collision in the world (round, so it doesn't change with the camera; the arena squashes it to match its 2D look)
@@ -31,7 +31,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   const plateausV = PLATEAUS.map(q => ({...q}));
   function syncPlateaus() { PLATEAUS.forEach((q, i) => Object.assign(plateausV[i], Math.abs(cv.yaw) < 1e-6 ? {...q} : {h: q.h, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, climbs: []})); }
   const PL = createPlayer({
-    ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, plateaus: plateausV,
+    ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, mods, plateaus: plateausV,
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
     elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
     inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },

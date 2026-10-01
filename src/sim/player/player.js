@@ -27,7 +27,8 @@
 //   shake(px, sec)
 import {ramps} from './harmonize.js';   // the character palette (pixel bow layer)
 export const AIM_H = 1.25;   // arrows fly at chest height
-export const SPEED = {walk: 1.4, run: 4.6, sprint: 7.2};  // m/s; the clips follow whatever distance is really covered
+export const SPEED = {walk: 1.4, run: 4.6, sprint: 7.2};
+const SPEED0 = {...SPEED};   // the authored speeds; SPEED = these with the modifiers' 'player.speed' notes (H.mods)  // m/s; the clips follow whatever distance is really covered
 export const ACC = {start: 38, sprintUp: 5.5, sprintDown: 8, stop: 30, skid: 13};   // m/s^2
 const TURN_RATE = 900;  // deg/s: locomotion (walking / standing turns)
 // Aiming turns FAST (180 deg in 0.15 s): aiming must feel immediate. (Tried 450 deg/s with the draw held until facing
@@ -88,6 +89,9 @@ export function createPlayer(H) {
   const PL = {P, shots: 0, BUSY};
   const has = f => !!A.SP[f];
   const ev = e => { if (H.events) H.events.push(e); };
+  // the run speeds follow the modifiers (an item's +speed): recomputed when the notes change, never written from outside
+  const applySpeed = () => { for (const k of Object.keys(SPEED0)) SPEED[k] = H.mods.value('player.speed', SPEED0[k]); };
+  if (H.mods) { H.mods.watch(applySpeed); applySpeed(); }
 
   // ---------------- facing ----------------
   const dirOf = (dx, dy) => ((Math.round(Math.atan2(dx, dy) / (2 * Math.PI / A.ND)) % A.ND) + A.ND) % A.ND;  // ground vector -> facing
