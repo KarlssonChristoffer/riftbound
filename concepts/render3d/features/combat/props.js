@@ -95,14 +95,16 @@ export async function createPropPhysics(host, core) {
     } else { q.float = true; q.r = 0; q.sink = T.sinkFloat; }
   }
   function dropStone(q) { if (q.stone) { const S = stream(), i = S.stones.indexOf(q.stone); if (i >= 0) S.stones.splice(i, 1); q.stone = null; } }
-  function resetHome(q) {
+  function resetHome(q, quiet) {
     dropStone(q);
     [q.x, q.y, q.z] = q.home3;
     Object.assign(q, {vx: 0, vy: 0, h: 0, vh: 0, tip: null, sink: 0, sinkT: undefined, float: false, gone: false, idle: 0, r: q.kind === 'crate' ? (q.wall ? .38 : .34) : .3});
     if (q.kind === 'crate') q.push = !q.wall;
     if (q.gone === false && q.broken && q.goneBroken) { q.broken = false; q.goneBroken = false; }
-    host.events.push({type: 'respawn', prop: true, x: q.x, y: q.y});
+    if (!quiet) host.events.push({type: 'respawn', prop: true, x: q.x, y: q.y});
   }
+  // a new stage: every movable prop back home, upright, dry, unbroken (combat restores hp / stage)
+  function resetAll() { for (const q of mov) { q.broken = false; q.goneBroken = false; q.wasBroken = false; q.manage = false; resetHome(q, true); } }
 
   function step(q, dt) {
     if (q.tilt > 0) q.tilt -= dt;
@@ -325,5 +327,5 @@ export async function createPropPhysics(host, core) {
   }
   function biomeChanged() { pool = []; for (const c of flying) c.m = null; }   // the old world disposed every mesh it lent us
 
-  return {T, update, frame, biomeChanged, shove, mov, dbg: {flying, mov, hitAt, pool: () => pool}};
+  return {T, update, frame, biomeChanged, shove, mov, resetAll, dbg: {flying, mov, hitAt, pool: () => pool}};
 }

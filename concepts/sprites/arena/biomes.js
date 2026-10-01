@@ -1240,7 +1240,8 @@ function brazier(p, ctx, S) {
     // tripod legs (drawn after the outline so they stay 1 px lines)
     P.line(cx - 5, by + 7, cx - 8, b, (x, y) => P.p(x, y, R, 2)); P.line(cx + 5, by + 7, cx + 8, b, (x, y) => P.p(x, y, R, 3));
     P.line(cx, by + 7, cx, b - 1, (x, y) => P.p(x, y, R, 2)); P.line(cx - 6, by + 16, cx + 6, by + 16, (x, y) => P.p(x, y, R, 3));
-    // coals + flame (emissive)
+    // coals + flame (emissive); p.unlit: cold ash, no flame, no light
+    if (p.unlit) { for (let x = cx - 7; x < cx + 7; x++) P.p(x, by - 1, R, hsh(x, 3) < .4 ? 2 : 3); return; }
     for (let x = cx - 7; x < cx + 7; x++) glowAt(P, E, x, by - 1, hsh(x, 3) < .4 ? mixHex(col, '#ffffff', .5) : mixHex(col, '#000000', .35), '#2a1a18');
     flame(E, cx + .5, by - 1, 10, 16, col, (p.light | 0) - 1);
     // the halo sits on the flame's middle: h = its height above the pivot (the pivot row is H)
@@ -1248,15 +1249,21 @@ function brazier(p, ctx, S) {
   });
 }
 function torch(p, ctx, S) {   // wall torch: the bracket reaches right to the east wall
-  const m = M(ctx), reach = Math.round(.6 * ctx.PPM), W = reach + 6, H = m.H(1.85), sx = 4;
+  // p.sconce (the 3D view): stick + cup only; its bracket is a real 3D arm there, so it reads right from every side.
+  // p.unlit: a charred tip, no flame, no light (a fire arrow lights it)
+  const m = M(ctx), reach = p.sconce ? 0 : Math.round(.6 * ctx.PPM), W = Math.max(9, reach + 6), H = m.H(1.85), sx = 4;
   return build(W, H, [sx, H], (P, E) => {
     const b = H - 1, ay = b - m.H(1.05), ty = b - m.H(1.5);
-    P.line(sx + 1, ay, reach + 1, ay, (x, y) => P.p(x, y, S.metal || STYLES.ruins.metal, 1)); P.line(sx + 2, ay + 5, reach, ay - 1, (x, y) => P.p(x, y, S.metal || STYLES.ruins.metal, 2));
-    for (let j = -3; j <= 3; j++) for (let i = 0; i < 3; i++) P.p(reach + i, ay + j, S.metal || STYLES.ruins.metal, i === 0 ? 0 : 1);
+    if (!p.sconce) {
+      P.line(sx + 1, ay, reach + 1, ay, (x, y) => P.p(x, y, S.metal || STYLES.ruins.metal, 1)); P.line(sx + 2, ay + 5, reach, ay - 1, (x, y) => P.p(x, y, S.metal || STYLES.ruins.metal, 2));
+      for (let j = -3; j <= 3; j++) for (let i = 0; i < 3; i++) P.p(reach + i, ay + j, S.metal || STYLES.ruins.metal, i === 0 ? 0 : 1);
+    }
     const WD = S.wood || STYLES.ruins.wood;
     for (let y = ty; y <= ay + 3; y++) for (let i = 0; i < 3; i++) P.p(sx - 1 + i, y, WD, i === 0 ? 0 : i === 2 ? 2 : 1);
     for (let i = -2; i <= 2; i++) P.p(sx + i, ty, S.metal || STYLES.ruins.metal, 1);
+    if (p.unlit) for (let i = -1; i <= 1; i++) P.p(sx + i, ty - 1, WD, 3);
     P.outline();
+    if (p.unlit) return;
     flame(E, sx + .5, ty, 7, 12, S.torch, 1);
     return {lights: [{dx: 0, dy: 0, h: (H - (ty - 6)) / ctx.PPMH, color: S.torch, radius: 4, intensity: .9, flicker: .6}]};
   });
@@ -1651,11 +1658,11 @@ const GROUND = {ruins: groundRuins, ember: groundEmber, frost: groundFrost, rift
 function makeBiome(id) {
   const S = STYLES[id], cache = new Map(), memo = new WeakMap();
   const B = {
-    id, name: S.name, groundEmit: null, groundLights: [], hole: () => false,
+    id, name: S.name, style: S, groundEmit: null, groundLights: [], hole: () => false,
     paintGround(q, ctx) { GROUND[id](q, ctx, B); },
     sprite(p, ctx) {
       // fast path: this prop's sprite at the current ground projection and state (breakable stage, open, facing)
-      const sig = (p.stage | 0) * 4 + (p.opened ? 2 : 0) + (p.kind === 'brute' && faceLeft(p) ? 1 : 0), hit = memo.get(p);
+      const sig = (p.stage | 0) * 4 + (p.opened ? 2 : 0) + (p.kind === 'brute' && faceLeft(p) ? 1 : 0) + (p.sconce ? 64 : 0) + (p.unlit ? 128 : 0), hit = memo.get(p);
       if (hit && hit.ppmy === ctx.PPMY && hit.sig === sig) return hit.s;
       const s = B.spriteOf(p, ctx, sig); memo.set(p, {ppmy: ctx.PPMY, sig, s}); return s;
     },
@@ -1673,3 +1680,5 @@ function makeBiome(id) {
   return B;
 }
 export const BIOMES = ['ruins', 'ember', 'frost', 'rift'].map(makeBiome);
+// the pixel toolkit, for modules that paint their own props in the same style (render3d/features/lights.js)
+export const ART = {Pix, build, flame, flameCols, glowAt, ramp, hex, mixHex, hsh, vn, rng, M, STYLES, RAMPS};

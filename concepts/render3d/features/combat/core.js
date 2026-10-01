@@ -13,6 +13,8 @@
 //   * Events go to host.events; the caller (combat.js) also hands this frame's new ones to the prop physics.
 // Everything else (tuning T, ability table AB, palettes, timings, RNG and its seed) is the arena's.
 
+import {PLAY} from '../../world.js';
+
 export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const SQ = 1;   // the arena's y squash for 2D distances (1.6); round in 3D
@@ -33,7 +35,7 @@ export function createCore(host) {
     trapArm: .5, trapLife: 6, trapR: 1.8, trapDmg: 40, trapRoot: 2, trapTrig: 1.1, vault: 16,        // 4 vault trap
     ignite: 5,                                                                          // barrel -> barrel fire reach (m)
     bruteAggro: 5, bruteLose: 12, bruteLeash: 9, bruteHopT: .5, bruteHopH: .75, bruteHopD: 1.7,
-    brutePause: .38, bruteKnock: 11, bruteReach: .95, bruteRespawn: 4,
+    brutePause: .38, bruteKnock: 11, bruteReach: .95, bruteRespawn: 4, bruteDmg: 10,
     magnet: 4.5, coinDelay: .45,
     propRespawn: 25, chestReset: 30, resetAway: 6,   // the yard restocks itself (s; only while you are > resetAway m off)
   };
@@ -72,6 +74,7 @@ export function createCore(host) {
     BS.set(b, {mode: 'idle', wait: .5, hop: null, root: 0, dead: 0, land: 0});
   }
   const debris = [], coins = [], fx = [], rings = [], nums = [], lts = [], pending = [], brands = [], zones = [], traps = [];
+  const dead = [];   // enemies killed this step: dropped from every list at the end of the step
   const flashing = new Set();
   let simT = 0, lightN = 0, lastDir = [0, 1];
   const S = {gold: 0, goldPop: 0, hud: ''};
@@ -147,17 +150,18 @@ export function createCore(host) {
   function breakProp(p, o = {}) {
     const pal = PAL[p.kind] || PAL.stone, hgt = HGT[p.kind] ?? 1, base = pz(p) + (p.h || 0);
     p.broken = true; p.stage = 2; p.hp = 0; p.r = 0;
-    events.push({type: 'break', x: p.x, y: p.y, kind: p.kind});
+    events.push({type: 'break', x: p.x, y: p.y, kind: p.kind, who: p});
     chunks(p.x, p.y, base + hgt * .3, p.kind === 'pot' ? 12 : p.kind === 'crystal' ? 18 : 16, pal, {dir: o.dir, speed: 2.8, big: p.kind === 'pot' ? 1 : 2, spreadH: hgt * .7});
     if (p.kind === 'crystal') for (let i = 0; i < 10; i++) part(p.x, p.y, base + RR(.3, 1.1), RR(-2, 2), RR(-1.5, 1.5), RR(1, 3), RR(.3, .6), SPARK, {emit: true, drag: 3});
-    const c = COINS[p.kind]; if (c) coinBurst(p.x, p.y, base, Math.round(RR(c[0], c[1] + .99) - .49));
+    const c = p.coins ?? COINS[p.kind]; if (c) coinBurst(p.x, p.y, base, Math.round(RR(c[0], c[1] + .99) - .49));
     if (p.explode) {
       chunks(p.x, p.y, base + .3, 6, PAL.char, {speed: 3, big: 1});
       if (o.delay) pending.push({t: o.delay, fn: () => explode(p.x, p.y, pz(p), p.explode.r, p.explode.dmg, true)});
       else explode(p.x, p.y, pz(p), p.explode.r, p.explode.dmg, true);
     }
     if (!p.sparring && T.propRespawn) p.respawnAt = simT + T.propRespawn;
-    if (p.sparring) { const s = BS.get(p); s.dead = T.bruteRespawn; s.hop = null; p.h = 0; p.air = false; p.rooted = false; }
+    if (p.sparring) { const s = BS.get(p); s.dead = p.hunter ? -1 : T.bruteRespawn; s.hop = null; p.h = 0; p.air = false; p.rooted = false; }
+    if (p.hunter) { p.gone = true; dead.push(p); events.push({type: 'kill', x: p.x, y: p.y, who: p}); }   // an enemy: gone (its debris stays)
     return true;
   }
   // an explosion: area damage with falloff, chain to barrels, knock the player, shake, hitstop, light, fire
@@ -186,29 +190,35 @@ export function createCore(host) {
       const d = Math.hypot(b.x - x, b.y - y); if (d > T.ignite || d < .05) continue;
       b.lit = true; brands.push({x0: x, y0: y, z0: z + .9, b, t: 0, dur: .22 + d * .07});
     }
-    if (Math.abs(P.z - z) < 1.2 && dP < r + .8 && !['climb', 'leap', 'fall'].includes(P.state)) {
+    if (Math.abs(P.z - z) < 1.2 && dP < r + .8 && !['climb', 'leap', 'fall'].includes(P.state) && !C.immune?.()) {
       const k = 1 - dP / (r + .8), ux = dP > .05 ? (P.x - x) / dP : 0, uy = dP > .05 ? (P.y - y) / dP : 1, sp = 6 + 9 * k;
       host.knock(ux * sp, uy * sp);
+      if (barrel) events.push({type: 'hurt', dmg: Math.round(dmg * .5 * (.4 + .6 * k)), by: 'blast', x: P.x, y: P.y});   // powder kegs hurt you too
     }
   }
 
   // ---------------- brutes ----------------
+  // where a brute may stand: the trail (the yard's sparring brutes) or inside the arena's walls (enemies in a run)
   const TR = host.layout?.trail || {x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9};
+  const walls = props.filter(p => p.rect);
+  const inArea = (x, y) => (x > TR.x0 + .5 && x < TR.x1 - .5 && y > TR.y0 + .5 && y < TR.y1 - .4) || (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35);
+  const inWall = (x, y, m) => walls.some(w => x > w.rect[0] - m && x < w.rect[2] + m && y > w.rect[1] - m && y < w.rect[3] + m);
   function freeSpot(b, x, y) {
-    if (x < TR.x0 + .5 || x > TR.x1 - .5 || y < TR.y0 + .5 || y > TR.y1 - .4) return false;
+    if (!inArea(x, y) || inWall(x, y, b.r0 * .8)) return false;
     if (host.inStream(x, y) || host.elev(x, y) !== pz(b)) return false;
     if (Math.hypot(P.x - x, (P.y - y) * SQ) < .78 && Math.abs(P.z - pz(b)) < 1) return false;
-    for (const p of colliders) if (p !== b && !p.broken && p.r > 0 && Math.abs(pz(p) - pz(b)) < 1 && Math.hypot(p.x - x, (p.y - y) * SQ) < p.r + b.r0 * .9) return false;
+    for (const p of colliders) if (p !== b && !p.broken && !p.gone && p.r > 0 && Math.abs(pz(p) - pz(b)) < 1 && Math.hypot(p.x - x, (p.y - y) * SQ) < p.r + b.r0 * .9) return false;
+    for (const o of brutes) { const h = o !== b && BS.get(o)?.hop; if (h && Math.hypot(h.x1 - x, h.y1 - y) < o.r0 + b.r0) return false; }   // where another one lands
     return true;
   }
-  function pathOk(b, x, y) {   // no leaping the stream, no climbing
-    for (let k = .25; k < 1; k += .25) { const sx = b.x + (x - b.x) * k, sy = b.y + (y - b.y) * k; if (host.inStream(sx, sy) || host.elev(sx, sy) !== pz(b)) return false; }
+  function pathOk(b, x, y) {   // no leaping the stream, no climbing, not through a wall
+    for (let k = .25; k < 1; k += .25) { const sx = b.x + (x - b.x) * k, sy = b.y + (y - b.y) * k; if (host.inStream(sx, sy) || host.elev(sx, sy) !== pz(b) || inWall(sx, sy, .1)) return false; }
     return true;
   }
   function planHop(b, s, tx, ty, stop) {
     const dx = tx - b.x, dy = ty - b.y, d = Math.hypot(dx, dy);
     if (d < .12) return null;
-    const base = Math.atan2(dx, dy), step = Math.min(T.bruteHopD, Math.max(0, d - stop));
+    const base = Math.atan2(dx, dy), step = Math.min(b.hopD ?? T.bruteHopD, Math.max(0, d - stop));
     if (step < .15) return {x: b.x, y: b.y};   // already there: a stomp in place
     for (const off of [0, .45, -.45, .9, -.9, 1.4, -1.4]) {
       const x = b.x + Math.sin(base + off) * step, y = b.y + Math.cos(base + off) * step;
@@ -218,6 +228,7 @@ export function createCore(host) {
   }
   function updBrute(b, s, dt) {
     if (b.broken) {
+      if (b.hunter || b.retired) return;   // enemies don't come back; retired = the yard's pair while a run is on
       s.dead -= dt;
       if (s.dead <= 0 && Math.hypot(P.x - b.home[0], P.y - b.home[1]) > 1.1) {   // respawn with a poof
         Object.assign(b, {broken: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0, flash: 1, wob: 1, lit: false});
@@ -240,26 +251,35 @@ export function createCore(host) {
     const dx = P.x - b.x, dy = P.y - b.y, d = Math.hypot(dx, dy), same = Math.abs(P.z - pz(b)) < .6 && P.state !== 'climb';
     const [hx, hy] = b.home, dHome = Math.hypot(b.x - hx, b.y - hy);
     s.calm = Math.max(0, (s.calm || 0) - dt);
-    if (s.mode === 'idle' && same && d < T.bruteAggro && !s.calm) { s.mode = 'aggro'; s.wait = Math.min(s.wait, .25); }
-    if (s.mode === 'aggro' && (dHome > T.bruteLeash || d > T.bruteLose || (!same && d > 3))) s.mode = 'home';
-    if (s.mode === 'home' && same && !s.calm && d < T.bruteAggro * .6 && dHome < T.bruteLeash * .7) s.mode = 'aggro';
-    if (s.mode === 'home' && dHome < .2) { s.mode = 'idle'; s.wait = 1; }
+    if (b.hunter) s.mode = 'aggro';   // an enemy: always after you, no home, no leash (C.steer finds the way)
+    else {
+      if (s.mode === 'idle' && same && d < T.bruteAggro && !s.calm) { s.mode = 'aggro'; s.wait = Math.min(s.wait, .25); }
+      if (s.mode === 'aggro' && (dHome > T.bruteLeash || d > T.bruteLose || (!same && d > 3))) s.mode = 'home';
+      if (s.mode === 'home' && same && !s.calm && d < T.bruteAggro * .6 && dHome < T.bruteLeash * .7) s.mode = 'aggro';
+      if (s.mode === 'home' && dHome < .2) { s.mode = 'idle'; s.wait = 1; }
+    }
     if (s.mode !== 'home' && d < 8 && d > 1e-3) b.faceW = [dx, dy];
     s.wait -= dt;
     if (s.mode !== 'idle' && s.wait < .14 && !b.rooted) b.squash = Math.max(b.squash, 1 - s.wait / .14);   // crouch
     if (s.wait > 0 || b.rooted || s.mode === 'idle') { if (s.mode === 'idle' && s.wait <= 0) s.wait = .5; return; }
-    const to = s.mode === 'aggro' ? planHop(b, s, P.x, P.y, .85) : planHop(b, s, hx, hy, 0);
-    // can't get closer (stream, cliff, crates in the way)? after a few tries it gives up and walks home
+    const way = b.hunter && C.steer ? C.steer(b) : null;   // a waypoint around walls and water, or null: straight at you
+    let to = s.mode === 'aggro' ? (way ? planHop(b, s, way.x, way.y, way.stop ?? 0) : planHop(b, s, P.x, P.y, .85)) : planHop(b, s, hx, hy, 0);
+    // can't get closer (stream, cliff, crates in the way)? after a few tries it gives up and walks home (an enemy
+    // hops somewhere else instead, to get unstuck)
     const gain = to ? d - Math.hypot(P.x - to.x, P.y - to.y) : 0;
-    if (s.mode === 'aggro' && d > 1.2) s.fail = gain > .2 ? 0 : (s.fail || 0) + 1;
-    if (s.mode === 'aggro' && s.fail >= 4) { s.mode = 'home'; s.calm = 4; s.fail = 0; }
+    if (s.mode === 'aggro' && d > 1.2) s.fail = (way ? !!to : gain > .2) ? 0 : (s.fail || 0) + 1;   // following a waypoint: stuck = no hop at all
+    if (s.mode === 'aggro' && s.fail >= 4) {
+      s.fail = 0;
+      if (b.hunter) { const a = R() * TAU; to = planHop(b, s, b.x + Math.sin(a) * 2, b.y + Math.cos(a) * 2, 0); }
+      else { s.mode = 'home'; s.calm = 4; }
+    }
     if (!to) { s.wait = .45; return; }
     if (to.x !== b.x || to.y !== b.y) b.faceW = [to.x - b.x, to.y - b.y];
-    s.hop = {x0: b.x, y0: b.y, x1: to.x, y1: to.y, t: 0, dur: T.bruteHopT, H: to.x === b.x && to.y === b.y ? T.bruteHopH * .8 : T.bruteHopH};
+    s.hop = {x0: b.x, y0: b.y, x1: to.x, y1: to.y, t: 0, dur: b.hopT ?? T.bruteHopT, H: (to.x === b.x && to.y === b.y ? .8 : 1) * (b.hopH ?? T.bruteHopH)};
   }
   function landBrute(b, s) {
     s.hop = null; b.h = 0; b.air = false; s.land = .12; b.squash = 1;
-    s.wait = T.brutePause + R() * .15;
+    s.wait = (b.pause ?? T.brutePause) + R() * .15;
     // never end up overlapping the player (the host can't move him out of a collider)
     let sd = Math.hypot(P.x - b.x, (P.y - b.y) * SQ);
     if (sd < .72 && Math.abs(P.z - pz(b)) < 1) {
@@ -268,11 +288,12 @@ export function createCore(host) {
     }
     puff(b.x, b.y, pz(b), 8, .5);
     const d = Math.hypot(P.x - b.x, P.y - b.y);
-    if (s.mode === 'aggro' && d < T.bruteReach && Math.abs(P.z - pz(b)) < .5 && !['climb', 'leap', 'fall', 'splash'].includes(P.state)) {
-      const ux = d > .05 ? (P.x - b.x) / d : 0, uy = d > .05 ? (P.y - b.y) / d : 1;
-      host.knock(ux * T.bruteKnock, uy * T.bruteKnock);
+    if (s.mode === 'aggro' && d < (b.reach ?? T.bruteReach) && Math.abs(P.z - pz(b)) < .5 && !['climb', 'leap', 'fall', 'splash'].includes(P.state) && !C.immune?.()) {
+      const ux = d > .05 ? (P.x - b.x) / d : 0, uy = d > .05 ? (P.y - b.y) / d : 1, kn = b.knock ?? T.bruteKnock;
+      host.knock(ux * kn, uy * kn);
       shake(3, .18); hitstop(.06); s.wait += .35;
       events.push({type: 'hit', x: P.x, y: P.y, vx: ux * 5, vy: uy * 5, player: true});
+      events.push({type: 'hurt', dmg: b.dmg ?? T.bruteDmg, by: b, x: P.x, y: P.y});
       for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + RR(.6, 1.2), ux * RR(1, 3) + RR(-1, 1), uy * RR(1, 3), RR(0, 2), RR(.15, .3), GOLD, {emit: true, drag: 4});
     } else if (d < 4) shake(1, .06);
     // stomping onto a trap sets it off
@@ -347,6 +368,17 @@ export function createCore(host) {
     },
   };
 
+  // enemies killed this step leave every list (their item leaves the world; their debris and coins stay)
+  function drop() {
+    if (!dead.length) return;
+    for (const b of dead) {
+      b.dead = true;
+      for (const a of [props, hittables, colliders, brutes]) { const i = a.indexOf(b); if (i >= 0) a.splice(i, 1); }
+      BS.delete(b); flashing.delete(b); host.world.removeItem?.(b);
+    }
+    dead.length = 0;
+  }
+
   // ---------------- the core ----------------
   const C = {
     T, AB, SLOTS, S, PAL, FIRE, SPARK, GOLD, DUST,
@@ -394,16 +426,49 @@ export function createCore(host) {
       ab.t = ab.cd; ab.cast = .9;
       return true;
     },
-    interact(p) {
+    interact(p, o = {}) {   // o.coins: how many coins it spills (default: the arena's 16, 24 for the cache)
       if (p.interact !== 'open' || p.opened) return false;
       p.opened = true; p.wob = 1; p.flash = .8; flashing.add(p); if (T.chestReset) p.resetAt = simT + T.chestReset;
       const big = p.y > 20;   // the cache behind the crate wall pays more
-      coinBurst(p.x, p.y, pz(p) + .4, big ? 24 : 16, 1.2);
+      coinBurst(p.x, p.y, pz(p) + .4, o.coins ?? (big ? 24 : 16), 1.2);
       for (let i = 0; i < 14; i++) part(p.x, p.y, pz(p) + .5, RR(-1.5, 1.5), RR(-1, 1), RR(1, 3), RR(.3, .7), GOLD, {emit: true, drag: 3});
       light(p.x, p.y, pz(p) + .6, '#ffd27a', 2.8, 1.5, .7, .1);
       shake(2, .15); hitstop(.05);
       events.push({type: 'open', x: p.x, y: p.y});
       return true;
+    },
+
+    // ---- the game's hooks (game/): enemies, immunity, steering, stage resets ----
+    immune: null,   // () -> bool: the player can't be hit now (dodge roll, i-frames)
+    steer: null,    // (brute) -> {x, y, stop} | null: the next waypoint for an enemy (game/nav.js)
+    // an ENEMY: a brute that hunts you (no home, no leash, no respawn). o: x, y, hp, and optionally dmg, knock, reach,
+    // hopT, hopD, hopH, pause, coins [min, max], r, plus anything the game wants to keep on it (type, elite, boss, name)
+    spawnBrute(o) {
+      const b = {kind: 'brute', z: 0, r: .35, stage: 0, target: true, sparring: true, hunter: true, ...o, maxHp: o.hp, home: [o.x, o.y]};
+      Object.assign(b, {r0: b.r, h: 0, faceW: [P.x - b.x, P.y - b.y], squash: 0, air: false, flash: 1});
+      props.push(b); hittables.push(b); colliders.push(b); brutes.push(b); flashing.add(b);
+      BS.set(b, {mode: 'aggro', wait: o.wait ?? .6, hop: null, root: 0, dead: 0, land: 0, fail: 0});
+      puff(b.x, b.y, 0, 14, .7);
+      host.world.addItem(b);
+      return b;
+    },
+    get enemies() { return brutes.filter(b => b.hunter && !b.broken); },
+    clearEnemies() { for (const b of brutes) if (b.hunter && !b.dead) { b.broken = b.gone = true; dead.push(b); } drop(); },
+    // the yard's sparring pair sits out a run (retire true) and comes back after it
+    retireYard(on) {
+      for (const b of brutes) {
+        if (b.hunter) continue;
+        const s = BS.get(b);
+        if (on) Object.assign(b, {retired: true, broken: true, gone: true, r: 0});
+        else { Object.assign(b, {retired: false, broken: false, gone: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0}); Object.assign(s, {mode: 'idle', wait: .8, hop: null, root: 0}); }
+      }
+    },
+    // a new stage: everything breakable whole again, chests shut, the ground swept (and the prop physics resets positions)
+    resetYard() {
+      for (const p of hittables) if (!p.sparring) Object.assign(p, {broken: false, stage: 0, hp: p.maxHp, r: p.r0, lit: false, respawnAt: 0, wob: 0, flash: 0});
+      for (const p of chests) Object.assign(p, {opened: false, resetAt: 0, lid: 0});
+      for (const a of [debris, coins, fx, rings, nums, lts, pending, brands, zones, traps]) a.length = 0;
+      for (const k of SLOTS) Object.assign(AB[k], {t: 0, ready: 0, deny: 0, cast: 0});
     },
 
     update(dt) {
@@ -506,6 +571,7 @@ export function createCore(host) {
       }
       for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) > rings[i].life) rings.splice(i, 1);
       S.goldPop = Math.max(0, S.goldPop - dt);
+      drop();
       const cds = SLOTS.filter(k => AB[k].t > 0).map(k => `${AB[k].key} ${AB[k].t.toFixed(1)}s`);
       S.hud = `gold ${S.gold}` + (cds.length ? ' · cd ' + cds.join(' ') : '');
     },

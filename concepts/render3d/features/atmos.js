@@ -237,7 +237,7 @@ export async function create(host) {
   }
   function source() {      // a brazier / torch on screen (embers rise from it)
     const vis = [];
-    for (const b of props()) if ((b.kind === 'brazier' || b.kind === 'torch') && !b.gone && !b.broken) {
+    for (const b of props()) if ((b.kind === 'brazier' || b.kind === 'torch') && !b.gone && !b.broken && !b.unlit) {
       const x = SX(b.x, b.y, b.z || 0), y = SY(b.x, b.y, b.z || 0); if (x > -8 && x < VW + 8 && y > 0 && y < VH + 40) vis.push(b);
     }
     return vis.length ? vis[R() * vis.length | 0] : null;

@@ -292,10 +292,17 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
   async function addItem(p) {
     if (byProp.has(p)) return byProp.get(p);
     const st = stateOf(p), geo = st && haveGlb ? await glbGeometry(loader, st) : null, sp = biome.sprite(p, ctxO), obj = nextId++;
+    if (p.dead || byProp.has(p)) return byProp.get(p) || null;   // gone (or added) while the model loaded
     const it = {p, st, obj, sp: null, hover: 0};
     if (geo) it.live = G.mesh(geo, obj, new THREE.Matrix4().makeTranslation(p.x, p.z || 0, p.y));
-    else if (sp) { it.card = cardOf(sp, {obj}); it.sp = sp; } else return null;
+    else if (sp) { it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind)}); it.sp = sp; } else return null;
     items.push(it); byProp.set(p, it); return it;
+  }
+  // a prop that leaves the world for good (a killed enemy): its card / mesh go with it
+  function removeItem(p) {
+    const it = byProp.get(p); if (!it) return;
+    it.live?.dispose(); it.card?.dispose(); it.yaw?.card.dispose();
+    items.splice(items.indexOf(it), 1); byProp.delete(p);
   }
   function setState(it, st) {
     it.st = st;
@@ -349,11 +356,16 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
     }
   }
   const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length;
-  return {layout, props, lights, items, setMode, update, hooks, addItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc,
+  return {layout, props, lights, items, setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc,
     itemOf: p => byProp.get(p) || null,
     glb: state => glbGeometry(loader, state),                   // Promise<geometry | null> (debris chunks, ...)
-    // an extra live mesh owned by a feature (debris chunks): dispose it when done; a rebuild (biome switch) disposes the rest
-    mesh: (geo, matrix) => { const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4()), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); }; return m; },
+    // an extra live mesh owned by a feature (debris chunks): dispose it when done; a rebuild (biome switch) disposes the rest.
+    // It doesn't block point lights unless o.occlude (tumbling chunks next to a blast threw black spikes everywhere)
+    mesh: (geo, matrix, o = {}) => {
+      const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4()), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
+      if (!o.occlude) m.sm.layers.disable(1);
+      return m;
+    },
     waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
 export {WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS};

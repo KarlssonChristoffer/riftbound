@@ -254,7 +254,7 @@ void main() {
 }`;
 
 // ---------------------------------------------------------------- shader: lighting / composite
-const NL = 16;
+const NL = 32;
 const COMP_VS = HEAD + `in vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
 const COMP_FS = HEAD + `
 uniform sampler2D tA, tN, tE, tD, tS, tX, uRamps;
@@ -293,14 +293,15 @@ float sunShadow(vec3 P, vec3 N) {
   if (any(lessThan(sc, vec3(0.))) || any(greaterThan(sc, vec3(1.)))) return 0.;
   return sc.z - .0006 > texture(tS, sc.xy).r ? 1. : 0.;
 }
-// 1 when something solid stands between S and the light: march the height map (0.15 m steps, stopping 0.25 m short
-// of the light, so a flame on a wall top or in a bracket isn't blocked by its own mount). A wall stops a torch behind it.
+// 1 when something solid stands between S and the light: march the height map (about one texel, 7 cm, per step across
+// the ground, so a shadow edge cast over a long way stays a clean line), stopping 0.25 m short of the light, so a flame
+// on a wall top or in a bracket isn't blocked by its own mount. A wall stops a torch behind it.
 float ptBlock(vec3 S, vec3 L) {
   vec3 d = L - S; float len = length(d), end = len - .25;
   if (end < .15) return 0.;
-  float n = min(48., ceil(end / .15));
-  vec3 a = (uHPV * vec4(S, 1.)).xyz * .5 + .5, b = (uHPV * vec4(S + d * (end / len), 1.)).xyz * .5 + .5;
-  for (int k = 1; k <= 48; k++) {
+  float f = end / len, n = min(128., max(ceil(length(d.xz) * f / .07), ceil(end / .3)));
+  vec3 a = (uHPV * vec4(S, 1.)).xyz * .5 + .5, b = (uHPV * vec4(S + d * f, 1.)).xyz * .5 + .5;
+  for (int k = 1; k <= 128; k++) {
     float t = float(k) / n; if (t > 1.) break;
     vec3 c = mix(a, b, t);
     if (c.x < 0. || c.y < 0. || c.x > 1. || c.y > 1.) continue;

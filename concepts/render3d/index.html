@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Proving Grounds 3D</title>
+<title>Riftbound</title>
 <style>
   :root { --bg: #0d0f0e; --ink: #e8e2d2; --dim: #9a937f; --key: #f0c060; --panel: rgba(14, 16, 15, .82); --line: rgba(232, 226, 210, .14); }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 12px/1.45 ui-monospace, Consolas, monospace; overflow: hidden; }
@@ -25,6 +25,29 @@
   #menu button b { color: var(--key); font-weight: 600; }
   #menu label { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin: 4px 0; }
   .hidden { display: none !important; }
+  /* game screens (game/screens.js): title, augment pick, run over */
+  #gscreen { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: radial-gradient(ellipse at center, rgba(6, 8, 7, .25), rgba(6, 8, 7, .72)); font-family: "Segoe UI", system-ui, sans-serif; }
+  .gs-panel { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 22px 24px; background: rgba(18, 20, 19, .9); border: 1px solid var(--line); border-radius: 10px; text-align: center; }
+  .gs-logo { font-size: clamp(34px, 8vw, 54px); font-weight: 800; letter-spacing: .14em; color: var(--key); text-shadow: 0 3px 0 #5a3a10; }
+  .gs-h { font-size: 30px; font-weight: 800; color: var(--key); }
+  .gs-sub { margin: 4px 0 18px; color: var(--dim); font-size: 13px; }
+  .gs-panel > button { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%; margin: 8px 0; padding: 11px 14px; font: inherit; font-size: 15px; color: var(--ink); background: #1c201d; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; text-align: left; }
+  .gs-panel > button span { color: var(--dim); font-size: 12px; }
+  .gs-panel > button:hover, .gs-card:hover { border-color: var(--key); }
+  .gs-panel > button.gs-main { background: #2a2414; border-color: rgba(240, 192, 96, .45); }
+  .gs-rec { margin-top: 14px; color: var(--dim); font-size: 12px; }
+  .gs-new { color: var(--key); font-weight: 700; }
+  .gs-keys { margin-top: 10px; color: #6f6a5c; font-size: 11px; line-height: 1.6; }
+  .gs-pick { width: min(760px, 100%); }
+  .gs-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .gs-card { position: relative; display: flex; flex-direction: column; gap: 8px; align-items: center; padding: 18px 14px 16px; font: inherit; color: var(--ink); background: #1c201d; border: 1px solid rgba(240, 192, 96, .35); border-radius: 8px; cursor: pointer; }
+  .gs-card b { font-size: 17px; color: var(--key); }
+  .gs-card span { font-size: 13px; color: #cfc8b6; line-height: 1.4; }
+  .gs-card .gs-glyph { font-size: 34px; color: var(--key); line-height: 1; }
+  .gs-card i { position: absolute; top: 6px; left: 9px; font-style: normal; font-size: 11px; color: var(--dim); }
+  .gs-stats { margin: 0 auto 8px; border-collapse: collapse; font-size: 14px; }
+  .gs-stats td { padding: 3px 10px; text-align: left; vertical-align: top; }
+  .gs-stats td:first-child { color: var(--dim); text-align: right; }
   @media (max-width: 720px) { #help { display: none; } #hud { max-width: calc(100vw - 40px); } }
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
@@ -46,6 +69,7 @@
     <tr><td>Shift+1–6</td><td>rotation steps · ground texture · outlines · props A/B · bands · shadows</td></tr>
     <tr><td>G · Shift+G</td><td>debug views · colliders</td></tr>
     <tr><td>Esc · H</td><td>menu · hide this help</td></tr>
+    <tr><td>` / §</td><td>dev mode on / off (these keys, the debug HUD) · ?mode=run | sandbox</td></tr>
   </table>
 </div>
 <div id="pause" class="hidden"><div id="menu"></div></div>

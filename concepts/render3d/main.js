@@ -22,6 +22,12 @@
 //   F.onArrowHit?(a, prop) -> 'stop' | 'pierce'   F.onArrowStuck?(a)   F.ability?(slot) -> bool   F.interact?(prop) -> bool
 //   F.aimTarget?() -> {x, y, h, target} | null    F.hud?() -> string   F.settings?() -> [{label, get, set, options?}]
 //   F.biomeChanged?()           after a world rebuild (N); F.dispose?()
+//   F.arrow?(a)                 every arrow as it is spawned (scale its damage, tag it, spawn extras with a.extra)
+//   F.prompt?(prop) -> text | {text, color}   the "E ..." prompt over a prop you can interact with
+//   F.menu?() -> [{label, run}] rows at the top of the pause menu
+// THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
+// dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
+// host.setBiome / setTime / teleport / setYaw.
 // HOST (see `host` below): player, arrows, spawnArrow, events, props, itemOf, elev, inStream, blocked, layout,
 //   hitstop, shake, knock, play, aim, mouse, keys, toView(x, y, h) -> view px, sprite, point, line, layer(name),
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE.
@@ -34,12 +40,13 @@ import {createLighting} from '../sprites/arena/lighting.js';
 import {ClothRig, depthOf, CLOTH_PARAMS} from '../sprites/cloth.js';
 import {createArmor} from '../sprites/arena/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
 import {createPlayer, atlasOf, BUSY, AIM_H} from '../sprites/player.js';
+import {createGame} from './game/game.js';
 
 const $ = s => document.querySelector(s);
 const Q = new URLSearchParams(location.search);
 const VW = 480, VH = 270;
 const t00 = performance.now();
-const FEATURES = ['wind', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'audio'];   // update order (wind first: others read it)
+const FEATURES = ['wind', 'lights', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first)
 
 // ---------------------------------------------------------------- the Ranger: loadouts (packed atlases)
 const LOADOUTS = [['ranger basic', '../sprites/out/outfits/ranger_basic/'], ['ranger + cloth sim', '../sprites/out/outfits/ranger_sim/'], ['bare body', '../sprites/out/skel/']];
@@ -266,7 +273,7 @@ function stepAssist(dt, ny) {
 }
 
 // ---------------------------------------------------------------- arrows (arena convention), the arena's stepFx
-function spawnArrow(o) { arrows.push({life: 1.6, vh: 0, kind: 'arrow', ...o}); }
+function spawnArrow(o) { const a = {life: 1.6, vh: 0, kind: 'arrow', ...o}; for (const f of features) f.arrow?.(a); arrows.push(a); }
 function stepArrows(dt) {
   for (const a of arrows) {
     if (a.stuck) { a.life -= dt; continue; }
@@ -325,6 +332,15 @@ const host = {
   layer: n => G.layer(n), rgb: rgbOf,
   get wind() { return feat('wind'); }, feature: feat,
   get hits() { return hits; },
+  // game controls (game/game.js): dev keys + debug HUD on/off, player input locked, the simulation's speed, the world
+  dev: true, lock: false, timeScale: 1, hudOff: false, BIOMES, TIMES,
+  get biomeI() { return biomeI; }, get timeI() { return timeI; },
+  setBiome: i => setBiome(i), setTime: i => { timeI = i; }, setYaw: a => setYaw(a),
+  teleport(x, y) {   // put the player at world (x, y), standing, and snap the camera there
+    const [vx, vy] = toView(x, y);
+    Object.assign(P, {x: vx, y: vy, z: elev(x, y), vx: 0, vy: 0, state: 'idle', t: 0, sink: 0, leap: null, hold: null});
+    camInit = false;
+  },
   // the Ranger as drawn this frame (sprite + runtime cloak + pixel bow, and its normals), for afterimages / reflections.
   // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame. Their
   // size is img.width / img.height; h is the player's height above the ground (metres), like every host h.
@@ -341,6 +357,8 @@ for (const x of mods) {
 }
 features.sort((a, b) => FEATURES.indexOf(a.name) - FEATURES.indexOf(b.name));
 mark('features', tp);
+// the game goes first: it sees keys, arrows, hits and interactions before the engine's features
+const game = await createGame(host); features.unshift(game);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 world.hooks.card = cardHook;
 
@@ -360,7 +378,7 @@ function stepSampling(dt, turned) {
 function applyOpts() {
   if (opt.sampling !== 'auto') G.U.smooth.value = opt.sampling === 'smooth' ? 1 : 0;
   G.compU.uOutline.value = opt.outline ? 1 : 0; G.compU.uBanded.value = opt.banded ? 1 : 0;
-  G.compU.uShadowOn.value = G.compU.uPtShadow.value = opt.shadows ? 1 : 0; G.compU.uDebug.value = opt.debug; $('#help').classList.toggle('hidden', !opt.help);
+  G.compU.uShadowOn.value = G.compU.uPtShadow.value = opt.shadows ? 1 : 0; G.compU.uDebug.value = opt.debug; $('#help').classList.toggle('hidden', !opt.help || !host.dev);
 }
 applyOpts();
 
@@ -394,9 +412,15 @@ function applyMood(PX, PY, t) {
     L.push({x: PX + fx * LANTERN.fwd - fy * LANTERN.side, y: P.z + LANTERN.h, z: PY + fy * LANTERN.fwd + fx * LANTERN.side, c: LANTERN.c, r: LANTERN.r * (1 + (fk2 - 1) * .15), gain: fk2});
   }
   const pool = world.lights.slice();
-  for (const f of features) if (f.on !== false && f.lights) for (const l of f.lights()) pool.push({x: l.x, y: (l.h || 0), z: l.y, c: rgbOf(l.color ?? l.c), r: l.radius || l.r || 3, k: l.intensity ?? l.k ?? 1, flicker: l.flicker || 0, id: l.id ?? 7000});
+  for (const f of features) if (f.on !== false && f.lights) for (const l of f.lights()) pool.push({x: l.x, y: (l.h || 0), z: l.y, c: rgbOf(l.color ?? l.c), r: l.radius || l.r || 3, k: l.intensity ?? l.k ?? 1, flicker: l.flicker || 0, id: l.id ?? 7000, jitter: l.jitter});
   const near = pool.map(l => ({l, d: Math.hypot(l.x - PX, l.z - PY)})).filter(o => o.d < 24 + o.l.r).sort((a, b) => a.d - b.d);
-  for (const {l} of near) { if (L.length >= 16) break; const k = flick(l, t); L.push({x: l.x, y: l.y, z: l.z, c: l.c, r: l.r * (1 + (k - 1) * .15), gain: l.k * k}); }
+  // a flame's light wanders a few cm (l.jitter, else from its flicker), so the shadows round a fire dance with it
+  for (const {l} of near) {
+    if (L.length >= 32) break;
+    const k = flick(l, t), j = l.jitter ?? (l.flicker || 0) * .035, s = (l.id ?? 0) * 7.13;
+    const jx = j ? j * (Math.sin(t * 11.3 + s) + Math.sin(t * 17.9 + s * 1.7) * .6) / 1.6 : 0, jz = j ? j * (Math.sin(t * 13.1 + s * 2.1) + Math.sin(t * 7.7 + s * .9) * .6) / 1.6 : 0;
+    L.push({x: l.x + jx, y: l.y + Math.abs(jz) * .5, z: l.z + jz, c: l.c, r: l.r * (1 + (k - 1) * .15), gain: l.k * k});
+  }
   U.uNL.value = L.length; let nh = 0;
   L.forEach((l, i) => {
     U.uLP.value[i].set(l.x, l.y, l.z, l.r); U.uLC.value[i].set(l.c[0] * l.gain, l.c[1] * l.gain, l.c[2] * l.gain, l.flat ? 1 : 0);
@@ -436,6 +460,8 @@ addEventListener('keydown', e => {
   if (e.repeat) return;
   if (k === 'escape') { togglePause(); return; }
   if (paused) return;
+  // locked (menus, death, travel) or a dev key outside dev mode: only the game hears it
+  if (host.lock || (!host.dev && (DEV_KEYS.has(k) || (e.shiftKey && /^Digit[1-6]$/.test(e.code))))) { game.onKey?.(k, e); return; }
   // renderer A/B (Shift + 1..6): rotation steps, ground sampling, outlines, props live / 16-angle, bands, shadows
   if (e.shiftKey && /^Digit[1-6]$/.test(e.code)) {
     const d = +e.code.slice(5);
@@ -466,6 +492,7 @@ addEventListener('keydown', e => {
   if (k === 'home') setYaw(0);
   applyOpts();
 });
+const DEV_KEYS = new Set(['n', 't', 'g', 'o', 'r', 'v', 'j', 'i', 'h', 'k', '5', '6', '7', '8']);   // sandbox / test keys
 addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys.delete(k); if (k === 'e') PL.onInteractUp(); });
 addEventListener('blur', () => { keys.clear(); mouse.down = false; dragging = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -475,7 +502,7 @@ addEventListener('mousemove', e => {
   if (dragging) { dragYaw += (e.clientX - dragX) * -.006; dragX = e.clientX; }
 });
 canvas.addEventListener('mousedown', e => {
-  if (paused) return;
+  if (paused || host.lock) return;
   if (e.button === 0) { PL.press(); mouse.down = true; }
   if (e.button === 1) { e.preventDefault(); dragging = true; dragX = e.clientX; }
   if (e.button === 2 && !BUSY.has(P.state)) features.some(f => f.ability?.('rmb'));
@@ -491,10 +518,12 @@ function togglePause(force) {
 function renderMenu() {
   const rows = [];
   const btn = (label, value, act) => `<button data-act="${act}">${label}: <b>${value}</b></button>`;
+  const gm = features.flatMap(f => f.menu?.() || []);
+  if (gm.length) rows.push(`<h3>Game</h3>`, `<button data-act="resume"><b>Resume</b></button>`, ...gm.map((m, i) => `<button data-act="menu:${i}"><b>${m.label}</b></button>`));
   rows.push(`<h3>Renderer</h3>`, btn('Rotation', SNAP_NAME[snapMode], 'snap'), btn('Ground texture', opt.sampling, 'sampling'), btn('Prop outlines', opt.outline ? 'on' : 'off', 'outline'),
     btn('Props', propMode === 'live' ? 'live 3D' : '16-angle sprites', 'props'), btn('Banded light', opt.banded ? 'on' : 'off', 'banded'), btn('Shadows (sun + lights)', opt.shadows ? 'on' : 'off', 'shadows'),
     btn('Debug view', DEBUG[opt.debug], 'debug'));
-  rows.push(`<h3>World</h3>`, btn('Biome', BIOMES[biomeI].name, 'biome'), btn('Time', TIMES[timeI], 'time'), btn('Lantern', opt.lantern ? 'on' : 'off', 'lantern'), btn('Loadout', LOADOUTS[loadI][0], 'loadout'),
+  if (host.dev) rows.push(`<h3>World</h3>`, btn('Biome', BIOMES[biomeI].name, 'biome'), btn('Time', TIMES[timeI], 'time'), btn('Lantern', opt.lantern ? 'on' : 'off', 'lantern'), btn('Loadout', LOADOUTS[loadI][0], 'loadout'),
     btn('Bow', opt.hdBow ? 'HD overlay' : 'pixel art', 'hdbow'), btn('Shiny armour', armor.on ? 'on' : 'off', 'armour'));
   const fs = features.filter(f => f.toggle || f.settings);
   if (fs.length) {
@@ -509,6 +538,8 @@ function renderMenu() {
 }
 $('#pause').addEventListener('click', e => {
   const a = e.target.closest('[data-act]')?.dataset.act; if (!a) { if (e.target === $('#pause')) togglePause(false); return; }
+  if (a === 'resume') { togglePause(false); return; }
+  if (a.startsWith('menu:')) { const m = features.flatMap(f => f.menu?.() || [])[+a.slice(5)]; togglePause(false); m?.run(); return; }
   if (a === 'snap') snapMode = (snapMode + 1) % 3;
   if (a === 'sampling') opt.sampling = SAMPLING[(SAMPLING.indexOf(opt.sampling) + 1) % 3];
   if (a === 'outline') opt.outline = !opt.outline;
@@ -544,6 +575,7 @@ function step(dt) {
   const y0 = yaw; setYaw(ny); syncPlateaus();
   stepSampling(dt, yaw !== y0);
   if (paused) return;
+  dt *= host.timeScale; if (dt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
   if (freeze > 0) { freeze -= dt; for (const f of features) if (f.always) f.update?.(dt, []); return; }
   const n0 = events.length, px0 = P.x, py0 = P.y;
   PL.step(dt);
@@ -611,7 +643,7 @@ function draw(t) {
   // HD overlay
   const dpr = devicePixelRatio || 1, sc = scale * dpr;
   hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);
-  for (const f of features) if (f.on !== false && f.hd) { hq.save(); f.hd(hq, sc); hq.restore(); }
+  for (const f of features) if (f.on !== false && f.hd && (!host.hudOff || f === game)) { hq.save(); f.hd(hq, sc); hq.restore(); }   // hudOff: the title
   if (opt.hdBow && !sinkPx) drawHDBow(sc);
   drawPrompt(sc);
 }
@@ -629,14 +661,19 @@ function drawHDBow(sc) {
 }
 function drawPrompt(sc) {   // "E climb" / "E open" over the thing you can interact with
   let at = null, txt = '';
-  const p = nearProp(); if (p && !BUSY.has(P.state)) { at = [p.x, p.y, (p.z || 0) + 1.1]; txt = 'E  open'; }
+  if (host.lock) return;
+  let col = '#f0c060';
+  const p = nearProp(); if (p && !BUSY.has(P.state)) {
+    const r = features.map(f => f.prompt?.(p)).find(Boolean);
+    at = [p.x, p.y, (p.z || 0) + 1.1]; txt = r?.text ?? r ?? 'E  open'; col = r?.color ?? col;
+  }
   else if (!BUSY.has(P.state) && climbSpotW()) { at = [player.x, player.y, P.z + 2]; txt = P.z > .1 ? 'E  climb down' : 'E  climb'; }
   if (!at) return;
   const [sx, sy] = G.toScreen(at[0], at[2], at[1]);
   hq.font = `${Math.round(11 * (devicePixelRatio || 1))}px ui-monospace, Consolas, monospace`; hq.textAlign = 'center';
   const w = hq.measureText(txt).width + 12 * (devicePixelRatio || 1);
   hq.fillStyle = 'rgba(14,16,15,.8)'; hq.fillRect(sx * sc - w / 2, sy * sc - 16 * (devicePixelRatio || 1), w, 18 * (devicePixelRatio || 1));
-  hq.fillStyle = '#f0c060'; hq.fillText(txt, sx * sc, sy * sc - 3 * (devicePixelRatio || 1));
+  hq.fillStyle = col; hq.fillText(txt, sx * sc, sy * sc - 3 * (devicePixelRatio || 1));
 }
 function drawZones() {   // Shift+G: colliders (red), the playable rectangle (cyan)
   const q = G.layer('front'); q.lineWidth = 1;
@@ -655,6 +692,8 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 function hud() {
+  $('#hud').classList.toggle('hidden', !host.dev); $('#help').classList.toggle('hidden', !host.dev || !opt.help);
+  if (!host.dev) return;
   const b = BIOMES[biomeI], deg = ((yaw / DEG) % 360 + 360) % 360, s = G.stats;
   const fh = features.map(f => f.hud?.()).filter(Boolean).join(' · ');
   $('#hud').innerHTML = [
@@ -669,7 +708,7 @@ $('#load').classList.add('hidden');
 console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} s (${set.packed ? 'packed atlas' : 'per-file atlas'})`, JSON.stringify(TIMING));
 
 // debug handle for scripted tests (drive frames while the pane is hidden: rAF pauses there)
-window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, toView, toWorld, setYaw, setBiome, switchLoadout, TIMING,
+window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout, TIMING,
   get world() { return world; }, get yaw() { return yaw; }, set zoom(v) { zoom = v; }, set time(i) { timeI = i; }, set snap(i) { snapMode = i; },
   set props(m) { propMode = m; world.setMode(m); }, get rig() { return rig; },
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { lastDt = dt; step(dt); draw(performance.now() / 1000); } },

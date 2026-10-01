@@ -885,7 +885,7 @@ export async function create(host) {
   // =================================================================== INSECTS: butterflies (day), moths (lights)
   function lightSources() {
     const L = [];
-    for (const p of props) if (p.kind === 'brazier' || p.kind === 'torch') {
+    for (const p of props) if ((p.kind === 'brazier' || p.kind === 'torch') && !p.unlit) {
       const sp = host.biome.sprite(p, ctx), l = sp && sp.lights && sp.lights[0];
       L.push({x: p.x + (l?.dx || 0), y: p.y + (l?.dy || 0), h: (l?.h ?? (p.kind === 'torch' ? 1.6 : 1.1)) + (p.z || 0), kind: p.kind});
     }
