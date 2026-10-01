@@ -47,52 +47,71 @@ export async function create(host) {
   const WA = {x: 0, y: 0, g: 0};   // wind.at fills it: no allocation per call
   const W = () => host.wind;
   // the view: its centre and half extents (view-frame metres), the screen's right / toward-camera on the ground (arena x, y)
+  const V = {RX: 1, RY: 0, FX: 0, FY: 1, cx: 0, cy: 0, hw: 1, hh: 1};   // (refreshed in place every step)
   function view() {
-    const yaw = host.yaw, z = host.zoom || 1, T3 = G.view.T, RX = Math.cos(yaw), RY = -Math.sin(yaw), FX = Math.sin(yaw), FY = Math.cos(yaw);
+    const yaw = host.yaw, z = host.zoom || 1, T3 = G.view.T;
+    V.RX = Math.cos(yaw); V.RY = -Math.sin(yaw); V.FX = Math.sin(yaw); V.FY = Math.cos(yaw);
     const up = T3.y * ctx.PPMH / ctx.PPMY;   // the target stands T3.y up: the ground at the screen's centre lies that much away from the camera
-    return {RX, RY, FX, FY, cx: T3.x - FX * up, cy: T3.z - FY * up, hw: ctx.VW / 2 / (ctx.PPM * z), hh: ctx.VH / 2 / (ctx.PPMY * z)};
+    V.cx = T3.x - V.FX * up; V.cy = T3.z - V.FY * up; V.hw = ctx.VW / 2 / (ctx.PPM * z); V.hh = ctx.VH / 2 / (ctx.PPMY * z);
+    return V;
   }
-  // ---- emitters: what the wind can be seen meeting. -> {x, y (centre, arena), h0, h1 (height span), r (bulk radius)}
-  function crownOf(p) {
-    const it = host.itemOf(p), ps = it?.pose, C = ps?.crown, z = p.z || 0;
-    if (C) { const c = Math.cos(ps.yaw), s = Math.sin(ps.yaw), k = ps.scale; return {x: p.x + (C.x * c + C.z * s) * k, y: p.y + (-C.x * s + C.z * c) * k, h0: z + C.y0 * k, h1: z + C.y1 * k, r: C.r * k}; }
-    if (ps) { const top = ps.top || 4; return {x: p.x, y: p.y, h0: z + top * .3, h1: z + top, r: .9}; }   // a bare (dead) 3D tree: its limbs
-    const sp = it?.sp, top = sp ? sp.pivot[1] / ctx.PPMH : 3.8;   // a painted card: its sprite's height
-    return p.kind === 'bush' ? {x: p.x, y: p.y, h0: z + .1, h1: z + Math.max(.6, top), r: .45} : {x: p.x, y: p.y, h0: z + top * .45, h1: z + top, r: 1.25};
+  // ---- emitters: what the wind can be seen meeting. -> {x, y (centre, arena), h0, h1 (height span), r (bulk radius)}.
+  // Worked out once per item (trees and bushes stay put; a rebuilt world has new items), once its sprite is known
+  const bulks = new WeakMap();
+  function crownOf(p) {   // (null: the prop has no item, it isn't drawn)
+    const it = host.itemOf(p); if (!it) return null;
+    let b = bulks.get(it); if (b) return b;
+    const ps = it?.pose, C = ps?.crown, z = p.z || 0;
+    if (C) { const c = Math.cos(ps.yaw), s = Math.sin(ps.yaw), k = ps.scale; b = {x: p.x + (C.x * c + C.z * s) * k, y: p.y + (-C.x * s + C.z * c) * k, h0: z + C.y0 * k, h1: z + C.y1 * k, r: C.r * k}; }
+    else if (ps) { const top = ps.top || 4; b = {x: p.x, y: p.y, h0: z + top * .3, h1: z + top, r: .9}; }   // a bare (dead) 3D tree: its limbs
+    else {
+      const sp = it?.sp, top = sp ? sp.pivot[1] / ctx.PPMH : 3.8;   // a painted card: its sprite's height
+      b = p.kind === 'bush' ? {x: p.x, y: p.y, h0: z + .1, h1: z + Math.max(.6, top), r: .45} : {x: p.x, y: p.y, h0: z + top * .45, h1: z + top, r: 1.25};
+      if (!sp) return b;   // (no sprite yet: not kept)
+    }
+    bulks.set(it, b);
+    return b;
   }
   const est = new Map();   // emitter (prop / 'player') -> {e: last (gust x strength), cool}
   const inView = (V, x, y, m) => { const dx = (x - V.cx) * V.RX + (y - V.cy) * V.RY, dy = (x - V.cx) * V.FX + (y - V.cy) * V.FY; return Math.abs(dx) < V.hw + m && dy > -V.hh - m - 3 && dy < V.hh + m; };
-  const queue = [];   // a burst's lines, staggered by a few tenths of a second
+  const queue = [], qpool = [];   // a burst's lines, staggered by a few tenths of a second (entries reused)
   function arrive(key, kind, B, e, dt) {
     let s = est.get(key); if (!s) est.set(key, s = {e, cool: 0});
     s.cool -= dt; const rose = e >= TUNE.fire && s.e < TUNE.fire; s.e = e;
     if (!rose || s.cool > 0 || R() > (TUNE.odds[kind] ?? 1)) return;
-    s.cool = rr(...TUNE.cool); F.fired[kind] = (F.fired[kind] || 0) + 1;
-    const [lo, hi] = TUNE.burst[kind === 'dead' ? 'tree' : kind] || [1, 1], n = lo + Math.floor(R() * (hi - lo + 1)) + (e > 2.6 && kind === 'tree' ? 1 : 0);
-    for (let i = 0; i < n; i++) queue.push({at: T + rr(0, .3) + i * .08, B, kind});
+    s.cool = rr(TUNE.cool[0], TUNE.cool[1]); F.fired[kind] = (F.fired[kind] || 0) + 1;
+    const bu = TUNE.burst[kind === 'dead' ? 'tree' : kind], lo = bu ? bu[0] : 1, hi = bu ? bu[1] : 1, n = lo + Math.floor(R() * (hi - lo + 1)) + (e > 2.6 && kind === 'tree' ? 1 : 0);
+    for (let i = 0; i < n; i++) { const q = qpool.pop() || {at: 0, B: null, kind: ''}; q.at = T + rr(0, .3) + i * .08; q.B = B; q.kind = kind; queue.push(q); }
   }
   // one line through / past the bulk B: it starts upwind of it, at a height within it, a little to one side, and runs on
-  // downwind (life = the way through + a few metres), bent round B on the way
+  // downwind (life = the way through + a few metres), bent round B on the way. Spent lines are reused (pool), trails too
+  const pool = [];
   function launch(q, w) {
     const B = q.B, a = w.at(B.x, B.y, WA), sp = Math.hypot(a.x, a.y) || 1, ux = a.x / sp, uy = a.y / sp, lv = w.level ?? 1;
     const side = (R() < .5 ? -1 : 1) * B.r * rr(.25, 1.05), back = B.r + rr(1, 2);
     const x = B.x - ux * back - uy * side, y = B.y - uy * back + ux * side, h = rr(B.h0 + (B.h1 - B.h0) * .2, B.h1 + .15), N = TUNE.trail;
     const S = (TUNE.speed[0] + TUNE.speed[1] * lv) * rr(.85, 1.15) + sp * 1.5;
-    const L = {x, y, h, dx: ux, dy: uy, t: 0, life: Math.min(TUNE.life[1] + .3, (back + B.r + rr(2.5, 4)) / S + .25), S, obs: B, kind: q.kind,
-      ph: R() * TAU, wob: rr(.06, .2), wf: rr(3, 6), sw: rr(...TUNE.wave) * (R() < .5 ? -1 : 1), sf: rr(2.5, 5.5), hist: new Float32Array(N * 3), n: 0, head: 0, curl: null, near: false};
-    if (R() < TUNE.curl) { const d = rr(...TUNE.curlDur); L.curl = {t0: Math.max(.25, L.life - d - rr(.05, .2)), d, dir: R() < .5 ? 1 : -1}; }
+    const L = pool.pop() || {curl: {on: false, t0: 0, d: 0, dir: 1}, hist: null};
+    if (!L.hist || L.hist.length !== N * 3) L.hist = new Float32Array(N * 3);
+    L.x = x; L.y = y; L.h = h; L.dx = ux; L.dy = uy; L.t = 0; L.life = Math.min(TUNE.life[1] + .3, (back + B.r + rr(2.5, 4)) / S + .25); L.S = S; L.obs = B; L.kind = q.kind;
+    L.ph = R() * TAU; L.wob = rr(.06, .2); L.wf = rr(3, 6); L.sw = rr(TUNE.wave[0], TUNE.wave[1]) * (R() < .5 ? -1 : 1); L.sf = rr(2.5, 5.5); L.n = 0; L.head = 0; L.near = false;
+    const C = L.curl; C.on = R() < TUNE.curl;
+    if (C.on) { const d = rr(TUNE.curlDur[0], TUNE.curlDur[1]); C.t0 = Math.max(.25, L.life - d - rr(.05, .2)); C.d = d; C.dir = R() < .5 ? 1 : -1; }
     lines.push(L);
   }
+  const PB = {x: 0, y: 0, h0: 0, h1: 0, r: .35};   // the Ranger's bulk (moves with him: refreshed in place)
   function emitters(V, w, dt) {
     const lv = w.level ?? 1;
     if (lv < .9) { est.clear(); return; }
-    for (const p of host.props) {
+    const dead2 = host.biome.id === 'ruins';
+    for (const p of w.foliage()) {   // (the wind feature's foliage round the view: never all the props)
       const k = p.kind; if ((k !== 'tree' && k !== 'bush') || p.gone || !inView(V, p.x, p.y, 2)) continue;
-      const dead = k === 'tree' && (p.variant | 0) === 2 && host.biome.id === 'ruins';
-      arrive(p, dead ? 'dead' : k, crownOf(p), w.at(p.x, p.y, WA).g * lv, dt);
+      const dead = k === 'tree' && (p.variant | 0) === 2 && dead2, B = crownOf(p); if (!B) continue;
+      arrive(p, dead ? 'dead' : k, B, w.at(p.x, p.y, WA).g * lv, dt);
     }
     const P = host.player;   // the Ranger: a gust strong enough to whip the cloak and scarf
-    arrive('player', 'player', {x: P.x, y: P.y, h0: P.z + .9, h1: P.z + 1.75, r: .35}, (w.strength || 0) * .62, dt);
+    PB.x = P.x; PB.y = P.y; PB.h0 = P.z + .9; PB.h1 = P.z + 1.75;
+    arrive('player', 'player', PB, (w.strength || 0) * .62, dt);
   }
   function step(L, dt, w) {
     L.t += dt;
@@ -100,7 +119,7 @@ export async function create(host) {
     if (sp > .05) { const k = Math.min(1, dt * 3); L.dx += (a.x / sp - L.dx) * k; L.dy += (a.y / sp - L.dy) * k; const n = Math.hypot(L.dx, L.dy) || 1; L.dx /= n; L.dy /= n; }
     let vH = L.S, vV = L.wob * L.wf * Math.cos(L.t * L.wf + L.ph);   // along the wind, up
     const C = L.curl;
-    if (C && L.t > C.t0 && L.t < C.t0 + C.d) {   // the loop: the velocity turns once round in the wind's vertical plane
+    if (C.on && L.t > C.t0 && L.t < C.t0 + C.d) {   // the loop: the velocity turns once round in the wind's vertical plane
       const th = (L.t - C.t0) / C.d * TAU * C.dir, s = L.S * .7; vH = s * Math.cos(th); vV = s * Math.sin(th);
     }
     const vS = L.sw * L.sf * Math.cos(L.t * L.sf + L.ph * 1.7);   // sideways, across the wind: the S of a flowing line
@@ -118,17 +137,25 @@ export async function create(host) {
   // how much of the trail shows: grows in at birth (.12 s), dies tail first over the last .35 s
   const shown = L => Math.max(0, Math.min(L.n, Math.floor(TUNE.trail * Math.min(1, L.t / .12) * Math.min(1, (L.life - L.t) / .35) + .999)));
 
+  function clear() {
+    for (const L of lines) { L.obs = null; pool.push(L); } lines.length = 0;
+    for (const q of queue) { q.B = null; qpool.push(q); } queue.length = 0;
+  }
   F.update = dt => {
     const t0 = performance.now(), w = W();
     T += dt; swishT -= dt;
-    if (!w?.on || !F.on || TUNE.look === 'off') { lines.length = 0; queue.length = 0; return; }
+    if (!w?.on || !F.on || TUNE.look === 'off') { if (lines.length || queue.length) clear(); return; }
     const V = view();
     emitters(V, w, dt);
-    for (let i = queue.length - 1; i >= 0; i--) if (queue[i].at <= T) { if (lines.length < TUNE.max) launch(queue[i], w); queue.splice(i, 1); }
+    for (let i = queue.length - 1; i >= 0; i--) {
+      const q = queue[i]; if (q.at > T) continue;
+      if (lines.length < TUNE.max) launch(q, w);
+      queue[i] = queue[queue.length - 1]; queue.pop(); q.B = null; qpool.push(q);
+    }
     const P = host.player, aw = host.feature('audio')?.windAudio;
     for (let i = lines.length - 1; i >= 0; i--) {
       const L = lines[i]; step(L, dt, w);
-      if (L.t >= L.life) { lines[i] = lines[lines.length - 1]; lines.pop(); continue; }
+      if (L.t >= L.life) { lines[i] = lines[lines.length - 1]; lines.pop(); L.obs = null; pool.push(L); continue; }
       if (!L.near && swishT <= 0 && aw?.swish && Math.hypot(L.x - P.x, L.y - P.y) < TUNE.swish.r && Math.abs(L.h - P.z - 1) < 1.6) {
         L.near = true; swishT = TUNE.swish.cool;
         aw.swish(clamp(((L.x - P.x) * V.RX + (L.y - P.y) * V.RY) / 2.5, -.9, .9), clamp((w.level ?? 1) / 2.5, .3, 1));

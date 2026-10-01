@@ -662,26 +662,57 @@ const CLOTH_CALM = {wind: [...CLOTH_PARAMS.wind], gust: CLOTH_PARAMS.gust};
 // HAIR IN THE WIND: once the wind at the Ranger is more than a breeze (the wind feature's strength), the hair's edge pixels
 // stream downwind on the screen by a pixel or two and lift at the crown, flickering at 10 fps like the arena's flame licks.
 // Hair = the harmonized hair ramp (a57a58 / 845f46 / 624535, read off the ID passes), inside a box round the Head bone;
-// the normals go along, so the lighting treats the strands as hair
+// the normals go along, so the lighting treats the strands as hair.
+// No read-back per frame: each sprite frame + facing is read ONCE off its atlas (hairOf: the hair pixels in the box,
+// which neighbours are empty, their colours) and cached; a frame then only paints the few strands that stream, one
+// fillRect each, into the composite and its normals. (Where the cloak covers a pixel it is neither hair nor empty.)
 const HAIR = new Set([0xa57a58, 0x845f46, 0x624535]);
 const hh32 = (a, b, c) => { let n = Math.imul(a, 374761393) + Math.imul(b, 668265263) + Math.imul(c, 1442695041) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+const HB = 26, hairCache = new WeakMap(), hairCv = document.createElement('canvas'), hairQ = hairCv.getContext('2d', {willReadFrequently: true}), HAIR_A = {x: 0, y: 0, g: 0};
+hairCv.width = HB; hairCv.height = HB * 2;
+const rgbaOf = (d, i) => `rgba(${d[i]},${d[i + 1]},${d[i + 2]},${(d[i + 3] / 255).toFixed(3)})`;
+// -> {bx, by (the box in frame px), n, x, y (box px), f (bits: empty at x-1, x+1, x-2, x+2, y-1), ca, cn (colours)}
+function hairOf(sp, face, hb) {
+  let byFace = hairCache.get(sp); if (!byFace) hairCache.set(sp, byFace = []);
+  if (byFace[face]) return byFace[face];
+  if (sp.img.complete === false) return null;   // (an atlas still loading: try again next frame)
+  const bx = Math.round((hb[0] + hb[2]) / 2) - 13, by = Math.round(Math.min(hb[1], hb[3])) - 6;
+  const sx0 = Math.max(0, bx), sy0 = Math.max(0, by), sx1 = Math.min(FW, bx + HB), sy1 = Math.min(FH, by + HB);   // (inside this facing's frame)
+  hairQ.clearRect(0, 0, HB, HB * 2);
+  if (sx1 > sx0 && sy1 > sy0) {
+    hairQ.drawImage(sp.img, face * FW + sx0, sy0, sx1 - sx0, sy1 - sy0, sx0 - bx, sy0 - by, sx1 - sx0, sy1 - sy0);
+    if (sp.nrm) hairQ.drawImage(sp.nrm, face * FW + sx0, sy0, sx1 - sx0, sy1 - sy0, sx0 - bx, HB + sy0 - by, sx1 - sx0, sy1 - sy0);
+  }
+  const all = hairQ.getImageData(0, 0, HB, HB * 2).data, nOff = HB * HB * 4, a = i => all[i + 3] > 0;
+  const xs = [], ys = [], fs = [], ca = [], cn = [];
+  for (let y = 1; y < HB; y++) for (let x = 1; x < HB - 1; x++) {
+    const i = (y * HB + x) * 4; if (!a(i) || !HAIR.has(all[i] << 16 | all[i + 1] << 8 | all[i + 2])) continue;
+    const f = (a(i - 4) ? 0 : 1) | (a(i + 4) ? 0 : 2) | (x >= 2 && !a(i - 8) ? 4 : 0) | (x + 2 < HB && !a(i + 8) ? 8 : 0) | (a(i - HB * 4) ? 0 : 16);
+    if (!f) continue;
+    xs.push(x); ys.push(y); fs.push(f); ca.push(rgbaOf(all, i)); cn.push(sp.nrm ? rgbaOf(all, nOff + i) : null);
+  }
+  return (byFace[face] = {bx, by, n: xs.length, x: Int16Array.from(xs), y: Int16Array.from(ys), f: Uint8Array.from(fs), ca, cn});
+}
 function hairWind(fr) {
   const W = feat('wind'); if (!W?.on || !W.at) return;
   const k = Math.min(1, Math.max(0, ((W.strength || 0) - 1.05) / 1.3)); if (k <= 0) return;
-  const hb = SP[fr]?.bones?.[DIRS[P.face]]?.Head; if (!hb) return;
-  const a = W.at(player.x, player.y), dir = Math.sign(a.x * Math.cos(yaw) - a.y * Math.sin(yaw)) || 1;   // downwind on screen
-  const w = 26, h = 26, x0 = CX + Math.round((hb[0] + hb[2]) / 2) - 13, y0 = CY + Math.round(Math.min(hb[1], hb[3])) - 6;
-  const A = cq.getImageData(x0, y0, w, h), N = nq.getImageData(x0, y0, w, h), d = A.data, nd = N.data, tk = Math.floor(performance.now() / 100);
-  const hair = i => d[i + 3] > 0 && HAIR.has(d[i] << 16 | d[i + 1] << 8 | d[i + 2]), set = [];
-  for (let y = 1; y < h; y++) for (let x = 1; x < w - 1; x++) {
-    const i = (y * w + x) * 4; if (!hair(i)) continue;
-    const j = i + dir * 4, up = i - w * 4, r = hh32(x0 + x, y0 + y, tk);
-    if (!d[j + 3] && r < k * .6) { set.push([j, i]); const j2 = j + dir * 4, xx = x + 2 * dir; if (k > .5 && xx >= 0 && xx < w && !d[j2 + 3] && r < (k - .5) * .5) set.push([j2, i]); }   // a lock streams out
-    else if (!d[up + 3] && r > 1 - k * .2) set.push([up, i]);   // a tuft lifts at the crown
+  const sp = SP[fr], hb = sp?.bones?.[DIRS[P.face]]?.Head; if (!hb) return;
+  const a = W.at(player.x, player.y, HAIR_A), dir = Math.sign(a.x * Math.cos(yaw) - a.y * Math.sin(yaw)) || 1;   // downwind on screen
+  const H = hairOf(sp, P.face, hb); if (!H) return;
+  const x0 = CX + H.bx, y0 = CY + H.by, tk = Math.floor(performance.now() / 100), cl = rig.active ? rig : null;
+  const fOut = dir > 0 ? 2 : 1, fOut2 = dir > 0 ? 8 : 4;
+  for (let i = 0; i < H.n; i++) {
+    const x = H.x[i], y = H.y[i], f = H.f[i], fx = H.bx + x, fy = H.by + y;   // fx, fy: frame px (the cloak's covers())
+    if (cl && cl.covers(fx, fy)) continue;
+    const r = hh32(x0 + x, y0 + y, tk);
+    let n = 0, ux = 0, uy = 0;
+    if (f & fOut && r < k * .6 && !(cl && cl.covers(fx + dir, fy))) { n = k > .5 && f & fOut2 && r < (k - .5) * .5 && !(cl && cl.covers(fx + 2 * dir, fy)) ? 2 : 1; ux = dir; }   // a lock streams out
+    else if (f & 16 && r > 1 - k * .2 && !(cl && cl.covers(fx, fy - 1))) { n = 1; uy = -1; }   // a tuft lifts at the crown
+    for (let s = 1; s <= n; s++) {
+      cq.fillStyle = H.ca[i]; cq.fillRect(x0 + x + ux * s, y0 + y + uy * s, 1, 1);
+      if (H.cn[i]) { nq.fillStyle = H.cn[i]; nq.fillRect(x0 + x + ux * s, y0 + y + uy * s, 1, 1); }
+    }
   }
-  if (!set.length) return;
-  for (const [j, i] of set) for (let c = 0; c < 4; c++) { d[j + c] = d[i + c]; nd[j + c] = nd[i + c]; }
-  cq.putImageData(A, x0, y0); nq.putImageData(N, x0, y0);
 }
 const clothPos = [0, 0];
 function toWorldEvent(e) {

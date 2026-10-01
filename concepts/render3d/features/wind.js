@@ -36,7 +36,8 @@
 //   F.mesh(it)          the host's mesh hook (world.hooks.mesh): a 3D tree -> {x, y (lean m at the top), shake (px)}
 //   F.lights()          hanging lanterns (they swing: the pool moves)
 //   F.cloth()           {wind: [vx, vy] (view frame), gust} for CLOTH_PARAMS
-//   F.at(x, y) -> {x, y, g}   wind velocity m/s on the ground plane (arena x east, y south) + gust 0..1
+//   F.at(x, y, o?) -> {x, y, g}   wind velocity m/s on the ground plane (arena x east, y south) + gust 0..1 (into o if given)
+//   F.foliage()         the trees / bushes / tufts round the view and the player (a cell index: no scan of all props)
 //   F.gust (0..1 at the player; audio reads it), F.dir ([ux, uy] the wind blows TOWARD), F.atmosGust() (view centre)
 //   F.biomeChanged()    re-seeds the field, rebuilds the decor for the new biome
 // EXTRAS: F.TUNE / F.tune (live tunables), F.gustNow(A) (a strong front at the view now), F.info(), F._dbg()
@@ -275,6 +276,30 @@ export async function create(host) {
   const fst = new Map();   // prop -> spring state (2D lean in px, world axes)
   let fol = null, folN = -1, folArr = null;
   const folList = () => { const P = host.props; if (!fol || P !== folArr || P.length !== folN) { fol = P.filter(p => FOLK[p.kind]); folN = P.length; folArr = P; } return fol; };
+  // NEAR: the foliage round the view and within 16 m of the player (the rustle's reach), from an 8 m cell index built when
+  // the props change; the list is redone only when that box crosses a cell edge. The per-step loops (sway, arrows through
+  // the leaves, shedding, rustle; windlines.js through W.foliage()) visit NEAR, never all the props
+  const CELL = 8, cells = new Map(), near = [], NB = {c0: 0, c1: -1, r0: 0, r1: -1, of: null};
+  const cellKey = (cx, cy) => (cx + 512) * 1024 + cy + 512;
+  let cellsOf = null;
+  function nearList() {
+    const L = folList();
+    if (cellsOf !== L) {
+      cellsOf = L; cells.clear(); NB.of = null;
+      for (const p of L) { const key = cellKey(Math.floor(p.x / CELL), Math.floor(p.y / CELL)); let c = cells.get(key); if (!c) cells.set(key, c = []); c.push(p); }
+    }
+    // the box: the view's corners as vis() sees them (+ 2 m), and the player +- 16 m, in the world
+    let x0 = PL.x - 16, x1 = PL.x + 16, y0 = PL.y - 16, y1 = PL.y + 16;
+    for (let i = 0; i < 4; i++) {
+      const vx = VB.cx + (i & 1 ? VB.hw + 4 : -VB.hw - 4), vy = VB.cy + (i & 2 ? VB.hh + 7.5 : -VB.hh - 3), x = vx * RX + vy * FX, y = vx * RY + vy * FY;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    const c0 = Math.floor(x0 / CELL), c1 = Math.floor(x1 / CELL), r0 = Math.floor(y0 / CELL), r1 = Math.floor(y1 / CELL);
+    if (NB.of === L && c0 === NB.c0 && c1 === NB.c1 && r0 === NB.r0 && r1 === NB.r1) return near;
+    NB.of = L; NB.c0 = c0; NB.c1 = c1; NB.r0 = r0; NB.r1 = r1; near.length = 0;
+    for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) { const c = cells.get(cellKey(cx, cy)); if (c) for (const p of c) near.push(p); }
+    return near;
+  }
   function flexOf(p) {
     const F = FLEX[biome]; if (!F) return null;
     if (p.kind === 'tree' && F.dead && (p.variant | 0) === 2) return F.dead;
@@ -329,7 +354,7 @@ export async function create(host) {
   function stepFoliage(dt) {
     const pvx = PL.vx, pvy = PL.vy, spd = Math.hypot(pvx, pvy), roll = PL.state === 'roll', VR = vref();
     const svx = pvx * RX + pvy * RY;   // his velocity along the screen's x (the arena's pvx)
-    for (const p of folList()) {
+    for (const p of nearList()) {
       if (!vis(p.x, p.y)) continue;
       const F = flexOf(p); if (!F) continue;
       let st = fst.get(p);
@@ -944,11 +969,16 @@ export async function create(host) {
   // ================================================================ particles (shaken out of foliage)
   const parts = [];
   function spawnPart(o) { if (parts.length < 320) parts.push(o); }
-  // a 3D tree's crown in the world (render3d/trees3d.js shape.crown, turned and scaled like the model) | null
+  // a 3D tree's crown in the world (render3d/trees3d.js shape.crown, turned and scaled like the model) | null. Per item,
+  // worked out once (a tree doesn't move; a rebuilt world has new items)
+  const crowns = new WeakMap();
   function crownOf(p) {
-    const ps = host.itemOf?.(p)?.pose, C = ps?.crown; if (!C) return null;
-    const c = Math.cos(ps.yaw), s = Math.sin(ps.yaw), k = ps.scale, z = p.z || 0;
-    return {x: p.x + (C.x * c + C.z * s) * k, y: p.y + (-C.x * s + C.z * c) * k, h0: z + C.y0 * k, h1: z + C.y1 * k, r: C.r * k};
+    const it = host.itemOf?.(p); if (!it) return null;
+    let cr = crowns.get(it); if (cr !== undefined) return cr;
+    const ps = it.pose, C = ps?.crown;
+    if (!C) cr = null;
+    else { const c = Math.cos(ps.yaw), s = Math.sin(ps.yaw), k = ps.scale, z = p.z || 0; cr = {x: p.x + (C.x * c + C.z * s) * k, y: p.y + (-C.x * s + C.z * c) * k, h0: z + C.y0 * k, h1: z + C.y1 * k, r: C.r * k}; }
+    crowns.set(it, cr); return cr;
   }
   function shed(p, n, why) {
     const S = SHED[biome]; if (!S) return;
@@ -986,12 +1016,15 @@ export async function create(host) {
   function stepFeel(dt) {
     const S = SHED[biome], lv = Math.max(0, LV - .75);
     let e = 0, ep = 0;
-    for (const p of folList()) {
+    const sheds = S && lv > 0 && (S.kind === 'leaf' || S.kind === 'snow');
+    for (const p of nearList()) {
       if (p.kind === 'tuft') continue;
       const F = flexOf(p); if (!F) continue;
-      const leafy = !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins'), a = field(p.x, p.y);
-      if (leafy && S && lv > 0 && (S.kind === 'leaf' || S.kind === 'snow') && vis(p.x, p.y) && R() < dt * lv * a.g * STRENGTH.shed * leafRate(S) * (p.kind === 'tree' ? 1 : .3)) shed(p, 1, 'wind');
-      const d = Math.hypot(p.x - PL.x, p.y - PL.y); if (d > 16) continue;
+      const leafy = !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins'), d = Math.hypot(p.x - PL.x, p.y - PL.y);
+      const sh = sheds && leafy && vis(p.x, p.y); if (!sh && d > 16) continue;   // (the wind field only where it's needed)
+      const a = field(p.x, p.y);
+      if (sh && R() < dt * lv * a.g * STRENGTH.shed * leafRate(S) * (p.kind === 'tree' ? 1 : .3)) shed(p, 1, 'wind');
+      if (d > 16) continue;
       const st = fst.get(p), w = (p.kind === 'tree' ? (leafy ? 1 : .3) : .35) * (1 - d / 16) ** 2;
       const sp = Math.hypot(a.x, a.y) / vref(), ag = w * sp * sp * (.7 + .3 * Math.min(1, st ? Math.hypot(st.vx, st.vy) / 25 : 0));   // ~ wind speed^2: the gusts do the talking
       e += ag; ep += ag * clamp(((p.x - PL.x) * RX + (p.y - PL.y) * RY) / 7, -1, 1);
@@ -999,7 +1032,7 @@ export async function create(host) {
     W.rustle.e = e; W.rustle.pan = e > 1e-4 ? ep / e : 0;
     const air = S && biome !== 'rift' ? Math.max(0, LV - 1.1) * STRENGTH.airborne * leafRate(S) : 0;
     if (air > 0) {
-      const [cx, cy] = viewCentre(); airAcc += dt * air * (.25 + 1.6 * field(cx, cy).g);   // flurries ride the gust fronts
+      airAcc += dt * air * (.25 + 1.6 * field(VB.cx * RX + VB.cy * FX, VB.cx * RY + VB.cy * FY).g);   // flurries ride the gust fronts (at the view's centre)
       while (airAcc >= 1) { airAcc -= 1; airborne(S); }
     } else airAcc = 0;
   }
@@ -1075,10 +1108,12 @@ export async function create(host) {
   // ================================================================ events: arrows through foliage, dummy hits, blasts
   const shook = new WeakMap();   // arrow -> Set of props it already shook
   function arrowsThroughFoliage() {
-    for (const a of host.arrows || []) {
+    const A = host.arrows; if (!A || !A.length) return;
+    const NL = nearList();
+    for (const a of A) {
       if (a.stuck || a.life <= -9) continue;
       const sv = (a.vx || 0) * RX + (a.vy || 0) * RY;
-      for (const p of folList()) {
+      for (const p of NL) {
         if (p.kind === 'tuft' || !vis(p.x, p.y)) continue;
         const F = flexOf(p); if (!F) continue;
         const [r, hMax] = p.kind === 'tree' ? TUNE.arrowTree : TUNE.arrowBush, z = p.z || 0, cr = p.kind === 'tree' ? crownOf(p) : null;
@@ -1097,7 +1132,7 @@ export async function create(host) {
         for (const it of decor) if (it.dummy === e.prop) for (const pc of it.pieces) kick(pc, (e.vx || 0) / v * 1.6, (e.vy || 0) / v * 1.2, .8, 1);
       } else if (e.type === 'explode') {   // a blast wave: foliage whips, cloth billows away from it
         const r = (e.r || 2.4) * 2.5;
-        for (const p of folList()) {
+        for (const p of nearList()) {   // (only foliage that has swayed in view has a spring state to kick)
           const d = Math.hypot(p.x - e.x, p.y - e.y), st = fst.get(p); if (!st || d > r) continue;
           const k = Math.sign((p.x - e.x) * RX + (p.y - e.y) * RY || 1) * 90 * (1 - d / r);
           st.vx += RX * k; st.vy += RY * k; st.shake = Math.max(st.shake, .6 * (1 - d / r));
@@ -1181,6 +1216,9 @@ export async function create(host) {
     card, mesh,
     // (o: an object to fill instead of a new one: per-frame callers pass a scratch object, nothing is allocated)
     at(x, y, o = null) { const r = o || {x: 0, y: 0, g: 0}; if (!W.on) { r.x = r.y = r.g = 0; return r; } const a = field(x, y); r.x = a.x; r.y = a.y; r.g = a.g; return r; },
+    // the foliage (trees, bushes, tufts) round the view and the player, for other features' per-step loops (windlines.js):
+    // read-only, the same array until the view crosses a cell edge or the props change
+    foliage: () => nearList(),
     lights() {
       if (!W.on || needDecor) return EMPTY;
       const out = [];
