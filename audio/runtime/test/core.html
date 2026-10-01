@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio runtime core test</title>
+<style>
+  :root { --bg: #111; --fg: #ddd; }
+  body { background: var(--bg); color: var(--fg); font: 13px/1.4 ui-monospace, monospace; margin: 16px; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h3>audio/runtime core test</h3>
+<p>Driven over CDP by a harness (window.T.*). Click "run all" to run it by hand.</p>
+<button id="all">run all</button>
+<pre id="out"></pre>
+<script type="module" src="./core.js"></script>
+</body>
+</html>
