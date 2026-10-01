@@ -43,10 +43,12 @@
 //             at 1.25 - lum(ambient) x .95, .3..1) -> host.layer('front') at that alpha; scorch / sole embers and the
 //             arrows' air streak (its ground-sized layers: glow x (1 - light), cut where the player stands in front)
 //             -> host.layer('emit'), skipping the pixels of the player's silhouette.
-//   Ghosts    host.playerSprite() is copied and flattened to the biome tint (source-in) into pooled canvases, drawn as
-//             host.sprite cards at the old positions with the arena's stepped alpha (ordered dither). Each frame the
-//             player's current silhouette is cut out of any ghost that overlaps him on screen, so a ghost never covers
-//             him (the arena sorted them just behind him) while props still hide ghosts correctly.
+//   Ghosts    host.playerSprite() is copied and flattened to the biome tint (source-in) into pooled canvases, drawn at
+//             the old positions with the arena's stepped alpha (.35 / .2 / .1) as REAL translucency into the 'pre' layer
+//             (mixed into the albedo before the light, as the arena drew them before its lighting pass). As G-buffer
+//             cards they could only fake alpha with an ordered dither, which at those levels read as scattered dots.
+//             Each frame the player's current silhouette is cut out of any ghost that overlaps him on screen, so a
+//             ghost never covers him (the arena sorted them just behind him).
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -551,19 +553,23 @@ export async function create(host) {
     if (!GH.list.length) return;
     const A = TUNE.ghost.alpha, band = TUNE.ghost.keep / A.length, sp = host.playerSprite();
     const PXs = Math.round(SX(sp.x, sp.y, sp.h)), PYs = Math.round(SY(sp.x, sp.y, sp.h));
+    let pq = null;
     for (const gh of GH.list) {
       const a = A[Math.min(A.length - 1, Math.floor(gh.t / band))];
       const gx = Math.round(SX(gh.x, gh.y, gh.z)), gy = Math.round(SY(gh.x, gh.y, gh.z));
       // the player's current silhouette, at his offset from this ghost (card px = screen px / zoom), cut out of it
       const ox = Math.round((PXs - gx) / V.z) + gh.px - sp.px, oy = Math.round((PYs - gy) / V.z) + gh.py - sp.py;
-      let img = gh.c, dyn = false;
+      let img = gh.c;
       if (Math.abs(ox) < gh.c.width && Math.abs(oy) < gh.c.height) {
         const q = gh.dq; q.globalCompositeOperation = 'source-over'; q.clearRect(0, 0, gh.d.width, gh.d.height); q.drawImage(gh.c, 0, 0);
         q.globalCompositeOperation = 'destination-out'; q.drawImage(sp.img, ox, oy); q.globalCompositeOperation = 'source-over';
-        img = gh.d; dyn = true;
+        img = gh.d;
       }
-      host.sprite({img, x: gh.x, y: gh.y, h: gh.z, px: gh.px, py: gh.py, alpha: a, type: 3, dynamic: dyn});
+      pq ??= host.layer('pre');
+      pq.globalAlpha = a; pq.imageSmoothingEnabled = false;
+      pq.drawImage(img, gx - gh.px * V.z, gy - gh.py * V.z, img.width * V.z, img.height * V.z);
     }
+    if (pq) pq.globalAlpha = 1;
   }
 
   // ============================================================ the arrows' air streak
