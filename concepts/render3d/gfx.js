@@ -96,13 +96,15 @@ uniform mat4 viewMatrix, projectionMatrix;
 uniform vec3 uAnchor; uniform vec2 uSize, uPivot; uniform float uFaceYaw, uBias; uniform vec2 uPx; uniform vec4 uRect;
 uniform vec2 uSnap;   // view size in px: the anchor lands on a whole pixel, so every sprite texel is one screen pixel (0 = off)
 uniform vec2 uOff; uniform float uSway;   // px offset (x right, y up: a hit wobble, a hop) and sway (px at the top: wind)
-out vec2 vUv; out vec2 vC;
+uniform float uHasBend;                   // 1 = the fragment shader bends rows by uBend (the quad widens by |sway|)
+out vec2 vUv; out vec2 vC; out vec2 vSp;  // vSp: sprite px (x from the left, y from the top), unclamped when bending
 void main() {
   vec2 c = position.xy;
   vec3 right = vec3(cos(uFaceYaw), 0., -sin(uFaceYaw));
-  float px = c.x * uSize.x - uPivot.x + uOff.x + uSway * c.y, py = uPivot.y - (1. - c.y) * uSize.y + uOff.y;
+  float S = uHasBend > .5 ? ceil(abs(uSway)) : 0., sxp = c.x * (uSize.x + 2. * S) - S;
+  float px = sxp - uPivot.x + uOff.x + (uHasBend > .5 ? 0. : uSway * c.y), py = uPivot.y - (1. - c.y) * uSize.y + uOff.y;
   vec3 w = uAnchor + right * (px / uPx.x) + vec3(0., py / uPx.y, 0.);
-  vC = vec2(c.x, 1. - c.y);
+  vC = vec2(c.x, 1. - c.y); vSp = vec2(sxp, (1. - c.y) * uSize.y);
   vUv = uRect.xy + vC * uRect.zw;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
   if (uSnap.x > 0.) {
@@ -113,11 +115,19 @@ void main() {
   gl_Position.z -= uBias * gl_Position.w;
 }`;
 const CARD_FS = HEAD + OUTS + `
-in vec2 vUv; in vec2 vC;
-uniform sampler2D uTex, uNrm, uEm; uniform vec4 uNrmRect;
-uniform float uHasNrm, uHasEm, uType, uObj, uCamYaw, uFlash;
+in vec2 vUv; in vec2 vC; in vec2 vSp;
+uniform sampler2D uTex, uNrm, uEm; uniform vec4 uNrmRect, uRect; uniform vec2 uSize;
+uniform float uHasNrm, uHasEm, uType, uObj, uCamYaw, uFlash, uHasBend, uSway;
+uniform float uBend[8];   // sway weight at height fractions 0 (bottom) .. 1 (top), 8 samples (the arena's per-row flex)
 void main() {
-  vec4 c = texture(uTex, vUv), e = uHasEm > .5 ? texture(uEm, vUv) : vec4(0.);
+  vec2 C = vC, uv = vUv;
+  if (uHasBend > .5) {   // each row shifts by whole pixels: stiff trunks, a crown moving as a block
+    float f = clamp(1. - vSp.y / uSize.y, 0., 1.) * 7.; int i = int(floor(f)); float t = f - float(i);
+    float sx = vSp.x - floor(uSway * mix(uBend[i], uBend[min(i + 1, 7)], t) + .5);
+    if (sx < 0. || sx >= uSize.x) discard;
+    C = vec2(sx / uSize.x, vSp.y / uSize.y); uv = uRect.xy + C * uRect.zw;
+  }
+  vec4 c = texture(uTex, uv), e = uHasEm > .5 ? texture(uEm, uv) : vec4(0.);
   if (c.a < .5 && e.a < .5) discard;
   if (c.a < .5) c.rgb = e.rgb;   // emit-only pixels (a flame above its bowl): painted too, like wind.js's flameAlbedo
   vec3 F = vec3(sin(uCamYaw), 0., cos(uCamYaw)), R = vec3(cos(uCamYaw), 0., -sin(uCamYaw));
@@ -125,7 +135,7 @@ void main() {
   vec3 U20 = vec3(0., C20, 0.) - F * S20, F20 = vec3(0., S20, 0.) + F * C20;
   vec3 n = normalize(F20 + vec3(0., .25, 0.));
   if (uHasNrm > .5) {
-    vec4 t = texture(uNrm, uNrmRect.xy + vC * uNrmRect.zw);
+    vec4 t = texture(uNrm, uNrmRect.xy + C * uNrmRect.zw);
     if (t.a > .5) { vec3 q = t.xyz * 2. - 1.; n = normalize(q.x * R + q.y * U20 + q.z * F20); }
   }
   o0 = vec4(c.rgb, float(int(uType) * 4) / 255.);
@@ -136,7 +146,7 @@ const LINE_VS = HEAD + `
 in vec3 position; in vec4 color;   // a = emissive (1) or lit (0)
 uniform mat4 viewMatrix, projectionMatrix;
 out vec4 vCol;
-void main() { vCol = color; gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.); gl_Position.z -= .004 * gl_Position.w; }`;
+void main() { vCol = color; gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.); gl_Position.z -= .00125 * gl_Position.w; }`;
 const LINE_FS = HEAD + OUTS + `
 in vec4 vCol;
 void main() { o0 = vec4(vCol.rgb, float(6 * 4) / 255.); o1 = vec4(0., 1., 0., 7.); o2 = vec4(vCol.rgb * vCol.a, 0.); }`;
@@ -195,7 +205,7 @@ void main() {
   vec4 p = projectionMatrix * viewMatrix * vec4(position, 1.);
   vec2 s = (p.xy * .5 + .5) * uSnap;
   vec2 c = mod(aMisc.x, 2.) > .5 ? floor(s) + .5 : floor(s + .5);   // odd sizes centre on a pixel, even on a corner
-  gl_Position = vec4(c / uSnap * 2. - 1., p.z - .003, 1.);
+  gl_Position = vec4(c / uSnap * 2. - 1., p.z - .00125, 1.);
   gl_PointSize = aMisc.x;
 }`;
 const POINT_FS = HEAD + OUTS + BAYER + `
@@ -413,7 +423,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const cardUniforms = o => ({
     uAnchor: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2(o.w, o.h)}, uPivot: {value: new THREE.Vector2(o.px, o.py)},
     uPx: U.px, uRect: {value: new THREE.Vector4(0, 0, 1, 1)}, uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uSnap: SNAP,
-    uOff: {value: new THREE.Vector2()}, uSway: {value: 0},
+    uOff: {value: new THREE.Vector2()}, uSway: {value: 0}, uHasBend: {value: 0},
   });
   const QUAD = new THREE.BufferGeometry();
   QUAD.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0], 3));
@@ -423,11 +433,11 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const u = cardUniforms(o);
     const g = raw(CARD_VS, CARD_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
       uNrmRect: {value: o.nrmRect || new THREE.Vector4(0, 0, 1, 1)}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0},
-      uType: {value: o.type ?? 3}, uObj: {value: o.obj ?? 0}, uFlash: {value: 0}}, {side: THREE.DoubleSide});
+      uType: {value: o.type ?? 3}, uObj: {value: o.obj ?? 0}, uFlash: {value: 0}, uBend: {value: new Float32Array(8).fill(1)}}, {side: THREE.DoubleSide});
     const gm = new THREE.Mesh(QUAD, g); gm.frustumCulled = false; gScene.add(gm);
     let sm = null, xm = null;
     if (o.shadow !== false) {
-      sm = new THREE.Mesh(QUAD, raw(CARD_VS, SHADOW_CARD_FS, {...u, uBias: {value: 0}, uSnap: NOSNAP, uFaceYaw: U.sunYaw}, {side: THREE.DoubleSide}));
+      sm = new THREE.Mesh(QUAD, raw(CARD_VS, SHADOW_CARD_FS, {...u, uBias: {value: 0}, uSnap: NOSNAP, uFaceYaw: U.sunYaw, uHasBend: {value: 0}}, {side: THREE.DoubleSide}));
       sm.frustumCulled = false; sScene.add(sm);
     }
     if (o.xray) {
@@ -499,7 +509,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const A = {iAnchor: 3, iRect: 4, iSize: 4, iMisc: 4}, attrs = {};
     for (const [k, n] of Object.entries(A)) { attrs[k] = new THREE.InstancedBufferAttribute(new Float32Array(cap * n), n); attrs[k].setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, attrs[k]); }
     const uni = {uTex: {value: null}, uEm: {value: null}, uNrm: {value: null}, uHasEm: {value: 0}, uHasNrm: {value: 0}, uType: {value: o.type ?? 3},
-      uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP, uBias: {value: .0025}};
+      uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP, uBias: {value: .00125}};
     const gm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gScene.add(gm);
     let sm = null;
     if (o.shadow) { sm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_SHADOW_FS, {uTex: uni.uTex, uFaceYaw: U.sunYaw, uPx: U.px, uSnap: NOSNAP, uBias: {value: 0}}, {side: THREE.DoubleSide})); sm.frustumCulled = false; sScene.add(sm); }

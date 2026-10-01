@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS} from '../sprites/arena/layout.js';
 
+export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../sprites/out/render3d/glb/', YAW = '../sprites/out/render3d/props_yaw/';
 
 // ---------------------------------------------------------------- the pixelizer's palettes (props_pixelize.py BIOMES)
@@ -166,7 +167,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
   const S = .25, NX = Math.round(WM / S), NZ = Math.round(HM / S);
   const hAt = (x, z) => {
     if (z > HM - 7 && dark(x, z) && dark(x, z + .2) && dark(x, z - .2)) return -3.5;
-    if (inStream(x, z)) return -.18;
+    if (inStream(x, z)) return WATER_H;
     return 0;
   };
   const pos = [], uv = [], idx = [];
@@ -207,7 +208,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
   let nextId = 10;
   const SHADOWLESS = new Set(['tuft']);
   if (haveGlb) await Promise.all([...new Set(props.map(stateOf).filter(Boolean))].map(s => glbGeometry(loader, s)));   // all at once
-  const cardOf = (sp, o) => G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1], type: 3, bias: .0025, ...o});
+  const cardOf = (sp, o) => G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1], type: 3, bias: .00125, ...o});
   for (const p of props) {
     const z0 = p.z || 0;
     if (p.outside && biome.hole?.(p.x, p.y, ctxO)) continue;   // over the ravine / in the stream
@@ -219,7 +220,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
       it.live = G.mesh(geo, obj, new THREE.Matrix4().makeTranslation(p.x, z0, p.y));
       const yw = yawIdx && yawOf(p, st);
       if (yw && yawIdx.frames[yw[0] + '_y0']) {
-        it.yaw = {base: yw[0], off: yw[1], card: G.card({tex: texOf(yawAlb), nrm: texOf(yawNrm), w: 1, h: 1, px: 0, py: 0, type: 7, obj, bias: .0025})};
+        it.yaw = {base: yw[0], off: yw[1], card: G.card({tex: texOf(yawAlb), nrm: texOf(yawNrm), w: 1, h: 1, px: 0, py: 0, type: 7, obj, bias: .00125})};
         it.yaw.card.anchor = new THREE.Vector3(p.x, z0, p.y); it.yaw.card.setVisible(false);
       }
     } else if (sp) {
@@ -284,6 +285,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
         const u = it.card.u; u.uAnchor.value.set(p.x, z0, p.y); u.uOff.value.set(wob, 0);
         const hk = hooks.card?.(it, sp);
         u.uSway.value = hk?.sway || 0;
+        if (hk?.bend) { it.card.g.uniforms.uBend.value = hk.bend; u.uHasBend.value = 1; } else u.uHasBend.value = 0;   // per-row flex (8 weights, bottom -> top)
         if (hk?.em) { it.card.g.uniforms.uEm.value = G.tex(hk.em, {dynamic: true}); it.card.g.uniforms.uHasEm.value = 1; }
         else if (it.sp) { it.card.g.uniforms.uEm.value = it.sp.emit ? texOf(it.sp.emit) : null; it.card.g.uniforms.uHasEm.value = it.sp.emit ? 1 : 0; }
         it.card.flash = flash; it.card.setVisible(!p.gone && !!sp);
@@ -296,6 +298,6 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}
     glb: state => glbGeometry(loader, state),                   // Promise<geometry | null> (debris chunks, ...)
     // an extra live mesh owned by a feature (debris chunks): dispose it when done; a rebuild (biome switch) disposes the rest
     mesh: (geo, matrix) => { const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4()), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); }; return m; },
-    biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
+    waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
 export {WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS};

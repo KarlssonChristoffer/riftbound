@@ -78,12 +78,15 @@ const rgbOf = c => { if (Array.isArray(c)) return c; let s = String(c || '#fff')
 let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome'))), timeI = Math.max(0, TIMES.indexOf(Q.get('time')));
 let world = null, propMode = Q.get('props') === 'yaw' ? 'yaw' : 'live';
 const features = [];
+// the wind sways painted foliage cards (per-row bend) and gives braziers / torches a live flame
+function cardHook(it, sp) { const w = features.find(f => f.name === 'wind'); return w?.on && w.card ? w.card(it, sp) : null; }
 async function setBiome(i) {
   biomeI = ((i % BIOMES.length) + BIOMES.length) % BIOMES.length;
   $('#load').classList.remove('hidden'); $('#load').textContent = 'Building ' + BIOMES[biomeI].name + '…';
   const keep = world?.props;   // props keep their state (broken, opened, moved) across a biome switch
   world?.dispose();
   world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH, props: keep});
+  world.hooks.card = cardHook;   // a rebuilt world has fresh hooks
   world.setMode(propMode);
   for (const f of features) f.biomeChanged?.();
   $('#load').classList.add('hidden');
@@ -167,7 +170,7 @@ charCv.width = nrmCv.width = 192; charCv.height = nrmCv.height = 160;   // margi
 const cq = charCv.getContext('2d', {willReadFrequently: true}), nq = nrmCv.getContext('2d', {willReadFrequently: true});
 cq.imageSmoothingEnabled = nq.imageSmoothingEnabled = false;
 const CX = 48, CY = 40;   // where the 96 x 80 frame sits in the composite
-const hero = G.card({tex: texOf(charCv), nrm: texOf(nrmCv), w: 192, h: 160, px: PIV[0] + CX, py: PIV[1] + CY, type: 4, obj: 8, bias: .0025, xray: true});
+const hero = G.card({tex: texOf(charCv), nrm: texOf(nrmCv), w: 192, h: 160, px: PIV[0] + CX, py: PIV[1] + CY, type: 4, obj: 8, bias: .00125, xray: true});
 
 async function switchLoadout(i) {
   loadI = ((i % LOADOUTS.length) + LOADOUTS.length) % LOADOUTS.length;
@@ -290,8 +293,9 @@ const host = {
   get wind() { return feat('wind'); }, feature: feat,
   get hits() { return hits; },
   // the Ranger as drawn this frame (sprite + runtime cloak + pixel bow, and its normals), for afterimages / reflections.
-  // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame.
-  playerSprite: () => ({img: charCv, nrm: nrmCv, w: 192, h: 160, px: PIV[0] + CX, py: PIV[1] + CY, x: player.x, y: player.y, h: P.z, frame: P.frame, face: P.face}),
+  // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame. Their
+  // size is img.width / img.height; h is the player's height above the ground (metres), like every host h.
+  playerSprite: () => ({img: charCv, nrm: nrmCv, px: PIV[0] + CX, py: PIV[1] + CY, x: player.x, y: player.y, h: P.z, frame: P.frame, face: P.face}),
 };
 
 // ---------------------------------------------------------------- features
@@ -305,7 +309,7 @@ for (const x of mods) {
 features.sort((a, b) => FEATURES.indexOf(a.name) - FEATURES.indexOf(b.name));
 mark('features', tp);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
-world.hooks.card = (it, sp) => { const w = feat('wind'); return w?.on && w.card ? w.card(it, sp) : null; };
+world.hooks.card = cardHook;
 
 // ---------------------------------------------------------------- toggles
 const SAMPLING = ['auto', 'nearest', 'smooth'];
