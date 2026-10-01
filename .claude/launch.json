@@ -64,6 +64,24 @@
         "8127"
       ],
       "port": 8127
+    },
+    {
+      "name": "render3d-arch",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8133"
+      ],
+      "port": 8133
+    },
+    {
+      "name": "render3d-menu",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8134"
+      ],
+      "port": 8134
     }
   ]
 }
