@@ -3,7 +3,7 @@
 // bones, sim}. Each pose's sheet / normals / depth is an ImageBitmap cut from the big sheet, so everything that draws
 // SP[pose].img (the host, cloth.js, the pixel bow) works unchanged.
 // Falls back to player.js loadSet (the slow per-file path) when the pack is missing or older than poses.json.
-import {loadSet} from '../concepts/sprites/player.js';
+import {loadSet} from './sim/player/player.js';
 
 const loadImg = src => new Promise((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => err(new Error(src)); i.src = src; });
 async function sha1(text) {

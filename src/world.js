@@ -9,7 +9,7 @@
 //   lights   from the biome's sprites (braziers, torches, crystals) and ground (lava, runes), in metres
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from '../concepts/sprites/arena/layout.js';
+import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from './world/layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)

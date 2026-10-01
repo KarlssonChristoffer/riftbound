@@ -41,11 +41,11 @@ import * as THREE from 'three';
 import {createGfx, DEG} from './gfx.js';
 import {buildWorld, texOf, WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, PROP_TOP} from './world.js';
 import {loadAtlas} from './atlas.js';
-import {BIOMES} from '../concepts/sprites/arena/biomes.js';
-import {createLighting} from '../concepts/sprites/arena/lighting.js';
-import {ClothRig, depthOf, CLOTH_PARAMS} from '../concepts/sprites/cloth.js';
-import {createArmor} from '../concepts/sprites/arena/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
-import {createPlayer, atlasOf, BUSY} from '../concepts/sprites/player.js';
+import {BIOMES} from './world/biomes.js';
+import {MOODS, TIMES, CHAR} from './content/moods.js';   // the lighting tables (forked from the arena's lighting.js)
+import {ClothRig, depthOf, CLOTH_PARAMS} from './view/cloth.js';
+import {createArmor} from './view/armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
+import {createPlayer, atlasOf, BUSY} from './sim/player/player.js';
 import {createGame} from './game/game.js';
 import {createPerf} from './core/perf.js';   // the frame profiler: per-system ms against the budget (F3, ?perf=1)
 import {createEnv, SEASONS, WEATHER} from './sim/env.js';   // the world clock: time of day, seasons, weather
@@ -101,9 +101,6 @@ function fit() {   // the window changed, or a zoom arrived (stepZoom): the view
 }
 fit(); addEventListener('resize', fit);
 
-// moods: the arena's own table (lighting.js), so both pages light the same scene the same way
-const LT = createLighting({...ctxO, layout: null});
-const MOODS = LT.MOODS, TIMES = LT.TIMES, CHAR = LT.CHAR;
 const GRADE = {ruins: [1.039, 1.029, .818], ember: [1.166, .958, .82], frost: [.896, 1.013, 1.161], rift: [1.056, .792, 1.649]};
 const BG = {ruins: [.10, .13, .11], ember: [.11, .06, .05], frost: [.10, .12, .17], rift: [.06, .04, .10]};
 const lum = c => c[0] * .3 + c[1] * .55 + c[2] * .15;

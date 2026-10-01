@@ -17,7 +17,7 @@
 //   (HD styles: each flame also sends up a column of hot air, gfx.js heat: a rising ripple over it, stronger with the flame)
 //   fires.pops                             this step's crackles [{x, y, h, col, kind, k}]: the caller throws sparks, flashes
 //                                          the light (lights.js); drained by the caller
-import {ART} from '../../concepts/sprites/arena/biomes.js';
+import {ART} from '../world/biomes.js';
 
 // style: 'pixel' (depth-tested pixel particles) | 'hybrid' (those + a soft HD glow round the flame) | 'soft' (the
 // whole flame as smooth HD particles: gfx.js fx, display resolution, additive, soft-depth-tested)

@@ -10,7 +10,7 @@
 // THE MENU (ui/menu.js): F.ui(name) plays the forge's wooden UI family (ui_hover / click / confirm / back / open,
 // audio/forge/recipes/ui.js) on the 'ui' bus; F.duck(on) keeps the paused world quiet: music and effects ducked (an
 // engine snapshot, so the volume settings stay as they are) while the ambience plays on.
-import {createAudio} from '../../concepts/sprites/arena/audio.js';
+import {createAudio} from '../audio/audio.js';
 import {createWindAudio} from './windaudio.js';
 import {createRainAudio} from './rainaudio.js';
 
