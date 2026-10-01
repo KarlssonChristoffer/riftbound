@@ -25,6 +25,7 @@
 //            S gate
 export const WORLD = {WM: 62, HM: 30};
 export const PLAY = {x0: 7, y0: 6, x1: 33, y1: 24};
+export const SCONCE_D = .21;   // a wall sconce's stick stands this far off the wall face (the east torches; lights.js mounts them)
 export const TRAIL = {x0: 33, y0: 2.6, x1: 60, y1: 27.5};   // walkable outdoor region east of the arena
 
 // ---- stream: centreline x and width per y (metres) ----
@@ -94,13 +95,15 @@ export function buildLayout(seed = 7) {
     const a = -Math.PI / 2 + i * Math.PI * 2 / 3;
     add('brazier', lg.x + Math.cos(a) * 2.4, lg.y + Math.sin(a) * 2.4 * .8, {r: .35, light: i});
   }
-  add('torch', x1 - .6, cy - 3.2, {r: 0});   // wall torches on the east wall
-  add('torch', x1 - .6, cy + 5.4, {r: 0});
+  // wall torches on the east wall: in a sconce whose stick stands SCONCE_D off the wall face (lights.js mounts them)
+  add('torch', x1 - SCONCE_D, cy - 3.2, {r: 0});
+  add('torch', x1 - SCONCE_D, cy + 5.4, {r: 0});
 
   // ---- south: deco strip + a column of dummies straight south of the ring (shots toward / away from camera) ----
   for (const x of [cx - 3, cx, cx + 3]) add('dummy', x, y1 - 1.6, {r: .3, wob: 0, target: true});
-  for (let i = 0; i < 7; i++) add(rnd() < .5 ? 'bush' : 'rock', x0 + 1 + rnd() * 5, y1 - .8 - rnd() * 2.4, {r: .25, variant: rnd() * 3 | 0});
-  for (let i = 0; i < 6; i++) add(rnd() < .5 ? 'bush' : 'rock', x1 - 6 + rnd() * 5, y1 - .8 - rnd() * 2, {r: .25, variant: rnd() * 3 | 0});
+  // (plants are soft: bushes, small rocks and tufts have no collider; you walk through them)
+  for (let i = 0; i < 7; i++) add(rnd() < .5 ? 'bush' : 'rock', x0 + 1 + rnd() * 5, y1 - .8 - rnd() * 2.4, {r: 0, variant: rnd() * 3 | 0});
+  for (let i = 0; i < 6; i++) add(rnd() < .5 ? 'bush' : 'rock', x1 - 6 + rnd() * 5, y1 - .8 - rnd() * 2, {r: 0, variant: rnd() * 3 | 0});
 
   // ---- small scatter inside (no collision) ----
   for (let i = 0; i < 26; i++) {
@@ -142,7 +145,7 @@ export function buildLayout(seed = 7) {
     const x = TRAIL.x0 + 1 + rnd() * (TRAIL.x1 - TRAIL.x0 - 2), y = TRAIL.y0 + .5 + rnd() * (TRAIL.y1 - TRAIL.y0 - 1);
     if (inStream(x, y) || Math.abs(x - STREAM.cx(y)) < STREAM.w(y) / 2 + .5 || wantsClear(x, y) || props.some(p => Math.hypot(p.x - x, p.y - y) < 1)) continue;
     if (elev(x, y) === 0 && y < 12 && x > 42.5) continue;   // right under the cliff lip
-    const k = rnd(); add(k < .45 ? 'tuft' : k < .75 ? 'bush' : 'rock', x, y, {variant: rnd() * 3 | 0, r: k < .45 ? 0 : .25});
+    const k = rnd(); add(k < .45 ? 'tuft' : k < .75 ? 'bush' : 'rock', x, y, {variant: rnd() * 3 | 0, r: 0});   // (soft)
   }
 
   // ---- surroundings outside the walls and the trail (unreachable; big shapes that set the biome mood) ----

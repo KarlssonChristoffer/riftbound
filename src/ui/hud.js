@@ -15,6 +15,7 @@ const FONT = '"Segoe UI", system-ui, sans-serif';
 
 export function createHud(host) {
   const banners = [], toasts = [], floats = [];
+  const lag = new WeakMap();   // boss -> the HP bar's lagging chip (the HUD's own state: not a field on the enemy)
   let hoverTip = null;
 
   function text(q, s, x, y, size, col, o = {}) {
@@ -101,9 +102,9 @@ export function createHud(host) {
         text(q, `${v.kills} kills`, W - 20 * u, 48 * u, 11 * u, '#9a937f', {align: 'right', w: 600});
         if (v.boss) {
           const b = v.boss, w = Math.round(Math.min(W * .5, 440 * u)), h = Math.round(10 * u), x = Math.round(W / 2 - w / 2), y = Math.round(72 * u);
-          b.hpBar = Math.max(b.hp, (b.hpBar ?? b.hp) - b.maxHp * .006);
+          const chip = Math.max(b.hp, (lag.get(b) ?? b.hp) - b.maxHp * .006); lag.set(b, chip);
           text(q, b.name, W / 2, y - 6 * u, 13 * u, b.aura || '#f2d27a', {align: 'center'});
-          bar(q, x, y, w, h, b.hp / b.maxHp, b.hpBar / b.maxHp, '#d8483a');
+          bar(q, x, y, w, h, b.hp / b.maxHp, chip / b.maxHp, '#d8483a');
         }
       }
       // banners + toasts (centre)

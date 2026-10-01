@@ -10,6 +10,8 @@
 // BUDGET: sync() once per sim step: a position check per entity, re-bucketing only what left its padded box.
 //   const ents = createEntities(list, bounds)
 //   ents.list / ver (bumps on every join / leave) / add(p) / remove(p) / has(p)
+//   ents.hide(p, on = true): out of the world for now (p.gone: not drawn, hit or collided with; kept for a reset: a
+//     broken-away crate, a retired yard brute, cleared scatter) or back. The one writer of p.gone
 //   ents.query(name, pred, join?) -> a live array: the members for which pred(p) held when they joined (or at refresh());
 //     join(p) runs for each member as it joins the query (the ones already there first, in order): the querying system
 //     sets up its own state for it. Names are the owner's: 'combat.hittable', 'props.movable'
@@ -69,9 +71,10 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
     for (let i = 0; i < scratch.length; i++) if (!bit || scratch[i].mask & bit) out.push(scratch[i].p);
     return out;
   }
+  function hide(p, on = true) { p.gone = !!on; }
   function moved(p) { const rec = recs.get(p); if (rec && !grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } }
   function sync() {
     for (const rec of recs.values()) if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); }
   }
-  return {list, add, remove, has: p => recs.has(p), query, refresh, near, sync, moved, get ver() { return ver; }, get size() { return recs.size; }, grid, _rec: recOf};
+  return {list, add, remove, has: p => recs.has(p), hide, query, refresh, near, sync, moved, get ver() { return ver; }, get size() { return recs.size; }, grid, _rec: recOf};
 }

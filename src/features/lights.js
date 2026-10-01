@@ -30,7 +30,7 @@
 // It sits BEFORE combat in the feature order: onArrowHit sees the hit first (to catch fire) and returns nothing, so
 // combat still resolves it. Props it adds (sconces, the campfire, the beacon) live in host.props like the layout's.
 import {ART} from '../world/biomes.js';
-import {STREAM, PLAY} from '../world/layout.js';
+import {STREAM, PLAY, SCONCE_D} from '../world/layout.js';
 import * as WORLD from '../world/world.js';
 import {geoOf, M4, along} from '../world/kit3d.js';
 import {createFires} from './firesim.js';
@@ -44,7 +44,7 @@ const TAU = Math.PI * 2;
 const R = Math.random, rr = (a, b) => a + R() * (b - a);
 const lerp3 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 
-const D = .21;   // a sconce's stick stands this far off the wall face (the arm shows a few px past the stick)
+const D = SCONCE_D;   // a sconce's stick stands this far off the wall face (the arm shows a few px past the stick)
 const TORCH_H = 1.72, BRAZ_H = 1.22;   // flame heights of the arena's torch / brazier sprites (their lights' h)
 const GLOW = {ruins: '#7af0c8', ember: '#ff9a50', frost: '#9ad8ff', rift: '#e070ff'};
 const WISP = {ruins: '#a8ffd8', ember: '#ffc070', frost: '#bfe8ff', rift: '#ff9cf0'};
@@ -187,10 +187,11 @@ export async function create(host) {
   const flames = host.entities.query('lights.flame', p => p.kind === 'brazier' || p.kind === 'torch');
   const catchers = host.entities.query('lights.catch', p => p.kind === 'brazier' || p.kind === 'torch' || p.kind === 'beacon');
   const nearB = [];
-  // the sconces: the layout's east torches move onto the wall, plus the gate pairs (west ones unlit)
+  // the sconces: the layout's east torches (on the wall already: world/layout.js SCONCE_D) get their mounts, plus the gate
+  // pairs (west ones unlit)
   function mountSconces() {
     const {x0, y0, x1, y1} = PLAY, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, added = [];
-    for (const p of props()) if (p.kind === 'torch' && !p.sconce && Math.abs(p.x - (x1 - .6)) < .05) { p.x = x1 - D; p.sconce = true; p.mount = [-1, 0]; }
+    for (const p of props()) if (p.kind === 'torch' && !p.sconce && Math.abs(p.x - (x1 - D)) < .05) { p.sconce = true; p.mount = [-1, 0]; }
     const add = (x, y, nx, ny, unlit) => {
       if (props().some(q => q.kind === 'torch' && Math.hypot(q.x - x, q.y - y) < .3)) return;
       const p = {kind: 'torch', x, y, z: 0, variant: 0, r: 0, sconce: true, mount: [nx, ny], unlit: !!unlit, lightable: true};
@@ -202,7 +203,7 @@ export async function create(host) {
     return added;
   }
   // the campfire and the beacon are props too (they collide; the beacon is an E target)
-  const clearAround = (x, y, r) => { for (const q of props()) if ((q.kind === 'tuft' || q.kind === 'bush' || q.kind === 'rock') && Math.hypot(q.x - x, q.y - y) < r) q.gone = true; };
+  const clearAround = (x, y, r) => { for (const q of props()) if ((q.kind === 'tuft' || q.kind === 'bush' || q.kind === 'rock') && Math.hypot(q.x - x, q.y - y) < r) host.entities.hide(q); };
   let camp = props().find(p => p.kind === 'campfire'), beacon = props().find(p => p.kind === 'beacon');
   if (!camp) { camp = host.entities.add({kind: 'campfire', x: 50.8, y: 19.4, z: 0, r: .55}); clearAround(camp.x, camp.y, 1.3); }
   if (!beacon) { beacon = host.entities.add({kind: 'beacon', x: 49.6, y: 10.35, z: 2.4, r: .45, unlit: true, interact: 'light the beacon'}); clearAround(beacon.x, beacon.y, 1); }
@@ -400,7 +401,7 @@ export async function create(host) {
       host.events.push({type: 'fire.crackle', x: p.x, y: p.y, big: true});
     }
     for (const [p, e] of ashes) {
-      if (!p.broken) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); if (e.gone) p.gone = false; ashes.delete(p); continue; }   // it came back
+      if (!p.broken) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); if (e.gone) host.entities.hide(p, false); ashes.delete(p); continue; }   // it came back
       e.t += dt;
       const base = p.z || 0, fl = clamp(1 - e.t / 9, 0, 1);   // the flames on the remains die down
       if (R() < dt * 14 * fl) parts.push({x: p.x + rr(-.2, .2), y: p.y + rr(-.15, .15), h: base + .25, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(.6, 1.4), t: 0, life: rr(.3, .7), k: 'spark', c: FIRE[0], g: -.3});
@@ -408,7 +409,7 @@ export async function create(host) {
       if (!e.gone && e.t > e.life) {   // the remains crumble to an ash pile
         e.cr = Math.min(1, (e.t - e.life) / 2.5);
         if (R() < dt * 7) ashPuff(p.x + rr(-.2, .2), p.y + rr(-.2, .2), base + .1, 2, .15);
-        if (e.cr >= 1) { e.gone = true; p.gone = true; ashPuff(p.x, p.y, base + .08, 10, .3); }
+        if (e.cr >= 1) { e.gone = true; host.entities.hide(p); ashPuff(p.x, p.y, base + .08, 10, .3); }
       }
     }
     for (const [p, e] of scorched) if ((e.t += dt) > 50) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); scorched.delete(p); }

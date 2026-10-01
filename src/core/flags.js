@@ -35,6 +35,7 @@ export const FLAG_DOCS = {
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
   lineup: 'trees: the procedural trees side by side for review',
+  owncheck: '1: record writes to entity fields by systems that do not own them (dev/owncheck.js; slow: for checks)',
 };
 const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
 const warned = new Set();

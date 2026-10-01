@@ -98,14 +98,14 @@ export async function createPropPhysics(host, core) {
   function resetHome(q, quiet) {
     dropStone(q);
     [q.x, q.y, q.z] = q.home3;
-    Object.assign(q, {vx: 0, vy: 0, h: 0, vh: 0, tip: null, sink: 0, sinkT: undefined, float: false, gone: false, idle: 0, r: q.kind === 'crate' ? (q.wall ? .38 : .34) : .3});
-    ents.moved(q);   // a jump home: the grid follows now, not next step
+    Object.assign(q, {vx: 0, vy: 0, h: 0, vh: 0, tip: null, sink: 0, sinkT: undefined, float: false, idle: 0, r: q.kind === 'crate' ? (q.wall ? .38 : .34) : .3});
+    ents.hide(q, false); ents.moved(q);   // a jump home: the grid follows now, not next step
     if (q.kind === 'crate') q.push = !q.wall;
     if (q.gone === false && q.broken && q.goneBroken) { q.broken = false; q.goneBroken = false; }
     if (!quiet) host.events.push({type: 'prop.respawn', prop: true, x: q.x, y: q.y});
   }
   // a new stage: every movable prop back home, upright, dry, unbroken (combat restores hp / stage)
-  function resetAll() { for (const q of mov) { q.broken = false; q.goneBroken = false; q.wasBroken = false; q.manage = false; resetHome(q, true); } }
+  function resetAll() { for (const q of mov) { q.broken = false; q.goneBroken = false; q.wasBroken = false; resetHome(q, true); } }
 
   function step(q, dt) {
     if (q.tilt > 0) q.tilt -= dt;
@@ -119,7 +119,7 @@ export async function createPropPhysics(host, core) {
     if (q.float) {   // drift down the stream, bobbing, until it leaves the map
       const S = stream(); q.y += T.flow * dt; q.x += (S.cx(q.y) - q.x) * Math.min(1, dt * 1.5);
       q.sink = T.sinkFloat + Math.sin(simT * 3.1 + q.home3[0]) * .03; if (q.tip) q.tip.phi += dt * .6;
-      if (q.y > 29.5) { q.gone = true; q.broken = true; q.goneBroken = true; q.idle = 0; }
+      if (q.y > 29.5) { ents.hide(q); q.broken = true; q.goneBroken = true; q.idle = 0; }
       return;
     }
     // air (fell off the plateau): gravity on the height above the surface under it
@@ -188,7 +188,7 @@ export async function createPropPhysics(host, core) {
         q.pushT = (q.pushT || 0) + dt;
         if (q.pushT > T.pushDelay) {
           const ax = Math.abs(ix) >= Math.abs(iy) ? Math.sign(ix) : 0, ay = ax ? 0 : Math.sign(iy);   // grid-like: one axis at a time
-          if (ax * ux + ay * uy > .35) { q.vx = ax * T.pushV; q.vy = ay * T.pushV; q.pushing = true; if (!q.pushSnd || simT - q.pushSnd > .35) { q.pushSnd = simT; host.events.push({type: 'prop.scrape', prop: true, x: q.x, y: q.y}); } }
+          if (ax * ux + ay * uy > .35) { q.vx = ax * T.pushV; q.vy = ay * T.pushV; if (!q.pushSnd || simT - q.pushSnd > .35) { q.pushSnd = simT; host.events.push({type: 'prop.scrape', prop: true, x: q.x, y: q.y}); } }
         }
       } else q.pushT = 0;
     }

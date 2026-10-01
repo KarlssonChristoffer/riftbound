@@ -143,7 +143,7 @@ export async function create(host) {
   const {THREE} = host;
   const F = {name: 'garden', label: 'Light garden', on: true, ms: 0};
   const props = () => host.props;
-  let T = 0, biomeId = '', atlas = null, softT = 2;
+  let T = 0, biomeId = '', atlas = null;
   const meshes = [];
 
   // ================================================================ art (one sheet per biome: albedo + emit)
@@ -261,14 +261,11 @@ export async function create(host) {
   // ================================================================ props (colliders, interaction, the biome's plants)
   const tag = (p, extra) => Object.assign(p, {garden: true}, extra);
   const add = p => host.entities.add(p);   // joins the world (world/entities.js)
-  const SOFT = new Set(['bush', 'rock', 'tuft']);
-  const softQ = host.entities.query('garden.soft', p => SOFT.has(p.kind));   // a live query: these kinds, not every prop
-  const soften = () => { for (const p of softQ) if (p.r) p.r = 0; };
-  soften();
+  // (bushes, small rocks and tufts are soft, no collider: world/layout.js makes them so, and the garden's own below)
   let merchant = props().find(p => p.kind === 'merchant');
   if (!merchant) {
     // clear the scatter where the new pieces stand
-    const clear = (x, y, r) => { for (const q of props()) if (!q.garden && ['tuft', 'bush', 'rock'].includes(q.kind) && Math.hypot(q.x - x, q.y - y) < r) q.gone = true; };
+    const clear = (x, y, r) => { for (const q of props()) if (!q.garden && ['tuft', 'bush', 'rock'].includes(q.kind) && Math.hypot(q.x - x, q.y - y) < r) host.entities.hide(q); };
     clear(31.6, 9.6, 2.2); clear(ARCH.x, ARCH.y, 2.0); clear(BENCH.x, BENCH.y, 1.1);
     add(tag({kind: 'stall', x: 31.6, y: STALL.y, z: 0, rect: [STALL.x - .05, STALL.y - 1.18, 33, STALL.y + 1.18]}));
     merchant = add(tag({kind: 'merchant', x: MERCH.x, y: MERCH.y, z: 0, r: 0, interact: 'talk'}));
@@ -340,7 +337,6 @@ export async function create(host) {
   const near = (x, y, m = 16) => { const t = host.G.view.T; return Math.abs(x - t.x) < m && Math.abs(y - t.z) < m; };
   F.update = (dt, evs) => {
     const t0 = performance.now(); T += dt; syncBiome();
-    if ((softT -= dt) <= 0) { softT = 2; soften(); }   // (props added later: respawns, restocks)
     if (near(STALL.x, STALL.y, 22)) { stepLantern(dt, evs); stepMerchant(dt); }
     F.ms = F.ms * .95 + (performance.now() - t0) * .05;
   };
@@ -380,7 +376,7 @@ export async function create(host) {
     q.fillStyle = '#3a2a24'; q.fillText(M.say, x, y - 6 * dpr); q.globalAlpha = 1;
   };
   F.biomeChanged = async () => {
-    syncBiome(); soften();
+    syncBiome();
     for (const p of props()) if (p.garden && ['tree', 'bush', 'tuft'].includes(p.kind) && !host.itemOf(p)) await host.world.addItem(p);
     meshes.length = 0; buildMeshes();   // the rebuilt world disposed our meshes
   };

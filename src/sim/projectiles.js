@@ -1,5 +1,5 @@
 // PROJECTILES: the player's arrows (arena convention: x east, y south, h up), the hit pops over what they hit and the
-// footstep dust; plus the props' hit wobble / flash decay and rail movers (the arena's stepFx).
+// footstep dust. (The props' hit wobble / flash and the rail dummies are combat's: combat/core.js update.)
 // An arrow flies (gravity .9), hits the first target / hp prop in reach (features' onArrowHit decide 'stop' | 'pierce'),
 // sticks in 3D tree bark, walls, solid props or the ground, splashes in the stream, then fades.
 // OWNS: arrows, pops, dust, the hit count. READS: the world (trees, elevation, stream), the entities (near: what an arrow
@@ -46,11 +46,6 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
       else if (!a.stuck && (a.h <= ground || a.life <= 0)) { a.stuck = true; a.h = Math.max(ground, Math.min(a.h, ground + 2.4)); a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
     }
     for (let i = arrows.length - 1; i >= 0; i--) if (arrows[i].life <= -9 || (arrows[i].stuck && arrows[i].life <= 0)) arrows.splice(i, 1);
-    for (const p of world.props) {
-      if (p.wob) p.wob = Math.max(0, p.wob - dt * 1.6);
-      if (p.flash) p.flash = Math.max(0, p.flash - dt * 6);
-      if (p.rail) { const r = p.rail; p.x += r.dir * r.speed * dt; if (p.x > r.x1 || p.x < r.x0) { r.dir *= -1; p.x = Math.max(r.x0, Math.min(r.x1, p.x)); } }
-    }
     for (let i = pops.length - 1; i >= 0; i--) if ((pops[i].t += dt) > .8) pops.splice(i, 1);
     for (let i = dust.length - 1; i >= 0; i--) { const q = dust[i]; q.t += dt; q.x += q.vx * dt; q.y += q.vy * dt; q.h += q.vh * dt; q.vx *= .9; q.vy *= .9; if (q.t > q.life) dust.splice(i, 1); }
   }

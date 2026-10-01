@@ -12,7 +12,7 @@ Rules that apply to every change now:
   In the game, F3 (or `?perf=1`) shows ms per system against the budget. Budgets: `src/core/perf.js`.
   Run the bench on a quiet machine; it warns when other work is competing for the CPU.
 - **Behaviour checks.** A change that should not change what you see (a refactor, a move) passes
-  `node tools/test/golden.mjs --compare tmp/golden/ref2` (bit-exact captures of a scripted tour); any engine change
+  `node tools/test/golden.mjs --compare tmp/golden/ref3` (bit-exact captures of a scripted tour); any engine change
   passes `node tools/test/smoke.mjs` (keys, menu, loadouts, resize, a run).
 - **No per-frame allocation, no per-frame CPU pixel work** (`getImageData`, software rasterising, repainting a canvas
   and re-uploading it), **no scans over all props**. Update on change, cache by version, preallocate.

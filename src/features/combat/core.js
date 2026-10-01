@@ -70,6 +70,7 @@ export function createCore(host) {
   const hittables = ents.query('combat.hittable', p => p.hp > 0 || p.target || p.breakable, p => { p.r0 ??= p.r; });
   const colliders = ents.query('combat.collider', p => p.r > 0 && !p.outside);
   const chests = ents.query('combat.chest', p => p.interact === 'open');
+  const feedback = ents.query('combat.feedback', p => p.hp > 0 || p.target || p.breakable || p.interact === 'open');   // what wobbles / flashes when hit
   const BS = new Map();   // brute -> its fight state (spawnBrute sets an enemy's own before it joins)
   const brutes = ents.query('combat.brute', p => p.kind === 'brute' || p.sparring, b => {
     if (BS.has(b)) return;
@@ -166,7 +167,7 @@ export function createCore(host) {
     }
     if (!p.sparring && T.propRespawn) p.respawnAt = simT + T.propRespawn;
     if (p.sparring) { const s = BS.get(p); s.dead = p.hunter ? -1 : T.bruteRespawn; s.hop = null; p.h = 0; p.air = false; p.rooted = false; }
-    if (p.hunter) { p.gone = true; dead.push(p); events.push({type: 'enemy.kill', x: p.x, y: p.y, who: p}); }   // an enemy: gone (its debris stays)
+    if (p.hunter) { ents.hide(p); dead.push(p); events.push({type: 'enemy.kill', x: p.x, y: p.y, who: p}); }   // an enemy: gone (its debris stays)
     return true;
   }
   // an explosion: area damage with falloff, chain to barrels, knock the player, shake, hitstop, light, fire
@@ -458,14 +459,14 @@ export function createCore(host) {
       return b;
     },
     get enemies() { return brutes.filter(b => b.hunter && !b.broken); },
-    clearEnemies() { for (const b of brutes) if (b.hunter && !b.dead) { b.broken = b.gone = true; dead.push(b); } drop(); },
+    clearEnemies() { for (const b of brutes) if (b.hunter && !b.dead) { ents.hide(b); b.broken = true; dead.push(b); } drop(); },
     // the yard's sparring pair sits out a run (retire true) and comes back after it
     retireYard(on) {
       for (const b of brutes) {
         if (b.hunter) continue;
         const s = BS.get(b);
-        if (on) Object.assign(b, {retired: true, broken: true, gone: true, r: 0});
-        else { Object.assign(b, {retired: false, broken: false, gone: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0}); ents.moved(b); Object.assign(s, {mode: 'idle', wait: .8, hop: null, root: 0}); }
+        if (on) { Object.assign(b, {retired: true, broken: true, r: 0}); ents.hide(b); }
+        else { Object.assign(b, {retired: false, broken: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0}); ents.hide(b, false); ents.moved(b); Object.assign(s, {mode: 'idle', wait: .8, hop: null, root: 0}); }
       }
     },
     // a new stage: everything breakable whole again, chests shut, the ground swept (and the prop physics resets positions)
@@ -477,12 +478,18 @@ export function createCore(host) {
     },
 
     update(dt) {
+      // hit feedback dies away (wobble 1.6/s, flash 6/s: the arena's stepFx) and rail dummies slide along their rails
+      for (const p of feedback) {
+        if (p.wob) p.wob = Math.max(0, p.wob - dt * 1.6);
+        if (p.flash) p.flash = Math.max(0, p.flash - dt * 6);
+        if (p.rail) { const r = p.rail; p.x += r.dir * r.speed * dt; if (p.x > r.x1 || p.x < r.x0) { r.dir *= -1; p.x = Math.max(r.x0, Math.min(r.x1, p.x)); } }
+      }
       simT += dt;
       for (const k of SLOTS) {
         const ab = AB[k]; ab.deny = Math.max(0, ab.deny - dt); ab.cast = Math.max(0, ab.cast - dt); ab.ready = Math.max(0, ab.ready - dt);
         if (ab.t > 0) { ab.t -= dt; if (ab.t <= 0) { ab.t = 0; ab.ready = .3; } }
       }
-      // the arena decays hit flashes at 8/s; the 3D host already decays every prop's flash at 6/s: add the rest
+      // the arena decays hit flashes at 8/s; the pass above decays them at 6/s: add the rest
       for (const p of flashing) { p.flash = Math.max(0, (p.flash || 0) - dt * 2); if (!p.flash) flashing.delete(p); }
       for (let i = nums.length - 1; i >= 0; i--) if ((nums[i].t += dt) > .8) nums.splice(i, 1);
       for (let i = lts.length - 1; i >= 0; i--) if ((lts[i].t += dt) > lts[i].life) lts.splice(i, 1);
