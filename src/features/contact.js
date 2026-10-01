@@ -18,6 +18,8 @@ const AO_SKIRT = {w: 1.3, pad: 3, h: 2.2, a: .14};
 const AO_AIR = 1.2;        // airborne: shrinks / fades over this height (m)
 const SKIP = new Set(['tuft', 'portal']);
 
+// ORDER (core/features.js): frame only: no update
+export const order = {};
 export async function create(host) {
   const Q = flags;
   let VW = host.VW, VH = host.VH;   // the view size: F.resize follows the window

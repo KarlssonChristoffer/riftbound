@@ -53,6 +53,9 @@ const BURNS = {crate: 9, barrel: 11, barrel_x: 1.1, dummy: 12};   // seconds ali
 const ASHC = ['#9e9890', '#7e7a74', '#64605b', '#4a4744'].map(rgb), ASH1 = rgb('#3e3a37');   // ash greys; a cooled ember
 const TOP = {crate: .72, barrel: .9, barrel_x: .9, dummy: 1.25};
 
+// ORDER (core/features.js): flames lean in this step's wind; it sees every arrow hit before combat stops the arrow
+// (the onArrowHit chain)
+export const order = {after: ['wind'], before: ['combat']};
 export async function create(host) {
   const {THREE, PPM, PPMY} = host;
   const F = {name: 'lights', label: 'Light sources', key: '9', on: true, ms: 0};

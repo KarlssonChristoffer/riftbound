@@ -169,6 +169,8 @@ const LANTERN = ['...O...', '..hbs..', '.hbbbsO', '.bGGGsO', '.bGgGsO', '.bGGGsO
 const LR = -.551, LU = .621, LT = .561;
 const CP = .34, SP_ = .94;   // sprite camera pitch 20 deg: toward-camera = (0, .94, .34), screen-up = (0, -.34, .94) in (x, y, z)
 
+// ORDER (core/features.js): first: the others read its wind (they declare after: ['wind'])
+export const order = {};
 export async function create(host) {
   const ctx = host.ctxO, G = host.G;
   const Q = flags;

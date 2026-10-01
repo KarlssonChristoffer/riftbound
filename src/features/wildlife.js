@@ -245,6 +245,8 @@ const MOTH_GLOW = {ember: ['#ffc080', '#c07040', '#6a3a24'], other: ['#ffe6b0', 
 const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
 
 // ---------------------------------------------------------------- the module
+// ORDER (core/features.js): birds and leaves feel this step's wind
+export const order = {after: ['wind']};
 export async function create(host) {
   const ctx = host.ctxO, G = host.G;
   const Q = flags;

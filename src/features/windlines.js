@@ -39,6 +39,8 @@ export const TUNE = {
   swish: {r: 2.2, cool: .35},                             // m from the player, s between swishes
 };
 
+// ORDER (core/features.js): it draws this step's wind
+export const order = {after: ['wind']};
 export async function create(host) {
   const Q = flags, G = host.G, ctx = host.ctxO;
   if (['hd', 'pixel', 'off'].includes(Q.get('windlines'))) TUNE.look = Q.get('windlines');

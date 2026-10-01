@@ -138,6 +138,8 @@ const WATER_H = -.18;   // world.js lowers the stream bed by this much: the surf
 const RGBF = new Map();   // '#rrggbb' -> [r, g, b] 0..1 (host.point takes arrays as they are: no parsing per particle)
 const rgbf = h => { let v = RGBF.get(h); if (!v) { const c = hex3(h); RGBF.set(h, v = [c[0] / 255, c[1] / 255, c[2] / 255]); } return v; };
 
+// ORDER (core/features.js): embers and motes drift on this step's gusts
+export const order = {after: ['wind']};
 export async function create(host) {
   const Q = flags;
   const {PPM, PPMY, PPMH} = host;

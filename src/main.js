@@ -29,7 +29,8 @@
 //   F.menu?() -> [{label, run}] rows in the menu's Game tab (ui/menu.js)
 // THE MENU (Escape, ui/pause.js + ui/menu.js): pauses the game but not the world: while host.paused only the AMBIENT
 // features update (nature, see stepPaused), behind a blur. A feature's toggle / settings land in its Dev tab unless
-// CLAIM gives them to a player tab (Graphics, Audio). Features load in core/features.js FEATURES order.
+// CLAIM gives them to a player tab (Graphics, Audio).
+// THE ORDER of the features (updates and every hook chain) is what each declares: `export const order` (core/features.js).
 // THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
 // dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
 // host.setBiome / setTime / teleport / setYaw.

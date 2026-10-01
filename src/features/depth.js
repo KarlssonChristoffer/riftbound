@@ -77,6 +77,8 @@ const TUNE = {
   haze: {on: true},
 };
 
+// ORDER (core/features.js): clouds and shafts move with this step's wind
+export const order = {after: ['wind']};
 export async function create(host) {
   const Q = flags;
   const {PPM, PPMY, PPMH} = host;

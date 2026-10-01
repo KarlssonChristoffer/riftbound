@@ -111,6 +111,8 @@ const RGBF = new Map(); const rgbf = h => { let v = RGBF.get(h); if (!v) { const
 const RGB8 = new Map(); const rgb8 = h => { let v = RGB8.get(h); if (!v) RGB8.set(h, v = hex3(h)); return v; };
 const ZERO = {x: 0, y: 0, g: 0};
 
+// ORDER (core/features.js): its trails read this step's wind
+export const order = {after: ['wind']};
 export async function create(host) {
   const Q = flags;
   const {PPM, PPMY, PPMH} = host;

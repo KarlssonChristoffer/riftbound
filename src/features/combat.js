@@ -28,6 +28,8 @@ import {createCore} from './combat/core.js';
 import {createPropPhysics, extraProps} from './combat/props.js';
 import {createDraw} from './combat/draw.js';
 
+// ORDER (core/features.js): lights goes before it (lights.js); the game before everything (main.js)
+export const order = {};
 export async function create(host) {
   // the 2 loose crates by the stream (the arena adds them before combat lists its hittables)
   const extra = extraProps(host.entities);

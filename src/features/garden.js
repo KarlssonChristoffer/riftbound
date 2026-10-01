@@ -139,6 +139,8 @@ const MF_WAVE = MF.slice();
   ['..OOOOaAAAAAAAAAAxxOqRqO', 22], ['.....OaAAAAAAAAAAAxOqRqO', 23], ['.....OaAAAAAAAAAAAxOOsSzO', 24], ['.....OaAAAAAAAAAAAxOsSSzO', 25],
   ['.....OkkkkkknNkkkkkkKOzzO', 26]].forEach(([row, i]) => { MF_WAVE[i] = row; });
 
+// ORDER (core/features.js): the lantern swings in this step's wind
+export const order = {after: ['wind']};
 export async function create(host) {
   const {THREE} = host;
   const F = {name: 'garden', label: 'Light garden', on: true, ms: 0};

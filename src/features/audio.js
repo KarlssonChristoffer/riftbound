@@ -14,6 +14,9 @@ import {createAudio} from '../audio/audio.js';
 import {createWindAudio} from './windaudio.js';
 import {createRainAudio} from './rainaudio.js';
 
+// ORDER (core/features.js): it hears this step's world: the rustle (wind), fires lit or out (lights), traps, stomps
+// and rolling barrels (combat)
+export const order = {after: ['wind', 'lights', 'combat']};
 export async function create(host) {
   const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }};
   const screenX = (x, y) => host.toView(x, y, 0)[0];

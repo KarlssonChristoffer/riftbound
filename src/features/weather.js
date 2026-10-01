@@ -32,6 +32,8 @@ const SEASON_M = {
   winter: [.45, .4, .1, .3, .5, .15, .25, .35, .3],
 };
 
+// ORDER (core/features.js): rain slants with this step's wind
+export const order = {after: ['wind']};
 export async function create(host) {
   const G = host.G, ctx = host.ctxO, U = G.compU;
   const F = {name: 'weather', label: 'Weather fx (rain, snow, storms)', on: true, fx: true, TUNE, ms: 0, stats: {rain: 0, snow: 0, splash: 0, bolts: 0}};   // fx: the particles / bolts (the season / snow / wet look always follows the clock)
