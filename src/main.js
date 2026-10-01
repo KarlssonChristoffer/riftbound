@@ -38,9 +38,9 @@
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE,
 //   paused (the menu is open), openMenu(), uiSound(name) (the menu's sounds: hover, click, confirm, back, open).
 import * as THREE from 'three';
-import {createGfx, DEG} from './gfx.js';
-import {buildWorld, texOf, WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, PROP_TOP} from './world.js';
-import {loadAtlas} from './atlas.js';
+import {createGfx, DEG} from './render/gfx.js';
+import {buildWorld, texOf, WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, PROP_TOP} from './world/world.js';
+import {loadAtlas} from './render/atlas.js';
 import {BIOMES} from './world/biomes.js';
 import {MOODS, TIMES, CHAR} from './content/moods.js';   // the lighting tables (forked from the arena's lighting.js)
 import {ClothRig, depthOf, CLOTH_PARAMS} from './view/cloth.js';

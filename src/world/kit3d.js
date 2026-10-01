@@ -10,8 +10,8 @@
 //   art(rows, key)    ASCII pixel art -> {P, E} pixel buffers (biomes.js ART.Pix). key: char -> [ramp, tone] | '#hex'
 //                     (emissive when the key entry has emit: true)
 import * as THREE from 'three';
-import {FAMS} from '../world.js';
-import {ART} from '../world/biomes.js';
+import {FAMS} from './world.js';
+import {ART} from './biomes.js';
 
 export const M4 = (pos, rot = [0, 0, 0], scl = [1, 1, 1]) =>
   new THREE.Matrix4().compose(new THREE.Vector3(...pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rot)), new THREE.Vector3(...scl));

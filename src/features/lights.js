@@ -31,8 +31,8 @@
 // combat still resolves it. Props it adds (sconces, the campfire, the beacon) live in host.props like the layout's.
 import {ART} from '../world/biomes.js';
 import {STREAM, PLAY} from '../world/layout.js';
-import * as WORLD from '../world.js';
-import {geoOf, M4, along} from './kit3d.js';
+import * as WORLD from '../world/world.js';
+import {geoOf, M4, along} from '../world/kit3d.js';
 import {createFires} from './firesim.js';
 // how high our props stop arrows (main.js reads world.js PROP_TOP; 2.5 m otherwise): arrows fly over the campfire
 // (they catch fire going through it), the beacon only stops them up to its basket

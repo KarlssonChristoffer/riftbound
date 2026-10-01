@@ -13,7 +13,7 @@
 //   * Events go to host.events; the caller (combat.js) also hands this frame's new ones to the prop physics.
 // Everything else (tuning T, ability table AB, palettes, timings, RNG and its seed) is the arena's.
 
-import {PLAY} from '../../world.js';
+import {PLAY} from '../../world/world.js';
 
 export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;

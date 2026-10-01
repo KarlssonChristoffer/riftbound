@@ -14,11 +14,11 @@
 // wave / lull (the director) -> clear -> pick (an augment) -> portal (chests cost gold and give items; walk into the
 // portal + E) -> next stage ... -> victory. Death anywhere: slow motion, then the run's summary.
 import {createStats} from './stats.js';
-import {createNav} from './nav.js';
+import {createNav} from '../world/nav.js';
 import {createDirector, STAGES, TELE} from './run.js';
 import {rollItem, rollAugments} from './items.js';
-import {createHud} from './hud.js';
-import {createScreens} from './screens.js';
+import {createHud} from '../ui/hud.js';
+import {createScreens} from '../ui/screens.js';
 import {loadSave, recordRun} from './save.js';
 
 const Q = new URLSearchParams(location.search);

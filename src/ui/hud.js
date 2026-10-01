@@ -7,8 +7,8 @@
 //   centre        banners (stage start, cleared, death) and toasts (an item you just got)
 //   world         floating text (damage you take, heals, "need 30 gold"), elite / champion nameplates
 //   edges         a red vignette when you're hit, a slow pulse at low health
-import {TIER} from './items.js';
-import {clock} from './save.js';
+import {TIER} from '../game/items.js';
+import {clock} from '../game/save.js';
 
 const FONT = '"Segoe UI", system-ui, sans-serif';
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;

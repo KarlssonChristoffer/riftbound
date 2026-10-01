@@ -1,7 +1,7 @@
 // DOM SCREENS over the world: the title, the augment pick, the end of a run. Only one shows at a time; each takes
 // clicks and keys (game.js forwards keys while the host is locked: Enter, 1-3, Escape). sound(name): the menu's wooden
 // UI sounds (host.uiSound): hover over a button, confirm on the main choice, click on the others.
-import {clock} from './save.js';
+import {clock} from '../game/save.js';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 

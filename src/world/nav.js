@@ -7,7 +7,7 @@
 //                  through a gate, along the bank), or null when it can go straight at you (the core does that)
 //   spots(...)     spawn spots: open cells in a band of WALKING distance (never across the stream from you), spaced out
 // It's rebuilt per stage (build()) since the world's fixed props come with the layout.
-import {PLAY, TRAIL, WORLD, elev, inStream} from '../world.js';
+import {PLAY, TRAIL, WORLD, elev, inStream} from './world.js';
 
 const C = .5, TAU = Math.PI * 2;
 

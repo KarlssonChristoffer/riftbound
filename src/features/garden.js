@@ -19,9 +19,9 @@
 // FEATURE CONTRACT (main.js): create(host) -> F: update, frame, lights, hd (speech bubbles), prompt, interact,
 // biomeChanged. Props it adds to host.props: 'stall' (rect collider), 'merchant' (interact 'talk'), 'ruin' (the arch's
 // colliders), 'bench' (rect), 'goods' (sacks / crates / barrel), and tree / bush / tuft props for the biome painters.
-import * as WORLD from '../world.js';
+import * as WORLD from '../world/world.js';
 import {ART} from '../world/biomes.js';
-import {geoOf, M4, box, along, pack, art} from './kit3d.js';
+import {geoOf, M4, box, along, pack, art} from '../world/kit3d.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
