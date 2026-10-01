@@ -22,15 +22,21 @@
 //   F.onArrowHit?(a, prop) -> 'stop' | 'pierce'   F.onArrowStuck?(a)   F.ability?(slot) -> bool   F.interact?(prop) -> bool
 //   F.aimTarget?() -> {x, y, h, target} | null    F.hud?() -> string   F.settings?() -> [{label, get, set, options?}]
 //   F.biomeChanged?()           after a world rebuild (N); F.dispose?()
+//   F.resize?(VW, VH)           the view changed size (art px: the window's shape decides, e.g. ultrawide); re-make
+//                               anything view-sized. host.VW / VH (and ctxO's) are always the current size
 //   F.arrow?(a)                 every arrow as it is spawned (scale its damage, tag it, spawn extras with a.extra)
 //   F.prompt?(prop) -> text | {text, color}   the "E ..." prompt over a prop you can interact with
-//   F.menu?() -> [{label, run}] rows at the top of the pause menu
+//   F.menu?() -> [{label, run}] rows in the menu's Game tab (ui/menu.js)
+// THE MENU (Escape, ui/menu.js): pauses the game but not the world: while host.paused only the AMBIENT features update
+// (nature, see stepPaused), behind a blur. A feature's toggle / settings land in its Dev tab unless CLAIM (below) gives
+// them to a player tab (Graphics, Audio).
 // THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
 // dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
 // host.setBiome / setTime / teleport / setYaw.
 // HOST (see `host` below): player, arrows, spawnArrow, events, props, itemOf, elev, inStream, blocked, layout,
 //   hitstop, shake, knock, play, aim, mouse, keys, toView(x, y, h) -> view px, sprite, point, line, layer(name),
-//   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE.
+//   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE,
+//   paused (the menu is open), openMenu(), uiSound(name) (the menu's sounds: hover, click, confirm, back, open).
 import * as THREE from 'three';
 import {createGfx, DEG} from './gfx.js';
 import {buildWorld, texOf, WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, PROP_TOP} from './world.js';
@@ -43,10 +49,11 @@ import {createPlayer, atlasOf, BUSY} from '../sprites/player.js';
 import {createGame} from './game/game.js';
 import {createPerf} from './core/perf.js';   // the frame profiler: per-system ms against the budget (F3, ?perf=1)
 import {createEnv, SEASONS, WEATHER} from './sim/env.js';   // the world clock: time of day, seasons, weather
+import {createMenu} from './ui/menu.js';   // the pause / settings menu (Escape)
 
 const $ = s => document.querySelector(s);
 const Q = new URLSearchParams(location.search);
-const VW = 480, VH = 270;
+let VW = 480, VH = 270;   // the view in art px: the window decides (fit, below)
 const t00 = performance.now();
 const FEATURES = ['wind', 'windlines', 'weather', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];   // update order (wind first: others read it; lights before combat: it sees arrow hits first; garden before combat: its colliders are known)
 
@@ -62,6 +69,19 @@ mark('atlas', tp);
 const atlas = atlasOf(set);
 let {SP} = set, rig = set.rig, {FW, FH, PIV, ND, DIRS} = atlas;
 const PPM = set.idx.fwd_px.E[0], PPMH = PPM * Math.cos(set.idx.pitch * DEG), PPMY = PPM * Math.sin(55 * DEG);
+// THE VIEW follows the window and the zoom. `scale` is the DISPLAY SCALE (screen px per art px, whole: the art stays crisp)
+// and the view is as many art px as fill the window at it, so a wide or ultrawide screen sees more of the world to the
+// sides instead of black bars. The window's own scale (base: the biggest that still fits 480 x 270, the design) is the
+// default zoom; the wheel moves `scale` (zoom levels, below). Capped at the world's size (bars past that). A change
+// resizes the renderer (G.resize) and tells the features (F.resize?(VW, VH)); host.VW / VH and ctxO.VW / VH are current
+const VIEW = {w: 480, h: 270, maxW: Math.min(1920, Math.floor(WORLD.WM * PPM / 2) * 2), maxH: Math.min(1080, Math.floor(WORLD.HM * PPMY / 2) * 2)};
+const even = v => Math.floor(v / 2) * 2;
+const baseScale = () => Math.max(1, Math.floor(Math.min(innerWidth / VIEW.w, innerHeight / VIEW.h)));
+const viewAt = s => [Math.min(VIEW.maxW, even(innerWidth / s)), Math.min(VIEW.maxH, even(innerHeight / s))];
+// zoom levels: out to half the base scale (twice the world on screen), in to twice it. ?zoom=2 starts zoomed in
+const scaleRange = b => [Math.max(1, Math.ceil(b / 2)), b * 2];
+let dsBase = baseScale(), dsGoal = Q.get('zoom') === '2' ? dsBase * 2 : dsBase, scale = dsGoal;   // the window's scale, the wheel's goal, the view's scale now
+[VW, VH] = viewAt(scale);
 const ctxO = {PPM, PPMY, PPMH, toS: (x, y, h = 0) => [x * PPM, y * PPMY - h * PPMH], VW, VH};
 
 const canvas = $('#screen');
@@ -69,9 +89,11 @@ const G = createGfx(canvas, {VW, VH, PPM, PPMY, PPMH});
 // the HD overlay: display resolution, over the pixel canvas (damage numbers, bars, prompts)
 const hdc = document.createElement('canvas'); hdc.id = 'hd'; hdc.style.cssText = 'position:absolute;pointer-events:none;image-rendering:auto';
 $('#wrap').appendChild(hdc); const hq = hdc.getContext('2d');
-let scale = 1;
-function fit() {
-  scale = Math.max(1, Math.floor(Math.min(innerWidth / VW, innerHeight / VH)));
+function fit() {   // the window changed, or a zoom arrived (stepZoom): the view at `scale`
+  const b = baseScale();
+  if (b !== dsBase) { const [lo, hi] = scaleRange(b); dsGoal = Math.max(lo, Math.min(hi, Math.round(dsGoal * b / dsBase))); dsBase = b; scale = dsGoal; zoom = 1; }   // (the same zoom, relative)
+  const [w, h] = viewAt(scale);
+  if (w !== VW || h !== VH) { VW = ctxO.VW = w; VH = ctxO.VH = h; G.resize(w, h); for (const f of features) f.resize?.(w, h); }
   canvas.style.width = VW * scale + 'px'; canvas.style.height = VH * scale + 'px';
   G.setDisplay?.(scale);   // the canvas at display size: the pixel image is blown up on the GPU, HD effects draw over it
   const dpr = devicePixelRatio || 1; hdc.width = VW * scale * dpr; hdc.height = VH * scale * dpr; hdc.style.width = canvas.style.width; hdc.style.height = canvas.style.height;
@@ -126,7 +148,9 @@ if (Q.get('lineup') === 'trees') {
 }
 
 // ---------------------------------------------------------------- the camera's frame
-let yaw = (+Q.get('yaw') || 0) * DEG, zoom = Q.get('zoom') === '2' ? 2 : 1, snapMode = +(Q.get('snap') ?? 0) || 0;
+// zoom: the projection's extra scale ON TOP of `scale` (the display scale). 1 at rest; between zoom levels it carries the
+// easing (stepZoom). host.zoom is this (view px per art px), so features size their pixels right while it eases
+let yaw = (+Q.get('yaw') || 0) * DEG, zoom = 1, snapMode = +(Q.get('snap') ?? 0) || 0;
 const SNAP = [0, 22.5 * DEG, 90 * DEG], SNAP_NAME = ['free', '22.5° steps', '90° steps'];
 const toView = (X, Z, a = yaw) => [X * Math.cos(a) - Z * Math.sin(a), X * Math.sin(a) + Z * Math.cos(a)];
 const toWorld = (vx, vy, a = yaw) => [vx * Math.cos(a) + vy * Math.sin(a), -vx * Math.sin(a) + vy * Math.cos(a)];
@@ -250,7 +274,7 @@ async function switchLoadout(i) {
 
 // ---------------------------------------------------------------- feel: shake, hitstop, knock
 let freeze = 0; const shakeS = {a: 0, t: 0};
-function shake(a, sec) { if (a >= shakeS.a * (shakeS.t > 0 ? 1 : 0)) { shakeS.a = a; shakeS.t = sec; } }
+function shake(a, sec) { if (opt.shake && a >= shakeS.a * (shakeS.t > 0 ? 1 : 0)) { shakeS.a = a; shakeS.t = sec; } }   // (menu > Graphics > Screen shake)
 
 // ---------------------------------------------------------------- targets, interaction
 // ARPG targeting: the cursor over something hittable aims at it (front-most), at the height the cursor points at on it
@@ -355,7 +379,7 @@ const DUST = ['#b8a888', '#8a7a60', '#5e5444'].map(rgbOf), POP = rgbOf('#f2d27a'
 
 // ---------------------------------------------------------------- the host features see
 const host = {
-  THREE, G, PPM, PPMY, PPMH, VW, VH, ctxO,
+  THREE, G, PPM, PPMY, PPMH, get VW() { return VW; }, get VH() { return VH; }, ctxO,
   get world() { return world; }, get biome() { return BIOMES[biomeI]; }, get time() { return env.bucket; }, get mood() { return env.mood(BIOMES[biomeI].id); }, env,
   get yaw() { return yaw; }, get zoom() { return zoom; }, get props() { return world.props; }, get layout() { return world.layout; },
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY,
@@ -369,6 +393,8 @@ const host = {
   layer: n => G.layer(n), rgb: rgbOf,
   get wind() { return feat('wind'); }, feature: feat,
   get hits() { return hits; },
+  // the menu (ui/menu.js): open it (the title's Settings), its wooden UI sounds (the audio feature), open or not
+  get paused() { return paused; }, openMenu: () => togglePause(true), uiSound: n => feat('audio')?.ui?.(n),
   // game controls (game/game.js): dev keys + debug HUD on/off, player input locked, the simulation's speed, the world
   dev: true, lock: false, timeScale: 1, hudOff: false, BIOMES, TIMES,
   get biomeI() { return biomeI; }, get timeI() { return TIMES.indexOf(env.bucket); },
@@ -404,7 +430,8 @@ world.hooks.card = cardHook;
 const SAMPLING = ['auto', 'nearest', 'smooth'];
 const opt = {sampling: Q.get('smooth') === '1' ? 'smooth' : SAMPLING.includes(Q.get('sampling')) ? Q.get('sampling') : 'auto',
   outline: true, banded: true, shadows: true, lantern: Q.get('lantern') === '1', debug: +(Q.get('debug') || 0), help: true, zones: false,
-  hdBow: Q.get('bow') === 'hd'};   // J: the HD bow overlay instead of the pixel bow (the arena's toggle)
+  hdBow: Q.get('bow') === 'hd',   // J: the HD bow overlay instead of the pixel bow (the arena's toggle)
+  shake: true};                   // screen shake (menu > Graphics)
 const DEBUG = ['final', 'albedo', 'normals', 'depth', 'object ids', 'sun shadow', 'light only'];
 const SMOOTH_IN = 12, SMOOTH_OUT = 3, TURN_HOLD = .12;
 let turnT = 0;
@@ -513,11 +540,11 @@ function snapTarget(ox, oy) {
 let dragging = false, dragX = 0, dragYaw = 0, paused = false;
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
+  if (k === 'escape') { if (!e.repeat) togglePause(); return; }
+  if (k === 'f3') { e.preventDefault(); if (!e.repeat) { perf.toggle(); menu.refresh(); } return; }   // the frame profiler
+  if (paused) { menu.key(k, e); return; }   // the menu has the keys: arrows, Tab, Enter
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'tab'].includes(k)) e.preventDefault();
   if (e.repeat) return;
-  if (k === 'escape') { togglePause(); return; }
-  if (k === 'f3') { e.preventDefault(); perf.toggle(); return; }   // the frame profiler
-  if (paused) return;
   // locked (menus, death, travel) or a dev key outside dev mode: only the game hears it
   if (host.lock || (!host.dev && (DEV_KEYS.has(k) || (e.shiftKey && /^Digit[1-6]$/.test(e.code))))) { game.onKey?.(k, e); return; }
   // renderer A/B (Shift + 1..6): rotation steps, ground sampling, outlines, props live / 16-angle, bands, shadows
@@ -567,66 +594,126 @@ canvas.addEventListener('mousedown', e => {
   if (e.button === 2 && !BUSY.has(P.state)) features.some(f => f.ability?.('rmb'));
 });
 addEventListener('mouseup', e => { if (e.button === 0) { if (!paused) PL.release(); mouse.down = false; } if (e.button === 1) dragging = false; });
-canvas.addEventListener('wheel', e => { e.preventDefault(); zoom = e.deltaY < 0 ? 2 : 1; }, {passive: false});
+canvas.addEventListener('wheel', e => { e.preventDefault(); onWheel(e); }, {passive: false});
 
-// ---------------------------------------------------------------- pause menu (Escape)
-function togglePause(force) {
-  paused = force ?? !paused; $('#pause').classList.toggle('hidden', !paused);
-  if (paused) { keys.clear(); renderMenu(); }
+// ---------------------------------------------------------------- zoom (the wheel)
+// LEVELS are whole display scales, so every zoom at rest is pixel-perfect (scaleRange: out to twice the world on screen,
+// in to twice the size). A wheel notch moves the goal one level; the view EASES there (in log space, so in and out feel
+// alike, ZOOM.ease per second) drawn at its current size with `zoom` as the in-between factor, and when it arrives it's
+// re-made at the new scale (fit): crisp again. Trackpads' small deltas add up to notches (ZOOM.notch). The camera
+// centres the Ranger's chest (FOCUS_H), so he stays put on screen while the world scales around him
+const ZOOM = {ease: 11, notch: 100, done: .004}, FOCUS_H = .9;
+let wheelAcc = 0, wheelT = 0;
+function zoomTo(goal) { const [lo, hi] = scaleRange(dsBase); dsGoal = Math.max(lo, Math.min(hi, goal)); }
+function onWheel(e) {
+  const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 300 : e.deltaY, now = performance.now();
+  if (now - wheelT > 400 || Math.sign(d) !== Math.sign(wheelAcc)) wheelAcc = 0;   // a new gesture, or turned around
+  wheelT = now; wheelAcc += d;
+  while (Math.abs(wheelAcc) >= ZOOM.notch) { zoomTo(dsGoal - Math.sign(wheelAcc)); wheelAcc -= Math.sign(wheelAcc) * ZOOM.notch; }   // up = in
 }
-function renderMenu() {
-  const rows = [];
-  const btn = (label, value, act) => `<button data-act="${act}">${label}: <b>${value}</b></button>`;
-  const gm = features.flatMap(f => f.menu?.() || []);
-  if (gm.length) rows.push(`<h3>Game</h3>`, `<button data-act="resume"><b>Resume</b></button>`, ...gm.map((m, i) => `<button data-act="menu:${i}"><b>${m.label}</b></button>`));
-  rows.push(`<h3>Renderer</h3>`, btn('Rotation', SNAP_NAME[snapMode], 'snap'), btn('Ground texture', opt.sampling, 'sampling'), btn('Prop outlines', opt.outline ? 'on' : 'off', 'outline'),
-    btn('Props', propMode === 'live' ? 'live 3D' : '16-angle sprites', 'props'), btn('Trees', trees3d ? '3D (grown)' : 'painted cards', 'trees'), btn('Banded light', opt.banded ? 'on' : 'off', 'banded'), btn('Shadows (sun + lights)', opt.shadows ? 'on' : 'off', 'shadows'),
-    btn('Debug view', DEBUG[opt.debug], 'debug'));
-  if (host.dev) rows.push(`<h3>World</h3>`, btn('Biome', BIOMES[biomeI].name, 'biome'), btn('Time', `${env.clock()} ${env.part}`, 'time'),
-    btn('Season', env.seasonLock || `auto (${env.season})`, 'season'), btn('Weather', env.weatherLock || `auto (${env.weather})`, 'weather'),
-    btn('Day length', env.frozen ? 'stopped' : `${env.TUNE.dayMinutes} min`, 'daylen'), btn('Lantern', opt.lantern ? 'on' : 'off', 'lantern'), btn('Loadout', LOADOUTS[loadI][0], 'loadout'),
-    btn('Bow', opt.hdBow ? 'HD overlay' : 'pixel art', 'hdbow'), btn('Shiny armour', armor.on ? 'on' : 'off', 'armour'));
-  const fs = features.filter(f => f.toggle || f.settings);
-  if (fs.length) {
-    rows.push(`<h3>Features</h3>`);
-    fs.forEach((f, i) => {
-      if (f.toggle) rows.push(btn(f.label || f.name, f.on ? 'on' : 'off', 'feat:' + i));
-      (f.settings?.() || []).forEach((s, j) => rows.push(s.options ? btn(s.label, s.get(), `set:${i}:${j}`) :
-        `<label>${s.label} <input type="range" min="${s.min ?? 0}" max="${s.max ?? 1}" step="${s.step ?? .01}" value="${s.get()}" data-act="range:${i}:${j}"></label>`));
-    });
+function stepZoom(dt) {   // every rendered frame (the menu's backdrop zooms too)
+  const eff = scale * zoom; if (eff === dsGoal) return;
+  const le = Math.log(eff), lg = Math.log(dsGoal), l = Math.abs(lg - le) < ZOOM.done ? lg : le + (lg - le) * (1 - Math.exp(-dt * ZOOM.ease));
+  if (l === lg) { scale = dsGoal; zoom = 1; fit(); } else zoom = Math.exp(l) / scale;   // arrived: the view re-made at the goal scale
+}
+
+// ---------------------------------------------------------------- the menu (Escape): ui/menu.js draws it, these are its items
+// PAUSED, the game stands still (player, arrows, enemies, the run, the clock) but the world doesn't: the AMBIENT features
+// are presentation only and keep running in real time behind the blurred menu, so the wind blows, birds fly, rain falls
+// and fires flicker (lights.js skips its burn-through while host.paused). The cloak still answers the wind. The camera
+// drifts slowly (drag the backdrop to look around) and eases back to where it was on resume. The audio feature ducks
+// music + effects; the ambience plays on. (flow is left out: its streaks / tracks follow the player's frozen speed)
+const AMBIENT = new Set(['wind', 'windlines', 'weather', 'lights', 'garden', 'atmos', 'wildlife', 'depth', 'contact', 'audio']);
+const NO_EVS = [], PAUSE_TURN = .035, LOOK_HOLD = 3000;   // drift rad/s (the title turns at .07); ms after a drag before it drifts again
+let pauseYaw = 0, pauseGoal = 1, lookT = 0;
+function stepPaused(dt) {
+  if (rig.active) { Object.assign(CLOTH_PARAMS, feat('wind')?.on && feat('wind').cloth?.() || CLOTH_CALM); rig.update(dt, SP[P.frame]?.sim, P.face, clothPos); }
+  const evs = events.length ? events.splice(0) : NO_EVS;   // wildlife's calls, fire crackles: for the audio feature
+  for (const f of features) if (AMBIENT.has(f.name) && f.on !== false) f.update?.(dt, evs);
+}
+const pauseTurn = dt => game.mode === 'title' || performance.now() - lookT < LOOK_HOLD ? 0 : PAUSE_TURN * dt;   // (the title turns itself)
+function togglePause(force, snd) {
+  const was = paused; paused = force ?? !paused; if (paused === was) return;
+  feat('audio')?.duck?.(paused);
+  if (paused) { keys.clear(); dragging = false; pauseYaw = yaw; pauseGoal = dsGoal; lookT = 0; menu.show(); return; }
+  menu.hide(snd); zoomTo(pauseGoal);   // back to the zoom you played at (it eases)
+  const d = Math.atan2(Math.sin(yaw - pauseYaw), Math.cos(yaw - pauseYaw));
+  if (game.mode !== 'title' && !assist && Math.abs(d) > .002) assist = {back: pauseYaw, phase: 'back'};   // back to where you were looking
+}
+
+const onOff = (get, set) => ({options: ['on', 'off'], get: () => get() ? 'on' : 'off', set: v => set(v === 'on')});
+const pick = (options, get, set) => ({options, get, set});
+const cyc = (o, cur, d, set) => set(o[((o.indexOf(cur) + d) % o.length + o.length) % o.length]);
+// features' toggles / settings a player sees, by feature and setting label ('' = its on / off); the rest go to Dev.
+// id + keep: remembered on this machine (keep: the URL parameter that overrides it)
+const gfx = (group, label, id, keep = true) => ({tab: 'graphics', group, label, id, keep});
+const vol = label => ({tab: 'audio', group: 'Volume', label});
+const CLAIM = {
+  depth: {'': gfx('World', 'Clouds, light shafts & reflections', 'depth', 'depth'), 'Foreground silhouettes': gfx('World', 'Foreground foliage', 'fg')},
+  weather: {'Weather fx': gfx('World', 'Rain, snow & lightning', 'rain')},
+  lights: {'Heat ripple': gfx('Effects', 'Heat shimmer', 'heat')},
+  atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd')},
+  audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
+    'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'}},
+};
+const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'sprint'], [['Q'], 'walk'], [['C'], 'crouch'], [['Space'], 'roll · leap'],
+  [['LMB'], 'hold to draw, release to shoot'], [['RMB'], 'multishot'], [['1', '2', '3', '4'], 'abilities'], [['E'], 'open · talk · climb'],
+  [['Z', 'X'], 'turn the camera (or drag with the middle button)'], [['Home'], 'reset the camera'], [['Wheel'], 'zoom in / out'],
+  [['M'], 'mute'], [['U'], 'music on / off'], [['Esc'], 'this menu']];
+function menuItems() {
+  const out = [], dv = (group, it) => out.push({tab: 'dev', group, ...it}), A = feat('audio')?.AU;
+  // Game: resume, then the game's own rows (start / abandon a run, back to title)
+  if (game.mode !== 'title') out.push({tab: 'game', label: 'Resume', main: true, sound: 'back', run() {}});
+  for (const m of features.flatMap(f => f.menu?.() || [])) out.push({tab: 'game', label: m.label, run: m.run});
+  // Graphics, Controls: the host's own
+  // (fullscreen keeps Escape for the menu: keyboard lock, where the browser has it; holding Esc still leaves fullscreen)
+  out.push({tab: 'graphics', group: 'Display', label: 'Fullscreen', ...onOff(() => !!document.fullscreenElement, v => {
+    try { (v ? document.documentElement.requestFullscreen?.().then(() => navigator.keyboard?.lock?.(['Escape'])) : document.fullscreenElement && document.exitFullscreen())?.catch?.(() => {}); } catch (e) {} })});
+  out.push({tab: 'graphics', group: 'World', label: 'Shadows', id: 'shadows', keep: true, ...onOff(() => opt.shadows, v => { opt.shadows = v; })});
+  out.push({tab: 'controls', group: 'Camera', label: 'Camera turning', id: 'snap', keep: 'snap', ...pick(SNAP_NAME, () => SNAP_NAME[snapMode], v => { snapMode = SNAP_NAME.indexOf(v); })},
+    {tab: 'controls', group: 'Keys', keys: KEYS});
+  // Dev: the character, the world's dials, the renderer's A/B (each with its dev key)
+  dv('Character', {label: 'Loadout', key: 'O', value: () => LOADOUTS[loadI][0], run: d => switchLoadout(loadI + d)});
+  dv('Character', {label: 'Bow', key: 'J', ...pick(['pixel art', 'HD overlay'], () => opt.hdBow ? 'HD overlay' : 'pixel art', v => { opt.hdBow = v === 'HD overlay'; })});
+  dv('Character', {label: 'Shiny armour', key: 'I', ...onOff(() => armor.on, v => { if (armor.on !== v) toggleArmour(); })});
+  dv('Character', {label: 'Lantern', key: 'L', ...onOff(() => opt.lantern, v => { opt.lantern = v; })});
+  dv('World', {label: 'Biome', key: 'N', value: () => BIOMES[biomeI].name, run: d => setBiome(biomeI + d)});
+  dv('World', {label: 'Time', key: 'T', value: () => `${env.clock()} ${env.part}`, run: () => env.nextPart()});
+  dv('World', {label: 'Season', value: () => env.seasonLock || `auto (${env.season})`, run: d => cyc(['auto', ...SEASONS], env.seasonLock || 'auto', d, env.setSeason)});
+  dv('World', {label: 'Weather', value: () => env.weatherLock || `auto (${env.weather})`,
+    run: d => cyc(['auto', ...Object.keys(WEATHER).filter(w => !WEATHER[w].precip || env.TUNE.precip)], env.weatherLock || 'auto', d, env.setWeather)});
+  dv('World', {label: 'Day length', value: () => env.frozen ? 'stopped' : `${env.TUNE.dayMinutes} min`, run: d => cyc([20, 5, 60, 0], env.frozen ? 0 : env.TUNE.dayMinutes, d, env.setDayMinutes)});
+  dv('Renderer', {label: 'Ground texture', key: 'Shift+2', ...pick(SAMPLING, () => opt.sampling, v => { opt.sampling = v; })});
+  dv('Renderer', {label: 'Prop outlines', key: 'Shift+3', ...onOff(() => opt.outline, v => { opt.outline = v; })});
+  dv('Renderer', {label: 'Props', key: 'R', ...pick(['live 3D', '16-angle sprites'], () => propMode === 'live' ? 'live 3D' : '16-angle sprites', v => { propMode = v === 'live 3D' ? 'live' : 'yaw'; world.setMode(propMode); })});
+  dv('Renderer', {label: 'Trees', key: 'Shift+R', ...pick(['3D (grown)', 'painted cards'], () => trees3d ? '3D (grown)' : 'painted cards', v => { trees3d = v === '3D (grown)'; setBiome(biomeI); })});
+  dv('Renderer', {label: 'Banded light', key: 'V', ...onOff(() => opt.banded, v => { opt.banded = v; })});
+  dv('Renderer', {label: 'Debug view', key: 'G', ...pick(DEBUG, () => DEBUG[opt.debug], v => { opt.debug = DEBUG.indexOf(v); })});
+  dv('Renderer', {label: 'Colliders', key: 'Shift+G', ...onOff(() => opt.zones, v => { opt.zones = v; })});
+  // the features' toggles and settings: Dev > Features, unless CLAIMed for a player tab
+  for (const f of features) {
+    if (!f.toggle && !f.settings) continue;
+    const claim = CLAIM[f.name] || {}, put = (k, it) => out.push(claim[k] ? {...it, key: undefined, ...claim[k]} : {...it, tab: 'dev', group: 'Features'});
+    if (f.toggle) put('', {label: f.label || f.name, key: f.key?.toUpperCase(), ...onOff(() => f.on !== false, v => { if ((f.on !== false) !== v) f.toggle(); })});
+    for (const s of f.settings?.() || []) put(s.label, s.options ? {label: s.label, ...pick(s.options, s.get, s.set)} : {label: s.label, min: s.min ?? 0, max: s.max ?? 1, step: s.step ?? .01, get: s.get, set: s.set});
   }
-  $('#menu').innerHTML = rows.join('');
+  if (A) out.push({tab: 'audio', group: 'Sound', label: 'Music', key: 'U', ...onOff(() => A.musicOn, v => { if (A.musicOn !== v) A.toggleMusic(); })});
+  out.push({tab: 'graphics', group: 'Effects', label: 'Screen shake', id: 'shake', keep: true, ...onOff(() => opt.shake, v => { opt.shake = v; })});
+  dv('Tools', {label: 'Frame profiler', key: 'F3', ...onOff(() => perf.on, v => { if (perf.on !== v) perf.toggle(); })});
+  dv('Tools', {label: 'Key help panel', key: 'H', ...onOff(() => opt.help, v => { opt.help = v; })});
+  dv('Tools', {label: 'Dev mode', key: '`', ...onOff(() => host.dev, v => { host.dev = v; })});
+  return out;
 }
-$('#pause').addEventListener('click', e => {
-  const a = e.target.closest('[data-act]')?.dataset.act; if (!a) { if (e.target === $('#pause')) togglePause(false); return; }
-  if (a === 'resume') { togglePause(false); return; }
-  if (a.startsWith('menu:')) { const m = features.flatMap(f => f.menu?.() || [])[+a.slice(5)]; togglePause(false); m?.run(); return; }
-  if (a === 'snap') snapMode = (snapMode + 1) % 3;
-  if (a === 'sampling') opt.sampling = SAMPLING[(SAMPLING.indexOf(opt.sampling) + 1) % 3];
-  if (a === 'outline') opt.outline = !opt.outline;
-  if (a === 'props') { propMode = propMode === 'live' ? 'yaw' : 'live'; world.setMode(propMode); }
-  if (a === 'trees') { trees3d = !trees3d; setBiome(biomeI); }
-  if (a === 'banded') opt.banded = !opt.banded;
-  if (a === 'shadows') opt.shadows = !opt.shadows;
-  if (a === 'debug') opt.debug = (opt.debug + 1) % DEBUG.length;
-  if (a === 'biome') setBiome(biomeI + 1);
-  if (a === 'time') env.nextPart();
-  const cyc = (o, cur, set) => set(o[(o.indexOf(cur) + 1) % o.length]);
-  if (a === 'season') cyc(['auto', ...SEASONS], env.seasonLock || 'auto', env.setSeason);
-  if (a === 'weather') cyc(['auto', ...Object.keys(WEATHER).filter(w => !WEATHER[w].precip || env.TUNE.precip)], env.weatherLock || 'auto', env.setWeather);
-  if (a === 'daylen') cyc([20, 5, 60, 0], env.frozen ? 0 : env.TUNE.dayMinutes, env.setDayMinutes);
-  if (a === 'lantern') opt.lantern = !opt.lantern;
-  if (a === 'hdbow') opt.hdBow = !opt.hdBow;
-  if (a === 'armour') toggleArmour();
-  if (a === 'loadout') switchLoadout(loadI + 1);
-  if (a.startsWith('feat:')) features.filter(f => f.toggle || f.settings)[+a.slice(5)].toggle();
-  if (a.startsWith('set:')) { const [, i, j] = a.split(':').map(Number), s = features.filter(f => f.toggle || f.settings)[i].settings()[j]; const o = s.options, c = o.indexOf(s.get()); s.set(o[(c + 1) % o.length]); }
-  applyOpts(); renderMenu();
+const menu = createMenu({
+  root: $('#pause'), items: menuItems, dev: () => host.dev, sound: host.uiSound, changed: applyOpts,
+  title: () => game.mode === 'title' ? ['Settings', ''] : ['Paused', game.mode === 'run' && game.run ? `Run · stage ${game.run.stage + 1}` : game.mode === 'sandbox' ? 'Proving Grounds' : ''],
+  groups: {graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys'], dev: ['Character', 'World', 'Renderer', 'Features', 'Tools']},
+  resume: snd => togglePause(false, snd),
+  look: dx => { dragYaw += dx * -.006; lookT = performance.now(); },
+  zoom: e => onWheel(e),
 });
-$('#pause').addEventListener('input', e => {
-  const a = e.target.dataset.act; if (!a?.startsWith('range:')) return;
-  const [, i, j] = a.split(':').map(Number); features.filter(f => f.toggle || f.settings)[i].settings()[j].set(+e.target.value);
-});
+menu.restore(Q);   // the player's remembered settings (Graphics, Controls)
+addEventListener('fullscreenchange', () => menu.refresh());
 
 // ---------------------------------------------------------------- frame
 const ROT_SPEED = 110 * DEG;
@@ -636,14 +723,15 @@ function step(dt) {
   // camera rotation: keys / middle-drag, then (in a step mode) ease onto the nearest step once you let go.
   // A climb started at an angle eases the camera to north first, climbs, then returns.
   const rot = (keys.has('x') ? 1 : 0) - (keys.has('z') ? 1 : 0);
-  let ny = yaw + (paused ? 0 : rot * ROT_SPEED * dt + dragYaw); dragYaw = 0;
-  if (assist) ny = stepAssist(dt, ny);
-  else if (!rot && !dragging && snapMode) { const s = SNAP[snapMode], tg = Math.round(ny / s) * s, d = tg - ny; ny = Math.abs(d) < .0015 ? tg : ny + d * (1 - Math.exp(-dt * 14)); }
+  // paused: the menu's slow drift + dragging its backdrop
+  let ny = yaw + (paused ? pauseTurn(dt) + dragYaw : rot * ROT_SPEED * dt + dragYaw); dragYaw = 0;
+  if (!paused && assist) ny = stepAssist(dt, ny);
+  else if (!paused && !rot && !dragging && snapMode) { const s = SNAP[snapMode], tg = Math.round(ny / s) * s, d = tg - ny; ny = Math.abs(d) < .0015 ? tg : ny + d * (1 - Math.exp(-dt * 14)); }
   const y0 = yaw; setYaw(ny); syncPlateaus();
   stepSampling(dt, yaw !== y0);
-  if (paused) return;
+  if (paused) { stepPaused(dt); return; }   // the game stands still, nature goes on
   dt *= host.timeScale; if (dt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
-  env.step(dt);   // the world clock first: everything after reads this step's time / weather
+  perf.begin('env', 'sim'); env.step(dt); perf.end('env');   // the world clock first: everything after reads this step's time / weather
   if (freeze > 0) { freeze -= dt; for (const f of features) if (f.always) f.update?.(dt, []); return; }
   const n0 = events.length, px0 = P.x, py0 = P.y;
   perf.begin('player.step', 'sim'); PL.step(dt); perf.end('player.step');
@@ -721,10 +809,12 @@ function toWorldEvent(e) {
 }
 function draw(t) {
   hoverKey++;
+  stepZoom(lastDt);
   const [PX, PY] = [player.x, player.y];
-  // camera: eases after the player with a little look-ahead (the arena's), feel offsets from features, shake
+  // camera: eases after the player with a little look-ahead (the arena's), feel offsets from features, shake. It aims at
+  // his chest (FOCUS_H m up, as the ground point that projects there), so he's in the same spot on screen at every zoom
   if (!camInit) { T.set(PX, P.z, PY); camInit = true; }
-  const [lvx, lvy] = toWorld(P.vx * .12, P.vy * .12 - 30 / PPMY);   // look-ahead + 30 px of headroom (arena: ty - 30)
+  const [lvx, lvy] = toWorld(P.vx * .12, P.vy * .12 - FOCUS_H * PPMH / PPMY);
   const k = 1 - Math.exp(-lastDt * 9); T.x += (PX + lvx - T.x) * k; T.y += (P.z - T.y) * k; T.z += (PY + lvy - T.z) * k;
   let ox = 0, oy = 0;
   for (const f of features) if (f.on !== false && f.camera) { const o = f.camera(lastDt); if (o) { ox += o.x || 0; oy += o.y || 0; } }
@@ -829,7 +919,7 @@ function hud() {
   $('#hud').innerHTML = [
     `<div class="row"><b>Proving Grounds 3D</b> · ${b.name} · ${env.label()}${opt.lantern ? ' · lantern' : ''} · ${LOADOUTS[loadI][0]}</div>`,
     fh ? `<div class="row">${fh}</div>` : '',
-    `<div class="row">camera <b>${deg.toFixed(1)}°</b> (${SNAP_NAME[snapMode]}) · zoom ${zoom}x${opt.debug ? ` · view <b>${DEBUG[opt.debug]}</b>` : ''}</div>`,
+    `<div class="row">camera <b>${deg.toFixed(1)}°</b> (${SNAP_NAME[snapMode]}) · zoom ${(scale * zoom / dsBase).toFixed(2)}x (${scale}:1)${opt.debug ? ` · view <b>${DEBUG[opt.debug]}</b>` : ''}</div>`,
     `<div class="row dim">features: ${features.map(f => `${f.name}${f.on === false ? ' (off)' : ''}`).join(', ') || 'none yet'}</div>`,
     `<div class="row dim">${fps.toFixed(0)} fps · ${s.ms.toFixed(1)} ms CPU · ${s.calls} draws · ${s.sprites} sprites · ${s.points} pts · hits ${hits}/${PL.shots}</div>`,
   ].join('');
@@ -839,7 +929,7 @@ console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} 
 
 // debug handle for scripted tests (drive frames while the pane is hidden: rAF pauses there)
 window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout, TIMING, perf,
-  get world() { return world; }, get yaw() { return yaw; }, set zoom(v) { zoom = v; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { snapMode = i; },
+  get world() { return world; }, get yaw() { return yaw; }, set zoom(v) { zoomTo(Math.round(dsBase * v)); }, get zoomState() { return {scale, zoom, dsBase, dsGoal}; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { snapMode = i; },
   set props(m) { propMode = m; world.setMode(m); }, get rig() { return rig; },
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { lastDt = dt; step(dt); draw(performance.now() / 1000); } },
   applyOpts, hud};

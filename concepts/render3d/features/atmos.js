@@ -139,7 +139,8 @@ const lum = c => c[0] * .3 + c[1] * .55 + c[2] * .15;
 
 export async function create(host) {
   const Q = new URLSearchParams(location.search);
-  const {PPM, PPMY, PPMH, VW, VH} = host;
+  const {PPM, PPMY, PPMH} = host;
+  let {VW, VH} = host;   // the view size: F.resize follows the window
   const F = {name: 'atmos', label: 'Weather', on: true, weather: Q.get('weather') !== '0', hdOn: Q.get('hd') !== '0', night: 1, ms: 0, count: 0,
     TUNE: {KINDS, WIND, BURST, FOG, OVER, DUST, SMOKE, SPLASH, STREAM_LIFE, PRINT, WATER_H}, windSrc: null};
   let biome = '', kinds = [], need = true;
@@ -677,6 +678,7 @@ export async function create(host) {
   Object.assign(F, {
     toggleWeather, setBiome,
     biomeChanged() { setBiome(host.biome.id); },
+    resize(w, h) { VW = w; VH = h; },   // the view changed size (main.js fit)
     onKey(k) { if (k === 'k') { toggleWeather(); return true; } return false; },
     settings: () => [
       {label: 'Weather (K)', options: ['on', 'off'], get: () => F.weather ? 'on' : 'off', set: v => { if ((v === 'on') !== F.weather) toggleWeather(); }},

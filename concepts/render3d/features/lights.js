@@ -730,7 +730,7 @@ export async function create(host) {
   F.update = (dt, evs) => {
     const t0 = performance.now();
     T += dt; syncBiome();
-    stepArrows(dt); stepBurning(dt);
+    stepArrows(dt); if (!host.paused) stepBurning(dt);   // paused (the menu): flames flicker on, nothing burns through
     fires.step(dt);
     if (F.on) stepCamp(dt);
     for (const o of fires.pops.splice(0)) {   // a crackle: sparks thrown high and wide, the fire's light flashes

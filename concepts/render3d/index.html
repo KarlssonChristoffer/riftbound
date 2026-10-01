@@ -16,14 +16,38 @@
   #help { position: fixed; right: 10px; bottom: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; pointer-events: none; }
   #help td { padding: 0 8px 0 0; vertical-align: top; }
   #help td:first-child { color: var(--key); white-space: nowrap; }
-  #load { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 14px; }
-  #pause { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(6, 8, 7, .62); }
-  #menu { min-width: 300px; max-width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto; padding: 12px 16px 16px; background: #141715; border: 1px solid var(--line); border-radius: 8px; }
-  #menu h3 { margin: 12px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
-  #menu button { display: block; width: 100%; margin: 3px 0; padding: 6px 8px; text-align: left; font: inherit; color: var(--ink); background: #1c201d; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
-  #menu button:hover { border-color: var(--key); }
-  #menu button b { color: var(--key); font-weight: 600; }
-  #menu label { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin: 4px 0; }
+  #load { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: var(--bg); font-size: 14px; }
+  /* the menu (ui/menu.js): plain white text, centred over the living world, which is blurred (drag it to look around) */
+  #pause { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 32px 16px; box-sizing: border-box;
+    background: rgba(0, 0, 0, .42); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px);
+    color: #fff; font: 15px/1.4 "Segoe UI", system-ui, sans-serif; text-shadow: 0 1px 3px rgba(0, 0, 0, .7); cursor: grab; animation: m-fade .2s ease-out; }
+  #pause.turning { cursor: grabbing; }
+  body:has(#pause:not(.hidden)) :is(#hud, #help) { visibility: hidden; }
+  @keyframes m-fade { from { opacity: 0; } }
+  #menu { position: relative; width: min(380px, 100%); max-height: 100%; display: flex; flex-direction: column; cursor: default; }
+  #menu header { padding-bottom: 8px; text-align: center; }
+  .m-title { font-size: 26px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; }
+  .m-sub { font-size: 13px; opacity: .6; }
+  .m-close { position: absolute; top: 2px; right: 0; padding: 2px 4px; font: inherit; font-size: 12px; color: #fff; text-shadow: inherit; opacity: .5; background: none; border: 0; cursor: pointer; }
+  .m-close:hover, .m-close:focus-visible { opacity: 1; outline: none; }
+  #menu nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 18px; padding: 4px 0 14px; }
+  .m-tab { padding: 2px 0; font: inherit; font-size: 14px; color: #fff; text-shadow: inherit; opacity: .5; background: none; border: 0; cursor: pointer; }
+  .m-tab:hover, .m-tab:focus-visible { opacity: .85; outline: none; }
+  .m-tab.on { opacity: 1; text-decoration: underline; text-underline-offset: 6px; }
+  .m-body { overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .25) transparent; }
+  .m-body h4 { margin: 14px 10px 2px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; opacity: .5; }
+  .m-row, .m-act { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 5px 10px; box-sizing: border-box;
+    font: inherit; color: #fff; text-shadow: inherit; text-align: left; opacity: .85; background: none; border: 0; border-radius: 4px; cursor: pointer; }
+  .m-row:hover, .m-row:focus-visible, .m-act:hover, .m-act:focus-visible { opacity: 1; background: rgba(255, 255, 255, .09); outline: none; }
+  .m-act { justify-content: center; padding: 7px 10px; font-size: 18px; }
+  .m-row small { margin-left: 8px; font-size: 11px; opacity: .45; }
+  .m-val { display: flex; align-items: center; white-space: nowrap; }
+  .m-val i { padding: 0 6px; font-style: normal; opacity: .45; }
+  .m-val i:hover { opacity: 1; }
+  .m-keys > div { display: grid; grid-template-columns: 120px 1fr; gap: 10px; padding: 3px 10px; font-size: 14px; }
+  .m-keys > div > span:first-child { opacity: .55; }
+  .m-note { margin: 14px 10px 0; font-size: 12px; opacity: .45; }
+  .m-hint { position: fixed; left: 0; right: 0; bottom: 14px; text-align: center; font-size: 12px; opacity: .5; }
   .hidden { display: none !important; }
   /* game screens (game/screens.js): title, augment pick, run over */
   #gscreen { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: radial-gradient(ellipse at center, rgba(6, 8, 7, .25), rgba(6, 8, 7, .72)); font-family: "Segoe UI", system-ui, sans-serif; }
@@ -48,7 +72,7 @@
   .gs-stats { margin: 0 auto 8px; border-collapse: collapse; font-size: 14px; }
   .gs-stats td { padding: 3px 10px; text-align: left; vertical-align: top; }
   .gs-stats td:first-child { color: var(--dim); text-align: right; }
-  @media (max-width: 720px) { #help { display: none; } #hud { max-width: calc(100vw - 40px); } }
+  @media (max-width: 720px) { #help { display: none; } #hud { max-width: calc(100vw - 40px); } .m-hint { display: none; } }
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
 </head>
@@ -61,7 +85,7 @@
     <tr><td>Mouse</td><td>aim · hold LMB draw, release shoot · RMB multishot · Space roll / leap</td></tr>
     <tr><td>1–4 · E</td><td>abilities · open / climb</td></tr>
     <tr><td>Z / X</td><td>rotate camera · or drag with the middle mouse button · Home: reset</td></tr>
-    <tr><td>Wheel</td><td>zoom 1x / 2x</td></tr>
+    <tr><td>Wheel</td><td>zoom in / out (smooth, pixel-perfect levels)</td></tr>
     <tr><td>5–8</td><td>wind · wildlife · depth · camera feel</td></tr>
     <tr><td>B · Shift+B</td><td>wind strength: auto · calm · breeze · brisk · gale · wind lines: hd · pixel · off</td></tr>
     <tr><td>T · N · L · K</td><td>time of day · biome · lantern · weather</td></tr>
@@ -74,7 +98,7 @@
     <tr><td>` / §</td><td>dev mode on / off (these keys, the debug HUD) · ?mode=run | sandbox</td></tr>
   </table>
 </div>
-<div id="pause" class="hidden"><div id="menu"></div></div>
+<div id="pause" class="hidden"></div>
 <div id="load">Loading…</div>
 <script type="module" src="main.js"></script>
 </body>

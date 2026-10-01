@@ -30,7 +30,7 @@ export async function createGame(host) {
   const core = combat.core, P = host.player;
   let seed = (Date.now() % 2147483646) + 1;
   const rng = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const stats = createStats(host, core), nav = createNav(host), hud = createHud(host), screens = createScreens();
+  const stats = createStats(host, core), nav = createNav(host), hud = createHud(host), screens = createScreens({sound: n => host.uiSound?.(n)});
   const save = loadSave();
   const DEV = Q.get('dev') === '1';
   const base = {propRespawn: core.T.propRespawn, chestReset: core.T.chestReset};
@@ -56,7 +56,7 @@ export async function createGame(host) {
   function toTitle() {
     endRunState();
     mode = 'title'; setPhase(''); host.dev = DEV; lock(true); host.timeScale = 1; host.hudOff = true;
-    screens.title(save, {run: startRun, sandbox: toSandbox});
+    screens.title(save, {run: startRun, sandbox: toSandbox, settings: () => host.openMenu?.()});
   }
   function toSandbox() {
     endRunState(); screens.hide();

@@ -29,8 +29,8 @@ export function createDraw(host, core) {
   const G = () => gq ??= host.layer('ground');
   const px = (q, c, x, y, w = 1, h = 1) => { q.fillStyle = c; q.fillRect(x, y, w * z, h * z); };
   // world -> view px without allocating (host.toView's maths: G.toScreen); the result array is reused, destructure it
-  const PV = [0, 0], _v = new host.THREE.Vector3(), VW = host.VW, VH = host.VH;
-  const proj = (x, y, h) => { _v.set(x, h, y).project(host.G.camera); PV[0] = (_v.x + 1) / 2 * VW; PV[1] = (1 - _v.y) / 2 * VH; return PV; };
+  const PV = [0, 0], _v = new host.THREE.Vector3();   // (host.VW / VH: the view size follows the window)
+  const proj = (x, y, h) => { _v.set(x, h, y).project(host.G.camera); PV[0] = (_v.x + 1) / 2 * host.VW; PV[1] = (1 - _v.y) / 2 * host.VH; return PV; };
   const V = (x, y, h) => { proj(x, y, h); PV[0] = Math.floor(PV[0]); PV[1] = Math.floor(PV[1]); return PV; };
   // a block of w x h art pixels at (dx, dy) px from a world anchor: dx along view-right, dy down in HEIGHT (standing art)
   function blk(x, y, h, dx, dy, w, hh, c, emit = false) {

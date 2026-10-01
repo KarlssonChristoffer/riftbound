@@ -119,7 +119,8 @@ const ZERO = {x: 0, y: 0, g: 0};
 
 export async function create(host) {
   const Q = new URLSearchParams(location.search);
-  const {PPM, PPMY, PPMH, VW, VH} = host;
+  const {PPM, PPMY, PPMH} = host;
+  let {VW, VH} = host;   // the view size: F.resize follows the window
   const F = {name: 'flow', label: 'Flow (camera, trails, marks)', key: '8', on: Q.get('flow') !== '0', ms: 0, TUNE, T: TUNE};
   const K = TUNE.cam;
   let biome = '', time = 'day', acc = 0, simT = 0;
@@ -756,6 +757,7 @@ export async function create(host) {
       return F.on;
     },
     biomeChanged() { levels.clear(); setBiome(host.biome.id); level(0); },   // (a rebuilt world: new ground texture; the ground layer made now, behind the loading screen)
+    resize(w, h) { VW = w; VH = h; if (EC) { EC.width = w; EC.height = h; ecq.imageSmoothingEnabled = false; } },   // the view changed size (main.js fit)
     update, camera, frame, lights,
     hud: () => '',
     // debugging / tests

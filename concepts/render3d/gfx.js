@@ -965,6 +965,16 @@ void main() {
     P[i] = x; P[i + 1] = y; P[i + 2] = z; P[i + 3] = r; C[i] = c[0]; C[i + 1] = c[1]; C[i + 2] = c[2]; C[i + 3] = a; B.n++;
   }
   function setDisplay(s) { s = Math.max(1, Math.round(s)); if (s === DS) return; DS = s; renderer.setSize(VW * s, VH * s, false); blitU.uDS.value = fxU.uDS.value = s; }
+  // resize(w, h): a new view size in art px (the window changed shape: ultrawide, fullscreen; main.js fit). The view-sized
+  // targets and the screen layers follow; the projection, toScreen and the fx sizes read VW / VH every frame anyway
+  function resize(w, h) {
+    if (w === VW && h === VH) return;
+    VW = w; VH = h;
+    renderer.setSize(VW * DS, VH * DS, false);
+    for (const rt of [gbuf, xray, outRT, heatRT]) rt.setSize(VW, VH);
+    SNAP.value.set(VW, VH); compU.uRes.value.set(VW, VH); blitU.uRes.value.set(VW, VH);
+    for (const L of layerList) { L.c.width = VW; L.c.height = VH; L.q.imageSmoothingEnabled = false; L.dirty = false; L.t.dispose(); L.t.needsUpdate = true; }
+  }
 
   // ---- view: target (snapped to the pixel lattice by the caller), yaw, zoom
   const view = {T: new THREE.Vector3(), yaw: 0, zoom: 1};
@@ -1067,7 +1077,7 @@ void main() {
     resetBatches(); for (const L of layerList) L.used = false; frameNo++;
   }
 
-  return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, VW, VH,
+  return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     setView, setSun, toScreen, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
-    fx, heat, setDisplay, fxU, get display() { return DS; }};
+    fx, heat, setDisplay, resize, fxU, get display() { return DS; }};
 }

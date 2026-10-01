@@ -78,7 +78,8 @@ const TUNE = {
 
 export async function create(host) {
   const Q = new URLSearchParams(location.search);
-  const {VW, VH, PPM, PPMY, PPMH} = host;
+  const {PPM, PPMY, PPMH} = host;
+  let {VW, VH} = host;   // the view size: F.resize follows the window
   const F = {name: 'depth', label: 'Depth (foreground, clouds, shafts, reflections)', key: '7', on: Q.get('depth') !== '0', ms: 0, TUNE, debug: ''};
   if (Q.get('fg') === '1') TUNE.fg.on = true;
   F.settings = () => [{label: 'Foreground silhouettes', options: ['off', 'on'], get: () => TUNE.fg.on ? 'on' : 'off', set: v => { TUNE.fg.on = v === 'on'; }}];
@@ -472,7 +473,7 @@ export async function create(host) {
   // masks are TOP-DOWN (R = PPM texels per metre, like the world's ground canvas) and projected per frame
   const WA = {key: '', mask: null, mpat: null, lava: null, lpat: null, yEnd: 0, shrink: 0, puddles: [], near: [], plane: new Map(), gpx: null, gw: 0, gh: 0, used: false, n: 0};
   const [RA, ra] = mk(VW, VH), [RB, rb] = mk(VW, VH), [MS, ms] = mk(VW, VH), [EM, em] = mk(VW, VH), [SK, sk] = mk(VW, VH), [HZ, hz] = mk(VW, VH);
-  const SKY = sk.createImageData(VW, VH), skyDirty = [];
+  let SKY = sk.createImageData(VW, VH); const skyDirty = [];
   function topMask(yEnd, half, cuts) {   // the stream's row spans (half-width function of y), minus cuts(q, R)
     const S = host.layout.stream, R = PPM, W = Math.ceil(WM() * R), H = Math.ceil(HM() * R), [c, q] = mk(W, H);
     q.fillStyle = '#fff';
@@ -721,6 +722,11 @@ export async function create(host) {
   Object.assign(F, {
     toggle() { F.on = !F.on; return F.on; },
     biomeChanged() { biome = ''; syncBiome(); },
+    resize(w, h) {   // the view changed size (main.js fit): the view-sized canvases and the sky glint's pixels follow
+      VW = w; VH = h;
+      for (const [c, q] of [[RA, ra], [RB, rb], [MS, ms], [EM, em], [SK, sk], [HZ, hz]]) { c.width = w; c.height = h; q.imageSmoothingEnabled = false; }
+      SKY = sk.createImageData(w, h); skyDirty.length = 0;
+    },
     update(dt) {
       const t0 = performance.now();
       T += dt;
