@@ -197,6 +197,9 @@ and gameplay can be tested without drawing anything.
    `body` (world: position, collider), `health` + `breakable` (combat), `burnable` (fire), `phys` (prop physics),
    `interact`, `light`, `render` (view). No free-form flags on the entity itself. Systems find entities by component
    (`world.with('burnable')`), so an entity spawned later is seen by everyone automatically.
+   *As built (phase 3):* entities are the props' own objects in the registry `host.entities` (world/entities.js); a
+   component is the set of fields one system owns (the table: `OWNERS` in dev/owncheck.js); systems find entities with
+   live queries, `host.entities.query('lights.flame', p => ...)`, which follow every join / leave.
 3. **Game effects are modifiers, never overwrites.** Items and augments add `{stat: 'moveSpeed', mul: 1.1, from:
    'boots'}` to a modifier list; the player reads `stats.get('moveSpeed')`. Nothing writes another module's constants,
    so nothing needs restoring.
@@ -204,11 +207,16 @@ and gameplay can be tested without drawing anything.
    behave the same at 40 fps and at 240 fps, slow motion is exact, and a seeded run can be replayed for a test.
 5. **The frame has named phases, and systems declare theirs**: `input -> sim (fixed steps) -> view -> render -> ui`.
    Order inside a phase is declared (`after: ['env']`), not implied by an array's order.
+   *As built (phase 3):* each feature exports `order = {after, before}`; core/features.js sorts by it. The phases
+   themselves come with the fixed step and the sim / view split (phase 4).
 6. **Events go through one bus with a catalog.** `events.emit('prop.break', {...})`; every type is listed in
    `core/events.js` with its payload, emitter and listeners. Names are namespaced (`player.land` vs `prop.land`, no
    overloaded types). Events emitted during a phase are delivered at the end of that phase, deterministically.
+   *As built (phase 3):* an event is `{type: 'prop.break', ...}` pushed on the one queue (`host.events`); the catalog
+   and today's delivery timing (same step / next step) are in core/events.js, and dev mode warns on an unlisted type.
 7. **Shared questions are services.** "Wind at x, y", "what's within 2 m", "can I walk here", "time of day" are answered
    by one service each (`env.windAt`, `world.near`, `world.blocked`, `env.time`), never re-derived in a feature.
+   *As built (phase 3):* "what's near" is `host.entities.near(x, y, r, out)` (a 2 m grid, answers in list order).
 8. **The game owns its code.** The 2D arena (`concepts/`) is frozen as a reference; the game gets its own copies of the
    files it shares today. Dev-only code lives in `dev/` and loads only in dev mode.
 
@@ -238,19 +246,21 @@ tools/                   offline pipelines (Blender, pixelizer, atlas packer) + 
 docs/                    this file, the audit, AUDIO.md
 ```
 
-**As built after phase 2 (2026-10-01).** Phases 3-4 add what's missing (entities, grid, collide, events; the fixed step;
-the features split into sim / view and moved out of `features/`).
+**As built after phases 2 and 3 (2026-10-01).** Phase 4 adds what's missing (the fixed step; the features split into
+sim / view and moved out of `features/`; modifiers).
 
 ```
 src/
   index.html, main.js    the boot (191 lines): the loadout, camera, renderer, stage, clock, hero, player, arrows; the
                          `host` features get (contract in main.js's header); the features; the engine context E; the loop
   core/                  loop.js (step + draw + frame, hitstop), input.js (keys + mouse, the camera drag),
-                         features.js (FEATURES order + loading), flags.js, perf.js, mathx.js, rng.js, color.js
+                         features.js (loading + the declared order), events.js (the catalog), flags.js, perf.js,
+                         mathx.js, rng.js, color.js
   render/                gfx.js (the renderer), camera.js (size, zoom, yaw, follow, shake, sampling), viewxf.js,
                          lighting.js (mood + lights -> the composite), options.js (opt + applying it), atlas.js
-  world/                 world.js (build + props), stage.js (biome, rebuilds, prop mode, trees), biomes.js, layout.js,
-                         trees3d.js, kit3d.js, nav.js
+  world/                 world.js (build + props), stage.js (biome, rebuilds, prop mode, trees, the registry),
+                         entities.js (the registry: join / leave / hide, live queries, near), spatial.js (the grid),
+                         biomes.js, layout.js, trees3d.js, kit3d.js, nav.js
   sim/                   env.js (clock, seasons, weather), projectiles.js (arrows, pops, dust),
                          player/ (player.js, harmonize.js, adapter.js: the camera-frame bridge, climbing, the cursor)
   view/                  hero.js (the Ranger's card: atlas, cloak, hair, armour, HD bow), cloth.js, armor.js
@@ -259,7 +269,8 @@ src/
   ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js
   audio/                 audio.js, music.js
   content/               moods.js (MOODS, TIMES, CHAR)
-  dev/                   devtools.js (colliders, debug HUD, tree lineup), devkeys.js (dev keys, renderer A/B)
+  dev/                   devtools.js (colliders, debug HUD, tree lineup), devkeys.js (dev keys, renderer A/B),
+                         owncheck.js (the ownership table + ?owncheck=1)
   vendor/three/          three.js 0.170.0
 ```
 
@@ -267,6 +278,18 @@ Two contexts, on purpose: **`host`** is the features' API (stable, documented in
 context for core/input, ui/pause and core/loop (what the boot made, by name). Both are filled by the boot only;
 modules read them and call the owners' APIs (`input.takeYaw()`, `loop.hitstop(s)`, `hero.moveCloth(dx, dy)`), they
 never write each other's state. `dev/` reaches the engine only as `E.dev`, handed in by the boot.
+
+**As built after phase 3 (2026-10-01).** What a system uses to keep to the rules:
+
+| question | the one place | notes |
+|---|---|---|
+| who is in the world | `host.entities` (world/entities.js): `add(p)`, `remove(p)`, `hide(p, on)` (the one writer of `p.gone`) | `host.props` is its list; `host.propsVersion` bumps on every join / leave |
+| all the things of a kind | `host.entities.query('owner.what', pred, join?)`: a live list in insertion order | `join(p)` sets the querying system's own state for a newcomer; one owner per query name |
+| what's near x, y | `host.entities.near(x, y, r, out, q?)`: candidates from a 2 m grid, in list order | do the exact test; `moved(p)` after a jump of more than 1 m within a step |
+| who may write a field | `OWNERS` in dev/owncheck.js; `?owncheck=1` records every other writer with its file:line | creators fill an entity in before it joins; a system keeps its private per-entity state in its own fields (listed) or a WeakMap |
+| which events exist | `EVENTS` in core/events.js | add the type there with its emitter; dev mode warns otherwise |
+| the features' order | each feature's `export const order = {after, before}` (core/features.js sorts) | a cycle throws |
+| module state of another system | the owner's API: `world.propTop`, `setClothWind`, `STREAM.addStone / removeStone`, `PL.faceShot / flicker / regrid` | |
 
 ### 2.4 A system, concretely
 
@@ -335,8 +358,9 @@ The numbers live in `src/core/perf.js` (`BUDGET`). Change them only on purpose, 
    are keyed by a version (`canvas.version++` when repainted, uploaded only when the version changed).
 4. **No per-frame pixel work on the CPU.** No `getImageData` / `putImageData` / software rasterising / 2D-canvas
    painting + re-upload in the frame loop. Do it in a shader, bake it at load, or cache it and redraw on change.
-5. **Spatial questions go through the grid.** Never scan all props/entities per call; `world.near(x, y, r)` and
-   `world.blocked(...)` use the uniform grid.
+5. **Spatial questions go through the grid.** Never scan all props/entities per call; `host.entities.near(x, y, r,
+   out)` answers from the uniform grid (the player's collision and interaction, arrows, the prop physics, brute spots,
+   fire spread use it), and a per-frame pass over one kind uses a live query (`host.entities.query`).
 6. **Everything visible is capped and culled.** Every particle system has a hard cap, uses the one on-screen test, and
    simulates off-screen sources at reduced rate. Quality tiers (low / medium / high) scale density, cloth, HD fx and
    shadow sizes.
@@ -397,7 +421,7 @@ No rewrite. Each phase leaves the game playable, ends in a commit and a bench ru
 | **0. Measure** (done 2026-10-01) | F3 profiler, `tools/perf/bench.mjs` + baseline, this doc, the audit | the numbers in 1.1 |
 | **1. Performance, no restructure** (done 2026-10-01: day 4.15 -> 2.04 ms, see 1.1) | cloth: persistent buffers, bounding box, flat arrays; batches upload only written ranges; card frustum culling; `setMatrix` early-out + height-map dirty threshold; flame canvases upload on version; firesim pooling + on-screen culling; cached lights / colours in `applyMood` and `world.update`; cached player position; quantised shaft / cloud keys. Moved on: `preserveDrawingBuffer` (GPU-only cost; captures rely on it) and lights' `F.on` freeze (a sim / view split, phase 4) | day JS <= 2.5 ms, every scenario in budget: met |
 | **2. Move and split** (done 2026-10-01, commits 6fcee2c .. eed7783; the layout as built is in 2.3) | `concepts/render3d` -> `src/`; `main.js` 773 -> 191 lines (the boot) split into core / render / sim / view / world / ui / dev modules; the shared arena files forked into `src/`; one `mathx` / `rng` / `color` / `viewxf`; `flags.js`; three.js vendored; old `game/` -> `concepts/legacy-game`. New checks: `tools/test/golden.mjs` (bit-exact captures), `tools/test/smoke.mjs` | behaviour identical: met (16 golden captures identical after every step, smoke passes); bench unchanged: met (day JS 1.55 ms) |
-| **3. Entities, grid, events** (freeze) | props + enemies become entities with owned components; uniform grid for collision / arrows / aim / proximity; the ~60 ad-hoc prop fields mapped to components; namespaced events with the catalog; declared phases | no module writes another's fields (a dev-mode check freezes foreign writes) |
+| **3. Entities, grid, events** (done 2026-10-01, commits 936195e .. 1a71971; how to use them: 2.3, "as built after phase 3") | the entity registry with live queries (combat's create-time snapshots gone); a uniform grid for collision / interaction / arrows / prop physics / brute spots / fire spread, live kind queries for the per-frame passes (run JS 1.56 -> 1.25 ms); namespaced events with the catalog (and the jump event's view-frame bug it exposed); the ownership table + `?owncheck=1`, and the cross-system writes it found fixed at their owners (torch mounting, soft plants, `gone`, hit feedback + rails, the cloak's wind, stepping stones, the player's facing / flicker); declared feature order. Left for phase 4 on purpose: stats.js / game.js tuning overwrites (modifiers), renderer uniform setters, ctxO's world fields, views that read sim state mid-step (wind's cloth strips), wind's own foliage index and wildlife's solids list onto the grid, the hover / contact passes over all items, `combat.enemies` allocating per read | no module writes another's entity fields: met (`?owncheck=1` over a sandbox session and a run: 0 violations, 0 added fields); golden identical but one intended 8 x 4 px change (ref3, see 3.4a) |
 | **4. Fixed step, sim / view split, modifiers** | fixed 60 Hz sim + interpolation; each mixed feature split (wind -> `env` wind field + foliage / leaves / audio views; lights -> `sim/fire` + `view/firefx`; ...); `stats.js` -> modifiers | sim runs headless in a test; quality tier "low" works |
 | **5. GPU-side visuals** (done 2026-10-01, see 1.1: shadow draws 188 -> 56, render -18 to -30% by day) | cached static shadow map + per-frame one for what moves (instancing built, measured, dropped); cloth collision early-out; per-pass stats, `--throttle`. Evaluated and deferred with reasons (1.1): cloth / fire on the GPU, layers in shaders, `preserveDrawingBuffer` | shadow draws ~halved: met (-70%); laptop-class target (CPU throttled 3x) holds 60 fps on average, the busiest moments touch it |
 

@@ -18,7 +18,12 @@ Rules that apply to every change now:
   and re-uploading it), **no scans over all props**. Update on change, cache by version, preallocate.
 - **One owner per piece of state.** Don't write fields on another module's objects, don't overwrite another module's
   constants (use or add its API), don't add free-form flags to props. If you must touch another area's file, keep the
-  change small, additive and named in the commit.
+  change small, additive and named in the commit. Entity fields: the table is `OWNERS` in `src/dev/owncheck.js`; after
+  touching them, run a session with `?owncheck=1` and `window.__r3d.owncheck()` (it lists every foreign write).
+- **The world's things go through the registry** (`host.entities`): `add` / `remove` / `hide` (never push into or
+  splice `host.props`, never set `gone`), live `query(name, pred)` for "all the X", `near(x, y, r, out)` for "what's
+  here" (no scans over all props). New event types go in `src/core/events.js` first; a feature states its update
+  order with `export const order = {after, before}`.
 - **Look before you write a helper**: colour parsing, hashing, rng, clamp, world <-> view conversion and on-screen tests
   already exist (`core/mathx.js`, `core/rng.js`, `core/color.js`, `render/viewxf.js`, `G.onScreen`).
 - **URL switches are declared in `core/flags.js`** (`flags.get('name')` warns on an undeclared one).
