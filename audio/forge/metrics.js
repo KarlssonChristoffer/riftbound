@@ -9,6 +9,7 @@
 //       t60Ms       Schroeder backward integration, extrapolated from the -5..-25 dB slope (or -5..-15 if the tail is short)
 //       centroidHz / rolloffHz (85%) / flatness (0 tonal .. 1 noise) / flux: from the energy-weighted average spectrum
 //       lowHz/highHz the band holding the middle 90% of the energy (5% .. 95%)
+//       hf4kDb      energy above 4 kHz relative to the total, dB (brightness rule: textures <= about -18)
 //       onsets      times (s) where the 5 ms envelope jumps (event structure: steps, debris, crackles)
 //   spectrumProfile(ch, sr) -> Float32Array(48)   log-band average spectrum (dB), for similarity between sounds
 //   similarity(a, b) -> 0..1                      1 = identical spectral profile (variants should NOT all be ≈1)
@@ -116,6 +117,7 @@ export function analyze(ch, sr) {
   const band = q => { let c = 0; for (let k = 1; k < K; k++) { c += avg[k]; if (c >= tot * q) return S.freqs[k]; } return sr / 2; };
   let lg = 0, ar = 0, cnt = 0; for (let k = 1; k < K; k++) if (S.freqs[k] > 40 && S.freqs[k] < 16000) { lg += Math.log(avg[k] + 1e-20); ar += avg[k]; cnt++; }
   const flat = cnt ? Math.exp(lg / cnt) / (ar / cnt + 1e-20) : 0;
+  let hi4 = 0; for (let k = 1; k < K; k++) if (S.freqs[k] >= 4000) hi4 += avg[k];   // energy above 4 kHz (the 'hiss' check)
   // onsets: 5 ms envelope jumps above 2.2x its recent mean and above 15% of the max
   const E5 = envelope(x, sr, 5), on = [], mx = Math.max(...E5.e);
   for (let k = 3; k < E5.e.length; k++) { const pm = (E5.e[k - 1] + E5.e[k - 2] + E5.e[k - 3]) / 3; if (E5.e[k] > mx * .15 && E5.e[k] > pm * 2.2 && (!on.length || k * E5.h / sr - on[on.length - 1] > .04)) on.push(+(k * E5.h / sr).toFixed(3)); }
@@ -124,7 +126,7 @@ export function analyze(ch, sr) {
     lufsM: +lufsMomentaryMax(ch, sr).toFixed(1), crest: +(db(pk) - db(rms)).toFixed(1),
     attackMs: +((a90 - a10) * h / sr * 1000).toFixed(2), t60Ms: t60 === null ? null : Math.round(t60 * 1000),
     centroidHz: Math.round(tot ? cen / tot : 0), rolloffHz: Math.round(band(.85)), lowHz: Math.round(band(.05)), highHz: Math.round(band(.95)),
-    flatness: +flat.toFixed(3), flux: +(S.mags.length > 1 ? flux / (S.mags.length - 1) : 0).toFixed(3),
+    flatness: +flat.toFixed(3), hf4kDb: +(10 * Math.log10(Math.max(1e-12, hi4 / (tot || 1e-20)))).toFixed(1), flux: +(S.mags.length > 1 ? flux / (S.mags.length - 1) : 0).toFixed(3),
     onsets: on, onsetRate: +(on.length / (n / sr)).toFixed(1),
     dc: +(sum / n).toFixed(5), clickStart: +Math.abs(x[0]).toFixed(4), clickEnd: +Math.abs(x[n - 1]).toFixed(4),
   };

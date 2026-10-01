@@ -104,6 +104,14 @@ export function sweep(b, type, fAt, q = .7071, sr = 48000, {every = 32, qAt = nu
 export function onePoleLP(b, fc, sr) { const k = 1 - Math.exp(-2 * Math.PI * fc / sr); let y = 0; for (let i = 0; i < b.length; i++) { y += (b[i] - y) * k; b[i] = y; } return b; }
 export function onePoleHP(b, fc, sr) { const k = 1 - Math.exp(-2 * Math.PI * fc / sr); let y = 0; for (let i = 0; i < b.length; i++) { y += (b[i] - y) * k; b[i] -= y; } return b; }
 
+// warm tone stage (the brightness rules in RECIPE_GUIDE.md): a high-shelf cut above `fs`, then an optional
+// 24 dB/oct low-pass at `lp`. Promoted from the recipes, where it was copied around after the user's "too high" pass.
+export function warm(b, sr, {shelf = -8, fs = 5000, lp = 0} = {}) {
+  if (shelf) filter(b, 'highshelf', fs, .7071, sr, shelf);
+  if (lp) { filter(b, 'lowpass', lp, .5412, sr); filter(b, 'lowpass', lp, 1.3066, sr); }   // 4th-order Butterworth
+  return b;
+}
+
 // ============================================================================================ envelopes
 // exponential decay to -60 dB after t60 seconds, with a linear attack
 export function envExp(n, sr, attack, t60) {

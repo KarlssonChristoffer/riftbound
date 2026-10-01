@@ -8,6 +8,8 @@
 //        peak would pass -1 dBTP. Equal loudness makes A/B comparisons fair; the runtime mixes with event gains.
 //     4. measure (metrics.js) and check the case's pass criteria
 //   defaults(recipe) -> params with every param at its default
+//   A case may carry `seedAs: 'oldName'` so a renamed case renders exactly the variants it rendered under its old name,
+//   and a recipe may set `seedId: 'oldRecipeId'` to keep the draws of a recipe it was copied from.
 
 import {makeRng, dcBlock, trim, fades, dbToGain} from './dsp.js';
 import {analyze, check, lufsMomentaryMax} from './metrics.js';
@@ -18,8 +20,9 @@ export function defaults(recipe) {
   return p;
 }
 export function bake(recipe, caseName, seed = 1, sr = 48000) {
-  const params = {...defaults(recipe), ...(recipe.cases?.[caseName] || {})};
-  const R = makeRng(((seed * 2654435761) ^ hash(recipe.id + ':' + caseName)) >>> 0);
+  const {seedAs, ...caseParams} = recipe.cases?.[caseName] || {};   // seedAs: a renamed case keeps its old random draws
+  const params = {...defaults(recipe), ...caseParams};
+  const R = makeRng(((seed * 2654435761) ^ hash((recipe.seedId || recipe.id) + ':' + (seedAs || caseName))) >>> 0);
   let out = recipe.render(params, R, sr);
   let ch = Array.isArray(out) ? out : [out];
   if (!recipe.loop) {

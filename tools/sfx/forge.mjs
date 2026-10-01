@@ -102,7 +102,7 @@ async function refsMode(recipes) {
 }
 
 // ---------------------------------------------------------------- render mode
-const fmt = m => `lufs ${m.lufsM} tp ${m.truePeakDb} atk ${m.attackMs}ms t60 ${m.t60Ms ?? '-'}ms cen ${m.centroidHz} band ${m.lowHz}-${m.highHz} flat ${m.flatness} ons ${m.onsets.length} dur ${m.durMs}ms`;
+const fmt = m => `lufs ${m.lufsM} tp ${m.truePeakDb} atk ${m.attackMs}ms t60 ${m.t60Ms ?? '-'}ms cen ${m.centroidHz} band ${m.lowHz}-${m.highHz} flat ${m.flatness} hf4k ${m.hf4kDb}dB ons ${m.onsets.length} dur ${m.durMs}ms`;
 function refsFor(recipe, cs) {
   const list = [].concat(recipe.refs?.[cs] || []), dir = join(FORGE, 'refs'), out = [];
   for (const f of list) {

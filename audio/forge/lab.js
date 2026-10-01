@@ -33,7 +33,10 @@ const baseName = p => String(p).split('/').pop();
 // PLAYBACK LEVELS (never baked in: bake() and the metrics stay as they are). Louder reads as "more real" in a blind
 // test, so every card and both A/B sides play at one common momentary-max loudness. If some buffer in the comparison
 // can't reach it without its sample peak passing PEAK_CAP, the whole comparison drops to the lowest reachable level.
-const PLAY_LUFS = -24, PEAK_CAP = -1.2;
+// Loops (beds, streams, fire, wind) play at an ambience level, as they will in the game (well under the one-shots):
+// a steady texture at one-shot loudness is fatiguing and exaggerates any hiss.
+const ONE_SHOT_LUFS = -24, LOOP_LUFS = -34, PEAK_CAP = -1.2;
+function playLufs() { return S.recipes[S.rid]?.loop ? LOOP_LUFS : ONE_SHOT_LUFS; }
 function levelOf(it) {   // measured on the stored buffer: {lufs, pk (sample peak dB, all channels), reach (max LUFS under the cap)}
   if (!it.lvl) {
     const chans = Array.isArray(it.ch) ? it.ch : [it.ch]; let pk = 0;
@@ -43,10 +46,10 @@ function levelOf(it) {   // measured on the stored buffer: {lufs, pk (sample pea
   }
   return it.lvl;
 }
-const groupTarget = items => Math.min(PLAY_LUFS, ...items.map(it => levelOf(it).reach));
+const groupTarget = items => Math.min(playLufs(), ...items.map(it => levelOf(it).reach));
 function computeLevels() {   // cards: one target for everything rendered in this case (variants + references)
   const items = [...S.variants, ...S.refs].filter(it => it.ch && Number.isFinite(levelOf(it).lufs));
-  S.target = items.length ? groupTarget(items) : PLAY_LUFS;
+  S.target = items.length ? groupTarget(items) : playLufs();
   for (const it of items) { it.playDb = S.target - it.lvl.lufs; const f = it.el && $('.foot', it.el); if (f) f.innerHTML = footOf(it); }
 }
 const KEY = 'forge.ratings.v1', EXTRA_KEY = 'forge.lab.extraRefs', SR_KEY = 'forge.lab.sr';
@@ -156,7 +159,7 @@ function machineGun() {
     order.push(...pool);
   }
   // runtime jitter, as the game's voice manager will do it: pitch ±1 semitone (playbackRate), gain -2..0 dB
-  const G = (S.target ?? PLAY_LUFS) - Math.max(...V.map(v => levelOf(v).lufs));   // one gain for the whole group
+  const G = (S.target ?? playLufs()) - Math.max(...V.map(v => levelOf(v).lufs));   // one gain for the whole group
   runSeq('mg', order.map((it, i) => { const jit = -2 * Math.random(); return {it, at: i * iv, rate: 2 ** ((Math.random() * 2 - 1) / 12), gainDb: G + jit, groupDb: G, jitDb: jit}; }));
 }
 function backToBack() {
@@ -239,7 +242,7 @@ function renderSummary() {
     `${V.length} variants`,
     `<span class="${pass === ok.length ? 'g' : 'w'}">${pass}/${ok.length} pass</span>`,
     errs ? `<span class="w">${errs} errors</span>` : '',
-    S.target != null && ok.length ? `playback <span class="${S.target < PLAY_LUFS - .05 ? 'w' : ''}">${S.target.toFixed(1)} LUFS</span>` : '',
+    S.target != null && ok.length ? `playback <span class="${S.target < playLufs() - .05 ? 'w' : ''}">${S.target.toFixed(1)} LUFS</span>` : '',
     sim ? `similarity <span class="${sim.max > .9 ? 'w' : ''}">${sim.min.toFixed(2)}–${sim.max.toFixed(2)}</span> (mean ${sim.mean.toFixed(2)})` : '',
     rms.length ? `render avg <span class="${avg > 20 && !recipe()?.loop ? 'w' : ''}">${avg.toFixed(1)} ms</span>` : '',
   ].filter(Boolean).join(' · ');
@@ -319,7 +322,7 @@ function fillCard(it) {
 function playTag(it) {
   if (it.playDb == null) return '';
   const v = it.lvl.lufs + it.playDb;
-  return `<span title="plays at this momentary-max loudness (gain ${it.playDb >= 0 ? '+' : ''}${it.playDb.toFixed(1)} dB); the whole case plays at one level" class="${v < PLAY_LUFS - .05 ? 'w' : ''}">play ${v.toFixed(1)} LUFS</span>`;
+  return `<span title="plays at this momentary-max loudness (gain ${it.playDb >= 0 ? '+' : ''}${it.playDb.toFixed(1)} dB); the whole case plays at one level" class="${v < playLufs() - .05 ? 'w' : ''}">play ${v.toFixed(1)} LUFS</span>`;
 }
 function footOf(it) {
   const s = it.sim ? `sim ${it.sim.min.toFixed(2)}–${it.sim.max.toFixed(2)}` : '';
@@ -524,7 +527,7 @@ function renderAB() {
   const p = S.ab, k = caseKey(), t = store.ab[k], mode = $('#abmode')?.value || 'mix';
   const pickLabel = {A: 'A sounds more real', same: 'Same', B: 'B sounds more real'};
   el.innerHTML = `<h2>Blind A/B · ${esc(k)}</h2>
-    <p class="muted" style="margin:6px 0 0;font-size:13px">Two sounds, identities hidden until you answer. Both play at the same loudness (${S.ab ? S.ab.target.toFixed(1) : PLAY_LUFS} LUFS momentary max), so pick on character, not level.</p>
+    <p class="muted" style="margin:6px 0 0;font-size:13px">Two sounds, identities hidden until you answer. Both play at the same loudness (${S.ab ? S.ab.target.toFixed(1) : playLufs()} LUFS momentary max), so pick on character, not level.</p>
     <div class="abrow"><label>pairs <select id="abmode"><option value="mix">mixed</option><option value="ref">forge vs reference</option><option value="ff">forge vs forge</option></select></label><button id="abnext">New pair</button></div>
     ${S.busy ? '<p class="muted">Rendering… the pair appears when the case is ready.</p>' : !p ? `<p class="muted">Not enough sounds for this pairing: ${mode === 'ref' || !S.refs.some(r => r.ch) ? 'add a reference take (Variants view) or ' : ''}render at least two variants.</p>` : `
     <div class="abrow abplay"><button data-s="A">▶ A</button><button data-s="B">▶ B</button></div>
