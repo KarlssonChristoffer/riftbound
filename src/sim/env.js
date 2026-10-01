@@ -25,6 +25,7 @@
 import {flags} from '../core/flags.js';
 import {clamp, smooth, lerp} from '../core/mathx.js';
 import {hex01 as hex} from '../core/color.js';
+import {mulberry32, simSeed} from '../core/rng.js';
 
 export const TUNE = {
   dayMinutes: 20,     // real minutes per in-game day (dawn ~1.5, day ~7.5, dusk ~1.5, night ~7 of them)
@@ -101,7 +102,8 @@ export function createEnv({moods, biome, Q = flags}) {
     weather: 'fair', sky: {cloud: 0, rain: 0, snow: 0, fog: 0, storm: 0, wind: 1}, windLevel: 1,
     year: 0, tinted: false, snowCover: 0, wet: 0, leafK: 1, leafFall: 0,   // year 0..4 (spring .. winter); tinted = the biome's colours follow the season
     ver: {part: 0, season: 0, weather: 0, leaf: 0}, frozen: false, seasonLock: null, weatherLock: null};
-  let spellLeft = 0, lastBiome = null, R = Math.random;
+  let spellLeft = 0, lastBiome = null;
+  const R = mulberry32(simSeed());   // the weather's next spell: the sim's own draws (core/rng.js), never presentation's
   // ---- persistence: {t (in-game hours since the start), weather, spellLeft}
   const KEY = 'rb.env.v1', url = {hour: Q.get('hour'), season: Q.get('season'), weather: Q.get('weather'), daymin: Q.get('daymin'), time: Q.get('time')};
   let hours = TUNE.start.day * 24 + TUNE.start.hour;

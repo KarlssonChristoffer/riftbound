@@ -11,8 +11,13 @@
 //
 // FEATURE CONTRACT (features/<name>.js):
 //   export async function create(host) -> F
-//   F.name, F.on (bool), F.toggle?() (F.key: its hotkey, e.g. '5'), F.always (update during hitstop too)
-//   F.update?(dt, evs)          simulation step. evs = this step's events ({type: 'player.land', ...}: core/events.js)
+//   F.name, F.on (bool: its presentation shows), F.toggle?() (F.key: its hotkey, e.g. '5'), F.always (update during hitstop
+//   too), F.ambient (its view goes on while paused: nature behind the menu)
+//   F.update?(dt, evs)          SIM step: the truth (what burns, breaks, moves, scores). Always runs, F.on or not; sim
+//                               decisions draw from the feature's own seeded generator (core/rng.js), never Math.random.
+//                               evs = this step's events ({type: 'player.land', ...}: core/events.js)
+//   F.view?(dt, evs)            VIEW step, after every update: particles, springs, animals, sounds. Reads the finished
+//                               sim, writes only its own state; runs while F.on. (?views=0 runs the sim without them)
 //   F.frame?(f)                 every rendered frame, camera set: push host.sprite / point / line, paint host.layer(...)
 //                               f = {dt, t (s)}
 //   F.lights?() -> [{x, y, h, color ('#rrggbb' | [r, g, b]), radius, intensity, flicker, id}]   arena coordinates
@@ -184,7 +189,7 @@ const lighting = createLighting({G, host, features, opt});   // render/lighting.
 // ---------------------------------------------------------------- the engine
 // E: the engine's context for its own modules (core/input.js, ui/pause.js, core/loop.js): what boot made, by name.
 // Boot fills it once; the modules read it and never write it. (Features get `host`, above.)
-const E = {G, canvas, hdc, hq, cv, stage, env, hero, proj, pa, PL, P, player, keys, mouse, cam, events, features, host, game, perf, opt,
+const E = {G, canvas, hdc, hq, cv, stage, env, hero, proj, pa, PL, P, player, keys, mouse, cam, events, features, host, game, perf, opt, flags: Q,
   applyOpts, lighting, feat, setBiome, setYaw, dev, input: null, pause: null};
 E.input = createInput(E);   // the keyboard + mouse (before the menu: the order its listeners run in)
 const pause = E.pause = createPause(E);

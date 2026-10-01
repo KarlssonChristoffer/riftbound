@@ -28,10 +28,10 @@ export async function create(host) {
   const UI_AT = {pan: 0, dist: 0, off: 0}, QUIET = {buses: {music: -9, sfx: -12}, attack: .3, hold: Infinity, release: .6};
   let quiet = null;
   const F = {
-    name: 'audio', label: 'Sound', always: false, AU,
+    name: 'audio', label: 'Sound', ambient: true, AU,
     get on() { return !AU.muted; },
     get windAudio() { return WA; }, get rainAudio() { return RA; },
-    update(dt, evs) {
+    view(dt, evs) {
       const p = host.player;
       Object.assign(listener, {x: p.x, y: p.y, z: p.z, vx: p.vx, vy: p.vy, state: p.state, t: p.t, aim: host.mouse.down, biome: host.biome.id, time: host.time, cam: null, screenX});
       AU.update(dt, listener, evs);

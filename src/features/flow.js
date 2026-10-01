@@ -17,7 +17,7 @@
 //
 // CONTRACT (features/<name>.js, see main.js): export async function create(host) -> F
 //   F.on / F.toggle() / F.key '8'   ?flow=0 starts off (off = the host's plain camera ease, no marks / trails)
-//   F.update(dt, evs)    every simulation step: kick / dip, events -> marks, particles, afterimage timing
+//   F.view(dt, evs)      every simulation step: kick / dip, events -> marks, particles, afterimage timing
 //   F.camera(dt) -> {x, y}   the spring's position as an offset (view px) from the host's own eased target
 //   F.frame(f)           decals (ground layer), particles (points + glow), afterimages (sprites), arrow streaks
 //   F.lights()           arrow lights (dusk / night)
@@ -752,7 +752,7 @@ export async function create(host) {
     },
     biomeChanged() { levels.clear(); setBiome(host.biome.id); level(0); },   // (a rebuilt world: new ground texture; the ground layer made now, behind the loading screen)
     resize(w, h) { VW = w; VH = h; if (EC) { EC.width = w; EC.height = h; ecq.imageSmoothingEnabled = false; } },   // the view changed size (main.js fit)
-    update, camera, frame, lights,
+    view: update, camera, frame, lights,   // (not ambient: its streaks / tracks follow the player's frozen speed)
     hud: () => '',
     // debugging / tests
     C, Tm, count: () => ({decals: decals.length, particles: ps.length, embers: gEmb.length, ghosts: GH.list.length, dirty: dirty.length, levels: levels.size}),

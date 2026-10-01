@@ -45,7 +45,7 @@ export async function create(host) {
   const Q = flags, G = host.G, ctx = host.ctxO;
   if (['hd', 'pixel', 'off'].includes(Q.get('windlines'))) TUNE.look = Q.get('windlines');
   const lines = [];
-  const F = {name: 'windlines', label: 'Wind lines', on: true, TUNE, lines, ms: 0, fired: {}};   // fired: bursts per emitter kind (tests)
+  const F = {name: 'windlines', label: 'Wind lines', ambient: true, on: true, TUNE, lines, ms: 0, fired: {}};   // fired: bursts per emitter kind (tests)
   let swishT = 0, T = 0;
   const WA = {x: 0, y: 0, g: 0};   // wind.at fills it: no allocation per call
   const W = () => host.wind;
@@ -144,7 +144,7 @@ export async function create(host) {
     for (const L of lines) { L.obs = null; pool.push(L); } lines.length = 0;
     for (const q of queue) { q.B = null; qpool.push(q); } queue.length = 0;
   }
-  F.update = dt => {
+  F.view = dt => {
     const t0 = performance.now(), w = W();
     T += dt; swishT -= dt;
     if (!w?.on || !F.on || TUNE.look === 'off') { if (lines.length || queue.length) clear(); return; }

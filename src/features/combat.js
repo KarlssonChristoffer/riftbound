@@ -10,7 +10,8 @@
 //                     and the ability bar on the HD layer
 //
 // CONTRACT (main.js FEATURE CONTRACT): create(host) -> F
-//   F.update(dt, evs)      combat step, then prop physics with this step's events (+ the ones combat just pushed)
+//   F.update(dt, evs)      SIM: combat step, then prop physics with this step's events (+ the ones combat just pushed)
+//   F.view(dt)             VIEW: damage numbers, light flashes, sparks, debris, particles, rings, the tumbling chunks
 //   F.frame()              brute facings, barrel / sunk-crate matrices, chunk meshes, pixel fx (host.point / layers)
 //   F.lights()             explosions, chest glow, trap flash, explosive arrows in flight (arena light format)
 //   F.hd(q, scale)         HP bars, damage numbers, ability bar + tooltips, gold
@@ -55,6 +56,7 @@ export async function create(host) {
       phys.update(dt, host.events.length > n0 ? evs.concat(host.events.slice(n0)) : evs);
       tU += now() - t0;
     },
+    view(dt) { const t0 = now(); core.view(dt); phys.view(dt); tU += now() - t0; },
     frame() { const t0 = now(); phys.frame(); draw.frame(); tF = now() - t0; },
     lights: () => core.lights(),
     hd(q, scale) {

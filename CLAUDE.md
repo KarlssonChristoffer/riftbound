@@ -12,8 +12,11 @@ Rules that apply to every change now:
   In the game, F3 (or `?perf=1`) shows ms per system against the budget. Budgets: `src/core/perf.js`.
   Run the bench on a quiet machine; it warns when other work is competing for the CPU.
 - **Behaviour checks.** A change that should not change what you see (a refactor, a move) passes
-  `node tools/test/golden.mjs --compare tmp/golden/ref3` (bit-exact captures of a scripted tour); any engine change
-  passes `node tools/test/smoke.mjs` (keys, menu, loadouts, resize, a run).
+  `node tools/test/golden.mjs --compare tmp/golden/ref4` (bit-exact captures of a scripted tour); any engine change
+  passes `node tools/test/smoke.mjs` (keys, menu, loadouts, resize, a run); anything touching a feature's update / view
+  or randomness passes `node tools/test/simview.mjs` (the sim comes out the same without its views).
+- **Sim vs view.** `F.update` is the truth (always runs; its random draws come from the feature's own seeded generator,
+  `core/rng.js`); `F.view` is presentation (after every update, may use Math.random, writes only its own state).
 - **No per-frame allocation, no per-frame CPU pixel work** (`getImageData`, software rasterising, repainting a canvas
   and re-uploading it), **no scans over all props**. Update on change, cache by version, preallocate.
 - **One owner per piece of state.** Don't write fields on another module's objects, don't overwrite another module's

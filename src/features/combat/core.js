@@ -25,7 +25,8 @@ const SQ = 1;   // the arena's y squash for 2D distances (1.6); round in 3D
 
 export function createCore(host) {
   const P = host.player, events = host.events, ents = host.entities;
-  const R = parkMiller(90210), RR = (a, b) => a + R() * (b - a);   // (core/rng.js: the arena's generator and seed)
+  const R = parkMiller(90210), RR = (a, b) => a + R() * (b - a);   // the SIM's draws (core/rng.js: the arena's generator and seed)
+  const V = parkMiller(31337), VR = (a, b) => a + V() * (b - a);     // presentation's (debris, sparks, number jitter): never the sim's
 
   // ---------------- tuning (the arena's C.T) ----------------
   const T = {
@@ -109,7 +110,7 @@ export function createCore(host) {
   }
   function ring(x, y, z, r, life, pal, emit) { rings.push({x, y, z, r, t: 0, life, pal, emit}); }
   function number(p, dmg, crit, a) {
-    nums.push({x: p.x + RR(-.2, .2), y: p.y, h: pz(p) + (p.h || 0) + (a ?? (HGT[p.kind] ?? 1.2)) + .15, v: dmg, crit, t: 0});
+    nums.push({x: p.x + VR(-.2, .2), y: p.y, h: pz(p) + (p.h || 0) + (a ?? (HGT[p.kind] ?? 1.2)) + .15, v: dmg, crit, t: 0});
     if (nums.length > 40) nums.shift();
   }
   // debris chunks: 1-3 px clusters, fly, bounce, settle, then blink out
@@ -118,10 +119,10 @@ export function createCore(host) {
     const [hx, hy] = o.dir || [0, 0], sp = o.speed ?? 2.4, big = o.big ?? 1;
     for (let i = 0; i < n; i++) {
       if (debris.length > 480) debris.shift();
-      const ang = R() * TAU, s = sp * RR(.35, 1);
-      debris.push({x: x + RR(-.15, .15), y: y + RR(-.1, .1), a: a + RR(0, o.spreadH ?? .4),
-        vx: Math.sin(ang) * s + hx * RR(.5, 1.6), vy: Math.cos(ang) * s * .8 + hy * RR(.5, 1.6), va: RR(1.5, 4.5) * (o.up ?? 1),
-        pal, ci: R() * 3 | 0, sh: SHAPES[Math.min(SHAPES.length - 1, R() * (2 + big * 1.5) | 0)], rest: false, t: 0, life: RR(8, 12)});
+      const ang = V() * TAU, s = sp * VR(.35, 1);
+      debris.push({x: x + VR(-.15, .15), y: y + VR(-.1, .1), a: a + VR(0, o.spreadH ?? .4),
+        vx: Math.sin(ang) * s + hx * VR(.5, 1.6), vy: Math.cos(ang) * s * .8 + hy * VR(.5, 1.6), va: VR(1.5, 4.5) * (o.up ?? 1),
+        pal, ci: V() * 3 | 0, sh: SHAPES[Math.min(SHAPES.length - 1, V() * (2 + big * 1.5) | 0)], rest: false, t: 0, life: VR(8, 12)});
     }
   }
   function coinBurst(x, y, a, n, sp = 1) {
@@ -132,7 +133,7 @@ export function createCore(host) {
     if (n) events.push({type: 'combat.loot', x, y, n});
   }
   function puff(x, y, z, n = 10, r = .5) {   // dust ring (landing, respawn)
-    for (let i = 0; i < n; i++) { const ang = i / n * TAU + R() * .4; part(x + Math.sin(ang) * r * .4, y + Math.cos(ang) * r * .3, z + .05, Math.sin(ang) * RR(1.2, 2.4), Math.cos(ang) * RR(.9, 1.8), RR(.2, .8), RR(.3, .55), DUST, {drag: 5}); }
+    for (let i = 0; i < n; i++) { const ang = i / n * TAU + V() * .4; part(x + Math.sin(ang) * r * .4, y + Math.cos(ang) * r * .3, z + .05, Math.sin(ang) * VR(1.2, 2.4), Math.cos(ang) * VR(.9, 1.8), VR(.2, .8), VR(.3, .55), DUST, {drag: 5}); }
   }
 
   // ---------------- damage ----------------
@@ -168,7 +169,7 @@ export function createCore(host) {
     // o.ash: burnt through (lights.js): it slumps into charcoal where it stood, nothing flies
     if (o.ash) chunks(p.x, p.y, base + .05, 9, PAL.char, {speed: .45, big: 0, up: .25, spreadH: .12});
     else chunks(p.x, p.y, base + hgt * .3, p.kind === 'pot' ? 12 : p.kind === 'crystal' ? 18 : 16, pal, {dir: o.dir, speed: 2.8, big: p.kind === 'pot' ? 1 : 2, spreadH: hgt * .7});
-    if (p.kind === 'crystal') for (let i = 0; i < 10; i++) part(p.x, p.y, base + RR(.3, 1.1), RR(-2, 2), RR(-1.5, 1.5), RR(1, 3), RR(.3, .6), SPARK, {emit: true, drag: 3});
+    if (p.kind === 'crystal') for (let i = 0; i < 10; i++) part(p.x, p.y, base + VR(.3, 1.1), VR(-2, 2), VR(-1.5, 1.5), VR(1, 3), VR(.3, .6), SPARK, {emit: true, drag: 3});
     const c = p.coins ?? COINS[p.kind]; if (c) coinBurst(p.x, p.y, base, Math.round(RR(c[0], c[1] + .99) - .49));
     if (p.explode) {
       chunks(p.x, p.y, base + .3, 6, PAL.char, {speed: 3, big: 1});
@@ -188,10 +189,10 @@ export function createCore(host) {
     shake(Math.round(clamp(6 - dP * .35, 2, 5)), .35);
     light(x, y, z + .8, '#ffb45a', r * 2.6, 2.6, .6, .35);
     ring(x, y, z, r, .2, FIRE, true); ring(x, y, z, r * 1.25, .35, DUST, false);
-    for (let i = 0; i < 9; i++) part(x + RR(-.25, .25), y + RR(-.15, .15), z + RR(.2, .9), RR(-.8, .8), RR(-.5, .5), RR(.5, 2), RR(.14, .26), FIRE, {emit: true, sz: 4, drag: 4});   // fireball core
-    for (let i = 0; i < 34; i++) { const ang = R() * TAU, s = RR(.5, 3.5) * r / 2.2; part(x, y, z + RR(.1, .8), Math.sin(ang) * s, Math.cos(ang) * s * .8, RR(1, 4), RR(.25, .6), FIRE, {emit: true, drag: 3.5, sz: 2}); }
-    for (let i = 0; i < 14; i++) { const ang = R() * TAU, s = RR(3, 7); part(x, y, z + .5, Math.sin(ang) * s, Math.cos(ang) * s * .8, RR(3, 7), RR(.6, 1.1), EMBER, {emit: true, grav: 11}); }
-    for (let i = 0; i < 16; i++) { const ang = R() * TAU, s = RR(.3, 1.6); part(x + Math.sin(ang) * .3, y, z + RR(.3, 1), Math.sin(ang) * s, Math.cos(ang) * s * .6, RR(.8, 1.8), RR(.8, 1.6), SMOKE, {drag: 2, sz: 2, delay: .08 + R() * .15}); }
+    for (let i = 0; i < 9; i++) part(x + VR(-.25, .25), y + VR(-.15, .15), z + VR(.2, .9), VR(-.8, .8), VR(-.5, .5), VR(.5, 2), VR(.14, .26), FIRE, {emit: true, sz: 4, drag: 4});   // fireball core
+    for (let i = 0; i < 34; i++) { const ang = V() * TAU, s = VR(.5, 3.5) * r / 2.2; part(x, y, z + VR(.1, .8), Math.sin(ang) * s, Math.cos(ang) * s * .8, VR(1, 4), VR(.25, .6), FIRE, {emit: true, drag: 3.5, sz: 2}); }
+    for (let i = 0; i < 14; i++) { const ang = V() * TAU, s = VR(3, 7); part(x, y, z + .5, Math.sin(ang) * s, Math.cos(ang) * s * .8, VR(3, 7), VR(.6, 1.1), EMBER, {emit: true, grav: 11}); }
+    for (let i = 0; i < 16; i++) { const ang = V() * TAU, s = VR(.3, 1.6); part(x + Math.sin(ang) * .3, y, z + VR(.3, 1), Math.sin(ang) * s, Math.cos(ang) * s * .6, VR(.8, 1.8), VR(.8, 1.6), SMOKE, {drag: 2, sz: 2, delay: .08 + V() * .15}); }
     chunks(x, y, z + .05, 8, PAL.char, {speed: 3.5, big: 1});
     for (const p of hittables) {
       if (p.broken || Math.abs(pz(p) - z) > 1.5) continue;
@@ -250,7 +251,7 @@ export function createCore(host) {
         Object.assign(b, {broken: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0, flash: 1, wob: 1, lit: false}); ents.moved(b);
         flashing.add(b); Object.assign(s, {mode: 'idle', wait: .8, hop: null, root: 0, fail: 0, calm: 0});
         puff(b.x, b.y, pz(b), 16, .8);
-        for (let i = 0; i < 8; i++) part(b.x + RR(-.3, .3), b.y, pz(b) + RR(.2, 1.3), RR(-.8, .8), 0, RR(.3, 1), RR(.3, .6), SMOKE, {sz: 2, drag: 2});
+        for (let i = 0; i < 8; i++) part(b.x + VR(-.3, .3), b.y, pz(b) + VR(.2, 1.3), VR(-.8, .8), 0, VR(.3, 1), VR(.3, .6), SMOKE, {sz: 2, drag: 2});
         events.push({type: 'brute.respawn', x: b.x, y: b.y});
       }
       return;
@@ -310,7 +311,7 @@ export function createCore(host) {
       shake(3, .18); hitstop(.06); s.wait += .35;
       events.push({type: 'player.hit', x: P.x, y: P.y, vx: ux * 5, vy: uy * 5, player: true});
       events.push({type: 'player.hurt', dmg: b.dmg ?? T.bruteDmg, by: b, x: P.x, y: P.y});
-      for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + RR(.6, 1.2), ux * RR(1, 3) + RR(-1, 1), uy * RR(1, 3), RR(0, 2), RR(.15, .3), GOLD, {emit: true, drag: 4});
+      for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + VR(.6, 1.2), ux * VR(1, 3) + VR(-1, 1), uy * VR(1, 3), VR(0, 2), VR(.15, .3), GOLD, {emit: true, drag: 4});
     } else if (d < 4) shake(1, .06);
     // stomping onto a trap sets it off
     for (const q of traps) if (q.t >= T.trapArm && !q.done && Math.hypot(q.x - b.x, q.y - b.y) < T.trapTrig) burstTrap(q);
@@ -322,9 +323,9 @@ export function createCore(host) {
     events.push({type: 'combat.trap', x: q.x, y: q.y});
     hitstop(.08); shake(3, .2);
     ring(q.x, q.y, q.z, T.trapR, .22, SPARK, true); ring(q.x, q.y, q.z, T.trapR * .6, .3, DUST, false);
-    for (let i = 0; i < 12; i++) { const ang = i / 12 * TAU; q.spikes = q.spikes || []; q.spikes.push({x: q.x + Math.sin(ang) * RR(.3, T.trapR * .8), y: q.y + Math.cos(ang) * RR(.2, T.trapR * .6), t: -R() * .08}); }
+    for (let i = 0; i < 12; i++) { const ang = i / 12 * TAU; q.spikes = q.spikes || []; q.spikes.push({x: q.x + Math.sin(ang) * VR(.3, T.trapR * .8), y: q.y + Math.cos(ang) * VR(.2, T.trapR * .6), t: -V() * .08}); }
     chunks(q.x, q.y, q.z + .1, 8, PAL.metal, {speed: 3, big: 0});
-    for (let i = 0; i < 10; i++) part(q.x, q.y, q.z + .2, RR(-3, 3), RR(-2, 2), RR(2, 5), RR(.2, .4), SPARK, {emit: true, drag: 3});
+    for (let i = 0; i < 10; i++) part(q.x, q.y, q.z + .2, VR(-3, 3), VR(-2, 2), VR(2, 5), VR(.2, .4), SPARK, {emit: true, drag: 3});
     light(q.x, q.y, q.z + .5, '#d8f0ff', 3.2, 1.6, .3, 0);
     for (const p of hittables) {
       if (p.broken || Math.abs(pz(p) - q.z) > 1.2) continue;
@@ -378,7 +379,7 @@ export function createCore(host) {
     3(A) { fire(A, 0, T.pierceV, {dmg: T.pierceDmg, pierce: true, ab: 'pierce', life: 1.1, n: 0}); pose('release.0', .26, A); },
     4(A) {
       traps.push({x: P.x, y: P.y, z: P.z, t: 0, done: false});
-      for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + .1, RR(-1.5, 1.5), RR(-1, 1), RR(.3, 1), RR(.2, .4), DUST, {drag: 5});
+      for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + .1, VR(-1.5, 1.5), VR(-1, 1), VR(.3, 1), VR(.2, .4), DUST, {drag: 5});
       if (!BUSYISH.has(P.state) || P.state === 'hold') host.knock(-A.dx * T.vault, -A.dy * T.vault);   // vault back
     },
   };
@@ -420,7 +421,7 @@ export function createCore(host) {
           // carry on through: step the arrow out of this prop's collider, or the host's wall test would stick it here
           const l = Math.hypot(a.vx, a.vy) || 1, ux = a.vx / l, uy = a.vy / l;
           for (let k = 0; k < 24 && !p.broken && p.r > 0 && Math.hypot(p.x - a.x, (p.y - a.y) * SQ) < p.r + .02; k++) { a.x += ux * .05; a.y += uy * .05; }
-          for (let i = 0; i < 5; i++) part(a.x, a.y, a.h, ux * RR(2, 5) + RR(-1, 1), uy * RR(2, 5), RR(-1, 1), RR(.12, .25), SPARK, {emit: true, drag: 4});
+          for (let i = 0; i < 5; i++) part(a.x, a.y, a.h, ux * VR(2, 5) + VR(-1, 1), uy * VR(2, 5), VR(-1, 1), VR(.12, .25), SPARK, {emit: true, drag: 4});
           return 'pierce';
         }
       }
@@ -431,7 +432,7 @@ export function createCore(host) {
       if (a.ab === 'rain') {   // near misses still sting
         const z = host.elev(a.x, a.y);
         for (const p of hittables) if (!p.broken && Math.abs(pz(p) - z) < 1 && Math.hypot(p.x - a.x, p.y - a.y) < .6) damage(p, T.rainSplash, {quiet: true});
-        for (let i = 0; i < 3; i++) part(a.x, a.y, z + .02, RR(-1, 1), RR(-.6, .6), RR(.3, 1), RR(.15, .3), DUST, {drag: 5});
+        for (let i = 0; i < 3; i++) part(a.x, a.y, z + .02, VR(-1, 1), VR(-.6, .6), VR(.3, 1), VR(.15, .3), DUST, {drag: 5});
       }
     },
     ability(slot) {
@@ -447,7 +448,7 @@ export function createCore(host) {
       p.opened = true; p.wob = 1; p.flash = .8; flashing.add(p); if (T.chestReset) p.resetAt = simT + T.chestReset;
       const big = p.y > 20;   // the cache behind the crate wall pays more
       coinBurst(p.x, p.y, pz(p) + .4, o.coins ?? (big ? 24 : 16), 1.2);
-      for (let i = 0; i < 14; i++) part(p.x, p.y, pz(p) + .5, RR(-1.5, 1.5), RR(-1, 1), RR(1, 3), RR(.3, .7), GOLD, {emit: true, drag: 3});
+      for (let i = 0; i < 14; i++) part(p.x, p.y, pz(p) + .5, VR(-1.5, 1.5), VR(-1, 1), VR(1, 3), VR(.3, .7), GOLD, {emit: true, drag: 3});
       light(p.x, p.y, pz(p) + .6, '#ffd27a', 2.8, 1.5, .7, .1);
       shake(2, .15); hitstop(.05);
       events.push({type: 'chest.open', x: p.x, y: p.y});
@@ -501,14 +502,12 @@ export function createCore(host) {
       }
       // the arena decays hit flashes at 8/s; the pass above decays them at 6/s: add the rest
       for (const p of flashing) { p.flash = Math.max(0, (p.flash || 0) - dt * 2); if (!p.flash) flashing.delete(p); }
-      for (let i = nums.length - 1; i >= 0; i--) if ((nums[i].t += dt) > .8) nums.splice(i, 1);
-      for (let i = lts.length - 1; i >= 0; i--) if ((lts[i].t += dt) > lts[i].life) lts.splice(i, 1);
       for (let i = pending.length - 1; i >= 0; i--) if ((pending[i].t -= dt) <= 0) { const f = pending[i].fn; pending.splice(i, 1); f(); }
       // burning brands arc from one barrel to the next, then it goes up
       for (let i = brands.length - 1; i >= 0; i--) {
         const B = brands[i]; B.t += dt; const k = Math.min(1, B.t / B.dur);
         const x = B.x0 + (B.b.x - B.x0) * k, y = B.y0 + (B.b.y - B.y0) * k, a = B.z0 + (pz(B.b) + .6 - B.z0) * k + 4 * 1.2 * k * (1 - k);
-        part(x, y, a, RR(-.3, .3), RR(-.3, .3), RR(.2, .8), RR(.15, .3), FIRE, {emit: true, drag: 2});
+        part(x, y, a, VR(-.3, .3), VR(-.3, .3), VR(.2, .8), VR(.15, .3), FIRE, {emit: true, drag: 2});
         if (k >= 1) { brands.splice(i, 1); if (!B.b.broken) breakProp(B.b, {}); }
       }
       // arrow rain
@@ -538,10 +537,42 @@ export function createCore(host) {
       }
       for (const b of brutes) updBrute(b, BS.get(b), dt);
       if ((simT % .5) < dt) restock();
+      // coins: pop, bounce, then magnetise to the player
+      for (let i = coins.length - 1; i >= 0; i--) {
+        const c = coins[i]; c.t += dt; if (c.t < 0) continue;
+        const dx = P.x - c.x, dy = P.y - c.y, dh = P.z + .6 - c.a, dist = Math.hypot(dx, dy);
+        if (!c.mag && c.t > T.coinDelay && dist < T.magnet && Math.abs(P.z - host.elev(c.x, c.y)) < 1.5) c.mag = true;
+        if (c.mag) {
+          c.spd = Math.min(16, c.spd + 34 * dt); const l = Math.hypot(dx, dy, dh) || 1, st = Math.min(l, c.spd * dt);
+          c.x += dx / l * st; c.y += dy / l * st; c.a += dh / l * st;
+          if (l < .35) {
+            S.gold++; S.goldPop = .25; coins[i] = coins[coins.length - 1]; coins.pop();
+            part(P.x, P.y, P.z + .9, VR(-.6, .6), VR(-.3, .3), VR(1, 2), .25, GOLD, {emit: true});
+            if (S.gold % 5 === 0) events.push({type: 'combat.coin', x: P.x, y: P.y});
+          }
+          continue;
+        }
+        if (c.rest) continue;
+        const nx = c.x + c.vx * dt, ny = c.y + c.vy * dt;
+        if (host.elev(nx, ny) > c.a + .1) { c.vx = -c.vx * .4; c.vy = -c.vy * .4; } else { c.x = nx; c.y = ny; }
+        c.va -= 22 * dt; c.a += c.va * dt;
+        const gz = host.elev(c.x, c.y);
+        if (c.a <= gz) { c.a = gz; if (c.va < -1.8) { c.va = -c.va * .45; c.vx *= .6; c.vy *= .6; } else { c.va = c.vx = c.vy = 0; c.rest = true; } }
+      }
+      S.goldPop = Math.max(0, S.goldPop - dt);
+      drop();
+      const cds = SLOTS.filter(k => AB[k].t > 0).map(k => `${AB[k].key} ${AB[k].t.toFixed(1)}s`);
+      S.hud = `gold ${S.gold}` + (cds.length ? ' · cd ' + cds.join(' ') : '');
+    },
+    // VIEW (combat.js F.view, after every sim update): damage numbers, light flashes, special arrows' sparks, debris,
+    // particles, rings. The sim spawns them (with V, never its own R); only these steps advance them
+    view(dt) {
+      for (let i = nums.length - 1; i >= 0; i--) if ((nums[i].t += dt) > .8) nums.splice(i, 1);
+      for (let i = lts.length - 1; i >= 0; i--) if ((lts[i].t += dt) > lts[i].life) lts.splice(i, 1);
       // special arrows leave sparks
       for (const a of host.arrows) {
         if (a.stuck) continue;
-        if (a.explode) part(a.x, a.y, a.h, RR(-.5, .5), RR(-.5, .5), RR(0, .8), RR(.12, .25), FIRE, {emit: true, drag: 3});
+        if (a.explode) part(a.x, a.y, a.h, VR(-.5, .5), VR(-.5, .5), VR(0, .8), VR(.12, .25), FIRE, {emit: true, drag: 3});
         else if (a.pierce) part(a.x, a.y, a.h, 0, 0, 0, .12, SPARK, {emit: true});
       }
       // debris
@@ -561,28 +592,6 @@ export function createCore(host) {
           }
         }
       }
-      // coins: pop, bounce, then magnetise to the player
-      for (let i = coins.length - 1; i >= 0; i--) {
-        const c = coins[i]; c.t += dt; if (c.t < 0) continue;
-        const dx = P.x - c.x, dy = P.y - c.y, dh = P.z + .6 - c.a, dist = Math.hypot(dx, dy);
-        if (!c.mag && c.t > T.coinDelay && dist < T.magnet && Math.abs(P.z - host.elev(c.x, c.y)) < 1.5) c.mag = true;
-        if (c.mag) {
-          c.spd = Math.min(16, c.spd + 34 * dt); const l = Math.hypot(dx, dy, dh) || 1, st = Math.min(l, c.spd * dt);
-          c.x += dx / l * st; c.y += dy / l * st; c.a += dh / l * st;
-          if (l < .35) {
-            S.gold++; S.goldPop = .25; coins[i] = coins[coins.length - 1]; coins.pop();
-            part(P.x, P.y, P.z + .9, RR(-.6, .6), RR(-.3, .3), RR(1, 2), .25, GOLD, {emit: true});
-            if (S.gold % 5 === 0) events.push({type: 'combat.coin', x: P.x, y: P.y});
-          }
-          continue;
-        }
-        if (c.rest) continue;
-        const nx = c.x + c.vx * dt, ny = c.y + c.vy * dt;
-        if (host.elev(nx, ny) > c.a + .1) { c.vx = -c.vx * .4; c.vy = -c.vy * .4; } else { c.x = nx; c.y = ny; }
-        c.va -= 22 * dt; c.a += c.va * dt;
-        const gz = host.elev(c.x, c.y);
-        if (c.a <= gz) { c.a = gz; if (c.va < -1.8) { c.va = -c.va * .45; c.vx *= .6; c.vy *= .6; } else { c.va = c.vx = c.vy = 0; c.rest = true; } }
-      }
       // particles
       for (let i = fx.length - 1; i >= 0; i--) {
         const q = fx[i]; q.t += dt; if (q.t < 0) continue;
@@ -592,10 +601,6 @@ export function createCore(host) {
         if (q.grav) { const gz = host.elev(q.x, q.y); if (q.a < gz) { q.a = gz; q.va = -q.va * .3; q.vx *= .5; q.vy *= .5; } }
       }
       for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) > rings[i].life) rings.splice(i, 1);
-      S.goldPop = Math.max(0, S.goldPop - dt);
-      drop();
-      const cds = SLOTS.filter(k => AB[k].t > 0).map(k => `${AB[k].key} ${AB[k].t.toFixed(1)}s`);
-      S.hud = `gold ${S.gold}` + (cds.length ? ' · cd ' + cds.join(' ') : '');
     },
     lights() {
       const out = [];

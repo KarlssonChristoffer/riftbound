@@ -143,7 +143,7 @@ const MF_WAVE = MF.slice();
 export const order = {after: ['wind']};
 export async function create(host) {
   const {THREE} = host;
-  const F = {name: 'garden', label: 'Light garden', on: true, ms: 0};
+  const F = {name: 'garden', label: 'Light garden', ambient: true, on: true, ms: 0};
   const props = () => host.props;
   let T = 0, biomeId = '', atlas = null;
   const meshes = [];
@@ -337,7 +337,7 @@ export async function create(host) {
 
   // ================================================================ contract
   const near = (x, y, m = 16) => { const t = host.G.view.T; return Math.abs(x - t.x) < m && Math.abs(y - t.z) < m; };
-  F.update = (dt, evs) => {
+  F.view = (dt, evs) => {   // the lantern, the merchant (the pieces' colliders and E are sim: the registry, F.interact)
     const t0 = performance.now(); T += dt; syncBiome();
     if (near(STALL.x, STALL.y, 22)) { stepLantern(dt, evs); stepMerchant(dt); }
     F.ms = F.ms * .95 + (performance.now() - t0) * .05;

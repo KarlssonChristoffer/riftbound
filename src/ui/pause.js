@@ -1,9 +1,9 @@
 // PAUSE: the menu (Escape; ui/menu.js draws it, these are its items) and what pausing means.
-// PAUSED, the game stands still (player, arrows, enemies, the run, the clock) but the world doesn't: the AMBIENT features
-// are presentation only and keep running in real time behind the blurred menu, so the wind blows, birds fly, rain falls
-// and fires flicker (lights.js skips its burn-through while host.paused). The cloak still answers the wind. The camera
-// drifts slowly (drag the backdrop to look around) and eases back to where it was on resume. The audio feature ducks
-// music + effects; the ambience plays on. (flow is left out: its streaks / tracks follow the player's frozen speed)
+// PAUSED, the game stands still (the sim: player, arrows, enemies, fire, the run, the clock) but the world doesn't: the
+// views of the features that declare F.ambient keep running in real time behind the blurred menu, so the wind blows,
+// birds fly, rain falls and fires flicker. The cloak still answers the wind. The camera drifts slowly (drag the
+// backdrop to look around) and eases back to where it was on resume. The audio feature ducks music + effects; the
+// ambience plays on. (flow isn't ambient: its streaks / tracks follow the player's frozen speed)
 // OWNS: paused, the pause drift (pauseYaw / pauseGoal / lookT), the menu and its items (Game / Graphics / Audio / Controls /
 // Dev tabs).  READS: E (the engine context, main.js).
 //   const pause = createPause(E); pause.paused / toggle(force, snd) / stepPaused(dt) / pauseTurn(dt) / menu
@@ -14,7 +14,6 @@ import {SEASONS, WEATHER} from '../sim/env.js';
 import {check as checkEvents} from '../core/events.js';
 const $ = s => document.querySelector(s);
 
-const AMBIENT = new Set(['wind', 'windlines', 'weather', 'lights', 'garden', 'atmos', 'wildlife', 'depth', 'contact', 'audio']);
 const NO_EVS = [], PAUSE_TURN = .035, LOOK_HOLD = 3000;   // drift rad/s (the title turns at .07); ms after a drag before it drifts again
 const onOff = (get, set) => ({options: ['on', 'off'], get: () => get() ? 'on' : 'off', set: v => set(v === 'on')});
 const pick = (options, get, set) => ({options, get, set});
@@ -43,7 +42,7 @@ export function createPause(E) {
     hero.stepCloth(dt);
     const evs = events.length ? events.splice(0) : NO_EVS;   // wildlife's calls, fire crackles: for the audio feature
     if (host.dev) checkEvents(evs);
-    for (const f of features) if (AMBIENT.has(f.name) && f.on !== false) f.update?.(dt, evs);
+    for (const f of features) if (f.ambient && f.on !== false) f.view?.(dt, evs);
   }
   const pauseTurn = dt => E.game.mode === 'title' || performance.now() - lookT < LOOK_HOLD ? 0 : PAUSE_TURN * dt;   // (the title turns itself)
   function toggle(force, snd) {

@@ -36,7 +36,7 @@ const SEASON_M = {
 export const order = {after: ['wind']};
 export async function create(host) {
   const G = host.G, ctx = host.ctxO, U = G.compU;
-  const F = {name: 'weather', label: 'Weather fx (rain, snow, storms)', on: true, fx: true, TUNE, ms: 0, stats: {rain: 0, snow: 0, splash: 0, bolts: 0}};   // fx: the particles / bolts (the season / snow / wet look always follows the clock)
+  const F = {name: 'weather', label: 'Weather fx (rain, snow, storms)', ambient: true, on: true, fx: true, TUNE, ms: 0, stats: {rain: 0, snow: 0, splash: 0, bolts: 0}};   // fx: the particles / bolts (the season / snow / wet look always follows the clock)
   // ---- particles: one pool each, structure of arrays
   const RN = TUNE.rain.max, rX = new Float32Array(RN), rY = new Float32Array(RN), rH = new Float32Array(RN), rV = new Float32Array(RN); let rn = 0;
   const SN = TUNE.snow.max, sX = new Float32Array(SN), sY = new Float32Array(SN), sH = new Float32Array(SN), sV = new Float32Array(SN), sP = new Float32Array(SN); let sn = 0;
@@ -98,7 +98,7 @@ export async function create(host) {
     U.uSeasonK.value = E.tinted ? 1 : 0; U.uSnow.value = E.snowCover; U.uWet.value = E.wet; G.U.leafK.value = E.leafK;
   }
 
-  F.update = dt => {
+  F.view = dt => {   // (the weather's state is the world clock's, sim/env.js: this is how it looks)
     const t0 = performance.now(), E = host.env, w = host.wind; T += dt;
     if (!E) return;
     view();

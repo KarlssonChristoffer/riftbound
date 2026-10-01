@@ -35,13 +35,14 @@ import * as WORLD from '../world/world.js';
 import {geoOf, M4, along} from '../world/kit3d.js';
 import {createFires} from './firesim.js';
 import {clamp} from '../core/mathx.js';
+import {mulberry32, simSeed} from '../core/rng.js';
 import {hex01 as rgb} from '../core/color.js';
 // how high our props stop arrows (world.js PROP_TOP, read by sim/projectiles.js; 2.5 m otherwise): arrows fly over the campfire
 // (they catch fire going through it), the beacon only stops them up to its basket
 WORLD.propTop({campfire: 0, beacon: 1.15, woodpile: .3});
 
 const TAU = Math.PI * 2;
-const R = Math.random, rr = (a, b) => a + R() * (b - a);
+const R = Math.random, rr = (a, b) => a + R() * (b - a);   // presentation (sparks, smoke, flicker); the sim's own: RS
 const lerp3 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 
 const D = SCONCE_D;   // a sconce's stick stands this far off the wall face (the arm shows a few px past the stick)
@@ -185,6 +186,7 @@ export async function create(host) {
 
   // ================================================================ the world's light sources
   const props = () => host.props;
+  const RS = mulberry32(simSeed()), srr = (a, b) => a + RS() * (b - a);   // the fire SIM's own draws (core/rng.js)
   // live queries on the entity registry (world/entities.js): the per-step / per-frame passes visit the braziers and
   // torches (and the beacon), not every prop; a neighbour that can catch fire is found through the grid
   const flames = host.entities.query('lights.flame', p => p.kind === 'brazier' || p.kind === 'torch');
@@ -337,12 +339,12 @@ export async function create(host) {
   function ignite(p) {
     if (burning.has(p) || p.broken || p.gone) return;
     const dur = BURNS[p.kind] ?? BURNS[p.breakable]; if (!dur) return;
-    burning.set(p, {t: 0, dur: dur * rr(.9, 1.15), spread: 0, sd: R() * TAU});
+    burning.set(p, {t: 0, dur: dur * srr(.9, 1.15), spread: 0, sd: RS() * TAU});
     burst(p.x, p.y, (p.z || 0) + .5, 12);
     host.events.push({type: 'fire.ignite', x: p.x, y: p.y, kind: p.kind});
   }
   const candleSnuff = (c, quiet) => {
-    if (!c.lit) return; c.lit = false; c.relight = rr(6, 9);
+    if (!c.lit) return; c.lit = false; c.relight = srr(6, 9);
     if (!quiet) for (let i = 0; i < 6; i++) parts.push({x: c.x + rr(-.12, .12), y: c.y, h: c.h + .22, vx: rr(-.1, .1), vy: 0, vh: rr(.25, .5), t: 0, life: rr(.8, 1.4), k: 'smoke', c: SMOKE[0], sz: 1, a0: .7});
   };
 
@@ -379,8 +381,39 @@ export async function create(host) {
     for (const [p, b] of burning) {
       b.t += dt;
       if (p.broken || p.gone) {   // smashed or blown apart while alight: what's left smoulders
-        burning.delete(p); if (p.broken && !p.explode && p.kind !== 'dummy') ashes.set(p, {t: 0, life: rr(10, 16), sd: b.sd, cr: 0}); continue;
+        burning.delete(p); if (p.broken && !p.explode && p.kind !== 'dummy') ashes.set(p, {t: 0, life: srr(10, 16), sd: b.sd, cr: 0}); continue;
       }
+      const base = (p.z || 0) + (p.h || 0);
+      // it spreads to wooden neighbours
+      b.spread += dt;
+      if (b.spread > 1.4) { b.spread = 0; for (const q of host.entities.near(p.x, p.y, 1.4, nearB)) if (q !== p && !burning.has(q) && BURNS[q.kind] && !q.broken && Math.hypot(q.x - p.x, q.y - p.y) < 1.4 && RS() < .45) ignite(q); }
+      if (b.t < b.dur) continue;
+      burning.delete(p);
+      if (p.kind === 'dummy') { scorched.set(p, {t: 0}); continue; }
+      if (!core) continue;
+      if (p.explode) { core.breakProp(p, {}); continue; }   // the powder keg cooks off
+      core.breakProp(p, {ash: true});   // burnt through: it slumps into charred remains
+      ashes.set(p, {t: 0, life: srr(22, 30), sd: b.sd, cr: 0});
+      burst(p.x, p.y, base + .3, 18, FIRE, 1.4); ashPuff(p.x, p.y, base + .15, 12, .35);
+      flare(p.x, p.y, base + .5, '#ff9a40', 4.5, 1, .4);
+      host.events.push({type: 'fire.crackle', x: p.x, y: p.y, big: true});
+    }
+    for (const [p, e] of ashes) {
+      if (!p.broken) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); if (e.gone) host.entities.hide(p, false); ashes.delete(p); continue; }   // it came back
+      e.t += dt;
+      const base = p.z || 0;
+      if (!e.gone && e.t > e.life) {   // the remains crumble to an ash pile
+        e.cr = Math.min(1, (e.t - e.life) / 2.5);
+        if (e.cr >= 1) { e.gone = true; host.entities.hide(p); ashPuff(p.x, p.y, base + .08, 10, .3); }
+      }
+    }
+    for (const [p, e] of scorched) if ((e.t += dt) > 50) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); scorched.delete(p); }
+  }
+  // VIEW: what the burning props and the remains throw off each step (sparks, smoke, embers, ash): stepBurning (sim)
+  // decides what burns, this shows it
+  function burnFx(dt) {
+    for (const [p, b] of burning) {
+      if (p.broken || p.gone) continue;
       const u = b.t / b.dur, fk = flameK(p, b), base = (p.z || 0) + (p.h || 0), top = base + (TOP[p.kind] ?? .8) * (1 - crumbleOf(b) * .55);
       if (R() < dt * 26 * fk) parts.push({x: p.x + rr(-.15, .15), y: p.y + rr(-.1, .1), h: top, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(.8, 1.8), t: 0, life: rr(.4, .9), k: 'spark', c: FIRE[R() * 3 | 0], g: -.3});
       if (R() < dt * 9) parts.push({x: p.x + rr(-.1, .1), y: p.y, h: top + .25, vx: 0, vy: 0, vh: rr(.35, .6), t: 0, life: rr(1.6, 2.6), k: 'smoke', c: SMOKE[R() * 3 | 0], sz: 2, a0: .55});
@@ -389,33 +422,14 @@ export async function create(host) {
         drip(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r, base + rr(.15, .65) * (top - base), p.z || 0, FIRE, {vx: Math.cos(a) * rr(.1, .4), vy: Math.sin(a) * rr(.1, .4), vh: rr(0, .5)});
       }
       if (u > .7 && R() < dt * 3) ashPuff(p.x, p.y, base + .2, 3, .25);
-      // it spreads to wooden neighbours
-      b.spread += dt;
-      if (b.spread > 1.4) { b.spread = 0; for (const q of host.entities.near(p.x, p.y, 1.4, nearB)) if (q !== p && !burning.has(q) && BURNS[q.kind] && !q.broken && Math.hypot(q.x - p.x, q.y - p.y) < 1.4 && R() < .45) ignite(q); }
-      if (b.t < b.dur) continue;
-      burning.delete(p);
-      if (p.kind === 'dummy') { scorched.set(p, {t: 0}); continue; }
-      if (!core) continue;
-      if (p.explode) { core.breakProp(p, {}); continue; }   // the powder keg cooks off
-      core.breakProp(p, {ash: true});   // burnt through: it slumps into charred remains
-      ashes.set(p, {t: 0, life: rr(22, 30), sd: b.sd, cr: 0});
-      burst(p.x, p.y, base + .3, 18, FIRE, 1.4); ashPuff(p.x, p.y, base + .15, 12, .35);
-      flare(p.x, p.y, base + .5, '#ff9a40', 4.5, 1, .4);
-      host.events.push({type: 'fire.crackle', x: p.x, y: p.y, big: true});
     }
     for (const [p, e] of ashes) {
-      if (!p.broken) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); if (e.gone) host.entities.hide(p, false); ashes.delete(p); continue; }   // it came back
-      e.t += dt;
+      if (!p.broken) continue;
       const base = p.z || 0, fl = clamp(1 - e.t / 9, 0, 1);   // the flames on the remains die down
       if (R() < dt * 14 * fl) parts.push({x: p.x + rr(-.2, .2), y: p.y + rr(-.15, .15), h: base + .25, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(.6, 1.4), t: 0, life: rr(.3, .7), k: 'spark', c: FIRE[0], g: -.3});
       if (!e.gone && R() < dt * 2.2 * clamp(1 - e.t / (e.life + 3), .15, 1)) parts.push({x: p.x + rr(-.15, .15), y: p.y + rr(-.1, .1), h: base + .3, vx: 0, vy: 0, vh: rr(.25, .45), t: 0, life: rr(1.6, 2.8), k: 'smoke', c: SMOKE[R() * 3 | 0], sz: 1, a0: .4});
-      if (!e.gone && e.t > e.life) {   // the remains crumble to an ash pile
-        e.cr = Math.min(1, (e.t - e.life) / 2.5);
-        if (R() < dt * 7) ashPuff(p.x + rr(-.2, .2), p.y + rr(-.2, .2), base + .1, 2, .15);
-        if (e.cr >= 1) { e.gone = true; host.entities.hide(p); ashPuff(p.x, p.y, base + .08, 10, .3); }
-      }
+      if (!e.gone && e.cr > 0 && R() < dt * 7) ashPuff(p.x + rr(-.2, .2), p.y + rr(-.2, .2), base + .1, 2, .15);
     }
-    for (const [p, e] of scorched) if ((e.t += dt) > 50) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); scorched.delete(p); }
   }
   function burnVisuals() {   // the burning props' meshes: char, veins, ash, the slump; the remains glowing down
     for (const [p, b] of burning) {
@@ -736,10 +750,17 @@ export async function create(host) {
   }
 
   // ================================================================ contract
+  // SIM (always, even with the extra lights toggled off: a fire burns on whether or not you show its flames): fire
+  // arrows dip and catch, torches / braziers / the beacon light, props burn, spread and burn through, the candles
   F.update = (dt, evs) => {
+    stepArrows(dt); stepBurning(dt); stepCandles(dt, evs);
+  };
+  // VIEW (ambient: it flickers on behind the pause menu): the flames, sparks and smoke, the campfire, shrooms, wisps
+  F.ambient = true;
+  F.view = (dt, evs) => {
     const t0 = performance.now();
     T += dt; syncBiome();
-    stepArrows(dt); if (!host.paused) stepBurning(dt);   // paused (the menu): flames flicker on, nothing burns through
+    burnFx(dt);
     fires.step(dt);
     if (F.on) stepCamp(dt);
     for (const o of fires.pops.splice(0)) {   // a crackle: sparks thrown high and wide, the fire's light flashes
@@ -749,7 +770,7 @@ export async function create(host) {
       if (near(o.x, o.y, 14)) host.events.push({type: 'fire.crackle', x: o.x, y: o.y, big});
     }
     if (F.on) {
-      stepCandles(dt, evs); stepShrooms(dt); stepWisps(dt);
+      stepShrooms(dt); stepWisps(dt);
       if (near(camp.x, camp.y, 20)) {   // the campfire's sparks and smoke (as big as the fire)
         if (R() < dt * 14 * Math.min(1, campK)) parts.push({x: camp.x + rr(-.12, .12), y: camp.y + rr(-.08, .08), h: .4, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(1, 2.3), t: 0, life: rr(.6, 1.4), k: 'spark', c: FIRE[0], g: -.2});
         if (R() < dt * 7) parts.push({x: camp.x + rr(-.08, .08), y: camp.y, h: .9, vx: 0, vy: 0, vh: rr(.35, .55), t: 0, life: rr(2.2, 3.4), k: 'smoke', c: SMOKE[R() * 3 | 0], sz: 2, a0: .5});

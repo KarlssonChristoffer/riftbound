@@ -15,7 +15,7 @@
 //                below; without it the haze is computed and skipped)
 //
 // CONTRACT (main.js FEATURE CONTRACT): export async function create(host) -> F
-//   F.name 'depth', F.key '7', F.on (?depth=0 starts off), F.toggle(), F.update(dt), F.frame(f), F.biomeChanged()
+//   F.name 'depth', F.key '7', F.on (?depth=0 starts off), F.toggle(), F.view(dt), F.frame(f), F.biomeChanged()
 //   F.ms        rolling average cost per frame (update + frame, ms)        F.debug   'fg n · shafts n · haze n · refl n'
 //   F.TUNE      live tunables (the arena's TUNE + the 3D additions marked 3D)
 //   F._dbg      internal state for test scripts (FG, SH, WA, CL, V, PT = per-part ms, proj / inv, the scratch canvases)
@@ -83,7 +83,7 @@ export async function create(host) {
   const Q = flags;
   const {PPM, PPMY, PPMH} = host;
   let {VW, VH} = host;   // the view size: F.resize follows the window
-  const F = {name: 'depth', label: 'Depth (foreground, clouds, shafts, reflections)', key: '7', on: Q.get('depth') !== '0', ms: 0, TUNE, debug: ''};
+  const F = {name: 'depth', label: 'Depth (foreground, clouds, shafts, reflections)', key: '7', ambient: true,  on: Q.get('depth') !== '0', ms: 0, TUNE, debug: ''};
   if (Q.get('fg') === '1') TUNE.fg.on = true;
   F.settings = () => [{label: 'Foreground silhouettes', options: ['off', 'on'], get: () => TUNE.fg.on ? 'on' : 'off', set: v => { TUNE.fg.on = v === 'on'; }}];
   let T = 0, biome = '', acc = 0;
@@ -730,7 +730,7 @@ export async function create(host) {
       for (const [c, q] of [[RA, ra], [RB, rb], [MS, ms], [EM, em], [SK, sk], [HZ, hz]]) { c.width = w; c.height = h; q.imageSmoothingEnabled = false; }
       SKY = sk.createImageData(w, h); skyDirty.length = 0;
     },
-    update(dt) {
+    view(dt) {
       const t0 = performance.now();
       T += dt;
       const dir = windDir(), v = TUNE.clouds.speed * (1 + .5 * gustNow()) * (host.env ? .6 + .4 * host.env.windLevel : 1), [TWm, THm] = TUNE.clouds.tileM;   // (a windy sky races)

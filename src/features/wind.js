@@ -26,7 +26,7 @@
 //
 // FEATURE CONTRACT (main.js): create(host) -> F
 //   F.name 'wind', F.key '5', F.on / F.toggle(), F.ms (rolling average cost per frame, update + frame + card hook)
-//   F.update(dt, evs)   field, foliage springs, cloth / lantern sims (60 Hz fixed), shed particles (+ the season's dying
+//   F.view(dt, evs)     field, foliage springs, cloth / lantern sims (60 Hz fixed), shed particles (+ the season's dying
 //                       leaves, env.leafFall), events (dummy hits kick the strips, explosions whip foliage and billow cloth,
 //                       a bird landing on / leaving a crown, wildlife.js 'bird_perch', knocks a dying leaf loose)
 //   F.frame(f)          cloth atlas raster + its cards, posts / lantern sprites, ropes / rods / chains (host.line),
@@ -174,7 +174,7 @@ export const order = {};
 export async function create(host) {
   const ctx = host.ctxO, G = host.G;
   const Q = flags;
-  const W = {name: 'wind', label: 'Wind', key: '5', on: Q.get('wind') !== '0', ms: 0, gust: 0, dir: [.94, .34], tune: TUNE, TUNE};
+  const W = {name: 'wind', label: 'Wind', key: '5', ambient: true,  on: Q.get('wind') !== '0', ms: 0, gust: 0, dir: [.94, .34], tune: TUNE, TUNE};
   { const l = Math.hypot(W.dir[0], W.dir[1]); W.dir = [W.dir[0] / l, W.dir[1] / l]; }
   const [UX, UY] = W.dir;
   let biome = 'ruins', B = BIOME.ruins, T = 0, acc = 0;
@@ -1209,7 +1209,7 @@ export async function create(host) {
     settings: () => [{label: 'Wind strength', options: MODES, get: () => W.mode, set: setMode}],
     hud: () => W.on ? `wind ${W.mode}${W.mode === 'auto' ? ' (' + (host.env ? host.env.weather : spell) + ')' : ''} x${LV.toFixed(2)} · at you ${W.strength.toFixed(2)} · rustle ${W.rustle.e.toFixed(2)}` : '',
     biomeChanged() { setBiome(host.biome.id); },   // (main.js re-installs the card hook on the rebuilt world)
-    update(dt, evs) {
+    view(dt, evs) {   // (all of the wind is presentation: nothing in the sim reads it)
       const t0 = performance.now();
       W.ms = W.ms * .95 + acc * .05; acc = 0;
       dt = Math.min(.05, Math.max(0, dt || 0));

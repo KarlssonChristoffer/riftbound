@@ -89,7 +89,7 @@ export async function create(host) {
   }
 
   const F = {
-    name: 'contact', label: 'Contact shadows', on: Q.get('contact') !== '0', get count() { return n; },
+    name: 'contact', label: 'Contact shadows', ambient: true,  on: Q.get('contact') !== '0', get count() { return n; },
     toggle() { F.on = !F.on; },
     resize(w, h) { VW = w; VH = h; mc.width = w; mc.height = h; mq.imageSmoothingEnabled = false; },   // the view changed size (main.js fit)
     frame() {

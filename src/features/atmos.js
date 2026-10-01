@@ -9,7 +9,7 @@
 //   F.weather       weather on / off: K (F.onKey), ?weather=0 starts off. Off = no ambient particles, no ground fog, no top
 //                   haze. The pause menu toggles it through F.settings()
 //   F.hdOn          vignette + top haze on the HD overlay (?hd=0 starts off)
-//   F.update(dt, evs)   the arena's A.update: ambient particles, events (step / land / jump / splash / hit / break /
+//   F.view(dt, evs)     the arena's A.update: ambient particles, events (step / land / jump / splash / hit / break /
 //                   explode / roll), climb grit, spindrift, stream life, fx
 //   F.frame(f)      the arena's drawGround + drawFront + emitters, mapped onto the host (below)
 //   F.hd(q, scale)  the arena's drawOver (vignette, top haze), display resolution
@@ -144,7 +144,7 @@ export async function create(host) {
   const Q = flags;
   const {PPM, PPMY, PPMH} = host;
   let {VW, VH} = host;   // the view size: F.resize follows the window
-  const F = {name: 'atmos', label: 'Weather', on: true, weather: Q.get('weather') !== '0', hdOn: Q.get('hd') !== '0', night: 1, ms: 0, count: 0,
+  const F = {name: 'atmos', label: 'Weather', ambient: true, on: true, weather: Q.get('weather') !== '0', hdOn: Q.get('hd') !== '0', night: 1, ms: 0, count: 0,
     TUNE: {KINDS, WIND, BURST, FOG, OVER, DUST, SMOKE, SPLASH, STREAM_LIFE, PRINT, WATER_H}, windSrc: null};
   let biome = '', kinds = [], need = true;
   let T = 0, wind = 0, gust = 0, fogX = 0, acc = 0;
@@ -691,7 +691,7 @@ export async function create(host) {
     hud: () => F.weather ? '' : 'weather off (K)',
     counts: () => ({fx: fx.length, prints: prints.length, rings: rings.length, stream: strm.length, ambient: kinds.reduce((n, K) => n + K.ps.length, 0)}),
     dbg: {get kinds() { return kinds; }, V, get fx() { return fx; }, get strm() { return strm; }},   // tests
-    update(dt, evs) {
+    view(dt, evs) {
       const t0 = performance.now();
       dt = Math.min(.05, Math.max(0, dt || 0)); T += dt;
       if (host.biome.id !== biome) setBiome(host.biome.id);

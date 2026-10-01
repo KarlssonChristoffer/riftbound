@@ -4,7 +4,7 @@
 // reads report() in headless Chrome and fails a scenario that goes over budget.
 //
 //   perf.wrap(obj, key, label, group)   time a function in place (features' hooks; idempotent)
-//   perf.instrument(features)           wrap every feature hook: update -> sim, frame / lights / camera -> view, hd -> ui
+//   perf.instrument(features)           wrap every feature hook: update -> sim, view / frame / lights / camera -> view, hd -> ui
 //   perf.begin(label, group) ... perf.end(label)   time a span of host code (main.js)
 //   perf.frameStart() / perf.frameEnd()  around the whole frame (the main thread's JS); the rAF interval gives the fps
 //   perf.report() -> {fps, frame: {p50, p95, p99, max}, js: {...}, groups: [{group, avg, budget}], systems: [...]}
@@ -12,7 +12,8 @@
 //
 // BUDGETS: milliseconds of main-thread CPU per frame on the dev machine (RTX 4070 desktop). The target is 60 fps on a mid
 // laptop (~2.5x slower single-thread), so the whole frame gets 4 ms here: ~10 ms there, with headroom for the browser.
-export const BUDGET = {sim: 1.0, char: .5, view: 1.0, render: 1.2, ui: .3, frame: 4.0, p95: 6.5};   // p95: frame interval (a 165 Hz display is 6.06)
+// (phase 4.2: the features' per-step presentation moved from update to view(), so .5 ms of sim's budget went to view)
+export const BUDGET = {sim: .5, char: .5, view: 1.5, render: 1.2, ui: .3, frame: 4.0, p95: 6.5};   // p95: frame interval (a 165 Hz display is 6.06)
 const GROUPS = ['sim', 'char', 'view', 'render', 'ui'];
 const COL = {sim: '#6fb3ff', char: '#c58cff', view: '#7fd67a', render: '#f0c060', ui: '#ff8a6a', host: '#8a8577'};
 const N = 240;   // frames in the window (~2-4 s)
@@ -33,7 +34,7 @@ export function createPerf({on = false} = {}) {
     const w = function (a, b, c) { const t = now(); try { return f.call(this, a, b, c); } finally { s.cur += now() - t; } };
     w.__perf = f; obj[key] = w;
   }
-  const HOOKS = {update: 'sim', frame: 'view', lights: 'view', camera: 'view', aimTarget: 'view', hd: 'ui'};
+  const HOOKS = {update: 'sim', view: 'view', frame: 'view', lights: 'view', camera: 'view', aimTarget: 'view', hd: 'ui'};
   function instrument(features) { for (const F of features) for (const [k, g] of Object.entries(HOOKS)) wrap(F, k, `${F.name}.${k}`, g); }
 
   function frameStart() { const t = now(); if (lastStart) dtRing[i] = t - lastStart; lastStart = t; f0 = t; }

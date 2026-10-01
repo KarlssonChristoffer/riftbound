@@ -340,7 +340,7 @@ The numbers live in `src/core/perf.js` (`BUDGET`). Change them only on purpose, 
   `tools/perf/baseline.json`. It fails when a scenario is over budget or a system got 25% (and 0.1 ms) slower. It
   checks that the machine is quiet first: parallel sessions baking or capturing make every number 2-4x worse.
   `--only night`, `--save` (new baseline after an intended change).
-- **`node tools/test/golden.mjs --compare tmp/golden/ref3`**: a scripted tour (seeded `Math.random`, a virtual clock,
+- **`node tools/test/golden.mjs --compare tmp/golden/ref4`**: a scripted tour (seeded `Math.random`, a virtual clock,
   no rAF) captured bit-exact: 16 PNGs + state digests by day, night, storm, snow and in a run. A refactor must leave
   every capture identical; a run that differs once and not again (seen right after a bench) is re-run before
   believing it. `--save <dir>` captures a new reference after an intended visual change.

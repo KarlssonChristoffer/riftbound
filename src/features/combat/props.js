@@ -13,7 +13,8 @@
 // with the bank (sinkCrate), since here the player stands at h = 0 on a real box (the arena sank it .5 m and clipped
 // the sprite at a painted waterline).
 //
-// createPropPhysics(host, core) -> PH: PH.update(dt, evs) after combat's update; PH.frame() every rendered frame
+// createPropPhysics(host, core) -> PH: PH.update(dt, evs) after combat's update (sim); PH.view(dt) the tumbling debris;
+// PH.frame() every rendered frame
 // (matrices, chunk meshes); PH.biomeChanged() (the world's meshes were disposed); PH.shove(q, vx, vy); PH.T; PH.dbg.
 import * as THREE from 'three';
 
@@ -255,6 +256,10 @@ export async function createPropPhysics(host, core) {
     for (const q of mov) step(q, dt);
     for (const q of mov) if (!q.broken && !q.gone && q.idle > T.idleReset && Math.hypot(P.x - q.x, P.y - q.y) > T.resetAway && Math.hypot(P.x - q.home3[0], P.y - q.home3[1]) > T.resetAway) resetHome(q);
     for (const c of chests) { const want = c.opened ? 1 : 0; c.lid = c.lid ?? 0; c.lid += Math.sign(want - c.lid) * Math.min(Math.abs(want - c.lid), dt * (want ? 3.2 : 2)); }
+    const pv = [P.vx, P.vy]; lastPS = Math.hypot(...pv); lastPV = pv;
+  }
+  // VIEW: the tumbling debris chunks (spawned by the sim's breaks / blasts with their own rnd, never read by the sim)
+  function view(dt) {
     for (let i = flying.length - 1; i >= 0; i--) {
       const c = flying[i]; c.t += dt;
       if (c.t > c.life) { release(c); flying.splice(i, 1); continue; }
@@ -267,7 +272,6 @@ export async function createPropPhysics(host, core) {
         c.vh *= -.35; c.vx *= .55; c.vy *= .55; c.spin *= .5;
       }
     }
-    const pv = [P.vx, P.vy]; lastPS = Math.hypot(...pv); lastPV = pv;
   }
 
   // ---------------- per rendered frame: how the world shows it ----------------
@@ -328,5 +332,5 @@ export async function createPropPhysics(host, core) {
   }
   function biomeChanged() { pool = []; for (const c of flying) c.m = null; }   // the old world disposed every mesh it lent us
 
-  return {T, update, frame, biomeChanged, shove, mov, resetAll, dbg: {flying, mov, hitAt, pool: () => pool}};
+  return {T, update, view, frame, biomeChanged, shove, mov, resetAll, dbg: {flying, mov, hitAt, pool: () => pool}};
 }

@@ -1,6 +1,10 @@
 // RNG: the seeded random generator (one algorithm: mulberry32). mulberry32(seed) -> R(): 0..1; R.seed(n) restarts it.
-// Seeded systems (a biome's wind fronts, its wildlife, its weather particles) start the same way every time. Gameplay
-// that should differ run to run uses Math.random (or seeds this from it).
+// Seeded systems (a biome's wind fronts, its wildlife, its weather particles) start the same way every time.
+// SIM vs VIEW (docs/ARCHITECTURE.md rule 4): a sim decision (a burn's length, fire spreading, a crit, the weather's
+// next spell) draws from its system's OWN generator, seeded once (simSeed(): from Math.random at boot, so play still
+// differs run to run); Math.random is for presentation only. Then the sim comes out the same with or without its views
+// (tools/test/simview.mjs), and a seeded run replays.
+export const simSeed = () => Math.floor(Math.random() * 4294967296);
 export function mulberry32(seed) {
   let s = seed | 0;
   const R = () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };

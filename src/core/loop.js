@@ -1,6 +1,9 @@
-// LOOP: the frame. step(dt) moves the world on (the camera's turn, then, unless paused, the clock, the player, arrows,
-// the cloak, the features in their order); draw(t) renders it (the camera, the hero's card, props, features' frame(),
-// lights, the GPU passes, the HD overlay). One step + one draw per animation frame, dt capped at 50 ms.
+// LOOP: the frame. step(dt) moves the world on in two passes (docs/ARCHITECTURE.md rule 5, sim vs view):
+//   SIM: the clock, the player, arrows, then every feature's update() (the truth: always, even with its visuals off)
+//   VIEW: the cloak, then every feature's view() (presentation: reads the finished sim, writes only its own state)
+// Paused, only the views of the features that declare `ambient` run (nature goes on behind the menu); in hitstop, only
+// the F.always updates. draw(t) renders (the camera, the hero's card, props, features' frame(), lights, the GPU
+// passes, the HD overlay). One step + one draw per animation frame, dt capped at 50 ms.
 // OWNS: the frame's timing (last, lastDt, fps, the HUD's refresh), hitstop (freeze), the season's leaf ramp version.
 // READS: E (main.js; E.dev: the colliders overlay + the debug HUD).  BUDGET: core/perf.js (F3).
 //   const loop = createLoop(E); loop.start() / hitstop(sec) / run(n, dt) (tests: n steps + draws without rAF) / hud()
@@ -13,6 +16,7 @@ export function createLoop(E) {
   const {drawZones, drawHud} = E.dev;
   const promptCtx = {host, pa, features, G};   // ui/prompt.js
   let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null, freeze = 0;
+  let views = E.flags.get('views') !== '0';   // ?views=0: the sim alone (tools/test/simview.mjs: it must come out the same)
   function step(dt) {
     pa.tick();
     // camera rotation: keys / middle-drag, then (in a step mode) ease onto the nearest step once you let go.
@@ -35,10 +39,11 @@ export function createLoop(E) {
     for (let i = n0; i < events.length; i++) pa.toWorldEvent(events[i]);   // the player's events are in the view frame
     hero.moveCloth(P.x - px0, P.y - py0);   // its motion in the view frame, without the camera's turns
     perf.begin('arrows', 'sim'); proj.step(dt); perf.end('arrows');
-    hero.stepCloth(dt, perf);
+    if (views) hero.stepCloth(dt, perf);
     const evs = events.splice(0);
     if (host.dev) checkEvents(evs);   // a type not in the catalog warns once (dev mode)
-    for (const f of features) if (f.on !== false || f.always) f.update?.(dt, evs);
+    for (const f of features) f.update?.(dt, evs);              // SIM
+    if (views) for (const f of features) if (f.on !== false) f.view?.(dt, evs);   // VIEW
     cv.stepShake(dt);
   }
   function draw(t) {
@@ -46,6 +51,7 @@ export function createLoop(E) {
     cv.stepZoom(lastDt);
     const [PX, PY] = [player.x, player.y];
     cv.follow(lastDt, PX, PY, P, cam);   // the camera eases after him (render/camera.js)
+    if (!views) return;   // (the camera follows without views too: it's the frame the cursor is read in, the sim's input)
     // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js)
     const sinkPx = hero.compose(PX, PY, perf);
     // props, hover pulse on the aimed target

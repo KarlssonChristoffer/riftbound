@@ -34,7 +34,7 @@
 //
 // FEATURE CONTRACT (main.js): create(host) -> F
 //   F.name 'wildlife', F.key '6', F.on / F.toggle(), F.ms (rolling average cost per frame: update + frame)
-//   F.update(dt, evs)    noise, flocks, birds, critters, fish, insects, vultures, jellies, eyes, motes (detail near the view)
+//   F.view(dt, evs)      noise, flocks, birds, critters, fish, insects, vultures, jellies, eyes, motes (detail near the view)
 //   F.frame(f)           sprites + the ground layer
 //   F.lights()           jellies' faint glow
 //   F.biomeChanged()     repopulate for the new biome (time of day is read from host.time every step)
@@ -250,7 +250,7 @@ export const order = {after: ['wind']};
 export async function create(host) {
   const ctx = host.ctxO, G = host.G;
   const Q = flags;
-  const WL = {name: 'wildlife', label: 'Wildlife', key: '6', on: Q.get('wildlife') !== '0', ms: 0, count: 0, T: TUNE, TUNE};
+  const WL = {name: 'wildlife', label: 'Wildlife', key: '6', ambient: true,  on: Q.get('wildlife') !== '0', ms: 0, count: 0, T: TUNE, TUNE};
   let biome = null, time = 'day', need = true, needTime = false, wasNight = false, T = 0, acc = 0, P = null, seasonVer = -1, raining = false;
   const R = mulberry32(1);
   const rr = (a, b) => a + R() * (b - a), pick = a => a[R() * a.length | 0];
@@ -1334,7 +1334,7 @@ export async function create(host) {
   Object.assign(WL, {
     toggle() { WL.on = !WL.on; if (!WL.on) WL.ms = 0; return WL.on; },
     biomeChanged() { need = true; },
-    update(dt, evs) {
+    view(dt, evs) {
       const t0 = performance.now();
       WL.ms = WL.ms * .95 + acc * .05; acc = 0;
       if (!WL.on) { tick(t0); return; }

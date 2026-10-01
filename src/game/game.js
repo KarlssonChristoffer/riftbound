@@ -160,6 +160,7 @@ export async function createGame(host) {
     startRun, toTitle, toSandbox, enterStage,
 
     update(dt, evs) {
+      if (boot) { const f = boot; boot = null; f(); }   // the first step: title / sandbox / run (the world is built)
       hud.update(dt);
       if (mode !== 'run' || !run) return;
       phaseT += dt;
@@ -187,7 +188,6 @@ export async function createGame(host) {
     },
 
     frame({t, dt}) {
-      if (boot) { const f = boot; boot = null; f(); }
       if (mode === 'title') host.setYaw(host.yaw + dt * .07);   // the slow turn behind the title
       if (mode !== 'run') return;
       // spawn telegraphs: a dashed ring that closes in, a glow rising at the centre
