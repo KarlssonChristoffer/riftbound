@@ -3,20 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HD-2D Render Test</title>
+<title>Proving Grounds 3D</title>
 <style>
   :root { --bg: #0d0f0e; --ink: #e8e2d2; --dim: #9a937f; --key: #f0c060; --panel: rgba(14, 16, 15, .82); --line: rgba(232, 226, 210, .14); }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 12px/1.45 ui-monospace, Consolas, monospace; overflow: hidden; }
   #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
   #screen { image-rendering: pixelated; display: block; background: #000; cursor: crosshair; }
-  #hud { position: fixed; left: 10px; top: 10px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; max-width: 420px; pointer-events: none; }
+  #hud { position: fixed; left: 10px; top: 10px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; max-width: 460px; pointer-events: none; }
   #hud b { color: var(--key); font-weight: 600; }
-  #hud .row { white-space: nowrap; }
+  #hud .row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #hud .dim { color: var(--dim); }
   #help { position: fixed; right: 10px; bottom: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; pointer-events: none; }
   #help td { padding: 0 8px 0 0; vertical-align: top; }
   #help td:first-child { color: var(--key); white-space: nowrap; }
   #load { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 14px; }
+  #pause { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(6, 8, 7, .62); }
+  #menu { min-width: 300px; max-width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto; padding: 12px 16px 16px; background: #141715; border: 1px solid var(--line); border-radius: 8px; }
+  #menu h3 { margin: 12px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  #menu button { display: block; width: 100%; margin: 3px 0; padding: 6px 8px; text-align: left; font: inherit; color: var(--ink); background: #1c201d; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+  #menu button:hover { border-color: var(--key); }
+  #menu button b { color: var(--key); font-weight: 600; }
+  #menu label { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin: 4px 0; }
   .hidden { display: none !important; }
   @media (max-width: 720px) { #help { display: none; } #hud { max-width: calc(100vw - 40px); } }
 </style>
@@ -27,21 +34,20 @@
 <div id="hud"></div>
 <div id="help">
   <table>
-    <tr><td>WASD</td><td>move (camera-relative) · Shift sprint · Q walk</td></tr>
-    <tr><td>Mouse</td><td>aim · hold LMB draw, release shoot · Space roll / leap</td></tr>
-    <tr><td>Z / X</td><td>rotate camera · or drag with right mouse</td></tr>
-    <tr><td>Wheel</td><td>zoom 1x / 2x · Home: reset rotation</td></tr>
-    <tr><td>1</td><td>rotation: free / 22.5° steps / 90° steps</td></tr>
-    <tr><td>2</td><td>ground texture: auto (crisp at rest, smooth while turning) / nearest / smooth-pixel</td></tr>
-    <tr><td>3</td><td>prop outlines + seams on / off</td></tr>
-    <tr><td>4</td><td>props: live 3D / pre-rendered 16 angles</td></tr>
-    <tr><td>5</td><td>banded light on / off</td></tr>
-    <tr><td>6</td><td>sun shadows on / off</td></tr>
-    <tr><td>T · N · L</td><td>time of day · biome · lantern</td></tr>
-    <tr><td>G</td><td>debug view (albedo, normals, depth, ids, shadow, light)</td></tr>
-    <tr><td>H</td><td>hide this help</td></tr>
+    <tr><td>WASD</td><td>move (camera-relative) · Shift sprint · Q walk · C crouch</td></tr>
+    <tr><td>Mouse</td><td>aim · hold LMB draw, release shoot · RMB multishot · Space roll / leap</td></tr>
+    <tr><td>1–4 · E</td><td>abilities · open / climb</td></tr>
+    <tr><td>Z / X</td><td>rotate camera · or drag with the middle mouse button · Home: reset</td></tr>
+    <tr><td>Wheel</td><td>zoom 1x / 2x</td></tr>
+    <tr><td>5–8</td><td>wind · wildlife · depth · camera feel</td></tr>
+    <tr><td>T · N · L · K</td><td>time of day · biome · lantern · weather</td></tr>
+    <tr><td>O · M · U</td><td>loadout (cloth cloak) · mute · music</td></tr>
+    <tr><td>Shift+1–6</td><td>rotation steps · ground texture · outlines · props A/B · bands · shadows</td></tr>
+    <tr><td>G · Shift+G</td><td>debug views · colliders</td></tr>
+    <tr><td>Esc · H</td><td>menu · hide this help</td></tr>
   </table>
 </div>
+<div id="pause" class="hidden"><div id="menu"></div></div>
 <div id="load">Loading…</div>
 <script type="module" src="main.js"></script>
 </body>

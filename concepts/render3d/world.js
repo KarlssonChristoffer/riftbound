@@ -53,15 +53,8 @@ export function rampTexture(biome) {
 }
 
 // ---------------------------------------------------------------- helpers
-const texCache = new WeakMap();
-export function texOf(img, linear = false) {
-  let t = texCache.get(img); if (t && t.__lin === linear) return t;
-  t = img instanceof HTMLCanvasElement ? new THREE.CanvasTexture(img) : new THREE.Texture(img);
-  t.flipY = false; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace;
-  t.minFilter = t.magFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
-  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true; t.__lin = linear;
-  texCache.set(img, t); return t;
-}
+let GT = null;   // the renderer: one texture cache for everything (gfx.js tex)
+export const texOf = (img, linear = false) => GT.tex(img, {linear});
 const loadImg = src => new Promise((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => err(new Error(src)); i.src = src; });
 const hsh = (a, b = 0, c = 0) => { const s = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453; return s - Math.floor(s); };
 const rgbOf = c => { if (Array.isArray(c)) return c; let s = String(c || '#fff').replace('#', ''); if (s.length === 3) s = s.replace(/./g, m => m + m); const n = parseInt(s, 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
@@ -97,14 +90,16 @@ async function glbGeometry(loader, state) {
   })().catch(e => { console.warn('glb', state, e.message); return null; });
   return (glbCache[state] = p);
 }
-// the arena's kind -> prop-kit state (props3d.js stateOf, intact props only)
+// the arena's kind (+ breakable stage, chest lid) -> prop-kit state (arena/props3d.js frameName; barrels tip and roll
+// as real rotations here, so they have no tilt / roll states)
 const wallV = p => ((Math.round(p.x * 3) * 7 + Math.round(p.y * 5) * 13) >>> 0) % 4;
 const potV = p => ((Math.round(p.x * 7) + Math.round(p.y * 13)) & 1) ? 'pot_b' : 'pot';
-function stateOf(p) {
+export function stateOf(p) {
   switch (p.kind) {
-    case 'crate': case 'barrel': case 'barrel_x': return p.kind;
-    case 'pot': return potV(p);
-    case 'chest': return 'chest_0';
+    case 'crate': return p.stage === 2 ? 'crate_broken' : p.stage === 1 ? 'crate_dmg' : 'crate';
+    case 'barrel': case 'barrel_x': return p.stage === 2 ? p.kind + '_broken' : p.stage === 1 ? p.kind + '_dmg' : p.kind;
+    case 'pot': { const v = potV(p); return p.stage === 2 ? 'pot_broken' : p.stage === 1 ? v + '_dmg' : v; }
+    case 'chest': return 'chest_' + Math.max(0, Math.min(4, Math.round((p.lid || 0) * 4)));
     case 'pillar': case 'pillar_broken': case 'rubble': case 'tower': case 'gatepost': return p.kind;
     case 'rock': return 'rock_' + ((p.variant | 0) % 3);
     case 'rock_big': return 'rock_big_' + ((p.variant | 0) % 3);
@@ -147,6 +142,7 @@ function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {
 
 // ---------------------------------------------------------------- build
 export async function buildWorld(G, {biome, ctxO, PPM, PPMH}) {
+  GT = G;
   const {WM, HM} = WORLD, layout = buildLayout(7), props = layout.props;
   Object.assign(ctxO, {WM, HM, WPX: Math.ceil(WM * ctxO.PPM), HPX: Math.ceil(HM * ctxO.PPMY), PLAY, layout});
   const disposers = [];
@@ -200,18 +196,22 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH}) {
     yawIdx = await fetch(YAW + 'props.json').then(r => r.ok ? r.json() : null);
     if (yawIdx) [yawAlb, yawNrm] = await Promise.all([loadImg(YAW + `props_${biome.id}.png`), loadImg(YAW + 'props_nrm.png')]);
   } catch { yawIdx = null; }
-  const lights = groundLights.map((l, i) => ({x: l.x, y: l.h || 0, z: l.y, c: rgbOf(l.color), r: l.radius || 3, k: l.intensity ?? 1, flicker: l.flicker || 0, id: 100 + i}));
-  const items = [];   // {p, kind: 'mesh'|'card', live?, yaw?}
+  const groundL = groundLights.map((l, i) => ({x: l.x, y: l.h || 0, z: l.y, c: rgbOf(l.color), r: l.radius || 3, k: l.intensity ?? 1, flicker: l.flicker || 0, id: 9000 + i}));
+  const lights = [];   // rebuilt every frame by sync(): ground lights + whatever the props' current sprites carry
+  // ITEMS: one per prop. {p, st (model state), obj (id), live (G.mesh) | card (G.card), sp (painted sprite shown), yaw?,
+  //   manageMatrix (a feature poses the mesh itself), hover (0..1 pulse set by the host)}
+  const items = [], byProp = new Map(), extra = new Set();
   let nextId = 10;
   const SHADOWLESS = new Set(['tuft']);
+  if (haveGlb) await Promise.all([...new Set(props.map(stateOf).filter(Boolean))].map(s => glbGeometry(loader, s)));   // all at once
+  const cardOf = (sp, o) => G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1], type: 3, bias: .0025, ...o});
   for (const p of props) {
     const z0 = p.z || 0;
     if (p.outside && biome.hole?.(p.x, p.y, ctxO)) continue;   // over the ravine / in the stream
     const sp = biome.sprite(p, ctxO);
-    for (const l of sp?.lights || []) lights.push({x: p.x + (l.dx || 0), y: z0 + (l.h || 0), z: p.y + (l.dy || 0), c: rgbOf(l.color), r: l.radius || 4, k: l.intensity ?? 1, flicker: l.flicker || 0, id: lights.length});
     const st = stateOf(p), geo = st && haveGlb ? await glbGeometry(loader, st) : null;
     const obj = WALL_ID[p.kind] ?? nextId++;
-    const it = {p, st};
+    const it = {p, st, obj, sp: null, hover: 0};
     if (geo) {
       it.live = G.mesh(geo, obj, new THREE.Matrix4().makeTranslation(p.x, z0, p.y));
       const yw = yawIdx && yawOf(p, st);
@@ -220,31 +220,79 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH}) {
         it.yaw.card.anchor = new THREE.Vector3(p.x, z0, p.y); it.yaw.card.setVisible(false);
       }
     } else if (sp) {
-      const c = G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1],
-        type: 3, obj, bias: .0025, shadow: !SHADOWLESS.has(p.kind)});
-      c.anchor = new THREE.Vector3(p.x, z0, p.y); it.card = c;
+      it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind)}); it.sp = sp;
+      it.card.anchor = new THREE.Vector3(p.x, z0, p.y);
     } else continue;
-    items.push(it);
+    items.push(it); byProp.set(p, it);
   }
   disposers.push(() => items.forEach(it => { it.live?.dispose(); it.card?.dispose(); it.yaw?.card.dispose(); }));
+  // the later stages (damaged, broken, chest lids, debris chunks) load in the background
+  if (haveGlb) loadGlbIndex().then(ix => ix && Object.keys(ix.states).forEach(s => glbGeometry(loader, s)));
+  // an item for a prop created later (a feature adds props to world.props: extra crates, respawns)
+  async function addItem(p) {
+    if (byProp.has(p)) return byProp.get(p);
+    const st = stateOf(p), geo = st && haveGlb ? await glbGeometry(loader, st) : null, sp = biome.sprite(p, ctxO), obj = nextId++;
+    const it = {p, st, obj, sp: null, hover: 0};
+    if (geo) it.live = G.mesh(geo, obj, new THREE.Matrix4().makeTranslation(p.x, p.z || 0, p.y));
+    else if (sp) { it.card = cardOf(sp, {obj}); it.sp = sp; } else return null;
+    items.push(it); byProp.set(p, it); return it;
+  }
+  function setState(it, st) {
+    it.st = st;
+    glbGeometry(loader, st).then(geo => { if (geo && it.st === st) it.live.setGeometry(geo); });
+  }
 
-  // prop display mode: live 3D meshes, or the 16-yaw pre-renders where they exist
+  // prop display mode: live 3D meshes, or the 16-yaw pre-renders where they exist (A/B reference)
   let mode = 'live';
   const step = Math.PI / 8;
-  function setMode(m) { mode = m; for (const it of items) if (it.yaw) { it.live.setVisible(m === 'live'); it.yaw.card.setVisible(m === 'yaw'); } }
+  function setMode(m) { mode = m; }
+  // hooks for features: card(it, sp) -> {sway (px at the top), em (a live emit canvas, re-uploaded every frame)} | null
+  const hooks = {card: null};
+  const M = new THREE.Matrix4();
+  // every frame: follow the props (stage, lid, hop, wobble, flash, gone), collect their lights, pick the yaw frames
   function update(yaw) {
-    if (mode !== 'yaw' || !yawIdx) return;
-    const k0 = -Math.round(yaw / step), AW = yawIdx.size[0], AH = yawIdx.size[1];
+    lights.length = 0; for (const l of groundL) lights.push(l);
+    const k0 = -Math.round(yaw / step);
     for (const it of items) {
-      if (!it.yaw) continue;
-      const k = (((k0 + it.yaw.off) % 16) + 16) % 16, f = yawIdx.frames[`${it.yaw.base}_y${k}`]; if (!f) continue;
-      const u = it.yaw.card.u, r = [f[0] / AW, f[1] / AH, f[2] / AW, f[3] / AH];
-      u.uRect.value.set(...r); it.yaw.card.g.uniforms.uNrmRect.value.set(...r);
-      u.uSize.value.set(f[2], f[3]); u.uPivot.value.set(f[4], f[5]);
+      const p = it.p, base = p.z || 0, z0 = base + (p.h || 0);
+      const sp = biome.sprite(p, ctxO);
+      if (sp?.lights) sp.lights.forEach((l, i) => lights.push({x: p.x + (l.dx || 0), y: base + (l.h || 0), z: p.y + (l.dy || 0), c: rgbOf(l.color), r: l.radius || 4,
+        k: l.intensity ?? 1, flicker: l.flicker || 0, id: it.obj * 8 + i}));
+      const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, flash = Math.min(1, Math.max(p.flash || 0, it.hover || 0));
+      const useYaw = mode === 'yaw' && it.yaw && !p.stage && !it.manageMatrix && !p.gone;
+      if (it.live) {
+        const st = stateOf(p); if (st && st !== it.st) setState(it, st);
+        if (!it.manageMatrix) it.live.setMatrix(M.makeTranslation(p.x + wob / PPM, z0, p.y));
+        it.live.setVisible(!p.gone && !useYaw); it.live.flash = flash;
+      }
+      if (it.yaw) {
+        it.yaw.card.setVisible(!!useYaw);
+        if (useYaw && yawIdx) {
+          const k = (((k0 + it.yaw.off) % 16) + 16) % 16, f = yawIdx.frames[`${it.yaw.base}_y${k}`];
+          if (f) {
+            const AW = yawIdx.size[0], AH = yawIdx.size[1], u = it.yaw.card.u, r = [f[0] / AW, f[1] / AH, f[2] / AW, f[3] / AH];
+            u.uRect.value.set(...r); it.yaw.card.g.uniforms.uNrmRect.value.set(...r); u.uSize.value.set(f[2], f[3]); u.uPivot.value.set(f[4], f[5]);
+            u.uAnchor.value.set(p.x, z0, p.y); it.yaw.card.flash = flash;
+          }
+        }
+      }
+      if (it.card) {
+        if (sp && sp !== it.sp) { it.sp = sp; it.card.setSprite({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1]}); }
+        const u = it.card.u; u.uAnchor.value.set(p.x, z0, p.y); u.uOff.value.set(wob, 0);
+        const hk = hooks.card?.(it, sp);
+        u.uSway.value = hk?.sway || 0;
+        if (hk?.em) { it.card.g.uniforms.uEm.value = G.tex(hk.em, {dynamic: true}); it.card.g.uniforms.uHasEm.value = 1; }
+        else if (it.sp) { it.card.g.uniforms.uEm.value = it.sp.emit ? texOf(it.sp.emit) : null; it.card.g.uniforms.uHasEm.value = it.sp.emit ? 1 : 0; }
+        it.card.flash = flash; it.card.setVisible(!p.gone && !!sp);
+      }
     }
   }
   const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length;
-  return {layout, props, lights, items, setMode, update, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc,
-    dispose() { disposers.forEach(f => f()); }};
+  return {layout, props, lights, items, setMode, update, hooks, addItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc,
+    itemOf: p => byProp.get(p) || null,
+    glb: state => glbGeometry(loader, state),                   // Promise<geometry | null> (debris chunks, ...)
+    // an extra live mesh owned by a feature (debris chunks): dispose it when done; a rebuild (biome switch) disposes the rest
+    mesh: (geo, matrix) => { const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4()), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); }; return m; },
+    biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
 export {WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS};

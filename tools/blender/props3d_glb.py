@@ -16,9 +16,9 @@ P3 = {'__name__': 'props3d_glb_lib', '__file__': os.path.join(HERE, 'props3d.py'
 exec(open(os.path.join(HERE, 'props3d.py'), encoding='utf-8').read(), P3)
 PARTS, COL = P3['PARTS'], P3['COL']
 
-STATES = ([f'wall_ew_{v}' for v in range(4)] + [f'wall_low_{v}' for v in range(4)] + [f'wall_ns_{v}' for v in range(4)] +
-          ['tower', 'gatepost', 'pillar', 'pillar_broken', 'rubble'] + [f'rock_{v}' for v in range(3)] +
-          [f'rock_big_{v}' for v in range(3)] + ['crate', 'barrel', 'barrel_x', 'pot', 'pot_b', 'chest_0'])
+# every state of the kit except the barrel tilt / roll frames (the 3D world tips and rolls the barrel mesh itself):
+# intact / damaged / broken stages, the chest's 5 lid angles, the debris chunks
+STATES = [s for st in P3['groups']().values() for s, _ in st if '_tilt_' not in s and '_roll_' not in s]
 
 
 def mat_name(base):
