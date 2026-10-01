@@ -407,6 +407,7 @@ export async function create(host) {
       if (y >= 0 && x >= 0 && x < w) buf[y * w + x] = tipC;
     }
     c.q.putImageData(c.im, 0, 0);
+    c.cv.version = (c.cv.version || 0) + 1;   // gfx tex(): re-uploaded only when repainted (12 fps), not every frame
   }
   function flameOf(p, sp) {
     let c = flames.get(p);

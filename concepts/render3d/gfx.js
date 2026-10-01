@@ -582,7 +582,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   };
   const raw = (vs, fs, uniforms, extra = {}) => new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
 
-  // ---- textures: one per source image (canvas / Image / ImageBitmap), nearest, no colour management
+  // ---- textures: one per source image (canvas / Image / ImageBitmap), nearest, no colour management.
+  // dynamic: a live canvas, re-uploaded at most once per frame. Give the canvas a `version` number (bump it whenever you
+  // repaint it) and it is re-uploaded only when that changed: a flame painted at 12 fps uploads 12 times a second, not 165
   const texCache = new WeakMap();
   function tex(img, {linear = false, dynamic = false} = {}) {
     let t = texCache.get(img);
@@ -592,7 +594,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       t.minFilter = t.magFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
       t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true; t.__lin = linear; t.__frame = -1;
       texCache.set(img, t);
-    } else if (dynamic && t.__frame !== frameNo) { t.needsUpdate = true; t.__frame = frameNo; }   // re-upload a live canvas once per frame
+    } else if (dynamic && t.__frame !== frameNo && (img.version === undefined || img.version !== t.__ver)) { t.needsUpdate = true; t.__frame = frameNo; t.__ver = img.version; }
     return t;
   }
   let frameNo = 0;
@@ -617,30 +619,53 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   QUAD.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0], 3));
 
   // a billboard: {tex, w, h, px, py, em?, nrm?, nrmRect?, rect?, type (3 | 4), obj, bias, shadow (cast), xray}
+  // The vertex shader places it from uAnchor, so the mesh's matrix is free: render() sets it to the anchor and the card's
+  // own geometry (the shared quad + a bounding sphere sized from uSize / uPivot / sway) lets three skip cards off screen.
+  // Geometries are pooled: disposing one would delete the shared quad's GL buffer
+  const cards = new Set(), cardGeoPool = [];
+  function cardGeo() {
+    const g = cardGeoPool.pop() || new THREE.BufferGeometry();
+    if (!g.attributes.position) { g.setAttribute('position', QUAD.getAttribute('position')); g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1); }
+    return g;
+  }
+  function syncCards() {
+    for (const C of cards) {
+      const u = C.u, a = u.uAnchor.value, s = u.uSize.value, pv = u.uPivot.value, off = u.uOff.value, sw = Math.abs(u.uSway.value);
+      if (a.x !== C.ax || a.y !== C.ay || a.z !== C.az) {
+        C.ax = a.x; C.ay = a.y; C.az = a.z;
+        for (const m of C.meshes) { m.matrix.makeTranslation(a.x, a.y, a.z); m.matrixWorldNeedsUpdate = true; }
+      }
+      const hx = (Math.max(pv.x, s.x - pv.x) + sw + Math.abs(off.x) + 2) / PPM, hy = (s.y / 2 + Math.abs(off.y) + 2) / PPMH;
+      const bs = C.geo.boundingSphere; bs.center.set(0, (pv.y - s.y / 2 + off.y) / PPMH, 0); bs.radius = Math.hypot(hx, hy) + .25;
+    }
+  }
   function card(o) {
-    const u = cardUniforms(o);
+    const u = cardUniforms(o), geo = cardGeo();
     const g = raw(CARD_VS, CARD_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
       uNrmRect: {value: o.nrmRect || new THREE.Vector4(0, 0, 1, 1)}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0},
       uType: {value: o.type ?? 3}, uObj: {value: o.obj ?? 0}, uFlash: {value: 0}, uBend: {value: new Float32Array(8).fill(1)},
       uMetal: {value: null}, uHasMetal: {value: 0}}, {side: THREE.DoubleSide});
-    const gm = new THREE.Mesh(QUAD, g); gm.frustumCulled = false; gScene.add(gm);
+    const gm = new THREE.Mesh(geo, g); gScene.add(gm);
     let sm = null, xm = null;
     if (o.shadow !== false) {
-      sm = new THREE.Mesh(QUAD, raw(CARD_VS, SHADOW_CARD_FS, {...u, uBias: {value: 0}, uSnap: NOSNAP, uFaceYaw: U.sunYaw, uCamYaw: U.camYaw, uHasBend: {value: 0}}, {side: THREE.DoubleSide}));
-      sm.frustumCulled = false; sScene.add(sm);
+      sm = new THREE.Mesh(geo, raw(CARD_VS, SHADOW_CARD_FS, {...u, uBias: {value: 0}, uSnap: NOSNAP, uFaceYaw: U.sunYaw, uCamYaw: U.camYaw, uHasBend: {value: 0}}, {side: THREE.DoubleSide}));
+      sScene.add(sm);
     }
     if (o.xray) {
-      xm = new THREE.Mesh(QUAD, raw(CARD_VS, XRAY_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uDepth: {value: gbuf.depthTexture}}, {side: THREE.DoubleSide, depthTest: false, depthWrite: false}));
-      xm.frustumCulled = false; xScene.add(xm);
+      xm = new THREE.Mesh(geo, raw(CARD_VS, XRAY_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uDepth: {value: gbuf.depthTexture}}, {side: THREE.DoubleSide, depthTest: false, depthWrite: false}));
+      xScene.add(xm);
     }
-    const C = {u, g, gm, sm, xm,
+    const meshes = [gm, sm, xm].filter(Boolean);
+    for (const m of meshes) m.matrixAutoUpdate = false;
+    const C = {u, g, gm, sm, xm, geo, meshes, ax: NaN, ay: NaN, az: NaN,
       set anchor(v) { u.uAnchor.value.copy(v); },
       set flash(k) { g.uniforms.uFlash.value = k; },            // 0..1: hit flash / hover pulse (white, glowing)
       setVisible(v) { gm.visible = v; if (sm) sm.visible = v; if (xm) xm.visible = v; },
       // swap the picture: {tex, w, h, px, py, em?} (a breakable's stage, a brute turning)
       setSprite(s) { u.uTex.value = s.tex; u.uSize.value.set(s.w, s.h); u.uPivot.value.set(s.px, s.py); g.uniforms.uEm.value = s.em || null; g.uniforms.uHasEm.value = s.em ? 1 : 0; },
-      dispose() { gScene.remove(gm); if (sm) sScene.remove(sm); if (xm) xScene.remove(xm); g.dispose(); sm?.material.dispose(); xm?.material.dispose(); },
+      dispose() { gScene.remove(gm); if (sm) sScene.remove(sm); if (xm) xScene.remove(xm); g.dispose(); sm?.material.dispose(); xm?.material.dispose(); cards.delete(C); cardGeoPool.push(geo); },
     };
+    cards.add(C);
     return C;
   }
   // a live ramp mesh (+ its shadow caster). setMatrix moves both; setGeometry swaps the model (a breakable's stage).
@@ -654,9 +679,14 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.layers.enable(1); sScene.add(sm);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
+    const H = {sm, hm: matrix.clone()};             // hm: the matrix the height map was last rendered with
     return {gm, sm,
       setVisible(v) { if (gm.visible !== v && caster()) hDirty = true; gm.visible = v; sm.visible = v; },
-      setMatrix(m) { if (!gm.matrix.equals(m) && caster()) hDirty = true; gm.matrix.copy(m); sm.matrix.copy(m); gm.matrixWorldNeedsUpdate = sm.matrixWorldNeedsUpdate = true; },
+      setMatrix(m) {
+        if (gm.matrix.equals(m)) return;
+        gm.matrix.copy(m); sm.matrix.copy(m); gm.matrixWorldNeedsUpdate = sm.matrixWorldNeedsUpdate = true;
+        if (caster()) moved.add(H);   // render() decides whether that's enough to re-render the height map
+      },
       setGeometry(g) { if (gm.geometry !== g && caster()) hDirty = true; gm.geometry = g; sm.geometry = g; },
       // burning wood: char 0..1 (blackens), glow 0..1 (ember veins), t (s: the veins crawl), ash 0..1 (settles on top)
       burn(char = 0, glow = 0, t = 0, ash = 0) { gm.material.uniforms.uBurn.value.set(char, glow, t, ash); },
@@ -668,6 +698,21 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       set flash(k) { gm.material.uniforms.uFlash.value = k; },
       dispose() { gScene.remove(gm); sScene.remove(sm); gm.material.dispose(); if (lean) sm.material.dispose(); hDirty = true; }};
   }
+  // the height map is re-rendered when a caster moved more than ~a texel (6 cm) or turned / scaled more than ~1%, against
+  // the matrix it was last rendered with: a hit wobble (2 px) or a burning crate set to two matrices a frame no longer
+  // re-render it every frame
+  const moved = new Set();
+  const HM_MOVE = .05, HM_TURN = .012;
+  function movedEnough() {
+    for (const H of moved) {
+      if (!H.sm.layers.isEnabled(1)) continue;
+      const a = H.sm.matrix.elements, b = H.hm.elements;
+      if (Math.abs(a[12] - b[12]) > HM_MOVE || Math.abs(a[13] - b[13]) > HM_MOVE || Math.abs(a[14] - b[14]) > HM_MOVE) return true;
+      for (const k of M3) if (Math.abs(a[k] - b[k]) > HM_TURN) return true;
+    }
+    return false;
+  }
+  const M3 = [0, 1, 2, 4, 5, 6, 8, 9, 10];
   function surface(geom, opts, castShadow = true) {
     const gm = new THREE.Mesh(geom, surfMat(opts)); gScene.add(gm);
     let sm = null; if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); sScene.add(sm); hDirty = true; }
@@ -678,7 +723,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const LMAX = 4096, lineGeo = new THREE.BufferGeometry();
   const lPos = new THREE.BufferAttribute(new Float32Array(LMAX * 6), 3), lCol = new THREE.BufferAttribute(new Float32Array(LMAX * 8), 4);
   lPos.setUsage(THREE.DynamicDrawUsage); lCol.setUsage(THREE.DynamicDrawUsage); lineGeo.setAttribute('position', lPos); lineGeo.setAttribute('color', lCol);
-  const lineObj = new THREE.LineSegments(lineGeo, raw(LINE_VS, LINE_FS, {})); lineObj.frustumCulled = false; gScene.add(lineObj);
+  const lineObj = new THREE.LineSegments(lineGeo, raw(LINE_VS, LINE_FS, {})); lineObj.frustumCulled = false; lineObj.matrixAutoUpdate = false; gScene.add(lineObj);
   let nLines = 0;
   // (the batches write straight into their typed arrays: no per-call allocation, no GC spikes in a big fight)
   function line(x0, y0, z0, x1, y1, z1, c, emit = false) {   // world X, Y (up), Z
@@ -692,7 +737,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const pPos = new THREE.BufferAttribute(new Float32Array(PMAX * 3), 3), pCol = new THREE.BufferAttribute(new Float32Array(PMAX * 4), 4), pMisc = new THREE.BufferAttribute(new Float32Array(PMAX * 2), 2);
   for (const a of [pPos, pCol, pMisc]) a.setUsage(THREE.DynamicDrawUsage);
   pointGeo.setAttribute('position', pPos); pointGeo.setAttribute('color', pCol); pointGeo.setAttribute('aMisc', pMisc);
-  const pointObj = new THREE.Points(pointGeo, raw(POINT_VS, POINT_FS, {uSnap: SNAP})); pointObj.frustumCulled = false; gScene.add(pointObj);
+  const pointObj = new THREE.Points(pointGeo, raw(POINT_VS, POINT_FS, {uSnap: SNAP})); pointObj.frustumCulled = false; pointObj.matrixAutoUpdate = false; gScene.add(pointObj);
   let nPoints = 0;
   const NOOPT = {};
   function point(x, y, z, c, o = NOOPT) {
@@ -713,15 +758,15 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     for (const [k, n] of Object.entries(A)) { attrs[k] = new THREE.InstancedBufferAttribute(new Float32Array(cap * n), n); attrs[k].setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, attrs[k]); }
     const uni = {uTex: {value: null}, uEm: {value: null}, uNrm: {value: null}, uHasEm: {value: 0}, uHasNrm: {value: 0}, uType: {value: o.type ?? 3},
       uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP, uBias: {value: .00125}};
-    const gm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gScene.add(gm);
+    const gm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gm.matrixAutoUpdate = false; gScene.add(gm);
     let sm = null;
-    if (o.shadow) { sm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_SHADOW_FS, {uTex: uni.uTex, uFaceYaw: U.sunYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: NOSNAP, uBias: {value: 0}}, {side: THREE.DoubleSide})); sm.frustumCulled = false; sScene.add(sm); }
-    return {geo, attrs, uni, gm, sm, cap, n: 0, idle: 0};
+    if (o.shadow) { sm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_SHADOW_FS, {uTex: uni.uTex, uFaceYaw: U.sunYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: NOSNAP, uBias: {value: 0}}, {side: THREE.DoubleSide})); sm.frustumCulled = false; sm.matrixAutoUpdate = false; sScene.add(sm); }
+    return {geo, attrs, list: Object.values(attrs), uni, gm, sm, cap, n: 0, idle: 0};
   }
   function grow(G2) {
     const cap = G2.cap * 2;
     for (const [k, a] of Object.entries(G2.attrs)) { const b = new THREE.InstancedBufferAttribute(new Float32Array(cap * a.itemSize), a.itemSize); b.array.set(a.array); b.setUsage(THREE.DynamicDrawUsage); G2.geo.setAttribute(k, b); G2.attrs[k] = b; }
-    G2.cap = cap;
+    G2.cap = cap; G2.list = Object.values(G2.attrs);
   }
   function sprite(o) {
     const key = `${idOf(o.img)}|${idOf(o.em)}|${idOf(o.nrm)}|${o.type ?? 3}|${o.shadow ? 1 : 0}`;
@@ -736,25 +781,29 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     S[b] = sw; S[b + 1] = sh; S[b + 2] = o.px ?? sw / 2; S[b + 3] = o.py ?? sh;
     M[b] = o.alpha ?? 1; M[b + 1] = o.flip ? 1 : 0; M[b + 2] = o.sway || 0; M[b + 3] = o.flash || 0;
   }
+  // upload only the part of a batch buffer written this frame (three uploads the WHOLE array otherwise: ~0.9 MB a frame)
+  function upload(a, n) { if (n <= 0) return; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
   function flushBatches() {
-    lPos.needsUpdate = lCol.needsUpdate = true; lineGeo.setDrawRange(0, nLines * 2);
-    pPos.needsUpdate = pCol.needsUpdate = pMisc.needsUpdate = true; pointGeo.setDrawRange(0, nPoints);
+    upload(lPos, nLines * 2); upload(lCol, nLines * 2); lineGeo.setDrawRange(0, nLines * 2); lineObj.visible = nLines > 0;
+    upload(pPos, nPoints); upload(pCol, nPoints); upload(pMisc, nPoints); pointGeo.setDrawRange(0, nPoints); pointObj.visible = nPoints > 0;
     for (const [key, G2] of groups) {
       G2.geo.instanceCount = G2.n; G2.gm.visible = G2.n > 0; if (G2.sm) G2.sm.visible = G2.n > 0;
-      for (const a of Object.values(G2.attrs)) a.needsUpdate = true;
-      if (G2.n === 0 && ++G2.idle > 600) { gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.dispose(); groups.delete(key); }
+      for (const a of G2.list) upload(a, G2.n);
+      if (G2.n === 0 && ++G2.idle > 600) {   // (the shared quad's attribute is detached first: disposing it would delete its GL buffer)
+        gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.deleteAttribute('position'); G2.geo.dispose(); groups.delete(key);
+      }
       else if (G2.n) G2.idle = 0;
     }
   }
   function resetBatches() { nLines = 0; nPoints = 0; for (const G2 of groups.values()) G2.n = 0; }
 
   // ---- screen layers: 2D canvases at view resolution, uploaded only on frames they were drawn into
-  const LAYERS = ['ground', 'pre', 'emit', 'add', 'front', 'distort'], layers = {};
+  const LAYERS = ['ground', 'pre', 'emit', 'add', 'front', 'distort'], layers = {}, layerList = [];
   for (const n of LAYERS) {
     const c = document.createElement('canvas'); c.width = VW; c.height = VH;
     const q = c.getContext('2d'); q.imageSmoothingEnabled = false;
     const t = new THREE.CanvasTexture(c); t.flipY = false; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace; t.minFilter = t.magFilter = THREE.NearestFilter;
-    layers[n] = {c, q, t, used: false, dirty: false};
+    layers[n] = {c, q, t, used: false, dirty: false}; layerList.push(layers[n]);
   }
   // layer(name) -> its 2D context for this frame (cleared on first use each frame)
   function layer(n) {
@@ -786,7 +835,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   };
   const compScene = new THREE.Scene();
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
-  const compMesh = new THREE.Mesh(tri, raw(COMP_VS, COMP_FS, compU, {depthTest: false, depthWrite: false})); compMesh.frustumCulled = false; compScene.add(compMesh);
+  const compMesh = new THREE.Mesh(tri, raw(COMP_VS, COMP_FS, compU, {depthTest: false, depthWrite: false})); compMesh.frustumCulled = false; compMesh.matrixAutoUpdate = false; compScene.add(compMesh);
   const dummyCam = new THREE.Camera();
 
   // ---- HD FX: soft effects at DISPLAY resolution over the pixel image (the HD-2D trick: pixel world, smooth light).
@@ -813,7 +862,7 @@ void main() {
 }`;
   const blitU = {tOut: {value: outRT.texture}, tHeat: {value: heatRT.texture}, uDS: {value: 1}, uHeat: {value: 0}, uT: {value: 0}, uZ: {value: 1}, uRes: {value: new THREE.Vector2(VW, VH)}},
     blitScene = new THREE.Scene();
-  { const m = new THREE.Mesh(tri, raw(COMP_VS, BLIT_FS, blitU, {depthTest: false, depthWrite: false})); m.frustumCulled = false; blitScene.add(m); }
+  { const m = new THREE.Mesh(tri, raw(COMP_VS, BLIT_FS, blitU, {depthTest: false, depthWrite: false})); m.frustumCulled = false; m.matrixAutoUpdate = false; blitScene.add(m); }
   const FX_VS = HEAD + `
 in vec3 position; in vec4 iPos; in vec4 iCol;   // iPos: world xyz + radius (m); iCol: rgb + alpha
 uniform mat4 viewMatrix, projectionMatrix; uniform vec2 uPxM;   // NDC per metre of radius (x, y): round on screen
@@ -856,7 +905,7 @@ void main() {
     const P = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4), C = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4);
     P.setUsage(THREE.DynamicDrawUsage); C.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iPos', P); geo.setAttribute('iCol', C);
     const m = new THREE.Mesh(geo, raw(FX_VS, FX_FS, fxU, {depthTest: false, depthWrite: false, transparent: true, blending}));
-    m.frustumCulled = false; m.renderOrder = mode === 'blend' ? 0 : 1; fxScene.add(m);   // smoke first, glow over it
+    m.frustumCulled = false; m.matrixAutoUpdate = false; m.renderOrder = mode === 'blend' ? 0 : 1; fxScene.add(m);   // smoke first, glow over it
     fxB[mode] = {geo, P, C, n: 0, m};
   }
   {
@@ -864,9 +913,10 @@ void main() {
     const P = new THREE.InstancedBufferAttribute(new Float32Array(1024 * 4), 4), C = new THREE.InstancedBufferAttribute(new Float32Array(1024 * 4), 4);
     P.setUsage(THREE.DynamicDrawUsage); C.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iPos', P); geo.setAttribute('iCol', C);
     const m = new THREE.Mesh(geo, raw(FX_VS, HEAT_FS, heatU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending}));
-    m.frustumCulled = false; heatScene.add(m);
+    m.frustumCulled = false; m.matrixAutoUpdate = false; heatScene.add(m);
     fxB.heat = {geo, P, C, n: 0, m, max: 1024};
   }
+  const fxList = [fxB.add, fxB.blend];   // (heat is drawn into its own target)
   // heat(X, Y (up), Z, radius m, strength): hot air this frame (strength 1 = ~.75 art px of ripple at its middle)
   function heat(x, y, z, r, k) { fx(x, y, z, r, [1, 1, 1], k, 'heat'); }
   // fx(X, Y (up), Z, radius m, [r, g, b], alpha, 'add' | 'blend'): one soft particle this frame (world axes)
@@ -892,19 +942,22 @@ void main() {
   // world -> internal-canvas px (y down), for halos / HUD / tests
   const _v = new THREE.Vector3();
   function toScreen(x, y, z) { _v.set(x, y, z).project(camera); return [(_v.x + 1) / 2 * VW, (1 - _v.y) / 2 * VH, _v.z]; }
+  // is world (X, Y up, Z) on screen, give or take m view px? (allocation-free: for culling effects every frame)
+  function onScreen(x, y, z, m = 0) { _v.set(x, y, z).project(camera); const sx = (_v.x + 1) / 2 * VW, sy = (1 - _v.y) / 2 * VH; return sx > -m && sx < VW + m && sy > -m && sy < VH + m; }
 
   // ---- sun: direction toward the sun (world), shadow camera snapped to its texel grid around the view target
   // dir: the sun as it LIGHTS (shading, rims, glints); sdir: the sun as it CASTS shadows (same azimuth, the elevation
   // the caller wants for shadow length; main.js keeps the arena's longest shadow), default the same
+  const _sl = new THREE.Vector3(), _sr = new THREE.Vector3(), _su = new THREE.Vector3();
   function setSun(dir, sdir = dir) {
     compU.uSunDir.value.copy(dir);
     U.sunYaw.value = Math.atan2(dir.x, dir.z);   // cards turned so their face points at the sun (normal = (sin, 0, cos))
     const T = view.T, texel = 2 * SHADOW_E / SM;
     sunCam.position.copy(T).addScaledVector(sdir, 100); sunCam.lookAt(T); sunCam.updateMatrixWorld(true);
     // snap: move the light camera so the target sits on a texel corner in light space (no shadow crawl while walking)
-    const lt = T.clone().applyMatrix4(sunCam.matrixWorldInverse);
+    const lt = _sl.copy(T).applyMatrix4(sunCam.matrixWorldInverse);
     const dx = lt.x - Math.round(lt.x / texel) * texel, dy = lt.y - Math.round(lt.y / texel) * texel;
-    const right = new THREE.Vector3().setFromMatrixColumn(sunCam.matrixWorld, 0), up = new THREE.Vector3().setFromMatrixColumn(sunCam.matrixWorld, 1);
+    const right = _sr.setFromMatrixColumn(sunCam.matrixWorld, 0), up = _su.setFromMatrixColumn(sunCam.matrixWorld, 1);
     sunCam.position.addScaledVector(right, dx).addScaledVector(up, dy); sunCam.updateMatrixWorld(true);
     compU.uLightPV.value.multiplyMatrices(sunCam.projectionMatrix, sunCam.matrixWorldInverse);
   }
@@ -913,18 +966,22 @@ void main() {
   function render() {
     const t0 = performance.now();
     U.time.value = (t0 / 1000) % 3600;
-    flushBatches();
-    stats.sprites = [...groups.values()].reduce((s, g2) => s + g2.n, 0); stats.points = nPoints; stats.lines = nLines;
+    flushBatches(); syncCards();
+    let ns = 0; for (const g2 of groups.values()) ns += g2.n;
+    stats.sprites = ns; stats.points = nPoints; stats.lines = nLines;
     const lay = compU.uLay.value;
     lay.set(+layers.ground.used, +layers.pre.used, +layers.front.used, +layers.add.used); compU.uLayE.value = +layers.emit.used; compU.uLayD.value = +layers.distort.used;
-    for (const L of Object.values(layers)) if (L.used) L.t.needsUpdate = true;
+    for (const L of layerList) if (L.used) L.t.needsUpdate = true;
+    if (!hDirty && moved.size && movedEnough()) hDirty = true;
     renderer.setClearColor(0x000000, 0);
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
       renderer.setRenderTarget(shadow); renderer.clear(true, true, false); renderer.render(sScene, sunCam);
     }
     if (hDirty && compU.uPtShadow.value > 0) {
       renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sScene, hCam); hDirty = false;
+      for (const H of moved) H.hm.copy(H.sm.matrix);
     }
+    moved.clear();
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
     const calls = renderer.info.render.calls;
     renderer.setRenderTarget(xray); renderer.clear(true, false, false); renderer.render(xScene, camera);
@@ -933,7 +990,7 @@ void main() {
     if (DS > 1 || fxN || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
       renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam);
       if (hN) {
-        const B = fxB.heat; B.geo.instanceCount = hN; B.P.needsUpdate = B.C.needsUpdate = true;
+        const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
         fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
         renderer.setRenderTarget(heatRT); renderer.clear(true, false, false); renderer.render(heatScene, camera);
       }
@@ -941,16 +998,16 @@ void main() {
       renderer.setRenderTarget(null); renderer.render(blitScene, dummyCam);
       if (fxN) {
         fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
-        for (const B of Object.values(fxB)) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; B.P.needsUpdate = B.C.needsUpdate = true; }
+        for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
         renderer.render(fxScene, camera);
       }
     } else { renderer.setRenderTarget(null); renderer.render(compScene, dummyCam); }
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
     stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
-    resetBatches(); for (const L of Object.values(layers)) L.used = false; frameNo++;
+    resetBatches(); for (const L of layerList) L.used = false; frameNo++;
   }
 
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, VW, VH,
-    setView, setSun, toScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
+    setView, setSun, toScreen, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
     fx, heat, setDisplay, fxU, get display() { return DS; }};
 }

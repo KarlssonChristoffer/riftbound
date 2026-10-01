@@ -170,8 +170,11 @@ const PL = createPlayer({
 const P = PL.P;
 { const at = (Q.get('at') || '').split(',').map(Number), sp = world.layout.spawn, [vx, vy] = toView(at.length === 2 ? at[0] : sp.x, at.length === 2 ? at[1] : sp.y); P.x = vx; P.y = vy; P.z = elev(...toWorld(vx, vy)); }
 // the player as features see it: world frame, live
+// (x / y are read dozens of times a frame: computed once per move or turn, not per read)
+let pwX = 0, pwY = 0, pwA = NaN, pwB = NaN, pwYaw = NaN;
+function pwSync() { if (P.x !== pwA || P.y !== pwB || yaw !== pwYaw) { pwA = P.x; pwB = P.y; pwYaw = yaw; const c = Math.cos(yaw), s = Math.sin(yaw); pwX = P.x * c + P.y * s; pwY = -P.x * s + P.y * c; } }
 const player = {
-  get x() { return toWorld(P.x, P.y)[0]; }, get y() { return toWorld(P.x, P.y)[1]; }, get z() { return P.z; },
+  get x() { pwSync(); return pwX; }, get y() { pwSync(); return pwY; }, get z() { return P.z; },
   get vx() { return toWorld(P.vx, P.vy)[0]; }, get vy() { return toWorld(P.vx, P.vy)[1]; },
   get faceAngle() { return P.face * 2 * Math.PI / ND + yaw; },                          // world: 0 = south, +pi/2 = east
   get face() { return (((Math.round(P.face + yaw / (2 * Math.PI / ND))) % ND) + ND) % ND; },   // world facing index (arena's dirOf)
@@ -252,7 +255,12 @@ function shake(a, sec) { if (a >= shakeS.a * (shakeS.t > 0 ? 1 : 0)) { shakeS.a 
 // ---------------------------------------------------------------- targets, interaction
 // ARPG targeting: the cursor over something hittable aims at it (front-most), at the height the cursor points at on it
 // (head, chest or legs; kept inside its hit height). -> {x, y, h (aim height), target} world
+let hoverKey = 0, hoverAt = -1, hoverMemo = null;   // hoverKey: bumped at the start of every step and draw
 function hoverTarget() {
+  if (hoverAt === hoverKey) return hoverMemo;
+  hoverAt = hoverKey; return (hoverMemo = hoverFind());
+}
+function hoverFind() {
   for (const f of features) { const t = f.aimTarget?.(); if (t) return t; }
   let best = null, bn = -1e9, bh = 0;
   const mx = VW / 2 + (mouse.x - VW / 2) * zoom, my = VH / 2 + (mouse.y - VH / 2) * zoom;
@@ -424,6 +432,12 @@ const sunDir = new THREE.Vector3(), shadowDir = new THREE.Vector3();
 // LIGHTS from low down (warm grazing light, rims), but its shadows stop growing at this length: the true 1 / tan(el)
 // stretched trees and towers 4-6x their height across the map
 const SUN_LEN_MAX = 1.7, SHADOW_EL_MIN = Math.atan(1 / SUN_LEN_MAX);
+// applyMood's light records, reused every frame
+const LOUT = [], CAND = [], CW = [], FREC = [], colCache = new Map();
+let nL = 0;
+const colOf = c => { if (Array.isArray(c)) return c; let v = colCache.get(c); if (!v) colCache.set(c, v = rgbOf(c)); return v; };
+const byD = (a, b) => a.d - b.d;
+function putL(x, y, z, c, r, gain, flat) { const o = LOUT[nL] ??= {}; nL++; o.x = x; o.y = y; o.z = z; o.c = c; o.r = r; o.gain = gain; o.flat = flat; }
 function applyMood(PX, PY, t) {
   const biome = BIOMES[biomeI].id, time = env.bucket, m = env.mood(biome), U = G.compU;   // the clock's blended mood
   U.uAmb.value.set(...m.amb);
@@ -440,31 +454,38 @@ function applyMood(PX, PY, t) {
   const dark = Math.max(0, 1 - lum(m.amb));
   U.uEmin.value = .1 + .2 * dark;
   U.uBg.value.set(...BG[biome].map(v => v * (.35 + .65 * lum(m.amb))));
-  // lights: the lift (a flat pool at the player in dark scenes), the lantern, features' lights, the nearest world lights
-  const L = [];
-  if (m.lift[0] + m.lift[1] + m.lift[2] > 0) L.push({x: PX, y: P.z + .9, z: PY, c: m.lift, r: 1.7, gain: 1, flat: true});
+  // lights: the lift (a flat pool at the player in dark scenes), the lantern, features' lights, the nearest world lights.
+  // (every record is reused frame to frame: LOUT goes to the shader, CAND holds the candidates, FREC copies features' lights)
+  nL = 0;
+  if (m.lift[0] + m.lift[1] + m.lift[2] > 0) putL(PX, P.z + .9, PY, m.lift, 1.7, 1, true);
   if (opt.lantern) {
     const a = player.faceAngle, fx = Math.sin(a), fy = Math.cos(a), fk2 = flick(LANTERN, t);
-    L.push({x: PX + fx * LANTERN.fwd - fy * LANTERN.side, y: P.z + LANTERN.h, z: PY + fy * LANTERN.fwd + fx * LANTERN.side, c: LANTERN.c, r: LANTERN.r * (1 + (fk2 - 1) * .15), gain: fk2});
+    putL(PX + fx * LANTERN.fwd - fy * LANTERN.side, P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side, LANTERN.c, LANTERN.r * (1 + (fk2 - 1) * .15), fk2, false);
   }
-  const pool = world.lights.slice();
-  for (const f of features) if (f.on !== false && f.lights) for (const l of f.lights()) pool.push({x: l.x, y: (l.h || 0), z: l.y, c: rgbOf(l.color ?? l.c), r: l.radius || l.r || 3, k: l.intensity ?? l.k ?? 1, flicker: l.flicker || 0, id: l.id ?? 7000, jitter: l.jitter});
-  const near = pool.map(l => ({l, d: Math.hypot(l.x - PX, l.z - PY)})).filter(o => o.d < 24 + o.l.r).sort((a, b) => a.d - b.d);
+  let nc = 0, nf = 0;
+  const cand = l => { const d = Math.hypot(l.x - PX, l.z - PY); if (d < 24 + l.r) { const w = CW[nc] ??= {l: null, d: 0}; w.l = l; w.d = d; CAND[nc++] = w; } };
+  for (const l of world.lights) cand(l);
+  for (const f of features) if (f.on !== false && f.lights) for (const l of f.lights()) {
+    const o = FREC[nf++] ??= {};
+    o.x = l.x; o.y = l.h || 0; o.z = l.y; o.c = colOf(l.color ?? l.c); o.r = l.radius || l.r || 3; o.k = l.intensity ?? l.k ?? 1; o.flicker = l.flicker || 0; o.id = l.id ?? 7000; o.jitter = l.jitter;
+    cand(o);
+  }
+  CAND.length = nc; CAND.sort(byD);   // nearest first (stable: ties keep the world-then-features order)
   // a flame's light wanders a few cm (l.jitter, else from its flicker), so the shadows round a fire dance with it
-  for (const {l} of near) {
-    if (L.length >= 32) break;
-    const k = flick(l, t), j = l.jitter ?? (l.flicker || 0) * .035, s = (l.id ?? 0) * 7.13;
+  for (let i = 0; i < nc && nL < 32; i++) {
+    const l = CAND[i].l, k = flick(l, t), j = l.jitter ?? (l.flicker || 0) * .035, s = (l.id ?? 0) * 7.13;
     const jx = j ? j * (Math.sin(t * 11.3 + s) + Math.sin(t * 17.9 + s * 1.7) * .6) / 1.6 : 0, jz = j ? j * (Math.sin(t * 13.1 + s * 2.1) + Math.sin(t * 7.7 + s * .9) * .6) / 1.6 : 0;
-    L.push({x: l.x + jx, y: l.y + Math.abs(jz) * .5, z: l.z + jz, c: l.c, r: l.r * (1 + (k - 1) * .15), gain: l.k * k});
+    putL(l.x + jx, l.y + Math.abs(jz) * .5, l.z + jz, l.c, l.r * (1 + (k - 1) * .15), l.k * k, false);
   }
-  U.uNL.value = L.length; let nh = 0;
-  L.forEach((l, i) => {
+  U.uNL.value = nL; let nh = 0;
+  for (let i = 0; i < nL; i++) {
+    const l = LOUT[i];
     U.uLP.value[i].set(l.x, l.y, l.z, l.r); U.uLC.value[i].set(l.c[0] * l.gain, l.c[1] * l.gain, l.c[2] * l.gain, l.flat ? 1 : 0);
-    if (l.flat) return;
-    const a = Math.min(.75, HALO_A * l.gain * (m.glow ?? 1) * (.3 + .7 * dark) + Math.max(0, l.gain - 1.5) * .12); if (a < .02) return;
+    if (l.flat) continue;
+    const a = Math.min(.75, HALO_A * l.gain * (m.glow ?? 1) * (.3 + .7 * dark) + Math.max(0, l.gain - 1.5) * .12); if (a < .02) continue;
     const [sx, sy] = G.toScreen(l.x, l.y, l.z);
-    U.uHalo.value[nh].set(sx, VH - sy, (HALO_R + .12 * Math.min(2, l.gain) + Math.max(0, l.gain - 1.3) * .35) * PPM * zoom, a); U.uHaloC.value[nh].set(...l.c); nh++;
-  });
+    U.uHalo.value[nh].set(sx, VH - sy, (HALO_R + .12 * Math.min(2, l.gain) + Math.max(0, l.gain - 1.3) * .35) * PPM * zoom, a); U.uHaloC.value[nh].set(l.c[0], l.c[1], l.c[2]); nh++;
+  }
   U.uNH.value = nh;
   return m;
 }
@@ -611,6 +632,7 @@ $('#pause').addEventListener('input', e => {
 const ROT_SPEED = 110 * DEG;
 let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null;
 function step(dt) {
+  hoverKey++;
   // camera rotation: keys / middle-drag, then (in a step mode) ease onto the nearest step once you let go.
   // A climb started at an angle eases the camera to north first, climbs, then returns.
   const rot = (keys.has('x') ? 1 : 0) - (keys.has('z') ? 1 : 0);
@@ -667,6 +689,7 @@ function toWorldEvent(e) {
   if (e.vx !== undefined && e.vy !== undefined) [e.vx, e.vy] = toWorld(e.vx, e.vy);
 }
 function draw(t) {
+  hoverKey++;
   const [PX, PY] = [player.x, player.y];
   // camera: eases after the player with a little look-ahead (the arena's), feel offsets from features, shake
   if (!camInit) { T.set(PX, P.z, PY); camInit = true; }

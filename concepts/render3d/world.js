@@ -357,8 +357,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     for (const it of items) {
       const p = it.p, base = p.z || 0, z0 = base + (p.h || 0);
       const sp = biome.sprite(p, ctxO);
-      if (sp?.lights) sp.lights.forEach((l, i) => lights.push({x: p.x + (l.dx || 0), y: base + (l.h || 0), z: p.y + (l.dy || 0), c: rgbOf(l.color), r: l.radius || 4,
-        k: l.intensity ?? 1, flicker: l.flicker || 0, id: it.obj * 8 + i}));
+      if (sp?.lights) {   // the sprite's lights: records built when the sprite changes, only their positions move per frame
+        if (it.lsp !== sp) { it.lsp = sp; it.lrec = sp.lights.map((l, i) => ({x: 0, y: 0, z: 0, c: rgbOf(l.color), r: l.radius || 4, k: l.intensity ?? 1, flicker: l.flicker || 0, id: it.obj * 8 + i, l})); }
+        for (const o of it.lrec) { o.x = p.x + (o.l.dx || 0); o.y = base + (o.l.h || 0); o.z = p.y + (o.l.dy || 0); lights.push(o); }
+      }
       const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, flash = Math.min(1, Math.max(p.flash || 0, it.hover || 0));
       const useYaw = mode === 'yaw' && it.yaw && !p.stage && !it.manageMatrix && !p.gone;
       if (it.live) {
@@ -384,8 +386,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         const hk = hooks.card?.(it, sp);
         u.uSway.value = hk?.sway || 0;
         if (hk?.bend) { it.card.g.uniforms.uBend.value = hk.bend; u.uHasBend.value = 1; } else u.uHasBend.value = 0;   // per-row flex (8 weights, bottom -> top)
-        if (hk?.em) { it.card.g.uniforms.uEm.value = G.tex(hk.em, {dynamic: true}); it.card.g.uniforms.uHasEm.value = 1; }
-        else if (it.sp) { it.card.g.uniforms.uEm.value = it.sp.emit ? texOf(it.sp.emit) : null; it.card.g.uniforms.uHasEm.value = it.sp.emit ? 1 : 0; }
+        if (hk?.em) { it.card.g.uniforms.uEm.value = G.tex(hk.em, {dynamic: true}); it.card.g.uniforms.uHasEm.value = 1; it.emSp = null; }
+        else if (it.sp && it.emSp !== it.sp) { it.emSp = it.sp; it.card.g.uniforms.uEm.value = it.sp.emit ? texOf(it.sp.emit) : null; it.card.g.uniforms.uHasEm.value = it.sp.emit ? 1 : 0; }
         it.card.flash = flash; it.card.setVisible(!p.gone && !!sp);
       }
     }
