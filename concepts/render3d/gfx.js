@@ -240,6 +240,9 @@ uniform int uDebug;
 // screen layers (view px, painted by the host / features with a 2D context): ground (before light, ground pixels only),
 // pre (before light, everything), emit (glow, added like an emitter), add (after light, additive), front (after light, over)
 uniform sampler2D tGround, tPre, tEmitL, tAdd, tFront; uniform vec4 uLay; uniform float uLayE;
+// distort: where alpha is set, this pixel shows the scene from (x + 128 - R*255, y + G*255 - 128) (heat haze). The screen
+// layers after the light (post) stay put.
+uniform sampler2D tDistort; uniform float uLayD;
 out vec4 oc;
 vec4 lay(sampler2D t, ivec2 p) { return texelFetch(t, ivec2(p.x, int(uRes.y) - 1 - p.y), 0); }
 vec3 post(vec3 col, ivec2 ip) {
@@ -256,10 +259,11 @@ float sunShadow(vec3 P, vec3 N) {
   return sc.z - .0006 > texture(tS, sc.xy).r ? 1. : 0.;
 }
 void main() {
-  ivec2 ip = ivec2(gl_FragCoord.xy);
+  ivec2 ip0 = ivec2(gl_FragCoord.xy), ip = ip0;
+  if (uLayD > .5) { vec4 dd = lay(tDistort, ip0); if (dd.a > .5) ip = clamp(ip0 + ivec2(128 - int(dd.r * 255. + .5), int(dd.g * 255. + .5) - 128), ivec2(0), ivec2(uRes) - 1); }
   vec4 a0 = texelFetch(tA, ip, 0);
   int code = int(a0.a * 255. + .5), type = code / 4, tone = code - type * 4;
-  if (type == 0) { oc = vec4(clamp(post(uBg, ip), 0., 1.), 1.); return; }
+  if (type == 0) { oc = vec4(clamp(post(uBg, ip0), 0., 1.), 1.); return; }
   float d0 = texelFetch(tD, ip, 0).r;
   vec4 N0 = texelFetch(tN, ip, 0), E0 = texelFetch(tE, ip, 0);
   vec3 P = worldAt(ip, d0), N = normalize(N0.xyz), alb = a0.rgb;
@@ -334,7 +338,7 @@ void main() {
   col += emit * max(vec3(1.) - L, vec3(uEmin)) * 1.15;                   // emitters add back what the light took away
   for (int i = 0; i < ${NL}; i++) {                                       // halos at the flames
     if (i >= uNH) break;
-    vec2 dp = (vec2(ip) + .5 - uHalo[i].xy); dp.y /= .9;
+    vec2 dp = (vec2(ip0) + .5 - uHalo[i].xy); dp.y /= .9;
     float t2 = dot(dp, dp) / (uHalo[i].z * uHalo[i].z); if (t2 < 1.) { float u = 1. - t2; col += uHaloC[i] * u * u * uHalo[i].w; }
   }
   col += uFog.rgb * uFog.a * (.4 + 1.2 * gl_FragCoord.y / uRes.y);       // haze, stronger toward the far (top) edge
@@ -344,7 +348,7 @@ void main() {
     for (int k = 0; k < 4; k++) { ivec2 q = ip + ivec2(k == 0 ? -1 : k == 1 ? 1 : 0, k == 2 ? -1 : k == 3 ? 1 : 0); if (texelFetch(tX, q, 0).r < .5) rim = true; }
     col = rim ? mix(col, vec3(.937, .886, .769), .85) : mix(col, uXCol, .4);
   }
-  col = post(col, ip);
+  col = post(col, ip0);
 
   if (uDebug == 1) col = a0.rgb;
   else if (uDebug == 2) col = N * .5 + .5;
@@ -532,7 +536,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   function resetBatches() { nLines = 0; nPoints = 0; for (const G2 of groups.values()) G2.n = 0; }
 
   // ---- screen layers: 2D canvases at view resolution, uploaded only on frames they were drawn into
-  const LAYERS = ['ground', 'pre', 'emit', 'add', 'front'], layers = {};
+  const LAYERS = ['ground', 'pre', 'emit', 'add', 'front', 'distort'], layers = {};
   for (const n of LAYERS) {
     const c = document.createElement('canvas'); c.width = VW; c.height = VH;
     const q = c.getContext('2d'); q.imageSmoothingEnabled = false;
@@ -559,7 +563,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     uNL: {value: 0}, uLP: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uLC: {value: Array.from({length: NL}, () => new THREE.Vector4())},
     uNH: {value: 0}, uHalo: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uHaloC: {value: Array.from({length: NL}, () => new THREE.Vector3())},
     tGround: {value: layers.ground.t}, tPre: {value: layers.pre.t}, tEmitL: {value: layers.emit.t}, tAdd: {value: layers.add.t}, tFront: {value: layers.front.t},
-    uLay: {value: new THREE.Vector4()}, uLayE: {value: 0},
+    uLay: {value: new THREE.Vector4()}, uLayE: {value: 0}, tDistort: {value: layers.distort.t}, uLayD: {value: 0},
     uDebug: {value: 0},
   };
   const compScene = new THREE.Scene();
@@ -601,7 +605,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     flushBatches();
     stats.sprites = [...groups.values()].reduce((s, g2) => s + g2.n, 0); stats.points = nPoints; stats.lines = nLines;
     const lay = compU.uLay.value;
-    lay.set(+layers.ground.used, +layers.pre.used, +layers.front.used, +layers.add.used); compU.uLayE.value = +layers.emit.used;
+    lay.set(+layers.ground.used, +layers.pre.used, +layers.front.used, +layers.add.used); compU.uLayE.value = +layers.emit.used; compU.uLayD.value = +layers.distort.used;
     for (const L of Object.values(layers)) if (L.used) L.t.needsUpdate = true;
     renderer.setClearColor(0x000000, 0);
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
