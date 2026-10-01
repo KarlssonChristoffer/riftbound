@@ -14,6 +14,7 @@
 // Everything else (tuning T, ability table AB, palettes, timings, RNG and its seed) is the arena's.
 
 import {PLAY} from '../../world/world.js';
+import {parkMiller} from '../../core/rng.js';
 
 export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -21,8 +22,7 @@ const SQ = 1;   // the arena's y squash for 2D distances (1.6); round in 3D
 
 export function createCore(host) {
   const P = host.player, events = host.events, props = host.props;
-  let seed = 90210;
-  const R = () => (seed = (seed * 16807) % 2147483647) / 2147483647, RR = (a, b) => a + R() * (b - a);
+  const R = parkMiller(90210), RR = (a, b) => a + R() * (b - a);   // (core/rng.js: the arena's generator and seed)
 
   // ---------------- tuning (the arena's C.T) ----------------
   const T = {
@@ -389,7 +389,7 @@ export function createCore(host) {
     get gold() { return S.gold; },
     get cd() { return Object.fromEntries(SLOTS.map(k => [k, +AB[k].t.toFixed(2)])); },
     dbg: {debris, coins, fx, rings, nums, lts, pending, brands, zones, traps, BS, brutes, hs},
-    seed(n) { seed = n; },
+    seed(n) { R.seed(n); },
     damage, breakProp, explode, part, puff,
 
     onArrowHit(a, p) {

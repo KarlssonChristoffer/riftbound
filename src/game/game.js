@@ -21,6 +21,7 @@ import {createHud} from '../ui/hud.js';
 import {createScreens} from '../ui/screens.js';
 import {loadSave, recordRun} from './save.js';
 import {flags} from '../core/flags.js';
+import {parkMiller} from '../core/rng.js';
 
 const Q = flags;
 const TAU = Math.PI * 2;
@@ -29,8 +30,7 @@ export async function createGame(host) {
   const combat = host.feature('combat');
   if (!combat) { console.warn('game: no combat feature, the game layer is off'); return {name: 'game', on: false}; }
   const core = combat.core, P = host.player;
-  let seed = (Date.now() % 2147483646) + 1;
-  const rng = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const rng = parkMiller((Date.now() % 2147483646) + 1);   // (core/rng.js)
   const stats = createStats(host, core), nav = createNav(host), hud = createHud(host), screens = createScreens({sound: n => host.uiSound?.(n)});
   const save = loadSave();
   const DEV = Q.get('dev') === '1';

@@ -13,6 +13,7 @@
 //   import {harmonizeSet, setHarmonized} from './harmonize.js';
 //   harmonizeSet(set)       // once per loaded set (idempotent): SP[p].img becomes a getter, cloth colours kept
 //   setHarmonized(on)       // flips every harmonized set; sheets are converted lazily on first draw
+import {hexRaw255 as hex} from '../../core/color.js';
 export const HARM = {
   SAT: {default: .8, red: .92, hair: .72, skin: .9},
   HI_V: .94, SHADE_LIFT: .15, CHAR_V: 1.14, LINE_LIFT: .2, OUTLINE_LIFT: .42,
@@ -25,7 +26,6 @@ const FAMS = {
   linen: ['efe4c8', 'cfbf9c', 'a08e70', '4a3e30'], cloth: ['8c6a4a', '6a4e36', '4a3626', '221812'],
   wood: ['c89a5e', '9a6c44', '6e4a2e', '2e1a16'],
 };
-const hex = h => [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 const mix = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
 function hsv([r, g, b]) {
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;

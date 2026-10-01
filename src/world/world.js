@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
+import {rgbOf, hexRaw255 as hexrgb} from '../core/color.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
@@ -34,7 +35,6 @@ const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {em
 // (bark, leaf: the procedural trees, trees3d.js; char, ash, ember: burning wood, gfx.js MESH_FS uBurn; appended, so the kit's
 // family indices stay put)
 export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember'];
-const hexrgb = h => [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
 const mix = (a, b, k) => a.map((x, i) => Math.round(x + (b[i] - x) * k));
 const ramp6 = r4 => { const r = r4.map(hexrgb); return [r[0], r[1], r[2], mix(r[3], r[2], .25), r[3], r[2]]; };   // + line, outline_shadow, outline_lit
 function palette(biome, style) {
@@ -68,7 +68,6 @@ let GT = null;   // the renderer: one texture cache for everything (gfx.js tex)
 export const texOf = (img, linear = false) => GT.tex(img, {linear});
 const loadImg = src => new Promise((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => err(new Error(src)); i.src = src; });
 const hsh = (a, b = 0, c = 0) => { const s = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453; return s - Math.floor(s); };
-const rgbOf = c => { if (Array.isArray(c)) return c; let s = String(c || '#fff').replace('#', ''); if (s.length === 3) s = s.replace(/./g, m => m + m); const n = parseInt(s, 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 
 // glb state -> merged non-indexed geometry with per-part attributes (part index, family, tone bias, fixed tone)
 const glbCache = {};

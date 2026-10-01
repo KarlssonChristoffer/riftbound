@@ -18,6 +18,8 @@
 //   fires.pops                             this step's crackles [{x, y, h, col, kind, k}]: the caller throws sparks, flashes
 //                                          the light (lights.js); drained by the caller
 import {ART} from '../world/biomes.js';
+import {clamp, TAU} from '../core/mathx.js';
+import {hex01 as rgb} from '../core/color.js';
 
 // style: 'pixel' (depth-tested pixel particles) | 'hybrid' (those + a soft HD glow round the flame) | 'soft' (the
 // whole flame as smooth HD particles: gfx.js fx, display resolution, additive, soft-depth-tested)
@@ -32,8 +34,7 @@ const KINDS = {
   camp:    {pops: .6, bed: .2, rate: 1000, life: [.3, .72], vh: [.85, 1.6], buoy: 1.8, H: .8, swirl: 4.5, dance: .13, size: 3, tongues: 5},
   beacon:  {pops: .45, bed: .3, rate: 1250, life: [.34, .82], vh: [1, 2], buoy: 2.1, H: 1.12, swirl: 4, dance: .17, size: 4, tongues: 5},
 };
-const R = Math.random, rr = (a, b) => a + R() * (b - a), clamp = (v, a, b) => v < a ? a : v > b ? b : v, TAU = Math.PI * 2;
-const rgb = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
+const R = Math.random, rr = (a, b) => a + R() * (b - a);
 function tones(c) {   // white-hot .. dark tips; warm fires lean yellow in the middle and red at the tips
   const [r, g, b] = rgb(c), warm = r > b + .15 && r >= g, m = ART.mixHex;
   return (warm ? [m(c, '#ffffff', .82), m(c, '#fff3c0', .58), m(c, '#ffd27a', .28), c, m(c, '#b0341a', .45), m(c, '#4a140a', .6)]

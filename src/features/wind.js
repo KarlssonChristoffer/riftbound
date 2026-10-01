@@ -48,15 +48,11 @@
 // ART RULES (biomes.js / atmos.js): 1 texel = 1 screen px, no AA / dither / gradients on the pixel art; 4-tone ramps
 // [hi, base, shade, outline] lit from the screen's top-left; motion reads at 1x (a gust = 1-3 px of lean).
 import {flags} from '../core/flags.js';
+import {clamp, smooth, hash3 as hsh} from '../core/mathx.js';
+import {mulberry32} from '../core/rng.js';
+import {hexU32 as rgba} from '../core/color.js';
 
 const TAU = Math.PI * 2;
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-const smooth = t => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
-const hsh = (a, b = 0, c = 0) => {   // deterministic hash (same as biomes.js)
-  let n = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(c | 0, 1442695041)) | 0;
-  n = Math.imul(n ^ (n >>> 13), 1274126177); n ^= n >>> 16; return (n >>> 0) / 4294967296;
-};
-const rgba = s => { const n = parseInt(s.slice(1), 16); return (0xff000000 | ((n & 255) << 16) | (n & 0xff00) | (n >>> 16)) >>> 0; };   // '#rrggbb' -> ImageData u32
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
 
 // ---------------------------------------------------------------- tunables (the arena's, unchanged)
@@ -197,8 +193,7 @@ export async function create(host) {
     LV += (tg - LV) * Math.min(1, dt / STRENGTH.ease); W.level = LV;
   }
   function setMode(m) { W.mode = m; if (m === 'auto') { spell = 'brisk'; spellT = STRENGTH.dwell[0]; } }
-  let s = 1;   // seeded PRNG (mulberry32)
-  const R = () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const R = mulberry32(1);   // seeded (core/rng.js)
   const rr = a => a[0] + R() * (a[1] - a[0]);
   const tick = t0 => { acc += performance.now() - t0; };
   const vref = () => (B.base + B.gust) || 1;
@@ -269,7 +264,7 @@ export async function create(host) {
     FA.x = UX * v - UY * tw; FA.y = UY * v + UX * tw; FA.g = g; return FA;
   }
   function seedField() {
-    fronts.length = 0; nextF = 0; s = {ruins: 101, ember: 202, frost: 303, rift: 404}[biome] || 1;
+    fronts.length = 0; nextF = 0; R.seed({ruins: 101, ember: 202, frost: 303, rift: 404}[biome] || 1);
     extent();
     for (let t = 0; t < 30; t += .25) stepField(.25);   // a steady state: fronts already on the map
   }
@@ -739,7 +734,7 @@ export async function create(host) {
     const cx = (PLAY.x0 + PLAY.x1) / 2, cy = (PLAY.y0 + PLAY.y1) / 2;
     const add = it => { if (it) decor.push(it); };
     DA = decorAtlas();
-    s = 777;
+    R.seed(777);
     for (const x of [cx - 3.2, cx + 3.2]) add(wallBanner(x, PLAY.y0, pal));          // flanking the north gate, on the wall's inner face
     for (const y of [cy - 1.85, cy + 1.85]) add(standard(PLAY.x1 + 1.2, y, pal));    // flanking the east gate, trail side
     for (const p of props) if (p.kind === 'tower') add(pennant(p, pal));

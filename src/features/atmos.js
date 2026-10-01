@@ -39,6 +39,8 @@
 // RULES the art follows (the arena's): every particle is 1-3 px of solid palette colour, no alpha, no AA; fading =
 // stepping through darker palette entries. Sizes scale with the host's zoom (zoom 2 = 2 x 2 px per art pixel).
 import {flags} from '../core/flags.js';
+import {mulberry32} from '../core/rng.js';
+import {hexAny255 as hex3, lum} from '../core/color.js';
 
 const TAU = Math.PI * 2;
 // palettes are ordered bright -> dim; fades step toward the end
@@ -133,10 +135,8 @@ const SH_COL = {m: '#6c4cb4', d: '#3a2868', L: '#9a7ae0'}, SH_EMIT = ['#b88cff',
 const SH_SHADOW = '#948cac';
 const WATER_H = -.18;   // world.js lowers the stream bed by this much: the surface the stream fx, rings and splashes sit on
 
-const hex3 = h => { let s = String(h).replace('#', ''); if (s.length === 3) s = s.replace(/./g, m => m + m); const n = parseInt(s, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
 const RGBF = new Map();   // '#rrggbb' -> [r, g, b] 0..1 (host.point takes arrays as they are: no parsing per particle)
 const rgbf = h => { let v = RGBF.get(h); if (!v) { const c = hex3(h); RGBF.set(h, v = [c[0] / 255, c[1] / 255, c[2] / 255]); } return v; };
-const lum = c => c[0] * .3 + c[1] * .55 + c[2] * .15;
 
 export async function create(host) {
   const Q = flags;
@@ -149,8 +149,7 @@ export async function create(host) {
   let P = {x: 0, y: 0, z: 0, vx: 0, vy: 0, state: 'idle'}, dirX = 0, dirY = 1;
   const fx = [], prints = [], rings = [], plumes = [], strm = [];
   let strmFor = '';
-  let s = 1;   // seeded PRNG (mulberry32): the same biome always starts the same way
-  const R = () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const R = mulberry32(1);   // seeded (core/rng.js): the same biome always starts the same way
   const rr = a => a[0] + R() * (a[1] - a[0]);
   const M = 10;   // wrap margin, view px
   const props = () => host.props || [];
@@ -271,7 +270,7 @@ export async function create(host) {
   }
   function populate() {
     need = false;
-    s = {ruins: 11, ember: 23, frost: 37, rift: 51}[biome] || 1;
+    R.seed({ruins: 11, ember: 23, frost: 37, rift: 51}[biome] || 1);
     view();
     kinds = (KINDS[biome] || []).map(D => {
       const K = {...D, span: D.hMax ?? D.hi ?? 2, ps: []};

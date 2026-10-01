@@ -16,8 +16,8 @@
 //   sound    a line passing close to the player gives a soft dark swish (windaudio.js swish), panned to its side
 // FEATURE CONTRACT (main.js): create(host) -> F: update (simulate), frame (draw), settings, onKey, hud.
 import {flags} from '../core/flags.js';
+import {clamp} from '../core/mathx.js';
 const TAU = Math.PI * 2;
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const R = Math.random, rr = (a, b) => a + R() * (b - a);
 export const TUNE = {
   look: 'pixel',

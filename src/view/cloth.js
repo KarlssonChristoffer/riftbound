@@ -12,9 +12,9 @@
 //   rig.draw(ctx, left, top, depth, face, nctx)   // + the cloth's normals (linear, +x right +y up +z to the viewer, as
 //                                                  // pixelize's body_normals) into nctx at the same spot, so the host
 //                                                  // can light body + cloth together (arena: lighting.drawSprite)
+import {hexRaw255 as hex} from '../core/color.js';
 const LIGHT = (() => { const v = [-0.55, -0.62, 0.56], l = Math.hypot(...v); return v.map(c => c / l); })();  // pixelize's
 const HI = .78, LO = .36;
-const hex = h => [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 // 3x3 matrices as row-major arrays of 9

@@ -9,9 +9,9 @@
 //   edges         a red vignette when you're hit, a slow pulse at low health
 import {TIER} from '../game/items.js';
 import {clock} from '../game/save.js';
+import {clamp} from '../core/mathx.js';
 
 const FONT = '"Segoe UI", system-ui, sans-serif';
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
 export function createHud(host) {
   const banners = [], toasts = [], floats = [];

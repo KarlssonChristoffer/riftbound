@@ -43,9 +43,9 @@ import {createBakery} from '../../audio/runtime/bakery.js';
 import {createDirector} from '../../audio/runtime/director.js';
 import {EVENTS, AMBIENCE} from '../../audio/runtime/events.js';
 import {flags} from '../core/flags.js';
+import {clamp} from '../core/mathx.js';
 
 const R = Math.random, RR = (a, b) => a + R() * (b - a), J = p => 1 + (R() * 2 - 1) * p;
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const pick = a => a[(R() * a.length) | 0];
 const MAXV = 30;   // simultaneous SFX voices (priority 2 / 3 sounds may go 6 / 12 over)
 

@@ -28,6 +28,8 @@
 //     Pad, flute and bass are live oscillators (few voices, cheap).
 //   Stingers: opening a chest plays a bell arpeggio in the current chord, loot plays a note from the scale, and a
 //     respawn plays a falling pluck. All are quantised to the next 16th so they land in time with the music.
+import {clamp} from '../core/mathx.js';
+import {mulberry32} from '../core/rng.js';
 
 const DORIAN = [0, 2, 3, 5, 7, 9, 10], PHRYGIAN = [0, 1, 3, 5, 7, 8, 10], AEOLIAN = [0, 2, 3, 5, 7, 8, 10];
 const HUNGARIAN = [0, 2, 3, 6, 7, 8, 11];   // minor with a raised 4th and 7th: eerie, still has the 5th for the rift's A-E drones
@@ -69,8 +71,6 @@ const RHYTHMS = [
 ];
 
 const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
 // ======================================================================================================================
 // INSTRUMENT RENDERING: plain JS DSP into Float32Arrays (deterministic, seeded)

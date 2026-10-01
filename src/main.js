@@ -51,6 +51,8 @@ import {createPerf} from './core/perf.js';   // the frame profiler: per-system m
 import {createEnv, SEASONS, WEATHER} from './sim/env.js';   // the world clock: time of day, seasons, weather
 import {createMenu} from './ui/menu.js';   // the pause / settings menu (Escape)
 import {flags} from './core/flags.js';
+import {lum, rgbOf} from './core/color.js';
+import {toView as viewOf, toWorld as worldOf} from './render/viewxf.js';
 
 const $ = s => document.querySelector(s);
 const Q = flags;   // the URL switches (core/flags.js)
@@ -104,8 +106,6 @@ fit(); addEventListener('resize', fit);
 
 const GRADE = {ruins: [1.039, 1.029, .818], ember: [1.166, .958, .82], frost: [.896, 1.013, 1.161], rift: [1.056, .792, 1.649]};
 const BG = {ruins: [.10, .13, .11], ember: [.11, .06, .05], frost: [.10, .12, .17], rift: [.06, .04, .10]};
-const lum = c => c[0] * .3 + c[1] * .55 + c[2] * .15;
-const rgbOf = c => { if (Array.isArray(c)) return c; let s = String(c || '#fff').replace('#', ''); if (s.length === 3) s = s.replace(/./g, m => m + m); const n = parseInt(s, 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 
 let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome')));
 // THE WORLD CLOCK (sim/env.js): time of day, seasons, weather, running in the background. It owns "what time is it":
@@ -150,8 +150,7 @@ if (Q.get('lineup') === 'trees') {
 // easing (stepZoom). host.zoom is this (view px per art px), so features size their pixels right while it eases
 let yaw = (+Q.get('yaw') || 0) * DEG, zoom = 1, snapMode = +(Q.get('snap') ?? 0) || 0;
 const SNAP = [0, 22.5 * DEG, 90 * DEG], SNAP_NAME = ['free', '22.5° steps', '90° steps'];
-const toView = (X, Z, a = yaw) => [X * Math.cos(a) - Z * Math.sin(a), X * Math.sin(a) + Z * Math.cos(a)];
-const toWorld = (vx, vy, a = yaw) => [vx * Math.cos(a) + vy * Math.sin(a), -vx * Math.sin(a) + vy * Math.cos(a)];
+const toView = (X, Z, a = yaw) => viewOf(X, Z, a), toWorld = (vx, vy, a = yaw) => worldOf(vx, vy, a);   // (render/viewxf.js at this camera's yaw)
 
 // ---------------------------------------------------------------- the player
 const keys = new Set(), mouse = {x: VW / 2, y: VH / 2, down: false}, cam = {x: 0, y: 0, fx: 0, fy: 0}, events = [];

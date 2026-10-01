@@ -50,18 +50,12 @@
 //             Each frame the player's current silhouette is cut out of any ghost that overlaps him on screen, so a
 //             ghost never covers him (the arena sorted them just behind him).
 import {flags} from '../core/flags.js';
+import {clamp, hash3 as hsh, vnoise as vn} from '../core/mathx.js';
+import {mulberry32} from '../core/rng.js';
+import {hexAny255 as hex3, lum} from '../core/color.js';
+import {toView, toWorld} from '../render/viewxf.js';
 
 const TAU = Math.PI * 2;
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-const hsh = (a, b = 0, c = 0) => {
-  let n = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(c | 0, 1442695041)) | 0;
-  n = Math.imul(n ^ (n >>> 13), 1274126177); n ^= n >>> 16; return (n >>> 0) / 4294967296;
-};
-const vn = (x, y, s = 0) => {   // value noise (blobby clusters, never per-pixel dither)
-  const xi = Math.floor(x), yi = Math.floor(y); let fx = x - xi, fy = y - yi; fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
-  const a = hsh(xi, yi, s), b = hsh(xi + 1, yi, s), c = hsh(xi, yi + 1, s), d = hsh(xi + 1, yi + 1, s);
-  return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
-};
 
 // ---------------- tunables (live: __r3d.host.feature('flow').TUNE) ----------------
 const TUNE = {
@@ -113,7 +107,6 @@ const AIR = '#efe4c8';   // the arrows' air streak: player.js PX.strTight (PAL.l
 const CHEST = 1.25, MOUTH = 1.55;   // metres: the arrows' height (aim lean origin), breath height
 const WATER_H = -.18;   // world.js lowers the stream bed by this much (drips sink there)
 
-const hex3 = h => { let s = String(h).replace('#', ''); if (s.length === 3) s = s.replace(/./g, m => m + m); const n = parseInt(s, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
 const RGBF = new Map(); const rgbf = h => { let v = RGBF.get(h); if (!v) { const c = hex3(h); RGBF.set(h, v = [c[0] / 255, c[1] / 255, c[2] / 255]); } return v; };
 const RGB8 = new Map(); const rgb8 = h => { let v = RGB8.get(h); if (!v) RGB8.set(h, v = hex3(h)); return v; };
 const ZERO = {x: 0, y: 0, g: 0};
@@ -125,8 +118,7 @@ export async function create(host) {
   const F = {name: 'flow', label: 'Flow (camera, trails, marks)', key: '8', on: Q.get('flow') !== '0', ms: 0, TUNE, T: TUNE};
   const K = TUNE.cam;
   let biome = '', time = 'day', acc = 0, simT = 0;
-  let s = 71;
-  const R = () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const R = mulberry32(71);
   const rr = (a, b) => a + R() * (b - a);
   const tick = t0 => { acc += performance.now() - t0; };
   const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const q = c.getContext('2d'); q.imageSmoothingEnabled = false; return [c, q]; };
@@ -143,8 +135,7 @@ export async function create(host) {
   const SX = (x, y, h) => V.ox + x * V.xx + y * V.yx + h * V.hx, SY = (x, y, h) => V.oy + x * V.xy + y * V.yy + h * V.hy;
   const inView = (X, Y, m) => X > -m && Y > -m && X < VW + m && Y < VH + m;
   // world <-> view frame (the camera-turned ground axes the player runs in), at the current yaw
-  const toVF = (x, y) => { const c = Math.cos(host.yaw), s0 = Math.sin(host.yaw); return [x * c - y * s0, x * s0 + y * c]; };
-  const toW = (a, b) => { const c = Math.cos(host.yaw), s0 = Math.sin(host.yaw); return [a * c + b * s0, -a * s0 + b * c]; };
+  const toVF = (x, y) => toView(x, y, host.yaw), toW = (a, b) => toWorld(a, b, host.yaw);
 
   // drawing: colour buckets (batched fillRects) for the ground / glow layers; lit points
   // ground; front glow (sparks, glowing drips, night breath: the arena's view-sized emitter canvas, drawn straight over the
@@ -156,7 +147,7 @@ export async function create(host) {
   const any = bk => { for (const a of bk.values()) if (a.length) return true; return false; };
   const lp = (bk, c, X, Y, dx = 0, dy = 0) => put(bk, c, X + dx * V.z, Y + dy * V.z, V.z, V.z);
   const PO = {size: 1}, PA = [{size: 1, alpha: .22}, {size: 1, alpha: .45}];
-  const lum = c => c[0] * .3 + c[1] * .55 + c[2] * .15, glowA = () => Math.max(.3, Math.min(1, 1.25 - lum(host.mood?.amb || [1, 1, 1]) * .95));
+  const glowA = () => Math.max(.3, Math.min(1, 1.25 - lum(host.mood?.amb || [1, 1, 1]) * .95));
   // the emit path: ground glow is painted on a private view-sized canvas, the player's silhouette (his card as drawn this
   // frame: anchor snapped to a pixel, pivot, zoom) is cut out of it, as the arena's lighting.apply did, then it goes
   // into host.layer('emit'). (Reading the player's canvas back per pixel would cost ~6 ms: it lives on the GPU.)

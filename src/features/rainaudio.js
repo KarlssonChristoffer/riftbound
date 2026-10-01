@@ -9,7 +9,8 @@
 // ambience level. createRainAudio(ac, dest) -> {update(dt, {rain, storm} | null), thunder(dist, pan), stop()}
 // Levels: TUNE (linear gains into the ambience bus).
 import {loopBuf, pink, burst} from './windaudio.js';
-const R = Math.random, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+import {clamp} from '../core/mathx.js';
+const R = Math.random;
 export const TUNE = {
   wash: .34,       // the rain's body at full rain
   drops: 70,       // patter grains per second at full rain

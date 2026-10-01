@@ -23,10 +23,8 @@
 // createEnv({moods, biome, Q}) -> env. env.step(dt) once per sim step. Dev: setHour / setPart / setSeason / setWeather /
 // setDayMinutes; URL ?hour= ?season= ?weather= ?daymin= (0 = the clock stands still); ?time=day|dusk|night still works.
 import {flags} from '../core/flags.js';
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-const smooth = t => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
-const lerp = (a, b, k) => a + (b - a) * k;
-const hex = h => [0, 2, 4].map(i => parseInt(h.slice(i + 1, i + 3), 16) / 255);
+import {clamp, smooth, lerp} from '../core/mathx.js';
+import {hex01 as hex} from '../core/color.js';
 
 export const TUNE = {
   dayMinutes: 20,     // real minutes per in-game day (dawn ~1.5, day ~7.5, dusk ~1.5, night ~7 of them)

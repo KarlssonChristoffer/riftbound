@@ -1,23 +1,14 @@
 // DEPTH ART: the arena's foreground kit, copied as it is from concepts/sprites/arena/depth.js (painters, palettes,
 // shaft / water / puddle colours), so the 3D page paints exactly the same pieces. features/depth.js uses it.
 // Nothing here knows about the camera: tone maps (Sil) in sprite px, coloured per mood by the feature.
+import {clamp, hash3 as hsh, vnoise as vn} from '../../core/mathx.js';
+import {mulberry32 as rng} from '../../core/rng.js';
+import {hex255 as rgb} from '../../core/color.js';
 const TAU = Math.PI * 2;
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const mod = (a, n) => ((a % n) + n) % n;
 function mk(w, h, opts) { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); const q = c.getContext('2d', opts); q.imageSmoothingEnabled = false; return [c, q]; }
 function fit(c, q, w, h) { w = Math.max(1, Math.ceil(w)); h = Math.max(1, Math.ceil(h)); if (c.width !== w || c.height !== h) { c.width = w; c.height = h; q.imageSmoothingEnabled = false; return true; } return false; }
 // deterministic hash / value noise (same as biomes.js: the frost floes below are re-derived from it)
-const hsh = (a, b = 0, c = 0) => {
-  let n = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(c | 0, 1442695041)) | 0;
-  n = Math.imul(n ^ (n >>> 13), 1274126177); n ^= n >>> 16; return (n >>> 0) / 4294967296;
-};
-const vn = (x, y, s = 0) => {
-  const xi = Math.floor(x), yi = Math.floor(y); let fx = x - xi, fy = y - yi; fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
-  const a = hsh(xi, yi, s), b = hsh(xi + 1, yi, s), c = hsh(xi, yi + 1, s), d = hsh(xi + 1, yi + 1, s);
-  return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
-};
-const rng = seed => { let s = seed | 0; return () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; };
-const rgb = s => { const n = parseInt(s.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
 const css = c => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
 
 const BARK = 1, LEAF = 2, STONE = 3, METAL = 4, SNOW = 5, ICE = 6, ROCK = 7, CRYS = 8;

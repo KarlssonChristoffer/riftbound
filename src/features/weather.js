@@ -12,8 +12,8 @@
 // OWNS: its particles (preallocated typed arrays, capped), the flash and bolts. READS: host.env (sky, season, seasonK,
 // tinted, snowCover, wet, leafK), host.wind (at, the wind field), host.elev / inStream. EMITS: rainaudio.thunder.
 // BUDGET: ~0.15 ms per frame at full rain (900 drops + splashes), nothing without weather.
+import {clamp} from '../core/mathx.js';
 const TAU = Math.PI * 2;
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const R = Math.random, rr = (a, b) => a + R() * (b - a);
 export const TUNE = {
   rain: {max: 900, v: [8.5, 10.5], len: .17, top: 7, splashEvery: 2},   // drops at full rain, fall m/s, streak m, spawn height

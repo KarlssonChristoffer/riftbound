@@ -34,14 +34,14 @@ import {STREAM, PLAY} from '../world/layout.js';
 import * as WORLD from '../world/world.js';
 import {geoOf, M4, along} from '../world/kit3d.js';
 import {createFires} from './firesim.js';
+import {clamp} from '../core/mathx.js';
+import {hex01 as rgb} from '../core/color.js';
 // how high our props stop arrows (main.js reads world.js PROP_TOP; 2.5 m otherwise): arrows fly over the campfire
 // (they catch fire going through it), the beacon only stops them up to its basket
 if (WORLD.PROP_TOP) Object.assign(WORLD.PROP_TOP, {campfire: 0, beacon: 1.15, woodpile: .3});
 
 const TAU = Math.PI * 2;
-const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const R = Math.random, rr = (a, b) => a + R() * (b - a);
-const rgb = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 const lerp3 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 
 const D = .21;   // a sconce's stick stands this far off the wall face (the arm shows a few px past the stick)

@@ -11,7 +11,8 @@
 // as sparse grains, ambience level. createWindAudio(ac, dest) -> {update(dt, s | null), swish(pan, k), stop()};
 // s = {e, pan, strength}. swish: a wind line (windlines.js) streaking past the player.
 // Levels: TUNE (linear gains into the ambience bus); measure(ac) renders a few seconds offline for level checks.
-const R = Math.random, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+import {clamp} from '../core/mathx.js';
+const R = Math.random;
 export const TUNE = {
   rustle: .39,     // gain at full agitation (saturates: 1 - exp(-.8 e)). Measured (measure()): calm -52 dBFS RMS, a breeze
                    // gust -34, a brisk lull -36, a brisk gust -30, a gale -28: ambience level, gusts stand out a little.

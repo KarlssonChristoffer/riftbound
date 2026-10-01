@@ -28,10 +28,12 @@
 // [highlight, base, shade, outline]; light from the top-left; selective outlines (shade tone on lit edges, darkest
 // tone on the shadow side). The environment stays calmer than the character: narrow value ranges, big calm areas,
 // detail at edges and focal points. Glow = emissive pixels (emit canvas) + lights; no bloom.
+import {hash3 as hsh, vnoise as vn} from '../core/mathx.js';
+import {mulberry32 as rng} from '../core/rng.js';
+import {hexU32 as hex} from '../core/color.js';
 
 // ============================================================ pixel toolkit
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
-const hex = s => { const n = parseInt(s.slice(1), 16); return (0xff000000 | ((n & 255) << 16) | (n & 0xff00) | (n >>> 16)) >>> 0; };
 const mixHex = (a, b, k) => {
   const A = parseInt(a.slice(1), 16), B = parseInt(b.slice(1), 16), c = s => Math.round(((A >> s) & 255) * (1 - k) + ((B >> s) & 255) * k);
   return '#' + ((c(16) << 16) | (c(8) << 8) | c(0)).toString(16).padStart(6, '0');
@@ -42,17 +44,7 @@ const LX = -.55, LY = -.62, LZ = .56;   // light: from the top-left, a bit towar
 const PI2 = Math.PI * 2;
 
 // deterministic hash / value noise (no Math.random anywhere: the same seed always paints the same world)
-const hsh = (a, b = 0, c = 0) => {
-  let n = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(c | 0, 1442695041)) | 0;
-  n = Math.imul(n ^ (n >>> 13), 1274126177); n ^= n >>> 16; return (n >>> 0) / 4294967296;
-};
-const vn = (x, y, s = 0) => {
-  const xi = Math.floor(x), yi = Math.floor(y); let fx = x - xi, fy = y - yi; fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
-  const a = hsh(xi, yi, s), b = hsh(xi + 1, yi, s), c = hsh(xi, yi + 1, s), d = hsh(xi + 1, yi + 1, s);
-  return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
-};
 const fbm = (x, y, s) => vn(x, y, s) * .62 + vn(x * 2.3 + 17, y * 2.3 + 5, s + 1) * .28 + vn(x * 5.1 + 3, y * 5.1 + 9, s + 2) * .1;
-const rng = seed => { let s = seed | 0; return () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; };
 // voronoi: nearest two feature points (metres). Results in VO to avoid allocations in per-pixel loops.
 const VO = {d1: 0, d2: 0, id: 0, x: 0, y: 0};
 function vor(mx, my, cell, seed) {
