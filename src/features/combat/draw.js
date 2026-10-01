@@ -8,7 +8,7 @@
 //   numbers, HP bars, ability bar      -> F.hd (display resolution)
 // Ground rings are world circles: under any yaw they project to the arena's ellipse (r * PPM, r * PPMY) * zoom.
 
-export function createDraw(host, core) {
+export function createDraw(host, core, phys) {
   const {T, AB, SLOTS, S} = core, D = core.dbg;
   const TAU = Math.PI * 2, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
   const RGB = new Map(), rgb = c => { let v = RGB.get(c); if (!v) { v = host.rgb(c); RGB.set(c, v); } return v; };
@@ -79,7 +79,7 @@ export function createDraw(host, core) {
   }
   function waterline() {
     const wh = host.world.waterH ?? -.18, t = core.simT, S = host.layout.stream;
-    for (const q of host.props) {
+    for (const q of phys.mov) {   // (only the movables sink: combat/props.js)
       // in the channel (inStream says false right ON a sunk crate: it became a stepping stone, dry footing)
       if (!q.sink || q.gone || q.broken || !S || Math.abs(q.x - S.cx(q.y)) > S.w(q.y) / 2 + .4) continue;
       const crate = q.kind === 'crate', g = G();

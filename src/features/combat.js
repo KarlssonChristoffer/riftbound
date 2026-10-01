@@ -33,7 +33,7 @@ export async function create(host) {
   await Promise.all(extra.map(p => host.world.addItem(p)));
   const core = createCore(host);
   const phys = await createPropPhysics(host, core);
-  const draw = createDraw(host, core);
+  const draw = createDraw(host, core, phys);
   let tU = 0, tF = 0;
   const now = () => performance.now();
 

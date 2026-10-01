@@ -39,7 +39,7 @@ export async function createPropPhysics(host, core) {
     blast: 7.5, impact: 2.2, boomImpact: 2.1, flow: .9, sinkT: .45, idleReset: 22, resetAway: 6,
     sinkCrate: CRATE_H - .02, sinkFloat: .22,   // 3D: how deep a sunk crate / a floating barrel sits (the arena: .5 / .22)
   };
-  const props = () => host.props, stream = () => host.layout.stream;
+  const ents = host.entities, stream = () => host.layout.stream, nearQ = [];   // nearQ: the grid's candidates
   // (live queries on the entity registry: a movable prop that joins later gets its physics state as it joins)
   const mov = host.entities.query('props.movable', p => MOVABLE.has(p.kind), p => { p.home3 = [p.x, p.y, p.z || 0]; p.vx = 0; p.vy = 0; p.push = p.kind === 'crate' && !p.wall; p.idle = 0; });
   const chests = host.entities.query('props.chest', p => p.kind === 'chest');
@@ -56,7 +56,7 @@ export async function createPropPhysics(host, core) {
     if (host.elev(x, y) > (q.z || 0) + .3) return 'edge';   // a cliff face from below
     const r = q.tip ? .3 : q.r || .32;
     if (Math.abs(P.z - (q.z || 0)) < .8 && Math.hypot(P.x - x, P.y - y) < r + R_BODY) return 'player';
-    for (const p of props()) {
+    for (const p of ents.near(x, y, r, nearQ)) {
       if (p === q || p.broken || p.gone || Math.abs((p.z || 0) - (q.z || 0)) > .9) continue;
       if (p.rect) { if (x > p.rect[0] - r && x < p.rect[2] + r && y > p.rect[1] - r && y < p.rect[3] + r) return p; }
       else if (p.r > 0 && Math.hypot(p.x - x, p.y - y) < p.r + r * .9) return p;
@@ -99,6 +99,7 @@ export async function createPropPhysics(host, core) {
     dropStone(q);
     [q.x, q.y, q.z] = q.home3;
     Object.assign(q, {vx: 0, vy: 0, h: 0, vh: 0, tip: null, sink: 0, sinkT: undefined, float: false, gone: false, idle: 0, r: q.kind === 'crate' ? (q.wall ? .38 : .34) : .3});
+    ents.moved(q);   // a jump home: the grid follows now, not next step
     if (q.kind === 'crate') q.push = !q.wall;
     if (q.gone === false && q.broken && q.goneBroken) { q.broken = false; q.goneBroken = false; }
     if (!quiet) host.events.push({type: 'respawn', prop: true, x: q.x, y: q.y});

@@ -273,7 +273,8 @@ export async function create(host) {
   const FOLK = {tuft: 1, bush: 1, tree: 1};
   const fst = new Map();   // prop -> spring state (2D lean in px, world axes)
   let fol = null, folN = -1, folArr = null;
-  const folList = () => { const P = host.props; if (!fol || P !== folArr || P.length !== folN) { fol = P.filter(p => FOLK[p.kind]); folN = P.length; folArr = P; } return fol; };
+  // (re-made when the registry's membership changes: host.propsVersion bumps on every join / leave, world/entities.js)
+  const folList = () => { const P = host.props, v = host.propsVersion ?? P.length; if (!fol || P !== folArr || v !== folN) { fol = P.filter(p => FOLK[p.kind]); folN = v; folArr = P; } return fol; };
   // NEAR: the foliage round the view and within 16 m of the player (the rustle's reach), from an 8 m cell index built when
   // the props change; the list is redone only when that box crosses a cell edge. The per-step loops (sway, arrows through
   // the leaves, shedding, rustle; windlines.js through W.foliage()) visit NEAR, never all the props

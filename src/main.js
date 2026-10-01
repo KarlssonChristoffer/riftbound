@@ -112,13 +112,13 @@ const toView = cv.toView, toWorld = cv.toWorld;   // world <-> the camera's view
 // ---------------------------------------------------------------- the player
 const keys = new Set(), mouse = {x: cv.VW / 2, y: cv.VH / 2, down: false}, cam = {x: 0, y: 0, fx: 0, fy: 0};
 // arrows, hit pops, footstep dust (sim/projectiles.js)
-const proj = createProjectiles({world: () => stage.world, features, events, opt: () => opt, toWorld, PPM, PPMH});
+const proj = createProjectiles({world: () => stage.world, ents: () => stage.ents, features, events, opt: () => opt, toWorld, PPM, PPMH});
 const {arrows, dust} = proj, spawnArrow = proj.spawn;
 const feat = name => features.find(f => f.name === name) || null;
 const hero = createHero({G, set, loadI, ctxO, app});
 // THE PLAYER (sim/player/adapter.js): player.js in the camera's frame, bridged to the world (collision, the world-frame
 // `player`, turning with the camera, the cursor's target, interaction, climbing at any angle)
-const pa = createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: () => stage.world, biome: () => stage.biome,
+const pa = createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: () => stage.world, ents: () => stage.ents, biome: () => stage.biome,
   opt: () => opt, proj, flags: Q});
 const {PL, P, player} = pa;
 
@@ -162,6 +162,7 @@ const host = {
 // ---------------------------------------------------------------- features
 tp = performance.now();
 await loadFeatures(features, host);   // core/features.js
+stage.ents.sync();   // features placed and moved props as they were made (lights' sconces): the grid follows
 mark('features', tp);
 // the game goes first: it sees keys, arrows, hits and interactions before the engine's features
 const game = await createGame(host); features.unshift(game);

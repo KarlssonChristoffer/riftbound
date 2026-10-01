@@ -2,27 +2,31 @@
 // footstep dust; plus the props' hit wobble / flash decay and rail movers (the arena's stepFx).
 // An arrow flies (gravity .9), hits the first target / hp prop in reach (features' onArrowHit decide 'stop' | 'pierce'),
 // sticks in 3D tree bark, walls, solid props or the ground, splashes in the stream, then fades.
-// OWNS: arrows, pops, dust, the hit count. READS: the world (props, trees, elevation, stream), features' arrow hooks.
+// OWNS: arrows, pops, dust, the hit count. READS: the world (trees, elevation, stream), the entities (near: what an arrow
+// hits or sticks in), features' arrow hooks.
 // EMITS: hit, splash. BUDGET: part of sim.
-//   const proj = createProjectiles({world: () => world, features, events, opt: () => opt, toWorld, PPM, PPMH})
+//   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH})
 //   proj.spawn(o) | proj.step(dt) | proj.draw(host) | proj.arrows / dust / hits
 import {elev, inStream, PROP_TOP} from '../world/world.js';
 import {rgbOf} from '../core/color.js';
 
 const ARROW = {shaft: rgbOf('#9a6c44'), head: rgbOf('#cfcbbf'), fletch: rgbOf('#efe4c8')};
 const DUST = ['#b8a888', '#8a7a60', '#5e5444'].map(rgbOf), POP = rgbOf('#f2d27a');
+// how far round an arrow to look for what it hits: any hitR (<= .55, a boss) plus a piercing arrow's step out of the
+// prop it went through (combat core: up to 1.2 m along its flight) in the same pass
+const REACH = 2;
 
-export function createProjectiles({world: worldOf, features, events, opt: optOf, toWorld, PPM, PPMH}) {
-  const arrows = [], pops = [], dust = [];
+export function createProjectiles({world: worldOf, ents: entsOf, features, events, opt: optOf, toWorld, PPM, PPMH}) {
+  const arrows = [], pops = [], dust = [], nearH = [], nearS = [];
   let hits = 0;
   function spawn(o) { const a = {life: 1.6, vh: 0, kind: 'arrow', ...o}; for (const f of features) f.arrow?.(a); arrows.push(a); }
   function step(dt) {
-    const world = worldOf();
+    const world = worldOf(), ents = entsOf();
     for (const a of arrows) {
       if (a.stuck) { a.life -= dt; continue; }
       a.x += a.vx * dt; a.y += a.vy * dt; a.h += a.vh * dt; a.vh -= .9 * dt; a.life -= dt;
       (a.trail ??= []).push([a.x, a.y, a.h]); if (a.trail.length > 7) a.trail.shift();
-      for (const p of world.props) {
+      for (const p of ents.near(a.x, a.y, REACH, nearH)) {
         if (p.broken || p.gone || !(p.target || p.hp > 0) || (a.hitSet && a.hitSet.has(p))) continue;
         const rel = a.h - (p.z || 0) - (p.h || 0);
         if (Math.hypot(p.x - a.x, p.y - a.y) < (p.hitR ?? .45) && rel > -.2 && rel < (p.hitH ?? 1.6)) {
@@ -36,7 +40,7 @@ export function createProjectiles({world: worldOf, features, events, opt: optOf,
       // a 3D tree (trees3d.js) stops an arrow only in its trunk / big limbs, the tip in the bark; its round collider is skipped
       const tree = world.treeHit?.(a.x - a.vx * dt, a.y - a.vy * dt, a.h - a.vh * dt, a.x, a.y, a.h);
       if (tree) { a.x = tree.x; a.y = tree.y; a.h = tree.h; a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
-      else if (!a.stuck && world.props.some(p => !p.broken && !p.gone && !(a.hitSet && a.hitSet.has(p)) && !world.itemOf(p)?.pose && (p.rect ? a.x > p.rect[0] && a.x < p.rect[2] && a.y > p.rect[1] && a.y < p.rect[3] : p.r > .3 && Math.hypot(p.x - a.x, p.y - a.y) < p.r)
+      else if (!a.stuck && ents.near(a.x, a.y, 0, nearS).some(p => !p.broken && !p.gone && !(a.hitSet && a.hitSet.has(p)) && !world.itemOf(p)?.pose && (p.rect ? a.x > p.rect[0] && a.x < p.rect[2] && a.y > p.rect[1] && a.y < p.rect[3] : p.r > .3 && Math.hypot(p.x - a.x, p.y - a.y) < p.r)
         && a.h > (p.z || 0) && a.h < (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5))) { a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
       else if (!a.stuck && a.h <= ground && ground === 0 && inStream(a.x, a.y)) { a.life = -9; events.push({type: 'splash', x: a.x, y: a.y, small: true}); features.forEach(f => f.onArrowStuck?.(a)); }
       else if (!a.stuck && (a.h <= ground || a.life <= 0)) { a.stuck = true; a.h = Math.max(ground, Math.min(a.h, ground + 2.4)); a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }

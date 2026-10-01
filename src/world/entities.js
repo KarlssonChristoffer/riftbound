@@ -13,9 +13,10 @@
 //   ents.query(name, pred, join?) -> a live array: the members for which pred(p) held when they joined (or at refresh());
 //     join(p) runs for each member as it joins the query (the ones already there first, in order): the querying system
 //     sets up its own state for it. Names are the owner's: 'combat.hittable', 'props.movable'
-//   ents.near(x, y, r, out, q?) -> out: entities whose extent may reach the circle (x, y, r) (q: only that query's
-//     members), in list order. Candidates: do the exact test
-//   ents.sync() (the loop, each step) / ents.refresh(name?) (re-run a query's predicate over the list)
+//   ents.near(x, y, r, out, q?) -> out (cleared first): entities whose extent may reach the circle (x, y, r) (q: only
+//     that query's members), in list order. Candidates: do the exact test. Each caller keeps its own `out` array
+//   ents.sync() (the loop, each step) / ents.moved(p) (a jump further than spatial.js PAD within a step: respawns,
+//     resets, teleports) / ents.refresh(name?) (re-run a query's predicate over the list)
 import {createGrid} from './spatial.js';
 
 export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
@@ -64,11 +65,13 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
     scratch.length = 0; grid.query(x - r, y - r, x + r, y + r, scratch);
     // list order = ids ascending (insertion sort: a handful of candidates)
     for (let i = 1; i < scratch.length; i++) { const a = scratch[i]; let j = i - 1; while (j >= 0 && scratch[j].id > a.id) { scratch[j + 1] = scratch[j]; j--; } scratch[j + 1] = a; }
+    out.length = 0;
     for (let i = 0; i < scratch.length; i++) if (!bit || scratch[i].mask & bit) out.push(scratch[i].p);
     return out;
   }
+  function moved(p) { const rec = recs.get(p); if (rec && !grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } }
   function sync() {
     for (const rec of recs.values()) if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); }
   }
-  return {list, add, remove, has: p => recs.has(p), query, refresh, near, sync, get ver() { return ver; }, get size() { return recs.size; }, grid, _rec: recOf};
+  return {list, add, remove, has: p => recs.has(p), query, refresh, near, sync, moved, get ver() { return ver; }, get size() { return recs.size; }, grid, _rec: recOf};
 }

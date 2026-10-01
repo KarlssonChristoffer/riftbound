@@ -153,6 +153,8 @@ export async function create(host) {
   const rr = a => a[0] + R() * (a[1] - a[0]);
   const M = 10;   // wrap margin, view px
   const props = () => host.props || [];
+  // the embers' sources (a live query: braziers and torches, not every prop) and the grid's candidates for a footstep
+  const emberQ = host.entities.query('atmos.ember', p => p.kind === 'brazier' || p.kind === 'torch'), nearT = [];
   const elevAt = (x, y) => host.elev(x, y);
   const wet = (x, y) => host.inStream(x, y);
   const tick = t0 => { acc += performance.now() - t0; };
@@ -238,7 +240,7 @@ export async function create(host) {
   }
   function source() {      // a brazier / torch on screen (embers rise from it)
     const vis = [];
-    for (const b of props()) if ((b.kind === 'brazier' || b.kind === 'torch') && !b.gone && !b.broken && !b.unlit) {
+    for (const b of emberQ) if (!b.gone && !b.broken && !b.unlit) {
       const x = SX(b.x, b.y, b.z || 0), y = SY(b.x, b.y, b.z || 0); if (x > -8 && x < VW + 8 && y > 0 && y < VH + 40) vis.push(b);
     }
     return vis.length ? vis[R() * vis.length | 0] : null;
@@ -415,7 +417,7 @@ export async function create(host) {
       if (e.type === 'land' || e.big > 1) emitFx(e.x, e.y, z + .03, 7, SNOWPUFF);
       else if (sp > 4) emitFx(x, y, z + .03, 2, SNOWPUFF);
     } else if (biome === 'ruins') {   // grass rustle: kicking through a tuft throws a few blades
-      for (const p of props()) if (p.kind === 'tuft' && Math.abs(p.x - e.x) < .6 && Math.abs(p.y - e.y) < .45 && Math.abs((p.z || 0) - z) < .3) { emitFx(p.x, p.y, z + .05, 3, GRASS); break; }
+      for (const p of host.entities.near(e.x, e.y, .6, nearT)) if (p.kind === 'tuft' && Math.abs(p.x - e.x) < .6 && Math.abs(p.y - e.y) < .45 && Math.abs((p.z || 0) - z) < .3) { emitFx(p.x, p.y, z + .05, 3, GRASS); break; }
     }
   }
   function splash(e) {

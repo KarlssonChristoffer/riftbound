@@ -262,7 +262,8 @@ export async function create(host) {
   const tag = (p, extra) => Object.assign(p, {garden: true}, extra);
   const add = p => host.entities.add(p);   // joins the world (world/entities.js)
   const SOFT = new Set(['bush', 'rock', 'tuft']);
-  const soften = () => { for (const p of props()) if (SOFT.has(p.kind) && p.r) p.r = 0; };
+  const softQ = host.entities.query('garden.soft', p => SOFT.has(p.kind));   // a live query: these kinds, not every prop
+  const soften = () => { for (const p of softQ) if (p.r) p.r = 0; };
   soften();
   let merchant = props().find(p => p.kind === 'merchant');
   if (!merchant) {

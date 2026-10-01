@@ -182,6 +182,11 @@ export async function create(host) {
 
   // ================================================================ the world's light sources
   const props = () => host.props;
+  // live queries on the entity registry (world/entities.js): the per-step / per-frame passes visit the braziers and
+  // torches (and the beacon), not every prop; a neighbour that can catch fire is found through the grid
+  const flames = host.entities.query('lights.flame', p => p.kind === 'brazier' || p.kind === 'torch');
+  const catchers = host.entities.query('lights.catch', p => p.kind === 'brazier' || p.kind === 'torch' || p.kind === 'beacon');
+  const nearB = [];
   // the sconces: the layout's east torches move onto the wall, plus the gate pairs (west ones unlit)
   function mountSconces() {
     const {x0, y0, x1, y1} = PLAY, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, added = [];
@@ -299,7 +304,7 @@ export async function create(host) {
   const flameAt = (p) => (p.z || 0) + (p.kind === 'torch' ? TORCH_H : BRAZ_H);
   function flamePoints() {   // lit flames an arrow can catch from: [x, y, h]
     const out = [];
-    for (const p of props()) if ((p.kind === 'brazier' || p.kind === 'torch') && !p.unlit && !p.gone && !p.broken) out.push([p.x, p.y, flameAt(p)]);
+    for (const p of flames) if (!p.unlit && !p.gone && !p.broken) out.push([p.x, p.y, flameAt(p)]);
     if (F.on) { out.push([camp.x, camp.y, .7]); if (!beacon.unlit) out.push([beacon.x, beacon.y, beacon.z + 1.3]); }
     for (const [p] of burning) out.push([p.x, p.y, (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8)]);
     return out;
@@ -352,7 +357,7 @@ export async function create(host) {
       if (!a.fire) continue;
       a._lt += dt;
       // light what it touches: unlit torches / braziers, the beacon
-      for (const p of props()) if (p.unlit && (p.lightable || p === beacon || p.kind === 'brazier')) {
+      for (const p of catchers) if (p.unlit && (p.lightable || p === beacon || p.kind === 'brazier')) {
         const h = p === beacon ? beacon.z + 1.25 : flameAt(p);
         const dh = a.h - h;   // stuck in the wall just under it, the flame licks up and catches
         if (Math.hypot(p.x - a.x, p.y - a.y) < (a.stuck ? .5 : .4) && dh < .5 && dh > (a.stuck ? -1.1 : -.65)) light(p);
@@ -382,7 +387,7 @@ export async function create(host) {
       if (u > .7 && R() < dt * 3) ashPuff(p.x, p.y, base + .2, 3, .25);
       // it spreads to wooden neighbours
       b.spread += dt;
-      if (b.spread > 1.4) { b.spread = 0; for (const q of props()) if (q !== p && !burning.has(q) && BURNS[q.kind] && !q.broken && Math.hypot(q.x - p.x, q.y - p.y) < 1.4 && R() < .45) ignite(q); }
+      if (b.spread > 1.4) { b.spread = 0; for (const q of host.entities.near(p.x, p.y, 1.4, nearB)) if (q !== p && !burning.has(q) && BURNS[q.kind] && !q.broken && Math.hypot(q.x - p.x, q.y - p.y) < 1.4 && R() < .45) ignite(q); }
       if (b.t < b.dur) continue;
       burning.delete(p);
       if (p.kind === 'dummy') { scorched.set(p, {t: 0}); continue; }
@@ -589,8 +594,8 @@ export async function create(host) {
   const burnTop = (p, b) => (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8) * (1 - (b ? crumbleOf(b) : 0) * .55) - .12;
   function drawFlames() {   // braziers and wall torches (their sprites paint only the coals / the cup: p.fx), burning props
     const S = host.biome.style;
-    for (const p of props()) {
-      if ((p.kind !== 'brazier' && p.kind !== 'torch') || p.unlit || p.gone || !near(p.x, p.y)) continue;
+    for (const p of flames) {
+      if (p.unlit || p.gone || !near(p.x, p.y)) continue;
       if (p.kind === 'torch') { fires.draw(p, 'torch', S.torch || '#ffc850', p.x, p.y + .01, (p.z || 0) + 1.53); continue; }
       const col = S.braz[(p.light | 0) % 3], base = (p.z || 0) + .955, pal = fires.ramp(col);
       fires.draw(p, 'brazier', col, p.x, p.y + .01, base);
@@ -747,7 +752,7 @@ export async function create(host) {
       }
       if (!beacon.unlit && near(beacon.x, beacon.y, 20) && R() < dt * 18) parts.push({x: beacon.x + rr(-.15, .15), y: beacon.y + rr(-.1, .1), h: beacon.z + 1.5, vx: rr(-.3, .3), vy: rr(-.3, .3), vh: rr(1.4, 2.8), t: 0, life: rr(.7, 1.5), k: 'spark', c: FIRE[0], g: -.2});
       // braziers and wall torches: sparks in their own colour, a thin smoke lit by the flame
-      for (const p of props()) if ((p.kind === 'brazier' || p.kind === 'torch') && !p.unlit && !p.gone && near(p.x, p.y, 14)) {
+      for (const p of flames) if (!p.unlit && !p.gone && near(p.x, p.y, 14)) {
         const h = flameAt(p), big = p.kind === 'brazier', pal = palOf(big ? host.biome.style.braz[(p.light | 0) % 3] : host.biome.style.torch);
         if (R() < dt * (big ? 9 : 3)) parts.push({x: p.x + rr(-.1, .1), y: p.y + rr(-.07, .07), h: h - .08, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(.9, 2.1), t: 0, life: rr(.5, 1.1), k: 'spark', pal, g: -.2});
         if (big && R() < dt * 2.4) parts.push({x: p.x + rr(-.05, .05), y: p.y, h: h + .5, vx: 0, vy: 0, vh: rr(.3, .5), t: 0, life: rr(1.8, 2.8), k: 'smoke', c: SMOKE[R() * 3 | 0], sz: 1, a0: .42});
@@ -772,7 +777,7 @@ export async function create(host) {
     drawAshes();
     if (F.on) {
       drawCampfire(); drawBeacon(); drawSmall(); drawWisps(); drawFlames();
-      for (const p of props()) if ((p.kind === 'brazier' || p.kind === 'torch') && !p.unlit && !p.gone && near(p.x, p.y, 12))
+      for (const p of flames) if (!p.unlit && !p.gone && near(p.x, p.y, 12))
         p.kind === 'brazier' ? haze(p.x, p.y, flameAt(p) + .5, 10, 18) : haze(p.x, p.y, flameAt(p) + .3, 6, 10);
     }
     else drawBurning();
@@ -802,7 +807,7 @@ export async function create(host) {
   };
   F.prompt = p => p === beacon && beacon.unlit ? 'E  light the beacon' : p === camp && F.on ? (canAdd() ? 'E  add a log' : 'E  stir the fire') : null;   // the host's prompt hook (the whole label)
   F.toggle = () => {   // off: the sprites' own flames
-    F.on = !F.on; for (const p of props()) if (p.kind === 'brazier' || p.kind === 'torch') p.fx = F.on;
+    F.on = !F.on; for (const p of flames) p.fx = F.on;
     camp.interact = F.on ? 'tend the fire' : undefined;
     // (off, the host stops calling F.frame: show / hide our meshes here)
     camp.mesh?.setVisible(F.on); beacon.mesh?.setVisible(F.on);

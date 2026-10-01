@@ -255,6 +255,7 @@ export async function create(host) {
   const elev = (x, y) => host.elev(x, y), inStream = (x, y) => host.inStream(x, y), S = () => host.layout.stream;
   const gH = (x, y) => inStream(x, y) ? WATER : elev(x, y);   // the 3D ground's height (the stream bed sits lower)
   let props = [];
+  const bushQ = host.entities.query('wildlife.bush', p => p.kind === 'bush');   // cover for rabbits (a live query, not every prop)
   const tick = t0 => { acc += performance.now() - t0; };
 
   // ---------- the camera (main.js turns it any time): screen right (RX, RY), toward the camera (FX, FY), zoom ----------
@@ -767,7 +768,7 @@ export async function create(host) {
   }
   function coverNear(x, y, r, not) {
     let best = null, bd = 1e9;
-    for (const p of props) if (p.kind === 'bush' && p !== not && !p.broken) { const d = Math.hypot(p.x - x, p.y - y); if (d < r && d > 1.5 && d < bd) { bd = d; best = p; } }
+    for (const p of bushQ) if (p !== not && !p.broken) { const d = Math.hypot(p.x - x, p.y - y); if (d < r && d > 1.5 && d < bd) { bd = d; best = p; } }
     return best;
   }
   function startFlee(a, sx, sy) {
@@ -776,8 +777,8 @@ export async function create(host) {
     let cov = null;
     if (a.id === 'rabbit') {
       let bs = -1e9;
-      for (const p of props) {
-        if (p.kind !== 'bush' || p.broken || Math.abs((p.z || 0) - a.z) > .2) continue;
+      for (const p of bushQ) {
+        if (p.broken || Math.abs((p.z || 0) - a.z) > .2) continue;
         const dx = p.x - a.x, dy = p.y - a.y, dd = Math.hypot(dx, dy); if (dd > 8 || dd < .3) continue;
         const along = (dx * ax + dy * ay) / dd, fromSrc = Math.hypot(p.x - sx, p.y - sy);
         if (along < -.2 || fromSrc < 2.2) continue;

@@ -4,26 +4,27 @@
 // world coordinates, the world-frame view of him every system reads (`player`), turning his view-frame state when the
 // camera turns, the cursor's target (ARPG aim), the nearest interactable, and climbing at any camera angle (the camera
 // eases to north for the climb and back after: `assist`).
-// OWNS: PL (player.js) and P (its state), the aim memo, the climb assist.  READS: the world, the camera, the hero's atlas,
-//   features' aimTarget / interact.  EMITS (via player.js): step, land, jump, splash (turned into world coordinates here).
+// OWNS: PL (player.js) and P (its state), the aim memo, the climb assist.  READS: the world, the entities (near: what
+//   blocks him, what he can interact with), the camera, the hero's atlas, features' aimTarget / interact.  EMITS (via player.js): step, land, jump, splash (turned into world coordinates here).
 //   const pa = createPlayerHost({...}); const {PL, P, player} = pa
 import {createPlayer} from './player.js';
 import {PLAY, TRAIL, elev, inStream, PLATEAUS} from '../../world/world.js';
 
 const R_BODY = .25;
 
-export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, biome, opt: optOf, proj, flags}) {
+export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags}) {
   const toView = cv.toView, toWorld = cv.toWorld;
+  const nearB = [], nearI = [];   // the grid's candidates (world/entities.js near)
   // collision in the world (round, so it doesn't change with the camera; the arena squashes it to match its 2D look)
   function blocked(x, y, z, air) {
-    const world = worldOf();
     const arena = x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3;
     const trail = x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1;
     if (!arena && !trail) return true;
     if (!air && inStream(x, y)) return true;
     if (elev(x, y) > z + .3) return true;
-    return world.props.some(p => !p.broken && !p.gone && Math.abs((p.z || 0) - z) < 1 && (p.rect ? x > p.rect[0] - R_BODY && x < p.rect[2] + R_BODY && y > p.rect[1] - R_BODY && y < p.rect[3] + R_BODY
-      : p.r && Math.hypot(p.x - x, p.y - y) < p.r + R_BODY));
+    for (const p of ents().near(x, y, R_BODY, nearB)) if (!p.broken && !p.gone && Math.abs((p.z || 0) - z) < 1 && (p.rect ? x > p.rect[0] - R_BODY && x < p.rect[2] + R_BODY && y > p.rect[1] - R_BODY && y < p.rect[3] + R_BODY
+      : p.r && Math.hypot(p.x - x, p.y - y) < p.r + R_BODY)) return true;
+    return false;
   }
   // the plateau as the player sees it. Exact when the camera faces north; turned, the climb spot is handled here
   const plateausV = PLATEAUS.map(q => ({...q}));
@@ -103,9 +104,8 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     return best && {x: best.x, y: best.y, h: bh, target: best};
   }
   function nearProp() {
-    const world = worldOf();
     let best = null, bd = 1.3; const px = player.x, py = player.y;
-    for (const p of world.props) if (p.interact && !p.opened && Math.abs((p.z || 0) - P.z) < .5) { const d = Math.hypot(p.x - px, p.y - py); if (d < bd) { bd = d; best = p; } }
+    for (const p of ents().near(px, py, bd, nearI)) if (p.interact && !p.opened && Math.abs((p.z || 0) - P.z) < .5) { const d = Math.hypot(p.x - px, p.y - py); if (d < bd) { bd = d; best = p; } }
     return best;
   }
   // climbing at any camera angle: the climb spot is checked in the world; the climb itself runs at yaw 0 (the camera

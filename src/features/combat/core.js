@@ -205,14 +205,14 @@ export function createCore(host) {
   // ---------------- brutes ----------------
   // where a brute may stand: the trail (the yard's sparring brutes) or inside the arena's walls (enemies in a run)
   const TR = host.layout?.trail || {x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9};
-  const walls = ents.query('combat.wall', p => p.rect);
+  const walls = ents.query('combat.wall', p => p.rect), nearF = [];   // nearF: the grid's candidates (freeSpot)
   const inArea = (x, y) => (x > TR.x0 + .5 && x < TR.x1 - .5 && y > TR.y0 + .5 && y < TR.y1 - .4) || (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35);
   const inWall = (x, y, m) => walls.some(w => x > w.rect[0] - m && x < w.rect[2] + m && y > w.rect[1] - m && y < w.rect[3] + m);
   function freeSpot(b, x, y) {
     if (!inArea(x, y) || inWall(x, y, b.r0 * .8)) return false;
     if (host.inStream(x, y) || host.elev(x, y) !== pz(b)) return false;
     if (Math.hypot(P.x - x, (P.y - y) * SQ) < .78 && Math.abs(P.z - pz(b)) < 1) return false;
-    for (const p of colliders) if (p !== b && !p.broken && !p.gone && p.r > 0 && Math.abs(pz(p) - pz(b)) < 1 && Math.hypot(p.x - x, (p.y - y) * SQ) < p.r + b.r0 * .9) return false;
+    for (const p of ents.near(x, y, b.r0 * .9, nearF, colliders)) if (p !== b && !p.broken && !p.gone && p.r > 0 && Math.abs(pz(p) - pz(b)) < 1 && Math.hypot(p.x - x, (p.y - y) * SQ) < p.r + b.r0 * .9) return false;
     for (const o of brutes) { const h = o !== b && BS.get(o)?.hop; if (h && Math.hypot(h.x1 - x, h.y1 - y) < o.r0 + b.r0) return false; }   // where another one lands
     return true;
   }
@@ -236,7 +236,7 @@ export function createCore(host) {
       if (b.hunter || b.retired) return;   // enemies don't come back; retired = the yard's pair while a run is on
       s.dead -= dt;
       if (s.dead <= 0 && Math.hypot(P.x - b.home[0], P.y - b.home[1]) > 1.1) {   // respawn with a poof
-        Object.assign(b, {broken: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0, flash: 1, wob: 1, lit: false});
+        Object.assign(b, {broken: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0, flash: 1, wob: 1, lit: false}); ents.moved(b);
         flashing.add(b); Object.assign(s, {mode: 'idle', wait: .8, hop: null, root: 0, fail: 0, calm: 0});
         puff(b.x, b.y, pz(b), 16, .8);
         for (let i = 0; i < 8; i++) part(b.x + RR(-.3, .3), b.y, pz(b) + RR(.2, 1.3), RR(-.8, .8), 0, RR(.3, 1), RR(.3, .6), SMOKE, {sz: 2, drag: 2});
@@ -465,7 +465,7 @@ export function createCore(host) {
         if (b.hunter) continue;
         const s = BS.get(b);
         if (on) Object.assign(b, {retired: true, broken: true, gone: true, r: 0});
-        else { Object.assign(b, {retired: false, broken: false, gone: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0}); Object.assign(s, {mode: 'idle', wait: .8, hop: null, root: 0}); }
+        else { Object.assign(b, {retired: false, broken: false, gone: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0}); ents.moved(b); Object.assign(s, {mode: 'idle', wait: .8, hop: null, root: 0}); }
       }
     },
     // a new stage: everything breakable whole again, chests shut, the ground swept (and the prop physics resets positions)
