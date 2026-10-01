@@ -141,9 +141,12 @@ function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {
 }
 
 // ---------------------------------------------------------------- build
-export async function buildWorld(G, {biome, ctxO, PPM, PPMH}) {
+export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null}) {
   GT = G;
-  const {WM, HM} = WORLD, layout = buildLayout(7), props = layout.props;
+  // keep: the live prop list of the previous world (a biome switch): the items must point at the props gameplay uses
+  const {WM, HM} = WORLD, layout = buildLayout(7);
+  if (keep) layout.props = keep;
+  const props = layout.props;
   Object.assign(ctxO, {WM, HM, WPX: Math.ceil(WM * ctxO.PPM), HPX: Math.ceil(HM * ctxO.PPMY), PLAY, layout});
   const disposers = [];
   const R = rampTexture(biome.id);

@@ -81,10 +81,9 @@ const features = [];
 async function setBiome(i) {
   biomeI = ((i % BIOMES.length) + BIOMES.length) % BIOMES.length;
   $('#load').classList.remove('hidden'); $('#load').textContent = 'Building ' + BIOMES[biomeI].name + '…';
-  const keep = world?.props;
+  const keep = world?.props;   // props keep their state (broken, opened, moved) across a biome switch
   world?.dispose();
-  world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH});
-  if (keep) { world.props.length = 0; keep.forEach(p => world.props.push(p)); }   // (the layout is rebuilt identically; props keep their state)
+  world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH, props: keep});
   world.setMode(propMode);
   for (const f of features) f.biomeChanged?.();
   $('#load').classList.add('hidden');
@@ -290,6 +289,9 @@ const host = {
   layer: n => G.layer(n), rgb: rgbOf,
   get wind() { return feat('wind'); }, feature: feat,
   get hits() { return hits; },
+  // the Ranger as drawn this frame (sprite + runtime cloak + pixel bow, and its normals), for afterimages / reflections.
+  // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame.
+  playerSprite: () => ({img: charCv, nrm: nrmCv, w: 192, h: 160, px: PIV[0] + CX, py: PIV[1] + CY, x: player.x, y: player.y, h: P.z, frame: P.frame, face: P.face}),
 };
 
 // ---------------------------------------------------------------- features

@@ -463,10 +463,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   lPos.setUsage(THREE.DynamicDrawUsage); lCol.setUsage(THREE.DynamicDrawUsage); lineGeo.setAttribute('position', lPos); lineGeo.setAttribute('color', lCol);
   const lineObj = new THREE.LineSegments(lineGeo, raw(LINE_VS, LINE_FS, {})); lineObj.frustumCulled = false; gScene.add(lineObj);
   let nLines = 0;
+  // (the batches write straight into their typed arrays: no per-call allocation, no GC spikes in a big fight)
   function line(x0, y0, z0, x1, y1, z1, c, emit = false) {   // world X, Y (up), Z
     if (nLines >= LMAX) return;
-    lPos.array.set([x0, y0, z0, x1, y1, z1], nLines * 6); const e = emit ? 1 : 0;
-    lCol.array.set([c[0], c[1], c[2], e, c[0], c[1], c[2], e], nLines * 8); nLines++;
+    const P = lPos.array, C = lCol.array, i = nLines * 6, j = nLines * 8, e = emit ? 1 : 0;
+    P[i] = x0; P[i + 1] = y0; P[i + 2] = z0; P[i + 3] = x1; P[i + 4] = y1; P[i + 5] = z1;
+    C[j] = C[j + 4] = c[0]; C[j + 1] = C[j + 5] = c[1]; C[j + 2] = C[j + 6] = c[2]; C[j + 3] = C[j + 7] = e; nLines++;
   }
   // points: pixel particles. size 1..4 px, alpha < 1 = ordered dither, emit = glows
   const PMAX = 8192, pointGeo = new THREE.BufferGeometry();
@@ -475,9 +477,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   pointGeo.setAttribute('position', pPos); pointGeo.setAttribute('color', pCol); pointGeo.setAttribute('aMisc', pMisc);
   const pointObj = new THREE.Points(pointGeo, raw(POINT_VS, POINT_FS, {uSnap: SNAP})); pointObj.frustumCulled = false; gScene.add(pointObj);
   let nPoints = 0;
-  function point(x, y, z, c, {size = 1, alpha = 1, emit = false} = {}) {
+  const NOOPT = {};
+  function point(x, y, z, c, o = NOOPT) {
     if (nPoints >= PMAX) return;
-    pPos.array.set([x, y, z], nPoints * 3); pCol.array.set([c[0], c[1], c[2], emit ? 1 : 0], nPoints * 4); pMisc.array.set([size, alpha], nPoints * 2); nPoints++;
+    const P = pPos.array, C = pCol.array, M = pMisc.array, i = nPoints * 3, j = nPoints * 4, k = nPoints * 2;
+    P[i] = x; P[i + 1] = y; P[i + 2] = z; C[j] = c[0]; C[j + 1] = c[1]; C[j + 2] = c[2]; C[j + 3] = o.emit ? 1 : 0;
+    M[k] = o.size ?? 1; M[k + 1] = o.alpha ?? 1; nPoints++;
   }
   // sprites: billboards from any image, grouped by (image, emit image, normals, type, shadow) into instanced draws.
   //   o = {img, sx, sy, sw, sh (source rect, px; default the whole image), x, y, z (world anchor: X, Y up, Z),
@@ -508,10 +513,11 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const W = o.img.width, H = o.img.height, sx = o.sx || 0, sy = o.sy || 0, sw = o.sw ?? W, sh = o.sh ?? H, i = G2.n++;
     G2.uni.uTex.value = tex(o.img, {dynamic: o.dynamic}); if (o.em) { G2.uni.uEm.value = tex(o.em, {dynamic: o.dynamic}); G2.uni.uHasEm.value = 1; }
     if (o.nrm) { G2.uni.uNrm.value = tex(o.nrm); G2.uni.uHasNrm.value = 1; }
-    G2.attrs.iAnchor.array.set([o.x, o.y, o.z], i * 3);
-    G2.attrs.iRect.array.set([sx / W, sy / H, sw / W, sh / H], i * 4);
-    G2.attrs.iSize.array.set([sw, sh, o.px ?? sw / 2, o.py ?? sh], i * 4);
-    G2.attrs.iMisc.array.set([o.alpha ?? 1, o.flip ? 1 : 0, o.sway || 0, o.flash || 0], i * 4);
+    const A = G2.attrs.iAnchor.array, R = G2.attrs.iRect.array, S = G2.attrs.iSize.array, M = G2.attrs.iMisc.array, a = i * 3, b = i * 4;
+    A[a] = o.x; A[a + 1] = o.y; A[a + 2] = o.z;
+    R[b] = sx / W; R[b + 1] = sy / H; R[b + 2] = sw / W; R[b + 3] = sh / H;
+    S[b] = sw; S[b + 1] = sh; S[b + 2] = o.px ?? sw / 2; S[b + 3] = o.py ?? sh;
+    M[b] = o.alpha ?? 1; M[b + 1] = o.flip ? 1 : 0; M[b + 2] = o.sway || 0; M[b + 3] = o.flash || 0;
   }
   function flushBatches() {
     lPos.needsUpdate = lCol.needsUpdate = true; lineGeo.setDrawRange(0, nLines * 2);
