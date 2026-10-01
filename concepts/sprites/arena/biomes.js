@@ -1229,21 +1229,30 @@ function dummy(p, ctx, S) {
 }
 
 // ---- light sources
-function brazier(p, ctx, S) {
-  const m = M(ctx), col = S.braz[(p.light | 0) % 3], bowlH = m.H(.95), W = 22, H = bowlH + 18;
+function brazier(p, ctx, S) {   // p.model (the 3D view): the bowl and tripod are a real 3D model there; this paints the
+  // coals and a fuller, three-tongue flame only (same pivot and heights, so the model's rim meets the coals)
+  const m = M(ctx), col = S.braz[(p.light | 0) % 3], bowlH = m.H(.95), W = 22, H = bowlH + (p.model ? 26 : 18);
   return build(W, H, [11, H], (P, E) => {
     const b = H - 1, by = b - bowlH, cx = 11, R = S.metal;
-    // bowl
-    for (let y = by; y < by + 7; y++) { const hw = 9 - Math.max(0, y - by - 2) * 1.2; for (let x = Math.round(cx - hw); x < Math.round(cx + hw); x++) P.p(x, y, R, y === by ? 0 : x < cx - hw + 3 ? 0 : x > cx + hw - 3 ? 2 : 1); }
-    for (let x = cx - 9; x < cx + 9; x++) P.p(x, by - 1, R, 1);
-    P.outline({only: [R.id]});
-    // tripod legs (drawn after the outline so they stay 1 px lines)
-    P.line(cx - 5, by + 7, cx - 8, b, (x, y) => P.p(x, y, R, 2)); P.line(cx + 5, by + 7, cx + 8, b, (x, y) => P.p(x, y, R, 3));
-    P.line(cx, by + 7, cx, b - 1, (x, y) => P.p(x, y, R, 2)); P.line(cx - 6, by + 16, cx + 6, by + 16, (x, y) => P.p(x, y, R, 3));
+    if (!p.model) {
+      // bowl
+      for (let y = by; y < by + 7; y++) { const hw = 9 - Math.max(0, y - by - 2) * 1.2; for (let x = Math.round(cx - hw); x < Math.round(cx + hw); x++) P.p(x, y, R, y === by ? 0 : x < cx - hw + 3 ? 0 : x > cx + hw - 3 ? 2 : 1); }
+      for (let x = cx - 9; x < cx + 9; x++) P.p(x, by - 1, R, 1);
+      P.outline({only: [R.id]});
+      // tripod legs (drawn after the outline so they stay 1 px lines)
+      P.line(cx - 5, by + 7, cx - 8, b, (x, y) => P.p(x, y, R, 2)); P.line(cx + 5, by + 7, cx + 8, b, (x, y) => P.p(x, y, R, 3));
+      P.line(cx, by + 7, cx, b - 1, (x, y) => P.p(x, y, R, 2)); P.line(cx - 6, by + 16, cx + 6, by + 16, (x, y) => P.p(x, y, R, 3));
+    }
     // coals + flame (emissive); p.unlit: cold ash, no flame, no light
-    if (p.unlit) { for (let x = cx - 7; x < cx + 7; x++) P.p(x, by - 1, R, hsh(x, 3) < .4 ? 2 : 3); return; }
-    for (let x = cx - 7; x < cx + 7; x++) glowAt(P, E, x, by - 1, hsh(x, 3) < .4 ? mixHex(col, '#ffffff', .5) : mixHex(col, '#000000', .35), '#2a1a18');
-    flame(E, cx + .5, by - 1, 10, 16, col, (p.light | 0) - 1);
+    const c0 = cx - 7, c1 = p.model ? cx + 8 : cx + 7;   // (the 3D bowl is a pixel wider)
+    // (p.fx: the host's 3D bowl has its own coal bed and glowing coals, so no painted coal row: it read as a flat line)
+    if (p.unlit) { if (!p.fx) for (let x = c0; x < c1; x++) P.p(x, by - 1, R, hsh(x, 3) < .4 ? 2 : 3); return; }
+    if (!p.fx) for (let x = c0; x < c1; x++) glowAt(P, E, x, by - 1, hsh(x, 3) < .4 ? mixHex(col, '#ffffff', .5) : mixHex(col, '#000000', .35), '#2a1a18');
+    if (p.fx) { /* p.fx: the host draws a live flame here (render3d lights.js), so only the coals */ }
+    else if (p.model) {   // side tongues first, the tall middle one over them (its hot core wins)
+      flame(E, cx - 3, by - 1, 6, 11, col, -2); flame(E, cx + 4, by - 1, 6, 13, col, 2);
+      flame(E, cx + .5, by - 1, 11, 22, col, (p.light | 0) - 1);
+    } else flame(E, cx + .5, by - 1, 10, 16, col, (p.light | 0) - 1);
     // the halo sits on the flame's middle: h = its height above the pivot (the pivot row is H)
     return {lights: [{dx: 0, dy: 0, h: (H - (by - 8)) / ctx.PPMH, color: col, radius: 3.5, intensity: 1, flicker: S.id === 'rift' && (p.light | 0) === 2 ? .15 : .45}]};
   });
@@ -1264,7 +1273,7 @@ function torch(p, ctx, S) {   // wall torch: the bracket reaches right to the ea
     if (p.unlit) for (let i = -1; i <= 1; i++) P.p(sx + i, ty - 1, WD, 3);
     P.outline();
     if (p.unlit) return;
-    flame(E, sx + .5, ty, 7, 12, S.torch, 1);
+    if (!p.fx) flame(E, sx + .5, ty, 7, 12, S.torch, 1);   // p.fx: the host draws a live flame here
     return {lights: [{dx: 0, dy: 0, h: (H - (ty - 6)) / ctx.PPMH, color: S.torch, radius: 4, intensity: .9, flicker: .6}]};
   });
 }
@@ -1662,7 +1671,7 @@ function makeBiome(id) {
     paintGround(q, ctx) { GROUND[id](q, ctx, B); },
     sprite(p, ctx) {
       // fast path: this prop's sprite at the current ground projection and state (breakable stage, open, facing)
-      const sig = (p.stage | 0) * 4 + (p.opened ? 2 : 0) + (p.kind === 'brute' && faceLeft(p) ? 1 : 0) + (p.sconce ? 64 : 0) + (p.unlit ? 128 : 0), hit = memo.get(p);
+      const sig = (p.stage | 0) * 4 + (p.opened ? 2 : 0) + (p.kind === 'brute' && faceLeft(p) ? 1 : 0) + (p.sconce ? 64 : 0) + (p.unlit ? 128 : 0) + (p.model ? 256 : 0) + (p.fx ? 512 : 0), hit = memo.get(p);
       if (hit && hit.ppmy === ctx.PPMY && hit.sig === sig) return hit.s;
       const s = B.spriteOf(p, ctx, sig); memo.set(p, {ppmy: ctx.PPMY, sig, s}); return s;
     },

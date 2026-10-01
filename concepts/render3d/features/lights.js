@@ -5,9 +5,13 @@
 //             the stick + cup only, wind.js still gives it the live flame), on a real 3D iron bracket (plate, arm, brace,
 //             collar) built here, so from any side the bracket meets the wall. The layout's east pair, a lit pair at the
 //             north gate and an UNLIT pair at the west gate (p.unlit: shoot a fire arrow at them)
-//   campfire  in the yard: a stone ring + log teepee as 3D meshes (the stones throw little shadow rays), a 3-tongue
-//             flame card, sparks, smoke lit by the fire, a scorched ring on the ground, heat haze, and a light that
-//             jitters so every shadow round it dances
+//   campfire  in the yard: a stone ring (3D, the stones throw little shadow rays) round a teepee of 3D logs that really
+//             burn: each chars, glowing veins crawl through it, it burns away from the tip, falls in across the coals
+//             (a crash of sparks, ash), burns on lying down and crumbles into the ash bed. The fire is as big as its
+//             wood. E throws a log on from the woodpile beside it (or stirs it: sparks); left alone it burns down to
+//             embers (and is restocked while nobody is near). Sparks, smoke, a scorched ring, heat haze, a dancing light
+//   embers    now and then one drops off a torch head or spills over a brazier's rim: it floats down glowing, may
+//             bounce (sparks), lies on the ground and cools to grey ash
 //   beacon    on the plateau's lip, above the climb: a stone plinth + iron basket (3D), UNLIT. E (or a fire arrow)
 //             lights it: a flare, then a big light that spills down over the cliff onto the yard
 //   candles   clusters on the broken pillar, by the rubble, by the west wall and just inside the west gate. A blast, a roll right past or an arrow
@@ -18,14 +22,21 @@
 //             and dart away from you
 //   fire      an arrow loosed next to a flame (a torch, brazier, the campfire, the beacon, a candle cluster), or one that
 //             flies through a flame, catches fire: a moving light + an ember trail. It lights unlit torches / braziers / the beacon; stuck, it burns out; in a crate, barrel or
-//             dummy it sets it alight (it burns, may spread to its neighbours, then breaks; an explosive barrel cooks off)
+//             dummy it sets it alight: the wood chars, glowing veins crawl through it, it may spread to its neighbours,
+//             it slumps and crumbles (embers and charcoal falling off), then lies as charred remains that glow down,
+//             crumble to an ash pile and fade (it comes back like anything broken). A powder keg cooks off; dummies go out
 //
 // FEATURE CONTRACT (main.js): create(host) -> F with update / frame / lights / onArrowHit / interact / biomeChanged.
 // It sits BEFORE combat in the feature order: onArrowHit sees the hit first (to catch fire) and returns nothing, so
 // combat still resolves it. Props it adds (sconces, the campfire, the beacon) live in host.props like the layout's.
 import {ART} from '../../sprites/arena/biomes.js';
 import {STREAM, PLAY} from '../../sprites/arena/layout.js';
-import {FAMS} from '../world.js';
+import * as WORLD from '../world.js';
+import {geoOf, M4, along} from './kit3d.js';
+import {createFires} from './firesim.js';
+// how high our props stop arrows (main.js reads world.js PROP_TOP; 2.5 m otherwise): arrows fly over the campfire
+// (they catch fire going through it), the beacon only stops them up to its basket
+if (WORLD.PROP_TOP) Object.assign(WORLD.PROP_TOP, {campfire: 0, beacon: 1.15, woodpile: .3});
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -38,7 +49,8 @@ const TORCH_H = 1.72, BRAZ_H = 1.22;   // flame heights of the arena's torch / b
 const GLOW = {ruins: '#7af0c8', ember: '#ff9a50', frost: '#9ad8ff', rift: '#e070ff'};
 const WISP = {ruins: '#a8ffd8', ember: '#ffc070', frost: '#bfe8ff', rift: '#ff9cf0'};
 const FIRE = ['#fff6c8', '#ffd060', '#ff8a30', '#c84a1c'].map(rgb), SMOKE = ['#6a625a', '#57514b', '#46423e'].map(rgb);
-const BURNS = {crate: 3.6, barrel: 4.4, barrel_x: 1.1, dummy: 6};   // seconds alight before it breaks (dummies just go out)
+const BURNS = {crate: 9, barrel: 11, barrel_x: 1.1, dummy: 12};   // seconds alight before it crumbles (keg: cooks off; dummies go out)
+const ASHC = ['#9e9890', '#7e7a74', '#64605b', '#4a4744'].map(rgb), ASH1 = rgb('#3e3a37');   // ash greys; a cooled ember
 const TOP = {crate: .72, barrel: .9, barrel_x: .9, dummy: 1.25};
 
 export async function create(host) {
@@ -51,19 +63,6 @@ export async function create(host) {
   const meshes = [];       // feature-owned 3D meshes (world.mesh: a rebuild disposes them, biomeChanged makes them again)
 
   // ================================================================ art: one atlas per biome (albedo + emit, same layout)
-  function flameFrames(add, name, w, h, col, tongues) {
-    for (let li = 0; li < 5; li++) for (let hi = 0; hi < 3; hi++) {
-      const lean = (li - 2) * (tongues > 1 ? 1.4 : 1), hk = [.74, .87, 1][hi];
-      const W = Math.ceil(w * (tongues > 1 ? 1.7 : 1)) + 6, H = Math.ceil(h * 1.05) + 3, E = new ART.Pix(W, H), P = new ART.Pix(W, H), cx = W / 2;
-      if (tongues > 1) {   // side tongues first, the tall middle one over them (its hot core wins)
-        ART.flame(E, cx - w * .32, H, w * .58, h * hk * (.5 + (hi === 1 ? .12 : 0)), col, lean - 1.6);
-        ART.flame(E, cx + w * .3, H, w * .55, h * hk * (.62 - (hi === 2 ? .1 : 0)), col, lean + 1.4);
-      }
-      if (tongues > 2) ART.flame(E, cx + (li - 2) * .4, H, w * .4, h * hk * .35, col, lean);
-      ART.flame(E, cx, H, w, h * hk, col, lean);
-      add(`${name}_${li}_${hi}`, P, E, [Math.floor(cx), H]);
-    }
-  }
   function candleArt(add, S, v) {
     const wax = ART.ramp(...(S.id === 'rift' ? ['#8a7aa8', '#6a5a88', '#4e4268', '#2e2644'] : S.id === 'frost' ? ['#f4f8ff', '#d8e2f0', '#aab8cc', '#6e7a8c'] : ['#f4ecd6', '#e0d4b4', '#b8a888', '#7a6e58']));
     const sets = [[[2, 5], [5, 8], [9, 4]], [[3, 7], [7, 4], [10, 6]]], C = sets[v], W = 14, H = 14;
@@ -113,10 +112,6 @@ export async function create(host) {
   function buildAtlas() {
     const S = host.biome.style, items = [];
     const add = (name, P, E, pivot) => items.push({name, img: P.canvas(), em: E.used ? E.canvas() : null, pivot});
-    const camp = S.id === 'rift' ? '#e070ff' : S.id === 'frost' ? '#ffb04a' : '#ffa040';
-    flameFrames(add, 'camp', 13, 24, camp, 3);
-    flameFrames(add, 'beacon', 18, 38, S.torch || '#ffc850', 3);
-    flameFrames(add, 'burn', 11, 19, '#ff9a40', 2);
     for (const v of [0, 1]) candleArt(add, S, v);
     for (const v of [0, 1, 2]) shroomArt(add, S, v);
     // shelf-pack into one sheet
@@ -134,26 +129,7 @@ export async function create(host) {
     host.sprite({img: atlas.img, em: atlas.em, sx: f.sx, sy: f.sy, sw: f.sw, sh: f.sh, px: f.px, py: f.py, x, y, h, type: 3, shadow: !!o.shadow, alpha: o.alpha ?? 1, flip: o.flip});
   }
 
-  // ================================================================ 3D pieces (the prop pipeline's ramps, outlines, shadows)
-  function geoOf(list) {   // [{g: geometry, m: Matrix4, fam, bias?, fixed?}] -> one mesh geometry with the prop attributes
-    const pos = [], nrm = [], aPart = [], aFam = [], aBias = [], aFixed = [];
-    list.forEach((q, pi) => {
-      const g = (q.g.index ? q.g.toNonIndexed() : q.g.clone()).applyMatrix4(q.m), P = g.attributes.position, N = g.attributes.normal;
-      for (let i = 0; i < P.count; i++) {
-        pos.push(P.getX(i), P.getY(i), P.getZ(i)); nrm.push(N.getX(i), N.getY(i), N.getZ(i));
-        aPart.push(pi % 64); aFam.push(Math.max(0, FAMS.indexOf(q.fam))); aBias.push(q.bias || 0); aFixed.push(q.fixed ?? -1);
-      }
-    });
-    const geo = new THREE.BufferGeometry(), A = (n, a, k) => geo.setAttribute(n, new THREE.Float32BufferAttribute(a, k));
-    A('position', pos, 3); A('normal', nrm, 3); A('aPart', aPart, 1); A('aFam', aFam, 1); A('aBias', aBias, 1); A('aFixed', aFixed, 1);
-    geo.computeBoundingSphere(); geo.computeBoundingBox(); return geo;
-  }
-  const M4 = (pos, rot = [0, 0, 0], scl = [1, 1, 1]) => new THREE.Matrix4().compose(new THREE.Vector3(...pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rot)), new THREE.Vector3(...scl));
-  const along = (a, b, r0, r1, seg = 6) => {   // a cylinder from a to b (world-local points)
-    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), d = B.clone().sub(A), len = d.length();
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
-    return {g: new THREE.CylinderGeometry(r1, r0, len, seg), m: new THREE.Matrix4().compose(A.add(B).multiplyScalar(.5), q, new THREE.Vector3(1, 1, 1))};
-  };
+  // ================================================================ 3D pieces (kit3d: the prop pipeline's ramps, outlines, shadows)
   // a sconce bracket, local: x = out of the wall (0 = the face), y up, z along the wall
   const bracketGeo = geoOf([
     {g: new THREE.BoxGeometry(.05, .34, .2), m: M4([.025, 1.02, 0]), fam: 'metal'},
@@ -167,18 +143,18 @@ export async function create(host) {
       const a = i / 10 * TAU + r() * .3, d = .46 + r() * .05;
       L.push({g: new THREE.IcosahedronGeometry(1, 0), m: M4([Math.cos(a) * d, .04, Math.sin(a) * d], [r() * 3, r() * 3, r() * 3], [.085 + r() * .03, .065 + r() * .025, .075 + r() * .03]), fam: 'rock'});
     }
-    for (let i = 0; i < 5; i++) {
-      const a = i / 5 * TAU + .4, b = [Math.cos(a) * .27, 0, Math.sin(a) * .27], m = [Math.cos(a) * .12, .2, Math.sin(a) * .12], t = [Math.cos(a) * .02, .36, Math.sin(a) * .02];
-      L.push({...along(b, m, .045, .042), fam: 'wood'}, {...along(m, t, .042, .03), fam: 'void'});
-    }
-    return geoOf(L);
+    return geoOf(L);   // (its logs are meshes of their own: they burn down, fall in, crumble)
   }
+  // one log, its foot at 0 and LOG_L m up +y (its matrix shortens and thins it as it burns away); the woodpile's too
+  const LOG_L = .46, logGeo = geoOf([{...along([0, 0, 0], [0, LOG_L, 0], .056, .048, 7), fam: 'wood'},
+    {g: new THREE.CylinderGeometry(.042, .046, .008, 7), m: M4([0, .002, 0]), fam: 'rope', fixed: 1},           // the sawn ends: pale end grain
+    {g: new THREE.CylinderGeometry(.036, .04, .008, 7), m: M4([0, LOG_L - .002, 0]), fam: 'rope', fixed: 1}]);
   function beaconGeo() {
     const L = [
       {g: new THREE.BoxGeometry(.84, .12, .84), m: M4([0, .06, 0]), fam: 'stone'},
       {g: new THREE.CylinderGeometry(.27, .33, .62, 8), m: M4([0, .43, 0]), fam: 'stone'},
       {g: new THREE.CylinderGeometry(.36, .36, .06, 8), m: M4([0, .77, 0]), fam: 'stone', bias: .2},
-      {g: new THREE.CylinderGeometry(.36, .2, .2, 8), m: M4([0, .9, 0]), fam: 'metal'},
+      {g: new THREE.CylinderGeometry(.36, .2, .2, 8, 1, true), m: M4([0, .9, 0]), fam: 'metal'},   // (open: its ash bed shows)
       {g: new THREE.TorusGeometry(.36, .025, 4, 8), m: M4([0, 1.0, 0], [Math.PI / 2, 0, 0]), fam: 'metal', bias: .3},
     ];
     L.push({g: new THREE.CylinderGeometry(.31, .31, .03, 8), m: M4([0, .99, 0]), fam: 'void'});   // the bed of ash and coals
@@ -188,7 +164,21 @@ export async function create(host) {
     }
     return geoOf(L);
   }
-  const campGeo = campfireGeo(), beacGeo = beaconGeo();
+  // a 3D brazier (the arena's sprite keeps only its coals + flame: p.model), local: y up, the bowl's rim at .95 m
+  function brazierGeo() {
+    const L = [], ring = (r, t, y, fam, bias = 0) => ({g: new THREE.TorusGeometry(r, t, 4, 10), m: M4([0, y, 0], [Math.PI / 2, 0, 0]), fam, bias});
+    for (let i = 0; i < 3; i++) {
+      const a = i / 3 * TAU + .5, c = Math.cos(a), s = Math.sin(a);
+      L.push({...along([c * .31, 0, s * .31], [c * .17, .8, s * .17], .024, .02), fam: 'metal', bias: -.1});
+      L.push({g: new THREE.BoxGeometry(.08, .03, .08), m: M4([c * .32, .015, s * .32], [0, -a, 0]), fam: 'metal'});
+    }
+    L.push(ring(.235, .016, .32, 'metal', -.15));                                                       // the leg brace
+    L.push({g: new THREE.CylinderGeometry(.31, .17, .17, 10, 1, true), m: M4([0, .86, 0]), fam: 'metal'});   // the bowl (open: its coal bed shows, no z-fight)
+    L.push(ring(.31, .024, .95, 'metal', .3));                                                          // its rim
+    L.push({g: new THREE.CylinderGeometry(.28, .28, .02, 10), m: M4([0, .935, 0]), fam: 'void'});       // the coal bed
+    return geoOf(L);
+  }
+  const campGeo = campfireGeo(), beacGeo = beaconGeo(), brazGeo = brazierGeo();
 
   // ================================================================ the world's light sources
   const props = () => host.props;
@@ -203,14 +193,19 @@ export async function create(host) {
     };
     add(cx - 2.6, y0 + D, 0, 1); add(cx + 2.6, y0 + D, 0, 1);                // north gate, lit
     add(x0 + D, cy - 2.6, 1, 0, true); add(x0 + D, cy + 2.6, 1, 0, true);    // west gate, waiting for a fire arrow
-    for (const p of props()) if (p.kind === 'torch') p.lightable = true;
+    for (const p of props()) if (p.kind === 'torch') { p.lightable = true; p.fx = true; }
     return added;
   }
   // the campfire and the beacon are props too (they collide; the beacon is an E target)
   const clearAround = (x, y, r) => { for (const q of props()) if ((q.kind === 'tuft' || q.kind === 'bush' || q.kind === 'rock') && Math.hypot(q.x - x, q.y - y) < r) q.gone = true; };
   let camp = props().find(p => p.kind === 'campfire'), beacon = props().find(p => p.kind === 'beacon');
-  if (!camp) { camp = {kind: 'campfire', x: 50.8, y: 19.4, z: 0, r: .55, fl: {}}; props().push(camp); clearAround(camp.x, camp.y, 1.3); }
-  if (!beacon) { beacon = {kind: 'beacon', x: 49.6, y: 10.35, z: 2.4, r: .45, unlit: true, interact: 'light the beacon', fl: {}}; props().push(beacon); clearAround(beacon.x, beacon.y, 1); }
+  if (!camp) { camp = {kind: 'campfire', x: 50.8, y: 19.4, z: 0, r: .55}; props().push(camp); clearAround(camp.x, camp.y, 1.3); }
+  if (!beacon) { beacon = {kind: 'beacon', x: 49.6, y: 10.35, z: 2.4, r: .45, unlit: true, interact: 'light the beacon'}; props().push(beacon); clearAround(beacon.x, beacon.y, 1); }
+  // the woodpile beside the campfire (a prop: it collides; arrows fly over it)
+  let pile = props().find(p => p.kind === 'woodpile');
+  if (!pile) { pile = {kind: 'woodpile', x: camp.x + 1.05, y: camp.y - .32, z: 0, r: .3, a: 1.05}; props().push(pile); clearAround(pile.x, pile.y, .7); }
+  const PILE = [[-.115, .056], [0, .056], [.115, .056], [-.058, .154], [.058, .154], [0, .252]];   // its logs: [across, h], bottom up
+  pile.n = PILE.length; camp.interact = 'tend the fire';
   const sconcesAdded = mountSconces();
   await Promise.all(sconcesAdded.map(p => host.world.addItem(p)));
 
@@ -239,15 +234,59 @@ export async function create(host) {
   // wisps: over the south stream
   const wisps = [20.5, 23.2, 26.2].map((y, i) => ({hy: y, x: sx(y), y, h: .9, vx: 0, vy: 0, tx: sx(y), ty: y, t: R() * 9, fade: 0, trail: [], id: 9130 + i}));
 
+  // ================================================================ the campfire's wood
+  // Five logs stand in a teepee, each burning at its own pace (wood left f: 1 -> 0). At a quarter left a log falls in
+  // across the coals; lying, it burns faster and crumbles into the ash bed. campK (the fire's size) follows the wood.
+  const CAMP_N = 5;
+  const logs = [];   // {slot, a, f, rate, st: 'drop' | 'stand' | 'fall' | 'lie', ph, la, ly, age, sd, m}
+  let ash = 1.3, campK = 1, campRate = 1;
+  function newLog(slot, f, age, st = 'stand') {
+    const L = {slot, a: slot / CAMP_N * TAU + .4 + rr(-.12, .12), f, rate: 1 / rr(75, 115), st, ph: 0, la: 0, ly: .04, age, sd: R() * 9, m: null};
+    logs.push(L); return L;
+  }
+  [1, .88, .76, .64, .52].sort(() => R() - .5).forEach((f, i) => newLog(i, f + rr(-.04, .04), rr(30, 90)));
+  const freeSlot = () => { for (let i = 0; i < CAMP_N; i++) if (!logs.some(L => L.slot === i && L.st !== 'lie')) return i; return -1; };
+  const canAdd = () => pile.n > 0 && freeSlot() >= 0;
+  const _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _d = new THREE.Vector3(), _s = new THREE.Vector3(), _ax = new THREE.Vector3(), _M = new THREE.Matrix4(), UPV = new THREE.Vector3(0, 1, 0);
+  function logMatrix(L) {   // world X, Y (up), Z
+    const c = Math.cos(L.a), s = Math.sin(L.a), f = Math.max(0, L.f);
+    // standing: its foot on the ring, leaning in over the middle (it burns away from the tip: the flame is there)
+    let bx = camp.x + c * .31, bh = 0, by = camp.y + s * .31, dx = -c * .28, dh = .37, dy = -s * .28;
+    if (L.st === 'fall' || L.st === 'lie') {   // falling in (accelerating), then lying across the coals
+      const e = L.st === 'lie' ? 1 : L.ph * L.ph, lc = Math.cos(L.la), ls = Math.sin(L.la);
+      bx += (camp.x + lc * .3 - bx) * e; bh += (L.ly - bh) * e; by += (camp.y + ls * .3 - by) * e;
+      dx += (-lc * .46 - dx) * e; dh += (.012 - dh) * e; dy += (-ls * .46 - dy) * e;
+    } else if (L.st === 'drop') {   // thrown on from the woodpile: an arc, swinging upright as it lands
+      const e = L.ph, k = 1 - e, pc = Math.cos(pile.a) * .46, ps = Math.sin(pile.a) * .46;
+      bx = pile.x * k + bx * e; by = pile.y * k + by * e; bh = .21 * k + Math.sin(e * Math.PI) * .55;
+      dx = pc * k + dx * e; dh *= e; dy = ps * k + dy * e;
+    }
+    const len = .34 + .66 * f, kt = .78 + .22 * f;
+    _d.set(dx, dh, dy).normalize(); _q.setFromUnitVectors(UPV, _d);
+    return _M.compose(_v.set(bx, bh, by), _q, _s.set(kt, len, kt));
+  }
+  function pileMatrix(i) {
+    const [o, h] = PILE[i], c = Math.cos(pile.a), s = Math.sin(pile.a);
+    _d.set(c, 0, s); _q.setFromUnitVectors(UPV, _d);
+    return _M.compose(_v.set(pile.x - s * o - c * .25, h, pile.y + c * o - s * .25), _q, _s.set(1, .5 / LOG_L, 1));
+  }
+  const brazMeshes = new Map();   // brazier -> its mesh (the coal bed's glowing veins)
+
   function buildMeshes() {
     for (const m of meshes) m.dispose(); meshes.length = 0;
     for (const p of props()) if (p.kind === 'torch' && p.mount) {
       const [nx, ny] = p.mount, th = Math.atan2(-ny, nx);
       meshes.push(host.world.mesh(bracketGeo, M4([p.x - nx * D, p.z || 0, p.y - ny * D], [0, th, 0])));
     }
+    for (const p of props()) if (p.kind === 'brazier') {   // the bowl and tripod are 3D (not a light occluder: its own flame is in it)
+      p.model = true; p.fx = true;
+      const m = host.world.mesh(brazGeo, M4([p.x, p.z || 0, p.y], [0, (p.light | 0) * 1.1, 0])); meshes.push(m); brazMeshes.set(p, m);
+    }
     camp.mesh = host.world.mesh(campGeo, M4([camp.x, 0, camp.y], [0, .3, 0]), {occlude: true}); meshes.push(camp.mesh);   // its stones throw little shadow rays
     // (not a point-light occluder: its flame sits in the basket, which would ring it with a black disc)
     beacon.mesh = host.world.mesh(beacGeo, M4([beacon.x, beacon.z, beacon.y], [0, .2, 0])); meshes.push(beacon.mesh);
+    for (const L of logs) { L.m = host.world.mesh(logGeo, logMatrix(L)); meshes.push(L.m); }   // (not light occluders: they move)
+    pile.meshes = PILE.map((_, i) => { const m = host.world.mesh(logGeo, pileMatrix(i).clone(), {occlude: true}); meshes.push(m); return m; });
     placeCandles();
   }
   function syncBiome() {
@@ -261,13 +300,22 @@ export async function create(host) {
   function flamePoints() {   // lit flames an arrow can catch from: [x, y, h]
     const out = [];
     for (const p of props()) if ((p.kind === 'brazier' || p.kind === 'torch') && !p.unlit && !p.gone && !p.broken) out.push([p.x, p.y, flameAt(p)]);
-    if (F.on) { out.push([camp.x, camp.y, .45]); if (!beacon.unlit) out.push([beacon.x, beacon.y, beacon.z + 1.3]); }
+    if (F.on) { out.push([camp.x, camp.y, .7]); if (!beacon.unlit) out.push([beacon.x, beacon.y, beacon.z + 1.3]); }
     for (const [p] of burning) out.push([p.x, p.y, (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8)]);
     return out;
   }
+  const pals = new Map();   // '#rrggbb' -> the flame's 4 tones (hot core .. dark tip), for sparks
+  function palOf(c) { let p = pals.get(c); if (!p) pals.set(c, p = [ART.mixHex(c, '#ffffff', .6), ART.mixHex(c, '#ffffff', .15), c, ART.mixHex(c, '#000000', .35)].map(rgb)); return p; }
   function flare(x, y, h, c, r = 4, k = 2.2, life = .5) { flares.push({x, y, h, c, r, k, t: 0, life}); }
   function burst(x, y, h, n, c = FIRE, speed = 1.6) {
-    for (let i = 0; i < n; i++) { const a = R() * TAU, s = rr(.3, speed); parts.push({x, y, h, vx: Math.cos(a) * s, vy: Math.sin(a) * s * .8, vh: rr(.5, 2.4), t: 0, life: rr(.35, .8), k: 'spark', c, g: 3}); }
+    for (let i = 0; i < n; i++) { const a = R() * TAU, s = rr(.3, speed); parts.push({x, y, h, vx: Math.cos(a) * s, vy: Math.sin(a) * s * .8, vh: rr(.5, 2.4), t: 0, life: rr(.35, .8), k: 'spark', pal: c, g: 3}); }
+  }
+  // a falling ember (k 'drip'): it floats down glowing, flutters, may bounce (sparks), lies there and cools to ash. gz: the ground
+  function drip(x, y, h, gz, pal, o = {}) {
+    parts.push({x, y, h, vx: o.vx ?? rr(-.06, .06), vy: o.vy ?? rr(-.06, .06), vh: o.vh ?? rr(-.15, .1), t: 0, life: 14, k: 'drip', pal, gz, heat: 1, land: 0, cool: rr(1.6, 3.4), sd: R() * TAU});
+  }
+  function ashPuff(x, y, h, n, r) {   // grey ash: light, it hangs and drifts
+    for (let i = 0; i < n; i++) { const a = R() * TAU, v = rr(.1, .5), d = r * R(); parts.push({x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, h: h + rr(0, .1), vx: Math.cos(a) * v, vy: Math.sin(a) * v, vh: rr(.15, .55), t: 0, life: rr(.9, 1.8), k: 'smoke', c: ASHC[R() * 3 | 0], sz: 1, a0: .55}); }
   }
   function light(p) {   // an unlit torch / brazier / the beacon catches
     p.unlit = false;
@@ -280,7 +328,7 @@ export async function create(host) {
   function ignite(p) {
     if (burning.has(p) || p.broken || p.gone) return;
     const dur = BURNS[p.kind] ?? BURNS[p.breakable]; if (!dur) return;
-    burning.set(p, {t: 0, dur: dur * rr(.9, 1.15), fl: {}, spread: 0});
+    burning.set(p, {t: 0, dur: dur * rr(.9, 1.15), spread: 0, sd: R() * TAU});
     burst(p.x, p.y, (p.z || 0) + .5, 12);
     host.events.push({type: 'ignite', x: p.x, y: p.y, kind: p.kind});
   }
@@ -312,20 +360,153 @@ export async function create(host) {
       if (!a.stuck || R() < .5) parts.push({x: a.x, y: a.y, h: a.h, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(.1, .6), t: 0, life: rr(.25, .5), k: 'ember', c: FIRE[1 + (R() * 2 | 0)]});
     }
   }
+  const ashes = new Map();     // burnt-through prop -> {t, life, sd, cr (crumbling 0..1), gone}: charred remains, then an ash pile
+  const scorched = new Map();  // a dummy that burnt out -> {t}: its char fades
+  const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  const crumbleOf = b => sstep(.72, 1, b.t / b.dur);
+  const flameK = (p, b) => { const u = b.t / b.dur; return p.kind === 'dummy' ? clamp((b.dur - b.t) / 1.5, 0, 1) * Math.min(1, u * 12) : Math.min(1, u * 12) * (u > .7 ? 1 - (u - .7) / .3 * .5 : 1); };
   function stepBurning(dt) {
     const core = host.feature('combat')?.core;
     for (const [p, b] of burning) {
       b.t += dt;
-      if (p.broken || p.gone || b.t > b.dur + (p.kind === 'dummy' ? 0 : 3)) { burning.delete(p); if (p.broken) for (let i = 0; i < 10; i++) parts.push({x: p.x + rr(-.3, .3), y: p.y + rr(-.3, .3), h: (p.z || 0) + .05, vx: 0, vy: 0, vh: 0, t: 0, life: rr(1.5, 3), k: 'ember', c: FIRE[2 + (R() * 2 | 0)], g: 0}); continue; }
-      const top = (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8);
-      if (R() < dt * 26) parts.push({x: p.x + rr(-.15, .15), y: p.y + rr(-.1, .1), h: top, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(.8, 1.8), t: 0, life: rr(.4, .9), k: 'spark', c: FIRE[R() * 3 | 0], g: -.3});
+      if (p.broken || p.gone) {   // smashed or blown apart while alight: what's left smoulders
+        burning.delete(p); if (p.broken && !p.explode && p.kind !== 'dummy') ashes.set(p, {t: 0, life: rr(10, 16), sd: b.sd, cr: 0}); continue;
+      }
+      const u = b.t / b.dur, fk = flameK(p, b), base = (p.z || 0) + (p.h || 0), top = base + (TOP[p.kind] ?? .8) * (1 - crumbleOf(b) * .55);
+      if (R() < dt * 26 * fk) parts.push({x: p.x + rr(-.15, .15), y: p.y + rr(-.1, .1), h: top, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(.8, 1.8), t: 0, life: rr(.4, .9), k: 'spark', c: FIRE[R() * 3 | 0], g: -.3});
       if (R() < dt * 9) parts.push({x: p.x + rr(-.1, .1), y: p.y, h: top + .25, vx: 0, vy: 0, vh: rr(.35, .6), t: 0, life: rr(1.6, 2.6), k: 'smoke', c: SMOKE[R() * 3 | 0], sz: 2, a0: .55});
+      if (u > .45 && R() < dt * (u > .7 ? 9 : 2.5)) {   // burning through: embers and charcoal drop off its sides
+        const a = R() * TAU, r = Math.max(.2, p.r || .3) * rr(.7, 1.1);
+        drip(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r, base + rr(.15, .65) * (top - base), p.z || 0, FIRE, {vx: Math.cos(a) * rr(.1, .4), vy: Math.sin(a) * rr(.1, .4), vh: rr(0, .5)});
+      }
+      if (u > .7 && R() < dt * 3) ashPuff(p.x, p.y, base + .2, 3, .25);
       // it spreads to wooden neighbours
       b.spread += dt;
       if (b.spread > 1.4) { b.spread = 0; for (const q of props()) if (q !== p && !burning.has(q) && BURNS[q.kind] && !q.broken && Math.hypot(q.x - p.x, q.y - p.y) < 1.4 && R() < .45) ignite(q); }
-      if (b.t >= b.dur && p.kind !== 'dummy' && core && !p.broken) core.breakProp(p, {});
+      if (b.t < b.dur) continue;
+      burning.delete(p);
+      if (p.kind === 'dummy') { scorched.set(p, {t: 0}); continue; }
+      if (!core) continue;
+      if (p.explode) { core.breakProp(p, {}); continue; }   // the powder keg cooks off
+      core.breakProp(p, {ash: true});   // burnt through: it slumps into charred remains
+      ashes.set(p, {t: 0, life: rr(22, 30), sd: b.sd, cr: 0});
+      burst(p.x, p.y, base + .3, 18, FIRE, 1.4); ashPuff(p.x, p.y, base + .15, 12, .35);
+      flare(p.x, p.y, base + .5, '#ff9a40', 4.5, 1, .4);
+      host.events.push({type: 'crackle', x: p.x, y: p.y, big: true});
+    }
+    for (const [p, e] of ashes) {
+      if (!p.broken) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); if (e.gone) p.gone = false; ashes.delete(p); continue; }   // it came back
+      e.t += dt;
+      const base = p.z || 0, fl = clamp(1 - e.t / 9, 0, 1);   // the flames on the remains die down
+      if (R() < dt * 14 * fl) parts.push({x: p.x + rr(-.2, .2), y: p.y + rr(-.15, .15), h: base + .25, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(.6, 1.4), t: 0, life: rr(.3, .7), k: 'spark', c: FIRE[0], g: -.3});
+      if (!e.gone && R() < dt * 2.2 * clamp(1 - e.t / (e.life + 3), .15, 1)) parts.push({x: p.x + rr(-.15, .15), y: p.y + rr(-.1, .1), h: base + .3, vx: 0, vy: 0, vh: rr(.25, .45), t: 0, life: rr(1.6, 2.8), k: 'smoke', c: SMOKE[R() * 3 | 0], sz: 1, a0: .4});
+      if (!e.gone && e.t > e.life) {   // the remains crumble to an ash pile
+        e.cr = Math.min(1, (e.t - e.life) / 2.5);
+        if (R() < dt * 7) ashPuff(p.x + rr(-.2, .2), p.y + rr(-.2, .2), base + .1, 2, .15);
+        if (e.cr >= 1) { e.gone = true; p.gone = true; ashPuff(p.x, p.y, base + .08, 10, .3); }
+      }
+    }
+    for (const [p, e] of scorched) if ((e.t += dt) > 50) { host.itemOf(p)?.live?.burn?.(0, 0, 0, 0); scorched.delete(p); }
+  }
+  function burnVisuals() {   // the burning props' meshes: char, veins, ash, the slump; the remains glowing down
+    for (const [p, b] of burning) {
+      const it = host.itemOf(p), m = it?.live; if (!m?.burn) continue;
+      const u = b.t / b.dur, cr = crumbleOf(b);
+      m.burn(.04 + sstep(0, .75, u), clamp(u * 6, 0, 1) * (.75 + .25 * Math.sin(T * 3 + b.sd)), T + b.sd, sstep(.65, 1, u) * .4);
+      if (cr > 0 && !it.manageMatrix) {   // it sags and slumps as it burns through
+        _ax.set(Math.cos(b.sd), 0, Math.sin(b.sd)); _q.setFromAxisAngle(_ax, cr * .14);
+        m.setMatrix(_M.compose(_v.set(p.x, (p.z || 0) + (p.h || 0), p.y), _q, _s.set(1 + cr * .14, 1 - cr * .6, 1 + cr * .14)));
+      }
+    }
+    for (const [p, e] of ashes) {
+      const m = host.itemOf(p)?.live; if (!m?.burn || e.gone) continue;
+      const k = clamp(1 - e.t / e.life, 0, 1);
+      m.burn(1, k ** 1.4 * (.7 + .3 * Math.sin(T * 2 + e.sd)), T + e.sd, .35 + .3 * (1 - k));
+      if (e.cr > 0) m.setMatrix(_M.compose(_v.set(p.x, p.z || 0, p.y), _q.identity(), _s.set(1 + e.cr * .25, Math.max(.02, 1 - e.cr), 1 + e.cr * .25)));
+    }
+    for (const [p, e] of scorched) { const m = host.itemOf(p)?.live; if (m?.burn) { const k = clamp(1 - e.t / 50, 0, 1); m.burn(k, clamp(1 - e.t / 5, 0, 1) * .6, T, .4 * k); } }
+  }
+  function drawAshes() {   // ash piles: grey flecks in a low mound, a few embers breathing in them while they're warm
+    for (const [p, e] of ashes) {
+      if (!near(p.x, p.y)) continue;
+      const fade = e.gone ? clamp(1 - (e.t - e.life - 2.5) / 60, 0, 1) : 1; if (fade <= 0) continue;
+      const grow = e.gone ? 1 : .35 + e.cr * .65, n = Math.round(44 * grow), heat = clamp(1 - e.t / (e.life + 25), 0, 1), s0 = e.sd * 10 | 0;
+      // the ash on the ground under it (an exact projected disc, whole pixels), spreading as the remains crumble
+      const z = host.zoom, [cx, cy] = host.toView(p.x, p.y, p.z || 0), q = host.layer('ground'), ra = .16 + .2 * grow, ax = ra * PPM * z, ay = ra * PPMY * z;
+      for (let j = -Math.ceil(ay); j <= Math.ceil(ay); j++) {
+        const t = j / ay; if (Math.abs(t) > 1) continue;
+        const hw = ax * Math.sqrt(1 - t * t) - (ART.hsh(j, s0) < .4 ? 1 : 0);
+        q.fillStyle = `rgba(${Math.abs(t) < .5 ? '112,107,100' : '84,80,75'},${(.5 * fade).toFixed(3)})`;
+        q.fillRect(Math.round(cx - hw), Math.round(cy + j), Math.round(hw * 2), 1);
+      }
+      for (let i = 0; i < n; i++) {
+        const a = ART.hsh(i, 7, s0) * TAU, d = Math.sqrt(ART.hsh(i, 8, s0)) * .38, h = (p.z || 0) + .012 + (1 - d / .38) * .05 * grow;
+        const x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d, pulse = .5 + .5 * Math.sin(T * (1.1 + ART.hsh(i, 9, s0)) + i * 1.7);
+        if (i % 4 === 0 && heat * pulse > .2) host.point(x, y, h, FIRE[heat * pulse > .6 ? 2 : 3], {emit: true});
+        else host.point(x, y, h, ASHC[(i * 7) % 4], {alpha: fade, size: d < .2 ? 2 : 1});
+      }
+      if (e.t < 9) fires.draw(p, 'burn', '#ff9a40', p.x, p.y + .01, (p.z || 0) + .1, {on: clamp(1 - e.t / 9, 0, 1), height: .55, scale: .6});
     }
   }
+  function stepCamp(dt) {
+    let fuel = 0;
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const L = logs[i]; L.age += dt;
+      if (L.st === 'drop') { if ((L.ph += dt / .5) >= 1) { L.st = 'stand'; L.ph = 0; logLands(L); } continue; }
+      if (L.st === 'fall' && (L.ph += dt / .45) >= 1) { L.st = 'lie'; logFalls(L); }
+      L.f -= dt * L.rate * campRate * (L.st === 'lie' ? 1.8 : 1);
+      if (L.st === 'stand' && L.f < .24) {   // burnt through at the foot: it falls in
+        L.st = 'fall'; L.ph = 0; L.la = L.a + rr(-.7, .7); L.ly = .05 + logs.filter(q => q.st === 'lie').length % 3 * .034;
+      }
+      if (L.f <= 0) {   // crumbled into the ash bed
+        L.m?.dispose(); logs.splice(i, 1); ash = Math.min(4, ash + .7); ashPuff(camp.x, camp.y, .06, 6, .25); continue;
+      }
+      fuel += L.st === 'lie' ? L.f * 1.5 + .12 : L.f;
+    }
+    campK += (clamp(fuel / 2.6, .1, 1.15) - campK) * (1 - Math.exp(-dt * .9));
+    // nobody near: the fire is tended (fed back up, the pile restocked)
+    if (!near(camp.x, camp.y, 18) && logs.filter(L => L.st !== 'lie').length < 3) {
+      for (let sl; (sl = freeSlot()) >= 0;) { const L = newLog(sl, rr(.85, 1), rr(20, 50)); L.m = host.world.mesh(logGeo, logMatrix(L)); meshes.push(L.m); }
+      pile.n = PILE.length;
+    }
+  }
+  const campFlare = (k = .8, pop = 0) => { const fc = fires._.get('camp'); if (fc) { fc.flare = Math.max(fc.flare, k); fc.pop = Math.max(fc.pop || 0, pop); } };
+  function logLands(L) {   // a log thrown on: sparks, the flames jump
+    const c = Math.cos(L.a), s = Math.sin(L.a), pal = palOf(campCol());
+    burst(camp.x + c * .1, camp.y + s * .1, .3, 16, pal, 1.4); ashPuff(camp.x, camp.y, .1, 5, .3);
+    flare(camp.x, camp.y, .6, campCol(), 5.5, 1, .35); campFlare(.8, .6);
+    host.events.push({type: 'crackle', x: camp.x, y: camp.y, big: true});
+  }
+  function logFalls(L) {   // it falls in: a crash of sparks, a puff of ash, embers knocked out
+    const lc = Math.cos(L.la), ls = Math.sin(L.la), pal = palOf(campCol());
+    burst(camp.x, camp.y, .15, 22, pal, 2); ashPuff(camp.x + lc * .12, camp.y + ls * .12, .08, 9, .4);
+    flare(camp.x, camp.y, .5, campCol(), 6, 1.2, .4); campFlare(1, 1);
+    for (let i = 0; i < 6; i++) { const u = R(); drip(camp.x + lc * (.3 - u * .46), camp.y + ls * (.3 - u * .46), .12, 0, pal, {vx: rr(-.6, .6), vy: rr(-.6, .6), vh: rr(.6, 1.4)}); }
+    host.events.push({type: 'crackle', x: camp.x, y: camp.y, big: true}, {type: 'logFall', x: camp.x, y: camp.y});
+  }
+  function tend() {   // E at the campfire: a log on from the pile, or (the teepee full / the pile empty) a stir
+    if (canAdd()) {
+      const L = newLog(freeSlot(), 1, 0, 'drop'); pile.n--;
+      L.m = host.world.mesh(logGeo, logMatrix(L)); meshes.push(L.m);
+      host.events.push({type: 'addWood', x: camp.x, y: camp.y});
+      return;
+    }
+    const pal = palOf(campCol());
+    burst(camp.x, camp.y, .25, 26, pal, 2.2); flare(camp.x, camp.y, .6, campCol(), 6, 1, .45); campFlare(1, 1); ashPuff(camp.x, camp.y, .1, 6, .3);
+    for (let i = 0; i < 4; i++) drip(camp.x + rr(-.15, .15), camp.y + rr(-.15, .15), .3, 0, pal, {vx: rr(-.9, .9), vy: rr(-.9, .9), vh: rr(1, 2)});
+    host.events.push({type: 'crackle', x: camp.x, y: camp.y, big: true});
+  }
+  function campVisuals() {   // the logs' poses and how burnt they are; the pile
+    for (const L of logs) if (L.m) {
+      L.m.setMatrix(logMatrix(L)); L.m.setVisible(F.on);
+      if (L.st === 'drop') { L.m.burn(0, 0, 0, 0); continue; }
+      const ch = clamp(Math.min(1, L.age / 25) * .5 + (1 - L.f) * .75, .02, 1);
+      const g = clamp(L.age / 5, 0, 1) * (.5 + .4 * (1 - L.f)) * (.8 + .2 * Math.sin(T * 2.3 + L.sd)) * (.55 + .45 * Math.min(1, campK));
+      L.m.burn(ch, g, T + L.sd, clamp((.5 - L.f) * 1.5, 0, .8));
+    }
+    pile.meshes?.forEach((m, i) => m.setVisible(F.on && i < pile.n));
+  }
+
   function stepCandles(dt, evs) {
     for (const e of evs) if (e.type === 'explode') for (const c of candles) if (Math.hypot(c.x - e.x, c.y - e.y) < (e.r || 2) * 1.8 + 1) candleSnuff(c);
     const pl = host.player;
@@ -366,36 +547,76 @@ export async function create(host) {
       w.trail.unshift([w.x, w.y, w.h]); if (w.trail.length > 9) w.trail.pop();
     }
   }
-  function stepFlame(s, dt, x, y) {   // a flame card's frame: height walk + lean from the wind (along the screen's x)
-    s.ft = (s.ft || 0) + dt; if (s.ft < 1 / 12 && s.li !== undefined) return;
-    s.ft = 0;
-    s.hi = R() < .4 ? 2 : clamp((s.hi ?? 2) + (R() < .5 ? -1 : 1), 0, 2);
-    const a = host.wind?.on && host.wind.at ? host.wind.at(x, y) : {x: 0, y: 0}, yaw = host.yaw;
-    const lean = (a.x * Math.cos(yaw) - a.y * Math.sin(yaw)) / 1.4;
-    s.li = clamp(Math.round(2 + clamp(lean, -1.6, 1.6) + (R() - .5) * .9), 0, 4);
-  }
   function stepParts(dt) {
     const wd = host.wind?.on && host.wind.at ? host.wind.at(host.player.x, host.player.y) : {x: 0, y: 0};
     for (let i = parts.length - 1; i >= 0; i--) {
       const q = parts[i]; q.t += dt;
-      if (q.t >= q.life) { parts.splice(i, 1); continue; }
+      if (q.t >= q.life) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }   // (swap-remove: splice made this O(n^2))
+      if (q.k === 'drip') {   // a falling ember: it floats down, flutters, may bounce (sparks), lands and cools
+        if (!q.land) {
+          q.tx = q.x; q.ty = q.y; q.th = q.h;
+          q.vh -= 2.6 * dt; q.vh *= Math.exp(-dt * 1.1);
+          q.vx += (Math.sin(q.t * 10 + q.sd) * .5 + (wd.x * .12 - q.vx) * .6) * dt; q.vy += (Math.cos(q.t * 8 + q.sd) * .4 + (wd.y * .12 - q.vy) * .6) * dt;
+          q.x += q.vx * dt; q.y += q.vy * dt; q.h += q.vh * dt; q.heat = Math.max(.62, q.heat - dt * .07);
+          if (q.h <= q.gz) {
+            q.h = q.gz + .004;
+            if (!q.bounced && q.vh < -.8 && R() < .55) {
+              q.bounced = 1; q.vh = -q.vh * .3; q.vx = q.vx * .4 + rr(-.3, .3); q.vy = q.vy * .4 + rr(-.3, .3);
+              for (let j = 0; j < 2; j++) parts.push({x: q.x, y: q.y, h: q.h + .02, vx: rr(-.6, .6), vy: rr(-.5, .5), vh: rr(.5, 1.2), t: 0, life: rr(.2, .4), k: 'spark', pal: q.pal, g: 3});
+            } else { q.land = q.t; q.vx = q.vy = q.vh = 0; q.life = q.t + q.cool + 1; }
+          }
+        } else q.heat = Math.max(0, 1 - (q.t - q.land) / q.cool) * .9;
+        continue;
+      }
       const drift = q.k === 'smoke' ? .35 : q.k === 'spore' ? .25 : .12;
       q.vx += (wd.x * drift - q.vx) * dt * .8; q.vy += (wd.y * drift - q.vy) * dt * .8;
       if (q.k === 'spark' || q.k === 'ember') { q.vx += (R() - .5) * dt * 6; q.vy += (R() - .5) * dt * 6; q.vh -= (q.g ?? 0) * dt; }
       if (q.k === 'spore') { q.vh *= Math.exp(-dt * 1.5); q.vx += Math.sin(q.t * 5 + i) * dt * .3; }
+      if (q.k === 'spark' || q.k === 'ember') { q.tx = q.x; q.ty = q.y; q.th = q.h; }
       q.x += q.vx * dt; q.y += q.vy * dt; q.h += q.vh * dt;
       if (q.k === 'smoke') q.vh *= Math.exp(-dt * .3);
       if (q.h < 0 && q.k !== 'ember') q.h = 0;
     }
-    if (parts.length > 900) parts.splice(0, parts.length - 900);
+    if (parts.length > 1100) parts.splice(0, parts.length - 1100);
   }
 
   // ================================================================ draw
   const near = (x, y, m = 15) => { const t = host.G.view.T; return Math.abs(x - t.x) < m && Math.abs(y - t.z) < m; };
-  function drawFire(name, s, x, y, h) { spr(`${name}_${s.li ?? 2}_${s.hi ?? 2}`, x, y, h); }
+  // live flames (firesim.js): one heat sim per flame, all in one sheet
+  const fires = createFires(host);
+  const campCol = () => biomeId === 'rift' ? '#e070ff' : biomeId === 'frost' ? '#ffb04a' : '#ffa040';
+  // (the bed a little inside the prop: it burns from within; lower as it slumps)
+  const burnTop = (p, b) => (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8) * (1 - (b ? crumbleOf(b) : 0) * .55) - .12;
+  function drawFlames() {   // braziers and wall torches (their sprites paint only the coals / the cup: p.fx), burning props
+    const S = host.biome.style;
+    for (const p of props()) {
+      if ((p.kind !== 'brazier' && p.kind !== 'torch') || p.unlit || p.gone || !near(p.x, p.y)) continue;
+      if (p.kind === 'torch') { fires.draw(p, 'torch', S.torch || '#ffc850', p.x, p.y + .01, (p.z || 0) + 1.53); continue; }
+      const col = S.braz[(p.light | 0) % 3], base = (p.z || 0) + .955, pal = fires.ramp(col);
+      fires.draw(p, 'brazier', col, p.x, p.y + .01, base);
+      for (let i = 0; i < 9; i++) {   // coals glowing in the bowl, breathing
+        const a = i / 9 * TAU + (p.light | 0), d = .07 + (i % 3) * .07, k = .5 + .5 * Math.sin(T * (5 + i % 4) + i * 1.9);
+        host.point(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d * .9, base - .005, pal[k > .75 ? 1 : k > .4 ? 2 : 4], {emit: true});
+      }
+    }
+    drawBurning();
+  }
+  function drawBurning() {
+    for (const [p, b] of burning) if (near(p.x, p.y)) { const k = flameK(p, b); fires.draw(p, 'burn', '#ff9a40', p.x, p.y + .01, burnTop(p, b), {scale: .3 + .7 * k, height: .55 + .45 * k}); }
+  }
   function drawCampfire() {
     if (!near(camp.x, camp.y)) return;
-    drawFire('camp', camp.fl, camp.x, camp.y + .01, .12);
+    // as big as its wood (a little less than full fuel: less white-hot, more tongues)
+    const k = Math.min(1.1, campK);
+    fires.draw('camp', 'camp', campCol(), camp.x, camp.y + .01, .1, {scale: .88 * (.3 + .7 * k), height: .42 + .58 * k});
+    // the ash bed: grey flecks in a low mound (fat ones in the middle), embers breathing in it
+    const am = Math.min(4, ash), nA = Math.round(am * 30), R0 = .13 + .055 * am;
+    for (let i = 0; i < nA; i++) {
+      const a = ART.hsh(i, 1) * TAU, d = Math.sqrt(ART.hsh(i, 2)) * R0, hh = .012 + (1 - d / R0) * .014 * am;
+      const x = camp.x + Math.cos(a) * d, y = camp.y + Math.sin(a) * d, pulse = .5 + .5 * Math.sin(T * (1.3 + ART.hsh(i, 3)) + i);
+      if (i % 6 === 0 && pulse > .3) host.point(x, y, hh, FIRE[pulse > .8 ? 1 : pulse > .55 ? 2 : 3], {emit: true});
+      else host.point(x, y, hh, ASHC[(i * 7) % 4], {size: d < R0 * .55 ? 2 : 1});
+    }
     for (let i = 0; i < 7; i++) {   // coals glowing between the logs
       const a = i / 7 * TAU + T * .1, d = .1 + (i & 1) * .07, k = .5 + .5 * Math.sin(T * 9 + i * 2.3);
       host.point(camp.x + Math.cos(a) * d, camp.y + Math.sin(a) * d, .03, FIRE[k > .6 ? 1 : 2], {emit: true});
@@ -409,10 +630,18 @@ export async function create(host) {
       q.fillStyle = inner ? 'rgba(26,21,18,.62)' : 'rgba(38,32,28,.42)';
       q.fillRect(Math.round(cx - hw), Math.round(cy + j), Math.round(hw * 2), 1);
     }
+    // the ash under it, spreading as the wood burns away
+    const ra = .1 + .05 * Math.min(4, ash), ax = ra * PPM * z, ay = ra * PPMY * z;
+    for (let j = -Math.ceil(ay); j <= Math.ceil(ay); j++) {
+      const t = j / ay; if (Math.abs(t) > 1) continue;
+      const hw = ax * Math.sqrt(1 - t * t) - (ART.hsh(j, 5) < .4 ? 1 : 0);
+      q.fillStyle = Math.abs(t) < .55 ? 'rgba(122,117,110,.55)' : 'rgba(96,91,86,.45)';
+      q.fillRect(Math.round(cx - hw), Math.round(cy + j), Math.round(hw * 2), 1);
+    }
     haze(camp.x, camp.y, 1.05, 12, 26);
   }
-  function haze(x, y, h, w, H) {   // heat shimmer above a fire: whole-pixel row shifts in the distort layer
-    if (!host.G.compU?.tDistort) return;
+  function haze(x, y, h, w, H) {   // heat shimmer above a fire: whole-pixel row shifts in the distort layer (HD: firesim's heat)
+    if (!host.G.compU?.tDistort || (hdFx() && fires.TUNE.heat && host.G.heat)) return;
     const z = host.zoom, [cx, top] = host.toView(x, y, h), q = host.layer('distort');
     for (let r = 0; r < H * z; r++) {
       const k = 1 - r / (H * z), s = Math.round(Math.sin(r * .55 / z - T * 7 + x) * 1.6 * k * z);
@@ -423,13 +652,12 @@ export async function create(host) {
   }
   function drawBeacon() {
     if (beacon.unlit || !near(beacon.x, beacon.y)) return;
-    drawFire('beacon', beacon.fl, beacon.x, beacon.y + .01, beacon.z + 1.0);
+    fires.draw('beacon', 'beacon', host.biome.style.torch || '#ffc850', beacon.x, beacon.y + .01, beacon.z + .98);
     haze(beacon.x, beacon.y, beacon.z + 2.0, 14, 30);
   }
   function drawSmall() {
     for (const c of candles) if (near(c.x, c.y)) spr(`candles_${c.v}_${c.lit ? (Math.floor(T * 7 + c.ph) % 4) : 4}`, c.x, c.y, c.h, {shadow: true});
     for (const s of shrooms) if (near(s.x, s.y)) spr(`shroom_${s.v}_${s.b > 1.05 ? 2 : s.b > .55 ? 1 : 0}`, s.x, s.y, 0, {shadow: true});
-    for (const [p, b] of burning) if (near(p.x, p.y)) { stepFlame(b.fl, 0, p.x, p.y); drawFire('burn', b.fl, p.x, p.y + .01, (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8) - .25); }
   }
   function drawWisps() {
     for (const w of wisps) {
@@ -451,15 +679,50 @@ export async function create(host) {
       const fl = Math.floor(T * 14 + a._id) % 3;
       host.point(a.x - dx * .12, a.y - dy * .12, a.h - dh * .12 + .04, FIRE[fl === 0 ? 0 : 1], {emit: true, size: a.stuck ? 1 : 2, alpha: k});
       host.point(a.x - dx * .18, a.y - dy * .18, a.h - dh * .18 + .09, FIRE[2], {emit: true, alpha: k * .8});
+      if (hdFx()) {   // its glow, the hot air over it (HD)
+        host.G.fx(a.x - dx * .14, a.h - dh * .14 + .06, a.y - dy * .14, .13, FIRE[1], .35 * k, 'add');
+        if (fires.TUNE.heat) host.G.heat?.(a.x - dx * .14, a.h + .2, a.y - dy * .14, .13, .5 * k);
+      }
     }
   }
+  // the fire's look (firesim.js TUNE.style): pixel | hybrid | soft. HD (hybrid, soft): sparks get a soft glow, smoke
+  // in 'soft' is soft blended puffs, warmed by the fire near it
+  const hdFx = () => !!host.G.fx && fires.TUNE.style !== 'pixel';
+  const SMK = [0, 0, 0];
+  function trail(q, c, a) {   // a short glowing trail (HD): back along its last step, stretched by its speed
+    if (q.tx === undefined) return;
+    const dx = q.x - q.tx, dy = q.y - q.ty, dh = q.h - q.th, k = Math.min(4, .045 / Math.max(.004, Math.hypot(dx, dy, dh)));
+    for (const f of [1, 2]) host.G.fx(q.x - dx * f * k, q.h - dh * f * k, q.y - dy * f * k, .022 - f * .004, c, (.22 - f * .07) * a, 'add');
+  }
+  const PO = {emit: false, size: 1, alpha: 1};   // one options object for every point (G.point reads it at once)
+  const pt = (x, y, h, c, emit, size, alpha) => { PO.emit = emit; PO.size = size; PO.alpha = alpha; host.point(x, y, h, c, PO); };
   function drawParts() {
+    const style = host.G.fx ? fires.TUNE.style : 'pixel', G = host.G;
     for (const q of parts) {
       if (!near(q.x, q.y, 16)) continue;
       const u = q.t / q.life;
-      if (q.k === 'smoke') host.point(q.x, q.y, q.h, q.c, {size: (q.sz || 2) + (u > .5 ? 1 : 0), alpha: (q.a0 ?? .5) * (1 - u)});
-      else if (q.k === 'spore') host.point(q.x, q.y, q.h, q.c, {emit: true, alpha: (1 - u) * .9});
-      else host.point(q.x, q.y, q.h, q.k === 'ember' ? q.c : FIRE[Math.min(3, Math.floor(u * 4))], {emit: true, alpha: u > .6 ? (1 - u) * 2.5 : 1});
+      if (q.k === 'smoke') {
+        if (style === 'soft') { const w = Math.max(0, .45 - u) * .5; SMK[0] = q.c[0] + w * .6; SMK[1] = q.c[1] + w * .3; SMK[2] = q.c[2]; G.fx(q.x, q.h, q.y, .05 + u * .17, SMK, .3 * (q.a0 ?? .5) * (1 - u), 'blend'); }
+        else {
+          pt(q.x, q.y, q.h, q.c, false, (q.sz || 2) + (u > .5 ? 1 : 0), (q.a0 ?? .5) * (1 - u));
+          if (style === 'hybrid') G.fx(q.x, q.h, q.y, .07 + u * .14, q.c, .1 * (q.a0 ?? .5) * (1 - u), 'blend');   // a faint soft haze round it
+        }
+      } else if (q.k === 'drip') {   // glowing as it falls, then on the ground it dims through the flame's tones to grey
+        const pal = q.pal || FIRE, k = q.heat, c = k > .78 ? pal[1] : k > .52 ? pal[2] : k > .26 ? pal[3] : ASH1;
+        pt(q.x, q.y, q.h, c, k > .26, 1, q.land && k <= .26 ? clamp(q.life - q.t, 0, 1) : 1);
+        if (style !== 'pixel' && k > .15) {
+          G.fx(q.x, q.h + .01, q.y, .028 + .03 * k, c, (q.land ? .3 : .42) * k, 'add');
+          if (!q.land) trail(q, c, k);
+        }
+      } else if (q.k === 'spore') {
+        pt(q.x, q.y, q.h, q.c, true, 1, (1 - u) * .9);
+        if (style !== 'pixel') G.fx(q.x, q.h, q.y, .04, q.c, .25 * (1 - u), 'add');
+      } else {
+        const c = q.k === 'ember' ? q.c : (q.pal || FIRE)[Math.min(3, Math.floor(u * 4))], a = u > .6 ? (1 - u) * 2.5 : 1;
+        if (style !== 'soft') pt(q.x, q.y, q.h, c, true, 1, a);
+        if (style !== 'pixel') G.fx(q.x, q.h, q.y, style === 'soft' ? .022 : .035, c, (style === 'soft' ? .9 : .3) * a, 'add');
+        if (style !== 'pixel') trail(q, c, a);
+      }
     }
   }
 
@@ -468,14 +731,32 @@ export async function create(host) {
     const t0 = performance.now();
     T += dt; syncBiome();
     stepArrows(dt); stepBurning(dt);
+    fires.step(dt);
+    if (F.on) stepCamp(dt);
+    for (const o of fires.pops.splice(0)) {   // a crackle: sparks thrown high and wide, the fire's light flashes
+      const big = o.kind === 'camp' || o.kind === 'beacon' || o.kind === 'burn', pal = palOf(o.col), n = Math.round((big ? 16 : 9) * o.k);
+      for (let i = 0; i < n; i++) { const a = R() * TAU, v = rr(.4, 1.6) * (big ? 1.3 : 1); parts.push({x: o.x + rr(-.08, .08), y: o.y + rr(-.06, .06), h: o.h + rr(.15, .4), vx: Math.cos(a) * v, vy: Math.sin(a) * v * .8, vh: rr(1.6, 3.4) * (big ? 1.2 : 1), t: 0, life: rr(.5, 1.2), k: 'spark', pal, g: 2.2}); }
+      flare(o.x, o.y, o.h + .4, o.col, big ? 5.5 : 3.6, (big ? 1.1 : .8) * o.k, .28);
+      if (near(o.x, o.y, 14)) host.events.push({type: 'crackle', x: o.x, y: o.y, big});
+    }
     if (F.on) {
       stepCandles(dt, evs); stepShrooms(dt); stepWisps(dt);
-      stepFlame(camp.fl, dt, camp.x, camp.y); if (!beacon.unlit) stepFlame(beacon.fl, dt, beacon.x, beacon.y);
-      if (near(camp.x, camp.y, 20)) {   // the campfire's sparks and smoke
-        if (R() < dt * 14) parts.push({x: camp.x + rr(-.12, .12), y: camp.y + rr(-.08, .08), h: .4, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(1, 2.3), t: 0, life: rr(.6, 1.4), k: 'spark', c: FIRE[0], g: -.2});
+      if (near(camp.x, camp.y, 20)) {   // the campfire's sparks and smoke (as big as the fire)
+        if (R() < dt * 14 * Math.min(1, campK)) parts.push({x: camp.x + rr(-.12, .12), y: camp.y + rr(-.08, .08), h: .4, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(1, 2.3), t: 0, life: rr(.6, 1.4), k: 'spark', c: FIRE[0], g: -.2});
         if (R() < dt * 7) parts.push({x: camp.x + rr(-.08, .08), y: camp.y, h: .9, vx: 0, vy: 0, vh: rr(.35, .55), t: 0, life: rr(2.2, 3.4), k: 'smoke', c: SMOKE[R() * 3 | 0], sz: 2, a0: .5});
       }
       if (!beacon.unlit && near(beacon.x, beacon.y, 20) && R() < dt * 18) parts.push({x: beacon.x + rr(-.15, .15), y: beacon.y + rr(-.1, .1), h: beacon.z + 1.5, vx: rr(-.3, .3), vy: rr(-.3, .3), vh: rr(1.4, 2.8), t: 0, life: rr(.7, 1.5), k: 'spark', c: FIRE[0], g: -.2});
+      // braziers and wall torches: sparks in their own colour, a thin smoke lit by the flame
+      for (const p of props()) if ((p.kind === 'brazier' || p.kind === 'torch') && !p.unlit && !p.gone && near(p.x, p.y, 14)) {
+        const h = flameAt(p), big = p.kind === 'brazier', pal = palOf(big ? host.biome.style.braz[(p.light | 0) % 3] : host.biome.style.torch);
+        if (R() < dt * (big ? 9 : 3)) parts.push({x: p.x + rr(-.1, .1), y: p.y + rr(-.07, .07), h: h - .08, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(.9, 2.1), t: 0, life: rr(.5, 1.1), k: 'spark', pal, g: -.2});
+        if (big && R() < dt * 2.4) parts.push({x: p.x + rr(-.05, .05), y: p.y, h: h + .5, vx: 0, vy: 0, vh: rr(.3, .5), t: 0, life: rr(1.8, 2.8), k: 'smoke', c: SMOKE[R() * 3 | 0], sz: 1, a0: .42});
+        if (R() < dt * .3) {   // now and then an ember drops: off the torch head, over the brazier's rim
+          const z0 = p.z || 0;
+          if (big) { const a = R() * TAU, v = rr(.15, .4); drip(p.x + Math.cos(a) * .3, p.y + Math.sin(a) * .3, z0 + .97, z0, pal, {vx: Math.cos(a) * v, vy: Math.sin(a) * v, vh: rr(.4, .9)}); }
+          else drip(p.x + rr(-.03, .03), p.y + rr(-.03, .03), z0 + 1.5, z0, pal);
+        }
+      }
     }
     for (let i = flares.length - 1; i >= 0; i--) if ((flares[i].t += dt) > flares[i].life) flares.splice(i, 1);
     stepParts(dt);
@@ -484,20 +765,31 @@ export async function create(host) {
   F.frame = () => {
     syncBiome();
     camp.mesh?.setVisible(F.on); beacon.mesh?.setVisible(F.on);
-    if (F.on) { drawCampfire(); drawBeacon(); drawSmall(); drawWisps(); }
-    else for (const [p, b] of burning) if (near(p.x, p.y)) drawFire('burn', b.fl, p.x, p.y + .01, (p.z || 0) + (TOP[p.kind] ?? .8) - .25);
-    drawArrowFire(); drawParts();
+    campVisuals(); burnVisuals();
+    // the beacon's logs char and glow while it burns; the braziers' coal beds glow in veins (ash grey when unlit)
+    beacon.mesh?.burn?.(beacon.unlit ? 0 : .6, beacon.unlit ? 0 : .8 + .2 * Math.sin(T * 2.7), T, beacon.unlit ? 0 : .3);
+    for (const [p, m] of brazMeshes) m.burn?.(1, p.unlit ? 0 : .75 + .25 * Math.sin(T * 3.1 + (p.light | 0)), T + (p.light | 0) * 3, p.unlit ? .6 : .1);
+    drawAshes();
+    if (F.on) {
+      drawCampfire(); drawBeacon(); drawSmall(); drawWisps(); drawFlames();
+      for (const p of props()) if ((p.kind === 'brazier' || p.kind === 'torch') && !p.unlit && !p.gone && near(p.x, p.y, 12))
+        p.kind === 'brazier' ? haze(p.x, p.y, flameAt(p) + .5, 10, 18) : haze(p.x, p.y, flameAt(p) + .3, 6, 10);
+    }
+    else drawBurning();
+    drawArrowFire(); drawParts(); fires.endFrame();
   };
   F.lights = () => {
     const out = [];
     if (F.on) {
-      out.push({x: camp.x, y: camp.y, h: .75, color: '#ffa048', radius: 6.5, intensity: 1.25, flicker: .55, id: 9101, jitter: .05});
+      const ck = Math.min(1.1, campK);
+      out.push({x: camp.x, y: camp.y, h: .3 + .45 * Math.min(1, ck), color: '#ffa048', radius: 6.5 * (.6 + .4 * ck), intensity: 1.25 * (.28 + .72 * ck), flicker: .55, id: 9101, jitter: .05});
       if (!beacon.unlit) out.push({x: beacon.x, y: beacon.y, h: beacon.z + 1.45, color: host.biome.style.torch || '#ffc850', radius: 8.5, intensity: 1.45, flicker: .4, id: 9102, jitter: .06});
       for (const c of candles) if (c.lit) out.push({x: c.x, y: c.y, h: c.h + .3, color: '#ffc070', radius: 2.3, intensity: .75, flicker: .35, id: c.id, jitter: .015});
       for (const s of shrooms) out.push({x: s.x, y: s.y, h: .3, color: GLOW[biomeId] || GLOW.ruins, radius: 2.4 + s.b * .8, intensity: .45 + s.b * .45, flicker: 0, id: s.id});
       for (const w of wisps) if (w.fade > .05) out.push({x: w.x, y: w.y, h: w.h, color: WISP[biomeId] || WISP.ruins, radius: 3.1, intensity: 1.15 * w.fade, flicker: .12, id: w.id});
     }
-    for (const [p, b] of burning) { const k = Math.min(1, b.t / .4) * (p.kind === 'dummy' ? clamp((b.dur - b.t) / 1, 0, 1) : 1); out.push({x: p.x, y: p.y, h: (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8) + .2, color: '#ff9a40', radius: 3.4, intensity: 1.05 * k, flicker: .6, id: 9200 + (p.x * 7 | 0) % 90, jitter: .04}); }
+    for (const [p, b] of burning) { const k = Math.min(1, b.t / .4) * flameK(p, b); out.push({x: p.x, y: p.y, h: burnTop(p, b) + .32, color: '#ff9a40', radius: 3.4, intensity: 1.05 * k, flicker: .6, id: 9200 + (p.x * 7 | 0) % 90, jitter: .04}); }
+    for (const [p, e] of ashes) if (e.t < 14) out.push({x: p.x, y: p.y, h: (p.z || 0) + .45, color: '#ff8a3a', radius: 2.8, intensity: .9 * (1 - e.t / 14) ** 1.5, flicker: .6, id: 9500 + (p.x * 7 | 0) % 90, jitter: .03});
     for (const a of host.arrows) if (a.fire) { const k = a.stuck ? clamp(a.life / 2, 0, 1) : 1; if (k > 0) out.push({x: a.x, y: a.y, h: a.h + .1, color: '#ffa040', radius: 2.6, intensity: .9 * k, flicker: .5, id: 9300 + (a._id || 0) % 60}); }
     for (const f of flares) { const k = 1 - f.t / f.life; out.push({x: f.x, y: f.y, h: f.h, color: f.c, radius: f.r * (.7 + .3 * k), intensity: f.k * k * k, flicker: 0, id: 9400}); }
     return out;
@@ -505,16 +797,30 @@ export async function create(host) {
   F.onArrowHit = (a, p) => { if (a.fire && BURNS[p.kind]) ignite(p); };   // nothing returned: combat resolves the hit
   F.interact = p => {
     if (p === beacon && beacon.unlit) { light(beacon); return true; }
+    if (p === camp && F.on) { tend(); return true; }
     return false;
   };
-  F.prompt = p => p === beacon && beacon.unlit ? 'E  light the beacon' : null;   // the host's prompt hook (the whole label)
-  F.toggle = () => { F.on = !F.on; };
+  F.prompt = p => p === beacon && beacon.unlit ? 'E  light the beacon' : p === camp && F.on ? (canAdd() ? 'E  add a log' : 'E  stir the fire') : null;   // the host's prompt hook (the whole label)
+  F.toggle = () => {   // off: the sprites' own flames
+    F.on = !F.on; for (const p of props()) if (p.kind === 'brazier' || p.kind === 'torch') p.fx = F.on;
+    camp.interact = F.on ? 'tend the fire' : undefined;
+    // (off, the host stops calling F.frame: show / hide our meshes here)
+    camp.mesh?.setVisible(F.on); beacon.mesh?.setVisible(F.on);
+    for (const L of logs) L.m?.setVisible(F.on); pile.meshes?.forEach((m, i) => m.setVisible(F.on && i < pile.n));
+  };
   F.biomeChanged = async () => {
     syncBiome();
     for (const p of props()) if (p.kind === 'torch' && !host.itemOf(p)) await host.world.addItem(p);
     meshes.length = 0; buildMeshes();   // the rebuilt world disposed our meshes
   };
-  F.hud = () => `fire ${host.arrows.filter(a => a.fire).length} · burning ${burning.size}`;
-  F._ = {camp, beacon, candles, shrooms, wisps, parts, burning, flares, ignite, light, atlas: () => atlas};
+  F.hud = () => `flames ${fires.TUNE.style} (F, HD fx ${host.G.stats.fx ?? 0}, heat ${host.G.stats.heat ?? 0}) · camp ${campK.toFixed(2)} (${logs.length} logs, pile ${pile.n}) · fire arrows ${host.arrows.filter(a => a.fire).length} · burning ${burning.size} · ash ${ashes.size}`;
+  F.onKey = k => {   // F: cycle the fire's look (pixel / hybrid / soft)
+    if (k !== 'f') return false;
+    const S = fires.TUNE.STYLES; fires.TUNE.style = S[(S.indexOf(fires.TUNE.style) + 1) % S.length]; return true;
+  };
+  F.settings = () => [{label: 'Flames', options: fires.TUNE.STYLES, get: () => fires.TUNE.style, set: v => { fires.TUNE.style = v; }},
+    {label: 'Heat ripple', options: ['on', 'off'], get: () => fires.TUNE.heat ? 'on' : 'off', set: v => { fires.TUNE.heat = v === 'on'; }}];
+  F._ = {fires, camp, beacon, candles, shrooms, wisps, parts, burning, flares, ignite, light, atlas: () => atlas,
+    logs, pile, ashes, scorched, tend, drip, get campK() { return campK; }, set campRate(v) { campRate = v; }, get ash() { return ash; }, set ash(v) { ash = v; }};
   return F;
 }

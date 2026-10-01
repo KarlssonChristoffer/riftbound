@@ -150,8 +150,10 @@ export function createCore(host) {
   function breakProp(p, o = {}) {
     const pal = PAL[p.kind] || PAL.stone, hgt = HGT[p.kind] ?? 1, base = pz(p) + (p.h || 0);
     p.broken = true; p.stage = 2; p.hp = 0; p.r = 0;
-    events.push({type: 'break', x: p.x, y: p.y, kind: p.kind, who: p});
-    chunks(p.x, p.y, base + hgt * .3, p.kind === 'pot' ? 12 : p.kind === 'crystal' ? 18 : 16, pal, {dir: o.dir, speed: 2.8, big: p.kind === 'pot' ? 1 : 2, spreadH: hgt * .7});
+    events.push({type: 'break', x: p.x, y: p.y, kind: p.kind, who: p, ash: !!o.ash});
+    // o.ash: burnt through (lights.js): it slumps into charcoal where it stood, nothing flies
+    if (o.ash) chunks(p.x, p.y, base + .05, 9, PAL.char, {speed: .45, big: 0, up: .25, spreadH: .12});
+    else chunks(p.x, p.y, base + hgt * .3, p.kind === 'pot' ? 12 : p.kind === 'crystal' ? 18 : 16, pal, {dir: o.dir, speed: 2.8, big: p.kind === 'pot' ? 1 : 2, spreadH: hgt * .7});
     if (p.kind === 'crystal') for (let i = 0; i < 10; i++) part(p.x, p.y, base + RR(.3, 1.1), RR(-2, 2), RR(-1.5, 1.5), RR(1, 3), RR(.3, .6), SPARK, {emit: true, drag: 3});
     const c = p.coins ?? COINS[p.kind]; if (c) coinBurst(p.x, p.y, base, Math.round(RR(c[0], c[1] + .99) - .49));
     if (p.explode) {
