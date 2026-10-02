@@ -41,13 +41,23 @@ import {createMusic} from './music.js';   // the adaptive score, layered with th
 import {createEngine} from '../../audio/runtime/engine.js';
 import {createBakery} from '../../audio/runtime/bakery.js';
 import {createDirector} from '../../audio/runtime/director.js';
-import {EVENTS, AMBIENCE} from '../../audio/runtime/events.js';
+import {EVENTS, AMBIENCE, SOURCES} from '../../audio/runtime/events.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
 
 const R = Math.random, RR = (a, b) => a + R() * (b - a), J = p => 1 + (R() * 2 - 1) * p;
 const pick = a => a[(R() * a.length) | 0];
 const MAXV = 30;   // simultaneous SFX voices (priority 2 / 3 sounds may go 6 / 12 over)
+
+// THE WATERFALLS (river brief D): the ruins' two falls are positional sources like the torches' fires (the director gives the nearest few on
+// screen a loop each: audio/runtime/director.js updateSources, level / pan / low-pass from SPATIAL.world: -6 dB per metre off screen, culled
+// 2 m off). The loop is the forge's stream 'rapids' (a strong rush with spray, still dark: docs/AUDIO.md's sound taste), a notch under the
+// brook's bank level so a fall near the river stands out only as you come close; `dScale` makes the distance count 1.8x, so the swell from the
+// view's edge to the fall's foot is ~11 dB. Added to the director's own SOURCES table by its options (not by writing events.js's constant).
+// The ravine's lip: the stream's centre x there, y ~ 27.9 (the biome's own edge as world.js cliffZ reads it; depth.js WA.yEnd 27.85). A proper 'fall' case of the stream
+// recipe (more spray, no extra highs) would be the next step: audio/forge/recipes/stream.js.
+const WATERFALL = {recipe: 'stream', case: 'rapids', gainDb: -22};
+const FALL = {dScale: 1.8, ravineY: 27.9, reach: 32};
 
 // ======================================================================================================================
 // ENGINE: one per AudioContext (live, or offline for level tests)
@@ -623,7 +633,7 @@ export function createAudio(ctx, host = {}) {
   const forgeOff = q.get('forge') === '0';
   if (!disabled && !forgeOff) {
     try {
-      const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac), B = createBakery(ac), D = createDirector(EN, B, {EVENTS, AMBIENCE});
+      const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac), B = createBakery(ac), D = createDirector(EN, B, {EVENTS, AMBIENCE, SOURCES: {...SOURCES, waterfall: WATERFALL}});
       try { EN.prepareReverbs?.(); } catch (e) {}
       D.prefetch({biome: 'ruins'});
       RT = {ac, EN, B, D}; AU.forge = RT;
@@ -694,6 +704,7 @@ export function createAudio(ctx, host = {}) {
   // props array or host.propsVersion changes, and once a second as a safety net: no per-frame walk over every prop
   // (docs/ARCHITECTURE.md rule). Every frame only touches these few.
   const C = {props: null, ver: -1, tick: 0, fires: [], brutes: [], rollers: [], sources: []};
+  const FALLS = [{kind: 'waterfall', id: 'fall:plateau', x: 0, y: 0, pan: 0, d: 0, off: 0}, {kind: 'waterfall', id: 'fall:ravine', x: 0, y: 0, pan: 0, d: 0, off: 0}];   // (reused: no allocation per step)
   function candidates() {
     const props = get(host.props) || [], ver = get(host.propsVersion) ?? props.length;
     if (props === C.props && ver === C.ver && (++C.tick % 60)) return C;
@@ -733,6 +744,15 @@ export function createAudio(ctx, host = {}) {
       // visible sound sources in the world (torches / braziers): the director gives each on-screen one an emitter
       const cand = candidates(), sources = cand.sources; sources.length = 0;
       for (const p of cand.fires) if (!p.broken) { const a = at(p.x, p.y); if (a.off < 3) sources.push({kind: p.kind, id: p, x: p.x, y: p.y, ...a}); }
+      if (pl.biome === 'ruins') {   // the waterfalls (ember's are lava, frost's frozen: no water sound there)
+        const f = ctx.layout?.fall;
+        FALLS[0].x = f ? f.x : 0; FALLS[0].y = f ? f.foot.y : 0; FALLS[1].x = STREAM.cx(FALL.ravineY); FALLS[1].y = FALL.ravineY;
+        for (let i = f ? 0 : 1; i < 2; i++) {
+          const w = FALLS[i];
+          if (Math.hypot(w.x - pl.x, w.y - pl.y) > FALL.reach) continue;
+          const a = at(w.x, w.y); if (a.off < 3) { w.pan = a.pan; w.d = a.d * FALL.dScale; w.off = a.off; sources.push(w); }
+        }
+      }
       RT.D.ambience.update({biome: pl.biome, time: pl.time || 'day', listener: {x: pl.x, y: pl.y}, stream: {prox, pan: at(sx, pl.y).pan}, gust, dt, sources, combat: E.music?.state?.I ?? 0});
       const fb = (RT.D.ambience.state?.beds?.length || 0) > 0;
       if (fb !== bedMuted) { bed.out.gain.cancelScheduledValues(t); bed.out.gain.setTargetAtTime(fb ? 0 : 1, t, .8); bedMuted = fb; }

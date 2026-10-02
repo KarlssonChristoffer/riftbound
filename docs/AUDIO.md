@@ -359,6 +359,7 @@ Each one is a pure picker returning `[{buffer, gain, rate, delay}]`.
     - player / ui: never touched
   - Random close spot calls are removed. Wildlife sounds only via the wildlife system's events. What remains are rare distant `calls` (≤ -30 dB, low-passed, panned wide; budget 2 per 10 s), plus a quiet insects bed.
   - Visible torches/braziers get fire emitters (4 nearest).
+  - River brief D (2026-10-02): the ruins' two waterfalls (the plateau's, at layout.fall's foot; the ravine's, at the stream's edge ~ y 27.9) are `sources` too: kind `waterfall`, the stream recipe's `rapids` loop at -22 dB, the distance counted 1.8x so the swell from the view's edge to the foot is ~11 dB. src/audio/audio.js hands the director its SOURCES + this entry through `createDirector`'s options (events.js is untouched). Not listened to yet (no assets in the worktree); a dedicated `fall` case of the stream recipe (more spray, nothing above ~4 kHz) is the next step if `rapids` is too dark / too heavy there.
   - Ambience ducks with combat intensity; beds are 2.5 dB quieter.
   - Ambient one-shots per minute: night 29–31 → ~2, day 9 → 1–2.
   - New recipes: insects (night/dusk/day loops), prop_roll (stone/dirt loop; speed sets rate and gain), arrow_stick/crystal, splash/lava and splash/rift.

@@ -5,7 +5,9 @@
 // Same cast, same behaviour, same tunables (F.TUNE = the arena's TUNE) as the arena; per biome:
 //   ruins  pigeons / sparrows pecking in flocks (burst up when startled, circle, land on walls, pillar / tower tops or the
 //          floor), crows on the towers, rabbits bolting between bushes, butterflies by day, moths round the braziers at
-//          dusk / night, fish jumping in the stream, frogs on the banks that plop in
+//          dusk / night, fish jumping in the stream (and two in the plateau's pool), frogs on the banks and on the lily pads
+//          (riverside.js F.pads()) that plop in, dragonflies by day in spring and summer (river brief D: they hover, dart in
+//          straight jerks and perch on the reeds' tops, the live 'reed' query)
 //   frost  ravens, snow buntings, snow hares, the odd fish under the floes
 //   ember  ash moths round braziers and lava, salamanders that dart and freeze, vulture SHADOWS circling overhead
 //   rift   drifting void jellies (glowing tips), eyes on walls / floor that track you and blink shut, schooling motes
@@ -80,6 +82,7 @@ const SPECIES = {   // sens: noise multiplier, shy: presence radius (m), perch: 
   hare: {id: 'hare', sens: .9, shy: 2.2},
   salamander: {id: 'salamander', sens: 1, shy: 1.6},
   frog: {id: 'frog', sens: .8, shy: 1.7},
+  dragonfly: {id: 'dragonfly', sens: 1.1, shy: 1.5},
   fish: {id: 'fish', sens: .7, shy: 1.2},
 };
 // perch spots per prop kind: px offsets from the sprite pivot column (3D models: along world x), sink = px below the top
@@ -93,7 +96,7 @@ const PERCH = {
 const CAST = {
   ruins: {flocks: [{sp: 'pigeon', n: 8, homes: [[15.5, 11.5], [25.5, 11], [14.5, 19.8], [25, 20.5]]},
     {sp: 'sparrow', n: 7, homes: [[36, 18.2], [36.5, 11.5], [45, 18.6], [43.6, 25.5], [51.5, 7.6]]}],
-    solos: {sp: 'crow', n: 2}, rabbits: 3, butterflies: 5, fish: 5, frogs: 3, moths: 3},
+    solos: {sp: 'crow', n: 2}, rabbits: 3, butterflies: 5, fish: 5, poolFish: 2, frogs: 3, padFrogs: 2, dragonflies: 5, moths: 3},
   frost: {flocks: [{sp: 'bunting', n: 9, homes: [[16, 12], [24.5, 19.8], [36.5, 17.8], [45, 18.6], [51.5, 7.6]]}],
     solos: {sp: 'raven', n: 4}, hares: 2, fish: 2, moths: 0},
   ember: {salamanders: 4, moths: 2, vultures: 2},
@@ -185,6 +188,12 @@ const ART = {
     level: A(['3.00.', '31112'], 2, 1),
     down: A(['3...', '.11.', '..10', '...2'], 2, 1),
   },
+  // a dragonfly (6 x 3, anchor = the middle of the body): four wings flickering over a thin body; perched, the wings lie flat
+  dragonfly: {
+    hov0: A(['.a..a.', '321110', '...a..'], 3, 1),
+    hov1: A(['...a..', '321110', '.a..a.'], 3, 1),
+    perch: A(['.aaaa.', '321110', '......'], 3, 1),
+  },
   butterfly: {
     open: A(['0.0', '131'], 1, 1),
     flat: A(['...', '030'], 1, 1),
@@ -203,7 +212,7 @@ const ART = {
     beat: A(['.............', '333.......333', '..333333333..', '.....333.....'], 6, 2),
   },
 };
-const ARTOF = {bfly0: 'butterfly', bfly1: 'butterfly', bfly2: 'butterfly', ashmoth: 'moth'};
+const ARTOF = {bfly0: 'butterfly', bfly1: 'butterfly', bfly2: 'butterfly', ashmoth: 'moth', dfly0: 'dragonfly', dfly1: 'dragonfly'};
 const PAL = {
   ruins: {
     pigeon: {r: ['#b4b6be', '#8e909c', '#6a6c7a', '#3e3e4c'], a: '#c28c7c', b: '#6c9480'},
@@ -216,6 +225,8 @@ const PAL = {
     bfly0: {r: ['#f2e39c', '#d6b44e', '#a08436', '#4e4020']},
     bfly1: {r: ['#eeeae0', '#cfcabc', '#9c978a', '#4a4840']},
     bfly2: {r: ['#eab070', '#c8803e', '#96582c', '#4a2c18']},
+    dfly0: {r: ['#8fe0e8', '#3f9ccc', '#285c8e', '#12304f'], a: '#e4f4f8'},   // a blue skimmer
+    dfly1: {r: ['#ffb27a', '#e0623e', '#9c3a2c', '#4e1a18'], a: '#f2ecdc'},   // a red darter
   },
   frost: {
     raven: {r: ['#5e6880', '#3e465c', '#2a3042', '#161a26'], a: '#6a7080'},
@@ -829,26 +840,44 @@ export async function create(host) {
     if (near(a.x, a.y) && R() < .3) emit('critter_dash', a.x, a.y);
   }
 
-  // =================================================================== FROGS (banks) and FISH (stream)
+  // =================================================================== FROGS (banks, lily pads) and FISH (stream, the plateau's pool)
   function bankPoint(y, side) { const s = S(); return [s.cx(y) + side * (s.w(y) / 2 + .14), y]; }
-  function newFrog(y, side) {
+  // a PAD frog sits on one of riverside.js's lily pads (F.pads(): live x, y, h = its bob, r), plops off into the river when startled (the same
+  // frog_jump + splash as a bank frog) and, after its swim, comes back onto a free pad of its stretch of the river
+  const padList = () => host.feature?.('riverside')?.pads?.() || [];
+  const padTop = q => (host.world?.waterH ?? WATER) + .012 + q.h;   // the pad's surface (riverside.js draws it at waterH + .012 + its bob)
+  const padFree = q => { for (const f of frogs) if (f.pad === q) return false; return true; };
+  function pickPad(y0) {   // the free pad nearest y0 (the bigger ones a little preferred), not within 5 m of the player
+    const L = padList(); let best = null, bd = 1e9;
+    for (let i = 0; i < L.length; i++) { const q = L[i]; if (!padFree(q) || (P && Math.hypot(q.x - P.x, q.y - P.y) < 5)) continue; const d = Math.abs(q.y - y0) - q.r * 4; if (d < bd) { bd = d; best = q; } }
+    return best;
+  }
+  function newFrog(y, side, pad) {
     const [x] = bankPoint(y, side);
-    const a = {x, y, side, h: 0, st: 'sit', at: rr(1, 4), fx: -side, fy: 0, jump: null, gone: 0, pulse: 0};
+    const a = {x, y, side, h: 0, st: 'sit', at: rr(1, 4), fx: -side, fy: 0, jump: null, gone: 0, pulse: 0, pad: pad || null, padFrog: !!pad, zone: y};
+    if (pad) { a.x = pad.x; a.y = pad.y; a.h = padTop(pad); }
     frogs.push(a); return a;
   }
   function stepFrog(a, dt) {
     a.pulse = Math.max(0, a.pulse - dt);
+    if (a.pad && !a.jump) { a.x = a.pad.x; a.y = a.pad.y; a.h = padTop(a.pad); }   // it rides its pad's drift and bob
     if (a.jump) {
       const J = a.jump; J.t += dt; const k = Math.min(1, J.t / J.d);
-      a.x = J.x0 + (J.x1 - J.x0) * k; a.y = J.y0 + (J.y1 - J.y0) * k; a.h = Math.sin(k * Math.PI) * J.a;
+      a.x = J.x0 + (J.x1 - J.x0) * k; a.y = J.y0 + (J.y1 - J.y0) * k; a.h = (J.hb || 0) + Math.sin(k * Math.PI) * J.a;
       if (k < 1) return;
-      a.jump = null; a.h = 0;
+      a.jump = null; a.h = a.pad ? padTop(a.pad) : 0;
       if (J.water) { splash(a.x, a.y); a.st = 'swim'; a.at = rr(1, 1.8); a.sx = a.x; a.sy = a.y; }
       return;
     }
     if (a.st === 'swim') { a.at -= dt; a.y += .5 * dt; if (a.at <= 0) { a.st = 'gone'; a.gone = rr(7, 14); } return; }
     if (a.st === 'gone') {
       if ((a.gone -= dt) > 0) return;
+      if (a.padFrog) {   // back onto a free pad, jumping up out of the water beside it (or later, if none is free / the player is by)
+        const q = pickPad(a.zone); if (!q) { a.gone = 2; return; }
+        Object.assign(a, {pad: q, side: R() < .5 ? -1 : 1, st: 'sit', at: rr(2, 5), fy: 0, x: q.x, y: q.y, h: padTop(q)}); a.fx = -a.side;
+        if (near(q.x, q.y)) { a.jump = {x0: q.x + a.side * (q.r + .3), y0: q.y + .15, x1: q.x, y1: q.y, t: 0, d: .3, a: .2, water: false, hb: a.h, e0: 0, e1: q.r + .09}; a.x = a.jump.x0; a.y = a.jump.y0; splash(a.x, a.y); }
+        return;
+      }
       const y = rr(15.5, 27.5), side = R() < .5 ? -1 : 1, [x] = bankPoint(y, side);
       if (P && Math.hypot(x - P.x, y - P.y) < 5) { a.gone = 2; return; }
       if (inStream(x, y) || solid(x, y, 0)) { a.gone = 1; return; }
@@ -858,11 +887,18 @@ export async function create(host) {
     }
     const th = near(a.x, a.y) ? threat(a.x, a.y, 0, SPECIES.frog) : null;
     if (th && th.t >= 1) {
+      if (a.pad) {   // plop off the pad into the river beside it
+        let tx = a.x, ty = a.y;
+        for (let k = 0; k < 10; k++) { const ang = R() * TAU, d = rr(.4, .75), x1 = a.x + Math.cos(ang) * d, y1 = a.y + Math.sin(ang) * d * .8; if (inStream(x1, y1)) { tx = x1; ty = y1; break; } }
+        a.jump = {x0: a.x, y0: a.y, x1: tx, y1: ty, t: 0, d: .3, a: .24, water: true, hb: a.h, e0: a.pad.r + .09, e1: 0}; faceV(a, tx - a.x, ty - a.y);
+        a.pad = null; emit('frog_jump', a.x, a.y); return;
+      }
       const s = S(), tx = s.cx(a.y) + a.side * s.w(a.y) * rr(.05, .22), ty = a.y + rr(-.3, .3);
       a.jump = {x0: a.x, y0: a.y, x1: tx, y1: ty, t: 0, d: .34, a: .28, water: true}; faceV(a, tx - a.x, ty - a.y);
       emit('frog_jump', a.x, a.y); return;
     }
     if ((a.at -= dt) > 0) return;
+    if (a.pad) { if (R() < .6) a.pulse = .5; else if (R() < .4) flipF(a); a.at = rr(1.5, 4.5); return; }   // (a pad frog doesn't hop about: it throbs and turns)
     if (R() < .6) { a.pulse = .5; a.at = rr(1, 3.5); return; }
     const y1 = clamp(a.y + rr(-.5, .5), 15.3, 27.7), [x1] = bankPoint(y1, a.side);
     if (!inStream(x1, y1)) { a.jump = {x0: a.x, y0: a.y, x1, y1, t: 0, d: .26, a: .12, water: false}; if (Math.hypot(x1 - a.x, y1 - a.y) > .02) faceV(a, x1 - a.x, y1 - a.y); }
@@ -872,14 +908,34 @@ export async function create(host) {
     const a = {y, u: rr(-.3, .3), v: rr(.25, .5) * (R() < .5 ? -1 : 1), du: 0, st: 'swim', at: rr(1, 4), jump: null, x: 0, h: 0, fx: 1, fy: 0, ph: R() * TAU, dart: 0};
     fish.push(a); return a;
   }
+  // a fish in the plateau's pool (layout.pool: deep, so inStream): it circles slowly, a margin off the bank, bolts when startled and jumps now and then
+  function newPoolFish(k) {
+    const a = {y: 11.5, u: 0, v: 0, du: 0, st: 'swim', at: rr(1, 4), jump: null, x: 0, h: 0, fx: 1, fy: 0, ph: R() * TAU, dart: 0, pool: true, ang: R() * TAU, w: k % 2 ? 1 : -1, rk: rr(.55, .8), hx: 1, hy: 0};
+    fish.push(a); poolPlace(a); return a;
+  }
+  function poolPlace(a) { const Pl = host.layout.pool; a.x = Pl.x + Math.cos(a.ang) * (Pl.rx - .3) * a.rk; a.y = Math.max(Pl.clip + .2, Pl.y + Math.sin(a.ang) * (Pl.ry - .2) * a.rk); }
+  function stepPoolFish(a, dt) {
+    if (!host.layout.pool) return;
+    const th = near(a.x, a.y) ? threat(a.x, a.y, 0, SPECIES.fish) : null;
+    if (th && th.t >= 1 && a.dart <= 0) a.dart = rr(.6, 1);
+    if (a.dart > 0) a.dart -= dt;
+    if ((a.at -= dt) <= 0) { a.at = rr(2, 5); if (R() < .3) a.w = -a.w; a.rk = clamp(a.rk + rr(-.15, .15), .45, .85); }
+    const x0 = a.x, y0 = a.y; a.ang += a.w * dt * (a.dart > 0 ? 2.6 : .55); poolPlace(a);
+    const dx = a.x - x0, dy = a.y - y0; if (dx * dx + dy * dy > 1e-9) { a.hx = dx; a.hy = dy; }
+  }
   function stepFish(a, dt) {
     const s = S();
     if (a.jump) {
       const J = a.jump; J.t += dt; const k = Math.min(1, J.t / J.d);
       a.x = J.x0 + (J.x1 - J.x0) * k; a.y = J.y0 + (J.y1 - J.y0) * k; a.h = Math.sin(k * Math.PI) * J.a;
-      if (k >= 1) { a.jump = null; a.h = 0; splash(a.x, a.y); a.u = (a.x - s.cx(a.y)) / s.w(a.y); }
+      if (k >= 1) {
+        a.jump = null; a.h = 0; splash(a.x, a.y);
+        if (a.pool) { const Pl = host.layout.pool; a.ang = Math.atan2((a.y - Pl.y) / Pl.ry, (a.x - Pl.x) / Pl.rx); a.rk = clamp(Math.hypot((a.x - Pl.x) / Pl.rx, (a.y - Pl.y) / Pl.ry) / .75, .45, .85); }
+        else a.u = (a.x - s.cx(a.y)) / s.w(a.y);
+      }
       return;
     }
+    if (a.pool) { stepPoolFish(a, dt); return; }
     const th = near(s.cx(a.y), a.y) ? threat(s.cx(a.y) + a.u * s.w(a.y), a.y, 0, SPECIES.fish) : null;
     if (th && th.t >= 1 && a.dart <= 0) { a.v = Math.sign(a.y - th.y || 1) * rr(1.4, 2); a.dart = rr(.6, 1); }
     if (a.dart > 0) { a.dart -= dt; if (a.dart <= 0) a.v = Math.sign(a.v) * rr(.25, .5); }
@@ -919,6 +975,7 @@ export async function create(host) {
     bugs.push(a); return a;
   }
   function stepBug(a, dt) {
+    if (a.kind === 'dragonfly') { stepDragon(a, dt); return; }
     const w = windAt(a.x, a.y);
     if (a.kind === 'moth') {
       a.a += a.w * dt * (1 + Math.sin(T * 3.1 + a.ph) * .5); a.r = clamp(a.r + Math.sin(T * 2.3 + a.ph * 3) * dt * .4, .15, .75);
@@ -951,6 +1008,77 @@ export async function create(host) {
     a.x += (a.vx + w.x * .5 + Math.sin(T * 7 + a.ph) * .25) * dt; a.y += (a.vy + w.y * .5) * dt;
     const gz = elev(a.x, a.y); a.h = clamp(a.h + a.vh * dt + Math.sin(T * 6 + a.ph) * dt * .4, gz + .25, gz + 1.8);
     if (Math.hypot(a.vx, a.vy) > .15) faceV(a, a.vx, a.vy);
+  }
+
+  // =================================================================== DRAGONFLIES (ruins, by day in spring and summer; river brief D)
+  // They keep to a home (a reed clump on the bank), hover there with a tremble, DART in straight jerks (4.5-7 m/s, no easing) to a new hover
+  // point a few metres off, hover again, and now and then land on the top of a reed (the live 'reed' query: riverside.js's clumps) for a few
+  // seconds. Noise, the player close by and a stiff gust startle them off (a perched one leaves its reed): they bolt away from the threat
+  const DRAG = {hover: [.5, 1.9], dart: [4.5, 7], flee: 8.5, perch: [2.5, 6], perchP: .3, reach: 4.5, range: [2.4, 1.8], gust: .75};
+  const reedQ = host.entities.query('wildlife.reeds', p => p.kind === 'reed');   // the riverside's reed clumps (a live query, not every prop)
+  const REED_TOP = [1.07, 1.22, 1.15];   // m: where a clump's tallest stems end (variant 0 reeds, 1 cattails, 2 a mix: biomes.js reed())
+  const perched = new Set();            // the reeds a dragonfly sits on
+  function reedSpotXY(a) {   // the spot on the clump's top, in the world (the card faces the camera, so the offset runs along the screen's x)
+    const p = a.reed, o = a.rdx / ctx.PPM;
+    a.sx = p.x + RX * o + FX * NEARC; a.sy = p.y + RY * o + FY * NEARC; a.sh = (p.z || 0) + REED_TOP[(p.variant | 0) % 3] - .03;
+  }
+  function newDragon(pal, home) {
+    const a = {kind: 'dragonfly', pal, x: home.x, y: home.y, h: 0, vx: 0, vy: 0, vh: 0, ax: home.x, ay: home.y, src: null, st: 'hover', at: rr(.2, 1.4), ph: R() * TAU, fx: 1, fy: 0, rest: null,
+      flap: R() * 9, hx: home.x, hy: home.y, hz: 0, tx: 0, ty: 0, th: 0, sp: 0, reed: null, rdx: 0, sx: 0, sy: 0, sh: 0, land: false, flee: false};
+    a.h = a.hz = gH(a.x, a.y) + rr(.5, 1.4); bugs.push(a); return a;
+  }
+  function dragonDart(a, x, y, h, sp, land) {
+    a.tx = x; a.ty = y; a.th = h; a.sp = sp; a.land = land; a.st = 'dart'; faceV(a, x - a.x, y - a.y);
+  }
+  function dragonNext(a) {   // after a hover: a perch, or a new hover point near home
+    if (R() < DRAG.perchP) {
+      let pick = null, n = 0;
+      for (const p of reedQ) { if (p.gone || perched.has(p) || Math.hypot(p.x - a.x, p.y - a.y) > DRAG.reach) continue; if (R() * ++n < 1) pick = p; }
+      if (pick) { a.reed = pick; a.rdx = Math.round(rr(-2, 2)); reedSpotXY(a); dragonDart(a, a.sx, a.sy, a.sh, rr(...DRAG.dart), true); return; }
+    }
+    const x = a.ax + rr(-DRAG.range[0], DRAG.range[0]), y = clamp(a.ay + rr(-DRAG.range[1], DRAG.range[1]), 2, 28);
+    dragonDart(a, x, y, gH(x, y) + rr(.45, 1.6), rr(...DRAG.dart), false);
+  }
+  function dragonLeave(a, th) {   // startled: away from the threat, fast; a perched one lets go of its reed
+    if (a.reed) { perched.delete(a.reed); a.reed = null; }
+    const ang = Math.atan2(a.y - th.y, a.x - th.x) + rr(-.5, .5), d = rr(3, 5), x = clamp(a.x + Math.cos(ang) * d, 1, ctx.WM - 1), y = clamp(a.y + Math.sin(ang) * d, 1, ctx.HM - 1);
+    a.rest = null; dragonDart(a, x, y, gH(x, y) + rr(.8, 1.9), DRAG.flee, false); a.flee = true;
+  }
+  function stepDragon(a, dt) {
+    a.flap += dt * 38;
+    if (!a.flee) {
+      const th = near(a.x, a.y) ? threat(a.x, a.y, a.h, SPECIES.dragonfly) : null;
+      if (th && th.t >= 1) { dragonLeave(a, th); }
+    }
+    if (a.st === 'perch') {
+      const w = windAt(a.x, a.y);
+      if (!a.reed || a.reed.gone || (w.g || 0) > DRAG.gust || (a.at -= dt) <= 0) {   // its time is up, or a gust (the reed sways beneath it)
+        if (a.reed) { perched.delete(a.reed); a.reed = null; }
+        a.hx = a.x; a.hy = a.y; a.hz = a.h; a.st = 'hover'; a.at = rr(.2, .6); return;
+      }
+      reedSpotXY(a); a.x = a.sx; a.y = a.sy; a.h = a.sh; return;
+    }
+    if (a.st === 'hover') {
+      a.x = a.hx + Math.sin(T * 9 + a.ph) * .025; a.y = a.hy + Math.cos(T * 7.3 + a.ph * 2) * .02; a.h = a.hz + Math.sin(T * 11 + a.ph) * .02;
+      if ((a.at -= dt) <= 0) dragonNext(a);
+      return;
+    }
+    // darting: a straight line at its speed, then still
+    const dx = a.tx - a.x, dy = a.ty - a.y, dh = a.th - a.h, d = Math.hypot(dx, dy, dh), step = a.sp * dt;
+    if (d > step) { a.x += dx / d * step; a.y += dy / d * step; a.h += dh / d * step; return; }
+    a.x = a.tx; a.y = a.ty; a.h = a.th; a.flee = false;
+    if (a.land && a.reed) { perched.add(a.reed); a.st = 'perch'; a.at = rr(...DRAG.perch); a.land = false; faceV(a, RX * (R() < .5 ? -1 : 1), RY); }
+    else { a.land = false; a.hx = a.x; a.hy = a.y; a.hz = a.h; a.st = 'hover'; a.at = rr(...DRAG.hover); }
+  }
+  function dragonHomes(n) {   // n reed clumps along the river, spread over its length, on alternate banks
+    const L = [...reedQ].filter(p => !p.gone).sort((a, b) => a.y - b.y), out = [];
+    if (!L.length) { for (let i = 0; i < n; i++) { const y = 4.5 + i * (21 / Math.max(1, n - 1)), s = S(); out.push({x: s.cx(y) + (i % 2 ? 1 : -1) * (s.w(y) / 2 - .2), y}); } return out; }
+    for (let i = 0; i < n; i++) {
+      const y0 = 4 + i * (22 / Math.max(1, n - 1)); let best = null, bd = 1e9;
+      for (const p of L) { const d = Math.abs(p.y - y0) + (((p.x < S().cx(p.y)) === (i % 2 === 0)) ? 0 : 1.2); if (d < bd) { bd = d; best = p; } }
+      out.push({x: best.x + (best.x < S().cx(best.y) ? .5 : -.5), y: best.y});
+    }
+    return out;
   }
 
   // =================================================================== VULTURES (ember): shadow + rare silhouette
@@ -1143,7 +1271,7 @@ export async function create(host) {
   // the season's say on who is out (ruins only: env.tinted), and rain's: butterflies like spring / summer and hide from rain,
   // moths are gone in winter, frogs sleep through it
   const SEASON_LIFE = {butterflies: {spring: 1.2, summer: 1, autumn: .35, winter: 0}, moths: {spring: .7, summer: 1, autumn: .6, winter: 0},
-    frogs: {spring: 1, summer: 1, autumn: .7, winter: 0}};
+    frogs: {spring: 1, summer: 1, autumn: .7, winter: 0}, dragonflies: {spring: .8, summer: 1, autumn: 0, winter: 0}};
   const lifeK = k => { const E = host.env; return E?.tinted ? SEASON_LIFE[k]?.[E.season] ?? 1 : 1; };
   function populate() {
     need = false; clearAll();
@@ -1162,8 +1290,12 @@ export async function create(host) {
     if (C.rabbits) { const bs = [...bushes].sort(() => R() - .5); for (let i = 0; i < C.rabbits && i < bs.length; i++) { const b = bs[i]; newHopper('rabbit', b.x + rr(-.8, .8), b.y + rr(.5, 1.2), b); } }
     if (C.hares) for (const [x, y] of [[11.5, 10], [49.5, 13.8], [27.5, 21.5]].slice(0, C.hares)) newHopper('hare', x, y, null);
     if (C.fish) for (let i = 0; i < C.fish; i++) newFish(rr(3, 28));
-    const nFrogs = Math.round((C.frogs || 0) * lifeK('frogs'));
-    if (nFrogs) for (const y of [16.8, 20.5, 26.2].slice(0, nFrogs)) newFrog(y + rr(-.4, .4), R() < .5 ? -1 : 1);
+    if (C.poolFish && host.layout.pool) for (let i = 0; i < C.poolFish; i++) newPoolFish(i);
+    const nFrogs = Math.round((C.frogs || 0) * lifeK('frogs')), nPad = Math.min(nFrogs, C.padFrogs || 0);
+    if (nFrogs) [10, 21.5, 26.2].slice(0, nFrogs).forEach((y, i) => {   // the first ones (a north and a south one) sit on lily pads, if riverside.js made any
+      const q = i < nPad ? pickPad(y) : null;
+      newFrog(y + rr(-.4, .4) + (i === 0 && !q ? 6.8 : i === 1 && !q ? -1 : 0), R() < .5 ? -1 : 1, q);
+    });
     if (C.salamanders) for (const [x, y] of [[37, 13.5], [42.5, 19], [17, 12.5], [24, 19.5], [37.5, 22]].slice(0, C.salamanders)) newLizard(x, y);
     if (C.vultures) for (let i = 0; i < C.vultures; i++) newVulture(rr(16, 44), rr(11, 20));
     if (C.jellies) for (const [x, y] of [[14, 12], [26, 18.5], [38, 14], [50, 20.5]].slice(0, C.jellies)) newJelly(x, y);
@@ -1180,6 +1312,11 @@ export async function create(host) {
       const anchors = bushes.map(b => [b.x, b.y]).concat(lg ? [[lg.x, lg.y], [lg.x - 1, lg.y + 1]] : []);
       const n = Math.round((time === 'day' ? C.butterflies || 0 : 2) * lifeK('butterflies') * (raining ? 0 : 1));
       for (let i = 0; i < n; i++) { const [x, y] = pick(anchors); newBug('butterfly', 'bfly' + (i % 3), x + rr(-1, 1), y + rr(-.5, .5), rr(.5, 1.3)); }
+    }
+    perched.clear();
+    if (biome === 'ruins' && time === 'day' && !raining && C.dragonflies) {   // by day in spring and summer (SEASON_LIFE), not in rain
+      const n = Math.round(C.dragonflies * lifeK('dragonflies')), H = n ? dragonHomes(n) : [];
+      for (let i = 0; i < n; i++) newDragon('dfly' + (i % 2), H[i]);
     }
     const nm = C.moths ? Math.round((time === 'night' ? C.moths : time === 'dusk' ? Math.max(1, C.moths - 1) : biome === 'ember' ? 1 : 0) * lifeK('moths')) : 0;
     if (nm) for (const L of lightSources()) for (let i = 0; i < (L.kind === 'lava' ? Math.max(1, nm - 1) : nm); i++)
@@ -1224,8 +1361,13 @@ export async function create(host) {
     }
     if (SPR.frog) for (const a of frogs) {
       if ((a.st !== 'sit' && !a.jump) || !onScreen(a.x, a.y, a.h, .4)) continue;
-      const wet = a.jump && a.jump.water && a.jump.t / a.jump.d > .5;
-      put(SPR.frog[a.jump ? 'jump' : a.pulse > 0 && ((a.pulse * 8) | 0) & 1 ? 'pulse' : 'sit'], a.x, a.y, a.h + (wet ? WATER * a.jump.t / a.jump.d : 0), sface(a));
+      const J = a.jump, wet = J && J.water && J.hb === undefined && J.t / J.d > .5;
+      let x = a.x, y = a.y, h = a.h + (wet ? WATER * J.t / J.d : 0);
+      // riverside.js draws a pad as a camera-facing card standing on its front edge, r + .04 m toward the camera: a frog in the middle of the pad
+      // would be behind it. So it stands e m nearer and e x PPMY / PPMH higher: the same screen pixel, in front (e eases in / out over a jump)
+      const e = J ? (J.e0 || 0) + ((J.e1 || 0) - (J.e0 || 0)) * Math.min(1, J.t / J.d) : a.pad ? a.pad.r + .09 : 0;
+      if (e) { x += FX * e; y += FY * e; h += e * ctx.PPMY / ctx.PPMH; }
+      put(SPR.frog[J ? 'jump' : a.pulse > 0 && ((a.pulse * 8) | 0) & 1 ? 'pulse' : 'sit'], x, y, h, sface(a));
     }
     if (SPR.fishj) for (const a of fish) {
       if (!a.jump || !onScreen(a.x, a.y, a.h, .4)) continue;
@@ -1235,7 +1377,8 @@ export async function create(host) {
       if (!onScreen(a.x, a.y, a.h, .3)) continue;
       const Sp = SPR[a.pal]; if (!Sp) continue;
       let f;
-      if (a.kind === 'moth') {
+      if (a.kind === 'dragonfly') f = a.st === 'perch' ? 'perch' : ((a.flap | 0) & 1) ? 'hov1' : 'hov0';
+      else if (a.kind === 'moth') {
         f = ((a.flap | 0) & 1) ? 'open' : 'closed';
         const d = a.src ? Math.hypot(a.r, (a.h - (a.hc ?? a.src.h)) * 1.3) : 9;   // lit by the flame: wings glow warm, brighter the closer
         if (d <= .7) f += '_g' + (d < .3 ? 0 : d < .5 ? 1 : 2);
@@ -1305,10 +1448,11 @@ export async function create(host) {
       const sxx = RX * z, syx = FX * ctx.PPMY / ctx.PPM * z, sxy = RY * ctx.PPM / ctx.PPMY * z, syy = FY * z;   // world (1/PPM, 0) / (0, 1/PPMY) -> view px
       for (const a of fish) {
         if (a.jump || !onScreen(a.x, a.y, WATER, .3)) continue;
-        const [X, Y] = gxy(a.x, a.y, WATER), dir = a.v > 0 ? 1 : -1, wig = ((T * (a.dart > 0 ? 9 : 4) + a.ph) | 0) & 1;
+        const [X, Y] = gxy(a.x, a.y, WATER), hz = a.pool && Math.abs(a.hx) > Math.abs(a.hy), dir = a.pool ? ((hz ? a.hx : a.hy) > 0 ? 1 : -1) : a.v > 0 ? 1 : -1, wig = ((T * (a.dart > 0 ? 9 : 4) + a.ph) | 0) & 1;
         const px = (ox, oy, col) => { if (inStream(a.x + ox / ctx.PPM, a.y + oy / ctx.PPMY)) bput(col, X + Math.round(ox * sxx + oy * sxy), Y + Math.round(ox * syx + oy * syy), z, z); };
-        px(0, 2 * dir, U[0]); px(1, 2 * dir, U[0]); px(0, dir, U[1]); px(1, dir, U[0]); px(0, 0, U[1]); px(1, 0, U[1]);
-        px(wig, -dir, U[1]); px(1 - wig, -2 * dir, U[1]);
+        const f = hz ? (across, along, col) => px(along, across, col) : px;   // (across, along): the body lies along y in the river, along x for a pool fish heading sideways
+        f(0, 2 * dir, U[0]); f(1, 2 * dir, U[0]); f(0, dir, U[1]); f(1, dir, U[0]); f(0, 0, U[1]); f(1, 0, U[1]);
+        f(wig, -dir, U[1]); f(1 - wig, -2 * dir, U[1]);
       }
       for (const a of frogs) if (a.st === 'swim') { const [X, Y] = gxy(a.x, a.y, WATER); if (inV(X, Y, 4)) bput(U[1], X, Y, 2 * z, z); }
       flush(g);
@@ -1319,6 +1463,7 @@ export async function create(host) {
     }
     for (const a of hoppers) if (a.st !== 'hide' && a.st !== 'gone') { const [X, Y] = gxy(a.x, a.y, a.z); if (inV(X, Y, 5)) bput(a.hop ? SHC[1] : SHC[0], X - 2 * z, Y + z, 5 * z, z); }
     for (const a of bugs) if (!a.rest && a.kind === 'butterfly') shadowAt(a.x, a.y, a.h - elev(a.x, a.y) + 1.2);
+    for (const a of bugs) if (a.kind === 'dragonfly' && a.st !== 'perch') shadowAt(a.x, a.y, a.h - gH(a.x, a.y) + 1.2);   // (on the water too: gH is the surface there)
     for (const j of jellies) { const e = elev(j.x, j.y), hA = j.h - e, [X, Y] = gxy(j.x, j.y, e); if (inV(X, Y, 4)) bput(hA < 2.2 ? SHC[1] : SHC[2], X - z, Y, 3 * z, z); }
     flush(g);
     for (const v of vultures) {   // the big soaring shadow, turned with the camera
@@ -1361,6 +1506,7 @@ export async function create(host) {
       const s = S();
       // is the stream in the detail region? (sample its course: it runs north - south whatever the camera does)
       let sv = false; for (let y = 1; y < 30 && !sv; y += 1.5) sv = near(s.cx(y), y);
+      if (!sv && host.layout.pool && fish.some(a => a.pool)) sv = near(host.layout.pool.x, host.layout.pool.y);
       if (sv || fish.some(a => a.jump) || frogs.some(a => a.jump || a.st !== 'sit')) {
         for (const a of frogs) stepFrog(a, dt);
         for (const a of fish) stepFish(a, dt);

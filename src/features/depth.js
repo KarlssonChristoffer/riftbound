@@ -43,7 +43,9 @@
 //                the current yaw (re-rasterised per 1° of yaw), drawn 'lighter' into the ADD layer. With the sun behind
 //                the camera a shaft is seen end-on (it would shrink to a bright blob at its foot), so it fades out in
 //                quarter steps as its screen length drops below its height in px (gone at 0.35 x).
-//   reflections  water = a top-down mask of the stream (spans minus stones / floes / the frost ice shelf) projected at
+//   reflections  water = a top-down mask of the stream (spans minus stones / floes / the frost ice shelf) PLUS the plateau's pool and its
+//                outflow (river brief D: layout.js POOL / OUTFLOW; the Ranger and the props near them mirror there too, and the sky glint
+//                crosses the pool) projected at
 //                the stream bed's height (-.18 m) as a pattern fill + screen-space puddle masks. Mirrored sprites go into
 //                a view scratch (flipped about their ground contact row, airborne = 2 x height lower), rippled in
 //                whole-pixel row bands, clipped, tinted and laid on the GROUND layer at one alpha. Sources: the Ranger
@@ -104,6 +106,9 @@ export async function create(host) {
     V.det = V.xx * V.yy - V.yx * V.xy;
   }
   const proj = (x, y, h = 0) => [V.ox + V.xx * x + V.yx * y + V.hx * h, V.oy + V.xy * x + V.yy * y + V.hy * h];
+  const _pa = [0, 0], _pb = [0, 0], _pu = [0, 0];   // the same through scratch arrays (no allocation): proj2 / inv2 write into `o`
+  const proj2 = (x, y, h, o) => { o[0] = V.ox + V.xx * x + V.yx * y + V.hx * h; o[1] = V.oy + V.xy * x + V.yy * y + V.hy * h; return o; };
+  const inv2 = (X, Y, h, o) => { const u = X - V.ox - V.hx * h, v = Y - V.oy - V.hy * h; o[0] = (V.yy * u - V.yx * v) / V.det; o[1] = (-V.xy * u + V.xx * v) / V.det; return o; };
   const inv = (X, Y, h = 0) => { const u = X - V.ox - V.hx * h, v = Y - V.oy - V.hy * h; return [(V.yy * u - V.yx * v) / V.det, (-V.xy * u + V.xx * v) / V.det]; };
   // a top-down canvas (R texels per metre, its texel (0, 0) at world (x0, y0)) -> view px, as a DOMMatrix for a pattern
   const groundMatrix = (R, h, x0 = 0, y0 = 0) => { const [e, f] = proj(x0, y0, h); return new DOMMatrix([V.xx / R, V.xy / R, V.yx / R, V.yy / R, e, f]); };
@@ -474,10 +479,10 @@ export async function create(host) {
 
   // ================================================================ WATER: masks, puddles, reflections, sky glint
   // masks are TOP-DOWN (R = PPM texels per metre, like the world's ground canvas) and projected per frame
-  const WA = {key: '', mask: null, mpat: null, lava: null, lpat: null, yEnd: 0, shrink: 0, puddles: [], near: [], plane: new Map(), gpx: null, gw: 0, gh: 0, used: false, n: 0};
+  const WA = {key: '', mask: null, mpat: null, lava: null, lpat: null, yEnd: 0, shrink: 0, puddles: [], near: [], plane: new Map(), gpx: null, gw: 0, gh: 0, used: false, n: 0, pool: null, x0: 0, x1: 0};
   const [RA, ra] = mk(VW, VH), [RB, rb] = mk(VW, VH), [MS, ms] = mk(VW, VH), [EM, em] = mk(VW, VH), [SK, sk] = mk(VW, VH), [HZ, hz] = mk(VW, VH);
   let SKY = sk.createImageData(VW, VH); const skyDirty = [];
-  function topMask(yEnd, half, cuts) {   // the stream's row spans (half-width function of y), minus cuts(q, R)
+  function topMask(yEnd, half, cuts, extra) {   // the stream's row spans (half-width function of y), plus extra(q, R), minus cuts(q, R)
     const S = host.layout.stream, R = PPM, W = Math.ceil(WM() * R), H = Math.ceil(HM() * R), [c, q] = mk(W, H);
     q.fillStyle = '#fff';
     for (let y = 0; y < H; y++) {
@@ -485,18 +490,40 @@ export async function create(host) {
       const cx = S.cx(my), hw = half(my), x0 = Math.ceil((cx - hw) * R - .5), x1 = Math.floor((cx + hw) * R - .5) + 1;
       if (x1 > x0) q.fillRect(x0, y, x1 - x0, 1);
     }
+    if (extra) extra(q, R);
     if (cuts) { q.globalCompositeOperation = 'destination-out'; cuts(q, R); q.globalCompositeOperation = 'source-over'; }
     return c;
+  }
+  // brief D: B's plateau pool (an ellipse at the foot of the plateau's south face, clipped at the face) and its outflow (a channel west to the river)
+  function poolMask(q, R) {
+    const L = host.layout, P = L.pool, O = L.outflow, sh = WA.shrink; if (!P) return;
+    for (let y = Math.floor(Math.max(P.clip, P.y - P.ry) * R); y < Math.ceil((P.y + P.ry) * R); y++) {
+      const k = 1 - (((y + .5) / R - P.y) / P.ry) ** 2; if (k <= 0) continue;
+      const hw = P.rx * Math.sqrt(k) - sh, x0 = Math.ceil((P.x - hw) * R - .5), x1 = Math.floor((P.x + hw) * R - .5) + 1;
+      if (hw > 0 && x1 > x0) q.fillRect(x0, y, x1 - x0, 1);
+    }
+    if (O) for (let i = 0; i < O.pts.length; i++) { const hw = O.hw[i] - sh; if (hw > 0) q.fillRect(Math.floor((O.pts[i][0] - .05) * R), Math.floor((O.pts[i][1] - hw) * R), Math.ceil(.1 * R) + 1, Math.ceil(2 * hw * R)); }
+  }
+  // within r m of the plateau's pool or its outflow (the water's other bodies besides the river)
+  function poolNear(x, y, r) {
+    const P = WA.pool; if (!WA.mask || !P) return false;
+    const u = (x - P.x) / (P.rx + r), v = (y - P.y) / (P.ry + r);
+    if (y > P.clip - r && u * u + v * v < 1) return true;
+    const O = host.layout.outflow; if (O && x > O.x1 - r - .5 && x < O.x0 + r + .5 && y > 10.4 - r && y < 13.4 + r) for (let i = 0; i < O.pts.length; i += 3) if (Math.hypot(x - O.pts[i][0], y - O.pts[i][1]) < r + .5) return true;
+    return false;
   }
   function buildWater() {
     const key = biome + '|' + (host.world?.groundCanvas ? host.world.groundCanvas.width : 0);
     if (WA.key === key) return;
-    Object.assign(WA, {key, mask: null, mpat: null, lava: null, lpat: null, puddles: [], near: [], plane: new Map(), gpx: null});
+    Object.assign(WA, {key, mask: null, mpat: null, lava: null, lpat: null, puddles: [], near: [], plane: new Map(), gpx: null, pool: null});
     const S = host.layout?.stream; if (!S) return;
     if (biome === 'ember') { WA.lava = topMask(27.6, my => S.w(my) / 2 + .18); return; }
     if (!(biome === 'ruins' || biome === 'frost')) return;
     WA.yEnd = biome === 'ruins' ? 27.85 : HM();   // the ruins stream falls over the ravine edge (~27.9 m)
     WA.shrink = biome === 'frost' ? .1 : .02;     // frost: the thin ice shelf along the banks is not water
+    WA.pool = host.layout.pool || null;
+    { let x0 = 1e9, x1 = -1e9; for (let y = 0; y < WA.yEnd; y += .25) { x0 = Math.min(x0, S.cx(y) - S.w(y) / 2); x1 = Math.max(x1, S.cx(y) + S.w(y) / 2); }
+      if (WA.pool) x1 = Math.max(x1, WA.pool.x + WA.pool.rx); WA.x0 = x0 - .35; WA.x1 = x1 + .35; }   // the water's extent in x (the view test: no hard-coded river span)
     WA.mask = topMask(WA.yEnd, my => S.w(my) / 2 - WA.shrink, (q, R) => {
       const cut = (cx, cy, rx, ry, below = 0) => { for (let y = Math.floor(cy - ry - 1); y <= Math.ceil(cy + ry + below + 1); y++) { const dy = y + .5 - cy, t = dy > 0 ? Math.max(0, dy - below) : dy, k = 1 - (t / (ry + 1)) ** 2; if (k <= 0) continue; const hw = (rx + 1.5) * Math.sqrt(k); q.fillRect(Math.floor(cx - hw), y, Math.ceil(hw * 2) + 1, 1); } };
       for (const st of S.stones || []) cut(st.x * R, st.y * R, st.r * R, st.r / 1.3 * R, biome === 'frost' ? 5 : 4);
@@ -505,12 +532,12 @@ export async function create(host) {
         const k = y * 10 | 0, hw = S.w(y) / 2, fx = S.cx(y) + (hsh(k, 1) - .5) * hw * .9, r0 = (.14 + hsh(k, 2) * .14) * R;
         cut(fx * R, y * R, r0 * 1.1, r0 * .7, 1);
       }
-    });
+    }, poolMask);
     if (biome === 'ruins') WA.puddles = PUDDLES.map(([x, y, rx, ry], i) => ({x, y, rx, ry, seed: 300 + i, key: ''}));
     // what can show up in the water: props near the stream / north of a puddle (sprites fetched per frame)
     for (const p of host.props || []) {
       if ((p.z || 0) > .05 || /^wall_/.test(p.kind)) continue;
-      const nearStream = p.y < WA.yEnd + 1 && Math.abs(p.x - S.cx(p.y)) - S.w(p.y) / 2 < TUNE.refl.reach;
+      const nearStream = (p.y < WA.yEnd + 1 && Math.abs(p.x - S.cx(p.y)) - S.w(p.y) / 2 < TUNE.refl.reach) || poolNear(p.x, p.y, TUNE.refl.reach);
       const nearPud = WA.puddles.some(u => Math.abs(p.x - u.x) < 2.6 && p.y > u.y - 3.4 && p.y < u.y + .3);
       // the water plane it mirrors about: the stream's surface (the lowered bed) or a puddle (ground level)
       if (nearStream || nearPud) { WA.near.push(p); WA.plane.set(p, nearStream ? TUNE.refl.bed : 0); }
@@ -556,15 +583,15 @@ export async function create(host) {
     u.cq.putImageData(im, 0, 0); u.mq.putImageData(mi, 0, 0);
     return {W, H, W0, H0, mx, my};
   }
-  const near = (x, y, r) => { const S = host.layout.stream; return (WA.mask && y < WA.yEnd + r && Math.abs(x - S.cx(y)) - S.w(y) / 2 < r) || WA.puddles.some(u => Math.hypot(x - u.x, y - u.y) < r + .6); };
+  const near = (x, y, r) => { const S = host.layout.stream; return (WA.mask && ((y < WA.yEnd + r && Math.abs(x - S.cx(y)) - S.w(y) / 2 < r) || poolNear(x, y, r))) || WA.puddles.some(u => Math.hypot(x - u.x, y - u.y) < r + .6); };
   // whole-pixel ripple: rows shifted by round(amp * sin), phase anchored to the view-frame row (the arena's world row at
   // yaw 0), stronger downstream and in gusts
   function rippleCopy(src, dq, x, y, w, h) {
     const gust = gustNow(), Rr = TUNE.refl.ripple, z = V.z, S = host.layout.stream, cxs = x + w / 2;
     const off = row => {
       const wy = (row - V.oy) / z, [mx, my] = inv(cxs, row + .5, TUNE.refl.bed);
-      const onStream = WA.mask && my < WA.yEnd && Math.abs(mx - S.cx(my)) < S.w(my) / 2 + .6;
-      const amp = onStream ? Rr * (.8 + .5 * clamp((my - 10) / 14, 0, 1) + .6 * gust) : Rr * (.25 + .8 * gust);
+      const onStream = WA.mask && my < WA.yEnd && Math.abs(mx - S.cx(my)) < S.w(my) / 2 + .6, onPool = !onStream && poolNear(mx, my, .6);
+      const amp = onStream ? Rr * (.8 + .5 * clamp((my - 10) / 14, 0, 1) + .6 * gust) : onPool ? Rr * (.7 + .5 * gust) : Rr * (.25 + .8 * gust);
       return Math.round(amp * Math.sin(wy * .55 - T * 2.1) * (.6 + .4 * Math.sin(wy * .13 + T * .7))) * z;
     };
     let r0 = y, o0 = off(y);
@@ -582,25 +609,37 @@ export async function create(host) {
     skyDirty.length = 0;
     let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
     const wy0 = Math.max(0, Math.floor(fp.y0 * PPMY) - 2), wy1 = Math.min(WA.yEnd * PPMY, Math.ceil(fp.y1 * PPMY) + 2);
-    for (let wy = wy0; wy < wy1; wy++) {
-      const k = mod(wy + 40, P); if (k > 2) continue;
-      const my = (wy + .5) / PPMY, cx = S.cx(my), hw = S.w(my) / 2 - WA.shrink;
-      const a = Math.ceil((cx - hw) * PPM - .5), b = Math.floor((cx + hw) * PPM - .5) + 1; if (b <= a) continue;
-      const w = b - a, s = Math.round(Math.sin(wy * .55 - T * 2.1)), band = Math.floor((wy + 40) / P);
-      for (let i = 0; i < 3; i++) {   // three dashes, gaps between
+    // three dashes across the water's row span [a, b) (px at the ground's resolution) at world row wy / y = my, gaps between
+    // (proj / inv through scratch arrays: this runs per pixel of every dash, every frame)
+    const dashes = (wy, my, a, b, k, band) => {
+      const w = b - a, s = Math.round(Math.sin(wy * .55 - T * 2.1));
+      for (let i = 0; i < 3; i++) {
         const u0 = .12 + i * .28 + hsh(band, i, 5) * .06 - k * .02, u1 = u0 + .14 + hsh(band, i, 6) * .08 - (k === 1 ? .04 : k === 2 ? .08 : 0);
         const xa = (Math.round(a + w * u0) + s) / PPM, xb = (Math.round(a + w * u1) + s) / PPM; if (xb <= xa) continue;
-        const [A0, A1] = proj(xa, my, h), [B0, B1] = proj(xb, my, h), n = Math.max(1, Math.ceil(Math.max(Math.abs(B0 - A0), Math.abs(B1 - A1)) / z));
+        proj2(xa, my, h, _pa); proj2(xb, my, h, _pb);
+        const A0 = _pa[0], A1 = _pa[1], B0 = _pb[0], B1 = _pb[1], n = Math.max(1, Math.ceil(Math.max(Math.abs(B0 - A0), Math.abs(B1 - A1)) / z));
         for (let j = 0; j < n; j++) {
           const t = (j + .5) / n, X = Math.floor((A0 + (B0 - A0) * t) / z) * z, Y = Math.floor((A1 + (B1 - A1) * t) / z) * z;
           if (X < 0 || Y < 0 || X + z > VW || Y + z > VH) continue;
-          const [ux, uy] = inv(X + .5 * z, Y + .5 * z, h), tx = Math.floor(ux * gx), ty = Math.floor(uy * gy);
+          inv2(X + .5 * z, Y + .5 * z, h, _pu); const tx = Math.floor(_pu[0] * gx), ty = Math.floor(_pu[1] * gy);
           if (tx < 0 || ty < 0 || tx >= WA.gw || ty >= WA.gh) continue;
           const o = (ty * WA.gw + tx) * 4, R = Math.min(255, WA.gpx[o] + sky[0]), G = Math.min(255, WA.gpx[o + 1] + sky[1]), B = Math.min(255, WA.gpx[o + 2] + sky[2]);
           for (let yy = 0; yy < z; yy++) for (let xx = 0; xx < z; xx++) { const p = ((Y + yy) * VW + X + xx) * 4; d[p] = R; d[p + 1] = G; d[p + 2] = B; d[p + 3] = 255; skyDirty.push(p); }
           bx0 = Math.min(bx0, X); by0 = Math.min(by0, Y); bx1 = Math.max(bx1, X + z); by1 = Math.max(by1, Y + z);
         }
       }
+    };
+    for (let wy = wy0; wy < wy1; wy++) {
+      const k = mod(wy + 40, P); if (k > 2) continue;
+      const my = (wy + .5) / PPMY, cx = S.cx(my), hw = S.w(my) / 2 - WA.shrink;
+      const a = Math.ceil((cx - hw) * PPM - .5), b = Math.floor((cx + hw) * PPM - .5) + 1; if (b <= a) continue;
+      dashes(wy, my, a, b, k, Math.floor((wy + 40) / P));
+    }
+    const Pp = WA.pool;   // brief D: the plateau's pool glints too, on rows of its own (the river's, every 6 m, never cross it)
+    if (Pp) for (let k = 0, wyc = Math.round((Pp.y + .1) * PPMY) - 1; k < 3; k++) {
+      const wy = wyc + k, my = (wy + .5) / PPMY, kk = 1 - ((my - Pp.y) / Pp.ry) ** 2; if (kk <= 0 || my < Pp.clip || wy < wy0 || wy >= wy1) continue;
+      const hwp = Pp.rx * Math.sqrt(kk) - WA.shrink - .06, a = Math.ceil((Pp.x - hwp) * PPM - .5), b = Math.floor((Pp.x + hwp) * PPM - .5) + 1;
+      if (b > a) dashes(wy, my, a, b, k, 91);
     }
     if (bx1 <= bx0) return;
     // the water mask decides (stones, floes and the ice shelf have no glint)
@@ -618,7 +657,7 @@ export async function create(host) {
     WA.used = false; WA.n = 0;
     buildWater(); if (!WA.mask && !WA.puddles.length) return;
     const z = V.z, fp = footprint(0), fb = footprint(TUNE.refl.bed), S = host.layout.stream;
-    const streamIn = WA.mask && Math.max(fp.x1, fb.x1) > 37.3 && Math.min(fp.x0, fb.x0) < 42.7 && Math.min(fp.y0, fb.y0) < WA.yEnd;
+    const streamIn = WA.mask && Math.max(fp.x1, fb.x1) > WA.x0 && Math.min(fp.x0, fb.x0) < WA.x1 && Math.min(fp.y0, fb.y0) < WA.yEnd;
     // puddles on the floor first (their colours follow the sky; re-rasterised when the yaw / zoom / time changes)
     const tn = timeName(), pk = Math.round(V.yaw / (.5 * DEG)) + '|' + tn, vis = [];
     for (const u of WA.puddles) {
@@ -664,7 +703,7 @@ export async function create(host) {
     const P = host.P, pl = host.player;
     if (P && !(P.sink > 0) && !(P.blink && Math.floor(P.blink * 12) % 2) && near(pl.x, pl.y, 3.2)) {
       // (playerSprite's h is the player's height above the ground; the canvas size is img.width / img.height)
-      const ps = host.playerSprite(), Sx = host.layout.stream, byStream = WA.mask && Math.abs(ps.x - Sx.cx(ps.y)) - Sx.w(ps.y) / 2 < 3.2,
+      const ps = host.playerSprite(), Sx = host.layout.stream, byStream = WA.mask && (Math.abs(ps.x - Sx.cx(ps.y)) - Sx.w(ps.y) / 2 < 3.2 || poolNear(ps.x, ps.y, 3.2)),
         plane = byStream ? TUNE.refl.bed : (host.elev ? host.elev(ps.x, ps.y) : 0), [ax, ay] = proj(ps.x, ps.y, ps.h), gy = Math.round(proj(ps.x, ps.y, plane)[1]);
       mirror(ps.img, 0, 0, ps.img.width, ps.img.height, Math.round(ax) - ps.px * z, Math.round(ay) - ps.py * z, gy);
     }
