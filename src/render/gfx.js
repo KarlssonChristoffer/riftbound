@@ -66,12 +66,19 @@ float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
              mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
 void main() {
   // the season thins the crowns (uLeafK: sim/env.js leafK, 1 = full .. ~.07 = bare): leaves go in clumps of a few cm (a 3D
-  // noise in the model's frame, varied per tree by uSeed); the trees' shadow pass drops the same ones (SHADOW_SWAY_FS)
+  // noise in the model's frame, varied per tree by uSeed); the trees' shadow pass drops the same ones (SHADOW_SWAY_FS).
+  // A clump is a hollow shell: through a gap in its near side you see its far side from within (the swaying meshes are
+  // two-sided), in the shade tone: leaves deeper in the crown. Only where both sides lost their leaves does it open
+  // onto what's behind (a thinned crown used to show the ground through every gap). Bark, and a full crown, never show
+  // their inside
+  bool inner = !gl_FrontFacing;
+  if (inner && (fFixed > -1.5 || uLeafK >= .999)) discard;
   if (fFixed < -1.5 && uLeafK < .999 && vn3(vPL * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) > uLeafK * 1.1 - .05) discard;
-  vec3 n = normalize(vN);
+  vec3 n = normalize(vN); if (inner) n = -n;
   float fam = fFam;
   int tone;
   if (fFixed >= 0.) tone = int(fFixed);
+  else if (inner) tone = 2;
   else {
     float d = dot(n, uLArt) + fBias;
     // aFixed -2 (leaves): the painted blobs' jitter, a 3D noise in the model's own frame (it stays on the leaves as the
@@ -632,7 +639,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // ---- materials
   const MESH_VS = meshVS(false), MESH_SWAY_VS = meshVS(true);
   const meshMat = (obj, seed, sw = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
-    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})});
+    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
+    sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
   const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0}) => raw(SURF_VS, SURF_FS, {
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
@@ -705,7 +713,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
     const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
-      uLeafK: U.leafK, uSeed: gm.material.uniforms.uSeed}) : shadowMeshMat);
+      uLeafK: U.leafK, uSeed: gm.material.uniforms.uSeed}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.layers.enable(1); sScene.add(sm);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
