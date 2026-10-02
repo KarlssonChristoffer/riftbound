@@ -53,7 +53,7 @@ const TUNE = {
   margin: 1.4, gone: 4.5,         // m outside the view: where they come in / where they are dropped
   life: 90,                       // s at most
   player: {r: .3, kick: 1.3, max: 5, up: [1.1, 1.9], roll: 1.4},   // his body radius, the push off him (x his speed, at most max m/s), the hop, x when he rolls into it
-  arrow: {kick: .14, up: [1.2, 2]},
+  arrow: {kick: .14, max: 4, up: [1.2, 2]},   // x the arrow's speed, at most max m/s; the hop
   sound: {hard: 1.5, near: 10, every: .3},   // a bounce is heard: coming down faster than this (m/s), within this of the player (m), this often (s)
   water: {sink: .5, flow: .5, wind: .25, rate: .8},       // floating: share of it under, the creek's pace (m/s), the wind's share
   ROLL: 16,                       // frames a turn
@@ -263,13 +263,17 @@ export async function create(host) {
         }
       }
     }
-    // arrows through it (each arrow once)
+    // arrows (and bullets: fast, so the path of their last step is tested, from where it began, lx / ly / lh) through it,
+    // each once; the kick is capped (a bullet shoves a tumbleweed like an arrow, not at its own speed)
     const A = arrows;
     if (A) for (let i = 0; i < A.length; i++) {
       const a = A[i]; if (a.stuck || a === q.hit) continue;
-      const ex = a.x - q.x, ey = a.y - q.y, rel = a.h - (q.gz + q.h);
+      const x0 = a.lx ?? a.x, y0 = a.ly ?? a.y, h0 = a.lh ?? a.h, sx = a.x - x0, sy = a.y - y0, l2 = sx * sx + sy * sy;
+      const t = l2 > 1e-6 ? clamp(((q.x - x0) * sx + (q.y - y0) * sy) / l2, 0, 1) : 1;
+      const ex = x0 + sx * t - q.x, ey = y0 + sy * t - q.y, rel = h0 + (a.h - h0) * t - (q.gz + q.h);
       if (ex * ex + ey * ey < (q.r + .06) * (q.r + .06) && rel > -.1 && rel < q.r * 2 + .1) {
-        q.hit = a; q.vx += a.vx * TUNE.arrow.kick; q.vy += a.vy * TUNE.arrow.kick; q.vh = Math.max(q.vh, rr(TUNE.arrow.up[0], TUNE.arrow.up[1])); q.st = 'roll'; q.lodge = 0;
+        const sp = hypot2(a.vx, a.vy) || 1, k = Math.min(sp * TUNE.arrow.kick, TUNE.arrow.max) / sp;
+        q.hit = a; q.vx += a.vx * k; q.vy += a.vy * k; q.vh = Math.max(q.vh, rr(TUNE.arrow.up[0], TUNE.arrow.up[1])); q.st = 'roll'; q.lodge = 0;
       }
     }
     return hit;
