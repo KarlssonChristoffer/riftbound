@@ -4,8 +4,9 @@
 // CONTRACT (music.js is the only caller)
 //   export function createWestern(ac, {lay, noise}) -> W
 //     lay: music.js's layer gains {pad, arp, bass, mel, light, drums, sting: {g, on}}; noise: its 1 s noise buffer
-//   W.ready, W.build(ms)   the instrument banks render lazily (western_dsp.js, seeded) in slices of about `ms`, the first
-//                          time the desert is asked for; music.js holds the style switch until W.ready
+//   W.ready, W.build(ms)   the instrument banks render lazily (western_dsp.js, seeded) the first time the desert is asked
+//                          for: in a Worker (western_worker.js); without one, here in slices of about `ms` (Infinity: all
+//                          at once, for offline renders); music.js holds the style switch until W.ready
 //   W.enter()              the style starts (at a bar line)
 //   W.tick(st, t, I, time, s16)   one 16th step: st 0..15 at time t; I the intensity 0..1; time 'day' | 'dusk' | 'night'
 //   W.stinger(kind, t, s16)       'open' | 'loot' | 'respawn' (quantised by music.js)
@@ -27,7 +28,7 @@
 //                    strummed accents on 2 and 4, a driving bass, the harmonica pushed through the whole tune
 // INSTRUMENTS: rendered once (seeded JS DSP, mono, at 24 or 16 kHz: they are dark), played by playbackRate from the
 // nearest pitch: nylon guitar x5, twang bass x2, muted string x2, harmonic x2, tremolo x2, reed x3, bell, 5 percussion
-// (4.8 MB; ~0.2 s of CPU in 22 jobs, a few per update). Live voices: the whistler (one sine voice per 2-bar phrase, with
+// (4.8 MB; ~0.2 s of CPU in 22 jobs, in a Worker). Live voices: the whistler (one sine voice per 2-bar phrase, with
 // portamento) and the drone (2 oscillators per chord). Panners are shared, so most voices are a source and a gain.
 import {mulberry32} from '../core/rng.js';
 import {renderGuitar, renderTwang, renderMute, renderHarmonic, renderTremolo, renderReed, renderBell, renderPerc} from './western_dsp.js';
@@ -75,24 +76,44 @@ export function createWestern(ac, {lay, noise}) {
   // render rates: 24 kHz, 16 kHz for the darkest (nothing above ~3.5 kHz): half the CPU and memory of the context's rate
   const R = Math.random, rnd = mulberry32(0x3e5a27), HI = Math.min(ac.sampleRate, 24000), LO = Math.min(ac.sampleRate, 16000);
   const buf = (d, sr) => { const b = ac.createBuffer(1, d.length, sr); b.copyToChannel ? b.copyToChannel(d, 0) : b.getChannelData(0).set(d); return b; };
-  // ---- the banks: one render job per note, each with its own seeded generator (the result can't depend on the slicing)
+  // ---- the banks: one render job per note, each with its own seed (a bank can't depend on the thread or the slicing).
+  // In the browser a module Worker renders them (western_worker.js) and this thread only wraps the arrays; without one
+  // (Node, offline tests, a failed worker) they render here, a job or a few per build() call.
   const bank = {gtr: [], twang: [], mute: [], harm: [], trem: [], reed: [], bell: [], perc: {}}, jobs = [];
+  const FN = {renderGuitar, renderTwang, renderMute, renderHarmonic, renderTremolo, renderReed, renderBell};
   let seed = 0x5a1d0;
-  const note = (set, m, fn, sr) => { const s = seed++; jobs.push(() => { const r = fn(sr, mtof(m), mulberry32(s)); bank[set].push({m, b: buf(r.data, sr), f0: r.f0}); }); };
-  for (const m of [40, 47, 54, 61, 68]) note('gtr', m, renderGuitar, HI);
-  for (const m of [36, 45]) note('twang', m, renderTwang, LO);
-  for (const m of [40, 47]) note('mute', m, renderMute, LO);
-  for (const m of [67, 76]) note('harm', m, renderHarmonic, HI);
-  for (const m of [60, 67]) note('trem', m, renderTremolo, HI);
-  for (const m of [55, 62, 69]) note('reed', m, renderReed, LO);
-  note('bell', 57, renderBell, LO);
-  for (const k of ['clip', 'clop', 'tom', 'boom', 'shaker']) { const s = seed++, sr = k === 'tom' || k === 'boom' ? LO : HI; jobs.push(() => { bank.perc[k] = buf(renderPerc(sr, k, mulberry32(s)).data, sr); }); }
-  let echoIn = null;
+  const note = (set, m, fn, sr) => jobs.push({set, m, fn, sr, f: mtof(m), seed: seed++});
+  for (const m of [40, 47, 54, 61, 68]) note('gtr', m, 'renderGuitar', HI);
+  for (const m of [36, 45]) note('twang', m, 'renderTwang', LO);
+  for (const m of [40, 47]) note('mute', m, 'renderMute', LO);
+  for (const m of [67, 76]) note('harm', m, 'renderHarmonic', HI);
+  for (const m of [60, 67]) note('trem', m, 'renderTremolo', HI);
+  for (const m of [55, 62, 69]) note('reed', m, 'renderReed', LO);
+  note('bell', 57, 'renderBell', LO);
+  for (const k of ['clip', 'clop', 'tom', 'boom', 'shaker']) jobs.push({set: 'perc', kind: k, fn: 'renderPerc', sr: k === 'tom' || k === 'boom' ? LO : HI, seed: seed++});
+  const store = (j, data, f0) => { if (j.set === 'perc') bank.perc[j.kind] = buf(data, j.sr); else bank[j.set].push({m: j.m, b: buf(data, j.sr), f0}); };
+  let echoIn = null, worker = null, tried = false, left = jobs.length;
   const W = {ready: false, chord: 'Am', build, enter, tick, stinger};
+  function done() { if (--left === 0) { makeEcho(); W.ready = true; if (worker) { worker.terminate(); worker = null; } } }
   function build(ms = Infinity) {
+    if (W.ready) return;
+    if (ms !== Infinity && !tried && typeof Worker !== 'undefined') {   // first call: hand all the jobs to a worker
+      tried = true;
+      try {
+        worker = new Worker(new URL('./western_worker.js', import.meta.url), {type: 'module'});
+        worker.onmessage = e => { const j = jobs[e.data.id]; store(j, e.data.data, e.data.f0); jobs[e.data.id] = null; done(); };
+        worker.onerror = () => { try { worker.terminate(); } catch (e) {} worker = null; };   // fall back to this thread (the jobs left)
+        jobs.forEach((j, id) => worker.postMessage({id, fn: j.fn, sr: j.sr, f: j.f, kind: j.kind, seed: j.seed}));
+      } catch (e) { worker = null; }
+    }
+    if (worker) return;
     const now = () => typeof performance !== 'undefined' ? performance.now() : Date.now(), t0 = now();
-    while (jobs.length) { jobs.shift()(); if (now() - t0 > ms) break; }
-    if (!jobs.length && !W.ready) { makeEcho(); W.ready = true; }
+    for (let id = 0; id < jobs.length; id++) {
+      const j = jobs[id]; if (!j) continue;
+      const R = mulberry32(j.seed), r = j.fn === 'renderPerc' ? renderPerc(j.sr, j.kind, R) : FN[j.fn](j.sr, j.f, R);
+      store(j, r.data, r.f0); jobs[id] = null; done();
+      if (W.ready || now() - t0 > ms) break;
+    }
   }
   // the canyon: a dotted-8th echo (dark, thinning) that the whistle and the harmonica send to; it ends in the melody layer
   function makeEcho() {
