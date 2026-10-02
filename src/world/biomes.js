@@ -2131,7 +2131,7 @@ function makeBiome(id) {
       const wall = k.startsWith('wall_');
       const key = `${k}|${p.variant | 0}|${p.light | 0}|${sig}|${ctx.PPMY.toFixed(2)}` + (wall ? `|${p.x}|${p.y}` : k === 'tree' ? `|${speciesOf(p, id)}` : '');   // (a tree's species is part of the card)
       let s = cache.get(key);
-      if (s === undefined) { const f = PAINTERS[k]; s = f ? f(p, ctx, S) : null; cache.set(key, s); }
+      if (s === undefined) { const f = S.painters?.[k] || PAINTERS[k]; s = f ? f(p, ctx, S) : null; cache.set(key, s); }   // (a registered biome may paint a kind its own way)
       return s;
     },
   };
@@ -2139,5 +2139,16 @@ function makeBiome(id) {
   return B;
 }
 export const BIOMES = ['ruins', 'ember', 'frost', 'rift'].map(makeBiome);
+// a biome from its own module (world/desert.js): its style (with an id), its ground painter (q, ctx, B) and optionally
+// its own painters for some prop kinds ({tree, bush, ...}: (p, ctx, S) -> sprite | null). Appended after the four, so
+// their indices (keys, ?biome=, the run's stages) stay put. The module is imported once by world/stage.js
+export function registerBiome(style, ground, painters = null) {
+  if (STYLES[style.id]) throw new Error('biome ' + style.id + ' exists');
+  STYLES[style.id] = painters ? {...style, painters} : style; GROUND[style.id] = ground;
+  const B = makeBiome(style.id); BIOMES.push(B); return B;
+}
+// the ground painters' toolkit, for a biome painted in its own module (see the ground section above for each)
+export const GROUND_KIT = {kit, fbm, vor, flagstones, stone, crack, marks, inlayStyle, wallAO, stamp, paintStream, slab, paintPlateau,
+  behindPlateau, strata, boulder, narrowRocks, dampBanks, paintRill, paintPool, paintOutflow, chan, fallFoot, dampPool, limb};
 // the pixel toolkit, for modules that paint their own props in the same style (render3d/features/lights.js)
 export const ART = {Pix, build, flame, flameCols, glowAt, ramp, hex, mixHex, hsh, vn, rng, M, STYLES, RAMPS};
