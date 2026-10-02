@@ -6,8 +6,8 @@ gfx.js, adapter.js and player.js. Line numbers drift, so search for the quoted c
 and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame breaks them.
 
 **Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2), the water's reflections (E.3), the
-cloud shadows and the lava's heat haze (E.4), and the vignette (E.5) are done; contact shadows are next. Stage 3: the
-world cards in instanced batches (E.6). Stage 4 not started.
+cloud shadows and the lava's heat haze (E.4), the vignette (E.5) and the contact shadows (E.7) are done; the GPU layer
+batch and the trees' sway are next. Stage 3: the world cards in instanced batches (E.6). Stage 4 not started.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -513,6 +513,47 @@ machine was loaded, so the whole-frame figures are the median of the slices.
 **Not done from the plan:** shared materials with per-object data in a data texture (for the meshes), and a custom
 submit loop. The horde's `G.render` is now under the ~1 ms target, so neither is needed yet. What is left in `G.render`
 is mostly the canvas uploads (the hero, the view layers) and three's per-pass walk of the scenes.
+
+### E.7 Stage 2 continued: contact shadows on the GPU (2026-10-02; the same pixels within rounding)
+
+**What it replaced.** contact.js painted every stamp into a view-sized canvas mask each frame:
+
+- a clear, then a `drawImage` per stamp (the player, ~20-100 world items);
+- a full-view `source-in` fill for the tint;
+- a blit of the mask into the GROUND layer, which then had to be uploaded even when nothing else drew there.
+
+**What it is now:**
+
+- contact.js still decides every stamp (where, which size, how strong) and still makes each stamp's image once, the same
+  alpha bytes. It hands them to `gfx.js` (`G.aoStamp`, `G.ao`, `G.setAo`) instead of a canvas.
+- gfx.js keeps the stamp images in one R8 atlas. AO_VS / AO_FS draw one instanced quad per stamp into the x-ray target's
+  G channel (R is the x-ray mark; G was free, so no new texture unit in COMP_FS). Each pixel shows the stamp texel the
+  canvas's nearest-neighbour `drawImage` showed there, merged source-over as the mask was.
+- COMP_FS mixes the mood's shadow colour into the ground's albedo by that mask (`uAo`), where the ground layer was mixed
+  in before.
+
+**Differences.** Two small ones, neither visible in the captures:
+
+- the contact shadows now lie under the other ground-layer marks (footprints, animal shadows) instead of over the ones
+  drawn before them;
+- a puddle under a contact shadow keeps its reflection (the shadow used to change the ground layer's alpha, which marks
+  puddles).
+
+**Checks:**
+
+- golden against a copy of the tree before the change (`src-ct0/`): every capture within 1 / 255, except a few pixels
+  where two stamps overlap (up to 6 / 255, the 8-bit blend rounding); the crops look identical;
+- smoke and simview pass.
+
+**Results.** These come from an interleaved A/B on a loaded machine (another session's Blender, a game client). The old
+canvas path stalled erratically under that load (slices up to 70-140 ms), so its whole-frame figures are unreliable; the
+new path held steady.
+
+| | Before | After |
+|---|---|---|
+| `contact.frame` | 0.22-0.55 ms | 0.04-0.05 ms |
+| `G.render` (day, horde) | ~2.0 ms | ~1.0 ms (no mask flushed and blitted into the ground layer) |
+| GPU, day (p50) | 0.64 ms | 0.63 ms |
 
 ### Stage 4: browser and measuring
 

@@ -620,7 +620,31 @@ void main() {
   if (texture(uTex, vUv).a < .5) discard;
   float sd = texelFetch(uDepth, ivec2(gl_FragCoord.xy), 0).r;
   if (gl_FragCoord.z <= sd + 1.5e-4) discard;   // visible here: not x-rayed
-  o0 = vec4(1.);
+  o0 = vec4(1., 0., 0., 0.);   // (R only: G is the contact shadows' mask, AO_FS)
+}`;
+
+// ---------------------------------------------------------------- shaders: CONTACT SHADOWS (features/contact.js; G.ao)
+// One instanced quad per stamp, drawn into the x-ray target's G channel (R is the x-ray mark; G, B, A were free) as the
+// canvas mask was: each stamp's texel shown nearest-neighbour at z px a texel (the canvas's drawImage), its alpha times the
+// stamp's (globalAlpha), merged source-over (blend: one, one minus src: a + m (1 - a)). COMP_FS lays the mask on the ground.
+//   iR: the stamp's top-left (canvas px, y down), z (px a texel), alpha   iT: its rect in the atlas (texels: u, v, w, h)
+const AO_VS = HEAD + `
+in vec3 position; in vec4 iR; in vec4 iT; uniform vec2 uRes;
+flat out vec4 vR; flat out vec4 vT;
+void main() {
+  vec2 p = iR.xy + position.xy * iT.zw * iR.z;
+  vR = iR; vT = iT;
+  gl_Position = vec4(p.x / uRes.x * 2. - 1., 1. - p.y / uRes.y * 2., 0., 1.);
+}`;
+const AO_FS = HEAD + ONE_OUT + `
+flat in vec4 vR; flat in vec4 vT; uniform vec2 uRes; uniform sampler2D uAtlas;
+void main() {
+  vec2 c = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);   // this pixel's centre in canvas px (y down)
+  ivec2 t = ivec2(floor((c - vR.xy) / vR.z));
+  if (t.x < 0 || t.y < 0 || t.x >= int(vT.z + .5) || t.y >= int(vT.w + .5)) discard;
+  float s = texelFetch(uAtlas, ivec2(vT.xy + .5) + t, 0).r * vR.w;
+  if (s <= 0.) discard;
+  o0 = vec4(0., s, 0., 0.);
 }`;
 
 // ---------------------------------------------------------------- shader: lighting / composite
@@ -653,6 +677,7 @@ uniform int uDebug;
 // screen layers (view px, painted by the host / features with a 2D context): ground (before light, ground pixels only),
 // pre (before light, everything), emit (glow, added like an emitter), add (after light, additive), front (after light, over)
 uniform sampler2D tGround, tPre, tEmitL, tAdd, tFront; uniform vec4 uLay; uniform float uLayE;
+uniform vec4 uAo;   // the contact shadows (tX.g): the mood's shadow colour, strength (0: none this frame)
 // distort: where alpha is set, this pixel shows the scene from (x + 128 - R*255, y + G*255 - 128) (heat haze). The screen
 // layers after the light (post) stay put.
 uniform sampler2D tDistort; uniform float uLayD;
@@ -798,6 +823,7 @@ void main() {
 
   // ---- painted layers before the light: ground decals / animal shadows / ripples (ground only), cloud shadows (all)
   float gA = 0.;
+  if (uAo.w > 0. && (type == 1 || type == 5)) alb = mix(alb, uAo.rgb, texelFetch(tX, ip, 0).g * uAo.w);   // contact shadows (G.ao)
   if (uLay.x > .5 && (type == 1 || type == 5)) { vec4 g = lay(tGround, ip); alb = mix(alb, g.rgb, g.a); gA = g.a; }
   vec3 rfE = vec3(0.);   // ---- what stands over the water, mirrored in it (see reflAt)
   if (uRf.x > .5 && type == 1) {
@@ -1383,7 +1409,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       else if (G2.n) G2.idle = 0;
     }
   }
-  function resetBatches() { nLines = 0; nPoints = 0; for (const G2 of groups.values()) G2.n = 0; }
+  function resetBatches() { nLines = 0; nPoints = 0; aoN = 0; for (const G2 of groups.values()) G2.n = 0; }
 
   // ---- screen layers: 2D canvases at view resolution, uploaded only on frames they were drawn into
   const LAYERS = ['ground', 'pre', 'emit', 'add', 'front', 'distort'], layers = {}, layerList = [];
@@ -1426,11 +1452,47 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     tTop: {value: (t => { t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.unpackAlignment = 1; return t; })(new THREE.DataTexture(new Uint8Array(1), 1, 1, THREE.RedFormat, THREE.UnsignedByteType))}, uTopH: {value: new THREE.Vector4()},
     uCl: {value: new THREE.Vector4()}, uClM: {value: new THREE.Vector4()}, uClO: {value: new THREE.Vector4()}, uClC: {value: new THREE.Vector3()},
     uHz: {value: new THREE.Vector4()}, uHzM: {value: new THREE.Vector4()}, uHzO: {value: new THREE.Vector4()},
+    uAo: {value: new THREE.Vector4()},
   };
   const compScene = new THREE.Scene();
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const compMesh = new THREE.Mesh(tri, raw(COMP_VS, COMP_FS, compU, {depthTest: false, depthWrite: false})); compMesh.frustumCulled = false; compMesh.matrixAutoUpdate = false; compScene.add(compMesh);
   const dummyCam = new THREE.Camera();
+
+  // ---- CONTACT SHADOWS (features/contact.js, every frame it shows them): the arena's contact AO stamps, drawn by the GPU
+  // into the x-ray target's G channel (AO_VS / AO_FS) and laid on the ground by the composite (uAo: the mood's shadow colour
+  // and strength, before the ground layer). contact.js was a view-sized canvas mask: a drawImage per stamp, a full-view tint
+  // fill and a blit into the ground layer every frame. A stamp's image is still contact's (its alpha bytes, as it painted
+  // them), kept once in an R8 atlas here (shelves; when it is full it starts over: aoEpoch, and contact makes them again)
+  const AO_MAX = 2048, AO_AW = 1024, AO_AH = 512;
+  const aoAtlas = new THREE.DataTexture(new Uint8Array(AO_AW * AO_AH), AO_AW, AO_AH, THREE.RedFormat, THREE.UnsignedByteType);
+  aoAtlas.minFilter = aoAtlas.magFilter = THREE.NearestFilter; aoAtlas.generateMipmaps = false; aoAtlas.unpackAlignment = 1; aoAtlas.needsUpdate = true;
+  const aoGeo = new THREE.InstancedBufferGeometry(), aoBuf = new THREE.InstancedInterleavedBuffer(new Float32Array(AO_MAX * 8), 8, 1);
+  aoGeo.setAttribute('position', QUAD.getAttribute('position')); aoBuf.setUsage(THREE.DynamicDrawUsage);
+  aoGeo.setAttribute('iR', new THREE.InterleavedBufferAttribute(aoBuf, 4, 0)); aoGeo.setAttribute('iT', new THREE.InterleavedBufferAttribute(aoBuf, 4, 4));
+  const aoScene = new THREE.Scene(); aoScene.matrixAutoUpdate = false;
+  { const m = new THREE.Mesh(aoGeo, raw(AO_VS, AO_FS, {uRes: compU.uRes, uAtlas: {value: aoAtlas}}, {side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcColorFactor}));
+    m.frustumCulled = false; m.matrixAutoUpdate = false; aoScene.add(m); }
+  let aoX = 0, aoY = 0, aoRow = 0, aoEpoch = 0, aoN = 0, aoFrame = -1;
+  // aoStamp(w, h, alpha bytes (w x h, rows top down)) -> {u, v, w, h, epoch}: the stamp's place in the atlas
+  function aoStamp(w, h, d) {
+    if (w > AO_AW || h > AO_AH) return null;
+    if (aoX + w > AO_AW) { aoX = 0; aoY += aoRow; aoRow = 0; }
+    if (aoY + h > AO_AH) { aoX = aoY = aoRow = 0; aoEpoch++; }   // full: start over (the stamps made before are stale)
+    const A = aoAtlas.image.data;
+    for (let j = 0; j < h; j++) A.set(d.subarray(j * w, j * w + w), (aoY + j) * AO_AW + aoX);
+    const r = {u: aoX, v: aoY, w, h, epoch: aoEpoch}; aoX += w; aoRow = Math.max(aoRow, h); aoAtlas.needsUpdate = true;
+    return r;
+  }
+  // ao(x, y, z, a, stamp): one stamp this frame, its top-left at (x, y) canvas px, z px a texel, alpha a
+  function ao(x, y, z, a, r) {
+    if (aoN >= AO_MAX || !r) return;
+    const D = aoBuf.array, i = aoN++ * 8;
+    D[i] = x; D[i + 1] = y; D[i + 2] = z; D[i + 3] = a; D[i + 4] = r.u; D[i + 5] = r.v; D[i + 6] = r.w; D[i + 7] = r.h;
+  }
+  // setAo(r, g, b, k): this frame's tint (0..1) and strength; no call (or no stamp) = no contact shadows this frame
+  function setAo(r, g, b, k) { aoFrame = frameNo; compU.uAo.value.set(r, g, b, k); }
 
   // ---- HD FX: soft effects at DISPLAY resolution over the pixel image (the HD-2D trick: pixel world, smooth light).
   // setDisplay(s): the canvas becomes s x the view; the composite renders into outRT (VW x VH) and is blown up with whole
@@ -1648,6 +1710,9 @@ void main() {
     const calls = renderer.info.render.calls;
     lap('gbuf', calls);
     renderer.setRenderTarget(xray); renderer.clear(true, false, false); renderer.render(xScene, camera);
+    if (aoFrame !== frameNo) aoN = 0;
+    compU.uAo.value.w = aoN ? compU.uAo.value.w : 0;
+    if (aoN) { aoGeo.instanceCount = aoN; aoBuf.clearUpdateRanges(); aoBuf.addUpdateRange(0, aoN * 8); aoBuf.needsUpdate = true; renderer.render(aoScene, dummyCam); }
     compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
     let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
@@ -1754,5 +1819,5 @@ void main() {
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette};
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }
