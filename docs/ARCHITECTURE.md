@@ -277,15 +277,17 @@ src/
                          entities.js (the registry: join / leave / hide, live queries, near), spatial.js (the grid),
                          biomes.js, layout.js, trees3d.js, kit3d.js, nav.js
   sim/                   env.js (clock, seasons, weather), projectiles.js (arrows, pops, dust),
-                         player/ (player.js, harmonize.js, adapter.js: the camera-frame bridge, climbing, the cursor)
+                         player/ (player.js, harmonize.js, adapter.js: the camera-frame bridge, climbing, the cursor;
+                         gun.js: a gun loadout's revolver, handed LMB and the frame by player.js through H.gun)
   view/                  hero.js (the Ranger's card: atlas, cloak, hair, armour, HD bow), cloth.js, armor.js
   features/              the features as before (wind, weather, lights, garden, combat/, atmos, flow, wildlife, depth/, ...),
                          riverside (reeds, ferns, willows, lily pads), litter (drives the leaf carpet from the wind),
-                         atmos/waterlife.js (riffles, falls' spray and mist, shallow-water rings: called by atmos)
+                         atmos/waterlife.js (riffles, falls' spray and mist, shallow-water rings: called by atmos),
+                         gun (a gun loadout's controls + cues + the cylinder HUD), gunfx (muzzle flash, smoke, tracers, cases)
   game/                  game.js, run.js, enemies.js, items.js, stats.js, save.js
-  ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js
+  ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js, cylinder.js (a gun's ammo)
   audio/                 audio.js, music.js
-  content/               moods.js (MOODS, TIMES, CHAR)
+  content/               moods.js (MOODS, TIMES, CHAR), weapons.js (the bow's numbers, the revolvers: view/hero.js LOADOUTS name one each)
   dev/                   devtools.js (colliders, debug HUD, tree lineup), devkeys.js (dev keys, renderer A/B),
                          owncheck.js (the ownership table + ?owncheck=1)
   vendor/three/          three.js 0.170.0

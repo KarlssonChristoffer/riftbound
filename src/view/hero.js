@@ -12,8 +12,14 @@ import {loadAtlas} from '../render/atlas.js';
 import {ClothRig, depthOf, CLOTH_PARAMS, setClothWind} from './cloth.js';
 import {createArmor} from './armor.js';   // the shiny-armour experiment: its albedo repaint (the shine is on the GPU)
 import {atlasOf} from '../sim/player/player.js';
+import {WEAPONS} from '../content/weapons.js';
 
-export const LOADOUTS = [['ranger basic', '../concepts/sprites/out/outfits/ranger_basic/'], ['ranger + cloth sim', '../concepts/sprites/out/outfits/ranger_sim/'], ['bare body', '../concepts/sprites/out/skel/']];
+// [name, atlas, weapon (content/weapons.js)]: the cowboys come last (the smoke test's two O presses from ranger_sim land on the
+// gunslinger); ?set=basic | sim | body | gunslinger | outlaw (main.js)
+export const LOADOUTS = [['ranger basic', '../concepts/sprites/out/outfits/ranger_basic/', 'bow'], ['ranger + cloth sim', '../concepts/sprites/out/outfits/ranger_sim/', 'bow'],
+  ['bare body', '../concepts/sprites/out/skel/', 'bow'], ['gunslinger', '../concepts/sprites/out/outfits/gunslinger/', 'peacemaker'],
+  ['outlaw', '../concepts/sprites/out/outfits/outlaw/', 'brass_navy']];
+export const SET_NAMES = ['basic', 'sim', 'body', 'gunslinger', 'outlaw'];   // ?set= (core/flags.js)
 export const loadLoadout = i => loadAtlas(LOADOUTS[i][1], {ClothRig});   // (packed atlases: render/atlas.js)
 const CLOTH_CALM = {wind: [...CLOTH_PARAMS.wind], gust: CLOTH_PARAMS.gust};   // the cloak's own breeze when there's no wind feature
 const $ = s => document.querySelector(s);
@@ -21,6 +27,7 @@ const $ = s => document.querySelector(s);
 export function createHero({G, set, loadI, ctxO, app}) {
   const atlas = atlasOf(set);
   let {SP} = set, rig = set.rig, {FW, FH, PIV, ND, DIRS} = atlas;
+  let weapon = WEAPONS[LOADOUTS[loadI][2]] || WEAPONS.bow;   // changes with the atlas (never ahead of it: player.js reads both)
   // the Ranger's card: sprite (+ runtime cloak) + pixel bow composited every frame, normals likewise
   const charCv = document.createElement('canvas'), nrmCv = document.createElement('canvas');
   charCv.width = nrmCv.width = 192; charCv.height = nrmCv.height = 160;   // margins: the cloth sim swings past the frame
@@ -63,10 +70,11 @@ export function createHero({G, set, loadI, ctxO, app}) {
   async function switchLoadout(i) {
     const P = app.P;
     loadI = ((i % LOADOUTS.length) + LOADOUTS.length) % LOADOUTS.length;
+    const li = loadI;
     $('#load').classList.remove('hidden'); $('#load').textContent = 'Loading ' + LOADOUTS[loadI][0] + '…';
     const s = await loadAtlas(LOADOUTS[loadI][1], {ClothRig});
     const a = atlasOf(s), old = ND;
-    Object.assign(atlas, a); set = s; SP = s.SP; rig = s.rig; ({FW, FH, PIV, ND, DIRS} = a);
+    Object.assign(atlas, a); set = s; SP = s.SP; rig = s.rig; ({FW, FH, PIV, ND, DIRS} = a); weapon = WEAPONS[LOADOUTS[li][2]] || WEAPONS.bow;
     if (ND !== old) app.PL.regrid(old, ND);   // the facings re-counted for the new atlas (player.js)
     rig.reset?.();
     card.u.uPivot.value.set(PIV[0] + CX, PIV[1] + CY);
@@ -153,7 +161,7 @@ export function createHero({G, set, loadI, ctxO, app}) {
     if (sp.nrm) nq.drawImage(sp.nrm, P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx, FW, FH - sinkPx);
     if (rig.active && sp.depth && !sinkPx) rig.draw(cq, CX, CY, depthOf(sp.depth), P.face, nq);
     if (!sinkPx) hairWind(fr);
-    if (!sinkPx && !opt.hdBow) PL.drawPixelBow(cq, CX, CY);
+    if (!sinkPx && !opt.hdBow && weapon.kind === 'bow') PL.drawPixelBow(cq, CX, CY);   // (a gun loadout has no string / nocked arrow)
     drawMetal(fr, sinkPx);
     G.tex(charCv, {dynamic: true}); G.tex(nrmCv, {dynamic: true});
     perf?.end('hero.compose');
@@ -169,7 +177,8 @@ export function createHero({G, set, loadI, ctxO, app}) {
   function drawHDBow(hq, sc) {
     const P = app.P, PL = app.PL, cam = app.cam, toView = app.toView, VW = app.VW, VH = app.VH;
     const z = app.zoom, s2 = sc * z, [px, py] = ctxO.toS(P.x, P.y, P.z);
-    const view = app.arrows.map(a => {
+    if (weapon.kind !== 'bow') return;   // the HD bow layers: string, nocked arrow, arrows in flight (bullets: view/gunfx.js)
+    const view = app.arrows.filter(a => a.kind !== 'bullet').map(a => {
       const [x, y] = toView(a.x, a.y), [vx, vy] = toView(a.vx, a.vy);
       return {...a, x, y, vx, vy, trail: a.trail?.map(([tx, ty, th]) => { const [u, v] = toView(tx, ty); return [u, v, th]; })};
     });
@@ -182,5 +191,6 @@ export function createHero({G, set, loadI, ctxO, app}) {
   const sprite = () => { const P = app.P, player = app.player; return {img: charCv, nrm: nrmCv, px: PIV[0] + CX, py: PIV[1] + CY, x: player.x, y: player.y, h: P.z, frame: P.frame, face: P.face}; };
 
   return {atlas, card, armor, toggleArmour, switchLoadout, moveCloth, stepCloth, compose, drawHDBow, sprite,
-    get SP() { return SP; }, get rig() { return rig; }, get ND() { return ND; }, get set() { return set; }, get loadI() { return loadI; }, get loadName() { return LOADOUTS[loadI][0]; }};
+    get SP() { return SP; }, get rig() { return rig; }, get ND() { return ND; }, get set() { return set; }, get loadI() { return loadI; }, get loadName() { return LOADOUTS[loadI][0]; },
+    get weapon() { return weapon; }};
 }

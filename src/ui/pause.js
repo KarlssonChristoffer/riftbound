@@ -12,6 +12,7 @@ import {SNAP_NAME} from '../render/camera.js';
 import {SAMPLING, DEBUG} from '../render/options.js';
 import {SEASONS, WEATHER} from '../sim/env.js';
 import {check as checkEvents} from '../core/events.js';
+import {LOADOUTS} from '../view/hero.js';
 const $ = s => document.querySelector(s);
 
 const NO_EVS = [], PAUSE_TURN = .035, LOOK_HOLD = 3000;   // drift rad/s (the title turns at .07); ms after a drag before it drifts again
@@ -35,8 +36,12 @@ const CLAIM = {
 const LOW_OFF = ['windlines', 'wildlife', 'depth', 'grass', 'litter'];
 const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'sprint'], [['Q'], 'walk'], [['C'], 'crouch'], [['Space'], 'roll · leap'],
   [['LMB'], 'hold to draw, release to shoot'], [['RMB'], 'multishot'], [['1', '2', '3', '4'], 'abilities'], [['E'], 'open · talk · climb'],
+  [['LMB'], 'revolver: draw · shoot'], [['RMB'], 'revolver: fan the hammer'], [['R'], 'revolver: reload'], [['Y'], 'tip the hat'],
   [['Z', 'X'], 'turn the camera (or drag with the middle button)'], [['Home'], 'reset the camera'], [['Wheel'], 'zoom in / out'],
   [['M'], 'mute'], [['U'], 'music on / off'], [['Esc'], 'this menu']];
+
+const CHARS = {Ranger: 'ranger + cloth sim', Gunslinger: 'gunslinger', Outlaw: 'outlaw'};   // the menu's names -> LOADOUTS names
+const charOf = name => name === 'gunslinger' ? 'Gunslinger' : name === 'outlaw' ? 'Outlaw' : 'Ranger';
 
 export function createPause(E) {
   const {cv, pa, hero, events, features, keys, feat, opt, stage, env, perf, host} = E;
@@ -66,6 +71,9 @@ export function createPause(E) {
     // Game: resume, then the game's own rows (start / abandon a run, back to title)
     if (game.mode !== 'title') out.push({tab: 'game', label: 'Resume', main: true, sound: 'back', run() {}});
     for (const m of features.flatMap(f => f.menu?.() || [])) out.push({tab: 'game', label: m.label, run: m.run});
+    // the character: the Ranger (bow), the gunslinger (Peacemaker), the outlaw (Brass Navy): view/hero.js LOADOUTS
+    out.push({tab: 'game', group: 'Character', label: 'Character', ...pick(Object.keys(CHARS), () => charOf(hero.loadName), v => {
+      const i = LOADOUTS.findIndex(l => l[0] === CHARS[v]); if (i >= 0 && i !== hero.loadI) hero.switchLoadout(i); })});
     // Graphics, Controls: the host's own
     // (fullscreen keeps Escape for the menu: keyboard lock, where the browser has it; holding Esc still leaves fullscreen)
     out.push({tab: 'graphics', group: 'Display', label: 'Fullscreen', ...onOff(() => !!document.fullscreenElement, v => {
@@ -87,8 +95,8 @@ export function createPause(E) {
     dv('World', {label: 'Day length', value: () => env.frozen ? 'stopped' : `${env.TUNE.dayMinutes} min`, run: d => cyc([20, 5, 60, 0], env.frozen ? 0 : env.TUNE.dayMinutes, d, env.setDayMinutes)});
     dv('Renderer', {label: 'Ground texture', key: 'Shift+2', ...pick(SAMPLING, () => opt.sampling, v => { opt.sampling = v; })});
     dv('Renderer', {label: 'Prop outlines', key: 'Shift+3', ...onOff(() => opt.outline, v => { opt.outline = v; })});
-    dv('Renderer', {label: 'Props', key: 'R', ...pick(['live 3D', '16-angle sprites'], () => stage.propMode === 'live' ? 'live 3D' : '16-angle sprites', v => { stage.propMode = v === 'live 3D' ? 'live' : 'yaw'; })});
-    dv('Renderer', {label: 'Trees', key: 'Shift+R', ...pick(['3D (grown)', 'painted cards'], () => stage.trees3d ? '3D (grown)' : 'painted cards', v => { stage.trees3d = v === '3D (grown)'; })});
+    dv('Renderer', {label: 'Props', key: 'P', ...pick(['live 3D', '16-angle sprites'], () => stage.propMode === 'live' ? 'live 3D' : '16-angle sprites', v => { stage.propMode = v === 'live 3D' ? 'live' : 'yaw'; })});
+    dv('Renderer', {label: 'Trees', key: 'Shift+P', ...pick(['3D (grown)', 'painted cards'], () => stage.trees3d ? '3D (grown)' : 'painted cards', v => { stage.trees3d = v === '3D (grown)'; })});
     dv('Renderer', {label: 'Banded light', key: 'V', ...onOff(() => opt.banded, v => { opt.banded = v; })});
     dv('Renderer', {label: 'Debug view', key: 'G', ...pick(DEBUG, () => DEBUG[opt.debug], v => { opt.debug = DEBUG.indexOf(v); })});
     dv('Renderer', {label: 'Colliders', key: 'Shift+G', ...onOff(() => opt.zones, v => { opt.zones = v; })});

@@ -5,7 +5,8 @@
 import {SAMPLING, DEBUG} from '../render/options.js';
 
 // sandbox / test keys (9: light sources, f: the flames' look, b: wind strength; 5-8, k: features' own)
-export const DEV_KEYS = new Set(['n', 't', 'g', 'o', 'r', 'v', 'j', 'i', 'h', 'k', '5', '6', '7', '8', '9', 'f', 'b']);
+// (P: the props' live 3D / 16-angle A/B, and Shift+P the trees: R reloads a gun loadout's revolver, features/gun.js)
+export const DEV_KEYS = new Set(['n', 't', 'g', 'o', 'p', 'v', 'j', 'i', 'h', 'k', '5', '6', '7', '8', '9', 'f', 'b']);
 
 // renderer A/B (Shift + 1..6): rotation steps, ground sampling, outlines, props live / 16-angle, bands, shadows -> handled?
 export function abKey(e, {cv, opt, stage}) {
@@ -28,8 +29,8 @@ export function devKey(k, e, {env, stage, opt, hero, setBiome}) {
   if (k === 'v') opt.banded = !opt.banded;
   if (k === 'j') opt.hdBow = !opt.hdBow;
   if (k === 'i') hero.toggleArmour();
-  if (k === 'r' && e.shiftKey) stage.trees3d = !stage.trees3d;   // trees: procedural 3D <-> painted cards (a rebuild)
-  else if (k === 'r') stage.propMode = stage.propMode === 'live' ? 'yaw' : 'live';
+  if (k === 'p' && e.shiftKey) stage.trees3d = !stage.trees3d;   // trees: procedural 3D <-> painted cards (a rebuild)
+  else if (k === 'p') stage.propMode = stage.propMode === 'live' ? 'yaw' : 'live';
   if (k === 'g') { if (e.shiftKey) opt.zones = !opt.zones; else opt.debug = (opt.debug + 1) % DEBUG.length; }
   if (k === 'h') opt.help = !opt.help;
 }

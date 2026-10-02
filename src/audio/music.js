@@ -236,7 +236,7 @@ export function createMusic(ac, dest, {send = null, enabled = true, offline = fa
 
   // ---- intensity ----
   function heatUp(v, t) { heat = Math.min(1, heat + v); lastHeat = t; }
-  const HEAT = {'arrow.hit': .22, 'player.hit': .22, 'prop.break': .1, 'combat.explode': .45, 'combat.trap': .15, 'chest.open': 0, 'combat.loot': 0};   // (core/events.js)
+  const HEAT = {'arrow.hit': .22, 'player.hit': .22, 'prop.break': .1, 'combat.explode': .45, 'combat.trap': .15, 'chest.open': 0, 'combat.loot': 0, 'player.shoot': .06};   // (core/events.js)
   function update(t, s = {}) {
     const dt = clamp(t - clock, 0, .25); clock = t;
     if (s.biome && STYLES[s.biome] && s.biome !== styleId && (!pending || pending.id !== s.biome)) pending = {id: s.biome};

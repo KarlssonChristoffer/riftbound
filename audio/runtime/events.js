@@ -141,6 +141,23 @@ export const EVENTS = {
     ...WORLD, priority: 55, maxInstances: 3, gainDb: -10, pick: () => L('explosion', 'fuse'), banks: [['explosion', 'fuse']], variants: 4, bakePriority: 4,
   },
 
+  // ================================================ the revolver (src/sim/player/gun.js; forge recipe 'revolver') ================================================
+  gunshot: {   // o.gun 'peacemaker' (a sharp crack) | 'brass_navy' (a deeper boom), o.fan (a fanned shot: a touch softer)
+    ...PLAYER, priority: 85, maxInstances: 4, coalesceMs: 0, gainDb: 0, send: .1, pitchSemi: .5, gainJitDb: 1, cooldownMs: 20,
+    pick: o => L('revolver', o.gun === 'brass_navy' ? 'navy' : 'peacemaker'),
+    gainFrom: o => (o.fan ? -1.5 : 0),
+    snapshot: {name: 'gunDuck', buses: {amb: -4, music: -2}, attack: .005, hold: .05, release: .4},
+    banks: [['revolver', 'peacemaker'], ['revolver', 'navy']], variants: 5, bakePriority: 1,
+  },
+  gunDry: {...PLAYER, priority: 70, gainDb: -6, cooldownMs: 60, pick: () => L('revolver', 'dry'), banks: [['revolver', 'dry']], variants: 4, bakePriority: 2},
+  gunDraw: {...PLAYER, priority: 55, gainDb: -10, cooldownMs: 100, pick: () => L('revolver', 'cock'), banks: [['revolver', 'cock']], variants: 4, bakePriority: 2},
+  gunReload: {   // o.phase: start (the hammer to half cock, the gate open) | eject (the cases out) | round (one in) | done (the spin)
+    ...PLAYER, priority: 55, maxInstances: 3, gainDb: -9, cooldownMs: 40,
+    pick: o => L('revolver', {eject: 'eject', round: 'load', done: 'spin'}[o.phase] || 'cock'),
+    gainFrom: o => (o.phase === 'start' ? -4 : 0),
+    banks: [['revolver', 'eject'], ['revolver', 'load'], ['revolver', 'spin'], ['revolver', 'cock']], variants: 4, bakePriority: 3,
+  },
+  gunHolster: {...PLAYER, priority: 45, gainDb: -10, cooldownMs: 150, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
   // ================================================ impacts ================================================
   hit: {   // o.mat 'wood' | 'straw' | 'clay' | 'glass' | 'stone' | 'body' (the player); o.g from physics impacts (.45..1.4)
     ...IMPACT, gainDb: -3, cooldownMs: 25, cat: o => (o.mat === 'body' || o.mat === 'flesh' ? 'player' : 'combat'),

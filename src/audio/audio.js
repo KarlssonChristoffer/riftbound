@@ -275,6 +275,34 @@ const SFX = {
     const v = E.voice(o, 'creakTick', .1); if (!v) return;
     E.O(v, 0, {w: 'sawtooth', f: 60, a: .01, d: .06, g: .08, type: 'bandpass', ff: 1100, q: 8});
   },
+  // ---------------- the revolver (fallbacks for the forge's 'revolver' recipe while it bakes / ?forge=0) ----------------
+  gunshot(E, o) {   // o.gun 'peacemaker' | 'brass_navy': crack + bark + thump + a dark, dry tail (nothing rings)
+    const v = E.voice({...o, g: (o.g ?? 1) * 1.5}, 'gunshot', 1, {pri: 3, cd: .02}); if (!v) return;
+    const navy = o.gun === 'brass_navy';
+    E.N(v, 0, {type: 'highpass', f: navy ? 500 : 900, a: .0005, d: navy ? .012 : .008, g: .55});
+    E.N(v, 0, {type: 'lowpass', f: navy ? 1800 : 3200, a: .001, d: navy ? .09 : .06, g: .6});
+    E.O(v, 0, {f: navy ? 75 : 100, f2: navy ? 45 : 60, sw: .08, a: .002, d: navy ? .16 : .1, g: navy ? .6 : .4});
+    E.N(v, .015, {b: E.BR, type: 'lowpass', f: 700, a: .02, d: navy ? .45 : .35, g: .25});
+  },
+  gunDry(E, o) {   // the hammer on an empty chamber
+    const v = E.voice(o, 'gunDry', .15, {cd: .05}); if (!v) return;
+    E.N(v, 0, {type: 'bandpass', f: 2200, q: 3, d: .004, g: .15}); E.N(v, .012, {type: 'bandpass', f: 2800, q: 3, d: .007, g: .4}); E.O(v, .012, {f: 800, a: .001, d: .02, g: .1});
+  },
+  gunDraw(E, o) {   // out of the leather, the hammer cocked
+    const v = E.voice(o, 'gunDraw', .3, {cd: .1}); if (!v) return;
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f: 750, q: .9, a: .03, d: .05, g: .2});
+    E.N(v, .11, {type: 'bandpass', f: 2400, q: 3, d: .006, g: .3}); E.N(v, .14, {type: 'bandpass', f: 2800, q: 3, d: .007, g: .4});
+  },
+  gunReload(E, o) {   // o.phase start | eject | round | done
+    const v = E.voice(o, 'gunReload', .8, {cd: .03}); if (!v) return;
+    if (o.phase === 'done') { for (let i = 0, t = 0; i < 9; i++, t += .04 + i * .007) E.N(v, t, {type: 'bandpass', f: 3000, q: 3, d: .004, g: .2 * (1 - i / 12)}); E.N(v, .62, {type: 'bandpass', f: 2000, q: 2, d: .009, g: .45}); }
+    else if (o.phase === 'eject') { E.N(v, 0, {type: 'bandpass', f: 1700, q: 1.5, a: .01, d: .03, g: .2}); for (const t of [.18, .26, .37]) E.N(v, t, {type: 'bandpass', f: 3200, q: 2, d: .01, g: .15}); }
+    else E.N(v, 0, {type: 'bandpass', f: o.phase === 'round' ? 1500 : 2600, q: 2.5, d: .008, g: .35});
+  },
+  gunHolster(E, o) {   // the twirl drops into leather
+    const v = E.voice(o, 'gunHolster', .3, {cd: .15}); if (!v) return;
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f: 700, q: .8, a: .05, d: .06, g: .18}); E.N(v, .15, {b: E.PK, type: 'lowpass', f: 1100, a: .001, d: .015, g: .45});
+  },
   // ---------------- impacts ----------------
   hit(E, o) {   // o.mat 'wood'|'straw'|'clay'|'glass'|'body'
     const v = E.voice({...o, g: (o.g ?? 1) * 1.2}, 'hit', .45, {pri: 2, cd: .025}); if (!v) return;
@@ -766,7 +794,7 @@ export function createAudio(ctx, host = {}) {
     else if (prevState === 'climb') { fire('climb', pl.x, pl.y, {surf, big: 1}); climbT = 0; }
     // the draw creak: while the string is held back
     const drawing = st === 'draw' && pl.aim;
-    if (drawing) {
+    if (drawing && !pl.gun) {   // (a revolver has no string)
       const k = Math.min(1, (pl.t || 0) * 1.5);
       if (!creak) { creak = (RT && RT.D.makeCreak?.()) || makeCreak(E); prevK = k; }
       creak.set(k, dt > 0 ? (k - prevK) / dt : 0, t, dt); prevK = k;
@@ -780,6 +808,13 @@ export function createAudio(ctx, host = {}) {
         case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, {surf, k: 1.3, g: 1}); break;   // sprint plant
         case 'player.jump': fire('jump', e.x, e.y, {surf}); break;
         case 'player.splash': case 'arrow.splash': case 'prop.splash': case 'wildlife.splash': fire('splash', e.x, e.y, {surf, small: !!e.small}); break;
+        // the revolver (sim/player/gun.js): its own sounds; its bullets aren't arrows (no bow shot, no stuck thud)
+        case 'player.shoot': fire('gunshot', e.x, e.y, {gun: e.gun, fan: !!e.fan}); break;
+        case 'player.dryfire': fire('gunDry', e.x, e.y); break;
+        case 'player.draw': fire('gunDraw', e.x, e.y); break;
+        case 'player.reload': fire('gunReload', e.x, e.y, {phase: e.phase}); break;
+        case 'player.holster': fire('gunHolster', e.x, e.y); break;
+        case 'bullet.impact': if (e.surf === 'ground') fire('stuck', e.x, e.y, {surf, g: .55}); else if (e.surf === 'tree' || e.surf === 'prop') fire('hit', e.x, e.y, {mat: 'wood', g: .7}); break;
         case 'arrow.hit': case 'player.hit': {
           const props = get(host.props) || [], p = !e.player && (e.prop || props.find(p => p.x === e.x && p.y === e.y));
           fire('hit', e.x, e.y, {mat: e.player ? 'body' : MAT[p?.kind] || 'wood'}); break;
@@ -808,6 +843,7 @@ export function createAudio(ctx, host = {}) {
     // ---- arrows: shots (new ones, grouped by ability) and thuds (newly stuck) ----
     let volley = null;
     for (const a of arrows) {
+      if (a.kind === 'bullet') continue;   // (the revolver's: player.shoot / bullet.impact above)
       if (!seen.has(a)) {
         seen.add(a);
         if (a.ab === 'rain') fire('whistle', a.x, a.y);

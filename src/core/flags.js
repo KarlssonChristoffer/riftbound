@@ -16,7 +16,7 @@ export const FLAG_DOCS = {
   yaw:       'the camera\'s starting yaw (deg)',
   zoom:      '2: start zoomed in',
   // ---- the player
-  set:       'basic | sim | body: the loadout (baked cloak / runtime cloth / bare body)',
+  set:       'basic | sim | body | gunslinger | outlaw: the loadout (baked cloak / runtime cloth / bare body; the cowboys with their revolvers)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
   lantern:   '1: start with the lantern lit',
   detail:    'low: the low detail tier (no wind lines, wildlife, depth layer or grass; menu > Graphics > Detail)',

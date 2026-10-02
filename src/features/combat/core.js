@@ -411,7 +411,7 @@ export function createCore(host) {
     damage, breakProp, explode, part, puff,
 
     onArrowHit(a, p) {
-      const dir = [a.vx * .12, a.vy * .12];
+      const k = .12 * (a.push ?? 1), dir = [a.vx * k, a.vy * k];   // (a bullet's push: it knocks bits like an arrow, not like 150 m/s)
       if (a.explode) {
         damage(p, a.dmg ?? T.boomDmg, {canCrit: true, dir});
         if (!a.done) { a.done = true; explode(a.x, a.y, host.elev(a.x, a.y), a.explode.r, a.explode.dmg, false); }
