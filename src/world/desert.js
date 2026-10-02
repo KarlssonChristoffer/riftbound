@@ -201,6 +201,50 @@ function groundDesert(q, ctx, B) {
     boulder(K, SP.x + Math.cos(a) * rr, SP.y + Math.sin(a) * rr, 5 * sz + 1.5, 3.2 * sz + 1, v & 1 ? S.rock : S.rockB, v * 13, S.earth);
   K.finish(B);
   B.hole = (x, y, c) => y > cliff(x) - .3 || K.streamE(x, y) < .4 || (c && behindPlateau(c, x, y));
+  B.groundAt = groundOf(ctx, B);
+}
+
+// ---------------------------------------------------------------- what the ground is, at a point
+// B.groundAt(x, y) (m) -> 'water' | 'stone' (the fort's paving) | 'rock' (outcrops, the mesa's bare rock, the canyon) | 'pan' (hardpan,
+// trodden tracks) | 'sand': the painter's own tests above (the same noise, no pixels read), for the footprints and the
+// footsteps (features/atmos.js, audio), the blowing sand and the dust devils (features/dust.js). Approximate at the edges
+// (a worn flagstone is judged at the point, not at its centre). No allocation; ~1 us a call
+function groundOf(ctx, B) {
+  const {PLAY, layout: L} = ctx, cx = (PLAY.x0 + PLAY.x1) / 2, cy = (PLAY.y0 + PLAY.y1) / 2, S = L.stream, T = L.trail, plats = L.plateaus || [];
+  const paths = (L.marks || []).filter(m => m.type === 'path');
+  const inside = (mx, my, pad) => mx > PLAY.x0 - pad && mx < PLAY.x1 + pad && my > PLAY.y0 - pad && my < PLAY.y1 + pad;
+  const calm = (mx, my, pad) => inside(mx, my, pad) || (!!T && mx > T.x0 - pad && mx < T.x1 + pad && my > T.y0 - pad && my < T.y1 + pad);
+  const streamE = (mx, my) => S ? Math.abs(mx - S.cx(my)) - S.w(my) / 2 : 9;
+  const pathD = (mx, my) => {   // (kit().pathD: the roads out of the gates)
+    let d = 1e9;
+    if (my < PLAY.y0) d = Math.min(d, Math.abs(mx - cx - Math.sin(my * .7) * .5));
+    if (my > PLAY.y1) d = Math.min(d, Math.abs(mx - cx - Math.sin(my * .8 + 1) * .5));
+    if (mx < PLAY.x0) d = Math.min(d, Math.abs(my - cy - Math.sin(mx * .6) * .4));
+    return d;
+  };
+  const onTrack = (mx, my) => {   // the trail's trodden paths (marks())
+    for (const m of paths) for (let i = 0; i + 1 < m.pts.length; i++) {
+      const [ax, ay] = m.pts[i], [bx, by] = m.pts[i + 1], dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((mx - ax) * dx + (my - ay) * dy) / l2)), ex = mx - ax - dx * t, ey = my - ay - dy * t;
+      if (ex * ex + ey * ey < m.w * m.w / 4) return true;
+    }
+    return false;
+  };
+  return (mx, my) => {
+    if (streamE(mx, my) < 0) return 'water';
+    if (my > ctx.HM - 3.4 && B.hole(mx, my)) return 'rock';   // the canyon's rim and below
+    for (const q of plats) if (mx > q.x0 && mx < q.x1 && my > q.y0 && my < q.y1) return fbm(mx * .25, my * .25, 127) - .5 > .06 ? 'rock' : 'sand';   // the mesa's top
+    if (inside(mx, my, .5)) {   // the paving, unless worn through to the ground under it
+      const ed = Math.min(mx - PLAY.x0, PLAY.x1 - mx, my - PLAY.y0, PLAY.y1 - my);
+      const wear = fbm(mx * .4, my * .4, 3) + Math.max(0, 1.8 - ed) * .2 - (Math.hypot(mx - cx, my - cy - .5) < 5.5 ? .25 : 0);
+      if (wear <= .74) return 'stone';
+      return fbm(mx * .3 + 40, my * .3, 119) - .12 > .6 ? 'pan' : 'sand';
+    }
+    const c = calm(mx, my, .4), pd = pathD(mx, my);
+    if (!c && fbm(mx * .15, my * .15, 117) - (pd < 2.2 ? .5 : 0) - (streamE(mx, my) < 1.6 ? .5 : 0) > .64) return 'rock';
+    if (fbm(mx * .3 + 40, my * .3, 119) + (c ? -.12 : 0) > .6 || pd < .9 || onTrack(mx, my)) return 'pan';
+    return 'sand';
+  };
 }
 
 // ---------------------------------------------------------------- the plants

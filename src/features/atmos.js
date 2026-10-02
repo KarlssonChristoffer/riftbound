@@ -78,12 +78,13 @@ const KINDS = {
       pal: ['#e4c8ff', '#ac80f2', '#7448c4', '#40247a'], emit: true, wake: 1},
   ],
 };
-const WIND = {ruins: [.3, .7], ember: [.12, .35], frost: [.45, 2.1], rift: [0, 0]};    // base m/s, + gust m/s
+const WIND = {ruins: [.3, .7], ember: [.12, .35], frost: [.45, 2.1], rift: [0, 0], desert: [.38, .85]};    // base m/s, + gust m/s
 const BURST = {   // arrow hits: small, biome-flavoured, short
   ruins: {n: 8, pal: ['#e2cc84', '#b89a58', '#7a6238'], sp: [1.2, 2.6], up: [.8, 2.2], life: [.7, 1.2], gr: 9, bounce: true},
   ember: {n: 9, pal: ['#ffe6a4', '#ffa446', '#cc5626', '#661f10'], sp: [1.6, 3.4], up: [.8, 2.6], life: [.3, .55], gr: 9, emit: true, bounce: true},
   frost: {n: 8, pal: ['#ffffff', '#cfe0f4', '#8eaad0'], sp: [1.2, 2.8], up: [.8, 2.4], life: [.6, 1], gr: 9, bounce: true},
   rift: {n: 9, pal: ['#e8ccff', '#a472f0', '#5c3298'], dark: ['#1e1030', '#160c24', '#100818'], sp: [.7, 1.8], up: [-.3, .6], life: [.5, .9], gr: 0, drag: 3, emit: true},
+  desert: {n: 8, pal: ['#f0deb0', '#d6ba86', '#aa8a60'], sp: [1.2, 2.6], up: [.8, 2], life: [.6, 1.1], gr: 9, bounce: true},   // a spray of sand and dry splinters
 };
 const FOG = {      // additive ground mist, quantized to 2 levels (hard pixel edges), in world space, drifting with the wind
   frost: {c: [[8, 10, 14], [15, 19, 26]], cover: [.17, .05], drift: .35},
@@ -94,10 +95,12 @@ const OVER = {     // HD overlay: vignette colour/strength, top haze colour/stre
   ember: {v: [20, 5, 6], va: .3, h: [255, 120, 60], ha: .06},
   frost: {v: [5, 9, 20], va: .28, h: [220, 234, 255], ha: .09},
   rift: {v: [8, 3, 14], va: .32, h: [138, 74, 208], ha: .07},
+  desert: {v: [26, 14, 6], va: .24, h: [255, 228, 176], ha: .07},   // warm corners, a pale heat-haze at the top
 };
 // dust / smoke per biome (bright -> dim): landings, cliff trickle, breakables, explosions
 const DUST = {ruins: ['#c8b894', '#a8987a', '#7e7260', '#5a5246'], ember: ['#948a84', '#766e68', '#56504c', '#3a3533'],
-  frost: ['#d8e2ee', '#a8b6ca', '#8492aa', '#66748c'], rift: ['#7a6a98', '#5c4e78', '#44385a', '#2e263e']};
+  frost: ['#d8e2ee', '#a8b6ca', '#8492aa', '#66748c'], rift: ['#7a6a98', '#5c4e78', '#44385a', '#2e263e'],
+  desert: ['#ecd8aa', '#d4ba8a', '#ae9068', '#7c664a']};   // sand
 const SMOKE = ['#8a8480', '#6a6460', '#4c4744', '#302c2a'];
 // splashes: droplets / chunks, a ring on the surface (clipped to the water), rift pulls inward instead
 const SPLASH = {
@@ -110,6 +113,8 @@ const SPLASH = {
     bits: {n: 5, pal: ['#f4faff', '#cfe0f4', '#8eaad0'], sp: [.7, 1.7], up: [1.1, 2.1], life: [.8, 1.2], gr: 9, drag: 1, bounce: true, px: 2, py: 2, hold: .7},
     ring: {pal: ['#e8f0fa', '#b4c4dc', '#8494b2'], r0: .1, r1: 1, life: .7}},
   rift: {n: 14, implode: true, ring: {pal: ['#e4c8ff', '#ac80f2', '#7448c4'], r0: 1.3, r1: 0, life: .45, emit: true, noclip: true}},
+  desert: {n: 12, drops: {pal: ['#e2dcc4', '#bcb090', '#8c8264'], sp: [.3, 1.2], up: [1.5, 3], life: [.5, .8], gr: 9, drag: 1},   // the muddy creek
+    ring: {pal: ['#d4ccaa', '#aca282', '#827a5e'], r0: .1, r1: 1, life: .7}},
 };
 // stream life. kinds: flow (drifts downstream), glint (a brief sparkle), bubble (lava: grows, pops, throws embers),
 // mist (rises off the water), shimmer (a slow wave of light along the crack), suck (motes pulled down into the crack)
@@ -132,8 +137,17 @@ const STREAM_LIFE = {
   rift: {v: 0, kinds: [
     {k: 'shimmer', n: 30, pal: ['#a878f0', '#6a44b8', '#3e2472'], emit: true},
     {k: 'suck', n: 12, life: [1.4, 2.4], pal: ['#e4c8ff', '#ac80f2', '#7448c4', '#40247a'], emit: true}]},
+  // the desert's muddy creek: silty streaks, a few pale flecks of foam, the sun's glint by day
+  desert: {v: .8, kinds: [
+    {k: 'flow', n: 8, shape: 'streak', life: [.8, 1.6], pal: ['#ddd4b4', '#c2b894', '#a29a78']},
+    {k: 'flow', n: 6, shape: 'fleck', life: [.6, 1.3], pal: ['#eee8d2', '#d4ccb0', '#b2a88a']},
+    {k: 'glint', n: 3, day: true, pal: ['#fffaf0', '#efe4cc']}]},
 };
 const PRINT = [[3, '#a4b4d0'], [6, '#bcc8dc'], [9, '#d6deea']];   // footprint age (s) -> multiply colour (deep -> faint)
+// the desert's: deep in the sand and slow to fill (the wind fills them faster: fill = x (1 + fill x its m/s)), faint and soon
+// gone on the hardpan; none on the paving or rock (world/desert.js B.groundAt says which)
+const PRINT_SAND = Object.assign([[7, '#9c8670'], [14, '#b4a088'], [22, '#cfc0aa']], {fill: .35});
+const PRINT_PAN = Object.assign([[2.5, '#c4b4a0'], [5, '#dcd0c0']], {fill: .2});
 // rift shards: 5x7 pixel crystals seen from 3 angles (spin = A B C B); m mid, d dark, L lit edge (= also emissive)
 const SHARD = [
   ['  L  ', ' mLd ', ' mLd ', 'mmLdd', ' mLd ', '  Ld ', '  d  '],
@@ -439,6 +453,7 @@ export async function create(host) {
     }
   }
   const dustOf = () => DUST[biome] || DUST.ruins;
+  const printTone = f => { const tb = f.tab; for (let i = 0; i < tb.length; i++) if (f.t < tb[i][0]) return tb[i][1]; return tb[tb.length - 1][1]; };   // (its age's tone: no closure per print)
   const flowAt = y => { const L = STREAM_LIFE[biome]; return L && L.v ? WL.pace(y) * waterK : 0; };   // m/s down the river: the shader's pace (+ rain)
   const SNOWPUFF = {pal: SNOW, sp: [.5, 1.5], up: [.6, 1.5], life: [.35, .6], gr: 7, drag: 3};
   const GRASS = {pal: ['#8ea452', '#6a803c', '#4a5a2a'], sp: [.3, .8], up: [1, 1.7], life: [.35, .55], gr: 7, drag: 2};
@@ -450,11 +465,16 @@ export async function create(host) {
       const side = e.foot === 'R' ? -1 : 1, x = e.x + dirY * side * .09, y = e.y - dirX * side * .09;   // left of travel = (dy, -dx)
       let dup = false; for (let i = Math.max(0, prints.length - 4); i < prints.length; i++) if (Math.hypot(prints[i].x - x, prints[i].y - y) < .07) dup = true;
       if (!dup && !(z === 0 && wet(x, y)) && elevAt(x, y) === z) {   // no prints on water or hanging over the cliff lip
-        prints.push({x, y, z, t: 0, dx: dirX, dy: dirY});   // (the shape follows the stride ON SCREEN: picked when drawn)
+        prints.push({x, y, z, t: 0, dx: dirX, dy: dirY, tab: PRINT});   // (the shape follows the stride ON SCREEN: picked when drawn)
         if (prints.length > 240) prints.shift();
       }
       if (e.type === 'player.land' || e.type === 'prop.land' || e.big > 1) emitFx(e.x, e.y, z + .03, 7, SNOWPUFF);
       else if (sp > 4) emitFx(x, y, z + .03, 2, SNOWPUFF);
+    } else if (biome === 'desert') {   // prints in the sand and on the hardpan (the kicked-up sand is features/dust.js's)
+      const gr = host.biome.groundAt?.(e.x, e.y), tab = gr === 'sand' ? PRINT_SAND : gr === 'pan' ? PRINT_PAN : null;
+      const side = e.foot === 'R' ? -1 : 1, x = e.x + dirY * side * .09, y = e.y - dirX * side * .09;
+      let dup = !tab; for (let i = Math.max(0, prints.length - 4); i < prints.length && !dup; i++) if (Math.hypot(prints[i].x - x, prints[i].y - y) < .07) dup = true;
+      if (!dup && !(z === 0 && wet(x, y)) && elevAt(x, y) === z) { prints.push({x, y, z, t: 0, dx: dirX, dy: dirY, tab}); if (prints.length > 240) prints.shift(); }
     } else if (biome === 'ruins') {   // grass rustle: kicking through a tuft throws a few blades
       for (const p of host.entities.near(e.x, e.y, .6, nearT)) if (p.kind === 'tuft' && Math.abs(p.x - e.x) < .6 && Math.abs(p.y - e.y) < .45 && Math.abs((p.z || 0) - z) < .3) { emitFx(p.x, p.y, z + .05, 3, GRASS); break; }
     }
@@ -499,7 +519,7 @@ export async function create(host) {
         }
       }
     }
-    for (let i = prints.length - 1; i >= 0; i--) if ((prints[i].t += dt) > PRINT[PRINT.length - 1][0]) prints.splice(i, 1);
+    for (let i = prints.length - 1; i >= 0; i--) { const f = prints[i], tb = f.tab; if ((f.t += tb.fill ? dt * (1 + tb.fill * wind) : dt) > tb[tb.length - 1][0]) prints.splice(i, 1); }
     for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) >= rings[i].life) rings.splice(i, 1);
     for (let i = plumes.length - 1; i >= 0; i--) {
       const m = plumes[i], k0 = m.t / m.dur; m.t += dt; const k1 = Math.min(1, m.t / m.dur);
@@ -786,7 +806,7 @@ export async function create(host) {
         const X = Math.floor(SX(f.x, f.y, f.z)), Y = Math.floor(SY(f.x, f.y, f.z));
         if (!inView(X, Y, 2 * V.z)) continue;
         const dX = f.dx * V.xx + f.dy * V.yx, dY = f.dx * V.xy + f.dy * V.yy, l = Math.hypot(dX, dY) || 1, ax = Math.abs(dX / l), ay = Math.abs(dY / l);
-        const sh = ax > .92 ? 0 : ay > .92 ? 1 : dX * dY > 0 ? 2 : 3, col = mulCss(f.x, f.y, PRINT.find(p => f.t < p[0])[1]);
+        const sh = ax > .92 ? 0 : ay > .92 ? 1 : dX * dY > 0 ? 2 : 3, col = mulCss(f.x, f.y, printTone(f));
         if (sh === 0) lp(BG, col, X, Y, -1, 0, 3, 1); else if (sh === 1) lp(BG, col, X, Y, 0, -1, 1, 2);
         else if (sh === 2) { lp(BG, col, X, Y, -1, -1); lp(BG, col, X, Y); } else { lp(BG, col, X, Y, 0, -1); lp(BG, col, X, Y, -1, 0); }
       }
