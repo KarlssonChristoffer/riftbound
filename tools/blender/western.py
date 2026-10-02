@@ -453,6 +453,8 @@ GUN_ITEMS = ('peacemaker', 'brass_navy')
 GUN_POSES = ('gun_', 'gws_', 'grs_', 'gwr_', 'grr_')   # pose keys starting with these hold the revolver in the hand;
                                                        # all others: holstered
 GUN_SPIN = {}                         # pose key -> the gun's spin (deg, muzzle up and back) about the trigger finger
+LEVEL = .25                           # share of the forearm's pitch the barrel keeps: the wrist holds the gun near level
+FOLLOW = ('gun_rl_', 'gwr_', 'grr_', 'gun_blow')   # keys whose barrel follows the forearm (muzzle up to eject, at the lips)
 REACH = {}                            # pose key -> [(side, bone, rest point fn)]: that wrist onto the point the bone carries
 LEFT_TO_GUN = {}                      # pose key -> the left wrist's spot (F, U, S metres) from the gun's hammer (IK)
 
@@ -486,6 +488,8 @@ def _key(pose_name):
     clip, i = pose_name.split('.')
     A, i = ANIMS[clip], int(i)
     keys = A['keys']
+    if A.get('tween'):
+        return keys[int(round(A['tween'][i])) % len(keys)]
     if not A.get('interp'):
         return keys[i]
     n = len(keys)
@@ -501,9 +505,10 @@ def _carried(bone, p):
 
 def _gun_hold(pose_name):
     """First the pose's wrist targets (REACH: a hand on the holstered grip, at the hat brim, the muzzle at the mouth).
-    In the hand (gun poses): level the gun along the forearm with its top up (a wrist does this without thinking; at
-    1-2 px the fist's own angle doesn't show), spun about the trigger finger (twirl, muzzle up to blow), then the left
-    hand onto the gun (LEFT_TO_GUN). Otherwise: in the holster, following the right thigh."""
+    In the hand (gun poses): the gun along the forearm's heading with its top up, its pitch mostly levelled out (LEVEL:
+    the wrist keeps a revolver near level while the forearm swings up or down; FOLLOW keys keep the forearm's pitch),
+    spun about the trigger finger (twirl, the recoil's flip, muzzle up to blow), then the left hand onto the gun
+    (LEFT_TO_GUN). Otherwise: in the holster, following the right thigh."""
     if 'g' not in GUN:
         return
     arm = bpy.data.objects[ROOT]
@@ -515,6 +520,9 @@ def _gun_hold(pose_name):
     if key.startswith(GUN_POSES):
         fa, hd = pbs['RightForeArm'], pbs['RightHand']
         d = (fa.tail - fa.head).normalized()
+        if not key.startswith(FOLLOW) and Vector((d.x, d.y)).length > .25:
+            p = math.asin(max(-1.0, min(1.0, d.z))) * LEVEL
+            d = Vector((d.x, d.y, 0)).normalized() * math.cos(p) + Vector((0, 0, math.sin(p)))
         fist = hd.head + (hd.tail - hd.head) * .5
         up = Vector((0, 0, 1)) if abs(d.z) < .95 else Vector((0, -1, 0))
         R = _frame_rot(GUN['F'], GUN['U'], d, up)
@@ -547,6 +555,66 @@ def _head_point(side, x, y, f):
         J = landmarks()
         return Vector((x * PROP['height'] / 1.8, y * PROP['height'] / 1.8, J['head'].z + f * (J['top'].z - J['head'].z)))
     return (side, 'Head', fn)
+
+
+# ---------------------------------------------------------------- in-betweens --------------------------------------
+# A clip made with _clip renders one frame per `tween` entry: a position on its keys (1.5 = halfway from the second key
+# to the third), the frame being the blend of the two neighbouring keys' FINISHED poses (the spec, its twist, the IK
+# reaches, the gun in the hand or the holster: every bone slerped, the gun's hold carried along). skeleton.py's own
+# interp blends only the specs, so a reach or the gun would snap at the halfway frame. `play` (optional) is the order the
+# game shows the rendered frames in and `ms` the time of each step (holds and back-and-forths without rendering a frame
+# twice); `marks` name the frames the game's gun code starts or cuts at. All three go to poses.json (clips_meta).
+def _clip(keys, tween, fps, loop=False, play=None, ms=None, marks=None):
+    A = dict(keys=keys, tween=tween, frames=len(tween), fps=fps, loop=loop)
+    A.update({k: v for k, v in (('play', play), ('ms', ms), ('marks', marks)) if v})
+    return A
+
+
+_pose_key = globals().get('_pose_key', pose)        # skeleton.py's pose(): a key (or a plain clip frame) as rendered
+_clips_meta_plain = globals().get('_clips_meta_plain', clips_meta)
+_FINISHED = {}
+
+
+def _finished(key):
+    """Every pose bone's basis in key `key` as rendered on its own, and its _air (cached: a key always renders alike)."""
+    if key not in _FINISHED:
+        _pose_key(key)
+        _FINISHED[key] = ({pb.name: pb.matrix_basis.copy() for pb in bpy.data.objects[ROOT].pose.bones},
+                          POSES[key].get('_air', 0))
+    return _FINISHED[key]
+
+
+def pose(name):
+    """skeleton.py's pose(), plus the in-between frames of _clip clips."""
+    clip, _, i = name.partition('.')
+    A = ANIMS.get(clip) if i else None
+    if not A or 'tween' not in A:
+        return _pose_key(name)
+    keys, n, t = A['keys'], len(A['keys']), A['tween'][int(i)]
+    a, f = int(t), t - int(t)
+    b = (a + 1) % n if A.get('loop') else min(a + 1, n - 1)
+    a %= n
+    (Ba, air_a), (Bb, air_b) = _finished(keys[a]), _finished(keys[b])
+    arm = bpy.data.objects[ROOT]
+    rz = arm.rotation_euler.z
+    arm.rotation_euler.z = 0
+    arm.location = (0, 0, 0)
+    for pb in arm.pose.bones:
+        ma, mb = Ba[pb.name], Bb[pb.name]
+        q = ma.to_quaternion().slerp(mb.to_quaternion(), f)
+        pb.matrix_basis = Matrix.Translation(ma.translation.lerp(mb.translation, f)) @ q.to_matrix().to_4x4()
+    bpy.context.view_layer.update()
+    zmin = _snap(name, air_a * (1 - f) + air_b * f)
+    arm.rotation_euler.z = rz
+    bpy.context.view_layer.update()
+    return zmin
+
+
+def clips_meta():
+    out = _clips_meta_plain()
+    for c, m in out.items():
+        m.update({k: ANIMS[c][k] for k in ('play', 'ms', 'marks') if k in ANIMS[c]})
+    return out
 
 
 # ---------------------------------------------------------------- poses --------------------------------------------
@@ -640,18 +708,22 @@ POSES['gdraw_grab'] = _gpose(0, _arm(y=-47, x=30, fx=-50, sz=6), {'RightHand': [
 REACH['gdraw_grab'] = [_over_grip(0, .01, .07)]
 POSES['gun_draw_lift'] = _gpose(8, _arm(y=-44, x=14, fx=-55, sz=2), legs=_GCROUCH, lean=4)
 POSES['gun_draw_hip'] = _gpose(16, _HIP_ARM, lean=2)
-ANIMS['gun_draw'] = dict(keys=['gdraw_grab', 'gun_draw_lift', 'gun_draw_hip', 'gun_aim'], frames=4, loop=False, fps=16)
-# a shot: the muzzle kicks up and the shoulder rocks back, then settles
-POSES['gun_recoil_a'] = _gpose(_BLADE, _arm(x=-80, fx=-17, sz=-10), {'Spine2': [('X', -7)], 'Head': [('Z', -10), ('X', -4)]})
-POSES['gun_recoil_b'] = _gpose(_BLADE, _arm(x=-76, fx=-9, sz=-8), {'Spine2': [('X', -4)]})
-ANIMS['gun_fire'] = dict(keys=['gun_recoil_a', 'gun_recoil_b', 'gun_aim'], frames=3, loop=False, fps=20)
+ANIMS['gun_draw'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_draw_hip', 'gun_aim'], [0, .55, 1, 1.5, 2, 2.4, 2.75, 3], 32,
+                          marks={'lift': 2, 'hip': 4})
+# a shot: the muzzle flips up at the wrist and the shoulder rocks back a little, then settles over three frames
+POSES['gun_recoil_a'] = _gpose(_BLADE, _arm(x=-77, fx=-8, sz=-10), {'Spine2': [('X', -6)], 'Head': [('Z', -10), ('X', -4)]})
+POSES['gun_recoil_b'] = _gpose(_BLADE, _arm(x=-74, fx=-5, sz=-7), {'Spine2': [('X', -3)]})
+GUN_SPIN.update({'gun_recoil_a': 26, 'gun_recoil_b': 9})
+ANIMS['gun_fire'] = _clip(['gun_recoil_a', 'gun_recoil_b', 'gun_aim'], [0, .8, 1.45, 2], 24)
 # fanning the hammer: the gun at the hip, the left palm sweeping back over the hammer for every shot
 POSES['gun_fan_a'] = _gpose(-6, _arm(x=-12, fx=-88, sz=-2, z=14), _larm(x=-50, z=-34, fx=-70, hx=20), legs=_GCROUCH, lean=8)
 POSES['gun_fan_b'] = _gpose(-6, _arm(x=-12, fx=-78, sz=-2, z=14), _larm(x=-40, z=-40, fx=-40), legs=_GCROUCH, lean=8)
 LEFT_TO_GUN.update({'gun_fan_a': (-.02, .1, .02), 'gun_fan_b': (.08, .02, .05)})   # palm up over the hammer / swept past it
-ANIMS['gun_fan'] = dict(keys=['gun_fan_a', 'gun_fan_b'], frames=2, loop=True, fps=14)
+ANIMS['gun_fan'] = _clip(['gun_fan_a', 'gun_fan_b'], [0, .5, 1, 1.5], 28, loop=True, marks={'shot': 2})
+ANIMS['gun_fan_out'] = _clip(['gun_fan_b', 'gun_aim'], [.3, .6, .85], 28)      # the cylinder empty: back up to the aim
 # reload: the muzzle tipped up to drop the cases, then down to thumb in rounds one by one (the left hand fetching each
-# from the belt), back to the hip
+# from the belt), back to the hip. The game shows it by phase (marks: up, eject, the first fetch, then fetch <-> load
+# per round over frames fetch..load, close)
 POSES['gun_rl_up'] = _gpose(10, _arm(x=-28, fx=-118, sz=2, z=14), _larm(x=-46, z=-30, fx=-80), legs=_RL_LEGS, lean=4)
 POSES['gun_rl_eject'] = _gpose(10, _arm(x=-30, fx=-134, sz=2, z=14), _larm(x=-50, z=-28, fx=-96), legs=_RL_LEGS, lean=4)
 POSES['gun_rl_load'] = _gpose(10, _arm(x=-26, fx=-42, sz=2, z=18), _larm(x=-40, z=-40, fx=-62), legs=_RL_LEGS, lean=10)
@@ -659,16 +731,19 @@ POSES['gun_rl_fetch'] = _gpose(10, _arm(x=-26, fx=-42, sz=2, z=18),
                                {'LeftShoulder': [('Z', -2)], 'LeftArm': [('Y', 38), ('X', -8)], 'LeftForeArm': [('X', -42)]},
                                legs=_RL_LEGS, lean=10)
 LEFT_TO_GUN.update({'gun_rl_up': (.02, -.01, .07), 'gun_rl_eject': (.06, -.02, .06), 'gun_rl_load': (.0, .01, .07)})
-ANIMS['gun_reload'] = dict(keys=['gun_rl_up', 'gun_rl_eject', 'gun_rl_load', 'gun_rl_fetch', 'gun_rl_load', 'gun_draw_hip'],
-                           frames=6, loop=False, fps=6)
-# twirl: the gun spun backward round the trigger finger at the hip, then dropped into the holster
-for _i in range(4):
+ANIMS['gun_reload'] = _clip(['gun_aim', 'gun_rl_up', 'gun_rl_eject', 'gun_rl_fetch', 'gun_rl_load', 'gun_draw_hip'],
+                            [.35, .7, 1, 1.5, 2, 2.5, 3, 3.33, 3.67, 4, 4.5, 5], 12,
+                            marks={'up': 0, 'eject': 3, 'first': 5, 'fetch': 6, 'load': 9, 'close': 10})
+# twirl: the gun spun a full turn backward round the trigger finger at the hip, then up to the aim; holster: down from
+# the aim, the turn, then dropped into the holster (gun_spin_4 = 360: the in-betweens turn the short way, forward)
+for _i in range(5):
     POSES[f'gun_spin_{_i}'] = _gpose(4, _arm(x=-6, fx=-74, sz=0))
     GUN_SPIN[f'gun_spin_{_i}'] = 90 * _i
 POSES['gholster'] = _gpose(0, _arm(y=-46, x=30, fx=-50, sz=4), {'RightHand': [('X', -10)]}, lean=2)
 REACH['gholster'] = [_over_grip(0, .01, .07)]
-ANIMS['gun_twirl'] = dict(keys=[f'gun_spin_{i}' for i in range(4)], frames=4, loop=True, fps=16)
-ANIMS['gun_holster'] = dict(keys=[f'gun_spin_{i}' for i in range(4)] + ['gholster'], frames=5, loop=False, fps=16)
+ANIMS['gun_twirl'] = _clip([f'gun_spin_{i}' for i in range(5)] + ['gun_aim'], [0, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.4, 4.75], 32)
+ANIMS['gun_holster'] = _clip(['gun_aim'] + [f'gun_spin_{i}' for i in range(5)] + ['gholster'],
+                             [.4, .75, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6], 32, marks={'hip': 2, 'in': 10})
 
 
 # standing aim turns (the bow's aim_step / aim_pivot, gun in hand): facing = the TORSO (aim). Step: the legs start
@@ -725,7 +800,8 @@ POSES['gun_hip_kick'] = _gpose(32, _arm(x=-8, fx=-66, sz=-6), _LEAN_BACK, {'Spin
                                                                          'Head': [('Z', -13), ('X', -3)]}, legs=_GCROUCH)
 POSES['gun_hip_mid'] = _gpose(32, _arm(x=-7, fx=-56, sz=-4), _LEAN_BACK, {'Spine': [('X', -14)], 'Neck': [('Z', -19), ('X', 15)],
                                                                         'Head': [('Z', -13)]}, legs=_GCROUCH)
-ANIMS['gun_hipfire'] = dict(keys=['gun_hip_kick', 'gun_hip_mid', 'gun_hip_lean'], frames=3, loop=False, fps=18)
+ANIMS['gun_hipfire'] = _clip(['gun_hip_kick', 'gun_hip_mid', 'gun_hip_lean', 'gun_aim'], [0, 1, 1.5, 2, 2.35, 2.7], 24,
+                             marks={'free': 3})   # (from `free` on, a press cuts the rise short with an aimed shot)
 # blowing the smoke off the barrel: the gun comes up muzzle-high in front of the face, a blow, back down to the hip
 POSES['gun_blow_up'] = _gpose(10, _arm(x=-40, fx=-100, sz=0, z=24), legs=_RL_LEGS)
 POSES['gun_blow'] = _gpose(10, _arm(x=-30, fx=-120, sz=0, z=30), {'Neck': [('Z', -6), ('X', 8)], 'Head': [('Z', -4), ('X', 6)]},
@@ -735,7 +811,9 @@ POSES['gun_blow_b'] = _gpose(10, _arm(x=-30, fx=-120, sz=0, z=30), {'Neck': [('Z
 GUN_SPIN.update({'gun_blow_up': 35, 'gun_blow': 65, 'gun_blow_b': 65})
 REACH['gun_blow'] = [_head_point('Right', -.02, -.27, -.36)]     # the muzzle just in front of the lips
 REACH['gun_blow_b'] = [_head_point('Right', -.02, -.26, -.38)]
-ANIMS['gun_blow'] = dict(keys=['gun_blow_up', 'gun_blow', 'gun_blow_b', 'gun_blow', 'gun_draw_hip'], frames=5, loop=False, fps=6)
+ANIMS['gun_blow'] = _clip(['gun_aim', 'gun_blow_up', 'gun_blow', 'gun_blow_b', 'gun_draw_hip'], [.5, 1, 1.5, 2, 3, 3.5, 4], 12,
+                          play=[0, 1, 2, 3, 4, 3, 4, 3, 5, 6], ms=[70, 90, 90, 160, 110, 90, 110, 140, 80, 90],
+                          marks={'puff0': 3, 'puff1': 4})
 # showdown: wide crouched stance, the gun hand hovering over the holstered grip, twitching; the left hand out
 _DUEL = {'Spine': [('X', 8)], 'Neck': [('X', -8)], 'LeftShoulder': [('Z', -2)], 'LeftArm': [('Y', 24), ('X', 6)],
          'LeftForeArm': [('X', -16)]}
@@ -743,14 +821,16 @@ POSES['duel_a'] = _gpose(14, _arm(y=-40, x=16, fx=-40, sz=4), _DUEL, legs=_GWIDE
 POSES['duel_b'] = _gpose(14, _arm(y=-40, x=16, fx=-40, sz=4), _DUEL, legs=_GWIDE)
 POSES['duel_c'] = _gpose(14, _arm(y=-40, x=16, fx=-40, sz=4), _DUEL, legs=_GWIDE)
 REACH.update({'duel_a': [_over_grip(-.02, .0, .17)], 'duel_b': [_over_grip(-.01, .02, .13)], 'duel_c': [_over_grip(-.03, -.01, .18)]})
-ANIMS['duel_ready'] = dict(keys=['duel_a', 'duel_b', 'duel_a', 'duel_c'], frames=4, loop=True, fps=5)
+ANIMS['duel_ready'] = _clip(['duel_a', 'duel_b', 'duel_a', 'duel_c'], [0, .5, 1, 2.5, 3], 8, loop=True,
+                            play=[0, 1, 2, 1, 0, 3, 4, 3], ms=[125] * 8)
 # hat tip: the left hand up to the front of the brim, a small nod (the hat tips with the head). Built on the ready idle,
 # whose right arm is explicit: expand() would otherwise mirror the raised left arm onto the right
 POSES['hat_tip_0'] = {**POSES['idle_in'], 'LeftArm': [('Y', 20), ('X', -40)], 'LeftForeArm': [('X', -70)]}
 POSES['hat_tip_1'] = {**POSES['idle_in'], 'LeftArm': [('Y', 10), ('X', -55)], 'LeftForeArm': [('X', -110)]}
 POSES['hat_tip_2'] = {**POSES['hat_tip_1'], 'Neck': [('X', 14)], 'Head': [('X', 8)]}
 REACH.update({'hat_tip_1': [_head_point('Left', .06, -.27, .6)], 'hat_tip_2': [_head_point('Left', .06, -.27, .6)]})
-ANIMS['hat_tip'] = dict(keys=['hat_tip_0', 'hat_tip_1', 'hat_tip_2', 'hat_tip_1', 'hat_tip_0'], frames=5, loop=False, fps=6)
+ANIMS['hat_tip'] = _clip(['idle_in', 'hat_tip_0', 'hat_tip_1', 'hat_tip_2'], [.5, 1, 1.5, 2, 2.5, 3], 12,
+                         play=[0, 1, 2, 3, 4, 5, 4, 3, 2, 1, 0], ms=[70, 70, 80, 80, 90, 280, 90, 80, 80, 70, 70])
 GUNSLINGER_CLIPS = ('gun_hipfire', 'gun_blow', 'duel_ready', 'hat_tip')
 
 
