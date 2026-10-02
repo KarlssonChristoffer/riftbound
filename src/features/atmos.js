@@ -701,6 +701,7 @@ export async function create(host) {
 
   // ---------- HD overlay ----------
   let O = null, oKey = '';
+  const VG = {va: 0, ha: 0, v: [0, 0, 0], h: [0, 0, 0]};   // (G.setVignette's numbers: the same OVER entry the canvas below is painted from)
   function buildOver(w, h) {
     if (!O) O = cv(w, h); O.width = w; O.height = h;
     const q = O.getContext('2d'), Vo = OVER[biome] || OVER.ruins, rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
@@ -807,9 +808,15 @@ export async function create(host) {
     },
     hd(q, scale) {
       if (!F.hdOn || !biome) return;
-      const t0 = performance.now(), w = q.canvas.width, h = q.canvas.height, key = `${w}x${h}|${biome}|${F.weather}`;
-      if (key !== oKey) { oKey = key; buildOver(w, h); }
-      q.drawImage(O, 0, 0);
+      const t0 = performance.now();
+      if (host.G.setVignette) {   // the GPU draws it (gfx.js VG_FS), the same gradients, over the canvas: no blit here
+        const Vo = OVER[biome] || OVER.ruins; VG.va = Vo.va; VG.v = Vo.v; VG.h = Vo.h; VG.ha = F.weather && Vo.ha ? Vo.ha : 0;
+        host.G.setVignette(VG);
+      } else {
+        const w = q.canvas.width, h = q.canvas.height, key = `${w}x${h}|${biome}|${F.weather}`;
+        if (key !== oKey) { oKey = key; buildOver(w, h); }
+        q.drawImage(O, 0, 0);
+      }
       tick(t0);
     },
   });

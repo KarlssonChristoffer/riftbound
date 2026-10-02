@@ -1328,6 +1328,29 @@ void main() {
     fxB.heat = {geo, P, C, n: 0, m, max: 1024};
   }
   const fxList = [fxB.add, fxB.blend];   // (heat is drawn into its own target)
+  // ---- THE VIGNETTE + TOP HAZE (features/atmos.js, every frame it shows them: G.setVignette): the arena's drawOver, two canvas
+  // gradients, worked out per display pixel and laid over everything in the canvas (they were a display-sized canvas blitted
+  // into the HD overlay every frame: ~3% of the frame's JS). Stops as atmos.js painted them: the vignette radial (r .62 -> 1.42 of
+  // the half-size, 7 stops, alpha va (i / 6)^1.8 rounded to 4 places), the haze linear over the top 30% (ha, .35 ha at .45, 0)
+  const VG_FS = HEAD + `uniform vec4 uVg; uniform vec3 uVgC, uVhC; uniform vec2 uVgS; out vec4 oc;
+float vstop(float i) { return floor(uVg.y * pow(i / 6., 1.8) * 1e4 + .5) / 1e4; }
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, uVgS.y - gl_FragCoord.y);   // canvas px, y down (a pixel's centre)
+  float ah = 0.;
+  if (uVg.z > 0. && p.y < uVgS.y * .3) { float t = p.y / (uVgS.y * .3); ah = t < .45 ? mix(uVg.z, uVg.z * .35, t / .45) : mix(uVg.z * .35, 0., (t - .45) / .55); }
+  float x = clamp((length((p - uVgS * .5) / (uVgS * .5)) - .62) / .8, 0., 1.) * 6., i = min(floor(x), 5.), av = mix(vstop(i), vstop(i + 1.), x - i);
+  float a = av + ah * (1. - av); if (a <= 0.) discard;   // (the vignette over the haze: source-over, as the canvas did)
+  oc = vec4((uVgC * av + uVhC * ah * (1. - av)) / a, a);
+}`;
+  const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}}, vgScene = new THREE.Scene();
+  { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
+  vgScene.matrixAutoUpdate = false;
+  let vgFrame = -1;
+  // {va, ha (0 = no haze), v: [r, g, b], h: [r, g, b] (0..255)}: shown on the next render (atmos.js sets it from F.hd, after this one)
+  function setVignette(o) {
+    vgFrame = frameNo; vgU.uVg.value.set(1, o.va, o.ha, 0);
+    vgU.uVgC.value.set(o.v[0] / 255, o.v[1] / 255, o.v[2] / 255); vgU.uVhC.value.set(o.h[0] / 255, o.h[1] / 255, o.h[2] / 255);
+  }
   // heat(X, Y (up), Z, radius m, strength): hot air this frame (strength 1 = ~.75 art px of ripple at its middle)
   function heat(x, y, z, r, k) { fx(x, y, z, r, [1, 1, 1], k, 'heat'); }
   // fx(X, Y (up), Z, radius m, [r, g, b], alpha, 'add' | 'blend'): one soft particle this frame (world axes)
@@ -1455,6 +1478,7 @@ void main() {
         renderer.render(fxScene, camera);
       }
     } else { renderer.setRenderTarget(null); renderer.render(compScene, dummyCam); }
+    if (vgFrame === frameNo) { vgU.uVgS.value.set(VW * DS, VH * DS); renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
     stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
@@ -1542,5 +1566,5 @@ void main() {
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze};
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette};
 }

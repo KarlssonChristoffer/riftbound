@@ -6,7 +6,8 @@ gfx.js, adapter.js and player.js. Line numbers drift, so search for the quoted c
 and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame breaks them.
 
 **Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2), the water's reflections (E.3), the
-cloud shadows and the lava's heat haze (E.4) are done; contact shadows are next. Stages 3-4 not started.
+cloud shadows and the lava's heat haze (E.4), and the vignette (E.5) are done; contact shadows are next. Stages 3-4
+not started.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -433,6 +434,31 @@ and applies the same rule: the clouds' two levels and their colour; the haze's w
 
 **Light shafts and motes: measured and left on the CPU.** Up to 5 cached shaft canvases and ~45 motes go into the ADD
 layer, ~0.06 ms in all. A GPU version needs a new additive post pass whose draw calls cost about as much.
+
+### E.5 The vignette and top haze on the GPU (2026-10-02; the same screen within rounding)
+
+**What it replaced.** atmos.js painted the arena's drawOver (a radial vignette, a linear haze over the top 30%) once into
+a display-sized canvas (3440x1440, 20 MB), then blitted it into the HD overlay EVERY frame. That blit was ~3% of the
+frame's JS, showing up at the context's `restore`; an ImageBitmap didn't help (D.4).
+
+**What it is now.** `gfx.js` VG_FS works out the same two gradients per display pixel (the same stops, alphas and colours)
+and lays them over everything in the WebGL canvas, last, as the overlay canvas did. atmos.js only hands over the numbers
+(`G.setVignette`, from F.hd). The overlay canvas is no longer made.
+
+**Checks:**
+
+- golden's GL + HD captures composited, against a copy with the old atmos.js (`src-v0/`): ±1 / 255 over the vignette;
+- up to 13-52 / 255 on a few hundred pixels under the semi-transparent HUD bars, which comes from the HUD canvas's
+  premultiplied PNG export; the crops look identical;
+- smoke passes.
+
+**Results:**
+
+| | Before | After |
+|---|---|---|
+| whole frame by day (interleaved A/B, every slice) | | -26% |
+| `G.render` | 1.21 ms | 0.87 ms |
+| GPU | | +0.05-0.08 ms (a full-screen pass at 3440x1440) |
 
 ### Stage 3: fewer draw calls (target: horde `G.render` 2.5 -> ~1 ms; 2-3x the enemies in budget)
 
