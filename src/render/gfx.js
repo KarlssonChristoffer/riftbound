@@ -104,6 +104,14 @@ void main() {
   if (fFixed < -1.5 && leafGone(vPL, fM)) discard;   // (the sprays that turned further go first: LEAF_GONE)
   vec3 n = normalize(vN); if (inner) n = -n;
   float fam = fFam, jn = .5;   // jn: the leaves' 3D noise (below), which the autumn stage borrows
+  // a ripening berry (aFixed -1.25: the rowan's bunches, trees3d.js; toned by the light like bark, never thinned): the part's own family is the ripe scarlet
+  // and the season steps it to the next rows (world.js FAMS): +1 orange, +2 green and unripe, +3 the creamy flowers of late spring (the crowns not yet full).
+  // Each bunch ripens at its own time (fM: the sun side and the early ones first, as a spray turns) and the birds take the early ones as the crown goes bare
+  if (fFixed < -1.1 && fFixed > -1.4) {
+    float kb = clamp((fM - ${gl(AU.lo)}) / ${gl(AU.hi - AU.lo)}, 0., 1.), v = uAutumn * (.5 + 1.5 * kb);
+    if (kb > mix(1., .45, 1. - smoothstep(.15, .5, uLeafK))) discard;
+    fam += v > .2 ? 0. : v > .03 ? 1. : uAutumn < .001 && uLeafK > .5 && uLeafK < .999 ? 3. : 2.;
+  }
   int tone;
   if (fFixed >= 0.) tone = int(fFixed);
   else if (inner) tone = 2;
@@ -116,8 +124,8 @@ void main() {
     tone = d > .62 ? 0 : d > .12 ? 1 : 2;
   }
   // biome cover (moss / ash / snow) on what faces up AT REST (the prop's own frame, so it tips and rolls with it):
-  // patchy, never on the glow / void families; the pattern is seeded per object. aFixed -2 = toned, never covered (leaves)
-  if (uCover.x > 0. && normalize(vNL).y > uCover.y && fFixed < 0. && fFixed > -1.5) {
+  // patchy, never on the glow / void families; the pattern is seeded per object. aFixed -2 = toned, never covered (leaves; nor the -1.25 berries)
+  if (uCover.x > 0. && normalize(vNL).y > uCover.y && fFixed < 0. && fFixed > -1.1) {
     vec2 q = vPL.xz + uSeed;   // uSeed = where the mesh was placed: continuous across wall segments, fixed on a rolling barrel
     float c = vn(q * 7.) * .7 + vn(q * 19. + 3.) * .3;
     if (c > 1. - uCover.x * 2.6) fam = uCover.z;

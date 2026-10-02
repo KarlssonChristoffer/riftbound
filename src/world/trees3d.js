@@ -14,8 +14,10 @@
 //          ~0.3 m above the ground. The season thins leaves, never whips: a bare willow is arching limbs and drooping whips,
 //          and no leaf is ever left in the air. The lower a strand hangs, the more it sways (aFlex); each strand flutters on
 //          its own phase (whip and tufts together)
-//   rowan  (variant 4; ~15 % of the surroundings) 2-4 slim stems, an open rounded crown of 50-90 feathery SPRAYS (a pinnate leaf: pairs of lozenge
-//          leaflets) over a few dark inner masses, clusters of red BERRIES (the berry family) out on its shell: never thinned, so winter keeps them
+//   rowan  (variant 4; ~15 % of the surroundings) 2-4 slim stems, an open rounded crown of ~90 soft SPRAYS (a pinnate leaf as the camera sees it: an
+//          arching stalk, its tip drooping, with 4 rounded little leaflets along it and one at the end) over a few dark leafy cores; 7-10 flat-topped
+//          BUNCHES of berries hang from the ends of sprays on the crown's outside (part 'berry', aFixed -1.25: gfx.js MESH_FS ripens them by the season,
+//          cream flowers in spring, green, orange, scarlet; never thinned, the birds take the early ones in winter)
 //   birch  (variant 5; ~25 %, in groves) tall, a white leaning trunk (the birch family) with black marks (short bark strips), a dark rough foot,
 //          white branches arching out and thin whips with small leaf clumps hanging from them: a light, see-through crown
 //   aspen  (variant 6; ~20 %, in groves) a straight grey-green trunk (the aspen family) bare to ~2.8 m, a narrow oval crown of ~45 round-leaved
@@ -405,10 +407,14 @@ const AUTUMN = {
 };
 const ASPEN_KIND = [0, 0, 1, 0, 2, 0, 1, 0];   // 5 of 8 shapes the usual, 2 gold, 1 red early (SEEDS = 8)
 
-// rowan (rönn): a small tree, 2-3 slim grey-brown stems from the foot, an open rounded crown of ~30 feathery SPRAYS (a pinnate leaf:
-// 5-6 pairs of narrow leaflets and a terminal one, each leaflet an 8-triangle lozenge) on twigs, and a few clusters of red berries
-// out on the shell (the berry family: not thinned, so a bare winter rowan keeps them). The sprays' normals lean strongly toward the
-// crown ellipsoid: one sun side and a shade side, the leaflets only comb its edge
+// rowan (rönn): a small tree, 2-4 slim grey-brown stems from the foot and an open, rounded crown of ~90 soft SPRAYS. A spray is a pinnate leaf as the game's
+// camera sees it: a stalk that rises a little and arches over so its tip droops, 3-4 rounded little leaflets along it (one a side in turn: a zigzag) and one
+// at the end. The leaflets are small icosahedra, not the lozenges a rowan's leaflets are close up (at this size those turned to spikes), so nothing points out
+// of the silhouette. The sprays are spread over the shell with gaps, so a little sky and branch shows through; their normals lean strongly toward the crown
+// ellipsoid (one sun side, one shade side; the leaflets only break its edge); a few dark cores of small leaflets give it a body.
+// BERRIES hang in 7-10 flat-topped bunches from the ends of sprays out on the crown's outside, a little below the leaves, never inside it: part 'berry'
+// (aFixed -1.25), which gfx.js MESH_FS ripens by the season (creamy flowers in late spring, green through the summer, orange, then scarlet; never thinned,
+// and the birds take the early bunches as the crown goes bare in winter)
 function rowan(seed, fam) {
   const r = rng(seed * 37 + 5), TAU = Math.PI * 2, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const H = 3.5 + r() * .5, R = V(1.15 + r() * .2, .92 + r() * .13, 1.15 + r() * .2), la = r() * TAU, ld = .05 + r() * .12;
@@ -417,8 +423,8 @@ function rowan(seed, fam) {
   const B = new Build(fam, crown);
   B.crown = {x: C.x, z: C.z, y0: C.y - R.y * .9, y1: H + .1, r: Math.max(R.x, R.z) + .1};
   B.autumn = AUTUMN.rowan;
-  const hull = .55, up = V(0, 1, 0);
-  // the stems: 2-3 from just off the foot, leaning out; each ends low in the crown
+  const hull = .78, up = V(0, 1, 0);
+  // the stems: 2-4 from just off the foot, leaning out; each ends low in the crown
   const ns = 2 + (r() < .5 ? 1 : 0) + (r() < .2 ? 1 : 0), a0 = r() * TAU, stems = [];
   for (let i = 0; i < ns; i++) {
     const az = a0 + i / ns * TAU + (r() - .5) * .6, d = V(Math.cos(az), 0, Math.sin(az)), r0 = .074 + r() * .018;
@@ -427,59 +433,67 @@ function rowan(seed, fam) {
     B.part('bark'); tube(B, pts, pts.map((q, k) => k === 0 ? r0 * 1.3 : r0 * (1 - .55 * k / (pts.length - 1))), 6, r(), false);
     stems.push({top, d, az});
   }
-  // the crown's tips: a spiral over the upper shell (stratified, so no gaps): each tip gets a branch from the nearest stem
-  const nb = ns * 3 + 3 + (r() * 3 | 0), tips = [];
+  // the crown's branches: a spiral over the upper shell (stratified, so no gaps); each branch ends in 3-4 twigs, and each twig carries two sprays (the second turned about the outward axis)
+  const nb = ns * 3 + 4 + (r() * 3 | 0), tips = [];
   for (let j = 0; j < nb; j++) {
-    const cz = -.2 + 1.15 * (j + .5) / nb, sz = Math.sqrt(1 - cz * cz), az = j * 2.39996 + a0, rho = .45 + r() * .15;
+    const cz = -.15 + 1.1 * (j + .5) / nb, sz = Math.sqrt(1 - cz * cz), az = j * 2.39996 + a0, rho = .5 + r() * .15;
     const E = C.clone().add(V(Math.cos(az) * sz * R.x * rho, cz * R.y * rho, Math.sin(az) * sz * R.z * rho));
     const st = stems.reduce((b, q) => Math.hypot(q.top.x - E.x, q.top.z - E.z) < Math.hypot(b.top.x - E.x, b.top.z - E.z) ? q : b, stems[0]);
     const pts = limbPts(st.top.clone().add(V(0, .05, 0)), E, 3, V(0, .1 + r() * .1, 0), .06, r);
     B.part('bark'); tube(B, pts, taper(pts.length, .036 + r() * .006, .02), 5, r());
-    // 3-4 twigs out of the branch's end, each a spray
-    const nt = 3 + (r() < .45 ? 1 : 0);
+    const out = V(E.x - C.x, E.y - C.y, E.z - C.z).normalize(), nt = 3 + (r() < .3 ? 1 : 0);
     for (let k = 0; k < nt; k++) {
-      const out = V(E.x - C.x, E.y - C.y, E.z - C.z).normalize(), ta = (k / nt + r() * .2) * TAU, side = V(Math.cos(ta), (r() - .35) * .8, Math.sin(ta)).normalize();
-      const dir = out.clone().multiplyScalar(.9).addScaledVector(side, .7).normalize(), len = .26 + r() * .16;
+      const ta = (k / nt + r() * .2) * TAU, side = V(Math.cos(ta), (r() - .3) * .8, Math.sin(ta)).normalize();
+      const dir = out.clone().multiplyScalar(.75).addScaledVector(side, .85).normalize(), len = .12 + r() * .26;
       const T = E.clone().addScaledVector(dir, len);
-      const e = V((T.x - C.x) / R.x, (T.y - C.y) / R.y, (T.z - C.z) / R.z), m = e.length(); if (m > 1.04) { T.copy(C).add(V(e.x / m * 1.04 * R.x, e.y / m * 1.04 * R.y, e.z / m * 1.04 * R.z)); e.multiplyScalar(1.04 / m); }
-      B.part('bark'); tube(B, [E, E.clone().lerp(T, .5).add(V(0, .04, 0)), T], [.02, .016, .011], 4, r());
-      const d1 = V(T.x - E.x, T.y - E.y, T.z - E.z).normalize().multiplyScalar(.6).addScaledVector(out, .5).normalize();
-      tips.push({T, dir: d1, out, e, L: .4 + r() * .12});
-      tips.push({T, dir: d1.clone().applyAxisAngle(out, (r() < .5 ? -1 : 1) * (.8 + r() * .5)).add(V(0, -.1, 0)).normalize(), out, e, L: .32 + r() * .12, second: true});   // a second spray off the same twig, turned about the outward axis
+      const e = V((T.x - C.x) / R.x, (T.y - C.y) / R.y, (T.z - C.z) / R.z), m = e.length(); if (m > 1.02) { T.copy(C).add(V(e.x / m * 1.02 * R.x, e.y / m * 1.02 * R.y, e.z / m * 1.02 * R.z)); e.multiplyScalar(1.02 / m); }
+      B.part('bark'); tube(B, [E, E.clone().lerp(T, .5).add(V(0, .03, 0)), T], [.02, .016, .011], 4, r());
+      const d1 = T.clone().sub(E).normalize().multiplyScalar(.6).addScaledVector(out, .5).normalize();
+      tips.push({T, dir: d1, out, e, L: .36 + r() * .08});
+      tips.push({T, dir: d1.clone().applyAxisAngle(out, (r() < .5 ? -1 : 1) * (.8 + r() * .5)).add(V(0, -.1, 0)).normalize(), out, e, L: .3 + r() * .08, second: true});   // a second spray off the same twig, turned about the outward axis
     }
   }
   // the sprays
-  let ns2 = 0;
+  let ls = 0;
   for (const [i, tp] of tips.entries()) {
-    const A = tp.T, a = tp.dir.clone(); a.y += tp.e.y > .35 ? -.05 : -.2; a.normalize();
+    const A = tp.T, a = tp.dir.clone(); a.y += tp.e.y > .35 ? -.03 : -.08; a.normalize();
     const s = V().crossVectors(a, up); if (s.lengthSq() < 1e-4) s.set(1, 0, 0); s.normalize();
     const n = V().crossVectors(s, a).normalize(), L = tp.L, phase = (i * 2.39996 + seed * .7) % TAU;
     const bias = TUNE.lift + TUNE.light * tp.e.y / .9 - TUNE.inner * (1 - Math.min(1, tp.e.length())) * .6 + (r() - .5) * .1;
-    B.part('leaf', bias, -2, crown(A.y), phase, sprayOf(A.clone().addScaledVector(a, L / 2), C, R, seed, i));   // the spray's middle, the crown's ellipsoid, the tree's seed, this spray
-    const np = 5 + (r() < .5 ? 1 : 0);
-    for (let k = 0; k < np; k++) {
-      const t = (k + .5) / (np + .1), ell = .2 + .09 * Math.sin(Math.PI * (.12 + .76 * t)), S = A.clone().addScaledVector(a, L * t).add(V(0, -.05 * t * t, 0));
-      for (const sd of [-1, 1]) {
-        const th = .86 + (r() - .5) * .3, ld2 = a.clone().multiplyScalar(Math.cos(th)).addScaledVector(s, sd * Math.sin(th)).addScaledVector(n, .22).normalize();
-        lobeOf(B, S.clone().addScaledVector(ld2, ell / 2), ld2, n, ell / 2, .046, .024, ns2++, C, R, hull, bias + (r() - .5) * .1, r, 'oct', .22);
-      }
+    const P = t => A.clone().addScaledVector(a, L * t).add(V(0, L * (.3 * t - .75 * t * t), 0)), Tn = t => P(Math.min(1, t + .03)).sub(P(Math.max(0, t - .03))).normalize();   // the stalk: out, a little up, then arching over
+    B.part('leaf', bias, -2, crown(A.y), phase, sprayOf(P(.5), C, R, seed, i));   // the spray's middle, the crown's ellipsoid, the tree's seed, this spray
+    const rd = tp.e.length() > .8, nn = rd ? 4 : 3;   // the sprays deeper in the crown have a leaflet fewer
+    for (let k = 0; k < nn; k++) {   // the leaflets: along the stalk, one a side in turn (a zigzag: the feather's pairs at this size), and one at the end
+      const t = .14 + .76 * k / (nn - 1), tg = Tn(t), sc = .8 + .4 * Math.sin(Math.PI * (.1 + .8 * k / (nn - 1))), sd = k % 2 ? 1 : -1;
+      const th = .3 + (r() - .5) * .3, ldir = tg.clone().multiplyScalar(Math.cos(th)).addScaledVector(s, sd * Math.sin(th)).addScaledVector(n, .15).normalize(), l1 = (rd ? .095 : .084) * sc * (.9 + r() * .2);
+      lobeOf(B, P(t).addScaledVector(s, .035 * sd), ldir, n, l1, l1 * .9, l1 * .72, ls++, C, R, hull, bias + (r() - .5) * .1, r, 0, .08);   // (detail 0: an icosahedron, 20 triangles)
     }
-    lobeOf(B, A.clone().addScaledVector(a, L + .09), a, n, .13, .05, .026, ns2++, C, R, hull, bias, r, 'oct', .2);
+    const tg1 = Tn(1); tp.end = P(1); tp.tg = tg1; tp.phase = phase;
+    lobeOf(B, tp.end.clone().addScaledVector(tg1, .05), tg1, n, .08, .068, .052, ls++, C, R, hull, bias, r, 0, .08);
   }
-  // inside the crown: a few dark masses behind the sprays (they stay put; the season thins them with the sprays), so the crown has a body and the sprays comb its surface
-  for (let i = 0; i < 4; i++) {
-    const az = a0 + i * 1.7 + r(), cz = -.1 + .8 * r(), sz = Math.sqrt(1 - cz * cz), q = C.clone().add(V(Math.cos(az) * sz * R.x * .36, cz * R.y * .4, Math.sin(az) * sz * R.z * .36)), bias = TUNE.lift - .24;
-    B.part('leaf', bias, -2, crown(q.y), -1, sprayOf(q, C, R, seed, 100 + i)); clump(B, q, .38 + r() * .08, .8, seed * 17 + i, C, R, bias, r, 3);
+  // inside the crown: a few dark cores behind the sprays, each 9 small leaflets heaped together (they stay put; the season thins them with the sprays), so the crown has a body
+  for (let i = 0; i < 3; i++) {
+    const az = a0 + i * 2.1 + r(), cz = -.05 + .6 * r(), sz = Math.sqrt(1 - cz * cz), q = C.clone().add(V(Math.cos(az) * sz * R.x * .3, cz * R.y * .34, Math.sin(az) * sz * R.z * .3)), bias = TUNE.lift - .24;
+    B.part('leaf', bias, -2, crown(q.y), -1, sprayOf(q, C, R, seed, 100 + i));
+    for (let m = 0; m < 9; m++) lobeOf(B, q.clone().add(V((r() - .5) * .5, (r() - .5) * .34, (r() - .5) * .5)), V(r() - .5, (r() - .5) * .7, r() - .5), up, .13 + r() * .04, .1, .075, ls++, C, R, hull, bias + (r() - .5) * .1, r, 'oct', .18);   // (diamonds: 8 triangles, they hardly show)
   }
-  // berries: a cluster at the end of some of the outer upper twigs (the berries sit above and among the leaves, so the camera sees them)
-  const cand = tips.filter(t => !t.second && t.e.y > .1 && t.e.length() > .8), want = 9 + (r() * 4 | 0), bt = cand.filter(() => r() < want / cand.length);
-  for (const [i, tp] of bt.entries()) {
-    const base = tp.T.clone().add(V(0, .09, 0)).addScaledVector(tp.out, .04);
-    B.part('bark'); tube(B, [tp.T.clone(), base], [.012, .01], 3, r());
-    B.part('berry', .1, -1, crown(base.y), -1);
-    for (let k = 0; k < 5; k++) {
-      const q = base.clone().add(V((r() - .5) * .14, r() * .07, (r() - .5) * .14));
-      clump(B, q, .052 + r() * .014, 1, seed * 19 + i * 5 + k, C, R, .1 + (r() - .5) * .1, r, 0, .25);   // (an icosahedron: 20 triangles a berry)
+  // berries: a flat-topped bunch of 11-13 small berries hangs from the end of 7-10 sprays out on the crown's outside, the bunches spread round it (each the
+  // farthest from the ones chosen so far); the stalk arches out and down, so the bunch hangs a little below its spray's leaves
+  const cand = tips.filter(t => !t.second && t.e.length() > .82 && t.e.y > .05), want = Math.min(cand.length, 7 + (r() * 4 | 0)), bt = [];
+  while (bt.length < want) {
+    let best = null, bd = -1;
+    for (const q of cand) { if (bt.includes(q)) continue; const d = bt.length ? Math.min(...bt.map(p => p.T.distanceTo(q.T))) : r(); if (d > bd) { bd = d; best = q; } }
+    bt.push(best);
+  }
+  for (const [bi, tp] of bt.entries()) {
+    const p0 = tp.end.clone().addScaledVector(tp.tg, .1), p1 = p0.clone().addScaledVector(tp.out, .05).add(V(0, .02, 0)), p2 = p1.clone().addScaledVector(tp.out, .06).add(V(0, -.1, 0));   // (the stalk starts past the spray's last leaflet, arches out and hangs)
+    B.part('bark', 0, -1, null, tp.phase); tube(B, [p0, p1, p2], [.015, .013, .011], 3, r(), false);
+    const nrm = up.clone().multiplyScalar(.85).addScaledVector(tp.out, .35).normalize(), u1 = V().crossVectors(nrm, tp.out).normalize(), u2 = V().crossVectors(nrm, u1), nbr = 11 + (r() * 3 | 0), RB = .1;
+    B.part('berry', .1, -1.25, crown(p2.y), tp.phase, sprayOf(p2, C, R, seed, 200 + bi));
+    for (let k = 0; k < nbr; k++) {
+      const ph = k * 2.39996 + r() * .4, rad = RB * Math.sqrt((k + .5) / nbr), br = .036 + r() * .006;
+      const q = p2.clone().addScaledVector(u1, Math.cos(ph) * rad).addScaledVector(u2, Math.sin(ph) * rad).addScaledVector(nrm, .02 * (1 - (rad / RB) ** 2));
+      lobeOf(B, q, u1, nrm, br, br, br, ls++, C, R, .3, .1 + (r() - .5) * .1, r, 0, .1);   // (an icosahedron: 20 triangles a berry)
     }
   }
   B.sprays = tips.length; B.berries = bt.length;

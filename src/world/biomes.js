@@ -187,7 +187,9 @@ const STYLES = {
     straw: ramp('#cdb577', '#ad935a', '#877043', '#594a2b'), cloth: ramp('#bca985', '#9e8d6b', '#7d6f53', '#514836'),
     leaf: ramp('#6f8c68', '#577154', '#435a45', '#2e3f33'), bark: ramp('#75654f', '#5d4f40', '#473c32', '#2d2621'),
     // the other trees (trees3d.js, world.js FAMS birch / aspen / berry): the birch's white bark, the aspen's grey-green bark, the rowan's berries
-    birch: ramp('#f3f0e7', '#d6d4ca', '#abaaa1', '#5e5c58'), aspen: ramp('#a9b19b', '#838e78', '#646f5d', '#3b453b'), berry: ramp('#f48a58', '#e2482c', '#ab2a2c', '#5a1820'),
+    birch: ramp('#f3f0e7', '#d6d4ca', '#abaaa1', '#5e5c58'), aspen: ramp('#a9b19b', '#838e78', '#646f5d', '#3b453b'), berry: ramp('#ffb066', '#fc5a24', '#cc3a1e', '#701a14'),
+    // the berries through the year (MESH_FS steps the rowan's berry family: scarlet when ripe, then these): orange as they ripen, a fresh yellow-green while unripe, the spring's creamy flowers
+    berryOrange: ramp('#ffd884', '#f9a83e', '#c8742a', '#6e3c1c'), berryGreen: ramp('#a3ba7c', '#83a064', '#637f50', '#344a2f'), berryCream: ramp('#fffbe9', '#efe5c4', '#c8b98e', '#74694c'),
     clay: ramp('#c8845a', '#a8643e', '#7e472c', '#4e2a1c'), gem: ramp('#e4ffc8', '#9ad878', '#58a060', '#2a5a3c'), gemGlow: ['#eaffd8', '#8aff6a'], gemInner: '#1e4a20',
     brute: ramp('#bca985', '#9e8d6b', '#7d6f53', '#514836'),
     rock: ramp('#7e786b', '#666056', '#504b44', '#35322d'), water: ramp('#9cc2c4', '#6e9ca4', '#4f7c8a', '#33556a'),
@@ -1687,7 +1689,8 @@ function willowCard(S, m) {
 
 // ---- the other trees' painted cards (trees3d.js grows the 3D ones: these are their trees3d=0 fallback and what the water mirrors; the same species pick,
 // trees3d.js speciesOf). The ruins only. Metres east of the foot / up -> card px through X / Y
-// the rowan: a small tree of 2-3 slim stems and a round crown of feathery sprays (leaf ticks round every blob's edge), red berry clusters on its shell
+// the rowan: a small tree of 2-3 slim stems and an open, rounded crown of small soft tufts (feathery sprays: a few dark masses behind, tufts
+// laid over a rounded shell with gaps between them, a ragged rim), with the red-orange bunches of berries hanging out on the outside of the crown
 function rowanCard(S, m, v) {
   const W = m.W(3.6), H = m.H(4.4), b = H - 3, cx = Math.round(W * .5);
   return build(W, H, [cx, H - 2], P => {
@@ -1696,21 +1699,44 @@ function rowanCard(S, m, v) {
     for (let i = 0; i < ns; i++) { const a = (i / (ns - 1 || 1) - .5) * 2 * (ns > 2 ? 1 : .6) + (r() - .5) * .3; limb(P, X(a * .1), b, X(a * .55), Y(2.1 + r() * .3), 4, 2.5, S.bark, a * 2); }
     limb(P, X(0), b, X(.05), Y(.5), 5, 4, S.bark);
     for (const [x, w] of [[-5, 3], [5, 3]]) limb(P, cx, b - 1, cx + x, b + 1, w, 1, S.bark);
+    for (let i = 0; i < 5; i++) { const a = (i / 4 - .5) * 2.1 + (r() - .5) * .3; limb(P, X(a * .15), Y(2.0), X(a * .85), Y(2.95 + r() * .4 - Math.abs(a) * .12), 2, 1, S.bark); }   // the branches the sprays sit on
     P.runShade([S.bark]);
-    const blobs = [[0, 3.1, .78, .55], [-.75, 2.7, .62, .46], [.8, 2.75, .62, .46], [-.35, 3.65, .62, .46], [.45, 3.55, .6, .45], [0, 2.3, .6, .42], [-1, 2.1, .4, .3], [1, 2.15, .4, .3]];
-    blobs.forEach(([u, h, rx, ry], i) => P.blob(X(u + (r() - .5) * .15), Y(h), m.W(rx), m.H(ry), S.leaf, {s: i + v * 10, j: .4, edge: .9, bias: (h - 3) * .16 - u * .06}));
+    // a few dark masses behind (the crown's body), then the tufts: Fibonacci over a rounded shell, the far side first, each a small ragged blob, a little darker the deeper it sits
+    const cy0 = 3.05, rx = 1.2, ry = .95;
+    [[-.45, 2.75], [.45, 2.85], [0, 3.25], [-.75, 3.1], [.75, 3.05]].forEach(([u, h], i) => P.blob(X(u), Y(h), m.W(.26), m.H(.2), S.leaf, {s: i + v * 10, j: .4, edge: .8, bias: -.32}));
+    const tf = [];
+    for (let i = 0; i < 40; i++) {
+      const cz = -.2 + 1.15 * (i + .5) / 40, sz = Math.sqrt(1 - cz * cz), az = i * 2.39996 + v * 1.3, k = .86 + r() * .26;
+      tf.push({u: Math.cos(az) * sz * rx * k, h: cy0 + cz * ry * k, depth: Math.sin(az) * sz * k, w: .17 + r() * .06, hh: .12 + r() * .05});
+    }
+    tf.sort((a, c) => a.depth - c.depth).forEach((t, i) => P.blob(X(t.u), Y(t.h), m.W(t.w), m.H(t.hh), S.leaf, {s: i + v * 10, j: .42, edge: .9, bias: (t.h - 3) * .2 - t.u * .06 - (t.depth < 0 ? .14 : 0)}));
     P.outline();
-    // the feathery edge: ticks 1-2 px out of the crown's rim, light on top and dark below
+    // the soft rim: single pixels 1-2 px out of the crown's edge, light on top and dark below (a feathery edge, no spikes)
     const tk = [];
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (P.mat(x, y) === S.leaf.id && hsh(x, y, 7 + v) < .3) {
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (P.mat(x, y) === S.leaf.id && hsh(x, y, 7 + v) < .2) {
       const dx = (hsh(x, y, 8) < .5 ? -1 : 1), dy = hsh(x, y, 9) < .5 ? -1 : 1;
-      if (!P.on(x + dx, y) || !P.on(x, y + dy)) tk.push([x + dx * (1 + (hsh(x, y, 10) < .4 ? 1 : 0)), y + (hsh(x, y, 11) < .5 ? 0 : dy), dy < 0 ? 0 : 2]);
+      if (!P.on(x + dx, y) || !P.on(x, y + dy)) tk.push([x + dx, y + (hsh(x, y, 11) < .5 ? 0 : dy), dy < 0 ? 0 : 2]);
     }
     for (const [x, y, t] of tk) if (!P.on(x, y)) P.p(x, y, S.leaf, t);
-    // berries: clusters of 3-4 px on the rim of the upper crown
-    for (let i = 0; i < 9; i++) {
-      const a = -2.6 + i / 8 * 2.1 + (r() - .5) * .3, h = 3.1 + Math.sin(a + 1.5) * .6, x = Math.round(X(Math.cos(a + 1.5) * 1.05 * (.8 + r() * .3))), y = Math.round(Y(h + .1 + r() * .35));
-      P.p(x, y, S.berry, 1); P.p(x + 1, y, S.berry, 0); P.p(x, y + 1, S.berry, 2); if (r() < .6) P.p(x + 1, y + 1, S.berry, 1);
+    // berries: 5-6 bunches of berries, flat on top, hung OUTSIDE the crown: from a leaf pixel of the crown's rim (the upper two thirds, sides first) on a 3 px stalk that
+    // bends out and down into clear air (a 7 x 8 box), so a bunch hangs a little below and beside the leaves and is never inside the crown; spread out (no two within 14 px)
+    let y0 = H, y1 = 0; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (P.mat(x, y) === S.leaf.id) { y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    const cd = [];
+    for (let y = y0 + 2; y < y0 + (y1 - y0) * .66; y++) for (let x = 3; x < W - 3; x++) {
+      if (P.mat(x, y) !== S.leaf.id) continue;
+      for (const sd of [-1, 1]) {
+        if (P.on(x + sd, y) || P.on(x + sd, y + 1)) continue;
+        let free = true; for (let dy = 2; dy <= 9 && free; dy++) for (let dx = -3; dx <= 3; dx++) if (P.on(x + sd * 4 + dx, y + dy)) { free = false; break; }
+        if (free) cd.push([x, y, sd, hsh(x, y, 40 + v)]);
+      }
+    }
+    cd.sort((a, c) => a[3] - c[3]);
+    const pick = [];
+    for (const q of cd) { if (pick.length >= 5 + (r() < .5 ? 1 : 0)) break; if (pick.every(p => Math.hypot(p[0] - q[0], p[1] - q[1]) > 14)) pick.push(q); }
+    for (const [x, y, sd] of pick) {
+      P.p(x + sd, y, S.bark, 1); P.p(x + sd * 2, y + 1, S.bark, 2); P.p(x + sd * 3, y + 2, S.bark, 2);
+      // the bunch, 6 px wide: flat on top, scalloped below, lit from the top left (rows of tones 0 .. 3)
+      ['.AAAA.', 'AAABBB', 'ABBBBC', 'BBBCCC', 'B.C.CD'].forEach((row, dy) => [...row].forEach((c, dx) => { if (c !== '.') P.p(x + sd * 4 - 2 + dx, y + 3 + dy, S.berry, 'ABCD'.indexOf(c)); }));
     }
   });
 }

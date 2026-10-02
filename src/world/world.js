@@ -60,8 +60,9 @@ const PAL = {
 };
 const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {ember: ['ffe08a', 'ffa040', 'e0541e', '6e1c12']}};
 // (bark, leaf: the procedural trees, trees3d.js; char, ash, ember: burning wood, gfx.js MESH_FS uBurn; birch, aspen, berry: the
-// birch's white bark, the aspen's grey-green bark, the rowan's berries, trees3d.js; appended, so the kit's family indices stay put)
-export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry'];
+// birch's white bark, the aspen's grey-green bark, the rowan's berries, trees3d.js; appended, so the kit's family indices stay put.
+// The rowan's berry part sits on 'berry' (ripe, scarlet); MESH_FS steps its family by the season, to the next rows: orange, green (unripe), cream (flowers))
+export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry', 'berryOrange', 'berryGreen', 'berryCream'];
 const mix = (a, b, k) => a.map((x, i) => Math.round(x + (b[i] - x) * k));
 const ramp6 = r4 => { const r = r4.map(hexrgb); return [r[0], r[1], r[2], mix(r[3], r[2], .25), r[3], r[2]]; };   // + line, outline_shadow, outline_lit
 function palette(biome, style) {
@@ -71,6 +72,7 @@ function palette(biome, style) {
   const sr = k => style?.[k]?.h ? ramp6(style[k].h.map(h => h.replace('#', ''))) : null;
   P.bark = sr('bark') || P.wood; P.leaf = sr('leaf') || sr('pine') || P.rock;
   P.birch = sr('birch') || P.stone; P.aspen = sr('aspen') || P.bark; P.berry = sr('berry') || P.red;   // (ruins' STYLES has them; the other biomes grow no such trees)
+  P.berryOrange = sr('berryOrange') || P.gold; P.berryGreen = sr('berryGreen') || P.leaf; P.berryCream = sr('berryCream') || P.stone;
   const w = P.wood; P.void = [...Array(3).fill(mix(w[4], [0, 0, 0], .3)), ...Array(3).fill(mix(w[4], [0, 0, 0], .45))];
   P.cover = B.cover ? ramp6(B.cover) : P.stone;
   P.char = ramp6(['3a3330', '26211f', '161312', '0c0a0a']); P.ash = ramp6(['8e8982', '75716b', '5e5a55', '403d3a']);
