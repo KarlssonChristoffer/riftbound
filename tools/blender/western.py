@@ -1275,7 +1275,12 @@ def _lg_install():
                     'gun_draw_lift': _lg_frame('hip', -18, -14) + (True,),
                     'gun_draw_hip': _lg_frame('hip', -24) + (True,)})
     # reload: the gun at the right hip, head down over it. Open (the left hand pushes the barrels down), tip the muzzle
-    # up so the spent shells slide out, fetch a shell from the belt / thumb it in (twice), snap the barrels up shut.
+    # up so the spent shells slide out, fetch a shell from the belt / thumb it in, close (the barrels swing up shut on
+    # the way to the hip hold). In-betweens as the revolver's reload (_clip: blends of the finished keys, the break and
+    # the hands carried), the same marks for the game's phase logic (up, eject, first, fetch, load, close) and its
+    # stretch per round; `dump` = the shells fall out. Two frames (load -> fetch, positions 6.33 / 6.67, an empty hand
+    # going back to the belt) serve only the clip's own timeline: play / ms run the whole two-shell reload (an enemy
+    # plays the clip as is) without rendering any frame twice.
     RL = -20
     look = {'Neck': [('Z', -.6 * RL), ('X', 12)], 'Head': [('Z', -.4 * RL), ('X', 8)]}
     fetch_arm = {'LeftShoulder': [('Z', -2)], 'LeftArm': [('Y', 30), ('X', -14), ('Z', -10)], 'LeftForeArm': [('X', -60)]}
@@ -1283,16 +1288,23 @@ def _lg_install():
     POSES['gun_rl_eject'] = _gpose(RL, HIP, look, {'RightForeArm': [('X', -96)]}, legs=LEGS, lean=4)
     POSES['gun_rl_fetch'] = _gpose(RL, HIP, look, fetch_arm, legs=LEGS, lean=8)
     POSES['gun_rl_load'] = _gpose(RL, HIP, look, legs=LEGS, lean=8)
-    POSES['gun_rl_shut'] = _gpose(RL, HIP, legs=LEGS, lean=2)
     LG_HOLD.update({'gun_rl_up': _lg_frame('hip', RL, -12) + (True,), 'gun_rl_eject': _lg_frame('hip', RL, 60) + (True,),
-                    'gun_rl_fetch': _lg_frame('hip', RL, -6) + (True,), 'gun_rl_load': _lg_frame('hip', RL, -6) + (True,),
-                    'gun_rl_shut': _lg_frame('hip', RL, 6) + (True,)})
+                    'gun_rl_fetch': _lg_frame('hip', RL, -6) + (True,), 'gun_rl_load': _lg_frame('hip', RL, -6) + (True,)})
     LG_BREAK.clear(); LG_LEFT.clear(); LG_SHELL.clear()
     LG_BREAK.update({'gun_rl_up': 38, 'gun_rl_eject': 44, 'gun_rl_fetch': 40, 'gun_rl_load': 40})
     LG_LEFT.update({'gun_rl_fetch': 'belt', 'gun_rl_load': 'breech'})
     LG_SHELL.update({'gun_rl_fetch', 'gun_rl_load'})
-    ANIMS['gun_reload'] = dict(keys=['gun_rl_up', 'gun_rl_eject', 'gun_rl_fetch', 'gun_rl_load', 'gun_rl_fetch',
-                                     'gun_rl_load', 'gun_rl_shut'], frames=7, loop=False, fps=6)
+    A = _clip(['gun_aim', 'gun_rl_up', 'gun_rl_eject', 'gun_rl_fetch', 'gun_rl_load', 'gun_draw_hip', 'gun_rl_load',
+               'gun_rl_fetch'],
+              [.35, .7, 1, 1.4, 1.7, 2, 2.33, 2.67, 3, 3.33, 3.67, 4, 6.33, 6.67, 4.5, 5], 12,
+              play=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 8, 9, 10, 11, 14, 15],
+              ms=[70, 70, 130, 60, 60, 170, 60, 60, 120, 70, 70, 140, 70, 70, 120, 70, 70, 140, 80, 140],
+              marks={'up': 0, 'eject': 3, 'dump': 5, 'first': 6, 'fetch': 8, 'load': 11, 'close': 14})
+    A['shell'] = [(3, 4)]                # key positions with the fresh shell in the left fist (in-between frames)
+    ANIMS['gun_reload'] = A
+    # the draw: as the revolver's, one more in-between while the left hand comes up from hanging to the fore-end
+    ANIMS['gun_draw'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_draw_hip', 'gun_aim'], [0, .35, .7, 1, 1.5, 2, 2.4, 2.75, 3],
+                              32, marks={'lift': 3, 'hip': 5})
     for rk in ('up', 'load', 'fetch'):                 # reloading on the move: the same upper bodies over the stride
         ru = _upper(POSES[f'gun_rl_{rk}'], RL)
         for i in range(8):
@@ -1352,6 +1364,24 @@ def _long_gun_hold(pose_name):
         pb = pbs['GunBreak0']
         pb.matrix = Matrix.Translation(hinge) @ Matrix.Rotation(-a, 4, F.cross(U)) @ Matrix.Translation(-hinge) @ pb.matrix
         bpy.context.view_layer.update()
+
+
+_pose_tween = globals().get('_pose_tween', pose)     # the in-between pose() above
+
+
+def pose(name):
+    """The in-between pose(), then the fresh shell in the left fist for an in-between frame: the blend carries location
+    and rotation only (the shell's shrink is a scale), so a _clip frame shows it when its key position lies in one of
+    the clip's `shell` ranges (key poses and plain clips: _long_gun_hold decides)."""
+    zmin = _pose_tween(name)
+    clip, _, i = name.partition('.')
+    A = ANIMS.get(clip) if i else None
+    pbs = bpy.data.objects[ROOT].pose.bones
+    if A and 'tween' in A and 'GunShell0' in pbs:
+        t = A['tween'][int(i)]
+        pbs['GunShell0'].scale = (1, 1, 1) if any(a <= t <= b for a, b in A.get('shell', ())) else (.001, .001, .001)
+        bpy.context.view_layer.update()
+    return zmin
 
 
 _build_wardrobe = build
