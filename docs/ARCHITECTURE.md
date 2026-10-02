@@ -301,7 +301,7 @@ never write each other's state. `dev/` reaches the engine only as `E.dev`, hande
 | who may write a field | `OWNERS` in dev/owncheck.js; `?owncheck=1` records every other writer with its file:line | creators fill an entity in before it joins; a system keeps its private per-entity state in its own fields (listed) or a WeakMap |
 | which events exist | `EVENTS` in core/events.js | add the type there with its emitter; dev mode warns otherwise |
 | the features' order | each feature's `export const order = {after, before}` (core/features.js sorts) | a cycle throws |
-| module state of another system | the owner's API: `world.propTop`, `setClothWind`, `STREAM.addStone / removeStone`, `PL.faceShot / flicker / regrid`; the renderer's `G.setOptions / setSmooth / setSeason / setGround / setFlash / setPlayer` | |
+| module state of another system | the owner's API: `world.propTop`, `setClothWind`, `STREAM.addStone / removeStone`, `PL.faceShot / flicker / regrid`; the renderer's `G.setOptions / setSmooth / setSeason / setGround / setFlash / setPlayer / setWater / setWaterLook` | |
 | a game effect on another system's number | a note in `host.mods` (core/modifiers.js); the owner applies it | never write the number |
 | truth or looks | `F.update` (sim: own seeded generator, always runs) vs `F.view` (presentation: Math.random, after the sim, while `F.on`); `F.ambient` for while paused | tools/test/simview.mjs proves the split |
 | how much detail | menu > Graphics > Detail (`?detail=low`): low turns cosmetic views off (wind lines, wildlife, depth) | it can't change play: views don't feed the sim |

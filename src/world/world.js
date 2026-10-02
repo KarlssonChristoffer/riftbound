@@ -7,11 +7,27 @@
 //            biomes it has species for; trees3d: false = the painted cards); everything else the kit doesn't model
 //            (bushes, tufts, braziers, torches, dummies, brutes, crystal) stays a painted billboard card
 //   lights   from the biome's sprites (braziers, torches, crystals) and ground (lava, runes), in metres
+//   water    the stream's surface MOVES, in the shader (gfx.js SURF_FS), from one baked texture. Everything animated is built
+//            from waterSample(x, y, out) below: it is the ONE place that says "this is water" and what the water there does.
+//            A new body of water (a plateau stream, a pool) adds a branch to waterSample and nothing else needs to change.
+//            What a water body provides, per point (metres, world axes: x east, y south):
+//              out.kind   0 = not water; 1 = the stream (a new body takes the next number)
+//              out.a      across the flow: signed metres from the body's axis (the stream: x - cx(y))
+//              out.hw     half the body's width here (m);  out.edge = hw - |a|: metres to the nearest bank
+//              out.s      the TRAVEL coordinate (m): the integral of dy / speed along the flow, speed ~ 1 / width. The shader
+//                         slides its pattern along s (pattern(a, s - clock)), so every stretch moves at its own speed and
+//                         the narrows run faster, with none of the shear a plain y - v t piles up
+//              out.speed  relative speed here (1 = the body's base; the stream runs a little faster mid-channel). 0 = still
+//              out.hold   1 = by a stone: the painted foam stays as painted
+//            FALLING water (a waterfall over the ravine, brief B's one down the plateau's west face) is marked in a face /
+//            cliff texture with alpha FALL_ALPHA (252, next to the alpha-250 note in buildWorld); the shader streams it down
+//            (gfx.js fall(): light streaks slide down in stepped time, the foam in the last 6 rows flickers).
+//            G.setWater({speed}) (gfx.js) scales the water's clock: brief D drives it from rain.
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
-import {rgbOf, hexRaw255 as hexrgb} from '../core/color.js';
+import {rgbOf, hexRaw255 as hexrgb, hex255} from '../core/color.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
@@ -133,6 +149,94 @@ export const PROP_TOP = {wall_n: 2.4, wall_w: 2.4, wall_e: 2.4, wall_s: .9, towe
 // a feature's own prop kinds: how high each stops arrows (registered once, at its module's load)
 export function propTop(table) { Object.assign(PROP_TOP, table); }
 
+// ---------------------------------------------------------------- water: the sampler
+export const FALL_ALPHA = 252;   // a cliff / face texel with this alpha is falling water (SURF_FS streams it); 250 = a glowing fall (lava)
+const W_REF = 2.9, S_Y0 = -1, S_DY = .05;   // the stream's reference width (its normal 2.9 m) and the travel table's grid
+let S_TAB = null;
+function travelTab() {   // S(y) = integral of w(y') / W_REF dy' from y = -1, every 5 cm: built once (the stream never changes shape)
+  const n = Math.round((31 - S_Y0) / S_DY) + 2, t = new Float32Array(n);
+  for (let i = 1; i < n; i++) t[i] = t[i - 1] + STREAM.w(S_Y0 + (i - .5) * S_DY) / W_REF * S_DY;
+  return S_TAB = t;
+}
+// waterSample(x, y, out): is (x, y) water and what does the water there do? Fills out (see the header); no allocation.
+// Stones are dry footing (their painted body, out.kind 0); the water round them is flagged out.hold
+export function waterSample(x, y, out) {
+  out.kind = 0;
+  if (y < -1 || y > 31) return out;
+  const c = STREAM.cx(y), hw = STREAM.w(y) / 2, a = x - c;
+  if (a > hw || a < -hw) return out;
+  let hold = 0;
+  for (let k = 0, st = STREAM.stones; k < st.length; k++) {
+    const s = st[k], dx = x - s.x, dy = y - s.y;
+    if (Math.hypot(dx, dy * 1.3) < s.r) return out;                                                 // the stone itself
+    if ((dx / (s.r + .22)) ** 2 + ((dy - .05) / (s.r / 1.3 + .25)) ** 2 < 1) hold = 1;             // its foam ring and a hair more
+  }
+  const tab = S_TAB || travelTab(), f = (y - S_Y0) / S_DY, i = Math.min(tab.length - 2, f | 0);
+  out.kind = 1; out.a = a; out.hw = hw; out.edge = hw - Math.abs(a); out.hold = hold;
+  out.s = tab[i] + (tab[i + 1] - tab[i]) * (f - i);
+  out.speed = 1 + .3 * (1 - (a / hw) ** 2);
+  return out;
+}
+
+// the water's tuning, per biome (setWaterLook hands it to the shader at every build). A biome without an entry has no
+// moving water (the rift's crack: its flow speed is 0).
+//   ramp      the four painted water tones, light -> dark, as the biome paints them: a painted texel counts as water only when
+//             it matches one EXACTLY (stones, ice, foam rings of other colours, anything painted over the water stay as painted)
+//   hold      tones that never move (a bank's shadow)        bank   texels from the bank where the 'streak' tone stays (the bright edge line)
+//   streak    the tone the painter scatters over the interior as sparse streaks (-1 = none): the moving pattern replaces them
+//   deep / shallow / deepFrac   the interior's base tone where the painter put 'streak' (|a| < deepFrac * hw is deep)
+//   range     [lightest, darkest] tone the moving pattern uses       rate  texels per second the pattern travels at speed 1
+//   across / along   the pattern's cell size in texels (thin streaks stretched along the flow); along is a divisor of 768
+//   hi / lo   the light / dark share of the surface (the pattern's thresholds: lower = more)     lap  the lapping line's tone (-1 = none)
+//   refl      how much the lanterns, mushrooms and wisps shine in it      spark  sun sparkles
+export const WATER_TUNE = {
+  ruins: {ramp: S => S.water.h, hold: [3], bank: 2, streak: 0, deep: 2, shallow: 1, deepFrac: .45, range: [0, 2], rate: 9, across: 2.5, along: 12, hi: .8, lo: .76, lap: 0, refl: 1, spark: 1},
+  // lava: the crust's three colours drift slowly; the glowing seams (lava-coloured, in the emissive layer) stay put. (The first two
+  // colours are literals in biomes.js groundEmber, not exposed by the style: keep them in step)
+  ember: {ramp: S => ['#5a1a10', '#3a1410', S.crust], hold: [0], bank: 2, streak: -1, deep: 2, shallow: 2, deepFrac: 0, range: [1, 2], rate: 2.5, across: 5, along: 24, hi: .82, lo: .8, lap: -1, refl: 0, spark: 0},
+  frost: {ramp: S => S.melt.h, hold: [3], bank: 2, streak: 1, deep: 2, shallow: 2, deepFrac: 0, range: [1, 2], rate: 4, across: 3, along: 16, hi: .86, lo: .8, lap: 1, refl: 1, spark: .5},
+};
+
+// ---------------------------------------------------------------- water: the texture
+// One RGBA8 texel per ground texel (so the ground canvas's size), read NEAREST by SURF_FS with texelFetch:
+//   R  bits 7-6 state: 0 dry and far from water; 1 dry beside water (a bank, a stone, ice: painted as it is); 2 water that
+//                      stays as painted (the bank's shadow, the bright edge line, foam round a stone); 3 water that MOVES
+//                      (state >= 2 is "water": SURF_FS writes tone 1 into the G-buffer and the composite lights it as water)
+//      bits 5-4 the base tone, 0 light .. 3 dark (which of the ramp's colours the pattern starts from)
+//      bits 3-0 the flow speed here in 1/8ths of the biome's rate (waterSample's speed)
+//   G  bits 7-5 ring: texels from the bank (1 = the first texel .. 7; 0 = further in);  bits 4-0 = travel bits 12-8
+//   B  travel bits 7-0: the travel coordinate s in 1/8 texel (13 bits: up to 1023 texels)
+//   A  across the flow, signed texels from the axis in 1/4 texel, + 128 (clamped)
+function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
+  const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
+  const toneOf = k => { for (let t = 0; t < ramp.length; t++) if (px[k] === ramp[t][0] && px[k + 1] === ramp[t][1] && px[k + 2] === ramp[t][2]) return t; return -1; };
+  for (let y = 0; y < HPX; y++) for (let x = 0; x < WPX; x++) {
+    const mx = (x + .5) / PPM, my = (y + .5) / PPM;
+    waterSample(mx, my, o);
+    if (!o.kind || my >= cliffZ(mx)) continue;                  // (the ravine takes the stream over its edge: below it is the waterfall's pool)
+    const i = y * WPX + x, k = i * 4, p = toneOf(i * 4);
+    if (p < 0) continue;                                        // painted over: not (moving) water
+    const ring = o.edge * PPM < 7 ? Math.max(1, Math.ceil(o.edge * PPM)) : 0;
+    let state = 3, tone = p;
+    if (T.hold.includes(p) || (p === T.streak && ring <= T.bank) || (o.hold && p === 0)) state = 2;
+    else if (p === T.streak) tone = Math.abs(o.a) < T.deepFrac * o.hw ? T.deep : T.shallow;
+    const s13 = Math.min(8191, Math.round(o.s * PPM * 8));
+    data[k] = state << 6 | tone << 4 | (Math.round(Math.min(1.875, o.speed) * 8) & 15);
+    data[k + 1] = ring << 5 | s13 >> 8; data[k + 2] = s13 & 255;
+    data[k + 3] = Math.max(0, Math.min(255, Math.round(o.a * PPM * 4) + 128));
+  }
+  for (let y = 0; y < HPX; y++) for (let x = 0; x < WPX; x++) {   // dry texels beside water: SURF_FS blends across them when the camera turns
+    const k = (y * WPX + x) * 4; if (data[k] >> 6) continue;
+    for (let j = -1; j <= 1; j++) for (let l = -1; l <= 1; l++) {
+      const u = x + l, v = y + j; if (u < 0 || v < 0 || u >= WPX || v >= HPX) continue;
+      if (data[(v * WPX + u) * 4] >> 6 >= 2) { data[k] = 1 << 6; j = 2; break; }
+    }
+  }
+  const tex = new THREE.DataTexture(data, WPX, HPX, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.colorSpace = THREE.NoColorSpace; tex.needsUpdate = true;
+  return tex;
+}
+
 // ---------------------------------------------------------------- strata texture for the plateau's faces
 function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {
   const w = Math.max(1, Math.round(len * PPM)), h = Math.max(1, Math.round(hgt * PPMH)), c = document.createElement('canvas');
@@ -221,7 +325,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const CL_H = 3.5, cliff = strataCanvas(WM + 2 * SKIRT, CL_H, PPM, PPMH, R.rock, R.cov, 11);
   {
     const q = cliff.getContext('2d', {willReadFrequently: true}), id = q.getImageData(0, 0, cliff.width, cliff.height), d = id.data, CH = cliff.height;
-    // where the stream glows (ember lava: the ground's emit layer), its fall glows too: alpha 250 marks emissive texels
+    // where the stream glows (ember lava: the ground's emit layer), its fall glows too: alpha 250 marks emissive texels.
+    // A fall of WATER carries alpha FALL_ALPHA (252): SURF_FS streams its streaks down in stepped time and flickers the foam
+    // at the foot, from the baked colour (dark edge columns and the lip stay as painted). Any face texture can use the marker
     const ge = groundEmit ? groundEmit.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, groundEmit.width, groundEmit.height).data : null;
     const edgeZ = x => { for (let z = HM - 7; z < HM + SKIRT; z += .05) if (hAt(x, z) < -1) return z; return null; };
     for (let cx = 0; cx < cliff.width; cx++) {
@@ -238,20 +344,25 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const base = [px[gi], px[gi + 1], px[gi + 2]], edge = off > -.08, streak = hsh(cx, 17) < .3;
       for (let r = 0; r < CH; r++) {
         const k = (r * cliff.width + cx) * 4, foam = r > CH - 6 && hsh(cx, r) < .6, lip = r < 2;
-        const m = foam ? .7 : lip ? .45 : edge ? -.3 : streak ? .3 : 0;   // + toward white, - darker
+        const live = !glows && !edge && !lip;   // a sheet of falling water: the shader adds the moving streaks and the foam
+        const m = live ? 0 : foam ? .7 : lip ? .45 : edge ? -.3 : streak ? .3 : 0;   // + toward white, - darker
         for (let c = 0; c < 3; c++) d[k + c] = m >= 0 ? base[c] + (255 - base[c]) * m : base[c] * (1 + m);
-        d[k + 3] = glows && !edge ? 250 : 255;
+        d[k + 3] = glows && !edge ? 250 : live ? FALL_ALPHA : 255;
       }
     }
     q.putImageData(id, 0, 0);
   }
   const cTex = texOf(cliff); cTex.wrapS = cTex.wrapT = THREE.RepeatWrapping; cTex.needsUpdate = true;
-  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0, cliff: cTex, cliffOff: SKIRT}, false); disposers.push(() => ground.dispose());
+  // the moving water: the baked texture (rebuilt, and the old one disposed, with the world) + the biome's look for the shader
+  const WT = WATER_TUNE[biome.id], wTex = WT ? bakeWater(biome, WT, {WPX, HPX, PPM, px, cliffZ}) : null;
+  if (wTex) disposers.push(() => wTex.dispose());
+  G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark} : null);
+  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0, cliff: cTex, cliffOff: SKIRT, water: wTex}, false); disposers.push(() => ground.dispose());
 
   // ---- plateau: top (the painted top, planar) + 4 strata faces
   for (const q of PLATEAUS) {
     const top = new THREE.PlaneGeometry(q.x1 - q.x0, q.y1 - q.y0); top.rotateX(-Math.PI / 2); top.translate((q.x0 + q.x1) / 2, q.h, (q.y0 + q.y1) / 2);
-    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1}); disposers.push(() => t.dispose());
+    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1, water: wTex}); disposers.push(() => t.dispose());   // (water on the plateau's top too: a stream or pool painted there moves, no texel of it does yet)
     const faces = [   // [len, centre x, centre z, rotation y]
       [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y1, 0], [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y0, Math.PI],
       [q.y1 - q.y0, q.x1, (q.y0 + q.y1) / 2, Math.PI / 2], [q.y1 - q.y0, q.x0, (q.y0 + q.y1) / 2, -Math.PI / 2]];

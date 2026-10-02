@@ -7,7 +7,7 @@
 //                 A  rgb albedo, a = (type * 4 + tone) / 255
 //                 N  xyz world normal, w = object id (whole numbers; a wall line shares one id: no outline at joints)
 //                 E  rgb emissive, w = part * 32 + family (meshes: seams between parts of the same family)
-//               types: 0 empty, 1 ground, 2 ramp mesh (live 3D prop), 3 billboard (painted sprite), 4 character,
+//               types: 0 empty, 1 ground (tone 1 = WATER: the composite lights it as water), 2 ramp mesh (live 3D prop), 3 billboard (painted sprite), 4 character,
 //                      5 textured surface (cliff faces), 6 line (arrows), 7 lit card (a prop pre-rendered at 16 angles)
 //   3. x-ray    the player's card again, marking pixels where the scene hides it
 //   4. light    full-screen: outlines / seams / occlusion lines on meshes (the pixelizer's rules, live), then the arena's
@@ -113,6 +113,68 @@ void main() {
   o2 = vec4((glow ? alb : vec3(0.)) + vec3(uFlash) + em, fPart * 32. + fam);
 }`;
 
+// THE MOVING WATER (SURF_FS). world.js bakes the water texture uWater (its layout is documented there: state, base tone, speed,
+// the travel coordinate s along the flow, the across coordinate a, the ring of texels from the bank); everything here is a
+// function of those WORLD TEXELS and the stepped water clock, never of the screen, so it holds still while the camera turns.
+// A texel's tone is a value noise in (a, s - travelled), cut to the biome's ramp: thin streaks stretched along the flow, sliding
+// by WHOLE texels (floor(clock * rate * speed)), each stretch at its own pace because s is travel TIME (the narrows run faster).
+// FALLING water (a cliff / face texel with alpha 252, world.js FALL_ALPHA) streams down the same way
+const WATER_FS = `
+uniform sampler2D uWater; uniform float uHasWater;
+uniform float uWPhase;               // the water clock, s: render() advances it at G.setWater's speed
+uniform vec4 uWA, uWB;               // (rate texels/s, cell across, cell along, lapping tone | -1), (hi, lo, lightest tone, darkest tone)
+uniform vec3 uWRamp[4];              // the biome's four water tones, light -> dark
+float wh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float wvn(vec2 p, float per) {       // value noise whose y lattice repeats every per cells: the wrapped clock never pops
+  vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  float y0 = mod(i.y, per), y1 = mod(i.y + 1., per);
+  return mix(mix(wh(vec2(i.x, y0)), wh(vec2(i.x + 1., y0)), f.x), mix(wh(vec2(i.x, y1)), wh(vec2(i.x + 1., y1)), f.x), f.y);
+}
+// the pattern slid along the flow by whole texels (ph = texels travelled; 768 is a multiple of every cell length and of the wobble's 24):
+// the streaks meander a little as they go (a = across, wobbling by ~1.3 texels along s - travelled)
+float wlay(float a, float s, float ph, float ca, float cs, float seed) {
+  float d = s - mod(floor(ph), 768.);
+  return wvn(vec2((a + sin(d * .2618) * 1.3) / ca + seed, d / cs), 768. / cs);
+}
+// one ground texel as the water makes it: moving water (state 3) or the painted texel
+vec3 wTexel(ivec2 ti, ivec2 mx) {
+  ti = clamp(ti, ivec2(0), mx);
+  vec4 w = texelFetch(uWater, ti, 0);
+  int rc = int(w.r * 255. + .5);
+  vec3 res = texelFetch(uTex, ti, 0).rgb;
+  if (rc < 192) return res;
+  int gg = int(w.g * 255. + .5), tone = (rc >> 4) & 3, ring = gg >> 5;
+  float spd = float(rc & 15) * .125, s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .25;
+  float ph = uWPhase * uWA.x * spd;
+  float h = wlay(a, s, ph, uWA.y, uWA.z, 0.), l = wlay(a, s, ph * .7, uWA.y * 1.4, uWA.z * 1.5, 7.3);
+  int t = tone;
+  // the broad bands drift too: the base tone is read from a texel slid across by a slow wobble that travels with the flow (a band's edge meanders)
+  float sw = floor((wvn(vec2(.5, (s - mod(floor(ph * .35), 768.)) / 48.), 16.) - .5) * 7. + .5);
+  if (sw != 0.) { vec4 w2 = texelFetch(uWater, clamp(ti + ivec2(int(sw), 0), ivec2(0), mx), 0); int r2 = int(w2.r * 255. + .5); if (r2 >= 192) t = (r2 >> 4) & 3; }
+  if (h > uWB.x) t -= 1;
+  if (h > uWB.x + .09) t -= 1;
+  if (l > uWB.y) t += 1;
+  t = clamp(t, int(uWB.z), int(uWB.w));
+  if (uWA.w >= 0. && ring > 0) {     // the lapping line: a dashed 1-texel line that creeps in and out along the bank, a step every ~1.3 s
+    float pos = 3. + abs(mod(floor(uWPhase * .75), 4.) - 2.) + (a < 0. ? 1. : 0.);
+    if (float(ring) == pos && wvn(vec2(3.7, (s - mod(floor(uWPhase * 3.), 768.)) / 8.), 96.) > .42) t = int(uWA.w);
+  }
+  res = uWRamp[t];
+  return res;
+}
+// a fall of water: the baked colour is the base; light streaks slide DOWN the sheet in whole texels at their own pace per column,
+// dark ones with them, and the foam at the foot flickers. px = the texel (column, row from the top of the fall), rows = its height
+vec3 fall(vec3 base, vec2 px, float rows) {
+  float h = wh(vec2(px.x, 17.)), g = wh(vec2(px.x, 5.));
+  float k = floor((px.y - mod(floor(uWPhase * 14. * (1. + g)), 1000.)) / 5.), d = wh(vec2(px.x, mod(k, 200.)));
+  vec3 c = base;
+  if (h < .55 && d > .5) c = mix(base, vec3(1.), .3);
+  else if (d < .14) c = base * .86;
+  if (px.y > rows - 6. && wh(vec2(px.x, px.y + mod(floor(uWPhase * 9.), 64.) * 13.)) < .6) c = mix(base, vec3(1.), .7);
+  return c;
+}
+`;
+
 // ground and textured surfaces: world-planar (ground) or uv (faces) mapping, nearest or "smooth pixel" sampling
 const SURF_VS = HEAD + `
 in vec3 position; in vec3 normal; in vec2 uv;
@@ -131,6 +193,7 @@ uniform sampler2D uTex, uEm; uniform vec2 uTexSize; uniform float uSmooth, uHasE
 // steep ground (the ravine wall): a cliff texture (rock strata, the waterfall) by world x (z on east / west faces) and
 // depth below the bank, 1 texel = 1 px at yaw 0 (uPx = PPM, PPMH), repeating; drawn as a textured face (type 5)
 uniform sampler2D uCliff; uniform float uHasCliff, uCliffOff; uniform vec2 uCliffSize, uPx;
+` + WATER_FS + `
 // uSmooth 0..1 blends the two samplings, so the host can fade between them (crisp at rest, smooth while turning)
 void main() {
   vec2 t = vUv * uTexSize, s = floor(t + .5), d = max(fwidth(t), vec2(1e-4));   // (derivatives before any branch)
@@ -143,15 +206,34 @@ void main() {
     float along = abs(n.z) >= abs(n.x) ? vW.x : vW.z;
     vec2 ct = vec2((along + uCliffOff) * uPx.x, -vW.y * uPx.y);
     vec4 cc = texture(uCliff, (floor(ct) + .5) / uCliffSize);
-    o0 = vec4(cc.rgb, float(5 * 4) / 255.);
-    o1 = vec4(n, uObj); o2 = vec4(cc.a < .995 ? cc.rgb : vec3(0.), 0.);   // alpha 250: a glowing fall (lava)
+    float al = cc.a * 255.;   // alpha 250: a glowing fall (lava); 252: a fall of water (streams down: fall())
+    o0 = vec4(abs(al - 252.) < .5 ? fall(cc.rgb, floor(ct), uCliffSize.y) : cc.rgb, float(5 * 4) / 255.);
+    o1 = vec4(n, uObj); o2 = vec4(abs(al - 250.) < .5 ? cc.rgb : vec3(0.), 0.);
     return;
   }
   vec4 c = uSmooth <= 0. ? texture(uTex, uvN) : uSmooth >= 1. ? texture(uTex, uvS) : mix(texture(uTex, uvN), texture(uTex, uvS), uSmooth);
   if (c.a < .5) discard;
+  if (abs((uSmooth <= 0. ? c.a : texture(uTex, uvN).a) * 255. - 252.) < .5) c.rgb = fall(c.rgb, floor(t), uTexSize.y);   // a fall of water on a face (type 5 or ground)
+  // the water (ground only): a texel beside water, or water, is read from the baked water texture. Nearest: that texel's own
+  // moving colour; smooth: the same bilinear blend across texel seams as the painted ground gets, of moving texels
+  float wfl = 0.;
+  if (uHasWater > .5) {
+    ivec2 mx = ivec2(uTexSize) - 1, ti = clamp(ivec2(floor(t)), ivec2(0), mx);
+    int rc = int(texelFetch(uWater, ti, 0).r * 255. + .5);
+    if (rc >= 64) {
+      wfl = rc >= 128 ? 1. : 0.;   // water: the G-buffer's tone 1
+      vec3 cN = wTexel(ti, mx);
+      if (uSmooth <= 0.) c.rgb = cN;
+      else {
+        vec2 q = uvS * uTexSize - .5, f = fract(q); ivec2 i0 = ivec2(floor(q));
+        vec3 cS = mix(mix(wTexel(i0, mx), wTexel(i0 + ivec2(1, 0), mx), f.x), mix(wTexel(i0 + ivec2(0, 1), mx), wTexel(i0 + ivec2(1, 1), mx), f.x), f.y);
+        c.rgb = mix(cN, cS, uSmooth);
+      }
+    }
+  }
   vec3 em = vec3(0.);
   if (uHasEm > .5) { vec4 e = mix(texture(uEm, uvN), texture(uEm, uvS), uSmooth); em = e.rgb * e.a; }
-  o0 = vec4(c.rgb, float(int(uType) * 4) / 255.);
+  o0 = vec4(c.rgb, float(int(uType) * 4 + int(wfl)) / 255.);
   o1 = vec4(normalize(vN), uObj);
   o2 = vec4(em, 0.);
 }`;
@@ -341,6 +423,8 @@ uniform vec4 uFog;
 uniform vec3 uPlayer;   // the player's chest (receives sun shadow as one object: no self-shadow from its own card)
 // shiny armour: toward the viewer (the sprite camera, 20 deg pitch, turned with the yaw), the sun's glint colour / strength
 uniform vec3 uView, uSunC; uniform float uSunStr;
+// the water (SURF_FS marks it: type 1 + tone 1): its clock (s), (lanterns' reflections, sun sparkles) strength, (ground texels, view px) per metre
+uniform float uWPhase; uniform vec4 uWRefl; uniform vec2 uWPx;
 float q3(float v) { return v < .12 ? 0. : v < .4 ? .35 : v < .75 ? .7 : 1.; }   // crisp glint steps
 uniform int uNL; uniform vec4 uLP[${NL}]; uniform vec4 uLC[${NL}];
 uniform int uNH; uniform vec4 uHalo[${NL}]; uniform vec3 uHaloC[${NL}];
@@ -396,6 +480,7 @@ void main() {
   if (uLayD > .5) { vec4 dd = lay(tDistort, ip0); if (dd.a > .5) ip = clamp(ip0 + ivec2(128 - int(dd.r * 255. + .5), int(dd.g * 255. + .5) - 128), ivec2(0), ivec2(uRes) - 1); }
   vec4 a0 = texelFetch(tA, ip, 0);
   int code = int(a0.a * 255. + .5), type = code / 4, tone = code - type * 4;
+  bool water = type == 1 && tone == 1;   // (tone is only used by meshes otherwise)
   if (type == 0) { oc = vec4(clamp(post(uBg, ip0), 0., 1.), 1.); return; }
   float d0 = texelFetch(tD, ip, 0).r;
   vec4 N0 = texelFetch(tN, ip, 0), E0 = texelFetch(tE, ip, 0);
@@ -434,7 +519,7 @@ void main() {
   // faces up (ground, props, crowns), in patches fixed in the world, thickening with uSnow (not on the water); WET ground
   // and props darken
   if (uSeasonK > 0. && (type == 1 || type == 3)) { float g = clamp((alb.g - max(alb.r, alb.b)) * 7., 0., 1.) * uSeasonK; if (g > 0.) alb = mix(alb, clamp(uSeasonM * alb, 0., 1.), g); }
-  if (uSnow > 0. && (type == 1 || type == 2) && N.y > .55 && !(alb.b > alb.r + .05 && alb.b >= alb.g)) {
+  if (uSnow > 0. && (type == 1 || type == 2) && N.y > .55 && !water && !(alb.b > alb.r + .05 && alb.b >= alb.g)) {   // (water: the baked flag; the blue-ish test stays for what isn't flagged: frost's blue ground and ice keep their painted snow)
     // patches at three scales (60 cm / 20 cm / 7 cm), the large one leading so mid cover reads as drifts, not camouflage.
     // Snow settles in the darker joints first and keeps their darker tone, so the paving still shows through the snow
     float l = dot(alb, vec3(.3, .55, .15)), n = vnC(P.xz * 1.6) * .64 + vnC(P.xz * 5.2 + 3.) * .24 + vnC(P.xz * 14. + 7.) * .12;
@@ -494,6 +579,37 @@ void main() {
   vec3 emit = E0.rgb;
   if (uLayE > .5) { vec4 el = lay(tEmitL, ip); emit += el.rgb * el.a; }
   col += emit * max(vec3(1.) - L, vec3(uEmin)) * 1.15;                   // emitters add back what the light took away
+  // ---- light on the water. Lanterns, mushrooms and wisps shine in it as thin shimmering vertical streaks and the sun twinkles on
+  // it; all in view pixels and 12 steps a second, so it moves in whole pixels. A light h above the water is mirrored h below it
+  // ON SCREEN (the oblique projection: heights count cos 20 px a metre, ground depth sin 55, as depth.js mirrors sprites), so the
+  // streak starts under the light's foot at that distance and trails toward the camera. Clear at night, faint by day. (The sky
+  // glint and the mirrored sprites are depth.js's, in the ground layer: these are light, which that can't do)
+  if (water && uWRefl.x + uWRefl.y > 0.) {
+    float wt = mod(floor(uWPhase * 12.), 997.), pm = uWPx.y;
+    vec2 Fh = normalize(uView.xz), Rh = vec2(Fh.y, -Fh.x);
+    vec3 wl = vec3(0.);
+    if (uWRefl.x > 0.) {
+      float night = clamp((1. - dot(uAmb, vec3(.3, .55, .15))) * 1.6, .2, 1.);
+      for (int i = 0; i < ${NL}; i++) {
+        if (i >= uNL) break; if (uLC[i].w > .5) continue;
+        float h = uLP[i].y - P.y; if (h < .05) continue;
+        vec2 d = P.xz - uLP[i].xz; float r = uLP[i].w, t2 = (dot(d, d) + .0625 * h * h) / (r * r); if (t2 >= 1.) continue;
+        float pool = (1. - t2) * (1. - t2);   // glints: single texels of the light's pool flick on and off on the water (the pool is lit by the light pass)
+        if (hC(floor(P.xz * uWPx.x) + vec2(float(i) * 5.3, wt) * 1.9 + 11.) > 1. - .006 * pool) wl += uLC[i].rgb * .5 * night;
+        float dx = dot(d, Rh) * pm, dd = (dot(d, Fh) * .81915 - h * .93969) * pm;   // px right of the mirror image, px below it
+        float wob = floor(hC(vec2(gl_FragCoord.y * .37 + float(i) * 3.1, wt)) * 3.) - 1., len = 8. + 7. * h, al = dd < 0. ? 1. + dd / 3. : 1. - dd / len;
+        if (abs(dx - wob) > 1.2 || al <= 0.) continue;
+        float v = al * pool * (.5 + .9 * hC(vec2(gl_FragCoord.y + float(i) * 17., wt + 31.)));
+        wl += uLC[i].rgb * q3(v) * night;
+      }
+      wl *= uWRefl.x * .8;
+    }
+    if (uWRefl.y > 0. && uSunStr > 0.) {   // sparse twinkling texels, thicker where the sun mirrors toward the camera
+      float spec = .35 + .65 * smoothstep(.5, 1., normalize(uSunDir + uView).y);
+      if (hC(floor(P.xz * uWPx.x) + vec2(7.3, mod(floor(uWPhase * 10.), 89.)) * 1.7) > 1. - .0016 * uWRefl.y * spec) wl += uSunC * min(1., uSunStr) * .55;
+    }
+    col += wl;
+  }
   // ---- shiny armour (the arena's armor.js shine, on the GPU): metal pixels of the character (E.w 2 steel / 1 gold) get a
   // quantised Blinn-Phong glint from every light and the sun, and reflect the sky (up) or the lit ground ~1.5 m away
   // (down), stronger at grazing angles (fresnel). Added on top of the light, like the arena's 'lighter'
@@ -608,6 +724,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     leanX: {value: new THREE.Vector3(1 / PPM, 0, 0)}, leanY: {value: new THREE.Vector3(0, 0, 1 / PPMY)},   // sway: m per art px (setView)
     time: {value: 0},   // s, for the leaves' flutter (render())
     leafK: {value: 1},  // how full the crowns are this season (features/weather.js from sim/env.js leafK)
+    // the moving water (setWaterLook at every build, the clock in render()): see WATER_FS
+    wPhase: {value: 0}, wA: {value: new THREE.Vector4(0, 3, 12, -1)}, wB: {value: new THREE.Vector4(.8, .76, 0, 2)}, wRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())},
   };
   const raw = (vs, fs, uniforms, extra = {}) => new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
 
@@ -634,11 +752,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const meshMat = (obj, seed, sw = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
     uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})});
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
-  const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0}) => raw(SURF_VS, SURF_FS, {
+  const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null}) => raw(SURF_VS, SURF_FS, {
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
     uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)},
     uCliff: {value: cliff}, uHasCliff: {value: cliff ? 1 : 0}, uCliffOff: {value: cliffOff}, uPx: U.px,
-    uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)}}, {side: THREE.FrontSide});
+    uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)},
+    uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   const cardUniforms = o => ({
     uAnchor: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2(o.w, o.h)}, uPivot: {value: new THREE.Vector2(o.px, o.py)},
@@ -865,6 +984,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     uSeasonM: {value: new THREE.Matrix3()}, uSeasonK: {value: 0}, uSnow: {value: 0}, uWet: {value: 0}, uFlashC: {value: new THREE.Vector3()},   // features/weather.js
     uFog: {value: new THREE.Vector4()}, uPlayer: {value: new THREE.Vector3()},
     uView: {value: new THREE.Vector3(0, .342, .94)}, uSunC: {value: new THREE.Vector3(1, 1, 1)}, uSunStr: {value: 0},
+    uWPhase: U.wPhase, uWRefl: {value: new THREE.Vector4()}, uWPx: {value: new THREE.Vector2(PPM, PPM)},
     uNL: {value: 0}, uLP: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uLC: {value: Array.from({length: NL}, () => new THREE.Vector4())},
     uNH: {value: 0}, uHalo: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uHaloC: {value: Array.from({length: NL}, () => new THREE.Vector3())},
     tGround: {value: layers.ground.t}, tPre: {value: layers.pre.t}, tEmitL: {value: layers.emit.t}, tAdd: {value: layers.add.t}, tFront: {value: layers.front.t},
@@ -986,7 +1106,7 @@ void main() {
     camera.projectionMatrix.set(A, 0, 0, 0, 0, B, -C, 0, 0, -PPMY / Nn / R_DEPTH, -PPMH / Nn / R_DEPTH, 0, 0, 0, 0, 1);
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
     compU.uView.value.set(Math.sin(yaw) * .93969, .34202, Math.cos(yaw) * .93969);   // the sprite camera's toward-the-viewer
-    U.camYaw.value = yaw;
+    U.camYaw.value = yaw; compU.uWPx.value.set(PPM, PPM * zoom);
     U.leanX.value.set(Math.cos(yaw) / PPM, 0, -Math.sin(yaw) / PPM); U.leanY.value.set(Math.sin(yaw) / PPMY, 0, Math.cos(yaw) / PPMY);   // art px -> m
   }
   // world -> internal-canvas px (y down), for halos / HUD / tests
@@ -1012,10 +1132,13 @@ void main() {
     compU.uLightPV.value.multiplyMatrices(sunCam.projectionMatrix, sunCam.matrixWorldInverse);
   }
 
+  let waterSpeed = 1, waterT = -1;
   const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
   function render() {
     const t0 = performance.now();
     U.time.value = (t0 / 1000) % 3600;
+    const dtw = waterT < 0 ? 0 : Math.min(.1, (t0 - waterT) / 1000); waterT = t0;   // the water's clock: its own, so G.setWater never makes the pattern jump
+    U.wPhase.value = (U.wPhase.value + dtw * waterSpeed) % 65536;
     flushBatches(); syncCards();
     let ns = 0; for (const g2 of groups.values()) ns += g2.n;
     stats.sprites = ns; stats.points = nPoints; stats.lines = nLines;
@@ -1090,8 +1213,19 @@ void main() {
   function setGround({tinted, snow, wet, leafK}) { compU.uSeasonK.value = tinted ? 1 : 0; compU.uSnow.value = snow; compU.uWet.value = wet; U.leafK.value = leafK; }
   const setFlash = (r, g, b) => { compU.uFlashC.value.set(r, g, b); };
   const setPlayer = (x, h, z) => { compU.uPlayer.value.set(x, h, z); };
+  // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
+  // advances at, so changing it never makes the pattern jump
+  const setWater = ({speed} = {}) => { if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0); };
+  // the biome's water (world.js buildWorld, at every build, from WATER_TUNE): {ramp: [[r, g, b] 0..1] light -> dark (padded to 4), rate,
+  // across, along, hi, lo, range: [lightest, darkest] tone, lap (tone | -1), refl, spark} | null = no moving water (the rift)
+  function setWaterLook(L) {
+    if (!L) { compU.uWRefl.value.set(0, 0, 0, 0); return; }
+    for (let i = 0; i < 4; i++) U.wRamp.value[i].set(...L.ramp[Math.min(i, L.ramp.length - 1)]);
+    U.wA.value.set(L.rate, L.across, L.along, L.lap); U.wB.value.set(L.hi, L.lo, L.range[0], L.range[1]);
+    compU.uWRefl.value.set(L.refl, L.spark, 0, 0);
+  }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     setView, setSun, toScreen, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer};
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook};
 }
