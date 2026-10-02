@@ -340,7 +340,7 @@ export async function create(host) {
         if (q.vh < -.9) {
           if (-q.vh > P0.sound.hard) { sound(q, (-q.vh - P0.sound.hard) / 3); if (dustF && dustF.puff) dustF.puff(q.x, q.y, Math.min(1.5, -q.vh / 2.5)); }   // (a little sand thrown up)
           q.vh = -q.vh * P0.bounce; q.vx *= P0.land; q.vy *= P0.land;
-        } else q.vh = 0;
+        } else if (q.vh < 0) q.vh = 0;   // (an upward kick this step, from the player, an arrow, a blast, stays)
         q.gz = host.elev(q.x, q.y);
       }
     } else if (q.gz + q.h < -6) { drop(q); return; }
