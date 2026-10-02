@@ -309,12 +309,24 @@ const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
 
 // http://stackoverflow.com/questions/105034/how-to-create-a-guid-uuid-in-javascript/21963136#21963136
+// LOCAL PATCH (the game, 2026-10-02; src/vendor/README.md): ids drawn from their own generator, not Math.random, so the
+// renderer making more or fewer objects never shifts the game's seeded Math.random (tools/test/golden.mjs captures)
+let _uuidSeed = 0x2F6B3A1D | 0;
+function _uuidRandom() {
+
+	_uuidSeed = ( _uuidSeed + 0x6D2B79F5 ) | 0;
+	let t = Math.imul( _uuidSeed ^ _uuidSeed >>> 15, 1 | _uuidSeed );
+	t = t + Math.imul( t ^ t >>> 7, 61 | t ) ^ t;
+	return ( ( t ^ t >>> 14 ) >>> 0 ) / 4294967296;
+
+}
+
 function generateUUID() {
 
-	const d0 = Math.random() * 0xffffffff | 0;
-	const d1 = Math.random() * 0xffffffff | 0;
-	const d2 = Math.random() * 0xffffffff | 0;
-	const d3 = Math.random() * 0xffffffff | 0;
+	const d0 = _uuidRandom() * 0xffffffff | 0;
+	const d1 = _uuidRandom() * 0xffffffff | 0;
+	const d2 = _uuidRandom() * 0xffffffff | 0;
+	const d3 = _uuidRandom() * 0xffffffff | 0;
 	const uuid = _lut[ d0 & 0xff ] + _lut[ d0 >> 8 & 0xff ] + _lut[ d0 >> 16 & 0xff ] + _lut[ d0 >> 24 & 0xff ] + '-' +
 			_lut[ d1 & 0xff ] + _lut[ d1 >> 8 & 0xff ] + '-' + _lut[ d1 >> 16 & 0x0f | 0x40 ] + _lut[ d1 >> 24 & 0xff ] + '-' +
 			_lut[ d2 & 0x3f | 0x80 ] + _lut[ d2 >> 8 & 0xff ] + '-' + _lut[ d2 >> 16 & 0xff ] + _lut[ d2 >> 24 & 0xff ] +
