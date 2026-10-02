@@ -282,7 +282,7 @@ export function createWestern(ac, {lay, noise}) {
   let bar = -1, pb = 0, ci = 0, prog = PROGS[0], pi = -1, again = false, tune = null, phraseN = 0, pat = 'roll';
   const tunes = new Map();
   function enter() { bar = -1; pi = -1; }
-  function newPhrase(I) {   // the first phrase plays the main theme; a progression plays at most twice in a row
+  function newPhrase(I) {   // the first phrase plays its section's first progression (calm, combat: the main theme's); none plays 3x in a row
     phraseN++;
     const set = I >= .62 ? SETS.combat : I >= .42 ? SETS.tension : SETS.calm;
     let nx = pi;
