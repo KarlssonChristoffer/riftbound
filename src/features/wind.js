@@ -51,6 +51,7 @@ import {flags} from '../core/flags.js';
 import {clamp, smooth, hash3 as hsh} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {hexU32 as rgba} from '../core/color.js';
+import {fallStage} from '../core/autumn.js';
 
 const TAU = Math.PI * 2;
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -999,7 +1000,7 @@ export async function create(host) {
         f = cr.r * .85 * Math.sqrt(Math.max(0, 1 - (o / cr.r) ** 2));
       }
       const base = {x: cx + RX * o + FX * f, y: cy + RY * o + FY * f + (R() - .5) * .1, h, t: 0, ph: R() * TAU, rest: 0};
-      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: leafPal(S), vx: (R() - .5) * (soft ? .4 : 1.4) + ax * .6, vy: (R() - .5) * (soft ? .25 : .5),
+      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: leafPal(S, tree ? autumnOf(p) : null), vx: (R() - .5) * (soft ? .4 : 1.4) + ax * .6, vy: (R() - .5) * (soft ? .25 : .5),
         vh: why === 'arrow' || why === 'blast' ? .6 + R() * .8 : why === 'fall' ? 0 : R() * .3, life: 4 + (h - z) * 2.5, g: 1.4, big: why === 'wind' && R() < .4, lie: soft ? 2.5 : 1});   // (long enough to reach the ground: it falls ~.45 m/s)
       else if (S.kind === 'snow') spawnPart({...base, kind: 'snow', pal: S.pal, vx: (R() - .5) * 1.6 + ax * .8, vy: (R() - .5) * .6, vh: .4 + R() * 1.1, life: .5 + R() * .45, g: 6});
       else if (S.kind === 'spark') {
@@ -1017,16 +1018,24 @@ export async function create(host) {
   // crowns). A dying leaf lets go by itself in still air (STRENGTH.fall) and far easier when something ruffles the crown: a
   // gust, an arrow, a blast, a bird landing or taking off (wildlife.js 'bird_perch'). leafRate = how loose they are (~.85
   // in summer, ~2 mid-autumn, ~3.2 at the peak, ~.2 on the bare winter crowns). Colours: half the crown's own (env.leafRamp),
-  // half browner than it (DYING: indices into SHED.ruins.pals [green, green, yellow-green, rust-gold, withered brown])
+  // half browner than it (DYING: indices into SHED.ruins.pals [green, green, yellow-green, rust-gold, withered brown]).
+  // A leaf of a 3D tree (autumn ramps, trees3d.js B.autumn) is the colour of the spray it left: once autumn has begun, the
+  // stage a leaf lets go from is drawn the way the crown loses them (core/autumn.js fallStage: the sprays that turned first go
+  // first), and an unturned one is the season's green. The crown's own ramp is that green now (sim/env.js LEAF.autumn), so
+  // in autumn the other things that shed (bushes) take only the dying colours
   const DYING = {spring: [4, 2], summer: [2, 2, 3], autumn: [3, 4], winter: [4]};
   let crownPal = null, crownV = -1;
   const hex6 = c => '#' + c.map(v => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')).join('');
-  function leafPal(S) {
+  const crownOwn = e => {   // the season's green leaf ([hi, base, shade] hex), null where the biome has none
+    const lr = e.leafRamp?.();   // (blended across a season's change; rebuilt only when it changed)
+    if (lr && e.ver.leaf !== crownV) { crownV = e.ver.leaf; crownPal = [hex6(lr[0]), hex6(lr[1]), hex6(lr[2])]; }
+    return lr ? crownPal : null;
+  };
+  const autumnOf = p => host.itemOf?.(p)?.pose?.autumn || null;   // a 3D tree's autumn ramps
+  function leafPal(S, aut) {
     const e = host.env; if (!e?.seasonal) return S.pals[R() * S.pals.length | 0];
-    if (R() < .5) {
-      const lr = e.leafRamp?.();   // (blended across a season's change; rebuilt only when it changed)
-      if (lr) { if (e.ver.leaf !== crownV) { crownV = e.ver.leaf; crownPal = [hex6(lr[0]), hex6(lr[1]), hex6(lr[2])]; } return crownPal; }
-    }
+    if (aut && e.autumn > .02) { const st = fallStage(e.autumn, R()); if (st > 0) return aut[st - 1]; const g = crownOwn(e); if (g) return g; }
+    if (R() < .5 && e.season !== 'autumn') { const g = crownOwn(e); if (g) return g; }
     const ix = DYING[e.season] || DYING.autumn; return S.pals[ix[R() * ix.length | 0]];
   }
   const leafRate = S => { const e = host.env; return S.kind === 'leaf' && e?.seasonal ? e.leafK * .6 + (e.leafFall || 0) * 3.2 : 1; };

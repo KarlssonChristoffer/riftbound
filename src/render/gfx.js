@@ -17,6 +17,7 @@
 // World axes: X east, Y up, Z south (arena x, h, y). Metres.
 import * as THREE from 'three';
 import {flags} from '../core/flags.js';
+import {AUTUMN as AU, AUTUMN_MID} from '../core/autumn.js';
 
 export const DEG = Math.PI / 180;
 const R_DEPTH = 120;   // metres of "nearness" mapped onto the depth range (the world is 62 x 30 m)
@@ -38,20 +39,45 @@ vec3 sway() {
   vec2 s = floor(l + .5); return uLeanX * s.x + uLeanY * s.y;
 }
 `;
-const meshVS = sway => HEAD + (sway ? SWAY : 'vec3 sway() { return vec3(0.); }\n') + `
+// AUTUMN (core/autumn.js is the model; the numbers are its): how fast a leaf clump turns, per tree. aSpray = the clump's
+// centre in the crown's ellipsoid (xyz, bytes, in 1/1.25ths) + its own random (w 0..1; bark -1). The clump's place is taken
+// into the WORLD frame (the tree's yaw), so the sun side is the south side whichever way the tree stands; fM is the same for
+// every vertex of a clump, so the mesh pass and the shadow pass (SHADOW_SWAY_VS) agree on every leaf
+const gl = v => Number.isInteger(v) ? v + '.' : String(v);   // a number as a GLSL float
+const gl3 = a => `vec3(${a.map(gl).join(', ')})`;
+const SPRAY_VS = `
+in vec4 aSpray; uniform vec2 uSeed;
+float sprayM(mat4 mm) {
+  if (aSpray.w < 0.) return ${gl(AUTUMN_MID)};
+  mat3 M = mat3(mm);
+  vec3 ew = M * (aSpray.xyz * 1.25) / length(M[0]);
+  float t1 = fract(sin(dot(uSeed, vec2(12.9898, 78.233))) * 43758.5453), t2 = fract(t1 * 91.7 + .37);   // per tree: where it stands
+  float k = clamp(.5 + ${gl(AU.expo)} * dot(ew, ${gl3(AU.sun)}) + ${gl(AU.rnd)} * (fract(aSpray.w + t2) - .5) + ${gl(AU.tree)} * (t1 - .5), 0., 1.);
+  return ${gl(AU.lo)} + ${gl(AU.hi - AU.lo)} * k;
+}`;
+const NO_SPRAY_VS = `float sprayM(mat4 mm) { return ${gl(AUTUMN_MID)}; }\n`;
+// the thinning (uLeafK): a fragment of a leaf is gone where a 3D noise (clumps of a few cm, varied per tree) beats the season's
+// fullness, and the sprays that turned further fall first: + drop x autumn x (m - mid), nothing at autumn 0. MESH_FS and
+// SHADOW_SWAY_FS both use it (vn3, uLeafK, uSeed above it), so the shadow drops exactly the leaves the camera loses
+const LEAF_GONE = `
+uniform float uAutumn;
+bool leafGone(vec3 pl, float m) { return uLeafK < .999 && vn3(pl * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) + ${gl(AU.drop)} * uAutumn * (m - ${gl(AUTUMN_MID)}) > uLeafK * 1.1 - .05; }`;
+const meshVS = sway => HEAD + (sway ? SWAY + SPRAY_VS : 'vec3 sway() { return vec3(0.); }\n' + NO_SPRAY_VS) + `
 in vec3 position; in vec3 normal; in float aPart; in float aFam; in float aBias; in float aFixed;
 uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
-out vec3 vN; out vec3 vW; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed;
+out vec3 vN; out vec3 vW; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed; flat out float fM;
 void main() {
   vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway();
   vW = w.xyz; vN = mat3(modelMatrix) * normal;
   vNL = normal; vPL = position;   // the prop's own frame: moss stays where it grew when the prop tips and rolls
-  fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed;
+  fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed; fM = sprayM(modelMatrix);
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
 const MESH_FS = HEAD + OUTS + `
-in vec3 vN; in vec3 vW; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed;
+in vec3 vN; in vec3 vW; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in float fM;
 uniform sampler2D uRamps; uniform vec3 uLArt; uniform float uObj, uFlash; uniform vec2 uSeed;
+uniform vec3 uAut[12];    // leaves only: the species' autumn ramps, stage 1..4 x tone 0..2 (trees3d.js B.autumn); uAutOn 0 = none
+uniform float uAutOn;
 uniform vec4 uRip;        // leaves only: (k x, k z, phase, amount) of a light wave rolling along the wind (0 = still)
 uniform float uLeafK;     // leaves only: how full the crowns are this season (1 = full)
 uniform vec3 uCover;      // x: amount (0 = none), y: up threshold, z: cover family
@@ -64,6 +90,7 @@ float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.54
 float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
+` + LEAF_GONE + `
 void main() {
   // the season thins the crowns (uLeafK: sim/env.js leafK, 1 = full .. ~.07 = bare): leaves go in clumps of a few cm (a 3D
   // noise in the model's frame, varied per tree by uSeed); the trees' shadow pass drops the same ones (SHADOW_SWAY_FS).
@@ -73,9 +100,9 @@ void main() {
   // their inside
   bool inner = !gl_FrontFacing;
   if (inner && (fFixed > -1.5 || uLeafK >= .999)) discard;
-  if (fFixed < -1.5 && uLeafK < .999 && vn3(vPL * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) > uLeafK * 1.1 - .05) discard;
+  if (fFixed < -1.5 && leafGone(vPL, fM)) discard;   // (the sprays that turned further go first: LEAF_GONE)
   vec3 n = normalize(vN); if (inner) n = -n;
-  float fam = fFam;
+  float fam = fFam, jn = .5;   // jn: the leaves' 3D noise (below), which the autumn stage borrows
   int tone;
   if (fFixed >= 0.) tone = int(fFixed);
   else if (inner) tone = 2;
@@ -83,8 +110,8 @@ void main() {
     float d = dot(n, uLArt) + fBias;
     // aFixed -2 (leaves): the painted blobs' jitter, a 3D noise in the model's own frame (it stays on the leaves as the
     // camera turns), so the tone bands break into leafy patches
-    if (fFixed < -1.5) d += (vn3(vPL * 7.5 + vec3(uSeed.x, 0., uSeed.y)) - .5) * .42
-      + uRip.w * sin(dot(vW.xz, uRip.xy) - uRip.z);   // wind: bands of light rolling through the leaves (uRip: k along the wind, phase, amount)
+    if (fFixed < -1.5) { jn = vn3(vPL * 7.5 + vec3(uSeed.x, 0., uSeed.y)); d += (jn - .5) * .42
+      + uRip.w * sin(dot(vW.xz, uRip.xy) - uRip.z); }   // wind: bands of light rolling through the leaves (uRip: k along the wind, phase, amount)
     tone = d > .62 ? 0 : d > .12 ? 1 : 2;
   }
   // biome cover (moss / ash / snow) on what faces up AT REST (the prop's own frame, so it tips and rolls with it):
@@ -95,6 +122,16 @@ void main() {
     if (c > 1. - uCover.x * 2.6) fam = uCover.z;
   }
   vec3 alb = texelFetch(uRamps, ivec2(tone, int(fam + .5)), 0).rgb;
+  // autumn: a leaf of a tree with autumn ramps takes its spray's STAGE (core/autumn.js): 0 stays the green leaf row, 1..4 are
+  // the species' ramps at this tone. v = autumn x (how fast this clump turns + flecks of noise + its own sun-facing + the
+  // withering of a nearly bare crown): whole steps, nothing at autumn 0. (The composite keeps this colour and darkens it for
+  // outlines: COMP_FS, soft family)
+  if (fFixed < -1.5 && uAutOn > .5 && uAutumn > 0.) {
+    float v = uAutumn * (fM + ${gl(AU.noise)} * (jn - .5) * 2. + ${gl(AU.face)} * dot(n, ${gl3(AU.sun)})
+      + ${gl(AU.wither[2])} * (1. - smoothstep(${gl(AU.wither[0])}, ${gl(AU.wither[1])}, uLeafK)));   // (what hangs on a nearly bare crown has withered: brown)
+    int st = v < ${gl(AU.cuts[0])} ? 0 : v < ${gl(AU.cuts[1])} ? 1 : v < ${gl(AU.cuts[2])} ? 2 : v < ${gl(AU.cuts[3])} ? 3 : 4;
+    if (st > 0) alb = uAut[(st - 1) * 3 + tone];
+  }
   bool glow = abs(fam - uEmitFam.x) < .5 || abs(fam - uEmitFam.y) < .5;
   // burning: only what burns chars (world.js FAMS: wood 0, rope 5, void 9, bark 13; hoops, iron, stone stay). It
   // blackens in patches (higher up first: the flame is on top), glowing cracks crawl through the char, ash settles on
@@ -385,18 +422,19 @@ in vec3 position; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
 void main() { gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.); }`;
 // a swaying mesh casts its shadow from the same leaned (whole-pixel) pose the camera sees, minus the leaves the season
 // took (the same noise as MESH_FS)
-const SHADOW_SWAY_VS = HEAD + SWAY + `
+const SHADOW_SWAY_VS = HEAD + SWAY + SPRAY_VS + `
 in vec3 position; in float aFixed; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
-out vec3 vPL; flat out float fFixed;
-void main() { vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway(); vPL = position; fFixed = aFixed; gl_Position = projectionMatrix * viewMatrix * w; }`;
+out vec3 vPL; flat out float fFixed; flat out float fM;
+void main() { vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway(); vPL = position; fFixed = aFixed; fM = sprayM(modelMatrix); gl_Position = projectionMatrix * viewMatrix * w; }`;
 const SHADOW_FS = HEAD + ONE_OUT + `void main() { o0 = vec4(1.); }`;
 const SHADOW_SWAY_FS = HEAD + ONE_OUT + `
-in vec3 vPL; flat in float fFixed; uniform float uLeafK; uniform vec2 uSeed;
+in vec3 vPL; flat in float fFixed; flat in float fM; uniform float uLeafK; uniform vec2 uSeed;
 float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
-void main() { if (fFixed < -1.5 && uLeafK < .999 && vn3(vPL * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) > uLeafK * 1.1 - .05) discard; o0 = vec4(1.); }`;
+` + LEAF_GONE + `
+void main() { if (fFixed < -1.5 && leafGone(vPL, fM)) discard; o0 = vec4(1.); }`;
 const SHADOW_CARD_FS = HEAD + ONE_OUT + `
 in vec2 vUv; in vec2 vC; uniform sampler2D uTex;
 void main() { if (texture(uTex, vUv).a < .5) discard; o0 = vec4(1.); }`;
@@ -515,6 +553,10 @@ void main() {
     }
     int ti = outDark ? 4 : outLit ? 5 : line ? 3 : seam ? min(tone + 1, 3) : edge ? min(tone + 1, 2) : tone;
     alb = texelFetch(uRamps, ivec2(ti, int(fam + .5)), 0).rgb;
+    if (soft) {   // a crown turned by autumn (MESH_FS wrote its spray's colour into tA): keep it, and give the outline / edge tones its hue
+      vec3 r0 = texelFetch(uRamps, ivec2(tone, int(fam + .5)), 0).rgb, kk = abs(a0.rgb / max(r0, vec3(.02)) - 1.);
+      if (max(kk.r, max(kk.g, kk.b)) > .02) alb = clamp(alb * a0.rgb / max(r0, vec3(.02)), 0., 1.);
+    }
   }
 
   // ---- painted layers before the light: ground decals / animal shadows / ripples (ground only), cloud shadows (all)
@@ -757,8 +799,18 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
 
   // ---- materials
   const MESH_VS = meshVS(false), MESH_SWAY_VS = meshVS(true);
-  const meshMat = (obj, seed, sw = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
-    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
+  // a tree's autumn ramps (trees3d.js B.autumn: 4 stages x 3 tones of '#rrggbb') as the shader's uAut: shared by every tree of a species
+  const autVecs = new WeakMap(), AUT_NONE = Array.from({length: 12}, () => new THREE.Vector3());
+  const autOf = pal => {
+    let v = autVecs.get(pal);
+    if (!v) {   // (the ramps are raw sRGB bytes, no colour management: parse the hex ourselves)
+      v = AUT_NONE.map((_, i) => { const h = pal[Math.floor(i / 3)]?.[i % 3] || '#000000'; return new THREE.Vector3(parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255); });
+      autVecs.set(pal, v);
+    }
+    return v;
+  };
+  const meshMat = (obj, seed, sw = null, aut = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
+    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
   const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null}) => raw(SURF_VS, SURF_FS, {
@@ -828,12 +880,13 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   }
   // a live ramp mesh (+ its shadow caster). setMatrix moves both; setGeometry swaps the model (a breakable's stage).
   // o.sway: the geometry has aFlex and the mesh leans (setLean(x, y): art px at full weight, x along the screen, y toward
-  // the camera; whole pixels per vertex in the shader, its shadow leans with it)
+  // the camera; whole pixels per vertex in the shader, its shadow leans with it). o.autumn: the tree's autumn ramps (trees3d.js
+  // B.autumn, [s1..s4] x ['#hi', '#base', '#shade']): its leaves turn, spray by spray, with U.autumn (core/autumn.js)
   function mesh(geom, obj, matrix, o = {}) {
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
-    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gScene.add(gm);
+    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
-      uLeafK: U.leafK, uSeed: gm.material.uniforms.uSeed}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
+      uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.layers.enable(1); sScene.add(sm);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)

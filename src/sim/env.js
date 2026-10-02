@@ -10,7 +10,7 @@
 //            the dusk mood lit from the east), the sun sweeping through the northern sky so shadows keep falling toward
 //            the camera side like the art, then the weather on top (clouds soften the sun and its shadows, fog thickens)
 //   wind     windLevel: the wind strength the weather asks for (the wind feature's 'auto' mode follows it)
-//   seasons  leafRamp(): the ruins' leaf ramp for the season (spring fresh, summer deep, autumn rust, winter withered),
+//   seasons  leafRamp(): the ruins' leaf ramp for the season (spring fresh, summer deep, autumn a late green, winter withered),
 //            blended across a season's change; ver.leaf counts its changes (update on change, never per frame)
 //   ground   the weather's memory: snowCover (builds in snowfall, melts slowly in winter, fast in spring), wet (rain wets,
 //            the sun dries), leafK (how full the ruins' crowns are through the year); features/weather.js shows them.
@@ -91,11 +91,13 @@ const CLIMATE = {
 };
 const SEASONAL = {ruins: true};               // biomes whose look follows the seasons
 const FIXED = {frost: 'winter'};              // biomes stuck in one season
-// the ruins' leaves per season (4-tone ramps, light -> dark: world.js ramp6 adds the line / outline tones)
+// the ruins' leaves per season (4-tone ramps, light -> dark: world.js ramp6 adds the line / outline tones). This is the GREEN
+// leaf of the season, what the 3D crowns show where a spray hasn't turned: in autumn a late, slightly yellowed green (the turned
+// sprays take the species' own autumn ramps, trees3d.js B.autumn, by env.autumn: core/autumn.js), not the rust it used to be
 export const LEAF = {
   spring: ['#86a86a', '#6a8c58', '#4f6c47', '#354a35'],
   summer: ['#6f8c68', '#577154', '#435a45', '#2e3f33'],
-  autumn: ['#c49a4e', '#a06a36', '#74462a', '#47291e'],
+  autumn: ['#789262', '#5f7a4e', '#4a6040', '#33422f'],
   winter: ['#80806a', '#646451', '#4c4c3f', '#33332c'],
 };
 const LEAF_RGB = Object.fromEntries(Object.entries(LEAF).map(([k, v]) => [k, v.map(hex)]));

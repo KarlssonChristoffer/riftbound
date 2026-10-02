@@ -14,10 +14,14 @@
 //          ~0.3 m above the ground. The season thins leaves, never whips: a bare willow is arching limbs and drooping whips,
 //          and no leaf is ever left in the air. The lower a strand hangs, the more it sways (aFlex); each strand flutters on
 //          its own phase (whip and tufts together)
-// treeModel(p, biome, fam) -> {geo, yaw, scale, top, bones, crown, species, seed} | null (no model: the prop keeps its
-//   card). crown = {x, z, y0, y1, r} in the model's frame (leafy species only)
+// treeModel(p, biome, fam) -> {geo, yaw, scale, top, bones, crown, autumn, species, seed} | null (no model: the prop keeps its
+//   card). crown = {x, z, y0, y1, r} in the model's frame (leafy species only). autumn = the species' autumn ramps
+//   [s1, s2, s3, s4] (B.autumn, each ['#hi', '#base', '#shade'], in the order the leaves turn, s4 the dying brown; stage 0
+//   is the green leaf ramp row): gfx.js colours each spray's stage from them (core/autumn.js is the model), wind.js
+//   colours the leaves that fall; null on a species without leaves
 // boneHit(tree, from, to) -> where an arrow sticks in the trunk / a big limb, or null (the twigs and leaves let it through)
-// The geometry carries aFlex (the wind's bend weight per vertex): gfx.js leans it (mesh {sway: true}, setLean)
+// The geometry carries aFlex (the wind's bend weight per vertex): gfx.js leans it (mesh {sway: true}, setLean), and aSpray
+//   (every leaf clump: its centre in the crown's ellipsoid and its own random: how early that spray turns in autumn; bark -1)
 //   fam(name) -> the family index (world.js FAMS). Shapes are cached per (species, seed): the world's ~40 trees share
 //   SEEDS shapes per species, each turned and scaled per tree. p.seed picks a shape (the lineup does).
 // Frame: x east, y up, z south, metres, origin = the ground point (as the glb props).
@@ -55,18 +59,25 @@ const hashXY = (x, y) => { const v = Math.sin(Math.round(x * 10) * 12.9898 + Mat
 // aFlex (the wind's bend weight, gfx.js SWAY): flexOf(y) per vertex (bark), or a constant per part (a leaf clump moves as
 // a block: one weight at its centre, so the whole clump steps by the same whole pixels). aPhase: a leaf clump's own
 // flutter phase (0..2pi: each clump dances on its own in a gust), -1 = bark (no flutter)
+// aSpray of a leaf clump: where it hangs in the crown (its centre minus the crown's centre over the crown's radii, ~ -1..1,
+// kept in 1/1.25ths so a clump on the shell still fits the byte) and its own random 0..1 (a hash of the tree's seed and the
+// clump, never the shape's rng stream: the shapes are as they were); gfx.js / core/autumn.js turn that into how early it turns
+const NO_SPRAY = [0, 0, 0, -1];
+const SQ = v => Math.max(-1, Math.min(1, v / 1.25));
+const sprayOf = (c, C, R, seed, i) => [SQ((c.x - C.x) / R.x), SQ((c.y - C.y) / R.y), SQ((c.z - C.z) / R.z), h3(i, seed, 7.7, 1.3)];
 class Build {
-  constructor(fam, flexOf) { this.F = fam; this.flexOf = flexOf; this.pos = []; this.nrm = []; this.aPart = []; this.aFam = []; this.aBias = []; this.aFixed = []; this.aFlex = []; this.aPhase = []; this.bones = []; this.np = 0; this.cur = null; }
-  part(fam, bias = 0, fixed = -1, flex = null, phase = -1) { this.cur = {pi: this.np++ % 64, fam: this.F(fam), bias, fixed, flex, phase}; return this; }
+  constructor(fam, flexOf) { this.F = fam; this.flexOf = flexOf; this.pos = []; this.nrm = []; this.aPart = []; this.aFam = []; this.aBias = []; this.aFixed = []; this.aFlex = []; this.aPhase = []; this.aSpray = []; this.leafy = false; this.bones = []; this.np = 0; this.cur = null; }
+  part(fam, bias = 0, fixed = -1, flex = null, phase = -1, spray = null) { this.cur = {pi: this.np++ % 64, fam: this.F(fam), bias, fixed, flex, phase, spray: spray || NO_SPRAY}; if (spray || fixed === -2) this.leafy = true; return this; }
   vert(p, n, bias) {
     const c = this.cur; this.pos.push(p.x, p.y, p.z); this.nrm.push(n.x, n.y, n.z);
-    this.aPart.push(c.pi); this.aFam.push(c.fam); this.aBias.push(bias ?? c.bias); this.aFixed.push(c.fixed); this.aFlex.push(c.flex ?? this.flexOf(p.y)); this.aPhase.push(c.phase);
+    this.aPart.push(c.pi); this.aFam.push(c.fam); this.aBias.push(bias ?? c.bias); this.aFixed.push(c.fixed); this.aFlex.push(c.flex ?? this.flexOf(p.y)); this.aPhase.push(c.phase); this.aSpray.push(c.spray[0], c.spray[1], c.spray[2], c.spray[3]);
   }
   tri(a, b, c, na, nb, nc, bias) { this.vert(a, na, bias); this.vert(b, nb, bias); this.vert(c, nc, bias); }
   geometry() {
     const g = new THREE.BufferGeometry(), A = (n, a, k) => g.setAttribute(n, new THREE.Float32BufferAttribute(a, k));
     A('position', this.pos, 3); A('normal', this.nrm, 3); A('aPart', this.aPart, 1); A('aFam', this.aFam, 1); A('aBias', this.aBias, 1); A('aFixed', this.aFixed, 1);
     A('aFlex', this.aFlex, 1); A('aPhase', this.aPhase, 1);
+    g.setAttribute('aSpray', new THREE.Int8BufferAttribute(Int8Array.from(this.aSpray, v => Math.round(v * 127)), 4, true));   // (4 bytes a vertex: x y z in -1.25 .. 1.25, w 0 .. 1, w -1 = no spray)
     g.computeBoundingSphere(); g.computeBoundingBox(); return g;
   }
 }
@@ -124,6 +135,12 @@ function clump(B, c, rad, squash, seed, C, R, bias, r, detail = TUNE.detail, lum
 }
 
 // ---------------------------------------------------------------- species
+// the autumn ramps (B.autumn): s1 .. s4 in the order the leaves turn, each ['#hi', '#base', '#shade'] (the tones MESH_FS picks;
+// stage 0 is the species' green, the leaf ramp row). The shade is ~.78 of the base and the highlight ~1.25 of it, like the
+// green's. s4 is the dying brown: the sprays that turned first are the ones that fall
+const AUTUMN_OAK = [['#cdb858', '#a8963f', '#7a6c30'], ['#e6b44a', '#c48a32', '#8c5e26'], ['#cf6a38', '#a64a26', '#6c2e1c'], ['#92714a', '#6e5232', '#46341f']];     // ochre -> amber -> rust -> brown
+const AUTUMN_DEFAULT = AUTUMN_OAK;
+const AUTUMN_WILLOW = [['#b5c068', '#8fa04c', '#667535'], ['#e2d462', '#c3b53e', '#8c8230'], ['#ecc454', '#cf9f35', '#946f25'], ['#c4ab78', '#a58b5c', '#75613e']];   // yellow-green -> yellow -> gold -> tan
 function oak(seed, fam) {
   const r = rng(seed * 31 + 7);
   // the fork sits well below the crown, so the limbs show between them (the painted oak's V)
@@ -185,9 +202,10 @@ function oak(seed, fam) {
   for (const [i, q] of cl.entries()) {
     const e = V((q.c.x - C.x) / R.x, (q.c.y - C.y) / R.y, (q.c.z - C.z) / R.z);
     const bias = TUNE.lift + (q.core ? -.2 : TUNE.light * e.y / .6 - TUNE.inner * (1 - Math.min(1, e.length() / .6)) + (r() - .5) * .08);
-    B.part('leaf', bias, -2, crown(q.c.y), q.core ? -1 : (i * 2.39996 + seed * .7) % (Math.PI * 2));   // the dark core stays put: no gaps open
+    B.part('leaf', bias, -2, crown(q.c.y), q.core ? -1 : (i * 2.39996 + seed * .7) % (Math.PI * 2), sprayOf(q.c, C, R, seed, i));   // the dark core stays put: no gaps open
     clump(B, q.c, q.rad, .82, seed * 13 + i, C, R, bias, r, q.small ? 3 : TUNE.detail);
   }
+  B.autumn = AUTUMN_OAK;
   return B;
 }
 
@@ -289,7 +307,7 @@ function willow(seed, fam) {
   // the masses: a lumpy leaf clump each (+ its lobe), the arch's twigs fanning up into it (a few of those carry strands too)
   for (const [i, m] of masses.entries()) {
     const sq = .72, R = V(m.rad, m.rad * sq, m.rad), bias = TUNE.lift + clamp((m.c.y - 3.1) * .22, -.12, .16) + (r() - .5) * .08;
-    B.part('leaf', bias, -2, crown(m.c.y), (i * 2.39996 + seed * .7) % TAU);
+    B.part('leaf', bias, -2, crown(m.c.y), (i * 2.39996 + seed * .7) % TAU, sprayOf(m.c, CC, CR, seed, i));
     clump(B, m.c, m.rad, sq, seed * 13 + i, m.c, R, bias, r, m.k, 1.4);
     if (m.lobe) clump(B, m.c.clone().add(m.lobe), m.rad * .66, sq, seed * 13 + i + 40, m.c, R, bias, r, 3, 1.4);
     const A = m.own.reduce((b, p) => p.distanceToSquared(m.c) < b.distanceToSquared(m.c) ? p : b, m.own[0]);   // the arch's point nearest the mass
@@ -318,16 +336,17 @@ function willow(seed, fam) {
     const at_ = h => { const q = Math.min(1, h / .38), d = off * (1 - (1 - q) * (1 - q)), w = Math.sin(wob + h * 2.2) * .015; return V(A.x + o.x * d + sp.x * w, A.y - h, A.z + o.z * d + sp.z * w); };   // out a little at the top, then straight down
     const fl = y => crown(A.y) * (1 + .36 * Math.max(0, A.y - y));
     B.flexOf = fl; B.part('bark', 0, -1, null, ph); tube(B, [0, .14, .34, .34 + (L - .34) * .5, L].map(at_), [.02, .018, .016, .014, .012], 3, r()); B.flexOf = crown;   // the whip: bark, the whole length, never thinned; it flutters with its leaves (one phase per strand: a leaf never drifts off its twig)
-    const nc = Math.max(4, Math.round(L / .27));
+    const nc = Math.max(4, Math.round(L / .27)), spray = sprayOf(A, CC, CR, seed, 100 + ns);   // (a strand turns as one: the spray is where it hangs from)
     for (let k = 0; k < nc; k++) {   // leaf clumps ON the whip, smaller toward its tip
       const h = clamp(.1 + (L - .18) * (k + (r() - .5) * .3) / (nc - 1), .1, L), f = h / L, pos = at_(h), rad = .076 - f * .026 + (r() - .5) * .012, dist = Math.hypot(pos.x - top.x, pos.z - top.z);
       const bias = TUNE.lift + .3 + clamp((pos.y - 1.8) * .05, -.08, .08) - TUNE.inner * (1 - Math.min(1, dist / 1.2)) + (r() - .5) * .08;
-      B.part('leaf', bias, -2, fl(pos.y), ph);
+      B.part('leaf', bias, -2, fl(pos.y), ph, spray);
       clump(B, pos, rad, 2.6, seed * 29 + ns * 7 + k, CC, CR, bias, r, 'oct');
     }
     ns++;
   }
   B.crown = {x: top.x + .3, z: top.z, y0: 1.9, y1: apexY + .65, r: 1.15};   // where arrows shake leaves loose, birds perch (wind.js)
+  B.autumn = AUTUMN_WILLOW;
   B.strands = ns; B.masses = masses.length; B.kinds = strands.reduce((o, q) => (o[q.kind] = (o[q.kind] || 0) + 1, o), {});   // (counts, for the tools)
   return B;
 }
@@ -342,7 +361,11 @@ const cache = new Map();
 export function treeShape(species, seed, fam) {
   const key = `${species}:${seed}:` + Object.values(TUNE).join(':');
   let s = cache.get(key);
-  if (!s) { const B = SPECIES[species](seed, fam), geo = B.geometry(); s = {geo, top: geo.boundingBox.max.y, bones: B.bones, crown: B.crown || null, species, seed}; cache.set(key, s); }
+  if (!s) {
+    const B = SPECIES[species](seed, fam), geo = B.geometry();
+    s = {geo, top: geo.boundingBox.max.y, bones: B.bones, crown: B.crown || null, autumn: B.leafy ? B.autumn || AUTUMN_DEFAULT : null, species, seed};   // (a leafy species that sets no B.autumn turns rust)
+    cache.set(key, s);
+  }
   return s;
 }
 // an arrow's step (arena coords: x east, y south, h up) against a tree's bones. tr = {x, y, z, pose (treeModel)}.

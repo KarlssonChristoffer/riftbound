@@ -475,8 +475,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const treeOf = p => trees3d && p.kind === 'tree' && !p.painted ? treeModel(p, biome.id, famOf) : null;
   const placeOf = (it, x, h, z, M) => it.pose ? M.makeRotationY(it.pose.yaw).scale(_scl.setScalar(it.pose.scale)).setPosition(x, h, z) : M.makeTranslation(x, h, z);
   // a crown overhangs: in the top-down height map it would stand as a solid pillar and black out the light under it
-  // (props cast into the cached static sun shadow, gfx mesh {static}; the swaying 3D trees cast every frame)
-  const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose, static: !it.pose}); if (it.pose) m.sm.layers.disable(1); return m; };
+  // (props cast into the cached static sun shadow, gfx mesh {static}; the swaying 3D trees cast every frame). A tree brings its
+  // autumn ramps (trees3d.js B.autumn): its crown turns spray by spray with the season (gfx.js MESH_FS)
+  const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose, static: !it.pose, autumn: it.pose?.autumn}); if (it.pose) m.sm.layers.disable(1); return m; };
   for (const p of props) {
     const z0 = p.z || 0;
     if (p.outside && biome.hole?.(p.x, p.y, ctxO)) continue;   // over the ravine / in the stream
