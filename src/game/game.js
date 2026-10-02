@@ -45,7 +45,8 @@ export async function createGame(host) {
     onStageClear() { setPhase('clear'); hud.banner('Stage cleared', STAGES[run.stage + 1] ? 'choose an augment' : '', 2, '#f2d27a'); },
   });
   core.steer = b => nav.steer(b);
-  core.immune = () => mode === 'run' && (phase === 'dead' || phase === 'travel' || P.untouchable || rollT > 0 || (P.raw.blink || 0) > 0);
+  const ended = () => phase === 'dead' || phase === 'won' || phase === 'over';   // the run is ending or over: no more hits, no second death
+  core.immune = () => mode === 'run' && (ended() || phase === 'travel' || P.untouchable || rollT > 0 || (P.raw.blink || 0) > 0);
 
   const stageName = i => host.BIOMES.find(b => b.id === STAGES[i].biome)?.name ?? STAGES[i].biome;
   const chestCost = () => Math.round(25 * (1 + .5 * (run?.stage || 0)) / 5) * 5;
@@ -90,6 +91,7 @@ export async function createGame(host) {
     hud.banner(`Stage ${i + 1} · ${stageName(i)}`, `${st.waves} waves`, 2.4);
   }
   function die() {
+    if (ended()) return;   // one death per run (hp stays <= 0 behind the summary screen)
     setPhase('dead'); deadT = 0; lock(true); host.timeScale = .3;
     director.stop();
     hud.banner('You fell', '', 3, '#e0604a');
@@ -123,7 +125,7 @@ export async function createGame(host) {
   // ---------------------------------------------------------------- run events
   function onEvents(evs) {
     for (const e of evs) {
-      if (e.type === 'player.hurt' && phase !== 'dead') {
+      if (e.type === 'player.hurt' && !ended()) {
         const d = stats.hurt(e.dmg); host.PL.flicker(.9);
         hud.float(P.x, P.y, P.z + 1.9, '-' + d, '#ff6a50', true);
         if (stats.S.hp <= 0) die();
