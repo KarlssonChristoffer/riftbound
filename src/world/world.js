@@ -387,7 +387,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   //   manageMatrix (a feature poses the mesh itself), hover (0..1 pulse set by the host)}
   const items = [], byProp = new Map(), extra = new Set();
   let nextId = 10;
-  const SHADOWLESS = new Set(['tuft']);
+  const SHADOWLESS = new Set(['tuft', 'reed', 'fern']);
   if (haveGlb) await Promise.all([...new Set(props.map(stateOf).filter(Boolean))].map(s => glbGeometry(loader, s)));   // all at once
   const cardOf = (sp, o) => G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1], type: 3, bias: .00125, ...o});
   // procedural trees (trees3d.js): a live mesh instead of the painted card, turned and scaled per tree (it.pose)
