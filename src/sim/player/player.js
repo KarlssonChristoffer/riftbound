@@ -195,7 +195,8 @@ export function createPlayer(H) {
     if (s0 < 0) return null;
     let s1 = -1; for (let d = s0; d <= s0 + 5; d += .05) if (!inStream(P.x + dx * d, P.y + dy * d)) { s1 = d; break; }
     const land = s1 + .25, lx = P.x + dx * land, ly = P.y + dy * land;
-    // (a leap never lands higher than it started: the plateau's pool lies right under its west face, so the far "bank" there is the cliff's top)
+    // (a leap never lands higher than it started: the plateau's pool lies right under its south face, so the far "bank" there is the cliff's top,
+    // and a roll toward the pool from a metre away would turn into a leap that ends against the face, in the water)
     if (s1 > 0 && land <= reach && elev(lx, ly) <= elev(P.x, P.y) + .3 && !H.blocked(lx, ly, elev(lx, ly), false)) return {dist: Math.max(1.2, land), safe: true};
     if (s0 <= .5) return {dist: reach, safe: false};
     return null;
@@ -222,9 +223,9 @@ export function createPlayer(H) {
     P.state = 'splash'; P.t = 0; P.z = 0; P.back = backTo;
     ev({type: 'player.splash', x: P.x, y: P.y}); H.shake?.(1, .12);
   }
-  // Where a FALL that ended in the water puts you back: behind the landing, against the drift. Off the plateau's west edge that spot can
-  // be water too (the pool under the waterfall is wider than the drift), so it goes on back, a body's length past the water's edge: onto
-  // the plateau, where you stepped off. Anywhere else the first spot is dry and is used as it is
+  // Where a FALL that ended in the water puts you back: behind the landing, against the drift. Off the plateau's south edge at the fall that
+  // spot can be water too (the pool under the waterfall is wider than the drift), so it goes on back, a body's length past the water's edge:
+  // onto the plateau, where you stepped off. Anywhere else the first spot is dry and is used as it is
   function dryBack(bx, by, vx, vy) {
     const l = Math.hypot(vx, vy);
     if (!inStream(bx, by) || l < .05) return [bx, by];
