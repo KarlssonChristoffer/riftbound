@@ -45,7 +45,7 @@ export async function createGame(host) {
     onStageClear() { setPhase('clear'); hud.banner('Stage cleared', STAGES[run.stage + 1] ? 'choose an augment' : '', 2, '#f2d27a'); },
   });
   core.steer = b => nav.steer(b);
-  core.immune = () => mode === 'run' && (phase === 'dead' || phase === 'travel' || P.raw.state === 'roll' || rollT > 0 || (P.raw.blink || 0) > 0);
+  core.immune = () => mode === 'run' && (phase === 'dead' || phase === 'travel' || P.untouchable || rollT > 0 || (P.raw.blink || 0) > 0);
 
   const stageName = i => host.BIOMES.find(b => b.id === STAGES[i].biome)?.name ?? STAGES[i].biome;
   const chestCost = () => Math.round(25 * (1 + .5 * (run?.stage || 0)) / 5) * 5;
@@ -164,8 +164,8 @@ export async function createGame(host) {
       hud.update(dt);
       if (mode !== 'run' || !run) return;
       phaseT += dt;
-      // dodge roll: untouchable while rolling, plus the Nimble window after
-      const roll = P.raw.state === 'roll'; if (wasRoll && !roll) rollT = stats.S.iframe; wasRoll = roll; rollT = Math.max(0, rollT - dt);
+      // dodge (roll / backstep): untouchable while dodging, plus the Nimble window after
+      const roll = P.untouchable; if (wasRoll && !roll) rollT = stats.S.iframe; wasRoll = roll; rollT = Math.max(0, rollT - dt);
       onEvents(evs);
       stepBleeds(dt); stepGold();
       stats.update(dt, phase !== 'dead');
