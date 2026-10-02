@@ -82,28 +82,32 @@ const MARK = {
   ember: ['#5a504e', '#766c68', '#948c88', '#b2acaa', '#cecac8'],
   frost: ['#7e8ea8', '#96a4bc', '#aebacc', '#c6cedc', '#dce2ec'],   // blue-grey slush
   rift: ['#726290', '#8a7ca6', '#a498bc', '#beb4d0', '#d8d0e4'],
+  desert: ['#9a8064', '#ae967a', '#c2ae94', '#d6c8b2', '#e8e0d2'],   // scuffed sand / dust
 };
 const SCORCH = {
   ruins: ['#857a6e', '#9a9084', '#aea69a', '#c2bcb2', '#d6d2ca', '#e8e6e0'],
   ember: ['#6a5e5c', '#7e7472', '#948c8a', '#aca6a4', '#c4c0be', '#dcd8d6'],
   frost: ['#7686a2', '#8a9ab4', '#a0acc4', '#b6c0d2', '#ccd4e0', '#e0e6ee'],   // melted: wet blue-grey slush
   rift: ['#665888', '#7a6e9a', '#9086ae', '#a8a0c2', '#c0bad4', '#d8d4e4'],
+  desert: ['#7e6c5a', '#94826e', '#aa9a86', '#c0b29e', '#d6cab8', '#eae2d6'],
 };
 const WET = {   // footprints after falling in (ember: charred soles out of the lava)
   ruins: ['#6a7a92', '#8694aa', '#a4aec0', '#c4cad6'],
   ember: ['#3a2c2a', '#5a4a46', '#80726e', '#a89e9a'],
   frost: ['#5e7092', '#7a8cac', '#9caac4', '#bec8da'],
   rift: ['#56467a', '#726496', '#9286b2', '#b4aace'],
+  desert: ['#6e5e4a', '#887862', '#a4947e', '#c2b49e'],   // muddy soles out of the creek
 };
-const CHIP = {ruins: '#b4a27c', ember: '#8c8078', frost: '#eef4fc', rift: '#9c8cc4'};   // splinter / crumb by an arrow hole
+const CHIP = {ruins: '#b4a27c', ember: '#8c8078', frost: '#eef4fc', rift: '#9c8cc4', desert: '#d8bc8c'};   // splinter / crumb by an arrow hole
 const STREAK = {ruins: ['#e6dcc4', '#c8b894', '#a8987a'], ember: ['#c8beb4', '#a39a92', '#7c746e'],
-  frost: ['#e8f0fa', '#c4d0e4', '#98a8c4'], rift: ['#c8b0ec', '#9a7ed4', '#6e56a8']};
-const GHOST = {ruins: '#a8c4d8', ember: '#e09a70', frost: '#c0dcf8', rift: '#7c66b4'};
+  frost: ['#e8f0fa', '#c4d0e4', '#98a8c4'], rift: ['#c8b0ec', '#9a7ed4', '#6e56a8'], desert: ['#f0e0bc', '#d6be92', '#b49a72']};
+const GHOST = {ruins: '#a8c4d8', ember: '#e09a70', frost: '#c0dcf8', rift: '#7c66b4', desert: '#e0c494'};
 const BREATH = {cold: ['#eef4fc', '#b8c6dc'], faint: ['#a4b0c2', '#7c889c'], night: ['#2e3848', '#1c2432']};   // night: a dim emitter lift (moonlit)
 const DRIP = {ruins: {pal: ['#d8eef4', '#8cb8c8']}, frost: {pal: ['#e8f4ff', '#a0b8d4']},
-  ember: {pal: ['#b8481c', '#5e200e'], emit: ['#ffd070', '#f08a30']}, rift: {pal: ['#7448c4', '#40247a'], emit: ['#e4c8ff', '#ac80f2']}};
+  ember: {pal: ['#b8481c', '#5e200e'], emit: ['#ffd070', '#f08a30']}, rift: {pal: ['#7448c4', '#40247a'], emit: ['#e4c8ff', '#ac80f2']},
+  desert: {pal: ['#d6ccac', '#9a8e6e']}};
 const EMBER = ['#ffd27e', '#f28a36', '#b8481c', '#5e200e'];   // hot -> cold
-const ALIGHT = {ruins: '#ffd8a0', ember: '#ffc890', frost: '#ffe4c0', rift: '#f4c8ff'};
+const ALIGHT = {ruins: '#ffd8a0', ember: '#ffc890', frost: '#ffe4c0', rift: '#f4c8ff', desert: '#ffd49a'};
 const AIR = '#efe4c8';   // the arrows' air streak: player.js PX.strTight (PAL.linen[0])
 const CHEST = 1.25, MOUTH = 1.55;   // metres: the arrows' height (aim lean origin), breath height
 const WATER_H = -.18;   // world.js lowers the stream bed by this much (drips sink there)
