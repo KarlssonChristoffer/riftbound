@@ -19,7 +19,7 @@
 // Run it before committing anything that touches the frame (a feature, the renderer, the host). Headless Chrome on the
 // dev machine is ~10-20% faster than a visible window; the budgets in perf.js already account for that.
 import {spawn} from 'node:child_process';
-import {readFileSync, writeFileSync, existsSync, mkdtempSync} from 'node:fs';
+import {readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir, cpus} from 'node:os';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -64,7 +64,15 @@ const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: '
 const prof = mkdtempSync(join(tmpdir(), 'bench-chrome-'));
 const chrome = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit',
   `--window-size=${W},${H}`, '--remote-debugging-port=9342', '--user-data-dir=' + prof, 'about:blank'], {stdio: 'ignore'});
-const quit = code => { try { chrome.kill(); } catch {} try { server.kill(); } catch {} process.exit(code); };
+// the throwaway profile (100-150 MB in %TEMP%) goes with Chrome, which lets go of its files a moment after the kill; if a
+// Chrome child process is slow to die (a busy machine), a detached node keeps trying for two minutes. 'exit' also
+// covers an uncaught error, Ctrl+C goes through quit
+const rmProfile = () => { for (let k = 0; k < 20; k++) { try { return rmSync(prof, {recursive: true, force: true}); } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); }
+  spawn(process.execPath, ['-e', 'for (let k = 0; k < 120; k++) { try { require("fs").rmSync(process.argv[1], {recursive: true, force: true}); break; } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000); }', prof], {detached: true, stdio: 'ignore', windowsHide: true}).unref(); };
+let stopped = false;
+const stop = () => { if (stopped) return; stopped = true; try { chrome.kill(); } catch {} try { server.kill(); } catch {} rmProfile(); };
+const quit = code => { stop(); process.exit(code); };
+process.on('exit', stop); process.on('SIGINT', () => quit(130));
 
 let tabs; for (let k = 0; k < 80; k++) { try { tabs = await (await fetch('http://127.0.0.1:9342/json')).json(); if (tabs.find(t => t.type === 'page')) break; } catch {} await sleep(250); }
 if (!tabs) { console.error('bench: Chrome did not start (set CHROME=...)'); quit(2); }
