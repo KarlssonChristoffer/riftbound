@@ -731,6 +731,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     leanX: {value: new THREE.Vector3(1 / PPM, 0, 0)}, leanY: {value: new THREE.Vector3(0, 0, 1 / PPMY)},   // sway: m per art px (setView)
     time: {value: 0},   // s, for the leaves' flutter (render())
     leafK: {value: 1},  // how full the crowns are this season (features/weather.js from sim/env.js leafK)
+    autumn: {value: 0}, // how far autumn has turned the leaves, 0 green .. 1 (setGround, from sim/env.js autumn): shaders colour leaves by it
     // the moving water (setWaterLook at every build, the clock in render()): see WATER_FS
     wPhase: {value: 0}, wA: {value: new THREE.Vector4(0, 3, 12, -1)}, wB: {value: new THREE.Vector4(.8, .76, 0, 2)}, wRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())},
   };
@@ -1218,7 +1219,7 @@ void main() {
   }
   const setSmooth = v => { U.smooth.value = v; };
   function setSeason(m) { compU.uSeasonM.value.set(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]); }
-  function setGround({tinted, snow, wet, leafK}) { compU.uSeasonK.value = tinted ? 1 : 0; compU.uSnow.value = snow; compU.uWet.value = wet; U.leafK.value = leafK; }
+  function setGround({tinted, snow, wet, leafK, autumn = 0}) { compU.uSeasonK.value = tinted ? 1 : 0; compU.uSnow.value = snow; compU.uWet.value = wet; U.leafK.value = leafK; U.autumn.value = autumn; }
   const setFlash = (r, g, b) => { compU.uFlashC.value.set(r, g, b); };
   const setPlayer = (x, h, z) => { compU.uPlayer.value.set(x, h, z); };
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it

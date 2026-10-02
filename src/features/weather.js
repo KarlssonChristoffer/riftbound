@@ -86,7 +86,7 @@ export async function create(host) {
     aw?.thunder?.(dist, pan);
   }
   // ---- the season's look (env -> gfx): the colour matrix only on a change of season / blend step
-  let seasonKey = -1; const GR = {tinted: false, snow: 0, wet: 0, leafK: 1};   // (the renderer's setters: render/gfx.js)
+  let seasonKey = -1; const GR = {tinted: false, snow: 0, wet: 0, leafK: 1, autumn: 0};   // (the renderer's setters: render/gfx.js)
   const SEAS = ['spring', 'summer', 'autumn', 'winter'], MX = new Float32Array(9);
   function lookFromEnv(E) {
     const q = Math.round(E.seasonK * 16), key = (SEAS.indexOf(E.season) * 4 + SEAS.indexOf(E.seasonNext)) * 17 + q;
@@ -95,7 +95,7 @@ export async function create(host) {
       for (let i = 0; i < 9; i++) MX[i] = a[i] + (b[i] - a[i]) * k;
       G.setSeason(MX);
     }
-    GR.tinted = E.tinted; GR.snow = E.snowCover; GR.wet = E.wet; GR.leafK = E.leafK; G.setGround(GR);
+    GR.tinted = E.tinted; GR.snow = E.snowCover; GR.wet = E.wet; GR.leafK = E.leafK; GR.autumn = E.autumn || 0; G.setGround(GR);
   }
 
   F.view = dt => {   // (the weather's state is the world clock's, sim/env.js: this is how it looks)
