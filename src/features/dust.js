@@ -4,8 +4,9 @@
 //            there (host.wind.at: the same gust fronts the plants and the tumbleweeds feel) is strong enough, more the stronger,
 //            so they run in bands with the fronts; the fast ones are short streaks along their flight. In a strong wind a
 //            finer dust lifts higher and drifts (dithered). Sand gives most, hardpan some, the paving a little (its drifts)
-//   devils   now and then by day a small DUST DEVIL: a funnel of sand grains whirling up round a leaning axis, a skirt of
-//            dust spinning at its foot, a twig or two caught in it. It spins up, wanders across open sand with the wind
+//   devils   now and then by day a small DUST DEVIL: a funnel of dust wound round a leaning axis in bands that turn with
+//            it (the whirl reads), loose grains arcing round it, a skirt of dust spinning at its foot, a twig or two caught
+//            in it; darker than the sand it stands on. It spins up, wanders across open sand with the wind
 //            for 9-22 s and dies down (sooner on paving or rock; walking through it breaks it up). More on a windy or a
 //            hot clear day, none at night or in rain. F.swirl(x, y, out): its whirl at a point (tumbleweed.js catches it)
 //   kicked   the player's steps, landings, jumps and rolls throw a few grains on sand (hardpan: a faint puff; paving, rock:

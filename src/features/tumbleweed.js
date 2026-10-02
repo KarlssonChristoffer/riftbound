@@ -1,6 +1,7 @@
 // TUMBLEWEEDS (view): the desert's signature. A few dry tangles of twigs (up to TUNE.n.max round the view, more the windier
 // it is) roll and bounce downwind with the gusts, spinning as they go. Only in the desert. SHOW ONLY: nothing here touches the
-// sim (no entities, no colliders, no events); the weeds are this file's own pool, like riverside.js's lily pads.
+// sim (no entities, no colliders; one presentation event for the audio); the weeds are this file's own pool, like
+// riverside.js's lily pads.
 //   life     spawned just off-screen UPWIND of the view while the wind is up (host.wind: the same gust fronts the plants feel),
 //            gone again off-screen downwind (or after TUNE.life s, or down the canyon, or drifted off in the creek)
 //   motion   the ground speed eases toward TUNE.push x the wind where it is (a calm lets it settle), it hops every metre or
@@ -13,16 +14,18 @@
 //            The player walking or rolling into one knocks it away (a little hop), an arrow through it kicks it along
 //   water    in the creek it floats half sunk and drifts with the current; the canyon's hole swallows it
 //   devils   a dust devil (features/dust.js F.swirl) catches it: it whirls round and is lifted, then dropped
-//   art      a 3D tangle of curling twigs per variant (three sizes), turned about the rolling axis and drawn in the desert's
-//            straw (outer twigs, lit from the top-left) and bark (inner / far twigs) ramps, ROLL frames a turn for 4 axes
+//   art      a 3D tangle of curling twigs per variant (three sizes), turned about the rolling axis and drawn in two ramps of
+//            its own: bleached straw (the near twigs, lit from the top-left) and weathered bark (inner / far twigs), paler and
+//            darker than the sand so it reads on it; ROLL frames a turn for 4 axes
 //            (the screen directions it can roll in, 45 deg apart; the opposite way plays them backward), with hysteresis
 //            on the axis so a wobble in the wind doesn't flick it. One atlas, built once. A camera-facing card with a sun
 //            shadow (the shadow is the tangle's own lace)
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle; F.weeds (the pool, tests), F.info().
 // OWNS: its weeds (a fixed pool), its atlas. READS: host.wind (at, level), host.entities.near (props: kind, r / rect, z,
 // gone / broken), host.elev / inStream, host.biome (id, hole, style.wallH), host.world.waterH, host.layout.stream,
-// host.player, host.arrows, the dust feature's devils (F.swirl), combat.explode events (a blast throws them). EMITS: 'tumbleweed.bounce' (audio: a dry rustle when one
-// comes down hard or is knocked, near the player and on screen, at most every TUNE.sound.every s).
+// host.player, host.arrows, the dust feature's devils (F.swirl, F.puff), combat.explode events (a blast throws them).
+// EMITS: 'tumbleweed.bounce' (audio: a dry rustle when one comes down hard or is knocked, near the player and on screen,
+// at most every TUNE.sound.every s).
 // BUDGET: view <= 0.07 ms, frame <= 0.02 ms with 4-8 weeds (measured 2026-10-02, headless 1920x1080, a gale: view .065 avg,
 // .031 in a tight loop; frame .009); nothing in other biomes; no allocation per frame.
 import {flags} from '../core/flags.js';
