@@ -8,6 +8,9 @@
 //          lower clumps are toned down (aBias: a cheap ambient occlusion), and every triangle gets a little bias jitter,
 //          so the tone bands break up into leafy patches instead of clean contours
 //   dead   (ruins v2) a gnarled trunk, limbs splitting 4 levels deep, a broken snag, no leaves
+//   willow (ruins v3) a short thick trunk leaning east (never turned: it stands on the river's west bank), arching limbs
+//          under a broad crown, and long CURTAINS of leaf clumps hanging to ~0.3 m above the ground; the lower a curtain
+//          hangs, the more it sways (aFlex), each clump flutters on its own phase (a travelling ripple down a strand)
 // treeModel(p, biome, fam) -> {geo, yaw, scale, top, bones, crown, species, seed} | null (no model: the prop keeps its
 //   card). crown = {x, z, y0, y1, r} in the model's frame (leafy species only)
 // boneHit(tree, from, to) -> where an arrow sticks in the trunk / a big limb, or null (the twigs and leaves let it through)
@@ -224,11 +227,72 @@ function dead(seed, fam) {
   return B;
 }
 
-const SPECIES = {oak, dead};
+// ruins v3, the willow (features/riverside.js stands one or two on the river's west bank): a short thick trunk leaning EAST
+// (toward the water: treeModel never turns it), forking low into arching limbs under a broad crown, and ~26 curtains (a
+// strand = a chain of tall narrow clumps, one part per strand so only its silhouette and the gaps between strands draw
+// lines) hanging from the crown's underside, the longest to ~0.3 m above the ground. aFlex per clump: the crown's, then up to
+// ~1.8x that at a strand's foot (a pendulum), so a gust swings the curtains more than the crown
+function willow(seed, fam) {
+  const r = rng(seed * 23 + 11);
+  const lean = V(.7 + r() * .3, 0, (r() - .5) * .35), fork = 1.4 + r() * .2;
+  const R = V(1.7 + r() * .25, .85 + r() * .12, 1.6 + r() * .2), C = V(lean.x * 1.5 + .2, 2.75 + r() * .15, lean.z * 1.2), H = C.y + R.y;
+  const c = Math.min(.6, Math.max(.15, fork / H));
+  const crown = y => { const u = Math.max(0, y) / H; return u < c ? .7 * (u / c) ** 2.2 : Math.min(1, .7 + .3 * (u - c) / (1 - c)); };
+  const B = new Build(fam, crown);
+  B.crown = {x: C.x, z: C.z, y0: C.y - R.y * .8, y1: H, r: Math.max(R.x, R.z)};
+  // trunk (thick, flared) + roots
+  const top = V(lean.x, fork, lean.z), tp = limbPts(V(0, -.15, 0), top, 4, V((r() - .5) * .12, 0, (r() - .5) * .12), .05, r), r0 = .2 + r() * .04;
+  B.part('bark');
+  tube(B, tp, tp.map((q, i) => i === 0 ? r0 * 1.5 : i === 1 ? r0 * 1.15 : r0 * (1 - .3 * (i - 1) / (tp.length - 2))), 8, r(), false);
+  for (let i = 0; i < 4; i++) {
+    const a = i / 4 * Math.PI * 2 + r() * .9, d = V(Math.cos(a), 0, Math.sin(a)), L = .4 + r() * .25;
+    tube(B, [V(0, .34, 0).addScaledVector(d, r0 * .4), V(0, .1, 0).addScaledVector(d, r0 + L * .35), V(0, -.06, 0).addScaledVector(d, r0 + L)], [r0 * .5, r0 * .38, .03], 5, r());
+  }
+  // limbs: four arching up and out under the crown, each ending in a dome clump
+  const tips = [], a0 = r() * Math.PI * 2;
+  for (let j = 0; j < 4; j++) {
+    const az = a0 + j / 4 * Math.PI * 2 + (r() - .5) * .6, out = .5 + r() * .15;
+    const end = C.clone().add(V(Math.cos(az) * R.x * out, -R.y * (.1 + r() * .3), Math.sin(az) * R.z * out));
+    const pts = limbPts(top.clone().add(V(0, -.1, 0)), end, 4, V(0, .3 + r() * .2, 0), .08, r);
+    B.part('bark');
+    tube(B, pts, taper(pts.length, r0 * .62, .07), 6, r());
+    tips.push(end);
+  }
+  // the dome: clumps at the limb tips and over them, a few on the shell, a dark core. The hull (C, R) leans their normals
+  const cl = [], inside = (q, k) => { const e = V((q.x - C.x) / R.x, (q.y - C.y) / R.y, (q.z - C.z) / R.z), m = e.length(); return m > k ? C.clone().add(V(e.x / m * k * R.x, e.y / m * k * R.y, e.z / m * k * R.z)) : q; };
+  for (const t of tips) cl.push({c: inside(t.clone().add(V((t.x - C.x) * .2, .45, (t.z - C.z) * .2)), .7), rad: .62 + r() * .15});
+  for (let i = 0; i < 5; i++) { const a = r() * Math.PI * 2, d = Math.sqrt(r()) * .55; cl.push({c: C.clone().add(V(Math.cos(a) * R.x * d, R.y * (.3 + r() * .5), Math.sin(a) * R.z * d)), rad: .5 + r() * .2}); }
+  for (let i = 0; i < 6; i++) { const a = (i + r() * .7) / 6 * Math.PI * 2; cl.push({c: inside(C.clone().add(V(Math.cos(a) * R.x, (r() - .55) * R.y * .6, Math.sin(a) * R.z)), .88), rad: .4 + r() * .12, small: true}); }
+  cl.push({c: C.clone().add(V(0, -R.y * .15, 0)), rad: Math.min(R.x, R.z) * .66, core: true});
+  for (const [i, q] of cl.entries()) {
+    const e = V((q.c.x - C.x) / R.x, (q.c.y - C.y) / R.y, (q.c.z - C.z) / R.z);
+    const bias = TUNE.lift + (q.core ? -.2 : TUNE.light * e.y / .6 - TUNE.inner * (1 - Math.min(1, e.length() / .6)) + (r() - .5) * .08);
+    B.part('leaf', bias, -2, crown(q.c.y), q.core ? -1 : (i * 2.39996 + seed * .7) % (Math.PI * 2));
+    clump(B, q.c, q.rad, .74, seed * 13 + i, C, R, bias, r, q.small ? 3 : TUNE.detail - 1);
+  }
+  // the curtains: anchors under the dome (the middle ones short of the trunk), a chain of clumps down to the ground
+  const NS = 36;
+  for (let i = 0; i < NS; i++) {
+    const a = (i + r() * .8) / NS * Math.PI * 2, rho = .5 + r() * .55, ca = Math.cos(a), sa = Math.sin(a);
+    const x0 = C.x + ca * R.x * Math.min(rho, 1.02), z0 = C.z + sa * R.z * Math.min(rho, 1.02), ya = C.y - R.y * .42 * Math.sqrt(Math.max(0, 1 - rho * rho)) + .1;
+    const yEnd = r() < .4 ? .3 + r() * .2 : .5 + r() * 1.1, n = Math.max(3, Math.ceil((ya - yEnd) / .26)), ph = r() * Math.PI * 2, pi = (i + 8) % 64;
+    for (let k = 0; k < n; k++) {
+      const f = k / (n - 1), y = ya - k * (ya - yEnd) / (n - 1), sw = Math.sin(k * .8 + a * 3) * .05, out = f ** 1.6 * .3;
+      const pos = V(x0 + ca * out + sa * sw, y, z0 + sa * out - ca * sw), e = V((pos.x - C.x) / R.x, (pos.y - C.y) / R.y, (pos.z - C.z) / R.z);
+      const bias = TUNE.lift + .08 + Math.max(-.12, Math.min(.12, e.y * .1)) - TUNE.inner * (1 - Math.min(1, e.length() / 1.1)) + (r() - .5) * .08;
+      B.cur = {pi, fam: B.F('leaf'), bias, fixed: -2, flex: crown(ya) * (1 + .85 * (1 - y / ya)), phase: (ph + k * .5) % (Math.PI * 2)};
+      clump(B, pos, .125 - f * .04, 3.3, seed * 29 + i * 7 + k, C, R, bias, r, 1);
+    }
+  }
+  return B;
+}
+
+const SPECIES = {oak, dead, willow};
 function speciesOf(p, biome) {
-  if (biome === 'ruins') return (p.variant | 0) === 2 ? 'dead' : 'oak';
+  if (biome === 'ruins') return (p.variant | 0) === 2 ? 'dead' : (p.variant | 0) === 3 ? 'willow' : 'oak';
   return null;   // ember spires, frost pines, rift shards: still the painted cards
 }
+const FIXED_YAW = {willow: 1};   // never turned: its lean is toward the water (east)
 const cache = new Map();
 export function treeShape(species, seed, fam) {
   const key = `${species}:${seed}:` + Object.values(TUNE).join(':');
@@ -260,6 +324,6 @@ export function treeModel(p, biome, fam) {
   const species = speciesOf(p, biome); if (!species) return null;
   const h = hashXY(p.x, p.y), seed = p.seed ?? ((h * 9973 | 0) % SEEDS);
   const s = treeShape(species, seed, fam), scale = p.lineup ? 1 : .9 + hashXY(p.y, p.x) * .2;
-  return {...s, yaw: p.lineup ? 0 : h * Math.PI * 2, scale, top: s.top * scale};
+  return {...s, yaw: p.lineup || FIXED_YAW[species] ? 0 : h * Math.PI * 2, scale, top: s.top * scale};
 }
 export function clearTreeCache() { for (const s of cache.values()) s.geo.dispose(); cache.clear(); }

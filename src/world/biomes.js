@@ -189,6 +189,9 @@ const STYLES = {
     brute: ramp('#bca985', '#9e8d6b', '#7d6f53', '#514836'),
     rock: ramp('#7e786b', '#666056', '#504b44', '#35322d'), water: ramp('#9cc2c4', '#6e9ca4', '#4f7c8a', '#33556a'),
     torch: '#ffc850', braz: ['#ffb04a', '#7fc8ff', '#a8ff6a'],
+    // the green banks (damp ground, clover, moss, reeds, cattail heads, ferns): clearly green, so the season turns them
+    damp: ramp('#587c5a', '#46664c', '#355040', '#243a30'), lush: ramp('#9bc464', '#76a04c', '#57803f', '#355432'), moss: ramp('#8fbb5e', '#6c9a49', '#4f7a3e', '#33502f'),
+    reed: ramp('#b3cc6a', '#86a64e', '#5f8441', '#355133'), cattail: ramp('#a5753f', '#80522c', '#5a3822', '#34211a'), fern: ramp('#8fc16a', '#69a050', '#4a7e3f', '#2f5233'),
   },
   ember: {
     id: 'ember', name: 'Ember Wastes', wallH: 1.2, lowH: .45,
@@ -215,6 +218,7 @@ const STYLES = {
     clay: ramp('#cfdcea', '#a0b6d0', '#7690b0', '#4a5e80'), gem: ramp('#e8fbff', '#9fe0f5', '#5aa8d8', '#2c5c8c'), gemGlow: ['#f0ffff', '#86d9ff'], gemInner: '#1a4a78',
     brute: ramp('#dfe6ee', '#bcc8d6', '#8e9fb6', '#5a6a86'),
     torch: '#86d9ff', braz: ['#ffb04a', '#86d9ff', '#9affd8'],
+    cattail: ramp('#9a7a52', '#76583a', '#523b28', '#2f2118'),
   },
   rift: {
     id: 'rift', name: 'The Rift', wallH: 1.2, lowH: .45,
@@ -477,6 +481,32 @@ const narrowRocks = (K, R, cap) => {   // rocks on both banks where the stream p
   }
 };
 
+// the banks: damp, lusher ground along the water (features/riverside.js stands the reeds on it). From 0.3 m outside the
+// water's edge (paintStream's own earth line and worn lip stay) out to a wavy 0.55-1.05 m: darker, cooler grass laid over
+// whatever tone the ground had (the relief stays), with clover and small-flower speckles. Left alone: the narrows (the path
+// and the leap), the east bank under the plateau (a pool's place) and the ravine lip
+function dampBanks(K, S, cliff) {
+  const SM = K.stream; if (!SM) return;
+  const {G, PPM, PPMY, HPX} = K, D = S.damp, L = S.lush, FL = [hex('#f1ecde'), hex('#f0d968'), hex('#c8a6e8'), hex('#f2b9c9')];
+  for (let y = 0; y < HPX; y++) {
+    const my = (y + .5) / PPMY, c = SM.cx(my), hw = SM.w(my) / 2;
+    if (my > cliff(c) - .6 || my < 2.2 || Math.abs(my - SM.narrows.y) < 2.7) continue;
+    for (const side of [-1, 1]) {
+      if (side > 0 && my < 12.4) continue;
+      const xa = Math.floor((c + side * (hw + .25)) * PPM), xb = Math.ceil((c + side * (hw + 1.1)) * PPM);
+      for (let x = Math.min(xa, xb); x <= Math.max(xa, xb); x++) {
+        const mx = (x + .5) / PPM, e = Math.abs(mx - c) - hw + (vn(x / 4, y / 3, 71) - .5) * .05;   // (paintStream's own edge)
+        if (e < .3 || e > .55 + vn(x / 9, y / 7, 62) * .5) continue;
+        const m0 = G.mat(x, y); if (m0 !== S.grass.id && m0 !== S.earth.id) continue;
+        if (e < .42 && hsh(x, y, 63) < .45) continue;   // a ragged inner edge: bare earth shows between the lip and the damp grass
+        G.p(x, y, D, Math.min(2, Math.max(0, G.tone(x, y))));
+        if (hsh(x, y, 65) < .013) { G.p(x, y, L, 0); G.p(x + 1, y, L, 1); G.p(x, y + 1, L, 2); }   // clover
+        else if (hsh(x, y, 66) < .0035) G.c(x, y, FL[hsh(x, y, 67) * 4 | 0]);   // a small flower
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------- RUINS ground
 function cliffRuins(K) { return mx => K.HM - 2.2 + (vn(mx * .3, .5, 91) - .5) * 1.3; }
 function groundRuins(q, ctx, B) {
@@ -554,7 +584,8 @@ function groundRuins(q, ctx, B) {
     },
     stone: st => slab(K, st, S.rock, {ring: (P, E, x, y) => P.p(x, y, W, 0)}),
   });
-  narrowRocks(K, S.rock, null);
+  dampBanks(K, S, cliff);
+  narrowRocks(K, S.rock, S.moss);   // (moss on the rocks where the stream pinches)
   // the south edge: the ground breaks off into a ravine (the stream falls over it)
   const Rk = S.rock, abyss = hex('#1a211d'), abyss2 = hex('#222c26'), SM = K.stream;
   for (let x = 0; x < K.WPX; x++) {
@@ -1322,6 +1353,99 @@ function tuft(p, ctx, S) {
   return build(9, 10, [4, 9], (P, E) => { crystal(P, E, S, 4, 1 + v, 2, 7 - v, v + 20); for (let i = 1; i < 8; i++) P.p(i, 9, S.floor, 2); });
 }
 
+// ---- riverside plants (features/riverside.js)
+// A reed clump is ONE card of 5-9 stems (variants: 0 reeds, 1 cattails with brown heads, 2 a mix). Stems are 1 px, 2 px at
+// the foot, lit from the top-left; the cattail heads are brown (brown stays brown through the seasons: the season matrix
+// only turns green pixels). Ruins: lush greens. Frost: dry pale stalks with snow on the heads. Ember, rift: none.
+function reed(p, ctx, S) {
+  const ruins = S.id === 'ruins'; if (!ruins && S.id !== 'frost') return null;
+  const v = p.variant | 0, m = M(ctx), R = ruins ? S.reed : S.straw, C = S.cattail, W = 34, B = m.H(1.62), H = B + 2, cx = 17;
+  return build(W, H, [cx, B], P => {
+    const r = rng(v * 17 + 5), n = [8, 6, 7][v % 3], st = [];
+    for (let i = 0; i < n; i++) {
+      const f = i / (n - 1) * 2 - 1, cat = v === 1 || (v === 2 && i % 2 === 1);   // f: -1 .. 1 across the clump
+      const len = (cat ? m.H(1.28) : m.H(1.14)) * (1 - Math.abs(f) * .22) + (r() - .5) * 6;
+      st.push({f, cat, len, x0: cx + f * 6.4 + (r() - .5) * 1.4, lean: f * 3.4 + (r() - .5) * 2.6, bow: f * (cat ? 1.6 : 3.4 + r() * 3) + (r() - .5), drop: cat ? .6 : 1.4 + r() * 2, tp: .66 + r() * .14});
+    }
+    // one blade: base (x0, B), the tip leaning and arching outward, the tip's own droop; tone from height, the right px in shade
+    const blade = (x0, len, lean, bow, drop, wide, dim, G) => {
+      let lx = -1, ly = -1;
+      for (let s = 0; s <= len; s += .5) {
+        const t = s / len, x = Math.round(x0 + lean * t + bow * t * t), y = Math.round(B - s + drop * t * t * t);
+        if (x === lx && y === ly) continue; lx = x; ly = y;
+        P.p(x, y, G, Math.min(2, (t > .78 ? 0 : t < .1 ? 2 : 1) + dim));
+        if (t < wide) P.p(x + 1, y, G, t < .12 ? 3 : 2);
+      }
+    };
+    st.sort((a, b) => Math.abs(b.f) - Math.abs(a.f));   // the outer stems first: the middle ones stand in front
+    for (const s of st) blade(s.x0, s.len, s.lean, s.bow, s.drop, s.cat ? .3 : .46, Math.abs(s.f) > .65 ? 1 : 0, R);
+    // the long leaves that arch out of the foot, both sides
+    for (const [dx, len, lean, bow] of [[-4, 20 + (r() * 5 | 0), -4, -10], [4, 19 + (r() * 5 | 0), 4, 10], [-1, 15, -2, -7], [2, 16, 2, 7]].slice(0, v === 1 ? 4 : 3))
+      blade(cx + dx, len, lean, bow, 3, .3, 1, R);
+    for (const s of st) {   // the heads
+      if (!s.cat) continue;
+      const t = s.tp, x = Math.round(s.x0 + s.lean * t + s.bow * t * t), y = Math.round(B - s.len * t), rows = ['.0.', '012', '012', '112', '113', '12.', '.2.'];
+      rows.forEach((row, j) => { for (let i = 0; i < 3; i++) { const c = row[i]; if (c === '.') continue; P.p(x - 1 + i, y - 3 + j, C, +c); } });
+      if (!ruins) { P.p(x, y - 3, S.snow, 0); P.p(x - 1, y - 2, S.snow, 0); P.p(x, y - 2, S.snow, 1); P.p(x + 1, y - 2, S.snow, 2); }
+      for (let k = 0; k < 3; k++) P.p(x + (k > 1 ? Math.sign(s.f) : 0), y - 4 - k, R, k === 2 ? 0 : 1);   // the thin spike over the head
+    }
+    for (const s of st) { P.p(s.x0, B, R, 3); if (hsh(s.x0, 1) < .6) P.p(s.x0 - 1, B, R, 2); }   // the dark foot in the mud
+  });
+}
+// a small fern: a fan of arching fronds, leaflets as short ticks. Ruins only (shade at the ravine lip, under the willows)
+function fern(p, ctx, S) {
+  if (S.id !== 'ruins') return null;
+  const v = p.variant | 0, W = 29, H = 19, B = H - 1, cx = 14;
+  return build(W, H, [cx, B], P => {
+    const r = rng(v * 7 + 3), n = 6 + v, fr = [];
+    for (let i = 0; i < n; i++) { const a = (i / (n - 1) * 2 - 1) * 1.28 + (r() - .5) * .3; fr.push({a, len: 15 - Math.abs(a) * 3.2 + r() * 2.5}); }
+    fr.sort((a, b) => Math.abs(b.a) - Math.abs(a.a));   // the low outer fronds first
+    for (const {a, len} of fr) {
+      const sa = Math.sin(a), ca = Math.cos(a); let px = cx, py = B;
+      for (let s = 0; s <= len; s += .5) {
+        const t = s / len, x = cx + sa * s * (.75 + .45 * t) + (Math.abs(a) < .3 ? a * 3 * t : 0), y = B - ca * s * (.92 - .25 * t) + (2.4 + 4.4 * Math.abs(sa)) * t * t;
+        P.p(x, y, S.fern, t > .85 ? 0 : 1);
+        if (s > 2.5 && Math.round(s * 2) % 4 === 0) {   // a leaflet pair across the frond, shorter toward the tip
+          const dx = x - px, dy = y - py, d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d, k = Math.max(1, Math.round(2.8 * (1 - t * .85)));
+          for (let q = 1; q <= k; q++) { const up = ny < 0 ? 1 : -1; P.p(x + nx * q * up, y + ny * q * up * .8, S.fern, 0); P.p(x - nx * q * up, y - ny * q * up * .8, S.fern, 2); }
+        }
+        px = x; py = y;
+      }
+    }
+    P.p(cx, B, S.fern, 3); P.p(cx - 1, B, S.fern, 2); P.p(cx + 1, B, S.fern, 3);
+  });
+}
+// the willow's painted card (trees3d.js grows the 3D one: this is its trees3d=0 fallback and what the water mirrors): a short
+// leaning trunk, a broad crown, long curtains of leaves hanging to ~0.3 m above the ground. Leans right: over the water
+function willowCard(S, m) {
+  const W = m.W(5.2), H = m.H(4.6), b = H - 3, cx = Math.round(W * .42);
+  return build(W, H, [cx, H - 2], P => {
+    const r = rng(91), top = 8, ccx = cx + 20, ccy = Math.round(b - m.H(2.95)), rx = m.W(1.95), ry = m.H(1.0);
+    limb(P, cx, b, cx + 6, b - m.H(1.5), 12, 8, S.bark, 2);
+    for (const [x, w] of [[-9, 4], [8, 4]]) limb(P, cx, b - 2, cx + x, b + 1, w, 1, S.bark);
+    limb(P, cx + 5, b - m.H(1.4), ccx - 18, ccy - 2, 6, 3, S.bark, -2); limb(P, cx + 6, b - m.H(1.4), ccx + 20, ccy + 4, 6, 3, S.bark, 2);
+    P.runShade([S.bark]);
+    for (let i = 0; i < 11; i++) {   // the dome
+      const a = r() * PI2, d = Math.sqrt(r()) * .8, x = ccx + Math.cos(a) * d * rx, y = ccy + Math.sin(a) * d * ry - ry * .1;
+      P.blob(x, y, 15 + r() * 8, 10 + r() * 5, S.leaf, {s: i, j: .38, edge: .6, bias: -(y - ccy) / ry * .4 - (x - ccx) / (rx * 2.4)});
+    }
+    P.outline();
+    // the curtains: strands 2-3 px wide with gaps, from the dome's underside down to ~0.3 m above the ground, lit from the left,
+    // ragged at the tips; the longest hang where the crown is widest
+    for (let x = ccx - rx; x <= ccx + rx; x++) {
+      const k = x + 1000, id = Math.floor(k / 4), col = k % 4, u = (x - ccx) / rx, edge = Math.sqrt(Math.max(0, 1 - u * u));
+      if (col === 3 || hsh(id, 3, 91) < .2 || edge < .12) continue;
+      const y0 = Math.round(ccy + ry * edge * .5), y1 = Math.round(b - m.H(.3) - hsh(id, 5, 91) * m.H(1.5) * (1.1 - Math.abs(u) * .5));
+      for (let y = y0; y < y1; y++) {
+        if (hsh(x, y, 92) < .05) continue;
+        const n = vn(x / 3, y / 9, 93), fall = (y - y0) / Math.max(1, y1 - y0);
+        const tone = (n > .6 ? 0 : n < .4 ? 2 : 1) + (u > .2 ? 1 : 0) - (u < -.3 ? 1 : 0) + (col === 2 ? 1 : 0) - (col === 0 ? 1 : 0) + (fall > .9 ? 1 : 0);
+        P.p(x, y, S.leaf, Math.max(0, Math.min(3, tone)));
+      }
+    }
+  });
+}
+
 // ---- big mood shapes outside the walls
 function limb(P, x0, y0, x1, y1, t0, t1, R, bend = 0) {
   const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0));
@@ -1330,6 +1454,7 @@ function limb(P, x0, y0, x1, y1, t0, t1, R, bend = 0) {
 function tree(p, ctx, S) {
   const v = p.variant | 0, m = M(ctx);
   if (S.id === 'ruins') {
+    if (v === 3) return willowCard(S, m);   // (the willow by the river: trees3d.js grows the 3D one)
     const H = m.H(4.2) + (v * 6), W = 84;
     return build(W, H, [42, H - 2], P => {
       const r = rng(v * 31 + 7), b = H - 3, cx = 42;
@@ -1652,7 +1777,7 @@ function brute(p, ctx, S, left) {
 // ============================================================ biomes
 const PAINTERS = {wall_n: (p, c, S) => wallEW(p, c, S, false), wall_s: (p, c, S) => wallEW(p, c, S, true), wall_w: wallNS, wall_e: wallNS,
   tower, gatepost, pillar: (p, c, S) => pillar(p, c, S, false), pillar_broken: (p, c, S) => pillar(p, c, S, true), rubble,
-  dummy, brazier, torch, bush, rock, tuft, tree, rock_big: rockBig,
+  dummy, brazier, torch, bush, rock, tuft, reed, fern, tree, rock_big: rockBig,
   crate, barrel: (p, c, S) => barrel(p, c, S, false), barrel_x: (p, c, S) => barrel(p, c, S, true), pot, crystal: crystalProp, chest,
   brute: (p, c, S) => brute(p, c, S, faceLeft(p))};
 const GROUND = {ruins: groundRuins, ember: groundEmber, frost: groundFrost, rift: groundRift};
