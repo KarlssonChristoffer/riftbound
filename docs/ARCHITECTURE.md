@@ -269,16 +269,19 @@ src/
                          `host` features get (contract in main.js's header); the features; the engine context E; the loop
   core/                  loop.js (step + draw + frame, hitstop), input.js (keys + mouse, the camera drag),
                          features.js (loading + the declared order), events.js (the catalog), flags.js, perf.js,
-                         mathx.js, rng.js, color.js
+                         mathx.js, rng.js, color.js, autumn.js (how a leaf turns: one model for the crowns' shader and wind.js)
   render/                gfx.js (the renderer), camera.js (size, zoom, yaw, follow, shake, sampling), viewxf.js,
-                         lighting.js (mood + lights -> the composite), options.js (opt + applying it), atlas.js
+                         lighting.js (mood + lights -> the composite), options.js (opt + applying it), atlas.js,
+                         litter.js (the fallen-leaf carpet: a small GPU simulation the wind drives)
   world/                 world.js (build + props), stage.js (biome, rebuilds, prop mode, trees, the registry),
                          entities.js (the registry: join / leave / hide, live queries, near), spatial.js (the grid),
                          biomes.js, layout.js, trees3d.js, kit3d.js, nav.js
   sim/                   env.js (clock, seasons, weather), projectiles.js (arrows, pops, dust),
                          player/ (player.js, harmonize.js, adapter.js: the camera-frame bridge, climbing, the cursor)
   view/                  hero.js (the Ranger's card: atlas, cloak, hair, armour, HD bow), cloth.js, armor.js
-  features/              the features as before (wind, weather, lights, garden, combat/, atmos, flow, wildlife, depth/, ...)
+  features/              the features as before (wind, weather, lights, garden, combat/, atmos, flow, wildlife, depth/, ...),
+                         riverside (reeds, ferns, willows, lily pads), litter (drives the leaf carpet from the wind),
+                         atmos/waterlife.js (riffles, falls' spray and mist, shallow-water rings: called by atmos)
   game/                  game.js, run.js, enemies.js, items.js, stats.js, save.js
   ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js
   audio/                 audio.js, music.js
