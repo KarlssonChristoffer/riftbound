@@ -735,8 +735,8 @@ POSES['gun_rl_fetch'] = _gpose(10, _arm(x=-26, fx=-42, sz=2, z=18),
                                legs=_RL_LEGS, lean=10)
 LEFT_TO_GUN.update({'gun_rl_up': (.02, -.01, .07), 'gun_rl_eject': (.06, -.02, .06), 'gun_rl_load': (.0, .01, .07)})
 ANIMS['gun_reload'] = _clip(['gun_aim', 'gun_rl_up', 'gun_rl_eject', 'gun_rl_fetch', 'gun_rl_load', 'gun_draw_hip'],
-                            [.35, .7, 1, 1.5, 2, 2.5, 3, 3.33, 3.67, 4, 4.5, 5], 12,
-                            marks={'up': 0, 'eject': 3, 'first': 5, 'fetch': 6, 'load': 9, 'close': 10})
+                            [.35, .7, 1, 1.5, 2, 2.33, 2.67, 3, 3.33, 3.67, 4, 4.5, 5], 12,
+                            marks={'up': 0, 'eject': 3, 'first': 5, 'fetch': 7, 'load': 10, 'close': 11})
 # twirl: the gun spun a full turn backward round the trigger finger at the hip, then up to the aim; holster: down from
 # the aim, the turn, then dropped into the holster (gun_spin_4 = 360: the in-betweens turn the short way, forward)
 for _i in range(5):
