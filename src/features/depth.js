@@ -113,6 +113,8 @@ export async function create(host) {
   const inv = (X, Y, h = 0) => { const u = X - V.ox - V.hx * h, v = Y - V.oy - V.hy * h; return [(V.yy * u - V.yx * v) / V.det, (-V.xy * u + V.xx * v) / V.det]; };
   // a top-down canvas (R texels per metre, its texel (0, 0) at world (x0, y0)) -> view px, as a DOMMatrix for a pattern
   const groundMatrix = (R, h, x0 = 0, y0 = 0) => { const [e, f] = proj(x0, y0, h); return new DOMMatrix([V.xx / R, V.xy / R, V.yx / R, V.yy / R, e, f]); };
+  // its 2 x 2 part inverted, into out [4]: view px (from the plane's origin) -> texel (gfx.js COMP_FS viewTexel)
+  const groundInv = (R, out) => { const a = V.xx / R, b = V.xy / R, c = V.yx / R, d = V.yy / R, det = a * d - b * c; out[0] = d / det; out[1] = -c / det; out[2] = -b / det; out[3] = a / det; return out; };
   function footprint(h = 0) {   // the view's world AABB at height h
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     for (const [X, Y] of [[0, 0], [VW, 0], [0, VH], [VW, VH]]) { const [x, y] = inv(X, Y, h); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
@@ -303,38 +305,28 @@ export async function create(host) {
     const qf = f => { let n = 0; const want = val.length * (1 - f); for (let i = 0; i < 1024; i++) { n += H[i]; if (n >= want) return (i + 1) / 1024; } return 1; };
     const tE = qf(cover), tC = qf(core);
     for (let i = 0; i < lv.length; i++) lv[i] = val[i] >= tC ? 2 : val[i] >= tE ? 1 : 0;
-    CL.cover = cover; CL.key = '';
+    CL.cover = cover;
   }
   // the sky's cover from the world clock (sim/env.js sky.cloud: clear = no cloud shadows, more as it clouds over; the
   // shadows themselves soften as the sun does under an overcast sky), quantised to 1/16; the old fixed cover without a clock
   const coverNow = () => { const E = host.env; if (!E) return TUNE.clouds.cover; const c = E.sky.cloud; return c < .08 ? 0 : Math.round(Math.min(.78, .08 + .62 * c) * 16) / 16; };
-  function cloudTile() {
+  // the cloud shadows for gfx.js COMP_FS (G.setClouds): the level map (re-uploaded when the cover changes), its colour and two
+  // alphas, and the ground plane's view -> texel affine with the drift. The map used to be painted into an RGBA tile and laid
+  // over the view as a pattern fill into the PRE layer every frame (and that layer uploaded); the shader samples the same texel
+  const CLS = {lv: null, TW: 0, TH: 0, ver: 0, col: [0, 0, 0], a1: 0, a2: 0, m: [0, 0, 0, 0], e: 0, f: 0};
+  function drawClouds() {
+    if (!host.G.setClouds) return false;
     const tn = timeName(), k = (TUNE.clouds.time[tn] ?? 0) * (TUNE.clouds.none.includes(biome) ? 0 : 1), M = host.mood, cover = coverNow();
     const a = M ? M.shadow.a : 0, s = Math.min(1.2, a / .46) * k;
-    if (s <= .01 || cover <= 0) return null;
+    if (s <= .01 || cover <= 0) return false;
     if (!CL.val) buildCloudLevels();
-    cloudLevels(cover);
-    // (quantised: the clock blends the mood every frame; an exact key re-rendered the tile every frame)
-    const c = M.shadow.c, key = biome + tn + cover + (Math.round(s * 50) / 50) + c.map(v => Math.round(v * 64)).join() + TUNE.clouds.s.join() + TUNE.clouds.mixC;
-    if (CL.key === key && CL.cv) return CL.cv;
-    CL.key = key;
-    const [cv, q] = CL.cv ? [CL.cv, CL.cv.getContext('2d')] : mk(CL.TW, CL.TH);
-    const im = q.createImageData(CL.TW, CL.TH), d = im.data, lv = CL.lv;
-    const rgbA = c.map(v => Math.round(255 * v * TUNE.clouds.mixC)), A = [0, Math.round(255 * TUNE.clouds.s[1] * s), Math.round(255 * TUNE.clouds.s[0] * s)];
-    for (let i = 0; i < lv.length; i++) { const L = lv[i]; if (!L) continue; const o = i * 4; d[o] = rgbA[0]; d[o + 1] = rgbA[1]; d[o + 2] = rgbA[2]; d[o + 3] = A[L]; }
-    q.putImageData(im, 0, 0);
-    CL.pat = null;
-    return (CL.cv = cv);
-  }
-  function drawClouds() {
-    const tile = cloudTile(); if (!tile) return false;
-    const q = host.layer('pre'), R = CL.R;
-    CL.pat ||= q.createPattern(tile, 'repeat');
+    if (CL.cover !== cover || CLS.lv !== CL.lv) { cloudLevels(cover); CLS.lv = CL.lv; CLS.TW = CL.TW; CLS.TH = CL.TH; CLS.ver++; }
+    const c = M.shadow.c, mx = TUNE.clouds.mixC, R = CL.R;
+    for (let i = 0; i < 3; i++) CLS.col[i] = Math.round(255 * c[i] * mx) / 255;
+    CLS.a1 = Math.round(255 * TUNE.clouds.s[1] * s) / 255; CLS.a2 = Math.round(255 * TUNE.clouds.s[0] * s) / 255;
     const ox = Math.round(CL.x * R) / R, oy = Math.round(CL.y * R) / R;   // whole texels: the shadows step, never shimmer
-    CL.pat.setTransform(groundMatrix(R, 0, ox, oy));
-    q.save(); q.imageSmoothingEnabled = false; q.globalAlpha = 1; q.globalCompositeOperation = 'source-over';
-    q.fillStyle = CL.pat; q.fillRect(0, 0, VW, VH);
-    q.restore();
+    proj2(ox, oy, 0, _pp); groundInv(R, CLS.m); CLS.e = _pp[0]; CLS.f = _pp[1];
+    host.G.setClouds(CLS);
     return true;
   }
 
@@ -481,7 +473,7 @@ export async function create(host) {
   // ================================================================ WATER: masks, puddles, reflections, sky glint
   // masks are TOP-DOWN (R = PPM texels per metre, like the world's ground canvas) and projected per frame
   const WA = {key: '', mask: null, mpat: null, lava: null, lpat: null, yEnd: 0, shrink: 0, puddles: [], near: [], plane: new Map(), gpx: null, gw: 0, gh: 0, used: false, n: 0, pool: null, x0: 0, x1: 0};
-  const [MS, ms] = mk(VW, VH), [SK, sk] = mk(VW, VH), [HZ, hz] = mk(VW, VH);   // the water mask (the sky glint's clip), the glint, the haze
+  const [MS, ms] = mk(VW, VH), [SK, sk] = mk(VW, VH);   // the water mask (the sky glint's clip), the glint
   // the puddles' alpha in the GROUND layer (gfx.js COMP_FS: a puddle mirrors what stands over it) and the reflections' settings
   const PUD_A = 254, RFL = {on: true, tint: [0, 0, 0], tintK: 0, alpha: 0, glow: 0, S: 0, ripple: 0, gust: 0, t: 0, oy: 0, zoom: 1, reach: 0, puddleA: 0, pool: null};
   let SKY = sk.createImageData(VW, VH); const skyDirty = [];
@@ -676,39 +668,35 @@ export async function create(host) {
   }
 
   // ================================================================ HEAT HAZE (ember lava stream)
-  const hasDistort = () => !!host.G?.compU?.tDistort;
+  // gfx.js COMP_FS (G.setHaze): rows of 2 px shifted whole pixels where the lava lies, the same formula; the lava's top-down mask
+  // goes up once per world (it was a DISTORT layer painted and uploaded every frame)
+  const HZS = {src: null, mask: null, W: 0, H: 0, ver: 0, band: 2, zoom: 1, t: 0, m: [0, 0, 0, 0], e: 0, f: 0, oy: 0};
   function drawHaze() {
-    buildWater(); if (!WA.lava || !TUNE.haze.on) return 0;
+    buildWater(); if (!WA.lava || !TUNE.haze.on || !host.G.setHaze) return 0;
     const fp = footprint(TUNE.refl.bed); if (fp.x1 < 37 || fp.x0 > 43 || fp.y0 > 27.6) return 0;
-    const z = V.z, band = 2 * z, rows = [];
-    for (let y = 0; y < VH; y += band) {
-      const wy = Math.round((y - V.oy) / z);   // the arena's world row at yaw 0
-      const s = Math.round(Math.sin(wy * .21 - T * 2.6) * Math.max(0, Math.sin(wy * .047 + T * .9)) * 1.45);
-      if (s) rows.push(y, s * z);
+    if (HZS.src !== WA.lava) {
+      const c = WA.lava, d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, b = new Uint8Array(c.width * c.height);
+      for (let i = 0; i < b.length; i++) b[i] = d[i * 4 + 3] > 127 ? 255 : 0;
+      HZS.src = c; HZS.mask = b; HZS.W = c.width; HZS.H = c.height; HZS.ver++;
     }
-    if (!rows.length) return 0;
-    if (!hasDistort()) return rows.length / 2;   // (the composite hook isn't there yet: computed, not shown)
-    hz.setTransform(1, 0, 0, 1, 0, 0); hz.globalAlpha = 1; hz.globalCompositeOperation = 'source-over'; hz.clearRect(0, 0, VW, VH); hz.imageSmoothingEnabled = false;
-    for (let i = 0; i < rows.length; i += 2) { hz.fillStyle = `rgb(${128 + rows[i + 1]},128,0)`; hz.fillRect(0, rows[i], VW, band); }
-    WA.lpat ||= hz.createPattern(WA.lava, 'no-repeat');
-    WA.lpat.setTransform(groundMatrix(PPM, TUNE.refl.bed));
-    hz.globalCompositeOperation = 'destination-in'; hz.fillStyle = WA.lpat; hz.fillRect(0, 0, VW, VH); hz.globalCompositeOperation = 'source-over';
-    const q = host.layer('distort'); q.save(); q.setTransform(1, 0, 0, 1, 0, 0); q.globalAlpha = 1; q.globalCompositeOperation = 'source-over'; q.drawImage(HZ, 0, 0); q.restore();
-    return rows.length / 2;
+    const z = V.z; HZS.band = 2 * z; HZS.zoom = z; HZS.t = T; HZS.oy = V.oy;
+    proj2(0, 0, TUNE.refl.bed, _pp); groundInv(PPM, HZS.m); HZS.e = _pp[0]; HZS.f = _pp[1];
+    host.G.setHaze(HZS);
+    return 1;
   }
 
   // ================================================================ contract
   const PT = {clouds: 0, water: 0, shafts: 0, haze: 0, fg: 0};   // per-part cost (ms, smoothed), for tuning
   function syncBiome() {
     const id = host.biome?.id || 'ruins';
-    if (id !== biome) { biome = id; SH.key = ''; SH.feet = null; CL.key = ''; WA.key = ''; FGcol = null; }
+    if (id !== biome) { biome = id; SH.key = ''; SH.feet = null; WA.key = ''; FGcol = null; }
   }
   Object.assign(F, {
     toggle() { F.on = !F.on; return F.on; },
     biomeChanged() { biome = ''; syncBiome(); },
     resize(w, h) {   // the view changed size (main.js fit): the view-sized canvases and the sky glint's pixels follow
       VW = w; VH = h;
-      for (const [c, q] of [[MS, ms], [SK, sk], [HZ, hz]]) { c.width = w; c.height = h; q.imageSmoothingEnabled = false; }
+      for (const [c, q] of [[MS, ms], [SK, sk]]) { c.width = w; c.height = h; q.imageSmoothingEnabled = false; }
       SKY = sk.createImageData(w, h); skyDirty.length = 0;
     },
     view(dt) {
@@ -735,10 +723,10 @@ export async function create(host) {
       acc += performance.now() - t0;
       hist[hN++ % hist.length] = acc; acc = 0;
       let s = 0; const n = Math.min(hN, hist.length); for (let i = 0; i < n; i++) s += hist[i]; F.ms = s / n;
-      F.debug = `fg ${nf} · shafts ${ns} · haze ${nh}${nh && !hasDistort() ? ' (no distort layer)' : ''} · refl ${WA.n}${WA.used ? ' glow' : ''}${cl ? ' · clouds' : ''}`;
+      F.debug = `fg ${nf} · shafts ${ns} · haze ${nh} · refl ${WA.used ? 'on' : 'off'}${cl ? ' · clouds' : ''}`;
     },
   });
-  F._dbg = {FG, SH, WA, CL, V, PT, proj, inv, footprint, cv: {MS, SK, HZ}};
+  F._dbg = {FG, SH, WA, CL, V, PT, proj, inv, footprint, cv: {MS, SK}};
   buildCloudLevels();   // ~0.1 s once, while the page loads (not as a hitch the first time the sun comes out)
   return F;
 }

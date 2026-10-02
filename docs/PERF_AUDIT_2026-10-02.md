@@ -5,8 +5,8 @@ the staged plan to fix it. It was measured on commit fe9bdf4 with other sessions
 gfx.js, adapter.js and player.js. Line numbers drift, so search for the quoted code. The budgets are in `src/core/perf.js`
 and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame breaks them.
 
-**Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2) and the water's reflections (E.3) are
-done; clouds / shafts / haze are next. Stages 3-4 not started.
+**Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2), the water's reflections (E.3), the
+cloud shadows and the lava's heat haze (E.4) are done; contact shadows are next. Stages 3-4 not started.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -393,6 +393,46 @@ G-buffer.
 | GPU | — | +0.03 ms |
 
 Smoke passes. Captures without water are identical (ember night 2/2).
+
+### E.4 Cloud shadows and the lava's heat haze in the composite (2026-10-02; the same pixels within 2 / 255)
+
+**What it replaced.** Both were painted every frame by depth.js through the ground plane's affine, and the canvas was then
+uploaded:
+
+- the clouds as a full-view pattern fill of a tile into the PRE layer;
+- the haze as 2 px row bands, masked by the lava's top-down map, into the DISTORT layer.
+
+**What it is now.** COMP_FS maps the view pixel back through that affine (`viewTexel`) to a texel of the same top-down map
+and applies the same rule: the clouds' two levels and their colour; the haze's whole-pixel row shift, the same formula.
+
+- Both maps live in ONE R8 texture (`tTop`: the cloud levels on top, the lava mask below). It is re-uploaded only when the
+  cover changes (in 1/16 steps) or the world is rebuilt.
+- The cloud tile is no longer re-rasterised when the mood's colour changes; the colour and the two alphas are uniforms.
+
+**Limits now in COMP_FS:**
+
+- **The 16 texture units are full.** A GPU only guarantees 16 per fragment shader, and with `tTop` the composite uses all
+  16 (17 failed to link). A new map must share an existing texture, or a screen layer must go first; when the layers move
+  to the GPU, their samplers free up.
+- **Making three.js objects after load shifts golden's seeded random.** `generateUUID` draws `Math.random`, so rain and
+  sparks land elsewhere. `tTop` is therefore made once at the start and re-sized, never re-created.
+
+**Checks:**
+
+- golden against a copy of the tree with the old depth.js (`src-c0/`, the same random sequence): every capture within 1 / 255
+  (the canvas's alpha rounding);
+- next to the lava, the haze's capture is within 2 / 255 of the old one (and 33k px differ with the haze off: it is there);
+- smoke and simview pass.
+
+**Results**, interleaved A/B:
+
+| | `depth.frame` | `G.render` |
+|---|---|---|
+| Cloudy day | 0.107 -> 0.047 ms | 1.09 -> 0.88 ms (no PRE upload) |
+| Ember lava | 0.086 -> 0.012 ms | 0.89 -> 0.73 ms (no DISTORT upload) |
+
+**Light shafts and motes: measured and left on the CPU.** Up to 5 cached shaft canvases and ~45 motes go into the ADD
+layer, ~0.06 ms in all. A GPU version needs a new additive post pass whose draw calls cost about as much.
 
 ### Stage 3: fewer draw calls (target: horde `G.render` 2.5 -> ~1 ms; 2-3x the enemies in budget)
 
