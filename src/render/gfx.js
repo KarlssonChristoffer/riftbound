@@ -96,11 +96,11 @@ void main() {
   }
   vec3 alb = texelFetch(uRamps, ivec2(tone, int(fam + .5)), 0).rgb;
   bool glow = abs(fam - uEmitFam.x) < .5 || abs(fam - uEmitFam.y) < .5;
-  // burning: only what burns chars (world.js FAMS: wood 0, rope 5, void 9, bark 13; hoops, iron, stone stay). It
+  // burning: only what burns chars (world.js FAMS: wood 0, rope 5, void 9, bark 13, birch 18, aspen 19; hoops, iron, stone stay). It
   // blackens in patches (higher up first: the flame is on top), glowing cracks crawl through the char, ash settles on
   // top. As FAMILIES (char 15, ash 16, ember 17), so the composite's outlines and plank seams still work on them
   vec3 em = vec3(0.);
-  if (uBurn.x > 0. && (fFam < .5 || abs(fFam - 5.) < .5 || abs(fFam - 9.) < .5 || abs(fFam - 13.) < .5)) {
+  if (uBurn.x > 0. && (fFam < .5 || abs(fFam - 5.) < .5 || abs(fFam - 9.) < .5 || abs(fFam - 13.) < .5 || abs(fFam - 18.5) < 1.)) {
     vec3 q = vPL * 8. + vec3(uSeed.x, 0., uSeed.y);
     float c = vn3(q) * .7 + vn3(q * 2.9 + 7.) * .3, ch = uBurn.x * 1.3 - c + (vPL.y - .25) * .5 * uBurn.x;
     if (ch > .1) fam = 15.; else if (ch > 0.) tone = min(tone + 1, 2);   // charred; a scorched rim round the char

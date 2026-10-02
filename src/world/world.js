@@ -56,9 +56,9 @@ const PAL = {
     stone: ['5e4e88', '46396a', '352b54', '211a36'], rock: ['4f4270', '3c3158', '2d2545', '1c1730'], rope: ['8a78a8', '6a5a88', '4e4268', '2e2644'], cover: null},
 };
 const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {ember: ['ffe08a', 'ffa040', 'e0541e', '6e1c12']}};
-// (bark, leaf: the procedural trees, trees3d.js; char, ash, ember: burning wood, gfx.js MESH_FS uBurn; appended, so the kit's
-// family indices stay put)
-export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember'];
+// (bark, leaf: the procedural trees, trees3d.js; char, ash, ember: burning wood, gfx.js MESH_FS uBurn; birch, aspen, berry: the
+// birch's white bark, the aspen's grey-green bark, the rowan's berries, trees3d.js; appended, so the kit's family indices stay put)
+export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry'];
 const mix = (a, b, k) => a.map((x, i) => Math.round(x + (b[i] - x) * k));
 const ramp6 = r4 => { const r = r4.map(hexrgb); return [r[0], r[1], r[2], mix(r[3], r[2], .25), r[3], r[2]]; };   // + line, outline_shadow, outline_lit
 function palette(biome, style) {
@@ -67,6 +67,7 @@ function palette(biome, style) {
   // the trees take the painted trees' own ramps (biomes.js STYLES: leaf / pine, bark)
   const sr = k => style?.[k]?.h ? ramp6(style[k].h.map(h => h.replace('#', ''))) : null;
   P.bark = sr('bark') || P.wood; P.leaf = sr('leaf') || sr('pine') || P.rock;
+  P.birch = sr('birch') || P.stone; P.aspen = sr('aspen') || P.bark; P.berry = sr('berry') || P.red;   // (ruins' STYLES has them; the other biomes grow no such trees)
   const w = P.wood; P.void = [...Array(3).fill(mix(w[4], [0, 0, 0], .3)), ...Array(3).fill(mix(w[4], [0, 0, 0], .45))];
   P.cover = B.cover ? ramp6(B.cover) : P.stone;
   P.char = ramp6(['3a3330', '26211f', '161312', '0c0a0a']); P.ash = ramp6(['8e8982', '75716b', '5e5a55', '403d3a']);

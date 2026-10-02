@@ -34,14 +34,18 @@ export function drawHud({host, opt, stage, env, hero, cv, features, G, fps, proj
 
 // ?lineup=trees: the procedural trees side by side for review, 3 rows of 5 (x 12 .. 26.4), each framed by standing 3.4 m
 // north of its middle (&at=19.2,6.6 / 13.1 / 19.6): oaks seeds 0-4 | oaks 5-7 + the painted oaks | dead 0-2 + the
-// painted dead tree, then the willows 0-2 and the painted willow (x 26.4 .. 37.2, framed at &at=31,21) (p.painted keeps a
-// tree's card). They join the world's entities, so they survive N / Shift+R
+// painted dead tree, then the willows 0-2 and the painted willow (x 26.4 .. 37.2, framed at &at=31,21), then a 4th row south of the arena's wall (y 27.4): the aspens
+// 0-2 + the painted one (x 4 .. 10.6, &at=7,24.4), the rowans (x 14 .. 23.6, &at=19,24.4), the birches (x 27 .. 36, &at=31,24.4) (p.painted
+// keeps a tree's card; variant 4 / 5 / 6 = rowan / birch / aspen, trees3d.js speciesOf). They join the world's entities, so they survive N / Shift+R
 export function treeLineup({world, ents}) {
-  const row = (y, list) => list.forEach(([variant, seed, painted], i) => {
-    const p = {kind: 'tree', x: 12 + i * 3.6, y, z: 0, variant, seed, painted, lineup: true, r: .3};
+  const row = (y, list) => list.forEach(([variant, seed, painted, x], i) => {
+    const p = {kind: 'tree', x: x ?? 12 + i * 3.6, y, z: 0, variant, seed, painted, lineup: true, r: .3};
     ents.add(p); world.addItem(p);
   });
   row(10, [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]]);
   row(16.5, [[0, 5], [0, 6], [0, 7], [0, 0, true], [1, 0, true]]);
   row(23, [[2, 0], [2, 1], [2, 2], [2, 0, true], [3, 0], [3, 1], [3, 2], [3, 0, true]]);
+  row(27.4, [[6, 0, false, 4], [6, 1, false, 6.2], [6, 2, false, 8.4], [6, 0, true, 10.6],
+    [4, 0, false, 14], [4, 1, false, 17.2], [4, 2, false, 20.4], [4, 0, true, 23.6],
+    [5, 0, false, 27], [5, 1, false, 30], [5, 2, false, 33], [5, 0, true, 36]]);
 }

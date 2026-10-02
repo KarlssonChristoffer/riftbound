@@ -31,6 +31,7 @@
 import {hash3 as hsh, vnoise as vn} from '../core/mathx.js';
 import {mulberry32 as rng} from '../core/rng.js';
 import {hexU32 as hex} from '../core/color.js';
+import {speciesOf} from './trees3d.js';   // which tree a prop is (the painted cards draw the same species as the 3D ones)
 
 // ============================================================ pixel toolkit
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -185,6 +186,8 @@ const STYLES = {
     wood: ramp('#8c6c4a', '#70543a', '#543e2b', '#35271c'), metal: ramp('#a08650', '#7a6438', '#56452a', '#352a1c'),
     straw: ramp('#cdb577', '#ad935a', '#877043', '#594a2b'), cloth: ramp('#bca985', '#9e8d6b', '#7d6f53', '#514836'),
     leaf: ramp('#6f8c68', '#577154', '#435a45', '#2e3f33'), bark: ramp('#75654f', '#5d4f40', '#473c32', '#2d2621'),
+    // the other trees (trees3d.js, world.js FAMS birch / aspen / berry): the birch's white bark, the aspen's grey-green bark, the rowan's berries
+    birch: ramp('#f3f0e7', '#d6d4ca', '#abaaa1', '#5e5c58'), aspen: ramp('#a9b19b', '#838e78', '#646f5d', '#3b453b'), berry: ramp('#f48a58', '#e2482c', '#ab2a2c', '#5a1820'),
     clay: ramp('#c8845a', '#a8643e', '#7e472c', '#4e2a1c'), gem: ramp('#e4ffc8', '#9ad878', '#58a060', '#2a5a3c'), gemGlow: ['#eaffd8', '#8aff6a'], gemInner: '#1e4a20',
     brute: ramp('#bca985', '#9e8d6b', '#7d6f53', '#514836'),
     rock: ramp('#7e786b', '#666056', '#504b44', '#35322d'), water: ramp('#9cc2c4', '#6e9ca4', '#4f7c8a', '#33556a'),
@@ -1632,6 +1635,70 @@ function willowCard(S, m) {
   });
 }
 
+// ---- the other trees' painted cards (trees3d.js grows the 3D ones: these are their trees3d=0 fallback and what the water mirrors; the same species pick,
+// trees3d.js speciesOf). The ruins only. Metres east of the foot / up -> card px through X / Y
+// the rowan: a small tree of 2-3 slim stems and a round crown of feathery sprays (leaf ticks round every blob's edge), red berry clusters on its shell
+function rowanCard(S, m, v) {
+  const W = m.W(3.6), H = m.H(4.4), b = H - 3, cx = Math.round(W * .5);
+  return build(W, H, [cx, H - 2], P => {
+    const r = rng(v * 29 + 11), X = u => cx + u * m.W(1), Y = h => b - h * m.H(1);
+    const ns = 2 + (v % 2);
+    for (let i = 0; i < ns; i++) { const a = (i / (ns - 1 || 1) - .5) * 2 * (ns > 2 ? 1 : .6) + (r() - .5) * .3; limb(P, X(a * .1), b, X(a * .55), Y(2.1 + r() * .3), 4, 2.5, S.bark, a * 2); }
+    limb(P, X(0), b, X(.05), Y(.5), 5, 4, S.bark);
+    for (const [x, w] of [[-5, 3], [5, 3]]) limb(P, cx, b - 1, cx + x, b + 1, w, 1, S.bark);
+    P.runShade([S.bark]);
+    const blobs = [[0, 3.1, .78, .55], [-.75, 2.7, .62, .46], [.8, 2.75, .62, .46], [-.35, 3.65, .62, .46], [.45, 3.55, .6, .45], [0, 2.3, .6, .42], [-1, 2.1, .4, .3], [1, 2.15, .4, .3]];
+    blobs.forEach(([u, h, rx, ry], i) => P.blob(X(u + (r() - .5) * .15), Y(h), m.W(rx), m.H(ry), S.leaf, {s: i + v * 10, j: .4, edge: .9, bias: (h - 3) * .16 - u * .06}));
+    P.outline();
+    // the feathery edge: ticks 1-2 px out of the crown's rim, light on top and dark below
+    const tk = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (P.mat(x, y) === S.leaf.id && hsh(x, y, 7 + v) < .3) {
+      const dx = (hsh(x, y, 8) < .5 ? -1 : 1), dy = hsh(x, y, 9) < .5 ? -1 : 1;
+      if (!P.on(x + dx, y) || !P.on(x, y + dy)) tk.push([x + dx * (1 + (hsh(x, y, 10) < .4 ? 1 : 0)), y + (hsh(x, y, 11) < .5 ? 0 : dy), dy < 0 ? 0 : 2]);
+    }
+    for (const [x, y, t] of tk) if (!P.on(x, y)) P.p(x, y, S.leaf, t);
+    // berries: clusters of 3-4 px on the rim of the upper crown
+    for (let i = 0; i < 9; i++) {
+      const a = -2.6 + i / 8 * 2.1 + (r() - .5) * .3, h = 3.1 + Math.sin(a + 1.5) * .6, x = Math.round(X(Math.cos(a + 1.5) * 1.05 * (.8 + r() * .3))), y = Math.round(Y(h + .1 + r() * .35));
+      P.p(x, y, S.berry, 1); P.p(x + 1, y, S.berry, 0); P.p(x, y + 1, S.berry, 2); if (r() < .6) P.p(x + 1, y + 1, S.berry, 1);
+    }
+  });
+}
+// the birch: a tall slender white trunk leaning a little, dark and rough at the foot, black marks, white branches, a light crown of small leaf clumps with gaps and a few hanging tufts
+function birchCard(S, m, v) {
+  const W = m.W(3), H = m.H(6.6), b = H - 3, cx = Math.round(W * .42);
+  return build(W, H, [cx, H - 2], P => {
+    const r = rng(v * 29 + 5), X = u => cx + u * m.W(1), Y = h => b - h * m.H(1), lean = .35 + r() * .3, top = 5.9, tx = h => lean * Math.pow(h / top, 1.5);
+    for (let k = 0; k < 8; k++) limb(P, X(tx(top * k / 8)), Y(top * k / 8), X(tx(top * (k + 1) / 8)), Y(top * (k + 1) / 8), 5.5 - 3 * k / 8, 5.5 - 3 * (k + 1) / 8, S.birch);
+    limb(P, cx, b, cx, Y(.55), 6, 5, S.bark); for (const [x, w] of [[-5, 3], [5, 3]]) limb(P, cx, b - 1, cx + x, b + 1, w, 1, S.bark);
+    for (let i = 0; i < 6; i++) { const h = 2.6 + i * .55 + r() * .3, a = i * 2.4, e = [X(tx(h) + Math.cos(a) * (.8 + r() * .5)), Y(h + .9 + r() * .4)]; limb(P, X(tx(h)), Y(h), e[0], e[1], 2, 1, S.birch); }
+    P.runShade([S.birch, S.bark]);
+    for (let i = 0; i < 22; i++) { const h = .7 + r() * 4.8, x = Math.round(X(tx(h))), y = Math.round(Y(h)), w = 2 + (r() * 3 | 0); for (let k = -1; k < w - 1; k++) if (P.mat(x + k, y) === S.birch.id) P.p(x + k, y, S.bark, 2); }
+    const blobs = [];
+    for (let i = 0; i < 18; i++) { const h = 2.7 + r() * 3.5, f = Math.sin(Math.PI * Math.min(1, (h - 2.2) / 4.2)); blobs.push([tx(h) + (r() - .5) * 2 * (1.0 * f + .25), h, .3 + r() * .18]); }
+    blobs.sort((a, c) => a[1] - c[1]);
+    blobs.forEach(([u, h, rr], i) => P.blob(X(u), Y(h), m.W(rr), m.H(rr * .8), S.leaf, {s: i + v * 10, j: .4, edge: .7, bias: (h - 4.2) * .1 + .06}));
+    for (let i = 0; i < 9; i++) { const q = blobs[i % blobs.length], dy = 5 + (r() * 9 | 0); P.blob(X(q[0] + (r() - .5) * .5), Y(q[1]) + dy, 2 + r() * 2, 3 + r() * 3, S.leaf, {s: i + 70, j: .3, edge: .5, bias: -.05}); }
+    P.outline();
+  });
+}
+// the aspen: a straight grey-green trunk, bare to the height of a house, a narrow oval crown of round-leaved clumps with a ragged edge
+function aspenCard(S, m, v) {
+  const W = m.W(2.8), H = m.H(7.2), b = H - 3, cx = Math.round(W * .5);
+  return build(W, H, [cx, H - 2], P => {
+    const r = rng(v * 29 + 17), X = u => cx + u * m.W(1), Y = h => b - h * m.H(1), lean = .1 + r() * .2, top = 6.6, tx = h => lean * Math.pow(h / top, 1.4);
+    for (let k = 0; k < 8; k++) limb(P, X(tx(top * k / 8)), Y(top * k / 8), X(tx(top * (k + 1) / 8)), Y(top * (k + 1) / 8), 5 - 2.6 * k / 8, 5 - 2.6 * (k + 1) / 8, S.aspen);
+    for (const [x, w] of [[-5, 3], [5, 3], [-2, 2]]) limb(P, cx, b - 1, cx + x, b + 1, w, 1, S.aspen);
+    P.runShade([S.aspen]);
+    for (let i = 0; i < 6; i++) { const x = cx + (r() * 3 | 0) - 1, y = b - 2 - (r() * m.H(1.2) | 0); if (P.mat(x, y) === S.aspen.id) P.p(x, y, S.bark, 2); }
+    const w = u => 1.0 * Math.pow(Math.sin(Math.PI * Math.min(1, .05 + .95 * Math.pow(u, .85))), .7), blobs = [];
+    for (let i = 0; i < 34; i++) { const u = r(), h = 2.9 + u * 3.9, f = i < 18 ? r() * .7 : .85 + r() * .3; blobs.push([tx(h) + (r() < .5 ? -1 : 1) * w(u) * f, h, (i < 18 ? .36 : .25) + r() * .1]); }
+    blobs.sort((a, c) => a[1] - c[1]);
+    blobs.forEach(([u, h, rr], i) => P.blob(X(u), Y(h), m.W(rr), m.H(rr * .85), S.leaf, {s: i + v * 10, j: .4, edge: .8, bias: (h - 4.8) * .09 + .08}));
+    P.outline();
+  });
+}
+
 // ---- big mood shapes outside the walls
 function limb(P, x0, y0, x1, y1, t0, t1, R, bend = 0) {
   const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0));
@@ -1640,6 +1707,10 @@ function limb(P, x0, y0, x1, y1, t0, t1, R, bend = 0) {
 function tree(p, ctx, S) {
   const v = p.variant | 0, m = M(ctx);
   if (S.id === 'ruins') {
+    const sp = speciesOf(p, 'ruins');   // (the same pick as the 3D trees: a birch is a birch in both)
+    if (sp === 'rowan') return rowanCard(S, m, v);
+    if (sp === 'birch') return birchCard(S, m, v);
+    if (sp === 'aspen') return aspenCard(S, m, v);
     if (v === 3) return willowCard(S, m);   // (the willow by the river: trees3d.js grows the 3D one)
     const H = m.H(4.2) + (v * 6), W = 84;
     return build(W, H, [42, H - 2], P => {
@@ -1982,7 +2053,7 @@ function makeBiome(id) {
       const k = p.kind;
       if (p.outside && B.hole(p.x, p.y, ctx)) return null;
       const wall = k.startsWith('wall_');
-      const key = `${k}|${p.variant | 0}|${p.light | 0}|${sig}|${ctx.PPMY.toFixed(2)}` + (wall ? `|${p.x}|${p.y}` : '');
+      const key = `${k}|${p.variant | 0}|${p.light | 0}|${sig}|${ctx.PPMY.toFixed(2)}` + (wall ? `|${p.x}|${p.y}` : k === 'tree' ? `|${speciesOf(p, id)}` : '');   // (a tree's species is part of the card)
       let s = cache.get(key);
       if (s === undefined) { const f = PAINTERS[k]; s = f ? f(p, ctx, S) : null; cache.set(key, s); }
       return s;

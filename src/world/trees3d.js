@@ -14,7 +14,15 @@
 //          ~0.3 m above the ground. The season thins leaves, never whips: a bare willow is arching limbs and drooping whips,
 //          and no leaf is ever left in the air. The lower a strand hangs, the more it sways (aFlex); each strand flutters on
 //          its own phase (whip and tufts together)
-// treeModel(p, biome, fam) -> {geo, yaw, scale, top, bones, crown, species, seed} | null (no model: the prop keeps its
+//   rowan  (variant 4; ~15 % of the surroundings) 2-4 slim stems, an open rounded crown of 50-90 feathery SPRAYS (a pinnate leaf: pairs of lozenge
+//          leaflets) over a few dark inner masses, clusters of red BERRIES (the berry family) out on its shell: never thinned, so winter keeps them
+//   birch  (variant 5; ~25 %, in groves) tall, a white leaning trunk (the birch family) with black marks (short bark strips), a dark rough foot,
+//          white branches arching out and thin whips with small leaf clumps hanging from them: a light, see-through crown
+//   aspen  (variant 6; ~20 %, in groves) a straight grey-green trunk (the aspen family) bare to ~2.8 m, a narrow oval crown of ~45 round-leaved
+//          clumps on short ascending branches (a fork on each: a bare aspen is a column of fine twigs); the shape seed picks its autumn palette
+// B.autumn = [s1, s2, s3, s4] (each [hi, base, shade]): the species' autumn colours, kept on the shape as shape.autumn (rowan, birch, aspen; the oak
+//   and willow's are brief T1's)
+// treeModel(p, biome, fam) -> {geo, yaw, scale, top, bones, crown, autumn, species, seed} | null (no model: the prop keeps its
 //   card). crown = {x, z, y0, y1, r} in the model's frame (leafy species only)
 // boneHit(tree, from, to) -> where an arrow sticks in the trunk / a big limb, or null (the twigs and leaves let it through)
 // The geometry carries aFlex (the wind's bend weight per vertex): gfx.js leans it (mesh {sway: true}, setLean)
@@ -332,17 +340,258 @@ function willow(seed, fam) {
   return B;
 }
 
-const SPECIES = {oak, dead, willow};
-function speciesOf(p, biome) {
-  if (biome === 'ruins') return (p.variant | 0) === 2 ? 'dead' : (p.variant | 0) === 3 ? 'willow' : 'oak';
+// ---------------------------------------------------------------- the rowan, the birch, the aspen (river brief T2)
+// helpers of their own (clump() makes round clumps; the rowan's feathery leaflets and the birch's bark marks need other shapes)
+const icoOf = {};
+const icoPos = d => icoOf[d] || (icoOf[d] = (g => { const a = g.attributes.position.array; g.dispose(); return a; })(d === 'oct' ? new THREE.OctahedronGeometry(1, 0) : new THREE.IcosahedronGeometry(1, d)));
+// an oriented leafy lobe: an ellipsoid with half-lengths (l1, l2, l3) along (dir, ., hint's side); the edge ragged by `jag`, the
+// normals the ellipsoid's own leaned toward the crown ellipsoid (C, R) by `hull`. 'oct' = 8 triangles (a leaflet), or an icosphere detail
+function lobeOf(B, c, dir, hint, l1, l2, l3, seed, C, R, hull, bias, r, detail = 'oct', jag = .18) {
+  const P = icoPos(detail), o = seed * 5.37, e1 = dir.clone().normalize(), e3 = hint.clone().addScaledVector(e1, -hint.dot(e1));
+  if (e3.lengthSq() < 1e-6) e3.copy(Math.abs(e1.y) < .9 ? V(0, 1, 0) : V(1, 0, 0)).addScaledVector(e1, -e1.dot(e3));
+  e3.normalize(); const e2 = V().crossVectors(e3, e1), u = V(), g = V(), p = [V(), V(), V()], n = [V(), V(), V()];
+  for (let t = 0; t < P.length; t += 9) {
+    for (let j = 0; j < 3; j++) {
+      u.set(P[t + j * 3], P[t + j * 3 + 1], P[t + j * 3 + 2]).normalize();
+      const d = 1 + (vn3(u.x * 3 + o, u.y * 3, u.z * 3 - o, 7) - .5) * jag * 2;
+      p[j].copy(c).addScaledVector(e1, u.x * l1 * d).addScaledVector(e2, u.y * l2 * d).addScaledVector(e3, u.z * l3 * d);
+      n[j].set(0, 0, 0).addScaledVector(e1, u.x / l1).addScaledVector(e2, u.y / l2).addScaledVector(e3, u.z / l3).normalize();
+      g.set((p[j].x - C.x) / (R.x * R.x), (p[j].y - C.y) / (R.y * R.y), (p[j].z - C.z) / (R.z * R.z)).normalize();
+      n[j].multiplyScalar(1 - hull).addScaledVector(g, hull).normalize();
+    }
+    B.tri(p[0], p[1], p[2], n[0], n[1], n[2], bias);
+  }
+}
+const ptAt = (pts, s) => { const f = Math.max(0, Math.min(1, s)) * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)); return pts[i].clone().lerp(pts[i + 1], f - i); };
+const tanOf = (pts, s) => ptAt(pts, Math.min(1, s + .02)).sub(ptAt(pts, Math.max(0, s - .02))).normalize();
+// a mark on a trunk: a short strip of bark `hh` tall wrapping `span` radians round the trunk's axis at c (tangent T), standing a hair off its
+// surface (radius rad); the black bands and eyes of a birch, the scars at an aspen's foot. Wound like tube() (outward = CCW), 4 segments
+function markStrip(B, c, T, rad, a0, span, hh) {
+  const N = V().crossVectors(T, Math.abs(T.z) < .9 ? V(0, 0, 1) : V(1, 0, 0)).normalize(), Bn = V().crossVectors(T, N), seg = 4;
+  const at = (k, dh) => { const a = a0 + span * k / seg, d = N.clone().multiplyScalar(Math.cos(a)).addScaledVector(Bn, Math.sin(a)); return [c.clone().addScaledVector(d, rad).addScaledVector(T, dh), d]; };
+  for (let k = 0; k < seg; k++) {
+    const [a, na] = at(k, -hh / 2), [b, nb] = at(k + 1, -hh / 2), [c1, nc] = at(k + 1, hh / 2), [d, nd] = at(k, hh / 2);
+    B.tri(a, b, c1, na, nb, nc); B.tri(a, c1, d, na, nc, nd);
+  }
+}
+// the autumn palettes (B.autumn: 4 stages, each ['#hi', '#base', '#shade'] = the tones the mesh shader picks; stage 1 turns first, 4 is the
+// dying brown; the green is the biome's `leaf` ramp). A species' crown is meant to turn in patches (the crown's shader, brief T1)
+const AUTUMN = {
+  rowan: [['#f5b25e', '#e5823a', '#aa552a'], ['#f0714e', '#d94a30', '#a42c2a'], ['#d9505a', '#b22c3c', '#7a1e30'], ['#9c3c44', '#6f2433', '#451620']],   // orange, scarlet, crimson, maroon
+  birch: [['#c8d268', '#a8b84c', '#7b8d36'], ['#f2e464', '#dac843', '#aa9b2d'], ['#f4cc56', '#dba830', '#a97c22'], ['#cdae78', '#aa8a5a', '#7d6542']],   // yellow-green, yellow, gold, tan
+  aspen: [   // it varies tree to tree: shape seed -> one of these (ASPEN_KIND)
+    [['#f4e46a', '#dcc944', '#ad9b2e'], ['#f6ac52', '#e27d30', '#ab5425'], ['#e45c40', '#c23e2e', '#8c2629'], ['#8e3d3a', '#66242d', '#40151f']],   // most: yellow, orange, red, maroon
+    [['#f4e46a', '#dcc944', '#ad9b2e'], ['#f2cc54', '#daa930', '#a97c22'], ['#dc9c3a', '#ba7a2a', '#8a5321'], ['#a47e4e', '#7e5d3a', '#58412b']],   // some: yellow, gold, amber, brown
+    [['#f48c4a', '#de5c34', '#a73c29'], ['#e4523e', '#c03232', '#882428'], ['#c63c46', '#9a2632', '#6c1a26'], ['#8e3a42', '#652331', '#41151f']]],   // a few: red early
+};
+const ASPEN_KIND = [0, 0, 1, 0, 2, 0, 1, 0];   // 5 of 8 shapes the usual, 2 gold, 1 red early (SEEDS = 8)
+
+// rowan (rönn): a small tree, 2-3 slim grey-brown stems from the foot, an open rounded crown of ~30 feathery SPRAYS (a pinnate leaf:
+// 5-6 pairs of narrow leaflets and a terminal one, each leaflet an 8-triangle lozenge) on twigs, and a few clusters of red berries
+// out on the shell (the berry family: not thinned, so a bare winter rowan keeps them). The sprays' normals lean strongly toward the
+// crown ellipsoid: one sun side and a shade side, the leaflets only comb its edge
+function rowan(seed, fam) {
+  const r = rng(seed * 37 + 5), TAU = Math.PI * 2, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const H = 3.5 + r() * .5, R = V(1.15 + r() * .2, .92 + r() * .13, 1.15 + r() * .2), la = r() * TAU, ld = .05 + r() * .12;
+  const C = V(Math.cos(la) * ld * 2, H - R.y * .9, Math.sin(la) * ld * 2);
+  const c = clamp((C.y - R.y * .8) / H, .15, .6), crown = y => { const u = Math.max(0, y) / H; return u < c ? .7 * (u / c) ** 2.2 : Math.min(1, .7 + .3 * (u - c) / (1 - c)); };
+  const B = new Build(fam, crown);
+  B.crown = {x: C.x, z: C.z, y0: C.y - R.y * .9, y1: H + .1, r: Math.max(R.x, R.z) + .1};
+  B.autumn = AUTUMN.rowan;
+  const hull = .55, up = V(0, 1, 0);
+  // the stems: 2-3 from just off the foot, leaning out; each ends low in the crown
+  const ns = 2 + (r() < .5 ? 1 : 0) + (r() < .2 ? 1 : 0), a0 = r() * TAU, stems = [];
+  for (let i = 0; i < ns; i++) {
+    const az = a0 + i / ns * TAU + (r() - .5) * .6, d = V(Math.cos(az), 0, Math.sin(az)), r0 = .074 + r() * .018;
+    const base = V(0, -.12, 0).addScaledVector(d, .05 + r() * .06), top = C.clone().add(V(d.x * R.x * (.2 + r() * .2), -R.y * (.3 + r() * .25), d.z * R.z * (.2 + r() * .2)));
+    const pts = limbPts(base, top, 4, V(d.x * .1, 0, d.z * .1), .05, r);
+    B.part('bark'); tube(B, pts, pts.map((q, k) => k === 0 ? r0 * 1.3 : r0 * (1 - .55 * k / (pts.length - 1))), 6, r(), false);
+    stems.push({top, d, az});
+  }
+  // the crown's tips: a spiral over the upper shell (stratified, so no gaps): each tip gets a branch from the nearest stem
+  const nb = ns * 3 + 3 + (r() * 3 | 0), tips = [];
+  for (let j = 0; j < nb; j++) {
+    const cz = -.2 + 1.15 * (j + .5) / nb, sz = Math.sqrt(1 - cz * cz), az = j * 2.39996 + a0, rho = .45 + r() * .15;
+    const E = C.clone().add(V(Math.cos(az) * sz * R.x * rho, cz * R.y * rho, Math.sin(az) * sz * R.z * rho));
+    const st = stems.reduce((b, q) => Math.hypot(q.top.x - E.x, q.top.z - E.z) < Math.hypot(b.top.x - E.x, b.top.z - E.z) ? q : b, stems[0]);
+    const pts = limbPts(st.top.clone().add(V(0, .05, 0)), E, 3, V(0, .1 + r() * .1, 0), .06, r);
+    B.part('bark'); tube(B, pts, taper(pts.length, .036 + r() * .006, .02), 5, r());
+    // 3-4 twigs out of the branch's end, each a spray
+    const nt = 3 + (r() < .45 ? 1 : 0);
+    for (let k = 0; k < nt; k++) {
+      const out = V(E.x - C.x, E.y - C.y, E.z - C.z).normalize(), ta = (k / nt + r() * .2) * TAU, side = V(Math.cos(ta), (r() - .35) * .8, Math.sin(ta)).normalize();
+      const dir = out.clone().multiplyScalar(.9).addScaledVector(side, .7).normalize(), len = .26 + r() * .16;
+      const T = E.clone().addScaledVector(dir, len);
+      const e = V((T.x - C.x) / R.x, (T.y - C.y) / R.y, (T.z - C.z) / R.z), m = e.length(); if (m > 1.04) { T.copy(C).add(V(e.x / m * 1.04 * R.x, e.y / m * 1.04 * R.y, e.z / m * 1.04 * R.z)); e.multiplyScalar(1.04 / m); }
+      B.part('bark'); tube(B, [E, E.clone().lerp(T, .5).add(V(0, .04, 0)), T], [.02, .016, .011], 4, r());
+      const d1 = V(T.x - E.x, T.y - E.y, T.z - E.z).normalize().multiplyScalar(.6).addScaledVector(out, .5).normalize();
+      tips.push({T, dir: d1, out, e, L: .4 + r() * .12});
+      tips.push({T, dir: d1.clone().applyAxisAngle(out, (r() < .5 ? -1 : 1) * (.8 + r() * .5)).add(V(0, -.1, 0)).normalize(), out, e, L: .32 + r() * .12, second: true});   // a second spray off the same twig, turned about the outward axis
+    }
+  }
+  // the sprays
+  let ns2 = 0;
+  for (const [i, tp] of tips.entries()) {
+    const A = tp.T, a = tp.dir.clone(); a.y += tp.e.y > .35 ? -.05 : -.2; a.normalize();
+    const s = V().crossVectors(a, up); if (s.lengthSq() < 1e-4) s.set(1, 0, 0); s.normalize();
+    const n = V().crossVectors(s, a).normalize(), L = tp.L, phase = (i * 2.39996 + seed * .7) % TAU;
+    const bias = TUNE.lift + TUNE.light * tp.e.y / .9 - TUNE.inner * (1 - Math.min(1, tp.e.length())) * .6 + (r() - .5) * .1;
+    B.part('leaf', bias, -2, crown(A.y), phase);   // spray: sprayOf(A.clone().addScaledVector(a, L / 2), C, R, seed, i)   (the spray's middle, the crown's ellipsoid, the tree's seed, this spray)
+    const np = 5 + (r() < .5 ? 1 : 0);
+    for (let k = 0; k < np; k++) {
+      const t = (k + .5) / (np + .1), ell = .2 + .09 * Math.sin(Math.PI * (.12 + .76 * t)), S = A.clone().addScaledVector(a, L * t).add(V(0, -.05 * t * t, 0));
+      for (const sd of [-1, 1]) {
+        const th = .86 + (r() - .5) * .3, ld2 = a.clone().multiplyScalar(Math.cos(th)).addScaledVector(s, sd * Math.sin(th)).addScaledVector(n, .22).normalize();
+        lobeOf(B, S.clone().addScaledVector(ld2, ell / 2), ld2, n, ell / 2, .046, .024, ns2++, C, R, hull, bias + (r() - .5) * .1, r, 'oct', .22);
+      }
+    }
+    lobeOf(B, A.clone().addScaledVector(a, L + .09), a, n, .13, .05, .026, ns2++, C, R, hull, bias, r, 'oct', .2);
+  }
+  // inside the crown: a few dark masses behind the sprays (they stay put; the season thins them with the sprays), so the crown has a body and the sprays comb its surface
+  for (let i = 0; i < 4; i++) {
+    const az = a0 + i * 1.7 + r(), cz = -.1 + .8 * r(), sz = Math.sqrt(1 - cz * cz), q = C.clone().add(V(Math.cos(az) * sz * R.x * .36, cz * R.y * .4, Math.sin(az) * sz * R.z * .36)), bias = TUNE.lift - .24;
+    B.part('leaf', bias, -2, crown(q.y), -1); clump(B, q, .38 + r() * .08, .8, seed * 17 + i, C, R, bias, r, 3);   // spray: sprayOf(q, C, R, seed, 100 + i)
+  }
+  // berries: a cluster at the end of some of the outer upper twigs (the berries sit above and among the leaves, so the camera sees them)
+  const cand = tips.filter(t => !t.second && t.e.y > .1 && t.e.length() > .8), want = 9 + (r() * 4 | 0), bt = cand.filter(() => r() < want / cand.length);
+  for (const [i, tp] of bt.entries()) {
+    const base = tp.T.clone().add(V(0, .09, 0)).addScaledVector(tp.out, .04);
+    B.part('bark'); tube(B, [tp.T.clone(), base], [.012, .01], 3, r());
+    B.part('berry', .1, -1, crown(base.y), -1);
+    for (let k = 0; k < 5; k++) {
+      const q = base.clone().add(V((r() - .5) * .14, r() * .07, (r() - .5) * .14));
+      clump(B, q, .052 + r() * .014, 1, seed * 19 + i * 5 + k, C, R, .1 + (r() - .5) * .1, r, 0, .25);   // (an icosahedron: 20 triangles a berry)
+    }
+  }
+  B.sprays = tips.length; B.berries = bt.length;
+  return B;
+}
+
+// birch (björk): tall and slender, a white trunk leaning a little, dark and rough at the foot, black bands and eyes on the white (marks:
+// short bark strips, never thinned), 10-11 white branches rising and arching, thin whips hanging from them with small leaf clumps
+// (the crown is light and see-through: gaps between the clumps, trunk and branches show through), a clump at every branch end
+function birch(seed, fam) {
+  const r = rng(seed * 41 + 13), TAU = Math.PI * 2, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const H = 5.9 + r() * 1.1, la = r() * TAU, ld = .25 + r() * .45, y0 = H * .36, Wc = 1.15 + r() * .25;
+  const c = clamp(y0 / H * .9, .15, .6), crown = y => { const u = Math.max(0, y) / H; return u < c ? .7 * (u / c) ** 2.2 : Math.min(1, .7 + .3 * (u - c) / (1 - c)); };
+  const B = new Build(fam, crown), CC = V(Math.cos(la) * ld * .8, y0 + (H - y0) * .5, Math.sin(la) * ld * .8), CR = V(Wc, (H - y0) * .55, Wc);
+  B.crown = {x: CC.x, z: CC.z, y0: y0 + .2, y1: H + .2, r: Wc * .95};
+  B.autumn = AUTUMN.birch;
+  // the trunk: a gentle curve (the lean grows toward the top), a little wobble
+  const nt = 9, tp = [], wob = Array.from({length: nt}, () => V((r() - .5) * .08, 0, (r() - .5) * .08));
+  for (let i = 0; i < nt; i++) { const t = i / (nt - 1); tp.push(V(Math.cos(la) * ld * Math.pow(t, 1.5), -.15 + (H + .15) * t, Math.sin(la) * ld * Math.pow(t, 1.5)).add(wob[i].multiplyScalar(Math.sin(Math.PI * t) + .15))); }
+  const rT = s => .034 + .084 * Math.pow(1 - s, .85), fh = .5 + r() * .35, sf = (fh + .15) / (H + .15);
+  const seg = (s0, s1, n) => Array.from({length: n}, (_, i) => ptAt(tp, s0 + (s1 - s0) * i / (n - 1)));
+  B.part('bark'); { const s = seg(0, sf, 4); tube(B, s, s.map((q, i) => rT(sf * i / 3) * (i === 0 ? 1.55 : i === 1 ? 1.2 : 1.12)), 7, r(), false); }   // the dark rough foot
+  B.part('birch'); { const ss = Array.from({length: 9}, (_, i) => sf * .8 + (1 - sf * .8) * i / 8); tube(B, ss.map(s => ptAt(tp, s)), ss.map(rT), 6, r()); }
+  B.part('bark', 0, 2);   // the marks: the darkest tone of the bark ramp
+  for (let k = 0; k < 30; k++) {
+    const s = sf + (1 - sf) * Math.pow((k + r() * .9) / 30, .9) * .96, big = r() < .22;
+    markStrip(B, ptAt(tp, s), tanOf(tp, s), rT(s) * 1.05, r() * TAU, big ? 2.8 + r() * 1.6 : .7 + r() * 1.9, big ? .06 + r() * .04 : .02 + r() * .035);
+  }
+  // branches: a spiral up the crown zone; each arcs out and up, its outer part carrying whips; a clump at its end
+  const nb = 10 + (r() < .5 ? 1 : 0), a0 = r() * TAU, tips = [], whips = [];
+  const wAt = u => Wc * (.15 + .85 * Math.sin(Math.PI * Math.pow(u, .62)));   // the crown's half width by height (0 at the foot, widest low, a point at the top)
+  for (let j = 0; j < nb; j++) {
+    const u = .08 + .88 * (j + r() * .6) / nb, y = y0 + (H - y0) * u, az = a0 + j * 2.39996, d = V(Math.cos(az), 0, Math.sin(az)), w = wAt(u) * (.78 + r() * .22);
+    const P0 = ptAt(tp, (y + .15) / (H + .15)), E = P0.clone().addScaledVector(d, w).add(V(0, .35 + .55 * (1 - u) + r() * .2, 0));
+    const pts = limbPts(P0, E, 4, V(d.x * -.06, .22 + r() * .12, d.z * -.06), .06, r);
+    B.part('birch'); tube(B, pts, taper(pts.length, .03 + .012 * (1 - u), .011), 5, r());
+    tips.push({E, u, pts, j});
+    for (const s of [.52 + r() * .1, .78 + r() * .1]) { // whips: out and then down
+      const Q = ptAt(pts, s), o = V(d.x, 0, d.z).applyAxisAngle(V(0, 1, 0), (r() - .5) * 1.2), L = .55 + r() * .55, ph = r() * TAU;
+      const wp = [0, .1, .38, .72, 1].map(f => V(Q.x + o.x * (.04 + .16 * Math.min(1, f * 2)), Q.y - L * f, Q.z + o.z * (.04 + .16 * Math.min(1, f * 2))));
+      B.flexOf = y => crown(Q.y) * (1 + .3 * Math.max(0, Q.y - y)); B.part('bark', 0, -1, null, ph); tube(B, wp, [.016, .014, .012, .01, .008], 3, r()); B.flexOf = crown;
+      whips.push({wp, L, ph, Q, u});
+    }
+  }
+  // leaves: a clump at every branch end (and the top), then 2-3 small clumps on each whip
+  let n = 0; const tuft = (pos, rad, k, ph, fl, e) => {
+    const bias = TUNE.lift + .06 + TUNE.light * clamp((pos.y - CC.y) / (CR.y), -1, 1) * .8 - TUNE.inner * (1 - Math.min(1, e)) * .5 + (r() - .5) * .1;
+    B.part('leaf', bias, -2, fl, ph); clump(B, pos, rad, .75, seed * 13 + n++, CC, CR, bias, r, k, 1.2);   // spray: sprayOf(pos, CC, CR, seed, n)
+  };
+  for (const [i, t] of tips.entries()) { const e = Math.hypot(t.E.x - CC.x, t.E.y - CC.y, t.E.z - CC.z) / (H - y0) * 1.6; tuft(t.E.clone().add(V(0, .08, 0)), .25 + r() * .08 - t.u * .06, 3, (i * 2.39996 + seed * .7) % TAU, crown(t.E.y), e); }
+  tuft(V(CC.x + Math.cos(la) * ld * .3, H + .02, CC.z + Math.sin(la) * ld * .3), .2, 3, r() * TAU, crown(H), 1);
+  for (const w of whips) {
+    const k = r() < .5 ? 2 : 3, fl = y => crown(w.Q.y) * (1 + .3 * Math.max(0, w.Q.y - y));
+    for (let q = 0; q < k; q++) { const f = (q + 1) / k, pos = ptAt(w.wp, f * (.9 + r() * .1)), rad = .12 + .05 * (1 - f) + r() * .03; tuft(pos, rad, rad < .15 ? 1 : 2, w.ph, fl(pos.y), 1.1 - w.u * .3); }
+  }
+  B.whips = whips.length; B.branches = tips.length;
+  return B;
+}
+
+// aspen (asp): a straight grey-green trunk, bare to the height of a house, and a narrow columnar crown held high: ~30 round-leaved clumps
+// stacked in a spiral up a pointed ellipse, short ascending branches, a dark tall core. It varies most tree to tree: the shape seed picks
+// the autumn palette (AUTUMN.aspen: most yellow-orange-red, some gold-brown, a few red early)
+function aspen(seed, fam) {
+  const r = rng(seed * 53 + 17), TAU = Math.PI * 2, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const H = 6.3 + r() * 1.0, la = r() * TAU, ld = .06 + r() * .2, y0 = H * .4, Wc = .85 + r() * .2, ph0 = r() * TAU;
+  const c = clamp(y0 / H * .9, .15, .6), crown = y => { const u = Math.max(0, y) / H; return u < c ? .7 * (u / c) ** 2.2 : Math.min(1, .7 + .3 * (u - c) / (1 - c)); };
+  const B = new Build(fam, crown), lean = t => V(Math.cos(la) * ld * Math.pow(t, 1.4), 0, Math.sin(la) * ld * Math.pow(t, 1.4));
+  const CC = V(lean(.7).x, y0 + (H - y0) * .5, lean(.7).z), CR = V(Wc, (H - y0) * .55, Wc);
+  B.crown = {x: CC.x, z: CC.z, y0: y0, y1: H + .25, r: Wc + .15};
+  B.autumn = AUTUMN.aspen[ASPEN_KIND[((seed % 8) + 8) % 8]];
+  const nt = 8, tp = [];
+  for (let i = 0; i < nt; i++) { const t = i / (nt - 1); tp.push(lean(t).add(V((r() - .5) * .04 * Math.sin(Math.PI * t), -.15 + (H + .15) * t, (r() - .5) * .04 * Math.sin(Math.PI * t)))); }
+  const rT = s => .04 + .07 * Math.pow(1 - s, .9);
+  B.part('aspen'); tube(B, tp, tp.map((q, i) => rT(i / (nt - 1)) * (i === 0 ? 1.4 : i === 1 ? 1.1 : 1)), 6, r());
+  for (let i = 0; i < 3; i++) {   // roots
+    const a = i / 3 * TAU + r() * .9, d = V(Math.cos(a), 0, Math.sin(a)), L = .3 + r() * .2;
+    tube(B, [V(0, .25, 0).addScaledVector(d, .06), V(0, .08, 0).addScaledVector(d, .1 + L * .35), V(0, -.05, 0).addScaledVector(d, .1 + L)], [.05, .036, .025], 5, r());
+  }
+  B.part('bark', 0, 2);   // the dark scars: low on the trunk, a few higher
+  for (let k = 0; k < 16; k++) { const s = k < 11 ? .02 + .2 * (k / 11) : .22 + .5 * r(), hh = .03 + r() * .06; markStrip(B, ptAt(tp, s), tanOf(tp, s), rT(s) * 1.04, r() * TAU, .6 + r() * 1.6, hh); }
+  const wAt = u => Wc * Math.pow(Math.sin(Math.PI * Math.min(1, .05 + .95 * Math.pow(u, .85))), .7) * (1 + .16 * Math.sin(u * 8 + ph0));   // the crown's half width by height: an oval column, a little fuller below its middle, round at the top
+  let n = 0;
+  const put = (u, az, f, rad, detail) => {   // a clump at height u (0 .. 1 up the crown), azimuth az, f of the half width out, on a short branch off the trunk
+    const y = y0 + (H - y0) * u, d = V(Math.cos(az), 0, Math.sin(az)), w = wAt(u) * f, pos = ptAt(tp, (y + .15) / (H + .15)).addScaledVector(d, w);
+    const P0 = ptAt(tp, (y - .4 - .5 * Math.min(1, w / .8) + .15) / (H + .15)), mid = P0.clone().lerp(pos, .55).addScaledVector(d, .05);   // (the branch leaves the trunk below its clump: a steep ascent, a fork off its middle)
+    const sd = V(-d.z, 0, d.x).multiplyScalar(r() < .5 ? 1 : -1);
+    B.part('aspen'); tube(B, [P0, mid, pos], [.03, .02, .012], 4, r());
+    tube(B, [mid, mid.clone().addScaledVector(d, .1).addScaledVector(sd, .1).add(V(0, .18, 0)), mid.clone().addScaledVector(d, .16).addScaledVector(sd, .2).add(V(0, .4, 0))], [.014, .011, .008], 3, r());
+    const e = Math.hypot((pos.x - CC.x) / CR.x, (pos.y - CC.y) / CR.y, (pos.z - CC.z) / CR.z), bias = TUNE.lift + .1 + TUNE.light * (pos.y - CC.y) / CR.y * .8 - TUNE.inner * (1 - Math.min(1, e / .7)) * .7 + (r() - .5) * .14;
+    B.part('leaf', bias, -2, crown(pos.y), (n * 2.39996 + seed * .7) % TAU);   // spray: sprayOf(pos, CC, CR, seed, n)
+    clump(B, pos, rad, .85, seed * 13 + n++, CC, CR, bias, r, detail, 1.5);
+  };
+  for (let i = 0; i < 18; i++) { const u = (i + .5 + (r() - .5) * .9) / 18; put(clamp(u, .02, .98), i * 2.39996 + r() * .8, .1 + .6 * r(), .26 + r() * .15, i % 3 === 2 ? 2 : 3); }   // the body: clumps of every size all through the column
+  for (let i = 0; i < 26; i++) put(.03 + .95 * r(), r() * TAU, .86 + .3 * r(), .15 + r() * .12, 2);   // the rim: small ones on the surface and a little beyond it, the ragged leafy edge
+  { const top = V(lean(1).x, H + .1, lean(1).z); B.part('leaf', TUNE.lift + .12, -2, crown(H), r() * TAU); clump(B, top, .22, .95, seed * 13 + n++, CC, CR, TUNE.lift + .12, r, 3); }   // spray: sprayOf(top, CC, CR, seed, n)
+  for (const f of [.3, .62]) {   // the dark core: tall, steady (no gaps open in it)
+    const q = V(lean(f * .9 + .1).x, y0 + (H - y0) * f, lean(f * .9 + .1).z); B.part('leaf', TUNE.lift - .2, -2, crown(q.y), -1);   // spray: sprayOf(q, CC, CR, seed, 100 + f * 10)
+    clump(B, q, .4, 1.7, seed * 13 + n++, CC, CR, TUNE.lift - .2, r, 3);
+  }
+  B.clumps = n;
+  return B;
+}
+
+const SPECIES = {oak, dead, willow, rowan, birch, aspen};
+// Which tree grows where (the ruins; the painted cards ask the same, biomes.js tree()). A tree's `variant`: 2 = dead, 3 = willow (the river), 4 / 5 /
+// 6 = rowan / birch / aspen (the lineup sets them); 0 / 1 = a live tree: the garden's and the plateau's stay oaks, and the surroundings' trees
+// (`outside`) are a mix chosen from their own position, deterministic: oak 40 % / birch 25 % / aspen 20 % / rowan 15 % over the whole world, but
+// birches and aspens each follow a low-frequency field (lattice cells of 16 m and 12 m): where the field is high that species is several times as
+// likely, so they stand in small groves (the surroundings are sparse, ~10 live trees in all, so a grove is a pair or a trio)
+const smooth01 = t => t * t * (3 - 2 * t);
+function plane(x, y, s, cell) {   // value noise over the ground, 0..1
+  const gx = x / cell, gy = y / cell, ix = Math.floor(gx), iy = Math.floor(gy), fx = smooth01(gx - ix), fy = smooth01(gy - iy), c = (i, j) => h3(i, j, 0, s);
+  return (c(ix, iy) * (1 - fx) + c(ix + 1, iy) * fx) * (1 - fy) + (c(ix, iy + 1) * (1 - fx) + c(ix + 1, iy + 1) * fx) * fy;
+}
+const GROVE = {oak: .4, birch: .25, aspen: .2, rowan: .15};
+function groveOf(x, y) {
+  const g = n => .06 + 2.6 * smooth01(Math.max(0, Math.min(1, (n - .35) / .3)));   // .06 .. 2.66 (about 1 on average): how much of a species this spot wants
+  const wB = GROVE.birch * g(plane(x, y, 18, 16)), wA = GROVE.aspen * g(plane(x, y, 57, 12)), wO = GROVE.oak, wR = GROVE.rowan, u = h3(x * 1.7, y * 1.3, 2, 11) * (wO + wB + wA + wR);
+  return u < wO ? 'oak' : u < wO + wB ? 'birch' : u < wO + wB + wA ? 'aspen' : 'rowan';
+}
+const VARIANT_SPECIES = ['oak', 'oak', 'dead', 'willow', 'rowan', 'birch', 'aspen'];
+export function speciesOf(p, biome) {
+  if (biome === 'ruins') { const v = p.variant | 0; return v === 0 || v === 1 ? (p.outside ? groveOf(p.x, p.y) : 'oak') : VARIANT_SPECIES[v] || 'oak'; }
   return null;   // ember spires, frost pines, rift shards: still the painted cards
 }
-const FIXED_YAW = {willow: 1};   // never turned: its lean is toward the water (east)
+const FIXED_YAW = {willow: 1};   // never turned: its lean is toward the water (east); the others stand at any angle
 const cache = new Map();
 export function treeShape(species, seed, fam) {
   const key = `${species}:${seed}:` + Object.values(TUNE).join(':');
   let s = cache.get(key);
-  if (!s) { const B = SPECIES[species](seed, fam), geo = B.geometry(); s = {geo, top: geo.boundingBox.max.y, bones: B.bones, crown: B.crown || null, species, seed}; cache.set(key, s); }
+  if (!s) { const B = SPECIES[species](seed, fam), geo = B.geometry(); s = {geo, top: geo.boundingBox.max.y, bones: B.bones, crown: B.crown || null, autumn: B.autumn || null, species, seed}; cache.set(key, s); }
   return s;
 }
 // an arrow's step (arena coords: x east, y south, h up) against a tree's bones. tr = {x, y, z, pose (treeModel)}.
