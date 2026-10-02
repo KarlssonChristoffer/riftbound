@@ -19,6 +19,12 @@ export const EVENTS = {
   'player.jump':        ['sim/player/player.js',  'x, y, z (emitted from the Space key handler, turned there)', 'atmos, flow, wildlife, audio'],
   'player.splash':      ['sim/player/player.js',  'x, y', 'atmos, flow, wildlife, audio'],
   'player.roll':        ['(reserved: not emitted yet)', 'x, y', 'atmos (frost puff)'],
+  // the revolver (sim/player/gun.js, a gun loadout); gun = the weapon's id (content/weapons.js: peacemaker | brass_navy)
+  'player.draw':        ['sim/player/gun.js',     'x, y, z, gun, hip (the first shot leaves from the hip)', 'audio'],
+  'player.shoot':       ['sim/player/gun.js',     'x, y, h (the muzzle), z, vx, vy (unit: the way it flies), gun, fan, hip, left (rounds)', 'gunfx, audio, wildlife, music'],
+  'player.dryfire':     ['sim/player/gun.js',     'x, y, z, gun (the hammer falls on an empty chamber)', 'audio'],
+  'player.reload':      ['sim/player/gun.js',     'x, y, z, gun, phase (start | eject | round | done), n (spent cases on eject, rounds in after)', 'gunfx (cases), audio'],
+  'player.holster':     ['sim/player/gun.js',     'x, y, z, gun (the twirl ends in the holster)', 'audio'],
   'player.hit':         ['features/combat/core.js', 'x, y, vx, vy, player: true (a brute landed on him)', 'atmos, wildlife, audio, music'],
   'player.hurt':        ['features/combat/core.js', 'dmg, by (the brute | \'blast\'), x, y', 'game'],
   'arrow.hit':          ['sim/projectiles.js',    'x, y (the prop), vx, vy (the arrow; a bullet: x its push), prop, kind? (bullet)', 'game, wind, props, atmos, wildlife, audio, music, gunfx'],

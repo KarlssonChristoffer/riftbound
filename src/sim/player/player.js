@@ -25,6 +25,7 @@
 //   dust(fx, fy, side, big)            a foot contact at world px (fx, fy); big 0 step, 1 turn push, 2 plant / land
 //   events []                          pushes {type: 'player.step'|'player.land'|'player.jump'|'player.splash', x, y, ...} (core/events.js)
 //   shake(px, sec)
+//   gun(PL, internals) -> a revolver (sim/player/gun.js createGun): while the loadout's weapon is a gun it gets LMB and the frame
 import {WEAPONS} from '../../content/weapons.js';   // the bow's numbers (shoot)
 import {ramps} from './harmonize.js';   // the character palette (pixel bow layer)
 export const AIM_H = 1.25;   // arrows fly at chest height
@@ -152,6 +153,7 @@ export function createPlayer(H) {
     P.face = P.want = dirOf(dx, dy); P.rollDir = vecOf(P.face); P.state = 'roll'; P.t = 0;
   }
   function shoot() {
+    if (gun?.on()) return;   // a gun fires on the press (sim/player/gun.js); a release does nothing here
     const W = WEAPONS.bow;
     const c = cursorAim(); let dx = c.x - P.x, dy = c.y - P.y; let l = Math.hypot(dx, dy) || 1;
     if (P.moveAim) {  // on the move the arrow goes where the body can aim: within +-35 deg of the torso's aim
@@ -392,6 +394,7 @@ export function createPlayer(H) {
     const {SP, CLIP} = A, WALK = CLIP.walk, RUN = CLIP.run, ND = A.ND;
     const [mx, my] = moveInput();
     P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt);
+    if (gun && gun.step(dt, mx, my)) return;   // a gun loadout: the revolver drives the frame while it's in hand (sim/player/gun.js)
     if (stepTraverse(dt)) return;
     if (P.state === 'roll') {
       const R = CLIP.roll, dur = R.frames / R.fps, k = Math.min(1, P.t / dur);
@@ -584,6 +587,7 @@ export function createPlayer(H) {
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
   function press() {   // LMB down: draw (kept through a roll)
+    if (gun?.on()) return gun.press();   // a gun loadout: the trigger (sim/player/gun.js)
     mouse.down = true; P.recover = 0;
     if (P.state !== 'roll' && !BUSY.has(P.state)) {
       if (P.state !== 'draw') { P.aimBack = false; P.stanceAge = 9; P.pivotDebt = 0; P.pivotSettle = false; P.aclip = null; P.lastSa = undefined; }   // a fresh aim starts from the legs as they are
@@ -778,6 +782,10 @@ export function createPlayer(H) {
     pxLine(g, tx, ty, hx, hy, null, t => t > 1 - hd ? PX.head : t < fl ? PX.fletch : PX.shaft);
     g.restore();
   }
+  // a gun loadout's revolver (H.gun: sim/player/gun.js) gets the player's internals; the bow's code above stays as it is
+  const gun = H.gun ? H.gun(PL, {P, A, H, has, ev, dirOf, vecOf, turnToward, moveBy, moveInput, cursorAim, puff, stepTraverse, angDiff,
+    SPEED, BUSY, AIM_TURN_RATE, TURN_RATE, AIM_H}) : null;
+  PL.gun = gun;
 
   // for the systems around him (they ask, they don't write P): face a shot along a view-frame direction (the string
   // settles: twang 0), flicker as he's hurt (i-frames; the respawn's flicker too), re-count the facings for an atlas
