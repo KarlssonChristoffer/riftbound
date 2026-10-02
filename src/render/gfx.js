@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import {flags} from '../core/flags.js';
 import {AUTUMN as AU, AUTUMN_MID} from '../core/autumn.js';
+import {createLitterSim} from './litter.js';
 
 export const DEG = Math.PI / 180;
 const R_DEPTH = 120;   // metres of "nearness" mapped onto the depth range (the world is 62 x 30 m)
@@ -239,15 +240,18 @@ uniform sampler2D uTex, uEm; uniform vec2 uTexSize; uniform float uSmooth, uHasE
 // depth below the bank, 1 texel = 1 px at yaw 0 (uPx = PPM, PPMH), repeating; drawn as a textured face (type 5)
 uniform sampler2D uCliff; uniform float uHasCliff, uCliffOff; uniform vec2 uCliffSize, uPx;
 ` + WATER_FS + `
-// FALLEN LEAVES (world.js bakes uLit, one texel per 2 x 2 ground texels: R = how thick the leaves lie here once the crowns are bare,
+// FALLEN LEAVES (world.js bakes the source, one texel per 2 x 2 ground texels: R = how thick the leaves lie here once the crowns are bare,
 // G = which tree palette they came from; uLitPal = that palette's colours, 4 stages x 3 tones along x, one row per group). A leaf
-// is one ground texel or two (across or down), placed by an integer hash of its own texel coordinates and the baked density, so
+// is one ground texel or two (across or down), placed by an integer hash of its own texel coordinates and the density, so
 // it is fixed to the world and holds still as the camera turns. uLitK.x = how much has fallen so far (0 = none: the whole thing is
-// skipped; setGround makes it from the season), uLitK.y = how far the fallen leaves have turned (which stages they are drawn in)
-uniform sampler2D uLit, uLitPal; uniform float uHasLit; uniform vec4 uLitK;
+// skipped; setGround makes it from the season), uLitK.y = how far the fallen leaves have turned (which stages they are drawn in).
+// uLit is the source (uLive 0: the density is R x uLitK.x, the palette G x 255) or, while render/litter.js runs the layer (uLive 1),
+// its field: the wind has moved the leaves about, R already holds how much has fallen, G is the palette itself. uLitCap: never denser
+precision highp sampler2D;
+uniform sampler2D uLit, uLitPal; uniform float uHasLit, uLive, uLitCap; uniform vec4 uLitK;
 float lh(ivec2 p, uint salt) { p = max(p, ivec2(0)); uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u + salt * 2246822519u; h = (h ^ (h >> 13)) * 1274126177u; return float((h ^ (h >> 16)) & 65535u) / 65536.; }
-float lorg(ivec2 o, ivec2 mx, ivec2 ls) {   // does a leaf start at texel o? (the baked density here, times how much has fallen; a leaf covers ~2 texels: half the odds)
-  return lh(o, 1u) < texelFetch(uLit, clamp(o, ivec2(0), mx) * ls / (mx + 1), 0).r * uLitK.x * .5 ? 1. : 0.;
+float lorg(ivec2 o, ivec2 mx, ivec2 ls) {   // does a leaf start at texel o? (the density here, as much as has fallen; a leaf covers ~2 texels: half the odds)
+  return lh(o, 1u) < min(texelFetch(uLit, clamp(o, ivec2(0), mx) * ls / (mx + 1), 0).r * (uLive > .5 ? 1. : uLitK.x), uLitCap) * .5 ? 1. : 0.;
 }
 vec4 leafAt(ivec2 ti, ivec2 mx) {   // (colour, 1) where a leaf lies on this ground texel, else a = 0
   ivec2 ls = textureSize(uLit, 0), o = ti;
@@ -258,7 +262,7 @@ vec4 leafAt(ivec2 ti, ivec2 mx) {   // (colour, 1) where a leaf lies on this gro
   }
   vec4 res = vec4(0.);
   if (f > .5) {
-    int g = int(texelFetch(uLit, clamp(o, ivec2(0), mx) * ls / (mx + 1), 0).g * 255. + .5);
+    int g = int(texelFetch(uLit, clamp(o, ivec2(0), mx) * ls / (mx + 1), 0).g * (uLive > .5 ? 1. : 255.) + .5);
     float r = lh(o, 3u), v = clamp(uLitK.y * 4.2 - (1. - r) * 3.4, 0., 3.99), rt = lh(o, 4u);   // the early leaves fall first: with the turn, more and more are in the late stages
     res = vec4(texelFetch(uLitPal, ivec2(int(v) * 3 + (rt < .28 ? 0 : rt < .78 ? 1 : 2), g), 0).rgb, 1.);
   }
@@ -887,7 +891,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
   const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, litter = null}) => raw(SURF_VS, SURF_FS, {
-    uLit: {value: litter?.tex || null}, uLitPal: {value: litter?.pal || null}, uHasLit: {value: litter ? 1 : 0}, uLitK: U.litK,
+    uLit: litter?.u || {value: null}, uLitPal: {value: litter?.pal || null}, uHasLit: {value: litter ? 1 : 0}, uLitK: U.litK, uLive: litter?.live || {value: 0}, uLitCap: litter?.cap || {value: 1},
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
     uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)},
     uCliff: {value: cliff}, uHasCliff: {value: cliff ? 1 : 0}, uCliffOff: {value: cliffOff}, uPx: U.px,
@@ -1295,6 +1299,8 @@ void main() {
     for (const t of ups) renderer.initTexture(t);
     for (const L of layerList) if (L.used) renderer.initTexture(L.t);
     ups.length = 0; lap('upload');
+    for (const s of litters) s.run();   // the fallen leaves' field (render/litter.js): the ticks that are due; the ground shader reads the result
+    lap('litter');
     PS.shadowN = PS.hmapN = PS.shadowSN = 0; PS.shadowS = 0;
     // movers that have been still long enough go back to the static map (switched over AT its re-render: no gap)
     for (const S of movers) if (!S.back && ++S.still > STILL_FRAMES) { S.back = true; staticSoon(20); }
@@ -1361,6 +1367,13 @@ void main() {
     const fell = Math.min(1, Math.max(0, LIT.byAutumn * autumn + 1 - leafK));
     U.litK.value.set(fell, autumn > .001 ? Math.max(autumn, 1 - leafK) : fell > 0 ? 1 : 0, 0, 0);
   }
+  // the living layer of fallen leaves for a litter object (world.js makeLitter): render/litter.js. The owner (features/litter.js) drives it
+  // through the returned object (advance, give, take, want, release, wind, mirror); render() runs it. Disposed with the world
+  const litters = new Set();
+  function litterSim(lit) {
+    const s = createLitterSim(renderer, lit, () => U.litK.value.x), d = s.dispose;
+    litters.add(s); s.dispose = () => { litters.delete(s); d(); }; return s;
+  }
   const setFlash = (r, g, b) => { compU.uFlashC.value.set(r, g, b); };
   const setPlayer = (x, h, z) => { compU.uPlayer.value.set(x, h, z); };
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
@@ -1377,5 +1390,5 @@ void main() {
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     setView, setSun, toScreen, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook};
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim};
 }

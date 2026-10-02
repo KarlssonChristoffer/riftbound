@@ -1092,7 +1092,7 @@ export async function create(host) {
             if (R() < dt * (sp - 1.3) * 1.2) { q.rest = 0; q.vh = .5 + R() * .8; q.vx = a.x; q.vy = a.y * .6; q.t = Math.min(q.t, q.life - 4); continue; }
           }
         }
-        if (q.rest <= 0) { parts[i] = parts[parts.length - 1]; parts.pop(); }
+        if (q.rest <= 0) { q.onLand?.(q); parts[i] = parts[parts.length - 1]; parts.pop(); }   // (a lifted leaf hands itself back to the carpet: features/litter.js)
         continue;
       }
       if (q.t >= q.life) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }
@@ -1260,6 +1260,13 @@ export async function create(host) {
       tick(t0);
     },
     card, mesh,
+    // a leaf lifted off the fallen carpet by a gust or a footfall (features/litter.js): {x, y, h, vx, vy, vh (m, m/s), pal ([hi, base, shade] hex), big,
+    // onLand(q)}. It tumbles on the wind like a shed leaf and lies where it comes down; once it has lain its time it is gone and onLand(q) is
+    // called (q.x, q.y: where, q.grp: whatever the caller put on it). false = not taken (wind off, or the particle cap)
+    leaf(o) {
+      if (!W.on || biome !== 'ruins' || parts.length >= 320) return false;
+      spawnPart({kind: 'leaf', t: 0, ph: R() * TAU, rest: 0, life: 9 + R() * 4, g: 1.4, big: false, lie: 1.5, ...o}); return true;
+    },
     // (o: an object to fill instead of a new one: per-frame callers pass a scratch object, nothing is allocated)
     at(x, y, o = null) { const r = o || {x: 0, y: 0, g: 0}; if (!W.on) { r.x = r.y = r.g = 0; return r; } const a = field(x, y); r.x = a.x; r.y = a.y; r.g = a.g; return r; },
     // the foliage (trees, bushes, tufts) round the view and the player, for other features' per-step loops (windlines.js):

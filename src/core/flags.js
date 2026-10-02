@@ -30,6 +30,7 @@ export const FLAG_DOCS = {
   sshadow:   '0: every shadow caster in the per-frame sun shadow (no cached static map; an A/B)',
   // ---- features (0 turns one off)
   wind: '0: no wind', windlevel: 'calm | breeze | brisk | gale: lock the wind strength', windlines: '0 | hd | pixel: the wind lines',
+  litter: '0: the fallen leaves stay as baked (no wind moves them, none are lifted); also the low detail tier',
   riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', wildlife: '0: no wildlife', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
