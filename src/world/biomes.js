@@ -1585,31 +1585,48 @@ function fern(p, ctx, S) {
   });
 }
 // the willow's painted card (trees3d.js grows the 3D one: this is its trees3d=0 fallback and what the water mirrors): a short
-// leaning trunk, a broad crown, long curtains of leaves hanging to ~0.3 m above the ground. Leans right: over the water
+// stout trunk leaning right (over the water) that splits into limbs arching up and over like a fountain, 7 separate leaf
+// masses on the arches (the highest over the middle, gaps between them), and sheets of thin strands hanging from the arches
+// with gaps between the sheets, a ragged hem, a few to ~0.3 m above the ground
 function willowCard(S, m) {
   const W = m.W(5.2), H = m.H(4.6), b = H - 3, cx = Math.round(W * .42);
   return build(W, H, [cx, H - 2], P => {
-    const r = rng(91), top = 8, ccx = cx + 20, ccy = Math.round(b - m.H(2.95)), rx = m.W(1.95), ry = m.H(1.0);
-    limb(P, cx, b, cx + 6, b - m.H(1.5), 12, 8, S.bark, 2);
+    const r = rng(91), X = u => cx + u * m.W(1), Y = v => b - v * m.H(1);   // (metres east of the trunk's foot, metres up) -> card px
+    // limbs: each a polyline from the fork over its apex to a drooping tip (metres), tapering
+    const ARCH = [
+      [[.7, 1.15], [.85, 1.9], [1.1, 2.6], [1.5, 3.05], [1.95, 3.1], [2.35, 2.8], [2.55, 2.3]],
+      [[.7, 1.15], [.55, 1.9], [.35, 2.55], [0, 2.95], [-.45, 3.0], [-.8, 2.7], [-.95, 2.2]],
+      [[.7, 1.15], [.75, 2.0], [.82, 2.8], [.98, 3.3], [1.2, 3.45], [1.5, 3.25]],
+      [[.65, 1.1], [.4, 1.6], [.1, 2.0], [-.3, 2.15], [-.65, 1.95]],
+    ];
+    const poly = (pts, w0, w1) => { for (let i = 0; i + 1 < pts.length; i++) { const t0 = i / (pts.length - 1), t1 = (i + 1) / (pts.length - 1); limb(P, X(pts[i][0]), Y(pts[i][1]), X(pts[i + 1][0]), Y(pts[i + 1][1]), w0 + (w1 - w0) * t0, w0 + (w1 - w0) * t1, S.bark); } };
+    limb(P, cx, b, X(.7), Y(1.2), 12, 9, S.bark, 2);
     for (const [x, w] of [[-9, 4], [8, 4]]) limb(P, cx, b - 2, cx + x, b + 1, w, 1, S.bark);
-    limb(P, cx + 5, b - m.H(1.4), ccx - 18, ccy - 2, 6, 3, S.bark, -2); limb(P, cx + 6, b - m.H(1.4), ccx + 20, ccy + 4, 6, 3, S.bark, 2);
+    for (const a of ARCH) poly(a, 6, 2);
     P.runShade([S.bark]);
-    for (let i = 0; i < 11; i++) {   // the dome
-      const a = r() * PI2, d = Math.sqrt(r()) * .8, x = ccx + Math.cos(a) * d * rx, y = ccy + Math.sin(a) * d * ry - ry * .1;
-      P.blob(x, y, 15 + r() * 8, 10 + r() * 5, S.leaf, {s: i, j: .38, edge: .6, bias: -(y - ccy) / ry * .4 - (x - ccx) / (rx * 2.4)});
-    }
+    // the masses: (metres east, up, half width, half height), the biggest and highest over the middle
+    for (const [i, [u, v, rx, ry]] of [[.98, 3.6, .55, .42], [1.95, 3.3, .46, .36], [2.4, 2.65, .32, .26], [-.35, 3.2, .42, .34], [-.8, 2.55, .3, .25], [.35, 3.3, .34, .28], [1.5, 3.0, .3, .25]].entries())
+      P.blob(X(u), Y(v), m.W(rx), m.H(ry), S.leaf, {s: i + 3, j: .38, edge: .6, bias: (v - 3.1) * .22 - (u - 1) * .06});
     P.outline();
-    // the curtains: strands 2-3 px wide with gaps, from the dome's underside down to ~0.3 m above the ground, lit from the left,
-    // ragged at the tips; the longest hang where the crown is widest
-    for (let x = ccx - rx; x <= ccx + rx; x++) {
-      const k = x + 1000, id = Math.floor(k / 4), col = k % 4, u = (x - ccx) / rx, edge = Math.sqrt(Math.max(0, 1 - u * u));
-      if (col === 3 || hsh(id, 3, 91) < .2 || edge < .12) continue;
-      const y0 = Math.round(ccy + ry * edge * .5), y1 = Math.round(b - m.H(.3) - hsh(id, 5, 91) * m.H(1.5) * (1.1 - Math.abs(u) * .5));
-      for (let y = y0; y < y1; y++) {
-        if (hsh(x, y, 92) < .05) continue;
-        const n = vn(x / 3, y / 9, 93), fall = (y - y0) / Math.max(1, y1 - y0);
-        const tone = (n > .6 ? 0 : n < .4 ? 2 : 1) + (u > .2 ? 1 : 0) - (u < -.3 ? 1 : 0) + (col === 2 ? 1 : 0) - (col === 0 ? 1 : 0) + (fall > .9 ? 1 : 0);
-        P.p(x, y, S.leaf, Math.max(0, Math.min(3, tone)));
+    // the strands: sheets along the outer arches (3-6 strands 2-3 px wide, then a gap), each to its own length: the hem is ragged
+    for (const a of ARCH) {
+      const at = x => { for (let i = 0; i + 1 < a.length; i++) { const x0 = X(a[i][0]), x1 = X(a[i + 1][0]); if ((x - x0) * (x - x1) <= 0 && x0 !== x1) return Y(a[i][1] + (a[i + 1][1] - a[i][1]) * (x - x0) / (x1 - x0)); } return null; };
+      const xa = X(a[1][0]), xb = X(a[a.length - 1][0]), lo = Math.min(xa, xb), hi = Math.max(xa, xb);
+      for (let x = lo + (hi - lo) * .22 + r() * 4; x < hi - 2;) {
+        const n = 3 + (r() * 5 | 0), kind = r(), hem = kind < .3 ? .3 + r() * .25 : kind < .78 ? .6 + r() * .6 : 1.25 + r() * .5;
+        for (let k = 0; k < n; k++, x += 3 + (r() * 2 | 0)) {
+          const y0 = at(Math.round(x)); if (y0 === null) continue;
+          const y1 = Math.round(Y(Math.max(.3, hem + (r() - .5) * .45))), w = r() < .5 ? 2 : 3, ph = r() * 6;
+          for (let y = Math.round(y0); y < y1; y++) {
+            const f = (y - y0) / Math.max(1, y1 - y0), bulge = Math.sin(y * .62 + ph) > .35 ? 1 : 0, fall = f > .88 ? 1 : 0;   // (small tufts: the strand widens a pixel here and there)
+            for (let i = 0; i < w + bulge; i++) {
+              if (hsh(x + i, y, 92) < .06) continue;
+              const nn = vn((x + i) / 3, y / 8, 93), tone = (nn > .6 ? 0 : nn < .4 ? 2 : 1) + (i === 0 ? -1 : i >= w - 1 + bulge ? 1 : 0) + fall;
+              P.p(x + i, y, S.leaf, Math.max(0, Math.min(3, tone)));
+            }
+          }
+        }
+        x += 5 + r() * 9;
       }
     }
   });

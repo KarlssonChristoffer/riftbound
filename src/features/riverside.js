@@ -44,7 +44,7 @@ const TUNE = {
     soft: .5,                    // scatter within this of a clump is hidden; anything solid within it moves the clump on
     shrooms: [[19.6, -1, .5], [25.4, 1, .55], [9.6, -1, .5]],   // lights.js: [y, side, m outside the edge]
   },
-  willows: [[5.7, 1.0], [19.9, 1.0]],   // [y, m of the trunk back from the west bank's edge]: the crown reaches east, over the water
+  willows: [[5.7, 1.2], [19.9, 1.4]],   // [y, m of the trunk back from the west bank's edge]: the crown reaches east, ~1 m over the water (a third of it). (x picks the tree's shape: trees3d.js seeds it from the spot)
   pads: {
     groups: 9, north: 5, size: [.15, .2, .27],   // 5 groups north of the narrows (in the default view), the rest south
     drift: [.034, .05], turn: .35, bob: .006, flowers: 2,
