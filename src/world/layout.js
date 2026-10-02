@@ -28,10 +28,15 @@
 //   |  deco strip + N/S shooting dummies   |               o o  stepping stones   crate wall    |
 //   +--------[   ]-------------------------+                ~                     [cache]      |
 //            S gate
+import {flags} from '../core/flags.js';
+
 // WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
 // cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
-// rect, what buildLayout and the biomes' ground painters lay out (today the whole world)
-export const WORLD = {x0: 0, y0: 0, x1: 62, y1: 30, WM: 62, HM: 30};
+// rect, what buildLayout and the biomes' ground painters lay out (today the whole world; it stays at 0, 0: a painted ground
+// texel's px / PPM is its world x / y). ?world=big: 40 m more to the west, 60 m to the north and east (the ravine stays the
+// south edge): 162 x 90 m, for measuring the engine at that size (the world plan, step 2; step 3 opens and paints the land)
+const BIG = flags.get('world') === 'big';
+export const WORLD = BIG ? {x0: -40, y0: -60, x1: 122, y1: 30, WM: 162, HM: 90} : {x0: 0, y0: 0, x1: 62, y1: 30, WM: 62, HM: 30};
 export const GROUNDS = {x0: 0, y0: 0, x1: 62, y1: 30};
 export const PLAY = {x0: 7, y0: 6, x1: 33, y1: 24};
 export const SCONCE_D = .21;   // a wall sconce's stick stands this far off the wall face (the east torches; lights.js mounts them)
@@ -52,6 +57,7 @@ export const STREAM = {
   // 2.9 m (a run-leap reaches ~3.0 m and falls in; a sprint-leap ~3.6 m clears it), 1.4 m at the narrows in front of the east gate
   w: y => { const n = Math.abs(y - 15); return n < 1.2 ? 1.4 : n < 2.4 ? 1.4 + (n - 1.2) / 1.2 * 1.5 : 2.9; },
   narrows: {y: 15},
+  y0: -1, y1: 31,   // its span: north of y0 / south of y1 there is no stream (inStream)
   stones: [{x: 0, y: 23.4, r: .42}, {x: 0, y: 23.4, r: .42}],   // x filled in below (placed across the channel)
   // dry footing added during play (a crate sunk to its lid: combat/props.js) and taken away again (it broke, reset)
   addStone(o) { STREAM.stones.push(o); },
@@ -59,7 +65,7 @@ export const STREAM = {
 };
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
 export const inStream = (x, y) => {
-  if (y < -1 || y > 31) return false;
+  if (y < STREAM.y0 || y > STREAM.y1) return false;
   if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y);   // (the plateau's pool is deep water too)
   return !STREAM.stones.some(s => Math.hypot(x - s.x, (y - s.y) * 1.3) < s.r);   // stones are dry footing
 };

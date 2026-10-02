@@ -13,6 +13,7 @@ export const FLAG_DOCS = {
   weather:   'a sim/env.js WEATHER state (clear, fair, cloudy, ..., storm, snow) to lock; 0 = no weather particles (atmos)',
   daymin:    'real minutes per in-game day; 0 = the clock stands still',
   at:        'x,y (m): start the player there',
+  world:     'big: the grown world, 162 x 90 m round the Proving Grounds (layout.js WORLD; the world plan: open land in step 3)',
   yaw:       'the camera\'s starting yaw (deg)',
   zoom:      '2: start zoomed in',
   // ---- the player

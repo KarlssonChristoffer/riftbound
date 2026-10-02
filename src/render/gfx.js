@@ -233,11 +233,11 @@ vec3 fall(vec3 base, vec2 px, float rows) {
 const SURF_VS = HEAD + `
 in vec3 position; in vec3 normal; in vec2 uv;
 uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
-uniform float uPlanar; uniform vec2 uWorld;
+uniform float uPlanar; uniform vec2 uWorld, uOrigin;   // planar: the texture covers uWorld m from uOrigin (x, z)
 out vec2 vUv; out vec3 vN; out vec3 vW;
 void main() {
   vec4 w = modelMatrix * vec4(position, 1.);
-  vUv = uPlanar > .5 ? w.xz / uWorld : uv;
+  vUv = uPlanar > .5 ? (w.xz - uOrigin) / uWorld : uv;
   vN = mat3(modelMatrix) * normal; vW = w.xyz;
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
@@ -911,10 +911,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
-  const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, litter = null}) => raw(SURF_VS, SURF_FS, {
+  const surfMat = ({tex, em = null, planar, world, origin = null, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, litter = null}) => raw(SURF_VS, SURF_FS, {
     uLit: litter?.u || {value: null}, uLitPal: {value: litter?.pal || null}, uHasLit: {value: litter ? 1 : 0}, uLitK: U.litK, uLive: litter?.live || {value: 0}, uLitCap: litter?.cap || {value: 1},
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
-    uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)},
+    uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)}, uOrigin: {value: origin || new THREE.Vector2(0, 0)},
     uCliff: {value: cliff}, uHasCliff: {value: cliff ? 1 : 0}, uCliffOff: {value: cliffOff}, uPx: U.px,
     uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)},
     uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp}, {side: THREE.FrontSide});
