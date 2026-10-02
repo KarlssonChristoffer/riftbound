@@ -101,7 +101,7 @@ export function createWestern(ac, {lay, noise}) {
       tried = true;
       try {
         worker = new Worker(new URL('./western_worker.js', import.meta.url), {type: 'module'});
-        worker.onmessage = e => { const j = jobs[e.data.id]; store(j, e.data.data, e.data.f0); jobs[e.data.id] = null; done(); };
+        worker.onmessage = e => { const j = jobs[e.data.id]; if (!j) return; store(j, e.data.data, e.data.f0); jobs[e.data.id] = null; done(); };
         worker.onerror = () => { try { worker.terminate(); } catch (e) {} worker = null; };   // fall back to this thread (the jobs left)
         jobs.forEach((j, id) => worker.postMessage({id, fn: j.fn, sr: j.sr, f: j.f, kind: j.kind, seed: j.seed}));
       } catch (e) { worker = null; }
