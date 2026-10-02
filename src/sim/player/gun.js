@@ -37,7 +37,7 @@ export const TUNE = {
   depth: .45,       // m: the muzzle sits this far along the aim (its screen x and height come from the pose)
   back: .9,         // m: the first step's hit test starts this far behind the muzzle (a brute in your face)
   clipFb: {gun_draw: [4, 16], gun_fire: [3, 20], gun_fan: [2, 14], gun_reload: [6, 6], gun_twirl: [4, 16], gun_holster: [5, 16],
-    gaim_step_l: [4, 16], gaim_step_r: [4, 16], gaim_pivot_l: [3, 24], gaim_pivot_r: [3, 24], gun_hipfire: [3, 18], gun_blow: [5, 6],
+    gaim_step_l: [4, 16], gaim_step_r: [4, 16], gaim_pivot_l: [3, 24], gaim_pivot_r: [3, 24], gun_hipfire: [3, 18], gun_blow: [5, 6], gun_fan_out: [3, 28],
     duel_ready: [4, 5], hat_tip: [5, 6]},
 };
 // the standing twists (facing = the legs; + = toward his left) and the moving ones (the gun in the RIGHT hand: out to
@@ -56,7 +56,7 @@ export function createGun(PL, I) {
     want: 0, wantT: 0, fanWant: false, reloadWant: false, tipWant: false,
     rph: '', rt: 0, rmul: 1, resume: false, hip: false, quick: false, fanT: 0,
     flourish: false, calm: true, duel: false, aimSpeed: 0, lastSa: NaN, aclip: null, twName: '0',
-    shotN: 0, lastHow: '', lastShotAt: -9, clock: 0, reloadK: 0};
+    shotN: 0, lastHow: '', lastShotAt: -9, clock: 0, reloadK: 0, rfirst: true};
   const weapon = () => H.weapon?.() || null;
   const on = () => { const w = weapon(); return !!w && w.kind === 'gun' && has('gun_aim'); };
 
@@ -65,8 +65,23 @@ export function createGun(PL, I) {
   const ST = {}, st = (pre, tw, f) => ((ST[pre] ??= {})[tw] ??= [])[f] ??= `${pre}_${tw}_${f}`;
   const FB = {}; for (const [k, [frames, fps]] of Object.entries(TUNE.clipFb)) FB[k] = {frames, fps};
   const clip = name => A.CLIP[name] || FB[name];
-  const frameAt = (name, t, rate = 1) => { const c = clip(name); return Math.min(c.frames - 1, Math.floor(t * c.fps * rate)); };
-  const over = (name, t, rate = 1) => { const c = clip(name); return t * c.fps * rate >= c.frames; };
+  // ---- clip timelines: a clip may carry `play` (the order its rendered frames show in), `ms` (each step's time) and
+  //      `marks` (named frames; tools/blender/western.py _clip); without them, one step per frame at fps. Built once per
+  //      atlas clip (a loadout switch brings another), so a step allocates nothing ----
+  const TL = {};
+  function tl(name) {
+    const c = clip(name), L = TL[name];
+    if (L && L.c === c) return L;
+    const n = c.play ? c.play.length : c.frames, ends = new Float64Array(n); let t = 0;
+    for (let i = 0; i < n; i++) { t += c.ms ? c.ms[i] / 1000 : 1 / c.fps; ends[i] = t; }
+    return (TL[name] = {c, n, ends, total: t, play: c.play || null});
+  }
+  const stepAt = (name, t) => { const L = tl(name); let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++; return i; };
+  const frameAt = (name, t) => { const L = tl(name), i = stepAt(name, L.c.loop ? t % L.total : t); return nm(name, L.play ? L.play[i] : i); };
+  const over = (name, t) => t >= tl(name).total;
+  const startOf = (name, i) => i > 0 ? tl(name).ends[i - 1] : 0;   // when step i begins (s)
+  const mark = (name, k, fb) => clip(name).marks?.[k] ?? fb;
+  const lastOf = name => nm(name, clip(name).frames - 1);
 
   // ---- the barrel on screen: aiming by what you SEE (as the bow's arrowAngle), from the pose's GunMuzzle0 + GunHold0 ----
   let ox = 0, oy = 0, sa0 = 0;   // the sprite's top-left in view px this step; the body's screen aim (fallback)
@@ -116,7 +131,8 @@ export function createGun(PL, I) {
   // ---------------------------------------------------------------- the shot
   function fire(w, how) {   // how: 'aim' | 'move' | 'hip' | 'fan'
     // the muzzle of the pose the shot leaves from (a draw frame still holds the gun low: its aim pose instead)
-    const pose = how === 'hip' ? 'gun_hipfire.0' : how === 'fan' ? 'gun_fan.1' : /^(gun_aim|gws_|grs_)/.test(P.frame) ? P.frame : 'gun_aim';
+    const pose = how === 'hip' ? 'gun_hipfire.0' : how === 'fan' ? nm('gun_fan', mark('gun_fan', 'shot', 1))
+      : /^(gun_aim|gws_|grs_)/.test(P.frame) ? P.frame : 'gun_aim';
     const c = cursorAim(), m = muzzle(pose, P.face, c), ND = A.ND;
     let a = Math.atan2(c.x - m.x, c.y - m.y);
     if (how === 'move') {   // on the move the shot leaves where the torso can aim (never over the shoulder)
@@ -137,7 +153,7 @@ export function createGun(PL, I) {
     ev({type: 'player.shoot', x: m.x, y: m.y, h: m.h, z: P.z, vx: fx, vy: fy, gun: w.id, fan: how === 'fan', hip: how === 'hip', left: S.ammo});
     if (!S.ammo && has('gun_blow.0')) S.flourish = true;   // an emptied cylinder: the smoke wants blowing off
     if (how === 'aim') {   // square up to the target for the kick: the fire clip's last (aim) frame on the cursor
-      P.face = P.want = bestFacing('gun_fire.2'); S.act = 'fire'; S.at = 0; S.aclip = null; P.frame = nm('gun_fire', 0);
+      P.face = P.want = bestFacing(lastOf('gun_fire')); S.act = 'fire'; S.at = 0; S.aclip = null; P.frame = nm('gun_fire', 0);
     }
   }
   function dry(w) { S.act = 'dry'; S.at = 0; S.want = 0; S.idle = 0; emit('player.dryfire', w, {}); }
@@ -146,14 +162,14 @@ export function createGun(PL, I) {
   function startDraw(w, shot, fast = false) {
     S.out = false; S.act = 'draw'; S.at = 0; S.quick = shot; S.aclip = null; S.lastSa = NaN;
     S.hip = shot && w.hip && has('gun_hipfire.0');
-    if (fast) S.at = 2 / (clip('gun_draw').fps * w.draw);   // from the duel stance: the hand is already on the grip
+    if (fast) S.at = startOf('gun_draw', mark('gun_draw', 'lift', 2)) / w.draw;   // from the duel stance: the hand is already on the grip
     P.state = 'draw'; P.aimBack = false; P.stanceAge = 9; P.snapFace = false;
     P.face = P.want = bestFacing(S.hip ? 'gun_hipfire.0' : 'gun_aim');   // a quick draw turns at once
     emit('player.draw', w, {hip: S.hip});
   }
   function startReload(w, resume) {
     if (S.ammo >= S.cap) return false;
-    S.act = 'reload'; S.out = true; S.rph = resume ? 'fetch' : 'up'; S.rt = 0; S.rmul = mv('weapon.reload', 1); S.resume = false; S.idle = 0; S.want = 0;
+    S.act = 'reload'; S.out = true; S.rph = resume ? 'fetch' : 'up'; S.rfirst = true; S.rt = 0; S.rmul = mv('weapon.reload', 1); S.resume = false; S.idle = 0; S.want = 0;
     P.state = 'draw'; S.aclip = null;
     emit('player.reload', w, {phase: 'start', n: S.ammo});
     return true;
@@ -166,9 +182,11 @@ export function createGun(PL, I) {
   // LMB, in the step: what a press means right now
   function consumePress(w, moving) {
     switch (S.act) {
-      case 'draw': case 'hip': case 'fan': case 'dry': return;   // the draw fires it once the gun is out; the rest run their course
+      case 'draw': case 'fan': case 'dry': return;   // the draw fires it once the gun is out; the rest run their course
+      case 'hip': if (stepAt('gun_hipfire', S.at) < mark('gun_hipfire', 'free', 99)) return; S.act = ''; break;   // its rise to the aim: cut short
+      case 'raise': S.act = ''; break;
       case 'reload': if (S.ammo > 0) { S.act = ''; S.resume = false; break; } S.want = 0; return;   // rounds in: fire them (R reloads on later)
-      case 'holster': if (S.at < 4 / clip('gun_holster').fps) { S.act = ''; S.out = true; break; } S.act = ''; S.out = false; break;
+      case 'holster': if (stepAt('gun_holster', S.at) < mark('gun_holster', 'in', 4)) { S.act = ''; S.out = true; break; } S.act = ''; S.out = false; break;
       case 'blow': case 'twirl': S.act = ''; break;
       case 'tip': S.act = ''; break;
       case 'duel': S.act = ''; startDraw(w, true, true); return;
@@ -258,8 +276,8 @@ export function createGun(PL, I) {
     if (S.rt >= dur * k) {
       S.rt -= dur * k;
       if (S.rph === 'up') { S.rph = 'eject'; emit('player.reload', w, {phase: 'eject', n: S.cap - S.ammo}); }
-      else if (S.rph === 'eject') S.rph = 'fetch';
-      else if (S.rph === 'fetch') S.rph = 'load';
+      else if (S.rph === 'eject') { S.rph = 'fetch'; S.rfirst = true; }
+      else if (S.rph === 'fetch') { S.rph = 'load'; S.rfirst = false; }
       else if (S.rph === 'load') { S.ammo++; emit('player.reload', w, {phase: 'round', n: S.ammo}); S.rph = S.ammo < S.cap ? 'fetch' : 'close'; }
       else {   // closed: the cylinder spins home
         emit('player.reload', w, {phase: 'done', n: S.ammo});
@@ -276,8 +294,24 @@ export function createGun(PL, I) {
       stepPuff(run, f, name); P.frame = A.SP[name] ? name : st('gwr', key || 'up', f); P.moveAim = false;
     } else {
       plant(dt);
-      P.frame = nm('gun_reload', S.rph === 'load' ? (S.ammo % 2 ? 4 : 2) : RELOAD_STAND[S.rph]);
+      P.frame = nm('gun_reload', reloadFrame());
     }
+  }
+  // standing: each phase plays its stretch of gun_reload by the phase's progress (the clip's marks: up, eject, the first
+  // fetch from the eject, then load <-> fetch per round, close); an atlas without marks holds one frame per phase
+  function reloadFrame() {
+    const M = clip('gun_reload').marks, k = S.reloadK;
+    if (!M) return S.rph === 'load' ? (S.ammo % 2 ? 4 : 2) : RELOAD_STAND[S.rph];
+    let a, b, back = false;
+    switch (S.rph) {
+      case 'up': a = M.up; b = M.eject - 1; break;
+      case 'eject': a = M.eject; b = M.first - 1; break;
+      case 'fetch': if (S.rfirst) { a = M.first; b = M.fetch; } else { a = M.fetch; b = M.load - 1; back = true; } break;   // the hand off to the belt
+      case 'load': a = M.fetch + 1; b = M.load; break;
+      default: a = M.close; b = clip('gun_reload').frames - 1;
+    }
+    const i = Math.min(b - a, Math.floor(k * (b - a + 1)));
+    return back ? b - i : a + i;
   }
 
   // ---------------------------------------------------------------- the frame
@@ -305,7 +339,7 @@ export function createGun(PL, I) {
     // ---- intents ----
     if (S.reloadWant) {
       S.reloadWant = false;
-      if (S.act === '' || S.act === 'fire' || S.act === 'twirl' || S.act === 'dry' || S.act === 'blow' || S.act === 'duel' || S.act === 'tip') startReload(w, S.resume);
+      if (S.act === '' || S.act === 'fire' || S.act === 'raise' || S.act === 'twirl' || S.act === 'dry' || S.act === 'blow' || S.act === 'duel' || S.act === 'tip') startReload(w, S.resume);
     }
     if (S.tipWant) {
       S.tipWant = false;
@@ -323,9 +357,9 @@ export function createGun(PL, I) {
     switch (S.act) {
       case 'draw': {
         S.at += dt;
-        const k = S.at * clip('gun_draw').fps * w.draw;
-        if (S.hip && !moving && k >= 2) { S.out = true; S.act = 'hip'; S.at = 0; S.want = 0; S.hip = false; plant(dt); fire(w, 'hip'); P.frame = nm('gun_hipfire', 0); break; }
-        if (k < clip('gun_draw').frames) { if (moving) movingAim(dt, mx, my); else { plant(dt); P.frame = nm('gun_draw', Math.floor(k)); } break; }
+        const td = S.at * w.draw;   // (the draw's speed: the weapon's)
+        if (S.hip && !moving && stepAt('gun_draw', td) >= mark('gun_draw', 'hip', 2)) { S.out = true; S.act = 'hip'; S.at = 0; S.want = 0; S.hip = false; plant(dt); fire(w, 'hip'); P.frame = nm('gun_hipfire', 0); break; }
+        if (!over('gun_draw', td)) { if (moving) movingAim(dt, mx, my); else { plant(dt); P.frame = frameAt('gun_draw', td); } break; }
         S.out = true; S.act = ''; S.at = 0; S.hip = false;   // out: the shot it was drawn for, or the ready pose
         if (S.next === 'fan') { S.next = ''; startFan(w); } else if (S.want) consumePress(w, moving);
         if (S.act === 'fan' || S.act === 'fire' || S.act === 'dry') { plant(dt); P.frame = S.act === 'fan' ? nm('gun_fan', 0) : S.act === 'fire' ? nm('gun_fire', 0) : P.frame; break; }
@@ -334,21 +368,31 @@ export function createGun(PL, I) {
       }
       case 'hip':
         S.at += dt;
-        if (over('gun_hipfire', S.at)) { S.act = ''; standingAim(dt); } else { plant(dt); P.frame = nm('gun_hipfire', frameAt('gun_hipfire', S.at)); }
+        if (over('gun_hipfire', S.at)) { S.act = ''; standingAim(dt); } else { plant(dt); P.frame = frameAt('gun_hipfire', S.at); }
         break;
       case 'fire':
         S.at += dt;
         if (moving || over('gun_fire', S.at)) { S.act = ''; if (moving) movingAim(dt, mx, my); else standingAim(dt); }
-        else { plant(dt); P.frame = nm('gun_fire', frameAt('gun_fire', S.at)); }
+        else { plant(dt); P.frame = frameAt('gun_fire', S.at); }
         break;
       case 'fan': {   // the palm sweeps the hammer: a shot each sweep (the frame's swing), the feet planted
-        plant(dt); P.want = bestFacing('gun_fan.1'); turnToward(P.want, dt, AIM_TURN_RATE);
+        plant(dt); P.want = bestFacing(nm('gun_fan', mark('gun_fan', 'shot', 1))); turnToward(P.want, dt, AIM_TURN_RATE);
         const gap = w.fanGap * mv('weapon.gap', 1), t0 = S.fanT; S.fanT += dt;
         for (let n = Math.floor(t0 / gap + .5); n < Math.floor(S.fanT / gap + .5) && S.ammo > 0; n++) fire(w, 'fan');
-        if (S.ammo <= 0 && (S.fanT / gap) % 1 >= .5) { S.act = 'fire'; S.at = 1 / clip('gun_fire').fps; P.frame = nm('gun_fire', 1); break; }
-        P.frame = nm('gun_fan', (S.fanT / gap) % 1 < .5 ? 0 : 1);
+        const ph = (S.fanT / gap) % 1, fc = clip('gun_fan').frames;
+        if (S.ammo <= 0 && ph >= .5 + .5 / fc) {   // empty: back up to the aim (an atlas without the rise: the kick's tail)
+          if (has('gun_fan_out.0')) { S.act = 'raise'; S.at = 0; P.frame = nm('gun_fan_out', 0); }
+          else { S.act = 'fire'; S.at = startOf('gun_fire', 1); P.frame = nm('gun_fire', 1); }
+          break;
+        }
+        P.frame = nm('gun_fan', Math.floor(ph * fc) % fc);   // the shot leaves halfway through a sweep (mark shot)
         break;
       }
+      case 'raise':   // from the hip (the fan) up to the aim
+        S.at += dt;
+        if (moving || over('gun_fan_out', S.at)) { S.act = ''; if (moving) movingAim(dt, mx, my); else standingAim(dt); }
+        else { plant(dt); P.frame = frameAt('gun_fan_out', S.at); }
+        break;
       case 'reload': reloadStep(dt, w, moving, mx, my); break;
       case 'dry':
         S.at += dt;
@@ -357,29 +401,29 @@ export function createGun(PL, I) {
         break;
       case 'twirl':
         S.at += dt;
-        if (over('gun_twirl', S.at)) { S.act = ''; standingAim(dt); } else { plant(dt); P.frame = nm('gun_twirl', frameAt('gun_twirl', S.at)); }
+        if (over('gun_twirl', S.at)) { S.act = ''; standingAim(dt); } else { plant(dt); P.frame = frameAt('gun_twirl', S.at); }
         break;
       case 'holster':
         S.at += dt; plant(dt); P.state = 'pose';
         if (over('gun_holster', S.at)) {
           S.out = false; S.act = S.next || ''; S.next = ''; S.at = 0; emit('player.holster', w, {});
           if (S.act === 'tip') P.frame = nm('hat_tip', 0); else { P.state = 'idle'; P.t = 0; P.frame = 'idle.0'; }
-        } else P.frame = nm('gun_holster', frameAt('gun_holster', S.at));
+        } else P.frame = frameAt('gun_holster', S.at);
         break;
       case 'blow':
         S.at += dt; plant(dt); P.state = 'pose';
-        if (over('gun_blow', S.at)) { S.act = 'holster'; S.at = 0; P.frame = nm('gun_holster', 0); }
-        else P.frame = nm('gun_blow', frameAt('gun_blow', S.at));
+        if (over('gun_blow', S.at)) { S.act = 'holster'; S.at = startOf('gun_holster', mark('gun_holster', 'hip', 0)); P.frame = frameAt('gun_holster', S.at); }   // (already at the hip)
+        else P.frame = frameAt('gun_blow', S.at);
         break;
       case 'tip':
         S.at += dt; plant(dt); P.state = 'pose';
-        if (over('hat_tip', S.at)) { S.act = ''; P.state = 'idle'; P.t = 0; P.frame = 'idle.0'; } else P.frame = nm('hat_tip', frameAt('hat_tip', S.at));
+        if (over('hat_tip', S.at)) { S.act = ''; P.state = 'idle'; P.t = 0; P.frame = 'idle.0'; } else P.frame = frameAt('hat_tip', S.at);
         break;
       case 'duel': {   // crouched, the hand twitching over the holster, while the cue lasts
         plant(dt); P.state = 'pose'; S.at += dt;
         const c = cursorAim(); P.want = dirOf(c.x - P.x, c.y - P.y); turnToward(P.want, dt, TURN_RATE);
         if (!S.duel) { S.act = ''; P.state = 'idle'; P.t = 0; P.frame = 'idle.0'; }
-        else { const cl = clip('duel_ready'); P.frame = nm('duel_ready', Math.floor(S.at * cl.fps) % cl.frames); }
+        else P.frame = frameAt('duel_ready', S.at);
         break;
       }
       default:   // ready: the gun up and on the cursor
@@ -392,8 +436,8 @@ export function createGun(PL, I) {
         }
         if (moving) movingAim(dt, mx, my); else standingAim(dt);
     }
-    if (S.act === 'draw' || S.act === 'hip' || S.act === 'fire' || S.act === 'fan' || S.act === 'reload' || S.act === 'dry' || S.act === 'twirl' || (S.out && !S.act)) P.state = 'draw';
-    P.t = S.out && S.ammo > 0 && (S.act === '' || S.act === 'fire' || S.act === 'twirl') ? 1 : 0;   // the reticle: gold when a shot is ready
+    if (S.act === 'draw' || S.act === 'hip' || S.act === 'fire' || S.act === 'fan' || S.act === 'raise' || S.act === 'reload' || S.act === 'dry' || S.act === 'twirl' || (S.out && !S.act)) P.state = 'draw';
+    P.t = S.out && S.ammo > 0 && (S.act === '' || S.act === 'fire' || S.act === 'raise' || S.act === 'twirl') ? 1 : 0;   // the reticle: gold when a shot is ready
     return true;
   }
 
@@ -410,6 +454,13 @@ export function createGun(PL, I) {
     cue(kind) { if (kind === 'kill' && S.out && has('gun_blow.0')) S.flourish = true; },   // a kill: smoke to blow off, when calm
     setCues(calm, duel) { S.calm = calm; S.duel = duel; },          // the gun feature, each step: nothing hunting nearby / an elite near
     get reloading() { return S.act === 'reload'; },
+    // (views) the gunslinger is blowing on the barrel: the clip's puff frames (an atlas without marks: its middle frames)
+    get blowing() {
+      if (S.act !== 'blow') return false;
+      const M = clip('gun_blow').marks, a = M ? M.puff0 : 1, b = M ? M.puff1 : 3;
+      for (let i = a; i <= b; i++) if (P.frame === nm('gun_blow', i)) return true;
+      return false;
+    },
     // (views) the muzzle of pose `frame` at facing f: out.x / out.y = sprite px from the pivot (the feet), out.a = the
     // barrel's screen angle; null when the pose has no gun bones
     barrel(frame, f, out) {

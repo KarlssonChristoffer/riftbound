@@ -111,6 +111,9 @@ export async function create(host) {
         if (e.type === 'player.shoot') {
           const w = WEAPONS[e.gun] || {}, navy = e.gun === 'brass_navy';
           FL.t = TUNE.flash.life; FL.v = (R() * 3) | 0; FL.k = (navy ? TUNE.flash.navy : 1) * (e.fan ? TUNE.flash.fan : 1);
+          // the flash leaves along the shot (the bullet's way on screen), not the barrel of the frame showing: that one
+          // is already kicking up
+          view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h); FL.a = Math.atan2(SC[1] - y0, SC[0] - x0);
           LIGHT.x = e.x; LIGHT.y = e.y; LIGHT.h = e.h;
           const S = TUNE.smoke, n = S.puffs + (navy ? 1 : 0);
           for (let i = 0; i < n; i++) {
@@ -132,7 +135,7 @@ export async function create(host) {
       }
       if (FL.t > 0) FL.t -= dt;
       // the wisp off the barrel after a shot, and while the gunslinger blows on it
-      const blowing = !!g && host.P.frame.startsWith('gun_blow.') && host.P.frame !== 'gun_blow.0' && host.P.frame !== 'gun_blow.4';
+      const blowing = !!g && g.blowing;
       if (g && (wispFor > 0 || blowing)) {
         wispFor -= dt; wispT -= dt;
         if (wispT <= 0) {
@@ -219,7 +222,7 @@ export async function create(host) {
         const m = muzzleWorld(g);
         if (m) {
           const s = view(m.x, m.y, m.h), len = TUNE.flash.len * px * FL.k * (.8 + .4 * FL.t / TUNE.flash.life), img = flashImg[FL.v];
-          const k = len / img.width, c = Math.cos(MZ.a) * k, sn = Math.sin(MZ.a) * k;
+          const k = len / img.width, c = Math.cos(FL.a) * k, sn = Math.sin(FL.a) * k;
           q.globalCompositeOperation = 'lighter';
           const gr = TUNE.flash.glow * px * FL.k * (.7 + .5 * FL.t / TUNE.flash.life);
           q.drawImage(glowImg, s[0] * sc - gr, s[1] * sc - gr, gr * 2, gr * 2);
