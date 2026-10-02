@@ -36,7 +36,7 @@ export function drawHud({host, opt, stage, env, hero, cv, features, G, fps, proj
 // north of its middle (&at=19.2,6.6 / 13.1 / 19.6): oaks seeds 0-4 | oaks 5-7 + the painted oaks | dead 0-2 + the
 // painted dead tree, then the willows 0-2 and the painted willow (x 26.4 .. 37.2, framed at &at=31,21), then a 4th row south of the arena's wall (y 27.4): the aspens
 // 0-2 + the painted one (x 4 .. 10.6, &at=7,24.4), the rowans (x 14 .. 23.6, &at=19,24.4), the birches (x 27 .. 36, &at=31,24.4) (p.painted
-// keeps a tree's card; variant 4 / 5 / 6 = rowan / birch / aspen, trees3d.js speciesOf). They join the world's entities, so they survive N / Shift+R
+// keeps a tree's card; variant 4 / 5 / 6 = rowan / birch / aspen, trees3d.js speciesOf). They join the world's entities, so they survive N / Shift+P
 export function treeLineup({world, ents}) {
   const row = (y, list) => list.forEach(([variant, seed, painted, x], i) => {
     const p = {kind: 'tree', x: x ?? 12 + i * 3.6, y, z: 0, variant, seed, painted, lineup: true, r: .3};
