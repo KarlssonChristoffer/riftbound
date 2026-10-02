@@ -305,9 +305,9 @@ def _bandolier():
 
 
 # ---------------------------------------------------------------- legs, feet -----------------------------------------
-def _trousers(seam=False):
+def _trousers(seam=False, over=False):
     """Trousers to the knee + the upper shin (tucked into the tall boots); seam: a silver line down the outer side
-    (charro trousers)."""
+    (charro trousers); over: straight legs worn OVER the boot shafts, down to the ankle (only the boot's foot shows)."""
     P, s, J, z = _ctx()
     T, t = _torso(P, s, z), .015 * s
     loft('TrouserHip', 'Hips', T['hip'][0][:3], _grow(T['hip'][1][:3], t), p=2.6)
@@ -316,8 +316,12 @@ def _trousers(seam=False):
         dl, ds = (kn - hp).normalized(), (an - kn).normalized()
         loft(f'TrouserThigh.{sd}', f'{m}UpLeg', [hp - dl * .05 * s, hp + (kn - hp) * .3, hp + (kn - hp) * .75, kn + dl * .03 * s],
              _grow([(.085 * s, .09 * s), (.08 * s, .085 * s), (.062 * s, .066 * s), (.05 * s, .052 * s)], t), side=(0, -1, 0))
-        loft(f'TrouserShin.{sd}', f'{m}Leg', [kn - ds * .035 * s, kn + (an - kn) * .45],
-             _grow([(.05 * s, .052 * s), (.056 * s, .06 * s)], t), side=(0, -1, 0))
+        if over:
+            loft(f'TrouserShin.{sd}', f'{m}Leg', [kn - ds * .035 * s, kn + (an - kn) * .45, an - ds * .025 * s],
+                 _grow([(.05 * s, .052 * s), (.07 * s, .074 * s), (.08 * s, .084 * s)], t), side=(0, -1, 0))
+        else:
+            loft(f'TrouserShin.{sd}', f'{m}Leg', [kn - ds * .035 * s, kn + (an - kn) * .45],
+                 _grow([(.05 * s, .052 * s), (.056 * s, .06 * s)], t), side=(0, -1, 0))
         if seam:
             out = Vector((sx, 0, 0))
             loft(f'TrouserSeam.{sd}', f'{m}UpLeg', [hp + (kn - hp) * .12 + out * .1 * s, hp + (kn - hp) * .5 + out * .09 * s,
@@ -626,11 +630,10 @@ def _on_legs(i, upper, clip='walk', delta=0.0):
 
 
 # aim: the arm straight out along the facing; standing twists of the upper body over the planted legs (facing = the
-# legs, as the bow's aim_tw_*), so a standing aim turns in 11.25 deg steps before the feet re-plant
+# legs, as the bow's aim_tw_*), so a standing aim turns in 11.25 deg steps before the feet re-plant (_gun_aim_set)
 POSES['gun_aim'] = _gpose(_BLADE, _AIM_ARM)
-for _n, _d in (('m45', -45), ('m34', -33.75), ('m22', -22.5), ('m11', -11.25), ('p11', 11.25), ('p22', 22.5),
-               ('p34', 33.75), ('p45', 45)):
-    POSES[f'gun_aim_{_n}'] = {**POSES['gun_aim'], '_post': _TWIST(_d)}
+AIM_TWISTS = (('m45', -45), ('m34', -33.75), ('m22', -22.5), ('m11', -11.25), ('p11', 11.25), ('p22', 22.5),
+              ('p34', 33.75), ('p45', 45))
 # ready idle (replaces the skeleton's idle in the western loadouts): the gun hand hangs loose over the holster
 POSES['idle_in'] = {**POSES['idle_in'], **_arm(y=-38, x=6, fx=-26, sz=2), 'RightHand': [('X', -12)]}
 POSES['idle_out'] = {**POSES['idle_out'], **_arm(y=-40, x=8, fx=-30, sz=3), 'RightHand': [('X', -16)]}
@@ -673,8 +676,8 @@ ANIMS['gun_holster'] = dict(keys=[f'gun_spin_{i}' for i in range(4)] + ['gholste
 
 # standing aim turns (the bow's aim_step / aim_pivot, gun in hand): facing = the TORSO (aim). Step: the legs start
 # offset and re-plant under the aim; pivot: the torso leads with the gun tucked at the hip, the legs trail.
-def _gstand(legs_off=0.0, torso_off=0.0, extra=None, up=None, lean=0.0, air=0.0):
-    spec = {'Hips': [('Z', _BLADE + legs_off)] + ([('Y', lean)] if lean else []), **{k: list(v) for k, v in _GLEGS.items()},
+def _gstand(legs_off=0.0, torso_off=0.0, extra=None, up=None, lean=0.0, air=0.0, blade=_BLADE):
+    spec = {'Hips': [('Z', blade + legs_off)] + ([('Y', lean)] if lean else []), **{k: list(v) for k, v in _GLEGS.items()},
             **{k: list(v) for k, v in (up or _upper(POSES['gun_aim'], _BLADE)).items()}}
     for k, v in (extra or {}).items():
         spec[k] = spec.get(k, []) + v
@@ -686,14 +689,6 @@ def _gstand(legs_off=0.0, torso_off=0.0, extra=None, up=None, lean=0.0, air=0.0)
     return spec
 
 
-_TUCKED = _upper(POSES['gun_draw_hip'], 16)
-for _i, (_off, _lg, _ln) in enumerate(_STEP_L):          # skeleton.py's step table: legs offset, leg bends, lean
-    POSES[f'gun_st_l{_i}'] = _gstand(_off, extra=_lg, lean=_ln)
-    POSES[f'gun_st_r{_i}'] = _gstand(-_off, extra=_LR(_lg), lean=-_ln)
-for _i, (_lo, _to, _up, _lg, _air) in enumerate(_PIV):    # and its pivot table (_TUCK_UP = the bow pulled in)
-    _gu = _TUCKED if _up is _TUCK_UP else None
-    POSES[f'gun_pv_l{_i}'] = _gstand(_lo, _to, extra=_lg, up=_gu, air=_air)
-    POSES[f'gun_pv_r{_i}'] = _gstand(-_lo, -_to, extra=_lg, up=_gu, air=_air)
 ANIMS['gaim_step_l'] = dict(keys=[f'gun_st_l{i}' for i in range(4)], frames=4, loop=False, fps=16)
 ANIMS['gaim_step_r'] = dict(keys=[f'gun_st_r{i}' for i in range(4)], frames=4, loop=False, fps=16)
 ANIMS['gaim_pivot_l'] = dict(keys=[f'gun_pv_l{i}' for i in range(3)], frames=3, loop=False, fps=24)
@@ -702,11 +697,30 @@ ANIMS['gaim_pivot_r'] = dict(keys=[f'gun_pv_r{i}' for i in range(3)], frames=3, 
 # on the move: the bladed aim held still over the stride, twisted by delta. One-handed, so both ways: out to the right
 # up to 90 deg, across the body to the left up to 45 deg. Reloading on the move: three reload keys over the stride.
 G_DELTAS = {'m90': -90, 'm67': -67.5, 'm45': -45, 'm22': -22.5, '0': 0, 'p22': 22.5, 'p45': 45}
-_AIM_UP_G = _upper(POSES['gun_aim'], _BLADE)
-for _dn, _d in G_DELTAS.items():
-    for _i in range(8):
-        POSES[f'gws_{_dn}_{_i}'] = _on_legs(_i, _AIM_UP_G, 'walk', _d)
-        POSES[f'grs_{_dn}_{_i}'] = _on_legs(_i, _AIM_UP_G, 'run', _d)
+
+
+def _gun_aim_set(blade, tucked):
+    """The poses derived from POSES['gun_aim'] (its stance turned `blade` deg): the standing twists, the aim steps and
+    pivots (`tucked` = the upper body of a quick pivot's first frames), aiming on the move (gws_ / grs_). A held item
+    with its own aim (the coach gun) rebuilds them over its own gun_aim."""
+    aim = POSES['gun_aim']
+    up = _upper(aim, blade)
+    for n, d in AIM_TWISTS:
+        POSES[f'gun_aim_{n}'] = {**aim, '_post': _TWIST(d)}
+    for i, (off, lg, ln) in enumerate(_STEP_L):          # skeleton.py's step table: legs offset, leg bends, lean
+        POSES[f'gun_st_l{i}'] = _gstand(off, extra=lg, up=up, lean=ln, blade=blade)
+        POSES[f'gun_st_r{i}'] = _gstand(-off, extra=_LR(lg), up=up, lean=-ln, blade=blade)
+    for i, (lo, to, u, lg, air) in enumerate(_PIV):      # and its pivot table (_TUCK_UP = the bow pulled in)
+        gu = tucked if u is _TUCK_UP else up
+        POSES[f'gun_pv_l{i}'] = _gstand(lo, to, extra=lg, up=gu, air=air, blade=blade)
+        POSES[f'gun_pv_r{i}'] = _gstand(-lo, -to, extra=lg, up=gu, air=air, blade=blade)
+    for dn, d in G_DELTAS.items():
+        for i in range(8):
+            POSES[f'gws_{dn}_{i}'] = _on_legs(i, up, 'walk', d)
+            POSES[f'grs_{dn}_{i}'] = _on_legs(i, up, 'run', d)
+
+
+_gun_aim_set(_BLADE, _upper(POSES['gun_draw_hip'], 16))
 for _rk in ('up', 'load', 'fetch'):
     _ru = _upper(POSES[f'gun_rl_{_rk}'], 10)
     for _i in range(8):
