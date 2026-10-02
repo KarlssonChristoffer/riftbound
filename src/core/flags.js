@@ -35,6 +35,8 @@ export const FLAG_DOCS = {
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
+  battlemusic: '0: no battle music (features/battlemusic.js: the songs that follow the fight); the procedural score plays throughout',
+  bmforce: 'state[:song[:x]]: dev, pin the battle music (dev/bmusic.js), e.g. boss:iron:.25 (x = the champion health) or battle:dust:.8 (x = intensity)',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
   lineup: 'trees: the procedural trees side by side for review',
