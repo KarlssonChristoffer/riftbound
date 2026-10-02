@@ -8,7 +8,7 @@
 //   host.player, host.paused, host.entities.near (the merchant, 4x a second in pick / portal).  EMITS: nothing.
 // BUDGET: view < 0.02 ms (a pass over the frame's events and the few enemies; no allocation).
 // Presentation only: no update(), no drawing, no Math.random (the golden frames and the sim stay identical with it on).
-// ?battlemusic=0 turns it off. Dev: ?bmforce=state[:song[:I or boss health]] pins a state (dev/bmusic.js, loaded only
+// OFF by default (the user prefers the procedural score: no premade songs); ?battlemusic=1 turns it on. Dev: ?bmforce=state[:song[:I or boss health]] pins a state (dev/bmusic.js, loaded only
 // then), e.g. ?bmforce=boss:iron:.25 or ?bmforce=battle:dust:.8; window.__bmusic is the handle (tests).
 import {flags} from '../core/flags.js';
 import {createTrackPlayer} from '../audio/tracks.js';
@@ -17,7 +17,7 @@ import {createBattleDirector, makeSignals, TUNE} from '../audio/battledirector.j
 // ORDER: after the game (it runs first anyway) and the audio feature, whose engine the player plays into
 export const order = {after: ['audio', 'combat']};
 export async function create(host) {
-  if (flags.get('battlemusic') === '0') return {name: 'battlemusic', on: false};
+  if (flags.get('battlemusic') !== '1' && !flags.get('bmforce')) return {name: 'battlemusic', on: false};   // (off: the procedural score)
   const sig = makeSignals(), near = [];
   let game = null, core = null, AU = null, TP = null, D = null, volT = 0, mT = 0, volK = -1, procWant = true;
   const P = host.player;
