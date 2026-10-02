@@ -195,7 +195,8 @@ export function createPlayer(H) {
     if (s0 < 0) return null;
     let s1 = -1; for (let d = s0; d <= s0 + 5; d += .05) if (!inStream(P.x + dx * d, P.y + dy * d)) { s1 = d; break; }
     const land = s1 + .25, lx = P.x + dx * land, ly = P.y + dy * land;
-    if (s1 > 0 && land <= reach && !H.blocked(lx, ly, elev(lx, ly), false)) return {dist: Math.max(1.2, land), safe: true};
+    // (a leap never lands higher than it started: the plateau's pool lies right under its west face, so the far "bank" there is the cliff's top)
+    if (s1 > 0 && land <= reach && elev(lx, ly) <= elev(P.x, P.y) + .3 && !H.blocked(lx, ly, elev(lx, ly), false)) return {dist: Math.max(1.2, land), safe: true};
     if (s0 <= .5) return {dist: reach, safe: false};
     return null;
   }
@@ -220,6 +221,19 @@ export function createPlayer(H) {
   function splash(backTo) {
     P.state = 'splash'; P.t = 0; P.z = 0; P.back = backTo;
     ev({type: 'player.splash', x: P.x, y: P.y}); H.shake?.(1, .12);
+  }
+  // Where a FALL that ended in the water puts you back: behind the landing, against the drift. Off the plateau's west edge that spot can
+  // be water too (the pool under the waterfall is wider than the drift), so it goes on back, a body's length past the water's edge: onto
+  // the plateau, where you stepped off. Anywhere else the first spot is dry and is used as it is
+  function dryBack(bx, by, vx, vy) {
+    const l = Math.hypot(vx, vy);
+    if (!inStream(bx, by) || l < .05) return [bx, by];
+    const ux = vx / l, uy = vy / l;
+    for (let d = .1; d <= 6; d += .1) {
+      const x = bx - ux * d, y = by - uy * d;
+      if (!inStream(x, y)) { const x2 = x - ux * .3, y2 = y - uy * .3; return H.blocked(x2, y2, elev(x2, y2), true) ? [x, y] : [x2, y2]; }
+    }
+    return [bx, by];
   }
   function climbSpot() {   // a climb spot within reach: from below (up) or from the top (down)
     for (const q of plateaus) for (const c of q.climbs || []) {
@@ -257,7 +271,7 @@ export function createPlayer(H) {
       P.vz -= 24 * dt; P.z += P.vz * dt; const x0 = P.x, y0 = P.y; moveBy(P.vx * dt, P.vy * dt, true);
       P.frame = has('fall') ? 'fall' : 'lunge';
       const e = elev(P.x, P.y);
-      if (P.z <= e) { if (inStream(P.x, P.y)) splash([x0 - P.vx * .3, y0 - P.vy * .3]); else land(P.fall0 - e); }
+      if (P.z <= e) { if (inStream(P.x, P.y)) splash(dryBack(x0 - P.vx * .3, y0 - P.vy * .3, P.vx, P.vy)); else land(P.fall0 - e); }
       return true;
     }
     if (P.state === 'land') {

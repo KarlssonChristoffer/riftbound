@@ -307,7 +307,7 @@ export async function create(host) {
         if (K.rest) {
           p.h = gnd; p.rest = p.restMax = K.rest * (.6 + R() * .8); p.float = 0;
           const S = host.layout?.stream;
-          if (!gnd && S && wet(p.x, p.y)) { p.float = (p.x - S.cx(p.y)) / S.w(p.y) || .01; p.rest = p.restMax = K.rest * 2.5; p.h = WATER_H; }
+          if (!gnd && S && wet(p.x, p.y)) { p.float = Math.max(-.45, Math.min(.45, (p.x - S.cx(p.y)) / S.w(p.y))) || .01; p.rest = p.restMax = K.rest * 2.5; p.h = WATER_H; }
         } else { spawn(K, p, false); return; }
       }
     } else if (K.mode === 'rise') {

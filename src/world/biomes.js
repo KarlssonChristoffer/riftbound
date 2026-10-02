@@ -507,6 +507,68 @@ function dampBanks(K, S, cliff) {
   }
 }
 
+// ---------------------------------------------------------------- the plateau's water (layout.js SPRING / RILL / POOL / FALL)
+// paintRill: st.px(x, y, e, side, mx, my, o) for every pixel within .45 m of the rill's edge (e < 0 in the water, metres from the edge;
+// side -1 where the nearest bank is north / west of the pixel, the shadow side, +1 south / east; o = rillAt's {d, a, l, hw}: o.a metres
+// across the rill (+ south), o.l metres from the spring). The spring's basin is the rill's round head
+function paintRill(K, st) {
+  const L = K.layout; if (!L.rill) return;
+  const {PPM, PPMY} = K, o = {d: 0, a: 0, l: 0, hw: 0};
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+  for (const [px, py] of L.rill.pts) { x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py); }
+  for (let y = Math.floor((y0 - .9) * PPMY); y <= Math.ceil((y1 + .9) * PPMY); y++) for (let x = Math.floor((x0 - .5) * PPM); x <= Math.ceil((x1 + .9) * PPM); x++) {
+    const mx = (x + .5) / PPM, my = (y + .5) / PPMY; L.rillAt(mx, my, o);
+    const e = o.d - o.hw + (vn(x / 4, y / 3, 73) - .5) * .05;
+    if (e < .45) st.px(x, y, e, o.a < 0 ? -1 : 1, mx, my, o);
+  }
+}
+// paintPool: the stream's own px (paintStream's st.px) for the pool at the foot of the plateau's west face. Its west half lies in the
+// river, so only what the pool changes is repainted: the water beyond the east bank (c / hw = the pool's own middle and half width at
+// that y, for the px's deep middle), the river's east edge where the pool opens into it (no bank there), and the pool's banks on dry land
+// (the face counts as a bank; the plateau's top, x >= the face, is paintPlateau's)
+function paintPool(K, st) {
+  const L = K.layout, P = L.pool, SM = K.stream; if (!P || !SM) return;
+  const {PPM, PPMY} = K, xe = Math.floor(P.clip * PPM) - 1;
+  for (let y = Math.floor((P.y - P.ry - .6) * PPMY); y <= Math.ceil((P.y + P.ry + .6) * PPMY); y++) {
+    const my = (y + .5) / PPMY, c = SM.cx(my), hw = SM.w(my) / 2, v = (my - P.y) / P.ry, cp = P.x - P.k * (my - P.y), hp = P.rx * Math.sqrt(Math.max(0, 1 - v * v));
+    for (let x = Math.floor((P.x - P.rx - .9) * PPM); x <= xe; x++) {
+      const mx = (x + .5) / PPM, eP = L.poolEdge(mx, my), eR = hw - Math.abs(mx - c);
+      if (eP < -.45 || (eP > 0 && eR > .15) || (eP <= 0 && (eR >= 0 || eP < eR))) continue;   // (deep in the river, in the river, or the river's own bank)
+      const u = (mx - P.x + P.k * (my - P.y)) / P.rx, gx = u / P.rx, gy = u * P.k / P.rx + v / P.ry, gl = Math.hypot(gx, gy) || 1;
+      const face = eP > 0 && P.clip - mx <= eP + 1e-9;   // (the face is the nearest bank)
+      const nx = face ? 1 : gx / gl, ny = face ? 0 : gy / gl, side = nx + ny < 0 ? -1 : 1, jag = (vn(x / 4, y / 3, 71) - .5) * .05;
+      if (eP > 0 && eR >= 0) st.px(x, y, -Math.max(eP, eR) + jag, 1, mx, my, c, hw);   // where the pool opens into the river
+      else if (eP > 0) st.px(x, y, -eP + jag, side, mx, my, cp, hp);                      // the water beyond the bank
+      else st.px(x, y, -eP + jag, side, mx, my, cp, hp);                                  // the pool's own bank
+    }
+  }
+}
+// fn(x, y, r, mx, my) for every pixel within .55 m of where the fall lands (r = a little squashed distance), west of the face
+function fallFoot(K, fn) {
+  const F = K.layout.fall, {PPM, PPMY} = K;
+  for (let y = Math.floor((F.y - .8) * PPMY); y <= Math.ceil((F.y + .8) * PPMY); y++) for (let x = Math.floor((F.x - .8) * PPM); x < Math.floor(F.x * PPM); x++) {
+    const mx = (x + .5) / PPM, my = (y + .5) / PPMY, r = Math.hypot(mx - F.x, (my - F.y) * 1.25);
+    if (r < .55) fn(x, y, r, mx, my);
+  }
+}
+// the damp, lusher ground round the pool's dry banks (dampBanks' band: 0.3 m out from the edge to a wavy 0.55-1.05 m)
+function dampPool(K, S) {
+  const L = K.layout, P = L.pool, SM = K.stream; if (!P || !SM) return;
+  const {G, PPM, PPMY} = K, D = S.damp, LU = S.lush, FL = [hex('#f1ecde'), hex('#f0d968'), hex('#c8a6e8'), hex('#f2b9c9')], xe = Math.floor((P.clip - .15) * PPM);
+  for (let y = Math.floor((P.y - P.ry - 1.3) * PPMY); y <= Math.ceil((P.y + P.ry + 1.3) * PPMY); y++) {
+    const my = (y + .5) / PPMY, c = SM.cx(my), hw = SM.w(my) / 2;
+    for (let x = Math.floor((P.x - P.rx - 1.2) * PPM); x <= xe; x++) {
+      const mx = (x + .5) / PPM, eP = L.poolEdge(mx, my), eR = hw - Math.abs(mx - c), e = -eP + (vn(x / 4, y / 3, 71) - .5) * .05;
+      if (eP > 0 || eR > -.3 || -eP > -eR || e < .3 || e > .55 + vn(x / 9, y / 7, 62) * .5) continue;   // outside both, nearer the pool than the river
+      const m0 = G.mat(x, y); if (m0 !== S.grass.id && m0 !== S.earth.id) continue;
+      if (e < .42 && hsh(x, y, 63) < .45) continue;
+      G.p(x, y, D, Math.min(2, Math.max(0, G.tone(x, y))));
+      if (hsh(x, y, 65) < .013) { G.p(x, y, LU, 0); G.p(x + 1, y, LU, 1); G.p(x, y + 1, LU, 2); }
+      else if (hsh(x, y, 66) < .0035) G.c(x, y, FL[hsh(x, y, 67) * 4 | 0]);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- RUINS ground
 function cliffRuins(K) { return mx => K.HM - 2.2 + (vn(mx * .3, .5, 91) - .5) * 1.3; }
 function groundRuins(q, ctx, B) {
@@ -575,7 +637,7 @@ function groundRuins(q, ctx, B) {
   }
   // the stream: teal water between dark earth banks; flow streaks; the west bank's shadow on the water
   const W = S.water;
-  paintStream(K, {
+  const riverSt = {
     stop: c => cliff(c) - .02,
     px(x, y, e, side, mx, my, c, hw) {
       if (e >= 0) { if (e < .06) G.p(x, y, S.earth, 3); else if (e < .18) G.p(x, y, S.earth, side < 0 ? 2 : 1); else if (e < .3 && hsh(x, y, 4) < .45) G.p(x, y, S.grass, 2); return; }
@@ -583,8 +645,12 @@ function groundRuins(q, ctx, B) {
       G.p(x, y, W, side < 0 && d < .14 ? 3 : side > 0 && d < .05 ? 0 : streak ? 0 : Math.abs(mx - c) < hw * .45 ? 2 : 1);
     },
     stone: st => slab(K, st, S.rock, {ring: (P, E, x, y) => P.p(x, y, W, 0)}),
-  });
+  };
+  paintStream(K, riverSt);
+  paintPool(K, riverSt);   // the pool at the foot of the plateau's west face: the same water, the same banks
+  fallFoot(K, (x, y, r, mx, my) => { if (G.mat(x, y) === W.id && hsh(x, y, 12) < .8 * (1 - Math.max(0, r - .1) / .45)) G.p(x, y, W, 0); });   // foam where the fall lands (held as painted)
   dampBanks(K, S, cliff);
+  dampPool(K, S);
   narrowRocks(K, S.rock, S.moss);   // (moss on the rocks where the stream pinches)
   // the south edge: the ground breaks off into a ravine (the stream falls over it)
   const Rk = S.rock, abyss = hex('#1a211d'), abyss2 = hex('#222c26'), SM = K.stream;
@@ -634,6 +700,22 @@ function groundRuins(q, ctx, B) {
       else if (stem) G.p(x, y, S.bark, 1);
     },
   });
+  // the plateau's spring and the rill it feeds: water welling up in a basin of mossy stones (ripple rings held as painted), then a
+  // shallow channel west between dark earth banks, with white riffles where it narrows (waterSample holds those too)
+  const SP = K.layout.spring;
+  paintRill(K, {px(x, y, e, side, mx, my, o) {
+    if (e >= 0) { if (e < .05) G.p(x, y, S.earth, 3); else if (e < .13) G.p(x, y, S.earth, side < 0 ? 2 : 1); else if (e < .24 && hsh(x, y, 4) < .5) G.p(x, y, S.damp, 1); return; }
+    const d = -e, rs = Math.hypot(mx - SP.x, my - SP.y);
+    let t;
+    if (rs < SP.r + .03) t = rs < .07 || (rs > .15 && rs < .19 && hsh(x, y, 8) < .85) || (rs > .29 && rs < .33 && hsh(x, y, 9) < .6) ? 0 : side < 0 && d < .1 ? 3 : side > 0 && d < .04 ? 0 : rs < .22 ? 2 : 1;
+    else {
+      const cell = Math.floor(o.l * K.PPM / 8), ph = o.l * K.PPM / 8 - cell, riff = K.layout.rill.riffle(o.l, o.hw) && hsh(cell, 3) < .5 && ph < .06 + hsh(cell, 4) * .1 && Math.abs(o.a + (hsh(cell, 6) - .5) * o.hw) < o.hw * (.15 + hsh(cell, 5) * .4) && hsh(x, y, 10) < .9;   // (crests across the flow, short and uneven)
+      t = riff ? 0 : side < 0 && d < .09 ? 3 : side > 0 && d < .04 ? 0 : Math.abs(o.a) < o.hw * .45 ? 2 : 1;
+    }
+    G.p(x, y, W, t);
+  }});
+  for (const [a, r, sz, v] of [[-2.25, .56, 1, 1], [-1.55, .52, .9, 2], [-.85, .56, 1.1, 3], [-.1, .6, .9, 4], [.6, .62, 1, 5], [1.3, .62, 1.1, 6], [2.0, .6, .8, 7]])
+    boulder(K, SP.x + Math.cos(a) * r, SP.y + Math.sin(a) * r, 5 * sz + 1.5, 3.2 * sz + 1, S.rock, v * 13, S.moss);
   K.finish(B);
   B.hole = (x, y, c) => y > cliff(x) - .3 || K.streamE(x, y) < .4 || (c && behindPlateau(c, x, y));
 }
@@ -681,7 +763,7 @@ function groundEmber(q, ctx, B) {
   }}}));
   wallAO(K);
   // the lava stream: a basalt-lined channel, crust plates drifting on bright lava, a hot seam along each bank
-  paintStream(K, {
+  const riverSt = {
     stop: c => cliff(c) - .02,
     px(x, y, e, side, mx, my) {
       E.off(x, y);
@@ -693,7 +775,11 @@ function groundEmber(q, ctx, B) {
       else G.c(x, y, hex(b < .045 ? '#5a1a10' : hsh(v.id, 3) < .3 ? '#3a1410' : S.crust));   // drifting crust
     },
     stone: st => slab(K, st, S.wall, {top: (P, E2, x, y, u) => P.p(x, y, u < -.3 ? S.ash : S.wall, u < -.3 ? 0 : 0), ring: (P, E2, x, y) => { P.p(x, y, L, 0); E2.c(x, y, L.c[0]); }}),
-  });
+  };
+  paintStream(K, riverSt);
+  paintPool(K, riverSt);   // the pool at the foot of the plateau's west face: the same stream, the same banks
+  fallFoot(K, (x, y, r) => { if (hsh(x, y, 12) < .85 * (1 - Math.max(0, r - .08) / .45)) { const k = r < .22 ? 0 : 1; G.p(x, y, L, k); E.c(x, y, L.c[k]); } });   // white-hot splash where the fall lands
+  if (K.layout.fall) K.lights.push({x: K.layout.fall.x - .5, y: K.layout.fall.y, h: .4, color: '#ff7a2e', radius: 2.6, intensity: .7, flicker: .25});
   if (K.stream) for (let y = 1.5; y < K.HM - 2; y += 3.4) K.lights.push({x: K.stream.cx(y), y, h: .3, color: '#ff7a2e', radius: 2.4, intensity: .6, flicker: .2});
   narrowRocks(K, S.wall, S.ash);
   // the south edge: basalt cliff down to a lava sea (the stream pours over it)
@@ -744,6 +830,20 @@ function groundEmber(q, ctx, B) {
       else if (inner && hsh(x, y, 9) < .2) G.p(x, y, S.wall, 0);              // scuffed rock
     },
   });
+  // the plateau's spring: lava seeping up in a ring of basalt, a thin trickle in the stream's own colours (crust rafts, a hot seam along
+  // each bank) west to the edge, then a glowing fall into the pool
+  {
+    const SP = K.layout.spring, top = K.plats[0].h;
+    paintRill(K, {px(x, y, e, side, mx, my, o) {
+      if (e >= 0) { E.off(x, y); if (e < .07) G.p(x, y, S.wall, 3); else if (e < .15) G.p(x, y, S.wall, side < 0 ? 1 : 0); else if (e < .24 && hsh(x, y, 4) < .5) G.p(x, y, S.wall, 2); return; }
+      const rs = Math.hypot(mx - SP.x, my - SP.y);
+      if (rs < SP.r + .03) { const t = rs < .12 ? 0 : rs < .3 ? 1 : 2; E.off(x, y); G.p(x, y, L, t); E.c(x, y, L.c[t]); return; }   // the basin: white-hot in the middle
+      riverSt.px(x, y, e, side, mx, my);
+    }});
+    for (const [a, r, sz, v] of [[-2.25, .56, 1, 1], [-1.55, .52, .9, 2], [-.85, .56, 1.1, 3], [-.1, .6, .9, 4], [.6, .62, 1, 5], [1.3, .62, 1.1, 6], [2.0, .6, .8, 7]])
+      boulder(K, SP.x + Math.cos(a) * r, SP.y + Math.sin(a) * r, 5 * sz + 1.5, 3.2 * sz + 1, S.wall, v * 13, S.ash);
+    for (const [x, y, rad, k] of [[SP.x, SP.y, 2.2, .7], [50.4, 6.9, 2, .45], [44.6, 7.7, 2, .5]]) K.lights.push({x, y, h: top + .3, color: '#ff7a2e', radius: rad, intensity: k, flicker: .22});
+  }
   K.finish(B);
   B.hole = (x, y, c) => y > cliff(x) - .3 || inPool(x, y) < 1.3 || K.streamE(x, y) < .4 || (c && behindPlateau(c, x, y));
 }
@@ -802,7 +902,7 @@ function groundFrost(q, ctx, B) {
   }
   // the meltwater stream: dark cold water between snow banks, a thin jagged ice shelf, small broken floes (no footing)
   const MW = S.melt;
-  paintStream(K, {
+  const riverSt = {
     px(x, y, e, side, mx, my) {
       if (e >= 0) { if (e < .06) G.p(x, y, SN, 3); else if (e < .18) G.p(x, y, SN, 2); else if (e < .28 && side < 0) G.p(x, y, SN, 1); return; }
       const d = -e;
@@ -810,7 +910,10 @@ function groundFrost(q, ctx, B) {
       G.p(x, y, MW, side < 0 && d < .26 ? 3 : hsh(x, Math.floor(my * 3), 74) < .06 ? 1 : 2);
     },
     stone: st => slab(K, st, S.rock, {fh: 4, ring: (P, E2, x, y) => P.p(x, y, IC, 0), top: (P, E2, x, y, u) => { if (u < .2) P.p(x, y, SN, u < -.5 ? 0 : 1); }}),
-  });
+  };
+  paintStream(K, riverSt);
+  paintPool(K, riverSt);   // the pool at the foot of the plateau's west face: the same stream, the same banks
+  fallFoot(K, (x, y, r) => { if (G.mat(x, y) === MW.id && hsh(x, y, 12) < .75 * (1 - Math.max(0, r - .1) / .45)) G.p(x, y, IC, r < .3 ? 0 : 1); });   // ice crumbs where the (frozen) fall lands
   if (K.stream) for (let y = .8; y < K.HM; y += 2.1) {
     if (Math.abs(y - K.stream.narrows.y) < 2.6 || K.stream.stones.some(t => Math.abs(y - t.y) < 1.3)) continue;
     // a broken, jagged floe riding low in the water: flat, no side face, cracked; clearly not something to stand on
@@ -843,6 +946,20 @@ function groundFrost(q, ctx, B) {
       else if (k === 4 && inner) G.p(x, y, S.rock, 3);
     },
   });
+  // the plateau's spring is frozen: a dome of ice in a ring of snowy stones, a glassy ribbon winding west to the edge (no flow), and the
+  // fall hangs over the face as a curtain of icicles
+  {
+    const SP = K.layout.spring;
+    paintRill(K, {px(x, y, e, side, mx, my, o) {
+      if (e >= 0) { if (e < .05) G.p(x, y, SN, 3); else if (e < .14) G.p(x, y, SN, 2); else if (e < .22 && side < 0) G.p(x, y, SN, 1); return; }
+      const d = -e, rs = Math.hypot(mx - SP.x, my - SP.y);
+      if (rs < SP.r + .03) { G.p(x, y, IC, d < .05 ? 3 : rs < .13 ? 0 : rs > .27 && rs < .3 ? 2 : 1); return; }
+      const crack = Math.abs(((mx * 1.1 + my * 1.9) % .7) - .35) < .012 && d > .05 && vn(mx * .8, my * .8, 75) > .35;
+      G.p(x, y, IC, d < .04 ? 3 : crack ? 2 : side < 0 && d < .1 ? 2 : Math.abs(o.a) < o.hw * .5 ? (hsh(x >> 1, y >> 1, 76) < .2 ? 1 : 0) : 1);
+    }});
+    for (const [a, r, sz, v] of [[-2.25, .56, 1, 1], [-1.55, .52, .9, 2], [-.85, .56, 1.1, 3], [-.1, .6, .9, 4], [.6, .62, 1, 5], [1.3, .62, 1.1, 6], [2.0, .6, .8, 7]])
+      boulder(K, SP.x + Math.cos(a) * r, SP.y + Math.sin(a) * r, 5 * sz + 1.5, 3.2 * sz + 1, S.rock, v * 13, SN);
+  }
   K.finish(B);
   B.hole = (x, y, c) => y > lake(x) - .35 || K.streamE(x, y) < .4 || (c && behindPlateau(c, x, y));
 }
@@ -930,7 +1047,7 @@ function groundRift(q, ctx, B) {
     }
   }
   // the crack: glowing rims, a sliver of rock under the west lip; floating stepping slabs with a rune each
-  paintStream(K, {
+  const riverSt = {
     px(x, y, e, side) {
       if (x < 0 || x >= K.WPX) return;
       const i = y * K.WPX + x;
@@ -939,7 +1056,10 @@ function groundRift(q, ctx, B) {
     },
     stone: t => slab(K, t, S.rock, {fh: 6, top: (P, E2, x, y, u) => P.p(x, y, S.floor, u < -.5 ? 0 : 1),
       rim: (P, E2, cx, cy) => { for (const [a, b] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) glowAt(P, E2, Math.round(cx) + a, Math.round(cy) + b, a || b ? S.runeDim : S.rune, null); }}),
-  });
+  };
+  paintStream(K, riverSt);
+  paintPool(K, riverSt);   // the pool at the foot of the plateau's west face: the same stream, the same banks
+  fallFoot(K, (x, y, r) => { if (PL[y * K.WPX + x] === 2 && hsh(x, y, 12) < .4 * (1 - r / .55)) { G.c(x, y, DIM); E.c(x, y, DIM); } });   // motes of light where the fall lands in the crack
   if (K.stream) for (let y = 3; y < K.HM; y += 6) K.lights.push({x: K.stream.cx(y), y, h: .1, color: '#b060ff', radius: 2.2, intensity: .45, flicker: .15});
   // the plateau: tiles on top with a rune-lit lip, violet strata with glowing veins, rune handholds at the climb spot
   paintPlateau(K, {
@@ -962,6 +1082,19 @@ function groundRift(q, ctx, B) {
       else if (i === n >> 1 && (r & 1)) { G.c(x, y, DIM); E.c(x, y, LEYE); }
     },
   });
+  // the plateau's spring: a rune ring where the ley line surfaces and the line itself, a dashed glowing seam west to the edge, pouring
+  // down the face as light into the crack
+  {
+    const SP = K.layout.spring, top = K.plats[0].h;
+    paintRill(K, {px(x, y, e, side, mx, my, o) {
+      if (e >= 0) return;
+      const rs = Math.hypot(mx - SP.x, my - SP.y), ad = Math.abs(o.a);
+      if (rs < SP.r + .03) { if ((rs > .37 && rs < .43) || rs < .08 || (rs > .2 && rs < .23 && hsh(x, y, 8) < .7)) { G.c(x, y, rs < .08 ? RUNE : DIM); E.c(x, y, rs < .08 ? RUNE : DIM); } else G.p(x, y, S.floor, 3); return; }
+      if (ad < .035 && Math.floor(o.l * K.PPM / 5) % 4 !== 3) { const c = ad < .014 ? DIM : LEY, ec = ad < .014 ? DIM : LEYE; G.c(x, y, c); E.c(x, y, ec); }
+    }});
+    for (const [x, y, rad, k] of [[SP.x, SP.y, 2.4, .55], [47.5, 7.9, 2, .35]]) K.lights.push({x, y, h: top + .3, color: '#c070ff', radius: rad, intensity: k, flicker: .15});
+    if (K.layout.fall) K.lights.push({x: K.layout.fall.x - .5, y: K.layout.fall.y, h: .4, color: '#c070ff', radius: 2.4, intensity: .5, flicker: .15});
+  }
   K.finish(B);
   B.hole = (x, y, c) => !!(c && behindPlateau(c, x, y));
 }

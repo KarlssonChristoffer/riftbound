@@ -11,7 +11,8 @@
 //            from waterSample(x, y, out) below: it is the ONE place that says "this is water" and what the water there does.
 //            A new body of water (a plateau stream, a pool) adds a branch to waterSample and nothing else needs to change.
 //            What a water body provides, per point (metres, world axes: x east, y south):
-//              out.kind   0 = not water; 1 = the stream (a new body takes the next number)
+//              out.kind   0 = not water; 1 = the stream; 2 = the plateau's rill; 3 = the pool at the foot of its west face (a new body
+//                         takes the next number)
 //              out.a      across the flow: signed metres from the body's axis (the stream: x - cx(y))
 //              out.hw     half the body's width here (m);  out.edge = hw - |a|: metres to the nearest bank
 //              out.s      the TRAVEL coordinate (m): the integral of dy / speed along the flow, speed ~ 1 / width. The shader
@@ -19,13 +20,18 @@
 //                         the narrows run faster, with none of the shear a plain y - v t piles up
 //              out.speed  relative speed here (1 = the body's base; the stream runs a little faster mid-channel). 0 = still
 //              out.hold   1 = by a stone: the painted foam stays as painted
+//            The rill (kind 2, layout.js RILL): a = metres across it (+ south), s = 0.55 x its length from the spring, the pace rising
+//            toward the lip; hold = the spring's basin and the narrow riffles, where the painted bright streaks stay put. The pool
+//            (kind 3, the part beyond the river's east bank): s and speed continue the river's own at that y, so the pattern joins it
+//            without a seam, the pace dying away toward the face; a is the river's across coordinate turned to run back the other way
+//            (the texture holds only +-1 m of it); edge counts the face as a bank. Inside the river's band the pool changes only edge.
 //            FALLING water (a waterfall over the ravine, brief B's one down the plateau's west face) is marked in a face /
 //            cliff texture with alpha FALL_ALPHA (252, next to the alpha-250 note in buildWorld); the shader streams it down
 //            (gfx.js fall(): light streaks slide down in stepped time, the foam in the last 6 rows flickers).
 //            G.setWater({speed}) (gfx.js) scales the water's clock: brief D drives it from rain.
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM} from './layout.js';
+import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, inPool, poolEdge, rillAt, inRill} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255} from '../core/color.js';
 
@@ -160,21 +166,37 @@ function travelTab() {   // S(y) = integral of w(y') / W_REF dy' from y = -1, ev
 }
 // waterSample(x, y, out): is (x, y) water and what does the water there do? Fills out (see the header); no allocation.
 // Stones are dry footing (their painted body, out.kind 0); the water round them is flagged out.hold
+const _rs = {d: 0, a: 0, l: 0, hw: 0}, RILL_K = .55, RILL_LEN = RILL.len[RILL.len.length - 1];
+const travel = y => { const tab = S_TAB || travelTab(), f = (y - S_Y0) / S_DY, i = Math.min(tab.length - 2, f | 0); return tab[i] + (tab[i + 1] - tab[i]) * (f - i); };
 export function waterSample(x, y, out) {
   out.kind = 0;
   if (y < -1 || y > 31) return out;
   const c = STREAM.cx(y), hw = STREAM.w(y) / 2, a = x - c;
-  if (a > hw || a < -hw) return out;
+  if (a > hw) {   // beyond the east bank: the plateau's rill (on its top) or the pool at the foot of its west face
+    if (x >= RILL.x1) {
+      if (y < 5.8 || y > 9.8 || x > 58 || !rillAt(x, y, _rs)) return out;
+      const u = _rs.l / RILL_LEN, k = Math.max(0, Math.min(1, (u - .3) / .7));
+      out.kind = 2; out.a = _rs.a; out.hw = _rs.hw; out.edge = _rs.hw - _rs.d; out.s = _rs.l * RILL_K; out.speed = .45 + 1.35 * k * k * (3 - 2 * k);
+      out.hold = (Math.hypot(x - SPRING.x, y - SPRING.y) < SPRING.r || RILL.riffle(_rs.l, _rs.hw)) ? 1 : 0;
+      return out;
+    }
+    if (!inPool(x, y)) return out;
+    out.kind = 3; out.a = 1 - (a - hw) * .8; out.hw = hw; out.edge = poolEdge(x, y); out.s = travel(y);
+    out.speed = Math.max(.12, 1 - .85 * Math.min(1, (a - hw) / 1.1));
+    out.hold = Math.hypot(x - FALL.x, (y - FALL.y) * 1.25) < .55 ? 1 : 0;   // the foam where the fall lands stays as painted
+    return out;
+  }
+  if (a < -hw) return out;
   let hold = 0;
   for (let k = 0, st = STREAM.stones; k < st.length; k++) {
     const s = st[k], dx = x - s.x, dy = y - s.y;
     if (Math.hypot(dx, dy * 1.3) < s.r) return out;                                                 // the stone itself
     if ((dx / (s.r + .22)) ** 2 + ((dy - .05) / (s.r / 1.3 + .25)) ** 2 < 1) hold = 1;             // its foam ring and a hair more
   }
-  const tab = S_TAB || travelTab(), f = (y - S_Y0) / S_DY, i = Math.min(tab.length - 2, f | 0);
   out.kind = 1; out.a = a; out.hw = hw; out.edge = hw - Math.abs(a); out.hold = hold;
-  out.s = tab[i] + (tab[i + 1] - tab[i]) * (f - i);
+  out.s = travel(y);
   out.speed = 1 + .3 * (1 - (a / hw) ** 2);
+  if (a > 0 && x > POOL.x - POOL.rx - .3 && inPool(x, y)) { const e = poolEdge(x, y); if (e > out.edge) out.edge = e; }   // (the pool's mouth: no bank here)
   return out;
 }
 
@@ -258,6 +280,50 @@ function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {
   q.putImageData(id, 0, 0); return c;
 }
 
+// ---------------------------------------------------------------- the waterfall on the plateau's west face (layout.js FALL)
+// Where the rill goes over the lip: a sheet FALL.hw wide (a little wider at the foot) down the face into the pool. The face's texture
+// is taller than the face: its last rows hang below the ground line down to the pool's surface (WATER_H), so nothing shows through
+// where the ground is lowered; they are hidden under the ground everywhere else. The look per biome:
+//   water  the biome's water colour, alpha FALL_ALPHA: SURF_FS streams light streaks down it and flickers the foam in the last 6 rows
+//          (which are exactly the rows between the ground line and the pool); a foam lip, dark edge columns, static foam flecks
+//   glow   a light fall (lava, arcane): alpha 250, the colours in the emissive layer, static streaks per column, a white-hot lip
+//   ice    frozen: a painted curtain of icicles, static
+const FALL_LOOK = {
+  ruins: {mode: 'water', ramp: S => S.water.h},
+  ember: {mode: 'glow', ramp: S => S.lava.h},
+  frost: {mode: 'ice', ramp: S => S.ice.h},
+  rift: {mode: 'glow', ramp: () => EMIT.rune.rift.map(h => '#' + h)},
+};
+function westFace(cv, q, PPM, rock, look, ramp) {
+  const rows = cv.height, per = q.h / rows, foot = Math.ceil(-WATER_H / per), H = rows + foot, W = cv.width, out = document.createElement('canvas');
+  out.width = W; out.height = H; const g = out.getContext('2d', {willReadFrequently: true}); g.drawImage(cv, 0, 0);
+  const id = g.getImageData(0, 0, W, H), d = id.data, put = (x, y, c, a = 255) => { const i = (y * W + x) * 4; d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = a; };
+  for (let y = rows; y < H; y++) for (let x = 0; x < W; x++) put(x, y, rock[3]);                       // the foot, below the ground line: dark, wet rock
+  if (!look) { g.putImageData(id, 0, 0); return {cv: out, h: H * per}; }   // (a biome without a fall: the foot only)
+  const col = (FALL.y - q.y0) / (q.y1 - q.y0) * W, hw = FALL.hw * PPM, C = ramp.map(hex255);
+  for (let y = 0; y < H; y++) {
+    const t = y / (H - 1), half = hw + 2.2 * t * t + (y > rows - 2 ? (hsh(y, 3) < .5 ? 1 : 0) : 0);   // spreads a little toward the foot
+    for (let x = Math.floor(col - half - 1); x <= Math.ceil(col + half + 1); x++) {
+      const dx = x + .5 - col, ad = Math.abs(dx); if (ad > half || x < 0 || x >= W) continue;
+      const edge = ad > half - 1.2, lip = y < 2, foam = y >= rows - 4 && hsh(x, y, 5) < .55, streak = hsh(x, 17) < .3;
+      if (look.mode === 'water') {
+        const base = C[1], m = lip ? .5 : foam ? .72 : edge ? -.3 : streak ? .25 : 0, live = !lip && !foam && !edge;
+        put(x, y, m >= 0 ? base.map(v => Math.round(v + (255 - v) * m)) : base.map(v => Math.round(v * (1 + m))), live ? FALL_ALPHA : 255);
+      } else if (look.mode === 'glow') {
+        const tone = lip ? 0 : edge ? 3 : foam ? (hsh(x, y, 6) < .5 ? 0 : 1) : hsh(x, 17) < .35 ? 0 : hsh(x, 18) < .5 ? 1 : 2;
+        put(x, y, C[tone], edge ? 255 : 250);
+      } else {   // ice: columns of light and shade, jagged at the sides, icicle tips at the foot
+        const jag = hsh(Math.floor(x / 2), 7, 9) * 1.6, band = (y + Math.floor(hsh(x, 14) * 30)) % 21 < 2;   // (frozen ripples across the columns)
+        const ice = ad > half - 1 - jag * .6 ? 2 : lip ? 0 : hsh(x, 11) < .3 ? 0 : hsh(x, 12) < .2 ? 2 : band ? 0 : 1;
+        if (y > H - 1 - Math.floor(hsh(x, 13) * 4) && ad < half - 1.5) continue;   // the icicles end in points (a few rows above the pool)
+        put(x, y, ad > half - .8 ? C[3] : C[ice]);
+      }
+    }
+  }
+  g.putImageData(id, 0, 0);
+  return {cv: out, h: H * per};
+}
+
 // ---------------------------------------------------------------- build
 export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null, trees3d = true}) {
   GT = G;
@@ -302,7 +368,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     } else c = rawCliff(x);
     cliffCache.set(k, c); return c;
   };
-  const hAt = (x, z) => z >= cliffZ(x) ? DROP : inStream(x, z) ? WATER_H : 0;
+  const hAt = (x, z) => z >= cliffZ(x) ? DROP : inStream(x, z) || inPool(x, z, .01) ? WATER_H : 0;   // (the pool's vertex ON the plateau's west face is lowered too: the face goes down to the water)
   // the grid follows the edge exactly: the last bank vertex of each column moves onto the edge line and the next one
   // to just past it at the ravine's depth, so the wall is one smooth face (a plain 0.25 m grid made it a staircase)
   const pos = [], uv = [];
@@ -360,16 +426,19 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0, cliff: cTex, cliffOff: SKIRT, water: wTex}, false); disposers.push(() => ground.dispose());
 
   // ---- plateau: top (the painted top, planar) + 4 strata faces
+  const FL = FALL_LOOK[biome.id];
   for (const q of PLATEAUS) {
     const top = new THREE.PlaneGeometry(q.x1 - q.x0, q.y1 - q.y0); top.rotateX(-Math.PI / 2); top.translate((q.x0 + q.x1) / 2, q.h, (q.y0 + q.y1) / 2);
-    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1, water: wTex}); disposers.push(() => t.dispose());   // (water on the plateau's top too: a stream or pool painted there moves, no texel of it does yet)
+    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1, water: wTex}); disposers.push(() => t.dispose());   // (water on the plateau's top too: the rill moves)
     const faces = [   // [len, centre x, centre z, rotation y]
       [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y1, 0], [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y0, Math.PI],
       [q.y1 - q.y0, q.x1, (q.y0 + q.y1) / 2, Math.PI / 2], [q.y1 - q.y0, q.x0, (q.y0 + q.y1) / 2, -Math.PI / 2]];
     faces.forEach(([len, cx, cz, ry], k) => {
-      const geo = new THREE.PlaneGeometry(len, q.h); geo.translate(0, q.h / 2, 0); geo.rotateY(ry); geo.translate(cx, 0, cz);
+      let cvs = strataCanvas(len, q.h, PPM, PPMH, R.rock, R.cov, k + 2), hgt = q.h;
+      if (k === 3 && q === PLATEAUS[0]) ({cv: cvs, h: hgt} = westFace(cvs, q, PPM, R.rock, FL, FL?.ramp(biome.style)));   // the waterfall, and the foot down to the pool
+      const geo = new THREE.PlaneGeometry(len, hgt); geo.translate(0, q.h - hgt / 2, 0); geo.rotateY(ry); geo.translate(cx, 0, cz);
       const uvA = geo.attributes.uv; for (let i = 0; i < uvA.count; i++) uvA.setY(i, 1 - uvA.getY(i));   // canvas rows go down
-      const tex = texOf(strataCanvas(len, q.h, PPM, PPMH, R.rock, R.cov, k + 2), true);
+      const tex = texOf(cvs, true);
       const f = G.surface(geo, {tex, planar: false, type: 5, obj: 1}); disposers.push(() => f.dispose());
     });
   }
@@ -535,4 +604,4 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
-export {WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS};
+export {WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, inPool, poolEdge, rillAt, inRill};
