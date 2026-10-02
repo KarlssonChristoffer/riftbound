@@ -1269,6 +1269,22 @@ export async function create(host) {
     },
     // (o: an object to fill instead of a new one: per-frame callers pass a scratch object, nothing is allocated)
     at(x, y, o = null) { const r = o || {x: 0, y: 0, g: 0}; if (!W.on) { r.x = r.y = r.g = 0; return r; } const a = field(x, y); r.x = a.x; r.y = a.y; r.g = a.g; return r; },
+    // the gust field for a shader that evaluates it per vertex (features/grass.js: the same fronts the trees feel). Fills out
+    // (a Float32Array of 8 + 16 x max) with [UX, UY, base, gust, LV, T, n, on (0 off / 1 fronts / 2 pulse rings)], then per front
+    // [F, len, A, edge, tc, half, k1, k2, k3, p1, p2, p3, w1, w2, 0, 0] (a pulse ring: [F, len, A, edge, ring x, ring y, k1, 0,
+    // 0, p1, 0, 0, w1, 0, 0, 0]): the field() above, term for term. Returns n. Allocation-free
+    gpu(out, max) {
+      const n = W.on ? Math.min(max, fronts.length) : 0, rg = B.pulse ? ring() : null;
+      out[0] = UX; out[1] = UY; out[2] = B.base; out[3] = B.gust; out[4] = LV; out[5] = T; out[6] = n; out[7] = !W.on ? 0 : B.pulse ? 2 : 1;
+      for (let i = 0; i < n; i++) {
+        const f = fronts[i], o = 8 + i * 16;
+        out[o] = f.F; out[o + 1] = f.len; out[o + 2] = f.A; out[o + 3] = f.edge;
+        out[o + 4] = rg ? rg.x : f.tc; out[o + 5] = rg ? rg.y : f.half; out[o + 6] = f.k1; out[o + 7] = f.k2 || 0;
+        out[o + 8] = f.k3 || 0; out[o + 9] = f.p1; out[o + 10] = f.p2 || 0; out[o + 11] = f.p3 || 0;
+        out[o + 12] = f.w1; out[o + 13] = f.w2 || 0; out[o + 14] = 0; out[o + 15] = 0;
+      }
+      return n;
+    },
     // the foliage (trees, bushes, tufts) round the view and the player, for other features' per-step loops (windlines.js):
     // read-only, the same array until the view crosses a cell edge or the props change
     foliage: () => nearList(),

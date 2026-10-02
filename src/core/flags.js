@@ -19,7 +19,7 @@ export const FLAG_DOCS = {
   set:       'basic | sim | body: the loadout (baked cloak / runtime cloth / bare body)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
   lantern:   '1: start with the lantern lit',
-  detail:    'low: the low detail tier (no wind lines, wildlife or depth layer; menu > Graphics > Detail)',
+  detail:    'low: the low detail tier (no wind lines, wildlife, depth layer or grass; menu > Graphics > Detail)',
   // ---- renderer A/B
   snap:      '0 | 1 | 2: camera rotation free / 22.5 deg steps / 90 deg steps',
   sampling:  'auto | nearest | smooth: ground texture sampling',
@@ -31,7 +31,7 @@ export const FLAG_DOCS = {
   // ---- features (0 turns one off)
   wind: '0: no wind', windlevel: 'calm | breeze | brisk | gale: lock the wind strength', windlines: '0 | hd | pixel: the wind lines',
   litter: '0: the fallen leaves stay as baked (no wind moves them, none are lifted); also the low detail tier',
-  riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', wildlife: '0: no wildlife', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
+  riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', grass: '0: no grass (features/grass.js)', wildlife: '0: no wildlife', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
   // ---- tools

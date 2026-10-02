@@ -33,7 +33,7 @@ export const EVENTS = {
   'prop.respawn':       ['features/combat/props.js', 'x, y, prop: true (drifted / reset home)', 'audio, music (the same sound + stinger as a brute\'s)'],
   'brute.respawn':      ['features/combat/core.js', 'x, y (a sparring brute is back)', 'audio, music'],
   'enemy.kill':         ['features/combat/core.js', 'x, y, who (the enemy)', 'game'],
-  'combat.explode':     ['features/combat/core.js', 'x, y, r', 'wind, lights, garden, props, atmos, flow, wildlife, audio, music'],
+  'combat.explode':     ['features/combat/core.js', 'x, y, r', 'wind, lights, garden, grass, props, atmos, flow, wildlife, audio, music'],
   'combat.loot':        ['features/combat/core.js', 'x, y, n (coins spilled)', 'wildlife, audio, music'],
   'combat.coin':        ['features/combat/core.js', 'x, y (the player: every 5th coin picked up)', 'audio, music'],
   'combat.trap':        ['features/combat/core.js', 'x, y (a vault trap bursts)', 'audio, music'],
