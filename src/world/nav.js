@@ -2,32 +2,40 @@
 // A 0.5 m grid over the world. A cell is OPEN when it is ground level (no plateau), inside the arena's walls or on the
 // trail (layout.navArea: the gateways count), dry, and clear of the walls and the fixed props (pillars, posts, trees, rocks); breakable
 // props don't close cells (the core's own hop test keeps enemies off them). A breadth-first FLOW FIELD from the player,
-// re-run a few times a second, gives every open cell its walking distance to you:
+// re-run a few times a second, gives every open cell within FIELD_R metres of walking its distance to you (the cost
+// follows the area round you, not the world's size; farther cells stay Infinity: an enemy there goes straight at you):
 //   steer(b)       the next waypoint for an enemy: the lowest cell one hop away along a clear line (round walls, out
 //                  through a gate, along the bank), or null when it can go straight at you (the core does that)
 //   spots(...)     spawn spots: open cells in a band of WALKING distance (never across the stream from you), spaced out
 // It's rebuilt per stage (build()) since the world's fixed props come with the layout.
 import {WORLD, navArea, elev, inStream} from './world.js';
 
-const C = .5, TAU = Math.PI * 2;
+const C = .5, TAU = Math.PI * 2, FIELD_R = 40;   // FIELD_R: how far (m of walking) the flow field reaches; spawns are 5-10 m out
 
 export function createNav(host) {
   const X0 = WORLD.x0, Y0 = WORLD.y0, NX = Math.ceil(WORLD.WM / C), NY = Math.ceil(WORLD.HM / C), N = NX * NY;   // cell (i, j) = X0 + i C .. (the world's origin)
   const open = new Uint8Array(N), dist = new Float32Array(N).fill(Infinity), queue = new Int32Array(N);
-  let fieldT = 0, built = false;
+  let fieldT = 0, built = false, lastT = 0;   // lastT: how many cells the last field reached (queue[0 .. lastT): reset only those)
   const idx = (x, y) => { const i = Math.floor((x - X0) / C), j = Math.floor((y - Y0) / C); return i < 0 || j < 0 || i >= NX || j >= NY ? -1 : j * NX + i; };
   const at = (x, y) => { const k = idx(x, y); return k < 0 ? Infinity : dist[k]; };
   const isOpen = (x, y) => { const k = idx(x, y); return k >= 0 && open[k] === 1; };
 
   function build() {
-    const fixed = host.props.filter(p => !p.gone && !p.broken && !p.breakable && !p.sparring && !p.outside && !p.interact && (p.rect || p.r > 0));
     for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
       const x = X0 + (i + .5) * C, y = Y0 + (j + .5) * C;
-      let ok = navArea(x, y) && elev(x, y) === 0 && !inStream(x, y);
-      if (ok) for (const p of fixed) {
-        if (p.rect ? x > p.rect[0] - .3 && x < p.rect[2] + .3 && y > p.rect[1] - .3 && y < p.rect[3] + .3 : Math.hypot(p.x - x, p.y - y) < p.r + .3) { ok = false; break; }
+      open[j * NX + i] = navArea(x, y) && elev(x, y) === 0 && !inStream(x, y) ? 1 : 0;
+    }
+    // each fixed prop closes the open cells whose centre is within .3 m of it: only the cells under its box are tested
+    for (const p of host.props) {
+      if (p.gone || p.broken || p.breakable || p.sparring || p.outside || p.interact || !(p.rect || p.r > 0)) continue;
+      const R = p.rect, bx0 = (R ? R[0] : p.x - p.r) - .3, bx1 = (R ? R[2] : p.x + p.r) + .3, by0 = (R ? R[1] : p.y - p.r) - .3, by1 = (R ? R[3] : p.y + p.r) + .3;
+      const i0 = Math.max(0, Math.floor((bx0 - X0) / C - .5)), i1 = Math.min(NX - 1, Math.ceil((bx1 - X0) / C - .5));
+      const j0 = Math.max(0, Math.floor((by0 - Y0) / C - .5)), j1 = Math.min(NY - 1, Math.ceil((by1 - Y0) / C - .5));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const k = j * NX + i; if (!open[k]) continue;
+        const x = X0 + (i + .5) * C, y = Y0 + (j + .5) * C;
+        if (R ? x > R[0] - .3 && x < R[2] + .3 && y > R[1] - .3 && y < R[3] + .3 : Math.hypot(p.x - x, p.y - y) < p.r + .3) open[k] = 0;
       }
-      open[j * NX + i] = ok ? 1 : 0;
     }
     built = true; fieldT = 0;
   }
@@ -42,12 +50,14 @@ export function createNav(host) {
     return best;
   }
   function field(px, py) {
-    dist.fill(Infinity);
+    for (let k = 0; k < lastT; k++) dist[queue[k]] = Infinity;   // (the cells the last field reached: all the others are still Infinity)
+    lastT = 0;
     let s = idx(px, py); if (s < 0 || !open[s]) s = nearestOpen(px, py);
     if (s < 0) return;
     let h = 0, t = 0; queue[t++] = s; dist[s] = 0;
     while (h < t) {
       const k = queue[h++], i = k % NX, j = (k - i) / NX, d = dist[k];
+      if (d >= FIELD_R) continue;   // the field's edge: reached, not spread from
       for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
         if (!di && !dj) continue;
         const a = i + di, b = j + dj; if (a < 0 || b < 0 || a >= NX || b >= NY) continue;
@@ -56,6 +66,7 @@ export function createNav(host) {
         dist[n] = d + (di && dj ? 1.414 : 1) * C; queue[t++] = n;
       }
     }
+    lastT = t;
   }
   const lineOpen = (x0, y0, x1, y1) => {
     const l = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.ceil(l / .25));
