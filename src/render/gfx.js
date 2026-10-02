@@ -647,6 +647,29 @@ void main() {
   o0 = vec4(0., s, 0., 0.);
 }`;
 
+// ---------------------------------------------------------------- shaders: THE SCREEN LAYERS' GPU OPS (G.glayer)
+// One instanced quad per op of a layer's GPU context (fillRect, drawImage), in canvas px (y down) as the 2D canvas was: a
+// fill is its premultiplied colour; an image shows the source texel the canvas's nearest-neighbour drawImage showed (the
+// source rect mapped onto the dest rect), times the op's alpha. Blended into the layer's target premultiplied: source-over
+// (one, one minus src alpha) or 'lighter' (one, one).
+//   iD: the dest rect (canvas px: x, y, w, h)   iS: the source rect (texels; w = 0: a fill)   iC: the colour, premultiplied (a: an image's alpha)
+const LB_VS = HEAD + `
+in vec3 position; in vec4 iD; in vec4 iS; in vec4 iC; uniform vec2 uRes;
+out vec2 vS; flat out vec4 vC; flat out float vF;
+void main() {
+  vS = iS.xy + position.xy * iS.zw; vC = iC; vF = iS.z == 0. ? 1. : 0.;
+  vec2 p = iD.xy + position.xy * iD.zw;
+  gl_Position = vec4(p.x / uRes.x * 2. - 1., 1. - p.y / uRes.y * 2., 0., 1.);
+}`;
+const LB_FS = HEAD + ONE_OUT + `
+in vec2 vS; flat in vec4 vC; flat in float vF; uniform sampler2D uTex;
+void main() {
+  if (vF > .5) { o0 = vC; return; }
+  ivec2 t = ivec2(floor(vS)), sz = textureSize(uTex, 0);
+  if (t.x < 0 || t.y < 0 || t.x >= sz.x || t.y >= sz.y) discard;
+  o0 = texelFetch(uTex, t, 0) * vC.a;   // (the texture is premultiplied, as the canvas keeps it)
+}`;
+
 // ---------------------------------------------------------------- shader: lighting / composite
 const NL = 32;
 const COMP_VS = HEAD + `in vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
@@ -684,7 +707,7 @@ uniform sampler2D tDistort; uniform float uLayD;
 // point-light occlusion: the top-down height map of the solid 3D things (depth from above: bigger = lower)
 uniform sampler2D tH; uniform mat4 uHPV; uniform float uPtShadow, uHBias;
 out vec4 oc;
-vec4 lay(sampler2D t, ivec2 p) { return texelFetch(t, ivec2(p.x, int(uRes.y) - 1 - p.y), 0); }
+vec4 lay(sampler2D t, ivec2 p) { return texelFetch(t, p, 0); }   // a screen layer's target: premultiplied, GL rows (G.glayer / G.layer)
 // ---- REFLECTIONS in the water and the puddles (features/depth.js sets them every frame it shows them: G.setReflect). In the
 // oblique projection a point h above the water's plane mirrors exactly 2 h S view px straight below itself (S: px per metre of
 // height on screen), so this pixel shows the scene pixel k rows above it whose height above the plane is k / 2S: a search up
@@ -738,8 +761,8 @@ vec4 reflAt(ivec2 p, float hw, out vec3 rE) {   // the mirrored albedo (a = 1: f
   return vec4(0.);
 }
 vec3 post(vec3 col, ivec2 ip) {
-  if (uLay.w > .5) { vec4 a = lay(tAdd, ip); col += a.rgb * a.a; }
-  if (uLay.z > .5) { vec4 f = lay(tFront, ip); col = mix(col, f.rgb, f.a); }
+  if (uLay.w > .5) col += lay(tAdd, ip).rgb;
+  if (uLay.z > .5) { vec4 f = lay(tFront, ip); col = col * (1. - f.a) + f.rgb; }
   return col;
 }
 float nearOf(float d) { return -(d * 2. - 1.) * uR; }
@@ -775,7 +798,7 @@ float ptBlock(vec3 S, vec3 L) {
 }
 void main() {
   ivec2 ip0 = ivec2(gl_FragCoord.xy), ip = ip0;
-  if (uLayD > .5) { vec4 dd = lay(tDistort, ip0); if (dd.a > .5) ip = clamp(ip0 + ivec2(128 - int(dd.r * 255. + .5), int(dd.g * 255. + .5) - 128), ivec2(0), ivec2(uRes) - 1); }
+  if (uLayD > .5) { vec4 dd = lay(tDistort, ip0); dd.rgb /= max(dd.a, 1e-3); if (dd.a > .5) ip = clamp(ip0 + ivec2(128 - int(dd.r * 255. + .5), int(dd.g * 255. + .5) - 128), ivec2(0), ivec2(uRes) - 1); }
   if (uHz.x > .5) {   // the lava's heat haze: rows of 2 px shifted whole pixels (depth.js drawHaze's formula) where the lava lies
     float yc = uRes.y - 1. - float(ip0.y), yb = floor(yc / uHz.y) * uHz.y, wy = floor((yb - uHzO.z) / uHz.z + .5);
     float s = floor(sin(wy * .21 - uHz.w * 2.6) * max(0., sin(wy * .047 + uHz.w * .9)) * 1.45 + .5);
@@ -824,7 +847,7 @@ void main() {
   // ---- painted layers before the light: ground decals / animal shadows / ripples (ground only), cloud shadows (all)
   float gA = 0.;
   if (uAo.w > 0. && (type == 1 || type == 5)) alb = mix(alb, uAo.rgb, texelFetch(tX, ip, 0).g * uAo.w);   // contact shadows (G.ao)
-  if (uLay.x > .5 && (type == 1 || type == 5)) { vec4 g = lay(tGround, ip); alb = mix(alb, g.rgb, g.a); gA = g.a; }
+  if (uLay.x > .5 && (type == 1 || type == 5)) { vec4 g = lay(tGround, ip); alb = alb * (1. - g.a) + g.rgb; gA = g.a; }
   vec3 rfE = vec3(0.);   // ---- what stands over the water, mirrored in it (see reflAt)
   if (uRf.x > .5 && type == 1) {
     bool puddle = uRfV.w > 0. && abs(gA * 255. - uRfV.w) < .5;
@@ -834,7 +857,7 @@ void main() {
       if (r.a > .5) { alb = mix(alb, mix(r.rgb, uRfC, uRf.y), uRf.z); rfE *= uRf.w; }
     }
   }
-  if (uLay.y > .5) { vec4 g = lay(tPre, ip); alb = mix(alb, g.rgb, g.a); }
+  if (uLay.y > .5) { vec4 g = lay(tPre, ip); alb = alb * (1. - g.a) + g.rgb; }
   if (uCl.x > .5) {   // cloud shadows: the level map fixed to the ground plane (h 0), drifting with the wind, two hard levels
     ivec2 t = viewTexel(ip, uClM, uClO.xy);
     float L = texelFetch(tTop, ivec2(mod(vec2(t), uClO.zw)), 0).r * 255.;   // (the tile repeats: mod, never negative)
@@ -904,7 +927,7 @@ void main() {
   vec3 col = alb * L;
   col += alb * uFlashC;   // lightning: the whole scene lit for an instant (features/weather.js)
   vec3 emit = E0.rgb + rfE;
-  if (uLayE > .5) { vec4 el = lay(tEmitL, ip); emit += el.rgb * el.a; }
+  if (uLayE > .5) emit += lay(tEmitL, ip).rgb;
   col += emit * max(vec3(1.) - L, vec3(uEmin)) * 1.15;                   // emitters add back what the light took away
   // ---- light on the water. Lanterns, mushrooms and wisps shine in it as thin shimmering vertical streaks and the sun twinkles on
   // it; all in view pixels and 12 steps a second, so it moves in whole pixels. A light h above the water is mirrored h below it
@@ -1415,19 +1438,158 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   }
   function resetBatches() { nLines = 0; nPoints = 0; aoN = 0; for (const G2 of groups.values()) G2.n = 0; }
 
-  // ---- screen layers: 2D canvases at view resolution, uploaded only on frames they were drawn into
-  const LAYERS = ['ground', 'pre', 'emit', 'add', 'front', 'distort'], layers = {}, layerList = [];
+  // ---- THE SCREEN LAYERS (ground, pre, emit, add, front, distort): render targets at the view's size, premultiplied, GL
+  // rows; COMP_FS reads them. Two ways to draw into one:
+  //   glayer(n): a small 2D-canvas-like context drawn by the GPU (LB_VS / LB_FS), for the marks drawn every frame: fillStyle
+  //     (a CSS colour, read once per string), globalAlpha, globalCompositeOperation 'source-over' | 'lighter', fillRect,
+  //     drawImage (an image or canvas; 3, 5 or 9 arguments; nearest), save / restore, setTransform / translate / scale (no
+  //     rotation or skew), imageSmoothingEnabled (ignored: always nearest). The ops keep their order. An image drawn there is
+  //     uploaded once: G.touch(canvas) after painting it again.
+  //   layer(n): the layer's 2D canvas, for what that can't do (paths, gradients, pixels). Used, it is uploaded and laid in
+  //     among that frame's GPU ops where it was first drawn into (one drawImage there): what other features draw after it,
+  //     on the GPU, stays over it.
+  // The canvases were uploaded every frame they were used: a 2D canvas -> WebGL copy, which stalls when the GPU is busy
+  const LAYERS = ['ground', 'pre', 'emit', 'add', 'front', 'distort'], layers = {}, layerList = [];   // (made below the GPU context)
+  // layer(name) -> its 2D canvas context for this frame (cleared on first use each frame)
+  function layer(n) {
+    const L = layers[n];
+    if (!L.used) {
+      L.used = true; if (L.dirty) { L.q.setTransform(1, 0, 0, 1, 0, 0); L.q.globalAlpha = 1; L.q.globalCompositeOperation = 'source-over'; L.q.clearRect(0, 0, VW, VH); } L.dirty = true;
+      lbOp(L, L.t, false, 0, 0, VW, VH, 0, 0, VW, VH, 0, 0, 0, 1);   // its place among the GPU ops (drawn with what it holds at render)
+    }
+    return L.q;
+  }
+  // glayer(name) -> its GPU context for this frame (its state reset on first use each frame, as layer() resets the canvas's)
+  function glayer(n) {
+    const L = layers[n];
+    if (!L.gUsed) { L.gUsed = true; L.g.reset(); }
+    return L.g;
+  }
+  // the ops of this frame in runs (a layer x a blend x one texture; fills join any run), pooled: one upload + one draw a run
+  const lbRuns = [], lbScene = new THREE.Scene(); let lbN = 0;
+  lbScene.matrixAutoUpdate = false;
+  function lbGrow(R, cap) {
+    const d = new Float32Array(cap * 12); if (R.d) d.set(R.d);
+    const ib = new THREE.InstancedInterleavedBuffer(d, 12, 1); ib.setUsage(THREE.DynamicDrawUsage);
+    R.geo.setAttribute('iD', new THREE.InterleavedBufferAttribute(ib, 4, 0)); R.geo.setAttribute('iS', new THREE.InterleavedBufferAttribute(ib, 4, 4));
+    R.geo.setAttribute('iC', new THREE.InterleavedBufferAttribute(ib, 4, 8));
+    R.d = d; R.ib = ib; R.cap = cap; regrown(R.geo);
+  }
+  function lbRun(L, tex, add) {
+    let R = lbRuns[lbN];
+    if (!R) {
+      const geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
+      const u = {uRes: compU.uRes, uTex: {value: null}};
+      const o = {side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor};
+      const mOver = raw(LB_VS, LB_FS, u, {...o, blendDst: THREE.OneMinusSrcAlphaFactor}), mAdd = raw(LB_VS, LB_FS, u, {...o, blendDst: THREE.OneFactor});
+      const mesh = new THREE.Mesh(geo, mOver); mesh.frustumCulled = false; mesh.matrixAutoUpdate = false;
+      R = lbRuns[lbN] = {geo, u, mOver, mAdd, mesh, d: null, ib: null, cap: 0, n: 0, tex: null, add: false};
+      lbGrow(R, 64);
+    }
+    lbN++; R.n = 0; R.tex = tex; R.add = add; L.runs.push(R);
+    return R;
+  }
+  function lbOp(L, tex, add, x, y, w, h, sx, sy, sw, sh, r, g, b, a) {
+    let R = L.runs.length ? L.runs[L.runs.length - 1] : null;
+    if (!R || R.add !== add || (tex && R.tex && R.tex !== tex)) R = lbRun(L, tex, add);
+    else if (tex) R.tex = tex;
+    if (R.n >= R.cap) lbGrow(R, R.cap * 2);
+    const D = R.d, i = R.n++ * 12;
+    D[i] = x; D[i + 1] = y; D[i + 2] = w; D[i + 3] = h; D[i + 4] = sx; D[i + 5] = sy; D[i + 6] = sw; D[i + 7] = sh;
+    D[i + 8] = r; D[i + 9] = g; D[i + 10] = b; D[i + 11] = a;
+  }
+  // a CSS colour -> [r, g, b, a] 0..1, as the canvas reads it (its own parser: any CSS colour; alpha in 1/255 steps), once a string
+  const cssC = new Map(), cssQ = document.createElement('canvas').getContext('2d');
+  const CSS_HEX = /^#([\da-f]{3}|[\da-f]{6})$/i, CSS_RGB = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/;
+  function cssRGBA(s) {
+    let c = cssC.get(s); if (c) return c;
+    let m = CSS_RGB.exec(s);
+    if (!m && !CSS_HEX.test(s)) { cssQ.fillStyle = '#000'; cssQ.fillStyle = s; m = CSS_RGB.exec(cssQ.fillStyle); }   // (other forms: as the canvas reads them)
+    if (m) c = [Math.round(+m[1]) / 255, Math.round(+m[2]) / 255, Math.round(+m[3]) / 255, Math.round(Math.min(1, m[4] === undefined ? 1 : +m[4]) * 255) / 255];
+    else {
+      let h = (CSS_HEX.test(s) ? s : cssQ.fillStyle).slice(1); if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      const v = parseInt(h, 16); c = [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255, 1];
+    }
+    if (cssC.size > 1024) cssC.clear();
+    cssC.set(s, c); return c;
+  }
+  // an image or canvas drawn by a GPU context: its texture, made (and uploaded) once; unused for 600 frames, it is let go
+  const imgT = new WeakMap(), imgLive = new Set();
+  function imgTex(img) {
+    let e = imgT.get(img);
+    if (!e) {
+      const t = new THREE.Texture(img); t.flipY = false; t.premultiplyAlpha = true; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace;
+      t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true;
+      e = {t, used: 0, gone: false}; imgT.set(img, e); imgLive.add(e);
+    } else if (e.gone) { e.gone = false; e.t.needsUpdate = true; imgLive.add(e); }
+    e.used = frameNo;
+    return e.t;
+  }
+  // touch(img): an image a GPU context draws was painted again: upload it before it is shown next
+  function touch(img) { const e = imgT.get(img); if (e && !e.gone) e.t.needsUpdate = true; }
+  function gctx(L) {
+    const S = {fs: '#000', c: cssRGBA('#000'), ga: 1, add: false, a: 1, d: 1, e: 0, f: 0}, stack = [];
+    let depth = 0;
+    const X = {
+      imageSmoothingEnabled: false,
+      get fillStyle() { return S.fs; },
+      set fillStyle(v) { if (typeof v !== 'string') throw new Error('G.glayer: fillStyle takes a colour string'); if (v !== S.fs) { S.fs = v; S.c = cssRGBA(v); } },
+      get globalAlpha() { return S.ga; },
+      set globalAlpha(v) { if (v >= 0 && v <= 1) S.ga = v; },   // (as the canvas: a value out of range is ignored)
+      get globalCompositeOperation() { return S.add ? 'lighter' : 'source-over'; },
+      set globalCompositeOperation(v) { if (v === 'lighter') S.add = true; else if (v === 'source-over') S.add = false; else throw new Error(`G.glayer: no '${v}' (source-over, lighter)`); },
+      save() { Object.assign(stack[depth] ??= {}, S); depth++; },
+      restore() { if (depth > 0) Object.assign(S, stack[--depth]); },
+      setTransform(a, b, c, d, e, f) { if (b || c) throw new Error('G.glayer: no rotation or skew'); S.a = a; S.d = d; S.e = e; S.f = f; },
+      translate(x, y) { S.e += S.a * x; S.f += S.d * y; },
+      scale(x, y) { S.a *= x; S.d *= y; },
+      fillRect(x, y, w, h) {
+        const c = S.c, al = c[3] * S.ga; if (!(al > 0)) return;
+        let X0 = S.a * x + S.e, Y0 = S.d * y + S.f, W = S.a * w, H = S.d * h;
+        if (W < 0) { X0 += W; W = -W; } if (H < 0) { Y0 += H; H = -H; }
+        if (!(W > 0 && H > 0)) return;
+        lbOp(L, null, S.add, X0, Y0, W, H, 0, 0, 0, 0, c[0] * al, c[1] * al, c[2] * al, al);
+      },
+      drawImage(img, a1, a2, a3, a4, a5, a6, a7, a8) {
+        const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+        let sx = 0, sy = 0, sw = iw, sh = ih, dx, dy, dw, dh;
+        if (a5 !== undefined) { sx = a1; sy = a2; sw = a3; sh = a4; dx = a5; dy = a6; dw = a7; dh = a8; }
+        else if (a3 !== undefined) { dx = a1; dy = a2; dw = a3; dh = a4; }
+        else { dx = a1; dy = a2; dw = iw; dh = ih; }
+        if (sw < 0) { sx += sw; sw = -sw; } if (sh < 0) { sy += sh; sh = -sh; } if (dw < 0) { dx += dw; dw = -dw; } if (dh < 0) { dy += dh; dh = -dh; }
+        if (!(sw > 0 && sh > 0 && dw > 0 && dh > 0 && S.ga > 0)) return;
+        let X0 = S.a * dx + S.e, Y0 = S.d * dy + S.f, W = S.a * dw, H = S.d * dh;
+        if (W < 0) { X0 += W; W = -W; } if (H < 0) { Y0 += H; H = -H; }
+        lbOp(L, imgTex(img), S.add, X0, Y0, W, H, sx, sy, sw, sh, 0, 0, 0, S.ga);
+      },
+      reset() { S.ga = 1; S.add = false; S.a = S.d = 1; S.e = S.f = 0; depth = 0; },
+    };
+    return X;
+  }
   for (const n of LAYERS) {
     const c = document.createElement('canvas'); c.width = VW; c.height = VH;
     const q = c.getContext('2d'); q.imageSmoothingEnabled = false;
     const t = new THREE.CanvasTexture(c); t.flipY = false; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace; t.minFilter = t.magFilter = THREE.NearestFilter;
-    layers[n] = {c, q, t, used: false, dirty: false}; layerList.push(layers[n]);
+    t.premultiplyAlpha = true;   // (as the canvas keeps it: laid into the target as is)
+    const rt = new THREE.WebGLRenderTarget(VW, VH, {minFilter: near, magFilter: near, depthBuffer: false});
+    const L = {c, q, t, rt, used: false, dirty: false, runs: [], g: null, gUsed: false}; L.g = gctx(L);
+    layers[n] = L; layerList.push(L);
   }
-  // layer(name) -> its 2D context for this frame (cleared on first use each frame)
-  function layer(n) {
-    const L = layers[n];
-    if (!L.used) { L.used = true; if (L.dirty) { L.q.setTransform(1, 0, 0, 1, 0, 0); L.q.globalAlpha = 1; L.q.globalCompositeOperation = 'source-over'; L.q.clearRect(0, 0, VW, VH); } L.dirty = true; }
-    return L.q;
+  // render(): each used layer's target, cleared, its runs drawn in order (its canvas, if used, where layer() placed it)
+  function drawLayers() {
+    for (const L of layerList) if (L.used) L.t.needsUpdate = true;
+    for (const L of layerList) {
+      if (!L.runs.length) continue;
+      renderer.setRenderTarget(L.rt); renderer.clear(true, false, false);
+      let k = 0;
+      for (const R of L.runs) {
+        R.geo.instanceCount = R.n; R.ib.clearUpdateRanges(); R.ib.addUpdateRange(0, R.n * 12); R.ib.needsUpdate = true;
+        R.u.uTex.value = R.tex; R.mesh.material = R.add ? R.mAdd : R.mOver; R.mesh.renderOrder = k++; lbScene.add(R.mesh);
+      }
+      renderer.render(lbScene, dummyCam);
+      lbScene.clear();
+    }
+    if (frameNo % 300 === 0) for (const e of imgLive) if (frameNo - e.used > 600) { e.t.dispose(); e.gone = true; imgLive.delete(e); }
   }
 
   // ---- composite
@@ -1447,8 +1609,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     uWPhase: U.wPhase, uWRefl: {value: new THREE.Vector4()}, uWPx: {value: new THREE.Vector2(PPM, PPM)},
     uNL: {value: 0}, uLP: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uLC: {value: Array.from({length: NL}, () => new THREE.Vector4())},
     uNH: {value: 0}, uHalo: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uHaloC: {value: Array.from({length: NL}, () => new THREE.Vector3())},
-    tGround: {value: layers.ground.t}, tPre: {value: layers.pre.t}, tEmitL: {value: layers.emit.t}, tAdd: {value: layers.add.t}, tFront: {value: layers.front.t},
-    uLay: {value: new THREE.Vector4()}, uLayE: {value: 0}, tDistort: {value: layers.distort.t}, uLayD: {value: 0},
+    tGround: {value: layers.ground.rt.texture}, tPre: {value: layers.pre.rt.texture}, tEmitL: {value: layers.emit.rt.texture}, tAdd: {value: layers.add.rt.texture},
+    tFront: {value: layers.front.rt.texture}, uLay: {value: new THREE.Vector4()}, uLayE: {value: 0}, tDistort: {value: layers.distort.rt.texture}, uLayD: {value: 0},
     tH: {value: hmap.depthTexture}, uHPV: {value: new THREE.Matrix4().multiplyMatrices(hCam.projectionMatrix, hCam.matrixWorldInverse)},
     uPtShadow: {value: 1}, uHBias: {value: .03 / HM.far},
     uDebug: {value: 0},
@@ -1622,7 +1784,7 @@ void main() {
     renderer.setSize(VW * DS, VH * DS, false);
     for (const rt of [gbuf, xray, outRT, heatRT]) rt.setSize(VW, VH);
     SNAP.value.set(VW, VH); compU.uRes.value.set(VW, VH); blitU.uRes.value.set(VW, VH);
-    for (const L of layerList) { L.c.width = VW; L.c.height = VH; L.q.imageSmoothingEnabled = false; L.dirty = false; L.t.dispose(); L.t.needsUpdate = true; }
+    for (const L of layerList) { L.c.width = VW; L.c.height = VH; L.q.imageSmoothingEnabled = false; L.dirty = false; L.t.dispose(); L.t.needsUpdate = true; L.rt.setSize(VW, VH); }
   }
 
   // ---- view: target (snapped to the pixel lattice by the caller), yaw, zoom
@@ -1675,9 +1837,6 @@ void main() {
     flushBatches(); syncCards(); packCards();
     let ns = 0; for (const g2 of groups.values()) ns += g2.n;
     stats.sprites = ns; stats.points = nPoints; stats.lines = nLines;
-    const lay = compU.uLay.value;
-    lay.set(+layers.ground.used, +layers.pre.used, +layers.front.used, +layers.add.used); compU.uLayE.value = +layers.emit.used; compU.uLayD.value = +layers.distort.used;
-    for (const L of layerList) if (L.used) L.t.needsUpdate = true;
     if (!hDirty && moved.size && movedEnough()) hDirty = true;
     renderer.setClearColor(0x000000, 0);
     // stats.pass: CPU ms + draw calls of each pass this frame (F3 shows them; the bench reads them)
@@ -1685,8 +1844,11 @@ void main() {
     const lap = (k, calls) => { const t = performance.now(); PS[k] = t - tp; tp = t; if (calls !== undefined) PS[k + 'N'] = calls; };
     lap('prep');
     for (const t of ups) renderer.initTexture(t);
-    for (const L of layerList) if (L.used) renderer.initTexture(L.t);
     ups.length = 0; lap('upload');
+    drawLayers();
+    const lay = compU.uLay.value, on = n => +(layers[n].runs.length > 0);
+    lay.set(on('ground'), on('pre'), on('front'), on('add')); compU.uLayE.value = on('emit'); compU.uLayD.value = on('distort');
+    lap('layers');
     for (const s of litters) s.run();   // the fallen leaves' field (render/litter.js): the ticks that are due; the ground shader reads the result
     lap('litter');
     PS.shadowN = PS.hmapN = PS.shadowSN = 0; PS.shadowS = 0;
@@ -1739,7 +1901,7 @@ void main() {
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
     stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
-    resetBatches(); for (const L of layerList) L.used = false; frameNo++;
+    resetBatches(); for (const L of layerList) { L.used = L.gUsed = false; L.runs.length = 0; } lbN = 0; frameNo++;
   }
 
   // SETTINGS other modules give the renderer (they call these; the uniforms stay the renderer's): the player options
@@ -1821,7 +1983,7 @@ void main() {
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
-    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
+    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, tex, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }

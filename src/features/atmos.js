@@ -28,7 +28,7 @@
 //                   particle's own depth (walls and props in front hide them), dithered to the arena's glow alpha
 //                   (1.25 - lum(ambient) x .95, clamped .3..1: faint by day, full at night)
 //   shard edges     the shard cards' emit image (glow x (1 - light), depth-correct)
-//   footprints, shard shadows (the arena multiplied them into the ground)  -> host.layer('ground') with the multiply
+//   footprints, shard shadows (the arena multiplied them into the ground)  -> host.glayer('ground') with the multiply
 //                   baked in: the ground texel under the pixel (world.groundCanvas) x the tone
 //   ground fog (additive, pre-light in the arena)  -> host.layer('add'), laid on the ground plane with the ground's
 //                   affine map (it turns with the world) and scaled by the mood's ambient (what the pre-light add became)
@@ -793,7 +793,7 @@ export async function create(host) {
       }
       shards((x, y) => { const z = elevAt(x, y), X = Math.floor(SX(x, y, z)), Y = Math.floor(SY(x, y, z)); lp(BG, mulCss(x, y, SH_SHADOW), X, Y, -1, 0, 3, 1); });
       if (F.weather) { drawFog(); drawKinds('ground'); }
-      if (any(BG)) flush(BG, host.layer('ground'));
+      if (any(BG)) flush(BG, host.glayer('ground'));
       // ---- in front (lit, depth-tested): shards, falling weather, fx
       shards((x, y, h, i) => { const f = shardFrame(i), pv = Math.sin(T * 1.5 + i * 2.1);
         host.sprite({img: SH_IMG[f], em: SH_EM[f][pv > .3 ? 0 : pv > -.4 ? 1 : 2], x, y, h, px: 2, py: 3, type: 3}); });

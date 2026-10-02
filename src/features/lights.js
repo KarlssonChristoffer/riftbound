@@ -455,7 +455,7 @@ export async function create(host) {
       const fade = e.gone ? clamp(1 - (e.t - e.life - 2.5) / 60, 0, 1) : 1; if (fade <= 0) continue;
       const grow = e.gone ? 1 : .35 + e.cr * .65, n = Math.round(44 * grow), heat = clamp(1 - e.t / (e.life + 25), 0, 1), s0 = e.sd * 10 | 0;
       // the ash on the ground under it (an exact projected disc, whole pixels), spreading as the remains crumble
-      const z = host.zoom, [cx, cy] = host.toView(p.x, p.y, p.z || 0), q = host.layer('ground'), ra = .16 + .2 * grow, ax = ra * PPM * z, ay = ra * PPMY * z;
+      const z = host.zoom, [cx, cy] = host.toView(p.x, p.y, p.z || 0), q = host.glayer('ground'), ra = .16 + .2 * grow, ax = ra * PPM * z, ay = ra * PPMY * z;
       for (let j = -Math.ceil(ay); j <= Math.ceil(ay); j++) {
         const t = j / ay; if (Math.abs(t) > 1) continue;
         const hw = ax * Math.sqrt(1 - t * t) - (ART.hsh(j, s0) < .4 ? 1 : 0);
@@ -647,7 +647,7 @@ export async function create(host) {
       host.point(camp.x + Math.cos(a) * d, camp.y + Math.sin(a) * d, .03, FIRE[k > .6 ? 1 : 2], {emit: true});
     }
     // the scorched ring under it (ground layer: an exact projected circle, whole pixels)
-    const z = host.zoom, [cx, cy] = host.toView(camp.x, camp.y, 0), q = host.layer('ground');
+    const z = host.zoom, [cx, cy] = host.toView(camp.x, camp.y, 0), q = host.glayer('ground');
     const rx = .64 * PPM * z, ry = .64 * PPMY * z;
     for (let j = -Math.ceil(ry); j <= Math.ceil(ry); j++) {
       const t = j / ry; if (Math.abs(t) > 1) continue;
@@ -667,7 +667,7 @@ export async function create(host) {
   }
   function haze(x, y, h, w, H) {   // heat shimmer above a fire: whole-pixel row shifts in the distort layer (HD: firesim's heat)
     if (!host.G.compU?.tDistort || (hdFx() && fires.TUNE.heat && host.G.heat)) return;
-    const z = host.zoom, [cx, top] = host.toView(x, y, h), q = host.layer('distort');
+    const z = host.zoom, [cx, top] = host.toView(x, y, h), q = host.glayer('distort');
     for (let r = 0; r < H * z; r++) {
       const k = 1 - r / (H * z), s = Math.round(Math.sin(r * .55 / z - T * 7 + x) * 1.6 * k * z);
       if (!s) continue;

@@ -2,9 +2,9 @@
 // Same pixels, same palettes, same timings; only WHERE they go changed:
 //   lit pixels (the arena's g)        -> host.point (depth-tested world pixels, lit by the scene's lights); pixel
 //                                        clusters keep their exact 1 px offsets (view-right on the ground / up in height)
-//   glowing pixels (the arena's E())  -> host.layer('emit') at the projected view pixel (added like an emitter, as there)
+//   glowing pixels (the arena's E())  -> host.glayer('emit') at the projected view pixel (added like an emitter, as there)
 //   pixels in both                     -> host.point({emit: true}) (albedo + the same colour as glow)
-//   ground shadows                     -> host.layer('ground')
+//   ground shadows                     -> host.glayer('ground') (both drawn by the GPU)
 //   numbers, HP bars, ability bar      -> F.hd (display resolution)
 // Ground rings are world circles: under any yaw they project to the arena's ellipse (r * PPM, r * PPMY) * zoom.
 
@@ -25,8 +25,8 @@ export function createDraw(host, core, phys) {
     up = 1 / host.PPMH;
     eq = gq = null;
   }
-  const E = () => eq ??= host.layer('emit');
-  const G = () => gq ??= host.layer('ground');
+  const E = () => eq ??= host.glayer('emit');
+  const G = () => gq ??= host.glayer('ground');
   const px = (q, c, x, y, w = 1, h = 1) => { q.fillStyle = c; q.fillRect(x, y, w * z, h * z); };
   // world -> view px without allocating (host.toView's maths: G.toScreen); the result array is reused, destructure it
   const PV = [0, 0], _v = new host.THREE.Vector3();   // (host.VW / VH: the view size follows the window)

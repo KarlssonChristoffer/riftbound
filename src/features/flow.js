@@ -41,7 +41,7 @@
 //             like the ground texture does; ground-level marks are clipped out of the plateau's silhouette.
 //   Particles world metres -> host.point (lit, depth-tested). Glow follows the arena's two emitter paths: sparks,
 //             glowing drips and night breath (its view-sized canvas, which lighting.apply drew straight over the lit frame
-//             at 1.25 - lum(ambient) x .95, .3..1) -> host.layer('front') at that alpha; scorch / sole embers and the
+//             at 1.25 - lum(ambient) x .95, .3..1) -> host.glayer('front') at that alpha; scorch / sole embers and the
 //             arrows' air streak (its ground-sized layers: glow x (1 - light), cut where the player stands in front)
 //             -> host.layer('emit'), skipping the pixels of the player's silhouette.
 //   Ghosts    host.playerSprite() is copied and flattened to the biome tint (source-in) into pooled canvases, drawn at
@@ -696,7 +696,7 @@ export async function create(host) {
       const k = emberTone(e); pp(x, y, e.z, EMBER[k + 1] || EMBER[3]);
       if (k < 3) lp(BE, EMBER[k], X, Y);
     }
-    if (any(BG)) flush(BG, host.layer('ground'));
+    if (any(BG)) flush(BG, host.glayer('ground'));
     // ---- afterimages (the ghost captured this frame: the player's card as it is drawn now)
     if (GH.due) { GH.due = false; capture(); }
     drawGhosts();
@@ -720,7 +720,7 @@ export async function create(host) {
       } else if (p.k === 4) { const k = Math.min(3, Math.floor(p.t / p.life * 4)); pp(p.x, p.y, p.h, EMBER[k]); if (k <= 2) lp(BF, EMBER[k], X, Y); }
     }
     airStreaks();
-    if (any(BF)) { const q = host.layer('front'); q.save(); q.globalAlpha = glowA(); flush(BF, q); q.restore(); }
+    if (any(BF)) { const q = host.glayer('front'); q.save(); q.globalAlpha = glowA(); flush(BF, q); q.restore(); }
     flushEmit();
     tick(t0);
   }

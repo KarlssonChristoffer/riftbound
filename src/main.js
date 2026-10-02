@@ -164,7 +164,7 @@ const host = {
   sprite,                                                                              // {img, x, y, h, px, py, ...}
   point: (x, y, h, c, o) => G.point(x, h, y, rgbOf(c), o),
   line: (x0, y0, h0, x1, y1, h1, c, emit) => G.line(x0, h0, y0, x1, h1, y1, rgbOf(c), emit),
-  layer: n => G.layer(n), rgb: rgbOf,
+  layer: n => G.layer(n), glayer: n => G.glayer(n), rgb: rgbOf,
   get wind() { return feat('wind'); }, feature: feat,
   get hits() { return proj.hits; },
   // the menu (ui/menu.js): open it (the title's Settings), its wooden UI sounds (the audio feature), open or not

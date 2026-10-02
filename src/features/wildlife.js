@@ -27,7 +27,7 @@
 //   perches    3D models (walls, towers, gateposts, pillars, rocks): the top of the mesh under the spot (ray cast on the
 //              model, cached); painted cards (trees, bushes, dummies): the sprite's top row as in the arena, offset along
 //              the screen's x (the card always faces the camera), drawn a hair in front of the card.
-//   ground     host.layer('ground'): flying animals' shadows, hopper / walker shadows, fish under the water, swimming
+//   ground     host.glayer('ground') (the GPU draws it): flying animals' shadows, hopper / walker shadows, fish under the water, swimming
 //              frogs, the vulture's soaring shadow (turned with the camera). The arena multiplies tints; the 3D ground
 //              layer is mixed over, so each tint becomes a dark colour + alpha solved against the biome's average ground
 //              colour (exact on that colour, close elsewhere).
@@ -1524,7 +1524,7 @@ export async function create(host) {
       if (!WL.on || need || !ATL) return;
       const t0 = performance.now();
       viewSync();
-      drawGround(host.layer('ground'));
+      drawGround(host.glayer('ground'));
       drawSprites();
       tick(t0);
     },

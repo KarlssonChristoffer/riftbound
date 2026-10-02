@@ -30,8 +30,8 @@
 //                       leaves, env.leafFall), events (dummy hits kick the strips, explosions whip foliage and billow cloth,
 //                       a bird landing on / leaving a crown, wildlife.js 'bird_perch', knocks a dying leaf loose)
 //   F.frame(f)          cloth atlas raster + its cards, posts / lantern sprites, ropes / rods / chains (host.line),
-//                       shed particles (host.point; sparks / motes glow through host.layer('emit')), pole contact shadows
-//                       (host.layer('ground'))
+//                       shed particles (host.point; sparks / motes glow through host.glayer('emit')), pole contact shadows
+//                       (host.glayer('ground'): the GPU draws both)
 //   F.card(it, sp)      the host's card hook (main.js installs it as world.hooks.card): foliage -> {sway, bend}, brazier /
 //                       torch -> {sway: 0, em: live flame canvas}, anything else null (rigid props never sway)
 //   F.mesh(it)          the host's mesh hook (world.hooks.mesh): a 3D tree -> {x, y (lean m at the top), shake (px)}
@@ -1126,7 +1126,7 @@ export async function create(host) {
       if (q.emit) {
         const [sx, sy] = host.toView(q.x, q.y, q.h), X = Math.round(sx), Y = Math.round(sy);
         if (X < 0 || Y < 0 || X >= ctx.VW || Y >= ctx.VH) continue;
-        eq ??= host.layer('emit'); eq.fillStyle = partColour(q); eq.fillRect(X, Y, ZM, ZM); continue;
+        eq ??= host.glayer('emit'); eq.fillStyle = partColour(q); eq.fillRect(X, Y, ZM, ZM); continue;
       }
       if (!vis(q.x, q.y)) continue;
       const c = C3(partColour(q)); host.point(q.x, q.y, q.h, c, o);
@@ -1253,7 +1253,7 @@ export async function create(host) {
       const shown = [];
       for (const it of decor) { if (!visItem(it)) continue; shown.push(it); if (rast || !it.rastered) rasterItem(it); }
       if (CA.reset) { CA.reset = false; for (const it of shown) rasterItem(it); }
-      const g = host.layer('ground'); g.fillStyle = 'rgba(12,16,10,.38)';
+      const g = host.glayer('ground'); g.fillStyle = 'rgba(12,16,10,.38)';
       for (const it of shown) drawItem(it, g);
       CA.dirty = false;
       drawParts();

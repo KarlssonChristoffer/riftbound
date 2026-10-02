@@ -325,7 +325,7 @@ export async function createPropPhysics(host, core) {
       }
       c.m.setMatrix(M);
       if (c.h > .05) {   // the arena's little ground shadow under a chunk in the air
-        gq ??= host.layer('ground'); gq.fillStyle = 'rgba(12,14,10,.3)';
+        gq ??= host.glayer('ground'); gq.fillStyle = 'rgba(12,14,10,.3)';
         const [sx, sy] = host.toView(c.x, c.y, c.z); gq.fillRect(Math.floor(sx) - zoom, Math.floor(sy), 3 * zoom, zoom);
       }
     }

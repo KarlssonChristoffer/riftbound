@@ -419,7 +419,7 @@ export async function create(host) {
     const fs = clamp((L0 / (f.H * PPMH) - .35) / .6, 0, 1), fore = Math.round(fs * 4) / 4;
     if (fore <= 0 || L0 < 2) return (f.tpl = null);
     f.tpl = shaftCanvas(f, L, f.w, -dx / L0, -dy / L0, SH.col.core, SH.col.edge, (f.x * 7 + f.y * 13) | 0);
-    f.tpl.fore = fore;
+    f.tpl.fore = fore; host.G.touch(f.tpl.cv);   // (painted again in its canvas: the GPU's copy of it is stale)
     return f.tpl;
   }
   function drawShafts() {
@@ -437,7 +437,7 @@ export async function create(host) {
       const X = Math.round(sx) - t.fx * z, Y = Math.round(sy) - t.fy * z, w = t.cv.width * z, h = t.cv.height * z;
       if (X >= VW || Y >= VH || X + w <= 0 || Y + h <= 0) continue;
       f.vis = true; n++;
-      if (!q) { q = host.layer('add'); q.save(); q.globalCompositeOperation = 'lighter'; q.imageSmoothingEnabled = false; }
+      if (!q) { q = host.glayer('add'); q.save(); q.globalCompositeOperation = 'lighter'; }   // (the GPU draws it: G.glayer)
       const br = Math.sin(T * .35 + f.ph) + .5 * Math.sin(T * .83 + f.ph * 2);   // slow breathing in 3 steps
       q.globalAlpha = (br > .6 ? 1 : br > -.4 ? .85 : .7) * t.fore;
       q.drawImage(t.cv, X, Y, w, h);
@@ -641,19 +641,25 @@ export async function create(host) {
     for (const u of WA.puddles) {
       proj2(u.x, u.y, 0, _pp); const sx = _pp[0], sy = _pp[1], rr = Math.max(u.rx, u.ry) * PPM * z * 1.3 + 4;
       if (sx < -rr || sx > VW + rr || sy < -rr || sy > VH + rr) continue;
-      if (u.key !== pk) { Object.assign(u, puddleSprite(u, PUD_COL[tn] || PUD_COL.day)); u.key = pk; }
+      if (u.key !== pk) { Object.assign(u, puddleSprite(u, PUD_COL[tn] || PUD_COL.day)); u.key = pk; host.G.touch(u.cv); }
       u.X = Math.round(sx - u.W0 * z / 2) - u.mx * z; u.Y = Math.round(sy - u.H0 * z / 2) - u.my * z;
       vis.push(u);
     }
     if (!streamIn && !vis.length) return;
-    const g = host.layer('ground');
-    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.imageSmoothingEnabled = false;
-    // (at the puddles' own alpha: gfx.js COMP_FS reads it as "a puddle here" and mirrors what stands over it)
-    g.globalAlpha = PUD_A / 255;
-    for (const u of vis) g.drawImage(u.cv, u.X, u.Y, u.W * z, u.H * z);
-    g.globalAlpha = 1;
-    if (streamIn) skyBand(g, fb);
-    g.restore();
+    if (vis.length) {   // (the GPU draws them: G.glayer)
+      const g = host.glayer('ground');
+      g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over';
+      // (at the puddles' own alpha: gfx.js COMP_FS reads it as "a puddle here" and mirrors what stands over it)
+      g.globalAlpha = PUD_A / 255;
+      for (const u of vis) g.drawImage(u.cv, u.X, u.Y, u.W * z, u.H * z);
+      g.restore();
+    }
+    if (streamIn) {   // the sky's glints on the stream: pixel work, still on the layer's canvas (laid over the GPU's marks)
+      const g = host.layer('ground');
+      g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.imageSmoothingEnabled = false;
+      skyBand(g, fb);
+      g.restore();
+    }
     // the REFLECTIONS (the stream, the pool, the puddles): on the GPU, gfx.js COMP_FS reflAt, from what is on screen this
     // frame. It mirrors as this file's 2D version did (rows shifted whole pixels by the ripple, the water's tint, laid over
     // the water's albedo before the light, flames glowing in it at glowDim), but every prop, card, tree and the Ranger, as
@@ -718,7 +724,7 @@ export async function create(host) {
       ns = drawShafts(); lap('shafts');
       if (biome === 'ember') nh = drawHaze();
       lap('haze');
-      if (TUNE.fg.on) { const q = host.layer('front'); q.save(); q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-over'; q.imageSmoothingEnabled = false; nf = drawFG(q); q.restore(); }
+      if (TUNE.fg.on) { const q = host.glayer('front'); q.save(); q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-over'; nf = drawFG(q); q.restore(); }
       lap('fg');
       acc += performance.now() - t0;
       hist[hN++ % hist.length] = acc; acc = 0;

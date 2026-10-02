@@ -6,8 +6,8 @@ gfx.js, adapter.js and player.js. Line numbers drift, so search for the quoted c
 and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame breaks them.
 
 **Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2), the water's reflections (E.3), the
-cloud shadows and the lava's heat haze (E.4), the vignette (E.5) and the contact shadows (E.7) are done; the GPU layer
-batch and the trees' sway are next. Stage 3: the world cards in instanced batches (E.6). Stage 4 not started.
+cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact shadows (E.7) and the GPU layer batch (E.8)
+are done; the trees' sway is next. Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 not started.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -554,6 +554,59 @@ new path held steady.
 | `contact.frame` | 0.22-0.55 ms | 0.04-0.05 ms |
 | `G.render` (day, horde) | ~2.0 ms | ~1.0 ms (no mask flushed and blitted into the ground layer) |
 | GPU, day (p50) | 0.64 ms | 0.63 ms |
+
+### E.8 Stage 2 continued: the screen layers drawn by the GPU (2026-10-02; the same pixels within 1 / 255)
+
+**What it replaced.** Every frame the ground and add layers (night: ground and front) were 2D canvases. The features
+cleared and drew into them, and each used canvas was uploaded to WebGL. That upload is a 2D-canvas -> WebGL copy that
+waits on the GPU. Under load (another session's Blender, a game client) it made whole frames erratic: in an A/B against
+a copy with the layers stubbed out, the canvas path's slices swung 3-15 ms where the stub held ~2 ms.
+
+**What it is now:**
+
+- **The targets.** Each layer is a render target at the view's size, premultiplied, in GL rows. COMP_FS reads it there
+  (`lay()` no longer flips rows; the mixes are premultiplied: `alb * (1 - a) + rgb`). No texture unit was added.
+- **The GPU context: `host.glayer(name)`** (`G.glayer`). It takes the canvas subset the per-frame marks use:
+  - `fillStyle` (any CSS colour, read once per string), `globalAlpha`, `globalCompositeOperation` (`source-over`,
+    `lighter`);
+  - `fillRect`, `drawImage` (3, 5 or 9 arguments, nearest);
+  - `save` / `restore`, and `setTransform` / `translate` / `scale` without rotation.
+
+  Each op is one instanced quad (LB_VS / LB_FS), in call order. The ops are grouped in runs (a blend x one texture; fills
+  join any run), and each run is one upload and one draw. An image drawn there is uploaded once; `G.touch(canvas)` after
+  painting it again.
+- **The canvas stays for the rest** (`host.layer`): paths, gradients, clips, rotated transforms, pixel writes. When one
+  is used, its canvas is uploaded and drawn into the target where it was first drawn into in the frame, so the GPU marks
+  drawn after it stay over it.
+- **Moved to `glayer`:**
+  - ground: wind's pole shadows, wildlife's shadows / fish / vultures, the puddles, combat's shadows and waterline,
+    the props' chunk shadows, flow's and atmos's mark pixels, the lights' ash and scorched rings;
+  - add: the light shafts and motes; front: flow's glow, the foreground pieces;
+  - emit: combat's and wind's glowing pixels; distort: the fires' heat shimmer.
+- **Still on the canvas:** flow's ground decals (an affine with rotation, clipped by the plateau), its emit cut-out and
+  afterimages; atmos's ground fog (rotated tiles); the stream's sky glints (`skyBand`, pixel work). Day, night and horde
+  in the Proving Grounds no longer use a canvas at all.
+
+**A bug found on the way, also in stage 3.** three.js works out an instanced geometry's instance limit once, the first
+time it is drawn (`geometry._maxInstanceCount`). It never redoes it when a batch later swaps in a bigger buffer, so the
+instances past the old size were silently not drawn. The card batches (E.6) start at 32 a texture: in a horde, a facing
+held 62 brutes and only 32 were drawn, in 468 of 600 frames. The sprite batches (64) had the same flaw. `regrown(geo)`
+now clears the limit wherever a batch grows. Golden hadn't caught it: its run's wave has few brutes.
+
+**Checks:**
+
+- golden against a copy of the tree before the change (`src-lb0/`): every capture within 1 / 255 (premultiplied
+  rounding);
+- the horde: no batch draws fewer instances than it holds;
+- smoke and simview pass.
+
+**Results**, interleaved A/B (14 x 150 frames; the machine was quieter than in E.7):
+
+| | Before | After |
+|---|---|---|
+| whole frame, day / night / horde | 2.10 / 1.82 / 2.24 ms | 1.64 / 1.51 / 1.84 ms (-22% / -17% / -18%) |
+| `G.render`, day / night / horde | 0.88 / 0.69 / 0.95 ms | 0.68 / 0.60 / 0.76 ms |
+| GPU, day (p50) | 0.63 ms | 0.62-0.63 ms |
 
 ### Stage 4: browser and measuring
 
