@@ -6,7 +6,7 @@
 // each other. The order is the update order AND every hook chain's (onArrowHit, interact, ability, onKey, prompt, the
 // frame and HD passes). A cycle throws. The game (game/game.js) goes in front of them all (main.js).
 //   await loadFeatures(features, host)   (features: the list the engine already holds)
-export const LOAD_ORDER = ['wind', 'windlines', 'weather', 'lights', 'garden', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];
+export const LOAD_ORDER = ['wind', 'windlines', 'weather', 'lights', 'garden', 'riverside', 'combat', 'atmos', 'flow', 'wildlife', 'depth', 'contact', 'audio'];
 
 export async function loadFeatures(features, host) {
   const mods = await Promise.all(LOAD_ORDER.map(name => import(`../features/${name}.js`).then(m => ({name, m}), e => {

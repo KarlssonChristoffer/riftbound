@@ -64,7 +64,7 @@ const TUNE = {
   idle: .1,           // foliage flutter, normalised: idle amplitude ...
   flutter: .26,       // ... + this per unit of gust
   hyst: .5,           // px: the lean must move this far before the drawn offset changes (no 1 px flicker at a threshold)
-  push: {tuft: [.8, 3], bush: [1.1, 2.2]},   // the player running / rolling past: [radius m, px at full speed]
+  push: {tuft: [.8, 3], bush: [1.1, 2.2], reed: [1, 3.6], fern: [.7, 1.8]},   // the player running / rolling past: [radius m, px at full speed] (reeds part for him)
   arrowBush: [.55, 1.45], arrowTree: [1.2, 4.6],   // an arrow through foliage: [radius m, max height m]
   towerTop: 9,        // px below the tower sprite's top where its roof centre is (fallback when the tower has no mesh)
   riftLift: 12,       // m/s^2 of eerie lift on cloth (at its free edge) while a rift ring passes
@@ -101,14 +101,17 @@ const STRENGTH = {
 // curve = the arena's row weight profile (CURVES)
 const FLEX = {
   ruins: {tuft: {px: 3, w: 16, z: .32, fq: 1.3, curve: 'tip'}, bush: {px: 2.4, w: 9, z: .36, fq: .8, curve: 'bush'},
-    tree: {px: 3.5, w: 3.8, z: .42, fq: .33, curve: 'crown'}, dead: {px: 2, w: 4.2, z: .4, fq: .4, curve: 'limb'}},
+    tree: {px: 3.5, w: 3.8, z: .42, fq: .33, curve: 'crown'}, dead: {px: 2, w: 4.2, z: .4, fq: .4, curve: 'limb'},
+    // the riverside (features/riverside.js): reeds a little livelier than a tuft, ferns barely, the willow (variant 3) loose and slow
+    reed: {px: 3.8, w: 12, z: .28, fq: 1.6, curve: 'reed'}, fern: {px: 1.4, w: 12, z: .35, fq: .9, curve: 'bush'}, willow: {px: 4.6, w: 3, z: .4, fq: .3, curve: 'crown'}},
   ember: {bush: {px: 1.6, w: 11, z: .4, fq: .5, curve: 'bush'}},
   frost: {tuft: {px: 1.6, w: 15, z: .35, fq: 1.1, curve: 'twig'}, bush: {px: 1.8, w: 8, z: .4, fq: .7, curve: 'bush'},
-    tree: {px: 2.6, w: 3, z: .45, fq: .3, curve: 'pine'}},
+    tree: {px: 2.6, w: 3, z: .45, fq: .3, curve: 'pine'}, reed: {px: 2, w: 13, z: .33, fq: 1.1, curve: 'reed'}},
   rift: {bush: {px: 2, w: 7, z: .3, fq: .45, curve: 'coral'}},
 };
 const CURVES = {   // the arena's row weights: u = 0 at the sprite's base row .. 1 at its top row; c = crown start (trees)
   tip: u => u < .2 ? 0 : ((u - .2) / .8) ** 1.25,
+  reed: u => u < .12 ? 0 : ((u - .12) / .88) ** 1.15,   // (a reed clump bends from lower down than a tuft)
   bush: u => u < .22 ? 0 : ((u - .22) / .78) ** 1.1,
   twig: u => u < .38 ? 0 : (u - .38) / .62,
   coral: u => u ** 1.6,
@@ -272,7 +275,7 @@ export async function create(host) {
   }
 
   // ================================================================ foliage
-  const FOLK = {tuft: 1, bush: 1, tree: 1};
+  const FOLK = {tuft: 1, bush: 1, tree: 1, reed: 1, fern: 1};
   const fst = new Map();   // prop -> spring state (2D lean in px, world axes)
   let fol = null, folN = -1, folArr = null;
   // (re-made when the registry's membership changes: host.propsVersion bumps on every join / leave, world/entities.js)
@@ -304,6 +307,7 @@ export async function create(host) {
   function flexOf(p) {
     const F = FLEX[biome]; if (!F) return null;
     if (p.kind === 'tree' && F.dead && (p.variant | 0) === 2) return F.dead;
+    if (p.kind === 'tree' && F.willow && (p.variant | 0) === 3) return F.willow;
     return F[p.kind] || null;
   }
   // our own sprite canvases only (never the screen)
@@ -1026,7 +1030,7 @@ export async function create(host) {
     const ix = DYING[e.season] || DYING.autumn; return S.pals[ix[R() * ix.length | 0]];
   }
   const leafRate = S => { const e = host.env; return S.kind === 'leaf' && e?.seasonal ? e.leafK * .6 + (e.leafFall || 0) * 3.2 : 1; };
-  const leafyTree = p => !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins');   // (a ruins dead tree has no leaves)
+  const leafyTree = p => !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins') && p.kind !== 'reed' && p.kind !== 'fern';   // (a ruins dead tree has no leaves; reeds and ferns shed none)
   // ---- the feel of a strong wind: leaves torn off the crowns in gusts, leaves (snow, ash) blowing through the view from
   // upwind, and what the foliage around the player sounds like: W.rustle = {e: the agitation of the leafy crowns / bushes
   // near him (1 = one tree beside him in a full breeze gust), pan: where they are on screen, -1..1}
