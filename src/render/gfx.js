@@ -1117,6 +1117,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     uPx: U.px, uRect: {value: new THREE.Vector4(0, 0, 1, 1)}, uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uSnap: SNAP,
     uOff: {value: new THREE.Vector2()}, uSway: {value: 0}, uHasBend: {value: 0},
   });
+  // three.js works out an instanced geometry's instance limit once, the first time it is drawn (geometry._maxInstanceCount,
+  // from its instance buffer's size), and never again: a batch that swaps in a bigger buffer later must clear it, or the
+  // instances past the old size are silently not drawn (a horde's 33rd brute of one facing went missing)
+  const regrown = geo => { geo._maxInstanceCount = undefined; };
   const QUAD = new THREE.BufferGeometry();
   QUAD.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0], 3));
 
@@ -1235,7 +1239,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   }
   function bGrow(G2) {
     const cap = G2.cap * 2, d = new Float32Array(cap * BC_STRIDE); d.set(G2.d);
-    G2.ib = bBuffer(G2.geo, d); G2.d = d; G2.cap = cap; G2.dirty = true;
+    G2.ib = bBuffer(G2.geo, d); G2.d = d; G2.cap = cap; G2.dirty = true; regrown(G2.geo);
   }
   const bPut = (G2, i, v) => { const f = Math.fround(v); if (G2.d[i] !== f) { G2.d[i] = f; G2.dirty = true; } };   // (a write that changes something)
   function packCards() {   // every frame: the visible batched cards into their groups (in the order they were made)
@@ -1373,7 +1377,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   function grow(G2) {
     const cap = G2.cap * 2;
     for (const [k, a] of Object.entries(G2.attrs)) { const b = new THREE.InstancedBufferAttribute(new Float32Array(cap * a.itemSize), a.itemSize); b.array.set(a.array); b.setUsage(THREE.DynamicDrawUsage); G2.geo.setAttribute(k, b); G2.attrs[k] = b; }
-    G2.cap = cap; G2.list = Object.values(G2.attrs);
+    G2.cap = cap; G2.list = Object.values(G2.attrs); regrown(G2.geo);
   }
   // the group key: a number while the image ids and the type fit (16 + 16 + 16 bits, type 0..15: < 2^53), else the
   // string it always was (no garbage per sprite on the common path; the groups are the same either way)
