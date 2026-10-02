@@ -1088,24 +1088,37 @@ GUN_ITEMS = GUN_ITEMS + ('iron_colt', 'nickel_colt')
 # at the right hip for the draw; then the right fist IKs onto the grip and the left fist under the fore-end. So the
 # muzzle points exactly where the torso puts it: the facing, plus the pose's twist (aim twists, aiming on the move).
 # Wearing it re-poses the aiming keys (same names and clips as the revolver set: gun_aim + twists, gun_draw, gun_fire,
-# steps, pivots, gws_ / grs_) for two hands; reload / fan / twirl / holster keys are revolver moves (not re-posed yet).
+# steps, pivots, gws_ / grs_) for two hands, and the reload (gun_reload: break open, tip the spent shells out, two
+# fresh shells fetched from the belt one by one, snap shut; gwr_ / grr_ on the move). Fan / twirl / holster keys are
+# revolver moves (not re-posed).
 LG_BLADE = -30          # the long-gun stance: hips and chest turned to the right
-LG_HOLD = {}            # pose key -> (rest grip point, rest barrel axis F, rest top U, left hand on the fore-end?)
-LG = {}                 # the coach gun's geometry (metres along F from the grip): fore-end centre
+LG_HOLD = {}            # pose key -> (rest grip point, rest barrel axis F, rest top U, left hand on the gun?)
+LG = {}                 # the coach gun's geometry (metres along F from the grip): fore-end centre; the belt's loops
+LG_HINGE = (.095, .028)  # the break's hinge (metres along F, U from the grip): the front of the frame, under the barrels
+LG_BREAK = {}           # pose key -> how far the barrels are broken open (deg)
+LG_LEFT = {}            # pose key -> where the left fist goes instead of the fore-end: 'breech' (thumbing a shell in),
+                        # 'belt' (fetching one from the shell belt)
+LG_SHELL = set()        # pose keys with a fresh shell in the left fist
 
 
-@garment('coach_gun', 'hands', ['human_small'], soft=['GunGrip', 'GunStock', 'GunFrame', 'GunBarrel', 'GunFore'],
+@garment('coach_gun', 'hands', ['human_small'],
+         soft=['GunGrip', 'GunStock', 'GunFrame', 'GunBarrel', 'GunFore', 'GunShell'],
          pixel={'GunGrip': ['stock', 'walnut', {'thin': True}], 'GunStock': ['stock', 'walnut', {'bias': .05}],
                 'GunFrame': ['gun', 'iron', {'thin': True}], 'GunBarrel': ['barrel', 'iron', {'thin': True, 'bias': .1}],
-                'GunFore': ['stock', 'walnut', {'thin': True, 'bias': .1}]})
+                'GunFore': ['stock', 'walnut', {'thin': True, 'bias': .1}],
+                'GunShell': ['shells', 'brass', {'thin': True, 'bias': .15}]})
 def _coach_gun():
     """A side-by-side double-barrel cut down to a coach gun: 47 cm barrels, a short walnut stock with a pistol grip
-    (83 cm in all, ~25 px side-on: a long-gun silhouette), the fore-end under the barrels for the left hand."""
+    (83 cm in all, ~25 px side-on: a long-gun silhouette), the fore-end under the barrels for the left hand. It breaks
+    open: the barrels and fore-end swing down on a hinge at the front of the frame (GunBreak0); GunBreech0 marks the
+    chambers. A fresh shell rides in the left fist (GunShell0), shown only while reloading."""
     P, s, J, z = _ctx()
     g, F, U = _hand_frame('R')
     S = F.cross(U)
     GUN.update(g=g, F=F, U=U)
     hold = add_chain('GunHold', 'RightHand', [g, g + F * .05 * s])[0]
+    hinge = g + F * LG_HINGE[0] * s + U * LG_HINGE[1] * s
+    brk = add_chain('GunBreak', hold, [hinge, hinge + F * .05 * s])[0]
     loft('GunGrip', hold, [g + F * .03 * s + U * .014 * s, g - F * .03 * s - U * .018 * s, g - F * .07 * s - U * .034 * s],
          [(.014 * s, .02 * s)] * 3, side=S, n=6, p=2.2)
     loft('GunStock', hold, [g - F * .06 * s - U * .03 * s, g - F * .16 * s - U * .045 * s, g - F * .27 * s - U * .06 * s],
@@ -1114,12 +1127,18 @@ def _coach_gun():
          side=S, n=6, p=2.2)
     for k, sx in (('L', 1), ('R', -1)):
         b0 = g + F * .09 * s + U * .042 * s + S * sx * .012 * s
-        loft(f'GunBarrel.{k}', hold, [b0, b0 + F * .47 * s], [(.0115 * s, .0115 * s)] * 2, side=S, n=6, p=2.0)
-    loft('GunFore', hold, [g + F * .1 * s + U * .022 * s, g + F * .29 * s + U * .026 * s], [(.021 * s, .015 * s), (.019 * s, .013 * s)],
+        loft(f'GunBarrel.{k}', brk, [b0, b0 + F * .47 * s], [(.0115 * s, .0115 * s)] * 2, side=S, n=6, p=2.0)
+    loft('GunFore', brk, [g + F * .1 * s + U * .022 * s, g + F * .29 * s + U * .026 * s], [(.021 * s, .015 * s), (.019 * s, .013 * s)],
          side=S, n=6, p=2.2)
     mz = g + F * .56 * s + U * .042 * s
-    add_chain('GunMuzzle', hold, [mz, mz + F * .02 * s])
-    LG.update(fore=.2, butt=(.27, .06))
+    add_chain('GunMuzzle', brk, [mz, mz + F * .02 * s])
+    bc = g + F * .09 * s + U * .042 * s
+    add_chain('GunBreech', brk, [bc, bc - F * .02 * s])
+    gl, FL, UL = _hand_frame('L')                       # the shell pinched in the left fist, its end out past the thumb
+    shell = add_chain('GunShell', 'LeftHand', [gl, gl + FL * .03 * s])[0]
+    loft('GunShell', shell, [gl - UL * .01 * s, gl + UL * .06 * s], [(.013 * s, .013 * s)] * 2, side=FL, n=6, p=2.0)
+    zc, rx, ry = z('hips') + .02 * s, .235 * s, .19 * s   # (as _shell_belt) the belt's loops at the left front
+    LG.update(fore=.2, butt=(.27, .06), belt=Vector((rx * .62, -ry * .78 - .04 * s, zc)))
     _lg_install()
 
 
@@ -1175,6 +1194,37 @@ def _lg_install():
                     'gdraw_grab': _lg_frame('low', -8, -40) + (False,),
                     'gun_draw_lift': _lg_frame('hip', -18, -14) + (True,),
                     'gun_draw_hip': _lg_frame('hip', -24) + (True,)})
+    # reload: the gun at the right hip, head down over it. Open (the left hand pushes the barrels down), tip the muzzle
+    # up so the spent shells slide out, fetch a shell from the belt / thumb it in (twice), snap the barrels up shut.
+    RL = -20
+    look = {'Neck': [('Z', -.6 * RL), ('X', 12)], 'Head': [('Z', -.4 * RL), ('X', 8)]}
+    fetch_arm = {'LeftShoulder': [('Z', -2)], 'LeftArm': [('Y', 30), ('X', -14), ('Z', -10)], 'LeftForeArm': [('X', -60)]}
+    POSES['gun_rl_up'] = _gpose(RL, HIP, look, legs=LEGS, lean=6)
+    POSES['gun_rl_eject'] = _gpose(RL, HIP, look, {'RightForeArm': [('X', -96)]}, legs=LEGS, lean=4)
+    POSES['gun_rl_fetch'] = _gpose(RL, HIP, look, fetch_arm, legs=LEGS, lean=8)
+    POSES['gun_rl_load'] = _gpose(RL, HIP, look, legs=LEGS, lean=8)
+    POSES['gun_rl_shut'] = _gpose(RL, HIP, legs=LEGS, lean=2)
+    LG_HOLD.update({'gun_rl_up': _lg_frame('hip', RL, -12) + (True,), 'gun_rl_eject': _lg_frame('hip', RL, 60) + (True,),
+                    'gun_rl_fetch': _lg_frame('hip', RL, -6) + (True,), 'gun_rl_load': _lg_frame('hip', RL, -6) + (True,),
+                    'gun_rl_shut': _lg_frame('hip', RL, 6) + (True,)})
+    LG_BREAK.clear(); LG_LEFT.clear(); LG_SHELL.clear()
+    LG_BREAK.update({'gun_rl_up': 38, 'gun_rl_eject': 44, 'gun_rl_fetch': 40, 'gun_rl_load': 40})
+    LG_LEFT.update({'gun_rl_fetch': 'belt', 'gun_rl_load': 'breech'})
+    LG_SHELL.update({'gun_rl_fetch', 'gun_rl_load'})
+    ANIMS['gun_reload'] = dict(keys=['gun_rl_up', 'gun_rl_eject', 'gun_rl_fetch', 'gun_rl_load', 'gun_rl_fetch',
+                                     'gun_rl_load', 'gun_rl_shut'], frames=7, loop=False, fps=6)
+    for rk in ('up', 'load', 'fetch'):                 # reloading on the move: the same upper bodies over the stride
+        ru = _upper(POSES[f'gun_rl_{rk}'], RL)
+        for i in range(8):
+            for gk, c in (('gwr', 'walk'), ('grr', 'run')):
+                n = f'{gk}_{rk}_{i}'
+                POSES[n] = _on_legs(i, ru, c)
+                LG_HOLD[n] = LG_HOLD[f'gun_rl_{rk}']
+                for d in (LG_BREAK, LG_LEFT):
+                    if f'gun_rl_{rk}' in d:
+                        d[n] = d[f'gun_rl_{rk}']
+                if f'gun_rl_{rk}' in LG_SHELL:
+                    LG_SHELL.add(n)
 
 
 def _fist_to(side, p):
@@ -1186,23 +1236,42 @@ def _fist_to(side, p):
 def _long_gun_hold(pose_name):
     """The coach gun in a gun pose: placed on the chest (LG_HOLD), the right fist onto the grip and the left fist under
     the fore-end (two IK passes: the wrist sits behind the fist along the hand), the gun set last (it is a child of the
-    right hand). Other poses: it stays in the right fist as built (hanging muzzle-down along the hand)."""
-    h = LG_HOLD.get(_key(pose_name))
-    if not h or 'g' not in GUN:
-        return
+    right hand), then the barrels broken open (LG_BREAK) about the hinge. Reloading, the left fist goes to the breech
+    or the belt instead (LG_LEFT), a fresh shell in it (LG_SHELL; otherwise the shell is shrunk out of sight). Other
+    poses: the gun stays in the right fist as built (hanging muzzle-down along the hand)."""
     arm = bpy.data.objects[ROOT]
     pbs, bones = arm.pose.bones, arm.data.bones
+    key = _key(pose_name)
+    if 'GunShell0' in pbs:
+        pbs['GunShell0'].scale = (1, 1, 1) if key in LG_SHELL else (.001, .001, .001)
+        bpy.context.view_layer.update()
+    h = LG_HOLD.get(key)
+    if not h or 'g' not in GUN:
+        return
     g0, F0, U0, left = h
     T = pbs['Spine2'].matrix @ bones['Spine2'].matrix_local.inverted()      # rest -> posed, for the chest
     g, F, U = T @ g0, (T.to_3x3() @ F0).normalized(), (T.to_3x3() @ U0).normalized()
     k = PROP['height'] / 1.8
+    a = math.radians(LG_BREAK.get(key, 0.0))
+    hinge = g + (F * LG_HINGE[0] + U * LG_HINGE[1]) * k
+    Fb, Ub = F * math.cos(a) - U * math.sin(a), U * math.cos(a) + F * math.sin(a)      # the barrels' frame, broken
+    on_gun = lambda f, u: hinge + (Fb * (f - LG_HINGE[0]) + Ub * (u - LG_HINGE[1])) * k  # a barrel-side point
+    spot = LG_LEFT.get(key)
     for _ in range(2):
         _fist_to('Right', g)
-        if left:
-            _fist_to('Left', g + F * LG['fore'] * k - U * .02 * k)
+        if spot == 'belt':
+            _fist_to('Left', _carried('Hips', LG['belt']))
+        elif spot == 'breech':     # behind the chambers and above them, the shell's tip at the breech
+            _fist_to('Left', on_gun(.09, .042) - Fb * .045 * k + Ub * .05 * k)
+        elif left:
+            _fist_to('Left', on_gun(LG['fore'], -.02))
     R = _frame_rot(GUN['F'], GUN['U'], F, U)
     pbs['GunHold0'].matrix = Matrix.Translation(g) @ (R @ bones['GunHold0'].matrix_local.to_3x3()).to_4x4()
     bpy.context.view_layer.update()
+    if a:                          # about the hinge's side axis: + would lift the muzzle, so the break is negative
+        pb = pbs['GunBreak0']
+        pb.matrix = Matrix.Translation(hinge) @ Matrix.Rotation(-a, 4, F.cross(U)) @ Matrix.Translation(-hinge) @ pb.matrix
+        bpy.context.view_layer.update()
 
 
 _build_wardrobe = build
