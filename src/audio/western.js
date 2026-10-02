@@ -13,8 +13,8 @@
 //
 // THE MUSIC: A minor, 72 bpm, 2 bars per chord, 8-bar phrases. The chords are guitar chords in open position, the
 // harmony natural minor with the border flavour of E major (the Andalusian cadence Am G F E) and the Phrygian B-flat.
-// Every phrase picks a progression for its section (calm / tension / combat; the last one comes back half the time),
-// and every progression keeps ITS tune once made, so the themes return. A tune is call (2 bars) - answer - the call
+// Every phrase picks a progression for its section (calm / tension / combat; one plays at most twice in a row), and
+// every progression keeps ITS tune once made, so the themes return. A tune is call (2 bars) - answer - the call
 // again on the third chord - a cadence that lands on the chord's root.
 //   rest (pad only)  space: now and then a slow rolled chord left to ring; dusk / night a low open-fifth drone; at
 //                    night, guitar harmonics
@@ -25,9 +25,10 @@
 //                    (bending into each), a trotting horse, a shaker, the mission bell on every chord
 //   combat           the gallop ("ta-ka-TUM" on every 8th: palm-muted strings and hooves), toms and a bass drum,
 //                    strummed accents on 2 and 4, a driving bass, the harmonica pushed through the whole tune
-// INSTRUMENTS: rendered once (seeded JS DSP, mono, at 24 or 16 kHz: they are dark) and played by playbackRate from the nearest pitch: nylon
-// guitar x5, twang bass x2, muted string x2, harmonic x2, tremolo x2, reed x3, bell, 5 percussion (~7 MB, ~150 ms of
-// CPU in slices). Live voices: the whistler (one sine voice per 2-bar phrase, with portamento) and the drone.
+// INSTRUMENTS: rendered once (seeded JS DSP, mono, at 24 or 16 kHz: they are dark), played by playbackRate from the
+// nearest pitch: nylon guitar x5, twang bass x2, muted string x2, harmonic x2, tremolo x2, reed x3, bell, 5 percussion
+// (4.8 MB; ~0.2 s of CPU in 22 jobs, a few per update). Live voices: the whistler (one sine voice per 2-bar phrase, with
+// portamento) and the drone (2 oscillators per chord). Panners are shared, so most voices are a source and a gain.
 import {mulberry32} from '../core/rng.js';
 import {renderGuitar, renderTwang, renderMute, renderHarmonic, renderTremolo, renderReed, renderBell, renderPerc} from './western_dsp.js';
 
@@ -277,7 +278,7 @@ export function createWestern(ac, {lay, noise}) {
     const C = CH[prog[ci]], first = pb % 2 === 0, hum = () => (R() - .5) * .012;
     W.chord = C.name;
     // ---- the pad layer: the drone, and the rest's own sparse guitar
-    if (st === 0 && first && !D) { const lv = L ? .8 : A ? (dusk ? .9 : .65) : dusk ? .6 : night ? .45 : 0; if (lv) drone(t, C, s16 * 32, .024 * lv); }
+    if (st === 0 && first && !D) { const lv = L ? .8 : A ? (dusk ? .9 : night ? .5 : .65) : dusk ? .6 : night ? .4 : 0; if (lv) drone(t, C, s16 * 32, .024 * lv); }
     if (!A) {
       const out = lay.pad.g;
       if (st === 0 && first && R() < (night ? .3 : dusk ? .75 : .55)) strum(t, C, .085, out, {spread: .085});   // a slow rolled chord, left to ring

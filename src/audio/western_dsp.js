@@ -128,27 +128,25 @@ export function renderTremolo(sr, f, R, {dur = 4.4, rate = 10.5, T60 = 1.1} = {}
 // ---------------------------------------------------------------- the reed (harmonica)
 // Additive: the harmonics' amplitudes k^-α (α falls as the breath pressure p rises: a soft note is mellow, a pushed one
 // brassy), even harmonics at 45 % (a free reed leans odd), a nasal formant near 1.2 kHz (the cupped hands), nothing
-// above ~3.5 kHz. Two reeds 4 cents apart breathe against each other. Sines by the Chebyshev recursion (one sin/cos
-// per sample per reed). The note bends up ~75 cents into pitch; hand vibrato (amplitude + a little pitch) after 0.5 s.
+// above ~3.5 kHz. Sines by the Chebyshev recursion (one sin/cos per sample). The note bends up ~75 cents into pitch;
+// hand vibrato (amplitude + a little pitch) after 0.5 s.
 export function renderReed(sr, f0, R, {dur = 4.6} = {}) {
   const n = dur * sr | 0, out = new Float32Array(n), K = Math.max(3, Math.min(12, Math.floor(3800 / f0))), amp = new Float32Array(K + 1), B = 32;
   const vph = R() * TAU, aph = R() * TAU, late = t => Math.min(1, Math.max(0, (t - .5) / .7)), lnk = new Float32Array(K + 1), wk = new Float32Array(K + 1);
   for (let k = 1; k <= K; k++) { const F = k * f0; lnk[k] = Math.log(k); wk[k] = (k % 2 ? 1 : .45) * (1 + 1.1 * Math.exp(-Math.pow(Math.log2(F / 1200), 2) / (2 * .3 * .3))) / (1 + Math.pow(F / 3000, 4)); }
   const press = t => (1 - Math.exp(-t / .05)) * (1 + .08 * Math.min(1, t / 1.6)) * (1 + .1 * late(t) * Math.sin(TAU * 5.1 * t + aph)) * (t > dur - .7 ? .5 + .5 * Math.cos(Math.PI * (t - dur + .7) / .7) : 1);
-  const inc = (t, det) => TAU * f0 * det * Math.pow(2, (-75 * Math.exp(-t / .075) + 6 * late(t) * Math.sin(TAU * 4.6 * t + vph)) / 1200) / sr;
-  for (const [det, g] of [[1, .62], [Math.pow(2, 3 / 1200), .38]]) {
-    let ph = R() * TAU;
-    for (let i0 = 0; i0 < n; i0 += B) {   // the envelopes per 32-sample block, interpolated; sines per sample
-      const i1 = Math.min(n, i0 + B), t0 = i0 / sr, t1 = i1 / sr, p0 = press(t0), p1 = press(t1), w0 = inc(t0, det), w1 = inc(t1, det);
-      const a = 2 - 1.1 * Math.min(1, (p0 + p1) / 2);   // the spectrum follows the breath
-      for (let k = 1; k <= K; k++) amp[k] = Math.exp(-a * lnk[k]) * wk[k];
-      for (let i = i0; i < i1; i++) {
-        const u = (i - i0) / B, p = p0 + (p1 - p0) * u;
-        ph += w0 + (w1 - w0) * u; if (ph > TAU) ph -= TAU;
-        const s1 = Math.sin(ph), c2 = 2 * Math.cos(ph); let sm2 = 0, sm1 = s1, v = amp[1] * s1;
-        for (let k = 2; k <= K; k++) { const sk = c2 * sm1 - sm2; v += amp[k] * sk; sm2 = sm1; sm1 = sk; }
-        out[i] += g * p * v;
-      }
+  const inc = t => TAU * f0 * Math.pow(2, (-75 * Math.exp(-t / .075) + 6 * late(t) * Math.sin(TAU * 4.6 * t + vph)) / 1200) / sr;
+  let ph = R() * TAU;
+  for (let i0 = 0; i0 < n; i0 += B) {   // the envelopes per 32-sample block, interpolated; sines per sample
+    const i1 = Math.min(n, i0 + B), t0 = i0 / sr, t1 = i1 / sr, p0 = press(t0), p1 = press(t1), w0 = inc(t0), w1 = inc(t1);
+    const a = 2 - 1.1 * Math.min(1, (p0 + p1) / 2);   // the spectrum follows the breath
+    for (let k = 1; k <= K; k++) amp[k] = Math.exp(-a * lnk[k]) * wk[k];
+    for (let i = i0; i < i1; i++) {
+      const u = (i - i0) / B, p = p0 + (p1 - p0) * u;
+      ph += w0 + (w1 - w0) * u; if (ph > TAU) ph -= TAU;
+      const s1 = Math.sin(ph), c2 = 2 * Math.cos(ph); let sm2 = 0, sm1 = s1, v = amp[1] * s1;
+      for (let k = 2; k <= K; k++) { const sk = c2 * sm1 - sm2; v += amp[k] * sk; sm2 = sm1; sm1 = sk; }
+      out[i] = p * v;
     }
   }
   // breath: a faint band of noise that follows the pressure (no broadband hiss)
