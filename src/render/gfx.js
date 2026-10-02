@@ -1105,6 +1105,35 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   }
   let frameNo = 0;
   const ups = [];   // textures re-uploaded this frame (render() uploads them first, timed as stats.pass.upload)
+  // ---- DATA UPLOADS (G.texData): a block of RGBA bytes the caller rasterised in its own array, into part of a canvas's
+  // texture (the one tex(img) shows; made here if it isn't yet), at render, by texSubImage2D from the array: no 2D canvas
+  // between (a canvas -> WebGL copy snapshots the whole canvas, and a GPU canvas's waits on the GPU). (x, y): where in the
+  // canvas (px, y down); the block is the first w x h px of data, rows rowLen px apart; data must hold still till render()
+  const dataUps = [];
+  let dataN = 0;
+  function texData(img, x, y, w, h, data, rowLen) {
+    const t = texCache.get(img) || tex(img), U = dataUps[dataN] ||= {t: null, x: 0, y: 0, w: 0, h: 0, data: null, rowLen: 0};
+    dataN++; U.t = t; U.x = x; U.y = y; U.w = w; U.h = h; U.data = data; U.rowLen = rowLen;
+  }
+  function uploadData() {   // (render: with the other uploads, before any pass reads them)
+    if (!dataN) return;
+    const gl = renderer.getContext();
+    let bound = null;
+    for (let i = 0; i < dataN; i++) {
+      const U = dataUps[i];
+      if (bound !== U.t) {
+        let p = renderer.properties.get(U.t);
+        if (!p.__webglTexture) { renderer.initTexture(U.t); p = renderer.properties.get(U.t); }   // (its first upload: the whole canvas, then the block over it)
+        renderer.state.bindTexture(gl.TEXTURE_2D, p.__webglTexture); bound = U.t;
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);   // (as tex() uploads it)
+      }
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, U.rowLen);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, U.x, U.y, U.w, U.h, gl.RGBA, gl.UNSIGNED_BYTE, U.data);
+      U.data = null;
+    }
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0); renderer.state.unbindTexture();   // (three never sets the row length: back to 0)
+    dataN = 0;
+  }
 
   // ---- materials
   const MESH_VS = meshVS(false), MESH_SWAY_VS = meshVS(true);
@@ -1844,6 +1873,7 @@ void main() {
     const lap = (k, calls) => { const t = performance.now(); PS[k] = t - tp; tp = t; if (calls !== undefined) PS[k + 'N'] = calls; };
     lap('prep');
     for (const t of ups) renderer.initTexture(t);
+    uploadData();
     ups.length = 0; lap('upload');
     drawLayers();
     const lay = compU.uLay.value, on = n => +(layers[n].runs.length > 0);
@@ -1983,7 +2013,7 @@ void main() {
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
-    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, tex, QUAD,
+    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, tex, texData, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }

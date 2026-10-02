@@ -793,11 +793,15 @@ export async function create(host) {
     pc.wind0 = Math.sign((sy(a) - sy(c)) * (sx(0) - sx(c)) + (sx(c) - sx(a)) * (sy(0) - sy(c))) || 1;
   }
 
-  // ---------------------------------------------------------------- the cloth atlas (one canvas for every piece's box)
-  const CA = {W: 512, H: 256, cv: null, q: null, ecv: null, eq: null, x: 0, y: 0, rowH: 0, gen: 0, dirty: false, reset: false};
-  function resetCloth() {   // the canvases live as long as the feature (one GPU texture each); a rebuild just clears them
-    if (!CA.cv) { CA.cv = mk(CA.W, CA.H); CA.q = CA.cv.getContext('2d'); CA.ecv = mk(CA.W, CA.H); CA.eq = CA.ecv.getContext('2d'); }
-    CA.q.clearRect(0, 0, CA.W, CA.H); CA.eq.clearRect(0, 0, CA.W, CA.H);
+  // ---------------------------------------------------------------- the cloth atlas (one texture for every piece's box)
+  // Each changed piece box goes into its slot straight from the raster's array (G.texData: no 2D canvas between; a canvas
+  // was painted and the whole of it uploaded, 512 x 256 twice, every frame a piece changed). The two canvases are blank:
+  // they only name the textures (albedo, emit) and their size for the sprite batch. A slot's texels past its box are
+  // stale, never shown (the sprite shows the box)
+  const CA = {W: 512, H: 256, cv: null, ecv: null, x: 0, y: 0, rowH: 0, gen: 0, dirty: false, reset: false};
+  let zeros = new Uint8Array(0);   // (a box that had an emit and has none now)
+  function resetCloth() {   // the canvases live as long as the feature (one GPU texture each); a rebuild starts the slots over
+    if (!CA.cv) { CA.cv = mk(CA.W, CA.H); CA.ecv = mk(CA.W, CA.H); }
     CA.x = CA.y = CA.rowH = 0; CA.gen++; CA.dirty = true;
   }
   function slotFor(grp, w, h) {
@@ -807,7 +811,7 @@ export async function create(host) {
     if (W2 > CA.W || H2 > CA.H) return null;
     if (CA.x + W2 > CA.W) { CA.x = 0; CA.y += CA.rowH; CA.rowH = 0; }
     if (CA.y + H2 > CA.H) {   // full: start over; everything re-rasters into fresh slots this frame
-      CA.q.clearRect(0, 0, CA.W, CA.H); CA.eq.clearRect(0, 0, CA.W, CA.H); CA.x = CA.y = CA.rowH = 0; CA.gen++; CA.reset = true;
+      CA.x = CA.y = CA.rowH = 0; CA.gen++; CA.reset = true;
     }
     const n = {x: CA.x, y: CA.y, w: W2, h: H2, gen: CA.gen}; CA.x += W2; CA.rowH = Math.max(CA.rowH, H2); grp.slot = n;
     if (grp.box) grp.box.fresh = true;
@@ -909,19 +913,19 @@ export async function create(host) {
       }
     }
     const sl = slotFor(grp, bw, bh); if (!sl) { b.any = false; return; }
-    // upload only if a pixel changed (or the box moved / got a new slot)
-    let same = !b.fresh && b.w === bw && b.h === bh && !E;
-    if (same) { const Pv = b.prev; outer: for (let y = 0; y < bh; y++) { const o = y * CW; for (let x = 0; x < bw; x++) if (Pv[o + x] !== buf[o + x]) { same = false; break outer; } } }
-    if (!same) {
-      CA.q.clearRect(sl.x, sl.y, sl.w, sl.h); CA.q.putImageData(b.im, sl.x, sl.y, 0, 0, bw, bh); b.prev.set(buf); CA.dirty = true;
-      if (E || b.eany) { CA.eq.clearRect(sl.x, sl.y, sl.w, sl.h); if (E && eany) CA.eq.putImageData(b.eim, sl.x, sl.y, 0, 0, bw, bh); }
-    }
+    // upload only what changed: the albedo if a pixel changed (or the box moved / got a new slot), the emit likewise
+    const kept = !b.fresh && b.w === bw && b.h === bh;
+    if (!(kept && same32(b.prev, buf, bw, bh, CW))) { host.G.texData(CA.cv, sl.x, sl.y, bw, bh, b.im.data, CW); b.prev.set(buf); CA.dirty = true; }
+    if (E) { if (!(kept && same32(b.eprev, E, bw, bh, CW))) { host.G.texData(CA.ecv, sl.x, sl.y, bw, bh, b.eim.data, CW); b.eprev.set(E); } }   // (zero where nothing glows)
+    else if (b.eany) { if (zeros.length < bw * bh * 4) zeros = new Uint8Array(bw * bh * 4); host.G.texData(CA.ecv, sl.x, sl.y, bw, bh, zeros, bw); }
     b.fresh = false; b.eany = eany; b.x = bx; b.y = by; b.w = bw; b.h = bh; b.any = true;
   }
   function ensureEmit(b) {
-    if (!b.ebuf || b.ebuf.length !== b.buf.length) { b.ebuf = new Uint32Array(b.CW * b.CH); b.eim = new ImageData(new Uint8ClampedArray(b.ebuf.buffer), b.CW, b.CH); }
+    if (!b.ebuf || b.ebuf.length !== b.buf.length) { b.ebuf = new Uint32Array(b.CW * b.CH); b.eprev = new Uint32Array(b.CW * b.CH); b.eim = new ImageData(new Uint8ClampedArray(b.ebuf.buffer), b.CW, b.CH); }
     return b.ebuf;
   }
+  // the first w x h px of two arrays with rows cw apart: the same?
+  function same32(A, B, w, h, cw) { for (let y = 0; y < h; y++) { const o = y * cw; for (let x = 0; x < w; x++) if (A[o + x] !== B[o + x]) return false; } return true; }
   function RID(it) {   // ramp name -> index into it.rampList
     if (it.rid) return it.rid;
     it.rampList = []; it.rid = {};
@@ -962,7 +966,7 @@ export async function create(host) {
     if (!behindWall) for (const grp of it.groups) {
       const b = grp.box, sl = grp.slot; if (!b || !b.any || !sl || sl.gen !== CA.gen) continue;
       const [ax, ay, ah] = grp.anchor(), AX = Math.round((ax * RX + ay * RY) * ctx.PPM), AY = Math.round((ax * FX + ay * FY) * ctx.PPMY - ah * ctx.PPMH);
-      host.sprite({img: CA.cv, em: CA.ecv, sx: sl.x, sy: sl.y, sw: b.w, sh: b.h, px: AX - b.x, py: AY - b.y, x: ax, y: ay, h: ah, dynamic: CA.dirty});
+      host.sprite({img: CA.cv, em: CA.ecv, sx: sl.x, sy: sl.y, sw: b.w, sh: b.h, px: AX - b.x, py: AY - b.y, x: ax, y: ay, h: ah});   // (never re-uploaded whole: its slots go up in rasterGroup, G.texData)
     }
     if (!behindWall) for (const r of it.rods) drawRod(r);
     if (it.rope) {   // the prayer-flag rope: world segments between its nodes

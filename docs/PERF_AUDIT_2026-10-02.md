@@ -6,8 +6,9 @@ gfx.js, adapter.js and player.js. Line numbers drift, so search for the quoted c
 and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame breaks them.
 
 **Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2), the water's reflections (E.3), the
-cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact shadows (E.7) and the GPU layer batch (E.8)
-are done; the trees' sway is next. Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 not started.
+cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact shadows (E.7), the GPU layer batch (E.8)
+and wind's cloth atlas (E.9) are done. The trees' sway was measured and left (E.9); the hero's compositor is the next real
+item. Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 not started.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -607,6 +608,51 @@ now clears the limit wherever a batch grows. Golden hadn't caught it: its run's 
 | whole frame, day / night / horde | 2.10 / 1.82 / 2.24 ms | 1.64 / 1.51 / 1.84 ms (-22% / -17% / -18%) |
 | `G.render`, day / night / horde | 0.88 / 0.69 / 0.95 ms | 0.68 / 0.60 / 0.76 ms |
 | GPU, day (p50) | 0.63 ms | 0.62-0.63 ms |
+
+### E.9 The remaining uploads: wind's cloth atlas from its arrays; the hero and the trees measured (2026-10-03)
+
+**The trees' sway: left on the CPU.** The per-tree lean (world.js `leanTree`), wind's mesh hook and the trees' share of
+the foliage springs cost ~0.03 ms a frame together. A shader sway from the gust field would save next to nothing, change
+how the trees move, and still need the CPU for the arrow shudder, the birds' bob and the player's brush.
+
+**The hero's composite: measured; cutting its uploads needs another compositor.**
+
+- **What it costs.** Two 192 x 160 canvases (albedo, normals) are composited on the CPU and uploaded every frame:
+  - ~0.19 ms to compose, 80% of it the cloak's software raster (view/cloth.js `draw`);
+  - ~0.075 ms to upload.
+
+  These are CPU-backed canvases (`willReadFrequently`), so the upload doesn't wait on the GPU and doesn't stall.
+- **Why the uploads stay.** With the cloth sim, the picture changes in ~70% of idle frames and in every frame of motion,
+  so "only when changed" saves little. Uploading only the drawn box costs the same as all of it: Chrome snapshots the
+  whole canvas either way, and three's `copyTextureToTexture` adds ~5 state reads per call. Reading the box back to an
+  array (`getImageData`) costs 0.23 ms.
+- **What would help.** Composing into an array (the cloak already rasterises into one), or the cloak on the GPU (look-
+  sensitive). Both would also have to keep the CPU picture that contact.js and flow's afterimages read.
+
+**Wind's cloth atlas: from the raster's arrays (bit-exact).**
+
+- **What it replaced.** Every changed piece box was `putImageData`'d into two 512 x 256 GPU-backed 2D canvases (albedo,
+  emit). Then both whole canvases were uploaded at the raster rate (30 Hz): a GPU canvas -> WebGL copy, the stall class
+  E.8 removed from the layers. A glowing piece (ember hems, rift runes) uploaded both atlases on every raster.
+- **What it is now:**
+  - `G.texData(img, x, y, w, h, data, rowLen)` uploads a block of RGBA bytes into part of a canvas's texture at render
+    time (`texSubImage2D` from the array, straight by GL: one bind per texture, the row length set per block).
+  - wind.js sends each changed slot from its raster buffer (`b.im` / `b.eim`). The canvases stay blank: they only name
+    the two textures.
+  - The emit rows get their own changed-pixel check, so ember night went from ~13 slot uploads a frame to ~4.
+- **Checks:** golden against the code before: 16 / 16 identical; smoke and simview pass.
+
+**Results**, interleaved A/B (14 x 150 frames). The machine was loaded (another session's work), and the old path's
+slices swung 2-11 ms where the new one held 1.3-2.7:
+
+| | Before | After |
+|---|---|---|
+| whole frame, day / ember night / horde | 4.06 / 3.36 / 3.43 ms | 2.12 / 1.58 / 2.28 ms |
+| `G.render`, day / ember night / horde | 1.78 / 1.57 / 1.53 ms | 0.90 / 0.62 / 0.93 ms |
+| `wind.frame` | 0.09-0.15 ms | 0.06 ms |
+
+The last, quieter slices are closer together (day 1.65-2.03 against 1.50-1.66 ms). The win is mostly that a busy GPU no
+longer stalls the frame.
 
 ### Stage 4: browser and measuring
 
