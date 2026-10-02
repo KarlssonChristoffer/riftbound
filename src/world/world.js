@@ -786,9 +786,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     glb: state => glbGeometry(loader, state),                   // Promise<geometry | null> (debris chunks, ...)
     // an extra live mesh owned by a feature (debris chunks): dispose it when done; a rebuild (biome switch) disposes the rest.
-    // It doesn't block point lights unless o.occlude (tumbling chunks next to a blast threw black spikes everywhere)
+    // It doesn't block point lights unless o.occlude (tumbling chunks next to a blast threw black spikes everywhere).
+    // o.static: it never moves (its sun shadow goes in the cached static map, gfx mesh {static})
     mesh: (geo, matrix, o = {}) => {
-      const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4()), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
+      const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4(), {static: !!o.static}), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
       if (!o.occlude) m.sm.layers.disable(1);
       return m;
     },
