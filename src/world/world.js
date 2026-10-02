@@ -7,6 +7,8 @@
 //            biomes it has species for; trees3d: false = the painted cards); everything else the kit doesn't model
 //            (bushes, tufts, braziers, torches, dummies, brutes, crystal) stays a painted billboard card
 //   lights   from the biome's sprites (braziers, torches, crystals) and ground (lava, runes), in metres
+//   leaves   fallen leaves lie under and downwind of the 3D trees: a density map baked here (LITTER, bakeLitter) that gfx.js SURF_FS
+//            draws from, by how far autumn has gone (the season looks: gfx.js setGround). The plants' autumn: plantOf, below
 //   water    the stream's surface MOVES, in the shader (gfx.js SURF_FS), from one baked texture. Everything animated is built
 //            from waterSample(x, y, out) below: it is the ONE place that says "this is water" and what the water there does.
 //            A new body of water (a plateau stream, a pool) adds a branch to waterSample and nothing else needs to change.
@@ -35,7 +37,8 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
-import {rgbOf, hexRaw255 as hexrgb, hex255} from '../core/color.js';
+import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
+import {vnoise, smooth} from '../core/mathx.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
@@ -168,7 +171,7 @@ function travelTab() {   // S(y) = integral of w(y') / W_REF dy' from y = -1, ev
 }
 // waterSample(x, y, out): is (x, y) water and what does the water there do? Fills out (see the header); no allocation.
 // Stones are dry footing (their painted body, out.kind 0); the water round them is flagged out.hold
-const _rs = {d: 0, a: 0, l: 0, hw: 0}, _os = {d: 0, a: 0, l: 0, hw: 0}, RILL_K = .55, RILL_LEN = RILL.len[RILL.len.length - 1];
+const _rs = {d: 0, a: 0, l: 0, hw: 0}, _os = {d: 0, a: 0, l: 0, hw: 0}, _lw = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0}, RILL_K = .55, RILL_LEN = RILL.len[RILL.len.length - 1];
 const travel = y => { const tab = S_TAB || travelTab(), f = (y - S_Y0) / S_DY, i = Math.min(tab.length - 2, f | 0); return tab[i] + (tab[i + 1] - tab[i]) * (f - i); };
 // the outflow / pool: its travel falls by `ease(u)` metres over the u metres east of the river's bank (0 for the first OUT_U0 m, then eased in:
 // continuous in value and slope, so it joins the river's own s without a seam); its axis's y at x (a linear lookup in OUTFLOW.pts, the ends held)
@@ -267,6 +270,90 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
   const tex = new THREE.DataTexture(data, WPX, HPX, THREE.RGBAFormat, THREE.UnsignedByteType);
   tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.colorSpace = THREE.NoColorSpace; tex.needsUpdate = true;
   return tex;
+}
+
+// ---------------------------------------------------------------- fallen leaves: the density bake
+// The ground shader (gfx.js SURF_FS) draws leaves from one RGBA8 map, a texel per LITTER.div x LITTER.div ground texels, read
+// NEAREST: R = how thickly leaves lie here once the crowns are bare (0..1; the shader scales it by how much has fallen so far,
+// gfx.js setGround, so this never changes with the season), G = which tree palette they came from (a row of the palette
+// texture), B / A spare. It is baked from where the 3D trees stand and how big their crowns are, with presentation's only
+// inputs (no sim state, no Math.random): a pool under each crown, drawn out DOWNWIND (the prevailing wind, west to east:
+// features/wind.js W.dir), drifted against the walls and along the edges of the paths, never on water (waterSample) or over
+// the ravine. A tree's leaves are the colours of its own autumn (shape.autumn: 4 stages of ['#light', '#base', '#shade'],
+// trees3d.js; a tree without one drops RUST). Baked at the build and again when a tree joins the world (the garden's, the
+// willows': it is marked dirty and the next update bakes once), never per frame
+export const LITTER = {
+  div: 2, groups: 8,
+  wind: [.94, .34],                                   // where the wind blows toward (arena x east, y south)
+  head: .9, tail: 2.0, side: 1.15, core: .55, edge: 1.5, // the pool in crown radii: upwind, downwind, across, solid core, where it ends
+  peak: .5, willow: {r: 1.7, w: .75}, card: 1.6,     // the density under a crown, a willow's (radius x, weight: its leaves hang, they don't pile), a painted tree's radius (m)
+  wall: [.6, 1.3], path: [.4, .7],                    // the drift against a wall: (reach m, extra density), along a path's edge
+};
+const RUST = [['#e0b04e', '#c88c34', '#9a6422'], ['#d28a3a', '#b4642a', '#86441c'], ['#b0602c', '#8a4420', '#62301a'], ['#7a5232', '#5e3c24', '#44291a']];
+function makeLitter(WPX, HPX) {
+  const W = Math.ceil(WPX / LITTER.div), H = Math.ceil(HPX / LITTER.div), N = W * H, G = LITTER.groups;
+  const dt = (data, w, h) => { const t = new THREE.DataTexture(data, w, h, THREE.RGBAFormat, THREE.UnsignedByteType); t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace; t.needsUpdate = true; return t; };
+  const data = new Uint8Array(N * 4), pd = new Uint8Array(12 * G * 4);
+  const L = {W, H, data, pd, tex: dt(data, W, H), pal: dt(pd, 12, G), keep: new Float32Array(N), best: new Float32Array(N), grp: new Uint8Array(N), bonus: new Float32Array(N), stats: {ms: 0, trees: 0, bakes: 0}};
+  L.dispose = () => { L.tex.dispose(); L.pal.dispose(); };
+  return L;
+}
+const segDist = (x, y, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, t = l2 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2)) : 0; return Math.hypot(x - a[0] - dx * t, y - a[1] - dy * t); };
+// trees: [{x, y, R (m), w, autumn}], walls: [[x0, y0, x1, y1]], paths: [{pts, w}], dry(x, y): not water, not over the ravine
+function bakeLitter(L, trees, {WPX, HPX, PPM, walls, paths, dry}) {
+  const t0 = performance.now(), {W, H, data, keep, best, grp, bonus} = L, sx = WPX / W / PPM, sy = HPX / H / PPM, [wx, wy] = LITTER.wind;
+  keep.fill(1); best.fill(0); grp.fill(0); bonus.fill(1);
+  // the palettes: group 0 is rust; each distinct autumn a tree brings takes the next row (distinct by its colours, not its array: every
+  // shape of a species carries its own copy)
+  const groups = [RUST], keys = new Map(), col = c => typeof c === 'string' ? hex255(c) : c.map(v => Math.round(v * 255));
+  for (const t of trees) {
+    let g = 0;
+    if (t.autumn) {
+      const key = JSON.stringify(t.autumn); g = keys.get(key);
+      if (g === undefined) { g = groups.length < LITTER.groups ? groups.push(t.autumn) - 1 : 0; keys.set(key, g); }
+    }
+    t.g = g;
+  }
+  groups.forEach((st, g) => st.forEach((ramp, s) => ramp.forEach((c, k) => { const o = (g * 12 + s * 3 + k) * 4, rgb = col(c); L.pd[o] = rgb[0]; L.pd[o + 1] = rgb[1]; L.pd[o + 2] = rgb[2]; L.pd[o + 3] = 255; })));
+  // a pool under each crown, drawn out downwind: the distance is measured in crown radii, stretched along the wind
+  for (const t of trees) {
+    const reach = t.R * LITTER.edge * Math.max(LITTER.tail, LITTER.head, LITTER.side), i0 = Math.max(0, Math.floor((t.x - reach) / sx)), i1 = Math.min(W - 1, Math.ceil((t.x + reach) / sx));
+    const j0 = Math.max(0, Math.floor((t.y - reach) / sy)), j1 = Math.min(H - 1, Math.ceil((t.y + reach) / sy));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const dx = (i + .5) * sx - t.x, dy = (j + .5) * sy - t.y, u = dx * wx + dy * wy, v = dy * wx - dx * wy;
+      const ue = u / (t.R * (u >= 0 ? LITTER.tail : LITTER.head)), ve = v / (t.R * LITTER.side), q = Math.sqrt(ue * ue + ve * ve);
+      if (q >= LITTER.edge) continue;
+      const f = q <= LITTER.core ? 1 : 1 - smooth((q - LITTER.core) / (LITTER.edge - LITTER.core)), d = LITTER.peak * t.w * f, k = j * W + i;
+      keep[k] *= 1 - d; if (d > best[k]) { best[k] = d; grp[k] = t.g; }
+    }
+  }
+  // drifts: against a wall's foot, along the edge of a path (only where leaves lie at all: the density multiplies)
+  const mark = (x0, y0, x1, y1, fn) => {   // the lit texels of a box in metres, each with its centre
+    for (let j = Math.max(0, Math.floor(y0 / sy)); j <= Math.min(H - 1, Math.ceil(y1 / sy)); j++) for (let i = Math.max(0, Math.floor(x0 / sx)); i <= Math.min(W - 1, Math.ceil(x1 / sx)); i++) fn(j * W + i, (i + .5) * sx, (j + .5) * sy);
+  };
+  const [wr, wk] = LITTER.wall, [pr, pk] = LITTER.path;
+  for (const r of walls) mark(r[0] - wr, r[1] - wr, r[2] + wr, r[3] + wr, (k, x, y) => {
+    const d = Math.hypot(Math.max(r[0] - x, 0, x - r[2]), Math.max(r[1] - y, 0, y - r[3]));
+    if (d < wr) bonus[k] = Math.max(bonus[k], 1 + wk * (1 - d / wr));
+  });
+  for (const P of paths) for (let s = 0; s + 1 < P.pts.length; s++) {
+    const a = P.pts[s], b = P.pts[s + 1], m = P.w / 2 + pr + .1;
+    mark(Math.min(a[0], b[0]) - m, Math.min(a[1], b[1]) - m, Math.max(a[0], b[0]) + m, Math.max(a[1], b[1]) + m, (k, x, y) => {
+      const e = Math.abs(segDist(x, y, a, b) - P.w / 2);
+      if (e < pr) bonus[k] = Math.max(bonus[k], 1 + pk * (1 - e / pr));
+    });
+  }
+  // the map: leaves lie in clumps (value noise at ~0.6 m and ~0.2 m), never on water or over the ravine
+  for (let j = 0, k = 0; j < H; j++) for (let i = 0; i < W; i++, k++) {
+    let D = 1 - keep[k];
+    if (D > .004) {
+      if (!dry((i + .5) * sx, (j + .5) * sy)) D = 0;
+      else D = Math.min(.9, D * bonus[k] * (.3 + 1.4 * (vnoise(i / 9, j / 9, 3) * .6 + vnoise(i / 3.2, j / 3.2, 4) * .4)));
+    } else D = 0;
+    const o = k * 4; data[o] = Math.round(D * 255); data[o + 1] = grp[k]; data[o + 2] = 0; data[o + 3] = 255;
+  }
+  L.tex.needsUpdate = true; L.pal.needsUpdate = true;
+  L.stats.ms = performance.now() - t0; L.stats.trees = trees.length; L.stats.bakes++;
 }
 
 // ---------------------------------------------------------------- strata texture for the plateau's faces
@@ -434,13 +521,16 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const WT = WATER_TUNE[biome.id], wTex = WT ? bakeWater(biome, WT, {WPX, HPX, PPM, px, cliffZ}) : null;
   if (wTex) disposers.push(() => wTex.dispose());
   G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark} : null);
-  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0, cliff: cTex, cliffOff: SKIRT, water: wTex}, false); disposers.push(() => ground.dispose());
+  // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
+  const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX) : null;
+  if (lit) disposers.push(lit.dispose);
+  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0, cliff: cTex, cliffOff: SKIRT, water: wTex, litter: lit}, false); disposers.push(() => ground.dispose());
 
   // ---- plateau: top (the painted top, planar) + 4 strata faces
   const FL = FALL_LOOK[biome.id];
   for (const q of PLATEAUS) {
     const top = new THREE.PlaneGeometry(q.x1 - q.x0, q.y1 - q.y0); top.rotateX(-Math.PI / 2); top.translate((q.x0 + q.x1) / 2, q.h, (q.y0 + q.y1) / 2);
-    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1, water: wTex}); disposers.push(() => t.dispose());   // (water on the plateau's top too: the rill moves)
+    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1, water: wTex, litter: lit}); disposers.push(() => t.dispose());   // (water on the plateau's top too: the rill moves; so do the leaves)
     const faces = [   // [len, centre x, centre z, rotation y]
       [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y1, 0], [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y0, Math.PI],
       [q.y1 - q.y0, q.x1, (q.y0 + q.y1) / 2, Math.PI / 2], [q.y1 - q.y0, q.x0, (q.y0 + q.y1) / 2, -Math.PI / 2]];
@@ -466,10 +556,24 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // ITEMS: one per prop. {p, st (model state), obj (id), live (G.mesh) | card (G.card), sp (painted sprite shown), yaw?,
   //   manageMatrix (a feature poses the mesh itself), hover (0..1 pulse set by the host)}
   const items = [], byProp = new Map(), extra = new Set();
+  let litterDirty = false;   // fallen leaves: a tree joined or left (bakeNow, below)
   let nextId = 10;
   const SHADOWLESS = new Set(['tuft', 'reed', 'fern']);
   if (haveGlb) await Promise.all([...new Set(props.map(stateOf).filter(Boolean))].map(s => glbGeometry(loader, s)));   // all at once
   const cardOf = (sp, o) => G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1], type: 3, bias: .00125, ...o});
+  // a plant's autumn (gfx.js CARD_FS): the biome's style.plantAutumn gives each kind a few PATHS (four stages of colour, biomes.js).
+  // A plant takes one by the golden ratio in the order the world creates them (twelve bushes are spread over the paths instead of
+  // twelve dice: some crimson, some orange, most yellow, a straggler or two) and starts at a delay of its own; where its patches
+  // are comes from its position. Deterministic, no Math.random. null = a kind with no autumn here (the card is as painted)
+  const PLANT_KIND = {bush: 1, tuft: 2, fern: 3, reed: 4}, plantN = {}, palOf = new Map();
+  const plantOf = p => {
+    const PA = biome.style.plantAutumn?.[p.kind]; if (!PA) return null;
+    const n = plantN[p.kind] = (plantN[p.kind] ?? -1) + 1, u = (.17 + n * .6180339887) % 1;
+    let i = 0, acc = PA.paths[0].w; while (i < PA.paths.length - 1 && u >= acc) acc += PA.paths[++i].w;
+    const P = PA.paths[i], A = PA.paths[P.alt ?? i], key = P.name + '|' + A.name + '|' + p.kind;
+    let pal = palOf.get(key); if (!pal) palOf.set(key, pal = [P, A].flatMap(q => q.stages.flatMap(st => st.map(hex01))));
+    return {kind: PLANT_KIND[p.kind], seed: hsh(p.x, p.y, 5), delay: P.delay[0] + (P.delay[1] - P.delay[0]) * hsh(p.y, p.x, 9), ramp: biome.style[PA.ramp].h.map(hex01), pal};
+  };
   // procedural trees (trees3d.js): a live mesh instead of the painted card, turned and scaled per tree (it.pose)
   const famOf = name => Math.max(0, FAMS.indexOf(name));
   const treeOf = p => trees3d && p.kind === 'tree' && !p.painted ? treeModel(p, biome.id, famOf) : null;
@@ -493,7 +597,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         it.yaw.card.anchor = new THREE.Vector3(p.x, z0, p.y); it.yaw.card.setVisible(false);
       }
     } else if (sp) {
-      it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind)}); it.sp = sp;
+      it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind), plant: plantOf(p)}); it.sp = sp;
       it.card.anchor = new THREE.Vector3(p.x, z0, p.y);
     } else continue;
     items.push(it); byProp.set(p, it);
@@ -508,14 +612,33 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     if (p.dead || byProp.has(p)) return byProp.get(p) || null;   // gone (or added) while the model loaded
     const it = {p, st, obj, sp: null, hover: 0, pose: tm};
     if (geo) it.live = liveOf(it, geo, p.x, p.z || 0, p.y);
-    else if (sp) { it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind)}); it.sp = sp; } else return null;
-    items.push(it); byProp.set(p, it); return it;
+    else if (sp) { it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind), plant: plantOf(p)}); it.sp = sp; } else return null;
+    items.push(it); byProp.set(p, it); if (p.kind === 'tree') litterDirty = true; return it;
   }
   // a prop that leaves the world for good (a killed enemy): its card / mesh go with it
   function removeItem(p) {
     const it = byProp.get(p); if (!it) return;
     it.live?.dispose(); it.card?.dispose(); it.yaw?.card.dispose();
-    items.splice(items.indexOf(it), 1); byProp.delete(p);
+    items.splice(items.indexOf(it), 1); byProp.delete(p); if (p.kind === 'tree') litterDirty = true;
+  }
+  // fallen leaves (LITTER): the trees as the bake wants them (a 3D tree's crown, rotated and scaled as it stands; a painted one's guess;
+  // a dead tree none), and the bake itself. A tree that joined or left marks it dirty: update() bakes once before the next draw
+  function bakeNow() {
+    litterDirty = false; if (!lit) return;
+    const trees = [], walls = [], dead = p => (p.variant | 0) === 2;
+    for (const it of items) {
+      const p = it.p;
+      if (p.rect) walls.push(p.rect);
+      if (p.kind !== 'tree' || p.gone) continue;
+      const w = it.pose;
+      if (w) {
+        const c = w.crown; if (!c) continue;
+        const co = Math.cos(w.yaw), si = Math.sin(w.yaw), wl = w.species === 'willow';
+        trees.push({x: p.x + (c.x * co + c.z * si) * w.scale, y: p.y + (c.z * co - c.x * si) * w.scale, R: c.r * w.scale * (wl ? LITTER.willow.r : 1.2), w: wl ? LITTER.willow.w : 1, autumn: w.autumn});
+      } else if (it.card && !dead(p)) trees.push({x: p.x, y: p.y, R: (p.variant | 0) === 3 ? LITTER.willow.r * 1.15 : LITTER.card, w: 1, autumn: null});
+    }
+    const paths = layout.marks.filter(m => m.type === 'path');
+    bakeLitter(lit, trees, {WPX, HPX, PPM, walls, paths, dry: (x, y) => { if (y >= cliffZ(x)) return false; waterSample(x, y, _lw); return !_lw.kind; }});
   }
   function setState(it, st) {
     it.st = st;
@@ -546,6 +669,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   }
   // every frame: follow the props (stage, lid, hop, wobble, flash, gone), collect their lights, pick the yaw frames
   function update(yaw) {
+    if (litterDirty) bakeNow();
     lights.length = 0; for (const l of groundL) lights.push(l);
     const k0 = -Math.round(yaw / step);
     for (const it of items) {
@@ -587,7 +711,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     }
   }
   const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length;
-  return {layout, props, lights, items, setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc, trees3d,
+  litterDirty = true;   // (the first bake: the trees are all here)
+  return {layout, props, lights, items, litter: lit && lit.stats, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
+    setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc, trees3d,
     itemOf: p => byProp.get(p) || null,
     // repaint one family of the ramp texture: r4 = 4 tones, rgb 0..1, light -> dark (+ the line / outline tones derived as
     // ramp6 does). The seasons' leaves (sim/env.js leafRamp); call it on change, not per frame
