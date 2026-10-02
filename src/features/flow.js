@@ -10,8 +10,9 @@
 //   arrows      at dusk / night a flying arrow carries a small warm light (at most 2); every flying arrow trails the
 //               streak of disturbed air the arena drew (player.js drawPixelArrow): two dithered alpha steps along its
 //               recent trail, lit, plus a glow copy so the flight stays readable at night
-//   marks       ground decals that stay a minute or two and fade in steps: skid scuffs, roll scrapes, turn plants, landing
-//               crescents, scorch rings (explode), holes where arrows stood, wet / charred footprints after a splash
+//   marks       ground decals that fade in steps: the player's own (skid scuffs, roll scrapes, turn plants, landing
+//               crescents) within ~10-20 s, scorch rings (explode) and holes where arrows stood in a minute or two, wet /
+//               charred footprints after a splash in seconds
 //   the Ranger  breath puffs in the cold (frost, and at night elsewhere; faster after sprinting), drips after a splash,
 //               sparks lifting off the cloak in ember
 //
@@ -68,7 +69,7 @@ const TUNE = {
   streak: {rate: 18, speed: 5.5, life: [.15, .25], len: [3, 6]},
   ghost: {every: .05, keep: .18, gap: 6, alpha: [.35, .2, .1]},
   light: {radius: 1.8, dusk: .38, night: .5, max: 2},
-  marks: {cap: 250},
+  marks: {cap: 250, st: 4},             // st: s per fade stage of the player's own marks (a mark lasts 3-5 stages)
   breath: {every: [2, 3], fast: .8, heat: 4},
   wet: {prints: 8, drips: 4},
   air: {tail: .72, a: [.22, .45], glow: [.35, .7]},   // arrow air streak: from the shaft's tail (main.js draws it .72 m), alpha steps
@@ -346,7 +347,7 @@ export async function create(host) {
   const wpx = (x, y) => [Math.round(x * PPM), Math.round(y * PPMY)];
   // a crescent of soil pushed up at a foot, bulging toward (ux, uy) (ground dir). rx, ry px, span rad either side
   function crescent(x, y, ux, uy, o = {}) {
-    const z = ground(x, y), d = decal(MARK[biome], o.st || 18, z), cx = x * PPM, cy = y * PPMY, [vx, vy] = scr(ux, uy), a0 = Math.atan2(vy, vx);
+    const z = ground(x, y), d = decal(MARK[biome], o.st || TUNE.marks.st, z), cx = x * PPM, cy = y * PPMY, [vx, vy] = scr(ux, uy), a0 = Math.atan2(vy, vx);
     const rx = o.rx || 2.6, ry = o.ry || 1.7, span = o.span || 1.25, tone = o.tone ?? 1;
     for (let a = -span; a <= span + 1e-6; a += .16) dot(d, Math.round(cx + Math.cos(a0 + a) * rx), Math.round(cy + Math.sin(a0 + a) * ry), tone);
     if (o.dent !== false) dot(d, Math.round(cx), Math.round(cy), tone + 1);   // the heel's dent
@@ -407,7 +408,7 @@ export async function create(host) {
     // the heels dig in hardest at the start; the streaks thin out as he slows, wander a pixel, break up now and then
     const z = ground(P.x, P.y), ux = P.vx / speed, uy = P.vy / speed, tone = speed > 6 ? 0 : speed > 3.2 ? 1 : 2, pts = [];
     for (const side of [-1, 1]) { const o = side * (.1 + (vn(SK.n / 9, side + 3, SK.sd) - .5) * .07); pts.push(wpx(P.x + uy * o, P.y - ux * o)); }
-    if (!SK.d || SK.d.z !== z) { SK.d = decal(MARK[biome], 20, z); SK.n = 0; SK.sd = (R() * 9e5) | 0; for (const [x, y] of pts) dot(SK.d, x, y, tone); }
+    if (!SK.d || SK.d.z !== z) { SK.d = decal(MARK[biome], TUNE.marks.st, z); SK.n = 0; SK.sd = (R() * 9e5) | 0; for (const [x, y] of pts) dot(SK.d, x, y, tone); }
     else {
       const n0 = SK.n;
       for (let k = 0; k < 2; k++) line(SK.d, SK.last[k][0], SK.last[k][1], pts[k][0], pts[k][1], tone, i => i > 0 && hsh((n0 + i) >> 1, k, SK.sd) < .13);
@@ -419,7 +420,7 @@ export async function create(host) {
     const on = P.state === 'roll' && P.t > .1 && P.t < .42;   // shoulders / back on the ground
     if (!on) { if (RL.d) { RL.d.set = null; RL.d = null; } return; }
     const z = ground(P.x, P.y), [X, Y] = wpx(P.x, P.y);
-    if (!RL.d || RL.d.z !== z) { RL.d = decal(MARK[biome], 20, z); RL.len = 0; RL.next = 0; RL.last = [X, Y]; }
+    if (!RL.d || RL.d.z !== z) { RL.d = decal(MARK[biome], TUNE.marks.st, z); RL.len = 0; RL.next = 0; RL.last = [X, Y]; }
     const [lx, ly] = RL.last, seg = Math.hypot(X - lx, Y - ly), L0 = RL.len;
     RL.len += seg;
     if (seg > 0) {
@@ -623,7 +624,7 @@ export async function create(host) {
     for (const e of evs || []) {
       if ((e.type === 'player.land' || e.type === 'player.step' || e.type === 'player.jump' || e.type === 'player.splash') && !mine(e)) continue;
       if (e.type === 'player.land' && P.state === 'land') {   // a real landing (sprint footfalls are 'player.land' too, big 2, state 'move')
-        if (e.big >= 3) { dip = Math.max(dip, K.dip); crescent(e.x, e.y, dirX, dirY, {rx: 5, ry: 3, span: 2.5, tone: 1, st: 20, dent: false}); }
+        if (e.big >= 3) { dip = Math.max(dip, K.dip); crescent(e.x, e.y, dirX, dirY, {rx: 5, ry: 3, span: 2.5, tone: 1, dent: false}); }
         else if (e.big === 2) {
           const drop = prevState === 'fall' ? (P.fall0 ?? P.z) - P.z : 0;
           dip = Math.max(dip, prevState === 'fall' ? K.dipSoft + (K.dip - K.dipSoft) * clamp((drop - .3) / 1.5, 0, 1) : K.dipSoft);

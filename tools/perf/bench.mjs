@@ -2,14 +2,17 @@
 // Starts its own dev server and a headless Chrome on the real GPU (ANGLE / D3D11, no vsync, no frame cap), loads each
 // scenario, lets it settle, then reads the in-game profiler (src/core/perf.js) for `--secs` seconds plus
 // GPU time (timer queries round G.render). Prints one row per scenario, compares with tools/perf/baseline.json and
-// exits 1 when a scenario is over budget or a system got clearly slower than the baseline.
+// exits 1 when a scenario is over budget (JS, its groups, the p95 frame, the GPU) or a system got clearly slower than
+// the baseline. It renders at the dev display's size (3440x1440: the HD pass and the GPU work scale with it).
 //
 //   node tools/perf/bench.mjs                      all scenarios, compare with the baseline
 //   node tools/perf/bench.mjs --only night         one scenario (substring match)
 //   node tools/perf/bench.mjs --save               ... and write the results as the new baseline
-//   options: --secs 6 --port 8139 --res 1920x1080 --no-fail --runs N (median of N fresh loads; --save uses 3)
+//   options: --secs 6 --port 8139 --res 3440x1440 --no-fail --runs N (median of N fresh loads; --save uses 3)
+//            --horde 60   enemies in the horde scenario (what more life costs: how many fit in the frame)
 //            --q inst=0   extra URL parameters for every scenario (an A/B of a switch)   --only day,run   several
-//            --throttle 3 (the CPU slowed 3x, ~a mid laptop: then the target is p95 <= 16.7 ms, not the budgets; no baseline compare)
+//            --throttle 3 (the CPU slowed 3x, ~a mid laptop: a look at weaker machines, not the target; checks only
+//                          p95 <= 16.7 ms, no baseline compare)
 //            env CHROME = path to chrome.exe
 //   --path src_ab/   bench another copy of the page (an A/B: the old version of a file in a copied folder)
 //
@@ -23,11 +26,16 @@ import {fileURLToPath} from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..'), BASE = join(ROOT, 'tools', 'perf', 'baseline.json');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; }, flag = k => process.argv.includes('--' + k);
-const PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, '') + '/', RUNS = Math.max(1, +arg('runs', flag('save') ? 3 : 1)), THROTTLE = +arg('throttle', 1), EXTRA = arg('q', ''), SECS = +arg('secs', 6), PORT = +arg('port', 8139), [W, H] = arg('res', '1920x1080').split('x').map(Number), ONLY = arg('only', '');
+const HORDE = +arg('horde', 60);
+const PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, '') + '/', RUNS = Math.max(1, +arg('runs', flag('save') ? 3 : 1)), THROTTLE = +arg('throttle', 1), EXTRA = arg('q', ''), SECS = +arg('secs', 6), PORT = +arg('port', 8139), [W, H] = arg('res', '3440x1440').split('x').map(Number), ONLY = arg('only', '');
 const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 
 // ---- scenarios: a page query + an optional driver (runs in the page once it's ready)
 const WALK = `(() => { const R = window.__r3d; let i = 0; window.__drive = setInterval(() => { R.keys.clear(); R.keys.add('wasd'[(i++ >> 4) % 4]); }, 60); })()`;
+// the horde: N enemies on rings 3.5-8.3 m round the player, who is made immune (the bench overrides game.js's hook) so
+// the fight goes on without hits and hitstops
+const SPAWN = `(() => { const R = window.__r3d, C = R.host.feature('combat').core, x = R.host.player.x, y = R.host.player.y; C.immune = () => true;
+  for (let i = 0; i < ${HORDE}; i++) { const r = 3.5 + (i % 4) * 1.6, a = i * 2.39996; C.spawnBrute({x: x + Math.cos(a) * r, y: y + Math.sin(a) * r * .7, hp: 1e6, dmg: 0, type: 'brute', name: 'Brute', coins: [0, 0]}); } })()`;
 const SCENARIOS = [
   {name: 'day',         q: 'mode=sandbox',                            note: 'ruins, day: sun shadows, 3D trees'},
   {name: 'night-fires', q: 'mode=sandbox&biome=ember&time=night',     note: 'ember, night: every fire and light'},
@@ -36,6 +44,7 @@ const SCENARIOS = [
   {name: 'basic-cloak', q: 'mode=sandbox&set=basic',                  note: 'day without the cloth sim (A/B)'},
   {name: 'storm',       q: 'mode=sandbox&weather=storm&season=summer', note: 'ruins, summer storm: rain, splashes, lightning'},
   {name: 'snow',        q: 'mode=sandbox&weather=snow&season=winter', note: 'ruins, winter: snowfall, bare crowns'},
+  {name: 'horde',       q: 'mode=sandbox', drive: SPAWN, whole: true, note: `ruins, day: ${HORDE} enemies round the player`},
 ].filter(s => !ONLY || ONLY.split(',').some(o => s.name.includes(o)));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -113,21 +122,22 @@ let fail = 0;
 const f = (v, w = 6, d = 2) => (v ?? 0).toFixed(d).padStart(w), mark = (v, b) => v > b ? '!' : ' ';
 console.log(`\nGPU: ${gpuName} · ${W}x${H} · ${SECS} s per scenario${laptop ? ` · CPU THROTTLED ${THROTTLE}x (target: p95 <= 16.7 ms)` : ''} · CPU calibration ${CAL0.toFixed(0)} / ${CAL1.toFixed(0)} ms${base?.calib ? ` (baseline ${base.calib.toFixed(0)})` : ''} · machine load before the run ${(LOAD0 * 100).toFixed(0)}%`);
 if (busy) console.log('WARNING: the machine is BUSY (load over 20% before the run, or calibration over 1.35x the baseline): other work is competing for the CPU, so these numbers are not comparable. Re-run when it is quiet.');
-console.log(`budget (ms): JS ${B.frame} · p95 frame ${B.p95} · sim ${B.sim} · char ${B.char} · view ${B.view} · render ${B.render} · ui ${B.ui}\n`);
-console.log('scenario      fps   p50    p95  | JS avg |  sim   char   view  render   ui  | GPU p50 | draws | top systems');
+console.log(`budget (ms): JS ${B.frame} · p95 frame ${B.p95} · GPU p95 ${B.gpu} · sim ${B.sim} · char ${B.char} · view ${B.view} · render ${B.render} · ui ${B.ui}\n`);
+console.log('scenario      fps   p50    p95  | JS avg |  sim   char   view  render   ui  | GPU p95 | draws | top systems');
 for (const sc of SCENARIOS) {
   const r = results[sc.name]; if (!r || r.error) { console.log(sc.name.padEnd(12), 'FAILED to load'); fail++; continue; }
   const g = Object.fromEntries(r.groups.map(x => [x.group, x.avg]));
   const over = laptop ? [r.frame.p95 > 16.7 && 'p95 > 16.7 ms (60 fps)'].filter(Boolean)   // throttled: only the 60 fps target counts
-    : [r.frame.p95 > B.p95 && 'p95', r.js.avg > B.frame && 'JS', ...r.groups.filter(x => x.avg > x.budget).map(x => x.group)].filter(Boolean);
+    : [r.frame.p95 > B.p95 && 'p95', r.js.avg > B.frame && 'JS', r.gpu && B.gpu && r.gpu.p95 > B.gpu && 'GPU',
+      ...(sc.whole ? [] : r.groups.filter(x => x.avg > x.budget).map(x => x.group))].filter(Boolean);   // (whole: the horde shifts time into render; judged on the frame)
   if (over.length) fail++;
   console.log(`${sc.name.padEnd(12)}${f(r.fps, 5, 0)} ${f(r.frame.p50, 5)} ${f(r.frame.p95, 5)}${mark(r.frame.p95, B.p95)}|${f(r.js.avg, 6)}${mark(r.js.avg, B.frame)}|` +
-    ['sim', 'char', 'view', 'render', 'ui'].map(k => f(g[k], 6) + mark(g[k], B[k])).join('') + `| ${f(r.gpu?.p50, 6)}  | ${String(r.draws).padStart(4)}  | ` +
+    ['sim', 'char', 'view', 'render', 'ui'].map(k => f(g[k], 6) + mark(g[k], B[k])).join('') + `| ${f(r.gpu?.p95, 6)}${mark(r.gpu?.p95 ?? 0, B.gpu ?? Infinity)} | ${String(r.draws).padStart(4)}  | ` +
     r.systems.slice(0, 4).map(s => `${s.label} ${s.avg.toFixed(2)}`).join(', ') + (over.length ? `   OVER: ${over.join(', ')}` : ''));
   if (r.runs) console.log(`   ${r.runs.length} runs, JS avg: ${r.runs.map(v => v.toFixed(2)).join(' / ')} (the median run is shown)`);
   if (r.errors) console.log('   errors:', r.errors.join(' | '));
   // regressions against the baseline: a system 25% and 0.1 ms slower, or the JS frame 15% slower
-  const b = laptop ? null : base?.results?.[sc.name];
+  const b = laptop || base?.res !== `${W}x${H}` ? null : base?.results?.[sc.name];   // (another resolution: nothing to compare)
   if (b && !b.error) {
     const prev = Object.fromEntries(b.systems.map(s => [s.label, s.avg])), slower = [];
     for (const s of r.systems) { const p = prev[s.label] ?? 0; if (s.avg - p > .1 && s.avg > p * 1.25) slower.push(`${s.label} ${p.toFixed(2)} -> ${s.avg.toFixed(2)}`); }
@@ -135,7 +145,7 @@ for (const sc of SCENARIOS) {
     if (slower.length) { console.log('   slower than baseline:', slower.join(' · ')); if (!busy) fail++; }
   }
 }
-if (base) console.log(`\n(baseline: ${base.date} ${base.commit || ''})`);
+if (base) console.log(`\n(baseline: ${base.date} ${base.commit || ''} at ${base.res}${base.res !== `${W}x${H}` ? `: not compared, this run is ${W}x${H} (--save one at this size)` : ''})`);
 if (flag('save') && laptop) console.log('not saving a baseline from a throttled run');
 else if (flag('save')) {
   let commit = ''; try { commit = (await new Promise(r => { const g = spawn('git', ['rev-parse', '--short', 'HEAD'], {cwd: ROOT}); let o = ''; g.stdout.on('data', d => o += d); g.on('close', () => r(o.trim())); })); } catch {}
