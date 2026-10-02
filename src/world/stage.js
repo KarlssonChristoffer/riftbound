@@ -8,6 +8,7 @@
 import {buildWorld, WORLD} from './world.js';
 import {createEntities} from './entities.js';
 import {BIOMES} from './biomes.js';
+import './desert.js';   // registers the desert biome (after the four: their indices stay)
 const $ = s => document.querySelector(s);
 
 export function createStage({G, ctxO, PPM, PPMH, features, flags: Q}) {

@@ -47,8 +47,10 @@ const lerp3 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, 
 
 const D = SCONCE_D;   // a sconce's stick stands this far off the wall face (the arm shows a few px past the stick)
 const TORCH_H = 1.72, BRAZ_H = 1.22;   // flame heights of the arena's torch / brazier sprites (their lights' h)
-const GLOW = {ruins: '#7af0c8', ember: '#ff9a50', frost: '#9ad8ff', rift: '#e070ff'};
-const WISP = {ruins: '#a8ffd8', ember: '#ffc070', frost: '#bfe8ff', rift: '#ff9cf0'};
+// (null: the biome has none: the desert, world/desert.js, grows no glowing mushrooms and has no will-o'-wisps)
+const GLOW = {ruins: '#7af0c8', ember: '#ff9a50', frost: '#9ad8ff', rift: '#e070ff', desert: null};
+const WISP = {ruins: '#a8ffd8', ember: '#ffc070', frost: '#bfe8ff', rift: '#ff9cf0', desert: null};
+const shroomsOn = id => GLOW[id] !== null, wispsOn = id => WISP[id] !== null;
 const FIRE = ['#fff6c8', '#ffd060', '#ff8a30', '#c84a1c'].map(rgb), SMOKE = ['#6a625a', '#57514b', '#46423e'].map(rgb);
 const BURNS = {crate: 9, barrel: 11, barrel_x: 1.1, dummy: 12};   // seconds alight before it crumbles (keg: cooks off; dummies go out)
 const ASHC = ['#9e9890', '#7e7a74', '#64605b', '#4a4744'].map(rgb), ASH1 = rgb('#3e3a37');   // ash greys; a cooled ember
@@ -682,9 +684,10 @@ export async function create(host) {
   }
   function drawSmall() {
     for (const c of candles) if (near(c.x, c.y)) spr(`candles_${c.v}_${c.lit ? (Math.floor(T * 7 + c.ph) % 4) : 4}`, c.x, c.y, c.h, {shadow: true});
-    for (const s of shrooms) if (near(s.x, s.y)) spr(`shroom_${s.v}_${s.b > 1.05 ? 2 : s.b > .55 ? 1 : 0}`, s.x, s.y, 0, {shadow: true});
+    if (shroomsOn(biomeId)) for (const s of shrooms) if (near(s.x, s.y)) spr(`shroom_${s.v}_${s.b > 1.05 ? 2 : s.b > .55 ? 1 : 0}`, s.x, s.y, 0, {shadow: true});
   }
   function drawWisps() {
+    if (!wispsOn(biomeId)) return;
     for (const w of wisps) {
       if (w.fade < .05 || !near(w.x, w.y)) continue;
       const c = rgb(WISP[biomeId] || WISP.ruins), core = lerp3(c, [1, 1, 1], .6), a = w.fade;
@@ -772,7 +775,8 @@ export async function create(host) {
       if (near(o.x, o.y, 14)) host.events.push({type: 'fire.crackle', x: o.x, y: o.y, big});
     }
     if (F.on) {
-      stepShrooms(dt); stepWisps(dt);
+      if (shroomsOn(biomeId)) stepShrooms(dt);
+      if (wispsOn(biomeId)) stepWisps(dt);
       if (near(camp.x, camp.y, 20)) {   // the campfire's sparks and smoke (as big as the fire)
         if (R() < dt * 14 * Math.min(1, campK)) parts.push({x: camp.x + rr(-.12, .12), y: camp.y + rr(-.08, .08), h: .4, vx: rr(-.2, .2), vy: rr(-.2, .2), vh: rr(1, 2.3), t: 0, life: rr(.6, 1.4), k: 'spark', c: FIRE[0], g: -.2});
         if (R() < dt * 7) parts.push({x: camp.x + rr(-.08, .08), y: camp.y, h: .9, vx: 0, vy: 0, vh: rr(.35, .55), t: 0, life: rr(2.2, 3.4), k: 'smoke', c: SMOKE[R() * 3 | 0], sz: 2, a0: .5});
@@ -817,8 +821,8 @@ export async function create(host) {
       out.push({x: camp.x, y: camp.y, h: .3 + .45 * Math.min(1, ck), color: '#ffa048', radius: 6.5 * (.6 + .4 * ck), intensity: 1.25 * (.28 + .72 * ck), flicker: .55, id: 9101, jitter: .05});
       if (!beacon.unlit) out.push({x: beacon.x, y: beacon.y, h: beacon.z + 1.45, color: host.biome.style.torch || '#ffc850', radius: 8.5, intensity: 1.45, flicker: .4, id: 9102, jitter: .06});
       for (const c of candles) if (c.lit) out.push({x: c.x, y: c.y, h: c.h + .3, color: '#ffc070', radius: 2.3, intensity: .75, flicker: .35, id: c.id, jitter: .015});
-      for (const s of shrooms) out.push({x: s.x, y: s.y, h: .3, color: GLOW[biomeId] || GLOW.ruins, radius: 2.4 + s.b * .8, intensity: .45 + s.b * .45, flicker: 0, id: s.id});
-      for (const w of wisps) if (w.fade > .05) out.push({x: w.x, y: w.y, h: w.h, color: WISP[biomeId] || WISP.ruins, radius: 3.1, intensity: 1.15 * w.fade, flicker: .12, id: w.id});
+      if (shroomsOn(biomeId)) for (const s of shrooms) out.push({x: s.x, y: s.y, h: .3, color: GLOW[biomeId] || GLOW.ruins, radius: 2.4 + s.b * .8, intensity: .45 + s.b * .45, flicker: 0, id: s.id});
+      if (wispsOn(biomeId)) for (const w of wisps) if (w.fade > .05) out.push({x: w.x, y: w.y, h: w.h, color: WISP[biomeId] || WISP.ruins, radius: 3.1, intensity: 1.15 * w.fade, flicker: .12, id: w.id});
     }
     for (const [p, b] of burning) { const k = Math.min(1, b.t / .4) * flameK(p, b); out.push({x: p.x, y: p.y, h: burnTop(p, b) + .32, color: '#ff9a40', radius: 3.4, intensity: 1.05 * k, flicker: .6, id: 9200 + (p.x * 7 | 0) % 90, jitter: .04}); }
     for (const [p, e] of ashes) if (e.t < 14) out.push({x: p.x, y: p.y, h: (p.z || 0) + .45, color: '#ff8a3a', radius: 2.8, intensity: .9 * (1 - e.t / 14) ** 1.5, flicker: .6, id: 9500 + (p.x * 7 | 0) % 90, jitter: .03});

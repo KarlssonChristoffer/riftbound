@@ -88,6 +88,7 @@ const CLIMATE = {
   frost: {winter: {clear: 2, fair: 1, cloudy: 1.5, windy: 1.2, fog: 1, snow: 3, blizzard: 1}},
   ember: {none: {haze: 3, clear: 1, ash: 2, windy: 1}},
   rift: {none: {void: 1}},
+  desert: {none: {clear: 5, fair: 1.5, haze: 2, windy: 1.5, storm: .2}},   // world/desert.js: dry; now and then a summer storm
 };
 const SEASONAL = {ruins: true};               // biomes whose look follows the seasons
 const FIXED = {frost: 'winter'};              // biomes stuck in one season
