@@ -591,7 +591,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   let nextId = 10;
   const SHADOWLESS = new Set(['tuft', 'reed', 'fern']);
   if (haveGlb) await Promise.all([...new Set(props.map(stateOf).filter(Boolean))].map(s => glbGeometry(loader, s)));   // all at once
-  const cardOf = (sp, o) => G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1], type: 3, bias: .00125, ...o});
+  const cardOf = (sp, o) => G.card({tex: texOf(sp.img), em: sp.emit ? texOf(sp.emit) : null, w: sp.img.width, h: sp.img.height, px: sp.pivot[0], py: sp.pivot[1], type: 3, bias: .00125, batch: true, ...o});   // batch: drawn with the other cards of its texture (gfx.js, stage 3)
   // a plant's autumn (gfx.js CARD_FS): the biome's style.plantAutumn gives each kind a few PATHS (four stages of colour, biomes.js).
   // A plant takes one by the golden ratio in the order the world creates them (twelve bushes are spread over the paths instead of
   // twelve dice: some crimson, some orange, most yellow, a straggler or two) and starts at a delay of its own; where its patches
@@ -624,8 +624,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       it.live = liveOf(it, geo, p.x, z0, p.y);
       const yw = yawIdx && yawOf(p, st);
       if (yw && yawIdx.frames[yw[0] + '_y0']) {
-        it.yaw = {base: yw[0], off: yw[1], card: G.card({tex: texOf(yawAlb), nrm: texOf(yawNrm), w: 1, h: 1, px: 0, py: 0, type: 7, obj, bias: .00125})};
-        it.yaw.card.anchor = new THREE.Vector3(p.x, z0, p.y); it.yaw.card.setVisible(false);
+        it.yaw = {base: yw[0], off: yw[1], card: null};   // (its card: made the first time the pre-renders show, update(); 90 hidden cards in every scene cost each pass a walk)
       }
     } else if (sp) {
       it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind), plant: plantOf(p)}); it.sp = sp;
@@ -633,7 +632,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     } else continue;
     items.push(it); byProp.set(p, it);
   }
-  disposers.push(() => items.forEach(it => { it.live?.dispose(); it.card?.dispose(); it.yaw?.card.dispose(); }));
+  disposers.push(() => items.forEach(it => { it.live?.dispose(); it.card?.dispose(); it.yaw?.card?.dispose(); }));
   // the later stages (damaged, broken, chest lids, debris chunks) load in the background
   if (haveGlb) loadGlbIndex().then(ix => ix && Object.keys(ix.states).forEach(s => glbGeometry(loader, s)));
   // an item for a prop created later (a feature adds props to world.props: extra crates, respawns)
@@ -649,7 +648,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // a prop that leaves the world for good (a killed enemy): its card / mesh go with it
   function removeItem(p) {
     const it = byProp.get(p); if (!it) return;
-    it.live?.dispose(); it.card?.dispose(); it.yaw?.card.dispose();
+    it.live?.dispose(); it.card?.dispose(); it.yaw?.card?.dispose();
     items.splice(items.indexOf(it), 1); byProp.delete(p); if (p.kind === 'tree') litterDirty = true;
   }
   // fallen leaves (LITTER): the trees as the bake wants them (a 3D tree's crown, rotated and scaled as it stands; a painted one's guess;
@@ -731,7 +730,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         const vis = !p.gone && !useYaw; if (vis !== it.kvis) { it.kvis = vis; L.setVisible(vis); }   // (the world is their only writer)
         if (flash !== it.kfl) { it.kfl = flash; L.flash = flash; }
       }
-      if (it.yaw) {
+      if (it.yaw && (useYaw || it.yaw.card)) {
+        it.yaw.card ??= G.card({tex: texOf(yawAlb), nrm: texOf(yawNrm), w: 1, h: 1, px: 0, py: 0, type: 7, obj: it.obj, bias: .00125});
         it.yaw.card.setVisible(!!useYaw);
         if (useYaw && yawIdx) {
           const k = (((k0 + it.yaw.off) % 16) + 16) % 16, f = yawIdx.frames[`${it.yaw.base}_y${k}`];

@@ -28,6 +28,7 @@ export const FLAG_DOCS = {
   trees3d:   '0: painted tree cards instead of the procedural 3D trees',
   debug:     'a debug view index (G cycles them)',
   sshadow:   '0: every shadow caster in the per-frame sun shadow (no cached static map; an A/B)',
+  cards:     '0: every world card its own mesh and draw (no instanced card batches; an A/B)',
   // ---- features (0 turns one off)
   wind: '0: no wind', windlevel: 'calm | breeze | brisk | gale: lock the wind strength', windlines: '0 | hd | pixel: the wind lines',
   litter: '0: the fallen leaves stay as baked (no wind moves them, none are lifted); also the low detail tier',

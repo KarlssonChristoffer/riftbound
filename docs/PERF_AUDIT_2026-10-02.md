@@ -6,8 +6,8 @@ gfx.js, adapter.js and player.js. Line numbers drift, so search for the quoted c
 and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame breaks them.
 
 **Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2), the water's reflections (E.3), the
-cloud shadows and the lava's heat haze (E.4), and the vignette (E.5) are done; contact shadows are next. Stages 3-4
-not started.
+cloud shadows and the lava's heat haze (E.4), and the vignette (E.5) are done; contact shadows are next. Stage 3: the
+world cards in instanced batches (E.6). Stage 4 not started.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -464,6 +464,55 @@ and lays them over everything in the WebGL canvas, last, as the overlay canvas d
 
 Enemies and painted world cards through instanced batches (one draw per sprite sheet and pass). Shared materials with
 per-object data in a data texture. Measure; then decide on a custom submit loop for the gbuffer / shadow passes.
+
+### E.6 Stage 3 as built: world cards in instanced batches (2026-10-02; bit-exact)
+
+**What it replaced.** Every painted world card (a bush, tuft, reed, dummy, brazier, brute ...) was a mesh with its own
+material. three paid its per-draw cost (~8 µs: the uniforms flattened and uploaded, the program state, a frustum test)
+once per card per pass, so 60 brutes were 120 draws. On top of that, every pass walked objects it never drew:
+
+- the 90 hidden cards of the 16-angle prop A/B (`?props=yaw`), made at every build;
+- ~200 static shadow casters in `sScene`, walked by the per-frame shadow pass though only the cached static map draws
+  them.
+
+**What it is now:**
+
+- **The batches.** `gfx.js` `card({batch: true})` (world.js `cardOf`) returns a plain record, with no mesh. render()
+  packs the visible ones per group (texture x emit texture x casts a shadow) into one interleaved instance buffer (28
+  floats each). It draws each group once in the G-buffer and once in the sun's shadow.
+  - BCARD_VS / BCARD_FS are CARD_VS / CARD_FS term for term.
+  - A group's buffer is uploaded only when a value in it changed.
+  - The plants' autumn palettes are rows in a float texture (36 texels: 4 ramp tones, then 32 path tones) instead of
+    uniform arrays.
+  - `?cards=0` turns the batches off (a mesh per card: the A/B).
+- **The yaw cards** are made the first time that mode shows them.
+- **The static casters** have their own scene, `sStatic`. A static prop that starts moving goes over to `sScene` and
+  comes back once it is still. The static map and the height map render both scenes, so a layer-2 caster added to
+  `sScene` from outside still casts.
+
+**Checks:**
+
+- golden against a capture of the code before stage 3: 16 / 16 identical;
+- the same with `?props=yaw` (day, night): 12 / 12 identical;
+- smoke and simview pass.
+
+**Results.** These come from an interleaved A/B against a copy of the code before stage 3, 14 slices x 150 frames. The
+machine was loaded, so the whole-frame figures are the median of the slices.
+
+| | Before | After |
+|---|---|---|
+| `G.render`, day | 1.16 ms | 0.76 ms |
+| `G.render`, night | 0.98 ms | 0.57 ms |
+| `G.render`, horde | 2.06 ms | 0.83 ms |
+| whole frame | | -25% day, -29% night, -42% horde |
+| draws per frame, day | 134 | 106 |
+| draws per frame, horde | 254 | 108 |
+| `uniform1f` / `uniform2f` / `uniform3fv` per frame, day | 109 / 81 / 90 | 38 / 45 / 28 |
+| GPU, day (timer queries, p50) | 0.63 ms | 0.63 ms |
+
+**Not done from the plan:** shared materials with per-object data in a data texture (for the meshes), and a custom
+submit loop. The horde's `G.render` is now under the ~1 ms target, so neither is needed yet. What is left in `G.render`
+is mostly the canvas uploads (the hero, the view layers) and three's per-pass walk of the scenes.
 
 ### Stage 4: browser and measuring
 

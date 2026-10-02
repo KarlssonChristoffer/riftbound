@@ -426,6 +426,97 @@ void main() {
   if (uHasMetal > .5) { float m = texture(uMetal, uv).r; metal = m > .7 ? 2. : m > .3 ? 1. : 0.; }
   o2 = vec4(e.rgb * e.a + vec3(uFlash), metal);
 }`;
+// ---------------------------------------------------------------- shaders: world cards in INSTANCED batches (stage 3)
+// The world's painted cards (bushes, tufts, reeds, dummies, braziers, brutes ...: card({batch: true})) are drawn one instanced
+// draw per texture (+ emit texture, + shadow or not) instead of a mesh + material each: CARD_VS / CARD_FS term for term, the
+// card's uniforms read from instance attributes (and flat varyings), the plants' autumn palettes from a float texture (one row
+// a plant path: its 4 green ramp tones, then the 32 tones of its two paths). A world card has no normal map, no metal and shows
+// its whole image (uRect 0, 0, 1, 1).
+//   iA anchor xyz, bias   iS size xy, pivot xy   iO offset xy, sway, bends (1/0)   iB0 / iB1 the 8 bend weights
+//   iM flash, obj, plant kind, plant seed   iP plant delay, palette row
+const BCARD_VS = HEAD + `
+in vec3 position; in vec4 iA; in vec4 iS; in vec4 iO; in vec4 iB0; in vec4 iB1; in vec4 iM; in vec4 iP;
+uniform mat4 viewMatrix, projectionMatrix;
+uniform float uFaceYaw, uCamYaw, uShadow; uniform vec2 uPx, uSnap;   // uShadow 1: the sun card (no bias, no row bend)
+out vec2 vUv; out vec2 vC; out vec2 vSp;
+flat out vec2 vSize; flat out vec4 vB0; flat out vec4 vB1; flat out vec4 vMisc; flat out vec4 vPlant;   // vMisc: sway, bends, flash, obj
+void main() {
+  vec2 c = position.xy;
+  vec2 uSize = iS.xy, uPivot = iS.zw, uOff = iO.xy; float uSway = iO.z, uHasBend = uShadow > .5 ? 0. : iO.w, uBias = uShadow > .5 ? 0. : iA.w;
+  vec3 right = vec3(cos(uFaceYaw), 0., -sin(uFaceYaw));
+  if (dot(right, vec3(cos(uCamYaw), 0., -sin(uCamYaw))) < 0.) right = -right;   // (CARD_VS: a sun card is never mirrored)
+  float S = uHasBend > .5 ? ceil(abs(uSway)) : 0., sxp = c.x * (uSize.x + 2. * S) - S;
+  float px = sxp - uPivot.x + uOff.x + (uHasBend > .5 ? 0. : uSway * c.y), py = uPivot.y - (1. - c.y) * uSize.y + uOff.y;
+  vec3 w = iA.xyz + right * (px / uPx.x) + vec3(0., py / uPx.y, 0.);
+  vC = vec2(c.x, 1. - c.y); vSp = vec2(sxp, (1. - c.y) * uSize.y);
+  vUv = vC;
+  vSize = uSize; vB0 = iB0; vB1 = iB1; vMisc = vec4(uSway, uHasBend, iM.x, iM.y); vPlant = vec4(iM.z, iM.w, iP.x, iP.y);
+  gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
+  if (uSnap.x > 0.) {
+    vec4 a = projectionMatrix * viewMatrix * vec4(iA.xyz, 1.);
+    vec2 p = (a.xy * .5 + .5) * uSnap;
+    gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
+  }
+  gl_Position.z -= uBias * gl_Position.w;
+}`;
+const BCARD_FS = HEAD + OUTS + `
+in vec2 vUv; in vec2 vC; in vec2 vSp;
+flat in vec2 vSize; flat in vec4 vB0; flat in vec4 vB1; flat in vec4 vMisc; flat in vec4 vPlant;
+uniform sampler2D uTex, uEm, uPal; uniform float uHasEm, uType, uCamYaw, uAutumn;
+float bend(int i) { return i < 4 ? vB0[i] : vB1[i - 4]; }
+vec3 pal(int k) { return texelFetch(uPal, ivec2(k, int(vPlant.w + .5)), 0).rgb; }   // 0..3 the green ramp, 4.. the paths' tones
+float ph2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float pvn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(ph2(i), ph2(i + vec2(1, 0)), f.x), mix(ph2(i + vec2(0, 1)), ph2(i + vec2(1, 1)), f.x), f.y); }
+vec3 plantTurn(vec3 col, int tn, vec2 sp) {   // (CARD_FS plantTurn)
+  float kind = vPlant.x, seed = vPlant.y;
+  vec2 cs = kind < 1.5 ? vec2(5.4, 4.6) : kind < 2.5 ? vec2(2.4, 3.2) : kind < 3.5 ? vec2(4.4, 3.8) : vec2(2.2, 8.);
+  vec2 q = sp + (vec2(pvn(sp * .21 + seed * 13.), pvn(sp * .21 + 7.3 + seed * 5.)) - .5) * (kind < 1.5 ? 3. : 1.6);
+  vec2 g = q / cs, gi = floor(g), gf = fract(g); float best = 9.; vec2 bc = gi;
+  for (int j = -1; j <= 1; j++) for (int k = -1; k <= 1; k++) {
+    vec2 c = gi + vec2(float(k), float(j)), o = vec2(ph2(c + seed * 17.), ph2(c + seed * 17. + 5.3)), dv = vec2(float(k), float(j)) + .12 + o * .76 - gf;
+    float dd = dot(dv, dv); if (dd < best) { best = dd; bc = c; }
+  }
+  float r1 = ph2(bc + seed * 31. + 1.7), r2 = ph2(bc + seed * 7. + 3.1);
+  vec2 u = sp / vSize; float e;
+  if (kind < 1.5 || (kind > 2.5 && kind < 3.5)) {
+    float x = clamp((u.x - .5) / .44, -1., 1.), y = clamp((.64 - u.y) / .46, -1., 1.), z = sqrt(max(0., 1. - x * x - y * y));
+    e = clamp((-.783 * sin(uCamYaw) * x + .622 * y + .783 * cos(uCamYaw) * z) * .5 + .5, 0., 1.);
+  } else e = clamp(1.08 - u.y * .95 + .08 * cos(uCamYaw), 0., 1.);
+  float d = vPlant.z + r1 * (kind < 2.5 ? .24 : .16) + (1. - e) * (kind < 2.5 ? .3 : .22);
+  float k = clamp((uAutumn - d) / max(.08, 1. - d), 0., 1.);
+  int stage = int(min(4., floor(k * 5.)));
+  if (stage == 0) return col;
+  return pal(4 + (r2 > .8 ? 16 : 0) + (stage - 1) * 4 + tn);
+}
+void main() {
+  vec2 C = vC, uv = vUv;
+  if (vMisc.y > .5) {   // each row shifts by whole pixels (CARD_FS)
+    float f = clamp(1. - vSp.y / vSize.y, 0., 1.) * 7.; int i = int(floor(f)); float t = f - float(i);
+    float sx = vSp.x - floor(vMisc.x * mix(bend(i), bend(min(i + 1, 7)), t) + .5);
+    if (sx < 0. || sx >= vSize.x) discard;
+    C = vec2(sx / vSize.x, vSp.y / vSize.y); uv = C;
+  }
+  vec4 c = texture(uTex, uv), e = uHasEm > .5 ? texture(uEm, uv) : vec4(0.);
+  if (c.a < .5 && e.a < .5) discard;
+  if (c.a < .5) c.rgb = e.rgb;
+  float own = 0.;
+  if (vPlant.x > .5 && uAutumn > 0. && c.a > .5) {
+    int tn = -1;
+    for (int k = 0; k < 4; k++) { vec3 dd = c.rgb - pal(k); if (dot(dd, dd) < .0004) { tn = k; break; } }
+    if (tn >= 0) { own = 1.; c.rgb = plantTurn(c.rgb, tn, floor(C * vSize) + .5); }
+  }
+  vec3 F = vec3(sin(uCamYaw), 0., cos(uCamYaw));
+  const float S20 = .34202, C20 = .93969;
+  vec3 F20 = vec3(0., S20, 0.) + F * C20;
+  vec3 n = normalize(F20 + vec3(0., .25, 0.));
+  o0 = vec4(c.rgb, float(int(uType) * 4 + (own > .5 ? 2 : 0)) / 255.);
+  o1 = vec4(n, vMisc.w);
+  o2 = vec4(e.rgb * e.a + vec3(vMisc.z), 0.);
+}`;
+const BCARD_SHADOW_FS = HEAD + `layout(location = 0) out vec4 o0;
+in vec2 vUv; in vec2 vC; in vec2 vSp; uniform sampler2D uTex;
+void main() { if (texture(uTex, vUv).a < .5) discard; o0 = vec4(1.); }`;
 const LINE_VS = HEAD + `
 in vec3 position; in vec4 color;   // a = emissive (1) or lit (0)
 uniform mat4 viewMatrix, projectionMatrix;
@@ -895,6 +986,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   let hDirty = true;
 
   const gScene = new THREE.Scene(), sScene = new THREE.Scene(), xScene = new THREE.Scene();
+  // sStatic: the casters of the cached static sun shadow (+ the height map), out of sScene so the per-frame shadow pass doesn't
+  // walk ~200 objects it never draws; a static caster that starts moving goes over to sScene until it is still again
+  const sStatic = new THREE.Scene(); sStatic.matrixAutoUpdate = false;
   gScene.matrixWorldAutoUpdate = sScene.matrixWorldAutoUpdate = xScene.matrixWorldAutoUpdate = true;
   // a Scene's own matrixAutoUpdate (three's default) re-flags it on every render and forces EVERY child's world matrix to be
   // recomputed in every pass (~760 objects x 3+ passes a frame: 4% of the frame's JS). Off: an object's world matrix is
@@ -902,7 +996,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   gScene.matrixAutoUpdate = sScene.matrixAutoUpdate = xScene.matrixAutoUpdate = false;
   const camera = new THREE.Camera();
   const sunCam = new THREE.OrthographicCamera(-SHADOW_E, SHADOW_E, SHADOW_E, -SHADOW_E, 1, 220);
-  // STATIC SUN SHADOW: what doesn't move (world props made with mesh(..., {static: true}), the terrain: sScene layer 2,
+  // STATIC SUN SHADOW: what doesn't move (world props made with mesh(..., {static: true}), the terrain: sStatic, layer 2,
   // not 0) is drawn into a world-wide map that is re-rendered only when one of them appears / goes / changes model or
   // starts / stops moving, or the sun has turned > SUN_STEP (the clock turns it ~.2 deg/s). The per-frame map round the view
   // (sunCam, layer 0) then holds only what moves: characters, cards, swaying trees, debris. A static prop that moves (a
@@ -1012,6 +1106,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   }
   function syncCards() {
     for (const C of cards) {
+      if (!C.gm.visible) continue;   // (synced when it shows again: before the passes of that frame)
       const u = C.u, a = u.uAnchor.value, s = u.uSize.value, pv = u.uPivot.value, off = u.uOff.value, sw = Math.abs(u.uSway.value);
       if (a.x !== C.ax || a.y !== C.ay || a.z !== C.az) {
         C.ax = a.x; C.ay = a.y; C.az = a.z;
@@ -1022,6 +1117,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     }
   }
   function card(o) {
+    if (o.batch && CARD_BATCH && (o.type ?? 3) === 3 && !o.nrm && !o.xray && !o.rect) return bcard(o);   // a world card: in a batch (below)
     const u = cardUniforms(o), geo = cardGeo();
     const g = raw(CARD_VS, CARD_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
       uNrmRect: {value: o.nrmRect || new THREE.Vector4(0, 0, 1, 1)}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0},
@@ -1050,6 +1146,97 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     cards.add(C);
     return C;
   }
+
+  // ---- WORLD CARDS IN BATCHES (stage 3; BCARD_VS / BCARD_FS): card({batch: true}) returns the API world.js drives (u.*,
+  // g.uniforms.*, anchor, flash, setVisible, setSprite, dispose) as plain values, no mesh or material of its own. render() packs
+  // every visible one into its group's instance buffers (a group: texture x emit texture x casts a shadow) and draws each group
+  // once in the G-buffer and once in the sun's shadow: three's per-draw cost (~8 µs) went per card per pass before, and 60
+  // brutes were 120 draws. No per-card frustum test: an off-screen instance costs a vertex shader, not a draw. ?cards=0: a mesh
+  // each (the A/B)
+  const CARD_BATCH = flags.get('cards') !== '0';
+  const bcards = new Set(), bGroups = new Map(), BC_ATTRS = ['iA', 'iS', 'iO', 'iB0', 'iB1', 'iM', 'iP'], BC_STRIDE = 28, BEND1 = new Float32Array(8).fill(1);
+  // the plants' palettes (CARD_FS uPRamp / uPPal): one row of 36 RGBA float texels per plant path pair (4 green ramp tones, then
+  // the 32 tones of its two paths), the same floats the uniforms held; the texture grows a row as a new pair turns up (at a build)
+  const palRows = new Map(); let palData = new Float32Array(36 * 4), palN = 0;
+  const palTex = new THREE.DataTexture(palData, 36, 1, THREE.RGBAFormat, THREE.FloatType), palU = {value: palTex};
+  palTex.minFilter = palTex.magFilter = THREE.NearestFilter; palTex.generateMipmaps = false; palTex.needsUpdate = true;
+  function palRow(pl) {
+    let m = palRows.get(pl.pal); if (!m) palRows.set(pl.pal, m = new Map());
+    const rk = pl.ramp.map(c => c.join()).join('|'); let r = m.get(rk); if (r !== undefined) return r;
+    r = palN++; m.set(rk, r);
+    if (palN * 36 * 4 > palData.length) { const d = new Float32Array(palData.length * 2); d.set(palData); palData = d; }
+    const o = r * 36 * 4, put = (c, i) => { palData[o + i * 4] = c[0]; palData[o + i * 4 + 1] = c[1]; palData[o + i * 4 + 2] = c[2]; palData[o + i * 4 + 3] = 1; };
+    pl.ramp.forEach((c, i) => put(c, i)); pl.pal.forEach((c, i) => put(c, 4 + i));
+    palTex.dispose(); palTex.image = {data: palData, width: 36, height: palData.length / (36 * 4)}; palTex.needsUpdate = true;
+    return r;
+  }
+  function bcard(o) {
+    const u = {uAnchor: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2(o.w, o.h)}, uPivot: {value: new THREE.Vector2(o.px, o.py)},
+      uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uOff: {value: new THREE.Vector2()}, uSway: {value: 0}, uHasBend: {value: 0}};
+    const gu = {uBend: {value: BEND1}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0}, uFlash: {value: 0}, uObj: {value: o.obj ?? 0}};
+    const pl = o.plant, plant = pl ? [pl.kind, pl.seed, pl.delay, palRow(pl)] : [0, 0, 0, 0];
+    const C = {u, g: {uniforms: gu}, shadow: o.shadow !== false, plant, vis: true,
+      set anchor(v) { u.uAnchor.value.copy(v); },
+      set flash(k) { gu.uFlash.value = k; },
+      setVisible(v) { C.vis = !!v; },
+      setSprite(s) { u.uTex.value = s.tex; u.uSize.value.set(s.w, s.h); u.uPivot.value.set(s.px, s.py); gu.uEm.value = s.em || null; gu.uHasEm.value = s.em ? 1 : 0; },
+      dispose() { bcards.delete(C); },
+    };
+    bcards.add(C);
+    return C;
+  }
+  function bGroup(key, tex, em, shadow) {
+    let G2 = bGroups.get(key); if (G2) return G2;
+    const cap = 32, geo = new THREE.InstancedBufferGeometry();
+    geo.setAttribute('position', QUAD.getAttribute('position'));   // (never dispose it with the quad's attribute on: shared GL buffer)
+    const ib = bBuffer(geo, new Float32Array(cap * BC_STRIDE));
+    const uni = {uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uType: {value: 3}, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP,
+      uShadow: {value: 0}, uAutumn: U.autumn, uPal: palU};
+    const gm = new THREE.Mesh(geo, raw(BCARD_VS, BCARD_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gm.matrixAutoUpdate = false; gScene.add(gm);
+    let sm = null;
+    if (shadow) {
+      sm = new THREE.Mesh(geo, raw(BCARD_VS, BCARD_SHADOW_FS, {uTex: uni.uTex, uFaceYaw: U.sunYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: NOSNAP, uShadow: {value: 1}}, {side: THREE.DoubleSide}));
+      sm.frustumCulled = false; sm.matrixAutoUpdate = false; sScene.add(sm);
+    }
+    G2 = {geo, ib, d: ib.array, gm, sm, cap, n: 0, n0: 0, dirty: true, idle: 0}; bGroups.set(key, G2);
+    return G2;
+  }
+  // the group's instances, interleaved (28 floats each: iA iS iO iB0 iB1 iM iP), one buffer and one upload
+  function bBuffer(geo, data) {
+    const ib = new THREE.InstancedInterleavedBuffer(data, BC_STRIDE, 1); ib.setUsage(THREE.DynamicDrawUsage);
+    BC_ATTRS.forEach((k, i) => geo.setAttribute(k, new THREE.InterleavedBufferAttribute(ib, 4, i * 4)));
+    return ib;
+  }
+  function bGrow(G2) {
+    const cap = G2.cap * 2, d = new Float32Array(cap * BC_STRIDE); d.set(G2.d);
+    G2.ib = bBuffer(G2.geo, d); G2.d = d; G2.cap = cap; G2.dirty = true;
+  }
+  const bPut = (G2, i, v) => { const f = Math.fround(v); if (G2.d[i] !== f) { G2.d[i] = f; G2.dirty = true; } };   // (a write that changes something)
+  function packCards() {   // every frame: the visible batched cards into their groups (in the order they were made)
+    for (const G2 of bGroups.values()) G2.n = 0;
+    for (const C of bcards) {
+      if (!C.vis) continue;
+      const u = C.u, g = C.g.uniforms, tex = u.uTex.value, em = g.uHasEm.value > .5 ? g.uEm.value : null, a0 = idOf(tex), e0 = idOf(em), s0 = C.shadow ? 1 : 0;
+      const key = a0 < 1048576 && e0 < 1048576 ? (a0 * 1048576 + e0) * 2 + s0 : `${a0}|${e0}|${s0}`;
+      const G2 = bGroup(key, tex, em, C.shadow);
+      if (G2.n >= G2.cap) bGrow(G2);
+      const i = G2.n++ * BC_STRIDE, an = u.uAnchor.value, s = u.uSize.value, pv = u.uPivot.value, off = u.uOff.value, b = g.uBend.value, pl = C.plant;
+      bPut(G2, i, an.x); bPut(G2, i + 1, an.y); bPut(G2, i + 2, an.z); bPut(G2, i + 3, u.uBias.value);
+      bPut(G2, i + 4, s.x); bPut(G2, i + 5, s.y); bPut(G2, i + 6, pv.x); bPut(G2, i + 7, pv.y);
+      bPut(G2, i + 8, off.x); bPut(G2, i + 9, off.y); bPut(G2, i + 10, u.uSway.value); bPut(G2, i + 11, u.uHasBend.value);
+      for (let k = 0; k < 8; k++) bPut(G2, i + 12 + k, b[k]);
+      bPut(G2, i + 20, g.uFlash.value); bPut(G2, i + 21, g.uObj.value); bPut(G2, i + 22, pl[0]); bPut(G2, i + 23, pl[1]);
+      bPut(G2, i + 24, pl[2]); bPut(G2, i + 25, pl[3]);
+    }
+    for (const [key, G2] of bGroups) {
+      G2.geo.instanceCount = G2.n; G2.gm.visible = G2.n > 0; if (G2.sm) G2.sm.visible = G2.n > 0;
+      if (G2.n && (G2.dirty || G2.n > G2.n0)) { G2.ib.clearUpdateRanges(); G2.ib.addUpdateRange(0, G2.n * BC_STRIDE); G2.ib.needsUpdate = true; }
+      G2.dirty = false; G2.n0 = G2.n;
+      if (G2.n === 0 && ++G2.idle > 600) {   // (a texture nobody shows any more: its group goes)
+        gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.deleteAttribute('position'); G2.geo.dispose(); bGroups.delete(key);
+      } else if (G2.n) G2.idle = 0;
+    }
+  }
   // a live ramp mesh (+ its shadow caster). setMatrix moves both; setGeometry swaps the model (a breakable's stage).
   // o.sway: the geometry has aFlex and the mesh leans (setLean(x, y): art px at full weight, x along the screen, y toward
   // the camera; whole pixels per vertex in the shader, its shadow leans with it). o.autumn: the tree's autumn ramps (trees3d.js
@@ -1059,13 +1246,14 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
       uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
-    sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1); sScene.add(sm);
+    sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
     const H = {sm, hm: matrix.clone()};             // hm: the matrix the height map was last rendered with
     // o.static (world props): its shadow lives in the cached static map; while it moves it casts per frame (STATIC SUN SHADOW)
     const S = STATIC_SHADOW && o.static && !sw ? {sm, still: 0, moving: false, back: false} : null;
     if (S) { sm.layers.enable(2); sm.layers.disable(0); staticSoon(0); }
+    (S ? sStatic : sScene).add(sm);
     const inStatic = () => S && !S.moving;
     let ver = 0;   // bumps on every setMatrix that changed the matrix (world.js: did a feature pose it since?)
     return {gm, sm, get ver() { return ver; },
@@ -1076,7 +1264,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
         if (caster()) moved.add(H);   // render() decides whether that's enough to re-render the height map
         if (S) {   // it moves: into the per-frame map now, out of the static one at its next re-render (soon)
           S.still = 0; S.back = false;
-          if (!S.moving) { S.moving = true; sm.layers.enable(0); sm.layers.disable(2); movers.add(S); staticSoon(6); }
+          if (!S.moving) { S.moving = true; sm.layers.enable(0); sm.layers.disable(2); sStatic.remove(sm); sScene.add(sm); movers.add(S); staticSoon(6); }
         }
       },
       setGeometry(g) { if (gm.geometry !== g) { if (caster()) hDirty = true; if (inStatic()) staticSoon(0); } gm.geometry = g; sm.geometry = g; },
@@ -1088,7 +1276,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       setFlutter(x, y) { sw?.flut.value.set(x, y); },
       setRipple(kx, kz, ph, amp) { gm.material.uniforms.uRip.value.set(kx, kz, ph, amp); },
       set flash(k) { gm.material.uniforms.uFlash.value = k; },
-      dispose() { gScene.remove(gm); sScene.remove(sm); gm.material.dispose(); if (lean) sm.material.dispose(); hDirty = true; if (S) { movers.delete(S); staticSoon(0); } }};
+      dispose() { gScene.remove(gm); sm.parent?.remove(sm); gm.material.dispose(); if (lean) sm.material.dispose(); hDirty = true; if (S) { movers.delete(S); staticSoon(0); } }};
   }
   // the height map is re-rendered when a caster moved more than ~a texel (6 cm) or turned / scaled more than ~1%, against
   // the matrix it was last rendered with: a hit wobble (2 px) or a burning crate set to two matrices a frame no longer
@@ -1108,8 +1296,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   function surface(geom, opts, castShadow = true) {
     const gm = new THREE.Mesh(geom, surfMat(opts)); gScene.add(gm);
     let sm = null;
-    if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); if (STATIC_SHADOW) { sm.layers.enable(2); sm.layers.disable(0); } sScene.add(sm); hDirty = true; staticSoon(0); }
-    return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sScene.remove(sm); hDirty = true; staticSoon(0); } gm.material.dispose(); }};
+    if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); if (STATIC_SHADOW) { sm.layers.enable(2); sm.layers.disable(0); } (STATIC_SHADOW ? sStatic : sScene).add(sm); hDirty = true; staticSoon(0); }
+    return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sm.parent?.remove(sm); hDirty = true; staticSoon(0); } gm.material.dispose(); }};
   }
   // ---- immediate-mode batches: filled every frame (G.line / G.point / G.sprite), drawn by render(), then emptied
   // lines: 1 px GL lines in world space (arrows, strings, streaks). color [r, g, b] 0..1, emit true = glows
@@ -1418,7 +1606,7 @@ void main() {
     U.time.value = (t0 / 1000) % 3600;
     const dtw = waterT < 0 ? 0 : Math.min(.1, (t0 - waterT) / 1000); waterT = t0;   // the water's clock: its own, so G.setWater never makes the pattern jump
     U.wPhase.value = (U.wPhase.value + dtw * waterSpeed) % 65536;
-    flushBatches(); syncCards();
+    flushBatches(); syncCards(); packCards();
     let ns = 0; for (const g2 of groups.values()) ns += g2.n;
     stats.sprites = ns; stats.points = nPoints; stats.lines = nLines;
     const lay = compU.uLay.value;
@@ -1441,16 +1629,16 @@ void main() {
     compU.uSOn.value = STATIC_SHADOW ? 1 : 0;
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
       if (STATIC_SHADOW && (frameNo >= sDue || sunNow.dot(sDir) < Math.cos(SUN_STEP))) {
-        for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); movers.delete(S); }
+        for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); sScene.remove(S.sm); sStatic.add(S.sm); movers.delete(S); }
         sDir.copy(sunNow); fitStatic(sDir); sDue = Infinity;
-        renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sScene, sunCamS);
+        renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sStatic, sunCamS); renderer.render(sScene, sunCamS);   // (sScene: a layer-2 caster added from outside)
         lap('shadowS', renderer.info.render.calls);
       }
       renderer.setRenderTarget(shadow); renderer.clear(true, true, false); renderer.render(sScene, sunCam);
       lap('shadow', renderer.info.render.calls);
     } else PS.shadow = 0;
     if (hDirty && compU.uPtShadow.value > 0) {
-      renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sScene, hCam); hDirty = false;
+      renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sStatic, hCam); renderer.render(sScene, hCam); hDirty = false;
       for (const H of moved) H.hm.copy(H.sm.matrix);
       lap('hmap', renderer.info.render.calls);
     } else { PS.hmap = 0; tp = performance.now(); }
