@@ -5,7 +5,8 @@ the staged plan to fix it. It was measured on commit fe9bdf4 with other sessions
 gfx.js, adapter.js and player.js. Line numbers drift, so search for the quoted code. The budgets are in `src/core/perf.js`
 and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame breaks them.
 
-**Status:** stage 1 done, not committed (2026-10-02; results in E.1). Stages 2-4 not started.
+**Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames are done (E.2); the water is next. Stages 3-4
+not started.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -319,6 +320,45 @@ Not done in stage 1, with the reason:
 
 D.2's table, one effect at a time, each with side-by-side captures for the user's approval: flames, water, clouds /
 shafts / haze, contact shadows, vignette / fog, the GPU layer batch, trees' sway from `W.gpu`.
+
+### E.2 The flames on the GPU (2026-10-02, approved by the user from side-by-side captures)
+
+**The design.** `render/flames.js` is new; `features/firesim.js` keeps only the births and each fire's state.
+
+- The CPU only births a particle, with the same random draws as before. It writes the particle once into a slot.
+- The shaders compute every live particle's position, temperature, tone, size, dither and HD glow each frame from its
+  age. The maths is firesim's old per-particle draw, term for term; the motion is closed-form (rise, swirl, dance, the
+  wind's lean).
+- Per-fire data is one row of a float texture.
+- firesim still ages each particle as two numbers, so the cap and the slots' release happen at the same steps as before.
+
+**Two lessons from ANGLE's D3D11 backend (the first version cost +1.7 ms of GPU):**
+
+1. Instanced `POINTS` are a slow path. The pixel flame is now drawn as squares on the pixel lattice, which cover what a
+   point sprite covered.
+2. A vertex shader over 32k mostly empty slots cost ~0.6 ms of GPU per pass. The slots are now a packed pool (a min-heap
+   of free slots, so a birth takes the lowest) and the draws cover only the slots in use.
+
+**One gotcha for seeded captures (golden):** three.js draws `Math.random` for every new object's id (`generateUUID`).
+Creating three objects therefore shifts the random sequence of everything after them (rain and snow came out different).
+To compare the old and new paths, both had to create the same objects.
+
+**Results.** Interleaved A/B on a loaded machine, CPU flames vs GPU flames:
+
+| | Before | After |
+|---|---|---|
+| `lights.frame` | 0.47-0.69 ms | 0.07-0.08 ms |
+| `lights.view` | 0.18-0.30 ms | ~0.07 ms |
+| `G.render` (fewer CPU points to upload) | — | lower |
+| GPU | — | +0.08 ms |
+
+Whole frame: about -20% by day, -35% at an ember night, -10% with 60 enemies.
+
+**Checks:**
+
+- the captures differ only inside the flames (a handful of single pixels: the closed-form motion vs the old Euler steps);
+- with the CPU path removed, golden is identical to the approved GPU captures (`tmp/golden/flames_gpu`);
+- smoke and simview pass.
 
 ### Stage 3: fewer draw calls (target: horde `G.render` 2.5 -> ~1 ms; 2-3x the enemies in budget)
 

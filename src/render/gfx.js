@@ -1226,6 +1226,11 @@ void main() {
 }`;
   const heatU = {tD: fxU.tD, uR: fxU.uR, uPxM: fxU.uPxM}, heatScene = new THREE.Scene();
   const fxScene = new THREE.Scene(), FXMAX = 6000, fxB = {};
+  // EXTRA passes owned by other modules (render/flames.js): extra(mesh, 'gbuf' | 'fx') puts a mesh in the G-buffer or the
+  // HD fx pass; it shows only on a frame its owner armed (mesh.userData.frame = G.frame before render()), so a system that
+  // didn't run this frame (its feature off, paused out) leaves nothing behind
+  const gExtra = [], fxExtra = [];
+  function extra(m, pass) { if (pass === 'fx') { fxScene.add(m); fxExtra.push(m); } else { gScene.add(m); gExtra.push(m); } m.visible = false; }
   for (const [mode, blending] of [['add', THREE.AdditiveBlending], ['blend', THREE.NormalBlending]]) {
     const geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
     const P = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4), C = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4);
@@ -1344,13 +1349,15 @@ void main() {
       lap('hmap', renderer.info.render.calls);
     } else { PS.hmap = 0; tp = performance.now(); }
     moved.clear();
+    for (const m of gExtra) m.visible = m.userData.frame === frameNo;
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
     const calls = renderer.info.render.calls;
     lap('gbuf', calls);
     renderer.setRenderTarget(xray); renderer.clear(true, false, false); renderer.render(xScene, camera);
     compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
-    if (DS > 1 || fxN || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
+    let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
+    if (DS > 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
       renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam);
       if (hN) {
         const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
@@ -1359,7 +1366,7 @@ void main() {
       }
       blitU.uHeat.value = hN ? 1 : 0; blitU.uT.value = performance.now() / 1000 % 1000; blitU.uZ.value = view.zoom;
       renderer.setRenderTarget(null); renderer.render(blitScene, dummyCam);
-      if (fxN) {
+      if (fxN || fxX) {
         fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
         renderer.render(fxScene, camera);
@@ -1411,6 +1418,7 @@ void main() {
     compU.uWRefl.value.set(L.refl, L.spark, 0, 0);
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
+    get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim};
