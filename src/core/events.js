@@ -51,6 +51,7 @@ export const EVENTS = {
   'wildlife.critter_dash': ['features/wildlife.js', 'x, y', 'audio'],
   'wildlife.splash':    ['features/wildlife.js',  'x, y, small: true, wl: true', 'atmos, wildlife, audio'],
   'wildlife.bird_perch': ['features/wildlife.js', 'x, y, h, prop, off, big, scared (a bird lands on / leaves a top)', 'wind'],
+  'tumbleweed.bounce':  ['features/tumbleweed.js', 'x, y, k (0..1: how hard it came down / was knocked; near the player, on screen)', 'audio'],
 };
 
 const warned = new Set();
