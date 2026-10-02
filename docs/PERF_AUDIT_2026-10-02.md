@@ -5,8 +5,8 @@ the staged plan to fix it. It was measured on commit fe9bdf4 with other sessions
 gfx.js, adapter.js and player.js. Line numbers drift, so search for the quoted code. The budgets are in `src/core/perf.js`
 and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame breaks them.
 
-**Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames are done (E.2); the water is next. Stages 3-4
-not started.
+**Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2) and the water's reflections (E.3) are
+done; clouds / shafts / haze are next. Stages 3-4 not started.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -359,6 +359,40 @@ Whole frame: about -20% by day, -35% at an ember night, -10% with 60 enemies.
 - the captures differ only inside the flames (a handful of single pixels: the closed-form motion vs the old Euler steps);
 - with the CPU path removed, golden is identical to the approved GPU captures (`tmp/golden/flames_gpu`);
 - smoke and simview pass.
+
+### E.3 The water's reflections on the GPU (2026-10-02, the user chose this look from side-by-side captures)
+
+**What it replaced.** depth.js mirrored the props near the water as their painted sprites, flipped about their contact
+row, in 2D canvases every frame. It then copied rows shifted by the ripple, masked them, tinted them and laid the result
+on the GROUND layer, and the flames' emit images went into the EMIT layer. That was ~5% of the frame's JS plus a canvas
+upload.
+
+**What it is now.** The composite shader does it (`gfx.js` COMP_FS `reflAt`):
+
+- **The geometry.** In the oblique orthographic view, a point h above the water's plane mirrors exactly 2·h·S view px
+  straight below itself on screen (S: px per metre of height). For each water pixel, the shader searches up its column
+  for the first pixel whose height over the water crosses k / 2S.
+- **The look** is the 2D version's: rows shifted whole pixels by the ripple (the same formula), the water's tint (0.38),
+  laid over the water's albedo at 0.6 before the light, and emission (flames) mirrored at glowDim.
+- **What reflects:** props, 3D trees, cards and the character. Not the ground, cliff faces, the batched sprites (obj 9:
+  lily pads lying on the water, reeds, wildlife) or particles.
+- **Puddles** are still painted by depth.js, now at alpha 254 in the GROUND layer. COMP_FS reads that alpha as "a puddle
+  here" and mirrors what stands over it.
+- **The sky glint** stays in depth.js, with its water mask filled only over the glint's box.
+
+**The difference the user accepted.** All the 3D things reflect, in their real shapes: walls, pillars, the trees' crowns,
+not painted stand-ins near the water. A thing above the screen's top edge can't reflect, because it isn't in the
+G-buffer.
+
+**Results**, interleaved A/B standing by the river:
+
+| | Before | After |
+|---|---|---|
+| `depth.frame` | 0.34 ms | 0.08 ms |
+| `G.render` (one canvas upload fewer) | 1.64 ms | 1.06 ms |
+| GPU | — | +0.03 ms |
+
+Smoke passes. Captures without water are identical (ember night 2/2).
 
 ### Stage 3: fewer draw calls (target: horde `G.render` 2.5 -> ~1 ms; 2-3x the enemies in budget)
 

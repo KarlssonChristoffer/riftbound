@@ -569,6 +569,46 @@ uniform sampler2D tDistort; uniform float uLayD;
 uniform sampler2D tH; uniform mat4 uHPV; uniform float uPtShadow, uHBias;
 out vec4 oc;
 vec4 lay(sampler2D t, ivec2 p) { return texelFetch(t, ivec2(p.x, int(uRes.y) - 1 - p.y), 0); }
+// ---- REFLECTIONS in the water and the puddles (features/depth.js sets them every frame it shows them: G.setReflect). In the
+// oblique projection a point h above the water's plane mirrors exactly 2 h S view px straight below itself (S: px per metre of
+// height on screen), so this pixel shows the scene pixel k rows above it whose height above the plane is k / 2S: a search up
+// the column for where that crosses (the first such thing in front: a prop, a tree, a card, the character; not the ground, a
+// face, the batched sprites or particles).
+// The look is depth.js's 2D one: its rows shifted whole pixels by a ripple, tinted toward the water's colour, laid over the
+// water's albedo before the light; whatever glows there (flames) glows in it, dimmer
+uniform vec4 uRf;    // on, tint amount, alpha, glow (the share of the mirrored emission)
+uniform vec3 uRfC;   // the water's tint
+uniform vec4 uRfW;   // S (view px per metre of height), ripple (px), gust 0..1, the ripple's clock (s)
+uniform vec4 uRfV;   // the world origin's view row (px, y down), zoom, how far up to search (px), the puddles' ground-layer alpha (x 255; 0: none)
+uniform vec4 uRfP;   // the plateau's pool: x, y (m), rx, ry (rx 0: none)
+float rippleOff(ivec2 p, vec3 P, bool puddle) {   // depth.js rippleCopy: whole-pixel row shifts, stronger downstream and in gusts
+  float wy = (uRes.y - 1. - float(p.y) - uRfV.x) / uRfV.y, Rr = uRfW.y, g = uRfW.z, T = uRfW.w, amp;
+  if (puddle) amp = Rr * (.25 + .8 * g);
+  else { vec2 u = (P.xz - uRfP.xy) / (uRfP.zw + .6); amp = uRfP.z > 0. && dot(u, u) < 1. ? Rr * (.7 + .5 * g) : Rr * (.8 + .5 * clamp((P.z - 10.) / 14., 0., 1.) + .6 * g); }
+  return floor(amp * sin(wy * .55 - T * 2.1) * (.6 + .4 * sin(wy * .13 + T * .7)) + .5) * uRfV.y;
+}
+vec4 reflAt(ivec2 p, float hw, out vec3 rE) {   // the mirrored albedo (a = 1: found) seen at p over water at height hw
+  rE = vec3(0.);
+  int kMax = int(uRfV.z), H = int(uRes.y);
+  float nx = (float(p.x) + .5) / uRes.x * 2. - 1., prev = -1.;
+  for (int k = 1; k <= 512; k++) {
+    if (k > kMax || p.y + k >= H) break;
+    ivec2 q = ivec2(p.x, p.y + k);
+    float dq = texelFetch(tD, q, 0).r;
+    if (dq > .99999) { prev = -1.; continue; }   // nothing there
+    float ny = (float(q.y) + .5) / uRes.y * 2. - 1.;   // (the projection is affine: a pixel's world height is linear in ndc and depth)
+    float Qy = uInvPV[0][1] * nx + uInvPV[1][1] * ny + uInvPV[2][1] * (dq * 2. - 1.) + uInvPV[3][1];
+    float d = 2. * (Qy - hw) * uRfW.x - float(k);
+    if (d >= -.5 && prev < -.5) {
+      // the world's things (props, trees, their cards, the character), not the batched sprites (obj 9: riverside plants, lily
+      // pads lying on the water, wildlife, decor) nor particles (obj -1): what depth.js mirrored
+      vec4 aq = texelFetch(tA, q, 0); int tq = int(aq.a * 255. + .5) / 4; float ob = texelFetch(tN, q, 0).w;
+      if ((tq == 2 || tq == 3 || tq == 4 || tq == 7) && ob > -.5 && abs(ob - 9.) > .5) { rE = texelFetch(tE, q, 0).rgb; return vec4(aq.rgb, 1.); }
+    }
+    prev = d;
+  }
+  return vec4(0.);
+}
 vec3 post(vec3 col, ivec2 ip) {
   if (uLay.w > .5) { vec4 a = lay(tAdd, ip); col += a.rgb * a.a; }
   if (uLay.z > .5) { vec4 f = lay(tFront, ip); col = mix(col, f.rgb, f.a); }
@@ -645,7 +685,17 @@ void main() {
   }
 
   // ---- painted layers before the light: ground decals / animal shadows / ripples (ground only), cloud shadows (all)
-  if (uLay.x > .5 && (type == 1 || type == 5)) { vec4 g = lay(tGround, ip); alb = mix(alb, g.rgb, g.a); }
+  float gA = 0.;
+  if (uLay.x > .5 && (type == 1 || type == 5)) { vec4 g = lay(tGround, ip); alb = mix(alb, g.rgb, g.a); gA = g.a; }
+  vec3 rfE = vec3(0.);   // ---- what stands over the water, mirrored in it (see reflAt)
+  if (uRf.x > .5 && type == 1) {
+    bool puddle = uRfV.w > 0. && abs(gA * 255. - uRfV.w) < .5;
+    if (water || puddle) {
+      ivec2 rp = ivec2(clamp(ip.x - int(rippleOff(ip, P, puddle)), 0, int(uRes.x) - 1), ip.y);
+      vec4 r = reflAt(rp, P.y, rfE);
+      if (r.a > .5) { alb = mix(alb, mix(r.rgb, uRfC, uRf.y), uRf.z); rfE *= uRf.w; }
+    }
+  }
   if (uLay.y > .5) { vec4 g = lay(tPre, ip); alb = mix(alb, g.rgb, g.a); }
 
   // ---- the world clock (sim/env.js via features/weather.js): the SEASON turns the green of the ground and of painted
@@ -710,7 +760,7 @@ void main() {
   if (type == 4) { alb = mix(alb, clamp(alb * uGrade, 0., 1.), uGradeK); L += min(uFill, L * .25); }
   vec3 col = alb * L;
   col += alb * uFlashC;   // lightning: the whole scene lit for an instant (features/weather.js)
-  vec3 emit = E0.rgb;
+  vec3 emit = E0.rgb + rfE;
   if (uLayE > .5) { vec4 el = lay(tEmitL, ip); emit += el.rgb * el.a; }
   col += emit * max(vec3(1.) - L, vec3(uEmin)) * 1.15;                   // emitters add back what the light took away
   // ---- light on the water. Lanterns, mushrooms and wisps shine in it as thin shimmering vertical streaks and the sun twinkles on
@@ -1158,6 +1208,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     tH: {value: hmap.depthTexture}, uHPV: {value: new THREE.Matrix4().multiplyMatrices(hCam.projectionMatrix, hCam.matrixWorldInverse)},
     uPtShadow: {value: 1}, uHBias: {value: .03 / HM.far},
     uDebug: {value: 0},
+    uRf: {value: new THREE.Vector4()}, uRfC: {value: new THREE.Vector3()}, uRfW: {value: new THREE.Vector4()}, uRfV: {value: new THREE.Vector4()}, uRfP: {value: new THREE.Vector4()},
   };
   const compScene = new THREE.Scene();
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
@@ -1309,6 +1360,7 @@ void main() {
   const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
   function render() {
     const t0 = performance.now();
+    if (rflFrame !== frameNo) compU.uRf.value.x = 0;   // (the reflections show only on frames depth.js set them)
     U.time.value = (t0 / 1000) % 3600;
     const dtw = waterT < 0 ? 0 : Math.min(.1, (t0 - waterT) / 1000); waterT = t0;   // the water's clock: its own, so G.setWater never makes the pattern jump
     U.wPhase.value = (U.wPhase.value + dtw * waterSpeed) % 65536;
@@ -1405,6 +1457,16 @@ void main() {
     litters.add(s); s.dispose = () => { litters.delete(s); d(); }; return s;
   }
   const setFlash = (r, g, b) => { compU.uFlashC.value.set(r, g, b); };
+  // the reflections in the water (features/depth.js, every frame it shows them; COMP_FS reflAt): {on, tint: [r, g, b] 0..1, tintK,
+  // alpha, glow, S (view px per metre of height), ripple (px), gust (0..1), t (the ripple's clock, s), oy (the world origin's view
+  // row), zoom, reach (px to search up), puddleA (the puddles' ground-layer alpha x 255, 0 = none), pool: {x, y, rx, ry} | null}
+  let rflFrame = -1;
+  function setReflect(o) {
+    rflFrame = frameNo; const C = compU, p = o.pool;
+    C.uRf.value.set(o.on ? 1 : 0, o.tintK, o.alpha, o.glow); C.uRfC.value.set(o.tint[0], o.tint[1], o.tint[2]);
+    C.uRfW.value.set(o.S, o.ripple, o.gust, o.t); C.uRfV.value.set(o.oy, o.zoom, o.reach, o.puddleA || 0);
+    C.uRfP.value.set(p ? p.x : 0, p ? p.y : 0, p ? p.rx : 0, p ? p.ry : 0);
+  }
   const setPlayer = (x, h, z) => { compU.uPlayer.value.set(x, h, z); };
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
   // advances at, so changing it never makes the pattern jump
@@ -1421,5 +1483,5 @@ void main() {
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim};
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect};
 }

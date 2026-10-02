@@ -75,7 +75,8 @@ const TUNE = {
   clouds: {on: true, tileM: [40, 30], cover: .31, core: .19, s: [.24, .12], time: {day: 1, dusk: .55, night: 0}, speed: 1.9, none: ['rift'],
     mixC: .45 /* 3D: the mix colour = shadow colour x this (approximates the arena's multiply) */},
   shafts: {on: true, max: 5, lenMax: 120, el: [38, 62], time: {day: .85, dusk: 1, night: .5}, night: ['frost', 'rift'], motes: 9, yawStep: 1 /* 3D: deg */},
-  refl: {on: true, alpha: .6, tint: .38, ripple: 1, reach: 2.5, glowDim: .5, bed: -.18 /* 3D: the stream bed's height (m) = world.waterH */},
+  refl: {on: true, alpha: .6, tint: .38, ripple: 1, reach: 2.5, glowDim: .5, bed: -.18 /* 3D: the stream bed's height (m) = world.waterH */,
+    height: 6 /* 3D: how tall a thing still mirrors whole (m over the water): how far up the GPU searches */},
   haze: {on: true},
 };
 
@@ -480,7 +481,9 @@ export async function create(host) {
   // ================================================================ WATER: masks, puddles, reflections, sky glint
   // masks are TOP-DOWN (R = PPM texels per metre, like the world's ground canvas) and projected per frame
   const WA = {key: '', mask: null, mpat: null, lava: null, lpat: null, yEnd: 0, shrink: 0, puddles: [], near: [], plane: new Map(), gpx: null, gw: 0, gh: 0, used: false, n: 0, pool: null, x0: 0, x1: 0};
-  const [RA, ra] = mk(VW, VH), [RB, rb] = mk(VW, VH), [MS, ms] = mk(VW, VH), [EM, em] = mk(VW, VH), [SK, sk] = mk(VW, VH), [HZ, hz] = mk(VW, VH);
+  const [MS, ms] = mk(VW, VH), [SK, sk] = mk(VW, VH), [HZ, hz] = mk(VW, VH);   // the water mask (the sky glint's clip), the glint, the haze
+  // the puddles' alpha in the GROUND layer (gfx.js COMP_FS: a puddle mirrors what stands over it) and the reflections' settings
+  const PUD_A = 254, RFL = {on: true, tint: [0, 0, 0], tintK: 0, alpha: 0, glow: 0, S: 0, ripple: 0, gust: 0, t: 0, oy: 0, zoom: 1, reach: 0, puddleA: 0, pool: null};
   let SKY = sk.createImageData(VW, VH); const skyDirty = [];
   function topMask(yEnd, half, cuts, extra) {   // the stream's row spans (half-width function of y), plus extra(q, R), minus cuts(q, R)
     const S = host.layout.stream, R = PPM, W = Math.ceil(WM() * R), H = Math.ceil(HM() * R), [c, q] = mk(W, H);
@@ -583,23 +586,6 @@ export async function create(host) {
     u.cq.putImageData(im, 0, 0); u.mq.putImageData(mi, 0, 0);
     return {W, H, W0, H0, mx, my};
   }
-  const near = (x, y, r) => { const S = host.layout.stream; return (WA.mask && ((y < WA.yEnd + r && Math.abs(x - S.cx(y)) - S.w(y) / 2 < r) || poolNear(x, y, r))) || WA.puddles.some(u => Math.hypot(x - u.x, y - u.y) < r + .6); };
-  // whole-pixel ripple: rows shifted by round(amp * sin), phase anchored to the view-frame row (the arena's world row at
-  // yaw 0), stronger downstream and in gusts
-  function rippleCopy(src, dq, x, y, w, h) {
-    const gust = gustNow(), Rr = TUNE.refl.ripple, z = V.z, S = host.layout.stream, cxs = x + w / 2;
-    const off = row => {
-      inv2(cxs, row + .5, TUNE.refl.bed, _pr); const wy = (row - V.oy) / z, mx = _pr[0], my = _pr[1];
-      const onStream = WA.mask && my < WA.yEnd && Math.abs(mx - S.cx(my)) < S.w(my) / 2 + .6, onPool = !onStream && poolNear(mx, my, .6);
-      const amp = onStream ? Rr * (.8 + .5 * clamp((my - 10) / 14, 0, 1) + .6 * gust) : onPool ? Rr * (.7 + .5 * gust) : Rr * (.25 + .8 * gust);
-      return Math.round(amp * Math.sin(wy * .55 - T * 2.1) * (.6 + .4 * Math.sin(wy * .13 + T * .7))) * z;
-    };
-    let r0 = y, o0 = off(y);
-    for (let r = y + 1; r <= y + h; r++) {
-      const o = r < y + h ? off(r) : NaN;
-      if (o !== o0) { dq.drawImage(src, x, r0, w, r - r0, x + o0, r0, w, r - r0); r0 = r; o0 = o; }
-    }
-  }
   // the sky glint across the stream: the arena's world rows (every 150 px of its ground), three dashes each, written as
   // ground texel + sky colour (the arena adds it before the light)
   function skyBand(g, fp) {
@@ -642,16 +628,16 @@ export async function create(host) {
       if (b > a) dashes(wy, my, a, b, k, 91);
     }
     if (bx1 <= bx0) return;
-    // the water mask decides (stones, floes and the ice shelf have no glint)
+    // the water mask decides (stones, floes and the ice shelf have no glint): the stream's top-down mask at the bed's height,
+    // filled over the glint's box only
+    ms.setTransform(1, 0, 0, 1, 0, 0); ms.globalCompositeOperation = 'source-over'; ms.globalAlpha = 1; ms.imageSmoothingEnabled = false; ms.clearRect(bx0, by0, bx1 - bx0, by1 - by0);
+    WA.mpat ||= ms.createPattern(WA.mask, 'no-repeat');
+    WA.mpat.setTransform(groundMatrix(PPM, TUNE.refl.bed)); ms.fillStyle = WA.mpat; ms.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
     sk.globalCompositeOperation = 'source-over'; sk.clearRect(bx0, by0, bx1 - bx0, by1 - by0);
     sk.putImageData(SKY, 0, 0, bx0, by0, bx1 - bx0, by1 - by0);
     sk.globalCompositeOperation = 'destination-in'; sk.drawImage(MS, bx0, by0, bx1 - bx0, by1 - by0, bx0, by0, bx1 - bx0, by1 - by0);
     sk.globalCompositeOperation = 'source-over';
     g.drawImage(SK, bx0, by0, bx1 - bx0, by1 - by0, bx0, by0, bx1 - bx0, by1 - by0);
-  }
-  function emitImageOf(p, sp) {   // the flame the card shows this frame (the wind's live flame when it has one)
-    const it = host.itemOf(p), t = it?.card?.g?.uniforms?.uEm?.value;
-    return (t && t.image && it.card.g.uniforms.uHasEm.value) ? t.image : sp?.emit || null;
   }
   function drawWater() {
     WA.used = false; WA.n = 0;
@@ -669,68 +655,24 @@ export async function create(host) {
     }
     if (!streamIn && !vis.length) return;
     const g = host.layer('ground');
-    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.imageSmoothingEnabled = false;
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.imageSmoothingEnabled = false;
+    // (at the puddles' own alpha: gfx.js COMP_FS reads it as "a puddle here" and mirrors what stands over it)
+    g.globalAlpha = PUD_A / 255;
     for (const u of vis) g.drawImage(u.cv, u.X, u.Y, u.W * z, u.H * z);
-    // the water in view as a screen mask: the stream (top-down mask at the bed's height) + the puddles' insides
-    ms.setTransform(1, 0, 0, 1, 0, 0); ms.globalCompositeOperation = 'source-over'; ms.globalAlpha = 1; ms.clearRect(0, 0, VW, VH); ms.imageSmoothingEnabled = false;
-    if (streamIn) {
-      WA.mpat ||= ms.createPattern(WA.mask, 'no-repeat');
-      WA.mpat.setTransform(groundMatrix(PPM, TUNE.refl.bed));
-      ms.fillStyle = WA.mpat; ms.fillRect(0, 0, VW, VH);
-    }
-    for (const u of vis) ms.drawImage(u.mask, u.X, u.Y, u.W * z, u.H * z);
+    g.globalAlpha = 1;
     if (streamIn) skyBand(g, fb);
-    if (!TUNE.refl.on) { g.restore(); return; }
-    // mirrored sprites into the scratch (flipped about the ground contact row gy: y -> 2 gy + z - y)
-    ra.setTransform(1, 0, 0, 1, 0, 0); ra.globalCompositeOperation = 'source-over'; ra.globalAlpha = 1; ra.clearRect(0, 0, VW, VH); ra.imageSmoothingEnabled = false;
-    let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
-    const mirror = (img, sx, sy, sw, sh, dx, dy, gy) => {
-      const top = 2 * gy + z - (dy + sh * z), bot = 2 * gy + z - dy;
-      if (dx >= VW || dx + sw * z <= 0 || bot <= 0 || top >= VH) return false;
-      ra.setTransform(1, 0, 0, -1, 0, 2 * gy + z); ra.drawImage(img, sx, sy, sw, sh, dx, dy, sw * z, sh * z); ra.setTransform(1, 0, 0, 1, 0, 0);
-      bx0 = Math.min(bx0, dx); by0 = Math.min(by0, top); bx1 = Math.max(bx1, dx + sw * z); by1 = Math.max(by1, bot); WA.n++; return true;
-    };
-    const flames = [];
-    for (const p of WA.near) {
-      if (p.gone) continue;
-      const it = host.itemOf(p), sp = it?.sp || host.biome.sprite?.(p, host.ctxO); if (!sp || !sp.img) continue;   // live 3D prop: its painted stand-in
-      const z0 = p.z || 0, ax = proj2(p.x, p.y, z0 + (p.h || 0), _pp)[0], ay = _pp[1], gy = Math.round(proj2(p.x, p.y, z0 + (WA.plane.get(p) ?? 0), _pp)[1]);
-      const dx = Math.round(ax) - sp.pivot[0] * z, dy = Math.round(ay) - sp.pivot[1] * z;
-      if (mirror(sp.img, 0, 0, sp.img.width, sp.img.height, dx, dy, gy)) { const e = emitImageOf(p, sp); if (e) flames.push({e, dx, dy, gy, w: sp.img.width * z, h: sp.img.height * z}); }
-    }
-    // the Ranger: body + cloak + bow as drawn this frame, flipped about the water plane next to him (the stream's lowered
-    // surface, or ground level at a puddle; airborne: 2 x height lower)
-    const P = host.P, pl = host.player;
-    if (P && !(P.sink > 0) && !(P.blink && Math.floor(P.blink * 12) % 2) && near(pl.x, pl.y, 3.2)) {
-      // (playerSprite's h is the player's height above the ground; the canvas size is img.width / img.height)
-      const ps = host.playerSprite(), Sx = host.layout.stream, byStream = WA.mask && (Math.abs(ps.x - Sx.cx(ps.y)) - Sx.w(ps.y) / 2 < 3.2 || poolNear(ps.x, ps.y, 3.2)),
-        plane = byStream ? TUNE.refl.bed : (host.elev ? host.elev(ps.x, ps.y) : 0), [ax, ay] = proj(ps.x, ps.y, ps.h), gy = Math.round(proj(ps.x, ps.y, plane)[1]);
-      mirror(ps.img, 0, 0, ps.img.width, ps.img.height, Math.round(ax) - ps.px * z, Math.round(ay) - ps.py * z, gy);
-    }
-    if (bx1 > bx0) {
-      bx0 = Math.max(0, Math.floor(bx0) - 2 * z); by0 = Math.max(0, Math.floor(by0)); bx1 = Math.min(VW, Math.ceil(bx1) + 2 * z); by1 = Math.min(VH, Math.ceil(by1));
-      if (bx1 > bx0 && by1 > by0) {
-        const w = bx1 - bx0, h = by1 - by0;
-        rb.setTransform(1, 0, 0, 1, 0, 0); rb.globalCompositeOperation = 'source-over'; rb.globalAlpha = 1; rb.clearRect(0, 0, VW, VH); rb.imageSmoothingEnabled = false;
-        rippleCopy(RA, rb, bx0, by0, w, h);
-        rb.globalCompositeOperation = 'destination-in'; rb.drawImage(MS, bx0, by0, w, h, bx0, by0, w, h);
-        rb.globalCompositeOperation = 'source-atop'; rb.globalAlpha = TUNE.refl.tint; rb.fillStyle = WATER[biome].tint; rb.fillRect(bx0, by0, w, h);
-        rb.globalAlpha = 1; rb.globalCompositeOperation = 'source-over';
-        g.globalAlpha = TUNE.refl.alpha; g.drawImage(RB, bx0, by0, w, h, bx0, by0, w, h); g.globalAlpha = 1;
-      }
-    }
     g.restore();
-    // flames mirrored into the water / puddles: the EMIT layer (glow x darkness, like the arena's ground emitters)
-    if (flames.length) {
-      em.setTransform(1, 0, 0, 1, 0, 0); em.globalCompositeOperation = 'source-over'; em.globalAlpha = 1; em.clearRect(0, 0, VW, VH); em.imageSmoothingEnabled = false;
-      for (const f of flames) { em.setTransform(1, 0, 0, -1, 0, 2 * f.gy + z); em.drawImage(f.e, f.dx, f.dy, f.w, f.h); }   // (the emit shares the sprite's layout, like the card's uv)
-      em.setTransform(1, 0, 0, 1, 0, 0);
-      em.globalCompositeOperation = 'destination-in'; em.drawImage(MS, 0, 0);
-      em.globalCompositeOperation = 'source-atop'; em.globalAlpha = TUNE.refl.glowDim; em.fillStyle = '#000'; em.fillRect(0, 0, VW, VH);
-      em.globalAlpha = 1; em.globalCompositeOperation = 'source-over';
-      const e = host.layer('emit'); e.save(); e.setTransform(1, 0, 0, 1, 0, 0); e.globalAlpha = 1; e.globalCompositeOperation = 'source-over'; e.drawImage(EM, 0, 0); e.restore();
-      WA.used = true;
-    }
+    // the REFLECTIONS (the stream, the pool, the puddles): on the GPU, gfx.js COMP_FS reflAt, from what is on screen this
+    // frame. It mirrors as this file's 2D version did (rows shifted whole pixels by the ripple, the water's tint, laid over
+    // the water's albedo before the light, flames glowing in it at glowDim), but every prop, card, tree and the Ranger, as
+    // they stand in 3D; the props near the water were mirrored here as painted sprites, ~5% of the frame's JS
+    if (!TUNE.refl.on) return;
+    const R = RFL, t = WATER[biome]?.tint || '#33556a', c = rgb(t);
+    R.tint[0] = c[0] / 255; R.tint[1] = c[1] / 255; R.tint[2] = c[2] / 255;
+    R.tintK = TUNE.refl.tint; R.alpha = TUNE.refl.alpha; R.glow = 1 - TUNE.refl.glowDim; R.S = Math.abs(V.hy); R.ripple = TUNE.refl.ripple;
+    R.gust = gustNow(); R.t = T; R.oy = V.oy; R.zoom = z; R.reach = Math.min(512, Math.ceil(2 * (TUNE.refl.height - TUNE.refl.bed) * R.S));
+    R.puddleA = WA.puddles.length ? PUD_A : 0; R.pool = WA.pool;
+    host.G.setReflect?.(R); WA.used = true;
   }
 
   // ================================================================ HEAT HAZE (ember lava stream)
@@ -766,7 +708,7 @@ export async function create(host) {
     biomeChanged() { biome = ''; syncBiome(); },
     resize(w, h) {   // the view changed size (main.js fit): the view-sized canvases and the sky glint's pixels follow
       VW = w; VH = h;
-      for (const [c, q] of [[RA, ra], [RB, rb], [MS, ms], [EM, em], [SK, sk], [HZ, hz]]) { c.width = w; c.height = h; q.imageSmoothingEnabled = false; }
+      for (const [c, q] of [[MS, ms], [SK, sk], [HZ, hz]]) { c.width = w; c.height = h; q.imageSmoothingEnabled = false; }
       SKY = sk.createImageData(w, h); skyDirty.length = 0;
     },
     view(dt) {
@@ -796,7 +738,7 @@ export async function create(host) {
       F.debug = `fg ${nf} · shafts ${ns} · haze ${nh}${nh && !hasDistort() ? ' (no distort layer)' : ''} · refl ${WA.n}${WA.used ? ' glow' : ''}${cl ? ' · clouds' : ''}`;
     },
   });
-  F._dbg = {FG, SH, WA, CL, V, PT, proj, inv, footprint, cv: {RA, RB, MS, EM, SK, HZ}};
+  F._dbg = {FG, SH, WA, CL, V, PT, proj, inv, footprint, cv: {MS, SK, HZ}};
   buildCloudLevels();   // ~0.1 s once, while the page loads (not as a hitch the first time the sun comes out)
   return F;
 }
