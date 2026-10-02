@@ -288,6 +288,9 @@ export function createGun(PL, I) {
     }
     const w = weapon(); sync(w);
     S.clock += dt; S.cool = Math.max(0, S.cool - dt);
+    if (P.state === 'backstep' && P.rollDir) {   // (main's dodge rework: its backstep plays the bow's frames; a gun rolls that way)
+      P.state = 'roll'; P.t = 0; P.rollDev = 0; P.rollLead = null; P.face = P.want = dirOf(P.rollDir[0], P.rollDir[1]);
+    }
     if (BUSY.has(P.state) || P.state === 'roll' || P.state === 'backstep') { interrupt(); return false; }
     if (P.state === 'release') { P.state = 'idle'; P.t = 0; }   // (a bow's leftover after a loadout switch)
     if (S.want && (S.wantT += dt) > TUNE.buffer) S.want = 0;   // a stale press is dropped
