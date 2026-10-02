@@ -291,24 +291,44 @@ export const LITTER = {
   head: .9, tail: 2.0, side: 1.15, core: .55, edge: 1.5, // the pool in crown radii: upwind, downwind, across, solid core, where it ends
   peak: .5, willow: {r: 1.7, w: .75}, card: 1.6,     // the density under a crown, a willow's (radius x, weight: its leaves hang, they don't pile), a painted tree's radius (m)
   wall: [.6, 1.3], path: [.4, .7],                    // the drift against a wall: (reach m, extra density), along a path's edge
+  max: .68, cap: .68,                                 // no cell is baked denser than this; and the living layer (render/litter.js) spreads what is piled over `cap`
+  trunk: .3,                                          // a tree's trunk, as the living layer's obstacle: radius m at most (the collider's .5 is for walking)
 };
+const LEAF_SOLID = new Set(['tower', 'gatepost', 'pillar', 'pillar_broken', 'ruin', 'brazier', 'woodpile']);   // (props with a round collider that stay put)
 const RUST = [['#e0b04e', '#c88c34', '#9a6422'], ['#d28a3a', '#b4642a', '#86441c'], ['#b0602c', '#8a4420', '#62301a'], ['#7a5232', '#5e3c24', '#44291a']];
-function makeLitter(WPX, HPX) {
+function makeLitter(WPX, HPX, PPM) {
   const W = Math.ceil(WPX / LITTER.div), H = Math.ceil(HPX / LITTER.div), N = W * H, G = LITTER.groups;
   const dt = (data, w, h) => { const t = new THREE.DataTexture(data, w, h, THREE.RGBAFormat, THREE.UnsignedByteType); t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace; t.needsUpdate = true; return t; };
   const data = new Uint8Array(N * 4), pd = new Uint8Array(12 * G * 4);
-  const L = {W, H, data, pd, tex: dt(data, W, H), pal: dt(pd, 12, G), keep: new Float32Array(N), best: new Float32Array(N), grp: new Uint8Array(N), bonus: new Float32Array(N), stats: {ms: 0, trees: 0, bakes: 0}};
-  L.dispose = () => { L.tex.dispose(); L.pal.dispose(); };
+  // The living layer (render/litter.js) takes this map as its SOURCE: B = 0 open, 128 sink (water, the ravine: a leaf blown there is gone), 255
+  // solid (a wall, a trunk, the plateau's foot: leaves lie against it); it reads u.value (this texture, or its own field when it runs) and
+  // cap, and says through live whether it does. groups / keys: the palettes the cells carry, kept across bakes (a rebake never renumbers them)
+  const L = {W, H, cell: WPX / W / PPM, data, pd, tex: dt(data, W, H), pal: dt(pd, 12, G), keep: new Float32Array(N), best: new Float32Array(N), grp: new Uint8Array(N), bonus: new Float32Array(N),
+    solid: new Uint8Array(N), sink: new Uint8Array(N), sinkDone: false, groups: [RUST], keys: new Map(), u: {value: null}, live: {value: 0}, cap: {value: LITTER.cap}, sim: null,
+    stats: {ms: 0, trees: 0, bakes: 0}};
+  L.u.value = L.tex;
+  L.dispose = () => { L.sim?.dispose(); L.tex.dispose(); L.pal.dispose(); };
   return L;
 }
 const segDist = (x, y, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, t = l2 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2)) : 0; return Math.hypot(x - a[0] - dx * t, y - a[1] - dy * t); };
-// trees: [{x, y, R (m), w, autumn}], walls: [[x0, y0, x1, y1]], paths: [{pts, w}], dry(x, y): not water, not over the ravine
-function bakeLitter(L, trees, {WPX, HPX, PPM, walls, paths, dry}) {
+// the sink mask, once (water and the ravine don't change): a cell is a sink where the baked water texture says water (R >= 128) or the
+// ravine's edge has passed (y >= cliffZ(x))
+function bakeSink(L, {WPX, HPX, PPM, wdata, cliffZ}) {
+  const {W, H, sink} = L, sx = WPX / W / PPM, sy = HPX / H / PPM, d = LITTER.div;
+  for (let i = 0; i < W; i++) {
+    const cz = cliffZ((i + .5) * sx), tx = Math.min(WPX - 1, i * d + (d >> 1));
+    for (let j = 0; j < H; j++) sink[j * W + i] = (j + .5) * sy >= cz || (wdata && wdata[(Math.min(HPX - 1, j * d + (d >> 1)) * WPX + tx) * 4] >= 128) ? 1 : 0;
+  }
+  L.sinkDone = true;
+}
+// trees: [{x, y, R (m), w, autumn}], walls: [[x0, y0, x1, y1]], paths: [{pts, w}], dry(x, y): not water, not over the ravine;
+// blocks: [[x0, y0, x1, y1]] and discs: [[x, y, r]]: what the living layer's leaves lie against (walls, trunks, the plateau's foot)
+function bakeLitter(L, trees, {WPX, HPX, PPM, walls, paths, dry, blocks = [], discs = []}) {
   const t0 = performance.now(), {W, H, data, keep, best, grp, bonus} = L, sx = WPX / W / PPM, sy = HPX / H / PPM, [wx, wy] = LITTER.wind;
   keep.fill(1); best.fill(0); grp.fill(0); bonus.fill(1);
   // the palettes: group 0 is rust; each distinct autumn a tree brings takes the next row (distinct by its colours, not its array: every
   // shape of a species carries its own copy)
-  const groups = [RUST], keys = new Map(), col = c => typeof c === 'string' ? hex255(c) : c.map(v => Math.round(v * 255));
+  const {groups, keys} = L, col = c => typeof c === 'string' ? hex255(c) : c.map(v => Math.round(v * 255));
   for (const t of trees) {
     let g = 0;
     if (t.autumn) {
@@ -346,14 +366,18 @@ function bakeLitter(L, trees, {WPX, HPX, PPM, walls, paths, dry}) {
       if (e < pr) bonus[k] = Math.max(bonus[k], 1 + pk * (1 - e / pr));
     });
   }
+  // what leaves lie against: the cells inside a wall (its box, a half cell fatter: a thin one still counts), a trunk, the plateau's foot
+  const solid = L.solid, sink = L.sink; solid.fill(0);
+  for (const r of blocks) mark(r[0] - sx / 2, r[1] - sy / 2, r[2] + sx / 2, r[3] + sy / 2, (k, x, y) => { if (x >= r[0] - sx / 2 && x <= r[2] + sx / 2 && y >= r[1] - sy / 2 && y <= r[3] + sy / 2) solid[k] = 1; });
+  for (const d of discs) mark(d[0] - d[2], d[1] - d[2], d[0] + d[2], d[1] + d[2], (k, x, y) => { if (Math.hypot(x - d[0], y - d[1]) <= d[2]) solid[k] = 1; });
   // the map: leaves lie in clumps (value noise at ~0.6 m and ~0.2 m), never on water or over the ravine
   for (let j = 0, k = 0; j < H; j++) for (let i = 0; i < W; i++, k++) {
     let D = 1 - keep[k];
-    if (D > .004) {
+    if (D > .004 && !solid[k] && !sink[k]) {
       if (!dry((i + .5) * sx, (j + .5) * sy)) D = 0;
-      else D = Math.min(.9, D * bonus[k] * (.3 + 1.4 * (vnoise(i / 9, j / 9, 3) * .6 + vnoise(i / 3.2, j / 3.2, 4) * .4)));
+      else D = Math.min(LITTER.max, D * bonus[k] * (.3 + 1.4 * (vnoise(i / 9, j / 9, 3) * .6 + vnoise(i / 3.2, j / 3.2, 4) * .4)));
     } else D = 0;
-    const o = k * 4; data[o] = Math.round(D * 255); data[o + 1] = grp[k]; data[o + 2] = 0; data[o + 3] = 255;
+    const o = k * 4; data[o] = Math.round(D * 255); data[o + 1] = grp[k]; data[o + 2] = solid[k] ? 255 : sink[k] ? 128 : 0; data[o + 3] = 255;
   }
   L.tex.needsUpdate = true; L.pal.needsUpdate = true;
   L.stats.ms = performance.now() - t0; L.stats.trees = trees.length; L.stats.bakes++;
@@ -525,8 +549,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   if (wTex) disposers.push(() => wTex.dispose());
   G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark} : null);
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
-  const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX) : null;
-  if (lit) disposers.push(lit.dispose);
+  const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
+  if (lit) { lit.sim = G.litterSim(lit); disposers.push(lit.dispose); }   // (the living layer: render/litter.js, driven by features/litter.js)
   const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0, cliff: cTex, cliffOff: SKIRT, water: wTex, litter: lit}, false); disposers.push(() => ground.dispose());
 
   // ---- plateau: top (the painted top, planar) + 4 strata faces
@@ -628,11 +652,13 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // a dead tree none), and the bake itself. A tree that joined or left marks it dirty: update() bakes once before the next draw
   function bakeNow() {
     litterDirty = false; if (!lit) return;
-    const trees = [], walls = [], dead = p => (p.variant | 0) === 2;
+    const trees = [], walls = [], blocks = [], discs = [], dead = p => (p.variant | 0) === 2;
     for (const it of items) {
       const p = it.p;
-      if (p.rect) walls.push(p.rect);
+      if (p.rect) { walls.push(p.rect); if (!p.gone) blocks.push(p.rect); }
+      else if (!p.gone && !p.broken && LEAF_SOLID.has(p.kind) && p.r > 0) discs.push([p.x, p.y, p.r]);
       if (p.kind !== 'tree' || p.gone) continue;
+      discs.push([p.x, p.y, Math.min(LITTER.trunk, p.r || .22 * (it.pose?.scale || 1))]);   // the trunk
       const w = it.pose;
       if (w) {
         const c = w.crown; if (!c) continue;
@@ -640,8 +666,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         trees.push({x: p.x + (c.x * co + c.z * si) * w.scale, y: p.y + (c.z * co - c.x * si) * w.scale, R: c.r * w.scale * (wl ? LITTER.willow.r : 1.2), w: wl ? LITTER.willow.w : 1, autumn: w.autumn});
       } else if (it.card && !dead(p)) trees.push({x: p.x, y: p.y, R: (p.variant | 0) === 3 ? LITTER.willow.r * 1.15 : LITTER.card, w: 1, autumn: null});
     }
-    const paths = layout.marks.filter(m => m.type === 'path');
-    bakeLitter(lit, trees, {WPX, HPX, PPM, walls, paths, dry: (x, y) => { if (y >= cliffZ(x)) return false; waterSample(x, y, _lw); return !_lw.kind; }});
+    const paths = layout.marks.filter(m => m.type === 'path'), fc = lit.cell;
+    for (const q of PLATEAUS) for (const r of [[q.x0 - fc, q.y0 - fc, q.x1 + fc, q.y0], [q.x0 - fc, q.y1, q.x1 + fc, q.y1 + fc], [q.x0 - fc, q.y0, q.x0, q.y1], [q.x1, q.y0, q.x1 + fc, q.y1]]) blocks.push(r);   // the plateau's foot (and its lip): a wall of one cell
+    if (!lit.sinkDone) bakeSink(lit, {WPX, HPX, PPM, wdata: wTex?.image.data, cliffZ});
+    bakeLitter(lit, trees, {WPX, HPX, PPM, walls, paths, blocks, discs, dry: (x, y) => { if (y >= cliffZ(x)) return false; waterSample(x, y, _lw); return !_lw.kind; }});
   }
   function setState(it, st) {
     it.st = st;
@@ -715,7 +743,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   }
   const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length;
   litterDirty = true;   // (the first bake: the trees are all here)
-  return {layout, props, lights, items, litter: lit && lit.stats, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
+  return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
     setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc, trees3d,
     itemOf: p => byProp.get(p) || null,
     // repaint one family of the ramp texture: r4 = 4 tones, rgb 0..1, light -> dark (+ the line / outline tones derived as
