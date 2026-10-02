@@ -38,7 +38,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
-import {vnoise, smooth} from '../core/mathx.js';
+import {vnoise, smooth, hypot2} from '../core/mathx.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
@@ -583,6 +583,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // ITEMS: one per prop. {p, st (model state), obj (id), live (G.mesh) | card (G.card), sp (painted sprite shown), yaw?,
   //   manageMatrix (a feature poses the mesh itself), hover (0..1 pulse set by the host)}
   const items = [], byProp = new Map(), extra = new Set();
+  // every item starts with ALL its fields (one shape: the per-frame loop's loads stay monomorphic). k*: what update() last
+  // built the live mesh from (kv: the mesh's matrix version), kvis / kfl: the visibility and flash it last set
+  const ITEM0 = {live: null, card: null, yaw: null, lsp: null, lrec: null, emSp: null, lean: null, manageMatrix: false,
+    kx: NaN, ky: NaN, kz: NaN, kw: NaN, ks: NaN, kl: NaN, km: null, kv: -1, kvis: null, kfl: NaN};
   let litterDirty = false;   // fallen leaves: a tree joined or left (bakeNow, below)
   let nextId = 10;
   const SHADOWLESS = new Set(['tuft', 'reed', 'fern']);
@@ -615,7 +619,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const sp = biome.sprite(p, ctxO);
     const tm = treeOf(p), st = stateOf(p), geo = tm ? tm.geo : st && haveGlb ? await glbGeometry(loader, st) : null;
     const obj = WALL_ID[p.kind] ?? nextId++;
-    const it = {p, st, obj, sp: null, hover: 0, pose: tm};
+    const it = {p, st, obj, sp: null, hover: 0, pose: tm, ...ITEM0};
     if (geo) {
       it.live = liveOf(it, geo, p.x, z0, p.y);
       const yw = yawIdx && yawOf(p, st);
@@ -637,7 +641,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     if (byProp.has(p)) return byProp.get(p);
     const tm = treeOf(p), st = stateOf(p), geo = tm ? tm.geo : st && haveGlb ? await glbGeometry(loader, st) : null, sp = biome.sprite(p, ctxO), obj = nextId++;
     if (p.dead || byProp.has(p)) return byProp.get(p) || null;   // gone (or added) while the model loaded
-    const it = {p, st, obj, sp: null, hover: 0, pose: tm};
+    const it = {p, st, obj, sp: null, hover: 0, pose: tm, ...ITEM0};
     if (geo) it.live = liveOf(it, geo, p.x, p.z || 0, p.y);
     else if (sp) { it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind), plant: plantOf(p)}); it.sp = sp; } else return null;
     items.push(it); byProp.set(p, it); if (p.kind === 'tree') litterDirty = true; return it;
@@ -693,12 +697,16 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const L = hooks.mesh?.(it), d = it.lean ||= {x: 0, y: 0};
     let sx = 0, sy = 0;
     if (L) { const c = Math.cos(yaw), s = Math.sin(yaw); sx = (L.x * c - L.y * s) * PPM; sy = (L.x * s + L.y * c) * ctxO.PPMY; }
-    if (!L || Math.hypot(sx - d.x, sy - d.y) > TREE_HYST) { d.x = sx; d.y = sy; }
+    if (!L || hypot2(sx - d.x, sy - d.y) > TREE_HYST) { d.x = sx; d.y = sy; }
     it.live.setLean(d.x + (L?.shake || 0), d.y);
     const f = L?.flut || 0; it.live.setFlutter?.(f, f * .5);
     it.live.setRipple?.((L?.wx || 0) * RIP_K, (L?.wy || 0) * RIP_K, L?.ph || 0, L?.wave || 0);
   }
-  // every frame: follow the props (stage, lid, hop, wobble, flash, gone), collect their lights, pick the yaw frames
+  // every frame: follow the props (stage, lid, hop, wobble, flash, gone), collect their lights, pick the yaw frames.
+  // A live mesh's model state and matrix are worked out only when what they're made of changed since the last frame
+  // (position, wobble, stage, lid, who poses it) or someone else set its matrix since (mesh.ver: a burning prop's slump):
+  // most props stand still, and their state strings, matrices and compares were most of this loop
+  const DYN = {dynamic: true};
   function update(yaw) {
     if (litterDirty) bakeNow();
     lights.length = 0; for (const l of groundL) lights.push(l);
@@ -713,10 +721,15 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, flash = Math.min(1, Math.max(p.flash || 0, it.hover || 0));
       const useYaw = mode === 'yaw' && it.yaw && !p.stage && !it.manageMatrix && !p.gone;
       if (it.live) {
-        const st = stateOf(p); if (st && st !== it.st) setState(it, st);
-        if (!it.manageMatrix) it.live.setMatrix(placeOf(it, p.x + wob / PPM, z0, p.y, M));
+        const L = it.live;
+        if (p.x !== it.kx || p.y !== it.ky || z0 !== it.kz || wob !== it.kw || p.stage !== it.ks || p.lid !== it.kl || it.manageMatrix !== it.km || L.ver !== it.kv) {
+          const st = stateOf(p); if (st && st !== it.st) setState(it, st);
+          if (!it.manageMatrix) L.setMatrix(placeOf(it, p.x + wob / PPM, z0, p.y, M));
+          it.kx = p.x; it.ky = p.y; it.kz = z0; it.kw = wob; it.ks = p.stage; it.kl = p.lid; it.km = it.manageMatrix; it.kv = L.ver;
+        }
         if (it.pose) leanTree(it, yaw);
-        it.live.setVisible(!p.gone && !useYaw); it.live.flash = flash;
+        const vis = !p.gone && !useYaw; if (vis !== it.kvis) { it.kvis = vis; L.setVisible(vis); }   // (the world is their only writer)
+        if (flash !== it.kfl) { it.kfl = flash; L.flash = flash; }
       }
       if (it.yaw) {
         it.yaw.card.setVisible(!!useYaw);
@@ -735,7 +748,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         const hk = hooks.card?.(it, sp);
         u.uSway.value = hk?.sway || 0;
         if (hk?.bend) { it.card.g.uniforms.uBend.value = hk.bend; u.uHasBend.value = 1; } else u.uHasBend.value = 0;   // per-row flex (8 weights, bottom -> top)
-        if (hk?.em) { it.card.g.uniforms.uEm.value = G.tex(hk.em, {dynamic: true}); it.card.g.uniforms.uHasEm.value = 1; it.emSp = null; }
+        if (hk?.em) { it.card.g.uniforms.uEm.value = G.tex(hk.em, DYN); it.card.g.uniforms.uHasEm.value = 1; it.emSp = null; }
         else if (it.sp && it.emSp !== it.sp) { it.emSp = it.sp; it.card.g.uniforms.uEm.value = it.sp.emit ? texOf(it.sp.emit) : null; it.card.g.uniforms.uHasEm.value = it.sp.emit ? 1 : 0; }
         it.card.flash = flash; it.card.setVisible(!p.gone && !!sp);
       }

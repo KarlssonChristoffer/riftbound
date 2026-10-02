@@ -79,7 +79,7 @@ export function createFires(host) {
       f.P.push(q);
     }
   }
-  const A = [0, 0], CC = [0, 0, 0], pops = [];
+  const A = [0, 0], CC = [0, 0, 0], pops = [], WS = {x: 0, y: 0, g: 0};   // WS: the wind at a flame (scratch)
   return {
     TUNE,
     ramp: c => rampOf(c),
@@ -107,7 +107,7 @@ export function createFires(host) {
       const f = fireOf(key, kind); f.x = x; f.y = y; f.h = h; f.onT = o.on ?? 1; f.scale = o.scale ?? 1; f.hs = clamp(o.height ?? 1, .2, 1.5);
       if (f.col !== col) { f.col = col; f.ramp = rampOf(col); }
       // the wind pushes the column (world metres; it leans the same way from every side)
-      const a = host.wind?.on && host.wind.at ? host.wind.at(x, y) : null;
+      const a = host.wind?.on && host.wind.at ? host.wind.at(x, y, WS) : null;
       f.wx += ((a ? a.x : 0) * .16 - f.wx) * .08; f.wy += ((a ? a.y : 0) * .16 - f.wy) * .08;
       const K = f.K, KH = K.H * f.hs, ramp = f.ramp, z = host.zoom, big = Math.min(4, K.size * z), mid = Math.min(3, Math.max(1, Math.round(K.size * .66 * z)));
       const style = host.G.fx ? TUNE.style : 'pixel', G = host.G, soft = style === 'soft', pix = style !== 'soft';
@@ -146,7 +146,7 @@ export function createFires(host) {
         if (pix) {   // the hot core: fat, solid pixels; the outer sheets thin and dithered, so the core glows through them
           const size = outer ? (t <= 2 ? mid : 1) : t <= 1 ? big : t <= 3 ? mid : 1;
           PO.size = size; PO.alpha = outer ? .62 : Tm < .22 ? .55 : 1;
-          host.point(px, py, h + q.z, ramp[t], PO);
+          G.point(px, h + q.z, py, ramp[t], PO);   // (= host.point(px, py, h + q.z, ...): the ramp's tones are [r, g, b] already)
         }
         if (soft) {   // smooth: overlapping additive blobs, the colour blended between the ramp's tones
           // (from the yellow tone down: overlapping blobs add up to white in the core by themselves)

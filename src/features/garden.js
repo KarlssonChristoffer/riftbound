@@ -296,8 +296,9 @@ export async function create(host) {
   // ================================================================ the lantern (a pendulum on a chain)
   const LAN = {ax: STALL.x + .36, ay: STALL.y - .75, ah: 2.26, len: .32, tx: 0, ty: 0, vx: 0, vy: 0};
   const lanPos = () => [LAN.ax + Math.sin(LAN.tx) * LAN.len, LAN.ay + Math.sin(LAN.ty) * LAN.len, LAN.ah - Math.cos(LAN.tx) * Math.cos(LAN.ty) * LAN.len];
+  const LW = {x: 0, y: 0, g: 0}, LCALM = {x: 0, y: 0, g: 0};   // the wind at the lantern (scratch), none
   function stepLantern(dt, evs) {
-    const w = host.wind?.on && host.wind.at ? host.wind.at(LAN.ax, LAN.ay) : {x: 0, y: 0, g: 0}, pl = host.player;
+    const w = host.wind?.on && host.wind.at ? host.wind.at(LAN.ax, LAN.ay, LW) : LCALM, pl = host.player;
     let fx = w.x * .9 + Math.sin(T * 1.3) * .15 * (1 + (w.g || 0) * 3), fy = w.y * .9;
     const d = Math.hypot(pl.x - LAN.ax, pl.y - LAN.ay), sp = Math.hypot(pl.vx, pl.vy);
     if (d < 1.1 && sp > .5) { fx += pl.vx * 1.4; fy += pl.vy * 1.4; }   // brushed past

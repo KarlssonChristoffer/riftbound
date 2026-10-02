@@ -48,7 +48,7 @@
 // ART RULES (biomes.js / atmos.js): 1 texel = 1 screen px, no AA / dither / gradients on the pixel art; 4-tone ramps
 // [hi, base, shade, outline] lit from the screen's top-left; motion reads at 1x (a gust = 1-3 px of lean).
 import {flags} from '../core/flags.js';
-import {clamp, smooth, hash3 as hsh} from '../core/mathx.js';
+import {clamp, smooth, hash3 as hsh, hypot2, hypot3} from '../core/mathx.js';   // hypot2/3: Math.hypot without its garbage (bit for bit)
 import {mulberry32} from '../core/rng.js';
 import {hexU32 as rgba} from '../core/color.js';
 import {fallStage} from '../core/autumn.js';
@@ -252,7 +252,7 @@ export async function create(host) {
     if (!W.on) { FA.x = FA.y = FA.g = 0; return FA; }
     let q = 1;
     if (B.pulse) {
-      const rg = ring(), dx = x - rg.x, dy = y - rg.y, d = Math.hypot(dx, dy) || 1e-3, a = Math.atan2(dy, dx);
+      const rg = ring(), dx = x - rg.x, dy = y - rg.y, d = hypot2(dx, dy) || 1e-3, a = Math.atan2(dy, dx);
       for (const f of fronts) {
         const e = f.F + f.edge * Math.sin(a * f.k1 + f.p1 + T * f.w1) - d;
         if (e > 0 && e < f.len) q *= 1 - f.A * env(e, f.len);
@@ -358,7 +358,7 @@ export async function create(host) {
     return (S.bend[curve] = out);
   }
   function stepFoliage(dt) {
-    const pvx = PL.vx, pvy = PL.vy, spd = Math.hypot(pvx, pvy), roll = PL.state === 'roll', VR = vref();
+    const pvx = PL.vx, pvy = PL.vy, spd = hypot2(pvx, pvy), roll = PL.state === 'roll', VR = vref();
     const svx = pvx * RX + pvy * RY;   // his velocity along the screen's x (the arena's pvx)
     for (const p of nearList()) {
       if (!vis(p.x, p.y)) continue;
@@ -370,7 +370,7 @@ export async function create(host) {
       const fl = (TUNE.idle + a.g * TUNE.flutter) * (.55 + .45 * LV) * (.65 * Math.sin(T * fq * TAU + st.ph) + .35 * Math.sin(T * fq * TAU * 1.73 + st.ph * 2.1));
       let push = 0; const PU = TUNE.push[p.kind];
       if (PU && (spd > .8 || roll) && Math.abs((p.z || 0) - PL.z) < .5) {   // running / rolling past pushes it away from him
-        const ox = p.x - PL.x, oy = p.y - PL.y, sx = ox * RX + oy * RY, sy = (ox * FX + oy * FY) * 1.3, dd = Math.hypot(sx, sy);
+        const ox = p.x - PL.x, oy = p.y - PL.y, sx = ox * RX + oy * RY, sy = (ox * FX + oy * FY) * 1.3, dd = hypot2(sx, sy);
         if (dd < PU[0]) {   // brushed along with his motion (sideways on screen), or away from him when he barely moves sideways
           const side = Math.abs(svx) > .8 ? Math.sign(svx) : Math.sign(sx || 1);
           push = side * PU[1] * (1 - dd / PU[0]) * Math.min(1.3, spd / 4 + (roll ? .6 : 0));
@@ -382,7 +382,7 @@ export async function create(host) {
       const tx = F.px * (nx + fl * RX) + st.push * RX, ty = F.px * (ny + fl * RY) + st.push * RY, w2 = F.w * F.w, zw = 2 * F.z * F.w;
       st.vx += (w2 * (tx - st.dx) - zw * st.vx) * dt; st.vy += (w2 * (ty - st.dy) - zw * st.vy) * dt;
       st.dx += st.vx * dt; st.dy += st.vy * dt;
-      const lim = F.px * Math.max(1, LV) + 1.5, l = Math.hypot(st.dx, st.dy); if (l > lim) { st.dx *= lim / l; st.dy *= lim / l; }
+      const lim = F.px * Math.max(1, LV) + 1.5, l = hypot2(st.dx, st.dy); if (l > lim) { st.dx *= lim / l; st.dy *= lim / l; }
       st.shake *= Math.exp(-dt * 4.5);
       if (a.g > .62 && st.g <= .62) gustShed(p);   // a gust front arriving
       st.g = a.g;
@@ -474,7 +474,7 @@ export async function create(host) {
   function mesh(it) {
     const p = it.p; if (!W.on || !FOLK[p.kind]) return null;
     const F = flexOf(p), st = F && fst.get(p); if (!st) return null;
-    const k = STRENGTH.tree3d / ctx.PPM, a = field(p.x, p.y), e = LV * (.25 + a.g), sp = Math.hypot(a.x, a.y) || 1;
+    const k = STRENGTH.tree3d / ctx.PPM, a = field(p.x, p.y), e = LV * (.25 + a.g), sp = hypot2(a.x, a.y) || 1;
     MH.x = st.dx * k; MH.y = st.dy * k; MH.shake = st.shake > .05 ? st.shake * 1.7 * Math.sin(T * 44 + st.ph) : 0;
     MH.flut = Math.min(3, Math.max(0, e * STRENGTH.dance - STRENGTH.danceMin));
     MH.wx = a.x / sp; MH.wy = a.y / sp; MH.ph = wphQ; MH.wave = Math.min(.24, LV * a.g * STRENGTH.wave);
@@ -512,13 +512,13 @@ export async function create(host) {
       const i = r * cols + k, a = (r * cols + Math.min(cols - 1, k + 1)) * 3, b = (r * cols + Math.max(0, k - 1)) * 3;
       const c = (Math.min(rows - 1, r + 1) * cols + k) * 3, d = (Math.max(0, r - 1) * cols + k) * 3;
       const ux = P[a] - P[b], uy = P[a + 1] - P[b + 1], uz = P[a + 2] - P[b + 2], vx = P[c] - P[d], vy = P[c + 1] - P[d + 1], vz = P[c + 2] - P[d + 2];
-      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1;
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = hypot3(nx, ny, nz) || 1;
       N[i * 3] = nx / l; N[i * 3 + 1] = ny / l; N[i * 3 + 2] = nz / l;
     }
   }
   function simPiece(pc, h, wx, wy, g, lift = 0) {
     const {P, O, pin, n, D, U, N} = pc, k = pc.k, damp = pc.damp, h2 = h * h, ih = 1 / h;
-    const fl = pc.flut * (TUNE.clothIdle + g) * TUNE.clothV * Math.hypot(pc.nx, pc.ny, .25);
+    const fl = pc.flut * (TUNE.clothIdle + g) * TUNE.clothV * hypot3(pc.nx, pc.ny, .25);
     if (pc.pinFn) pc.pinFn(pc);
     for (let i = 0; i < n; i++) {
       const j = i * 3;
@@ -533,7 +533,7 @@ export async function create(host) {
     for (let it = 0; it < pc.iters; it++) {
       for (let l = 0; l < m; l += 4) {
         const a = L[l] * 3, b = L[l + 1] * 3, wa = pin[L[l]] ? 0 : 1, wb = pin[L[l + 1]] ? 0 : 1, w = wa + wb; if (!w) continue;
-        const dx = P[b] - P[a], dy = P[b + 1] - P[a + 1], dz = P[b + 2] - P[a + 2], d = Math.hypot(dx, dy, dz) || 1e-6;
+        const dx = P[b] - P[a], dy = P[b + 1] - P[a + 1], dz = P[b + 2] - P[a + 2], d = hypot3(dx, dy, dz) || 1e-6;
         const q = (d - L[l + 2]) / d * L[l + 3] / w;
         if (wa) { P[a] += dx * q; P[a + 1] += dy * q; P[a + 2] += dz * q; }
         if (wb) { P[b] -= dx * q; P[b + 1] -= dy * q; P[b + 2] -= dz * q; }
@@ -1052,7 +1052,7 @@ export async function create(host) {
     for (const p of nearList()) {
       if (p.kind === 'tuft') continue;
       const F = flexOf(p); if (!F) continue;
-      const leafy = leafyTree(p), d = Math.hypot(p.x - PL.x, p.y - PL.y);
+      const leafy = leafyTree(p), d = hypot2(p.x - PL.x, p.y - PL.y);
       const sh = sheds && leafy && vis(p.x, p.y); if (!sh && d > 16) continue;   // (the wind field only where it's needed)
       const a = field(p.x, p.y);
       if (sh) {
@@ -1061,7 +1061,7 @@ export async function create(host) {
       }
       if (d > 16) continue;
       const st = fst.get(p), w = (p.kind === 'tree' ? (leafy ? 1 : .3) : .35) * (1 - d / 16) ** 2;
-      const sp = Math.hypot(a.x, a.y) / vref(), ag = w * sp * sp * (.7 + .3 * Math.min(1, st ? Math.hypot(st.vx, st.vy) / 25 : 0));   // ~ wind speed^2: the gusts do the talking
+      const sp = hypot2(a.x, a.y) / vref(), ag = w * sp * sp * (.7 + .3 * Math.min(1, st ? hypot2(st.vx, st.vy) / 25 : 0));   // ~ wind speed^2: the gusts do the talking
       e += ag; ep += ag * clamp(((p.x - PL.x) * RX + (p.y - PL.y) * RY) / 7, -1, 1);
     }
     W.rustle.e = e; W.rustle.pan = e > 1e-4 ? ep / e : 0;
@@ -1086,7 +1086,7 @@ export async function create(host) {
       if (q.rest > 0) {
         q.rest -= dt;
         if (q.kind === 'leaf' && LV > 1.2) {   // a strong wind skitters a fallen leaf along the ground and lifts it off again
-          const a = field(q.x, q.y), sp = Math.hypot(a.x, a.y);
+          const a = field(q.x, q.y), sp = hypot2(a.x, a.y);
           if (sp > 1.3) {
             q.x += a.x * .35 * dt; q.y += a.y * .35 * dt;
             if (R() < dt * (sp - 1.3) * 1.2) { q.rest = 0; q.vh = .5 + R() * .8; q.vx = a.x; q.vy = a.y * .6; q.t = Math.min(q.t, q.life - 4); continue; }
@@ -1098,7 +1098,7 @@ export async function create(host) {
       if (q.t >= q.life) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }
       const a = field(q.x, q.y);
       if (q.kind === 'leaf') {   // flutters down, drifts with the wind; in a strong wind it loops, climbs and races (sw)
-        const sw = Math.max(0, Math.hypot(a.x, a.y) - .9), k = .9 + .5 * Math.max(0, LV - 1), c = Math.min(1, dt * 2);
+        const sw = Math.max(0, hypot2(a.x, a.y) - .9), k = .9 + .5 * Math.max(0, LV - 1), c = Math.min(1, dt * 2);
         q.vh += (-.45 + sw * .8 * Math.sin(q.t * 2.6 + q.ph * 3) - q.vh) * Math.min(1, dt * 2.2);
         q.vx += (a.x * k + Math.sin(q.t * 3.1 + q.ph) * (.5 + sw * .6) - q.vx) * c;
         q.vy += (a.y * .6 * k + Math.cos(q.t * 2.3 + q.ph * 2) * sw * .4 - q.vy) * c;

@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import {flags} from '../core/flags.js';
 import {AUTUMN as AU, AUTUMN_MID} from '../core/autumn.js';
+import {hypot2} from '../core/mathx.js';
 import {createLitterSim} from './litter.js';
 
 export const DEG = Math.PI / 180;
@@ -819,6 +820,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
 
   const gScene = new THREE.Scene(), sScene = new THREE.Scene(), xScene = new THREE.Scene();
   gScene.matrixWorldAutoUpdate = sScene.matrixWorldAutoUpdate = xScene.matrixWorldAutoUpdate = true;
+  // a Scene's own matrixAutoUpdate (three's default) re-flags it on every render and forces EVERY child's world matrix to be
+  // recomputed in every pass (~760 objects x 3+ passes a frame: 4% of the frame's JS). Off: an object's world matrix is
+  // recomputed only when it was flagged (matrixWorldNeedsUpdate: setMatrix, syncCards, a new mesh) or it updates itself
+  gScene.matrixAutoUpdate = sScene.matrixAutoUpdate = xScene.matrixAutoUpdate = false;
   const camera = new THREE.Camera();
   const sunCam = new THREE.OrthographicCamera(-SHADOW_E, SHADOW_E, SHADOW_E, -SHADOW_E, 1, 220);
   // STATIC SUN SHADOW: what doesn't move (world props made with mesh(..., {static: true}), the terrain: sScene layer 2,
@@ -937,7 +942,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
         for (const m of C.meshes) { m.matrix.makeTranslation(a.x, a.y, a.z); m.matrixWorldNeedsUpdate = true; }
       }
       const hx = (Math.max(pv.x, s.x - pv.x) + sw + Math.abs(off.x) + 2) / PPM, hy = (s.y / 2 + Math.abs(off.y) + 2) / PPMH;
-      const bs = C.geo.boundingSphere; bs.center.set(0, (pv.y - s.y / 2 + off.y) / PPMH, 0); bs.radius = Math.hypot(hx, hy) + .25;
+      const bs = C.geo.boundingSphere; bs.center.set(0, (pv.y - s.y / 2 + off.y) / PPMH, 0); bs.radius = hypot2(hx, hy) + .25;
     }
   }
   function card(o) {
@@ -975,10 +980,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // B.autumn, [s1..s4] x ['#hi', '#base', '#shade']): its leaves turn, spray by spray, with U.autumn (core/autumn.js)
   function mesh(geom, obj, matrix, o = {}) {
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
-    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gScene.add(gm);
+    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
       uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
-    sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.layers.enable(1); sScene.add(sm);
+    sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1); sScene.add(sm);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
     const H = {sm, hm: matrix.clone()};             // hm: the matrix the height map was last rendered with
@@ -986,11 +991,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const S = STATIC_SHADOW && o.static && !sw ? {sm, still: 0, moving: false, back: false} : null;
     if (S) { sm.layers.enable(2); sm.layers.disable(0); staticSoon(0); }
     const inStatic = () => S && !S.moving;
-    return {gm, sm,
+    let ver = 0;   // bumps on every setMatrix that changed the matrix (world.js: did a feature pose it since?)
+    return {gm, sm, get ver() { return ver; },
       setVisible(v) { if (gm.visible !== v) { if (caster()) hDirty = true; if (inStatic()) staticSoon(0); } gm.visible = v; sm.visible = v; },
       setMatrix(m) {
         if (gm.matrix.equals(m)) return;
-        gm.matrix.copy(m); sm.matrix.copy(m); gm.matrixWorldNeedsUpdate = sm.matrixWorldNeedsUpdate = true;
+        ver++; gm.matrix.copy(m); sm.matrix.copy(m); gm.matrixWorldNeedsUpdate = sm.matrixWorldNeedsUpdate = true;
         if (caster()) moved.add(H);   // render() decides whether that's enough to re-render the height map
         if (S) {   // it moves: into the per-frame map now, out of the static one at its next re-render (soon)
           S.still = 0; S.back = false;
@@ -1079,12 +1085,19 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     for (const [k, a] of Object.entries(G2.attrs)) { const b = new THREE.InstancedBufferAttribute(new Float32Array(cap * a.itemSize), a.itemSize); b.array.set(a.array); b.setUsage(THREE.DynamicDrawUsage); G2.geo.setAttribute(k, b); G2.attrs[k] = b; }
     G2.cap = cap; G2.list = Object.values(G2.attrs);
   }
+  // the group key: a number while the image ids and the type fit (16 + 16 + 16 bits, type 0..15: < 2^53), else the
+  // string it always was (no garbage per sprite on the common path; the groups are the same either way)
+  const DYN = {dynamic: true}, STILL = {};
+  function groupKey(o) {
+    const a = idOf(o.img), b = idOf(o.em), c = idOf(o.nrm), t = o.type ?? 3, s = o.shadow ? 1 : 0;
+    return a < 65536 && b < 65536 && c < 65536 && t >= 0 && t < 16 && (t | 0) === t ? ((a * 65536 + b) * 65536 + c) * 32 + t * 2 + s : `${a}|${b}|${c}|${t}|${s}`;
+  }
   function sprite(o) {
-    const key = `${idOf(o.img)}|${idOf(o.em)}|${idOf(o.nrm)}|${o.type ?? 3}|${o.shadow ? 1 : 0}`;
+    const key = groupKey(o);
     let G2 = groups.get(key); if (!G2) groups.set(key, G2 = makeGroup(o));
     if (G2.n >= G2.cap) grow(G2);
-    const W = o.img.width, H = o.img.height, sx = o.sx || 0, sy = o.sy || 0, sw = o.sw ?? W, sh = o.sh ?? H, i = G2.n++;
-    G2.uni.uTex.value = tex(o.img, {dynamic: o.dynamic}); if (o.em) { G2.uni.uEm.value = tex(o.em, {dynamic: o.dynamic}); G2.uni.uHasEm.value = 1; }
+    const W = o.img.width, H = o.img.height, sx = o.sx || 0, sy = o.sy || 0, sw = o.sw ?? W, sh = o.sh ?? H, i = G2.n++, dyn = o.dynamic ? DYN : STILL;
+    G2.uni.uTex.value = tex(o.img, dyn); if (o.em) { G2.uni.uEm.value = tex(o.em, dyn); G2.uni.uHasEm.value = 1; }
     if (o.nrm) { G2.uni.uNrm.value = tex(o.nrm); G2.uni.uHasNrm.value = 1; }
     const A = G2.attrs.iAnchor.array, R = G2.attrs.iRect.array, S = G2.attrs.iSize.array, M = G2.attrs.iMisc.array, a = i * 3, b = i * 4;
     A[a] = o.x; A[a + 1] = o.y; A[a + 2] = o.z;
@@ -1265,6 +1278,8 @@ void main() {
   // world -> internal-canvas px (y down), for halos / HUD / tests
   const _v = new THREE.Vector3();
   function toScreen(x, y, z) { _v.set(x, y, z).project(camera); return [(_v.x + 1) / 2 * VW, (1 - _v.y) / 2 * VH, _v.z]; }
+  // the same into out (3 numbers), no allocation: for per-frame loops
+  function toScreenInto(x, y, z, out) { _v.set(x, y, z).project(camera); out[0] = (_v.x + 1) / 2 * VW; out[1] = (1 - _v.y) / 2 * VH; out[2] = _v.z; return out; }
   // is world (X, Y up, Z) on screen, give or take m view px? (allocation-free: for culling effects every frame)
   function onScreen(x, y, z, m = 0) { _v.set(x, y, z).project(camera); const sx = (_v.x + 1) / 2 * VW, sy = (1 - _v.y) / 2 * VH; return sx > -m && sx < VW + m && sy > -m && sy < VH + m; }
 
@@ -1396,7 +1411,7 @@ void main() {
     compU.uWRefl.value.set(L.refl, L.spark, 0, 0);
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
-    setView, setSun, toScreen, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
+    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim};
 }

@@ -140,6 +140,16 @@ const shake = cv.shake;
 let loop = null;
 
 // ---------------------------------------------------------------- the host features see
+// host.sprite's arguments for G.sprite (arena -> world axes), in ONE reused object: G.sprite reads it at once and keeps
+// nothing, so no copy per sprite (a spread made a new object for every sprite of every frame)
+const SPR = {img: null, em: null, nrm: null, type: undefined, shadow: undefined, dynamic: undefined, sx: undefined, sy: undefined, sw: undefined, sh: undefined,
+  x: 0, y: 0, z: 0, px: undefined, py: undefined, alpha: undefined, flip: undefined, sway: undefined, flash: undefined};
+const sprite = o => {
+  const s = SPR; s.img = o.img; s.em = o.em; s.nrm = o.nrm; s.type = o.type; s.shadow = o.shadow; s.dynamic = o.dynamic;
+  s.sx = o.sx; s.sy = o.sy; s.sw = o.sw; s.sh = o.sh; s.x = o.x; s.y = o.h ?? 0; s.z = o.y;
+  s.px = o.px; s.py = o.py; s.alpha = o.alpha; s.flip = o.flip; s.sway = o.sway; s.flash = o.flash;
+  G.sprite(s); s.img = s.em = s.nrm = null;   // (don't hold the images)
+};
 const host = {
   THREE, G, PPM, PPMY, PPMH, get VW() { return cv.VW; }, get VH() { return cv.VH; }, ctxO,
   get world() { return stage.world; }, get biome() { return stage.biome; }, get time() { return env.bucket; }, get mood() { return env.mood(stage.biome.id); }, env,
@@ -151,7 +161,7 @@ const host = {
   hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); }, play: (frame, sec) => PL.hold(frame, sec),
   aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target}; },
   toView: (x, y, h = 0) => { const s = G.toScreen(x, h, y); return [s[0], s[1]]; },         // world -> view px (rotated)
-  sprite: o => G.sprite({...o, x: o.x, y: o.h ?? 0, z: o.y}),                            // {img, x, y, h, px, py, ...}
+  sprite,                                                                              // {img, x, y, h, px, py, ...}
   point: (x, y, h, c, o) => G.point(x, h, y, rgbOf(c), o),
   line: (x0, y0, h0, x1, y1, h1, c, emit) => G.line(x0, h0, y0, x1, h1, y1, rgbOf(c), emit),
   layer: n => G.layer(n), rgb: rgbOf,

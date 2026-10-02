@@ -34,7 +34,7 @@ import {STREAM, PLAY, SCONCE_D} from '../world/layout.js';
 import * as WORLD from '../world/world.js';
 import {geoOf, M4, along} from '../world/kit3d.js';
 import {createFires} from './firesim.js';
-import {clamp} from '../core/mathx.js';
+import {clamp, hypot3} from '../core/mathx.js';
 import {mulberry32, simSeed} from '../core/rng.js';
 import {hex01 as rgb} from '../core/color.js';
 // how high our props stop arrows (world.js PROP_TOP, read by sim/projectiles.js; 2.5 m otherwise): arrows fly over the campfire
@@ -570,8 +570,9 @@ export async function create(host) {
       w.trail.unshift([w.x, w.y, w.h]); if (w.trail.length > 9) w.trail.pop();
     }
   }
+  const WD = {x: 0, y: 0, g: 0}, CALM = {x: 0, y: 0};   // the wind at the player (scratch), none
   function stepParts(dt) {
-    const wd = host.wind?.on && host.wind.at ? host.wind.at(host.player.x, host.player.y) : {x: 0, y: 0};
+    const wd = host.wind?.on && host.wind.at ? host.wind.at(host.player.x, host.player.y, WD) : CALM;
     for (let i = parts.length - 1; i >= 0; i--) {
       const q = parts[i]; q.t += dt;
       if (q.t >= q.life) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }   // (swap-remove: splice made this O(n^2))
@@ -610,6 +611,7 @@ export async function create(host) {
   const campCol = () => biomeId === 'rift' ? '#e070ff' : biomeId === 'frost' ? '#ffb04a' : '#ffa040';
   // (the bed a little inside the prop: it burns from within; lower as it slumps)
   const burnTop = (p, b) => (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8) * (1 - (b ? crumbleOf(b) : 0) * .55) - .12;
+  const EMIT = {emit: true};   // (G.point reads its options at once: one object for all)
   function drawFlames() {   // braziers and wall torches (their sprites paint only the coals / the cup: p.fx), burning props
     const S = host.biome.style;
     for (const p of flames) {
@@ -619,7 +621,7 @@ export async function create(host) {
       fires.draw(p, 'brazier', col, p.x, p.y + .01, base);
       for (let i = 0; i < 9; i++) {   // coals glowing in the bowl, breathing
         const a = i / 9 * TAU + (p.light | 0), d = .07 + (i % 3) * .07, k = .5 + .5 * Math.sin(T * (5 + i % 4) + i * 1.9);
-        host.point(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d * .9, base - .005, pal[k > .75 ? 1 : k > .4 ? 2 : 4], {emit: true});
+        host.point(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d * .9, base - .005, pal[k > .75 ? 1 : k > .4 ? 2 : 4], EMIT);
       }
     }
     drawBurning();
@@ -714,8 +716,8 @@ export async function create(host) {
   const SMK = [0, 0, 0];
   function trail(q, c, a) {   // a short glowing trail (HD): back along its last step, stretched by its speed
     if (q.tx === undefined) return;
-    const dx = q.x - q.tx, dy = q.y - q.ty, dh = q.h - q.th, k = Math.min(4, .045 / Math.max(.004, Math.hypot(dx, dy, dh)));
-    for (const f of [1, 2]) host.G.fx(q.x - dx * f * k, q.h - dh * f * k, q.y - dy * f * k, .022 - f * .004, c, (.22 - f * .07) * a, 'add');
+    const dx = q.x - q.tx, dy = q.y - q.ty, dh = q.h - q.th, k = Math.min(4, .045 / Math.max(.004, hypot3(dx, dy, dh)));
+    for (let f = 1; f <= 2; f++) host.G.fx(q.x - dx * f * k, q.h - dh * f * k, q.y - dy * f * k, .022 - f * .004, c, (.22 - f * .07) * a, 'add');
   }
   const PO = {emit: false, size: 1, alpha: 1};   // one options object for every point (G.point reads it at once)
   const pt = (x, y, h, c, emit, size, alpha) => { PO.emit = emit; PO.size = size; PO.alpha = alpha; host.point(x, y, h, c, PO); };

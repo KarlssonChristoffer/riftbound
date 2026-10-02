@@ -27,7 +27,7 @@ export async function create(host) {
   const [mc, mq] = mk(VW, VH);   // this frame's mask (all stamps), then tinted
   const stamps = new Map();
   function aoStamp(hw, hh, skirt) {   // the arena's aoStamp, as is
-    const key = hw + ':' + hh + ':' + skirt; let e = stamps.get(key); if (e) return e;
+    const key = (hw * 16 + hh) * 2 + (skirt ? 1 : 0); let e = stamps.get(key); if (e) return e;   // (hh <= AO_HMAX: a number, no string per stamp)
     const wo = hw + AO_RING.pad + (hw > 8 ? 1 : 0), ho = hh + AO_RING.h;
     const ws = skirt ? Math.round(wo * AO_SKIRT.w + AO_SKIRT.pad) : 0, hs = skirt ? Math.round(ho * AO_SKIRT.h) : 0;
     const W = Math.max(wo, ws), up = Math.max(ho, Math.round(hs * .6)), dn = Math.max(ho, hs), w = 2 * W + 1, h = up + dn + 1;
@@ -65,7 +65,12 @@ export async function create(host) {
     }
     return x1 < 0 ? null : {cx: (x0 + x1 + 1) / 2 - px, hw: (x1 - x0 + 1) / 2, py};
   }
+  const footSp = new WeakMap();   // the same, per sprite record (its image and pivot don't change): no key string per card per frame
   function footOf(sp) {
+    const f = footSp.get(sp); if (f !== undefined) return f;
+    const e = footOfImg(sp); footSp.set(sp, e); return e;
+  }
+  function footOfImg(sp) {
     let m = foot.get(sp.img); if (!m) foot.set(sp.img, m = new Map());
     const k = sp.pivot[0] + ':' + sp.pivot[1]; let e = m.get(k);
     if (e === undefined) { e = measure(sp.img, sp.pivot[0], sp.pivot[1]); m.set(k, e); }
@@ -75,8 +80,9 @@ export async function create(host) {
   let n = 0;
   // one stamp: world base (x, y, h ground), footprint {cx, hw} in art px, air (m above the ground), py (the sprite's
   // pivot row: tiny things get a faint smudge), skirt (tall occluders)
+  const SV = [0, 0, 0], RFP = {cx: 0, hw: 0};   // scratch: the stamp's view position, a round mesh's footprint
   function stamp(x, y, h, fp, air, py, skirt) {
-    const z = host.zoom, [sx, sy] = host.toView(x, y, h);
+    const z = host.zoom, sv = host.G.toScreenInto(x, h, y, SV), sx = sv[0], sy = sv[1];   // (= host.toView, without its arrays)
     if (sx < -40 * z || sx > VW + 40 * z || sy < -20 * z || sy > VH + 30 * z) return;
     const up = Math.min(1, air / AO_AIR), s = 1 - .35 * up;
     const a = Math.min(1, Math.max(.25, (py - 3) / 12)) * (1 - .65 * up);
@@ -107,7 +113,7 @@ export async function create(host) {
         const p = it.p; if (p.gone || p.broken || SKIP.has(p.kind) || p.rect) continue;
         const base = p.z || 0, air = Math.max(0, p.h || 0);
         if (it.card && it.sp) { const fp = footOf(it.sp); if (fp) stamp(p.x, p.y, base, fp, air, fp.py, p.occluder || p.kind === 'tree' || p.kind === 'rock_big'); }
-        else if (it.live && p.r > 0 && !p.float && !(p.sink > .05)) stamp(p.x, p.y, base, {cx: 0, hw: Math.round(p.r * host.PPM * .8)}, air, 14, false);
+        else if (it.live && p.r > 0 && !p.float && !(p.sink > .05)) { RFP.hw = Math.round(p.r * host.PPM * .8); stamp(p.x, p.y, base, RFP, air, 14, false); }
       }
       if (!n) return;
       // tint: the mood's shadow colour, at the arena's AO opacity (night: mood.shadow.ao)

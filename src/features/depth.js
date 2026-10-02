@@ -92,7 +92,7 @@ export async function create(host) {
   const hist = new Float32Array(60); let hN = 0;
   const WM = () => host.ctxO.WM, HM = () => host.ctxO.HM;
   const timeName = () => host.time || 'day';
-  const windAt = (x, y) => { const W = host.wind; return (W && W.on !== false && W.at) ? W.at(x, y) : null; };
+  const WAT = {x: 0, y: 0, g: 0}, windAt = (x, y) => { const W = host.wind; return (W && W.on !== false && W.at) ? W.at(x, y, WAT) : null; };   // (one scratch result: read at once)
   const windDir = () => host.wind?.dir || [.94, .34];
   const gustNow = () => { const W = host.wind; return (W && W.on !== false && W.gust) || 0; };
 
@@ -106,7 +106,7 @@ export async function create(host) {
     V.det = V.xx * V.yy - V.yx * V.xy;
   }
   const proj = (x, y, h = 0) => [V.ox + V.xx * x + V.yx * y + V.hx * h, V.oy + V.xy * x + V.yy * y + V.hy * h];
-  const _pa = [0, 0], _pb = [0, 0], _pu = [0, 0];   // the same through scratch arrays (no allocation): proj2 / inv2 write into `o`
+  const _pa = [0, 0], _pb = [0, 0], _pu = [0, 0], _pr = [0, 0], _pp = [0, 0];   // the same through scratch arrays (no allocation): proj2 / inv2 write into `o`
   const proj2 = (x, y, h, o) => { o[0] = V.ox + V.xx * x + V.yx * y + V.hx * h; o[1] = V.oy + V.xy * x + V.yy * y + V.hy * h; return o; };
   const inv2 = (X, Y, h, o) => { const u = X - V.ox - V.hx * h, v = Y - V.oy - V.hy * h; o[0] = (V.yy * u - V.yx * v) / V.det; o[1] = (-V.xy * u + V.xx * v) / V.det; return o; };
   const inv = (X, Y, h = 0) => { const u = X - V.ox - V.hx * h, v = Y - V.oy - V.hy * h; return [(V.yy * u - V.yx * v) / V.det, (-V.xy * u + V.xx * v) / V.det]; };
@@ -438,7 +438,7 @@ export async function create(host) {
     for (const f of SH.feet) {
       f.vis = false;
       if (n >= TUNE.shafts.max) continue;
-      const [sx, sy] = proj(f.x, f.y, f.z);
+      proj2(f.x, f.y, f.z, _pp); const sx = _pp[0], sy = _pp[1];
       if (sx < -reach || sx > VW + reach || sy < -reach || sy > VH + reach) continue;
       const t = shaftOf(f); if (!t) continue;
       const X = Math.round(sx) - t.fx * z, Y = Math.round(sy) - t.fy * z, w = t.cv.width * z, h = t.cv.height * z;
@@ -589,7 +589,7 @@ export async function create(host) {
   function rippleCopy(src, dq, x, y, w, h) {
     const gust = gustNow(), Rr = TUNE.refl.ripple, z = V.z, S = host.layout.stream, cxs = x + w / 2;
     const off = row => {
-      const wy = (row - V.oy) / z, [mx, my] = inv(cxs, row + .5, TUNE.refl.bed);
+      inv2(cxs, row + .5, TUNE.refl.bed, _pr); const wy = (row - V.oy) / z, mx = _pr[0], my = _pr[1];
       const onStream = WA.mask && my < WA.yEnd && Math.abs(mx - S.cx(my)) < S.w(my) / 2 + .6, onPool = !onStream && poolNear(mx, my, .6);
       const amp = onStream ? Rr * (.8 + .5 * clamp((my - 10) / 14, 0, 1) + .6 * gust) : onPool ? Rr * (.7 + .5 * gust) : Rr * (.25 + .8 * gust);
       return Math.round(amp * Math.sin(wy * .55 - T * 2.1) * (.6 + .4 * Math.sin(wy * .13 + T * .7))) * z;
@@ -661,7 +661,7 @@ export async function create(host) {
     // puddles on the floor first (their colours follow the sky; re-rasterised when the yaw / zoom / time changes)
     const tn = timeName(), pk = Math.round(V.yaw / (.5 * DEG)) + '|' + tn, vis = [];
     for (const u of WA.puddles) {
-      const [sx, sy] = proj(u.x, u.y, 0), rr = Math.max(u.rx, u.ry) * PPM * z * 1.3 + 4;
+      proj2(u.x, u.y, 0, _pp); const sx = _pp[0], sy = _pp[1], rr = Math.max(u.rx, u.ry) * PPM * z * 1.3 + 4;
       if (sx < -rr || sx > VW + rr || sy < -rr || sy > VH + rr) continue;
       if (u.key !== pk) { Object.assign(u, puddleSprite(u, PUD_COL[tn] || PUD_COL.day)); u.key = pk; }
       u.X = Math.round(sx - u.W0 * z / 2) - u.mx * z; u.Y = Math.round(sy - u.H0 * z / 2) - u.my * z;
@@ -694,7 +694,7 @@ export async function create(host) {
     for (const p of WA.near) {
       if (p.gone) continue;
       const it = host.itemOf(p), sp = it?.sp || host.biome.sprite?.(p, host.ctxO); if (!sp || !sp.img) continue;   // live 3D prop: its painted stand-in
-      const z0 = p.z || 0, [ax, ay] = proj(p.x, p.y, z0 + (p.h || 0)), gy = Math.round(proj(p.x, p.y, z0 + (WA.plane.get(p) ?? 0))[1]);
+      const z0 = p.z || 0, ax = proj2(p.x, p.y, z0 + (p.h || 0), _pp)[0], ay = _pp[1], gy = Math.round(proj2(p.x, p.y, z0 + (WA.plane.get(p) ?? 0), _pp)[1]);
       const dx = Math.round(ax) - sp.pivot[0] * z, dy = Math.round(ay) - sp.pivot[1] * z;
       if (mirror(sp.img, 0, 0, sp.img.width, sp.img.height, dx, dy, gy)) { const e = emitImageOf(p, sp); if (e) flames.push({e, dx, dy, gy, w: sp.img.width * z, h: sp.img.height * z}); }
     }

@@ -24,6 +24,7 @@ export function createLoop(E) {
   let views = E.flags.get('views') !== '0';   // ?views=0: the sim alone (tools/test/simview.mjs: it must come out the same)
   const SIM_DT = 1 / 60, MAX_STEPS = 4;
   let acc = 0, alpha = 1;   // acc: real time the sim is behind (<= 0: ahead); alpha: where the draw sits in the last step
+  let hovIt = null;         // the world item with the hover pulse on (the aimed target)
   const frameEvs = [];      // every event of this frame's sim steps, for the views
   // ONE fixed sim step
   function simStep(dt) {
@@ -79,8 +80,10 @@ export function createLoop(E) {
     // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js)
     const sinkPx = hero.compose(PX, PY, perf);
     // props, hover pulse on the aimed target
-    const hov = P.state === 'draw' ? pa.hoverTarget()?.target : null;
-    for (const it of stage.world.items) it.hover = it.p === hov ? .16 + .08 * Math.sin(performance.now() / 110) : 0;
+    const hov = P.state === 'draw' ? pa.hoverTarget()?.target : null, hi = hov ? stage.world.itemOf(hov) : null;
+    if (hovIt && hovIt !== hi) hovIt.hover = 0;   // (only the aimed item's pulse is ever on: no write per item per frame)
+    if (hi) hi.hover = .16 + .08 * Math.sin(performance.now() / 110);
+    hovIt = hi;
     perf.begin('world.update', 'view'); stage.world.update(cv.yaw); perf.end('world.update');
     // the season's leaves (env.leafRamp: changes a few times per season; a rebuilt world starts from the biome's own ramp)
     const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || stage.world !== leafWorld)) { stage.world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = stage.world; }
