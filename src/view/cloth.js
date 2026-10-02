@@ -406,6 +406,11 @@ export class ClothRig {
     }
     B.cbox = [cx0, cx1, cy0, cy1];
     const qw = qx1 - qx0 + 1, qh = qy1 - qy0 + 1;
+    if (g.blit) {   // an array target (view/hero.js pix): the box's pixels straight in, source-over (no canvas between)
+      g.blit(D, BW, qx0, qy0, qw, qh, left - MX + qx0, top - MY + qy0);
+      if (ND && gn) gn.blit(ND, BW, qx0, qy0, qw, qh, left - MX + qx0, top - MY + qy0);
+      return;
+    }
     const cv = this.canvas; if (cv.width !== BW || cv.height !== BH) { cv.width = BW; cv.height = BH; }
     cv.getContext('2d').putImageData(B.img, 0, 0, qx0, qy0, qw, qh);
     g.drawImage(cv, qx0, qy0, qw, qh, left - MX + qx0, top - MY + qy0, qw, qh);

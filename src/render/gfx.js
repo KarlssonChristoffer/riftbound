@@ -20,6 +20,7 @@ import * as THREE from 'three';
 import {flags} from '../core/flags.js';
 import {AUTUMN as AU, AUTUMN_MID} from '../core/autumn.js';
 import {hypot2} from '../core/mathx.js';
+import {cssRGBA} from '../core/color.js';
 import {createLitterSim} from './litter.js';
 
 export const DEG = Math.PI / 180;
@@ -1108,12 +1109,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // ---- DATA UPLOADS (G.texData): a block of RGBA bytes the caller rasterised in its own array, into part of a canvas's
   // texture (the one tex(img) shows; made here if it isn't yet), at render, by texSubImage2D from the array: no 2D canvas
   // between (a canvas -> WebGL copy snapshots the whole canvas, and a GPU canvas's waits on the GPU). (x, y): where in the
-  // canvas (px, y down); the block is the first w x h px of data, rows rowLen px apart; data must hold still till render()
+  // canvas (px, y down); the block is data's (sx, sy, w, h), rows rowLen px apart; data must hold still till render()
   const dataUps = [];
   let dataN = 0;
-  function texData(img, x, y, w, h, data, rowLen) {
-    const t = texCache.get(img) || tex(img), U = dataUps[dataN] ||= {t: null, x: 0, y: 0, w: 0, h: 0, data: null, rowLen: 0};
-    dataN++; U.t = t; U.x = x; U.y = y; U.w = w; U.h = h; U.data = data; U.rowLen = rowLen;
+  function texData(img, x, y, w, h, data, rowLen, sx = 0, sy = 0) {
+    const t = texCache.get(img) || tex(img), U = dataUps[dataN] ||= {t: null, x: 0, y: 0, w: 0, h: 0, data: null, rowLen: 0, sx: 0, sy: 0};
+    dataN++; U.t = t; U.x = x; U.y = y; U.w = w; U.h = h; U.data = data; U.rowLen = rowLen; U.sx = sx; U.sy = sy;
   }
   function uploadData() {   // (render: with the other uploads, before any pass reads them)
     if (!dataN) return;
@@ -1127,11 +1128,11 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
         renderer.state.bindTexture(gl.TEXTURE_2D, p.__webglTexture); bound = U.t;
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);   // (as tex() uploads it)
       }
-      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, U.rowLen);
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, U.rowLen); gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, U.sx); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, U.sy);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, U.x, U.y, U.w, U.h, gl.RGBA, gl.UNSIGNED_BYTE, U.data);
       U.data = null;
     }
-    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0); renderer.state.unbindTexture();   // (three never sets the row length: back to 0)
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0); gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0); renderer.state.unbindTexture();   // (three never sets these: back to 0)
     dataN = 0;
   }
 
@@ -1526,21 +1527,6 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const D = R.d, i = R.n++ * 12;
     D[i] = x; D[i + 1] = y; D[i + 2] = w; D[i + 3] = h; D[i + 4] = sx; D[i + 5] = sy; D[i + 6] = sw; D[i + 7] = sh;
     D[i + 8] = r; D[i + 9] = g; D[i + 10] = b; D[i + 11] = a;
-  }
-  // a CSS colour -> [r, g, b, a] 0..1, as the canvas reads it (its own parser: any CSS colour; alpha in 1/255 steps), once a string
-  const cssC = new Map(), cssQ = document.createElement('canvas').getContext('2d');
-  const CSS_HEX = /^#([\da-f]{3}|[\da-f]{6})$/i, CSS_RGB = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/;
-  function cssRGBA(s) {
-    let c = cssC.get(s); if (c) return c;
-    let m = CSS_RGB.exec(s);
-    if (!m && !CSS_HEX.test(s)) { cssQ.fillStyle = '#000'; cssQ.fillStyle = s; m = CSS_RGB.exec(cssQ.fillStyle); }   // (other forms: as the canvas reads them)
-    if (m) c = [Math.round(+m[1]) / 255, Math.round(+m[2]) / 255, Math.round(+m[3]) / 255, Math.round(Math.min(1, m[4] === undefined ? 1 : +m[4]) * 255) / 255];
-    else {
-      let h = (CSS_HEX.test(s) ? s : cssQ.fillStyle).slice(1); if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-      const v = parseInt(h, 16); c = [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255, 1];
-    }
-    if (cssC.size > 1024) cssC.clear();
-    cssC.set(s, c); return c;
   }
   // an image or canvas drawn by a GPU context: its texture, made (and uploaded) once; unused for 600 frames, it is let go
   const imgT = new WeakMap(), imgLive = new Set();

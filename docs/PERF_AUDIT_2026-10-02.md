@@ -6,9 +6,9 @@ gfx.js, adapter.js and player.js. Line numbers drift, so search for the quoted c
 and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame breaks them.
 
 **Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2), the water's reflections (E.3), the
-cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact shadows (E.7), the GPU layer batch (E.8)
-and wind's cloth atlas (E.9) are done. The trees' sway was measured and left (E.9); the hero's compositor is the next real
-item. Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 not started.
+cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact shadows (E.7), the GPU layer batch (E.8),
+wind's cloth atlas (E.9) and the hero's compositor in arrays (E.10) are done. The trees' sway was measured and left (E.9).
+Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 not started.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -653,6 +653,63 @@ slices swung 2-11 ms where the new one held 1.3-2.7:
 
 The last, quieter slices are closer together (day 1.65-2.03 against 1.50-1.66 ms). The win is mostly that a busy GPU no
 longer stalls the frame.
+
+### E.10 The hero's composite in arrays (2026-10-03; bit-exact)
+
+**What it replaced.** Each frame view/hero.js composited the Ranger into two 192 x 160 CPU canvases:
+
+- `drawImage` of the atlas frame (albedo, normals);
+- the cloak via its own canvas (`putImageData`, then `drawImage`);
+- the hair and the pixel bow as `fillRect`s.
+
+Then both whole canvases were uploaded.
+
+**What it is now:**
+
+- **The composite.** hero.js `pix(w, h)` is an RGBA8 array plus the box drawn this frame. It takes:
+  - `blit`: an atlas frame, or the cloak's box. view/cloth.js `draw` hands its rasterised box straight to a target that
+    has `blit`, no canvases.
+  - `put`: one hair pixel (packed colours, read once per frame and facing, as before).
+  - the 2D calls the pixel bow makes (`fillStyle`, `globalAlpha`, `source-over`, `save` / `restore`, `fillRect`).
+
+  Alpha 0 and 255 copy; anything between is laid over by straight-alpha source-over.
+- **The atlas frames.** A pose sheet is decoded to bytes once, the first time one of its frames shows.
+- **The upload.** Only this frame's box joined with last frame's goes up, through `G.texData`, which now takes a source
+  offset.
+- **The readers.** The two canvases are now the readers' copy (contact's foot measure, flow's afterimages and emit
+  cut-out). `sprite().img` / `.nrm` fill them from the arrays, over the changed box, only when one is read.
+- **One CSS colour reader.** `cssRGBA` moved from gfx.js to core/color.js; the composite's bow colours use it too.
+
+**Checks:**
+
+- golden against the code before: 16 / 16 identical (contact reads the canvas copy in every capture);
+- a roll with afterimages captured: identical;
+- smoke and simview pass.
+
+**Results**, interleaved A/B (14 x 150 frames):
+
+| | Before | After |
+|---|---|---|
+| whole frame, day / storm / horde | 2.84 / 2.48 / 2.14 ms | 1.77 / 1.68 / 1.47 ms (-37% / -32% / -31%) |
+| `G.render` CPU, day / storm / horde | 1.26 / 1.07 / 0.91 ms | 0.69 / 0.62 / 0.54 ms |
+| `hero.compose` (now without the uploads) | 0.15-0.20 ms | 0.14-0.17 ms |
+
+The `G.render` drop is much bigger than the uploads' own measured cost (~0.075 ms). The canvas path cost more than its
+calls show.
+
+**An open question: the GPU timer.** Timer queries on `G.render`'s offscreen passes read 0.50 ms before (p95 0.51, very
+tight) and 0.62-0.68 ms after (p95 ~0.9).
+
+- **Ruled out, by variants in one page:** switching off the hero's uploads, then every block upload; uploading whole
+  blocks; adding a CPU-canvas upload or a GPU-canvas readback each frame; delaying the work before or after the render.
+  None of these moved it.
+- **Where it isn't:** new gfx.js alone with the old compositor reads 0.62 on the full timer, the same as before.
+- **Why it doesn't look like work:** the new code issues strictly less GPU work, and the output is bit-identical. It looks
+  like how the GPU process schedules this context's commands, not more work. Under vsync this timer measures mostly
+  waiting (it read 0.5 and 4.3 ms for the same build).
+- **Why it doesn't matter yet:** even taken at face value it's +0.15 ms of a 6.1 ms frame, with the frame CPU-bound.
+
+A windowed 164 Hz run on the dev machine (stage 4) is the way to settle it.
 
 ### Stage 4: browser and measuring
 
