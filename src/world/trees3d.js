@@ -455,7 +455,7 @@ function rowan(seed, fam) {
     const s = V().crossVectors(a, up); if (s.lengthSq() < 1e-4) s.set(1, 0, 0); s.normalize();
     const n = V().crossVectors(s, a).normalize(), L = tp.L, phase = (i * 2.39996 + seed * .7) % TAU;
     const bias = TUNE.lift + TUNE.light * tp.e.y / .9 - TUNE.inner * (1 - Math.min(1, tp.e.length())) * .6 + (r() - .5) * .1;
-    B.part('leaf', bias, -2, crown(A.y), phase);   // spray: sprayOf(A.clone().addScaledVector(a, L / 2), C, R, seed, i)   (the spray's middle, the crown's ellipsoid, the tree's seed, this spray)
+    B.part('leaf', bias, -2, crown(A.y), phase, sprayOf(A.clone().addScaledVector(a, L / 2), C, R, seed, i));   // the spray's middle, the crown's ellipsoid, the tree's seed, this spray
     const np = 5 + (r() < .5 ? 1 : 0);
     for (let k = 0; k < np; k++) {
       const t = (k + .5) / (np + .1), ell = .2 + .09 * Math.sin(Math.PI * (.12 + .76 * t)), S = A.clone().addScaledVector(a, L * t).add(V(0, -.05 * t * t, 0));
@@ -469,7 +469,7 @@ function rowan(seed, fam) {
   // inside the crown: a few dark masses behind the sprays (they stay put; the season thins them with the sprays), so the crown has a body and the sprays comb its surface
   for (let i = 0; i < 4; i++) {
     const az = a0 + i * 1.7 + r(), cz = -.1 + .8 * r(), sz = Math.sqrt(1 - cz * cz), q = C.clone().add(V(Math.cos(az) * sz * R.x * .36, cz * R.y * .4, Math.sin(az) * sz * R.z * .36)), bias = TUNE.lift - .24;
-    B.part('leaf', bias, -2, crown(q.y), -1); clump(B, q, .38 + r() * .08, .8, seed * 17 + i, C, R, bias, r, 3);   // spray: sprayOf(q, C, R, seed, 100 + i)
+    B.part('leaf', bias, -2, crown(q.y), -1, sprayOf(q, C, R, seed, 100 + i)); clump(B, q, .38 + r() * .08, .8, seed * 17 + i, C, R, bias, r, 3);
   }
   // berries: a cluster at the end of some of the outer upper twigs (the berries sit above and among the leaves, so the camera sees them)
   const cand = tips.filter(t => !t.second && t.e.y > .1 && t.e.length() > .8), want = 9 + (r() * 4 | 0), bt = cand.filter(() => r() < want / cand.length);
@@ -527,7 +527,7 @@ function birch(seed, fam) {
   // leaves: a clump at every branch end (and the top), then 2-3 small clumps on each whip
   let n = 0; const tuft = (pos, rad, k, ph, fl, e) => {
     const bias = TUNE.lift + .06 + TUNE.light * clamp((pos.y - CC.y) / (CR.y), -1, 1) * .8 - TUNE.inner * (1 - Math.min(1, e)) * .5 + (r() - .5) * .1;
-    B.part('leaf', bias, -2, fl, ph); clump(B, pos, rad, .75, seed * 13 + n++, CC, CR, bias, r, k, 1.2);   // spray: sprayOf(pos, CC, CR, seed, n)
+    B.part('leaf', bias, -2, fl, ph, sprayOf(pos, CC, CR, seed, n)); clump(B, pos, rad, .75, seed * 13 + n++, CC, CR, bias, r, k, 1.2);
   };
   for (const [i, t] of tips.entries()) { const e = Math.hypot(t.E.x - CC.x, t.E.y - CC.y, t.E.z - CC.z) / (H - y0) * 1.6; tuft(t.E.clone().add(V(0, .08, 0)), .25 + r() * .08 - t.u * .06, 3, (i * 2.39996 + seed * .7) % TAU, crown(t.E.y), e); }
   tuft(V(CC.x + Math.cos(la) * ld * .3, H + .02, CC.z + Math.sin(la) * ld * .3), .2, 3, r() * TAU, crown(H), 1);
@@ -569,14 +569,14 @@ function aspen(seed, fam) {
     B.part('aspen'); tube(B, [P0, mid, pos], [.03, .02, .012], 4, r());
     tube(B, [mid, mid.clone().addScaledVector(d, .1).addScaledVector(sd, .1).add(V(0, .18, 0)), mid.clone().addScaledVector(d, .16).addScaledVector(sd, .2).add(V(0, .4, 0))], [.014, .011, .008], 3, r());
     const e = Math.hypot((pos.x - CC.x) / CR.x, (pos.y - CC.y) / CR.y, (pos.z - CC.z) / CR.z), bias = TUNE.lift + .1 + TUNE.light * (pos.y - CC.y) / CR.y * .8 - TUNE.inner * (1 - Math.min(1, e / .7)) * .7 + (r() - .5) * .14;
-    B.part('leaf', bias, -2, crown(pos.y), (n * 2.39996 + seed * .7) % TAU);   // spray: sprayOf(pos, CC, CR, seed, n)
+    B.part('leaf', bias, -2, crown(pos.y), (n * 2.39996 + seed * .7) % TAU, sprayOf(pos, CC, CR, seed, n));
     clump(B, pos, rad, .85, seed * 13 + n++, CC, CR, bias, r, detail, 1.5);
   };
   for (let i = 0; i < 18; i++) { const u = (i + .5 + (r() - .5) * .9) / 18; put(clamp(u, .02, .98), i * 2.39996 + r() * .8, .1 + .6 * r(), .26 + r() * .15, i % 3 === 2 ? 2 : 3); }   // the body: clumps of every size all through the column
   for (let i = 0; i < 26; i++) put(.03 + .95 * r(), r() * TAU, .86 + .3 * r(), .15 + r() * .12, 2);   // the rim: small ones on the surface and a little beyond it, the ragged leafy edge
-  { const top = V(lean(1).x, H + .1, lean(1).z); B.part('leaf', TUNE.lift + .12, -2, crown(H), r() * TAU); clump(B, top, .22, .95, seed * 13 + n++, CC, CR, TUNE.lift + .12, r, 3); }   // spray: sprayOf(top, CC, CR, seed, n)
+  { const top = V(lean(1).x, H + .1, lean(1).z); B.part('leaf', TUNE.lift + .12, -2, crown(H), r() * TAU, sprayOf(top, CC, CR, seed, n)); clump(B, top, .22, .95, seed * 13 + n++, CC, CR, TUNE.lift + .12, r, 3); }
   for (const f of [.3, .62]) {   // the dark core: tall, steady (no gaps open in it)
-    const q = V(lean(f * .9 + .1).x, y0 + (H - y0) * f, lean(f * .9 + .1).z); B.part('leaf', TUNE.lift - .2, -2, crown(q.y), -1);   // spray: sprayOf(q, CC, CR, seed, 100 + f * 10)
+    const q = V(lean(f * .9 + .1).x, y0 + (H - y0) * f, lean(f * .9 + .1).z); B.part('leaf', TUNE.lift - .2, -2, crown(q.y), -1, sprayOf(q, CC, CR, seed, 100 + f * 10));
     clump(B, q, .4, 1.7, seed * 13 + n++, CC, CR, TUNE.lift - .2, r, 3);
   }
   B.clumps = n;
