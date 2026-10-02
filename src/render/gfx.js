@@ -144,7 +144,7 @@ vec3 wTexel(ivec2 ti, ivec2 mx) {
   vec3 res = texelFetch(uTex, ti, 0).rgb;
   if (rc < 192) return res;
   int gg = int(w.g * 255. + .5), tone = (rc >> 4) & 3, ring = gg >> 5;
-  float spd = float(rc & 15) * .125, s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .25;
+  float spd = float(rc & 15) * .125, s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .5;
   float ph = uWPhase * uWA.x * spd;
   float h = wlay(a, s, ph, uWA.y, uWA.z, 0.), l = wlay(a, s, ph * .7, uWA.y * 1.4, uWA.z * 1.5, 7.3);
   int t = tone;

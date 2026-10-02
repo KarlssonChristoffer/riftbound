@@ -228,7 +228,7 @@ export const WATER_TUNE = {
 //      bits 3-0 the flow speed here in 1/8ths of the biome's rate (waterSample's speed)
 //   G  bits 7-5 ring: texels from the bank (1 = the first texel .. 7; 0 = further in);  bits 4-0 = travel bits 12-8
 //   B  travel bits 7-0: the travel coordinate s in 1/8 texel (13 bits: up to 1023 texels)
-//   A  across the flow, signed texels from the axis in 1/4 texel, + 128 (clamped)
+//   A  across the flow, signed texels from the axis in 1/2 texel, + 128 (clamped: +-63.5 texels, 2.08 m at PPM 30.5)
 function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
   const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
   const toneOf = k => { for (let t = 0; t < ramp.length; t++) if (px[k] === ramp[t][0] && px[k + 1] === ramp[t][1] && px[k + 2] === ramp[t][2]) return t; return -1; };
@@ -245,7 +245,7 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
     const s13 = Math.min(8191, Math.round(o.s * PPM * 8));
     data[k] = state << 6 | tone << 4 | (Math.round(Math.min(1.875, o.speed) * 8) & 15);
     data[k + 1] = ring << 5 | s13 >> 8; data[k + 2] = s13 & 255;
-    data[k + 3] = Math.max(0, Math.min(255, Math.round(o.a * PPM * 4) + 128));
+    data[k + 3] = Math.max(0, Math.min(255, Math.round(o.a * PPM * 2) + 128));
   }
   for (let y = 0; y < HPX; y++) for (let x = 0; x < WPX; x++) {   // dry texels beside water: SURF_FS blends across them when the camera turns
     const k = (y * WPX + x) * 4; if (data[k] >> 6) continue;
