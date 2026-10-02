@@ -192,6 +192,56 @@ const STYLES = {
     // the green banks (damp ground, clover, moss, reeds, cattail heads, ferns): clearly green, so the season turns them
     damp: ramp('#587c5a', '#46664c', '#355040', '#243a30'), lush: ramp('#9bc464', '#76a04c', '#57803f', '#355432'), moss: ramp('#8fbb5e', '#6c9a49', '#4f7a3e', '#33502f'),
     reed: ramp('#b3cc6a', '#86a64e', '#5f8441', '#355133'), cattail: ramp('#a5753f', '#80522c', '#5a3822', '#34211a'), fern: ramp('#8fc16a', '#69a050', '#4a7e3f', '#2f5233'),
+    // THE PLANTS' AUTUMN (world.js plantOf hands a card its path; gfx.js CARD_FS turns it patch by patch, by render/gfx.js U.autumn).
+    // `ramp` is the painted green the card is made of (its pixels are recognised by it). A path = four stages, the first colour ..
+    // the dying one, each [light, base, shade, dark] like the ramp it replaces (stage 0 is the painted green itself, so summer is
+    // untouched). `w` how many plants take it, `delay` when its first patch starts (0 .. 1 of autumn: higher = stays green later),
+    // `alt` the path a fifth of its patches follow instead (a spray of another colour). The red shrubs (barberry, burning bush) go
+    // first and furthest; the green straggler hardly starts before the others are done; tufts and reeds dry to straw and tan,
+    // ferns to rust. The photos: yellow-green sprays, orange and scarlet ones, brown at the end
+    plantAutumn: {
+      bush: {ramp: 'leaf', paths: [
+        {name: 'crimson', w: .22, delay: [0, .1], alt: 1, stages: [
+          ['#e9a84c', '#d27c38', '#a1572f', '#5f3224'], ['#ea6a3c', '#cc4630', '#92302b', '#541c22'],
+          ['#d84e4a', '#ac2f3a', '#76222f', '#43151f'], ['#8c4a3e', '#68342e', '#48262a', '#2d171b']]},
+        {name: 'orange', w: .22, delay: [.03, .15], alt: 0, stages: [
+          ['#eec650', '#dba43a', '#aa7830', '#694b26'], ['#eea646', '#d87e34', '#a35628', '#5f3320'],
+          ['#d98c42', '#ba6330', '#85432a', '#4d2920'], ['#9b6b3d', '#754d2e', '#53371f', '#33221a']]},
+        {name: 'yellow', w: .4, delay: [.07, .2], alt: 1, stages: [
+          ['#c6ca5a', '#a6ae48', '#7e8a38', '#4b5b30'], ['#ecd65a', '#d6ba46', '#a28c34', '#5f5130'],
+          ['#e2b24c', '#c29038', '#906b2e', '#534022'], ['#b2925b', '#8c714a', '#675139', '#3e3125']]},
+        {name: 'late', w: .16, delay: [.3, .34], alt: 2, stages: [
+          ['#8ca561', '#6f8b4d', '#576f43', '#3b5135'], ['#b2ba59', '#8f9b46', '#6b7b3a', '#445530'],
+          ['#d2b24f', '#b28d3c', '#826b30', '#4f4122'], ['#9c7c4b', '#795f3d', '#57452f', '#362b21']]},
+      ]},
+      tuft: {ramp: 'grass', paths: [
+        {name: 'straw', w: .4, delay: [0, .22], alt: 1, stages: [
+          ['#9fae62', '#85974e', '#677c40', '#46583a'], ['#c6bd6a', '#a8a354', '#82823f', '#545a33'],
+          ['#d6c283', '#b8a066', '#8f7a4c', '#5e4f31'], ['#cfbf98', '#b0a07a', '#8a7c5c', '#5a5040']]},
+        {name: 'tan', w: .35, delay: [.05, .3], alt: 0, stages: [
+          ['#a6ad6c', '#8a9456', '#6c7a46', '#48563c'], ['#bcb072', '#9f9460', '#7c744b', '#524b36'],
+          ['#c8b488', '#a99870', '#857650', '#585038'], ['#b8aa8c', '#988c70', '#756c56', '#4e483a']]},
+        {name: 'bleached', w: .25, delay: [.12, .38], alt: 1, stages: [
+          ['#a8b074', '#8c9660', '#6e7a50', '#4c573f'], ['#b8b484', '#9c9870', '#7a7658', '#524f3c'],
+          ['#c0b698', '#a39a80', '#80775f', '#555040'], ['#aca898', '#8e8a7c', '#6c6a5e', '#47463e']]},
+      ]},
+      fern: {ramp: 'fern', paths: [
+        {name: 'rust', w: .55, delay: [.05, .25], alt: 1, stages: [
+          ['#b8c05e', '#98a64a', '#788a3e', '#4a5a34'], ['#dba84a', '#bd8a38', '#926a2e', '#5a4224'],
+          ['#cf7e3c', '#ae5e2e', '#82442a', '#4e2a20'], ['#9a6a42', '#78503a', '#573a2e', '#38251f']]},
+        {name: 'ochre', w: .45, delay: [.12, .32], alt: 0, stages: [
+          ['#c4c264', '#a4a850', '#808c42', '#4e5c36'], ['#e0b852', '#c29a40', '#977434', '#5c4826'],
+          ['#d29a48', '#b27a38', '#865a2e', '#533826'], ['#a07e4e', '#7e6040', '#5c4632', '#3a2c22']]},
+      ]},
+      reed: {ramp: 'reed', paths: [
+        {name: 'straw', w: .55, delay: [.02, .24], alt: 1, stages: [
+          ['#c4cc6a', '#a2ae54', '#7e8c42', '#4c5a36'], ['#d6ca72', '#b8aa5c', '#8f8446', '#585234'],
+          ['#d8c47c', '#bba463', '#907c4a', '#5c4e32'], ['#cebe94', '#ae9e76', '#88795a', '#584e3c']]},
+        {name: 'tan', w: .45, delay: [.1, .32], alt: 0, stages: [
+          ['#b8c470', '#98a85a', '#788a48', '#4c5c3a'], ['#cdc480', '#aca368', '#867f4c', '#565038'],
+          ['#cdb98a', '#ad9c74', '#88785a', '#5a4e3a'], ['#bcae92', '#9c9078', '#7a705c', '#524a3e']]},
+      ]},
+    },
   },
   ember: {
     id: 'ember', name: 'Ember Wastes', wallH: 1.2, lowH: .45,

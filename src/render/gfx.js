@@ -7,7 +7,8 @@
 //                 A  rgb albedo, a = (type * 4 + tone) / 255
 //                 N  xyz world normal, w = object id (whole numbers; a wall line shares one id: no outline at joints)
 //                 E  rgb emissive, w = part * 32 + family (meshes: seams between parts of the same family)
-//               types: 0 empty, 1 ground (tone 1 = WATER: the composite lights it as water), 2 ramp mesh (live 3D prop), 3 billboard (painted sprite), 4 character,
+//               types: 0 empty, 1 ground (tone 1 = WATER: the composite lights it as water; tone 2 = fallen leaves), 2 ramp mesh (live 3D prop), 3 billboard (painted sprite;
+//                      tone 2 = a plant with its own autumn colours: the composite's season matrix skips tone 2 on types 1 and 3), 4 character,
 //                      5 textured surface (cliff faces), 6 line (arrows), 7 lit card (a prop pre-rendered at 16 angles)
 //   3. x-ray    the player's card again, marking pixels where the scene hides it
 //   4. light    full-screen: outlines / seams / occlusion lines on meshes (the pixelizer's rules, live), then the arena's
@@ -201,6 +202,31 @@ uniform sampler2D uTex, uEm; uniform vec2 uTexSize; uniform float uSmooth, uHasE
 // depth below the bank, 1 texel = 1 px at yaw 0 (uPx = PPM, PPMH), repeating; drawn as a textured face (type 5)
 uniform sampler2D uCliff; uniform float uHasCliff, uCliffOff; uniform vec2 uCliffSize, uPx;
 ` + WATER_FS + `
+// FALLEN LEAVES (world.js bakes uLit, one texel per 2 x 2 ground texels: R = how thick the leaves lie here once the crowns are bare,
+// G = which tree palette they came from; uLitPal = that palette's colours, 4 stages x 3 tones along x, one row per group). A leaf
+// is one ground texel or two (across or down), placed by an integer hash of its own texel coordinates and the baked density, so
+// it is fixed to the world and holds still as the camera turns. uLitK.x = how much has fallen so far (0 = none: the whole thing is
+// skipped; setGround makes it from the season), uLitK.y = how far the fallen leaves have turned (which stages they are drawn in)
+uniform sampler2D uLit, uLitPal; uniform float uHasLit; uniform vec4 uLitK;
+float lh(ivec2 p, uint salt) { p = max(p, ivec2(0)); uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u + salt * 2246822519u; h = (h ^ (h >> 13)) * 1274126177u; return float((h ^ (h >> 16)) & 65535u) / 65536.; }
+float lorg(ivec2 o, ivec2 mx, ivec2 ls) {   // does a leaf start at texel o? (the baked density here, times how much has fallen; a leaf covers ~2 texels: half the odds)
+  return lh(o, 1u) < texelFetch(uLit, clamp(o, ivec2(0), mx) * ls / (mx + 1), 0).r * uLitK.x * .5 ? 1. : 0.;
+}
+vec4 leafAt(ivec2 ti, ivec2 mx) {   // (colour, 1) where a leaf lies on this ground texel, else a = 0
+  ivec2 ls = textureSize(uLit, 0), o = ti;
+  float f = lorg(ti, mx, ls);
+  if (f < .5) {   // or its first texel is the one on my left (a leaf lying along x) or the one above me (lying down y)
+    o = ti - ivec2(1, 0); f = lorg(o, mx, ls) * (lh(o, 2u) < .5 ? 1. : 0.);
+    if (f < .5) { o = ti - ivec2(0, 1); f = lorg(o, mx, ls) * (lh(o, 2u) >= .5 ? 1. : 0.); }
+  }
+  vec4 res = vec4(0.);
+  if (f > .5) {
+    int g = int(texelFetch(uLit, clamp(o, ivec2(0), mx) * ls / (mx + 1), 0).g * 255. + .5);
+    float r = lh(o, 3u), v = clamp(uLitK.y * 4.2 - (1. - r) * 3.4, 0., 3.99), rt = lh(o, 4u);   // the early leaves fall first: with the turn, more and more are in the late stages
+    res = vec4(texelFetch(uLitPal, ivec2(int(v) * 3 + (rt < .28 ? 0 : rt < .78 ? 1 : 2), g), 0).rgb, 1.);
+  }
+  return res;
+}
 // uSmooth 0..1 blends the two samplings, so the host can fade between them (crisp at rest, smooth while turning)
 void main() {
   vec2 t = vUv * uTexSize, s = floor(t + .5), d = max(fwidth(t), vec2(1e-4));   // (derivatives before any branch)
@@ -238,9 +264,16 @@ void main() {
       }
     }
   }
+  // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
+  // composite doesn't push them through the season's matrix a second time
+  float leaf = 0.;
+  if (uHasLit > .5 && uLitK.x > 0. && uType < 1.5 && wfl < .5) {
+    ivec2 mx = ivec2(uTexSize) - 1; vec4 lc = leafAt(clamp(ivec2(floor(t)), ivec2(0), mx), mx);
+    if (lc.a > 0.) { c.rgb = lc.rgb; leaf = 1.; }
+  }
   vec3 em = vec3(0.);
   if (uHasEm > .5) { vec4 e = mix(texture(uEm, uvN), texture(uEm, uvS), uSmooth); em = e.rgb * e.a; }
-  o0 = vec4(c.rgb, float(int(uType) * 4 + int(wfl)) / 255.);
+  o0 = vec4(c.rgb, float(int(uType) * 4 + int(wfl) + (leaf > .5 ? 2 : 0)) / 255.);
   o1 = vec4(normalize(vN), uObj);
   o2 = vec4(em, 0.);
 }`;
@@ -279,6 +312,39 @@ uniform sampler2D uTex, uNrm, uEm; uniform vec4 uNrmRect, uRect; uniform vec2 uS
 uniform float uHasNrm, uHasEm, uType, uObj, uCamYaw, uFlash, uHasBend, uSway;
 uniform sampler2D uMetal; uniform float uHasMetal;   // the shiny-armour mask (R: 255 steel, 128 gold), aligned with uTex
 uniform float uBend[8];   // sway weight at height fractions 0 (bottom) .. 1 (top), 8 samples (the arena's per-row flex)
+// THE PLANTS' AUTUMN (bushes, tufts, ferns, reeds: world.js plantOf fills uPlant for a card whose biome has them; every other card
+// has uPlant.x = 0 and skips all of it). The card's pixels are recognised by the green ramp it was painted with (uPRamp, light ..
+// dark) and swapped for the plant's own path (uPPal: 4 stages x 4 tones, then the same for a second path, at a fifth of the patches),
+// in whole palette steps. The plant turns in PATCHES, a spray / a branch / a blade (jittered cells in the sprite's own pixels, their
+// edges roughened), each with its own draw, and the sun side and the top go first: the exposure to a noon sun fixed in the world
+// (south and up) of the face the camera sees, so the side toward the player at yaw 0 is the reddest and a plant seen from the
+// north is the greenest. A patch starts at d (the plant's own delay + its draw + how shaded it is) and has run its four stages by
+// autumn 1. uPlant: x kind (0 none, 1 bush, 2 tuft, 3 fern, 4 reed), y seed 0..1, z the plant's delay
+uniform float uAutumn; uniform vec4 uPlant; uniform vec3 uPRamp[4]; uniform vec3 uPPal[32];
+float ph2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float pvn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(ph2(i), ph2(i + vec2(1, 0)), f.x), mix(ph2(i + vec2(0, 1)), ph2(i + vec2(1, 1)), f.x), f.y); }
+vec3 plantTurn(vec3 col, int tn, vec2 sp) {   // sp: the pixel in the sprite (y from the top)
+  float kind = uPlant.x, seed = uPlant.y;
+  vec2 cs = kind < 1.5 ? vec2(5.4, 4.6) : kind < 2.5 ? vec2(2.4, 3.2) : kind < 3.5 ? vec2(4.4, 3.8) : vec2(2.2, 8.);   // a patch's size, px
+  vec2 q = sp + (vec2(pvn(sp * .21 + seed * 13.), pvn(sp * .21 + 7.3 + seed * 5.)) - .5) * (kind < 1.5 ? 3. : 1.6);
+  vec2 g = q / cs, gi = floor(g), gf = fract(g); float best = 9.; vec2 bc = gi;
+  for (int j = -1; j <= 1; j++) for (int k = -1; k <= 1; k++) {
+    vec2 c = gi + vec2(float(k), float(j)), o = vec2(ph2(c + seed * 17.), ph2(c + seed * 17. + 5.3)), dv = vec2(float(k), float(j)) + .12 + o * .76 - gf;
+    float dd = dot(dv, dv); if (dd < best) { best = dd; bc = c; }
+  }
+  float r1 = ph2(bc + seed * 31. + 1.7), r2 = ph2(bc + seed * 7. + 3.1);
+  vec2 u = sp / uSize; float e;
+  if (kind < 1.5 || (kind > 2.5 && kind < 3.5)) {   // a bush, a fern: a dome of leaves, its normal turned like the card's own face
+    float x = clamp((u.x - .5) / .44, -1., 1.), y = clamp((.64 - u.y) / .46, -1., 1.), z = sqrt(max(0., 1. - x * x - y * y));
+    e = clamp((-.783 * sin(uCamYaw) * x + .622 * y + .783 * cos(uCamYaw) * z) * .5 + .5, 0., 1.);
+  } else e = clamp(1.08 - u.y * .95 + .08 * cos(uCamYaw), 0., 1.);   // blades: the tips first
+  float d = uPlant.z + r1 * (kind < 2.5 ? .24 : .16) + (1. - e) * (kind < 2.5 ? .3 : .22);
+  float k = clamp((uAutumn - d) / max(.08, 1. - d), 0., 1.);
+  int stage = int(min(4., floor(k * 5.)));
+  if (stage == 0) return col;
+  return uPPal[(r2 > .8 ? 16 : 0) + (stage - 1) * 4 + tn];
+}
 void main() {
   vec2 C = vC, uv = vUv;
   if (uHasBend > .5) {   // each row shifts by whole pixels: stiff trunks, a crown moving as a block
@@ -290,6 +356,12 @@ void main() {
   vec4 c = texture(uTex, uv), e = uHasEm > .5 ? texture(uEm, uv) : vec4(0.);
   if (c.a < .5 && e.a < .5) discard;
   if (c.a < .5) c.rgb = e.rgb;   // emit-only pixels (a flame above its bowl): painted too, like wind.js's flameAlbedo
+  float own = 0.;   // 1 = this pixel has its own autumn colours: the composite leaves it out of the season's matrix (G-buffer tone 2)
+  if (uPlant.x > .5 && uAutumn > 0. && c.a > .5) {
+    int tn = -1;
+    for (int k = 0; k < 4; k++) { vec3 dd = c.rgb - uPRamp[k]; if (dot(dd, dd) < .0004) { tn = k; break; } }   // (a cattail head, a painted flower: not the ramp, left as painted)
+    if (tn >= 0) { own = 1.; c.rgb = plantTurn(c.rgb, tn, floor(C * uSize) + .5); }
+  }
   vec3 F = vec3(sin(uCamYaw), 0., cos(uCamYaw)), R = vec3(cos(uCamYaw), 0., -sin(uCamYaw));
   const float S20 = .34202, C20 = .93969;
   vec3 U20 = vec3(0., C20, 0.) - F * S20, F20 = vec3(0., S20, 0.) + F * C20;
@@ -298,7 +370,7 @@ void main() {
     vec4 t = texture(uNrm, uNrmRect.xy + C * uNrmRect.zw);
     if (t.a > .5) { vec3 q = t.xyz * 2. - 1.; n = normalize(q.x * R + q.y * U20 + q.z * F20); }
   }
-  o0 = vec4(c.rgb, float(int(uType) * 4) / 255.);
+  o0 = vec4(c.rgb, float(int(uType) * 4 + (own > .5 ? 2 : 0)) / 255.);
   o1 = vec4(n, uObj);
   float metal = 0.;   // the character's metal (E.w for type 4): 2 steel, 1 gold
   if (uHasMetal > .5) { float m = texture(uMetal, uv).r; metal = m > .7 ? 2. : m > .3 ? 1. : 0.; }
@@ -525,7 +597,7 @@ void main() {
   // things (bushes, tufts, leaf particles: types 1 and 3) through uSeasonM, by how green the pixel is; SNOW lies on what
   // faces up (ground, props, crowns), in patches fixed in the world, thickening with uSnow (not on the water); WET ground
   // and props darken
-  if (uSeasonK > 0. && (type == 1 || type == 3)) { float g = clamp((alb.g - max(alb.r, alb.b)) * 7., 0., 1.) * uSeasonK; if (g > 0.) alb = mix(alb, clamp(uSeasonM * alb, 0., 1.), g); }
+  if (uSeasonK > 0. && (type == 1 || type == 3) && tone != 2) { float g = clamp((alb.g - max(alb.r, alb.b)) * 7., 0., 1.) * uSeasonK; if (g > 0.) alb = mix(alb, clamp(uSeasonM * alb, 0., 1.), g); }   // (tone 2 on a ground or card pixel: it has its own autumn colours, SURF_FS's fallen leaves and CARD_FS's plants)
   if (uSnow > 0. && (type == 1 || type == 2) && N.y > .55 && !water && !(alb.b > alb.r + .05 && alb.b >= alb.g)) {   // (water: the baked flag; the blue-ish test stays for what isn't flagged: frost's blue ground and ice keep their painted snow)
     // patches at three scales (60 cm / 20 cm / 7 cm), the large one leading so mid cover reads as drifts, not camouflage.
     // Snow settles in the darker joints first and keeps their darker tone, so the paving still shows through the snow
@@ -732,6 +804,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     time: {value: 0},   // s, for the leaves' flutter (render())
     leafK: {value: 1},  // how full the crowns are this season (features/weather.js from sim/env.js leafK)
     autumn: {value: 0}, // how far autumn has turned the leaves, 0 green .. 1 (setGround, from sim/env.js autumn): shaders colour leaves by it
+    litK: {value: new THREE.Vector4()},   // the fallen leaves: x how much has fallen (0 = none), y how far they have turned (setGround; SURF_FS)
     // the moving water (setWaterLook at every build, the clock in render()): see WATER_FS
     wPhase: {value: 0}, wA: {value: new THREE.Vector4(0, 3, 12, -1)}, wB: {value: new THREE.Vector4(.8, .76, 0, 2)}, wRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())},
   };
@@ -761,13 +834,19 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
-  const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null}) => raw(SURF_VS, SURF_FS, {
+  const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, litter = null}) => raw(SURF_VS, SURF_FS, {
+    uLit: {value: litter?.tex || null}, uLitPal: {value: litter?.pal || null}, uHasLit: {value: litter ? 1 : 0}, uLitK: U.litK,
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
     uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)},
     uCliff: {value: cliff}, uHasCliff: {value: cliff ? 1 : 0}, uCliffOff: {value: cliffOff}, uPx: U.px,
     uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)},
     uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
+  // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
+  // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test
+  const v3s = a => a.map(c => new THREE.Vector3(...c));
+  const PLANT0 = {uAutumn: U.autumn, uPlant: {value: new THREE.Vector4()}, uPRamp: {value: v3s(Array(4).fill([0, 0, 0]))}, uPPal: {value: v3s(Array(32).fill([0, 0, 0]))}};
+  const plantU = pl => !pl ? PLANT0 : {uAutumn: U.autumn, uPlant: {value: new THREE.Vector4(pl.kind, pl.seed, pl.delay, 0)}, uPRamp: {value: v3s(pl.ramp)}, uPPal: {value: v3s(pl.pal)}};
   const cardUniforms = o => ({
     uAnchor: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2(o.w, o.h)}, uPivot: {value: new THREE.Vector2(o.px, o.py)},
     uPx: U.px, uRect: {value: new THREE.Vector4(0, 0, 1, 1)}, uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uSnap: SNAP,
@@ -776,7 +855,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const QUAD = new THREE.BufferGeometry();
   QUAD.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0], 3));
 
-  // a billboard: {tex, w, h, px, py, em?, nrm?, nrmRect?, rect?, type (3 | 4), obj, bias, shadow (cast), xray}
+  // a billboard: {tex, w, h, px, py, em?, nrm?, nrmRect?, rect?, type (3 | 4), obj, bias, shadow (cast), xray, plant (see plantU)}
   // The vertex shader places it from uAnchor, so the mesh's matrix is free: render() sets it to the anchor and the card's
   // own geometry (the shared quad + a bounding sphere sized from uSize / uPivot / sway) lets three skip cards off screen.
   // Geometries are pooled: disposing one would delete the shared quad's GL buffer
@@ -802,7 +881,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const g = raw(CARD_VS, CARD_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
       uNrmRect: {value: o.nrmRect || new THREE.Vector4(0, 0, 1, 1)}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0},
       uType: {value: o.type ?? 3}, uObj: {value: o.obj ?? 0}, uFlash: {value: 0}, uBend: {value: new Float32Array(8).fill(1)},
-      uMetal: {value: null}, uHasMetal: {value: 0}}, {side: THREE.DoubleSide});
+      uMetal: {value: null}, uHasMetal: {value: 0}, ...plantU(o.plant)}, {side: THREE.DoubleSide});
     const gm = new THREE.Mesh(geo, g); gScene.add(gm);
     let sm = null, xm = null;
     if (o.shadow !== false) {
@@ -1219,7 +1298,16 @@ void main() {
   }
   const setSmooth = v => { U.smooth.value = v; };
   function setSeason(m) { compU.uSeasonM.value.set(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]); }
-  function setGround({tinted, snow, wet, leafK, autumn = 0}) { compU.uSeasonK.value = tinted ? 1 : 0; compU.uSnow.value = snow; compU.uWet.value = wet; U.leafK.value = leafK; U.autumn.value = autumn; }
+  // the fallen leaves' amount (SURF_FS): they start as the first leaves turn and pile up as the crowns thin, so the most lies where
+  // autumn ends, through the winter (under the snow, which covers it in the composite) and into spring, fading as the crowns fill out
+  // again (leafK rising, autumn already back at 0). 0 in summer (autumn 0, leafK 1: the ground shader skips it). Old leaves are brown
+  // (turn 1) once autumn has passed
+  const LIT = {byAutumn: .3};
+  function setGround({tinted, snow, wet, leafK, autumn = 0}) {
+    compU.uSeasonK.value = tinted ? 1 : 0; compU.uSnow.value = snow; compU.uWet.value = wet; U.leafK.value = leafK; U.autumn.value = autumn;
+    const fell = Math.min(1, Math.max(0, LIT.byAutumn * autumn + 1 - leafK));
+    U.litK.value.set(fell, autumn > .001 ? Math.max(autumn, 1 - leafK) : fell > 0 ? 1 : 0, 0, 0);
+  }
   const setFlash = (r, g, b) => { compU.uFlashC.value.set(r, g, b); };
   const setPlayer = (x, h, z) => { compU.uPlayer.value.set(x, h, z); };
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
