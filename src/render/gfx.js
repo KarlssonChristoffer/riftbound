@@ -793,7 +793,7 @@ void main() {
 }`;
 
 // ---------------------------------------------------------------- the renderer
-export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
+export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world: the world's bounds {x0, y0, x1, y1} (m; layout.WORLD)
   const renderer = new THREE.WebGLRenderer({canvas, antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: true});
   renderer.setPixelRatio(1); renderer.setSize(VW, VH, false);
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the arena does its maths on sRGB numbers: so do we
@@ -808,8 +808,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     depthTexture: new THREE.DepthTexture(SM, SM, THREE.UnsignedIntType)});
 
   // point-light occlusion: the solid 3D things (live meshes, the plateau; not cards) seen from straight above, as depth.
-  // Covers the Proving Grounds (62 x 30 m) + 2 m. Re-rendered only when one of them moved, appeared or vanished.
-  const HM = {x0: -2, z0: -2, w: 66, d: 34, ppm: 16, top: 20, far: 30};
+  // Covers the world (its bounds) + 2 m. Re-rendered only when one of them moved, appeared or vanished.
+  const HM = {x0: world.x0 - 2, z0: world.y0 - 2, w: world.x1 - world.x0 + 4, d: world.y1 - world.y0 + 4, ppm: 16, top: 20, far: 30};
   const hmap = new THREE.WebGLRenderTarget(HM.w * HM.ppm, HM.d * HM.ppm, {minFilter: near, magFilter: near, depthBuffer: true,
     depthTexture: new THREE.DepthTexture(HM.w * HM.ppm, HM.d * HM.ppm, THREE.UnsignedIntType)});
   const hCam = new THREE.OrthographicCamera(-HM.w / 2, HM.w / 2, HM.d / 2, -HM.d / 2, 0, HM.far);
@@ -828,7 +828,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // hit wobble, a push, burning) casts into the per-frame map until it has been still STILL_FRAMES. ~180 -> ~55 shadow
   // draws a frame. ?sshadow=0 puts everything back in the per-frame map (A/B)
   const STATIC_SHADOW = flags.get('sshadow') !== '0';
-  const SMS = 4096, SUN_STEP = .15 * DEG, STILL_FRAMES = 45, SBOX = [-6, 68, -4, 9, -6, 36];   // the world + its skirt (m)
+  const SMS = 4096, SUN_STEP = .15 * DEG, STILL_FRAMES = 45, SBOX = [world.x0 - 6, world.x1 + 6, -4, 9, world.y0 - 6, world.y1 + 6];   // the world + its skirt (m)
   const shadowS = new THREE.WebGLRenderTarget(SMS, SMS, {minFilter: near, magFilter: near, depthBuffer: true, format: THREE.RedFormat,
     depthTexture: new THREE.DepthTexture(SMS, SMS, THREE.UnsignedIntType)});
   const sunCamS = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2); sunCamS.layers.set(2);

@@ -35,7 +35,7 @@
 //            G.setWater({speed}) (gfx.js) scales the water's clock: brief D drives it from rain.
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow} from './layout.js';
+import {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth} from '../core/mathx.js';
@@ -456,7 +456,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const {WM, HM} = WORLD, layout = buildLayout(7);
   if (keep) layout.props = keep;
   const props = layout.props;
-  Object.assign(ctxO, {WM, HM, WPX: Math.ceil(WM * ctxO.PPM), HPX: Math.ceil(HM * ctxO.PPMY), PLAY, layout});
+  Object.assign(ctxO, {WM, HM, WPX: Math.ceil(WM * ctxO.PPM), HPX: Math.ceil(HM * ctxO.PPMY), PLAY, layout, bounds: WORLD});   // bounds: x0 y0 x1 y1 (read only)
   const disposers = [];
   const R = rampTexture(biome.id, biome.style);
   G.U.ramps.value = R.tex; G.U.cover.value.set(...R.cover); G.U.emitFam.value.set(...R.emitFam);
@@ -773,4 +773,4 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
-export {WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow};
+export {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow};

@@ -1,30 +1,29 @@
 // NAV: where enemies can stand and how they reach you.
 // A 0.5 m grid over the world. A cell is OPEN when it is ground level (no plateau), inside the arena's walls or on the
-// trail (the gateways count), dry, and clear of the walls and the fixed props (pillars, posts, trees, rocks); breakable
+// trail (layout.navArea: the gateways count), dry, and clear of the walls and the fixed props (pillars, posts, trees, rocks); breakable
 // props don't close cells (the core's own hop test keeps enemies off them). A breadth-first FLOW FIELD from the player,
 // re-run a few times a second, gives every open cell its walking distance to you:
 //   steer(b)       the next waypoint for an enemy: the lowest cell one hop away along a clear line (round walls, out
 //                  through a gate, along the bank), or null when it can go straight at you (the core does that)
 //   spots(...)     spawn spots: open cells in a band of WALKING distance (never across the stream from you), spaced out
 // It's rebuilt per stage (build()) since the world's fixed props come with the layout.
-import {PLAY, TRAIL, WORLD, elev, inStream} from './world.js';
+import {WORLD, navArea, elev, inStream} from './world.js';
 
 const C = .5, TAU = Math.PI * 2;
 
 export function createNav(host) {
-  const NX = Math.ceil(WORLD.WM / C), NY = Math.ceil(WORLD.HM / C), N = NX * NY;
+  const X0 = WORLD.x0, Y0 = WORLD.y0, NX = Math.ceil(WORLD.WM / C), NY = Math.ceil(WORLD.HM / C), N = NX * NY;   // cell (i, j) = X0 + i C .. (the world's origin)
   const open = new Uint8Array(N), dist = new Float32Array(N).fill(Infinity), queue = new Int32Array(N);
   let fieldT = 0, built = false;
-  const idx = (x, y) => { const i = Math.floor(x / C), j = Math.floor(y / C); return i < 0 || j < 0 || i >= NX || j >= NY ? -1 : j * NX + i; };
+  const idx = (x, y) => { const i = Math.floor((x - X0) / C), j = Math.floor((y - Y0) / C); return i < 0 || j < 0 || i >= NX || j >= NY ? -1 : j * NX + i; };
   const at = (x, y) => { const k = idx(x, y); return k < 0 ? Infinity : dist[k]; };
   const isOpen = (x, y) => { const k = idx(x, y); return k >= 0 && open[k] === 1; };
 
   function build() {
     const fixed = host.props.filter(p => !p.gone && !p.broken && !p.breakable && !p.sparring && !p.outside && !p.interact && (p.rect || p.r > 0));
-    const inArea = (x, y) => (x > PLAY.x0 && x < PLAY.x1 + .6 && y > PLAY.y0 && y < PLAY.y1) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1);
     for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
-      const x = (i + .5) * C, y = (j + .5) * C;
-      let ok = inArea(x, y) && elev(x, y) === 0 && !inStream(x, y);
+      const x = X0 + (i + .5) * C, y = Y0 + (j + .5) * C;
+      let ok = navArea(x, y) && elev(x, y) === 0 && !inStream(x, y);
       if (ok) for (const p of fixed) {
         if (p.rect ? x > p.rect[0] - .3 && x < p.rect[2] + .3 && y > p.rect[1] - .3 && y < p.rect[3] + .3 : Math.hypot(p.x - x, p.y - y) < p.r + .3) { ok = false; break; }
       }
@@ -34,7 +33,7 @@ export function createNav(host) {
   }
   // the nearest open cell to (x, y) within r cells (the player can stand where enemies can't: a plateau, a sunk crate)
   function nearestOpen(x, y, r = 8) {
-    const i0 = Math.floor(x / C), j0 = Math.floor(y / C);
+    const i0 = Math.floor((x - X0) / C), j0 = Math.floor((y - Y0) / C);
     let best = -1, bd = 1e9;
     for (let j = j0 - r; j <= j0 + r; j++) for (let i = i0 - r; i <= i0 + r; i++) {
       if (i < 0 || j < 0 || i >= NX || j >= NY || !open[j * NX + i]) continue;
@@ -65,7 +64,7 @@ export function createNav(host) {
   };
 
   return {
-    get built() { return built; }, open, dist, NX, NY, C, at, isOpen, build,
+    get built() { return built; }, open, dist, NX, NY, C, X0, Y0, at, isOpen, build,
     update(dt) { if (built && (fieldT -= dt) <= 0) { fieldT = .25; field(host.player.x, host.player.y); } },
     steer(b) {
       const P = host.player, d0 = at(b.x, b.y);
@@ -90,7 +89,7 @@ export function createNav(host) {
       if (!cand.length) for (let k = 0; k < N; k++) if (open[k] && dist[k] > 3 && isFinite(dist[k])) cand.push(k);
       const out = [];
       for (let tries = 0; out.length < n && tries < 200 && cand.length; tries++) {
-        const k = cand[Math.floor(rng() * cand.length)], x = (k % NX + .5) * C, y = (Math.floor(k / NX) + .5) * C;
+        const k = cand[Math.floor(rng() * cand.length)], x = X0 + (k % NX + .5) * C, y = Y0 + (Math.floor(k / NX) + .5) * C;
         if (Math.hypot(P.x - x, P.y - y) < lo * .7) continue;
         if ([...out, ...avoid].some(o => Math.hypot(o.x - x, o.y - y) < apart)) continue;
         out.push({x, y});

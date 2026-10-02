@@ -92,7 +92,7 @@ const cv = createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: () => opt, onTurn: d
 const features = [], events = [];
 const mods = createModifiers();   // game effects as notes on the owners' stats (core/modifiers.js; host.mods)
 const canvas = $('#screen');
-const G = createGfx(canvas, {VW: cv.VW, VH: cv.VH, PPM, PPMY, PPMH});
+const G = createGfx(canvas, {VW: cv.VW, VH: cv.VH, PPM, PPMY, PPMH, world: WORLD});
 // the HD overlay: display resolution, over the pixel canvas (damage numbers, bars, prompts)
 const hdc = document.createElement('canvas'); hdc.id = 'hd'; hdc.style.cssText = 'position:absolute;pointer-events:none;image-rendering:auto';
 $('#wrap').appendChild(hdc); const hq = hdc.getContext('2d');
