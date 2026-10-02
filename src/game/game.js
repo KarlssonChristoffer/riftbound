@@ -232,7 +232,7 @@ export async function createGame(host) {
       if (mode !== 'run' || a.extra) return;
       a.dmg = (a.dmg ?? 10) * stats.S.dmg;
       if (a.explode) a.explode = {...a.explode, dmg: a.explode.dmg * stats.S.dmg};
-      if (a.ab) return;   // ability arrows (multishot, rain, piercing, explosive) stop here
+      if (a.ab || a.kind === 'bullet') return;   // ability arrows (multishot, rain, piercing, explosive) and bullets stop here
       shotN++;
       if (stats.S.nthBoom && shotN % stats.S.nthBoom === 0) a.explode = {r: 1.5, dmg: 14 * stats.S.dmg};
       for (let i = 0; i < stats.S.volley; i++) {
