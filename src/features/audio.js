@@ -18,7 +18,8 @@ import {createRainAudio} from './rainaudio.js';
 // and rolling barrels (combat)
 export const order = {after: ['wind', 'lights', 'combat']};
 export async function create(host) {
-  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }};
+  // (ground: what the biome's painter says is under a foot, where it says: world/desert.js B.groundAt; null elsewhere)
+  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }, ground: (x, y) => host.biome?.groundAt?.(x, y) ?? null};
   const screenX = (x, y) => host.toView(x, y, 0)[0];
   const AU = createAudio(ctx, {arrows: () => host.arrows, props: () => host.props, combat: () => host.feature('combat'), wind: () => host.wind});
   const listener = {};

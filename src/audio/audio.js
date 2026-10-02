@@ -38,7 +38,7 @@ import {STREAM, elev as elevOf} from '../world/layout.js';
 import {createMusic} from './music.js';   // the adaptive score, layered with the beds (U toggles it)
 // Phase 2 (docs/AUDIO.md): the Sound Forge runtime. Forge sounds baked in a Worker at load play first; this file's
 // synth below is the FALLBACK for anything not baked yet (or with ?forge=0, to compare).
-import {createEngine} from '../../audio/runtime/engine.js';
+import {createEngine, REVERBS} from '../../audio/runtime/engine.js';
 import {createBakery} from '../../audio/runtime/bakery.js';
 import {createDirector} from '../../audio/runtime/director.js';
 import {EVENTS, AMBIENCE, SOURCES} from '../../audio/runtime/events.js';
@@ -58,6 +58,30 @@ const MAXV = 30;   // simultaneous SFX voices (priority 2 / 3 sounds may go 6 / 
 // recipe (more spray, no extra highs) would be the next step: audio/forge/recipes/stream.js.
 const WATERFALL = {recipe: 'stream', case: 'rapids', gainDb: -22};
 const FALL = {dScale: 1.8, ravineY: 27.9, reach: 32};
+// THE DESERT (world/desert.js, "Red Mesa"). Its forge ambience is made of banks the forge already bakes, added to the director
+// by its options like the waterfall (events.js's AMBIENCE is not written): a hot, dry wind by day (ember_hot: a low wind, a
+// faint roar, next to no leaves), the gustier one at dusk and night, insects by day (a hum, far rasps), crickets at night, the
+// creek as the brook. What the forge has no bank for (a hawk's cry by day, cicadas swelling in the heat, coyotes at night) is
+// synthesised (desertCalls), far off and panned wide, under the beds; the hawk you SEE cries through SFX.hawk (wildlife.js's
+// 'caw'). Footsteps read the ground under the foot (ctx.ground: world/desert.js B.groundAt): paving and rock are stone, sand a
+// soft muffled crunch (the forge's fine gravel pitched down and darkened; the synth's 'sand'), hardpan a dry tap. The reverb:
+// short dry open air, and near the canyon's rim a long one whose early reflections come late (the far wall answering).
+const DESERT_AMB = {
+  beds: {
+    day: [{recipe: 'wind', case: 'ember_hot', gainDb: -25, gust: 6}, {recipe: 'insects', case: 'day', gainDb: -38, bakePriority: 6}],
+    dusk: [{recipe: 'wind', case: 'gusty', gainDb: -26.5, gust: 6}, {recipe: 'insects', case: 'dusk', gainDb: -34, bakePriority: 5}],
+    night: [{recipe: 'wind', case: 'gusty', gainDb: -29, gust: 5}, {recipe: 'insects', case: 'night', gainDb: -31, bakePriority: 5}],
+  },
+  calls: [],
+  emitters: [{recipe: 'stream', case: 'brook', at: 'stream', gainDb: -22, floorDb: -14, lpf: [600, 8000]}],
+};
+const DESERT_REVERBS = {
+  desert: {rt: .55, pre: .01, lp0: 8000, lp1: 2200, hp: 160, er: 4, erSpan: .08, erGain: .3, width: 1, wet: -3},
+  canyon: {rt: 1.9, pre: .045, lp0: 6000, lp1: 1400, hp: 140, er: 6, erSpan: .32, erGain: .7, width: 1, wet: 0},
+};
+const CANYON = {in: 23.6, out: 22.8, rev: [.14, .38]};   // the player's y (m) where the canyon's echo comes in / goes (its rim ~27.7); the synth's reverb level out / in
+const DESERT_STEP = {sand: {surf: 'sand', ground: 'gravel', semi: -4, lpf: 2400, gainDb: -2}, pan: {surf: 'pan', ground: 'gravel', semi: -1, lpf: 3400, gainDb: -6},
+  stone: {surf: 'stone', ground: 'stone'}, rock: {surf: 'stone', ground: 'stone'}};
 
 // ======================================================================================================================
 // ENGINE: one per AudioContext (live, or offline for level tests)
@@ -186,7 +210,7 @@ function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (t
 // SOUNDS. Each: (E, o) with o {at?, pan, d, g?, ...fields}. Levels are set so a step peaks ~0.1, a hit ~0.3, a break
 // ~0.45, an explosion hits the compressor. Soft, woody, low: nothing above ~6 kHz carries much energy.
 // ======================================================================================================================
-const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift'};
+const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift', desert: 'desert'};
 const MAT = {dummy: 'straw', brute: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};
 
 // the ground texture of one footfall (shared by steps, landings, scuffs); k = weight 0..1.5
@@ -203,6 +227,13 @@ function surface(E, v, dt, surf, k = .6) {
     N(v, dt, {type: 'bandpass', f: 2600, q: 2, d: .014, g: .22});
     O(v, dt + .002, {f: pick([1760, 2349, 2637, 3136]), a: .002, d: .09 + k * .05, g: .035 + .02 * k});
     N(v, dt, {type: 'lowpass', f: 700, d: .04, g: .2 * k + .06});
+  } else if (surf === 'sand') {   // the desert's sand: a soft, muffled crunch, fine grains giving under the boot
+    const n = 4 + (k * 4 | 0);
+    for (let i = 0; i < n; i++) N(v, dt + RR(0, .03 + k * .03), {type: 'bandpass', f: RR(900, 2200), q: 1.1, d: RR(.012, .03), g: RR(.08, .16) * (.6 + k * .4)});
+    N(v, dt, {type: 'lowpass', f: 520, a: .006, d: .06 + k * .02, g: .16 * k + .06});
+  } else if (surf === 'pan') {     // hardpan: a dry, dull tap and a grit or two
+    N(v, dt, {type: 'bandpass', f: RR(700, 1000), q: 1.3, d: .03, g: .3});
+    for (let i = 0; i < 2; i++) N(v, dt + RR(0, .02), {type: 'bandpass', f: RR(2200, 3400), q: 2.5, d: .008, g: .08});
   } else if (surf === 'stone') {
     N(v, dt, {type: 'bandpass', f: 1500, q: 1.6, d: .025, g: .35});
     N(v, dt, {type: 'lowpass', f: 800, d: .04, g: .25 * k + .08});
@@ -365,6 +396,12 @@ const SFX = {
       for (let k = 0; k < flaps; k++) E.N(v, t0 + k * per * J(.12), {b: E.PK, type: 'bandpass', f: f * (1 - k * .04), q: .9, a: .012, d: .04 + k * .004, g: RR(.18, .3) * (1 - k * .08)});
     }
     if (n >= 3 && o.surf !== 'rift') for (let i = 0; i < 2; i++) { const f0 = RR(2800, 4000); E.O(v, RR(.05, .3), {f: f0, f2: f0 * RR(.75, 1.25), a: .004, d: .05, g: .03}); }
+  },
+  hawk(E, o) {    // the desert's red-tailed hawk (wildlife.js's 'caw'): a hoarse scream falling away
+    const v = E.voice({...o, wet: .55}, 'hawk', 2, {pri: 1, cd: 1.5}); if (!v) return;
+    const f = RR(2900, 3300);
+    E.O(v, 0, {w: 'sawtooth', f, f2: f * .52, sw: 1.4, a: .1, hold: .2, d: 1.1, g: .05, type: 'lowpass', ff: 2600, q: 1.2});
+    E.N(v, 0, {type: 'bandpass', f: f * .9, f2: f * .5, sw: 1.4, q: 4, a: .08, hold: .2, d: 1, g: .08});
   },
   caw(E, o) {     // a crow: two harsh nasal calls (a buzzy sawtooth through a vocal formant, plus rasp)
     const v = E.voice({...o, wet: .5}, 'caw', 1, {pri: 1, cd: .8}); if (!v) return;
@@ -534,6 +571,22 @@ function makeBed(E, id, t0) {
       set(sg.gain, .012 + .05 * env.prox, t, .3); set(slp.frequency, 400 + 2600 * env.prox * env.prox, t, .3);
       if (env.prox > .1 && due('plip', t, .12 / env.prox, .5 / env.prox)) { const v = E.sub(sg, t + .03, RR(-.3, .3)), f = RR(700, 1500); E.O(v, 0, {f, f2: f * 1.5, sw: .03, a: .003, d: .04, g: .07}); }
     };
+  } else if (id === 'desert') {   // dry wind over sand (a low body, sand hissing in the gusts), insects by day, crickets at night, the creek
+    const wind = L(E.PK, out, {type: 'bandpass', f: 360, q: .55}), hiss = L(E.W, out, {type: 'bandpass', f: 1700, q: .8}), hum = L(E.PK, out, {type: 'bandpass', f: 190, q: 2});
+    const water = L(E.PK, sg, {type: 'bandpass', f: 900, q: .5, g: .45});
+    tick = (env, t) => {
+      const night = env.time === 'night', dusk = env.time === 'dusk', g = st.gust;
+      set(wind.f.frequency, 240 + 420 * g, t, .4); set(wind.g.gain, (.042 + .07 * g) * (night ? .7 : 1), t, .4);   // (level with the ruins' bed)
+      set(hiss.g.gain, .002 + .008 * g * g, t, .4);   // (dark: the user's taste, nothing hissy)
+      set(hum.g.gain, night ? 0 : dusk ? .004 : .008, t, 1);
+      if (night || dusk) for (const [k, f, p] of [['cr1', 4180, -.5], ['cr2', 4460, .55]]) if (due(k, t, .7, 1.4)) {   // crickets
+        const v = E.sub(out, t + .05, p, night ? .9 : .35);
+        for (let i = 0; i < 3; i++) E.O(v, i * .05, {f, a: .004, d: .026, g: .009});
+      }
+      set(sg.gain, .016 + .07 * env.prox, t, .3); set(slp.frequency, 450 + 5000 * env.prox * env.prox, t, .3);
+      set(water.f.frequency, 760 + 420 * Math.sin(st.lfo * .7), t, .5);
+      if (env.prox > .05 && due('plip', t, .07 / env.prox, .32 / env.prox)) { const v = E.sub(sg, t + .03, RR(-.3, .3)), f = RR(450, 1100); E.O(v, 0, {f, f2: f * 1.5, sw: .03, a: .003, d: .04, g: .07}); }
+    };
   } else {   // rift
     const drones = [55, 82.7, 110.4].map((f, i) => Osc(out, {f, g: [.009, .006, .0035][i]}));
     const saw = Osc(out, {w: 'sawtooth', f: 55.3, g: .006, type: 'lowpass', ff: 260, q: 2});
@@ -603,6 +656,35 @@ function makeCreak(E) {
   };
 }
 
+// the desert's far calls (no forge bank for them): a hawk's cry by day, a cicada swelling in the heat, coyotes at dusk and
+// night (yips, a howl, one answering further off). Each far off (quiet, low-passed), panned wide, on its own timer (st)
+function desertCalls(E, st, time, t) {
+  const due = (k, lo, hi) => { if (st[k] === undefined) st[k] = t + RR(lo, hi) * .4; if (t < st[k]) return false; st[k] = t + RR(lo, hi); return true; };
+  const side = () => (R() < .5 ? -1 : 1) * RR(.45, .8);
+  if (time === 'day' && due('hawk', 28, 70)) {
+    const v = E.sub(E.amb, t + .05, side(), RR(.6, 1));
+    for (let i = 0, n = R() < .35 ? 2 : 1; i < n; i++) {
+      const dt = i * RR(1.6, 2.2), f = RR(2900, 3300);
+      E.O(v, dt, {w: 'sawtooth', f, f2: f * .52, sw: 1.5, a: .12, hold: .25, d: 1.2, g: .012, type: 'lowpass', ff: 2300, q: 1.2});
+      E.N(v, dt, {type: 'bandpass', f: f * .9, f2: f * .5, sw: 1.5, q: 4, a: .1, hold: .25, d: 1.1, g: .02});
+    }
+  }
+  if (time === 'day' && due('cicada', 16, 40)) {
+    const v = E.sub(E.amb, t + .05, side(), RR(.5, 1)), hold = RR(2, 5), f = RR(3100, 3700);   // (soft and far: a swell under the wind, not a whine)
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f, q: 5, a: RR(1, 1.8), hold, d: RR(1.5, 2.5), g: .007});
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f: f * 1.5, q: 6, a: 1.6, hold, d: 2, g: .002});
+  }
+  if (time !== 'day' && due('coyote', time === 'night' ? 30 : 60, time === 'night' ? 75 : 140)) {
+    for (const [dt, far] of [[0, 1], [RR(2.5, 4), .45]]) {
+      const v = E.sub(E.amb, t + .05 + dt, side(), far), n = 2 + (R() * 4 | 0);
+      for (let i = 0; i < n; i++) { const f = RR(620, 820); E.O(v, i * RR(.12, .18), {w: 'triangle', f, f2: f * 1.35, sw: .08, a: .01, d: .1, g: .012, type: 'lowpass', ff: 1600}); }
+      const h0 = n * .16 + .15, f = RR(480, 560);
+      E.O(v, h0, {w: 'triangle', f, f2: f * 1.55, sw: .45, a: .2, hold: .5, d: .2, g: .014, type: 'lowpass', ff: 1500});
+      E.O(v, h0 + .85, {w: 'triangle', f: f * 1.55, f2: f * 1.05, sw: .8, a: .02, d: .9, g: .012, type: 'lowpass', ff: 1400});
+    }
+  }
+}
+
 // ======================================================================================================================
 // CONTROLLER
 // ======================================================================================================================
@@ -612,7 +694,10 @@ export function createAudio(ctx, host = {}) {
   const q = flags;
   const disabled = !AC || !!q.get('sheet') || q.get('audio') === '0';
   let E = null, muted = false, bed = null, bedId = null, bedMuted = false, creak = null, roll = null, prevState = 'idle', prevK = 0, climbT = 0, musicOn = true;
-  let nZones = 0, nTraps = 0;
+  let nZones = 0, nTraps = 0, canyonOn = false, revBiome = null;
+  const callSt = {};   // desertCalls' timers
+  // the desert's ground under a foot (DESERT_STEP: the synth's surface + the forge's footstep case), else o as it is
+  const grounded = (biome, x, y, o) => { if (biome !== 'desert') return o; const g = DESERT_STEP[ctx.ground?.(x, y)]; if (g) Object.assign(o, g); return o; };
   // settings (pause menu > Sound): slider values 0..1, mapped to gain as v² (perceptually even steps)
   const VOL = {master: 1, music: 1, sfx: 1, amb: 1}, MODES = {adaptive: null, explore: .3, combat: .85};
   let musicMode = 'adaptive';
@@ -633,7 +718,8 @@ export function createAudio(ctx, host = {}) {
   const forgeOff = q.get('forge') === '0';
   if (!disabled && !forgeOff) {
     try {
-      const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac), B = createBakery(ac), D = createDirector(EN, B, {EVENTS, AMBIENCE, SOURCES: {...SOURCES, waterfall: WATERFALL}});
+      const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac, {reverbs: {...REVERBS, ...DESERT_REVERBS}}), B = createBakery(ac);
+      const D = createDirector(EN, B, {EVENTS, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL}});
       try { EN.prepareReverbs?.(); } catch (e) {}
       D.prefetch({biome: 'ruins'});
       RT = {ac, EN, B, D}; AU.forge = RT;
@@ -734,7 +820,7 @@ export function createAudio(ctx, host = {}) {
     L = {x: pl.x, y: pl.y, cam: pl.cam, screenX: pl.screenX};
     // ---- ambient bed + stream ----
     if (pl.biome !== bedId) { bed?.stop(t); bed = makeBed(E, SURF[pl.biome] || 'ruins', t); bedId = pl.biome; bedMuted = false;
-      E.revOut.gain.setTargetAtTime({ruins: .22, ember: .15, frost: .3, rift: .45}[bedId] ?? .22, t, .5); }
+      E.revOut.gain.setTargetAtTime({ruins: .22, ember: .15, frost: .3, rift: .45, desert: CANYON.rev[0]}[bedId] ?? .22, t, .5); }
     const sx = STREAM.cx(pl.y), sd = Math.max(0, Math.abs(pl.x - sx) - STREAM.w(pl.y) / 2);
     const prox = clamp(1 - sd / 18, 0, 1) ** 2;
     let W = null; try { W = get(host.wind); } catch (e) {}   // the getter may run before wind.js exists
@@ -757,11 +843,18 @@ export function createAudio(ctx, host = {}) {
       const fb = (RT.D.ambience.state?.beds?.length || 0) > 0;
       if (fb !== bedMuted) { bed.out.gain.cancelScheduledValues(t); bed.out.gain.setTargetAtTime(fb ? 0 : 1, t, .8); bedMuted = fb; }
     }
+    // ---- the desert: the canyon's echo near its rim (both reverbs), the far calls ----
+    if (pl.biome !== revBiome) { revBiome = pl.biome; canyonOn = false; }
+    if (pl.biome === 'desert') {
+      const near = pl.y > (canyonOn ? CANYON.out : CANYON.in);
+      if (near !== canyonOn) { canyonOn = near; E.revOut.gain.setTargetAtTime(CANYON.rev[near ? 1 : 0], t, .8); try { RT?.EN.setReverb?.(near ? 'canyon' : 'desert', 1.5); } catch (e) {} }
+      desertCalls(E, callSt, pl.time || 'day', t);
+    }
     // ---- player state transitions ----
     const st = pl.state, landed = st === 'land' && prevState !== 'land';
     const bigDrop = events.some(e => e.type === 'player.land' && e.big === 3), speed = Math.hypot(pl.vx || 0, pl.vy || 0);
-    if (landed) fire('land', pl.x, pl.y, {surf, big: bigDrop ? 1 : 0});
-    if (st === 'roll' && prevState !== 'roll') fire('roll', pl.x, pl.y, {surf});
+    if (landed) fire('land', pl.x, pl.y, grounded(pl.biome, pl.x, pl.y, {surf, big: bigDrop ? 1 : 0}));
+    if (st === 'roll' && prevState !== 'roll') fire('roll', pl.x, pl.y, grounded(pl.biome, pl.x, pl.y, {surf}));
     if (st === 'climb') { climbT -= dt; if (climbT <= 0) { fire('climb', pl.x, pl.y, {surf}); climbT = RR(.26, .34); } }
     else if (prevState === 'climb') { fire('climb', pl.x, pl.y, {surf, big: 1}); climbT = 0; }
     // the draw creak: while the string is held back
@@ -775,10 +868,10 @@ export function createAudio(ctx, host = {}) {
     // ---- events ----
     for (const e of events) {
       switch (e.type) {
-        case 'player.step': if (!landed) fire('step', e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)}); break;
+        case 'player.step': if (!landed) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)})); break;
         case 'prop.land': fire('propDrop', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;   // a prop dropped off the plateau (combat/props.js)
-        case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, {surf, k: 1.3, g: 1}); break;   // sprint plant
-        case 'player.jump': fire('jump', e.x, e.y, {surf}); break;
+        case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: 1.3, g: 1})); break;   // sprint plant
+        case 'player.jump': fire('jump', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); break;
         case 'player.splash': case 'arrow.splash': case 'prop.splash': case 'wildlife.splash': fire('splash', e.x, e.y, {surf, small: !!e.small}); break;
         case 'arrow.hit': case 'player.hit': {
           const props = get(host.props) || [], p = !e.player && (e.prop || props.find(p => p.x === e.x && p.y === e.y));
@@ -799,10 +892,11 @@ export function createAudio(ctx, host = {}) {
         // wildlife (arena/wildlife.js)
         case 'wildlife.birds_scatter': fire('wings', e.x, e.y, {n: clamp(e.n || 3, 1, 8), surf}); break;
         case 'wildlife.wings': fire('wings', e.x, e.y, {n: 1, surf}); break;
-        case 'wildlife.caw': fire('caw', e.x, e.y); break;
+        case 'wildlife.caw': fire(pl.biome === 'desert' ? 'hawk' : 'caw', e.x, e.y); break;   // (the desert's caller is its hawk)
         case 'wildlife.fish_jump': fire('plop', e.x, e.y, {surf, fish: 1}); break;
         case 'wildlife.frog_jump': fire('plop', e.x, e.y, {surf, frog: 1}); break;
         case 'wildlife.critter_dash': fire('rustle', e.x, e.y, {surf}); break;
+        case 'tumbleweed.bounce': fire('rustle', e.x, e.y, {surf, g: .35 + .45 * (e.k || 0), gainDb: -6 + 4 * (e.k || 0), semi: -3}); break;   // dry twigs on the ground
       }
     }
     // ---- arrows: shots (new ones, grouped by ability) and thuds (newly stuck) ----
