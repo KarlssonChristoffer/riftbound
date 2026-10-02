@@ -33,7 +33,7 @@ export async function create(host) {
     get windAudio() { return WA; }, get rainAudio() { return RA; },
     view(dt, evs) {
       const p = host.player;
-      Object.assign(listener, {x: p.x, y: p.y, z: p.z, vx: p.vx, vy: p.vy, state: p.state, t: p.t, aim: host.mouse.down, biome: host.biome.id, time: host.time, cam: null, screenX});
+      Object.assign(listener, {x: p.x, y: p.y, z: p.z, vx: p.vx, vy: p.vy, state: p.state, t: p.t, aim: host.mouse.down, biome: host.biome.id, time: host.time, cam: null, screenX, gun: host.weapon?.kind === 'gun'});
       AU.update(dt, listener, evs);
       if (!WA && AU.on) {
         try { const b = ambBus(); WA = b ? createWindAudio(b[0], b[1]) : null; } catch (e) { console.warn('audio: wind layer unavailable', e); WA = false; }

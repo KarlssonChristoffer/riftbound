@@ -61,7 +61,7 @@ const TUNE = {
   noise: {walk: 1.3, run: 3.2, sprint: 5.5, roll: 5, leap: 3.5, climb: 1.4, knock: 4, release: 1, arrow: 2.6, hit: 6, hitMe: 5,
     break: 8, explode: 6 /* x blast r */, splash: 5, splashSmall: 2, loot: 3, open: 3, land: 4.5, landBig: 8, jump: 2.5, scatter: 3.2,
     impact: 6, scrape: 2.5, propLand: 4.5, propSplash: 4,
-    splashAnimal: 1.1},
+    splashAnimal: 1.1, gunshot: 14 /* a revolver: birds go up across the yard */, bullet: 3.5},
   nervous: .6,      // threat at which animals edge away / sit up (1 = flee)
   earshot: 22,      // m from the player: animal sounds beyond it are not pushed
   margin: 4,        // m around the view simulated in detail
@@ -448,6 +448,7 @@ export async function create(host) {
         case 'prop.scrape': r = N.scrape; break;
         case 'player.jump': r = N.jump; break;
         case 'wildlife.birds_scatter': r = N.scatter; break;
+        case 'player.shoot': r = N.gunshot; break; case 'bullet.impact': r = e.surf === 'air' ? 0 : N.bullet; break;
       }
       if (r > 0 && e.x !== undefined) noise.push({x: e.x, y: e.y, h: e.z ?? elev(e.x, e.y), r, ev: e.type});
     }
