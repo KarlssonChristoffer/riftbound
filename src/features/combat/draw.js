@@ -231,7 +231,7 @@ export function createDraw(host, core, phys) {
     if (live) { barKey = ''; drawBar(og, W, HH, scale); return; }
     const {Sz, gap, bx, by} = barGeo(W, HH, scale);
     const hi = mouse.y >= by && mouse.y < by + Sz ? SLOTS.findIndex((k, i) => mouse.x >= bx + i * (Sz + gap) && mouse.x < bx + i * (Sz + gap) + Sz) : -1;
-    const key = `${W}|${HH}|${scale}|${S.gold}|${hi}`;
+    const key = `${W}|${HH}|${scale}|${S.gold}|${hi}|${slotsOn()}`;
     if (key !== barKey) {
       barC ??= document.createElement('canvas');
       if (barC.width !== W || barC.height !== HH) { barC.width = W; barC.height = HH; }
@@ -239,12 +239,15 @@ export function createDraw(host, core, phys) {
     }
     og.drawImage(barC, 0, 0);
   }
+  // a gun loadout has no bow abilities (host.weapon: features/gun.js takes RMB for the fan): the gold stays where it is,
+  // the slots go (the revolver's cylinder sits there: ui/cylinder.js)
+  const slotsOn = () => host.weapon?.abilities !== false;
   function drawBar(og, W, HH, scale) {
     og.save();
-    const {Sz, gap, tw, bx, by} = barGeo(W, HH, scale);
-    og.fillStyle = 'rgba(12,10,16,.55)'; og.fillRect(bx - 6, by - 6, tw + 12, Sz + 12);
+    const {Sz, gap, tw, bx, by} = barGeo(W, HH, scale), on = slotsOn();
+    if (on) { og.fillStyle = 'rgba(12,10,16,.55)'; og.fillRect(bx - 6, by - 6, tw + 12, Sz + 12); }
     let hover = null;
-    SLOTS.forEach((k, i) => {
+    if (on) SLOTS.forEach((k, i) => {
       const ab = AB[k], x = bx + i * (Sz + gap), cx = x + Sz / 2, cy = by + Sz / 2;
       if (mouse.x >= x && mouse.x < x + Sz && mouse.y >= by && mouse.y < by + Sz) hover = {ab, x: cx, k};
       og.fillStyle = '#16141c'; og.fillRect(x, by, Sz, Sz);

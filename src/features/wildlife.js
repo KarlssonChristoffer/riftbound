@@ -61,7 +61,7 @@ const TUNE = {
   noise: {walk: 1.3, run: 3.2, sprint: 5.5, roll: 5, leap: 3.5, climb: 1.4, knock: 4, release: 1, arrow: 2.6, hit: 6, hitMe: 5,
     break: 8, explode: 6 /* x blast r */, splash: 5, splashSmall: 2, loot: 3, open: 3, land: 4.5, landBig: 8, jump: 2.5, scatter: 3.2,
     impact: 6, scrape: 2.5, propLand: 4.5, propSplash: 4,
-    splashAnimal: 1.1},
+    splashAnimal: 1.1, gunshot: 14 /* a revolver: birds go up across the yard */, bullet: 3.5},
   nervous: .6,      // threat at which animals edge away / sit up (1 = flee)
   earshot: 22,      // m from the player: animal sounds beyond it are not pushed
   margin: 4,        // m around the view simulated in detail
@@ -78,6 +78,9 @@ const SPECIES = {   // sens: noise multiplier, shy: presence radius (m), perch: 
     perch: {tower: 4, gatepost: 2, pillar: 2, tree: 2, dummy: 1, ledge: 1}},
   raven: {id: 'raven', bird: true, solo: true, heavy: true, sens: .7, shy: 2.4, speed: 3.8, agil: 2.1, flap: 3.4, alt: [4, 6], caw: true, walker: true,
     perch: {tower: 4, tree: 3, pillar: 2, gatepost: 2, rock_big: 2, dummy: 1, ledge: 1}},
+  // the desert's red-tailed hawk: a solo on the saguaros' tops and the towers, wary, high when it flies; its cry is the caw event
+  hawk: {id: 'hawk', bird: true, solo: true, sens: .65, shy: 2.8, speed: 4.6, agil: 2.3, flap: 3, alt: [4.6, 6.6], caw: true,
+    perch: {tree: 5, tower: 3, gatepost: 2, pillar: 2, rock_big: 2, ruin: 1}},
   rabbit: {id: 'rabbit', sens: 1.1, shy: 2.4},
   hare: {id: 'hare', sens: .9, shy: 2.2},
   salamander: {id: 'salamander', sens: 1, shy: 1.6},
@@ -101,6 +104,11 @@ const CAST = {
     solos: {sp: 'raven', n: 4}, hares: 2, fish: 2, moths: 0},
   ember: {salamanders: 4, moths: 2, vultures: 2},
   rift: {jellies: 4, eyes: 10, motes: 12},
+  // the desert (world/desert.js): birds only by the creek and the camp (mourning doves, finches), a hawk, jackrabbits (the hare's
+  // bolt-and-freeze), lizards darting between the rocks (the salamander's dart-and-freeze), vultures circling high, a few toads
+  // and fish in the muddy creek, moths round the fires at night
+  desert: {flocks: [{sp: 'pigeon', n: 6, homes: [[37.2, 19.2], [44.6, 18.4], [43.8, 24.6]]}, {sp: 'sparrow', n: 6, homes: [[36.6, 12.2], [45.6, 15.6], [37.2, 24.4]]}],
+    solos: {sp: 'hawk', n: 1}, hares: 2, lizards: 5, vultures: 3, fish: 2, frogs: 2, moths: 2},
 };
 
 // ---------------------------------------------------------------- art (the arena's, unchanged)
@@ -174,6 +182,12 @@ const ART = {
     hop: A(['......k.', '.....k1.', 'a0011e12', '3....3..'], 3, 3),
     hop2: A(['.......', '.....k.', '.0001k.', 'a0111e2', '33...3.'], 3, 4),
   },
+  lizard: {
+    a0: A(['...2.2...', '3321a10..', '...2...2.'], 5, 1),
+    a1: A(['.......0.', '3321a1...', '...2...2.'], 5, 1),
+    b0: A(['...2...2.', '3321a10..', '....2.2..'], 5, 1),
+    b1: A(['.......0.', '3321a1...', '....2.2..'], 5, 1),
+  },
   salamander: {
     a: A(['..2.2..', '32a1a10', '.2...2.'], 3, 1),
     b: A(['.2...2.', '32a1a10', '..2.2..'], 3, 1),
@@ -212,6 +226,7 @@ const ART = {
     beat: A(['.............', '333.......333', '..333333333..', '.....333.....'], 6, 2),
   },
 };
+ART.hawk = ART.crow;   // the desert's hawk: the crow's shape in its own colours (PAL.desert.hawk)
 const ARTOF = {bfly0: 'butterfly', bfly1: 'butterfly', bfly2: 'butterfly', ashmoth: 'moth', dfly0: 'dragonfly', dfly1: 'dragonfly'};
 const PAL = {
   ruins: {
@@ -242,11 +257,22 @@ const PAL = {
   rift: {
     jelly: {r: ['#dcbcff', '#a274e6', '#6c46b4', '#35205e']},
   },
+  desert: {
+    pigeon: {r: ['#d8c2aa', '#b49c84', '#8a7462', '#4e4036'], a: '#3a3030', b: '#c8a0a0'},   // mourning doves (a pink sheen on the neck)
+    sparrow: {r: ['#d49a7e', '#9c7c58', '#6e563e', '#3e3024'], a: '#4a3a2c'},               // house finches (rosy where the light falls)
+    hawk: {r: ['#c49a6c', '#8e6440', '#5e4028', '#2e2016'], a: '#e8d6a8'},
+    hare: {r: ['#cbb592', '#a99272', '#836e56', '#4e4234'], a: '#f2ead8', e: '#1c1612', k: '#3a2e24'},   // a jackrabbit: black-tipped ears
+    lizard: {r: ['#cdb88c', '#8c7556', '#5e4b36', '#2e2419'], a: '#4f86a8'},                // a whiptail (darker than the sand, so it shows), a blue throat
+    vulture: {r: ['#3a2a24', '#2e221e', '#241a18', '#1a1312']},
+    frog: {r: ['#a89474', '#857258', '#655440', '#3a3026'], a: '#c8645a'},                  // red-spotted toads
+    fishj: {r: ['#d8d0b0', '#a8a07e', '#78725a', '#46423a']},
+    moth: {r: ['#d8ccb2', '#ab9f86', '#7d7360', '#4a4236']},
+  },
 };
 // multiply tints for shadows (strong -> faint) and the colours that are not sprites
 const SHADE = {ruins: ['#a4a69e', '#b8bab2', '#cdcec8'], frost: ['#a8b0c4', '#bcc3d4', '#d0d6e2'], ember: ['#aca29e', '#bfb6b2', '#d2cac6'],
-  rift: ['#a69cba', '#bab2ca', '#ccc6da']};
-const UNDER = {ruins: ['#3c6676', '#284858'], frost: ['#5a7a9a', '#425e7c']};
+  rift: ['#a69cba', '#bab2ca', '#ccc6da'], desert: ['#b4a08a', '#c6b4a0', '#d8cab8']};
+const UNDER = {ruins: ['#3c6676', '#284858'], frost: ['#5a7a9a', '#425e7c'], desert: ['#6e6650', '#575040']};
 const EYE = {sclera: '#cbbbe6', pupil: '#120a1c', lid: '#161022', lidHi: '#443a68', lash: '#0e0a16', glow: '#7a64a8', glint: '#f4e8ff'};
 const MOTE = {base: '#5a3a9a', glow: ['#e4c8ff', '#ac80f2', '#7448c4']};
 const JELLY = {tend: '#6c46b4', tip: '#dcb8ff', tip2: '#6a44a8', bell: '#7c52c0', core: '#c89cff', light: '#b47cff'};
@@ -448,6 +474,7 @@ export async function create(host) {
         case 'prop.scrape': r = N.scrape; break;
         case 'player.jump': r = N.jump; break;
         case 'wildlife.birds_scatter': r = N.scatter; break;
+        case 'player.shoot': r = N.gunshot; break; case 'bullet.impact': r = e.surf === 'air' ? 0 : N.bullet; break;
       }
       if (r > 0 && e.x !== undefined) noise.push({x: e.x, y: e.y, h: e.z ?? elev(e.x, e.y), r, ev: e.type});
     }
@@ -828,8 +855,10 @@ export async function create(host) {
     }
     const th = near(a.x, a.y) ? threat(a.x, a.y, a.z, SPECIES.salamander) : null;
     if (th && th.t >= 1) {
-      const ang = Math.atan2(a.y - th.y, a.x - th.x) + rr(-.5, .5), s = rr(3.4, 4.2);
-      a.vx = Math.cos(ang) * s; a.vy = Math.sin(ang) * s * .8; a.st = 'dart'; a.at = rr(.35, .6); faceV(a, a.vx, a.vy);
+      let ang = Math.atan2(a.y - th.y, a.x - th.x) + rr(-.5, .5), s = rr(3.4, 4.2), at = rr(.35, .6);
+      const q = a.rock ? rockAway(a, th) : null;   // (the desert's: to the cover of another rock, away from the threat)
+      if (q) { const [bx, by] = besideRock(q), dx = bx - a.x, dy = by - a.y, d = Math.hypot(dx, dy); ang = Math.atan2(dy, dx); at = Math.min(1.3, d / s); a.rock = q; a.hx = bx; a.hy = by; }
+      a.vx = Math.cos(ang) * s; a.vy = Math.sin(ang) * s * (q ? 1 : .8); a.st = 'dart'; a.at = at; faceV(a, a.vx, a.vy);
       emit('critter_dash', a.x, a.y); return;
     }
     if ((a.at -= dt) > 0) return;
@@ -840,6 +869,30 @@ export async function create(host) {
     if (near(a.x, a.y) && R() < .3) emit('critter_dash', a.x, a.y);
   }
 
+  // the nearest rock 1.2-5 m away whose way doesn't lead back toward the threat (the desert's lizards: rock to rock)
+  let lizRocks = [];
+  // a wall just south of (x, y) hides what is there (the camera looks from the south): the lizards keep to where they show
+  const nearW = [];
+  function hiddenAt(x, y) {
+    for (const p of host.entities.near(x, y + 1, 1.2, nearW)) if (p.rect && !p.gone && x > p.rect[0] - .2 && x < p.rect[2] + .2 && p.rect[1] > y - .05 && p.rect[1] < y + 1.8) return true;
+    return false;
+  }
+  // where a lizard sits by a rock: in front of it (south), else beside it, else behind it; one that shows and is free
+  const BESIDE = [[0, .5], [.6, .15], [-.6, .15], [0, -.5]], SPOT = [0, 0];
+  function besideRock(q) {
+    for (const [dx, dy] of BESIDE) { const x = q.x + dx, y = q.y + dy; if (!hiddenAt(x, y) && !solid(x, y, q.z || 0)) { SPOT[0] = x; SPOT[1] = y; return SPOT; } }
+    SPOT[0] = q.x; SPOT[1] = q.y + .5; return SPOT;
+  }
+  function rockAway(a, th) {
+    let best = null, bd = 1e9; const ax = a.x - th.x, ay = a.y - th.y, al = Math.hypot(ax, ay) || 1;
+    for (const q of lizRocks) {
+      if (q === a.rock || q.gone) continue;
+      const dx = q.x - a.x, dy = q.y - a.y, d = Math.hypot(dx, dy); if (d < 1.2 || d > 5) continue;
+      if ((dx * ax + dy * ay) / (d * al) < -.2) continue;
+      if (d < bd) { bd = d; best = q; }
+    }
+    return best;
+  }
   // =================================================================== FROGS (banks, lily pads) and FISH (stream, the plateau's pool)
   function bankPoint(y, side) { const s = S(); return [s.cx(y) + side * (s.w(y) / 2 + .14), y]; }
   // a PAD frog sits on one of riverside.js's lily pads (F.pads(): live x, y, h = its bob, r), plops off into the river when startled (the same
@@ -1297,6 +1350,12 @@ export async function create(host) {
       newFrog(y + rr(-.4, .4) + (i === 0 && !q ? 6.8 : i === 1 && !q ? -1 : 0), R() < .5 ? -1 : 1, q);
     });
     if (C.salamanders) for (const [x, y] of [[37, 13.5], [42.5, 19], [17, 12.5], [24, 19.5], [37.5, 22]].slice(0, C.salamanders)) newLizard(x, y);
+    if (C.lizards) {   // the desert's: each at home by a rock on open ground (the playable area first: you meet them), darting from rock to rock
+      const rocks = props.filter(p => (p.kind === 'rock' || p.kind === 'rock_big') && !p.gone && !(p.z > .1) && !inStream(p.x, p.y));
+      const pref = p => (p.x > 5 && p.x < 58 && p.y > 4 && p.y < 26 ? 0 : 1) + (hiddenAt(p.x, p.y + .5) ? 2 : 0);   // (in the playable area and not behind a wall first)
+      rocks.sort((a, b) => pref(a) - pref(b) || R() - .5); lizRocks = rocks;
+      for (const q of rocks.slice(0, C.lizards)) { const [x, y] = besideRock(q), a = newLizard(x + rr(-.15, .15), y + rr(-.1, .1)); a.rock = q; }
+    }
     if (C.vultures) for (let i = 0; i < C.vultures; i++) newVulture(rr(16, 44), rr(11, 20));
     if (C.jellies) for (const [x, y] of [[14, 12], [26, 18.5], [38, 14], [50, 20.5]].slice(0, C.jellies)) newJelly(x, y);
     if (C.eyes) placeEyes(C.eyes);
@@ -1354,10 +1413,11 @@ export async function create(host) {
       const hid = a.st === 'hide' && a.cover;   // under a bush: just behind its card
       put(Sp[hopperFrame(a)], a.x - (hid ? FX * .12 : 0), a.y - (hid ? FY * .12 : 0), a.h, sface(a));
     }
-    if (SPR.salamander) for (const a of lizards) {
+    const LZ = SPR.salamander || SPR.lizard;   // (the desert's lizards: k = 1 a push-up, its head raised)
+    if (LZ) for (const a of lizards) {
       if (!onScreen(a.x, a.y, a.z, .4)) continue;
       const k = ((T * 1.3 + a.ph * 7) | 0) % 5 === 0 ? 1 : 0;
-      put(SPR.salamander[(a.st === 'dart' && ((a.ph | 0) & 1) ? 'b' : 'a') + k], a.x, a.y, a.z, sface(a));
+      put(LZ[(a.st === 'dart' && ((a.ph | 0) & 1) ? 'b' : 'a') + (a.st === 'dart' && LZ === SPR.lizard ? 0 : k)], a.x, a.y, a.z, sface(a));
     }
     if (SPR.frog) for (const a of frogs) {
       if ((a.st !== 'sit' && !a.jump) || !onScreen(a.x, a.y, a.h, .4)) continue;

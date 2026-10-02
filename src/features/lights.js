@@ -355,6 +355,7 @@ export async function create(host) {
   function stepArrows(dt) {
     const fp = flamePoints();
     for (const a of host.arrows) {
+      if (a.kind === 'bullet') continue;   // a revolver's bullet (sim/player/gun.js) never catches fire
       if (a._lt === undefined) {   // just loosed: next to a flame, it's dipped
         a._lt = 0; a._id = aid++;
         if (fp.some(([x, y]) => Math.hypot(x - a.x, y - a.y) < 1.5) || candles.some(c => c.lit && F.on && Math.hypot(c.x - a.x, c.y - a.y) < 1.3)) { a.fire = 1; burst(a.x, a.y, a.h, 6, FIRE, .8); }

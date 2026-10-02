@@ -14,7 +14,7 @@ const $ = s => document.querySelector(s);
 export function createStage({G, ctxO, PPM, PPMH, features, flags: Q}) {
   let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome')));
   let world = null, ents = null, propMode = Q.get('props') === 'yaw' ? 'yaw' : 'live';
-  let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+R rebuilds)
+  let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+P rebuilds)
   // the wind sways painted foliage cards (per-row bend) and gives braziers / torches a live flame. (The wind feature is
   // looked up once it exists, not per card per frame: the features are made at boot and never replaced)
   let windF = null;

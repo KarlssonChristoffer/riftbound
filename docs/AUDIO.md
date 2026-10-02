@@ -363,6 +363,7 @@ Each one is a pure picker returning `[{buffer, gain, rate, delay}]`.
   - Ambience ducks with combat intensity; beds are 2.5 dB quieter.
   - Ambient one-shots per minute: night 29–31 → ~2, day 9 → 1–2.
   - New recipes: insects (night/dusk/day loops), prop_roll (stone/dirt loop; speed sets rate and gain), arrow_stick/crystal, splash/lava and splash/rift.
+  - The western loadouts (2026-10-02): recipe `revolver` (cases peacemaker: a sharp crack, navy: a deeper boom, both with a dry desert tail: brown decay + soft low-passed rock slaps, nothing tonal; dry, cock, load, eject, spin, holster: short steel ticks, t60 < 15 ms). Events gunshot (a short ambience duck), gunDry, gunDraw, gunReload {phase}, gunHolster, fired by src/audio/audio.js from player.shoot / dryfire / draw / reload / holster; a bullet is no arrow there (no bow shot, no stuck thud: bullet.impact). Not listened to yet.
 - **Phase 4 (loudness pass): 2026-10-01.** Measured with `node tools/sfx/mixmeter.mjs`, which taps the engine buses in the live arena. The user's report was "pretty damn loud ambience noise". The cause was MUSIC, not the beds: the idle pad (detuned sawtooth chords) played at -24 LUFS-M, about 25 dB over the wind bed and almost as loud as combat.
   - **Fixes:**
     - Music master 0.25 → 0.1; the idle (pad-only) state a further -4.4 dB.

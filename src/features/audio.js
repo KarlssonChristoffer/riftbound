@@ -18,7 +18,8 @@ import {createRainAudio} from './rainaudio.js';
 // and rolling barrels (combat)
 export const order = {after: ['wind', 'lights', 'combat']};
 export async function create(host) {
-  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }};
+  // (ground: what the biome's painter says is under a foot, where it says: world/desert.js B.groundAt; null elsewhere)
+  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }, ground: (x, y) => host.biome?.groundAt?.(x, y) ?? null};
   const screenX = (x, y) => host.toView(x, y, 0)[0];
   const AU = createAudio(ctx, {arrows: () => host.arrows, props: () => host.props, combat: () => host.feature('combat'), wind: () => host.wind});
   const listener = {};
@@ -33,7 +34,7 @@ export async function create(host) {
     get windAudio() { return WA; }, get rainAudio() { return RA; },
     view(dt, evs) {
       const p = host.player;
-      Object.assign(listener, {x: p.x, y: p.y, z: p.z, vx: p.vx, vy: p.vy, state: p.state, t: p.t, aim: host.mouse.down, biome: host.biome.id, time: host.time, cam: null, screenX});
+      Object.assign(listener, {x: p.x, y: p.y, z: p.z, vx: p.vx, vy: p.vy, state: p.state, t: p.t, aim: host.mouse.down, biome: host.biome.id, time: host.time, cam: null, screenX, gun: host.weapon?.kind === 'gun'});
       AU.update(dt, listener, evs);
       if (!WA && AU.on) {
         try { const b = ambBus(); WA = b ? createWindAudio(b[0], b[1]) : null; } catch (e) { console.warn('audio: wind layer unavailable', e); WA = false; }

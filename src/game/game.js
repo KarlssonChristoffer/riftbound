@@ -176,7 +176,7 @@ export async function createGame(host) {
       if (phase === 'clear' && phaseT > 1.6) {
         if (!STAGES[run.stage + 1]) { hud.banner('Victory', 'the Rift is closed', 3, '#f2d27a'); setPhase('won'); setTimeout(() => mode === 'run' && finish(true), 2200); return; }
         setPhase('pick'); lock(true);
-        const choices = rollAugments(rng, stats.augs, 3);
+        const choices = rollAugments(rng, stats.augs, 3, host.weapon?.kind ?? 'bow');   // (the weapon's: game/items.js only)
         if (!choices.length) { lock(false); setPhase('portal'); openPortal(); return; }
         screens.pick(stageName(run.stage), choices, a => {
           screens.hide(); stats.addAugment(a); hud.toast(a.name, a.desc, '#f2d27a');
@@ -232,7 +232,7 @@ export async function createGame(host) {
       if (mode !== 'run' || a.extra) return;
       a.dmg = (a.dmg ?? 10) * stats.S.dmg;
       if (a.explode) a.explode = {...a.explode, dmg: a.explode.dmg * stats.S.dmg};
-      if (a.ab) return;   // ability arrows (multishot, rain, piercing, explosive) stop here
+      if (a.ab || a.kind === 'bullet') return;   // ability arrows (multishot, rain, piercing, explosive) and bullets stop here
       shotN++;
       if (stats.S.nthBoom && shotN % stats.S.nthBoom === 0) a.explode = {r: 1.5, dmg: 14 * stats.S.dmg};
       for (let i = 0; i < stats.S.volley; i++) {
@@ -253,7 +253,7 @@ export async function createGame(host) {
         if (core.gold < cost) { hud.float(p.x, p.y, 1.3, `need ${cost} gold`, '#e0604a'); return true; }
         core.addGold(-cost); goldSeen = core.gold;
         core.interact(p, {coins: 0});
-        const it = rollItem(rng, run.stage * .25); stats.addItem(it);
+        const it = rollItem(rng, run.stage * .25, host.weapon?.kind ?? 'bow'); stats.addItem(it);
         hud.toast(it.name, it.desc, it.tier === 3 ? '#e8604a' : it.tier === 2 ? '#7ad07a' : '#f4efe4');
         hud.float(p.x, p.y, 1.4, it.name, '#f2d27a', true);
         return true;

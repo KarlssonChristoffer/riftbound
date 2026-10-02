@@ -10,6 +10,9 @@
 //   volley    extra arrows per bow shot (50% damage)                      waveHeal         share of max health healed per wave
 //   execute   extra damage to enemies under 35% health                    trapCd / trapRoot   Vault Trap cooldown x (1 - .), root + s
 //   rainCd / rainN   Arrow Rain cooldown x (1 - .), extra arrows          iframe           untouchable seconds after a dodge roll
+//   the revolver's (sim/player/gun.js applies them: host.mods 'weapon.*'): reload (time x (1 - .)), rof (shots x (1 + .) as
+//   fast), spread (x (1 - .), the fan's too), fanSpread (the fan's x (1 - .)), last (the cylinder's last round: damage
+//   x (1 + .)), quick (the first shot after a draw: x (1 + .))
 // restore() drops the notes (the sandbox plays with the engine's own numbers).
 import {itemById, augmentById} from './items.js';
 
@@ -44,6 +47,9 @@ export function createStats(host, core) {
       ...SLOTS.flatMap(k => [{stat: 'combat.cd.' + k, mul: cdr}, {stat: 'combat.cd.' + k, mul: k === 2 ? 1 - sum('rainCd') : 1},
         {stat: 'combat.cd.' + k, mul: k === 4 ? 1 - sum('trapCd') : 1}]),
       {stat: 'player.speed', mul: Math.max(.5, 1 + sum('speed'))},
+      {stat: 'weapon.reload', mul: Math.max(.3, 1 - sum('reload'))}, {stat: 'weapon.gap', mul: 1 / (1 + sum('rof'))},
+      {stat: 'weapon.spread', mul: Math.max(.2, 1 - sum('spread'))}, {stat: 'weapon.fanSpread', mul: Math.max(.2, 1 - sum('spread')) * Math.max(.2, 1 - sum('fanSpread'))},
+      {stat: 'weapon.last', add: sum('last')}, {stat: 'weapon.quick', add: sum('quick')},
     ]);
   }
 
