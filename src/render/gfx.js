@@ -828,13 +828,20 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // hit wobble, a push, burning) casts into the per-frame map until it has been still STILL_FRAMES. ~180 -> ~55 shadow
   // draws a frame. ?sshadow=0 puts everything back in the per-frame map (A/B)
   const STATIC_SHADOW = flags.get('sshadow') !== '0';
-  const SMS = 4096, SUN_STEP = .15 * DEG, STILL_FRAMES = 45, SBOX = [world.x0 - 6, world.x1 + 6, -4, 9, world.y0 - 6, world.y1 + 6];   // the world + its skirt (m)
+  const SMS = 4096, SUN_STEP = .15 * DEG, STILL_FRAMES = 45;
+  // the static map's box (m): the world + its skirt while that is at most SFIT m a side (~50 texels / m: the Proving Grounds'
+  // 74 x 42 m); a bigger world gets a box 2 SFOLLOW m a side round the view instead, re-centred on an SSTEP m lattice as the view
+  // moves on (a re-render each time; the view shows at most ~40 x 20 m, so the box holds it plus the long shadows cast into
+  // it: ~43 texels / m), its texel grid kept still in light space so the shadows don't shimmer at a re-centre
+  const SWORLD = [world.x0 - 6, world.x1 + 6, -4, 9, world.y0 - 6, world.y1 + 6], SFIT = 100, SFOLLOW = 32, SSTEP = 8;
+  const sFollow = SWORLD[1] - SWORLD[0] > SFIT || SWORLD[5] - SWORLD[4] > SFIT, SBOX = SWORLD.slice();
+  let sCx = NaN, sCz = NaN;   // the follow box's centre (its lattice point)
   const shadowS = new THREE.WebGLRenderTarget(SMS, SMS, {minFilter: near, magFilter: near, depthBuffer: true, format: THREE.RedFormat,
     depthTexture: new THREE.DepthTexture(SMS, SMS, THREE.UnsignedIntType)});
   const sunCamS = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2); sunCamS.layers.set(2);
   let sDue = 0;   // the frame by which the static map must be re-rendered (Infinity: it's up to date)
   const staticSoon = frames => { sDue = Math.min(sDue, frameNo + frames); };
-  const sDir = new THREE.Vector3(0, 2, 0), sunNow = new THREE.Vector3(0, 1, 0), _sc = new THREE.Vector3(), movers = new Set();
+  const sDir = new THREE.Vector3(0, 2, 0), sunNow = new THREE.Vector3(0, 1, 0), _sc = new THREE.Vector3(), _scR = new THREE.Vector3(), _scU = new THREE.Vector3(), movers = new Set();
   function fitStatic(d) {   // look along the sun at the world's centre; the ortho box = the world's 8 corners in light space
     const cx = (SBOX[0] + SBOX[1]) / 2, cy = (SBOX[2] + SBOX[3]) / 2, cz = (SBOX[4] + SBOX[5]) / 2;
     sunCamS.position.set(cx, cy, cz).addScaledVector(d, 100); sunCamS.lookAt(cx, cy, cz); sunCamS.updateMatrixWorld(true);
@@ -844,6 +851,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
       x0 = Math.min(x0, _sc.x); x1 = Math.max(x1, _sc.x); y0 = Math.min(y0, _sc.y); y1 = Math.max(y1, _sc.y); z0 = Math.min(z0, _sc.z); z1 = Math.max(z1, _sc.z);
     }
     Object.assign(sunCamS, {left: x0, right: x1, top: y1, bottom: y0, near: -z1 - 1, far: -z0 + 1}); sunCamS.updateProjectionMatrix();
+    if (sFollow) {   // a follow box: the world's origin on a texel corner, so a re-centred box keeps the same texel grid
+      const tx = (x1 - x0) / SMS, ty = (y1 - y0) / SMS, o = _sc.set(0, 0, 0).applyMatrix4(sunCamS.matrixWorldInverse);
+      const dx = o.x - Math.round(o.x / tx) * tx, dy = o.y - Math.round(o.y / ty) * ty;
+      sunCamS.position.addScaledVector(_scR.setFromMatrixColumn(sunCamS.matrixWorld, 0), dx).addScaledVector(_scU.setFromMatrixColumn(sunCamS.matrixWorld, 1), dy);
+      sunCamS.updateMatrixWorld(true);
+    }
     compU.uLightPVS.value.multiplyMatrices(sunCamS.projectionMatrix, sunCamS.matrixWorldInverse);
     compU.uSBias.value = (sunCam.far - sunCam.near) / (sunCamS.far - sunCamS.near);   // the same metres of bias in its depth units
   }
@@ -1314,6 +1327,10 @@ void main() {
     for (const S of movers) if (!S.back && ++S.still > STILL_FRAMES) { S.back = true; staticSoon(20); }
     compU.uSOn.value = STATIC_SHADOW ? 1 : 0;
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
+      if (STATIC_SHADOW && sFollow) {   // a big world: the static box follows the view, on its lattice
+        const cx = Math.round(view.T.x / SSTEP) * SSTEP, cz = Math.round(view.T.z / SSTEP) * SSTEP;
+        if (cx !== sCx || cz !== sCz) { sCx = cx; sCz = cz; SBOX[0] = cx - SFOLLOW; SBOX[1] = cx + SFOLLOW; SBOX[4] = cz - SFOLLOW; SBOX[5] = cz + SFOLLOW; sDue = Math.min(sDue, frameNo); }
+      }
       if (STATIC_SHADOW && (frameNo >= sDue || sunNow.dot(sDir) < Math.cos(SUN_STEP))) {
         for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); movers.delete(S); }
         sDir.copy(sunNow); fitStatic(sDir); sDue = Infinity;
