@@ -7,8 +7,10 @@ field, every event, every duplicate) are in `docs/ARCH_AUDIT_2026-10-01.md`.
 
 **Goal:** a game that stays fast and stays changeable as it grows. Concretely:
 
-- **Fast:** 60 fps on a mid-range laptop, 165 fps on the dev desktop, with no hitches. Every system has a time budget,
-  and a regression shows up the day it is written, not three features later.
+- **Fast:** as high a frame rate as the dev machine's display shows (RTX 4070, 3440x1440 at 164 Hz: every frame in
+  6.1 ms), with no hitches, and the GPU's spare time spent on looks. Weaker machines get the detail tier. (Until
+  2026-10-02 the target was 60 fps on a mid-range laptop; section 1 was measured against that.) Every system has a time
+  budget, and a regression shows up the day it is written, not three features later.
 - **Changeable:** a change in one place can't break an unrelated place. "Changing the weather makes my guy blue" can
   happen only if two systems both write the same thing, or one reaches into another's insides. The rules below make
   both of those impossible by construction, so they don't depend on anyone remembering.
@@ -333,17 +335,22 @@ export default {
 
 ### 3.1 Budgets
 
-Milliseconds of main-thread CPU per frame on the dev machine. They add up to 4 ms, which is ~10 ms on a mid laptop.
+Milliseconds per frame on the dev machine (RTX 4070, 3440x1440 at 164 Hz), which is the target. A frame at 164 Hz is
+6.1 ms: the main thread's JS gets 4 ms of it on average (the browser, the compositor and a visible window take the
+rest; headless Chrome runs 10-20% faster than a window), the GPU 4.5 ms. First measurement at 3440x1440 (2026-10-02,
+a busy machine): JS ~3.3 ms by day, GPU p95 ~1.3 ms; the ultrawide shows ~50% more world than 1920x1080 (63 gbuffer
+draws, not 41). The CPU's room goes to more life (enemies, creatures), the GPU's to looks (light, particles, post
+effects).
 
 | group | what's in it | budget |
 |---|---|---|
-| sim | player, projectiles, every system's fixed step | 1.0 ms |
-| char | the hero: sprite + cloth + bow compositing | 0.5 ms |
-| view | world sync, cosmetic systems, lights choice | 1.0 ms |
-| render | `G.render`: scene submission + uploads | 1.2 ms |
-| ui | HUD, overlays | 0.3 ms |
-| **frame (JS total)** | | **4.0 ms**, and p95 frame time <= 6.5 ms (165 Hz = 6.06) |
-| GPU | `G.render` GPU time at 1440p | 3 ms |
+| sim | player, projectiles, enemies' AI + collisions, every system's fixed step | 0.4 ms |
+| char | the hero: sprite + cloth + bow compositing | 0.4 ms |
+| view | world sync, cosmetic systems, lights choice | 1.7 ms |
+| render | `G.render`: scene submission + uploads (a card + a shadow draw per enemy) | 1.3 ms |
+| ui | HUD, overlays | 0.2 ms |
+| **frame (JS total)** | | **4.0 ms**, and p95 frame time <= 6.1 ms (164 Hz) |
+| GPU | `G.render` GPU time, p95, at 3440x1440 | 4.5 ms |
 
 The numbers live in `src/core/perf.js` (`BUDGET`). Change them only on purpose, in a commit that says why.
 
@@ -351,9 +358,13 @@ The numbers live in `src/core/perf.js` (`BUDGET`). Change them only on purpose, 
 
 - **F3 in the game** (or `?perf=1`): the frame profiler. Frame-time graph, each group against its budget, the most
   expensive systems. Every feature hook is timed automatically.
-- **`node tools/perf/bench.mjs`**: five scenarios in headless Chrome on the real GPU, compared with
-  `tools/perf/baseline.json`. It fails when a scenario is over budget or a system got 25% (and 0.1 ms) slower. It
+- **`node tools/perf/bench.mjs`**: eight scenarios in headless Chrome on the real GPU at the dev display's 3440x1440,
+  compared with `tools/perf/baseline.json` (only a baseline saved at the same resolution). One is `horde`: 60 enemies
+  round the player (`--horde N`), what more life costs, judged on the whole frame (JS, p95, GPU), not the group split.
+  It fails when a scenario is over budget (JS, a group, the p95 frame, GPU p95) or a system got 25% (and 0.1 ms)
+  slower. It
   checks that the machine is quiet first: parallel sessions baking or capturing make every number 2-4x worse.
+  `--throttle 3` (a laptop-class CPU) is a look at weaker machines, not the target.
   `--only night`, `--save` (new baseline after an intended change). It renders uncapped (hundreds of fps), so since
   the fixed step (phase 4.3) the sim group shows its share per frame (60 steps a second spread over many frames);
   F3 at 60 fps shows a step's full cost every frame.

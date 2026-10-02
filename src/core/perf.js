@@ -10,10 +10,15 @@
 //   perf.report() -> {fps, frame: {p50, p95, p99, max}, js: {...}, groups: [{group, avg, budget}], systems: [...]}
 //   perf.draw(q, sc)                    the overlay (q = the HD canvas' 2D context, sc = display px per view px)
 //
-// BUDGETS: milliseconds of main-thread CPU per frame on the dev machine (RTX 4070 desktop). The target is 60 fps on a mid
-// laptop (~2.5x slower single-thread), so the whole frame gets 4 ms here: ~10 ms there, with headroom for the browser.
-// (phase 4.2: the features' per-step presentation moved from update to view(), so .5 ms of sim's budget went to view)
-export const BUDGET = {sim: .5, char: .5, view: 1.5, render: 1.2, ui: .3, frame: 4.0, p95: 6.5};   // p95: frame interval (a 165 Hz display is 6.06)
+// BUDGETS: milliseconds per frame on the dev machine (RTX 4070, a 3440x1440 display at 164 Hz), which is the target: as
+// high a frame rate as that display shows, so every frame fits 1000 / 164 = 6.1 ms (p95 of the frame interval). The main
+// thread's JS gets 4 ms of it on average (the browser, the compositor and a visible window take the rest: headless Chrome
+// runs 10-20% faster than a window); the GPU gets 4.5 ms (G.render, p95, timed by the bench), most of it unused today:
+// that's the room for looks. Weaker machines get the detail tier, not a budget.
+// (2026-10-02: the target was a mid laptop at 60 fps; the 4 ms total stays, its split leans to where more life and the
+// ultrawide's wider view cost (measured: 60 enemies add ~.02 ms to sim's per-frame share, ~.35 ms to render: a card +
+// a shadow draw each; 3440x1440 shows ~50% more world than 1920x1080: 63 gbuffer draws, not 41, more lights in view))
+export const BUDGET = {sim: .4, char: .4, view: 1.7, render: 1.3, ui: .2, frame: 4.0, p95: 6.1, gpu: 4.5};   // p95: frame interval; gpu: G.render on the GPU, p95
 const GROUPS = ['sim', 'char', 'view', 'render', 'ui'];
 const COL = {sim: '#6fb3ff', char: '#c58cff', view: '#7fd67a', render: '#f0c060', ui: '#ff8a6a', host: '#8a8577'};
 const N = 240;   // frames in the window (~2-4 s)
@@ -71,7 +76,8 @@ export function createPerf({on = false} = {}) {
     const p = 8 * u, ok = (v, b) => v <= b ? '#7fd67a' : v <= b * 1.5 ? '#f0c060' : '#ff6a5a';
     txt(`${rep.fps.toFixed(0)} fps · frame p50 ${rep.frame.p50.toFixed(1)} / p95 ${rep.frame.p95.toFixed(1)} ms`, x0 + p, y0 + p, ok(rep.frame.p95, BUDGET.p95));
     txt(`JS ${rep.js.avg.toFixed(2)} ms (budget ${BUDGET.frame})`, x0 + p, y0 + p + lh, ok(rep.js.avg, BUDGET.frame));
-    // the graph: JS per frame (stacked by group would cost more than it tells), frame interval as a line; 16.7 / 6.1 ms marks
+    // the graph: JS per frame (stacked by group would cost more than it tells), frame interval as a line; marks at 16.7 ms,
+    // the p95 budget (164 Hz) and the JS budget
     const gx = x0 + p, gy = y0 + p + 2.4 * lh, gw = W - 2 * p, gh = 56 * u, sy = v => gy + gh - Math.min(gh, v / 20 * gh);
     q.fillStyle = 'rgba(255,255,255,.05)'; q.fillRect(gx, gy, gw, gh);
     for (const [v, c] of [[16.7, 'rgba(255,106,90,.5)'], [BUDGET.p95, 'rgba(240,192,96,.5)'], [BUDGET.frame, 'rgba(127,214,122,.5)']]) { q.fillStyle = c; q.fillRect(gx, sy(v), gw, Math.max(1, u)); }
