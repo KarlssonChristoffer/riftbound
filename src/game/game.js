@@ -77,6 +77,7 @@ export async function createGame(host) {
     await enterStage(0);
   }
   async function enterStage(i) {
+    const r = run;
     setPhase('travel'); lock(true);
     director.stop(); core.clearEnemies(); removePortal(); bleeds.length = 0;
     run.stage = i;
@@ -86,7 +87,7 @@ export async function createGame(host) {
     core.resetYard(); combat.phys.resetAll?.();
     const sp = host.layout.spawn; host.teleport(sp.x, sp.y);
     nav.build(); nav.update(1);
-    if (mode !== 'run') return;   // left while the world was building
+    if (run !== r || r.done) return;   // left, restarted or abandoned while the world was building
     lock(false); setPhase('arrive');
     hud.banner(`Stage ${i + 1} · ${stageName(i)}`, `${st.waves} waves`, 2.4);
   }
@@ -97,7 +98,8 @@ export async function createGame(host) {
     hud.banner('You fell', '', 3, '#e0604a');
   }
   function finish(won) {
-    lock(true); host.timeScale = 1;
+    if (!run || run.done) return;   // a run is recorded once (Abandon on the summary, the victory timer after an Abandon)
+    run.done = true; lock(true); host.timeScale = 1;
     const r = {won, stage: run.stage + 1, stageName: stageName(run.stage), wave: Math.min(director.wave + 1, director.waves), time: run.time, kills: run.kills, gold: run.gold, build: stats.build()};
     const best0 = [save.bestStage, save.bestTime];
     recordRun(save, r);
@@ -176,7 +178,7 @@ export async function createGame(host) {
       if (phase === 'arrive' && phaseT > 2.2) { setPhase('wave'); director.start(run.stage, STAGES[run.stage].waves); }
       if (phase === 'wave') { director.update(dt); run.wave = director.wave; }
       if (phase === 'clear' && phaseT > 1.6) {
-        if (!STAGES[run.stage + 1]) { hud.banner('Victory', 'the Rift is closed', 3, '#f2d27a'); setPhase('won'); setTimeout(() => mode === 'run' && finish(true), 2200); return; }
+        if (!STAGES[run.stage + 1]) { hud.banner('Victory', 'the Rift is closed', 3, '#f2d27a'); setPhase('won'); const r = run; setTimeout(() => run === r && finish(true), 2200); return; }
         setPhase('pick'); lock(true);
         const choices = rollAugments(rng, stats.augs, 3);
         if (!choices.length) { lock(false); setPhase('portal'); openPortal(); return; }
@@ -274,7 +276,7 @@ export async function createGame(host) {
       return false;
     },
     menu() {   // the pause menu's top rows
-      if (mode === 'run') return [{label: 'Abandon run', run: () => { finish(false); }}, {label: 'Back to title', run: toTitle}];
+      if (mode === 'run') return [...(run && !run.done ? [{label: 'Abandon run', run: () => { finish(phase === 'won'); }}] : []), {label: 'Back to title', run: toTitle}];   // (in the victory banner the win stands)
       if (mode === 'sandbox') return [{label: 'Start a run', run: startRun}, {label: 'Back to title', run: toTitle}];
       return [];
     },
