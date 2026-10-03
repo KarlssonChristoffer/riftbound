@@ -15,6 +15,8 @@
 //   snap   the body's anchor on whole pixels (rigmesh uSnap, as the sprite cards). (The tone bands are fixed to the camera
 //          always: rigmesh's light turns with the view.)
 //   smear  a segment whose tip jumped more than SMEAR.px since the last drawn frame is stretched back along its motion
+//          (by the jump's share, at most SMEAR.max m and SMEAR.kmax x its own extent that way; the hat and the coil, which
+//          ride other pieces, never)
 // PROCEDURAL ANIMATION (K.proc; the payoff of going live): the gun aimed at ANY angle, standing or on the move (a continuous
 // spine twist onto the cursor over the twist-0 pose, instead of the gun_aim_* / gws_* / grs_* twist families), a reload's
 // upper body over the walk / run legs (layering: legs from one clip, the upper body from another, here gun_reload's 13
@@ -36,7 +38,8 @@ const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const C20 = Math.cos(20 * DEG), S55 = Math.sin(55 * DEG), K_UP = Math.tan(20 * DEG) * C20 / S55;   // the sprite camera's squash
 const FADE = .08, STEP_HZ = 12, TURN = 1200 * DEG;   // clip cross-fade (s), procedural steps / s, eased facing (rad/s)
 const PLAYER_SUN = 1.6;   // m toward the sun of his chest where the composite tests whether he stands in shade (the sprite: .5)
-const SMEAR = {px: 3, k: .55, max: .3};   // a tip jump past px screen px: stretched back k of its move (at most max m)
+const SMEAR = {px: 3, k: .55, max: .3, kmax: 2};   // a tip jump past px screen px: stretched back k of its move (at most
+                                                   // max m, at most kmax x the piece's own extent along the move)
 // the knobs' presets (dev/livekeys.js cycles them; the shimmer meter runs each)
 export const PRESETS = {
   exact: {step: true, face: 16, hyst: 0, hold: false, snap: true, smear: false, proc: false},   // the sprite path's frames, drawn live
@@ -104,6 +107,9 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
   for (let i = NB - 1; i >= 0; i--) { END[i] = i + 1; for (let j = i + 1; j < NB; j++) { let q = PI[j]; while (q > i) q = PI[q]; if (q === i) END[i] = j + 1; else if (q < i) break; } }
   const LEN = Float64Array.from(BN.map(b => { const B = J.bones[b]; return Math.hypot(B.tail[0] - B.head[0], B.tail[1] - B.head[1], B.tail[2] - B.head[2]); }));
   const SEG = Int16Array.from(J.segs.map(s => IX[s.bone] ?? 0)), NS = J.segs.length;
+  // each piece's box size in its bone's frame (the export's min / max; else a bone-long rod) and whether it may smear
+  const BOX = Float64Array.from(J.segs.flatMap(s => s.min && s.max ? [0, 1, 2].map(i => s.max[i] - s.min[i]) : [.1, LEN[IX[s.bone] ?? 0] || .1, .1]));
+  const SMEARS = Uint8Array.from(J.segs, s => s.kind === 'hat' || s.kind === 'coil' ? 0 : 1);
   const B_ = n => IX[n] ?? -1;
   const HIPS = B_('Hips'), SPINE = B_('Spine'), SPINE1 = B_('Spine1'), SPINE2 = B_('Spine2'), HEAD = B_('Head'), GUN = B_('GunHold0'), HAND_R = B_('RightHand');
   const ARM_R = B_('RightArm'), FARM_R = B_('RightForeArm'), HAND_L = B_('LeftHand'), UPLEG_L = B_('LeftUpLeg'), UPLEG_R = B_('RightUpLeg');
@@ -165,7 +171,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
   const MATS = new Float32Array(24 * 12), PR = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 4};
   const TIPS = new Float64Array(NB * 4), TIPS2 = new Float64Array(NB * 4), PREV = new Float64Array(NB * 3), SC = [0, 0, 0];
   let prevOk = false;
-  const stats = {held: 0, frames: 0, smears: 0, ms: 0, msRender: 0};
+  const stats = {held: 0, frames: 0, smears: 0, smearK: 0, ms: 0, msRender: 0};
   const aim = {ok: false, mx: 0, my: 0, a: 0};   // the drawn gun on screen (view px): the muzzle, the barrel's angle (the meter's aim error)
 
   // ---------------------------------------------------------------- which pose: the frame, its clip, the next frame, the fraction
@@ -328,11 +334,15 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     }
     if (hide) for (let s = 0; s < NS; s++) if (hide[s]) MATS.fill(0, s * 12, s * 12 + 12);   // (a zero matrix draws nothing)
   }
-  // SMEAR: a segment whose bone tail jumped > SMEAR.px on screen since the last drawn frame: stretched back along its move
+  // SMEAR: a segment whose bone tail jumped > SMEAR.px on screen since the last drawn frame: stretched back along its move.
+  // The stretch scales the whole piece along the move by (1 + k) about the tail, so k is the smear's length over the
+  // piece's OWN extent that way (its box projected on the move), not its bone's length: the hat's bone is 5 cm under a
+  // 1 m brim (k came out at ~6: the brim drawn several times its width)
   function smear(w) {
-    let n = 0;
+    let n = 0; stats.smearK = 0;
     screenOf(0, 0, 0, SC); const ax = SC[0], ay = SC[1];
     for (let s = 0; s < NS; s++) {
+      if (!SMEARS[s]) continue;
       const b = SEG[s], o = b * 7; qrot(w, o, 0, LEN[b] || .05, 0, V3, 0);
       const tx = w[o + 4] + V3[0], ty = w[o + 5] + V3[1], tz = w[o + 6] + V3[2];
       if (prevOk) {
@@ -341,7 +351,11 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
         if (jp > SMEAR.px) {
           toWorld(tx, ty, tz, WP, 0); const qx = WP[0], qy = WP[1], qz = WP[2]; toWorld(PREV[b * 3], PREV[b * 3 + 1], PREV[b * 3 + 2], WP, 0);
           let vx = qx - WP[0], vy = qy - WP[1], vz = qz - WP[2]; const vl = Math.hypot(vx, vy, vz) || 1; vx /= vl; vy /= vl; vz /= vl;
-          const k = Math.min(SMEAR.max, vl * SMEAR.k) / (LEN[b] || .1), m = s * 12;
+          const m = s * 12, e = Math.abs(vx * MATS[m] + vy * MATS[m + 4] + vz * MATS[m + 8]) * BOX[s * 3]
+            + Math.abs(vx * MATS[m + 1] + vy * MATS[m + 5] + vz * MATS[m + 9]) * BOX[s * 3 + 1]
+            + Math.abs(vx * MATS[m + 2] + vy * MATS[m + 6] + vz * MATS[m + 10]) * BOX[s * 3 + 2];   // its extent along v
+          const k = Math.min(SMEAR.kmax, Math.min(SMEAR.max, vl * SMEAR.k) / Math.max(e, .03));
+          if (k > stats.smearK) stats.smearK = k;
           // M' = S M about q: S = I + k v v^T; t' = S t - k v (v . q)
           for (let c = 0; c < 4; c++) {
             const a0 = MATS[m + c], a1 = MATS[m + 4 + c], a2 = MATS[m + 8 + c], dv = vx * a0 + vy * a1 + vz * a2 - (c === 3 ? vx * qx + vy * qy + vz * qz : 0);
