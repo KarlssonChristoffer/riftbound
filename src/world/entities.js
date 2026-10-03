@@ -6,7 +6,8 @@
 // entities in the order a scan of the whole list did (results don't depend on the grid's cells).
 // OWNS: membership (the list: world.props is this array, kept across biome rebuilds), each entity's registry record
 //   (id, grid cells, query membership: kept here, not on the entity), the queries' lists.  The entities' fields belong
-//   to the systems that use them (docs/ARCHITECTURE.md, the ownership table).
+//   to the systems that use them (docs/ARCHITECTURE.md, the ownership table). Writes: x / y / z / h while drawn (the
+//   lerp, below) and, as an entity joins, x / y / z / h / r back unchanged (their storage: refNumbers).
 // BUDGET: sync() once per sim step: a position check per entity, re-bucketing only what left its padded box.
 //   const ents = createEntities(list, bounds)
 //   ents.list / ver (bumps on every join / leave) / add(p) / remove(p) / has(p)
@@ -32,9 +33,24 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
   const queries = [];       // {name, pred, join, list, bit}
   let nextId = 1, ver = 0;
   const recOf = p => recs.get(p);
+  // An entity's body numbers, written back unchanged after a moment's non-number, as it joins. V8 then keeps these fields
+  // (for every object of its shape) as references to numbers rather than numbers in place, so reading one through a site
+  // that sees many shapes (the scans over every entity: sync below, world.update, contact) costs nothing, where it made a
+  // new heap number a read (~25 KB of garbage a frame by day). A computed number written pays a box instead: only the
+  // movers do that, a few fields a step. (Data fields only: a getter is left alone.)
+  const BODY = ['x', 'y', 'z', 'h', 'r'];
+  function refNumbers(p) {
+    for (const f of BODY) {
+      const d = Object.getOwnPropertyDescriptor(p, f);
+      if (d && d.writable && typeof d.value === 'number') { p[f] = null; p[f] = d.value; }
+    }
+  }
   function join(p) {
+    refNumbers(p);
+    // l*: at the step's start; c*: the true values while drawn (start as null: they keep the entity's number boxes, and
+    // lerpEnd puts back the very box it took, no new one)
     const rec = {p, id: nextId++, mask: 0, stamp: 0, c0: 0, c1: 0, r0: 0, r1: 0, bx0: 0, by0: 0, bx1: 0, by1: 0,
-      lx: p.x, ly: p.y, lz: p.z, lh: p.h, cx: 0, cy: 0, cz: 0, ch: 0};   // l*: at the step's start; c*: the true values while drawn
+      lx: p.x, ly: p.y, lz: p.z, lh: p.h, cx: null, cy: null, cz: null, ch: null};
     recs.set(p, rec); grid.insert(rec);
     for (const q of queries) if (q.pred(p)) { rec.mask |= q.bit; q.list.push(p); q.join?.(p); }
   }

@@ -10,8 +10,8 @@ cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact sh
 wind's cloth atlas (E.9) and the hero's compositor in arrays (E.10) are done. The trees' sway was measured and left (E.9).
 Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 (E.11): done. In a real window at 164 Hz the
 game misses 0-3 vsyncs in 10 s in every scenario. The last per-frame canvas uploads (flow's marks, the stream's glints)
-are on the GPU too (E.12). The heap's garbage is down a quarter (E.13: 174 -> 131 KB a frame by day, not yet the
-100 KB stage 1 aimed at; what's left is listed there).
+are on the GPU too (E.12). The heap's garbage is down 40% (E.13, E.14: 174 -> 103 KB a frame by day, about the
+100 KB stage 1 aimed at; what's left is listed in E.14).
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -939,6 +939,48 @@ objects included). A fixed step makes the per-frame figure independent of the ma
 - **`Math.random` in the views (~3.5 KB):** a seeded JS generator would make none, but it changes every random draw
   (golden would differ; the look is the same in kind).
 - atmos (~3 KB), wind's foliage step (~3 KB), lights' particle draw (~3 KB).
+
+### E.14 The props' number reads (2026-10-03; bit-exact)
+
+**What it was** (E.13's largest item left). The scans over every entity read each prop's body numbers (x, y, z, h,
+r): entities.sync once a step, world.update and contact every frame. Those reads go through sites that see dozens of
+prop shapes (megamorphic). V8 keeps a field that has only ever held numbers in place, in a mutable box, and a read
+through such a site copies the number into a new heap number: ~25 KB of garbage a frame by day.
+
+**What changed:**
+
+- **world/entities.js `refNumbers`:** as an entity joins, each of its body fields (data fields only: a getter is left
+  alone) is written back unchanged after a moment's `null`. V8 then keeps that field as a reference to a number, for
+  every object of that shape (a one-way change), and a read through any site returns the reference: nothing allocated.
+- **The cost moves to writes:** a computed number written to such a field gets a new box (16 bytes). Only the movers
+  write (brutes, the prop physics, the lerp), a few fields a step.
+- **The lerp:** the registry's records start their c* fields (the true values while drawn) as null. They keep the
+  entity's own number boxes, and lerpEnd puts back the box it took instead of boxing the value again.
+- **dev/owncheck.js:** `r` lists the registry as a writer (x / y / z / h already did, for the lerp).
+
+**Checks:**
+
+- golden 16 / 16 and the 144 Hz captures (E.13) 10 / 10 identical against the code before;
+- smoke and simview pass;
+- `?owncheck=1` with 60 brutes: no violations, no fields added.
+
+**Results** (garbage per frame at a fixed 164 Hz step after 45 s of play, as in E.13; the A/B's frame times):
+
+| | Before | After |
+|---|---|---|
+| day: garbage a frame (sampled, fixed 164 Hz step) | 129 KB | 103 KB (-20%) |
+| horde (60): garbage a frame | 154 KB | 119 KB (-23%) |
+| day / horde: heap growth a frame (perf.counts, in the A/B) | 139 / 163 KB | 109 / 126 KB |
+| day: frame (interleaved A/B, median) | 2.04 ms | 2.02 ms (-0.9%; median slice 0.97, slices 0.84-1.27) |
+| horde: frame | 2.09 ms | 2.00 ms (-4.3%; median slice 0.90) |
+
+entities.sync, contact and most of world.update's garbage are gone (world.update 14 -> 5 KB: what's left there is the
+cards' sway uniform, `{value}` objects that three keeps as references too). `contact.frame` -17% and `world.update`
+-3..-5% in the A/B; the whole frame's change is within the A/B's noise by day. The movers' writes cost less than the
+reads saved: the horde, with 60 brutes writing their positions every step, gained the most.
+
+Since E.13, by day: 174 -> 103 KB a frame, about 100 KB as stage 1 aimed. Left: three's uniform setters (~22 KB),
+wildlife (~9 KB), wind's cloth raster (~8 KB), the cloth's relax (~6 KB), Math.random (~3.5 KB).
 
 ---
 
