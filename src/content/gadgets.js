@@ -31,8 +31,15 @@ export const GADGETS = {
   // dmg (a flying kick)
   grapple: {name: 'Grappling Hook', col: '#9ad0ff', cd: 7, range: 12, desc: 'hook a tree, a rock, an enemy or the ground and pull yourself there',
     speed: 34, pull: 17, max: 1.1, stop: .55, dmg: 30, snap: 1.1},
+  // a gun loadout's (gun: only the cowboys carry it; a cowboy starts with it): hold F to spin the loop overhead, let go to
+  // throw it at what's under the cursor: rope an enemy (it can't fight, tap F: yank it off its feet), a barrel or a crate
+  // (towed), or a high anchor (a limb, a beam: swing on it; F or Space lets go). cd: after it's back in the hand. Its
+  // numbers: content/lasso.js
+  lasso: {name: 'Lasso', col: '#e0c084', cd: 1.4, range: 10, gun: true, desc: 'rope an enemy (tap F: yank it off its feet), tow a barrel, swing from a high limb'},
 };
 export const GADGET_IDS = Object.keys(GADGETS);
+// may this loadout carry it (a gun's gadgets only with a gun)
+export const fits = (id, weapon) => !!GADGETS[id] && (!GADGETS[id].gun || weapon?.kind === 'gun');
 // a run: a cache by the spawn on every stage (cost + perStage x the stage, gold), and now and then one in a chest
 export const SHOP = {cost: 20, perStage: 10, chest: .2};
 // a thrown gadget: the time in the air for a lob of d m (t0 + tk d, clamped), and gravity (m/s2: a lob reads as a lob)

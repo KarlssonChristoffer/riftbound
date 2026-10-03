@@ -154,6 +154,12 @@ export function createEquipSlot() {
       q.beginPath(); q.arc(x + r * .4, y + r * .45, r * .4, Math.PI * .15, Math.PI); q.stroke();
       L(0, .45, 0, .85);
       q.setLineDash([r * .15, r * .12]); L(0, -1.1, -.6, -1.4); q.setLineDash([]);
+    } else if (id === 'lasso') {   // a coil of rope, its loop thrown out top right, the honda knot
+      q.beginPath(); q.ellipse(x - r * .25, y + r * .35, r * .62, r * .42, -.25, 0, TAU); q.stroke();
+      q.beginPath(); q.ellipse(x - r * .3, y + r * .42, r * .44, r * .28, -.25, 0, TAU); q.stroke();
+      q.beginPath(); q.moveTo(x + r * .3, y + r * .1); q.quadraticCurveTo(x + r * .5, y - r * .45, x + r * .35, y - r * .6); q.stroke();
+      q.beginPath(); q.ellipse(x + r * .5, y - r * .82, r * .48, r * .3, .35, 0, TAU); q.stroke();
+      O(.16, -.66, .12);
     }
     q.restore();
   }

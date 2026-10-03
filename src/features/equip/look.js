@@ -14,6 +14,7 @@
 //   host (yaw, zoom, PPM, toView, G.fx), the wind (smoke drift). CALLS: lights.js F.flame (its flames, drawn before its frame).
 // BUDGET: view + frame ~.05-.15 ms with all six out (points <= ~700 a frame); render: a sprite draw per sheet in use.
 import {paintArt, TIPS} from './art.js';
+import {createLassoLook} from './lassolook.js';
 import {GADGETS, THROW} from '../../content/gadgets.js';
 import {viewRandom} from '../../core/rng.js';
 import {hex01} from '../../core/color.js';
@@ -39,6 +40,7 @@ for (let i = 0; i < 16; i++) { OIL_GLOW.push([0, 1, 2, 3].map(f => `rgba(255,${1
 
 export function createLook(host, sim) {
   const V = viewRandom('equip'), VR = (a, b) => a + V() * (b - a);
+  const lassoLook = createLassoLook(host, sim.lasso);   // the lasso's loop and rope (features/equip/lassolook.js)
   const seenPools = [], flameKeys = new Map();   // the pools drawn last step (a pool gone: its scorch); a pool's 5 flame keys (lights.js F.flame)
   const S = sim.S;
   let art = null, T = 0;
@@ -287,8 +289,9 @@ export function createLook(host, sim) {
       if (!ca.spent) item(ca.id, ca.p.x, ca.p.y, ca.p.z + .95, ca.t, 1);
     }
     for (const d of sim.drops) item(d.id, d.p.x, d.p.y, d.p.z + .35, d.t, Math.min(1, d.t / .3), d.cd);
-    // the preview while F is held
-    if (S.aiming && S.slot) preview();
+    // the preview while F is held (the lasso marks its own aim)
+    if (S.aiming && S.slot && S.slot.id !== 'lasso') preview();
+    lassoLook.frame();
     // the lure's marks over the enemies it has: '!' (the scarecrow took it), '?' (it lost you in the smoke), for a moment
     for (const [b, m] of sim.lured) {
       const age = S.simT - m.t; if (age > 1.1 || b.gone) continue;
@@ -403,7 +406,7 @@ export function createLook(host, sim) {
     view(dt, evs) {
       if (!art) return;
       T += dt;
-      onEvents(evs); emit(dt); stepParts(dt); stepPuffs(dt);
+      onEvents(evs); emit(dt); stepParts(dt); stepPuffs(dt); lassoLook.view(dt);
       for (let i = scorches.length - 1; i >= 0; i--) if ((scorches[i].t += dt) > scorches[i].life) scorches.splice(i, 1);
       for (let i = flares.length - 1; i >= 0; i--) if ((flares[i].t += dt) > flares[i].life) flares.splice(i, 1);
       // a pool burning out leaves its scorch (seen as the sim drops it: the view keeps the last pools it drew)

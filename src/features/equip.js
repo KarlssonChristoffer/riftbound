@@ -23,7 +23,7 @@
 import {createEquipSim} from './equip/sim.js';
 import {createLook} from './equip/look.js';
 import {createEquipSlot} from '../ui/equipslot.js';
-import {GADGETS, GADGET_IDS} from '../content/gadgets.js';
+import {GADGETS, GADGET_IDS, fits} from '../content/gadgets.js';
 import {flags} from '../core/flags.js';
 
 const KEY = 'riftbound.equip';   // localStorage: the switch, as the menu last left it
@@ -47,9 +47,10 @@ export async function create(host) {
     F.on = on; sim.setOn(on);
     if (on) look.load(); else look.clear();
   }
-  function cycle(d = 1) {
-    const i = sim.S.slot ? GADGET_IDS.indexOf(sim.S.slot.id) : -1;
-    sim.give(GADGET_IDS[((i + d) % GADGET_IDS.length + GADGET_IDS.length) % GADGET_IDS.length]);
+  function cycle(d = 1) {   // (only what this loadout can carry: the lasso is a gun's)
+    let i = sim.S.slot ? GADGET_IDS.indexOf(sim.S.slot.id) : -1;
+    for (let k = 0; k < GADGET_IDS.length; k++) { i = ((i + d) % GADGET_IDS.length + GADGET_IDS.length) % GADGET_IDS.length; if (fits(GADGET_IDS[i], host.weapon)) break; }
+    sim.give(GADGET_IDS[i]);
   }
   // the names over the cache and the pickups near you (HD), its price (fonts made when the scale changes, not per frame)
   const PV = [0, 0, 0];
@@ -97,6 +98,7 @@ export async function create(host) {
       const ms = tU + tF + now() - t0; tU = 0; F.ms = F.ms * .95 + ms * .05;
     },
     onKey(k, e) {
+      if (F.on && k === ' ' && sim.lasso.space()) return true;   // swinging on the lasso: Space lets go
       if (!F.on || k !== 'f') return false;
       if (e?.shiftKey) { if (host.dev && game()?.mode !== 'run') cycle(1); return true; }   // the sandbox: the next gadget
       sim.press(); return true;
@@ -116,7 +118,8 @@ export async function create(host) {
     hud: () => {
       if (!F.on) return '';
       const S = sim.S, sl = S.slot;
-      return `equip ${sl ? sl.id + (sl.cd > 0 ? ' ' + sl.cd.toFixed(1) + 's' : ' ready') : 'none'}${S.aiming ? ' aiming' : ''} · air ${sim.air.length} pools ${sim.pools.length} traps ${sim.traps.length} crows ${sim.crows.length} clouds ${sim.clouds.length}${S.inSmoke ? ' (in smoke)' : ''} drops ${sim.drops.length}${sim.cache ? ' cache ' + sim.cache.id : ''}`;
+      const Lp = sim.lasso.L.phase;
+      return `equip ${sl ? sl.id + (sl.cd > 0 ? ' ' + sl.cd.toFixed(1) + 's' : ' ready') : 'none'}${S.aiming ? ' aiming' : ''}${Lp ? ' · lasso ' + Lp + (Lp === 'spin' ? ' at ' + sim.lasso.L.aim.kind : '') : ''} · air ${sim.air.length} pools ${sim.pools.length} traps ${sim.traps.length} crows ${sim.crows.length} clouds ${sim.clouds.length}${S.inSmoke ? ' (in smoke)' : ''} drops ${sim.drops.length}${sim.cache ? ' cache ' + sim.cache.id : ''}`;
     },
   };
   set(q === '0' ? false : q ? true : remembered());

@@ -96,6 +96,23 @@ export const EVENTS = {
   'equip.break':        ['features/equip/sim.js', 'x, y, gadget (a scarecrow falls apart; an unsprung trap rusts away)', 'equip (view), audio'],
   'equip.latch':        ['features/equip/sim.js', 'x, y, h, who, prop (the grappling hook bites: an enemy, a prop, else the ground)', 'equip (view), audio'],
   'equip.pick':         ['features/equip/sim.js', 'x, y, gadget, bought (you take a gadget: a pickup, or a stage cache for gold)', 'equip (view), audio'],
+  // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
+  // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
+  'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
+  'lasso.drop':         ['sim/player/lasso.js',   'x, y, z, why (roll | knock | gun | ...: he lost the rope)', 'equip (lasso)'],
+  'lasso.letgo':        ['sim/player/lasso.js',   'x, y, z, vx, vy, vz, why (key | water | bump | time | ground: off a swing)', 'equip (lasso), audio'],
+  'lasso.bump':         ['sim/player/lasso.js',   'x, y, z (a swing ran into a wall, a trunk, a cliff face)', 'equip (lasso), audio'],
+  'lasso.throw':        ['features/equip/lasso.js', 'x, y, h (the hand), at (enemy | prop | anchor | ground: what it goes for)', 'audio'],
+  'lasso.catch':        ['features/equip/lasso.js', 'x, y, h, what (enemy | prop | anchor), who (the body / prop, or the prop the anchor is on)', 'audio'],
+  'lasso.miss':         ['features/equip/lasso.js', 'x, y, h (the loop lands on the ground)', 'audio'],
+  'lasso.yank':         ['features/equip/lasso.js', 'x, y, who, ok (false: a champion held against it)', 'audio'],
+  'lasso.slam':         ['features/equip/lasso.js', 'x, y, who (a yanked body comes down)', 'audio'],
+  'lasso.slip':         ['features/equip/lasso.js', 'x, y, who, why (slip | gone | drop | gun | jolt: the rope lets go of it)', 'audio'],
+  'lasso.swing':        ['features/equip/lasso.js', 'x, y, h (the anchor: he swings)', 'audio'],
+  'lasso.home':         ['features/equip/lasso.js', 'x, y (the loop is back in the hand)', '(none yet)'],
+  'lasso.swish':        ['features/equip/lassolook.js (a view)', 'x, y (a turn of the loop overhead)', 'audio'],
+  'lasso.creak':        ['features/equip/lassolook.js (a view)', 'x, y, k (the rope strains)', 'audio'],
+  'combat.bowl':        ['features/combat/core.js', 'x, y, who, by (a flung body bowls another over: combat fling)', 'audio'],
 };
 
 const warned = new Set();
