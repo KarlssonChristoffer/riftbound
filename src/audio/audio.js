@@ -330,6 +330,12 @@ const SFX = {
     else if (o.phase === 'eject') { E.N(v, 0, {type: 'bandpass', f: 1700, q: 1.5, a: .01, d: .03, g: .2}); for (const t of [.18, .26, .37]) E.N(v, t, {type: 'bandpass', f: 3200, q: 2, d: .01, g: .15}); }
     else E.N(v, 0, {type: 'bandpass', f: o.phase === 'round' ? 1500 : 2600, q: 2.5, d: .008, g: .35});
   },
+  // the desert's gunmen (features/foes): the revolver's sounds where they stand (the forge's foe* events while it bakes)
+  foeShot(E, o) { SFX.gunshot(E, {...o, gun: o.gun === 'navy' ? 'brass_navy' : 'peacemaker', g: (o.g ?? 1) * .8}); },
+  foeCock(E, o) { SFX.gunDraw(E, {...o, g: (o.g ?? 1) * .6}); },
+  foeDraw(E, o) { SFX.gunHolster(E, {...o, g: (o.g ?? 1) * .5}); },
+  foeReload(E, o) { SFX.gunReload(E, {...o, g: (o.g ?? 1) * .7}); },
+  foeHolster(E, o) { SFX.gunHolster(E, {...o, g: (o.g ?? 1) * .5}); },
   gunHolster(E, o) {   // the twirl drops into leather
     const v = E.voice(o, 'gunHolster', .3, {cd: .15}); if (!v) return;
     E.N(v, 0, {b: E.PK, type: 'bandpass', f: 700, q: .8, a: .05, d: .06, g: .18}); E.N(v, .15, {b: E.PK, type: 'lowpass', f: 1100, a: .001, d: .015, g: .45});
@@ -907,6 +913,12 @@ export function createAudio(ctx, host = {}) {
         case 'player.draw': fire('gunDraw', e.x, e.y); break;
         case 'player.reload': fire('gunReload', e.x, e.y, {phase: e.phase}); break;
         case 'player.holster': fire('gunHolster', e.x, e.y); break;
+        // the desert's gunmen (features/foes/sim.js): the same revolver, heard where they stand
+        case 'foe.shoot': fire('foeShot', e.x, e.y, {gun: e.gun}); break;
+        case 'foe.aim': fire('foeCock', e.x, e.y); break;
+        case 'foe.draw': fire('foeDraw', e.x, e.y); break;
+        case 'foe.reload': fire('foeReload', e.x, e.y, {phase: e.phase, gun: e.gun}); break;
+        case 'foe.holster': fire('foeHolster', e.x, e.y); break;
         case 'bullet.impact': if (e.surf === 'ground') fire('stuck', e.x, e.y, {surf, g: .55}); else if (e.surf === 'tree' || e.surf === 'prop') fire('hit', e.x, e.y, {mat: 'wood', g: .7}); break;
         case 'arrow.hit': case 'player.hit': {
           const props = get(host.props) || [], p = !e.player && (e.prop || props.find(p => p.x === e.x && p.y === e.y));

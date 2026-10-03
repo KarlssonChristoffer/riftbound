@@ -474,7 +474,7 @@ export async function create(host) {
         case 'prop.scrape': r = N.scrape; break;
         case 'player.jump': r = N.jump; break;
         case 'wildlife.birds_scatter': r = N.scatter; break;
-        case 'player.shoot': r = N.gunshot; break; case 'bullet.impact': r = e.surf === 'air' ? 0 : N.bullet; break;
+        case 'player.shoot': case 'foe.shoot': r = N.gunshot; break; case 'bullet.impact': r = e.surf === 'air' ? 0 : N.bullet; break;   // (foe: the desert's gunmen)
       }
       if (r > 0 && e.x !== undefined) noise.push({x: e.x, y: e.y, h: e.z ?? elev(e.x, e.y), r, ev: e.type});
     }
