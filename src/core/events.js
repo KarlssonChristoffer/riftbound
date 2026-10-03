@@ -51,7 +51,7 @@ export const EVENTS = {
   'foe.shoot':          ['features/foes/sim.js',  'x, y, h (the muzzle), z, vx, vy (unit: the way it flies), foe, gun, who, n (rounds left)', 'gunfx, audio, wildlife'],
   'foe.reload':         ['features/foes/sim.js',  'x, y, z, foe, gun, phase (start | eject | round | done), n (spent cases on eject, rounds in after)', 'gunfx (cases), audio'],
   'foe.holster':        ['features/foes/sim.js',  'x, y, z, foe', 'audio'],
-  'foe.ground':         ['features/foes/look.js (a view: nothing in the sim listens)', 'x, y, z, foe (a dead gunman hits the ground: the death clip\'s ground mark)', 'audio'],
+  'foe.ground':         ['features/foes/look.js (a view: nothing in the sim listens)', 'x, y, z, foe (a dead gunman hits the ground: the death clip\'s ground mark; a ragdoll (?ragdoll=1): its torso first touching it)', 'audio'],
   'foe.clip':           ['features/foes/look.js (a view: nothing in the sim listens)', 'x, y, z, foe, gun, mark (dump | load | close: the reload you see drops the spent shells, seats a shell, snaps shut)', 'audio'],
   'frontier.read':      ['features/frontier.js',  'x, y, what (wanted | sign), name (the poster\'s outlaw, or null)', 'foes (a bounty gang)'],
   'combat.hit':         ['features/combat/core.js', 'x, y, h, who (the target), kind, dmg, crit, broke, quiet (every damage: an enemy, a prop, a dummy); by (arrow | bullet | impact: a hit through the arrow chain, else undefined), hx, hy, hh (where the shot met it; else the target\'s x, y, h), dx, dy (unit: the shot\'s way; 0 without one)', 'audio (a gunman\'s flesh hit, a crit heavier; the player\'s hit-confirm on an enemy), gunfx (the hit marker), flow (the camera kick), blood'],

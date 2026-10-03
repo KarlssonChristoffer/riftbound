@@ -78,6 +78,21 @@ export const TUNE = {
   // back in `fall` (s), `land` (s), then `crouch`, faded over old: [from, to] s, sliding `slide` m/s, lifted `lift` m
   corpse: {hold: 9, fade: .8, max: 10, early: .5, side: 40, travel: {die_b: .8, die_f: .7, die_s: -.2}, puff: {n: 14, r: .6},
     fall: .24, land: .2, old: [.7, 1.5], slide: 1.6, lift: .22},
+  // the RAGDOLL death (?ragdoll=1, the bandit: features/foes/look.js + view/ragdoll.js): the live 3D body takes the death
+  // sprite's place and falls by physics. Per 1/sub s substep, iters constraint passes; gravity m/s^2; damp (velocity kept
+  // per substep, in the air); mu: ground friction (body, the gun, the hat: the share of sliding speed lost per contact
+  // substep); bounce: what the gun and the hat keep of a fall's speed. muscles: the body holds its pose against gravity,
+  // fading to nothing over `legs` s (the legs) and `body` s (the rest; k: the hold's pull per substep at first), so the
+  // knees give way first (buckle: m/s the knees are nudged forward with the shot). hit: the killing shot's push at its
+  // point (m/s per unit of the shot's push: arrow.hit's vx, vy, the weapon's push x the bullet's speed: the Navy hits
+  // harder; at most `max`), `all` of it through the whole body, `r` (m) how far from the point it reaches; gun / hat: their toss (m/s along the shot, up; spin rad/s). sleep: a body
+  // still (moving under `eps` m a substep) for `still` s after `after` s stops being simulated. fall: s the body is given
+  // to fall before the corpse's hold begins. swap: frames of dithered cross-fade from the last sprite to the live body
+  // (0: the swap is on the first frame of the fall)
+  ragdoll: {sub: 120, iters: 8, gravity: 9.8, damp: .997, mu: [.55, .4, .6], bounce: .22,
+    muscles: {legs: .09, body: .2, k: .32, buckle: .9}, hit: {k: .05, all: .15, r: .3, max: 2.4},
+    gun: {fwd: [.4, 1.4], up: [1.2, 2.4], spin: [9, 18]}, hat: {fwd: [.6, 1.8], up: [1.4, 2.6], spin: [4, 9]},
+    sleep: {after: 1.4, still: .4, eps: .0003}, fall: 1.2, swap: 0},
   // the view's hit (features/foes/look.js): a bullet shoves the sprite `nudge` m along its way in `out` s and it eases
   // back over `back` s (only the picture: the body doesn't move); combat's white flash shows x `flash` (held full at first)
   hit: {nudge: .1, out: .035, back: .15, flash: 1.6},
