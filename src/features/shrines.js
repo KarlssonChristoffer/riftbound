@@ -630,8 +630,9 @@ export async function create(host) {
         text(q, FOES[Math.min(12, s.left)], SC[0] * sc, SC[1] * sc, 13 * u, GLOW[s.kind][1]);
       }
     }
-    if (mountain.on && game.mode === 'run' && sheet) {   // the run rule's icon (top left), as the build's icons are drawn
-      const f = sheet.fr.mountain, is = Math.round(30 * u), x = Math.round(20 * u), y = Math.round(20 * u);
+    if (mountain.on && game.mode === 'run' && sheet) {   // the run rule's icon (top left), as the build's icons are drawn; under
+      // a stage omen's icon when one holds (features/omens.js draws it at the same corner), above the affixes' cards
+      const f = sheet.fr.mountain, is = Math.round(30 * u), x = Math.round(20 * u), y = Math.round((host.feature('omens')?.active ? 58 : 20) * u);
       q.fillStyle = 'rgba(16,14,20,.9)'; q.fillRect(x, y, is, is); q.strokeStyle = GLOW.mountain[1]; q.lineWidth = 2; q.strokeRect(x + 1, y + 1, is - 2, is - 2);
       q.imageSmoothingEnabled = false; const k = Math.floor((is - 8) / f.sw);
       q.drawImage(sheet.img, f.sx, f.sy, f.sw, f.sh, x + (is - f.sw * k) / 2, y + (is - f.sh * k) / 2, f.sw * k, f.sh * k);
