@@ -71,6 +71,9 @@ const TWM = ['m90', 'm67', 'm45', 'm22', '0', 'p22', 'p45'];
 const angDiff = (a, b) => Math.abs(((a - b) + Math.PI * 3) % TAU - Math.PI);
 const GLINT = ['#fff8e0', '#ffe2a0', '#ffc86a'];
 const RAG = flags.get('ragdoll') === '1', RAG_TYPES = {bandit: 'ragdoll/bandit/'};   // ?ragdoll=1: these types die as ragdolls (their models' folders under out/)
+// the poses a gunman may show (poseOf, the corpses, the fallbacks), warmed as its atlas loads: a pose first seen mid-fight
+// would otherwise be cut from its big sheet then (render/atlas.js warm: tens of ms each)
+const SHOWN = /^(idle|walk|run|gun_draw|gun_holster|gun_fire|gun_reload|hit_[fb]|die_[bfs]|gun_aim(_[mp]\d+)?|gws_[mp0-9]+_\d+|fall|land|crouch)(\.\d+)?$/;
 
 // which atlas a type draws from: the full outfit once it lists what's needed, else the gate-2 preview
 async function rootOf(name) {
@@ -165,11 +168,29 @@ export function createLook(host, sim) {
       try { s = await loadAtlas(root, {normals: true}); }
       catch (e) { if (!root.includes('/outfits/')) throw e; root = `${OUT}western/art_g2b/${TYPES[k].atlas}/all/`; s = await loadAtlas(root, {normals: true}); }
       const set = sets[k] = prep(s, root);
+      const shown = Object.keys(s.SP).filter(n => SHOWN.test(n));
+      s.warm?.(shown)?.then(() => warmTex(s, shown));   // (cut ahead of their first sight: render/atlas.js warm; then their textures)
       for (const c of ['hit_f', 'hit_b']) {   // (the sim's flinch is TUNE's, never the art's: it should match the clip)
         const bt = set.ok(c) ? set.markT(c, 'back') : null, fl = TYPES[k].flinch;
         if (host.dev && bt !== null && fl > 0 && Math.abs(bt - fl) > .03) console.warn(`foes: ${k} ${c} 'back' is at ${bt.toFixed(2)} s, TYPES.${k}.flinch is ${fl} s`);
       }
     })).catch(e => { failed = String(e); console.warn('foes: an atlas failed to load', e); }));
+  }
+
+  // their textures, uploaded ahead in idle slices (the renderer's own: G.tex is what host.sprite draws with): a pose's
+  // first draw uploads two (albedo + normals, ~.3 ms each plus the GPU process's copy), ~100 a second as a fight starts
+  function warmTex(s, names) {
+    let i = 0;
+    const step = d => {
+      const t0 = performance.now(), ms = d.didTimeout ? 1 : Math.max(.5, Math.min(3, d.timeRemaining()));
+      while (i < names.length && performance.now() - t0 < ms) {
+        const sp = s.SP[names[i++]];
+        if (sp.img) G.renderer.initTexture(G.tex(sp.img));
+        if (sp.nrm) G.renderer.initTexture(G.tex(sp.nrm));
+      }
+      if (i < names.length) requestIdleCallback(step, {timeout: 50});
+    };
+    if (window.requestIdleCallback) requestIdleCallback(step, {timeout: 50});
   }
 
   // ---------------------------------------------------------------- per gunman: the view's own state
@@ -359,7 +380,7 @@ export function createLook(host, sim) {
     let e = arr[f];
     if (!e) {
       const W = set.FW + 8, H = set.FH + 8, mk = o => { const c = document.createElement('canvas'); c.width = W; c.height = H; c.getContext('2d', o); return c; };
-      const c = aoCan ??= mk({willReadFrequently: true}), q = c.getContext('2d'), t = aoTmp ??= mk(), tq = t.getContext('2d');
+      const c = aoCan ??= mk({willReadFrequently: true}), q = c.getContext('2d'), t = aoTmp ??= mk({willReadFrequently: true}), tq = t.getContext('2d');   // (both on the CPU: no GPU read-back)
       const union = D => { tq.clearRect(0, 0, W, H); for (let k = 0; k < D.length; k += 2) tq.drawImage(sp.img, f * set.FW, 0, set.FW, set.FH, 4 + D[k], 4 + D[k + 1], set.FW, set.FH); };
       q.globalAlpha = 1; q.clearRect(0, 0, W, H);
       union(FRINGE); q.globalAlpha = .38; q.drawImage(t, 0, 0);
