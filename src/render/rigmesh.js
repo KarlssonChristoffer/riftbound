@@ -85,7 +85,8 @@ const S_VS = HEAD + XF + `
 in vec3 position; in vec4 aInfo; in float iSlot; uniform mat4 viewMatrix, projectionMatrix;
 void main() { vec4 r0, r1, r2; gl_Position = projectionMatrix * viewMatrix * vec4(rigPos(position, int(aInfo.x + .5), int(iSlot + .5), r0, r1, r2), 1.); }`;
 const S_FS = HEAD + `layout(location = 0) out vec4 o0; void main() { o0 = vec4(1.); }`;
-const B_VS = HEAD + `in vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
+// (B and X cover only the bodies' screen box, uBox: NDC min x, y, max x, y; the full-view triangle mapped onto it)
+const B_VS = HEAD + `in vec3 position; uniform vec4 uBox; void main() { gl_Position = vec4(uBox.xy + (position.xy + 1.) * .5 * (uBox.zw - uBox.xy), 0., 1.); }`;
 const B_FS = HEAD + `
 layout(location = 0) out vec4 o0; layout(location = 1) out vec4 o1; layout(location = 2) out vec4 o2;
 uniform sampler2D tId, tNv, tDep, uRamp, uXf; uniform vec2 uRes; uniform vec3 uDefN; uniform float uEps;
@@ -163,6 +164,7 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     uXf: {value: xf}, uFwd: {value: new THREE.Vector2(0, -1)}, uLight: {value: new THREE.Vector3()}, uYaw: {value: 0},
     tId: {value: rt.textures[0]}, tNv: {value: rt.textures[1]}, tDep: {value: rt.depthTexture}, uRamp: {value: ramp},
     uRes: {value: new THREE.Vector2(VW, VH)}, uSnap: {value: new THREE.Vector2(VW, VH)}, uDefN: {value: new THREE.Vector3(0, 1, 0)}, uEps: {value: .06},
+    uBox: {value: new THREE.Vector4(-1, -1, 1, 1)},
   };
   const sceneA = new THREE.Scene(); sceneA.matrixAutoUpdate = false; sceneA.matrixWorldAutoUpdate = false;
   const matA = raw(A_VS, A_FS, U, {side: THREE.DoubleSide}), matS = raw(S_VS, S_FS, U, {side: THREE.DoubleSide});
@@ -209,7 +211,11 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     const q = o + PCOL * 4;
     for (let i = 0; i < 12; i++) { const f = Math.fround(P[KEYS[i]] ?? 0); if (xfData[q + i] !== f) { xfData[q + i] = f; dirty = true; } }
     M.iSlot.array[M.n++] = slot; used = true;
+    // the bodies' screen box (view px) for passes B and X: each anchor +- BOX_R m (a body lying or reaching stays inside)
+    G.toScreenInto(P.x ?? 0, P.y ?? 0, P.z ?? 0, SCR);
+    if (SCR[0] < box[0]) box[0] = SCR[0]; if (SCR[1] < box[1]) box[1] = SCR[1]; if (SCR[0] > box[2]) box[2] = SCR[0]; if (SCR[1] > box[3]) box[3] = SCR[1];
   }
+  const BOX_R = 2.4, SCR = [0, 0, 0], box = [1e9, 1e9, -1e9, -1e9];
   const KEYS = ['x', 'z', 'k', 'alpha', 'flash', 'pitch', 'y', 'type', 'sx', 'sy', 'sz', 'snap'];
   const S20 = Math.sin(20 * Math.PI / 180), C20 = Math.cos(20 * Math.PI / 180);
   function render() {
@@ -229,6 +235,9 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     r.render(sceneA, G.camera);
     r.setRenderTarget(prev);
     meshB.userData.frame = fr; if (meshX) { U.uGDep.value = G.compU.tD.value; meshX.userData.frame = fr; }
+    const rp = BOX_R * G.camera.projectionMatrix.elements[0] * VW / 2 + 2;   // (px a metre at this zoom: the projection's x scale)
+    U.uBox.value.set(Math.max(-1, (box[0] - rp) / VW * 2 - 1), Math.max(-1, 1 - (box[3] + rp) / VH * 2), Math.min(1, (box[2] + rp) / VW * 2 - 1), Math.min(1, 1 - (box[1] - rp) / VH * 2));
+    box[0] = box[1] = 1e9; box[2] = box[3] = -1e9;
     for (const M of models) M.n = 0;
     used = false;
   }
