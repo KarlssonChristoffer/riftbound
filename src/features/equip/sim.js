@@ -546,9 +546,20 @@ export function createEquipSim(host) {
     if (cache) cache.t += dt;
   }
 
+  function give(id) { if (lasso.busy && id !== 'lasso') lasso.clear(); if (!GADGETS[id]) { S.slot = null; return; } const cd = S.slot?.id === id ? S.slot.cd : 0; S.slot = {id, cd}; S.aiming = false; S.ready = .3; }
   // ---------------------------------------------------------------- the game's state: runs, stages, the sandbox
+  // the loadout changed (a cowboy <-> the Ranger): a cowboy with nothing in the slot gets the lasso, the Ranger can't carry it
+  let kindWas = '';
+  function watchLoadout() {
+    const k = host.weapon?.kind || ''; if (k === kindWas) return;
+    const first = !kindWas; kindWas = k;
+    if (first || !S.mode) return;
+    if (k === 'gun' && (!S.slot || S.slot.id === GADGET_IDS[0])) give('lasso');   // (empty, or the default the Ranger started with)
+    else if (k !== 'gun' && S.slot?.id === 'lasso') give(GADGET_IDS[0]);
+  }
   function watchGame(evs) {
     const g = gameF(); if (!g) return;
+    watchLoadout();
     if (g.mode !== S.mode) {
       const was = S.mode; S.mode = g.mode;
       if (was) clearWorld();
@@ -612,7 +623,7 @@ export function createEquipSim(host) {
       S.on = on;
       if (!on) { clearWorld(); if (lureOff) { lureOff(); lureOff = null; } S.mode = ''; S.run = null; S.stage = -1; }
     },
-    give(id) { if (lasso.busy && id !== 'lasso') lasso.clear(); if (!GADGETS[id]) { S.slot = null; return; } const cd = S.slot?.id === id ? S.slot.cd : 0; S.slot = {id, cd}; S.aiming = false; S.ready = .3; },
+    give,
     interact(p) {
       if (!S.on) return false;
       if (cache && p === cache.p && !cache.spent) { buy(); return true; }
