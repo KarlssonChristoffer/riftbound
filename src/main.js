@@ -144,11 +144,11 @@ let loop = null;
 // host.sprite's arguments for G.sprite (arena -> world axes), in ONE reused object: G.sprite reads it at once and keeps
 // nothing, so no copy per sprite (a spread made a new object for every sprite of every frame)
 const SPR = {img: null, em: null, nrm: null, type: undefined, shadow: undefined, dynamic: undefined, sx: undefined, sy: undefined, sw: undefined, sh: undefined,
-  x: 0, y: 0, z: 0, px: undefined, py: undefined, alpha: undefined, flip: undefined, sway: undefined, flash: undefined};
+  x: 0, y: 0, z: 0, px: undefined, py: undefined, alpha: undefined, flip: undefined, sway: undefined, flash: undefined, lie: undefined};
 const sprite = o => {
   const s = SPR; s.img = o.img; s.em = o.em; s.nrm = o.nrm; s.type = o.type; s.shadow = o.shadow; s.dynamic = o.dynamic;
   s.sx = o.sx; s.sy = o.sy; s.sw = o.sw; s.sh = o.sh; s.x = o.x; s.y = o.h ?? 0; s.z = o.y;
-  s.px = o.px; s.py = o.py; s.alpha = o.alpha; s.flip = o.flip; s.sway = o.sway; s.flash = o.flash;
+  s.px = o.px; s.py = o.py; s.alpha = o.alpha; s.flip = o.flip; s.sway = o.sway; s.flash = o.flash; s.lie = o.lie;
   G.sprite(s); s.img = s.em = s.nrm = null;   // (don't hold the images)
 };
 const host = {

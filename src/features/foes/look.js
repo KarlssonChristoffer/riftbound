@@ -19,8 +19,14 @@
 //            foe.ground (the thud: audio); the body lies TUNE.corpse.hold s, then fades (an ordered dither); at most
 //            TUNE.corpse.max lie about (the oldest fades early). The corpse lies on the sprite's pivot, so the sprite
 //            is placed back by how far his root starts from it (the Hips bone at the clip's first frame, side view;
-//            else clip.travel / TUNE.corpse.travel), and he falls from where he stood. Without the clips: thrown back in
-//            `fall`, down through `land` to `crouch`, faded at once; without those either, his last pose slides and fades
+//            else clip.travel / TUNE.corpse.travel), and he falls from where he stood. Going down he LIES DOWN in the
+//            world: the clip's per-frame `lie` (0 upright .. 1 lying: its lying frames are rendered in the game's own
+//            ground projection, tools/blender/western.py) goes to the sprite (gfx.js BATCH_VS: the card's depth and its
+//            sun card lie down onto the ground, so the shadow is the body's footprint and what stands behind him shows
+//            over him), and a contact shadow hugs the body on the ground (his silhouette grown a px or two, dark, on
+//            the ground layer, as much as he lies; a small one under his feet while he still stands: contact.js's
+//            walker stamp ends when he dies). Without the clips: thrown back in `fall`, down through `land` to `crouch`, faded
+//            at once; without those either, his last pose slides and fades
 //   telegraph the aim's last moment (the lock): a glint on the barrel (the 'add' layer, after the light: it reads at noon)
 //   tracers  the bullets in flight, with gunfx's look (features/gunfx.js tracer()); the flash, smoke, impacts and the
 //            reload's cases are gunfx's own (its events: foe.shoot, foe.reload, bullet.impact)
@@ -38,7 +44,8 @@
 //   reload's marks as seen).
 // BUDGET: view; frame ~.15 ms with 6 gunmen fighting (measured 2026-10-03 in headless Chrome on a busy machine: the pose
 //   picks ~.035 ms, the sprites ~.04 ms; a pick scores <= 3 facings x 9 twists, or 2 stances x 5 legs x 7 twists walking,
-//   against barrel angles worked out once per pose); render: a sprite + a shadow draw per pose image on screen.
+//   against barrel angles worked out once per pose); render: a sprite + a shadow draw per pose image on screen; a corpse's
+//   contact shadow: one drawImage of a mask made once per death frame and facing seen.
 import {loadAtlas} from '../../render/atlas.js';
 import {atlasOf} from '../../sim/player/player.js';
 import {TYPES, TUNE} from '../../content/foes.js';
@@ -121,7 +128,13 @@ function prep(s, root) {
     let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
     return px[L.play ? L.play[i] : i] || 0;
   }
-  return {root, ...a, SP, has, nm, st, tl, frameAt, frameAtT, markT, ok, rootShift, shiftPx, barrel, tws: TWS.filter(has), twm: TWM.filter(t => has(st('gws', t, 0))), preview: !root.includes('/outfits/')};
+  // how far down the body is in the frame t s into clip `name` (its `lie`: 0 upright .. 1 lying), 0 without it
+  function lieAt(name, t) {
+    const L = tl(name), v = L && L.c.lie; if (!v) return 0;
+    let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
+    return v[L.play ? L.play[i] : i] || 0;
+  }
+  return {root, ...a, SP, has, nm, st, tl, frameAt, frameAtT, markT, ok, rootShift, shiftPx, lieAt, barrel, tws: TWS.filter(has), twm: TWM.filter(t => has(st('gws', t, 0))), preview: !root.includes('/outfits/')};
 }
 
 export function createLook(host, sim) {
@@ -220,7 +233,7 @@ export function createLook(host, sim) {
   // the draw): die_b / die_f by the way the killing hit went against his facing (or away from you), or the fallback
   const CM = 16, corpses = [];
   for (let i = 0; i < CM; i++) corpses.push({on: false, set: null, clip: '', x: 0, y: 0, z: 0, face: 0, vx: 0, vy: 0, t: 0, pose: '', lift: 0,
-    groundT: 0, grounded: true, fadeAt: 0, fadeLen: 1, foe: ''});
+    groundT: 0, grounded: true, fadeAt: 0, fadeLen: 1, foe: '', fx: 0, fy: 0});   // fx / fy: where he stood
   function fell(v, p) {
     const set = sets[p.foe], C = TUNE.corpse; if (!set) return;
     let n = 0, old = null;   // at most C.max lie about: the oldest still lying starts to fade now
@@ -233,7 +246,7 @@ export function createLook(host, sim) {
     dx /= l; dy /= l;
     const front = -(dx * Math.sin(v.face) + dy * Math.cos(v.face)) >= Math.cos(TUNE.ai.hitFront * DEG);
     const clip = pick(set, front ? 'die_b' : 'die_f', front ? 'die_f' : 'die_b');
-    c.on = true; c.set = set; c.clip = clip || ''; c.z = p.z || 0; c.t = 0; c.lift = 0; c.vx = dx; c.vy = dy; c.pose = v.pose; c.foe = p.foe;
+    c.on = true; c.set = set; c.clip = clip || ''; c.z = p.z || 0; c.t = 0; c.lift = 0; c.vx = dx; c.vy = dy; c.pose = v.pose; c.foe = p.foe; c.fx = p.x; c.fy = p.y;
     if (clip) {   // the clip as rendered, its corpse on the pivot: the sprite goes back by his root's start ahead of it
       const L = set.tl(clip), sh = set.rootShift(clip) ?? (clip === 'die_b' ? 1 : -1) * (L.c.travel ?? C.travel[clip] ?? 0);
       c.face = v.face; c.x = p.x - Math.sin(v.face) * sh; c.y = p.y - Math.cos(v.face) * sh;
@@ -284,13 +297,62 @@ export function createLook(host, sim) {
   function sweep(v, p) { if (v.seen === frameN) return; if (p.broken) fell(v, p); VS.delete(p); }   // (gone: killed, or the gang left)
 
   // ---------------------------------------------------------------- the frame
-  const O = {img: null, nrm: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, x: 0, y: 0, h: 0, px: 0, py: 0, type: 7, shadow: true, alpha: 1, flash: 0, flip: false, sway: 0, dynamic: false};
-  function put(set, pose, f, x, y, h, alpha, flash, wob, lift = 0) {   // lift: px the pivot moves up the image (a death clip's shift)
+  const O = {img: null, nrm: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, x: 0, y: 0, h: 0, px: 0, py: 0, type: 7, shadow: true, alpha: 1, flash: 0, flip: false, sway: 0, dynamic: false, lie: 0};
+  // lift: px the pivot moves up the image (a death clip's shift); lie: how far down the body is (gfx.js BATCH_VS)
+  function put(set, pose, f, x, y, h, alpha, flash, wob, lift = 0, lie = 0) {
     const sp = set.SP[pose] || set.SP['idle.0']; if (!sp) return;
     const img = sp.img; if (!img || !(img.width > 0)) return;
     O.img = img; O.nrm = sp.nrm || null; O.sx = f * set.FW; O.sy = 0; O.sw = set.FW; O.sh = set.FH;
-    O.x = x; O.y = y; O.h = h; O.px = set.PIV[0] - wob; O.py = set.PIV[1] - lift; O.alpha = alpha; O.flash = flash;
+    O.x = x; O.y = y; O.h = h; O.px = set.PIV[0] - wob; O.py = set.PIV[1] - lift; O.alpha = alpha; O.flash = flash; O.lie = lie;
     host.sprite(O); O.img = O.nrm = null;
+  }
+  // a corpse's contact shadow (view only, the ground layer: under the light, ground pixels only, so it shows round the
+  // body and never on it): per death frame and facing, the frame's silhouette grown 1 px (dark) inside a 3 px fringe
+  // (faint), made once on first sight and kept with the frame's image; a small stepped blob under his feet while he
+  // stands. Drawn at the mood's contact-shadow strength (features/contact.js's), as much as he lies
+  const AOM = new WeakMap(), GROW = [], FRINGE = [];
+  for (let dy = -2; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+    const e = dx * dx / 10 + (dy - .5) * (dy - .5) / 7;
+    if (e <= 1) FRINGE.push(dx, dy);
+    if (Math.abs(dx) + Math.abs(dy - (dy > 0 ? 1 : 0)) <= 1) GROW.push(dx, dy);
+  }
+  let aoTmp = null;
+  function aoMask(set, sp, f) {
+    let arr = AOM.get(sp.img); if (!arr) AOM.set(sp.img, arr = new Array(set.ND).fill(null));
+    if (arr[f]) return arr[f];
+    const W = set.FW, H = set.FH, mk = () => { const c = document.createElement('canvas'); c.width = W + 8; c.height = H + 8; return c; };
+    const c = mk(), q = c.getContext('2d'), t = aoTmp ??= mk(), tq = t.getContext('2d');
+    const union = (D) => { tq.globalCompositeOperation = 'source-over'; tq.clearRect(0, 0, W + 8, H + 8); for (let k = 0; k < D.length; k += 2) tq.drawImage(sp.img, f * W, 0, W, H, 4 + D[k], 4 + D[k + 1], W, H); };
+    union(FRINGE); q.globalAlpha = .38; q.drawImage(t, 0, 0);
+    union(GROW); q.globalAlpha = .8; q.drawImage(t, 0, 0);
+    q.globalAlpha = 1; q.globalCompositeOperation = 'source-in'; q.fillStyle = '#000'; q.fillRect(0, 0, W + 8, H + 8);
+    return (arr[f] = c);
+  }
+  const blob = (() => {   // the feet: a stepped ellipse, 13 x 3 px core in a 19 x 7 px ring (contact.js's stamp, smaller)
+    const c = document.createElement('canvas'); c.width = 19; c.height = 7; const q = c.getContext('2d'), id = q.createImageData(19, 7);
+    for (let j = 0; j < 7; j++) for (let i = 0; i < 19; i++) {
+      const x = i - 9, y = j - 3, e = (a, b) => x * x / (a * a) + y * y / (b * b);
+      id.data[(j * 19 + i) * 4 + 3] = e(6.5, 1.5) <= 1 ? 255 : e(9.5, 3.5) <= 1 ? 90 : 0;
+    }
+    q.putImageData(id, 0, 0);
+    return c;
+  })();
+  let aoK = .5;   // the mood's contact-shadow strength, read once a frame
+  function corpseAO(c, set, pose, f, lift, lie, alpha) {
+    const sp = set.SP[pose]; if (!sp || !sp.img || !(sp.img.width > 0)) return;
+    const k = alpha * aoK, g = host.layer('ground');
+    g.save(); g.imageSmoothingEnabled = false;
+    if (lie > .02) {
+      G.toScreenInto(c.x, c.z, c.y, SC);
+      g.globalAlpha = k * Math.min(1, lie * 1.25);
+      g.drawImage(aoMask(set, sp, f), Math.round(SC[0]) - (set.PIV[0] + 4) * z, Math.round(SC[1]) - (set.PIV[1] - lift + 4) * z, (set.FW + 8) * z, (set.FH + 8) * z);
+    }
+    if (lie < .98) {
+      G.toScreenInto(c.fx, c.z, c.fy, SC);
+      g.globalAlpha = k * (1 - lie);
+      g.drawImage(blob, Math.round(SC[0]) - 9.5 * z, Math.round(SC[1]) - 2.5 * z, 19 * z, 7 * z);
+    }
+    g.restore();
   }
   function poseOf(set, g, v, dt, t) {
     const p = g.p, act = g.act, G2 = g.T.gun;
@@ -385,12 +447,15 @@ export function createLook(host, sim) {
       }
       if (VS.size > sim.gang.length) VS.forEach(sweep);
       const C = TUNE.corpse;
+      aoK = host.mood?.shadow?.ao ?? .5;
       for (const c of corpses) {
         if (!c.on) continue;
         const set = c.set, pose = c.clip ? set.frameAtT(c.clip, c.t)
           : c.t < C.fall ? (set.has('fall') ? 'fall' : c.pose) : c.t < C.fall + C.land ? (set.has('land') ? 'land' : c.pose) : set.has('crouch') ? 'crouch' : c.pose;
-        const a = c.t < c.fadeAt ? 1 : Math.max(0, 1 - (c.t - c.fadeAt) / c.fadeLen);
-        put(set, pose, faceOf(set, c.face), c.x, c.y, c.z + c.lift, a, 0, 0, c.clip ? set.shiftPx(c.clip, c.t) : 0);
+        const a = c.t < c.fadeAt ? 1 : Math.max(0, 1 - (c.t - c.fadeAt) / c.fadeLen), f = faceOf(set, c.face);
+        const lift = c.clip ? set.shiftPx(c.clip, c.t) : 0, lie = c.clip ? set.lieAt(c.clip, c.t) : 0;
+        put(set, pose, f, c.x, c.y, c.z + c.lift, a, 0, 0, lift, lie);
+        if (c.clip) corpseAO(c, set, set.SP[pose] ? pose : 'idle.0', f, lift, lie, a);
       }
       // their bullets in flight: gunfx's tracer look
       const B = sim.B;
