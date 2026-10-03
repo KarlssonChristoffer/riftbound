@@ -28,7 +28,7 @@
 // BUDGET: off: nothing (update returns; no Math.random, no props, no draws). On: update ~.01 ms (a few records); view +
 //   frame ~.05 ms (<= 8 sprites, <= 512 points, <= 6 lights); <= 6 static meshes.
 import * as WORLD from '../world/world.js';
-import {roamable, elev, inStream, PLAY} from '../world/world.js';
+import {roamable, elev, inStream, PLAY, TRAIL} from '../world/world.js';
 import {mulberry32, viewRandom} from '../core/rng.js';
 import {clamp, hypot2, TAU, clearArray} from '../core/mathx.js';
 import {rgbOf} from '../core/color.js';
@@ -54,7 +54,7 @@ export const TUNE = {
   // placement (m): clear ground round it, and how far from the spawn, from each other, the gates, the paths (their
   // half width added), the range lane / rail, the movement ring (the portal opens in it), the light garden's pad, chests
   away: {clear: 1.25, spawn: 8, apart: 7, gate: 3.4, path: 1.6, lane: 2.6, ring: 1.6, pad: 1.4, interact: 2.6},
-  chance: {price: 15, rise: 1.5, odds: .45, tries: 3, luck: .15},     // gold (x (1 + .5 stage), x rise per try), win odds
+  chance: {price: 12, rise: 1.5, odds: .45, tries: 3, luck: .35},     // gold (x (1 + .5 stage), x rise per try), win odds, luck (a chest's is .25 x stage)
   combat: {budget: 5, perStage: 2.5, max: 6, near: [2.6, 4.6], coins: 16, coinsStage: 8, item: .5},   // a pack's budget (brute 1, elite 4)
   blood: {share: .3, minHp: 18, gold: 1, goldStage: .35, uses: 3},      // health share; gold per health x (gold + goldStage x stage)
   mountain: {hp: 1.6, dmg: 1.25, elites: 1, items: 2, luck: .5},       // the champion's health / damage x, extra elites, items on clear
@@ -105,8 +105,9 @@ export async function create(host) {
     const gates = [[cx, PLAY.y0], [cx, PLAY.y1], [PLAY.x0, cy], [PLAY.x1, cy]];
     const inter = host.entities.list.filter(p => p.interact && !p.gone);
     const nav = g()?.nav;
-    const W = WORLD.WORLD;
-    for (let y = Math.ceil(W.y0) + .5; y < W.y1; y += 1) for (let x = Math.ceil(W.x0) + .5; x < W.x1; x += 1) {
+    // (only where enemies roam: the arena and the trail, layout.js roamable; not the whole world, which may be grown)
+    const x0 = Math.floor(Math.min(PLAY.x0, TRAIL.x0)), x1 = Math.max(PLAY.x1, TRAIL.x1), y0 = Math.floor(Math.min(PLAY.y0, TRAIL.y0)), y1 = Math.max(PLAY.y1, TRAIL.y1);
+    for (let y = y0 + .5; y < y1; y += 1) for (let x = x0 + .5; x < x1; x += 1) {
       if (hypot2(x - sp.x, y - sp.y) < A.spawn) continue;
       if (nav?.built && !nav.isOpen(x, y)) continue;
       if (gates.some(([gx, gy]) => hypot2(x - gx, y - gy) < A.gate)) continue;
@@ -419,14 +420,15 @@ export async function create(host) {
   for (const k of KINDS) { palOf[k] = PAL.length; for (const c of GLOW[k]) PAL.push(rgbOf(c)); }
   const SMOKE = PAL.length; for (const c of ['#8a8580', '#6a6560', '#4e4a46']) PAL.push(rgbOf(c));
   const WHITE = PAL.length; for (const c of ['#ffffff', '#fff6e0', '#e8f0ff']) PAL.push(rgbOf(c));
-  const GOLDC = palOf.chance, BLOODC = palOf.blood;
+  const BLOODC = PAL.length; for (const c of ['#ff3a48', '#c8142c', '#7e0a1a']) PAL.push(rgbOf(c));   // (blood: deeper than the shrine's glow)
+  const GOLDC = palOf.chance;
   // host.point's options, kept (glow x size x 4 alpha steps): no object a point
   const OPT = []; for (let f = 0; f < 4; f++) for (let a = 0; a < 4; a++) OPT.push({emit: !!(f & 1), size: f & 2 ? 2 : 1, alpha: 1 - a * .22});
   function part(x, y, h, vx, vy, vh, life, col, fl = 1, drag = 0, grav = 0) {
     if (np >= NP) return;
     const i = np++; px[i] = x; py[i] = y; ph[i] = h; pvx[i] = vx; pvy[i] = vy; pvh[i] = vh; page[i] = 0; plife[i] = life; pcol[i] = col; pfl[i] = fl; pdrag[i] = drag; pgrav[i] = grav;
   }
-  const NOOPT = {}, NOGLOW = {glow: 0}, DUSTO = {glow: 0, grav: 6};
+  const NOOPT = {}, NOGLOW = {glow: 0}, DUSTO = {glow: 0, grav: 6}, BLEEDO = {up: .6};
   function burst(x, y, h, n, col, sp = 2.5, o = NOOPT) {
     const glow = o.glow ?? 1;   // (0: smoke and dust, unlit)
     for (let i = 0; i < n; i++) { const a = V() * TAU, s = VR(.3, 1) * sp; part(x, y, h, Math.sin(a) * s, Math.cos(a) * s * .8, VR(.5, 2.5) * (o.up ?? 1), VR(.35, .8), col + (V() * 3 | 0), (V() < .3 ? 2 : 0) | glow, 2.5, o.grav ?? 3); }
@@ -435,7 +437,7 @@ export async function create(host) {
   function stream(x0, y0, h0, x1, y1, h1, n, col, T = .55, g = 9, spread = .4) {
     for (let i = 0; i < n; i++) {
       const tt = T * VR(.8, 1.2), dx = x1 - x0 + VR(-.15, .15), dy = y1 - y0 + VR(-.15, .15);
-      part(x0 + VR(-spread, spread) * .3, y0 + VR(-spread, spread) * .3, h0 + VR(0, .3), dx / tt, dy / tt, (h1 - h0) / tt + .5 * g * tt, tt, col + (V() * 3 | 0), 1, 0, g);
+      part(x0 + VR(-spread, spread) * .3, y0 + VR(-spread, spread) * .3, h0 + VR(0, .3), dx / tt, dy / tt, (h1 - h0) / tt + .5 * g * tt, tt, col + (V() * 3 | 0), V() < .45 ? 3 : 1, 0, g);
     }
   }
   function stepParts(dt) {
@@ -464,13 +466,13 @@ export async function create(host) {
     const s = v.s;
     const k = palOf[s.kind], gh = glyphH(s) + (s.z || 0), x = s.x, y = s.y, z = s.z || 0;
     switch (e.what) {
-      case 'pay': stream(P.x, P.y, P.z + 1.1, x, y, z + shaped(s).top, 8, GOLDC, .45); v.pulse = Math.max(v.pulse, .4); break;
+      case 'pay': stream(P.x, P.y, P.z + 1.1, x, y, z + shaped(s).top, 12, GOLDC, .45); v.pulse = Math.max(v.pulse, .4); break;
       case 'win': case 'trade': case 'buy': case 'yield': case 'clear':
         burst(x, y, gh, 46, k, 3.2); burst(x, y, gh, 10, WHITE, 1.5); v.pulse = 1; break;
       case 'lose':
-        for (let i = 0; i < 16; i++) part(x + VR(-.3, .3), y + VR(-.2, .2), z + shaped(s).top + VR(0, .3), VR(-.5, .5), VR(-.4, .4), VR(.4, 1.3), VR(.7, 1.3), SMOKE + (V() * 3 | 0), V() < .5 ? 2 : 0, 1.5, -.4);
-        burst(x, y, gh, 6, SMOKE, 1.2, NOGLOW); break;
-      case 'bleed': stream(P.x, P.y, P.z + 1.1, x, y + .02, z + .72, 18, BLOODC, .6, 9, .6); burst(x, y + .02, z + .75, 10, BLOODC, 1.2, {up: .6}); v.pulse = .8; break;
+        for (let i = 0; i < 26; i++) part(x + VR(-.35, .35), y + VR(-.25, .25), z + shaped(s).top + VR(0, .35), VR(-.6, .6), VR(-.45, .45), VR(.3, 1.2), VR(.9, 1.6), SMOKE + (V() * 3 | 0), V() < .75 ? 2 : 0, 1.4, -.35);
+        burst(x, y, gh, 8, SMOKE, 1.4, NOGLOW); v.pulse = Math.max(v.pulse, .25); break;
+      case 'bleed': stream(P.x, P.y, P.z + 1.1, x, y + .02, z + .72, 30, BLOODC, .65, 11, .7); burst(x, y + .02, z + .75, 12, BLOODC, 1.2, BLEEDO); v.pulse = .8; break;
       case 'call': for (let i = 0; i < 28; i++) { const a = i / 28 * TAU; part(x + Math.sin(a) * .5, y + Math.cos(a) * .4, z + .1, Math.sin(a) * 3.5, Math.cos(a) * 2.8, VR(.5, 2), VR(.4, .8), k + (V() * 3 | 0), 1, 3, 2); }
         v.pulse = 1; break;
       case 'wake': for (let i = 0; i < 36; i++) { const a = V() * TAU, r = VR(.2, .7); part(x + Math.sin(a) * r, y + Math.cos(a) * r * .8, z + VR(0, .4), Math.cos(a) * 1.2, -Math.sin(a) * 1, VR(1.5, 3.5), VR(.8, 1.5), k + (V() * 3 | 0), 1, 1.2, 0); }
