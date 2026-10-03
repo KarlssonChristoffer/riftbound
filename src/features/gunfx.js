@@ -15,8 +15,6 @@
 //            tan chips and a dusty puff; wood splinters; metal a burst of sparks. Bits are world points, sparks glowing
 //            streaks, puffs HD (tinted). A mark: a scuff in the ground (features/flow.js F.stamp), a hole in a wall, prop
 //            or tree (world points just off its face, fading). A body hit is blood's (features/blood.js)
-//   hits     the hit marker at the reticle when your bullet lands on a body (combat.hit by 'bullet': ui/hitmark.js), the
-//            'front' layer like the reticle
 //   others   the desert's gunmen (features/foes): their shots (foe.shoot) flash, spit grains and smoke at the muzzle the
 //            event names (a few at once), their reloads drop cases (foe.reload), their bullets end like yours
 //            (bullet.impact); their tracers in flight are drawn by their own view with this look (tracer(), exported)
@@ -28,7 +26,6 @@
 import {WEAPONS} from '../content/weapons.js';
 import {rgbOf} from '../core/color.js';
 import {hypot2, hypot3} from '../core/mathx.js';
-import {createHitmark} from '../ui/hitmark.js';
 
 export const TUNE = {
   flash: {life: .065, len: .95, glow: .34, navy: 1.3, fan: 1.1, light: {radius: 4.6, intensity: 3.4, life: .11, color: '#ffc46a'}},
@@ -127,7 +124,7 @@ export async function create(host) {
     q.fillStyle = g; q.fillRect(0, 0, w, w);
   });
   // ---- state: the flash, the smoke (SoA pools), tracers' last streaks, cases, bits, holes ----
-  const FL = {t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0}, HM = createHitmark();
+  const FL = {t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0};
   const LIGHT = {x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: 7450}, LIT = [LIGHT], NONE = [];
   // other shooters' flashes (foe.shoot): each at the muzzle its event names, along its shot; one light, the newest's
   const OF = []; for (let i = 0; i < 6; i++) OF.push({t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0});
@@ -280,8 +277,6 @@ export async function create(host) {
           const T = TR[trI]; trI = (trI + 1) % TRN;
           T.x0 = e.x0 ?? e.x; T.y0 = e.y0 ?? e.y; T.h0 = e.h0 ?? e.h; T.x1 = e.x; T.y1 = e.y; T.h1 = e.h; T.t = 0;
           impact(e);
-        } else if (e.type === 'combat.hit') {   // your bullet on a body: the hit marker (crit, kill)
-          const p = e.who; if (e.by === 'bullet' && p && (p.target || p.hunter || p.sparring)) HM.hit(e.broke ? 2 : e.crit ? 1 : 0);
         } else if ((e.type === 'player.reload' || e.type === 'foe.reload') && e.phase === 'eject' && e.n > 0) {
           for (let i = 0; i < e.n; i++) {
             const k = cI; cI = (cI + 1) % CM; if (cN < CM) cN++;
@@ -291,7 +286,6 @@ export async function create(host) {
         }
       }
       if (FL.t > 0) FL.t -= dt;
-      HM.view(dt);
       for (const Q of OF) if (Q.t > 0) Q.t -= dt;
       if (OFL.t > -TUNE.flash.light.life) OFL.t -= dt;
       // the wisp off the barrel after a shot, and while the gunslinger blows on it
@@ -366,7 +360,6 @@ export async function create(host) {
         const cs = HCOL[hk[i]]; host.point(hx[i], hy[i], hh[i], cs[0], O); host.point(hx[i] + rx, hy[i] + ry, hh[i], cs[0], O); host.point(hx[i], hy[i], hh[i] + 1 / host.PPMH, cs[1], O);
       }
       O.alpha = 1; O.emit = false;
-      if (HM.on) { const zz = host.zoom; HM.draw(host.layer('front'), Math.round(host.VW / 2 + (host.mouse.x - host.VW / 2) * zz), Math.round(host.VH / 2 + (host.mouse.y - host.VH / 2) * zz)); }   // (the reticle's spot: core/loop.js)
     },
     lights() {
       const L = TUNE.flash.light, mine = FL.t > -L.life + TUNE.flash.life, other = OFL.t > -L.life + TUNE.flash.life;
