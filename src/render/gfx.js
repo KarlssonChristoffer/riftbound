@@ -5,7 +5,8 @@
 //   1. shadow   the sun's depth map (meshes as they are; billboards as cards turned toward the sun)
 //   2. gbuffer  every visible thing writes 3 targets + depth:
 //                 A  rgb albedo, a = (type * 4 + tone) / 255
-//                 N  xyz world normal, w = object id (whole numbers; a wall line shares one id: no outline at joints)
+//                 N  xyz world normal, w = object id (whole numbers; a wall line shares one id: no outline at joints;
+//                    -1 = particles (points), which never count as hiding the player in the x-ray)
 //                 E  rgb emissive, w = part * 32 + family (meshes: seams between parts of the same family)
 //               types: 0 empty, 1 ground (tone 1 = WATER: the composite lights it as water; tone 2 = fallen leaves), 2 ramp mesh (live 3D prop), 3 billboard (painted sprite;
 //                      tone 2 = a plant with its own autumn colours: the composite's season matrix skips tone 2 on types 1 and 3), 4 character,
@@ -606,7 +607,7 @@ const POINT_FS = HEAD + OUTS + BAYER + `
 in vec4 vCol; flat in float vAlpha;
 void main() {
   if (vAlpha < .999 && vAlpha <= bayer(ivec2(gl_FragCoord.xy))) discard;
-  o0 = vec4(vCol.rgb, float(3 * 4) / 255.); o1 = vec4(0., 1., 0., 9.); o2 = vec4(vCol.rgb * vCol.a, 0.);
+  o0 = vec4(vCol.rgb, float(3 * 4) / 255.); o1 = vec4(0., 1., 0., -1.); o2 = vec4(vCol.rgb * vCol.a, 0.);   // obj -1: a particle
 }`;
 
 // ---------------------------------------------------------------- shaders: shadow + x-ray (single target)
@@ -1024,8 +1025,9 @@ void main() {
     float t2 = dot(dp, dp) / (uHalo[i].z * uHalo[i].z); if (t2 < 1.) { float u = 1. - t2; col += uHaloC[i] * u * u * uHalo[i].w; }
   }
   col += uFog.rgb * uFog.a * (.4 + 1.2 * gl_FragCoord.y / uRes.y);       // haze, stronger toward the far (top) edge
-  // x-ray (the arena's look): where something hides the player, a dim fill with a light 1 px rim
-  if (texelFetch(tX, ip, 0).r > .5 && type != 4) {
+  // x-ray (the arena's look): where something hides the player, a dim fill with a light 1 px rim. Not where a particle
+  // (obj -1) is in front: a dust mote or raindrop over him would otherwise be a lone rim pixel, a bright speck
+  if (texelFetch(tX, ip, 0).r > .5 && type != 4 && N0.w > -.5) {
     bool rim = false;
     for (int k = 0; k < 4; k++) { ivec2 q = ip + ivec2(k == 0 ? -1 : k == 1 ? 1 : 0, k == 2 ? -1 : k == 3 ? 1 : 0); if (texelFetch(tX, q, 0).r < .5) rim = true; }
     col = rim ? mix(col, vec3(.937, .886, .769), .85) : mix(col, uXCol, .4);
