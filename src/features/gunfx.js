@@ -9,16 +9,19 @@
 //            streak that shrinks into the impact in ~70 ms (a bullet that hit within its first step is seen only so)
 //   cases    world points: brass cases dropping from the cylinder on a reload's eject, bouncing, lying a while
 //   impacts  world points: dust and sparks where a bullet hits the ground, chips off trees and props, sparks off a hit
+//   hits     the hit marker at the reticle when your bullet lands on a body (combat.hit by 'bullet': ui/hitmark.js), the
+//            'front' layer like the reticle
 //   others   the desert's gunmen (features/foes): their shots (foe.shoot) flash and smoke at the muzzle the event names
 //            (a few at once), their reloads drop cases (foe.reload), their bullets end like yours (bullet.impact); their
 //            tracers in flight are drawn by their own view with this look (tracer(), exported)
 // OWNS: its pools (typed arrays, capped; reused, nothing allocated per frame). READS: host.P, host.PL.gun, host.weapon,
-// host.arrows, events (player.shoot / reload, foe.shoot / reload, bullet.impact, arrow.hit), host.wind (the smoke's
-// drift), host.yaw / zoom.
+// host.arrows, events (player.shoot / reload, foe.shoot / reload, bullet.impact, arrow.hit, combat.hit), host.wind (the
+// smoke's drift), host.yaw / zoom, host.mouse / VW / VH (the reticle).
 // BUDGET: view ~.02 ms with a fanned cylinder in the air (6 tracers x 3 lines, <= 200 points); HD: <= 60 drawImage calls.
 import {WEAPONS} from '../content/weapons.js';
 import {rgbOf} from '../core/color.js';
 import {hypot3} from '../core/mathx.js';
+import {createHitmark} from '../ui/hitmark.js';
 
 export const TUNE = {
   flash: {life: .05, len: .62, glow: .2, navy: 1.3, fan: 1.1, light: {radius: 3.4, intensity: 2.4, life: .08, color: '#ffc46a'}},
@@ -81,7 +84,7 @@ export async function create(host) {
     q.fillStyle = g; q.fillRect(0, 0, w, w);
   });
   // ---- state: the flash, the smoke (SoA pools), tracers' last streaks, cases, bits ----
-  const FL = {t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0};
+  const FL = {t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0}, HM = createHitmark();
   const LIGHT = {x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: 7450}, LIT = [LIGHT], NONE = [];
   // other shooters' flashes (foe.shoot): each at the muzzle its event names, along its shot; one light, the newest's
   const OF = []; for (let i = 0; i < 6; i++) OF.push({t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0});
@@ -155,6 +158,8 @@ export async function create(host) {
           const T = TR[trI]; trI = (trI + 1) % TRN;
           T.x0 = e.x0 ?? e.x; T.y0 = e.y0 ?? e.y; T.h0 = e.h0 ?? e.h; T.x1 = e.x; T.y1 = e.y; T.h1 = e.h; T.t = 0;
           impact(e);
+        } else if (e.type === 'combat.hit') {   // your bullet on a body: the hit marker (crit, kill)
+          const p = e.who; if (e.by === 'bullet' && p && (p.target || p.hunter || p.sparring)) HM.hit(e.kill ? 2 : e.crit ? 1 : 0);
         } else if ((e.type === 'player.reload' || e.type === 'foe.reload') && e.phase === 'eject' && e.n > 0) {
           for (let i = 0; i < e.n; i++) {
             const k = cI; cI = (cI + 1) % CM; if (cN < CM) cN++;
@@ -164,6 +169,7 @@ export async function create(host) {
         }
       }
       if (FL.t > 0) FL.t -= dt;
+      HM.view(dt);
       for (const Q of OF) if (Q.t > 0) Q.t -= dt;
       if (OFL.t > -TUNE.flash.light.life) OFL.t -= dt;
       // the wisp off the barrel after a shot, and while the gunslinger blows on it
@@ -228,6 +234,7 @@ export async function create(host) {
         host.point(bx[i], by[i], bh[i], k < 3 ? C.dust[k] : k < 5 ? C.spark[k - 3] : C.chip[k - 5], O);
       }
       O.alpha = 1; O.emit = false;
+      if (HM.on) { const zz = host.zoom; HM.draw(host.layer('front'), Math.round(host.VW / 2 + (host.mouse.x - host.VW / 2) * zz), Math.round(host.VH / 2 + (host.mouse.y - host.VH / 2) * zz)); }   // (the reticle's spot: core/loop.js)
     },
     lights() {
       const L = TUNE.flash.light, mine = FL.t > -L.life + TUNE.flash.life, other = OFL.t > -L.life + TUNE.flash.life;
