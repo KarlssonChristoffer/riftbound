@@ -270,9 +270,11 @@ export function createCore(host) {
     }
     s.root = Math.max(0, s.root - dt); b.rooted = s.root > 0;
     s.land = Math.max(0, s.land - dt);
+    const held = (s.held = Math.max(0, (s.held || 0) - dt)) > 0;   // (an outside hold: hold() / a fling's stun; no root pegs)
     if (s.hop) {
       const H = s.hop; H.t += dt; const k = Math.min(1, H.t / H.dur);
       b.x = H.x0 + (H.x1 - H.x0) * k; b.y = H.y0 + (H.y1 - H.y0) * k; b.h = 4 * H.H * k * (1 - k); b.air = true; b.squash = 0;
+      if (H.fling) flying(b, H, k);
       if (k >= 1) landBrute(b, s);
       return;
     }
@@ -289,8 +291,8 @@ export function createCore(host) {
     }
     if (s.mode !== 'home' && d < 8 && d > 1e-3) b.faceW = [dx, dy];
     s.wait -= dt;
-    if (s.mode !== 'idle' && s.wait < .14 && !b.rooted) b.squash = Math.max(b.squash, 1 - s.wait / .14);   // crouch
-    if (s.wait > 0 || b.rooted || s.mode === 'idle') { if (s.mode === 'idle' && s.wait <= 0) s.wait = .5; return; }
+    if (s.mode !== 'idle' && s.wait < .14 && !b.rooted && !held) b.squash = Math.max(b.squash, 1 - s.wait / .14);   // crouch
+    if (s.wait > 0 || b.rooted || held || s.mode === 'idle') { if (s.mode === 'idle' && s.wait <= 0) s.wait = .5; return; }
     const way = b.hunter && C.steer ? C.steer(b) : null;   // a waypoint around walls and water, or null: straight at you
     let to = s.mode === 'aggro' ? (way ? planHop(b, s, way.x, way.y, way.stop ?? 0) : planHop(b, s, P.x, P.y, .85)) : planHop(b, s, hx, hy, 0);
     // can't get closer (stream, cliff, crates in the way)? after a few tries it gives up and walks home (an enemy
@@ -306,8 +308,30 @@ export function createCore(host) {
     if (to.x !== b.x || to.y !== b.y) b.faceW = [to.x - b.x, to.y - b.y];
     s.hop = {x0: b.x, y0: b.y, x1: to.x, y1: to.y, t: 0, dur: (b.hopT ?? T.bruteHopT) * T.enemyPace, H: (to.x === b.x && to.y === b.y ? .8 : 1) * (b.hopH ?? T.bruteHopH)};
   }
+  // a FLING (fling(): features/equip/lasso.js's yank): it tumbles over its facings as it flies, and bowls over whoever it
+  // meets on the way (o.dmgFly to them, a moment's hold); o.onLand(b) is told when it comes down
+  function flying(b, H, k) {
+    const o = H.fling, a = o.a0 + o.spin * k; b.faceW[0] = Math.sin(a); b.faceW[1] = Math.cos(a);
+    if (!o.dmgFly || b.h > 1.3) return;
+    for (const q of ents.near(b.x, b.y, (o.bowl ?? .55) + .5, nearF)) {
+      if (q === b || q.broken || q.gone || !(q.hunter || q.sparring) || o.hit.includes(q)) continue;
+      if (Math.abs(pz(q) - pz(b)) > 1 || Math.hypot(q.x - b.x, q.y - b.y) > (o.bowl ?? .55) + (q.hitR ?? .35)) continue;
+      o.hit.push(q); damage(q, o.dmgFly, {canCrit: false, dir: [(q.x - b.x) * 3, (q.y - b.y) * 3]});
+      const qs = BS.get(q); if (qs && !q.broken) { qs.held = Math.max(qs.held || 0, .6); qs.hop = null; q.h = 0; q.air = false; }
+      events.push({type: 'combat.bowl', x: q.x, y: q.y, who: q, by: b});
+    }
+  }
   function landBrute(b, s) {
+    const fl = s.hop?.fling;
     s.hop = null; b.h = 0; b.air = false; s.land = .12; b.squash = 1;
+    if (fl) {   // a fling comes down: a thud, no strike; it lies held (stunned) where it fell, takes its damage
+      s.held = Math.max(s.held || 0, fl.stun); s.wait = fl.stun + .2; s.mode = 'aggro';
+      puff(b.x, b.y, pz(b), 16, .8); shake(3, .18);
+      const d = Math.hypot(b.x - fl.x0, b.y - fl.y0) || 1;
+      if (fl.dmg) damage(b, fl.dmg, {dir: [(b.x - fl.x0) / d * 3, (b.y - fl.y0) / d * 3]});
+      fl.onLand?.(b);
+      return;
+    }
     s.wait = (b.pause ?? T.brutePause) * T.enemyPace + R() * .15;
     // never end up overlapping the player (the host can't move him out of a collider)
     let sd = Math.hypot(P.x - b.x, (P.y - b.y) * SQ);
@@ -488,6 +512,30 @@ export function createCore(host) {
       puff(b.x, b.y, 0, 14, .7);
       host.world.addItem(b);
       return b;
+    },
+    // OUTSIDE PULLS (the equipment experiment's lasso: features/equip/lasso.js). hold(p, sec): it stands where it is for sec
+    // s more (no hops, so no strikes; no root pegs: a rope holds it, not the ground); shift(p, dx, dy): dragged along the
+    // ground by up to (dx, dy), as far as it can go (walls, props, the stream, ledges stop it) -> the distance it moved;
+    // fling(p, x, y, o): thrown through the air at (x, y) (it lands on the first free spot from there back toward where it
+    // was): o = {dur, h (m up at the middle), dmg (on landing), stun (s held after), spin (rad it tumbles), dmgFly, bowl,
+    // onLand(b)} -> the landing spot {x1, y1} or null (not one of the core's, down, or in the air already)
+    hold(p, sec) { const s = BS.get(p); if (!s || p.broken || s.hop) return false; s.held = Math.max(s.held || 0, sec); return true; },
+    shift(p, dx, dy) {
+      const s = BS.get(p); if (!s || p.broken || s.hop) return 0;
+      const d = Math.hypot(dx, dy); if (d < 1e-6) return 0;
+      const n = Math.ceil(d / .12); let moved = 0;
+      for (let i = 0; i < n; i++) { const x = p.x + dx / n, y = p.y + dy / n; if (!freeSpot(p, x, y)) break; p.x = x; p.y = y; moved += d / n; }
+      return moved;
+    },
+    fling(p, x, y, o) {
+      const s = BS.get(p); if (!s || p.broken || s.hop) return null;
+      const dx = p.x - x, dy = p.y - y; let tx = p.x, ty = p.y;
+      for (let k = 0; k <= 12; k++) { const cx = x + dx * k / 12, cy = y + dy * k / 12; if (freeSpot(p, cx, cy)) { tx = cx; ty = cy; break; } }
+      const a0 = Math.atan2(p.faceW?.[0] ?? 0, p.faceW?.[1] ?? 1);
+      if (!Array.isArray(p.faceW)) p.faceW = [0, 1];
+      s.hop = {x0: p.x, y0: p.y, x1: tx, y1: ty, t: 0, dur: o.dur, H: o.h, fling: {...o, x0: p.x, y0: p.y, a0, hit: []}};
+      s.root = 0; p.rooted = false; s.held = 0; s.wait = 0;
+      return s.hop;
     },
     // hold one of the core's brutes where it stands for sec s (the equipment experiment's bear trap: features/equip/sim.js):
     // a hop ends where it is, a hold it has already is never shortened. -> false if it isn't one of them, or down
