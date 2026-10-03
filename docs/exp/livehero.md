@@ -119,7 +119,9 @@ the export poses every frame through the model's own `pose()` and writes the bon
 In the game they are demos (`view/livehero.js` `emote()`): Shift+9 picks one, and it plays while he stands still
 (the sim's idle, the gun holstered), by the clip's own `play` / `ms`, from the start each time he stops; walking or
 drawing cancels it at once. After the last step a clip loops from `marks.loop` (a step of `play`) or he stands 1.6 s
-and it plays again. View only: the sim still says idle (the sprite path shows him idle).
+and it plays again. A frame its marks name `shot*` fires a muzzle flash (render/flashes.js, at the drawn muzzle along the
+barrel) and his gun's sound as its step begins (the gunslinger's live gun moves, another session's: quickdraw,
+behind_back, sky_shot, ...). View only: the sim still says idle (the sprite path shows him idle), no events.
 
 Making one: add keys to `POSES` (start from `POSES['idle_in']`, the ready idle, so the clip leaves and returns to
 idle.0), a `_clip(keys, tween, fps, play=, ms=, marks=)` to `ANIMS`, its name to `OUTLAW_EMOTES`; export with

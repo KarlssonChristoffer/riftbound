@@ -35,12 +35,15 @@
 // emotes, history) on one shared rig, loaded the first time he wears it (the sprite shows meanwhile); the knobs and the
 // demo (K) are shared, so a preset or an emote carries over a loadout switch.
 import {createRigMesh} from '../render/rigmesh.js';
+import {createFlashes} from '../render/flashes.js';
 import {flags} from '../core/flags.js';
+import {LOADOUTS} from './hero.js';
 
 const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const C20 = Math.cos(20 * DEG), S55 = Math.sin(55 * DEG), K_UP = Math.tan(20 * DEG) * C20 / S55;   // the sprite camera's squash
 const FADE = .08, STEP_HZ = 12, TURN = 1200 * DEG;   // clip cross-fade (s), procedural steps / s, eased facing (rad/s)
 const PLAYER_SUN = 1.6;   // m toward the sun of his chest where the composite tests whether he stands in shade (the sprite: .5)
+const SHOT_FX = {life: .065, len: .62};   // an emote's shot: the flash's life (s) and length (m along the barrel), as gunfx's
 const SMEAR = {px: 3, k: .55, max: .3, kmax: 2};   // a tip jump past px screen px: stretched back k of its move (at most
                                                    // max m, at most kmax x the piece's own extent along the move)
 // the knobs' presets (dev/livekeys.js cycles them; the shimmer meter runs each)
@@ -93,7 +96,7 @@ function fromTo(ax, ay, az, bx, by, bz, o) {   // the shortest rotation taking d
 }
 const wrap = a => a - TAU * Math.round(a / TAU);
 
-async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, rig, K, slots}) {
+async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, rig, flashes, K, slots}) {
   const [J, bin] = await Promise.all([fetch(base + 'model.json').then(r => r.json()), fetch(base + 'model.bin').then(r => r.arrayBuffer())]);
   const model = rig.addModel(J, bin);
   const CL = J.clips || {};
@@ -376,27 +379,49 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   // While he stands still (the sim's idle, his gun holstered and idle) the clip's frame replaces the sim's, by the clip's
   // own timing (its play order and ms, else its fps), from the start each time he stops. After the last step it loops
   // from marks.loop (a step of play: the squat rests there), else he stands EMOTE_REST s and it plays again. View only:
-  // the sim still says idle (a moving or a drawn gun cancels it at once).
+  // the sim still says idle (a moving or a drawn gun cancels it at once). A step showing a frame its marks name shot,
+  // shot2, ... fires the shot's look and sound as it begins (shot(): compose, off the drawn barrel); hit, ... a body hit's
+  // sound (the pistol whip); nothing of the sim's.
   const EMOTE_REST = 1.6, EMO = {};
   for (const c of EMOTES) {
     const C = CL[c], n = C.play ? C.play.length : C.frames, at = new Float64Array(n + 1);
     for (let i = 0; i < n; i++) at[i + 1] = at[i] + (C.ms ? C.ms[i] / 1000 : 1 / C.fps);
-    EMO[c] = {n, at, loop: C.marks?.loop ?? -1, play: C.play || null};
+    EMO[c] = {n, at, loop: C.marks?.loop ?? -1, play: C.play || null,
+      shots: new Set(Object.entries(C.marks || {}).filter(([k]) => /^shot/.test(k)).map(([, v]) => v)),
+      hits: new Set(Object.entries(C.marks || {}).filter(([k]) => /^hit/.test(k)).map(([, v]) => v))};
   }
-  let emT = 0, emC = '';
+  let emT = 0, emC = '', emS = -1, shotWant = false;
   function emote(f, P, dt) {
     const E = EMO[K.demo]; if (!E) return f;
-    if (K.demo !== emC) { emC = K.demo; emT = 0; }   // (another emote: from its start)
+    if (K.demo !== emC) { emC = K.demo; emT = 0; emS = -1; }   // (another emote: from its start)
     const S = app.PL.gun?.S;
-    if (P.state !== 'idle' || (S && (S.out || S.act))) { emT = 0; return f; }
+    if (P.state !== 'idle' || (S && (S.out || S.act))) { emT = 0; emS = -1; return f; }
     emT += dt;
     const end = E.at[E.n]; let x = emT;
     if (x >= end) {
       if (E.loop >= 0) x = E.at[E.loop] + (x - end) % (end - E.at[E.loop]);
-      else { x %= end + EMOTE_REST; if (x >= end) return f; }
+      else { x %= end + EMOTE_REST; if (x >= end) { emS = -1; return f; } }
     }
     let s = 0; while (s < E.n - 1 && E.at[s + 1] <= x) s++;
-    return nm(K.demo + '.', E.play ? E.play[s] : s);
+    const fr = E.play ? E.play[s] : s;
+    if (s !== emS) {
+      emS = s; if (E.shots.has(fr)) shotWant = true;
+      if (E.hits.has(fr)) app.feat('audio')?.AU?.play('hit', {mat: 'body'});   // (the gun's butt on a body: the bullets' body hit)
+    }
+    return nm(K.demo + '.', fr);
+  }
+  // an emote's shot: a muzzle flash (render/flashes.js, the rig's shared one) at the drawn muzzle along the barrel on screen
+  // for SHOT_FX.life s, and his gun's sound (the audio feature's play: at the listener)
+  const SHOT = {t: 0, x: 0, y: 0, h: 0, a: 0, len: 0, v: 0};
+  function shot() {   // (after compose's aim: MUZ the muzzle, aim.mx / my it on screen, SC the gun's hold on screen)
+    toWorld(MUZ[0], MUZ[1], MUZ[2], WP, 0); SHOT.x = WP[0]; SHOT.y = WP[2]; SHOT.h = WP[1];
+    const pxm = Math.hypot(aim.mx - SC[0], aim.my - SC[1]) / (Math.hypot(MZ[0], MZ[1], MZ[2]) || .2) / (app.zoom || 1);   // art px a metre along it
+    SHOT.a = aim.a; SHOT.len = SHOT_FX.len * pxm; SHOT.v = (Math.random() * 3) | 0; SHOT.t = SHOT_FX.life;
+    app.feat('audio')?.AU?.play('gunshot', {gun: LOADOUTS[hero.loadI]?.[2]});
+  }
+  function flash(dt) {
+    if (SHOT.t > 0) { const k = SHOT.t / SHOT_FX.life; flashes.put(SHOT.x, SHOT.y, SHOT.h, SHOT.len * (.7 + .3 * k), SHOT.a, k, SHOT.v, 1); SHOT.t -= dt; }
+    flashes.frame();
   }
 
   // ---------------------------------------------------------------- the frame
@@ -482,6 +507,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // 8) the segments' matrices, the smear, the rig
     aim.ok = GUN >= 0 && gunNear(show);
     if (aim.ok) { barrel(show); screenOf(MUZ[0], MUZ[1], MUZ[2], SC); aim.mx = SC[0]; aim.my = SC[1]; const o = GUN * 7; screenOf(show[o + 4], show[o + 5], show[o + 6], SC); aim.a = Math.atan2(aim.my - SC[1], aim.mx - SC[0]); }
+    if (shotWant) { shotWant = false; if (aim.ok) shot(); }   // (an emote's shot: the gun in his hand)
+    flash(dt);
     mats(show, A.hide);
     stats.smears += K.smear ? smear(show) : (prevOk = false, 0);
     const blinkOff = P.blink && Math.floor(P.blink * 12) % 2;
@@ -533,7 +560,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const live = {
     stats, model, poseOf, BN, J,
     // (a knob changed, the body (re)shown: no history carried over)
-    reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; },
+    reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false; },
     setLineup(items) { lineup = items || []; },
     aim,
     // (dev: the shimmer meter draws several knob sets off ONE sim step, each from its own history)
@@ -548,12 +575,12 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
 
 // THE LIVE HERO: the body of the loadout he wears (MODELS), loaded on first wear; the shared rig, knobs and switch
 export async function createLiveHero(o) {
-  const slots = o.slots ?? 17, rig = createRigMesh(o.G, {slots, xray: true}), hero = o.hero;
+  const slots = o.slots ?? 17, rig = createRigMesh(o.G, {slots, xray: true}), hero = o.hero, flashes = createFlashes(o.G, 2);
   const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: ''}, want = flags.get('livedemo') || '';
   const bodies = {}, loading = {};
   let on = true, shown = null;
   function load(name) {
-    return loading[name] ??= createLiveBody({...o, url: MODELS[name], rig, K, slots}).then(b => {
+    return loading[name] ??= createLiveBody({...o, url: MODELS[name], rig, flashes, K, slots}).then(b => {
       bodies[name] = b;
       if (want && !K.demo && b.demos.includes(want)) K.demo = want;
       return b;
@@ -572,7 +599,7 @@ export async function createLiveHero(o) {
     K, rig,
     get on() { return on && !!cur(); },
     get available() { return hero.loadName in MODELS; },
-    toggle(v = !on) { on = !!v; shown = null; return on; },
+    toggle(v = !on) { on = !!v; shown = null; flashes.frame(); return on; },   // (no flash left armed: compose stops)
     set(x) { Object.assign(K, x); cur()?.reset(); return K; },
     preset(name) { return live.set(PRESETS[name]); },
     get presetName() { for (const [n, v] of Object.entries(PRESETS)) if (Object.keys(v).every(k => v[k] === K[k])) return n; return 'custom'; },
