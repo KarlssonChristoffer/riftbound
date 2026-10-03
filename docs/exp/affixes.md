@@ -114,8 +114,9 @@ H.canHit()   H.clear()   H.list / H.n   H.slowK   H.onBurst = h => {}
 - Feature on: `tmp/exp-affixes/simview_aff.mjs` (simview's method on port 8201 / debug 9401): the sandbox with all six
   fighting is identical with `?views=0` and at 240 fps; a keyboard-only session identical at 30 and 240 fps; a stage-3
   run with the director's own rolls identical with `?views=0`. Sandbox and run sessions: no console errors.
-- Perf (headless 1920x1080, real time, six affixed elites fighting round you, 165 fps): `affixes.update` .008,
-  `view` .021, `frame` .121, `lights` .005, `hd` .068 ms a frame (~.22 ms together); off: an early return (.003).
+- Perf (headless 1920x1080, real time, six affixed elites fighting round you, 165 fps): `affixes.frame` .12-.13,
+  `hd` .05-.06, `view` .01-.02, `update` .007, `lights` .006 ms a frame (~.21 ms together; whole-frame JS 2.8 ms vs
+  2.67 with six plain elites and the feature off); off: an early return (.001).
 - Scratch tools: `tmp/exp-affixes/probe.mjs` (scripted sessions + captures), `bodies/*.js` (lineup, one affix at a
   time, fairness bots, GIF sequences, perf), `gif.py`, `sheet.py`.
 
