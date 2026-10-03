@@ -159,6 +159,7 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
   xf.minFilter = xf.magFilter = near; xf.generateMipmaps = false; xf.needsUpdate = true;
   // the families' ramps (6 tones each: pixelize.py's hi, base, shade, line, outline shadow, outline lit), a row each
   let rampData = new Uint8Array(6 * 4 * 32), famN = 0;
+  const famRow = new Map();   // 'name:tones' -> its row
   const ramp = new THREE.DataTexture(rampData, 6, 32, THREE.RGBAFormat, THREE.UnsignedByteType);
   ramp.minFilter = ramp.magFilter = near; ramp.generateMipmaps = false; ramp.needsUpdate = true;
   const U = {
@@ -179,19 +180,24 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
 
   // a model from ragdoll_export.py's json + bin: the triangles (de-interleaved once), its families' ramps
   function addModel(J, bin) {
-    const n = J.meta.corners, dv = new DataView(bin), F0 = famN;
+    const n = J.meta.corners, dv = new DataView(bin);
     if (J.segs.length > SEGMAX) throw new Error(`rigmesh: ${J.segs.length} segments (max ${SEGMAX})`);
-    for (const f of J.families) {
+    // the model's families -> the ramps texture's rows; a family another model already brought (the same name and tones:
+    // skin, leather, iron ...) shares its row
+    const FM = J.families.map(f => {
+      const key = f.name + ':' + f.ramp.join(';'); let row = famRow.get(key);
+      if (row !== undefined) return row;
       if (famN * 6 * 4 >= rampData.length) { const d = new Uint8Array(rampData.length * 2); d.set(rampData); rampData = d; ramp.image = {data: d, width: 6, height: d.length / 24}; ramp.dispose(); }
-      f.ramp.forEach((c, t) => rampData.set([c[0], c[1], c[2], 255], (famN * 6 + t) * 4)); famN++;
-    }
+      f.ramp.forEach((c, t) => rampData.set([c[0], c[1], c[2], 255], (famN * 6 + t) * 4)); famRow.set(key, row = famN++);
+      return row;
+    });
     ramp.needsUpdate = true;
     const pos = new Float32Array(n * 3), nrm = new Int8Array(n * 4), info = new Uint8Array(n * 4);
     for (let i = 0; i < n; i++) {
       const o = i * 20;
       pos[i * 3] = dv.getFloat32(o, true); pos[i * 3 + 1] = dv.getFloat32(o + 4, true); pos[i * 3 + 2] = dv.getFloat32(o + 8, true);
       for (let k = 0; k < 4; k++) nrm[i * 4 + k] = dv.getInt8(o + 12 + k);
-      info[i * 4] = dv.getUint8(o + 16); info[i * 4 + 1] = dv.getUint8(o + 17); info[i * 4 + 2] = dv.getUint8(o + 18) + F0; info[i * 4 + 3] = dv.getUint8(o + 19);
+      info[i * 4] = dv.getUint8(o + 16); info[i * 4 + 1] = dv.getUint8(o + 17); info[i * 4 + 2] = FM[dv.getUint8(o + 18)]; info[i * 4 + 3] = dv.getUint8(o + 19);
     }
     const geo = new THREE.InstancedBufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('aNrm', new THREE.BufferAttribute(nrm, 4, true));

@@ -1,5 +1,5 @@
 // RAGDOLL: a gunman's death as a live 3D body thrown by the killing shot (features/foes/look.js spawns one where the
-// death clip would play; ?ragdoll=1, the bandit). VIEW only: nothing in the sim reads it (?views=0 changes nothing).
+// death clip would play; ?ragdoll=1: the bandit, the sheriff, the bruiser). VIEW only: nothing in the sim reads it (?views=0 changes nothing).
 // The body is the sprite atlas's own Blender model in rigid per-bone segments (tools/blender/ragdoll_export.py), drawn
 // by render/rigmesh.js with the pixelizer's rules; this module moves it.
 // THE PHYSICS (position based, no library): 16 points on the body (the pelvis block: pelvis, the hips, the belly; the
@@ -9,6 +9,8 @@
 // within limits: elbows and knees bend one way, the torso bends and twists a little, the head tilts), then the ground
 // (the world's elevation) and the walls / props near the body (host.entities.near once a frame per body: no scan over
 // all props), with friction. A body still for a while sleeps (no more steps, no more uploads).
+// PER TYPE (a model each): the loose pieces' points from their boxes (a revolver, the coach gun; each hat), the gun in
+// the hand or not (its offset from the grip against gun_aim), the body's mass (TUNE.ragdoll.mass: the shot's push / it).
 // THE START: the exported pose nearest the sprite he showed (poseFor), facing as the sprite faced, every point placed by
 // the pose's bones; for a short while the MUSCLES hold that pose against gravity, fading out (the legs first, so the
 // knees give), and the killing shot pushes the points round where it hit (its way, the gun's power). The gun and the hat
@@ -42,6 +44,7 @@ const PTS = [
 ];
 const MASS = [3, 2, 2, 2.5, 3, 1.5, 1.5, 1.6, .8, .5, .8, .5, 1.5, .9, 1.5, .9, .3, .3, .3, .08, .08, .08, .08];
 const RAD = [.11, .09, .09, .11, .1, .07, .07, .11, .05, .045, .05, .045, .06, .075, .06, .075, .025, .02, .025, .012, .012, .012, .03];
+const RH = .035;   // m: a gun's origin further than this off its grip (against gun_aim) is not in the hand
 const LEG = new Uint8Array(NP); for (const i of [12, 13, 14, 15]) LEG[i] = 1;
 // distance constraints: [a, b, lo, hi] x the start distance (1, 1: rigid)
 const CON = [
@@ -119,8 +122,27 @@ export function createRagdolls(host) {
       poses[pn] = out;
     }
     const segFrame = J.segs.map(s => FRAME_OF[s.bone] ?? 0);
-    return (models[name] = {J, M, poses, names: Object.keys(poses), segFrame, segBone: J.segs.map(s => s.bone)});
+    // the loose pieces' points from their boxes (the bone's frame: y along the gun / up through the hat): the gun's grip
+    // (half the stock behind the hand), its muzzle, a point off its side; the hat's brim in three and its crown
+    const pts = PTS.map(q => q.slice()), box = bone => J.segs.find(s => s.bone === bone);
+    const g = box('GunHold0'), h = box('HatHold0');
+    if (g) { pts[G0] = ['GunHold0', 0, g.min[1] * .5, 0]; pts[G0 + 1] = ['GunHold0', 0, g.max[1] * .96, 0]; pts[G0 + 2] = ['GunHold0', g.max[0] * .85, 0, 0]; }
+    if (h) {
+      const r = Math.min(h.max[0], h.max[2]) * .8, y = h.min[1] + .02;
+      pts[H0] = ['HatHold0', r, y, 0]; pts[H0 + 1] = ['HatHold0', -r / 2, y, r * .866]; pts[H0 + 2] = ['HatHold0', -r / 2, y, -r * .866]; pts[H0 + 3] = ['HatHold0', 0, h.max[1] * .88, 0];
+    }
+    const gunRef = poses.gun_aim ? handOffset(poses.gun_aim, [0, 0, 0]) : null;
+    return (models[name] = {J, M, poses, names: Object.keys(poses), segFrame, segBone: J.segs.map(s => s.bone), pts, gunRef, mass: T.mass?.[name] ?? 1});
   }
+  // where the gun's origin sits in the right hand's frame in a pose (Blender axes): in the hand it rides the grip (as in
+  // gun_aim, give or take a spin about it); in the holster it is a hand's span and more away
+  function handOffset(pose, out) {
+    const H = pose.RightHand, Gm = pose.GunHold0; if (!H || !Gm) return null;
+    const dx = Gm[3] - H[3], dy = Gm[7] - H[7], dz = Gm[11] - H[11];
+    out[0] = H[0] * dx + H[4] * dy + H[8] * dz; out[1] = H[1] * dx + H[5] * dy + H[9] * dz; out[2] = H[2] * dx + H[6] * dy + H[10] * dz;
+    return out;
+  }
+  const HO = [0, 0, 0];
   // the exported pose nearest a sprite pose name (features/foes/look.js poseOf's names)
   function poseFor(m, name) {
     if (m.poses[name]) return name;
@@ -180,7 +202,7 @@ export function createRagdolls(host) {
     const B = BODY[s], pose = m.poses[poseFor(m, o.pose || 'idle.0')] || m.poses['idle.0'] || m.poses[m.names[0]];
     const c = Math.cos(o.face), sn = Math.sin(o.face), b = s * NP * 3;
     for (let i = 0; i < NP; i++) {
-      const [bone, lx, ly, lz] = PTS[i];
+      const [bone, lx, ly, lz] = m.pts[i];
       boneWorld(pose, pose[bone] ? bone : 'Hips', c, sn, o.x, o.y, o.z, MW);
       for (let k = 0; k < 3; k++) P[b + i * 3 + k] = Q[b + i * 3 + k] = MW[k * 4] * lx + MW[k * 4 + 1] * ly + MW[k * 4 + 2] * lz + MW[k * 4 + 3];
     }
@@ -206,12 +228,15 @@ export function createRagdolls(host) {
     B.sx = o.x; B.sy = o.z; B.sz = o.y;   // (the snap anchor: where he stood, render axes)
     Object.assign(B, {on: true, model: m, t: 0, acc: 0, asleep: !!o.frozen, frozen: !!o.frozen, drawn: false, still: 0, lie: 0, alpha: o.alpha ?? 1, flash: o.flash || 0, thud: false, np: 0});
     B.segFrame.set(m.segFrame);
-    // a gun still in its holster stays on the thigh (it flies only from the hand)
-    const gb = s * NP * 3 + G0 * 3; boneWorld(pose, 'RightHand', c, sn, o.x, o.y, o.z, MW);
-    B.holstered = Math.hypot(P[gb] - MW[3], P[gb + 1] - MW[7], P[gb + 2] - MW[11]) > .2;
+    // a gun not in the hand (its origin off the grip by more than RH m against gun_aim: holstered, slung) stays on the
+    // body, on the right thigh or the chest, whichever it is nearer (it flies only from the hand)
+    const ho = m.gunRef && handOffset(pose, HO);
+    B.holstered = !!ho && Math.hypot(ho[0] - m.gunRef[0], ho[1] - m.gunRef[1], ho[2] - m.gunRef[2]) > RH;
     if (B.holstered) for (let i = 0; i < m.segBone.length; i++) if (m.segBone[i] === 'GunHold0') {
-      B.segFrame[i] = 10; boneWorld(pose, 'GunHold0', c, sn, o.x, o.y, o.z, MW);
-      invert(FRM, 10 * 12, FI, 0); compose(FI, 0, MW, 0, TMP, 0);
+      boneWorld(pose, 'GunHold0', c, sn, o.x, o.y, o.z, MW);
+      const dT = Math.hypot(MW[3] - (P[b + 6] + P[b + 42]) / 2, MW[7] - (P[b + 7] + P[b + 43]) / 2, MW[11] - (P[b + 8] + P[b + 44]) / 2);
+      const dC = Math.hypot(MW[3] - P[b + 12], MW[7] - P[b + 13], MW[11] - P[b + 14]), fr = dT <= dC ? 10 : 2;
+      B.segFrame[i] = fr; invert(FRM, fr * 12, FI, 0); compose(FI, 0, MW, 0, TMP, 0);
       for (let k = 0; k < 12; k++) OFF[(s * SEGMAX + i) * 12 + k] = TMP[k];
     }
     if (o.hit && !o.frozen) push(s, o.hit);
@@ -222,7 +247,7 @@ export function createRagdolls(host) {
   function push(s, H) {
     const B = BODY[s]; if (!B.on || B.frozen) return;
     const b = s * NP * 3, dt = 1 / T.sub, dl = Math.hypot(H.dx, H.dy) || 1, ux = H.dx / dl, uz = H.dy / dl;
-    const V = Math.min(T.hit.max, H.power * T.hit.k), r2 = 2 * T.hit.r * T.hit.r;
+    const V = Math.min(T.hit.max, H.power * T.hit.k) / B.model.mass, r2 = 2 * T.hit.r * T.hit.r;   // (a heavier body takes the same shot slower)
     for (let i = 0; i < NB; i++) {
       const dx = P[b + i * 3] - H.x, dy = P[b + i * 3 + 1] - H.h, dz = P[b + i * 3 + 2] - H.y, w = T.hit.all + (1 - T.hit.all) * 2.2 * Math.exp(-(dx * dx + dy * dy + dz * dz) / r2);
       Q[b + i * 3] -= ux * V * w * dt; Q[b + i * 3 + 2] -= uz * V * w * dt;

@@ -90,11 +90,12 @@ export const TUNE = {
   // harder; at most `max`), `all` of it through the whole body, `r` (m) how far from the point it reaches; gun / hat: their toss (m/s along the shot, up; spin rad/s). sleep: a body
   // still (moving under `eps` m a substep) for `still` s after `after` s stops being simulated. fall: s the body is given
   // to fall before the corpse's hold begins. swap: frames of dithered cross-fade from the last sprite to the live body
-  // (0: the swap is on the first frame of the fall)
+  // (0: the swap is on the first frame of the fall). mass: each type's body against the bandit's (the shot's push / it: the
+  // bruiser is the heavy one)
   ragdoll: {sub: 120, iters: 8, gravity: 9.8, damp: .997, mu: [.55, .4, .6], bounce: .22,
     muscles: {legs: .09, body: .2, k: .32, buckle: .9}, hit: {k: .05, all: .15, r: .3, max: 2.4},
     gun: {fwd: [.4, 1.4], up: [1.2, 2.4], spin: [9, 18]}, hat: {fwd: [.6, 1.8], up: [1.4, 2.6], spin: [4, 9]},
-    sleep: {after: 1.4, still: .4, eps: .0003}, fall: 1.2, swap: 0},
+    sleep: {after: 1.4, still: .4, eps: .0003}, fall: 1.2, swap: 0, mass: {bandit: 1, sheriff: 1.05, bruiser: 1.45}},
   // the view's hit (features/foes/look.js): a bullet shoves the sprite `nudge` m along its way in `out` s and it eases
   // back over `back` s (only the picture: the body doesn't move); combat's white flash shows x `flash` (held full at first)
   hit: {nudge: .1, out: .035, back: .15, flash: 1.6},

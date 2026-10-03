@@ -28,14 +28,14 @@
 //            GPU contact stamp, gfx.js G.ao, as much as he lies; a small one under his feet while he still stands:
 //            contact.js's walker stamp ends when he dies). Without the clips: thrown back in `fall`, down through `land` to `crouch`, faded
 //            at once; without those either, his last pose slides and fades
-//   ragdoll  (?ragdoll=1, the bandit, once its model has loaded: view/ragdoll.js) instead of the death clip, the sprite's
+//   ragdoll  (?ragdoll=1: the bandit, the sheriff, the bruiser, each once his model has loaded: view/ragdoll.js) instead of the death clip, the sprite's
 //            place is taken on the frame he falls by the live 3D body of the atlas's own Blender model, in the pose the
 //            sprite showed (the nearest exported one) and facing as it faced, drawn with the pixelizer's rules
 //            (render/rigmesh.js) and thrown by the killing shot (arrow.hit's way and push; combat.hit's point and height,
 //            which reaches the view after the kill's hitstop, before the body has moved); the gun and the hat fly loose.
 //            The thud (foe.ground + the puff) when the torso first touches the ground; it lies TUNE.ragdoll.fall +
 //            corpse.hold s, then fades with the same dither, counted with the corpses (TUNE.corpse.max). hit_f / hit_b
-//            and the other gunmen's deaths are the clips as before
+//            are the clips as before
 //   telegraph the aim's last moment (the lock): a glint on the barrel (the 'add' layer, drawn by the GPU, after the light:
 //            it reads at noon)
 //   tracers  the bullets in flight, with gunfx's look (features/gunfx.js tracer()); the flash, smoke, impacts and the
@@ -70,7 +70,7 @@ const TWS = ['gun_aim_m45', 'gun_aim_m34', 'gun_aim_m22', 'gun_aim_m11', 'gun_ai
 const TWM = ['m90', 'm67', 'm45', 'm22', '0', 'p22', 'p45'];
 const angDiff = (a, b) => Math.abs(((a - b) + Math.PI * 3) % TAU - Math.PI);
 const GLINT = ['#fff8e0', '#ffe2a0', '#ffc86a'];
-const RAG = flags.get('ragdoll') === '1', RAG_TYPES = {bandit: 'ragdoll/bandit/'};   // ?ragdoll=1: these types die as ragdolls (their models' folders under out/)
+const RAG = flags.get('ragdoll') === '1', RAG_TYPES = {bandit: 'ragdoll/bandit/', sheriff: 'ragdoll/sheriff/', bruiser: 'ragdoll/bruiser/'};   // ?ragdoll=1: these types die as ragdolls (their models' folders under out/)
 // the poses a gunman may show (poseOf, the corpses, the fallbacks), warmed as its atlas loads: a pose first seen mid-fight
 // would otherwise be cut from its big sheet then (render/atlas.js warm: tens of ms each)
 const SHOWN = /^(idle|walk|run|gun_draw|gun_holster|gun_fire|gun_reload|hit_[fb]|die_[bfs]|gun_aim(_[mp]\d+)?|gws_[mp0-9]+_\d+|fall|land|crouch)(\.\d+)?$/;
