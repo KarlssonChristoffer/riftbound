@@ -36,6 +36,16 @@ and what the user's first rating pass taught us (2026-10-01).
    - Transients may be crisp, but short.
 3. **Think "warm game mix",** not "field recording through a bright mic". When in doubt, darker.
 
+## The western-movie guns (2026-10-03): a deliberate exception
+The user on the dark v2 guns: "I don't like the sounds, we should try to make them sound more 'western movie'". The gun
+sounds (recipes revolver.js v3, coachgun.js v2, bullet.js v2: the `spaghetti_` / `hollywood_` / `gritty_` cases, picked by
+audio/runtime/events.js GUN_SFX) are deliberately bright cues: a gunshot's crack, the cock's double click and the falling
+ricochet whine may reach 3-7 kHz, and their echoes and tails are long (baked in, not a convolver). Still binding for them:
+no hollow / boxy ringing (impacts die in a few periods; only metal "ptangs" ring, ~0.06-0.2 s, under ~4 kHz), no static
+hiss (every tail is two one-pole low-passes darkening over its decay), what you hear is on screen (events.js SPATIAL), and
+rule 2 (every echo and tail sized to -80 dB). Measure loudness by the transient too (the first 50 ms, K-weighted): the
+forge's -20 LUFS normalises the loudest 400 ms, which a wet shot shares with its echoes.
+
 ## Rules
 1. Follow the contract:
    - deterministic: all randomness from `R`; `R.fork(k)` for independent layers; never `Math.random`
