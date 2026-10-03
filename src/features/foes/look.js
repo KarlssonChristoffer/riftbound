@@ -60,6 +60,9 @@ const TWS = ['gun_aim_m45', 'gun_aim_m34', 'gun_aim_m22', 'gun_aim_m11', 'gun_ai
 const TWM = ['m90', 'm67', 'm45', 'm22', '0', 'p22', 'p45'];
 const angDiff = (a, b) => Math.abs(((a - b) + Math.PI * 3) % TAU - Math.PI);
 const GLINT = ['#fff8e0', '#ffe2a0', '#ffc86a'];
+// the poses a gunman may show (poseOf, the corpses, the fallbacks), warmed as its atlas loads: a pose first seen mid-fight
+// would otherwise be cut from its big sheet then (render/atlas.js warm: tens of ms each)
+const SHOWN = /^(idle|walk|run|gun_draw|gun_holster|gun_fire|gun_reload|hit_[fb]|die_[bfs]|gun_aim(_[mp]\d+)?|gws_[mp0-9]+_\d+|fall|land|crouch)(\.\d+)?$/;
 
 // which atlas a type draws from: the full outfit once it lists what's needed, else the gate-2 preview
 async function rootOf(name) {
@@ -149,6 +152,7 @@ export function createLook(host, sim) {
       try { s = await loadAtlas(root, {normals: true}); }
       catch (e) { if (!root.includes('/outfits/')) throw e; root = `${OUT}western/art_g2b/${TYPES[k].atlas}/all/`; s = await loadAtlas(root, {normals: true}); }
       const set = sets[k] = prep(s, root);
+      s.warm?.(Object.keys(s.SP).filter(n => SHOWN.test(n)));   // (cut ahead of their first sight: render/atlas.js warm)
       for (const c of ['hit_f', 'hit_b']) {   // (the sim's flinch is TUNE's, never the art's: it should match the clip)
         const bt = set.ok(c) ? set.markT(c, 'back') : null, fl = TYPES[k].flinch;
         if (host.dev && bt !== null && fl > 0 && Math.abs(bt - fl) > .03) console.warn(`foes: ${k} ${c} 'back' is at ${bt.toFixed(2)} s, TYPES.${k}.flinch is ${fl} s`);
@@ -329,7 +333,7 @@ export function createLook(host, sim) {
     let e = arr[f];
     if (!e) {
       const W = set.FW + 8, H = set.FH + 8, mk = o => { const c = document.createElement('canvas'); c.width = W; c.height = H; c.getContext('2d', o); return c; };
-      const c = aoCan ??= mk({willReadFrequently: true}), q = c.getContext('2d'), t = aoTmp ??= mk(), tq = t.getContext('2d');
+      const c = aoCan ??= mk({willReadFrequently: true}), q = c.getContext('2d'), t = aoTmp ??= mk({willReadFrequently: true}), tq = t.getContext('2d');   // (both on the CPU: no GPU read-back)
       const union = D => { tq.clearRect(0, 0, W, H); for (let k = 0; k < D.length; k += 2) tq.drawImage(sp.img, f * set.FW, 0, set.FW, set.FH, 4 + D[k], 4 + D[k + 1], set.FW, set.FH); };
       q.globalAlpha = 1; q.clearRect(0, 0, W, H);
       union(FRINGE); q.globalAlpha = .38; q.drawImage(t, 0, 0);
