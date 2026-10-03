@@ -42,7 +42,7 @@ import {hex01 as rgb} from '../core/color.js';
 WORLD.propTop({campfire: 0, beacon: 1.15, woodpile: .3});
 
 const TAU = Math.PI * 2;
-const R = viewRandom(), rr = (a, b) => a + R() * (b - a);   // presentation (sparks, smoke, flicker); the sim's own: RS
+const R = viewRandom('lights'), rr = (a, b) => a + R() * (b - a);   // presentation (sparks, smoke, flicker); the sim's own: RS
 // a particle (spark, ember, smoke, spore, drip): all of one shape, so the loops that step and draw them read one hidden
 // class (a dozen literal shapes made those reads megamorphic, and each number read that way was a new heap number:
 // ~20 KB of garbage a frame). tx: NaN until its first step (trail() draws nothing before); the drip's fields are 0 on the rest

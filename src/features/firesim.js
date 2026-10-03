@@ -41,7 +41,7 @@ const KINDS = {
   camp:    {pops: .6, bed: .2, rate: 1000, life: [.3, .72], vh: [.85, 1.6], buoy: 1.8, H: .8, swirl: 4.5, dance: .13, size: 3, tongues: 5},
   beacon:  {pops: .45, bed: .3, rate: 1250, life: [.34, .82], vh: [1, 2], buoy: 2.1, H: 1.12, swirl: 4, dance: .17, size: 4, tongues: 5},
 };
-const R = viewRandom(), rr = (a, b) => a + R() * (b - a);
+const R = viewRandom('firesim'), rr = (a, b) => a + R() * (b - a);
 function tones(c) {   // white-hot .. dark tips; warm fires lean yellow in the middle and red at the tips
   const [r, g, b] = rgb(c), warm = r > b + .15 && r >= g, m = ART.mixHex;
   return (warm ? [m(c, '#ffffff', .82), m(c, '#fff3c0', .58), m(c, '#ffd27a', .28), c, m(c, '#b0341a', .45), m(c, '#4a140a', .6)]

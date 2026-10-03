@@ -28,7 +28,8 @@
 //   F.aimTarget?() -> {x, y, h, target} | null    F.hud?() -> string   F.settings?() -> [{label, get, set, options?}]
 //   F.biomeChanged?()           after a world rebuild (N); F.dispose?()
 //   F.resize?(VW, VH)           the view changed size (art px: the window's shape decides, e.g. ultrawide); re-make
-//                               anything view-sized. host.VW / VH (and ctxO's) are always the current size
+//                               anything view-sized. host.VW / VH (and ctxO's) are always the current size, never 0
+//                               (a hidden window keeps the last view: render/camera.js)
 //   F.arrow?(a)                 every arrow as it is spawned (scale its damage, tag it, spawn extras with a.extra)
 //   F.prompt?(prop) -> text | {text, color}   the "E ..." prompt over a prop you can interact with
 //   F.menu?() -> [{label, run}] rows in the menu's Game tab (ui/menu.js)
