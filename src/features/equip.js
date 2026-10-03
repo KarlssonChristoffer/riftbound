@@ -41,6 +41,8 @@ export async function create(host) {
   const now = () => performance.now();
   const game = () => host.feature('game');
   const names = GADGET_IDS.map(id => GADGETS[id].name);
+  // F let go: the throw (core/input.js hands features keydowns only; a held key the menu clears sends no keyup: no throw)
+  addEventListener('keyup', e => { if (F.on && e.key.toLowerCase() === 'f') sim.S.fUp = true; });
   function set(on) {
     F.on = on; sim.setOn(on);
     if (on) look.load(); else look.clear();

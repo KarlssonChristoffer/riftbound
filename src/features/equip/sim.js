@@ -47,7 +47,7 @@ export function createEquipSim(host) {
   // ---------------------------------------------------------------- state
   const S = {
     on: false, slot: null,          // slot: {id, cd} the gadget you carry and the seconds left on its cooldown
-    aiming: false, aimT: 0, queued: 0, deny: 0, ready: 0, cast: 0, simT: 0,
+    aiming: false, aimT: 0, queued: 0, deny: 0, ready: 0, cast: 0, simT: 0, fUp: false,   // fUp: F's keyup came (the feature's listener)
     inSmoke: false, smokeT: 0, speedOn: false,
     mode: '', run: null, stage: -1, cacheDue: false, start: null,   // start: the gadget a run / the sandbox begins with (the flag)
     aim: {x: 0, y: 0, z: 0, d: 0, who: null, prop: null, ax: 0, ay: 0, ah: 0, stop: 0, ground: true},   // where a throw would land (filled while aiming)
@@ -161,7 +161,7 @@ export function createEquipSim(host) {
     if (!S.on || host.lock) return;
     const sl = S.slot;
     if (!sl || sl.cd > 0 || hook) { S.deny = .3; return; }
-    S.aiming = true; S.aimT = 0;
+    S.aiming = true; S.aimT = 0; S.fUp = false;
   }
   function release() {
     const sl = S.slot, G = GADGETS[sl.id], A = target(G, S.aim);
@@ -578,12 +578,13 @@ export function createEquipSim(host) {
     const sl = S.slot;
     if (sl && sl.cd > 0) { sl.cd -= dt; if (sl.cd <= 0) { sl.cd = 0; S.ready = .3; } }
     S.deny = Math.max(0, S.deny - dt); S.ready = Math.max(0, S.ready - dt); S.cast = Math.max(0, S.cast - dt);
-    // F held: aiming (the view shows where it lands); let go: thrown. Mid-leap / climbing / knocked it waits (up to .5 s)
+    // F held: aiming (the view shows where it lands); let go (its keyup: the menu clearing the held keys isn't a throw):
+    // thrown. Mid-leap / climbing / knocked it waits (up to .5 s)
     if (S.aiming) {
       if (host.lock || !sl || sl.cd > 0) S.aiming = false;
       else {
         S.aimT += dt; target(GADGETS[sl.id], S.aim);
-        if (!host.keys.has('f')) { if (host.BUSY.has(P.state) && P.state !== 'hold') { S.queued += dt; if (S.queued > .5) S.aiming = false; } else release(); }
+        if (S.fUp) { if (host.BUSY.has(P.state) && P.state !== 'hold') { S.queued += dt; if (S.queued > .5) S.aiming = false; } else release(); }
       }
     }
     for (let i = air.length - 1; i >= 0; i--) { stepAir(air[i], dt); if (air[i].done) air.splice(i, 1); }
