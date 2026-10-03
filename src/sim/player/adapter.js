@@ -18,6 +18,12 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   const toView = cv.toView, toWorld = cv.toWorld;
   const nearB = [], nearI = [];   // the grid's candidates (world/entities.js near)
   const aimable = ents().query('player.aim', p => p.hp > 0 || p.target || p.breakable);   // what the cursor can aim at (a live list)
+  // a run rule's wind on the player (features/omens.js, a gale): host.mods 'player.windX' / 'player.windY' (world axes, the
+  // share of speed gained moving along it: .25 = 25% faster with it, slower against it), turned into the view frame for
+  // player.js's moveBy (H.wind: null without one)
+  let PWX = 0, PWY = 0; const PWV = [0, 0];
+  if (mods) { const f = () => { PWX = mods.value('player.windX', 0); PWY = mods.value('player.windY', 0); }; mods.watch(f); f(); }
+  const windV = () => { if (!PWX && !PWY) return null; const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); PWV[0] = PWX * c - PWY * s; PWV[1] = PWX * s + PWY * c; return PWV; };
   // collision in the world (round, so it doesn't change with the camera; the arena squashes it to match its 2D look)
   function blocked(x, y, z, air) {
     if (!walkable(x, y)) return true;
@@ -31,7 +37,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   const plateausV = PLATEAUS.map(q => ({...q}));
   function syncPlateaus() { PLATEAUS.forEach((q, i) => Object.assign(plateausV[i], Math.abs(cv.yaw) < 1e-6 ? {...q} : {h: q.h, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, climbs: []})); }
   const PL = createPlayer({
-    ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, mods, plateaus: plateausV,
+    ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, mods, plateaus: plateausV, wind: windV,
     weapon: () => hero.weapon, gun: createGun,   // the loadout's weapon (content/weapons.js) and, for a gun, its revolver
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
     elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
