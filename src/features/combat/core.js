@@ -409,6 +409,7 @@ export function createCore(host) {
     get simT() { return simT; },
     get gold() { return S.gold; },
     addGold(n) { S.gold += n; },   // the game's gold rules: a run starts at 0, the gold stat's bonus, a chest's price
+    spill: (x, y, a, n, sp = 1) => coinBurst(x, y, a, n, sp),   // n coins out of something that isn't a prop (a shrine's payout: features/shrines.js)
     get cd() { return Object.fromEntries(SLOTS.map(k => [k, +AB[k].t.toFixed(2)])); },
     dbg: {debris, coins, fx, rings, nums, lts, pending, brands, zones, traps, BS, brutes, hs},
     seed(n) { R.seed(n); },

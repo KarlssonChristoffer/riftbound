@@ -4,6 +4,9 @@
 // spends it in small groups, every `gap` seconds, never with more than `maxAlive` on the field. A spawn is TELEGRAPHED:
 // a ring on the ground for TELE seconds (game.js draws it), then the enemy pops in. A wave ends when everything it
 // planned has spawned and died; after a short lull the next one starts, and after the last one the stage is cleared.
+// A RUN RULE can lean on the last wave through host.mods (o.mods; core/modifiers.js): 'run.eliteLast' adds elites to it,
+// 'run.champHp' / 'run.champDmg' scale its champion (features/shrines.js, the Shrine of the Mountain). summon() lets a feature
+// call enemies in through the same telegraphs (the Shrine of Combat).
 import {ENEMIES, scaleOf, spawnEnemy} from './enemies.js';
 
 export const STAGES = [
@@ -14,7 +17,7 @@ export const STAGES = [
 ];
 export const TELE = .9, LULL = 2.4;
 
-export function createDirector({core, nav, rng, onWaveClear, onStageClear}) {
+export function createDirector({core, nav, rng, mods = null, onWaveClear, onStageClear}) {
   const alive = () => core.enemies.length;
   const D = {stage: 0, wave: 0, waves: 0, phase: 'idle', plan: [], tele: [], t: 0, gap: 1.4, maxAlive: 7, spawned: 0, total: 0,
     get alive() { return alive(); },
@@ -30,7 +33,15 @@ export function createDirector({core, nav, rng, onWaveClear, onStageClear}) {
     while (budget > 0) { list.push('brute'); budget -= ENEMIES.brute.cost; }
     for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
     if (last) list.splice(Math.min(2, list.length), 0, 'champion');   // after the first group or two
+    const xe = last && mods ? Math.round(mods.value('run.eliteLast', 0)) : 0;   // a run rule's extra elites, right after the champion
+    for (let i = 0; i < xe; i++) list.splice(Math.min(3 + i, list.length), 0, 'elite');
     return list;
+  }
+  // the wave's scale; the champion's x a run rule's notes
+  function scaled(q) {
+    const sc = scaleOf(D.stage, D.wave);
+    if (q.boss && mods) { sc.hp *= mods.value('run.champHp', 1); sc.dmg *= mods.value('run.champDmg', 1); }
+    return sc;
   }
   function startWave() {
     D.plan = planWave(D.stage, D.wave, D.waves); D.total = D.plan.length; D.spawned = 0;
@@ -41,10 +52,13 @@ export function createDirector({core, nav, rng, onWaveClear, onStageClear}) {
   Object.assign(D, {   // (methods only: Object.assign would freeze getters into values)
     start(stage, waves) { Object.assign(D, {stage, waves, wave: 0, tele: []}); startWave(); },
     stop() { D.phase = 'idle'; D.plan = []; D.tele = []; },
+    // a feature's summons: telegraphed and spawned like the wave's own (while the game runs the director: its 'wave' phase),
+    // counted in `left` and in the wave's end -> the telegraph record (its .b is the enemy once it popped in)
+    summon(type, x, y) { const q = {x, y, type, t: 0, boss: type === 'champion', elite: type === 'elite'}; D.tele.push(q); return q; },
     update(dt) {
       for (let i = D.tele.length - 1; i >= 0; i--) {   // telegraphs ripen into enemies
         const q = D.tele[i]; q.t += dt;
-        if (q.t >= TELE) { D.tele.splice(i, 1); q.b = spawnEnemy(core, q.type, q.x, q.y, scaleOf(D.stage, D.wave)); D.spawned++; }
+        if (q.t >= TELE) { D.tele.splice(i, 1); q.b = spawnEnemy(core, q.type, q.x, q.y, scaled(q)); D.spawned++; }
       }
       if (D.phase === 'wave') {
         D.t -= dt;

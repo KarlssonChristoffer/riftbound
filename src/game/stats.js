@@ -58,6 +58,7 @@ export function createStats(host, core) {
     reset() { items.clear(); augs.clear(); Object.assign(S, {hp: BASE_HP, maxHp: BASE_HP, hpShow: BASE_HP, hurtT: 0, healT: 0}); apply(); },
     restore() { mods.clear('stats'); },   // the engine's own numbers (sandbox)
     addItem(it) { items.set(it.id, (items.get(it.id) || 0) + 1); apply(); },
+    removeItem(id) { const n = items.get(id) || 0; if (!n) return false; if (n > 1) items.set(id, n - 1); else items.delete(id); apply(); return true; },   // (one copy: a trade)
     addAugment(a) { augs.add(a.id); apply(); },
     // the build in pick order, for the HUD: [{def, n, aug}]
     build() { return [...[...augs].map(id => ({def: augmentById(id), n: 1, aug: true})), ...[...items].map(([id, n]) => ({def: itemById(id), n}))]; },
