@@ -110,6 +110,11 @@ export function createHero({G, set, loadI, ctxO, app}) {
     pend[0] = pend[1] = 1e9; pend[2] = pend[3] = -1e9;
   }
   const card = G.card({tex: texOf(charCv), nrm: texOf(nrmCv), w: 192, h: 160, px: PIV[0] + CX, py: PIV[1] + CY, type: 4, obj: 8, bias: .00125, xray: true});
+  // the loadout's poses cut ahead of their first sight, but only once several atlases are in play (render/atlas.js
+  // warmLater / crowd: the gunmen's sheets push the player's out of the decode cache, and a pose cut on first sight then
+  // cost tens of ms in compose; alone, the lazy cut is cheap): albedo + normals, and the depth when the cloth reads it
+  const warmPoses = s => s.warmLater?.(Object.keys(s.SP), s.rig?.active ? [0, 1, 2] : [0, 1], 'player');
+  warmPoses(set);
 
   // SHINY ARMOUR (the arena's experiment; its X key turns the camera here, so it's I / the menu): armor.js repaints the
   // metal pixels dark steel / gold, and a METAL MASK aligned with the composite (255 steel, 128 gold, cleared under the
@@ -148,6 +153,7 @@ export function createHero({G, set, loadI, ctxO, app}) {
     const li = loadI;
     $('#load').classList.remove('hidden'); $('#load').textContent = 'Loading ' + LOADOUTS[loadI][0] + '…';
     const s = await loadAtlas(LOADOUTS[loadI][1], {ClothRig});
+    warmPoses(s);
     const a = atlasOf(s), old = ND;
     Object.assign(atlas, a); set = s; SP = s.SP; rig = s.rig; ({FW, FH, PIV, ND, DIRS} = a); weapon = WEAPONS[LOADOUTS[li][2]] || WEAPONS.bow;
     if (ND !== old) app.PL.regrid(old, ND);   // the facings re-counted for the new atlas (player.js)

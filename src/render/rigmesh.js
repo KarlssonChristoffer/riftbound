@@ -20,7 +20,8 @@
 //   params) for each body (mats: Float32Array segs x 12, rows of each segment's 3x4 world matrix; params: x, y, z (the
 //   squash anchor), k, alpha, flash, pitch (rad), sx, sy, sz (the snap anchor, world axes), snap (1: on), type (the
 //   G-buffer pixel type pass B writes: 0 / absent = 7, the lit card; 4 = the character, as the player's card: view/livehero.js)),
-//   then rig.render() (pass A now, B and S armed for this frame's G.render). rig.bytes.
+//   then rig.render() (pass A now, B and S armed for this frame's G.render). rig.warm() once the models are added (at load:
+//   no first-use hitch). rig.bytes.
 //   {xray: true}: a fourth pass X marks where a character body (type 4) is hidden, for the composite's x-ray (gfx.js).
 // OWNS: its target, the transforms texture, the ramps texture, its meshes and materials.
 // READS: G (camera, view size, frame, extra).  EMITS: nothing.  BUDGET: render: per model 2 draws (A, S) + 1 (B) a frame while bodies show;
@@ -174,7 +175,7 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
   let meshX = null;
   if (xray) { U.uGDep = {value: G.compU.tD.value}; meshX = new THREE.Mesh(tri, raw(B_VS, X_FS, U, {depthTest: false, depthWrite: false})); meshX.frustumCulled = false; meshX.matrixAutoUpdate = false; G.extra(meshX, 'xray'); }
   const models = [];
-  let dirty = false, used = false;
+  let dirty = false, used = false, warmN = 0;
 
   // a model from ragdoll_export.py's json + bin: the triangles (de-interleaved once), its families' ramps
   function addModel(J, bin) {
@@ -218,9 +219,27 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
   const BOX_R = 2.4, SCR = [0, 0, 0], box = [1e9, 1e9, -1e9, -1e9];
   const KEYS = ['x', 'z', 'k', 'alpha', 'flash', 'pitch', 'y', 'type', 'sx', 'sy', 'sz', 'snap'];
   const S20 = Math.sin(20 * Math.PI / 180), C20 = Math.cos(20 * Math.PI / 180);
+  // WARM (at load, so the first body costs nothing extra: three programs, the target, the textures and the buffers were a
+  // 196 ms frame and then a 78 ms one at the first death): the data textures uploaded, the target allocated, the three
+  // programs compiled off the main thread where the GPU allows (KHR_parallel_shader_compile: compileAsync), then the
+  // next render() draws every pass once with no body (programs bound, buffers uploaded; pass B discards everywhere)
+  async function warm() {
+    const r = G.renderer;
+    r.initTexture(xf); r.initTexture(ramp);
+    const prev = r.getRenderTarget(); r.setRenderTarget(rt); r.clear(true, true, false); r.setRenderTarget(prev);
+    const ws = new THREE.Scene(), cam = G.camera;   // (throwaway meshes sharing the passes' materials: B and S live in the renderer's scenes)
+    ws.add(new THREE.Mesh(tri, meshB.material)); if (models[0]) ws.add(new THREE.Mesh(models[0].geo, matS));
+    await Promise.all([r.compileAsync(sceneA, cam), r.compileAsync(ws, cam, G.gScene)]);
+    ws.clear(); warmN = 1;
+  }
   function render() {
     const fr = G.frame;
     for (const M of models) { M.geo.instanceCount = M.n; M.mA.visible = M.n > 0; if (M.n) { M.iSlot.needsUpdate = true; M.mS.userData.frame = fr; } }
+    if (!used && warmN > 0) {   // the warm frame: every pass once, no instances
+      warmN--;
+      for (const M of models) { M.mA.visible = true; M.mS.userData.frame = fr; }
+      used = true;
+    }
     if (!used) return;
     if (G.VW !== VW || G.VH !== VH) { VW = G.VW; VH = G.VH; rt.setSize(VW, VH); U.uRes.value.set(VW, VH); U.uSnap.value.set(VW, VH); }
     if (dirty) { xf.needsUpdate = true; dirty = false; }
@@ -241,5 +260,5 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     for (const M of models) M.n = 0;
     used = false;
   }
-  return {addModel, put, render, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
+  return {addModel, put, render, warm, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
 }

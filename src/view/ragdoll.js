@@ -17,7 +17,7 @@
 // the head from their blocks; the limbs by parallel transport, so a straight arm never flips) x the offset fixed at the
 // start (frame^-1 x the bone's posed matrix); the body's pitch follows how far down it is (`lie`: the hips -> head tilt,
 // a running max), the sprite camera's 20 deg upright .. the world's 41 deg lying (render/rigmesh.js).
-// API: const R = createRagdolls(host); await R.load(name, url); R.ready(name); R.spawn(slot, name, o) (o: x, y, z (the
+// API: const R = createRagdolls(host); await R.load(name, url); R.warm(name) (once, at load); R.ready(name); R.spawn(slot, name, o) (o: x, y, z (the
 //   ground), face (rad), pose (a sprite pose name), hit {x, y, h, dx, dy, power} | null, flash, frozen); R.step(dt);
 //   R.frame(); R.alpha(slot, a); R.free(slot); R.onGround = (slot) => {} (the torso first hits the ground); R.bytes; R.ms.
 // OWNS: the bodies (points, offsets, frames), the models, its rig renderer.
@@ -418,8 +418,24 @@ export function createRagdolls(host) {
       G.ao(Math.round(SCR[0]) - (S.w >> 1) * z, Math.round(SCR[1]) - (S.h >> 1) * z, z, B.alpha * (1 - up / .12) * .9, S.r);
     }
   }
+  // WARM (once a model has loaded: the first death then costs nothing extra; it was a 196 ms frame, then a 78 ms one): the
+  // code paths run once on a hidden body (spawned, pushed, stepped, posed, freed: never drawn), the contact stamps made
+  // (the stamp atlas uploads once), the rig's programs, target and textures (render/rigmesh.js warm)
+  const WARMHIT = {x: 1, y: 1, h: 1.2, dx: 1, dy: 0, power: 20};
+  async function warm(name) {
+    const m = models[name], s = SL - 1, B = BODY[s]; if (!m) return;
+    if (!B.on && spawn(s, name, {x: 1, y: 1, z: host.elev(1, 1), face: 0, pose: poseFor(m, 'gws_m22_3'), hit: WARMHIT})) {
+      for (let i = 0; i < 40; i++) substep(B, s, 1 / T.sub);
+      for (let f = 0; f < NF; f++) frameOf(s, f, FRM, f * 12, false);
+      for (let i = 0; i < m.segBone.length; i++) compose(FRM, B.segFrame[i] * 12, OFF, (s * SEGMAX + i) * 12, MATS, i * 12);
+      B.on = false;
+    }
+    const G = host.G;
+    if (G.aoStamp) for (const S of [AO_BIG, AO_SMALL]) if (!S.r || S.r.epoch !== G.aoEpoch) S.r = G.aoStamp(S.w, S.h, S.d);
+    await rig.warm();
+  }
   const R = {
-    load, ready: name => !!models[name], spawn, push, step, frame, poseFor: (name, p) => models[name] && poseFor(models[name], p),
+    load, warm, ready: name => !!models[name], spawn, push, step, frame, poseFor: (name, p) => models[name] && poseFor(models[name], p),
     alpha(s, a) { BODY[s].alpha = a; },
     free(s) { BODY[s].on = false; },
     body: s => BODY[s], onGround: null,
