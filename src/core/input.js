@@ -11,6 +11,7 @@ import {BUSY} from '../sim/player/player.js';
 export function createInput(E) {
   const {canvas, keys, mouse, cv, host, features, events, PL, P, pa, perf, applyOpts, setYaw} = E, {DEV_KEYS, abKey, devKey} = E.dev;
   let dragging = false, dragX = 0, dragYaw = 0;
+  const claimed = k => { for (const f of features) if (f.claims?.(k)) return true; return false; };
   addEventListener('keydown', e => {
     const k = e.key.toLowerCase(), pause = E.pause;
     if (k === 'escape') { if (!e.repeat) pause.toggle(); return; }
@@ -18,8 +19,9 @@ export function createInput(E) {
     if (pause.paused) { pause.menu.key(k, e); return; }   // the menu has the keys: arrows, Tab, Enter
     if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'tab'].includes(k)) e.preventDefault();
     if (e.repeat) return;
-    // locked (menus, death, travel) or a dev key outside dev mode: only the game hears it
-    if (host.lock || (!host.dev && (DEV_KEYS.has(k) || (e.shiftKey && /^Digit[1-6]$/.test(e.code))))) { E.game.onKey?.(k, e); return; }
+    // locked (menus, death, travel) or a dev key outside dev mode: only the game hears it (unless a feature claims that key
+    // for play while it's on: F.claims(k), the equipment experiment's F)
+    if (host.lock || (!host.dev && ((DEV_KEYS.has(k) && !claimed(k)) || (e.shiftKey && /^Digit[1-6]$/.test(e.code))))) { E.game.onKey?.(k, e); return; }
     if (abKey(e, E)) { applyOpts(); return; }   // renderer A/B (Shift + 1..6)
     keys.add(k);
     for (const f of features) if (f.onKey?.(k, e)) return;

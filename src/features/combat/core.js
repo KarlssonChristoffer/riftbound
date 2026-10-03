@@ -480,6 +480,13 @@ export function createCore(host) {
       host.world.addItem(b);
       return b;
     },
+    // hold one of the core's brutes where it stands for sec s (the equipment experiment's bear trap: features/equip/sim.js):
+    // a hop ends where it is, a hold it has already is never shortened. -> false if it isn't one of them, or down
+    root(p, sec) {
+      const s = BS.get(p); if (!s || p.broken) return false;
+      s.root = Math.max(s.root, sec); s.hop = null; p.h = 0; p.air = false; p.rooted = true; s.mode = 'aggro';
+      return true;
+    },
     get enemies() { if (enemyAt !== enemyVer) { enemyList = brutes.filter(b => b.hunter && !b.broken); enemyAt = enemyVer; } return enemyList; },
     clearEnemies() { for (const b of brutes) if (b.hunter && !b.dead) { ents.hide(b); b.broken = true; dead.push(b); } enemyVer++; drop(); },
     // the yard's sparring pair sits out a run (retire true) and comes back after it

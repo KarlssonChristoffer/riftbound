@@ -852,6 +852,12 @@ export async function create(host) {
     LLIST.length = nLR; return LLIST;
   };
   F.onArrowHit = (a, p) => { if (a.fire && BURNS[p.kind]) ignite(p); };   // nothing returned: combat resolves the hit
+  // OTHER FEATURES' FIRE (the equipment experiment's fire flask and dynamite: features/equip): set a prop alight through this
+  // fire (it chars, spreads, burns through; only what burns: BURNS) -> true if it caught now; and draw a flame of this fire's
+  // look for a frame (call it from F.frame, which must run before this feature's: order before ['lights']): key (any object:
+  // one per flame), kind torch | brazier | burn | camp | beacon, colour, (x, y, h) its bed, on (0..1), scale, height (firesim.js draw)
+  F.ignite = p => { const was = burning.has(p); ignite(p); return !was && burning.has(p); };
+  F.flame = (key, kind, col, x, y, h, on = 1, scale = 1, height = 1) => { fires.draw(key, kind, col, x, y, h, fo(on, scale, height)); };
   F.interact = p => {
     if (p === beacon && beacon.unlit) { light(beacon); return true; }
     if (p === camp && F.on) { tend(); return true; }

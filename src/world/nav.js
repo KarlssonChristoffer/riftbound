@@ -7,6 +7,9 @@
 //   steer(b)       the next waypoint for an enemy: the lowest cell one hop away along a clear line (round walls, out
 //                  through a gate, along the bank), or null when it can go straight at you (the core does that)
 //   spots(...)     spawn spots: open cells in a band of WALKING distance (never across the stream from you), spaced out
+//   addLure(fn)    another system's say over where an enemy goes (the equipment experiment's scarecrow and smoke: features/
+//                  equip/sim.js): fn(b) -> {x, y, stop} | null, asked first, in the order added; the first point given is where
+//                  steer sends it (a straight hop at it: the core's planHop goes round what's in the way). -> a remover
 // It's rebuilt per stage (build()) since the world's fixed props come with the layout.
 // o.area(x, y) -> bool: the ground it may use (default: layout.navArea, inside the arena's walls or on the trail; the desert's
 // gunmen, features/foes, walk all the ground the player can: the fort's square and 3 m round it too).
@@ -18,6 +21,7 @@ export function createNav(host, o = {}) {
   const X0 = WORLD.x0, Y0 = WORLD.y0, NX = Math.ceil(WORLD.WM / C), NY = Math.ceil(WORLD.HM / C), N = NX * NY;   // cell (i, j) = X0 + i C .. (the world's origin)
   const open = new Uint8Array(N), dist = new Float32Array(N).fill(Infinity), queue = new Int32Array(N);
   let fieldT = 0, built = false, lastT = 0;   // lastT: how many cells the last field reached (queue[0 .. lastT): reset only those)
+  const lures = [];   // addLure's providers
   const idx = (x, y) => { const i = Math.floor((x - X0) / C), j = Math.floor((y - Y0) / C); return i < 0 || j < 0 || i >= NX || j >= NY ? -1 : j * NX + i; };
   const at = (x, y) => { const k = idx(x, y); return k < 0 ? Infinity : dist[k]; };
   const isOpen = (x, y) => { const k = idx(x, y); return k >= 0 && open[k] === 1; };
@@ -80,7 +84,9 @@ export function createNav(host, o = {}) {
   return {
     get built() { return built; }, open, dist, NX, NY, C, X0, Y0, at, isOpen, build,
     update(dt) { if (built && (fieldT -= dt) <= 0) { fieldT = .25; field(host.player.x, host.player.y); } },
+    addLure(fn) { lures.push(fn); return () => { const i = lures.indexOf(fn); if (i >= 0) lures.splice(i, 1); }; },
     steer(b) {
+      for (let i = 0; i < lures.length; i++) { const w = lures[i](b); if (w) return w; }
       const P = host.player, d0 = at(b.x, b.y);
       if (!isFinite(d0)) return null;                                     // off the grid: straight at you
       if (d0 < 2.5 || lineOpen(b.x, b.y, P.x, P.y)) return null;          // close, or a clear line: straight at you
