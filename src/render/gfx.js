@@ -1836,11 +1836,12 @@ void main() {
 }`;
   const heatU = {tD: fxU.tD, uR: fxU.uR, uPxM: fxU.uPxM}, heatScene = new THREE.Scene();
   const fxScene = new THREE.Scene(), FXMAX = 6000, fxB = {};
-  // EXTRA passes owned by other modules (render/flames.js): extra(mesh, 'gbuf' | 'fx') puts a mesh in the G-buffer or the
-  // HD fx pass; it shows only on a frame its owner armed (mesh.userData.frame = G.frame before render()), so a system that
-  // didn't run this frame (its feature off, paused out) leaves nothing behind
-  const gExtra = [], fxExtra = [];
-  function extra(m, pass) { if (pass === 'fx') { fxScene.add(m); fxExtra.push(m); } else { gScene.add(m); gExtra.push(m); } m.visible = false; }
+  // EXTRA passes owned by other modules (render/flames.js, render/rigmesh.js): extra(mesh, 'gbuf' | 'fx' | 'shadow') puts a
+  // mesh in the G-buffer, the HD fx pass or the per-frame sun shadow (a caster that moves: layer 0); it shows only on a frame
+  // its owner armed (mesh.userData.frame = G.frame before render()), so a system that didn't run this frame (its feature
+  // off, paused out) leaves nothing behind
+  const gExtra = [], fxExtra = [], sExtra = [];
+  function extra(m, pass) { if (pass === 'fx') { fxScene.add(m); fxExtra.push(m); } else if (pass === 'shadow') { sScene.add(m); sExtra.push(m); } else { gScene.add(m); gExtra.push(m); } m.visible = false; }
   for (const [mode, blending] of [['add', THREE.AdditiveBlending], ['blend', THREE.NormalBlending]]) {
     const geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
     const P = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4), C = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4);
@@ -1971,6 +1972,7 @@ void main() {
     // movers that have been still long enough go back to the static map (switched over AT its re-render: no gap)
     for (const S of movers) if (!S.back && ++S.still > STILL_FRAMES) { S.back = true; staticSoon(20); }
     compU.uSOn.value = STATIC_SHADOW ? 1 : 0;
+    for (const m of sExtra) m.visible = m.userData.frame === frameNo;   // (extra casters: before the shadow passes)
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
       if (STATIC_SHADOW && sFollow) {   // a big world: the static box follows the view, on its lattice
         const cx = Math.round(view.T.x / SSTEP) * SSTEP, cz = Math.round(view.T.z / SSTEP) * SSTEP;
