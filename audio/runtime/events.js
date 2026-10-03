@@ -60,19 +60,19 @@ const COACH_MARK = {break: 'break', dump: 'eject', load: 'load', close: 'close'}
 const BULLET_DB = {sand: 0, stone: -1, wood: 0, metal: -1};   // bulletHit: the bullet recipe's case per o.mat, and its trim
 const FOE = {cat: 'combat', bus: 'sfx.world', priority: 50, maxInstances: 3, steal: 'quietest', coalesceMs: 0, send: .15, pitchSemi: .8, gainJitDb: 1.5};
 // GUN SOUNDS: the western-movie flavors (the user, on the v2 guns: "make them sound more 'western movie'"): every gun
-// event plays the forge cases '<flavor>_<case>' (recipes revolver.js v3, coachgun.js v2, bullet.js v2; their headers say
-// what each flavor is). The caller passes o.gunsfx (src/audio/audio.js: ?gunsfx= / menu > Audio > Gun sounds, remembered);
-// anything else plays GUN_SFX_DEF. Per flavor:
+// event plays the forge cases '<flavor>_<case>' (recipes revolver.js v4, coachgun.js v3, bullet.js v3; their headers say
+// what each flavor is). Two flavors (the user dropped spaghetti, "by far worst", and keeps both of these for now): the
+// caller passes o.gunsfx (src/audio/audio.js: ?gunsfx= / menu > Audio > Gun sounds, remembered); anything else (an old
+// saved 'spaghetti', an unknown name) plays GUN_SFX_DEF. Per flavor:
 //   trims (dB)  each shot's transient (its first 50 ms, K-weighted) ~2 dB over the v2 / v1 shot's: larger than life (the
 //               forge normalises the loudest 400 ms, and a wet shot's echoes take a share of it); peaks stay under the
 //               master limiter's -3 dBFS
 //   send        the reverb send: the place is baked into the buffers, the biome's reverb only adds air
 //   rico        how often a bullet ricochets off stone / metal, ricoSand off sand ([the player's, a gunman's]); ricoDb its
-//               level against the hit (spaghetti: often and loud; gritty: rarely and under)
-// The reloads keep their one sound (the v2 / v1 cases). GUN_SFX_DEF: spaghetti, the most iconic western-movie sound.
-export const GUN_SFX = ['spaghetti', 'hollywood', 'gritty'], GUN_SFX_DEF = 'spaghetti';
+//               level against the hit (hollywood: the stock ricochet now and then; gritty: rarely and under)
+// The reloads keep their one sound (the v2 / v1 cases). GUN_SFX_DEF: hollywood, the classic western-movie sound.
+export const GUN_SFX = ['hollywood', 'gritty'], GUN_SFX_DEF = 'hollywood';
 const GSX = {
-  spaghetti: {peacemaker: 4.5, navy: 4.5, fire: 3, cock: 0, send: .04, rico: [.5, .3], ricoSand: [.12, .06], ricoDb: -1},
   hollywood: {peacemaker: 4.5, navy: 4.5, fire: 4, cock: 0, send: .06, rico: [.3, .18], ricoSand: [.05, .03], ricoDb: -2},
   gritty: {peacemaker: 5.5, navy: 6, fire: 3, cock: 0, send: .08, rico: [.1, .05], ricoSand: [0, 0], ricoDb: -5},
 };
@@ -81,7 +81,7 @@ const gsx = o => (GSX[o?.gunsfx] ? o.gunsfx : GUN_SFX_DEF);
 const GL = (recipe, c, o, extra = {}) => { const s = gsx(o), F = GSX[s]; return L(recipe, `${s}_${c}`, {send: F.send, ...extra, gainDb: (F[c] || 0) + (extra.gainDb || 0)}); };
 const gunBanks = (recipe, cases, bp) => GUN_SFX.flatMap(s => cases.map(c => (bp == null ? [recipe, `${s}_${c}`] : [recipe, `${s}_${c}`, bp])));
 // the director's prefetch skips the other flavors' banks (they bake when picked: src/audio/audio.js prefetches again)
-export const otherGunSfx = style => (recipe, c) => { const m = /^(spaghetti|hollywood|gritty)_/.exec(c); return !!m && m[1] !== style; };
+export const otherGunSfx = style => (recipe, c) => { const m = /^(hollywood|gritty)_/.exec(c); return !!m && m[1] !== style; };
 
 export const EVENTS = {
   // ================================================ player movement ================================================
