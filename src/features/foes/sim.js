@@ -43,7 +43,7 @@ export function createFoesSim(host) {
   // the ground you can walk on (sim/player/adapter.js blocked: the fort's square and 3 m round it, the trail), minus the
   // canyon (the desert's hole south of its rim)
   const walkArea = (x, y) => ((x > PLAY.x0 - 2.6 && x < PLAY.x1 + 2.6 && y > PLAY.y0 - 2.6 && y < PLAY.y1 + 2.6)
-    || (x > TRAIL.x0 && x < TRAIL.x1 - .3 && y > TRAIL.y0 + .3 && y < TRAIL.y1 - .3)) && !(y > WORLD.HM - 3.6 && host.biome.hole?.(x, y));
+    || (x > TRAIL.x0 && x < TRAIL.x1 - .3 && y > TRAIL.y0 + .3 && y < TRAIL.y1 - .3)) && !(y > WORLD.y1 - 3.6 && host.biome.hole?.(x, y));
   const nav = createNav(host, {area: walkArea});
   let navOk = false, edges = null, edgeN = 0;   // the open cells near the walkable ground's outer edge (spawn spots)
 
@@ -69,10 +69,10 @@ export function createFoesSim(host) {
   // ---------------------------------------------------------------- the ground
   function buildNav() {
     nav.build(); navOk = true;
-    const {open, NX, NY, C} = nav, out = [], d = SP.edge;
+    const {open, NX, NY, C, X0, Y0} = nav, out = [], d = SP.edge;
     for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
       const k = j * NX + i; if (!open[k]) continue;
-      const x = (i + .5) * C, y = (j + .5) * C;
+      const x = X0 + (i + .5) * C, y = Y0 + (j + .5) * C;
       if (!walkArea(x - d, y) || !walkArea(x + d, y) || !walkArea(x, y - d) || !walkArea(x, y + d)) out.push(k);
     }
     edges = Int32Array.from(out); edgeN = 0;
@@ -139,13 +139,13 @@ export function createFoesSim(host) {
   const cand = new Int32Array(8192);
   function edgeSpot(out) {
     if (!edges) return null;
-    const {NX, C} = nav; let n = 0;
+    const {NX, C, X0, Y0} = nav; let n = 0;
     for (let i = 0; i < edges.length && n < cand.length; i++) {
-      const k = edges[i], x = (k % NX + .5) * C, y = (Math.floor(k / NX) + .5) * C, w = nav.at(x, y);
+      const k = edges[i], x = X0 + (k % NX + .5) * C, y = Y0 + (Math.floor(k / NX) + .5) * C, w = nav.at(x, y);
       if (isFinite(w) && w >= SP.minWalk && hypot2(x - P.x, y - P.y) >= SP.minLine) cand[n++] = k;
     }
     if (!n) return null;
-    const k = cand[Math.floor(R() * n)]; out.x = (k % NX + .5) * C; out.y = (Math.floor(k / NX) + .5) * C;
+    const k = cand[Math.floor(R() * n)]; out.x = X0 + (k % NX + .5) * C; out.y = Y0 + (Math.floor(k / NX) + .5) * C;
     return out;
   }
   const AT = {x: 0, y: 0};
