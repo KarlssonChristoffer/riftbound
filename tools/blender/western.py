@@ -2324,3 +2324,312 @@ POSES['squat'] = _SQUAT
 POSES['squat_b'] = {**_SQUAT, 'Spine2': [('X', 8)], 'Head': [('X', 8)]}
 ANIMS['squat'] = _clip(['idle_in', 'squat_mid', 'squat', 'squat_b'], [.5, 1, 1.5, 2, 2.5, 3], 12,
                        play=[0, 1, 2, 3, 4, 5, 4, 3], ms=[70, 70, 70, 900, 400, 900, 400, 900], marks={'loop': 3})
+
+
+# ================================================================ the gunslinger's live gun moves (live only) ==========
+# Trick shots and draws made for the LIVE hero only (src/view/livehero.js), like the outlaw's emotes above: exported as
+# bone matrices with ragdoll_export.py --clips (no atlas render), shown with Shift+9 while he stands still. Each is a
+# routine from the ready idle back into the holster (the live demos play from the holstered idle), with marks naming the
+# frames a game would hook: draw (the hand closes on the grip), shot / shot2 / shot3 (a round leaves), hit (the whip).
+#   quickdraw     the fast draw: a hover over the grip, the gun out and fired from the hip, two shots fanned, a twirl home
+#   behind_back   the gun hand swung behind his back, the muzzle out past the left hip: two shots to his LEFT, looking
+#                 over his shoulder
+#   over_shoulder the gun by his right ear, the barrel back over the shoulder: a shot BEHIND him without turning
+#   under_arm     the gun hand across the chest, the barrel back past his left side: a no-look shot BEHIND him
+#   duelist       the formal duel: side-on, feet in line, the gun raised muzzle-up by the cheek, lowered at arm's length,
+#                 the free hand on the small of the back; a shot, the salute
+#   kneel         down on the right knee, two-handed (the left hand cupping the right), two careful shots, up again
+#   road_agent    the road agent's spin: the gun offered butt-first hanging off the trigger finger, rolled over into the
+#                 hand, a shot
+#   toss          the revolver tossed up end over end and caught, a shot
+#   border_shift  tossed across into the left hand, a left-handed shot, tossed back
+#   pistol_whip   a wind-up and a downward strike with the gun (melee), then back to the hip
+#   sky_shot      a warning shot: the gun to the sky, the free hand on the hip
+#   point_blank   leaning over a foe on the ground, a shot down
+#   turn_shot     a target behind him: a spin on the spot over the right shoulder, drawing on the turn, a shot at the end
+#                 of it, the twirl turning back
+# The kit: a key named gun_* holds the revolver (_gun_hold), LIVE_AT puts a wrist on a point (two-bone IK, after the
+# spec), LIVE_GUN holds the revolver another way than along the forearm, LIVE_LEFT puts the left wrist on the gun.
+GUNSLINGER_LIVE = ('quickdraw', 'behind_back', 'over_shoulder', 'under_arm', 'duelist', 'kneel', 'road_agent', 'toss',
+                   'border_shift', 'pistol_whip', 'sky_shot', 'point_blank', 'turn_shot')
+LIVE_AT = {}     # pose key -> [(side, bone | None, (x, y, z) m at 1.8 m)]: that wrist onto the point, carried by the bone (a
+                 # rest-space point), or None: in his frame (he faces -Y, +X his left, before the ground snap: hips at .76)
+LIVE_GUN = {}    # pose key -> {dir: (x, y, z) the barrel's direction in his frame (else along the forearm, levelled as
+                 # LEVEL; follow: True keeps its pitch), up: the gun's top (default up), spin: deg about the trigger finger
+                 # (else GUN_SPIN), hand: 'Left' (in the left fist), air: (x, y, z) m in his frame (free, out of the hand)}
+LIVE_LEFT = {}   # pose key -> the left wrist (F, U, S m) from the hammer of the gun as LIVE_GUN holds it (LEFT_TO_GUN's)
+
+
+def _live_gun(pose_name):
+    """HOLD hook (last): a live gun move's key: the wrists onto their points (LIVE_AT), the revolver held its way
+    (LIVE_GUN), the left wrist onto it (LIVE_LEFT). Keys outside these tables are left as the other hooks posed them."""
+    key = _key(pose_name)
+    H, at = LIVE_GUN.get(key), LIVE_AT.get(key, ())
+    if (H is None and not at) or 'g' not in GUN:
+        return
+    arm = bpy.data.objects[ROOT]
+    pbs, bones = arm.pose.bones, arm.data.bones
+    k = PROP['height'] / 1.8
+    for side, bone, p in at:
+        _reach(side, _carried(bone, Vector(p) * k) if bone else Vector(p) * k)
+    if H is None:
+        H = {} if key.startswith(GUN_POSES) else None   # (the hand moved: the gun is placed again, as _gun_hold does)
+    if H is None:
+        return
+    side = H.get('hand', 'Right')
+    fa, hd = pbs[side + 'ForeArm'], pbs[side + 'Hand']
+    if 'dir' in H:
+        d = Vector(H['dir']).normalized()
+    else:
+        d = (fa.tail - fa.head).normalized()
+        if not H.get('follow') and Vector((d.x, d.y)).length > .25:
+            p = math.asin(max(-1.0, min(1.0, d.z))) * LEVEL
+            d = Vector((d.x, d.y, 0)).normalized() * math.cos(p) + Vector((0, 0, math.sin(p)))
+    up = Vector(H.get('up', (0, 0, 1))).normalized()
+    if abs(d.dot(up)) > .95:
+        up = Vector((0, 1, 0)) if abs(d.y) < .9 else Vector((0, 0, 1))
+    R = _frame_rot(GUN['F'], GUN['U'], d, up)
+    spin = H.get('spin', GUN_SPIN.get(key, 0))
+    if spin:
+        R = Matrix.Rotation(math.radians(spin), 3, (R @ GUN['F']).cross(R @ GUN['U'])) @ R
+    at = Vector(H['air']) * k if 'air' in H else hd.head + (hd.tail - hd.head) * .5
+    pbs['GunHold0'].matrix = Matrix.Translation(at) @ (R @ bones['GunHold0'].matrix_local.to_3x3()).to_4x4()
+    bpy.context.view_layer.update()
+    if key in LIVE_LEFT:
+        F, U = R @ GUN['F'], R @ GUN['U']
+        f, u, sd = LIVE_LEFT[key]
+        _reach('Left', at + U * .05 * k - F * .03 * k + (F * f + U * u + F.cross(U) * sd) * k)
+
+
+_build_live = build
+
+
+def build():
+    """western's build, then the live gun moves' hold hook after every other (it re-places what they placed)."""
+    names = _build_live()
+    if any(g in LOADOUT for g in GUN_ITEMS) and _live_gun not in HOLD_HOOKS:
+        HOLD_HOOKS.append(_live_gun)
+    return names
+
+
+def _routine(steps):
+    """A live gun move as steps, each shown for its ms: (key, ms[, mark]) shows that key, ('~', f, ms[, mark]) a frame
+    f of the way from the key before to the next key (blended: _clip). Played straight through (no `play`)."""
+    keys, tween, ms, marks = [], [], [], {}
+    for st in steps:
+        if st[0] == '~':
+            tween.append(len(keys) - 1 + st[1])
+            ms.append(st[2])
+            mk = st[3] if len(st) > 3 else None
+        else:
+            if not keys or keys[-1] != st[0]:
+                keys.append(st[0])
+            tween.append(len(keys) - 1)
+            ms.append(st[1])
+            mk = st[2] if len(st) > 2 else None
+        if mk:
+            marks[mk] = len(tween) - 1
+    assert max(tween) <= len(keys) - 1, ('an in-between with no key after it', keys)
+    return _clip(keys, tween, 12, ms=ms, marks=marks or None)
+
+
+# the endings: the twirl at the hip (backward, round the trigger finger) into the holster, and the ready idle
+_HOME = [('gun_spin_0', 45), ('gun_spin_1', 45), ('gun_spin_2', 45), ('gun_spin_3', 45), ('gun_spin_4', 50), ('~', .5, 50), ('gholster', 70),
+         ('~', .5, 80), ('idle_in', 120)]
+_DRAW = [('idle_in', 90), ('gdraw_grab', 50, 'draw'), ('~', .5, 40), ('gun_draw_lift', 40)]
+_RIGHT_LOOSE = {'RightShoulder': [('Z', 4)], 'RightArm': [('Y', -36), ('X', 8)], 'RightForeArm': [('X', -22)], 'RightHand': [('Y', -10)]}
+_HAND_ON_HIP = {'LeftShoulder': [('Z', -2)], 'LeftArm': [('Y', 10), ('X', 14)], 'LeftForeArm': [('X', -50)]}
+_KNEEL = {'LeftUpLeg': [('X', -82), ('Y', -6)], 'LeftLeg': [('X', 84)], 'LeftFoot': [('X', -2)],
+          'RightUpLeg': [('X', 6), ('Y', 6)], 'RightLeg': [('X', 100)], 'RightFoot': [('X', -30)]}
+_LUNGE = {'LeftUpLeg': [('X', -28), ('Y', -6)], 'LeftLeg': [('X', 26)], 'LeftFoot': [('X', -4)],
+          'RightUpLeg': [('X', 16), ('Y', 6)], 'RightLeg': [('X', 10)], 'RightFoot': [('X', 10), ('Z', 10)]}
+_HIPS_L = ('Left', 'Hips', (.2, -.03, .86))     # the left fist on the left hip (akimbo)
+
+# ---- quickdraw: hover, grab, the gun out level at the hip (shot), the kick, two fanned shots, the twirl home
+POSES['gun_lv_qd_hip'] = _gpose(20, _arm(y=-44, x=-10, fx=-82, sz=-2, z=8), {'LeftArm': [('Y', 30), ('X', -30), ('Z', -20)],
+                                'LeftForeArm': [('X', -60)]}, legs=_GWIDE, lean=14)
+POSES['gun_lv_qd_kick'] = _gpose(18, _arm(y=-44, x=-14, fx=-84, sz=-4, z=8), {'LeftArm': [('Y', 34), ('X', -44), ('Z', -30)],
+                                 'LeftForeArm': [('X', -66)]}, legs=_GWIDE, lean=10)
+GUN_SPIN['gun_lv_qd_kick'] = 24
+ANIMS['quickdraw'] = _routine([('idle_in', 90), ('duel_a', 380), ('gdraw_grab', 40, 'draw'), ('gun_draw_lift', 30),
+                               ('gun_lv_qd_hip', 60, 'shot'), ('gun_lv_qd_kick', 50), ('~', .5, 40), ('gun_fan_a', 50),
+                               ('gun_fan_b', 60, 'shot2'), ('gun_fan_a', 50), ('~', .5, 30), ('gun_fan_b', 60, 'shot3'),
+                               ('~', .5, 60)] + _HOME)
+
+# ---- behind_back: the gun hand swung round behind the back (wrist behind the left hip, carried by the hips), the
+# barrel to his LEFT, the head turned over the left shoulder; two shots
+_BB = {'Spine': [('Y', -4)], 'Neck': [('Z', 38), ('Y', 4)], 'Head': [('Z', 26)],
+       'RightShoulder': [('Z', 8)], 'RightArm': [('Y', -36), ('X', 36)], 'RightForeArm': [('X', -60)]}
+POSES['gun_lv_bb_swing'] = _gpose(-10, _BB, {'RightArm': [('Y', -40), ('X', 28)], 'Neck': [('Z', 20)], 'Head': [('Z', 14)]})
+POSES['gun_lv_bb_aim'] = _gpose(-14, _BB)
+POSES['gun_lv_bb_kick'] = _gpose(-14, _BB, {'Neck': [('Z', 40), ('Y', 6)]})
+LIVE_AT.update({'gun_lv_bb_swing': [('Right', 'Hips', (-.12, .26, .9))], 'gun_lv_bb_aim': [('Right', 'Hips', (.04, .27, .92))],
+                'gun_lv_bb_kick': [('Right', 'Hips', (.03, .27, .93))]})
+LIVE_GUN.update({'gun_lv_bb_swing': {'dir': (.4, .9, -.2)}, 'gun_lv_bb_aim': {'dir': (1, .2, 0)},
+                 'gun_lv_bb_kick': {'dir': (1, .2, 0), 'spin': 24}})
+ANIMS['behind_back'] = _routine(_DRAW + [('gun_draw_hip', 50), ('gun_lv_bb_swing', 60), ('~', .5, 40), ('gun_lv_bb_aim', 220),
+                                         ('gun_lv_bb_kick', 60, 'shot'), ('gun_lv_bb_aim', 260), ('gun_lv_bb_kick', 60, 'shot2'),
+                                         ('gun_lv_bb_aim', 200), ('gun_lv_bb_swing', 60), ('gun_draw_hip', 60)] + _HOME)
+
+# ---- over_shoulder: the gun hand up by the right ear (carried by the chest), the barrel back over the shoulder, the
+# left fist on the hip; a no-look shot behind him
+_OS = {'RightShoulder': [('Z', 10)], 'RightArm': [('Y', 50), ('X', -40)], 'RightForeArm': [('X', -110)],
+       'Neck': [('Z', -40), ('Y', -4)], 'Head': [('Z', -26)], **_HAND_ON_HIP}
+POSES['gun_lv_os_up'] = _gpose(6, _OS, {'RightArm': [('Y', 30), ('X', -50)], 'Neck': [('Z', -6)], 'Head': [('Z', -4)]})
+POSES['gun_lv_os_aim'] = _gpose(6, _OS)
+POSES['gun_lv_os_kick'] = _gpose(6, _OS, {'Spine2': [('X', 4)], 'Head': [('Z', -26), ('X', 6)]})
+LIVE_AT.update({'gun_lv_os_up': [('Right', 'Spine2', (-.24, -.14, 1.36)), _HIPS_L],
+                'gun_lv_os_aim': [('Right', 'Spine2', (-.31, .03, 1.4)), _HIPS_L],
+                'gun_lv_os_kick': [('Right', 'Spine2', (-.31, .05, 1.43)), _HIPS_L]})
+LIVE_GUN.update({'gun_lv_os_up': {'dir': (0, .2, 1)}, 'gun_lv_os_aim': {'dir': (-.42, 1, .36)},
+                 'gun_lv_os_kick': {'dir': (-.42, 1, .36), 'spin': 26}})
+ANIMS['over_shoulder'] = _routine(_DRAW + [('gun_draw_hip', 50), ('gun_lv_os_up', 70), ('~', .5, 50), ('gun_lv_os_aim', 420),
+                                           ('gun_lv_os_kick', 70, 'shot'), ('gun_lv_os_aim', 300), ('gun_lv_os_up', 80),
+                                           ('gun_draw_hip', 70)] + _HOME)
+
+# ---- under_arm: the gun hand across the front, the wrist beside the left hip under the arm (carried by the hips), the
+# barrel BACK past his left side; the left arm lifted clear, the head turned a little after it; a no-look shot behind
+_UA = {'RightShoulder': [('Z', 14)], 'RightArm': [('Y', -20), ('X', -30), ('Z', 40)], 'RightForeArm': [('X', -60)],
+       'LeftShoulder': [('Z', -2)], 'LeftArm': [('Y', 14), ('X', -6)], 'LeftForeArm': [('X', -125)],
+       'Neck': [('Z', 14)], 'Head': [('Z', 8)]}
+POSES['gun_lv_ua_aim'] = _gpose(-8, _UA)
+POSES['gun_lv_ua_kick'] = _gpose(-8, _UA, {'Spine2': [('X', 3)], 'Neck': [('Z', 18)]})
+LIVE_AT.update({'gun_lv_ua_aim': [('Right', 'Hips', (.23, -.05, .93)), ('Left', 'Spine2', (.1, -.17, 1.15))],
+                'gun_lv_ua_kick': [('Right', 'Hips', (.23, -.04, .94)), ('Left', 'Spine2', (.1, -.17, 1.15))]})
+LIVE_GUN.update({'gun_lv_ua_aim': {'dir': (.28, 1, -.04)}, 'gun_lv_ua_kick': {'dir': (.28, 1, -.04), 'spin': 22}})
+ANIMS['under_arm'] = _routine(_DRAW + [('gun_draw_hip', 60), ('~', .5, 50), ('gun_lv_ua_aim', 380), ('gun_lv_ua_kick', 70, 'shot'),
+                                       ('gun_lv_ua_aim', 300), ('~', .5, 60), ('gun_draw_hip', 60)] + _HOME)
+
+# ---- duelist: side-on (the stance turned 70 deg, feet in line), the gun raised muzzle-up by the cheek, lowered to arm's
+# length on the target (wrists in his frame), the left fist on the small of the back; a shot, the salute
+_DL_LEFT = ('Left', 'Hips', (.03, .25, .95))
+POSES['gun_lv_dl_up'] = _gpose(70, {'Spine2': [('X', -3)], 'Neck': [('Z', -42), ('X', -4)], 'Head': [('Z', -28)],
+                                    'RightArm': [('Y', -10), ('X', -40)], 'RightForeArm': [('X', -100)]})
+POSES['gun_lv_dl_aim'] = _gpose(70, {'Spine2': [('X', -3)], 'Neck': [('Z', -42)], 'Head': [('Z', -28)],
+                                     'RightArm': [('Y', -42), ('X', -80)], 'RightForeArm': [('X', -4)]})
+POSES['gun_lv_dl_kick'] = _gpose(70, {'Spine2': [('X', -6)], 'Neck': [('Z', -42), ('X', -4)], 'Head': [('Z', -28)],
+                                      'RightArm': [('Y', -42), ('X', -84)], 'RightForeArm': [('X', -8)]})
+LIVE_AT.update({'gun_lv_dl_up': [('Right', None, (-.12, -.3, 1.36)), _DL_LEFT],
+                'gun_lv_dl_aim': [('Right', None, (-.06, -.66, 1.3)), _DL_LEFT],
+                'gun_lv_dl_kick': [('Right', None, (-.06, -.63, 1.35)), _DL_LEFT]})
+LIVE_GUN.update({'gun_lv_dl_up': {'dir': (0, -.12, 1), 'up': (0, 1, 0)}, 'gun_lv_dl_aim': {'dir': (0, -1, .02)},
+                 'gun_lv_dl_kick': {'dir': (0, -1, .02), 'spin': 22}})
+ANIMS['duelist'] = _routine(_DRAW + [('~', .5, 60), ('gun_lv_dl_up', 600), ('~', .5, 50),
+                                     ('gun_lv_dl_aim', 380), ('gun_lv_dl_kick', 70, 'shot'), ('gun_lv_dl_aim', 420),
+                                     ('~', .5, 60), ('gun_lv_dl_up', 500), ('~', .5, 60), ('gun_draw_hip', 60)] + _HOME)
+
+# ---- kneel: down on the right knee, two-handed (the left hand cupping the gun hand), two shots, up again
+POSES['gun_lv_kn_down'] = _gpose(16, _arm(x=-30, fx=-60, sz=0), {'Spine': [('X', 10)]},
+                                 legs={k: [(a, d * .55) for a, d in v] for k, v in _KNEEL.items()})
+POSES['gun_lv_kn_aim'] = _gpose(-10, _AIM_ARM, _larm(x=-62, z=-30, fx=-30), {'Spine': [('X', 4)]}, legs=_KNEEL)
+POSES['gun_lv_kn_kick'] = _gpose(-10, _arm(x=-78, fx=-8, sz=-8), _larm(x=-66, z=-30, fx=-30), {'Spine': [('X', 2)], 'Spine2': [('X', -4)]},
+                                 legs=_KNEEL)
+LIVE_AT.update({'gun_lv_kn_aim': [('Right', None, (-.09, -.47, 1.21))], 'gun_lv_kn_kick': [('Right', None, (-.09, -.45, 1.25))]})
+LIVE_GUN.update({'gun_lv_kn_aim': {'dir': (0, -1, 0)}, 'gun_lv_kn_kick': {'dir': (0, -1, 0), 'spin': 20}})
+LIVE_LEFT.update({'gun_lv_kn_aim': (-.04, -.09, -.03), 'gun_lv_kn_kick': (-.04, -.09, -.03)})
+ANIMS['kneel'] = _routine(_DRAW + [('gun_draw_hip', 50), ('gun_lv_kn_down', 60), ('~', .5, 50), ('gun_lv_kn_aim', 360),
+                                   ('gun_lv_kn_kick', 70, 'shot'), ('gun_lv_kn_aim', 380), ('gun_lv_kn_kick', 70, 'shot2'),
+                                   ('gun_lv_kn_aim', 300), ('gun_lv_kn_down', 90), ('gun_draw_hip', 80)] + _HOME)
+
+# ---- road_agent: drawn slowly, offered butt-first (hanging upside down off the trigger finger: spin 180), the left palm
+# up ("easy now"), the head down; then rolled forward over the finger into the hand (270: muzzle down, 360: on him), a shot
+_RA_LEFT = {'LeftShoulder': [('Z', 4)], 'LeftArm': [('Y', -6), ('X', -30)], 'LeftForeArm': [('X', -80)], 'LeftHand': [('X', 20)]}
+POSES['gun_lv_ra_offer'] = _gpose(10, _arm(y=-40, x=-56, fx=-24, sz=-4), _RA_LEFT, {'Neck': [('Z', -6), ('X', 10)], 'Head': [('X', 6)]})
+POSES['gun_lv_ra_flip'] = _gpose(16, _arm(y=-42, x=-64, fx=-14, sz=-6), _RA_LEFT, {'Neck': [('Z', -9), ('X', 2)]})
+GUN_SPIN.update({'gun_lv_ra_offer': 180, 'gun_lv_ra_flip': 270})
+ANIMS['road_agent'] = _routine([('idle_in', 90), ('gdraw_grab', 120, 'draw'), ('~', .5, 90), ('gun_draw_lift', 90),
+                                ('~', .5, 90), ('gun_lv_ra_offer', 700), ('gun_lv_ra_flip', 40), ('~', .5, 30),
+                                ('gun_aim', 70), ('gun_recoil_a', 60, 'shot'), ('gun_recoil_b', 60), ('gun_aim', 300),
+                                ('~', .5, 60)] + _HOME)
+
+# ---- toss: the revolver flipped up end over end off the hand (free in the air: LIVE_GUN air), the head following it,
+# caught at chest height; a shot
+_TOSS = {'RightArm': [('Y', -40), ('X', -46)], 'RightForeArm': [('X', -40)], 'Neck': [('X', -10)], 'Head': [('X', -8)]}
+POSES['gun_lv_toss_up'] = _gpose(6, _arm(y=-40, x=-40, fx=-50, sz=-4))
+POSES['gun_lv_toss_a'] = _gpose(6, _TOSS)
+POSES['gun_lv_toss_b'] = _gpose(6, _TOSS, {'Neck': [('X', -16)], 'Head': [('X', -12)]})
+POSES['gun_lv_toss_c'] = _gpose(6, _TOSS)
+POSES['gun_lv_toss_catch'] = _gpose(10, _arm(y=-40, x=-58, fx=-30, sz=-4))
+LIVE_GUN.update({'gun_lv_toss_up': {'spin': 50}, 'gun_lv_toss_a': {'air': (-.22, -.44, 1.5), 'dir': (0, -1, 0), 'spin': 150},
+                 'gun_lv_toss_b': {'air': (-.21, -.43, 1.82), 'dir': (0, -1, 0), 'spin': 260},
+                 'gun_lv_toss_c': {'air': (-.2, -.42, 1.5), 'dir': (0, -1, 0), 'spin': 350}, 'gun_lv_toss_catch': {}})
+ANIMS['toss'] = _routine(_DRAW + [('gun_draw_hip', 60), ('gun_lv_toss_up', 60), ('gun_lv_toss_a', 60), ('gun_lv_toss_b', 80),
+                                  ('gun_lv_toss_c', 60), ('gun_lv_toss_catch', 90), ('gun_aim', 90), ('gun_recoil_a', 60, 'shot'),
+                                  ('gun_recoil_b', 60), ('gun_aim', 260), ('~', .5, 60)] + _HOME)
+
+# ---- border_shift: the revolver tossed across in front of the chest into the LEFT hand, the stance turned the other way
+# (left shoulder leading), a left-handed shot, tossed back, home
+_L_AIM = {'LeftShoulder': [('Z', 6)], 'LeftArm': [('Y', 42), ('X', -72)], 'LeftForeArm': [('X', -4)]}
+POSES['gun_lv_bs_pass'] = _gpose(0, _arm(y=-42, x=-40, fx=-60, sz=-2, z=20),
+                                 {'LeftArm': [('Y', 40), ('X', -40), ('Z', -20)], 'LeftForeArm': [('X', -60)]})
+POSES['gun_lv_bs_left'] = _gpose(-25, _L_AIM, _RIGHT_LOOSE, legs=mirrored(_GLEGS))
+POSES['gun_lv_bs_kick'] = _gpose(-25, {'LeftShoulder': [('Z', 10)], 'LeftArm': [('Y', 42), ('X', -77)], 'LeftForeArm': [('X', -8)]},
+                                 _RIGHT_LOOSE, {'Spine2': [('X', -6)]}, legs=mirrored(_GLEGS))
+LIVE_GUN.update({'gun_lv_bs_pass': {'air': (0, -.4, 1.18), 'dir': (0, -1, 0), 'spin': 0},
+                 'gun_lv_bs_left': {'hand': 'Left'}, 'gun_lv_bs_kick': {'hand': 'Left', 'spin': 26}})
+ANIMS['border_shift'] = _routine(_DRAW + [('gun_draw_hip', 60), ('gun_lv_bs_pass', 70), ('~', .5, 50), ('gun_lv_bs_left', 330),
+                                          ('gun_lv_bs_kick', 70, 'shot'), ('gun_lv_bs_left', 330), ('~', .5, 50),
+                                          ('gun_lv_bs_pass', 70), ('gun_draw_hip', 70)] + _HOME)
+
+# ---- pistol_whip: the gun raised high to the right (the chest turned away), brought down across the body in a lunge
+# (mark hit), the follow-through low to the left; back to the hip
+_PW_GUARD = {'LeftShoulder': [('Z', -4)], 'LeftArm': [('Y', 30), ('X', -50)], 'LeftForeArm': [('X', -50)]}
+POSES['gun_lv_pw_wind'] = _gpose(-25, {'RightShoulder': [('Z', -6), ('Y', 14)], 'RightArm': [('Y', 60), ('X', -10)],
+                                       'RightForeArm': [('X', -100)], 'Spine': [('X', -4)]}, _PW_GUARD)
+POSES['gun_lv_pw_hit'] = _gpose(22, {'Spine': [('X', 12)], 'RightArm': [('Y', -10), ('X', -80)], 'RightForeArm': [('X', -20)]},
+                                _PW_GUARD, legs=_LUNGE)
+POSES['gun_lv_pw_follow'] = _gpose(36, {'Spine': [('X', 18)], 'RightArm': [('Y', -40), ('X', -30), ('Z', 50)], 'RightForeArm': [('X', -30)],
+                                        'LeftArm': [('Y', 40), ('X', 10)], 'LeftForeArm': [('X', -30)]}, legs=_LUNGE)
+LIVE_AT.update({'gun_lv_pw_wind': [('Right', None, (-.27, .07, 1.62))], 'gun_lv_pw_hit': [('Right', None, (-.03, -.56, 1.3))],
+                'gun_lv_pw_follow': [('Right', None, (.2, -.36, .86))]})
+LIVE_GUN.update({'gun_lv_pw_wind': {'dir': (-.12, .4, 1)}, 'gun_lv_pw_hit': {'dir': (.15, -.55, -.8)},
+                 'gun_lv_pw_follow': {'dir': (.55, -.2, -.85)}})
+ANIMS['pistol_whip'] = _routine(_DRAW + [('gun_draw_hip', 60), ('~', .5, 60), ('gun_lv_pw_wind', 240), ('~', .5, 30),
+                                         ('gun_lv_pw_hit', 50, 'hit'), ('~', .5, 40), ('gun_lv_pw_follow', 200), ('~', .5, 90),
+                                         ('gun_draw_hip', 90)] + _HOME)
+
+# ---- sky_shot: the gun straight up beside the hat brim, the left fist on the hip, two shots into the air
+POSES['gun_lv_sky'] = _gpose(10, {'RightShoulder': [('Z', -14)], 'RightArm': [('Y', 80), ('X', -20)], 'RightForeArm': [('X', -10)],
+                                  'Neck': [('X', -6)], **_HAND_ON_HIP})
+POSES['gun_lv_sky_kick'] = _gpose(10, {'RightShoulder': [('Z', -14)], 'RightArm': [('Y', 80), ('X', -20)], 'RightForeArm': [('X', -10)],
+                                       'Neck': [('X', -10)], **_HAND_ON_HIP})
+LIVE_AT.update({'gun_lv_sky': [('Right', None, (-.36, -.1, 1.66)), _HIPS_L], 'gun_lv_sky_kick': [('Right', None, (-.36, -.07, 1.69)), _HIPS_L]})
+LIVE_GUN.update({'gun_lv_sky': {'dir': (-.18, -.12, 1), 'up': (0, 1, 0)}, 'gun_lv_sky_kick': {'dir': (-.18, -.12, 1), 'up': (0, 1, 0), 'spin': 20}})
+ANIMS['sky_shot'] = _routine(_DRAW + [('gun_draw_hip', 60), ('~', .5, 60), ('gun_lv_sky', 300), ('gun_lv_sky_kick', 70, 'shot'),
+                                      ('gun_lv_sky', 320), ('gun_lv_sky_kick', 70, 'shot2'), ('gun_lv_sky', 300), ('~', .5, 70),
+                                      ('gun_draw_hip', 70)] + _HOME)
+
+# ---- point_blank: a step in, leaning over a foe on the ground, the gun pointed down at him; a shot
+POSES['gun_lv_pb_aim'] = _gpose(16, _arm(y=-42, x=-40, fx=-6, sz=-4), {'Spine': [('X', 16)], 'Spine1': [('X', 6)], 'Neck': [('X', -8)],
+                                                                         'Head': [('X', 14)]}, legs=_LUNGE)
+POSES['gun_lv_pb_kick'] = _gpose(16, _arm(y=-42, x=-50, fx=-10, sz=-6), {'Spine': [('X', 13)], 'Spine1': [('X', 6)], 'Neck': [('X', -8)],
+                                                                          'Head': [('X', 12)]}, legs=_LUNGE)
+LIVE_GUN.update({'gun_lv_pb_aim': {'dir': (0, -.7, -1)}, 'gun_lv_pb_kick': {'dir': (0, -.7, -1), 'spin': 22}})
+ANIMS['point_blank'] = _routine(_DRAW + [('gun_draw_hip', 60), ('~', .5, 70), ('gun_lv_pb_aim', 480), ('gun_lv_pb_kick', 70, 'shot'),
+                                         ('gun_lv_pb_aim', 500), ('~', .5, 80), ('gun_draw_hip', 70)] + _HOME)
+
+# ---- turn_shot: turned by _post on the hips (the specs' world-axis rotations stay as built facing forward), drawing on the
+# turn: the grab at 70 deg, the gun out at the hip at 130, the aim at 180 (a shot), back round with the twirl
+_turned = lambda key, deg, **kw: {**POSES[key], **kw, '_post': [('Hips', deg)] + POSES[key].get('_post', [])}
+POSES['lv_ts_grab'] = _turned('gdraw_grab', -70)
+REACH['lv_ts_grab'] = REACH['gdraw_grab']
+POSES['gun_lv_ts_hip'] = _turned('gun_draw_hip', -130)
+POSES['gun_lv_ts_aim'] = _turned('gun_aim', -180)
+POSES['gun_lv_ts_kick'] = _turned('gun_recoil_a', -180)
+POSES['gun_lv_ts_back'] = _turned('gun_spin_1', -90)
+GUN_SPIN.update({'gun_lv_ts_kick': GUN_SPIN['gun_recoil_a'], 'gun_lv_ts_back': GUN_SPIN['gun_spin_1']})
+ANIMS['turn_shot'] = _routine([('idle_in', 90), ('~', .5, 50), ('lv_ts_grab', 50, 'draw'), ('~', .5, 40), ('gun_lv_ts_hip', 40),
+                               ('~', .5, 40), ('gun_lv_ts_aim', 60), ('gun_lv_ts_kick', 60, 'shot'), ('gun_lv_ts_aim', 380),
+                               ('~', .5, 60), ('gun_lv_ts_back', 60)] + _HOME[2:])
+
+# ---- the COMBAT versions, rendered into the gunslinger's atlas (the sim plays them: sim/player/gun.js; the routines above
+# are the live demos). gun_turnshot: a draw at a target behind him while he stands: from the ready idle (the sim starts at
+# frame 1, mid-turn), the spin over the right shoulder, the shot at the end of it (mark shot), ending on the aim turned
+# 180 deg, i.e. gun_aim at the opposite facing, where the sim turns his facing round and the gun's ready state takes
+# over. gun_whip: the pistol whip from the aim (V; the empty cylinder's click with a foe in reach): the wind-up, the blow
+# (mark hit: the sim's melee lands), the follow-through, back to the aim.
+ANIMS['gun_turnshot'] = _routine([('idle_in', 40), ('~', .5, 40), ('lv_ts_grab', 40, 'grab'), ('~', .5, 35), ('gun_lv_ts_hip', 35),
+                                  ('~', .5, 35), ('gun_lv_ts_aim', 50), ('gun_lv_ts_kick', 60, 'shot'), ('~', .5, 50),
+                                  ('gun_lv_ts_aim', 60)])
+ANIMS['gun_whip'] = _routine([('gun_aim', 40), ('~', .5, 40), ('gun_lv_pw_wind', 70), ('~', .5, 30), ('gun_lv_pw_hit', 50, 'hit'),
+                              ('~', .5, 50), ('gun_lv_pw_follow', 90), ('~', .5, 60), ('gun_aim', 70)])
