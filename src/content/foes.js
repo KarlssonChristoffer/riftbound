@@ -8,7 +8,8 @@
 //     range     [near, far] m: inside `near` it backs off, past `far` it closes in; `keep` m is where it strafes. The view
 //               shows ~5.4 m of ground above and below you at zoom 1 (more across): ranges stay on screen mostly; a gun
 //               held on you from off screen gets an arrow at the screen's edge (features/foes/look.js)
-//     gun       sound: the forge's revolver case its shots use (peacemaker | navy); rounds (the cylinder, the shells);
+//     gun       sound: what its gun sounds like (peacemaker: the forge's revolver recipe; coach: the coach gun's own recipe,
+//               audio/forge/recipes/coachgun.js; src/audio/audio.js picks by it); rounds (the cylinder, the shells);
 //               draw (s from the holster), aim (s the gun is held on you before each shot: the TELEGRAPH), lock (the
 //               last s of it: the aim freezes and the barrel glints: roll or step out of the line), recover (s of the
 //               kick), gap [lo, hi] s between shots, holster (s)
@@ -39,7 +40,7 @@ export const TYPES = {
     flinch: 0, coins: [7, 10], weight: 1, max: 1},
   bruiser: {name: 'Bruiser', atlas: 'bruiser', hp: 85, r: .33, hitR: .44, hitH: 1.8, foot: 6,
     speed: {walk: 1.4, back: 1.1, run: 3.0}, range: [2, 4.5], keep: 3.2,
-    gun: {sound: 'navy', rounds: 2, draw: .4, aim: .62, lock: .22, recover: .4, gap: [.25, .4], holster: .48,
+    gun: {sound: 'coach', rounds: 2, draw: .4, aim: .62, lock: .22, recover: .4, gap: [.25, .4], holster: .48,
       bullet: {speed: 38, dmg: 5, spread: 16, pellets: 6, range: 12, lead: 0},
       reload: {up: .3, eject: .45, round: .65, close: .35}},
     flinch: .18, coins: [3, 6], weight: 2, max: 2},

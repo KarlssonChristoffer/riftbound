@@ -246,7 +246,7 @@ export async function create(host) {
       const g = gun();
       for (const e of evs) {
         if (e.type === 'foe.shoot') {   // a gunman's shot: the flash at its muzzle along the shot, grains, the smoke
-          const navy = e.gun === 'navy', Q = OF[ofI]; ofI = (ofI + 1) % OF.length;
+          const navy = e.gun === 'coach' || e.gun === 'navy', Q = OF[ofI]; ofI = (ofI + 1) % OF.length;   // (coach: the bruiser's coach gun, the big flash)
           Q.t = TUNE.flash.life; Q.v = (R() * 3) | 0; Q.k = navy ? TUNE.flash.navy * 1.15 : 1; Q.x = e.x; Q.y = e.y; Q.h = e.h;
           view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h); Q.a = Math.atan2(SC[1] - y0, SC[0] - x0);
           OLIGHT.x = e.x; OLIGHT.y = e.y; OLIGHT.h = e.h; OFL.t = TUNE.flash.life; OFL.k = Q.k;
@@ -281,7 +281,7 @@ export async function create(host) {
           T.x0 = e.x0 ?? e.x; T.y0 = e.y0 ?? e.y; T.h0 = e.h0 ?? e.h; T.x1 = e.x; T.y1 = e.y; T.h1 = e.h; T.t = 0;
           impact(e);
         } else if (e.type === 'combat.hit') {   // your bullet on a body: the hit marker (crit, kill)
-          const p = e.who; if (e.by === 'bullet' && p && (p.target || p.hunter || p.sparring)) HM.hit(e.kill ? 2 : e.crit ? 1 : 0);
+          const p = e.who; if (e.by === 'bullet' && p && (p.target || p.hunter || p.sparring)) HM.hit(e.broke ? 2 : e.crit ? 1 : 0);
         } else if ((e.type === 'player.reload' || e.type === 'foe.reload') && e.phase === 'eject' && e.n > 0) {
           for (let i = 0; i < e.n; i++) {
             const k = cI; cI = (cI + 1) % CM; if (cN < CM) cN++;

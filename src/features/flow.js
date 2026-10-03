@@ -676,7 +676,7 @@ export async function create(host) {
       } else if (e.type === 'player.splash' && !e.small && P.state === 'splash') { splashT = simT; wetFrom = -99; }   // HIS splash
       else if (e.type === 'combat.explode') scorch(e.x, e.y, e.r || 2);
       else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
-      else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, e.kill || e.crit ? K.hitKickBig : K.hitKick);
+      else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, e.broke || e.crit ? K.hitKickBig : K.hitKick);
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }

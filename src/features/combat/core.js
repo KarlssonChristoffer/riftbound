@@ -164,9 +164,10 @@ export function createCore(host) {
       if (o.by === 'bullet') { hitstop(broke ? T.hsShotKill : crit ? T.hsShotCrit : T.hsShot); shake(T.shakeShot + (broke || crit ? 1 : 0), broke ? .14 : crit ? .11 : .09); }
       else { hitstop(broke ? T.hsBreak : crit ? T.hsCrit : T.hsHit); shake(broke ? 2 : crit ? 2 : 1, broke ? .14 : crit ? .1 : .07); }
     }
-    // a hit through the arrow chain (o.by: arrow | bullet | impact): where it met the body, its way, crit, kill (views:
-    // the hit marker, blood, the camera's kick)
-    if (o.by) events.push({type: 'combat.hit', x: o.hx ?? p.x, y: o.hy ?? p.y, h: o.hh ?? base + hgt * .6, dx: o.ux ?? 0, dy: o.uy ?? 0, who: p, dmg, crit, kill: broke, by: o.by});
+    // every damage (audio: the hit's sound); a hit through the arrow chain (o.by: arrow | bullet | impact) also says where
+    // the shot met it and its way (views: the hit marker, blood, the camera's kick)
+    events.push({type: 'combat.hit', x: p.x, y: p.y, h: base + hgt * .6, who: p, kind: p.kind, dmg, crit, broke, quiet: !!o.quiet,
+      by: o.by, hx: o.hx ?? p.x, hy: o.hy ?? p.y, hh: o.hh ?? base + hgt * .6, dx: o.ux ?? 0, dy: o.uy ?? 0});
     return broke;
   }
   function breakProp(p, o = {}) {
