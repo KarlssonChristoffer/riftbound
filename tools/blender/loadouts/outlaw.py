@@ -6,4 +6,4 @@ exec(open(r'D:\Game\tools\blender\wardrobe.py', encoding='utf-8').read())
 exec(open(r'tools/blender/western.py', encoding='utf-8').read())
 SPUR_SIZE = 1.8
 LOADOUT = ['linen_shirt', 'charro_trousers', 'cowboy_boots', 'bandana', 'serape_poncho', 'bandolier', 'gun_belt',
-           'brass_navy', 'hair_mop', 'sombrero']
+           'brass_navy', 'hair_mop', 'sombrero', 'lasso_coil']
