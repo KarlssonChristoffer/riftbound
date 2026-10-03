@@ -4,7 +4,8 @@
 // flickering and wandering a few cm) with their halos (a feature light with halo: false has none). Writes the composite's
 // uniforms (gfx.js compU); nothing else.
 // OWNS: the light records (reused frame to frame). READS: host.env / biome / world / player / P / zoom / VH, features'
-//   lights(), opt.lantern. BUDGET: ~0.05 ms (part of view).
+//   lights(), opt.lantern, host.mods 'light.lantern' / 'light.lanternR' (a run rule lights the lantern: features/omens.js,
+//   an eclipse). BUDGET: ~0.05 ms (part of view).
 //   const lighting = createLighting({G, host, features, opt}); lighting.apply(PX, PY, t) once per frame before G.render
 import * as THREE from 'three';
 import {DEG} from './gfx.js';
@@ -32,6 +33,10 @@ export function createLighting({G, host, features, opt}) {
   let nL = 0;
   const colOf = c => { if (Array.isArray(c)) return c; let v = colCache.get(c); if (!v) colCache.set(c, v = rgbOf(c)); return v; };
   const ONE3 = [1, 1, 1], SV3 = [0, 0, 0];
+  // the lantern by a run rule (features/omens.js, an eclipse): 'light.lantern' > 0 lights it whatever the switch says,
+  // 'light.lanternR' scales its reach; read when the notes change
+  let lanternMod = 0, lanternR = 1;
+  if (host.mods) { const f = () => { lanternMod = host.mods.value('light.lantern', 0); lanternR = host.mods.value('light.lanternR', 1); }; host.mods.watch(f); f(); }
   function putL(x, y, z, c, r, gain, flat, halo = true) { const o = LOUT[nL] ??= {}; nL++; o.x = x; o.y = y; o.z = z; o.c = c; o.r = r; o.gain = gain; o.flat = flat; o.halo = halo; }
   function apply(PX, PY, t) {
     const env = host.env, world = host.world, P = host.P, player = host.player, VH = host.VH, zoom = host.zoom, PPM = host.PPM;
@@ -54,9 +59,9 @@ export function createLighting({G, host, features, opt}) {
     // (every record is reused frame to frame: LOUT goes to the shader, CAND holds the candidates, FREC copies features' lights)
     nL = 0;
     if (m.lift[0] + m.lift[1] + m.lift[2] > 0) putL(PX, P.z + .9, PY, m.lift, 1.7, 1, true);
-    if (opt.lantern) {
+    if (opt.lantern || lanternMod > 0) {
       const a = player.faceAngle, fx = Math.sin(a), fy = Math.cos(a), fk2 = flick(LANTERN, t);
-      putL(PX + fx * LANTERN.fwd - fy * LANTERN.side, P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side, LANTERN.c, LANTERN.r * (1 + (fk2 - 1) * .15), fk2, false);
+      putL(PX + fx * LANTERN.fwd - fy * LANTERN.side, P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side, LANTERN.c, LANTERN.r * lanternR * (1 + (fk2 - 1) * .15), fk2, false);
     }
     let nc = 0, nf = 0;
     const cand = l => { const d = hypot2(l.x - PX, l.z - PY); if (d < 24 + l.r) { const w = CW[nc] ??= {l: null, d: 0}; w.l = l; w.d = d; CAND[nc++] = w; } };

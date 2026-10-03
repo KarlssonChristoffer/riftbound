@@ -37,7 +37,7 @@ export async function createGame(host) {
 
   let boot = null, mode = 'boot', phase = '', phaseT = 0, run = null, portal = null, deadT = 0, rollT = 0, wasRoll = false, shotN = 0, goldSeen = 0, goldFrac = 0;
   const bleeds = [];
-  const director = createDirector({core, nav, rng,
+  const director = createDirector({core, nav, rng, mods: host.mods,
     onWaveClear(w, n) {
       if (stats.S.waveHeal) { const h = stats.heal(stats.S.maxHp * stats.S.waveHeal); if (h >= 1) hud.float(P.x, P.y, P.z + 2, '+' + Math.round(h), '#9af07a'); }
       if (w < n) hud.banner(`Wave ${w} cleared`, '', 1.6, '#e8e2d2');
@@ -190,11 +190,24 @@ export async function createGame(host) {
     }
   }
 
+  // ---------------------------------------------------------------- rewards: what a feature may give or take (features/shrines.js)
+  // through the game's own rules: gold paid the chest's way, gold handed over counted in the run's, items for this weapon
+  // into the build (with the chest's toast), a seed drawn from the run's generator for a feature's own
+  const tierCol = it => it.tier === 3 ? '#e8604a' : it.tier === 2 ? '#7ad07a' : '#f4efe4';
+  const rewards = {
+    seed: () => 1 + Math.floor(rng() * 2147483645),
+    spend(n) { if (core.gold < n) return false; core.addGold(-n); goldSeen -= n; return true; },
+    addGold(n) { core.addGold(n); goldSeen += n; if (run) run.gold += n; },
+    rollItem: (R, luck = (run?.stage || 0) * .25) => rollItem(R, luck, host.weapon?.kind ?? 'bow'),
+    giveItem(it, x, y, h = 1.4) { stats.addItem(it); hud.toast(it.name, it.desc, tierCol(it)); hud.float(x, y, h, it.name, '#f2d27a', true); },
+    takeItem: id => stats.removeItem(id),
+  };
+
   // ---------------------------------------------------------------- the feature
   const F = {
     name: 'game', label: 'Game', always: true,
     get mode() { return mode; }, get phase() { return phase; }, get run() { return run; }, stats, nav, director, ui: hud, screens, save,   // (F.hud is the dev HUD's line)
-    startRun, toTitle, toSandbox, enterStage,
+    startRun, toTitle, toSandbox, enterStage, rewards,
 
     update(dt, evs) {
       if (boot) { const f = boot; boot = null; f(); }   // the first step: title / sandbox / run (the world is built)

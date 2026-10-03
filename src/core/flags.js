@@ -16,6 +16,8 @@ export const FLAG_DOCS = {
   world:     'big: the grown world, 162 x 90 m round the Proving Grounds (layout.js WORLD; the world plan: open land in step 3)',
   yaw:       'the camera\'s starting yaw (deg)',
   zoom:      '2: start zoomed in',
+  omens:     '1: stage omens in a run (features/omens.js: the weather, wind and light turned into a stage\'s rules); 0: off (the Dev toggle remembers it)',
+  omen:      'storm | gale | bloodmoon | riftfog | eclipse | golden: that omen on every run stage (and in the sandbox from the start)',
   // ---- the player
   set:       'basic | sim | body | gunslinger | outlaw: the loadout (baked cloak / runtime cloth / bare body; the cowboys with their revolvers)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
@@ -41,8 +43,11 @@ export const FLAG_DOCS = {
   smoke: 'pixel | hybrid | strands | soft: the gun smoke\'s look (features/gunfx/smoke.js; Shift+V cycles it in dev mode)',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
   gunsfx: 'hollywood | gritty: the gun sounds\' western-movie flavor (audio/runtime/events.js GUN_SFX; menu > Audio > Gun sounds, remembered)',
+  equip: '1 | a gadget id (flask, dynamite, beartrap, scarecrow, smoke, grapple): the equipment experiment on (features/equip.js: a gadget on F), with that one in the slot; 0 forces it off',
+  affixes: '1: elite affixes on (features/affixes.js: Blazing, Glacial, Overloaded, Splitting, Warded, Vampiric); 0: off; menu > Dev > Features remembers it',
   battlemusic: '1: the premade Six Chambers songs follow the fight (features/battlemusic.js); off by default: the procedural score plays',
   bmforce: 'state[:song[:x]]: dev, pin the battle music (dev/bmusic.js), e.g. boss:iron:.25 (x = the champion health) or battle:dust:.8 (x = intensity)',
+  shrines: '1 | 0: shrines and mini-events in a run (features/shrines.js, an experiment; off by default; the Dev tab toggle remembers it)',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
   lineup: 'trees: the procedural trees side by side for review',

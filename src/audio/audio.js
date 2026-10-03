@@ -1021,6 +1021,18 @@ export function createAudio(ctx, host = {}) {
         case 'wildlife.frog_jump': fire('plop', e.x, e.y, {surf, frog: 1}); break;
         case 'wildlife.critter_dash': fire('rustle', e.x, e.y, {surf}); break;
         case 'tumbleweed.bounce': fire('rustle', e.x, e.y, {surf, g: .35 + .45 * (e.k || 0), gainDb: -6 + 4 * (e.k || 0), semi: -3}); break;   // dry twigs on the ground
+        // the equipment experiment (features/equip/sim.js): its gadgets on the closest recipes there are
+        case 'equip.throw': fire('jump', e.x, e.y, {surf, g: .6}); break;   // (a cloth swish: the arm swinging)
+        case 'equip.bounce': fire('hit', e.x, e.y, {mat: e.gadget === 'beartrap' || e.gadget === 'grapple' ? 'clay' : e.gadget === 'scarecrow' ? 'straw' : 'wood', g: clamp((e.speed || 3) / 7, .3, 1)}); break;
+        case 'equip.land': fire(e.gadget === 'beartrap' ? 'trapSet' : e.gadget === 'scarecrow' ? 'propDrop' : 'kick', e.x, e.y, {mat: 'wood', surf}); break;
+        case 'equip.shatter': fire('brk', e.x, e.y, {kind: 'pot'}); fire('hit', e.x, e.y, {mat: 'glass'}); break;
+        case 'equip.puff': fire('respawn', e.x, e.y, {g: 1.6}); break;   // (a soft poof)
+        case 'equip.fizzle': fire('splash', e.x, e.y, {surf, small: true}); break;
+        case 'equip.snap': fire('trap', e.x, e.y); break;
+        case 'equip.hit': fire('hit', e.x, e.y, {mat: 'straw'}); break;
+        case 'equip.break': fire('brk', e.x, e.y, {kind: e.gadget === 'scarecrow' ? 'dummy' : 'pot'}); break;
+        case 'equip.latch': fire('stuck', e.x, e.y, {surf: e.who ? surf : 'stone'}); break;
+        case 'equip.pick': fire(e.bought ? 'open' : 'loot', e.x, e.y, {n: 2}); break;
       }
     }
     // ---- arrows: shots (new ones, grouped by ability) and thuds (newly stuck) ----

@@ -125,7 +125,7 @@ const toView = cv.toView, toWorld = cv.toWorld;   // world <-> the camera's view
 // ---------------------------------------------------------------- the player
 const keys = new Set(), mouse = {x: cv.VW / 2, y: cv.VH / 2, down: false}, cam = {x: 0, y: 0, fx: 0, fy: 0};
 // arrows, hit pops, footstep dust (sim/projectiles.js)
-const proj = createProjectiles({world: () => stage.world, ents: () => stage.ents, features, events, opt: () => opt, toWorld, PPM, PPMH});
+const proj = createProjectiles({world: () => stage.world, ents: () => stage.ents, features, events, opt: () => opt, toWorld, PPM, PPMH, mods});
 const {arrows, dust} = proj, spawnArrow = proj.spawn;
 const feat = name => { for (const f of features) if (f.name === name) return f; return null; };   // (no closure a call: host.wind is read in hot loops)
 const hero = createHero({G, set, loadI, ctxO, app});

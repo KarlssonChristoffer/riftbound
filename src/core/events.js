@@ -25,8 +25,8 @@ export const EVENTS = {
   'player.dryfire':     ['sim/player/gun.js',     'x, y, z, gun (the hammer falls on an empty chamber)', 'audio'],
   'player.reload':      ['sim/player/gun.js',     'x, y, z, gun, phase (start | eject | round | done), n (spent cases on eject, rounds in after)', 'gunfx (cases), audio'],
   'player.holster':     ['sim/player/gun.js',     'x, y, z, gun (the twirl ends in the holster)', 'audio'],
-  'player.hit':         ['features/combat/core.js, features/foes/sim.js', 'x, y, vx, vy, player: true (a brute landed on him; a gunman\'s bullet hit him)', 'atmos, wildlife, audio, music'],
-  'player.hurt':        ['features/combat/core.js, features/foes/sim.js', 'dmg, by (the brute | \'blast\' | the gunman), x, y', 'game, battlemusic'],
+  'player.hit':         ['features/combat/core.js, features/foes/sim.js, sim/hazards.js', 'x, y, vx, vy, player: true (a brute landed on him; a gunman\'s bullet hit him; a hazard went off on him)', 'atmos, wildlife, audio, music'],
+  'player.hurt':        ['features/combat/core.js, features/foes/sim.js, sim/hazards.js', 'dmg, by (the brute | \'blast\' | the gunman | the enemy a hazard or a drain is from), x, y', 'game, battlemusic, affixes (an affix\'s blow: Glacial chills, Vampiric heals)'],
   // the desert sandbox's stakes (game/game.js, while features/foes.js says a fight is on)
   'player.down':        ['game/game.js',          'x, y (your health ran out in the desert sandbox: the gang stops shooting)', 'foes'],
   'player.respawn':     ['game/game.js',          'x, y (up again at the fort: the gunmen are gone, the next gang comes later)', 'foes'],
@@ -55,6 +55,8 @@ export const EVENTS = {
   'foe.clip':           ['features/foes/look.js (a view: nothing in the sim listens)', 'x, y, z, foe, gun, mark (dump | load | close: the reload you see drops the spent shells, seats a shell, snaps shut)', 'audio'],
   'frontier.read':      ['features/frontier.js',  'x, y, what (wanted | sign), name (the poster\'s outlaw, or null)', 'foes (a bounty gang)'],
   'combat.hit':         ['features/combat/core.js', 'x, y, h, who (the target), kind, dmg, crit, broke, quiet (every damage: an enemy, a prop, a dummy); by (arrow | bullet | impact: a hit through the arrow chain, else undefined), hx, hy, hh (where the shot met it; else the target\'s x, y, h), dx, dy (unit: the shot\'s way; 0 without one)', 'audio (a gunman\'s flesh hit, a crit heavier; the player\'s hit-confirm on an enemy), gunfx (the hit marker), flow (the camera kick), blood'],
+  // telegraphed ground zones (sim/hazards.js: features/affixes.js's burning ground, frost novas, lightning strikes)
+  'hazard.burst':       ['sim/hazards.js',        'x, y, z, r, style (fire | frost | strike | blast | ring), col, by, data, src (the kit\'s name): a zone went off', 'its look (view/hazards.js)'],
   'combat.explode':     ['features/combat/core.js', 'x, y, r', 'wind, lights, garden, grass, props, atmos, flow, wildlife, audio, music'],
   'combat.loot':        ['features/combat/core.js', 'x, y, n (coins spilled)', 'wildlife, audio, music'],
   'combat.coin':        ['features/combat/core.js', 'x, y (the player: every 5th coin picked up)', 'audio, music'],
@@ -74,6 +76,26 @@ export const EVENTS = {
   'wildlife.splash':    ['features/wildlife.js',  'x, y, small: true, wl: true', 'atmos, wildlife, audio'],
   'wildlife.bird_perch': ['features/wildlife.js', 'x, y, h, prop, off, big, scared (a bird lands on / leaves a top)', 'wind'],
   'tumbleweed.bounce':  ['features/tumbleweed.js', 'x, y, k (0..1: how hard it came down / was knocked; near the player, on screen)', 'audio'],
+  // the shrines experiment (features/shrines.js, ?shrines=1); its sounds ride on chest.open / combat.coin / combat.loot / combat.trap /
+  // player.dryfire, emitted with it
+  'shrine.use':         ['features/shrines.js',   'x, y, kind (chance | combat | blood | mountain | exchange | trader), what (pay | win | lose | bleed | call | clear | wake | yield | offer | trade | buy | spent), n (gold, health or foes), who (its prop)', 'shrines (its particles)'],
+  // stage omens (features/omens.js: an omen turns the world's weather, wind and light into a stage's rules)
+  'omen.begin':         ['features/omens.js',     'id (content/omens.js), stage (the run\'s stage index, -1 in the sandbox)', '(none yet)'],
+  'omen.end':           ['features/omens.js',     'id', '(none yet)'],
+  'omen.strike':        ['features/omens/storm.js', 'x, y, r (m: what it hurts), h (where the bolt ends: a rod\'s top), rod (what drew it: arrow | lead | a prop kind | \'\')', '(none yet)'],
+  // the equipment experiment (features/equip/sim.js; gadget = a content/gadgets.js id)
+  'equip.throw':        ['features/equip/sim.js', 'x, y, h (the hand), gadget (thrown: F let go)', 'audio'],
+  'equip.bounce':       ['features/equip/sim.js', 'x, y, gadget, speed (m/s: off the ground, a prop, a wall or a body)', 'equip (view), audio'],
+  'equip.land':         ['features/equip/sim.js', 'x, y, gadget (it comes to rest: a trap set, a scarecrow planted, dynamite stopped rolling)', 'equip (view), audio'],
+  'equip.shatter':      ['features/equip/sim.js', 'x, y, z, h (where it broke): the fire flask, a burning pool there', 'equip (view), audio'],
+  'equip.puff':         ['features/equip/sim.js', 'x, y, z, h, r: the smoke bomb pops, a cloud r m round', 'equip (view), audio'],
+  'equip.blast':        ['features/equip/sim.js', 'x, y, z, wet (under water): dynamite goes off (combat.explode follows at once)', 'equip (view)'],
+  'equip.fizzle':       ['features/equip/sim.js', 'x, y, gadget, sunk: it fell in the stream (the flask goes out, a trap sinks, dynamite sinks lit)', 'equip (view), audio'],
+  'equip.snap':         ['features/equip/sim.js', 'x, y, who (a bear trap shuts on an enemy)', 'equip (view), audio'],
+  'equip.hit':          ['features/equip/sim.js', 'x, y, gadget, who (an enemy whacks the scarecrow)', 'equip (view), audio'],
+  'equip.break':        ['features/equip/sim.js', 'x, y, gadget (a scarecrow falls apart; an unsprung trap rusts away)', 'equip (view), audio'],
+  'equip.latch':        ['features/equip/sim.js', 'x, y, h, who, prop (the grappling hook bites: an enemy, a prop, else the ground)', 'equip (view), audio'],
+  'equip.pick':         ['features/equip/sim.js', 'x, y, gadget, bought (you take a gadget: a pickup, or a stage cache for gold)', 'equip (view), audio'],
 };
 
 const warned = new Set();

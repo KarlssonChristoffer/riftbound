@@ -215,6 +215,8 @@ export function createPlayer(H) {
     if (P.moveAim) { P.state = 'draw'; P.recover = .25; } else P.state = 'release';
   }
   function moveBy(dx, dy, air = false) {  // collide per axis; returns the distance actually travelled
+    const w = H.wind ? H.wind() : null;   // a run rule's wind (features/omens.js, a gale; H.wind: the adapter): with it faster, against it slower
+    if (w) { const l = Math.hypot(dx, dy); if (l > 1e-9) { const k = Math.max(.3, 1 + (dx * w[0] + dy * w[1]) / l); dx *= k; dy *= k; } }
     let d = 0;
     if (dx && !H.blocked(P.x + dx, P.y, P.z, air)) { P.x += dx; d += dx * dx; } else P.vx = 0;
     if (dy && !H.blocked(P.x, P.y + dy, P.z, air)) { P.y += dy; d += dy * dy; } else P.vy = 0;

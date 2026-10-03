@@ -43,6 +43,7 @@ export function createCore(host) {
     brutePause: .38, bruteKnock: 11, bruteReach: .95, bruteRespawn: 4, bruteDmg: 10,
     magnet: 4.5, coinDelay: .45,
     propRespawn: 25, chestReset: 30, resetAway: 6,   // the yard restocks itself (s; only while you are > resetAway m off)
+    enemyDmg: 1, enemyPace: 1, enemyCoins: 1,   // a run rule's (features/omens.js, a blood moon): brutes hit x, wait + hop x (< 1 faster), drop coins x
   };
   const AB = {
     rmb: {key: 'RMB', name: 'Multishot', cd: 1.2, desc: '5-arrow fan, 60% damage each', col: '#f2d27a'},
@@ -55,7 +56,7 @@ export function createCore(host) {
   for (const k of SLOTS) Object.assign(AB[k], {t: 0, ready: 0, deny: 0, cast: 0});
   // MODIFIERS (core/modifiers.js, host.mods): items, augments and a run's rules leave notes on these; T / AB.cd are
   // always this file's authored numbers (T0, CD0) with the notes applied, recomputed when the notes change
-  const MOD_T = ['crit', 'critMul', 'msN', 'boomR', 'boomBlast', 'rainN', 'trapRoot', 'propRespawn', 'chestReset'];
+  const MOD_T = ['crit', 'critMul', 'msN', 'boomR', 'boomBlast', 'rainN', 'trapRoot', 'propRespawn', 'chestReset', 'enemyDmg', 'enemyPace', 'enemyCoins'];
   const T0 = {...T}, CD0 = Object.fromEntries(SLOTS.map(k => [k, AB[k].cd]));
   function applyMods() {
     const M = host.mods; if (!M) return;
@@ -98,6 +99,9 @@ export function createCore(host) {
   let simT = 0, lightN = 0, lastDir = [0, 1];
   const S = {gold: 0, goldPop: 0, hud: ''};
   const hs = {end: -9, used: 0};
+  // HIT MODS: other systems' say on one hit (features/omens.js: a fog's close-range crits, an eclipse's light): fn(p, o, M)
+  // with M = {dmg: 1 (x the damage), crit: 0 (+ the crit chance)} to change; damage() asks them all (none: as before)
+  const hitMods = [], HM = {dmg: 1, crit: 0};
 
   // ---------------- helpers ----------------
   const pz = p => p.z || 0;
@@ -144,8 +148,9 @@ export function createCore(host) {
   function damage(p, dmg, o = {}) {
     if (p.broken) return false;
     let crit = false;
-    if (o.canCrit && R() < T.crit) { crit = true; dmg *= T.critMul; }
-    dmg = Math.round(dmg);
+    if (hitMods.length) { HM.dmg = 1; HM.crit = 0; for (let i = 0; i < hitMods.length; i++) hitMods[i](p, o, HM); }
+    if (o.canCrit && R() < T.crit + (hitMods.length ? HM.crit : 0)) { crit = true; dmg *= T.critMul; }
+    dmg = Math.round(hitMods.length ? dmg * HM.dmg : dmg);
     p.wob = 1; p.flash = 1; flashing.add(p);
     number(p, dmg, crit);
     const pal = PAL[p.kind] || PAL[p.breakable] || PAL.stone, hgt = HGT[p.kind] ?? 1, base = pz(p) + (p.h || 0);
@@ -178,7 +183,7 @@ export function createCore(host) {
     if (o.ash) chunks(p.x, p.y, base + .05, 9, PAL.char, {speed: .45, big: 0, up: .25, spreadH: .12});
     else chunks(p.x, p.y, base + hgt * .3, p.kind === 'pot' ? 12 : p.kind === 'crystal' ? 18 : 16, pal, {dir: o.dir, speed: 2.8, big: p.kind === 'pot' ? 1 : 2, spreadH: hgt * .7});
     if (p.kind === 'crystal') for (let i = 0; i < 10; i++) part(p.x, p.y, base + VR(.3, 1.1), VR(-2, 2), VR(-1.5, 1.5), VR(1, 3), VR(.3, .6), SPARK, {emit: true, drag: 3});
-    const c = p.coins ?? COINS[p.kind]; if (c) coinBurst(p.x, p.y, base, Math.round(RR(c[0], c[1] + .99) - .49));
+    const c = p.coins ?? COINS[p.kind]; if (c) coinBurst(p.x, p.y, base, Math.round(Math.round(RR(c[0], c[1] + .99) - .49) * (p.sparring ? T.enemyCoins : 1)));
     if (p.explode) {
       chunks(p.x, p.y, base + .3, 6, PAL.char, {speed: 3, big: 1});
       if (o.delay) pending.push({t: o.delay, fn: () => explode(p.x, p.y, pz(p), p.explode.r, p.explode.dmg, true)});
@@ -299,11 +304,11 @@ export function createCore(host) {
     }
     if (!to) { s.wait = .45; return; }
     if (to.x !== b.x || to.y !== b.y) b.faceW = [to.x - b.x, to.y - b.y];
-    s.hop = {x0: b.x, y0: b.y, x1: to.x, y1: to.y, t: 0, dur: b.hopT ?? T.bruteHopT, H: (to.x === b.x && to.y === b.y ? .8 : 1) * (b.hopH ?? T.bruteHopH)};
+    s.hop = {x0: b.x, y0: b.y, x1: to.x, y1: to.y, t: 0, dur: (b.hopT ?? T.bruteHopT) * T.enemyPace, H: (to.x === b.x && to.y === b.y ? .8 : 1) * (b.hopH ?? T.bruteHopH)};
   }
   function landBrute(b, s) {
     s.hop = null; b.h = 0; b.air = false; s.land = .12; b.squash = 1;
-    s.wait = (b.pause ?? T.brutePause) + R() * .15;
+    s.wait = (b.pause ?? T.brutePause) * T.enemyPace + R() * .15;
     // never end up overlapping the player (the host can't move him out of a collider)
     let sd = Math.hypot(P.x - b.x, (P.y - b.y) * SQ);
     if (sd < .72 && Math.abs(P.z - pz(b)) < 1) {
@@ -317,7 +322,7 @@ export function createCore(host) {
       host.knock(ux * kn, uy * kn);
       shake(3, .18); hitstop(.06); s.wait += .35;
       events.push({type: 'player.hit', x: P.x, y: P.y, vx: ux * 5, vy: uy * 5, player: true});
-      events.push({type: 'player.hurt', dmg: b.dmg ?? T.bruteDmg, by: b, x: P.x, y: P.y});
+      events.push({type: 'player.hurt', dmg: (b.dmg ?? T.bruteDmg) * T.enemyDmg, by: b, x: P.x, y: P.y});
       for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + VR(.6, 1.2), ux * VR(1, 3) + VR(-1, 1), uy * VR(1, 3), VR(0, 2), VR(.15, .3), GOLD, {emit: true, drag: 4});
     } else if (d < 4) shake(1, .06);
     // stomping onto a trap sets it off
@@ -409,10 +414,14 @@ export function createCore(host) {
     get simT() { return simT; },
     get gold() { return S.gold; },
     addGold(n) { S.gold += n; },   // the game's gold rules: a run starts at 0, the gold stat's bonus, a chest's price
+    spill: (x, y, a, n, sp = 1) => coinBurst(x, y, a, n, sp),   // n coins out of something that isn't a prop (a shrine's payout: features/shrines.js)
     get cd() { return Object.fromEntries(SLOTS.map(k => [k, +AB[k].t.toFixed(2)])); },
     dbg: {debris, coins, fx, rings, nums, lts, pending, brands, zones, traps, BS, brutes, hs},
     seed(n) { R.seed(n); },
     damage, breakProp, explode, part, puff,
+    // other systems' hooks: hitMod(fn, on) adds / drops a HIT MOD (above); root(p, sec) (below): an outside effect roots a
+    // brute where it stands (features/omens.js: a lightning strike stuns; features/equip: the bear trap), as a trap does
+    hitMod(fn, on = true) { const i = hitMods.indexOf(fn); if (on && i < 0) hitMods.push(fn); else if (!on && i >= 0) hitMods.splice(i, 1); },
 
     onArrowHit(a, p) {
       const k = .12 * (a.push ?? 1), dir = [a.vx * k, a.vy * k];   // (a bullet's push: it knocks bits like an arrow, not like 150 m/s)
@@ -480,6 +489,15 @@ export function createCore(host) {
       host.world.addItem(b);
       return b;
     },
+    // hold one of the core's brutes where it stands for sec s (the equipment experiment's bear trap: features/equip/sim.js):
+    // a hop ends where it is, a hold it has already is never shortened. -> false if it isn't one of them, or down
+    root(p, sec) {
+      const s = BS.get(p); if (!s || p.broken) return false;
+      s.root = Math.max(s.root, sec); s.hop = null; p.h = 0; p.air = false; p.rooted = true; s.mode = 'aggro';
+      return true;
+    },
+    // an enemy heals (a game effect: features/affixes.js, a Vampiric one's drain and blows): hp up to its max -> how much
+    heal(p, n) { if (p.broken || !(p.hp > 0) || !(n > 0)) return 0; const h = Math.min(p.maxHp - p.hp, Math.round(n)); if (h > 0) p.hp += h; return Math.max(0, h); },
     get enemies() { if (enemyAt !== enemyVer) { enemyList = brutes.filter(b => b.hunter && !b.broken); enemyAt = enemyVer; } return enemyList; },
     clearEnemies() { for (const b of brutes) if (b.hunter && !b.dead) { ents.hide(b); b.broken = true; dead.push(b); } enemyVer++; drop(); },
     // the yard's sparring pair sits out a run (retire true) and comes back after it
