@@ -19,7 +19,8 @@
 //   and wheel move: layer 0, hidden while the windmill is out of view), its painted faces (one G.surface over one atlas)
 //   and bone / lantern cards (G.card), the windmill's motion (view), the speech bubble.
 // READS: host.biome, host.wind.at (the windmill), host.entities (add / remove / hide / near), host.G (view, toScreen).
-// EMITS: nothing.
+// EMITS: frontier.read {what: 'wanted' | 'sign', name: the poster's outlaw or null} as you read one (features/foes: a
+//   wanted poster calls a bounty gang in the desert sandbox).
 // BUDGET: static pieces: no per-frame work (built once, placed per desert world): 5 cluster meshes + 1 face surface +
 //   11 small cards, culled by the camera; F.view ~.015 ms measured (real clock, the windmill in view: one wind sample,
 //   a few lines of spring maths, two setMatrix; nothing when it's out of view); F.lights one preallocated record near
@@ -62,6 +63,7 @@ const LANTERN = {x: 53.97, y: 11.36, h: 2.1};
 // what the posters and the sign say (E)
 const POSTERS = ["WANTED: 'Two-Gun' Calloway | robbed the Tres Piedras stage | $500 reward", 'WANTED: Kid Ybarra, horse thief | $200, brought in alive',
   "Scratched in the wood: | 'water at the windmill, whiskey at the fort'"];
+const WANTED_NAMES = ["'Two-Gun' Calloway", 'Kid Ybarra', null];   // each poster's outlaw (frontier.read), in POSTERS' order
 const SIGN_TEXT = ['RED MESA | the fort west, the mesa and the mine east | the canyon south'];
 // the scatter a piece hides while it stands (soft plants and stones; the unreachable big rocks and trees round the map)
 const SOFT = new Set(['tuft', 'bush', 'rock', 'reed', 'fern', 'rock_big']);
@@ -255,8 +257,12 @@ export async function create(host) {
   F.prompt = p => active && (p === wanted || p === sign) ? 'E  read' : null;
   F.interact = p => {
     if (!active) return false;
-    if (p === wanted) { say(POSTERS[pi++ % POSTERS.length], wanted.x, 2.45, wanted.y); return true; }
-    if (p === sign) { say(SIGN_TEXT[0], sign.x, 2.95, sign.y); return true; }
+    if (p === wanted) {
+      const i = pi++ % POSTERS.length; say(POSTERS[i], wanted.x, 2.45, wanted.y);
+      host.events.push({type: 'frontier.read', what: 'wanted', name: WANTED_NAMES[i], x: wanted.x, y: wanted.y});
+      return true;
+    }
+    if (p === sign) { say(SIGN_TEXT[0], sign.x, 2.95, sign.y); host.events.push({type: 'frontier.read', what: 'sign', name: null, x: sign.x, y: sign.y}); return true; }
     return false;
   };
   F.hd = (q, sc) => {   // the bubble at display resolution over the board / the sign
