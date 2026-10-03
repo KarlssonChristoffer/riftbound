@@ -20,22 +20,24 @@ export const TUNE = {
   crack: .42,      // a close strike's crack peak
   smooth: .6,      // s: the wash follows the rain this fast
 };
-function brown(n) {   // integrated white noise, leaky, normalised to RMS .3: the thunder's body
+function brown(n, r = R) {   // integrated white noise, leaky, normalised to RMS .3: the thunder's body
   const o = new Float32Array(n); let b = 0, s = 0;
-  for (let i = 0; i < n; i++) { b = (b + (R() * 2 - 1) * .02) * .997; o[i] = b; s += b * b; }
+  for (let i = 0; i < n; i++) { b = (b + (r() * 2 - 1) * .02) * .997; o[i] = b; s += b * b; }
   const k = .3 / Math.sqrt(s / n || 1); for (let i = 0; i < n; i++) o[i] *= k;
   return o;
 }
 
-export function createRainAudio(ac, dest) {
+// rnd: the generator for what's made here (the loops' noise, the wash's start points); the grains, drips and thunder keep
+// Math.random. features/audio.js makes it at load with core/rng.js viewRandom (no Math.random draws there)
+export function createRainAudio(ac, dest, rnd = R) {
   const out = ac.createGain(); out.gain.value = 1; out.connect(dest);
   const srcs = [], at = ac.currentTime + .05;
   const biq = (type, f, q) => { const b = ac.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
   const pan = p => { const n = ac.createStereoPanner ? ac.createStereoPanner() : ac.createGain(); if (n.pan) n.pan.value = p; n.connect(out); return n; };
-  const PK = [loopBuf(ac, 3.3, pink), loopBuf(ac, 4.1, pink)], BR = loopBuf(ac, 5.7, brown), BU = burst(ac);
+  const PK = [loopBuf(ac, 3.3, n => pink(n, rnd)), loopBuf(ac, 4.1, n => pink(n, rnd))], BR = loopBuf(ac, 5.7, n => brown(n, rnd)), BU = burst(ac, rnd);
   // the wash: two decorrelated voices, left / right
   const wash = [-.45, .45].map((side, i) => {
-    const s = ac.createBufferSource(); s.buffer = PK[i]; s.loop = true; s.start(at, R() * PK[i].duration); srcs.push(s);
+    const s = ac.createBufferSource(); s.buffer = PK[i]; s.loop = true; s.start(at, rnd() * PK[i].duration); srcs.push(s);
     const bp = biq('bandpass', 620, .45), lp1 = biq('lowpass', 1200, .7), lp2 = biq('lowpass', 1500, .5), g = ac.createGain(); g.gain.value = 0;
     s.connect(bp); bp.connect(lp1); lp1.connect(lp2); lp2.connect(g); g.connect(pan(side));
     return g;

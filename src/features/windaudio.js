@@ -30,10 +30,10 @@ export function loopBuf(ac, sec, fill) {   // (also used by rainaudio.js)
   for (let i = 0; i < n; i++) o[i] = i < X ? raw[i] * (i / X) + raw[n + i] * (1 - i / X) : raw[i];
   return b;
 }
-export function pink(n) {   // Paul Kellet's filter, normalised to RMS .3
+export function pink(n, r = R) {   // Paul Kellet's filter, normalised to RMS .3 (r: the noise's generator)
   const o = new Float32Array(n); let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, s = 0;
   for (let i = 0; i < n; i++) {
-    const w = R() * 2 - 1;
+    const w = r() * 2 - 1;
     b0 = .99886 * b0 + w * .0555179; b1 = .99332 * b1 + w * .0750759; b2 = .969 * b2 + w * .153852; b3 = .8665 * b3 + w * .3104856;
     b4 = .55 * b4 + w * .5329522; b5 = -.7616 * b5 - w * .016898; o[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * .5362; b6 = w * .115926; s += o[i] * o[i];
   }
@@ -41,36 +41,38 @@ export function pink(n) {   // Paul Kellet's filter, normalised to RMS .3
   return o;
 }
 // a rough loudness envelope: random points at ~11 Hz, smoothed (cosine), made peaky (^1.6) -> 0..1, circular
-function rough(sr) {
+function rough(sr, r = R) {
   return n => {
-    const per = Math.round(sr / 11), m = Math.ceil(n / per) + 2, pts = Array.from({length: m}, () => R()), o = new Float32Array(n);
+    const per = Math.round(sr / 11), m = Math.ceil(n / per) + 2, pts = Array.from({length: m}, () => r()), o = new Float32Array(n);
     for (let i = 0; i < n; i++) { const f = i / per, k = Math.floor(f), t = (1 - Math.cos((f - k) * Math.PI)) / 2, v = pts[k % m] * (1 - t) + pts[(k + 1) % m] * t; o[i] = .12 + .88 * v ** 1.6; }
     return o;
   };
 }
-export function burst(ac) {   // 16 ms of noise for the ticks (each tick filters and envelopes it)
+export function burst(ac, r = R) {   // 16 ms of noise for the ticks (each tick filters and envelopes it)
   const n = Math.round(.016 * ac.sampleRate), b = ac.createBuffer(1, n, ac.sampleRate), o = b.getChannelData(0);
-  for (let i = 0; i < n; i++) o[i] = (R() * 2 - 1) * .5;
+  for (let i = 0; i < n; i++) o[i] = (r() * 2 - 1) * .5;
   return b;
 }
 
-export function createWindAudio(ac, dest) {
+// rnd: the generator for what's made here (the loops' noise, their start points); the ticks and swishes keep Math.random.
+// features/audio.js makes it at load with core/rng.js viewRandom (no Math.random draws there)
+export function createWindAudio(ac, dest, rnd = R) {
   const out = ac.createGain(); out.gain.value = 1; out.connect(dest);
   const srcs = [], at = ac.currentTime + .05;
   const loop = (buf, off = 0) => { const s = ac.createBufferSource(); s.buffer = buf; s.loop = true; s.start(at, off * buf.duration); srcs.push(s); return s; };
   const biq = (type, f, q) => { const b = ac.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
   const pan = p => { const n = ac.createStereoPanner ? ac.createStereoPanner() : ac.createGain(); if (n.pan) n.pan.value = p; n.connect(out); return n; };
-  const PK = [loopBuf(ac, 3.1, pink), loopBuf(ac, 3.7, pink), loopBuf(ac, 4.3, pink)], RG = loopBuf(ac, 5.3, rough(ac.sampleRate)), BU = burst(ac);
+  const pk = n => pink(n, rnd), PK = [loopBuf(ac, 3.1, pk), loopBuf(ac, 3.7, pk), loopBuf(ac, 4.3, pk)], RG = loopBuf(ac, 5.3, rough(ac.sampleRate, rnd)), BU = burst(ac, rnd);
   // rustle: two voices; vca.gain = (rough envelope x level) through `amt`
   const voices = [-1, 1].map((side, i) => {   // band ~350-1400 Hz, then 36 dB/oct down from ~1.4 kHz (three low-passes)
     const bp = biq('bandpass', 700, .6), lp1 = biq('lowpass', 1350, .7), lp2 = biq('lowpass', 1550, .5), lp3 = biq('lowpass', 1750, .5), vca = ac.createGain(), p = pan(side * .35);
-    vca.gain.value = 0; loop(PK[i], R()).connect(bp); bp.connect(lp1); lp1.connect(lp2); lp2.connect(lp3); lp3.connect(vca); vca.connect(p);
-    const amt = ac.createGain(); amt.gain.value = 0; loop(RG, i * .41 + R() * .2).connect(amt); amt.connect(vca.gain);
+    vca.gain.value = 0; loop(PK[i], rnd()).connect(bp); bp.connect(lp1); lp1.connect(lp2); lp2.connect(lp3); lp3.connect(vca); vca.connect(p);
+    const amt = ac.createGain(); amt.gain.value = 0; loop(RG, i * .41 + rnd() * .2).connect(amt); amt.connect(vca.gain);
     return {side, amt, p, bp};
   });
   // whoosh: the gust around the player
   const wbp = biq('bandpass', 260, .7), wlp = biq('lowpass', 950, .6), wg = ac.createGain(); wg.gain.value = 0;
-  loop(PK[2], R()).connect(wbp); wbp.connect(wlp); wlp.connect(wg); wg.connect(pan(0));
+  loop(PK[2], rnd()).connect(wbp); wbp.connect(wlp); wlp.connect(wg); wg.connect(pan(0));
   let tickAcc = 0, alive = true;
   const set = (p, v, tc = TUNE.smooth) => p.setTargetAtTime(v, ac.currentTime, tc);
   function tick(t, e, panC) {

@@ -13,6 +13,7 @@
 import {createAudio} from '../audio/audio.js';
 import {createWindAudio} from './windaudio.js';
 import {createRainAudio} from './rainaudio.js';
+import {viewRandom} from '../core/rng.js';
 
 // ORDER (core/features.js): it hears this step's world: the rustle (wind), fires lit or out (lights), traps, stomps
 // and rolling barrels (combat)
@@ -39,6 +40,14 @@ export async function create(host) {
   let WA = null, RA = null;
   const WS = {e: 0, pan: 0, strength: 0}, RS = {rain: 0, storm: 0};   // per-step inputs, reused (no allocation)
   const ambBus = () => AU.forge ? [AU.forge.ac, AU.forge.EN.bus('amb.emitters')] : AU.E ? [AU.E.ac, AU.E.amb] : null;
+  // the wind and rain layers: made at load with the engine when the forge runtime is up (its context exists from load:
+  // audio.js prepare), behind the loading screen; quiet until the context runs (update gets null). Their noise loops are
+  // ~70 ms of synthesis that froze the first frame after the first key or click. Made from core/rng.js viewRandom: no
+  // Math.random draws at load. Without the forge (?forge=0) they come with the engine, on the first gesture, as before
+  if (AU.forge) {
+    try { const b = ambBus(); WA = createWindAudio(b[0], b[1], viewRandom('audio.wind')); } catch (e) { console.warn('audio: wind layer unavailable', e); WA = false; }
+    try { const b = ambBus(); RA = createRainAudio(b[0], b[1], viewRandom('audio.rain')); } catch (e) { console.warn('audio: rain layer unavailable', e); RA = false; }
+  }
   const UI_AT = {pan: 0, dist: 0, off: 0}, QUIET = {buses: {music: -9, sfx: -12}, attack: .3, hold: Infinity, release: .6};
   let quiet = null;
   const F = {

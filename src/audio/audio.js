@@ -46,6 +46,7 @@ import {createDirector} from '../../audio/runtime/director.js';
 import {EVENTS, AMBIENCE, SOURCES, SPATIAL, groundCase, GUN_SFX, GUN_SFX_DEF, otherGunSfx} from '../../audio/runtime/events.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
+import {viewRandom} from '../core/rng.js';
 
 const R = Math.random, RR = (a, b) => a + R() * (b - a), J = p => 1 + (R() * 2 - 1) * p;
 const pick = a => a[(R() * a.length) | 0];
@@ -90,12 +91,15 @@ const DESERT_STEP = {sand: {surf: 'sand', ground: 'gravel', semi: -4, lpf: 2400,
 // ======================================================================================================================
 function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (the forge engine's master), else the speakers
   const sr = ac.sampleRate;
+  // (the beds' and the reverb's noise: presentation randomness from its own generator, core/rng.js viewRandom: the engine
+  // can be made at load, see createAudio's prepare(), without a million Math.random draws there)
+  const NR = viewRandom('audio.noise');
   // ---- noise buffers, rendered once; loops are cross-faded at the seam so filtered beds never click ----
   function noiseBuf(sec, kind) {
     const L = (sec * sr) | 0, X = (sr * .08) | 0, raw = new Float32Array(L + X);
     let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, br = 0;
     for (let i = 0; i < L + X; i++) {
-      const w = R() * 2 - 1;
+      const w = NR() * 2 - 1;
       if (kind === 'pink') {   // Paul Kellet's filter
         b0 = .99886 * b0 + w * .0555179; b1 = .99332 * b1 + w * .0750759; b2 = .969 * b2 + w * .153852;
         b3 = .8665 * b3 + w * .3104856; b4 = .55 * b4 + w * .5329522; b5 = -.7616 * b5 - w * .016898;
@@ -116,7 +120,7 @@ function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (t
     const L = (sec * sr) | 0, b = ac.createBuffer(2, L, sr), pre = (sr * .012) | 0;
     for (let c = 0; c < 2; c++) {
       const d = b.getChannelData(c); let lp = 0;
-      for (let i = pre; i < L; i++) { const k = i / L; lp += ((R() * 2 - 1) * Math.pow(1 - k, 2.4) - lp) * (.5 - .4 * k); d[i] = lp; }
+      for (let i = pre; i < L; i++) { const k = i / L; lp += ((NR() * 2 - 1) * Math.pow(1 - k, 2.4) - lp) * (.5 - .4 * k); d[i] = lp; }
     }
     return b;
   }
@@ -791,7 +795,7 @@ export function createAudio(ctx, host = {}) {
     if (v.mode in MODES) musicMode = v.mode;
   } catch (e) {}
   const seen = new WeakSet(), stuckSeen = new WeakSet(), air = new WeakMap();
-  const AU = {muted, ms: 0, get on() { return !!E && E.ac.state === 'running'; }, get E() { return E; }, get music() { return E?.music || null; },
+  const AU = {muted, ms: 0, get on() { return started && !!E && E.ac.state === 'running'; }, get E() { return E; }, get music() { return E?.music || null; },
     get musicOn() { return musicOn; }, get volumes() { return {...VOL}; }, get musicMode() { return musicMode; },
     get gunSfx() { return gunsfx; }, gunSfxList: GUN_SFX,
     update, toggle, toggleMusic, setVolume, setMusicMode, setGunSfx, play};
@@ -809,20 +813,29 @@ export function createAudio(ctx, host = {}) {
       RT = {ac, EN, B, D}; AU.forge = RT;
     } catch (e) { console.warn('audio: forge runtime unavailable, using the built-in synth', e); RT = null; }
   }
+  // the legacy engine (beds, voices, reverb) and the music's instrument banks: ~0.25 s of synthesis on the main thread.
+  // Made on the first gesture, they froze that frame (the first key or click; measured 220 ms, the dev key's gang call
+  // when it came first). With the forge runtime its context exists from load anyway, so they're made now, behind the
+  // loading screen (no Math.random draws: the banks are seeded, the noise is viewRandom's); without it (?forge=0) the
+  // context and all are still made on the first gesture
+  let started = false;   // the first gesture came: sound may play (E may exist before, made at load)
+  function prepare() {
+    if (E) return;
+    E = makeEngine(RT ? RT.ac : new AC({latencyHint: 'interactive'}), RT ? RT.EN.bus('master') : null);
+    try { E.music = createMusic(E.ac, RT ? RT.EN.bus('music') : E.out, {send: E.revIn, enabled: musicOn}); } catch (e) { console.warn('audio: music unavailable', e); }
+    applyVolumes();
+  }
+  if (RT) try { prepare(); } catch (e) { console.warn('audio: unavailable', e); }
   function unlock() {
     if (disabled) return;
     try {
-      if (!E) {
-        E = makeEngine(RT ? RT.ac : new AC({latencyHint: 'interactive'}), RT ? RT.EN.bus('master') : null);
-        try { E.music = createMusic(E.ac, RT ? RT.EN.bus('music') : E.out, {send: E.revIn, enabled: musicOn}); } catch (e) { console.warn('audio: music unavailable', e); }
-        applyVolumes();
-      }
+      prepare(); started = true;
       if (!muted && E.ac.state !== 'running') { if (RT) RT.EN.unlock?.(); E.ac.resume().catch(() => {}); }
     } catch (e) { console.warn('audio: unavailable', e); }
   }
   if (!disabled && typeof addEventListener === 'function') {
     for (const ev of ['keydown', 'pointerdown', 'mousedown', 'touchstart']) addEventListener(ev, unlock, {capture: true, passive: true});
-    document.addEventListener?.('visibilitychange', () => { try { if (!E) return; if (document.hidden) E.ac.suspend(); else if (!muted) E.ac.resume(); } catch (e) {} });
+    document.addEventListener?.('visibilitychange', () => { try { if (!E || !started) return; if (document.hidden) E.ac.suspend(); else if (!muted) E.ac.resume(); } catch (e) {} });
   }
   function toggle() {
     muted = !muted; AU.muted = muted;
@@ -903,7 +916,7 @@ export function createAudio(ctx, host = {}) {
   }
   function update(dt, pl, events) {
     const arrows = get(host.arrows) || [];
-    if (!E || muted || E.ac.state !== 'running') {   // not started (no gesture yet / sheet mode) or muted: just keep up
+    if (!started || !E || muted || E.ac.state !== 'running') {   // not started (no gesture yet / sheet mode) or muted: just keep up
       for (const a of arrows) { seen.add(a); if (a.stuck) stuckSeen.add(a); }
       if (creak) { try { creak.stop(E.ac.currentTime); } catch (e) {} creak = null; }
       if (roll) { try { roll.stop(E.ac.currentTime); } catch (e) {} roll = null; }
