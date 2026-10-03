@@ -8,7 +8,7 @@
 // OWNS: S (rounds, the action, timers, the cues) and, while it drives the frame, the player's frame / facing / state the
 //   way player.js does (it runs inside player.js's step: the player's code, in two files).
 // READS: the atlas (gun poses; the GunMuzzle0 / GunHold0 bones = the barrel on screen), the cursor, the modifiers' notes
-//   (weapon.dmg / reload / gap / spread / fanSpread / last / quick), H.weapon() (the loadout's weapon).
+//   (weapon.dmg / reload / gap / spread / fanSpread / last / quick / endless), H.weapon() (the loadout's weapon).
 // EMITS (player.js's queue, turned into world coordinates by the loop): player.draw / shoot / dryfire / reload / holster /
 //   melee (the pistol whip's blow: features/gun.js lands it through combat).
 // BUDGET: part of player.step (sim group): aiming on the move scores <= 70 poses a step, like the bow's stance search.
@@ -164,6 +164,7 @@ export function createGun(PL, I) {
     H.onShoot({x: m.x, y: m.y, h: m.h, vx: fx * v, vy: fy * v, vh, life: w.range / v, dmg: Math.round(dmg), kind: 'bullet', gun: w.id, push: w.push, back: TUNE.back, pen: w.pen});
     if (how !== 'move' && w.kick) { const k = w.kick * (how === 'fan' ? TUNE.fanKick : 1); P.vx -= fx * k; P.vy -= fy * k; }   // the recoil: back against the shot (plant() takes it up)
     S.ammo--; PL.shots++; S.shotN++; S.idle = 0; S.lastHow = how; S.lastShotAt = S.clock;
+    if (!S.ammo && how !== 'fan' && mv('weapon.endless', 0) > 0) S.ammo = S.cap;   // endless (a dev cheat: dev/cheats.js); a fan refills as it ends
     S.cool = (how === 'fan' ? 0 : w.gap) * mv('weapon.gap', 1);
     ev({type: 'player.shoot', x: m.x, y: m.y, h: m.h, z: P.z, vx: fx, vy: fy, gun: w.id, fan: how === 'fan', hip: how === 'hip', left: S.ammo});
     if (!S.ammo && has('gun_blow.0')) S.flourish = true;   // an emptied cylinder: the smoke wants blowing off
@@ -442,6 +443,7 @@ export function createGun(PL, I) {
         for (let n = Math.floor(t0 / gap + .5); n < Math.floor(S.fanT / gap + .5) && S.ammo > 0; n++) fire(w, 'fan');
         const ph = (S.fanT / gap) % 1, fc = clip('gun_fan').frames;
         if (S.ammo <= 0 && ph >= .5 + .5 / fc) {   // empty: back up to the aim (an atlas without the rise: the kick's tail)
+          if (mv('weapon.endless', 0) > 0) S.ammo = S.cap;
           if (has('gun_fan_out.0')) { S.act = 'raise'; S.at = 0; P.frame = nm('gun_fan_out', 0); }
           else { S.act = 'fire'; S.at = startOf('gun_fire', 1); P.frame = nm('gun_fire', 1); }
           break;

@@ -14,6 +14,7 @@
 //   fast), spread (x (1 - .), the fan's too), fanSpread (the fan's x (1 - .)), last (the cylinder's last round: damage
 //   x (1 + .)), quick (the first shot after a draw: x (1 + .))
 // restore() drops the notes (the sandbox plays with the engine's own numbers).
+// READS the note 'game.hurt' (x the damage you take; a dev cheat's god mode: dev/cheats.js).
 import {itemById, augmentById} from './items.js';
 
 export const BASE_HP = 100, BASE_REGEN = .4;
@@ -62,7 +63,8 @@ export function createStats(host, core) {
     addAugment(a) { augs.add(a.id); apply(); },
     // the build in pick order, for the HUD: [{def, n, aug}]
     build() { return [...[...augs].map(id => ({def: augmentById(id), n: 1, aug: true})), ...[...items].map(([id, n]) => ({def: itemById(id), n}))]; },
-    hurt(dmg) { const d = Math.max(1, Math.round(dmg)); S.hp = Math.max(0, S.hp - d); S.hurtT = 1; return d; },
+    // damage taken x the 'game.hurt' notes (dev/cheats.js god mode: x 0, nothing taken -> 0)
+    hurt(dmg) { const k = mods.value('game.hurt', 1); if (!(k > 0)) return 0; const d = Math.max(1, Math.round(dmg * k)); S.hp = Math.max(0, S.hp - d); S.hurtT = 1; return d; },
     heal(n) { const h = Math.min(S.maxHp - S.hp, n); if (h > 0) { S.hp += h; if (h >= 1) S.healT = 1; } return h; },
     update(dt, regen = true) {
       if (regen && S.hp > 0) S.hp = Math.min(S.maxHp, S.hp + S.regen * dt);

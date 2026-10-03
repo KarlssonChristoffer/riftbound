@@ -10,7 +10,7 @@
 // sim steps run only the F.always updates and the views hold (a freeze frame).
 // OWNS: the frame's timing (last, lastDt, fps, the HUD's refresh), the sim's clock (acc, alpha), hitstop (freeze), the
 //   season's leaf ramp version.
-// READS: E (main.js; E.dev: the colliders overlay + the debug HUD).  BUDGET: core/perf.js (F3).
+// READS: E (main.js; E.dev: the colliders overlay + the debug HUD), the modifiers' note 'sim.speed'.  BUDGET: core/perf.js (F3).
 //   const loop = createLoop(E); loop.start() / hitstop(sec) / run(n, dt) (tests: n steps + draws without rAF) / hud()
 import {ROT_SPEED} from '../render/camera.js';
 import {check as checkEvents} from './events.js';
@@ -26,6 +26,8 @@ export function createLoop(E) {
   const BENCH = E.flags.get('bench') === '1';   // (the bench reads the counts: render/glstats.js -> perf.counts)
   const SIM_DT = 1 / 60, MAX_STEPS = 4;
   let acc = 0, alpha = 1;   // acc: real time the sim is behind (<= 0: ahead); alpha: where the draw sits in the last step
+  // the 'sim.speed' note x host.timeScale (the cheat panel's game speed: dev/cheats.js), read when the notes change
+  let simSpeed = 1; if (host.mods) { const f = () => { simSpeed = host.mods.value('sim.speed', 1); }; host.mods.watch(f); f(); }
   let hovIt = null;         // the world item with the hover pulse on (the aimed target)
   const frameEvs = [];      // every event of this frame's sim steps, for the views
   // ONE fixed sim step
@@ -57,7 +59,7 @@ export function createLoop(E) {
     const y0 = cv.yaw; cv.setYaw(ny); pa.syncPlateaus();
     cv.stepSampling(dt, cv.yaw !== y0);
     if (paused) { pause.stepPaused(dt); return; }   // the game stands still, nature goes on
-    const sdt = dt * host.timeScale; if (sdt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
+    const sdt = dt * host.timeScale * simSpeed; if (sdt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
     const held = freeze > 0;   // hitstop: the sim steps run the F.always updates only, the views hold
     acc += sdt; clearArray(frameEvs);
     for (let n = 0; acc > 1e-9 && n < MAX_STEPS; n++) { simStep(SIM_DT); acc -= SIM_DT; }

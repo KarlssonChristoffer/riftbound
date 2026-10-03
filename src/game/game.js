@@ -61,7 +61,7 @@ export async function createGame(host) {
   }
   function toSandbox() {
     endRunState(); screens.hide();
-    mode = 'sandbox'; setPhase(''); host.dev = true; lock(false); host.timeScale = 1; host.hudOff = false; SB.down = -1;
+    mode = 'sandbox'; setPhase(''); host.dev = true; lock(false); host.timeScale = 1; host.hudOff = false; SB.down = -1; SB.nav = false;
     stats.restore(); host.mods.clear('run'); core.retireYard(false);
   }
   function endRunState() {   // leave a run: no enemies, no portal, the engine's own numbers
@@ -128,8 +128,7 @@ export async function createGame(host) {
   function onEvents(evs) {
     for (const e of evs) {
       if (e.type === 'player.hurt' && !ended()) {
-        const d = stats.hurt(e.dmg); host.PL.flicker(.9);
-        hud.float(P.x, P.y, P.z + 1.9, '-' + d, '#ff6a50', true);
+        hurtFloat(stats.hurt(e.dmg)); host.PL.flicker(.9);
         if (stats.S.hp <= 0) die();
       } else if (e.type === 'enemy.kill' && e.who?.hunter) {
         run.kills++;
@@ -140,6 +139,8 @@ export async function createGame(host) {
       }
     }
   }
+  // a hurt's number over you: grey 0 when nothing was taken (god mode: dev/cheats.js)
+  const hurtFloat = d => hud.float(P.x, P.y, P.z + 1.9, d ? '-' + d : '0', d ? '#ff6a50' : '#a8a8a8', true);
   function stepBleeds(dt) {
     for (let i = bleeds.length - 1; i >= 0; i--) {
       const b = bleeds[i]; b.left -= dt; b.tick -= dt;
@@ -157,12 +158,15 @@ export async function createGame(host) {
     goldSeen = core.gold;
   }
 
-  // ---------------------------------------------------------------- the desert sandbox's stakes
-  // While a feature says a fight is on (features/foes.js F.stakes: gunmen about in the desert) your hurts count in the
-  // sandbox too: the health bar, the hit vignette and flicker; at 0 you fall (slow motion; player.down: the gang stops
-  // shooting), then wake at the fort (F.respawn(); player.respawn: they're gone) with your health back. Out of a fight
-  // you heal up quickly (SB.heal per s). Nothing changes in the sandbox anywhere else.
-  const SB = {down: -1, heal: 12};
+  // ---------------------------------------------------------------- the sandbox's stakes
+  // While a fight is on (features/foes.js F.stakes: gunmen about in the desert; or hunting enemies about: the cheat
+  // panel's spawns, dev/cheats.js) your hurts count in the sandbox too: the health bar, the hit vignette and flicker; at 0
+  // you fall (slow motion; player.down: the gang stops shooting), then wake at the fort (F.respawn(); player.respawn:
+  // they're gone, the hunters too) with your health back. Out of a fight you heal up quickly (SB.heal per s). Hunters in
+  // the sandbox find their way round walls on the game's nav (built for them on demand: SB.nav). Nothing changes in the
+  // sandbox anywhere else.
+  const SB = {down: -1, heal: 12, nav: false};
+  const fightOn = foes => !!foes?.stakes || core.enemies.length > 0;
   function stakes(dt, evs) {
     const foes = host.feature('foes');
     if (SB.down >= 0) {
@@ -170,17 +174,17 @@ export async function createGame(host) {
       if (!['hold', 'knock', 'fall'].includes(P.raw.state)) host.PL.hold('crouch', 99);
       if (SB.down > 1.8) {
         SB.down = -1; host.timeScale = 1;
-        const at = foes?.respawn?.(); if (at) host.teleport(at.x, at.y);
-        stats.heal(stats.S.maxHp); lock(false);
+        const at = foes?.respawn?.() ?? host.layout.spawn; if (at) host.teleport(at.x, at.y);
+        stats.heal(stats.S.maxHp); lock(false); core.clearEnemies();
         host.events.push({type: 'player.respawn', x: P.x, y: P.y});
       }
       return;
     }
     stats.update(dt);
-    if (!foes?.stakes) { if (stats.S.hp < stats.S.maxHp) stats.heal(SB.heal * dt); return; }
+    if (core.enemies.length) { if (!SB.nav) { nav.build(); SB.nav = true; } nav.update(dt); }
+    if (!fightOn(foes)) { if (stats.S.hp < stats.S.maxHp) stats.heal(SB.heal * dt); return; }
     for (const e of evs) if (e.type === 'player.hurt') {
-      const d = stats.hurt(e.dmg); host.PL.flicker(.9);
-      hud.float(P.x, P.y, P.z + 1.9, '-' + d, '#ff6a50', true);
+      hurtFloat(stats.hurt(e.dmg)); host.PL.flicker(.9);
       if (stats.S.hp <= 0) {
         SB.down = 0; lock(true); host.timeScale = .3;
         hud.banner('You fell', 'you wake at the fort', 2.6, '#e0604a');
@@ -272,7 +276,7 @@ export async function createGame(host) {
     },
 
     hd(q, sc) {
-      if (mode !== 'run' || !run) { hud.draw(q, sc, {run: false, stats, build: [], enemies: [], health: mode === 'sandbox' && (SB.down >= 0 || !!host.feature('foes')?.stakes)}); return; }
+      if (mode !== 'run' || !run) { hud.draw(q, sc, {run: false, stats, build: [], enemies: [], health: mode === 'sandbox' && (SB.down >= 0 || fightOn(host.feature('foes')))}); return; }
       hud.draw(q, sc, {run: true, stats, build: stats.build(), stage: run.stage, stages: STAGES.length, stageName: stageName(run.stage),
         wave: director.wave, waves: director.waves || STAGES[run.stage].waves, left: director.left, phase, time: run.time, kills: run.kills,
         boss: director.boss, enemies: core.enemies, cost: chestCost()});
@@ -327,6 +331,7 @@ export async function createGame(host) {
       if (mode === 'sandbox') return [{label: 'Start a run', run: startRun}, {label: 'Back to title', run: toTitle}];
       return [];
     },
+    biomeChanged() { SB.nav = false; },   // (the sandbox's nav: the world's fixed props changed)
     hud: () => mode === 'run' && run ? `run: stage ${run.stage + 1} ${phase} · wave ${director.wave + 1}/${director.waves} · alive ${core.enemies.length} · hp ${Math.ceil(stats.S.hp)}/${stats.S.maxHp}` : `mode ${mode}`,
   };
 

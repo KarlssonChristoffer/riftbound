@@ -26,7 +26,8 @@
 // OWNS: the records (gang), the gunmen entities' bodies (x, y, z, h, r: the creator's fields), the bullet pool, the spawn
 //   clock, its own nav grid (world/nav.js over the ground you can walk on).
 // READS: host.player (x, y, z, state, untouchable, raw.blink), the entities (near: a step, a line, a bullet), the world
-//   (elev, the stream, 3D trees, PROP_TOP), the biome's canyon (hole), the game's mode.
+//   (elev, the stream, 3D trees, PROP_TOP), the biome's canyon (hole), the game's mode, the modifiers' note 'foes.raids'
+//   (x 0: no gang comes on its own; a request still does: the cheat panel's Raids, dev/cheats.js).
 // EMITS (pooled payloads, read in their step only: core/events.js): foe.draw / aim / shoot / reload / holster,
 //   bullet.impact, player.hit, player.hurt.
 import {mulberry32} from '../../core/rng.js';
@@ -56,6 +57,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
   const B = {n: 0, x: f64(), y: f64(), h: f64(), vx: f64(), vy: f64(), vh: f64(), life: f64(), age: f64(), dmg: f64(), lx: f64(), ly: f64(), lh: f64(),
     flown: f64(), kind: new Uint8Array(BM), who: new Array(BM).fill(null)};
   const nearS = [], nearL = [];
+  let raids = true; if (host.mods) { const f = () => { raids = host.mods.value('foes.raids', 1) > 0; }; host.mods.watch(f); f(); }   // ('foes.raids' x 0: the clock stands)
   // events: a ring of payloads with one shape (no allocation per shot; a payload lives for its step: core/events.js)
   const POOL = 96, pool = [];
   for (let i = 0; i < POOL; i++) pool.push({type: '', x: 0, y: 0, z: 0, h: 0, vx: 0, vy: 0, dx: 0, dy: 0, x0: 0, y0: 0, h0: 0, gun: '', foe: '', who: null,
@@ -404,7 +406,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
     }
     // gangs: the clock, a request (the dev key, a poster). Unarmed: the clock waits while any of the pair is up
     if (U && gang.length) S.clock = Math.max(S.clock, U.every);
-    S.clock -= dt;
+    if (raids) S.clock -= dt;
     if (S.clock <= 0 && !S.down) {
       const n = gangSize();
       if (gang.length + n <= SP.cap) { spawnGang(n); S.clock = U ? U.every : RR(SP.every[0], SP.every[1]); } else S.clock = SP.retry;

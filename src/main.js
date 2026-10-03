@@ -68,6 +68,7 @@ import {createOptions} from './render/options.js';
 import * as devtools from './dev/devtools.js';   // dev/: only the boot imports it, and hands it on (E.dev)
 import * as devkeys from './dev/devkeys.js';
 import * as owncheck from './dev/owncheck.js';
+import {createCheats} from './dev/cheats.js';   // the cheat panel (F2): a dev feature the boot adds last
 import {loadFeatures} from './core/features.js';
 import {createInput} from './core/input.js';
 import {createLoop} from './core/loop.js';
@@ -197,6 +198,8 @@ stage.ents.sync();   // features placed and moved props as they were made (light
 mark('features', tp);
 // the game goes first: it sees keys, arrows, hits and interactions before the engine's features
 const game = await createGame(host); features.unshift(game);
+// the cheat panel (dev/cheats.js, F2 in dev mode): last, so what it asks for lands after every feature's step
+features.push(createCheats({host, cam, canvas}));
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;
