@@ -8,7 +8,7 @@ default**, and nothing in the game changes while it is off (the golden captures,
 
 - `?equip=1` turns it on (`?mode=sandbox&equip=1`, `?mode=run&equip=1`).
 - `?equip=<gadget>` turns it on with that gadget in the slot (a run starts with it too): `flask`, `dynamite`,
-  `beartrap`, `scarecrow`, `smoke`, `grapple`.
+  `beartrap`, `scarecrow`, `smoke`, `grapple`, `lasso` (a gun loadout's: [lasso.md](lasso.md)).
 - Menu > Dev > Features > **Equipment** switches it any time (remembered on this machine, `localStorage`
   `riftbound.equip`); `?equip=0` forces it off.
 
@@ -35,6 +35,7 @@ default**, and nothing in the game changes while it is off (the golden captures,
 | **Bear Trap** | 10 s | Thrown open, armed after 0.45 s (a faint ring shows its bite). The first enemy that steps in takes 30 (a stage-1 brute is left on 10: the hold sets up the kill) and is held 4 s (elites 2.6, the champion 1.5; combat's own root, so the HP bar turns blue and the root pegs show). Unsprung it rusts away after 30 s. |
 | **Scarecrow** | 22 s | Planted where it lands for 8 s (a collider: nothing stands in it). Every enemy within 12 m goes for it instead of you and whacks it with its own damage (260 hp). |
 | **Smoke Bomb** | 18 s | Pops where it lands: a thick cloud 3.3 m round for 6.5 s (soft HD puffs drawn over what is in it: you vanish in it). While you are inside (and 0.8 s after) you run 35% faster (a `host.mods` note on `player.speed`) and every enemy has lost you: they wander. An enemy inside it is lost too. |
+| **Lasso** (a gun loadout's: a cowboy starts with it) | 1.4 s | Hold F: the loop spins overhead; let go: it's thrown at what's under the cursor. Rope an enemy (it can't fight; tap F: yanked off its feet, stunned; hold F: swung round you and flung), tow a barrel or a crate, pull a lit brazier over, drag a tumbleweed home, or catch a high limb and swing (over the stream, off and onto the plateau). Its own doc: [lasso.md](lasso.md). |
 | **Grappling Hook** | 7 s | The hook flies straight (34 m/s) to what is under the cursor: an enemy, else a solid prop within 1.1 m of the cursor (tree, rock, pillar, crate, a wall), else the ground; it bites what it meets on the way. It then pulls you there at 17 m/s (the player's own knock, re-applied each step) and you glide in the last 2 m; an enemy at the end takes a flying kick (30). |
 
 Damage numbers are stage 1 without items; in a run every gadget's damage is multiplied by the build's damage stat and
