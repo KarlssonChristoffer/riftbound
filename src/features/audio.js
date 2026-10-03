@@ -19,7 +19,20 @@ import {createRainAudio} from './rainaudio.js';
 export const order = {after: ['wind', 'lights', 'combat']};
 export async function create(host) {
   // (ground: what the biome's painter says is under a foot, where it says: world/desert.js B.groundAt; null elsewhere)
-  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }, ground: (x, y) => host.biome?.groundAt?.(x, y) ?? null};
+  // (propAt: the kind of the solid prop at a point, for a bullet that ended in one: the registry's near(), the exact test here)
+  const NEAR = [];
+  const propAt = (x, y) => {
+    let best = null, bd = 1e9;
+    for (const p of host.entities.near(x, y, .3, NEAR)) {   // a point in a rect (a wall, a wagon): 0; a round one: off its edge
+      if (p.broken || p.gone) continue;
+      let d;
+      if (p.rect) { if (!(x > p.rect[0] - .1 && x < p.rect[2] + .1 && y > p.rect[1] - .1 && y < p.rect[3] + .1)) continue; d = 0; }
+      else { if (!(p.r > .05)) continue; d = Math.hypot(p.x - x, p.y - y) - p.r; if (d > .15) continue; }
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best ? best.kind : null;
+  };
+  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }, ground: (x, y) => host.biome?.groundAt?.(x, y) ?? null, propAt};
   const screenX = (x, y) => host.toView(x, y, 0)[0];
   const AU = createAudio(ctx, {arrows: () => host.arrows, props: () => host.props, combat: () => host.feature('combat'), wind: () => host.wind});
   const listener = {};

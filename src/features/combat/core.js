@@ -163,6 +163,7 @@ export function createCore(host) {
       hitstop(broke ? T.hsBreak : crit ? T.hsCrit : T.hsHit);
       shake(broke ? 2 : crit ? 2 : 1, broke ? .14 : crit ? .1 : .07);
     }
+    events.push({type: 'combat.hit', x: p.x, y: p.y, h: base + hgt * .6, who: p, kind: p.kind, dmg, crit, broke, quiet: !!o.quiet});   // (audio: the hit's sound)
     return broke;
   }
   function breakProp(p, o = {}) {

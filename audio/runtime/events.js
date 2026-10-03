@@ -57,6 +57,7 @@ const WILD = {cat: 'world', bus: 'sfx.world', priority: 15, maxInstances: 3, ste
 const UI = {cat: 'ui', bus: 'ui', priority: 95, maxInstances: 2, steal: 'oldest', coalesceMs: 0, send: 0, pitchSemi: 0, gainJitDb: 0, variants: 2, bakePriority: 5};
 // the desert's gunmen: placed where they stand, combat's spatial rule (off screen a shot fades slowly: you hear it coming)
 const COACH_MARK = {break: 'break', dump: 'eject', load: 'load', close: 'close'};   // coachReload's o.mark -> the coachgun case
+const BULLET_DB = {sand: 0, stone: -1, wood: 0, metal: -1};   // bulletHit: the bullet recipe's case per o.mat, and its trim
 const FOE = {cat: 'combat', bus: 'sfx.world', priority: 50, maxInstances: 3, steal: 'quietest', coalesceMs: 0, send: .15, pitchSemi: .8, gainJitDb: 1.5};
 
 export const EVENTS = {
@@ -200,6 +201,34 @@ export const EVENTS = {
     pick: (o, rnd) => [L('impact', 'thud'), L('footstep', groundCase(o, rnd), {gainDb: -4, delayMs: 12}), L('cloth', 'jump', {gainDb: -9, delayMs: 6})],
     gainFrom: o => (o.heavy ? 2 : 0),
     banks: [['impact', 'thud', 3], ...STEP_CASES.map(c => ['footstep', c]), ['cloth', 'jump']], variants: 6, bakePriority: 3,
+  },
+  // ================================================ bullets (forge recipe 'bullet') ================================================
+  // where a bullet ends (bullet.impact: src/audio/audio.js reads its material: the ground's own, a tree, a prop's kind),
+  // the hits on a gunman (combat.hit: flesh, a crit heavier), the player's hit-confirm, a bullet through a gunman
+  bulletHit: {   // o.mat sand | stone | wood | metal, o.foe (a gunman's: the coach gun's pellets come six at once, a touch under);
+    // off stone and metal now and then a ricochet's whine
+    ...IMPACT, priority: 50, maxInstances: 5, coalesceMs: 30, gainDb: -7, send: .14, pitchSemi: 1.2, gainJitDb: 2,
+    pick: (o, rnd) => {
+      const m = o.mat in BULLET_DB ? o.mat : 'sand', out = [L('bullet', m, {gainDb: BULLET_DB[m]})];
+      if ((m === 'stone' || m === 'metal') && rnd() < (o.foe ? .07 : .14)) out.push(L('bullet', 'ricochet', {gainDb: -6, delayMs: [4, 20]}));
+      return out;
+    },
+    gainFrom: o => (o.foe ? -3 : 0),
+    banks: [['bullet', 'sand'], ['bullet', 'stone'], ['bullet', 'wood'], ['bullet', 'metal'], ['bullet', 'ricochet', 4]], variants: 6, bakePriority: 2,
+  },
+  fleshHit: {   // a gunman hit (combat.hit): o.crit the heavier thump
+    ...IMPACT, priority: 75, maxInstances: 4, coalesceMs: 20, gainDb: -2, send: .1, pitchSemi: .8, gainJitDb: 1.5,
+    pick: o => L('bullet', o.crit ? 'crit' : 'flesh', o.crit ? {gainDb: 1.5} : {}),
+    banks: [['bullet', 'flesh'], ['bullet', 'crit']], variants: 6, bakePriority: 1,
+  },
+  hitConfirm: {   // the player's own: a hit on an enemy confirmed, at any range (posted at the listener: never faded, never culled)
+    ...PLAYER, priority: 70, maxInstances: 2, coalesceMs: 30, gainDb: -10, send: 0, pitchSemi: .4, gainJitDb: .5,
+    pick: o => L('bullet', 'confirm', o.crit ? {gainDb: 2, semi: -1.5} : {}),
+    banks: [['bullet', 'confirm']], variants: 4, bakePriority: 1,
+  },
+  bulletPierce: {   // bullet.pierce: a bullet through a gunman (layered on its flesh hit)
+    ...IMPACT, priority: 70, maxInstances: 3, coalesceMs: 30, gainDb: -4, pitchSemi: .8,
+    pick: () => L('bullet', 'pierce'), banks: [['bullet', 'pierce']], variants: 4, bakePriority: 2,
   },
   // ================================================ impacts ================================================
   hit: {   // o.mat 'wood' | 'straw' | 'clay' | 'glass' | 'stone' | 'body' (the player); o.g from physics impacts (.45..1.4)
