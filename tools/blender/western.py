@@ -619,7 +619,7 @@ def pose(name):
 def clips_meta():
     out = _clips_meta_plain()
     for c, m in out.items():
-        m.update({k: ANIMS[c][k] for k in ('play', 'ms', 'marks', 'shift', 'travel', 'lie') if k in ANIMS[c]})
+        m.update({k: ANIMS[c][k] for k in ('play', 'ms', 'marks', 'shift', 'travel', 'lie', 'side') if k in ANIMS[c]})
     return out
 
 
@@ -1328,9 +1328,11 @@ def _lg_install():
     POSES['gun_dieb_a'] = _gpose(LG_BLADE, ARMS, DIE_JOLT_B, _head(LG_BLADE, -14, -14), legs=DIEB_LEGS)
     POSES['gun_dief_a'] = _gpose(LG_BLADE, ARMS, DIE_JOLT_F, _head(LG_BLADE, -12, -16),
                                  {'Hips': [('Z', LG_BLADE), ('X', 4)], '_root': (0, -.06)}, legs=DIEF_LEGS)
+    POSES['gun_dies_a'] = _gpose(LG_BLADE, ARMS, DIE_JOLT_S, _head(LG_BLADE, -6, -6, -14),
+                                 {'Hips': [('Z', LG_BLADE + 8), ('Y', 6)], '_root': (.06, 0)}, legs=DIES_LEGS)
     LG_HOLD.update({k: _lg_frame('shoulder', LG_BLADE, p) + (True,) for k, p in
                     (('gun_hitf_a', 14), ('gun_hitf_b', -3), ('gun_hitb_a', -16), ('gun_hitb_b', 2),
-                     ('gun_dieb_a', 24), ('gun_dief_a', -26))})
+                     ('gun_dieb_a', 24), ('gun_dief_a', -26), ('gun_dies_a', 8))})
     _fall_keys(LG_BLADE)
     POSES['dieb_b'].update({'LeftArm': [('Y', 16), ('X', -70), ('Z', -26)], 'LeftForeArm': [('X', -30)]})  # off the fore-end
     GUN_FREE.update({'dieb_b': ('at', (-.45, .05, 1.5), -20, 30), 'dieb_c': ('at', (-.6, .2, .9), -35, 8),
@@ -1338,7 +1340,10 @@ def _lg_install():
                      'dieb_f': ('ground', (-.62, .3), -8),
                      'dief_b': ('air', (-.1, -.18, -.12), -25, -45), 'dief_c': ('ground', (-.58, -.3), -12),
                      'dief_d': ('ground', (-.58, -.3), -12), 'dief_e': ('ground', (-.58, -.32), -13),
-                     'dief_f': ('ground', (-.58, -.32), -13), 'dief_g': ('ground', (-.58, -.32), -13)})
+                     'dief_f': ('ground', (-.58, -.32), -13), 'dief_g': ('ground', (-.58, -.32), -13),
+                     'dies_b': ('at', (.4, -.3, 1.2), 40, 20), 'dies_c': ('at', (.62, -.3, .6), 90, -10),
+                     'dies_d': ('ground', (.7, -.3), 120), 'dies_e': ('ground', (.72, -.28), 124),
+                     'dies_f': ('ground', (.72, -.28), 124)})
 
 
 def _fist_to(side, p):
@@ -1418,18 +1423,19 @@ def _long_gun_hold(pose_name):
 #     needs (each frame its own), a camera move (the view's `lift`: the depth pass keeps its range). Clip meta: `shift`
 #     = that move per frame as m at the atlas pitch (px = shift * sin(20) / units_per_px, whole px): the game draws frame
 #     i that many px lower to put the body where it lies; `lie` per frame (the game lays the sprite's depth and its sun
-#     card down by it: gfx.js BATCH_VS); `travel` = the corpse's
+#     card down by it: gfx.js BATCH_VS); die_s, which ends off to his left, is centred across him too: `side` = how
+#     far (m, + his left: the game moves the sprite that way); `travel` = the corpse's
 #     centre from where he stood (m, behind him for die_b, in front for die_f; the game's fallback without bones).
-FOE_CLIPS = ('hit_f', 'hit_b', 'die_b', 'die_f')
+FOE_CLIPS = ('hit_f', 'hit_b', 'die_b', 'die_f', 'die_s')
 _CAM_YAW, _CAM_PITCH = math.radians(45), math.radians(20)            # pixel_rig's camera(yaw=45, pitch=20)
 GUN_FREE = {}      # pose key -> ('air', (x, y, z) m from the right fist, yaw, pitch) | ('at', (x, y, z) m in his frame,
                    # yaw, pitch) | ('ground', (x, y) m, yaw)
 GUN_Z = .022       # the grip point's height with the gun lying on its side (m, for a 1.8 m figure)
 HAT_PARTS = ('HatCrown', 'HatBand', 'HatBrim')
 HAT_FREE = {}      # pose key -> ('air', (x, y, z) m in his frame, tilt, heading, spin) | ('ground', (x, y) m, tilt, heading,
-                   # spin): the hat bone's head (the head's centre) there, the hat tipped `tilt` deg (+ toward his front)
-                   # about the axis `heading` deg round from his left, spun `spin` about its crown first; 'ground' sets
-                   # its lowest point on the ground
+                   # spin) | ('byhead', (x, y) m from where his head lies, ...): the hat bone's head (the head's centre)
+                   # there, the hat tipped `tilt` deg (+ toward his front) about the axis `heading` deg round from his
+                   # left, spun `spin` about its crown first; on the ground its lowest point is set on it
 FIT_MARGIN = 2.2   # px kept clear inside every canvas edge (1 for the outline pixelize adds, + a little)
 PITCH_GAME = math.degrees(math.atan(math.sin(math.radians(55)) / math.cos(math.radians(20))))   # 41.08: the game's ground
 _GUNW, _HATW, _SHIFT, _ROOT_OFF, _ARMS, _VIEW = {}, {}, {}, {}, [], {}
@@ -1451,7 +1457,10 @@ DIEF_LEGS = {'LeftUpLeg': [('X', -2), ('Y', -5)], 'LeftLeg': [('X', 34)], 'Right
 JOLT_F = {'Spine': [('X', -7)], 'Spine1': [('X', -6)], 'Spine2': [('X', -9)]}
 JOLT_B = {'Spine': [('X', 12)], 'Spine1': [('X', 8)], 'Spine2': [('X', 6)]}
 DIE_JOLT_B = {'Spine': [('X', -12), ('Z', -8)], 'Spine1': [('X', -8), ('Z', -6)], 'Spine2': [('X', -12), ('Z', -5)]}  # thrown back, the gun shoulder knocked open
-DIE_JOLT_F = {'Spine': [('X', -16), ('Z', 6)], 'Spine1': [('X', -11), ('Z', 4)], 'Spine2': [('X', -8)]}   # arched: the hit in the back drives the chest on, the shoulders back
+DIE_JOLT_F = {'Spine': [('X', -16), ('Z', 6)], 'Spine1': [('X', -11), ('Z', 4)], 'Spine2': [('X', -8)]}
+DIE_JOLT_S = {'Spine': [('Y', 12), ('Z', 14)], 'Spine1': [('Y', 8), ('Z', 10)], 'Spine2': [('Y', 6), ('Z', 8)]}   # pushed over to his left, the spin begins up top
+DIES_LEGS = {'LeftUpLeg': [('X', -10), ('Y', -10)], 'LeftLeg': [('X', 26)], 'RightUpLeg': [('X', 4), ('Y', 2)],
+             'RightLeg': [('X', 22)], 'RightFoot': [('Z', 10)]}   # arched: the hit in the back drives the chest on, the shoulders back
 
 # the revolvers: the gun hand flies up (a wrist flip, GUN_SPIN) or dips, the left arm flung
 POSES['gun_hitf_a'] = _gpose(_BLADE, _arm(x=-92, fx=-22, sz=-12), JOLT_F, _head(_BLADE, -10, -12),
@@ -1469,7 +1478,11 @@ POSES['gun_dief_a'] = _gpose(_BLADE, _arm(y=-30, x=24, fx=-36, sz=-6), DIE_JOLT_
                              {'Hips': [('Z', _BLADE), ('X', 5)], '_root': (0, -.08),
                               'LeftShoulder': [('Z', 6)], 'LeftArm': [('Y', 26), ('X', 30)], 'LeftForeArm': [('X', -34)]},
                              legs=DIEF_LEGS)
-GUN_SPIN.update({'gun_hitf_a': 28, 'gun_hitf_b': 6, 'gun_hitb_a': -14, 'gun_dieb_a': 45, 'gun_dief_a': -25})
+POSES['gun_dies_a'] = _gpose(_BLADE, _arm(y=-14, x=-60, fx=-50, sz=-6, z=34), DIE_JOLT_S, _head(_BLADE, -6, -6, -14),
+                             {'Hips': [('Z', _BLADE + 8), ('Y', 6)], '_root': (.06, 0),
+                              'LeftShoulder': [('Z', 8)], 'LeftArm': [('Y', -30), ('X', 10)], 'LeftForeArm': [('X', -30)]},
+                             legs=DIES_LEGS)
+GUN_SPIN.update({'gun_hitf_a': 28, 'gun_hitf_b': 6, 'gun_hitb_a': -14, 'gun_dieb_a': 45, 'gun_dief_a': -25, 'gun_dies_a': 30})
 
 
 def _fall_keys(b):
@@ -1555,6 +1568,40 @@ def _fall_keys(b):
                        'LeftArm': [('Z', -84), ('Y', 9), ('X', 7)], 'LeftForeArm': [('Z', -46), ('X', 4)],       # by his head
                        'LeftUpLeg': [('X', -2), ('Z', 28)], 'LeftLeg': [('X', 10), ('Z', -50)], 'LeftFoot': [('X', 40)],   # the knee drawn out
                        'RightUpLeg': [('X', 2), ('Y', 8)], 'RightLeg': [('X', 16)], 'RightFoot': [('X', 40)]}
+    # die_s: shot from his right side: pushed away from the shot, he spins to his left (Hips Z +) as the knees go,
+    # drops on his left knee, lands on his left side and rolls onto his front, turned round about 170 deg
+    POSES['dies_b'] = {'Hips': [('X', 8), ('Y', 10), ('Z', b + 50)], '_root': (.12, -.02),          # spinning, the knees go
+                       'Spine': [('X', 6), ('Z', 10)], 'Spine1': [('X', 4), ('Z', 6)], 'Spine2': [('X', 2)],
+                       'Neck': [('Z', -.4 * b - 14), ('X', 6)], 'Head': [('Z', -.3 * b - 10), ('X', -4)],   # the head lags the spin
+                       'RightShoulder': [('Z', -6)], 'RightArm': [('Y', 50), ('X', -20)], 'RightForeArm': [('X', -24)],   # flung out wide
+                       'LeftShoulder': [('Z', 6)], 'LeftArm': [('Y', -46), ('X', 16)], 'LeftForeArm': [('X', -20)],
+                       'LeftUpLeg': [('X', -34), ('Y', -10)], 'LeftLeg': [('X', 64)], 'LeftFoot': [('X', -10)],
+                       'RightUpLeg': [('X', -14), ('Y', 8)], 'RightLeg': [('X', 46)], 'RightFoot': [('X', -6)]}
+    POSES['dies_c'] = {'Hips': [('X', 18), ('Y', 24), ('Z', b + 110)], '_root': (.26, -.04),        # down on the left knee
+                       'Spine': [('X', 10), ('Z', 8)], 'Spine1': [('X', 6)], 'Spine2': [('X', 4)],
+                       'Neck': [('Z', -12), ('X', 10)], 'Head': [('Z', -8), ('X', 8)],
+                       'RightArm': [('Y', 30), ('X', -40)], 'RightForeArm': [('X', -30)],                 # swinging round
+                       'LeftArm': [('Y', 10), ('X', -30)], 'LeftForeArm': [('X', -20)],                   # reaching down
+                       'LeftUpLeg': [('X', -40), ('Y', -6)], 'LeftLeg': [('X', 100)], 'LeftFoot': [('X', 30)],
+                       'RightUpLeg': [('X', -2), ('Y', 16)], 'RightLeg': [('X', 30)], 'RightFoot': [('X', 10)]}
+    POSES['dies_d'] = {'Hips': [('X', 72), ('Y', -34), ('Z', b + 150)], '_root': (.36, .02),        # on his left side: `ground`
+                       'Spine': [('X', 4)], 'Neck': [('X', -8)], 'Head': [('X', -6), ('Y', -30)],
+                       'RightArm': [('Y', 20), ('Z', 30)], 'RightForeArm': [('X', -30)],                  # still coming over
+                       'LeftArm': [('Y', 14), ('Z', -40)], 'LeftForeArm': [('X', -10)],
+                       'LeftUpLeg': [('X', -20), ('Y', -6)], 'LeftLeg': [('X', 60)], 'LeftFoot': [('X', 20)],
+                       'RightUpLeg': [('X', 10), ('Y', 20)], 'RightLeg': [('X', 40)], 'RightFoot': [('X', 20)]}
+    POSES['dies_e'] = {'Hips': [('X', 84), ('Y', -14), ('Z', b + 162)], '_root': (.38, .02),        # rolled onto his front
+                       'Neck': [('X', -10)], 'Head': [('X', -6), ('Y', -56)],
+                       'RightArm': [('Y', -4), ('Z', 44)], 'RightForeArm': [('Z', 30)],
+                       'LeftArm': [('Y', 8), ('Z', -30)], 'LeftForeArm': [('X', -6)],
+                       'LeftUpLeg': [('X', -10), ('Z', 24)], 'LeftLeg': [('X', 30), ('Z', -30)], 'LeftFoot': [('X', 30)],
+                       'RightUpLeg': [('X', 6), ('Y', 10)], 'RightLeg': [('X', 50)], 'RightFoot': [('X', 30)]}
+    POSES['dies_f'] = {'Hips': [('X', 90), ('Y', -6), ('Z', b + 168)], '_root': (.38, .02),         # the corpse
+                       'Neck': [('X', -8)], 'Head': [('X', -4), ('Y', -66)],
+                       'RightArm': [('Y', -6), ('Z', 60), ('X', -6)], 'RightForeArm': [('Z', 40), ('X', -2)],   # thrown up past his head
+                       'LeftArm': [('Y', 9), ('Z', -20), ('X', 7)], 'LeftForeArm': [('Z', -10), ('X', 4)],     # by his side
+                       'LeftUpLeg': [('X', -4), ('Z', 30)], 'LeftLeg': [('X', 10), ('Z', -46)], 'LeftFoot': [('X', 40)],
+                       'RightUpLeg': [('X', 2), ('Y', 8)], 'RightLeg': [('X', 18)], 'RightFoot': [('X', 40)]}
 
 
 _fall_keys(_BLADE)
@@ -1563,7 +1610,10 @@ GUN_FREE.update({'dieb_b': ('at', (-.55, .05, 1.84), -60, 70), 'dieb_c': ('at', 
                  'dieb_f': ('ground', (-.78, .05), -218),
                  'dief_b': ('air', (-.1, -.25, .22), -20, 40), 'dief_c': ('at', (-.42, -.6, .6), -80, -40),
                  'dief_d': ('ground', (-.6, -.72), -140), 'dief_e': ('ground', (-.62, -.76), -150),
-                 'dief_f': ('ground', (-.63, -.78), -152), 'dief_g': ('ground', (-.63, -.78), -152)})
+                 'dief_f': ('ground', (-.63, -.78), -152), 'dief_g': ('ground', (-.63, -.78), -152),
+                 'dies_b': ('at', (.5, -.3, 1.3), 60, 30), 'dies_c': ('at', (.8, -.25, .7), 140, -30),
+                 'dies_d': ('ground', (.88, -.2), 190), 'dies_e': ('ground', (.92, -.18), 198),
+                 'dies_f': ('ground', (.93, -.17), 200)})
 # the hat off the head (HAT_FREE: placed in world space like a gun out of the hand, in-betweens blended): die_b's flies
 # off up and back over his left shoulder at the jolt (tipping back, spinning: crown up enough that its dark inside
 # never fills the frame), lands on the back of its brim by his head, rocks and settles flat, crown up; die_f's stays on until his face hits the ground, is knocked off to his right, lands tipped and falls
@@ -1572,7 +1622,10 @@ HAT_FREE.update({'dieb_b': ('air', (.25, .5, 1.86), -35, 30, 60), 'dieb_c': ('ai
                  'dieb_d': ('ground', (.55, 1.2), -55, 60, 190), 'dieb_e': ('ground', (.62, 1.28), -24, 80, 215),
                  'dieb_f': ('ground', (.66, 1.3), -5, 90, 228),
                  'dief_e': ('air', (-.3, -1.2, .3), 60, -60, 0), 'dief_f': ('ground', (-.42, -1.28), 36, -70, 20),
-                 'dief_g': ('ground', (-.46, -1.3), 5, -80, 30)})
+                 'dief_g': ('ground', (-.46, -1.3), 5, -80, 30),
+                 'dies_b': ('air', (.45, .05, 1.58), 22, 90, 60), 'dies_c': ('air', (.85, .2, .95), 38, 100, 150),
+                 'dies_d': ('byhead', (.4, .26), 40, 110, 220), 'dies_e': ('byhead', (.44, .3), 16, 120, 245),
+                 'dies_f': ('byhead', (.45, .31), 4, 120, 255)})
 ANIMS['hit_f'] = _clip(['gun_aim', 'gun_hitf_a', 'gun_hitf_b', 'gun_aim'], [1, 1.45, 1.9, 2.4, 2.8], 18,
                        ms=[65, 60, 65, 50, 50], marks={'back': 3})      # `back` at 0.19 s (TYPES' flinch .18-.2)
 ANIMS['hit_b'] = _clip(['gun_aim', 'gun_hitb_a', 'gun_hitb_b', 'gun_aim'], [1, 1.45, 1.9, 2.4, 2.8], 18,
@@ -1583,10 +1636,14 @@ ANIMS['die_b'] = _clip(['gun_aim', 'gun_dieb_a', 'dieb_b', 'dieb_c', 'dieb_d', '
 ANIMS['die_f'] = _clip(['gun_aim', 'gun_dief_a', 'dief_b', 'dief_c', 'dief_d', 'dief_e', 'dief_f', 'dief_g'],
                        [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6, 6.5, 7], 10,
                        ms=[90, 70, 70, 70, 120, 70, 60, 50, 80, 90, 90, 420], marks={'knees': 4, 'ground': 8})
+ANIMS['die_s'] = _clip(['gun_aim', 'gun_dies_a', 'dies_b', 'dies_c', 'dies_d', 'dies_e', 'dies_f'],
+                       [1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 5.5, 6], 10,
+                       ms=[90, 70, 70, 70, 90, 60, 80, 90, 90, 440], marks={'knees': 4, 'ground': 6})
 for _c in FOE_CLIPS:
     ANIMS[_c]['foe'] = True
-for _c in ('die_b', 'die_f'):
+for _c in ('die_b', 'die_f', 'die_s'):
     ANIMS[_c]['fit'] = True
+ANIMS['die_s']['fitx'] = True
 
 
 def _foe_root(pose_name):
@@ -1647,9 +1704,13 @@ def _hat_world(key):
         axis = Vector((math.cos(h), math.sin(h), 0))          # heading 0: his left (+X): + tilt tips the crown toward his front
         R = Matrix.Rotation(math.radians(-tilt), 3, axis) @ Matrix.Rotation(math.radians(spin), 3, 'Z')
         Mr = arm.data.bones['HatHold0'].matrix_local
-        pos = Vector((p[0] * k, p[1] * k, p[2] * k if kind == 'air' else 0.0))
+        if kind == 'byhead':                                   # on the ground, (x, y) m from where his head lies
+            hd = arm.matrix_world @ pbs['Head'].head
+            pos = Vector((hd.x + p[0] * k, hd.y + p[1] * k, 0.0))
+        else:
+            pos = Vector((p[0] * k, p[1] * k, p[2] * k if kind == 'air' else 0.0))
         M = Matrix.Translation(pos) @ (R @ Mr.to_3x3()).to_4x4()
-        if kind == 'ground':
+        if kind in ('ground', 'byhead'):
             pbs['HatHold0'].matrix = arm.matrix_world.inverted() @ M
             bpy.context.view_layer.update()
             dg = bpy.context.evaluated_depsgraph_get()
@@ -1773,11 +1834,12 @@ def _lie_now():
     return t * t * (3 - 2 * t)
 
 
-def _root_to(dy):
-    """The whole posed body (and a gun out of the hand: it hangs off the hand) moved dy m along his back axis."""
-    if dy:
+def _root_to(dy, dx=0.0):
+    """The whole posed body (and a gun out of the hand: it hangs off the hand) moved dy m along his back axis (and dx
+    to his left)."""
+    if dy or dx:
         hp = bpy.data.objects[ROOT].pose.bones['Hips']
-        hp.matrix = Matrix.Translation((0, dy, 0)) @ hp.matrix
+        hp.matrix = Matrix.Translation((dx, dy, 0)) @ hp.matrix
         bpy.context.view_layer.update()
 
 
@@ -1793,12 +1855,13 @@ def _fit_clip(clip):
     A, req, over, lie = ANIMS[clip], [], [], []
     n = A['frames']
     _frame(f'{clip}.{n - 1}')
-    cy = _fit_need()[2][1]
-    _ROOT_OFF[clip] = -cy
+    cx, cy = _fit_need()[2]
+    cx = cx if A.get('fitx') else 0.0      # (fitx: centred across him too, `side` says how far: a fall off to one side)
+    _ROOT_OFF[clip] = (-cy, -cx)
     run = 0.0
     for i in range(n):
         _frame(f'{clip}.{i}')
-        _root_to(-cy)
+        _root_to(-cy, -cx)
         run = 0.0 if i == 0 else max(run, _lie_now())
         lie.append(run)
         need, o, centre = _fit_need(20 + (PITCH_GAME - 20) * run)
@@ -1810,7 +1873,9 @@ def _fit_clip(clip):
     kpy = math.sin(_CAM_PITCH) / _canvas()[4]
     A['shift'] = [round(v / kpy, 4) for v in out]
     A['lie'] = [round(v, 3) for v in lie]
-    A['travel'] = round(cy if clip == 'die_b' else -cy, 3)
+    A['travel'] = round(cy if clip == 'die_b' else -cy, 3)   # (die_s: its own sign, the game reads the Hips)
+    if A.get('fitx'):
+        A['side'] = round(cx, 3)
     print('FOE_FIT', clip, 'shift px', out, 'lie', A['lie'], 'travel', A['travel'], 'corpse centre x', round(centre[0], 3),
           'y', round(centre[1], 3), 'over (left, right, top px, worst)', tuple(max(o[j] for o in over) for j in range(3)),
           'top by frame', [round(o[2] + out[i] - req[i], 1) for i, o in enumerate(over)])
@@ -1850,7 +1915,7 @@ def pose(name):
     finally:
         SOFT_PARTS.difference_update(soft)
     if A and clip in _SHIFT:
-        _root_to(_ROOT_OFF[clip])
+        _root_to(*_ROOT_OFF[clip])
     return zmin
 
 
