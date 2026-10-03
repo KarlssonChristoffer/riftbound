@@ -59,6 +59,29 @@ const UI = {cat: 'ui', bus: 'ui', priority: 95, maxInstances: 2, steal: 'oldest'
 const COACH_MARK = {break: 'break', dump: 'eject', load: 'load', close: 'close'};   // coachReload's o.mark -> the coachgun case
 const BULLET_DB = {sand: 0, stone: -1, wood: 0, metal: -1};   // bulletHit: the bullet recipe's case per o.mat, and its trim
 const FOE = {cat: 'combat', bus: 'sfx.world', priority: 50, maxInstances: 3, steal: 'quietest', coalesceMs: 0, send: .15, pitchSemi: .8, gainJitDb: 1.5};
+// GUN SOUNDS: the western-movie flavors (the user, on the v2 guns: "make them sound more 'western movie'"): every gun
+// event plays the forge cases '<flavor>_<case>' (recipes revolver.js v3, coachgun.js v2, bullet.js v2; their headers say
+// what each flavor is). The caller passes o.gunsfx (src/audio/audio.js: ?gunsfx= / menu > Audio > Gun sounds, remembered);
+// anything else plays GUN_SFX_DEF. Per flavor:
+//   trims (dB)  each shot's transient (its first 50 ms, K-weighted) ~2 dB over the v2 / v1 shot's: larger than life (the
+//               forge normalises the loudest 400 ms, and a wet shot's echoes take a share of it); peaks stay under the
+//               master limiter's -3 dBFS
+//   send        the reverb send: the place is baked into the buffers, the biome's reverb only adds air
+//   rico        how often a bullet ricochets off stone / metal, ricoSand off sand ([the player's, a gunman's]); ricoDb its
+//               level against the hit (spaghetti: often and loud; gritty: rarely and under)
+// The reloads keep their one sound (the v2 / v1 cases). GUN_SFX_DEF: spaghetti, the most iconic western-movie sound.
+export const GUN_SFX = ['spaghetti', 'hollywood', 'gritty'], GUN_SFX_DEF = 'spaghetti';
+const GSX = {
+  spaghetti: {peacemaker: 4.5, navy: 4.5, fire: 3, cock: 0, send: .04, rico: [.5, .3], ricoSand: [.12, .06], ricoDb: -1},
+  hollywood: {peacemaker: 4.5, navy: 4.5, fire: 4, cock: 0, send: .06, rico: [.3, .18], ricoSand: [.05, .03], ricoDb: -2},
+  gritty: {peacemaker: 5.5, navy: 6, fire: 3, cock: 0, send: .08, rico: [.1, .05], ricoSand: [0, 0], ricoDb: -5},
+};
+const gsx = o => (GSX[o?.gunsfx] ? o.gunsfx : GUN_SFX_DEF);
+// a flavored layer: the case for o's flavor, with its trim and send
+const GL = (recipe, c, o, extra = {}) => { const s = gsx(o), F = GSX[s]; return L(recipe, `${s}_${c}`, {send: F.send, ...extra, gainDb: (F[c] || 0) + (extra.gainDb || 0)}); };
+const gunBanks = (recipe, cases, bp) => GUN_SFX.flatMap(s => cases.map(c => (bp == null ? [recipe, `${s}_${c}`] : [recipe, `${s}_${c}`, bp])));
+// the director's prefetch skips the other flavors' banks (they bake when picked: src/audio/audio.js prefetches again)
+export const otherGunSfx = style => (recipe, c) => { const m = /^(spaghetti|hollywood|gritty)_/.exec(c); return !!m && m[1] !== style; };
 
 export const EVENTS = {
   // ================================================ player movement ================================================
@@ -148,13 +171,13 @@ export const EVENTS = {
   // ================================================ the revolver (src/sim/player/gun.js; forge recipe 'revolver') ================================================
   gunshot: {   // o.gun 'peacemaker' (a sharp crack) | 'brass_navy' (a deeper boom), o.fan (a fanned shot: a touch softer)
     ...PLAYER, priority: 85, maxInstances: 4, coalesceMs: 0, gainDb: 0, send: .1, pitchSemi: .5, gainJitDb: 1, cooldownMs: 20,
-    pick: o => L('revolver', o.gun === 'brass_navy' ? 'navy' : 'peacemaker'),
+    pick: o => GL('revolver', o.gun === 'brass_navy' ? 'navy' : 'peacemaker', o),
     gainFrom: o => (o.fan ? -1.5 : 0),
     snapshot: {name: 'gunDuck', buses: {amb: -4, music: -2}, attack: .005, hold: .05, release: .4},
-    banks: [['revolver', 'peacemaker'], ['revolver', 'navy']], variants: 5, bakePriority: 1,
+    banks: gunBanks('revolver', ['peacemaker', 'navy']), variants: 5, bakePriority: 1,
   },
   gunDry: {...PLAYER, priority: 70, gainDb: -6, cooldownMs: 60, pick: () => L('revolver', 'dry'), banks: [['revolver', 'dry']], variants: 4, bakePriority: 2},
-  gunDraw: {...PLAYER, priority: 55, gainDb: -10, cooldownMs: 100, pick: () => L('revolver', 'cock'), banks: [['revolver', 'cock']], variants: 4, bakePriority: 2},
+  gunDraw: {...PLAYER, priority: 55, gainDb: -10, cooldownMs: 100, pick: o => GL('revolver', 'cock', o), banks: gunBanks('revolver', ['cock']), variants: 4, bakePriority: 2},
   gunReload: {   // o.phase: start (the hammer to half cock, the gate open) | eject (the cases out) | round (one in) | done (the spin)
     ...PLAYER, priority: 55, maxInstances: 3, gainDb: -9, cooldownMs: 40,
     pick: o => L('revolver', {eject: 'eject', round: 'load', done: 'spin'}[o.phase] || 'cock'),
@@ -167,10 +190,10 @@ export const EVENTS = {
   // back as a gunman starts to aim: the shot's telegraph in sound. (The bruiser's coach gun has its own: coach* below.)
   foeShot: {
     ...FOE, priority: 80, maxInstances: 4, gainDb: -2, send: .16, cooldownMs: 25, pitchSemi: .6,
-    pick: o => L('revolver', o.gun === 'navy' ? 'navy' : 'peacemaker'), gainFrom: o => (o.gun === 'navy' ? 1.5 : 0),
-    banks: [['revolver', 'peacemaker'], ['revolver', 'navy']], variants: 5, bakePriority: 1,
+    pick: o => GL('revolver', o.gun === 'navy' ? 'navy' : 'peacemaker', o), gainFrom: o => (o.gun === 'navy' ? 1.5 : 0),
+    banks: gunBanks('revolver', ['peacemaker', 'navy']), variants: 5, bakePriority: 1,
   },
-  foeCock: {...FOE, priority: 62, gainDb: -6, cooldownMs: 60, pick: () => L('revolver', 'cock'), banks: [['revolver', 'cock']], variants: 4, bakePriority: 2},
+  foeCock: {...FOE, priority: 62, gainDb: -6, cooldownMs: 60, pick: o => GL('revolver', 'cock', o), banks: gunBanks('revolver', ['cock']), variants: 4, bakePriority: 2},
   foeDraw: {...FOE, priority: 40, gainDb: -12, cooldownMs: 120, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
   foeReload: {   // o.phase start | eject | round | done (the cylinder's spin)
     ...FOE, priority: 45, maxInstances: 3, gainDb: -10, cooldownMs: 40,
@@ -187,9 +210,9 @@ export const EVENTS = {
   // foeHolster above)
   coachShot: {
     ...FOE, priority: 82, maxInstances: 4, gainDb: 0, send: .18, cooldownMs: 25, pitchSemi: .5,
-    pick: () => L('coachgun', 'fire'), banks: [['coachgun', 'fire']], variants: 6, bakePriority: 1,
+    pick: o => GL('coachgun', 'fire', o), banks: gunBanks('coachgun', ['fire']), variants: 6, bakePriority: 1,
   },
-  coachCock: {...FOE, priority: 62, gainDb: -6, cooldownMs: 60, pick: () => L('coachgun', 'cock'), banks: [['coachgun', 'cock']], variants: 4, bakePriority: 2},
+  coachCock: {...FOE, priority: 62, gainDb: -6, cooldownMs: 60, pick: o => GL('coachgun', 'cock', o), banks: gunBanks('coachgun', ['cock']), variants: 4, bakePriority: 2},
   coachReload: {   // o.mark break | dump | load | close
     ...FOE, priority: 45, maxInstances: 3, gainDb: -9, cooldownMs: 40,
     pick: o => L('coachgun', COACH_MARK[o.mark] || 'load'),
@@ -206,20 +229,21 @@ export const EVENTS = {
   // where a bullet ends (bullet.impact: src/audio/audio.js reads its material: the ground's own, a tree, a prop's kind),
   // the hits on a gunman (combat.hit: flesh, a crit heavier), the player's hit-confirm, a bullet through a gunman
   bulletHit: {   // o.mat sand | stone | wood | metal, o.foe (a gunman's: the coach gun's pellets come six at once, a touch under);
-    // off stone and metal now and then a ricochet's whine
+    // off stone and metal (and now and then sand) a ricochet's whine, as often as the flavor wants (GSX)
     ...IMPACT, priority: 50, maxInstances: 5, coalesceMs: 30, gainDb: -7, send: .14, pitchSemi: 1.2, gainJitDb: 2,
     pick: (o, rnd) => {
-      const m = o.mat in BULLET_DB ? o.mat : 'sand', out = [L('bullet', m, {gainDb: BULLET_DB[m]})];
-      if ((m === 'stone' || m === 'metal') && rnd() < (o.foe ? .07 : .14)) out.push(L('bullet', 'ricochet', {gainDb: -6, delayMs: [4, 20]}));
+      const m = o.mat in BULLET_DB ? o.mat : 'sand', F = GSX[gsx(o)], out = [GL('bullet', m, o, {gainDb: BULLET_DB[m], send: .1})];
+      const pr = m === 'stone' || m === 'metal' ? F.rico : m === 'sand' ? F.ricoSand : null;
+      if (pr && rnd() < pr[o.foe ? 1 : 0]) out.push(GL('bullet', 'ricochet', o, {gainDb: F.ricoDb, delayMs: [4, 20], send: .1}));
       return out;
     },
     gainFrom: o => (o.foe ? -3 : 0),
-    banks: [['bullet', 'sand'], ['bullet', 'stone'], ['bullet', 'wood'], ['bullet', 'metal'], ['bullet', 'ricochet', 4]], variants: 6, bakePriority: 2,
+    banks: [...gunBanks('bullet', ['sand', 'stone', 'wood', 'metal']), ...gunBanks('bullet', ['ricochet'], 3)], variants: 6, bakePriority: 2,
   },
   fleshHit: {   // a gunman hit (combat.hit): o.crit the heavier thump
     ...IMPACT, priority: 75, maxInstances: 4, coalesceMs: 20, gainDb: -2, send: .1, pitchSemi: .8, gainJitDb: 1.5,
-    pick: o => L('bullet', o.crit ? 'crit' : 'flesh', o.crit ? {gainDb: 1.5} : {}),
-    banks: [['bullet', 'flesh'], ['bullet', 'crit']], variants: 6, bakePriority: 1,
+    pick: o => GL('bullet', o.crit ? 'crit' : 'flesh', o, o.crit ? {gainDb: 1.5, send: .08} : {send: .08}),
+    banks: gunBanks('bullet', ['flesh', 'crit']), variants: 6, bakePriority: 1,
   },
   hitConfirm: {   // the player's own: a hit on an enemy confirmed, at any range (posted at the listener: never faded, never culled)
     ...PLAYER, priority: 70, maxInstances: 2, coalesceMs: 30, gainDb: -10, send: 0, pitchSemi: .4, gainJitDb: .5,
@@ -228,7 +252,7 @@ export const EVENTS = {
   },
   bulletPierce: {   // bullet.pierce: a bullet through a gunman (layered on its flesh hit)
     ...IMPACT, priority: 70, maxInstances: 3, coalesceMs: 30, gainDb: -4, pitchSemi: .8,
-    pick: () => L('bullet', 'pierce'), banks: [['bullet', 'pierce']], variants: 4, bakePriority: 2,
+    pick: o => GL('bullet', 'pierce', o, {send: .08}), banks: gunBanks('bullet', ['pierce']), variants: 4, bakePriority: 2,
   },
   // ================================================ impacts ================================================
   hit: {   // o.mat 'wood' | 'straw' | 'clay' | 'glass' | 'stone' | 'body' (the player); o.g from physics impacts (.45..1.4)

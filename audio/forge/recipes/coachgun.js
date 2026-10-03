@@ -135,13 +135,148 @@ const SHOT = {tp: .0028, crackD: .006, crackHP: 260, crackLP: 2800, crack: .75, 
   tailD: .18, tailLP: 620, tail: .3, echo: .17};
 const DUR = {fire: 1.9, break: .4, eject: .75, load: .3, close: .45, cock: .2, dry: .15};
 
+// ======================================================================================================================
+// v2: THE WESTERN-MOVIE FLAVORS (with recipes/revolver.js v3: the user wanted the guns "more 'western movie'"); the v1
+// cases above stay as they were. The flavored barrel is v1's parts (pulse, chuff, rough body, thump) voiced bigger, then
+// the place, baked in, as the revolver's flavors do it:
+//   spaghetti  a cannon in the canyon: a broad crack, a huge thump, a hard slapback, five discrete echoes off far walls
+//              (each later, darker, more smeared) over a long rolling roll (RT60 ~3.3 s)
+//   hollywood  the stock 12-gauge BLAM: the core driven hard (fat, compressed), band-limited like an optical track, the
+//              echo chamber (dense early reflections, a smooth RT60 ~2.1 s tail) and one canyon slap
+//   gritty     a deep, heavy blast: the longest thump, a dense set of early reflections off the walls, a dark grounded
+//              tail that rolls like far thunder (RT60 ~2.3 s), one faint far slap
+// The cock (the aim's telegraph): both hammers' heavier double click (half cock, a beat, full cock on the lock plate);
+// spaghetti's close-up rings in the canyon, hollywood's in a small room, gritty's is dry and heavy.
+// Echoes and tails are mixed by ENERGY against the barrel's core above 150 Hz (g = amplitude ratio of the RMS totals).
+const STYLES = ['spaghetti', 'hollywood', 'gritty'];
+const energy = b => { let e = 0; for (let i = 0; i < b.length; i++) e += b[i] * b[i]; return e; };
+// a discrete echo of `src` (energy en) at sample i0: smeared by sparse taps over sm s (a rough, far wall), darkened by two
+// low-passes at lp, thinned below hp; energy g^2 of the source's
+function echo(out, sr, R, src, en, i0, g, lp, sm, hp = 110) {
+  if (i0 >= out.length || !(g > 0)) return;
+  const ns = Math.min(out.length - i0, src.length + Math.round(sm * sr)), e = new Float32Array(ns), k = 1 + Math.round(sm * 260);
+  for (let j = 0; j < k; j++) {
+    const o = j ? Math.round(Math.pow(R(), 1.4) * sm * sr) : 0, a = j ? R.range(.25, .75) * (R() < .5 ? -1 : 1) : 1;
+    for (let i = 0; i + o < ns && i < src.length; i++) e[i + o] += src[i] * a;
+  }
+  filter(e, 'lowpass', lp, .7, sr); filter(e, 'lowpass', lp * 1.3, .7, sr); filter(e, 'highpass', hp, .7, sr);
+  const ee = energy(e); if (ee > 0) add(out, scale(e, g * Math.sqrt(en / ee)), i0);
+}
+// the diffuse tail at sample i0: noise built up over a s, decaying to -60 dB in rt s (sized to -80 dB), darkening from lp0
+// to lp1 Hz (two one-poles whose cutoff falls exponentially over rt), rolling (depth roll at ~rollF Hz), thinned below hp;
+// energy g^2 of the core's (en)
+function tail(out, sr, R, en, i0, {rt, a = .02, lp0, lp1, roll = 0, rollF = 4, hp = 80, g, color = 'pink'}) {
+  const n = Math.min(out.length - i0, Math.round((rt * 1.34 + a * 4) * sr)); if (n <= 0 || !(g > 0)) return;
+  const b = color === 'brown' ? brown(n, R) : pink(n, R), rl = roll ? rough(n, sr, R, rollF) : null;
+  const kd = Math.exp(-6.9078 / (rt * sr)), ka = Math.exp(-1 / (a * sr)), kf = Math.pow(lp1 / lp0, 32 / (rt * sr));
+  let y = 0, y2 = 0, k = 0, fc = lp0, ea = 1, ed = 1;
+  for (let i = 0; i < n; i++) {
+    if ((i & 31) === 0) { k = 1 - Math.exp(-2 * PI * fc / sr); if (i < rt * sr) fc *= kf; }
+    y += (b[i] - y) * k; y2 += (y - y2) * k; b[i] = y2 * (1 - ea) * ed * (rl ? Math.max(0, 1 + roll * rl[i]) : 1); ea *= ka; ed *= kd;
+  }
+  filter(b, 'highpass', hp, .7, sr);
+  for (let i = n - Math.min(n, Math.round(.02 * sr)); i < n; i++) b[i] *= .5 + .5 * Math.cos(PI * (i - n + .02 * sr) / (.02 * sr));
+  const eb = energy(b); if (eb > 0) add(out, scale(b, g * Math.sqrt(en / eb)), i0);
+}
+// the flavored barrel: the core (pulse, chuff, rough body, thump; drive: hollywood's fat stock blam), then the place
+function wfire(out, sr, R, P) {
+  const choke = R() < .5, kT = choke ? .9 : 1.06, kF = choke ? 1.12 : .94;   // the choked barrel or the open one
+  const t0 = R.range(.004, .006);
+  tick(out, sr, R, 0, {f: R.range(1400, 1800), amp: .05, t60: .005, body: .5});
+  const i0 = Math.round(t0 * sr), nC = Math.round(P.core * sr), core = new Float32Array(nC);
+  // 1. the pressure pulse + a pink crackle
+  const tp = P.tp * kT * R.jit(.12), kq = R.range(.9, 1.1), nc = Math.round(.06 * sr), crack = new Float32Array(nc);
+  for (let i = 0; i < nc; i++) { const t = i / sr / tp; crack[i] = t < 9 ? (1 - t) * Math.exp(-kq * t) : 0; }
+  add(crack, norm(burst(.06, sr, R, {a: .0001, d: P.crackD * R.jit(.25), color: 'pink'}), P.crackN));
+  filter(crack, 'highpass', P.crackHP, .7, sr); filter(crack, 'lowpass', P.crackLP, .7, sr); filter(crack, 'lowpass', P.crackLP * 1.3, .7, sr);
+  add(core, norm(crack, P.crack * R.jit(.1)));
+  // 2. the black powder's chuff
+  const cA = P.chuffA * R.jit(.25), cD = P.chuffD * R.jit(.2), nh = Math.min(nC, Math.round((cD * TAIL + cA * 3) * sr));
+  const ch = ad(pink(nh, R), sr, cA, cD);
+  filter(ch, 'bandpass', P.chuffF * kF * R.jit(.15), .75, sr); filter(ch, 'lowpass', 2200, .7, sr);
+  add(core, norm(ch, P.chuff * R.jit(.25)), Math.round(R.range(.0005, .0025) * sr));
+  // 3. the body: rough and wide
+  const bD = P.bodyD * R.jit(.15), nb = Math.min(nC, Math.round((bD * TAIL + .01) * sr)), body = ad(pink(nb, R), sr, .0009, bD);
+  const gr = rough(nb, sr, R, P.roughF * R.jit(.3)), dep = P.rough * R.jit(.25);
+  for (let i = 0; i < nb; i++) body[i] *= Math.max(0, 1 + dep * gr[i]);
+  const bLP = P.bodyLP * R.jit(.15); filter(body, 'lowpass', bLP, .7, sr); filter(body, 'lowpass', bLP * 1.4, .7, sr); filter(body, 'highpass', 80, .7, sr);
+  add(core, norm(body, P.body));
+  // 4. the thump: three heavily damped low modes
+  const tT = P.thumpT * R.jit(.12), nt = Math.min(nC, Math.round((tT * 1.6 + .05) * sr)), tF = P.thumpF * R.jit(.08);
+  add(core, norm(modal(halfSine(P.thumpTc * R.jit(.2), sr), [{f: tF, t60: tT, a: 1}, {f: tF * R.range(1.75, 2.05), t60: tT * .55, a: .5},
+    {f: tF * R.range(2.9, 3.4), t60: tT * .35, a: .22}], sr, nt), P.thump * R.jit(.12)));
+  if (P.drive) saturate(core, P.drive);
+  const en = energy(filter(core.slice(), 'highpass', 150, .7, sr));   // the reference: what an echo carries (the thump's sub doesn't count)
+  add(out, core, i0);
+  // 5. the place
+  if (P.er) for (let j = 0; j < P.er.n; j++) echo(out, sr, R, core, en, i0 + Math.round(R.range(P.er.t[0], P.er.t[1]) * sr), P.er.g * R.range(.5, 1), P.er.lp * R.jit(.15), .004, 140);
+  for (const [t, g, lp, sm] of P.echoes) echo(out, sr, R, core, en, i0 + Math.round(t * R.jit(.08) * sr), g * R.jit(.2), lp * R.jit(.1), sm);
+  tail(out, sr, R, en, i0 + Math.round(P.tail.at * sr), {...P.tail, rt: P.tail.rt * R.jit(.08), roll: (P.tail.roll || 0) * R.jit(.25), rollF: (P.tail.rollF || 4) * R.jit(.3)});
+}
+// the flavored cock: the half-cock click, a beat, the full-cock clack on the lock plate (a strike + a low-mid knock)
+function wcock(out, sr, R, P) {
+  const n = Math.round(.25 * sr), dry = new Float32Array(n), t1 = .004, t2 = t1 + R.range(P.gap[0], P.gap[1]);
+  tick(dry, sr, R, t1, {f: R.range(P.f1[0], P.f1[1]), amp: .5, t60: P.t60 * .8, tc: P.tc, body: P.body * .8});
+  tick(dry, sr, R, t2, {f: R.range(P.f2[0], P.f2[1]), amp: 1, t60: P.t60, tc: P.tc, body: P.body});
+  thock(dry, sr, R, t2 + .0005, {f: R.range(P.knock[0], P.knock[1]), amp: P.knockA, t60: .02, tc: .0008, grit: .15});
+  add(out, dry);
+  if (P.room) {
+    const en = energy(dry);
+    for (const [t, g, lp, sm] of P.room.echoes) echo(out, sr, R, dry, en, Math.round((t2 + t * R.jit(.1)) * sr), g * R.jit(.15), lp, sm, 300);
+    tail(out, sr, R, en, Math.round((t2 - .015) * sr), {...P.room.tail, rt: P.room.tail.rt * R.jit(.1)});
+  }
+}
+// the flavors (as SHOT above, plus crackN the crackle's share, core (s) the buffer the echoes copy, drive, er {n, t, g, lp},
+// echoes [[t s, g, lp Hz, smear s]], tail, out {hp, lp, shelf [dB, Hz]}, sat, dur (s))
+const WEST = {
+  spaghetti: {
+    fire: {tp: .0022, crackD: .008, crackN: .6, crackHP: 450, crackLP: 5600, crack: 1.1, chuffA: .003, chuffD: .05, chuffF: 520, chuff: .85,
+      bodyD: .065, bodyLP: 2200, body: .85, rough: .55, roughF: 55, thumpF: 50, thumpT: .28, thumpTc: .0085, thump: 1.8, core: .7,
+      echoes: [[.15, .36, 2600, .01], [.42, .27, 1900, .02], [.72, .19, 1500, .03], [1.05, .12, 1150, .045], [1.45, .075, 900, .06], [1.95, .045, 700, .08]],
+      tail: {at: .04, rt: 3.3, a: .07, lp0: 2600, lp1: 520, roll: .4, rollF: 2.5, hp: 70, g: .36},
+      out: {hp: 30, shelf: [-3, 6000]}, sat: 1.9, dur: 5},
+    cock: {gap: [.07, .1], f1: [1600, 1900], f2: [1800, 2200], t60: .009, tc: .0003, body: .45, knock: [480, 620], knockA: .6,
+      room: {echoes: [[.13, .26, 2200, .01], [.36, .11, 1500, .025]], tail: {rt: .5, a: .008, lp0: 3000, lp1: 1000, hp: 250, g: .26}}, out: {hp: 60, shelf: [-4, 6000]}, sat: 1.2, dur: .75},
+  },
+  hollywood: {
+    fire: {tp: .0024, crackD: .006, crackN: .5, crackHP: 350, crackLP: 4400, crack: .8, chuffA: .0035, chuffD: .05, chuffF: 560, chuff: 1,
+      bodyD: .07, bodyLP: 2000, body: 1, rough: .4, roughF: 55, thumpF: 60, thumpT: .18, thumpTc: .008, thump: 1.2, core: .6, drive: 2.8,
+      er: {n: 8, t: [.01, .05], g: .25, lp: 3600},
+      echoes: [[.24, .32, 2000, .015], [.55, .14, 1400, .035]],
+      tail: {at: .012, rt: 2.1, a: .02, lp0: 4200, lp1: 1300, hp: 90, g: .48},
+      out: {hp: 70, lp: 6500, shelf: [-3, 5000]}, sat: 2.3, dur: 3.2},
+    cock: {gap: [.055, .075], f1: [1600, 1900], f2: [1800, 2200], t60: .007, tc: .0003, body: .4, knock: [500, 650], knockA: .5,
+      room: {echoes: [], tail: {rt: .3, a: .004, lp0: 4500, lp1: 1800, hp: 250, g: .3}}, out: {hp: 80, lp: 7000, shelf: [-3, 5000]}, sat: 1.25, dur: .4},
+  },
+  gritty: {
+    fire: {tp: .0018, crackD: .009, crackN: .7, crackHP: 600, crackLP: 7500, crack: 1.35, chuffA: .003, chuffD: .045, chuffF: 480, chuff: .9,
+      bodyD: .06, bodyLP: 2200, body: .85, rough: .7, roughF: 60, thumpF: 44, thumpT: .28, thumpTc: .01, thump: 1.9, core: .7,
+      er: {n: 12, t: [.012, .1], g: .21, lp: 2800},
+      echoes: [[.09, .27, 1600, .012], [.72, .1, 650, .08]],
+      tail: {at: .025, rt: 2.3, a: .08, lp0: 1400, lp1: 360, roll: .6, rollF: 3.5, hp: 55, g: .44, color: 'brown'},
+      out: {hp: 26, shelf: [-5, 5000]}, sat: 1.8, dur: 3.4},
+    cock: {gap: [.06, .09], f1: [1300, 1600], f2: [1500, 1800], t60: .008, tc: .0004, body: .55, knock: [400, 520], knockA: .75,
+      out: {hp: 50, shelf: [-6, 5000]}, sat: 1.2, dur: .25},
+  },
+};
+
 export default {
-  id: 'coachgun', version: 1, desc: 'The bruiser\'s double-barrelled coach gun: a black-powder 12-gauge boom with a rolling desert tail, the break, the shells out, a shell in, the close, the hammer',
-  params: {act: {values: ['fire', 'break', 'eject', 'load', 'close', 'cock', 'dry'], def: 'fire'}},
-  cases: {fire: {act: 'fire'}, break: {act: 'break'}, eject: {act: 'eject'}, load: {act: 'load'}, close: {act: 'close'}, cock: {act: 'cock'}, dry: {act: 'dry'}},
+  id: 'coachgun', version: 2, desc: 'The bruiser\'s double-barrelled coach gun: a black-powder 12-gauge boom with a rolling desert tail, the break, the shells out, a shell in, the close, the hammer; v2: the western-movie flavors (spaghetti / hollywood / gritty barrels and cocks)',
+  params: {act: {values: ['fire', 'break', 'eject', 'load', 'close', 'cock', 'dry'], def: 'fire'}, style: {values: ['v1', ...STYLES], def: 'v1'}},
+  cases: {fire: {act: 'fire'}, break: {act: 'break'}, eject: {act: 'eject'}, load: {act: 'load'}, close: {act: 'close'}, cock: {act: 'cock'}, dry: {act: 'dry'},
+    ...Object.fromEntries(STYLES.flatMap(s => ['fire', 'cock'].map(a => [`${s}_${a}`, {act: a, style: s}])))},
   variants: 6,
   render(p, R, sr) {
-    const a = p.act, out = new Float32Array(Math.round(DUR[a] * sr));
+    const a = p.act;
+    if (p.style !== 'v1' && WEST[p.style]?.[a]) {
+      const P = WEST[p.style][a], out = new Float32Array(Math.round(P.dur * sr));
+      if (a === 'cock') wcock(out, sr, R, P); else wfire(out, sr, R, P);
+      filter(out, 'highpass', P.out.hp, .7, sr);
+      if (P.out.lp) { filter(out, 'lowpass', P.out.lp, .5412, sr); filter(out, 'lowpass', P.out.lp, 1.3066, sr); }   // the optical track's edge
+      filter(out, 'highshelf', P.out.shelf[1], .7, sr, P.out.shelf[0]);
+      return saturate(out, P.sat);
+    }
+    const out = new Float32Array(Math.round(DUR[a] * sr));
     if (a === 'fire') shot(out, sr, R, SHOT);
     else if (a === 'break') {
       tick(out, sr, R, 0, {f: R.range(1400, 1800), amp: .45, t60: .006, body: .55});                        // the top lever thumbed aside
@@ -191,6 +326,14 @@ export default {
     close: {attackMs: [5, 95], t60Ms: [25, 90], centroidHz: [220, 420], highHz: [450, 1100], flatness: [0, .01], hf4kDb: [-60, -30], durMs: [120, 185], onsetCount: [1, 2], clickEnd: [0, .01]},
     cock: {t60Ms: [8, 35], centroidHz: [600, 1200], highHz: [1400, 2500], flatness: [0, .01], hf4kDb: [-50, -26], durMs: [80, 130], onsetCount: [1, 2], clickEnd: [0, .01]},
     dry: {attackMs: [3, 20], t60Ms: [12, 50], centroidHz: [340, 650], highHz: [500, 1250], flatness: [0, .01], hf4kDb: [-60, -35], durMs: [60, 100], clickEnd: [0, .01]},
+    // the western-movie flavors (v3 / v2): ranges from 37 seeds (1-24, the lab's 44291-44296, seven large ones) with a margin
+    // (t60 x.75..1.25, centroid / highHz x.85..1.15, hf4kDb -4..+3 dB, durMs x.9..1.1); the shots' t60 includes the echoes
+    spaghetti_fire: {attackMs: [0, 55], t60Ms: [2600, 5800], centroidHz: [200, 520], lowHz: [15, 65], highHz: [850, 1900], flatness: [0, .005], hf4kDb: [-37, -26], durMs: [3050, 4690], onsetCount: [0, 4], clickEnd: [0, .01]},
+    spaghetti_cock: {attackMs: [40, 145], t60Ms: [950, 1900], centroidHz: [700, 1400], lowHz: [80, 220], highHz: [1550, 2900], flatness: [0, .005], hf4kDb: [-33, -22], durMs: [500, 710], onsetCount: [2, 4], clickEnd: [0, .01]},
+    hollywood_fire: {attackMs: [0, 65], t60Ms: [1200, 2350], centroidHz: [500, 900], lowHz: [30, 190], highHz: [1400, 2400], flatness: [0, .005], hf4kDb: [-31, -21], durMs: [2110, 3060], onsetCount: [0, 2], clickEnd: [0, .01]},
+    hollywood_cock: {attackMs: [30, 110], t60Ms: [110, 280], centroidHz: [700, 1450], lowHz: [80, 220], highHz: [1650, 2900], flatness: [0, .005], hf4kDb: [-29, -19], durMs: [320, 450], onsetCount: [1, 2], clickEnd: [0, .01]},
+    gritty_fire: {attackMs: [0, 55], t60Ms: [1450, 3000], centroidHz: [170, 440], lowHz: [15, 30], highHz: [800, 1550], flatness: [0, .005], hf4kDb: [-41, -27], durMs: [2330, 3510], onsetCount: [0, 3], clickEnd: [0, .01]},
+    gritty_cock: {attackMs: [35, 130], t60Ms: [15, 40], centroidHz: [450, 800], lowHz: [45, 160], highHz: [1250, 2250], flatness: [0, .005], hf4kDb: [-42, -29], durMs: [100, 170], onsetCount: [1, 2], clickEnd: [0, .01]},
   },
   notes: 'Long Friedlander pulse + band-passed black-powder chuff + roughened pink body + damped low thump + rolling brown tail with darker rock slaps; mechanics are damped low-mid thocks and short low steel ticks; see the header',
 };
