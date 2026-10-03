@@ -16,7 +16,8 @@
 //            last frame the corpse with the gun beside him, held; at its `ground` mark a dust puff (combat's puff) and
 //            foe.ground (the thud: audio); the body lies TUNE.corpse.hold s, then fades (an ordered dither); at most
 //            TUNE.corpse.max lie about (the oldest fades early). The corpse lies on the sprite's pivot, so the sprite
-//            stands `travel` m along the fall from where he stood. Without the clips (the fallback): thrown back in
+//            is placed back by how far his root starts from it (the Hips bone at the clip's first frame, side view;
+//            else clip.travel / TUNE.corpse.travel), and he falls from where he stood. Without the clips: thrown back in
 //            `fall`, down through `land` to `crouch`, faded at once; without those either, his last pose slides and fades
 //   telegraph the aim's last moment (the lock): a glint on the barrel (the 'add' layer, after the light: it reads at noon)
 //   tracers  the bullets in flight, with gunfx's look (features/gunfx.js tracer()); the flash, smoke, impacts and the
@@ -89,13 +90,21 @@ function prep(s, root) {
     return nm(name, L.play ? L.play[i] : i);
   }
   const ok = name => !!a.CLIP[name] && has(nm(name, 0));   // the clip is in this atlas
+  // how far ahead of the sprite's pivot his root stands as the clip begins (m along his facing; - behind): the Hips bone
+  // in the side view (E: screen x is his forward) at its first frame. A death clip ends with the body on the pivot, so
+  // the sprite goes this far back from where he stood. null without the bones
+  const ppm = s.idx?.fwd_px?.E?.[0] || 30.5;
+  function rootShift(name) {
+    const L = tl(name), sp = L && SP[nm(name, L.play ? L.play[0] : 0)], h = sp && sp.bones && sp.bones.E && sp.bones.E.Hips;
+    return h ? (h[0] - a.PIV[0]) / ppm : null;
+  }
   // the frame of clip `name` a fraction k (0..1) through it
   function frameAt(name, k) {
     const L = tl(name); if (!L) return null;
     const t = Math.max(0, Math.min(.9999, k)) * L.total; let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
     return nm(name, L.play ? L.play[i] : i);
   }
-  return {root, ...a, SP, has, nm, st, tl, frameAt, frameAtT, markT, ok, barrel, tws: TWS.filter(has), twm: TWM.filter(t => has(st('gws', t, 0))), preview: !root.includes('/outfits/')};
+  return {root, ...a, SP, has, nm, st, tl, frameAt, frameAtT, markT, ok, rootShift, barrel, tws: TWS.filter(has), twm: TWM.filter(t => has(st('gws', t, 0))), preview: !root.includes('/outfits/')};
 }
 
 export function createLook(host, sim) {
@@ -204,9 +213,9 @@ export function createLook(host, sim) {
     const front = -(dx * Math.sin(v.face) + dy * Math.cos(v.face)) >= Math.cos(TUNE.ai.hitFront * DEG);
     const clip = pick(set, front ? 'die_b' : 'die_f', front ? 'die_f' : 'die_b');
     c.on = true; c.set = set; c.clip = clip || ''; c.z = p.z || 0; c.t = 0; c.lift = 0; c.vx = dx; c.vy = dy; c.pose = v.pose; c.foe = p.foe;
-    if (clip) {   // the clip as rendered, its corpse on the pivot: the sprite stands `travel` m along the fall
-      const L = set.tl(clip), k = (clip === 'die_f' ? 1 : -1) * (L.c.travel ?? C.travel[clip] ?? 0);
-      c.face = v.face; c.x = p.x + Math.sin(v.face) * k; c.y = p.y + Math.cos(v.face) * k;
+    if (clip) {   // the clip as rendered, its corpse on the pivot: the sprite goes back by his root's start ahead of it
+      const L = set.tl(clip), sh = set.rootShift(clip) ?? (clip === 'die_b' ? 1 : -1) * (L.c.travel ?? C.travel[clip] ?? 0);
+      c.face = v.face; c.x = p.x - Math.sin(v.face) * sh; c.y = p.y - Math.cos(v.face) * sh;
       c.groundT = set.markT(clip, 'ground') ?? L.total * .7; c.grounded = false; c.fadeAt = L.total + C.hold; c.fadeLen = C.fade;
     } else {   // the fallback: thrown back facing the shot, faded at once
       c.face = Math.atan2(-dx, -dy); c.x = p.x; c.y = p.y; c.grounded = true; c.fadeAt = C.old[0]; c.fadeLen = C.old[1] - C.old[0];
