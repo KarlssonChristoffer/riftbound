@@ -1,7 +1,8 @@
 // LIGHTING: the scene's light every frame, from the world clock's blended mood (sim/env.js) and the lights round the
 // player: the sun (direction for shading + a capped one for shadow length), ambient, fog, the character's fill and
 // grade, then up to 32 point lights (the dark scene's lift, the lantern, world + feature lights, nearest first, each
-// flickering and wandering a few cm) with their halos. Writes the composite's uniforms (gfx.js compU); nothing else.
+// flickering and wandering a few cm) with their halos (a feature light with halo: false has none). Writes the composite's
+// uniforms (gfx.js compU); nothing else.
 // OWNS: the light records (reused frame to frame). READS: host.env / biome / world / player / P / zoom / VH, features'
 //   lights(), opt.lantern. BUDGET: ~0.05 ms (part of view).
 //   const lighting = createLighting({G, host, features, opt}); lighting.apply(PX, PY, t) once per frame before G.render
@@ -31,7 +32,7 @@ export function createLighting({G, host, features, opt}) {
   let nL = 0;
   const colOf = c => { if (Array.isArray(c)) return c; let v = colCache.get(c); if (!v) colCache.set(c, v = rgbOf(c)); return v; };
   const ONE3 = [1, 1, 1], SV3 = [0, 0, 0];
-  function putL(x, y, z, c, r, gain, flat) { const o = LOUT[nL] ??= {}; nL++; o.x = x; o.y = y; o.z = z; o.c = c; o.r = r; o.gain = gain; o.flat = flat; }
+  function putL(x, y, z, c, r, gain, flat, halo = true) { const o = LOUT[nL] ??= {}; nL++; o.x = x; o.y = y; o.z = z; o.c = c; o.r = r; o.gain = gain; o.flat = flat; o.halo = halo; }
   function apply(PX, PY, t) {
     const env = host.env, world = host.world, P = host.P, player = host.player, VH = host.VH, zoom = host.zoom, PPM = host.PPM;
     const biome = host.biome.id, time = env.bucket, m = env.mood(biome), U = G.compU;   // the clock's blended mood
@@ -62,7 +63,7 @@ export function createLighting({G, host, features, opt}) {
     for (const l of world.lights) cand(l);
     for (const f of features) if (f.on !== false && f.lights) for (const l of f.lights()) {
       const o = FREC[nf++] ??= {};
-      o.x = l.x; o.y = l.h || 0; o.z = l.y; o.c = colOf(l.color ?? l.c); o.r = l.radius || l.r || 3; o.k = l.intensity ?? l.k ?? 1; o.flicker = l.flicker || 0; o.id = l.id ?? 7000; o.jitter = l.jitter;
+      o.x = l.x; o.y = l.h || 0; o.z = l.y; o.c = colOf(l.color ?? l.c); o.r = l.radius || l.r || 3; o.k = l.intensity ?? l.k ?? 1; o.flicker = l.flicker || 0; o.id = l.id ?? 7000; o.jitter = l.jitter; o.halo = l.halo;
       cand(o);
     }
     // nearest first, ties in the world-then-features order (a stable insertion sort of the first nc: Array.sort made a
@@ -72,13 +73,13 @@ export function createLighting({G, host, features, opt}) {
     for (let i = 0; i < nc && nL < 32; i++) {
       const l = CAND[i].l, k = flick(l, t), j = l.jitter ?? (l.flicker || 0) * .035, s = (l.id ?? 0) * 7.13;
       const jx = j ? j * (Math.sin(t * 11.3 + s) + Math.sin(t * 17.9 + s * 1.7) * .6) / 1.6 : 0, jz = j ? j * (Math.sin(t * 13.1 + s * 2.1) + Math.sin(t * 7.7 + s * .9) * .6) / 1.6 : 0;
-      putL(l.x + jx, l.y + Math.abs(jz) * .5, l.z + jz, l.c, l.r * (1 + (k - 1) * .15), l.k * k, false);
+      putL(l.x + jx, l.y + Math.abs(jz) * .5, l.z + jz, l.c, l.r * (1 + (k - 1) * .15), l.k * k, false, l.halo !== false);
     }
     U.uNL.value = nL; let nh = 0;
     for (let i = 0; i < nL; i++) {
       const l = LOUT[i];
       U.uLP.value[i].set(l.x, l.y, l.z, l.r); U.uLC.value[i].set(l.c[0] * l.gain, l.c[1] * l.gain, l.c[2] * l.gain, l.flat ? 1 : 0);
-      if (l.flat) continue;
+      if (l.flat || !l.halo) continue;   // (halo: false, a feature light without one: a muzzle flash)
       const a = Math.min(.75, HALO_A * l.gain * (m.glow ?? 1) * (.3 + .7 * dark) + Math.max(0, l.gain - 1.5) * .12); if (a < .02) continue;
       const sv = G.toScreenInto(l.x, l.y, l.z, SV3), sx = sv[0], sy = sv[1];
       U.uHalo.value[nh].set(sx, VH - sy, (HALO_R + .12 * Math.min(2, l.gain) + Math.max(0, l.gain - 1.3) * .35) * PPM * zoom, a); U.uHaloC.value[nh].set(l.c[0], l.c[1], l.c[2]); nh++;

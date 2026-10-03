@@ -1,8 +1,10 @@
 // GUN FX (view): what a revolver's shots look like. Presentation only: it reads the sim (the player's pose through the
 // revolver's barrel(), the bullets in host.arrows) and its events, and writes only its own pools; with ?views=0 or
 // switched off nothing in play changes (tools/test/simview.mjs).
-//   flash    HD: a muzzle flash at the pose's GunMuzzle0 for ~4 frames (pre-rendered flame stars, turned along the
-//            barrel on screen; the Navy's bigger and redder), plus a short warm point light (F.lights) for the yard
+//   flash    a pixel-art muzzle flash for ~4 frames (render/flashes.js): a hot core, a flame tongue along the shot,
+//            petals either side, in the world at the muzzle's real place (the sim's), so what stands in front of the
+//            gun (his own hat, firing away from the camera) hides it; a small soft glow round it (HD, depth-faded); and
+//            light thrown forward along the shot (a short chain of pools ahead of the muzzle, no halo: F.lights)
 //   blast    world lines (glowing): burning powder grains thrown out of the muzzle along the shot
 //   smoke    gunfx/smoke.js: the jet of gun smoke along the shot that stops within a metre, then rolls in eddies,
 //            rises and drifts downwind, and a jet out of each side of the cylinder gap; a thin wisp keeps curling off
@@ -23,14 +25,18 @@
 // READS: host.P, host.PL.gun, host.weapon, host.arrows, events (player.shoot / reload, foe.shoot / reload, bullet.impact,
 // arrow.hit, combat.hit), host.wind (the smoke's drift), host.yaw / zoom, host.mouse / VW / VH (the reticle),
 // host.entities.near + host.biome.groundAt (what a bullet hit), flow's F.stamp (the ground's scuffs).
-// BUDGET: view ~.03 ms with a fanned cylinder in the air and its impacts (<= 320 bits, 48 holes); HD: <= 120 drawImage calls.
+// BUDGET: view ~.03 ms with a fanned cylinder in the air and its impacts (<= 320 bits, 48 holes); flashes: one instanced draw.
 import {WEAPONS} from '../content/weapons.js';
 import {rgbOf} from '../core/color.js';
 import {hypot2, hypot3} from '../core/mathx.js';
 import {SMOKE, createSmoke} from './gunfx/smoke.js';
+import {createFlashes} from '../render/flashes.js';
 
 export const TUNE = {
-  flash: {life: .065, len: .95, glow: .34, navy: 1.3, fan: 1.1, light: {radius: 4.6, intensity: 3.4, life: .11, color: '#ffc46a'}},
+  // the flash: s, its length (m along the shot), x its thickness, x for the Navy / a fanned shot; its glow (HD: m, alpha);
+  // its light: s it fades over, colour, x brightness, and the chain of pools [m ahead of the muzzle, radius m, x k]
+  flash: {life: .065, len: .62, width: 1, navy: 1.3, fan: 1.1, glow: {r: .13, a: .45},
+    light: {life: .07, color: '#ffc46a', k: 1.1, chain: [[.6, .8, .8], [1.4, 1.35, .75], [2.4, 1.7, .45]]}},
   blast: {n: 6, navy: 9, foe: 4, speed: [7, 13], spread: .22, life: [.04, .11]},   // powder grains: count, m/s, rad either side, s
   smoke: SMOKE,   // (gunfx/smoke.js)
   tracer: {len: 2.4, head: .45, mid: 1.1, last: .07},
@@ -97,32 +103,38 @@ export async function create(host) {
     W3.x = pl.x + dx * c; W3.y = pl.y - dx * s; W3.h = P.z - MZ.y / host.PPMH; return W3;
   }
 
-  // ---- pre-rendered sprites (made once) ----
-  const mk = (w, h, fn) => { const c = document.createElement('canvas'); c.width = w; c.height = h; fn(c.getContext('2d'), w, h); return c; };
-  // a flash: a hot core and flame lobes along +x (the barrel), a side spray and a cross of short spikes; three variants
-  const flashImg = [0, 1, 2].map(v => mk(112, 56, (q, w, h) => {
-    q.globalCompositeOperation = 'lighter';
-    const blob = (x, y, rx, ry, col) => { const g = q.createRadialGradient(x, y, 0, x, y, Math.max(rx, ry)); g.addColorStop(0, col); g.addColorStop(1, 'rgba(255,120,30,0)');
-      q.save(); q.translate(x, y); q.scale(rx / Math.max(rx, ry), ry / Math.max(rx, ry)); q.translate(-x, -y); q.fillStyle = g; q.beginPath(); q.arc(x, y, Math.max(rx, ry), 0, Math.PI * 2); q.fill(); q.restore(); };
-    blob(16, h / 2, 16, 14, 'rgba(255,252,228,1)');
-    blob(38 + v * 4, h / 2, 30 + v * 3, 9 - v, 'rgba(255,216,124,.95)');
-    blob(66 + v * 6, h / 2 + (v - 1) * 2, 22, 6, 'rgba(255,150,60,.85)');
-    blob(22, h / 2 - 12 - v * 2, 12, 4, 'rgba(255,190,90,.65)'); blob(22, h / 2 + 12 + v, 12, 4, 'rgba(255,190,90,.65)');
-    blob(16, h / 2, 4, 20 - v * 3, 'rgba(255,236,170,.7)');   // the cross: a short spike either side of the core
-  }));
-
-  const glowImg = mk(64, 64, (q, w) => {   // the flash's round glow at the muzzle
-    const g = q.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
-    g.addColorStop(0, 'rgba(255,252,230,1)'); g.addColorStop(.25, 'rgba(255,220,140,.85)'); g.addColorStop(1, 'rgba(255,140,40,0)');
-    q.fillStyle = g; q.fillRect(0, 0, w, w);
-  });
-  // ---- state: the flash, the smoke (gunfx/smoke.js), tracers' last streaks, cases, bits, holes ----
-  const FL = {t: -9, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0};   // t: the flash's time left; it runs on below 0 while its light fades
-  const LIGHT = {x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: 7450}, LIT = [LIGHT], NONE = [];
-  // other shooters' flashes (foe.shoot): each at the muzzle its event names, along its shot; one light, the newest's
-  const OF = []; for (let i = 0; i < 6; i++) OF.push({t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0});
-  let ofI = 0;
-  const OLIGHT = {x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: 7451}, LITS = [], OFL = {t: -9, k: 1};
+  // ---- state: the flashes (render/flashes.js), the smoke (gunfx/smoke.js), tracers' last streaks, cases, bits, holes ----
+  const flashes = createFlashes(host.G, 8);
+  // a flash: t its time left (it runs on below 0 while its light fades), v its variant, k x its size, a its angle on
+  // screen, s art px a metre along the shot there, the muzzle (x, y, h: the sim's), the shot's way (ux, uy)
+  const mkFlash = () => ({t: -9, v: 0, k: 1, a: 0, s: 1, x: 0, y: 0, h: 0, ux: 1, uy: 0});
+  const FL = mkFlash();   // yours
+  const OF = []; for (let i = 0; i < 6; i++) OF.push(mkFlash());   // other shooters' (foe.shoot): the newest one lights
+  let ofI = 0, OFL = OF[0];
+  const mkChain = id => TUNE.flash.light.chain.map((c, i) => ({x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: id + i, halo: false}));
+  const LCH = mkChain(7450), OCH = mkChain(7460), LITS = [], GLOW = [1, .78, .42];
+  // a shot's flash from its event (x, y, h the muzzle; vx, vy its way): where, which way on screen, how big
+  function flashOf(Q, e, k) {
+    Q.t = TUNE.flash.life; Q.v = (R() * 3) | 0; Q.k = k; Q.x = e.x; Q.y = e.y; Q.h = e.h; Q.ux = e.vx; Q.uy = e.vy;
+    view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h);
+    Q.a = Math.atan2(SC[1] - y0, SC[0] - x0); Q.s = Math.hypot(SC[0] - x0, SC[1] - y0) / (host.zoom || 1);
+  }
+  function drawFlash(Q) {   // (frame) the pixel flash and its glow
+    const T = TUNE.flash, k = Q.t / T.life;
+    flashes.put(Q.x, Q.y, Q.h, T.len * Q.s * Q.k * (.7 + .3 * k), Q.a, k, Q.v, T.width);
+    if (host.G.fx) for (let i = 0; i < 2; i++) {
+      const d = (.08 + i * .22) * Q.k;
+      host.G.fx(Q.x + Q.ux * d, Q.h, Q.y + Q.uy * d, T.glow.r * Q.k * (i ? .75 : 1) * (.6 + .4 * k), GLOW, T.glow.a * k * (i ? .6 : 1), 'add');
+    }
+  }
+  function chain(L, Q) {   // the light thrown forward along the shot: on full at the flash, gone life s later
+    const T = TUNE.flash, k = Math.max(0, Math.min(1, (Q.t + T.light.life - T.life) / T.light.life));
+    for (let i = 0; i < L.length; i++) {
+      const c = T.light.chain[i], o = L[i], d = c[0] * Q.k;
+      o.x = Q.x + Q.ux * d; o.y = Q.y + Q.uy * d; o.h = Q.h; o.radius = c[1] * Q.k * (.75 + .25 * k); o.intensity = T.light.k * c[2] * k * Q.k;
+      LITS.push(o);
+    }
+  }
   const smoke = createSmoke(host);
   let wispT = 0, wispFor = 0;
   const TR = [], TRN = 16; for (let i = 0; i < TRN; i++) TR.push({x0: 0, y0: 0, h0: 0, x1: 0, y1: 0, h1: 0, t: 9});
@@ -232,18 +244,14 @@ export async function create(host) {
       for (const e of evs) {
         if (e.type === 'foe.shoot') {   // a gunman's shot: the flash at its muzzle along the shot, grains, the smoke
           const navy = e.gun === 'coach' || e.gun === 'navy', Q = OF[ofI]; ofI = (ofI + 1) % OF.length;   // (coach: the bruiser's coach gun, the big flash)
-          Q.t = TUNE.flash.life; Q.v = (R() * 3) | 0; Q.k = navy ? TUNE.flash.navy * 1.15 : 1; Q.x = e.x; Q.y = e.y; Q.h = e.h;
-          view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h); Q.a = Math.atan2(SC[1] - y0, SC[0] - x0);
-          OLIGHT.x = e.x; OLIGHT.y = e.y; OLIGHT.h = e.h; OFL.t = TUNE.flash.life; OFL.k = Q.k;
+          flashOf(Q, e, navy ? TUNE.flash.navy * 1.15 : 1); OFL = Q;
           blast(e.x, e.y, e.h, e.vx, e.vy, TUNE.blast.foe + (navy ? 2 : 0));
           smoke.shot(e.x, e.y, e.h, e.vx, e.vy, SMOKE.puffs + (navy ? 2 : 0), navy ? 1.4 : 1, navy ? 1.3 : 1.1, false);
         } else if (e.type === 'player.shoot') {
           const w = WEAPONS[e.gun] || {}, navy = e.gun === 'brass_navy';
-          FL.t = TUNE.flash.life; FL.v = (R() * 3) | 0; FL.k = (navy ? TUNE.flash.navy : 1) * (e.fan ? TUNE.flash.fan : 1);
-          // the flash leaves along the shot (the bullet's way on screen), not the barrel of the frame showing: that one
-          // is already kicking up
-          view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h); FL.a = Math.atan2(SC[1] - y0, SC[0] - x0);
-          LIGHT.x = e.x; LIGHT.y = e.y; LIGHT.h = e.h;
+          // the flash at the shot's muzzle (where the sim put it: the pose's muzzle on screen, the aim's depth), along the
+          // shot, not the barrel of the frame showing: that one is already kicking up
+          flashOf(FL, e, (navy ? TUNE.flash.navy : 1) * (e.fan ? TUNE.flash.fan : 1));
           blast(e.x, e.y, e.h, e.vx, e.vy, navy ? TUNE.blast.navy : TUNE.blast.n);
           smoke.shot(e.x, e.y, e.h, e.vx, e.vy, SMOKE.puffs + (navy ? 1 : 0), navy ? 1.25 : 1, w.push ? 1 + w.push : 1, true);   // (+ the cylinder gap's jets)
           wispFor = SMOKE.wisp;
@@ -260,8 +268,7 @@ export async function create(host) {
         }
       }
       if (FL.t > -TUNE.flash.light.life) FL.t -= dt;   // (past 0 too: the light outlives the flash)
-      for (const Q of OF) if (Q.t > 0) Q.t -= dt;
-      if (OFL.t > -TUNE.flash.light.life) OFL.t -= dt;
+      for (const Q of OF) if (Q.t > -TUNE.flash.light.life) Q.t -= dt;
       // the wisp off the barrel after a shot, and while the gunslinger blows on it
       const blowing = !!g && g.blowing;
       if (g && (wispFor > 0 || blowing)) {
@@ -297,6 +304,9 @@ export async function create(host) {
     },
     frame() {
       smoke.frame();
+      if (FL.t > 0) drawFlash(FL);
+      for (const Q of OF) if (Q.t > 0) drawFlash(Q);
+      flashes.frame();
       // tracers: every bullet in flight, a streak behind its head (length capped by how far it has come)
       const T = TUNE.tracer;
       for (const a of host.arrows) {
@@ -330,46 +340,15 @@ export async function create(host) {
       }
       O.alpha = 1; O.emit = false;
     },
-    lights() {
-      const L = TUNE.flash.light, mine = FL.t > -L.life + TUNE.flash.life, other = OFL.t > -L.life + TUNE.flash.life;
-      if (!mine && !other) return NONE;
-      if (mine) { const k = Math.max(0, (FL.t + L.life - TUNE.flash.life) / L.life); LIGHT.radius = L.radius * (.7 + .3 * k) * FL.k; LIGHT.intensity = L.intensity * k * FL.k; }
-      if (!other) return LIT;
-      const k = Math.max(0, (OFL.t + L.life - TUNE.flash.life) / L.life); OLIGHT.radius = L.radius * (.7 + .3 * k) * OFL.k; OLIGHT.intensity = L.intensity * k * OFL.k;
-      LITS.length = 0; if (mine) LITS.push(LIGHT); LITS.push(OLIGHT); return LITS;
+    lights() {   // the flashes' light, thrown forward along the shot: yours, and the newest gunman's
+      const on = TUNE.flash.life - TUNE.flash.light.life;
+      LITS.length = 0;
+      if (FL.t > on) chain(LCH, FL);
+      if (OFL.t > on) chain(OCH, OFL);
+      return LITS;
     },
-    hd(q, sc) {
-      let others = false; for (const Q of OF) if (Q.t > 0) others = true;
-      if (!smoke.n && FL.t <= 0 && !others) return;
-      const z = host.zoom, px = host.PPM * z * sc;   // display px per metre
-      smoke.hd(q, sc);   // (the soft look's puffs: first, the flash glows through them)
-      const g = gun();
-      if (FL.t > 0 && g) {
-        const m = muzzleWorld(g);
-        if (m) {
-          const s = view(m.x, m.y, m.h), len = TUNE.flash.len * px * FL.k * (.8 + .4 * FL.t / TUNE.flash.life), img = flashImg[FL.v];
-          const k = len / img.width, c = Math.cos(FL.a) * k, sn = Math.sin(FL.a) * k;
-          q.globalCompositeOperation = 'lighter';
-          const gr = TUNE.flash.glow * px * FL.k * (.7 + .5 * FL.t / TUNE.flash.life);
-          q.drawImage(glowImg, s[0] * sc - gr, s[1] * sc - gr, gr * 2, gr * 2);
-          q.setTransform(c, sn, -sn, c, s[0] * sc, s[1] * sc);
-          q.drawImage(img, -img.width * .12, -img.height / 2);
-          q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-over';
-        }
-      }
-      if (others) for (const Q of OF) if (Q.t > 0) flashAt(q, sc, px, Q.x, Q.y, Q.h, Q.a, Q.k, Q.t, Q.v);
-    },
+    hd(q, sc) { smoke.hd(q, sc); },   // (the soft smoke look's puffs; the flashes are in the world now)
   };
   const PT = {size: 1, alpha: 1, emit: false};
-  // a flash at a world muzzle (another shooter's): the glow, then the flame star turned along its shot on screen
-  function flashAt(q, sc, px, x, y, h, a, kk, t, v) {
-    const s = view(x, y, h), len = TUNE.flash.len * px * kk * (.8 + .4 * t / TUNE.flash.life), img = flashImg[v];
-    const k = len / img.width, c = Math.cos(a) * k, sn = Math.sin(a) * k, gr = TUNE.flash.glow * px * kk * (.7 + .5 * t / TUNE.flash.life);
-    q.globalCompositeOperation = 'lighter';
-    q.drawImage(glowImg, s[0] * sc - gr, s[1] * sc - gr, gr * 2, gr * 2);
-    q.setTransform(c, sn, -sn, c, s[0] * sc, s[1] * sc);
-    q.drawImage(img, -img.width * .12, -img.height / 2);
-    q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-over';
-  }
   return F;
 }
