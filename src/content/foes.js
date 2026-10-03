@@ -70,12 +70,13 @@ export const TUNE = {
   body: {r: .3, h0: .1, h1: 1.75},
   bullets: {max: 96, sub: .3},   // pool size; sub-step length (m) of the hit test (no tunnelling at any speed)
   // the view's deaths (features/foes/look.js). With the death clips (die_b: shot from the front, on his back; die_f: from
-  // behind, forward): the clip (its last frame the corpse, the gun beside him), a dust puff and a thud at its `ground`
+  // behind, forward; die_s: from within `side` deg of his right, spun round onto his front; an atlas without die_s
+  // uses die_b / die_f): the clip (its last frame the corpse, the gun beside him), a dust puff and a thud at its `ground`
   // mark, then the body lies `hold` s and fades over `fade` s; at most `max` lie about (the oldest fades early, `early` s).
   // travel: m the root moves as he falls, only where the clip's own bones can't say (features/foes/look.js reads the Hips
   // bone at its first frame) and it doesn't carry clip.travel. Without the clips (the fallback): thrown
   // back in `fall` (s), `land` (s), then `crouch`, faded over old: [from, to] s, sliding `slide` m/s, lifted `lift` m
-  corpse: {hold: 9, fade: .8, max: 10, early: .5, travel: {die_b: .8, die_f: .7}, puff: {n: 14, r: .6},
+  corpse: {hold: 9, fade: .8, max: 10, early: .5, side: 40, travel: {die_b: .8, die_f: .7, die_s: -.2}, puff: {n: 14, r: .6},
     fall: .24, land: .2, old: [.7, 1.5], slide: 1.6, lift: .22},
   // the view's hit (features/foes/look.js): a bullet shoves the sprite `nudge` m along its way in `out` s and it eases
   // back over `back` s (only the picture: the body doesn't move); combat's white flash shows x `flash` (held full at first)

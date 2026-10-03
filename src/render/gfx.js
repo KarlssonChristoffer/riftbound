@@ -532,24 +532,36 @@ const LINE_FS = HEAD + OUTS + `
 in vec4 vCol;
 void main() { o0 = vec4(vCol.rgb, float(6 * 4) / 255.); o1 = vec4(0., 1., 0., 7.); o2 = vec4(vCol.rgb * vCol.a, 0.); }`;
 
-// the sprite batch: many small billboards per draw (one draw per source image). Per instance: anchor (world), uv rect,
-// size + pivot (px), misc (alpha: ordered dither below 1, flipX, sway px at the top, flash 0..1)
+// the sprite batch: many small billboards per draw (one draw per source image). Per instance: anchor (world) + lie, uv
+// rect, size + pivot (px), misc (alpha: ordered dither below 1, flipX, sway px at the top, flash 0..1).
+// LIE (0 upright .. 1 lying; features/foes/look.js, a death clip's per-frame `lie`): a lying body's image is the game's
+// own ground projection (tools/blender/western.py render views: PPMH px per m of height, PPMY per m of ground), so a row
+// py px above the pivot shows the ground (py - LIE_H PPMH) / PPMY m beyond it, LIE_H up. Drawn, the card keeps its place
+// on screen and only its DEPTH lies down onto that plane (things behind the body show over it, the ground in front no
+// longer buries its lowered rows); in the sun's map the card itself lies down (uSun): its shadow is the body's footprint
 const BATCH_VS = HEAD + `
-in vec3 position; in vec3 iAnchor; in vec4 iRect; in vec4 iSize; in vec4 iMisc;
+in vec3 position; in vec4 iAnchor; in vec4 iRect; in vec4 iSize; in vec4 iMisc;
 uniform mat4 viewMatrix, projectionMatrix;
-uniform float uFaceYaw, uCamYaw, uBias; uniform vec2 uPx, uSnap;
+uniform float uFaceYaw, uCamYaw, uBias, uPy, uSun; uniform vec2 uPx, uSnap;
 out vec2 vUv; out vec2 vC; flat out vec4 vMisc;
+const float LIE_H = .18;
 void main() {
   vec2 c = position.xy;
   vec3 right = vec3(cos(uFaceYaw), 0., -sin(uFaceYaw));
   if (dot(right, vec3(cos(uCamYaw), 0., -sin(uCamYaw))) < 0.) right = -right;   // shadow cards: never mirrored (CARD_VS)
-  float px = c.x * iSize.x - iSize.z + iMisc.z * c.y, py = iSize.w - (1. - c.y) * iSize.y;
-  vec3 w = iAnchor + right * (px / uPx.x) + vec3(0., py / uPx.y, 0.);
+  float px = c.x * iSize.x - iSize.z + iMisc.z * c.y, py = iSize.w - (1. - c.y) * iSize.y, lie = iAnchor.w;
+  vec3 w = iAnchor.xyz + right * (px / uPx.x) + vec3(0., py / uPx.y, 0.), fl = w;
+  if (lie > 0.) {
+    vec3 rc = vec3(cos(uCamYaw), 0., -sin(uCamYaw)), fc = vec3(-sin(uCamYaw), 0., -cos(uCamYaw));   // the view's right, away along the ground
+    fl = iAnchor.xyz + rc * (px / uPx.x) + fc * ((py - LIE_H * uPx.y) / uPy) + vec3(0., LIE_H, 0.);
+    if (uSun > .5) w = mix(w, fl, lie);
+  }
   vC = vec2(iMisc.y > .5 ? 1. - c.x : c.x, 1. - c.y);
   vUv = iRect.xy + vC * iRect.zw; vMisc = iMisc;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
+  if (lie > 0. && uSun < .5) gl_Position.z = mix(gl_Position.z, (projectionMatrix * viewMatrix * vec4(fl, 1.)).z, lie);
   if (uSnap.x > 0.) {
-    vec4 a = projectionMatrix * viewMatrix * vec4(iAnchor, 1.);
+    vec4 a = projectionMatrix * viewMatrix * vec4(iAnchor.xyz, 1.);
     vec2 p = (a.xy * .5 + .5) * uSnap;
     gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
   }
@@ -1460,18 +1472,20 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // sprites: billboards from any image, grouped by (image, emit image, normals, type, shadow) into instanced draws.
   //   o = {img, sx, sy, sw, sh (source rect, px; default the whole image), x, y, z (world anchor: X, Y up, Z),
   //        px, py (pivot inside the source rect), em (emit image, same layout), nrm (normal image, same layout),
-  //        type 3 painted | 7 lit by its normals, alpha (dither), flip, sway (px at the top), flash, shadow (cast), dynamic}
+  //        type 3 painted | 7 lit by its normals, alpha (dither), flip, sway (px at the top), flash, shadow (cast), dynamic,
+  //        lie (0..1: a lying body's depth and sun card lie down, BATCH_VS)}
   const groups = new Map(), imgId = new WeakMap(); let nextImg = 1;
   const idOf = img => { if (!img) return 0; let i = imgId.get(img); if (!i) { i = nextImg++; imgId.set(img, i); } return i; };
+  const PY_U = {value: PPMY}, SUN_OFF = {value: 0}, SUN_ON = {value: 1};
   function makeGroup(o) {
     const cap = 64, geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
-    const A = {iAnchor: 3, iRect: 4, iSize: 4, iMisc: 4}, attrs = {};
+    const A = {iAnchor: 4, iRect: 4, iSize: 4, iMisc: 4}, attrs = {};
     for (const [k, n] of Object.entries(A)) { attrs[k] = new THREE.InstancedBufferAttribute(new Float32Array(cap * n), n); attrs[k].setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, attrs[k]); }
     const uni = {uTex: {value: null}, uEm: {value: null}, uNrm: {value: null}, uHasEm: {value: 0}, uHasNrm: {value: 0}, uType: {value: o.type ?? 3},
-      uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP, uBias: {value: .00125}};
+      uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uPy: PY_U, uSun: SUN_OFF, uSnap: SNAP, uBias: {value: .00125}};
     const gm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gm.matrixAutoUpdate = false; gScene.add(gm);
     let sm = null;
-    if (o.shadow) { sm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_SHADOW_FS, {uTex: uni.uTex, uFaceYaw: U.sunYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: NOSNAP, uBias: {value: 0}}, {side: THREE.DoubleSide})); sm.frustumCulled = false; sm.matrixAutoUpdate = false; sScene.add(sm); }
+    if (o.shadow) { sm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_SHADOW_FS, {uTex: uni.uTex, uFaceYaw: U.sunYaw, uCamYaw: U.camYaw, uPx: U.px, uPy: PY_U, uSun: SUN_ON, uSnap: NOSNAP, uBias: {value: 0}}, {side: THREE.DoubleSide})); sm.frustumCulled = false; sm.matrixAutoUpdate = false; sScene.add(sm); }
     return {geo, attrs, list: Object.values(attrs), uni, gm, sm, cap, n: 0, idle: 0};
   }
   function grow(G2) {
@@ -1499,8 +1513,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     const W = o.img.width, H = o.img.height, sx = o.sx || 0, sy = o.sy || 0, sw = o.sw ?? W, sh = o.sh ?? H, i = G2.n++, dyn = o.dynamic ? DYN : STILL;
     G2.uni.uTex.value = tex(o.img, dyn); if (o.em) { G2.uni.uEm.value = tex(o.em, dyn); G2.uni.uHasEm.value = 1; }
     if (o.nrm) { G2.uni.uNrm.value = tex(o.nrm); G2.uni.uHasNrm.value = 1; }
-    const A = G2.attrs.iAnchor.array, R = G2.attrs.iRect.array, S = G2.attrs.iSize.array, M = G2.attrs.iMisc.array, a = i * 3, b = i * 4;
-    A[a] = o.x; A[a + 1] = o.y; A[a + 2] = o.z;
+    const A = G2.attrs.iAnchor.array, R = G2.attrs.iRect.array, S = G2.attrs.iSize.array, M = G2.attrs.iMisc.array, b = i * 4;
+    A[b] = o.x; A[b + 1] = o.y; A[b + 2] = o.z; A[b + 3] = o.lie || 0;
     R[b] = sx / W; R[b + 1] = sy / H; R[b + 2] = sw / W; R[b + 3] = sh / H;
     S[b] = sw; S[b + 1] = sh; S[b + 2] = o.px ?? sw / 2; S[b + 3] = o.py ?? sh;
     M[b] = o.alpha ?? 1; M[b + 1] = o.flip ? 1 : 0; M[b + 2] = o.sway || 0; M[b + 3] = o.flash || 0;
