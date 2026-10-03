@@ -4,11 +4,14 @@
 //         piercing shot, vault trap) are the bow's: for a gun, 1-4 do nothing and their bar hides (combat/draw.js)
 //   R     reload (the dev key that was there moved to P: dev/devkeys.js)        Y   tip the hat (the gunslinger)
 //   cues  each step: calm (nothing hunting within TUNE.calmR m: the gunslinger blows the smoke off then), an elite or
-//         the champion within TUNE.duelR m (the duel stance), a kill (smoke to blow off)
+//         the champion within TUNE.duelR m (the duel stance), a kill (smoke to blow off). Hunting: combat's brutes and
+//         every other hunter in the world (the desert's gunmen, features/foes; the sheriff is an elite)
 //   HUD   the cylinder (ui/cylinder.js), bottom centre
 // OWNS: nothing of the sim (it calls the revolver's API: setCues, cue, fan, reload, emote). READS: host.weapon, host.PL.gun,
-// the combat core's brutes (a live list) and their fight state. BUDGET: sim, a gun loadout only: one pass over the brutes.
+// the combat core's brutes (a live list) and their fight state, the other hunters (a live query).
+// BUDGET: sim, a gun loadout only: one pass over the brutes and the other hunters.
 import {createCylinder} from '../ui/cylinder.js';
+import {hypot2} from '../core/mathx.js';
 
 const TUNE = {calmR: 7, duelR: 11};
 // ORDER (core/features.js): before combat in every hook chain: RMB is the fan before combat's multishot
@@ -17,6 +20,7 @@ export async function create(host) {
   const cyl = createCylinder();
   let combat;
   const gun = () => host.weapon?.kind === 'gun' ? host.PL.gun : null;
+  const others = host.entities.query('gun.hunter', p => p.hunter && p.kind !== 'brute');   // hunters that aren't combat's brutes
   const F = {
     name: 'gun', label: 'Revolver', TUNE,
     update(dt, evs) {
@@ -31,6 +35,12 @@ export async function create(host) {
           if (d < TUNE.calmR && (b.hunter || core.BS.get(b)?.mode === 'aggro')) calm = false;
           if ((b.elite || b.boss) && d < TUNE.duelR) duel = true;
         }
+      }
+      for (const b of others) {
+        if (b.broken || b.gone) continue;
+        const d = hypot2(b.x - host.player.x, b.y - host.player.y);
+        if (d < TUNE.calmR) calm = false;
+        if ((b.elite || b.boss) && d < TUNE.duelR) duel = true;
       }
       g.setCues(calm, duel);
       for (const e of evs) if (e.type === 'enemy.kill' || (e.type === 'prop.break' && e.kind === 'brute')) g.cue('kill');
