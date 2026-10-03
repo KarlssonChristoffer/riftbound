@@ -168,7 +168,7 @@ export function createGun(PL, I) {
   // ---------------------------------------------------------------- starting things
   function startDraw(w, shot, fast = false) {
     S.out = false; S.act = 'draw'; S.at = 0; S.quick = shot; S.aclip = null; S.lastSa = NaN;
-    S.hip = shot && w.hip && has('gun_hipfire.0');
+    S.hip = shot && w.hip && S.ammo > 0 && has('gun_hipfire.0');   // (an empty cylinder: no hip shot; the draw ends in the dry click)
     if (fast) S.at = startOf('gun_draw', mark('gun_draw', 'lift', 2)) / w.draw;   // from the duel stance: the hand is already on the grip
     P.state = 'draw'; P.aimBack = false; P.stanceAge = 9; P.snapFace = false;
     P.face = P.want = bestFacing(S.hip ? 'gun_hipfire.0' : 'gun_aim');   // a quick draw turns at once
