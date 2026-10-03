@@ -152,12 +152,29 @@ export function createLook(host, sim) {
       try { s = await loadAtlas(root, {normals: true}); }
       catch (e) { if (!root.includes('/outfits/')) throw e; root = `${OUT}western/art_g2b/${TYPES[k].atlas}/all/`; s = await loadAtlas(root, {normals: true}); }
       const set = sets[k] = prep(s, root);
-      s.warm?.(Object.keys(s.SP).filter(n => SHOWN.test(n)));   // (cut ahead of their first sight: render/atlas.js warm)
+      const shown = Object.keys(s.SP).filter(n => SHOWN.test(n));
+      s.warm?.(shown)?.then(() => warmTex(s, shown));   // (cut ahead of their first sight: render/atlas.js warm; then their textures)
       for (const c of ['hit_f', 'hit_b']) {   // (the sim's flinch is TUNE's, never the art's: it should match the clip)
         const bt = set.ok(c) ? set.markT(c, 'back') : null, fl = TYPES[k].flinch;
         if (host.dev && bt !== null && fl > 0 && Math.abs(bt - fl) > .03) console.warn(`foes: ${k} ${c} 'back' is at ${bt.toFixed(2)} s, TYPES.${k}.flinch is ${fl} s`);
       }
     })).catch(e => { failed = String(e); console.warn('foes: an atlas failed to load', e); }));
+  }
+
+  // their textures, uploaded ahead in idle slices (the renderer's own: G.tex is what host.sprite draws with): a pose's
+  // first draw uploads two (albedo + normals, ~.3 ms each plus the GPU process's copy), ~100 a second as a fight starts
+  function warmTex(s, names) {
+    let i = 0;
+    const step = d => {
+      const t0 = performance.now(), ms = d.didTimeout ? 1 : Math.max(.5, Math.min(3, d.timeRemaining()));
+      while (i < names.length && performance.now() - t0 < ms) {
+        const sp = s.SP[names[i++]];
+        if (sp.img) G.renderer.initTexture(G.tex(sp.img));
+        if (sp.nrm) G.renderer.initTexture(G.tex(sp.nrm));
+      }
+      if (i < names.length) requestIdleCallback(step, {timeout: 50});
+    };
+    if (window.requestIdleCallback) requestIdleCallback(step, {timeout: 50});
   }
 
   // ---------------------------------------------------------------- per gunman: the view's own state
