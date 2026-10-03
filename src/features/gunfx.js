@@ -9,8 +9,12 @@
 //            streak that shrinks into the impact in ~70 ms (a bullet that hit within its first step is seen only so)
 //   cases    world points: brass cases dropping from the cylinder on a reload's eject, bouncing, lying a while
 //   impacts  world points: dust and sparks where a bullet hits the ground, chips off trees and props, sparks off a hit
+//   others   the desert's gunmen (features/foes): their shots (foe.shoot) flash and smoke at the muzzle the event names
+//            (a few at once), their reloads drop cases (foe.reload), their bullets end like yours (bullet.impact); their
+//            tracers in flight are drawn by their own view with this look (tracer(), exported)
 // OWNS: its pools (typed arrays, capped; reused, nothing allocated per frame). READS: host.P, host.PL.gun, host.weapon,
-// host.arrows, events (player.shoot / reload, bullet.impact, arrow.hit), host.wind (the smoke's drift), host.yaw / zoom.
+// host.arrows, events (player.shoot / reload, foe.shoot / reload, bullet.impact, arrow.hit), host.wind (the smoke's
+// drift), host.yaw / zoom.
 // BUDGET: view ~.02 ms with a fanned cylinder in the air (6 tracers x 3 lines, <= 200 points); HD: <= 60 drawImage calls.
 import {WEAPONS} from '../content/weapons.js';
 import {rgbOf} from '../core/color.js';
@@ -26,6 +30,18 @@ export const TUNE = {
 const C = {head: rgbOf('#fff6d8'), mid: rgbOf('#ffd27a'), tail: rgbOf('#b8642e'), brass: rgbOf('#d8a93c'), brassHi: rgbOf('#ffe08a'),
   dust: ['#cbb593', '#a99272', '#8a765c'].map(rgbOf), spark: [rgbOf('#fff4c8'), rgbOf('#ffc860')], chip: ['#b08a5a', '#7a5636'].map(rgbOf)};
 const R = Math.random, RR = (a, b) => a + R() * (b - a);   // presentation's randomness
+// a bullet in flight as a streak behind its head (x, y, h; u: its unit direction), L m long at most (how far it has
+// come: a fresh one is short): a white-hot head, a gold middle (both glowing), a dull copper tail. Other shooters' bullets
+// (features/foes) are drawn with it too
+export function tracer(host, x, y, h, ux, uy, uh, L) {
+  const T = TUNE.tracer; L = Math.min(T.len, L);
+  seg(host, x, y, h, ux, uy, uh, 0, Math.min(L, T.head), C.head, true);
+  if (L > T.head) seg(host, x, y, h, ux, uy, uh, T.head, Math.min(L, T.mid), C.mid, true);
+  if (L > T.mid) seg(host, x, y, h, ux, uy, uh, T.mid, L, C.tail, false);
+}
+function seg(host, x, y, h, ux, uy, uh, d0, d1, col, emit) {
+  host.line(x - ux * d0, y - uy * d0, h - uh * d0, x - ux * d1, y - uy * d1, h - uh * d1, col, emit);
+}
 
 // ORDER (core/features.js): after combat (its hits' chunks first; nothing reads ours)
 export const order = {after: ['combat']};
@@ -67,6 +83,10 @@ export async function create(host) {
   // ---- state: the flash, the smoke (SoA pools), tracers' last streaks, cases, bits ----
   const FL = {t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0};
   const LIGHT = {x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: 7450}, LIT = [LIGHT], NONE = [];
+  // other shooters' flashes (foe.shoot): each at the muzzle its event names, along its shot; one light, the newest's
+  const OF = []; for (let i = 0; i < 6; i++) OF.push({t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0});
+  let ofI = 0;
+  const OLIGHT = {x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: 7451}, LITS = [], OFL = {t: -9, k: 1};
   const SM = TUNE.smoke.max, sx = new Float32Array(SM), sy = new Float32Array(SM), sh = new Float32Array(SM), svx = new Float32Array(SM),
     svy = new Float32Array(SM), svh = new Float32Array(SM), st = new Float32Array(SM), sl = new Float32Array(SM), ss = new Float32Array(SM), sg = new Float32Array(SM);
   let sN = 0, wispT = 0, wispFor = 0;
@@ -108,7 +128,17 @@ export async function create(host) {
     view(dt, evs) {
       const g = gun();
       for (const e of evs) {
-        if (e.type === 'player.shoot') {
+        if (e.type === 'foe.shoot') {   // a gunman's shot: the flash at its muzzle along the shot, the smoke
+          const navy = e.gun === 'navy', Q = OF[ofI]; ofI = (ofI + 1) % OF.length;
+          Q.t = TUNE.flash.life; Q.v = (R() * 3) | 0; Q.k = navy ? TUNE.flash.navy * 1.15 : 1; Q.x = e.x; Q.y = e.y; Q.h = e.h;
+          view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h); Q.a = Math.atan2(SC[1] - y0, SC[0] - x0);
+          OLIGHT.x = e.x; OLIGHT.y = e.y; OLIGHT.h = e.h; OFL.t = TUNE.flash.life; OFL.k = Q.k;
+          const S = TUNE.smoke, n = S.puffs + (navy ? 2 : 0);
+          for (let i = 0; i < n; i++) {
+            const sp = S.speed * RR(.2, 1) * (navy ? 1.3 : 1.1);
+            puff(e.x + e.vx * .08 * i, e.y + e.vy * .08 * i, e.h + RR(-.03, .03), e.vx * sp + RR(-.3, .3), e.vy * sp + RR(-.3, .3), RR(.05, .3), RR(S.life[0], S.life[1]), RR(S.size[0], S.size[1]) * (navy ? 1.4 : 1));
+          }
+        } else if (e.type === 'player.shoot') {
           const w = WEAPONS[e.gun] || {}, navy = e.gun === 'brass_navy';
           FL.t = TUNE.flash.life; FL.v = (R() * 3) | 0; FL.k = (navy ? TUNE.flash.navy : 1) * (e.fan ? TUNE.flash.fan : 1);
           // the flash leaves along the shot (the bullet's way on screen), not the barrel of the frame showing: that one
@@ -125,7 +155,7 @@ export async function create(host) {
           const T = TR[trI]; trI = (trI + 1) % TRN;
           T.x0 = e.x0 ?? e.x; T.y0 = e.y0 ?? e.y; T.h0 = e.h0 ?? e.h; T.x1 = e.x; T.y1 = e.y; T.h1 = e.h; T.t = 0;
           impact(e);
-        } else if (e.type === 'player.reload' && e.phase === 'eject' && e.n > 0) {
+        } else if ((e.type === 'player.reload' || e.type === 'foe.reload') && e.phase === 'eject' && e.n > 0) {
           for (let i = 0; i < e.n; i++) {
             const k = cI; cI = (cI + 1) % CM; if (cN < CM) cN++;
             cx[k] = e.x + RR(-.08, .08); cy[k] = e.y + RR(-.08, .08); ch[k] = e.z + RR(1.05, 1.25);
@@ -134,6 +164,8 @@ export async function create(host) {
         }
       }
       if (FL.t > 0) FL.t -= dt;
+      for (const Q of OF) if (Q.t > 0) Q.t -= dt;
+      if (OFL.t > -TUNE.flash.light.life) OFL.t -= dt;
       // the wisp off the barrel after a shot, and while the gunslinger blows on it
       const blowing = !!g && g.blowing;
       if (g && (wispFor > 0 || blowing)) {
@@ -178,10 +210,7 @@ export async function create(host) {
       for (const a of host.arrows) {
         if (a.kind !== 'bullet' || a.life <= -9) continue;
         const w = WEAPONS[a.gun], v = hypot3(a.vx, a.vy, a.vh) || 1, ux = a.vx / v, uy = a.vy / v, uh = a.vh / v;
-        const flown = w ? (w.range / w.speed - a.life) * w.speed + .3 : T.len, L = Math.min(T.len, flown);
-        seg(a.x, a.y, a.h, ux, uy, uh, 0, Math.min(L, T.head), C.head, true);
-        if (L > T.head) seg(a.x, a.y, a.h, ux, uy, uh, T.head, Math.min(L, T.mid), C.mid, true);
-        if (L > T.mid) seg(a.x, a.y, a.h, ux, uy, uh, T.mid, L, C.tail, false);
+        tracer(host, a.x, a.y, a.h, ux, uy, uh, w ? (w.range / w.speed - a.life) * w.speed + .3 : T.len);
       }
       for (const S of TR) {   // a bullet's last step, shrinking into where it ended
         if (S.t >= T.last) continue;
@@ -201,14 +230,16 @@ export async function create(host) {
       O.alpha = 1; O.emit = false;
     },
     lights() {
-      const L = TUNE.flash.light;
-      if (FL.t <= -L.life + TUNE.flash.life) return NONE;
-      const k = Math.max(0, (FL.t + L.life - TUNE.flash.life) / L.life);
-      LIGHT.radius = L.radius * (.7 + .3 * k) * FL.k; LIGHT.intensity = L.intensity * k * FL.k;
-      return LIT;
+      const L = TUNE.flash.light, mine = FL.t > -L.life + TUNE.flash.life, other = OFL.t > -L.life + TUNE.flash.life;
+      if (!mine && !other) return NONE;
+      if (mine) { const k = Math.max(0, (FL.t + L.life - TUNE.flash.life) / L.life); LIGHT.radius = L.radius * (.7 + .3 * k) * FL.k; LIGHT.intensity = L.intensity * k * FL.k; }
+      if (!other) return LIT;
+      const k = Math.max(0, (OFL.t + L.life - TUNE.flash.life) / L.life); OLIGHT.radius = L.radius * (.7 + .3 * k) * OFL.k; OLIGHT.intensity = L.intensity * k * OFL.k;
+      LITS.length = 0; if (mine) LITS.push(LIGHT); LITS.push(OLIGHT); return LITS;
     },
     hd(q, sc) {
-      if (!sN && FL.t <= 0) return;
+      let others = false; for (const Q of OF) if (Q.t > 0) others = true;
+      if (!sN && FL.t <= 0 && !others) return;
       const z = host.zoom, px = host.PPM * z * sc;   // display px per metre
       // smoke first (the flash glows through it)
       for (let i = 0; i < sN; i++) {
@@ -231,11 +262,19 @@ export async function create(host) {
           q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-over';
         }
       }
+      if (others) for (const Q of OF) if (Q.t > 0) flashAt(q, sc, px, Q.x, Q.y, Q.h, Q.a, Q.k, Q.t, Q.v);
     },
   };
   const PT = {size: 1, alpha: 1, emit: false};
-  function seg(x, y, h, ux, uy, uh, d0, d1, col, emit) {
-    host.line(x - ux * d0, y - uy * d0, h - uh * d0, x - ux * d1, y - uy * d1, h - uh * d1, col, emit);
+  // a flash at a world muzzle (another shooter's): the glow, then the flame star turned along its shot on screen
+  function flashAt(q, sc, px, x, y, h, a, kk, t, v) {
+    const s = view(x, y, h), len = TUNE.flash.len * px * kk * (.8 + .4 * t / TUNE.flash.life), img = flashImg[v];
+    const k = len / img.width, c = Math.cos(a) * k, sn = Math.sin(a) * k, gr = TUNE.flash.glow * px * kk * (.7 + .5 * t / TUNE.flash.life);
+    q.globalCompositeOperation = 'lighter';
+    q.drawImage(glowImg, s[0] * sc - gr, s[1] * sc - gr, gr * 2, gr * 2);
+    q.setTransform(c, sn, -sn, c, s[0] * sc, s[1] * sc);
+    q.drawImage(img, -img.width * .12, -img.height / 2);
+    q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-over';
   }
   return F;
 }
