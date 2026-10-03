@@ -421,7 +421,7 @@ export function createLook(host, sim) {
   // getting up, the same frames backward, then a crouch
   function downPose(set, g, v) {
     const D = g.down; v.f = faceOf(set, g.face);
-    if (D.ph === 'fly') return set.has('fall') ? 'fall' : set.has('land') ? 'land' : 'idle.0';
+    if (D.ph === 'fly' || D.ph === 'carry') return set.has('fall') ? 'fall' : set.has('land') ? 'land' : 'idle.0';
     const clip = set.ok('die_b') ? 'die_b' : null;
     if (!clip) return set.has('crouch') ? 'crouch' : 'idle.0';
     const L = set.tl(clip), t0 = L.ends[Math.min(3, L.n - 1)], k = D.ph === 'up' ? D.t / sim.TUNE_GETUP : 0;

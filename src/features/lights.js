@@ -291,6 +291,10 @@ export async function create(host) {
     return _M.compose(_v.set(pile.x - s * o - c * .25, h, pile.y + c * o - s * .25), _q, _s.set(1, .5 / LOG_L, 1));
   }
   const brazMeshes = new Map();   // brazier -> its mesh (the coal bed's glowing veins)
+  // TOPPLED braziers (F.topple: pulled over by the equipment experiment's lasso): sim, brazier -> {ux, uy (the way it fell),
+  // t (s down)}; the view's fall: brazier -> the view clock as it began to fall
+  const toppled = new Map(), fallen = new Map(), TOPPLE = {fall: .38, lie: 1.5, back: 40, away: 6};   // s to fall, rad it lies at; s down before it's stood up again (you > away m off)
+  const _B = new THREE.Matrix4(), _P = new THREE.Matrix4();
 
   function buildMeshes() {
     for (const m of meshes) m.dispose(); meshes.length = 0;
@@ -339,6 +343,7 @@ export async function create(host) {
     for (let i = 0; i < n; i++) { const a = R() * TAU, v = rr(.1, .5), d = r * R(); parts.push(part(x + Math.cos(a) * d, y + Math.sin(a) * d, h + rr(0, .1), Math.cos(a) * v, Math.sin(a) * v, rr(.15, .55), rr(.9, 1.8), 'smoke', ASHC[R() * 3 | 0], null, 0, 1, .55)); }
   }
   function light(p) {   // an unlit torch / brazier / the beacon catches
+    if (toppled.has(p)) return;   // (a brazier lying on its side doesn't)
     p.unlit = false;
     const h = p === beacon ? beacon.z + 1.25 : flameAt(p), c = p === beacon ? host.biome.style.torch || '#ffc850' : p.kind === 'torch' ? host.biome.style.torch : '#ffb04a';
     flare(p.x, p.y, h, c, p === beacon ? 9 : 5, p === beacon ? 3 : 2.4, p === beacon ? 1.1 : .6);
@@ -772,6 +777,10 @@ export async function create(host) {
   // arrows dip and catch, torches / braziers / the beacon light, props burn, spread and burn through, the candles
   F.update = (dt, evs) => {
     stepArrows(dt); stepBurning(dt); stepCandles(dt, evs);
+    if (toppled.size) for (const [p, o] of toppled) {   // a toppled brazier is stood up again (lit) a while later, out of your way
+      o.t += dt; const P = host.player;
+      if (o.t > TOPPLE.back && Math.hypot(P.x - p.x, P.y - p.y) > TOPPLE.away) { toppled.delete(p); p.unlit = false; }
+    }
   };
   // VIEW (ambient: it flickers on behind the pause menu): the flames, sparks and smoke, the campfire, shrooms, wisps
   F.ambient = true;
@@ -818,6 +827,7 @@ export async function create(host) {
     // the beacon's logs char and glow while it burns; the braziers' coal beds glow in veins (ash grey when unlit)
     beacon.mesh?.burn?.(beacon.unlit ? 0 : .6, beacon.unlit ? 0 : .8 + .2 * Math.sin(T * 2.7), T, beacon.unlit ? 0 : .3);
     for (const [p, m] of brazMeshes) m.burn?.(1, p.unlit ? 0 : .75 + .25 * Math.sin(T * 3.1 + (p.light | 0)), T + (p.light | 0) * 3, p.unlit ? .6 : .1);
+    if (toppled.size || fallen.size) toppleFrame();
     drawAshes();
     if (F.on) {
       drawCampfire(); drawBeacon(); drawSmall(); drawWisps(); drawFlames();
@@ -861,6 +871,30 @@ export async function create(host) {
   // ['lights']): key (any object: one per flame), kind torch | brazier | burn | camp | beacon, colour, (x, y, h) its bed, on (0..1),
   // scale, height (firesim.js draw)
   F.ignite = p => { const was = burning.has(p); ignite(p); return !was && burning.has(p); };
+  // TOPPLE (features/equip/lasso.js: a brazier on the lasso is pulled over toward (dx, dy)): it goes out (unlit: no flame,
+  // no light, no relighting while it lies) and lies on its side; its coals are the caller's to spill. Stood up again, lit,
+  // TOPPLE.back s later once you're away. -> true if it was standing
+  F.topple = (p, dx, dy) => {
+    if (p.kind !== 'brazier' || toppled.has(p) || p.gone) return false;
+    const l = Math.hypot(dx, dy) || 1; toppled.set(p, {ux: dx / l, uy: dy / l, t: 0}); p.unlit = true;
+    return true;
+  };
+  // (view) the fall: its mesh tips about the rim on the way it fell, the coal card goes (veiled); stood up again, put back
+  function toppleFrame() {
+    for (const [p, o] of toppled) {
+      if (!fallen.has(p)) { fallen.set(p, T); burst(p.x, p.y, (p.z || 0) + .9, 22, FIRE, 2.2); ashPuff(p.x, p.y, (p.z || 0) + .5, 8, .4); }
+      const m = brazMeshes.get(p); host.world.veil?.(p, true); if (!m) continue;
+      const k = Math.min(1, (T - fallen.get(p)) / TOPPLE.fall), a = k * k * TOPPLE.lie, z = p.z || 0;
+      _B.makeRotationY((p.light | 0) * 1.1).setPosition(p.x, z, p.y);   // (its standing matrix: buildMeshes')
+      _ax.set(o.uy, 0, -o.ux); _q.setFromAxisAngle(_ax, a);
+      _P.makeTranslation(p.x + o.ux * .3, z, p.y + o.uy * .3).multiply(_M.makeRotationFromQuaternion(_q)).multiply(_M.makeTranslation(-(p.x + o.ux * .3), -z, -(p.y + o.uy * .3)));
+      m.setMatrix(_P.multiply(_B));
+    }
+    for (const [p] of fallen) if (!toppled.has(p)) {
+      fallen.delete(p); host.world.veil?.(p, false);
+      brazMeshes.get(p)?.setMatrix(_B.makeRotationY((p.light | 0) * 1.1).setPosition(p.x, p.z || 0, p.y));
+    }
+  }
   F.fireNear = (x, y, r) => {
     for (const p of flames) if (!p.unlit && !p.gone && !p.broken && Math.hypot(p.x - x, p.y - y) < r) return true;
     if (F.on && (Math.hypot(camp.x - x, camp.y - y) < r + 1 || (!beacon.unlit && Math.hypot(beacon.x - x, beacon.y - y) < r + 2))) return true;

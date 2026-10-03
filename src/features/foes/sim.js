@@ -431,9 +431,10 @@ export function createFoesSim(host) {
   // legs, the aim let go. o.dmg (combat's damage) as he lands; o.onLand(p) is told; he bowls over a mate he flies into
   function downStep(g, dt) {
     const D = g.down, p = g.p; D.t += dt;
-    if (D.ph === 'fly') {
+    if (D.ph === 'carry') { if (D.t > .25) { D.ph = 'fly'; D.t = 0; D.x0 = D.x1 = p.x; D.y0 = D.y1 = p.y; D.dur = .3; D.H = 0; D.h0 = p.h; } }   // (let go of without a throw: he drops)
+    else if (D.ph === 'fly') {
       const k = Math.min(1, D.t / D.dur);
-      p.x = D.x0 + (D.x1 - D.x0) * k; p.y = D.y0 + (D.y1 - D.y0) * k; p.h = 4 * D.H * k * (1 - k);
+      p.x = D.x0 + (D.x1 - D.x0) * k; p.y = D.y0 + (D.y1 - D.y0) * k; p.h = 4 * D.H * k * (1 - k) + (D.h0 || 0) * (1 - k);
       if (D.dmgFly && p.h < 1.3) for (const o of gang) {
         const q = o.p; if (o === g || q.broken || D.hit.includes(q) || hypot2(q.x - p.x, q.y - p.y) > D.bowl + q.hitR) continue;
         D.hit.push(q); host.feature('combat')?.core.damage(q, D.dmgFly, {dir: [(q.x - p.x) * 3, (q.y - p.y) * 3]}); o.flinch = Math.max(o.flinch, .45);
@@ -460,18 +461,28 @@ export function createFoesSim(host) {
     for (let i = 0; i < n; i++) { const x = p.x + dx / n, y = p.y + dy / n; if (!standable(x, y, p)) break; p.x = x; p.y = y; moved += d / n; }
     return moved;
   }
+  // carry(p, x, y, h): held up off his feet at (x, y), h m up (the lasso's hammer throw): a down state that holds while it's
+  // renewed every step (else he drops); fling lets go of him
+  function carry(p, x, y, h) {
+    const g = byP.get(p); if (!g || p.broken || (g.down && g.down.ph !== 'carry')) return false;
+    if (solid(x, y, h + .3) || elev(x, y) > (p.z || 0) + .3) return false;
+    if (!g.down) { if (g.act === 'aim') S.aiming--; g.act = 'holstered'; g.at = 0; g.rope = 0; g.flinch = 0; g.vx = g.vy = 0; g.speed = 0; g.gait = '';
+      g.down = {ph: 'carry', t: 0, x0: p.x, y0: p.y, x1: p.x, y1: p.y, dur: .3, H: 0, h0: 0, dmg: 0, stun: .6, dmgFly: 0, bowl: .55, hit: [], onLand: null}; }
+    g.down.t = 0; p.x = x; p.y = y; p.h = h; g.face = wrap(g.face + .35);
+    return true;
+  }
   function fling(p, x, y, o) {
-    const g = byP.get(p); if (!g || g.down || p.broken) return null;
+    const g = byP.get(p); if (!g || (g.down && g.down.ph !== 'carry') || p.broken) return null;
     if (g.act === 'aim') S.aiming--;
     const dx = p.x - x, dy = p.y - y; let tx = p.x, ty = p.y;
     for (let k = 0; k <= 12; k++) { const cx = x + dx * k / 12, cy = y + dy * k / 12; if (standable(cx, cy, p)) { tx = cx; ty = cy; break; } }
     g.act = 'holstered'; g.at = 0; g.rope = 0; g.flinch = 0; g.vx = g.vy = 0; g.speed = 0; g.gait = '';
-    g.down = {ph: 'fly', t: 0, x0: p.x, y0: p.y, x1: tx, y1: ty, dur: o.dur, H: o.h, dmg: o.dmg || 0, stun: o.stun || 1, dmgFly: o.dmgFly || 0, bowl: o.bowl ?? .55, hit: [], onLand: o.onLand || null};
+    g.down = {ph: 'fly', t: 0, x0: p.x, y0: p.y, x1: tx, y1: ty, dur: o.dur, H: o.h, h0: o.h0 || 0, dmg: o.dmg || 0, stun: o.stun || 1, dmgFly: o.dmgFly || 0, bowl: o.bowl ?? .55, hit: [], onLand: o.onLand || null};
     return g.down;
   }
 
   return {
-    gang, B, S, nav, KINDS, update, removeAll, roped, shift, fling, TUNE_GETUP: A.getUp,
+    gang, B, S, nav, KINDS, update, removeAll, roped, shift, fling, carry, TUNE_GETUP: A.getUp,
     get alive() { return gang.length; },
     request(n = 0, o = null) { S.want = n || -1; S.wantO = o; },   // a gang now (-1: the usual size): read by the next step
     spawnAt: (type, x, y, name = null) => add(type, x, y, name),   // (tests: a gunman of a type, there, now)

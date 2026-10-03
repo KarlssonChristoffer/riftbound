@@ -41,6 +41,8 @@ export function createLassoSim(host, eq) {
   const phys = () => (combat ??= host.feature('combat'))?.phys || null;
   const foes = () => (foesF ??= host.feature('foes'))?.sim || null;
   const lz = () => host.PL.lasso;
+  let lightsF = null;
+  const lights = () => lightsF ??= host.feature('lights');
   const nearA = [], nearB = [];
 
   // ---------------------------------------------------------------- state
@@ -58,6 +60,9 @@ export function createLassoSim(host, eq) {
   // ---------------------------------------------------------------- what's what
   const creature = eq.creature;
   const movable = p => !!p && MOVABLE.has(p.kind) && !p.wall && !p.broken && !p.gone && !p.sink && !p.float;
+  // a brazier standing lit (lights.js): the loop pulls it over
+  const brazier = p => !!p && p.kind === 'brazier' && !p.gone && !p.unlit;
+  function brazierAt(x, y) { for (const p of ents.near(x, y, 1.2, nearA)) if (brazier(p) && hypot2(p.x - x, p.y - y) < .75) return p; return null; }
   const bodyMid = p => (p.z || 0) + (p.h || 0) + (p.hitH ?? 1.6) * .55;
   const topOf = p => PROP_TOP[p.kind] ?? TOP[p.kind] ?? 1.2;
 
@@ -137,6 +142,9 @@ export function createLassoSim(host, eq) {
     // the ground under the cursor (host.aim reads it at chest height: the ground is that much further up the screen)
     let gx = a.x, gy = a.y;
     if (!t) { const k = (a.h - host.elev(a.x, a.y)) * host.PPMH / host.PPMY; gx -= Math.sin(host.yaw) * k; gy -= Math.cos(host.yaw) * k; }
+    // a lit brazier there: the loop goes for it (pulled over)
+    const br = brazierAt(gx, gy) || brazierAt(a.x, a.y);
+    if (br) { A.kind = 'prop'; A.who = br; A.x = br.x; A.y = br.y; A.h = (br.z || 0) + .95; A.d = hypot2(br.x - P.x, br.y - P.y); A.ok = A.d <= R + .4; if (A.ok) return A; }
     let dx = gx - P.x, dy = gy - P.y, d = hypot2(dx, dy);
     if (d < .05) { const f = P.faceAngle; dx = Math.sin(f); dy = Math.cos(f); d = 1; } else { dx /= d; dy /= d; }
     d = clamp(d, 1, R);
@@ -151,7 +159,7 @@ export function createLassoSim(host, eq) {
   function aimPinned(A) {
     const R = TUNE.range;
     A.who = null;
-    for (const p of ents.near(PIN.x, PIN.y, 1.2, nearA)) if (!p.gone && !p.broken && (creature(p) || movable(p)) && hypot2(p.x - PIN.x, p.y - PIN.y) < .6) {
+    for (const p of ents.near(PIN.x, PIN.y, 1.2, nearA)) if (!p.gone && !p.broken && (creature(p) || movable(p) || brazier(p)) && hypot2(p.x - PIN.x, p.y - PIN.y) < .6) {
       A.kind = creature(p) ? 'enemy' : 'prop'; A.who = p; A.x = p.x; A.y = p.y; A.h = creature(p) ? bodyMid(p) : (p.z || 0) + topOf(p) * .6;
       A.d = hypot2(p.x - P.x, p.y - P.y); A.ok = A.d <= R + (p.hitR ?? .3); return A;
     }
@@ -218,7 +226,7 @@ export function createLassoSim(host, eq) {
       if (creature(p)) {
         const rel = h - (p.z || 0) - (p.h || 0);
         if (rel > -.1 && rel < (p.hitH ?? 1.6) + .1 && dd < (p.hitR ?? .4) + R) { L.loop.x = x; L.loop.y = y; L.loop.h = h; catchThing(p); return true; }
-      } else if (movable(p) && dd < (p.r || .3) + R && h < (p.z || 0) + topOf(p) + .3) { L.loop.x = x; L.loop.y = y; L.loop.h = h; catchThing(p); return true; }
+      } else if ((movable(p) || brazier(p)) && dd < (p.r || .3) + R && h < (p.z || 0) + topOf(p) + .3) { L.loop.x = x; L.loop.y = y; L.loop.h = h; catchThing(p); return true; }
     }
     // anchors: a loop thrown at one drops over it there (k = 1: stepLoop), not over a limb it passes on the way; any other
     // throw is caught by a limb late in its flight (thrown at the ground under one)
@@ -236,7 +244,18 @@ export function createLassoSim(host, eq) {
   }
 
   // ---------------------------------------------------------------- holding something
+  // a lit brazier caught: pulled over toward you at once (lights.js topple: it goes out), its coals spill burning; the loop
+  // slips off as it falls
+  function topple(p) {
+    const dx = P.x - p.x, dy = P.y - p.y, d = hypot2(dx, dy) || 1, B = TUNE.brazier;
+    if (!lights()?.topple?.(p, dx, dy)) { miss(); return; }
+    eq.spill?.(p.x + dx / d * B.spill, p.y + dy / d * B.spill, B.r, B.dur);
+    events.push({type: 'lasso.catch', x: p.x, y: p.y, h: L.loop.h, what: 'prop', who: p});
+    events.push({type: 'lasso.yank', x: p.x, y: p.y, who: p, ok: true}); host.shake(2, .12);
+    back();
+  }
   function catchThing(p) {
+    if (p.kind === 'brazier') { topple(p); return; }
     const c = core(), Z = lz(), T2 = TUNE.hold;
     L.who = p; L.kind = c?.BS.has(p) ? 'brute' : p.kind === 'gunman' ? 'gunman' : 'prop';
     L.boss = !!p.boss; L.elite = !!p.elite;
@@ -259,7 +278,8 @@ export function createLassoSim(host, eq) {
     if (Z.mode !== 'haul') { slip('drop'); return; }
     L.held += dt; L.t += dt;
     if (L.held >= L.slip) { slip('slip'); return; }
-    if (L.fHeld && (L.fT += dt) > T2.tapMax) L.fHeld = false;   // (a long press is no tap: the hammer throw is a stretch for later)
+    // a long press: the hammer throw (a body, not a champion): it's swung off its feet round you
+    if (L.fHeld && (L.fT += dt) > TUNE.hammer.hold && L.kind !== 'prop' && !L.boss) { startHammer(); return; }   // (a prop / a champion: still a yank on release)
     holdIt(.12);
     let dx = P.x - p.x, dy = P.y - p.y, d = hypot2(dx, dy) || 1e-6;
     const ux = dx / d, uy = dy / d;
@@ -279,6 +299,49 @@ export function createLassoSim(host, eq) {
     L.taut = d >= L.len - .06;
     Z.leash(p.x, p.y, L.len + T2.stretch);
     L.loop.x = p.x; L.loop.y = p.y; L.loop.h = L.kind === 'prop' ? (p.z || 0) + (p.h || 0) + topOf(p) * .55 : (p.z || 0) + (p.h || 0) + (p.hitH ?? 1.6) * .5;
+  }
+  // THE HAMMER THROW (hold F while roped): the body is swung off its feet round you, the rope's length growing to `r` m
+  // and the turns to `rps` a second; it bowls over whoever it meets (both hurt); let go of F (or after `max` s) and it's
+  // flung out along its way at `v` m/s, landing hard (`dmg`, stunned). A wall in the way stops the swing: it's dropped there
+  function startHammer() {
+    const p = L.who; lz().hammer();
+    L.phase = 'hammer'; L.t = 0; L.fHeld = true; L.ham = L.ham || {a: 0, w: 0, r: 0, hit: []};
+    L.ham.a = Math.atan2(p.y - P.y, p.x - P.x); L.ham.w = 0; L.ham.r = clamp(hypot2(p.x - P.x, p.y - P.y), 1.2, TUNE.hammer.r); L.ham.hit.length = 0; L.ham.turn = 0;
+    events.push({type: 'lasso.yank', x: p.x, y: p.y, who: p, ok: true}); host.shake(1, .08);
+  }
+  function stepHammer(dt, up) {
+    const p = L.who, Hm = TUNE.hammer, Z = lz();
+    if (!p || p.broken || p.gone) { back(); return; }
+    L.t += dt; const H = L.ham;
+    H.w = Math.min(Hm.rps * TAU, H.w + Hm.rps * TAU * dt / Hm.spinUp); H.r += (Hm.r - H.r) * Math.min(1, dt * 6);
+    const da = H.w * dt; H.a += da; H.turn += da; if (H.turn > TAU) { H.turn -= TAU; H.hit.length = 0; }   // (each turn may hit someone again)
+    const x = P.x + Math.cos(H.a) * H.r, y = P.y + Math.sin(H.a) * H.r, h = Hm.h * Math.min(1, L.t / .25);
+    const ok = L.kind === 'brute' ? core()?.carry(p, x, y, h) : foes()?.carry(p, x, y, h);
+    Z.face(p.x, p.y);
+    L.loop.x = p.x; L.loop.y = p.y; L.loop.h = (p.z || 0) + (p.h || 0) + (p.hitH ?? 1.6) * .5; L.taut = true;
+    if (!ok) { fling(.25); return; }
+    // whoever it swings into: both take a knock
+    const k = eq.dmgK();
+    for (const q of ents.near(p.x, p.y, Hm.bowl + .6, nearA)) {
+      if (q === p || q.broken || q.gone || !creature(q) || H.hit.includes(q) || hypot2(q.x - p.x, q.y - p.y) > Hm.bowl + (q.hitR ?? .35)) continue;
+      H.hit.push(q); core()?.damage(q, Hm.dmg * k, {dir: [(q.x - p.x) * 3, (q.y - p.y) * 3]}); core()?.damage(p, Hm.dmg * .5 * k, {quiet: true});
+      events.push({type: 'combat.bowl', x: q.x, y: q.y, who: q, by: p}); host.shake(2, .1);
+      if (core()?.BS.has(q)) core().hold(q, .6);
+    }
+    if (up || L.t > Hm.max) fling(1);
+  }
+  // let go of the hammer: flung along its way (k: x the speed; a wall stop throws it weakly)
+  function fling(k) {
+    const p = L.who, Hm = TUNE.hammer, Y = TUNE.yank, H = L.ham, s = Math.sign(H.w) || 1;
+    const tx = -Math.sin(H.a) * s, ty = Math.cos(H.a) * s, d = Hm.v * k * Hm.dur;
+    const o = {dur: Hm.dur, h: .8 * k + .2, h0: p.h || 0, dmg: Hm.dmg * eq.dmgK(), dmgFly: Hm.dmg * eq.dmgK(), bowl: Hm.bowl, stun: L.elite ? Y.stunElite : Y.stun,
+      spin: s * TAU * 1.5, onLand: landed};
+    const ok = L.kind === 'brute' ? core()?.fling(p, p.x + tx * d, p.y + ty * d, o) : foes()?.fling(p, p.x + tx * d, p.y + ty * d, o);
+    lz().yank(p.x + tx * d, p.y + ty * d);
+    events.push({type: 'lasso.yank', x: p.x, y: p.y, who: p, ok: !!ok}); host.shake(2, .12);
+    L.stunFor = o.stun; L.fHeld = false;
+    if (!ok) { back(); return; }
+    L.phase = 'yanked'; L.t = 0;
   }
   // the yank: the clip starts (he heaves); at its pull mark (lasso.pull) what he holds comes off its feet
   function startYank() { const p = L.who; lz().yank(p.x, p.y); L.phase = 'pull'; L.t = 0; }
@@ -406,6 +469,7 @@ export function createLassoSim(host, eq) {
         if (up && L.fHeld) { L.fHeld = false; startYank(); break; }
         stepHold(dt);
         break;
+      case 'hammer': stepHammer(dt, up); break;
       case 'pull':   // (the yank clip, until its pull mark: it's still held)
         L.t += dt; holdIt(.12);
         if (!L.who || L.who.broken || L.who.gone) back(); else if (L.t > .4 || Z.mode !== 'yank') yank();

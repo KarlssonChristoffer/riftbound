@@ -120,9 +120,9 @@ export function createLassoLook(host, lsim) {
       if (n !== swishN && S.t > .05) { swishN = n; Z.hand(false, HA); SW.x = HA[0]; SW.y = HA[1]; host.events.push(SW); }
     } else swishN = -1;
     // the rope's chain: from the hand to the loop in flight / on the ground / at what it holds
-    if (ph === 'fly' || ph === 'lie' || ph === 'back' || ph === 'hold' || ph === 'pull' || ph === 'yanked') {
+    if (ph === 'fly' || ph === 'lie' || ph === 'back' || ph === 'hold' || ph === 'pull' || ph === 'hammer' || ph === 'yanked') {
       Z.hand(false, HA);
-      const O = L.loop, slack = ph === 'fly' ? .06 : ph === 'hold' ? (L.taut ? .004 : .14) : ph === 'yanked' ? .25 : .12;
+      const O = L.loop, slack = ph === 'fly' ? .06 : ph === 'hammer' ? .002 : ph === 'hold' ? (L.boss && !L.heave ? .16 : L.taut ? .004 : .14) : ph === 'yanked' ? .25 : .12;
       if (ph === 'fly' && O.t <= dt * 1.5 && !chainOn) chainReset(HA[0], HA[1], HA[2], O.x, O.y, O.h);
       ringNear(E);
       chainStep(dt, HA[0], HA[1], HA[2], E[0], E[1], E[2], slack);
@@ -137,7 +137,7 @@ export function createLassoLook(host, lsim) {
   }
   function ringR() {
     const O = L.loop, p = L.who;
-    if ((L.phase === 'hold' || L.phase === 'pull' || L.phase === 'yanked') && p) return L.kind === 'prop' ? (p.r || .3) * 1.05 + .03 : (p.hitR ?? .35) * .78;
+    if ((L.phase === 'hold' || L.phase === 'pull' || L.phase === 'hammer' || L.phase === 'yanked') && p) return L.kind === 'prop' ? (p.r || .3) * 1.05 + .03 : (p.hitR ?? .35) * .78;
     if (L.phase === 'fly') return O.r * (.6 + .4 * Math.min(1, O.t / (O.T * .5)));
     return O.r;
   }
@@ -181,8 +181,10 @@ export function createLassoLook(host, lsim) {
       const vx = O.x - O.lx, vy = O.y - O.ly, l = hypot2(vx, vy) || 1, ux = vx / l, uy = vy / l;
       ring(O.x, O.y, O.h, ringR(), ux * .85, uy * .85, .5, -uy, ux, 0, 18, T * 6, .06);
     } else if (ph === 'lie' || ph === 'back') flatRing(O.x, O.y, Math.max(O.h, host.elev(O.x, O.y) + .03), O.r * (ph === 'back' ? .8 : 1), 18, 0, .08);
-    else if ((ph === 'hold' || ph === 'pull' || ph === 'yanked') && L.who) {
+    else if ((ph === 'hold' || ph === 'pull' || ph === 'hammer' || ph === 'yanked') && L.who) {
       const p = L.who; flatRing(p.x, p.y, O.h, ringR(), 14, T * (L.taut ? 0 : .5), .03);
+      // a champion's tug of war: its slack (the moment a yank lands) shows: the rope sags and a gold ring pulses at its feet
+      if (ph === 'hold' && L.boss && !L.heave) dashRing(p.x, p.y, (p.z || 0) + .03, (p.hitR ?? .5) + .25 + .08 * Math.sin(T * 30), GOLD, 26, (T * 20) | 0, 1);
     }
     // the rope (the chain, its ends where they are drawn)
     if (chainOn) { ringNear(E); drawChain(HA[0], HA[1], HA[2], E[0], E[1], E[2]); }

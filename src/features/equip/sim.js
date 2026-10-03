@@ -55,7 +55,9 @@ export function createEquipSim(host) {
   };
   // the lasso (a gun loadout's: features/equip/lasso.js) is a gadget of its own kind: it gets F while it's in the slot or busy
   let anchorsOf = null;   // (the lasso's own anchors: set by the feature, features/equip/anchors.js)
-  const lasso = createLassoSim(host, {S, R, dmgK: () => dmgK(), creature: p => creature(p), anchors: () => anchorsOf?.()});
+  const lasso = createLassoSim(host, {S, R, dmgK: () => dmgK(), creature: p => creature(p), anchors: () => anchorsOf?.(),
+    // a toppled brazier's coals: a burning patch (the fire flask's pool: it burns who stands in it, wood in it catches)
+    spill: (x, y, r, dur) => { const z = host.elev(x, y); if (water(x, y, z)) return; pools.push({x, y, z, r, t: 0, dur, tick: 0, lit: []}); }});
   const air = [];      // thrown, in the air / bouncing / rolling: {id, x, y, h, vx, vy, vh, t, fuse, rest, spin, ...}
   const pools = [];    // fire: {x, y, z, r, t, dur, tick, lit: [props set alight]}
   const traps = [];    // {x, y, z, t, state: set | armed | shut | spent, who, hold, gone}

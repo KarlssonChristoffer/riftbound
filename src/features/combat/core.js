@@ -273,7 +273,7 @@ export function createCore(host) {
     const held = (s.held = Math.max(0, (s.held || 0) - dt)) > 0;   // (an outside hold: hold() / a fling's stun; no root pegs)
     if (s.hop) {
       const H = s.hop; H.t += dt; const k = Math.min(1, H.t / H.dur);
-      b.x = H.x0 + (H.x1 - H.x0) * k; b.y = H.y0 + (H.y1 - H.y0) * k; b.h = 4 * H.H * k * (1 - k); b.air = true; b.squash = 0;
+      b.x = H.x0 + (H.x1 - H.x0) * k; b.y = H.y0 + (H.y1 - H.y0) * k; b.h = 4 * H.H * k * (1 - k) + (H.h0 || 0) * (1 - k); b.air = true; b.squash = 0;   // (h0: thrown from up in the air: fling o.h0)
       if (H.fling) flying(b, H, k);
       if (k >= 1) landBrute(b, s);
       return;
@@ -520,6 +520,16 @@ export function createCore(host) {
     // was): o = {dur, h (m up at the middle), dmg (on landing), stun (s held after), spin (rad it tumbles), dmgFly, bowl,
     // onLand(b)} -> the landing spot {x1, y1} or null (not one of the core's, down, or in the air already)
     hold(p, sec) { const s = BS.get(p); if (!s || p.broken || s.hop) return false; s.held = Math.max(s.held || 0, sec); return true; },
+    // carry(p, x, y, h): held up off its feet at (x, y), h m up (the lasso's hammer throw swings it round you), tumbling;
+    // -> false where it can't be (a wall: it stays where it was). Let go with fling (o.h0: from that height)
+    carry(p, x, y, h) {
+      const s = BS.get(p); if (!s || p.broken) return false;
+      if (inWall(x, y, (p.r0 || .35) * .6) || host.elev(x, y) > pz(p) + .3) return false;
+      s.hop = null; s.held = Math.max(s.held || 0, .3); s.root = 0; p.rooted = false;
+      p.x = x; p.y = y; p.h = h; p.air = true; p.squash = 0;
+      if (Array.isArray(p.faceW)) { const a = Math.atan2(p.faceW[0], p.faceW[1]) + .35; p.faceW[0] = Math.sin(a); p.faceW[1] = Math.cos(a); }
+      return true;
+    },
     shift(p, dx, dy) {
       const s = BS.get(p); if (!s || p.broken || s.hop) return 0;
       const d = Math.hypot(dx, dy); if (d < 1e-6) return 0;
@@ -533,7 +543,7 @@ export function createCore(host) {
       for (let k = 0; k <= 12; k++) { const cx = x + dx * k / 12, cy = y + dy * k / 12; if (freeSpot(p, cx, cy)) { tx = cx; ty = cy; break; } }
       const a0 = Math.atan2(p.faceW?.[0] ?? 0, p.faceW?.[1] ?? 1);
       if (!Array.isArray(p.faceW)) p.faceW = [0, 1];
-      s.hop = {x0: p.x, y0: p.y, x1: tx, y1: ty, t: 0, dur: o.dur, H: o.h, fling: {...o, x0: p.x, y0: p.y, a0, hit: []}};
+      s.hop = {x0: p.x, y0: p.y, x1: tx, y1: ty, t: 0, dur: o.dur, H: o.h, h0: o.h0 || 0, fling: {...o, x0: p.x, y0: p.y, a0, hit: []}};
       s.root = 0; p.rooted = false; s.held = 0; s.wait = 0;
       return s.hop;
     },

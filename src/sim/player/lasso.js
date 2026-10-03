@@ -159,11 +159,16 @@ export function createLasso(PL, I) {
       case 'preview': {   // (the sandbox's "Lasso: preview poses": every lasso pose in place, in turn; moving ends it)
         if (mx || my) { S.mode = ''; P.t = 0; return false; }
         plant(dt); P.state = 'idle';
-        const it = PV[S.pi % PV.length], k = it[0], per = it[2] || 1.6;
+        const per = PV[S.pi % PV.length][2] || 1.6;
         if (S.t >= per) { S.t -= per; S.pi = (S.pi + 1) % PV.length; }
         const t = S.t, n = PV[S.pi % PV.length];
         S.pvName = n[3];
         P.frame = n[0] === 'pose' ? L[n[1]][n[4]] : n[0] === 'cycle' ? L[n[1]][Math.floor(t * 10) % L[n[1]].length] : at(L[n[1]], t, true);
+        return true;
+      }
+      case 'hammer': {   // swinging what he holds round him (the hammer throw): planted, turning with it, leaning back
+        plant(dt); P.state = 'idle'; faceTo(dt, 0);
+        P.frame = L.haul[Math.floor(S.t * 6) & 1];
         return true;
       }
       case 'yank': {   // (its pull mark: lasso.pull, the gadget throws what it holds then)
@@ -186,8 +191,7 @@ export function createLasso(PL, I) {
   }
 
   // ---------------------------------------------------------------- the swing
-  const GP = [0, 0, 0];
-  function gripOff(frame) {   // the hang pose's upper grip (RopeHand1): m right of the pivot (view), m above it; a stand-in
+  function gripOff(frame) {   // the hang pose's grip (POSES.hang.grip): m right of the pivot (view), m above it; a stand-in
     const b = A.SP[frame]?.bones?.[A.DIRS[P.face]], g = POSES.hang.grip;   // (POSES.hang.grip: which hand holds the rope)
     let m = null;
     if (b) { if (g === 'auto') { const a0 = b[HANDS.grip], a1 = b[HANDS.upper]; m = a0 && a1 ? (a0[1] <= a1[1] ? a0 : a1) : a0 || a1 || null; } else m = b[g] || null; }   // pose without it hangs from straight over his head
@@ -305,6 +309,7 @@ export function createLasso(PL, I) {
     haul(on) { if (on) { S.mode = 'haul'; S.t = 0; S.ph = 0; S.leashOn = false; } else if (S.mode === 'haul') { S.mode = ''; S.leashOn = false; P.t = 0; } },
     leash(x, y, len) { S.tx = x; S.ty = y; S.lx = x; S.ly = y; S.len = len; S.leashOn = true; },
     yank(x, y) { if (x !== undefined) { S.tx = x; S.ty = y; } S.mode = 'yank'; S.t = 0; S.leashOn = false; S.loose = false; },
+    hammer() { S.mode = 'hammer'; S.t = 0; S.leashOn = false; },   // (the hammer throw: face(x, y) each step turns him with it)
     // swing from the anchor (world ax, ay, ah); W: {elev(x, y), water(x, y), solid(x, y, h0, h1, r)} in the world; v0: his
     // velocity (world) to start from. -> false when he can't (mid-air already, a dodge)
     hang(ax, ay, ah, W) {
