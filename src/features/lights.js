@@ -852,6 +852,17 @@ export async function create(host) {
     LLIST.length = nLR; return LLIST;
   };
   F.onArrowHit = (a, p) => { if (a.fire && BURNS[p.kind]) ignite(p); };   // nothing returned: combat resolves the hit
+  // other systems' (features/omens.js): ignite(p) sets a prop alight as a fire arrow does (a lightning strike); fireNear(x, y,
+  // r): does a fire light x, y from within r m (a lit torch / brazier, the campfire and the lit beacon as flamePoints sees them,
+  // something burning, a fire arrow)? SIM state only: an eclipse's rule reads it
+  F.ignite = p => ignite(p);
+  F.fireNear = (x, y, r) => {
+    for (const p of flames) if (!p.unlit && !p.gone && !p.broken && Math.hypot(p.x - x, p.y - y) < r) return true;
+    if (F.on && (Math.hypot(camp.x - x, camp.y - y) < r + 1 || (!beacon.unlit && Math.hypot(beacon.x - x, beacon.y - y) < r + 2))) return true;
+    for (const p of burning.keys()) if (Math.hypot(p.x - x, p.y - y) < r) return true;
+    for (const a of host.arrows) if (a.fire && Math.hypot(a.x - x, a.y - y) < r) return true;
+    return false;
+  };
   F.interact = p => {
     if (p === beacon && beacon.unlit) { light(beacon); return true; }
     if (p === camp && F.on) { tend(); return true; }

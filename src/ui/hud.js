@@ -4,7 +4,7 @@
 //                 then items with their stack counts; hover one for what it does
 //   top centre    stage and wave, enemies left; a boss bar while the champion lives
 //   top right     the run's clock and kills
-//   centre        banners (stage start, cleared, death) and toasts (an item you just got)
+//   centre        banners (stage start, cleared, death; note(): a line under one, the stage's omen) and toasts (an item you just got)
 //   world         floating text (damage you take, heals, "need 30 gold"), elite / champion nameplates
 //   edges         a red vignette when you're hit, a slow pulse at low health
 import {TIER} from '../game/items.js';
@@ -40,7 +40,9 @@ export function createHud(host) {
   }
 
   const H = {
-    banner(title, sub = '', dur = 2.4, col = '#f2d27a') { banners.length = 0; banners.push({title, sub, t: 0, dur, col}); },
+    banner(title, sub = '', dur = 2.4, col = '#f2d27a') { banners.length = 0; banners.push({title, sub, t: 0, dur, col, note: null}); },
+    // a line under the banner showing now (features/omens.js: the stage's omen and its rule), kept up for at least dur s
+    note(title, sub = '', col = '#f4efe4', dur = 4.2) { const b = banners[0]; if (!b) return; b.note = {title, sub, col}; b.dur = Math.max(b.dur, b.t + dur); },
     toast(title, sub = '', col = '#f4efe4') { toasts.push({title, sub, col, t: 0, dur: 3}); if (toasts.length > 3) toasts.shift(); },
     float(x, y, h, s, col = '#f4efe4', big = false) { floats.push({x, y, h, s, col, big, t: 0}); if (floats.length > 30) floats.shift(); },
     clear() { banners.length = toasts.length = floats.length = 0; },
@@ -115,6 +117,10 @@ export function createHud(host) {
         q.globalAlpha = clamp(a, 0, 1);
         text(q, b.title, W / 2, Hh * .3, 34 * u, b.col, {align: 'center', w: 800});
         if (b.sub) text(q, b.sub, W / 2, Hh * .3 + 28 * u, 15 * u, '#e8e2d2', {align: 'center', w: 600});
+        if (b.note) {
+          text(q, b.note.title, W / 2, Hh * .3 + 62 * u, 20 * u, b.note.col, {align: 'center', w: 800});
+          if (b.note.sub) text(q, b.note.sub, W / 2, Hh * .3 + 84 * u, 13 * u, '#e8e2d2', {align: 'center', w: 600});
+        }
         q.globalAlpha = 1;
       }
       toasts.forEach((t, i) => {
