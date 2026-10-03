@@ -1,8 +1,17 @@
 // MIX METER (Phase 4): drives the live arena in headless Chrome, taps the forge engine buses, prints loudness per bus
 // per scenario (rms dB / momentary-max LUFS). Needs the dev server on :8126. Usage: node tools/sfx/mixmeter.mjs [seconds per scenario]
 import {spawn} from 'node:child_process';
+import {rmSync} from 'node:fs';
 const port = 9100 + Math.floor(Math.random() * 90), dir = process.env.TEMP + '/cdp_p4_' + port, SEC = +(process.argv[2] || 8);
 const chrome = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe', ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', '--autoplay-policy=no-user-gesture-required', '--window-size=1280,800', 'about:blank'], {stdio: 'ignore'});
+// the throwaway profile (100+ MB in %TEMP%) goes with Chrome, which lets go of its files a moment after the kill; if a
+// Chrome child process is slow to die (a busy machine), a detached node keeps trying for two minutes. 'exit' also
+// covers an uncaught error, and Ctrl+C
+const rmProfile = () => { for (let k = 0; k < 20; k++) { try { return rmSync(dir, {recursive: true, force: true}); } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); }
+  spawn(process.execPath, ['-e', 'for (let k = 0; k < 120; k++) { try { require("fs").rmSync(process.argv[1], {recursive: true, force: true}); break; } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000); }', dir], {detached: true, stdio: 'ignore', windowsHide: true}).unref(); };
+let stopped = false;
+const stop = () => { if (stopped) return; stopped = true; try { chrome.kill(); } catch {} rmProfile(); };
+process.on('exit', stop); process.on('SIGINT', () => { stop(); process.exit(130); });
 const sleep = ms => new Promise(r => setTimeout(r, ms)); let ws, id = 0; const pend = new Map(), logs = [];
 const send = (m, p = {}) => new Promise(ok => { const i = ++id; pend.set(i, ok); ws.send(JSON.stringify({id: i, method: m, params: p})); });
 const ev = async e => { const r = await send('Runtime.evaluate', {expression: e, awaitPromise: true, returnByValue: true}); return r.result?.result?.value ?? r.result?.exceptionDetails?.exception?.description; };
@@ -59,4 +68,4 @@ try {
   for (let i = 0; i < 5; i++) { await send('Input.dispatchMouseEvent', {type: 'mousePressed', x: 1000, y: 260, button: 'left', clickCount: 1}); await sleep(650); await send('Input.dispatchMouseEvent', {type: 'mouseReleased', x: 1000, y: 260, button: 'left', clickCount: 1}); await sleep(300); }
   show('combat (ruins, shooting)', await m);
   for (const l of logs.slice(0, 8)) console.log(l);
-} finally { ws?.close(); chrome.kill(); }
+} finally { ws?.close(); stop(); }

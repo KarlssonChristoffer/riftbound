@@ -75,7 +75,8 @@ const TUNE = {
   clouds: {on: true, tileM: [40, 30], cover: .31, core: .19, s: [.24, .12], time: {day: 1, dusk: .55, night: 0}, speed: 1.9, none: ['rift'],
     mixC: .45 /* 3D: the mix colour = shadow colour x this (approximates the arena's multiply) */},
   shafts: {on: true, max: 5, lenMax: 120, el: [38, 62], time: {day: .85, dusk: 1, night: .5}, night: ['frost', 'rift'], motes: 9, yawStep: 1 /* 3D: deg */},
-  refl: {on: true, alpha: .6, tint: .38, ripple: 1, reach: 2.5, glowDim: .5, bed: -.18 /* 3D: the stream bed's height (m) = world.waterH */},
+  refl: {on: true, alpha: .6, tint: .38, ripple: 1, reach: 2.5, glowDim: .5, bed: -.18 /* 3D: the stream bed's height (m) = world.waterH */,
+    height: 6 /* 3D: how tall a thing still mirrors whole (m over the water): how far up the GPU searches */},
   haze: {on: true},
 };
 
@@ -112,10 +113,13 @@ export async function create(host) {
   const inv = (X, Y, h = 0) => { const u = X - V.ox - V.hx * h, v = Y - V.oy - V.hy * h; return [(V.yy * u - V.yx * v) / V.det, (-V.xy * u + V.xx * v) / V.det]; };
   // a top-down canvas (R texels per metre, its texel (0, 0) at world (x0, y0)) -> view px, as a DOMMatrix for a pattern
   const groundMatrix = (R, h, x0 = 0, y0 = 0) => { const [e, f] = proj(x0, y0, h); return new DOMMatrix([V.xx / R, V.xy / R, V.yx / R, V.yy / R, e, f]); };
-  function footprint(h = 0) {   // the view's world AABB at height h
+  // its 2 x 2 part inverted, into out [4]: view px (from the plane's origin) -> texel (gfx.js COMP_FS viewTexel)
+  const groundInv = (R, out) => { const a = V.xx / R, b = V.xy / R, c = V.yx / R, d = V.yy / R, det = a * d - b * c; out[0] = d / det; out[1] = -c / det; out[2] = -b / det; out[3] = a / det; return out; };
+  const FPA = {x0: 0, y0: 0, x1: 0, y1: 0}, FPB = {x0: 0, y0: 0, x1: 0, y1: 0}, FPC = {x0: 0, y0: 0, x1: 0, y1: 0}, _pf = [0, 0];
+  function footprint(h, out) {   // the view's world AABB at height h, into out (one of FPA..FPC: kept, no object a call)
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-    for (const [X, Y] of [[0, 0], [VW, 0], [0, VH], [VW, VH]]) { const [x, y] = inv(X, Y, h); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-    return {x0, y0, x1, y1};
+    for (let k = 0; k < 4; k++) { inv2(k & 1 ? VW : 0, k & 2 ? VH : 0, h, _pf); const x = _pf[0], y = _pf[1]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    out.x0 = x0; out.y0 = y0; out.x1 = x1; out.y1 = y1; return out;
   }
 
   // ================================================================ FOREGROUND
@@ -129,10 +133,10 @@ export async function create(host) {
     if (!K) return {tpls, pieces};
     const r = rng(SEED[biome] || 3), mkT = (e, i, j) => { const [fn, sway, amp, exp, par] = e, S = fn(SEED[biome] * 101 + i * 17 + j * 5); const t = {S, sway, amp, exp, par, mir: null, cvs: new Map()}; tpls.push(t); return t; };
     const lists = {N: K.N.map((e, i) => [mkT(e, i, 1), mkT(e, i, 2)]).flat(), S: K.S.map((e, i) => [mkT(e, i + 10, 1), mkT(e, i + 10, 2)]).flat(), side: K.side.map((e, i) => [mkT(e, i + 20, 1), mkT(e, i + 20, 2)]).flat()};
-    const wm = WM(), hm = HM();
+    const wb = host.ctxO.bounds;   // the world's borders (a bigger world's own, not the Proving Grounds')
     for (const edge of ['N', 'S']) {   // the arena's loop, verbatim RNG order: pick, mir, d, par, ph, spacing
-      let x = 1 + r() * 3, i = 0;
-      while (x < wm - 1) {
+      let x = wb.x0 + 1 + r() * 3, i = 0;
+      while (x < wb.x1 - 1) {
         const t = lists[edge][(i * 3 + (r() * 2 | 0)) % lists[edge].length];
         const home = {tpl: t, mir: r() < .5, d: Math.round(r() * (edge === 'N' ? 8 : 12)), par: t.par + (r() - .5) * .08};
         pieces.push({border: edge, along: x, var: {[edge]: home}, ph: r() * TAU, k: 0, ft: 0, want: 0, slot: edge, next: edge, vis: false});
@@ -140,8 +144,8 @@ export async function create(host) {
       }
     }
     for (const edge of ['W', 'E']) {
-      let y = 1.5 + r() * 3, i = 0;
-      while (y < hm - 1) {
+      let y = wb.y0 + 1.5 + r() * 3, i = 0;
+      while (y < wb.y1 - 1) {
         const t = lists.side[(i + (r() * 2 | 0)) % lists.side.length];
         const home = {tpl: t, mir: edge === 'E', d: Math.round(r() * 10), par: t.par + (r() - .5) * .08};
         pieces.push({border: edge, along: y, var: {side: home}, ph: r() * TAU, k: 0, ft: 0, want: 0, slot: edge, next: edge, vis: false});
@@ -210,12 +214,12 @@ export async function create(host) {
     return false;
   }
   function anchorOf(pc) {   // world anchor on the border + the point 1 m inside (wind sample)
-    const wm = WM(), hm = HM();
+    const wb = host.ctxO.bounds;
     switch (pc.border) {
-      case 'N': return [pc.along, 0, pc.along, 1];
-      case 'S': return [pc.along, hm, pc.along, hm - 1];
-      case 'W': return [0, pc.along, 1, pc.along];
-      default: return [wm, pc.along, wm - 1, pc.along];
+      case 'N': return [pc.along, wb.y0, pc.along, wb.y0 + 1];
+      case 'S': return [pc.along, wb.y1, pc.along, wb.y1 - 1];
+      case 'W': return [wb.x0, pc.along, wb.x0 + 1, pc.along];
+      default: return [wb.x1, pc.along, wb.x1 - 1, pc.along];
     }
   }
   function drawFG(q) {
@@ -302,38 +306,28 @@ export async function create(host) {
     const qf = f => { let n = 0; const want = val.length * (1 - f); for (let i = 0; i < 1024; i++) { n += H[i]; if (n >= want) return (i + 1) / 1024; } return 1; };
     const tE = qf(cover), tC = qf(core);
     for (let i = 0; i < lv.length; i++) lv[i] = val[i] >= tC ? 2 : val[i] >= tE ? 1 : 0;
-    CL.cover = cover; CL.key = '';
+    CL.cover = cover;
   }
   // the sky's cover from the world clock (sim/env.js sky.cloud: clear = no cloud shadows, more as it clouds over; the
   // shadows themselves soften as the sun does under an overcast sky), quantised to 1/16; the old fixed cover without a clock
   const coverNow = () => { const E = host.env; if (!E) return TUNE.clouds.cover; const c = E.sky.cloud; return c < .08 ? 0 : Math.round(Math.min(.78, .08 + .62 * c) * 16) / 16; };
-  function cloudTile() {
+  // the cloud shadows for gfx.js COMP_FS (G.setClouds): the level map (re-uploaded when the cover changes), its colour and two
+  // alphas, and the ground plane's view -> texel affine with the drift. The map used to be painted into an RGBA tile and laid
+  // over the view as a pattern fill into the PRE layer every frame (and that layer uploaded); the shader samples the same texel
+  const CLS = {lv: null, TW: 0, TH: 0, ver: 0, col: [0, 0, 0], a1: 0, a2: 0, m: [0, 0, 0, 0], e: 0, f: 0};
+  function drawClouds() {
+    if (!host.G.setClouds) return false;
     const tn = timeName(), k = (TUNE.clouds.time[tn] ?? 0) * (TUNE.clouds.none.includes(biome) ? 0 : 1), M = host.mood, cover = coverNow();
     const a = M ? M.shadow.a : 0, s = Math.min(1.2, a / .46) * k;
-    if (s <= .01 || cover <= 0) return null;
+    if (s <= .01 || cover <= 0) return false;
     if (!CL.val) buildCloudLevels();
-    cloudLevels(cover);
-    // (quantised: the clock blends the mood every frame; an exact key re-rendered the tile every frame)
-    const c = M.shadow.c, key = biome + tn + cover + (Math.round(s * 50) / 50) + c.map(v => Math.round(v * 64)).join() + TUNE.clouds.s.join() + TUNE.clouds.mixC;
-    if (CL.key === key && CL.cv) return CL.cv;
-    CL.key = key;
-    const [cv, q] = CL.cv ? [CL.cv, CL.cv.getContext('2d')] : mk(CL.TW, CL.TH);
-    const im = q.createImageData(CL.TW, CL.TH), d = im.data, lv = CL.lv;
-    const rgbA = c.map(v => Math.round(255 * v * TUNE.clouds.mixC)), A = [0, Math.round(255 * TUNE.clouds.s[1] * s), Math.round(255 * TUNE.clouds.s[0] * s)];
-    for (let i = 0; i < lv.length; i++) { const L = lv[i]; if (!L) continue; const o = i * 4; d[o] = rgbA[0]; d[o + 1] = rgbA[1]; d[o + 2] = rgbA[2]; d[o + 3] = A[L]; }
-    q.putImageData(im, 0, 0);
-    CL.pat = null;
-    return (CL.cv = cv);
-  }
-  function drawClouds() {
-    const tile = cloudTile(); if (!tile) return false;
-    const q = host.layer('pre'), R = CL.R;
-    CL.pat ||= q.createPattern(tile, 'repeat');
+    if (CL.cover !== cover || CLS.lv !== CL.lv) { cloudLevels(cover); CLS.lv = CL.lv; CLS.TW = CL.TW; CLS.TH = CL.TH; CLS.ver++; }
+    const c = M.shadow.c, mx = TUNE.clouds.mixC, R = CL.R;
+    for (let i = 0; i < 3; i++) CLS.col[i] = Math.round(255 * c[i] * mx) / 255;
+    CLS.a1 = Math.round(255 * TUNE.clouds.s[1] * s) / 255; CLS.a2 = Math.round(255 * TUNE.clouds.s[0] * s) / 255;
     const ox = Math.round(CL.x * R) / R, oy = Math.round(CL.y * R) / R;   // whole texels: the shadows step, never shimmer
-    CL.pat.setTransform(groundMatrix(R, 0, ox, oy));
-    q.save(); q.imageSmoothingEnabled = false; q.globalAlpha = 1; q.globalCompositeOperation = 'source-over';
-    q.fillStyle = CL.pat; q.fillRect(0, 0, VW, VH);
-    q.restore();
+    proj2(ox, oy, 0, _pp); groundInv(R, CLS.m); CLS.e = _pp[0]; CLS.f = _pp[1];
+    host.G.setClouds(CLS);
     return true;
   }
 
@@ -426,7 +420,7 @@ export async function create(host) {
     const fs = clamp((L0 / (f.H * PPMH) - .35) / .6, 0, 1), fore = Math.round(fs * 4) / 4;
     if (fore <= 0 || L0 < 2) return (f.tpl = null);
     f.tpl = shaftCanvas(f, L, f.w, -dx / L0, -dy / L0, SH.col.core, SH.col.edge, (f.x * 7 + f.y * 13) | 0);
-    f.tpl.fore = fore;
+    f.tpl.fore = fore; host.G.touch(f.tpl.cv);   // (painted again in its canvas: the GPU's copy of it is stale)
     return f.tpl;
   }
   function drawShafts() {
@@ -434,7 +428,7 @@ export async function create(host) {
     ensureShafts(); if (!SH.col) return 0;
     const z = V.z, reach = (TUNE.shafts.lenMax + 30) * z;
     let n = 0, q = null;
-    const mc = css(SH.col.mote), ec = css(SH.col.edge.map(v => v * 2));
+    const CC = SH.col, mc = CC.mcss ??= css(CC.mote), ec = CC.ecss ??= css(CC.edge.map(v => v * 2));   // (made once a colour set)
     for (const f of SH.feet) {
       f.vis = false;
       if (n >= TUNE.shafts.max) continue;
@@ -444,7 +438,7 @@ export async function create(host) {
       const X = Math.round(sx) - t.fx * z, Y = Math.round(sy) - t.fy * z, w = t.cv.width * z, h = t.cv.height * z;
       if (X >= VW || Y >= VH || X + w <= 0 || Y + h <= 0) continue;
       f.vis = true; n++;
-      if (!q) { q = host.layer('add'); q.save(); q.globalCompositeOperation = 'lighter'; q.imageSmoothingEnabled = false; }
+      if (!q) { q = host.glayer('add'); q.save(); q.globalCompositeOperation = 'lighter'; }   // (the GPU draws it: G.glayer)
       const br = Math.sin(T * .35 + f.ph) + .5 * Math.sin(T * .83 + f.ph * 2);   // slow breathing in 3 steps
       q.globalAlpha = (br > .6 ? 1 : br > -.4 ? .85 : .7) * t.fore;
       q.drawImage(t.cv, X, Y, w, h);
@@ -480,8 +474,8 @@ export async function create(host) {
   // ================================================================ WATER: masks, puddles, reflections, sky glint
   // masks are TOP-DOWN (R = PPM texels per metre, like the world's ground canvas) and projected per frame
   const WA = {key: '', mask: null, mpat: null, lava: null, lpat: null, yEnd: 0, shrink: 0, puddles: [], near: [], plane: new Map(), gpx: null, gw: 0, gh: 0, used: false, n: 0, pool: null, x0: 0, x1: 0};
-  const [RA, ra] = mk(VW, VH), [RB, rb] = mk(VW, VH), [MS, ms] = mk(VW, VH), [EM, em] = mk(VW, VH), [SK, sk] = mk(VW, VH), [HZ, hz] = mk(VW, VH);
-  let SKY = sk.createImageData(VW, VH); const skyDirty = [];
+  // the puddles' alpha in the GROUND layer (gfx.js COMP_FS: a puddle mirrors what stands over it) and the reflections' settings
+  const PUD_A = 254, RFL = {on: true, tint: [0, 0, 0], tintK: 0, alpha: 0, glow: 0, S: 0, ripple: 0, gust: 0, t: 0, oy: 0, zoom: 1, reach: 0, puddleA: 0, pool: null};
   function topMask(yEnd, half, cuts, extra) {   // the stream's row spans (half-width function of y), plus extra(q, R), minus cuts(q, R)
     const S = host.layout.stream, R = PPM, W = Math.ceil(WM() * R), H = Math.ceil(HM() * R), [c, q] = mk(W, H);
     q.fillStyle = '#fff';
@@ -515,7 +509,7 @@ export async function create(host) {
   function buildWater() {
     const key = biome + '|' + (host.world?.groundCanvas ? host.world.groundCanvas.width : 0);
     if (WA.key === key) return;
-    Object.assign(WA, {key, mask: null, mpat: null, lava: null, lpat: null, puddles: [], near: [], plane: new Map(), gpx: null, pool: null});
+    Object.assign(WA, {key, mask: null, ma: null, mw: 0, mh: 0, mpat: null, lava: null, lpat: null, puddles: [], near: [], plane: new Map(), gpx: null, pool: null});
     const S = host.layout?.stream; if (!S) return;
     if (biome === 'ember') { WA.lava = topMask(27.6, my => S.w(my) / 2 + .18); return; }
     if (!(biome === 'ruins' || biome === 'frost')) return;
@@ -533,6 +527,11 @@ export async function create(host) {
         cut(fx * R, y * R, r0 * 1.1, r0 * .7, 1);
       }
     }, poolMask);
+    {   // the mask's alpha as bytes (the sky glint's clip, read per glint pixel: skyBand)
+      const c = WA.mask, d = c.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, c.width, c.height).data, A = new Uint8Array(c.width * c.height);
+      for (let i = 0; i < A.length; i++) A[i] = d[i * 4 + 3];
+      WA.ma = A; WA.mw = c.width; WA.mh = c.height;
+    }
     if (biome === 'ruins') WA.puddles = PUDDLES.map(([x, y, rx, ry], i) => ({x, y, rx, ry, seed: 300 + i, key: ''}));
     // what can show up in the water: props near the stream / north of a puddle (sprites fetched per frame)
     for (const p of host.props || []) {
@@ -583,31 +582,15 @@ export async function create(host) {
     u.cq.putImageData(im, 0, 0); u.mq.putImageData(mi, 0, 0);
     return {W, H, W0, H0, mx, my};
   }
-  const near = (x, y, r) => { const S = host.layout.stream; return (WA.mask && ((y < WA.yEnd + r && Math.abs(x - S.cx(y)) - S.w(y) / 2 < r) || poolNear(x, y, r))) || WA.puddles.some(u => Math.hypot(x - u.x, y - u.y) < r + .6); };
-  // whole-pixel ripple: rows shifted by round(amp * sin), phase anchored to the view-frame row (the arena's world row at
-  // yaw 0), stronger downstream and in gusts
-  function rippleCopy(src, dq, x, y, w, h) {
-    const gust = gustNow(), Rr = TUNE.refl.ripple, z = V.z, S = host.layout.stream, cxs = x + w / 2;
-    const off = row => {
-      inv2(cxs, row + .5, TUNE.refl.bed, _pr); const wy = (row - V.oy) / z, mx = _pr[0], my = _pr[1];
-      const onStream = WA.mask && my < WA.yEnd && Math.abs(mx - S.cx(my)) < S.w(my) / 2 + .6, onPool = !onStream && poolNear(mx, my, .6);
-      const amp = onStream ? Rr * (.8 + .5 * clamp((my - 10) / 14, 0, 1) + .6 * gust) : onPool ? Rr * (.7 + .5 * gust) : Rr * (.25 + .8 * gust);
-      return Math.round(amp * Math.sin(wy * .55 - T * 2.1) * (.6 + .4 * Math.sin(wy * .13 + T * .7))) * z;
-    };
-    let r0 = y, o0 = off(y);
-    for (let r = y + 1; r <= y + h; r++) {
-      const o = r < y + h ? off(r) : NaN;
-      if (o !== o0) { dq.drawImage(src, x, r0, w, r - r0, x + o0, r0, w, r - r0); r0 = r; o0 = o; }
-    }
-  }
   // the sky glint across the stream: the arena's world rows (every 150 px of its ground), three dashes each, written as
   // ground texel + sky colour (the arena adds it before the light)
+  // the sky's glints on the water: whole-pixel dashes (z x z view px each) in g, a GPU context (G.glayer), each pixel only
+  // where the water mask at the bed's height lets it through (stones, floes and the ice shelf have no glint): the mask's
+  // texel under the pixel's centre, as the canvas's pattern fill through groundMatrix showed it
   function skyBand(g, fp) {
-    const sky = WATER[biome]?.sky[timeName()]; if (!sky || !WA.mask || !WA.gpx) return;
-    const S = host.layout.stream, P = 150, z = V.z, d = SKY.data, gx = WA.gw / WM(), gy = WA.gh / HM(), h = TUNE.refl.bed;
-    for (const i of skyDirty) d[i + 3] = 0;
-    skyDirty.length = 0;
-    let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+    const sky = WATER[biome]?.sky[timeName()]; if (!sky || !WA.ma || !WA.gpx) return;
+    const S = host.layout.stream, P = 150, z = V.z, gx = WA.gw / WM(), gy = WA.gh / HM(), h = TUNE.refl.bed, MA = WA.ma, MW = WA.mw, MH = WA.mh;
+    const wet = (X, Y) => { inv2(X + .5, Y + .5, h, _pr); const tx = Math.floor(_pr[0] * PPM), ty = Math.floor(_pr[1] * PPM); return tx >= 0 && ty >= 0 && tx < MW && ty < MH && MA[ty * MW + tx] > 127; };
     const wy0 = Math.max(0, Math.floor(fp.y0 * PPMY) - 2), wy1 = Math.min(WA.yEnd * PPMY, Math.ceil(fp.y1 * PPMY) + 2);
     // three dashes across the water's row span [a, b) (px at the ground's resolution) at world row wy / y = my, gaps between
     // (proj / inv through scratch arrays: this runs per pixel of every dash, every frame)
@@ -624,8 +607,10 @@ export async function create(host) {
           inv2(X + .5 * z, Y + .5 * z, h, _pu); const tx = Math.floor(_pu[0] * gx), ty = Math.floor(_pu[1] * gy);
           if (tx < 0 || ty < 0 || tx >= WA.gw || ty >= WA.gh) continue;
           const o = (ty * WA.gw + tx) * 4, R = Math.min(255, WA.gpx[o] + sky[0]), G = Math.min(255, WA.gpx[o + 1] + sky[1]), B = Math.min(255, WA.gpx[o + 2] + sky[2]);
-          for (let yy = 0; yy < z; yy++) for (let xx = 0; xx < z; xx++) { const p = ((Y + yy) * VW + X + xx) * 4; d[p] = R; d[p + 1] = G; d[p + 2] = B; d[p + 3] = 255; skyDirty.push(p); }
-          bx0 = Math.min(bx0, X); by0 = Math.min(by0, Y); bx1 = Math.max(bx1, X + z); by1 = Math.max(by1, Y + z);
+          for (let yy = 0; yy < z; yy++) {   // the block's rows: a fill a run of wet pixels (later dashes over earlier ones, as before)
+            let s = -1;
+            for (let xx = 0; xx <= z; xx++) { const w = xx < z && wet(X + xx, Y + yy); if (w && s < 0) s = xx; else if (!w && s >= 0) { g.fillRectRGB(X + s, Y + yy, xx - s, 1, R, G, B); s = -1; } }
+          }
         }
       }
     };
@@ -641,134 +626,72 @@ export async function create(host) {
       const hwp = Pp.rx * Math.sqrt(kk) - WA.shrink - .06, a = Math.ceil((Pp.x - hwp) * PPM - .5), b = Math.floor((Pp.x + hwp) * PPM - .5) + 1;
       if (b > a) dashes(wy, my, a, b, k, 91);
     }
-    if (bx1 <= bx0) return;
-    // the water mask decides (stones, floes and the ice shelf have no glint)
-    sk.globalCompositeOperation = 'source-over'; sk.clearRect(bx0, by0, bx1 - bx0, by1 - by0);
-    sk.putImageData(SKY, 0, 0, bx0, by0, bx1 - bx0, by1 - by0);
-    sk.globalCompositeOperation = 'destination-in'; sk.drawImage(MS, bx0, by0, bx1 - bx0, by1 - by0, bx0, by0, bx1 - bx0, by1 - by0);
-    sk.globalCompositeOperation = 'source-over';
-    g.drawImage(SK, bx0, by0, bx1 - bx0, by1 - by0, bx0, by0, bx1 - bx0, by1 - by0);
-  }
-  function emitImageOf(p, sp) {   // the flame the card shows this frame (the wind's live flame when it has one)
-    const it = host.itemOf(p), t = it?.card?.g?.uniforms?.uEm?.value;
-    return (t && t.image && it.card.g.uniforms.uHasEm.value) ? t.image : sp?.emit || null;
   }
   function drawWater() {
     WA.used = false; WA.n = 0;
     buildWater(); if (!WA.mask && !WA.puddles.length) return;
-    const z = V.z, fp = footprint(0), fb = footprint(TUNE.refl.bed), S = host.layout.stream;
+    const z = V.z, fp = footprint(0, FPA), fb = footprint(TUNE.refl.bed, FPB), S = host.layout.stream;
     const streamIn = WA.mask && Math.max(fp.x1, fb.x1) > WA.x0 && Math.min(fp.x0, fb.x0) < WA.x1 && Math.min(fp.y0, fb.y0) < WA.yEnd;
     // puddles on the floor first (their colours follow the sky; re-rasterised when the yaw / zoom / time changes)
     const tn = timeName(), pk = Math.round(V.yaw / (.5 * DEG)) + '|' + tn, vis = [];
     for (const u of WA.puddles) {
       proj2(u.x, u.y, 0, _pp); const sx = _pp[0], sy = _pp[1], rr = Math.max(u.rx, u.ry) * PPM * z * 1.3 + 4;
       if (sx < -rr || sx > VW + rr || sy < -rr || sy > VH + rr) continue;
-      if (u.key !== pk) { Object.assign(u, puddleSprite(u, PUD_COL[tn] || PUD_COL.day)); u.key = pk; }
+      if (u.key !== pk) { Object.assign(u, puddleSprite(u, PUD_COL[tn] || PUD_COL.day)); u.key = pk; host.G.touch(u.cv); }
       u.X = Math.round(sx - u.W0 * z / 2) - u.mx * z; u.Y = Math.round(sy - u.H0 * z / 2) - u.my * z;
       vis.push(u);
     }
     if (!streamIn && !vis.length) return;
-    const g = host.layer('ground');
-    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.imageSmoothingEnabled = false;
-    for (const u of vis) g.drawImage(u.cv, u.X, u.Y, u.W * z, u.H * z);
-    // the water in view as a screen mask: the stream (top-down mask at the bed's height) + the puddles' insides
-    ms.setTransform(1, 0, 0, 1, 0, 0); ms.globalCompositeOperation = 'source-over'; ms.globalAlpha = 1; ms.clearRect(0, 0, VW, VH); ms.imageSmoothingEnabled = false;
-    if (streamIn) {
-      WA.mpat ||= ms.createPattern(WA.mask, 'no-repeat');
-      WA.mpat.setTransform(groundMatrix(PPM, TUNE.refl.bed));
-      ms.fillStyle = WA.mpat; ms.fillRect(0, 0, VW, VH);
+    const g = host.glayer('ground');   // (the GPU draws them: G.glayer)
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over';
+    if (vis.length) {   // (at the puddles' own alpha: gfx.js COMP_FS reads it as "a puddle here" and mirrors what stands over it)
+      g.globalAlpha = PUD_A / 255;
+      for (const u of vis) g.drawImage(u.cv, u.X, u.Y, u.W * z, u.H * z);
+      g.globalAlpha = 1;
     }
-    for (const u of vis) ms.drawImage(u.mask, u.X, u.Y, u.W * z, u.H * z);
-    if (streamIn) skyBand(g, fb);
-    if (!TUNE.refl.on) { g.restore(); return; }
-    // mirrored sprites into the scratch (flipped about the ground contact row gy: y -> 2 gy + z - y)
-    ra.setTransform(1, 0, 0, 1, 0, 0); ra.globalCompositeOperation = 'source-over'; ra.globalAlpha = 1; ra.clearRect(0, 0, VW, VH); ra.imageSmoothingEnabled = false;
-    let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
-    const mirror = (img, sx, sy, sw, sh, dx, dy, gy) => {
-      const top = 2 * gy + z - (dy + sh * z), bot = 2 * gy + z - dy;
-      if (dx >= VW || dx + sw * z <= 0 || bot <= 0 || top >= VH) return false;
-      ra.setTransform(1, 0, 0, -1, 0, 2 * gy + z); ra.drawImage(img, sx, sy, sw, sh, dx, dy, sw * z, sh * z); ra.setTransform(1, 0, 0, 1, 0, 0);
-      bx0 = Math.min(bx0, dx); by0 = Math.min(by0, top); bx1 = Math.max(bx1, dx + sw * z); by1 = Math.max(by1, bot); WA.n++; return true;
-    };
-    const flames = [];
-    for (const p of WA.near) {
-      if (p.gone) continue;
-      const it = host.itemOf(p), sp = it?.sp || host.biome.sprite?.(p, host.ctxO); if (!sp || !sp.img) continue;   // live 3D prop: its painted stand-in
-      const z0 = p.z || 0, ax = proj2(p.x, p.y, z0 + (p.h || 0), _pp)[0], ay = _pp[1], gy = Math.round(proj2(p.x, p.y, z0 + (WA.plane.get(p) ?? 0), _pp)[1]);
-      const dx = Math.round(ax) - sp.pivot[0] * z, dy = Math.round(ay) - sp.pivot[1] * z;
-      if (mirror(sp.img, 0, 0, sp.img.width, sp.img.height, dx, dy, gy)) { const e = emitImageOf(p, sp); if (e) flames.push({e, dx, dy, gy, w: sp.img.width * z, h: sp.img.height * z}); }
-    }
-    // the Ranger: body + cloak + bow as drawn this frame, flipped about the water plane next to him (the stream's lowered
-    // surface, or ground level at a puddle; airborne: 2 x height lower)
-    const P = host.P, pl = host.player;
-    if (P && !(P.sink > 0) && !(P.blink && Math.floor(P.blink * 12) % 2) && near(pl.x, pl.y, 3.2)) {
-      // (playerSprite's h is the player's height above the ground; the canvas size is img.width / img.height)
-      const ps = host.playerSprite(), Sx = host.layout.stream, byStream = WA.mask && (Math.abs(ps.x - Sx.cx(ps.y)) - Sx.w(ps.y) / 2 < 3.2 || poolNear(ps.x, ps.y, 3.2)),
-        plane = byStream ? TUNE.refl.bed : (host.elev ? host.elev(ps.x, ps.y) : 0), [ax, ay] = proj(ps.x, ps.y, ps.h), gy = Math.round(proj(ps.x, ps.y, plane)[1]);
-      mirror(ps.img, 0, 0, ps.img.width, ps.img.height, Math.round(ax) - ps.px * z, Math.round(ay) - ps.py * z, gy);
-    }
-    if (bx1 > bx0) {
-      bx0 = Math.max(0, Math.floor(bx0) - 2 * z); by0 = Math.max(0, Math.floor(by0)); bx1 = Math.min(VW, Math.ceil(bx1) + 2 * z); by1 = Math.min(VH, Math.ceil(by1));
-      if (bx1 > bx0 && by1 > by0) {
-        const w = bx1 - bx0, h = by1 - by0;
-        rb.setTransform(1, 0, 0, 1, 0, 0); rb.globalCompositeOperation = 'source-over'; rb.globalAlpha = 1; rb.clearRect(0, 0, VW, VH); rb.imageSmoothingEnabled = false;
-        rippleCopy(RA, rb, bx0, by0, w, h);
-        rb.globalCompositeOperation = 'destination-in'; rb.drawImage(MS, bx0, by0, w, h, bx0, by0, w, h);
-        rb.globalCompositeOperation = 'source-atop'; rb.globalAlpha = TUNE.refl.tint; rb.fillStyle = WATER[biome].tint; rb.fillRect(bx0, by0, w, h);
-        rb.globalAlpha = 1; rb.globalCompositeOperation = 'source-over';
-        g.globalAlpha = TUNE.refl.alpha; g.drawImage(RB, bx0, by0, w, h, bx0, by0, w, h); g.globalAlpha = 1;
-      }
-    }
+    if (streamIn) skyBand(g, fb);   // the sky's glints on the stream
     g.restore();
-    // flames mirrored into the water / puddles: the EMIT layer (glow x darkness, like the arena's ground emitters)
-    if (flames.length) {
-      em.setTransform(1, 0, 0, 1, 0, 0); em.globalCompositeOperation = 'source-over'; em.globalAlpha = 1; em.clearRect(0, 0, VW, VH); em.imageSmoothingEnabled = false;
-      for (const f of flames) { em.setTransform(1, 0, 0, -1, 0, 2 * f.gy + z); em.drawImage(f.e, f.dx, f.dy, f.w, f.h); }   // (the emit shares the sprite's layout, like the card's uv)
-      em.setTransform(1, 0, 0, 1, 0, 0);
-      em.globalCompositeOperation = 'destination-in'; em.drawImage(MS, 0, 0);
-      em.globalCompositeOperation = 'source-atop'; em.globalAlpha = TUNE.refl.glowDim; em.fillStyle = '#000'; em.fillRect(0, 0, VW, VH);
-      em.globalAlpha = 1; em.globalCompositeOperation = 'source-over';
-      const e = host.layer('emit'); e.save(); e.setTransform(1, 0, 0, 1, 0, 0); e.globalAlpha = 1; e.globalCompositeOperation = 'source-over'; e.drawImage(EM, 0, 0); e.restore();
-      WA.used = true;
-    }
+    // the REFLECTIONS (the stream, the pool, the puddles): on the GPU, gfx.js COMP_FS reflAt, from what is on screen this
+    // frame. It mirrors as this file's 2D version did (rows shifted whole pixels by the ripple, the water's tint, laid over
+    // the water's albedo before the light, flames glowing in it at glowDim), but every prop, card, tree and the Ranger, as
+    // they stand in 3D; the props near the water were mirrored here as painted sprites, ~5% of the frame's JS
+    if (!TUNE.refl.on) return;
+    const R = RFL, t = WATER[biome]?.tint || '#33556a', c = rgb(t);
+    R.tint[0] = c[0] / 255; R.tint[1] = c[1] / 255; R.tint[2] = c[2] / 255;
+    R.tintK = TUNE.refl.tint; R.alpha = TUNE.refl.alpha; R.glow = 1 - TUNE.refl.glowDim; R.S = Math.abs(V.hy); R.ripple = TUNE.refl.ripple;
+    R.gust = gustNow(); R.t = T; R.oy = V.oy; R.zoom = z; R.reach = Math.min(512, Math.ceil(2 * (TUNE.refl.height - TUNE.refl.bed) * R.S));
+    R.puddleA = WA.puddles.length ? PUD_A : 0; R.pool = WA.pool;
+    host.G.setReflect?.(R); WA.used = true;
   }
 
   // ================================================================ HEAT HAZE (ember lava stream)
-  const hasDistort = () => !!host.G?.compU?.tDistort;
+  // gfx.js COMP_FS (G.setHaze): rows of 2 px shifted whole pixels where the lava lies, the same formula; the lava's top-down mask
+  // goes up once per world (it was a DISTORT layer painted and uploaded every frame)
+  const HZS = {src: null, mask: null, W: 0, H: 0, ver: 0, band: 2, zoom: 1, t: 0, m: [0, 0, 0, 0], e: 0, f: 0, oy: 0};
   function drawHaze() {
-    buildWater(); if (!WA.lava || !TUNE.haze.on) return 0;
-    const fp = footprint(TUNE.refl.bed); if (fp.x1 < 37 || fp.x0 > 43 || fp.y0 > 27.6) return 0;
-    const z = V.z, band = 2 * z, rows = [];
-    for (let y = 0; y < VH; y += band) {
-      const wy = Math.round((y - V.oy) / z);   // the arena's world row at yaw 0
-      const s = Math.round(Math.sin(wy * .21 - T * 2.6) * Math.max(0, Math.sin(wy * .047 + T * .9)) * 1.45);
-      if (s) rows.push(y, s * z);
+    buildWater(); if (!WA.lava || !TUNE.haze.on || !host.G.setHaze) return 0;
+    const fp = footprint(TUNE.refl.bed, FPC); if (fp.x1 < 37 || fp.x0 > 43 || fp.y0 > 27.6) return 0;
+    if (HZS.src !== WA.lava) {
+      const c = WA.lava, d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, b = new Uint8Array(c.width * c.height);
+      for (let i = 0; i < b.length; i++) b[i] = d[i * 4 + 3] > 127 ? 255 : 0;
+      HZS.src = c; HZS.mask = b; HZS.W = c.width; HZS.H = c.height; HZS.ver++;
     }
-    if (!rows.length) return 0;
-    if (!hasDistort()) return rows.length / 2;   // (the composite hook isn't there yet: computed, not shown)
-    hz.setTransform(1, 0, 0, 1, 0, 0); hz.globalAlpha = 1; hz.globalCompositeOperation = 'source-over'; hz.clearRect(0, 0, VW, VH); hz.imageSmoothingEnabled = false;
-    for (let i = 0; i < rows.length; i += 2) { hz.fillStyle = `rgb(${128 + rows[i + 1]},128,0)`; hz.fillRect(0, rows[i], VW, band); }
-    WA.lpat ||= hz.createPattern(WA.lava, 'no-repeat');
-    WA.lpat.setTransform(groundMatrix(PPM, TUNE.refl.bed));
-    hz.globalCompositeOperation = 'destination-in'; hz.fillStyle = WA.lpat; hz.fillRect(0, 0, VW, VH); hz.globalCompositeOperation = 'source-over';
-    const q = host.layer('distort'); q.save(); q.setTransform(1, 0, 0, 1, 0, 0); q.globalAlpha = 1; q.globalCompositeOperation = 'source-over'; q.drawImage(HZ, 0, 0); q.restore();
-    return rows.length / 2;
+    const z = V.z; HZS.band = 2 * z; HZS.zoom = z; HZS.t = T; HZS.oy = V.oy;
+    proj2(0, 0, TUNE.refl.bed, _pp); groundInv(PPM, HZS.m); HZS.e = _pp[0]; HZS.f = _pp[1];
+    host.G.setHaze(HZS);
+    return 1;
   }
 
   // ================================================================ contract
   const PT = {clouds: 0, water: 0, shafts: 0, haze: 0, fg: 0};   // per-part cost (ms, smoothed), for tuning
   function syncBiome() {
     const id = host.biome?.id || 'ruins';
-    if (id !== biome) { biome = id; SH.key = ''; SH.feet = null; CL.key = ''; WA.key = ''; FGcol = null; }
+    if (id !== biome) { biome = id; SH.key = ''; SH.feet = null; WA.key = ''; FGcol = null; }
   }
   Object.assign(F, {
     toggle() { F.on = !F.on; return F.on; },
     biomeChanged() { biome = ''; syncBiome(); },
-    resize(w, h) {   // the view changed size (main.js fit): the view-sized canvases and the sky glint's pixels follow
-      VW = w; VH = h;
-      for (const [c, q] of [[RA, ra], [RB, rb], [MS, ms], [EM, em], [SK, sk], [HZ, hz]]) { c.width = w; c.height = h; q.imageSmoothingEnabled = false; }
-      SKY = sk.createImageData(w, h); skyDirty.length = 0;
-    },
+    resize(w, h) { VW = w; VH = h; },   // the view changed size (main.js fit)
     view(dt) {
       const t0 = performance.now();
       T += dt;
@@ -788,15 +711,15 @@ export async function create(host) {
       ns = drawShafts(); lap('shafts');
       if (biome === 'ember') nh = drawHaze();
       lap('haze');
-      if (TUNE.fg.on) { const q = host.layer('front'); q.save(); q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-over'; q.imageSmoothingEnabled = false; nf = drawFG(q); q.restore(); }
+      if (TUNE.fg.on) { const q = host.glayer('front'); q.save(); q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-over'; nf = drawFG(q); q.restore(); }
       lap('fg');
       acc += performance.now() - t0;
       hist[hN++ % hist.length] = acc; acc = 0;
       let s = 0; const n = Math.min(hN, hist.length); for (let i = 0; i < n; i++) s += hist[i]; F.ms = s / n;
-      F.debug = `fg ${nf} · shafts ${ns} · haze ${nh}${nh && !hasDistort() ? ' (no distort layer)' : ''} · refl ${WA.n}${WA.used ? ' glow' : ''}${cl ? ' · clouds' : ''}`;
+      F.debug = `fg ${nf} · shafts ${ns} · haze ${nh} · refl ${WA.used ? 'on' : 'off'}${cl ? ' · clouds' : ''}`;
     },
   });
-  F._dbg = {FG, SH, WA, CL, V, PT, proj, inv, footprint, cv: {RA, RB, MS, EM, SK, HZ}};
+  F._dbg = {FG, SH, WA, CL, V, PT, proj, inv, footprint};
   buildCloudLevels();   // ~0.1 s once, while the page loads (not as a hitch the first time the sun comes out)
   return F;
 }

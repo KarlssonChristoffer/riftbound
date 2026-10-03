@@ -23,6 +23,9 @@ export const hypot3 = (a, b, c) => {
   const k = (t - s) - u; s = t; u = r * r - k; t = s + u;
   return Math.sqrt(t) * m;
 };
+// empty an array that is filled again (every frame, every query): `a.length = 0` frees its store, so refilling it allocates
+// a new one in doubling steps (~4 KB for 150 items); popping keeps the store
+export const clearArray = a => { while (a.length > 0) a.pop(); return a; };
 // integer hash of up to 3 ints -> 0..1 (the arena's, biomes.js: walls, decor, moss, foliage all agree)
 export const hash3 = (a, b = 0, c = 0) => {
   let n = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(c | 0, 1442695041)) | 0;

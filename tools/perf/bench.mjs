@@ -4,6 +4,9 @@
 // GPU time (timer queries round G.render). Prints one row per scenario, compares with tools/perf/baseline.json and
 // exits 1 when a scenario is over budget (JS, its groups, the p95 frame, the GPU) or a system got clearly slower than
 // the baseline. It renders at the dev display's size (3440x1440: the HD pass and the GPU work scale with it).
+// Under each row, what the frame asks of WebGL and the heap (core/perf.js counts: draws, uniform calls, texture uploads
+// from a canvas / from an array, buffer bytes, the heap's growth a frame) and the GC's pauses (a short trace after the
+// measured window: the MinorGC / MajorGC events, ms a second and the longest).
 //
 //   node tools/perf/bench.mjs                      all scenarios, compare with the baseline
 //   node tools/perf/bench.mjs --only night         one scenario (substring match)
@@ -12,14 +15,14 @@
 //            --horde 60   enemies in the horde scenario (what more life costs: how many fit in the frame)
 //            --q inst=0   extra URL parameters for every scenario (an A/B of a switch)   --only day,run   several
 //            --throttle 3 (the CPU slowed 3x, ~a mid laptop: a look at weaker machines, not the target; checks only
-//                          p95 <= 16.7 ms, no baseline compare)
+//                          p95 <= 16.7 ms, no baseline compare)   --no-gc (skip the GC trace)
 //            env CHROME = path to chrome.exe
 //   --path src_ab/   bench another copy of the page (an A/B: the old version of a file in a copied folder)
 //
 // Run it before committing anything that touches the frame (a feature, the renderer, the host). Headless Chrome on the
 // dev machine is ~10-20% faster than a visible window; the budgets in perf.js already account for that.
 import {spawn} from 'node:child_process';
-import {readFileSync, writeFileSync, existsSync, mkdtempSync} from 'node:fs';
+import {readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir, cpus} from 'node:os';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -36,6 +39,8 @@ const WALK = `(() => { const R = window.__r3d; let i = 0; window.__drive = setIn
 // the fight goes on without hits and hitstops
 const SPAWN = `(() => { const R = window.__r3d, C = R.host.feature('combat').core, x = R.host.player.x, y = R.host.player.y; C.immune = () => true;
   for (let i = 0; i < ${HORDE}; i++) { const r = 3.5 + (i % 4) * 1.6, a = i * 2.39996; C.spawnBrute({x: x + Math.cos(a) * r, y: y + Math.sin(a) * r * .7, hp: 1e6, dmg: 0, type: 'brute', name: 'Brute', coins: [0, 0]}); } })()`;
+// zoomed out as far as the wheel goes (render/camera.js: half the window's scale): the worst case for the view's cost
+const ZOOM_OUT = `(() => { window.__r3d.zoom = .5; })()`;
 const SCENARIOS = [
   {name: 'day',         q: 'mode=sandbox',                            note: 'ruins, day: sun shadows, 3D trees'},
   {name: 'night-fires', q: 'mode=sandbox&biome=ember&time=night',     note: 'ember, night: every fire and light'},
@@ -45,6 +50,7 @@ const SCENARIOS = [
   {name: 'storm',       q: 'mode=sandbox&weather=storm&season=summer', note: 'ruins, summer storm: rain, splashes, lightning'},
   {name: 'snow',        q: 'mode=sandbox&weather=snow&season=winter', note: 'ruins, winter: snowfall, bare crowns'},
   {name: 'horde',       q: 'mode=sandbox', drive: SPAWN, whole: true, note: `ruins, day: ${HORDE} enemies round the player`},
+  {name: 'zoomed-out',  q: 'mode=sandbox', drive: ZOOM_OUT,             note: 'ruins, day, zoomed all the way out: the most world on screen'},
 ].filter(s => !ONLY || ONLY.split(',').some(o => s.name.includes(o)));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -62,15 +68,34 @@ async function cpuBusy(ms = 1500) {
 const LOAD0 = await cpuBusy();
 const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
 const prof = mkdtempSync(join(tmpdir(), 'bench-chrome-'));
-const chrome = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit',
+const chrome = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit', '--enable-precise-memory-info',
   `--window-size=${W},${H}`, '--remote-debugging-port=9342', '--user-data-dir=' + prof, 'about:blank'], {stdio: 'ignore'});
-const quit = code => { try { chrome.kill(); } catch {} try { server.kill(); } catch {} process.exit(code); };
+// the throwaway profile (100-150 MB in %TEMP%) goes with Chrome, which lets go of its files a moment after the kill; if a
+// Chrome child process is slow to die (a busy machine), a detached node keeps trying for two minutes. 'exit' also
+// covers an uncaught error, Ctrl+C goes through quit
+const rmProfile = () => { for (let k = 0; k < 20; k++) { try { return rmSync(prof, {recursive: true, force: true}); } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); }
+  spawn(process.execPath, ['-e', 'for (let k = 0; k < 120; k++) { try { require("fs").rmSync(process.argv[1], {recursive: true, force: true}); break; } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000); }', prof], {detached: true, stdio: 'ignore', windowsHide: true}).unref(); };
+let stopped = false;
+const stop = () => { if (stopped) return; stopped = true; try { chrome.kill(); } catch {} try { server.kill(); } catch {} rmProfile(); };
+const quit = code => { stop(); process.exit(code); };
+process.on('exit', stop); process.on('SIGINT', () => quit(130));
 
 let tabs; for (let k = 0; k < 80; k++) { try { tabs = await (await fetch('http://127.0.0.1:9342/json')).json(); if (tabs.find(t => t.type === 'page')) break; } catch {} await sleep(250); }
 if (!tabs) { console.error('bench: Chrome did not start (set CHROME=...)'); quit(2); }
 const ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise(r => ws.onopen = r);
-let id = 0; const pend = {}, logs = [];
-ws.onmessage = e => { const m = JSON.parse(e.data); if (pend[m.id]) { pend[m.id](m); delete pend[m.id]; } else if (m.method === 'Runtime.exceptionThrown') logs.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); };
+let id = 0; const pend = {}, logs = [], trace = {ev: [], done: null};
+ws.onmessage = e => { const m = JSON.parse(e.data); if (pend[m.id]) { pend[m.id](m); delete pend[m.id]; } else if (m.method === 'Runtime.exceptionThrown') logs.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text);
+  else if (m.method === 'Tracing.dataCollected') { for (const t of m.params.value) if ((t.name === 'MinorGC' || t.name === 'MajorGC') && t.ph === 'X') trace.ev.push(t); }
+  else if (m.method === 'Tracing.tracingComplete') trace.done?.(); };
+// the GC's pauses over `secs`: the renderer's MinorGC / MajorGC (devtools.timeline), ms a second, the longest, how many
+async function gcPauses(secs) {
+  trace.ev.length = 0;
+  await send('Tracing.start', {transferMode: 'ReportEvents', traceConfig: {recordMode: 'recordContinuously', includedCategories: ['devtools.timeline', 'v8.gc', 'disabled-by-default-v8.gc']}});
+  await sleep(secs * 1000);
+  const done = new Promise(r => trace.done = r); await send('Tracing.end'); await done;
+  const ms = trace.ev.map(t => t.dur / 1000), sum = ms.reduce((a, v) => a + v, 0);
+  return {msPerSec: +(sum / secs).toFixed(2), max: +Math.max(0, ...ms).toFixed(2), perSec: +(ms.length / secs).toFixed(1), major: trace.ev.filter(t => t.name === 'MajorGC').length};
+}
 const send = (method, params = {}) => new Promise(r => { const i = ++id; pend[i] = r; ws.send(JSON.stringify({id: i, method, params})); });
 const ev = async expr => { const r = await send('Runtime.evaluate', {expression: expr, awaitPromise: true, returnByValue: true}); return r.result?.exceptionDetails ? {err: r.result.exceptionDetails.text} : r.result?.result?.value; };
 await send('Page.enable'); await send('Runtime.enable');
@@ -103,6 +128,7 @@ for (const sc of SCENARIOS) {
     await sleep(SECS * 1000);
     const r = await ev(`(() => { const r = window.__r3d.perf.report(), g = window.__gpu.ms.slice().sort((a, b) => a - b);
       r.gpu = g.length ? {p50: +g[g.length >> 1].toFixed(2), p95: +g[Math.floor(g.length * .95)].toFixed(2)} : null; r.draws = window.__r3d.G.stats.calls; return r; })()`);
+    if (!flag('no-gc')) r.gc = await gcPauses(3);
     if (logs.length) r.errors = logs.slice(0, 3);
     runs.push(r);
   }
@@ -135,6 +161,9 @@ for (const sc of SCENARIOS) {
     ['sim', 'char', 'view', 'render', 'ui'].map(k => f(g[k], 6) + mark(g[k], B[k])).join('') + `| ${f(r.gpu?.p95, 6)}${mark(r.gpu?.p95 ?? 0, B.gpu ?? Infinity)} | ${String(r.draws).padStart(4)}  | ` +
     r.systems.slice(0, 4).map(s => `${s.label} ${s.avg.toFixed(2)}`).join(', ') + (over.length ? `   OVER: ${over.join(', ')}` : ''));
   if (r.runs) console.log(`   ${r.runs.length} runs, JS avg: ${r.runs.map(v => v.toFixed(2)).join(' / ')} (the median run is shown)`);
+  const c = r.counts;
+  if (c) console.log(`   draws ${c.draws.toFixed(0)} (max ${c.drawsMax}) · uniforms ${c.uniforms.toFixed(0)} · uploads ${c.texCanvas.toFixed(1)} canvas + ${c.texData.toFixed(1)} array (${c.texKB.toFixed(0)} KB)` +
+    ` · buffers ${c.bufKB.toFixed(0)} KB · heap +${c.heapKB.toFixed(0)} KB/frame` + (r.gc ? ` · GC ${r.gc.msPerSec.toFixed(1)} ms/s (${r.gc.perSec}/s, longest ${r.gc.max.toFixed(1)} ms${r.gc.major ? `, ${r.gc.major} major` : ''})` : ''));
   if (r.errors) console.log('   errors:', r.errors.join(' | '));
   // regressions against the baseline: a system 25% and 0.1 ms slower, or the JS frame 15% slower
   const b = laptop || base?.res !== `${W}x${H}` ? null : base?.results?.[sc.name];   // (another resolution: nothing to compare)

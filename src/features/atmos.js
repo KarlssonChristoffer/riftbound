@@ -28,7 +28,7 @@
 //                   particle's own depth (walls and props in front hide them), dithered to the arena's glow alpha
 //                   (1.25 - lum(ambient) x .95, clamped .3..1: faint by day, full at night)
 //   shard edges     the shard cards' emit image (glow x (1 - light), depth-correct)
-//   footprints, shard shadows (the arena multiplied them into the ground)  -> host.layer('ground') with the multiply
+//   footprints, shard shadows (the arena multiplied them into the ground)  -> host.glayer('ground') with the multiply
 //                   baked in: the ground texel under the pixel (world.groundCanvas) x the tone
 //   ground fog (additive, pre-light in the arena)  -> host.layer('add'), laid on the ground plane with the ground's
 //                   affine map (it turns with the world) and scaled by the mood's ambient (what the pre-light add became)
@@ -43,6 +43,7 @@
 // stepping through darker palette entries. Sizes scale with the host's zoom (zoom 2 = 2 x 2 px per art pixel).
 import {flags} from '../core/flags.js';
 import {mulberry32} from '../core/rng.js';
+import {clearArray} from '../core/mathx.js';
 import {hexAny255 as hex3, lum} from '../core/color.js';
 import {createWaterLife} from './atmos/waterlife.js';
 
@@ -205,7 +206,7 @@ export async function create(host) {
   const glowAt = (x, y, h) => { GA = [x, y, h, SX(x, y, h), SY(x, y, h)]; };
   const GL = [];
   const put = (bk, c, x, y, w = 1, h = 1) => { if (bk === BE) { GL.push(c, x, y, w, h, GA); return; } let a = bk.get(c); if (!a) bk.set(c, a = []); a.push(x, y, w, h); };
-  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); a.length = 0; } }
+  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); clearArray(a); } }
   const any = bk => { for (const a of bk.values()) if (a.length) return true; return false; };
   const GO = {size: 1, alpha: 1, emit: true}, RGBC = new Map(), rgbc = c => { let v = RGBC.get(c); if (!v) RGBC.set(c, v = host.rgb(c)); return v; };
   function flushGlow() {   // the glow buffer -> emissive points at their particle's depth (alpha: the arena's glow strength, dithered)
@@ -218,7 +219,7 @@ export async function create(host) {
         host.point(ax + dX * ca + dY * sa, ay - dX * sa + dY * ca, ah, c, GO);
       }
     }
-    GL.length = 0;
+    clearArray(GL);
   }
   // a layer pixel at art offset (dx, dy) from a projected point, w x h art px (zoom scales art px)
   const lp = (bk, c, X, Y, dx = 0, dy = 0, w = 1, h = 1) => put(bk, c, X + dx * V.z, Y + dy * V.z, w * V.z, h * V.z);
@@ -721,6 +722,8 @@ export async function create(host) {
 
   // ---------- HD overlay ----------
   let O = null, oKey = '';
+  const VG = {va: 0, ha: 0, v: [0, 0, 0], h: [0, 0, 0]};   // (G.setVignette's numbers: the same OVER entry the canvas below is painted from)
+  const SPS = {img: null, em: null, x: 0, y: 0, h: 0, px: 2, py: 3, type: 3};   // (the shards' host.sprite options, kept)
   function buildOver(w, h) {
     if (!O) O = cv(w, h); O.width = w; O.height = h;
     const q = O.getContext('2d'), Vo = OVER[biome] || OVER.ruins, rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
@@ -812,10 +815,10 @@ export async function create(host) {
       }
       shards((x, y) => { const z = elevAt(x, y), X = Math.floor(SX(x, y, z)), Y = Math.floor(SY(x, y, z)); lp(BG, mulCss(x, y, SH_SHADOW), X, Y, -1, 0, 3, 1); });
       if (F.weather) { drawFog(); drawKinds('ground'); }
-      if (any(BG)) flush(BG, host.layer('ground'));
+      if (any(BG)) flush(BG, host.glayer('ground'));
       // ---- in front (lit, depth-tested): shards, falling weather, fx
       shards((x, y, h, i) => { const f = shardFrame(i), pv = Math.sin(T * 1.5 + i * 2.1);
-        host.sprite({img: SH_IMG[f], em: SH_EM[f][pv > .3 ? 0 : pv > -.4 ? 1 : 2], x, y, h, px: 2, py: 3, type: 3}); });
+        const s = SPS; s.img = SH_IMG[f]; s.em = SH_EM[f][pv > .3 ? 0 : pv > -.4 ? 1 : 2]; s.x = x; s.y = y; s.h = h; host.sprite(s); });   // (a kept options object)
       if (F.weather) drawKinds('front');
       drawFx(false); WL.drawFront();
       // ---- glow: the arena's view-sized emitter canvas always overlapped the player, so lighting.apply drew it straight
@@ -827,9 +830,15 @@ export async function create(host) {
     },
     hd(q, scale) {
       if (!F.hdOn || !biome) return;
-      const t0 = performance.now(), w = q.canvas.width, h = q.canvas.height, key = `${w}x${h}|${biome}|${F.weather}`;
-      if (key !== oKey) { oKey = key; buildOver(w, h); }
-      q.drawImage(O, 0, 0);
+      const t0 = performance.now();
+      if (host.G.setVignette) {   // the GPU draws it (gfx.js VG_FS), the same gradients, over the canvas: no blit here
+        const Vo = OVER[biome] || OVER.ruins; VG.va = Vo.va; VG.v = Vo.v; VG.h = Vo.h; VG.ha = F.weather && Vo.ha ? Vo.ha : 0;
+        host.G.setVignette(VG);
+      } else {
+        const w = q.canvas.width, h = q.canvas.height, key = `${w}x${h}|${biome}|${F.weather}`;
+        if (key !== oKey) { oKey = key; buildOver(w, h); }
+        q.drawImage(O, 0, 0);
+      }
       tick(t0);
     },
   });

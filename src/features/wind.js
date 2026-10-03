@@ -30,8 +30,8 @@
 //                       leaves, env.leafFall), events (dummy hits kick the strips, explosions whip foliage and billow cloth,
 //                       a bird landing on / leaving a crown, wildlife.js 'bird_perch', knocks a dying leaf loose)
 //   F.frame(f)          cloth atlas raster + its cards, posts / lantern sprites, ropes / rods / chains (host.line),
-//                       shed particles (host.point; sparks / motes glow through host.layer('emit')), pole contact shadows
-//                       (host.layer('ground'))
+//                       shed particles (host.point; sparks / motes glow through host.glayer('emit')), pole contact shadows
+//                       (host.glayer('ground'): the GPU draws both)
 //   F.card(it, sp)      the host's card hook (main.js installs it as world.hooks.card): foliage -> {sway, bend}, brazier /
 //                       torch -> {sway: 0, em: live flame canvas}, anything else null (rigid props never sway)
 //   F.mesh(it)          the host's mesh hook (world.hooks.mesh): a 3D tree -> {x, y (lean m at the top), shake (px)}
@@ -231,7 +231,9 @@ export async function create(host) {
   // ================================================================ gust field (the arena's, unchanged)
   const fronts = []; let nextF = 0, S0 = 0, S1 = 60, T0 = -25, T1 = 30;
   function extent() {
-    const c = [[0, 0], [ctx.WM, 0], [0, ctx.HM], [ctx.WM, ctx.HM]];
+    // the Proving Grounds' corners: the fronts cross them as they always have (a bigger world's open land gets the base wind; the
+    // world plan's step 3 decides how gusts reach it)
+    const wb = ctx.grounds, c = [[wb.x0, wb.y0], [wb.x1, wb.y0], [wb.x0, wb.y1], [wb.x1, wb.y1]];
     const sv = c.map(([x, y]) => x * UX + y * UY), tv = c.map(([x, y]) => -x * UY + y * UX);
     S0 = Math.min(...sv); S1 = Math.max(...sv); T0 = Math.min(...tv); T1 = Math.max(...tv);
   }
@@ -489,7 +491,8 @@ export async function create(host) {
 
   // ================================================================ cloth decor (the arena's Verlet pieces)
   // A piece is a Verlet grid (cols x rows) in world metres. u runs along cols, v along rows; d = 0 at the pinned edge ..
-  // 1 at the free edge (flutter grows toward it). pat(u, v) -> -1 (no cloth) | ramp index (+64 emissive, +128 rime).
+  // 1 at the free edge (flutter grows toward it). pat(uv) -> -1 (no cloth) | ramp index (+64 emissive, +128 rime); uv: [u, v] in a kept Float64Array (rasterGroup's PUV: numbers
+  // passed to the per-piece callbacks, which can't inline, were boxed a pixel each).
   function grid(o) {
     const {cols, rows} = o, n = cols * rows, P = new Float32Array(n * 3), U = new Float32Array(n), Vv = new Float32Array(n), Dd = new Float32Array(n), pin = new Uint8Array(n);
     for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
@@ -611,7 +614,8 @@ export async function create(host) {
   }
   function bannerPat(pal, wPx, lPx, {point = false, band = false} = {}) {
     const E = pal.emblem, rime = pal.rime;
-    return (u, v) => {
+    return uv => {
+      const u = uv[0], v = uv[1];
       if (pal.fray) { if (v > .8 + .14 * hsh(Math.round(u * wPx), 7)) return -1; }
       else if (point) { if (v > .8 && Math.abs(u - .5) > (1 - v) / .2 * .5) return -1; }
       else if (v > .8 && Math.abs(u - .5) < (v - .8) / .2 * .28) return -1;
@@ -656,7 +660,8 @@ export async function create(host) {
     const mast = 1.05, len = .78, hgt = .3, top = hTop + mast - .05, wPx = len * ctx.PPM;
     const pc = grid({cols: 6, rows: 3, org: [tp.x + .04, tp.y + .01, top], ax: [len, 0, 0], ay: [0, 0, -hgt], pin: (r, k) => k === 0,
       k: 4.5, flut: 1.4, waves: .9, freq: 2.2, bend: .45, dist: u => u,
-      pat: (u, v) => {
+      pat: uv => {
+        const u = uv[0], v = uv[1];
         if (Math.abs(v - .5) > .5 * (1 - u * .94)) return -1;
         if (pal.fray && u > .72 && hsh(Math.round(u * wPx), Math.round(v * 9), 5) > .6) return -1;
         if (pal.rime && Math.abs(v - .5) > .5 * (1 - u * .94) - .12 && u < .5) return 1 + 128;
@@ -677,7 +682,7 @@ export async function create(host) {
       const t = (.35 + (i + .5) * (len - .7) / nF) / len, ci = pal.flags[i % pal.flags.length];
       const fx = A.x + (Bp.x - A.x) * t - dx * fw / 2, fy = A.y + (Bp.y - A.y) * t - dy * fw / 2;
       const pc = grid({cols: 3, rows: 3, org: [fx, fy, H], ax: [dx * fw, dy * fw, 0], ay: [0, 0, -fh], pin: r => r === 0, k: 3, flut: 1.1, waves: .6, freq: 2.6, iters: 2, bend: 0,
-        pat: (u, v) => pal.rime && v < .12 ? 3 + 128 : 0, fray: false});
+        pat: uv => pal.rime && uv[1] < .12 ? 3 + 128 : 0, fray: false});
       pc.ramp0 = ci; pc.at = [t - fw / 2 / len, t + fw / 2 / len];
       pc.pinFn = q => {   // the top edge rides on the rope
         for (let k = 0; k < 3; k++) {
@@ -704,7 +709,7 @@ export async function create(host) {
     if (!rift && hsh(dp.x * 10 | 0, dp.y * 10 | 0) > .45) arms.push([-11, .87, .3]);
     for (const [ox, oh, len] of arms) {
       const pc = grid({cols: 2, rows: 6, org: [dp.x + ox / ctx.PPM, dp.y + .02, (dp.z || 0) + oh], ax: [.07, 0, 0], ay: [0, 0, -len], pin: r => r === 0,
-        k: 3.2, flut: 1.2, waves: .7, freq: 2.4, bend: .4, outline: 'out', pat: (u, v) => pal.rime && v < .15 ? 1 + 128 : 0});
+        k: 3.2, flut: 1.2, waves: .7, freq: 2.4, bend: .4, outline: 'out', pat: uv => pal.rime && uv[1] < .15 ? 1 + 128 : 0});
       pc.ramp0 = pal.strip;
       // the dummy is a camera-facing card, so its arm is always on the screen's x: the strip's knot follows the camera
       pc.pinFn = q => {
@@ -799,11 +804,15 @@ export async function create(host) {
     pc.wind0 = Math.sign((sy(a) - sy(c)) * (sx(0) - sx(c)) + (sx(c) - sx(a)) * (sy(0) - sy(c))) || 1;
   }
 
-  // ---------------------------------------------------------------- the cloth atlas (one canvas for every piece's box)
-  const CA = {W: 512, H: 256, cv: null, q: null, ecv: null, eq: null, x: 0, y: 0, rowH: 0, gen: 0, dirty: false, reset: false};
-  function resetCloth() {   // the canvases live as long as the feature (one GPU texture each); a rebuild just clears them
-    if (!CA.cv) { CA.cv = mk(CA.W, CA.H); CA.q = CA.cv.getContext('2d'); CA.ecv = mk(CA.W, CA.H); CA.eq = CA.ecv.getContext('2d'); }
-    CA.q.clearRect(0, 0, CA.W, CA.H); CA.eq.clearRect(0, 0, CA.W, CA.H);
+  // ---------------------------------------------------------------- the cloth atlas (one texture for every piece's box)
+  // Each changed piece box goes into its slot straight from the raster's array (G.texData: no 2D canvas between; a canvas
+  // was painted and the whole of it uploaded, 512 x 256 twice, every frame a piece changed). The two canvases are blank:
+  // they only name the textures (albedo, emit) and their size for the sprite batch. A slot's texels past its box are
+  // stale, never shown (the sprite shows the box)
+  const CA = {W: 512, H: 256, cv: null, ecv: null, x: 0, y: 0, rowH: 0, gen: 0, dirty: false, reset: false};
+  let zeros = new Uint8Array(0);   // (a box that had an emit and has none now)
+  function resetCloth() {   // the canvases live as long as the feature (one GPU texture each); a rebuild starts the slots over
+    if (!CA.cv) { CA.cv = mk(CA.W, CA.H); CA.ecv = mk(CA.W, CA.H); }
     CA.x = CA.y = CA.rowH = 0; CA.gen++; CA.dirty = true;
   }
   function slotFor(grp, w, h) {
@@ -813,7 +822,7 @@ export async function create(host) {
     if (W2 > CA.W || H2 > CA.H) return null;
     if (CA.x + W2 > CA.W) { CA.x = 0; CA.y += CA.rowH; CA.rowH = 0; }
     if (CA.y + H2 > CA.H) {   // full: start over; everything re-rasters into fresh slots this frame
-      CA.q.clearRect(0, 0, CA.W, CA.H); CA.eq.clearRect(0, 0, CA.W, CA.H); CA.x = CA.y = CA.rowH = 0; CA.gen++; CA.reset = true;
+      CA.x = CA.y = CA.rowH = 0; CA.gen++; CA.reset = true;
     }
     const n = {x: CA.x, y: CA.y, w: W2, h: H2, gen: CA.gen}; CA.x += W2; CA.rowH = Math.max(CA.rowH, H2); grp.slot = n;
     if (grp.box) grp.box.fresh = true;
@@ -822,6 +831,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- raster (per group box, view px of the turned camera)
   function rasterItem(it) { for (const grp of it.groups) rasterGroup(it, grp); it.rastered = true; }
+  const PUV = new Float64Array(2);   // a pixel's (u, v) for the piece's pat()
   function rasterGroup(it, grp) {
     const {PPM, PPMY, PPMH} = ctx;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -875,7 +885,7 @@ export async function create(host) {
           if (l0 < -1e-4 || l1 < -1e-4 || l2 < -1e-4) continue;
           const j = y * CW + x, z = l0 * ZT[i0] + l1 * ZT[i1] + l2 * ZT[i2]; if (z < zb[j]) continue;
           const u = l0 * U[i0] + l1 * U[i1] + l2 * U[i2], v = l0 * V[i0] + l1 * V[i1] + l2 * V[i2];
-          const code = pc.pat(u, v); if (code < 0) continue;
+          PUV[0] = u; PUV[1] = v; const code = pc.pat(PUV); if (code < 0) continue;
           let lam = l0 * LM[i0] + l1 * LM[i1] + l2 * LM[i2]; if (back) lam = -lam;   // the lining: its own side faces us
           const dl = lam - lam0;
           let t = dl > .17 ? 0 : dl < -.15 ? 2 : 1; if (back) t = Math.min(2, t + 1);
@@ -915,19 +925,19 @@ export async function create(host) {
       }
     }
     const sl = slotFor(grp, bw, bh); if (!sl) { b.any = false; return; }
-    // upload only if a pixel changed (or the box moved / got a new slot)
-    let same = !b.fresh && b.w === bw && b.h === bh && !E;
-    if (same) { const Pv = b.prev; outer: for (let y = 0; y < bh; y++) { const o = y * CW; for (let x = 0; x < bw; x++) if (Pv[o + x] !== buf[o + x]) { same = false; break outer; } } }
-    if (!same) {
-      CA.q.clearRect(sl.x, sl.y, sl.w, sl.h); CA.q.putImageData(b.im, sl.x, sl.y, 0, 0, bw, bh); b.prev.set(buf); CA.dirty = true;
-      if (E || b.eany) { CA.eq.clearRect(sl.x, sl.y, sl.w, sl.h); if (E && eany) CA.eq.putImageData(b.eim, sl.x, sl.y, 0, 0, bw, bh); }
-    }
+    // upload only what changed: the albedo if a pixel changed (or the box moved / got a new slot), the emit likewise
+    const kept = !b.fresh && b.w === bw && b.h === bh;
+    if (!(kept && same32(b.prev, buf, bw, bh, CW))) { host.G.texData(CA.cv, sl.x, sl.y, bw, bh, b.im.data, CW); b.prev.set(buf); CA.dirty = true; }
+    if (E) { if (!(kept && same32(b.eprev, E, bw, bh, CW))) { host.G.texData(CA.ecv, sl.x, sl.y, bw, bh, b.eim.data, CW); b.eprev.set(E); } }   // (zero where nothing glows)
+    else if (b.eany) { if (zeros.length < bw * bh * 4) zeros = new Uint8Array(bw * bh * 4); host.G.texData(CA.ecv, sl.x, sl.y, bw, bh, zeros, bw); }
     b.fresh = false; b.eany = eany; b.x = bx; b.y = by; b.w = bw; b.h = bh; b.any = true;
   }
   function ensureEmit(b) {
-    if (!b.ebuf || b.ebuf.length !== b.buf.length) { b.ebuf = new Uint32Array(b.CW * b.CH); b.eim = new ImageData(new Uint8ClampedArray(b.ebuf.buffer), b.CW, b.CH); }
+    if (!b.ebuf || b.ebuf.length !== b.buf.length) { b.ebuf = new Uint32Array(b.CW * b.CH); b.eprev = new Uint32Array(b.CW * b.CH); b.eim = new ImageData(new Uint8ClampedArray(b.ebuf.buffer), b.CW, b.CH); }
     return b.ebuf;
   }
+  // the first w x h px of two arrays with rows cw apart: the same?
+  function same32(A, B, w, h, cw) { for (let y = 0; y < h; y++) { const o = y * cw; for (let x = 0; x < w; x++) if (A[o + x] !== B[o + x]) return false; } return true; }
   function RID(it) {   // ramp name -> index into it.rampList
     if (it.rid) return it.rid;
     it.rampList = []; it.rid = {};
@@ -957,18 +967,20 @@ export async function create(host) {
     host.point(x2, L.y, L.armH, C3(M[1])); host.point(x2, L.y, L.armH - dh, C3(M[3])); host.point(x2, L.y, L.armH - 2 * dh, C3(M[3]));
     host.line(L.ax, L.y, L.az, L.bx, L.by, L.bz, C3(M[3]));
     const fr = (T * 6) | 0, e = L.body[(fr + (L.id & 1)) % 5 === 0 ? 1 : 0];
-    host.sprite({img: DA.cv, em: DA.ecv, sx: e.sx, sy: e.sy, sw: e.sw, sh: e.sh, px: e.px, py: e.py, x: L.bx, y: L.by, h: L.bz, shadow: true});
+    { const o = SPD; o.img = DA.cv; o.em = DA.ecv; o.sx = e.sx; o.sy = e.sy; o.sw = e.sw; o.sh = e.sh; o.px = e.px; o.py = e.py; o.x = L.bx; o.y = L.by; o.h = L.bz; host.sprite(o); }
   }
+  // host.sprite's options, kept (an object literal a sprite a frame before): the decor atlas (casting) and the cloth atlas
+  const SPD = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0, shadow: true}, SPC = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0};
   function drawItem(it, g) {
     if (it.shadow) for (let i = 0; i < it.shadow.length; i += 2) shadowAt(g, it.shadow[i], it.shadow[i + 1]);
-    for (const [e, x, y, h] of it.posts) host.sprite({img: DA.cv, em: DA.ecv, sx: e.sx, sy: e.sy, sw: e.sw, sh: e.sh, px: e.px, py: e.py, x, y, h, shadow: true});
+    for (const [e, x, y, h] of it.posts) { const o = SPD; o.img = DA.cv; o.em = DA.ecv; o.sx = e.sx; o.sy = e.sy; o.sw = e.sw; o.sh = e.sh; o.px = e.px; o.py = e.py; o.x = x; o.y = y; o.h = h; host.sprite(o); }
     // a wall banner hangs on the wall's south face: from the north the wall hides it. (Cards and world lines carry a depth
     // bias of ~0.15 m; the banner's top hem and rod sit closer than that to the wall's top edge and would show over it.)
     const behindWall = it.kind === 'banner' && FY < -.02;
     if (!behindWall) for (const grp of it.groups) {
       const b = grp.box, sl = grp.slot; if (!b || !b.any || !sl || sl.gen !== CA.gen) continue;
       const [ax, ay, ah] = grp.anchor(), AX = Math.round((ax * RX + ay * RY) * ctx.PPM), AY = Math.round((ax * FX + ay * FY) * ctx.PPMY - ah * ctx.PPMH);
-      host.sprite({img: CA.cv, em: CA.ecv, sx: sl.x, sy: sl.y, sw: b.w, sh: b.h, px: AX - b.x, py: AY - b.y, x: ax, y: ay, h: ah, dynamic: CA.dirty});
+      const o = SPC; o.img = CA.cv; o.em = CA.ecv; o.sx = sl.x; o.sy = sl.y; o.sw = b.w; o.sh = b.h; o.px = AX - b.x; o.py = AY - b.y; o.x = ax; o.y = ay; o.h = ah; host.sprite(o);   // (never re-uploaded whole: its slots go up in rasterGroup, G.texData)
     }
     if (!behindWall) for (const r of it.rods) drawRod(r);
     if (it.rope) {   // the prayer-flag rope: world segments between its nodes
@@ -1132,7 +1144,7 @@ export async function create(host) {
       if (q.emit) {
         const [sx, sy] = host.toView(q.x, q.y, q.h), X = Math.round(sx), Y = Math.round(sy);
         if (X < 0 || Y < 0 || X >= ctx.VW || Y >= ctx.VH) continue;
-        eq ??= host.layer('emit'); eq.fillStyle = partColour(q); eq.fillRect(X, Y, ZM, ZM); continue;
+        eq ??= host.glayer('emit'); eq.fillStyle = partColour(q); eq.fillRect(X, Y, ZM, ZM); continue;
       }
       if (!vis(q.x, q.y)) continue;
       const c = C3(partColour(q)); host.point(q.x, q.y, q.h, c, o);
@@ -1259,7 +1271,7 @@ export async function create(host) {
       const shown = [];
       for (const it of decor) { if (!visItem(it)) continue; shown.push(it); if (rast || !it.rastered) rasterItem(it); }
       if (CA.reset) { CA.reset = false; for (const it of shown) rasterItem(it); }
-      const g = host.layer('ground'); g.fillStyle = 'rgba(12,16,10,.38)';
+      const g = host.glayer('ground'); g.fillStyle = 'rgba(12,16,10,.38)';
       for (const it of shown) drawItem(it, g);
       CA.dirty = false;
       drawParts();

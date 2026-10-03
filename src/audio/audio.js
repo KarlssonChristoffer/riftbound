@@ -17,6 +17,8 @@
 //   AU.setVolume(k, 0..1) / AU.volumes      // k: master | music | sfx | amb (pause menu > Sound; remembered in localStorage)
 //   AU.setMusicMode(m) / AU.musicMode       // 'adaptive' (follows play) | 'explore' | 'combat' (fixed intensity, for previews)
 //   AU.toggleMusic() -> on                     // host maps key 'u': the adaptive score (music.js) on / off, remembered too
+//   AU.setGunSfx(s) / AU.gunSfx / AU.gunSfxList  // the gun sounds' western-movie flavor (events.js GUN_SFX: spaghetti | hollywood |
+//                                              //   gritty), remembered in localStorage; ?gunsfx= overrides it at load
 //   ctx = {PPM, VW, layout, ...}               // only PPM / VW (panning by screen x) and layout.elev are read
 //
 // Events used: step {big 0|1} / land {big 2 sprint plant, 3 big drop} / jump / splash {small} (player.js, arena.html);
@@ -41,7 +43,7 @@ import {createMusic} from './music.js';   // the adaptive score, layered with th
 import {createEngine, REVERBS} from '../../audio/runtime/engine.js';
 import {createBakery} from '../../audio/runtime/bakery.js';
 import {createDirector} from '../../audio/runtime/director.js';
-import {EVENTS, AMBIENCE, SOURCES, SPATIAL, groundCase} from '../../audio/runtime/events.js';
+import {EVENTS, AMBIENCE, SOURCES, SPATIAL, groundCase, GUN_SFX, GUN_SFX_DEF, otherGunSfx} from '../../audio/runtime/events.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
 
@@ -778,8 +780,11 @@ export function createAudio(ctx, host = {}) {
   // settings (pause menu > Sound): slider values 0..1, mapped to gain as v² (perceptually even steps)
   const VOL = {master: 1, music: 1, sfx: 1, amb: 1}, MODES = {adaptive: null, explore: .3, combat: .85};
   let musicMode = 'adaptive';
+  // the gun sounds' flavor (events.js GUN_SFX): ?gunsfx= at load, else the one picked in the menu before, else the default
+  let gunsfx = GUN_SFX_DEF;
   try {
     muted = localStorage.getItem('pg.audio.muted') === '1'; musicOn = localStorage.getItem('pg.audio.music') !== '0';
+    const gs = q.get('gunsfx') || localStorage.getItem('pg.audio.gunsfx'); if (GUN_SFX.includes(gs)) gunsfx = gs;
     const v = JSON.parse(localStorage.getItem('pg.audio.vol') || '{}');
     for (const k in VOL) if (typeof v[k] === 'number') VOL[k] = clamp(v[k], 0, 1);
     if (v.mode in MODES) musicMode = v.mode;
@@ -787,7 +792,8 @@ export function createAudio(ctx, host = {}) {
   const seen = new WeakSet(), stuckSeen = new WeakSet(), air = new WeakMap();
   const AU = {muted, ms: 0, get on() { return !!E && E.ac.state === 'running'; }, get E() { return E; }, get music() { return E?.music || null; },
     get musicOn() { return musicOn; }, get volumes() { return {...VOL}; }, get musicMode() { return musicMode; },
-    update, toggle, toggleMusic, setVolume, setMusicMode, play};
+    get gunSfx() { return gunsfx; }, gunSfxList: GUN_SFX,
+    update, toggle, toggleMusic, setVolume, setMusicMode, setGunSfx, play};
   if (typeof window !== 'undefined') window.__audio = AU;   // debug handle
 
   // the forge runtime starts at LOAD (the context stays suspended until a gesture) so banks bake before you play
@@ -798,7 +804,7 @@ export function createAudio(ctx, host = {}) {
       const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac, {reverbs: {...REVERBS, ...DESERT_REVERBS}}), B = createBakery(ac);
       const D = createDirector(EN, B, {EVENTS, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL}});
       try { EN.prepareReverbs?.(); } catch (e) {}
-      D.prefetch({biome: 'ruins'});
+      D.prefetch({biome: 'ruins', skip: otherGunSfx(gunsfx)});   // (only the playing gun flavor's banks)
       RT = {ac, EN, B, D}; AU.forge = RT;
     } catch (e) { console.warn('audio: forge runtime unavailable, using the built-in synth', e); RT = null; }
   }
@@ -838,6 +844,14 @@ export function createAudio(ctx, host = {}) {
   }
   function setVolume(k, v) { if (!(k in VOL)) return; VOL[k] = clamp(+v || 0, 0, 1); saveVol(); applyVolumes(); }
   function setMusicMode(m) { if (!(m in MODES)) return; musicMode = m; saveVol(); applyVolumes(); }
+  // a new gun flavor: remembered, and its banks baked now (the director picks them from the next shot on; until they are
+  // baked a shot plays the built-in synth, as at load)
+  function setGunSfx(v) {
+    if (!GUN_SFX.includes(v) || v === gunsfx) return;
+    gunsfx = v;
+    try { localStorage.setItem('pg.audio.gunsfx', v); } catch (e) {}
+    try { RT?.D.prefetch({biome: bedId || 'ruins', skip: otherGunSfx(v)}); } catch (e) {}
+  }
   function toggleMusic() {
     musicOn = !musicOn;
     try { localStorage.setItem('pg.audio.music', musicOn ? '1' : '0'); } catch (e) {}
@@ -858,7 +872,7 @@ export function createAudio(ctx, host = {}) {
   }
   function fire(name, x, y, o = {}) {
     const px = x ?? L.x, py = y ?? L.y, pos = at(px, py);
-    if (RT) { try { if (RT.D.post(name, {...pos, dist: pos.d, x: px, y: py, ...o})) return; } catch (e) { console.warn('audio: forge', name, e); } }
+    if (RT) { try { if (RT.D.post(name, {...pos, dist: pos.d, x: px, y: py, gunsfx, ...o})) return; } catch (e) { console.warn('audio: forge', name, e); } }
     try { SFX[name](E, {...pos, ...o}); } catch (e) { console.warn('audio:', name, e); }   // legacy synth (not baked yet / ?forge=0)
   }
   // the ground a bullet ended in: the desert's painter (stone and rock hard, sand and hardpan dull); elsewhere rock where it is

@@ -29,7 +29,7 @@ export function createStage({G, ctxO, PPM, PPMH, features, flags: Q}) {
     world?.dispose();
     world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH, props: keep, trees3d});
     world.hooks.card = cardHook; world.hooks.mesh = meshHook;   // a rebuilt world has fresh hooks
-    ents ??= createEntities(world.props, {x0: 0, y0: 0, x1: WORLD.WM, y1: WORLD.HM});
+    ents ??= createEntities(world.props, {x0: WORLD.x0, y0: WORLD.y0, x1: WORLD.x1, y1: WORLD.y1});
     world.setMode(propMode);
     for (const f of features) f.biomeChanged?.();
     $('#load').classList.add('hidden');

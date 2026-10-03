@@ -17,7 +17,7 @@
 //   proj.lerpBegin(alpha) / lerpEnd(): drawn between sim steps (an arrow's lx / ly / lh: where it was at the step's start)
 import {elev, inStream, PROP_TOP} from '../world/world.js';
 import {rgbOf} from '../core/color.js';
-import {hypot2, hypot3} from '../core/mathx.js';
+import {clearArray, hypot2, hypot3} from '../core/mathx.js';
 
 const ARROW = {shaft: rgbOf('#9a6c44'), head: rgbOf('#cfcbbf'), fletch: rgbOf('#efe4c8')};
 const DUST = ['#b8a888', '#8a7a60', '#5e5444'].map(rgbOf), POP = rgbOf('#f2d27a');
@@ -139,6 +139,6 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
       a.x = a.lx + (a.x - a.lx) * k; a.y = a.ly + (a.y - a.ly) * k; a.h = a.lh + (a.h - a.lh) * k;
     }
   }
-  function lerpEnd() { for (const a of lerped) { a.x = a.cx; a.y = a.cy; a.h = a.ch; } lerped.length = 0; }
+  function lerpEnd() { for (const a of lerped) { a.x = a.cx; a.y = a.cy; a.h = a.ch; } clearArray(lerped); }
   return {arrows, pops, dust, spawn, step, draw, lerpBegin, lerpEnd, get hits() { return hits; }};
 }

@@ -23,9 +23,10 @@ import * as WORLD from '../world/world.js';
 import {ART} from '../world/biomes.js';
 import {geoOf, M4, box, along, pack, art} from '../world/kit3d.js';
 import {clamp} from '../core/mathx.js';
+import {viewRandom} from '../core/rng.js';
 
 const TAU = Math.PI * 2;
-const R = Math.random, rr = (a, b) => a + R() * (b - a);
+const R = viewRandom(), rr = (a, b) => a + R() * (b - a);
 // how high these stop arrows (world.js PROP_TOP, read by sim/projectiles.js)
 WORLD.propTop({stall: 1.05, merchant: 0, ruin: 2.4, bench: .5, goods: .75});
 
@@ -188,9 +189,11 @@ export async function create(host) {
     });
     return pack(items);
   }
-  function spr(name, x, y, h, o = {}) {
+  const SPO = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0, type: 3, shadow: true, alpha: 1, flip: false}, NOO = {};   // (host.sprite's kept options; the default o: no object a call)
+  function spr(name, x, y, h, o = NOO) {
     const f = atlas.fr[name]; if (!f) return;
-    host.sprite({img: atlas.img, em: atlas.em, sx: f.sx, sy: f.sy, sw: f.sw, sh: f.sh, px: f.px, py: f.py, x, y, h, type: 3, shadow: o.shadow !== false, alpha: o.alpha ?? 1, flip: o.flip});
+    const s = SPO; s.img = atlas.img; s.em = atlas.em; s.sx = f.sx; s.sy = f.sy; s.sw = f.sw; s.sh = f.sh; s.px = f.px; s.py = f.py; s.x = x; s.y = y; s.h = h;
+    s.shadow = o.shadow !== false; s.alpha = o.alpha ?? 1; s.flip = !!o.flip; host.sprite(s);   // (a kept options object: no literal a sprite)
   }
 
   // ================================================================ 3D pieces
@@ -295,7 +298,10 @@ export async function create(host) {
 
   // ================================================================ the lantern (a pendulum on a chain)
   const LAN = {ax: STALL.x + .36, ay: STALL.y - .75, ah: 2.26, len: .32, tx: 0, ty: 0, vx: 0, vy: 0};
-  const lanPos = () => [LAN.ax + Math.sin(LAN.tx) * LAN.len, LAN.ay + Math.sin(LAN.ty) * LAN.len, LAN.ah - Math.cos(LAN.tx) * Math.cos(LAN.ty) * LAN.len];
+  const LP = [0, 0, 0], lanPos = () => {   // (into one kept array: its callers take the three numbers at once)
+    LP[0] = LAN.ax + Math.sin(LAN.tx) * LAN.len; LP[1] = LAN.ay + Math.sin(LAN.ty) * LAN.len; LP[2] = LAN.ah - Math.cos(LAN.tx) * Math.cos(LAN.ty) * LAN.len;
+    return LP;
+  };
   const LW = {x: 0, y: 0, g: 0}, LCALM = {x: 0, y: 0, g: 0};   // the wind at the lantern (scratch), none
   function stepLantern(dt, evs) {
     const w = host.wind?.on && host.wind.at ? host.wind.at(LAN.ax, LAN.ay, LW) : LCALM, pl = host.player;
@@ -326,14 +332,15 @@ export async function create(host) {
     if (close && !M.near && M.greetCool <= 0) { M.wave = 1.4; M.greetCool = 25; say(GREET[R() * GREET.length | 0], 2.6); }
     M.near = close;
   }
+  // his frames by view x eyes ('mb_c' does not exist: the back has no blink); MFO: his sprite's options, kept
+  const MNAME = {mb: {a: 'mb_a', b: 'mb_b', c: 'mb_a'}, mw: {a: 'mw_a', b: 'mw_b', c: 'mw_c'}, mf: {a: 'mf_a', b: 'mf_b', c: 'mf_c'}}, MFO = {flip: false};
   function drawMerchant() {
     const yaw = host.yaw, fx = Math.cos(M.ang), fy = Math.sin(M.ang);
-    const camF = [-Math.sin(yaw), -Math.cos(yaw)], right = [Math.cos(yaw), -Math.sin(yaw)];
-    const back = fx * camF[0] + fy * camF[1] > .15, side = fx * right[0] + fy * right[1];
+    const back = fx * -Math.sin(yaw) + fy * -Math.cos(yaw) > .15, side = fx * Math.cos(yaw) + fy * -Math.sin(yaw);   // (the camera's forward, its right)
     const v = back ? 'mb' : M.wave > 0 ? 'mw' : 'mf', fr = M.blink > 0 && !back ? 'c' : (Math.floor(T * 1.1) % 2 ? 'b' : 'a');
     // the art faces screen-left from the front; seen from the back his facing on screen is mirrored
-    const flip = back ? side < 0 : side > 0;
-    spr(`${v}_${v === 'mb' && fr === 'c' ? 'a' : fr}`, MERCH.x, MERCH.y, 0, {flip});
+    MFO.flip = back ? side < 0 : side > 0;
+    spr(MNAME[v][fr], MERCH.x, MERCH.y, 0, MFO);
   }
 
   // ================================================================ contract
@@ -344,22 +351,27 @@ export async function create(host) {
     F.ms = F.ms * .95 + (performance.now() - t0) * .05;
   };
   const CHAIN = host.rgb('#3a3028');
+  const NOSH = {shadow: false}, POT = ['potion_0', 'potion_1', 'potion_2'], POTZ = [-.6, -.2, .25], FLN = FLOWERS.map(f => `flower_${f[2]}`);   // (kept: no string or object a frame)
   F.frame = () => {
     syncBiome();
     if (near(STALL.x, STALL.y)) {
       drawMerchant();
       const [lx, ly, lh] = lanPos();
       host.line(LAN.ax, LAN.ay, LAN.ah, lx, ly, lh + .02, CHAIN);
-      spr(LAN.lit === false ? 'lantern_dim' : 'lantern', lx, ly, lh + .02, {shadow: false});
-      [[-.6, .2], [-.2, .6], [.25, 1.0]].forEach(([dz, k], i) => spr(`potion_${i}`, STALL.x + 2.28, STALL.y + dz, 1.57, {shadow: false}));
+      spr(LAN.lit === false ? 'lantern_dim' : 'lantern', lx, ly, lh + .02, NOSH);
+      for (let i = 0; i < 3; i++) spr(POT[i], STALL.x + 2.28, STALL.y + POTZ[i], 1.57, NOSH);
     }
-    for (const [x, y, v] of FLOWERS) if (near(x, y)) spr(`flower_${v}`, x, y, 0, {shadow: false});
+    for (let i = 0; i < FLOWERS.length; i++) { const f = FLOWERS[i]; if (near(f[0], f[1])) spr(FLN[i], f[0], f[1], 0, NOSH); }
   };
+  // the lantern's light and the potions' glow: records reused every frame (lighting.js copies them at once)
+  const GLR = [{x: 0, y: 0, h: 0, color: '#ffc878', radius: 4.6, intensity: 1.05, flicker: .25, id: 9501},
+    ...['#7cff8a', '#7ad8ff', '#e58aff'].map((color, i) => ({x: 0, y: 0, h: 1.62, color, radius: 1.3, intensity: .55, flicker: .05, id: 9502 + i}))];
+  const POTY = [-.6, -.2, .25], NOL = [];
   F.lights = () => {
-    if (!near(STALL.x, STALL.y, 26)) return [];
-    const [lx, ly, lh] = lanPos(), out = [{x: lx, y: ly, h: lh, color: '#ffc878', radius: 4.6, intensity: 1.05, flicker: .25, id: 9501}];
-    ['#7cff8a', '#7ad8ff', '#e58aff'].forEach((c, i) => out.push({x: STALL.x + 2.15, y: STALL.y + [-.6, -.2, .25][i], h: 1.62, color: c, radius: 1.3, intensity: .55, flicker: .05, id: 9502 + i}));
-    return out;
+    if (!near(STALL.x, STALL.y, 26)) return NOL;
+    const [lx, ly, lh] = lanPos(), a = GLR[0]; a.x = lx; a.y = ly; a.h = lh;
+    for (let i = 0; i < 3; i++) { const o = GLR[i + 1]; o.x = STALL.x + 2.15; o.y = STALL.y + POTY[i]; }
+    return GLR;
   };
   F.prompt = p => p === merchant ? 'E  talk' : null;
   F.interact = p => {

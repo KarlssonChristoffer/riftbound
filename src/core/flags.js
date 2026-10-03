@@ -13,6 +13,7 @@ export const FLAG_DOCS = {
   weather:   'a sim/env.js WEATHER state (clear, fair, cloudy, ..., storm, snow) to lock; 0 = no weather particles (atmos)',
   daymin:    'real minutes per in-game day; 0 = the clock stands still',
   at:        'x,y (m): start the player there',
+  world:     'big: the grown world, 162 x 90 m round the Proving Grounds (layout.js WORLD; the world plan: open land in step 3)',
   yaw:       'the camera\'s starting yaw (deg)',
   zoom:      '2: start zoomed in',
   // ---- the player
@@ -28,6 +29,8 @@ export const FLAG_DOCS = {
   trees3d:   '0: painted tree cards instead of the procedural 3D trees',
   debug:     'a debug view index (G cycles them)',
   sshadow:   '0: every shadow caster in the per-frame sun shadow (no cached static map; an A/B)',
+  cards:     '0: every world card its own mesh and draw (no instanced card batches; an A/B)',
+  preserve:  '1: keep the WebGL drawing buffer between frames (a capture that reads the canvas outside the frame that drew it)',
   // ---- features (0 turns one off)
   wind: '0: no wind', windlevel: 'calm | breeze | brisk | gale: lock the wind strength', windlines: '0 | hd | pixel: the wind lines',
   litter: '0: the fallen leaves stay as baked (no wind moves them, none are lifted); also the low detail tier',
@@ -36,6 +39,7 @@ export const FLAG_DOCS = {
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
   foes: '0: no gunmen in the desert sandbox (features/foes.js)', blood: '0: no blood from bullet hits (features/blood.js; menu > Graphics > Effects > Blood)',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
+  gunsfx: 'spaghetti | hollywood | gritty: the gun sounds\' western-movie flavor (audio/runtime/events.js GUN_SFX; menu > Audio > Gun sounds, remembered)',
   battlemusic: '1: the premade Six Chambers songs follow the fight (features/battlemusic.js); off by default: the procedural score plays',
   bmforce: 'state[:song[:x]]: dev, pin the battle music (dev/bmusic.js), e.g. boss:iron:.25 (x = the champion health) or battle:dust:.8 (x = intensity)',
   // ---- tools

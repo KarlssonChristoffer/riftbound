@@ -9,16 +9,16 @@
 // FRAME RATE (the fixed step, phase 4.3): the 'keys' scenario (keyboard and world-space input only: the cursor is read
 // through a camera that moves differently at another frame rate) also runs at 240 and 30 frames a second: the sim
 // must come out the same as at 60 (its inputs change on even sixtieths, where every rate has a frame).
-//   node tools/test/simview.mjs            options: --only sandbox,run --port 8142
+//   node tools/test/simview.mjs            options: --only sandbox,run --port 8142 --path src/ (the page folder, as golden.mjs)
 import {spawn} from 'node:child_process';
-import {mkdtempSync} from 'node:fs';
+import {mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
-const PORT = +arg('port', 8142), ONLY = arg('only', '');
+const PORT = +arg('port', 8142), ONLY = arg('only', ''), PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, '') + '/';
 const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const SHIM = `(() => {
   let s = 0x2545F491 | 0;
@@ -84,9 +84,18 @@ const DIGEST = `(() => { const R = window.__r3d, core = R.host.feature('combat')
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
+const PROFILE = mkdtempSync(join(tmpdir(), 'simview-'));
 const chrome = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1920,1080',
-  '--remote-debugging-port=9352', '--user-data-dir=' + mkdtempSync(join(tmpdir(), 'simview-')), 'about:blank'], {stdio: 'ignore'});
-const quit = code => { try { chrome.kill(); } catch {} try { server.kill(); } catch {} process.exit(code); };
+  '--remote-debugging-port=9352', '--user-data-dir=' + PROFILE, 'about:blank'], {stdio: 'ignore'});
+// the throwaway profile (100-150 MB in %TEMP%) goes with Chrome, which lets go of its files a moment after the kill; if a
+// Chrome child process is slow to die (a busy machine), a detached node keeps trying for two minutes. 'exit' also
+// covers an uncaught error, Ctrl+C goes through quit
+const rmProfile = () => { for (let k = 0; k < 20; k++) { try { return rmSync(PROFILE, {recursive: true, force: true}); } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); }
+  spawn(process.execPath, ['-e', 'for (let k = 0; k < 120; k++) { try { require("fs").rmSync(process.argv[1], {recursive: true, force: true}); break; } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000); }', PROFILE], {detached: true, stdio: 'ignore', windowsHide: true}).unref(); };
+let stopped = false;
+const stop = () => { if (stopped) return; stopped = true; try { chrome.kill(); } catch {} try { server.kill(); } catch {} rmProfile(); };
+const quit = code => { stop(); process.exit(code); };
+process.on('exit', stop); process.on('SIGINT', () => quit(130));
 let tabs; for (let k = 0; k < 80; k++) { try { tabs = await (await fetch('http://127.0.0.1:9352/json')).json(); if (tabs.find(t => t.type === 'page')) break; } catch {} await sleep(250); }
 const ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise(r => ws.onopen = r);
 let id = 0; const pend = {}, logs = [];
@@ -100,7 +109,7 @@ await send('Page.addScriptToEvaluateOnNewDocument', {source: SHIM});
 
 async function runOnce(q, body, fps = 60) {
   logs.length = 0;
-  await send('Page.navigate', {url: `http://localhost:${PORT}/src/?${q}`});
+  await send('Page.navigate', {url: `http://localhost:${PORT}/${PAGE}?${q}`});
   let ok = false; for (let k = 0; k < 240; k++) { await sleep(250); try { if (await ev('!!(window.__r3d && window.__r3d.world)')) { ok = true; break; } } catch {} }
   if (!ok) return {error: 'load'};
   await sleep(2500);

@@ -30,7 +30,8 @@ const CLAIM = {
   atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd')},
   blood: {'': gfx('Effects', 'Blood', 'blood', 'blood')},   // (features/blood.js: on by default; ?blood=0)
   audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
-    'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'}},
+    'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'},
+    'Gun sounds': {tab: 'audio', group: 'Sound', label: 'Gun sounds'}},   // (the western-movie flavor: features/audio.js, remembered there)
 };
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low

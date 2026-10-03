@@ -9,7 +9,7 @@
 //   node tools/test/golden.mjs --compare tmp/golden/base                    capture again and compare
 //   options: --path src/ (the page folder: src/, or concepts/render3d/ in commits before the move) --only day,run --port 8141
 import {spawn} from 'node:child_process';
-import {mkdirSync, writeFileSync, readFileSync, existsSync, mkdtempSync} from 'node:fs';
+import {mkdirSync, writeFileSync, readFileSync, existsSync, mkdtempSync, rmSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join, dirname} from 'node:path';
@@ -63,9 +63,18 @@ const SCENARIOS = [
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
+const PROFILE = mkdtempSync(join(tmpdir(), 'golden-'));
 const chrome = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1920,1080',
-  '--remote-debugging-port=9351', '--user-data-dir=' + mkdtempSync(join(tmpdir(), 'golden-')), 'about:blank'], {stdio: 'ignore'});
-const quit = code => { try { chrome.kill(); } catch {} try { server.kill(); } catch {} process.exit(code); };
+  '--remote-debugging-port=9351', '--user-data-dir=' + PROFILE, 'about:blank'], {stdio: 'ignore'});
+// the throwaway profile (100-150 MB in %TEMP%) goes with Chrome, which lets go of its files a moment after the kill; if a
+// Chrome child process is slow to die (a busy machine), a detached node keeps trying for two minutes. 'exit' also
+// covers an uncaught error, Ctrl+C goes through quit
+const rmProfile = () => { for (let k = 0; k < 20; k++) { try { return rmSync(PROFILE, {recursive: true, force: true}); } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); }
+  spawn(process.execPath, ['-e', 'for (let k = 0; k < 120; k++) { try { require("fs").rmSync(process.argv[1], {recursive: true, force: true}); break; } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000); }', PROFILE], {detached: true, stdio: 'ignore', windowsHide: true}).unref(); };
+let stopped = false;
+const stop = () => { if (stopped) return; stopped = true; try { chrome.kill(); } catch {} try { server.kill(); } catch {} rmProfile(); };
+const quit = code => { stop(); process.exit(code); };
+process.on('exit', stop); process.on('SIGINT', () => quit(130));
 let tabs; for (let k = 0; k < 80; k++) { try { tabs = await (await fetch('http://127.0.0.1:9351/json')).json(); if (tabs.find(t => t.type === 'page')) break; } catch {} await sleep(250); }
 const ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise(r => ws.onopen = r);
 let id = 0; const pend = {}, logs = [];

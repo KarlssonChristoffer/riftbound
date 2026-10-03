@@ -15,6 +15,7 @@
 import {ROT_SPEED} from '../render/camera.js';
 import {check as checkEvents} from './events.js';
 import {drawPrompt} from '../ui/prompt.js';
+import {clearArray} from './mathx.js';
 
 export function createLoop(E) {
   const {G, cv, pa, P, PL, player, keys, mouse, cam, events, features, host, env, proj, hero, stage, perf, opt, lighting, hq, hdc, input, pause, game} = E;
@@ -22,6 +23,7 @@ export function createLoop(E) {
   const promptCtx = {host, pa, features, G};   // ui/prompt.js
   let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null, freeze = 0;
   let views = E.flags.get('views') !== '0';   // ?views=0: the sim alone (tools/test/simview.mjs: it must come out the same)
+  const BENCH = E.flags.get('bench') === '1';   // (the bench reads the counts: render/glstats.js -> perf.counts)
   const SIM_DT = 1 / 60, MAX_STEPS = 4;
   let acc = 0, alpha = 1;   // acc: real time the sim is behind (<= 0: ahead); alpha: where the draw sits in the last step
   let hovIt = null;         // the world item with the hover pulse on (the aimed target)
@@ -57,7 +59,7 @@ export function createLoop(E) {
     if (paused) { pause.stepPaused(dt); return; }   // the game stands still, nature goes on
     const sdt = dt * host.timeScale; if (sdt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
     const held = freeze > 0;   // hitstop: the sim steps run the F.always updates only, the views hold
-    acc += sdt; frameEvs.length = 0;
+    acc += sdt; clearArray(frameEvs);
     for (let n = 0; acc > 1e-9 && n < MAX_STEPS; n++) { simStep(SIM_DT); acc -= SIM_DT; }
     if (acc > 0) acc = 0;   // still behind after MAX_STEPS (a stall): let it go rather than spiral
     alpha = 1 + acc / SIM_DT;
@@ -74,7 +76,7 @@ export function createLoop(E) {
   }
   function render(t) {
     cv.stepZoom(lastDt);
-    const [PX, PY] = [player.x, player.y];
+    const PX = player.x, PY = player.y;
     cv.follow(lastDt, PX, PY, P, cam);   // the camera eases after him (render/camera.js)
     if (!views) return;   // (the camera follows without views too: it's the frame the cursor is read in, the sim's input)
     // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js)
@@ -98,6 +100,7 @@ export function createLoop(E) {
     if (opt.zones) drawZones({G, host, world: stage.world});
     perf.begin('mood+lights', 'view'); lighting.apply(PX, PY, t); perf.end('mood+lights');
     perf.begin('G.render', 'render'); G.render(); perf.end('G.render');
+    const cnt = perf.on || BENCH; G.glStats.enable(cnt); if (cnt) perf.counts(G.glStats.take());   // (draws, uploads... while F3 is up)
     // HD overlay
     const dpr = devicePixelRatio || 1, sc = cv.scale * dpr;
     hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);

@@ -3,7 +3,9 @@
 //
 //   const D = createDirector(engine, bakery, {EVENTS, AMBIENCE});   // SPATIAL / SOURCES / AMB_RULES default to events.js
 //   D.prefetch({biome, allBiomes})  request every bank EVENTS use, ordered by bakePriority, and the current biome's
-//                                  ambience early (other biomes lazily on arrival, or last with allBiomes); returns the list
+//                                  ambience early (other biomes lazily on arrival, or last with allBiomes); returns the list.
+//                                  skip(recipe, case) -> true leaves an event bank out (it bakes when a post picks it):
+//                                  the gun-sound flavors that aren't playing (events.js otherGunSfx)
 //   D.post(name, params) -> bool   false = the bank isn't baked (or the name is unknown): the caller plays its legacy sound.
 //                                  true = handled, which includes "culled because its source is off-screen"
 //                                  params: {pan, dist | d, off, at, x, y, mat, surf, kind, k, g, n, small, big, ...}
@@ -164,14 +166,14 @@ export function createDirector(engine, bakery, {EVENTS = {}, AMBIENCE = {}, SPAT
 
   // ---------------------------------------------------------------- prefetch
   const callsOf = A => A.calls || A.spots || [];
-  function prefetch({biome = null, allBiomes = false} = {}) {
+  function prefetch({biome = null, allBiomes = false, skip = null} = {}) {
     const want = new Map();   // key -> {recipe, case, variants, priority}
     const add = (recipe, c, priority, variants) => {
       const k = keyOf(recipe, c), have = want.get(k);
       if (!have) want.set(k, {recipe, case: c, variants: variants ?? null, priority});
       else { have.priority = Math.min(have.priority, priority); if (variants) have.variants = Math.max(have.variants || 0, variants); }
     };
-    for (const ev of Object.values(EVENTS)) for (const [r, c, bp] of ev.banks || []) add(r, c, bp ?? ev.bakePriority ?? 5, ev.variants);
+    for (const ev of Object.values(EVENTS)) for (const [r, c, bp] of ev.banks || []) if (!skip || !skip(r, c)) add(r, c, bp ?? ev.bakePriority ?? 5, ev.variants);
     for (const s of Object.values(SOURCES)) add(s.recipe, s.case, AMB_PRIORITY.sources ?? 4, 1);
     // ambience: the current biome now; the others lazily (ambience.update requests them on arrival) unless allBiomes
     for (const [id, A] of Object.entries(AMBIENCE)) {
