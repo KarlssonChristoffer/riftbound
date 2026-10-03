@@ -29,8 +29,11 @@
 // OWNS: the live model and its rig (render/rigmesh.js), the knobs, the drawn pose, the lineup (dev: setLineup).
 // READS: app (P, PL, player, yaw, zoom, cam, mouse), hero (atlas, card, loadName), pa (hoverTarget, faceRest), G.
 // BUDGET: char: ~25 bones a frame (slerp + FK + ~100 projected tips), ~.02 ms; render: rigmesh's A + B + S (3 draws).
-//   const live = await createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url}); live.on / toggle() / compose(PX, PY, perf)
+//   const live = await createLiveHero({G, app, hero, pa, mouse, cam, ctxO}); live.on / toggle() / compose(PX, PY, perf)
 //   -> sinkPx (instead of hero.compose) / sprite() (host.playerSprite's object) / set(knobs) / preset(name) / K / stats
+// ONE BODY PER LOADOUT (MODELS): each loadout with a live model gets its own body (createLiveBody: its model, poses, clips,
+// emotes, history) on one shared rig, loaded the first time he wears it (the sprite shows meanwhile); the knobs and the
+// demo (K) are shared, so a preset or an emote carries over a loadout switch.
 import {createRigMesh} from '../render/rigmesh.js';
 import {flags} from '../core/flags.js';
 
@@ -56,7 +59,9 @@ export const PRESETS = {
 };
 for (const v of Object.values(PRESETS)) v.proc ??= true;   // (every preset but exact: the procedural layers on)
 export const DEMOS = ['', 'lasso', 'swing'];
-const MODELS = {outlaw: '../concepts/sprites/out/live/outlaw/'};   // the loadouts with a live model (view/hero.js names)
+// the loadouts with a live model (view/hero.js names). The gunslinger's lacks his duster's long panel (runtime cloth in the
+// sprite path, view/cloth.js; not on live bones yet: docs/exp/livehero.md, the plan's step 2): only its shoulder cape shows
+const MODELS = {outlaw: '../concepts/sprites/out/live/outlaw/', gunslinger: '../concepts/sprites/out/live/gunslinger/'};
 
 // ---------------------------------------------------------------- quaternions (x, y, z, w) and rigid transforms in Float64Arrays
 function qmul(a, i, b, j, o, k) {   // o = a * b
@@ -88,9 +93,7 @@ function fromTo(ax, ay, az, bx, by, bz, o) {   // the shortest rotation taking d
 }
 const wrap = a => a - TAU * Math.round(a / TAU);
 
-export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = null, slots = 17}) {
-  const rig = createRigMesh(G, {slots, xray: true});
-  const base = url || MODELS.outlaw;
+async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, rig, K, slots}) {
   const [J, bin] = await Promise.all([fetch(base + 'model.json').then(r => r.json()), fetch(base + 'model.bin').then(r => r.arrayBuffer())]);
   const model = rig.addModel(J, bin);
   const CL = J.clips || {};
@@ -162,8 +165,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
   const gunNear = w => Math.hypot(w[GUN * 7 + 4] - w[HAND_R * 7 + 4], w[GUN * 7 + 5] - w[HAND_R * 7 + 5], w[GUN * 7 + 6] - w[HAND_R * 7 + 6]) < .15;
 
   // ---------------------------------------------------------------- state
-  const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: demos.includes(flags.get('livedemo')) ? flags.get('livedemo') : ''};
-  let on = true, t = 0;
+  let on = true, t = 0;   // (K: the knobs, shared by the bodies: createLiveHero)
   const Ll = new Float64Array(NB * 7), Lfrom = new Float64Array(NB * 7), Ltmp = new Float64Array(NB * 7);
   const Wb = new Float64Array(NB * 7), Wshow = new Float64Array(NB * 7), Wt = new Float64Array(NB * 7);
   let clipNow = '', frameNow = '', frameT = 0, fadeT = 1, haveShow = false;
@@ -529,23 +531,61 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
   }
 
   const live = {
-    K, stats, rig, model, poseOf, BN, J,
-    get on() { return on && hero.loadName in MODELS; },
-    get available() { return hero.loadName in MODELS; },
-    toggle(v = !on) { on = !!v; haveShow = false; prevOk = false; wf = NaN; lastT = -1; t = 0; stepK = -1; return on; },
-    set(o) { Object.assign(K, o); haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; return K; },
-    preset(name) { return live.set(PRESETS[name]); },
-    get presetName() { for (const [n, v] of Object.entries(PRESETS)) if (Object.keys(v).every(k => v[k] === K[k])) return n; return 'custom'; },
+    stats, model, poseOf, BN, J,
+    // (a knob changed, the body (re)shown: no history carried over)
+    reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; },
     setLineup(items) { lineup = items || []; },
     aim,
     // (dev: the shimmer meter draws several knob sets off ONE sim step, each from its own history)
     snapshot: () => ({v: [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase],
       a: [Ll.slice(), Lfrom.slice(), Wshow.slice(), PREV.slice()], K: {...K}}),
     restore(S) { [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase] = S.v; Ll.set(S.a[0]); Lfrom.set(S.a[1]); Wshow.set(S.a[2]); PREV.set(S.a[3]); Object.assign(K, S.K); },
-    presets: Object.keys(PRESETS), demos, emotes: EMOTES,
+    demos, emotes: EMOTES,
     compose, sprite,
+  };
+  return live;
+}
+
+// THE LIVE HERO: the body of the loadout he wears (MODELS), loaded on first wear; the shared rig, knobs and switch
+export async function createLiveHero(o) {
+  const slots = o.slots ?? 17, rig = createRigMesh(o.G, {slots, xray: true}), hero = o.hero;
+  const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: ''}, want = flags.get('livedemo') || '';
+  const bodies = {}, loading = {};
+  let on = true, shown = null;
+  function load(name) {
+    return loading[name] ??= createLiveBody({...o, url: MODELS[name], rig, K, slots}).then(b => {
+      bodies[name] = b;
+      if (want && !K.demo && b.demos.includes(want)) K.demo = want;
+      return b;
+    }).catch(e => { console.warn('live hero: no body for', name, e); });
+  }
+  // the body he wears now (a body not loaded yet starts loading: null meanwhile); a switch starts it with no history
+  function cur() {
+    const n = hero.loadName, b = bodies[n];
+    if (!b) { if (n in MODELS) load(n); return null; }
+    if (b !== shown) { shown = b; b.reset(); }
+    return b;
+  }
+  const NOSTATS = {held: 0, frames: 0, smears: 0, smearK: 0, ms: 0, msRender: 0};
+  if (hero.loadName in MODELS) await load(hero.loadName);
+  const live = {
+    K, rig,
+    get on() { return on && !!cur(); },
+    get available() { return hero.loadName in MODELS; },
+    toggle(v = !on) { on = !!v; shown = null; return on; },
+    set(x) { Object.assign(K, x); cur()?.reset(); return K; },
+    preset(name) { return live.set(PRESETS[name]); },
+    get presetName() { for (const [n, v] of Object.entries(PRESETS)) if (Object.keys(v).every(k => v[k] === K[k])) return n; return 'custom'; },
+    presets: Object.keys(PRESETS),
+    get demos() { return cur()?.demos ?? DEMOS; }, get emotes() { return cur()?.emotes ?? []; },
+    get stats() { return cur()?.stats ?? NOSTATS; }, get aim() { return cur()?.aim; },
+    get model() { return cur()?.model; }, get J() { return cur()?.J; }, get BN() { return cur()?.BN; }, poseOf: n => cur()?.poseOf(n),
+    setLineup(items) { cur()?.setLineup(items); },
+    snapshot: () => cur().snapshot(), restore: S => cur().restore(S),
+    compose: (PX, PY, perf) => cur().compose(PX, PY, perf), sprite: () => cur().sprite(),
     get bytes() { return rig.bytes; },
     get atlas() { return hero.atlas; },
+    load,   // (dev / tests: a loadout's body now)
   };
   return live;
 }

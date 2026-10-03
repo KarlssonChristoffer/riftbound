@@ -16,7 +16,10 @@ pass), and the live path is view-only (simview with `?live=1` passes: the sim ne
 
 ## Trying it
 
-- `?mode=sandbox&set=outlaw&live=1` (the outlaw is the loadout with a live model: his poncho is baked, no runtime cloth).
+- `?mode=sandbox&set=outlaw&live=1` (the outlaw is the loadout with a full live model: his poncho is baked, no runtime
+  cloth). The gunslinger has one too (`set=gunslinger`), but without his duster's long panel (runtime cloth, not on live
+  bones yet): only its shoulder cape shows. Each loadout's live body loads the first time he wears it (O switches);
+  the knobs and the demo carry over.
 - **Shift+7** flips sprite <-> live at runtime (the A/B), **Shift+8** steps through the motion knobs' presets
   (Shift+Alt+8 turns the procedural layers off / on), **Shift+9** the demos (none, `lasso`, `swing`, then the live
   model's own emotes `cheer`, `wave`, `shrug`, `squat`: stand still to see one). A note in the top-left corner says
@@ -334,7 +337,8 @@ pipeline as the look's reference and for everything that stays a sprite.
 
 ## Files
 
-- `src/view/livehero.js` (new): the live hero: poses, the knobs, the procedural layers, the demos, the meters' hooks.
+- `src/view/livehero.js` (new): the live hero: poses, the knobs, the procedural layers, the demos, the meters' hooks;
+  a body per loadout (`createLiveBody`, MODELS) on one rig behind `createLiveHero`.
 - `src/dev/livekeys.js` (new): Shift+7 / 8 / 9. `src/dev/livelook.js` (new): the look-parity lineup.
 - `src/render/rigmesh.js` (small, additive): the per-body pixel `type`, the optional x-ray pass, B and X over the
   bodies' screen box.
