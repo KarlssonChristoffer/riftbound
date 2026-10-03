@@ -13,7 +13,7 @@
 #            clip metadata (stride, contacts, planted foot) in poses.json)
 #            [--upp 0.03279]  fixed metres per pixel (one scale for the body and every outfit)
 #            [--dirs 16]  16 facings (22.5 deg) instead of 8
-#            [--append 1]  render only these poses/clips into an existing atlas and merge poses.json
+#            [--append 1]  render only these poses/clips into an existing atlas (in its own depth box) and merge poses.json
 import bpy, json, math, os, sys
 from mathutils import Vector
 
@@ -227,6 +227,28 @@ def render_dirs(root, mats, out, cam=None, px=None, W=0, H=0, ky=1.0):
     return bones
 
 
+def atlas_depth_box(out, near, far):
+    """--append: the depth box (near, far) the atlas's frames already use, the most common one over their meta.json,
+    so the appended frames' depth pass is encoded alike and poses.json's atlas-wide cam (the runtime cloth reads it for
+    every frame) stays right. A run fitted on its own first pose would write a box that differs by up to ~0.3 m."""
+    from collections import Counter
+    pj = os.path.join(out, 'poses.json')
+    if not os.path.exists(pj):
+        return near, far
+    box = Counter()
+    for p in json.load(open(pj))['poses']:
+        f = os.path.join(out, p, 'meta.json')
+        if os.path.exists(f):
+            m = json.load(open(f))
+            if 'view' not in m:              # (a render view's frame has its own box)
+                box[(m['near'], m['far'])] += 1
+    if not box:
+        return near, far
+    (n, f), cnt = box.most_common(1)[0]
+    print(f'append: depth box of {cnt}/{sum(box.values())} atlas frames {n:.4f}..{f:.4f} (this run fitted {near:.4f}..{far:.4f})')
+    return n, f
+
+
 def run(model, out, W=48, H=64, ss=4, fig=58, pivot=None, yaw=45, pitch=20, poses=None, clips=None, upp=None, append=False):
     """Without poses: renders the model as built into `out`. With poses (the model defines pose(name)): the scale
     is fitted once on the first pose, then every pose renders into out/<pose>/ at that same scale."""
@@ -242,6 +264,8 @@ def run(model, out, W=48, H=64, ss=4, fig=58, pivot=None, yaw=45, pitch=20, pose
     if poses:
         ns['pose'](poses[0])
     px, near, far = fit(cam, off, root, meshes, W, H, fig, pivot, depth_margin=.6 if poses else .05, upp=upp)
+    if append and poses:
+        near, far = atlas_depth_box(out, near, far)
     vt = render_setup(W, H, ss)
     mats = pass_materials(near, far)
     meta = {'w': W, 'h': H, 'ss': ss, 'pivot': list(pivot), 'fig': fig, 'yaw': yaw, 'pitch': pitch,
