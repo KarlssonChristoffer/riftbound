@@ -9,7 +9,8 @@ and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame b
 cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact shadows (E.7), the GPU layer batch (E.8),
 wind's cloth atlas (E.9) and the hero's compositor in arrays (E.10) are done. The trees' sway was measured and left (E.9).
 Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 (E.11): done. In a real window at 164 Hz the
-game misses 0-3 vsyncs in 10 s in every scenario.
+game misses 0-3 vsyncs in 10 s in every scenario. The last per-frame canvas uploads (flow's marks, the stream's glints)
+are on the GPU too (E.12).
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -795,6 +796,61 @@ budget:
   Each costs a whole-canvas upload (0.8-2.2 MB). On the GPU, both would leave a normal frame with no canvas upload at all.
 - The heap still grows ~130-230 KB a frame between collections (stage 1 aimed at under 100 KB). GC takes ~1.5-3.3 ms a
   second, longest ~2.7 ms.
+
+### E.12 flow's marks and the stream's glints on the GPU (2026-10-03; bit-exact)
+
+**What it replaced.** They were the last users of the ground layer's canvas (E.11), and either one made the whole canvas
+go up every frame:
+
+- **flow's marks:** drawn with `drawImage` of each level's canvas, through the ground plane's affine (with rotation) and
+  clipped by the plateau's hull (`clip('evenodd')`);
+- **the glints:** written per pixel into a view-sized ImageData, masked by the water mask (a pattern fill through the
+  ground matrix, then `destination-in`), then blitted. The canvas was used, and uploaded, whenever the stream was in view,
+  even with no glint drawn.
+
+**What it is now:**
+
+- **The GPU context** (G.glayer) takes any affine (`setTransform` / `transform` / `rotate` ...: an op is a corner and two
+  axes now, 16 floats). Two calls beyond the canvas:
+  - `clipOutside(polygons)`: up to 4 polygons; a pixel shows where an even number of them cover it, tested in LB_FS. That
+    is the canvas's rect + hulls + `clip('evenodd')`.
+  - `fillRectRGB` (numbers, not a colour string, for a fill a pixel).
+- **Data images.** `G.dataImage(w, h, data)` is a texture filled from its owner's array. drawImage takes it like a canvas,
+  and `G.texData` uploads a changed rect.
+- **flow.js.** A mark level is a data image over its own array; `paintRect` sends the rect it repainted. The marks are
+  drawn with the affine and the plateau's hulls as the clip.
+- **depth.js.** The glints keep their dashes. Each pixel is kept only where the water mask's texel under its centre (the
+  mask's alpha, read once a build) is set, then drawn as fills of the wet runs, later dashes over earlier ones as before.
+  The two view-sized canvases and the ImageData are gone.
+- **A profiler fix.** `perf.reset()` now also clears the running sums. Steps taken without frameStart / frameEnd (a tool's
+  settling) used to land in the first frame after a reset (a 47k-draw "frame").
+
+**Checks:**
+
+- golden against the code before: 16 / 16 identical (two captures show the glints);
+- a capture with 14 marks (154 mark pixels on screen), the camera turned 0.5 rad and the plateau clip active: identical;
+- smoke and simview pass.
+
+**Results**, interleaved A/B:
+
+| | Before | After |
+|---|---|---|
+| zoomed out: frame | | -21% (median slice 0.81) |
+| zoomed out: canvas uploads / upload KB a frame | 1 / 2220 KB | 0 / 72 KB |
+| zoomed out: `depth.frame` | 0.143 ms | 0.029 ms |
+| walking: frame | | -7% (median slice 0.93) |
+| walking: canvas uploads / upload KB a frame | 1 / 844 KB | 0 / 70 KB |
+| walking: `depth.frame` | 0.121 ms | 0.035 ms |
+
+**The GPU timer, again.** Zoomed out, the offscreen passes read 0.90 ms before and 1.26-1.83 ms after. In that view no
+glint is drawn (0 spans a frame), and switching the glints off changes nothing; there are no marks either. So nothing new
+reaches the GPU: removing a per-frame canvas upload raises this timer, as in E.10.
+
+The windowed 164 Hz run settles it for the player, alternating the two versions:
+
+- walking: 0 missed in three of the four runs (10 missed in the fourth);
+- zoomed out: one clean run and one with a 150-200 ms hitch for EACH version, from something they share (the zoom-out's
+  first frames, or the machine).
 
 ---
 

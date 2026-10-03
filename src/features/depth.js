@@ -473,10 +473,8 @@ export async function create(host) {
   // ================================================================ WATER: masks, puddles, reflections, sky glint
   // masks are TOP-DOWN (R = PPM texels per metre, like the world's ground canvas) and projected per frame
   const WA = {key: '', mask: null, mpat: null, lava: null, lpat: null, yEnd: 0, shrink: 0, puddles: [], near: [], plane: new Map(), gpx: null, gw: 0, gh: 0, used: false, n: 0, pool: null, x0: 0, x1: 0};
-  const [MS, ms] = mk(VW, VH), [SK, sk] = mk(VW, VH);   // the water mask (the sky glint's clip), the glint
   // the puddles' alpha in the GROUND layer (gfx.js COMP_FS: a puddle mirrors what stands over it) and the reflections' settings
   const PUD_A = 254, RFL = {on: true, tint: [0, 0, 0], tintK: 0, alpha: 0, glow: 0, S: 0, ripple: 0, gust: 0, t: 0, oy: 0, zoom: 1, reach: 0, puddleA: 0, pool: null};
-  let SKY = sk.createImageData(VW, VH); const skyDirty = [];
   function topMask(yEnd, half, cuts, extra) {   // the stream's row spans (half-width function of y), plus extra(q, R), minus cuts(q, R)
     const S = host.layout.stream, R = PPM, W = Math.ceil(WM() * R), H = Math.ceil(HM() * R), [c, q] = mk(W, H);
     q.fillStyle = '#fff';
@@ -510,7 +508,7 @@ export async function create(host) {
   function buildWater() {
     const key = biome + '|' + (host.world?.groundCanvas ? host.world.groundCanvas.width : 0);
     if (WA.key === key) return;
-    Object.assign(WA, {key, mask: null, mpat: null, lava: null, lpat: null, puddles: [], near: [], plane: new Map(), gpx: null, pool: null});
+    Object.assign(WA, {key, mask: null, ma: null, mw: 0, mh: 0, mpat: null, lava: null, lpat: null, puddles: [], near: [], plane: new Map(), gpx: null, pool: null});
     const S = host.layout?.stream; if (!S) return;
     if (biome === 'ember') { WA.lava = topMask(27.6, my => S.w(my) / 2 + .18); return; }
     if (!(biome === 'ruins' || biome === 'frost')) return;
@@ -528,6 +526,11 @@ export async function create(host) {
         cut(fx * R, y * R, r0 * 1.1, r0 * .7, 1);
       }
     }, poolMask);
+    {   // the mask's alpha as bytes (the sky glint's clip, read per glint pixel: skyBand)
+      const c = WA.mask, d = c.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, c.width, c.height).data, A = new Uint8Array(c.width * c.height);
+      for (let i = 0; i < A.length; i++) A[i] = d[i * 4 + 3];
+      WA.ma = A; WA.mw = c.width; WA.mh = c.height;
+    }
     if (biome === 'ruins') WA.puddles = PUDDLES.map(([x, y, rx, ry], i) => ({x, y, rx, ry, seed: 300 + i, key: ''}));
     // what can show up in the water: props near the stream / north of a puddle (sprites fetched per frame)
     for (const p of host.props || []) {
@@ -580,12 +583,13 @@ export async function create(host) {
   }
   // the sky glint across the stream: the arena's world rows (every 150 px of its ground), three dashes each, written as
   // ground texel + sky colour (the arena adds it before the light)
+  // the sky's glints on the water: whole-pixel dashes (z x z view px each) in g, a GPU context (G.glayer), each pixel only
+  // where the water mask at the bed's height lets it through (stones, floes and the ice shelf have no glint): the mask's
+  // texel under the pixel's centre, as the canvas's pattern fill through groundMatrix showed it
   function skyBand(g, fp) {
-    const sky = WATER[biome]?.sky[timeName()]; if (!sky || !WA.mask || !WA.gpx) return;
-    const S = host.layout.stream, P = 150, z = V.z, d = SKY.data, gx = WA.gw / WM(), gy = WA.gh / HM(), h = TUNE.refl.bed;
-    for (const i of skyDirty) d[i + 3] = 0;
-    skyDirty.length = 0;
-    let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+    const sky = WATER[biome]?.sky[timeName()]; if (!sky || !WA.ma || !WA.gpx) return;
+    const S = host.layout.stream, P = 150, z = V.z, gx = WA.gw / WM(), gy = WA.gh / HM(), h = TUNE.refl.bed, MA = WA.ma, MW = WA.mw, MH = WA.mh;
+    const wet = (X, Y) => { inv2(X + .5, Y + .5, h, _pr); const tx = Math.floor(_pr[0] * PPM), ty = Math.floor(_pr[1] * PPM); return tx >= 0 && ty >= 0 && tx < MW && ty < MH && MA[ty * MW + tx] > 127; };
     const wy0 = Math.max(0, Math.floor(fp.y0 * PPMY) - 2), wy1 = Math.min(WA.yEnd * PPMY, Math.ceil(fp.y1 * PPMY) + 2);
     // three dashes across the water's row span [a, b) (px at the ground's resolution) at world row wy / y = my, gaps between
     // (proj / inv through scratch arrays: this runs per pixel of every dash, every frame)
@@ -602,8 +606,10 @@ export async function create(host) {
           inv2(X + .5 * z, Y + .5 * z, h, _pu); const tx = Math.floor(_pu[0] * gx), ty = Math.floor(_pu[1] * gy);
           if (tx < 0 || ty < 0 || tx >= WA.gw || ty >= WA.gh) continue;
           const o = (ty * WA.gw + tx) * 4, R = Math.min(255, WA.gpx[o] + sky[0]), G = Math.min(255, WA.gpx[o + 1] + sky[1]), B = Math.min(255, WA.gpx[o + 2] + sky[2]);
-          for (let yy = 0; yy < z; yy++) for (let xx = 0; xx < z; xx++) { const p = ((Y + yy) * VW + X + xx) * 4; d[p] = R; d[p + 1] = G; d[p + 2] = B; d[p + 3] = 255; skyDirty.push(p); }
-          bx0 = Math.min(bx0, X); by0 = Math.min(by0, Y); bx1 = Math.max(bx1, X + z); by1 = Math.max(by1, Y + z);
+          for (let yy = 0; yy < z; yy++) {   // the block's rows: a fill a run of wet pixels (later dashes over earlier ones, as before)
+            let s = -1;
+            for (let xx = 0; xx <= z; xx++) { const w = xx < z && wet(X + xx, Y + yy); if (w && s < 0) s = xx; else if (!w && s >= 0) { g.fillRectRGB(X + s, Y + yy, xx - s, 1, R, G, B); s = -1; } }
+          }
         }
       }
     };
@@ -619,17 +625,6 @@ export async function create(host) {
       const hwp = Pp.rx * Math.sqrt(kk) - WA.shrink - .06, a = Math.ceil((Pp.x - hwp) * PPM - .5), b = Math.floor((Pp.x + hwp) * PPM - .5) + 1;
       if (b > a) dashes(wy, my, a, b, k, 91);
     }
-    if (bx1 <= bx0) return;
-    // the water mask decides (stones, floes and the ice shelf have no glint): the stream's top-down mask at the bed's height,
-    // filled over the glint's box only
-    ms.setTransform(1, 0, 0, 1, 0, 0); ms.globalCompositeOperation = 'source-over'; ms.globalAlpha = 1; ms.imageSmoothingEnabled = false; ms.clearRect(bx0, by0, bx1 - bx0, by1 - by0);
-    WA.mpat ||= ms.createPattern(WA.mask, 'no-repeat');
-    WA.mpat.setTransform(groundMatrix(PPM, TUNE.refl.bed)); ms.fillStyle = WA.mpat; ms.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
-    sk.globalCompositeOperation = 'source-over'; sk.clearRect(bx0, by0, bx1 - bx0, by1 - by0);
-    sk.putImageData(SKY, 0, 0, bx0, by0, bx1 - bx0, by1 - by0);
-    sk.globalCompositeOperation = 'destination-in'; sk.drawImage(MS, bx0, by0, bx1 - bx0, by1 - by0, bx0, by0, bx1 - bx0, by1 - by0);
-    sk.globalCompositeOperation = 'source-over';
-    g.drawImage(SK, bx0, by0, bx1 - bx0, by1 - by0, bx0, by0, bx1 - bx0, by1 - by0);
   }
   function drawWater() {
     WA.used = false; WA.n = 0;
@@ -646,20 +641,15 @@ export async function create(host) {
       vis.push(u);
     }
     if (!streamIn && !vis.length) return;
-    if (vis.length) {   // (the GPU draws them: G.glayer)
-      const g = host.glayer('ground');
-      g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over';
-      // (at the puddles' own alpha: gfx.js COMP_FS reads it as "a puddle here" and mirrors what stands over it)
+    const g = host.glayer('ground');   // (the GPU draws them: G.glayer)
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over';
+    if (vis.length) {   // (at the puddles' own alpha: gfx.js COMP_FS reads it as "a puddle here" and mirrors what stands over it)
       g.globalAlpha = PUD_A / 255;
       for (const u of vis) g.drawImage(u.cv, u.X, u.Y, u.W * z, u.H * z);
-      g.restore();
+      g.globalAlpha = 1;
     }
-    if (streamIn) {   // the sky's glints on the stream: pixel work, still on the layer's canvas (laid over the GPU's marks)
-      const g = host.layer('ground');
-      g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.imageSmoothingEnabled = false;
-      skyBand(g, fb);
-      g.restore();
-    }
+    if (streamIn) skyBand(g, fb);   // the sky's glints on the stream
+    g.restore();
     // the REFLECTIONS (the stream, the pool, the puddles): on the GPU, gfx.js COMP_FS reflAt, from what is on screen this
     // frame. It mirrors as this file's 2D version did (rows shifted whole pixels by the ripple, the water's tint, laid over
     // the water's albedo before the light, flames glowing in it at glowDim), but every prop, card, tree and the Ranger, as
@@ -700,11 +690,7 @@ export async function create(host) {
   Object.assign(F, {
     toggle() { F.on = !F.on; return F.on; },
     biomeChanged() { biome = ''; syncBiome(); },
-    resize(w, h) {   // the view changed size (main.js fit): the view-sized canvases and the sky glint's pixels follow
-      VW = w; VH = h;
-      for (const [c, q] of [[MS, ms], [SK, sk]]) { c.width = w; c.height = h; q.imageSmoothingEnabled = false; }
-      SKY = sk.createImageData(w, h); skyDirty.length = 0;
-    },
+    resize(w, h) { VW = w; VH = h; },   // the view changed size (main.js fit)
     view(dt) {
       const t0 = performance.now();
       T += dt;
@@ -732,7 +718,7 @@ export async function create(host) {
       F.debug = `fg ${nf} · shafts ${ns} · haze ${nh} · refl ${WA.used ? 'on' : 'off'}${cl ? ' · clouds' : ''}`;
     },
   });
-  F._dbg = {FG, SH, WA, CL, V, PT, proj, inv, footprint, cv: {MS, SK}};
+  F._dbg = {FG, SH, WA, CL, V, PT, proj, inv, footprint};
   buildCloudLevels();   // ~0.1 s once, while the page loads (not as a hitch the first time the sun comes out)
   return F;
 }

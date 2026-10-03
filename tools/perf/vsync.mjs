@@ -4,7 +4,7 @@
 // has 6.1 ms, and one that takes longer shows the previous picture twice (a hitch).
 //
 //   node tools/perf/vsync.mjs                 every scenario; a full-screen window on the main display, ~15 s each
-//   options: --only day,horde  --secs 10 (measured per scenario)  --settle 3
+//   options: --only day,horde  --secs 10 (measured per scenario)  --settle 3  --path src-old/ (another copy of the page)
 //
 // Per scenario: the refresh rate (the median frame interval: rAF times are vsync times), the frames, the MISSED vsyncs
 // (an interval of n periods missed n - 1; a frame within 1.5 periods counts as on time), the longest interval, the 99th
@@ -19,7 +19,7 @@ import {fileURLToPath} from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
-const SECS = +arg('secs', 10), SETTLE = +arg('settle', 3), ONLY = arg('only', ''), PORT = 8136, DBG = 9345;
+const SECS = +arg('secs', 10), SETTLE = +arg('settle', 3), ONLY = arg('only', ''), PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, ''), PORT = 8136, DBG = 9345;
 const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const SPAWN = `(() => { const R = window.__r3d, C = R.host.feature('combat').core, x = R.host.player.x, y = R.host.player.y; C.immune = () => true;
   for (let i = 0; i < 60; i++) { const r = 3.5 + (i % 4) * 1.6, a = i * 2.39996; C.spawnBrute({x: x + Math.cos(a) * r, y: y + Math.sin(a) * r * .7, hp: 1e6, dmg: 0, type: 'brute', name: 'Brute', coins: [0, 0]}); } })()`;
@@ -58,7 +58,7 @@ await send('Page.enable'); await send('Runtime.enable');
 const rows = [];
 for (const sc of SCENARIOS) {
   logs.length = 0;
-  await send('Page.navigate', {url: `http://localhost:${PORT}/src/?${sc.q}&bench=1`});
+  await send('Page.navigate', {url: `http://localhost:${PORT}/${PAGE}/?${sc.q}&bench=1`});
   let ok = false; for (let i = 0; i < 240; i++) { await sleep(250); if (await ev('!!(window.__r3d && window.__r3d.perf)')) { ok = true; break; } }
   if (!ok) { rows.push({name: sc.name, error: 'did not load: ' + logs.slice(-2).join(' | ')}); continue; }
   await send('Page.bringToFront');
@@ -74,7 +74,7 @@ for (const sc of SCENARIOS) {
   let missed = 0, late = 0; for (const v of iv) { const n = Math.round(v / per); if (v > per * 1.5) { late++; missed += Math.max(1, n - 1); } }
   rows.push({name: sc.name, hz: 1000 / per, frames: iv.length, late, missed, pct: 100 * missed / (iv.length + missed), longest: s[s.length - 1], p99: s[Math.floor(s.length * .99)], js: r.js, size: `${r.w}x${r.h}`, errors: logs.slice(0, 2)});
 }
-console.log(`\nwindowed, vsync on · ${SECS} s per scenario · ${rows.find(r => r.size)?.size || '?'} px`);
+console.log(`\n${PAGE} · windowed, vsync on · ${SECS} s per scenario · ${rows.find(r => r.size)?.size || '?'} px`);
 console.log('scenario      refresh  frames  missed  (%)    late frames  longest   p99    | JS avg  p95');
 for (const r of rows) {
   if (r.error) { console.log(r.name.padEnd(12), r.error); continue; }

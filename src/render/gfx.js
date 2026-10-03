@@ -650,22 +650,35 @@ void main() {
 }`;
 
 // ---------------------------------------------------------------- shaders: THE SCREEN LAYERS' GPU OPS (G.glayer)
-// One instanced quad per op of a layer's GPU context (fillRect, drawImage), in canvas px (y down) as the 2D canvas was: a
-// fill is its premultiplied colour; an image shows the source texel the canvas's nearest-neighbour drawImage showed (the
-// source rect mapped onto the dest rect), times the op's alpha. Blended into the layer's target premultiplied: source-over
-// (one, one minus src alpha) or 'lighter' (one, one).
-//   iD: the dest rect (canvas px: x, y, w, h)   iS: the source rect (texels; w = 0: a fill)   iC: the colour, premultiplied (a: an image's alpha)
+// One instanced quad per op of a layer's GPU context (fillRect, drawImage), in canvas px (y down) as the 2D canvas was, under
+// the context's transform (any affine: the quad is a parallelogram): a fill is its premultiplied colour; an image shows the
+// source texel the canvas's nearest-neighbour drawImage showed (the source rect mapped onto the dest rect: a pixel centre
+// mapped back), times the op's alpha. Blended into the layer's target premultiplied: source-over (one, one minus src alpha)
+// or 'lighter' (one, one). A run can be clipped (clipOutside: up to 4 polygons; a pixel shows where an even number cover it).
+//   iO: the dest's corner + its first axis (canvas px)   iV: its second axis   iS: the source rect (texels; w = 0: a fill)
+//   iC: the colour, premultiplied (a: an image's alpha)
 const LB_VS = HEAD + `
-in vec3 position; in vec4 iD; in vec4 iS; in vec4 iC; uniform vec2 uRes;
+in vec3 position; in vec4 iO; in vec4 iV; in vec4 iS; in vec4 iC; uniform vec2 uRes;
 out vec2 vS; flat out vec4 vC; flat out float vF;
 void main() {
   vS = iS.xy + position.xy * iS.zw; vC = iC; vF = iS.z == 0. ? 1. : 0.;
-  vec2 p = iD.xy + position.xy * iD.zw;
+  vec2 p = iO.xy + iO.zw * position.x + iV.xy * position.y;
   gl_Position = vec4(p.x / uRes.x * 2. - 1., 1. - p.y / uRes.y * 2., 0., 1.);
 }`;
 const LB_FS = HEAD + ONE_OUT + `
-in vec2 vS; flat in vec4 vC; flat in float vF; uniform sampler2D uTex;
+in vec2 vS; flat in vec4 vC; flat in float vF; uniform sampler2D uTex; uniform vec2 uRes;
+uniform vec2 uClipP[32]; uniform vec4 uClipN; uniform float uClipK;   // the clip's polygons (points in a row, counts), how many
+bool inPoly(vec2 p, int s, int n) {   // even-odd crossing test of polygon s .. s + n - 1
+  bool c = false;
+  for (int i = 0, j = n - 1; i < n; j = i++) { vec2 a = uClipP[s + i], b = uClipP[s + j]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) c = !c; }
+  return c;
+}
 void main() {
+  if (uClipK > .5) {
+    vec2 c = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y); int inside = 0, s = 0;
+    for (int j = 0; j < 4; j++) { if (float(j) >= uClipK) break; int n = int(uClipN[j] + .5); if (inPoly(c, s, n)) inside++; s += n; }
+    if (inside % 2 == 1) discard;
+  }
   if (vF > .5) { o0 = vC; return; }
   ivec2 t = ivec2(floor(vS)), sz = textureSize(uTex, 0);
   if (t.x < 0 || t.y < 0 || t.x >= sz.x || t.y >= sz.y) discard;
@@ -1117,7 +1130,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const dataUps = [];
   let dataN = 0;
   function texData(img, x, y, w, h, data, rowLen, sx = 0, sy = 0) {
-    const t = texCache.get(img) || tex(img), U = dataUps[dataN] ||= {t: null, x: 0, y: 0, w: 0, h: 0, data: null, rowLen: 0, sx: 0, sy: 0};
+    const t = img.isData ? imgTex(img) : texCache.get(img) || tex(img), U = dataUps[dataN] ||= {t: null, x: 0, y: 0, w: 0, h: 0, data: null, rowLen: 0, sx: 0, sy: 0};
     dataN++; U.t = t; U.x = x; U.y = y; U.w = w; U.h = h; U.data = data; U.rowLen = rowLen; U.sx = sx; U.sy = sy;
   }
   function uploadData() {   // (render: with the other uploads, before any pass reads them)
@@ -1476,9 +1489,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // rows; COMP_FS reads them. Two ways to draw into one:
   //   glayer(n): a small 2D-canvas-like context drawn by the GPU (LB_VS / LB_FS), for the marks drawn every frame: fillStyle
   //     (a CSS colour, read once per string), globalAlpha, globalCompositeOperation 'source-over' | 'lighter', fillRect,
-  //     drawImage (an image or canvas; 3, 5 or 9 arguments; nearest), save / restore, setTransform / translate / scale (no
-  //     rotation or skew), imageSmoothingEnabled (ignored: always nearest). The ops keep their order. An image drawn there is
-  //     uploaded once: G.touch(canvas) after painting it again.
+  //     drawImage (an image, a canvas or a G.dataImage; 3, 5 or 9 arguments; nearest), save / restore, setTransform /
+  //     transform / translate / scale / rotate (any affine), imageSmoothingEnabled (ignored: always nearest). Beyond the
+  //     canvas: fillRectRGB(x, y, w, h, r, g, b) (0..255, no colour string a pixel) and clipOutside(polygons) (draw only
+  //     where an even number of them cover: a canvas's rect(all) + the polygons + clip('evenodd')). The ops keep their order.
+  //     An image drawn there is uploaded once: G.touch(canvas) after painting it again; a data image's changed rect goes up
+  //     with G.texData.
   //   layer(n): the layer's 2D canvas, for what that can't do (paths, gradients, pixels). Used, it is uploaded and laid in
   //     among that frame's GPU ops where it was first drawn into (one drawImage there): what other features draw after it,
   //     on the GPU, stays over it.
@@ -1489,7 +1505,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const L = layers[n];
     if (!L.used) {
       L.used = true; if (L.dirty) { L.q.setTransform(1, 0, 0, 1, 0, 0); L.q.globalAlpha = 1; L.q.globalCompositeOperation = 'source-over'; L.q.clearRect(0, 0, VW, VH); } L.dirty = true;
-      lbOp(L, L.t, false, 0, 0, VW, VH, 0, 0, VW, VH, 0, 0, 0, 1);   // its place among the GPU ops (drawn with what it holds at render)
+      lbOp(L, L.t, false, null, 0, 0, VW, 0, 0, VH, 0, 0, VW, VH, 0, 0, 0, 1);   // its place among the GPU ops (drawn with what it holds at render)
     }
     return L.q;
   }
@@ -1503,41 +1519,48 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const lbRuns = [], lbScene = new THREE.Scene(); let lbN = 0;
   lbScene.matrixAutoUpdate = false;
   function lbGrow(R, cap) {
-    const d = new Float32Array(cap * 12); if (R.d) d.set(R.d);
-    const ib = new THREE.InstancedInterleavedBuffer(d, 12, 1); ib.setUsage(THREE.DynamicDrawUsage);
-    R.geo.setAttribute('iD', new THREE.InterleavedBufferAttribute(ib, 4, 0)); R.geo.setAttribute('iS', new THREE.InterleavedBufferAttribute(ib, 4, 4));
-    R.geo.setAttribute('iC', new THREE.InterleavedBufferAttribute(ib, 4, 8));
+    const d = new Float32Array(cap * 16); if (R.d) d.set(R.d);
+    const ib = new THREE.InstancedInterleavedBuffer(d, 16, 1); ib.setUsage(THREE.DynamicDrawUsage);
+    R.geo.setAttribute('iO', new THREE.InterleavedBufferAttribute(ib, 4, 0)); R.geo.setAttribute('iV', new THREE.InterleavedBufferAttribute(ib, 4, 4));
+    R.geo.setAttribute('iS', new THREE.InterleavedBufferAttribute(ib, 4, 8)); R.geo.setAttribute('iC', new THREE.InterleavedBufferAttribute(ib, 4, 12));
     R.d = d; R.ib = ib; R.cap = cap; regrown(R.geo);
   }
-  function lbRun(L, tex, add) {
+  function lbRun(L, tex, add, clip) {
     let R = lbRuns[lbN];
     if (!R) {
       const geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
-      const u = {uRes: compU.uRes, uTex: {value: null}};
+      const u = {uRes: compU.uRes, uTex: {value: null}, uClipP: {value: new Float32Array(64)}, uClipN: {value: new THREE.Vector4()}, uClipK: {value: 0}};
       const o = {side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor};
       const mOver = raw(LB_VS, LB_FS, u, {...o, blendDst: THREE.OneMinusSrcAlphaFactor}), mAdd = raw(LB_VS, LB_FS, u, {...o, blendDst: THREE.OneFactor});
       const mesh = new THREE.Mesh(geo, mOver); mesh.frustumCulled = false; mesh.matrixAutoUpdate = false;
-      R = lbRuns[lbN] = {geo, u, mOver, mAdd, mesh, d: null, ib: null, cap: 0, n: 0, tex: null, add: false};
+      R = lbRuns[lbN] = {geo, u, mOver, mAdd, mesh, d: null, ib: null, cap: 0, n: 0, tex: null, add: false, clip: null};
       lbGrow(R, 64);
     }
-    lbN++; R.n = 0; R.tex = tex; R.add = add; L.runs.push(R);
+    lbN++; R.n = 0; R.tex = tex; R.add = add; R.clip = clip; L.runs.push(R);
     return R;
   }
-  function lbOp(L, tex, add, x, y, w, h, sx, sy, sw, sh, r, g, b, a) {
+  // one op: its corner (ox, oy) and axes (ux, uy) (vx, vy) in canvas px, its source rect, its colour; a run per blend x
+  // texture x clip
+  function lbOp(L, tex, add, clip, ox, oy, ux, uy, vx, vy, sx, sy, sw, sh, r, g, b, a) {
     let R = L.runs.length ? L.runs[L.runs.length - 1] : null;
-    if (!R || R.add !== add || (tex && R.tex && R.tex !== tex)) R = lbRun(L, tex, add);
+    if (!R || R.add !== add || R.clip !== clip || (tex && R.tex && R.tex !== tex)) R = lbRun(L, tex, add, clip);
     else if (tex) R.tex = tex;
     if (R.n >= R.cap) lbGrow(R, R.cap * 2);
-    const D = R.d, i = R.n++ * 12;
-    D[i] = x; D[i + 1] = y; D[i + 2] = w; D[i + 3] = h; D[i + 4] = sx; D[i + 5] = sy; D[i + 6] = sw; D[i + 7] = sh;
-    D[i + 8] = r; D[i + 9] = g; D[i + 10] = b; D[i + 11] = a;
+    const D = R.d, i = R.n++ * 16;
+    D[i] = ox; D[i + 1] = oy; D[i + 2] = ux; D[i + 3] = uy; D[i + 4] = vx; D[i + 5] = vy; D[i + 6] = 0; D[i + 7] = 0;
+    D[i + 8] = sx; D[i + 9] = sy; D[i + 10] = sw; D[i + 11] = sh; D[i + 12] = r; D[i + 13] = g; D[i + 14] = b; D[i + 15] = a;
   }
+  // dataImage(w, h, data): an image for the GPU contexts whose pixels are an RGBA8 array its owner keeps and paints (they
+  // are shown as premultiplied: straight colours whose alpha is 0 or 255 are both). drawImage takes it like a canvas; after
+  // changing the array, G.texData(img, x, y, w, h, data, w, x, y) uploads that rect (no canvas between: flow's marks)
+  const dataImage = (w, h, data) => ({width: w, height: h, data, isData: true});
   // an image or canvas drawn by a GPU context: its texture, made (and uploaded) once; unused for 600 frames, it is let go
   const imgT = new WeakMap(), imgLive = new Set();
   function imgTex(img) {
     let e = imgT.get(img);
     if (!e) {
-      const t = new THREE.Texture(img); t.flipY = false; t.premultiplyAlpha = true; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace;
+      const t = img.isData ? new THREE.DataTexture(img.data, img.width, img.height, THREE.RGBAFormat, THREE.UnsignedByteType) : new THREE.Texture(img);
+      t.flipY = false; t.premultiplyAlpha = !img.isData; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace;
       t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true;
       e = {t, used: 0, gone: false}; imgT.set(img, e); imgLive.add(e);
     } else if (e.gone) { e.gone = false; e.t.needsUpdate = true; imgLive.add(e); }
@@ -1547,8 +1570,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // touch(img): an image a GPU context draws was painted again: upload it before it is shown next
   function touch(img) { const e = imgT.get(img); if (e && !e.gone) e.t.needsUpdate = true; }
   function gctx(L) {
-    const S = {fs: '#000', c: cssRGBA('#000'), ga: 1, add: false, a: 1, d: 1, e: 0, f: 0}, stack = [];
-    let depth = 0;
+    // S: the fill (string, rgba), alpha, blend, the transform (a b c d e f, as the canvas's) and the clip (null: none)
+    const S = {fs: '#000', c: cssRGBA('#000'), ga: 1, add: false, ma: 1, mb: 0, mc: 0, md: 1, me: 0, mf: 0, clip: null}, stack = [], clips = [];
+    let depth = 0, ci = 0;
+    // a rect (x, y, w, h) in user space through the transform: its corner and axes
+    const quad = (tex, x, y, w, h, sx, sy, sw, sh, r, g, b, a) => lbOp(L, tex, S.add, S.clip, S.ma * x + S.mc * y + S.me, S.mb * x + S.md * y + S.mf,
+      S.ma * w, S.mb * w, S.mc * h, S.md * h, sx, sy, sw, sh, r, g, b, a);
     const X = {
       imageSmoothingEnabled: false,
       get fillStyle() { return S.fs; },
@@ -1559,15 +1586,33 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       set globalCompositeOperation(v) { if (v === 'lighter') S.add = true; else if (v === 'source-over') S.add = false; else throw new Error(`G.glayer: no '${v}' (source-over, lighter)`); },
       save() { Object.assign(stack[depth] ??= {}, S); depth++; },
       restore() { if (depth > 0) Object.assign(S, stack[--depth]); },
-      setTransform(a, b, c, d, e, f) { if (b || c) throw new Error('G.glayer: no rotation or skew'); S.a = a; S.d = d; S.e = e; S.f = f; },
-      translate(x, y) { S.e += S.a * x; S.f += S.d * y; },
-      scale(x, y) { S.a *= x; S.d *= y; },
+      setTransform(a, b, c, d, e, f) { S.ma = a; S.mb = b; S.mc = c; S.md = d; S.me = e; S.mf = f; },
+      transform(a, b, c, d, e, f) {
+        const A = S.ma, B = S.mb, C = S.mc, D = S.md;
+        S.ma = A * a + C * b; S.mb = B * a + D * b; S.mc = A * c + C * d; S.md = B * c + D * d; S.me += A * e + C * f; S.mf += B * e + D * f;
+      },
+      translate(x, y) { S.me += S.ma * x + S.mc * y; S.mf += S.mb * x + S.md * y; },
+      scale(x, y) { S.ma *= x; S.mb *= x; S.mc *= y; S.md *= y; },
+      rotate(t) { const c = Math.cos(t), s = Math.sin(t); X.transform(c, s, -s, c, 0, 0); },
+      // (not canvas) draw only where an even number of these polygons ([[x, y], ...], canvas px: the transform not applied)
+      // cover a pixel; until restore() or the next frame. Up to 4 polygons, 32 points in all
+      clipOutside(polys) {
+        const C = clips[ci] ||= {p: new Float32Array(64), n: new THREE.Vector4(), k: 0}; ci++;
+        let o = 0, k = 0; C.n.set(0, 0, 0, 0);
+        for (const poly of polys) {
+          if (k >= 4 || o + poly.length > 32) break;
+          for (const pt of poly) { C.p[o * 2] = pt[0]; C.p[o * 2 + 1] = pt[1]; o++; }
+          C.n.setComponent(k++, poly.length);
+        }
+        C.k = k; S.clip = k ? C : null;
+      },
       fillRect(x, y, w, h) {
-        const c = S.c, al = c[3] * S.ga; if (!(al > 0)) return;
-        let X0 = S.a * x + S.e, Y0 = S.d * y + S.f, W = S.a * w, H = S.d * h;
-        if (W < 0) { X0 += W; W = -W; } if (H < 0) { Y0 += H; H = -H; }
-        if (!(W > 0 && H > 0)) return;
-        lbOp(L, null, S.add, X0, Y0, W, H, 0, 0, 0, 0, c[0] * al, c[1] * al, c[2] * al, al);
+        const c = S.c, al = c[3] * S.ga; if (!(al > 0) || !w || !h) return;
+        quad(null, x, y, w, h, 0, 0, 0, 0, c[0] * al, c[1] * al, c[2] * al, al);
+      },
+      fillRectRGB(x, y, w, h, r, g, b) {   // (not canvas) an opaque colour as numbers 0..255 (x the alpha)
+        const al = S.ga; if (!(al > 0) || !w || !h) return;
+        quad(null, x, y, w, h, 0, 0, 0, 0, r / 255 * al, g / 255 * al, b / 255 * al, al);
       },
       drawImage(img, a1, a2, a3, a4, a5, a6, a7, a8) {
         const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
@@ -1577,11 +1622,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
         else { dx = a1; dy = a2; dw = iw; dh = ih; }
         if (sw < 0) { sx += sw; sw = -sw; } if (sh < 0) { sy += sh; sh = -sh; } if (dw < 0) { dx += dw; dw = -dw; } if (dh < 0) { dy += dh; dh = -dh; }
         if (!(sw > 0 && sh > 0 && dw > 0 && dh > 0 && S.ga > 0)) return;
-        let X0 = S.a * dx + S.e, Y0 = S.d * dy + S.f, W = S.a * dw, H = S.d * dh;
-        if (W < 0) { X0 += W; W = -W; } if (H < 0) { Y0 += H; H = -H; }
-        lbOp(L, imgTex(img), S.add, X0, Y0, W, H, sx, sy, sw, sh, 0, 0, 0, S.ga);
+        quad(imgTex(img), dx, dy, dw, dh, sx, sy, sw, sh, 0, 0, 0, S.ga);
       },
-      reset() { S.ga = 1; S.add = false; S.a = S.d = 1; S.e = S.f = 0; depth = 0; },
+      reset() { S.ga = 1; S.add = false; S.ma = S.md = 1; S.mb = S.mc = S.me = S.mf = 0; S.clip = null; depth = 0; ci = 0; },
     };
     return X;
   }
@@ -1602,8 +1645,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       renderer.setRenderTarget(L.rt); renderer.clear(true, false, false);
       let k = 0;
       for (const R of L.runs) {
-        R.geo.instanceCount = R.n; R.ib.clearUpdateRanges(); R.ib.addUpdateRange(0, R.n * 12); R.ib.needsUpdate = true;
+        R.geo.instanceCount = R.n; R.ib.clearUpdateRanges(); R.ib.addUpdateRange(0, R.n * 16); R.ib.needsUpdate = true;
         R.u.uTex.value = R.tex; R.mesh.material = R.add ? R.mAdd : R.mOver; R.mesh.renderOrder = k++; lbScene.add(R.mesh);
+        const C = R.clip; R.u.uClipK.value = C ? C.k : 0; if (C) { R.u.uClipP.value.set(C.p); R.u.uClipN.value.copy(C.n); }
       }
       renderer.render(lbScene, dummyCam);
       lbScene.clear();
@@ -2003,7 +2047,7 @@ void main() {
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
-    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, tex, texData, glStats, QUAD,
+    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }

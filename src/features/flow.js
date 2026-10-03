@@ -37,8 +37,9 @@
 //             RGBA layer per ground height (0, the plateau top). The host's ground layer MIXES (it does not multiply),
 //             so each layer pixel holds the ground texel under it (world.groundCanvas) x the mark's tone; overlapping
 //             marks keep the darker one ('darken', as in the arena). Each frame the visible part of a layer is drawn
-//             into host.layer('ground') through the ground plane's affine map (nearest), so marks turn with the world
-//             like the ground texture does; ground-level marks are clipped out of the plateau's silhouette.
+//             into host.glayer('ground') through the ground plane's affine map (nearest), so marks turn with the world
+//             like the ground texture does; ground-level marks are clipped out of the plateau's silhouette. A layer is a
+//             G.dataImage over its own array (a painted rect goes up with G.texData; no canvas).
 //   Particles world metres -> host.point (lit, depth-tested). Glow follows the arena's two emitter paths: sparks,
 //             glowing drips and night breath (its view-sized canvas, which lighting.apply drew straight over the lit frame
 //             at 1.25 - lum(ambient) x .95, .3..1) -> host.glayer('front') at that alpha; scorch / sole embers and the
@@ -263,7 +264,7 @@ export async function create(host) {
   // decal px: the arena's world px at yaw 0 without the height (X = x PPM, Y = y PPMY); each decal keeps its ground height
   const decals = [];   // {pix: [X, Y, tone, ...], set, ramp, st, z, t, stage, min, x0, y0, x1, y1, chips}
   let dirty = [];      // [z, x0, y0, x1, y1]
-  const levels = new Map();   // ground height -> {z, x0, y0, w, h, c, q, img, D}: the baked layer (ground x tone)
+  const levels = new Map();   // ground height -> {z, x0, y0, w, h, D, gi}: the baked layer (ground x tone; gi: D as a G.dataImage)
   const WPX = () => host.ctxO.WPX || Math.ceil(62 * PPM), HPX = () => host.ctxO.HPX || Math.ceil(30 * PPMY);
   const plats = () => host.layout?.plateaus || [];
   function level(z) {
@@ -274,8 +275,8 @@ export async function create(host) {
       for (const q of plats()) if (q.h === z) { x0 = Math.min(x0, Math.floor(q.x0 * PPM) - 2); y0 = Math.min(y0, Math.floor(q.y0 * PPMY) - 2); x1 = Math.max(x1, Math.ceil(q.x1 * PPM) + 2); y1 = Math.max(y1, Math.ceil(q.y1 * PPMY) + 2); }
       if (x1 <= x0) { x0 = 0; y0 = 0; x1 = WPX(); y1 = HPX(); }
     }
-    const [c, q] = mk(x1 - x0, y1 - y0), img = q.createImageData(x1 - x0, y1 - y0);
-    levels.set(z, L = {z, x0, y0, w: x1 - x0, h: y1 - y0, c, q, img, D: img.data});
+    const w = x1 - x0, h = y1 - y0, D = new Uint8ClampedArray(w * h * 4);
+    levels.set(z, L = {z, x0, y0, w, h, D, gi: host.G.dataImage(w, h, D)});
     return L;
   }
   // the ground texture (world.js paints it top-down at PPM px / m) for the multiply: read back lazily in 64 px tiles
@@ -332,7 +333,7 @@ export async function create(host) {
         else { D[o] = r; D[o + 1] = g; D[o + 2] = b; D[o + 3] = 255; }
       }
     }
-    L.q.putImageData(L.img, 0, 0, x0 - L.x0, y0 - L.y0, x1 - x0, y1 - y0);
+    host.G.texData(L.gi, x0 - L.x0, y0 - L.y0, x1 - x0, y1 - y0, D, W, x0 - L.x0, y0 - L.y0);   // (the rect into its texture)
   }
   function ageDecals(dt) {
     for (let i = decals.length - 1; i >= 0; i--) {
@@ -468,18 +469,18 @@ export async function create(host) {
       const x0 = Math.max(L.x0, Math.floor(Math.max(u0, w0)) - 2), y0 = Math.max(L.y0, Math.floor(Math.max(v0, z0)) - 2);
       const x1 = Math.min(L.x0 + L.w, Math.ceil(Math.min(u1, w1)) + 2), y1 = Math.min(L.y0 + L.h, Math.ceil(Math.min(v1, z1)) + 2);
       if (x1 <= x0 || y1 <= y0) continue;
-      const q = host.layer('ground');
+      const q = host.glayer('ground');   // (the GPU draws it: G.glayer)
       q.save(); q.setTransform(1, 0, 0, 1, 0, 0);
-      if (L.z === 0 && plats().length) {
-        q.beginPath(); q.rect(-4, -4, VW + 8, VH + 8);
+      if (L.z === 0 && plats().length) {   // cut out of the plateau's silhouette (even-odd, as a canvas's rect + hulls + clip('evenodd'))
+        const polys = [];
         for (const p of plats()) {
           const pts = []; for (const x of [p.x0, p.x1]) for (const y of [p.y0, p.y1]) for (const h of [0, p.h]) pts.push([SX(x, y, h), SY(x, y, h)]);
-          const H = hull(pts); H.forEach(([x, y], i) => i ? q.lineTo(x, y) : q.moveTo(x, y)); q.closePath();
+          polys.push(hull(pts));
         }
-        q.clip('evenodd');
+        q.clipOutside(polys);
       }
-      q.setTransform(a, b, c, d, e, f); q.imageSmoothingEnabled = false; q.globalAlpha = 1; q.globalCompositeOperation = 'source-over';
-      q.drawImage(L.c, x0 - L.x0, y0 - L.y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+      q.setTransform(a, b, c, d, e, f); q.globalAlpha = 1; q.globalCompositeOperation = 'source-over';
+      q.drawImage(L.gi, x0 - L.x0, y0 - L.y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
       q.restore();
     }
   }
@@ -740,7 +741,7 @@ export async function create(host) {
     decals.length = 0; dirty.length = 0; ps.length = 0; gEmb.length = 0; stuck.clear();
     for (const gh of GH.list) GH.pool.push(gh); GH.list.length = 0; GH.due = false;
     SK.d = RL.d = null; wetFrom = splashT = -99;
-    for (const L of levels.values()) { L.D.fill(0); L.q.clearRect(0, 0, L.w, L.h); }
+    for (const L of levels.values()) { L.D.fill(0); host.G.texData(L.gi, 0, 0, L.w, L.h, L.D, L.w); }
   }
   function setBiome(id) { biome = MARK[id] ? id : 'ruins'; reset(); }
 

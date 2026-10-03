@@ -84,7 +84,8 @@ export function createPerf({on = false} = {}) {
     return {draws: +a('draws').toFixed(1), drawsMax: dMax, uniforms: +a('uniforms').toFixed(1), texCanvas: +a('texCanvas').toFixed(2), texData: +a('texData').toFixed(2),
       texKB: +(a('texBytes') / 1024).toFixed(1), bufKB: +(a('bufBytes') / 1024).toFixed(1), heapKB: +(a('heapUp') / 1024).toFixed(1), gcPerSec: secs ? +(sum.gc / secs).toFixed(2) : 0, frames: n};
   }
-  function reset() { filled = 0; i = 0; jsRing.fill(0); dtRing.fill(0); for (const s of S.values()) s.ring.fill(0); for (const k of CN) cRing[k].fill(0); cOn.fill(0); heapPrev = 0; }
+  // (the running sums too: steps taken without frameStart / frameEnd, a tool's settling, would land in the first frame after)
+  function reset() { filled = 0; i = 0; jsRing.fill(0); dtRing.fill(0); for (const s of S.values()) { s.ring.fill(0); s.cur = 0; } for (const k of CN) { cRing[k].fill(0); cCur[k] = 0; } cOn.fill(0); heapPrev = 0; counted = false; }
 
   // ---- the overlay: frame-time graph, the groups against their budgets, the most expensive systems
   let rep = null, repT = 0;
