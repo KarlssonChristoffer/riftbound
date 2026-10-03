@@ -107,8 +107,9 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     const hx = cv.VW / (2 * PPM * z), hy = cv.VH / (2 * PPMY * z), c = Math.abs(Math.cos(cv.yaw)), s = Math.abs(Math.sin(cv.yaw));
     const ex = hx * c + hy * s, ez = hx * s + hy * c;
     let [gx, gz] = toWorld(vx, vy - lift);
-    gx = ex * 2 >= WORLD.WM ? WORLD.x0 + WORLD.WM / 2 : Math.min(WORLD.x1 - ex, Math.max(WORLD.x0 + ex, gx));
-    gz = ez * 2 >= WORLD.HM ? WORLD.y0 + WORLD.HM / 2 : Math.min(WORLD.y1 - ez, Math.max(WORLD.y0 + ez, gz));
+    const ga = airH * PPMH / PPMY;   // airborne: the clamp gives way by his height above where he stood (0 on the ground)
+    gx = ex * 2 >= WORLD.WM ? WORLD.x0 + WORLD.WM / 2 : Math.min(WORLD.x1 - ex + ga, Math.max(WORLD.x0 + ex - ga, gx));
+    gz = ez * 2 >= WORLD.HM ? WORLD.y0 + WORLD.HM / 2 : Math.min(WORLD.y1 - ez + ga, Math.max(WORLD.y0 + ez - ga, gz));
     [vx, vy] = toView(gx, gz); vy += lift;
     const sx = Math.round(vx * PPM * z) / (PPM * z), S = Math.round((vy * PPMY - h * PPMH) * z), vy2 = (S / z + h * PPMH) / PPMY;
     const [X, Zw] = toWorld(sx, vy2); Ts.set(X, h, Zw);
@@ -116,8 +117,16 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   // every rendered frame: ease after the player with a little look-ahead (the arena's), feel offsets from features, shake.
   // It aims at his chest (FOCUS_H m up, as the ground point that projects there), so he's in the same spot on screen at
   // every zoom. Sets the renderer's view and player.js's cam (its cursor reading)
+  // AIRBORNE (on a rope: the equipment experiment's lasso swing, state 'rope', and the fall after it): the world-edge clamp
+  // above gives way by the body's height over where he last stood (eased, metres), so a body up to ~3 m stays in view near
+  // the world's edges; on the ground it is 0 and the clamp is as it was
+  let airH = 0, groundZ = 0;
   cv.follow = function follow(dt, PX, PY, P, cam) {
     if (!camInit) { T.set(PX, P.z, PY); camInit = true; }
+    const air = P.state === 'rope' || P.state === 'fall';
+    if (!air) groundZ = P.z;
+    const aw = air ? Math.max(0, P.z - groundZ) : 0;
+    airH = aw === airH ? aw : airH + (aw - airH) * (1 - Math.exp(-dt * 6)); if (airH < 1e-3 && aw === 0) airH = 0;
     const [lvx, lvy] = toWorld(P.vx * .12, P.vy * .12 - FOCUS_H * PPMH / PPMY);
     const k = 1 - Math.exp(-dt * 9); T.x += (PX + lvx - T.x) * k; T.y += (P.z - T.y) * k; T.z += (PY + lvy - T.z) * k;
     let ox = 0, oy = 0;
