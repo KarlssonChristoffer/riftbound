@@ -179,7 +179,7 @@ export function createLassoSim(host, eq) {
       const f = i / n, x = O.lx + (nx - O.lx) * f, y = O.ly + (ny - O.ly) * f, h = O.lh + (nh - O.lh) * f;
       if (catchAt(x, y, h, k)) return;
       const g = host.elev(x, y);
-      if (h <= g + .02 || (k > .2 && solid(x, y, h, h, .05))) { O.x = x; O.y = y; O.h = Math.max(g + .02, Math.min(h, O.lh)); miss(); return; }
+      if (h <= g + .02 || (k > .2 && solid(x, y, h, h, .05, O.kind === 'anchor' ? L.aim.who : null))) { O.x = x; O.y = y; O.h = Math.max(g + .02, Math.min(h, O.lh)); miss(); return; }
     }
     O.x = nx; O.y = ny; O.h = nh;
     if (k >= 1) {   // there: what it was thrown at, if it's still there
@@ -199,7 +199,9 @@ export function createLassoSim(host, eq) {
         if (rel > -.1 && rel < (p.hitH ?? 1.6) + .1 && dd < (p.hitR ?? .4) + R) { L.loop.x = x; L.loop.y = y; L.loop.h = h; catchThing(p); return true; }
       } else if (movable(p) && dd < (p.r || .3) + R && h < (p.z || 0) + topOf(p) + .3) { L.loop.x = x; L.loop.y = y; L.loop.h = h; catchThing(p); return true; }
     }
-    if (L.loop.kind !== 'anchor' && k < .5) return false;   // (an anchor nearby only catches a loop thrown at one, or late in its flight)
+    // anchors: a loop thrown at one drops over it there (k = 1: stepLoop), not over a limb it passes on the way; any other
+    // throw is caught by a limb late in its flight (thrown at the ground under one)
+    if (L.loop.kind === 'anchor' || k < .5) return false;
     for (let i = 0; i < nSeg; i++) {
       if (segDist(i, x, y, h) > R + SEG[i * 7 + 6]) continue;
       if (!high(Q.x, Q.y, Q.h)) continue;
@@ -257,12 +259,16 @@ export function createLassoSim(host, eq) {
     Z.leash(p.x, p.y, L.len + T2.stretch);
     L.loop.x = p.x; L.loop.y = p.y; L.loop.h = L.kind === 'prop' ? (p.z || 0) + (p.h || 0) + topOf(p) * .55 : (p.z || 0) + (p.h || 0) + (p.hitH ?? 1.6) * .5;
   }
+  // the yank: the clip starts (he heaves); at its pull mark (lasso.pull) what he holds comes off its feet
+  function startYank() { const p = L.who; lz().yank(p.x, p.y); L.phase = 'pull'; L.t = 0; }
   function yank() {
-    const p = L.who, Z = lz(), Y = TUNE.yank;
+    const p = L.who, Y = TUNE.yank;
+    if (!p || p.broken || p.gone) { back(); return; }
     const dx = P.x - p.x, dy = P.y - p.y, d = hypot2(dx, dy) || 1, ux = dx / d, uy = dy / d;
-    Z.yank(p.x, p.y);
-    if (L.kind === 'prop') {
-      phys()?.shove(p, ux * TUNE.prop.yankV, uy * TUNE.prop.yankV);
+    if (L.kind === 'prop') {   // (the speed that brings it to your feet: a barrel rolls, a crate slides, each its own friction)
+      const PT = phys()?.T, fr = PT ? (p.tip || p.kind !== 'crate' ? PT.rollFric : PT.slideFric) : 3;
+      const v = clamp(Math.sqrt(2 * fr * Math.max(0, d - TUNE.prop.stop)) * 1.05, 1.5, TUNE.prop.yankV);
+      phys()?.shove(p, ux * v, uy * v);
       events.push({type: 'lasso.yank', x: p.x, y: p.y, who: p, ok: true}); host.shake(1, .08);
       back(); return;
     }
@@ -301,10 +307,10 @@ export function createLassoSim(host, eq) {
   };
   // something solid in the column (x, y) between h0 and h1 within r: higher ground (a cliff's face), a wall, a trunk, a prop
   // up to its top (world.js PROP_TOP, else TOP above)
-  function solid(x, y, h0, h1, r) {
+  function solid(x, y, h0, h1, r, skip = null) {   // (skip: the tree / snag a loop is thrown at: it flies past its own trunk)
     if (host.elev(x, y) > h0 + .3) return true;
     for (const p of ents.near(x, y, r + .8, nearA)) {
-      if (p.broken || p.gone || creature(p) || p.kind === 'gadget' || !(p.rect || p.r > .15)) continue;
+      if (p === skip || p.broken || p.gone || creature(p) || p.kind === 'gadget' || !(p.rect || p.r > .15)) continue;
       const z0 = p.z || 0, top = z0 + topOf(p); if (h1 < z0 || h0 > top) continue;
       if (p.rect ? x > p.rect[0] - r && x < p.rect[2] + r && y > p.rect[1] - r && y < p.rect[3] + r : hypot2(p.x - x, p.y - y) < p.r + r) return true;
     }
@@ -347,6 +353,7 @@ export function createLassoSim(host, eq) {
     for (let i = 0; i < evs.length; i++) {
       const e = evs[i];
       if (e.type === 'lasso.loose') { if (L.phase === 'wind') launch(); }
+      else if (e.type === 'lasso.pull') { if (L.phase === 'pull') yank(); }
       else if (e.type === 'lasso.drop') {
         if (L.phase === 'spin' || L.phase === 'wind') { L.phase = ''; eq.S.aiming = false; }
         else if (L.phase === 'hold') slip(e.why === 'gun' ? 'gun' : 'drop');
@@ -375,8 +382,12 @@ export function createLassoSim(host, eq) {
       case 'lie': L.t += dt; if (L.t >= TUNE.miss.lie) back(); break;
       case 'hold':
         if (press) { L.fHeld = true; L.fT = 0; }
-        if (up && L.fHeld) { L.fHeld = false; yank(); break; }
+        if (up && L.fHeld) { L.fHeld = false; startYank(); break; }
         stepHold(dt);
+        break;
+      case 'pull':   // (the yank clip, until its pull mark: it's still held)
+        L.t += dt; holdIt(.12);
+        if (!L.who || L.who.broken || L.who.gone) back(); else if (L.t > .4 || Z.mode !== 'yank') yank();
         break;
       case 'yanked': {
         L.t += dt; const p = L.who;

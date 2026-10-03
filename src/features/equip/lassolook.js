@@ -22,6 +22,7 @@ import {hex01} from '../../core/color.js';
 import {clamp, hypot2, hypot3, TAU} from '../../core/mathx.js';
 
 const CN = 16;   // the rope's chain points
+const TWIST = [1, 0, 1, 2];   // the hemp's lay along the rope: mid, lit, mid, shade (it reads on bright sand and water)
 const C3 = ROPE.map(hex01), GOLD = hex01('#ffe08a'), DIM = hex01('#a08a70'), STAR = hex01('#fff2a0'), RED = hex01('#e07050');
 
 export function createLassoLook(host, lsim) {
@@ -61,7 +62,7 @@ export function createLassoLook(host, lsim) {
     const l = hypot3(x1 - x0, y1 - y0, h1 - h0), n = Math.max(1, Math.round(l / .12));
     for (let k = 0; k < n; k++) {
       const a = k / n, b = (k + 1) / n;
-      host.line(x0 + (x1 - x0) * a, y0 + (y1 - y0) * a, h0 + (h1 - h0) * a, x0 + (x1 - x0) * b, y0 + (y1 - y0) * b, h0 + (h1 - h0) * b, C3[(k + phase) & 1], false);
+      host.line(x0 + (x1 - x0) * a, y0 + (y1 - y0) * a, h0 + (h1 - h0) * a, x0 + (x1 - x0) * b, y0 + (y1 - y0) * b, h0 + (h1 - h0) * b, C3[TWIST[(k + phase) & 3]], false);
     }
     return n;
   }
@@ -96,17 +97,30 @@ export function createLassoLook(host, lsim) {
   const POP = {size: 1, emit: true, alpha: 1};
 
   // ---------------------------------------------------------------- per view step
+  // a TUMBLEWEED (features/tumbleweed.js: a view, so the sim's loop never knows): a loop that lands by one snags it, and it
+  // comes bouncing home with the loop as it's reeled in; let go at your feet
+  let weed = null, weedF = null, lastPh = '';
+  function weeds(ph) {
+    weedF ??= host.feature('tumbleweed') || false;
+    if (!weedF || !weedF.snag) return;
+    if (lastPh === 'fly' && ph === 'lie' && !weed) weed = weedF.snag(L.loop.x, L.loop.y, TUNE.weed);
+    if (weed) {
+      if ((ph === 'lie' || ph === 'back') && weedF.tow(weed, L.loop.x, L.loop.y)) return;
+      weedF.unsnag(weed, 1.4); weed = null;
+    }
+  }
   function view(dt) {
     T += dt;
     const Z = lz(); if (!Z) return;
     const ph = L.phase, S = Z.S;
+    weeds(ph); lastPh = ph;
     // the swish: a turn of the loop overhead (by the spin clip's clock: in time with his hand)
     if (ph === 'spin' && Z.mode === 'spin') {
       const n = Math.floor(S.t * TUNE.spin.rps);
       if (n !== swishN && S.t > .05) { swishN = n; Z.hand(false, HA); SW.x = HA[0]; SW.y = HA[1]; host.events.push(SW); }
     } else swishN = -1;
     // the rope's chain: from the hand to the loop in flight / on the ground / at what it holds
-    if (ph === 'fly' || ph === 'lie' || ph === 'back' || ph === 'hold' || ph === 'yanked') {
+    if (ph === 'fly' || ph === 'lie' || ph === 'back' || ph === 'hold' || ph === 'pull' || ph === 'yanked') {
       Z.hand(false, HA);
       const O = L.loop, slack = ph === 'fly' ? .06 : ph === 'hold' ? (L.taut ? .004 : .14) : ph === 'yanked' ? .25 : .12;
       if (ph === 'fly' && O.t <= dt * 1.5 && !chainOn) chainReset(HA[0], HA[1], HA[2], O.x, O.y, O.h);
@@ -123,7 +137,7 @@ export function createLassoLook(host, lsim) {
   }
   function ringR() {
     const O = L.loop, p = L.who;
-    if ((L.phase === 'hold' || L.phase === 'yanked') && p) return L.kind === 'prop' ? (p.r || .3) * 1.05 + .03 : (p.hitR ?? .35) * .78;
+    if ((L.phase === 'hold' || L.phase === 'pull' || L.phase === 'yanked') && p) return L.kind === 'prop' ? (p.r || .3) * 1.05 + .03 : (p.hitR ?? .35) * .78;
     if (L.phase === 'fly') return O.r * (.6 + .4 * Math.min(1, O.t / (O.T * .5)));
     return O.r;
   }
@@ -138,11 +152,13 @@ export function createLassoLook(host, lsim) {
       for (let k = 0; k < 3; k++) { const a = T * 5 + k * TAU / 3; POP.size = z * (k === 0 ? 2 : 1); POP.emit = true; POP.alpha = 1; host.point(p.x + Math.cos(a) * .32, p.y + Math.sin(a) * .32, top + Math.sin(a * 2) * .05, STAR, POP); }
     }
     if (!ph) return;
-    // the loop overhead (spinning, and through the throw until it leaves the hand)
+    // the loop overhead (spinning, and through the throw until it leaves the hand): on the art's own hand circle when the
+    // pose has its rope hand (spinCircle), else a ring turning over his head
+    if ((ph === 'spin' || ph === 'wind') && artSpin(Z, ph)) { if (ph === 'spin') aimMark(); return; }
     if (ph === 'spin' || ph === 'wind') {
       const k = clamp(L.spinT / TUNE.spin.grow, .15, 1), r = TUNE.spin.r * k, f = P.faceAngle, fx = Math.sin(f), fy = Math.cos(f), tl = TUNE.spin.tilt;
       Z.hand(false, HA);
-      const cx = P.x + fx * .06, cy = P.y + fy * .06, ch = Math.max(HA[2] + .06, P.z + 1.85 + TUNE.spin.h * k);
+      const cx = P.x + fx * .06, cy = P.y + fy * .06, ch = Math.max(HA[2] + .06, P.z + 2.1 * k + 1.8 * (1 - k));
       // the plane: forward tilted down by `tilt`, and across
       const ux = fx * Math.cos(tl), uy = fy * Math.cos(tl), uh = -Math.sin(tl), vx = fy, vy = -fx;
       const rot = -S.t * TUNE.spin.rps * TAU + (ph === 'wind' ? S.t * 4 : 0);
@@ -165,11 +181,59 @@ export function createLassoLook(host, lsim) {
       const vx = O.x - O.lx, vy = O.y - O.ly, l = hypot2(vx, vy) || 1, ux = vx / l, uy = vy / l;
       ring(O.x, O.y, O.h, ringR(), ux * .85, uy * .85, .5, -uy, ux, 0, 18, T * 6, .06);
     } else if (ph === 'lie' || ph === 'back') flatRing(O.x, O.y, Math.max(O.h, host.elev(O.x, O.y) + .03), O.r * (ph === 'back' ? .8 : 1), 18, 0, .08);
-    else if ((ph === 'hold' || ph === 'yanked') && L.who) {
+    else if ((ph === 'hold' || ph === 'pull' || ph === 'yanked') && L.who) {
       const p = L.who; flatRing(p.x, p.y, O.h, ringR(), 14, T * (L.taut ? 0 : .5), .03);
     }
     // the rope (the chain, its ends where they are drawn)
     if (chainOn) { ringNear(E); drawChain(HA[0], HA[1], HA[2], E[0], E[1], E[2]); }
+  }
+  // THE ART'S SPIN: in the spin clip and the walk / run spins the rope hand (RopeHand0) draws a circle round his head on
+  // screen; per clip and facing its centre (the mean of its frames' markers) and its turning way are worked out once. A
+  // frame's hand is then a point on that circle in the view frame (screen x: across; screen y at the circle's height:
+  // toward / away from you), the loop a ring round the circle's centre a little above the hand, its honda trailing the hand
+  // by `lag`: so the loop turns with his hand, from any yaw
+  const CIRC = new Map();   // the atlas's SP -> {key: [per facing {cx, cy, dir} | null]}
+  const SPINS = [['lasso_spin.', 6], ['lws_', 8], ['lrs_', 8]];
+  function circleOf(Z, base, n, face, PPMr) {
+    const A = Z.atlas; let byA = CIRC.get(A.SP); if (!byA) CIRC.set(A.SP, byA = {});
+    const arr = byA[base] ??= new Array(A.ND).fill(undefined);
+    if (arr[face] !== undefined) return arr[face];
+    let sx = 0, sy = 0; const xs = [], ys = [];
+    for (let i = 0; i < n; i++) { const m = Z.marker(base + i, face, false); if (!m) return (arr[face] = null); xs.push(m.x); ys.push(m.y); sx += m.x; sy += m.y; }
+    const cx = sx / n, cy = sy / n; let turn = 0;
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n, ax = xs[i] - cx, ay = (ys[i] - cy) * PPMr, bx = xs[j] - cx, by = (ys[j] - cy) * PPMr; turn += ax * by - ay * bx; }
+    return (arr[face] = {cx, cy, dir: turn >= 0 ? 1 : -1});
+  }
+  const SPN = {cx: 0, cy: 0, ch: 0, hx: 0, hy: 0, hh: 0};
+  function artSpin(Z, ph) {
+    const Pv = host.P, fr = Pv.frame, A = Z.atlas;
+    let base = null, n = 0; for (const [b, k] of SPINS) if (fr.startsWith(b)) { base = b; n = k; break; }
+    const th = ph === 'wind' ? fr.startsWith('lasso_throw.') : !!base; if (!th) return false;
+    const PPM = host.PPM, PPMY = host.PPMY, PPMH = host.PPMH, m = Z.marker(fr, Pv.face, false); if (!m) return false;
+    const a = host.yaw, ca = Math.cos(a), sa = Math.sin(a), W = (vx, vy, out, o) => { out[o] = vx * ca + vy * sa; out[o + 1] = -vx * sa + vy * ca; };
+    const k = clamp(L.spinT / TUNE.spin.grow, .15, 1), r = TUNE.spin.r * k;
+    if (ph === 'spin') {
+      const c = circleOf(Z, base, n, Pv.face, PPM / PPMY); if (!c) return false;
+      const hv = (m.y - c.cy) / PPMY, hz = Pv.z + (A.PIV[1] - c.cy) / PPMH;   // the hand: toward you by its screen y off the circle's centre
+      W(Pv.x + (c.cx - A.PIV[0]) / PPM, Pv.y, E, 0); const cxw = E[0], cyw = E[1];
+      W(Pv.x + (m.x - A.PIV[0]) / PPM, Pv.y + hv, E, 0); const hxw = E[0], hyw = E[1];
+      // the honda: on the ring, the way the hand is from the centre, trailing it by `lag`
+      const ang = Math.atan2(hyw - cyw, hxw - cxw) - c.dir * TUNE.spin.lag;
+      // the ring tilted down toward where he faces (`tilt`); the honda on it the way the hand is
+      const f = P.faceAngle, fx = Math.sin(f), fy = Math.cos(f), tl = TUNE.spin.tilt, ct = Math.cos(tl), st = Math.sin(tl);
+      const dx = Math.cos(ang), dy = Math.sin(ang), phi = Math.atan2(dx * fy - dy * fx, dx * fx + dy * fy), cp = Math.cos(phi), sp = Math.sin(phi);
+      const ch = hz + TUNE.spin.h * k, hx = cxw + (fx * ct * cp + fy * sp) * r, hy = cyw + (fy * ct * cp - fx * sp) * r, hh = ch - st * cp * r;
+      ring(cxw, cyw, ch, r, fx * ct, fy * ct, -st, fy, -fx, 0, 22, phi, .05);
+      hemp(hxw, hyw, hz, hx, hy, hh, 0);
+      return true;
+    }
+    // the throw's wind-up: the loop swings off the hand, out in front of it, standing up as it goes
+    const f = P.faceAngle, fx = Math.sin(f), fy = Math.cos(f);
+    W(Pv.x + (m.x - A.PIV[0]) / PPM, Pv.y, E, 0); const hxw = E[0], hyw = E[1], hz = Pv.z + (A.PIV[1] - m.y) / PPMH;
+    const q = clamp(Z.S.t / Math.max(.05, Z.tls().throw.rel), 0, 1), tl = .2 + q * .65, cx = hxw + fx * r * .8, cy = hyw + fy * r * .8, chh = hz + .08 + (1 - q) * .12;
+    ring(cx, cy, chh, r, fx * Math.cos(tl), fy * Math.cos(tl), -Math.sin(tl), fy, -fx, 0, 20, T * 9, .06);
+    hemp(hxw, hyw, hz, cx - fx * r * Math.cos(tl), cy - fy * r * Math.cos(tl), chh + Math.sin(tl) * r, 0);
+    return true;
   }
   // what the throw goes for (the sim's aim)
   function aimMark() {

@@ -99,6 +99,7 @@ export const EVENTS = {
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
+  'lasso.pull':         ['sim/player/lasso.js',   'x, y, z (the yank clip pull mark: what he holds comes off its feet now)', 'equip (lasso)'],
   'lasso.drop':         ['sim/player/lasso.js',   'x, y, z, why (roll | knock | gun | ...: he lost the rope)', 'equip (lasso)'],
   'lasso.letgo':        ['sim/player/lasso.js',   'x, y, z, vx, vy, vz, why (key | water | bump | time | ground: off a swing)', 'equip (lasso), audio'],
   'lasso.bump':         ['sim/player/lasso.js',   'x, y, z (a swing ran into a wall, a trunk, a cliff face)', 'equip (lasso), audio'],
