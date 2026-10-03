@@ -11,8 +11,10 @@ async function sha1(text) {
   return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
 }
 const cache = {};
-// one sheet decoded at a time across every atlas's warm() (each is ~50 MB decoded): the jobs queue up here
+// every atlas's warm() queues up here (one at a time); within one, up to DECODES sheets decode at once (each is ~50 MB
+// decoded, on the browser's decoder threads), while the oldest is cut
 let warmQueue = Promise.resolve();
+const DECODES = 3;
 // a slice to cut in (ms): the idle time after a frame (up to 4 ms), or 2 ms within 20 ms whatever the page is doing (an
 // uncapped or busy page has no idle time). A cut is ~0.2 ms: a slice stays inside a 164 Hz frame's slack
 const idleSlice = () => new Promise(r => (window.requestIdleCallback || (f => setTimeout(() => f({didTimeout: true, timeRemaining: () => 0}), 16)))(
@@ -47,18 +49,22 @@ export async function loadAtlas(root, opts = {}) {
     // 8160 px: ~30-50 ms on the main thread), and with a few dozen sheets in play (the player's, three gunmen's) Chrome's
     // decoded-image cache can't keep them: nearly every pose seen for the first time paid it again (a fight with 14
     // gunmen: frames of 30-470 ms). warm() decodes each sheet ONCE, off the main thread (its PNG as a blob ->
-    // createImageBitmap), cuts the poses asked for out of it in idle slices (~0.1 ms each) and lets it go: one decoded
-    // sheet at a time. A pose shown before its turn is cut lazily as before (the same pixels).
+    // createImageBitmap), cuts the poses asked for out of it in idle slices (~0.2 ms each) and lets it go: up to DECODES
+    // decoded sheets at a time. A pose shown before its turn is cut lazily as before (the same pixels).
     //   set.warm(names, layers = [0, 1]) -> a promise (layers: 0 albedo, 1 normals, 2 depth); unknown names are skipped
     function warm(names, want = [0, 1]) {
       const by = new Map();   // sheet -> its poses asked for
       for (const n of names) { const p = packed.poses[n]; if (!p) continue; let a = by.get(p[0]); if (!a) by.set(p[0], a = []); a.push(n); }
+      const jobs = [];   // [sheet, layer, poses]: decoded up to DECODES ahead of the one being cut (the decodes are most of the time)
+      for (const [k, list] of by) for (const i of want) if (i < layers.length) jobs.push([k, i, list]);
+      const open = j => jobs[j][2].some(n => !memos[n][jobs[j][1]]);
+      const decode = j => open(j) ? fetch(`${root}packed/${layers[jobs[j][1]]}_${jobs[j][0]}.png`).then(r => r.blob()).then(b => createImageBitmap(b)).catch(() => null) : Promise.resolve(null);
       return (warmQueue = warmQueue.then(async () => {
-        for (const [k, list] of by) for (const i of want) {
-          if (i >= layers.length) continue;
-          const need = list.filter(n => !memos[n][i]); if (!need.length) continue;
-          let bm = null;
-          try { bm = await createImageBitmap(await (await fetch(`${root}packed/${layers[i]}_${k}.png`)).blob()); } catch (e) { continue; }   // (lazy cuts cover it)
+        const pend = [];
+        for (let q = 0; q < jobs.length; q++) {
+          for (let a = pend.length; a < Math.min(jobs.length, q + DECODES); a++) pend.push(decode(a));
+          const bm = await pend[q]; pend[q] = null; if (!bm) continue;   // (nothing left to cut, or it failed: lazy cuts cover it)
+          const [, i, list] = jobs[q], need = list.filter(n => !memos[n][i]);
           for (let j = 0; j < need.length;) {
             const ms = await idleSlice(), t0 = performance.now();
             while (j < need.length && performance.now() - t0 < ms) {
