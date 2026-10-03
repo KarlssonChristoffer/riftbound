@@ -118,6 +118,9 @@ export function createLassoLook(host, lsim) {
     if (ph === 'spin' && Z.mode === 'spin') {
       const n = Math.floor(S.t * TUNE.spin.rps);
       if (n !== swishN && S.t > .05) { swishN = n; Z.hand(false, HA); SW.x = HA[0]; SW.y = HA[1]; host.events.push(SW); }
+    } else if (ph === 'hammer' && L.ham && L.who) {   // the hammer throw: a whoosh each turn, where the body is
+      const n = Math.floor(L.ham.a / TAU);
+      if (n !== swishN) { swishN = n; SW.x = L.who.x; SW.y = L.who.y; host.events.push(SW); }
     } else swishN = -1;
     // the rope's chain: from the hand to the loop in flight / on the ground / at what it holds
     if (ph === 'fly' || ph === 'lie' || ph === 'back' || ph === 'hold' || ph === 'pull' || ph === 'hammer' || ph === 'yanked') {

@@ -1038,7 +1038,7 @@ export function createAudio(ctx, host = {}) {
         // a heave, a yanked body's landing the gunmen's fall thud, the rope straining a short creak (the bow's)
         case 'lasso.swish': fire('jump', e.x, e.y, {surf, g: .28}); break;
         case 'lasso.throw': fire('jump', e.x, e.y, {surf, g: .75}); break;
-        case 'lasso.catch': if (e.what === 'anchor') fire('stuck', e.x, e.y, {surf: 'wood', g: .6}); else fire('hit', e.x, e.y, {mat: 'straw', g: .55}); break;
+        case 'lasso.catch': if (e.what === 'anchor') fire('stuck', e.x, e.y, {surf: 'wood', g: .6}); else if (e.who?.kind === 'brazier') { fire('hit', e.x, e.y, {mat: 'clay', g: .8}); fire('propDrop', e.x, e.y, {mat: 'metal', surf}); } else fire('hit', e.x, e.y, {mat: MAT[e.who?.kind] || 'straw', g: .55}); break;   // (a brazier: iron over, the coals spill)
         case 'lasso.yank': fire('jump', e.x, e.y, {surf, g: 1}); if (!e.ok) fire('hit', e.x, e.y, {mat: 'body', g: .6}); break;
         case 'lasso.slam': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: e.who?.kind === 'brute' || e.who?.foe === 'bruiser'})); break;
         case 'lasso.slip': fire('rustle', e.x, e.y, {surf, g: .4}); break;
