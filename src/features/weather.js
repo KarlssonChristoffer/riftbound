@@ -15,7 +15,7 @@
 import {clamp} from '../core/mathx.js';
 import {viewRandom} from '../core/rng.js';
 const TAU = Math.PI * 2;
-const R = viewRandom(), rr = (a, b) => a + R() * (b - a);
+const R = viewRandom('weather'), rr = (a, b) => a + R() * (b - a);
 export const TUNE = {
   rain: {max: 900, v: [8.5, 10.5], len: .17, top: 7, splashEvery: 2},   // drops at full rain, fall m/s, streak m, spawn height
   snow: {max: 520, v: [.55, 1.05], sway: [.25, .5], big: .12, top: 6},
