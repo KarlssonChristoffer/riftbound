@@ -272,12 +272,12 @@ export function createEquipSim(host) {
     const G = GADGETS[o.id], x = who ? who.x : o.x, y = who ? who.y : o.y, z = host.elev(x, y);
     if (o.id === 'smoke') {
       clouds.push({x, y, z: Math.max(0, z), r: G.r, t: 0, dur: G.dur});
-      events.push({type: 'equip.puff', x, y, z, h: o.h, r: G.r});
+      events.push({type: 'equip.puff', x, y, z, h: o.h, r: G.r}); host.shake(1, .06);
       return;
     }
     if (water(x, y, z)) { events.push({type: 'equip.fizzle', x, y, gadget: o.id, sunk: false}); return; }
     pools.push({x, y, z, r: G.r, t: 0, dur: G.dur, tick: 0, lit: []});
-    events.push({type: 'equip.shatter', x, y, z, h: Math.max(z + .1, o.h)});
+    events.push({type: 'equip.shatter', x, y, z, h: Math.max(z + .1, o.h)}); host.shake(2, .1);
     // the splash: whoever it broke on and everyone close by
     const k = dmgK();
     if (who) hurt(who, G.splash * k, false, null);
@@ -351,7 +351,7 @@ export function createEquipSim(host) {
     const p = {kind: 'scarecrow', x, y, z: Math.max(0, z), h: 0, r: .28};
     ents.add(p);
     crows.push({p, x, y, z: p.z, t: 0, dur: G.dur, hp: G.hp, hp0: G.hp, dead: false, deadT: 0, hitT: -9});
-    events.push({type: 'equip.land', x, y, gadget: 'scarecrow'});
+    events.push({type: 'equip.land', x, y, gadget: 'scarecrow'}); host.shake(1, .06);
   }
   function stepCrows(dt) {
     const G = GADGETS.scarecrow, BS = core()?.BS;
