@@ -160,7 +160,7 @@ export async function create(host) {
       const g = game(); if (g?.mode !== 'sandbox' || !(enabled || active)) return [];
       return OMENS.map(o => ({label: `Omen: ${o.name}${active?.def.id === o.id ? '  (on)' : ''}`, run: () => F.force(o.id)}));
     },
-    hud: () => active ? `omen ${active.def.id} (stage ${active.stage + 1}, ${active.t.toFixed(1)} s)` : enabled ? 'omens on' : '',
+    hud: () => active ? `omen ${active.def.id} (${active.stage < 0 ? 'sandbox' : 'stage ' + (active.stage + 1)}, ${active.t.toFixed(1)} s)` : enabled ? 'omens on' : '',
   };
   const LL = [];
   return F;
