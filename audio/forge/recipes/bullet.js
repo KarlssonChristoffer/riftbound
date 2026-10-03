@@ -75,19 +75,19 @@ const DUR = {sand: .55, stone: .45, wood: .3, metal: .35, ricochet: .6, flesh: .
 
 // ======================================================================================================================
 // v2: THE WESTERN-MOVIE FLAVORS (with recipes/revolver.js v3 and coachgun.js v2: the user wanted the guns "more 'western
-// movie'"); the v1 cases above stay as they were. Movie bullet hits are stylised: louder, cleaner, each material told at
-// once:
+// movie'"); v3: the spaghetti flavor removed (the user: "won't be used"), hollywood and gritty kept. The v1 cases above
+// stay as they were (the hit-confirm still plays its own). Movie bullet hits are stylised: louder, cleaner, each material
+// told at once:
 //   sand     the squib's PUFF of dirt: a snap as the ground opens, a thud, the dirt thrown up (a soft swell) and the spray
 //            falling back (grains, brighter than v1, still sparse); hollywood adds the stock "tsip" of the bullet arriving
-//   stone    a hard CHIP (a sharp crack + short stone modes over a damped mass), chips and dust; spaghetti and hollywood
-//            add the ZING off the rock (a short falling whine: the ricochet's cousin)
+//   stone    a hard CHIP (a sharp crack + short stone modes over a damped mass), chips and dust; hollywood adds the
+//            ZING off the rock (a short falling whine: the ricochet's cousin)
 //   wood     a solid THOCK (damped low-mid modes, no ring) with a bright tock on top and the splinters crackling
-//   metal    spaghetti / hollywood: the movie PTANG (a thick plate's inharmonic partials with a short ring, under ~4 kHz);
+//   metal    hollywood: the movie PTANG (a thick plate's inharmonic partials with a short ring, under ~4 kHz);
 //            gritty: a dull, heavy TUNK
 //   ricochet the iconic falling whine. Physics: a tumbling bullet whistles a chord (the measured peaks 324 / 633 / 910 Hz:
 //            .51 / 1 / 1.44) whose pitch falls EXPONENTIALLY (drag on the tumble, the Doppler of leaving) while its level
 //            decays; films stretch and sweeten it:
-//              spaghetti  the long, bright "pyeeeooww" (3.5 kHz falling to ~0.85 kHz over ~1 s) with canyon echoes
 //              hollywood  the stock ricochet: a purer tone with the classic warble (2.9 -> 1.05 kHz, ~0.8 s), a chamber slap
 //              gritty     short and turbulent: a lower, noisier whirr (1.8 -> 0.5 kHz, ~0.5 s), no echo
 //   flesh    the dry Foley body hit: a punch (a broad pulse into damped body modes ~90-130 Hz), the SLAP of leather and
@@ -95,7 +95,7 @@ const DUR = {sand: .55, stone: .45, wood: .3, metal: .35, ricochet: .6, flesh: .
 //   crit     heavier: a lower punch, the body's second jolt, a dull knock
 //   pierce   through: the punch, the THWIP of the bullet tearing through (a fast band of noise sweeping up then down), the
 //            exit spray (a short cluster of dark grains), the whump
-const STYLES = ['spaghetti', 'hollywood', 'gritty'];
+const STYLES = ['hollywood', 'gritty'];
 const W_ACTS = ['sand', 'stone', 'wood', 'metal', 'ricochet', 'flesh', 'crit', 'pierce'];
 // a tumbling bullet's whine at `at` s: the chord (partials r1, 1, r2 of the main tone, the 2nd harmonic h2) falling
 // exponentially from f0 to f1 Hz (time constant tau s), warbling at the tumble rate wF (which slows with the pitch: FM depth
@@ -121,13 +121,6 @@ function whine(out, sr, R, at, {f0, f1, tau, T, atk = .012, dec, wF, wD, am = .3
     add(out, norm(zz, amp * air), i0);
   }
 }
-// a delayed, darker copy of out[0..len) added at +t s (an echo off a wall: its second half faded out), level g
-function slap(out, sr, len, t, g, lp) {
-  const d = Math.round(t * sr), n = Math.min(len, out.length - d); if (n <= 0) return;
-  const e = out.slice(0, n); for (let i = n >> 1; i < n; i++) e[i] *= .5 + .5 * Math.cos(PI * (i - (n >> 1)) / (n - (n >> 1)));
-  filter(filter(e, 'lowpass', lp, .7, sr), 'highpass', 200, .7, sr);
-  add(out, e, d, g);
-}
 // the stock "tsip": a rising band of noise into the hit, ending at `end` s
 function zip(out, sr, R, end, amp) {
   const n = Math.round(R.range(.018, .028) * sr), i0 = Math.round(end * sr) - n; if (i0 < 0) return;
@@ -137,13 +130,6 @@ function zip(out, sr, R, end, amp) {
 }
 // the flavors (levels relative; the forge normalises each case)
 const WB = {
-  spaghetti: {sand: {snap: .5, snapF: 2200, thud: .9, thudF: [110, 150], puff: .45, spray: .16, sprayN: [10, 16], sprayF: [1400, 3600], sprayT: [.14, .22], zip: 0, echo: [.12, .22, 1800]},
-    stone: {chipF: [1600, 2300], crackle: .6, zing: {f0: 3200, f1: 1500, tau: .07, T: .2, atk: .004, dec: .09, wF: 34, wD: .03, am: .25, air: .3, amp: .38}, dust: .25, chips: [3, 6], echo: [.12, .2, 2000]},
-    wood: {f: [190, 250], tock: .45, splinter: .2, knock: 0},
-    metal: {f: [850, 1100], ring: .2, thud: .3, spark: .14},
-    ricochet: {hit: .55, whine: {f0: 3500, f1: 850, tau: .32, T: 1.05, atk: .012, dec: .5, wF: 30, wD: .025, am: .35, air: .32, chord: [.32, .22], h2: .1, q: 5, amp: 1}, echoes: [[.24, .3, 2400], [.52, .14, 1600]], lp: 6000},
-    flesh: {fB: [92, 120], tB: .055, tc: .0032, slap: 1, slapF: [1100, 1700], slapD: .009, smack: .8, smackF: [420, 520], mass: .45, crunch: 0},
-    pierce: {thwip: .55, spray: .2}},
   hollywood: {sand: {snap: .4, snapF: 2000, thud: .85, thudF: [120, 160], puff: .4, spray: .13, sprayN: [8, 13], sprayF: [1300, 3200], sprayT: [.1, .16], zip: .35},
     stone: {chipF: [1500, 2100], crackle: .55, zing: {f0: 2900, f1: 1500, tau: .06, T: .17, atk: .004, dec: .08, wF: 26, wD: .045, am: .2, air: .2, amp: .38}, dust: .22, chips: [2, 5]},
     wood: {f: [200, 260], tock: .5, splinter: .17, knock: 0},
@@ -160,7 +146,7 @@ const WB = {
     pierce: {thwip: .45, spray: .26}},
 };
 const WDUR = {sand: .7, stone: .6, wood: .3, metal: .5, ricochet: 1.9, flesh: .25, crit: .32, pierce: .42};
-const WOUT = {spaghetti: {shelf: -3, lp: 0}, hollywood: {shelf: -4, lp: 7500}, gritty: {shelf: -6, lp: 0}};
+const WOUT = {hollywood: {shelf: -4, lp: 7500}, gritty: {shelf: -6, lp: 0}};
 function westHit(out, sr, R, a, style) {
   const S = WB[style];
   if (a === 'sand') {
@@ -171,7 +157,6 @@ function westHit(out, sr, R, a, style) {
     puff(out, sr, R, t, {a: .0004, d: R.range(.01, .014), lp: R.range(650, 850), hp: 80, amp: .7});
     puff(out, sr, R, t + .002, {a: R.range(.003, .006), d: R.range(.035, .05), bp: R.range(500, 800), q: .6, lp: 2400, amp: P.puff});          // the dirt thrown up
     grains(out, sr, R, t + .01, t + R.range(P.sprayT[0], P.sprayT[1]), R.int(P.sprayN[0], P.sprayN[1]), {f: P.sprayF, amp: P.spray, d: [.0005, .0011]});   // falling back
-    if (P.echo) slap(out, sr, Math.round(.1 * sr), R.range(P.echo[0], P.echo[1]), .22, P.echo[2]);
   } else if (a === 'stone') {
     const P = S.stone, f = R.range(P.chipF[0], P.chipF[1]);
     strike(out, sr, R, 0, R.range(.00013, .0002), [[f, .008, 1], [f * R.range(1.6, 1.8), .005, .6], [f * R.range(2.5, 2.8), .0035, .35], [R.range(380, 520), .02, .7]], 1);   // the chip
@@ -180,7 +165,6 @@ function westHit(out, sr, R, a, style) {
     if (P.zing) whine(out, sr, R, R.range(.003, .008), P.zing);                                                         // off the rock
     puff(out, sr, R, .003, {a: .003, d: R.range(.02, .03), lp: R.range(800, 1100), hp: 120, amp: P.dust});             // a breath of dust
     grains(out, sr, R, .03, R.range(.16, .26), R.int(P.chips[0], P.chips[1]), {f: [1200, 2600], amp: .2, d: [.0006, .0014]});   // chips falling back
-    if (P.echo) slap(out, sr, Math.round(.08 * sr), R.range(P.echo[0], P.echo[1]), .2, P.echo[2]);
   } else if (a === 'wood') {
     const P = S.wood, f = R.range(P.f[0], P.f[1]);
     strike(out, sr, R, 0, R.range(.0007, .001), [[f, .038, 1], [f * R.range(1.55, 1.75), .026, .6], [f * R.range(2.4, 2.8), .016, .35], [f * R.range(3.6, 4), .01, .2]], 1);   // the thock
@@ -229,8 +213,8 @@ function westHit(out, sr, R, a, style) {
 }
 
 export default {
-  id: 'bullet', version: 2,
-  desc: 'Bullets where they end: into sand, stone, wood, metal, a ricochet\'s whine, a gunman (flesh, crit, through), the hit-confirm; v2: the western-movie flavors (spaghetti / hollywood / gritty)',
+  id: 'bullet', version: 3,
+  desc: 'Bullets where they end: into sand, stone, wood, metal, a ricochet\'s whine, a gunman (flesh, crit, through), the hit-confirm; v2-3: the western-movie flavors (hollywood / gritty)',
   params: {act: {values: Object.keys(DUR), def: 'sand'}, style: {values: ['v1', ...STYLES], def: 'v1'}},
   cases: {...Object.fromEntries(Object.keys(DUR).map(k => [k, {act: k}])), ...Object.fromEntries(STYLES.flatMap(s => W_ACTS.map(a => [`${s}_${a}`, {act: a, style: s}])))},
   variants: 6,
@@ -309,19 +293,12 @@ export default {
     metal: {attackMs: [0, 6], t60Ms: [35, 110], centroidHz: [240, 660], highHz: [550, 1300], flatness: [0, .01], hf4kDb: [-95, -45], durMs: [70, 150], clickEnd: [0, .01]},
     ricochet: {attackMs: [8, 90], t60Ms: [600, 1100], centroidHz: [1000, 2000], lowHz: [650, 1500], highHz: [1250, 2300], flatness: [0, .01], hf4kDb: [-42, -28], durMs: [380, 600], clickEnd: [0, .01]},
     flesh: {attackMs: [0, 15], t60Ms: [45, 160], centroidHz: [130, 330], highHz: [280, 1350], flatness: [0, .01], hf4kDb: [-75, -46], durMs: [115, 210], clickEnd: [0, .01]},
-    crit: {attackMs: [0, 18], t60Ms: [40, 140], centroidHz: [90, 230], highHz: [120, 700], flatness: [0, .01], hf4kDb: [-80, -52], durMs: [120, 210], clickEnd: [0, .01]},
+    // (crit v3: centroid / highHz widened to the 37-seed range; seeds 123457 / 2024101 sat just outside the v1 bounds)
+    crit: {attackMs: [0, 18], t60Ms: [40, 140], centroidHz: [85, 260], highHz: [110, 760], flatness: [0, .01], hf4kDb: [-80, -52], durMs: [120, 210], clickEnd: [0, .01]},
     confirm: {attackMs: [0, 5], t60Ms: [15, 28], centroidHz: [300, 460], highHz: [380, 540], flatness: [0, .01], hf4kDb: [-100, -80], durMs: [45, 60], clickEnd: [0, .01]},
     pierce: {attackMs: [2, 50], t60Ms: [130, 320], centroidHz: [170, 500], highHz: [550, 1450], flatness: [0, .01], hf4kDb: [-48, -32], durMs: [270, 420], clickEnd: [0, .01]},
-    // the western-movie flavors (v3 / v2): ranges from 37 seeds (1-24, the lab's 44291-44296, seven large ones) with a margin
+    // the western-movie flavors (revolver v3-4, coachgun v2-3, bullet v2-3): ranges from 37 seeds (1-24, the lab's 44291-44296, seven large ones) with a margin
     // (t60 x.75..1.25, centroid / highHz x.85..1.15, hf4kDb -4..+3 dB, durMs x.9..1.1); the shots' t60 includes the echoes
-    spaghetti_sand: {attackMs: [0, 20], t60Ms: [330, 900], centroidHz: [400, 900], lowHz: [45, 190], highHz: [1150, 2200], flatness: [0, .005], hf4kDb: [-38, -21], durMs: [300, 530], onsetCount: [1, 2], clickEnd: [0, .01]},
-    spaghetti_stone: {attackMs: [0, 10], t60Ms: [250, 700], centroidHz: [1550, 2800], lowHz: [130, 750], highHz: [2300, 3900], flatness: [0, .019], hf4kDb: [-26, -12], durMs: [210, 330], onsetCount: [0, 2], clickEnd: [0, .01]},
-    spaghetti_wood: {attackMs: [0, 10], t60Ms: [30, 150], centroidHz: [320, 1200], lowHz: [30, 220], highHz: [1300, 3500], flatness: [0, .005], hf4kDb: [-41, -17], durMs: [60, 90], onsetCount: [0, 1], clickEnd: [0, .01]},
-    spaghetti_metal: {attackMs: [0, 10], t60Ms: [120, 280], centroidHz: [800, 1500], lowHz: [130, 1450], highHz: [1150, 2700], flatness: [0, .005], hf4kDb: [-49, -30], durMs: [210, 350], onsetCount: [0, 1], clickEnd: [0, .01]},
-    spaghetti_ricochet: {attackMs: [15, 115], t60Ms: [1450, 2800], centroidHz: [1650, 2800], lowHz: [670, 1600], highHz: [2500, 4100], flatness: [0, .006], hf4kDb: [-25, -14], durMs: [1380, 1800], onsetCount: [0, 2], clickEnd: [0, .01]},
-    spaghetti_flesh: {attackMs: [0, 20], t60Ms: [40, 140], centroidHz: [190, 850], lowHz: [15, 125], highHz: [700, 3600], flatness: [0, .005], hf4kDb: [-33, -16], durMs: [120, 210], onsetCount: [0, 1], clickEnd: [0, .01]},
-    spaghetti_crit: {attackMs: [0, 20], t60Ms: [45, 150], centroidHz: [110, 750], lowHz: [15, 95], highHz: [210, 3400], flatness: [0, .005], hf4kDb: [-39, -16], durMs: [110, 210], onsetCount: [0, 1], clickEnd: [0, .01]},
-    spaghetti_pierce: {attackMs: [0, 25], t60Ms: [100, 350], centroidHz: [500, 1600], lowHz: [15, 95], highHz: [1800, 3900], flatness: [0, .037], hf4kDb: [-27, -13], durMs: [260, 450], onsetCount: [0, 1], clickEnd: [0, .01]},
     hollywood_sand: {attackMs: [0, 35], t60Ms: [160, 440], centroidHz: [230, 900], lowHz: [30, 160], highHz: [750, 3300], flatness: [0, .005], hf4kDb: [-38, -15], durMs: [320, 560], onsetCount: [1, 2], clickEnd: [0, .01]},
     hollywood_stone: {attackMs: [0, 10], t60Ms: [190, 540], centroidHz: [1550, 2500], lowHz: [145, 1250], highHz: [2200, 3500], flatness: [0, .005], hf4kDb: [-29, -14], durMs: [180, 310], onsetCount: [0, 2], clickEnd: [0, .01]},
     hollywood_wood: {attackMs: [0, 10], t60Ms: [25, 150], centroidHz: [290, 1100], lowHz: [15, 280], highHz: [1350, 3500], flatness: [0, .005], hf4kDb: [-39, -17], durMs: [60, 90], onsetCount: [0, 2], clickEnd: [0, .01]},

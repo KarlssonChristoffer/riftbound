@@ -136,19 +136,18 @@ const SHOT = {tp: .0028, crackD: .006, crackHP: 260, crackLP: 2800, crack: .75, 
 const DUR = {fire: 1.9, break: .4, eject: .75, load: .3, close: .45, cock: .2, dry: .15};
 
 // ======================================================================================================================
-// v2: THE WESTERN-MOVIE FLAVORS (with recipes/revolver.js v3: the user wanted the guns "more 'western movie'"); the v1
-// cases above stay as they were. The flavored barrel is v1's parts (pulse, chuff, rough body, thump) voiced bigger, then
+// v2: THE WESTERN-MOVIE FLAVORS (with recipes/revolver.js v3: the user wanted the guns "more 'western movie'"); v3: the
+// spaghetti flavor removed (the user: "won't be used"), hollywood and gritty kept. The v1 cases above stay as they were
+// (the reload still plays them). The flavored barrel is v1's parts (pulse, chuff, rough body, thump) voiced bigger, then
 // the place, baked in, as the revolver's flavors do it:
-//   spaghetti  a cannon in the canyon: a broad crack, a huge thump, a hard slapback, five discrete echoes off far walls
-//              (each later, darker, more smeared) over a long rolling roll (RT60 ~3.3 s)
 //   hollywood  the stock 12-gauge BLAM: the core driven hard (fat, compressed), band-limited like an optical track, the
 //              echo chamber (dense early reflections, a smooth RT60 ~2.1 s tail) and one canyon slap
 //   gritty     a deep, heavy blast: the longest thump, a dense set of early reflections off the walls, a dark grounded
 //              tail that rolls like far thunder (RT60 ~2.3 s), one faint far slap
 // The cock (the aim's telegraph): both hammers' heavier double click (half cock, a beat, full cock on the lock plate);
-// spaghetti's close-up rings in the canyon, hollywood's in a small room, gritty's is dry and heavy.
+// hollywood's rings in a small room, gritty's is dry and heavy.
 // Echoes and tails are mixed by ENERGY against the barrel's core above 150 Hz (g = amplitude ratio of the RMS totals).
-const STYLES = ['spaghetti', 'hollywood', 'gritty'];
+const STYLES = ['hollywood', 'gritty'];
 const energy = b => { let e = 0; for (let i = 0; i < b.length; i++) e += b[i] * b[i]; return e; };
 // a discrete echo of `src` (energy en) at sample i0: smeared by sparse taps over sm s (a rough, far wall), darkened by two
 // low-passes at lp, thinned below hp; energy g^2 of the source's
@@ -229,15 +228,6 @@ function wcock(out, sr, R, P) {
 // the flavors (as SHOT above, plus crackN the crackle's share, core (s) the buffer the echoes copy, drive, er {n, t, g, lp},
 // echoes [[t s, g, lp Hz, smear s]], tail, out {hp, lp, shelf [dB, Hz]}, sat, dur (s))
 const WEST = {
-  spaghetti: {
-    fire: {tp: .0022, crackD: .008, crackN: .6, crackHP: 450, crackLP: 5600, crack: 1.1, chuffA: .003, chuffD: .05, chuffF: 520, chuff: .85,
-      bodyD: .065, bodyLP: 2200, body: .85, rough: .55, roughF: 55, thumpF: 50, thumpT: .28, thumpTc: .0085, thump: 1.8, core: .7,
-      echoes: [[.15, .36, 2600, .01], [.42, .27, 1900, .02], [.72, .19, 1500, .03], [1.05, .12, 1150, .045], [1.45, .075, 900, .06], [1.95, .045, 700, .08]],
-      tail: {at: .04, rt: 3.3, a: .07, lp0: 2600, lp1: 520, roll: .4, rollF: 2.5, hp: 70, g: .36},
-      out: {hp: 30, shelf: [-3, 6000]}, sat: 1.9, dur: 5},
-    cock: {gap: [.07, .1], f1: [1600, 1900], f2: [1800, 2200], t60: .009, tc: .0003, body: .45, knock: [480, 620], knockA: .6,
-      room: {echoes: [[.13, .26, 2200, .01], [.36, .11, 1500, .025]], tail: {rt: .5, a: .008, lp0: 3000, lp1: 1000, hp: 250, g: .26}}, out: {hp: 60, shelf: [-4, 6000]}, sat: 1.2, dur: .75},
-  },
   hollywood: {
     fire: {tp: .0024, crackD: .006, crackN: .5, crackHP: 350, crackLP: 4400, crack: .8, chuffA: .0035, chuffD: .05, chuffF: 560, chuff: 1,
       bodyD: .07, bodyLP: 2000, body: 1, rough: .4, roughF: 55, thumpF: 60, thumpT: .18, thumpTc: .008, thump: 1.2, core: .6, drive: 2.8,
@@ -261,7 +251,7 @@ const WEST = {
 };
 
 export default {
-  id: 'coachgun', version: 2, desc: 'The bruiser\'s double-barrelled coach gun: a black-powder 12-gauge boom with a rolling desert tail, the break, the shells out, a shell in, the close, the hammer; v2: the western-movie flavors (spaghetti / hollywood / gritty barrels and cocks)',
+  id: 'coachgun', version: 3, desc: 'The bruiser\'s double-barrelled coach gun: a black-powder 12-gauge boom with a rolling desert tail, the break, the shells out, a shell in, the close, the hammer; v2-3: the western-movie flavors (hollywood / gritty barrels and cocks)',
   params: {act: {values: ['fire', 'break', 'eject', 'load', 'close', 'cock', 'dry'], def: 'fire'}, style: {values: ['v1', ...STYLES], def: 'v1'}},
   cases: {fire: {act: 'fire'}, break: {act: 'break'}, eject: {act: 'eject'}, load: {act: 'load'}, close: {act: 'close'}, cock: {act: 'cock'}, dry: {act: 'dry'},
     ...Object.fromEntries(STYLES.flatMap(s => ['fire', 'cock'].map(a => [`${s}_${a}`, {act: a, style: s}])))},
@@ -326,10 +316,8 @@ export default {
     close: {attackMs: [5, 95], t60Ms: [25, 90], centroidHz: [220, 420], highHz: [450, 1100], flatness: [0, .01], hf4kDb: [-60, -30], durMs: [120, 185], onsetCount: [1, 2], clickEnd: [0, .01]},
     cock: {t60Ms: [8, 35], centroidHz: [600, 1200], highHz: [1400, 2500], flatness: [0, .01], hf4kDb: [-50, -26], durMs: [80, 130], onsetCount: [1, 2], clickEnd: [0, .01]},
     dry: {attackMs: [3, 20], t60Ms: [12, 50], centroidHz: [340, 650], highHz: [500, 1250], flatness: [0, .01], hf4kDb: [-60, -35], durMs: [60, 100], clickEnd: [0, .01]},
-    // the western-movie flavors (v3 / v2): ranges from 37 seeds (1-24, the lab's 44291-44296, seven large ones) with a margin
+    // the western-movie flavors (revolver v3-4, coachgun v2-3, bullet v2-3): ranges from 37 seeds (1-24, the lab's 44291-44296, seven large ones) with a margin
     // (t60 x.75..1.25, centroid / highHz x.85..1.15, hf4kDb -4..+3 dB, durMs x.9..1.1); the shots' t60 includes the echoes
-    spaghetti_fire: {attackMs: [0, 55], t60Ms: [2600, 5800], centroidHz: [200, 520], lowHz: [15, 65], highHz: [850, 1900], flatness: [0, .005], hf4kDb: [-37, -26], durMs: [3050, 4690], onsetCount: [0, 4], clickEnd: [0, .01]},
-    spaghetti_cock: {attackMs: [40, 145], t60Ms: [950, 1900], centroidHz: [700, 1400], lowHz: [80, 220], highHz: [1550, 2900], flatness: [0, .005], hf4kDb: [-33, -22], durMs: [500, 710], onsetCount: [2, 4], clickEnd: [0, .01]},
     hollywood_fire: {attackMs: [0, 65], t60Ms: [1200, 2350], centroidHz: [500, 900], lowHz: [30, 190], highHz: [1400, 2400], flatness: [0, .005], hf4kDb: [-31, -21], durMs: [2110, 3060], onsetCount: [0, 2], clickEnd: [0, .01]},
     hollywood_cock: {attackMs: [30, 110], t60Ms: [110, 280], centroidHz: [700, 1450], lowHz: [80, 220], highHz: [1650, 2900], flatness: [0, .005], hf4kDb: [-29, -19], durMs: [320, 450], onsetCount: [1, 2], clickEnd: [0, .01]},
     gritty_fire: {attackMs: [0, 55], t60Ms: [1450, 3000], centroidHz: [170, 440], lowHz: [15, 30], highHz: [800, 1550], flatness: [0, .005], hf4kDb: [-41, -27], durMs: [2330, 3510], onsetCount: [0, 3], clickEnd: [0, .01]},
