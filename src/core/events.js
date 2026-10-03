@@ -77,6 +77,10 @@ export const EVENTS = {
   // the shrines experiment (features/shrines.js, ?shrines=1); its sounds ride on chest.open / combat.coin / combat.loot / combat.trap /
   // player.dryfire, emitted with it
   'shrine.use':         ['features/shrines.js',   'x, y, kind (chance | combat | blood | mountain | exchange | trader), what (pay | win | lose | bleed | call | clear | wake | yield | offer | trade | buy | spent), n (gold, health or foes), who (its prop)', 'shrines (its particles)'],
+  // stage omens (features/omens.js: an omen turns the world's weather, wind and light into a stage's rules)
+  'omen.begin':         ['features/omens.js',     'id (content/omens.js), stage (the run\'s stage index, -1 in the sandbox)', '(none yet)'],
+  'omen.end':           ['features/omens.js',     'id', '(none yet)'],
+  'omen.strike':        ['features/omens/storm.js', 'x, y, r (m: what it hurts), h (where the bolt ends: a rod\'s top), rod (what drew it: arrow | lead | a prop kind | \'\')', '(none yet)'],
 };
 
 const warned = new Set();

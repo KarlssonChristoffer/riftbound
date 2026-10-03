@@ -9,10 +9,12 @@
 // PENETRATION: a bullet carries its weapon's pen {through, dmg, speed} (content/weapons.js); when the hit chain says
 // 'pierce' (combat: a body, while it has `through` left) it goes on through: a.pn bodies passed, a.penK the share of its
 // damage left (combat multiplies its hits by it), slower by pen.speed; 'bullet.pierce' at the point it leaves the body.
+// WIND: a run rule may push what flies (features/omens.js, a gale): host.mods 'proj.windX' / 'proj.windY' (m/s^2, world x / y,
+// base 0) accelerate every arrow in flight; a bullet feels 'proj.windBullet' x of that (base 1). None: nothing changes.
 // OWNS: arrows (a bullet's pn / penK too), pops, dust, the hit count. READS: the world (trees, elevation, stream), the
-// entities (near: what an arrow hits or sticks in), features' arrow hooks.
+// entities (near: what an arrow hits or sticks in), features' arrow hooks, the mods' wind notes.
 // EMITS: arrow.hit, arrow.splash, bullet.impact, bullet.pierce (core/events.js). BUDGET: part of sim.
-//   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH})
+//   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH, mods})
 //   proj.spawn(o) | proj.step(dt) | proj.draw(host) | proj.arrows / dust / hits
 //   proj.lerpBegin(alpha) / lerpEnd(): drawn between sim steps (an arrow's lx / ly / lh: where it was at the step's start)
 import {elev, inStream, PROP_TOP} from '../world/world.js';
@@ -26,9 +28,11 @@ const DUST = ['#b8a888', '#8a7a60', '#5e5444'].map(rgbOf), POP = rgbOf('#f2d27a'
 const REACH = 2;
 const SUB = .3, REACH_B = .6;   // a bullet's sub-step (m) and how far round each to look (any hitR <= .55)
 
-export function createProjectiles({world: worldOf, ents: entsOf, features, events, opt: optOf, toWorld, PPM, PPMH}) {
+export function createProjectiles({world: worldOf, ents: entsOf, features, events, opt: optOf, toWorld, PPM, PPMH, mods = null}) {
   const arrows = [], pops = [], dust = [], nearH = [], nearS = [];
-  let hits = 0;
+  let hits = 0, WX = 0, WY = 0, WB = 1;   // the wind's push (m/s^2) and a bullet's share of it: the mods' notes, on change
+  const applyWind = () => { WX = mods.value('proj.windX', 0); WY = mods.value('proj.windY', 0); WB = mods.value('proj.windBullet', 1); };
+  if (mods) { mods.watch(applyWind); applyWind(); }
   function spawn(o) { const a = {life: 1.6, vh: 0, kind: 'arrow', ...o}; for (const f of features) f.arrow?.(a); arrows.push(a); }
   function step(dt) {
     const world = worldOf(), ents = entsOf();
@@ -36,6 +40,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
       a.lx = a.x; a.ly = a.y; a.lh = a.h;
       if (a.stuck) { a.life -= dt; continue; }
       if (a.kind === 'bullet') { stepBullet(a, dt, world, ents); continue; }
+      if (WX || WY) { a.vx += WX * dt; a.vy += WY * dt; }
       a.x += a.vx * dt; a.y += a.vy * dt; a.h += a.vh * dt; a.vh -= .9 * dt; a.life -= dt;
       (a.trail ??= []).push([a.x, a.y, a.h]); if (a.trail.length > 7) a.trail.shift();
       for (const p of ents.near(a.x, a.y, REACH, nearH)) {
@@ -64,6 +69,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
   // a bullet's step: the segment from where it was (the first step: TUNE.back m behind the muzzle) to where it gets
   function stepBullet(a, dt, world, ents) {
     const back = a.back || 0; a.back = 0;
+    if (WX || WY) { a.vx += WX * WB * dt; a.vy += WY * WB * dt; }
     const ax = a.x, ay = a.y, ah = a.h;   // (a hit moves it to the hit point: one it goes through mustn't jump a step on)
     const dx = a.vx * dt, dy = a.vy * dt, dh = a.vh * dt, len = hypot3(dx, dy, dh) || 1;
     const x0 = a.x - dx / len * back, y0 = a.y - dy / len * back, h0 = a.h - dh / len * back;

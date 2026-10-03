@@ -23,6 +23,8 @@
 //
 // createEnv({moods, biome, Q}) -> env. env.step(dt) once per sim step. Dev: setHour / setPart / setSeason / setWeather /
 // setDayMinutes; URL ?hour= ?season= ?weather= ?daymin= (0 = the clock stands still); ?time=day|dusk|night still works.
+// Other systems: setWeather(w, ease) (an omen's storm rolls in over a few s), setGrade(source, g) / clearGrade(source): a
+// colour grade over mood() (features/omens.js: a blood moon, an eclipse; GRADES below).
 import {flags} from '../core/flags.js';
 import {clamp, smooth, lerp} from '../core/mathx.js';
 import {hex01 as hex} from '../core/color.js';
@@ -74,6 +76,7 @@ export const WEATHER = {
   haze:     {cloud: .2,  fog: .4,  wind: .8},
   ash:      {cloud: .5,  fog: .3,  wind: 1.3},
   void:     {cloud: 0,   fog: 0,   wind: 1},
+  gale:     {cloud: .45, fog: .05, wind: 3},   // (no climate draws it: an omen locks it, features/omens.js)
 };
 const CH = ['cloud', 'rain', 'snow', 'fog', 'storm', 'wind'];
 const GREY = [.94, .96, 1], HAZE = [.55, .6, .7];   // clouds pull the light toward a cool grey; the haze they add
@@ -165,7 +168,8 @@ export function createEnv({moods, biome, Q = flags}) {
     for (const k in C) { if (!TUNE.precip && WEATHER[k].precip) continue; if ((r -= C[k]) <= 0) return k; }
     return 'fair';
   }
-  function setSpell(w) { if (w !== E.weather) E.ver.weather++; E.weather = w; spellLeft = lerp(TUNE.spell[0], TUNE.spell[1], R()); }
+  let easeS = 0;   // s: setWeather's own ease for the spell it set (0: TUNE.ease)
+  function setSpell(w) { if (w !== E.weather) E.ver.weather++; E.weather = w; spellLeft = lerp(TUNE.spell[0], TUNE.spell[1], R()); easeS = 0; }
   function stepWeather(dt, dh) {
     const b = biome();
     if (b !== lastBiome) {   // a new biome: its climate takes over at once (no snow carried into the ember wastes)
@@ -174,7 +178,7 @@ export function createEnv({moods, biome, Q = flags}) {
     }
     if (E.weatherLock) { if (E.weather !== E.weatherLock) { E.weather = E.weatherLock; E.ver.weather++; } }
     else if ((spellLeft -= dh) <= 0 || (!TUNE.precip && WEATHER[E.weather]?.precip)) setSpell(pick());
-    const W = WEATHER[E.weather] || WEATHER.fair, k = 1 - Math.exp(-dt / TUNE.ease);
+    const W = WEATHER[E.weather] || WEATHER.fair, k = 1 - Math.exp(-dt / (easeS || TUNE.ease));
     for (const c of CH) E.sky[c] += ((W[c] ?? (c === 'wind' ? 1 : 0)) - E.sky[c]) * k;
     E.windLevel = E.sky.wind;
   }
@@ -216,8 +220,30 @@ export function createEnv({moods, biome, Q = flags}) {
     o.fog[3] = Math.min(.5, o.fog[3] + .05 * c + .1 * S.rain + .16 * S.fog + .08 * S.snow);
     if (dust) o.fog[3] = Math.min(.5, o.fog[3] + dust);
     o.glow *= 1 + .3 * c;
+    for (let j = 0; j < grades.length; j++) grade(o, grades[j].g);   // another system's grade on top (setGrade, below)
     return o;
   };
+  // GRADES: another system's colour grade over the mood (features/omens.js: a blood moon, an eclipse), at its own k (0..1,
+  // eased by its owner): amb / sun (the sun's or moon's colour) / lift / fill: [r, g, b] multipliers; sunK, shadow (the
+  // shadows' opacity), glow: multipliers; fog: [r, g, b, a] added. Presentation only: nothing in the sim reads mood().
+  //   env.setGrade(source, g) (g: the caller's object, read live) / env.clearGrade(source)
+  const grades = [], mulK = (v, m, k) => v * (1 + (m - 1) * k);
+  function grade(o, g) {
+    const k = clamp(g.k ?? 1, 0, 1); if (k <= 0) return;
+    for (let j = 0; j < 3; j++) {
+      if (g.amb) o.amb[j] = mulK(o.amb[j], g.amb[j], k);
+      if (g.sun) o.sun.c[j] = mulK(o.sun.c[j], g.sun[j], k);
+      if (g.lift) o.lift[j] = mulK(o.lift[j], g.lift[j], k);
+      if (g.fill) o.fill[j] = mulK(o.fill[j], g.fill[j], k);
+      if (g.fog) o.fog[j] += g.fog[j] * k;
+    }
+    if (g.fog) o.fog[3] = Math.min(.7, o.fog[3] + g.fog[3] * k);
+    if (g.sunK !== undefined) o.sun.k = mulK(o.sun.k, g.sunK, k);
+    if (g.shadow !== undefined) o.shadow.a = mulK(o.shadow.a, g.shadow, k);
+    if (g.glow !== undefined) o.glow = mulK(o.glow, g.glow, k);
+  }
+  E.setGrade = (src, g) => { const i = grades.findIndex(e => e.src === src); if (i >= 0) grades[i].g = g; else grades.push({src, g}); };
+  E.clearGrade = src => { const i = grades.findIndex(e => e.src === src); if (i >= 0) grades.splice(i, 1); };
   // ---- seasons: the ruins' leaf ramp (rgb 0..1 x 4), blended across a change; null where the biome has no seasons
   const leafOut = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
   let leafKey = -1;
@@ -236,7 +262,8 @@ export function createEnv({moods, biome, Q = flags}) {
   E.setPart = p => { if (PART_H[p] !== undefined) { const day0 = Math.floor(hours / 24) * 24, h = PART_H[p]; hours = day0 + h + (h < E.hour ? 24 : 0); syncClock(); } };
   E.nextPart = () => E.setPart(PARTS[(PARTS.indexOf(E.part) + 1) % 4]);
   E.setSeason = s => { E.seasonLock = SEASONS.includes(s) ? s : null; syncClock(); };
-  E.setWeather = w => { E.weatherLock = WEATHER[w] ? w : null; if (!E.weatherLock) setSpell(pick()); };
+  // (ease: s, this spell's channels ease toward it faster or slower than TUNE.ease: an omen's storm rolls in over a few s)
+  E.setWeather = (w, ease = 0) => { E.weatherLock = WEATHER[w] ? w : null; if (!E.weatherLock) setSpell(pick()); easeS = ease; };
   E.setDayMinutes = m => { if (m <= 0) E.frozen = true; else { E.frozen = false; TUNE.dayMinutes = m; } };
   E.clock = () => { const h = Math.floor(E.hour), m = Math.floor((E.hour - h) * 60); return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`; };
   E.label = () => `${E.clock()} ${E.part} · day ${E.day + 1}${E.seasonal ? ' · ' + E.season + (E.seasonK > .02 ? ' -> ' + E.seasonNext : '') : ''} · ${E.weather}`;

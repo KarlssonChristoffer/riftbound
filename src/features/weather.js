@@ -174,6 +174,9 @@ export async function create(host) {
   };
   const LIGHTS = [light], NONE = [];
   F.lights = () => light.intensity > 0 ? LIGHTS : NONE;
+  // another system's lightning (features/omens/storm.js: a storm omen's strike): the scene flashes in a bolt's pulses, at
+  // k (0..1, like a strike's own .6..1). The flash is this feature's (G.setFlash every frame): one writer
+  F.flash = k => { flashT = 0; flashK = k; };
   F.settings = () => [{label: 'Weather fx', options: ['on', 'off'], get: () => F.fx ? 'on' : 'off', set: v => { F.fx = v === 'on'; }}];
   F.hud = () => { const E = host.env; return E && (rn || sn || F.stats.bolts) ? `rain ${rn} · snow ${sn} · splash ${pn} · bolts ${F.stats.bolts}` : ''; };
   return F;

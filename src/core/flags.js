@@ -16,6 +16,8 @@ export const FLAG_DOCS = {
   world:     'big: the grown world, 162 x 90 m round the Proving Grounds (layout.js WORLD; the world plan: open land in step 3)',
   yaw:       'the camera\'s starting yaw (deg)',
   zoom:      '2: start zoomed in',
+  omens:     '1: stage omens in a run (features/omens.js: the weather, wind and light turned into a stage\'s rules); 0: off (the Dev toggle remembers it)',
+  omen:      'storm | gale | bloodmoon | riftfog | eclipse | golden: that omen on every run stage (and in the sandbox from the start)',
   // ---- the player
   set:       'basic | sim | body | gunslinger | outlaw: the loadout (baked cloak / runtime cloth / bare body; the cowboys with their revolvers)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
