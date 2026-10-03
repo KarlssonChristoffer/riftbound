@@ -417,7 +417,10 @@ export function createCore(host) {
         if (!a.done) { a.done = true; explode(a.x, a.y, host.elev(a.x, a.y), a.explode.r, a.explode.dmg, false); }
         return 'stop';
       }
-      damage(p, a.dmg ?? 10, {canCrit: true, dir});
+      damage(p, (a.dmg ?? 10) * (a.penK ?? 1), {canCrit: true, dir});   // (penK: a bullet's share left after the bodies it went through)
+      // a bullet goes through a body (a gunman, a brute) while its weapon's pen.through lasts (sim/projectiles.js does the
+      // rest); walls, props and dummies stop it
+      if (a.kind === 'bullet' && a.pen && (a.pn || 0) < a.pen.through && (p.hunter || p.sparring)) return 'pierce';
       if (a.pierce) {
         a.n = (a.n || 0) + 1;
         if (a.n < T.pierceN) {

@@ -147,7 +147,7 @@ export function createGun(PL, I) {
     let dmg = mv('weapon.dmg', w.dmg) * (how === 'fan' ? w.fanDmg : 1);
     if (S.ammo === 1) dmg *= 1 + mv('weapon.last', 0);
     if (S.quick) { dmg *= 1 + mv('weapon.quick', 0); S.quick = false; }
-    H.onShoot({x: m.x, y: m.y, h: m.h, vx: fx * v, vy: fy * v, vh, life: w.range / v, dmg: Math.round(dmg), kind: 'bullet', gun: w.id, push: w.push, back: TUNE.back});
+    H.onShoot({x: m.x, y: m.y, h: m.h, vx: fx * v, vy: fy * v, vh, life: w.range / v, dmg: Math.round(dmg), kind: 'bullet', gun: w.id, push: w.push, back: TUNE.back, pen: w.pen});
     S.ammo--; PL.shots++; S.shotN++; S.idle = 0; S.lastHow = how; S.lastShotAt = S.clock;
     S.cool = (how === 'fan' ? 0 : w.gap) * mv('weapon.gap', 1);
     ev({type: 'player.shoot', x: m.x, y: m.y, h: m.h, z: P.z, vx: fx, vy: fy, gun: w.id, fan: how === 'fan', hip: how === 'hip', left: S.ammo});

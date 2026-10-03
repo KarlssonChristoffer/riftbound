@@ -6,9 +6,12 @@
 // whole path in sub-steps of at most SUB m (no tunnelling), stops at the first thing it meets and is gone at once (no
 // sticking, no onArrowStuck): 'bullet.impact' says where and what. Its hits go through the same onArrowHit chain and
 // 'arrow.hit' (kind 'bullet'; the push scales its velocity there: a bullet shoves like an arrow, not like 150 m/s).
-// OWNS: arrows, pops, dust, the hit count. READS: the world (trees, elevation, stream), the entities (near: what an arrow
-// hits or sticks in), features' arrow hooks.
-// EMITS: arrow.hit, arrow.splash, bullet.impact (core/events.js). BUDGET: part of sim.
+// PENETRATION: a bullet carries its weapon's pen {through, dmg, speed} (content/weapons.js); when the hit chain says
+// 'pierce' (combat: a body, while it has `through` left) it goes on through: a.pn bodies passed, a.penK the share of its
+// damage left (combat multiplies its hits by it), slower by pen.speed; 'bullet.pierce' at the point it leaves the body.
+// OWNS: arrows (a bullet's pn / penK too), pops, dust, the hit count. READS: the world (trees, elevation, stream), the
+// entities (near: what an arrow hits or sticks in), features' arrow hooks.
+// EMITS: arrow.hit, arrow.splash, bullet.impact, bullet.pierce (core/events.js). BUDGET: part of sim.
 //   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH})
 //   proj.spawn(o) | proj.step(dt) | proj.draw(host) | proj.arrows / dust / hits
 //   proj.lerpBegin(alpha) / lerpEnd(): drawn between sim steps (an arrow's lx / ly / lh: where it was at the step's start)
@@ -61,6 +64,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
   // a bullet's step: the segment from where it was (the first step: TUNE.back m behind the muzzle) to where it gets
   function stepBullet(a, dt, world, ents) {
     const back = a.back || 0; a.back = 0;
+    const ax = a.x, ay = a.y, ah = a.h;   // (a hit moves it to the hit point: one it goes through mustn't jump a step on)
     const dx = a.vx * dt, dy = a.vy * dt, dh = a.vh * dt, len = hypot3(dx, dy, dh) || 1;
     const x0 = a.x - dx / len * back, y0 = a.y - dy / len * back, h0 = a.h - dh / len * back;
     const ex = a.x + dx - x0, ey = a.y + dy - y0, eh = a.h + dh - h0, n = Math.max(1, Math.ceil((len + back) / SUB));
@@ -76,7 +80,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
           const k = a.push ?? 1;
           events.push({type: 'arrow.hit', x: p.x, y: p.y, vx: a.vx * k, vy: a.vy * k, prop: p, kind: 'bullet'});
           let r; for (const f of features) { r = f.onArrowHit?.(a, p); if (r) break; }
-          if (r === 'pierce') (a.hitSet ??= new Set()).add(p); else return endBullet(a, 'hit', x, y, h);
+          if (r === 'pierce') { (a.hitSet ??= new Set()).add(p); if (a.pen) pierce(a, p, x, y, h); } else return endBullet(a, 'hit', x, y, h);
         }
       }
       const ground = elev(x, y);
@@ -87,8 +91,17 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
       if (h <= ground) return endBullet(a, 'ground', x, y, ground);
       px = x; py = y; ph = h;
     }
-    a.x += dx; a.y += dy; a.h += dh;
+    a.x = ax + dx; a.y = ay + dy; a.h = ah + dh;
     if (a.life <= 0) endBullet(a, 'air', a.x, a.y, a.h);
+  }
+  // through a body (the hit chain said 'pierce'): weaker and slower from here (this step's path stays as it was), and
+  // 'bullet.pierce' where its line leaves the body's hit circle (the exit wound)
+  function pierce(a, p, x, y, h) {
+    const P = a.pen; a.pn = (a.pn || 0) + 1; a.penK = (a.penK ?? 1) * P.dmg;
+    const l = hypot2(a.vx, a.vy) || 1, ux = a.vx / l, uy = a.vy / l, r = p.hitR ?? .45;
+    const cx = p.x - x, cy = p.y - y, along = cx * ux + cy * uy, out = Math.max(0, along + Math.sqrt(Math.max(0, r * r - (cx * cx + cy * cy - along * along))));
+    events.push({type: 'bullet.pierce', x: x + ux * out, y: y + uy * out, h: h + a.vh / l * out, vx: ux, vy: uy, who: p, gun: a.gun});
+    a.vx *= P.speed; a.vy *= P.speed; a.vh *= P.speed;
   }
   function solidAt(world, ents, a, x, y, h) {   // a wall, a crate, a solid prop at this point (as an arrow sticks in it)
     for (const p of ents.near(x, y, 0, nearS)) {
