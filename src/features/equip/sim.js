@@ -63,6 +63,7 @@ export function createEquipSim(host) {
   const burning = new Map();   // an enemy alight after the fire: -> {t (s left), tick}
   const wander = new Map();    // an enemy that has lost you: -> {x, y, until}
   const airWas = new Map();    // an enemy near a scarecrow: was it in the air last step (a hop that lands next to it whacks it)
+  const lured = new Map();     // an enemy the lure has: -> {why: 'crow' | 'lost', t (when it began: S.simT)} (the view's marks)
   const nearA = [], nearB = [], nearC = [], WAY = {x: 0, y: 0, stop: 0};
 
   // ---------------------------------------------------------------- helpers
@@ -384,6 +385,8 @@ export function createEquipSim(host) {
     const fast = S.smokeT > 0;
     if (fast !== S.speedOn) { S.speedOn = fast; if (fast) host.mods.set('equip.smoke', [{stat: 'player.speed', mul: G.speed}]); else host.mods.clear('equip.smoke'); }
     if (!clouds.length && wander.size) wander.clear();
+    if (lured.size && !clouds.length && !crows.length) lured.clear();
+    for (const [b] of lured) if (b.broken || b.gone) lured.delete(b);
   }
   // THE LURE (world/nav.js addLure: asked before the game's own steering, for each enemy as it picks its next hop): an
   // enemy that has lost you in the smoke wanders; one near a scarecrow goes for it
@@ -396,13 +399,16 @@ export function createEquipSim(host) {
         const a = R() * TAU, d = RR(G.wander[0], G.wander[1]);
         w.x = b.x + Math.sin(a) * d; w.y = b.y + Math.cos(a) * d; w.until = S.simT + RR(G.every[0], G.every[1]);
       }
+      mark(b, 'lost');
       WAY.x = w.x; WAY.y = w.y; WAY.stop = 0; return WAY;
     }
     let best = null, bd = GADGETS.scarecrow.lure;
     for (let i = 0; i < crows.length; i++) { const c = crows[i]; if (c.dead) continue; const d = hypot2(c.x - b.x, c.y - b.y); if (d < bd) { bd = d; best = c; } }
-    if (!best) return null;
+    if (!best) { if (lured.size) lured.delete(b); return null; }
+    mark(b, 'crow');
     WAY.x = best.x; WAY.y = best.y; WAY.stop = GADGETS.scarecrow.stop; return WAY;
   }
+  function mark(b, why) { const m = lured.get(b); if (!m) lured.set(b, {why, t: S.simT}); else if (m.why !== why) { m.why = why; m.t = S.simT; } }
 
   // ---------------------------------------------------------------- the grappling hook
   function launchHook(G, A) {
@@ -555,7 +561,7 @@ export function createEquipSim(host) {
     for (const d of drops) ents.remove(d.p);
     drops.length = 0;
     if (cache) { ents.remove(cache.p); cache = null; }
-    hook = null; burning.clear(); wander.clear(); airWas.clear();
+    hook = null; burning.clear(); wander.clear(); airWas.clear(); lured.clear();
     S.aiming = false; S.queued = 0; S.inSmoke = false; S.smokeT = 0;
     if (S.speedOn) { S.speedOn = false; host.mods.clear('equip.smoke'); }
   }
@@ -584,7 +590,7 @@ export function createEquipSim(host) {
   }
 
   return {
-    S, air, pools, traps, crows, clouds, drops, burning, get hook() { return hook; }, get cache() { return cache; },
+    S, air, pools, traps, crows, clouds, drops, burning, lured, get hook() { return hook; }, get cache() { return cache; },
     cloudR, inCloud, update, press, clearWorld,
     // on / off (the feature's switch): off clears everything it put in the world and its lure and note
     setOn(on) {

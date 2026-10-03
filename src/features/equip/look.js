@@ -29,12 +29,13 @@ const PALS = {
 const PIDX = {}, PCOL = [], PLEN = [];
 for (const [k, list] of Object.entries(PALS)) { PIDX[k] = PCOL.length; PCOL.push(list.map(hex01)); PLEN.push(list.length); }
 const EMITS = new Set([PIDX.fire, PIDX.spark, PIDX.gold]);
-const C = {rope: hex01('#c8a878'), ropeD: hex01('#8a6a44'), smoke: hex01('#c8ced8'), smokeD: hex01('#8a9098'), soot: hex01('#4a4448'),
+const BANG = ['##', '##', '##', '##', '##', '..', '##'], WHAT = ['.###.', '##.##', '...##', '..##.', '..#..', '.....', '..#..'];
+const C = {bang: hex01('#ffe066'), what: hex01('#c8d8f0'), rope: hex01('#c8a878'), ropeD: hex01('#8a6a44'), smoke: hex01('#c8ced8'), smokeD: hex01('#8a9098'), soot: hex01('#4a4448'),
   steam: hex01('#eef4f8'), white: hex01('#ffffff')};
 
 // fill styles, made once (a colour string made every frame is a new string to parse and cache each time)
 const OIL_GLOW = [], SCORCH = [];
-for (let i = 0; i < 16; i++) { OIL_GLOW.push([0, 1, 2, 3].map(f => `rgba(255,${110 + f * 12},30,${(.26 * i / 15).toFixed(3)})`)); SCORCH.push(`rgba(24,18,16,${(.5 * i / 15).toFixed(3)})`); }
+for (let i = 0; i < 16; i++) { OIL_GLOW.push([0, 1, 2, 3].map(f => `rgba(255,${110 + f * 12},30,${(.26 * i / 15).toFixed(3)})`)); SCORCH.push(`rgba(28,20,16,${(.36 * i / 15).toFixed(3)})`); }
 
 export function createLook(host, sim) {
   const V = viewRandom('equip'), VR = (a, b) => a + V() * (b - a);
@@ -108,7 +109,7 @@ export function createLook(host, sim) {
           } else {
             for (let k = 0; k < 34; k++) { const a = V() * TAU, s = VR(1, 4.5); part(e.x, e.y, e.z + .1, Math.sin(a) * s, Math.cos(a) * s * .8, VR(2.5, 7), VR(.7, 1.3), PIDX.dirt, 0, VR(1, 2.5) | 0, 14, .4); }
             for (let k = 0; k < 14; k++) { const a = k / 14 * TAU + V() * .3; puff(e.x + Math.sin(a) * .8, e.y + Math.cos(a) * .6, e.z + .2, VR(.3, .5), 1.2, VR(.2, .5), VR(1.2, 2.2), .5, 2); }
-            scorch(e.x, e.y, e.z, GADGETS.dynamite.r * .55, 14);
+            scorch(e.x, e.y, e.z, GADGETS.dynamite.r * .42, 12);
           }
           break;
         }
@@ -285,9 +286,15 @@ export function createLook(host, sim) {
       spr(art.cache, ca.spent ? 1 : 0, ca.p.x, ca.p.y, ca.p.z, false);
       if (!ca.spent) item(ca.id, ca.p.x, ca.p.y, ca.p.z + .95, ca.t, 1);
     }
-    for (const d of sim.drops) item(d.id, d.p.x, d.p.y, d.p.z + .35, d.t, Math.min(1, d.t / .3));
+    for (const d of sim.drops) item(d.id, d.p.x, d.p.y, d.p.z + .35, d.t, Math.min(1, d.t / .3), d.cd);
     // the preview while F is held
     if (S.aiming && S.slot) preview();
+    // the lure's marks over the enemies it has: '!' (the scarecrow took it), '?' (it lost you in the smoke), for a moment
+    for (const [b, m] of sim.lured) {
+      const age = S.simT - m.t; if (age > 1.1 || b.gone) continue;
+      const pop = age < .12 ? age / .12 : 1, hh = (b.z || 0) + (b.h || 0) + (b.hitH ?? 1.6) + .5 + (1 - pop) * .25;
+      glyphPx(m.why === 'crow' ? BANG : WHAT, b.x, b.y, hh, m.why === 'crow' ? C.bang : C.what, age > .9 ? (1.1 - age) / .2 : 1);
+    }
     // enemies alight: flame pixels round them
     for (const [p] of sim.burning) {
       if (p.gone) continue;
@@ -301,12 +308,17 @@ export function createLook(host, sim) {
       pt(X[i], Y[i], H[i], PCOL[p][Math.min(n - 1, (k * n) | 0)], z * (SZ[i] > 1 && k < .5 ? SZ[i] : 1), EMITS.has(p));
     }
   }
-  // a gadget floating over the cache / lying as a pickup: its sprite bobbing, a turning dashed ring, a beam of its colour
-  function item(id, x, y, h, t, k) {
+  // a pixel glyph (rows of '#') standing at (x, y, h), its middle bottom there, glowing
+  function glyphPx(rows, x, y, h, c, a) {   // (each glyph pixel 2 x 2 art px: it reads over a crowd)
+    for (let j = 0; j < rows.length; j++) { const r = rows[j]; for (let i = 0; i < r.length; i++) if (r.charCodeAt(i) === 35) { const o = (i - r.length / 2 + .5) * 2; pt(x + o * rx, y + o * ry, h + (rows.length - j) * 2 * up, c, z * 2, true, a); } }
+  }
+  // a gadget floating over the cache / lying as a pickup: its sprite bobbing, a turning dashed ring (a pickup still
+  // cooling down: only the part of it that's ready), a beam of its colour
+  function item(id, x, y, h, t, k, cd = 0) {
     const sh = id === 'scarecrow' ? art.crow : sheetOf(id), fr = id === 'scarecrow' ? 4 : 0, bob = Math.sin(t * 2.4) * .06;
     spr(sh, fr, x, y, h + bob + (id === 'scarecrow' ? -.2 : 0), id !== 'scarecrow', k);
-    const c = COL[id], n = 20, g = host.elev(x, y) + .02;
-    for (let j = 0; j < n; j++) { if ((j + ((t * 6) | 0)) % 5 >= 3) continue; const a = j / n * TAU; gpt(x, y, g, Math.cos(a) * .45, Math.sin(a) * .45, c, k); }
+    const c = COL[id], n = 20, g = host.elev(x, y) + .02, ready = cd > 0 ? 1 - cd / GADGETS[id].cd : 1;
+    for (let j = 0; j < n; j++) { if (j >= ready * n || (j + ((t * 6) | 0)) % 5 >= 3) continue; const a = -Math.PI / 2 + j / n * TAU; gpt(x, y, g, Math.cos(a) * .45, Math.sin(a) * .45, c, k); }
     for (let j = 0; j < 14; j++) { const hh = g + j * .12, a = (1 - j / 14) * .7 * k * (.75 + .25 * Math.sin(t * 3 - j * .4)); pt(x, y, hh, c, z, true, a); }
   }
   // a point on the ground at a view-frame offset (ox right, oy toward the camera, metres) from (x, y)
@@ -316,7 +328,7 @@ export function createLook(host, sim) {
     q.fillStyle = col;
     const n = Math.max(2, Math.round(ey / z));
     for (let j = -n; j <= n; j++) {
-      const v = j / n, w = Math.sqrt(Math.max(0, 1 - v * v)) * ex * (.9 + .1 * Math.sin(seed + j * 1.7)), w0 = Math.round(w / z) * z;
+      const v = j / n, w = Math.sqrt(Math.max(0, 1 - v * v)) * ex * (.93 + .05 * Math.sin(seed + j * .45) + .02 * Math.sin(seed * 1.7 + j * 1.3)), w0 = Math.round(w / z) * z;
       if (w0 <= 0) continue;
       q.fillRect(cx - w0, cy + j * z, w0 * 2, z);
     }
