@@ -305,9 +305,9 @@ def _bandolier():
 
 
 # ---------------------------------------------------------------- legs, feet -----------------------------------------
-def _trousers(seam=False):
+def _trousers(seam=False, over=False):
     """Trousers to the knee + the upper shin (tucked into the tall boots); seam: a silver line down the outer side
-    (charro trousers)."""
+    (charro trousers); over: straight legs worn OVER the boot shafts, down to the ankle (only the boot's foot shows)."""
     P, s, J, z = _ctx()
     T, t = _torso(P, s, z), .015 * s
     loft('TrouserHip', 'Hips', T['hip'][0][:3], _grow(T['hip'][1][:3], t), p=2.6)
@@ -316,8 +316,12 @@ def _trousers(seam=False):
         dl, ds = (kn - hp).normalized(), (an - kn).normalized()
         loft(f'TrouserThigh.{sd}', f'{m}UpLeg', [hp - dl * .05 * s, hp + (kn - hp) * .3, hp + (kn - hp) * .75, kn + dl * .03 * s],
              _grow([(.085 * s, .09 * s), (.08 * s, .085 * s), (.062 * s, .066 * s), (.05 * s, .052 * s)], t), side=(0, -1, 0))
-        loft(f'TrouserShin.{sd}', f'{m}Leg', [kn - ds * .035 * s, kn + (an - kn) * .45],
-             _grow([(.05 * s, .052 * s), (.056 * s, .06 * s)], t), side=(0, -1, 0))
+        if over:
+            loft(f'TrouserShin.{sd}', f'{m}Leg', [kn - ds * .035 * s, kn + (an - kn) * .45, an - ds * .025 * s],
+                 _grow([(.05 * s, .052 * s), (.07 * s, .074 * s), (.08 * s, .084 * s)], t), side=(0, -1, 0))
+        else:
+            loft(f'TrouserShin.{sd}', f'{m}Leg', [kn - ds * .035 * s, kn + (an - kn) * .45],
+                 _grow([(.05 * s, .052 * s), (.056 * s, .06 * s)], t), side=(0, -1, 0))
         if seam:
             out = Vector((sx, 0, 0))
             loft(f'TrouserSeam.{sd}', f'{m}UpLeg', [hp + (kn - hp) * .12 + out * .1 * s, hp + (kn - hp) * .5 + out * .09 * s,
@@ -694,11 +698,10 @@ def _on_legs(i, upper, clip='walk', delta=0.0):
 
 
 # aim: the arm straight out along the facing; standing twists of the upper body over the planted legs (facing = the
-# legs, as the bow's aim_tw_*), so a standing aim turns in 11.25 deg steps before the feet re-plant
+# legs, as the bow's aim_tw_*), so a standing aim turns in 11.25 deg steps before the feet re-plant (_gun_aim_set)
 POSES['gun_aim'] = _gpose(_BLADE, _AIM_ARM)
-for _n, _d in (('m45', -45), ('m34', -33.75), ('m22', -22.5), ('m11', -11.25), ('p11', 11.25), ('p22', 22.5),
-               ('p34', 33.75), ('p45', 45)):
-    POSES[f'gun_aim_{_n}'] = {**POSES['gun_aim'], '_post': _TWIST(_d)}
+AIM_TWISTS = (('m45', -45), ('m34', -33.75), ('m22', -22.5), ('m11', -11.25), ('p11', 11.25), ('p22', 22.5),
+              ('p34', 33.75), ('p45', 45))
 # ready idle (replaces the skeleton's idle in the western loadouts): the gun hand hangs loose over the holster
 POSES['idle_in'] = {**POSES['idle_in'], **_arm(y=-38, x=6, fx=-26, sz=2), 'RightHand': [('X', -12)]}
 POSES['idle_out'] = {**POSES['idle_out'], **_arm(y=-40, x=8, fx=-30, sz=3), 'RightHand': [('X', -16)]}
@@ -748,8 +751,8 @@ ANIMS['gun_holster'] = _clip(['gun_aim'] + [f'gun_spin_{i}' for i in range(5)] +
 
 # standing aim turns (the bow's aim_step / aim_pivot, gun in hand): facing = the TORSO (aim). Step: the legs start
 # offset and re-plant under the aim; pivot: the torso leads with the gun tucked at the hip, the legs trail.
-def _gstand(legs_off=0.0, torso_off=0.0, extra=None, up=None, lean=0.0, air=0.0):
-    spec = {'Hips': [('Z', _BLADE + legs_off)] + ([('Y', lean)] if lean else []), **{k: list(v) for k, v in _GLEGS.items()},
+def _gstand(legs_off=0.0, torso_off=0.0, extra=None, up=None, lean=0.0, air=0.0, blade=_BLADE):
+    spec = {'Hips': [('Z', blade + legs_off)] + ([('Y', lean)] if lean else []), **{k: list(v) for k, v in _GLEGS.items()},
             **{k: list(v) for k, v in (up or _upper(POSES['gun_aim'], _BLADE)).items()}}
     for k, v in (extra or {}).items():
         spec[k] = spec.get(k, []) + v
@@ -761,14 +764,6 @@ def _gstand(legs_off=0.0, torso_off=0.0, extra=None, up=None, lean=0.0, air=0.0)
     return spec
 
 
-_TUCKED = _upper(POSES['gun_draw_hip'], 16)
-for _i, (_off, _lg, _ln) in enumerate(_STEP_L):          # skeleton.py's step table: legs offset, leg bends, lean
-    POSES[f'gun_st_l{_i}'] = _gstand(_off, extra=_lg, lean=_ln)
-    POSES[f'gun_st_r{_i}'] = _gstand(-_off, extra=_LR(_lg), lean=-_ln)
-for _i, (_lo, _to, _up, _lg, _air) in enumerate(_PIV):    # and its pivot table (_TUCK_UP = the bow pulled in)
-    _gu = _TUCKED if _up is _TUCK_UP else None
-    POSES[f'gun_pv_l{_i}'] = _gstand(_lo, _to, extra=_lg, up=_gu, air=_air)
-    POSES[f'gun_pv_r{_i}'] = _gstand(-_lo, -_to, extra=_lg, up=_gu, air=_air)
 ANIMS['gaim_step_l'] = dict(keys=[f'gun_st_l{i}' for i in range(4)], frames=4, loop=False, fps=16)
 ANIMS['gaim_step_r'] = dict(keys=[f'gun_st_r{i}' for i in range(4)], frames=4, loop=False, fps=16)
 ANIMS['gaim_pivot_l'] = dict(keys=[f'gun_pv_l{i}' for i in range(3)], frames=3, loop=False, fps=24)
@@ -777,11 +772,30 @@ ANIMS['gaim_pivot_r'] = dict(keys=[f'gun_pv_r{i}' for i in range(3)], frames=3, 
 # on the move: the bladed aim held still over the stride, twisted by delta. One-handed, so both ways: out to the right
 # up to 90 deg, across the body to the left up to 45 deg. Reloading on the move: three reload keys over the stride.
 G_DELTAS = {'m90': -90, 'm67': -67.5, 'm45': -45, 'm22': -22.5, '0': 0, 'p22': 22.5, 'p45': 45}
-_AIM_UP_G = _upper(POSES['gun_aim'], _BLADE)
-for _dn, _d in G_DELTAS.items():
-    for _i in range(8):
-        POSES[f'gws_{_dn}_{_i}'] = _on_legs(_i, _AIM_UP_G, 'walk', _d)
-        POSES[f'grs_{_dn}_{_i}'] = _on_legs(_i, _AIM_UP_G, 'run', _d)
+
+
+def _gun_aim_set(blade, tucked):
+    """The poses derived from POSES['gun_aim'] (its stance turned `blade` deg): the standing twists, the aim steps and
+    pivots (`tucked` = the upper body of a quick pivot's first frames), aiming on the move (gws_ / grs_). A held item
+    with its own aim (the coach gun) rebuilds them over its own gun_aim."""
+    aim = POSES['gun_aim']
+    up = _upper(aim, blade)
+    for n, d in AIM_TWISTS:
+        POSES[f'gun_aim_{n}'] = {**aim, '_post': _TWIST(d)}
+    for i, (off, lg, ln) in enumerate(_STEP_L):          # skeleton.py's step table: legs offset, leg bends, lean
+        POSES[f'gun_st_l{i}'] = _gstand(off, extra=lg, up=up, lean=ln, blade=blade)
+        POSES[f'gun_st_r{i}'] = _gstand(-off, extra=_LR(lg), up=up, lean=-ln, blade=blade)
+    for i, (lo, to, u, lg, air) in enumerate(_PIV):      # and its pivot table (_TUCK_UP = the bow pulled in)
+        gu = tucked if u is _TUCK_UP else up
+        POSES[f'gun_pv_l{i}'] = _gstand(lo, to, extra=lg, up=gu, air=air, blade=blade)
+        POSES[f'gun_pv_r{i}'] = _gstand(-lo, -to, extra=lg, up=gu, air=air, blade=blade)
+    for dn, d in G_DELTAS.items():
+        for i in range(8):
+            POSES[f'gws_{dn}_{i}'] = _on_legs(i, up, 'walk', d)
+            POSES[f'grs_{dn}_{i}'] = _on_legs(i, up, 'run', d)
+
+
+_gun_aim_set(_BLADE, _upper(POSES['gun_draw_hip'], 16))
 for _rk in ('up', 'load', 'fetch'):
     _ru = _upper(POSES[f'gun_rl_{_rk}'], 10)
     for _i in range(8):
@@ -834,12 +848,551 @@ ANIMS['hat_tip'] = _clip(['idle_in', 'hat_tip_0', 'hat_tip_1', 'hat_tip_2'], [.5
 GUNSLINGER_CLIPS = ('gun_hipfire', 'gun_blow', 'duel_ready', 'hat_tip')
 
 
+# ================================================================ the bandits and the sheriff ========================
+# Enemies: the masked bandit (revolver, the gun move set unchanged) and the bruiser (a coach gun held two-handed: the
+# same clip names, its own arm placements, see LONG GUN). The ally: the sheriff. Enemies wear grubby, desaturated
+# earth colours and one accent, the gang's mask ('mask'); the sheriff clean, light and blue with a tin star.
+PIXEL_FAMILIES.update({
+    'dustfelt': ['aea690', '847c6a', '5e584a', '26221a'],   # the bandit's slouch hat: sun-faded grey-tan felt
+    'grubby': ['c6ac74', '9e8654', '725e3a', '2c2416'],     # his shirt: dirty ochre
+    'hide': ['86705c', '62503e', '46382c', '1c1410'],       # his vest: worn suede
+    'drab': ['8e8e78', '6a6a56', '4c4c3e', '1e1e18'],       # grey-olive canvas: his trousers, the bruiser's coat
+    'mask': ['5eaaa4', '3c8282', '2a5e62', '0e282c'],       # the gang's masks: the enemies' one accent (faded teal)
+    'creamfelt': ['f4ecda', 'dacfb4', 'b0a286', '4e4636'],  # the sheriff's hat
+    'chambray': ['b8cce0', '90a8c4', '6a82a0', '262e40'],   # his shirt
+    'navy': ['5c6c90', '404c6e', '2e3650', '10141e'],       # his vest
+    'khaki': ['c4b28c', '9c8a68', '74664a', '2e281c'],      # his trousers
+    'tin': ['fafaf6', 'd6dade', '9ca4ae', '3a3e48'],        # the star, the nickel revolver
+})
+
+
+def _tilt(names, deg, pivot):
+    """Rock built parts about the front-back axis through `pivot` (+deg: the character's left side goes down)."""
+    R = Matrix.Rotation(math.radians(deg), 3, 'Y')
+    for nm in names:
+        for v in bpy.data.objects[nm].data.vertices:
+            v.co = pivot + R @ (v.co - pivot)
+
+
+def _star(name, bone, centre, r_out, r_in, thick, points=5):
+    """A flat star facing -Y (the character's front), bound to `bone`: two fans (front, back) and the rim."""
+    bm = bmesh.new()
+    rings = []
+    for side in (-1, 1):
+        c = bm.verts.new(centre + Vector((0, side * thick / 2, 0)))
+        rim = []
+        for i in range(2 * points):
+            a = math.pi / 2 + math.pi * i / points
+            r = r_out if i % 2 == 0 else r_in
+            rim.append(bm.verts.new(centre + Vector((math.cos(a) * r, side * thick / 2, math.sin(a) * r))))
+        rings.append((c, rim))
+    n = 2 * points
+    for c, rim in rings:
+        for i in range(n):
+            bm.faces.new((c, rim[i], rim[(i + 1) % n]))
+    (_, f), (_, b) = rings
+    for i in range(n):
+        j = (i + 1) % n
+        bm.faces.new((f[i], b[i], b[j], f[j]))
+    return _bind(name, bm, bone)
+
+
+def _boxes(name, bone, items):
+    """Small boxes in one object (cartridges in belt loops): items = [(centre, x half, y half, z half)]."""
+    bm = bmesh.new()
+    for c, hx, hy, hz in items:
+        vs = [bm.verts.new(c + Vector((sx * hx, sy * hy, sz * hz))) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
+        for q in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)):
+            bm.faces.new([vs[k] for k in q])
+    return _bind(name, bm, bone)
+
+
+# ---------------------------------------------------------------- hats ---------------------------------------------
+@garment('slouch_hat', 'hat', ['human_small'], hides=['HairFringe'],
+         pixel={'HatCrown': ['hat', 'dustfelt', {'bias': .05}], 'HatBand': ['hatband', 'leather', {'bias': -.3}],
+                'HatBrim': ['brim', 'dustfelt', {}]})
+def _slouch_hat():
+    """The bandit's battered slouch hat: a low, round, dented crown; a wide floppy brim drooping at the back and on
+    the left, cocked up on the right, level at the front (the eyes must show between it and the mask); the whole hat
+    knocked askew."""
+    P, s, J, z = _ctx()
+    _hat([(.68, .012, .232, .244), (.76, .012, .236, .248), (.9, .012, .226, .238), (1.0, .012, .2, .212),
+          (1.05, .012, .15, .16), (1.07, .012, .07, .08)],
+         (.4, .36), lambda ux, uy, t: t * t * (-.07 * max(0, uy) ** 2 - .05 * max(0, ux) ** 2 + .07 * max(0, -ux) ** 3
+                                                + .012 * max(0, -uy)), crease=.03)
+    c, hh = z('head'), z('top') - z('head')
+    _tilt(('HatCrown', 'HatBand', 'HatBrim'), 6, Vector((0, .012 * s, c + .69 * hh)))
+
+
+@garment('derby', 'hat', ['human_small'], hides=['HairFringe'],
+         pixel={'HatCrown': ['hat', 'blackfelt', {'bias': .08}], 'HatBand': ['hatband', 'charcoal', {'bias': -.2}],
+                'HatBrim': ['brim', 'blackfelt', {}]})
+def _derby():
+    """The bruiser's derby (bowler): a round dome crown, a short brim rolled up at the sides."""
+    _hat([(.68, .012, .232, .244), (.74, .012, .235, .247), (.88, .012, .232, .244), (1.0, .012, .208, .22),
+          (1.08, .012, .165, .175), (1.13, .012, .09, .1)],
+         (.315, .295), lambda ux, uy, t: t * t * (.05 * ux * ux + .015 * uy * uy), crease=0)
+
+
+@garment('sheriff_hat', 'hat', ['human_small'], hides=['HairFringe'],
+         pixel={'HatCrown': ['hat', 'creamfelt', {'bias': .02}], 'HatBand': ['hatband', 'leather', {'bias': -.25}],
+                'HatBrim': ['brim', 'creamfelt', {}]})
+def _sheriff_hat():
+    """A clean, light cattleman: a taller creased crown than the gunslinger's, a dark band, the brim curled at the
+    sides."""
+    _hat([(.68, .012, .232, .244), (.76, .012, .233, .245), (.96, .012, .226, .238), (1.14, .012, .214, .228),
+          (1.21, .012, .19, .205), (1.24, .012, .1, .12)],
+         (.37, .32), lambda ux, uy, t: .08 * t * t * ux ** 4, crease=.05)
+
+
+# ---------------------------------------------------------------- head, face, neck ---------------------------------
+@garment('hair_tache', 'head', ['human_small'],
+         pixel={**GARMENTS['hair_mop']['pixel'], 'Moustache': ['tache', 'hair', {'bias': -.1}]})
+def _hair_tache():
+    """The mop and a full horseshoe moustache under the nose (in the hair's colours), its ends drooping past the
+    mouth: ~4 px wide and over 1 px tall, so the 1x face reads as moustached; it sits low enough (f .22 of the head)
+    that a pixel of skin stays between it and the eyes at the 20 deg camera."""
+    _hair_mop()
+    P, s, J, z = _ctx()
+    c, hh = z('head'), z('top') - z('head')
+    pts = [(-.1, -.15, .1), (-.094, -.178, .17), (-.05, -.198, .215), (0, -.203, .22), (.05, -.198, .215),
+           (.094, -.178, .17), (.1, -.15, .1)]
+    loft('Moustache', 'Head', [(x * s, y * s, c + f * hh) for x, y, f in pts], [(.026 * s, .016 * s)] * len(pts),
+         side=(0, 0, 1), n=6, p=2.0)
+
+
+@garment('bandit_mask', 'neck', ['human_small'],
+         pixel={'Mask': ['mask', 'mask', {}], 'MaskPoint': ['mask', 'mask', {'bias': -.06}],
+                'MaskKnot': ['mask', 'mask', {'bias': -.1}]})
+def _bandit_mask():
+    """The bandits' signature: a bandana pulled up over the nose and mouth. It wraps the lower face from just under the
+    eyes, hangs loose under the jaw, drops round the back to a knot under the hair, its point over the throat."""
+    P, s, J, z = _ctx()
+    c, hh = z('head'), z('top') - z('head')
+    rows = [(.335, -.012, .2, .214), (.26, -.016, .197, .212), (.13, -.03, .182, .198), (.0, -.045, .152, .17)]
+    ob = loft('Mask', 'Head', [(0, yc * s, c + f * hh) for f, yc, rx, ry in rows], [(rx * s, ry * s) for f, yc, rx, ry in rows],
+              n=12, p=2.3)
+    for v in ob.data.vertices:          # round the back it drops under the hair cap
+        v.co.z -= .3 * max(0.0, v.co.y)
+    loft('MaskPoint', 'Head', [(0, -.205 * s, c + .06 * hh), (0, -.195 * s, c - .1 * hh), (0, -.18 * s, c - .26 * hh)],
+         [(.13 * s, .012 * s), (.075 * s, .012 * s), (.012 * s, .01 * s)], side=(1, 0, 0), n=4, p=2.0)
+    loft('MaskKnot', 'Head', [(0, .19 * s, c + .2 * hh), (.005 * s, .215 * s, c + .12 * hh), (.02 * s, .2 * s, c - .08 * hh)],
+         [(.042 * s, .03 * s), (.036 * s, .026 * s), (.012 * s, .01 * s)], n=6, p=2.0)
+
+
+@garment('string_tie', 'neck', ['human_small'], pixel={'Tie': ['tie', 'char', {'thin': True}]})
+def _string_tie():
+    """The sheriff's string tie: a dark cord from the collar down the open V of the vest."""
+    P, s, J, z = _ctx()
+    n = z('neck')
+    loft('Tie', 'Spine2', [(0, -.13 * s, n - .01 * s), (0, -.168 * s, n - .07 * s), (0, -.172 * s, z('spine2'))],
+         [(.012 * s, .006 * s)] * 3, side=(1, 0, 0), n=4, p=2.0)
+
+
+# ---------------------------------------------------------------- shirts, vests, coat ------------------------------
+def _shirt_body(t):
+    """The shirt's torso (as wardrobe.linen_shirt)."""
+    P, s, J, z = _ctx()
+    T = _torso(P, s, z)
+    loft('ShirtHem', 'Hips', [(0, 0, z('hips') + .01 * s), (0, 0, z('spine'))], _grow(T['hip'][1][2:], t), p=2.6)
+    loft('ShirtBelly', 'Spine', T['belly'][0], _grow(T['belly'][1], t), p=2.6)
+    loft('ShirtRibs', 'Spine1', T['ribs'][0], _grow(T['ribs'][1], t), p=2.6)
+    loft('ShirtChest', 'Spine2', T['chest'][0] + [(0, .01, z('neck') + .01 * s)],
+         _grow(T['chest'][1], t) + [(.085 * s, .075 * s)], p=2.6)
+
+
+def _shirt_pixel(fam):
+    return {k: ['sleeve' if 'Sleeve' in k else 'shirt', fam, {}] for k in
+            ('ShirtBelly', 'ShirtRibs', 'ShirtChest', 'ShirtHem', 'ShirtSleeveUp', 'ShirtSleeveLo')}
+
+
+@garment('rolled_shirt', 'torso', ['human_small'], hides=['Belly', 'Ribs', 'Chest', 'UpperArm'],
+         pixel=_shirt_pixel('grubby'))
+def _rolled_shirt():
+    """The bandit's grubby work shirt, its sleeves rolled to mid-forearm: the bare forearms show below the roll."""
+    P, s, J, z = _ctx()
+    t = .012 * s
+    _shirt_body(t)
+    for sd in 'LR':
+        _sleeve('ShirtSleeve', sd, J, s, t, upper=(0, 1), lower=(0, .5), cuff=.024 * s)
+
+
+@garment('chambray_shirt', 'torso', ['human_small'], hides=['Belly', 'Ribs', 'Chest', 'UpperArm', 'ForeArm'],
+         pixel=_shirt_pixel('chambray'))
+def _chambray_shirt():
+    """The sheriff's pale blue shirt (the linen shirt's cut)."""
+    _linen_shirt()
+
+
+@garment('ragged_vest', 'outer', ['human_small'],
+         pixel={'VestBelly': ['vest', 'hide', {}], 'VestRibs': ['vest', 'hide', {}], 'VestChest': ['vest', 'hide', {}],
+                'VestOpen': ['shirt', 'grubby', {'thin': True}]})
+def _ragged_vest():
+    """A worn suede vest hanging open (a wide V of shirt down the front), longer than the shirt's waist, its hem torn
+    into points below the belt."""
+    P, s, J, z = _ctx()
+    T, t = _torso(P, s, z), .024 * s
+    hip = T['hip'][1][2]
+    ob = loft('VestBelly', 'Spine', [(0, .005, z('hips') - .06 * s), (0, .005, z('spine')), (0, .005, z('spine1'))],
+              _grow([(hip[0] + .006 * s, hip[1] + .004 * s)] + T['belly'][1], t), n=12, p=2.6)
+    for i in range(0, 12, 2):           # torn hem: every other point of the bottom ring (the loft's first) hangs lower
+        ob.data.vertices[i].co.z -= .045 * s
+    loft('VestRibs', 'Spine1', T['ribs'][0], _grow(T['ribs'][1], t), p=2.6)
+    loft('VestChest', 'Spine2', T['chest'][0] + [(0, .01, z('neck') - .01 * s)],
+         _grow(T['chest'][1], t) + [(.105 * s, .095 * s)], p=2.6)
+    pts, rad = [], []
+    for zz, ry, w in ((z('neck') - .02 * s, .12, .07), (z('spine2') + .03 * s, .135, .055), (z('spine1') + .03 * s, .12, .035),
+                      (z('spine1') - .04 * s, .113, .02)):
+        pts.append((0, -(ry * s + t + .004 * s), zz)); rad.append((w * s, .004 * s))
+    loft('VestOpen', 'Spine2', pts, rad, side=(1, 0, 0), n=4, p=2.0)
+
+
+@garment('lawman_vest', 'outer', ['human_small'],
+         pixel={'VestBelly': ['vest', 'navy', {}], 'VestRibs': ['vest', 'navy', {}], 'VestChest': ['vest', 'navy', {}],
+                'VestOpen': ['shirt', 'chambray', {'thin': True}], 'Star': ['star', 'tin', {'bias': .3}]})
+def _lawman_vest():
+    """The sheriff's dark blue vest (the wool vest's cut) with the tin star on the left breast, sized up (12 cm across,
+    ~4 px) so it reads at 1x as the brightest spot on the figure."""
+    _wool_vest()
+    P, s, J, z = _ctx()
+    _star('Star', 'Spine2', Vector((.1 * s, -.168 * s, z('spine2') + .03 * s)), .062 * s, .027 * s, .014 * s)
+
+
+@garment('heavy_coat', 'outer', ['human_small'], hides=['Belly', 'Ribs', 'Chest', 'UpperArm', 'ForeArm'],
+         pixel={'CoatHip': ['coat', 'drab', {}], 'CoatBelly': ['coat', 'drab', {}], 'CoatRibs': ['coat', 'drab', {}],
+                'CoatChest': ['coat', 'drab', {}], 'CoatSkirt': ['skirt', 'drab', {'bias': -.06}],
+                'CoatSleeveUp': ['csleeve', 'drab', {}], 'CoatSleeveLo': ['csleeve', 'drab', {}],
+                'CoatCollar': ['collar', 'linen', {'bias': .05}], 'CoatCuff': ['cuff', 'linen', {}]})
+def _heavy_coat():
+    """The bruiser's heavy canvas coat to the hips, padded out (wider than deep: a bigger torso than the heroes'), a thick
+    sheepskin collar standing round the neck, full sleeves with sheepskin cuffs; its skirt splits over each thigh."""
+    P, s, J, z = _ctx()
+    T = _torso(P, s, z)
+    pad = lambda radii, tx, ty: [(r[0] + tx, r[1] + ty) for r in radii]   # padded out sideways more than front-back
+    tx, ty = .085 * s, .06 * s
+    loft('CoatHip', 'Hips', T['hip'][0][1:], pad(T['hip'][1][1:], tx + .01 * s, ty + .01 * s), p=2.6)
+    loft('CoatBelly', 'Spine', T['belly'][0], pad(T['belly'][1], tx, ty), p=2.6)
+    loft('CoatRibs', 'Spine1', T['ribs'][0], pad(T['ribs'][1], tx, ty), p=2.6)
+    loft('CoatChest', 'Spine2', T['chest'][0] + [(0, .01, z('neck') - .01 * s)],
+         pad(T['chest'][1], tx, ty) + [(.17 * s, .14 * s)], p=2.6)
+    n = z('neck')
+    loft('CoatCollar', 'Spine2', [(0, .015 * s, n - .07 * s), (0, .02 * s, n - .01 * s), (0, .03 * s, n + .05 * s)],
+         [(.23 * s, .2 * s), (.21 * s, .185 * s), (.15 * s, .14 * s)], p=2.4)
+    for sd, m in (('L', 'Left'), ('R', 'Right')):
+        _sleeve('CoatSleeve', sd, J, s, .062 * s, upper=(0, 1), lower=(0, .86))
+        el, wr = J['elbow' + sd], J['wrist' + sd]
+        loft(f'CoatCuff.{sd}', f'{m}ForeArm', [el + (wr - el) * .78, el + (wr - el) * .97],
+             [(.098 * s, .096 * s), (.09 * s, .088 * s)], side=(0, -1, 0))
+        hp, kn = J['hip' + sd], J['knee' + sd]
+        dl = (kn - hp).normalized()
+        loft(f'CoatSkirt.{sd}', f'{m}UpLeg', [hp - dl * .06 * s, hp + (kn - hp) * .24],
+             [(.135 * s, .145 * s), (.14 * s, .145 * s)], side=(0, -1, 0))
+
+
+# ---------------------------------------------------------------- legs, belts ------------------------------------------
+@garment('drab_trousers', 'legs', ['human_small'], hides=['Pelvis', 'Thigh', 'Shin'],
+         pixel={'TrouserHip': ['trousers', 'drab', {}], 'TrouserThigh': ['trousers', 'drab', {}],
+                'TrouserShin': ['trousers', 'drab', {}]})
+def _drab_trousers():
+    """The bandit's: grey-olive canvas, straight legs over the boots."""
+    _trousers(over=True)
+
+
+@garment('work_trousers', 'legs', ['human_small'], hides=['Pelvis', 'Thigh', 'Shin'],
+         pixel={'TrouserHip': ['trousers', 'cloth', {}], 'TrouserThigh': ['trousers', 'cloth', {}],
+                'TrouserShin': ['trousers', 'cloth', {}]})
+def _work_trousers():
+    """The bruiser's: brown wool, tucked into the boots."""
+    _trousers()
+
+
+@garment('khaki_trousers', 'legs', ['human_small'], hides=['Pelvis', 'Thigh', 'Shin'],
+         pixel={'TrouserHip': ['trousers', 'khaki', {}], 'TrouserThigh': ['trousers', 'khaki', {}],
+                'TrouserShin': ['trousers', 'khaki', {}]})
+def _khaki_trousers():
+    """The sheriff's: clean khaki, tucked into the boots."""
+    _trousers()
+
+
+@garment('shell_belt', 'belt', ['human_small'],
+         pixel={'ShellBelt': ['gunbelt', 'leather', {'bias': -.12}], 'Buckle': ['buckle', 'brass', {'thin': True}],
+                'Shells': ['shells', 'brass', {'thin': True, 'bias': .1}]})
+def _shell_belt():
+    """A wide cartridge belt over the coat (no holster: the coach gun never leaves the hand), a row of brass shotgun
+    shells in its loops round the front."""
+    P, s, J, z = _ctx()
+    zc, rx, ry = z('hips') + .02 * s, .235 * s, .19 * s
+    loft('ShellBelt', 'Hips', [(0, .005, zc - .03 * s), (0, .005, zc + .03 * s)], [(rx, ry), (rx * .99, ry * .99)], n=16, p=2.6)
+    loft('Buckle', 'Hips', [(0, -(ry + .004 * s), zc), (0, -(ry + .014 * s), zc)], [(.026 * s, .022 * s)] * 2,
+         side=(1, 0, 0), n=4, p=2.0)
+    items = []
+    for a in range(-80, 81, 13):
+        if abs(a) < 10:
+            continue                     # the buckle
+        u = math.radians(a)
+        x, y = math.sin(u), -math.cos(u)
+        k = (abs(x) ** 2.6 + abs(y) ** 2.6) ** (1 / 2.6)    # onto the belt's superellipse
+        items.append((Vector((rx * x / k * 1.04, .005 + ry * y / k * 1.06, zc)), .011 * s, .011 * s, .024 * s))
+    _boxes('Shells', 'Hips', items)
+
+
+# ---------------------------------------------------------------- revolvers ----------------------------------------
+_REV_SOFT = ['GunGrip', 'GunFrame', 'GunGuard', 'GunCylinder', 'GunBarrel', 'GunRod']
+
+
+@garment('iron_colt', 'hands', ['human_small'], soft=_REV_SOFT,
+         pixel={'GunGrip': ['grip', 'walnut', {'thin': True}], 'GunFrame': ['gun', 'iron', {'thin': True}],
+                'GunGuard': ['gun', 'iron', {'thin': True}], 'GunCylinder': ['gun', 'iron', {'thin': True, 'bias': .08}],
+                'GunBarrel': ['barrel', 'iron', {'thin': True, 'bias': .1}], 'GunRod': ['barrel', 'iron', {'thin': True}]})
+def _iron_colt():
+    """The bandits': a plain iron revolver with a worn walnut grip and a shorter 5.5-inch barrel."""
+    _revolver(barrel=.15, bore=.0085, bore_n=6, cyl=.048, rod=.6)
+
+
+@garment('nickel_colt', 'hands', ['human_small'], soft=_REV_SOFT,
+         pixel={'GunGrip': ['grip', 'char', {'thin': True}], 'GunFrame': ['gun', 'tin', {'thin': True}],
+                'GunGuard': ['gun', 'tin', {'thin': True}], 'GunCylinder': ['gun', 'tin', {'thin': True, 'bias': .05}],
+                'GunBarrel': ['barrel', 'tin', {'thin': True, 'bias': .05}], 'GunRod': ['barrel', 'tin', {'thin': True}]})
+def _nickel_colt():
+    """The sheriff's: nickel-plated, black grips, the long 7.5-inch barrel."""
+    _revolver(barrel=.19, bore=.0085, bore_n=6, cyl=.048, rod=.6)
+
+
+GUN_ITEMS = GUN_ITEMS + ('iron_colt', 'nickel_colt')
+
+
+# ---------------------------------------------------------------- LONG GUN: the bruiser's coach gun ------------------
+# A double-barrelled coach gun on the revolver's hold bone (GunHold0 on the right hand, GunMuzzle0 at the muzzle).
+# Outside the gun poses it hangs from the right fist (no holster). In the gun poses it rides the CHEST (Spine2): the
+# butt in the right shoulder pocket for the aim (stance turned LG_BLADE: the left shoulder leads, as a rifleman's),
+# at the right hip for the draw; then the right fist IKs onto the grip and the left fist under the fore-end. So the
+# muzzle points exactly where the torso puts it: the facing, plus the pose's twist (aim twists, aiming on the move).
+# Wearing it re-poses the aiming keys (same names and clips as the revolver set: gun_aim + twists, gun_draw, gun_fire,
+# steps, pivots, gws_ / grs_) for two hands, and the reload (gun_reload: break open, tip the spent shells out, two
+# fresh shells fetched from the belt one by one, snap shut; gwr_ / grr_ on the move). Fan / twirl / holster keys are
+# revolver moves (not re-posed).
+LG_BLADE = -30          # the long-gun stance: hips and chest turned to the right
+LG_HOLD = {}            # pose key -> (rest grip point, rest barrel axis F, rest top U, left hand on the gun?)
+LG = {}                 # the coach gun's geometry (metres along F from the grip): fore-end centre; the belt's loops
+LG_HINGE = (.095, .028)  # the break's hinge (metres along F, U from the grip): the front of the frame, under the barrels
+LG_BREAK = {}           # pose key -> how far the barrels are broken open (deg)
+LG_LEFT = {}            # pose key -> where the left fist goes instead of the fore-end: 'breech' (thumbing a shell in),
+                        # 'belt' (fetching one from the shell belt)
+LG_SHELL = set()        # pose keys with a fresh shell in the left fist
+
+
+@garment('coach_gun', 'hands', ['human_small'],
+         soft=['GunGrip', 'GunStock', 'GunFrame', 'GunBarrel', 'GunFore', 'GunShell'],
+         pixel={'GunGrip': ['stock', 'walnut', {'thin': True}], 'GunStock': ['stock', 'walnut', {'bias': .05}],
+                'GunFrame': ['gun', 'iron', {'thin': True}], 'GunBarrel': ['barrel', 'iron', {'thin': True, 'bias': .1}],
+                'GunFore': ['stock', 'walnut', {'thin': True, 'bias': .1}],
+                'GunShell': ['shells', 'brass', {'thin': True, 'bias': .15}]})
+def _coach_gun():
+    """A side-by-side double-barrel cut down to a coach gun: 47 cm barrels, a short walnut stock with a pistol grip
+    (83 cm in all, ~25 px side-on: a long-gun silhouette), the fore-end under the barrels for the left hand. It breaks
+    open: the barrels and fore-end swing down on a hinge at the front of the frame (GunBreak0); GunBreech0 marks the
+    chambers. A fresh shell rides in the left fist (GunShell0), shown only while reloading."""
+    P, s, J, z = _ctx()
+    g, F, U = _hand_frame('R')
+    S = F.cross(U)
+    GUN.update(g=g, F=F, U=U)
+    hold = add_chain('GunHold', 'RightHand', [g, g + F * .05 * s])[0]
+    hinge = g + F * LG_HINGE[0] * s + U * LG_HINGE[1] * s
+    brk = add_chain('GunBreak', hold, [hinge, hinge + F * .05 * s])[0]
+    loft('GunGrip', hold, [g + F * .03 * s + U * .014 * s, g - F * .03 * s - U * .018 * s, g - F * .07 * s - U * .034 * s],
+         [(.014 * s, .02 * s)] * 3, side=S, n=6, p=2.2)
+    loft('GunStock', hold, [g - F * .06 * s - U * .03 * s, g - F * .16 * s - U * .045 * s, g - F * .27 * s - U * .06 * s],
+         [(.016 * s, .026 * s), (.019 * s, .04 * s), (.021 * s, .052 * s)], side=S, n=6, p=2.2)
+    loft('GunFrame', hold, [g + U * .028 * s - F * .005 * s, g + F * .1 * s + U * .034 * s], [(.022 * s, .024 * s), (.021 * s, .022 * s)],
+         side=S, n=6, p=2.2)
+    for k, sx in (('L', 1), ('R', -1)):
+        b0 = g + F * .09 * s + U * .042 * s + S * sx * .012 * s
+        loft(f'GunBarrel.{k}', brk, [b0, b0 + F * .47 * s], [(.0115 * s, .0115 * s)] * 2, side=S, n=6, p=2.0)
+    loft('GunFore', brk, [g + F * .1 * s + U * .022 * s, g + F * .29 * s + U * .026 * s], [(.021 * s, .015 * s), (.019 * s, .013 * s)],
+         side=S, n=6, p=2.2)
+    mz = g + F * .56 * s + U * .042 * s
+    add_chain('GunMuzzle', brk, [mz, mz + F * .02 * s])
+    bc = g + F * .09 * s + U * .042 * s
+    add_chain('GunBreech', brk, [bc, bc - F * .02 * s])
+    gl, FL, UL = _hand_frame('L')                       # the shell pinched in the left fist, its end out past the thumb
+    shell = add_chain('GunShell', 'LeftHand', [gl, gl + FL * .03 * s])[0]
+    loft('GunShell', shell, [gl - UL * .01 * s, gl + UL * .06 * s], [(.013 * s, .013 * s)] * 2, side=FL, n=6, p=2.0)
+    zc, rx, ry = z('hips') + .02 * s, .235 * s, .19 * s   # (as _shell_belt) the belt's loops at the left front
+    LG.update(fore=.2, butt=(.27, .06), belt=Vector((rx * .62, -ry * .78 - .04 * s, zc)))
+    _lg_install()
+
+
+def _lg_frame(kind, blade, pitch=0.0):
+    """A hold frame given in the FACING frame (the stance turned `blade` deg; x = the character's left, y = back),
+    taken back to rest space: the chest's own turn by `blade` brings it to the facing. kind: 'shoulder' (the butt in the
+    right shoulder pocket, barrel level at chest height), 'hip' (level at the right hip), 'low' (pointing down-forward)."""
+    P, s, J, z = _ctx()
+    Rp = Matrix.Rotation(math.radians(-pitch), 3, 'X')       # + pitch = muzzle up
+    F, U = Rp @ Vector((0, -1, 0)), Rp @ Vector((0, 0, 1))
+    if kind == 'shoulder':
+        butt = Vector((-.2 * s, .05 * s, z('neck') - .07 * s))
+        g = butt + F * LG['butt'][0] * s + U * LG['butt'][1] * s
+    elif kind == 'hip':
+        g = Vector((-.22 * s, -.2 * s, z('hips') + .16 * s))
+    else:
+        g = Vector((-.24 * s, -.1 * s, z('hips') + .06 * s))
+    R = Matrix.Rotation(math.radians(-blade), 3, 'Z')
+    return R @ g, R @ F, R @ U
+
+
+def _lg_install():
+    """The coach gun's aiming keys: a two-handed stance for the aim, the shot, the draw, rebuilt over the same pose
+    names (and the derived twists, steps, pivots, aiming on the move), and where the gun rides in each."""
+    LEGS = {'LeftUpLeg': [('X', -14), ('Y', -6)], 'LeftLeg': [('X', 12)], 'LeftFoot': [('Z', -6)],
+            'RightUpLeg': [('X', 8), ('Y', 7)], 'RightLeg': [('X', 10)], 'RightFoot': [('Z', -12)]}
+    ARMS = {'RightShoulder': [('Z', -4)], 'RightArm': [('Y', -22), ('X', -40)], 'RightForeArm': [('X', -85)],
+            'LeftShoulder': [('Z', -10)], 'LeftArm': [('Y', 30), ('X', -55), ('Z', -25)], 'LeftForeArm': [('X', -35)]}
+    LOW = {'RightShoulder': [('Z', 2)], 'RightArm': [('Y', -40), ('X', -8)], 'RightForeArm': [('X', -40)]}
+    HIP = {'RightShoulder': [('Z', 2)], 'RightArm': [('Y', -38), ('X', 6)], 'RightForeArm': [('X', -80)],
+           'LeftShoulder': [('Z', -6)], 'LeftArm': [('Y', 34), ('X', -40), ('Z', -30)], 'LeftForeArm': [('X', -60)]}
+    cheek = {'Neck': [('Z', -.6 * LG_BLADE), ('X', 4)], 'Head': [('Z', -.4 * LG_BLADE), ('Y', 5)]}   # cheek toward the stock
+    POSES['gun_aim'] = _gpose(LG_BLADE, ARMS, cheek, legs=LEGS)
+    POSES['gun_recoil_a'] = _gpose(LG_BLADE, ARMS, cheek, {'Spine': [('X', -5)], 'Spine2': [('X', -9)],
+                                                           'Head': [('Z', -.4 * LG_BLADE), ('X', -4)]}, legs=LEGS)
+    POSES['gun_recoil_b'] = _gpose(LG_BLADE, ARMS, cheek, {'Spine': [('X', -2)], 'Spine2': [('X', -5)]}, legs=LEGS)
+    POSES['gdraw_grab'] = _gpose(-8, LOW, legs=_GCROUCH, lean=6)
+    POSES['gun_draw_lift'] = _gpose(-18, HIP, legs=_GCROUCH, lean=4)
+    POSES['gun_draw_hip'] = _gpose(-24, HIP, legs=LEGS, lean=2)
+    for k in ('gdraw_grab', 'gholster'):
+        REACH.pop(k, None)               # no holster to reach for
+    _gun_aim_set(LG_BLADE, _upper(POSES['gun_draw_hip'], -24))
+    shoulder = _lg_frame('shoulder', LG_BLADE, -2)       # (the stance leans the chest back 2 deg: level the barrel)
+    LG_HOLD.clear()
+    LG_HOLD.update({k: shoulder + (True,) for k in POSES
+                    if k == 'gun_aim' or k.startswith(('gun_aim_', 'gun_st_', 'gws_', 'grs_'))})
+    for k in POSES:
+        if k.startswith('gun_pv_'):
+            tuck = _PIV[int(k[-1])][2] is _TUCK_UP
+            LG_HOLD[k] = (_lg_frame('hip', -24) if tuck else shoulder) + (True,)
+    LG_HOLD.update({'gun_recoil_a': _lg_frame('shoulder', LG_BLADE, 2) + (True,),
+                    'gun_recoil_b': _lg_frame('shoulder', LG_BLADE, 0) + (True,),
+                    'gdraw_grab': _lg_frame('low', -8, -40) + (False,),
+                    'gun_draw_lift': _lg_frame('hip', -18, -14) + (True,),
+                    'gun_draw_hip': _lg_frame('hip', -24) + (True,)})
+    # reload: the gun at the right hip, head down over it. Open (the left hand pushes the barrels down), tip the muzzle
+    # up so the spent shells slide out, fetch a shell from the belt / thumb it in, close (the barrels swing up shut on
+    # the way to the hip hold). In-betweens as the revolver's reload (_clip: blends of the finished keys, the break and
+    # the hands carried), the same marks for the game's phase logic (up, eject, first, fetch, load, close) and its
+    # stretch per round; `dump` = the shells fall out. Two frames (load -> fetch, positions 6.33 / 6.67, an empty hand
+    # going back to the belt) serve only the clip's own timeline: play / ms run the whole two-shell reload (an enemy
+    # plays the clip as is) without rendering any frame twice.
+    RL = -20
+    look = {'Neck': [('Z', -.6 * RL), ('X', 12)], 'Head': [('Z', -.4 * RL), ('X', 8)]}
+    fetch_arm = {'LeftShoulder': [('Z', -2)], 'LeftArm': [('Y', 30), ('X', -14), ('Z', -10)], 'LeftForeArm': [('X', -60)]}
+    POSES['gun_rl_up'] = _gpose(RL, HIP, look, legs=LEGS, lean=6)
+    POSES['gun_rl_eject'] = _gpose(RL, HIP, look, {'RightForeArm': [('X', -96)]}, legs=LEGS, lean=4)
+    POSES['gun_rl_fetch'] = _gpose(RL, HIP, look, fetch_arm, legs=LEGS, lean=8)
+    POSES['gun_rl_load'] = _gpose(RL, HIP, look, legs=LEGS, lean=8)
+    LG_HOLD.update({'gun_rl_up': _lg_frame('hip', RL, -12) + (True,), 'gun_rl_eject': _lg_frame('hip', RL, 60) + (True,),
+                    'gun_rl_fetch': _lg_frame('hip', RL, -6) + (True,), 'gun_rl_load': _lg_frame('hip', RL, -6) + (True,)})
+    LG_BREAK.clear(); LG_LEFT.clear(); LG_SHELL.clear()
+    LG_BREAK.update({'gun_rl_up': 38, 'gun_rl_eject': 44, 'gun_rl_fetch': 40, 'gun_rl_load': 40})
+    LG_LEFT.update({'gun_rl_fetch': 'belt', 'gun_rl_load': 'breech'})
+    LG_SHELL.update({'gun_rl_fetch', 'gun_rl_load'})
+    A = _clip(['gun_aim', 'gun_rl_up', 'gun_rl_eject', 'gun_rl_fetch', 'gun_rl_load', 'gun_draw_hip', 'gun_rl_load',
+               'gun_rl_fetch'],
+              [.35, .7, 1, 1.4, 1.7, 2, 2.33, 2.67, 3, 3.33, 3.67, 4, 6.33, 6.67, 4.5, 5], 12,
+              play=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 8, 9, 10, 11, 14, 15],
+              ms=[70, 70, 130, 60, 60, 170, 60, 60, 120, 70, 70, 140, 70, 70, 120, 70, 70, 140, 80, 140],
+              marks={'up': 0, 'eject': 3, 'dump': 5, 'first': 6, 'fetch': 8, 'load': 11, 'close': 14})
+    A['shell'] = [(3, 4)]                # key positions with the fresh shell in the left fist (in-between frames)
+    ANIMS['gun_reload'] = A
+    # the draw: as the revolver's, one more in-between while the left hand comes up from hanging to the fore-end
+    ANIMS['gun_draw'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_draw_hip', 'gun_aim'], [0, .35, .7, 1, 1.5, 2, 2.4, 2.75, 3],
+                              32, marks={'lift': 3, 'hip': 5})
+    for rk in ('up', 'load', 'fetch'):                 # reloading on the move: the same upper bodies over the stride
+        ru = _upper(POSES[f'gun_rl_{rk}'], RL)
+        for i in range(8):
+            for gk, c in (('gwr', 'walk'), ('grr', 'run')):
+                n = f'{gk}_{rk}_{i}'
+                POSES[n] = _on_legs(i, ru, c)
+                LG_HOLD[n] = LG_HOLD[f'gun_rl_{rk}']
+                for d in (LG_BREAK, LG_LEFT):
+                    if f'gun_rl_{rk}' in d:
+                        d[n] = d[f'gun_rl_{rk}']
+                if f'gun_rl_{rk}' in LG_SHELL:
+                    LG_SHELL.add(n)
+
+
+def _fist_to(side, p):
+    """IK the <side> wrist so that the fist centre (mid-hand) lands on p (armature space)."""
+    hd = bpy.data.objects[ROOT].pose.bones[side + 'Hand']
+    _reach(side, p - (hd.tail - hd.head) * .5)
+
+
+def _long_gun_hold(pose_name):
+    """The coach gun in a gun pose: placed on the chest (LG_HOLD), the right fist onto the grip and the left fist under
+    the fore-end (two IK passes: the wrist sits behind the fist along the hand), the gun set last (it is a child of the
+    right hand), then the barrels broken open (LG_BREAK) about the hinge. Reloading, the left fist goes to the breech
+    or the belt instead (LG_LEFT), a fresh shell in it (LG_SHELL; otherwise the shell is shrunk out of sight). Other
+    poses: the gun stays in the right fist as built (hanging muzzle-down along the hand)."""
+    arm = bpy.data.objects[ROOT]
+    pbs, bones = arm.pose.bones, arm.data.bones
+    key = _key(pose_name)
+    if 'GunShell0' in pbs:
+        pbs['GunShell0'].scale = (1, 1, 1) if key in LG_SHELL else (.001, .001, .001)
+        bpy.context.view_layer.update()
+    h = LG_HOLD.get(key)
+    if not h or 'g' not in GUN:
+        return
+    g0, F0, U0, left = h
+    T = pbs['Spine2'].matrix @ bones['Spine2'].matrix_local.inverted()      # rest -> posed, for the chest
+    g, F, U = T @ g0, (T.to_3x3() @ F0).normalized(), (T.to_3x3() @ U0).normalized()
+    k = PROP['height'] / 1.8
+    a = math.radians(LG_BREAK.get(key, 0.0))
+    hinge = g + (F * LG_HINGE[0] + U * LG_HINGE[1]) * k
+    Fb, Ub = F * math.cos(a) - U * math.sin(a), U * math.cos(a) + F * math.sin(a)      # the barrels' frame, broken
+    on_gun = lambda f, u: hinge + (Fb * (f - LG_HINGE[0]) + Ub * (u - LG_HINGE[1])) * k  # a barrel-side point
+    spot = LG_LEFT.get(key)
+    for _ in range(2):
+        _fist_to('Right', g)
+        if spot == 'belt':
+            _fist_to('Left', _carried('Hips', LG['belt']))
+        elif spot == 'breech':     # behind the chambers and above them, the shell's tip at the breech
+            _fist_to('Left', on_gun(.09, .042) - Fb * .045 * k + Ub * .05 * k)
+        elif left:
+            _fist_to('Left', on_gun(LG['fore'], -.02))
+    R = _frame_rot(GUN['F'], GUN['U'], F, U)
+    pbs['GunHold0'].matrix = Matrix.Translation(g) @ (R @ bones['GunHold0'].matrix_local.to_3x3()).to_4x4()
+    bpy.context.view_layer.update()
+    if a:                          # about the hinge's side axis: + would lift the muzzle, so the break is negative
+        pb = pbs['GunBreak0']
+        pb.matrix = Matrix.Translation(hinge) @ Matrix.Rotation(-a, 4, F.cross(U)) @ Matrix.Translation(-hinge) @ pb.matrix
+        bpy.context.view_layer.update()
+
+
+_pose_tween = globals().get('_pose_tween', pose)     # the in-between pose() above
+
+
+def pose(name):
+    """The in-between pose(), then the fresh shell in the left fist for an in-between frame: the blend carries location
+    and rotation only (the shell's shrink is a scale), so a _clip frame shows it when its key position lies in one of
+    the clip's `shell` ranges (key poses and plain clips: _long_gun_hold decides)."""
+    zmin = _pose_tween(name)
+    clip, _, i = name.partition('.')
+    A = ANIMS.get(clip) if i else None
+    pbs = bpy.data.objects[ROOT].pose.bones
+    if A and 'tween' in A and 'GunShell0' in pbs:
+        t = A['tween'][int(i)]
+        pbs['GunShell0'].scale = (1, 1, 1) if any(a <= t <= b for a, b in A.get('shell', ())) else (.001, .001, .001)
+        bpy.context.view_layer.update()
+    return zmin
+
+
 _build_wardrobe = build
 
 
 def build():
-    """wardrobe.build (body + dress), then the revolver's hold hook (holster or hand) for every pose."""
+    """wardrobe.build (body + dress), then the gun's hold hook for every pose: the revolver's (holster or hand) or the
+    coach gun's (on the chest, both hands)."""
     names = _build_wardrobe()
     if any(g in LOADOUT for g in GUN_ITEMS) and _gun_hold not in HOLD_HOOKS:
         HOLD_HOOKS.append(_gun_hold)
+    if 'coach_gun' in LOADOUT and _long_gun_hold not in HOLD_HOOKS:
+        HOLD_HOOKS.append(_long_gun_hold)
     return names
