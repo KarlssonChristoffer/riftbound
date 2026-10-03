@@ -110,8 +110,10 @@ export function createEquipSim(host) {
     o.vx *= .8; o.vy *= .8;
     return -vn;
   }
-  // face the throw and play a short throw pose (the player's own: a held frame; skipped mid-dodge)
+  // face the throw and play a short throw pose (the player's own: a held frame; skipped mid-dodge, and while a shot is being
+  // drawn: a throw doesn't cost you the arrow on the string)
   function pose(dx, dy) {
+    if (P.state === 'draw') return;
     const a = host.yaw, c = Math.cos(a), s = Math.sin(a), l = hypot2(dx, dy) || 1;
     host.PL.faceShot?.((dx * c - dy * s) / l, (dx * s + dy * c) / l);
     if (!host.BUSY.has(P.state)) host.play('lunge', .2);

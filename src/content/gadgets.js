@@ -12,11 +12,11 @@ export const GADGETS = {
   // `keep` of its speed along the ground), rolls to a stop (`roll` m/s2 of friction) and goes off `fuse` s after the throw:
   // combat's explosion (crates break, props are thrown, kegs chain); wood the blast leaves standing may catch
   dynamite: {name: 'Dynamite', col: '#e8483a', cd: 15, range: 10, desc: 'a lit bundle: bounces, rolls, blows up big',
-    fuse: 1.9, r: 3.2, dmg: 95, lead: .75, bounce: .36, keep: .45, roll: 5, ignite: .35},
+    fuse: 1.5, r: 3.2, dmg: 95, lead: .75, bounce: .36, keep: .45, roll: 5, ignite: .35},
   // thrown open; armed after `arm` s; the first enemy that sets foot within `trig` m gets dmg and is held (root s; elites
   // and the champion less); a spent trap stays shut `hold` s after it lets go; unsprung, it rusts away after `life` s
   beartrap: {name: 'Bear Trap', col: '#c8ccd4', cd: 10, range: 7, desc: 'snaps shut on the first enemy: a hard bite and a long hold',
-    lead: .92, arm: .45, trig: .6, dmg: 45, root: 4, rootElite: 2.6, rootBoss: 1.5, life: 30, hold: .8},
+    lead: .92, arm: .45, trig: .6, dmg: 30, root: 4, rootElite: 2.6, rootBoss: 1.5, life: 30, hold: .8},
   // planted where it lands for dur s: every enemy within `lure` m hops at it instead of you (to `stop` m) and whacks it;
   // each whack takes the enemy's damage off its hp; at 0 it falls apart
   scarecrow: {name: 'Scarecrow', col: '#e0b860', cd: 22, range: 9, desc: 'every enemy nearby goes for it instead of you',
