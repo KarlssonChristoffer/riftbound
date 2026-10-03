@@ -48,6 +48,23 @@ function axisRot([x, y, z], a) {
   return [t * x * x + c, t * x * y - s * z, t * x * z + s * y, t * x * y + s * z, t * y * y + c, t * y * z - s * x, t * x * z - s * y, t * y * z + s * x, t * z * z + c];
 }
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+// how far a point inside a capsule must go along the unit direction o to leave it (w: the point - the capsule's start a,
+// u: its axis, L2 = |u|^2, r: radius). The capsule is convex: the one boundary crossing ahead is on its side (the
+// cylinder's far root, axial t in 0..1) or on an end's sphere (t beyond that end)
+function exitAlong(wx, wy, wz, ox, oy, oz, ux, uy, uz, L2, r) {
+  let best = 0;
+  const wu = (wx * ux + wy * uy + wz * uz) / L2, ou = (ox * ux + oy * uy + oz * uz) / L2;
+  const px = wx - ux * wu, py = wy - uy * wu, pz = wz - uz * wu, qx = ox - ux * ou, qy = oy - uy * ou, qz = oz - uz * ou;   // across the axis
+  const A = qx * qx + qy * qy + qz * qz, B = px * qx + py * qy + pz * qz, Cc = px * px + py * py + pz * pz - r * r;
+  if (A > 1e-12 && B * B - A * Cc >= 0) { const s = (-B + Math.sqrt(B * B - A * Cc)) / A, t = wu + s * ou; if (t >= 0 && t <= 1 && s > best) best = s; }
+  for (let e = 0; e < 2; e++) {   // the end spheres (o is a unit vector)
+    const vx = wx - ux * e, vy = wy - uy * e, vz = wz - uz * e, b = vx * ox + vy * oy + vz * oz, c = vx * vx + vy * vy + vz * vz - r * r;
+    if (b * b - c < 0) continue;
+    const s = -b + Math.sqrt(b * b - c), t = wu + s * ou;
+    if ((e ? t >= 1 : t <= 0) && s > best) best = s;
+  }
+  return best;
+}
 
 // the wind the cloth feels (the hero sets it each sim step: the wind feature's numbers or a calm breeze)
 export function setClothWind({wind, gust}) { CLOTH_PARAMS.wind = wind; CLOTH_PARAMS.gust = gust; }
@@ -73,6 +90,16 @@ export const CLOTH_MATERIALS = {
   // [at the shoulders, at the hem]: thick cloth holds its rounded drape instead of collapsing into a ribbon.
   // bendBoth: folds resist crumpling as well as stretching open.
   Cloak: {weight: 2, bend: .9, damping: .985, flutter: .2, wave: 1, retain: [140, 18], bendBoth: true},
+  // the gunslinger's oilskin duster: heavy like the cloak (without an entry it was simulated as silk and streamed out flat
+  // behind him like a wing, flapping in pieces round his legs). hull = m it may be pushed inside its drape, toward the
+  // bone's axis (it may billow out freely): the wind at his back, or backing up, pressed its narrow back panel into the
+  // legs and the hem slipped through the gap between them (in front of his shins, seen from the front). A hull cloth
+  // wraps the legs (#collideOut: the boots showed through the coat on a back kick): boot = m the shins reach past the
+  // ankle, legPad = m the legs are thicker, edge = columns at each side that collide plainly (the coat is open in front:
+  // the legs pass out past its edges, and pushed off through its face the side flaps stuck out at the knees), carry = m
+  // a leg may push it out past its drape (the run's back kick lifts the heel to the knee: carried all the way, the
+  // tails rode up on the heels and stood out flat behind him; past this the heel slips through)
+  Duster: {weight: 2, bend: .9, damping: .985, flutter: .2, wave: 1, retain: [140, 18], bendBoth: true, hull: .05, boot: .1, legPad: .03, edge: 2, carry: .2},
 };
 
 const CAP = 12;   // floats per body capsule in ClothRig.capF
@@ -85,6 +112,8 @@ export class ClothRig {
     this.idx = idx;
     this.cloths = (idx.sim?.cloths || []).map(c => this.#makeCloth(c));
     if (!this.cloths.length) return;   // a set with its cloth baked into the sprites
+    // the legs (a hull cloth wraps them): 1 thigh, 2 shin (its capsule ends at the ankle: the boot goes on past it)
+    this.legs = Uint8Array.from(idx.sim.capsule_names || [], n => /UpLeg$/.test(n) ? 1 : /Leg$/.test(n) ? 2 : 0);
     const y = idx.cam.yaw * Math.PI / 180, p = idx.pitch * Math.PI / 180;
     this.off = [Math.sin(y) * Math.cos(p), -Math.cos(y) * Math.cos(p), Math.sin(p)];   // toward the camera
     this.R = [Math.cos(y), Math.sin(y), 0];                                            // screen right
@@ -115,9 +144,16 @@ export class ClothRig {
     const g = c.grid, rowLen = Math.hypot(...sub(g[rows - 1][0], g[0][0])) / (rows - 1);
     const nl = links.length, lA = new Int32Array(nl), lB = new Int32Array(nl), lL = new Float64Array(nl), lS = new Float64Array(nl);
     links.forEach(([a, b, l, s], i) => { lA[i] = a; lB[i] = b; lL[i] = l; lS[i] = s; });
-    const pin = c.pin_rows * cols;
+    const pin = c.pin_rows * cols, mat = CLOTH_MATERIALS[c.name] || {};
+    // hull: each point's outward direction off the bone's axis, in bone space (the grid's x, z: y runs along the bone)
+    // -> `out` in the world each frame (update)
+    let rad = null, out = null;
+    if (mat.hull) {
+      rad = new Float64Array(n * 3); out = new Float64Array(n * 3);
+      for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) { const v = g[r][k], l = Math.hypot(v[0], v[2]) || 1, i = (r * cols + k) * 3; rad[i] = v[0] / l; rad[i + 2] = v[2] / l; }
+    }
     return {def: c, rows, cols, n, links, lA, lB, lL, lS, pos: null, prev: null, pin, rowLen, seed: this.cloths?.length * 2.1 || 0,
-            colours: c.colours.map(hex), bias: c.bias ?? 0, mat: CLOTH_MATERIALS[c.name] || {},
+            colours: c.colours.map(hex), bias: c.bias ?? 0, mat, rad, out,
             goal: Array.from({length: n}, () => [0, 0, 0]), from: Array.from({length: pin}, () => [0, 0, 0])};
   }
 
@@ -157,7 +193,7 @@ export class ClothRig {
     }
     this.nCap = nc;
     for (const C of this.cloths) {
-      const M = sim.mats[C.def.bone], all = !!C.mat.retain;
+      const M = sim.mats[C.def.bone], all = !!(C.mat.retain || C.out);
       // snaps: facing steps (360/N, a reversal is 180 deg in 1-2 frames) and pose switches (a 90 deg torso twist for a
       // moving shot) turn the bone the cloth hangs from in ONE frame. Turn the whole cloth with it about the bone
       // (pos and prev together: no velocity injected), keeping only turnLag of the turn as real lag; small per-frame
@@ -183,6 +219,13 @@ export class ClothRig {
           const v = grid[r][k], g = G[r * cols + k];
           const px = M[0] * v[0] + M[1] * v[1] + M[2] * v[2] + M[3], py = M[4] * v[0] + M[5] * v[1] + M[6] * v[2] + M[7], pz = M[8] * v[0] + M[9] * v[1] + M[10] * v[2] + M[11];
           g[0] = fc * px - fs * py + ox; g[1] = fs * px + fc * py + oy; g[2] = pz + 0;
+        }
+      }
+      if (C.out) {   // the hull's outward directions on this pose (the bone's turn, then the facing's)
+        const D = C.rad, O = C.out;
+        for (let i = 0; i < C.n * 3; i += 3) {
+          const x = M[0] * D[i] + M[2] * D[i + 2], y = M[4] * D[i] + M[6] * D[i + 2], z = M[8] * D[i] + M[10] * D[i + 2], l = hypot3(x, y, z) || 1;
+          O[i] = (fc * x - fs * y) / l; O[i + 1] = (fs * x + fc * y) / l; O[i + 2] = z / l;
         }
       }
       if (!C.pos) { C.pos = G.map(p => p.slice()); C.prev = G.map(p => p.slice()); }
@@ -261,7 +304,10 @@ export class ClothRig {
         if (wa) { pa[0] += dx * k * wa; pa[1] += dy * k * wa; pa[2] += dz * k * wa; }
         if (wb) { pb[0] -= dx * k * wb; pb[1] -= dy * k * wb; pb[2] -= dz * k * wb; }
       }
-      for (let i = pin; i < pos.length; i++) this.#collide(pos[i]);
+      if (C.out) {   // (a hull cloth's M.edge columns at each side collide plainly)
+        const cols = C.cols, e = M.edge || 0;
+        for (let i = pin; i < pos.length; i++) { const k = i % cols; if (k >= e && k < cols - e) this.#collideOut(C, i, M); else this.#collide(pos[i]); }
+      } else for (let i = pin; i < pos.length; i++) this.#collide(pos[i]);
     }
   }
 
@@ -279,6 +325,13 @@ export class ClothRig {
       if (wa) { pa[0] += dx * k; pa[1] += dy * k; pa[2] += dz * k; }
       if (wb) { pb[0] -= dx * k; pb[1] -= dy * k; pb[2] -= dz * k; }
     }
+    // the hull: no deeper than M.hull inside the drape (toward the body), whatever pressed it there
+    const O = C.out; if (!O) return;
+    const hull = C.mat.hull, G = C.goal;
+    for (let i = pin; i < pos.length; i++) {
+      const p = pos[i], g = G[i], j = i * 3, d = (p[0] - g[0]) * O[j] + (p[1] - g[1]) * O[j + 1] + (p[2] - g[2]) * O[j + 2] + hull;
+      if (d < 0) { p[0] -= O[j] * d; p[1] -= O[j + 1] * d; p[2] -= O[j + 2] * d; }
+    }
   }
 
   #collide(p) {
@@ -294,6 +347,35 @@ export class ClothRig {
       // push out, but at most 4 mm per pass: when the body snaps to a new facing its capsules teleport into the cloth,
       // and a full push-out in one step would fling it (it resolves over a few substeps instead)
       if (l < r && l > 1e-6) { const k = Math.min(r - l, .004) / l; p[0] += d0 * k; p[1] += d1 * k; p[2] += d2 * k; }
+    }
+    if (p[2] < .01) p[2] = .01;
+  }
+
+  // #collide for a hull cloth (point i of C, M: its material). The legs are inside the coat: a point inside a leg leaves
+  // outward (its drape's outward direction, level: a hanging coat is pushed aside, never lifted), to the leg's surface on
+  // that side, however the leg got there (kicked back through the coat faster than a capped push follows, or end-on:
+  // the shin of a back kick points at the coat, and pushed out sideways the cloth slid round it and the boot showed
+  // through), until it is M.carry out past its drape. (Not along the cloth's own normal: a roll flips the coat over, and
+  // pushed through its flipped face it stayed up on his shoulders.) Where the drape's direction is mostly vertical (a
+  // dive: the chest faces down), and past M.carry, it collides plainly. The shins reach M.boot past the ankle (the boot),
+  // the legs are M.legPad thicker. All but 4 mm of the move is carried by its last position too (no fling). Arms stay
+  // outside the coat: they push it as #collide does
+  #collideOut(C, i, M) {
+    const F = this.capF, th = CLOTH_PARAMS.thickness, legs = this.legs, p = C.pos[i], q = C.prev[i], O = C.out, j = i * 3, G = C.goal[i];
+    const pad = M.legPad || 0, boot = M.boot || 0, carry = M.carry ?? 1e9, hl = hypot2(O[j], O[j + 1]), ox = O[j] / (hl || 1), oy = O[j + 1] / (hl || 1), level = hl > .5;
+    for (let ci = 0, o = 0; ci < this.nCap; ci++, o += CAP) {
+      const lg = legs[ci], ext = lg === 2 ? boot : 0, r = F[o + 7] + (lg ? pad : 0) + th;
+      const ex = p[0] - F[o + 8], ey = p[1] - F[o + 9], ez = p[2] - F[o + 10], R = F[o + 11] + ext + r + 1e-6;
+      if (ex * ex + ey * ey + ez * ez > R * R) continue;
+      const k = ext ? 1 + ext / (2 * F[o + 11] || 1) : 1, ax = F[o], ay = F[o + 1], az = F[o + 2];
+      const abx = F[o + 3] * k, aby = F[o + 4] * k, abz = F[o + 5] * k, L2 = F[o + 6] * k * k;
+      const t = Math.max(0, Math.min(1, ((p[0] - ax) * abx + (p[1] - ay) * aby + (p[2] - az) * abz) / L2));
+      const d0 = p[0] - (ax + abx * t), d1 = p[1] - (ay + aby * t), d2 = p[2] - (az + abz * t), l = hypot3(d0, d1, d2);
+      if (l >= r) continue;
+      if (lg && level && (p[0] - G[0]) * ox + (p[1] - G[1]) * oy < carry) {
+        const s = exitAlong(p[0] - ax, p[1] - ay, p[2] - az, ox, oy, 0, abx, aby, abz, L2, r);
+        if (s > 0) { const c = Math.max(0, s - .004); p[0] += ox * s; p[1] += oy * s; q[0] += ox * c; q[1] += oy * c; }
+      } else if (l > 1e-6) { const c = Math.min(r - l, .004) / l; p[0] += d0 * c; p[1] += d1 * c; p[2] += d2 * c; }
     }
     if (p[2] < .01) p[2] = .01;
   }
