@@ -40,15 +40,15 @@ export const TUNE = {
   bits: {max: 320},
   // where a bullet ends, by what it met (surfaceOf). bits: [palette, n, speed (m/s, back off the face toward the
   // shooter, and sideways), up [lo, hi] m/s, life [lo, hi] s, gravity]; along: x speed carried on along its way;
-  // puff: [tint, n, size m, life [lo, hi] s] (HD); spark: [chance, n lo, n hi]
+  // puff: [tint, n, size m, life [lo, hi] s, rise m/s] (HD: a dirt hit spurts up); spark: [chance, n lo, n hi]
   impact: {
-    sand:  {bits: ['sand', 11, 1.2, [.8, 2.8], [.3, .6], 7], along: .45, puff: ['sand', 2, .09, [.45, .8]], spark: [0, 0, 0]},
-    dirt:  {bits: ['dirt', 9, 1.1, [.6, 2.3], [.25, .5], 7], along: .35, puff: ['dirt', 1, .08, [.35, .6]], spark: [0, 0, 0]},
-    snow:  {bits: ['snow', 9, 1, [.6, 2.4], [.3, .6], 6], along: .3, puff: ['snow', 2, .09, [.4, .7]], spark: [0, 0, 0]},
-    stone: {bits: ['stone', 7, 2, [.6, 2.4], [.35, .7], 9], along: .1, puff: ['stone', 1, .07, [.3, .55]], spark: [.35, 2, 4]},
-    adobe: {bits: ['adobe', 8, 1.8, [.5, 2.2], [.35, .7], 9], along: .1, puff: ['adobe', 2, .08, [.35, .65]], spark: [.12, 1, 3]},
-    wood:  {bits: ['wood', 6, 1.8, [.6, 2.6], [.4, .8], 9], along: .2, puff: ['wood', 1, .06, [.25, .45]], spark: [0, 0, 0]},
-    metal: {bits: null, along: .2, puff: ['stone', 1, .05, [.2, .35]], spark: [1, 5, 8]},
+    sand:  {bits: ['sand', 16, 1.3, [1.2, 3.4], [.35, .7], 8], along: .45, puff: ['sand', 3, .12, [.5, .9], .8], spark: [0, 0, 0]},
+    dirt:  {bits: ['dirt', 13, 1.2, [1, 3], [.3, .6], 8], along: .35, puff: ['dirt', 2, .1, [.4, .7], .6], spark: [0, 0, 0]},
+    snow:  {bits: ['snow', 12, 1, [.8, 2.8], [.3, .6], 6], along: .3, puff: ['snow', 3, .1, [.45, .8], .6], spark: [0, 0, 0]},
+    stone: {bits: ['stone', 8, 2, [.6, 2.4], [.35, .7], 9], along: .1, puff: ['stone', 2, .07, [.3, .55], .35], spark: [.35, 2, 4]},
+    adobe: {bits: ['adobe', 9, 1.8, [.5, 2.2], [.35, .7], 9], along: .1, puff: ['adobe', 2, .09, [.35, .65], .45], spark: [.12, 1, 3]},
+    wood:  {bits: ['wood', 7, 1.8, [.6, 2.6], [.4, .8], 9], along: .2, puff: ['wood', 1, .06, [.25, .45], .3], spark: [0, 0, 0]},
+    metal: {bits: null, along: .2, puff: ['stone', 1, .05, [.2, .35], .2], spark: [1, 5, 8]},
   },
   sparks: {speed: [2.5, 6.5], up: [.4, 3], life: [.08, .24], grav: 9, streak: .022},   // streak: s of its travel each spark draws
   holes: {max: 48, life: 7, fade: 2, back: .03},   // in walls, props, trees: s shown, the last s fading, m off the face
@@ -72,7 +72,7 @@ for (const [k, list] of Object.entries(PALS)) { BASE[k] = COLS.length; for (cons
 const HOLE = {stone: ['#34302e', '#d8d2c8'], adobe: ['#4a3628', '#e4cca8'], wood: ['#2a1c12', '#d8b080'], metal: ['#26262a', '#d0d4dc']};
 const HOLES = Object.keys(HOLE), HCOL = HOLES.map(k => HOLE[k].map(rgbOf));
 // the puffs' tints (HD; made once as sprites): gun smoke, then each material's dust
-const TINTS = {smoke: [236, 232, 224], sand: [222, 202, 162], dirt: [192, 176, 150], snow: [246, 248, 255], stone: [208, 204, 198], adobe: [222, 196, 162], wood: [208, 186, 150]};
+const TINTS = {smoke: [236, 232, 224], sand: [244, 232, 202], dirt: [218, 202, 174], snow: [246, 248, 255], stone: [208, 204, 198], adobe: [222, 196, 162], wood: [208, 186, 150]};
 const TINT = Object.keys(TINTS);
 const R = Math.random, RR = (a, b) => a + R() * (b - a);   // presentation's randomness
 // a bullet in flight as a streak behind its head (x, y, h; u: its unit direction), L m long at most (how far it has
@@ -215,7 +215,7 @@ export async function create(host) {
         bit(x, y, h + lift, -ux * back + ux * on - uy * side, -uy * back + uy * on + ux * side, RR(up[0], up[1]), RR(life[0], life[1]), b0 + i % 3, grav);
       }
     }
-    if (I.puff) { const [tint, n, size, life] = I.puff, k = TINT.indexOf(tint); for (let i = 0; i < n; i++) puff(x - ux * .05, y - uy * .05, h + .05 + i * .04, -ux * RR(.2, .6) + RR(-.2, .2), -uy * RR(.2, .6) + RR(-.2, .2), RR(.15, .4), RR(life[0], life[1]), size * RR(.8, 1.2), .7, k, 1.3); }
+    if (I.puff) { const [tint, n, size, life, rise] = I.puff, k = TINT.indexOf(tint); for (let i = 0; i < n; i++) puff(x - ux * .05, y - uy * .05, h + .05 + i * .05, -ux * RR(.2, .6) + RR(-.2, .2), -uy * RR(.2, .6) + RR(-.2, .2), rise * RR(.5, 1.3), RR(life[0], life[1]), size * RR(.8, 1.2), .7, k, 1.8); }
     const [pS, n0, n1] = I.spark;
     if (pS && R() < pS) {   // sparks: glowing streaks bouncing back off the face
       const S = TUNE.sparks, n = Math.round(RR(n0, n1)), b0 = BASE.spark;
