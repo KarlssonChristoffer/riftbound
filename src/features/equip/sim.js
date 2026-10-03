@@ -25,7 +25,8 @@
 //   the game HUD's float / toast.
 // EMITS: equip.throw / bounce / land / shatter / puff / blast / fizzle / snap / hit / break / latch / pick (core/events.js).
 // BUDGET: sim; a few things out at once, each a handful of grid queries a step (~.01-.03 ms a step measured with all six out).
-import {GADGETS, GADGET_IDS, SHOP, THROW} from '../../content/gadgets.js';
+import {GADGETS, GADGET_IDS, SHOP, THROW, fits} from '../../content/gadgets.js';
+import {createLassoSim} from './lasso.js';
 import {mulberry32} from '../../core/rng.js';
 import {clamp, hypot2, TAU} from '../../core/mathx.js';
 import {PROP_TOP} from '../../world/world.js';
@@ -52,6 +53,9 @@ export function createEquipSim(host) {
     mode: '', run: null, stage: -1, cacheDue: false, start: null,   // start: the gadget a run / the sandbox begins with (the flag)
     aim: {x: 0, y: 0, z: 0, d: 0, who: null, prop: null, ax: 0, ay: 0, ah: 0, stop: 0, ground: true},   // where a throw would land (filled while aiming)
   };
+  // the lasso (a gun loadout's: features/equip/lasso.js) is a gadget of its own kind: it gets F while it's in the slot or busy
+  let anchorsOf = null;   // (the lasso's own anchors: set by the feature, features/equip/anchors.js)
+  const lasso = createLassoSim(host, {S, R, dmgK: () => dmgK(), creature: p => creature(p), anchors: () => anchorsOf?.()});
   const air = [];      // thrown, in the air / bouncing / rolling: {id, x, y, h, vx, vy, vh, t, fuse, rest, spin, ...}
   const pools = [];    // fire: {x, y, z, r, t, dur, tick, lit: [props set alight]}
   const traps = [];    // {x, y, z, t, state: set | armed | shut | spent, who, hold, gone}
@@ -159,6 +163,7 @@ export function createEquipSim(host) {
   // ---------------------------------------------------------------- the throw
   function press() {
     if (!S.on || host.lock) return;
+    if (S.slot?.id === 'lasso' || lasso.busy) { lasso.press(); return; }   // (the lasso reads F its own way: features/equip/lasso.js)
     const sl = S.slot;
     if (!sl || sl.cd > 0 || hook) { S.deny = .3; return; }
     S.aiming = true; S.aimT = 0; S.fUp = false;
@@ -500,13 +505,15 @@ export function createEquipSim(host) {
   const SP = {x: 0, y: 0};
   function take(id, cd, from, bought) {
     const old = S.slot;
+    if (lasso.busy && id !== 'lasso') lasso.clear();
     S.slot = {id, cd};
     if (old) { const s = spot(P.x, P.y, from); drop(old.id, old.cd, s.x, s.y); }
     S.aiming = false; S.ready = .3;
     events.push({type: 'equip.pick', x: P.x, y: P.y, gadget: id, bought: !!bought});
     const G = GADGETS[id]; gameF()?.ui?.toast?.(G.name, G.desc + ' · F', G.col);
   }
-  const otherThan = id => { let n = 0; for (let k = 0; k < 6; k++) { const c = GADGET_IDS[(R() * GADGET_IDS.length) | 0]; if (c !== id || ++n > 4) return c; } return GADGET_IDS[0]; };
+  const otherThan = id => { let n = 0; for (let k = 0; k < 12; k++) { const c = GADGET_IDS[(R() * GADGET_IDS.length) | 0]; if (!fits(c, host.weapon)) continue; if (c !== id || ++n > 4) return c; } return GADGET_IDS[0]; };
+  const firstOf = () => host.weapon?.kind === 'gun' ? 'lasso' : GADGET_IDS[0];   // what a run / the sandbox starts with (a cowboy: the lasso)
   const cost = stage => Math.round((SHOP.cost + SHOP.perStage * stage) / 5) * 5;
   function placeCache(stage) {
     const L = host.layout, ring = L.ring || L.spawn, c = core();
@@ -543,11 +550,11 @@ export function createEquipSim(host) {
     if (g.mode !== S.mode) {
       const was = S.mode; S.mode = g.mode;
       if (was) clearWorld();
-      if (g.mode === 'sandbox' && !S.slot) S.slot = {id: S.start || GADGET_IDS[0], cd: 0};
+      if (g.mode === 'sandbox' && !S.slot) S.slot = {id: S.start || firstOf(), cd: 0};
     }
     if (g.mode !== 'run' || !g.run) return;
     const run = g.run;
-    if (run !== S.run) { S.run = run; S.stage = -1; S.slot = S.start ? {id: S.start, cd: 0} : null; clearWorld(); }
+    if (run !== S.run) { S.run = run; S.stage = -1; S.slot = S.start ? {id: S.start, cd: 0} : host.weapon?.kind === 'gun' ? {id: 'lasso', cd: 0} : null; clearWorld(); }
     if (run.stage !== S.stage) { S.stage = run.stage; clearWorld(); S.cacheDue = true; }
     if (S.cacheDue && g.phase !== 'travel') { S.cacheDue = false; placeCache(run.stage); }
     // a chest now and then holds a gadget: it lands beside it
@@ -563,7 +570,7 @@ export function createEquipSim(host) {
     for (const d of drops) ents.remove(d.p);
     drops.length = 0;
     if (cache) { ents.remove(cache.p); cache = null; }
-    hook = null; burning.clear(); wander.clear(); airWas.clear(); lured.clear();
+    hook = null; burning.clear(); wander.clear(); airWas.clear(); lured.clear(); lasso.clear();
     S.aiming = false; S.queued = 0; S.inSmoke = false; S.smokeT = 0;
     if (S.speedOn) { S.speedOn = false; host.mods.clear('equip.smoke'); }
   }
@@ -580,7 +587,8 @@ export function createEquipSim(host) {
     S.deny = Math.max(0, S.deny - dt); S.ready = Math.max(0, S.ready - dt); S.cast = Math.max(0, S.cast - dt);
     // F held: aiming (the view shows where it lands); let go (its keyup: the menu clearing the held keys isn't a throw):
     // thrown. Mid-leap / climbing / knocked it waits (up to .5 s)
-    if (S.aiming) {
+    if (sl?.id === 'lasso' || lasso.busy) lasso.update(dt, evs);
+    else if (S.aiming) {
       if (host.lock || !sl || sl.cd > 0) S.aiming = false;
       else {
         S.aimT += dt; target(GADGETS[sl.id], S.aim);
@@ -593,7 +601,8 @@ export function createEquipSim(host) {
   }
 
   return {
-    S, air, pools, traps, crows, clouds, drops, burning, lured, get hook() { return hook; }, get cache() { return cache; },
+    S, air, pools, traps, crows, clouds, drops, burning, lured, lasso, get hook() { return hook; }, get cache() { return cache; },
+    setAnchors(fn) { anchorsOf = fn; },
     cloudR, inCloud, update, press, clearWorld,
     // on / off (the feature's switch): off clears everything it put in the world and its lure and note
     setOn(on) {
@@ -601,7 +610,7 @@ export function createEquipSim(host) {
       S.on = on;
       if (!on) { clearWorld(); if (lureOff) { lureOff(); lureOff = null; } S.mode = ''; S.run = null; S.stage = -1; }
     },
-    give(id) { if (!GADGETS[id]) { S.slot = null; return; } const cd = S.slot?.id === id ? S.slot.cd : 0; S.slot = {id, cd}; S.aiming = false; S.ready = .3; },
+    give(id) { if (lasso.busy && id !== 'lasso') lasso.clear(); if (!GADGETS[id]) { S.slot = null; return; } const cd = S.slot?.id === id ? S.slot.cd : 0; S.slot = {id, cd}; S.aiming = false; S.ready = .3; },
     interact(p) {
       if (!S.on) return false;
       if (cache && p === cache.p && !cache.spent) { buy(); return true; }

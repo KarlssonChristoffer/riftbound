@@ -10,6 +10,7 @@
 //   const pa = createPlayerHost({...}); const {PL, P, player} = pa
 import {createPlayer} from './player.js';
 import {createGun} from './gun.js';   // a gun loadout's revolver (player.js H.gun)
+import {createLasso} from './lasso.js';   // the equipment experiment's lasso in his hands (player.js H.lasso)
 import {walkable, elev, inStream, PLATEAUS} from '../../world/world.js';
 
 const R_BODY = .25;
@@ -39,6 +40,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   const PL = createPlayer({
     ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, mods, plateaus: plateausV, wind: windV,
     weapon: () => hero.weapon, gun: createGun,   // the loadout's weapon (content/weapons.js) and, for a gun, its revolver
+    lasso: createLasso, yaw: () => cv.yaw,      // the lasso's hands (idle unless features/equip/lasso.js uses them); the camera's yaw (its swing is in the world)
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
     elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
     inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
@@ -79,6 +81,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     if (P.rollDir) P.rollDir = rot(...P.rollDir);
     if (P.back) P.back = rot(...P.back);
     if (P.leap) { [P.leap.x0, P.leap.y0] = rot(P.leap.x0, P.leap.y0); [P.leap.dx, P.leap.dy] = rot(P.leap.dx, P.leap.dy); }
+    // (the lasso's swing keeps its state in the world and writes P from it every step: nothing of it to turn)
     faceAcc -= d / (2 * Math.PI / ND);
     const n = Math.round(faceAcc);
     if (n) { P.face = (((P.face + n) % ND) + ND) % ND; P.want = (((P.want + n) % ND) + ND) % ND; faceAcc -= n; }

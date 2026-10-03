@@ -26,6 +26,8 @@
 //   events []                          pushes {type: 'player.step'|'player.land'|'player.jump'|'player.splash', x, y, ...} (core/events.js)
 //   shake(px, sec)
 //   gun(PL, internals) -> a revolver (sim/player/gun.js createGun): while the loadout's weapon is a gun it gets LMB and the frame
+//   lasso(PL, internals) -> the lasso's hands (sim/player/lasso.js createLasso): while the equipment experiment's lasso has
+//            something to do it drives the frame (before the gun); PL.lasso is its API
 import {WEAPONS} from '../../content/weapons.js';   // the bow's numbers (shoot)
 import {ramps} from './harmonize.js';   // the character palette (pixel bow layer)
 import {clamp} from '../../core/mathx.js';
@@ -38,8 +40,9 @@ const TURN_RATE = 900;  // deg/s: locomotion (walking / standing turns)
 // the target: it looked smoother but the user found it slow and clumsy to aim.)
 const AIM_TURN_RATE = 1200;
 const STANCE_HOLD = .25;  // s: a moving-aim stance (running forward / backing up) can't flip back sooner (no flip-flop)
-// states in which the player is taken over by a move (no aiming, rolling or new actions)
-export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'splash', 'hold', 'knock']);
+// states in which the player is taken over by a move (no aiming, rolling or new actions); 'rope': hanging from a lasso
+// (sim/player/lasso.js, the equipment experiment's)
+export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'splash', 'hold', 'knock', 'rope']);
 // The dodge (Space). The roll clip is a FORWARD roll, so a roll never reverses:
 // - running into a roll more than leadMin deg off the way he faces: he plants and turns first (the run's turn frames,
 //   lead s each, untouchable from the plant)
@@ -437,6 +440,7 @@ export function createPlayer(H) {
     const {SP, CLIP} = A, WALK = CLIP.walk, RUN = CLIP.run, ND = A.ND;
     const [mx, my] = moveInput();
     P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt);
+    if (lasso && lasso.step(dt, mx, my)) return;   // the lasso in his hands (sim/player/lasso.js; nothing while it's idle)
     if (gun && gun.step(dt, mx, my)) return;   // a gun loadout: the revolver drives the frame while it's in hand (sim/player/gun.js)
     if (stepTraverse(dt)) return;
     if (P.state === 'roll' && P.t < 0) {
@@ -858,9 +862,12 @@ export function createPlayer(H) {
     g.restore();
   }
   // a gun loadout's revolver (H.gun: sim/player/gun.js) gets the player's internals; the bow's code above stays as it is
-  const gun = H.gun ? H.gun(PL, {P, A, H, has, ev, dirOf, vecOf, turnToward, moveBy, moveInput, cursorAim, puff, stepTraverse, angDiff,
-    SPEED, BUSY, AIM_TURN_RATE, TURN_RATE, AIM_H}) : null;
+  const internals = {P, A, H, has, ev, dirOf, vecOf, turnToward, moveBy, moveInput, cursorAim, puff, stepTraverse, angDiff,
+    SPEED, BUSY, AIM_TURN_RATE, TURN_RATE, AIM_H};
+  const gun = H.gun ? H.gun(PL, internals) : null;
   PL.gun = gun;
+  const lasso = H.lasso ? H.lasso(PL, internals) : null;   // (the equipment experiment's lasso: sim/player/lasso.js)
+  PL.lasso = lasso;
 
   // for the systems around him (they ask, they don't write P): face a shot along a view-frame direction (the string
   // settles: twang 0), flicker as he's hurt (i-frames; the respawn's flicker too), re-count the facings for an atlas

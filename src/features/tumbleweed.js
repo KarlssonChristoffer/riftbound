@@ -55,6 +55,7 @@ const TUNE = {
   player: {r: .3, kick: 1.3, max: 5, up: [1.1, 1.9], roll: 1.4},   // his body radius, the push off him (x his speed, at most max m/s), the hop, x when he rolls into it
   arrow: {kick: .14, max: 4, up: [1.2, 2]},   // x the arrow's speed, at most max m/s; the hop
   sound: {hard: 1.5, near: 10, every: .3},   // a bounce is heard: coming down faster than this (m/s), within this of the player (m), this often (s)
+  tow: {k: 9, max: 11, grip: 9},  // on a lasso (features/equip/lassolook.js: snag / tow / unsnag): pulled toward the loop at k x the distance (at most max m/s), its grip (1/s)
   water: {sink: .5, flow: .5, wind: .25, rate: .8},       // floating: share of it under, the creek's pace (m/s), the wind's share
   ROLL: 16,                       // frames a turn
   // the tangle (tools: tmp/western/life/tools/twsheet.mjs previews it offline): twigs (+ random up to) x (size / .34)^k, how many of
@@ -143,7 +144,7 @@ export async function create(host) {
   // ================================================================ the weeds: a fixed pool
   const MAXN = TUNE.n.max + 2, weeds = [];
   for (let i = 0; i < MAXN; i++) weeds.push({on: false, v: 0, r: .3, x: 0, y: 0, h: 0, gz: 0, vx: 0, vy: 0, vh: 0, th: 0, w: 0, bin: 0, sgn: 1, hopIn: 1,
-    st: 'roll', lodge: 0, nx: 0, ny: 0, age: 0, wet: 0, fall: false, hit: null, kick: 0});
+    st: 'roll', lodge: 0, nx: 0, ny: 0, age: 0, wet: 0, fall: false, hit: null, kick: 0, tow: null});   // tow: on a lasso (F.snag)
   F.weeds = weeds;
   let biomeOn = false, T = 0, spawnIn = 1, wanted = 0, count = 0, waterH = -.18, dustF = null, wallH = 1.2, arrows = null;   // (dustF: the dust feature, looked up once)
   // the player, read once a view step (host.player's getters turn his view frame into the world's on every read)
@@ -187,7 +188,7 @@ export async function create(host) {
       const x = vx * RX + vy * FX, y = vx * RY + vy * FY, v = R() < .25 ? 0 : R() < .55 ? 1 : 2, r = TUNE.size[v];
       if (blockedAt(x, y, r)) continue;
       w.at(x, y, WA);
-      q.on = true; q.v = v; q.r = r; q.x = x; q.y = y; q.gz = 0; q.h = rr(0, .3); q.vh = rr(0, 1);
+      q.on = true; q.tow = null; q.v = v; q.r = r; q.x = x; q.y = y; q.gz = 0; q.h = rr(0, .3); q.vh = rr(0, 1);
       q.vx = WA.x * TUNE.push * rr(.6, 1); q.vy = WA.y * TUNE.push * rr(.6, 1); q.th = R() * TAU; q.w = 0; q.sgn = 1;
       q.bin = ((Math.round(Math.atan2(q.vx * FX + q.vy * FY, q.vx * RX + q.vy * RY) / (Math.PI / 4)) % 8) + 8) % 8;
       q.hopIn = rr(TUNE.hop.every[0], TUNE.hop.every[1]); q.st = 'roll'; q.lodge = 0; q.age = 0; q.wet = 0; q.fall = false; q.hit = null; q.kick = 0;
@@ -287,6 +288,7 @@ export async function create(host) {
     const gust = WA.g * lv;
     const dust = dustF ??= host.feature('dust') || false, sw = dust && dust.on && dust.swirl ? dust.swirl(q.x, q.y, SW) : null;
     if (sw) { tx += sw.x; ty += sw.y; if (sw.up > 0 && q.vh < sw.up * 2.2) q.vh += sw.up * 9 * dt; }
+    if (q.tow) { const dx = q.tow.x - q.x, dy = q.tow.y - q.y, d = hypot2(dx, dy), k = Math.min(P0.tow.max, d * P0.tow.k) / (d || 1); tx = dx * k; ty = dy * k; }   // (on a lasso: the loop pulls, not the wind)
     const air = q.h > .02 || q.vh > 0;
     // ---- the water: afloat, drifting with the creek
     if (!q.fall && q.h < .1 && host.inStream(q.x, q.y)) {
@@ -318,7 +320,7 @@ export async function create(host) {
       const ts = hypot2(tx, ty), sp = hypot2(q.vx, q.vy);
       if (ts < P0.still * P0.push && sp < ts + .2) {   // a lull: rolling to a stop
         const dec = Math.min(sp, P0.stop * dt); if (sp > 1e-4) { q.vx -= q.vx / sp * dec; q.vy -= q.vy / sp * dec; }
-      } else { const k = Math.min(1, dt * P0.grip); q.vx += (tx - q.vx) * k; q.vy += (ty - q.vy) * k; }
+      } else { const k = Math.min(1, dt * (q.tow ? P0.tow.grip : P0.grip)); q.vx += (tx - q.vx) * k; q.vy += (ty - q.vy) * k; }
       // hops: every so far rolled (higher the faster), a big one off a gust
       q.hopIn -= sp * dt;
       if (q.hopIn <= 0 && sp > .5) { q.vh = rr(P0.hop.v[0], P0.hop.v[1]) + sp * rr(P0.hop.k[0], P0.hop.k[1]); q.hopIn = rr(P0.hop.every[0], P0.hop.every[1]); }
@@ -412,7 +414,18 @@ export async function create(host) {
       SP.x = q.x; SP.y = q.y; SP.h = y; host.sprite(SP);
     }
   };
-  F.biomeChanged = () => { for (const q of weeds) q.on = false; count = 0; spawnIn = 1; };
+  // ON A LASSO (features/equip/lassolook.js, a view like this one): snag(x, y, r) takes the nearest weed within r m (it then
+  // rolls after its tow point instead of the wind) -> it, or null; tow(q, x, y) moves the point; unsnag(q, up) lets it go
+  // with a hop (m/s). A weed that leaves the pool is let go
+  F.snag = (x, y, r) => {
+    if (!F.on || !biomeOn) return null;
+    let best = null, bd = r; for (const q of weeds) { if (!q.on || q.fall || q.tow) continue; const d = hypot2(q.x - x, q.y - y); if (d < bd) { bd = d; best = q; } }
+    if (best) { best.tow = {x, y}; best.st = 'roll'; best.lodge = 0; best.vh = Math.max(best.vh, 1.6); best.age = 0; }
+    return best;
+  };
+  F.tow = (q, x, y) => { if (q.on && q.tow) { q.tow.x = x; q.tow.y = y; q.age = 0; } return q.on; };
+  F.unsnag = (q, up = 1.2) => { if (!q.tow) return; q.tow = null; q.vh = Math.max(q.vh, up); };
+  F.biomeChanged = () => { for (const q of weeds) { q.on = false; q.tow = null; } count = 0; spawnIn = 1; };
   F.toggle = () => { F.on = !F.on; if (!F.on) F.biomeChanged(); return F.on; };
   F.info = () => ({on: F.on, desert: biomeOn, wanted, count, weeds: weeds.filter(q => q.on).map(q => ({x: +q.x.toFixed(2), y: +q.y.toFixed(2), h: +q.h.toFixed(2), st: q.st, v: +hypot2(q.vx, q.vy).toFixed(2), age: +q.age.toFixed(1)}))});
   F.TUNE = TUNE;

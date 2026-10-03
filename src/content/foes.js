@@ -65,6 +65,8 @@ export const TUNE = {
     chest: 1.1,          // m: where on you they aim
     hitFront: 90,        // deg: a hit whose way comes from within this of his facing is from the front (hit_f / die_b)
     hitGap: .12,         // s: hits closer than this after the last one start no new reaction (a fanned cylinder: one flinch)
+    roped: .3,           // x his walk: on a lasso (features/equip/lasso.js) he leans away from you this slowly, his gun put away
+    getUp: .55,          // s: knocked off his feet by a lasso's yank, he lies its stun, then takes this long to get up
   },
   // you, as their bullets see you: a round body this wide between these heights (the dodge roll's i-frames let them by)
   body: {r: .3, h0: .1, h1: 1.75},

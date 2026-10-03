@@ -159,7 +159,7 @@ export function createLook(host, sim) {
   // ---------------------------------------------------------------- per gunman: the view's own state
   const VS = new Map();   // entity -> {f, tw, ph, pose, face0, hpShow, idle}
   const vsOf = p => { let v = VS.get(p); if (!v) VS.set(p, v = {f: 0, tw: 'gun_aim', twm: '0', back: false, ph: 0, pose: 'idle.0', hpShow: p.hp, idle: (p.x * 7.3 + p.y * 3.1) % 1, seen: 0, hx: 0, hy: 0, face: 0,
-    nx: 0, ny: 0, nt: 9, rs: -1, rph: '', ram: 0}); return v; };   // nx / ny / nt: a bullet's shove (its way, its age); rs: the reload clip's next step to say a mark for (-1: not reloading); rph / ram: the phase and rounds last seen
+    nx: 0, ny: 0, nt: 9, rs: -1, rph: '', ram: 0, dox: 0, doy: 0, dl: 0, de: 0}); return v; };   // dox / doy / dl / de: knocked down (downPose)   // nx / ny / nt: a bullet's shove (its way, its age); rs: the reload clip's next step to say a mark for (-1: not reloading); rph / ram: the phase and rounds last seen
   const SC = [0, 0, 0], SM = [0, 0, 0];
   let yaw = 0, z = 1;
   const faceOf = (set, w) => { const n = set.ND; return ((Math.round((w - yaw) / (TAU / n)) % n) + n) % n; };   // world angle -> the atlas's facing at this yaw
@@ -364,8 +364,25 @@ export function createLook(host, sim) {
       G.ao(Math.round(SC[0]) - 9 * z, Math.round(SC[1]) - 2 * z, z, alpha * (1 - lie), BLOB.r);
     }
   }
+  // KNOCKED DOWN (the sim's g.down: a lasso's yank, features/equip/lasso.js): flying, `fall`; on the ground, die_b from his
+  // knees down to lying (placed as a corpse is: back by the clip's root shift, its lift and lie), held while he's stunned;
+  // getting up, the same frames backward, then a crouch
+  function downPose(set, g, v) {
+    const D = g.down; v.f = faceOf(set, g.face);
+    if (D.ph === 'fly') return set.has('fall') ? 'fall' : set.has('land') ? 'land' : 'idle.0';
+    const clip = set.ok('die_b') ? 'die_b' : null;
+    if (!clip) return set.has('crouch') ? 'crouch' : 'idle.0';
+    const L = set.tl(clip), t0 = L.ends[Math.min(3, L.n - 1)], k = D.ph === 'up' ? D.t / sim.TUNE_GETUP : 0;
+    if (k > .7) return set.has('crouch') ? 'crouch' : 'idle.0';
+    const tc = D.ph === 'lie' ? Math.min(L.total - .001, t0 + D.t * 1.5) : L.total - .001 - (L.total - .001 - t0) * k / .7;
+    const sh = set.rootShift(clip) ?? (L.c.travel ?? TUNE.corpse.travel[clip] ?? 0);
+    v.dox = -Math.sin(g.face) * sh; v.doy = -Math.cos(g.face) * sh; v.dl = set.shiftPx(clip, tc); v.de = set.lieAt(clip, tc);
+    return set.frameAtT(clip, tc);
+  }
   function poseOf(set, g, v, dt, t) {
     const p = g.p, act = g.act, G2 = g.T.gun;
+    v.dox = v.doy = v.dl = v.de = 0;
+    if (g.down) return downPose(set, g, v);
     G.toScreenInto(p.x, p.z, p.y, SC); const ox = SC[0], oy = SC[1];
     G.toScreenInto(g.tx, g.th, g.ty, SM); const tx = SM[0], ty = SM[1];
     const moving = g.speed > .15;
@@ -452,7 +469,7 @@ export function createLook(host, sim) {
         v.pose = set.SP[pose] ? pose : 'idle.0';
         const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, H = TUNE.hit;
         const k = v.nt < H.out ? v.nt / H.out : v.nt < H.out + H.back ? 1 - (v.nt - H.out) / H.back : 0, nd = H.nudge * k * (2 - k);   // (out fast, back eased)
-        put(set, v.pose, v.f, p.x + v.nx * nd, p.y + v.ny * nd, (p.z || 0) + (p.h || 0), 1, Math.min(1, (p.flash || 0) * H.flash), wob);
+        put(set, v.pose, v.f, p.x + v.nx * nd + v.dox, p.y + v.ny * nd + v.doy, (p.z || 0) + (p.h || 0), 1, Math.min(1, (p.flash || 0) * H.flash), wob, v.dl, v.de);
         if (g.act === 'aim' && g.locked) glint(set, g, v);
       }
       if (VS.size > sim.gang.length) VS.forEach(sweep);

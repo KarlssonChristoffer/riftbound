@@ -1033,6 +1033,19 @@ export function createAudio(ctx, host = {}) {
         case 'equip.break': fire('brk', e.x, e.y, {kind: e.gadget === 'scarecrow' ? 'dummy' : 'pot'}); break;
         case 'equip.latch': fire('stuck', e.x, e.y, {surf: e.who ? surf : 'stone'}); break;
         case 'equip.pick': fire(e.bought ? 'open' : 'loot', e.x, e.y, {n: 2}); break;
+        // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge
+        // recipes of its own yet): the swish of a turn and the throw on the cloth swish, the cinch a soft thump, the yank
+        // a heave, a yanked body's landing the gunmen's fall thud, the rope straining a short creak (the bow's)
+        case 'lasso.swish': fire('jump', e.x, e.y, {surf, g: .28}); break;
+        case 'lasso.throw': fire('jump', e.x, e.y, {surf, g: .75}); break;
+        case 'lasso.catch': if (e.what === 'anchor') fire('stuck', e.x, e.y, {surf: 'wood', g: .6}); else fire('hit', e.x, e.y, {mat: 'straw', g: .55}); break;
+        case 'lasso.yank': fire('jump', e.x, e.y, {surf, g: 1}); if (!e.ok) fire('hit', e.x, e.y, {mat: 'body', g: .6}); break;
+        case 'lasso.slam': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: e.who?.kind === 'brute' || e.who?.foe === 'bruiser'})); break;
+        case 'lasso.slip': fire('rustle', e.x, e.y, {surf, g: .4}); break;
+        case 'lasso.swing': fire('jump', e.x, e.y, {surf, g: .9}); break;
+        case 'lasso.bump': fire('hit', e.x, e.y, {mat: 'body', g: .8}); break;
+        case 'combat.bowl': fire('hit', e.x, e.y, {mat: 'body', g: .7}); break;
+        case 'lasso.creak': { const c = (RT && RT.D.makeCreak?.()) || makeCreak(E), k = clamp(e.k ?? .6, 0, 1); c.set(k * .7, 1.5, t, 1 / 60); c.set(k, 0, t + .12, 1 / 60); c.stop(t + .3); break; }
       }
     }
     // ---- arrows: shots (new ones, grouped by ability) and thuds (newly stuck) ----
