@@ -14,7 +14,8 @@
 //            shows it only between shots, standing. Without the clips: the flash and the wobble alone. Every bullet hit
 //            also shoves the sprite a little along its way (TUNE.hit: back in ~.2 s; the body stays where the sim has
 //            it) and shows combat's flash brighter, held full white for its first frames
-//   death    die_b (the killing hit from in front: he falls on his back) / die_f (from behind: forward): the clip, its
+//   death    die_b (the killing hit from in front: he falls on his back) / die_f (from behind: forward) / die_s (from his
+//            right side, TUNE.corpse.side: pushed away from the shot he spins round onto his front): the clip, its
 //            last frame the corpse with the gun beside him, held; at its `ground` mark a dust puff (combat's puff) and
 //            foe.ground (the thud: audio); the body lies TUNE.corpse.hold s, then fades (an ordered dither); at most
 //            TUNE.corpse.max lie about (the oldest fades early). The corpse lies on the sprite's pivot, so the sprite
@@ -230,7 +231,8 @@ export function createLook(host, sim) {
   // the clip `want`, else `alt`, if this atlas has it
   const pick = (set, want, alt) => set.ok(want) ? want : set.ok(alt) ? alt : null;
   // made the frame a gunman leaves the fight broken (combat killed him; the kill's hitstop holds the views a moment, not
-  // the draw): die_b / die_f by the way the killing hit went against his facing (or away from you), or the fallback
+  // the draw): die_b / die_f by the way the killing hit went against his facing (or away from you), die_s when it came
+  // from his right side (his left: (cos face, -sin face) on the ground), or the fallback
   const CM = 16, corpses = [];
   for (let i = 0; i < CM; i++) corpses.push({on: false, set: null, clip: '', x: 0, y: 0, z: 0, face: 0, vx: 0, vy: 0, t: 0, pose: '', lift: 0,
     groundT: 0, grounded: true, fadeAt: 0, fadeLen: 1, foe: '', fx: 0, fy: 0});   // fx / fy: where he stood
@@ -245,11 +247,13 @@ export function createLook(host, sim) {
     if (l < 1e-3) { dx = p.x - host.player.x; dy = p.y - host.player.y; l = hypot3(dx, dy, 0) || 1; }
     dx /= l; dy /= l;
     const front = -(dx * Math.sin(v.face) + dy * Math.cos(v.face)) >= Math.cos(TUNE.ai.hitFront * DEG);
-    const clip = pick(set, front ? 'die_b' : 'die_f', front ? 'die_f' : 'die_b');
+    const spin = C.side > 0 && dx * Math.cos(v.face) - dy * Math.sin(v.face) >= Math.cos(C.side * DEG) && set.ok('die_s');
+    const clip = spin ? 'die_s' : pick(set, front ? 'die_b' : 'die_f', front ? 'die_f' : 'die_b');
     c.on = true; c.set = set; c.clip = clip || ''; c.z = p.z || 0; c.t = 0; c.lift = 0; c.vx = dx; c.vy = dy; c.pose = v.pose; c.foe = p.foe; c.fx = p.x; c.fy = p.y;
     if (clip) {   // the clip as rendered, its corpse on the pivot: the sprite goes back by his root's start ahead of it
       const L = set.tl(clip), sh = set.rootShift(clip) ?? (clip === 'die_b' ? 1 : -1) * (L.c.travel ?? C.travel[clip] ?? 0);
-      c.face = v.face; c.x = p.x - Math.sin(v.face) * sh; c.y = p.y - Math.cos(v.face) * sh;
+      const sd = L.c.side || 0;   // (a clip centred across him too, die_s: the corpse lies that far to his left)
+      c.face = v.face; c.x = p.x - Math.sin(v.face) * sh + Math.cos(v.face) * sd; c.y = p.y - Math.cos(v.face) * sh - Math.sin(v.face) * sd;
       c.groundT = set.markT(clip, 'ground') ?? L.total * .7; c.grounded = false; c.fadeAt = L.total + C.hold; c.fadeLen = C.fade;
     } else {   // the fallback: thrown back facing the shot, faded at once
       c.face = Math.atan2(-dx, -dy); c.x = p.x; c.y = p.y; c.grounded = true; c.fadeAt = C.old[0]; c.fadeLen = C.old[1] - C.old[0];
