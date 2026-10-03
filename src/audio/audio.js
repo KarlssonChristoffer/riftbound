@@ -211,7 +211,7 @@ function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (t
 // ~0.45, an explosion hits the compressor. Soft, woody, low: nothing above ~6 kHz carries much energy.
 // ======================================================================================================================
 const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift', desert: 'desert'};
-const MAT = {dummy: 'straw', brute: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};
+const MAT = {dummy: 'straw', brute: 'straw', gunman: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};   // (gunman: the desert's, a dull hit)
 
 // the ground texture of one footfall (shared by steps, landings, scuffs); k = weight 0..1.5
 function surface(E, v, dt, surf, k = .6) {
@@ -336,6 +336,7 @@ const SFX = {
   foeDraw(E, o) { SFX.gunHolster(E, {...o, g: (o.g ?? 1) * .5}); },
   foeReload(E, o) { SFX.gunReload(E, {...o, g: (o.g ?? 1) * .7}); },
   foeHolster(E, o) { SFX.gunHolster(E, {...o, g: (o.g ?? 1) * .5}); },
+  foeFall(E, o) { SFX.land(E, {...o, big: 1, g: (o.g ?? 1) * .8}); },   // a body hits the ground
   gunHolster(E, o) {   // the twirl drops into leather
     const v = E.voice(o, 'gunHolster', .3, {cd: .15}); if (!v) return;
     E.N(v, 0, {b: E.PK, type: 'bandpass', f: 700, q: .8, a: .05, d: .06, g: .18}); E.N(v, .15, {b: E.PK, type: 'lowpass', f: 1100, a: .001, d: .015, g: .45});
@@ -919,6 +920,7 @@ export function createAudio(ctx, host = {}) {
         case 'foe.draw': fire('foeDraw', e.x, e.y); break;
         case 'foe.reload': fire('foeReload', e.x, e.y, {phase: e.phase, gun: e.gun}); break;
         case 'foe.holster': fire('foeHolster', e.x, e.y); break;
+        case 'foe.ground': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: e.foe === 'bruiser'})); break;   // (features/foes/look.js)
         case 'bullet.impact': if (e.surf === 'ground') fire('stuck', e.x, e.y, {surf, g: .55}); else if (e.surf === 'tree' || e.surf === 'prop') fire('hit', e.x, e.y, {mat: 'wood', g: .7}); break;
         case 'arrow.hit': case 'player.hit': {
           const props = get(host.props) || [], p = !e.player && (e.prop || props.find(p => p.x === e.x && p.y === e.y));

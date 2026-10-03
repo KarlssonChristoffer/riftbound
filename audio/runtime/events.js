@@ -177,6 +177,12 @@ export const EVENTS = {
     banks: [['revolver', 'eject'], ['revolver', 'load'], ['revolver', 'spin'], ['revolver', 'cock']], variants: 4, bakePriority: 3,
   },
   foeHolster: {...FOE, priority: 40, gainDb: -12, cooldownMs: 150, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
+  foeFall: {   // a dead gunman hits the ground (foe.ground): a body's thud, the ground's own texture, his clothes
+    ...FOE, priority: 55, maxInstances: 3, gainDb: -4, cooldownMs: 60,
+    pick: (o, rnd) => [L('impact', 'thud'), L('footstep', groundCase(o, rnd), {gainDb: -4, delayMs: 12}), L('cloth', 'jump', {gainDb: -9, delayMs: 6})],
+    gainFrom: o => (o.heavy ? 2 : 0),
+    banks: [['impact', 'thud', 3], ...STEP_CASES.map(c => ['footstep', c]), ['cloth', 'jump']], variants: 6, bakePriority: 3,
+  },
   // ================================================ impacts ================================================
   hit: {   // o.mat 'wood' | 'straw' | 'clay' | 'glass' | 'stone' | 'body' (the player); o.g from physics impacts (.45..1.4)
     ...IMPACT, gainDb: -3, cooldownMs: 25, cat: o => (o.mat === 'body' || o.mat === 'flesh' ? 'player' : 'combat'),
