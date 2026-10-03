@@ -56,6 +56,7 @@ const WORLD = {cat: 'world', bus: 'sfx.world', priority: 50, maxInstances: 4, st
 const WILD = {cat: 'world', bus: 'sfx.world', priority: 15, maxInstances: 3, steal: 'oldest', coalesceMs: 0, send: .3, pitchSemi: 1, gainJitDb: 2, variants: 4, bakePriority: 6};
 const UI = {cat: 'ui', bus: 'ui', priority: 95, maxInstances: 2, steal: 'oldest', coalesceMs: 0, send: 0, pitchSemi: 0, gainJitDb: 0, variants: 2, bakePriority: 5};
 // the desert's gunmen: placed where they stand, combat's spatial rule (off screen a shot fades slowly: you hear it coming)
+const COACH_MARK = {break: 'break', dump: 'eject', load: 'load', close: 'close'};   // coachReload's o.mark -> the coachgun case
 const FOE = {cat: 'combat', bus: 'sfx.world', priority: 50, maxInstances: 3, steal: 'quietest', coalesceMs: 0, send: .15, pitchSemi: .8, gainJitDb: 1.5};
 
 export const EVENTS = {
@@ -160,9 +161,9 @@ export const EVENTS = {
     banks: [['revolver', 'eject'], ['revolver', 'load'], ['revolver', 'spin'], ['revolver', 'cock']], variants: 4, bakePriority: 3,
   },
   gunHolster: {...PLAYER, priority: 45, gainDb: -10, cooldownMs: 150, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
-  // the desert's gunmen (src/features/foes: foe.shoot / aim / draw / reload / holster): the same recipe as yours, heard
-  // where they stand. o.gun 'peacemaker' (the revolvers) | 'navy' (the bruiser's coach gun: the deeper boom); foeCock is
-  // the hammer thumbed back as a gunman starts to aim: the shot's telegraph in sound
+  // the desert's gunmen with revolvers (src/features/foes: foe.shoot / aim / draw / reload / holster): the same recipe as
+  // yours, heard where they stand. o.gun 'peacemaker' (the bandit's, the sheriff's) | 'navy'; foeCock is the hammer thumbed
+  // back as a gunman starts to aim: the shot's telegraph in sound. (The bruiser's coach gun has its own: coach* below.)
   foeShot: {
     ...FOE, priority: 80, maxInstances: 4, gainDb: -2, send: .16, cooldownMs: 25, pitchSemi: .6,
     pick: o => L('revolver', o.gun === 'navy' ? 'navy' : 'peacemaker'), gainFrom: o => (o.gun === 'navy' ? 1.5 : 0),
@@ -170,13 +171,30 @@ export const EVENTS = {
   },
   foeCock: {...FOE, priority: 62, gainDb: -6, cooldownMs: 60, pick: () => L('revolver', 'cock'), banks: [['revolver', 'cock']], variants: 4, bakePriority: 2},
   foeDraw: {...FOE, priority: 40, gainDb: -12, cooldownMs: 120, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
-  foeReload: {   // o.phase start | eject | round | done (the cylinder's spin; the coach gun snaps shut: a cock)
+  foeReload: {   // o.phase start | eject | round | done (the cylinder's spin)
     ...FOE, priority: 45, maxInstances: 3, gainDb: -10, cooldownMs: 40,
-    pick: o => L('revolver', {eject: 'eject', round: 'load', done: o.gun === 'navy' ? 'cock' : 'spin'}[o.phase] || 'cock'),
+    pick: o => L('revolver', {eject: 'eject', round: 'load', done: 'spin'}[o.phase] || 'cock'),
     gainFrom: o => (o.phase === 'start' ? -4 : 0),
     banks: [['revolver', 'eject'], ['revolver', 'load'], ['revolver', 'spin'], ['revolver', 'cock']], variants: 4, bakePriority: 3,
   },
   foeHolster: {...FOE, priority: 40, gainDb: -12, cooldownMs: 150, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
+  // the bruiser's coach gun (forge recipe 'coachgun'; content/foes.js gun.sound 'coach'), heard where he stands with the
+  // other gunmen's rule: its shot (a barrel: 6 variants and the director never repeats the last two, so a pair of shots
+  // never matches; 2 dB over the revolvers' peacemaker), the hammer thumbed back as he aims (the telegraph), the reload:
+  // the break from the sim (foe.reload start), then the marks as you SEE them (foe.clip from features/foes/look.js: dump =
+  // the spent shells fall, load = a shell seated, close = snapped shut). His draw and holster are leather (foeDraw /
+  // foeHolster above)
+  coachShot: {
+    ...FOE, priority: 82, maxInstances: 4, gainDb: 0, send: .18, cooldownMs: 25, pitchSemi: .5,
+    pick: () => L('coachgun', 'fire'), banks: [['coachgun', 'fire']], variants: 6, bakePriority: 1,
+  },
+  coachCock: {...FOE, priority: 62, gainDb: -6, cooldownMs: 60, pick: () => L('coachgun', 'cock'), banks: [['coachgun', 'cock']], variants: 4, bakePriority: 2},
+  coachReload: {   // o.mark break | dump | load | close
+    ...FOE, priority: 45, maxInstances: 3, gainDb: -9, cooldownMs: 40,
+    pick: o => L('coachgun', COACH_MARK[o.mark] || 'load'),
+    gainFrom: o => (o.mark === 'close' ? 1.5 : o.mark === 'load' ? -1.5 : 0),   // the lock is the payoff; a shell in, a touch under
+    banks: [['coachgun', 'break'], ['coachgun', 'eject'], ['coachgun', 'load'], ['coachgun', 'close']], variants: 4, bakePriority: 3,
+  },
   foeFall: {   // a dead gunman hits the ground (foe.ground): a body's thud, the ground's own texture, his clothes
     ...FOE, priority: 55, maxInstances: 3, gainDb: -4, cooldownMs: 60,
     pick: (o, rnd) => [L('impact', 'thud'), L('footstep', groundCase(o, rnd), {gainDb: -4, delayMs: 12}), L('cloth', 'jump', {gainDb: -9, delayMs: 6})],

@@ -22,13 +22,18 @@
 //   telegraph the aim's last moment (the lock): a glint on the barrel (the 'add' layer, after the light: it reads at noon)
 //   tracers  the bullets in flight, with gunfx's look (features/gunfx.js tracer()); the flash, smoke, impacts and the
 //            reload's cases are gunfx's own (its events: foe.shoot, foe.reload, bullet.impact)
+//   marks    foe.clip {mark: dump | load | close}: the moments the reload you SEE drops the spent shells, seats a shell,
+//            snaps the gun shut (audio: the coach gun's eject / load / close land on those frames). A reload clip with its
+//            own timeline (the coach gun's: play / ms / marks) says them as its steps reach those frames; without one
+//            (the revolvers' clips, an atlas not loaded) the sim's phases do: the eject begins, a round goes in, it ends
 //   HD       health bars over hurt gunmen (combat's look), the sheriff's name; a gun held on you from OFF SCREEN: an
 //            arrow at the screen's edge toward it, through the aim (gold), bright and bigger once the aim locks
 // ATLASES: each type's outfit (content/foes.js atlas) from concepts/sprites/out/outfits/<name>/ once its poses.json lists
 // the poses used here, else the gate-2 preview western/art_g2b/<name>/all/; loaded on the first visit to the desert.
 // OWNS: the atlases, the view state per gunman (facing, twist, gait phase, health chip), the corpses.
 // READS: the sim (gang, B), host.yaw / zoom / G (toScreenInto), host.player, the events (arrow.hit: the way a hit came).
-// EMITS (a view's, like wildlife's calls: nothing in the sim listens): foe.ground (a body hits the ground).
+// EMITS (a view's, like wildlife's calls: nothing in the sim listens): foe.ground (a body hits the ground), foe.clip (the
+//   reload's marks as seen).
 // BUDGET: view; frame ~.15 ms with 6 gunmen fighting (measured 2026-10-03 in headless Chrome on a busy machine: the pose
 //   picks ~.035 ms, the sprites ~.04 ms; a pick scores <= 3 facings x 9 twists, or 2 stances x 5 legs x 7 twists walking,
 //   against barrel angles worked out once per pose); render: a sprite + a shadow draw per pose image on screen.
@@ -126,7 +131,8 @@ export function createLook(host, sim) {
 
   // ---------------------------------------------------------------- per gunman: the view's own state
   const VS = new Map();   // entity -> {f, tw, ph, pose, face0, hpShow, idle}
-  const vsOf = p => { let v = VS.get(p); if (!v) VS.set(p, v = {f: 0, tw: 'gun_aim', twm: '0', back: false, ph: 0, pose: 'idle.0', hpShow: p.hp, idle: (p.x * 7.3 + p.y * 3.1) % 1, seen: 0, hx: 0, hy: 0, face: 0}); return v; };
+  const vsOf = p => { let v = VS.get(p); if (!v) VS.set(p, v = {f: 0, tw: 'gun_aim', twm: '0', back: false, ph: 0, pose: 'idle.0', hpShow: p.hp, idle: (p.x * 7.3 + p.y * 3.1) % 1, seen: 0, hx: 0, hy: 0, face: 0,
+    rs: -1, rph: '', ram: 0}); return v; };   // rs: the reload clip's next step to say a mark for (-1: not reloading); rph / ram: the phase and rounds last seen
   const SC = [0, 0, 0], SM = [0, 0, 0];
   let yaw = 0, z = 1;
   const faceOf = (set, w) => { const n = set.ND; return ((Math.round((w - yaw) / (TAU / n)) % n) + n) % n; };   // world angle -> the atlas's facing at this yaw
@@ -162,18 +168,21 @@ export function createLook(host, sim) {
     }
     return set.st('gws', v.twm, gf);
   }
+  // how far through the whole reload he is (0..1): the sim's phases laid end to end (a reload clip with its own timeline
+  // plays over all of it)
+  function reloadK(g) {
+    const Rl = g.T.gun.reload, k = g.rk, rounds = g.T.gun.rounds;
+    const n0 = g.r0 ?? 0, total = Rl.up + Rl.eject + (rounds - n0) * Rl.round + Rl.close, base = Rl.up + Rl.eject + (g.ammo - n0) * Rl.round;
+    const t = g.rph === 'up' ? k * Rl.up : g.rph === 'eject' ? Rl.up + k * Rl.eject : g.rph === 'fetch' ? base + k * Rl.round / 2
+      : g.rph === 'load' ? base + Rl.round / 2 + k * Rl.round / 2 : total - (1 - k) * Rl.close;
+    return t / total;
+  }
   // the reload's frame: a clip with its own timeline (the coach gun's) plays over the whole reload; the revolver's by its
   // marks, phase by phase (sim/player/gun.js reloadFrame)
   function reloadPose(set, g) {
     const c = set.CLIP.gun_reload; if (!c) return null;
-    const Rl = g.T.gun.reload, k = g.rk, rounds = g.T.gun.rounds;
-    if (c.play) {
-      const n0 = g.r0 ?? 0, total = Rl.up + Rl.eject + (rounds - n0) * Rl.round + Rl.close, base = Rl.up + Rl.eject + (g.ammo - n0) * Rl.round;
-      const t = g.rph === 'up' ? k * Rl.up : g.rph === 'eject' ? Rl.up + k * Rl.eject : g.rph === 'fetch' ? base + k * Rl.round / 2
-        : g.rph === 'load' ? base + Rl.round / 2 + k * Rl.round / 2 : total - (1 - k) * Rl.close;
-      return set.frameAt('gun_reload', t / total);
-    }
-    const M = c.marks; if (!M) return set.nm('gun_reload', Math.min(c.frames - 1, {up: 0, eject: 1, fetch: 3, load: 2, close: 5}[g.rph] ?? 0));
+    if (c.play) return set.frameAt('gun_reload', reloadK(g));
+    const M = c.marks, k = g.rk; if (!M) return set.nm('gun_reload', Math.min(c.frames - 1, {up: 0, eject: 1, fetch: 3, load: 2, close: 5}[g.rph] ?? 0));
     let a, b, back = false;
     switch (g.rph) {
       case 'up': a = M.up; b = M.eject - 1; break;
@@ -227,6 +236,37 @@ export function createLook(host, sim) {
   function ground(c) {
     const P = TUNE.corpse.puff; (combat ??= host.feature('combat'))?.core.puff(c.x, c.y, c.z, P.n, P.r);
     const e = GE[gi]; gi = (gi + 1) % GE.length; e.x = c.x; e.y = c.y; e.z = c.z; e.foe = c.foe; host.events.push(e);
+  }
+  // the reload's marks as you see them (foe.clip; see the header). The payloads are a ring too
+  const KE = []; for (let i = 0; i < 16; i++) KE.push({type: 'foe.clip', x: 0, y: 0, z: 0, foe: '', gun: '', mark: ''});
+  let ki = 0;
+  function clipEv(g, mark) {
+    const e = KE[ki]; ki = (ki + 1) % KE.length;
+    e.x = g.p.x; e.y = g.p.y; e.z = g.p.z; e.foe = g.type; e.gun = g.T.gun.sound; e.mark = mark; host.events.push(e);
+  }
+  // the timeline clip's steps from v.rs up to step `to`: a mark for each that shows the dump / a load / the close frame
+  function stepMarks(g, v, L, M, to) {
+    for (let j = Math.max(0, v.rs); j <= to; j++) {
+      const fr = L.play ? L.play[j] : j;
+      if (fr === M.dump) clipEv(g, 'dump'); else if (fr === M.load) clipEv(g, 'load'); else if (fr === M.close) clipEv(g, 'close');
+    }
+    v.rs = to + 1;
+  }
+  function marks(g, v) {
+    const set = sets[g.type], c = set && set.CLIP.gun_reload, M = c && c.play && c.marks ? c.marks : null, L = M && set.tl('gun_reload');
+    if (g.act !== 'reload') {
+      if (v.rs >= 0 && g.ammo >= g.T.gun.rounds) { if (L) stepMarks(g, v, L, M, L.n - 1); else clipEv(g, 'close'); }   // it ended: what's left
+      v.rs = -1; return;
+    }
+    if (v.rs < 0) { v.rs = 0; v.rph = g.rph; v.ram = g.ammo; }   // a reload begins
+    if (L) {   // the clip's own timeline: the step it shows now (as frameAt picks it)
+      const t = Math.max(0, Math.min(.9999, reloadK(g))) * L.total; let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
+      if (i >= v.rs) stepMarks(g, v, L, M, i);
+    } else {   // the sim's phases
+      if (g.rph === 'eject' && v.rph !== 'eject') clipEv(g, 'dump');
+      if (g.ammo > v.ram) clipEv(g, 'load');
+    }
+    v.rph = g.rph; v.ram = g.ammo;
   }
   let frameN = 0;
   function sweep(v, p) { if (v.seen === frameN) return; if (p.broken) fell(v, p); VS.delete(p); }   // (gone: killed, or the gang left)
@@ -297,6 +337,7 @@ export function createLook(host, sim) {
     view(dt, evs, on) {
       if (!on) { if (VS.size) VS.clear(); for (const c of corpses) c.on = false; return; }   // (out of the desert sandbox)
       for (const e of evs) if (e.type === 'arrow.hit' && e.prop?.kind === 'gunman') { const v = VS.get(e.prop); if (v) { v.hx = e.vx; v.hy = e.vy; } }   // (the way the last hit came)
+      for (const g of sim.gang) if (!g.p.broken) marks(g, vsOf(g.p));   // the reload's marks as seen (foe.clip)
       const C = TUNE.corpse;
       for (const c of corpses) {
         if (!c.on) continue;
