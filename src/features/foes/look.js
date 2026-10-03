@@ -109,7 +109,17 @@ function prep(s, root) {
     const t = Math.max(0, Math.min(.9999, k)) * L.total; let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
     return nm(name, L.play ? L.play[i] : i);
   }
-  return {root, ...a, SP, has, nm, st, tl, frameAt, frameAtT, markT, ok, rootShift, barrel, tws: TWS.filter(has), twm: TWM.filter(t => has(st('gws', t, 0))), preview: !root.includes('/outfits/')};
+  // a death clip renders the falling body raised a whole number of px up the image (its `shift`: m along the ground away
+  // from the camera, so the depth stays in range; tools/blender/western.py): those frames are drawn with the pivot as many
+  // px higher, which puts the body back where it lies. px per frame worked out once per clip
+  const SH = {}, sinP = Math.sin((s.idx?.pitch ?? 20) * Math.PI / 180), upp = s.idx?.units_per_px || .0328;
+  function shiftPx(name, t) {
+    const L = tl(name); if (!L || !L.c.shift) return 0;
+    const px = SH[name] ??= Int16Array.from(L.c.shift, v => Math.round(v * sinP / upp));
+    let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
+    return px[L.play ? L.play[i] : i] || 0;
+  }
+  return {root, ...a, SP, has, nm, st, tl, frameAt, frameAtT, markT, ok, rootShift, shiftPx, barrel, tws: TWS.filter(has), twm: TWM.filter(t => has(st('gws', t, 0))), preview: !root.includes('/outfits/')};
 }
 
 export function createLook(host, sim) {
@@ -273,11 +283,11 @@ export function createLook(host, sim) {
 
   // ---------------------------------------------------------------- the frame
   const O = {img: null, nrm: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, x: 0, y: 0, h: 0, px: 0, py: 0, type: 7, shadow: true, alpha: 1, flash: 0, flip: false, sway: 0, dynamic: false};
-  function put(set, pose, f, x, y, h, alpha, flash, wob) {
+  function put(set, pose, f, x, y, h, alpha, flash, wob, lift = 0) {   // lift: px the pivot moves up the image (a death clip's shift)
     const sp = set.SP[pose] || set.SP['idle.0']; if (!sp) return;
     const img = sp.img; if (!img || !(img.width > 0)) return;
     O.img = img; O.nrm = sp.nrm || null; O.sx = f * set.FW; O.sy = 0; O.sw = set.FW; O.sh = set.FH;
-    O.x = x; O.y = y; O.h = h; O.px = set.PIV[0] - wob; O.py = set.PIV[1]; O.alpha = alpha; O.flash = flash;
+    O.x = x; O.y = y; O.h = h; O.px = set.PIV[0] - wob; O.py = set.PIV[1] - lift; O.alpha = alpha; O.flash = flash;
     host.sprite(O); O.img = O.nrm = null;
   }
   function poseOf(set, g, v, dt, t) {
@@ -369,7 +379,7 @@ export function createLook(host, sim) {
         const set = c.set, pose = c.clip ? set.frameAtT(c.clip, c.t)
           : c.t < C.fall ? (set.has('fall') ? 'fall' : c.pose) : c.t < C.fall + C.land ? (set.has('land') ? 'land' : c.pose) : set.has('crouch') ? 'crouch' : c.pose;
         const a = c.t < c.fadeAt ? 1 : Math.max(0, 1 - (c.t - c.fadeAt) / c.fadeLen);
-        put(set, pose, faceOf(set, c.face), c.x, c.y, c.z + c.lift, a, 0, 0);
+        put(set, pose, faceOf(set, c.face), c.x, c.y, c.z + c.lift, a, 0, 0, c.clip ? set.shiftPx(c.clip, c.t) : 0);
       }
       // their bullets in flight: gunfx's tracer look
       const B = sim.B;
