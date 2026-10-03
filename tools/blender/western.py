@@ -1939,15 +1939,20 @@ def render_view(name):
 #                                  `release`) -> follow-through (low forward) -> recover (the coil hand comes up)
 #   lasso_haul_0-1                taut hold, leaning back, feet wide, right hand forward at chest height, left at the hip
 #   lasso_yank.<i> (clip)         the hard pull: further back, hands in to the chest and hip, a short step back
-#   lasso_hang_0-2                hanging from the rope (no coil), legs forward / straight / back; every frame has the
-#                                  grip at the same height above the pivot (LASSO_HANG['grip'], printed when fitted)
-# Markers (bones, exported per pose and facing like GunMuzzle0): RopeHand0 = the right fist's grip point, RopeHand1 =
-# the left fist's (the upper grip in the hang); the bone's HEAD is the point.
+#   lasso_take.0-1 (clip)         the rope goes taut after a throw: the throw's last frame into lasso_haul_0
+#   lasso_hang_in.0-3 (clip)      the grab before a swing (backward: letting go): the arm up to the grip, the hat sliding
+#                                  off onto his back; from mark `grip` on the fist is at the hang's grip height
+#   lasso_hang_0-2                hanging by the right fist (no coil), knees tucked forward / legs long / knees tucked
+#                                  back; every frame has the grip (RopeHand0) at the same height above the pivot
+#                                  (LASSO_HANG['grip'], printed when fitted)
+# Markers (bones, exported per pose and facing like GunMuzzle0): RopeHand0 = the right fist's grip point (the hanging
+# fist in the hang), RopeHand1 = the left fist's; the bone's HEAD is the point.
 PIXEL_FAMILIES['hemp'] = ['d5aa68', '9a743d', '624522', '2a1c10']   # -> c8a876 / 9a7c50 / 6a5234 after palette_harm
 LASSO_KEYS = set()   # pose keys with the coil shown in the left hand (else collapsed into the fist)
 LASSO_AT = {}        # pose key -> [(side, (x, y, z) m in his frame for a 1.8 m figure)]: wrist targets (IK, after REACH)
 LASSO_HANG = {}      # the hang's fit: per key the snapped grip height, and 'grip' (the common one, m above the pivot)
-LASSO_HAT = {}       # pose key -> deg the hat is tipped back on the head (its front brim up), about the back of its band
+LASSO_HAT = {}       # pose key -> deg the hat is tipped back on the head (its front brim up), about the back of its band,
+                     # or ('back', (x, y, z) m, deg): off the head onto its back (head-carried), the crown turned back
 COIL_TURN = 40       # deg: the coil's plane turned from his frontal plane toward his left side (it reads from most sides)
 
 
@@ -2010,9 +2015,10 @@ def _lasso_reach(pose_name):
         _reach(side, Vector(p) * PROP['height'] / 1.8)
 
 
-def _lasso_hold(pose_name):
-    """HOLD hook (last): the coil. In a lasso key it hangs plumb from the left fist, its plane turned COIL_TURN from the
-    chest's frontal plane; otherwise it is collapsed into the fist."""
+def _lasso_hold(pose_name, hat=True):
+    """HOLD hook (last): the hat (LASSO_HAT: tipped back, or off onto his back; hat=False for a blended in-between,
+    whose hat is the blend), then the coil. In a lasso key the coil hangs plumb from the left fist, its plane turned
+    COIL_TURN from the chest's frontal plane; otherwise it is collapsed into the fist."""
     arm = bpy.data.objects[ROOT]
     pbs, bones = arm.pose.bones, arm.data.bones
     key = _key(pose_name)
@@ -2021,7 +2027,7 @@ def _lasso_hold(pose_name):
     Mr = bones['CoilHold0'].matrix_local
     hd = pbs['LeftHand']
     fist = hd.head + (hd.tail - hd.head) * .5
-    hat = LASSO_HAT.get(key)
+    hat = hat and LASSO_HAT.get(key)
     if hat and 'HatHold0' in pbs:
         J, k = landmarks(), PROP['height'] / 1.8
         zb = J['head'].z + .69 * (J['top'].z - J['head'].z)          # the band's height (the brim's root)
@@ -2128,42 +2134,63 @@ ANIMS['lasso_yank'] = _clip(['lasso_haul_0', 'lasso_yank_b', 'lasso_yank_c'], [.
 # (extra) the rope goes taut after a throw: from the throw's recover into the hold, then lasso_haul_0
 ANIMS['lasso_take'] = _clip(['lasso_throw_d', 'lasso_haul_0'], [.35, .7], 14, ms=[60, 60])
 LASSO_KEYS.update(k for k in POSES if k.startswith(('lasso_spin_', 'lws_', 'lrs_', 'lasso_throw_', 'lasso_haul_', 'lasso_yank_')))
-# hanging from the rope (swinging): both fists on it in front of the face, the left above the right, arms up; the body
-# tilted back a little under the grip, the head back to look up the rope; legs forward (0) / straight (1) / back (2)
-_HANG = {'Hips': [('X', -3)], 'Spine': [('X', 2)], 'Neck': [('X', -2)], 'Head': [('X', -6)],
-         'LeftShoulder': [('Y', -40)], 'LeftArm': [('Y', -85), ('X', -10)], 'LeftForeArm': [('Y', -60)],
-         'RightShoulder': [('Y', 40)], 'RightArm': [('Y', 85), ('X', -10)], 'RightForeArm': [('Y', 60)]}
+# hanging from the rope (swinging, Indiana Jones on the whip): by the right fist, the arm straight up beside the head and
+# the fist the highest point; the body tilted so the fist is over his centre; the left arm out for balance; the hat slid
+# off onto the back of his head (on its cord); knees tucked forward (0), legs long (1), knees tucked back (2)
+_HANG = {'Hips': [('Y', 8)], 'Spine': [('X', 2)], 'Neck': [('X', -4), ('Y', -4)], 'Head': [('X', -6), ('Y', -2)],
+         'RightShoulder': [('Y', 45)], 'RightArm': [('Y', 128)],
+         'LeftShoulder': [('Z', -6)], 'LeftArm': [('Y', -60), ('X', -20)], 'LeftForeArm': [('Y', -25), ('X', -15)],
+         'LeftHand': [('Y', -10)]}
 _hlegs = lambda lu, ll, lf, ru, rl, rf: {'LeftUpLeg': [('X', lu)], 'LeftLeg': [('X', ll)], 'LeftFoot': [('X', lf)],
                                           'RightUpLeg': [('X', ru)], 'RightLeg': [('X', rl)], 'RightFoot': [('X', rf)]}
-POSES['lasso_hang_0'] = {**_HANG, **_hlegs(-40, 34, 16, -34, 24, 16)}
-POSES['lasso_hang_1'] = {**_HANG, **_hlegs(-6, 6, 22, -2, 10, 22)}
-POSES['lasso_hang_2'] = {**_HANG, **_hlegs(22, 40, 18, 14, 30, 18), 'Spine': [('X', -4)]}
+POSES['lasso_hang_0'] = {**_HANG, **_hlegs(-75, 95, 15, -60, 85, 15), 'Spine': [('X', 7)]}
+POSES['lasso_hang_1'] = {**_HANG, **_hlegs(-8, 18, 28, 4, 26, 28)}
+POSES['lasso_hang_2'] = {**_HANG, **_hlegs(20, 95, 25, 30, 85, 25), 'Hips': [('Y', 8), ('X', -6)], 'Spine': [('X', -8)]}
+_HANG_FIST = ('Right', (-.17, -.02, 1.82))
+_HAT_BACK = ('back', (0, .26, 1.38), 80)          # the band's centre behind the head (m, head-carried), crown turned back 80 deg
 for _i in range(3):
-    LASSO_AT[f'lasso_hang_{_i}'] = [('Left', (.03, -.11, 1.78)), ('Right', (-.04, -.11, 1.67))]   # the fists one above the other
-    LASSO_HAT[f'lasso_hang_{_i}'] = 30                               # the hat pushed back: the fists over the forehead
-LASSO_LIST = ['lasso_spin', 'lasso_throw', 'lasso_yank', 'lasso_take']   # the clips; poses: lws_, lrs_, lasso_haul_, lasso_hang_
+    LASSO_AT[f'lasso_hang_{_i}'] = [_HANG_FIST]
+    LASSO_HAT[f'lasso_hang_{_i}'] = _HAT_BACK
+# the grab (lasso_hang_in, played forward into the swing and backward out of it): 0 a crouch, the right arm reaching up,
+# looking up, the hat tipped back; 1 halfway (the hat sliding back); 2 the fist closes at the hang's grip (mark `grip`),
+# up on his toes, the hat off the back of his head; 3 most of the way into lasso_hang_1 (the hat on his back, the feet
+# leaving the ground). From frame 2 on the grip is at the hang's height above the pivot (HANG_KEYS fit + a lift for the
+# in-between); frames 0-1 stand on the pivot.
+POSES['lasso_grab_0'] = {'Hips': [('Y', 3)], 'Spine': [('X', 6)], 'Neck': [('X', -10)], 'Head': [('X', -8)],
+                         'RightShoulder': [('Y', 30)], 'RightArm': [('Y', 110), ('X', -20)],
+                         'LeftShoulder': [('Z', -4)], 'LeftArm': [('Y', 0), ('X', -10)], 'LeftForeArm': [('X', -30)],
+                         **_hlegs(-26, 46, -20, -22, 42, -20)}
+POSES['lasso_grab_1'] = {**_HANG, 'LeftArm': [('Y', -36), ('X', -14)], 'LeftForeArm': [('Y', -15), ('X', -20)],
+                         **_hlegs(-4, 6, 30, 2, 10, 30)}
+LASSO_AT.update({'lasso_grab_0': [('Right', (-.24, -.14, 1.55))], 'lasso_grab_1': [_HANG_FIST]})
+LASSO_HAT.update({'lasso_grab_0': 25, 'lasso_grab_1': ('back', (0, .2, 1.55), 55)})
+ANIMS['lasso_hang_in'] = _clip(['lasso_grab_0', 'lasso_grab_1', 'lasso_hang_1'], [0, .5, 1, 1.6], 14, ms=[70, 60, 70, 80],
+                               marks={'grip': 2})   # from `grip` on: the fist closed, the grip at the hang's height
+HANG_KEYS = ['lasso_hang_0', 'lasso_hang_1', 'lasso_hang_2', 'lasso_grab_1']   # one grip height (RopeHand0) for these
+LASSO_LIST = ['lasso_spin', 'lasso_throw', 'lasso_yank', 'lasso_take', 'lasso_hang_in']   # the clips (poses: lws_, lrs_,
+                                                                                          # lasso_haul_, lasso_hang_)
 
 
 _pose_dead = globals().get('_pose_dead', pose)     # the death-fit pose() above
 
 
-HANG_GRIP = {'lasso_hang_': 'RopeHand1'}   # hang key prefix -> the marker it hangs by
-
-
-def _hang_fit(pre):
-    """The hang frames: each posed with no lift, its grip (HANG_GRIP's marker) height after the ground snap; then every
-    frame lifted (_air) so the grip sits at the highest of them: one grip height above the pivot for all three."""
+def _grip_z():
     arm = bpy.data.objects[ROOT]
-    keys = [k for k in POSES if k.startswith(pre)]
-    for k in keys:
+    return (arm.matrix_world @ arm.pose.bones['RopeHand0'].head).z
+
+
+def _hang_fit():
+    """The hang keys (HANG_KEYS): each posed with no lift, its grip (RopeHand0, the hanging fist) height after the ground
+    snap; then every one lifted (_air) so the grip sits at the highest of them (LASSO_HANG['grip'], m above the pivot)."""
+    for k in HANG_KEYS:
         POSES[k]['_air'] = 0.0
         _pose_dead(k)
-        LASSO_HANG[k] = (arm.matrix_world @ arm.pose.bones[HANG_GRIP[pre]].head).z
-    LASSO_HANG[pre] = max(LASSO_HANG[k] for k in keys)
-    for k in keys:
-        POSES[k]['_air'] = LASSO_HANG[pre] - LASSO_HANG[k]
-    print('LASSO_HANG', pre, HANG_GRIP[pre], 'grip', round(LASSO_HANG[pre], 4), 'm above the pivot;',
-          {k: round(LASSO_HANG[k], 4) for k in keys})
+        LASSO_HANG[k] = _grip_z()
+    LASSO_HANG['grip'] = max(LASSO_HANG[k] for k in HANG_KEYS)
+    for k in HANG_KEYS:
+        POSES[k]['_air'] = LASSO_HANG['grip'] - LASSO_HANG[k]
+    print('LASSO_HANG grip (RopeHand0)', round(LASSO_HANG['grip'], 4), 'm above the pivot; snapped:',
+          {k: round(LASSO_HANG[k], 4) for k in HANG_KEYS})
 
 
 def _holster_now():
@@ -2183,15 +2210,18 @@ def pose(name):
     """The death-fit pose(); a hang frame first fits the hang's common grip height. A lasso clip's in-between blends the
     bones hand-relative, so the holstered revolver (on a right-hand bone) and the coil (on a left-hand one) are set again
     after the blend: the gun in the holster, the coil plumb."""
-    pre = next((p for p in HANG_GRIP if name.startswith(p)), None)
-    if pre and pre not in LASSO_HANG:
-        _hang_fit(pre)
+    if name.startswith(('lasso_hang', 'lasso_grab')) and 'grip' not in LASSO_HANG:
+        _hang_fit()
     zmin = _pose_dead(name)
     clip, _, i = name.partition('.')
     if i and clip in LASSO_LIST:
         _holster_now()
         if 'CoilHold0' in bpy.data.objects[ROOT].pose.bones:
-            _lasso_hold(name)
+            _lasso_hold(name, hat=False)
+        if clip == 'lasso_hang_in' and ANIMS[clip]['tween'][int(i)] >= 1:   # the fist closed: at the hang's grip height
+            arm = bpy.data.objects[ROOT]
+            arm.location.z += LASSO_HANG['grip'] - _grip_z()
+            bpy.context.view_layer.update()
     return zmin
 
 
