@@ -77,4 +77,7 @@ export const TUNE = {
   // back in `fall` (s), `land` (s), then `crouch`, faded over old: [from, to] s, sliding `slide` m/s, lifted `lift` m
   corpse: {hold: 9, fade: .8, max: 10, early: .5, travel: {die_b: .8, die_f: .7}, puff: {n: 14, r: .6},
     fall: .24, land: .2, old: [.7, 1.5], slide: 1.6, lift: .22},
+  // the view's hit (features/foes/look.js): a bullet shoves the sprite `nudge` m along its way in `out` s and it eases
+  // back over `back` s (only the picture: the body doesn't move); combat's white flash shows x `flash` (held full at first)
+  hit: {nudge: .1, out: .035, back: .15, flash: 1.6},
 };

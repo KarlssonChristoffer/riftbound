@@ -283,9 +283,11 @@ src/
   features/              the features as before (wind, weather, lights, garden, combat/, atmos, flow, wildlife, depth/, ...),
                          riverside (reeds, ferns, willows, lily pads), litter (drives the leaf carpet from the wind),
                          atmos/waterlife.js (riffles, falls' spray and mist, shallow-water rings: called by atmos),
-                         gun (a gun loadout's controls + cues + the cylinder HUD), gunfx (muzzle flash, smoke, tracers, cases)
+                         gun (a gun loadout's controls + cues + the cylinder HUD), gunfx (muzzle flash, smoke, tracers, cases, impacts by
+                         surface, holes, the hit marker), blood (pixel blood from bullet hits; Graphics > Effects > Blood)
   game/                  game.js, run.js, enemies.js, items.js, stats.js, save.js
-  ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js, cylinder.js (a gun's ammo)
+  ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js, cylinder.js (a gun's ammo),
+                         hitmark.js (the X at the reticle on a hit)
   audio/                 audio.js, music.js
   content/               moods.js (MOODS, TIMES, CHAR), weapons.js (the bow's numbers, the revolvers: view/hero.js LOADOUTS name one each)
   dev/                   devtools.js (colliders, debug HUD, tree lineup), devkeys.js (dev keys, renderer A/B),

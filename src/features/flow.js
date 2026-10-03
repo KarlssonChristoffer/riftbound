@@ -4,7 +4,8 @@
 //
 //   camera      a spring instead of the host's plain ease: leans toward the aim while drawing the bow, a small kick back
 //               on release, a dip on hard landings, a little overshoot before settling; the player's screen pixel is held
-//               with hysteresis (no +-1 px toggling)
+//               with hysteresis (no +-1 px toggling). A revolver's shot (player.shoot) kicks it back harder (the Navy
+//               more, a fanned shot less), a bullet's hit on a body (combat.hit) a little more on top
 //   motion      sprint speed streaks (1 px lines peeling off the body), a short afterimage trail on the dodge roll
 //               (2-3 flat-tinted silhouettes of earlier frames, behind the player)
 //   arrows      at dusk / night a flying arrow carries a small warm light (at most 2); every flying arrow trails the
@@ -12,7 +13,8 @@
 //               recent trail, lit, plus a glow copy so the flight stays readable at night
 //   marks       ground decals that fade in steps: the player's own (skid scuffs, roll scrapes, turn plants, landing
 //               crescents) within ~10-20 s, scorch rings (explode) and holes where arrows stood in a minute or two, wet /
-//               charred footprints after a splash in seconds
+//               charred footprints after a splash in seconds; other features' marks through F.stamp: a bullet's scuff
+//               (features/gunfx.js) and blood stains (features/blood.js), gone in ~10-20 s
 //   the Ranger  breath puffs in the cold (frost, and at night elsewhere; faster after sprinting), drips after a splash,
 //               sparks lifting off the cloak in ember
 //
@@ -25,6 +27,9 @@
 //   F.biomeChanged()     marks / particles reset (the arena's setBiome)
 //   F.ms                 rolling cost per rendered frame (ms); F.count() breakdown; F.C the camera state (tests)
 //   F.TUNE (= F.T)       the arena's tunables, live
+//   F.stamp(kind, x, y, dx, dy, k)   a mark from another feature (world metres): 'bullet' a bullet's scuff in the ground
+//                        ((dx, dy) its way: a gouge back toward the shooter, a few crumbs thrown ahead); 'blood' a drop's
+//                        stain (k 0..1: a pixel .. a little splat; stains close in time and place join one mark)
 //
 // HOW IT MAPS ONTO THE 3D HOST
 //   Camera    the host eases its target T after the player (exp(-9 dt), look-ahead, 30 px headroom) and adds
@@ -65,11 +70,15 @@ const TUNE = {
     hyst: .35, snap: .25,                 // screen-offset hysteresis (px over the 0.5 rounding); dt >= snap: jump to the target
     leanX: 22, leanY: 14, leanRX: 150, leanRY: 90, leanIn: 2.6, leanOut: 2.2,   // aim lean: max px, cursor px for full lean, 1/s
     kick: 2.6, dip: 3, dipSoft: 1.2,      // px peaks: bow kick (opposite the shot), hard landing dip, a leap's landing
+    gunKick: 3.6, navyK: 1.35, fanK: .6,  // px peak of a revolver's kick (opposite the shot); x for the Navy; x for a fanned shot
+    hitKick: 1.3, hitKickBig: 2.2,        // px more when the bullet hits a body; a crit or a kill
     sprintLead: 12, rollLead: 16, leadRate: 5},   // extra px ahead at a full sprint / in a roll, ease rate 1/s
   streak: {rate: 18, speed: 5.5, life: [.15, .25], len: [3, 6]},
   ghost: {every: .05, keep: .18, gap: 6, alpha: [.35, .2, .1]},
   light: {radius: 1.8, dusk: .38, night: .5, max: 2},
-  marks: {cap: 250, st: 4},             // st: s per fade stage of the player's own marks (a mark lasts 3-5 stages)
+  marks: {cap: 250, st: 4,              // st: s per fade stage of the player's own marks (a mark lasts 3-5 stages)
+    bullet: 2.5, blood: 3,              // s per stage of F.stamp's marks (a bullet's scuff ~12 s, a blood stain ~18 s)
+    join: {t: .7, r: 1.6}},             // blood stains within t s and r m of the last one join its mark (one mark a hit)
   breath: {every: [2, 3], fast: .8, heat: 4},
   wet: {prints: 8, drips: 4},
   air: {tail: .72, a: [.22, .45], glow: [.35, .7]},   // arrow air streak: from the shaft's tail (main.js draws it .72 m), alpha steps
@@ -98,6 +107,8 @@ const WET = {   // footprints after falling in (ember: charred soles out of the 
   rift: ['#56467a', '#726496', '#9286b2', '#b4aace'],
   desert: ['#6e5e4a', '#887862', '#a4947e', '#c2b49e'],   // muddy soles out of the creek
 };
+// blood stains (F.stamp 'blood'): multiply tones, deep -> faint (on sand the deepest is a dark red, ~#72170c)
+const BLOOD = ['#8a2018', '#9c3426', '#b04c3a', '#c46a56', '#d68a76', '#e6ac9c'];
 const CHIP = {ruins: '#b4a27c', ember: '#8c8078', frost: '#eef4fc', rift: '#9c8cc4', desert: '#d8bc8c'};   // splinter / crumb by an arrow hole
 const STREAK = {ruins: ['#e6dcc4', '#c8b894', '#a8987a'], ember: ['#c8beb4', '#a39a92', '#7c746e'],
   frost: ['#e8f0fa', '#c4d0e4', '#98a8c4'], rift: ['#c8b0ec', '#9a7ed4', '#6e56a8'], desert: ['#f0e0bc', '#d6be92', '#b49a72']};
@@ -262,6 +273,10 @@ export async function create(host) {
     return {x: C.outX - TX, y: C.outY - TY};
   }
   function kick(ux, uy, px) { const v = punchV(px); C.pvx -= ux * v; C.pvy -= uy * v; }   // camera goes AGAINST (ux, uy)
+  function gunKick(wx, wy, px) {   // a shot's way on the ground (world, unit) -> the view frame's px direction, then the kick
+    const v = toVF(wx, wy), vx = v[0] * PPM, vy = v[1] * PPMY, l = Math.hypot(vx, vy);
+    if (l > 1e-6) kick(vx / l, vy / l, px);
+  }
 
   // ============================================================ marks (decals)
   // decal px: the arena's world px at yaw 0 without the height (X = x PPM, Y = y PPMY); each decal keeps its ground height
@@ -436,6 +451,26 @@ export async function create(host) {
       }
     }
     RL.last = [X, Y]; commit(RL.d, true);
+  }
+  // other features' marks (F.stamp): a bullet's scuff; blood stains, joined into the last stain's mark when close
+  const BL = {d: null, t: -9, x: 0, y: 0};
+  function stamp(kind, x, y, dx = 0, dy = 0, k = 0) {
+    if (!F.on || !biome) return;
+    const z = ground(x, y), X = Math.round(x * PPM), Y = Math.round(y * PPMY);
+    if (z === 0 && host.inStream(x, y)) return;
+    if (kind === 'blood') {
+      const J = TUNE.marks.join;
+      if (!(BL.d && BL.d.z === z && simT - BL.t < J.t && Math.abs(x - BL.x) + Math.abs(y - BL.y) < J.r && decals.includes(BL.d))) { if (BL.d) BL.d.set = null; BL.d = decal(BLOOD, TUNE.marks.blood, z); BL.x = x; BL.y = y; }
+      BL.t = simT; const d = BL.d;
+      dot(d, X, Y, k > .6 ? 0 : 1);
+      if (k > .35) dot(d, X + (R() < .5 ? -1 : 1), Y, 1);
+      if (k > .7) { const [ux, uy] = scr(dx, dy); dot(d, X, Y + (R() < .5 ? -1 : 1), 2); dot(d, X + Math.round(ux * 2), Y + Math.round(uy * 2), 2); }   // (a splat: a tail along its fall)
+      commit(d, true); return;
+    }
+    const d = decal(MARK[biome], TUNE.marks.bullet, z), [ux, uy] = scr(dx, dy);
+    dot(d, X, Y, 0); dot(d, Math.round(X - ux * 1.3), Math.round(Y - uy * 1.3), 1);   // the hole, the gouge back toward the shot
+    for (let i = 0; i < 3; i++) { const f = rr(1.6, 3.4), s = rr(-1.3, 1.3); dot(d, Math.round(X + ux * f - uy * s), Math.round(Y + uy * f + ux * s), 2 + (R() < .5 ? 1 : 0)); }   // crumbs thrown ahead
+    commit(d);
   }
   // stuck arrows: remember the ones in the ground; when one is gone, leave its hole
   const stuck = new Map();
@@ -640,6 +675,8 @@ export async function create(host) {
         const L = P.leap; if (L) { const [ldx, ldy] = toW(L.dx, L.dy); crescent(e.x - ldx * .12, e.y - ldy * .12, -ldx, -ldy, {tone: 2}); }
       } else if (e.type === 'player.splash' && !e.small && P.state === 'splash') { splashT = simT; wetFrom = -99; }   // HIS splash
       else if (e.type === 'combat.explode') scorch(e.x, e.y, e.r || 2);
+      else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
+      else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, e.broke || e.crit ? K.hitKickBig : K.hitKick);
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }
@@ -741,7 +778,7 @@ export async function create(host) {
   }
 
   function reset() {
-    decals.length = 0; dirty.length = 0; ps.length = 0; gEmb.length = 0; stuck.clear();
+    decals.length = 0; dirty.length = 0; ps.length = 0; gEmb.length = 0; stuck.clear(); BL.d = null;
     for (const gh of GH.list) GH.pool.push(gh); GH.list.length = 0; GH.due = false;
     SK.d = RL.d = null; wetFrom = splashT = -99;
     for (const L of levels.values()) { L.D.fill(0); L.q.clearRect(0, 0, L.w, L.h); }
@@ -757,7 +794,7 @@ export async function create(host) {
     },
     biomeChanged() { levels.clear(); setBiome(host.biome.id); level(0); },   // (a rebuilt world: new ground texture; the ground layer made now, behind the loading screen)
     resize(w, h) { VW = w; VH = h; if (EC) { EC.width = w; EC.height = h; ecq.imageSmoothingEnabled = false; } },   // the view changed size (main.js fit)
-    view: update, camera, frame, lights,   // (not ambient: its streaks / tracks follow the player's frozen speed)
+    view: update, camera, frame, lights, stamp,   // (not ambient: its streaks / tracks follow the player's frozen speed)
     hud: () => '',
     // debugging / tests
     C, Tm, count: () => ({decals: decals.length, particles: ps.length, embers: gEmb.length, ghosts: GH.list.length, dirty: dirty.length, levels: levels.size}),

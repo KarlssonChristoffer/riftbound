@@ -11,7 +11,9 @@
 //   hits     hit_f / hit_b (a hit from in front of his facing / from behind: the sim keeps which and when): the clip from
 //            the gun up back to it; a gunman who flinches is held still by the sim until its `back` mark (TYPES flinch:
 //            dev mode warns when they differ), after which it gives way to what he does; one who doesn't (the sheriff)
-//            shows it only between shots, standing. Without the clips: the flash and the wobble alone
+//            shows it only between shots, standing. Without the clips: the flash and the wobble alone. Every bullet hit
+//            also shoves the sprite a little along its way (TUNE.hit: back in ~.2 s; the body stays where the sim has
+//            it) and shows combat's flash brighter, held full white for its first frames
 //   death    die_b (the killing hit from in front: he falls on his back) / die_f (from behind: forward): the clip, its
 //            last frame the corpse with the gun beside him, held; at its `ground` mark a dust puff (combat's puff) and
 //            foe.ground (the thud: audio); the body lies TUNE.corpse.hold s, then fades (an ordered dither); at most
@@ -142,7 +144,7 @@ export function createLook(host, sim) {
   // ---------------------------------------------------------------- per gunman: the view's own state
   const VS = new Map();   // entity -> {f, tw, ph, pose, face0, hpShow, idle}
   const vsOf = p => { let v = VS.get(p); if (!v) VS.set(p, v = {f: 0, tw: 'gun_aim', twm: '0', back: false, ph: 0, pose: 'idle.0', hpShow: p.hp, idle: (p.x * 7.3 + p.y * 3.1) % 1, seen: 0, hx: 0, hy: 0, face: 0,
-    rs: -1, rph: '', ram: 0}); return v; };   // rs: the reload clip's next step to say a mark for (-1: not reloading); rph / ram: the phase and rounds last seen
+    nx: 0, ny: 0, nt: 9, rs: -1, rph: '', ram: 0}); return v; };   // nx / ny / nt: a bullet's shove (its way, its age); rs: the reload clip's next step to say a mark for (-1: not reloading); rph / ram: the phase and rounds last seen
   const SC = [0, 0, 0], SM = [0, 0, 0];
   let yaw = 0, z = 1;
   const faceOf = (set, w) => { const n = set.ND; return ((Math.round((w - yaw) / (TAU / n)) % n) + n) % n; };   // world angle -> the atlas's facing at this yaw
@@ -346,8 +348,16 @@ export function createLook(host, sim) {
     get sets() { return sets; }, get failed() { return failed; }, load, VS, corpses,
     view(dt, evs, on) {
       if (!on) { if (VS.size) VS.clear(); for (const c of corpses) c.on = false; return; }   // (out of the desert sandbox)
-      for (const e of evs) if (e.type === 'arrow.hit' && e.prop?.kind === 'gunman') { const v = VS.get(e.prop); if (v) { v.hx = e.vx; v.hy = e.vy; } }   // (the way the last hit came)
-      for (const g of sim.gang) if (!g.p.broken) marks(g, vsOf(g.p));   // the reload's marks as seen (foe.clip)
+      for (const e of evs) if (e.type === 'arrow.hit' && e.prop?.kind === 'gunman') {   // (the way the last hit came; a bullet's shove)
+        const v = VS.get(e.prop); if (!v) continue;
+        v.hx = e.vx; v.hy = e.vy;
+        if (e.kind === 'bullet') { const l = Math.hypot(e.vx, e.vy) || 1; v.nx = e.vx / l; v.ny = e.vy / l; v.nt = 0; }
+      }
+      for (const g of sim.gang) {   // a bullet's shove ages (in the view: it holds through the hitstop); the reload's marks as seen (foe.clip)
+        if (g.p.broken) continue;
+        const v = vsOf(g.p); if (v.nt < 9) v.nt += dt;
+        marks(g, v);
+      }
       const C = TUNE.corpse;
       for (const c of corpses) {
         if (!c.on) continue;
@@ -368,8 +378,9 @@ export function createLook(host, sim) {
         const p = g.p, v = vsOf(p); v.seen = frameN; v.face = g.face;
         const pose = poseOf(set, g, v, f.dt, t) || 'idle.0';
         v.pose = set.SP[pose] ? pose : 'idle.0';
-        const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0;
-        put(set, v.pose, v.f, p.x, p.y, (p.z || 0) + (p.h || 0), 1, Math.min(1, p.flash || 0), wob);
+        const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, H = TUNE.hit;
+        const k = v.nt < H.out ? v.nt / H.out : v.nt < H.out + H.back ? 1 - (v.nt - H.out) / H.back : 0, nd = H.nudge * k * (2 - k);   // (out fast, back eased)
+        put(set, v.pose, v.f, p.x + v.nx * nd, p.y + v.ny * nd, (p.z || 0) + (p.h || 0), 1, Math.min(1, (p.flash || 0) * H.flash), wob);
         if (g.act === 'aim' && g.locked) glint(set, g, v);
       }
       if (VS.size > sim.gang.length) VS.forEach(sweep);
