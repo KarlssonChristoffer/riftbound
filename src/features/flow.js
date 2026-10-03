@@ -4,7 +4,8 @@
 //
 //   camera      a spring instead of the host's plain ease: leans toward the aim while drawing the bow, a small kick back
 //               on release, a dip on hard landings, a little overshoot before settling; the player's screen pixel is held
-//               with hysteresis (no +-1 px toggling)
+//               with hysteresis (no +-1 px toggling). A revolver's shot (player.shoot) kicks it back harder (the Navy
+//               more, a fanned shot less), a bullet's hit on a body (combat.hit) a little more on top
 //   motion      sprint speed streaks (1 px lines peeling off the body), a short afterimage trail on the dodge roll
 //               (2-3 flat-tinted silhouettes of earlier frames, behind the player)
 //   arrows      at dusk / night a flying arrow carries a small warm light (at most 2); every flying arrow trails the
@@ -65,6 +66,8 @@ const TUNE = {
     hyst: .35, snap: .25,                 // screen-offset hysteresis (px over the 0.5 rounding); dt >= snap: jump to the target
     leanX: 22, leanY: 14, leanRX: 150, leanRY: 90, leanIn: 2.6, leanOut: 2.2,   // aim lean: max px, cursor px for full lean, 1/s
     kick: 2.6, dip: 3, dipSoft: 1.2,      // px peaks: bow kick (opposite the shot), hard landing dip, a leap's landing
+    gunKick: 3.6, navyK: 1.35, fanK: .6,  // px peak of a revolver's kick (opposite the shot); x for the Navy; x for a fanned shot
+    hitKick: 1.3, hitKickBig: 2.2,        // px more when the bullet hits a body; a crit or a kill
     sprintLead: 12, rollLead: 16, leadRate: 5},   // extra px ahead at a full sprint / in a roll, ease rate 1/s
   streak: {rate: 18, speed: 5.5, life: [.15, .25], len: [3, 6]},
   ghost: {every: .05, keep: .18, gap: 6, alpha: [.35, .2, .1]},
@@ -262,6 +265,10 @@ export async function create(host) {
     return {x: C.outX - TX, y: C.outY - TY};
   }
   function kick(ux, uy, px) { const v = punchV(px); C.pvx -= ux * v; C.pvy -= uy * v; }   // camera goes AGAINST (ux, uy)
+  function gunKick(wx, wy, px) {   // a shot's way on the ground (world, unit) -> the view frame's px direction, then the kick
+    const v = toVF(wx, wy), vx = v[0] * PPM, vy = v[1] * PPMY, l = Math.hypot(vx, vy);
+    if (l > 1e-6) kick(vx / l, vy / l, px);
+  }
 
   // ============================================================ marks (decals)
   // decal px: the arena's world px at yaw 0 without the height (X = x PPM, Y = y PPMY); each decal keeps its ground height
@@ -640,6 +647,8 @@ export async function create(host) {
         const L = P.leap; if (L) { const [ldx, ldy] = toW(L.dx, L.dy); crescent(e.x - ldx * .12, e.y - ldy * .12, -ldx, -ldy, {tone: 2}); }
       } else if (e.type === 'player.splash' && !e.small && P.state === 'splash') { splashT = simT; wetFrom = -99; }   // HIS splash
       else if (e.type === 'combat.explode') scorch(e.x, e.y, e.r || 2);
+      else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
+      else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, e.kill || e.crit ? K.hitKickBig : K.hitKick);
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }

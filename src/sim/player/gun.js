@@ -36,6 +36,7 @@ export const TUNE = {
   moveSpeed: {run: 3, sprint: 3.6, back: 2.7, walkBack: 1.6},   // m/s on the move with the gun up (the bow's)
   depth: .45,       // m: the muzzle sits this far along the aim (its screen x and height come from the pose)
   back: .9,         // m: the first step's hit test starts this far behind the muzzle (a brute in your face)
+  fanKick: .5,      // x the weapon's recoil push for a fanned shot (the palm, not the arm, takes it)
   clipFb: {gun_draw: [4, 16], gun_fire: [3, 20], gun_fan: [2, 14], gun_reload: [6, 6], gun_twirl: [4, 16], gun_holster: [5, 16],
     gaim_step_l: [4, 16], gaim_step_r: [4, 16], gaim_pivot_l: [3, 24], gaim_pivot_r: [3, 24], gun_hipfire: [3, 18], gun_blow: [5, 6], gun_fan_out: [3, 28],
     duel_ready: [4, 5], hat_tip: [5, 6]},
@@ -148,6 +149,7 @@ export function createGun(PL, I) {
     if (S.ammo === 1) dmg *= 1 + mv('weapon.last', 0);
     if (S.quick) { dmg *= 1 + mv('weapon.quick', 0); S.quick = false; }
     H.onShoot({x: m.x, y: m.y, h: m.h, vx: fx * v, vy: fy * v, vh, life: w.range / v, dmg: Math.round(dmg), kind: 'bullet', gun: w.id, push: w.push, back: TUNE.back, pen: w.pen});
+    if (how !== 'move' && w.kick) { const k = w.kick * (how === 'fan' ? TUNE.fanKick : 1); P.vx -= fx * k; P.vy -= fy * k; }   // the recoil: back against the shot (plant() takes it up)
     S.ammo--; PL.shots++; S.shotN++; S.idle = 0; S.lastHow = how; S.lastShotAt = S.clock;
     S.cool = (how === 'fan' ? 0 : w.gap) * mv('weapon.gap', 1);
     ev({type: 'player.shoot', x: m.x, y: m.y, h: m.h, z: P.z, vx: fx, vy: fy, gun: w.id, fan: how === 'fan', hip: how === 'hip', left: S.ammo});
