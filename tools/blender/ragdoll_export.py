@@ -15,7 +15,7 @@
 #               (the part's lambert bias x 100), seg uint8 (index into json.segs), part uint8 (1.. json.parts),
 #               family uint8 (index into json.families), flags uint8 (bits 0-2 fixed tone + 1, 0 = shaded; bit 3 no
 #               exterior outline; bit 4 no interior lines; bit 5 thin)
-#   model.json  segs [{bone, kind (body | gun | hat), first, count (corners)}], parts [names, 1-based in the bin],
+#   model.json  segs [{bone, kind (body | gun | hat), first, count (corners), min, max (its box in the bone's frame)}], parts [names, 1-based in the bin],
 #               families [{name, ramp: 6 x [r, g, b] (pixelize.py's harmonized ramp: hi, base, shade, line,
 #               outline_shadow, outline_lit)}], bones {name: {parent, head, tail, rest: 4x4 row-major (world, the
 #               armature at the origin facing -Y)}}, joints {landmark: [x, y, z]} (skeleton.py landmarks at rest),
@@ -37,8 +37,22 @@ POSES = (['gun_aim'] + [f'gun_aim_{t}' for t in ('m45', 'm34', 'm22', 'm11', 'p1
          + [f'gws_{t}_{i}' for t in ('m90', 'm45', '0', 'p45') for i in range(8)]
          + [f'gun_fire.{i}' for i in range(4)] + [f'gun_draw.{i}' for i in range(8)] + [f'gun_reload.{i}' for i in range(13)]
          + [f'gun_holster.{i}' for i in range(0, 13, 2)] + [f'hit_f.{i}' for i in range(5)] + [f'hit_b.{i}' for i in range(5)])
-PIECE_BONE = {'GunHold0': 'gun', 'HatHold0': 'hat'}   # bones whose parts fly loose
-SKIP_BONES = {'GunMuzzle0'}
+PIECE_BONE = {'GunHold0': 'gun', 'HatHold0': 'hat'}   # bones whose parts fly loose, with every bone below them (the
+                                                      # coach gun's GunBreak0 + muzzle + breech fold in, barrels closed)
+SKIP_BONES = {'GunMuzzle0', 'GunShell0'}             # no parts, or dropped (the coach gun's fresh shell in the left fist)
+STANDARD = {'Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head'} | {m + b for m in ('Left', 'Right') for b in
+            ('Shoulder', 'Arm', 'ForeArm', 'Hand', 'UpLeg', 'Leg', 'Foot', 'ToeBase')}   # skeleton.py's bones
+
+
+def piece_of(arm, bone):
+    # the segment a bone's parts belong to: a skeleton bone or a loose piece's root itself, else its nearest such ancestor
+    # (a garment's own chain rides its standard bone as at rest); None for a skipped bone
+    b = arm.data.bones.get(bone)
+    while b and b.name not in STANDARD and b.name not in PIECE_BONE:
+        if b.name in SKIP_BONES:
+            return None
+        b = b.parent
+    return b.name if b else None
 
 
 def load_model(path):
@@ -86,9 +100,13 @@ def run(model, out, poses, clips=None):
                     break
             if bone:
                 break
-        if not bone or bone in SKIP_BONES:
-            print('RAGDOLL skip (no bone)', ob.name)
+        owner = piece_of(arm, bone) if bone else None
+        if not owner:
+            print('RAGDOLL skip (no bone)', ob.name, bone)
             continue
+        if owner != bone:
+            print('RAGDOLL fold', ob.name, bone, '->', owner)
+        bone = owner
         if bone not in seg_ix:
             seg_ix[bone] = len(segs)
             segs.append({'bone': bone, 'kind': PIECE_BONE.get(bone, 'body')})
@@ -128,6 +146,9 @@ def run(model, out, poses, clips=None):
     for si, s in enumerate(segs):
         s['first'] = first // 20
         s['count'] = len(recs[si]) // 20
+        xyz = [struct.unpack_from('<3f', recs[si], k * 20) for k in range(s['count'])]
+        s['min'] = [round(min(v[i] for v in xyz), 4) for i in range(3)]
+        s['max'] = [round(max(v[i] for v in xyz), 4) for i in range(3)]
         blob += recs[si]
         first = len(blob)
     open(os.path.join(out, 'model.bin'), 'wb').write(bytes(blob))
