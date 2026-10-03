@@ -70,6 +70,8 @@ export async function create(host) {
       ...['master', 'music', 'sfx', 'amb'].map(k => ({label: {master: 'Volume', music: 'Music', sfx: 'Effects', amb: 'Ambience'}[k], min: 0, max: 1, step: .05,
         get: () => AU.volumes?.[k] ?? 1, set: v => AU.setVolume(k, v)})),
       {label: 'Music mode', options: ['adaptive', 'explore', 'combat'], get: () => AU.musicMode || 'adaptive', set: v => AU.setMusicMode(v)},
+      // the gun sounds' western-movie flavor (audio/runtime/events.js GUN_SFX; ?gunsfx=; remembered): menu > Audio
+      {label: 'Gun sounds', options: AU.gunSfxList || [], get: () => AU.gunSfx, set: v => AU.setGunSfx?.(v)},
     ],
     hud: () => AU.muted ? 'muted (M)' : '',
   };
