@@ -134,7 +134,13 @@ void main() {
 
   let lo = SLOTS, hi = -1, loB = SLOTS, hiB = -1, rowsDirty = true;   // the slots written since the last frame(): A (births + deaths), B / C (births)
   const STYLE = {pixel: 0, hybrid: 1, soft: 2};
-  const range = (a, l, h) => { a.clearUpdateRanges(); a.addUpdateRange(l * 4, (h - l + 1) * 4); a.needsUpdate = true; };
+  // (one {start, count} kept on each buffer: three's addUpdateRange makes a new one every call; cleared by pop: three's
+  // clearUpdateRanges, `length = 0`, frees the array's store and the next push allocates one)
+  function popRanges() { const u = this.updateRanges; while (u.length) u.pop(); }
+  const range = (a, l, h) => {
+    let r = a.__range; if (!r) { r = a.__range = {start: 0, count: 0}; a.clearUpdateRanges = popRanges; }
+    r.start = l * 4; r.count = (h - l + 1) * 4; a.clearUpdateRanges(); a.updateRanges.push(r); a.needsUpdate = true;
+  };
   return {
     get count() { return inUse; }, _: {pixels, glow, get top() { return top; }},   // (debug)
     fire() {

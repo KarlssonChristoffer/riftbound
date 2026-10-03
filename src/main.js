@@ -125,7 +125,7 @@ const keys = new Set(), mouse = {x: cv.VW / 2, y: cv.VH / 2, down: false}, cam =
 // arrows, hit pops, footstep dust (sim/projectiles.js)
 const proj = createProjectiles({world: () => stage.world, ents: () => stage.ents, features, events, opt: () => opt, toWorld, PPM, PPMH});
 const {arrows, dust} = proj, spawnArrow = proj.spawn;
-const feat = name => features.find(f => f.name === name) || null;
+const feat = name => { for (const f of features) if (f.name === name) return f; return null; };   // (no closure a call: host.wind is read in hot loops)
 const hero = createHero({G, set, loadI, ctxO, app});
 // THE PLAYER (sim/player/adapter.js): player.js in the camera's frame, bridged to the world (collision, the world-frame
 // `player`, turning with the camera, the cursor's target, interaction, climbing at any angle)
@@ -142,12 +142,14 @@ let loop = null;
 // ---------------------------------------------------------------- the host features see
 // host.sprite's arguments for G.sprite (arena -> world axes), in ONE reused object: G.sprite reads it at once and keeps
 // nothing, so no copy per sprite (a spread made a new object for every sprite of every frame)
-const SPR = {img: null, em: null, nrm: null, type: undefined, shadow: undefined, dynamic: undefined, sx: undefined, sy: undefined, sw: undefined, sh: undefined,
-  x: 0, y: 0, z: 0, px: undefined, py: undefined, alpha: undefined, flip: undefined, sway: undefined, flash: undefined};
+// Its number fields always hold numbers (the defaults G.sprite would take, worked out here): a field that also held
+// undefined kept its doubles as boxes, a new box for every number written (~10 a sprite, every sprite, every frame)
+const SPR = {img: null, em: null, nrm: null, type: 3, shadow: false, dynamic: false, sx: 0, sy: 0, sw: 0, sh: 0,
+  x: 0, y: 0, z: 0, px: 0, py: 0, alpha: 1, flip: false, sway: 0, flash: 0};
 const sprite = o => {
-  const s = SPR; s.img = o.img; s.em = o.em; s.nrm = o.nrm; s.type = o.type; s.shadow = o.shadow; s.dynamic = o.dynamic;
-  s.sx = o.sx; s.sy = o.sy; s.sw = o.sw; s.sh = o.sh; s.x = o.x; s.y = o.h ?? 0; s.z = o.y;
-  s.px = o.px; s.py = o.py; s.alpha = o.alpha; s.flip = o.flip; s.sway = o.sway; s.flash = o.flash;
+  const s = SPR; s.img = o.img; s.em = o.em; s.nrm = o.nrm; s.type = o.type ?? 3; s.shadow = !!o.shadow; s.dynamic = !!o.dynamic;
+  s.sx = o.sx || 0; s.sy = o.sy || 0; s.sw = o.sw ?? o.img.width; s.sh = o.sh ?? o.img.height; s.x = o.x; s.y = o.h ?? 0; s.z = o.y;
+  s.px = o.px ?? s.sw / 2; s.py = o.py ?? s.sh; s.alpha = o.alpha ?? 1; s.flip = !!o.flip; s.sway = o.sway || 0; s.flash = o.flash || 0;
   G.sprite(s); s.img = s.em = s.nrm = null;   // (don't hold the images)
 };
 const host = {

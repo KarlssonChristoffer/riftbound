@@ -256,7 +256,9 @@ export function createHero({G, set, loadI, ctxO, app}) {
 
   // the Ranger as drawn this frame, for afterimages / reflections (host.playerSprite)
   // (img / nrm: the canvases, filled from the arrays when read)
-  const sprite = () => { const P = app.P, player = app.player; return {get img() { sync(); return charCv; }, get nrm() { sync(); return nrmCv; }, px: PIV[0] + CX, py: PIV[1] + CY, x: player.x, y: player.y, h: P.z, frame: P.frame, face: P.face}; };
+  // (one kept object, filled per call: its readers use it at once; flow's afterimage copies what it keeps)
+  const SPRO = {get img() { sync(); return charCv; }, get nrm() { sync(); return nrmCv; }, px: 0, py: 0, x: 0, y: 0, h: 0, frame: '', face: 0};
+  const sprite = () => { const P = app.P, player = app.player, o = SPRO; o.px = PIV[0] + CX; o.py = PIV[1] + CY; o.x = player.x; o.y = player.y; o.h = P.z; o.frame = P.frame; o.face = P.face; return o; };
 
   return {atlas, card, armor, toggleArmour, switchLoadout, moveCloth, stepCloth, compose, drawHDBow, sprite,
     get SP() { return SP; }, get rig() { return rig; }, get ND() { return ND; }, get set() { return set; }, get loadI() { return loadI; }, get loadName() { return LOADOUTS[loadI][0]; }};

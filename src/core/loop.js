@@ -75,7 +75,7 @@ export function createLoop(E) {
   }
   function render(t) {
     cv.stepZoom(lastDt);
-    const [PX, PY] = [player.x, player.y];
+    const PX = player.x, PY = player.y;
     cv.follow(lastDt, PX, PY, P, cam);   // the camera eases after him (render/camera.js)
     if (!views) return;   // (the camera follows without views too: it's the frame the cursor is read in, the sim's input)
     // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js)

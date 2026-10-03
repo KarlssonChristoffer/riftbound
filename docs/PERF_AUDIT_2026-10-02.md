@@ -10,7 +10,8 @@ cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact sh
 wind's cloth atlas (E.9) and the hero's compositor in arrays (E.10) are done. The trees' sway was measured and left (E.9).
 Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 (E.11): done. In a real window at 164 Hz the
 game misses 0-3 vsyncs in 10 s in every scenario. The last per-frame canvas uploads (flow's marks, the stream's glints)
-are on the GPU too (E.12).
+are on the GPU too (E.12). The heap's garbage is down a quarter (E.13: 174 -> 131 KB a frame by day, not yet the
+100 KB stage 1 aimed at; what's left is listed there).
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -851,6 +852,93 @@ The windowed 164 Hz run settles it for the player, alternating the two versions:
 - walking: 0 missed in three of the four runs (10 missed in the fourth);
 - zoomed out: one clean run and one with a 150-200 ms hitch for EACH version, from something they share (the zoom-out's
   first frames, or the machine).
+
+### E.13 The heap's garbage (2026-10-03; bit-exact)
+
+**Where it came from.** Measured with V8's sampling heap profiler after 45-60 s of play (the first seconds run in V8's
+middle tier, which boxes far more: ~290 KB a frame at 5 s against ~170 at 60 s). Most of it was not visible in the code:
+
+- **A number read through a site that sees many object shapes** (megamorphic) comes back as a new heap number (16 bytes)
+  when the field holds doubles. Measured: 20 shapes, 16 bytes a read; 4 shapes or fewer, nothing. Lights' particles had a
+  dozen literal shapes; the props have dozens.
+- **A field that ever held `undefined` (or anything not a number)** stores its numbers boxed: a new heap number on every
+  write (main.js's sprite options, the registry's step records).
+- **`arr.length = 0` frees the array's store**: the next push allocates a new one. three's `clearUpdateRanges` does it
+  after every upload.
+- **A call that isn't inlined boxes its number arguments and its result.** The cloth's substep was one long function, so
+  TurboFan's inlining budget ran out before the `hypot3` calls.
+- `Array.prototype.sort` makes a work array per call and boxes every comparison's result.
+- `Math.hypot`, spreads, `map` / `flatMap` / `forEach` with closures, object literals and `o = {}` defaults per call.
+- `Math.random()` returns a new heap number on every call, optimized or not (this V8: 16 bytes a call).
+
+**What changed** (none of it changes a pixel or the sim):
+
+- **main.js `host.sprite`:** the kept options object's number fields always hold numbers (the defaults G.sprite applies
+  are worked out in the wrapper). `feat()` (host.wind, host.feature) loops instead of `find` with a closure.
+- **gfx.js:**
+  - one update range per buffer, kept on it and cleared by pop (`setRange`; the same in flames.js);
+  - packCards keeps each card's group (the key is recomputed only when its textures change or a group was disposed);
+  - sprite() finds its group through two small-integer keys instead of a numeric key past the Smi range;
+  - the layer batch's run meshes stay in their scene and are shown / hidden, not added and cleared each frame.
+- **lighting.js:** explicit `.set()` calls instead of spreads and `map`; halos project into a kept array; the candidate
+  lights are ordered by a stable insertion sort (the same order Array.sort gave).
+- **lights.js:** every particle comes from one factory (`part()`, one shape); F.lights fills kept records (lighting.js
+  copies them at once); fires.draw's options are one kept object.
+- **view/cloth.js:** the substep is split in three (`#integrate`, `#relax`, `#limit`), so the hypot3 calls inline;
+  `mul3` uses loops; two `Math.hypot(...v)` became hypot3 (bit for bit).
+- **world/entities.js:** who moved is worked out once per sim step, by its first draw (positions change only in
+  steps); the draws between two steps lerp that list instead of reading four numbers off every entity. The lerp lists
+  are kept arrays. add / remove / moved drop the list.
+- **Smaller:**
+  - depth.js: the footprints into kept objects, the shafts' colour strings cached;
+  - hero.js: one kept sprite object;
+  - contact.js: the player's foot cache keyed by frame, then facing (no key string);
+  - wind.js / atmos.js / garden.js: kept sprite options; garden's lights and lantern position kept;
+  - wildlife.js: the ground layer projects into a kept array;
+  - firesim.js: no `{}` default; loop.js: no array destructuring a frame.
+
+**Checks:**
+
+- golden: 16 / 16 identical against the code before;
+- golden's tour runs a frame per step, so the draws between steps (the lerp) were checked apart: 10 captures at 144 Hz
+  frames (24 brutes walking, the player walking, a run's wave), each frame different from the last, all identical
+  against the code before;
+- smoke and simview pass.
+
+**Results** (garbage per frame at a fixed 164 Hz step, after 45 s of play; the A/B's frame times):
+
+| | Before | After |
+|---|---|---|
+| day: garbage a frame (sampled, fixed 164 Hz step) | 174 KB | 131 KB (-25%) |
+| horde (60): garbage a frame | 206 KB | 157 KB (-24%) |
+| day / horde: heap growth a frame (perf.counts, in the A/B) | 186 / 212 KB | 136 / 164 KB |
+| day: frame (interleaved A/B, median) | 2.78 ms | 2.55 ms (-8.4%; median slice 0.93) |
+| horde: frame | 2.69 ms | 2.57 ms (-4.5%; median slice 0.93) |
+
+By site (day): lights' particle step 14 KB -> 0 and their draw 8.2 -> 3.3 KB; the cloth's substep 14.7 -> 6.4 KB;
+the registry's lerp 8.4 -> 2.7 KB; lighting's sort and the features' light records 3.6 -> 1 KB. `G.render` -7% by day
+(-2% in the horde), `lights.frame` -16..-23%, `cloth.sim` -5..-11%. Draws and uploads are unchanged.
+
+**How it was measured.** `tmp/perf-tools/sample_jf.mjs`: the page loads and plays for 45 s (warm), then 1500 frames are
+stepped by hand at 1/164 s each (`__r3d.step(1, 1 / 164)`) under the sampling heap profiler (1 KB interval, collected
+objects included). A fixed step makes the per-frame figure independent of the machine's load; uncapped runs swung
+90-160 KB a frame for the same code with the frame rate (the machine was ~45% busy).
+
+**What's left** (131 KB a frame by day), in order of size:
+
+- **The props' numbers, read by the scans of all items (~27 KB):** world.update (~14 KB a frame), entities.sync (~8 KB,
+  once a step) and contact (~5 KB). Megamorphic reads of double fields, one heap number each. Fixes: props made by one
+  factory whose number fields start as non-numbers (reads free, only moving props pay on writes), or the registry
+  owning positions in arrays.
+- **three.js's uniform setters and render list (~22 KB):** each changed uniform's numbers are boxed into the WebGL
+  call. Fewer per-object uniforms (more instancing) is the way down.
+- **wildlife's ground layer and sprites (~9 KB).**
+- **wind's cloth raster (`tri`, ~8 KB):** the pattern callback per pixel takes two numbers, boxed because the
+  callbacks differ per piece.
+- **The cloth's `#relax` (~6 KB):** not found (no zero-length links, the arrays hold doubles).
+- **`Math.random` in the views (~3.5 KB):** a seeded JS generator would make none, but it changes every random draw
+  (golden would differ; the look is the same in kind).
+- atmos (~3 KB), wind's foliage step (~3 KB), lights' particle draw (~3 KB).
 
 ---
 

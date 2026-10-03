@@ -115,10 +115,11 @@ export async function create(host) {
   const groundMatrix = (R, h, x0 = 0, y0 = 0) => { const [e, f] = proj(x0, y0, h); return new DOMMatrix([V.xx / R, V.xy / R, V.yx / R, V.yy / R, e, f]); };
   // its 2 x 2 part inverted, into out [4]: view px (from the plane's origin) -> texel (gfx.js COMP_FS viewTexel)
   const groundInv = (R, out) => { const a = V.xx / R, b = V.xy / R, c = V.yx / R, d = V.yy / R, det = a * d - b * c; out[0] = d / det; out[1] = -c / det; out[2] = -b / det; out[3] = a / det; return out; };
-  function footprint(h = 0) {   // the view's world AABB at height h
+  const FPA = {x0: 0, y0: 0, x1: 0, y1: 0}, FPB = {x0: 0, y0: 0, x1: 0, y1: 0}, FPC = {x0: 0, y0: 0, x1: 0, y1: 0}, _pf = [0, 0];
+  function footprint(h, out) {   // the view's world AABB at height h, into out (one of FPA..FPC: kept, no object a call)
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-    for (const [X, Y] of [[0, 0], [VW, 0], [0, VH], [VW, VH]]) { const [x, y] = inv(X, Y, h); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-    return {x0, y0, x1, y1};
+    for (let k = 0; k < 4; k++) { inv2(k & 1 ? VW : 0, k & 2 ? VH : 0, h, _pf); const x = _pf[0], y = _pf[1]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    out.x0 = x0; out.y0 = y0; out.x1 = x1; out.y1 = y1; return out;
   }
 
   // ================================================================ FOREGROUND
@@ -427,7 +428,7 @@ export async function create(host) {
     ensureShafts(); if (!SH.col) return 0;
     const z = V.z, reach = (TUNE.shafts.lenMax + 30) * z;
     let n = 0, q = null;
-    const mc = css(SH.col.mote), ec = css(SH.col.edge.map(v => v * 2));
+    const CC = SH.col, mc = CC.mcss ??= css(CC.mote), ec = CC.ecss ??= css(CC.edge.map(v => v * 2));   // (made once a colour set)
     for (const f of SH.feet) {
       f.vis = false;
       if (n >= TUNE.shafts.max) continue;
@@ -629,7 +630,7 @@ export async function create(host) {
   function drawWater() {
     WA.used = false; WA.n = 0;
     buildWater(); if (!WA.mask && !WA.puddles.length) return;
-    const z = V.z, fp = footprint(0), fb = footprint(TUNE.refl.bed), S = host.layout.stream;
+    const z = V.z, fp = footprint(0, FPA), fb = footprint(TUNE.refl.bed, FPB), S = host.layout.stream;
     const streamIn = WA.mask && Math.max(fp.x1, fb.x1) > WA.x0 && Math.min(fp.x0, fb.x0) < WA.x1 && Math.min(fp.y0, fb.y0) < WA.yEnd;
     // puddles on the floor first (their colours follow the sky; re-rasterised when the yaw / zoom / time changes)
     const tn = timeName(), pk = Math.round(V.yaw / (.5 * DEG)) + '|' + tn, vis = [];
@@ -669,7 +670,7 @@ export async function create(host) {
   const HZS = {src: null, mask: null, W: 0, H: 0, ver: 0, band: 2, zoom: 1, t: 0, m: [0, 0, 0, 0], e: 0, f: 0, oy: 0};
   function drawHaze() {
     buildWater(); if (!WA.lava || !TUNE.haze.on || !host.G.setHaze) return 0;
-    const fp = footprint(TUNE.refl.bed); if (fp.x1 < 37 || fp.x0 > 43 || fp.y0 > 27.6) return 0;
+    const fp = footprint(TUNE.refl.bed, FPC); if (fp.x1 < 37 || fp.x0 > 43 || fp.y0 > 27.6) return 0;
     if (HZS.src !== WA.lava) {
       const c = WA.lava, d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, b = new Uint8Array(c.width * c.height);
       for (let i = 0; i < b.length; i++) b[i] = d[i * 4 + 3] > 127 ? 255 : 0;

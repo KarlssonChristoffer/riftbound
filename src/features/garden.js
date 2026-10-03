@@ -188,9 +188,11 @@ export async function create(host) {
     });
     return pack(items);
   }
-  function spr(name, x, y, h, o = {}) {
+  const SPO = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0, type: 3, shadow: true, alpha: 1, flip: false}, NOO = {};   // (host.sprite's kept options; the default o: no object a call)
+  function spr(name, x, y, h, o = NOO) {
     const f = atlas.fr[name]; if (!f) return;
-    host.sprite({img: atlas.img, em: atlas.em, sx: f.sx, sy: f.sy, sw: f.sw, sh: f.sh, px: f.px, py: f.py, x, y, h, type: 3, shadow: o.shadow !== false, alpha: o.alpha ?? 1, flip: o.flip});
+    const s = SPO; s.img = atlas.img; s.em = atlas.em; s.sx = f.sx; s.sy = f.sy; s.sw = f.sw; s.sh = f.sh; s.px = f.px; s.py = f.py; s.x = x; s.y = y; s.h = h;
+    s.shadow = o.shadow !== false; s.alpha = o.alpha ?? 1; s.flip = !!o.flip; host.sprite(s);   // (a kept options object: no literal a sprite)
   }
 
   // ================================================================ 3D pieces
@@ -295,7 +297,10 @@ export async function create(host) {
 
   // ================================================================ the lantern (a pendulum on a chain)
   const LAN = {ax: STALL.x + .36, ay: STALL.y - .75, ah: 2.26, len: .32, tx: 0, ty: 0, vx: 0, vy: 0};
-  const lanPos = () => [LAN.ax + Math.sin(LAN.tx) * LAN.len, LAN.ay + Math.sin(LAN.ty) * LAN.len, LAN.ah - Math.cos(LAN.tx) * Math.cos(LAN.ty) * LAN.len];
+  const LP = [0, 0, 0], lanPos = () => {   // (into one kept array: its callers take the three numbers at once)
+    LP[0] = LAN.ax + Math.sin(LAN.tx) * LAN.len; LP[1] = LAN.ay + Math.sin(LAN.ty) * LAN.len; LP[2] = LAN.ah - Math.cos(LAN.tx) * Math.cos(LAN.ty) * LAN.len;
+    return LP;
+  };
   const LW = {x: 0, y: 0, g: 0}, LCALM = {x: 0, y: 0, g: 0};   // the wind at the lantern (scratch), none
   function stepLantern(dt, evs) {
     const w = host.wind?.on && host.wind.at ? host.wind.at(LAN.ax, LAN.ay, LW) : LCALM, pl = host.player;
@@ -355,11 +360,15 @@ export async function create(host) {
     }
     for (const [x, y, v] of FLOWERS) if (near(x, y)) spr(`flower_${v}`, x, y, 0, {shadow: false});
   };
+  // the lantern's light and the potions' glow: records reused every frame (lighting.js copies them at once)
+  const GLR = [{x: 0, y: 0, h: 0, color: '#ffc878', radius: 4.6, intensity: 1.05, flicker: .25, id: 9501},
+    ...['#7cff8a', '#7ad8ff', '#e58aff'].map((color, i) => ({x: 0, y: 0, h: 1.62, color, radius: 1.3, intensity: .55, flicker: .05, id: 9502 + i}))];
+  const POTY = [-.6, -.2, .25], NOL = [];
   F.lights = () => {
-    if (!near(STALL.x, STALL.y, 26)) return [];
-    const [lx, ly, lh] = lanPos(), out = [{x: lx, y: ly, h: lh, color: '#ffc878', radius: 4.6, intensity: 1.05, flicker: .25, id: 9501}];
-    ['#7cff8a', '#7ad8ff', '#e58aff'].forEach((c, i) => out.push({x: STALL.x + 2.15, y: STALL.y + [-.6, -.2, .25][i], h: 1.62, color: c, radius: 1.3, intensity: .55, flicker: .05, id: 9502 + i}));
-    return out;
+    if (!near(STALL.x, STALL.y, 26)) return NOL;
+    const [lx, ly, lh] = lanPos(), a = GLR[0]; a.x = lx; a.y = ly; a.h = lh;
+    for (let i = 0; i < 3; i++) { const o = GLR[i + 1]; o.x = STALL.x + 2.15; o.y = STALL.y + POTY[i]; }
+    return GLR;
   };
   F.prompt = p => p === merchant ? 'E  talk' : null;
   F.interact = p => {

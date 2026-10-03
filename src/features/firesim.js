@@ -93,7 +93,7 @@ export function createFires(host) {
       f.ages[f.live] = 0; f.lifes[f.live++] = life;
     }
   }
-  const A = [0, 0], pops = [], WS = {x: 0, y: 0, g: 0};   // WS: the wind at a flame (scratch)
+  const A = [0, 0], pops = [], WS = {x: 0, y: 0, g: 0}, NOO = {};   // WS: the wind at a flame (scratch); NOO: no options
   return {
     TUNE,
     ramp: c => rampOf(c),
@@ -113,7 +113,7 @@ export function createFires(host) {
         for (let i = f.live - 1; i >= 0; i--) if ((Ag[i] += dt) >= Lf[i]) { gpu.release(Sl[i]); const j = --f.live; Ag[i] = Ag[j]; Lf[i] = Lf[j]; Sl[i] = Sl[j]; }
       }
     },
-    draw(key, kind, col, x, y, h, o = {}) {
+    draw(key, kind, col, x, y, h, o = NOO) {
       const f = fireOf(key, kind); f.x = x; f.y = y; f.h = h; f.onT = o.on ?? 1; f.scale = o.scale ?? 1; f.hs = clamp(o.height ?? 1, .2, 1.5);
       if (f.col !== col) { f.col = col; f.ramp = rampOf(col); }
       // the wind pushes the column (world metres; it leans the same way from every side)

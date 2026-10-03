@@ -1432,7 +1432,9 @@ export async function create(host) {
   const bk = new Map();
   const bput = (c, x, y, w = 1, h = 1) => { let a = bk.get(c); if (!a) bk.set(c, a = []); a.push(x, y, w, h); };
   function flush(q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); a.length = 0; } }
-  const gxy = (x, y, h) => { const v = host.toView(x, y, h); v[0] = Math.round(v[0]); v[1] = Math.round(v[1]); return v; };
+  const GV = [0, 0, 0], gxy = (x, y, h) => {   // (= host.toView, rounded, into one kept array: its callers take X, Y at once)
+    const v = G.toScreenInto(x, h, y, GV); v[0] = Math.round(v[0]); v[1] = Math.round(v[1]); return v;
+  };
   const inV = (X, Y, p) => X > -p && Y > -p && X < ctx.VW + p && Y < ctx.VH + p;
   function shadowAt(x, y, hAbove) {   // a flying animal's shadow: 3 -> 1 px, lighter with height (sprite px x zoom)
     if (hAbove > 7) return;

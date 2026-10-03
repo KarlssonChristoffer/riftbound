@@ -1191,6 +1191,15 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   // from its instance buffer's size), and never again: a batch that swaps in a bigger buffer later must clear it, or the
   // instances past the old size are silently not drawn (a horde's 33rd brute of one facing went missing)
   const regrown = geo => { geo._maxInstanceCount = undefined; };
+  // one update range on a buffer (attribute or interleaved), in a {start, count} kept on it: three's addUpdateRange makes a
+  // new one every call (one a batch a frame); three empties the list after the upload
+  // (and cleared by pop: `length = 0`, as three's clearUpdateRanges does after each upload, frees the array's store, and
+  // the next push allocates a new one)
+  function popRanges() { const u = this.updateRanges; while (u.length) u.pop(); }
+  const setRange = (a, start, count) => {
+    let r = a.__range; if (!r) { r = a.__range = {start: 0, count: 0}; a.clearUpdateRanges = popRanges; }
+    r.start = start; r.count = count; a.clearUpdateRanges(); a.updateRanges.push(r); a.needsUpdate = true;
+  };
   const QUAD = new THREE.BufferGeometry();
   QUAD.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0], 3));
 
@@ -1275,7 +1284,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uOff: {value: new THREE.Vector2()}, uSway: {value: 0}, uHasBend: {value: 0}};
     const gu = {uBend: {value: BEND1}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0}, uFlash: {value: 0}, uObj: {value: o.obj ?? 0}};
     const pl = o.plant, plant = pl ? [pl.kind, pl.seed, pl.delay, palRow(pl)] : [0, 0, 0, 0];
-    const C = {u, g: {uniforms: gu}, shadow: o.shadow !== false, plant, vis: true,
+    const C = {u, g: {uniforms: gu}, shadow: o.shadow !== false, plant, vis: true, grp: null, gTex: null, gEm: null,   // grp: its group while its textures stay
       set anchor(v) { u.uAnchor.value.copy(v); },
       set flash(k) { gu.uFlash.value = k; },
       setVisible(v) { C.vis = !!v; },
@@ -1316,9 +1325,13 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     for (const G2 of bGroups.values()) G2.n = 0;
     for (const C of bcards) {
       if (!C.vis) continue;
-      const u = C.u, g = C.g.uniforms, tex = u.uTex.value, em = g.uHasEm.value > .5 ? g.uEm.value : null, a0 = idOf(tex), e0 = idOf(em), s0 = C.shadow ? 1 : 0;
-      const key = a0 < 1048576 && e0 < 1048576 ? (a0 * 1048576 + e0) * 2 + s0 : `${a0}|${e0}|${s0}`;
-      const G2 = bGroup(key, tex, em, C.shadow);
+      const u = C.u, g = C.g.uniforms, tex = u.uTex.value, em = g.uHasEm.value > .5 ? g.uEm.value : null;
+      let G2 = C.grp;
+      if (!G2 || G2.dead || C.gTex !== tex || C.gEm !== em) {   // (looked up again only when its textures change: no key a card a frame)
+        const a0 = idOf(tex), e0 = idOf(em), s0 = C.shadow ? 1 : 0;
+        const key = a0 < 1048576 && e0 < 1048576 ? (a0 * 1048576 + e0) * 2 + s0 : `${a0}|${e0}|${s0}`;
+        G2 = C.grp = bGroup(key, tex, em, C.shadow); C.gTex = tex; C.gEm = em;
+      }
       if (G2.n >= G2.cap) bGrow(G2);
       const i = G2.n++ * BC_STRIDE, an = u.uAnchor.value, s = u.uSize.value, pv = u.uPivot.value, off = u.uOff.value, b = g.uBend.value, pl = C.plant;
       bPut(G2, i, an.x); bPut(G2, i + 1, an.y); bPut(G2, i + 2, an.z); bPut(G2, i + 3, u.uBias.value);
@@ -1330,10 +1343,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     }
     for (const [key, G2] of bGroups) {
       G2.geo.instanceCount = G2.n; G2.gm.visible = G2.n > 0; if (G2.sm) G2.sm.visible = G2.n > 0;
-      if (G2.n && (G2.dirty || G2.n > G2.n0)) { G2.ib.clearUpdateRanges(); G2.ib.addUpdateRange(0, G2.n * BC_STRIDE); G2.ib.needsUpdate = true; }
+      if (G2.n && (G2.dirty || G2.n > G2.n0)) setRange(G2.ib, 0, G2.n * BC_STRIDE);
       G2.dirty = false; G2.n0 = G2.n;
       if (G2.n === 0 && ++G2.idle > 600) {   // (a texture nobody shows any more: its group goes)
-        gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.deleteAttribute('position'); G2.geo.dispose(); bGroups.delete(key);
+        gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.deleteAttribute('position'); G2.geo.dispose(); bGroups.delete(key); G2.dead = true;
       } else if (G2.n) G2.idle = 0;
     }
   }
@@ -1456,9 +1469,15 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     const a = idOf(o.img), b = idOf(o.em), c = idOf(o.nrm), t = o.type ?? 3, s = o.shadow ? 1 : 0;
     return a < 65536 && b < 65536 && c < 65536 && t >= 0 && t < 16 && (t | 0) === t ? ((a * 65536 + b) * 65536 + c) * 32 + t * 2 + s : `${a}|${b}|${c}|${t}|${s}`;
   }
+  // a sprite's group, found by small integers (image id -> its emit, normals, type, shadow): the flat key is a number past
+  // the small-integer range, a boxed double every lookup; made (or found by that key) the first time
+  const gIdx = new Map();
   function sprite(o) {
-    const key = groupKey(o);
-    let G2 = groups.get(key); if (!G2) groups.set(key, G2 = makeGroup(o));
+    const ia = idOf(o.img), ie = idOf(o.em), inr = idOf(o.nrm), ty = o.type ?? 3, sh0 = o.shadow ? 1 : 0;
+    let m = gIdx.get(ia); if (!m) gIdx.set(ia, m = new Map());
+    const k2 = ie < 4096 && inr < 4096 && ty >= 0 && ty < 16 && (ty | 0) === ty ? ((ie * 4096 + inr) * 16 + ty) * 2 + sh0 : `${ie}|${inr}|${ty}|${sh0}`;
+    let G2 = m.get(k2);
+    if (!G2) { const key = groupKey(o); G2 = groups.get(key); if (!G2) groups.set(key, G2 = makeGroup(o)); G2.ia = ia; G2.ik = k2; m.set(k2, G2); }
     if (G2.n >= G2.cap) grow(G2);
     const W = o.img.width, H = o.img.height, sx = o.sx || 0, sy = o.sy || 0, sw = o.sw ?? W, sh = o.sh ?? H, i = G2.n++, dyn = o.dynamic ? DYN : STILL;
     G2.uni.uTex.value = tex(o.img, dyn); if (o.em) { G2.uni.uEm.value = tex(o.em, dyn); G2.uni.uHasEm.value = 1; }
@@ -1470,7 +1489,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     M[b] = o.alpha ?? 1; M[b + 1] = o.flip ? 1 : 0; M[b + 2] = o.sway || 0; M[b + 3] = o.flash || 0;
   }
   // upload only the part of a batch buffer written this frame (three uploads the WHOLE array otherwise: ~0.9 MB a frame)
-  function upload(a, n) { if (n <= 0) return; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
+  function upload(a, n) { if (n > 0) setRange(a, 0, n * a.itemSize); }
   function flushBatches() {
     upload(lPos, nLines * 2); upload(lCol, nLines * 2); lineGeo.setDrawRange(0, nLines * 2); lineObj.visible = nLines > 0;
     upload(pPos, nPoints); upload(pCol, nPoints); upload(pMisc, nPoints); pointGeo.setDrawRange(0, nPoints); pointObj.visible = nPoints > 0;
@@ -1478,7 +1497,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       G2.geo.instanceCount = G2.n; G2.gm.visible = G2.n > 0; if (G2.sm) G2.sm.visible = G2.n > 0;
       for (const a of G2.list) upload(a, G2.n);
       if (G2.n === 0 && ++G2.idle > 600) {   // (the shared quad's attribute is detached first: disposing it would delete its GL buffer)
-        gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.deleteAttribute('position'); G2.geo.dispose(); groups.delete(key);
+        gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.deleteAttribute('position'); G2.geo.dispose(); groups.delete(key); gIdx.get(G2.ia)?.delete(G2.ik);
       }
       else if (G2.n) G2.idle = 0;
     }
@@ -1532,7 +1551,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       const u = {uRes: compU.uRes, uTex: {value: null}, uClipP: {value: new Float32Array(64)}, uClipN: {value: new THREE.Vector4()}, uClipK: {value: 0}};
       const o = {side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor};
       const mOver = raw(LB_VS, LB_FS, u, {...o, blendDst: THREE.OneMinusSrcAlphaFactor}), mAdd = raw(LB_VS, LB_FS, u, {...o, blendDst: THREE.OneFactor});
-      const mesh = new THREE.Mesh(geo, mOver); mesh.frustumCulled = false; mesh.matrixAutoUpdate = false;
+      const mesh = new THREE.Mesh(geo, mOver); mesh.frustumCulled = false; mesh.matrixAutoUpdate = false; mesh.visible = false; lbScene.add(mesh);   // (shown only while its layer draws)
       R = lbRuns[lbN] = {geo, u, mOver, mAdd, mesh, d: null, ib: null, cap: 0, n: 0, tex: null, add: false, clip: null};
       lbGrow(R, 64);
     }
@@ -1643,15 +1662,16 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     for (const L of layerList) {
       if (!L.runs.length) continue;
       renderer.setRenderTarget(L.rt); renderer.clear(true, false, false);
+      for (const R of lbRuns) R.mesh.visible = false;   // (every pooled run sits in lbScene: this layer's are shown, in order)
       let k = 0;
       for (const R of L.runs) {
-        R.geo.instanceCount = R.n; R.ib.clearUpdateRanges(); R.ib.addUpdateRange(0, R.n * 16); R.ib.needsUpdate = true;
-        R.u.uTex.value = R.tex; R.mesh.material = R.add ? R.mAdd : R.mOver; R.mesh.renderOrder = k++; lbScene.add(R.mesh);
+        R.geo.instanceCount = R.n; setRange(R.ib, 0, R.n * 16);
+        R.u.uTex.value = R.tex; R.mesh.material = R.add ? R.mAdd : R.mOver; R.mesh.renderOrder = k++; R.mesh.visible = true;
         const C = R.clip; R.u.uClipK.value = C ? C.k : 0; if (C) { R.u.uClipP.value.set(C.p); R.u.uClipN.value.copy(C.n); }
       }
       renderer.render(lbScene, dummyCam);
-      lbScene.clear();
     }
+    for (const R of lbRuns) R.mesh.visible = false;
     if (frameNo % 300 === 0) for (const e of imgLive) if (frameNo - e.used > 600) { e.t.dispose(); e.gone = true; imgLive.delete(e); }
   }
 
@@ -1942,7 +1962,7 @@ void main() {
     renderer.setRenderTarget(xray); renderer.clear(true, false, false); renderer.render(xScene, camera);
     if (aoFrame !== frameNo) aoN = 0;
     compU.uAo.value.w = aoN ? compU.uAo.value.w : 0;
-    if (aoN) { aoGeo.instanceCount = aoN; aoBuf.clearUpdateRanges(); aoBuf.addUpdateRange(0, aoN * 8); aoBuf.needsUpdate = true; renderer.render(aoScene, dummyCam); }
+    if (aoN) { aoGeo.instanceCount = aoN; setRange(aoBuf, 0, aoN * 8); renderer.render(aoScene, dummyCam); }
     compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
     let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }

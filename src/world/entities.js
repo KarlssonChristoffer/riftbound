@@ -21,7 +21,9 @@
 //     resets, teleports) / ents.refresh(name?) (re-run a query's predicate over the list)
 //   ents.lerpBegin(alpha) / lerpEnd(): DRAWING BETWEEN SIM STEPS (core/loop.js, the fixed step): sync() notes where each
 //     entity was when the step began (x, y, z, h); lerpBegin puts the ones that moved alpha of the way from there to
-//     where they are now, for the draw; lerpEnd puts them back. moved(p) skips that for a jump (nothing slides across)
+//     where they are now, for the draw; lerpEnd puts them back. moved(p) skips that for a jump (nothing slides across).
+//     Who moved is worked out once per step, by its first draw (positions change only in sim steps): the draws between
+//     two steps lerp that list (reading four numbers off every entity a frame was ~8 KB of boxed numbers a frame)
 import {createGrid} from './spatial.js';
 
 export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
@@ -39,14 +41,14 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
   for (const p of list) join(p);
   function add(p) {
     if (recs.has(p)) return p;
-    list.push(p); join(p); ver++;
+    list.push(p); join(p); ver++; dropMovers();
     return p;
   }
   function remove(p) {
     const rec = recs.get(p); if (!rec) return false;
     const i = list.indexOf(p); if (i >= 0) list.splice(i, 1);
     for (const q of queries) if (rec.mask & q.bit) { const k = q.list.indexOf(p); if (k >= 0) q.list.splice(k, 1); }
-    grid.remove(rec); recs.delete(p); ver++;
+    grid.remove(rec); recs.delete(p); ver++; dropMovers();
     return true;
   }
   function query(name, pred, join = null) {
@@ -77,17 +79,27 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
   }
   function hide(p, on = true) { p.gone = !!on; }
   const snap = rec => { const p = rec.p; rec.lx = p.x; rec.ly = p.y; rec.lz = p.z; rec.lh = p.h; };
-  function moved(p) { const rec = recs.get(p); if (!rec) return; if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } snap(rec); }
+  function moved(p) { const rec = recs.get(p); if (!rec) return; if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } snap(rec); dropMovers(); }
+  let stepNo = 0;
   function sync() {
+    stepNo++;
     for (const rec of recs.values()) { if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } snap(rec); }
   }
-  const lerped = [], mix = (a, b, k) => typeof a === 'number' && typeof b === 'number' ? a + (b - a) * k : b;
+  // the records that moved in the last step (movStep: the step they are for; -1: work them out again) and the ones lerped
+  // this draw (kept arrays, filled by index: no garbage a frame)
+  const movers = [], lerped = [], mix = (a, b, k) => typeof a === 'number' && typeof b === 'number' ? a + (b - a) * k : b;
+  let nMov = 0, movStep = -1, nLerp = 0;
+  function dropMovers() { movStep = -1; movers.fill(null, 0, nMov); nMov = 0; }
   function lerpBegin(k) {
     if (k >= 1) return;
-    for (const rec of recs.values()) {
-      const p = rec.p, x = p.x, y = p.y, z = p.z, h = p.h;
+    if (movStep !== stepNo) {   // the first draw since the step: who moved in it
+      movStep = stepNo; nMov = 0;
+      for (const rec of recs.values()) { const p = rec.p; if (p.x !== rec.lx || p.y !== rec.ly || p.z !== rec.lz || p.h !== rec.lh) movers[nMov++] = rec; }
+    }
+    for (let i = 0; i < nMov; i++) {
+      const rec = movers[i], p = rec.p, x = p.x, y = p.y, z = p.z, h = p.h;
       if (x === rec.lx && y === rec.ly && z === rec.lz && h === rec.lh) continue;
-      rec.cx = x; rec.cy = y; rec.cz = z; rec.ch = h; lerped.push(rec);
+      rec.cx = x; rec.cy = y; rec.cz = z; rec.ch = h; lerped[nLerp++] = rec;
       if (x !== rec.lx) p.x = mix(rec.lx, x, k);
       if (y !== rec.ly) p.y = mix(rec.ly, y, k);
       if (z !== rec.lz) p.z = mix(rec.lz, z, k);
@@ -95,8 +107,8 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
     }
   }
   function lerpEnd() {
-    for (const rec of lerped) { const p = rec.p; if (p.x !== rec.cx) p.x = rec.cx; if (p.y !== rec.cy) p.y = rec.cy; if (p.z !== rec.cz) p.z = rec.cz; if (p.h !== rec.ch) p.h = rec.ch; }
-    lerped.length = 0;
+    for (let i = 0; i < nLerp; i++) { const rec = lerped[i], p = rec.p; if (p.x !== rec.cx) p.x = rec.cx; if (p.y !== rec.cy) p.y = rec.cy; if (p.z !== rec.cz) p.z = rec.cz; if (p.h !== rec.ch) p.h = rec.ch; lerped[i] = null; }
+    nLerp = 0;
   }
   return {list, add, remove, has: p => recs.has(p), hide, query, refresh, near, sync, moved, lerpBegin, lerpEnd, get ver() { return ver; }, get size() { return recs.size; }, grid, _rec: recOf};
 }

@@ -955,18 +955,20 @@ export async function create(host) {
     host.point(x2, L.y, L.armH, C3(M[1])); host.point(x2, L.y, L.armH - dh, C3(M[3])); host.point(x2, L.y, L.armH - 2 * dh, C3(M[3]));
     host.line(L.ax, L.y, L.az, L.bx, L.by, L.bz, C3(M[3]));
     const fr = (T * 6) | 0, e = L.body[(fr + (L.id & 1)) % 5 === 0 ? 1 : 0];
-    host.sprite({img: DA.cv, em: DA.ecv, sx: e.sx, sy: e.sy, sw: e.sw, sh: e.sh, px: e.px, py: e.py, x: L.bx, y: L.by, h: L.bz, shadow: true});
+    { const o = SPD; o.img = DA.cv; o.em = DA.ecv; o.sx = e.sx; o.sy = e.sy; o.sw = e.sw; o.sh = e.sh; o.px = e.px; o.py = e.py; o.x = L.bx; o.y = L.by; o.h = L.bz; host.sprite(o); }
   }
+  // host.sprite's options, kept (an object literal a sprite a frame before): the decor atlas (casting) and the cloth atlas
+  const SPD = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0, shadow: true}, SPC = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0};
   function drawItem(it, g) {
     if (it.shadow) for (let i = 0; i < it.shadow.length; i += 2) shadowAt(g, it.shadow[i], it.shadow[i + 1]);
-    for (const [e, x, y, h] of it.posts) host.sprite({img: DA.cv, em: DA.ecv, sx: e.sx, sy: e.sy, sw: e.sw, sh: e.sh, px: e.px, py: e.py, x, y, h, shadow: true});
+    for (const [e, x, y, h] of it.posts) { const o = SPD; o.img = DA.cv; o.em = DA.ecv; o.sx = e.sx; o.sy = e.sy; o.sw = e.sw; o.sh = e.sh; o.px = e.px; o.py = e.py; o.x = x; o.y = y; o.h = h; host.sprite(o); }
     // a wall banner hangs on the wall's south face: from the north the wall hides it. (Cards and world lines carry a depth
     // bias of ~0.15 m; the banner's top hem and rod sit closer than that to the wall's top edge and would show over it.)
     const behindWall = it.kind === 'banner' && FY < -.02;
     if (!behindWall) for (const grp of it.groups) {
       const b = grp.box, sl = grp.slot; if (!b || !b.any || !sl || sl.gen !== CA.gen) continue;
       const [ax, ay, ah] = grp.anchor(), AX = Math.round((ax * RX + ay * RY) * ctx.PPM), AY = Math.round((ax * FX + ay * FY) * ctx.PPMY - ah * ctx.PPMH);
-      host.sprite({img: CA.cv, em: CA.ecv, sx: sl.x, sy: sl.y, sw: b.w, sh: b.h, px: AX - b.x, py: AY - b.y, x: ax, y: ay, h: ah});   // (never re-uploaded whole: its slots go up in rasterGroup, G.texData)
+      const o = SPC; o.img = CA.cv; o.em = CA.ecv; o.sx = sl.x; o.sy = sl.y; o.sw = b.w; o.sh = b.h; o.px = AX - b.x; o.py = AY - b.y; o.x = ax; o.y = ay; o.h = ah; host.sprite(o);   // (never re-uploaded whole: its slots go up in rasterGroup, G.texData)
     }
     if (!behindWall) for (const r of it.rods) drawRod(r);
     if (it.rope) {   // the prayer-flag rope: world segments between its nodes

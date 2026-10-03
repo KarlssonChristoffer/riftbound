@@ -702,6 +702,7 @@ export async function create(host) {
   // ---------- HD overlay ----------
   let O = null, oKey = '';
   const VG = {va: 0, ha: 0, v: [0, 0, 0], h: [0, 0, 0]};   // (G.setVignette's numbers: the same OVER entry the canvas below is painted from)
+  const SPS = {img: null, em: null, x: 0, y: 0, h: 0, px: 2, py: 3, type: 3};   // (the shards' host.sprite options, kept)
   function buildOver(w, h) {
     if (!O) O = cv(w, h); O.width = w; O.height = h;
     const q = O.getContext('2d'), Vo = OVER[biome] || OVER.ruins, rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
@@ -796,7 +797,7 @@ export async function create(host) {
       if (any(BG)) flush(BG, host.glayer('ground'));
       // ---- in front (lit, depth-tested): shards, falling weather, fx
       shards((x, y, h, i) => { const f = shardFrame(i), pv = Math.sin(T * 1.5 + i * 2.1);
-        host.sprite({img: SH_IMG[f], em: SH_EM[f][pv > .3 ? 0 : pv > -.4 ? 1 : 2], x, y, h, px: 2, py: 3, type: 3}); });
+        const s = SPS; s.img = SH_IMG[f]; s.em = SH_EM[f][pv > .3 ? 0 : pv > -.4 ? 1 : 2]; s.x = x; s.y = y; s.h = h; host.sprite(s); });   // (a kept options object)
       if (F.weather) drawKinds('front');
       drawFx(false); WL.drawFront();
       // ---- glow: the arena's view-sized emitter canvas always overlapped the player, so lighting.apply drew it straight

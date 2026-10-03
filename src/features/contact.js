@@ -101,8 +101,9 @@ export async function create(host) {
       // the player: his bottom rows this frame (feet apart when aiming / running: the stamp spans both)
       const ps = host.playerSprite(), P = host.P, pl = host.player, gz = host.elev(pl.x, pl.y);
       if (!(P.blink && Math.floor(P.blink * 12) % 2) && !(P.sink > .05)) {
-        const key = ps.frame + '|' + ps.face; let fp = pfoot.get(key);
-        if (fp === undefined) { fp = measure(ps.img, ps.px, ps.py); pfoot.set(key, fp); if (pfoot.size > 600) pfoot.delete(pfoot.keys().next().value); }
+        let byF = pfoot.get(ps.frame); if (!byF) { pfoot.set(ps.frame, byF = []); if (pfoot.size > 120) pfoot.delete(pfoot.keys().next().value); }   // (frame -> facing: no key string a frame)
+        let fp = byF[ps.face];
+        if (fp === undefined) { fp = measure(ps.img, ps.px, ps.py); byF[ps.face] = fp; }
         if (fp) stamp(pl.x, pl.y, gz, fp, Math.max(0, P.z - gz), 14, false);
       }
       // world items: cards by their sprite's foot, round live meshes by their radius

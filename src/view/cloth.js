@@ -19,13 +19,17 @@ const HI = .78, LO = .36;
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 // 3x3 matrices as row-major arrays of 9
-const mul3 = (A, B) => [0, 1, 2].flatMap(r => [0, 1, 2].map(c => A[r * 3] * B[c] + A[r * 3 + 1] * B[3 + c] + A[r * 3 + 2] * B[6 + c]));
+const mul3 = (A, B) => {   // (loops: flatMap / map made 4 arrays and 4 closures a call)
+  const o = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o[r * 3 + c] = A[r * 3] * B[c] + A[r * 3 + 1] * B[3 + c] + A[r * 3 + 2] * B[6 + c];
+  return o;
+};
 const tr3 = A => [A[0], A[3], A[6], A[1], A[4], A[7], A[2], A[5], A[8]];
 const mv3 = (A, v) => [A[0] * v[0] + A[1] * v[1] + A[2] * v[2], A[3] * v[0] + A[4] * v[1] + A[5] * v[2], A[6] * v[0] + A[7] * v[1] + A[8] * v[2]];
 const rotZ = a => [Math.cos(a), -Math.sin(a), 0, Math.sin(a), Math.cos(a), 0, 0, 0, 1];
 function axisAngle(R) {
   const ang = Math.acos(Math.max(-1, Math.min(1, (R[0] + R[4] + R[8] - 1) / 2)));
-  let ax = [R[7] - R[5], R[2] - R[6], R[3] - R[1]], l = Math.hypot(...ax);
+  let ax = [R[7] - R[5], R[2] - R[6], R[3] - R[1]], l = hypot3(ax[0], ax[1], ax[2]);
   if (l < 1e-6) {   // ~0 or ~180 deg: the axis is the column of R + I with the largest norm
     const c = [0, 1, 2].map(k => [R[k] + (k === 0), R[3 + k] + (k === 1), R[6 + k] + (k === 2)]);
     ax = c.reduce((a, b) => Math.hypot(...b) > Math.hypot(...a) ? b : a); l = Math.hypot(...ax) || 1;
@@ -161,7 +165,7 @@ export class ClothRig {
           C.pos.forEach(rot); C.prev.forEach(rot);
         }
         // and pose snaps that shift the bone relative to the body (a turn's plant frame drops and leans the chest)
-        const rel = [head[0] - org[0], head[1] - org[1], head[2]], d = sub(rel, C.head), dl = Math.hypot(...d);
+        const rel = [head[0] - org[0], head[1] - org[1], head[2]], d = sub(rel, C.head), dl = hypot3(d[0], d[1], d[2]);
         if (dl > .04) {
           const k = 1 - CLOTH_PARAMS.turnLag, sh = p => { p[0] += d[0] * k; p[1] += d[1] * k; p[2] += d[2] * k; };
           C.pos.forEach(sh); C.prev.forEach(sh);
@@ -195,67 +199,80 @@ export class ClothRig {
     return w;
   }
 
+  // (in three parts: one function this size kept TurboFan from inlining its hypot3 calls, and a call that isn't inlined
+  // boxes its numbers: ~10 KB of garbage a frame)
   #substep(h, f) {
-    const P = CLOTH_PARAMS, wind = this.#wind(), h2 = h * h, bv = this.vel, cap = P.maxSpeed * h;
+    const wind = this.#wind();
+    for (const C of this.cloths) { this.#integrate(C, h, f, wind); this.#relax(C); this.#limit(C); }
+  }
+
+  #integrate(C, h, f, wind) {   // the pins follow the pose; the free points: gravity, air, flap, the drape's spring (Verlet)
+    const P = CLOTH_PARAMS, h2 = h * h, bv = this.vel, cap = P.maxSpeed * h;
     const w0 = wind[0], w1 = wind[1], w2 = wind[2], bv0 = bv[0], bv1 = bv[1], bv2 = bv[2];
-    for (const C of this.cloths) {
-      const {pos, prev, rows, cols, pin} = C, M = C.mat, wt = M.weight ?? 1, damp = M.damping ?? P.damping;
-      const flut = (M.flutter ?? P.flutter) / wt, wave = M.wave ?? P.wave, drag = P.drag / wt, lift = P.lift / wt;
-      for (let i = 0; i < pin; i++) {   // pins follow the animation
-        const a = C.from[i], b = C.goal[i], q = pos[i], o = prev[i];
-        o[0] = q[0]; o[1] = q[1]; o[2] = q[2];
-        q[0] = a[0] + (b[0] - a[0]) * f; q[1] = a[1] + (b[1] - a[1]) * f; q[2] = a[2] + (b[2] - a[2]) * f;
+    const {pos, prev, rows, cols, pin} = C, M = C.mat, wt = M.weight ?? 1, damp = M.damping ?? P.damping;
+    const flut = (M.flutter ?? P.flutter) / wt, wave = M.wave ?? P.wave, drag = P.drag / wt, lift = P.lift / wt;
+    for (let i = 0; i < pin; i++) {   // pins follow the animation
+      const a = C.from[i], b = C.goal[i], q = pos[i], o = prev[i];
+      o[0] = q[0]; o[1] = q[1]; o[2] = q[2];
+      q[0] = a[0] + (b[0] - a[0]) * f; q[1] = a[1] + (b[1] - a[1]) * f; q[2] = a[2] + (b[2] - a[2]) * f;
+    }
+    for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
+      const i = r * cols + k; if (i < pin) continue;
+      const p = pos[i], o = prev[i], v0 = (p[0] - o[0]) / h, v1 = (p[1] - o[1]) / h, v2 = (p[2] - o[2]) / h;
+      // surface normal from the neighbours (the panel's local orientation)
+      const a = pos[r * cols + Math.min(cols - 1, k + 1)], b = pos[r * cols + Math.max(0, k - 1)];
+      const c = pos[Math.min(rows - 1, r + 1) * cols + k], d = pos[Math.max(0, r - 1) * cols + k];
+      const u0 = a[0] - b[0], u1 = a[1] - b[1], u2 = a[2] - b[2], s0 = c[0] - d[0], s1 = c[1] - d[1], s2 = c[2] - d[2];
+      let n0 = u1 * s2 - u2 * s1, n1 = u2 * s0 - u0 * s2, n2 = u0 * s1 - u1 * s0;
+      const nl = hypot3(n0, n1, n2) || 1; n0 /= nl; n1 /= nl; n2 /= nl;
+      const r0 = v0 - w0, r1 = v1 - w1, r2 = v2 - w2, vn = r0 * n0 + r1 * n1 + r2 * n2, air = hypot3(r0, r1, r2);
+      // flap: a wave running from the pinned edge to the hem, a little out of step across the width (the panel twists)
+      const fq = (1.4 + .45 * air) / Math.sqrt(wt), ph = 2 * Math.PI * ((r * C.rowLen) / wave - fq * this.t) + k * .5 + C.seed;
+      const fl = flut * Math.min(35, air * air) * (r / (rows - 1)) * Math.sin(ph) - lift * vn;
+      let a0 = -drag * r0 + fl * n0, a1 = -drag * r1 + fl * n1, a2 = -P.gravity - drag * r2 + fl * n2;
+      if (M.retain) {   // spring toward the drape, weakening down the cloak (the hem is freest)
+        const u = (r - C.def.pin_rows) / Math.max(1, rows - 1 - C.def.pin_rows), K = M.retain[0] + (M.retain[1] - M.retain[0]) * Math.min(1, u * 1.4), G = C.goal[i];
+        a0 += K * (G[0] - p[0]); a1 += K * (G[1] - p[1]); a2 += K * (G[2] - p[2]);
       }
-      for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
-        const i = r * cols + k; if (i < pin) continue;
-        const p = pos[i], o = prev[i], v0 = (p[0] - o[0]) / h, v1 = (p[1] - o[1]) / h, v2 = (p[2] - o[2]) / h;
-        // surface normal from the neighbours (the panel's local orientation)
-        const a = pos[r * cols + Math.min(cols - 1, k + 1)], b = pos[r * cols + Math.max(0, k - 1)];
-        const c = pos[Math.min(rows - 1, r + 1) * cols + k], d = pos[Math.max(0, r - 1) * cols + k];
-        const u0 = a[0] - b[0], u1 = a[1] - b[1], u2 = a[2] - b[2], s0 = c[0] - d[0], s1 = c[1] - d[1], s2 = c[2] - d[2];
-        let n0 = u1 * s2 - u2 * s1, n1 = u2 * s0 - u0 * s2, n2 = u0 * s1 - u1 * s0;
-        const nl = hypot3(n0, n1, n2) || 1; n0 /= nl; n1 /= nl; n2 /= nl;
-        const r0 = v0 - w0, r1 = v1 - w1, r2 = v2 - w2, vn = r0 * n0 + r1 * n1 + r2 * n2, air = hypot3(r0, r1, r2);
-        // flap: a wave running from the pinned edge to the hem, a little out of step across the width (the panel twists)
-        const fq = (1.4 + .45 * air) / Math.sqrt(wt), ph = 2 * Math.PI * ((r * C.rowLen) / wave - fq * this.t) + k * .5 + C.seed;
-        const fl = flut * Math.min(35, air * air) * (r / (rows - 1)) * Math.sin(ph) - lift * vn;
-        let a0 = -drag * r0 + fl * n0, a1 = -drag * r1 + fl * n1, a2 = -P.gravity - drag * r2 + fl * n2;
-        if (M.retain) {   // spring toward the drape, weakening down the cloak (the hem is freest)
-          const u = (r - C.def.pin_rows) / Math.max(1, rows - 1 - C.def.pin_rows), K = M.retain[0] + (M.retain[1] - M.retain[0]) * Math.min(1, u * 1.4), G = C.goal[i];
-          a0 += K * (G[0] - p[0]); a1 += K * (G[1] - p[1]); a2 += K * (G[2] - p[2]);
-        }
-        let t0 = (p[0] - o[0] - bv0 * h) * damp + a0 * h2, t1 = (p[1] - o[1] - bv1 * h) * damp + a1 * h2, t2 = (p[2] - o[2] - bv2 * h) * damp + a2 * h2;
-        const sl = hypot3(t0, t1, t2);   // relative to the body
-        if (sl > cap) { t0 *= cap / sl; t1 *= cap / sl; t2 *= cap / sl; }
-        const x = p[0] + bv0 * h + t0, y = p[1] + bv1 * h + t1, z = p[2] + bv2 * h + t2;
-        o[0] = p[0]; o[1] = p[1]; o[2] = p[2]; p[0] = x; p[1] = y; p[2] = z;
-      }
-      const {lA, lB, lL, lS} = C, nl = lA.length, bend = M.bend ?? P.bend, both = !!M.bendBoth;
-      for (let it = 0; it < P.iterations; it++) {
-        for (let li = 0; li < nl; li++) {
-          const ia = lA[li], ib = lB[li], L = lL[li], s0 = lS[li];
-          const s = s0 < 0 ? bend : s0, pa = pos[ia], pb = pos[ib];
-          const dx = pb[0] - pa[0], dy = pb[1] - pa[1], dz = pb[2] - pa[2], l = hypot3(dx, dy, dz) || 1e-9;
-          if (s0 < 0 && l < L && !both) continue;   // light cloth: bend links only resist stretching open (folds free)
-          const wa = ia < pin ? 0 : 1, wb = ib < pin ? 0 : 1, w = wa + wb; if (!w) continue;
-          const k = (l - L) / l * s / w;
-          if (wa) { pa[0] += dx * k * wa; pa[1] += dy * k * wa; pa[2] += dz * k * wa; }
-          if (wb) { pb[0] -= dx * k * wb; pb[1] -= dy * k * wb; pb[2] -= dz * k * wb; }
-        }
-        for (let i = pin; i < pos.length; i++) this.#collide(pos[i]);
-      }
-      // strain limit after the collisions: overlapping body capsules (a tucked roll) can push neighbours to opposite
-      // sides; no structural link may end up longer than 110% (cloth left inside the body is hidden by the depth test)
-      for (let it = 0; it < 3; it++) for (let li = 0; li < nl; li++) {
-        if (lS[li] !== 1) continue;
-        const ia = lA[li], ib = lB[li], L = lL[li];
-        const pa = pos[ia], pb = pos[ib], dx = pb[0] - pa[0], dy = pb[1] - pa[1], dz = pb[2] - pa[2], l = hypot3(dx, dy, dz);
-        if (l <= L * 1.1) continue;
+      let t0 = (p[0] - o[0] - bv0 * h) * damp + a0 * h2, t1 = (p[1] - o[1] - bv1 * h) * damp + a1 * h2, t2 = (p[2] - o[2] - bv2 * h) * damp + a2 * h2;
+      const sl = hypot3(t0, t1, t2);   // relative to the body
+      if (sl > cap) { t0 *= cap / sl; t1 *= cap / sl; t2 *= cap / sl; }
+      const x = p[0] + bv0 * h + t0, y = p[1] + bv1 * h + t1, z = p[2] + bv2 * h + t2;
+      o[0] = p[0]; o[1] = p[1]; o[2] = p[2]; p[0] = x; p[1] = y; p[2] = z;
+    }
+  }
+
+  #relax(C) {   // the links (structural, shear, bend) and the body's capsules, P.iterations passes
+    const P = CLOTH_PARAMS, M = C.mat, {pos, pin} = C;
+    const {lA, lB, lL, lS} = C, nl = lA.length, bend = M.bend ?? P.bend, both = !!M.bendBoth;
+    for (let it = 0; it < P.iterations; it++) {
+      for (let li = 0; li < nl; li++) {
+        const ia = lA[li], ib = lB[li], L = lL[li], s0 = lS[li];
+        const s = s0 < 0 ? bend : s0, pa = pos[ia], pb = pos[ib];
+        const dx = pb[0] - pa[0], dy = pb[1] - pa[1], dz = pb[2] - pa[2], l = hypot3(dx, dy, dz) || 1e-9;
+        if (s0 < 0 && l < L && !both) continue;   // light cloth: bend links only resist stretching open (folds free)
         const wa = ia < pin ? 0 : 1, wb = ib < pin ? 0 : 1, w = wa + wb; if (!w) continue;
-        const k = (l - L * 1.1) / l / w;
-        if (wa) { pa[0] += dx * k; pa[1] += dy * k; pa[2] += dz * k; }
-        if (wb) { pb[0] -= dx * k; pb[1] -= dy * k; pb[2] -= dz * k; }
+        const k = (l - L) / l * s / w;
+        if (wa) { pa[0] += dx * k * wa; pa[1] += dy * k * wa; pa[2] += dz * k * wa; }
+        if (wb) { pb[0] -= dx * k * wb; pb[1] -= dy * k * wb; pb[2] -= dz * k * wb; }
       }
+      for (let i = pin; i < pos.length; i++) this.#collide(pos[i]);
+    }
+  }
+
+  #limit(C) {
+    const {pos, pin, lA, lB, lL, lS} = C, nl = lA.length;
+    // strain limit after the collisions: overlapping body capsules (a tucked roll) can push neighbours to opposite
+    // sides; no structural link may end up longer than 110% (cloth left inside the body is hidden by the depth test)
+    for (let it = 0; it < 3; it++) for (let li = 0; li < nl; li++) {
+      if (lS[li] !== 1) continue;
+      const ia = lA[li], ib = lB[li], L = lL[li];
+      const pa = pos[ia], pb = pos[ib], dx = pb[0] - pa[0], dy = pb[1] - pa[1], dz = pb[2] - pa[2], l = hypot3(dx, dy, dz);
+      if (l <= L * 1.1) continue;
+      const wa = ia < pin ? 0 : 1, wb = ib < pin ? 0 : 1, w = wa + wb; if (!w) continue;
+      const k = (l - L * 1.1) / l / w;
+      if (wa) { pa[0] += dx * k; pa[1] += dy * k; pa[2] += dz * k; }
+      if (wb) { pb[0] -= dx * k; pb[1] -= dy * k; pb[2] -= dz * k; }
     }
   }
 
