@@ -2242,3 +2242,17 @@ def build():
         HOLD_HOOKS.insert(HOLD_HOOKS.index(_gun_hold) if _gun_hold in HOLD_HOOKS else len(HOLD_HOOKS), _lasso_reach)
         HOLD_HOOKS.append(_lasso_hold)
     return names
+
+
+_pose_hang = pose   # the hang-fit pose() above
+
+
+def pose(name):
+    """The hang-fit pose(); then a _clip frame outside the lasso's clips packs the lasso's coil away again: its in-between
+    is a blend of its keys' bones, which carries no scale, so the coil (collapsed into the fist by scaling it to nothing)
+    came back full size in the left hand (the live export, ragdoll_export.py, hides a piece by that scale)."""
+    zmin = _pose_hang(name)
+    clip, _, i = name.partition('.')
+    if i and 'tween' in ANIMS.get(clip, {}) and clip not in LASSO_LIST and 'CoilHold0' in bpy.data.objects[ROOT].pose.bones:
+        _lasso_hold(name, hat=False)
+    return zmin

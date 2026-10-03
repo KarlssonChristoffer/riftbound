@@ -7,6 +7,8 @@
 #   D:\Blender\blender.exe -b --factory-startup --python tools/blender/ragdoll_export.py -- \
 #       --model tools/blender/loadouts/bandit.py --out D:/Game/concepts/sprites/out/ragdoll/bandit [--poses a,b,...]
 #       [--atlas D:/Game/concepts/sprites/out/outfits/outlaw]   (every pose of that atlas, unless --poses, and its clips' timing)
+#       [--clips cheer,wave]   (more clips of the model's own, every frame + its timing: clips no atlas has rendered, for the
+#                               live hero only; western.py OUTLAW_EMOTES)
 # (run from the repo root: a loadout execs tools/blender/western.py by a relative path)
 #
 # Writes <out>/model.json + <out>/model.bin:
@@ -21,8 +23,11 @@
 #               armature at the origin facing -Y)}}, joints {landmark: [x, y, z]} (skeleton.py landmarks at rest),
 #               poses {name: {bone: [qx, qy, qz, qw, tx, ty, tz]}} (each bone's WORLD matrix in that pose, posed by
 #               the model's own pose() exactly as pixel_rig.py renders it: ground snap, gun in the hand or the
-#               holster), meta (units_per_px, pivot, proportions, the source loadout), clips (with --atlas: the atlas's
-#               poses.json clips as the game plays them: frames, fps, loop, play, ms, marks, stride; the live hero, view/livehero.js)
+#               holster), hide {pose: [bone]} (a piece collapsed in that pose: scaled to nothing, as the outlaw's lasso
+#               coil outside the lasso's keys; the poses carry no scale), meta (units_per_px, pivot, proportions, the
+#               source loadout), clips (with --atlas: the atlas's poses.json clips as the game plays them: frames,
+#               fps, loop, play, ms, marks, stride; with --clips, those clips' too; the live hero, view/livehero.js),
+#               live [clip] (with --clips: the clips only the live model has; the live hero's emote demos)
 import bpy, json, math, os, struct, sys
 from mathutils import Matrix, Vector
 
@@ -37,8 +42,9 @@ POSES = (['gun_aim'] + [f'gun_aim_{t}' for t in ('m45', 'm34', 'm22', 'm11', 'p1
          + [f'gws_{t}_{i}' for t in ('m90', 'm45', '0', 'p45') for i in range(8)]
          + [f'gun_fire.{i}' for i in range(4)] + [f'gun_draw.{i}' for i in range(8)] + [f'gun_reload.{i}' for i in range(13)]
          + [f'gun_holster.{i}' for i in range(0, 13, 2)] + [f'hit_f.{i}' for i in range(5)] + [f'hit_b.{i}' for i in range(5)])
-PIECE_BONE = {'GunHold0': 'gun', 'HatHold0': 'hat'}   # bones whose parts fly loose, with every bone below them (the
-                                                      # coach gun's GunBreak0 + muzzle + breech fold in, barrels closed)
+PIECE_BONE = {'GunHold0': 'gun', 'HatHold0': 'hat',   # bones whose parts fly loose, with every bone below them (the
+              'CoilHold0': 'coil'}                    # coach gun's GunBreak0 + muzzle + breech fold in, barrels closed);
+                                                      # the lasso's coil: its own piece, so a pose can hide it (hide)
 SKIP_BONES = {'GunMuzzle0', 'GunShell0'}             # no parts, or dropped (the coach gun's fresh shell in the left fist)
 STANDARD = {'Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head'} | {m + b for m in ('Left', 'Right') for b in
             ('Shoulder', 'Arm', 'ForeArm', 'Hand', 'UpLeg', 'Leg', 'Foot', 'ToeBase')}   # skeleton.py's bones
@@ -66,9 +72,10 @@ def mat_rows(M):
     return [round(M[i][j], 6) for i in range(4) for j in range(4)]
 
 
-def run(model, out, poses, clips=None):
+def run(model, out, poses, clips=None, more=()):
     os.makedirs(out, exist_ok=True)
     arm, ns = load_model(os.path.abspath(model))
+    poses = list(poses) + [f'{c}.{i}' for c in more for i in range(ns['ANIMS'][c]['frames'])]
     W = arm.matrix_world.copy()
     table = ns['PIXEL']
     fams_src = dict(json.load(open(os.path.join(REPO, 'concepts', 'sprites', 'out', 'ranger_master_layers.json')))['families']) \
@@ -161,7 +168,7 @@ def run(model, out, poses, clips=None):
     joints = {k: [round(c, 5) for c in v] for k, v in ns['landmarks']().items()} if 'landmarks' in ns else {}
 
     # ---- the poses, through the model's own pose() (pixel_rig.py's call), the armature at the origin facing -Y
-    out_poses = {}
+    out_poses, hide = {}, {}
     for pz in poses:
         clip, _, i = pz.partition('.')
         if pz not in ns['POSES'] and not (i and clip in ns['ANIMS']):
@@ -183,10 +190,15 @@ def run(model, out, poses, clips=None):
             M = Wm @ pb.matrix
             q, t = M.to_quaternion(), M.translation
             P[pb.name] = [round(q.x, 5), round(q.y, 5), round(q.z, 5), round(q.w, 5), round(t.x, 5), round(t.y, 5), round(t.z, 5)]
+            if pb.name in PIECE_BONE and min(M.to_scale()) < .01:
+                hide.setdefault(pz, []).append(pb.name)
         out_poses[pz] = P
+    if more:   # their timing as pixel_rig.py writes an atlas's (clips_meta: every frame posed above)
+        cm = ns['clips_meta']()
+        clips = {**(clips or {}), **{c: cm[c] for c in more if c in cm}}
     meta = {'loadout': os.path.basename(model), 'proportions': ns.get('PROP'), 'units_per_px': .0327883818891779,
             'stride': 20, 'corners': len(blob) // 20}
-    extra = {'clips': clips} if clips else {}
+    extra = {**({'clips': clips} if clips else {}), **({'hide': hide} if hide else {}), **({'live': list(more)} if more else {})}
     json.dump({'meta': meta, 'segs': segs, 'parts': parts, **extra,
                'families': [{'name': f, 'ramp': [list(c) for c in palette_harm.ramp(f, fams_src[f])]} for f in fams],
                'bones': bones, 'joints': joints, 'poses': out_poses}, open(os.path.join(out, 'model.json'), 'w'))
@@ -200,4 +212,4 @@ if __name__ == '__main__':
     atlas = json.load(open(os.path.join(a['--atlas'], 'poses.json'))) if '--atlas' in a else None
     run(a.get('--model', 'tools/blender/loadouts/bandit.py'), a.get('--out', r'D:\Game\concepts\sprites\out\ragdoll\bandit'),
         a['--poses'].split(',') if '--poses' in a else atlas['poses'] if atlas else POSES,
-        atlas['clips'] if atlas else None)
+        atlas['clips'] if atlas else None, a['--clips'].split(',') if '--clips' in a else ())
