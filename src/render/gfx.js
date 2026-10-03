@@ -19,12 +19,16 @@
 import * as THREE from 'three';
 import {flags} from '../core/flags.js';
 import {AUTUMN as AU, AUTUMN_MID} from '../core/autumn.js';
-import {hypot2} from '../core/mathx.js';
+import {hypot2, clearArray} from '../core/mathx.js';
 import {cssRGBA} from '../core/color.js';
 import {createGLStats} from './glstats.js';
 import {createLitterSim} from './litter.js';
 
 export const DEG = Math.PI / 180;
+// a uniform-shaped holder whose value is only ever a number (a card's sway: written every frame). Its own class keeps
+// that field a number in place; plain {value} objects share one hidden class with every three.js uniform (textures,
+// vectors), so a number written to one is boxed: a new heap number per swaying card per frame
+class NumU { constructor(v) { this.value = v; } }
 const R_DEPTH = 120;   // metres of "nearness" mapped onto the depth range (the world is 62 x 30 m)
 
 const HEAD = `precision highp float; precision highp int;\n`;
@@ -1185,7 +1189,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   const cardUniforms = o => ({
     uAnchor: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2(o.w, o.h)}, uPivot: {value: new THREE.Vector2(o.px, o.py)},
     uPx: U.px, uRect: {value: new THREE.Vector4(0, 0, 1, 1)}, uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uSnap: SNAP,
-    uOff: {value: new THREE.Vector2()}, uSway: {value: 0}, uHasBend: {value: 0},
+    uOff: {value: new THREE.Vector2()}, uSway: new NumU(0), uHasBend: {value: 0},
   });
   // three.js works out an instanced geometry's instance limit once, the first time it is drawn (geometry._maxInstanceCount,
   // from its instance buffer's size), and never again: a batch that swaps in a bigger buffer later must clear it, or the
@@ -1281,7 +1285,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   }
   function bcard(o) {
     const u = {uAnchor: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2(o.w, o.h)}, uPivot: {value: new THREE.Vector2(o.px, o.py)},
-      uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uOff: {value: new THREE.Vector2()}, uSway: {value: 0}, uHasBend: {value: 0}};
+      uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uOff: {value: new THREE.Vector2()}, uSway: new NumU(0), uHasBend: {value: 0}};
     const gu = {uBend: {value: BEND1}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0}, uFlash: {value: 0}, uObj: {value: o.obj ?? 0}};
     const pl = o.plant, plant = pl ? [pl.kind, pl.seed, pl.delay, palRow(pl)] : [0, 0, 0, 0];
     const C = {u, g: {uniforms: gu}, shadow: o.shadow !== false, plant, vis: true, grp: null, gTex: null, gEm: null,   // grp: its group while its textures stay
@@ -1851,7 +1855,8 @@ void main() {
     vgU.uVgC.value.set(o.v[0] / 255, o.v[1] / 255, o.v[2] / 255); vgU.uVhC.value.set(o.h[0] / 255, o.h[1] / 255, o.h[2] / 255);
   }
   // heat(X, Y (up), Z, radius m, strength): hot air this frame (strength 1 = ~.75 art px of ripple at its middle)
-  function heat(x, y, z, r, k) { fx(x, y, z, r, [1, 1, 1], k, 'heat'); }
+  const HEATC = [1, 1, 1];   // (heat's colour: fx reads it at once)
+  function heat(x, y, z, r, k) { fx(x, y, z, r, HEATC, k, 'heat'); }
   // fx(X, Y (up), Z, radius m, [r, g, b], alpha, 'add' | 'blend'): one soft particle this frame (world axes)
   function fx(x, y, z, r, c, a = 1, mode = 'add') {
     const B = fxB[mode]; if (!B || B.n >= (B.max || FXMAX)) return;
@@ -1985,7 +1990,7 @@ void main() {
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
     stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
-    resetBatches(); for (const L of layerList) { L.used = L.gUsed = false; L.runs.length = 0; } lbN = 0; frameNo++;
+    resetBatches(); for (const L of layerList) { L.used = L.gUsed = false; clearArray(L.runs); } lbN = 0; frameNo++;
   }
 
   // SETTINGS other modules give the renderer (they call these; the uniforms stay the renderer's): the player options

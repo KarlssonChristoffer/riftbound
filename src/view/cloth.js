@@ -27,8 +27,9 @@ const mul3 = (A, B) => {   // (loops: flatMap / map made 4 arrays and 4 closures
 const tr3 = A => [A[0], A[3], A[6], A[1], A[4], A[7], A[2], A[5], A[8]];
 const mv3 = (A, v) => [A[0] * v[0] + A[1] * v[1] + A[2] * v[2], A[3] * v[0] + A[4] * v[1] + A[5] * v[2], A[6] * v[0] + A[7] * v[1] + A[8] * v[2]];
 const rotZ = a => [Math.cos(a), -Math.sin(a), 0, Math.sin(a), Math.cos(a), 0, 0, 0, 1];
+const angleOf = R => Math.acos(Math.max(-1, Math.min(1, (R[0] + R[4] + R[8] - 1) / 2)));   // a rotation's angle
 function axisAngle(R) {
-  const ang = Math.acos(Math.max(-1, Math.min(1, (R[0] + R[4] + R[8] - 1) / 2)));
+  const ang = angleOf(R);
   let ax = [R[7] - R[5], R[2] - R[6], R[3] - R[1]], l = hypot3(ax[0], ax[1], ax[2]);
   if (l < 1e-6) {   // ~0 or ~180 deg: the axis is the column of R + I with the largest norm
     const c = [0, 1, 2].map(k => [R[k] + (k === 0), R[3 + k] + (k === 1), R[6 + k] + (k === 2)]);
@@ -36,6 +37,12 @@ function axisAngle(R) {
   }
   return [ax.map(x => x / l), ang];
 }
+// the snaps' whole-cloth moves (outside update's loop: closures in it, even in branches seldom taken, made V8 allocate a
+// context for every cloth every frame)
+function turnAbout(pts, Q, head) {   // turn each point about head by Q
+  for (const p of pts) { const d = [p[0] - head[0], p[1] - head[1], p[2] - head[2]], q = mv3(Q, d); p[0] = head[0] + q[0]; p[1] = head[1] + q[1]; p[2] = head[2] + q[2]; }
+}
+function shiftBy(pts, d, k) { for (const p of pts) { p[0] += d[0] * k; p[1] += d[1] * k; p[2] += d[2] * k; } }
 function axisRot([x, y, z], a) {
   const c = Math.cos(a), s = Math.sin(a), t = 1 - c;
   return [t * x * x + c, t * x * y - s * z, t * x * z + s * y, t * x * y + s * z, t * y * y + c, t * y * z - s * x, t * x * z - s * y, t * y * z + s * x, t * z * z + c];
@@ -158,18 +165,14 @@ export class ClothRig {
       const Rb = mul3(rotZ((this.idx.cam.yaw0 + 360 / this.N * face) * Math.PI / 180), [M[0], M[1], M[2], M[4], M[5], M[6], M[8], M[9], M[10]]);
       const head = this.#place([M[3], M[7], M[11]], face, org);
       if (C.pos && C.rot && !jump) {
-        const [ax, ang] = axisAngle(mul3(Rb, tr3(C.rot)));
-        if (ang > 8 * Math.PI / 180) {
-          const Q = axisRot(ax, ang * (1 - CLOTH_PARAMS.turnLag));
-          const rot = p => { const d = [p[0] - head[0], p[1] - head[1], p[2] - head[2]], q = mv3(Q, d); p[0] = head[0] + q[0]; p[1] = head[1] + q[1]; p[2] = head[2] + q[2]; };
-          C.pos.forEach(rot); C.prev.forEach(rot);
+        const Rd = mul3(Rb, tr3(C.rot));   // (the axis only for a snap: at rest it is the arrays-and-hypots ~0 deg case)
+        if (angleOf(Rd) > 8 * Math.PI / 180) {
+          const [ax, ang] = axisAngle(Rd), Q = axisRot(ax, ang * (1 - CLOTH_PARAMS.turnLag));
+          turnAbout(C.pos, Q, head); turnAbout(C.prev, Q, head);
         }
         // and pose snaps that shift the bone relative to the body (a turn's plant frame drops and leans the chest)
         const rel = [head[0] - org[0], head[1] - org[1], head[2]], d = sub(rel, C.head), dl = hypot3(d[0], d[1], d[2]);
-        if (dl > .04) {
-          const k = 1 - CLOTH_PARAMS.turnLag, sh = p => { p[0] += d[0] * k; p[1] += d[1] * k; p[2] += d[2] * k; };
-          C.pos.forEach(sh); C.prev.forEach(sh);
-        }
+        if (dl > .04) { const k = 1 - CLOTH_PARAMS.turnLag; shiftBy(C.pos, d, k); shiftBy(C.prev, d, k); }
       }
       C.rot = Rb; C.head = [head[0] - org[0], head[1] - org[1], head[2]];
       // the draped shape on the current pose (the pins' targets; all of it for the shape-retention spring)
@@ -244,7 +247,9 @@ export class ClothRig {
 
   #relax(C) {   // the links (structural, shear, bend) and the body's capsules, P.iterations passes
     const P = CLOTH_PARAMS, M = C.mat, {pos, pin} = C;
-    const {lA, lB, lL, lS} = C, nl = lA.length, bend = M.bend ?? P.bend, both = !!M.bendBoth;
+    // (bend as a plain number, +: `M.bend ?? P.bend` is of no known type, so the ternary below that mixes it with a link's
+    // own stiffness was kept boxed, and every structural link boxed its number: ~6 KB of garbage a frame)
+    const {lA, lB, lL, lS} = C, nl = lA.length, bend = +(M.bend ?? P.bend), both = !!M.bendBoth;
     for (let it = 0; it < P.iterations; it++) {
       for (let li = 0; li < nl; li++) {
         const ia = lA[li], ib = lB[li], L = lL[li], s0 = lS[li];

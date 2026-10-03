@@ -331,14 +331,15 @@ export async function create(host) {
     if (close && !M.near && M.greetCool <= 0) { M.wave = 1.4; M.greetCool = 25; say(GREET[R() * GREET.length | 0], 2.6); }
     M.near = close;
   }
+  // his frames by view x eyes ('mb_c' does not exist: the back has no blink); MFO: his sprite's options, kept
+  const MNAME = {mb: {a: 'mb_a', b: 'mb_b', c: 'mb_a'}, mw: {a: 'mw_a', b: 'mw_b', c: 'mw_c'}, mf: {a: 'mf_a', b: 'mf_b', c: 'mf_c'}}, MFO = {flip: false};
   function drawMerchant() {
     const yaw = host.yaw, fx = Math.cos(M.ang), fy = Math.sin(M.ang);
-    const camF = [-Math.sin(yaw), -Math.cos(yaw)], right = [Math.cos(yaw), -Math.sin(yaw)];
-    const back = fx * camF[0] + fy * camF[1] > .15, side = fx * right[0] + fy * right[1];
+    const back = fx * -Math.sin(yaw) + fy * -Math.cos(yaw) > .15, side = fx * Math.cos(yaw) + fy * -Math.sin(yaw);   // (the camera's forward, its right)
     const v = back ? 'mb' : M.wave > 0 ? 'mw' : 'mf', fr = M.blink > 0 && !back ? 'c' : (Math.floor(T * 1.1) % 2 ? 'b' : 'a');
     // the art faces screen-left from the front; seen from the back his facing on screen is mirrored
-    const flip = back ? side < 0 : side > 0;
-    spr(`${v}_${v === 'mb' && fr === 'c' ? 'a' : fr}`, MERCH.x, MERCH.y, 0, {flip});
+    MFO.flip = back ? side < 0 : side > 0;
+    spr(MNAME[v][fr], MERCH.x, MERCH.y, 0, MFO);
   }
 
   // ================================================================ contract
@@ -349,16 +350,17 @@ export async function create(host) {
     F.ms = F.ms * .95 + (performance.now() - t0) * .05;
   };
   const CHAIN = host.rgb('#3a3028');
+  const NOSH = {shadow: false}, POT = ['potion_0', 'potion_1', 'potion_2'], POTZ = [-.6, -.2, .25], FLN = FLOWERS.map(f => `flower_${f[2]}`);   // (kept: no string or object a frame)
   F.frame = () => {
     syncBiome();
     if (near(STALL.x, STALL.y)) {
       drawMerchant();
       const [lx, ly, lh] = lanPos();
       host.line(LAN.ax, LAN.ay, LAN.ah, lx, ly, lh + .02, CHAIN);
-      spr(LAN.lit === false ? 'lantern_dim' : 'lantern', lx, ly, lh + .02, {shadow: false});
-      [[-.6, .2], [-.2, .6], [.25, 1.0]].forEach(([dz, k], i) => spr(`potion_${i}`, STALL.x + 2.28, STALL.y + dz, 1.57, {shadow: false}));
+      spr(LAN.lit === false ? 'lantern_dim' : 'lantern', lx, ly, lh + .02, NOSH);
+      for (let i = 0; i < 3; i++) spr(POT[i], STALL.x + 2.28, STALL.y + POTZ[i], 1.57, NOSH);
     }
-    for (const [x, y, v] of FLOWERS) if (near(x, y)) spr(`flower_${v}`, x, y, 0, {shadow: false});
+    for (let i = 0; i < FLOWERS.length; i++) { const f = FLOWERS[i]; if (near(f[0], f[1])) spr(FLN[i], f[0], f[1], 0, NOSH); }
   };
   // the lantern's light and the potions' glow: records reused every frame (lighting.js copies them at once)
   const GLR = [{x: 0, y: 0, h: 0, color: '#ffc878', radius: 4.6, intensity: 1.05, flicker: .25, id: 9501},

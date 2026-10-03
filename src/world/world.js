@@ -38,7 +38,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
-import {vnoise, smooth, hypot2} from '../core/mathx.js';
+import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
@@ -706,15 +706,18 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // (position, wobble, stage, lid, who poses it) or someone else set its matrix since (mesh.ver: a burning prop's slump):
   // most props stand still, and their state strings, matrices and compares were most of this loop
   const DYN = {dynamic: true};
+  // a sprite's light records (outside update's loop: a closure in the loop body, even in a branch seldom taken, made V8
+  // allocate a context for every item every frame, ~6 KB of garbage)
+  const lightRecs = (it, sp) => sp.lights.map((l, i) => ({x: 0, y: 0, z: 0, c: rgbOf(l.color), r: l.radius || 4, k: l.intensity ?? 1, flicker: l.flicker || 0, id: it.obj * 8 + i, l}));
   function update(yaw) {
     if (litterDirty) bakeNow();
-    lights.length = 0; for (const l of groundL) lights.push(l);
+    clearArray(lights); for (const l of groundL) lights.push(l);
     const k0 = -Math.round(yaw / step);
     for (const it of items) {
       const p = it.p, base = p.z || 0, z0 = base + (p.h || 0);
       const sp = biome.sprite(p, ctxO);
       if (sp?.lights) {   // the sprite's lights: records built when the sprite changes, only their positions move per frame
-        if (it.lsp !== sp) { it.lsp = sp; it.lrec = sp.lights.map((l, i) => ({x: 0, y: 0, z: 0, c: rgbOf(l.color), r: l.radius || 4, k: l.intensity ?? 1, flicker: l.flicker || 0, id: it.obj * 8 + i, l})); }
+        if (it.lsp !== sp) { it.lsp = sp; it.lrec = lightRecs(it, sp); }
         for (const o of it.lrec) { o.x = p.x + (o.l.dx || 0); o.y = base + (o.l.h || 0); o.z = p.y + (o.l.dy || 0); lights.push(o); }
       }
       const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, flash = Math.min(1, Math.max(p.flash || 0, it.hover || 0));

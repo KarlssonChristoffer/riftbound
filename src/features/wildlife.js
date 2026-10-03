@@ -48,7 +48,7 @@
 // ART RULES (biomes.js / atmos.js): 1 texel = 1 screen px, no AA / dither / gradients; small animals are 2-6 px with 2-3
 // frame animation, outlined in their own darkest tone; palettes harmonise with the biome. Motion reads at 1x.
 import {flags} from '../core/flags.js';
-import {clamp} from '../core/mathx.js';
+import {clamp, clearArray, hypot2} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {hex255 as hex} from '../core/color.js';
 
@@ -1333,31 +1333,36 @@ export async function create(host) {
 
   // =================================================================== drawing
   const SP0 = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, flip: false, x: 0, y: 0, h: 0};
-  function put(s, x, y, h, face) {   // one atlas frame as a camera-facing sprite, mirrored when it faces screen-left
+  // one atlas frame as a camera-facing sprite, mirrored when it faces screen-left; its place is in SP0.x / y / h already
+  // (written by the caller: numbers passed to a call that isn't inlined were boxed, three a sprite)
+  function put(s, face) {
     if (!s) return;
     const fl = face < 0;
     SP0.img = ATL; SP0.em = ATE; SP0.sx = s.sx; SP0.sy = s.sy; SP0.sw = s.w; SP0.sh = s.h; SP0.px = fl ? s.w - 1 - s.ax : s.ax; SP0.py = s.ay; SP0.flip = fl;
-    SP0.x = x; SP0.y = y; SP0.h = h; host.sprite(SP0);
+    host.sprite(SP0);
   }
   const NEARC = .05;   // m toward the camera: a perched / resting animal stays in front of its card
+  // frame names as tables (no string built a frame)
+  const SALA = ['a0', 'a1'], SALB = ['b0', 'b1'], MOTEK = ['m0', 'm1', 'm2'];
+  const MOTHG = {open: ['open_g0', 'open_g1', 'open_g2'], closed: ['closed_g0', 'closed_g1', 'closed_g2']};
   function drawSprites() {
     // birds (on the floor, perched, in flight: all depth-tested now)
     for (const b of birds) {
       if (!onScreen(b.x, b.y, b.h, .6)) continue;
       const Sp = SPR[b.sp.id]; if (!Sp) continue;
       const card = (b.st === 'perch' && b.spot?.card) || (b.st === 'fly' && b.dly > 0 && b.lift?.card);
-      put(Sp[birdFrame(b)], b.x + (card ? FX * NEARC : 0), b.y + (card ? FY * NEARC : 0), b.h, sface(b));
+      { const s_ = Sp[birdFrame(b)]; SP0.x = b.x + (card ? FX * NEARC : 0); SP0.y = b.y + (card ? FY * NEARC : 0); SP0.h = b.h; put(s_, sface(b)); }
     }
     for (const a of hoppers) {
       if (a.st === 'gone' || !onScreen(a.x, a.y, a.h, .5)) continue;
       const Sp = SPR[a.id]; if (!Sp) continue;
       const hid = a.st === 'hide' && a.cover;   // under a bush: just behind its card
-      put(Sp[hopperFrame(a)], a.x - (hid ? FX * .12 : 0), a.y - (hid ? FY * .12 : 0), a.h, sface(a));
+      { const s_ = Sp[hopperFrame(a)]; SP0.x = a.x - (hid ? FX * .12 : 0); SP0.y = a.y - (hid ? FY * .12 : 0); SP0.h = a.h; put(s_, sface(a)); }
     }
     if (SPR.salamander) for (const a of lizards) {
       if (!onScreen(a.x, a.y, a.z, .4)) continue;
       const k = ((T * 1.3 + a.ph * 7) | 0) % 5 === 0 ? 1 : 0;
-      put(SPR.salamander[(a.st === 'dart' && ((a.ph | 0) & 1) ? 'b' : 'a') + k], a.x, a.y, a.z, sface(a));
+      { const s_ = SPR.salamander[(a.st === 'dart' && ((a.ph | 0) & 1) ? SALB : SALA)[k]]; SP0.x = a.x; SP0.y = a.y; SP0.h = a.z; put(s_, sface(a)); }
     }
     if (SPR.frog) for (const a of frogs) {
       if ((a.st !== 'sit' && !a.jump) || !onScreen(a.x, a.y, a.h, .4)) continue;
@@ -1367,11 +1372,11 @@ export async function create(host) {
       // would be behind it. So it stands e m nearer and e x PPMY / PPMH higher: the same screen pixel, in front (e eases in / out over a jump)
       const e = J ? (J.e0 || 0) + ((J.e1 || 0) - (J.e0 || 0)) * Math.min(1, J.t / J.d) : a.pad ? a.pad.r + .09 : 0;
       if (e) { x += FX * e; y += FY * e; h += e * ctx.PPMY / ctx.PPMH; }
-      put(SPR.frog[J ? 'jump' : a.pulse > 0 && ((a.pulse * 8) | 0) & 1 ? 'pulse' : 'sit'], x, y, h, sface(a));
+      { const s_ = SPR.frog[J ? 'jump' : a.pulse > 0 && ((a.pulse * 8) | 0) & 1 ? 'pulse' : 'sit']; SP0.x = x; SP0.y = y; SP0.h = h; put(s_, sface(a)); }
     }
     if (SPR.fishj) for (const a of fish) {
       if (!a.jump || !onScreen(a.x, a.y, a.h, .4)) continue;
-      const k = a.jump.t / a.jump.d; put(SPR.fishj[k < .35 ? 'up' : k < .65 ? 'level' : 'down'], a.x, a.y, WATER + a.h, sface(a));
+      const k = a.jump.t / a.jump.d; { const s_ = SPR.fishj[k < .35 ? 'up' : k < .65 ? 'level' : 'down']; SP0.x = a.x; SP0.y = a.y; SP0.h = WATER + a.h; put(s_, sface(a)); }
     }
     for (const a of bugs) {
       if (!onScreen(a.x, a.y, a.h, .3)) continue;
@@ -1380,23 +1385,26 @@ export async function create(host) {
       if (a.kind === 'dragonfly') f = a.st === 'perch' ? 'perch' : ((a.flap | 0) & 1) ? 'hov1' : 'hov0';
       else if (a.kind === 'moth') {
         f = ((a.flap | 0) & 1) ? 'open' : 'closed';
-        const d = a.src ? Math.hypot(a.r, (a.h - (a.hc ?? a.src.h)) * 1.3) : 9;   // lit by the flame: wings glow warm, brighter the closer
-        if (d <= .7) f += '_g' + (d < .3 ? 0 : d < .5 ? 1 : 2);
+        const d = a.src ? hypot2(a.r, (a.h - (a.hc ?? a.src.h)) * 1.3) : 9;   // lit by the flame: wings glow warm, brighter the closer
+        if (d <= .7) f = MOTHG[f][d < .3 ? 0 : d < .5 ? 1 : 2];
       } else { const i = (a.flap | 0) % 4; f = a.rest ? (i < 2 ? 'closed' : 'open') : i === 0 ? 'open' : i === 2 ? 'closed' : 'flat'; }
-      put(Sp[f], a.x + (a.rest ? FX * NEARC : 0), a.y + (a.rest ? FY * NEARC : 0), a.h, sface(a));
+      { const s_ = Sp[f]; SP0.x = a.x + (a.rest ? FX * NEARC : 0); SP0.y = a.y + (a.rest ? FY * NEARC : 0); SP0.h = a.h; put(s_, sface(a)); }
     }
     if (SPR.vulture) for (const v of vultures) {   // the rare silhouette, when its circle brings it into the top of the view
       if (v.off || !onScreen(v.x, v.y, v.h, .6)) continue;
-      put(SPR.vulture[v.beat > 0 && ((v.beat * 3) | 0) & 1 ? 'beat' : 'glide'], v.x, v.y, v.h, sface(v));
+      { const s_ = SPR.vulture[v.beat > 0 && ((v.beat * 3) | 0) & 1 ? 'beat' : 'glide']; SP0.x = v.x; SP0.y = v.y; SP0.h = v.h; put(s_, sface(v)); }
     }
     if (SPR.eye) for (const e of eyes) {
       if (!onScreen(e.x, e.y, e.h, .3)) continue;
-      put(SPR.eye[e.open === 0 ? 'e0' : e.open === 1 ? 'e1_' + e.px : 'e2_' + e.px + e.py], e.x, e.y, e.h, 1);
+      if (e.kno !== e.open || e.knx !== e.px || e.kny !== e.py) {   // (its frame's name: made when the eye changes, not a frame)
+        e.kno = e.open; e.knx = e.px; e.kny = e.py; e.kn = e.open === 0 ? 'e0' : e.open === 1 ? 'e1_' + e.px : 'e2_' + e.px + e.py;
+      }
+      { const s_ = SPR.eye[e.kn]; SP0.x = e.x; SP0.y = e.y; SP0.h = e.h; put(s_, 1); }
     }
     if (SPR.mote) for (const m of motes) {
       if (!onScreen(m.x, m.y, m.h, .2)) continue;
       const b = Math.sin(T * 2.2 + m.ph * 5);
-      put(SPR.mote[b > .9 ? 'mb' : 'm' + (b > .6 ? 0 : b > -.2 ? 1 : 2)], m.x, m.y, m.h, 1);
+      { const s_ = SPR.mote[b > .9 ? 'mb' : MOTEK[b > .6 ? 0 : b > -.2 ? 1 : 2]]; SP0.x = m.x; SP0.y = m.y; SP0.h = m.h; put(s_, 1); }
     }
     if (JA && jellies.length) drawJellies();
   }
@@ -1431,7 +1439,7 @@ export async function create(host) {
   // ---------- the ground layer: shadows (tinted), fish under the water, swimming frogs, the vulture's shadow ----------
   const bk = new Map();
   const bput = (c, x, y, w = 1, h = 1) => { let a = bk.get(c); if (!a) bk.set(c, a = []); a.push(x, y, w, h); };
-  function flush(q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); a.length = 0; } }
+  function flush(q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); clearArray(a); } }
   const GV = [0, 0, 0], gxy = (x, y, h) => {   // (= host.toView, rounded, into one kept array: its callers take X, Y at once)
     const v = G.toScreenInto(x, h, y, GV); v[0] = Math.round(v[0]); v[1] = Math.round(v[1]); return v;
   };
@@ -1444,6 +1452,13 @@ export async function create(host) {
     else if (hAbove < 5) bput(SHC[1], X, Y, 2 * z, z);
     else bput(SHC[2], X, Y, z, z);
   }
+  // a fish's pixel (across, along its body) under the water, clipped to the channel: the body lies along y in the river,
+  // along x for a pool fish heading sideways (FP: the fish and its view axes, set per fish; no closures a frame)
+  const FP = {a: null, X: 0, Y: 0, hz: false, sxx: 0, syx: 0, sxy: 0, syy: 0, z: 1};
+  function fishPx(across, along, col) {
+    const q = FP, a = q.a, ox = q.hz ? along : across, oy = q.hz ? across : along;
+    if (inStream(a.x + ox / ctx.PPM, a.y + oy / ctx.PPMY)) bput(col, q.X + Math.round(ox * q.sxx + oy * q.sxy), q.Y + Math.round(ox * q.syx + oy * q.syy), q.z, q.z);
+  }
   function drawGround(g) {
     const z = ZM, U = UNDER[biome];
     if (U && fish.length) {   // fish under the water: a 2 x 5 px silhouette along its swim (world y), clipped to the channel
@@ -1451,10 +1466,9 @@ export async function create(host) {
       for (const a of fish) {
         if (a.jump || !onScreen(a.x, a.y, WATER, .3)) continue;
         const [X, Y] = gxy(a.x, a.y, WATER), hz = a.pool && Math.abs(a.hx) > Math.abs(a.hy), dir = a.pool ? ((hz ? a.hx : a.hy) > 0 ? 1 : -1) : a.v > 0 ? 1 : -1, wig = ((T * (a.dart > 0 ? 9 : 4) + a.ph) | 0) & 1;
-        const px = (ox, oy, col) => { if (inStream(a.x + ox / ctx.PPM, a.y + oy / ctx.PPMY)) bput(col, X + Math.round(ox * sxx + oy * sxy), Y + Math.round(ox * syx + oy * syy), z, z); };
-        const f = hz ? (across, along, col) => px(along, across, col) : px;   // (across, along): the body lies along y in the river, along x for a pool fish heading sideways
-        f(0, 2 * dir, U[0]); f(1, 2 * dir, U[0]); f(0, dir, U[1]); f(1, dir, U[0]); f(0, 0, U[1]); f(1, 0, U[1]);
-        f(wig, -dir, U[1]); f(1 - wig, -2 * dir, U[1]);
+        const q = FP; q.a = a; q.X = X; q.Y = Y; q.hz = hz; q.sxx = sxx; q.syx = syx; q.sxy = sxy; q.syy = syy; q.z = z;
+        fishPx(0, 2 * dir, U[0]); fishPx(1, 2 * dir, U[0]); fishPx(0, dir, U[1]); fishPx(1, dir, U[0]); fishPx(0, 0, U[1]); fishPx(1, 0, U[1]);
+        fishPx(wig, -dir, U[1]); fishPx(1 - wig, -2 * dir, U[1]);
       }
       for (const a of frogs) if (a.st === 'swim') { const [X, Y] = gxy(a.x, a.y, WATER); if (inV(X, Y, 4)) bput(U[1], X, Y, 2 * z, z); }
       flush(g);
@@ -1476,7 +1490,8 @@ export async function create(host) {
   }
 
   // =================================================================== the contract
-  const LI = [];
+  const LI = [], PK = {x: 0, y: 0, z: 0, vx: 0, vy: 0, state: '', gait: ''};
+  const inPool = a => a.pool, jumping = a => a.jump, frogBusy = a => a.jump || a.st !== 'sit';   // (made once, not a step)
   Object.assign(WL, {
     toggle() { WL.on = !WL.on; if (!WL.on) WL.ms = 0; return WL.on; },
     biomeChanged() { need = true; },
@@ -1485,8 +1500,8 @@ export async function create(host) {
       WL.ms = WL.ms * .95 + acc * .05; acc = 0;
       if (!WL.on) { tick(t0); return; }
       dt = Math.min(.05, Math.max(0, dt || 0)); T += dt;
-      const pl = host.player;
-      P = pl ? {x: pl.x, y: pl.y, z: pl.z || 0, vx: pl.vx || 0, vy: pl.vy || 0, state: pl.state, gait: pl.gait} : null;
+      const pl = host.player;   // (the player's snapshot for this step: one kept object, not a new one a step)
+      if (pl) { const q = PK; q.x = pl.x; q.y = pl.y; q.z = pl.z || 0; q.vx = pl.vx || 0; q.vy = pl.vy || 0; q.state = pl.state; q.gait = pl.gait; P = q; } else P = null;
       viewSync();
       if (host.biome.id !== biome || host.props !== props) need = true;
       if (need) populate();
@@ -1508,8 +1523,8 @@ export async function create(host) {
       const s = S();
       // is the stream in the detail region? (sample its course: it runs north - south whatever the camera does)
       let sv = false; for (let y = 1; y < 30 && !sv; y += 1.5) sv = near(s.cx(y), y);
-      if (!sv && host.layout.pool && fish.some(a => a.pool)) sv = near(host.layout.pool.x, host.layout.pool.y);
-      if (sv || fish.some(a => a.jump) || frogs.some(a => a.jump || a.st !== 'sit')) {
+      if (!sv && host.layout.pool && fish.some(inPool)) sv = near(host.layout.pool.x, host.layout.pool.y);
+      if (sv || fish.some(jumping) || frogs.some(frogBusy)) {
         for (const a of frogs) stepFrog(a, dt);
         for (const a of fish) stepFish(a, dt);
         if (fish.length && (fishT -= dt) <= 0) fishT = fishJump() ? (biome === 'frost' ? rr(12, 22) : rr(3, 8)) : 1;

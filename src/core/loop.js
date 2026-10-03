@@ -15,6 +15,7 @@
 import {ROT_SPEED} from '../render/camera.js';
 import {check as checkEvents} from './events.js';
 import {drawPrompt} from '../ui/prompt.js';
+import {clearArray} from './mathx.js';
 
 export function createLoop(E) {
   const {G, cv, pa, P, PL, player, keys, mouse, cam, events, features, host, env, proj, hero, stage, perf, opt, lighting, hq, hdc, input, pause, game} = E;
@@ -58,7 +59,7 @@ export function createLoop(E) {
     if (paused) { pause.stepPaused(dt); return; }   // the game stands still, nature goes on
     const sdt = dt * host.timeScale; if (sdt <= 0) return;   // the game's slow motion / frozen world (the camera above stays live)
     const held = freeze > 0;   // hitstop: the sim steps run the F.always updates only, the views hold
-    acc += sdt; frameEvs.length = 0;
+    acc += sdt; clearArray(frameEvs);
     for (let n = 0; acc > 1e-9 && n < MAX_STEPS; n++) { simStep(SIM_DT); acc -= SIM_DT; }
     if (acc > 0) acc = 0;   // still behind after MAX_STEPS (a stall): let it go rather than spiral
     alpha = 1 + acc / SIM_DT;

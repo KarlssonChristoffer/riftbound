@@ -13764,7 +13764,9 @@ function WebGLAttributes( gl ) {
 			// update ranges in-place. This is safe because this method will clear the
 			// update ranges once updated.
 
-			updateRanges.sort( ( a, b ) => a.start - b.start );
+			// LOCAL PATCH (the game, 2026-10-03): sorted only when there are two or more (a closure and a sort call a buffer
+			// upload, for the one range the game's buffers carry)
+			if ( updateRanges.length > 1 ) updateRanges.sort( ( a, b ) => a.start - b.start );
 
 			// To merge the update ranges in-place, we work from left to right in the
 			// existing updateRanges array, merging ranges. This may result in a final
@@ -18322,9 +18324,9 @@ function flatten( array, nBlocks, blockSize ) {
 
 	const firstElem = array[ 0 ];
 
-	if ( firstElem <= 0 || firstElem > 0 ) return array;
-	// unoptimized: ! isNaN( firstElem )
-	// see http://jacksondunstan.com/articles/983
+	// LOCAL PATCH (the game, 2026-10-03): typeof, not `firstElem <= 0 || firstElem > 0` (that converted a vector to a
+	// primitive twice a call)
+	if ( typeof firstElem === 'number' ) return array;
 
 	const n = nBlocks * blockSize;
 	let r = arrayCacheF32[ n ];
@@ -18405,17 +18407,39 @@ function allocTexUnits( textures, n ) {
 // Note: Defining these methods externally, because they come in a bunch
 // and this way their names minify.
 
+// LOCAL PATCH (the game, 2026-10-03; src/vendor/README.md): the float setters (single floats, vectors, matrices) box no
+// numbers. (1) They go up through uniformNfv / uniformMatrixNfv from typed arrays: a number passed to uniform1f..4f is
+// boxed into a new heap number on its way into the browser. (2) They remember the last values in cacheF, a
+// Float64Array of each uniform's own: the `cache` arrays all come from one allocation site, which V8 makes generic once
+// any uniform keeps a boolean there, and then every number stored in any of them was boxed (~15 KB of garbage a frame,
+// far more while the camera moves: every object's matrices change). The GPU gets the same float32 values.
+const _uf = /*@__PURE__*/ new Float32Array( 4 );
+
+function _eqF( c, a, n ) {
+
+	for ( let i = 0; i < n; i ++ ) if ( c[ i ] !== a[ i ] ) return false;
+	return true;
+
+}
+
+function _cpF( c, a, n ) {
+
+	for ( let i = 0; i < n; i ++ ) c[ i ] = a[ i ];
+
+}
+
 // Single scalar
 
 function setValueV1f( gl, v ) {
 
-	const cache = this.cache;
+	const c = this.cacheF, n = + v; // (a boolean as its number: the value that goes up)
 
-	if ( cache[ 0 ] === v ) return;
+	if ( c[ 0 ] === n ) return;
 
-	gl.uniform1f( this.addr, v );
+	_uf[ 0 ] = n;
+	gl.uniform1fv( this.addr, _uf, 0, 1 );
 
-	cache[ 0 ] = v;
+	c[ 0 ] = n;
 
 }
 
@@ -18423,26 +18447,24 @@ function setValueV1f( gl, v ) {
 
 function setValueV2f( gl, v ) {
 
-	const cache = this.cache;
+	const c = this.cacheF;
 
 	if ( v.x !== undefined ) {
 
-		if ( cache[ 0 ] !== v.x || cache[ 1 ] !== v.y ) {
+		if ( c[ 0 ] !== v.x || c[ 1 ] !== v.y ) {
 
-			gl.uniform2f( this.addr, v.x, v.y );
-
-			cache[ 0 ] = v.x;
-			cache[ 1 ] = v.y;
+			_uf[ 0 ] = c[ 0 ] = v.x; _uf[ 1 ] = c[ 1 ] = v.y;
+			gl.uniform2fv( this.addr, _uf, 0, 2 );
 
 		}
 
 	} else {
 
-		if ( arraysEqual( cache, v ) ) return;
+		if ( _eqF( c, v, 2 ) ) return;
 
 		gl.uniform2fv( this.addr, v );
 
-		copyArray( cache, v );
+		_cpF( c, v, 2 );
 
 	}
 
@@ -18450,39 +18472,33 @@ function setValueV2f( gl, v ) {
 
 function setValueV3f( gl, v ) {
 
-	const cache = this.cache;
+	const c = this.cacheF;
 
 	if ( v.x !== undefined ) {
 
-		if ( cache[ 0 ] !== v.x || cache[ 1 ] !== v.y || cache[ 2 ] !== v.z ) {
+		if ( c[ 0 ] !== v.x || c[ 1 ] !== v.y || c[ 2 ] !== v.z ) {
 
-			gl.uniform3f( this.addr, v.x, v.y, v.z );
-
-			cache[ 0 ] = v.x;
-			cache[ 1 ] = v.y;
-			cache[ 2 ] = v.z;
+			_uf[ 0 ] = c[ 0 ] = v.x; _uf[ 1 ] = c[ 1 ] = v.y; _uf[ 2 ] = c[ 2 ] = v.z;
+			gl.uniform3fv( this.addr, _uf, 0, 3 );
 
 		}
 
 	} else if ( v.r !== undefined ) {
 
-		if ( cache[ 0 ] !== v.r || cache[ 1 ] !== v.g || cache[ 2 ] !== v.b ) {
+		if ( c[ 0 ] !== v.r || c[ 1 ] !== v.g || c[ 2 ] !== v.b ) {
 
-			gl.uniform3f( this.addr, v.r, v.g, v.b );
-
-			cache[ 0 ] = v.r;
-			cache[ 1 ] = v.g;
-			cache[ 2 ] = v.b;
+			_uf[ 0 ] = c[ 0 ] = v.r; _uf[ 1 ] = c[ 1 ] = v.g; _uf[ 2 ] = c[ 2 ] = v.b;
+			gl.uniform3fv( this.addr, _uf, 0, 3 );
 
 		}
 
 	} else {
 
-		if ( arraysEqual( cache, v ) ) return;
+		if ( _eqF( c, v, 3 ) ) return;
 
 		gl.uniform3fv( this.addr, v );
 
-		copyArray( cache, v );
+		_cpF( c, v, 3 );
 
 	}
 
@@ -18490,28 +18506,24 @@ function setValueV3f( gl, v ) {
 
 function setValueV4f( gl, v ) {
 
-	const cache = this.cache;
+	const c = this.cacheF;
 
 	if ( v.x !== undefined ) {
 
-		if ( cache[ 0 ] !== v.x || cache[ 1 ] !== v.y || cache[ 2 ] !== v.z || cache[ 3 ] !== v.w ) {
+		if ( c[ 0 ] !== v.x || c[ 1 ] !== v.y || c[ 2 ] !== v.z || c[ 3 ] !== v.w ) {
 
-			gl.uniform4f( this.addr, v.x, v.y, v.z, v.w );
-
-			cache[ 0 ] = v.x;
-			cache[ 1 ] = v.y;
-			cache[ 2 ] = v.z;
-			cache[ 3 ] = v.w;
+			_uf[ 0 ] = c[ 0 ] = v.x; _uf[ 1 ] = c[ 1 ] = v.y; _uf[ 2 ] = c[ 2 ] = v.z; _uf[ 3 ] = c[ 3 ] = v.w;
+			gl.uniform4fv( this.addr, _uf, 0, 4 );
 
 		}
 
 	} else {
 
-		if ( arraysEqual( cache, v ) ) return;
+		if ( _eqF( c, v, 4 ) ) return;
 
 		gl.uniform4fv( this.addr, v );
 
-		copyArray( cache, v );
+		_cpF( c, v, 4 );
 
 	}
 
@@ -18521,26 +18533,26 @@ function setValueV4f( gl, v ) {
 
 function setValueM2( gl, v ) {
 
-	const cache = this.cache;
+	const c = this.cacheF;
 	const elements = v.elements;
 
 	if ( elements === undefined ) {
 
-		if ( arraysEqual( cache, v ) ) return;
+		if ( _eqF( c, v, 4 ) ) return;
 
 		gl.uniformMatrix2fv( this.addr, false, v );
 
-		copyArray( cache, v );
+		_cpF( c, v, 4 );
 
 	} else {
 
-		if ( arraysEqual( cache, elements ) ) return;
+		if ( _eqF( c, elements, 4 ) ) return;
 
 		mat2array.set( elements );
 
 		gl.uniformMatrix2fv( this.addr, false, mat2array );
 
-		copyArray( cache, elements );
+		_cpF( c, elements, 4 );
 
 	}
 
@@ -18548,26 +18560,26 @@ function setValueM2( gl, v ) {
 
 function setValueM3( gl, v ) {
 
-	const cache = this.cache;
+	const c = this.cacheF;
 	const elements = v.elements;
 
 	if ( elements === undefined ) {
 
-		if ( arraysEqual( cache, v ) ) return;
+		if ( _eqF( c, v, 9 ) ) return;
 
 		gl.uniformMatrix3fv( this.addr, false, v );
 
-		copyArray( cache, v );
+		_cpF( c, v, 9 );
 
 	} else {
 
-		if ( arraysEqual( cache, elements ) ) return;
+		if ( _eqF( c, elements, 9 ) ) return;
 
 		mat3array.set( elements );
 
 		gl.uniformMatrix3fv( this.addr, false, mat3array );
 
-		copyArray( cache, elements );
+		_cpF( c, elements, 9 );
 
 	}
 
@@ -18575,26 +18587,26 @@ function setValueM3( gl, v ) {
 
 function setValueM4( gl, v ) {
 
-	const cache = this.cache;
+	const c = this.cacheF;
 	const elements = v.elements;
 
 	if ( elements === undefined ) {
 
-		if ( arraysEqual( cache, v ) ) return;
+		if ( _eqF( c, v, 16 ) ) return;
 
 		gl.uniformMatrix4fv( this.addr, false, v );
 
-		copyArray( cache, v );
+		_cpF( c, v, 16 );
 
 	} else {
 
-		if ( arraysEqual( cache, elements ) ) return;
+		if ( _eqF( c, elements, 16 ) ) return;
 
 		mat4array.set( elements );
 
 		gl.uniformMatrix4fv( this.addr, false, mat4array );
 
-		copyArray( cache, elements );
+		_cpF( c, elements, 16 );
 
 	}
 
@@ -19212,6 +19224,7 @@ class SingleUniform {
 		this.id = id;
 		this.addr = addr;
 		this.cache = [];
+		this.cacheF = new Float64Array( 16 ).fill( NaN ); // LOCAL PATCH: the float setters' last values (see setValueV1f)
 		this.type = activeInfo.type;
 		this.setValue = getSingularSetter( activeInfo.type );
 
@@ -21376,6 +21389,64 @@ function reversePainterSortStable( a, b ) {
 }
 
 
+// LOCAL PATCH (the game, 2026-10-03; src/vendor/README.md): the render lists' arrays are emptied by pop (`length = 0`
+// freed their stores, and refilling ~150 items a render made ~4 KB of new stores), and sorted by _stableSort, a merge
+// sort through a kept array: Array.prototype.sort made a work array a call and boxed every comparison's result. Both
+// sorts are stable, so the order is the same.
+const _sortTmp = [];
+function _stableSort( a, cmp ) {
+
+	const n = a.length, RUN = 16;
+	if ( n < 2 ) return;
+
+	for ( let lo = 0; lo < n; lo += RUN ) { // insertion sort each run (an item moves only past strictly greater ones)
+
+		const hi = Math.min( lo + RUN, n );
+
+		for ( let i = lo + 1; i < hi; i ++ ) {
+
+			const x = a[ i ];
+			let j = i - 1;
+			while ( j >= lo && cmp( a[ j ], x ) > 0 ) { a[ j + 1 ] = a[ j ]; j --; }
+			a[ j + 1 ] = x;
+
+		}
+
+	}
+
+	if ( n <= RUN ) return;
+
+	const t = _sortTmp;
+	while ( t.length < n ) t.push( null );
+	let src = a, dst = t;
+
+	for ( let w = RUN; w < n; w *= 2 ) { // merge runs pairwise, a -> t -> a ... (a tie takes the left one)
+
+		for ( let lo = 0; lo < n; lo += 2 * w ) {
+
+			const mid = Math.min( lo + w, n ), hi = Math.min( lo + 2 * w, n );
+			let i = lo, j = mid, k = lo;
+			while ( i < mid && j < hi ) dst[ k ++ ] = cmp( src[ j ], src[ i ] ) < 0 ? src[ j ++ ] : src[ i ++ ];
+			while ( i < mid ) dst[ k ++ ] = src[ i ++ ];
+			while ( j < hi ) dst[ k ++ ] = src[ j ++ ];
+
+		}
+
+		const s = src; src = dst; dst = s;
+
+	}
+
+	if ( src !== a ) for ( let i = 0; i < n; i ++ ) a[ i ] = src[ i ];
+	for ( let i = 0; i < n; i ++ ) t[ i ] = null;
+
+}
+
+function _emptyArray( a ) {
+
+	while ( a.length > 0 ) a.pop();
+
+}
+
 function WebGLRenderList() {
 
 	const renderItems = [];
@@ -21389,9 +21460,9 @@ function WebGLRenderList() {
 
 		renderItemsIndex = 0;
 
-		opaque.length = 0;
-		transmissive.length = 0;
-		transparent.length = 0;
+		_emptyArray( opaque );
+		_emptyArray( transmissive );
+		_emptyArray( transparent );
 
 	}
 
@@ -21475,9 +21546,9 @@ function WebGLRenderList() {
 
 	function sort( customOpaqueSort, customTransparentSort ) {
 
-		if ( opaque.length > 1 ) opaque.sort( customOpaqueSort || painterSortStable );
-		if ( transmissive.length > 1 ) transmissive.sort( customTransparentSort || reversePainterSortStable );
-		if ( transparent.length > 1 ) transparent.sort( customTransparentSort || reversePainterSortStable );
+		if ( opaque.length > 1 ) _stableSort( opaque, customOpaqueSort || painterSortStable );
+		if ( transmissive.length > 1 ) _stableSort( transmissive, customTransparentSort || reversePainterSortStable );
+		if ( transparent.length > 1 ) _stableSort( transparent, customTransparentSort || reversePainterSortStable );
 
 	}
 

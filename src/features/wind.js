@@ -483,7 +483,8 @@ export async function create(host) {
 
   // ================================================================ cloth decor (the arena's Verlet pieces)
   // A piece is a Verlet grid (cols x rows) in world metres. u runs along cols, v along rows; d = 0 at the pinned edge ..
-  // 1 at the free edge (flutter grows toward it). pat(u, v) -> -1 (no cloth) | ramp index (+64 emissive, +128 rime).
+  // 1 at the free edge (flutter grows toward it). pat(uv) -> -1 (no cloth) | ramp index (+64 emissive, +128 rime); uv: [u, v] in a kept Float64Array (rasterGroup's PUV: numbers
+  // passed to the per-piece callbacks, which can't inline, were boxed a pixel each).
   function grid(o) {
     const {cols, rows} = o, n = cols * rows, P = new Float32Array(n * 3), U = new Float32Array(n), Vv = new Float32Array(n), Dd = new Float32Array(n), pin = new Uint8Array(n);
     for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
@@ -605,7 +606,8 @@ export async function create(host) {
   }
   function bannerPat(pal, wPx, lPx, {point = false, band = false} = {}) {
     const E = pal.emblem, rime = pal.rime;
-    return (u, v) => {
+    return uv => {
+      const u = uv[0], v = uv[1];
       if (pal.fray) { if (v > .8 + .14 * hsh(Math.round(u * wPx), 7)) return -1; }
       else if (point) { if (v > .8 && Math.abs(u - .5) > (1 - v) / .2 * .5) return -1; }
       else if (v > .8 && Math.abs(u - .5) < (v - .8) / .2 * .28) return -1;
@@ -650,7 +652,8 @@ export async function create(host) {
     const mast = 1.05, len = .78, hgt = .3, top = hTop + mast - .05, wPx = len * ctx.PPM;
     const pc = grid({cols: 6, rows: 3, org: [tp.x + .04, tp.y + .01, top], ax: [len, 0, 0], ay: [0, 0, -hgt], pin: (r, k) => k === 0,
       k: 4.5, flut: 1.4, waves: .9, freq: 2.2, bend: .45, dist: u => u,
-      pat: (u, v) => {
+      pat: uv => {
+        const u = uv[0], v = uv[1];
         if (Math.abs(v - .5) > .5 * (1 - u * .94)) return -1;
         if (pal.fray && u > .72 && hsh(Math.round(u * wPx), Math.round(v * 9), 5) > .6) return -1;
         if (pal.rime && Math.abs(v - .5) > .5 * (1 - u * .94) - .12 && u < .5) return 1 + 128;
@@ -671,7 +674,7 @@ export async function create(host) {
       const t = (.35 + (i + .5) * (len - .7) / nF) / len, ci = pal.flags[i % pal.flags.length];
       const fx = A.x + (Bp.x - A.x) * t - dx * fw / 2, fy = A.y + (Bp.y - A.y) * t - dy * fw / 2;
       const pc = grid({cols: 3, rows: 3, org: [fx, fy, H], ax: [dx * fw, dy * fw, 0], ay: [0, 0, -fh], pin: r => r === 0, k: 3, flut: 1.1, waves: .6, freq: 2.6, iters: 2, bend: 0,
-        pat: (u, v) => pal.rime && v < .12 ? 3 + 128 : 0, fray: false});
+        pat: uv => pal.rime && uv[1] < .12 ? 3 + 128 : 0, fray: false});
       pc.ramp0 = ci; pc.at = [t - fw / 2 / len, t + fw / 2 / len];
       pc.pinFn = q => {   // the top edge rides on the rope
         for (let k = 0; k < 3; k++) {
@@ -698,7 +701,7 @@ export async function create(host) {
     if (!rift && hsh(dp.x * 10 | 0, dp.y * 10 | 0) > .45) arms.push([-11, .87, .3]);
     for (const [ox, oh, len] of arms) {
       const pc = grid({cols: 2, rows: 6, org: [dp.x + ox / ctx.PPM, dp.y + .02, (dp.z || 0) + oh], ax: [.07, 0, 0], ay: [0, 0, -len], pin: r => r === 0,
-        k: 3.2, flut: 1.2, waves: .7, freq: 2.4, bend: .4, outline: 'out', pat: (u, v) => pal.rime && v < .15 ? 1 + 128 : 0});
+        k: 3.2, flut: 1.2, waves: .7, freq: 2.4, bend: .4, outline: 'out', pat: uv => pal.rime && uv[1] < .15 ? 1 + 128 : 0});
       pc.ramp0 = pal.strip;
       // the dummy is a camera-facing card, so its arm is always on the screen's x: the strip's knot follows the camera
       pc.pinFn = q => {
@@ -820,6 +823,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- raster (per group box, view px of the turned camera)
   function rasterItem(it) { for (const grp of it.groups) rasterGroup(it, grp); it.rastered = true; }
+  const PUV = new Float64Array(2);   // a pixel's (u, v) for the piece's pat()
   function rasterGroup(it, grp) {
     const {PPM, PPMY, PPMH} = ctx;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -873,7 +877,7 @@ export async function create(host) {
           if (l0 < -1e-4 || l1 < -1e-4 || l2 < -1e-4) continue;
           const j = y * CW + x, z = l0 * ZT[i0] + l1 * ZT[i1] + l2 * ZT[i2]; if (z < zb[j]) continue;
           const u = l0 * U[i0] + l1 * U[i1] + l2 * U[i2], v = l0 * V[i0] + l1 * V[i1] + l2 * V[i2];
-          const code = pc.pat(u, v); if (code < 0) continue;
+          PUV[0] = u; PUV[1] = v; const code = pc.pat(PUV); if (code < 0) continue;
           let lam = l0 * LM[i0] + l1 * LM[i1] + l2 * LM[i2]; if (back) lam = -lam;   // the lining: its own side faces us
           const dl = lam - lam0;
           let t = dl > .17 ? 0 : dl < -.15 ? 2 : 1; if (back) t = Math.min(2, t + 1);

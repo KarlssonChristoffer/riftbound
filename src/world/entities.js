@@ -26,6 +26,7 @@
 //     Who moved is worked out once per step, by its first draw (positions change only in sim steps): the draws between
 //     two steps lerp that list (reading four numbers off every entity a frame was ~8 KB of boxed numbers a frame)
 import {createGrid} from './spatial.js';
+import {clearArray} from '../core/mathx.js';
 
 export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
   const grid = createGrid({x0, y0, x1, y1, cell});
@@ -86,10 +87,10 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
   const scratch = [];
   function near(x, y, r, out, ql) {
     const bit = ql ? queries.find(q => q.list === ql)?.bit || 0 : 0;
-    scratch.length = 0; grid.query(x - r, y - r, x + r, y + r, scratch);
+    clearArray(scratch); grid.query(x - r, y - r, x + r, y + r, scratch);
     // list order = ids ascending (insertion sort: a handful of candidates)
     for (let i = 1; i < scratch.length; i++) { const a = scratch[i]; let j = i - 1; while (j >= 0 && scratch[j].id > a.id) { scratch[j + 1] = scratch[j]; j--; } scratch[j + 1] = a; }
-    out.length = 0;
+    clearArray(out);
     for (let i = 0; i < scratch.length; i++) if (!bit || scratch[i].mask & bit) out.push(scratch[i].p);
     return out;
   }

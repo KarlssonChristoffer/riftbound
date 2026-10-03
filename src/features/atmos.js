@@ -43,6 +43,7 @@
 // stepping through darker palette entries. Sizes scale with the host's zoom (zoom 2 = 2 x 2 px per art pixel).
 import {flags} from '../core/flags.js';
 import {mulberry32} from '../core/rng.js';
+import {clearArray} from '../core/mathx.js';
 import {hexAny255 as hex3, lum} from '../core/color.js';
 import {createWaterLife} from './atmos/waterlife.js';
 
@@ -134,6 +135,7 @@ const STREAM_LIFE = {
     {k: 'suck', n: 12, life: [1.4, 2.4], pal: ['#e4c8ff', '#ac80f2', '#7448c4', '#40247a'], emit: true}]},
 };
 const PRINT = [[3, '#a4b4d0'], [6, '#bcc8dc'], [9, '#d6deea']];   // footprint age (s) -> multiply colour (deep -> faint)
+const printOf = t => { for (const p of PRINT) if (t < p[0]) return p; };   // (PRINT.find with a closure made a context for every print, every frame)
 // rift shards: 5x7 pixel crystals seen from 3 angles (spin = A B C B); m mid, d dark, L lit edge (= also emissive)
 const SHARD = [
   ['  L  ', ' mLd ', ' mLd ', 'mmLdd', ' mLd ', '  Ld ', '  d  '],
@@ -191,7 +193,7 @@ export async function create(host) {
   const glowAt = (x, y, h) => { GA = [x, y, h, SX(x, y, h), SY(x, y, h)]; };
   const GL = [];
   const put = (bk, c, x, y, w = 1, h = 1) => { if (bk === BE) { GL.push(c, x, y, w, h, GA); return; } let a = bk.get(c); if (!a) bk.set(c, a = []); a.push(x, y, w, h); };
-  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); a.length = 0; } }
+  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); clearArray(a); } }
   const any = bk => { for (const a of bk.values()) if (a.length) return true; return false; };
   const GO = {size: 1, alpha: 1, emit: true}, RGBC = new Map(), rgbc = c => { let v = RGBC.get(c); if (!v) RGBC.set(c, v = host.rgb(c)); return v; };
   function flushGlow() {   // the glow buffer -> emissive points at their particle's depth (alpha: the arena's glow strength, dithered)
@@ -204,7 +206,7 @@ export async function create(host) {
         host.point(ax + dX * ca + dY * sa, ay - dX * sa + dY * ca, ah, c, GO);
       }
     }
-    GL.length = 0;
+    clearArray(GL);
   }
   // a layer pixel at art offset (dx, dy) from a projected point, w x h art px (zoom scales art px)
   const lp = (bk, c, X, Y, dx = 0, dy = 0, w = 1, h = 1) => put(bk, c, X + dx * V.z, Y + dy * V.z, w * V.z, h * V.z);
@@ -788,7 +790,7 @@ export async function create(host) {
         const X = Math.floor(SX(f.x, f.y, f.z)), Y = Math.floor(SY(f.x, f.y, f.z));
         if (!inView(X, Y, 2 * V.z)) continue;
         const dX = f.dx * V.xx + f.dy * V.yx, dY = f.dx * V.xy + f.dy * V.yy, l = Math.hypot(dX, dY) || 1, ax = Math.abs(dX / l), ay = Math.abs(dY / l);
-        const sh = ax > .92 ? 0 : ay > .92 ? 1 : dX * dY > 0 ? 2 : 3, col = mulCss(f.x, f.y, PRINT.find(p => f.t < p[0])[1]);
+        const sh = ax > .92 ? 0 : ay > .92 ? 1 : dX * dY > 0 ? 2 : 3, col = mulCss(f.x, f.y, printOf(f.t)[1]);
         if (sh === 0) lp(BG, col, X, Y, -1, 0, 3, 1); else if (sh === 1) lp(BG, col, X, Y, 0, -1, 1, 2);
         else if (sh === 2) { lp(BG, col, X, Y, -1, -1); lp(BG, col, X, Y); } else { lp(BG, col, X, Y, 0, -1); lp(BG, col, X, Y, -1, 0); }
       }

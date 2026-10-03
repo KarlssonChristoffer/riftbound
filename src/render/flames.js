@@ -20,7 +20,8 @@
 //   setFire(row, f)             this frame's look of a drawn fire: {x, y, h (arena, base of the flame), KH (flame height m),
 //                               s1, s2, s3 (dance seeds), dance (m at the top x height scale), wx, wy (wind lean), on (0..1),
 //                               buoy (m/s2 x height scale), big, mid (px sizes), rad (soft blob radius m), ramp (6 x [r, g, b])}
-//   birth(row, T, life, z0, vz, r0, rf, th0, sw, wob, n) -> slot | -1   one particle born at firesim time T (s)
+//   birth(row, b) -> slot | -1   one particle born: b = {T (firesim time, s), life, z0, vz, r0, rf, th0, sw, wob, n}, read at once
+//                                (an object, not 10 numbers: a call that isn't inlined boxes every number it passes)
 //   release(slot)               that particle died
 //   frame(T, style)             after the frame's draws: arm the passes, upload what changed. style: 'pixel' | 'hybrid' | 'soft'
 //   count                       slots in use }
@@ -159,13 +160,13 @@ void main() {
       for (let k = 0; k < 6; k++) { const c = R[k], q = o + (5 + k) * 4; D[q] = c[0]; D[q + 1] = c[1]; D[q + 2] = c[2]; }
       shown[r] = 1; rowsDirty = true;
     },
-    birth(r, T, life, z0, vz, r0, rf, th0, sw, wob, n) {
+    birth(r, b) {
       if (r < 0) return -1;
       const s = nHeap ? pop() : top < SLOTS ? top++ : -1; if (s < 0) return -1;   // (all in use: this one isn't drawn)
       const i = s * 4; inUse++;
-      A[i] = T % 2048; A[i + 1] = life; A[i + 2] = z0; A[i + 3] = vz;
-      B[i] = r0; B[i + 1] = rf; B[i + 2] = th0; B[i + 3] = sw;
-      C[i] = wob; C[i + 1] = n; C[i + 2] = r; C[i + 3] = gen[r];
+      A[i] = b.T % 2048; A[i + 1] = b.life; A[i + 2] = b.z0; A[i + 3] = b.vz;
+      B[i] = b.r0; B[i + 1] = b.rf; B[i + 2] = b.th0; B[i + 3] = b.sw;
+      C[i] = b.wob; C[i + 1] = b.n; C[i + 2] = r; C[i + 3] = gen[r];
       if (s < lo) lo = s; if (s > hi) hi = s; if (s < loB) loB = s; if (s > hiB) hiB = s;
       return s;
     },

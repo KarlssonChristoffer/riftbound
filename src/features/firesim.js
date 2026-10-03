@@ -89,11 +89,13 @@ export function createFires(host) {
       const z0 = rr(0, .04), vz = rr(K.vh[0], K.vh[1]) * hv * (.9 + (1 - rf) * .25) * (1 + tongue * .55);
       const life = rr(K.life[0], K.life[1]) * hl * (.8 + (1 - rf) * .4) * (1 + tongue * .45);
       const sw = K.swirl * rr(.6, 1.4) * (R() < .5 ? -1 : 1), wob = R() * TAU, nn = rr(-.07, .07), tb = T - dt;
-      f.slots[f.live] = gpu.birth(f.row, tb, life, z0, vz, r, rf, th, sw, wob, nn);
+      const b = BO; b.T = tb; b.life = life; b.z0 = z0; b.vz = vz; b.r0 = r; b.rf = rf; b.th0 = th; b.sw = sw; b.wob = wob; b.n = nn;
+      f.slots[f.live] = gpu.birth(f.row, b);
       f.ages[f.live] = 0; f.lifes[f.live++] = life;
     }
   }
   const A = [0, 0], pops = [], WS = {x: 0, y: 0, g: 0}, NOO = {};   // WS: the wind at a flame (scratch); NOO: no options
+  const BO = {T: 0, life: 0, z0: 0, vz: 0, r0: 0, rf: 0, th0: 0, sw: 0, wob: 0, n: 0};   // a birth for gpu.birth (kept)
   return {
     TUNE,
     ramp: c => rampOf(c),

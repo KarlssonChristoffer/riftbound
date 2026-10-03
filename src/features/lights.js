@@ -575,7 +575,8 @@ export async function create(host) {
       const dx = w.tx - w.x, dy = w.ty - w.y, d = Math.hypot(dx, dy) || 1, k = 1 - Math.exp(-dt * 2.2);
       w.vx += (dx / d * Math.min(sp, d * 2) - w.vx) * k; w.vy += (dy / d * Math.min(sp, d * 2) - w.vy) * k;
       w.x += w.vx * dt; w.y += w.vy * dt; w.h = .85 + Math.sin(w.t * 1.7) * .22 + Math.sin(w.t * 4.1) * .05;
-      w.trail.unshift([w.x, w.y, w.h]); if (w.trail.length > 9) w.trail.pop();
+      const tp = w.trail.length >= 9 ? w.trail.pop() : [0, 0, 0];   // (the oldest point's array, reused)
+      tp[0] = w.x; tp[1] = w.y; tp[2] = w.h; w.trail.unshift(tp);
     }
   }
   const WD = {x: 0, y: 0, g: 0}, CALM = {x: 0, y: 0};   // the wind at the player (scratch), none
@@ -693,17 +694,19 @@ export async function create(host) {
     for (const c of candles) if (near(c.x, c.y)) spr(`candles_${c.v}_${c.lit ? (Math.floor(T * 7 + c.ph) % 4) : 4}`, c.x, c.y, c.h, {shadow: true});
     for (const s of shrooms) if (near(s.x, s.y)) spr(`shroom_${s.v}_${s.b > 1.05 ? 2 : s.b > .55 ? 1 : 0}`, s.x, s.y, 0, {shadow: true});
   }
-  function drawWisps() {
+  const wispCols = {};   // biome -> [colour, core] (made once: no arrays a frame)
+  const wispCol = id => { let wc = wispCols[id]; if (!wc) { const c = rgb(WISP[id] || WISP.ruins); wc = wispCols[id] = [c, lerp3(c, [1, 1, 1], .6)]; } return wc; };
+  function drawWisps() {   // (points through pt's kept options; no closure in the loop: V8 made a context for every wisp, drawn or not)
     for (const w of wisps) {
       if (w.fade < .05 || !near(w.x, w.y)) continue;
-      const c = rgb(WISP[biomeId] || WISP.ruins), core = lerp3(c, [1, 1, 1], .6), a = w.fade;
-      host.point(w.x, w.y, w.h, core, {emit: true, size: 2, alpha: a});
-      host.point(w.x, w.y, w.h, c, {emit: true, size: 4, alpha: a * .45});   // a dithered glow round the core (the core wins the depth tie)
+      const wc = wispCol(biomeId), c = wc[0], core = wc[1], a = w.fade;
+      pt(w.x, w.y, w.h, core, true, 2, a);
+      pt(w.x, w.y, w.h, c, true, 4, a * .45);   // a dithered glow round the core (the core wins the depth tie)
       for (let k = 0; k < 4; k++) {   // a soft ring of motes round the core
         const ang = T * 2.2 + k * TAU / 4, rx = Math.cos(ang) * .07, ry = Math.sin(ang) * .05;
-        host.point(w.x + rx, w.y + ry, w.h + Math.sin(ang * 2) * .05, c, {emit: true, alpha: a * .55});
+        pt(w.x + rx, w.y + ry, w.h + Math.sin(ang * 2) * .05, c, true, 1, a * .55);
       }
-      w.trail.forEach(([x, y, h], i) => { if (i > 1 && i % 2 === 0) host.point(x, y, h, c, {emit: true, alpha: a * (1 - i / 10) * .7}); });
+      for (let i = 2; i < w.trail.length; i += 2) { const q = w.trail[i]; pt(q[0], q[1], q[2], c, true, 1, a * (1 - i / 10) * .7); }   // every other trail point
     }
   }
   function drawArrowFire() {

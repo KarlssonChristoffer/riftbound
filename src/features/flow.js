@@ -52,7 +52,7 @@
 //             Each frame the player's current silhouette is cut out of any ghost that overlaps him on screen, so a
 //             ghost never covers him (the arena sorted them just behind him).
 import {flags} from '../core/flags.js';
-import {clamp, hash3 as hsh, vnoise as vn} from '../core/mathx.js';
+import {clamp, hash3 as hsh, vnoise as vn, clearArray} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {hexAny255 as hex3, lum} from '../core/color.js';
 import {toView, toWorld} from '../render/viewxf.js';
@@ -147,7 +147,7 @@ export async function create(host) {
   // emitter layers, glow x (1 - light) with the player's silhouette cut out), the air streak at its two alphas
   const BG = new Map(), BF = new Map(), BE = new Map(), BA = [new Map(), new Map()];
   const put = (bk, c, x, y, w = 1, h = 1) => { let a = bk.get(c); if (!a) bk.set(c, a = []); a.push(x, y, w, h); };
-  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); a.length = 0; } }
+  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); clearArray(a); } }
   const any = bk => { for (const a of bk.values()) if (a.length) return true; return false; };
   const lp = (bk, c, X, Y, dx = 0, dy = 0) => put(bk, c, X + dx * V.z, Y + dy * V.z, V.z, V.z);
   const PO = {size: 1}, PA = [{size: 1, alpha: .22}, {size: 1, alpha: .45}];
