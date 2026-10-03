@@ -20,6 +20,8 @@
 // walls and solid props, 3D trees and the ground; the gang's own bodies let them by.
 // GANGS (the desert sandbox only: features/foes.js decides): every so often 2-4 come in from the edge of the walkable
 // ground, far from you, while there is room under the cap; the dev key and a wanted poster ask for one now.
+// UNARMED (?foes=unarmed, createFoesSim(host, {unarmed: true}): targets to test on): they never draw (they close in and
+// circle you holstered); a pair at a time, the next one TUNE.spawn.unarmed.every s after the last of a pair is down.
 //
 // OWNS: the records (gang), the gunmen entities' bodies (x, y, z, h, r: the creator's fields), the bullet pool, the spawn
 //   clock, its own nav grid (world/nav.js over the ground you can walk on).
@@ -37,8 +39,8 @@ const DEG = Math.PI / 180;
 const wrap = a => a - TAU * Math.floor((a + Math.PI) / TAU);   // -> [-pi, pi)
 const KINDS = Object.keys(TYPES);
 
-export function createFoesSim(host) {
-  const ents = host.entities, P = host.player, events = host.events, A = TUNE.ai, SP = TUNE.spawn;
+export function createFoesSim(host, {unarmed = false} = {}) {
+  const ents = host.entities, P = host.player, events = host.events, A = TUNE.ai, SP = TUNE.spawn, U = unarmed ? SP.unarmed : null;
   const R = mulberry32((Date.now() % 2147483646) + 1), RR = (a, b) => a + R() * (b - a);
   // the ground you can walk on (sim/player/adapter.js blocked: the fort's square and 3 m round it, the trail), minus the
   // canyon (the desert's hole south of its rim)
@@ -128,6 +130,7 @@ export function createFoesSim(host) {
   }
 
   // ---------------------------------------------------------------- gangs
+  const gangSize = () => U ? U.gang : SP.gang[0] + Math.floor(R() * (SP.gang[1] - SP.gang[0] + 1));
   function alive(type) { let n = 0; for (const g of gang) if (!type || g.type === type) n++; return n; }
   function pickType() {
     let sum = 0; for (const k of KINDS) if (alive(k) < TYPES[k].max) sum += TYPES[k].weight;
@@ -242,7 +245,7 @@ export function createFoesSim(host) {
     g.at += dt;
     switch (g.act) {
       case 'holstered':
-        if (!S.down && g.los && g.d < T.range[1] + A.drawPast) { startAct(g, 'draw'); g.lost = 0; }
+        if (!U && !S.down && g.los && g.d < T.range[1] + A.drawPast) { startAct(g, 'draw'); g.lost = 0; }   // (unarmed: never)
         break;
       case 'draw':
         if (g.at >= G.draw) { g.act = 'ready'; g.at = 0; g.cool = RR(A.firstAim[0], A.firstAim[1]); }
@@ -372,7 +375,7 @@ export function createFoesSim(host) {
   function update(dt, evs, on) {
     if (!on) { if (gang.length || B.n) removeAll(); S.armed = false; S.down = false; S.want = 0; return; }
     if (!navOk) buildNav();
-    if (!S.armed) { S.armed = true; S.clock = SP.first; }
+    if (!S.armed) { S.armed = true; S.clock = U ? U.first : SP.first; }
     nav.update(dt);
     // your motion (for the steady hands that lead you), without allocation
     const px = P.x, py = P.y;
@@ -389,7 +392,7 @@ export function createFoesSim(host) {
         }
         if (g.act === 'holstered' && !S.down) { g.mode = 'fight'; g.los = true; }   // shot from out of sight: it turns on you
       } else if (e.type === 'player.down') { S.down = true; }
-      else if (e.type === 'player.respawn') { removeAll(); S.down = false; S.clock = SP.first; }
+      else if (e.type === 'player.respawn') { removeAll(); S.down = false; S.clock = U ? U.first : SP.first; }
       else if (e.type === 'frontier.read' && e.name && !S.bounty) { S.want = Math.max(3, 2 + Math.floor(R() * 3)); S.wantO = {leader: 'sheriff', name: e.name}; S.bounty = true; }
     }
     // the dead (combat broke them this step and took them out of the world; enemy.kill was its): out of the fight
@@ -399,14 +402,15 @@ export function createFoesSim(host) {
       if (g.p.name !== g.T.name) S.bounty = false;   // the named one fell: the next poster may call another
       byP.delete(g.p); gang.splice(i, 1);
     }
-    // gangs: the clock, a request (the dev key, a poster)
+    // gangs: the clock, a request (the dev key, a poster). Unarmed: the clock waits while any of the pair is up
+    if (U && gang.length) S.clock = Math.max(S.clock, U.every);
     S.clock -= dt;
     if (S.clock <= 0 && !S.down) {
-      const n = SP.gang[0] + Math.floor(R() * (SP.gang[1] - SP.gang[0] + 1));
-      if (gang.length + n <= SP.cap) { spawnGang(n); S.clock = RR(SP.every[0], SP.every[1]); } else S.clock = SP.retry;
+      const n = gangSize();
+      if (gang.length + n <= SP.cap) { spawnGang(n); S.clock = U ? U.every : RR(SP.every[0], SP.every[1]); } else S.clock = SP.retry;
     }
     if (S.want && !S.down) {
-      const n = Math.min(S.want > 0 ? S.want : SP.gang[0] + Math.floor(R() * (SP.gang[1] - SP.gang[0] + 1)), SP.devCap - gang.length);
+      const n = Math.min(S.want > 0 ? S.want : gangSize(), SP.devCap - gang.length);
       if (n > 0) spawnGang(n, S.wantO); S.want = 0; S.wantO = null;
     }
     // each gunman: look, the gun, the legs (knocked down: only that)
@@ -482,7 +486,7 @@ export function createFoesSim(host) {
   }
 
   return {
-    gang, B, S, nav, KINDS, update, removeAll, roped, shift, fling, carry, TUNE_GETUP: A.getUp,
+    gang, B, S, nav, KINDS, update, removeAll, roped, shift, fling, carry, TUNE_GETUP: A.getUp, unarmed: !!U,
     get alive() { return gang.length; },
     request(n = 0, o = null) { S.want = n || -1; S.wantO = o; },   // a gang now (-1: the usual size): read by the next step
     spawnAt: (type, x, y, name = null) => add(type, x, y, name),   // (tests: a gunman of a type, there, now)

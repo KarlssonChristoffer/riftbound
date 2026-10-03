@@ -48,8 +48,10 @@ export const TYPES = {
 export const TUNE = {
   // gangs: the first one comes `first` s after you enter the desert sandbox, then one every `every` s while there is room
   // under `cap` alive; `gang` gunmen each, in from the walkable ground's edge `minWalk` m of walking (and `minLine` m of
-  // straight line) from you
-  spawn: {first: 8, every: [22, 36], retry: 2, cap: 6, gang: [2, 4], minWalk: 14, minLine: 11, edge: 2, apart: 1.3, devCap: 8},
+  // straight line) from you. unarmed (?foes=unarmed: targets to test on, the live hero, the lasso): `gang` at a time who never
+  // draw; the next pair comes `every` s after the last of them is down (the first `first` s after you enter)
+  spawn: {first: 8, every: [22, 36], retry: 2, cap: 6, gang: [2, 4], minWalk: 14, minLine: 11, edge: 2, apart: 1.3, devCap: 8,
+    unarmed: {gang: 2, first: 3, every: 3}},
   ai: {
     perceive: .2,        // s between looks at you (line of sight, distance), staggered per gunman
     maxAiming: 2,        // at most this many hold a gun on you at once (the rest wait their turn): telegraphs stay readable

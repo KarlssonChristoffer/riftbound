@@ -3,7 +3,8 @@
 // room under a cap, close in, draw, and trade shots with you from their range; a fight has stakes (game/game.js: your
 // health counts while gunmen are about, you fall, you wake at the fort). Menu > Dev > Features > Gunmen turns it off and on
 // (off: every gunman, his bullets and the bodies gone at once, no gangs; on: they come again, the first after spawn.first s);
-// ?foes=0 starts it off.
+// ?foes=0 starts it off. ?foes=unarmed: targets to test on (the live hero, the lasso): a pair at a time who never draw
+// (foes/sim.js UNARMED; TUNE.spawn.unarmed).
 //   bandit   a revolver, the common one: mid range
 //   sheriff  a revolver, the elite: tougher, steadier, a quicker aim with a lead on you, long range; his name over him
 //            (the gunslinger's duel cue sees him: features/gun.js)
@@ -36,7 +37,7 @@ import {TYPES, TUNE} from '../content/foes.js';
 // (its props stand in the world before the gunmen's nav grid is built from them)
 export const order = {after: ['combat', 'frontier']};
 export async function create(host) {
-  const sim = createFoesSim(host), look = createLook(host, sim), NONE = [];
+  const sim = createFoesSim(host, {unarmed: flags.get('foes') === 'unarmed'}), look = createLook(host, sim), NONE = [];
   let game = null, tU = 0, tF = 0;
   const now = () => performance.now();
   const active = () => F.on && host.biome.id === 'desert' && (game ??= host.feature('game'))?.mode === 'sandbox';
@@ -60,7 +61,7 @@ export async function create(host) {
     respawn() { const s = host.layout.spawn; RESPAWN.x = s.x; RESPAWN.y = s.y; return RESPAWN; },
     // dev (dev/devkeys.js): a gang now (n gunmen, or the usual 2-4), if the desert sandbox is on
     spawnGang(n = 0) { if (!active()) return false; sim.request(n); return true; },
-    hud: () => active() ? `foes ${sim.alive} alive · ${sim.B.n} bullets · next gang ${Math.max(0, sim.S.clock).toFixed(0)} s${look.failed ? ' · ART FAILED' : ''}` : '',
+    hud: () => active() ? `foes ${sim.alive} alive${sim.unarmed ? ' (unarmed)' : ''} · ${sim.B.n} bullets · next gang ${Math.max(0, sim.S.clock).toFixed(0)} s${look.failed ? ' · ART FAILED' : ''}` : '',
   };
   if (F.on && host.biome.id === 'desert') look.load();
   return F;

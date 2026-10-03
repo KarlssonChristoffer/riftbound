@@ -24,6 +24,8 @@ pass), and the live path is view-only (simview with `?live=1` passes: the sim ne
   (default), `allsmear`, `free32`); `?livedemo=lasso | swing` with a demo.
 - Draw the revolver (LMB) and walk with it up: the gun follows the cursor at any angle. R reloads on the move: the
   upper body plays the standing reload's 13 frames over the walk / run legs.
+- Something to shoot and rope without being shot: `?mode=sandbox&biome=desert&set=outlaw&live=1&foes=unarmed` (the
+  desert's gunmen two at a time, never drawing; the next pair 3 s after the last of them is down: features/foes.js).
 
 Mirror for testing: `D:/Game/src-xlive/` (`http://localhost:8210/src-xlive/`). Captures, GIFs and the measuring scripts
 are in `D:/Game/tmp/exp-livehero/`.
