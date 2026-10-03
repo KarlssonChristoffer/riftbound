@@ -161,7 +161,7 @@ export function createLook(host, sim) {
     if (RAG) {   // (the ragdolls' models: a type without one keeps its death clips)
       rag = createRagdolls(host);
       rag.onGround = s => { const c = corpses[s]; if (c.on && c.rag) { rag.point(s, 0, SC); c.x = SC[0]; c.y = SC[2]; c.z = host.elev(SC[0], SC[2]); ground(c); } };
-      for (const [k, dir] of Object.entries(RAG_TYPES)) rag.load(k, OUT + dir).catch(e => console.warn(`foes: the ${k} ragdoll failed to load`, e));
+      for (const [k, dir] of Object.entries(RAG_TYPES)) rag.load(k, OUT + dir).then(() => rag.warm(k)).catch(e => console.warn(`foes: the ${k} ragdoll failed to load`, e));   // (warm: no hitch at the first death)
     }
     return (loading = Promise.all(Object.keys(TYPES).map(async k => {
       let root = await rootOf(TYPES[k].atlas), s;
