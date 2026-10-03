@@ -231,7 +231,9 @@ export async function create(host) {
   // ================================================================ gust field (the arena's, unchanged)
   const fronts = []; let nextF = 0, S0 = 0, S1 = 60, T0 = -25, T1 = 30;
   function extent() {
-    const c = [[0, 0], [ctx.WM, 0], [0, ctx.HM], [ctx.WM, ctx.HM]];
+    // the Proving Grounds' corners: the fronts cross them as they always have (a bigger world's open land gets the base wind; the
+    // world plan's step 3 decides how gusts reach it)
+    const wb = ctx.grounds, c = [[wb.x0, wb.y0], [wb.x1, wb.y0], [wb.x0, wb.y1], [wb.x1, wb.y1]];
     const sv = c.map(([x, y]) => x * UX + y * UY), tv = c.map(([x, y]) => -x * UY + y * UX);
     S0 = Math.min(...sv); S1 = Math.max(...sv); T0 = Math.min(...tv); T1 = Math.max(...tv);
   }

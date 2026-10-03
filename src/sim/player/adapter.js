@@ -10,7 +10,7 @@
 //   const pa = createPlayerHost({...}); const {PL, P, player} = pa
 import {createPlayer} from './player.js';
 import {createGun} from './gun.js';   // a gun loadout's revolver (player.js H.gun)
-import {PLAY, TRAIL, elev, inStream, PLATEAUS} from '../../world/world.js';
+import {walkable, elev, inStream, PLATEAUS} from '../../world/world.js';
 
 const R_BODY = .25;
 
@@ -20,9 +20,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   const aimable = ents().query('player.aim', p => p.hp > 0 || p.target || p.breakable);   // what the cursor can aim at (a live list)
   // collision in the world (round, so it doesn't change with the camera; the arena squashes it to match its 2D look)
   function blocked(x, y, z, air) {
-    const arena = x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3;
-    const trail = x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1;
-    if (!arena && !trail) return true;
+    if (!walkable(x, y)) return true;
     if (!air && inStream(x, y)) return true;
     if (elev(x, y) > z + .3) return true;
     for (const p of ents().near(x, y, R_BODY, nearB)) if (!p.broken && !p.gone && Math.abs((p.z || 0) - z) < 1 && (p.rect ? x > p.rect[0] - R_BODY && x < p.rect[2] + R_BODY && y > p.rect[1] - R_BODY && y < p.rect[3] + R_BODY

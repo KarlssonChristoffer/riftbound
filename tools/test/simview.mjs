@@ -9,7 +9,7 @@
 // FRAME RATE (the fixed step, phase 4.3): the 'keys' scenario (keyboard and world-space input only: the cursor is read
 // through a camera that moves differently at another frame rate) also runs at 240 and 30 frames a second: the sim
 // must come out the same as at 60 (its inputs change on even sixtieths, where every rate has a frame).
-//   node tools/test/simview.mjs            options: --only sandbox,run --port 8142
+//   node tools/test/simview.mjs            options: --only sandbox,run --port 8142 --path src/ (the page folder, as golden.mjs)
 import {spawn} from 'node:child_process';
 import {mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -18,7 +18,7 @@ import {fileURLToPath} from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
-const PORT = +arg('port', 8142), ONLY = arg('only', '');
+const PORT = +arg('port', 8142), ONLY = arg('only', ''), PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, '') + '/';
 const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const SHIM = `(() => {
   let s = 0x2545F491 | 0;
@@ -109,7 +109,7 @@ await send('Page.addScriptToEvaluateOnNewDocument', {source: SHIM});
 
 async function runOnce(q, body, fps = 60) {
   logs.length = 0;
-  await send('Page.navigate', {url: `http://localhost:${PORT}/src/?${q}`});
+  await send('Page.navigate', {url: `http://localhost:${PORT}/${PAGE}?${q}`});
   let ok = false; for (let k = 0; k < 240; k++) { await sleep(250); try { if (await ev('!!(window.__r3d && window.__r3d.world)')) { ok = true; break; } } catch {} }
   if (!ok) return {error: 'load'};
   await sleep(2500);

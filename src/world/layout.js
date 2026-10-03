@@ -3,7 +3,7 @@
 // in metres above the ground. The biome decides how things look; this file decides WHERE things are, what they
 // collide with, how high the ground is (elev) and where the traversal features are.
 //
-//   world 62 x 30 m
+//   world 62 x 30 m (WORLD: the bounds of everything; GROUNDS: the Proving Grounds' own rect, the same today)
 //   x 7..33   walled arena (movement ring, range lane, pillar grove, light garden, N/S dummies)
 //   x 33..60  the trail, out of the east gate:
 //               stream   runs N-S at x ~40; 2.9 m wide (sprint-leap only), a 1.4 m narrows in front of the gate
@@ -28,10 +28,28 @@
 //   |  deco strip + N/S shooting dummies   |               o o  stepping stones   crate wall    |
 //   +--------[   ]-------------------------+                ~                     [cache]      |
 //            S gate
-export const WORLD = {WM: 62, HM: 30};
+import {flags} from '../core/flags.js';
+
+// WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
+// cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
+// rect, what buildLayout and the biomes' ground painters lay out (today the whole world; it stays at 0, 0: a painted ground
+// texel's px / PPM is its world x / y). ?world=big: 40 m more to the west, 60 m to the north and east (the ravine stays the
+// south edge): 162 x 90 m, for measuring the engine at that size (the world plan, step 2; step 3 opens and paints the land)
+const BIG = flags.get('world') === 'big';
+export const WORLD = BIG ? {x0: -40, y0: -60, x1: 122, y1: 30, WM: 162, HM: 90} : {x0: 0, y0: 0, x1: 62, y1: 30, WM: 62, HM: 30};
+export const GROUNDS = {x0: 0, y0: 0, x1: 62, y1: 30};
 export const PLAY = {x0: 7, y0: 6, x1: 33, y1: 24};
 export const SCONCE_D = .21;   // a wall sconce's stick stands this far off the wall face (the east torches; lights.js mounts them)
 export const TRAIL = {x0: 33, y0: 2.6, x1: 60, y1: 27.5};   // walkable outdoor region east of the arena
+
+// ---- where things may be: the walled arena and the trail (one place; was four copies), each use with its own margins ----
+//   walkable(x, y)  the player and pushed props: the arena and 3 m round it (the gates' aprons), the trail
+//   roamable(x, y)  enemies (combat's brutes): the arena .35 m in from its edges, the trail .5 m in (.4 m at its south edge)
+//   navArea(x, y)   the nav grid's open cells: the arena and .6 m past its east edge (the east gate meets the trail), the trail
+// Walls, water and plateaus are tested on top of these by their users
+export const walkable = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1);
+export const roamable = (x, y) => (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35) || (x > TRAIL.x0 + .5 && x < TRAIL.x1 - .5 && y > TRAIL.y0 + .5 && y < TRAIL.y1 - .4);
+export const navArea = (x, y) => (x > PLAY.x0 && x < PLAY.x1 + .6 && y > PLAY.y0 && y < PLAY.y1) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1);
 
 // ---- stream: centreline x and width per y (metres) ----
 export const STREAM = {
@@ -39,6 +57,7 @@ export const STREAM = {
   // 2.9 m (a run-leap reaches ~3.0 m and falls in; a sprint-leap ~3.6 m clears it), 1.4 m at the narrows in front of the east gate
   w: y => { const n = Math.abs(y - 15); return n < 1.2 ? 1.4 : n < 2.4 ? 1.4 + (n - 1.2) / 1.2 * 1.5 : 2.9; },
   narrows: {y: 15},
+  y0: -1, y1: 31,   // its span: north of y0 / south of y1 there is no stream (inStream)
   stones: [{x: 0, y: 23.4, r: .42}, {x: 0, y: 23.4, r: .42}],   // x filled in below (placed across the channel)
   // dry footing added during play (a crate sunk to its lid: combat/props.js) and taken away again (it broke, reset)
   addStone(o) { STREAM.stones.push(o); },
@@ -46,7 +65,7 @@ export const STREAM = {
 };
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
 export const inStream = (x, y) => {
-  if (y < -1 || y > 31) return false;
+  if (y < STREAM.y0 || y > STREAM.y1) return false;
   if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y);   // (the plateau's pool is deep water too)
   return !STREAM.stones.some(s => Math.hypot(x - s.x, (y - s.y) * 1.3) < s.r);   // stones are dry footing
 };
@@ -246,10 +265,10 @@ export function buildLayout(seed = 7) {
     const k = rnd(); add(k < .45 ? 'tuft' : k < .75 ? 'bush' : 'rock', x, y, {variant: rnd() * 3 | 0, r: 0});   // (soft)
   }
 
-  // ---- surroundings outside the walls and the trail (unreachable; big shapes that set the biome mood) ----
-  const {WM, HM} = WORLD;
+  // ---- surroundings outside the walls and the trail, over the Proving Grounds (unreachable; big shapes that set the biome mood) ----
+  const WM = GROUNDS.x1 - GROUNDS.x0, HM = GROUNDS.y1 - GROUNDS.y0;
   for (let i = 0; i < 110; i++) {
-    const x = rnd() * WM, y = rnd() * HM;
+    const x = GROUNDS.x0 + rnd() * WM, y = GROUNDS.y0 + rnd() * HM;
     if (x > x0 - 1.5 && x < x1 + 1.5 && y > y0 - 1.5 && y < y1 + 1.5) continue;
     if (x > TRAIL.x0 - 1 && x < TRAIL.x1 + 1 && y > TRAIL.y0 - 1.2 && y < TRAIL.y1 + 1) continue;
     if (Math.abs(x - STREAM.cx(y)) < STREAM.w(y) / 2 + .6) continue;

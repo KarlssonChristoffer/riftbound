@@ -16,7 +16,7 @@
 //     with host.entities.remove. Each list's join() sets up combat's own fields for a newcomer.
 // Everything else (tuning T, ability table AB, palettes, timings, RNG and its seed) is the arena's.
 
-import {PLAY} from '../../world/world.js';
+import {roamable} from '../../world/world.js';
 import {parkMiller} from '../../core/rng.js';
 
 export const TAU = Math.PI * 2;
@@ -223,10 +223,9 @@ export function createCore(host) {
   }
 
   // ---------------- brutes ----------------
-  // where a brute may stand: the trail (the yard's sparring brutes) or inside the arena's walls (enemies in a run)
-  const TR = host.layout?.trail || {x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9};
+  // where a brute may stand: the trail (the yard's sparring brutes) or inside the arena's walls (enemies in a run): layout.roamable
   const walls = ents.query('combat.wall', p => p.rect), nearF = [];   // nearF: the grid's candidates (freeSpot)
-  const inArea = (x, y) => (x > TR.x0 + .5 && x < TR.x1 - .5 && y > TR.y0 + .5 && y < TR.y1 - .4) || (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35);
+  const inArea = roamable;
   const inWall = (x, y, m) => walls.some(w => x > w.rect[0] - m && x < w.rect[2] + m && y > w.rect[1] - m && y < w.rect[3] + m);
   function freeSpot(b, x, y) {
     if (!inArea(x, y) || inWall(x, y, b.r0 * .8)) return false;

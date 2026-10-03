@@ -432,7 +432,7 @@ export async function create(host) {
   // ---------- ground: can a small animal stand here ----------
   const nearS = [];   // the grid's candidates (host.entities.near): what stands here
   function solid(x, y, z) {
-    if (x < .6 || y < .6 || x > ctx.WM - .6 || y > ctx.HM - .6) return true;
+    const wb = ctx.bounds; if (x < wb.x0 + .6 || y < wb.y0 + .6 || x > wb.x1 - .6 || y > wb.y1 - .6) return true;   // the world's edge
     if (Math.abs(elev(x, y) - z) > .2) return true;
     if (z < .1 && inStream(x, y)) return true;
     for (const p of host.entities.near(x, y, .1, nearS)) {
@@ -1019,7 +1019,7 @@ export async function create(host) {
       L.push({x: p.x + (l?.dx || 0), y: p.y + (l?.dy || 0), h: (l?.h ?? (p.kind === 'torch' ? 1.6 : 1.1)) + (p.z || 0), kind: p.kind});
     }
     if (biome === 'ember') for (const l of host.biome.groundLights || [])
-      if (l.x > 1 && l.x < ctx.WM - 1 && l.y > 1 && l.y < ctx.HM - 1) L.push({x: l.x, y: l.y, h: .5, kind: 'lava'});
+      if (l.x > ctx.bounds.x0 + 1 && l.x < ctx.bounds.x1 - 1 && l.y > ctx.bounds.y0 + 1 && l.y < ctx.bounds.y1 - 1) L.push({x: l.x, y: l.y, h: .5, kind: 'lava'});
     return L;
   }
   function newBug(kind, pal, x, y, h, src) {
@@ -1094,7 +1094,7 @@ export async function create(host) {
   }
   function dragonLeave(a, th) {   // startled: away from the threat, fast; a perched one lets go of its reed
     if (a.reed) { perched.delete(a.reed); a.reed = null; }
-    const ang = Math.atan2(a.y - th.y, a.x - th.x) + rr(-.5, .5), d = rr(3, 5), x = clamp(a.x + Math.cos(ang) * d, 1, ctx.WM - 1), y = clamp(a.y + Math.sin(ang) * d, 1, ctx.HM - 1);
+    const ang = Math.atan2(a.y - th.y, a.x - th.x) + rr(-.5, .5), d = rr(3, 5), wb = ctx.bounds, x = clamp(a.x + Math.cos(ang) * d, wb.x0 + 1, wb.x1 - 1), y = clamp(a.y + Math.sin(ang) * d, wb.y0 + 1, wb.y1 - 1);
     a.rest = null; dragonDart(a, x, y, gH(x, y) + rr(.8, 1.9), DRAG.flee, false); a.flee = true;
   }
   function stepDragon(a, dt) {

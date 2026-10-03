@@ -133,10 +133,10 @@ export async function create(host) {
     if (!K) return {tpls, pieces};
     const r = rng(SEED[biome] || 3), mkT = (e, i, j) => { const [fn, sway, amp, exp, par] = e, S = fn(SEED[biome] * 101 + i * 17 + j * 5); const t = {S, sway, amp, exp, par, mir: null, cvs: new Map()}; tpls.push(t); return t; };
     const lists = {N: K.N.map((e, i) => [mkT(e, i, 1), mkT(e, i, 2)]).flat(), S: K.S.map((e, i) => [mkT(e, i + 10, 1), mkT(e, i + 10, 2)]).flat(), side: K.side.map((e, i) => [mkT(e, i + 20, 1), mkT(e, i + 20, 2)]).flat()};
-    const wm = WM(), hm = HM();
+    const wb = host.ctxO.bounds;   // the world's borders (a bigger world's own, not the Proving Grounds')
     for (const edge of ['N', 'S']) {   // the arena's loop, verbatim RNG order: pick, mir, d, par, ph, spacing
-      let x = 1 + r() * 3, i = 0;
-      while (x < wm - 1) {
+      let x = wb.x0 + 1 + r() * 3, i = 0;
+      while (x < wb.x1 - 1) {
         const t = lists[edge][(i * 3 + (r() * 2 | 0)) % lists[edge].length];
         const home = {tpl: t, mir: r() < .5, d: Math.round(r() * (edge === 'N' ? 8 : 12)), par: t.par + (r() - .5) * .08};
         pieces.push({border: edge, along: x, var: {[edge]: home}, ph: r() * TAU, k: 0, ft: 0, want: 0, slot: edge, next: edge, vis: false});
@@ -144,8 +144,8 @@ export async function create(host) {
       }
     }
     for (const edge of ['W', 'E']) {
-      let y = 1.5 + r() * 3, i = 0;
-      while (y < hm - 1) {
+      let y = wb.y0 + 1.5 + r() * 3, i = 0;
+      while (y < wb.y1 - 1) {
         const t = lists.side[(i + (r() * 2 | 0)) % lists.side.length];
         const home = {tpl: t, mir: edge === 'E', d: Math.round(r() * 10), par: t.par + (r() - .5) * .08};
         pieces.push({border: edge, along: y, var: {side: home}, ph: r() * TAU, k: 0, ft: 0, want: 0, slot: edge, next: edge, vis: false});
@@ -214,12 +214,12 @@ export async function create(host) {
     return false;
   }
   function anchorOf(pc) {   // world anchor on the border + the point 1 m inside (wind sample)
-    const wm = WM(), hm = HM();
+    const wb = host.ctxO.bounds;
     switch (pc.border) {
-      case 'N': return [pc.along, 0, pc.along, 1];
-      case 'S': return [pc.along, hm, pc.along, hm - 1];
-      case 'W': return [0, pc.along, 1, pc.along];
-      default: return [wm, pc.along, wm - 1, pc.along];
+      case 'N': return [pc.along, wb.y0, pc.along, wb.y0 + 1];
+      case 'S': return [pc.along, wb.y1, pc.along, wb.y1 - 1];
+      case 'W': return [wb.x0, pc.along, wb.x0 + 1, pc.along];
+      default: return [wb.x1, pc.along, wb.x1 - 1, pc.along];
     }
   }
   function drawFG(q) {

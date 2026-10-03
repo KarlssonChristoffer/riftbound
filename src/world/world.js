@@ -1,6 +1,7 @@
 // WORLD: the Proving Grounds rebuilt as a 3D scene for the HD-2D test, from the arena's own data.
 //   ground   the biome's painter, run TOP-DOWN (the same code with PPMY = PPM and PPMH = 0), on a height grid: the stream
-//            bed sits lower, the south ravine drops away
+//            bed sits lower, the south ravine drops away. Painted over the Proving Grounds (layout GROUNDS); a bigger world's
+//            open land round them is a grid of tiles with a stand-in texture (the world plan: step 3 paints it)
 //   plateau  a real block: its painted top, rock-strata faces
 //   props    live 3D meshes (Blender prop kit -> glb, toned on the GPU with the pixelizer's ramps and rules) or, for the
 //            A/B test, the same props pre-rendered at 16 yaws (cards); trees are grown in the browser (trees3d.js: the
@@ -35,7 +36,7 @@
 //            G.setWater({speed}) (gfx.js) scales the water's clock: brief D drives it from rain.
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {WORLD, PLAY, TRAIL, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow} from './layout.js';
+import {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
@@ -461,10 +462,12 @@ const POOL_GROW = .25;   // the ground mesh (.25 m cells) is lowered this far (m
 export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null, trees3d = true}) {
   GT = G;
   // keep: the live prop list of the previous world (a biome switch): the items must point at the props gameplay uses
-  const {WM, HM} = WORLD, layout = buildLayout(7);
+  // WM x HM: the Proving Grounds' painted ground (GROUNDS, from 0, 0); the world round it (WORLD) can be bigger
+  const WM = GROUNDS.x1 - GROUNDS.x0, HM = GROUNDS.y1 - GROUNDS.y0, layout = buildLayout(7);
   if (keep) layout.props = keep;
   const props = layout.props;
-  Object.assign(ctxO, {WM, HM, WPX: Math.ceil(WM * ctxO.PPM), HPX: Math.ceil(HM * ctxO.PPMY), PLAY, layout});
+  // for features: WM HM WPX HPX = the painted ground (groundCanvas: GROUNDS); grounds / bounds = GROUNDS / WORLD {x0 y0 x1 y1} (read only)
+  Object.assign(ctxO, {WM, HM, WPX: Math.ceil(WM * ctxO.PPM), HPX: Math.ceil(HM * ctxO.PPMY), PLAY, layout, grounds: GROUNDS, bounds: WORLD});
   const disposers = [];
   const R = rampTexture(biome.id, biome.style);
   G.U.ramps.value = R.tex; G.U.cover.value.set(...R.cover); G.U.emitFam.value.set(...R.emitFam);
@@ -480,57 +483,85 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const gTex = texOf(gc, true), eTex = groundEmit ? texOf(groundEmit, true) : null;
   // the ground's pixels (the waterfall takes the stream's painted colour at the edge)
   const px = gq.getImageData(0, 0, WPX, HPX).data;
-  // the grid runs SKIRT m past the world on every side (edge texels stretched outward): the camera keeps the flat
-  // ground inside the world, but lowered ground (the south ravine) projects further down the screen than that
-  const S = .25, SKIRT = 6, NX = Math.round((WM + 2 * SKIRT) / S), NZ = Math.round((HM + 2 * SKIRT) / S), DROP = -3.5;
+  // the ground mesh, in PATCHES (each drawn and culled on its own): the Proving Grounds under their painted texture and, in a
+  // bigger world, the OPEN LAND round them in tiles of at most TILE m (a stand-in texture until the world plan's step 3 paints
+  // it). A patch side on the world's edge runs SKIRT m past it (edge texels stretched outward): the camera keeps the flat ground
+  // inside the world, but lowered ground (the south ravine) projects further down the screen than that. Y1: the world's south
+  // edge, which the ravine runs along
+  const S = .25, SKIRT = 6, DROP = -3.5, Y1 = WORLD.y1, TILE = 32, COARSE = 2;
   // the south edge, as the biome itself defines it: ruins and ember end in a RAVINE along their cliff line (the biome's
   // hole() is y > cliff(x) - .3 there, or near the stream); frost ends in a flat frozen lake and the rift in its flat void,
   // so they keep their ground. Inside the stream's band the line is interpolated from both banks (the waterfall)
   const RAVINE = new Set(['ruins', 'ember', 'desert']).has(biome.id);   // (desert: its red canyon)
   const nearStream = (x, y) => Math.abs(x - STREAM.cx(y)) - STREAM.w(y) / 2 < .7;
-  const rawCliff = x => { for (let y = HM - 7; y < HM + .5; y += .05) if (biome.hole?.(x, y) && !nearStream(x, y)) return y + .3; return Infinity; };
+  const rawCliff = x => { for (let y = Y1 - 7; y < Y1 + .5; y += .05) if (biome.hole?.(x, y) && !nearStream(x, y)) return y + .3; return Infinity; };
   const cliffCache = new Map();
   const cliffZ = x => {
     if (!RAVINE) return Infinity;
     const k = Math.round(x * 8); let c = cliffCache.get(k); if (c !== undefined) return c;
-    const ys = HM - 2.4, hw = STREAM.w(ys) / 2 + .7, sc = STREAM.cx(ys);
+    const ys = Y1 - 2.4, hw = STREAM.w(ys) / 2 + .7, sc = STREAM.cx(ys);
     if (Math.abs(x - sc) < hw) {   // the banks a little outside the band (the stream meanders: right on its edge it's still "near")
       let a = rawCliff(sc - hw - .4), b = rawCliff(sc + hw + .4);
-      if (!isFinite(a)) a = b; if (!isFinite(b)) b = a; if (!isFinite(a)) a = b = HM - 2.2;
+      if (!isFinite(a)) a = b; if (!isFinite(b)) b = a; if (!isFinite(a)) a = b = Y1 - 2.2;
       c = a + (b - a) * (x - (sc - hw)) / (2 * hw);
     } else c = rawCliff(x);
     cliffCache.set(k, c); return c;
   };
   const hAt = (x, z) => z >= cliffZ(x) ? DROP : inStream(x, z) || inPool(x, z, .01, POOL_GROW) ? WATER_H : 0;   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
-  // the grid follows the edge exactly: the last bank vertex of each column moves onto the edge line and the next one
-  // to just past it at the ravine's depth, so the wall is one smooth face (a plain 0.25 m grid made it a staircase)
-  const pos = [], uv = [];
-  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
-    const x = i * S - SKIRT; let z = j * S - SKIRT, h;
-    const cz = cliffZ(x);
-    if (z <= cz && z + S > cz) { z = cz - .001; h = inStream(x, z) ? WATER_H : 0; }   // the lip
-    else if (z > cz && z - S <= cz) { z = cz + .02; h = DROP; }                       // the foot
-    else h = hAt(x, z);
-    pos.push(x, h, z); uv.push(x / WM, z / HM);
+  // a patch's grid, s m cells, from (rx0, rz0) to (rx1, rz1). It follows the edge exactly: the last bank vertex of each column
+  // moves onto the edge line and the next one to just past it at the ravine's depth, so the wall is one smooth face (a plain
+  // 0.25 m grid made it a staircase). Neighbouring patches share their border vertices (one lattice, one edge line per column)
+  function gridGeo(rx0, rz0, rx1, rz1, s) {
+    const NX = Math.round((rx1 - rx0) / s), NZ = Math.round((rz1 - rz0) / s), pos = [], uv = [];
+    for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
+      const x = i * s + rx0; let z = j * s + rz0, h;
+      const cz = cliffZ(x);
+      if (z <= cz && z + s > cz) { z = cz - .001; h = inStream(x, z) ? WATER_H : 0; }   // the lip
+      else if (z > cz && z - s <= cz) { z = cz + .02; h = DROP; }                       // the foot
+      else h = hAt(x, z);
+      pos.push(x, h, z); uv.push(x / WM, z / HM);
+    }
+    const idx = [];
+    for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) { const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    return geo;
   }
-  const idx = [];
-  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) { const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
-  const gGeo = new THREE.BufferGeometry(); gGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); gGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  gGeo.setIndex(idx); gGeo.computeVertexNormals();
-  const world2 = new THREE.Vector2(WM, HM);
+  // the Proving Grounds' patch: their rect, + SKIRT on the sides that are the world's edge
+  const G0 = GROUNDS, hx0 = G0.x0 - (G0.x0 <= WORLD.x0 ? SKIRT : 0), hz0 = G0.y0 - (G0.y0 <= WORLD.y0 ? SKIRT : 0);
+  const hx1 = G0.x1 + (G0.x1 >= WORLD.x1 ? SKIRT : 0), hz1 = G0.y1 + (G0.y1 >= WORLD.y1 ? SKIRT : 0);
+  const gGeo = gridGeo(hx0, hz0, hx1, hz1, S);
+  const world2 = new THREE.Vector2(WM, HM), origin2 = new THREE.Vector2(G0.x0, G0.y0);
+  // the open land's tiles [x0, z0, x1, z1, cell]: the world + skirt outside the Proving Grounds' patch, cut on a TILE m lattice
+  // from the skirt's corner and at the patch's sides. Fine cells (S) where the ground can step: the ravine's band (rawCliff
+  // looks 7 m in from the south edge) and the stream's box; COARSE cells on flat land (they meet fine ones only where both are flat)
+  const openTiles = [];
+  {
+    const ax = WORLD.x0 - SKIRT, az = WORLD.y0 - SKIRT, bx = WORLD.x1 + SKIRT, bz = WORLD.y1 + SKIRT;
+    const cuts = (a, b, h0, h1) => { const v = new Set([a, b, h0, h1]); for (let t = a; t < b; t += TILE) v.add(t); return [...v].filter(t => t >= a && t <= b).sort((p, q) => p - q); };
+    const xs = cuts(ax, bx, hx0, hx1), zs = cuts(az, bz, hz0, hz1);
+    let wx0 = 1e9, wx1 = -1e9;
+    for (let y = STREAM.y0; y <= STREAM.y1; y += .25) { const c = STREAM.cx(y), w = STREAM.w(y) / 2; wx0 = Math.min(wx0, c - w); wx1 = Math.max(wx1, c + w); }
+    const wet = (x0, z0, x1, z1) => x1 > wx0 - 1 && x0 < wx1 + 1 && z1 > STREAM.y0 - 1 && z0 < STREAM.y1 + 1;
+    for (let j = 0; j + 1 < zs.length; j++) for (let i = 0; i + 1 < xs.length; i++) {
+      const x0 = xs[i], x1 = xs[i + 1], z0 = zs[j], z1 = zs[j + 1];
+      if (x0 >= hx0 && x1 <= hx1 && z0 >= hz0 && z1 <= hz1) continue;   // the Proving Grounds' patch
+      openTiles.push([x0, z0, x1, z1, z1 > Y1 - 8 || wet(x0, z0, x1, z1) ? S : COARSE]);
+    }
+  }
   // the south ravine's wall (any steep ground): rock strata with the biome's grass / ash / snow lip, and a WATERFALL where
   // the stream goes over the edge, in the stream's own painted colour (streaks, dark edges, foam at the foot). Indexed by
-  // world x (+ SKIRT) and depth below the bank: the ground shader maps it onto the steep cells (gfx.js SURF_FS)
-  const CL_H = 3.5, cliff = strataCanvas(WM + 2 * SKIRT, CL_H, PPM, PPMH, R.rock, R.cov, 11, R.rockB);
+  // world x (+ cliffOff) and depth below the bank: the ground shader maps it onto the steep cells (gfx.js SURF_FS)
+  const CL_H = 3.5, cliff = strataCanvas(WORLD.WM + 2 * SKIRT, CL_H, PPM, PPMH, R.rock, R.cov, 11, R.rockB), cliffOff = SKIRT - WORLD.x0;   // column 0 = the world's x0 - SKIRT
   {
     const q = cliff.getContext('2d', {willReadFrequently: true}), id = q.getImageData(0, 0, cliff.width, cliff.height), d = id.data, CH = cliff.height;
     // where the stream glows (ember lava: the ground's emit layer), its fall glows too: alpha 250 marks emissive texels.
     // A fall of WATER carries alpha FALL_ALPHA (252): SURF_FS streams its streaks down in stepped time and flickers the foam
     // at the foot, from the baked colour (dark edge columns and the lip stay as painted). Any face texture can use the marker
     const ge = groundEmit ? groundEmit.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, groundEmit.width, groundEmit.height).data : null;
-    const edgeZ = x => { for (let z = HM - 7; z < HM + SKIRT; z += .05) if (hAt(x, z) < -1) return z; return null; };
+    const edgeZ = x => { for (let z = Y1 - 7; z < Y1 + SKIRT; z += .05) if (hAt(x, z) < -1) return z; return null; };
     for (let cx = 0; cx < cliff.width; cx++) {
-      const x = cx / PPM - SKIRT, ze = edgeZ(x); if (ze === null) continue;
+      const x = cx / PPM - cliffOff, ze = edgeZ(x); if (ze === null) continue;
       const zs = ze - .35, off = Math.abs(x - STREAM.cx(zs)) - STREAM.w(zs) / 2;
       if (off > 0) continue;
       const at = z => (Math.min(HPX - 1, Math.max(0, Math.round(z * PPM))) * WPX + Math.min(WPX - 1, Math.max(0, Math.round(x * PPM)))) * 4;
@@ -559,7 +590,28 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
   const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
   if (lit) { lit.sim = G.litterSim(lit); disposers.push(lit.dispose); }   // (the living layer: render/litter.js, driven by features/litter.js)
-  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 0, cliff: cTex, cliffOff: SKIRT, water: wTex, litter: lit}, false); disposers.push(() => ground.dispose());
+  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, water: wTex, litter: lit}, false); disposers.push(() => ground.dispose());
+  // the open land: a stand-in texture until the world plan's step 3 paints the land itself. Plain ground in the biome's own colours:
+  // the 3 commonest texels of a 5 m square of the Proving Grounds' ground outside their walls (the north-west corner), speckled
+  // in proportion by a hash, OPEN_PATCH m a side, repeated
+  if (openTiles.length) {
+    const OPEN_PATCH = 8, n = Math.round(OPEN_PATCH * PPM), s0 = Math.round(.5 * PPM), s1 = Math.round(5.5 * PPM), count = new Map();
+    for (let y = s0; y < s1; y++) for (let x = s0; x < s1; x++) { const i = (y * WPX + x) * 4, k = px[i] << 16 | px[i + 1] << 8 | px[i + 2]; count.set(k, (count.get(k) || 0) + 1); }
+    const top = [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3), total = top.reduce((t, e) => t + e[1], 0);
+    const pc = document.createElement('canvas'); pc.width = pc.height = n;
+    const pq = pc.getContext('2d'), id = pq.createImageData(n, n), d = id.data;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      let r = hsh(x, y, 7) * total, k = 0; while (k < top.length - 1 && (r -= top[k][1]) >= 0) k++;
+      const c = top[k][0], i = (y * n + x) * 4; d[i] = c >> 16 & 255; d[i + 1] = c >> 8 & 255; d[i + 2] = c & 255; d[i + 3] = 255;
+    }
+    pq.putImageData(id, 0, 0);
+    const pTex = texOf(pc, true); pTex.wrapS = pTex.wrapT = THREE.RepeatWrapping; pTex.needsUpdate = true;
+    const size = new THREE.Vector2(OPEN_PATCH, OPEN_PATCH);
+    for (const [x0, z0, x1, z1, s] of openTiles) {
+      const m = G.surface(gridGeo(x0, z0, x1, z1, s), {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff}, false);
+      disposers.push(() => m.dispose());
+    }
+  }
 
   // ---- plateau: top (the painted top, planar) + 4 strata faces
   const FL = FALL_LOOK[biome.id];
@@ -798,4 +850,4 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
-export {WORLD, PLAY, TRAIL, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow};
+export {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow};
