@@ -150,22 +150,74 @@ def render_setup(W, H, ss):
     return sc.view_settings.view_transform
 
 
-def bones2d(arm, cam, px, W, H):
-    """Pose bone head/tail in sprite pixel coordinates (for the bone overlay on the review page)."""
+def bones2d(arm, cam, px, W, H, ky=1.0):
+    """Pose bone head/tail in sprite pixel coordinates (for the bone overlay on the review page). ky: the vertical
+    pixel scale of a render view (a pixel row covers px / ky m along the camera's up)."""
     M = cam.rotation_euler.to_matrix()
     right, up = M @ Vector((1, 0, 0)), M @ Vector((0, 1, 0))
-    to = lambda p: [round((p - cam.location).dot(right) / px + W / 2, 2), round(H / 2 - (p - cam.location).dot(up) / px, 2)]
+    to = lambda p: [round((p - cam.location).dot(right) / px + W / 2, 2), round(H / 2 - (p - cam.location).dot(up) * ky / px, 2)]
     return {pb.name: to(arm.matrix_world @ pb.head) + to(arm.matrix_world @ pb.tail) for pb in arm.pose.bones}
 
 
-def render_dirs(root, mats, out, cam=None, px=None, W=0, H=0):
+# A RENDER VIEW (optional, per pose): the model's render_view(pose) -> {'pitch': deg, 'lift': px} or None. That pose is
+# rendered through an ortho camera at that pitch whose pixel rows are scaled (pixel aspect) so heights keep the atlas
+# pitch's px per metre (cos(atlas pitch) / units_per_px): only the ground's foreshortening changes. At pitch
+# atan(sin 55 / cos 20) = 41.08 deg the image IS the game's oblique projection (src/main.js: PPMH = PPM cos 20, PPMY =
+# PPM sin 55), so a body lying on the ground covers the ground it lies on in the game. The normal pass stays in the
+# ATLAS camera's basis (the game converts normals with the 20 deg frame), the depth pass gets its own box (meta near /
+# far of that pose), `lift` moves the image up by whole px (the camera down: depth unchanged). Bones in meta follow the
+# view. Poses without a view render exactly as before.
+def view_setup(cam, base, view, W, H, pivot, px):
+    """Point the camera for a render view; returns (ky, near, far). base = (rotation, location, off, pitch, yaw)."""
+    p, y = math.radians(view['pitch']), math.radians(base[4])
+    ky = math.cos(math.radians(base[3])) / math.cos(p)
+    off = Vector((math.sin(y) * math.cos(p), -math.cos(y) * math.cos(p), math.sin(p)))
+    cam.rotation_euler = (-off).to_track_quat('-Z', 'Y').to_euler()
+    M = cam.rotation_euler.to_matrix()
+    right, up = M @ Vector((1, 0, 0)), M @ Vector((0, 1, 0))
+    cx, cy = pivot[0] + .5 - W / 2, H / 2 - (pivot[1] + .5) + view.get('lift', 0)
+    cam.location = -(right * cx * px + up * cy * px / ky) + off * 50
+    bpy.context.scene.render.pixel_aspect_x, bpy.context.scene.render.pixel_aspect_y = ky, 1
+    half = view.get('depth', 2.2)
+    return ky, 50 - half, 50 + half
+
+
+def view_reset(cam, base):
+    cam.rotation_euler, cam.location = base[0].copy(), base[1].copy()
+    bpy.context.scene.render.pixel_aspect_x = bpy.context.scene.render.pixel_aspect_y = 1
+
+
+def view_materials(mats, base, near, far):
+    """The pass materials for a render view: the normal in the atlas camera's basis (x right, y up, z toward the
+    viewer of the atlas camera, from the world normal: independent of the camera rendering it), the depth mapped onto
+    this view's box (the shared depth material's range, set per pose)."""
+    if 'nrm_atlas' not in mats:
+        M = base[0].to_matrix()
+        axes = (M @ Vector((1, 0, 0)), M @ Vector((0, 1, 0)), M @ Vector((0, 0, 1)))   # right, up, back (toward the viewer)
+
+        def nrm(nt, col):
+            geo = nt.nodes.new('ShaderNodeNewGeometry')
+            comb = nt.nodes.new('ShaderNodeCombineXYZ')
+            for i, a in enumerate(axes):
+                dp = nt.nodes.new('ShaderNodeVectorMath'); dp.operation = 'DOT_PRODUCT'; dp.inputs[1].default_value = tuple(a)
+                nt.links.new(geo.outputs['Normal'], dp.inputs[0]); nt.links.new(dp.outputs['Value'], comb.inputs[i])
+            ma = nt.nodes.new('ShaderNodeVectorMath'); ma.operation = 'MULTIPLY_ADD'
+            ma.inputs[1].default_value = (.5, .5, .5); ma.inputs[2].default_value = (.5, .5, .5)
+            nt.links.new(comb.outputs[0], ma.inputs[0]); nt.links.new(ma.outputs[0], col)
+        mats['nrm_atlas'] = _mat('PxNrmAtlas', nrm)
+    mr = next(n for n in mats['dep'].node_tree.nodes if n.type == 'MAP_RANGE')
+    mr.inputs['From Min'].default_value, mr.inputs['From Max'].default_value = near, far
+    return {'id': mats['id'], 'nrm': mats['nrm_atlas'], 'dep': mats['dep']}
+
+
+def render_dirs(root, mats, out, cam=None, px=None, W=0, H=0, ky=1.0):
     sc, vl = bpy.context.scene, bpy.context.view_layer
     bones = {}
     for k, d in enumerate(DIRS):
         root.rotation_euler = (0, 0, math.radians(yaw_of(k)))
         bpy.context.view_layer.update()
         if root.type == 'ARMATURE':
-            bones[d] = bones2d(root, cam, px, W, H)
+            bones[d] = bones2d(root, cam, px, W, H, ky)
         for tag, m in mats.items():
             vl.material_override = m
             sc.render.filepath = os.path.join(out, f'{d}_{tag}.png')
@@ -201,14 +253,24 @@ def run(model, out, W=48, H=64, ss=4, fig=58, pivot=None, yaw=45, pitch=20, pose
         meta['proportions'] = ns['PROP']
     if ns.get('PIXEL_FAMILIES'):
         meta['families'] = ns['PIXEL_FAMILIES']
+    base = (cam.rotation_euler.copy(), cam.location.copy(), off.copy(), pitch, yaw)
     for pz in poses or [None]:
         d = os.path.join(out, pz) if pz else out
         os.makedirs(d, exist_ok=True)
         if pz:
             ns['pose'](pz)
         sim = ns['sim_frame']() if 'sim_frame' in ns else None   # runtime cloth: pins + colliders at facing yaw 0
-        bones = render_dirs(root, mats, d, cam, px, W, H)
+        view = ns['render_view'](pz) if pz and 'render_view' in ns else None
+        if view:
+            ky, vnear, vfar = view_setup(cam, base, view, W, H, pivot, px)
+            bones = render_dirs(root, view_materials(mats, base, vnear, vfar), d, cam, px, W, H, ky)
+            view_materials(mats, base, near, far)          # (the shared depth material back to the atlas box)
+            view_reset(cam, base)
+        else:
+            bones = render_dirs(root, mats, d, cam, px, W, H)
         m = dict(meta, pose=pz, bones=bones) if bones else dict(meta)
+        if view:
+            m.update(near=vnear, far=vfar, view={'pitch': round(view['pitch'], 3), 'lift': view.get('lift', 0), 'ky': round(ky, 5)})
         if sim:
             m['sim'] = sim
         if pz and pz in ns.get('POSE_INFO', {}):
