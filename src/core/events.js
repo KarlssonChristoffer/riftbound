@@ -81,6 +81,19 @@ export const EVENTS = {
   'omen.begin':         ['features/omens.js',     'id (content/omens.js), stage (the run\'s stage index, -1 in the sandbox)', '(none yet)'],
   'omen.end':           ['features/omens.js',     'id', '(none yet)'],
   'omen.strike':        ['features/omens/storm.js', 'x, y, r (m: what it hurts), h (where the bolt ends: a rod\'s top), rod (what drew it: arrow | lead | a prop kind | \'\')', '(none yet)'],
+  // the equipment experiment (features/equip/sim.js; gadget = a content/gadgets.js id)
+  'equip.throw':        ['features/equip/sim.js', 'x, y, h (the hand), gadget (thrown: F let go)', 'audio'],
+  'equip.bounce':       ['features/equip/sim.js', 'x, y, gadget, speed (m/s: off the ground, a prop, a wall or a body)', 'equip (view), audio'],
+  'equip.land':         ['features/equip/sim.js', 'x, y, gadget (it comes to rest: a trap set, a scarecrow planted, dynamite stopped rolling)', 'equip (view), audio'],
+  'equip.shatter':      ['features/equip/sim.js', 'x, y, z, h (where it broke): the fire flask, a burning pool there', 'equip (view), audio'],
+  'equip.puff':         ['features/equip/sim.js', 'x, y, z, h, r: the smoke bomb pops, a cloud r m round', 'equip (view), audio'],
+  'equip.blast':        ['features/equip/sim.js', 'x, y, z, wet (under water): dynamite goes off (combat.explode follows at once)', 'equip (view)'],
+  'equip.fizzle':       ['features/equip/sim.js', 'x, y, gadget, sunk: it fell in the stream (the flask goes out, a trap sinks, dynamite sinks lit)', 'equip (view), audio'],
+  'equip.snap':         ['features/equip/sim.js', 'x, y, who (a bear trap shuts on an enemy)', 'equip (view), audio'],
+  'equip.hit':          ['features/equip/sim.js', 'x, y, gadget, who (an enemy whacks the scarecrow)', 'equip (view), audio'],
+  'equip.break':        ['features/equip/sim.js', 'x, y, gadget (a scarecrow falls apart; an unsprung trap rusts away)', 'equip (view), audio'],
+  'equip.latch':        ['features/equip/sim.js', 'x, y, h, who, prop (the grappling hook bites: an enemy, a prop, else the ground)', 'equip (view), audio'],
+  'equip.pick':         ['features/equip/sim.js', 'x, y, gadget, bought (you take a gadget: a pickup, or a stage cache for gold)', 'equip (view), audio'],
 };
 
 const warned = new Set();

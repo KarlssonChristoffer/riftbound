@@ -419,10 +419,9 @@ export function createCore(host) {
     dbg: {debris, coins, fx, rings, nums, lts, pending, brands, zones, traps, BS, brutes, hs},
     seed(n) { R.seed(n); },
     damage, breakProp, explode, part, puff,
-    // other systems' hooks: hitMod(fn, on) adds / drops a HIT MOD (above); root(b, sec): an outside effect roots a brute
-    // where it stands (features/omens.js: a lightning strike stuns), as a trap does
+    // other systems' hooks: hitMod(fn, on) adds / drops a HIT MOD (above); root(p, sec) (below): an outside effect roots a
+    // brute where it stands (features/omens.js: a lightning strike stuns; features/equip: the bear trap), as a trap does
     hitMod(fn, on = true) { const i = hitMods.indexOf(fn); if (on && i < 0) hitMods.push(fn); else if (!on && i >= 0) hitMods.splice(i, 1); },
-    root(b, sec) { const s = BS.get(b); if (!s || b.broken) return; s.root = Math.max(s.root, sec); s.hop = null; b.h = 0; b.air = false; b.rooted = true; },
 
     onArrowHit(a, p) {
       const k = .12 * (a.push ?? 1), dir = [a.vx * k, a.vy * k];   // (a bullet's push: it knocks bits like an arrow, not like 150 m/s)
@@ -489,6 +488,13 @@ export function createCore(host) {
       puff(b.x, b.y, 0, 14, .7);
       host.world.addItem(b);
       return b;
+    },
+    // hold one of the core's brutes where it stands for sec s (the equipment experiment's bear trap: features/equip/sim.js):
+    // a hop ends where it is, a hold it has already is never shortened. -> false if it isn't one of them, or down
+    root(p, sec) {
+      const s = BS.get(p); if (!s || p.broken) return false;
+      s.root = Math.max(s.root, sec); s.hop = null; p.h = 0; p.air = false; p.rooted = true; s.mode = 'aggro';
+      return true;
     },
     get enemies() { if (enemyAt !== enemyVer) { enemyList = brutes.filter(b => b.hunter && !b.broken); enemyAt = enemyVer; } return enemyList; },
     clearEnemies() { for (const b of brutes) if (b.hunter && !b.dead) { ents.hide(b); b.broken = true; dead.push(b); } enemyVer++; drop(); },

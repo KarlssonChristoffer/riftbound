@@ -852,10 +852,14 @@ export async function create(host) {
     LLIST.length = nLR; return LLIST;
   };
   F.onArrowHit = (a, p) => { if (a.fire && BURNS[p.kind]) ignite(p); };   // nothing returned: combat resolves the hit
-  // other systems' (features/omens.js): ignite(p) sets a prop alight as a fire arrow does (a lightning strike); fireNear(x, y,
-  // r): does a fire light x, y from within r m (a lit torch / brazier, the campfire and the lit beacon as flamePoints sees them,
-  // something burning, a fire arrow)? SIM state only: an eclipse's rule reads it
-  F.ignite = p => ignite(p);
+  // OTHER FEATURES' FIRE (the equipment experiment's fire flask and dynamite: features/equip; the omens' lightning: features/omens):
+  // ignite(p) sets a prop alight through this fire as a fire arrow does (it chars, spreads, burns through; only what burns: BURNS)
+  // -> true if it caught now; fireNear(x, y, r): does a fire light x, y from within r m (a lit torch / brazier, the campfire and the
+  // lit beacon as flamePoints sees them, something burning, a fire arrow)? SIM state only: an eclipse's rule reads it; flame(...)
+  // draws a flame of this fire's look for a frame (call it from F.frame, which must run before this feature's: order before
+  // ['lights']): key (any object: one per flame), kind torch | brazier | burn | camp | beacon, colour, (x, y, h) its bed, on (0..1),
+  // scale, height (firesim.js draw)
+  F.ignite = p => { const was = burning.has(p); ignite(p); return !was && burning.has(p); };
   F.fireNear = (x, y, r) => {
     for (const p of flames) if (!p.unlit && !p.gone && !p.broken && Math.hypot(p.x - x, p.y - y) < r) return true;
     if (F.on && (Math.hypot(camp.x - x, camp.y - y) < r + 1 || (!beacon.unlit && Math.hypot(beacon.x - x, beacon.y - y) < r + 2))) return true;
@@ -863,6 +867,7 @@ export async function create(host) {
     for (const a of host.arrows) if (a.fire && Math.hypot(a.x - x, a.y - y) < r) return true;
     return false;
   };
+  F.flame = (key, kind, col, x, y, h, on = 1, scale = 1, height = 1) => { fires.draw(key, kind, col, x, y, h, fo(on, scale, height)); };
   F.interact = p => {
     if (p === beacon && beacon.unlit) { light(beacon); return true; }
     if (p === camp && F.on) { tend(); return true; }
