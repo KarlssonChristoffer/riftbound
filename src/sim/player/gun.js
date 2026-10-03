@@ -460,6 +460,8 @@ export function createGun(PL, I) {
     emote(kind) { if (on() && kind === 'tip' && has('hat_tip.0')) { S.tipWant = true; return true; } return false; },   // Y
     cue(kind) { if (kind === 'kill' && S.out && has('gun_blow.0')) S.flourish = true; },   // a kill: smoke to blow off, when calm
     setCues(calm, duel) { S.calm = calm; S.duel = duel; },          // the gun feature, each step: nothing hunting nearby / an elite near
+    // the hands are wanted for something else (sim/player/lasso.js: the lasso): the gun goes back in the holster at once
+    stow() { if (!S.out && !S.act) return; interrupt(); if (P.state === 'draw' || P.state === 'pose') { P.state = 'idle'; P.t = 0; } },
     get reloading() { return S.act === 'reload'; },
     // (views) the gunslinger is blowing on the barrel: the clip's puff frames (an atlas without marks: its middle frames)
     get blowing() {

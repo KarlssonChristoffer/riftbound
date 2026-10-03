@@ -1,0 +1,266 @@
+// LASSO (the player's side): the cowboy's body while the equipment experiment's lasso is in his hands. The gadget itself
+// (the loop, what it catches, the anchors, the rope) is features/equip/lasso.js; this is his part, and like
+// sim/player/gun.js it runs inside player.js's step: while it has something to do it drives the frame, the facing, the
+// state and the motion the way player.js does (the player's code, in another file). SIM: fixed steps, no random draws.
+// THE MODES (S.mode; '' = nothing: player.js's own step runs):
+//   spin   F held: the loop spins overhead; standing he faces what he aims at (lasso_spin), moving he walks or runs at a
+//          share of his speed (the walk / run legs with the spinning arm: lws_ / lrs_)
+//   throw  the throw clip, planted, facing the throw; its `release` mark lets the loop go (event lasso.loose)
+//   haul   holding something on the rope: lasso_haul, facing it, walking slowly; the rope is a LEASH: he stays within its
+//          length of what he holds (a target that won't come holds him back; a champion that pulls drags him)
+//   yank   the yank clip, planted, facing what he pulls
+//   hang   on a rope from an anchor (P.state 'rope', in BUSY): a pendulum in the WORLD (gravity, the rope's length reeled
+//          in a little, the ground, the stream, walls, WASD pumps), lasso_hang_0..2 by the swing (legs forward / straight /
+//          back), facing the way he swings; letting go he flies on with its speed (player.js's fall / land / splash)
+// What ends a mode from his side: a roll or a dodge, a knock, a leap or a fall (the rope slips: lasso.drop), LMB (the gun:
+// he drops the rope and draws, sim/player/gun.js takes the press), a wall or the water in a swing (lasso.bump / letgo).
+// The camera may turn at any time: the swing lives in the world and P (the view frame) is written from it every step.
+// OWNS: S (the mode, its clock, the leash, the swing), and while it drives the frame P's frame / face / state / x / y / z /
+//   vx / vy (+ vz / fall0 when he lets go).
+// READS: the atlas (the poses: content/lasso.js POSES; the rope hands in the meta bones: HANDS), the keys, the cursor, the
+//   gun's pending press (PL.gun.S.want), H.yaw (world <-> view), the world helpers the gadget hands to hang() (elev, water,
+//   solid).
+// EMITS (player.js's queue: x / y in the view frame, turned into the world by the loop): lasso.loose (the throw lets go),
+//   lasso.drop {why} (he lost the rope), lasso.letgo {vx, vy, vz} (off the rope), lasso.bump (a wall stopped the swing).
+// BUDGET: part of player.step (sim group): a few multiplies a step; the swing 2 sub-steps with a wall test each.
+//   const L = createLasso(PL, internals); L.step(dt, mx, my) -> true while it drives; the API below (features/equip/lasso.js)
+import {TUNE, POSES, HANDS} from '../../content/lasso.js';
+import {clamp, hypot2, hypot3} from '../../core/mathx.js';
+
+export function createLasso(PL, I) {
+  const {P, A, H, has, ev, dirOf, turnToward, moveBy, puff, SPEED, BUSY, TURN_RATE, AIM_TURN_RATE} = I;
+  const {keys} = H, T = H.ctx, SW = TUNE.swing;
+  const S = {mode: '', t: 0, ph: 0, tx: 0, ty: 0, faceOn: false, loose: false, leashOn: false, lx: 0, ly: 0, len: 0, prevK: '',
+    // the swing (world): the anchor, the grip (where the rope meets his hands), its velocity, the rope's length now and
+    // the one it reels in to, time on the ground, the last facing way
+    ax: 0, ay: 0, ah: 0, gx: 0, gy: 0, gh: 0, vx: 0, vy: 0, vh: 0, L: 0, L0: 0, Lt: 0, ground: 0, air: false, fx: 0, fy: 1, W: null};
+
+  // ---- world <-> view at the camera's yaw (render/viewxf.js's maths, without allocating: these run every step) ----
+  let c = 1, s = 0;
+  const yaw = () => { const a = H.yaw ? H.yaw() : 0; c = Math.cos(a); s = Math.sin(a); };
+  const OV = [0, 0];
+  const toV = (x, y) => { OV[0] = x * c - y * s; OV[1] = x * s + y * c; return OV; };
+  const toW = (x, y) => { OV[0] = x * c + y * s; OV[1] = -x * s + y * c; return OV; };
+
+  // ---- the poses (content/lasso.js POSES): per atlas, the frame names in play order and when each step ends ----
+  let TL = null, TLsp = null;
+  function tls() {
+    if (TLsp === A.SP && TL) return TL;
+    TLsp = A.SP; TL = {};
+    for (const k of ['spin', 'throw', 'yank']) {
+      const Q = POSES[k], c0 = A.CLIP[Q.clip];
+      let names, ms = null, fps = Q.fps || 12, rel = Q.release ?? 0;
+      if (c0 && has(Q.clip + '.0')) {
+        const n = c0.play ? c0.play.length : c0.frames; names = [];
+        for (let i = 0; i < n; i++) names.push(Q.clip + '.' + (c0.play ? c0.play[i] : i));
+        ms = c0.ms || null; fps = c0.fps || fps; rel = c0.marks?.release ?? Math.floor(c0.frames / 2);
+        const at = c0.play ? c0.play.indexOf(rel) : rel; rel = at < 0 ? 0 : at;   // (the mark is a frame: the first step showing it)
+      } else { names = Q.fb.filter(has); if (!names.length) names = ['idle.0']; rel = Math.min(rel, names.length - 1); }
+      const ends = new Float64Array(names.length); let t = 0;
+      for (let i = 0; i < names.length; i++) { t += ms ? ms[i] / 1000 : 1 / fps; ends[i] = t; }
+      TL[k] = {names, ends, total: t, rel: rel > 0 ? ends[rel - 1] : 0, real: !!(c0 && has(Q.clip + '.0'))};
+    }
+    for (const k of ['haul', 'hang']) TL[k] = POSES[k].pose.map((n, i) => has(n) ? n : has(POSES[k].fb[i]) ? POSES[k].fb[i] : 'idle.0');
+    for (const k of ['walk', 'run']) { const C = A.CLIP[k], Q = POSES[k]; TL[k] = []; for (let f = 0; f < (C?.frames || 8); f++) TL[k].push(has(Q.pre + f) ? Q.pre + f : Q.fb + f); }
+    return TL;
+  }
+  const at = (L, t, loop) => { if (loop) t %= L.total; let i = 0; while (i < L.names.length - 1 && t >= L.ends[i]) i++; return L.names[i]; };
+
+  // ---- the rope hands: where the pose's grip is this frame, in the world (the meta bones: [hx, hy, tx, ty], the HEAD is the
+  //      grip; without the markers the higher hand's fist, the hand bone's tail) ----
+  const HB = {x: 0, y: 0};
+  function handPx(frame, face, upper) {
+    const b = A.SP[frame]?.bones?.[A.DIRS[face]], m = b && b[upper ? HANDS.upper : HANDS.grip];
+    if (m) { HB.x = m[0]; HB.y = m[1]; return HB; }
+    const r = b && b[HANDS.fb[0]], l = b && b[HANDS.fb[1]];
+    if (r || l) { const q = !l || (r && r[3] <= l[3]) ? r : l; HB.x = q[2]; HB.y = q[3]; return HB; }
+    HB.x = A.PIV[0]; HB.y = A.PIV[1] - 1.5 * T.PPMH; return HB;
+  }
+  // the hand at (pivot-relative) px -> world; out = [x, y, h]
+  function hand(upper, out) {
+    yaw(); const m = handPx(P.frame, P.face, upper), ox = (m.x - A.PIV[0]) / T.PPM, oz = (A.PIV[1] - m.y) / T.PPMH;
+    const w = toW(P.x + ox, P.y); out[0] = w[0]; out[1] = w[1]; out[2] = P.z + oz; return out;
+  }
+
+  // ---- helpers ----
+  function abort(why) {
+    const m = S.mode; S.mode = ''; S.leashOn = false;
+    if (m === 'hang' && P.state === 'rope') { P.state = 'idle'; P.t = 0; }
+    ev({type: 'lasso.drop', x: P.x, y: P.y, z: P.z, why});
+  }
+  function plant(dt) { const d = Math.exp(-dt * 18); P.vx *= d; P.vy *= d; moveBy(P.vx * dt, P.vy * dt); }
+  function faceTo(dt, rate) {   // toward S.tx, S.ty (world)
+    yaw(); const dx = S.tx - wx(), dy = S.ty - wy(); if (dx * dx + dy * dy < 1e-4) return;
+    const v = toV(dx, dy); P.want = dirOf(v[0], v[1]); if (rate) turnToward(P.want, dt, rate); else P.face = P.want;
+  }
+  const wx = () => P.x * c + P.y * s, wy = () => -P.x * s + P.y * c;   // (after yaw())
+  // walking with the rope: speed toward the input, a share of his own (the modifiers' SPEED), sliding along what blocks
+  function walk(dt, mx, my, share) {
+    const target = (keys.has('q') ? SPEED.walk : keys.has('shift') ? SPEED.sprint : SPEED.run) * share;
+    let sp = hypot2(P.vx, P.vy);
+    if (mx || my) { sp = sp < target ? Math.min(target, sp + 22 * dt) : Math.max(target, sp - 22 * dt); P.vx = mx * sp; P.vy = my * sp; }
+    else { const k = Math.max(0, sp - 26 * dt); if (sp > 1e-6) { P.vx *= k / sp; P.vy *= k / sp; } sp = k; }
+    return {d: moveBy(P.vx * dt, P.vy * dt), sp};
+  }
+  // the legs' phase by the distance walked: the walk / run frame and its foot puffs (as player.js gaitDistance)
+  function gait(d, sp, L) {
+    const run = sp >= 2.3 && A.CLIP.run, C = A.CLIP[run ? 'run' : 'walk'];
+    P.ph = (P.ph + d / C.stride) % 1;
+    const at2 = P.ph * C.stride; let f = 0; while (f < C.frames - 1 && at2 >= C.cum[f + 1]) f++;
+    const name = (run ? L.run : L.walk)[f], key = (run ? 'lr' : 'lw') + f;
+    if (key !== P.prevF) { const ci = C.contacts.indexOf(f); if (ci >= 0 && P.prevF !== -1) puff(C.contact_foot[ci], A.SP[name] ? name : (run ? 'run.' : 'walk.') + f, 0); P.prevF = key; }
+    return name;
+  }
+
+  // ---------------------------------------------------------------- the step
+  function step(dt, mx, my) {
+    if (!S.mode) return false;
+    if (S.mode === 'hang') { if (P.state !== 'rope') { S.mode = ''; ev({type: 'lasso.drop', x: P.x, y: P.y, z: P.z, why: P.state}); return false; } }
+    else if (BUSY.has(P.state) || P.state === 'roll' || P.state === 'backstep') { abort(P.state); return false; }
+    else if (PL.gun?.S.want) { abort('gun'); return false; }   // LMB: he lets the rope go and draws (gun.js takes the press)
+    const L = tls();
+    S.t += dt; yaw();
+    switch (S.mode) {
+      case 'spin': {
+        const {d, sp} = walk(dt, mx, my, TUNE.spin.walk);
+        if (mx || my) { P.want = dirOf(mx, my); turnToward(P.want, dt, TURN_RATE); }
+        else if (S.faceOn) faceTo(dt, AIM_TURN_RATE);
+        if (sp > .2 && d > 0) { P.state = 'move'; P.frame = gait(d, sp, L); }
+        else { P.state = 'idle'; P.frame = at(L.spin, S.t, true); P.prevF = -1; }
+        return true;
+      }
+      case 'throw': {
+        plant(dt); P.state = 'idle';
+        if (S.t <= dt * 1.5) faceTo(dt, 0); else faceTo(dt, AIM_TURN_RATE);
+        P.frame = at(L.throw, S.t, false);
+        if (!S.loose && S.t >= L.throw.rel) { S.loose = true; ev({type: 'lasso.loose', x: P.x, y: P.y, z: P.z}); }
+        if (S.t >= L.throw.total) { S.mode = ''; P.t = 0; }
+        return true;
+      }
+      case 'haul': {
+        const {d, sp} = walk(dt, mx, my, TUNE.hold.haul);
+        if (S.leashOn) leash();
+        faceTo(dt, AIM_TURN_RATE);
+        P.state = sp > .2 ? 'move' : 'idle';
+        if (sp > .2) S.ph = (S.ph + d / .5) % 1;   // a step every half metre: the two hold poses
+        P.frame = L.haul[sp > .2 ? (S.ph < .5 ? 0 : 1) : 0];
+        return true;
+      }
+      case 'yank': {
+        plant(dt); P.state = 'idle'; faceTo(dt, AIM_TURN_RATE);
+        P.frame = at(L.yank, S.t, false);
+        if (S.t >= L.yank.total) { S.mode = ''; P.t = 0; }
+        return true;
+      }
+      case 'hang': swing(dt, mx, my, L); return true;
+    }
+    return false;
+  }
+  // the rope holds him within its length of what he holds: back along it by what he's past (a wall may stop that)
+  function leash() {
+    const px = wx(), py = wy(), dx = px - S.lx, dy = py - S.ly, d = hypot2(dx, dy), over = d - S.len;
+    if (over <= 1e-4) return;
+    const k = Math.min(over, .5) / d, v = toV(-dx * k, -dy * k);
+    moveBy(v[0], v[1]);
+  }
+
+  // ---------------------------------------------------------------- the swing
+  const GP = [0, 0, 0];
+  function gripOff(frame) {   // the hang pose's upper grip: m right of the pivot (view), m above it
+    const m = handPx(frame, P.face, true); GO.x = (m.x - A.PIV[0]) / T.PPM; GO.z = (A.PIV[1] - m.y) / T.PPMH; return GO;
+  }
+  const GO = {x: 0, z: 0};
+  function swing(dt, mx, my, L) {
+    const W = S.W, n = 2, h = dt / n;
+    // the pose first (its grip says where his feet hang from the rope's end)
+    const ux = S.gx - S.ax, uy = S.gy - S.ay, sv = hypot2(S.vx, S.vy);
+    if (sv > .6) { S.fx = S.vx / sv; S.fy = S.vy / sv; }
+    const along = (ux * S.fx + uy * S.fy) / Math.max(.5, S.L);
+    const fr = !S.air ? L.haul[0] : L.hang[along > .3 ? 0 : along < -.3 ? 2 : 1];
+    { const v = toV(S.fx, S.fy); P.want = dirOf(v[0], v[1]); turnToward(P.want, dt, TURN_RATE); }
+    P.frame = fr;
+    const go = gripOff(fr);
+    // pumping: WASD (the camera's frame) in the world
+    const iw = toW(mx, my), ix = iw[0], iy = iw[1];
+    S.L = S.t < SW.reelT ? S.L0 + (S.Lt - S.L0) * (S.t / SW.reelT) : S.Lt;
+    for (let k = 0; k < n; k++) {
+      S.vh -= SW.g * h; S.vx += ix * SW.pump * h; S.vy += iy * SW.pump * h;
+      const dk = 1 - SW.damp * h; S.vx *= dk; S.vy *= dk; S.vh *= dk;
+      let nx = S.gx + S.vx * h, ny = S.gy + S.vy * h, nh = S.gh + S.vh * h;
+      // the rope: never longer than L (it only pulls): back onto the sphere, no speed outward
+      const dx = nx - S.ax, dy = ny - S.ay, dz = nh - S.ah, d = hypot3(dx, dy, dz);
+      if (d > S.L && d > 1e-6) {
+        const q = S.L / d; nx = S.ax + dx * q; ny = S.ay + dy * q; nh = S.ah + dz * q;
+        const ex = dx / d, ey = dy / d, ez = dz / d, vr = S.vx * ex + S.vy * ey + S.vh * ez;
+        if (vr > 0) { S.vx -= vr * ex; S.vy -= vr * ey; S.vh -= vr * ez; }
+      }
+      // the ground (and the water) under his feet
+      const feet = nh - go.z, gz = W.elev(nx, ny);
+      S.air = feet > gz + .12;
+      if (feet < gz + .02) {
+        if (gz <= 0 && W.water(nx, ny)) { S.gx = nx; S.gy = ny; S.gh = nh; place(go); letGo('water'); return; }   // he touches the creek: he falls in
+        nh = gz + go.z; if (S.vh < 0) S.vh = 0;
+        const fk = Math.exp(-h * 5); S.vx *= fk; S.vy *= fk;
+      }
+      // a wall, a trunk, a cliff face: bump and drop
+      if (W.solid(nx - S.fx * 0, ny, Math.max(gz, feet), feet + 1.6, .26)) {
+        S.vx *= -SW.bump; S.vy *= -SW.bump; S.vh = Math.min(S.vh, 0);
+        place(go); ev({type: 'lasso.bump', x: P.x, y: P.y, z: P.z}); letGo('bump'); return;
+      }
+      S.gx = nx; S.gy = ny; S.gh = nh;
+    }
+    S.ground = S.air ? 0 : S.ground + dt;
+    place(go);
+    if (S.t > SW.max) { letGo('time'); return; }
+    if (!S.air && S.ground > SW.rest && hypot2(S.vx, S.vy) < 1.5) { S.mode = ''; P.state = 'idle'; P.t = 0; P.vx = P.vy = 0; P.z = W.elev(wx(), wy()); ev({type: 'lasso.letgo', x: P.x, y: P.y, z: P.z, vx: 0, vy: 0, vz: 0, why: 'ground'}); }
+  }
+  // his feet from the grip (the pose's grip offset), into P (the view frame)
+  function place(go) {
+    const v = toV(S.gx, S.gy); P.x = v[0] - go.x; P.y = v[1]; P.z = S.gh - go.z;
+    const u = toV(S.vx, S.vy); P.vx = u[0]; P.vy = u[1];
+  }
+  function letGo(why) {
+    if (S.mode !== 'hang') return;
+    S.mode = ''; yaw();
+    const v = toV(S.vx, S.vy);
+    P.state = 'fall'; P.t = 0; P.vx = v[0]; P.vy = v[1]; P.vz = S.vh; P.fall0 = Math.max(P.z, S.W.elev(wx(), wy())); P.aimRoll = false;
+    ev({type: 'lasso.letgo', x: P.x, y: P.y, z: P.z, vx: P.vx, vy: P.vy, vz: S.vh, why});
+  }
+
+  // ---------------------------------------------------------------- the API (features/equip/lasso.js)
+  return {
+    S, step, hand, tls,
+    get mode() { return S.mode; },
+    // spin the loop overhead (on) / stop (off: only from spin)
+    spin(on) {
+      if (on) { if (S.mode === 'hang' || S.mode === 'haul') return false; PL.gun?.stow?.(); S.mode = 'spin'; S.t = 0; S.faceOn = false; P.prevF = -1; return true; }
+      if (S.mode === 'spin') { S.mode = ''; P.t = 0; } return true;
+    },
+    // face this world point while standing (the aim) / throw at it (the clip; lasso.loose at its release mark)
+    face(x, y) { S.tx = x; S.ty = y; S.faceOn = true; },
+    throwAt(x, y) { PL.gun?.stow?.(); S.mode = 'throw'; S.t = 0; S.tx = x; S.ty = y; S.loose = false; P.vx *= .5; P.vy *= .5; },
+    // hold something on the rope: face it, the leash (world: what he holds, the rope's length)
+    haul(on) { if (on) { S.mode = 'haul'; S.t = 0; S.ph = 0; S.leashOn = false; } else if (S.mode === 'haul') { S.mode = ''; S.leashOn = false; P.t = 0; } },
+    leash(x, y, len) { S.tx = x; S.ty = y; S.lx = x; S.ly = y; S.len = len; S.leashOn = true; },
+    yank(x, y) { if (x !== undefined) { S.tx = x; S.ty = y; } S.mode = 'yank'; S.t = 0; S.leashOn = false; },
+    // swing from the anchor (world ax, ay, ah); W: {elev(x, y), water(x, y), solid(x, y, h0, h1, r)} in the world; v0: his
+    // velocity (world) to start from. -> false when he can't (mid-air already, a dodge)
+    hang(ax, ay, ah, W) {
+      if (BUSY.has(P.state) || P.state === 'roll' || P.state === 'backstep') return false;
+      const L = tls(); yaw();
+      S.W = W; S.ax = ax; S.ay = ay; S.ah = ah; S.mode = 'hang'; S.t = 0; S.ground = 0; S.air = false;
+      const go = gripOff(L.hang[1]), px = wx(), py = wy(), r = toW(go.x, 0);
+      S.gx = px + r[0]; S.gy = py + r[1]; S.gh = P.z + go.z;
+      const vv = toW(P.vx, P.vy); S.vx = vv[0]; S.vy = vv[1]; S.vh = SW.up;
+      const sv = hypot2(S.vx, S.vy);
+      if (sv > .3) { S.fx = S.vx / sv; S.fy = S.vy / sv; } else { const dx = ax - px, dy = ay - py, l = hypot2(dx, dy) || 1; S.fx = dx / l; S.fy = dy / l; }
+      const d0 = hypot3(S.gx - ax, S.gy - ay, S.gh - ah), floor = ah - W.elev(ax, ay) - go.z - SW.clear;
+      S.L0 = S.L = d0; S.Lt = Math.max(SW.minLen, Math.min(d0 * (1 - SW.lift), floor >= SW.minLen ? floor : d0));
+      P.state = 'rope'; P.t = 0; P.aimRoll = false;
+      return true;
+    },
+    // off the rope: from a swing he flies on; from anything else he stands again
+    letGo() { if (S.mode === 'hang') letGo('key'); else if (S.mode) { S.mode = ''; S.leashOn = false; P.t = 0; } },
+    stop() { if (S.mode === 'hang') letGo('stop'); S.mode = ''; S.leashOn = false; },
+  };
+}
