@@ -15,6 +15,13 @@ const cache = {};
 // decoded, on the browser's decoder threads), while the oldest is cut
 let warmQueue = Promise.resolve();
 const DECODES = 3;
+// CROWDED: one atlas alone (the player's) fits Chrome's decoded-image cache, so its lazy cut is cheap and warming it would
+// only cost memory (~100-300 MB). Once more atlases come into play (crowd(): the desert's gunmen, ~9 sheets each) the
+// player's sheets get pushed out and its first-seen poses would decode whole sheets mid-fight: a set's warmLater() asks
+// for exactly that moment (now, if it has already come). One entry per slot ('player': a loadout switch replaces it)
+let crowded = false;
+const later = new Map();   // slot -> () => its warm
+export function crowd() { if (crowded) return; crowded = true; for (const f of later.values()) f(); later.clear(); }
 // a slice to cut in (ms): the idle time after a frame (up to 4 ms), or 2 ms within 20 ms whatever the page is doing (an
 // uncapped or busy page has no idle time). A cut is ~0.2 ms: a slice stays inside a 164 Hz frame's slack
 const idleSlice = () => new Promise(r => (window.requestIdleCallback || (f => setTimeout(() => f({didTimeout: true, timeRemaining: () => 0}), 16)))(
@@ -80,7 +87,9 @@ export async function loadAtlas(root, opts = {}) {
     for (const c of Object.values(idx.clips)) if (c.advance) { c.cum = [0]; c.advance.forEach((a, i) => c.cum.push(c.cum[i] + a)); }   // as loadSet
     const OV = await fetch(root + 'overlays.json').then(r => r.ok ? r.json() : {}).catch(() => ({}));
     const rig = opts.ClothRig && idx.sim ? new opts.ClothRig(idx) : {active: false, update() {}, draw() {}, reset() {}};
-    return {idx, SP, CLIP: idx.clips, OV, rig, packed: true, warm};
+    //   set.warmLater(names, layers, slot): warm(names, layers) once several atlases are in play (crowd(), above)
+    const warmLater = (names, want, slot = root) => { if (crowded) return warm(names, want); later.set(slot, () => warm(names, want)); };
+    return {idx, SP, CLIP: idx.clips, OV, rig, packed: true, warm, warmLater};
   })();
   return (cache[root] = p);
 }

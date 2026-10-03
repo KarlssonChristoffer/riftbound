@@ -48,7 +48,7 @@
 //   picks ~.035 ms, the sprites ~.04 ms; a pick scores <= 3 facings x 9 twists, or 2 stances x 5 legs x 7 twists walking,
 //   against barrel angles worked out once per pose); render: a sprite + a shadow draw per pose image on screen; a corpse's
 //   contact shadow: one G.ao stamp (made once per death frame and facing seen, a few KB in the stamp atlas).
-import {loadAtlas} from '../../render/atlas.js';
+import {loadAtlas, crowd} from '../../render/atlas.js';
 import {atlasOf} from '../../sim/player/player.js';
 import {TYPES, TUNE} from '../../content/foes.js';
 import {tracer} from '../gunfx.js';
@@ -154,6 +154,7 @@ export function createLook(host, sim) {
       const set = sets[k] = prep(s, root);
       const shown = Object.keys(s.SP).filter(n => SHOWN.test(n));
       s.warm?.(shown)?.then(() => warmTex(s, shown));   // (cut ahead of their first sight: render/atlas.js warm; then their textures)
+      crowd();   // (several atlases in play now: the player's poses are warmed too, render/atlas.js warmLater)
       for (const c of ['hit_f', 'hit_b']) {   // (the sim's flinch is TUNE's, never the art's: it should match the clip)
         const bt = set.ok(c) ? set.markT(c, 'back') : null, fl = TYPES[k].flinch;
         if (host.dev && bt !== null && fl > 0 && Math.abs(bt - fl) > .03) console.warn(`foes: ${k} ${c} 'back' is at ${bt.toFixed(2)} s, TYPES.${k}.flinch is ${fl} s`);
