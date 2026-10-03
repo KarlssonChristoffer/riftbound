@@ -4,10 +4,10 @@
 // Each has its row in the menu's Dev tab (ui/pause.js).  WRITES: opt, cv.snapMode, stage.propMode / trees3d (their setters).
 import {SAMPLING, DEBUG} from '../render/options.js';
 
-// sandbox / test keys (9: light sources, f: the flames' look, b: wind strength; 5-8, k: features' own; c: a gang of gunmen
-// now, in the desert sandbox: features/foes.js)
+// sandbox / test keys (9: light sources, f: the flames' look, b: wind strength; 5-8, k: features' own; 0: a gang of gunmen
+// now, Shift+0 one, in the desert sandbox: features/foes.js; not C, which is the player's crouch)
 // (P: the props' live 3D / 16-angle A/B, and Shift+P the trees: R reloads a gun loadout's revolver, features/gun.js)
-export const DEV_KEYS = new Set(['n', 't', 'g', 'o', 'p', 'v', 'j', 'i', 'h', 'k', '5', '6', '7', '8', '9', 'f', 'b', 'c']);
+export const DEV_KEYS = new Set(['n', 't', 'g', 'o', 'p', 'v', 'j', 'i', 'h', 'k', '5', '6', '7', '8', '9', 'f', 'b', '0']);
 
 // renderer A/B (Shift + 1..6): rotation steps, ground sampling, outlines, props live / 16-angle, bands, shadows -> handled?
 export function abKey(e, {cv, opt, stage}) {
@@ -34,5 +34,5 @@ export function devKey(k, e, {env, stage, opt, hero, setBiome, feat}) {
   else if (k === 'p') stage.propMode = stage.propMode === 'live' ? 'yaw' : 'live';
   if (k === 'g') { if (e.shiftKey) opt.zones = !opt.zones; else opt.debug = (opt.debug + 1) % DEBUG.length; }
   if (k === 'h') opt.help = !opt.help;
-  if (k === 'c') feat('foes')?.spawnGang(e.shiftKey ? 1 : 0);   // a gang of gunmen now (Shift: one), in the desert sandbox
+  if (e.code === 'Digit0') feat('foes')?.spawnGang(e.shiftKey ? 1 : 0);   // a gang of gunmen now (Shift: one), in the desert sandbox
 }

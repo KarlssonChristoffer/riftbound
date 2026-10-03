@@ -16,7 +16,7 @@
 // gun's kill cue), the aim's hover; their shots and reloads go out as events (gunfx's flash, smoke, tracers' ends, the
 // cases; the revolver recipe's sounds: src/audio/audio.js).
 // API: F.stakes (a fight is on: the game counts your hurts), F.respawn() -> {x, y} (the fort, after you fall),
-//   F.spawnGang(n?) (dev/devkeys.js C: a gang now), F.sim / F.look / F.TUNE / F.TYPES (tests), F.ms.
+//   F.spawnGang(n?) (dev/devkeys.js 0: a gang now), F.sim / F.look / F.TUNE / F.TYPES (tests), F.ms.
 // OWNS: through foes/sim.js and foes/look.js (see there).  READS: the game's mode (host.feature('game')), the biome, flags.
 // EMITS: foe.draw / aim / shoot / reload / holster, bullet.impact, player.hit, player.hurt (foes/sim.js).
 // BUDGET (measured 2026-10-03, headless Chrome, 6 gunmen fighting, a busy machine): sim ~.10-.13 ms a step (the legs'
