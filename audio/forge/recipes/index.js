@@ -41,7 +41,7 @@ export const RECIPES = [
   // phase 3
   'insects', 'prop_roll',
   // the western loadouts
-  'revolver',
+  'revolver', 'coachgun',
 ];
 export async function loadRecipes(ids = RECIPES) {
   const out = {};
