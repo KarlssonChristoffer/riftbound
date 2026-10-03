@@ -43,14 +43,16 @@ const SHAPES = {
   shield: ['aaaaaaa', 'abbbbba', 'abbbbba', 'abbbbba', '.abbba.', '..aba..', '...a...'],
 };
 const SPAL = {
-  cloud: {a: C('#2a2636'), b: C('#463f5c'), c: C('#6a5a94'), f: C('#e0d0ff')},
-  drop: {a: C('#4a0814'), b: C('#ff3a5a'), c: C('#b01a3a'), h: C('#ffd0d8')},
+  cloud: {a: C('#2a2636'), b: C('#504670'), c: C('#8a78c0'), f: C('#e0d0ff')},
+  drop: {a: C('#4a0814'), b: C('#d82a48'), c: C('#901430'), h: C('#ffb0c0')},
+  dropHi: {a: C('#6a0c1c'), b: C('#ff4a6a'), c: C('#c01e3e'), h: C('#ffe0e6')},   // on the beat
   blob: {a: C('#2a6a1a'), b: C('#7ae05a'), c: C('#e0ffc0')},
   shield: {a: C('#8a5a14'), b: C('#ffd870'), e: C('#3a2a10')},
 };
 const parse = rows => { const out = [], H = rows.length, W = rows[0].length; for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) if (rows[j][i] !== '.') out.push(i - (W >> 1), j - H + 1, rows[j][i]); return out; };
 const SH = Object.fromEntries(Object.entries(SHAPES).map(([k, v]) => [k, parse(v)]));
-const HEAD = 1.42;   // a brute's head top over its feet (m): the marks float just over it, under the HP bar
+const HEAD = 1.42;
+const CARD_T = 5;   // s a first-sighting card shows   // a brute's head top over its feet (m): the marks float just over it, under the HP bar
 
 export function createAffixLook(host, sim) {
   const R = viewRandom('affixes'), rr = (a, b) => a + R() * (b - a);
@@ -81,8 +83,19 @@ export function createAffixLook(host, sim) {
   const shown = new WeakMap();
   function memo(b, s) {
     let m = shown.get(b);
-    if (!m) shown.set(b, m = {hitN: s.hitN, breakN: s.breakN, healN: s.healN, castN: s.castN, chillN: s.chillN, snapN: s.snapN, hitT: 0, castT: 0, growT: 0, up: s.whp > 0});
+    if (!m) { sighted(s.id); shown.set(b, m = {hitN: s.hitN, breakN: s.breakN, healN: s.healN, castN: s.castN, chillN: s.chillN, snapN: s.snapN, hitT: 0, castT: 0, growT: 0, up: s.whp > 0}); }
     return m;
+  }
+
+  // ---------------------------------------------------------------- first sightings: a card the first time an affix shows
+  // up in a run (or a sandbox session): its name in its colour and what it does, top left, for a few seconds
+  const seenIds = new Set(), CARDS = [];
+  let seenRun = undefined;
+  function sighted(id) {
+    const g = gameF(), key = g?.mode === 'run' ? g.run : g?.mode;
+    if (key !== seenRun) { seenRun = key; seenIds.clear(); CARDS.length = 0; }
+    if (seenIds.has(id) || AFFIXES[id]?.child) return;
+    seenIds.add(id); CARDS.push({id, t: 0}); if (CARDS.length > 3) CARDS.shift();
   }
 
   // ---------------------------------------------------------------- floating text (HD), pooled
@@ -220,14 +233,14 @@ export function createAffixLook(host, sim) {
       case 'glacial':
         for (let k = 0; k < SPIKES.length; k += 2) {
           const dx = SPIKES[k], hgt = SPIKES[k + 1];
-          for (let j = 0; j < hgt; j++) px1(A, dx, -j, j === hgt - 1 ? PAL.glacial.ice[0] : j > hgt * .5 ? PAL.glacial.ice[1] : j > 0 ? PAL.glacial.ice[2] : PAL.glacial.ice[3], j === hgt - 1);
+          for (let j = 0; j < hgt; j++) px1(A, dx, -j, j === hgt - 1 ? PAL.glacial.ice[0] : j > hgt * .5 ? PAL.glacial.ice[1] : j > 0 ? PAL.glacial.ice[2] : PAL.glacial.ice[3], true);
         }
         if (Math.floor(t * 3) % 4 === 0) px1(A, Math.floor(t * 3) % 8 > 3 ? 1 : -1, -7, PAL.glacial.ice[0], true);   // a glint
         break;
       case 'overloaded': {
         A[2] = ah + .3 + Math.round(Math.sin(t * 2.3) * 1.5) * up;
         const fl = R() < .12 || m.castT > 0;
-        blit(A, SH.cloud, SPAL.cloud, false);
+        blit(A, SH.cloud, SPAL.cloud, true);   // (emissive: it reads at night too)
         if (fl) for (let k = 0; k < 5; k++) px1(A, Math.floor(rr(-5, 6)), Math.floor(rr(-5, -1)), SPAL.cloud.f, true);
         if (fl) { let dx = Math.floor(rr(-2, 3)); for (let j = 1; j <= 7; j++) { dx += R() < .4 ? (R() < .5 ? -1 : 1) : 0; px1(A, dx, j, PAL.overloaded.arc, true); } }
         A[2] = ah;
@@ -237,16 +250,16 @@ export function createAffixLook(host, sim) {
         // a blob that pulls apart into two and snaps back: mitosis
         const big = s.id === 'splitting', ph = (t * (big ? .8 : 1.6) + b.x * .13) % 1, sep = Math.round(Math.sin(ph * Math.PI) ** 2 * (big ? 4 : 1));
         const ax = A[0], ay = A[1];
-        A[0] = ax - (sep + 1) * rx; A[1] = ay - (sep + 1) * ry; blit(A, SH.blob, SPAL.blob, false);
-        A[0] = ax + (sep + 1) * rx; A[1] = ay + (sep + 1) * ry; blit(A, SH.blob, SPAL.blob, false);
-        if (sep <= 1) for (let j = -3; j <= -1; j++) px1(A, -(sep + 1), j, SPAL.blob.b, false);   // still joined: the bridge
+        A[0] = ax - (sep + 1) * rx; A[1] = ay - (sep + 1) * ry; blit(A, SH.blob, SPAL.blob, true);
+        A[0] = ax + (sep + 1) * rx; A[1] = ay + (sep + 1) * ry; blit(A, SH.blob, SPAL.blob, true);
+        if (sep <= 1) for (let j = -3; j <= -1; j++) px1(A, -(sep + 1), j, SPAL.blob.b, true);   // still joined: the bridge
         A[0] = ax; A[1] = ay;
         break;
       }
       case 'vampiric': {
         const beat = (t * 1.1) % 1;
         A[2] = ah + (beat < .1 || (beat > .22 && beat < .32) ? up : 0);
-        blit(A, SH.drop, SPAL.drop, beat < .32);
+        blit(A, SH.drop, beat < .32 ? SPAL.dropHi : SPAL.drop, true);
         A[2] = ah;
         break;
       }
@@ -324,6 +337,7 @@ export function createAffixLook(host, sim) {
       for (let i = 0; i < sim.bearers.length; i++) { const b = sim.bearers[i]; if (b.broken || b.gone) continue; const s = sim.stateOf(b); if (s) bearerFx(b, s, memo(b, s), dt); }
       if (H.slowK > 0 && R() < dt * 18 * H.slowK) part(P.x + rr(-.3, .3), P.y + rr(-.2, .2), P.z + rr(.2, 1.6), rr(-.2, .2), rr(-.2, .2), rr(-.3, .2), rr(.5, .9), PAL.glacial.snow, O_SNOW);
       for (const f of FL) if (f.on && (f.t += dt) > 1.1) f.on = false;
+      for (let i = CARDS.length - 1; i >= 0; i--) if ((CARDS[i].t += dt) > CARD_T) CARDS.splice(i, 1);
     },
     frame({t}) {
       basis();
@@ -372,6 +386,16 @@ export function createAffixLook(host, sim) {
         const k = f.t / 1.1, rise = (1 - (1 - k) ** 2) * 24 * u;
         q.globalAlpha = k > .7 ? 1 - (k - .7) / .3 : 1;
         text(q, f.s, SV[0] * sc, SV[1] * sc - rise, (f.big ? 15 : 12) * u, f.col);
+        q.globalAlpha = 1;
+      }
+      // the first-sighting cards (top left, under the run's banner line)
+      for (let i = 0; i < CARDS.length; i++) {
+        const c = CARDS[i], A = AFFIXES[c.id], a = clamp(Math.min(c.t / .3, (CARD_T - c.t) / .6), 0, 1), x = 22 * u, y = (110 + i * 46) * u;
+        q.font = `500 ${Math.round(10.5 * u)}px ${FONT}`; const w = q.measureText(A.desc).width + 22 * u;
+        q.globalAlpha = a; q.fillStyle = 'rgba(12,10,16,.72)'; q.fillRect(x - 10 * u, y - 18 * u, w, 40 * u);
+        q.fillStyle = A.col; q.fillRect(x - 10 * u, y - 18 * u, 3 * u, 40 * u);
+        q.textAlign = 'left'; q.font = `800 ${Math.round(14 * u)}px ${FONT}`; q.fillStyle = A.col; q.fillText(A.name, x, y - 1 * u);
+        q.font = `500 ${Math.round(10.5 * u)}px ${FONT}`; q.fillStyle = '#e8e2d2'; q.fillText(A.desc, x, y + 14 * u);
         q.globalAlpha = 1;
       }
       q.restore();

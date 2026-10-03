@@ -32,7 +32,7 @@ export const AFFIXES = {
     patch: {r: [.5, .62, .85], warn: .3, last: [2.6, 3.6, 4.6], dps: 8, tick: .5, gap: .7, near: 16},
     // the death burst: a ring that closes, then fire (dmg, knock), and patches left round it
     burst: {r: [1.6, 2.2, 3], warn: .8, dmg: [8, 14, 20], knock: 9, patches: [2, 4, 6]},
-    ignite: .9},   // wooden props (crates, barrels, dummies) within this of a new patch catch fire (features/lights.js)
+    ignite: 1},   // a wooden prop (crate, barrel, dummy) a new patch touches catches fire (its reach: the patch's radius x this; features/lights.js)
   glacial: {name: 'Glacial', col: '#9fe6ff', bar: '#7ccfff', desc: 'its blows chill you (slower); a frost nova when it dies',
     chill: {mul: [.7, .58, .5], dur: [1.6, 2.2, 2.8]},   // a hit's chill: your run speed x mul for dur s
     nova: {r: [2, 2.8, 3.6], warn: 1.25, dmg: [4, 8, 12], mul: .5, dur: 3, knock: 5}},

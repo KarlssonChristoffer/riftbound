@@ -17,19 +17,22 @@ Status: a playable prototype, **off by default**. Nothing changes unless it is t
   - Menu > **Game**: `Try: Blazing Elite` ... `Try: Vampiric Elite`, `Try: one of each` (spawns ~5 m from you)
   - Key **`.`**: the next affix's elite; **Shift + `.`** (`:` on a Nordic keyboard, `>` on a US one): its champion
   - The sandbox doesn't count hurts; while affixed enemies are about, the hurts you *would* have taken float up in red.
+- The first time an affix shows up in a run (or a sandbox session) a card at the top left gives its name, in its
+  colour, and what it does.
 
 ## The affixes
 
 | affix | colour | its mark | what it does | how you beat it |
 |---|---|---|---|---|
-| **Blazing** | orange | a crown of fire | every landing leaves a **burning patch** (an ember for 0.3 s, then fire for 2.6-4.6 s that hurts while you stand in it; wooden props beside it catch fire). Dying: a ring closes for 0.8 s, then it **bursts into flame** (damage + knock) and leaves patches round where it fell | keep moving off its trail; don't finish it next to you, or roll through the burst |
+| **Blazing** | orange | a crown of fire | every landing leaves a **burning patch** (an ember for 0.3 s, then fire for 2.6-4.6 s that hurts while you stand in it; a wooden prop it touches catches fire, and lights.js
+  spreads it). Dying: a ring closes for 0.8 s, then it **bursts into flame** (damage + knock) and leaves patches round where it fell | keep moving off its trail; don't finish it next to you, or roll through the burst |
 | **Glacial** | ice blue | ice spikes, rime under it | its blows **chill** you (run speed x0.58 for 2.2 s on an elite). Dying: a **frost nova** fills out from it for 1.25 s, then goes off (damage, knock, a 3 s chill) | don't trade blows; walk or roll out of the nova |
 | **Overloaded** | violet | a storm cloud over its head | every ~3.4 s while you're within 13 m it **calls lightning**: a strike on you and (elite) one where you're heading, (champion) one more round you. Each is a hatched violet zone with a ring closing in for 1.15 s, a leader flickers down, then the **bolt** (damage + knock). Dying: a last discharge round where it fell | step out of the zone or roll at the last moment; don't stop in your own path |
 | **Splitting** | green | a blob dividing in two | dying, it **splits** (0.35 s later) into 2 / 3 / 4 **Splitlings**: quicker, smaller hops, weaker, they don't split again | AoE: explosive arrow, arrow rain, the trap |
-| **Warded** | gold | a curved wall of gold light in front | a **ward** in front of it stops arrows and bullets ("blocked") until broken (60 on an elite), then grows back after 7 s. It turns after you at 32 deg/s: **you can outrun it by circling**. Falling arrows (rain), blasts and traps go round it; a **piercing shot** hits it 3x as hard and goes on through when it breaks it | flank it, blow it up, pierce it |
+| **Warded** | gold | a curved wall of gold light in front | a **ward** in front of it stops arrows and bullets ("blocked") until broken (60 on an elite), then grows back after 7 s. It turns after you at 32 deg/s: **you can outrun it by circling**. Falling arrows (rain), blasts and traps go round it; a **piercing shot** hits it 3x as hard and goes on through when it breaks it; revolver bullets break it in ~3 shots | flank it, blow it up, pierce it |
 | **Vampiric** | crimson | a beating blood drop | every ~5 s within 5.5 m it **reaches a beam** out to you (a dotted line crawling to you for 0.8 s: the telegraph), then **latches**: a pulsing beam drains you (6 dps on an elite) and heals it 3x that. Its blows heal it 2x their damage | break the beam: a **dodge roll**, get beyond 7 m, or put **cover** between (a wall, a crate, another body) |
 
-Every affixed enemy also gets: its name prefixed ("Overloaded Elite Brute"), the aura ring, light and nameplate in
+Every affixed enemy also gets: a mark over its head (emissive: it reads at night too), its name prefixed ("Overloaded Elite Brute"), the aura ring, light and nameplate in
 its colour (the game's own, which take `aura`), its HP bar and the champion's boss bar in its colour (`bar`), and 1.5x
 the coins (a regular brute with an affix: 1.7x health, 1.2x damage, 3-6 coins).
 

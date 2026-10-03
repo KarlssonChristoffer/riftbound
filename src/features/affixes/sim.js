@@ -210,7 +210,7 @@ export function createAffixSim(host, F) {
     if (h.style !== 'fire' && h.style !== 'blast') return;
     lights ??= host.feature('lights');
     if (!lights?.ignite) return;
-    const r = h.style === 'blast' ? h.r : AFFIXES.blazing.ignite;
+    const r = h.style === 'blast' ? h.r : h.r * AFFIXES.blazing.ignite;
     for (const p of ents.near(h.x, h.y, r, nearI)) if (!p.broken && !p.gone && !p.hunter && Math.abs((p.z || 0) - h.z) < .8 && hypot2(p.x - h.x, p.y - h.y) < r + (p.r || .3)) lights.ignite(p);
   };
 
