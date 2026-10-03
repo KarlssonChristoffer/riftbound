@@ -32,6 +32,7 @@ export function createCore(host) {
   const T = {
     crit: .15, critMul: 2,
     hsHit: .045, hsCrit: .06, hsBreak: .08, hsBoom: .1, hsCap: .12, hsWindow: .15,   // hitstop (s); chain cap
+    hsShot: .065, hsShotCrit: .085, hsShotKill: .11, shakeShot: 2,                     // a bullet's hit: heavier than an arrow's (a miss: none)
     msN: 5, msSpread: 40 * Math.PI / 180, msDmg: 12, msV: 24,                         // RMB multishot (60% of ~20)
     boomDmg: 10, boomR: 2, boomBlast: 30, boomV: 22,                                   // 1 explosive arrow
     rainR: 2.2, rainDelay: .6, rainN: 14, rainDur: .5, rainDmg: 12, rainSplash: 8, rainRange: 13,   // 2 arrow rain
@@ -160,9 +161,12 @@ export function createCore(host) {
     } else chunks(p.x, p.y, base + hgt * .6, 2, pal, {dir: o.dir, speed: 1.2, big: 0});   // dummies: a few straw bits
     if (p.sparring && !broke) { const s = BS.get(p); if (s && s.mode !== 'aggro') { s.mode = 'aggro'; s.wait = Math.min(s.wait, .3); } }
     if (!o.quiet) {
-      hitstop(broke ? T.hsBreak : crit ? T.hsCrit : T.hsHit);
-      shake(broke ? 2 : crit ? 2 : 1, broke ? .14 : crit ? .1 : .07);
+      if (o.by === 'bullet') { hitstop(broke ? T.hsShotKill : crit ? T.hsShotCrit : T.hsShot); shake(T.shakeShot + (broke || crit ? 1 : 0), broke ? .14 : crit ? .11 : .09); }
+      else { hitstop(broke ? T.hsBreak : crit ? T.hsCrit : T.hsHit); shake(broke ? 2 : crit ? 2 : 1, broke ? .14 : crit ? .1 : .07); }
     }
+    // a hit through the arrow chain (o.by: arrow | bullet | impact): where it met the body, its way, crit, kill (views:
+    // the hit marker, blood, the camera's kick)
+    if (o.by) events.push({type: 'combat.hit', x: o.hx ?? p.x, y: o.hy ?? p.y, h: o.hh ?? base + hgt * .6, dx: o.ux ?? 0, dy: o.uy ?? 0, who: p, dmg, crit, kill: broke, by: o.by});
     return broke;
   }
   function breakProp(p, o = {}) {
@@ -417,7 +421,8 @@ export function createCore(host) {
         if (!a.done) { a.done = true; explode(a.x, a.y, host.elev(a.x, a.y), a.explode.r, a.explode.dmg, false); }
         return 'stop';
       }
-      damage(p, (a.dmg ?? 10) * (a.penK ?? 1), {canCrit: true, dir});   // (penK: a bullet's share left after the bodies it went through)
+      const l = Math.hypot(a.vx, a.vy) || 1;   // (penK: a bullet's share left after the bodies it went through)
+      damage(p, (a.dmg ?? 10) * (a.penK ?? 1), {canCrit: true, dir, by: a.kind || 'arrow', hx: a.x, hy: a.y, hh: a.h, ux: a.vx / l, uy: a.vy / l});
       // a bullet goes through a body (a gunman, a brute) while its weapon's pen.through lasts (sim/projectiles.js does the
       // rest); walls, props and dummies stop it
       if (a.kind === 'bullet' && a.pen && (a.pn || 0) < a.pen.through && (p.hunter || p.sparring)) return 'pierce';

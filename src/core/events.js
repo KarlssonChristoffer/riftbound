@@ -21,7 +21,7 @@ export const EVENTS = {
   'player.roll':        ['(reserved: not emitted yet)', 'x, y', 'atmos (frost puff)'],
   // the revolver (sim/player/gun.js, a gun loadout); gun = the weapon's id (content/weapons.js: peacemaker | brass_navy)
   'player.draw':        ['sim/player/gun.js',     'x, y, z, gun, hip (the first shot leaves from the hip)', 'audio'],
-  'player.shoot':       ['sim/player/gun.js',     'x, y, h (the muzzle), z, vx, vy (unit: the way it flies), gun, fan, hip, left (rounds)', 'gunfx, audio, wildlife, music'],
+  'player.shoot':       ['sim/player/gun.js',     'x, y, h (the muzzle), z, vx, vy (unit: the way it flies), gun, fan, hip, left (rounds)', 'gunfx, flow (the camera kick), audio, wildlife, music'],
   'player.dryfire':     ['sim/player/gun.js',     'x, y, z, gun (the hammer falls on an empty chamber)', 'audio'],
   'player.reload':      ['sim/player/gun.js',     'x, y, z, gun, phase (start | eject | round | done), n (spent cases on eject, rounds in after)', 'gunfx (cases), audio'],
   'player.holster':     ['sim/player/gun.js',     'x, y, z, gun (the twirl ends in the holster)', 'audio'],
@@ -44,6 +44,7 @@ export const EVENTS = {
   'prop.respawn':       ['features/combat/props.js', 'x, y, prop: true (drifted / reset home)', 'audio, music (the same sound + stinger as a brute\'s)'],
   'brute.respawn':      ['features/combat/core.js', 'x, y (a sparring brute is back)', 'audio, music'],
   'enemy.kill':         ['features/combat/core.js', 'x, y, who (the enemy)', 'game, gun, battlemusic'],
+  'combat.hit':         ['features/combat/core.js', 'x, y, h (where the shot met the body), dx, dy (unit: its way), who, dmg, crit, kill (it broke / died), by (arrow | bullet | impact: what hit, through the arrow chain)', 'gunfx (the hit marker), flow (the camera kick), blood'],
   // the desert's gunmen (features/foes/sim.js); foe = their type (bandit | sheriff | bruiser), gun = the revolver recipe's
   // shot they sound like (peacemaker | navy: the coach gun)
   'foe.draw':           ['features/foes/sim.js',  'x, y, z, foe (out of the holster)', 'audio'],
