@@ -1929,6 +1929,302 @@ def render_view(name):
     return {'pitch': pitch, 'lift': lift}
 
 
+# ================================================================ LASSO (the cowboys' gadget, key F) ==================
+# The game draws the live rope and the loop (3D lines in the hemp palette); the sprite has the body and the COIL in the
+# left hand. Poses (the revolver stays holstered: none starts with GUN_POSES):
+#   lasso_spin.0-5 (clip, loop)   standing, weight back, right arm up, the hand circling beside / over the hat once
+#                                  (counter-clockwise seen from above: right -> left in front of him), coil at the hip
+#   lws_0-7 / lrs_0-7             walk / run frames (the legs of walk.i / run.i) under the spin's upper body
+#   lasso_throw.<i> (clip)        wind-up (hand high and back) -> release (the arm level along the facing, mark
+#                                  `release`) -> follow-through (low forward) -> recover (the coil hand comes up)
+#   lasso_haul_0-1                taut hold, leaning back, feet wide, right hand forward at chest height, left at the hip
+#   lasso_yank.<i> (clip)         the hard pull: further back, hands in to the chest and hip, a short step back
+#   lasso_take.0-1 (clip)         the rope goes taut after a throw: the throw's last frame into lasso_haul_0
+#   lasso_hang_in.0-3 (clip)      the grab before a swing (backward: letting go): the arm up to the grip, the hat sliding
+#                                  off onto his back; from mark `grip` on the fist is at the hang's grip height
+#   lasso_hang_0-2                hanging by the right fist (no coil), knees tucked forward / legs long / knees tucked
+#                                  back; every frame has the grip (RopeHand0) at the same height above the pivot
+#                                  (LASSO_HANG['grip'], printed when fitted)
+# Markers (bones, exported per pose and facing like GunMuzzle0): RopeHand0 = the right fist's grip point (the hanging
+# fist in the hang), RopeHand1 = the left fist's; the bone's HEAD is the point.
+PIXEL_FAMILIES['hemp'] = ['d5aa68', '9a743d', '624522', '2a1c10']   # -> c8a876 / 9a7c50 / 6a5234 after palette_harm
+LASSO_KEYS = set()   # pose keys with the coil shown in the left hand (else collapsed into the fist)
+LASSO_AT = {}        # pose key -> [(side, (x, y, z) m in his frame for a 1.8 m figure)]: wrist targets (IK, after REACH)
+LASSO_HANG = {}      # the hang's fit: per key the snapped grip height, and 'grip' (the common one, m above the pivot)
+LASSO_HAT = {}       # pose key -> deg the hat is tipped back on the head (its front brim up), about the back of its band,
+                     # or ('back', (x, y, z) m, deg): off the head onto its back (head-carried), the crown turned back
+COIL_TURN = 40       # deg: the coil's plane turned from his frontal plane toward his left side (it reads from most sides)
+
+
+def _marker(name, parent, head, tail):
+    """A lone bone (a marker or a hold bone) on a standard bone: the head is the point."""
+    arm = bpy.data.objects[ROOT]
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    b = arm.data.edit_bones.new(name)
+    b.head, b.tail, b.roll = head, tail, 0
+    b.parent = arm.data.edit_bones[parent]
+    bpy.ops.object.mode_set(mode='OBJECT')
+    return name
+
+
+def _tube_loop(bm, pts, r, m=4):
+    """A closed tube (a ring of rope) through pts."""
+    n, rings = len(pts), []
+    for k, c in enumerate(pts):
+        t = (pts[(k + 1) % n] - pts[k - 1]).normalized()
+        u = Vector((0, 0, 1)) - t * t.z if abs(t.z) < .9 else Vector((1, 0, 0)) - t * t.x
+        u.normalize()
+        v = t.cross(u)
+        rings.append([bm.verts.new(c + (u * math.cos(2 * math.pi * j / m + math.pi / m) +
+                                        v * math.sin(2 * math.pi * j / m + math.pi / m)) * r) for j in range(m)])
+    for k in range(n):
+        a, b = rings[k], rings[(k + 1) % n]
+        for j in range(m):
+            bm.faces.new((a[j], a[(j + 1) % m], b[(j + 1) % m], b[j]))
+
+
+@garment('lasso_coil', 'rope', ['human_small'], soft=['RopeCoil'], pixel={'RopeCoil': ['rope', 'hemp', {'thin': True}]})
+def _lasso_coil():
+    """The lariat's coils in the left fist: 5 turns ~25 cm across hanging from the grip, fanned a little so the turns
+    read; on its own bone (CoilHold0), hung plumb by _lasso_hold in the lasso poses and collapsed into the fist in all
+    others. Also the rope markers RopeHand0 / RopeHand1 (the fists' grip points)."""
+    P, s, J, z = _ctx()
+    gR, gL = _hand_frame('R')[0], _hand_frame('L')[0]
+    _marker('RopeHand0', 'RightHand', gR, J['handR'])
+    _marker('RopeHand1', 'LeftHand', gL, J['handL'])
+    hold = _marker('CoilHold0', 'LeftHand', gL, gL + Vector((0, 0, -.05 * s)))
+    bm = bmesh.new()
+    for k in range(5):
+        a, b = (.112 + .007 * k) * s, (.122 + .005 * k) * s        # half width, half height of turn k
+        fan = math.radians(-14 + 7 * k)                              # turned about the plumb line through the fist
+        dy = (-.012 + .006 * k) * s
+        pts = []
+        for i in range(20):
+            t = 2 * math.pi * i / 20
+            p = Vector((a * math.sin(t), dy, -b * (1 - math.cos(t)) - .01 * s))
+            pts.append(gL + Matrix.Rotation(fan, 3, 'Z') @ p)
+        _tube_loop(bm, pts, .0075 * s)
+    _bind('RopeCoil', bm, hold)
+
+
+def _lasso_reach(pose_name):
+    """HOLD hook (BEFORE the gun's: the holstered revolver rides a bone on the right hand, placed after the arms are
+    final): the lasso keys' wrist targets (LASSO_AT, IK)."""
+    for side, p in LASSO_AT.get(_key(pose_name), ()):
+        _reach(side, Vector(p) * PROP['height'] / 1.8)
+
+
+def _lasso_hold(pose_name, hat=True):
+    """HOLD hook (last): the hat (LASSO_HAT: tipped back, or off onto his back; hat=False for a blended in-between,
+    whose hat is the blend), then the coil. In a lasso key the coil hangs plumb from the left fist, its plane turned
+    COIL_TURN from the chest's frontal plane; otherwise it is collapsed into the fist."""
+    arm = bpy.data.objects[ROOT]
+    pbs, bones = arm.pose.bones, arm.data.bones
+    key = _key(pose_name)
+    if 'CoilHold0' not in pbs:
+        return
+    Mr = bones['CoilHold0'].matrix_local
+    hd = pbs['LeftHand']
+    fist = hd.head + (hd.tail - hd.head) * .5
+    hat = hat and LASSO_HAT.get(key)
+    if hat and 'HatHold0' in pbs:
+        J, k = landmarks(), PROP['height'] / 1.8
+        zb = J['head'].z + .69 * (J['top'].z - J['head'].z)          # the band's height (the brim's root)
+        hb = pbs['HatHold0']
+        if isinstance(hat, tuple):   # ('back', (x, y, z) m, tilt): off the head onto its back, its crown turned back `tilt`
+            M = (Matrix.Translation(Vector(hat[1]) * k) @ Matrix.Rotation(math.radians(-hat[2]), 4, 'X') @
+                 Matrix.Translation(-Vector((0, .012 * k, zb))))
+            hb.matrix = pbs['Head'].matrix @ bones['Head'].matrix_local.inverted() @ M @ bones['HatHold0'].matrix_local
+        else:                        # tipped back `hat` deg about the back of its band
+            piv = _carried('Head', Vector((0, .2 * k, zb)))
+            ax = (pbs['Head'].matrix.to_3x3() @ bones['Head'].matrix_local.to_3x3().inverted() @ Vector((1, 0, 0))).normalized()
+            hb.matrix = Matrix.Translation(piv) @ Matrix.Rotation(math.radians(-hat), 4, ax) @ Matrix.Translation(-piv) @ hb.matrix
+        bpy.context.view_layer.update()
+    if key in LASSO_KEYS:
+        f = pbs['Spine2'].matrix.to_3x3() @ bones['Spine2'].matrix_local.to_3x3().inverted() @ Vector((0, -1, 0))
+        yaw = math.atan2(f.x, -f.y)
+        R = Matrix.Rotation(yaw + math.radians(COIL_TURN), 3, 'Z')
+        pbs['CoilHold0'].matrix = Matrix.Translation(fist) @ (R @ Mr.to_3x3()).to_4x4()
+    else:
+        pbs['CoilHold0'].matrix = Matrix.Translation(fist) @ Mr.to_3x3().to_4x4() @ Matrix.Scale(.001, 4)
+    bpy.context.view_layer.update()
+
+
+def _spin_point(th, c=(-.36, -.12, 1.71), r=.12):
+    """REACH entry: the right wrist on the spin circle (centre c, radius r, m at 1.8 m) at angle th, carried by the chest
+    (th 0 = his left of the centre, 90 deg = behind it: counter-clockwise seen from above)."""
+    k = PROP['height'] / 1.8
+    return ('Right', 'Spine2', lambda: Vector((c[0] + r * math.cos(th), c[1] + r * math.sin(th), c[2])) * k)
+
+
+_SPIN_LEGS = {'LeftUpLeg': [('X', -9), ('Y', -5)], 'LeftLeg': [('X', 8)], 'LeftFoot': [('X', -3)],
+              'RightUpLeg': [('X', 8), ('Y', 6)], 'RightLeg': [('X', 14)], 'RightFoot': [('Z', 10)]}
+_COIL_ARM = {'LeftShoulder': [('Z', -4)], 'LeftArm': [('Y', 32)], 'LeftForeArm': [('X', -44)],
+             'LeftHand': [('Y', 6)]}                                   # the coil hand in front of the left hip
+_SPIN_ARM = {'RightShoulder': [('Y', 40)], 'RightArm': [('Y', 84), ('X', -8)], 'RightForeArm': [('Y', 60)]}
+_SPIN = {'Hips': [('Z', -10)], 'Spine': [('X', -3), ('Y', 6)], 'Spine1': [('X', -2), ('Y', 4)], 'Neck': [('Z', 6), ('X', 4), ('Y', -4)],
+         'Head': [('Z', 4), ('X', -5), ('Y', -3)], **_COIL_ARM, **_SPIN_ARM, **_SPIN_LEGS}
+for _i in range(6):
+    POSES[f'lasso_spin_{_i}'] = dict(_SPIN)
+    REACH[f'lasso_spin_{_i}'] = [_spin_point(math.radians(-90 + 60 * _i))]   # frame 0: the hand in front
+ANIMS['lasso_spin'] = _clip([f'lasso_spin_{i}' for i in range(6)], [0, 1, 2, 3, 4, 5], 12, loop=True)
+# on the move: the spin's upper body over the walk / run legs (the hand once round per gait cycle)
+_SPIN_UP = _upper({k: v for k, v in _SPIN.items() if k not in LEG_BONES}, -10)
+for _i in range(8):
+    for _g, _c in (('lws', 'walk'), ('lrs', 'run')):
+        POSES[f'{_g}_{_i}'] = _on_legs(_i, _SPIN_UP, _c)
+        REACH[f'{_g}_{_i}'] = [_spin_point(math.radians(-90 + 45 * _i))]
+# the throw: wind-up (the hand high and back over the right shoulder, the body loaded onto the back foot) -> the whip
+# over the top -> release (the arm level along the facing, the right shoulder through) -> follow-through (low forward,
+# the weight on the front foot) -> recover (upright, the coil hand comes up in front to take the rope)
+_THROW_LEGS = {'LeftUpLeg': [('X', -14), ('Y', -6)], 'LeftLeg': [('X', 10)], 'LeftFoot': [('X', -4)],
+               'RightUpLeg': [('X', 10), ('Y', 7)], 'RightLeg': [('X', 14)], 'RightFoot': [('Z', 10)]}
+POSES['lasso_throw_a'] = {'Hips': [('Z', -22)], 'Spine': [('X', -6), ('Y', 4)], 'Spine1': [('X', -4)], 'Neck': [('Z', 14), ('X', 6)],
+                          'Head': [('Z', 8)], **_COIL_ARM, 'LeftArm': [('Y', 26), ('X', -14)], 'LeftForeArm': [('X', -40)],
+                          'RightShoulder': [('Y', 34)], 'RightArm': [('Y', 84), ('X', 20)], 'RightForeArm': [('Y', 50)],
+                          **_THROW_LEGS, 'RightLeg': [('X', 20)]}
+POSES['lasso_throw_b'] = {'Hips': [('Z', 16)], 'Spine': [('X', 6)], 'Spine1': [('X', 4)], 'Neck': [('Z', -10), ('X', -6)],
+                          'Head': [('Z', -6), ('X', -2)], **_COIL_ARM,
+                          'RightShoulder': [('Z', -10)], 'RightArm': [('Y', -40), ('X', -80)], 'RightForeArm': [('X', -8)],
+                          **_THROW_LEGS, 'LeftLeg': [('X', 16)], 'RightUpLeg': [('X', 14), ('Y', 7)], 'RightLeg': [('X', 10)]}
+POSES['lasso_throw_c'] = {'Hips': [('Z', 24)], 'Spine': [('X', 12)], 'Spine1': [('X', 6)], 'Neck': [('Z', -14), ('X', -12)],
+                          'Head': [('Z', -8), ('X', -4)], **_COIL_ARM, 'LeftArm': [('Y', 30), ('X', 10)],
+                          'RightShoulder': [('Z', -12)], 'RightArm': [('Y', -36), ('X', -48)], 'RightForeArm': [('X', -10)],
+                          **_THROW_LEGS, 'LeftLeg': [('X', 22)], 'RightUpLeg': [('X', 18), ('Y', 7)], 'RightLeg': [('X', 16)],
+                          'RightFoot': [('X', 20), ('Z', 10)]}
+POSES['lasso_throw_d'] = {'Hips': [('Z', 10)], 'Spine': [('X', 4)], 'Neck': [('Z', -6)], 'Head': [('Z', -4)],
+                          'LeftShoulder': [('Z', -6)], 'LeftArm': [('Y', 30), ('X', -40), ('Z', -20)], 'LeftForeArm': [('X', -60)],
+                          'RightShoulder': [('Z', -4)], 'RightArm': [('Y', -36), ('X', -36)], 'RightForeArm': [('X', -24)],
+                          **_SPIN_LEGS}
+POSES['lasso_throw_w'] = {'Hips': [('Z', -4)], 'Spine': [('X', 0), ('Y', 2)], 'Spine1': [('X', 0)], 'Neck': [('Z', 2)],
+                          'Head': [('Z', 2)], **_COIL_ARM, 'LeftArm': [('Y', 28), ('X', -8)], 'LeftForeArm': [('X', -42)],
+                          'RightShoulder': [('Y', 30)], 'RightArm': [('Y', 84), ('X', -30)], 'RightForeArm': [('Y', 40)],
+                          **_THROW_LEGS}
+LASSO_AT.update({'lasso_throw_a': [('Right', (-.3, .2, 1.68))], 'lasso_throw_w': [('Right', (-.24, -.2, 1.64))],
+                 'lasso_throw_b': [('Right', (-.1, -.5, 1.2))],
+                 'lasso_throw_c': [('Right', (-.04, -.42, .9))],
+                 'lasso_throw_d': [('Right', (-.12, -.34, .96)), ('Left', (.1, -.3, 1.0))]})
+ANIMS['lasso_throw'] = _clip(['lasso_throw_a', 'lasso_throw_w', 'lasso_throw_b', 'lasso_throw_c', 'lasso_throw_d'],
+                             [0, .5, 1, 1.33, 1.67, 2, 2.5, 3, 3.33, 3.67, 4], 14,
+                             ms=[100, 45, 40, 35, 35, 60, 60, 70, 60, 60, 120], marks={'release': 5})
+# the taut hold: leaning back on a wide stance, the right hand forward at chest height and the left at the hip, the rope
+# running between them along the facing; frame 1 a small strain wobble. The yank: further back, hands in, a step back.
+_HAUL_LEGS = {'LeftUpLeg': [('X', 16), ('Y', -9)], 'LeftLeg': [('X', 32)], 'LeftFoot': [('X', -8)],
+              'RightUpLeg': [('X', -22), ('Y', 10)], 'RightLeg': [('X', 8)], 'RightFoot': [('X', 6), ('Z', 6)]}
+_HAUL = {'Hips': [('Z', 14), ('X', -8)], 'Spine': [('X', -10)], 'Spine1': [('X', -5)], 'Neck': [('Z', -8), ('X', 12)],
+         'Head': [('Z', -6), ('X', 4)], 'LeftShoulder': [('Z', 4)], 'LeftArm': [('Y', 34), ('X', 10)], 'LeftForeArm': [('X', -40)],
+         'RightShoulder': [('Z', -10)], 'RightArm': [('Y', -40), ('X', -60)], 'RightForeArm': [('X', -20)], **_HAUL_LEGS}
+POSES['lasso_haul_0'] = dict(_HAUL)
+POSES['lasso_haul_1'] = {**_HAUL, 'Spine': [('X', -12)], 'Spine1': [('X', -6)], 'Neck': [('Z', -8), ('X', 15)],
+                         'LeftLeg': [('X', 35)]}
+LASSO_AT.update({'lasso_haul_0': [('Right', (-.06, -.36, 1.0)), ('Left', (.2, .06, .8))],
+                 'lasso_haul_1': [('Right', (-.06, -.34, .99)), ('Left', (.2, .08, .8))]})
+POSES['lasso_yank_b'] = {**_HAUL, 'Hips': [('Z', 18), ('X', -13)], 'Spine': [('X', -17)], 'Spine1': [('X', -8)],
+                         'Neck': [('Z', -8), ('X', 22)], 'LeftUpLeg': [('X', 4), ('Y', -9)], 'LeftLeg': [('X', 70)], 'LeftFoot': [('X', 20)],
+                         'RightLeg': [('X', 14)]}
+POSES['lasso_yank_c'] = {**_HAUL, 'Hips': [('Z', 20), ('X', -16)], 'Spine': [('X', -22)], 'Spine1': [('X', -10)],
+                         'Neck': [('Z', -8), ('X', 28)], 'Head': [('Z', -6), ('X', 8)],
+                         'LeftUpLeg': [('X', 36), ('Y', -9)], 'LeftLeg': [('X', 30)], 'LeftFoot': [('X', -10)],
+                         'RightUpLeg': [('X', -14), ('Y', 9)], 'RightLeg': [('X', 16)]}
+LASSO_AT.update({'lasso_yank_b': [('Right', (-.08, -.24, 1.07)), ('Left', (.22, .14, .83))],
+                 'lasso_yank_c': [('Right', (-.1, -.15, 1.1)), ('Left', (.24, .22, .86))]})
+ANIMS['lasso_yank'] = _clip(['lasso_haul_0', 'lasso_yank_b', 'lasso_yank_c'], [.5, 1, 1.5, 2], 16, ms=[50, 60, 60, 140],
+                            marks={'pull': 1})
+# (extra) the rope goes taut after a throw: from the throw's recover into the hold, then lasso_haul_0
+ANIMS['lasso_take'] = _clip(['lasso_throw_d', 'lasso_haul_0'], [.35, .7], 14, ms=[60, 60])
+LASSO_KEYS.update(k for k in POSES if k.startswith(('lasso_spin_', 'lws_', 'lrs_', 'lasso_throw_', 'lasso_haul_', 'lasso_yank_')))
+# hanging from the rope (swinging, Indiana Jones on the whip): by the right fist, the arm straight up beside the head and
+# the fist the highest point; the body tilted so the fist is over his centre; the left arm out for balance; the hat slid
+# off onto the back of his head (on its cord); knees tucked forward (0), legs long (1), knees tucked back (2)
+_HANG = {'Hips': [('Y', 8)], 'Spine': [('X', 2)], 'Neck': [('X', -4), ('Y', -4)], 'Head': [('X', -6), ('Y', -2)],
+         'RightShoulder': [('Y', 45)], 'RightArm': [('Y', 128)],
+         'LeftShoulder': [('Z', -6)], 'LeftArm': [('Y', -60), ('X', -20)], 'LeftForeArm': [('Y', -25), ('X', -15)],
+         'LeftHand': [('Y', -10)]}
+_hlegs = lambda lu, ll, lf, ru, rl, rf: {'LeftUpLeg': [('X', lu)], 'LeftLeg': [('X', ll)], 'LeftFoot': [('X', lf)],
+                                          'RightUpLeg': [('X', ru)], 'RightLeg': [('X', rl)], 'RightFoot': [('X', rf)]}
+POSES['lasso_hang_0'] = {**_HANG, **_hlegs(-75, 95, 15, -60, 85, 15), 'Spine': [('X', 7)]}
+POSES['lasso_hang_1'] = {**_HANG, **_hlegs(-8, 18, 28, 4, 26, 28)}
+POSES['lasso_hang_2'] = {**_HANG, **_hlegs(20, 95, 25, 30, 85, 25), 'Hips': [('Y', 8), ('X', -6)], 'Spine': [('X', -8)]}
+_HANG_FIST = ('Right', (-.17, -.02, 1.82))
+_HAT_BACK = ('back', (0, .26, 1.38), 80)          # the band's centre behind the head (m, head-carried), crown turned back 80 deg
+for _i in range(3):
+    LASSO_AT[f'lasso_hang_{_i}'] = [_HANG_FIST]
+    LASSO_HAT[f'lasso_hang_{_i}'] = _HAT_BACK
+# the grab (lasso_hang_in, played forward into the swing and backward out of it): 0 a crouch, the right arm reaching up,
+# looking up, the hat tipped back; 1 halfway (the hat sliding back); 2 the fist closes at the hang's grip (mark `grip`),
+# up on his toes, the hat off the back of his head; 3 most of the way into lasso_hang_1 (the hat on his back, the feet
+# leaving the ground). From frame 2 on the grip is at the hang's height above the pivot (HANG_KEYS fit + a lift for the
+# in-between); frames 0-1 stand on the pivot.
+POSES['lasso_grab_0'] = {'Hips': [('Y', 3)], 'Spine': [('X', 6)], 'Neck': [('X', -10)], 'Head': [('X', -8)],
+                         'RightShoulder': [('Y', 30)], 'RightArm': [('Y', 110), ('X', -20)],
+                         'LeftShoulder': [('Z', -4)], 'LeftArm': [('Y', 0), ('X', -10)], 'LeftForeArm': [('X', -30)],
+                         **_hlegs(-26, 46, -20, -22, 42, -20)}
+POSES['lasso_grab_1'] = {**_HANG, 'LeftArm': [('Y', -36), ('X', -14)], 'LeftForeArm': [('Y', -15), ('X', -20)],
+                         **_hlegs(-4, 6, 30, 2, 10, 30)}
+LASSO_AT.update({'lasso_grab_0': [('Right', (-.24, -.14, 1.55))], 'lasso_grab_1': [_HANG_FIST]})
+LASSO_HAT.update({'lasso_grab_0': 25, 'lasso_grab_1': ('back', (0, .2, 1.55), 55)})
+ANIMS['lasso_hang_in'] = _clip(['lasso_grab_0', 'lasso_grab_1', 'lasso_hang_1'], [0, .5, 1, 1.6], 14, ms=[70, 60, 70, 80],
+                               marks={'grip': 2})   # from `grip` on: the fist closed, the grip at the hang's height
+HANG_KEYS = ['lasso_hang_0', 'lasso_hang_1', 'lasso_hang_2', 'lasso_grab_1']   # one grip height (RopeHand0) for these
+LASSO_LIST = ['lasso_spin', 'lasso_throw', 'lasso_yank', 'lasso_take', 'lasso_hang_in']   # the clips (poses: lws_, lrs_,
+                                                                                          # lasso_haul_, lasso_hang_)
+
+
+_pose_dead = globals().get('_pose_dead', pose)     # the death-fit pose() above
+
+
+def _grip_z():
+    arm = bpy.data.objects[ROOT]
+    return (arm.matrix_world @ arm.pose.bones['RopeHand0'].head).z
+
+
+def _hang_fit():
+    """The hang keys (HANG_KEYS): each posed with no lift, its grip (RopeHand0, the hanging fist) height after the ground
+    snap; then every one lifted (_air) so the grip sits at the highest of them (LASSO_HANG['grip'], m above the pivot)."""
+    for k in HANG_KEYS:
+        POSES[k]['_air'] = 0.0
+        _pose_dead(k)
+        LASSO_HANG[k] = _grip_z()
+    LASSO_HANG['grip'] = max(LASSO_HANG[k] for k in HANG_KEYS)
+    for k in HANG_KEYS:
+        POSES[k]['_air'] = LASSO_HANG['grip'] - LASSO_HANG[k]
+    print('LASSO_HANG grip (RopeHand0)', round(LASSO_HANG['grip'], 4), 'm above the pivot; snapped:',
+          {k: round(LASSO_HANG[k], 4) for k in HANG_KEYS})
+
+
+def _holster_now():
+    """The revolver back in its holster on the posed right thigh (as _gun_hold does outside the gun poses)."""
+    arm = bpy.data.objects[ROOT]
+    pbs, bones = arm.pose.bones, arm.data.bones
+    if 'GunHold0' not in pbs or 'g' not in HOLSTER or 'g' not in GUN:
+        return
+    T = pbs['RightUpLeg'].matrix @ bones['RightUpLeg'].matrix_local.inverted()
+    T3 = T.to_3x3()
+    R = _frame_rot(GUN['F'], GUN['U'], (T3 @ HOLSTER['F']).normalized(), (T3 @ HOLSTER['U']).normalized())
+    pbs['GunHold0'].matrix = Matrix.Translation(T @ HOLSTER['g']) @ (R @ bones['GunHold0'].matrix_local.to_3x3()).to_4x4()
+    bpy.context.view_layer.update()
+
+
+def pose(name):
+    """The death-fit pose(); a hang frame first fits the hang's common grip height. A lasso clip's in-between blends the
+    bones hand-relative, so the holstered revolver (on a right-hand bone) and the coil (on a left-hand one) are set again
+    after the blend: the gun in the holster, the coil plumb."""
+    if name.startswith(('lasso_hang', 'lasso_grab')) and 'grip' not in LASSO_HANG:
+        _hang_fit()
+    zmin = _pose_dead(name)
+    clip, _, i = name.partition('.')
+    if i and clip in LASSO_LIST:
+        _holster_now()
+        if 'CoilHold0' in bpy.data.objects[ROOT].pose.bones:
+            _lasso_hold(name, hat=False)
+        if clip == 'lasso_hang_in' and ANIMS[clip]['tween'][int(i)] >= 1:   # the fist closed: at the hang's grip height
+            arm = bpy.data.objects[ROOT]
+            arm.location.z += LASSO_HANG['grip'] - _grip_z()
+            bpy.context.view_layer.update()
+    return zmin
+
+
 _build_wardrobe = build
 
 
@@ -1942,4 +2238,7 @@ def build():
         HOLD_HOOKS.append(_gun_hold)
     if 'coach_gun' in LOADOUT and _long_gun_hold not in HOLD_HOOKS:
         HOLD_HOOKS.append(_long_gun_hold)
+    if 'lasso_coil' in LOADOUT and _lasso_hold not in HOLD_HOOKS:
+        HOLD_HOOKS.insert(HOLD_HOOKS.index(_gun_hold) if _gun_hold in HOLD_HOOKS else len(HOLD_HOOKS), _lasso_reach)
+        HOLD_HOOKS.append(_lasso_hold)
     return names

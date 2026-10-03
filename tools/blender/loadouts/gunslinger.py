@@ -11,4 +11,4 @@ exec(open(r'D:\Game\tools\blender\wardrobe.py', encoding='utf-8').read())
 exec(open(r'tools/blender/western.py', encoding='utf-8').read())
 SIM_CLOTH = os.environ.get('CLOTH_BAKED') != '1'
 LOADOUT = ['linen_shirt', 'wool_vest', 'dark_trousers', 'cowboy_boots', 'bandana', 'gun_belt', 'peacemaker', 'hair_mop',
-           'gunslinger_hat', 'duster']
+           'gunslinger_hat', 'duster', 'lasso_coil']
