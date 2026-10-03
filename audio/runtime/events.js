@@ -55,6 +55,8 @@ const IMPACT = {cat: 'combat', bus: 'sfx.impacts', priority: 60, maxInstances: 6
 const WORLD = {cat: 'world', bus: 'sfx.world', priority: 50, maxInstances: 4, steal: 'quietest', coalesceMs: 0, send: .18, pitchSemi: 1, gainJitDb: 1.5};
 const WILD = {cat: 'world', bus: 'sfx.world', priority: 15, maxInstances: 3, steal: 'oldest', coalesceMs: 0, send: .3, pitchSemi: 1, gainJitDb: 2, variants: 4, bakePriority: 6};
 const UI = {cat: 'ui', bus: 'ui', priority: 95, maxInstances: 2, steal: 'oldest', coalesceMs: 0, send: 0, pitchSemi: 0, gainJitDb: 0, variants: 2, bakePriority: 5};
+// the desert's gunmen: placed where they stand, combat's spatial rule (off screen a shot fades slowly: you hear it coming)
+const FOE = {cat: 'combat', bus: 'sfx.world', priority: 50, maxInstances: 3, steal: 'quietest', coalesceMs: 0, send: .15, pitchSemi: .8, gainJitDb: 1.5};
 
 export const EVENTS = {
   // ================================================ player movement ================================================
@@ -158,6 +160,23 @@ export const EVENTS = {
     banks: [['revolver', 'eject'], ['revolver', 'load'], ['revolver', 'spin'], ['revolver', 'cock']], variants: 4, bakePriority: 3,
   },
   gunHolster: {...PLAYER, priority: 45, gainDb: -10, cooldownMs: 150, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
+  // the desert's gunmen (src/features/foes: foe.shoot / aim / draw / reload / holster): the same recipe as yours, heard
+  // where they stand. o.gun 'peacemaker' (the revolvers) | 'navy' (the bruiser's coach gun: the deeper boom); foeCock is
+  // the hammer thumbed back as a gunman starts to aim: the shot's telegraph in sound
+  foeShot: {
+    ...FOE, priority: 80, maxInstances: 4, gainDb: -2, send: .16, cooldownMs: 25, pitchSemi: .6,
+    pick: o => L('revolver', o.gun === 'navy' ? 'navy' : 'peacemaker'), gainFrom: o => (o.gun === 'navy' ? 1.5 : 0),
+    banks: [['revolver', 'peacemaker'], ['revolver', 'navy']], variants: 5, bakePriority: 1,
+  },
+  foeCock: {...FOE, priority: 62, gainDb: -6, cooldownMs: 60, pick: () => L('revolver', 'cock'), banks: [['revolver', 'cock']], variants: 4, bakePriority: 2},
+  foeDraw: {...FOE, priority: 40, gainDb: -12, cooldownMs: 120, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
+  foeReload: {   // o.phase start | eject | round | done (the cylinder's spin; the coach gun snaps shut: a cock)
+    ...FOE, priority: 45, maxInstances: 3, gainDb: -10, cooldownMs: 40,
+    pick: o => L('revolver', {eject: 'eject', round: 'load', done: o.gun === 'navy' ? 'cock' : 'spin'}[o.phase] || 'cock'),
+    gainFrom: o => (o.phase === 'start' ? -4 : 0),
+    banks: [['revolver', 'eject'], ['revolver', 'load'], ['revolver', 'spin'], ['revolver', 'cock']], variants: 4, bakePriority: 3,
+  },
+  foeHolster: {...FOE, priority: 40, gainDb: -12, cooldownMs: 150, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
   // ================================================ impacts ================================================
   hit: {   // o.mat 'wood' | 'straw' | 'clay' | 'glass' | 'stone' | 'body' (the player); o.g from physics impacts (.45..1.4)
     ...IMPACT, gainDb: -3, cooldownMs: 25, cat: o => (o.mat === 'body' || o.mat === 'flesh' ? 'player' : 'combat'),
