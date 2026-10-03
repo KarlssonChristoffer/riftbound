@@ -18,7 +18,9 @@
 // ground sin 20); lying (pitch 41.08) k = 1: the game's own ground projection, as the death clips' lying frames.
 // API: const rig = createRigMesh(G, {slots}); rig.addModel(json, bin) -> model; per frame rig.put(model, slot, mats,
 //   params) for each body (mats: Float32Array segs x 12, rows of each segment's 3x4 world matrix; params: x, y, z (the
-//   squash anchor), k, alpha, flash, pitch (rad), sx, sy, sz (the snap anchor, world axes), snap (1: on)), then rig.render() (pass A now, B and S armed for this frame's G.render). rig.bytes.
+//   squash anchor), k, alpha, flash, pitch (rad), sx, sy, sz (the snap anchor, world axes), snap (1: on), type (the
+//   G-buffer pixel type pass B writes: 0 / absent = 7, the lit card; 4 = the character, as the player's card: view/livehero.js)),
+//   then rig.render() (pass A now, B and S armed for this frame's G.render). rig.bytes.
 // OWNS: its target, the transforms texture, the ramps texture, its meshes and materials.
 // READS: G (camera, view size, frame, extra).  EMITS: nothing.  BUDGET: render: per model 2 draws (A, S) + 1 (B) a frame while bodies show;
 //   CPU: the transforms texture upload (slots x 74 texels) when a body moved; no allocation per frame.
@@ -124,7 +126,8 @@ void main() {
   }
   vec4 b0 = texelFetch(uXf, ivec2(${PCOL}, slot), 0), b1 = texelFetch(uXf, ivec2(${PCOL + 1}, slot), 0);
   if (b0.w < .999 && b0.w <= bayer(p)) discard;   // alpha as an ordered dither (the sprites' fade)
-  o0 = vec4(texelFetch(uRamp, ivec2(tone, fam), 0).rgb, float(7 * 4) / 255.);
+  int ty = b1.w > .5 ? int(b1.w + .5) : 7;   // the body's pixel type (param 'type': 4 = the character; default 7, a lit card)
+  o0 = vec4(texelFetch(uRamp, ivec2(tone, fam), 0).rgb, float(ty * 4) / 255.);
   o1 = vec4(n, 9.);
   o2 = vec4(vec3(b1.x), 0.);
   gl_FragDepth = dep;
@@ -193,7 +196,7 @@ export function createRigMesh(G, {slots = 16} = {}) {
     for (let i = 0; i < 12; i++) { const f = Math.fround(P[KEYS[i]] ?? 0); if (xfData[q + i] !== f) { xfData[q + i] = f; dirty = true; } }
     M.iSlot.array[M.n++] = slot; used = true;
   }
-  const KEYS = ['x', 'z', 'k', 'alpha', 'flash', 'pitch', 'y', 'pad', 'sx', 'sy', 'sz', 'snap'];
+  const KEYS = ['x', 'z', 'k', 'alpha', 'flash', 'pitch', 'y', 'type', 'sx', 'sy', 'sz', 'snap'];
   const S20 = Math.sin(20 * Math.PI / 180), C20 = Math.cos(20 * Math.PI / 180);
   function render() {
     const fr = G.frame;

@@ -79,8 +79,9 @@ export function createLoop(E) {
     const PX = player.x, PY = player.y;
     cv.follow(lastDt, PX, PY, P, cam);   // the camera eases after him (render/camera.js)
     if (!views) return;   // (the camera follows without views too: it's the frame the cursor is read in, the sim's input)
-    // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js)
-    const sinkPx = hero.compose(PX, PY, perf);
+    // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js); or,
+    // with ?live=1 and the live hero on, his live 3D body (view/livehero.js)
+    const sinkPx = E.live?.on ? E.live.compose(PX, PY, perf) : hero.compose(PX, PY, perf);
     // props, hover pulse on the aimed target
     const hov = P.state === 'draw' ? pa.hoverTarget()?.target : null, hi = hov ? stage.world.itemOf(hov) : null;
     if (hovIt && hovIt !== hi) hovIt.hover = 0;   // (only the aimed item's pulse is ever on: no write per item per frame)

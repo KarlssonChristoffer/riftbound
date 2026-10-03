@@ -159,5 +159,8 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   }
   function lerpEnd() { if (!lerping) return; P.x = c0; P.y = c1; P.z = c2; lerping = false; }
   return {PL, P, player, blocked, syncPlateaus, turnFrame, toWorldEvent, hoverTarget, nearProp, climbSpotW, stepAssist, teleport, snap, lerpBegin, lerpEnd,
-    tick() { hoverKey++; }, get assist() { return A.assist; }, set assist(v) { A.assist = v; }};
+    tick() { hoverKey++; }, get assist() { return A.assist; }, set assist(v) { A.assist = v; },
+    // (views) the part of a facing step the camera has turned since P.face last moved with it (turnFrame's remainder):
+    // his facing in the world without the camera's 16-step rounding is (P.face + faceRest) x 360 / ND + yaw (view/livehero.js)
+    get faceRest() { return faceAcc; }};
 }

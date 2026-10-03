@@ -6,6 +6,7 @@
 #
 #   D:\Blender\blender.exe -b --factory-startup --python tools/blender/ragdoll_export.py -- \
 #       --model tools/blender/loadouts/bandit.py --out D:/Game/concepts/sprites/out/ragdoll/bandit [--poses a,b,...]
+#       [--atlas D:/Game/concepts/sprites/out/outfits/outlaw]   (every pose of that atlas, unless --poses, and its clips' timing)
 # (run from the repo root: a loadout execs tools/blender/western.py by a relative path)
 #
 # Writes <out>/model.json + <out>/model.bin:
@@ -20,7 +21,8 @@
 #               armature at the origin facing -Y)}}, joints {landmark: [x, y, z]} (skeleton.py landmarks at rest),
 #               poses {name: {bone: [qx, qy, qz, qw, tx, ty, tz]}} (each bone's WORLD matrix in that pose, posed by
 #               the model's own pose() exactly as pixel_rig.py renders it: ground snap, gun in the hand or the
-#               holster), meta (units_per_px, pivot, proportions, the source loadout)
+#               holster), meta (units_per_px, pivot, proportions, the source loadout), clips (with --atlas: the atlas's
+#               poses.json clips as the game plays them: frames, fps, loop, play, ms, marks, stride; the live hero, view/livehero.js)
 import bpy, json, math, os, struct, sys
 from mathutils import Matrix, Vector
 
@@ -50,7 +52,7 @@ def mat_rows(M):
     return [round(M[i][j], 6) for i in range(4) for j in range(4)]
 
 
-def run(model, out, poses):
+def run(model, out, poses, clips=None):
     os.makedirs(out, exist_ok=True)
     arm, ns = load_model(os.path.abspath(model))
     W = arm.matrix_world.copy()
@@ -163,7 +165,8 @@ def run(model, out, poses):
         out_poses[pz] = P
     meta = {'loadout': os.path.basename(model), 'proportions': ns.get('PROP'), 'units_per_px': .0327883818891779,
             'stride': 20, 'corners': len(blob) // 20}
-    json.dump({'meta': meta, 'segs': segs, 'parts': parts,
+    extra = {'clips': clips} if clips else {}
+    json.dump({'meta': meta, 'segs': segs, 'parts': parts, **extra,
                'families': [{'name': f, 'ramp': [list(c) for c in palette_harm.ramp(f, fams_src[f])]} for f in fams],
                'bones': bones, 'joints': joints, 'poses': out_poses}, open(os.path.join(out, 'model.json'), 'w'))
     print('RAGDOLL_OK', json.dumps({'segs': len(segs), 'parts': len(parts), 'families': fams, 'corners': len(blob) // 20,
@@ -173,5 +176,7 @@ def run(model, out, poses):
 if __name__ == '__main__':
     argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
     a = dict(zip(argv[::2], argv[1::2]))
+    atlas = json.load(open(os.path.join(a['--atlas'], 'poses.json'))) if '--atlas' in a else None
     run(a.get('--model', 'tools/blender/loadouts/bandit.py'), a.get('--out', r'D:\Game\concepts\sprites\out\ragdoll\bandit'),
-        a['--poses'].split(',') if '--poses' in a else POSES)
+        a['--poses'].split(',') if '--poses' in a else atlas['poses'] if atlas else POSES,
+        atlas['clips'] if atlas else None)

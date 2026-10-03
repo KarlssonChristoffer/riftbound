@@ -134,6 +134,11 @@ const hero = createHero({G, set, loadI, ctxO, app});
 const pa = createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: () => stage.world, ents: () => stage.ents, biome: () => stage.biome,
   opt: () => opt, proj, flags: Q, mods});
 const {PL, P, player} = pa;
+// ?live=1 (a prototype: docs/exp/livehero.md): the player drawn LIVE (view/livehero.js: his Blender model through
+// render/rigmesh.js) instead of his sprite, for the loadouts with a live model (the outlaw); the loop calls its compose
+// instead of hero.compose while it's on (dev/livekeys.js: Shift+7 flips it)
+const live = Q.get('live') === '1' ? await import('./view/livehero.js').then(m => m.createLiveHero({G, app, hero, pa, mouse, cam, ctxO}))
+  .catch(e => { console.warn('live hero: not loaded', e); return null; }) : null;
 
 const setYaw = cv.setYaw, setBiome = i => stage.setBiome(i);
 
@@ -182,7 +187,7 @@ const host = {
   // the Ranger as drawn this frame (sprite + runtime cloak + pixel bow, and its normals), for afterimages / reflections.
   // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame. Their
   // size is img.width / img.height; h is the player's height above the ground (metres), like every host h.
-  playerSprite: () => hero.sprite(),
+  playerSprite: () => live?.on ? live.sprite() : hero.sprite(),
 };
 
 // ---------------------------------------------------------------- features
@@ -204,7 +209,7 @@ const lighting = createLighting({G, host, features, opt});   // render/lighting.
 // ---------------------------------------------------------------- the engine
 // E: the engine's context for its own modules (core/input.js, ui/pause.js, core/loop.js): what boot made, by name.
 // Boot fills it once; the modules read it and never write it. (Features get `host`, above.)
-const E = {G, canvas, hdc, hq, cv, stage, env, hero, proj, pa, PL, P, player, keys, mouse, cam, events, features, host, game, perf, opt, flags: Q,
+const E = {G, canvas, hdc, hq, cv, stage, env, hero, live, proj, pa, PL, P, player, keys, mouse, cam, events, features, host, game, perf, opt, flags: Q,
   applyOpts, lighting, feat, setBiome, setYaw, dev, input: null, pause: null};
 E.input = createInput(E);   // the keyboard + mouse (before the menu: the order its listeners run in)
 const pause = E.pause = createPause(E);
@@ -218,5 +223,5 @@ console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} 
 window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout: i => hero.switchLoadout(i), TIMING, perf,
   get world() { return stage.world; }, get yaw() { return cv.yaw; }, set zoom(v) { cv.zoomTo(Math.round(cv.dsBase * v)); }, get zoomState() { return {scale: cv.scale, zoom: cv.zoom, dsBase: cv.dsBase, dsGoal: cv.dsGoal}; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { cv.snapMode = i; },
   set props(m) { stage.propMode = m; }, get rig() { return hero.rig; },
-  step: (n, dt) => loop.run(n, dt), applyOpts, hud: loop.hud, owncheck: ownReport};
+  step: (n, dt) => loop.run(n, dt), applyOpts, hud: loop.hud, owncheck: ownReport, live};
 loop.start();
