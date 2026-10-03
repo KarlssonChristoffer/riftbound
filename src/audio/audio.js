@@ -17,8 +17,8 @@
 //   AU.setVolume(k, 0..1) / AU.volumes      // k: master | music | sfx | amb (pause menu > Sound; remembered in localStorage)
 //   AU.setMusicMode(m) / AU.musicMode       // 'adaptive' (follows play) | 'explore' | 'combat' (fixed intensity, for previews)
 //   AU.toggleMusic() -> on                     // host maps key 'u': the adaptive score (music.js) on / off, remembered too
-//   AU.setGunSfx(s) / AU.gunSfx / AU.gunSfxList  // the gun sounds' western-movie flavor (events.js GUN_SFX: spaghetti | hollywood |
-//                                              //   gritty), remembered in localStorage; ?gunsfx= overrides it at load
+//   AU.setGunSfx(s) / AU.gunSfx / AU.gunSfxList  // the gun sounds' western-movie flavor (events.js GUN_SFX: hollywood | gritty),
+//                                              //   remembered in localStorage; ?gunsfx= overrides it at load
 //   ctx = {PPM, VW, layout, ...}               // only PPM / VW (panning by screen x) and layout.elev are read
 //
 // Events used: step {big 0|1} / land {big 2 sprint plant, 3 big drop} / jump / splash {small} (player.js, arena.html);
@@ -781,6 +781,7 @@ export function createAudio(ctx, host = {}) {
   const VOL = {master: 1, music: 1, sfx: 1, amb: 1}, MODES = {adaptive: null, explore: .3, combat: .85};
   let musicMode = 'adaptive';
   // the gun sounds' flavor (events.js GUN_SFX): ?gunsfx= at load, else the one picked in the menu before, else the default
+  // (a saved flavor that no longer exists, e.g. the old default 'spaghetti', falls back to the default)
   let gunsfx = GUN_SFX_DEF;
   try {
     muted = localStorage.getItem('pg.audio.muted') === '1'; musicOn = localStorage.getItem('pg.audio.music') !== '0';

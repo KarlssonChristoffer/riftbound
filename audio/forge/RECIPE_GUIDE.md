@@ -37,8 +37,10 @@ and what the user's first rating pass taught us (2026-10-01).
 3. **Think "warm game mix",** not "field recording through a bright mic". When in doubt, darker.
 
 ## The western-movie guns (2026-10-03): a deliberate exception
-The user on the dark v2 guns: "I don't like the sounds, we should try to make them sound more 'western movie'". The gun
-sounds (recipes revolver.js v3, coachgun.js v2, bullet.js v2: the `spaghetti_` / `hollywood_` / `gritty_` cases, picked by
+The user on the dark v2 guns: "I don't like the sounds, we should try to make them sound more 'western movie'". Three
+flavors went to the user; spaghetti (Leone: the spring-reverb "pew" in the report, canyon echo trains, ricochets on half
+the hits) was "by far worst" and is gone; hollywood (the default) and gritty both stay, switchable, until the user picks.
+The gun sounds (recipes revolver.js v4, coachgun.js v3, bullet.js v3: the `hollywood_` / `gritty_` cases, picked by
 audio/runtime/events.js GUN_SFX) are deliberately bright cues: a gunshot's crack, the cock's double click and the falling
 ricochet whine may reach 3-7 kHz, and their echoes and tails are long (baked in, not a convolver). Still binding for them:
 no hollow / boxy ringing (impacts die in a few periods; only metal "ptangs" ring, ~0.06-0.2 s, under ~4 kHz), no static
