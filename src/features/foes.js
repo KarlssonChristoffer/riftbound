@@ -41,8 +41,8 @@ export async function create(host) {
   const F = {
     name: 'foes', label: 'Desert gunmen', on: true, ms: 0, TUNE, TYPES, sim, look,
     update(dt, evs) { const t0 = now(); sim.update(dt, evs, active()); tU += now() - t0; },
-    view(dt, evs) { const t0 = now(); if (active()) look.load(); look.view(dt, evs); tU += now() - t0; },
-    frame(f) { const t0 = now(); look.frame(f); tF = now() - t0; },
+    view(dt, evs) { const t0 = now(), on = active(); if (on) look.load(); look.view(dt, evs, on); tU += now() - t0; },
+    frame(f) { const t0 = now(); look.frame(f, active()); tF = now() - t0; },
     hd(q, sc) {
       const t0 = now(); look.hd(q, sc);
       const ms = tU + tF + now() - t0; tU = 0; F.ms = F.ms * .95 + ms * .05; F.msLast = ms;

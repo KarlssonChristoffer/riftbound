@@ -17,7 +17,10 @@
 //               it aims ahead of)
 //       reload  s: up (the gate open), eject, round (each round / shell back in), close. Planted while it reloads: the
 //               window to punish
-//     stagger   s a hit before the lock pushes its shot back (0: an elite doesn't flinch)
+//     flinch    s a hit freezes him (gun up: ready, aiming, the kick): no step, his gun's timers held, a shot he was
+//               aiming comes that much later. It matches the hit clips' `back` mark (hit_f / hit_b: the frame from which
+//               he can act again; features/foes/look.js warns in dev when they differ). 0: he doesn't flinch (the elite;
+//               the view still shows the clip while he's between shots)
 //     coins     [lo, hi] dropped on death (combat core's coin burst); weight: how often it comes in a gang; max alive
 //     elite     the sheriff: tougher, steadier, a nameplate; the gunslinger's duel cue (features/gun.js) reads it
 //   TUNE    how gangs come and how they fight together (see each line)
@@ -27,19 +30,19 @@ export const TYPES = {
     gun: {sound: 'peacemaker', rounds: 6, draw: .32, aim: .62, lock: .2, recover: .22, gap: [.8, 1.5], holster: .42,
       bullet: {speed: 46, dmg: 10, spread: 4, pellets: 1, range: 24, lead: 0},
       reload: {up: .3, eject: .35, round: .3, close: .3}},
-    stagger: .25, coins: [2, 4], weight: 6, max: 6},
+    flinch: .2, coins: [2, 4], weight: 6, max: 6},
   sheriff: {name: 'Sheriff', atlas: 'sheriff', elite: true, hp: 110, r: .3, hitR: .4, hitH: 1.8, foot: 5,
     speed: {walk: 1.5, back: 1.2, run: 3.2}, range: [5, 9], keep: 6.8,
     gun: {sound: 'peacemaker', rounds: 6, draw: .22, aim: .46, lock: .14, recover: .18, gap: [.55, .95], holster: .36,
       bullet: {speed: 60, dmg: 14, spread: 1.6, pellets: 1, range: 30, lead: .5},
       reload: {up: .22, eject: .26, round: .22, close: .22}},
-    stagger: 0, coins: [7, 10], weight: 1, max: 1},
+    flinch: 0, coins: [7, 10], weight: 1, max: 1},
   bruiser: {name: 'Bruiser', atlas: 'bruiser', hp: 85, r: .33, hitR: .44, hitH: 1.8, foot: 6,
     speed: {walk: 1.4, back: 1.1, run: 3.0}, range: [2, 4.5], keep: 3.2,
     gun: {sound: 'navy', rounds: 2, draw: .4, aim: .62, lock: .22, recover: .4, gap: [.25, .4], holster: .48,
       bullet: {speed: 38, dmg: 5, spread: 16, pellets: 6, range: 12, lead: 0},
       reload: {up: .3, eject: .45, round: .65, close: .35}},
-    stagger: .15, coins: [3, 6], weight: 2, max: 2},
+    flinch: .18, coins: [3, 6], weight: 2, max: 2},
 };
 export const TUNE = {
   // gangs: the first one comes `first` s after you enter the desert sandbox, then one every `every` s while there is room
@@ -59,9 +62,18 @@ export const TUNE = {
     accel: 10,           // m/s^2
     muzzle: {fwd: .5, h: 1.22},   // the shot leaves this far ahead of the body (m) at this height
     chest: 1.1,          // m: where on you they aim
+    hitFront: 90,        // deg: a hit whose way comes from within this of his facing is from the front (hit_f / die_b)
+    hitGap: .12,         // s: hits closer than this after the last one start no new reaction (a fanned cylinder: one flinch)
   },
   // you, as their bullets see you: a round body this wide between these heights (the dodge roll's i-frames let them by)
   body: {r: .3, h0: .1, h1: 1.75},
   bullets: {max: 96, sub: .3},   // pool size; sub-step length (m) of the hit test (no tunnelling at any speed)
-  corpse: {fall: .24, land: .2, fade: [.7, 1.5], slide: 1.6, lift: .22},   // the view's death: s, s, s, m/s, m
+  // the view's deaths (features/foes/look.js). With the death clips (die_b: shot from the front, on his back; die_f: from
+  // behind, forward): the clip (its last frame the corpse, the gun beside him), a dust puff and a thud at its `ground`
+  // mark, then the body lies `hold` s and fades over `fade` s; at most `max` lie about (the oldest fades early, `early` s).
+  // travel: m the root moves as he falls (the corpse lies on the sprite's pivot, so the sprite stands that far along the
+  // fall from where he stood), when the clip doesn't carry its own (clip.travel). Without the clips (the fallback): thrown
+  // back in `fall` (s), `land` (s), then `crouch`, faded over old: [from, to] s, sliding `slide` m/s, lifted `lift` m
+  corpse: {hold: 9, fade: .8, max: 10, early: .5, travel: {die_b: .8, die_f: .7}, puff: {n: 14, r: .6},
+    fall: .24, land: .2, old: [.7, 1.5], slide: 1.6, lift: .22},
 };

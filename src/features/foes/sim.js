@@ -13,6 +13,9 @@
 // shots strafes round you at its range (backs off inside `near`, closes past `far`, spreads out from its mates). An
 // empty gun is RELOADED standing (eject, round by round, close): the window to punish. No shot at you for a while:
 // the gun goes back in the holster and it comes looking. At most TUNE.ai.maxAiming hold a gun on you at once.
+// HIT: a gunman who flinches (TYPES flinch: the bandit, the bruiser) freezes with his gun up for that long (no step,
+// his gun's timers held: a shot he was aiming comes later, so shooting first pays); every hit's way (front / back of
+// his facing) and age are kept for the view's hit_f / hit_b. His death is the view's (combat kills him).
 // BULLETS: a pool of fast segments tested in sub-steps against you (a round body; not while you dodge or flicker),
 // walls and solid props, 3D trees and the ground; the gang's own bodies let them by.
 // GANGS (the desert sandbox only: features/foes.js decides): every so often 2-4 come in from the edge of the walkable
@@ -167,7 +170,7 @@ export function createFoesSim(host) {
     const g = {p, T, type, mode: 'enter', act: 'holstered', at: 0, ammo: G.rounds, cool: 0, locked: false,
       face, aim: face, tx: P.x, ty: P.y, th: P.z + A.chest, vx: 0, vy: 0, speed: 0, gait: '', strafe: R() < .5 ? -1 : 1, strafeT: RR(A.strafe[0], A.strafe[1]),
       look: R() * A.perceive, d: hypot2(P.x - x, P.y - y), los: false, lost: 0, rph: '', rt: 0, rk: 0, rfirst: true, r0: 0,
-      stuck: 0, sideT: 0, way: false, wx: 0, wy: 0, wayT: 0};
+      stuck: 0, sideT: 0, way: false, wx: 0, wy: 0, wayT: 0, flinch: 0, hitAge: 99, hitFront: true};
     ents.add(p); gang.push(g); byP.set(p, g);
     return g;
   }
@@ -224,6 +227,7 @@ export function createFoesSim(host) {
   function gun(g, dt) {
     // can: a shot at you from here; lost: how long it has had no business with the gun out (no line, or far beyond its
     // range): it walks in with the gun up meanwhile, and holsters after A.lose s of it
+    if (g.flinch > 0) { g.flinch -= dt; return; }   // hit: his gun's timers wait (the hit clip plays)
     const T = g.T, G = T.gun, can = g.los && g.d <= T.range[1] + A.shootPast && !S.down;
     g.lost = g.los && g.d <= T.range[1] + A.drawPast + 1 && !S.down ? 0 : g.lost + dt;
     g.at += dt;
@@ -261,7 +265,7 @@ export function createFoesSim(host) {
   }
 
   // ---------------------------------------------------------------- legs
-  const planted = g => g.act === 'aim' || g.act === 'fire' || g.act === 'reload' || g.act === 'draw' || g.act === 'holster';
+  const planted = g => g.flinch > 0 || g.act === 'aim' || g.act === 'fire' || g.act === 'reload' || g.act === 'draw' || g.act === 'holster';
   function legs(g, dt, i) {
     const p = g.p, T = g.T, dx = P.x - p.x, dy = P.y - p.y, d = g.d || 1, ux = dx / d, uy = dy / d;
     let mx = 0, my = 0, speed = 0, gait = '';
@@ -365,9 +369,14 @@ export function createFoesSim(host) {
     if (S.px === S.px) { S.playerVX = (px - S.px) / dt; S.playerVY = (py - S.py) / dt; if (hypot2(S.playerVX, S.playerVY) > 12) S.playerVX = S.playerVY = 0; }
     S.px = px; S.py = py;
     for (const e of evs) {
-      if (e.type === 'arrow.hit') {   // a hit before the lock pushes the shot back (an elite doesn't flinch)
+      if (e.type === 'arrow.hit') {   // you hit him
         const g = byP.get(e.prop); if (!g) continue;
-        if (g.act === 'aim' && !g.locked) g.at = Math.max(0, g.at - g.T.stagger);
+        // a reaction (the view's hit_f / hit_b): from the front when the shot came from within A.hitFront of his facing;
+        // with his gun up (not while drawing, reloading, holstering); a gunman who flinches (T.flinch) freezes that long
+        if (g.flinch <= 0 && g.hitAge >= A.hitGap && (g.act === 'ready' || g.act === 'aim' || g.act === 'fire')) {
+          g.hitAge = 0; g.hitFront = -(e.vx * Math.sin(g.face) + e.vy * Math.cos(g.face)) >= Math.cos(A.hitFront * DEG) * hypot2(e.vx, e.vy);
+          if (g.T.flinch > 0) g.flinch = g.T.flinch;
+        }
         if (g.act === 'holstered' && !S.down) { g.mode = 'fight'; g.los = true; }   // shot from out of sight: it turns on you
       } else if (e.type === 'player.down') { S.down = true; }
       else if (e.type === 'player.respawn') { removeAll(); S.down = false; S.clock = SP.first; }
@@ -393,6 +402,7 @@ export function createFoesSim(host) {
     // each gunman: look, the gun, the legs
     for (let i = 0; i < gang.length; i++) {
       const g = gang[i], p = g.p;
+      g.hitAge += dt;
       g.d = hypot2(P.x - p.x, P.y - p.y);
       if ((g.look -= dt) <= 0) {
         g.look += A.perceive;
