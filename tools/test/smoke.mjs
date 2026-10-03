@@ -1,7 +1,7 @@
 // SMOKE: the paths the golden tour doesn't take, run once each and checked for errors (exceptions, console errors /
 // warnings). Armour, HD bow, lantern, colliders, loadout switches, a biome switch, pause / resume, camera turning, a
-// window resize (ultrawide), wheel zoom, the title screen, a run. Pairs with tools/test/golden.mjs (which proves the
-// pixels didn't change): run both after a restructure.
+// window resize (ultrawide), wheel zoom, the title screen, a run, booting in a hidden window. Pairs with
+// tools/test/golden.mjs (which proves the pixels didn't change): run both after a restructure.
 //   node tools/test/smoke.mjs [--path src/] [--port 8142]
 import {spawn} from 'node:child_process';
 import {mkdtempSync} from 'node:fs';
@@ -66,6 +66,16 @@ await run('wheel zoom in + out', `document.querySelector('#screen').dispatchEven
   `document.querySelector('#screen').dispatchEvent(new WheelEvent('wheel', {deltaY: 100, bubbles: true, cancelable: true}));` + step(60));
 if (await load('')) { await sleep(1500); await run('title screen', step(60)); } else { fail++; console.log('FAIL title did not load'); }
 if (await load('mode=run')) { await sleep(1500); await run('a run (600 frames)', step(600)); } else { fail++; console.log('FAIL run did not load'); }
+// a window hidden or minimised while the page boots (0 x 0; 1 x 1 here, which made a 0 px view too): the view keeps a
+// usable size (no feature dropped at create, nothing view-sized empty); shown, it fits and draws
+await size(1, 1); const nh = logs.length;
+if (await load('mode=sandbox')) {
+  await sleep(1500);
+  if (logs.length > nh) { fail++; console.log('FAIL booting in a hidden window\n     ' + logs.slice(nh).join('\n     ')); }
+  const sane = 'const h = window.__r3d.host; if (!(h.VW > 0 && h.VH > 0) || !h.feature("depth")) throw new Error(`view ${h.VW} x ${h.VH}, depth ${!!h.feature("depth")}`);';
+  await run('booted in a hidden window (1 x 1)', sane + step(10));
+  await size(1920, 1080); await run('the window shown', 'window.dispatchEvent(new Event("resize"));' + step(20) + sane);
+} else { fail++; console.log('FAIL the hidden-window boot did not load'); }
 console.log(fail ? `\n${fail} FAILED` : '\nall smoke checks passed');
 ws.close();
 quit(fail ? 1 : 0);

@@ -6,6 +6,9 @@
 // sides instead of black bars. The window's own scale (base: the biggest that still fits 480 x 270, the design) is the
 // default zoom; the wheel moves `scale` (zoom levels, below). Capped at the world's size (bars past that). A change
 // resizes the renderer (G.resize) and tells the features (F.resize?(VW, VH)); host.VW / VH and ctxO.VW / VH are current.
+// A HIDDEN window (a minimised browser, a collapsed pane: 0 x 0, or anything under MIN_WIN px) has no view to fit: the
+// view keeps its size (the design's 480 x 270 if the page boots hidden) until the window is back, so the view is never
+// 0 px (no view-sized canvas made empty) and the zoom isn't re-scaled to an empty window.
 // OWNS: cv = {VW, VH, scale, zoom, dsBase, dsGoal, yaw, snapMode}, the target, the shake.  READS: the window, opt.
 //   const cv = createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: () => opt, onTurn, flags})   (the view size, before the renderer)
 //   cv.attach({G, canvas, hdc, features}); cv.fit()                                             (once they exist)
@@ -22,12 +25,14 @@ export const ROT_SPEED = 110 * DEG;
 // centres the Ranger's chest (FOCUS_H), so he stays put on screen while the world scales around him
 export const ZOOM = {ease: 11, notch: 100, done: .004}, FOCUS_H = .9;
 const SMOOTH_IN = 12, SMOOTH_OUT = 3, TURN_HOLD = .12;   // ground sampling: smooth while turning (auto)
+const MIN_WIN = 16;   // px: a window smaller than this either way counts as hidden (the view keeps its size)
 
 export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, flags}) {
   const Q = flags;
   let G = null, canvas = null, hdc = null, features = [];
   const VIEW = {w: 480, h: 270, maxW: Math.min(1920, Math.floor(WORLD.WM * PPM / 2) * 2), maxH: Math.min(1080, Math.floor(WORLD.HM * PPMY / 2) * 2)};
   const even = v => Math.floor(v / 2) * 2;
+  const shown = () => innerWidth >= MIN_WIN && innerHeight >= MIN_WIN;   // (else hidden: see the header)
   const baseScale = () => Math.max(1, Math.floor(Math.min(innerWidth / VIEW.w, innerHeight / VIEW.h)));
   const viewAt = s => [Math.min(VIEW.maxW, even(innerWidth / s)), Math.min(VIEW.maxH, even(innerHeight / s))];
   // zoom levels: out to half the base scale (twice the world on screen), in to twice it. ?zoom=2 starts zoomed in
@@ -36,7 +41,7 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   // easing (stepZoom). host.zoom is this (view px per art px), so features size their pixels right while it eases
   const cv = {VW: 480, VH: 270, scale: 1, zoom: 1, dsBase: 1, dsGoal: 1, yaw: (+Q.get('yaw') || 0) * DEG, snapMode: +(Q.get('snap') ?? 0) || 0};
   cv.dsBase = baseScale(); cv.dsGoal = Q.get('zoom') === '2' ? cv.dsBase * 2 : cv.dsBase; cv.scale = cv.dsGoal;   // the window's scale, the wheel's goal, the view's scale now
-  [cv.VW, cv.VH] = viewAt(cv.scale);
+  [cv.VW, cv.VH] = shown() ? viewAt(cv.scale) : [Math.min(VIEW.maxW, VIEW.w), Math.min(VIEW.maxH, VIEW.h)];   // (booting hidden: the design's)
   ctxO.VW = cv.VW; ctxO.VH = cv.VH;
   cv.toView = (X, Z, a = cv.yaw) => viewOf(X, Z, a);
   cv.toWorld = (vx, vy, a = cv.yaw) => worldOf(vx, vy, a);   // (render/viewxf.js at this camera's yaw)
@@ -44,6 +49,7 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   cv.attach = o => { ({G, canvas, hdc, features} = o); };
 
   cv.fit = function fit() {   // the window changed, or a zoom arrived (stepZoom): the view at `scale`
+    if (!shown()) return;   // hidden: the view stays as it is; the window's resize event when it's back fits it
     const b = baseScale();
     if (b !== cv.dsBase) { const [lo, hi] = scaleRange(b); cv.dsGoal = Math.max(lo, Math.min(hi, Math.round(cv.dsGoal * b / cv.dsBase))); cv.dsBase = b; cv.scale = cv.dsGoal; cv.zoom = 1; }   // (the same zoom, relative)
     const [w, h] = viewAt(cv.scale);
