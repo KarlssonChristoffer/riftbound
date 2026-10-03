@@ -720,6 +720,7 @@ float vnC(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(hC(i), hC(i + vec2(1, 0)), f.x), mix(hC(i + vec2(0, 1)), hC(i + vec2(1, 1)), f.x), f.y); }
 uniform vec4 uFog;
 uniform vec3 uPlayer;   // the player's chest (receives sun shadow as one object: no self-shadow from its own card)
+uniform float uPlayerSun;   // how far toward the sun (m) his one shadow test looks: .5; the live hero (view/livehero.js) more, past his own 3D body
 // shiny armour: toward the viewer (the sprite camera, 20 deg pitch, turned with the yaw), the sun's glint colour / strength
 uniform vec3 uView, uSunC; uniform float uSunStr;
 // the water (SURF_FS marks it: type 1 + tone 1): its clock (s), (lanterns' reflections, sun sparkles) strength, (ground texels, view px) per metre
@@ -918,7 +919,7 @@ void main() {
   if (uShadowA > 0. && !faceAway) {
     if (type == 2 && dot(N, uSunDir) < .08) sh = 0.;   // prop faces turned away: their ramp tone already shades them
     else if (uShadowOn > .5) {
-      if (type == 4) sh = sunShadow(uPlayer + uSunDir * .5, vec3(0.), .0006) * .75;
+      if (type == 4) sh = sunShadow(uPlayer + uSunDir * uPlayerSun, vec3(0.), .0006) * .75;
       else if (type != 3 && type != 7) sh = sunShadow(P, N, N0.w < .5 ? .00004 : .0006);   // obj 0: the terrain (casts nothing)   // cards would shadow themselves through their own sun card
     }
   }
@@ -1718,7 +1719,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uShadowA: {value: 0}, uShadowOn: {value: 1}, uSunK: {value: .34}, uBanded: {value: 1}, uOutline: {value: 1}, uGradeK: {value: 0}, uEmin: {value: .1}, uShadowTexel: {value: 1 / SM},
     uSoftFam: {value: -1},
     uSeasonM: {value: new THREE.Matrix3()}, uSeasonK: {value: 0}, uSnow: {value: 0}, uWet: {value: 0}, uFlashC: {value: new THREE.Vector3()},   // features/weather.js
-    uFog: {value: new THREE.Vector4()}, uPlayer: {value: new THREE.Vector3()},
+    uFog: {value: new THREE.Vector4()}, uPlayer: {value: new THREE.Vector3()}, uPlayerSun: {value: .5},
     uView: {value: new THREE.Vector3(0, .342, .94)}, uSunC: {value: new THREE.Vector3(1, 1, 1)}, uSunStr: {value: 0},
     uWPhase: U.wPhase, uWRefl: {value: new THREE.Vector4()}, uWPx: {value: new THREE.Vector2(PPM, PPM)},
     uNL: {value: 0}, uLP: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uLC: {value: Array.from({length: NL}, () => new THREE.Vector4())},
@@ -1836,12 +1837,13 @@ void main() {
 }`;
   const heatU = {tD: fxU.tD, uR: fxU.uR, uPxM: fxU.uPxM}, heatScene = new THREE.Scene();
   const fxScene = new THREE.Scene(), FXMAX = 6000, fxB = {};
-  // EXTRA passes owned by other modules (render/flames.js, render/rigmesh.js): extra(mesh, 'gbuf' | 'fx' | 'shadow') puts a
-  // mesh in the G-buffer, the HD fx pass or the per-frame sun shadow (a caster that moves: layer 0); it shows only on a frame
+  // EXTRA passes owned by other modules (render/flames.js, render/rigmesh.js): extra(mesh, 'gbuf' | 'fx' | 'shadow' | 'xray') puts a
+  // mesh in the G-buffer, the HD fx pass, the per-frame sun shadow (a caster that moves: layer 0) or the player's x-ray mark
+  // (R where the scene hides him: the live hero, view/livehero.js); it shows only on a frame
   // its owner armed (mesh.userData.frame = G.frame before render()), so a system that didn't run this frame (its feature
   // off, paused out) leaves nothing behind
-  const gExtra = [], fxExtra = [], sExtra = [];
-  function extra(m, pass) { if (pass === 'fx') { fxScene.add(m); fxExtra.push(m); } else if (pass === 'shadow') { sScene.add(m); sExtra.push(m); } else { gScene.add(m); gExtra.push(m); } m.visible = false; }
+  const gExtra = [], fxExtra = [], sExtra = [], xExtra = [];
+  function extra(m, pass) { if (pass === 'fx') { fxScene.add(m); fxExtra.push(m); } else if (pass === 'shadow') { sScene.add(m); sExtra.push(m); } else if (pass === 'xray') { xScene.add(m); xExtra.push(m); } else { gScene.add(m); gExtra.push(m); } m.visible = false; }
   for (const [mode, blending] of [['add', THREE.AdditiveBlending], ['blend', THREE.NormalBlending]]) {
     const geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
     const P = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4), C = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4);
@@ -1997,6 +1999,7 @@ void main() {
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
     const calls = renderer.info.render.calls;
     lap('gbuf', calls);
+    for (const m of xExtra) m.visible = m.userData.frame === frameNo;
     renderer.setRenderTarget(xray); renderer.clear(true, false, false); renderer.render(xScene, camera);
     if (aoFrame !== frameNo) aoN = 0;
     compU.uAo.value.w = aoN ? compU.uAo.value.w : 0;
@@ -2091,7 +2094,8 @@ void main() {
     C.uRfW.value.set(o.S, o.ripple, o.gust, o.t); C.uRfV.value.set(o.oy, o.zoom, o.reach, o.puddleA || 0);
     C.uRfP.value.set(p ? p.x : 0, p ? p.y : 0, p ? p.rx : 0, p ? p.ry : 0);
   }
-  const setPlayer = (x, h, z) => { compU.uPlayer.value.set(x, h, z); };
+  // (sun: how far toward the sun his shadow test looks, .5 m; a live 3D body would shade its own test point: view/livehero.js)
+  const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; };
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
   // advances at, so changing it never makes the pattern jump
   const setWater = ({speed} = {}) => { if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0); };

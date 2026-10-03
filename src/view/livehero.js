@@ -32,7 +32,8 @@ import {flags} from '../core/flags.js';
 
 const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const C20 = Math.cos(20 * DEG), S55 = Math.sin(55 * DEG), K_UP = Math.tan(20 * DEG) * C20 / S55;   // the sprite camera's squash
-const AIM_H = 1.25, FADE = .08, STEP_HZ = 12, TURN = 1200 * DEG;   // aim height (m), clip cross-fade (s), procedural steps / s, eased facing (rad/s)
+const FADE = .08, STEP_HZ = 12, TURN = 1200 * DEG;   // clip cross-fade (s), procedural steps / s, eased facing (rad/s)
+const PLAYER_SUN = 1.6;   // m toward the sun of his chest where the composite tests whether he stands in shade (the sprite: .5)
 const SMEAR = {px: 3, k: .55, max: .3};   // a tip jump past px screen px: stretched back k of its move (at most max m)
 // the knobs' presets (dev/livekeys.js cycles them; the shimmer meter runs each)
 export const PRESETS = {
@@ -83,7 +84,7 @@ function fromTo(ax, ay, az, bx, by, bz, o) {   // the shortest rotation taking d
 const wrap = a => a - TAU * Math.round(a / TAU);
 
 export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = null, slots = 17}) {
-  const rig = createRigMesh(G, {slots});
+  const rig = createRigMesh(G, {slots, xray: true});
   const base = url || MODELS.outlaw;
   const [J, bin] = await Promise.all([fetch(base + 'model.json').then(r => r.json()), fetch(base + 'model.bin').then(r => r.arrayBuffer())]);
   const model = rig.addModel(J, bin);
@@ -152,14 +153,15 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
   // ---------------------------------------------------------------- state
   const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: DEMOS.includes(flags.get('livedemo')) ? flags.get('livedemo') : ''};
   let on = true, t = 0;
-  const Lw = new Float64Array(NB * 7), Ll = new Float64Array(NB * 7), Lfrom = new Float64Array(NB * 7), Ltmp = new Float64Array(NB * 7);
-  const Wa = new Float64Array(NB * 7), Wb = new Float64Array(NB * 7), Wshow = new Float64Array(NB * 7), Wt = new Float64Array(NB * 7);
+  const Ll = new Float64Array(NB * 7), Lfrom = new Float64Array(NB * 7), Ltmp = new Float64Array(NB * 7);
+  const Wb = new Float64Array(NB * 7), Wshow = new Float64Array(NB * 7), Wt = new Float64Array(NB * 7);
   let clipNow = '', frameNow = '', frameT = 0, fadeT = 1, haveShow = false;
-  let wf = NaN, twist = 0, twistShown = NaN, demoA = NaN, stepK = -1, sampT = 0, lastT = -1;
+  let wf = NaN, twist = 0, twistShown = NaN, demoA = NaN, stepK = -1, sampT = 0, lastT = -1, aimPhi = NaN, aimBase = '';
   const MATS = new Float32Array(24 * 12), PR = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 4};
   const TIPS = new Float64Array(NB * 4), TIPS2 = new Float64Array(NB * 4), PREV = new Float64Array(NB * 3), SC = [0, 0, 0];
-  let prevOk = false, prevAx = 0, prevAy = 0;
+  let prevOk = false;
   const stats = {held: 0, frames: 0, smears: 0, ms: 0, msRender: 0};
+  const aim = {ok: false, mx: 0, my: 0, a: 0};   // the drawn gun on screen (view px): the muzzle, the barrel's angle (the meter's aim error)
 
   // ---------------------------------------------------------------- which pose: the frame, its clip, the next frame, the fraction
   const NAME = {}, nm = (pre, i) => (NAME[pre] ??= [])[i] ??= pre + i;
@@ -194,20 +196,9 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
   }
 
   // ---------------------------------------------------------------- the procedural layers (body space, in Wt)
-  // the cursor's world point at aim height (or the hovered target's), into body space at facing phi: (a, b) Blender x, y
-  const AIMV = new Float64Array(3);
-  function aimBody(PX, PY, P, phi, yaw) {
-    const ht = pa.hoverTarget?.();
-    let X, Z, H;
-    if (ht) { X = ht.x; Z = ht.y; H = ht.h; }
-    else {
-      const vx = (mouse.x + cam.x) / ctxO.PPM, vy = (mouse.y + cam.y + (P.z + AIM_H) * ctxO.PPMH) / ctxO.PPMY;
-      X = vx * Math.cos(yaw) + vy * Math.sin(yaw); Z = -vx * Math.sin(yaw) + vy * Math.cos(yaw); H = P.z + AIM_H;
-    }
-    const c = Math.cos(phi), s = Math.sin(phi), dx = X - PX, dz = Z - PY;
-    AIMV[0] = c * dx - s * dz; AIMV[1] = -s * dx - c * dz; AIMV[2] = H - P.z;
-    return AIMV;
-  }
+  // the cursor on screen (view px)
+  const CUR = new Float64Array(2);
+  function cursor() { const z = app.zoom || 1; CUR[0] = G.VW / 2 + (mouse.x - G.VW / 2) * z; CUR[1] = G.VH / 2 + (mouse.y - G.VH / 2) * z; return CUR; }
   // the gun's heading (rad about +Z from -Y) and its muzzle, in w
   const MUZ = new Float64Array(3);
   function barrel(w) {
@@ -216,18 +207,28 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     return Math.atan2(V3[0], -V3[1]);
   }
   // the spine twist (_TWIST's split: .4 / .3 / .3 over Spine, Spine1, Spine2, about the vertical through each)
+  const TWB = Int16Array.of(SPINE, SPINE1, SPINE2), TWF = Float64Array.of(.4, .3, .3);
   function spineTwist(w, d) {
-    for (const [b, f] of [[SPINE, .4], [SPINE1, .3], [SPINE2, .3]]) { if (b < 0) continue; axisAngle(0, 0, 1, d * f, R4); turnTree(w, b, R4, w[b * 7 + 4], w[b * 7 + 5], w[b * 7 + 6]); }
+    for (let k = 0; k < 3; k++) { const b = TWB[k]; if (b < 0) continue; axisAngle(0, 0, 1, d * TWF[k], R4); turnTree(w, b, R4, w[b * 7 + 4], w[b * 7 + 5], w[b * 7 + 6]); }
   }
-  const TW_TMP = new Float64Array(NB * 7);
-  function aimTwist(w, tgt) {   // the twist putting the barrel on the target (the muzzle orbits: 3 passes)
-    let d = 0;
-    for (let it = 0; it < 3; it++) {
-      TW_TMP.set(w); spineTwist(TW_TMP, d);
-      const h = barrel(TW_TMP), want = Math.atan2(tgt[0] - MUZ[0], -(tgt[1] - MUZ[1]));
-      d = Math.max(-110 * DEG, Math.min(110 * DEG, d + wrap(want - h)));
+  // AIMING BY WHAT YOU SEE (as the sim picks the sprites' twists, sim/player/gun.js aimErr): the twist that puts the barrel's
+  // SCREEN direction (the body squashed as the sprite camera saw it) on the line from the muzzle to the cursor. A secant
+  // search on the screen-angle error, from the last answer (4 passes: the muzzle orbits the spine as it turns)
+  const TW_TMP = new Float64Array(NB * 7), SO = [0, 0, 0];
+  function screenErr(w, d) {
+    TW_TMP.set(w); spineTwist(TW_TMP, d); barrel(TW_TMP);
+    const o = GUN * 7; screenOf(MUZ[0], MUZ[1], MUZ[2], SC); const mx = SC[0], my = SC[1];
+    screenOf(TW_TMP[o + 4], TW_TMP[o + 5], TW_TMP[o + 6], SO);
+    return wrap(Math.atan2(CUR[1] - my, CUR[0] - mx) - Math.atan2(my - SO[1], mx - SO[0]));
+  }
+  function aimTwist(w, d0) {
+    const LIM = 110 * DEG; cursor();
+    let a = d0 === d0 ? d0 : 0, ea = screenErr(w, a), b = a + (ea > 0 ? -1 : 1) * 12 * DEG, eb = screenErr(w, b);
+    for (let it = 0; it < 5 && Math.abs(eb) > .5 * DEG; it++) {
+      const den = eb - ea; let c = Math.abs(den) < 1e-6 ? b + 6 * DEG : b - eb * (b - a) / den;
+      c = Math.max(-LIM, Math.min(LIM, c)); a = b; ea = eb; b = c; eb = screenErr(w, b);
     }
-    return d;
+    return Math.abs(eb) <= Math.abs(ea) ? b : a;
   }
   // hysteresis: v follows target only when it moved more than K.hyst degrees (0: always)
   const hystOf = (shown, target) => !(shown === shown) || !K.hyst || Math.abs(wrap(target - shown)) > K.hyst * DEG ? target : shown;
@@ -283,7 +284,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
   function swing(w, th, dth) {
     const l = HAND_L * 7, r = HAND_R * 7;
     const px = (w[l + 4] + w[r + 4]) / 2, py = (w[l + 5] + w[r + 5]) / 2, pz = (w[l + 6] + w[r + 6]) / 2 + SWING.rope;
-    for (const b of [UPLEG_L, UPLEG_R]) if (b >= 0) { axisAngle(0, 1, 0, -dth * SWING.lag, R4); turnTree(w, b, R4, w[b * 7 + 4], w[b * 7 + 5], w[b * 7 + 6]); }   // the legs trail
+    for (let k = 0; k < 2; k++) { const b = k ? UPLEG_R : UPLEG_L; if (b >= 0) { axisAngle(0, 1, 0, -dth * SWING.lag, R4); turnTree(w, b, R4, w[b * 7 + 4], w[b * 7 + 5], w[b * 7 + 6]); } }   // the legs trail
     axisAngle(0, 1, 0, th, R4);
     for (let i = 0; i < NB; i++) if (PI[i] < 0) turnTree(w, i, R4, px, py, pz);   // the whole body about the rope's top
     for (let i = 0; i < NB; i++) w[i * 7 + 6] += SWING.lift;
@@ -372,9 +373,9 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     if (p.clip !== clipNow) { if (haveShow && !K.step) { Lfrom.set(Ll); fadeT = 0; } clipNow = p.clip; }
     // 2) the base pose (world, body space) into Wt
     const S = app.PL.gun?.S, proc = K.proc;
-    let baseName = f, layer = '', upper = -1;
-    if (proc && p.fam && (p.fam === 'gws' || p.fam === 'grs')) baseName = nm(p.fam + '_0_', p.i);            // aim on the move: the twist-0 pose
-    else if (proc && /^gun_aim/.test(f)) baseName = 'gun_aim';                                               // the standing twists: gun_aim
+    let baseName = f, layer = '', upper = -1, aiming = false;
+    if (proc && p.fam && (p.fam === 'gws' || p.fam === 'grs')) { baseName = nm(p.fam + '_0_', p.i); aiming = true; }   // aim on the move: the twist-0 pose
+    else if (proc && f.startsWith('gun_aim')) { baseName = 'gun_aim'; aiming = true; }                                  // the standing twists: gun_aim
     else if (proc && p.fam && (p.fam === 'gwr' || p.fam === 'grr') && S) { baseName = nm(p.loco + '.', p.i); layer = 'reload'; upper = reloadAt(S); }
     if (K.demo === 'swing') baseName = poseOf('reach_up') ? 'reach_up' : 'idle.0';
     const A = poseOf(baseName) || poseOf(f);
@@ -404,8 +405,10 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     const phi = facing(P, yaw, dt);
     fc = Math.cos(phi); fs = Math.sin(phi); AX = PX; AY = P.z - sinkPx / ctxO.PPMH; AZ = PY; FX = -Math.sin(yaw); FZ = -Math.cos(yaw);
     // 5) aim at any angle: the twist onto the cursor (held by the hysteresis, sampled with the step)
-    if (proc && baseName !== f && layer === '' && GUN >= 0) {
-      if (sample) { const tg = aimBody(PX, PY, P, phi, yaw); twist = aimTwist(Wt, tg); twistShown = hystOf(twistShown, twist); }
+    if (aiming && GUN >= 0) {   // (and at once when the legs re-plant or turn: a stale twist on new legs points anywhere)
+      if (sample || !(twistShown === twistShown) || phi !== aimPhi || baseName !== aimBase) {
+        twist = aimTwist(Wt, twist); twistShown = phi !== aimPhi || baseName !== aimBase ? twist : hystOf(twistShown, twist); aimPhi = phi; aimBase = baseName;
+      }
       spineTwist(Wt, twistShown);
     } else twistShown = NaN;
     // 6) the demos
@@ -426,8 +429,10 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
       if (mx < 1) { show = Wshow; stats.held++; } else Wshow.set(Wt);
     } else Wshow.set(Wt);
     haveShow = true;
-    if (show === Wt) { /* (Ll is the shown local pose for the next cross-fade) */ } else toLocal(Wshow, Ll);
+    if (show !== Wt) toLocal(Wshow, Ll);   // (Ll: the shown local pose, a clip change's cross-fade starts from it)
     // 8) the segments' matrices, the smear, the rig
+    aim.ok = GUN >= 0 && gunNear(show);
+    if (aim.ok) { barrel(show); screenOf(MUZ[0], MUZ[1], MUZ[2], SC); aim.mx = SC[0]; aim.my = SC[1]; const o = GUN * 7; screenOf(show[o + 4], show[o + 5], show[o + 6], SC); aim.a = Math.atan2(aim.my - SC[1], aim.mx - SC[0]); }
     mats(show);
     stats.smears += K.smear ? smear(show) : (prevOk = false, 0);
     const blinkOff = P.blink && Math.floor(P.blink * 12) % 2;
@@ -441,21 +446,21 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     perf?.end('live.pose');
     const t1 = performance.now();
     perf?.begin('live.rig', 'render'); rig.render(); perf?.end('live.rig');
-    G.setPlayer(PX, P.z + .9, PY);
+    G.setPlayer(PX, P.z + .9, PY, PLAYER_SUN);   // (his one sun-shadow test, past his own 3D body: it cast onto the point and flickered)
     stats.ms = stats.ms * .95 + (t1 - t0) * .05; stats.msRender = stats.msRender * .95 + (performance.now() - t1) * .05;
     return sinkPx;
   }
 
   // ---------------------------------------------------------------- the lineup (dev: the look test puts poses beside sprites)
   let lineup = [];
-  const LM = new Float32Array(24 * 12), LP = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 4};
+  const LP = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 4};
   function lineupDraw() {
     for (let i = 0; i < lineup.length && i < slots - 1; i++) {
       const L = lineup[i], A = poseOf(L.pose); if (!A) continue;
       fc = Math.cos(L.face); fs = Math.sin(L.face); AX = L.x; AY = L.z; AZ = L.y;
-      mats(A.w); LM.set(MATS);
+      mats(A.w);
       LP.x = AX; LP.y = AY; LP.z = AZ; LP.sx = L.x; LP.sy = L.z; LP.sz = L.y; LP.snap = L.snap ?? 1;
-      rig.put(model, i + 1, LM, LP);
+      rig.put(model, i + 1, MATS, LP);
     }
   }
 
@@ -480,14 +485,20 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     K, stats, rig, model, poseOf, BN, J,
     get on() { return on && hero.loadName in MODELS; },
     get available() { return hero.loadName in MODELS; },
-    toggle(v = !on) { on = !!v; haveShow = false; prevOk = false; wf = NaN; lastT = -1; return on; },
+    toggle(v = !on) { on = !!v; haveShow = false; prevOk = false; wf = NaN; lastT = -1; t = 0; stepK = -1; return on; },
     set(o) { Object.assign(K, o); haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; return K; },
     preset(name) { return live.set(PRESETS[name]); },
     get presetName() { for (const [n, v] of Object.entries(PRESETS)) if (Object.keys(v).every(k => v[k] === K[k])) return n; return 'custom'; },
     setLineup(items) { lineup = items || []; },
+    aim,
+    // (dev: the shimmer meter draws several knob sets off ONE sim step, each from its own history)
+    snapshot: () => ({v: [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase],
+      a: [Ll.slice(), Lfrom.slice(), Wshow.slice(), PREV.slice()], K: {...K}}),
+    restore(S) { [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase] = S.v; Ll.set(S.a[0]); Lfrom.set(S.a[1]); Wshow.set(S.a[2]); PREV.set(S.a[3]); Object.assign(K, S.K); },
     presets: Object.keys(PRESETS), demos: DEMOS,
     compose, sprite,
     get bytes() { return rig.bytes; },
+    get atlas() { return hero.atlas; },
   };
   return live;
 }

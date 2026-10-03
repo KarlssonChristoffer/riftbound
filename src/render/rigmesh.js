@@ -21,6 +21,7 @@
 //   squash anchor), k, alpha, flash, pitch (rad), sx, sy, sz (the snap anchor, world axes), snap (1: on), type (the
 //   G-buffer pixel type pass B writes: 0 / absent = 7, the lit card; 4 = the character, as the player's card: view/livehero.js)),
 //   then rig.render() (pass A now, B and S armed for this frame's G.render). rig.bytes.
+//   {xray: true}: a fourth pass X marks where a character body (type 4) is hidden, for the composite's x-ray (gfx.js).
 // OWNS: its target, the transforms texture, the ramps texture, its meshes and materials.
 // READS: G (camera, view size, frame, extra).  EMITS: nothing.  BUDGET: render: per model 2 draws (A, S) + 1 (B) a frame while bodies show;
 //   CPU: the transforms texture upload (slots x 74 texels) when a body moved; no allocation per frame.
@@ -68,6 +69,17 @@ void main() {
   // part, family + 1, tone + 4 (no exterior outline) + 8 (no interior lines), body + 1; normal, nearness (m, from the anchor)
   o0 = vec4(vInfo.y, vInfo.z + 1., float(tone + ((fl >> 3) & 1) * 4 + ((fl >> 4) & 1) * 8), vSlot + 1.);
   o1 = vec4(n, dot(vW - vec3(p0.x, p1.z, p0.y), V));
+}`;
+// X (optional, {xray: true}: the player's x-ray, G.extra 'xray') where a character body (type 4) is hidden by the scene: its
+// pass-A depth behind the G-buffer's (which holds its own where it shows) -> R, as gfx.js XRAY_FS marks the player's card
+const X_FS = HEAD + `
+layout(location = 0) out vec4 o0;
+uniform sampler2D tId, tDep, uGDep, uXf;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy); vec4 c = texelFetch(tId, p, 0);
+  if (c.w < .5 || texelFetch(uXf, ivec2(${PCOL + 1}, int(c.w + .5) - 1), 0).w != 4.) discard;
+  if (texelFetch(tDep, p, 0).r <= texelFetch(uGDep, p, 0).r + 1.5e-4) discard;
+  o0 = vec4(1., 0., 0., 0.);
 }`;
 const S_VS = HEAD + XF + `
 in vec3 position; in vec4 aInfo; in float iSlot; uniform mat4 viewMatrix, projectionMatrix;
@@ -133,7 +145,7 @@ void main() {
   gl_FragDepth = dep;
 }`;
 
-export function createRigMesh(G, {slots = 16} = {}) {
+export function createRigMesh(G, {slots = 16, xray = false} = {}) {
   const raw = (vs, fs, uniforms, extra = {}) => new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
   const near = THREE.NearestFilter;
   let VW = G.VW, VH = G.VH;
@@ -157,6 +169,8 @@ export function createRigMesh(G, {slots = 16} = {}) {
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const meshB = new THREE.Mesh(tri, raw(B_VS, B_FS, U)); meshB.frustumCulled = false; meshB.matrixAutoUpdate = false;
   G.extra(meshB, 'gbuf');
+  let meshX = null;
+  if (xray) { U.uGDep = {value: G.compU.tD.value}; meshX = new THREE.Mesh(tri, raw(B_VS, X_FS, U, {depthTest: false, depthWrite: false})); meshX.frustumCulled = false; meshX.matrixAutoUpdate = false; G.extra(meshX, 'xray'); }
   const models = [];
   let dirty = false, used = false;
 
@@ -214,7 +228,7 @@ export function createRigMesh(G, {slots = 16} = {}) {
     r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(true, true, false);
     r.render(sceneA, G.camera);
     r.setRenderTarget(prev);
-    meshB.userData.frame = fr;
+    meshB.userData.frame = fr; if (meshX) { U.uGDep.value = G.compU.tD.value; meshX.userData.frame = fr; }
     for (const M of models) M.n = 0;
     used = false;
   }
