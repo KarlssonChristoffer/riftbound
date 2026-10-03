@@ -91,9 +91,10 @@ export function createLoop(E) {
     const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || stage.world !== leafWorld)) { stage.world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = stage.world; }
     proj.draw(host);
     for (const f of features) if (f.on !== false) f.frame?.({dt: lastDt, t});
-    // the aim reticle (pixel cross at the cursor, front layer)
+    // the aim reticle (pixel cross at the cursor, front layer; drawn by the GPU: the layer's 2D canvas went up whole every
+    // frame a gun was out for these 4 pixels' rects)
     if (P.state === 'draw') {
-      const q = G.layer('front'), mx = Math.round(cv.VW / 2 + (mouse.x - cv.VW / 2) * cv.zoom), my = Math.round(cv.VH / 2 + (mouse.y - cv.VH / 2) * cv.zoom);
+      const q = G.glayer('front'), mx = Math.round(cv.VW / 2 + (mouse.x - cv.VW / 2) * cv.zoom), my = Math.round(cv.VH / 2 + (mouse.y - cv.VH / 2) * cv.zoom);
       q.fillStyle = P.t > .5 ? '#f2d27a' : '#e9e4da';
       q.fillRect(mx - 3, my, 2, 1); q.fillRect(mx + 2, my, 2, 1); q.fillRect(mx, my - 3, 1, 2); q.fillRect(mx, my + 2, 1, 2);
     }
