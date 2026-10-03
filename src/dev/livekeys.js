@@ -1,6 +1,7 @@
 // LIVE KEYS (dev; ?live=1, view/livehero.js): Shift+7 flips the player between his sprite and his live body (the A/B),
 // Shift+8 steps through the motion knobs' presets (livehero PRESETS: smooth, step, face16, hyst, hold, snap, smear, all,
-// allsmear, free32), Shift+9 through the procedural demos (none, lasso, swing), Shift+Alt+8 turns the procedural layers
+// allsmear, free32), Shift+9 through the demos (none, lasso, swing, then the live model's own emotes: cheer, wave, shrug,
+// squat, played while he stands still: view/livehero.js emote()), Shift+Alt+8 turns the procedural layers
 // (aim at any angle, the reload over the legs) off / on. A small note in the corner says what is on (it fades).
 // WRITES: nothing of the game's: it calls the live hero's API (toggle, preset, set).
 let note = null, noteT = 0;

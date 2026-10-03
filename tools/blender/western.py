@@ -2244,6 +2244,17 @@ def build():
     return names
 
 
+# ================================================================ the outlaw's emotes (live only) =====================
+# Made for the LIVE hero (src/view/livehero.js): exported as bone matrices by tools/blender/ragdoll_export.py --clips (no
+# atlas render, no pixelize: a 5 s export), shown with Shift+9 (the live demos) while he stands still. The sprite atlas
+# doesn't have them. Every key starts from the ready idle, so each clip leaves and returns to idle.0. A clip's
+# marks.loop (a step of its `play`) is where the demo player loops back to after the last step (else: idle, then again).
+#   cheer   the draw, both arms thrown up in a V (the revolver to the sky, the hat pushed back) with two hops, the
+#           twirl and back into the holster
+#   wave    the left arm up and out (clear of the sombrero's brim), the forearm swung side to side, a head tilt
+#   shrug   shoulders up, forearms out, palms up; the head tilted one way, then the other
+#   squat   down onto his heels, the forearms over the knees, then resting there (a slow breath, a nod)
+OUTLAW_EMOTES = ('cheer', 'wave', 'shrug', 'squat')
 _pose_hang = pose   # the hang-fit pose() above
 
 
@@ -2256,3 +2267,60 @@ def pose(name):
     if i and 'tween' in ANIMS.get(clip, {}) and clip not in LASSO_LIST and 'CoilHold0' in bpy.data.objects[ROOT].pose.bones:
         _lasso_hold(name, hat=False)
     return zmin
+
+
+FOLLOW = FOLLOW + ('gun_cheer',)   # the cheer's raised revolver points along the forearm (to the sky)
+_IDLE_W = POSES['idle_in']
+_LEGS_HOP = {'LeftUpLeg': [('X', -16), ('Y', -4)], 'LeftLeg': [('X', 30)], 'LeftFoot': [('X', 12)],
+             'RightUpLeg': [('X', -10), ('Y', 4)], 'RightLeg': [('X', 22)], 'RightFoot': [('X', 10)]}
+_LEGS_DIP = {'LeftUpLeg': [('X', -24), ('Y', -6)], 'LeftLeg': [('X', 40)], 'LeftFoot': [('X', -14)],
+             'RightUpLeg': [('X', -18), ('Y', 6)], 'RightLeg': [('X', 34)], 'RightFoot': [('X', -14)]}
+# cheer: `up` the arms in a wide V, ~40 deg over the horizontal (the hands out past the brim, below it: a steeper V puts
+# them on the brim from above), in the air; `pump` elbows bent, fists up by the shoulders, knees bent from the landing
+POSES['gun_cheer_up'] = {**_IDLE_W, **_LEGS_HOP, 'Spine': [('X', -6)], 'Spine1': [('X', -3)], 'Neck': [('X', -4)],
+                         'Head': [('X', -5)],
+                         'RightShoulder': [('Y', 8)], 'RightArm': [('Y', 76), ('X', -14)], 'RightForeArm': [('Y', 10)],
+                         'RightHand': [],
+                         'LeftShoulder': [('Y', -8)], 'LeftArm': [('Y', -76), ('X', -14)], 'LeftForeArm': [('Y', -10)],
+                         'LeftHand': [], '_air': .09}
+POSES['gun_cheer_pump'] = {**_IDLE_W, **_LEGS_DIP, 'Spine': [('X', 6)], 'Neck': [('X', -4)], 'Head': [('X', -4)],
+                           'RightShoulder': [('Y', 8)], 'RightArm': [('Y', 62), ('X', -18)], 'RightForeArm': [('Y', 58)],
+                           'RightHand': [],
+                           'LeftShoulder': [('Y', -8)], 'LeftArm': [('Y', -62), ('X', -18)], 'LeftForeArm': [('Y', -58)],
+                           'LeftHand': []}
+LASSO_HAT.update({'gun_cheer_up': 14, 'gun_cheer_pump': 8})
+ANIMS['cheer'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_cheer_pump', 'gun_cheer_up', 'gun_spin_0', 'gun_spin_1',
+                        'gun_spin_2', 'gun_spin_3', 'gun_spin_4', 'gholster', 'idle_in'],
+                       [0, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 8.5, 9, 9.5, 10], 14,
+                       play=[0, 1, 2, 3, 4, 5, 4, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+                       ms=[60, 50, 50, 80, 50, 230, 50, 90, 50, 260, 70, 50, 45, 45, 45, 55, 60, 90, 80, 120])
+# wave: the upper arm ~24 deg over the horizontal and a little forward, the forearm from ~30 deg (out) to ~70 deg (in)
+# over it: the hand stays out past the brim and below it (seen from behind too)
+POSES['wave_up'] = {**_IDLE_W, 'Hips': [('Y', -3)], 'Neck': [('Z', 6), ('Y', 3)], 'Head': [('Y', 2)],
+                    'LeftShoulder': [('Y', -4)], 'LeftArm': [('Y', -65), ('X', -20)], 'LeftForeArm': [('Y', -25)], 'LeftHand': []}
+POSES['wave_in'] = {**POSES['wave_up'], 'LeftForeArm': [('Y', -45)]}
+POSES['wave_out'] = {**POSES['wave_up'], 'LeftForeArm': [('Y', -5)]}
+ANIMS['wave'] = _clip(['idle_in', 'wave_up', 'wave_in', 'wave_out'], [.5, 1, 2, 2.5, 3], 12,
+                      play=[0, 1, 2, 3, 4, 3, 2, 3, 4, 3, 2, 1, 0], ms=[70, 80, 110, 60, 110, 60, 110, 60, 110, 60, 140, 80, 70])
+# shrug: both arms explicit (the ready idle's right arm would otherwise stay)
+_SHRUG = {**_IDLE_W, 'Spine': [('X', -3)],
+          'LeftShoulder': [('Y', -14)], 'LeftArm': [('Y', 30), ('X', -18)], 'LeftForeArm': [('X', -70), ('Z', 20)], 'LeftHand': [],
+          'RightShoulder': [('Y', 14)], 'RightArm': [('Y', -30), ('X', -18)], 'RightForeArm': [('X', -70), ('Z', -20)],
+          'RightHand': []}
+# (the head's roll small: the sombrero's wide brim makes a few degrees read as a lot)
+POSES['shrug_l'] = {**_SHRUG, 'Neck': [('Y', 4), ('X', -4)], 'Head': [('Y', 3)]}
+POSES['shrug_r'] = {**_SHRUG, 'Neck': [('Y', -4), ('X', -4)], 'Head': [('Y', -3)]}
+ANIMS['shrug'] = _clip(['idle_in', 'shrug_l', 'shrug_r'], [.4, .8, 1, 1.5, 2], 12,
+                       play=[0, 1, 2, 3, 4, 3, 2, 1, 0], ms=[60, 60, 220, 70, 200, 70, 240, 70, 70])
+# squat: thighs 15 deg over the horizontal, the heels under the hips; the back leaning in, the head up; the arms over
+# the knees. Left only: expand() mirrors it (the right leg, the right arm)
+_SQUAT = {'LeftUpLeg': [('X', -105), ('Y', -14)], 'LeftLeg': [('X', 135)], 'LeftFoot': [('X', -28)],
+          'Spine': [('X', 22)], 'Spine1': [('X', 10)], 'Spine2': [('X', 4)], 'Neck': [('X', -24)], 'Head': [('X', 2)],
+          'LeftShoulder': [('Z', -4)], 'LeftArm': [('Y', 34), ('X', -40)], 'LeftForeArm': [('X', -48)], 'LeftHand': [('X', 16)]}
+POSES['squat_mid'] = {'LeftUpLeg': [('X', -55), ('Y', -8)], 'LeftLeg': [('X', 80)], 'LeftFoot': [('X', -20)],
+                      'Spine': [('X', 14)], 'Neck': [('X', -12)],
+                      'LeftShoulder': [('Z', -4)], 'LeftArm': [('Y', 36), ('X', -20)], 'LeftForeArm': [('X', -20)]}
+POSES['squat'] = _SQUAT
+POSES['squat_b'] = {**_SQUAT, 'Spine2': [('X', 8)], 'Head': [('X', 8)]}
+ANIMS['squat'] = _clip(['idle_in', 'squat_mid', 'squat', 'squat_b'], [.5, 1, 1.5, 2, 2.5, 3], 12,
+                       play=[0, 1, 2, 3, 4, 5, 4, 3], ms=[70, 70, 70, 900, 400, 900, 400, 900], marks={'loop': 3})

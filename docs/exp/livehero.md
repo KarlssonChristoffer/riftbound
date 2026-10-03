@@ -18,10 +18,11 @@ pass), and the live path is view-only (simview with `?live=1` passes: the sim ne
 
 - `?mode=sandbox&set=outlaw&live=1` (the outlaw is the loadout with a live model: his poncho is baked, no runtime cloth).
 - **Shift+7** flips sprite <-> live at runtime (the A/B), **Shift+8** steps through the motion knobs' presets
-  (Shift+Alt+8 turns the procedural layers off / on), **Shift+9** the demos (none, `lasso`, `swing`). A note in the
-  top-left corner says what is on. (`dev/livekeys.js`)
+  (Shift+Alt+8 turns the procedural layers off / on), **Shift+9** the demos (none, `lasso`, `swing`, then the live
+  model's own emotes `cheer`, `wave`, `shrug`, `squat`: stand still to see one). A note in the top-left corner says
+  what is on. (`dev/livekeys.js`)
 - `?livek=<preset>` starts with a preset (`exact`, `smooth`, `step`, `face16`, `hyst`, `hold`, `snap`, `smear`, `all`
-  (default), `allsmear`, `free32`); `?livedemo=lasso | swing` with a demo.
+  (default), `allsmear`, `free32`); `?livedemo=lasso | swing | cheer | wave | shrug | squat` with a demo.
 - Draw the revolver (LMB) and walk with it up: the gun follows the cursor at any angle. R reloads on the move: the
   upper body plays the standing reload's 13 frames over the walk / run legs.
 - Something to shoot and rope without being shot: `?mode=sandbox&biome=desert&set=outlaw&live=1&foes=unarmed` (the
@@ -43,7 +44,7 @@ not in the mesh: only the rigid shoulder cape is (see the plan).
 ```
 D:\Blender\blender.exe -b --factory-startup --python tools/blender/ragdoll_export.py -- \
   --model tools/blender/loadouts/outlaw.py --out D:/Game/concepts/sprites/out/live/outlaw \
-  --atlas D:/Game/concepts/sprites/out/outfits/outlaw          (run from the repo root)
+  --atlas D:/Game/concepts/sprites/out/outfits/outlaw --clips cheer,wave,shrug,squat     (run from the repo root)
 ```
 
 **The draw.** `view/livehero.js` builds the pose for the frame the sprite path picked this step (`P.frame` at
@@ -97,6 +98,40 @@ face16, hyst 7, hold, snap, with the procedural layers. `smooth` = every knob of
 GIFs: `tmp/exp-livehero/aim_sweep.gif` (sprite | live all knobs | live smooth, the cursor marked), `lasso.gif`,
 `swing.gif` (all knobs | smooth), `camera.gif` (the camera turned a full circle round him: sprite | live smooth | live
 all), `ab_exact.gif` (the first milestone: sprite | live, the same frames).
+
+## New animations made live (no atlas render)
+
+The outlaw's first animations that exist **only** for the live model (2026-10-03), made the way the atlas's are
+written (bone rotations in `tools/blender/western.py`, the "outlaw's emotes" section at its end) but never rendered:
+the export poses every frame through the model's own `pose()` and writes the bone matrices (`ragdoll_export.py
+--clips`, 10 s for the whole model with its 369 atlas poses + these 32 frames).
+
+| clip | what he does | frames | the game's timing |
+|---|---|---|---|
+| `cheer` | draws, throws both arms up in a wide V (the revolver to the sky, the hat pushed back) with two hops, twirls the gun and holsters it | 16 | play / ms: ~2.2 s |
+| `wave` | the left arm up and out, the forearm swung side to side, a head tilt | 5 | ~1.2 s |
+| `shrug` | shoulders up, forearms out, the head tilted one way, then the other | 5 | ~1.1 s |
+| `squat` | down onto his heels, the forearms over the knees, then resting: a slow breath and nod (`marks.loop`) | 6 | 0.2 s down, then a 2.6 s loop |
+
+In the game they are demos (`view/livehero.js` `emote()`): Shift+9 picks one, and it plays while he stands still
+(the sim's idle, the gun holstered), by the clip's own `play` / `ms`, from the start each time he stops; walking or
+drawing cancels it at once. After the last step a clip loops from `marks.loop` (a step of `play`) or he stands 1.6 s
+and it plays again. View only: the sim still says idle (the sprite path shows him idle).
+
+Making one: add keys to `POSES` (start from `POSES['idle_in']`, the ready idle, so the clip leaves and returns to
+idle.0), a `_clip(keys, tween, fps, play=, ms=, marks=)` to `ANIMS`, its name to `OUTLAW_EMOTES`; export with
+`--clips`; Shift+9. What the keys can use is the gun clips' kit: a key named `gun_*` holds the revolver (`FOLLOW`: its
+barrel along the forearm), `REACH` puts a wrist on a point, `LASSO_HAT` tips the hat back, `_air` lifts him (a hop).
+Rules learnt making these: the sombrero's brim is 1 m across and drawn from above, so an arm raised steeper than ~40 deg
+over the horizontal reads as hands on the brim (and hides behind it seen from the back): raise arms wide, not high;
+a few degrees of head roll tip that brim a lot. Contact sheets and GIFs: `tmp/live-emotes/` (`sheet.mjs` draws every
+frame of a clip live at 4 facings through the lineup, `sheet.py` builds the sheets and the GIFs at the game's timing).
+
+The lasso's coil: the outlaw's model has a coil (`CoilHold0`) that shows in his left hand only in the lasso's keys; in
+every other pose it is scaled to nothing. The export carried no scale, so the coil was folded into the left hand and
+showed in every pose; it is now its own piece, and `model.json` `hide` lists the poses that collapse it (the live hero
+draws a hidden piece with a zero matrix). A `_clip`'s in-between lost that scale in `western.py` too (a blend of the
+keys' bones); its `pose()` now packs the coil away again after the blend outside the lasso's clips.
 
 ## Measurements
 
@@ -223,7 +258,7 @@ warnings or errors through the meters' sessions (every preset, both demos, the a
 | HD bow / pixel bow (the Ranger) | `PL.drawPixelBow` from the render's overlays | missing | the bow string becomes a live line between two bones |
 | normals / depth layers | the atlas's normal sheet; a depth sheet for the cloth's occlusion | **true normals and per-pixel depth** | better: hands go behind crates, the x-ray works per pixel |
 | afterimages, reflections, contact shadow | read the composite canvas | the atlas frame for the same pose | close; afterimages of procedural poses would show the base pose |
-| poses the model lacks (lasso: added to the atlas after this export) | atlas | falls back to `idle.0` | re-export (5 s) once `western.py` has them |
+| poses the model lacks | atlas | falls back to `idle.0` | re-export (10 s) once `western.py` has them (the lasso's: done 2026-10-03) |
 | sinking in water | the sprite is cropped | the body is lowered: the ground's depth hides it | |
 | blink (i-frames) | card hidden | body not drawn | same |
 
@@ -306,7 +341,10 @@ pipeline as the look's reference and for everything that stays a sprite.
 - `src/render/gfx.js` (small, additive): `G.extra(mesh, 'xray')`; `G.setPlayer(x, h, z, sun = .5)`.
 - `src/sim/player/adapter.js` (additive): the read-only `faceRest`.
 - `src/core/loop.js`, `src/main.js`, `src/core/flags.js` (`live`, `livek`, `livedemo`), `src/dev/devkeys.js`: the switch.
-- `tools/blender/ragdoll_export.py` (additive): `--atlas`.
+- `tools/blender/ragdoll_export.py` (additive): `--atlas`; `--clips` (clips only the live model has), the coil as its own
+  piece and `hide` (pieces a pose collapses).
+- `tools/blender/western.py` (additive, at its end): the outlaw's emotes (`OUTLAW_EMOTES`) and the coil packed away
+  after a `_clip` blend.
 - `D:/Game/tmp/exp-livehero/`: `probe.mjs` (captures, ports 8210 / 9410), `s6_shimmer.mjs` (the meter) +
   `mktables.py`, `s10_look.mjs` + `lookstats.py` + `mkparity.py` (parity), `s11_perf.mjs` / `s14_gpu.mjs` (perf),
   `s2_ab.mjs` + `seq.mjs` + `mkab.py` (the GIFs), `simview_live.mjs` + `runtests.sh` (the tests).

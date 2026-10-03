@@ -20,6 +20,8 @@
 // upper body over the walk / run legs (layering: legs from one clip, the upper body from another, here gun_reload's 13
 // frames instead of the 3 gwr_* / grr_* phases), and two demos (K.demo): 'lasso' (the rope hand on a point circling
 // overhead: a two-bone IK hand, the loop drawn as rope) and 'swing' (hanging from a rope, swinging as a pendulum).
+// EMOTES (K.demo = a clip of J.live: animations made for the live model only, no atlas render: western.py OUTLAW_EMOTES,
+// exported with ragdoll_export.py --clips): played by their own timing while he stands still (emote() below).
 // VIEW only: reads the player (P, the gun's state), the cursor; writes its own state, its rig, and hides the hero's card
 // while it draws (hero.card.setVisible). The sim never reads any of it (?views=0 and ?live=1 leave the sim the same).
 // OWNS: the live model and its rig (render/rigmesh.js), the knobs, the drawn pose, the lineup (dev: setLineup).
@@ -89,6 +91,8 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
   const [J, bin] = await Promise.all([fetch(base + 'model.json').then(r => r.json()), fetch(base + 'model.bin').then(r => r.arrayBuffer())]);
   const model = rig.addModel(J, bin);
   const CL = J.clips || {};
+  const HIDE = J.hide || {};   // pose -> pieces it hides (the lasso's coil packed away: the poses carry no scale)
+  const EMOTES = (J.live || []).filter(c => CL[c]), demos = [...DEMOS, ...EMOTES];
   for (const c of Object.values(CL)) if (c.advance && !c.cum) { c.cum = [0]; c.advance.forEach((a, i) => c.cum.push(c.cum[i] + a)); }   // (render/atlas.js's)
   // the bones in depth-first order (a bone's subtree is the range [b, END[b])), those the poses carry
   const names = Object.keys(J.bones).filter(b => J.poses['idle.0']?.[b] || J.poses[Object.keys(J.poses)[0]][b]);
@@ -118,7 +122,8 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     const w = new Float64Array(NB * 7), l = new Float64Array(NB * 7);
     for (let i = 0; i < NB; i++) { const v = src[BN[i]] || src.Hips; for (let k = 0; k < 7; k++) w[i * 7 + k] = v[k]; }
     toLocal(w, l);
-    POSE.set(name, p = {w, l, name});
+    const h = HIDE[name], hide = h ? Uint8Array.from(J.segs, s => h.includes(s.bone) ? 1 : 0) : null;
+    POSE.set(name, p = {w, l, name, hide});
     return p;
   }
   function toLocal(w, l) {
@@ -151,7 +156,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
   const gunNear = w => Math.hypot(w[GUN * 7 + 4] - w[HAND_R * 7 + 4], w[GUN * 7 + 5] - w[HAND_R * 7 + 5], w[GUN * 7 + 6] - w[HAND_R * 7 + 6]) < .15;
 
   // ---------------------------------------------------------------- state
-  const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: DEMOS.includes(flags.get('livedemo')) ? flags.get('livedemo') : ''};
+  const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: demos.includes(flags.get('livedemo')) ? flags.get('livedemo') : ''};
   let on = true, t = 0;
   const Ll = new Float64Array(NB * 7), Lfrom = new Float64Array(NB * 7), Ltmp = new Float64Array(NB * 7);
   const Wb = new Float64Array(NB * 7), Wshow = new Float64Array(NB * 7), Wt = new Float64Array(NB * 7);
@@ -309,7 +314,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
       qrot(w, o, 0, LEN[i], 0, V3, 0); screenOf(w[o + 4] + V3[0], w[o + 5] + V3[1], w[o + 6] + V3[2], SC); out[i * 4 + 2] = SC[0] - ax; out[i * 4 + 3] = SC[1] - ay;
     }
   }
-  function mats(w) {
+  function mats(w, hide = null) {
     for (let s = 0; s < NS; s++) {
       const o = SEG[s] * 7, m = s * 12, x = w[o], y = w[o + 1], z = w[o + 2], q = w[o + 3];
       // the bone's rotation (rows), Blender axes
@@ -321,6 +326,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
       MATS[m + 8] = -fs * r00 - fc * r10; MATS[m + 9] = -fs * r01 - fc * r11; MATS[m + 10] = -fs * r02 - fc * r12;
       toWorld(w[o + 4], w[o + 5], w[o + 6], WP, 0); MATS[m + 3] = WP[0]; MATS[m + 7] = WP[1]; MATS[m + 11] = WP[2];
     }
+    if (hide) for (let s = 0; s < NS; s++) if (hide[s]) MATS.fill(0, s * 12, s * 12 + 12);   // (a zero matrix draws nothing)
   }
   // SMEAR: a segment whose bone tail jumped > SMEAR.px on screen since the last drawn frame: stretched back along its move
   function smear(w) {
@@ -350,6 +356,33 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     return n;
   }
 
+  // ---------------------------------------------------------------- the emotes (K.demo = one of EMOTES)
+  // While he stands still (the sim's idle, his gun holstered and idle) the clip's frame replaces the sim's, by the clip's
+  // own timing (its play order and ms, else its fps), from the start each time he stops. After the last step it loops
+  // from marks.loop (a step of play: the squat rests there), else he stands EMOTE_REST s and it plays again. View only:
+  // the sim still says idle (a moving or a drawn gun cancels it at once).
+  const EMOTE_REST = 1.6, EMO = {};
+  for (const c of EMOTES) {
+    const C = CL[c], n = C.play ? C.play.length : C.frames, at = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) at[i + 1] = at[i] + (C.ms ? C.ms[i] / 1000 : 1 / C.fps);
+    EMO[c] = {n, at, loop: C.marks?.loop ?? -1, play: C.play || null};
+  }
+  let emT = 0, emC = '';
+  function emote(f, P, dt) {
+    const E = EMO[K.demo]; if (!E) return f;
+    if (K.demo !== emC) { emC = K.demo; emT = 0; }   // (another emote: from its start)
+    const S = app.PL.gun?.S;
+    if (P.state !== 'idle' || (S && (S.out || S.act))) { emT = 0; return f; }
+    emT += dt;
+    const end = E.at[E.n]; let x = emT;
+    if (x >= end) {
+      if (E.loop >= 0) x = E.at[E.loop] + (x - end) % (end - E.at[E.loop]);
+      else { x %= end + EMOTE_REST; if (x >= end) return f; }
+    }
+    let s = 0; while (s < E.n - 1 && E.at[s + 1] <= x) s++;
+    return nm(K.demo + '.', E.play ? E.play[s] : s);
+  }
+
   // ---------------------------------------------------------------- the frame
   // the facing: his facing in the world without the camera's 16-step rounding ((P.face + faceRest) steps + yaw), eased
   // (smooth) or as the sim has it (step), then snapped relative to the camera (K.face) or left free
@@ -368,7 +401,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     t += dt; lastT = t0;   // (the view's own clock: the frame's real time)
     const sinkPx = Math.round((P.sink || 0) * 22);
     // 1) the frame and its clip, the time it has shown
-    const f = poseOf(P.frame) ? P.frame : 'idle.0', p = parse(f);
+    const f = emote(poseOf(P.frame) ? P.frame : 'idle.0', P, dt), p = parse(f);
     if (f !== frameNow) { frameNow = f; frameT = 0; } else frameT += dt;
     if (p.clip !== clipNow) { if (haveShow && !K.step) { Lfrom.set(Ll); fadeT = 0; } clipNow = p.clip; }
     // 2) the base pose (world, body space) into Wt
@@ -433,7 +466,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     // 8) the segments' matrices, the smear, the rig
     aim.ok = GUN >= 0 && gunNear(show);
     if (aim.ok) { barrel(show); screenOf(MUZ[0], MUZ[1], MUZ[2], SC); aim.mx = SC[0]; aim.my = SC[1]; const o = GUN * 7; screenOf(show[o + 4], show[o + 5], show[o + 6], SC); aim.a = Math.atan2(aim.my - SC[1], aim.mx - SC[0]); }
-    mats(show);
+    mats(show, A.hide);
     stats.smears += K.smear ? smear(show) : (prevOk = false, 0);
     const blinkOff = P.blink && Math.floor(P.blink * 12) % 2;
     PR.x = AX; PR.y = AY; PR.z = AZ; PR.sx = PX; PR.sy = P.z; PR.sz = PY; PR.snap = K.snap ? 1 : 0; PR.alpha = 1;
@@ -458,7 +491,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     for (let i = 0; i < lineup.length && i < slots - 1; i++) {
       const L = lineup[i], A = poseOf(L.pose); if (!A) continue;
       fc = Math.cos(L.face); fs = Math.sin(L.face); AX = L.x; AY = L.z; AZ = L.y;
-      mats(A.w);
+      mats(A.w, A.hide);
       LP.x = AX; LP.y = AY; LP.z = AZ; LP.sx = L.x; LP.sy = L.z; LP.sz = L.y; LP.snap = L.snap ?? 1;
       rig.put(model, i + 1, MATS, LP);
     }
@@ -495,7 +528,7 @@ export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = 
     snapshot: () => ({v: [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase],
       a: [Ll.slice(), Lfrom.slice(), Wshow.slice(), PREV.slice()], K: {...K}}),
     restore(S) { [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase] = S.v; Ll.set(S.a[0]); Lfrom.set(S.a[1]); Wshow.set(S.a[2]); PREV.set(S.a[3]); Object.assign(K, S.K); },
-    presets: Object.keys(PRESETS), demos: DEMOS,
+    presets: Object.keys(PRESETS), demos, emotes: EMOTES,
     compose, sprite,
     get bytes() { return rig.bytes; },
     get atlas() { return hero.atlas; },
