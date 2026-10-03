@@ -1,0 +1,504 @@
+// LIVE HERO (?live=1, a prototype: docs/exp/livehero.md): the player drawn LIVE instead of as his atlas sprite. The model
+// is the atlas's own Blender model in rigid per-bone segments with every atlas pose as bone matrices and the clips'
+// timing (tools/blender/ragdoll_export.py --atlas), drawn by render/rigmesh.js (the pixelizer's rules on the GPU, the
+// character's pixel type 4). It shows the SAME frame the sprite path picks each step (P.frame at P.face), so the two
+// compare directly; dev/livekeys.js flips sprite <-> live at runtime (Shift+7).
+// THE PIXEL-FRIENDLY MOTION LAYER: knobs (K), each switchable at runtime and measured (tmp/exp-livehero: the shimmer meter):
+//   step   stepped time: the pose is the sim's frame as the sprites show it (the clip's fps, its play / ms holds) and the
+//          procedural layers sample at STEP_HZ; off (smooth): each bone slerped toward the clip's next frame by the clip's
+//          own phase (distance travelled) or time, a clip change cross-faded, the facing eased at the aim's turn rate
+//   face   facing snap: the body's yaw in 16 | 32 steps relative to the camera (16: the sprites'); 0: free (his facing in
+//          the world: turning the camera doesn't turn him)
+//   hyst   procedural rotations (the aim twist, the IK hand's orbit, the swing) move only when their target moved more than
+//          this many degrees, else they hold (0: off)
+//   hold   hold-until-change: the drawn pose stays until the new one would move some bone tip >= 1 screen px
+//   snap   the body's anchor on whole pixels (rigmesh uSnap, as the sprite cards). (The tone bands are fixed to the camera
+//          always: rigmesh's light turns with the view.)
+//   smear  a segment whose tip jumped more than SMEAR.px since the last drawn frame is stretched back along its motion
+// PROCEDURAL ANIMATION (K.proc; the payoff of going live): the gun aimed at ANY angle, standing or on the move (a continuous
+// spine twist onto the cursor over the twist-0 pose, instead of the gun_aim_* / gws_* / grs_* twist families), a reload's
+// upper body over the walk / run legs (layering: legs from one clip, the upper body from another, here gun_reload's 13
+// frames instead of the 3 gwr_* / grr_* phases), and two demos (K.demo): 'lasso' (the rope hand on a point circling
+// overhead: a two-bone IK hand, the loop drawn as rope) and 'swing' (hanging from a rope, swinging as a pendulum).
+// VIEW only: reads the player (P, the gun's state), the cursor; writes its own state, its rig, and hides the hero's card
+// while it draws (hero.card.setVisible). The sim never reads any of it (?views=0 and ?live=1 leave the sim the same).
+// OWNS: the live model and its rig (render/rigmesh.js), the knobs, the drawn pose, the lineup (dev: setLineup).
+// READS: app (P, PL, player, yaw, zoom, cam, mouse), hero (atlas, card, loadName), pa (hoverTarget, faceRest), G.
+// BUDGET: char: ~25 bones a frame (slerp + FK + ~100 projected tips), ~.02 ms; render: rigmesh's A + B + S (3 draws).
+//   const live = await createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url}); live.on / toggle() / compose(PX, PY, perf)
+//   -> sinkPx (instead of hero.compose) / sprite() (host.playerSprite's object) / set(knobs) / preset(name) / K / stats
+import {createRigMesh} from '../render/rigmesh.js';
+import {flags} from '../core/flags.js';
+
+const DEG = Math.PI / 180, TAU = Math.PI * 2;
+const C20 = Math.cos(20 * DEG), S55 = Math.sin(55 * DEG), K_UP = Math.tan(20 * DEG) * C20 / S55;   // the sprite camera's squash
+const FADE = .08, STEP_HZ = 12, TURN = 1200 * DEG;   // clip cross-fade (s), procedural steps / s, eased facing (rad/s)
+const PLAYER_SUN = 1.6;   // m toward the sun of his chest where the composite tests whether he stands in shade (the sprite: .5)
+const SMEAR = {px: 3, k: .55, max: .3};   // a tip jump past px screen px: stretched back k of its move (at most max m)
+// the knobs' presets (dev/livekeys.js cycles them; the shimmer meter runs each)
+export const PRESETS = {
+  exact: {step: true, face: 16, hyst: 0, hold: false, snap: true, smear: false, proc: false},   // the sprite path's frames, drawn live
+  smooth: {step: false, face: 0, hyst: 0, hold: false, snap: false, smear: false},
+  step: {step: true, face: 0, hyst: 0, hold: false, snap: false, smear: false},
+  face16: {step: false, face: 16, hyst: 0, hold: false, snap: false, smear: false},
+  hyst: {step: false, face: 0, hyst: 7, hold: false, snap: false, smear: false},
+  hold: {step: false, face: 0, hyst: 0, hold: true, snap: false, smear: false},
+  snap: {step: false, face: 0, hyst: 0, hold: false, snap: true, smear: false},
+  smear: {step: false, face: 0, hyst: 0, hold: false, snap: false, smear: true},
+  all: {step: true, face: 16, hyst: 7, hold: true, snap: true, smear: false},
+  allsmear: {step: true, face: 16, hyst: 7, hold: true, snap: true, smear: true},
+  free32: {step: false, face: 32, hyst: 7, hold: true, snap: true, smear: false},   // smooth time, 32 facings, the rest on
+};
+for (const v of Object.values(PRESETS)) v.proc ??= true;   // (every preset but exact: the procedural layers on)
+export const DEMOS = ['', 'lasso', 'swing'];
+const MODELS = {outlaw: '../concepts/sprites/out/live/outlaw/'};   // the loadouts with a live model (view/hero.js names)
+
+// ---------------------------------------------------------------- quaternions (x, y, z, w) and rigid transforms in Float64Arrays
+function qmul(a, i, b, j, o, k) {   // o = a * b
+  const ax = a[i], ay = a[i + 1], az = a[i + 2], aw = a[i + 3], bx = b[j], by = b[j + 1], bz = b[j + 2], bw = b[j + 3];
+  o[k] = aw * bx + ax * bw + ay * bz - az * by; o[k + 1] = aw * by - ax * bz + ay * bw + az * bx;
+  o[k + 2] = aw * bz + ax * by - ay * bx + az * bw; o[k + 3] = aw * bw - ax * bx - ay * by - az * bz;
+}
+function qrot(q, i, x, y, z, o, k) {   // o = q v q*
+  const qx = q[i], qy = q[i + 1], qz = q[i + 2], qw = q[i + 3];
+  const tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
+  o[k] = x + qw * tx + qy * tz - qz * ty; o[k + 1] = y + qw * ty + qz * tx - qx * tz; o[k + 2] = z + qw * tz + qx * ty - qy * tx;
+}
+function slerp(a, i, b, j, u, o, k) {
+  let bx = b[j], by = b[j + 1], bz = b[j + 2], bw = b[j + 3], d = a[i] * bx + a[i + 1] * by + a[i + 2] * bz + a[i + 3] * bw;
+  if (d < 0) { d = -d; bx = -bx; by = -by; bz = -bz; bw = -bw; }
+  let s0 = 1 - u, s1 = u;
+  if (d < .9995) { const th = Math.acos(d), sn = Math.sin(th); s0 = Math.sin((1 - u) * th) / sn; s1 = Math.sin(u * th) / sn; }
+  const x = s0 * a[i] + s1 * bx, y = s0 * a[i + 1] + s1 * by, z = s0 * a[i + 2] + s1 * bz, w = s0 * a[i + 3] + s1 * bw, l = Math.hypot(x, y, z, w) || 1;
+  o[k] = x / l; o[k + 1] = y / l; o[k + 2] = z / l; o[k + 3] = w / l;
+}
+const R4 = new Float64Array(4), V3 = new Float64Array(3);
+function axisAngle(x, y, z, a, o, k = 0) { const s = Math.sin(a / 2); o[k] = x * s; o[k + 1] = y * s; o[k + 2] = z * s; o[k + 3] = Math.cos(a / 2); return o; }
+function fromTo(ax, ay, az, bx, by, bz, o) {   // the shortest rotation taking direction a onto direction b
+  const la = Math.hypot(ax, ay, az) || 1, lb = Math.hypot(bx, by, bz) || 1; ax /= la; ay /= la; az /= la; bx /= lb; by /= lb; bz /= lb;
+  const d = ax * bx + ay * by + az * bz;
+  let x = ay * bz - az * by, y = az * bx - ax * bz, z = ax * by - ay * bx, w = 1 + d;
+  if (w < 1e-6) { x = Math.abs(ax) < .9 ? 0 : -az; y = Math.abs(ax) < .9 ? -az : 0; z = Math.abs(ax) < .9 ? ay : ax; w = 0; }
+  const l = Math.hypot(x, y, z, w) || 1; o[0] = x / l; o[1] = y / l; o[2] = z / l; o[3] = w / l; return o;
+}
+const wrap = a => a - TAU * Math.round(a / TAU);
+
+export async function createLiveHero({G, app, hero, pa, mouse, cam, ctxO, url = null, slots = 17}) {
+  const rig = createRigMesh(G, {slots, xray: true});
+  const base = url || MODELS.outlaw;
+  const [J, bin] = await Promise.all([fetch(base + 'model.json').then(r => r.json()), fetch(base + 'model.bin').then(r => r.arrayBuffer())]);
+  const model = rig.addModel(J, bin);
+  const CL = J.clips || {};
+  for (const c of Object.values(CL)) if (c.advance && !c.cum) { c.cum = [0]; c.advance.forEach((a, i) => c.cum.push(c.cum[i] + a)); }   // (render/atlas.js's)
+  // the bones in depth-first order (a bone's subtree is the range [b, END[b])), those the poses carry
+  const names = Object.keys(J.bones).filter(b => J.poses['idle.0']?.[b] || J.poses[Object.keys(J.poses)[0]][b]);
+  const kids = {}; for (const b of names) { const p = J.bones[b].parent; (kids[p] ??= []).push(b); }
+  const BN = []; (function dfs(p) { for (const b of kids[p] || []) { BN.push(b); dfs(b); } })(null);
+  for (const b of names) if (!BN.includes(b)) BN.push(b);   // (a bone whose parent the poses lack: a root of its own)
+  const NB = BN.length, IX = Object.fromEntries(BN.map((b, i) => [b, i]));
+  const PI = Int16Array.from(BN.map(b => IX[J.bones[b].parent] ?? -1)), END = new Int16Array(NB);
+  for (let i = NB - 1; i >= 0; i--) { END[i] = i + 1; for (let j = i + 1; j < NB; j++) { let q = PI[j]; while (q > i) q = PI[q]; if (q === i) END[i] = j + 1; else if (q < i) break; } }
+  const LEN = Float64Array.from(BN.map(b => { const B = J.bones[b]; return Math.hypot(B.tail[0] - B.head[0], B.tail[1] - B.head[1], B.tail[2] - B.head[2]); }));
+  const SEG = Int16Array.from(J.segs.map(s => IX[s.bone] ?? 0)), NS = J.segs.length;
+  const B_ = n => IX[n] ?? -1;
+  const HIPS = B_('Hips'), SPINE = B_('Spine'), SPINE1 = B_('Spine1'), SPINE2 = B_('Spine2'), HEAD = B_('Head'), GUN = B_('GunHold0'), HAND_R = B_('RightHand');
+  const ARM_R = B_('RightArm'), FARM_R = B_('RightForeArm'), HAND_L = B_('LeftHand'), UPLEG_L = B_('LeftUpLeg'), UPLEG_R = B_('RightUpLeg');
+  // the muzzle in the gun's frame (GunMuzzle0 is a fixed child of GunHold0: rest^-1 x rest)
+  const MZ = new Float64Array(3);
+  if (J.bones.GunMuzzle0 && J.bones.GunHold0) {
+    const r = J.bones.GunHold0.rest, h = J.bones.GunMuzzle0.head, d = [h[0] - r[3], h[1] - r[7], h[2] - r[11]];
+    for (let k = 0; k < 3; k++) MZ[k] = r[k] * d[0] + r[4 + k] * d[1] + r[8 + k] * d[2];   // R^T d (the rest's rows are R's rows)
+  }
+  // each pose: the bones' WORLD transforms (body space: Blender axes, the feet at the origin facing -Y) and their LOCAL ones
+  // (parent^-1 x world: what blends without the joints coming apart), made on first use
+  const POSE = new Map(), QI = new Float64Array(4);
+  function poseOf(name) {
+    let p = POSE.get(name); if (p !== undefined) return p;
+    const src = J.poses[name]; if (!src) { POSE.set(name, null); return null; }
+    const w = new Float64Array(NB * 7), l = new Float64Array(NB * 7);
+    for (let i = 0; i < NB; i++) { const v = src[BN[i]] || src.Hips; for (let k = 0; k < 7; k++) w[i * 7 + k] = v[k]; }
+    toLocal(w, l);
+    POSE.set(name, p = {w, l, name});
+    return p;
+  }
+  function toLocal(w, l) {
+    for (let i = 0; i < NB; i++) {
+      const o = i * 7, p = PI[i] * 7;
+      if (PI[i] < 0) { for (let k = 0; k < 7; k++) l[o + k] = w[o + k]; continue; }
+      QI[0] = -w[p]; QI[1] = -w[p + 1]; QI[2] = -w[p + 2]; QI[3] = w[p + 3];
+      qmul(QI, 0, w, o, l, o);
+      qrot(QI, 0, w[o + 4] - w[p + 4], w[o + 5] - w[p + 5], w[o + 6] - w[p + 6], l, o + 4);
+    }
+  }
+  function fk(l, w) {   // local -> world, parents first
+    for (let i = 0; i < NB; i++) {
+      const o = i * 7, p = PI[i] * 7;
+      if (PI[i] < 0) { for (let k = 0; k < 7; k++) w[o + k] = l[o + k]; continue; }
+      qmul(w, p, l, o, w, o);
+      qrot(w, p, l[o + 4], l[o + 5], l[o + 6], V3, 0);
+      w[o + 4] = w[p + 4] + V3[0]; w[o + 5] = w[p + 5] + V3[1]; w[o + 6] = w[p + 6] + V3[2];
+    }
+  }
+  function blendLocal(a, b, u, o) { for (let i = 0; i < NB; i++) { const k = i * 7; slerp(a, k, b, k, u, o, k); for (let j = 4; j < 7; j++) o[k + j] = a[k + j] + (b[k + j] - a[k + j]) * u; } }
+  // a subtree [b, END[b]) turned by quaternion q about point c (body space)
+  function turnTree(w, b, q, cx, cy, cz) {
+    for (let i = b; i < END[b]; i++) {
+      const o = i * 7; qmul(q, 0, w, o, w, o);
+      qrot(q, 0, w[o + 4] - cx, w[o + 5] - cy, w[o + 6] - cz, V3, 0);
+      w[o + 4] = cx + V3[0]; w[o + 5] = cy + V3[1]; w[o + 6] = cz + V3[2];
+    }
+  }
+  const gunNear = w => Math.hypot(w[GUN * 7 + 4] - w[HAND_R * 7 + 4], w[GUN * 7 + 5] - w[HAND_R * 7 + 5], w[GUN * 7 + 6] - w[HAND_R * 7 + 6]) < .15;
+
+  // ---------------------------------------------------------------- state
+  const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: DEMOS.includes(flags.get('livedemo')) ? flags.get('livedemo') : ''};
+  let on = true, t = 0;
+  const Ll = new Float64Array(NB * 7), Lfrom = new Float64Array(NB * 7), Ltmp = new Float64Array(NB * 7);
+  const Wb = new Float64Array(NB * 7), Wshow = new Float64Array(NB * 7), Wt = new Float64Array(NB * 7);
+  let clipNow = '', frameNow = '', frameT = 0, fadeT = 1, haveShow = false;
+  let wf = NaN, twist = 0, twistShown = NaN, demoA = NaN, stepK = -1, sampT = 0, lastT = -1, aimPhi = NaN, aimBase = '';
+  const MATS = new Float32Array(24 * 12), PR = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 4};
+  const TIPS = new Float64Array(NB * 4), TIPS2 = new Float64Array(NB * 4), PREV = new Float64Array(NB * 3), SC = [0, 0, 0];
+  let prevOk = false;
+  const stats = {held: 0, frames: 0, smears: 0, ms: 0, msRender: 0};
+  const aim = {ok: false, mx: 0, my: 0, a: 0};   // the drawn gun on screen (view px): the muzzle, the barrel's angle (the meter's aim error)
+
+  // ---------------------------------------------------------------- which pose: the frame, its clip, the next frame, the fraction
+  const NAME = {}, nm = (pre, i) => (NAME[pre] ??= [])[i] ??= pre + i;
+  const LOCO = /^(g[wr][sr]|g[wr]r|[wr]s)_([a-z0-9]+)_(\d)$/;
+  const parsed = new Map();   // frame name -> {clip, i, pre, tw, loco: 'walk' | 'run' | null}
+  function parse(f) {
+    let p = parsed.get(f); if (p) return p;
+    const m = LOCO.exec(f), d = f.lastIndexOf('.');
+    if (m) p = {clip: m[1] + '_' + m[2], i: +m[3], pre: m[1] + '_' + m[2] + '_', tw: m[2], fam: m[1], loco: m[1][1] === 'r' || m[1] === 'rs' ? 'run' : 'walk'};
+    else if (d > 0 && CL[f.slice(0, d)]) p = {clip: f.slice(0, d), i: +f.slice(d + 1), pre: f.slice(0, d + 1), tw: '', fam: '', loco: ['walk', 'run', 'sprint', 'drive'].includes(f.slice(0, d)) ? f.slice(0, d) : null};
+    else p = {clip: f, i: 0, pre: '', tw: '', fam: '', loco: null};
+    parsed.set(f, p); return p;
+  }
+  // the fraction toward the clip's next frame: by the phase (locomotion: P.ph x stride over the clip's frame advances) or by
+  // the time this frame has shown (its step: ms / fps); -> [next name | null, u]
+  const NX = {name: '', u: 0};
+  function next(p, P, f) {
+    NX.name = ''; NX.u = 0;
+    if (p.loco) {
+      const C = CL[p.loco]; if (!C || !C.cum) return NX;
+      const at = ((P.ph % 1) + 1) % 1 * C.stride, i = p.i, a = C.cum[i], b = C.cum[i + 1] ?? C.stride;
+      NX.u = Math.max(0, Math.min(1, (at - a) / ((b - a) || 1))); NX.name = nm(p.pre, (i + 1) % C.frames);
+      return NX;
+    }
+    const C = CL[p.clip]; if (!C) return NX;
+    const play = C.play, n = play ? play.length : C.frames;
+    let s = play ? play.indexOf(p.i) : p.i; if (s < 0) s = 0;
+    const dur = C.ms ? C.ms[s] / 1000 : 1 / C.fps, s2 = s + 1 < n ? s + 1 : C.loop ? 0 : -1;
+    if (s2 < 0) return NX;
+    NX.name = nm(p.pre, play ? play[s2] : s2); NX.u = Math.min(1, frameT / dur);
+    return NX;
+  }
+
+  // ---------------------------------------------------------------- the procedural layers (body space, in Wt)
+  // the cursor on screen (view px)
+  const CUR = new Float64Array(2);
+  function cursor() { const z = app.zoom || 1; CUR[0] = G.VW / 2 + (mouse.x - G.VW / 2) * z; CUR[1] = G.VH / 2 + (mouse.y - G.VH / 2) * z; return CUR; }
+  // the gun's heading (rad about +Z from -Y) and its muzzle, in w
+  const MUZ = new Float64Array(3);
+  function barrel(w) {
+    const o = GUN * 7; qrot(w, o, MZ[0], MZ[1], MZ[2], V3, 0);
+    MUZ[0] = w[o + 4] + V3[0]; MUZ[1] = w[o + 5] + V3[1]; MUZ[2] = w[o + 6] + V3[2];
+    return Math.atan2(V3[0], -V3[1]);
+  }
+  // the spine twist (_TWIST's split: .4 / .3 / .3 over Spine, Spine1, Spine2, about the vertical through each)
+  const TWB = Int16Array.of(SPINE, SPINE1, SPINE2), TWF = Float64Array.of(.4, .3, .3);
+  function spineTwist(w, d) {
+    for (let k = 0; k < 3; k++) { const b = TWB[k]; if (b < 0) continue; axisAngle(0, 0, 1, d * TWF[k], R4); turnTree(w, b, R4, w[b * 7 + 4], w[b * 7 + 5], w[b * 7 + 6]); }
+  }
+  // AIMING BY WHAT YOU SEE (as the sim picks the sprites' twists, sim/player/gun.js aimErr): the twist that puts the barrel's
+  // SCREEN direction (the body squashed as the sprite camera saw it) on the line from the muzzle to the cursor. A secant
+  // search on the screen-angle error, from the last answer (4 passes: the muzzle orbits the spine as it turns)
+  const TW_TMP = new Float64Array(NB * 7), SO = [0, 0, 0];
+  function screenErr(w, d) {
+    TW_TMP.set(w); spineTwist(TW_TMP, d); barrel(TW_TMP);
+    const o = GUN * 7; screenOf(MUZ[0], MUZ[1], MUZ[2], SC); const mx = SC[0], my = SC[1];
+    screenOf(TW_TMP[o + 4], TW_TMP[o + 5], TW_TMP[o + 6], SO);
+    return wrap(Math.atan2(CUR[1] - my, CUR[0] - mx) - Math.atan2(my - SO[1], mx - SO[0]));
+  }
+  function aimTwist(w, d0) {
+    const LIM = 110 * DEG; cursor();
+    let a = d0 === d0 ? d0 : 0, ea = screenErr(w, a), b = a + (ea > 0 ? -1 : 1) * 12 * DEG, eb = screenErr(w, b);
+    for (let it = 0; it < 5 && Math.abs(eb) > .5 * DEG; it++) {
+      const den = eb - ea; let c = Math.abs(den) < 1e-6 ? b + 6 * DEG : b - eb * (b - a) / den;
+      c = Math.max(-LIM, Math.min(LIM, c)); a = b; ea = eb; b = c; eb = screenErr(w, b);
+    }
+    return Math.abs(eb) <= Math.abs(ea) ? b : a;
+  }
+  // hysteresis: v follows target only when it moved more than K.hyst degrees (0: always)
+  const hystOf = (shown, target) => !(shown === shown) || !K.hyst || Math.abs(wrap(target - shown)) > K.hyst * DEG ? target : shown;
+  // two-bone IK: the right wrist onto body-space point T, the elbow bending in the plane it bends in now
+  function ikRight(w, Tx, Ty, Tz) {
+    const s = ARM_R * 7, e = FARM_R * 7, h = HAND_R * 7;
+    const Sx = w[s + 4], Sy = w[s + 5], Sz = w[s + 6], L1 = LEN[ARM_R], L2 = LEN[FARM_R];
+    let dx = Tx - Sx, dy = Ty - Sy, dz = Tz - Sz; const d0 = Math.hypot(dx, dy, dz) || 1e-6, d = Math.max(Math.abs(L1 - L2) + 1e-3, Math.min(L1 + L2 - 1e-3, d0));
+    dx /= d0; dy /= d0; dz /= d0;
+    let px = w[e + 4] - Sx, py = w[e + 5] - Sy, pz = w[e + 6] - Sz; const pd = px * dx + py * dy + pz * dz;   // the pole: the elbow now
+    px -= dx * pd; py -= dy * pd; pz -= dz * pd; let pl = Math.hypot(px, py, pz);
+    if (pl < 1e-4) { px = 0; py = 1; pz = -.3; pl = Math.hypot(py, pz); }   // (straight: the elbow back and down)
+    px /= pl; py /= pl; pz /= pl;
+    const ca = Math.max(-1, Math.min(1, (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d))), sa = Math.sqrt(1 - ca * ca);
+    const Ex = Sx + L1 * (dx * ca + px * sa), Ey = Sy + L1 * (dy * ca + py * sa), Ez = Sz + L1 * (dz * ca + pz * sa);
+    fromTo(w[e + 4] - Sx, w[e + 5] - Sy, w[e + 6] - Sz, Ex - Sx, Ey - Sy, Ez - Sz, R4); turnTree(w, ARM_R, R4, Sx, Sy, Sz);
+    const Wx = Sx + dx * d, Wy = Sy + dy * d, Wz = Sz + dz * d;
+    fromTo(w[h + 4] - w[e + 4], w[h + 5] - w[e + 5], w[h + 6] - w[e + 6], Wx - w[e + 4], Wy - w[e + 5], Wz - w[e + 6], R4); turnTree(w, FARM_R, R4, w[e + 4], w[e + 5], w[e + 6]);
+  }
+  // the reload's frame for the gun's phase + progress (sim/player/gun.js reloadFrame, as a fraction for the smooth path)
+  function reloadAt(S) {
+    const C = CL.gun_reload, M = C && C.marks, k = S.reloadK; if (!M) return 0;
+    let a, b, back = false;
+    switch (S.rph) {
+      case 'up': a = M.up; b = M.eject - 1; break;
+      case 'eject': a = M.eject; b = M.first - 1; break;
+      case 'fetch': if (S.rfirst) { a = M.first; b = M.fetch; } else { a = M.fetch; b = M.load - 1; back = true; } break;
+      case 'load': a = M.fetch + 1; b = M.load; break;
+      default: a = M.close; b = C.frames - 1;
+    }
+    const x = Math.min(b - a, k * (b - a + 1));
+    return back ? b - x : a + x;
+  }
+  // ---- the demos: the lasso spun overhead (IK hand + the rope's loop), hanging from a rope and swinging
+  const LASSO = {r: .17, up: .28, side: -.12, fwd: .05, hz: 1.4, loop: .72, n: 14}, SWING = {amp: 32 * DEG, rope: 1.25, lift: .45, lag: .35};
+  const ROPE = new Float64Array(3 * 18), ROPE_C = [.79, .64, .42];
+  let ropeN = 0;
+  function lasso(w, tt) {
+    const ang = tt * TAU * LASSO.hz, h = HEAD * 7;
+    const cx = w[h + 4] + LASSO.side, cy = w[h + 5] - LASSO.fwd, cz = w[h + 6] + LASSO.up + .1;
+    const Tx = cx + LASSO.r * Math.cos(ang), Ty = cy + LASSO.r * Math.sin(ang), Tz = cz;
+    ikRight(w, Tx, Ty, Tz);
+    // the loop: a ring round the hand's circle's centre, the hand on it (the honda), plus the spoke
+    // (a lasso's loop: its centre across the hand's circle from the hand, so the loop passes through the hand and swings round with it)
+    const n = LASSO.n, o = HAND_R * 7, hx = w[o + 4], hy = w[o + 5], hz = w[o + 6] + .03;
+    const lx = cx - (LASSO.loop - LASSO.r) * Math.cos(ang), ly = cy - (LASSO.loop - LASSO.r) * Math.sin(ang), lz = cz + .06;
+    for (let i = 0; i <= n; i++) {
+      const a = ang + i / n * TAU, e = i === 0 || i === n;
+      ROPE[i * 3] = e ? hx : lx + LASSO.loop * Math.cos(a); ROPE[i * 3 + 1] = e ? hy : ly + LASSO.loop * Math.sin(a); ROPE[i * 3 + 2] = e ? hz : lz + .05 * Math.sin(a);
+    }
+    ropeN = n + 1;
+  }
+  function swing(w, th, dth) {
+    const l = HAND_L * 7, r = HAND_R * 7;
+    const px = (w[l + 4] + w[r + 4]) / 2, py = (w[l + 5] + w[r + 5]) / 2, pz = (w[l + 6] + w[r + 6]) / 2 + SWING.rope;
+    for (let k = 0; k < 2; k++) { const b = k ? UPLEG_R : UPLEG_L; if (b >= 0) { axisAngle(0, 1, 0, -dth * SWING.lag, R4); turnTree(w, b, R4, w[b * 7 + 4], w[b * 7 + 5], w[b * 7 + 6]); } }   // the legs trail
+    axisAngle(0, 1, 0, th, R4);
+    for (let i = 0; i < NB; i++) if (PI[i] < 0) turnTree(w, i, R4, px, py, pz);   // the whole body about the rope's top
+    for (let i = 0; i < NB; i++) w[i * 7 + 6] += SWING.lift;
+    ROPE[0] = px; ROPE[1] = py; ROPE[2] = pz + SWING.lift;
+    ROPE[3] = (w[l + 4] + w[r + 4]) / 2; ROPE[4] = (w[l + 5] + w[r + 5]) / 2; ROPE[5] = (w[l + 6] + w[r + 6]) / 2 + .05;
+    ropeN = 2;
+  }
+
+  // ---------------------------------------------------------------- body space -> the render's world (render/rigmesh.js matrices)
+  let fc = 1, fs = 0, AX = 0, AY = 0, AZ = 0, FX = 0, FZ = -1;
+  function toWorld(x, y, z, o, k) { o[k] = fc * x - fs * y + AX; o[k + 1] = z + AY; o[k + 2] = -fs * x - fc * y + AZ; }
+  const WP = new Float64Array(3);
+  function screenOf(x, y, z, out) {   // body space -> view px, the sprite camera's squash applied
+    toWorld(x, y, z, WP, 0);
+    const dd = (WP[0] - AX) * FX + (WP[2] - AZ) * FZ, X = WP[0] - FX * dd * (1 - K_UP), Z = WP[2] - FZ * dd * (1 - K_UP);
+    return G.toScreenInto(X, WP[1], Z, out);
+  }
+  function tips(w, out) {   // each bone's head and tail on screen, relative to the anchor's (px)
+    screenOf(0, 0, 0, SC); const ax = SC[0], ay = SC[1];
+    for (let i = 0; i < NB; i++) {
+      const o = i * 7; screenOf(w[o + 4], w[o + 5], w[o + 6], SC); out[i * 4] = SC[0] - ax; out[i * 4 + 1] = SC[1] - ay;
+      qrot(w, o, 0, LEN[i], 0, V3, 0); screenOf(w[o + 4] + V3[0], w[o + 5] + V3[1], w[o + 6] + V3[2], SC); out[i * 4 + 2] = SC[0] - ax; out[i * 4 + 3] = SC[1] - ay;
+    }
+  }
+  function mats(w) {
+    for (let s = 0; s < NS; s++) {
+      const o = SEG[s] * 7, m = s * 12, x = w[o], y = w[o + 1], z = w[o + 2], q = w[o + 3];
+      // the bone's rotation (rows), Blender axes
+      const r00 = 1 - 2 * (y * y + z * z), r01 = 2 * (x * y - z * q), r02 = 2 * (x * z + y * q);
+      const r10 = 2 * (x * y + z * q), r11 = 1 - 2 * (x * x + z * z), r12 = 2 * (y * z - x * q);
+      const r20 = 2 * (x * z - y * q), r21 = 2 * (y * z + x * q), r22 = 1 - 2 * (x * x + y * y);
+      MATS[m] = fc * r00 - fs * r10; MATS[m + 1] = fc * r01 - fs * r11; MATS[m + 2] = fc * r02 - fs * r12;
+      MATS[m + 4] = r20; MATS[m + 5] = r21; MATS[m + 6] = r22;
+      MATS[m + 8] = -fs * r00 - fc * r10; MATS[m + 9] = -fs * r01 - fc * r11; MATS[m + 10] = -fs * r02 - fc * r12;
+      toWorld(w[o + 4], w[o + 5], w[o + 6], WP, 0); MATS[m + 3] = WP[0]; MATS[m + 7] = WP[1]; MATS[m + 11] = WP[2];
+    }
+  }
+  // SMEAR: a segment whose bone tail jumped > SMEAR.px on screen since the last drawn frame: stretched back along its move
+  function smear(w) {
+    let n = 0;
+    screenOf(0, 0, 0, SC); const ax = SC[0], ay = SC[1];
+    for (let s = 0; s < NS; s++) {
+      const b = SEG[s], o = b * 7; qrot(w, o, 0, LEN[b] || .05, 0, V3, 0);
+      const tx = w[o + 4] + V3[0], ty = w[o + 5] + V3[1], tz = w[o + 6] + V3[2];
+      if (prevOk) {
+        screenOf(tx, ty, tz, SC); const sx = SC[0] - ax, sy = SC[1] - ay; screenOf(PREV[b * 3], PREV[b * 3 + 1], PREV[b * 3 + 2], SC);
+        const jp = Math.hypot(sx - (SC[0] - ax), sy - (SC[1] - ay));
+        if (jp > SMEAR.px) {
+          toWorld(tx, ty, tz, WP, 0); const qx = WP[0], qy = WP[1], qz = WP[2]; toWorld(PREV[b * 3], PREV[b * 3 + 1], PREV[b * 3 + 2], WP, 0);
+          let vx = qx - WP[0], vy = qy - WP[1], vz = qz - WP[2]; const vl = Math.hypot(vx, vy, vz) || 1; vx /= vl; vy /= vl; vz /= vl;
+          const k = Math.min(SMEAR.max, vl * SMEAR.k) / (LEN[b] || .1), m = s * 12;
+          // M' = S M about q: S = I + k v v^T; t' = S t - k v (v . q)
+          for (let c = 0; c < 4; c++) {
+            const a0 = MATS[m + c], a1 = MATS[m + 4 + c], a2 = MATS[m + 8 + c], dv = vx * a0 + vy * a1 + vz * a2 - (c === 3 ? vx * qx + vy * qy + vz * qz : 0);
+            MATS[m + c] = a0 + k * vx * dv; MATS[m + 4 + c] = a1 + k * vy * dv; MATS[m + 8 + c] = a2 + k * vz * dv;
+          }
+          n++;
+        }
+      }
+    }
+    for (let b = 0; b < NB; b++) { const o = b * 7; qrot(w, o, 0, LEN[b] || .05, 0, V3, 0); PREV[b * 3] = w[o + 4] + V3[0]; PREV[b * 3 + 1] = w[o + 5] + V3[1]; PREV[b * 3 + 2] = w[o + 6] + V3[2]; }
+    prevOk = true;
+    return n;
+  }
+
+  // ---------------------------------------------------------------- the frame
+  // the facing: his facing in the world without the camera's 16-step rounding ((P.face + faceRest) steps + yaw), eased
+  // (smooth) or as the sim has it (step), then snapped relative to the camera (K.face) or left free
+  function facing(P, yaw, dt) {
+    const ND = hero.ND, st = TAU / ND, rest = pa.faceRest ?? 0, tru = (P.face + rest) * st + yaw;
+    if (K.step || !(wf === wf)) wf = tru;
+    else { const d = wrap(tru - wf), m = TURN * dt; wf = Math.abs(d) <= m ? tru : wf + Math.sign(d) * m; }
+    if (!K.face) return wf;
+    const q = TAU / K.face; return yaw + Math.round((wf - yaw) / q) * q;
+  }
+  const SPRO = {img: null, nrm: null, px: 0, py: 0, x: 0, y: 0, h: 0, frame: '', face: 0};
+  function compose(PX, PY, perf) {
+    const t0 = performance.now(), P = app.P, yaw = app.yaw, dt = lastT < 0 ? 0 : Math.min(.05, Math.max(0, (t0 - lastT) / 1000));
+    perf?.begin('live.pose', 'char');
+    hero.card.setVisible(false);
+    t += dt; lastT = t0;   // (the view's own clock: the frame's real time)
+    const sinkPx = Math.round((P.sink || 0) * 22);
+    // 1) the frame and its clip, the time it has shown
+    const f = poseOf(P.frame) ? P.frame : 'idle.0', p = parse(f);
+    if (f !== frameNow) { frameNow = f; frameT = 0; } else frameT += dt;
+    if (p.clip !== clipNow) { if (haveShow && !K.step) { Lfrom.set(Ll); fadeT = 0; } clipNow = p.clip; }
+    // 2) the base pose (world, body space) into Wt
+    const S = app.PL.gun?.S, proc = K.proc;
+    let baseName = f, layer = '', upper = -1, aiming = false;
+    if (proc && p.fam && (p.fam === 'gws' || p.fam === 'grs')) { baseName = nm(p.fam + '_0_', p.i); aiming = true; }   // aim on the move: the twist-0 pose
+    else if (proc && f.startsWith('gun_aim')) { baseName = 'gun_aim'; aiming = true; }                                  // the standing twists: gun_aim
+    else if (proc && p.fam && (p.fam === 'gwr' || p.fam === 'grr') && S) { baseName = nm(p.loco + '.', p.i); layer = 'reload'; upper = reloadAt(S); }
+    if (K.demo === 'swing') baseName = poseOf('reach_up') ? 'reach_up' : 'idle.0';
+    const A = poseOf(baseName) || poseOf(f);
+    if (!K.step) {   // smooth: toward the next frame
+      const nx = next(baseName === f ? p : parse(baseName), P, f), B = nx.name && poseOf(nx.name);
+      if (B) blendLocal(A.l, B.l, nx.u, Ll); else Ll.set(A.l);
+    } else Ll.set(A.l);
+    if (fadeT < 1) { fadeT = Math.min(1, fadeT + dt / FADE); blendLocal(Lfrom, Ll, fadeT * fadeT * (3 - 2 * fadeT), Ltmp); Ll.set(Ltmp); }
+    fk(Ll, Wt);
+    if (GUN >= 0 && !K.step) {   // the gun held away from the hand (the holster) blends in body space, not along the arm
+      const nx = NX.name ? poseOf(NX.name) : null;
+      if (nx && !(gunNear(A.w) && gunNear(nx.w))) { const o = GUN * 7; slerp(A.w, o, nx.w, o, NX.u, Wt, o); for (let k = 4; k < 7; k++) Wt[o + k] = A.w[o + k] + (nx.w[o + k] - A.w[o + k]) * NX.u; }
+    }
+    // the procedural time: sampled at STEP_HZ (step) or every frame
+    const tk = Math.floor(t * STEP_HZ), sample = !K.step || tk !== stepK; if (sample) { stepK = tk; sampT = K.step ? tk / STEP_HZ : t; }
+    // 3) layering: the reload's upper body (Spine and up, as posed in the stand) over these legs, the spine's base on theirs
+    if (layer === 'reload') {
+      const a = Math.floor(upper), u = K.step ? 0 : upper - a, RA = poseOf(nm('gun_reload.', a)), RB = poseOf(nm('gun_reload.', Math.min(a + 1, (CL.gun_reload?.frames || 13) - 1)));
+      if (RA && SPINE >= 0) {
+        if (RB && u > 0) { blendLocal(RA.l, RB.l, u, Ltmp); fk(Ltmp, Wb); } else Wb.set(RA.w);
+        const o = SPINE * 7, dx = Wt[o + 4] - Wb[o + 4], dy = Wt[o + 5] - Wb[o + 5], dz = Wt[o + 6] - Wb[o + 6];
+        for (let i = SPINE; i < END[SPINE]; i++) { const k = i * 7; for (let j = 0; j < 4; j++) Wt[k + j] = Wb[k + j]; Wt[k + 4] = Wb[k + 4] + dx; Wt[k + 5] = Wb[k + 5] + dy; Wt[k + 6] = Wb[k + 6] + dz; }
+        if (p.loco === 'run') { axisAngle(1, 0, 0, 6 * DEG, R4); turnTree(Wt, SPINE, R4, Wt[o + 4], Wt[o + 5], Wt[o + 6]); }   // the run's lean (western.py _on_legs)
+      }
+    }
+    // 4) the facing and the anchor
+    const phi = facing(P, yaw, dt);
+    fc = Math.cos(phi); fs = Math.sin(phi); AX = PX; AY = P.z - sinkPx / ctxO.PPMH; AZ = PY; FX = -Math.sin(yaw); FZ = -Math.cos(yaw);
+    // 5) aim at any angle: the twist onto the cursor (held by the hysteresis, sampled with the step)
+    if (aiming && GUN >= 0) {   // (and at once when the legs re-plant or turn: a stale twist on new legs points anywhere)
+      if (sample || !(twistShown === twistShown) || phi !== aimPhi || baseName !== aimBase) {
+        twist = aimTwist(Wt, twist); twistShown = phi !== aimPhi || baseName !== aimBase ? twist : hystOf(twistShown, twist); aimPhi = phi; aimBase = baseName;
+      }
+      spineTwist(Wt, twistShown);
+    } else twistShown = NaN;
+    // 6) the demos
+    ropeN = 0;
+    if (K.demo === 'lasso' && !(S && S.out)) {
+      const ang = sampT * TAU * LASSO.hz, a = hystOf(demoA, wrap(ang)); demoA = a;
+      lasso(Wt, a / (TAU * LASSO.hz));
+    } else if (K.demo === 'swing') {
+      const w0 = Math.sqrt(9.81 / (SWING.rope + 1.0)), th = SWING.amp * Math.sin(w0 * sampT), dth = SWING.amp * Math.cos(w0 * sampT);
+      const a = hystOf(demoA, th); demoA = a; swing(Wt, a, dth);
+    } else demoA = NaN;
+    // 7) hold until it changes by a pixel
+    stats.frames++;
+    let show = Wt;
+    if (K.hold && haveShow) {
+      tips(Wt, TIPS); tips(Wshow, TIPS2);
+      let mx = 0; for (let i = 0; i < NB * 4; i++) { const d = Math.abs(TIPS[i] - TIPS2[i]); if (d > mx) mx = d; }
+      if (mx < 1) { show = Wshow; stats.held++; } else Wshow.set(Wt);
+    } else Wshow.set(Wt);
+    haveShow = true;
+    if (show !== Wt) toLocal(Wshow, Ll);   // (Ll: the shown local pose, a clip change's cross-fade starts from it)
+    // 8) the segments' matrices, the smear, the rig
+    aim.ok = GUN >= 0 && gunNear(show);
+    if (aim.ok) { barrel(show); screenOf(MUZ[0], MUZ[1], MUZ[2], SC); aim.mx = SC[0]; aim.my = SC[1]; const o = GUN * 7; screenOf(show[o + 4], show[o + 5], show[o + 6], SC); aim.a = Math.atan2(aim.my - SC[1], aim.mx - SC[0]); }
+    mats(show);
+    stats.smears += K.smear ? smear(show) : (prevOk = false, 0);
+    const blinkOff = P.blink && Math.floor(P.blink * 12) % 2;
+    PR.x = AX; PR.y = AY; PR.z = AZ; PR.sx = PX; PR.sy = P.z; PR.sz = PY; PR.snap = K.snap ? 1 : 0; PR.alpha = 1;
+    if (!blinkOff) rig.put(model, 0, MATS, PR);
+    for (let i = 0; i < ropeN - 1; i++) {   // the rope (the demos): pixel lines in the world
+      toWorld(ROPE[i * 3], ROPE[i * 3 + 1], ROPE[i * 3 + 2], WP, 0); const x0 = WP[0], y0 = WP[1], z0 = WP[2];
+      toWorld(ROPE[i * 3 + 3], ROPE[i * 3 + 4], ROPE[i * 3 + 5], WP, 0); G.line(x0, y0, z0, WP[0], WP[1], WP[2], ROPE_C);
+    }
+    lineupDraw();
+    perf?.end('live.pose');
+    const t1 = performance.now();
+    perf?.begin('live.rig', 'render'); rig.render(); perf?.end('live.rig');
+    G.setPlayer(PX, P.z + .9, PY, PLAYER_SUN);   // (his one sun-shadow test, past his own 3D body: it cast onto the point and flickered)
+    stats.ms = stats.ms * .95 + (t1 - t0) * .05; stats.msRender = stats.msRender * .95 + (performance.now() - t1) * .05;
+    return sinkPx;
+  }
+
+  // ---------------------------------------------------------------- the lineup (dev: the look test puts poses beside sprites)
+  let lineup = [];
+  const LP = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 4};
+  function lineupDraw() {
+    for (let i = 0; i < lineup.length && i < slots - 1; i++) {
+      const L = lineup[i], A = poseOf(L.pose); if (!A) continue;
+      fc = Math.cos(L.face); fs = Math.sin(L.face); AX = L.x; AY = L.z; AZ = L.y;
+      mats(A.w);
+      LP.x = AX; LP.y = AY; LP.z = AZ; LP.sx = L.x; LP.sy = L.z; LP.sz = L.y; LP.snap = L.snap ?? 1;
+      rig.put(model, i + 1, MATS, LP);
+    }
+  }
+
+  // ---------------------------------------------------------------- host.playerSprite's object while live: the atlas frame
+  // (contact shadows measure his feet from it, flow's afterimages and depth's reflections copy it), filled when read
+  const cv = document.createElement('canvas'), cn = document.createElement('canvas'); cv.width = cn.width = 192; cv.height = cn.height = 160;
+  const cq = cv.getContext('2d', {willReadFrequently: true}), nq = cn.getContext('2d'); cq.imageSmoothingEnabled = nq.imageSmoothingEnabled = false;
+  let drawnKey = '', drawnFace = -1;
+  function fill() {
+    const P = app.P, A = hero.atlas, f = A.SP[P.frame] ? P.frame : 'idle.0';
+    if (f === drawnKey && P.face === drawnFace) return;
+    drawnKey = f; drawnFace = P.face; cq.clearRect(0, 0, 192, 160); nq.clearRect(0, 0, 192, 160);
+    const sp = A.SP[f]; if (sp.img) cq.drawImage(sp.img, P.face * A.FW, 0, A.FW, A.FH, 48, 40, A.FW, A.FH); if (sp.nrm) nq.drawImage(sp.nrm, P.face * A.FW, 0, A.FW, A.FH, 48, 40, A.FW, A.FH);
+  }
+  Object.defineProperty(SPRO, 'img', {get() { fill(); return cv; }}); Object.defineProperty(SPRO, 'nrm', {get() { fill(); return cn; }});
+  function sprite() {
+    const P = app.P, pl = app.player, A = hero.atlas; SPRO.px = A.PIV[0] + 48; SPRO.py = A.PIV[1] + 40; SPRO.x = pl.x; SPRO.y = pl.y; SPRO.h = P.z; SPRO.frame = P.frame; SPRO.face = P.face;
+    return SPRO;
+  }
+
+  const live = {
+    K, stats, rig, model, poseOf, BN, J,
+    get on() { return on && hero.loadName in MODELS; },
+    get available() { return hero.loadName in MODELS; },
+    toggle(v = !on) { on = !!v; haveShow = false; prevOk = false; wf = NaN; lastT = -1; t = 0; stepK = -1; return on; },
+    set(o) { Object.assign(K, o); haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; return K; },
+    preset(name) { return live.set(PRESETS[name]); },
+    get presetName() { for (const [n, v] of Object.entries(PRESETS)) if (Object.keys(v).every(k => v[k] === K[k])) return n; return 'custom'; },
+    setLineup(items) { lineup = items || []; },
+    aim,
+    // (dev: the shimmer meter draws several knob sets off ONE sim step, each from its own history)
+    snapshot: () => ({v: [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase],
+      a: [Ll.slice(), Lfrom.slice(), Wshow.slice(), PREV.slice()], K: {...K}}),
+    restore(S) { [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase] = S.v; Ll.set(S.a[0]); Lfrom.set(S.a[1]); Wshow.set(S.a[2]); PREV.set(S.a[3]); Object.assign(K, S.K); },
+    presets: Object.keys(PRESETS), demos: DEMOS,
+    compose, sprite,
+    get bytes() { return rig.bytes; },
+    get atlas() { return hero.atlas; },
+  };
+  return live;
+}

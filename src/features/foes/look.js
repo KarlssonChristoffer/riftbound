@@ -28,6 +28,14 @@
 //            GPU contact stamp, gfx.js G.ao, as much as he lies; a small one under his feet while he still stands:
 //            contact.js's walker stamp ends when he dies). Without the clips: thrown back in `fall`, down through `land` to `crouch`, faded
 //            at once; without those either, his last pose slides and fades
+//   ragdoll  (?ragdoll=1, the bandit, once its model has loaded: view/ragdoll.js) instead of the death clip, the sprite's
+//            place is taken on the frame he falls by the live 3D body of the atlas's own Blender model, in the pose the
+//            sprite showed (the nearest exported one) and facing as it faced, drawn with the pixelizer's rules
+//            (render/rigmesh.js) and thrown by the killing shot (arrow.hit's way and push; combat.hit's point and height,
+//            which reaches the view after the kill's hitstop, before the body has moved); the gun and the hat fly loose.
+//            The thud (foe.ground + the puff) when the torso first touches the ground; it lies TUNE.ragdoll.fall +
+//            corpse.hold s, then fades with the same dither, counted with the corpses (TUNE.corpse.max). hit_f / hit_b
+//            and the other gunmen's deaths are the clips as before
 //   telegraph the aim's last moment (the lock): a glint on the barrel (the 'add' layer, drawn by the GPU, after the light:
 //            it reads at noon)
 //   tracers  the bullets in flight, with gunfx's look (features/gunfx.js tracer()); the flash, smoke, impacts and the
@@ -53,6 +61,8 @@ import {atlasOf} from '../../sim/player/player.js';
 import {TYPES, TUNE} from '../../content/foes.js';
 import {tracer} from '../gunfx.js';
 import {hypot3} from '../../core/mathx.js';
+import {flags} from '../../core/flags.js';
+import {createRagdolls} from '../../view/ragdoll.js';
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180, OUT = '../concepts/sprites/out/';
 const NEED = ['idle.0', 'walk.0', 'run.0', 'gun_draw.0', 'gun_aim', 'gun_fire.0', 'gun_reload.0'];
@@ -60,6 +70,7 @@ const TWS = ['gun_aim_m45', 'gun_aim_m34', 'gun_aim_m22', 'gun_aim_m11', 'gun_ai
 const TWM = ['m90', 'm67', 'm45', 'm22', '0', 'p22', 'p45'];
 const angDiff = (a, b) => Math.abs(((a - b) + Math.PI * 3) % TAU - Math.PI);
 const GLINT = ['#fff8e0', '#ffe2a0', '#ffc86a'];
+const RAG = flags.get('ragdoll') === '1', RAG_TYPES = {bandit: 'ragdoll/bandit/'};   // ?ragdoll=1: these types die as ragdolls (their models' folders under out/)
 
 // which atlas a type draws from: the full outfit once it lists what's needed, else the gate-2 preview
 async function rootOf(name) {
@@ -141,9 +152,14 @@ function prep(s, root) {
 
 export function createLook(host, sim) {
   const sets = {}, G = host.G;
-  let loading = null, failed = '';
+  let loading = null, failed = '', rag = null;
   function load() {
     if (loading) return loading;
+    if (RAG) {   // (the ragdolls' models: a type without one keeps its death clips)
+      rag = createRagdolls(host);
+      rag.onGround = s => { const c = corpses[s]; if (c.on && c.rag) { rag.point(s, 0, SC); c.x = SC[0]; c.y = SC[2]; c.z = host.elev(SC[0], SC[2]); ground(c); } };
+      for (const [k, dir] of Object.entries(RAG_TYPES)) rag.load(k, OUT + dir).catch(e => console.warn(`foes: the ${k} ragdoll failed to load`, e));
+    }
     return (loading = Promise.all(Object.keys(TYPES).map(async k => {
       let root = await rootOf(TYPES[k].atlas), s;
       try { s = await loadAtlas(root, {normals: true}); }
@@ -236,7 +252,9 @@ export function createLook(host, sim) {
   // from his right side (his left: (cos face, -sin face) on the ground), or the fallback
   const CM = 16, corpses = [];
   for (let i = 0; i < CM; i++) corpses.push({on: false, set: null, clip: '', x: 0, y: 0, z: 0, face: 0, vx: 0, vy: 0, t: 0, pose: '', lift: 0,
-    groundT: 0, grounded: true, fadeAt: 0, fadeLen: 1, foe: '', fx: 0, fy: 0});   // fx / fy: where he stood
+    groundT: 0, grounded: true, fadeAt: 0, fadeLen: 1, foe: '', fx: 0, fy: 0, rag: false, pend: false, p: null, f: 0, swap: 0, power: 0});
+  // fx / fy: where he stood; rag: a ragdoll (its slot = this corpse's index); pend: its push not given yet (p: the gunman, for
+  // combat.hit's point; power: arrow.hit's push); f: the sprite's facing; swap: frames of cross-fade left
   function fell(v, p) {
     const set = sets[p.foe], C = TUNE.corpse; if (!set) return;
     let n = 0, old = null;   // at most C.max lie about: the oldest still lying starts to fade now
@@ -244,13 +262,24 @@ export function createLook(host, sim) {
     if (n >= C.max && old) { old.fadeAt = old.t; old.fadeLen = C.early; }
     let c = null; for (const q of corpses) if (!q.on) { c = q; break; }
     if (!c) { c = corpses[0]; for (const q of corpses) if (q.t > c.t) c = q; }   // (all in use: the oldest goes)
+    if (c.rag) { rag.free(corpses.indexOf(c)); c.rag = false; }
     let dx = v.hx, dy = v.hy, l = hypot3(dx, dy, 0);
+    const power = l;   // (arrow.hit's way for a bullet: the weapon's push x the bullet's speed)
     if (l < 1e-3) { dx = p.x - host.player.x; dy = p.y - host.player.y; l = hypot3(dx, dy, 0) || 1; }
     dx /= l; dy /= l;
+    if (rag && RAG_TYPES[p.foe] && rag.ready(p.foe)) {   // the ragdoll: the live body in the sprite's pose and facing, pushed on its first view step
+      const R = TUNE.ragdoll, s = corpses.indexOf(c), face = worldOf(set, v.f);
+      if (rag.spawn(s, p.foe, {x: p.x, y: p.y, z: p.z || 0, face, pose: v.pose, hit: null, flash: Math.min(1, (p.flash || 0) * TUNE.hit.flash), alpha: R.swap ? 0 : 1})) {
+        c.on = true; c.set = set; c.clip = ''; c.rag = true; c.pend = true; c.p = p; c.f = v.f; c.pose = v.pose; c.swap = R.swap; c.power = power;
+        c.z = p.z || 0; c.t = 0; c.lift = 0; c.vx = dx; c.vy = dy; c.foe = p.foe; c.x = c.fx = p.x; c.y = c.fy = p.y; c.face = face;
+        c.grounded = false; c.fadeAt = R.fall + C.hold; c.fadeLen = C.fade;
+        return;
+      }
+    }
     const front = -(dx * Math.sin(v.face) + dy * Math.cos(v.face)) >= Math.cos(TUNE.ai.hitFront * DEG);
     const spin = C.side > 0 && dx * Math.cos(v.face) - dy * Math.sin(v.face) >= Math.cos(C.side * DEG) && set.ok('die_s');
     const clip = spin ? 'die_s' : pick(set, front ? 'die_b' : 'die_f', front ? 'die_f' : 'die_b');
-    c.on = true; c.set = set; c.clip = clip || ''; c.z = p.z || 0; c.t = 0; c.lift = 0; c.vx = dx; c.vy = dy; c.pose = v.pose; c.foe = p.foe; c.fx = p.x; c.fy = p.y;
+    c.on = true; c.set = set; c.clip = clip || ''; c.rag = false; c.z = p.z || 0; c.t = 0; c.lift = 0; c.vx = dx; c.vy = dy; c.pose = v.pose; c.foe = p.foe; c.fx = p.x; c.fy = p.y;
     if (clip) {   // the clip as rendered, its corpse on the pivot: the sprite goes back by his root's start ahead of it
       const L = set.tl(clip), sh = set.rootShift(clip) ?? (clip === 'die_b' ? 1 : -1) * (L.c.travel ?? C.travel[clip] ?? 0);
       const sd = L.c.side || 0;   // (a clip centred across him too, die_s: the corpse lies that far to his left)
@@ -298,6 +327,7 @@ export function createLook(host, sim) {
     }
     v.rph = g.rph; v.ram = g.ammo;
   }
+  const RAGHIT = {x: 0, y: 0, h: 0, dx: 0, dy: 0, power: 0};
   let frameN = 0;
   function sweep(v, p) { if (v.seen === frameN) return; if (p.broken) fell(v, p); VS.delete(p); }   // (gone: killed, or the gang left)
 
@@ -434,9 +464,13 @@ export function createLook(host, sim) {
   }
 
   const L = {
-    get sets() { return sets; }, get failed() { return failed; }, load, VS, corpses,
+    get sets() { return sets; }, get failed() { return failed; }, load, VS, corpses, get rag() { return rag; },
     view(dt, evs, on) {
-      if (!on) { if (VS.size) VS.clear(); for (const c of corpses) c.on = false; return; }   // (out of the desert sandbox)
+      if (!on) {   // (out of the desert sandbox)
+        if (VS.size) VS.clear();
+        for (let i = 0; i < CM; i++) { const c = corpses[i]; if (c.rag) { rag.free(i); c.rag = false; } c.on = false; }
+        return;
+      }
       for (const e of evs) if (e.type === 'arrow.hit' && e.prop?.kind === 'gunman') {   // (the way the last hit came; a bullet's shove)
         const v = VS.get(e.prop); if (!v) continue;
         v.hx = e.vx; v.hy = e.vy;
@@ -448,15 +482,23 @@ export function createLook(host, sim) {
         marks(g, v);
       }
       const C = TUNE.corpse;
+      for (let i = 0; i < CM; i++) {   // a ragdoll's push: at its first view step (after the kill's hitstop), at combat.hit's point if it came
+        const c = corpses[i]; if (!c.on || !c.rag || !c.pend) continue;
+        let hx = c.fx, hy = c.fy, hh = c.z + 1.15, ux = c.vx, uy = c.vy;
+        for (const e of evs) if (e.type === 'combat.hit' && e.who === c.p) { hx = e.hx; hy = e.hy; hh = e.hh; if (e.dx || e.dy) { ux = e.dx; uy = e.dy; } }
+        RAGHIT.x = hx; RAGHIT.y = hy; RAGHIT.h = hh; RAGHIT.dx = ux; RAGHIT.dy = uy; RAGHIT.power = c.power;
+        rag.push(i, RAGHIT); c.pend = false; c.p = null;
+      }
       for (const c of corpses) {
         if (!c.on) continue;
         c.t += dt;
         if (!c.clip) {   // the fallback's throw
           if (c.t < C.fall) { const k = 1 - c.t / C.fall; c.x += c.vx * C.slide * k * dt; c.y += c.vy * C.slide * k * dt; c.lift = Math.sin(Math.PI * c.t / C.fall) * C.lift; }
           else c.lift = 0;
-        } else if (!c.grounded && c.t >= c.groundT) { c.grounded = true; ground(c); }
-        if (c.t >= c.fadeAt + c.fadeLen) c.on = false;
+        } else if (!c.rag && !c.grounded && c.t >= c.groundT) { c.grounded = true; ground(c); }
+        if (c.t >= c.fadeAt + c.fadeLen) { c.on = false; if (c.rag) { rag.free(corpses.indexOf(c)); c.rag = false; } }
       }
+      if (rag) rag.step(dt);
     },
     frame(f, on) {
       if (!on) return;
@@ -474,8 +516,16 @@ export function createLook(host, sim) {
       }
       if (VS.size > sim.gang.length) VS.forEach(sweep);
       const C = TUNE.corpse;
-      for (const c of corpses) {
-        if (!c.on) continue;
+      for (let i = 0; i < CM; i++) {
+        const c = corpses[i]; if (!c.on) continue;
+        if (c.rag) {   // the live body (view/ragdoll.js draws it); a cross-fade from the last sprite, if TUNE.ragdoll.swap
+          const a = c.t < c.fadeAt ? 1 : Math.max(0, 1 - (c.t - c.fadeAt) / c.fadeLen), R = TUNE.ragdoll;
+          if (c.swap > 0) {
+            const k = c.swap / (R.swap + 1);
+            put(c.set, c.set.SP[c.pose] ? c.pose : 'idle.0', c.f, c.fx, c.fy, c.z, a * k, 0, 0); rag.alpha(i, a * (1 - k)); c.swap--;
+          } else rag.alpha(i, a);
+          continue;
+        }
         const set = c.set, pose = c.clip ? set.frameAtT(c.clip, c.t)
           : c.t < C.fall ? (set.has('fall') ? 'fall' : c.pose) : c.t < C.fall + C.land ? (set.has('land') ? 'land' : c.pose) : set.has('crouch') ? 'crouch' : c.pose;
         const a = c.t < c.fadeAt ? 1 : Math.max(0, 1 - (c.t - c.fadeAt) / c.fadeLen), f = faceOf(set, c.face);
@@ -483,6 +533,7 @@ export function createLook(host, sim) {
         put(set, pose, f, c.x, c.y, c.z + c.lift, a, 0, 0, lift, lie);
         if (c.clip) corpseAO(c, set, set.SP[pose] ? pose : 'idle.0', f, lift, lie, a);
       }
+      if (rag) rag.frame(f.dt);
       // their bullets in flight: gunfx's tracer look
       const B = sim.B;
       for (let i = 0; i < B.n; i++) {

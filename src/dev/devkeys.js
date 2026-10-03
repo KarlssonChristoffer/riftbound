@@ -3,6 +3,7 @@
 // Outside dev mode (host.dev off) the keys in DEV_KEYS and Shift + 1..6 go to the game only; L (the lantern) works in both.
 // Each has its row in the menu's Dev tab (ui/pause.js).  WRITES: opt, cv.snapMode, stage.propMode / trees3d (their setters).
 import {SAMPLING, DEBUG} from '../render/options.js';
+import {liveKey} from './livekeys.js';
 
 // sandbox / test keys (9: light sources, f: the flames' look, b: wind strength; 5-8, k: features' own; 0: a gang of gunmen
 // now, Shift+0 one, in the desert sandbox: features/foes.js; not C, which is the player's crouch)
@@ -22,7 +23,8 @@ export function abKey(e, {cv, opt, stage}) {
   return true;
 }
 
-export function devKey(k, e, {env, stage, opt, hero, setBiome, feat}) {
+export function devKey(k, e, {env, stage, opt, hero, setBiome, feat, live}) {
+  if (live && liveKey(e, live)) return;   // ?live=1: Shift+7 / 8 / 9 (dev/livekeys.js)
   if (k === 't') env.nextPart();   // jump to dawn / day / dusk / night; the clock runs on from there
   if (k === 'n') setBiome(stage.biomeI + (e.shiftKey ? -1 : 1));
   if (k === 'l') opt.lantern = !opt.lantern;
