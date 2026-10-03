@@ -269,20 +269,26 @@ src/
                          `host` features get (contract in main.js's header); the features; the engine context E; the loop
   core/                  loop.js (step + draw + frame, hitstop), input.js (keys + mouse, the camera drag),
                          features.js (loading + the declared order), events.js (the catalog), flags.js, perf.js,
-                         mathx.js, rng.js, color.js
+                         mathx.js, rng.js, color.js, autumn.js (how a leaf turns: one model for the crowns' shader and wind.js)
   render/                gfx.js (the renderer), camera.js (size, zoom, yaw, follow, shake, sampling), viewxf.js,
-                         lighting.js (mood + lights -> the composite), options.js (opt + applying it), atlas.js
+                         lighting.js (mood + lights -> the composite), options.js (opt + applying it), atlas.js,
+                         litter.js (the fallen-leaf carpet: a small GPU simulation the wind drives)
   world/                 world.js (build + props), stage.js (biome, rebuilds, prop mode, trees, the registry),
                          entities.js (the registry: join / leave / hide, live queries, near), spatial.js (the grid),
                          biomes.js, layout.js, trees3d.js, kit3d.js, nav.js
   sim/                   env.js (clock, seasons, weather), projectiles.js (arrows, pops, dust),
-                         player/ (player.js, harmonize.js, adapter.js: the camera-frame bridge, climbing, the cursor)
+                         player/ (player.js, harmonize.js, adapter.js: the camera-frame bridge, climbing, the cursor;
+                         gun.js: a gun loadout's revolver, handed LMB and the frame by player.js through H.gun)
   view/                  hero.js (the Ranger's card: atlas, cloak, hair, armour, HD bow), cloth.js, armor.js
-  features/              the features as before (wind, weather, lights, garden, combat/, atmos, flow, wildlife, depth/, ...)
+  features/              the features as before (wind, weather, lights, garden, combat/, atmos, flow, wildlife, depth/, ...),
+                         riverside (reeds, ferns, willows, lily pads), litter (drives the leaf carpet from the wind),
+                         atmos/waterlife.js (riffles, falls' spray and mist, shallow-water rings: called by atmos),
+                         gun (a gun loadout's controls + cues + the cylinder HUD), gunfx (muzzle flash, smoke, tracers, cases, impacts by
+                         surface, holes), blood (pixel blood from bullet hits; Graphics > Effects > Blood)
   game/                  game.js, run.js, enemies.js, items.js, stats.js, save.js
-  ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js
+  ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js, cylinder.js (a gun's ammo)
   audio/                 audio.js, music.js
-  content/               moods.js (MOODS, TIMES, CHAR)
+  content/               moods.js (MOODS, TIMES, CHAR), weapons.js (the bow's numbers, the revolvers: view/hero.js LOADOUTS name one each)
   dev/                   devtools.js (colliders, debug HUD, tree lineup), devkeys.js (dev keys, renderer A/B),
                          owncheck.js (the ownership table + ?owncheck=1)
   vendor/three/          three.js 0.170.0
@@ -300,10 +306,12 @@ never write each other's state. `dev/` reaches the engine only as `E.dev`, hande
 | who is in the world | `host.entities` (world/entities.js): `add(p)`, `remove(p)`, `hide(p, on)` (the one writer of `p.gone`) | `host.props` is its list; `host.propsVersion` bumps on every join / leave |
 | all the things of a kind | `host.entities.query('owner.what', pred, join?)`: a live list in insertion order | `join(p)` sets the querying system's own state for a newcomer; one owner per query name |
 | what's near x, y | `host.entities.near(x, y, r, out, q?)`: candidates from a 2 m grid, in list order | do the exact test; `moved(p)` after a jump of more than 1 m within a step |
+| how big the world is | `WORLD` in world/layout.js: `x0 y0 x1 y1` (the origin may go below 0 as the world grows) + `WM HM`; features read `host.ctxO.bounds` (`?world=big`: 162 x 90 m) | `GROUNDS` = the Proving Grounds' own rect, from 0, 0 (buildLayout, the biomes' ground painters, `groundCanvas`; `host.ctxO.grounds`, and `ctxO.WM HM WPX HPX` are its size); never assume the world starts at 0, 0 or is 62 x 30. The plan: docs/WORLD.md |
+| may something be at x, y | world/layout.js: `walkable` (the player, pushed props), `roamable` (enemies), `navArea` (the nav grid's cells) | each use keeps its own margins; walls, water and plateaus are tested on top by the caller |
 | who may write a field | `OWNERS` in dev/owncheck.js; `?owncheck=1` records every other writer with its file:line | creators fill an entity in before it joins; a system keeps its private per-entity state in its own fields (listed) or a WeakMap |
 | which events exist | `EVENTS` in core/events.js | add the type there with its emitter; dev mode warns otherwise |
 | the features' order | each feature's `export const order = {after, before}` (core/features.js sorts) | a cycle throws |
-| module state of another system | the owner's API: `world.propTop`, `setClothWind`, `STREAM.addStone / removeStone`, `PL.faceShot / flicker / regrid`; the renderer's `G.setOptions / setSmooth / setSeason / setGround / setFlash / setPlayer` | |
+| module state of another system | the owner's API: `world.propTop`, `setClothWind`, `STREAM.addStone / removeStone`, `PL.faceShot / flicker / regrid`; the renderer's `G.setOptions / setSmooth / setSeason / setGround / setFlash / setPlayer / setWater / setWaterLook` | |
 | a game effect on another system's number | a note in `host.mods` (core/modifiers.js); the owner applies it | never write the number |
 | truth or looks | `F.update` (sim: own seeded generator, always runs) vs `F.view` (presentation: Math.random, after the sim, while `F.on`); `F.ambient` for while paused | tools/test/simview.mjs proves the split |
 | how much detail | menu > Graphics > Detail (`?detail=low`): low turns cosmetic views off (wind lines, wildlife, depth) | it can't change play: views don't feed the sim |

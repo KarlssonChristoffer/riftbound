@@ -17,6 +17,8 @@
 //   AU.setVolume(k, 0..1) / AU.volumes      // k: master | music | sfx | amb (pause menu > Sound; remembered in localStorage)
 //   AU.setMusicMode(m) / AU.musicMode       // 'adaptive' (follows play) | 'explore' | 'combat' (fixed intensity, for previews)
 //   AU.toggleMusic() -> on                     // host maps key 'u': the adaptive score (music.js) on / off, remembered too
+//   AU.setGunSfx(s) / AU.gunSfx / AU.gunSfxList  // the gun sounds' western-movie flavor (events.js GUN_SFX: spaghetti | hollywood |
+//                                              //   gritty), remembered in localStorage; ?gunsfx= overrides it at load
 //   ctx = {PPM, VW, layout, ...}               // only PPM / VW (panning by screen x) and layout.elev are read
 //
 // Events used: step {big 0|1} / land {big 2 sprint plant, 3 big drop} / jump / splash {small} (player.js, arena.html);
@@ -38,16 +40,50 @@ import {STREAM, elev as elevOf} from '../world/layout.js';
 import {createMusic} from './music.js';   // the adaptive score, layered with the beds (U toggles it)
 // Phase 2 (docs/AUDIO.md): the Sound Forge runtime. Forge sounds baked in a Worker at load play first; this file's
 // synth below is the FALLBACK for anything not baked yet (or with ?forge=0, to compare).
-import {createEngine} from '../../audio/runtime/engine.js';
+import {createEngine, REVERBS} from '../../audio/runtime/engine.js';
 import {createBakery} from '../../audio/runtime/bakery.js';
 import {createDirector} from '../../audio/runtime/director.js';
-import {EVENTS, AMBIENCE} from '../../audio/runtime/events.js';
+import {EVENTS, AMBIENCE, SOURCES, SPATIAL, groundCase, GUN_SFX, GUN_SFX_DEF, otherGunSfx} from '../../audio/runtime/events.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
 
 const R = Math.random, RR = (a, b) => a + R() * (b - a), J = p => 1 + (R() * 2 - 1) * p;
 const pick = a => a[(R() * a.length) | 0];
 const MAXV = 30;   // simultaneous SFX voices (priority 2 / 3 sounds may go 6 / 12 over)
+
+// THE WATERFALLS (river brief D): the ruins' two falls are positional sources like the torches' fires (the director gives the nearest few on
+// screen a loop each: audio/runtime/director.js updateSources, level / pan / low-pass from SPATIAL.world: -6 dB per metre off screen, culled
+// 2 m off). The loop is the forge's stream 'rapids' (a strong rush with spray, still dark: docs/AUDIO.md's sound taste), a notch under the
+// brook's bank level so a fall near the river stands out only as you come close; `dScale` makes the distance count 1.8x, so the swell from the
+// view's edge to the fall's foot is ~11 dB. Added to the director's own SOURCES table by its options (not by writing events.js's constant).
+// The ravine's lip: the stream's centre x there, y ~ 27.9 (the biome's own edge as world.js cliffZ reads it; depth.js WA.yEnd 27.85). A proper 'fall' case of the stream
+// recipe (more spray, no extra highs) would be the next step: audio/forge/recipes/stream.js.
+const WATERFALL = {recipe: 'stream', case: 'rapids', gainDb: -22};
+const FALL = {dScale: 1.8, ravineY: 27.9, reach: 32};
+// THE DESERT (world/desert.js, "Red Mesa"). Its forge ambience is made of banks the forge already bakes, added to the director
+// by its options like the waterfall (events.js's AMBIENCE is not written): a hot, dry wind by day (ember_hot: a low wind, a
+// faint roar, next to no leaves), the gustier one at dusk and night, insects by day (a hum, far rasps), crickets at night, the
+// creek as the brook. What the forge has no bank for (a hawk's cry by day, cicadas swelling in the heat, coyotes at night) is
+// synthesised (desertCalls), far off and panned wide, under the beds; the hawk you SEE cries through SFX.hawk (wildlife.js's
+// 'caw'). Footsteps read the ground under the foot (ctx.ground: world/desert.js B.groundAt): paving and rock are stone, sand a
+// soft muffled crunch (the forge's fine gravel pitched down and darkened; the synth's 'sand'), hardpan a dry tap. The reverb:
+// short dry open air, and near the canyon's rim a long one whose early reflections come late (the far wall answering).
+const DESERT_AMB = {
+  beds: {
+    day: [{recipe: 'wind', case: 'ember_hot', gainDb: -25, gust: 6}, {recipe: 'insects', case: 'day', gainDb: -38, bakePriority: 6}],
+    dusk: [{recipe: 'wind', case: 'gusty', gainDb: -26.5, gust: 6}, {recipe: 'insects', case: 'dusk', gainDb: -34, bakePriority: 5}],
+    night: [{recipe: 'wind', case: 'gusty', gainDb: -29, gust: 5}, {recipe: 'insects', case: 'night', gainDb: -31, bakePriority: 5}],
+  },
+  calls: [],
+  emitters: [{recipe: 'stream', case: 'brook', at: 'stream', gainDb: -22, floorDb: -14, lpf: [600, 8000]}],
+};
+const DESERT_REVERBS = {
+  desert: {rt: .55, pre: .01, lp0: 8000, lp1: 2200, hp: 160, er: 4, erSpan: .08, erGain: .3, width: 1, wet: -3},
+  canyon: {rt: 1.9, pre: .045, lp0: 6000, lp1: 1400, hp: 140, er: 6, erSpan: .32, erGain: .7, width: 1, wet: 0},
+};
+const CANYON = {in: 23.6, out: 22.8, rev: [.14, .38]};   // the player's y (m) where the canyon's echo comes in / goes (its rim ~27.7); the synth's reverb level out / in
+const DESERT_STEP = {sand: {surf: 'sand', ground: 'gravel', semi: -4, lpf: 2400, gainDb: -2}, pan: {surf: 'pan', ground: 'gravel', semi: -1, lpf: 3400, gainDb: -6},
+  stone: {surf: 'stone', ground: 'stone'}, rock: {surf: 'stone', ground: 'stone'}};
 
 // ======================================================================================================================
 // ENGINE: one per AudioContext (live, or offline for level tests)
@@ -176,8 +212,11 @@ function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (t
 // SOUNDS. Each: (E, o) with o {at?, pan, d, g?, ...fields}. Levels are set so a step peaks ~0.1, a hit ~0.3, a break
 // ~0.45, an explosion hits the compressor. Soft, woody, low: nothing above ~6 kHz carries much energy.
 // ======================================================================================================================
-const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift'};
-const MAT = {dummy: 'straw', brute: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};
+const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift', desert: 'desert'};
+// a bullet's end by what it met (bullet.impact surf 'prop'): the prop's material by its kind (ctx.propAt); the rest is wood
+const PROP_MAT = {stock_tank: 'metal', ore_cart: 'metal', well: 'stone', wall_n: 'stone', wall_w: 'stone', wall_e: 'stone', wall_s: 'stone',
+  tower: 'stone', gatepost: 'stone', pot: 'stone', crystal: 'stone'};
+const MAT = {dummy: 'straw', brute: 'straw', gunman: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};   // (gunman: the desert's, a dull hit)
 
 // the ground texture of one footfall (shared by steps, landings, scuffs); k = weight 0..1.5
 function surface(E, v, dt, surf, k = .6) {
@@ -193,6 +232,13 @@ function surface(E, v, dt, surf, k = .6) {
     N(v, dt, {type: 'bandpass', f: 2600, q: 2, d: .014, g: .22});
     O(v, dt + .002, {f: pick([1760, 2349, 2637, 3136]), a: .002, d: .09 + k * .05, g: .035 + .02 * k});
     N(v, dt, {type: 'lowpass', f: 700, d: .04, g: .2 * k + .06});
+  } else if (surf === 'sand') {   // the desert's sand: a soft, muffled crunch, fine grains giving under the boot
+    const n = 4 + (k * 4 | 0);
+    for (let i = 0; i < n; i++) N(v, dt + RR(0, .03 + k * .03), {type: 'bandpass', f: RR(900, 2200), q: 1.1, d: RR(.012, .03), g: RR(.08, .16) * (.6 + k * .4)});
+    N(v, dt, {type: 'lowpass', f: 520, a: .006, d: .06 + k * .02, g: .16 * k + .06});
+  } else if (surf === 'pan') {     // hardpan: a dry, dull tap and a grit or two
+    N(v, dt, {type: 'bandpass', f: RR(700, 1000), q: 1.3, d: .03, g: .3});
+    for (let i = 0; i < 2; i++) N(v, dt + RR(0, .02), {type: 'bandpass', f: RR(2200, 3400), q: 2.5, d: .008, g: .08});
   } else if (surf === 'stone') {
     N(v, dt, {type: 'bandpass', f: 1500, q: 1.6, d: .025, g: .35});
     N(v, dt, {type: 'lowpass', f: 800, d: .04, g: .25 * k + .08});
@@ -202,6 +248,9 @@ function surface(E, v, dt, surf, k = .6) {
   }
 }
 
+// the screen rule for the coach gun's synth fallbacks, as the director applies it to the forge's (events.js SPATIAL.combat):
+// a gain falling by fadeDbPerM a metre off screen, 0 (silent) past cullOff
+const offK = o => { const S = SPATIAL.combat, off = Math.max(0, +o.off || 0); return off > S.cullOff ? 0 : Math.pow(10, -S.fadeDbPerM * off / 20); };
 const SFX = {
   // ---------------- player ----------------
   step(E, o) {   // o.surf, o.k weight (walk .25 .. sprint 1, plant 1.3)
@@ -264,6 +313,77 @@ const SFX = {
   creakTick(E, o) {  // (tests only) the draw creak lives in createAudio: see Creak
     const v = E.voice(o, 'creakTick', .1); if (!v) return;
     E.O(v, 0, {w: 'sawtooth', f: 60, a: .01, d: .06, g: .08, type: 'bandpass', ff: 1100, q: 8});
+  },
+  // ---------------- the revolver (fallbacks for the forge's 'revolver' recipe while it bakes / ?forge=0) ----------------
+  gunshot(E, o) {   // o.gun 'peacemaker' | 'brass_navy': crack + bark + thump + a dark, dry tail (nothing rings)
+    const v = E.voice({...o, g: (o.g ?? 1) * 1.5}, 'gunshot', 1, {pri: 3, cd: .02}); if (!v) return;
+    const navy = o.gun === 'brass_navy';
+    E.N(v, 0, {type: 'highpass', f: navy ? 500 : 900, a: .0005, d: navy ? .012 : .008, g: .55});
+    E.N(v, 0, {type: 'lowpass', f: navy ? 1800 : 3200, a: .001, d: navy ? .09 : .06, g: .6});
+    E.O(v, 0, {f: navy ? 75 : 100, f2: navy ? 45 : 60, sw: .08, a: .002, d: navy ? .16 : .1, g: navy ? .6 : .4});
+    E.N(v, .015, {b: E.BR, type: 'lowpass', f: 700, a: .02, d: navy ? .45 : .35, g: .25});
+  },
+  gunDry(E, o) {   // the hammer on an empty chamber
+    const v = E.voice(o, 'gunDry', .15, {cd: .05}); if (!v) return;
+    E.N(v, 0, {type: 'bandpass', f: 2200, q: 3, d: .004, g: .15}); E.N(v, .012, {type: 'bandpass', f: 2800, q: 3, d: .007, g: .4}); E.O(v, .012, {f: 800, a: .001, d: .02, g: .1});
+  },
+  gunDraw(E, o) {   // out of the leather, the hammer cocked
+    const v = E.voice(o, 'gunDraw', .3, {cd: .1}); if (!v) return;
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f: 750, q: .9, a: .03, d: .05, g: .2});
+    E.N(v, .11, {type: 'bandpass', f: 2400, q: 3, d: .006, g: .3}); E.N(v, .14, {type: 'bandpass', f: 2800, q: 3, d: .007, g: .4});
+  },
+  gunReload(E, o) {   // o.phase start | eject | round | done
+    const v = E.voice(o, 'gunReload', .8, {cd: .03}); if (!v) return;
+    if (o.phase === 'done') { for (let i = 0, t = 0; i < 9; i++, t += .04 + i * .007) E.N(v, t, {type: 'bandpass', f: 3000, q: 3, d: .004, g: .2 * (1 - i / 12)}); E.N(v, .62, {type: 'bandpass', f: 2000, q: 2, d: .009, g: .45}); }
+    else if (o.phase === 'eject') { E.N(v, 0, {type: 'bandpass', f: 1700, q: 1.5, a: .01, d: .03, g: .2}); for (const t of [.18, .26, .37]) E.N(v, t, {type: 'bandpass', f: 3200, q: 2, d: .01, g: .15}); }
+    else E.N(v, 0, {type: 'bandpass', f: o.phase === 'round' ? 1500 : 2600, q: 2.5, d: .008, g: .35});
+  },
+  // the desert's gunmen (features/foes): the revolver's sounds where they stand (the forge's foe* events while it bakes)
+  foeShot(E, o) { SFX.gunshot(E, {...o, gun: o.gun === 'navy' ? 'brass_navy' : 'peacemaker', g: (o.g ?? 1) * .8}); },
+  foeCock(E, o) { SFX.gunDraw(E, {...o, g: (o.g ?? 1) * .6}); },
+  foeDraw(E, o) { SFX.gunHolster(E, {...o, g: (o.g ?? 1) * .5}); },
+  foeReload(E, o) { SFX.gunReload(E, {...o, g: (o.g ?? 1) * .7}); },
+  foeHolster(E, o) { SFX.gunHolster(E, {...o, g: (o.g ?? 1) * .5}); },
+  foeFall(E, o) { SFX.land(E, {...o, big: 1, g: (o.g ?? 1) * .8}); },   // a body hits the ground
+  // bullets (fallbacks for the forge's 'bullet' recipe while it bakes / ?forge=0): the old thuds, screen-bound like the forge's
+  bulletHit(E, o) {
+    const k = offK(o); if (!k) return;
+    if (o.mat === 'sand') SFX.stuck(E, {...o, surf: 'ruins', g: .55 * k});
+    else if (o.mat === 'stone' || o.mat === 'metal') SFX.stuck(E, {...o, surf: 'stone', g: .6 * k});
+    else SFX.hit(E, {...o, mat: 'wood', g: .7 * k});
+  },
+  fleshHit(E, o) { const k = offK(o); if (k) SFX.hit(E, {...o, mat: 'straw', g: (o.crit ? 1.25 : 1) * k}); },
+  hitConfirm(E, o) {   // a soft low thock
+    const v = E.voice({...o, g: (o.g ?? 1) * .35}, 'hitConfirm', .1, {cd: .03}); if (!v) return;
+    E.O(v, 0, {f: 410, a: .002, d: .03, g: .4}); E.N(v, 0, {b: E.PK, type: 'lowpass', f: 700, a: .001, d: .015, g: .2});
+  },
+  bulletPierce(E, o) { const k = offK(o); if (k) SFX.hit(E, {...o, mat: 'body', g: .6 * k}); },
+  // the bruiser's coach gun (fallbacks for the forge's 'coachgun' recipe while it bakes / ?forge=0), screen-bound like it
+  coachShot(E, o) {   // deeper and longer than the revolver's: a broad bark, a low sweep, a long dark tail
+    const k = offK(o); if (!k) return;
+    const v = E.voice({...o, g: (o.g ?? 1) * 1.5 * k}, 'coachShot', 1.4, {pri: 3, cd: .02}); if (!v) return;
+    E.N(v, 0, {type: 'highpass', f: 380, a: .0008, d: .014, g: .45});
+    E.N(v, 0, {b: E.PK, type: 'lowpass', f: 1300, a: .003, d: .12, g: .7});
+    E.O(v, 0, {f: 62, f2: 38, sw: .12, a: .003, d: .22, g: .75});
+    E.N(v, .02, {b: E.BR, type: 'lowpass', f: 600, a: .03, d: .7, g: .3});
+  },
+  coachCock(E, o) {   // a hammer thumbed back: two low notch clicks
+    const k = offK(o); if (!k) return;
+    const v = E.voice({...o, g: (o.g ?? 1) * .6 * k}, 'coachCock', .2, {cd: .06}); if (!v) return;
+    E.N(v, 0, {type: 'bandpass', f: 1500, q: 3, d: .005, g: .25}); E.N(v, .04, {type: 'bandpass', f: 1800, q: 3, d: .007, g: .45}); E.O(v, .04, {f: 650, a: .001, d: .02, g: .12});
+  },
+  coachReload(E, o) {   // o.mark break | dump (the shells into the sand) | load | close: dull thuds, a click or two
+    const k = offK(o); if (!k) return;
+    const v = E.voice({...o, g: (o.g ?? 1) * .7 * k}, 'coachReload', .6, {cd: .03}); if (!v) return;
+    const thud = (dt, f, g, d = .03) => { E.N(v, dt, {b: E.PK, type: 'lowpass', f, a: .001, d, g}); E.O(v, dt, {f: f * .35, a: .001, d, g: g * .4}); };
+    if (o.mark === 'break') { E.N(v, 0, {type: 'bandpass', f: 1600, q: 3, d: .005, g: .2}); thud(.12, 900, .5); }
+    else if (o.mark === 'dump') { E.N(v, 0, {b: E.PK, type: 'bandpass', f: 850, q: 1.2, a: .02, d: .03, g: .15}); thud(.28, 800, .35, .02); thud(.34, 800, .25, .02); }
+    else if (o.mark === 'close') { thud(.07, 700, .7, .04); E.N(v, .085, {type: 'bandpass', f: 1600, q: 3, d: .006, g: .3}); }
+    else thud(.05, 1000, .45, .02);
+  },
+  gunHolster(E, o) {   // the twirl drops into leather
+    const v = E.voice(o, 'gunHolster', .3, {cd: .15}); if (!v) return;
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f: 700, q: .8, a: .05, d: .06, g: .18}); E.N(v, .15, {b: E.PK, type: 'lowpass', f: 1100, a: .001, d: .015, g: .45});
   },
   // ---------------- impacts ----------------
   hit(E, o) {   // o.mat 'wood'|'straw'|'clay'|'glass'|'body'
@@ -355,6 +475,12 @@ const SFX = {
       for (let k = 0; k < flaps; k++) E.N(v, t0 + k * per * J(.12), {b: E.PK, type: 'bandpass', f: f * (1 - k * .04), q: .9, a: .012, d: .04 + k * .004, g: RR(.18, .3) * (1 - k * .08)});
     }
     if (n >= 3 && o.surf !== 'rift') for (let i = 0; i < 2; i++) { const f0 = RR(2800, 4000); E.O(v, RR(.05, .3), {f: f0, f2: f0 * RR(.75, 1.25), a: .004, d: .05, g: .03}); }
+  },
+  hawk(E, o) {    // the desert's red-tailed hawk (wildlife.js's 'caw'): a hoarse scream falling away
+    const v = E.voice({...o, wet: .55}, 'hawk', 2, {pri: 1, cd: 1.5}); if (!v) return;
+    const f = RR(2900, 3300);
+    E.O(v, 0, {w: 'sawtooth', f, f2: f * .52, sw: 1.4, a: .1, hold: .2, d: 1.1, g: .05, type: 'lowpass', ff: 2600, q: 1.2});
+    E.N(v, 0, {type: 'bandpass', f: f * .9, f2: f * .5, sw: 1.4, q: 4, a: .08, hold: .2, d: 1, g: .08});
   },
   caw(E, o) {     // a crow: two harsh nasal calls (a buzzy sawtooth through a vocal formant, plus rasp)
     const v = E.voice({...o, wet: .5}, 'caw', 1, {pri: 1, cd: .8}); if (!v) return;
@@ -524,6 +650,22 @@ function makeBed(E, id, t0) {
       set(sg.gain, .012 + .05 * env.prox, t, .3); set(slp.frequency, 400 + 2600 * env.prox * env.prox, t, .3);
       if (env.prox > .1 && due('plip', t, .12 / env.prox, .5 / env.prox)) { const v = E.sub(sg, t + .03, RR(-.3, .3)), f = RR(700, 1500); E.O(v, 0, {f, f2: f * 1.5, sw: .03, a: .003, d: .04, g: .07}); }
     };
+  } else if (id === 'desert') {   // dry wind over sand (a low body, sand hissing in the gusts), insects by day, crickets at night, the creek
+    const wind = L(E.PK, out, {type: 'bandpass', f: 360, q: .55}), hiss = L(E.W, out, {type: 'bandpass', f: 1700, q: .8}), hum = L(E.PK, out, {type: 'bandpass', f: 190, q: 2});
+    const water = L(E.PK, sg, {type: 'bandpass', f: 900, q: .5, g: .45});
+    tick = (env, t) => {
+      const night = env.time === 'night', dusk = env.time === 'dusk', g = st.gust;
+      set(wind.f.frequency, 240 + 420 * g, t, .4); set(wind.g.gain, (.042 + .07 * g) * (night ? .7 : 1), t, .4);   // (level with the ruins' bed)
+      set(hiss.g.gain, .002 + .008 * g * g, t, .4);   // (dark: the user's taste, nothing hissy)
+      set(hum.g.gain, night ? 0 : dusk ? .004 : .008, t, 1);
+      if (night || dusk) for (const [k, f, p] of [['cr1', 4180, -.5], ['cr2', 4460, .55]]) if (due(k, t, .7, 1.4)) {   // crickets
+        const v = E.sub(out, t + .05, p, night ? .9 : .35);
+        for (let i = 0; i < 3; i++) E.O(v, i * .05, {f, a: .004, d: .026, g: .009});
+      }
+      set(sg.gain, .016 + .07 * env.prox, t, .3); set(slp.frequency, 450 + 5000 * env.prox * env.prox, t, .3);
+      set(water.f.frequency, 760 + 420 * Math.sin(st.lfo * .7), t, .5);
+      if (env.prox > .05 && due('plip', t, .07 / env.prox, .32 / env.prox)) { const v = E.sub(sg, t + .03, RR(-.3, .3)), f = RR(450, 1100); E.O(v, 0, {f, f2: f * 1.5, sw: .03, a: .003, d: .04, g: .07}); }
+    };
   } else {   // rift
     const drones = [55, 82.7, 110.4].map((f, i) => Osc(out, {f, g: [.009, .006, .0035][i]}));
     const saw = Osc(out, {w: 'sawtooth', f: 55.3, g: .006, type: 'lowpass', ff: 260, q: 2});
@@ -593,6 +735,35 @@ function makeCreak(E) {
   };
 }
 
+// the desert's far calls (no forge bank for them): a hawk's cry by day, a cicada swelling in the heat, coyotes at dusk and
+// night (yips, a howl, one answering further off). Each far off (quiet, low-passed), panned wide, on its own timer (st)
+function desertCalls(E, st, time, t) {
+  const due = (k, lo, hi) => { if (st[k] === undefined) st[k] = t + RR(lo, hi) * .4; if (t < st[k]) return false; st[k] = t + RR(lo, hi); return true; };
+  const side = () => (R() < .5 ? -1 : 1) * RR(.45, .8);
+  if (time === 'day' && due('hawk', 28, 70)) {
+    const v = E.sub(E.amb, t + .05, side(), RR(.6, 1));
+    for (let i = 0, n = R() < .35 ? 2 : 1; i < n; i++) {
+      const dt = i * RR(1.6, 2.2), f = RR(2900, 3300);
+      E.O(v, dt, {w: 'sawtooth', f, f2: f * .52, sw: 1.5, a: .12, hold: .25, d: 1.2, g: .012, type: 'lowpass', ff: 2300, q: 1.2});
+      E.N(v, dt, {type: 'bandpass', f: f * .9, f2: f * .5, sw: 1.5, q: 4, a: .1, hold: .25, d: 1.1, g: .02});
+    }
+  }
+  if (time === 'day' && due('cicada', 16, 40)) {
+    const v = E.sub(E.amb, t + .05, side(), RR(.5, 1)), hold = RR(2, 5), f = RR(3100, 3700);   // (soft and far: a swell under the wind, not a whine)
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f, q: 5, a: RR(1, 1.8), hold, d: RR(1.5, 2.5), g: .007});
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f: f * 1.5, q: 6, a: 1.6, hold, d: 2, g: .002});
+  }
+  if (time !== 'day' && due('coyote', time === 'night' ? 30 : 60, time === 'night' ? 75 : 140)) {
+    for (const [dt, far] of [[0, 1], [RR(2.5, 4), .45]]) {
+      const v = E.sub(E.amb, t + .05 + dt, side(), far), n = 2 + (R() * 4 | 0);
+      for (let i = 0; i < n; i++) { const f = RR(620, 820); E.O(v, i * RR(.12, .18), {w: 'triangle', f, f2: f * 1.35, sw: .08, a: .01, d: .1, g: .012, type: 'lowpass', ff: 1600}); }
+      const h0 = n * .16 + .15, f = RR(480, 560);
+      E.O(v, h0, {w: 'triangle', f, f2: f * 1.55, sw: .45, a: .2, hold: .5, d: .2, g: .014, type: 'lowpass', ff: 1500});
+      E.O(v, h0 + .85, {w: 'triangle', f: f * 1.55, f2: f * 1.05, sw: .8, a: .02, d: .9, g: .012, type: 'lowpass', ff: 1400});
+    }
+  }
+}
+
 // ======================================================================================================================
 // CONTROLLER
 // ======================================================================================================================
@@ -602,12 +773,18 @@ export function createAudio(ctx, host = {}) {
   const q = flags;
   const disabled = !AC || !!q.get('sheet') || q.get('audio') === '0';
   let E = null, muted = false, bed = null, bedId = null, bedMuted = false, creak = null, roll = null, prevState = 'idle', prevK = 0, climbT = 0, musicOn = true;
-  let nZones = 0, nTraps = 0;
+  let nZones = 0, nTraps = 0, canyonOn = false, revBiome = null;
+  const callSt = {};   // desertCalls' timers
+  // the desert's ground under a foot (DESERT_STEP: the synth's surface + the forge's footstep case), else o as it is
+  const grounded = (biome, x, y, o) => { if (biome !== 'desert') return o; const g = DESERT_STEP[ctx.ground?.(x, y)]; if (g) Object.assign(o, g); return o; };
   // settings (pause menu > Sound): slider values 0..1, mapped to gain as v² (perceptually even steps)
   const VOL = {master: 1, music: 1, sfx: 1, amb: 1}, MODES = {adaptive: null, explore: .3, combat: .85};
   let musicMode = 'adaptive';
+  // the gun sounds' flavor (events.js GUN_SFX): ?gunsfx= at load, else the one picked in the menu before, else the default
+  let gunsfx = GUN_SFX_DEF;
   try {
     muted = localStorage.getItem('pg.audio.muted') === '1'; musicOn = localStorage.getItem('pg.audio.music') !== '0';
+    const gs = q.get('gunsfx') || localStorage.getItem('pg.audio.gunsfx'); if (GUN_SFX.includes(gs)) gunsfx = gs;
     const v = JSON.parse(localStorage.getItem('pg.audio.vol') || '{}');
     for (const k in VOL) if (typeof v[k] === 'number') VOL[k] = clamp(v[k], 0, 1);
     if (v.mode in MODES) musicMode = v.mode;
@@ -615,7 +792,8 @@ export function createAudio(ctx, host = {}) {
   const seen = new WeakSet(), stuckSeen = new WeakSet(), air = new WeakMap();
   const AU = {muted, ms: 0, get on() { return !!E && E.ac.state === 'running'; }, get E() { return E; }, get music() { return E?.music || null; },
     get musicOn() { return musicOn; }, get volumes() { return {...VOL}; }, get musicMode() { return musicMode; },
-    update, toggle, toggleMusic, setVolume, setMusicMode, play};
+    get gunSfx() { return gunsfx; }, gunSfxList: GUN_SFX,
+    update, toggle, toggleMusic, setVolume, setMusicMode, setGunSfx, play};
   if (typeof window !== 'undefined') window.__audio = AU;   // debug handle
 
   // the forge runtime starts at LOAD (the context stays suspended until a gesture) so banks bake before you play
@@ -623,9 +801,10 @@ export function createAudio(ctx, host = {}) {
   const forgeOff = q.get('forge') === '0';
   if (!disabled && !forgeOff) {
     try {
-      const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac), B = createBakery(ac), D = createDirector(EN, B, {EVENTS, AMBIENCE});
+      const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac, {reverbs: {...REVERBS, ...DESERT_REVERBS}}), B = createBakery(ac);
+      const D = createDirector(EN, B, {EVENTS, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL}});
       try { EN.prepareReverbs?.(); } catch (e) {}
-      D.prefetch({biome: 'ruins'});
+      D.prefetch({biome: 'ruins', skip: otherGunSfx(gunsfx)});   // (only the playing gun flavor's banks)
       RT = {ac, EN, B, D}; AU.forge = RT;
     } catch (e) { console.warn('audio: forge runtime unavailable, using the built-in synth', e); RT = null; }
   }
@@ -665,6 +844,14 @@ export function createAudio(ctx, host = {}) {
   }
   function setVolume(k, v) { if (!(k in VOL)) return; VOL[k] = clamp(+v || 0, 0, 1); saveVol(); applyVolumes(); }
   function setMusicMode(m) { if (!(m in MODES)) return; musicMode = m; saveVol(); applyVolumes(); }
+  // a new gun flavor: remembered, and its banks baked now (the director picks them from the next shot on; until they are
+  // baked a shot plays the built-in synth, as at load)
+  function setGunSfx(v) {
+    if (!GUN_SFX.includes(v) || v === gunsfx) return;
+    gunsfx = v;
+    try { localStorage.setItem('pg.audio.gunsfx', v); } catch (e) {}
+    try { RT?.D.prefetch({biome: bedId || 'ruins', skip: otherGunSfx(v)}); } catch (e) {}
+  }
   function toggleMusic() {
     musicOn = !musicOn;
     try { localStorage.setItem('pg.audio.music', musicOn ? '1' : '0'); } catch (e) {}
@@ -685,8 +872,15 @@ export function createAudio(ctx, host = {}) {
   }
   function fire(name, x, y, o = {}) {
     const px = x ?? L.x, py = y ?? L.y, pos = at(px, py);
-    if (RT) { try { if (RT.D.post(name, {...pos, dist: pos.d, x: px, y: py, ...o})) return; } catch (e) { console.warn('audio: forge', name, e); } }
+    if (RT) { try { if (RT.D.post(name, {...pos, dist: pos.d, x: px, y: py, gunsfx, ...o})) return; } catch (e) { console.warn('audio: forge', name, e); } }
     try { SFX[name](E, {...pos, ...o}); } catch (e) { console.warn('audio:', name, e); }   // legacy synth (not baked yet / ?forge=0)
+  }
+  // the ground a bullet ended in: the desert's painter (stone and rock hard, sand and hardpan dull); elsewhere rock where it is
+  // raised (a plateau's face or top), else the footsteps' ground (flagstones hard; grass, gravel, snow dull)
+  function groundMat(biome, x, y, h) {
+    if (biome === 'desert') { const g = ctx.ground?.(x, y); return g === 'stone' || g === 'rock' ? 'stone' : 'sand'; }
+    if (h > .3) return 'stone';
+    const c = groundCase({surf: SURF[biome] || 'ruins', x, y}); return c === 'stone' || c === 'crystal' ? 'stone' : 'sand';
   }
   function play(name, o = {}) { unlock(); if (E && SFX[name]) fire(name, L.x, L.y, {surf: bedId || 'ruins', ...o}); }
 
@@ -694,6 +888,7 @@ export function createAudio(ctx, host = {}) {
   // props array or host.propsVersion changes, and once a second as a safety net: no per-frame walk over every prop
   // (docs/ARCHITECTURE.md rule). Every frame only touches these few.
   const C = {props: null, ver: -1, tick: 0, fires: [], brutes: [], rollers: [], sources: []};
+  const FALLS = [{kind: 'waterfall', id: 'fall:plateau', x: 0, y: 0, pan: 0, d: 0, off: 0}, {kind: 'waterfall', id: 'fall:ravine', x: 0, y: 0, pan: 0, d: 0, off: 0}];   // (reused: no allocation per step)
   function candidates() {
     const props = get(host.props) || [], ver = get(host.propsVersion) ?? props.length;
     if (props === C.props && ver === C.ver && (++C.tick % 60)) return C;
@@ -723,7 +918,7 @@ export function createAudio(ctx, host = {}) {
     L = {x: pl.x, y: pl.y, cam: pl.cam, screenX: pl.screenX};
     // ---- ambient bed + stream ----
     if (pl.biome !== bedId) { bed?.stop(t); bed = makeBed(E, SURF[pl.biome] || 'ruins', t); bedId = pl.biome; bedMuted = false;
-      E.revOut.gain.setTargetAtTime({ruins: .22, ember: .15, frost: .3, rift: .45}[bedId] ?? .22, t, .5); }
+      E.revOut.gain.setTargetAtTime({ruins: .22, ember: .15, frost: .3, rift: .45, desert: CANYON.rev[0]}[bedId] ?? .22, t, .5); }
     const sx = STREAM.cx(pl.y), sd = Math.max(0, Math.abs(pl.x - sx) - STREAM.w(pl.y) / 2);
     const prox = clamp(1 - sd / 18, 0, 1) ** 2;
     let W = null; try { W = get(host.wind); } catch (e) {}   // the getter may run before wind.js exists
@@ -733,20 +928,36 @@ export function createAudio(ctx, host = {}) {
       // visible sound sources in the world (torches / braziers): the director gives each on-screen one an emitter
       const cand = candidates(), sources = cand.sources; sources.length = 0;
       for (const p of cand.fires) if (!p.broken) { const a = at(p.x, p.y); if (a.off < 3) sources.push({kind: p.kind, id: p, x: p.x, y: p.y, ...a}); }
+      if (pl.biome === 'ruins') {   // the waterfalls (ember's are lava, frost's frozen: no water sound there)
+        const f = ctx.layout?.fall;
+        FALLS[0].x = f ? f.x : 0; FALLS[0].y = f ? f.foot.y : 0; FALLS[1].x = STREAM.cx(FALL.ravineY); FALLS[1].y = FALL.ravineY;
+        for (let i = f ? 0 : 1; i < 2; i++) {
+          const w = FALLS[i];
+          if (Math.hypot(w.x - pl.x, w.y - pl.y) > FALL.reach) continue;
+          const a = at(w.x, w.y); if (a.off < 3) { w.pan = a.pan; w.d = a.d * FALL.dScale; w.off = a.off; sources.push(w); }
+        }
+      }
       RT.D.ambience.update({biome: pl.biome, time: pl.time || 'day', listener: {x: pl.x, y: pl.y}, stream: {prox, pan: at(sx, pl.y).pan}, gust, dt, sources, combat: E.music?.state?.I ?? 0});
       const fb = (RT.D.ambience.state?.beds?.length || 0) > 0;
       if (fb !== bedMuted) { bed.out.gain.cancelScheduledValues(t); bed.out.gain.setTargetAtTime(fb ? 0 : 1, t, .8); bedMuted = fb; }
     }
+    // ---- the desert: the canyon's echo near its rim (both reverbs), the far calls ----
+    if (pl.biome !== revBiome) { revBiome = pl.biome; canyonOn = false; }
+    if (pl.biome === 'desert') {
+      const near = pl.y > (canyonOn ? CANYON.out : CANYON.in);
+      if (near !== canyonOn) { canyonOn = near; E.revOut.gain.setTargetAtTime(CANYON.rev[near ? 1 : 0], t, .8); try { RT?.EN.setReverb?.(near ? 'canyon' : 'desert', 1.5); } catch (e) {} }
+      desertCalls(E, callSt, pl.time || 'day', t);
+    }
     // ---- player state transitions ----
     const st = pl.state, landed = st === 'land' && prevState !== 'land';
     const bigDrop = events.some(e => e.type === 'player.land' && e.big === 3), speed = Math.hypot(pl.vx || 0, pl.vy || 0);
-    if (landed) fire('land', pl.x, pl.y, {surf, big: bigDrop ? 1 : 0});
-    if (st === 'roll' && prevState !== 'roll') fire('roll', pl.x, pl.y, {surf});
+    if (landed) fire('land', pl.x, pl.y, grounded(pl.biome, pl.x, pl.y, {surf, big: bigDrop ? 1 : 0}));
+    if (st === 'roll' && prevState !== 'roll') fire('roll', pl.x, pl.y, grounded(pl.biome, pl.x, pl.y, {surf}));
     if (st === 'climb') { climbT -= dt; if (climbT <= 0) { fire('climb', pl.x, pl.y, {surf}); climbT = RR(.26, .34); } }
     else if (prevState === 'climb') { fire('climb', pl.x, pl.y, {surf, big: 1}); climbT = 0; }
     // the draw creak: while the string is held back
     const drawing = st === 'draw' && pl.aim;
-    if (drawing) {
+    if (drawing && !pl.gun) {   // (a revolver has no string)
       const k = Math.min(1, (pl.t || 0) * 1.5);
       if (!creak) { creak = (RT && RT.D.makeCreak?.()) || makeCreak(E); prevK = k; }
       creak.set(k, dt > 0 ? (k - prevK) / dt : 0, t, dt); prevK = k;
@@ -755,13 +966,38 @@ export function createAudio(ctx, host = {}) {
     // ---- events ----
     for (const e of events) {
       switch (e.type) {
-        case 'player.step': if (!landed) fire('step', e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)}); break;
+        case 'player.step': if (!landed) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)})); break;
         case 'prop.land': fire('propDrop', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;   // a prop dropped off the plateau (combat/props.js)
-        case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, {surf, k: 1.3, g: 1}); break;   // sprint plant
-        case 'player.jump': fire('jump', e.x, e.y, {surf}); break;
+        case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: 1.3, g: 1})); break;   // sprint plant
+        case 'player.jump': fire('jump', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); break;
         case 'player.splash': case 'arrow.splash': case 'prop.splash': case 'wildlife.splash': fire('splash', e.x, e.y, {surf, small: !!e.small}); break;
+        // the revolver (sim/player/gun.js): its own sounds; its bullets aren't arrows (no bow shot, no stuck thud)
+        case 'player.shoot': fire('gunshot', e.x, e.y, {gun: e.gun, fan: !!e.fan}); break;
+        case 'player.dryfire': fire('gunDry', e.x, e.y); break;
+        case 'player.draw': fire('gunDraw', e.x, e.y); break;
+        case 'player.reload': fire('gunReload', e.x, e.y, {phase: e.phase}); break;
+        case 'player.holster': fire('gunHolster', e.x, e.y); break;
+        // the desert's gunmen (features/foes/sim.js): the revolvers sound like yours; the bruiser's coach gun (gun 'coach')
+        // has its own: its reload breaks open with the sim's start, the rest lands on the frames you see (foe.clip, the view's)
+        case 'foe.shoot': fire(e.gun === 'coach' ? 'coachShot' : 'foeShot', e.x, e.y, {gun: e.gun}); break;
+        case 'foe.aim': fire(e.gun === 'coach' ? 'coachCock' : 'foeCock', e.x, e.y); break;
+        case 'foe.draw': fire('foeDraw', e.x, e.y); break;
+        case 'foe.reload': if (e.gun !== 'coach') fire('foeReload', e.x, e.y, {phase: e.phase, gun: e.gun}); else if (e.phase === 'start') fire('coachReload', e.x, e.y, {mark: 'break'}); break;
+        case 'foe.clip': if (e.gun === 'coach') fire('coachReload', e.x, e.y, {mark: e.mark}); break;   // (features/foes/look.js)
+        case 'foe.holster': fire('foeHolster', e.x, e.y); break;
+        case 'foe.ground': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: e.foe === 'bruiser'})); break;   // (features/foes/look.js)
+        // a bullet's end (sim/projectiles.js, features/foes/sim.js) by what it met; water is arrow.splash's, a hit combat.hit's
+        case 'bullet.impact': {
+          const s = e.surf; if (s !== 'ground' && s !== 'tree' && s !== 'prop') break;
+          fire('bulletHit', e.x, e.y, {mat: s === 'tree' ? 'wood' : s === 'prop' ? PROP_MAT[ctx.propAt?.(e.x, e.y)] || 'wood' : groundMat(pl.biome, e.x, e.y, e.h), foe: !!e.foe}); break;
+        }
+        // a hit (features/combat/core.js damage): a gunman's flesh (a crit heavier); with a gun loadout the player's confirm on
+        // any enemy, at the listener (the bow's hits keep their own thunks)
+        case 'combat.hit': if (!e.quiet && e.who) { if (e.who.kind === 'gunman') fire('fleshHit', e.x, e.y, {crit: !!e.crit}); if (e.who.hunter && pl.gun) fire('hitConfirm', L.x, L.y, {crit: !!e.crit}); } break;
+        case 'bullet.pierce': fire('bulletPierce', e.x, e.y); break;   // a bullet through a gunman (the feel branch's event: core/events.js there)
         case 'arrow.hit': case 'player.hit': {
           const props = get(host.props) || [], p = !e.player && (e.prop || props.find(p => p.x === e.x && p.y === e.y));
+          if (p?.kind === 'gunman') break;   // (a gunman's hit sounds by its damage: combat.hit below)
           fire('hit', e.x, e.y, {mat: e.player ? 'body' : MAT[p?.kind] || 'wood'}); break;
         }
         case 'prop.break': fire('brk', e.x, e.y, {kind: e.kind}); break;
@@ -779,15 +1015,17 @@ export function createAudio(ctx, host = {}) {
         // wildlife (arena/wildlife.js)
         case 'wildlife.birds_scatter': fire('wings', e.x, e.y, {n: clamp(e.n || 3, 1, 8), surf}); break;
         case 'wildlife.wings': fire('wings', e.x, e.y, {n: 1, surf}); break;
-        case 'wildlife.caw': fire('caw', e.x, e.y); break;
+        case 'wildlife.caw': fire(pl.biome === 'desert' ? 'hawk' : 'caw', e.x, e.y); break;   // (the desert's caller is its hawk)
         case 'wildlife.fish_jump': fire('plop', e.x, e.y, {surf, fish: 1}); break;
         case 'wildlife.frog_jump': fire('plop', e.x, e.y, {surf, frog: 1}); break;
         case 'wildlife.critter_dash': fire('rustle', e.x, e.y, {surf}); break;
+        case 'tumbleweed.bounce': fire('rustle', e.x, e.y, {surf, g: .35 + .45 * (e.k || 0), gainDb: -6 + 4 * (e.k || 0), semi: -3}); break;   // dry twigs on the ground
       }
     }
     // ---- arrows: shots (new ones, grouped by ability) and thuds (newly stuck) ----
     let volley = null;
     for (const a of arrows) {
+      if (a.kind === 'bullet') continue;   // (the revolver's: player.shoot / bullet.impact above)
       if (!seen.has(a)) {
         seen.add(a);
         if (a.ab === 'rain') fire('whistle', a.x, a.y);

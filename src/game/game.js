@@ -45,7 +45,8 @@ export async function createGame(host) {
     onStageClear() { setPhase('clear'); hud.banner('Stage cleared', STAGES[run.stage + 1] ? 'choose an augment' : '', 2, '#f2d27a'); },
   });
   core.steer = b => nav.steer(b);
-  core.immune = () => mode === 'run' && (phase === 'dead' || phase === 'travel' || P.raw.state === 'roll' || rollT > 0 || (P.raw.blink || 0) > 0);
+  const ended = () => phase === 'dead' || phase === 'won' || phase === 'over';   // the run is ending or over: no more hits, no second death
+  core.immune = () => mode === 'run' && (ended() || phase === 'travel' || P.untouchable || rollT > 0 || (P.raw.blink || 0) > 0);
 
   const stageName = i => host.BIOMES.find(b => b.id === STAGES[i].biome)?.name ?? STAGES[i].biome;
   const chestCost = () => Math.round(25 * (1 + .5 * (run?.stage || 0)) / 5) * 5;
@@ -60,7 +61,7 @@ export async function createGame(host) {
   }
   function toSandbox() {
     endRunState(); screens.hide();
-    mode = 'sandbox'; setPhase(''); host.dev = true; lock(false); host.timeScale = 1; host.hudOff = false;
+    mode = 'sandbox'; setPhase(''); host.dev = true; lock(false); host.timeScale = 1; host.hudOff = false; SB.down = -1;
     stats.restore(); host.mods.clear('run'); core.retireYard(false);
   }
   function endRunState() {   // leave a run: no enemies, no portal, the engine's own numbers
@@ -76,6 +77,7 @@ export async function createGame(host) {
     await enterStage(0);
   }
   async function enterStage(i) {
+    const r = run;
     setPhase('travel'); lock(true);
     director.stop(); core.clearEnemies(); removePortal(); bleeds.length = 0;
     run.stage = i;
@@ -85,17 +87,19 @@ export async function createGame(host) {
     core.resetYard(); combat.phys.resetAll?.();
     const sp = host.layout.spawn; host.teleport(sp.x, sp.y);
     nav.build(); nav.update(1);
-    if (mode !== 'run') return;   // left while the world was building
+    if (run !== r || r.done) return;   // left, restarted or abandoned while the world was building
     lock(false); setPhase('arrive');
     hud.banner(`Stage ${i + 1} · ${stageName(i)}`, `${st.waves} waves`, 2.4);
   }
   function die() {
+    if (ended()) return;   // one death per run (hp stays <= 0 behind the summary screen)
     setPhase('dead'); deadT = 0; lock(true); host.timeScale = .3;
     director.stop();
     hud.banner('You fell', '', 3, '#e0604a');
   }
   function finish(won) {
-    lock(true); host.timeScale = 1;
+    if (!run || run.done) return;   // a run is recorded once (Abandon on the summary, the victory timer after an Abandon)
+    run.done = true; lock(true); host.timeScale = 1;
     const r = {won, stage: run.stage + 1, stageName: stageName(run.stage), wave: Math.min(director.wave + 1, director.waves), time: run.time, kills: run.kills, gold: run.gold, build: stats.build()};
     const best0 = [save.bestStage, save.bestTime];
     recordRun(save, r);
@@ -123,7 +127,7 @@ export async function createGame(host) {
   // ---------------------------------------------------------------- run events
   function onEvents(evs) {
     for (const e of evs) {
-      if (e.type === 'player.hurt' && phase !== 'dead') {
+      if (e.type === 'player.hurt' && !ended()) {
         const d = stats.hurt(e.dmg); host.PL.flicker(.9);
         hud.float(P.x, P.y, P.z + 1.9, '-' + d, '#ff6a50', true);
         if (stats.S.hp <= 0) die();
@@ -153,6 +157,39 @@ export async function createGame(host) {
     goldSeen = core.gold;
   }
 
+  // ---------------------------------------------------------------- the desert sandbox's stakes
+  // While a feature says a fight is on (features/foes.js F.stakes: gunmen about in the desert) your hurts count in the
+  // sandbox too: the health bar, the hit vignette and flicker; at 0 you fall (slow motion; player.down: the gang stops
+  // shooting), then wake at the fort (F.respawn(); player.respawn: they're gone) with your health back. Out of a fight
+  // you heal up quickly (SB.heal per s). Nothing changes in the sandbox anywhere else.
+  const SB = {down: -1, heal: 12};
+  function stakes(dt, evs) {
+    const foes = host.feature('foes');
+    if (SB.down >= 0) {
+      SB.down += dt / Math.max(.05, host.timeScale);
+      if (!['hold', 'knock', 'fall'].includes(P.raw.state)) host.PL.hold('crouch', 99);
+      if (SB.down > 1.8) {
+        SB.down = -1; host.timeScale = 1;
+        const at = foes?.respawn?.(); if (at) host.teleport(at.x, at.y);
+        stats.heal(stats.S.maxHp); lock(false);
+        host.events.push({type: 'player.respawn', x: P.x, y: P.y});
+      }
+      return;
+    }
+    stats.update(dt);
+    if (!foes?.stakes) { if (stats.S.hp < stats.S.maxHp) stats.heal(SB.heal * dt); return; }
+    for (const e of evs) if (e.type === 'player.hurt') {
+      const d = stats.hurt(e.dmg); host.PL.flicker(.9);
+      hud.float(P.x, P.y, P.z + 1.9, '-' + d, '#ff6a50', true);
+      if (stats.S.hp <= 0) {
+        SB.down = 0; lock(true); host.timeScale = .3;
+        hud.banner('You fell', 'you wake at the fort', 2.6, '#e0604a');
+        host.events.push({type: 'player.down', x: P.x, y: P.y});
+        break;
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- the feature
   const F = {
     name: 'game', label: 'Game', always: true,
@@ -162,10 +199,11 @@ export async function createGame(host) {
     update(dt, evs) {
       if (boot) { const f = boot; boot = null; f(); }   // the first step: title / sandbox / run (the world is built)
       hud.update(dt);
+      if (mode === 'sandbox') { stakes(dt, evs); return; }
       if (mode !== 'run' || !run) return;
       phaseT += dt;
-      // dodge roll: untouchable while rolling, plus the Nimble window after
-      const roll = P.raw.state === 'roll'; if (wasRoll && !roll) rollT = stats.S.iframe; wasRoll = roll; rollT = Math.max(0, rollT - dt);
+      // dodge (roll / backstep): untouchable while dodging, plus the Nimble window after
+      const roll = P.untouchable; if (wasRoll && !roll) rollT = stats.S.iframe; wasRoll = roll; rollT = Math.max(0, rollT - dt);
       onEvents(evs);
       stepBleeds(dt); stepGold();
       stats.update(dt, phase !== 'dead');
@@ -174,9 +212,9 @@ export async function createGame(host) {
       if (phase === 'arrive' && phaseT > 2.2) { setPhase('wave'); director.start(run.stage, STAGES[run.stage].waves); }
       if (phase === 'wave') { director.update(dt); run.wave = director.wave; }
       if (phase === 'clear' && phaseT > 1.6) {
-        if (!STAGES[run.stage + 1]) { hud.banner('Victory', 'the Rift is closed', 3, '#f2d27a'); setPhase('won'); setTimeout(() => mode === 'run' && finish(true), 2200); return; }
+        if (!STAGES[run.stage + 1]) { hud.banner('Victory', 'the Rift is closed', 3, '#f2d27a'); setPhase('won'); const r = run; setTimeout(() => run === r && finish(true), 2200); return; }
         setPhase('pick'); lock(true);
-        const choices = rollAugments(rng, stats.augs, 3);
+        const choices = rollAugments(rng, stats.augs, 3, host.weapon?.kind ?? 'bow');   // (the weapon's: game/items.js only)
         if (!choices.length) { lock(false); setPhase('portal'); openPortal(); return; }
         screens.pick(stageName(run.stage), choices, a => {
           screens.hide(); stats.addAugment(a); hud.toast(a.name, a.desc, '#f2d27a');
@@ -221,7 +259,7 @@ export async function createGame(host) {
     },
 
     hd(q, sc) {
-      if (mode !== 'run' || !run) { hud.draw(q, sc, {run: false, stats, build: [], enemies: []}); return; }
+      if (mode !== 'run' || !run) { hud.draw(q, sc, {run: false, stats, build: [], enemies: [], health: mode === 'sandbox' && (SB.down >= 0 || !!host.feature('foes')?.stakes)}); return; }
       hud.draw(q, sc, {run: true, stats, build: stats.build(), stage: run.stage, stages: STAGES.length, stageName: stageName(run.stage),
         wave: director.wave, waves: director.waves || STAGES[run.stage].waves, left: director.left, phase, time: run.time, kills: run.kills,
         boss: director.boss, enemies: core.enemies, cost: chestCost()});
@@ -232,7 +270,7 @@ export async function createGame(host) {
       if (mode !== 'run' || a.extra) return;
       a.dmg = (a.dmg ?? 10) * stats.S.dmg;
       if (a.explode) a.explode = {...a.explode, dmg: a.explode.dmg * stats.S.dmg};
-      if (a.ab) return;   // ability arrows (multishot, rain, piercing, explosive) stop here
+      if (a.ab || a.kind === 'bullet') return;   // ability arrows (multishot, rain, piercing, explosive) and bullets stop here
       shotN++;
       if (stats.S.nthBoom && shotN % stats.S.nthBoom === 0) a.explode = {r: 1.5, dmg: 14 * stats.S.dmg};
       for (let i = 0; i < stats.S.volley; i++) {
@@ -253,7 +291,7 @@ export async function createGame(host) {
         if (core.gold < cost) { hud.float(p.x, p.y, 1.3, `need ${cost} gold`, '#e0604a'); return true; }
         core.addGold(-cost); goldSeen = core.gold;
         core.interact(p, {coins: 0});
-        const it = rollItem(rng, run.stage * .25); stats.addItem(it);
+        const it = rollItem(rng, run.stage * .25, host.weapon?.kind ?? 'bow'); stats.addItem(it);
         hud.toast(it.name, it.desc, it.tier === 3 ? '#e8604a' : it.tier === 2 ? '#7ad07a' : '#f4efe4');
         hud.float(p.x, p.y, 1.4, it.name, '#f2d27a', true);
         return true;
@@ -272,7 +310,7 @@ export async function createGame(host) {
       return false;
     },
     menu() {   // the pause menu's top rows
-      if (mode === 'run') return [{label: 'Abandon run', run: () => { finish(false); }}, {label: 'Back to title', run: toTitle}];
+      if (mode === 'run') return [...(run && !run.done ? [{label: 'Abandon run', run: () => { finish(phase === 'won'); }}] : []), {label: 'Back to title', run: toTitle}];   // (in the victory banner the win stands)
       if (mode === 'sandbox') return [{label: 'Start a run', run: startRun}, {label: 'Back to title', run: toTitle}];
       return [];
     },

@@ -17,8 +17,9 @@ export const OWNERS = {
   home: CC, maxHp: CC, hunter: ['@creator'], interact: ['@creator'], t: ['@creator'], a: ['@creator'], lineup: ['@creator'], seed: ['@creator'],
   painted: ['@creator'],
   // the body: where it is, how big its collider is. Combat simulates what moves (brutes, the prop physics); the registry
-  // draws it between sim steps (lerpBegin / lerpEnd: written back before anything else runs)
-  x: [...CC, 'entities'], y: [...CC, 'entities'], z: [...CC, 'entities'], h: [...CC, 'entities'], r: CC,
+  // draws it between sim steps (lerpBegin / lerpEnd: written back before anything else runs) and, as one joins, writes
+  // x / y / z / h / r back unchanged (their storage: entities.js refNumbers)
+  x: [...CC, 'entities'], y: [...CC, 'entities'], z: [...CC, 'entities'], h: [...CC, 'entities'], r: [...CC, 'entities'],
   // combat: damage, breaking, respawns, brutes, chests, the prop physics, the hit feedback
   hp: C, stage: C, broken: C, r0: C, respawnAt: C, resetAt: C, lit: C, dead: C, retired: C, faceW: C, squash: C, air: C, rooted: C,
   face: C, hpShow: C, opened: CC, lid: C, tip: C, tilt: C, vh: C, vx: C, vy: C, sink: C, sinkT: C, float: C, slide: C, stone: C,
@@ -31,7 +32,7 @@ export const OWNERS = {
 };
 const OWNER_OF_PATH = [   // the stack frame's path (after /src/) -> the system
   [/^features\/combat(\.js|\/)/, 'combat'], [/^features\/(firesim|lights)\.js/, 'lights'], [/^features\/depth(\.js|\/)/, 'depth'],
-  [/^features\/(rainaudio|windaudio|audio)\.js/, 'audio'], [/^features\/(\w+)\.js/, 1],
+  [/^features\/(rainaudio|windaudio|audio)\.js/, 'audio'], [/^features\/foes(\.js|\/)/, 'foes'], [/^features\/(\w+)\.js/, 1],
   [/^world\/(entities|spatial)\.js/, 'entities'], [/^world\/(\w+)\.js/, 1], [/^sim\/player\//, 'player'], [/^sim\/(\w+)\.js/, 1],
   [/^(game|ui|audio|view|render|core|dev)\//, 1], [/^main\.js/, 'boot'],
 ];

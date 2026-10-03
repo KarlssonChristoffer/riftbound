@@ -30,8 +30,8 @@
 //                       leaves, env.leafFall), events (dummy hits kick the strips, explosions whip foliage and billow cloth,
 //                       a bird landing on / leaving a crown, wildlife.js 'bird_perch', knocks a dying leaf loose)
 //   F.frame(f)          cloth atlas raster + its cards, posts / lantern sprites, ropes / rods / chains (host.line),
-//                       shed particles (host.point; sparks / motes glow through host.layer('emit')), pole contact shadows
-//                       (host.layer('ground'))
+//                       shed particles (host.point; sparks / motes glow through host.glayer('emit')), pole contact shadows
+//                       (host.glayer('ground'): the GPU draws both)
 //   F.card(it, sp)      the host's card hook (main.js installs it as world.hooks.card): foliage -> {sway, bend}, brazier /
 //                       torch -> {sway: 0, em: live flame canvas}, anything else null (rigid props never sway)
 //   F.mesh(it)          the host's mesh hook (world.hooks.mesh): a 3D tree -> {x, y (lean m at the top), shake (px)}
@@ -48,9 +48,10 @@
 // ART RULES (biomes.js / atmos.js): 1 texel = 1 screen px, no AA / dither / gradients on the pixel art; 4-tone ramps
 // [hi, base, shade, outline] lit from the screen's top-left; motion reads at 1x (a gust = 1-3 px of lean).
 import {flags} from '../core/flags.js';
-import {clamp, smooth, hash3 as hsh} from '../core/mathx.js';
+import {clamp, smooth, hash3 as hsh, hypot2, hypot3} from '../core/mathx.js';   // hypot2/3: Math.hypot without its garbage (bit for bit)
 import {mulberry32} from '../core/rng.js';
 import {hexU32 as rgba} from '../core/color.js';
+import {fallStage} from '../core/autumn.js';
 
 const TAU = Math.PI * 2;
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -64,7 +65,7 @@ const TUNE = {
   idle: .1,           // foliage flutter, normalised: idle amplitude ...
   flutter: .26,       // ... + this per unit of gust
   hyst: .5,           // px: the lean must move this far before the drawn offset changes (no 1 px flicker at a threshold)
-  push: {tuft: [.8, 3], bush: [1.1, 2.2]},   // the player running / rolling past: [radius m, px at full speed]
+  push: {tuft: [.8, 3], bush: [1.1, 2.2], reed: [1, 3.6], fern: [.7, 1.8]},   // the player running / rolling past: [radius m, px at full speed] (reeds part for him)
   arrowBush: [.55, 1.45], arrowTree: [1.2, 4.6],   // an arrow through foliage: [radius m, max height m]
   towerTop: 9,        // px below the tower sprite's top where its roof centre is (fallback when the tower has no mesh)
   riftLift: 12,       // m/s^2 of eerie lift on cloth (at its free edge) while a rift ring passes
@@ -77,6 +78,8 @@ const BIOME = {
   ember: {base: .12, gust: .35, sway: .5, fronts: {every: [5, 10], speed: [4, 5], len: [10, 18], amp: [.5, .9], edge: [2.5, 5], half: [14, 36]}, cloth: [.3, .8]},
   frost: {base: .45, gust: 2.1, sway: 1, fronts: {every: [1.6, 4], speed: [6, 8], len: [6, 11], amp: [.6, 1], edge: [1, 3], half: [12, 30]}, cloth: [.7, 2.2]},
   rift: {base: 0, gust: 1.1, sway: .85, pulse: {every: [5.5, 9], speed: [2, 2.6], len: [2.4, 3.4], amp: [.7, 1]}, cloth: [0, 1.6]},
+  // the desert (world/desert.js): a dry wind that keeps up between the gusts, and fast gust fronts that lift sand and roll the tumbleweeds
+  desert: {base: .38, gust: .85, sway: .8, fronts: {every: [3, 7], speed: [6, 8.5], len: [7, 13], amp: [.55, 1], edge: [1.5, 3.5], half: [10, 30]}, cloth: [.6, 1.7]},
 };
 // WIND STRENGTH (render3d): the weather of the wind, on top of the gust fronts. A multiplier on every wind speed the field
 // returns (base + gusts), so everything that reads the field feels it: foliage springs and 3D trees (lean, the leaves'
@@ -101,14 +104,20 @@ const STRENGTH = {
 // curve = the arena's row weight profile (CURVES)
 const FLEX = {
   ruins: {tuft: {px: 3, w: 16, z: .32, fq: 1.3, curve: 'tip'}, bush: {px: 2.4, w: 9, z: .36, fq: .8, curve: 'bush'},
-    tree: {px: 3.5, w: 3.8, z: .42, fq: .33, curve: 'crown'}, dead: {px: 2, w: 4.2, z: .4, fq: .4, curve: 'limb'}},
+    tree: {px: 3.5, w: 3.8, z: .42, fq: .33, curve: 'crown'}, dead: {px: 2, w: 4.2, z: .4, fq: .4, curve: 'limb'},
+    // the riverside (features/riverside.js): reeds a little livelier than a tuft, ferns barely, the willow (variant 3) loose and slow
+    reed: {px: 3.8, w: 12, z: .28, fq: 1.6, curve: 'reed'}, fern: {px: 1.4, w: 12, z: .35, fq: .9, curve: 'bush'}, willow: {px: 4.6, w: 3, z: .4, fq: .3, curve: 'crown'}},
   ember: {bush: {px: 1.6, w: 11, z: .4, fq: .5, curve: 'bush'}},
   frost: {tuft: {px: 1.6, w: 15, z: .35, fq: 1.1, curve: 'twig'}, bush: {px: 1.8, w: 8, z: .4, fq: .7, curve: 'bush'},
-    tree: {px: 2.6, w: 3, z: .45, fq: .3, curve: 'pine'}},
+    tree: {px: 2.6, w: 3, z: .45, fq: .3, curve: 'pine'}, reed: {px: 2, w: 13, z: .33, fq: 1.1, curve: 'reed'}},
   rift: {bush: {px: 2, w: 7, z: .3, fq: .45, curve: 'coral'}},
+  // the desert: stiff straw tufts, sagebrush and creosote (bush variants 0, 3) give a little; saguaros (no tree entry), prickly
+  // pear and barrel cactus (rigid: bush variants 1, 2) stand still
+  desert: {tuft: {px: 2.2, w: 16, z: .34, fq: 1.2, curve: 'tip'}, bush: {px: 1.6, w: 10, z: .38, fq: .7, curve: 'bush'}, rigid: {bush: [1, 2]}},
 };
 const CURVES = {   // the arena's row weights: u = 0 at the sprite's base row .. 1 at its top row; c = crown start (trees)
   tip: u => u < .2 ? 0 : ((u - .2) / .8) ** 1.25,
+  reed: u => u < .12 ? 0 : ((u - .12) / .88) ** 1.15,   // (a reed clump bends from lower down than a tuft)
   bush: u => u < .22 ? 0 : ((u - .22) / .78) ** 1.1,
   twig: u => u < .38 ? 0 : (u - .38) / .62,
   coral: u => u ** 1.6,
@@ -222,7 +231,9 @@ export async function create(host) {
   // ================================================================ gust field (the arena's, unchanged)
   const fronts = []; let nextF = 0, S0 = 0, S1 = 60, T0 = -25, T1 = 30;
   function extent() {
-    const c = [[0, 0], [ctx.WM, 0], [0, ctx.HM], [ctx.WM, ctx.HM]];
+    // the Proving Grounds' corners: the fronts cross them as they always have (a bigger world's open land gets the base wind; the
+    // world plan's step 3 decides how gusts reach it)
+    const wb = ctx.grounds, c = [[wb.x0, wb.y0], [wb.x1, wb.y0], [wb.x0, wb.y1], [wb.x1, wb.y1]];
     const sv = c.map(([x, y]) => x * UX + y * UY), tv = c.map(([x, y]) => -x * UY + y * UX);
     S0 = Math.min(...sv); S1 = Math.max(...sv); T0 = Math.min(...tv); T1 = Math.max(...tv);
   }
@@ -248,7 +259,7 @@ export async function create(host) {
     if (!W.on) { FA.x = FA.y = FA.g = 0; return FA; }
     let q = 1;
     if (B.pulse) {
-      const rg = ring(), dx = x - rg.x, dy = y - rg.y, d = Math.hypot(dx, dy) || 1e-3, a = Math.atan2(dy, dx);
+      const rg = ring(), dx = x - rg.x, dy = y - rg.y, d = hypot2(dx, dy) || 1e-3, a = Math.atan2(dy, dx);
       for (const f of fronts) {
         const e = f.F + f.edge * Math.sin(a * f.k1 + f.p1 + T * f.w1) - d;
         if (e > 0 && e < f.len) q *= 1 - f.A * env(e, f.len);
@@ -272,7 +283,7 @@ export async function create(host) {
   }
 
   // ================================================================ foliage
-  const FOLK = {tuft: 1, bush: 1, tree: 1};
+  const FOLK = {tuft: 1, bush: 1, tree: 1, reed: 1, fern: 1};
   const fst = new Map();   // prop -> spring state (2D lean in px, world axes)
   let fol = null, folN = -1, folArr = null;
   // (re-made when the registry's membership changes: host.propsVersion bumps on every join / leave, world/entities.js)
@@ -303,7 +314,9 @@ export async function create(host) {
   }
   function flexOf(p) {
     const F = FLEX[biome]; if (!F) return null;
+    if (F.rigid?.[p.kind]?.includes(p.variant | 0)) return null;
     if (p.kind === 'tree' && F.dead && (p.variant | 0) === 2) return F.dead;
+    if (p.kind === 'tree' && F.willow && (p.variant | 0) === 3) return F.willow;
     return F[p.kind] || null;
   }
   // our own sprite canvases only (never the screen)
@@ -353,7 +366,7 @@ export async function create(host) {
     return (S.bend[curve] = out);
   }
   function stepFoliage(dt) {
-    const pvx = PL.vx, pvy = PL.vy, spd = Math.hypot(pvx, pvy), roll = PL.state === 'roll', VR = vref();
+    const pvx = PL.vx, pvy = PL.vy, spd = hypot2(pvx, pvy), roll = PL.state === 'roll', VR = vref();
     const svx = pvx * RX + pvy * RY;   // his velocity along the screen's x (the arena's pvx)
     for (const p of nearList()) {
       if (!vis(p.x, p.y)) continue;
@@ -365,7 +378,7 @@ export async function create(host) {
       const fl = (TUNE.idle + a.g * TUNE.flutter) * (.55 + .45 * LV) * (.65 * Math.sin(T * fq * TAU + st.ph) + .35 * Math.sin(T * fq * TAU * 1.73 + st.ph * 2.1));
       let push = 0; const PU = TUNE.push[p.kind];
       if (PU && (spd > .8 || roll) && Math.abs((p.z || 0) - PL.z) < .5) {   // running / rolling past pushes it away from him
-        const ox = p.x - PL.x, oy = p.y - PL.y, sx = ox * RX + oy * RY, sy = (ox * FX + oy * FY) * 1.3, dd = Math.hypot(sx, sy);
+        const ox = p.x - PL.x, oy = p.y - PL.y, sx = ox * RX + oy * RY, sy = (ox * FX + oy * FY) * 1.3, dd = hypot2(sx, sy);
         if (dd < PU[0]) {   // brushed along with his motion (sideways on screen), or away from him when he barely moves sideways
           const side = Math.abs(svx) > .8 ? Math.sign(svx) : Math.sign(sx || 1);
           push = side * PU[1] * (1 - dd / PU[0]) * Math.min(1.3, spd / 4 + (roll ? .6 : 0));
@@ -377,7 +390,7 @@ export async function create(host) {
       const tx = F.px * (nx + fl * RX) + st.push * RX, ty = F.px * (ny + fl * RY) + st.push * RY, w2 = F.w * F.w, zw = 2 * F.z * F.w;
       st.vx += (w2 * (tx - st.dx) - zw * st.vx) * dt; st.vy += (w2 * (ty - st.dy) - zw * st.vy) * dt;
       st.dx += st.vx * dt; st.dy += st.vy * dt;
-      const lim = F.px * Math.max(1, LV) + 1.5, l = Math.hypot(st.dx, st.dy); if (l > lim) { st.dx *= lim / l; st.dy *= lim / l; }
+      const lim = F.px * Math.max(1, LV) + 1.5, l = hypot2(st.dx, st.dy); if (l > lim) { st.dx *= lim / l; st.dy *= lim / l; }
       st.shake *= Math.exp(-dt * 4.5);
       if (a.g > .62 && st.g <= .62) gustShed(p);   // a gust front arriving
       st.g = a.g;
@@ -469,7 +482,7 @@ export async function create(host) {
   function mesh(it) {
     const p = it.p; if (!W.on || !FOLK[p.kind]) return null;
     const F = flexOf(p), st = F && fst.get(p); if (!st) return null;
-    const k = STRENGTH.tree3d / ctx.PPM, a = field(p.x, p.y), e = LV * (.25 + a.g), sp = Math.hypot(a.x, a.y) || 1;
+    const k = STRENGTH.tree3d / ctx.PPM, a = field(p.x, p.y), e = LV * (.25 + a.g), sp = hypot2(a.x, a.y) || 1;
     MH.x = st.dx * k; MH.y = st.dy * k; MH.shake = st.shake > .05 ? st.shake * 1.7 * Math.sin(T * 44 + st.ph) : 0;
     MH.flut = Math.min(3, Math.max(0, e * STRENGTH.dance - STRENGTH.danceMin));
     MH.wx = a.x / sp; MH.wy = a.y / sp; MH.ph = wphQ; MH.wave = Math.min(.24, LV * a.g * STRENGTH.wave);
@@ -478,7 +491,8 @@ export async function create(host) {
 
   // ================================================================ cloth decor (the arena's Verlet pieces)
   // A piece is a Verlet grid (cols x rows) in world metres. u runs along cols, v along rows; d = 0 at the pinned edge ..
-  // 1 at the free edge (flutter grows toward it). pat(u, v) -> -1 (no cloth) | ramp index (+64 emissive, +128 rime).
+  // 1 at the free edge (flutter grows toward it). pat(uv) -> -1 (no cloth) | ramp index (+64 emissive, +128 rime); uv: [u, v] in a kept Float64Array (rasterGroup's PUV: numbers
+  // passed to the per-piece callbacks, which can't inline, were boxed a pixel each).
   function grid(o) {
     const {cols, rows} = o, n = cols * rows, P = new Float32Array(n * 3), U = new Float32Array(n), Vv = new Float32Array(n), Dd = new Float32Array(n), pin = new Uint8Array(n);
     for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
@@ -507,13 +521,13 @@ export async function create(host) {
       const i = r * cols + k, a = (r * cols + Math.min(cols - 1, k + 1)) * 3, b = (r * cols + Math.max(0, k - 1)) * 3;
       const c = (Math.min(rows - 1, r + 1) * cols + k) * 3, d = (Math.max(0, r - 1) * cols + k) * 3;
       const ux = P[a] - P[b], uy = P[a + 1] - P[b + 1], uz = P[a + 2] - P[b + 2], vx = P[c] - P[d], vy = P[c + 1] - P[d + 1], vz = P[c + 2] - P[d + 2];
-      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1;
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = hypot3(nx, ny, nz) || 1;
       N[i * 3] = nx / l; N[i * 3 + 1] = ny / l; N[i * 3 + 2] = nz / l;
     }
   }
   function simPiece(pc, h, wx, wy, g, lift = 0) {
     const {P, O, pin, n, D, U, N} = pc, k = pc.k, damp = pc.damp, h2 = h * h, ih = 1 / h;
-    const fl = pc.flut * (TUNE.clothIdle + g) * TUNE.clothV * Math.hypot(pc.nx, pc.ny, .25);
+    const fl = pc.flut * (TUNE.clothIdle + g) * TUNE.clothV * hypot3(pc.nx, pc.ny, .25);
     if (pc.pinFn) pc.pinFn(pc);
     for (let i = 0; i < n; i++) {
       const j = i * 3;
@@ -528,7 +542,7 @@ export async function create(host) {
     for (let it = 0; it < pc.iters; it++) {
       for (let l = 0; l < m; l += 4) {
         const a = L[l] * 3, b = L[l + 1] * 3, wa = pin[L[l]] ? 0 : 1, wb = pin[L[l + 1]] ? 0 : 1, w = wa + wb; if (!w) continue;
-        const dx = P[b] - P[a], dy = P[b + 1] - P[a + 1], dz = P[b + 2] - P[a + 2], d = Math.hypot(dx, dy, dz) || 1e-6;
+        const dx = P[b] - P[a], dy = P[b + 1] - P[a + 1], dz = P[b + 2] - P[a + 2], d = hypot3(dx, dy, dz) || 1e-6;
         const q = (d - L[l + 2]) / d * L[l + 3] / w;
         if (wa) { P[a] += dx * q; P[a + 1] += dy * q; P[a + 2] += dz * q; }
         if (wb) { P[b] -= dx * q; P[b + 1] -= dy * q; P[b + 2] -= dz * q; }
@@ -600,7 +614,8 @@ export async function create(host) {
   }
   function bannerPat(pal, wPx, lPx, {point = false, band = false} = {}) {
     const E = pal.emblem, rime = pal.rime;
-    return (u, v) => {
+    return uv => {
+      const u = uv[0], v = uv[1];
       if (pal.fray) { if (v > .8 + .14 * hsh(Math.round(u * wPx), 7)) return -1; }
       else if (point) { if (v > .8 && Math.abs(u - .5) > (1 - v) / .2 * .5) return -1; }
       else if (v > .8 && Math.abs(u - .5) < (v - .8) / .2 * .28) return -1;
@@ -645,7 +660,8 @@ export async function create(host) {
     const mast = 1.05, len = .78, hgt = .3, top = hTop + mast - .05, wPx = len * ctx.PPM;
     const pc = grid({cols: 6, rows: 3, org: [tp.x + .04, tp.y + .01, top], ax: [len, 0, 0], ay: [0, 0, -hgt], pin: (r, k) => k === 0,
       k: 4.5, flut: 1.4, waves: .9, freq: 2.2, bend: .45, dist: u => u,
-      pat: (u, v) => {
+      pat: uv => {
+        const u = uv[0], v = uv[1];
         if (Math.abs(v - .5) > .5 * (1 - u * .94)) return -1;
         if (pal.fray && u > .72 && hsh(Math.round(u * wPx), Math.round(v * 9), 5) > .6) return -1;
         if (pal.rime && Math.abs(v - .5) > .5 * (1 - u * .94) - .12 && u < .5) return 1 + 128;
@@ -666,7 +682,7 @@ export async function create(host) {
       const t = (.35 + (i + .5) * (len - .7) / nF) / len, ci = pal.flags[i % pal.flags.length];
       const fx = A.x + (Bp.x - A.x) * t - dx * fw / 2, fy = A.y + (Bp.y - A.y) * t - dy * fw / 2;
       const pc = grid({cols: 3, rows: 3, org: [fx, fy, H], ax: [dx * fw, dy * fw, 0], ay: [0, 0, -fh], pin: r => r === 0, k: 3, flut: 1.1, waves: .6, freq: 2.6, iters: 2, bend: 0,
-        pat: (u, v) => pal.rime && v < .12 ? 3 + 128 : 0, fray: false});
+        pat: uv => pal.rime && uv[1] < .12 ? 3 + 128 : 0, fray: false});
       pc.ramp0 = ci; pc.at = [t - fw / 2 / len, t + fw / 2 / len];
       pc.pinFn = q => {   // the top edge rides on the rope
         for (let k = 0; k < 3; k++) {
@@ -693,7 +709,7 @@ export async function create(host) {
     if (!rift && hsh(dp.x * 10 | 0, dp.y * 10 | 0) > .45) arms.push([-11, .87, .3]);
     for (const [ox, oh, len] of arms) {
       const pc = grid({cols: 2, rows: 6, org: [dp.x + ox / ctx.PPM, dp.y + .02, (dp.z || 0) + oh], ax: [.07, 0, 0], ay: [0, 0, -len], pin: r => r === 0,
-        k: 3.2, flut: 1.2, waves: .7, freq: 2.4, bend: .4, outline: 'out', pat: (u, v) => pal.rime && v < .15 ? 1 + 128 : 0});
+        k: 3.2, flut: 1.2, waves: .7, freq: 2.4, bend: .4, outline: 'out', pat: uv => pal.rime && uv[1] < .15 ? 1 + 128 : 0});
       pc.ramp0 = pal.strip;
       // the dummy is a camera-facing card, so its arm is always on the screen's x: the strip's knot follows the camera
       pc.pinFn = q => {
@@ -788,11 +804,15 @@ export async function create(host) {
     pc.wind0 = Math.sign((sy(a) - sy(c)) * (sx(0) - sx(c)) + (sx(c) - sx(a)) * (sy(0) - sy(c))) || 1;
   }
 
-  // ---------------------------------------------------------------- the cloth atlas (one canvas for every piece's box)
-  const CA = {W: 512, H: 256, cv: null, q: null, ecv: null, eq: null, x: 0, y: 0, rowH: 0, gen: 0, dirty: false, reset: false};
-  function resetCloth() {   // the canvases live as long as the feature (one GPU texture each); a rebuild just clears them
-    if (!CA.cv) { CA.cv = mk(CA.W, CA.H); CA.q = CA.cv.getContext('2d'); CA.ecv = mk(CA.W, CA.H); CA.eq = CA.ecv.getContext('2d'); }
-    CA.q.clearRect(0, 0, CA.W, CA.H); CA.eq.clearRect(0, 0, CA.W, CA.H);
+  // ---------------------------------------------------------------- the cloth atlas (one texture for every piece's box)
+  // Each changed piece box goes into its slot straight from the raster's array (G.texData: no 2D canvas between; a canvas
+  // was painted and the whole of it uploaded, 512 x 256 twice, every frame a piece changed). The two canvases are blank:
+  // they only name the textures (albedo, emit) and their size for the sprite batch. A slot's texels past its box are
+  // stale, never shown (the sprite shows the box)
+  const CA = {W: 512, H: 256, cv: null, ecv: null, x: 0, y: 0, rowH: 0, gen: 0, dirty: false, reset: false};
+  let zeros = new Uint8Array(0);   // (a box that had an emit and has none now)
+  function resetCloth() {   // the canvases live as long as the feature (one GPU texture each); a rebuild starts the slots over
+    if (!CA.cv) { CA.cv = mk(CA.W, CA.H); CA.ecv = mk(CA.W, CA.H); }
     CA.x = CA.y = CA.rowH = 0; CA.gen++; CA.dirty = true;
   }
   function slotFor(grp, w, h) {
@@ -802,7 +822,7 @@ export async function create(host) {
     if (W2 > CA.W || H2 > CA.H) return null;
     if (CA.x + W2 > CA.W) { CA.x = 0; CA.y += CA.rowH; CA.rowH = 0; }
     if (CA.y + H2 > CA.H) {   // full: start over; everything re-rasters into fresh slots this frame
-      CA.q.clearRect(0, 0, CA.W, CA.H); CA.eq.clearRect(0, 0, CA.W, CA.H); CA.x = CA.y = CA.rowH = 0; CA.gen++; CA.reset = true;
+      CA.x = CA.y = CA.rowH = 0; CA.gen++; CA.reset = true;
     }
     const n = {x: CA.x, y: CA.y, w: W2, h: H2, gen: CA.gen}; CA.x += W2; CA.rowH = Math.max(CA.rowH, H2); grp.slot = n;
     if (grp.box) grp.box.fresh = true;
@@ -811,6 +831,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- raster (per group box, view px of the turned camera)
   function rasterItem(it) { for (const grp of it.groups) rasterGroup(it, grp); it.rastered = true; }
+  const PUV = new Float64Array(2);   // a pixel's (u, v) for the piece's pat()
   function rasterGroup(it, grp) {
     const {PPM, PPMY, PPMH} = ctx;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -864,7 +885,7 @@ export async function create(host) {
           if (l0 < -1e-4 || l1 < -1e-4 || l2 < -1e-4) continue;
           const j = y * CW + x, z = l0 * ZT[i0] + l1 * ZT[i1] + l2 * ZT[i2]; if (z < zb[j]) continue;
           const u = l0 * U[i0] + l1 * U[i1] + l2 * U[i2], v = l0 * V[i0] + l1 * V[i1] + l2 * V[i2];
-          const code = pc.pat(u, v); if (code < 0) continue;
+          PUV[0] = u; PUV[1] = v; const code = pc.pat(PUV); if (code < 0) continue;
           let lam = l0 * LM[i0] + l1 * LM[i1] + l2 * LM[i2]; if (back) lam = -lam;   // the lining: its own side faces us
           const dl = lam - lam0;
           let t = dl > .17 ? 0 : dl < -.15 ? 2 : 1; if (back) t = Math.min(2, t + 1);
@@ -904,19 +925,19 @@ export async function create(host) {
       }
     }
     const sl = slotFor(grp, bw, bh); if (!sl) { b.any = false; return; }
-    // upload only if a pixel changed (or the box moved / got a new slot)
-    let same = !b.fresh && b.w === bw && b.h === bh && !E;
-    if (same) { const Pv = b.prev; outer: for (let y = 0; y < bh; y++) { const o = y * CW; for (let x = 0; x < bw; x++) if (Pv[o + x] !== buf[o + x]) { same = false; break outer; } } }
-    if (!same) {
-      CA.q.clearRect(sl.x, sl.y, sl.w, sl.h); CA.q.putImageData(b.im, sl.x, sl.y, 0, 0, bw, bh); b.prev.set(buf); CA.dirty = true;
-      if (E || b.eany) { CA.eq.clearRect(sl.x, sl.y, sl.w, sl.h); if (E && eany) CA.eq.putImageData(b.eim, sl.x, sl.y, 0, 0, bw, bh); }
-    }
+    // upload only what changed: the albedo if a pixel changed (or the box moved / got a new slot), the emit likewise
+    const kept = !b.fresh && b.w === bw && b.h === bh;
+    if (!(kept && same32(b.prev, buf, bw, bh, CW))) { host.G.texData(CA.cv, sl.x, sl.y, bw, bh, b.im.data, CW); b.prev.set(buf); CA.dirty = true; }
+    if (E) { if (!(kept && same32(b.eprev, E, bw, bh, CW))) { host.G.texData(CA.ecv, sl.x, sl.y, bw, bh, b.eim.data, CW); b.eprev.set(E); } }   // (zero where nothing glows)
+    else if (b.eany) { if (zeros.length < bw * bh * 4) zeros = new Uint8Array(bw * bh * 4); host.G.texData(CA.ecv, sl.x, sl.y, bw, bh, zeros, bw); }
     b.fresh = false; b.eany = eany; b.x = bx; b.y = by; b.w = bw; b.h = bh; b.any = true;
   }
   function ensureEmit(b) {
-    if (!b.ebuf || b.ebuf.length !== b.buf.length) { b.ebuf = new Uint32Array(b.CW * b.CH); b.eim = new ImageData(new Uint8ClampedArray(b.ebuf.buffer), b.CW, b.CH); }
+    if (!b.ebuf || b.ebuf.length !== b.buf.length) { b.ebuf = new Uint32Array(b.CW * b.CH); b.eprev = new Uint32Array(b.CW * b.CH); b.eim = new ImageData(new Uint8ClampedArray(b.ebuf.buffer), b.CW, b.CH); }
     return b.ebuf;
   }
+  // the first w x h px of two arrays with rows cw apart: the same?
+  function same32(A, B, w, h, cw) { for (let y = 0; y < h; y++) { const o = y * cw; for (let x = 0; x < w; x++) if (A[o + x] !== B[o + x]) return false; } return true; }
   function RID(it) {   // ramp name -> index into it.rampList
     if (it.rid) return it.rid;
     it.rampList = []; it.rid = {};
@@ -946,18 +967,20 @@ export async function create(host) {
     host.point(x2, L.y, L.armH, C3(M[1])); host.point(x2, L.y, L.armH - dh, C3(M[3])); host.point(x2, L.y, L.armH - 2 * dh, C3(M[3]));
     host.line(L.ax, L.y, L.az, L.bx, L.by, L.bz, C3(M[3]));
     const fr = (T * 6) | 0, e = L.body[(fr + (L.id & 1)) % 5 === 0 ? 1 : 0];
-    host.sprite({img: DA.cv, em: DA.ecv, sx: e.sx, sy: e.sy, sw: e.sw, sh: e.sh, px: e.px, py: e.py, x: L.bx, y: L.by, h: L.bz, shadow: true});
+    { const o = SPD; o.img = DA.cv; o.em = DA.ecv; o.sx = e.sx; o.sy = e.sy; o.sw = e.sw; o.sh = e.sh; o.px = e.px; o.py = e.py; o.x = L.bx; o.y = L.by; o.h = L.bz; host.sprite(o); }
   }
+  // host.sprite's options, kept (an object literal a sprite a frame before): the decor atlas (casting) and the cloth atlas
+  const SPD = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0, shadow: true}, SPC = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0};
   function drawItem(it, g) {
     if (it.shadow) for (let i = 0; i < it.shadow.length; i += 2) shadowAt(g, it.shadow[i], it.shadow[i + 1]);
-    for (const [e, x, y, h] of it.posts) host.sprite({img: DA.cv, em: DA.ecv, sx: e.sx, sy: e.sy, sw: e.sw, sh: e.sh, px: e.px, py: e.py, x, y, h, shadow: true});
+    for (const [e, x, y, h] of it.posts) { const o = SPD; o.img = DA.cv; o.em = DA.ecv; o.sx = e.sx; o.sy = e.sy; o.sw = e.sw; o.sh = e.sh; o.px = e.px; o.py = e.py; o.x = x; o.y = y; o.h = h; host.sprite(o); }
     // a wall banner hangs on the wall's south face: from the north the wall hides it. (Cards and world lines carry a depth
     // bias of ~0.15 m; the banner's top hem and rod sit closer than that to the wall's top edge and would show over it.)
     const behindWall = it.kind === 'banner' && FY < -.02;
     if (!behindWall) for (const grp of it.groups) {
       const b = grp.box, sl = grp.slot; if (!b || !b.any || !sl || sl.gen !== CA.gen) continue;
       const [ax, ay, ah] = grp.anchor(), AX = Math.round((ax * RX + ay * RY) * ctx.PPM), AY = Math.round((ax * FX + ay * FY) * ctx.PPMY - ah * ctx.PPMH);
-      host.sprite({img: CA.cv, em: CA.ecv, sx: sl.x, sy: sl.y, sw: b.w, sh: b.h, px: AX - b.x, py: AY - b.y, x: ax, y: ay, h: ah, dynamic: CA.dirty});
+      const o = SPC; o.img = CA.cv; o.em = CA.ecv; o.sx = sl.x; o.sy = sl.y; o.sw = b.w; o.sh = b.h; o.px = AX - b.x; o.py = AY - b.y; o.x = ax; o.y = ay; o.h = ah; host.sprite(o);   // (never re-uploaded whole: its slots go up in rasterGroup, G.texData)
     }
     if (!behindWall) for (const r of it.rods) drawRod(r);
     if (it.rope) {   // the prayer-flag rope: world segments between its nodes
@@ -995,7 +1018,7 @@ export async function create(host) {
         f = cr.r * .85 * Math.sqrt(Math.max(0, 1 - (o / cr.r) ** 2));
       }
       const base = {x: cx + RX * o + FX * f, y: cy + RY * o + FY * f + (R() - .5) * .1, h, t: 0, ph: R() * TAU, rest: 0};
-      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: leafPal(S), vx: (R() - .5) * (soft ? .4 : 1.4) + ax * .6, vy: (R() - .5) * (soft ? .25 : .5),
+      if (S.kind === 'leaf') spawnPart({...base, kind: 'leaf', pal: leafPal(S, tree ? autumnOf(p) : null), vx: (R() - .5) * (soft ? .4 : 1.4) + ax * .6, vy: (R() - .5) * (soft ? .25 : .5),
         vh: why === 'arrow' || why === 'blast' ? .6 + R() * .8 : why === 'fall' ? 0 : R() * .3, life: 4 + (h - z) * 2.5, g: 1.4, big: why === 'wind' && R() < .4, lie: soft ? 2.5 : 1});   // (long enough to reach the ground: it falls ~.45 m/s)
       else if (S.kind === 'snow') spawnPart({...base, kind: 'snow', pal: S.pal, vx: (R() - .5) * 1.6 + ax * .8, vy: (R() - .5) * .6, vh: .4 + R() * 1.1, life: .5 + R() * .45, g: 6});
       else if (S.kind === 'spark') {
@@ -1013,20 +1036,28 @@ export async function create(host) {
   // crowns). A dying leaf lets go by itself in still air (STRENGTH.fall) and far easier when something ruffles the crown: a
   // gust, an arrow, a blast, a bird landing or taking off (wildlife.js 'bird_perch'). leafRate = how loose they are (~.85
   // in summer, ~2 mid-autumn, ~3.2 at the peak, ~.2 on the bare winter crowns). Colours: half the crown's own (env.leafRamp),
-  // half browner than it (DYING: indices into SHED.ruins.pals [green, green, yellow-green, rust-gold, withered brown])
+  // half browner than it (DYING: indices into SHED.ruins.pals [green, green, yellow-green, rust-gold, withered brown]).
+  // A leaf of a 3D tree (autumn ramps, trees3d.js B.autumn) is the colour of the spray it left: once autumn has begun, the
+  // stage a leaf lets go from is drawn the way the crown loses them (core/autumn.js fallStage: the sprays that turned first go
+  // first), and an unturned one is the season's green. The crown's own ramp is that green now (sim/env.js LEAF.autumn), so
+  // in autumn the other things that shed (bushes) take only the dying colours
   const DYING = {spring: [4, 2], summer: [2, 2, 3], autumn: [3, 4], winter: [4]};
   let crownPal = null, crownV = -1;
   const hex6 = c => '#' + c.map(v => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')).join('');
-  function leafPal(S) {
+  const crownOwn = e => {   // the season's green leaf ([hi, base, shade] hex), null where the biome has none
+    const lr = e.leafRamp?.();   // (blended across a season's change; rebuilt only when it changed)
+    if (lr && e.ver.leaf !== crownV) { crownV = e.ver.leaf; crownPal = [hex6(lr[0]), hex6(lr[1]), hex6(lr[2])]; }
+    return lr ? crownPal : null;
+  };
+  const autumnOf = p => host.itemOf?.(p)?.pose?.autumn || null;   // a 3D tree's autumn ramps
+  function leafPal(S, aut) {
     const e = host.env; if (!e?.seasonal) return S.pals[R() * S.pals.length | 0];
-    if (R() < .5) {
-      const lr = e.leafRamp?.();   // (blended across a season's change; rebuilt only when it changed)
-      if (lr) { if (e.ver.leaf !== crownV) { crownV = e.ver.leaf; crownPal = [hex6(lr[0]), hex6(lr[1]), hex6(lr[2])]; } return crownPal; }
-    }
+    if (aut && e.autumn > .02) { const st = fallStage(e.autumn, R()); if (st > 0) return aut[st - 1]; const g = crownOwn(e); if (g) return g; }
+    if (R() < .5 && e.season !== 'autumn') { const g = crownOwn(e); if (g) return g; }
     const ix = DYING[e.season] || DYING.autumn; return S.pals[ix[R() * ix.length | 0]];
   }
   const leafRate = S => { const e = host.env; return S.kind === 'leaf' && e?.seasonal ? e.leafK * .6 + (e.leafFall || 0) * 3.2 : 1; };
-  const leafyTree = p => !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins');   // (a ruins dead tree has no leaves)
+  const leafyTree = p => !(p.kind === 'tree' && (p.variant | 0) === 2 && biome === 'ruins') && p.kind !== 'reed' && p.kind !== 'fern';   // (a ruins dead tree has no leaves; reeds and ferns shed none)
   // ---- the feel of a strong wind: leaves torn off the crowns in gusts, leaves (snow, ash) blowing through the view from
   // upwind, and what the foliage around the player sounds like: W.rustle = {e: the agitation of the leafy crowns / bushes
   // near him (1 = one tree beside him in a full breeze gust), pan: where they are on screen, -1..1}
@@ -1039,7 +1070,7 @@ export async function create(host) {
     for (const p of nearList()) {
       if (p.kind === 'tuft') continue;
       const F = flexOf(p); if (!F) continue;
-      const leafy = leafyTree(p), d = Math.hypot(p.x - PL.x, p.y - PL.y);
+      const leafy = leafyTree(p), d = hypot2(p.x - PL.x, p.y - PL.y);
       const sh = sheds && leafy && vis(p.x, p.y); if (!sh && d > 16) continue;   // (the wind field only where it's needed)
       const a = field(p.x, p.y);
       if (sh) {
@@ -1048,7 +1079,7 @@ export async function create(host) {
       }
       if (d > 16) continue;
       const st = fst.get(p), w = (p.kind === 'tree' ? (leafy ? 1 : .3) : .35) * (1 - d / 16) ** 2;
-      const sp = Math.hypot(a.x, a.y) / vref(), ag = w * sp * sp * (.7 + .3 * Math.min(1, st ? Math.hypot(st.vx, st.vy) / 25 : 0));   // ~ wind speed^2: the gusts do the talking
+      const sp = hypot2(a.x, a.y) / vref(), ag = w * sp * sp * (.7 + .3 * Math.min(1, st ? hypot2(st.vx, st.vy) / 25 : 0));   // ~ wind speed^2: the gusts do the talking
       e += ag; ep += ag * clamp(((p.x - PL.x) * RX + (p.y - PL.y) * RY) / 7, -1, 1);
     }
     W.rustle.e = e; W.rustle.pan = e > 1e-4 ? ep / e : 0;
@@ -1073,19 +1104,19 @@ export async function create(host) {
       if (q.rest > 0) {
         q.rest -= dt;
         if (q.kind === 'leaf' && LV > 1.2) {   // a strong wind skitters a fallen leaf along the ground and lifts it off again
-          const a = field(q.x, q.y), sp = Math.hypot(a.x, a.y);
+          const a = field(q.x, q.y), sp = hypot2(a.x, a.y);
           if (sp > 1.3) {
             q.x += a.x * .35 * dt; q.y += a.y * .35 * dt;
             if (R() < dt * (sp - 1.3) * 1.2) { q.rest = 0; q.vh = .5 + R() * .8; q.vx = a.x; q.vy = a.y * .6; q.t = Math.min(q.t, q.life - 4); continue; }
           }
         }
-        if (q.rest <= 0) { parts[i] = parts[parts.length - 1]; parts.pop(); }
+        if (q.rest <= 0) { q.onLand?.(q); parts[i] = parts[parts.length - 1]; parts.pop(); }   // (a lifted leaf hands itself back to the carpet: features/litter.js)
         continue;
       }
       if (q.t >= q.life) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }
       const a = field(q.x, q.y);
       if (q.kind === 'leaf') {   // flutters down, drifts with the wind; in a strong wind it loops, climbs and races (sw)
-        const sw = Math.max(0, Math.hypot(a.x, a.y) - .9), k = .9 + .5 * Math.max(0, LV - 1), c = Math.min(1, dt * 2);
+        const sw = Math.max(0, hypot2(a.x, a.y) - .9), k = .9 + .5 * Math.max(0, LV - 1), c = Math.min(1, dt * 2);
         q.vh += (-.45 + sw * .8 * Math.sin(q.t * 2.6 + q.ph * 3) - q.vh) * Math.min(1, dt * 2.2);
         q.vx += (a.x * k + Math.sin(q.t * 3.1 + q.ph) * (.5 + sw * .6) - q.vx) * c;
         q.vy += (a.y * .6 * k + Math.cos(q.t * 2.3 + q.ph * 2) * sw * .4 - q.vy) * c;
@@ -1113,7 +1144,7 @@ export async function create(host) {
       if (q.emit) {
         const [sx, sy] = host.toView(q.x, q.y, q.h), X = Math.round(sx), Y = Math.round(sy);
         if (X < 0 || Y < 0 || X >= ctx.VW || Y >= ctx.VH) continue;
-        eq ??= host.layer('emit'); eq.fillStyle = partColour(q); eq.fillRect(X, Y, ZM, ZM); continue;
+        eq ??= host.glayer('emit'); eq.fillStyle = partColour(q); eq.fillRect(X, Y, ZM, ZM); continue;
       }
       if (!vis(q.x, q.y)) continue;
       const c = C3(partColour(q)); host.point(q.x, q.y, q.h, c, o);
@@ -1240,15 +1271,38 @@ export async function create(host) {
       const shown = [];
       for (const it of decor) { if (!visItem(it)) continue; shown.push(it); if (rast || !it.rastered) rasterItem(it); }
       if (CA.reset) { CA.reset = false; for (const it of shown) rasterItem(it); }
-      const g = host.layer('ground'); g.fillStyle = 'rgba(12,16,10,.38)';
+      const g = host.glayer('ground'); g.fillStyle = 'rgba(12,16,10,.38)';
       for (const it of shown) drawItem(it, g);
       CA.dirty = false;
       drawParts();
       tick(t0);
     },
     card, mesh,
+    // a leaf lifted off the fallen carpet by a gust or a footfall (features/litter.js): {x, y, h, vx, vy, vh (m, m/s), pal ([hi, base, shade] hex), big,
+    // onLand(q)}. It tumbles on the wind like a shed leaf and lies where it comes down; once it has lain its time it is gone and onLand(q) is
+    // called (q.x, q.y: where, q.grp: whatever the caller put on it). false = not taken (wind off, or the particle cap)
+    leaf(o) {
+      if (!W.on || biome !== 'ruins' || parts.length >= 320) return false;
+      spawnPart({kind: 'leaf', t: 0, ph: R() * TAU, rest: 0, life: 9 + R() * 4, g: 1.4, big: false, lie: 1.5, ...o}); return true;
+    },
     // (o: an object to fill instead of a new one: per-frame callers pass a scratch object, nothing is allocated)
     at(x, y, o = null) { const r = o || {x: 0, y: 0, g: 0}; if (!W.on) { r.x = r.y = r.g = 0; return r; } const a = field(x, y); r.x = a.x; r.y = a.y; r.g = a.g; return r; },
+    // the gust field for a shader that evaluates it per vertex (features/grass.js: the same fronts the trees feel). Fills out
+    // (a Float32Array of 8 + 16 x max) with [UX, UY, base, gust, LV, T, n, on (0 off / 1 fronts / 2 pulse rings)], then per front
+    // [F, len, A, edge, tc, half, k1, k2, k3, p1, p2, p3, w1, w2, 0, 0] (a pulse ring: [F, len, A, edge, ring x, ring y, k1, 0,
+    // 0, p1, 0, 0, w1, 0, 0, 0]): the field() above, term for term. Returns n. Allocation-free
+    gpu(out, max) {
+      const n = W.on ? Math.min(max, fronts.length) : 0, rg = B.pulse ? ring() : null;
+      out[0] = UX; out[1] = UY; out[2] = B.base; out[3] = B.gust; out[4] = LV; out[5] = T; out[6] = n; out[7] = !W.on ? 0 : B.pulse ? 2 : 1;
+      for (let i = 0; i < n; i++) {
+        const f = fronts[i], o = 8 + i * 16;
+        out[o] = f.F; out[o + 1] = f.len; out[o + 2] = f.A; out[o + 3] = f.edge;
+        out[o + 4] = rg ? rg.x : f.tc; out[o + 5] = rg ? rg.y : f.half; out[o + 6] = f.k1; out[o + 7] = f.k2 || 0;
+        out[o + 8] = f.k3 || 0; out[o + 9] = f.p1; out[o + 10] = f.p2 || 0; out[o + 11] = f.p3 || 0;
+        out[o + 12] = f.w1; out[o + 13] = f.w2 || 0; out[o + 14] = 0; out[o + 15] = 0;
+      }
+      return n;
+    },
     // the foliage (trees, bushes, tufts) round the view and the player, for other features' per-step loops (windlines.js):
     // read-only, the same array until the view crosses a cell edge or the props change
     foliage: () => nearList(),

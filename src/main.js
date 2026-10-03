@@ -40,7 +40,7 @@
 // THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
 // dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
 // host.setBiome / setTime / teleport / setYaw.
-// HOST (see `host` below): player, arrows, spawnArrow, events, mods (modifiers), props, entities (add / remove / hide /
+// HOST (see `host` below): player, arrows, spawnArrow, events, mods (modifiers), weapon (the loadout's), props, entities (add / remove / hide /
 //   query / near), itemOf, elev, inStream, blocked, layout,
 //   hitstop, shake, knock, play, aim, mouse, keys, toView(x, y, h) -> view px, sprite, point, line, layer(name),
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE,
@@ -50,7 +50,7 @@ import {createGfx, DEG} from './render/gfx.js';
 import {WORLD, elev, inStream} from './world/world.js';
 import {BIOMES} from './world/biomes.js';
 import {MOODS, TIMES} from './content/moods.js';   // the lighting tables (forked from the arena's lighting.js)
-import {createHero, loadLoadout} from './view/hero.js';   // the Ranger's card: loadouts, the composite, cloak, hair, armour, HD bow
+import {createHero, loadLoadout, SET_NAMES} from './view/hero.js';   // the Ranger's card: loadouts, the composite, cloak, hair, armour, HD bow
 import {BUSY} from './sim/player/player.js';
 import {createPlayerHost} from './sim/player/adapter.js';
 import {createGame} from './game/game.js';
@@ -78,7 +78,8 @@ const t00 = performance.now();
 
 // ---------------------------------------------------------------- the Ranger: loadouts (packed atlases)
 // the loadout (view/hero.js LOADOUTS). Default: the runtime cloth (cloak + scarf tail answer the wind; ?set=basic = the baked cloak)
-const loadI = {basic: 0, body: 2, sim: 1}[Q.get('set')] ?? 1;
+// (?set=gunslinger | outlaw: the cowboys, a revolver each: content/weapons.js)
+const loadI = SET_NAMES.includes(Q.get('set')) ? SET_NAMES.indexOf(Q.get('set')) : 1;
 $('#load').textContent = 'Loading the Ranger…';
 const TIMING = {}, mark = (k, t0) => { TIMING[k] = +((performance.now() - t0) / 1000).toFixed(2); };
 let tp = performance.now();
@@ -93,7 +94,7 @@ const cv = createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: () => opt, onTurn: d
 const features = [], events = [];
 const mods = createModifiers();   // game effects as notes on the owners' stats (core/modifiers.js; host.mods)
 const canvas = $('#screen');
-const G = createGfx(canvas, {VW: cv.VW, VH: cv.VH, PPM, PPMY, PPMH});
+const G = createGfx(canvas, {VW: cv.VW, VH: cv.VH, PPM, PPMY, PPMH, world: WORLD});
 // the HD overlay: display resolution, over the pixel canvas (damage numbers, bars, prompts)
 const hdc = document.createElement('canvas'); hdc.id = 'hd'; hdc.style.cssText = 'position:absolute;pointer-events:none;image-rendering:auto';
 $('#wrap').appendChild(hdc); const hq = hdc.getContext('2d');
@@ -126,7 +127,7 @@ const keys = new Set(), mouse = {x: cv.VW / 2, y: cv.VH / 2, down: false}, cam =
 // arrows, hit pops, footstep dust (sim/projectiles.js)
 const proj = createProjectiles({world: () => stage.world, ents: () => stage.ents, features, events, opt: () => opt, toWorld, PPM, PPMH});
 const {arrows, dust} = proj, spawnArrow = proj.spawn;
-const feat = name => features.find(f => f.name === name) || null;
+const feat = name => { for (const f of features) if (f.name === name) return f; return null; };   // (no closure a call: host.wind is read in hot loops)
 const hero = createHero({G, set, loadI, ctxO, app});
 // THE PLAYER (sim/player/adapter.js): player.js in the camera's frame, bridged to the world (collision, the world-frame
 // `player`, turning with the camera, the cursor's target, interaction, climbing at any angle)
@@ -141,6 +142,18 @@ const shake = cv.shake;
 let loop = null;
 
 // ---------------------------------------------------------------- the host features see
+// host.sprite's arguments for G.sprite (arena -> world axes), in ONE reused object: G.sprite reads it at once and keeps
+// nothing, so no copy per sprite (a spread made a new object for every sprite of every frame)
+// Its number fields always hold numbers (the defaults G.sprite would take, worked out here): a field that also held
+// undefined kept its doubles as boxes, a new box for every number written (~10 a sprite, every sprite, every frame)
+const SPR = {img: null, em: null, nrm: null, type: 3, shadow: false, dynamic: false, sx: 0, sy: 0, sw: 0, sh: 0,
+  x: 0, y: 0, z: 0, px: 0, py: 0, alpha: 1, flip: false, sway: 0, flash: 0};
+const sprite = o => {
+  const s = SPR; s.img = o.img; s.em = o.em; s.nrm = o.nrm; s.type = o.type ?? 3; s.shadow = !!o.shadow; s.dynamic = !!o.dynamic;
+  s.sx = o.sx || 0; s.sy = o.sy || 0; s.sw = o.sw ?? o.img.width; s.sh = o.sh ?? o.img.height; s.x = o.x; s.y = o.h ?? 0; s.z = o.y;
+  s.px = o.px ?? s.sw / 2; s.py = o.py ?? s.sh; s.alpha = o.alpha ?? 1; s.flip = !!o.flip; s.sway = o.sway || 0; s.flash = o.flash || 0;
+  G.sprite(s); s.img = s.em = s.nrm = null;   // (don't hold the images)
+};
 const host = {
   THREE, G, PPM, PPMY, PPMH, get VW() { return cv.VW; }, get VH() { return cv.VH; }, ctxO,
   get world() { return stage.world; }, get biome() { return stage.biome; }, get time() { return env.bucket; }, get mood() { return env.mood(stage.biome.id); }, env,
@@ -148,14 +161,15 @@ const host = {
   // the entity registry (world/entities.js): add / remove props, live queries by kind, near(x, y, r); props = its list
   get entities() { return stage.ents; }, get propsVersion() { return stage.ents.ver; },
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY, mods,
+  get weapon() { return hero.weapon; },   // the loadout's weapon (content/weapons.js): kind 'bow' | 'gun', abilities
   itemOf: p => stage.world.itemOf(p), elev, inStream, blocked: (x, y, z = P.z, air = false) => pa.blocked(x, y, z, air),
   hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); }, play: (frame, sec) => PL.hold(frame, sec),
   aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target}; },
   toView: (x, y, h = 0) => { const s = G.toScreen(x, h, y); return [s[0], s[1]]; },         // world -> view px (rotated)
-  sprite: o => G.sprite({...o, x: o.x, y: o.h ?? 0, z: o.y}),                            // {img, x, y, h, px, py, ...}
+  sprite,                                                                              // {img, x, y, h, px, py, ...}
   point: (x, y, h, c, o) => G.point(x, h, y, rgbOf(c), o),
   line: (x0, y0, h0, x1, y1, h1, c, emit) => G.line(x0, h0, y0, x1, h1, y1, rgbOf(c), emit),
-  layer: n => G.layer(n), rgb: rgbOf,
+  layer: n => G.layer(n), glayer: n => G.glayer(n), rgb: rgbOf,
   get wind() { return feat('wind'); }, feature: feat,
   get hits() { return proj.hits; },
   // the menu (ui/menu.js): open it (the title's Settings), its wooden UI sounds (the audio feature), open or not

@@ -107,8 +107,8 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     const hx = cv.VW / (2 * PPM * z), hy = cv.VH / (2 * PPMY * z), c = Math.abs(Math.cos(cv.yaw)), s = Math.abs(Math.sin(cv.yaw));
     const ex = hx * c + hy * s, ez = hx * s + hy * c;
     let [gx, gz] = toWorld(vx, vy - lift);
-    gx = ex * 2 >= WORLD.WM ? WORLD.WM / 2 : Math.min(WORLD.WM - ex, Math.max(ex, gx));
-    gz = ez * 2 >= WORLD.HM ? WORLD.HM / 2 : Math.min(WORLD.HM - ez, Math.max(ez, gz));
+    gx = ex * 2 >= WORLD.WM ? WORLD.x0 + WORLD.WM / 2 : Math.min(WORLD.x1 - ex, Math.max(WORLD.x0 + ex, gx));
+    gz = ez * 2 >= WORLD.HM ? WORLD.y0 + WORLD.HM / 2 : Math.min(WORLD.y1 - ez, Math.max(WORLD.y0 + ez, gz));
     [vx, vy] = toView(gx, gz); vy += lift;
     const sx = Math.round(vx * PPM * z) / (PPM * z), S = Math.round((vy * PPMY - h * PPMH) * z), vy2 = (S / z + h * PPMH) / PPMY;
     const [X, Zw] = toWorld(sx, vy2); Ts.set(X, h, Zw);

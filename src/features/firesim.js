@@ -4,7 +4,12 @@
 // dances (a twist along its height from layered sines + the wind's push). Each particle cools as it ages: white-hot core,
 // yellow, the fire's own colour, dark tips; hot ones are fat pixels, cool ones single pixels that dither away. Because
 // they live in 3D, turning the camera shows the flame from another side, and the bowl's rim, the player or a post in
-// front hides what is behind it (they are depth-tested pixel particles: host.point).
+// front hides what is behind it (they are depth-tested pixel particles in the G-buffer).
+// THE PARTICLES LIVE ON THE GPU (render/flames.js): one is only BORN here (its random draws: where on the bed, how fast, how
+// long, which way it swirls), written once into a slot; the shaders place, colour and size every live one each frame from its
+// age. Here: each fire's breathing, flares, pops, tongues and the wind's push, the HD glow and heat round the flame, and each
+// particle's age (two numbers: the per-fire cap and the slot's release). Until 2026-10-02 the particles were simulated and
+// drawn here, ~1000 a frame (~10% of the frame's JS); the GPU's maths is that draw's, term for term.
 //
 //   const fires = createFires(host)
 //   fires.step(dt)                         advance every flame drawn recently (once per update)
@@ -20,6 +25,8 @@
 import {ART} from '../world/biomes.js';
 import {clamp, TAU} from '../core/mathx.js';
 import {hex01 as rgb} from '../core/color.js';
+import {createFlames} from '../render/flames.js';
+import {viewRandom} from '../core/rng.js';
 
 // style: 'pixel' (depth-tested pixel particles) | 'hybrid' (those + a soft HD glow round the flame) | 'soft' (the
 // whole flame as smooth HD particles: gfx.js fx, display resolution, additive, soft-depth-tested)
@@ -34,7 +41,7 @@ const KINDS = {
   camp:    {pops: .6, bed: .2, rate: 1000, life: [.3, .72], vh: [.85, 1.6], buoy: 1.8, H: .8, swirl: 4.5, dance: .13, size: 3, tongues: 5},
   beacon:  {pops: .45, bed: .3, rate: 1250, life: [.34, .82], vh: [1, 2], buoy: 2.1, H: 1.12, swirl: 4, dance: .17, size: 4, tongues: 5},
 };
-const R = Math.random, rr = (a, b) => a + R() * (b - a);
+const R = viewRandom(), rr = (a, b) => a + R() * (b - a);
 function tones(c) {   // white-hot .. dark tips; warm fires lean yellow in the middle and red at the tips
   const [r, g, b] = rgb(c), warm = r > b + .15 && r >= g, m = ART.mixHex;
   return (warm ? [m(c, '#ffffff', .82), m(c, '#fff3c0', .58), m(c, '#ffd27a', .28), c, m(c, '#b0341a', .45), m(c, '#4a140a', .6)]
@@ -42,20 +49,23 @@ function tones(c) {   // white-hot .. dark tips; warm fires lean yellow in the m
 }
 
 export function createFires(host) {
-  // PERFORMANCE: ~1000 particles live at once and thousands are born per second, so dead particles go back to a pool
-  // (no garbage), every point is drawn through one reused options object (G.point reads it at once), and a flame whose
-  // bed is off screen keeps simulating but draws nothing (it's ready the moment the camera turns to it)
-  const fires = new Map(), ramps = new Map(), pool = [], PO = {emit: true, size: 1, alpha: 1};
+  // PERFORMANCE: per fire per frame a few numbers; per particle a birth (~1-8 a fire a frame) and an age (a typed array). A
+  // flame whose bed is off screen keeps simulating but isn't drawn (it's ready the moment the camera turns to it)
+  const fires = new Map(), ramps = new Map(), gpu = createFlames(host.G);
   let T = 0, frame = 0;
+  const SF = {x: 0, y: 0, h: 0, KH: 1, s1: 0, s2: 0, s3: 0, dance: 0, wx: 0, wy: 0, on: 0, buoy: 0, big: 1, mid: 1, rad: .1, ramp: null};
   const rampOf = c => { let r = ramps.get(c); if (!r) ramps.set(c, r = tones(c)); return r; };
 
   function fireOf(key, kind) {
     let f = fires.get(key);
     if (!f || f.kind !== kind) {
-      f = {kind, K: KINDS[kind] || KINDS.brazier, hs: 1, P: [], acc: 0, x: 0, y: 0, h: 0, col: null, ramp: null, on: 0, onT: 1, scale: 1, used: frame,
+      if (f) dropGPU(f);
+      f = {kind, K: KINDS[kind] || KINDS.brazier, hs: 1, acc: 0, x: 0, y: 0, h: 0, col: null, ramp: null, on: 0, onT: 1, scale: 1, used: frame,
         s1: R() * TAU, s2: R() * TAU, s3: R() * TAU, wx: 0, wy: 0, flare: 0,
         // tongues: a few directions round the axis where the flame licks higher; they wander round it
         tg: Array.from({length: (KINDS[kind] || KINDS.brazier).tongues}, (_, i) => ({th: i / 4 * TAU + R(), v: rr(-1.6, 1.6)}))};
+      // its particles: age, life (s) and GPU slot each, in birth order (swap-removed as they die)
+      f.row = gpu.fire(); f.live = 0; f.ages = new Float64Array(1024); f.lifes = new Float64Array(1024); f.slots = new Int32Array(1024);
       fires.set(key, f);
     }
     f.used = frame; return f;
@@ -66,51 +76,54 @@ export function createFires(host) {
     out[0] = a * (Math.sin(T * 2.9 + f.s1 + z * 5.5) * .65 + Math.sin(T * 6.1 + f.s2 + z * 11) * .35) + f.wx * z * .55;
     out[1] = a * (Math.sin(T * 2.4 + f.s3 + z * 6.3) * .65 + Math.sin(T * 5.3 + f.s1 + z * 9) * .35) + f.wy * z * .55;
   }
-  function spawn(f, n) {
+  function dropGPU(f) { for (let i = 0; i < f.live; i++) gpu.release(f.slots[i]); f.live = 0; gpu.free(f.row); }   // a fire gone: its slots and row back
+  function spawn(f, n, dt) {
     const K = f.K;
-    for (let i = 0; i < n && f.P.length < TUNE.maxPer; i++) {
+    for (let i = 0; i < n && f.live < TUNE.maxPer; i++) {
+      if (f.live >= f.ages.length) {   // (a raised maxPer)
+        const a = new Float64Array(f.ages.length * 2), b = new Float64Array(a.length), c = new Int32Array(a.length); a.set(f.ages); b.set(f.lifes); c.set(f.slots); f.ages = a; f.lifes = b; f.slots = c;
+      }
       const rf = R() ** .8, r = K.bed * rf, th = R() * TAU, hl = f.hs ** .7, hv = f.hs ** .3;
       let tongue = 0; for (const t of f.tg) { let d = Math.abs(((th - t.th) % TAU + TAU) % TAU); d = Math.min(d, TAU - d); tongue = Math.max(tongue, Math.exp(-((d / .45) ** 2))); }
       tongue *= .4 + .6 * rf;   // the licks are the flame's outer sheets
-      const q = pool.pop() || {};
-      q.r0 = r; q.rf = rf; q.th = th; q.z = rr(0, .04); q.vz = rr(K.vh[0], K.vh[1]) * hv * (.9 + (1 - rf) * .25) * (1 + tongue * .55); q.age = 0;
-      q.life = rr(K.life[0], K.life[1]) * hl * (.8 + (1 - rf) * .4) * (1 + tongue * .45);
-      q.sw = K.swirl * rr(.6, 1.4) * (R() < .5 ? -1 : 1); q.wob = R() * TAU; q.n = rr(-.07, .07);
-      f.P.push(q);
+      // born at the step's start (it is aged dt by the step's end), rising at vz, living `life` s; the rest is its look
+      const z0 = rr(0, .04), vz = rr(K.vh[0], K.vh[1]) * hv * (.9 + (1 - rf) * .25) * (1 + tongue * .55);
+      const life = rr(K.life[0], K.life[1]) * hl * (.8 + (1 - rf) * .4) * (1 + tongue * .45);
+      const sw = K.swirl * rr(.6, 1.4) * (R() < .5 ? -1 : 1), wob = R() * TAU, nn = rr(-.07, .07), tb = T - dt;
+      const b = BO; b.T = tb; b.life = life; b.z0 = z0; b.vz = vz; b.r0 = r; b.rf = rf; b.th0 = th; b.sw = sw; b.wob = wob; b.n = nn;
+      f.slots[f.live] = gpu.birth(f.row, b);
+      f.ages[f.live] = 0; f.lifes[f.live++] = life;
     }
   }
-  const A = [0, 0], CC = [0, 0, 0], pops = [];
+  const A = [0, 0], pops = [], WS = {x: 0, y: 0, g: 0}, NOO = {};   // WS: the wind at a flame (scratch); NOO: no options
+  const BO = {T: 0, life: 0, z0: 0, vz: 0, r0: 0, rf: 0, th0: 0, sw: 0, wob: 0, n: 0};   // a birth for gpu.birth (kept)
   return {
     TUNE,
     ramp: c => rampOf(c),
     step(dt) {
       T += dt;
       for (const [key, f] of fires) {
-        if (frame - f.used > 30) { for (const q of f.P) pool.push(q); fires.delete(key); continue; }
+        if (frame - f.used > 30) { dropGPU(f); fires.delete(key); continue; }
         f.on += (f.onT - f.on) * Math.min(1, dt * 6);
         // the fuel breathes and now and then flares; now and then it POPS (a crackle: a hard flare, sparks thrown)
         if (R() < dt * .5) f.flare = rr(.25, .5); f.flare *= Math.exp(-dt * 3);
         if (f.on > .8 && R() < dt * (f.K.pops || 0)) { const k = rr(.6, 1); f.flare = Math.max(f.flare, .7 * k); f.pop = 1; pops.push({x: f.x, y: f.y, h: f.h, col: f.col, kind: f.kind, k}); }
         f.pop = (f.pop || 0) * Math.exp(-dt * 9);
         f.acc += f.K.rate * TUNE.density * f.on * (f.scale ?? 1) * (1 + f.flare + Math.sin(T * 7 + f.s2) * .12) * dt;
-        const n = f.acc | 0; f.acc -= n; spawn(f, n);
+        const n = f.acc | 0; f.acc -= n; spawn(f, n, dt);
         for (const t of f.tg) { t.v += (R() - .5) * dt * 6; t.v *= Math.exp(-dt * .8); t.th += t.v * dt; }
-        const K = f.K, P = f.P;
-        for (let i = P.length - 1; i >= 0; i--) {
-          const q = P[i]; q.age += dt;
-          if (q.age >= q.life) { P[i] = P[P.length - 1]; P.pop(); pool.push(q); continue; }
-          q.vz += K.buoy * f.hs * dt; q.z += q.vz * dt; q.th += q.sw * dt;
-        }
+        const Ag = f.ages, Lf = f.lifes, Sl = f.slots;   // age them; the dead give their slots back (the GPU works out the motion)
+        for (let i = f.live - 1; i >= 0; i--) if ((Ag[i] += dt) >= Lf[i]) { gpu.release(Sl[i]); const j = --f.live; Ag[i] = Ag[j]; Lf[i] = Lf[j]; Sl[i] = Sl[j]; }
       }
     },
-    draw(key, kind, col, x, y, h, o = {}) {
+    draw(key, kind, col, x, y, h, o = NOO) {
       const f = fireOf(key, kind); f.x = x; f.y = y; f.h = h; f.onT = o.on ?? 1; f.scale = o.scale ?? 1; f.hs = clamp(o.height ?? 1, .2, 1.5);
       if (f.col !== col) { f.col = col; f.ramp = rampOf(col); }
       // the wind pushes the column (world metres; it leans the same way from every side)
-      const a = host.wind?.on && host.wind.at ? host.wind.at(x, y) : null;
+      const a = host.wind?.on && host.wind.at ? host.wind.at(x, y, WS) : null;
       f.wx += ((a ? a.x : 0) * .16 - f.wx) * .08; f.wy += ((a ? a.y : 0) * .16 - f.wy) * .08;
       const K = f.K, KH = K.H * f.hs, ramp = f.ramp, z = host.zoom, big = Math.min(4, K.size * z), mid = Math.min(3, Math.max(1, Math.round(K.size * .66 * z)));
-      const style = host.G.fx ? TUNE.style : 'pixel', G = host.G, soft = style === 'soft', pix = style !== 'soft';
+      const style = host.G.fx ? TUNE.style : 'pixel', G = host.G;
       if (G.onScreen && !G.onScreen(x, h + KH * .5, y, (KH * 2 + .6) * host.PPM * z)) return f;   // off screen: simulated, not drawn
       const rad = K.bed * .32 + .025;   // a soft particle's radius (m)
       if (style === 'soft') {   // the glow round the flame: a wide faint halo + a hot heart low in it (bloom, HD)
@@ -131,38 +144,19 @@ export function createFires(host) {
           G.heat(x + A[0] * (1 + j * .4), h + zz, y + A[1] * (1 + j * .4), KH * (.34 + j * .18) + K.bed * .6, (.5 - j * .13) * k);
         }
       }
-      for (const q of f.P) {
-        // temperature from WHERE it is in the flame (hot low and central, cooling up and out), so neighbours agree and
-        // the flame reads as one body with a white core; age only fades it at the end of its life
-        const u = q.age / q.life, zf = q.z / KH, fade = u < .72 ? 1 : 1 - (u - .72) / .28;
-        const Tm = clamp(1.1 - .9 * zf ** 1.15 - .5 * q.rf * q.rf + q.n, 0, 1.05) * fade * (.7 + .3 * f.on);
-        if (Tm < .1) continue;
-        // drawn in toward the axis as it climbs (the teardrop), swirling round it, a little flutter
-        const conv = Math.max(0, 1 - q.z / KH), r = q.r0 * (conv ** .7) + Math.sin(T * 13 + q.wob) * .012;
-        axis(f, q.z, A);
-        const px = x + A[0] + Math.cos(q.th) * r, py = y + A[1] + Math.sin(q.th) * r;
-        const t = Tm > .86 ? 0 : Tm > .7 ? 1 : Tm > .55 ? 2 : Tm > .4 ? 3 : Tm > .26 ? 4 : 5;
-        const outer = q.rf > .72;
-        if (pix) {   // the hot core: fat, solid pixels; the outer sheets thin and dithered, so the core glows through them
-          const size = outer ? (t <= 2 ? mid : 1) : t <= 1 ? big : t <= 3 ? mid : 1;
-          PO.size = size; PO.alpha = outer ? .62 : Tm < .22 ? .55 : 1;
-          host.point(px, py, h + q.z, ramp[t], PO);
-        }
-        if (soft) {   // smooth: overlapping additive blobs, the colour blended between the ramp's tones
-          // (from the yellow tone down: overlapping blobs add up to white in the core by themselves)
-          const k = clamp(1 + (1.05 - Tm) * 4.4, 1, 4.999), i0 = k | 0, fr = k - i0, c0 = ramp[i0], c1 = ramp[i0 + 1];
-          CC[0] = c0[0] + (c1[0] - c0[0]) * fr; CC[1] = c0[1] + (c1[1] - c0[1]) * fr; CC[2] = c0[2] + (c1[2] - c0[2]) * fr;
-          G.fx(px, h + q.z, py, rad * (outer ? .6 : .82) * (.65 + .5 * Tm), CC, (outer ? .13 : .19) * (.3 + .7 * Tm), 'add');
-        } else if (style === 'hybrid') {
-          if (!outer && Tm > .55 && (q.wob * 7 | 0) % 3 === 0) G.fx(px, h + q.z, py, rad * 1.3, ramp[2], .1 * Tm, 'add');   // a glow on the hottest third
-          else if (zf > .62 && (q.wob * 5 | 0) % 2 === 0) G.fx(px, h + q.z, py, rad * .9, ramp[4], .07 * Tm + .02, 'add');   // tips melt into the dark
-        }
-      }
+      // the particles (render/flames.js): this frame's row for the shaders. A particle's temperature comes from WHERE it is
+      // in the flame (hot low and central, cooling up and out: one body with a white core), its age only fades it at the end;
+      // it is drawn in toward the axis as it climbs (the teardrop), swirls round it, flutters; the hot core is fat solid
+      // pixels (big), the outer sheets thin and dithered; HD styles add soft glows (render/flames.js GLOW_VS)
+      SF.x = x; SF.y = y; SF.h = h; SF.KH = KH; SF.s1 = f.s1; SF.s2 = f.s2; SF.s3 = f.s3; SF.dance = K.dance * f.hs; SF.wx = f.wx; SF.wy = f.wy;
+      SF.on = f.on; SF.buoy = K.buoy * f.hs; SF.big = big; SF.mid = mid; SF.rad = rad; SF.ramp = ramp;
+      gpu.setFire(f.row, SF);
       return f;
     },
-    endFrame() { frame++; },
+    endFrame() { gpu.frame(T, host.G.fx ? TUNE.style : 'pixel'); frame++; },
     pops,
-    get count() { let n = 0; for (const f of fires.values()) n += f.P.length; return n; },
+    get count() { let n = 0; for (const f of fires.values()) n += f.live; return n; },
+    gpu,   // (render/flames.js)
     _: fires,   // (debug: the live flames)
   };
 }

@@ -17,6 +17,7 @@
 // PH.frame() every rendered frame
 // (matrices, chunk meshes); PH.biomeChanged() (the world's meshes were disposed); PH.shove(q, vx, vy); PH.T; PH.dbg.
 import * as THREE from 'three';
+import {walkable} from '../../world/world.js';
 
 const MOVABLE = new Set(['crate', 'barrel', 'barrel_x']);
 const DEBRIS = {crate: ['plank', 5], barrel: ['stave', 6], barrel_x: ['stave', 5], pot: ['shard', 5], crystal: ['stone', 0], chest: ['plank', 0]};
@@ -45,8 +46,7 @@ export async function createPropPhysics(host, core) {
   const mov = host.entities.query('props.movable', p => MOVABLE.has(p.kind), p => { p.home3 = [p.x, p.y, p.z || 0]; p.vx = 0; p.vy = 0; p.push = p.kind === 'crate' && !p.wall; p.idle = 0; });
   const chests = host.entities.query('props.chest', p => p.kind === 'chest');
   let simT = 0, lastPV = [0, 0], lastPS = 0;
-  const PLAY = host.ctxO.PLAY, TR = host.layout.trail;
-  const inBounds = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TR.x0 && x < TR.x1 && y > TR.y0 && y < TR.y1);
+  const inBounds = walkable;   // where a pushed prop may go: where the player may (layout.walkable)
   const moveInput = () => {   // the player's WASD (camera-relative) in the world
     const [vx, vy] = host.PL.moveInput(), a = host.yaw, c = Math.cos(a), s = Math.sin(a);
     return [vx * c + vy * s, -vx * s + vy * c];
@@ -325,7 +325,7 @@ export async function createPropPhysics(host, core) {
       }
       c.m.setMatrix(M);
       if (c.h > .05) {   // the arena's little ground shadow under a chunk in the air
-        gq ??= host.layer('ground'); gq.fillStyle = 'rgba(12,14,10,.3)';
+        gq ??= host.glayer('ground'); gq.fillStyle = 'rgba(12,14,10,.3)';
         const [sx, sy] = host.toView(c.x, c.y, c.z); gq.fillRect(Math.floor(sx) - zoom, Math.floor(sy), 3 * zoom, zoom);
       }
     }

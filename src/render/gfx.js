@@ -7,7 +7,8 @@
 //                 A  rgb albedo, a = (type * 4 + tone) / 255
 //                 N  xyz world normal, w = object id (whole numbers; a wall line shares one id: no outline at joints)
 //                 E  rgb emissive, w = part * 32 + family (meshes: seams between parts of the same family)
-//               types: 0 empty, 1 ground, 2 ramp mesh (live 3D prop), 3 billboard (painted sprite), 4 character,
+//               types: 0 empty, 1 ground (tone 1 = WATER: the composite lights it as water; tone 2 = fallen leaves), 2 ramp mesh (live 3D prop), 3 billboard (painted sprite;
+//                      tone 2 = a plant with its own autumn colours: the composite's season matrix skips tone 2 on types 1 and 3), 4 character,
 //                      5 textured surface (cliff faces), 6 line (arrows), 7 lit card (a prop pre-rendered at 16 angles)
 //   3. x-ray    the player's card again, marking pixels where the scene hides it
 //   4. light    full-screen: outlines / seams / occlusion lines on meshes (the pixelizer's rules, live), then the arena's
@@ -17,8 +18,17 @@
 // World axes: X east, Y up, Z south (arena x, h, y). Metres.
 import * as THREE from 'three';
 import {flags} from '../core/flags.js';
+import {AUTUMN as AU, AUTUMN_MID} from '../core/autumn.js';
+import {hypot2, clearArray} from '../core/mathx.js';
+import {cssRGBA} from '../core/color.js';
+import {createGLStats} from './glstats.js';
+import {createLitterSim} from './litter.js';
 
 export const DEG = Math.PI / 180;
+// a uniform-shaped holder whose value is only ever a number (a card's sway: written every frame). Its own class keeps
+// that field a number in place; plain {value} objects share one hidden class with every three.js uniform (textures,
+// vectors), so a number written to one is boxed: a new heap number per swaying card per frame
+class NumU { constructor(v) { this.value = v; } }
 const R_DEPTH = 120;   // metres of "nearness" mapped onto the depth range (the world is 62 x 30 m)
 
 const HEAD = `precision highp float; precision highp int;\n`;
@@ -38,20 +48,45 @@ vec3 sway() {
   vec2 s = floor(l + .5); return uLeanX * s.x + uLeanY * s.y;
 }
 `;
-const meshVS = sway => HEAD + (sway ? SWAY : 'vec3 sway() { return vec3(0.); }\n') + `
+// AUTUMN (core/autumn.js is the model; the numbers are its): how fast a leaf clump turns, per tree. aSpray = the clump's
+// centre in the crown's ellipsoid (xyz, bytes, in 1/1.25ths) + its own random (w 0..1; bark -1). The clump's place is taken
+// into the WORLD frame (the tree's yaw), so the sun side is the south side whichever way the tree stands; fM is the same for
+// every vertex of a clump, so the mesh pass and the shadow pass (SHADOW_SWAY_VS) agree on every leaf
+const gl = v => Number.isInteger(v) ? v + '.' : String(v);   // a number as a GLSL float
+const gl3 = a => `vec3(${a.map(gl).join(', ')})`;
+const SPRAY_VS = `
+in vec4 aSpray; uniform vec2 uSeed;
+float sprayM(mat4 mm) {
+  if (aSpray.w < 0.) return ${gl(AUTUMN_MID)};
+  mat3 M = mat3(mm);
+  vec3 ew = M * (aSpray.xyz * 1.25) / length(M[0]);
+  float t1 = fract(sin(dot(uSeed, vec2(12.9898, 78.233))) * 43758.5453), t2 = fract(t1 * 91.7 + .37);   // per tree: where it stands
+  float k = clamp(.5 + ${gl(AU.expo)} * dot(ew, ${gl3(AU.sun)}) + ${gl(AU.rnd)} * (fract(aSpray.w + t2) - .5) + ${gl(AU.tree)} * (t1 - .5), 0., 1.);
+  return ${gl(AU.lo)} + ${gl(AU.hi - AU.lo)} * k;
+}`;
+const NO_SPRAY_VS = `float sprayM(mat4 mm) { return ${gl(AUTUMN_MID)}; }\n`;
+// the thinning (uLeafK): a fragment of a leaf is gone where a 3D noise (clumps of a few cm, varied per tree) beats the season's
+// fullness, and the sprays that turned further fall first: + drop x autumn x (m - mid), nothing at autumn 0. MESH_FS and
+// SHADOW_SWAY_FS both use it (vn3, uLeafK, uSeed above it), so the shadow drops exactly the leaves the camera loses
+const LEAF_GONE = `
+uniform float uAutumn;
+bool leafGone(vec3 pl, float m) { return uLeafK < .999 && vn3(pl * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) + ${gl(AU.drop)} * uAutumn * (m - ${gl(AUTUMN_MID)}) > uLeafK * 1.1 - .05; }`;
+const meshVS = sway => HEAD + (sway ? SWAY + SPRAY_VS : 'vec3 sway() { return vec3(0.); }\n' + NO_SPRAY_VS) + `
 in vec3 position; in vec3 normal; in float aPart; in float aFam; in float aBias; in float aFixed;
 uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
-out vec3 vN; out vec3 vW; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed;
+out vec3 vN; out vec3 vW; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed; flat out float fM;
 void main() {
   vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway();
   vW = w.xyz; vN = mat3(modelMatrix) * normal;
   vNL = normal; vPL = position;   // the prop's own frame: moss stays where it grew when the prop tips and rolls
-  fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed;
+  fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed; fM = sprayM(modelMatrix);
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
 const MESH_FS = HEAD + OUTS + `
-in vec3 vN; in vec3 vW; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed;
+in vec3 vN; in vec3 vW; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in float fM;
 uniform sampler2D uRamps; uniform vec3 uLArt; uniform float uObj, uFlash; uniform vec2 uSeed;
+uniform vec3 uAut[12];    // leaves only: the species' autumn ramps, stage 1..4 x tone 0..2 (trees3d.js B.autumn); uAutOn 0 = none
+uniform float uAutOn;
 uniform vec4 uRip;        // leaves only: (k x, k z, phase, amount) of a light wave rolling along the wind (0 = still)
 uniform float uLeafK;     // leaves only: how full the crowns are this season (1 = full)
 uniform vec3 uCover;      // x: amount (0 = none), y: up threshold, z: cover family
@@ -64,6 +99,7 @@ float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.54
 float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
+` + LEAF_GONE + `
 void main() {
   // the season thins the crowns (uLeafK: sim/env.js leafK, 1 = full .. ~.07 = bare): leaves go in clumps of a few cm (a 3D
   // noise in the model's frame, varied per tree by uSeed); the trees' shadow pass drops the same ones (SHADOW_SWAY_FS).
@@ -73,9 +109,17 @@ void main() {
   // their inside
   bool inner = !gl_FrontFacing;
   if (inner && (fFixed > -1.5 || uLeafK >= .999)) discard;
-  if (fFixed < -1.5 && uLeafK < .999 && vn3(vPL * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) > uLeafK * 1.1 - .05) discard;
+  if (fFixed < -1.5 && leafGone(vPL, fM)) discard;   // (the sprays that turned further go first: LEAF_GONE)
   vec3 n = normalize(vN); if (inner) n = -n;
-  float fam = fFam;
+  float fam = fFam, jn = .5;   // jn: the leaves' 3D noise (below), which the autumn stage borrows
+  // a ripening berry (aFixed -1.25: the rowan's bunches, trees3d.js; toned by the light like bark, never thinned): the part's own family is the ripe scarlet
+  // and the season steps it to the next rows (world.js FAMS): +1 orange, +2 green and unripe, +3 the creamy flowers of late spring (the crowns not yet full).
+  // Each bunch ripens at its own time (fM: the sun side and the early ones first, as a spray turns) and the birds take the early ones as the crown goes bare
+  if (fFixed < -1.1 && fFixed > -1.4) {
+    float kb = clamp((fM - ${gl(AU.lo)}) / ${gl(AU.hi - AU.lo)}, 0., 1.), v = uAutumn * (.5 + 1.5 * kb);
+    if (kb > mix(1., .45, 1. - smoothstep(.15, .5, uLeafK))) discard;
+    fam += v > .2 ? 0. : v > .03 ? 1. : uAutumn < .001 && uLeafK > .5 && uLeafK < .999 ? 3. : 2.;
+  }
   int tone;
   if (fFixed >= 0.) tone = int(fFixed);
   else if (inner) tone = 2;
@@ -83,24 +127,34 @@ void main() {
     float d = dot(n, uLArt) + fBias;
     // aFixed -2 (leaves): the painted blobs' jitter, a 3D noise in the model's own frame (it stays on the leaves as the
     // camera turns), so the tone bands break into leafy patches
-    if (fFixed < -1.5) d += (vn3(vPL * 7.5 + vec3(uSeed.x, 0., uSeed.y)) - .5) * .42
-      + uRip.w * sin(dot(vW.xz, uRip.xy) - uRip.z);   // wind: bands of light rolling through the leaves (uRip: k along the wind, phase, amount)
+    if (fFixed < -1.5) { jn = vn3(vPL * 7.5 + vec3(uSeed.x, 0., uSeed.y)); d += (jn - .5) * .42
+      + uRip.w * sin(dot(vW.xz, uRip.xy) - uRip.z); }   // wind: bands of light rolling through the leaves (uRip: k along the wind, phase, amount)
     tone = d > .62 ? 0 : d > .12 ? 1 : 2;
   }
   // biome cover (moss / ash / snow) on what faces up AT REST (the prop's own frame, so it tips and rolls with it):
-  // patchy, never on the glow / void families; the pattern is seeded per object. aFixed -2 = toned, never covered (leaves)
-  if (uCover.x > 0. && normalize(vNL).y > uCover.y && fFixed < 0. && fFixed > -1.5) {
+  // patchy, never on the glow / void families; the pattern is seeded per object. aFixed -2 = toned, never covered (leaves; nor the -1.25 berries)
+  if (uCover.x > 0. && normalize(vNL).y > uCover.y && fFixed < 0. && fFixed > -1.1) {
     vec2 q = vPL.xz + uSeed;   // uSeed = where the mesh was placed: continuous across wall segments, fixed on a rolling barrel
     float c = vn(q * 7.) * .7 + vn(q * 19. + 3.) * .3;
     if (c > 1. - uCover.x * 2.6) fam = uCover.z;
   }
   vec3 alb = texelFetch(uRamps, ivec2(tone, int(fam + .5)), 0).rgb;
+  // autumn: a leaf of a tree with autumn ramps takes its spray's STAGE (core/autumn.js): 0 stays the green leaf row, 1..4 are
+  // the species' ramps at this tone. v = autumn x (how fast this clump turns + flecks of noise + its own sun-facing + the
+  // withering of a nearly bare crown): whole steps, nothing at autumn 0. (The composite keeps this colour and darkens it for
+  // outlines: COMP_FS, soft family)
+  if (fFixed < -1.5 && uAutOn > .5 && uAutumn > 0.) {
+    float v = uAutumn * (fM + ${gl(AU.noise)} * (jn - .5) * 2. + ${gl(AU.face)} * dot(n, ${gl3(AU.sun)})
+      + ${gl(AU.wither[2])} * (1. - smoothstep(${gl(AU.wither[0])}, ${gl(AU.wither[1])}, uLeafK)));   // (what hangs on a nearly bare crown has withered: brown)
+    int st = v < ${gl(AU.cuts[0])} ? 0 : v < ${gl(AU.cuts[1])} ? 1 : v < ${gl(AU.cuts[2])} ? 2 : v < ${gl(AU.cuts[3])} ? 3 : 4;
+    if (st > 0) alb = uAut[(st - 1) * 3 + tone];
+  }
   bool glow = abs(fam - uEmitFam.x) < .5 || abs(fam - uEmitFam.y) < .5;
-  // burning: only what burns chars (world.js FAMS: wood 0, rope 5, void 9, bark 13; hoops, iron, stone stay). It
+  // burning: only what burns chars (world.js FAMS: wood 0, rope 5, void 9, bark 13, birch 18, aspen 19; hoops, iron, stone stay). It
   // blackens in patches (higher up first: the flame is on top), glowing cracks crawl through the char, ash settles on
   // top. As FAMILIES (char 15, ash 16, ember 17), so the composite's outlines and plank seams still work on them
   vec3 em = vec3(0.);
-  if (uBurn.x > 0. && (fFam < .5 || abs(fFam - 5.) < .5 || abs(fFam - 9.) < .5 || abs(fFam - 13.) < .5)) {
+  if (uBurn.x > 0. && (fFam < .5 || abs(fFam - 5.) < .5 || abs(fFam - 9.) < .5 || abs(fFam - 13.) < .5 || abs(fFam - 18.5) < 1.)) {
     vec3 q = vPL * 8. + vec3(uSeed.x, 0., uSeed.y);
     float c = vn3(q) * .7 + vn3(q * 2.9 + 7.) * .3, ch = uBurn.x * 1.3 - c + (vPL.y - .25) * .5 * uBurn.x;
     if (ch > .1) fam = 15.; else if (ch > 0.) tone = min(tone + 1, 2);   // charred; a scorched rim round the char
@@ -120,15 +174,77 @@ void main() {
   o2 = vec4((glow ? alb : vec3(0.)) + vec3(uFlash) + em, fPart * 32. + fam);
 }`;
 
+// THE MOVING WATER (SURF_FS). world.js bakes the water texture uWater (its layout is documented there: state, base tone, speed,
+// the travel coordinate s along the flow, the across coordinate a, the ring of texels from the bank); everything here is a
+// function of those WORLD TEXELS and the stepped water clock, never of the screen, so it holds still while the camera turns.
+// A texel's tone is a value noise in (a, s - travelled), cut to the biome's ramp: thin streaks stretched along the flow, sliding
+// by WHOLE texels (floor(clock * rate * speed)), each stretch at its own pace because s is travel TIME (the narrows run faster).
+// FALLING water (a cliff / face texel with alpha 252, world.js FALL_ALPHA) streams down the same way
+const WATER_FS = `
+uniform sampler2D uWater; uniform float uHasWater;
+uniform float uWPhase;               // the water clock, s: render() advances it at G.setWater's speed
+uniform vec4 uWA, uWB;               // (rate texels/s, cell across, cell along, lapping tone | -1), (hi, lo, lightest tone, darkest tone)
+uniform vec3 uWRamp[4];              // the biome's four water tones, light -> dark
+float wh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float wvn(vec2 p, float per) {       // value noise whose y lattice repeats every per cells: the wrapped clock never pops
+  vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  float y0 = mod(i.y, per), y1 = mod(i.y + 1., per);
+  return mix(mix(wh(vec2(i.x, y0)), wh(vec2(i.x + 1., y0)), f.x), mix(wh(vec2(i.x, y1)), wh(vec2(i.x + 1., y1)), f.x), f.y);
+}
+// the pattern slid along the flow by whole texels (ph = texels travelled; 768 is a multiple of every cell length and of the wobble's 24):
+// the streaks meander a little as they go (a = across, wobbling by ~1.3 texels along s - travelled)
+float wlay(float a, float s, float ph, float ca, float cs, float seed) {
+  float d = s - mod(floor(ph), 768.);
+  return wvn(vec2((a + sin(d * .2618) * 1.3) / ca + seed, d / cs), 768. / cs);
+}
+// one ground texel as the water makes it: moving water (state 3) or the painted texel
+vec3 wTexel(ivec2 ti, ivec2 mx) {
+  ti = clamp(ti, ivec2(0), mx);
+  vec4 w = texelFetch(uWater, ti, 0);
+  int rc = int(w.r * 255. + .5);
+  vec3 res = texelFetch(uTex, ti, 0).rgb;
+  if (rc < 192) return res;
+  int gg = int(w.g * 255. + .5), tone = (rc >> 4) & 3, ring = gg >> 5;
+  float spd = float(rc & 15) * .125, s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .5;
+  float ph = uWPhase * uWA.x * spd;
+  float h = wlay(a, s, ph, uWA.y, uWA.z, 0.), l = wlay(a, s, ph * .7, uWA.y * 1.4, uWA.z * 1.5, 7.3);
+  int t = tone;
+  // the broad bands drift too: the base tone is read from a texel slid across by a slow wobble that travels with the flow (a band's edge meanders)
+  float sw = floor((wvn(vec2(.5, (s - mod(floor(ph * .35), 768.)) / 48.), 16.) - .5) * 7. + .5);
+  if (sw != 0.) { vec4 w2 = texelFetch(uWater, clamp(ti + ivec2(int(sw), 0), ivec2(0), mx), 0); int r2 = int(w2.r * 255. + .5); if (r2 >= 192) t = (r2 >> 4) & 3; }
+  if (h > uWB.x) t -= 1;
+  if (h > uWB.x + .09) t -= 1;
+  if (l > uWB.y) t += 1;
+  t = clamp(t, int(uWB.z), int(uWB.w));
+  if (uWA.w >= 0. && ring > 0) {     // the lapping line: a dashed 1-texel line that creeps in and out along the bank, a step every ~1.3 s
+    float pos = 3. + abs(mod(floor(uWPhase * .75), 4.) - 2.) + (a < 0. ? 1. : 0.);
+    if (float(ring) == pos && wvn(vec2(3.7, (s - mod(floor(uWPhase * 3.), 768.)) / 8.), 96.) > .42) t = int(uWA.w);
+  }
+  res = uWRamp[t];
+  return res;
+}
+// a fall of water: the baked colour is the base; light streaks slide DOWN the sheet in whole texels at their own pace per column,
+// dark ones with them, and the foam at the foot flickers. px = the texel (column, row from the top of the fall), rows = its height
+vec3 fall(vec3 base, vec2 px, float rows) {
+  float h = wh(vec2(px.x, 17.)), g = wh(vec2(px.x, 5.));
+  float k = floor((px.y - mod(floor(uWPhase * 14. * (1. + g)), 1000.)) / 5.), d = wh(vec2(px.x, mod(k, 200.)));
+  vec3 c = base;
+  if (h < .55 && d > .5) c = mix(base, vec3(1.), .3);
+  else if (d < .14) c = base * .86;
+  if (px.y > rows - 6. && wh(vec2(px.x, px.y + mod(floor(uWPhase * 9.), 64.) * 13.)) < .6) c = mix(base, vec3(1.), .7);
+  return c;
+}
+`;
+
 // ground and textured surfaces: world-planar (ground) or uv (faces) mapping, nearest or "smooth pixel" sampling
 const SURF_VS = HEAD + `
 in vec3 position; in vec3 normal; in vec2 uv;
 uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
-uniform float uPlanar; uniform vec2 uWorld;
+uniform float uPlanar; uniform vec2 uWorld, uOrigin;   // planar: the texture covers uWorld m from uOrigin (x, z)
 out vec2 vUv; out vec3 vN; out vec3 vW;
 void main() {
   vec4 w = modelMatrix * vec4(position, 1.);
-  vUv = uPlanar > .5 ? w.xz / uWorld : uv;
+  vUv = uPlanar > .5 ? (w.xz - uOrigin) / uWorld : uv;
   vN = mat3(modelMatrix) * normal; vW = w.xyz;
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
@@ -138,6 +254,35 @@ uniform sampler2D uTex, uEm; uniform vec2 uTexSize; uniform float uSmooth, uHasE
 // steep ground (the ravine wall): a cliff texture (rock strata, the waterfall) by world x (z on east / west faces) and
 // depth below the bank, 1 texel = 1 px at yaw 0 (uPx = PPM, PPMH), repeating; drawn as a textured face (type 5)
 uniform sampler2D uCliff; uniform float uHasCliff, uCliffOff; uniform vec2 uCliffSize, uPx;
+` + WATER_FS + `
+// FALLEN LEAVES (world.js bakes the source, one texel per 2 x 2 ground texels: R = how thick the leaves lie here once the crowns are bare,
+// G = which tree palette they came from; uLitPal = that palette's colours, 4 stages x 3 tones along x, one row per group). A leaf
+// is one ground texel or two (across or down), placed by an integer hash of its own texel coordinates and the density, so
+// it is fixed to the world and holds still as the camera turns. uLitK.x = how much has fallen so far (0 = none: the whole thing is
+// skipped; setGround makes it from the season), uLitK.y = how far the fallen leaves have turned (which stages they are drawn in).
+// uLit is the source (uLive 0: the density is R x uLitK.x, the palette G x 255) or, while render/litter.js runs the layer (uLive 1),
+// its field: the wind has moved the leaves about, R already holds how much has fallen, G is the palette itself. uLitCap: never denser
+precision highp sampler2D;
+uniform sampler2D uLit, uLitPal; uniform float uHasLit, uLive, uLitCap; uniform vec4 uLitK;
+float lh(ivec2 p, uint salt) { p = max(p, ivec2(0)); uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u + salt * 2246822519u; h = (h ^ (h >> 13)) * 1274126177u; return float((h ^ (h >> 16)) & 65535u) / 65536.; }
+float lorg(ivec2 o, ivec2 mx, ivec2 ls) {   // does a leaf start at texel o? (the density here, as much as has fallen; a leaf covers ~2 texels: half the odds)
+  return lh(o, 1u) < min(texelFetch(uLit, clamp(o, ivec2(0), mx) * ls / (mx + 1), 0).r * (uLive > .5 ? 1. : uLitK.x), uLitCap) * .5 ? 1. : 0.;
+}
+vec4 leafAt(ivec2 ti, ivec2 mx) {   // (colour, 1) where a leaf lies on this ground texel, else a = 0
+  ivec2 ls = textureSize(uLit, 0), o = ti;
+  float f = lorg(ti, mx, ls);
+  if (f < .5) {   // or its first texel is the one on my left (a leaf lying along x) or the one above me (lying down y)
+    o = ti - ivec2(1, 0); f = lorg(o, mx, ls) * (lh(o, 2u) < .5 ? 1. : 0.);
+    if (f < .5) { o = ti - ivec2(0, 1); f = lorg(o, mx, ls) * (lh(o, 2u) >= .5 ? 1. : 0.); }
+  }
+  vec4 res = vec4(0.);
+  if (f > .5) {
+    int g = int(texelFetch(uLit, clamp(o, ivec2(0), mx) * ls / (mx + 1), 0).g * (uLive > .5 ? 1. : 255.) + .5);
+    float r = lh(o, 3u), v = clamp(uLitK.y * 4.2 - (1. - r) * 3.4, 0., 3.99), rt = lh(o, 4u);   // the early leaves fall first: with the turn, more and more are in the late stages
+    res = vec4(texelFetch(uLitPal, ivec2(int(v) * 3 + (rt < .28 ? 0 : rt < .78 ? 1 : 2), g), 0).rgb, 1.);
+  }
+  return res;
+}
 // uSmooth 0..1 blends the two samplings, so the host can fade between them (crisp at rest, smooth while turning)
 void main() {
   vec2 t = vUv * uTexSize, s = floor(t + .5), d = max(fwidth(t), vec2(1e-4));   // (derivatives before any branch)
@@ -150,15 +295,41 @@ void main() {
     float along = abs(n.z) >= abs(n.x) ? vW.x : vW.z;
     vec2 ct = vec2((along + uCliffOff) * uPx.x, -vW.y * uPx.y);
     vec4 cc = texture(uCliff, (floor(ct) + .5) / uCliffSize);
-    o0 = vec4(cc.rgb, float(5 * 4) / 255.);
-    o1 = vec4(n, uObj); o2 = vec4(cc.a < .995 ? cc.rgb : vec3(0.), 0.);   // alpha 250: a glowing fall (lava)
+    float al = cc.a * 255.;   // alpha 250: a glowing fall (lava); 252: a fall of water (streams down: fall())
+    o0 = vec4(abs(al - 252.) < .5 ? fall(cc.rgb, floor(ct), uCliffSize.y) : cc.rgb, float(5 * 4) / 255.);
+    o1 = vec4(n, uObj); o2 = vec4(abs(al - 250.) < .5 ? cc.rgb : vec3(0.), 0.);
     return;
   }
   vec4 c = uSmooth <= 0. ? texture(uTex, uvN) : uSmooth >= 1. ? texture(uTex, uvS) : mix(texture(uTex, uvN), texture(uTex, uvS), uSmooth);
   if (c.a < .5) discard;
+  if (abs((uSmooth <= 0. ? c.a : texture(uTex, uvN).a) * 255. - 252.) < .5) c.rgb = fall(c.rgb, floor(t), uTexSize.y);   // a fall of water on a face (type 5 or ground)
+  // the water (ground only): a texel beside water, or water, is read from the baked water texture. Nearest: that texel's own
+  // moving colour; smooth: the same bilinear blend across texel seams as the painted ground gets, of moving texels
+  float wfl = 0.;
+  if (uHasWater > .5) {
+    ivec2 mx = ivec2(uTexSize) - 1, ti = clamp(ivec2(floor(t)), ivec2(0), mx);
+    int rc = int(texelFetch(uWater, ti, 0).r * 255. + .5);
+    if (rc >= 64) {
+      wfl = rc >= 128 ? 1. : 0.;   // water: the G-buffer's tone 1
+      vec3 cN = wTexel(ti, mx);
+      if (uSmooth <= 0.) c.rgb = cN;
+      else {
+        vec2 q = uvS * uTexSize - .5, f = fract(q); ivec2 i0 = ivec2(floor(q));
+        vec3 cS = mix(mix(wTexel(i0, mx), wTexel(i0 + ivec2(1, 0), mx), f.x), mix(wTexel(i0 + ivec2(0, 1), mx), wTexel(i0 + ivec2(1, 1), mx), f.x), f.y);
+        c.rgb = mix(cN, cS, uSmooth);
+      }
+    }
+  }
+  // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
+  // composite doesn't push them through the season's matrix a second time
+  float leaf = 0.;
+  if (uHasLit > .5 && uLitK.x > 0. && uType < 1.5 && wfl < .5) {
+    ivec2 mx = ivec2(uTexSize) - 1; vec4 lc = leafAt(clamp(ivec2(floor(t)), ivec2(0), mx), mx);
+    if (lc.a > 0.) { c.rgb = lc.rgb; leaf = 1.; }
+  }
   vec3 em = vec3(0.);
   if (uHasEm > .5) { vec4 e = mix(texture(uEm, uvN), texture(uEm, uvS), uSmooth); em = e.rgb * e.a; }
-  o0 = vec4(c.rgb, float(int(uType) * 4) / 255.);
+  o0 = vec4(c.rgb, float(int(uType) * 4 + int(wfl) + (leaf > .5 ? 2 : 0)) / 255.);
   o1 = vec4(normalize(vN), uObj);
   o2 = vec4(em, 0.);
 }`;
@@ -197,6 +368,39 @@ uniform sampler2D uTex, uNrm, uEm; uniform vec4 uNrmRect, uRect; uniform vec2 uS
 uniform float uHasNrm, uHasEm, uType, uObj, uCamYaw, uFlash, uHasBend, uSway;
 uniform sampler2D uMetal; uniform float uHasMetal;   // the shiny-armour mask (R: 255 steel, 128 gold), aligned with uTex
 uniform float uBend[8];   // sway weight at height fractions 0 (bottom) .. 1 (top), 8 samples (the arena's per-row flex)
+// THE PLANTS' AUTUMN (bushes, tufts, ferns, reeds: world.js plantOf fills uPlant for a card whose biome has them; every other card
+// has uPlant.x = 0 and skips all of it). The card's pixels are recognised by the green ramp it was painted with (uPRamp, light ..
+// dark) and swapped for the plant's own path (uPPal: 4 stages x 4 tones, then the same for a second path, at a fifth of the patches),
+// in whole palette steps. The plant turns in PATCHES, a spray / a branch / a blade (jittered cells in the sprite's own pixels, their
+// edges roughened), each with its own draw, and the sun side and the top go first: the exposure to a noon sun fixed in the world
+// (south and up) of the face the camera sees, so the side toward the player at yaw 0 is the reddest and a plant seen from the
+// north is the greenest. A patch starts at d (the plant's own delay + its draw + how shaded it is) and has run its four stages by
+// autumn 1. uPlant: x kind (0 none, 1 bush, 2 tuft, 3 fern, 4 reed), y seed 0..1, z the plant's delay
+uniform float uAutumn; uniform vec4 uPlant; uniform vec3 uPRamp[4]; uniform vec3 uPPal[32];
+float ph2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float pvn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(ph2(i), ph2(i + vec2(1, 0)), f.x), mix(ph2(i + vec2(0, 1)), ph2(i + vec2(1, 1)), f.x), f.y); }
+vec3 plantTurn(vec3 col, int tn, vec2 sp) {   // sp: the pixel in the sprite (y from the top)
+  float kind = uPlant.x, seed = uPlant.y;
+  vec2 cs = kind < 1.5 ? vec2(5.4, 4.6) : kind < 2.5 ? vec2(2.4, 3.2) : kind < 3.5 ? vec2(4.4, 3.8) : vec2(2.2, 8.);   // a patch's size, px
+  vec2 q = sp + (vec2(pvn(sp * .21 + seed * 13.), pvn(sp * .21 + 7.3 + seed * 5.)) - .5) * (kind < 1.5 ? 3. : 1.6);
+  vec2 g = q / cs, gi = floor(g), gf = fract(g); float best = 9.; vec2 bc = gi;
+  for (int j = -1; j <= 1; j++) for (int k = -1; k <= 1; k++) {
+    vec2 c = gi + vec2(float(k), float(j)), o = vec2(ph2(c + seed * 17.), ph2(c + seed * 17. + 5.3)), dv = vec2(float(k), float(j)) + .12 + o * .76 - gf;
+    float dd = dot(dv, dv); if (dd < best) { best = dd; bc = c; }
+  }
+  float r1 = ph2(bc + seed * 31. + 1.7), r2 = ph2(bc + seed * 7. + 3.1);
+  vec2 u = sp / uSize; float e;
+  if (kind < 1.5 || (kind > 2.5 && kind < 3.5)) {   // a bush, a fern: a dome of leaves, its normal turned like the card's own face
+    float x = clamp((u.x - .5) / .44, -1., 1.), y = clamp((.64 - u.y) / .46, -1., 1.), z = sqrt(max(0., 1. - x * x - y * y));
+    e = clamp((-.783 * sin(uCamYaw) * x + .622 * y + .783 * cos(uCamYaw) * z) * .5 + .5, 0., 1.);
+  } else e = clamp(1.08 - u.y * .95 + .08 * cos(uCamYaw), 0., 1.);   // blades: the tips first
+  float d = uPlant.z + r1 * (kind < 2.5 ? .24 : .16) + (1. - e) * (kind < 2.5 ? .3 : .22);
+  float k = clamp((uAutumn - d) / max(.08, 1. - d), 0., 1.);
+  int stage = int(min(4., floor(k * 5.)));
+  if (stage == 0) return col;
+  return uPPal[(r2 > .8 ? 16 : 0) + (stage - 1) * 4 + tn];
+}
 void main() {
   vec2 C = vC, uv = vUv;
   if (uHasBend > .5) {   // each row shifts by whole pixels: stiff trunks, a crown moving as a block
@@ -208,6 +412,12 @@ void main() {
   vec4 c = texture(uTex, uv), e = uHasEm > .5 ? texture(uEm, uv) : vec4(0.);
   if (c.a < .5 && e.a < .5) discard;
   if (c.a < .5) c.rgb = e.rgb;   // emit-only pixels (a flame above its bowl): painted too, like wind.js's flameAlbedo
+  float own = 0.;   // 1 = this pixel has its own autumn colours: the composite leaves it out of the season's matrix (G-buffer tone 2)
+  if (uPlant.x > .5 && uAutumn > 0. && c.a > .5) {
+    int tn = -1;
+    for (int k = 0; k < 4; k++) { vec3 dd = c.rgb - uPRamp[k]; if (dot(dd, dd) < .0004) { tn = k; break; } }   // (a cattail head, a painted flower: not the ramp, left as painted)
+    if (tn >= 0) { own = 1.; c.rgb = plantTurn(c.rgb, tn, floor(C * uSize) + .5); }
+  }
   vec3 F = vec3(sin(uCamYaw), 0., cos(uCamYaw)), R = vec3(cos(uCamYaw), 0., -sin(uCamYaw));
   const float S20 = .34202, C20 = .93969;
   vec3 U20 = vec3(0., C20, 0.) - F * S20, F20 = vec3(0., S20, 0.) + F * C20;
@@ -216,12 +426,103 @@ void main() {
     vec4 t = texture(uNrm, uNrmRect.xy + C * uNrmRect.zw);
     if (t.a > .5) { vec3 q = t.xyz * 2. - 1.; n = normalize(q.x * R + q.y * U20 + q.z * F20); }
   }
-  o0 = vec4(c.rgb, float(int(uType) * 4) / 255.);
+  o0 = vec4(c.rgb, float(int(uType) * 4 + (own > .5 ? 2 : 0)) / 255.);
   o1 = vec4(n, uObj);
   float metal = 0.;   // the character's metal (E.w for type 4): 2 steel, 1 gold
   if (uHasMetal > .5) { float m = texture(uMetal, uv).r; metal = m > .7 ? 2. : m > .3 ? 1. : 0.; }
   o2 = vec4(e.rgb * e.a + vec3(uFlash), metal);
 }`;
+// ---------------------------------------------------------------- shaders: world cards in INSTANCED batches (stage 3)
+// The world's painted cards (bushes, tufts, reeds, dummies, braziers, brutes ...: card({batch: true})) are drawn one instanced
+// draw per texture (+ emit texture, + shadow or not) instead of a mesh + material each: CARD_VS / CARD_FS term for term, the
+// card's uniforms read from instance attributes (and flat varyings), the plants' autumn palettes from a float texture (one row
+// a plant path: its 4 green ramp tones, then the 32 tones of its two paths). A world card has no normal map, no metal and shows
+// its whole image (uRect 0, 0, 1, 1).
+//   iA anchor xyz, bias   iS size xy, pivot xy   iO offset xy, sway, bends (1/0)   iB0 / iB1 the 8 bend weights
+//   iM flash, obj, plant kind, plant seed   iP plant delay, palette row
+const BCARD_VS = HEAD + `
+in vec3 position; in vec4 iA; in vec4 iS; in vec4 iO; in vec4 iB0; in vec4 iB1; in vec4 iM; in vec4 iP;
+uniform mat4 viewMatrix, projectionMatrix;
+uniform float uFaceYaw, uCamYaw, uShadow; uniform vec2 uPx, uSnap;   // uShadow 1: the sun card (no bias, no row bend)
+out vec2 vUv; out vec2 vC; out vec2 vSp;
+flat out vec2 vSize; flat out vec4 vB0; flat out vec4 vB1; flat out vec4 vMisc; flat out vec4 vPlant;   // vMisc: sway, bends, flash, obj
+void main() {
+  vec2 c = position.xy;
+  vec2 uSize = iS.xy, uPivot = iS.zw, uOff = iO.xy; float uSway = iO.z, uHasBend = uShadow > .5 ? 0. : iO.w, uBias = uShadow > .5 ? 0. : iA.w;
+  vec3 right = vec3(cos(uFaceYaw), 0., -sin(uFaceYaw));
+  if (dot(right, vec3(cos(uCamYaw), 0., -sin(uCamYaw))) < 0.) right = -right;   // (CARD_VS: a sun card is never mirrored)
+  float S = uHasBend > .5 ? ceil(abs(uSway)) : 0., sxp = c.x * (uSize.x + 2. * S) - S;
+  float px = sxp - uPivot.x + uOff.x + (uHasBend > .5 ? 0. : uSway * c.y), py = uPivot.y - (1. - c.y) * uSize.y + uOff.y;
+  vec3 w = iA.xyz + right * (px / uPx.x) + vec3(0., py / uPx.y, 0.);
+  vC = vec2(c.x, 1. - c.y); vSp = vec2(sxp, (1. - c.y) * uSize.y);
+  vUv = vC;
+  vSize = uSize; vB0 = iB0; vB1 = iB1; vMisc = vec4(uSway, uHasBend, iM.x, iM.y); vPlant = vec4(iM.z, iM.w, iP.x, iP.y);
+  gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
+  if (uSnap.x > 0.) {
+    vec4 a = projectionMatrix * viewMatrix * vec4(iA.xyz, 1.);
+    vec2 p = (a.xy * .5 + .5) * uSnap;
+    gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
+  }
+  gl_Position.z -= uBias * gl_Position.w;
+}`;
+const BCARD_FS = HEAD + OUTS + `
+in vec2 vUv; in vec2 vC; in vec2 vSp;
+flat in vec2 vSize; flat in vec4 vB0; flat in vec4 vB1; flat in vec4 vMisc; flat in vec4 vPlant;
+uniform sampler2D uTex, uEm, uPal; uniform float uHasEm, uType, uCamYaw, uAutumn;
+float bend(int i) { return i < 4 ? vB0[i] : vB1[i - 4]; }
+vec3 pal(int k) { return texelFetch(uPal, ivec2(k, int(vPlant.w + .5)), 0).rgb; }   // 0..3 the green ramp, 4.. the paths' tones
+float ph2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float pvn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(ph2(i), ph2(i + vec2(1, 0)), f.x), mix(ph2(i + vec2(0, 1)), ph2(i + vec2(1, 1)), f.x), f.y); }
+vec3 plantTurn(vec3 col, int tn, vec2 sp) {   // (CARD_FS plantTurn)
+  float kind = vPlant.x, seed = vPlant.y;
+  vec2 cs = kind < 1.5 ? vec2(5.4, 4.6) : kind < 2.5 ? vec2(2.4, 3.2) : kind < 3.5 ? vec2(4.4, 3.8) : vec2(2.2, 8.);
+  vec2 q = sp + (vec2(pvn(sp * .21 + seed * 13.), pvn(sp * .21 + 7.3 + seed * 5.)) - .5) * (kind < 1.5 ? 3. : 1.6);
+  vec2 g = q / cs, gi = floor(g), gf = fract(g); float best = 9.; vec2 bc = gi;
+  for (int j = -1; j <= 1; j++) for (int k = -1; k <= 1; k++) {
+    vec2 c = gi + vec2(float(k), float(j)), o = vec2(ph2(c + seed * 17.), ph2(c + seed * 17. + 5.3)), dv = vec2(float(k), float(j)) + .12 + o * .76 - gf;
+    float dd = dot(dv, dv); if (dd < best) { best = dd; bc = c; }
+  }
+  float r1 = ph2(bc + seed * 31. + 1.7), r2 = ph2(bc + seed * 7. + 3.1);
+  vec2 u = sp / vSize; float e;
+  if (kind < 1.5 || (kind > 2.5 && kind < 3.5)) {
+    float x = clamp((u.x - .5) / .44, -1., 1.), y = clamp((.64 - u.y) / .46, -1., 1.), z = sqrt(max(0., 1. - x * x - y * y));
+    e = clamp((-.783 * sin(uCamYaw) * x + .622 * y + .783 * cos(uCamYaw) * z) * .5 + .5, 0., 1.);
+  } else e = clamp(1.08 - u.y * .95 + .08 * cos(uCamYaw), 0., 1.);
+  float d = vPlant.z + r1 * (kind < 2.5 ? .24 : .16) + (1. - e) * (kind < 2.5 ? .3 : .22);
+  float k = clamp((uAutumn - d) / max(.08, 1. - d), 0., 1.);
+  int stage = int(min(4., floor(k * 5.)));
+  if (stage == 0) return col;
+  return pal(4 + (r2 > .8 ? 16 : 0) + (stage - 1) * 4 + tn);
+}
+void main() {
+  vec2 C = vC, uv = vUv;
+  if (vMisc.y > .5) {   // each row shifts by whole pixels (CARD_FS)
+    float f = clamp(1. - vSp.y / vSize.y, 0., 1.) * 7.; int i = int(floor(f)); float t = f - float(i);
+    float sx = vSp.x - floor(vMisc.x * mix(bend(i), bend(min(i + 1, 7)), t) + .5);
+    if (sx < 0. || sx >= vSize.x) discard;
+    C = vec2(sx / vSize.x, vSp.y / vSize.y); uv = C;
+  }
+  vec4 c = texture(uTex, uv), e = uHasEm > .5 ? texture(uEm, uv) : vec4(0.);
+  if (c.a < .5 && e.a < .5) discard;
+  if (c.a < .5) c.rgb = e.rgb;
+  float own = 0.;
+  if (vPlant.x > .5 && uAutumn > 0. && c.a > .5) {
+    int tn = -1;
+    for (int k = 0; k < 4; k++) { vec3 dd = c.rgb - pal(k); if (dot(dd, dd) < .0004) { tn = k; break; } }
+    if (tn >= 0) { own = 1.; c.rgb = plantTurn(c.rgb, tn, floor(C * vSize) + .5); }
+  }
+  vec3 F = vec3(sin(uCamYaw), 0., cos(uCamYaw));
+  const float S20 = .34202, C20 = .93969;
+  vec3 F20 = vec3(0., S20, 0.) + F * C20;
+  vec3 n = normalize(F20 + vec3(0., .25, 0.));
+  o0 = vec4(c.rgb, float(int(uType) * 4 + (own > .5 ? 2 : 0)) / 255.);
+  o1 = vec4(n, vMisc.w);
+  o2 = vec4(e.rgb * e.a + vec3(vMisc.z), 0.);
+}`;
+const BCARD_SHADOW_FS = HEAD + `layout(location = 0) out vec4 o0;
+in vec2 vUv; in vec2 vC; in vec2 vSp; uniform sampler2D uTex;
+void main() { if (texture(uTex, vUv).a < .5) discard; o0 = vec4(1.); }`;
 const LINE_VS = HEAD + `
 in vec3 position; in vec4 color;   // a = emissive (1) or lit (0)
 uniform mat4 viewMatrix, projectionMatrix;
@@ -303,18 +604,19 @@ in vec3 position; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
 void main() { gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.); }`;
 // a swaying mesh casts its shadow from the same leaned (whole-pixel) pose the camera sees, minus the leaves the season
 // took (the same noise as MESH_FS)
-const SHADOW_SWAY_VS = HEAD + SWAY + `
+const SHADOW_SWAY_VS = HEAD + SWAY + SPRAY_VS + `
 in vec3 position; in float aFixed; uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
-out vec3 vPL; flat out float fFixed;
-void main() { vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway(); vPL = position; fFixed = aFixed; gl_Position = projectionMatrix * viewMatrix * w; }`;
+out vec3 vPL; flat out float fFixed; flat out float fM;
+void main() { vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway(); vPL = position; fFixed = aFixed; fM = sprayM(modelMatrix); gl_Position = projectionMatrix * viewMatrix * w; }`;
 const SHADOW_FS = HEAD + ONE_OUT + `void main() { o0 = vec4(1.); }`;
 const SHADOW_SWAY_FS = HEAD + ONE_OUT + `
-in vec3 vPL; flat in float fFixed; uniform float uLeafK; uniform vec2 uSeed;
+in vec3 vPL; flat in float fFixed; flat in float fM; uniform float uLeafK; uniform vec2 uSeed;
 float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
-void main() { if (fFixed < -1.5 && uLeafK < .999 && vn3(vPL * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) > uLeafK * 1.1 - .05) discard; o0 = vec4(1.); }`;
+` + LEAF_GONE + `
+void main() { if (fFixed < -1.5 && leafGone(vPL, fM)) discard; o0 = vec4(1.); }`;
 const SHADOW_CARD_FS = HEAD + ONE_OUT + `
 in vec2 vUv; in vec2 vC; uniform sampler2D uTex;
 void main() { if (texture(uTex, vUv).a < .5) discard; o0 = vec4(1.); }`;
@@ -324,7 +626,67 @@ void main() {
   if (texture(uTex, vUv).a < .5) discard;
   float sd = texelFetch(uDepth, ivec2(gl_FragCoord.xy), 0).r;
   if (gl_FragCoord.z <= sd + 1.5e-4) discard;   // visible here: not x-rayed
-  o0 = vec4(1.);
+  o0 = vec4(1., 0., 0., 0.);   // (R only: G is the contact shadows' mask, AO_FS)
+}`;
+
+// ---------------------------------------------------------------- shaders: CONTACT SHADOWS (features/contact.js; G.ao)
+// One instanced quad per stamp, drawn into the x-ray target's G channel (R is the x-ray mark; G, B, A were free) as the
+// canvas mask was: each stamp's texel shown nearest-neighbour at z px a texel (the canvas's drawImage), its alpha times the
+// stamp's (globalAlpha), merged source-over (blend: one, one minus src: a + m (1 - a)). COMP_FS lays the mask on the ground.
+//   iR: the stamp's top-left (canvas px, y down), z (px a texel), alpha   iT: its rect in the atlas (texels: u, v, w, h)
+const AO_VS = HEAD + `
+in vec3 position; in vec4 iR; in vec4 iT; uniform vec2 uRes;
+flat out vec4 vR; flat out vec4 vT;
+void main() {
+  vec2 p = iR.xy + position.xy * iT.zw * iR.z;
+  vR = iR; vT = iT;
+  gl_Position = vec4(p.x / uRes.x * 2. - 1., 1. - p.y / uRes.y * 2., 0., 1.);
+}`;
+const AO_FS = HEAD + ONE_OUT + `
+flat in vec4 vR; flat in vec4 vT; uniform vec2 uRes; uniform sampler2D uAtlas;
+void main() {
+  vec2 c = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);   // this pixel's centre in canvas px (y down)
+  ivec2 t = ivec2(floor((c - vR.xy) / vR.z));
+  if (t.x < 0 || t.y < 0 || t.x >= int(vT.z + .5) || t.y >= int(vT.w + .5)) discard;
+  float s = texelFetch(uAtlas, ivec2(vT.xy + .5) + t, 0).r * vR.w;
+  if (s <= 0.) discard;
+  o0 = vec4(0., s, 0., 0.);
+}`;
+
+// ---------------------------------------------------------------- shaders: THE SCREEN LAYERS' GPU OPS (G.glayer)
+// One instanced quad per op of a layer's GPU context (fillRect, drawImage), in canvas px (y down) as the 2D canvas was, under
+// the context's transform (any affine: the quad is a parallelogram): a fill is its premultiplied colour; an image shows the
+// source texel the canvas's nearest-neighbour drawImage showed (the source rect mapped onto the dest rect: a pixel centre
+// mapped back), times the op's alpha. Blended into the layer's target premultiplied: source-over (one, one minus src alpha)
+// or 'lighter' (one, one). A run can be clipped (clipOutside: up to 4 polygons; a pixel shows where an even number cover it).
+//   iO: the dest's corner + its first axis (canvas px)   iV: its second axis   iS: the source rect (texels; w = 0: a fill)
+//   iC: the colour, premultiplied (a: an image's alpha)
+const LB_VS = HEAD + `
+in vec3 position; in vec4 iO; in vec4 iV; in vec4 iS; in vec4 iC; uniform vec2 uRes;
+out vec2 vS; flat out vec4 vC; flat out float vF;
+void main() {
+  vS = iS.xy + position.xy * iS.zw; vC = iC; vF = iS.z == 0. ? 1. : 0.;
+  vec2 p = iO.xy + iO.zw * position.x + iV.xy * position.y;
+  gl_Position = vec4(p.x / uRes.x * 2. - 1., 1. - p.y / uRes.y * 2., 0., 1.);
+}`;
+const LB_FS = HEAD + ONE_OUT + `
+in vec2 vS; flat in vec4 vC; flat in float vF; uniform sampler2D uTex; uniform vec2 uRes;
+uniform vec2 uClipP[32]; uniform vec4 uClipN; uniform float uClipK;   // the clip's polygons (points in a row, counts), how many
+bool inPoly(vec2 p, int s, int n) {   // even-odd crossing test of polygon s .. s + n - 1
+  bool c = false;
+  for (int i = 0, j = n - 1; i < n; j = i++) { vec2 a = uClipP[s + i], b = uClipP[s + j]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) c = !c; }
+  return c;
+}
+void main() {
+  if (uClipK > .5) {
+    vec2 c = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y); int inside = 0, s = 0;
+    for (int j = 0; j < 4; j++) { if (float(j) >= uClipK) break; int n = int(uClipN[j] + .5); if (inPoly(c, s, n)) inside++; s += n; }
+    if (inside % 2 == 1) discard;
+  }
+  if (vF > .5) { o0 = vC; return; }
+  ivec2 t = ivec2(floor(vS)), sz = textureSize(uTex, 0);
+  if (t.x < 0 || t.y < 0 || t.x >= sz.x || t.y >= sz.y) discard;
+  o0 = texelFetch(uTex, t, 0) * vC.a;   // (the texture is premultiplied, as the canvas keeps it)
 }`;
 
 // ---------------------------------------------------------------- shader: lighting / composite
@@ -348,6 +710,8 @@ uniform vec4 uFog;
 uniform vec3 uPlayer;   // the player's chest (receives sun shadow as one object: no self-shadow from its own card)
 // shiny armour: toward the viewer (the sprite camera, 20 deg pitch, turned with the yaw), the sun's glint colour / strength
 uniform vec3 uView, uSunC; uniform float uSunStr;
+// the water (SURF_FS marks it: type 1 + tone 1): its clock (s), (lanterns' reflections, sun sparkles) strength, (ground texels, view px) per metre
+uniform float uWPhase; uniform vec4 uWRefl; uniform vec2 uWPx;
 float q3(float v) { return v < .12 ? 0. : v < .4 ? .35 : v < .75 ? .7 : 1.; }   // crisp glint steps
 uniform int uNL; uniform vec4 uLP[${NL}]; uniform vec4 uLC[${NL}];
 uniform int uNH; uniform vec4 uHalo[${NL}]; uniform vec3 uHaloC[${NL}];
@@ -355,16 +719,69 @@ uniform int uDebug;
 // screen layers (view px, painted by the host / features with a 2D context): ground (before light, ground pixels only),
 // pre (before light, everything), emit (glow, added like an emitter), add (after light, additive), front (after light, over)
 uniform sampler2D tGround, tPre, tEmitL, tAdd, tFront; uniform vec4 uLay; uniform float uLayE;
+uniform vec4 uAo;   // the contact shadows (tX.g): the mood's shadow colour, strength (0: none this frame)
 // distort: where alpha is set, this pixel shows the scene from (x + 128 - R*255, y + G*255 - 128) (heat haze). The screen
 // layers after the light (post) stay put.
 uniform sampler2D tDistort; uniform float uLayD;
 // point-light occlusion: the top-down height map of the solid 3D things (depth from above: bigger = lower)
 uniform sampler2D tH; uniform mat4 uHPV; uniform float uPtShadow, uHBias;
 out vec4 oc;
-vec4 lay(sampler2D t, ivec2 p) { return texelFetch(t, ivec2(p.x, int(uRes.y) - 1 - p.y), 0); }
+vec4 lay(sampler2D t, ivec2 p) { return texelFetch(t, p, 0); }   // a screen layer's target: premultiplied, GL rows (G.glayer / G.layer)
+// ---- REFLECTIONS in the water and the puddles (features/depth.js sets them every frame it shows them: G.setReflect). In the
+// oblique projection a point h above the water's plane mirrors exactly 2 h S view px straight below itself (S: px per metre of
+// height on screen), so this pixel shows the scene pixel k rows above it whose height above the plane is k / 2S: a search up
+// the column for where that crosses (the first such thing in front: a prop, a tree, a card, the character; not the ground, a
+// face, the batched sprites or particles).
+// The look is depth.js's 2D one: its rows shifted whole pixels by a ripple, tinted toward the water's colour, laid over the
+// water's albedo before the light; whatever glows there (flames) glows in it, dimmer
+uniform vec4 uRf;    // on, tint amount, alpha, glow (the share of the mirrored emission)
+uniform vec3 uRfC;   // the water's tint
+uniform vec4 uRfW;   // S (view px per metre of height), ripple (px), gust 0..1, the ripple's clock (s)
+uniform vec4 uRfV;   // the world origin's view row (px, y down), zoom, how far up to search (px), the puddles' ground-layer alpha (x 255; 0: none)
+uniform vec4 uRfP;   // the plateau's pool: x, y (m), rx, ry (rx 0: none)
+float rippleOff(ivec2 p, vec3 P, bool puddle) {   // depth.js rippleCopy: whole-pixel row shifts, stronger downstream and in gusts
+  float wy = (uRes.y - 1. - float(p.y) - uRfV.x) / uRfV.y, Rr = uRfW.y, g = uRfW.z, T = uRfW.w, amp;
+  if (puddle) amp = Rr * (.25 + .8 * g);
+  else { vec2 u = (P.xz - uRfP.xy) / (uRfP.zw + .6); amp = uRfP.z > 0. && dot(u, u) < 1. ? Rr * (.7 + .5 * g) : Rr * (.8 + .5 * clamp((P.z - 10.) / 14., 0., 1.) + .6 * g); }
+  return floor(amp * sin(wy * .55 - T * 2.1) * (.6 + .4 * sin(wy * .13 + T * .7)) + .5) * uRfV.y;
+}
+// ---- CLOUD SHADOWS and the LAVA'S HEAT HAZE (features/depth.js sets them every frame it shows them: G.setClouds / setHaze).
+// Each was a 2D canvas painted every frame through the ground plane's affine (a pattern fill into the PRE layer; row shifts
+// masked by the lava into the DISTORT layer) and uploaded; here a view pixel goes back through that affine to a texel of a
+// small top-down map uploaded only when it changes: the same nearest texel the pattern fill sampled. Both maps share ONE texture
+// (tTop: the cloud levels in rows 0.., the lava's mask below them): this shader is at the 16 texture units a GPU guarantees
+uniform sampler2D tTop; uniform vec4 uTopH;                                 // (the lava mask's width, height, first row)
+uniform vec4 uCl, uClM, uClO; uniform vec3 uClC;   // clouds: on, the two alphas; view -> texel (2x2); origin (view px), tile size; colour
+uniform vec4 uHz, uHzM, uHzO;                      // haze: on, band (px), zoom, clock (s); view -> texel; origin (view px), the world origin's view row
+ivec2 viewTexel(ivec2 p, vec4 M, vec2 o) {   // view pixel p (GL, y up) -> the top-down map's texel (the pattern's nearest sample)
+  vec2 c = vec2(float(p.x) + .5, uRes.y - float(p.y) - .5) - o;
+  return ivec2(floor(vec2(M.x * c.x + M.y * c.y, M.z * c.x + M.w * c.y)));
+}
+vec4 reflAt(ivec2 p, float hw, out vec3 rE) {   // the mirrored albedo (a = 1: found) seen at p over water at height hw
+  rE = vec3(0.);
+  int kMax = int(uRfV.z), H = int(uRes.y);
+  float nx = (float(p.x) + .5) / uRes.x * 2. - 1., prev = -1.;
+  for (int k = 1; k <= 512; k++) {
+    if (k > kMax || p.y + k >= H) break;
+    ivec2 q = ivec2(p.x, p.y + k);
+    float dq = texelFetch(tD, q, 0).r;
+    if (dq > .99999) { prev = -1.; continue; }   // nothing there
+    float ny = (float(q.y) + .5) / uRes.y * 2. - 1.;   // (the projection is affine: a pixel's world height is linear in ndc and depth)
+    float Qy = uInvPV[0][1] * nx + uInvPV[1][1] * ny + uInvPV[2][1] * (dq * 2. - 1.) + uInvPV[3][1];
+    float d = 2. * (Qy - hw) * uRfW.x - float(k);
+    if (d >= -.5 && prev < -.5) {
+      // the world's things (props, trees, their cards, the character), not the batched sprites (obj 9: riverside plants, lily
+      // pads lying on the water, wildlife, decor) nor particles (obj -1): what depth.js mirrored
+      vec4 aq = texelFetch(tA, q, 0); int tq = int(aq.a * 255. + .5) / 4; float ob = texelFetch(tN, q, 0).w;
+      if ((tq == 2 || tq == 3 || tq == 4 || tq == 7) && ob > -.5 && abs(ob - 9.) > .5) { rE = texelFetch(tE, q, 0).rgb; return vec4(aq.rgb, 1.); }
+    }
+    prev = d;
+  }
+  return vec4(0.);
+}
 vec3 post(vec3 col, ivec2 ip) {
-  if (uLay.w > .5) { vec4 a = lay(tAdd, ip); col += a.rgb * a.a; }
-  if (uLay.z > .5) { vec4 f = lay(tFront, ip); col = mix(col, f.rgb, f.a); }
+  if (uLay.w > .5) col += lay(tAdd, ip).rgb;
+  if (uLay.z > .5) { vec4 f = lay(tFront, ip); col = col * (1. - f.a) + f.rgb; }
   return col;
 }
 float nearOf(float d) { return -(d * 2. - 1.) * uR; }
@@ -400,9 +817,19 @@ float ptBlock(vec3 S, vec3 L) {
 }
 void main() {
   ivec2 ip0 = ivec2(gl_FragCoord.xy), ip = ip0;
-  if (uLayD > .5) { vec4 dd = lay(tDistort, ip0); if (dd.a > .5) ip = clamp(ip0 + ivec2(128 - int(dd.r * 255. + .5), int(dd.g * 255. + .5) - 128), ivec2(0), ivec2(uRes) - 1); }
+  if (uLayD > .5) { vec4 dd = lay(tDistort, ip0); dd.rgb /= max(dd.a, 1e-3); if (dd.a > .5) ip = clamp(ip0 + ivec2(128 - int(dd.r * 255. + .5), int(dd.g * 255. + .5) - 128), ivec2(0), ivec2(uRes) - 1); }
+  if (uHz.x > .5) {   // the lava's heat haze: rows of 2 px shifted whole pixels (depth.js drawHaze's formula) where the lava lies
+    float yc = uRes.y - 1. - float(ip0.y), yb = floor(yc / uHz.y) * uHz.y, wy = floor((yb - uHzO.z) / uHz.z + .5);
+    float s = floor(sin(wy * .21 - uHz.w * 2.6) * max(0., sin(wy * .047 + uHz.w * .9)) * 1.45 + .5);
+    if (s != 0.) {
+      ivec2 t = viewTexel(ip0, uHzM, uHzO.xy);
+      if (all(greaterThanEqual(t, ivec2(0))) && all(lessThan(t, ivec2(uTopH.xy))) && texelFetch(tTop, t + ivec2(0, int(uTopH.z)), 0).r > .5)
+        ip = clamp(ivec2(ip0.x - int(s * uHz.z), ip0.y), ivec2(0), ivec2(uRes) - 1);
+    }
+  }
   vec4 a0 = texelFetch(tA, ip, 0);
   int code = int(a0.a * 255. + .5), type = code / 4, tone = code - type * 4;
+  bool water = type == 1 && tone == 1;   // (tone is only used by meshes otherwise)
   if (type == 0) { oc = vec4(clamp(post(uBg, ip0), 0., 1.), 1.); return; }
   float d0 = texelFetch(tD, ip, 0).r;
   vec4 N0 = texelFetch(tN, ip, 0), E0 = texelFetch(tE, ip, 0);
@@ -430,18 +857,38 @@ void main() {
     }
     int ti = outDark ? 4 : outLit ? 5 : line ? 3 : seam ? min(tone + 1, 3) : edge ? min(tone + 1, 2) : tone;
     alb = texelFetch(uRamps, ivec2(ti, int(fam + .5)), 0).rgb;
+    if (soft) {   // a crown turned by autumn (MESH_FS wrote its spray's colour into tA): keep it, and give the outline / edge tones its hue
+      vec3 r0 = texelFetch(uRamps, ivec2(tone, int(fam + .5)), 0).rgb, kk = abs(a0.rgb / max(r0, vec3(.02)) - 1.);
+      if (max(kk.r, max(kk.g, kk.b)) > .02) alb = clamp(alb * a0.rgb / max(r0, vec3(.02)), 0., 1.);
+    }
   }
 
   // ---- painted layers before the light: ground decals / animal shadows / ripples (ground only), cloud shadows (all)
-  if (uLay.x > .5 && (type == 1 || type == 5)) { vec4 g = lay(tGround, ip); alb = mix(alb, g.rgb, g.a); }
-  if (uLay.y > .5) { vec4 g = lay(tPre, ip); alb = mix(alb, g.rgb, g.a); }
+  float gA = 0.;
+  if (uAo.w > 0. && (type == 1 || type == 5)) alb = mix(alb, uAo.rgb, texelFetch(tX, ip, 0).g * uAo.w);   // contact shadows (G.ao)
+  if (uLay.x > .5 && (type == 1 || type == 5)) { vec4 g = lay(tGround, ip); alb = alb * (1. - g.a) + g.rgb; gA = g.a; }
+  vec3 rfE = vec3(0.);   // ---- what stands over the water, mirrored in it (see reflAt)
+  if (uRf.x > .5 && type == 1) {
+    bool puddle = uRfV.w > 0. && abs(gA * 255. - uRfV.w) < .5;
+    if (water || puddle) {
+      ivec2 rp = ivec2(clamp(ip.x - int(rippleOff(ip, P, puddle)), 0, int(uRes.x) - 1), ip.y);
+      vec4 r = reflAt(rp, P.y, rfE);
+      if (r.a > .5) { alb = mix(alb, mix(r.rgb, uRfC, uRf.y), uRf.z); rfE *= uRf.w; }
+    }
+  }
+  if (uLay.y > .5) { vec4 g = lay(tPre, ip); alb = alb * (1. - g.a) + g.rgb; }
+  if (uCl.x > .5) {   // cloud shadows: the level map fixed to the ground plane (h 0), drifting with the wind, two hard levels
+    ivec2 t = viewTexel(ip, uClM, uClO.xy);
+    float L = texelFetch(tTop, ivec2(mod(vec2(t), uClO.zw)), 0).r * 255.;   // (the tile repeats: mod, never negative)
+    alb = mix(alb, uClC, L > 1.5 ? uCl.z : L > .5 ? uCl.y : 0.);
+  }
 
   // ---- the world clock (sim/env.js via features/weather.js): the SEASON turns the green of the ground and of painted
   // things (bushes, tufts, leaf particles: types 1 and 3) through uSeasonM, by how green the pixel is; SNOW lies on what
   // faces up (ground, props, crowns), in patches fixed in the world, thickening with uSnow (not on the water); WET ground
   // and props darken
-  if (uSeasonK > 0. && (type == 1 || type == 3)) { float g = clamp((alb.g - max(alb.r, alb.b)) * 7., 0., 1.) * uSeasonK; if (g > 0.) alb = mix(alb, clamp(uSeasonM * alb, 0., 1.), g); }
-  if (uSnow > 0. && (type == 1 || type == 2) && N.y > .55 && !(alb.b > alb.r + .05 && alb.b >= alb.g)) {
+  if (uSeasonK > 0. && (type == 1 || type == 3) && tone != 2) { float g = clamp((alb.g - max(alb.r, alb.b)) * 7., 0., 1.) * uSeasonK; if (g > 0.) alb = mix(alb, clamp(uSeasonM * alb, 0., 1.), g); }   // (tone 2 on a ground or card pixel: it has its own autumn colours, SURF_FS's fallen leaves and CARD_FS's plants)
+  if (uSnow > 0. && (type == 1 || type == 2) && N.y > .55 && !water && !(alb.b > alb.r + .05 && alb.b >= alb.g)) {   // (water: the baked flag; the blue-ish test stays for what isn't flagged: frost's blue ground and ice keep their painted snow)
     // patches at three scales (60 cm / 20 cm / 7 cm), the large one leading so mid cover reads as drifts, not camouflage.
     // Snow settles in the darker joints first and keeps their darker tone, so the paving still shows through the snow
     float l = dot(alb, vec3(.3, .55, .15)), n = vnC(P.xz * 1.6) * .64 + vnC(P.xz * 5.2 + 3.) * .24 + vnC(P.xz * 14. + 7.) * .12;
@@ -498,9 +945,40 @@ void main() {
   if (type == 4) { alb = mix(alb, clamp(alb * uGrade, 0., 1.), uGradeK); L += min(uFill, L * .25); }
   vec3 col = alb * L;
   col += alb * uFlashC;   // lightning: the whole scene lit for an instant (features/weather.js)
-  vec3 emit = E0.rgb;
-  if (uLayE > .5) { vec4 el = lay(tEmitL, ip); emit += el.rgb * el.a; }
+  vec3 emit = E0.rgb + rfE;
+  if (uLayE > .5) emit += lay(tEmitL, ip).rgb;
   col += emit * max(vec3(1.) - L, vec3(uEmin)) * 1.15;                   // emitters add back what the light took away
+  // ---- light on the water. Lanterns, mushrooms and wisps shine in it as thin shimmering vertical streaks and the sun twinkles on
+  // it; all in view pixels and 12 steps a second, so it moves in whole pixels. A light h above the water is mirrored h below it
+  // ON SCREEN (the oblique projection: heights count cos 20 px a metre, ground depth sin 55, as depth.js mirrors sprites), so the
+  // streak starts under the light's foot at that distance and trails toward the camera. Clear at night, faint by day. (The sky
+  // glint and the mirrored sprites are depth.js's, in the ground layer: these are light, which that can't do)
+  if (water && uWRefl.x + uWRefl.y > 0.) {
+    float wt = mod(floor(uWPhase * 12.), 997.), pm = uWPx.y;
+    vec2 Fh = normalize(uView.xz), Rh = vec2(Fh.y, -Fh.x);
+    vec3 wl = vec3(0.);
+    if (uWRefl.x > 0.) {
+      float night = clamp((1. - dot(uAmb, vec3(.3, .55, .15))) * 1.6, .2, 1.);
+      for (int i = 0; i < ${NL}; i++) {
+        if (i >= uNL) break; if (uLC[i].w > .5) continue;
+        float h = uLP[i].y - P.y; if (h < .05) continue;
+        vec2 d = P.xz - uLP[i].xz; float r = uLP[i].w, t2 = (dot(d, d) + .0625 * h * h) / (r * r); if (t2 >= 1.) continue;
+        float pool = (1. - t2) * (1. - t2);   // glints: single texels of the light's pool flick on and off on the water (the pool is lit by the light pass)
+        if (hC(floor(P.xz * uWPx.x) + vec2(float(i) * 5.3, wt) * 1.9 + 11.) > 1. - .006 * pool) wl += uLC[i].rgb * .5 * night;
+        float dx = dot(d, Rh) * pm, dd = (dot(d, Fh) * .81915 - h * .93969) * pm;   // px right of the mirror image, px below it
+        float wob = floor(hC(vec2(gl_FragCoord.y * .37 + float(i) * 3.1, wt)) * 3.) - 1., len = 8. + 7. * h, al = dd < 0. ? 1. + dd / 3. : 1. - dd / len;
+        if (abs(dx - wob) > 1.2 || al <= 0.) continue;
+        float v = al * pool * (.5 + .9 * hC(vec2(gl_FragCoord.y + float(i) * 17., wt + 31.)));
+        wl += uLC[i].rgb * q3(v) * night;
+      }
+      wl *= uWRefl.x * .8;
+    }
+    if (uWRefl.y > 0. && uSunStr > 0.) {   // sparse twinkling texels, thicker where the sun mirrors toward the camera
+      float spec = .35 + .65 * smoothstep(.5, 1., normalize(uSunDir + uView).y);
+      if (hC(floor(P.xz * uWPx.x) + vec2(7.3, mod(floor(uWPhase * 10.), 89.)) * 1.7) > 1. - .0016 * uWRefl.y * spec) wl += uSunC * min(1., uSunStr) * .55;
+    }
+    col += wl;
+  }
   // ---- shiny armour (the arena's armor.js shine, on the GPU): metal pixels of the character (E.w 2 steel / 1 gold) get a
   // quantised Blinn-Phong glint from every light and the sun, and reflect the sky (up) or the lit ground ~1.5 m away
   // (down), stronger at grazing angles (fresnel). Added on top of the light, like the arena's 'lighter'
@@ -551,8 +1029,11 @@ void main() {
 }`;
 
 // ---------------------------------------------------------------- the renderer
-export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
-  const renderer = new THREE.WebGLRenderer({canvas, antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: true});
+export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world: the world's bounds {x0, y0, x1, y1} (m; layout.WORLD)
+  // (the drawing buffer is not kept between frames: keeping it costs a copy of the 3440 x 1440 back buffer each frame. Every
+  // frame draws every pixel, and the captures read the canvas in the task that drew it; ?preserve=1 keeps it)
+  const renderer = new THREE.WebGLRenderer({canvas, antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: flags.get('preserve') === '1'});
+  const glStats = createGLStats(renderer.getContext());   // (what a frame asks of WebGL, counted while the profiler shows it)
   renderer.setPixelRatio(1); renderer.setSize(VW, VH, false);
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the arena does its maths on sRGB numbers: so do we
   renderer.autoClear = false;
@@ -566,8 +1047,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     depthTexture: new THREE.DepthTexture(SM, SM, THREE.UnsignedIntType)});
 
   // point-light occlusion: the solid 3D things (live meshes, the plateau; not cards) seen from straight above, as depth.
-  // Covers the Proving Grounds (62 x 30 m) + 2 m. Re-rendered only when one of them moved, appeared or vanished.
-  const HM = {x0: -2, z0: -2, w: 66, d: 34, ppm: 16, top: 20, far: 30};
+  // Covers the world (its bounds) + 2 m. Re-rendered only when one of them moved, appeared or vanished.
+  const HM = {x0: world.x0 - 2, z0: world.y0 - 2, w: world.x1 - world.x0 + 4, d: world.y1 - world.y0 + 4, ppm: 16, top: 20, far: 30};
   const hmap = new THREE.WebGLRenderTarget(HM.w * HM.ppm, HM.d * HM.ppm, {minFilter: near, magFilter: near, depthBuffer: true,
     depthTexture: new THREE.DepthTexture(HM.w * HM.ppm, HM.d * HM.ppm, THREE.UnsignedIntType)});
   const hCam = new THREE.OrthographicCamera(-HM.w / 2, HM.w / 2, HM.d / 2, -HM.d / 2, 0, HM.far);
@@ -576,23 +1057,37 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   let hDirty = true;
 
   const gScene = new THREE.Scene(), sScene = new THREE.Scene(), xScene = new THREE.Scene();
+  // sStatic: the casters of the cached static sun shadow (+ the height map), out of sScene so the per-frame shadow pass doesn't
+  // walk ~200 objects it never draws; a static caster that starts moving goes over to sScene until it is still again
+  const sStatic = new THREE.Scene(); sStatic.matrixAutoUpdate = false;
   gScene.matrixWorldAutoUpdate = sScene.matrixWorldAutoUpdate = xScene.matrixWorldAutoUpdate = true;
+  // a Scene's own matrixAutoUpdate (three's default) re-flags it on every render and forces EVERY child's world matrix to be
+  // recomputed in every pass (~760 objects x 3+ passes a frame: 4% of the frame's JS). Off: an object's world matrix is
+  // recomputed only when it was flagged (matrixWorldNeedsUpdate: setMatrix, syncCards, a new mesh) or it updates itself
+  gScene.matrixAutoUpdate = sScene.matrixAutoUpdate = xScene.matrixAutoUpdate = false;
   const camera = new THREE.Camera();
   const sunCam = new THREE.OrthographicCamera(-SHADOW_E, SHADOW_E, SHADOW_E, -SHADOW_E, 1, 220);
-  // STATIC SUN SHADOW: what doesn't move (world props made with mesh(..., {static: true}), the terrain: sScene layer 2,
+  // STATIC SUN SHADOW: what doesn't move (world props made with mesh(..., {static: true}), the terrain: sStatic, layer 2,
   // not 0) is drawn into a world-wide map that is re-rendered only when one of them appears / goes / changes model or
   // starts / stops moving, or the sun has turned > SUN_STEP (the clock turns it ~.2 deg/s). The per-frame map round the view
   // (sunCam, layer 0) then holds only what moves: characters, cards, swaying trees, debris. A static prop that moves (a
   // hit wobble, a push, burning) casts into the per-frame map until it has been still STILL_FRAMES. ~180 -> ~55 shadow
   // draws a frame. ?sshadow=0 puts everything back in the per-frame map (A/B)
   const STATIC_SHADOW = flags.get('sshadow') !== '0';
-  const SMS = 4096, SUN_STEP = .15 * DEG, STILL_FRAMES = 45, SBOX = [-6, 68, -4, 9, -6, 36];   // the world + its skirt (m)
+  const SMS = 4096, SUN_STEP = .15 * DEG, STILL_FRAMES = 45;
+  // the static map's box (m): the world + its skirt while that is at most SFIT m a side (~50 texels / m: the Proving Grounds'
+  // 74 x 42 m); a bigger world gets a box 2 SFOLLOW m a side round the view instead, re-centred on an SSTEP m lattice as the view
+  // moves on (a re-render each time; the view shows at most ~40 x 20 m, so the box holds it plus the long shadows cast into
+  // it: ~43 texels / m), its texel grid kept still in light space so the shadows don't shimmer at a re-centre
+  const SWORLD = [world.x0 - 6, world.x1 + 6, -4, 9, world.y0 - 6, world.y1 + 6], SFIT = 100, SFOLLOW = 32, SSTEP = 8;
+  const sFollow = SWORLD[1] - SWORLD[0] > SFIT || SWORLD[5] - SWORLD[4] > SFIT, SBOX = SWORLD.slice();
+  let sCx = NaN, sCz = NaN;   // the follow box's centre (its lattice point)
   const shadowS = new THREE.WebGLRenderTarget(SMS, SMS, {minFilter: near, magFilter: near, depthBuffer: true, format: THREE.RedFormat,
     depthTexture: new THREE.DepthTexture(SMS, SMS, THREE.UnsignedIntType)});
   const sunCamS = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2); sunCamS.layers.set(2);
   let sDue = 0;   // the frame by which the static map must be re-rendered (Infinity: it's up to date)
   const staticSoon = frames => { sDue = Math.min(sDue, frameNo + frames); };
-  const sDir = new THREE.Vector3(0, 2, 0), sunNow = new THREE.Vector3(0, 1, 0), _sc = new THREE.Vector3(), movers = new Set();
+  const sDir = new THREE.Vector3(0, 2, 0), sunNow = new THREE.Vector3(0, 1, 0), _sc = new THREE.Vector3(), _scR = new THREE.Vector3(), _scU = new THREE.Vector3(), movers = new Set();
   function fitStatic(d) {   // look along the sun at the world's centre; the ortho box = the world's 8 corners in light space
     const cx = (SBOX[0] + SBOX[1]) / 2, cy = (SBOX[2] + SBOX[3]) / 2, cz = (SBOX[4] + SBOX[5]) / 2;
     sunCamS.position.set(cx, cy, cz).addScaledVector(d, 100); sunCamS.lookAt(cx, cy, cz); sunCamS.updateMatrixWorld(true);
@@ -602,6 +1097,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       x0 = Math.min(x0, _sc.x); x1 = Math.max(x1, _sc.x); y0 = Math.min(y0, _sc.y); y1 = Math.max(y1, _sc.y); z0 = Math.min(z0, _sc.z); z1 = Math.max(z1, _sc.z);
     }
     Object.assign(sunCamS, {left: x0, right: x1, top: y1, bottom: y0, near: -z1 - 1, far: -z0 + 1}); sunCamS.updateProjectionMatrix();
+    if (sFollow) {   // a follow box: the world's origin on a texel corner, so a re-centred box keeps the same texel grid
+      const tx = (x1 - x0) / SMS, ty = (y1 - y0) / SMS, o = _sc.set(0, 0, 0).applyMatrix4(sunCamS.matrixWorldInverse);
+      const dx = o.x - Math.round(o.x / tx) * tx, dy = o.y - Math.round(o.y / ty) * ty;
+      sunCamS.position.addScaledVector(_scR.setFromMatrixColumn(sunCamS.matrixWorld, 0), dx).addScaledVector(_scU.setFromMatrixColumn(sunCamS.matrixWorld, 1), dy);
+      sunCamS.updateMatrixWorld(true);
+    }
     compU.uLightPVS.value.multiplyMatrices(sunCamS.projectionMatrix, sunCamS.matrixWorldInverse);
     compU.uSBias.value = (sunCam.far - sunCam.near) / (sunCamS.far - sunCamS.near);   // the same metres of bias in its depth units
   }
@@ -615,6 +1116,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     leanX: {value: new THREE.Vector3(1 / PPM, 0, 0)}, leanY: {value: new THREE.Vector3(0, 0, 1 / PPMY)},   // sway: m per art px (setView)
     time: {value: 0},   // s, for the leaves' flutter (render())
     leafK: {value: 1},  // how full the crowns are this season (features/weather.js from sim/env.js leafK)
+    autumn: {value: 0}, // how far autumn has turned the leaves, 0 green .. 1 (setGround, from sim/env.js autumn): shaders colour leaves by it
+    litK: {value: new THREE.Vector4()},   // the fallen leaves: x how much has fallen (0 = none), y how far they have turned (setGround; SURF_FS)
+    // the moving water (setWaterLook at every build, the clock in render()): see WATER_FS
+    wPhase: {value: 0}, wA: {value: new THREE.Vector4(0, 3, 12, -1)}, wB: {value: new THREE.Vector4(.8, .76, 0, 2)}, wRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())},
   };
   const raw = (vs, fs, uniforms, extra = {}) => new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
 
@@ -635,28 +1140,87 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   }
   let frameNo = 0;
   const ups = [];   // textures re-uploaded this frame (render() uploads them first, timed as stats.pass.upload)
+  // ---- DATA UPLOADS (G.texData): a block of RGBA bytes the caller rasterised in its own array, into part of a canvas's
+  // texture (the one tex(img) shows; made here if it isn't yet), at render, by texSubImage2D from the array: no 2D canvas
+  // between (a canvas -> WebGL copy snapshots the whole canvas, and a GPU canvas's waits on the GPU). (x, y): where in the
+  // canvas (px, y down); the block is data's (sx, sy, w, h), rows rowLen px apart; data must hold still till render()
+  const dataUps = [];
+  let dataN = 0;
+  function texData(img, x, y, w, h, data, rowLen, sx = 0, sy = 0) {
+    const t = img.isData ? imgTex(img) : texCache.get(img) || tex(img), U = dataUps[dataN] ||= {t: null, x: 0, y: 0, w: 0, h: 0, data: null, rowLen: 0, sx: 0, sy: 0};
+    dataN++; U.t = t; U.x = x; U.y = y; U.w = w; U.h = h; U.data = data; U.rowLen = rowLen; U.sx = sx; U.sy = sy;
+  }
+  function uploadData() {   // (render: with the other uploads, before any pass reads them)
+    if (!dataN) return;
+    const gl = renderer.getContext();
+    let bound = null;
+    for (let i = 0; i < dataN; i++) {
+      const U = dataUps[i];
+      if (bound !== U.t) {
+        let p = renderer.properties.get(U.t);
+        if (!p.__webglTexture) { renderer.initTexture(U.t); p = renderer.properties.get(U.t); }   // (its first upload: the whole canvas, then the block over it)
+        renderer.state.bindTexture(gl.TEXTURE_2D, p.__webglTexture); bound = U.t;
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);   // (as tex() uploads it)
+      }
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, U.rowLen); gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, U.sx); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, U.sy);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, U.x, U.y, U.w, U.h, gl.RGBA, gl.UNSIGNED_BYTE, U.data);
+      U.data = null;
+    }
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0); gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0); renderer.state.unbindTexture();   // (three never sets these: back to 0)
+    dataN = 0;
+  }
 
   // ---- materials
   const MESH_VS = meshVS(false), MESH_SWAY_VS = meshVS(true);
-  const meshMat = (obj, seed, sw = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
-    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
+  // a tree's autumn ramps (trees3d.js B.autumn: 4 stages x 3 tones of '#rrggbb') as the shader's uAut: shared by every tree of a species
+  const autVecs = new WeakMap(), AUT_NONE = Array.from({length: 12}, () => new THREE.Vector3());
+  const autOf = pal => {
+    let v = autVecs.get(pal);
+    if (!v) {   // (the ramps are raw sRGB bytes, no colour management: parse the hex ourselves)
+      v = AUT_NONE.map((_, i) => { const h = pal[Math.floor(i / 3)]?.[i % 3] || '#000000'; return new THREE.Vector3(parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255); });
+      autVecs.set(pal, v);
+    }
+    return v;
+  };
+  const meshMat = (obj, seed, sw = null, aut = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
+    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
-  const surfMat = ({tex, em = null, planar, world, type = 1, obj = 0, cliff = null, cliffOff = 0}) => raw(SURF_VS, SURF_FS, {
+  const surfMat = ({tex, em = null, planar, world, origin = null, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, litter = null}) => raw(SURF_VS, SURF_FS, {
+    uLit: litter?.u || {value: null}, uLitPal: {value: litter?.pal || null}, uHasLit: {value: litter ? 1 : 0}, uLitK: U.litK, uLive: litter?.live || {value: 0}, uLitCap: litter?.cap || {value: 1},
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
-    uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)},
+    uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)}, uOrigin: {value: origin || new THREE.Vector2(0, 0)},
     uCliff: {value: cliff}, uHasCliff: {value: cliff ? 1 : 0}, uCliffOff: {value: cliffOff}, uPx: U.px,
-    uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)}}, {side: THREE.FrontSide});
+    uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)},
+    uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
+  // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
+  // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test
+  const v3s = a => a.map(c => new THREE.Vector3(...c));
+  const PLANT0 = {uAutumn: U.autumn, uPlant: {value: new THREE.Vector4()}, uPRamp: {value: v3s(Array(4).fill([0, 0, 0]))}, uPPal: {value: v3s(Array(32).fill([0, 0, 0]))}};
+  const plantU = pl => !pl ? PLANT0 : {uAutumn: U.autumn, uPlant: {value: new THREE.Vector4(pl.kind, pl.seed, pl.delay, 0)}, uPRamp: {value: v3s(pl.ramp)}, uPPal: {value: v3s(pl.pal)}};
   const cardUniforms = o => ({
     uAnchor: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2(o.w, o.h)}, uPivot: {value: new THREE.Vector2(o.px, o.py)},
     uPx: U.px, uRect: {value: new THREE.Vector4(0, 0, 1, 1)}, uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uSnap: SNAP,
-    uOff: {value: new THREE.Vector2()}, uSway: {value: 0}, uHasBend: {value: 0},
+    uOff: {value: new THREE.Vector2()}, uSway: new NumU(0), uHasBend: {value: 0},
   });
+  // three.js works out an instanced geometry's instance limit once, the first time it is drawn (geometry._maxInstanceCount,
+  // from its instance buffer's size), and never again: a batch that swaps in a bigger buffer later must clear it, or the
+  // instances past the old size are silently not drawn (a horde's 33rd brute of one facing went missing)
+  const regrown = geo => { geo._maxInstanceCount = undefined; };
+  // one update range on a buffer (attribute or interleaved), in a {start, count} kept on it: three's addUpdateRange makes a
+  // new one every call (one a batch a frame); three empties the list after the upload
+  // (and cleared by pop: `length = 0`, as three's clearUpdateRanges does after each upload, frees the array's store, and
+  // the next push allocates a new one)
+  function popRanges() { const u = this.updateRanges; while (u.length) u.pop(); }
+  const setRange = (a, start, count) => {
+    let r = a.__range; if (!r) { r = a.__range = {start: 0, count: 0}; a.clearUpdateRanges = popRanges; }
+    r.start = start; r.count = count; a.clearUpdateRanges(); a.updateRanges.push(r); a.needsUpdate = true;
+  };
   const QUAD = new THREE.BufferGeometry();
   QUAD.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0], 3));
 
-  // a billboard: {tex, w, h, px, py, em?, nrm?, nrmRect?, rect?, type (3 | 4), obj, bias, shadow (cast), xray}
+  // a billboard: {tex, w, h, px, py, em?, nrm?, nrmRect?, rect?, type (3 | 4), obj, bias, shadow (cast), xray, plant (see plantU)}
   // The vertex shader places it from uAnchor, so the mesh's matrix is free: render() sets it to the anchor and the card's
   // own geometry (the shared quad + a bounding sphere sized from uSize / uPivot / sway) lets three skip cards off screen.
   // Geometries are pooled: disposing one would delete the shared quad's GL buffer
@@ -668,21 +1232,23 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   }
   function syncCards() {
     for (const C of cards) {
+      if (!C.gm.visible) continue;   // (synced when it shows again: before the passes of that frame)
       const u = C.u, a = u.uAnchor.value, s = u.uSize.value, pv = u.uPivot.value, off = u.uOff.value, sw = Math.abs(u.uSway.value);
       if (a.x !== C.ax || a.y !== C.ay || a.z !== C.az) {
         C.ax = a.x; C.ay = a.y; C.az = a.z;
         for (const m of C.meshes) { m.matrix.makeTranslation(a.x, a.y, a.z); m.matrixWorldNeedsUpdate = true; }
       }
       const hx = (Math.max(pv.x, s.x - pv.x) + sw + Math.abs(off.x) + 2) / PPM, hy = (s.y / 2 + Math.abs(off.y) + 2) / PPMH;
-      const bs = C.geo.boundingSphere; bs.center.set(0, (pv.y - s.y / 2 + off.y) / PPMH, 0); bs.radius = Math.hypot(hx, hy) + .25;
+      const bs = C.geo.boundingSphere; bs.center.set(0, (pv.y - s.y / 2 + off.y) / PPMH, 0); bs.radius = hypot2(hx, hy) + .25;
     }
   }
   function card(o) {
+    if (o.batch && CARD_BATCH && (o.type ?? 3) === 3 && !o.nrm && !o.xray && !o.rect) return bcard(o);   // a world card: in a batch (below)
     const u = cardUniforms(o), geo = cardGeo();
     const g = raw(CARD_VS, CARD_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
       uNrmRect: {value: o.nrmRect || new THREE.Vector4(0, 0, 1, 1)}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0},
       uType: {value: o.type ?? 3}, uObj: {value: o.obj ?? 0}, uFlash: {value: 0}, uBend: {value: new Float32Array(8).fill(1)},
-      uMetal: {value: null}, uHasMetal: {value: 0}}, {side: THREE.DoubleSide});
+      uMetal: {value: null}, uHasMetal: {value: 0}, ...plantU(o.plant)}, {side: THREE.DoubleSide});
     const gm = new THREE.Mesh(geo, g); gScene.add(gm);
     let sm = null, xm = null;
     if (o.shadow !== false) {
@@ -706,31 +1272,129 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     cards.add(C);
     return C;
   }
+
+  // ---- WORLD CARDS IN BATCHES (stage 3; BCARD_VS / BCARD_FS): card({batch: true}) returns the API world.js drives (u.*,
+  // g.uniforms.*, anchor, flash, setVisible, setSprite, dispose) as plain values, no mesh or material of its own. render() packs
+  // every visible one into its group's instance buffers (a group: texture x emit texture x casts a shadow) and draws each group
+  // once in the G-buffer and once in the sun's shadow: three's per-draw cost (~8 µs) went per card per pass before, and 60
+  // brutes were 120 draws. No per-card frustum test: an off-screen instance costs a vertex shader, not a draw. ?cards=0: a mesh
+  // each (the A/B)
+  const CARD_BATCH = flags.get('cards') !== '0';
+  const bcards = new Set(), bGroups = new Map(), BC_ATTRS = ['iA', 'iS', 'iO', 'iB0', 'iB1', 'iM', 'iP'], BC_STRIDE = 28, BEND1 = new Float32Array(8).fill(1);
+  // the plants' palettes (CARD_FS uPRamp / uPPal): one row of 36 RGBA float texels per plant path pair (4 green ramp tones, then
+  // the 32 tones of its two paths), the same floats the uniforms held; the texture grows a row as a new pair turns up (at a build)
+  const palRows = new Map(); let palData = new Float32Array(36 * 4), palN = 0;
+  const palTex = new THREE.DataTexture(palData, 36, 1, THREE.RGBAFormat, THREE.FloatType), palU = {value: palTex};
+  palTex.minFilter = palTex.magFilter = THREE.NearestFilter; palTex.generateMipmaps = false; palTex.needsUpdate = true;
+  function palRow(pl) {
+    let m = palRows.get(pl.pal); if (!m) palRows.set(pl.pal, m = new Map());
+    const rk = pl.ramp.map(c => c.join()).join('|'); let r = m.get(rk); if (r !== undefined) return r;
+    r = palN++; m.set(rk, r);
+    if (palN * 36 * 4 > palData.length) { const d = new Float32Array(palData.length * 2); d.set(palData); palData = d; }
+    const o = r * 36 * 4, put = (c, i) => { palData[o + i * 4] = c[0]; palData[o + i * 4 + 1] = c[1]; palData[o + i * 4 + 2] = c[2]; palData[o + i * 4 + 3] = 1; };
+    pl.ramp.forEach((c, i) => put(c, i)); pl.pal.forEach((c, i) => put(c, 4 + i));
+    palTex.dispose(); palTex.image = {data: palData, width: 36, height: palData.length / (36 * 4)}; palTex.needsUpdate = true;
+    return r;
+  }
+  function bcard(o) {
+    const u = {uAnchor: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2(o.w, o.h)}, uPivot: {value: new THREE.Vector2(o.px, o.py)},
+      uTex: {value: o.tex}, uBias: {value: o.bias ?? 0}, uOff: {value: new THREE.Vector2()}, uSway: new NumU(0), uHasBend: {value: 0}};
+    const gu = {uBend: {value: BEND1}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0}, uFlash: {value: 0}, uObj: {value: o.obj ?? 0}};
+    const pl = o.plant, plant = pl ? [pl.kind, pl.seed, pl.delay, palRow(pl)] : [0, 0, 0, 0];
+    const C = {u, g: {uniforms: gu}, shadow: o.shadow !== false, plant, vis: true, grp: null, gTex: null, gEm: null,   // grp: its group while its textures stay
+      set anchor(v) { u.uAnchor.value.copy(v); },
+      set flash(k) { gu.uFlash.value = k; },
+      setVisible(v) { C.vis = !!v; },
+      setSprite(s) { u.uTex.value = s.tex; u.uSize.value.set(s.w, s.h); u.uPivot.value.set(s.px, s.py); gu.uEm.value = s.em || null; gu.uHasEm.value = s.em ? 1 : 0; },
+      dispose() { bcards.delete(C); },
+    };
+    bcards.add(C);
+    return C;
+  }
+  function bGroup(key, tex, em, shadow) {
+    let G2 = bGroups.get(key); if (G2) return G2;
+    const cap = 32, geo = new THREE.InstancedBufferGeometry();
+    geo.setAttribute('position', QUAD.getAttribute('position'));   // (never dispose it with the quad's attribute on: shared GL buffer)
+    const ib = bBuffer(geo, new Float32Array(cap * BC_STRIDE));
+    const uni = {uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uType: {value: 3}, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP,
+      uShadow: {value: 0}, uAutumn: U.autumn, uPal: palU};
+    const gm = new THREE.Mesh(geo, raw(BCARD_VS, BCARD_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gm.matrixAutoUpdate = false; gScene.add(gm);
+    let sm = null;
+    if (shadow) {
+      sm = new THREE.Mesh(geo, raw(BCARD_VS, BCARD_SHADOW_FS, {uTex: uni.uTex, uFaceYaw: U.sunYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: NOSNAP, uShadow: {value: 1}}, {side: THREE.DoubleSide}));
+      sm.frustumCulled = false; sm.matrixAutoUpdate = false; sScene.add(sm);
+    }
+    G2 = {geo, ib, d: ib.array, gm, sm, cap, n: 0, n0: 0, dirty: true, idle: 0}; bGroups.set(key, G2);
+    return G2;
+  }
+  // the group's instances, interleaved (28 floats each: iA iS iO iB0 iB1 iM iP), one buffer and one upload
+  function bBuffer(geo, data) {
+    const ib = new THREE.InstancedInterleavedBuffer(data, BC_STRIDE, 1); ib.setUsage(THREE.DynamicDrawUsage);
+    BC_ATTRS.forEach((k, i) => geo.setAttribute(k, new THREE.InterleavedBufferAttribute(ib, 4, i * 4)));
+    return ib;
+  }
+  function bGrow(G2) {
+    const cap = G2.cap * 2, d = new Float32Array(cap * BC_STRIDE); d.set(G2.d);
+    G2.ib = bBuffer(G2.geo, d); G2.d = d; G2.cap = cap; G2.dirty = true; regrown(G2.geo);
+  }
+  const bPut = (G2, i, v) => { const f = Math.fround(v); if (G2.d[i] !== f) { G2.d[i] = f; G2.dirty = true; } };   // (a write that changes something)
+  function packCards() {   // every frame: the visible batched cards into their groups (in the order they were made)
+    for (const G2 of bGroups.values()) G2.n = 0;
+    for (const C of bcards) {
+      if (!C.vis) continue;
+      const u = C.u, g = C.g.uniforms, tex = u.uTex.value, em = g.uHasEm.value > .5 ? g.uEm.value : null;
+      let G2 = C.grp;
+      if (!G2 || G2.dead || C.gTex !== tex || C.gEm !== em) {   // (looked up again only when its textures change: no key a card a frame)
+        const a0 = idOf(tex), e0 = idOf(em), s0 = C.shadow ? 1 : 0;
+        const key = a0 < 1048576 && e0 < 1048576 ? (a0 * 1048576 + e0) * 2 + s0 : `${a0}|${e0}|${s0}`;
+        G2 = C.grp = bGroup(key, tex, em, C.shadow); C.gTex = tex; C.gEm = em;
+      }
+      if (G2.n >= G2.cap) bGrow(G2);
+      const i = G2.n++ * BC_STRIDE, an = u.uAnchor.value, s = u.uSize.value, pv = u.uPivot.value, off = u.uOff.value, b = g.uBend.value, pl = C.plant;
+      bPut(G2, i, an.x); bPut(G2, i + 1, an.y); bPut(G2, i + 2, an.z); bPut(G2, i + 3, u.uBias.value);
+      bPut(G2, i + 4, s.x); bPut(G2, i + 5, s.y); bPut(G2, i + 6, pv.x); bPut(G2, i + 7, pv.y);
+      bPut(G2, i + 8, off.x); bPut(G2, i + 9, off.y); bPut(G2, i + 10, u.uSway.value); bPut(G2, i + 11, u.uHasBend.value);
+      for (let k = 0; k < 8; k++) bPut(G2, i + 12 + k, b[k]);
+      bPut(G2, i + 20, g.uFlash.value); bPut(G2, i + 21, g.uObj.value); bPut(G2, i + 22, pl[0]); bPut(G2, i + 23, pl[1]);
+      bPut(G2, i + 24, pl[2]); bPut(G2, i + 25, pl[3]);
+    }
+    for (const [key, G2] of bGroups) {
+      G2.geo.instanceCount = G2.n; G2.gm.visible = G2.n > 0; if (G2.sm) G2.sm.visible = G2.n > 0;
+      if (G2.n && (G2.dirty || G2.n > G2.n0)) setRange(G2.ib, 0, G2.n * BC_STRIDE);
+      G2.dirty = false; G2.n0 = G2.n;
+      if (G2.n === 0 && ++G2.idle > 600) {   // (a texture nobody shows any more: its group goes)
+        gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.deleteAttribute('position'); G2.geo.dispose(); bGroups.delete(key); G2.dead = true;
+      } else if (G2.n) G2.idle = 0;
+    }
+  }
   // a live ramp mesh (+ its shadow caster). setMatrix moves both; setGeometry swaps the model (a breakable's stage).
   // o.sway: the geometry has aFlex and the mesh leans (setLean(x, y): art px at full weight, x along the screen, y toward
-  // the camera; whole pixels per vertex in the shader, its shadow leans with it)
+  // the camera; whole pixels per vertex in the shader, its shadow leans with it). o.autumn: the tree's autumn ramps (trees3d.js
+  // B.autumn, [s1..s4] x ['#hi', '#base', '#shade']): its leaves turn, spray by spray, with U.autumn (core/autumn.js)
   function mesh(geom, obj, matrix, o = {}) {
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
-    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gScene.add(gm);
+    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
-      uLeafK: U.leafK, uSeed: gm.material.uniforms.uSeed}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
-    sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.layers.enable(1); sScene.add(sm);
+      uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
+    sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
     const H = {sm, hm: matrix.clone()};             // hm: the matrix the height map was last rendered with
     // o.static (world props): its shadow lives in the cached static map; while it moves it casts per frame (STATIC SUN SHADOW)
     const S = STATIC_SHADOW && o.static && !sw ? {sm, still: 0, moving: false, back: false} : null;
     if (S) { sm.layers.enable(2); sm.layers.disable(0); staticSoon(0); }
+    (S ? sStatic : sScene).add(sm);
     const inStatic = () => S && !S.moving;
-    return {gm, sm,
+    let ver = 0;   // bumps on every setMatrix that changed the matrix (world.js: did a feature pose it since?)
+    return {gm, sm, get ver() { return ver; },
       setVisible(v) { if (gm.visible !== v) { if (caster()) hDirty = true; if (inStatic()) staticSoon(0); } gm.visible = v; sm.visible = v; },
       setMatrix(m) {
         if (gm.matrix.equals(m)) return;
-        gm.matrix.copy(m); sm.matrix.copy(m); gm.matrixWorldNeedsUpdate = sm.matrixWorldNeedsUpdate = true;
+        ver++; gm.matrix.copy(m); sm.matrix.copy(m); gm.matrixWorldNeedsUpdate = sm.matrixWorldNeedsUpdate = true;
         if (caster()) moved.add(H);   // render() decides whether that's enough to re-render the height map
         if (S) {   // it moves: into the per-frame map now, out of the static one at its next re-render (soon)
           S.still = 0; S.back = false;
-          if (!S.moving) { S.moving = true; sm.layers.enable(0); sm.layers.disable(2); movers.add(S); staticSoon(6); }
+          if (!S.moving) { S.moving = true; sm.layers.enable(0); sm.layers.disable(2); sStatic.remove(sm); sScene.add(sm); movers.add(S); staticSoon(6); }
         }
       },
       setGeometry(g) { if (gm.geometry !== g) { if (caster()) hDirty = true; if (inStatic()) staticSoon(0); } gm.geometry = g; sm.geometry = g; },
@@ -742,7 +1406,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       setFlutter(x, y) { sw?.flut.value.set(x, y); },
       setRipple(kx, kz, ph, amp) { gm.material.uniforms.uRip.value.set(kx, kz, ph, amp); },
       set flash(k) { gm.material.uniforms.uFlash.value = k; },
-      dispose() { gScene.remove(gm); sScene.remove(sm); gm.material.dispose(); if (lean) sm.material.dispose(); hDirty = true; if (S) { movers.delete(S); staticSoon(0); } }};
+      dispose() { gScene.remove(gm); sm.parent?.remove(sm); gm.material.dispose(); if (lean) sm.material.dispose(); hDirty = true; if (S) { movers.delete(S); staticSoon(0); } }};
   }
   // the height map is re-rendered when a caster moved more than ~a texel (6 cm) or turned / scaled more than ~1%, against
   // the matrix it was last rendered with: a hit wobble (2 px) or a burning crate set to two matrices a frame no longer
@@ -762,8 +1426,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   function surface(geom, opts, castShadow = true) {
     const gm = new THREE.Mesh(geom, surfMat(opts)); gScene.add(gm);
     let sm = null;
-    if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); if (STATIC_SHADOW) { sm.layers.enable(2); sm.layers.disable(0); } sScene.add(sm); hDirty = true; staticSoon(0); }
-    return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sScene.remove(sm); hDirty = true; staticSoon(0); } gm.material.dispose(); }};
+    if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); if (STATIC_SHADOW) { sm.layers.enable(2); sm.layers.disable(0); } (STATIC_SHADOW ? sStatic : sScene).add(sm); hDirty = true; staticSoon(0); }
+    return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sm.parent?.remove(sm); hDirty = true; staticSoon(0); } gm.material.dispose(); }};
   }
   // ---- immediate-mode batches: filled every frame (G.line / G.point / G.sprite), drawn by render(), then emptied
   // lines: 1 px GL lines in world space (arrows, strings, streaks). color [r, g, b] 0..1, emit true = glows
@@ -813,14 +1477,27 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
   function grow(G2) {
     const cap = G2.cap * 2;
     for (const [k, a] of Object.entries(G2.attrs)) { const b = new THREE.InstancedBufferAttribute(new Float32Array(cap * a.itemSize), a.itemSize); b.array.set(a.array); b.setUsage(THREE.DynamicDrawUsage); G2.geo.setAttribute(k, b); G2.attrs[k] = b; }
-    G2.cap = cap; G2.list = Object.values(G2.attrs);
+    G2.cap = cap; G2.list = Object.values(G2.attrs); regrown(G2.geo);
   }
+  // the group key: a number while the image ids and the type fit (16 + 16 + 16 bits, type 0..15: < 2^53), else the
+  // string it always was (no garbage per sprite on the common path; the groups are the same either way)
+  const DYN = {dynamic: true}, STILL = {};
+  function groupKey(o) {
+    const a = idOf(o.img), b = idOf(o.em), c = idOf(o.nrm), t = o.type ?? 3, s = o.shadow ? 1 : 0;
+    return a < 65536 && b < 65536 && c < 65536 && t >= 0 && t < 16 && (t | 0) === t ? ((a * 65536 + b) * 65536 + c) * 32 + t * 2 + s : `${a}|${b}|${c}|${t}|${s}`;
+  }
+  // a sprite's group, found by small integers (image id -> its emit, normals, type, shadow): the flat key is a number past
+  // the small-integer range, a boxed double every lookup; made (or found by that key) the first time
+  const gIdx = new Map();
   function sprite(o) {
-    const key = `${idOf(o.img)}|${idOf(o.em)}|${idOf(o.nrm)}|${o.type ?? 3}|${o.shadow ? 1 : 0}`;
-    let G2 = groups.get(key); if (!G2) groups.set(key, G2 = makeGroup(o));
+    const ia = idOf(o.img), ie = idOf(o.em), inr = idOf(o.nrm), ty = o.type ?? 3, sh0 = o.shadow ? 1 : 0;
+    let m = gIdx.get(ia); if (!m) gIdx.set(ia, m = new Map());
+    const k2 = ie < 4096 && inr < 4096 && ty >= 0 && ty < 16 && (ty | 0) === ty ? ((ie * 4096 + inr) * 16 + ty) * 2 + sh0 : `${ie}|${inr}|${ty}|${sh0}`;
+    let G2 = m.get(k2);
+    if (!G2) { const key = groupKey(o); G2 = groups.get(key); if (!G2) groups.set(key, G2 = makeGroup(o)); G2.ia = ia; G2.ik = k2; m.set(k2, G2); }
     if (G2.n >= G2.cap) grow(G2);
-    const W = o.img.width, H = o.img.height, sx = o.sx || 0, sy = o.sy || 0, sw = o.sw ?? W, sh = o.sh ?? H, i = G2.n++;
-    G2.uni.uTex.value = tex(o.img, {dynamic: o.dynamic}); if (o.em) { G2.uni.uEm.value = tex(o.em, {dynamic: o.dynamic}); G2.uni.uHasEm.value = 1; }
+    const W = o.img.width, H = o.img.height, sx = o.sx || 0, sy = o.sy || 0, sw = o.sw ?? W, sh = o.sh ?? H, i = G2.n++, dyn = o.dynamic ? DYN : STILL;
+    G2.uni.uTex.value = tex(o.img, dyn); if (o.em) { G2.uni.uEm.value = tex(o.em, dyn); G2.uni.uHasEm.value = 1; }
     if (o.nrm) { G2.uni.uNrm.value = tex(o.nrm); G2.uni.uHasNrm.value = 1; }
     const A = G2.attrs.iAnchor.array, R = G2.attrs.iRect.array, S = G2.attrs.iSize.array, M = G2.attrs.iMisc.array, a = i * 3, b = i * 4;
     A[a] = o.x; A[a + 1] = o.y; A[a + 2] = o.z;
@@ -829,7 +1506,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     M[b] = o.alpha ?? 1; M[b + 1] = o.flip ? 1 : 0; M[b + 2] = o.sway || 0; M[b + 3] = o.flash || 0;
   }
   // upload only the part of a batch buffer written this frame (three uploads the WHOLE array otherwise: ~0.9 MB a frame)
-  function upload(a, n) { if (n <= 0) return; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
+  function upload(a, n) { if (n > 0) setRange(a, 0, n * a.itemSize); }
   function flushBatches() {
     upload(lPos, nLines * 2); upload(lCol, nLines * 2); lineGeo.setDrawRange(0, nLines * 2); lineObj.visible = nLines > 0;
     upload(pPos, nPoints); upload(pCol, nPoints); upload(pMisc, nPoints); pointGeo.setDrawRange(0, nPoints); pointObj.visible = nPoints > 0;
@@ -837,26 +1514,182 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
       G2.geo.instanceCount = G2.n; G2.gm.visible = G2.n > 0; if (G2.sm) G2.sm.visible = G2.n > 0;
       for (const a of G2.list) upload(a, G2.n);
       if (G2.n === 0 && ++G2.idle > 600) {   // (the shared quad's attribute is detached first: disposing it would delete its GL buffer)
-        gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.deleteAttribute('position'); G2.geo.dispose(); groups.delete(key);
+        gScene.remove(G2.gm); if (G2.sm) sScene.remove(G2.sm); G2.gm.material.dispose(); G2.sm?.material.dispose(); G2.geo.deleteAttribute('position'); G2.geo.dispose(); groups.delete(key); gIdx.get(G2.ia)?.delete(G2.ik);
       }
       else if (G2.n) G2.idle = 0;
     }
   }
-  function resetBatches() { nLines = 0; nPoints = 0; for (const G2 of groups.values()) G2.n = 0; }
+  function resetBatches() { nLines = 0; nPoints = 0; aoN = 0; for (const G2 of groups.values()) G2.n = 0; }
 
-  // ---- screen layers: 2D canvases at view resolution, uploaded only on frames they were drawn into
-  const LAYERS = ['ground', 'pre', 'emit', 'add', 'front', 'distort'], layers = {}, layerList = [];
+  // ---- THE SCREEN LAYERS (ground, pre, emit, add, front, distort): render targets at the view's size, premultiplied, GL
+  // rows; COMP_FS reads them. Two ways to draw into one:
+  //   glayer(n): a small 2D-canvas-like context drawn by the GPU (LB_VS / LB_FS), for the marks drawn every frame: fillStyle
+  //     (a CSS colour, read once per string), globalAlpha, globalCompositeOperation 'source-over' | 'lighter', fillRect,
+  //     drawImage (an image, a canvas or a G.dataImage; 3, 5 or 9 arguments; nearest), save / restore, setTransform /
+  //     transform / translate / scale / rotate (any affine), imageSmoothingEnabled (ignored: always nearest). Beyond the
+  //     canvas: fillRectRGB(x, y, w, h, r, g, b) (0..255, no colour string a pixel) and clipOutside(polygons) (draw only
+  //     where an even number of them cover: a canvas's rect(all) + the polygons + clip('evenodd')). The ops keep their order.
+  //     An image drawn there is uploaded once: G.touch(canvas) after painting it again; a data image's changed rect goes up
+  //     with G.texData.
+  //   layer(n): the layer's 2D canvas, for what that can't do (paths, gradients, pixels). Used, it is uploaded and laid in
+  //     among that frame's GPU ops where it was first drawn into (one drawImage there): what other features draw after it,
+  //     on the GPU, stays over it.
+  // The canvases were uploaded every frame they were used: a 2D canvas -> WebGL copy, which stalls when the GPU is busy
+  const LAYERS = ['ground', 'pre', 'emit', 'add', 'front', 'distort'], layers = {}, layerList = [];   // (made below the GPU context)
+  // layer(name) -> its 2D canvas context for this frame (cleared on first use each frame)
+  function layer(n) {
+    const L = layers[n];
+    if (!L.used) {
+      L.used = true; if (L.dirty) { L.q.setTransform(1, 0, 0, 1, 0, 0); L.q.globalAlpha = 1; L.q.globalCompositeOperation = 'source-over'; L.q.clearRect(0, 0, VW, VH); } L.dirty = true;
+      lbOp(L, L.t, false, null, 0, 0, VW, 0, 0, VH, 0, 0, VW, VH, 0, 0, 0, 1);   // its place among the GPU ops (drawn with what it holds at render)
+    }
+    return L.q;
+  }
+  // glayer(name) -> its GPU context for this frame (its state reset on first use each frame, as layer() resets the canvas's)
+  function glayer(n) {
+    const L = layers[n];
+    if (!L.gUsed) { L.gUsed = true; L.g.reset(); }
+    return L.g;
+  }
+  // the ops of this frame in runs (a layer x a blend x one texture; fills join any run), pooled: one upload + one draw a run
+  const lbRuns = [], lbScene = new THREE.Scene(); let lbN = 0;
+  lbScene.matrixAutoUpdate = false;
+  function lbGrow(R, cap) {
+    const d = new Float32Array(cap * 16); if (R.d) d.set(R.d);
+    const ib = new THREE.InstancedInterleavedBuffer(d, 16, 1); ib.setUsage(THREE.DynamicDrawUsage);
+    R.geo.setAttribute('iO', new THREE.InterleavedBufferAttribute(ib, 4, 0)); R.geo.setAttribute('iV', new THREE.InterleavedBufferAttribute(ib, 4, 4));
+    R.geo.setAttribute('iS', new THREE.InterleavedBufferAttribute(ib, 4, 8)); R.geo.setAttribute('iC', new THREE.InterleavedBufferAttribute(ib, 4, 12));
+    R.d = d; R.ib = ib; R.cap = cap; regrown(R.geo);
+  }
+  function lbRun(L, tex, add, clip) {
+    let R = lbRuns[lbN];
+    if (!R) {
+      const geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
+      const u = {uRes: compU.uRes, uTex: {value: null}, uClipP: {value: new Float32Array(64)}, uClipN: {value: new THREE.Vector4()}, uClipK: {value: 0}};
+      const o = {side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor};
+      const mOver = raw(LB_VS, LB_FS, u, {...o, blendDst: THREE.OneMinusSrcAlphaFactor}), mAdd = raw(LB_VS, LB_FS, u, {...o, blendDst: THREE.OneFactor});
+      const mesh = new THREE.Mesh(geo, mOver); mesh.frustumCulled = false; mesh.matrixAutoUpdate = false; mesh.visible = false; lbScene.add(mesh);   // (shown only while its layer draws)
+      R = lbRuns[lbN] = {geo, u, mOver, mAdd, mesh, d: null, ib: null, cap: 0, n: 0, tex: null, add: false, clip: null};
+      lbGrow(R, 64);
+    }
+    lbN++; R.n = 0; R.tex = tex; R.add = add; R.clip = clip; L.runs.push(R);
+    return R;
+  }
+  // one op: its corner (ox, oy) and axes (ux, uy) (vx, vy) in canvas px, its source rect, its colour; a run per blend x
+  // texture x clip
+  function lbOp(L, tex, add, clip, ox, oy, ux, uy, vx, vy, sx, sy, sw, sh, r, g, b, a) {
+    let R = L.runs.length ? L.runs[L.runs.length - 1] : null;
+    if (!R || R.add !== add || R.clip !== clip || (tex && R.tex && R.tex !== tex)) R = lbRun(L, tex, add, clip);
+    else if (tex) R.tex = tex;
+    if (R.n >= R.cap) lbGrow(R, R.cap * 2);
+    const D = R.d, i = R.n++ * 16;
+    D[i] = ox; D[i + 1] = oy; D[i + 2] = ux; D[i + 3] = uy; D[i + 4] = vx; D[i + 5] = vy; D[i + 6] = 0; D[i + 7] = 0;
+    D[i + 8] = sx; D[i + 9] = sy; D[i + 10] = sw; D[i + 11] = sh; D[i + 12] = r; D[i + 13] = g; D[i + 14] = b; D[i + 15] = a;
+  }
+  // dataImage(w, h, data): an image for the GPU contexts whose pixels are an RGBA8 array its owner keeps and paints (they
+  // are shown as premultiplied: straight colours whose alpha is 0 or 255 are both). drawImage takes it like a canvas; after
+  // changing the array, G.texData(img, x, y, w, h, data, w, x, y) uploads that rect (no canvas between: flow's marks)
+  const dataImage = (w, h, data) => ({width: w, height: h, data, isData: true});
+  // an image or canvas drawn by a GPU context: its texture, made (and uploaded) once; unused for 600 frames, it is let go
+  const imgT = new WeakMap(), imgLive = new Set();
+  function imgTex(img) {
+    let e = imgT.get(img);
+    if (!e) {
+      const t = img.isData ? new THREE.DataTexture(img.data, img.width, img.height, THREE.RGBAFormat, THREE.UnsignedByteType) : new THREE.Texture(img);
+      t.flipY = false; t.premultiplyAlpha = !img.isData; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace;
+      t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true;
+      e = {t, used: 0, gone: false}; imgT.set(img, e); imgLive.add(e);
+    } else if (e.gone) { e.gone = false; e.t.needsUpdate = true; imgLive.add(e); }
+    e.used = frameNo;
+    return e.t;
+  }
+  // touch(img): an image a GPU context draws was painted again: upload it before it is shown next
+  function touch(img) { const e = imgT.get(img); if (e && !e.gone) e.t.needsUpdate = true; }
+  function gctx(L) {
+    // S: the fill (string, rgba), alpha, blend, the transform (a b c d e f, as the canvas's) and the clip (null: none)
+    const S = {fs: '#000', c: cssRGBA('#000'), ga: 1, add: false, ma: 1, mb: 0, mc: 0, md: 1, me: 0, mf: 0, clip: null}, stack = [], clips = [];
+    let depth = 0, ci = 0;
+    // a rect (x, y, w, h) in user space through the transform: its corner and axes
+    const quad = (tex, x, y, w, h, sx, sy, sw, sh, r, g, b, a) => lbOp(L, tex, S.add, S.clip, S.ma * x + S.mc * y + S.me, S.mb * x + S.md * y + S.mf,
+      S.ma * w, S.mb * w, S.mc * h, S.md * h, sx, sy, sw, sh, r, g, b, a);
+    const X = {
+      imageSmoothingEnabled: false,
+      get fillStyle() { return S.fs; },
+      set fillStyle(v) { if (typeof v !== 'string') throw new Error('G.glayer: fillStyle takes a colour string'); if (v !== S.fs) { S.fs = v; S.c = cssRGBA(v); } },
+      get globalAlpha() { return S.ga; },
+      set globalAlpha(v) { if (v >= 0 && v <= 1) S.ga = v; },   // (as the canvas: a value out of range is ignored)
+      get globalCompositeOperation() { return S.add ? 'lighter' : 'source-over'; },
+      set globalCompositeOperation(v) { if (v === 'lighter') S.add = true; else if (v === 'source-over') S.add = false; else throw new Error(`G.glayer: no '${v}' (source-over, lighter)`); },
+      save() { Object.assign(stack[depth] ??= {}, S); depth++; },
+      restore() { if (depth > 0) Object.assign(S, stack[--depth]); },
+      setTransform(a, b, c, d, e, f) { S.ma = a; S.mb = b; S.mc = c; S.md = d; S.me = e; S.mf = f; },
+      transform(a, b, c, d, e, f) {
+        const A = S.ma, B = S.mb, C = S.mc, D = S.md;
+        S.ma = A * a + C * b; S.mb = B * a + D * b; S.mc = A * c + C * d; S.md = B * c + D * d; S.me += A * e + C * f; S.mf += B * e + D * f;
+      },
+      translate(x, y) { S.me += S.ma * x + S.mc * y; S.mf += S.mb * x + S.md * y; },
+      scale(x, y) { S.ma *= x; S.mb *= x; S.mc *= y; S.md *= y; },
+      rotate(t) { const c = Math.cos(t), s = Math.sin(t); X.transform(c, s, -s, c, 0, 0); },
+      // (not canvas) draw only where an even number of these polygons ([[x, y], ...], canvas px: the transform not applied)
+      // cover a pixel; until restore() or the next frame. Up to 4 polygons, 32 points in all
+      clipOutside(polys) {
+        const C = clips[ci] ||= {p: new Float32Array(64), n: new THREE.Vector4(), k: 0}; ci++;
+        let o = 0, k = 0; C.n.set(0, 0, 0, 0);
+        for (const poly of polys) {
+          if (k >= 4 || o + poly.length > 32) break;
+          for (const pt of poly) { C.p[o * 2] = pt[0]; C.p[o * 2 + 1] = pt[1]; o++; }
+          C.n.setComponent(k++, poly.length);
+        }
+        C.k = k; S.clip = k ? C : null;
+      },
+      fillRect(x, y, w, h) {
+        const c = S.c, al = c[3] * S.ga; if (!(al > 0) || !w || !h) return;
+        quad(null, x, y, w, h, 0, 0, 0, 0, c[0] * al, c[1] * al, c[2] * al, al);
+      },
+      fillRectRGB(x, y, w, h, r, g, b) {   // (not canvas) an opaque colour as numbers 0..255 (x the alpha)
+        const al = S.ga; if (!(al > 0) || !w || !h) return;
+        quad(null, x, y, w, h, 0, 0, 0, 0, r / 255 * al, g / 255 * al, b / 255 * al, al);
+      },
+      drawImage(img, a1, a2, a3, a4, a5, a6, a7, a8) {
+        const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+        let sx = 0, sy = 0, sw = iw, sh = ih, dx, dy, dw, dh;
+        if (a5 !== undefined) { sx = a1; sy = a2; sw = a3; sh = a4; dx = a5; dy = a6; dw = a7; dh = a8; }
+        else if (a3 !== undefined) { dx = a1; dy = a2; dw = a3; dh = a4; }
+        else { dx = a1; dy = a2; dw = iw; dh = ih; }
+        if (sw < 0) { sx += sw; sw = -sw; } if (sh < 0) { sy += sh; sh = -sh; } if (dw < 0) { dx += dw; dw = -dw; } if (dh < 0) { dy += dh; dh = -dh; }
+        if (!(sw > 0 && sh > 0 && dw > 0 && dh > 0 && S.ga > 0)) return;
+        quad(imgTex(img), dx, dy, dw, dh, sx, sy, sw, sh, 0, 0, 0, S.ga);
+      },
+      reset() { S.ga = 1; S.add = false; S.ma = S.md = 1; S.mb = S.mc = S.me = S.mf = 0; S.clip = null; depth = 0; ci = 0; },
+    };
+    return X;
+  }
   for (const n of LAYERS) {
     const c = document.createElement('canvas'); c.width = VW; c.height = VH;
     const q = c.getContext('2d'); q.imageSmoothingEnabled = false;
     const t = new THREE.CanvasTexture(c); t.flipY = false; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace; t.minFilter = t.magFilter = THREE.NearestFilter;
-    layers[n] = {c, q, t, used: false, dirty: false}; layerList.push(layers[n]);
+    t.premultiplyAlpha = true;   // (as the canvas keeps it: laid into the target as is)
+    const rt = new THREE.WebGLRenderTarget(VW, VH, {minFilter: near, magFilter: near, depthBuffer: false});
+    const L = {c, q, t, rt, used: false, dirty: false, runs: [], g: null, gUsed: false}; L.g = gctx(L);
+    layers[n] = L; layerList.push(L);
   }
-  // layer(name) -> its 2D context for this frame (cleared on first use each frame)
-  function layer(n) {
-    const L = layers[n];
-    if (!L.used) { L.used = true; if (L.dirty) { L.q.setTransform(1, 0, 0, 1, 0, 0); L.q.globalAlpha = 1; L.q.globalCompositeOperation = 'source-over'; L.q.clearRect(0, 0, VW, VH); } L.dirty = true; }
-    return L.q;
+  // render(): each used layer's target, cleared, its runs drawn in order (its canvas, if used, where layer() placed it)
+  function drawLayers() {
+    for (const L of layerList) if (L.used) L.t.needsUpdate = true;
+    for (const L of layerList) {
+      if (!L.runs.length) continue;
+      renderer.setRenderTarget(L.rt); renderer.clear(true, false, false);
+      for (const R of lbRuns) R.mesh.visible = false;   // (every pooled run sits in lbScene: this layer's are shown, in order)
+      let k = 0;
+      for (const R of L.runs) {
+        R.geo.instanceCount = R.n; setRange(R.ib, 0, R.n * 16);
+        R.u.uTex.value = R.tex; R.mesh.material = R.add ? R.mAdd : R.mOver; R.mesh.renderOrder = k++; R.mesh.visible = true;
+        const C = R.clip; R.u.uClipK.value = C ? C.k : 0; if (C) { R.u.uClipP.value.set(C.p); R.u.uClipN.value.copy(C.n); }
+      }
+      renderer.render(lbScene, dummyCam);
+    }
+    for (const R of lbRuns) R.mesh.visible = false;
+    if (frameNo % 300 === 0) for (const e of imgLive) if (frameNo - e.used > 600) { e.t.dispose(); e.gone = true; imgLive.delete(e); }
   }
 
   // ---- composite
@@ -873,18 +1706,59 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
     uSeasonM: {value: new THREE.Matrix3()}, uSeasonK: {value: 0}, uSnow: {value: 0}, uWet: {value: 0}, uFlashC: {value: new THREE.Vector3()},   // features/weather.js
     uFog: {value: new THREE.Vector4()}, uPlayer: {value: new THREE.Vector3()},
     uView: {value: new THREE.Vector3(0, .342, .94)}, uSunC: {value: new THREE.Vector3(1, 1, 1)}, uSunStr: {value: 0},
+    uWPhase: U.wPhase, uWRefl: {value: new THREE.Vector4()}, uWPx: {value: new THREE.Vector2(PPM, PPM)},
     uNL: {value: 0}, uLP: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uLC: {value: Array.from({length: NL}, () => new THREE.Vector4())},
     uNH: {value: 0}, uHalo: {value: Array.from({length: NL}, () => new THREE.Vector4())}, uHaloC: {value: Array.from({length: NL}, () => new THREE.Vector3())},
-    tGround: {value: layers.ground.t}, tPre: {value: layers.pre.t}, tEmitL: {value: layers.emit.t}, tAdd: {value: layers.add.t}, tFront: {value: layers.front.t},
-    uLay: {value: new THREE.Vector4()}, uLayE: {value: 0}, tDistort: {value: layers.distort.t}, uLayD: {value: 0},
+    tGround: {value: layers.ground.rt.texture}, tPre: {value: layers.pre.rt.texture}, tEmitL: {value: layers.emit.rt.texture}, tAdd: {value: layers.add.rt.texture},
+    tFront: {value: layers.front.rt.texture}, uLay: {value: new THREE.Vector4()}, uLayE: {value: 0}, tDistort: {value: layers.distort.rt.texture}, uLayD: {value: 0},
     tH: {value: hmap.depthTexture}, uHPV: {value: new THREE.Matrix4().multiplyMatrices(hCam.projectionMatrix, hCam.matrixWorldInverse)},
     uPtShadow: {value: 1}, uHBias: {value: .03 / HM.far},
     uDebug: {value: 0},
+    uRf: {value: new THREE.Vector4()}, uRfC: {value: new THREE.Vector3()}, uRfW: {value: new THREE.Vector4()}, uRfV: {value: new THREE.Vector4()}, uRfP: {value: new THREE.Vector4()},
+    tTop: {value: (t => { t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.unpackAlignment = 1; return t; })(new THREE.DataTexture(new Uint8Array(1), 1, 1, THREE.RedFormat, THREE.UnsignedByteType))}, uTopH: {value: new THREE.Vector4()},
+    uCl: {value: new THREE.Vector4()}, uClM: {value: new THREE.Vector4()}, uClO: {value: new THREE.Vector4()}, uClC: {value: new THREE.Vector3()},
+    uHz: {value: new THREE.Vector4()}, uHzM: {value: new THREE.Vector4()}, uHzO: {value: new THREE.Vector4()},
+    uAo: {value: new THREE.Vector4()},
   };
   const compScene = new THREE.Scene();
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const compMesh = new THREE.Mesh(tri, raw(COMP_VS, COMP_FS, compU, {depthTest: false, depthWrite: false})); compMesh.frustumCulled = false; compMesh.matrixAutoUpdate = false; compScene.add(compMesh);
   const dummyCam = new THREE.Camera();
+
+  // ---- CONTACT SHADOWS (features/contact.js, every frame it shows them): the arena's contact AO stamps, drawn by the GPU
+  // into the x-ray target's G channel (AO_VS / AO_FS) and laid on the ground by the composite (uAo: the mood's shadow colour
+  // and strength, before the ground layer). contact.js was a view-sized canvas mask: a drawImage per stamp, a full-view tint
+  // fill and a blit into the ground layer every frame. A stamp's image is still contact's (its alpha bytes, as it painted
+  // them), kept once in an R8 atlas here (shelves; when it is full it starts over: aoEpoch, and contact makes them again)
+  const AO_MAX = 2048, AO_AW = 1024, AO_AH = 512;
+  const aoAtlas = new THREE.DataTexture(new Uint8Array(AO_AW * AO_AH), AO_AW, AO_AH, THREE.RedFormat, THREE.UnsignedByteType);
+  aoAtlas.minFilter = aoAtlas.magFilter = THREE.NearestFilter; aoAtlas.generateMipmaps = false; aoAtlas.unpackAlignment = 1; aoAtlas.needsUpdate = true;
+  const aoGeo = new THREE.InstancedBufferGeometry(), aoBuf = new THREE.InstancedInterleavedBuffer(new Float32Array(AO_MAX * 8), 8, 1);
+  aoGeo.setAttribute('position', QUAD.getAttribute('position')); aoBuf.setUsage(THREE.DynamicDrawUsage);
+  aoGeo.setAttribute('iR', new THREE.InterleavedBufferAttribute(aoBuf, 4, 0)); aoGeo.setAttribute('iT', new THREE.InterleavedBufferAttribute(aoBuf, 4, 4));
+  const aoScene = new THREE.Scene(); aoScene.matrixAutoUpdate = false;
+  { const m = new THREE.Mesh(aoGeo, raw(AO_VS, AO_FS, {uRes: compU.uRes, uAtlas: {value: aoAtlas}}, {side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcColorFactor}));
+    m.frustumCulled = false; m.matrixAutoUpdate = false; aoScene.add(m); }
+  let aoX = 0, aoY = 0, aoRow = 0, aoEpoch = 0, aoN = 0, aoFrame = -1;
+  // aoStamp(w, h, alpha bytes (w x h, rows top down)) -> {u, v, w, h, epoch}: the stamp's place in the atlas
+  function aoStamp(w, h, d) {
+    if (w > AO_AW || h > AO_AH) return null;
+    if (aoX + w > AO_AW) { aoX = 0; aoY += aoRow; aoRow = 0; }
+    if (aoY + h > AO_AH) { aoX = aoY = aoRow = 0; aoEpoch++; }   // full: start over (the stamps made before are stale)
+    const A = aoAtlas.image.data;
+    for (let j = 0; j < h; j++) A.set(d.subarray(j * w, j * w + w), (aoY + j) * AO_AW + aoX);
+    const r = {u: aoX, v: aoY, w, h, epoch: aoEpoch}; aoX += w; aoRow = Math.max(aoRow, h); aoAtlas.needsUpdate = true;
+    return r;
+  }
+  // ao(x, y, z, a, stamp): one stamp this frame, its top-left at (x, y) canvas px, z px a texel, alpha a
+  function ao(x, y, z, a, r) {
+    if (aoN >= AO_MAX || !r) return;
+    const D = aoBuf.array, i = aoN++ * 8;
+    D[i] = x; D[i + 1] = y; D[i + 2] = z; D[i + 3] = a; D[i + 4] = r.u; D[i + 5] = r.v; D[i + 6] = r.w; D[i + 7] = r.h;
+  }
+  // setAo(r, g, b, k): this frame's tint (0..1) and strength; no call (or no stamp) = no contact shadows this frame
+  function setAo(r, g, b, k) { aoFrame = frameNo; compU.uAo.value.set(r, g, b, k); }
 
   // ---- HD FX: soft effects at DISPLAY resolution over the pixel image (the HD-2D trick: pixel world, smooth light).
   // setDisplay(s): the canvas becomes s x the view; the composite renders into outRT (VW x VH) and is blown up with whole
@@ -948,6 +1822,11 @@ void main() {
 }`;
   const heatU = {tD: fxU.tD, uR: fxU.uR, uPxM: fxU.uPxM}, heatScene = new THREE.Scene();
   const fxScene = new THREE.Scene(), FXMAX = 6000, fxB = {};
+  // EXTRA passes owned by other modules (render/flames.js): extra(mesh, 'gbuf' | 'fx') puts a mesh in the G-buffer or the
+  // HD fx pass; it shows only on a frame its owner armed (mesh.userData.frame = G.frame before render()), so a system that
+  // didn't run this frame (its feature off, paused out) leaves nothing behind
+  const gExtra = [], fxExtra = [];
+  function extra(m, pass) { if (pass === 'fx') { fxScene.add(m); fxExtra.push(m); } else { gScene.add(m); gExtra.push(m); } m.visible = false; }
   for (const [mode, blending] of [['add', THREE.AdditiveBlending], ['blend', THREE.NormalBlending]]) {
     const geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
     const P = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4), C = new THREE.InstancedBufferAttribute(new Float32Array(FXMAX * 4), 4);
@@ -965,8 +1844,32 @@ void main() {
     fxB.heat = {geo, P, C, n: 0, m, max: 1024};
   }
   const fxList = [fxB.add, fxB.blend];   // (heat is drawn into its own target)
+  // ---- THE VIGNETTE + TOP HAZE (features/atmos.js, every frame it shows them: G.setVignette): the arena's drawOver, two canvas
+  // gradients, worked out per display pixel and laid over everything in the canvas (they were a display-sized canvas blitted
+  // into the HD overlay every frame: ~3% of the frame's JS). Stops as atmos.js painted them: the vignette radial (r .62 -> 1.42 of
+  // the half-size, 7 stops, alpha va (i / 6)^1.8 rounded to 4 places), the haze linear over the top 30% (ha, .35 ha at .45, 0)
+  const VG_FS = HEAD + `uniform vec4 uVg; uniform vec3 uVgC, uVhC; uniform vec2 uVgS; out vec4 oc;
+float vstop(float i) { return floor(uVg.y * pow(i / 6., 1.8) * 1e4 + .5) / 1e4; }
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, uVgS.y - gl_FragCoord.y);   // canvas px, y down (a pixel's centre)
+  float ah = 0.;
+  if (uVg.z > 0. && p.y < uVgS.y * .3) { float t = p.y / (uVgS.y * .3); ah = t < .45 ? mix(uVg.z, uVg.z * .35, t / .45) : mix(uVg.z * .35, 0., (t - .45) / .55); }
+  float x = clamp((length((p - uVgS * .5) / (uVgS * .5)) - .62) / .8, 0., 1.) * 6., i = min(floor(x), 5.), av = mix(vstop(i), vstop(i + 1.), x - i);
+  float a = av + ah * (1. - av); if (a <= 0.) discard;   // (the vignette over the haze: source-over, as the canvas did)
+  oc = vec4((uVgC * av + uVhC * ah * (1. - av)) / a, a);
+}`;
+  const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}}, vgScene = new THREE.Scene();
+  { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
+  vgScene.matrixAutoUpdate = false;
+  let vgFrame = -1;
+  // {va, ha (0 = no haze), v: [r, g, b], h: [r, g, b] (0..255)}: shown on the next render (atmos.js sets it from F.hd, after this one)
+  function setVignette(o) {
+    vgFrame = frameNo; vgU.uVg.value.set(1, o.va, o.ha, 0);
+    vgU.uVgC.value.set(o.v[0] / 255, o.v[1] / 255, o.v[2] / 255); vgU.uVhC.value.set(o.h[0] / 255, o.h[1] / 255, o.h[2] / 255);
+  }
   // heat(X, Y (up), Z, radius m, strength): hot air this frame (strength 1 = ~.75 art px of ripple at its middle)
-  function heat(x, y, z, r, k) { fx(x, y, z, r, [1, 1, 1], k, 'heat'); }
+  const HEATC = [1, 1, 1];   // (heat's colour: fx reads it at once)
+  function heat(x, y, z, r, k) { fx(x, y, z, r, HEATC, k, 'heat'); }
   // fx(X, Y (up), Z, radius m, [r, g, b], alpha, 'add' | 'blend'): one soft particle this frame (world axes)
   function fx(x, y, z, r, c, a = 1, mode = 'add') {
     const B = fxB[mode]; if (!B || B.n >= (B.max || FXMAX)) return;
@@ -982,7 +1885,7 @@ void main() {
     renderer.setSize(VW * DS, VH * DS, false);
     for (const rt of [gbuf, xray, outRT, heatRT]) rt.setSize(VW, VH);
     SNAP.value.set(VW, VH); compU.uRes.value.set(VW, VH); blitU.uRes.value.set(VW, VH);
-    for (const L of layerList) { L.c.width = VW; L.c.height = VH; L.q.imageSmoothingEnabled = false; L.dirty = false; L.t.dispose(); L.t.needsUpdate = true; }
+    for (const L of layerList) { L.c.width = VW; L.c.height = VH; L.q.imageSmoothingEnabled = false; L.dirty = false; L.t.dispose(); L.t.needsUpdate = true; L.rt.setSize(VW, VH); }
   }
 
   // ---- view: target (snapped to the pixel lattice by the caller), yaw, zoom
@@ -994,12 +1897,14 @@ void main() {
     camera.projectionMatrix.set(A, 0, 0, 0, 0, B, -C, 0, 0, -PPMY / Nn / R_DEPTH, -PPMH / Nn / R_DEPTH, 0, 0, 0, 0, 1);
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
     compU.uView.value.set(Math.sin(yaw) * .93969, .34202, Math.cos(yaw) * .93969);   // the sprite camera's toward-the-viewer
-    U.camYaw.value = yaw;
+    U.camYaw.value = yaw; compU.uWPx.value.set(PPM, PPM * zoom);
     U.leanX.value.set(Math.cos(yaw) / PPM, 0, -Math.sin(yaw) / PPM); U.leanY.value.set(Math.sin(yaw) / PPMY, 0, Math.cos(yaw) / PPMY);   // art px -> m
   }
   // world -> internal-canvas px (y down), for halos / HUD / tests
   const _v = new THREE.Vector3();
   function toScreen(x, y, z) { _v.set(x, y, z).project(camera); return [(_v.x + 1) / 2 * VW, (1 - _v.y) / 2 * VH, _v.z]; }
+  // the same into out (3 numbers), no allocation: for per-frame loops
+  function toScreenInto(x, y, z, out) { _v.set(x, y, z).project(camera); out[0] = (_v.x + 1) / 2 * VW; out[1] = (1 - _v.y) / 2 * VH; out[2] = _v.z; return out; }
   // is world (X, Y up, Z) on screen, give or take m view px? (allocation-free: for culling effects every frame)
   function onScreen(x, y, z, m = 0) { _v.set(x, y, z).project(camera); const sx = (_v.x + 1) / 2 * VW, sy = (1 - _v.y) / 2 * VH; return sx > -m && sx < VW + m && sy > -m && sy < VH + m; }
 
@@ -1020,16 +1925,19 @@ void main() {
     compU.uLightPV.value.multiplyMatrices(sunCam.projectionMatrix, sunCam.matrixWorldInverse);
   }
 
+  let waterSpeed = 1, waterT = -1;
   const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
   function render() {
     const t0 = performance.now();
+    if (rflFrame !== frameNo) compU.uRf.value.x = 0;   // (the reflections, clouds and haze show only on frames depth.js set them)
+    if (clFrame !== frameNo) compU.uCl.value.x = 0;
+    if (hzFrame !== frameNo) compU.uHz.value.x = 0;
     U.time.value = (t0 / 1000) % 3600;
-    flushBatches(); syncCards();
+    const dtw = waterT < 0 ? 0 : Math.min(.1, (t0 - waterT) / 1000); waterT = t0;   // the water's clock: its own, so G.setWater never makes the pattern jump
+    U.wPhase.value = (U.wPhase.value + dtw * waterSpeed) % 65536;
+    flushBatches(); syncCards(); packCards();
     let ns = 0; for (const g2 of groups.values()) ns += g2.n;
     stats.sprites = ns; stats.points = nPoints; stats.lines = nLines;
-    const lay = compU.uLay.value;
-    lay.set(+layers.ground.used, +layers.pre.used, +layers.front.used, +layers.add.used); compU.uLayE.value = +layers.emit.used; compU.uLayD.value = +layers.distort.used;
-    for (const L of layerList) if (L.used) L.t.needsUpdate = true;
     if (!hDirty && moved.size && movedEnough()) hDirty = true;
     renderer.setClearColor(0x000000, 0);
     // stats.pass: CPU ms + draw calls of each pass this frame (F3 shows them; the bench reads them)
@@ -1037,35 +1945,50 @@ void main() {
     const lap = (k, calls) => { const t = performance.now(); PS[k] = t - tp; tp = t; if (calls !== undefined) PS[k + 'N'] = calls; };
     lap('prep');
     for (const t of ups) renderer.initTexture(t);
-    for (const L of layerList) if (L.used) renderer.initTexture(L.t);
+    uploadData();
     ups.length = 0; lap('upload');
+    drawLayers();
+    const lay = compU.uLay.value, on = n => +(layers[n].runs.length > 0);
+    lay.set(on('ground'), on('pre'), on('front'), on('add')); compU.uLayE.value = on('emit'); compU.uLayD.value = on('distort');
+    lap('layers');
+    for (const s of litters) s.run();   // the fallen leaves' field (render/litter.js): the ticks that are due; the ground shader reads the result
+    lap('litter');
     PS.shadowN = PS.hmapN = PS.shadowSN = 0; PS.shadowS = 0;
     // movers that have been still long enough go back to the static map (switched over AT its re-render: no gap)
     for (const S of movers) if (!S.back && ++S.still > STILL_FRAMES) { S.back = true; staticSoon(20); }
     compU.uSOn.value = STATIC_SHADOW ? 1 : 0;
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
+      if (STATIC_SHADOW && sFollow) {   // a big world: the static box follows the view, on its lattice
+        const cx = Math.round(view.T.x / SSTEP) * SSTEP, cz = Math.round(view.T.z / SSTEP) * SSTEP;
+        if (cx !== sCx || cz !== sCz) { sCx = cx; sCz = cz; SBOX[0] = cx - SFOLLOW; SBOX[1] = cx + SFOLLOW; SBOX[4] = cz - SFOLLOW; SBOX[5] = cz + SFOLLOW; sDue = Math.min(sDue, frameNo); }
+      }
       if (STATIC_SHADOW && (frameNo >= sDue || sunNow.dot(sDir) < Math.cos(SUN_STEP))) {
-        for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); movers.delete(S); }
+        for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); sScene.remove(S.sm); sStatic.add(S.sm); movers.delete(S); }
         sDir.copy(sunNow); fitStatic(sDir); sDue = Infinity;
-        renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sScene, sunCamS);
+        renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sStatic, sunCamS); renderer.render(sScene, sunCamS);   // (sScene: a layer-2 caster added from outside)
         lap('shadowS', renderer.info.render.calls);
       }
       renderer.setRenderTarget(shadow); renderer.clear(true, true, false); renderer.render(sScene, sunCam);
       lap('shadow', renderer.info.render.calls);
     } else PS.shadow = 0;
     if (hDirty && compU.uPtShadow.value > 0) {
-      renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sScene, hCam); hDirty = false;
+      renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sStatic, hCam); renderer.render(sScene, hCam); hDirty = false;
       for (const H of moved) H.hm.copy(H.sm.matrix);
       lap('hmap', renderer.info.render.calls);
     } else { PS.hmap = 0; tp = performance.now(); }
     moved.clear();
+    for (const m of gExtra) m.visible = m.userData.frame === frameNo;
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
     const calls = renderer.info.render.calls;
     lap('gbuf', calls);
     renderer.setRenderTarget(xray); renderer.clear(true, false, false); renderer.render(xScene, camera);
+    if (aoFrame !== frameNo) aoN = 0;
+    compU.uAo.value.w = aoN ? compU.uAo.value.w : 0;
+    if (aoN) { aoGeo.instanceCount = aoN; setRange(aoBuf, 0, aoN * 8); renderer.render(aoScene, dummyCam); }
     compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
-    if (DS > 1 || fxN || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
+    let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
+    if (DS > 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
       renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam);
       if (hN) {
         const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
@@ -1074,16 +1997,17 @@ void main() {
       }
       blitU.uHeat.value = hN ? 1 : 0; blitU.uT.value = performance.now() / 1000 % 1000; blitU.uZ.value = view.zoom;
       renderer.setRenderTarget(null); renderer.render(blitScene, dummyCam);
-      if (fxN) {
+      if (fxN || fxX) {
         fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
         renderer.render(fxScene, camera);
       }
     } else { renderer.setRenderTarget(null); renderer.render(compScene, dummyCam); }
+    if (vgFrame === frameNo) { vgU.uVgS.value.set(VW * DS, VH * DS); renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
     stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
-    resetBatches(); for (const L of layerList) L.used = false; frameNo++;
+    resetBatches(); for (const L of layerList) { L.used = L.gUsed = false; clearArray(L.runs); } lbN = 0; frameNo++;
   }
 
   // SETTINGS other modules give the renderer (they call these; the uniforms stay the renderer's): the player options
@@ -1095,11 +2019,77 @@ void main() {
   }
   const setSmooth = v => { U.smooth.value = v; };
   function setSeason(m) { compU.uSeasonM.value.set(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]); }
-  function setGround({tinted, snow, wet, leafK}) { compU.uSeasonK.value = tinted ? 1 : 0; compU.uSnow.value = snow; compU.uWet.value = wet; U.leafK.value = leafK; }
+  // the fallen leaves' amount (SURF_FS): they start as the first leaves turn and pile up as the crowns thin, so the most lies where
+  // autumn ends, through the winter (under the snow, which covers it in the composite) and into spring, fading as the crowns fill out
+  // again (leafK rising, autumn already back at 0). 0 in summer (autumn 0, leafK 1: the ground shader skips it). Old leaves are brown
+  // (turn 1) once autumn has passed
+  const LIT = {byAutumn: .3};
+  function setGround({tinted, snow, wet, leafK, autumn = 0}) {
+    compU.uSeasonK.value = tinted ? 1 : 0; compU.uSnow.value = snow; compU.uWet.value = wet; U.leafK.value = leafK; U.autumn.value = autumn;
+    const fell = Math.min(1, Math.max(0, LIT.byAutumn * autumn + 1 - leafK));
+    U.litK.value.set(fell, autumn > .001 ? Math.max(autumn, 1 - leafK) : fell > 0 ? 1 : 0, 0, 0);
+  }
+  // the living layer of fallen leaves for a litter object (world.js makeLitter): render/litter.js. The owner (features/litter.js) drives it
+  // through the returned object (advance, give, take, want, release, wind, mirror); render() runs it. Disposed with the world
+  const litters = new Set();
+  function litterSim(lit) {
+    const s = createLitterSim(renderer, lit, () => U.litK.value.x), d = s.dispose;
+    litters.add(s); s.dispose = () => { litters.delete(s); d(); }; return s;
+  }
   const setFlash = (r, g, b) => { compU.uFlashC.value.set(r, g, b); };
+  // the reflections in the water (features/depth.js, every frame it shows them; COMP_FS reflAt): {on, tint: [r, g, b] 0..1, tintK,
+  // alpha, glow, S (view px per metre of height), ripple (px), gust (0..1), t (the ripple's clock, s), oy (the world origin's view
+  // row), zoom, reach (px to search up), puddleA (the puddles' ground-layer alpha x 255, 0 = none), pool: {x, y, rx, ry} | null}
+  // the cloud shadows (features/depth.js, every frame it shows them; COMP_FS): {lv (Uint8Array TW x TH: 0 / 1 / 2), TW, TH, ver
+  // (bump when lv changed: re-uploaded), col [r, g, b] 0..1, a1, a2 (the two levels' alpha), m [4] (view px -> texel), e, f (the
+  // tile's origin in view px)}. The haze (ember's lava): {mask (Uint8Array W x H, 255 = lava), W, H, ver, band (px), zoom, t (s),
+  // m [4], e, f (view -> mask texel at the lava's height), oy (the world origin's view row)}
+  // the shared top-down texture (tTop): the cloud levels at the top, the lava's mask under them; rebuilt and re-uploaded only
+  // when one of them changes (the cover in 1/16 steps; the mask once per world)
+  const top = {cl: null, clW: 0, clH: 0, hz: null, hzW: 0, hzH: 0, dirty: false};
+  function topUpload() {
+    const W = Math.max(top.clW, top.hzW, 1), H = top.clH + top.hzH || 1, d = new Uint8Array(W * H);
+    for (let y = 0; y < top.clH; y++) d.set(top.cl.subarray(y * top.clW, (y + 1) * top.clW), y * W);
+    for (let y = 0; y < top.hzH; y++) d.set(top.hz.subarray(y * top.hzW, (y + 1) * top.hzW), (top.clH + y) * W);
+    // (the one texture made at the start, re-sized: three draws Math.random for a new texture's id, which would shift every
+    // seeded random after it in a golden capture)
+    const t = compU.tTop.value; t.dispose(); t.image = {data: d, width: W, height: H}; t.needsUpdate = true;
+    compU.uTopH.value.set(top.hzW, top.hzH, top.clH, 0); top.dirty = false;
+  }
+  let clFrame = -1, clVer = -1, hzFrame = -1, hzVer = -1;
+  function setClouds(o) {
+    clFrame = frameNo; const C = compU;
+    if (o.ver !== clVer) { clVer = o.ver; top.cl = o.lv; top.clW = o.TW; top.clH = o.TH; topUpload(); }
+    C.uCl.value.set(1, o.a1, o.a2, 0); C.uClC.value.set(o.col[0], o.col[1], o.col[2]);
+    C.uClM.value.set(o.m[0], o.m[1], o.m[2], o.m[3]); C.uClO.value.set(o.e, o.f, o.TW, o.TH);
+  }
+  function setHaze(o) {
+    hzFrame = frameNo; const C = compU;
+    if (o.ver !== hzVer) { hzVer = o.ver; top.hz = o.mask; top.hzW = o.W; top.hzH = o.H; topUpload(); }
+    C.uHz.value.set(1, o.band, o.zoom, o.t); C.uHzM.value.set(o.m[0], o.m[1], o.m[2], o.m[3]); C.uHzO.value.set(o.e, o.f, o.oy, 0);
+  }
+  let rflFrame = -1;
+  function setReflect(o) {
+    rflFrame = frameNo; const C = compU, p = o.pool;
+    C.uRf.value.set(o.on ? 1 : 0, o.tintK, o.alpha, o.glow); C.uRfC.value.set(o.tint[0], o.tint[1], o.tint[2]);
+    C.uRfW.value.set(o.S, o.ripple, o.gust, o.t); C.uRfV.value.set(o.oy, o.zoom, o.reach, o.puddleA || 0);
+    C.uRfP.value.set(p ? p.x : 0, p ? p.y : 0, p ? p.rx : 0, p ? p.ry : 0);
+  }
   const setPlayer = (x, h, z) => { compU.uPlayer.value.set(x, h, z); };
+  // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
+  // advances at, so changing it never makes the pattern jump
+  const setWater = ({speed} = {}) => { if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0); };
+  // the biome's water (world.js buildWorld, at every build, from WATER_TUNE): {ramp: [[r, g, b] 0..1] light -> dark (padded to 4), rate,
+  // across, along, hi, lo, range: [lightest, darkest] tone, lap (tone | -1), refl, spark} | null = no moving water (the rift)
+  function setWaterLook(L) {
+    if (!L) { compU.uWRefl.value.set(0, 0, 0, 0); return; }
+    for (let i = 0; i < 4; i++) U.wRamp.value[i].set(...L.ramp[Math.min(i, L.ramp.length - 1)]);
+    U.wA.value.set(L.rate, L.across, L.along, L.lap); U.wB.value.set(L.hi, L.lo, L.range[0], L.range[1]);
+    compU.uWRefl.value.set(L.refl, L.spark, 0, 0);
+  }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
-    setView, setSun, toScreen, onScreen, render, card, mesh, surface, line, point, sprite, layer, tex, QUAD,
+    get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
+    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer};
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }

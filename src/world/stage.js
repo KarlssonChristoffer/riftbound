@@ -8,16 +8,20 @@
 import {buildWorld, WORLD} from './world.js';
 import {createEntities} from './entities.js';
 import {BIOMES} from './biomes.js';
+import './desert.js';   // registers the desert biome (after the four: their indices stay)
 const $ = s => document.querySelector(s);
 
 export function createStage({G, ctxO, PPM, PPMH, features, flags: Q}) {
   let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome')));
   let world = null, ents = null, propMode = Q.get('props') === 'yaw' ? 'yaw' : 'live';
-  let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+R rebuilds)
-  // the wind sways painted foliage cards (per-row bend) and gives braziers / torches a live flame
-  function cardHook(it, sp) { const w = features.find(f => f.name === 'wind'); return w?.on && w.card ? w.card(it, sp) : null; }
+  let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+P rebuilds)
+  // the wind sways painted foliage cards (per-row bend) and gives braziers / torches a live flame. (The wind feature is
+  // looked up once it exists, not per card per frame: the features are made at boot and never replaced)
+  let windF = null;
+  const wind = () => windF ??= features.find(f => f.name === 'wind') || null;
+  function cardHook(it, sp) { const w = wind(); return w?.on && w.card ? w.card(it, sp) : null; }
   // ... and leans the 3D trees (world.js leanTree: the lean at the top, whole pixels per vertex in the shader)
-  function meshHook(it) { const w = features.find(f => f.name === 'wind'); return w?.on && w.mesh ? w.mesh(it) : null; }
+  function meshHook(it) { const w = wind(); return w?.on && w.mesh ? w.mesh(it) : null; }
   async function setBiome(i) {
     biomeI = ((i % BIOMES.length) + BIOMES.length) % BIOMES.length;
     $('#load').classList.remove('hidden'); $('#load').textContent = 'Building ' + BIOMES[biomeI].name + '…';
@@ -25,7 +29,7 @@ export function createStage({G, ctxO, PPM, PPMH, features, flags: Q}) {
     world?.dispose();
     world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH, props: keep, trees3d});
     world.hooks.card = cardHook; world.hooks.mesh = meshHook;   // a rebuilt world has fresh hooks
-    ents ??= createEntities(world.props, {x0: 0, y0: 0, x1: WORLD.WM, y1: WORLD.HM});
+    ents ??= createEntities(world.props, {x0: WORLD.x0, y0: WORLD.y0, x1: WORLD.x1, y1: WORLD.y1});
     world.setMode(propMode);
     for (const f of features) f.biomeChanged?.();
     $('#load').classList.add('hidden');

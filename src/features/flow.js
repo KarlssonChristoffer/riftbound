@@ -4,7 +4,8 @@
 //
 //   camera      a spring instead of the host's plain ease: leans toward the aim while drawing the bow, a small kick back
 //               on release, a dip on hard landings, a little overshoot before settling; the player's screen pixel is held
-//               with hysteresis (no +-1 px toggling)
+//               with hysteresis (no +-1 px toggling). A revolver's shot (player.shoot) kicks it back harder (the Navy
+//               more, a fanned shot less), a bullet's hit on a body (combat.hit) a little more on top
 //   motion      sprint speed streaks (1 px lines peeling off the body), a short afterimage trail on the dodge roll
 //               (2-3 flat-tinted silhouettes of earlier frames, behind the player)
 //   arrows      at dusk / night a flying arrow carries a small warm light (at most 2); every flying arrow trails the
@@ -12,7 +13,8 @@
 //               recent trail, lit, plus a glow copy so the flight stays readable at night
 //   marks       ground decals that fade in steps: the player's own (skid scuffs, roll scrapes, turn plants, landing
 //               crescents) within ~10-20 s, scorch rings (explode) and holes where arrows stood in a minute or two, wet /
-//               charred footprints after a splash in seconds
+//               charred footprints after a splash in seconds; other features' marks through F.stamp: a bullet's scuff
+//               (features/gunfx.js) and blood stains (features/blood.js), gone in ~10-20 s
 //   the Ranger  breath puffs in the cold (frost, and at night elsewhere; faster after sprinting), drips after a splash,
 //               sparks lifting off the cloak in ember
 //
@@ -25,6 +27,9 @@
 //   F.biomeChanged()     marks / particles reset (the arena's setBiome)
 //   F.ms                 rolling cost per rendered frame (ms); F.count() breakdown; F.C the camera state (tests)
 //   F.TUNE (= F.T)       the arena's tunables, live
+//   F.stamp(kind, x, y, dx, dy, k)   a mark from another feature (world metres): 'bullet' a bullet's scuff in the ground
+//                        ((dx, dy) its way: a gouge back toward the shooter, a few crumbs thrown ahead); 'blood' a drop's
+//                        stain (k 0..1: a pixel .. a little splat; stains close in time and place join one mark)
 //
 // HOW IT MAPS ONTO THE 3D HOST
 //   Camera    the host eases its target T after the player (exp(-9 dt), look-ahead, 30 px headroom) and adds
@@ -37,11 +42,12 @@
 //             RGBA layer per ground height (0, the plateau top). The host's ground layer MIXES (it does not multiply),
 //             so each layer pixel holds the ground texel under it (world.groundCanvas) x the mark's tone; overlapping
 //             marks keep the darker one ('darken', as in the arena). Each frame the visible part of a layer is drawn
-//             into host.layer('ground') through the ground plane's affine map (nearest), so marks turn with the world
-//             like the ground texture does; ground-level marks are clipped out of the plateau's silhouette.
+//             into host.glayer('ground') through the ground plane's affine map (nearest), so marks turn with the world
+//             like the ground texture does; ground-level marks are clipped out of the plateau's silhouette. A layer is a
+//             G.dataImage over its own array (a painted rect goes up with G.texData; no canvas).
 //   Particles world metres -> host.point (lit, depth-tested). Glow follows the arena's two emitter paths: sparks,
 //             glowing drips and night breath (its view-sized canvas, which lighting.apply drew straight over the lit frame
-//             at 1.25 - lum(ambient) x .95, .3..1) -> host.layer('front') at that alpha; scorch / sole embers and the
+//             at 1.25 - lum(ambient) x .95, .3..1) -> host.glayer('front') at that alpha; scorch / sole embers and the
 //             arrows' air streak (its ground-sized layers: glow x (1 - light), cut where the player stands in front)
 //             -> host.layer('emit'), skipping the pixels of the player's silhouette.
 //   Ghosts    host.playerSprite() is copied and flattened to the biome tint (source-in) into pooled canvases, drawn at
@@ -51,7 +57,7 @@
 //             Each frame the player's current silhouette is cut out of any ghost that overlaps him on screen, so a
 //             ghost never covers him (the arena sorted them just behind him).
 import {flags} from '../core/flags.js';
-import {clamp, hash3 as hsh, vnoise as vn} from '../core/mathx.js';
+import {clamp, hash3 as hsh, vnoise as vn, clearArray} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {hexAny255 as hex3, lum} from '../core/color.js';
 import {toView, toWorld} from '../render/viewxf.js';
@@ -65,11 +71,15 @@ const TUNE = {
     hyst: .35, snap: .25,                 // screen-offset hysteresis (px over the 0.5 rounding); dt >= snap: jump to the target
     leanX: 22, leanY: 14, leanRX: 150, leanRY: 90, leanIn: 2.6, leanOut: 2.2,   // aim lean: max px, cursor px for full lean, 1/s
     kick: 2.6, dip: 3, dipSoft: 1.2,      // px peaks: bow kick (opposite the shot), hard landing dip, a leap's landing
+    gunKick: 3.6, navyK: 1.35, fanK: .6,  // px peak of a revolver's kick (opposite the shot); x for the Navy; x for a fanned shot
+    hitKick: 1.3, hitKickBig: 2.2,        // px more when the bullet hits a body; a crit or a kill
     sprintLead: 12, rollLead: 16, leadRate: 5},   // extra px ahead at a full sprint / in a roll, ease rate 1/s
   streak: {rate: 18, speed: 5.5, life: [.15, .25], len: [3, 6]},
   ghost: {every: .05, keep: .18, gap: 6, alpha: [.35, .2, .1]},
   light: {radius: 1.8, dusk: .38, night: .5, max: 2},
-  marks: {cap: 250, st: 4},             // st: s per fade stage of the player's own marks (a mark lasts 3-5 stages)
+  marks: {cap: 250, st: 4,              // st: s per fade stage of the player's own marks (a mark lasts 3-5 stages)
+    bullet: 2.5, blood: 3,              // s per stage of F.stamp's marks (a bullet's scuff ~12 s, a blood stain ~18 s)
+    join: {t: .7, r: 1.6}},             // blood stains within t s and r m of the last one join its mark (one mark a hit)
   breath: {every: [2, 3], fast: .8, heat: 4},
   wet: {prints: 8, drips: 4},
   air: {tail: .72, a: [.22, .45], glow: [.35, .7]},   // arrow air streak: from the shaft's tail (main.js draws it .72 m), alpha steps
@@ -82,28 +92,34 @@ const MARK = {
   ember: ['#5a504e', '#766c68', '#948c88', '#b2acaa', '#cecac8'],
   frost: ['#7e8ea8', '#96a4bc', '#aebacc', '#c6cedc', '#dce2ec'],   // blue-grey slush
   rift: ['#726290', '#8a7ca6', '#a498bc', '#beb4d0', '#d8d0e4'],
+  desert: ['#9a8064', '#ae967a', '#c2ae94', '#d6c8b2', '#e8e0d2'],   // scuffed sand / dust
 };
 const SCORCH = {
   ruins: ['#857a6e', '#9a9084', '#aea69a', '#c2bcb2', '#d6d2ca', '#e8e6e0'],
   ember: ['#6a5e5c', '#7e7472', '#948c8a', '#aca6a4', '#c4c0be', '#dcd8d6'],
   frost: ['#7686a2', '#8a9ab4', '#a0acc4', '#b6c0d2', '#ccd4e0', '#e0e6ee'],   // melted: wet blue-grey slush
   rift: ['#665888', '#7a6e9a', '#9086ae', '#a8a0c2', '#c0bad4', '#d8d4e4'],
+  desert: ['#7e6c5a', '#94826e', '#aa9a86', '#c0b29e', '#d6cab8', '#eae2d6'],
 };
 const WET = {   // footprints after falling in (ember: charred soles out of the lava)
   ruins: ['#6a7a92', '#8694aa', '#a4aec0', '#c4cad6'],
   ember: ['#3a2c2a', '#5a4a46', '#80726e', '#a89e9a'],
   frost: ['#5e7092', '#7a8cac', '#9caac4', '#bec8da'],
   rift: ['#56467a', '#726496', '#9286b2', '#b4aace'],
+  desert: ['#6e5e4a', '#887862', '#a4947e', '#c2b49e'],   // muddy soles out of the creek
 };
-const CHIP = {ruins: '#b4a27c', ember: '#8c8078', frost: '#eef4fc', rift: '#9c8cc4'};   // splinter / crumb by an arrow hole
+// blood stains (F.stamp 'blood'): multiply tones, deep -> faint (on sand the deepest is a dark red, ~#72170c)
+const BLOOD = ['#8a2018', '#9c3426', '#b04c3a', '#c46a56', '#d68a76', '#e6ac9c'];
+const CHIP = {ruins: '#b4a27c', ember: '#8c8078', frost: '#eef4fc', rift: '#9c8cc4', desert: '#d8bc8c'};   // splinter / crumb by an arrow hole
 const STREAK = {ruins: ['#e6dcc4', '#c8b894', '#a8987a'], ember: ['#c8beb4', '#a39a92', '#7c746e'],
-  frost: ['#e8f0fa', '#c4d0e4', '#98a8c4'], rift: ['#c8b0ec', '#9a7ed4', '#6e56a8']};
-const GHOST = {ruins: '#a8c4d8', ember: '#e09a70', frost: '#c0dcf8', rift: '#7c66b4'};
+  frost: ['#e8f0fa', '#c4d0e4', '#98a8c4'], rift: ['#c8b0ec', '#9a7ed4', '#6e56a8'], desert: ['#f0e0bc', '#d6be92', '#b49a72']};
+const GHOST = {ruins: '#a8c4d8', ember: '#e09a70', frost: '#c0dcf8', rift: '#7c66b4', desert: '#e0c494'};
 const BREATH = {cold: ['#eef4fc', '#b8c6dc'], faint: ['#a4b0c2', '#7c889c'], night: ['#2e3848', '#1c2432']};   // night: a dim emitter lift (moonlit)
 const DRIP = {ruins: {pal: ['#d8eef4', '#8cb8c8']}, frost: {pal: ['#e8f4ff', '#a0b8d4']},
-  ember: {pal: ['#b8481c', '#5e200e'], emit: ['#ffd070', '#f08a30']}, rift: {pal: ['#7448c4', '#40247a'], emit: ['#e4c8ff', '#ac80f2']}};
+  ember: {pal: ['#b8481c', '#5e200e'], emit: ['#ffd070', '#f08a30']}, rift: {pal: ['#7448c4', '#40247a'], emit: ['#e4c8ff', '#ac80f2']},
+  desert: {pal: ['#d6ccac', '#9a8e6e']}};
 const EMBER = ['#ffd27e', '#f28a36', '#b8481c', '#5e200e'];   // hot -> cold
-const ALIGHT = {ruins: '#ffd8a0', ember: '#ffc890', frost: '#ffe4c0', rift: '#f4c8ff'};
+const ALIGHT = {ruins: '#ffd8a0', ember: '#ffc890', frost: '#ffe4c0', rift: '#f4c8ff', desert: '#ffd49a'};
 const AIR = '#efe4c8';   // the arrows' air streak: player.js PX.strTight (PAL.linen[0])
 const CHEST = 1.25, MOUTH = 1.55;   // metres: the arrows' height (aim lean origin), breath height
 const WATER_H = -.18;   // world.js lowers the stream bed by this much (drips sink there)
@@ -146,7 +162,7 @@ export async function create(host) {
   // emitter layers, glow x (1 - light) with the player's silhouette cut out), the air streak at its two alphas
   const BG = new Map(), BF = new Map(), BE = new Map(), BA = [new Map(), new Map()];
   const put = (bk, c, x, y, w = 1, h = 1) => { let a = bk.get(c); if (!a) bk.set(c, a = []); a.push(x, y, w, h); };
-  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); a.length = 0; } }
+  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); clearArray(a); } }
   const any = bk => { for (const a of bk.values()) if (a.length) return true; return false; };
   const lp = (bk, c, X, Y, dx = 0, dy = 0) => put(bk, c, X + dx * V.z, Y + dy * V.z, V.z, V.z);
   const PO = {size: 1}, PA = [{size: 1, alpha: .22}, {size: 1, alpha: .45}];
@@ -258,12 +274,16 @@ export async function create(host) {
     return {x: C.outX - TX, y: C.outY - TY};
   }
   function kick(ux, uy, px) { const v = punchV(px); C.pvx -= ux * v; C.pvy -= uy * v; }   // camera goes AGAINST (ux, uy)
+  function gunKick(wx, wy, px) {   // a shot's way on the ground (world, unit) -> the view frame's px direction, then the kick
+    const v = toVF(wx, wy), vx = v[0] * PPM, vy = v[1] * PPMY, l = Math.hypot(vx, vy);
+    if (l > 1e-6) kick(vx / l, vy / l, px);
+  }
 
   // ============================================================ marks (decals)
   // decal px: the arena's world px at yaw 0 without the height (X = x PPM, Y = y PPMY); each decal keeps its ground height
   const decals = [];   // {pix: [X, Y, tone, ...], set, ramp, st, z, t, stage, min, x0, y0, x1, y1, chips}
   let dirty = [];      // [z, x0, y0, x1, y1]
-  const levels = new Map();   // ground height -> {z, x0, y0, w, h, c, q, img, D}: the baked layer (ground x tone)
+  const levels = new Map();   // ground height -> {z, x0, y0, w, h, D, gi}: the baked layer (ground x tone; gi: D as a G.dataImage)
   const WPX = () => host.ctxO.WPX || Math.ceil(62 * PPM), HPX = () => host.ctxO.HPX || Math.ceil(30 * PPMY);
   const plats = () => host.layout?.plateaus || [];
   function level(z) {
@@ -274,8 +294,8 @@ export async function create(host) {
       for (const q of plats()) if (q.h === z) { x0 = Math.min(x0, Math.floor(q.x0 * PPM) - 2); y0 = Math.min(y0, Math.floor(q.y0 * PPMY) - 2); x1 = Math.max(x1, Math.ceil(q.x1 * PPM) + 2); y1 = Math.max(y1, Math.ceil(q.y1 * PPMY) + 2); }
       if (x1 <= x0) { x0 = 0; y0 = 0; x1 = WPX(); y1 = HPX(); }
     }
-    const [c, q] = mk(x1 - x0, y1 - y0), img = q.createImageData(x1 - x0, y1 - y0);
-    levels.set(z, L = {z, x0, y0, w: x1 - x0, h: y1 - y0, c, q, img, D: img.data});
+    const w = x1 - x0, h = y1 - y0, D = new Uint8ClampedArray(w * h * 4);
+    levels.set(z, L = {z, x0, y0, w, h, D, gi: host.G.dataImage(w, h, D)});
     return L;
   }
   // the ground texture (world.js paints it top-down at PPM px / m) for the multiply: read back lazily in 64 px tiles
@@ -332,7 +352,7 @@ export async function create(host) {
         else { D[o] = r; D[o + 1] = g; D[o + 2] = b; D[o + 3] = 255; }
       }
     }
-    L.q.putImageData(L.img, 0, 0, x0 - L.x0, y0 - L.y0, x1 - x0, y1 - y0);
+    host.G.texData(L.gi, x0 - L.x0, y0 - L.y0, x1 - x0, y1 - y0, D, W, x0 - L.x0, y0 - L.y0);   // (the rect into its texture)
   }
   function ageDecals(dt) {
     for (let i = decals.length - 1; i >= 0; i--) {
@@ -433,6 +453,26 @@ export async function create(host) {
     }
     RL.last = [X, Y]; commit(RL.d, true);
   }
+  // other features' marks (F.stamp): a bullet's scuff; blood stains, joined into the last stain's mark when close
+  const BL = {d: null, t: -9, x: 0, y: 0};
+  function stamp(kind, x, y, dx = 0, dy = 0, k = 0) {
+    if (!F.on || !biome) return;
+    const z = ground(x, y), X = Math.round(x * PPM), Y = Math.round(y * PPMY);
+    if (z === 0 && host.inStream(x, y)) return;
+    if (kind === 'blood') {
+      const J = TUNE.marks.join;
+      if (!(BL.d && BL.d.z === z && simT - BL.t < J.t && Math.abs(x - BL.x) + Math.abs(y - BL.y) < J.r && decals.includes(BL.d))) { if (BL.d) BL.d.set = null; BL.d = decal(BLOOD, TUNE.marks.blood, z); BL.x = x; BL.y = y; }
+      BL.t = simT; const d = BL.d;
+      dot(d, X, Y, k > .6 ? 0 : 1);
+      if (k > .35) dot(d, X + (R() < .5 ? -1 : 1), Y, 1);
+      if (k > .7) { const [ux, uy] = scr(dx, dy); dot(d, X, Y + (R() < .5 ? -1 : 1), 2); dot(d, X + Math.round(ux * 2), Y + Math.round(uy * 2), 2); }   // (a splat: a tail along its fall)
+      commit(d, true); return;
+    }
+    const d = decal(MARK[biome], TUNE.marks.bullet, z), [ux, uy] = scr(dx, dy);
+    dot(d, X, Y, 0); dot(d, Math.round(X - ux * 1.3), Math.round(Y - uy * 1.3), 1);   // the hole, the gouge back toward the shot
+    for (let i = 0; i < 3; i++) { const f = rr(1.6, 3.4), s = rr(-1.3, 1.3); dot(d, Math.round(X + ux * f - uy * s), Math.round(Y + uy * f + ux * s), 2 + (R() < .5 ? 1 : 0)); }   // crumbs thrown ahead
+    commit(d);
+  }
   // stuck arrows: remember the ones in the ground; when one is gone, leave its hole
   const stuck = new Map();
   function trackArrows() {
@@ -468,18 +508,18 @@ export async function create(host) {
       const x0 = Math.max(L.x0, Math.floor(Math.max(u0, w0)) - 2), y0 = Math.max(L.y0, Math.floor(Math.max(v0, z0)) - 2);
       const x1 = Math.min(L.x0 + L.w, Math.ceil(Math.min(u1, w1)) + 2), y1 = Math.min(L.y0 + L.h, Math.ceil(Math.min(v1, z1)) + 2);
       if (x1 <= x0 || y1 <= y0) continue;
-      const q = host.layer('ground');
+      const q = host.glayer('ground');   // (the GPU draws it: G.glayer)
       q.save(); q.setTransform(1, 0, 0, 1, 0, 0);
-      if (L.z === 0 && plats().length) {
-        q.beginPath(); q.rect(-4, -4, VW + 8, VH + 8);
+      if (L.z === 0 && plats().length) {   // cut out of the plateau's silhouette (even-odd, as a canvas's rect + hulls + clip('evenodd'))
+        const polys = [];
         for (const p of plats()) {
           const pts = []; for (const x of [p.x0, p.x1]) for (const y of [p.y0, p.y1]) for (const h of [0, p.h]) pts.push([SX(x, y, h), SY(x, y, h)]);
-          const H = hull(pts); H.forEach(([x, y], i) => i ? q.lineTo(x, y) : q.moveTo(x, y)); q.closePath();
+          polys.push(hull(pts));
         }
-        q.clip('evenodd');
+        q.clipOutside(polys);
       }
-      q.setTransform(a, b, c, d, e, f); q.imageSmoothingEnabled = false; q.globalAlpha = 1; q.globalCompositeOperation = 'source-over';
-      q.drawImage(L.c, x0 - L.x0, y0 - L.y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+      q.setTransform(a, b, c, d, e, f); q.globalAlpha = 1; q.globalCompositeOperation = 'source-over';
+      q.drawImage(L.gi, x0 - L.x0, y0 - L.y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
       q.restore();
     }
   }
@@ -636,6 +676,8 @@ export async function create(host) {
         const L = P.leap; if (L) { const [ldx, ldy] = toW(L.dx, L.dy); crescent(e.x - ldx * .12, e.y - ldy * .12, -ldx, -ldy, {tone: 2}); }
       } else if (e.type === 'player.splash' && !e.small && P.state === 'splash') { splashT = simT; wetFrom = -99; }   // HIS splash
       else if (e.type === 'combat.explode') scorch(e.x, e.y, e.r || 2);
+      else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
+      else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, e.broke || e.crit ? K.hitKickBig : K.hitKick);
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }
@@ -696,7 +738,7 @@ export async function create(host) {
       const k = emberTone(e); pp(x, y, e.z, EMBER[k + 1] || EMBER[3]);
       if (k < 3) lp(BE, EMBER[k], X, Y);
     }
-    if (any(BG)) flush(BG, host.layer('ground'));
+    if (any(BG)) flush(BG, host.glayer('ground'));
     // ---- afterimages (the ghost captured this frame: the player's card as it is drawn now)
     if (GH.due) { GH.due = false; capture(); }
     drawGhosts();
@@ -720,7 +762,7 @@ export async function create(host) {
       } else if (p.k === 4) { const k = Math.min(3, Math.floor(p.t / p.life * 4)); pp(p.x, p.y, p.h, EMBER[k]); if (k <= 2) lp(BF, EMBER[k], X, Y); }
     }
     airStreaks();
-    if (any(BF)) { const q = host.layer('front'); q.save(); q.globalAlpha = glowA(); flush(BF, q); q.restore(); }
+    if (any(BF)) { const q = host.glayer('front'); q.save(); q.globalAlpha = glowA(); flush(BF, q); q.restore(); }
     flushEmit();
     tick(t0);
   }
@@ -737,10 +779,10 @@ export async function create(host) {
   }
 
   function reset() {
-    decals.length = 0; dirty.length = 0; ps.length = 0; gEmb.length = 0; stuck.clear();
+    decals.length = 0; dirty.length = 0; ps.length = 0; gEmb.length = 0; stuck.clear(); BL.d = null;
     for (const gh of GH.list) GH.pool.push(gh); GH.list.length = 0; GH.due = false;
     SK.d = RL.d = null; wetFrom = splashT = -99;
-    for (const L of levels.values()) { L.D.fill(0); L.q.clearRect(0, 0, L.w, L.h); }
+    for (const L of levels.values()) { L.D.fill(0); host.G.texData(L.gi, 0, 0, L.w, L.h, L.D, L.w); }
   }
   function setBiome(id) { biome = MARK[id] ? id : 'ruins'; reset(); }
 
@@ -753,7 +795,7 @@ export async function create(host) {
     },
     biomeChanged() { levels.clear(); setBiome(host.biome.id); level(0); },   // (a rebuilt world: new ground texture; the ground layer made now, behind the loading screen)
     resize(w, h) { VW = w; VH = h; if (EC) { EC.width = w; EC.height = h; ecq.imageSmoothingEnabled = false; } },   // the view changed size (main.js fit)
-    view: update, camera, frame, lights,   // (not ambient: its streaks / tracks follow the player's frozen speed)
+    view: update, camera, frame, lights, stamp,   // (not ambient: its streaks / tracks follow the player's frozen speed)
     hud: () => '',
     // debugging / tests
     C, Tm, count: () => ({decals: decals.length, particles: ps.length, embers: gEmb.length, ghosts: GH.list.length, dirty: dirty.length, levels: levels.size}),

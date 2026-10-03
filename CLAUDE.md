@@ -10,7 +10,9 @@ Rules that apply to every change now:
 - **Measure.** Anything that runs every frame gets checked with `node tools/perf/bench.mjs` (headless Chrome on the
   GPU, compared with `tools/perf/baseline.json`) before it's committed; put the before/after in the commit message.
   In the game, F3 (or `?perf=1`) shows ms per system against the budget. Budgets: `src/core/perf.js`.
-  Run the bench on a quiet machine; it warns when other work is competing for the CPU.
+  Run the bench on a quiet machine; it warns when other work is competing for the CPU. On a busy machine compare with
+  `node tools/perf/ab.mjs --a git:HEAD` (both versions stepped in one Chrome, alternating: load hits both alike);
+  `node tools/perf/vsync.mjs` counts missed frames at the display's refresh rate (a real full-screen window).
 - **Behaviour checks.** A change that should not change what you see (a refactor, a move) passes
   `node tools/test/golden.mjs --compare tmp/golden/ref4` (bit-exact captures of a scripted tour); any engine change
   passes `node tools/test/smoke.mjs` (keys, menu, loadouts, resize, a run); anything touching a feature's update / view

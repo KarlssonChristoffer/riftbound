@@ -25,7 +25,10 @@
 //   dust(fx, fy, side, big)            a foot contact at world px (fx, fy); big 0 step, 1 turn push, 2 plant / land
 //   events []                          pushes {type: 'player.step'|'player.land'|'player.jump'|'player.splash', x, y, ...} (core/events.js)
 //   shake(px, sec)
+//   gun(PL, internals) -> a revolver (sim/player/gun.js createGun): while the loadout's weapon is a gun it gets LMB and the frame
+import {WEAPONS} from '../../content/weapons.js';   // the bow's numbers (shoot)
 import {ramps} from './harmonize.js';   // the character palette (pixel bow layer)
+import {clamp} from '../../core/mathx.js';
 export const AIM_H = 1.25;   // arrows fly at chest height
 export const SPEED = {walk: 1.4, run: 4.6, sprint: 7.2};
 const SPEED0 = {...SPEED};   // the authored speeds; SPEED = these with the modifiers' 'player.speed' notes (H.mods)  // m/s; the clips follow whatever distance is really covered
@@ -37,6 +40,18 @@ const AIM_TURN_RATE = 1200;
 const STANCE_HOLD = .25;  // s: a moving-aim stance (running forward / backing up) can't flip back sooner (no flip-flop)
 // states in which the player is taken over by a move (no aiming, rolling or new actions)
 export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'splash', 'hold', 'knock']);
+// The dodge (Space). The roll clip is a FORWARD roll, so a roll never reverses:
+// - running into a roll more than leadMin deg off the way he faces: he plants and turns first (the run's turn frames,
+//   lead s each, untouchable from the plant)
+// - WASD steers a roll during its first steerEnd (while he's curled up) at steerRate deg/s, at most steerMax deg off the
+//   way it started (a back diagonal turns it the full steerMax its way); input more than steerIgnore deg off it (back)
+//   is ignored
+// - aiming, with back, a back diagonal (input . aim < backCos) or nothing held: a short backstep instead of a roll, the
+//   bow drawn on the target (backDist m in backDur s, no slower than backExit = backing up while aiming if a direction
+//   is held), untouchable for its first guard s
+const DODGE = {lead: .045, leadMin: 67.5, leadSpeed: 2.3, steerRate: 360, steerMax: 90, steerIgnore: 150, steerEnd: .65,
+  backCos: -.3, backDist: 1.3, backDur: .3, backExit: 2.7, guard: .15};
+const D2R = Math.PI / 180;
 const CLIMB_T = 1.1, MANTLE_T = .28;
 const angDiff = (a, b) => Math.abs(((a - b) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
 
@@ -142,29 +157,59 @@ export function createPlayer(H) {
   }
 
   // ---------------- actions ----------------
+  const dodging = () => P.state === 'roll' || P.state === 'backstep';
   function startRoll() {
-    // rolling out of an aim keeps it: remember we were drawn; with no direction held, roll back away from the target
+    // rolling out of an aim keeps it: remember we were drawn. Aiming and going back (or nothing held): a backstep
     const aiming = P.state === 'draw' && mouse.down;
     let [dx, dy] = moveInput();
-    if (!dx && !dy) { const [fx, fy] = vecOf(P.face); [dx, dy] = aiming ? [-fx, -fy] : [fx, fy]; }
+    if (aiming) {
+      const c = cursorAim(), ax = c.x - P.x, ay = c.y - P.y, al = Math.hypot(ax, ay) || 1;
+      if (!dx && !dy) { startBackstep(-ax / al, -ay / al); return; }
+      if ((dx * ax + dy * ay) / al < DODGE.backCos) { startBackstep(dx, dy); return; }
+    } else if (!dx && !dy) [dx, dy] = vecOf(P.face);
     P.aimRoll = aiming; P.queuedShot = false; P.recover = 0;
-    P.face = P.want = dirOf(dx, dy); P.rollDir = vecOf(P.face); P.state = 'roll'; P.t = 0;
+    const nd = dirOf(dx, dy), ND = A.ND, deg = ((nd - P.face + ND) % ND) * 360 / ND, left = deg <= 180, m = left ? deg : 360 - deg;
+    const set = m <= 112.5 ? 90 : 135, s = left ? 'l' : 'r', a = `turn_${s}${set}a`, b = `turn_${s}${set}b`;
+    P.state = 'roll'; P.t = 0; P.rollDev = 0; P.rollLead = null;
+    if (!aiming && m >= DODGE.leadMin && Math.hypot(P.vx, P.vy) > DODGE.leadSpeed && has(a) && has(b)) {
+      // running, a sharp new way: plant (outside foot) and push (inside foot) first; the roll proper starts at t = 0
+      P.rollLead = {frames: [a, b], feet: left ? ['R', 'L'] : ['L', 'R'], i: -1}; P.t = -2 * DODGE.lead;
+    }
+    P.face = P.want = nd; P.rollDir = vecOf(P.face);
   }
+  function startBackstep(dx, dy) {
+    const l = Math.hypot(dx, dy) || 1;
+    P.rollDir = [dx / l, dy / l]; P.state = 'backstep'; P.t = 0; P.aimRoll = false; P.queuedShot = false; P.recover = 0; P.prevF = -1;
+  }
+  // WASD during a roll: turn its direction toward the input, within steerMax of where it started (P.rollDev: how far off)
+  function steerRoll(mx, my, dt) {
+    const D = P.rollDir, cur = Math.atan2(D[0], D[1]), max = DODGE.steerMax * D2R, rate = DODGE.steerRate * D2R * dt;
+    const rel = ((Math.atan2(mx, my) - (cur - P.rollDev)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+    if (Math.abs(rel) > DODGE.steerIgnore * D2R) return;
+    const turn = clamp(clamp(rel, -max, max) - P.rollDev, -rate, rate);
+    if (!turn) return;
+    P.rollDev += turn; D[0] = Math.sin(cur + turn); D[1] = Math.cos(cur + turn);
+    P.face = P.want = dirOf(D[0], D[1]);
+  }
+  // untouchable: rolling (from the plant on), or the first moment of a backstep (the game's i-frames)
+  const untouchable = () => P.state === 'roll' || (P.state === 'backstep' && P.t < DODGE.guard);
   function shoot() {
+    if (gun?.on()) return;   // a gun fires on the press (sim/player/gun.js); a release does nothing here
+    const W = WEAPONS.bow;
     const c = cursorAim(); let dx = c.x - P.x, dy = c.y - P.y; let l = Math.hypot(dx, dy) || 1;
     if (P.moveAim) {  // on the move the arrow goes where the body can aim: within +-35 deg of the torso's aim
       const [bx, by] = vecOf(P.bodyAim), a = Math.atan2(dx, dy), b = Math.atan2(bx, by);
       let da = ((a - b + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-      da = Math.max(-Math.PI * 35 / 180, Math.min(Math.PI * 35 / 180, da));   // covers the legs still turning into the
+      da = Math.max(-Math.PI * W.cone / 180, Math.min(Math.PI * W.cone / 180, da));   // covers the legs still turning into the
       dx = Math.sin(b + da); dy = Math.cos(b + da); l = 1;                        // stance; never a shot over the shoulder
     }
-    const v = 14 + Math.min(1, P.t * 1.5) * 12;  // longer draw, faster arrow
+    const v = W.v0 + Math.min(1, P.t * W.drawK) * W.vDraw;  // longer draw, faster arrow
     const fx = dx / l, fy = dy / l;   // launch from the bow, along the flight line (not the legs' facing)
     // flat at the same level; aimed down / up across levels or at a snapped target (plus the drop over the flight)
     const h0 = P.z + AIM_H, dist = Math.hypot(c.x - P.x, c.y - P.y) || 1;
-    const vh = c.target || Math.abs(c.h - h0) > .5 ? Math.max(-12, Math.min(8, (c.h - h0) / (dist / v) + .45 * dist / v)) : 0;
-    const dmg = Math.round(10 + Math.min(1, P.t * 1.5) * 14);   // a full draw hits harder
-    H.onShoot({x: P.x + fx * .35, y: P.y + fy * .35, h: h0, vx: fx * v, vy: fy * v, vh, life: 1.6, dmg, kind: 'arrow'});
+    const vh = c.target || Math.abs(c.h - h0) > .5 ? Math.max(W.vhMin, Math.min(W.vhMax, (c.h - h0) / (dist / v) + W.lift * dist / v)) : 0;
+    const dmg = Math.round(W.dmg0 + Math.min(1, P.t * W.drawK) * W.dmgDraw);   // a full draw hits harder
+    H.onShoot({x: P.x + fx * W.muzzle, y: P.y + fy * W.muzzle, h: h0, vx: fx * v, vy: fy * v, vh, life: W.life, dmg, kind: 'arrow'});
     P.twang = 0; PL.shots++; P.t = 0;
     // moving: hold the aiming stance briefly after the shot (rapid fire while strafing never leaves it); standing: release anim
     if (P.moveAim) { P.state = 'draw'; P.recover = .25; } else P.state = 'release';
@@ -195,7 +240,9 @@ export function createPlayer(H) {
     if (s0 < 0) return null;
     let s1 = -1; for (let d = s0; d <= s0 + 5; d += .05) if (!inStream(P.x + dx * d, P.y + dy * d)) { s1 = d; break; }
     const land = s1 + .25, lx = P.x + dx * land, ly = P.y + dy * land;
-    if (s1 > 0 && land <= reach && !H.blocked(lx, ly, elev(lx, ly), false)) return {dist: Math.max(1.2, land), safe: true};
+    // (a leap never lands higher than it started: the plateau's pool lies right under its south face, so the far "bank" there is the cliff's top,
+    // and a roll toward the pool from a metre away would turn into a leap that ends against the face, in the water)
+    if (s1 > 0 && land <= reach && elev(lx, ly) <= elev(P.x, P.y) + .3 && !H.blocked(lx, ly, elev(lx, ly), false)) return {dist: Math.max(1.2, land), safe: true};
     if (s0 <= .5) return {dist: reach, safe: false};
     return null;
   }
@@ -221,6 +268,19 @@ export function createPlayer(H) {
     P.state = 'splash'; P.t = 0; P.z = 0; P.back = backTo;
     ev({type: 'player.splash', x: P.x, y: P.y}); H.shake?.(1, .12);
   }
+  // Where a FALL that ended in the water puts you back: behind the landing, against the drift. Off the plateau's south edge at the fall that
+  // spot can be water too (the pool under the waterfall is wider than the drift), so it goes on back, a body's length past the water's edge:
+  // onto the plateau, where you stepped off. Anywhere else the first spot is dry and is used as it is
+  function dryBack(bx, by, vx, vy) {
+    const l = Math.hypot(vx, vy);
+    if (!inStream(bx, by) || l < .05) return [bx, by];
+    const ux = vx / l, uy = vy / l;
+    for (let d = .1; d <= 6; d += .1) {
+      const x = bx - ux * d, y = by - uy * d;
+      if (!inStream(x, y)) { const x2 = x - ux * .3, y2 = y - uy * .3; return H.blocked(x2, y2, elev(x2, y2), true) ? [x, y] : [x2, y2]; }
+    }
+    return [bx, by];
+  }
   function climbSpot() {   // a climb spot within reach: from below (up) or from the top (down)
     for (const q of plateaus) for (const c of q.climbs || []) {
       if (Math.abs(P.x - c.x) > c.w / 2 + .45) continue;
@@ -231,7 +291,7 @@ export function createPlayer(H) {
   }
   const nearInteract = () => H.nearInteract?.(P) || null;
   function interact() {
-    if (BUSY.has(P.state) || P.state === 'roll') return false;
+    if (BUSY.has(P.state) || dodging()) return false;
     const p = nearInteract(); if (p) return !!H.onInteract?.(p);
     const cs = climbSpot(); if (!cs) return false;
     P.climb = cs; P.state = 'climb'; P.t = 0; P.vx = P.vy = 0; P.face = P.want = A.ND / 2;   // face the wall (N)
@@ -257,7 +317,7 @@ export function createPlayer(H) {
       P.vz -= 24 * dt; P.z += P.vz * dt; const x0 = P.x, y0 = P.y; moveBy(P.vx * dt, P.vy * dt, true);
       P.frame = has('fall') ? 'fall' : 'lunge';
       const e = elev(P.x, P.y);
-      if (P.z <= e) { if (inStream(P.x, P.y)) splash([x0 - P.vx * .3, y0 - P.vy * .3]); else land(P.fall0 - e); }
+      if (P.z <= e) { if (inStream(P.x, P.y)) splash(dryBack(x0 - P.vx * .3, y0 - P.vy * .3, P.vx, P.vy)); else land(P.fall0 - e); }
       return true;
     }
     if (P.state === 'land') {
@@ -375,10 +435,20 @@ export function createPlayer(H) {
     const {SP, CLIP} = A, WALK = CLIP.walk, RUN = CLIP.run, ND = A.ND;
     const [mx, my] = moveInput();
     P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt);
+    if (gun && gun.step(dt, mx, my)) return;   // a gun loadout: the revolver drives the frame while it's in hand (sim/player/gun.js)
     if (stepTraverse(dt)) return;
+    if (P.state === 'roll' && P.t < 0) {
+      // the plant-and-turn into it (startRoll): the run's turn frames, the momentum biting into the plant
+      const L = P.rollLead, fi = Math.min(1, Math.floor((P.t + 2 * DODGE.lead) / DODGE.lead));
+      if (fi !== L.i) { L.i = fi; puff(L.feet[fi], L.frames[fi], fi ? 1 : 2); }
+      const bite = fi ? .8 : .35; moveBy(P.vx * bite * dt, P.vy * bite * dt);
+      P.frame = L.frames[fi];
+      return;
+    }
     if (P.state === 'roll') {
       const R = CLIP.roll, dur = R.frames / R.fps, k = Math.min(1, P.t / dur);
-      const held = moveInput().some(v => v), exit = held ? (keys.has('shift') ? SPEED.run + 1 : SPEED.run) : 1.2;
+      const held = !!(mx || my), exit = held ? (keys.has('shift') ? SPEED.run + 1 : SPEED.run) : 1.2;
+      if (held && k < DODGE.steerEnd) steerRoll(mx, my, dt);
       const sp = exit + (8.6 - exit) * (1 - k) * (1 - k);   // quick launch, then ease DOWN TO the exit speed (no stop)
       moveBy(P.rollDir[0] * sp * dt, P.rollDir[1] * sp * dt);
       P.frame = `roll.${Math.min(R.frames - 1, Math.floor(P.t * R.fps))}`;
@@ -388,13 +458,36 @@ export function createPlayer(H) {
           // come out of the roll straight into full draw (no re-draw); a release during the roll fires right now
           P.state = 'draw'; P.t = 1; P.moveAim = false; P.snapFace = true;   // land already in the aiming stance
           const c = cursorAim(); P.want = dirOf(c.x - P.x, c.y - P.y);
-          if (P.queuedShot) { P.queuedShot = false; const [mx2, my2] = moveInput(); P.moveAim = !!(mx2 || my2); shoot(); }
+          if (P.queuedShot) { P.queuedShot = false; P.moveAim = held; shoot(); }
         } else if (held) {
           // straight into the run, already at speed; the roll's rise pose has the left leg forward = the run's
           // left heel strike, so the stride continues from there instead of restarting from a stand
           P.state = 'move'; P.gait = 'run'; P.ph = .02; P.prevF = 'run0'; P.frame = 'run.0'; P.t = 0;
         } else { P.state = 'idle'; P.t = 0; }
         P.aimRoll = false;
+      }
+      return;
+    }
+    if (P.state === 'backstep') {
+      // aiming, going back: a quick shuffle on the drawn bow, facing the target. The legs: the run-with-full-draw
+      // cycle (rs_0_*) run backwards by the distance covered (a dedicated backstep clip can replace it)
+      const B = DODGE, k = Math.min(1, P.t / B.backDur), held = !!(mx || my);
+      const sp = Math.max(held ? B.backExit : 0, 3 * B.backDist / B.backDur * (1 - k) * (1 - k));   // a hard push, easing out
+      P.vx = P.rollDir[0] * sp; P.vy = P.rollDir[1] * sp;
+      const d = moveBy(P.vx * dt, P.vy * dt);
+      const c = cursorAim(); P.want = bestFacing('draw.2', dirOf(c.x - P.x, c.y - P.y)); turnToward(P.want, dt, AIM_TURN_RATE);
+      const pre = SP['rs_0_0'] ? 'rs' : 'ws', C = pre === 'rs' ? RUN : WALK, fa = P.face * 2 * Math.PI / ND;
+      P.ph = ((P.ph + (P.rollDir[0] * Math.sin(fa) + P.rollDir[1] * Math.cos(fa)) * d / C.stride) % 1 + 1) % 1;
+      const at = P.ph * C.stride; let f = 0; while (f < C.frames - 1 && at >= C.cum[f + 1]) f++;
+      const name = `${pre}_0_${f}`, key = 'back' + f;
+      if (key !== P.prevF) { const ci = C.contacts.indexOf(f); if (ci >= 0 && P.prevF !== -1 && SP[name]) puff(C.contact_foot[ci], name, 0); P.prevF = key; }
+      P.frame = SP[name] ? name : `draw.${CLIP.draw.frames - 1}`;
+      if (k >= 1) {
+        if (mouse.down || P.queuedShot) {
+          // land still at full draw; carry on backing up if a direction is held. A release during it fires now
+          P.state = 'draw'; P.t = 1; P.moveAim = held; P.aimBack = true; P.stanceAge = 0; P.bodyAim = P.face;   // (twist 0)
+          if (P.queuedShot) { P.queuedShot = false; shoot(); }
+        } else { P.state = 'idle'; P.t = 0; }
       }
       return;
     }
@@ -563,21 +656,22 @@ export function createPlayer(H) {
   }
 
   // ---------------- input (the host maps its keys / buttons to these) ----------------
-  function onSpace() { if (P.state === 'roll' || BUSY.has(P.state)) return; if (!tryLeap()) startRoll(); }   // also while aiming
+  function onSpace() { if (dodging() || BUSY.has(P.state)) return; if (!tryLeap()) startRoll(); }   // also while aiming
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
   function press() {   // LMB down: draw (kept through a roll)
+    if (gun?.on()) return gun.press();   // a gun loadout: the trigger (sim/player/gun.js)
     mouse.down = true; P.recover = 0;
-    if (P.state !== 'roll' && !BUSY.has(P.state)) {
+    if (!dodging() && !BUSY.has(P.state)) {
       if (P.state !== 'draw') { P.aimBack = false; P.stanceAge = 9; P.pivotDebt = 0; P.pivotSettle = false; P.aclip = null; P.lastSa = undefined; }   // a fresh aim starts from the legs as they are
       P.state = 'draw'; P.t = 0;
     }
   }
-  function release() {   // LMB up: shoot, or buffer the shot during an aimed roll
+  function release() {   // LMB up: shoot, or buffer the shot during an aimed roll / a backstep
     mouse.down = false;
-    if (P.state === 'draw') shoot(); else if (P.state === 'roll' && P.aimRoll) P.queuedShot = true;
+    if (P.state === 'draw') shoot(); else if ((P.state === 'roll' && P.aimRoll) || P.state === 'backstep') P.queuedShot = true;
   }
-  function hold(frame, sec) { if (BUSY.has(P.state) || P.state === 'roll') return; P.hold = {frame: A.SP[frame] ? frame : 'release.0', sec}; P.state = 'hold'; P.t = 0; }
+  function hold(frame, sec) { if (BUSY.has(P.state) || dodging()) return; P.hold = {frame: A.SP[frame] ? frame : 'release.0', sec}; P.state = 'hold'; P.t = 0; }
   function knock(vx, vy) { if (P.state === 'climb') return; P.vx = vx; P.vy = vy; P.state = 'knock'; P.t = 0; }
 
   // ---------------- HD bow layer (display resolution, over the pixel art) ----------------
@@ -761,6 +855,10 @@ export function createPlayer(H) {
     pxLine(g, tx, ty, hx, hy, null, t => t > 1 - hd ? PX.head : t < fl ? PX.fletch : PX.shaft);
     g.restore();
   }
+  // a gun loadout's revolver (H.gun: sim/player/gun.js) gets the player's internals; the bow's code above stays as it is
+  const gun = H.gun ? H.gun(PL, {P, A, H, has, ev, dirOf, vecOf, turnToward, moveBy, moveInput, cursorAim, puff, stepTraverse, angDiff,
+    SPEED, BUSY, AIM_TURN_RATE, TURN_RATE, AIM_H}) : null;
+  PL.gun = gun;
 
   // for the systems around him (they ask, they don't write P): face a shot along a view-frame direction (the string
   // settles: twang 0), flicker as he's hurt (i-frames; the respawn's flicker too), re-count the facings for an atlas
@@ -768,6 +866,6 @@ export function createPlayer(H) {
   const faceShot = (dx, dy) => { P.face = P.want = dirOf(dx, dy); P.twang = 0; };
   const flicker = sec => { P.blink = sec; };
   const regrid = (n0, n1) => { P.face = Math.round(P.face * n1 / n0) % n1; P.want = P.face; };
-  return Object.assign(PL, {step, startRoll, shoot, tryLeap, leapPlan, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, faceShot, flicker, regrid,
+  return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, faceShot, flicker, regrid,
     press, release, hold, knock, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
 }

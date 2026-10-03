@@ -28,19 +28,24 @@
 //                   particle's own depth (walls and props in front hide them), dithered to the arena's glow alpha
 //                   (1.25 - lum(ambient) x .95, clamped .3..1: faint by day, full at night)
 //   shard edges     the shard cards' emit image (glow x (1 - light), depth-correct)
-//   footprints, shard shadows (the arena multiplied them into the ground)  -> host.layer('ground') with the multiply
+//   footprints, shard shadows (the arena multiplied them into the ground)  -> host.glayer('ground') with the multiply
 //                   baked in: the ground texel under the pixel (world.groundCanvas) x the tone
 //   ground fog (additive, pre-light in the arena)  -> host.layer('add'), laid on the ground plane with the ground's
 //                   affine map (it turns with the world) and scaled by the mood's ambient (what the pre-light add became)
 //   rift shards     -> host.sprite cards (5 x 7 px, 3 spin frames, glowing edges as their emit image)
 //   vignette, top haze  -> F.hd
-// The stream bed in world.js sits WATER_H below the bank: stream life, rings and splashes sit on that surface.
+// The stream bed in world.js sits WATER_H below the bank (host.world.waterH): stream life, rings and splashes sit on that surface.
+// THE WATER'S LIFE (river brief D): the river's streaks ride at the pace the shader gives the water (world.js waterSample / WATER_TUNE, via
+// atmos/waterlife.js), which G.setWater quickens in rain (eased over ~15 s); atmos/waterlife.js adds the riffles, the flecks on the rill and the
+// outflow, the falls' spray, mist and churn, shallow-water rings (rain, arrows) and the autumn leaves that gather in the pool and the bends.
 //
 // RULES the art follows (the arena's): every particle is 1-3 px of solid palette colour, no alpha, no AA; fading =
 // stepping through darker palette entries. Sizes scale with the host's zoom (zoom 2 = 2 x 2 px per art pixel).
 import {flags} from '../core/flags.js';
 import {mulberry32} from '../core/rng.js';
+import {clearArray} from '../core/mathx.js';
 import {hexAny255 as hex3, lum} from '../core/color.js';
+import {createWaterLife} from './atmos/waterlife.js';
 
 const TAU = Math.PI * 2;
 // palettes are ordered bright -> dim; fades step toward the end
@@ -74,12 +79,13 @@ const KINDS = {
       pal: ['#e4c8ff', '#ac80f2', '#7448c4', '#40247a'], emit: true, wake: 1},
   ],
 };
-const WIND = {ruins: [.3, .7], ember: [.12, .35], frost: [.45, 2.1], rift: [0, 0]};    // base m/s, + gust m/s
+const WIND = {ruins: [.3, .7], ember: [.12, .35], frost: [.45, 2.1], rift: [0, 0], desert: [.38, .85]};    // base m/s, + gust m/s
 const BURST = {   // arrow hits: small, biome-flavoured, short
   ruins: {n: 8, pal: ['#e2cc84', '#b89a58', '#7a6238'], sp: [1.2, 2.6], up: [.8, 2.2], life: [.7, 1.2], gr: 9, bounce: true},
   ember: {n: 9, pal: ['#ffe6a4', '#ffa446', '#cc5626', '#661f10'], sp: [1.6, 3.4], up: [.8, 2.6], life: [.3, .55], gr: 9, emit: true, bounce: true},
   frost: {n: 8, pal: ['#ffffff', '#cfe0f4', '#8eaad0'], sp: [1.2, 2.8], up: [.8, 2.4], life: [.6, 1], gr: 9, bounce: true},
   rift: {n: 9, pal: ['#e8ccff', '#a472f0', '#5c3298'], dark: ['#1e1030', '#160c24', '#100818'], sp: [.7, 1.8], up: [-.3, .6], life: [.5, .9], gr: 0, drag: 3, emit: true},
+  desert: {n: 8, pal: ['#f0deb0', '#d6ba86', '#aa8a60'], sp: [1.2, 2.6], up: [.8, 2], life: [.6, 1.1], gr: 9, bounce: true},   // a spray of sand and dry splinters
 };
 const FOG = {      // additive ground mist, quantized to 2 levels (hard pixel edges), in world space, drifting with the wind
   frost: {c: [[8, 10, 14], [15, 19, 26]], cover: [.17, .05], drift: .35},
@@ -90,10 +96,12 @@ const OVER = {     // HD overlay: vignette colour/strength, top haze colour/stre
   ember: {v: [20, 5, 6], va: .3, h: [255, 120, 60], ha: .06},
   frost: {v: [5, 9, 20], va: .28, h: [220, 234, 255], ha: .09},
   rift: {v: [8, 3, 14], va: .32, h: [138, 74, 208], ha: .07},
+  desert: {v: [26, 14, 6], va: .24, h: [255, 228, 176], ha: .07},   // warm corners, a pale heat-haze at the top
 };
 // dust / smoke per biome (bright -> dim): landings, cliff trickle, breakables, explosions
 const DUST = {ruins: ['#c8b894', '#a8987a', '#7e7260', '#5a5246'], ember: ['#948a84', '#766e68', '#56504c', '#3a3533'],
-  frost: ['#d8e2ee', '#a8b6ca', '#8492aa', '#66748c'], rift: ['#7a6a98', '#5c4e78', '#44385a', '#2e263e']};
+  frost: ['#d8e2ee', '#a8b6ca', '#8492aa', '#66748c'], rift: ['#7a6a98', '#5c4e78', '#44385a', '#2e263e'],
+  desert: ['#ecd8aa', '#d4ba8a', '#ae9068', '#7c664a']};   // sand
 const SMOKE = ['#8a8480', '#6a6460', '#4c4744', '#302c2a'];
 // splashes: droplets / chunks, a ring on the surface (clipped to the water), rift pulls inward instead
 const SPLASH = {
@@ -106,13 +114,19 @@ const SPLASH = {
     bits: {n: 5, pal: ['#f4faff', '#cfe0f4', '#8eaad0'], sp: [.7, 1.7], up: [1.1, 2.1], life: [.8, 1.2], gr: 9, drag: 1, bounce: true, px: 2, py: 2, hold: .7},
     ring: {pal: ['#e8f0fa', '#b4c4dc', '#8494b2'], r0: .1, r1: 1, life: .7}},
   rift: {n: 14, implode: true, ring: {pal: ['#e4c8ff', '#ac80f2', '#7448c4'], r0: 1.3, r1: 0, life: .45, emit: true, noclip: true}},
+  desert: {n: 12, drops: {pal: ['#e2dcc4', '#bcb090', '#8c8264'], sp: [.3, 1.2], up: [1.5, 3], life: [.5, .8], gr: 9, drag: 1},   // the muddy creek
+    ring: {pal: ['#d4ccaa', '#aca282', '#827a5e'], r0: .1, r1: 1, life: .7}},
 };
 // stream life. kinds: flow (drifts downstream), glint (a brief sparkle), bubble (lava: grows, pops, throws embers),
 // mist (rises off the water), shimmer (a slow wave of light along the crack), suck (motes pulled down into the crack)
+// v: a nonzero v switches the biome's stream life on; the flow's pace is the shader's (waterlife.js pace: world.js WATER_TUNE rate x waterSample speed).
+// Brief D's retune of the ruins (the water moves in the shader now): 26 streaks -> 9, a few of them small foam flecks, 7 glints -> 3 and by day only
+// (the shader's own sun sparkles and depth.js's sky dashes already glitter)
 const STREAM_LIFE = {
   ruins: {v: .9, kinds: [
-    {k: 'flow', n: 26, shape: 'streak', life: [.6, 1.4], pal: ['#eaf7fa', '#bcdde6', '#8cb8c8']},
-    {k: 'glint', n: 7, pal: ['#ffffff', '#cfe6ee']}]},
+    {k: 'flow', n: 9, shape: 'streak', life: [.7, 1.5], pal: ['#eaf7fa', '#bcdde6', '#8cb8c8']},
+    {k: 'flow', n: 8, shape: 'fleck', life: [.6, 1.3], pal: ['#f8fdff', '#d4ecf2', '#a4c8d4']},
+    {k: 'glint', n: 3, day: true, pal: ['#ffffff', '#cfe6ee']}]},
   ember: {v: .22, kinds: [
     {k: 'flow', n: 14, shape: 'crust', life: [3, 6], pal: ['#4a2418', '#361a12', '#26100c']},
     {k: 'flow', n: 14, shape: 'streak', life: [.8, 1.8], pal: ['#ffd070', '#f08a30', '#a8401a'], emit: true},
@@ -124,8 +138,17 @@ const STREAM_LIFE = {
   rift: {v: 0, kinds: [
     {k: 'shimmer', n: 30, pal: ['#a878f0', '#6a44b8', '#3e2472'], emit: true},
     {k: 'suck', n: 12, life: [1.4, 2.4], pal: ['#e4c8ff', '#ac80f2', '#7448c4', '#40247a'], emit: true}]},
+  // the desert's muddy creek: silty streaks, a few pale flecks of foam, the sun's glint by day
+  desert: {v: .8, kinds: [
+    {k: 'flow', n: 8, shape: 'streak', life: [.8, 1.6], pal: ['#ddd4b4', '#c2b894', '#a29a78']},
+    {k: 'flow', n: 6, shape: 'fleck', life: [.6, 1.3], pal: ['#eee8d2', '#d4ccb0', '#b2a88a']},
+    {k: 'glint', n: 3, day: true, pal: ['#fffaf0', '#efe4cc']}]},
 };
 const PRINT = [[3, '#a4b4d0'], [6, '#bcc8dc'], [9, '#d6deea']];   // footprint age (s) -> multiply colour (deep -> faint)
+// the desert's: deep in the sand and slow to fill (the wind fills them faster: fill = x (1 + fill x its m/s)), faint and soon
+// gone on the hardpan; none on the paving or rock (world/desert.js B.groundAt says which)
+const PRINT_SAND = Object.assign([[7, '#9c8670'], [14, '#b4a088'], [22, '#cfc0aa']], {fill: .35});
+const PRINT_PAN = Object.assign([[2.5, '#c4b4a0'], [5, '#dcd0c0']], {fill: .2});
 // rift shards: 5x7 pixel crystals seen from 3 angles (spin = A B C B); m mid, d dark, L lit edge (= also emissive)
 const SHARD = [
   ['  L  ', ' mLd ', ' mLd ', 'mmLdd', ' mLd ', '  Ld ', '  d  '],
@@ -133,7 +156,7 @@ const SHARD = [
   ['  L  ', ' dLm ', ' dLm ', 'ddLmm', ' dLm ', ' dL  ', '  d  ']];
 const SH_COL = {m: '#6c4cb4', d: '#3a2868', L: '#9a7ae0'}, SH_EMIT = ['#b88cff', '#8a5ce0', '#5c3aa8'], SH_EMIT_M = '#3a2270';
 const SH_SHADOW = '#948cac';
-const WATER_H = -.18;   // world.js lowers the stream bed by this much: the surface the stream fx, rings and splashes sit on
+const WATER_H0 = -.18;   // world.js lowers the stream bed by this much (host.world.waterH, read each view: that is the surface the stream fx, rings and splashes sit on)
 
 const RGBF = new Map();   // '#rrggbb' -> [r, g, b] 0..1 (host.point takes arrays as they are: no parsing per particle)
 const rgbf = h => { let v = RGBF.get(h); if (!v) { const c = hex3(h); RGBF.set(h, v = [c[0] / 255, c[1] / 255, c[2] / 255]); } return v; };
@@ -145,8 +168,8 @@ export async function create(host) {
   const {PPM, PPMY, PPMH} = host;
   let {VW, VH} = host;   // the view size: F.resize follows the window
   const F = {name: 'atmos', label: 'Weather', ambient: true, on: true, weather: Q.get('weather') !== '0', hdOn: Q.get('hd') !== '0', night: 1, ms: 0, count: 0,
-    TUNE: {KINDS, WIND, BURST, FOG, OVER, DUST, SMOKE, SPLASH, STREAM_LIFE, PRINT, WATER_H}, windSrc: null};
-  let biome = '', kinds = [], need = true;
+    TUNE: {KINDS, WIND, BURST, FOG, OVER, DUST, SMOKE, SPLASH, STREAM_LIFE, PRINT}, windSrc: null};
+  let biome = '', kinds = [], need = true, WATER_H = WATER_H0;
   let T = 0, wind = 0, gust = 0, fogX = 0, acc = 0;
   let P = {x: 0, y: 0, z: 0, vx: 0, vy: 0, state: 'idle'}, dirX = 0, dirY = 1;
   const fx = [], prints = [], rings = [], plumes = [], strm = [];
@@ -183,7 +206,7 @@ export async function create(host) {
   const glowAt = (x, y, h) => { GA = [x, y, h, SX(x, y, h), SY(x, y, h)]; };
   const GL = [];
   const put = (bk, c, x, y, w = 1, h = 1) => { if (bk === BE) { GL.push(c, x, y, w, h, GA); return; } let a = bk.get(c); if (!a) bk.set(c, a = []); a.push(x, y, w, h); };
-  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); a.length = 0; } }
+  function flush(bk, q) { for (const [c, a] of bk) { if (!a.length) continue; q.fillStyle = c; for (let i = 0; i < a.length; i += 4) q.fillRect(a[i], a[i + 1], a[i + 2], a[i + 3]); clearArray(a); } }
   const any = bk => { for (const a of bk.values()) if (a.length) return true; return false; };
   const GO = {size: 1, alpha: 1, emit: true}, RGBC = new Map(), rgbc = c => { let v = RGBC.get(c); if (!v) RGBC.set(c, v = host.rgb(c)); return v; };
   function flushGlow() {   // the glow buffer -> emissive points at their particle's depth (alpha: the arena's glow strength, dithered)
@@ -196,7 +219,7 @@ export async function create(host) {
         host.point(ax + dX * ca + dY * sa, ay - dX * sa + dY * ca, ah, c, GO);
       }
     }
-    GL.length = 0;
+    clearArray(GL);
   }
   // a layer pixel at art offset (dx, dy) from a projected point, w x h art px (zoom scales art px)
   const lp = (bk, c, X, Y, dx = 0, dy = 0, w = 1, h = 1) => put(bk, c, X + dx * V.z, Y + dy * V.z, w * V.z, h * V.z);
@@ -209,6 +232,22 @@ export async function create(host) {
   };
   const inView = (X, Y, m) => X > -m && Y > -m && X < VW + m && Y < VH + m;
   const glowA = () => Math.max(.3, Math.min(1, 1.25 - lum(host.mood?.amb || [1, 1, 1]) * .95));
+
+  // ---------- the water's life (atmos/waterlife.js: riffles, flecks, the falls' spray, shallow rings, autumn leaves) and the water's speed ----------
+  const WL = createWaterLife(host, {V, SX, SY, lp, pp, BG, BE, inView, glowAt, wind: () => wind, weatherOn: () => F.weather});
+  // Rain, a storm and the wet ground after them quicken the river: G.setWater({speed}) (A's setter for the shader's water clock), eased over ~15 s
+  // (the clock's own sky channels ease too), set only when it moved. Everything riding the water (the streaks, the flecks, the leaves) follows waterK.
+  let waterK = 1, waterSet = 1;
+  // AUTUMN: how much the leaves linger on the water (the clock's leafFall, 0..1): they wait longer, drift to the inside bank of their bend and slow
+  // there (the centreline curves toward it: cx'' < 0 is the west bank), and a leaf that lands in the plateau's pool stays and circles (poolLeaves, capped)
+  let linger = 0, poolLeaves = 0;
+  const insideSide = (S, y) => S.cx(y + .5) + S.cx(y - .5) - 2 * S.cx(y) < 0 ? -1 : 1;
+  function waterSpeed(dt) {
+    const E = host.env, sk = E?.sky, want = !E ? 1 : Math.min(1.9, 1 + .3 * sk.rain + .35 * sk.storm + .15 * Math.min(1, E.wet || 0));
+    waterK += (want - waterK) * (1 - Math.exp(-dt / 15));
+    if (want === 1 && Math.abs(waterK - 1) < .006) waterK = 1;
+    if (waterSet !== waterK && (Math.abs(waterK - waterSet) > .004 || waterK === 1)) { waterSet = waterK; host.G?.setWater?.({speed: waterK}); }
+  }
 
   // ---------- the ground under a point: multiply baked in (the 3D ground layer mixes, it doesn't multiply) ----------
   // world.js paints the ground texture top-down at PPM px / m: read back lazily in 64 px tiles
@@ -248,6 +287,7 @@ export async function create(host) {
     return vis.length ? vis[R() * vis.length | 0] : null;
   }
   function spawn(K, p, init) {
+    p.pool = 0;
     place(K, p); p.t = 0; p.ph = R(); p.ex = 0; p.ey = 0; p.rest = 0; p.v = K.v ? rr(K.v) : 0;
     if (K.pals) p.pal = K.pals[R() * K.pals.length | 0];
     p.big = !!K.big && R() < K.big;
@@ -297,8 +337,14 @@ export async function create(host) {
     if (K.mode === 'fall') {
       if (p.rest > 0) {
         p.rest -= dt; if (p.rest <= 0) { spawn(K, p, false); return; }
-        const S = host.layout?.stream;   // a leaf that landed on the stream floats downstream
-        if (p.float && S) { p.y += flowAt(p.y) * .8 * dt; p.x = S.cx(p.y) + p.float * S.w(p.y); }
+        const S = host.layout?.stream;
+        if (p.pool) {   // a leaf in the plateau's pool circles there, slowly, a margin off the bank
+          poolLeaves++; const Pl = host.layout.pool; p.pa += p.pw * dt * .3 * waterK;
+          p.x = Pl.x + Math.cos(p.pa) * (Pl.rx - .22) * .7; p.y = Math.max(Pl.clip + .12, Pl.y + Math.sin(p.pa) * (Pl.ry - .18) * .7);
+        } else if (p.float && S) {   // a leaf that landed on the stream floats downstream; in autumn (linger) it drifts to the inside bank of its bend and slows there, an eddy
+          if (linger > 0) p.float += (insideSide(S, p.y) * .42 - p.float) * (1 - Math.exp(-dt * .35 * linger));
+          p.y += flowAt(p.y) * .9 * (1 - linger * .85 * Math.min(1, Math.abs(p.float) / .4)) * dt; p.x = S.cx(p.y) + p.float * S.w(p.y);
+        }
         return;
       }
       p.h -= p.v * dt; p.x += (sw + p.ex) * dt; p.y += p.ey * dt;
@@ -307,7 +353,13 @@ export async function create(host) {
         if (K.rest) {
           p.h = gnd; p.rest = p.restMax = K.rest * (.6 + R() * .8); p.float = 0;
           const S = host.layout?.stream;
-          if (!gnd && S && wet(p.x, p.y)) { p.float = (p.x - S.cx(p.y)) / S.w(p.y) || .01; p.rest = p.restMax = K.rest * 2.5; p.h = WATER_H; }
+          if (!gnd && S && wet(p.x, p.y)) {
+            const Pl = host.layout.pool;
+            if (Pl && host.layout.inPool(p.x, p.y)) {   // in the plateau's pool: it stays and circles there (up to a cap, then it sinks)
+              if (poolLeaves + WL.poolLeaves() >= 8) { spawn(K, p, false); return; }
+              p.pool = 1; poolLeaves++; p.pa = Math.atan2((p.y - Pl.y) / Pl.ry, (p.x - Pl.x) / Pl.rx); p.pw = R() < .5 ? -1 : 1; p.rest = p.restMax = K.rest * (3 + 5 * linger); p.h = WATER_H;
+            } else { p.float = Math.max(-.45, Math.min(.45, (p.x - S.cx(p.y)) / S.w(p.y))) || .01; p.rest = p.restMax = K.rest * 2.5 * (1 + 5 * linger); p.h = WATER_H; }
+          }
         } else { spawn(K, p, false); return; }
       }
     } else if (K.mode === 'rise') {
@@ -402,7 +454,8 @@ export async function create(host) {
     }
   }
   const dustOf = () => DUST[biome] || DUST.ruins;
-  const flowAt = y => { const S = host.layout?.stream, L = STREAM_LIFE[biome]; return S && L ? L.v * 2.6 / S.w(y) : 0; };
+  const printTone = f => { const tb = f.tab; for (let i = 0; i < tb.length; i++) if (f.t < tb[i][0]) return tb[i][1]; return tb[tb.length - 1][1]; };   // (its age's tone: no closure per print)
+  const flowAt = y => { const L = STREAM_LIFE[biome]; return L && L.v ? WL.pace(y) * waterK : 0; };   // m/s down the river: the shader's pace (+ rain)
   const SNOWPUFF = {pal: SNOW, sp: [.5, 1.5], up: [.6, 1.5], life: [.35, .6], gr: 7, drag: 3};
   const GRASS = {pal: ['#8ea452', '#6a803c', '#4a5a2a'], sp: [.3, .8], up: [1, 1.7], life: [.35, .55], gr: 7, drag: 2};
   function foot(e) {
@@ -413,11 +466,16 @@ export async function create(host) {
       const side = e.foot === 'R' ? -1 : 1, x = e.x + dirY * side * .09, y = e.y - dirX * side * .09;   // left of travel = (dy, -dx)
       let dup = false; for (let i = Math.max(0, prints.length - 4); i < prints.length; i++) if (Math.hypot(prints[i].x - x, prints[i].y - y) < .07) dup = true;
       if (!dup && !(z === 0 && wet(x, y)) && elevAt(x, y) === z) {   // no prints on water or hanging over the cliff lip
-        prints.push({x, y, z, t: 0, dx: dirX, dy: dirY});   // (the shape follows the stride ON SCREEN: picked when drawn)
+        prints.push({x, y, z, t: 0, dx: dirX, dy: dirY, tab: PRINT});   // (the shape follows the stride ON SCREEN: picked when drawn)
         if (prints.length > 240) prints.shift();
       }
       if (e.type === 'player.land' || e.type === 'prop.land' || e.big > 1) emitFx(e.x, e.y, z + .03, 7, SNOWPUFF);
       else if (sp > 4) emitFx(x, y, z + .03, 2, SNOWPUFF);
+    } else if (biome === 'desert') {   // prints in the sand and on the hardpan (the kicked-up sand is features/dust.js's)
+      const gr = host.biome.groundAt?.(e.x, e.y), tab = gr === 'sand' ? PRINT_SAND : gr === 'pan' ? PRINT_PAN : null;
+      const side = e.foot === 'R' ? -1 : 1, x = e.x + dirY * side * .09, y = e.y - dirX * side * .09;
+      let dup = !tab; for (let i = Math.max(0, prints.length - 4); i < prints.length && !dup; i++) if (Math.hypot(prints[i].x - x, prints[i].y - y) < .07) dup = true;
+      if (!dup && !(z === 0 && wet(x, y)) && elevAt(x, y) === z) { prints.push({x, y, z, t: 0, dx: dirX, dy: dirY, tab}); if (prints.length > 240) prints.shift(); }
     } else if (biome === 'ruins') {   // grass rustle: kicking through a tuft throws a few blades
       for (const p of host.entities.near(e.x, e.y, .6, nearT)) if (p.kind === 'tuft' && Math.abs(p.x - e.x) < .6 && Math.abs(p.y - e.y) < .45 && Math.abs((p.z || 0) - z) < .3) { emitFx(p.x, p.y, z + .05, 3, GRASS); break; }
     }
@@ -462,7 +520,7 @@ export async function create(host) {
         }
       }
     }
-    for (let i = prints.length - 1; i >= 0; i--) if ((prints[i].t += dt) > PRINT[PRINT.length - 1][0]) prints.splice(i, 1);
+    for (let i = prints.length - 1; i >= 0; i--) { const f = prints[i], tb = f.tab; if ((f.t += tb.fill ? dt * (1 + tb.fill * wind) : dt) > tb[tb.length - 1][0]) prints.splice(i, 1); }
     for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) >= rings[i].life) rings.splice(i, 1);
     for (let i = plumes.length - 1; i >= 0; i--) {
       const m = plumes[i], k0 = m.t / m.dur; m.t += dt; const k1 = Math.min(1, m.t / m.dur);
@@ -496,6 +554,7 @@ export async function create(host) {
   // the stream's visible stretch (world y): every y whose centreline projects near the view (any camera angle; at yaw 0
   // the arena's: the view +-12 px). Turned, more of the stream can be on screen: the particle count scales with it
   const BASE_SPAN = (270 + 24) / 24.98;   // metres of stream the arena shows at yaw 0
+  const VS = {S: null, y0: 0, y1: 0, U: [0, 1], N: [1, 0]};   // streamView's answer (one object, reused: no allocation per frame)
   function streamView() {
     const S = host.layout?.stream; if (!S || !STREAM_LIFE[biome]) return null;
     let y0 = 1e9, y1 = -1e9;
@@ -505,8 +564,9 @@ export async function create(host) {
     }
     if (y1 < y0) return null;
     // the flow's direction on screen (world south) and across it (world east): the streaks / crusts / floes follow them
-    const ul = Math.hypot(V.yx, V.yy) || 1, nl = Math.hypot(V.xx, V.xy) || 1;
-    return {S, y0: Math.max(-1, y0 - .25), y1: Math.min(31, y1 + .25), U: [V.yx / ul, V.yy / ul], N: [V.xx / nl, V.xy / nl]};
+    const ul = Math.hypot(V.yx, V.yy) || 1, nl = Math.hypot(V.xx, V.xy) || 1, o = VS;
+    o.S = S; o.y0 = Math.max(-1, y0 - .25); o.y1 = Math.min(31, y1 + .25); o.U[0] = V.yx / ul; o.U[1] = V.yy / ul; o.N[0] = V.xx / nl; o.N[1] = V.xy / nl;
+    return o;
   }
   function sSpawn(K, p, Vs, init) {
     p.t = 0; p.ph = R(); p.y = Vs.y0 + R() * (Vs.y1 - Vs.y0); p.u = (R() - .5) * .76; p.life = K.life ? rr(K.life) : 0; p.h = 0; p.wait = 0;
@@ -522,7 +582,7 @@ export async function create(host) {
     const L = STREAM_LIFE[biome], span = Vs.y1 - Vs.y0, mul = Math.min(3, Math.max(1, span / BASE_SPAN));
     if (strmFor !== biome) { strm.length = 0; strmFor = biome; for (const K of L.kinds) K._n = 0; }
     for (const K of L.kinds) {   // the arena's count per visible stretch (more when the turned view shows more stream)
-      const want = Math.round(K.n * mul);
+      const want = Math.round(K.n * mul * (K.day ? (F.night >= 1 ? 0 : F.night > .5 ? .4 : 1) : 1));
       for (; K._n < want; K._n++) { const p = {K}; sSpawn(K, p, Vs, true); strm.push(p); }
       for (let i = strm.length - 1; i >= 0 && K._n > want; i--) if (strm[i].K === K) { strm.splice(i, 1); K._n--; }
     }
@@ -530,7 +590,7 @@ export async function create(host) {
       const K = p.K;
       if (p.wait > 0) { p.wait -= dt; continue; }
       p.t += dt;
-      p.y += flowAt(p.y) * dt * (K.k === 'mist' ? .5 : K.k === 'bubble' ? .6 : 1);
+      p.y += flowAt(p.y) * (1 + .3 * (1 - 4 * p.u * p.u)) * dt * (K.k === 'mist' ? .5 : K.k === 'bubble' ? .6 : 1);
       if (p.y > Vs.y1 || p.y < Vs.y0) p.y = Vs.y0 + (((p.y - Vs.y0) % span) + span) % span;   // wrap over the visible stretch
       if (K.k === 'mist') { p.h = .5 * p.t / p.life; p.u += wind * .03 * dt; }
       if (K.k === 'suck') { const k = Math.exp(-dt * (1.2 + p.t * 1.6)); p.o *= k; p.h *= k; if (Math.abs(p.o) < .12 && p.h < .08) p.t = p.life; }
@@ -548,8 +608,8 @@ export async function create(host) {
     if (!Vs || strmFor !== biome) return;
     const S = Vs.S, bk = pass === 'emit' ? BE : BG, [ux, uy] = Vs.U, [nx, ny] = Vs.N;
     // art px (i across the flow, j along it) -> screen offsets: at yaw 0 exactly the arena's (i right, j down)
-    const at = (i, j) => [Math.round(nx * i + ux * j), Math.round(ny * i + uy * j)];
-    const run = (c, x, y, i, j, len, along) => { for (let k = 0; k < len; k++) { const [a, b] = along ? at(i, j + k) : at(i + k, j); lp(bk, c, x, y, a, b); } };
+    const offX = (i, j) => Math.round(nx * i + ux * j), offY = (i, j) => Math.round(ny * i + uy * j);
+    const run = (c, x, y, i, j, len, along) => { for (let k = 0; k < len; k++) { const ii = along ? i : i + k, jj = along ? j + k : j; lp(bk, c, x, y, offX(ii, jj), offY(ii, jj)); } };
     for (const p of strm) {
       const K = p.K;
       if (p.wait > 0 || (K.emit ? 'emit' : 'ground') !== pass) continue;
@@ -562,8 +622,9 @@ export async function create(host) {
       switch (K.k) {
         case 'flow':
           if (K.shape === 'streak') run(pal[Math.min(n - 1, fi)], x, y, 0, 0, 3 - fi, true);
+          else if (K.shape === 'fleck') run(pal[Math.min(n - 1, fi)], x, y, 0, 0, fi === 0 ? 2 : 1, true);   // a small foam fleck
           else if (K.shape === 'crust') { run(pal[0], x, y, 0, 0, p.w, false); if (p.w > 2) run(pal[2], x, y, 1, 1, p.w - 2, false); }
-          else { run(pal[0], x, y, 0, 0, p.w, false); run(pal[1], x, y, 0, 1, p.w, false); if (fi === 0 && Math.sin(T * 2 + p.ph * TAU) > .8) { const [a, b] = at(1, 0); lp(bk, '#ffffff', x, y, a, b); } }   // ice floe + glint
+          else { run(pal[0], x, y, 0, 0, p.w, false); run(pal[1], x, y, 0, 1, p.w, false); if (fi === 0 && Math.sin(T * 2 + p.ph * TAU) > .8) lp(bk, '#ffffff', x, y, offX(1, 0), offY(1, 0)); }   // ice floe + glint
           break;
         case 'glint': lp(bk, pal[a < .5 ? 0 : 1], x, y); break;
         case 'bubble':
@@ -581,7 +642,7 @@ export async function create(host) {
       for (const st of S.stones || []) {
         const X = Math.floor(SX(st.x, st.y - st.r / 1.3, WATER_H)), Y = Math.floor(SY(st.x, st.y - st.r / 1.3, WATER_H));
         if (!inView(X, Y, 12 * V.z)) continue;
-        let [a, b] = at(-3 + f, -1); lp(bk, c, X, Y, a, b); [a, b] = at(2 - f, -1); lp(bk, c, X, Y, a, b); run('#b4d0da', X, Y, -1, -2 + f, 2, false);
+        lp(bk, c, X, Y, offX(-3 + f, -1), offY(-3 + f, -1)); lp(bk, c, X, Y, offX(2 - f, -1), offY(2 - f, -1)); run('#b4d0da', X, Y, -1, -2 + f, 2, false);
       }
     }
   }
@@ -661,6 +722,8 @@ export async function create(host) {
 
   // ---------- HD overlay ----------
   let O = null, oKey = '';
+  const VG = {va: 0, ha: 0, v: [0, 0, 0], h: [0, 0, 0]};   // (G.setVignette's numbers: the same OVER entry the canvas below is painted from)
+  const SPS = {img: null, em: null, x: 0, y: 0, h: 0, px: 2, py: 3, type: 3};   // (the shards' host.sprite options, kept)
   function buildOver(w, h) {
     if (!O) O = cv(w, h); O.width = w; O.height = h;
     const q = O.getContext('2d'), Vo = OVER[biome] || OVER.ruins, rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
@@ -675,7 +738,7 @@ export async function create(host) {
     q.fillStyle = gr; q.fillRect(-1, -1, 2, 2); q.restore();
   }
 
-  function setBiome(id) { biome = id; need = true; fx.length = 0; prints.length = 0; rings.length = 0; plumes.length = 0; strmFor = ''; oKey = ''; camW = null; }
+  function setBiome(id) { biome = id; poolLeaves = 0; need = true; fx.length = 0; prints.length = 0; rings.length = 0; plumes.length = 0; strmFor = ''; oKey = ''; camW = null; WL.sync(); }
   function toggleWeather() { F.weather = !F.weather; oKey = ''; return F.weather; }
   const ms = () => { F.ms = F.ms * .95 + acc * .05; acc = 0; };
 
@@ -689,11 +752,15 @@ export async function create(host) {
       {label: 'Vignette + haze', options: ['on', 'off'], get: () => F.hdOn ? 'on' : 'off', set: v => { F.hdOn = v === 'on'; }},
     ],
     hud: () => F.weather ? '' : 'weather off (K)',
-    counts: () => ({fx: fx.length, prints: prints.length, rings: rings.length, stream: strm.length, ambient: kinds.reduce((n, K) => n + K.ps.length, 0)}),
-    dbg: {get kinds() { return kinds; }, V, get fx() { return fx; }, get strm() { return strm; }},   // tests
+    counts: () => ({fx: fx.length, prints: prints.length, rings: rings.length, stream: strm.length, ambient: kinds.reduce((n, K) => n + K.ps.length, 0), water: WL.counts()}),
+    falls: () => WL.falls(),   // the waterfalls of this biome [{id, x, y (the foot), h0 (its height), lipY, lipH, hw}] (sound / tools)
+    onArrowStuck: a => WL.arrowStuck(a),   // an arrow in the rill / outflow: a ring + droplets (called in the sim step: it only fills presentation pools)
+    dbg: {get kinds() { return kinds; }, V, get fx() { return fx; }, get strm() { return strm; }, WL, get waterK() { return waterK; }},   // tests
     view(dt, evs) {
       const t0 = performance.now();
       dt = Math.min(.05, Math.max(0, dt || 0)); T += dt;
+      WATER_H = host.world?.waterH ?? WATER_H; waterSpeed(dt);
+      { const E = host.env; linger = biome === 'ruins' && E && E.tinted ? Math.min(1, (E.leafFall || 0) * 1.6 + (E.season === 'autumn' ? .2 : 0)) : 0; }
       if (host.biome.id !== biome) setBiome(host.biome.id);
       const tm = host.time; F.night = tm === 'night' ? 1 : tm === 'dusk' ? .6 : .2;
       const pl = host.player; P = {x: pl.x, y: pl.y, z: pl.z, vx: pl.vx, vy: pl.vy, state: pl.state};
@@ -704,6 +771,7 @@ export async function create(host) {
       gust = ext ?? Math.max(0, (sn - .7) / 1.3); wind = W[0] + gust * W[1];
       fogX += wind * (FOG[biome]?.drift || 0) * dt + (biome === 'rift' ? .04 * dt : 0);
       let n = fx.length;
+      poolLeaves = 0;
       if (F.weather) { parallax(); for (const K of kinds) { K.act = actOf(K); for (let i = 0; i < K.act; i++) stepP(K, K.ps[i], dt); n += K.act; } } else camW = null;
       if (F.weather && biome === 'frost' && gust > .25 && R() < gust * 7 * dt) {   // spindrift: a gust lifts a little snow off the ground
         const [x, y] = fromVF(V.camx + R() * VW, V.camy + R() * VH);
@@ -724,6 +792,7 @@ export async function create(host) {
         else if (e.type === 'player.roll' && biome === 'frost') emitFx(e.x, e.y, elevAt(e.x, e.y) + .03, 4, SNOWPUFF);
       }
       n += stepStream(dt);
+      WL.view(dt, waterK);
       stepFx(dt);
       F.count = n;
       tick(t0);
@@ -735,35 +804,41 @@ export async function create(host) {
       view();
       const Vs = streamView();
       // ---- the ground canvas's share: stream, rings, footprints and shard shadows (multiplied in), far layers
-      drawStream(Vs, 'ground'); drawRings(false);
+      drawStream(Vs, 'ground'); drawRings(false); WL.draw('ground');
       for (const f of prints) {   // footprints: lightening in steps as they fill back in; the stride's shape as seen on screen
         const X = Math.floor(SX(f.x, f.y, f.z)), Y = Math.floor(SY(f.x, f.y, f.z));
         if (!inView(X, Y, 2 * V.z)) continue;
         const dX = f.dx * V.xx + f.dy * V.yx, dY = f.dx * V.xy + f.dy * V.yy, l = Math.hypot(dX, dY) || 1, ax = Math.abs(dX / l), ay = Math.abs(dY / l);
-        const sh = ax > .92 ? 0 : ay > .92 ? 1 : dX * dY > 0 ? 2 : 3, col = mulCss(f.x, f.y, PRINT.find(p => f.t < p[0])[1]);
+        const sh = ax > .92 ? 0 : ay > .92 ? 1 : dX * dY > 0 ? 2 : 3, col = mulCss(f.x, f.y, printTone(f));
         if (sh === 0) lp(BG, col, X, Y, -1, 0, 3, 1); else if (sh === 1) lp(BG, col, X, Y, 0, -1, 1, 2);
         else if (sh === 2) { lp(BG, col, X, Y, -1, -1); lp(BG, col, X, Y); } else { lp(BG, col, X, Y, 0, -1); lp(BG, col, X, Y, -1, 0); }
       }
       shards((x, y) => { const z = elevAt(x, y), X = Math.floor(SX(x, y, z)), Y = Math.floor(SY(x, y, z)); lp(BG, mulCss(x, y, SH_SHADOW), X, Y, -1, 0, 3, 1); });
       if (F.weather) { drawFog(); drawKinds('ground'); }
-      if (any(BG)) flush(BG, host.layer('ground'));
+      if (any(BG)) flush(BG, host.glayer('ground'));
       // ---- in front (lit, depth-tested): shards, falling weather, fx
       shards((x, y, h, i) => { const f = shardFrame(i), pv = Math.sin(T * 1.5 + i * 2.1);
-        host.sprite({img: SH_IMG[f], em: SH_EM[f][pv > .3 ? 0 : pv > -.4 ? 1 : 2], x, y, h, px: 2, py: 3, type: 3}); });
+        const s = SPS; s.img = SH_IMG[f]; s.em = SH_EM[f][pv > .3 ? 0 : pv > -.4 ? 1 : 2]; s.x = x; s.y = y; s.h = h; host.sprite(s); });   // (a kept options object)
       if (F.weather) drawKinds('front');
-      drawFx(false);
+      drawFx(false); WL.drawFront();
       // ---- glow: the arena's view-sized emitter canvas always overlapped the player, so lighting.apply drew it straight
       // over the lit frame at alpha 1.25 - lum(ambient) x .95 (clamped .3..1): faint by day, full at night. Same here
       if (F.weather) drawKinds('emit');
-      drawFx(true); drawStream(Vs, 'emit'); drawRings(true);
+      drawFx(true); drawStream(Vs, 'emit'); drawRings(true); WL.draw('emit');
       flushGlow();   // depth-tested emissive points (hidden behind walls / props)
       tick(t0);
     },
     hd(q, scale) {
       if (!F.hdOn || !biome) return;
-      const t0 = performance.now(), w = q.canvas.width, h = q.canvas.height, key = `${w}x${h}|${biome}|${F.weather}`;
-      if (key !== oKey) { oKey = key; buildOver(w, h); }
-      q.drawImage(O, 0, 0);
+      const t0 = performance.now();
+      if (host.G.setVignette) {   // the GPU draws it (gfx.js VG_FS), the same gradients, over the canvas: no blit here
+        const Vo = OVER[biome] || OVER.ruins; VG.va = Vo.va; VG.v = Vo.v; VG.h = Vo.h; VG.ha = F.weather && Vo.ha ? Vo.ha : 0;
+        host.G.setVignette(VG);
+      } else {
+        const w = q.canvas.width, h = q.canvas.height, key = `${w}x${h}|${biome}|${F.weather}`;
+        if (key !== oKey) { oKey = key; buildOver(w, h); }
+        q.drawImage(O, 0, 0);
+      }
       tick(t0);
     },
   });

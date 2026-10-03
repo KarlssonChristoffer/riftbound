@@ -6,7 +6,8 @@
 // entities in the order a scan of the whole list did (results don't depend on the grid's cells).
 // OWNS: membership (the list: world.props is this array, kept across biome rebuilds), each entity's registry record
 //   (id, grid cells, query membership: kept here, not on the entity), the queries' lists.  The entities' fields belong
-//   to the systems that use them (docs/ARCHITECTURE.md, the ownership table).
+//   to the systems that use them (docs/ARCHITECTURE.md, the ownership table). Writes: x / y / z / h while drawn (the
+//   lerp, below) and, as an entity joins, x / y / z / h / r back unchanged (their storage: refNumbers).
 // BUDGET: sync() once per sim step: a position check per entity, re-bucketing only what left its padded box.
 //   const ents = createEntities(list, bounds)
 //   ents.list / ver (bumps on every join / leave) / add(p) / remove(p) / has(p)
@@ -21,8 +22,11 @@
 //     resets, teleports) / ents.refresh(name?) (re-run a query's predicate over the list)
 //   ents.lerpBegin(alpha) / lerpEnd(): DRAWING BETWEEN SIM STEPS (core/loop.js, the fixed step): sync() notes where each
 //     entity was when the step began (x, y, z, h); lerpBegin puts the ones that moved alpha of the way from there to
-//     where they are now, for the draw; lerpEnd puts them back. moved(p) skips that for a jump (nothing slides across)
+//     where they are now, for the draw; lerpEnd puts them back. moved(p) skips that for a jump (nothing slides across).
+//     Who moved is worked out once per step, by its first draw (positions change only in sim steps): the draws between
+//     two steps lerp that list (reading four numbers off every entity a frame was ~8 KB of boxed numbers a frame)
 import {createGrid} from './spatial.js';
+import {clearArray} from '../core/mathx.js';
 
 export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
   const grid = createGrid({x0, y0, x1, y1, cell});
@@ -30,23 +34,38 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
   const queries = [];       // {name, pred, join, list, bit}
   let nextId = 1, ver = 0;
   const recOf = p => recs.get(p);
+  // An entity's body numbers, written back unchanged after a moment's non-number, as it joins. V8 then keeps these fields
+  // (for every object of its shape) as references to numbers rather than numbers in place, so reading one through a site
+  // that sees many shapes (the scans over every entity: sync below, world.update, contact) costs nothing, where it made a
+  // new heap number a read (~25 KB of garbage a frame by day). A computed number written pays a box instead: only the
+  // movers do that, a few fields a step. (Data fields only: a getter is left alone.)
+  const BODY = ['x', 'y', 'z', 'h', 'r'];
+  function refNumbers(p) {
+    for (const f of BODY) {
+      const d = Object.getOwnPropertyDescriptor(p, f);
+      if (d && d.writable && typeof d.value === 'number') { p[f] = null; p[f] = d.value; }
+    }
+  }
   function join(p) {
+    refNumbers(p);
+    // l*: at the step's start; c*: the true values while drawn (start as null: they keep the entity's number boxes, and
+    // lerpEnd puts back the very box it took, no new one)
     const rec = {p, id: nextId++, mask: 0, stamp: 0, c0: 0, c1: 0, r0: 0, r1: 0, bx0: 0, by0: 0, bx1: 0, by1: 0,
-      lx: p.x, ly: p.y, lz: p.z, lh: p.h, cx: 0, cy: 0, cz: 0, ch: 0};   // l*: at the step's start; c*: the true values while drawn
+      lx: p.x, ly: p.y, lz: p.z, lh: p.h, cx: null, cy: null, cz: null, ch: null};
     recs.set(p, rec); grid.insert(rec);
     for (const q of queries) if (q.pred(p)) { rec.mask |= q.bit; q.list.push(p); q.join?.(p); }
   }
   for (const p of list) join(p);
   function add(p) {
     if (recs.has(p)) return p;
-    list.push(p); join(p); ver++;
+    list.push(p); join(p); ver++; dropMovers();
     return p;
   }
   function remove(p) {
     const rec = recs.get(p); if (!rec) return false;
     const i = list.indexOf(p); if (i >= 0) list.splice(i, 1);
     for (const q of queries) if (rec.mask & q.bit) { const k = q.list.indexOf(p); if (k >= 0) q.list.splice(k, 1); }
-    grid.remove(rec); recs.delete(p); ver++;
+    grid.remove(rec); recs.delete(p); ver++; dropMovers();
     return true;
   }
   function query(name, pred, join = null) {
@@ -68,26 +87,36 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
   const scratch = [];
   function near(x, y, r, out, ql) {
     const bit = ql ? queries.find(q => q.list === ql)?.bit || 0 : 0;
-    scratch.length = 0; grid.query(x - r, y - r, x + r, y + r, scratch);
+    clearArray(scratch); grid.query(x - r, y - r, x + r, y + r, scratch);
     // list order = ids ascending (insertion sort: a handful of candidates)
     for (let i = 1; i < scratch.length; i++) { const a = scratch[i]; let j = i - 1; while (j >= 0 && scratch[j].id > a.id) { scratch[j + 1] = scratch[j]; j--; } scratch[j + 1] = a; }
-    out.length = 0;
+    clearArray(out);
     for (let i = 0; i < scratch.length; i++) if (!bit || scratch[i].mask & bit) out.push(scratch[i].p);
     return out;
   }
   function hide(p, on = true) { p.gone = !!on; }
   const snap = rec => { const p = rec.p; rec.lx = p.x; rec.ly = p.y; rec.lz = p.z; rec.lh = p.h; };
-  function moved(p) { const rec = recs.get(p); if (!rec) return; if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } snap(rec); }
+  function moved(p) { const rec = recs.get(p); if (!rec) return; if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } snap(rec); dropMovers(); }
+  let stepNo = 0;
   function sync() {
+    stepNo++;
     for (const rec of recs.values()) { if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } snap(rec); }
   }
-  const lerped = [], mix = (a, b, k) => typeof a === 'number' && typeof b === 'number' ? a + (b - a) * k : b;
+  // the records that moved in the last step (movStep: the step they are for; -1: work them out again) and the ones lerped
+  // this draw (kept arrays, filled by index: no garbage a frame)
+  const movers = [], lerped = [], mix = (a, b, k) => typeof a === 'number' && typeof b === 'number' ? a + (b - a) * k : b;
+  let nMov = 0, movStep = -1, nLerp = 0;
+  function dropMovers() { movStep = -1; movers.fill(null, 0, nMov); nMov = 0; }
   function lerpBegin(k) {
     if (k >= 1) return;
-    for (const rec of recs.values()) {
-      const p = rec.p, x = p.x, y = p.y, z = p.z, h = p.h;
+    if (movStep !== stepNo) {   // the first draw since the step: who moved in it
+      movStep = stepNo; nMov = 0;
+      for (const rec of recs.values()) { const p = rec.p; if (p.x !== rec.lx || p.y !== rec.ly || p.z !== rec.lz || p.h !== rec.lh) movers[nMov++] = rec; }
+    }
+    for (let i = 0; i < nMov; i++) {
+      const rec = movers[i], p = rec.p, x = p.x, y = p.y, z = p.z, h = p.h;
       if (x === rec.lx && y === rec.ly && z === rec.lz && h === rec.lh) continue;
-      rec.cx = x; rec.cy = y; rec.cz = z; rec.ch = h; lerped.push(rec);
+      rec.cx = x; rec.cy = y; rec.cz = z; rec.ch = h; lerped[nLerp++] = rec;
       if (x !== rec.lx) p.x = mix(rec.lx, x, k);
       if (y !== rec.ly) p.y = mix(rec.ly, y, k);
       if (z !== rec.lz) p.z = mix(rec.lz, z, k);
@@ -95,8 +124,8 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
     }
   }
   function lerpEnd() {
-    for (const rec of lerped) { const p = rec.p; if (p.x !== rec.cx) p.x = rec.cx; if (p.y !== rec.cy) p.y = rec.cy; if (p.z !== rec.cz) p.z = rec.cz; if (p.h !== rec.ch) p.h = rec.ch; }
-    lerped.length = 0;
+    for (let i = 0; i < nLerp; i++) { const rec = lerped[i], p = rec.p; if (p.x !== rec.cx) p.x = rec.cx; if (p.y !== rec.cy) p.y = rec.cy; if (p.z !== rec.cz) p.z = rec.cz; if (p.h !== rec.ch) p.h = rec.ch; lerped[i] = null; }
+    nLerp = 0;
   }
   return {list, add, remove, has: p => recs.has(p), hide, query, refresh, near, sync, moved, lerpBegin, lerpEnd, get ver() { return ver; }, get size() { return recs.size; }, grid, _rec: recOf};
 }

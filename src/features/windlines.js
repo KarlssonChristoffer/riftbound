@@ -17,8 +17,9 @@
 // FEATURE CONTRACT (main.js): create(host) -> F: update (simulate), frame (draw), settings, onKey, hud.
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
+import {viewRandom} from '../core/rng.js';
 const TAU = Math.PI * 2;
-const R = Math.random, rr = (a, b) => a + R() * (b - a);
+const R = viewRandom(), rr = (a, b) => a + R() * (b - a);
 export const TUNE = {
   look: 'pixel',
   fire: 1.05,         // an emitter bursts when (gust there x strength) rises past this (a breeze's full gust ~1: rarely)

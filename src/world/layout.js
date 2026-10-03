@@ -3,13 +3,18 @@
 // in metres above the ground. The biome decides how things look; this file decides WHERE things are, what they
 // collide with, how high the ground is (elev) and where the traversal features are.
 //
-//   world 62 x 30 m
+//   world 62 x 30 m (WORLD: the bounds of everything; GROUNDS: the Proving Grounds' own rect, the same today)
 //   x 7..33   walled arena (movement ring, range lane, pillar grove, light garden, N/S dummies)
 //   x 33..60  the trail, out of the east gate:
 //               stream   runs N-S at x ~40; 2.9 m wide (sprint-leap only), a 1.4 m narrows in front of the gate
 //                        (leap), and 2 stepping stones further south (chained short leaps). Falling in = respawn.
 //               plateau  x 43..60, y 2.8..11, 2.4 m high. South face = cliff; walk off any edge to drop down;
 //                        climb up / down only at the climb spot (E). Chest, pots and a crystal on top.
+//               spring   on the plateau's east half (57, 6.9): a shallow RILL (0.5-0.8 m, wadeable: not water to the sim) winds
+//                        west across the top and pours over the SOUTH edge near its south-west corner (the FALL, on the face the
+//                        default camera sees) into a POOL at the foot: round, deep like the stream (falling in = respawn; arrows
+//                        splash; spawns and brutes keep out). A shallow OUTFLOW (wadeable) runs west from the pool to the stream's
+//                        east bank, north of the narrows. The ledge between the stream and the west face stays dry.
 //               yard     below the cliff: crates, barrels, pots, explosive barrels, a crate wall hiding a cache,
 //                        and two sparring dummies that hop at you.
 //
@@ -23,10 +28,28 @@
 //   |  deco strip + N/S shooting dummies   |               o o  stepping stones   crate wall    |
 //   +--------[   ]-------------------------+                ~                     [cache]      |
 //            S gate
-export const WORLD = {WM: 62, HM: 30};
+import {flags} from '../core/flags.js';
+
+// WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
+// cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
+// rect, what buildLayout and the biomes' ground painters lay out (today the whole world; it stays at 0, 0: a painted ground
+// texel's px / PPM is its world x / y). ?world=big: 40 m more to the west, 60 m to the north and east (the ravine stays the
+// south edge): 162 x 90 m, for measuring the engine at that size (the world plan, step 2; step 3 opens and paints the land)
+const BIG = flags.get('world') === 'big';
+export const WORLD = BIG ? {x0: -40, y0: -60, x1: 122, y1: 30, WM: 162, HM: 90} : {x0: 0, y0: 0, x1: 62, y1: 30, WM: 62, HM: 30};
+export const GROUNDS = {x0: 0, y0: 0, x1: 62, y1: 30};
 export const PLAY = {x0: 7, y0: 6, x1: 33, y1: 24};
 export const SCONCE_D = .21;   // a wall sconce's stick stands this far off the wall face (the east torches; lights.js mounts them)
 export const TRAIL = {x0: 33, y0: 2.6, x1: 60, y1: 27.5};   // walkable outdoor region east of the arena
+
+// ---- where things may be: the walled arena and the trail (one place; was four copies), each use with its own margins ----
+//   walkable(x, y)  the player and pushed props: the arena and 3 m round it (the gates' aprons), the trail
+//   roamable(x, y)  enemies (combat's brutes): the arena .35 m in from its edges, the trail .5 m in (.4 m at its south edge)
+//   navArea(x, y)   the nav grid's open cells: the arena and .6 m past its east edge (the east gate meets the trail), the trail
+// Walls, water and plateaus are tested on top of these by their users
+export const walkable = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1);
+export const roamable = (x, y) => (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35) || (x > TRAIL.x0 + .5 && x < TRAIL.x1 - .5 && y > TRAIL.y0 + .5 && y < TRAIL.y1 - .4);
+export const navArea = (x, y) => (x > PLAY.x0 && x < PLAY.x1 + .6 && y > PLAY.y0 && y < PLAY.y1) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1);
 
 // ---- stream: centreline x and width per y (metres) ----
 export const STREAM = {
@@ -34,6 +57,7 @@ export const STREAM = {
   // 2.9 m (a run-leap reaches ~3.0 m and falls in; a sprint-leap ~3.6 m clears it), 1.4 m at the narrows in front of the east gate
   w: y => { const n = Math.abs(y - 15); return n < 1.2 ? 1.4 : n < 2.4 ? 1.4 + (n - 1.2) / 1.2 * 1.5 : 2.9; },
   narrows: {y: 15},
+  y0: -1, y1: 31,   // its span: north of y0 / south of y1 there is no stream (inStream)
   stones: [{x: 0, y: 23.4, r: .42}, {x: 0, y: 23.4, r: .42}],   // x filled in below (placed across the channel)
   // dry footing added during play (a crate sunk to its lid: combat/props.js) and taken away again (it broke, reset)
   addStone(o) { STREAM.stones.push(o); },
@@ -41,8 +65,8 @@ export const STREAM = {
 };
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
 export const inStream = (x, y) => {
-  if (y < -1 || y > 31) return false;
-  if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return false;
+  if (y < STREAM.y0 || y > STREAM.y1) return false;
+  if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y);   // (the plateau's pool is deep water too)
   return !STREAM.stones.some(s => Math.hypot(x - s.x, (y - s.y) * 1.3) < s.r);   // stones are dry footing
 };
 
@@ -51,6 +75,96 @@ export const PLATEAUS = [{x0: 43, y0: 2.8, x1: 60, y1: 11, h: 2.4,
   climbs: [{x: 51.5, w: 1.2}]}];        // climb spot on the south face (x = centre, w = width)
 export const elev = (x, y) => { for (const p of PLATEAUS) if (x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) return p.h; return 0; };
 export const plateauAt = (x, y) => PLATEAUS.find(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) || null;
+
+// ---- the plateau's water (river brief B, moved to the south face by B2): a spring, a shallow rill across the top, a waterfall down the
+// SOUTH face, a pool at its foot, an outflow to the river ----
+// Plain data and functions (the sim: no randomness, nothing allocated per call). world.js waterSample says what the water does,
+// biomes.js paints it, features read it from here. (The south face is the one the default camera looks at: a face on x = const has no
+// width on screen at yaw 0, which is where B's west-face waterfall was lost.)
+//   SPRING   where the water wells up: a round basin (r m) at the rill's head
+//   RILL     the shallow stream from the spring west across the top, then south to the plateau's south edge near its south-west corner,
+//            .5-.85 m wide. WADEABLE: not part of inStream (you walk through it; no slowdown yet). pts[i] = [x, y] every .1 m of x from
+//            the spring (i 0) to the lip (the flow runs west: x falls as i grows), hw[i] = half the width there, len[i] = metres of rill
+//            from the spring. It stays >= .6 m from every prop on the plateau and from the climb spot's arrival
+//   FALL     where the rill goes over the south edge: the waterfall down the south face (x = its centre, y = the face line, hw = half its
+//            width along the face, h = the drop); foot = where it lands in the pool
+//   POOL     a rounded pool at the foot of the south face: an ellipse centred south of the face line (it meets the face at an obtuse
+//            angle), clipped at the face (y < clip: the plateau's top is not water). DEEP: part of inStream. >= .4 m from the path's edge
+//   OUTFLOW  a shallow channel (.7-1.0 m wide) from the pool west to the stream's east bank, joining it north of the narrows. WADEABLE like
+//            the rill (not part of inStream: the ledge north of it stays connected to the path). pts / hw / len as the rill's, from the pool
+//            (i 0, x = x0) to a little inside the stream's band (x = x1); the flow runs west
+const _Q = PLATEAUS[0];
+export const SPRING = {x: 57, y: 6.85, r: .46};
+// a curve y(x) through [x, y, half width] points (x strictly falling): cubic Hermite with each point's slope from its neighbours, sampled
+// every dx m of x. pts / hw / len as above
+function curve(ctl, dx = .1) {
+  const m = ctl.map((c, i) => { const a = ctl[Math.max(0, i - 1)], b = ctl[Math.min(ctl.length - 1, i + 1)]; return (b[1] - a[1]) / (b[0] - a[0]); });
+  const x0 = ctl[0][0], x1 = ctl[ctl.length - 1][0], n = Math.round((x0 - x1) / dx), pts = [], hw = [], len = [0];
+  for (let i = 0, k = 0; i <= n; i++) {
+    const x = i === n ? x1 : x0 - i * dx;
+    while (k < ctl.length - 2 && x < ctl[k + 1][0]) k++;
+    const a = ctl[k], b = ctl[k + 1], w = b[0] - a[0], t = Math.max(0, Math.min(1, (x - a[0]) / w)), t2 = t * t, t3 = t2 * t;
+    pts.push([x, (2 * t3 - 3 * t2 + 1) * a[1] + (t3 - 2 * t2 + t) * m[k] * w + (3 * t2 - 2 * t3) * b[1] + (t3 - t2) * m[k + 1] * w]);
+    hw.push(a[2] + (b[2] - a[2]) * t2 * (3 - 2 * t));
+    if (i) len.push(len[i - 1] + Math.hypot(x - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  }
+  return {pts, hw, len, dx, x0, x1, lo: null, hi: null};
+}
+// lo[i] / hi[i]: the y band within which something within hw + .5 m of the curve can lie, for a point whose x index is i (the window of win samples
+// either side): curveAt leaves anything outside it alone, which is most of the bounding box
+function bands(C, win) {
+  const n = C.pts.length, m = Math.max(...C.hw) + .5; C.lo = new Float32Array(n); C.hi = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let a = 1e9, b = -1e9; for (let j = Math.max(0, i - win); j <= Math.min(n - 1, i + win); j++) { a = Math.min(a, C.pts[j][1]); b = Math.max(b, C.pts[j][1]); } C.lo[i] = a - m; C.hi[i] = b + m; }
+  return C;
+}
+// out.d = metres to the curve's axis, out.a = across it (signed: + = to the left of the flow, the south of a westward one), out.l =
+// metres along it from its start to the nearest point, out.hw = half the width there. True in the water. Its ends are round caps.
+// win = how many samples either side of the x index to test (steeper stretches need more)
+function curveAt(C, win, x, y, out) {
+  out.d = 1e9; out.a = 0; out.l = 0; out.hw = 0;
+  const P = C.pts, H = C.hw, L = C.len, n = P.length - 1, c = Math.max(0, Math.min(n, Math.round((C.x0 - x) / C.dx)));
+  if (y < C.lo[c] || y > C.hi[c]) return false;
+  for (let j = Math.max(0, c - win), e = Math.min(n - 1, c + win - 1); j <= e; j++) {
+    const ax = P[j][0], ay = P[j][1], vx = P[j + 1][0] - ax, vy = P[j + 1][1] - ay;
+    const t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy))), px = ax + vx * t, py = ay + vy * t, d = Math.hypot(x - px, y - py);
+    if (d < out.d) { out.d = d; out.l = L[j] + (L[j + 1] - L[j]) * t; out.hw = H[j] + (H[j + 1] - H[j]) * t; out.a = vx * (y - py) - vy * (x - px) < 0 ? d : -d; }
+  }
+  return out.d < out.hw;
+}
+const RILL_CTL = [[57, 6.85, .46], [56, 7.05, .27], [54.8, 7.55, .3], [53.4, 7.45, .33], [52, 6.95, .36], [50.6, 6.85, .38], [49.2, 7.35, .38],
+  [47.8, 8, .37], [46.5, 8.9, .38], [45.5, 9.8, .4], [44.85, 10.4, .41], [44.58, 10.78, .4], [44.5, _Q.y1, .4]];   // [x, y, half width]
+export const RILL = Object.assign(bands(curve(RILL_CTL), 9), {riffle: (l, w) => w < .3 && l > 1.2});   // riffle(l, hw): the narrow stretches, where the water breaks white and stays put
+// rillAt(x, y, out): see curveAt; false off the plateau's top (the rill ends at the south edge)
+export function rillAt(x, y, out) {
+  if (x < RILL.x1 - .6 || x > RILL.x0 + .6 || y < 5.8 || y > _Q.y1) { out.d = 1e9; out.a = 0; out.l = 0; out.hw = 0; return false; }
+  return curveAt(RILL, 9, x, y, out);
+}
+const _rill = {d: 0, a: 0, l: 0, hw: 0};
+export const inRill = (x, y) => rillAt(x, y, _rill);
+const _end = RILL.pts[RILL.pts.length - 1], _prev = RILL.pts[RILL.pts.length - 2], _slope = Math.abs((_end[1] - _prev[1]) / (_end[0] - _prev[0]));
+export const FALL = {x: _end[0], y: _Q.y1, hw: RILL.hw[RILL.hw.length - 1] * Math.hypot(1, 1 / _slope), h: _Q.h, foot: {x: _end[0], y: _Q.y1 + .2}};
+export const POOL = {x: 44.5, y: 11.4, rx: 1.1, ry: .75, clip: _Q.y1};
+// in the pool (ext widens the clip: world.js lowers the ground mesh's vertex ON the face's line too, so no gap shows at the foot; grow = metres the
+// ellipse is grown by, for the same: the lowered vertices then cover the whole painted pool, so its outline is drawn as painted, not as the coarse mesh)
+export const inPool = (x, y, ext = 0, grow = 0) => {
+  const rx = POOL.rx + grow, ry = POOL.ry + grow;
+  if (y < POOL.clip - ext || y > POOL.y + ry || x < POOL.x - rx || x > POOL.x + rx) return false;
+  const u = (x - POOL.x) / rx, v = (y - POOL.y) / ry;
+  return u * u + v * v < 1;
+};
+// metres from (x, y) to the pool's edge (first order; + inside, - outside), the face counting as an edge
+export const poolEdge = (x, y) => {
+  const u = (x - POOL.x) / POOL.rx, v = (y - POOL.y) / POOL.ry, rho = Math.hypot(u, v), g = Math.hypot(u / POOL.rx, v / POOL.ry);
+  return Math.min(y - POOL.clip, g > 1e-6 ? (1 - rho) * rho / g : POOL.ry);
+};
+const OUT_CTL = [[44.2, 11.5, .38], [43.3, 11.58, .4], [42.4, 11.85, .42], [41.6, 11.98, .45], [40.5, 11.9, .5]];
+export const OUTFLOW = bands(curve(OUT_CTL), 6);
+// outflowAt(x, y, out): see curveAt; out.l = metres from the pool end
+export function outflowAt(x, y, out) {
+  if (x < OUTFLOW.x1 - .6 || x > OUTFLOW.x0 + .6 || y < 11 || y > 13.4) { out.d = 1e9; out.a = 0; out.l = 0; out.hw = 0; return false; }
+  return curveAt(OUTFLOW, 6, x, y, out);
+}
+export const inOutflow = (x, y) => outflowAt(x, y, _rill);
 
 export function buildLayout(seed = 7) {
   let s = seed; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
@@ -151,15 +265,26 @@ export function buildLayout(seed = 7) {
     const k = rnd(); add(k < .45 ? 'tuft' : k < .75 ? 'bush' : 'rock', x, y, {variant: rnd() * 3 | 0, r: 0});   // (soft)
   }
 
-  // ---- surroundings outside the walls and the trail (unreachable; big shapes that set the biome mood) ----
-  const {WM, HM} = WORLD;
+  // ---- surroundings outside the walls and the trail, over the Proving Grounds (unreachable; big shapes that set the biome mood) ----
+  const WM = GROUNDS.x1 - GROUNDS.x0, HM = GROUNDS.y1 - GROUNDS.y0;
   for (let i = 0; i < 110; i++) {
-    const x = rnd() * WM, y = rnd() * HM;
+    const x = GROUNDS.x0 + rnd() * WM, y = GROUNDS.y0 + rnd() * HM;
     if (x > x0 - 1.5 && x < x1 + 1.5 && y > y0 - 1.5 && y < y1 + 1.5) continue;
     if (x > TRAIL.x0 - 1 && x < TRAIL.x1 + 1 && y > TRAIL.y0 - 1.2 && y < TRAIL.y1 + 1) continue;
     if (Math.abs(x - STREAM.cx(y)) < STREAM.w(y) / 2 + .6) continue;
     add(rnd() < .55 ? 'tree' : 'rock_big', x, y, {variant: rnd() * 3 | 0, outside: true});
   }
+
+  // ---- the plateau's spring (river brief B). Added last, so no random draw and no earlier prop depends on it. Soft scatter that
+  // landed in the water (the rill, the spring's basin, the pool and a hand of margin) is taken out; three stones stand round the spring
+  const wet = p => {
+    rillAt(p.x, p.y, _rill); if (_rill.d < _rill.hw + .4) return true;
+    if (Math.hypot(p.x - SPRING.x, p.y - SPRING.y) < SPRING.r + .55) return true;
+    outflowAt(p.x, p.y, _rill); if (_rill.d < _rill.hw + .35) return true;
+    const u = (p.x - POOL.x) / (POOL.rx + .35), v = (p.y - POOL.y) / (POOL.ry + .35); return p.y >= POOL.clip && u * u + v * v < 1;
+  };
+  for (let i = props.length - 1; i >= 0; i--) { const p = props[i]; if (!p.outside && !(p.r > 0) && (p.kind === 'tuft' || p.kind === 'bush' || p.kind === 'rock') && wet(p)) props.splice(i, 1); }
+  for (const [x, y, v] of [[57.75, 6.25, 0], [57.7, 7.5, 1], [56.45, 6.2, 2]]) add('rock', x, y, {r: 0, variant: v});
   return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5},
-    trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt};
+    trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt, spring: SPRING, rill: RILL, fall: FALL, pool: POOL, outflow: OUTFLOW, inRill, rillAt, inPool, poolEdge, inOutflow, outflowAt};
 }
