@@ -10,8 +10,8 @@ cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact sh
 wind's cloth atlas (E.9) and the hero's compositor in arrays (E.10) are done. The trees' sway was measured and left (E.9).
 Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 (E.11): done. In a real window at 164 Hz the
 game misses 0-3 vsyncs in 10 s in every scenario. The last per-frame canvas uploads (flow's marks, the stream's glints)
-are on the GPU too (E.12). The heap's garbage is down 40% (E.13, E.14: 174 -> 103 KB a frame by day, about the
-100 KB stage 1 aimed at; what's left is listed in E.14).
+are on the GPU too (E.12). The heap's garbage is down 70% (E.13-E.15: 174 -> 52 KB a frame by day, half the
+100 KB stage 1 aimed at; what's left is listed in E.15).
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -981,6 +981,85 @@ reads saved: the horde, with 60 brutes writing their positions every step, gaine
 
 Since E.13, by day: 174 -> 103 KB a frame, about 100 KB as stage 1 aimed. Left: three's uniform setters (~22 KB),
 wildlife (~9 KB), wind's cloth raster (~8 KB), the cloth's relax (~6 KB), Math.random (~3.5 KB).
+
+### E.15 The rest of the garbage (2026-10-03; bit-exact but the view's random draws)
+
+**Where it came from**, beyond E.13 and E.14:
+
+- **three.js (~22 KB a frame).**
+  - `uniform1f`..`4f` take numbers, and each is boxed on its way into the browser.
+  - The uniforms' `cache` arrays all come from one allocation site, which V8 makes generic once one uniform keeps a
+    boolean there; from then on every number stored in any of them was boxed. That includes every object's matrices
+    whenever the camera moves.
+  - The render lists were emptied with `length = 0`, which frees their stores: refilling ~150 items made ~4 KB of new
+    stores a render. They were sorted with Array.prototype.sort, which makes a work array and boxes every comparison's
+    result.
+  - `updateRanges.sort(closure)` ran for the one range the game's buffers carry: a closure and a sort for each buffer
+    upload (~5 KB).
+- **The same `length = 0` in the game:** the frame's events, the layer runs, the registry's near() scratch, the world's
+  light list, the ground layers' colour buckets (atmos, flow, wildlife), the projectiles' lerp list.
+- **A closure in a loop body that captures a loop-scoped value** makes V8 allocate a context for every iteration, even
+  when the closure sits in a branch that never runs. world.update's light records cost ~6 KB a frame this way (every
+  item, every frame); also the wisps, the cloth's snaps and atmos' footprints.
+- **A ternary that mixes a value of no known type with a number keeps the number boxed.** The cloth's `bend`
+  (`M.bend ?? P.bend`) boxed every structural link's stiffness (~6 KB).
+- **Numbers passed to callbacks that can't inline:** wind's cloth patterns, `pat(u, v)` a pixel (~7 KB); the flames'
+  `birth(...)`, 10 numbers a particle.
+- **`Math.random` returns a new heap number every call** (16 bytes, optimized or not: ~3.5 KB).
+- Literals, strings and closures made every frame: garden's stall (frame names, `{shadow: false}`, a forEach),
+  wildlife's frame names, the fish's pixel closures and the player snapshot, gfx heat's colour.
+
+**What changed:**
+
+- **three.js local patches** (`src/vendor/README.md`):
+  - the float setters upload through `uniformNfv` / `uniformMatrixNfv` from typed arrays, and keep their last values
+    in `cacheF`, a Float64Array of each uniform's own;
+  - the render lists are emptied by pop and sorted by a stable merge sort through a kept array (the same order);
+  - a single update range isn't sorted;
+  - flatten's number test uses typeof.
+- **core/mathx.js `clearArray`** (pop until empty) for arrays refilled every frame or query.
+- **view/cloth.js:** `bend` as a number (`+`); the snaps' whole-cloth moves are functions outside the loop; the rotation
+  axis is worked out only on a snap.
+- **world/world.js:** the light records come from a function outside the loop.
+- **features/wind.js:** `pat(uv)` reads a kept Float64Array.
+- **render/gfx.js:** the cards' sway is held by `NumU`, a class of its own, so its value stays a number in place;
+  heat's colour is kept.
+- **render/flames.js:** `birth(row, b)` takes one kept object.
+- **core/rng.js `viewRandom()`:** firesim, lights, garden, weather and windlines take their presentation randomness
+  from a mulberry32 seeded from Math.random once (it still differs run to run).
+- **wildlife:**
+  - frame names come from tables or a memo per eye;
+  - the fish's pixels go through a function;
+  - the player snapshot and the predicates are kept;
+  - the sprites' positions are written to the kept options.
+- **garden, lights (the wisps), atmos (the footprints):** as above.
+
+**Checks:**
+
+- With the five generators set back to Math.random (a copy), golden is 16 / 16 identical against the code before, and
+  the 144 Hz captures are 10 / 10 identical: everything but the random source is bit-exact.
+- With `viewRandom`, the captures differ wherever presentation randomness shows: sparks, flames, rain, snow, the soft
+  glows. Side by side (`tmp/perf-tools/out/viewrandom_compare.jpg`) it is the same look with other draws. Like the uuid
+  patch (aa881eb), this shifts golden's seeded sequence once: references captured before it don't compare.
+- smoke and simview pass.
+
+**Results** (garbage per frame at a fixed 164 Hz step after 45 s of play; the A/B's frame times):
+
+| | Before | After |
+|---|---|---|
+| day: garbage a frame (sampled, fixed 164 Hz step) | 103 KB | 52 KB (-49%) |
+| horde (60): garbage a frame | 118 KB | 66 KB (-44%) |
+| day / horde: heap growth a frame (perf.counts, in the A/B) | 111 / 127 KB | 73 / 86 KB |
+| day: frame (interleaved A/B, median) | 1.42 ms | 1.42 ms (-0.5%, within noise; median slice 0.95) |
+| horde: frame | 1.89 ms | 1.68 ms (-11%; median slice 0.93) |
+
+`G.render` -5% by day and -14% in the horde (the uniform setters, the render lists), `cloth.sim` -5..-18%,
+`world.update` -14% in the horde. Draws and uploads are unchanged. Since E.13, by day: 174 -> 52 KB a frame.
+
+**What's left** (~52 KB a frame by day). Mostly numbers passed to calls the optimizer didn't inline, each boxed. The
+biggest sites: lights' particle draw (G.fx / host.point, ~3 KB), wildlife's sprites and ground layer (~6 KB), atmos'
+particles (~3 KB), firesim's draw (~1 KB). None is over ~3.5 KB. The fix for each is the same as for the flames' births:
+pass a kept object, not the numbers.
 
 ---
 

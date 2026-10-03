@@ -23,9 +23,10 @@ import * as WORLD from '../world/world.js';
 import {ART} from '../world/biomes.js';
 import {geoOf, M4, box, along, pack, art} from '../world/kit3d.js';
 import {clamp} from '../core/mathx.js';
+import {viewRandom} from '../core/rng.js';
 
 const TAU = Math.PI * 2;
-const R = Math.random, rr = (a, b) => a + R() * (b - a);
+const R = viewRandom(), rr = (a, b) => a + R() * (b - a);
 // how high these stop arrows (world.js PROP_TOP, read by sim/projectiles.js)
 WORLD.propTop({stall: 1.05, merchant: 0, ruin: 2.4, bench: .5, goods: .75});
 
