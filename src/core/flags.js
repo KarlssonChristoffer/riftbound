@@ -38,6 +38,7 @@ export const FLAG_DOCS = {
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
   foes: '0: no gunmen in the desert sandbox (features/foes.js)', blood: '0: no blood from bullet hits (features/blood.js; menu > Graphics > Effects > Blood)',
+  smoke: 'pixel | hybrid | strands | soft: the gun smoke\'s look (features/gunfx/smoke.js; Shift+V cycles it in dev mode)',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
   gunsfx: 'hollywood | gritty: the gun sounds\' western-movie flavor (audio/runtime/events.js GUN_SFX; menu > Audio > Gun sounds, remembered)',
   battlemusic: '1: the premade Six Chambers songs follow the fight (features/battlemusic.js); off by default: the procedural score plays',

@@ -4,34 +4,35 @@
 //   flash    HD: a muzzle flash at the pose's GunMuzzle0 for ~4 frames (pre-rendered flame stars, turned along the
 //            barrel on screen; the Navy's bigger and redder), plus a short warm point light (F.lights) for the yard
 //   blast    world lines (glowing): burning powder grains thrown out of the muzzle along the shot
-//   smoke    HD: puffs of gun smoke from the muzzle that rise, spread, drift downwind and fade, and a jet out of each side
-//            of the cylinder gap; a thin wisp keeps curling off the barrel for a moment after the last shot, and while
-//            the gunslinger blows it off (gun_blow)
+//   smoke    gunfx/smoke.js: the jet of gun smoke along the shot that stops within a metre, then rolls in eddies,
+//            rises and drifts downwind, and a jet out of each side of the cylinder gap; a thin wisp keeps curling off
+//            the barrel for a moment after the last shot, and while the gunslinger blows it off (gun_blow). Four looks
+//            (pixel | hybrid | strands | soft): Shift+V in dev mode, the menu's Dev tab, ?smoke=
 //   tracer   world lines (glowing): each bullet in flight as a streak behind its head; its last step (the impact) as a
 //            streak that shrinks into the impact in ~70 ms (a bullet that hit within its first step is seen only so)
 //   cases    world points: brass cases dropping from the cylinder on a reload's eject, bouncing, lying a while
 //   impacts  by what the bullet met (surfaceOf: bullet.impact's surf, the prop there by its kind, the desert's groundAt):
 //            sand / dirt / snow a dust kick and a puff; stone a spray of grey chips, a puff and now and then sparks; adobe
 //            tan chips and a dusty puff; wood splinters; metal a burst of sparks. Bits are world points, sparks glowing
-//            streaks, puffs HD (tinted). A mark: a scuff in the ground (features/flow.js F.stamp), a hole in a wall, prop
-//            or tree (world points just off its face, fading). A body hit is blood's (features/blood.js)
+//            streaks, puffs the smoke's (tinted). A mark: a scuff in the ground (features/flow.js F.stamp), a hole in a
+//            wall, prop or tree (world points just off its face, fading). A body hit is blood's (features/blood.js)
 //   others   the desert's gunmen (features/foes): their shots (foe.shoot) flash, spit grains and smoke at the muzzle the
 //            event names (a few at once), their reloads drop cases (foe.reload), their bullets end like yours
 //            (bullet.impact); their tracers in flight are drawn by their own view with this look (tracer(), exported)
-// OWNS: its pools (typed arrays, capped; reused, nothing allocated per frame). READS: host.P, host.PL.gun, host.weapon,
-// host.arrows, events (player.shoot / reload, foe.shoot / reload, bullet.impact, arrow.hit, combat.hit), host.wind (the
-// smoke's drift), host.yaw / zoom, host.mouse / VW / VH (the reticle), host.entities.near + host.biome.groundAt (what a
-// bullet hit), flow's F.stamp (the ground's scuffs).
+// OWNS: its pools (typed arrays, capped; reused, nothing allocated per frame) and its smoke (gunfx/smoke.js).
+// READS: host.P, host.PL.gun, host.weapon, host.arrows, events (player.shoot / reload, foe.shoot / reload, bullet.impact,
+// arrow.hit, combat.hit), host.wind (the smoke's drift), host.yaw / zoom, host.mouse / VW / VH (the reticle),
+// host.entities.near + host.biome.groundAt (what a bullet hit), flow's F.stamp (the ground's scuffs).
 // BUDGET: view ~.03 ms with a fanned cylinder in the air and its impacts (<= 320 bits, 48 holes); HD: <= 120 drawImage calls.
 import {WEAPONS} from '../content/weapons.js';
 import {rgbOf} from '../core/color.js';
 import {hypot2, hypot3} from '../core/mathx.js';
+import {SMOKE, createSmoke} from './gunfx/smoke.js';
 
 export const TUNE = {
   flash: {life: .065, len: .95, glow: .34, navy: 1.3, fan: 1.1, light: {radius: 4.6, intensity: 3.4, life: .11, color: '#ffc46a'}},
   blast: {n: 6, navy: 9, foe: 4, speed: [7, 13], spread: .22, life: [.04, .11]},   // powder grains: count, m/s, rad either side, s
-  smoke: {max: 110, puffs: 5, life: [1, 1.9], size: [.13, .26], grow: .6, rise: .45, speed: 2.3, drag: 3, alpha: .5, wisp: 1.6, wispGap: .09,
-    gap: 2, gapSpeed: 1.1, gapBack: .22},   // the cylinder gap's side jets: puffs a side, m/s out, m back from the muzzle
+  smoke: SMOKE,   // (gunfx/smoke.js)
   tracer: {len: 2.4, head: .45, mid: 1.1, last: .07},
   cases: {max: 36, life: 5, grav: 9.8, bounce: .35},
   bits: {max: 320},
@@ -68,9 +69,6 @@ for (const [k, list] of Object.entries(PALS)) { BASE[k] = COLS.length; for (cons
 // a hole: its dark middle (2 px across) and a pale rim pixel above it, by material
 const HOLE = {stone: ['#34302e', '#d8d2c8'], adobe: ['#4a3628', '#e4cca8'], wood: ['#2a1c12', '#d8b080'], metal: ['#26262a', '#d0d4dc']};
 const HOLES = Object.keys(HOLE), HCOL = HOLES.map(k => HOLE[k].map(rgbOf));
-// the puffs' tints (HD; made once as sprites): gun smoke, then each material's dust
-const TINTS = {smoke: [236, 232, 224], sand: [244, 232, 202], dirt: [218, 202, 174], snow: [246, 248, 255], stone: [208, 204, 198], adobe: [222, 196, 162], wood: [208, 186, 150]};
-const TINT = Object.keys(TINTS);
 const R = Math.random, RR = (a, b) => a + R() * (b - a);   // presentation's randomness
 // a bullet in flight as a streak behind its head (x, y, h; u: its unit direction), L m long at most (how far it has
 // come: a fresh one is short): a white-hot head, a gold middle (both glowing), a dull copper tail. Other shooters' bullets
@@ -89,7 +87,7 @@ function seg(host, x, y, h, ux, uy, uh, d0, d1, col, emit) {
 export const order = {after: ['combat']};
 export async function create(host) {
   const gun = () => host.weapon?.kind === 'gun' ? host.PL.gun : null;
-  const MZ = {x: 0, y: 0, a: 0}, W3 = {x: 0, y: 0, h: 0}, WIND = {x: 0, y: 0, g: 0}, SC = [0, 0, 0], NEAR = [], AT = {x: 0, y: 0, h: 0};
+  const MZ = {x: 0, y: 0, a: 0}, W3 = {x: 0, y: 0, h: 0}, SC = [0, 0, 0], NEAR = [], AT = {x: 0, y: 0, h: 0};
   const view = (x, y, h) => host.G.toScreenInto(x, h, y, SC);   // world -> view px, no allocation (host.toView's maths)
   // the muzzle in the world this frame: the pose's muzzle (sprite px from the feet) put back through the camera at the
   // player's depth: exact on screen, which is all the HD layers need
@@ -101,11 +99,6 @@ export async function create(host) {
 
   // ---- pre-rendered sprites (made once) ----
   const mk = (w, h, fn) => { const c = document.createElement('canvas'); c.width = w; c.height = h; fn(c.getContext('2d'), w, h); return c; };
-  const puffImgs = TINT.map(k => mk(64, 64, (q, w) => {
-    const [r, g, b] = TINTS[k], d = (v, f) => Math.round(v * f), G = q.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
-    G.addColorStop(0, `rgba(${r},${g},${b},.9)`); G.addColorStop(.45, `rgba(${d(r, .91)},${d(g, .9)},${d(b, .89)},.55)`); G.addColorStop(1, `rgba(${d(r, .85)},${d(g, .84)},${d(b, .83)},0)`);
-    q.fillStyle = G; q.fillRect(0, 0, w, w);
-  }));
   // a flash: a hot core and flame lobes along +x (the barrel), a side spray and a cross of short spikes; three variants
   const flashImg = [0, 1, 2].map(v => mk(112, 56, (q, w, h) => {
     q.globalCompositeOperation = 'lighter';
@@ -123,23 +116,15 @@ export async function create(host) {
     g.addColorStop(0, 'rgba(255,252,230,1)'); g.addColorStop(.25, 'rgba(255,220,140,.85)'); g.addColorStop(1, 'rgba(255,140,40,0)');
     q.fillStyle = g; q.fillRect(0, 0, w, w);
   });
-  // ---- state: the flash, the smoke (SoA pools), tracers' last streaks, cases, bits, holes ----
-  const FL = {t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0};
+  // ---- state: the flash, the smoke (gunfx/smoke.js), tracers' last streaks, cases, bits, holes ----
+  const FL = {t: -9, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0};   // t: the flash's time left; it runs on below 0 while its light fades
   const LIGHT = {x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: 7450}, LIT = [LIGHT], NONE = [];
   // other shooters' flashes (foe.shoot): each at the muzzle its event names, along its shot; one light, the newest's
   const OF = []; for (let i = 0; i < 6; i++) OF.push({t: 0, v: 0, k: 1, a: 0, x: 0, y: 0, h: 0});
   let ofI = 0;
   const OLIGHT = {x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: 7451}, LITS = [], OFL = {t: -9, k: 1};
-  const SM = TUNE.smoke.max, sx = new Float32Array(SM), sy = new Float32Array(SM), sh = new Float32Array(SM), svx = new Float32Array(SM),
-    svy = new Float32Array(SM), svh = new Float32Array(SM), st = new Float32Array(SM), sl = new Float32Array(SM), ss = new Float32Array(SM), sg = new Float32Array(SM),
-    sk = new Uint8Array(SM), sa = new Float32Array(SM);
-  let sN = 0, wispT = 0, wispFor = 0;
-  // grow: x TUNE.smoke.grow (a wisp: thin, it barely spreads); tint: TINT's index (0 gun smoke); alpha: x the smoke's
-  function puff(x, y, h, vx, vy, vh, life, size, grow = 1, tint = 0, alpha = 1) {
-    let i = sN < SM ? sN++ : -1;
-    if (i < 0) { let o = 0; for (let k = 1; k < SM; k++) if (st[k] / sl[k] > st[o] / sl[o]) o = k; i = o; }   // full: the oldest goes
-    sx[i] = x; sy[i] = y; sh[i] = h; svx[i] = vx; svy[i] = vy; svh[i] = vh; st[i] = 0; sl[i] = life; ss[i] = size; sg[i] = grow; sk[i] = tint; sa[i] = alpha;
-  }
+  const smoke = createSmoke(host);
+  let wispT = 0, wispFor = 0;
   const TR = [], TRN = 16; for (let i = 0; i < TRN; i++) TR.push({x0: 0, y0: 0, h0: 0, x1: 0, y1: 0, h1: 0, t: 9});
   let trI = 0;
   const CM = TUNE.cases.max, cx = new Float32Array(CM), cy = new Float32Array(CM), ch = new Float32Array(CM), cvx = new Float32Array(CM),
@@ -212,7 +197,7 @@ export async function create(host) {
         bit(x, y, h + lift, -ux * back + ux * on - uy * side, -uy * back + uy * on + ux * side, RR(up[0], up[1]), RR(life[0], life[1]), b0 + i % 3, grav);
       }
     }
-    if (I.puff) { const [tint, n, size, life, rise] = I.puff, k = TINT.indexOf(tint); for (let i = 0; i < n; i++) puff(x - ux * .05, y - uy * .05, h + .05 + i * .05, -ux * RR(.2, .6) + RR(-.2, .2), -uy * RR(.2, .6) + RR(-.2, .2), rise * RR(.5, 1.3), RR(life[0], life[1]), size * RR(.8, 1.2), .7, k, 1.8); }
+    if (I.puff) { const [tint, n, size, life, rise] = I.puff; smoke.dust(x, y, h, ux, uy, tint, n, size, life, rise); }
     const [pS, n0, n1] = I.spark;
     if (pS && R() < pS) {   // sparks: glowing streaks bouncing back off the face
       const S = TUNE.sparks, n = Math.round(RR(n0, n1)), b0 = BASE.spark;
@@ -238,7 +223,10 @@ export async function create(host) {
     name: 'gunfx', label: 'Gun fx', on: true, TUNE,
     toggle() { F.on = !F.on; return F.on; },
     surfaceOf,   // (bullet.impact -> its material: for anything that wants it, e.g. a sound per surface)
-    count() { let h = 0; for (let i = 0; i < HM_; i++) if (ht[i] < TUNE.holes.life) h++; return {bits: bN, smoke: sN, holes: h, cases: cN}; },   // (tests)
+    count() { let h = 0; for (let i = 0; i < HM_; i++) if (ht[i] < TUNE.holes.life) h++; return {bits: bN, smoke: smoke.n, holes: h, cases: cN}; },   // (tests)
+    // the smoke's look (gunfx/smoke.js): Shift+V cycles it (a dev key), the menu's Dev tab picks it
+    settings: () => [{label: 'Smoke', options: SMOKE.STYLES, get: () => SMOKE.style, set: v => { SMOKE.style = v; }}],
+    onKey(k, e) { if (k !== 'v' || !e?.shiftKey) return false; const S = SMOKE.STYLES; SMOKE.style = S[(S.indexOf(SMOKE.style) + 1) % S.length]; return true; },
     view(dt, evs) {
       const g = gun();
       for (const e of evs) {
@@ -248,11 +236,7 @@ export async function create(host) {
           view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h); Q.a = Math.atan2(SC[1] - y0, SC[0] - x0);
           OLIGHT.x = e.x; OLIGHT.y = e.y; OLIGHT.h = e.h; OFL.t = TUNE.flash.life; OFL.k = Q.k;
           blast(e.x, e.y, e.h, e.vx, e.vy, TUNE.blast.foe + (navy ? 2 : 0));
-          const S = TUNE.smoke, n = S.puffs + (navy ? 2 : 0);
-          for (let i = 0; i < n; i++) {
-            const sp = S.speed * RR(.2, 1) * (navy ? 1.3 : 1.1);
-            puff(e.x + e.vx * .08 * i, e.y + e.vy * .08 * i, e.h + RR(-.03, .03), e.vx * sp + RR(-.3, .3), e.vy * sp + RR(-.3, .3), RR(.05, .3), RR(S.life[0], S.life[1]), RR(S.size[0], S.size[1]) * (navy ? 1.4 : 1));
-          }
+          smoke.shot(e.x, e.y, e.h, e.vx, e.vy, SMOKE.puffs + (navy ? 2 : 0), navy ? 1.4 : 1, navy ? 1.3 : 1.1, false);
         } else if (e.type === 'player.shoot') {
           const w = WEAPONS[e.gun] || {}, navy = e.gun === 'brass_navy';
           FL.t = TUNE.flash.life; FL.v = (R() * 3) | 0; FL.k = (navy ? TUNE.flash.navy : 1) * (e.fan ? TUNE.flash.fan : 1);
@@ -261,18 +245,8 @@ export async function create(host) {
           view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h); FL.a = Math.atan2(SC[1] - y0, SC[0] - x0);
           LIGHT.x = e.x; LIGHT.y = e.y; LIGHT.h = e.h;
           blast(e.x, e.y, e.h, e.vx, e.vy, navy ? TUNE.blast.navy : TUNE.blast.n);
-          const S = TUNE.smoke, n = S.puffs + (navy ? 1 : 0);
-          for (let i = 0; i < n; i++) {
-            const sp = S.speed * RR(.2, 1) * (w.push ? 1 + w.push : 1);
-            puff(e.x + e.vx * .08 * i, e.y + e.vy * .08 * i, e.h + RR(-.03, .03), e.vx * sp + RR(-.3, .3), e.vy * sp + RR(-.3, .3), RR(.05, .3), RR(S.life[0], S.life[1]), RR(S.size[0], S.size[1]) * (navy ? 1.25 : 1));
-          }
-          // the cylinder gap: a jet out of each side, a hand back from the muzzle
-          const gx = e.x - e.vx * S.gapBack, gy = e.y - e.vy * S.gapBack;
-          for (let i = 0; i < S.gap * 2; i++) {
-            const sd = i & 1 ? 1 : -1, v = S.gapSpeed * RR(.6, 1.2);
-            puff(gx, gy, e.h + RR(-.02, .03), -e.vy * sd * v + e.vx * RR(0, .4), e.vx * sd * v + e.vy * RR(0, .4), RR(.05, .25), RR(S.life[0], S.life[1]) * .6, RR(S.size[0], S.size[1]) * .55);
-          }
-          wispFor = TUNE.smoke.wisp;
+          smoke.shot(e.x, e.y, e.h, e.vx, e.vy, SMOKE.puffs + (navy ? 1 : 0), navy ? 1.25 : 1, w.push ? 1 + w.push : 1, true);   // (+ the cylinder gap's jets)
+          wispFor = SMOKE.wisp;
         } else if (e.type === 'bullet.impact') {
           const T = TR[trI]; trI = (trI + 1) % TRN;
           T.x0 = e.x0 ?? e.x; T.y0 = e.y0 ?? e.y; T.h0 = e.h0 ?? e.h; T.x1 = e.x; T.y1 = e.y; T.h1 = e.h; T.t = 0;
@@ -285,7 +259,7 @@ export async function create(host) {
           }
         }
       }
-      if (FL.t > 0) FL.t -= dt;
+      if (FL.t > -TUNE.flash.light.life) FL.t -= dt;   // (past 0 too: the light outlives the flash)
       for (const Q of OF) if (Q.t > 0) Q.t -= dt;
       if (OFL.t > -TUNE.flash.light.life) OFL.t -= dt;
       // the wisp off the barrel after a shot, and while the gunslinger blows on it
@@ -293,20 +267,14 @@ export async function create(host) {
       if (g && (wispFor > 0 || blowing)) {
         wispFor -= dt; wispT -= dt;
         if (wispT <= 0) {
-          wispT = TUNE.smoke.wispGap * (blowing ? .6 : 1);
+          wispT = SMOKE.wispGap * (blowing ? .6 : 1);
           const m = muzzleWorld(g);
-          if (m) puff(m.x, m.y, m.h + .02, RR(-.08, .08), RR(-.08, .08), blowing ? RR(.1, .3) : RR(.25, .45), RR(.6, 1.1), RR(.025, .04), .3);
+          if (m) smoke.wisp(m.x, m.y, m.h, blowing);
         }
       }
-      // smoke: rises, slows, drifts with the wind, grows; puffs past their life are swapped out
-      const Wd = host.wind, wind = Wd?.on && Wd.at ? Wd.at(host.player.x, host.player.y, WIND) : null, S = TUNE.smoke, dr = Math.exp(-S.drag * dt);
-      for (let i = sN - 1; i >= 0; i--) {
-        st[i] += dt;
-        if (st[i] >= sl[i]) { sN--; sx[i] = sx[sN]; sy[i] = sy[sN]; sh[i] = sh[sN]; svx[i] = svx[sN]; svy[i] = svy[sN]; svh[i] = svh[sN]; st[i] = st[sN]; sl[i] = sl[sN]; ss[i] = ss[sN]; sg[i] = sg[sN]; sk[i] = sk[sN]; sa[i] = sa[sN]; continue; }
-        svx[i] = svx[i] * dr + (wind ? wind.x * .35 : 0) * (1 - dr); svy[i] = svy[i] * dr + (wind ? wind.y * .35 : 0) * (1 - dr);
-        svh[i] = svh[i] * dr + S.rise * (1 - dr);
-        sx[i] += svx[i] * dt; sy[i] += svy[i] * dt; sh[i] += svh[i] * dt;
-      }
+      // smoke: slows, rolls in its eddies, rises, goes with the wind where it is and is torn up by it; puffs past their life
+      // are swapped out
+      const Wd = host.wind; smoke.step(dt, Wd?.on && Wd.at ? Wd : null);
       for (const T of TR) if (T.t < 9) T.t += dt;
       // cases: fall, bounce, lie, then go
       const CS = TUNE.cases;
@@ -328,6 +296,7 @@ export async function create(host) {
       for (let i = 0; i < HM_; i++) if (ht[i] < 99) ht[i] += dt;
     },
     frame() {
+      smoke.frame();
       // tracers: every bullet in flight, a streak behind its head (length capped by how far it has come)
       const T = TUNE.tracer;
       for (const a of host.arrows) {
@@ -371,15 +340,9 @@ export async function create(host) {
     },
     hd(q, sc) {
       let others = false; for (const Q of OF) if (Q.t > 0) others = true;
-      if (!sN && FL.t <= 0 && !others) return;
+      if (!smoke.n && FL.t <= 0 && !others) return;
       const z = host.zoom, px = host.PPM * z * sc;   // display px per metre
-      // smoke and dust first (the flash glows through it)
-      for (let i = 0; i < sN; i++) {
-        const k = st[i] / sl[i], s = view(sx[i], sy[i], sh[i]), r = (ss[i] + TUNE.smoke.grow * sg[i] * Math.sqrt(st[i])) * px;
-        q.globalAlpha = Math.min(1, TUNE.smoke.alpha * sa[i] * (sg[i] < 1 ? .6 : 1) * (k < .1 ? k / .1 : 1 - (k - .1) / .9) ** 1.4);
-        q.drawImage(puffImgs[sk[i]], s[0] * sc - r, s[1] * sc - r, r * 2, r * 2);
-      }
-      q.globalAlpha = 1;
+      smoke.hd(q, sc);   // (the soft look's puffs: first, the flash glows through them)
       const g = gun();
       if (FL.t > 0 && g) {
         const m = muzzleWorld(g);
