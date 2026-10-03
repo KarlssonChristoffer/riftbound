@@ -480,6 +480,8 @@ export function createCore(host) {
       host.world.addItem(b);
       return b;
     },
+    // an enemy heals (a game effect: features/affixes.js, a Vampiric one's drain and blows): hp up to its max -> how much
+    heal(p, n) { if (p.broken || !(p.hp > 0) || !(n > 0)) return 0; const h = Math.min(p.maxHp - p.hp, Math.round(n)); if (h > 0) p.hp += h; return Math.max(0, h); },
     get enemies() { if (enemyAt !== enemyVer) { enemyList = brutes.filter(b => b.hunter && !b.broken); enemyAt = enemyVer; } return enemyList; },
     clearEnemies() { for (const b of brutes) if (b.hunter && !b.dead) { ents.hide(b); b.broken = true; dead.push(b); } enemyVer++; drop(); },
     // the yard's sparring pair sits out a run (retire true) and comes back after it

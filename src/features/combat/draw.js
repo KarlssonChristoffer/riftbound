@@ -201,7 +201,7 @@ export function createDraw(host, core, phys) {
       const x0 = Math.round(x - w / 2), y0 = Math.round(y);
       og.fillStyle = 'rgba(14,10,14,.85)'; og.fillRect(x0 - 1, y0 - 1, w + 2, hh + 2);
       og.fillStyle = '#f4efe4'; og.fillRect(x0, y0, Math.round(w * b.hpShow / b.maxHp), hh);
-      og.fillStyle = b.rooted ? '#8ab0d8' : '#d8483a'; og.fillRect(x0, y0, Math.round(w * b.hp / b.maxHp), hh);
+      og.fillStyle = b.rooted ? '#8ab0d8' : b.bar || '#d8483a'; og.fillRect(x0, y0, Math.round(w * b.hp / b.maxHp), hh);   // (bar: an affix's colour, features/affixes.js)
     }
     // damage numbers: pop, rise, fade; crits bigger and gold
     og.textAlign = 'center'; og.textBaseline = 'middle'; og.lineJoin = 'round';

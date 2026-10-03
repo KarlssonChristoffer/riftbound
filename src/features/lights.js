@@ -852,6 +852,7 @@ export async function create(host) {
     LLIST.length = nLR; return LLIST;
   };
   F.onArrowHit = (a, p) => { if (a.fire && BURNS[p.kind]) ignite(p); };   // nothing returned: combat resolves the hit
+  F.ignite = p => ignite(p);   // set a wooden prop alight (a SIM call: features/affixes.js's burning ground); not wood, broken or burning: nothing
   F.interact = p => {
     if (p === beacon && beacon.unlit) { light(beacon); return true; }
     if (p === camp && F.on) { tend(); return true; }
