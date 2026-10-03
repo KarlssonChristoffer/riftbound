@@ -34,6 +34,7 @@ const PAL = {
   vampiric: {beam: C('#ff4a6a'), core: C('#ffd0d8'), dim: C('#8a1a32'), blood: [C('#ffb0bc'), C('#ff3a5a'), C('#b01a3a'), C('#5a0a1a')]},
 };
 const FONT = '"Segoe UI", system-ui, sans-serif';
+const FONTS = new Map(), font = (w, px) => { const k = w * 1000 + px; let f = FONTS.get(k); if (!f) FONTS.set(k, f = `${w} ${px}px ${FONT}`); return f; };   // (a string a size, made once)
 // pixel shapes over a bearer's head (rows top to bottom, '.' empty; a letter is a colour of its palette below): what it
 // is, readable at a glance by day as by night. Anchored at their bottom centre
 const SHAPES = {
@@ -321,7 +322,7 @@ export function createAffixLook(host, sim) {
   };
   const SV = [0, 0, 0];
   const text = (q, s, x, y, size, col) => {
-    q.font = `800 ${Math.round(size)}px ${FONT}`; q.textAlign = 'center'; q.textBaseline = 'alphabetic';
+    q.font = font(800, Math.round(size)); q.textAlign = 'center'; q.textBaseline = 'alphabetic';
     q.lineJoin = 'round'; q.lineWidth = Math.max(2, size * .22); q.strokeStyle = 'rgba(10,8,12,.9)'; q.strokeText(s, x, y); q.fillStyle = col; q.fillText(s, x, y);
   };
 
@@ -391,11 +392,11 @@ export function createAffixLook(host, sim) {
       // the first-sighting cards (top left, under the run's banner line)
       for (let i = 0; i < CARDS.length; i++) {
         const c = CARDS[i], A = AFFIXES[c.id], a = clamp(Math.min(c.t / .3, (CARD_T - c.t) / .6), 0, 1), x = 22 * u, y = (110 + i * 46) * u;
-        q.font = `500 ${Math.round(10.5 * u)}px ${FONT}`; const w = q.measureText(A.desc).width + 22 * u;
+        q.font = font(500, Math.round(10.5 * u)); const w = q.measureText(A.desc).width + 22 * u;
         q.globalAlpha = a; q.fillStyle = 'rgba(12,10,16,.72)'; q.fillRect(x - 10 * u, y - 18 * u, w, 40 * u);
         q.fillStyle = A.col; q.fillRect(x - 10 * u, y - 18 * u, 3 * u, 40 * u);
-        q.textAlign = 'left'; q.font = `800 ${Math.round(14 * u)}px ${FONT}`; q.fillStyle = A.col; q.fillText(A.name, x, y - 1 * u);
-        q.font = `500 ${Math.round(10.5 * u)}px ${FONT}`; q.fillStyle = '#e8e2d2'; q.fillText(A.desc, x, y + 14 * u);
+        q.textAlign = 'left'; q.font = font(800, Math.round(14 * u)); q.fillStyle = A.col; q.fillText(A.name, x, y - 1 * u);
+        q.font = font(500, Math.round(10.5 * u)); q.fillStyle = '#e8e2d2'; q.fillText(A.desc, x, y + 14 * u);
         q.globalAlpha = 1;
       }
       q.restore();
