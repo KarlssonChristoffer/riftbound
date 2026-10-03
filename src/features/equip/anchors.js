@@ -18,7 +18,8 @@ propTop({lasso_snag: 4.3});   // (how high it stops an arrow: the trunk; the lim
 // base), which way the bank is (the trunk leans out over the water)
 const SNAGS = [
   {base: [44.25, 7.7], z: 2.4, tip: [40.7, 7.9, 4.7], seed: 3},      // on the plateau by its west edge, out over the ledge and the stream
-  {base: [36.95, 25.35], z: 0, tip: [41.75, 25.15, 5.8], seed: 7},    // from the west bank over the stream's south stretch
+  {base: [37.0, 23.55], z: 0, tip: [41.8, 25.2, 5.8], seed: 7},       // from the west bank over the stream's south stretch (its trunk north of
+                                                                       // where you run out under the limb: behind you from the default camera)
 ];
 const BIOMES = {ruins: 'bark', desert: 'wood'};
 

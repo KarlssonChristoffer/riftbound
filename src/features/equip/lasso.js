@@ -124,6 +124,7 @@ export function createLassoSim(host, eq) {
   }
   function aimAt(A) {
     lz().hand(false, HP);
+    if (pinned) return aimPinned(A);
     const a = host.aim(), t = a.target, R = TUNE.range;
     A.who = null;
     if (t && (creature(t) || movable(t))) {
@@ -139,6 +140,26 @@ export function createLassoSim(host, eq) {
     let dx = gx - P.x, dy = gy - P.y, d = hypot2(dx, dy);
     if (d < .05) { const f = P.faceAngle; dx = Math.sin(f); dy = Math.cos(f); d = 1; } else { dx /= d; dy /= d; }
     d = clamp(d, 1, R);
+    A.kind = 'ground'; A.x = P.x + dx * d; A.y = P.y + dy * d; A.h = host.elev(A.x, A.y); A.d = d; A.ok = true;
+    return A;
+  }
+
+  // A PINNED AIM (a test handle, pin(x, y, h)): the aim at a world point instead of the cursor (the cursor is read through
+  // a camera that eases differently at another frame rate: tools' frame-rate checks pin it). What's there, as the cursor
+  // would find it: a body or a prop within .6 m, else an anchor point within .6 m (the closest on its segment), else the ground
+  const PIN = {x: 0, y: 0, h: 0}; let pinned = false;
+  function aimPinned(A) {
+    const R = TUNE.range;
+    A.who = null;
+    for (const p of ents.near(PIN.x, PIN.y, 1.2, nearA)) if (!p.gone && !p.broken && (creature(p) || movable(p)) && hypot2(p.x - PIN.x, p.y - PIN.y) < .6) {
+      A.kind = creature(p) ? 'enemy' : 'prop'; A.who = p; A.x = p.x; A.y = p.y; A.h = creature(p) ? bodyMid(p) : (p.z || 0) + topOf(p) * .6;
+      A.d = hypot2(p.x - P.x, p.y - P.y); A.ok = A.d <= R + (p.hitR ?? .3); return A;
+    }
+    gather(P.x, P.y, R);
+    let best = -1, bd = .6, bx = 0, by = 0, bh = 0;
+    for (let i = 0; i < nSeg; i++) { const d = segDist(i, PIN.x, PIN.y, PIN.h); if (d < bd && high(Q.x, Q.y, Q.h)) { bd = d; best = i; bx = Q.x; by = Q.y; bh = Q.h; } }
+    if (best >= 0) { A.kind = 'anchor'; A.who = SRC[best]; A.x = bx; A.y = by; A.h = bh; A.d = hypot3(bx - HP[0], by - HP[1], bh - HP[2]); A.ok = A.d <= R; return A; }
+    let dx = PIN.x - P.x, dy = PIN.y - P.y, d = hypot2(dx, dy) || 1; dx /= d; dy /= d; d = clamp(d, 1, R);
     A.kind = 'ground'; A.x = P.x + dx * d; A.y = P.y + dy * d; A.h = host.elev(A.x, A.y); A.d = d; A.ok = true;
     return A;
   }
@@ -413,5 +434,7 @@ export function createLassoSim(host, eq) {
     // Space while swinging lets go (features/equip.js onKey): true when it took the key
     space() { if (L.phase !== 'swing') return false; lz()?.letGo(); return true; },
     seg: () => ({SEG, n: nSeg}),
+    // (tests) pin the aim to a world point (null: the cursor again)
+    pin(x, y, h) { pinned = x !== null && x !== undefined; if (pinned) { PIN.x = x; PIN.y = y; PIN.h = h || 0; } },
   };
 }
