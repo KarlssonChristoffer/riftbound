@@ -47,6 +47,14 @@ export const MOODS = {
             shadow: {a: 0, c: [.05, .01, .10], ao: .62}, fog: [.07, .03, .12, .12], lift: [.07, .06, .10], fill: [.17, .14, .22], glow: 1},
   },
 };
+MOODS.desert = {   // world/desert.js: a hard white sun high up, an orange dusk, a cold blue night
+  day:   {amb: [1.00, .97, .90], sun: {az: 300, el: 60, c: [1, .95, .82], k: .36, rim: .15},
+          shadow: {a: .54, c: [.22, .12, .10]}, fog: [.08, .05, .02, .06], lift: [0, 0, 0], glow: .25},
+  dusk:  {amb: [.94, .60, .45], sun: {az: 288, el: 11, c: [1, .52, .26], k: .58, rim: .35},
+          shadow: {a: .50, c: [.22, .06, .12]}, fog: [.24, .09, .04, .12], lift: [.05, .03, .02], fill: [.03, .02, .01], glow: .7},
+  night: {amb: [.20, .24, .38], sun: {az: 330, el: 40, c: [.60, .70, 1], k: .4, rim: .85},
+          shadow: {a: 0, c: [.02, .03, .09], ao: .62}, fog: [.03, .04, .09, .08], lift: [.06, .07, .10], fill: [.15, .16, .22], glow: 1},
+};
 export const TIMES = ['day', 'dusk', 'night'];
 
 // the character in dark scenes: the readability fill (fillK, capped at fillCap of the light there) and how far its albedo

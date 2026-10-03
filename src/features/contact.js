@@ -10,7 +10,9 @@
 // figure reads as floating. The arena had the same flat-card limits and grounded everything this way.
 //   casters  the player (his bottom rows measured per frame / facing), every world item drawn as a card (dummies,
 //            brutes and enemies, trees, braziers, bushes ...) and every live mesh standing on a round footprint
-//            (crates, barrels, pots, pillars, posts). Rect props (walls) have their real 3D foot: no stamp.
+//            (crates, barrels, pots, pillars, posts). Rect props (walls) have their real 3D foot: no stamp. And the
+//            characters a feature draws itself (the desert's gunmen, features/foes): an entity with `foot` (its
+//            footprint's half width, art px, set by its creator) gets a standing character's stamp.
 // CONTRACT: create(host) -> F with frame(); F.on / F.toggle() (in the menu as "Contact shadows"), ?contact=0 starts off.
 import {flags} from '../core/flags.js';
 const AO_A = .5, AO_PAD = 1, AO_H = .15, AO_HMIN = 1, AO_HMAX = 2, AO_DY = 1;   // the arena's numbers (lighting.js)
@@ -76,6 +78,8 @@ export async function create(host) {
     return e;
   }
 
+  // the characters a feature draws itself (not world items): a live list, so a gunman who walks in later is in it
+  const walkers = host.entities.query('contact.foot', p => p.foot > 0), WFP = {cx: 0, hw: 0};
   let n = 0;
   // one stamp: world base (x, y, h ground), footprint {cx, hw} in art px, air (m above the ground), py (the sprite's
   // pivot row: tiny things get a faint smudge), skirt (tall occluders)
@@ -113,6 +117,7 @@ export async function create(host) {
         if (it.card && it.sp) { const fp = footOf(it.sp); if (fp) stamp(p.x, p.y, base, fp, air, fp.py, p.occluder || p.kind === 'tree' || p.kind === 'rock_big'); }
         else if (it.live && p.r > 0 && !p.float && !(p.sink > .05)) { RFP.hw = Math.round(p.r * host.PPM * .8); stamp(p.x, p.y, base, RFP, air, 14, false); }
       }
+      for (const p of walkers) { if (p.gone || p.broken) continue; WFP.hw = p.foot; stamp(p.x, p.y, p.z || 0, WFP, Math.max(0, p.h || 0), 14, false); }
       if (!n) return;
       // tint: the mood's shadow colour (whole 0..255 steps, as the canvas fill had it), at the arena's AO opacity (night: mood.shadow.ao)
       const m = host.mood, c = m.shadow.c;

@@ -32,7 +32,7 @@ export const OWNERS = {
 };
 const OWNER_OF_PATH = [   // the stack frame's path (after /src/) -> the system
   [/^features\/combat(\.js|\/)/, 'combat'], [/^features\/(firesim|lights)\.js/, 'lights'], [/^features\/depth(\.js|\/)/, 'depth'],
-  [/^features\/(rainaudio|windaudio|audio)\.js/, 'audio'], [/^features\/(\w+)\.js/, 1],
+  [/^features\/(rainaudio|windaudio|audio)\.js/, 'audio'], [/^features\/foes(\.js|\/)/, 'foes'], [/^features\/(\w+)\.js/, 1],
   [/^world\/(entities|spatial)\.js/, 'entities'], [/^world\/(\w+)\.js/, 1], [/^sim\/player\//, 'player'], [/^sim\/(\w+)\.js/, 1],
   [/^(game|ui|audio|view|render|core|dev)\//, 1], [/^main\.js/, 'boot'],
 ];

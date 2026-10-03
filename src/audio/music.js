@@ -28,8 +28,12 @@
 //     Pad, flute and bass are live oscillators (few voices, cheap).
 //   Stingers: opening a chest plays a bell arpeggio in the current chord, loot plays a note from the scale, and a
 //     respawn plays a falling pluck. All are quantised to the next 16th so they land in time with the music.
+//   The desert ('Red Mesa') is a style with its own band: western.js (a spaghetti-western score: guitar, whistler,
+//     harmonica, twang bass, hooves). This file keeps its clock, intensity, layers and stinger queue; its banks render
+//     lazily (in slices of a few ms per update) the first time the desert is asked for, and the switch waits for them.
 import {clamp} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
+import {createWestern} from './western.js';
 
 const DORIAN = [0, 2, 3, 5, 7, 9, 10], PHRYGIAN = [0, 1, 3, 5, 7, 8, 10], AEOLIAN = [0, 2, 3, 5, 7, 8, 10];
 const HUNGARIAN = [0, 2, 3, 6, 7, 8, 11];   // minor with a raised 4th and 7th: eerie, still has the 5th for the rift's A-E drones
@@ -48,6 +52,7 @@ const STYLES = {
   rift: {root: 45, scale: HUNGARIAN, bpm: 66, progs: [[0, 1, 0, 5], [0, 3, 1, 0], [0, 5, 3, 1]],
     pad: {wave: 'sawtooth', cut: 560, det: 6, oct: 0, g: .026}, arp: {inst: 'glock', oct: 1, pat: 'sparse'},
     mel: {inst: 'flute', oct: 1, every: 3}, bass: {oct: -1}, drums: 'ritual', level: .95},
+  desert: {engine: 'western', bpm: 72, level: 1},   // A minor, played by western.js
 };
 // arp: [step (16ths), chord-tone index]; tones = [root, 3rd, 5th, root+12, 3rd+12, 5th+12]
 const ARPS = {
@@ -161,6 +166,7 @@ export function createMusic(ac, dest, {send = null, enabled = true, offline = fa
   if (send) { const s = ac.createGain(); s.gain.value = .25; vol.connect(s); s.connect(send); }
   const LAYERS = ['pad', 'arp', 'bass', 'mel', 'light', 'drums', 'sting'];
   const lay = {}; for (const k of LAYERS) { const g = ac.createGain(); g.gain.value = k === 'pad' || k === 'sting' ? 1 : 0; g.connect(bus); lay[k] = {g, on: k === 'pad' || k === 'sting'}; }
+  const W = createWestern(ac, {lay, noise});   // the desert's band (renders nothing until the desert is asked for)
   const MASTER = .1;   // Phase 4 mix: music sits well under the SFX (explore ≈ -34 LUFS-M in game; idle pad quieter still)
 
   // ---- state ----
@@ -236,10 +242,11 @@ export function createMusic(ac, dest, {send = null, enabled = true, offline = fa
 
   // ---- intensity ----
   function heatUp(v, t) { heat = Math.min(1, heat + v); lastHeat = t; }
-  const HEAT = {'arrow.hit': .22, 'player.hit': .22, 'prop.break': .1, 'combat.explode': .45, 'combat.trap': .15, 'chest.open': 0, 'combat.loot': 0};   // (core/events.js)
+  const HEAT = {'arrow.hit': .22, 'player.hit': .22, 'prop.break': .1, 'combat.explode': .45, 'combat.trap': .15, 'chest.open': 0, 'combat.loot': 0, 'player.shoot': .06};   // (core/events.js)
   function update(t, s = {}) {
     const dt = clamp(t - clock, 0, .25); clock = t;
     if (s.biome && STYLES[s.biome] && s.biome !== styleId && (!pending || pending.id !== s.biome)) pending = {id: s.biome};
+    if (on && pending && STYLES[pending.id].engine && !W.ready) W.build(offline ? Infinity : 6);   // a slice of the desert's banks per step
     time = s.time || 'day';
     for (const e of s.events || []) {
       if (HEAT[e.type]) heatUp(e.player ? .4 : HEAT[e.type], t);
@@ -251,11 +258,11 @@ export function createMusic(ac, dest, {send = null, enabled = true, offline = fa
     const target = forced ?? clamp(floor + heat * .75, 0, 1);
     I += (target - I) * Math.min(1, dt * (target > I ? 2.5 : .5));   // rise fast, settle slowly
     if (on && !offline) schedule(ac.currentTime + .2);
-    MU.state = {biome: styleId, section: section(), I: +I.toFixed(2), bar, chord: prog[chord]};
+    MU.state = {biome: styleId, section: section(), I: +I.toFixed(2), bar, chord: style.engine ? W.chord : prog[chord]};
   }
   function force(v) {   // a fixed level applies at once (also while the game is paused: the sequencer keeps running)
     forced = v ?? null; if (forced !== null) I = forced;
-    MU.state = {biome: styleId, section: section(), I: +I.toFixed(2), bar, chord: prog[chord]};
+    MU.state = {biome: styleId, section: section(), I: +I.toFixed(2), bar, chord: style.engine ? W.chord : prog[chord]};
   }
   const section = () => I >= .62 ? 'combat' : I >= .42 ? 'tension' : I >= .2 ? 'explore' : 'rest';
   // layer wanted states with hysteresis
@@ -289,21 +296,24 @@ export function createMusic(ac, dest, {send = null, enabled = true, offline = fa
 
   // ---- the sequencer ----
   function schedule(until) {
+    if (nextT === null && pending && STYLES[pending.id].engine && !W.ready) return;   // starting in the desert: wait for its banks
     if (nextT === null || nextT < ac.currentTime - .1) nextT = ac.currentTime + .06;
     while (nextT < until) { tick(step % 16, nextT); nextT += s16(); step++; }
   }
   function tick(st, t) {
     const hum = () => (R() - .5) * .01;   // ±5 ms humanise
     if (st === 0) {   // bar line: style changes, chords, phrases
-      if (pending) {
+      if (pending && (W.ready || !STYLES[pending.id].engine)) {
         style = STYLES[pending.id]; styleId = pending.id; pending = null; bar = 0;
-        prog = style.progs[(rnd() * style.progs.length) | 0]; motif = newMotif();
+        if (style.engine) W.enter(); else { prog = style.progs[(rnd() * style.progs.length) | 0]; motif = newMotif(); }
         bus.gain.setValueAtTime(bus.gain.value, t); bus.gain.linearRampToValueAtTime(bus.gain.value * .3, t + .05);   // soft reset
       }
+      if (style.engine) { applyLayers(t, true); bar++; W.tick(0, t, I, time, s16()); while (stingQ.length) W.stinger(stingQ.shift(), t, s16()); return; }
       if (bar % 8 === 0) { if (bar) prog = style.progs[(rnd() * style.progs.length) | 0]; phrase++; if (!motif || phrase % 2 === 0) motif = newMotif(); }
       if (bar % 2 === 0) { chord = (bar / 2) % 4; padChord(t, chordTones(prog[chord], 0).slice(0, 3), spb() * 8); }
       applyLayers(t, true); bar++;
     } else if (st % 4 === 0) applyLayers(t, false);
+    if (style.engine) { W.tick(st, t, I, time, s16()); while (stingQ.length) W.stinger(stingQ.shift(), t, s16()); return; }   // the desert: western.js
     playStingers(t);
     const deg = prog[chord], tones = chordTones(deg, 0), sparse = night() ? .5 : dusk() ? .8 : 1;
     // arp

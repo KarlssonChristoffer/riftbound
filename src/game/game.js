@@ -61,7 +61,7 @@ export async function createGame(host) {
   }
   function toSandbox() {
     endRunState(); screens.hide();
-    mode = 'sandbox'; setPhase(''); host.dev = true; lock(false); host.timeScale = 1; host.hudOff = false;
+    mode = 'sandbox'; setPhase(''); host.dev = true; lock(false); host.timeScale = 1; host.hudOff = false; SB.down = -1;
     stats.restore(); host.mods.clear('run'); core.retireYard(false);
   }
   function endRunState() {   // leave a run: no enemies, no portal, the engine's own numbers
@@ -157,6 +157,39 @@ export async function createGame(host) {
     goldSeen = core.gold;
   }
 
+  // ---------------------------------------------------------------- the desert sandbox's stakes
+  // While a feature says a fight is on (features/foes.js F.stakes: gunmen about in the desert) your hurts count in the
+  // sandbox too: the health bar, the hit vignette and flicker; at 0 you fall (slow motion; player.down: the gang stops
+  // shooting), then wake at the fort (F.respawn(); player.respawn: they're gone) with your health back. Out of a fight
+  // you heal up quickly (SB.heal per s). Nothing changes in the sandbox anywhere else.
+  const SB = {down: -1, heal: 12};
+  function stakes(dt, evs) {
+    const foes = host.feature('foes');
+    if (SB.down >= 0) {
+      SB.down += dt / Math.max(.05, host.timeScale);
+      if (!['hold', 'knock', 'fall'].includes(P.raw.state)) host.PL.hold('crouch', 99);
+      if (SB.down > 1.8) {
+        SB.down = -1; host.timeScale = 1;
+        const at = foes?.respawn?.(); if (at) host.teleport(at.x, at.y);
+        stats.heal(stats.S.maxHp); lock(false);
+        host.events.push({type: 'player.respawn', x: P.x, y: P.y});
+      }
+      return;
+    }
+    stats.update(dt);
+    if (!foes?.stakes) { if (stats.S.hp < stats.S.maxHp) stats.heal(SB.heal * dt); return; }
+    for (const e of evs) if (e.type === 'player.hurt') {
+      const d = stats.hurt(e.dmg); host.PL.flicker(.9);
+      hud.float(P.x, P.y, P.z + 1.9, '-' + d, '#ff6a50', true);
+      if (stats.S.hp <= 0) {
+        SB.down = 0; lock(true); host.timeScale = .3;
+        hud.banner('You fell', 'you wake at the fort', 2.6, '#e0604a');
+        host.events.push({type: 'player.down', x: P.x, y: P.y});
+        break;
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- the feature
   const F = {
     name: 'game', label: 'Game', always: true,
@@ -166,6 +199,7 @@ export async function createGame(host) {
     update(dt, evs) {
       if (boot) { const f = boot; boot = null; f(); }   // the first step: title / sandbox / run (the world is built)
       hud.update(dt);
+      if (mode === 'sandbox') { stakes(dt, evs); return; }
       if (mode !== 'run' || !run) return;
       phaseT += dt;
       // dodge (roll / backstep): untouchable while dodging, plus the Nimble window after
@@ -180,7 +214,7 @@ export async function createGame(host) {
       if (phase === 'clear' && phaseT > 1.6) {
         if (!STAGES[run.stage + 1]) { hud.banner('Victory', 'the Rift is closed', 3, '#f2d27a'); setPhase('won'); const r = run; setTimeout(() => run === r && finish(true), 2200); return; }
         setPhase('pick'); lock(true);
-        const choices = rollAugments(rng, stats.augs, 3);
+        const choices = rollAugments(rng, stats.augs, 3, host.weapon?.kind ?? 'bow');   // (the weapon's: game/items.js only)
         if (!choices.length) { lock(false); setPhase('portal'); openPortal(); return; }
         screens.pick(stageName(run.stage), choices, a => {
           screens.hide(); stats.addAugment(a); hud.toast(a.name, a.desc, '#f2d27a');
@@ -225,7 +259,7 @@ export async function createGame(host) {
     },
 
     hd(q, sc) {
-      if (mode !== 'run' || !run) { hud.draw(q, sc, {run: false, stats, build: [], enemies: []}); return; }
+      if (mode !== 'run' || !run) { hud.draw(q, sc, {run: false, stats, build: [], enemies: [], health: mode === 'sandbox' && (SB.down >= 0 || !!host.feature('foes')?.stakes)}); return; }
       hud.draw(q, sc, {run: true, stats, build: stats.build(), stage: run.stage, stages: STAGES.length, stageName: stageName(run.stage),
         wave: director.wave, waves: director.waves || STAGES[run.stage].waves, left: director.left, phase, time: run.time, kills: run.kills,
         boss: director.boss, enemies: core.enemies, cost: chestCost()});
@@ -236,7 +270,7 @@ export async function createGame(host) {
       if (mode !== 'run' || a.extra) return;
       a.dmg = (a.dmg ?? 10) * stats.S.dmg;
       if (a.explode) a.explode = {...a.explode, dmg: a.explode.dmg * stats.S.dmg};
-      if (a.ab) return;   // ability arrows (multishot, rain, piercing, explosive) stop here
+      if (a.ab || a.kind === 'bullet') return;   // ability arrows (multishot, rain, piercing, explosive) and bullets stop here
       shotN++;
       if (stats.S.nthBoom && shotN % stats.S.nthBoom === 0) a.explode = {r: 1.5, dmg: 14 * stats.S.dmg};
       for (let i = 0; i < stats.S.volley; i++) {
@@ -257,7 +291,7 @@ export async function createGame(host) {
         if (core.gold < cost) { hud.float(p.x, p.y, 1.3, `need ${cost} gold`, '#e0604a'); return true; }
         core.addGold(-cost); goldSeen = core.gold;
         core.interact(p, {coins: 0});
-        const it = rollItem(rng, run.stage * .25); stats.addItem(it);
+        const it = rollItem(rng, run.stage * .25, host.weapon?.kind ?? 'bow'); stats.addItem(it);
         hud.toast(it.name, it.desc, it.tier === 3 ? '#e8604a' : it.tier === 2 ? '#7ad07a' : '#f4efe4');
         hud.float(p.x, p.y, 1.4, it.name, '#f2d27a', true);
         return true;

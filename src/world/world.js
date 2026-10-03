@@ -57,6 +57,10 @@ const PAL = {
     cover: ['eef3f8', 'd6dfeb', 'b4c2d6', '8795b2'], coverK: .5, coverT: .78},
   rift: {wood: ['6a5680', '4e3e66', '392d4e', '221a31'], metal: ['6c5c8c', '4f4372', '3b3158', '251e39'], clay: ['7a64a8', '5a4886', '433466', '2a2044'],
     stone: ['5e4e88', '46396a', '352b54', '211a36'], rock: ['4f4270', '3c3158', '2d2545', '1c1730'], rope: ['8a78a8', '6a5a88', '4e4268', '2e2644'], cover: null},
+  // world/desert.js: sun-bleached wood, rusted iron, terracotta, sandstone, red rock, sand drifted on the tops
+  desert: {wood: ['c4ab88', 'a2896a', '7f684f', '504131'], metal: ['a87c54', '83603f', '5e442e', '38281b'], clay: ['d68c5c', 'b46c40', '8a502e', '58321e'],
+    stone: ['d6b88e', 'bc9c72', '9c7e58', '6a5440'], rock: ['c97e5c', 'ab6246', '874a36', '562c22'], rope: ['dcc890', 'bea872', '988456', '625438'],
+    cover: ['ead4a4', 'dcc08c', 'c2a272', '90724e'], coverK: .1, coverT: .86, rockB: ['d89a70', 'be7e58', '9a6244', '643e2c']},   // (rockB: banded cliffs)
 };
 const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {ember: ['ffe08a', 'ffa040', 'e0541e', '6e1c12']}};
 // (bark, leaf: the procedural trees, trees3d.js; char, ash, ember: burning wood, gfx.js MESH_FS uBurn; birch, aspen, berry: the
@@ -89,7 +93,8 @@ export function rampTexture(biome, style = null) {
   t.minFilter = t.magFilter = THREE.NearestFilter;
   const B = PAL[biome];
   return {tex: t, cover: B.cover ? [B.coverK, B.coverT, FAMS.indexOf('cover')] : [0, 1, 0],
-    emitFam: [EMIT.rune[biome] ? FAMS.indexOf('rune') : -1, EMIT.crack[biome] ? FAMS.indexOf('crack') : -1], rock: P.rock, cov: B.cover ? P.cover : null};
+    emitFam: [EMIT.rune[biome] ? FAMS.indexOf('rune') : -1, EMIT.crack[biome] ? FAMS.indexOf('crack') : -1], rock: P.rock, cov: B.cover ? P.cover : null,
+    rockB: B.rockB ? ramp6(B.rockB) : null};
 }
 
 // ---------------------------------------------------------------- helpers
@@ -233,6 +238,7 @@ export const WATER_TUNE = {
   // colours are literals in biomes.js groundEmber, not exposed by the style: keep them in step)
   ember: {ramp: S => ['#5a1a10', '#3a1410', S.crust], hold: [0], bank: 2, streak: -1, deep: 2, shallow: 2, deepFrac: 0, range: [1, 2], rate: 2.5, across: 5, along: 24, hi: .82, lo: .8, lap: -1, refl: 0, spark: 0},
   frost: {ramp: S => S.melt.h, hold: [3], bank: 2, streak: 1, deep: 2, shallow: 2, deepFrac: 0, range: [1, 2], rate: 4, across: 3, along: 16, hi: .86, lo: .8, lap: 1, refl: 1, spark: .5},
+  desert: {ramp: S => S.water.h, hold: [3], bank: 2, streak: 0, deep: 2, shallow: 1, deepFrac: .45, range: [0, 2], rate: 7, across: 2.5, along: 12, hi: .82, lo: .78, lap: 0, refl: .7, spark: .7},   // a muddy creek
 };
 
 // ---------------------------------------------------------------- water: the texture
@@ -384,7 +390,8 @@ function bakeLitter(L, trees, {WPX, HPX, PPM, walls, paths, dry, blocks = [], di
 }
 
 // ---------------------------------------------------------------- strata texture for the plateau's faces
-function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {
+// rockB (optional): a second rock ramp for alternate layers (the desert's red and tan bands)
+function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed, rockB = null) {
   const w = Math.max(1, Math.round(len * PPM)), h = Math.max(1, Math.round(hgt * PPMH)), c = document.createElement('canvas');
   c.width = w; c.height = h; const q = c.getContext('2d'), id = q.createImageData(w, h), d = id.data;
   for (let x = 0; x < w; x++) {
@@ -394,9 +401,9 @@ function strataCanvas(len, hgt, PPM, PPMH, rock, cov, seed) {
       if (r < hang) col = cov[r === hang - 1 ? 2 : r ? 1 : 0];
       else {
         const ly = r + Math.round((hsh(Math.floor(x / 14), 94, seed) - .5) * 5), layer = Math.floor(ly / 9), inL = ((ly % 9) + 9) % 9;
-        const crackX = hsh(Math.floor(x / 11), layer, 96 + seed) < .35 && x % 11 === (hsh(layer, Math.floor(x / 11), 97 + seed) * 11 | 0);
+        const crackX = hsh(Math.floor(x / 11), layer, 96 + seed) < (rockB ? .1 : .35) && x % 11 === (hsh(layer, Math.floor(x / 11), 97 + seed) * 11 | 0);   // (banded sandstone: few joints)
         const t = r === h - 1 ? 3 : inL === 0 ? (hsh(layer, 5, seed) < .5 ? 0 : 1) : inL >= 7 ? 2 : crackX ? 2 : hsh(layer, 9, seed) < .3 ? 2 : 1;
-        col = rock[t];
+        col = (rockB && hsh(layer, 3, seed) < .45 ? rockB : rock)[t];
       }
       const i = (r * w + x) * 4; d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255;
     }
@@ -417,6 +424,7 @@ const FALL_LOOK = {
   ember: {mode: 'glow', ramp: S => S.lava.h},
   frost: {mode: 'ice', ramp: S => S.ice.h},
   rift: {mode: 'glow', ramp: () => EMIT.rune.rift.map(h => '#' + h)},
+  desert: {mode: 'water', ramp: S => S.water.h},
 };
 function fallFace(cv, q, PPM, rock, look, ramp) {
   const rows = cv.height, per = q.h / rows, foot = Math.ceil(-WATER_H / per), H = rows + foot, W = cv.width, out = document.createElement('canvas');
@@ -478,7 +486,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // the south edge, as the biome itself defines it: ruins and ember end in a RAVINE along their cliff line (the biome's
   // hole() is y > cliff(x) - .3 there, or near the stream); frost ends in a flat frozen lake and the rift in its flat void,
   // so they keep their ground. Inside the stream's band the line is interpolated from both banks (the waterfall)
-  const RAVINE = new Set(['ruins', 'ember']).has(biome.id);
+  const RAVINE = new Set(['ruins', 'ember', 'desert']).has(biome.id);   // (desert: its red canyon)
   const nearStream = (x, y) => Math.abs(x - STREAM.cx(y)) - STREAM.w(y) / 2 < .7;
   const rawCliff = x => { for (let y = HM - 7; y < HM + .5; y += .05) if (biome.hole?.(x, y) && !nearStream(x, y)) return y + .3; return Infinity; };
   const cliffCache = new Map();
@@ -513,7 +521,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // the south ravine's wall (any steep ground): rock strata with the biome's grass / ash / snow lip, and a WATERFALL where
   // the stream goes over the edge, in the stream's own painted colour (streaks, dark edges, foam at the foot). Indexed by
   // world x (+ SKIRT) and depth below the bank: the ground shader maps it onto the steep cells (gfx.js SURF_FS)
-  const CL_H = 3.5, cliff = strataCanvas(WM + 2 * SKIRT, CL_H, PPM, PPMH, R.rock, R.cov, 11);
+  const CL_H = 3.5, cliff = strataCanvas(WM + 2 * SKIRT, CL_H, PPM, PPMH, R.rock, R.cov, 11, R.rockB);
   {
     const q = cliff.getContext('2d', {willReadFrequently: true}), id = q.getImageData(0, 0, cliff.width, cliff.height), d = id.data, CH = cliff.height;
     // where the stream glows (ember lava: the ground's emit layer), its fall glows too: alpha 250 marks emissive texels.
@@ -562,7 +570,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y1, 0], [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y0, Math.PI],
       [q.y1 - q.y0, q.x1, (q.y0 + q.y1) / 2, Math.PI / 2], [q.y1 - q.y0, q.x0, (q.y0 + q.y1) / 2, -Math.PI / 2]];
     faces.forEach(([len, cx, cz, ry], k) => {
-      let cvs = strataCanvas(len, q.h, PPM, PPMH, R.rock, R.cov, k + 2), hgt = q.h;
+      let cvs = strataCanvas(len, q.h, PPM, PPMH, R.rock, R.cov, k + 2, R.rockB), hgt = q.h;
       if (k === 0 && q === PLATEAUS[0]) ({cv: cvs, h: hgt} = fallFace(cvs, q, PPM, R.rock, FL, FL?.ramp(biome.style)));   // the south face: the waterfall, and the foot down to the pool
       const geo = new THREE.PlaneGeometry(len, hgt); geo.translate(0, q.h - hgt / 2, 0); geo.rotateY(ry); geo.translate(cx, 0, cz);
       const uvA = geo.attributes.uv; for (let i = 0; i < uvA.count; i++) uvA.setY(i, 1 - uvA.getY(i));   // canvas rows go down
@@ -781,9 +789,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     glb: state => glbGeometry(loader, state),                   // Promise<geometry | null> (debris chunks, ...)
     // an extra live mesh owned by a feature (debris chunks): dispose it when done; a rebuild (biome switch) disposes the rest.
-    // It doesn't block point lights unless o.occlude (tumbling chunks next to a blast threw black spikes everywhere)
+    // It doesn't block point lights unless o.occlude (tumbling chunks next to a blast threw black spikes everywhere).
+    // o.static: it never moves (its sun shadow goes in the cached static map, gfx mesh {static})
     mesh: (geo, matrix, o = {}) => {
-      const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4()), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
+      const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4(), {static: !!o.static}), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
       if (!o.occlude) m.sm.layers.disable(1);
       return m;
     },

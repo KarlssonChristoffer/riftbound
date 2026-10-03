@@ -19,10 +19,21 @@ export const EVENTS = {
   'player.jump':        ['sim/player/player.js',  'x, y, z (emitted from the Space key handler, turned there)', 'atmos, flow, wildlife, audio'],
   'player.splash':      ['sim/player/player.js',  'x, y', 'atmos, flow, wildlife, audio'],
   'player.roll':        ['(reserved: not emitted yet)', 'x, y', 'atmos (frost puff)'],
-  'player.hit':         ['features/combat/core.js', 'x, y, vx, vy, player: true (a brute landed on him)', 'atmos, wildlife, audio, music'],
-  'player.hurt':        ['features/combat/core.js', 'dmg, by (the brute | \'blast\'), x, y', 'game'],
-  'arrow.hit':          ['sim/projectiles.js',    'x, y (the prop), vx, vy (the arrow), prop', 'game, wind, props, atmos, wildlife, audio, music'],
-  'arrow.splash':       ['sim/projectiles.js',    'x, y, small: true', 'atmos, wildlife, audio'],
+  // the revolver (sim/player/gun.js, a gun loadout); gun = the weapon's id (content/weapons.js: peacemaker | brass_navy)
+  'player.draw':        ['sim/player/gun.js',     'x, y, z, gun, hip (the first shot leaves from the hip)', 'audio'],
+  'player.shoot':       ['sim/player/gun.js',     'x, y, h (the muzzle), z, vx, vy (unit: the way it flies), gun, fan, hip, left (rounds)', 'gunfx, flow (the camera kick), audio, wildlife, music'],
+  'player.dryfire':     ['sim/player/gun.js',     'x, y, z, gun (the hammer falls on an empty chamber)', 'audio'],
+  'player.reload':      ['sim/player/gun.js',     'x, y, z, gun, phase (start | eject | round | done), n (spent cases on eject, rounds in after)', 'gunfx (cases), audio'],
+  'player.holster':     ['sim/player/gun.js',     'x, y, z, gun (the twirl ends in the holster)', 'audio'],
+  'player.hit':         ['features/combat/core.js, features/foes/sim.js', 'x, y, vx, vy, player: true (a brute landed on him; a gunman\'s bullet hit him)', 'atmos, wildlife, audio, music'],
+  'player.hurt':        ['features/combat/core.js, features/foes/sim.js', 'dmg, by (the brute | \'blast\' | the gunman), x, y', 'game, battlemusic'],
+  // the desert sandbox's stakes (game/game.js, while features/foes.js says a fight is on)
+  'player.down':        ['game/game.js',          'x, y (your health ran out in the desert sandbox: the gang stops shooting)', 'foes'],
+  'player.respawn':     ['game/game.js',          'x, y (up again at the fort: the gunmen are gone, the next gang comes later)', 'foes'],
+  'arrow.hit':          ['sim/projectiles.js',    'x, y (the prop), vx, vy (the arrow; a bullet: x its push), prop, kind? (bullet)', 'game, wind, props, atmos, wildlife, audio, music, gunfx'],
+  'arrow.splash':       ['sim/projectiles.js',    'x, y, small: true (an arrow or a bullet into the stream)', 'atmos, wildlife, audio'],
+  'bullet.impact':      ['sim/projectiles.js, features/foes/sim.js', 'x, y, h (where it ended), x0, y0, h0 (where it was as that step began), surf (hit | ground | water | tree | prop | air | player: a gunman\'s bullet in you), gun, dx, dy, foe? (the gunman\'s type)', 'gunfx, audio, wildlife, battlemusic'],
+  'bullet.pierce':      ['sim/projectiles.js',    'x, y, h (where it leaves the body), vx, vy (unit: the way it flies on), who (the body it went through: a gunman, a brute), gun (the weapon id)', 'blood, audio (a through-shot)'],
   'prop.break':         ['features/combat/core.js', 'x, y, kind, who (the prop), ash (burnt through)', 'props, atmos, wildlife, audio, music'],
   'prop.tip':           ['features/combat/props.js', 'x, y, kind, prop: true', 'wildlife, audio'],
   'prop.kick':          ['features/combat/props.js', 'x, y, kind, prop: true', 'wildlife, audio'],
@@ -32,7 +43,18 @@ export const EVENTS = {
   'prop.splash':        ['features/combat/props.js', 'x, y, prop: true (into the stream)', 'atmos, wildlife, audio'],
   'prop.respawn':       ['features/combat/props.js', 'x, y, prop: true (drifted / reset home)', 'audio, music (the same sound + stinger as a brute\'s)'],
   'brute.respawn':      ['features/combat/core.js', 'x, y (a sparring brute is back)', 'audio, music'],
-  'enemy.kill':         ['features/combat/core.js', 'x, y, who (the enemy)', 'game'],
+  'enemy.kill':         ['features/combat/core.js', 'x, y, who (the enemy)', 'game, gun, battlemusic'],
+  // the desert's gunmen (features/foes/sim.js); foe = their type (bandit | sheriff | bruiser), gun = the sound of their gun
+  // (content/foes.js gun.sound: peacemaker = the revolver recipe's shot, coach = the bruiser's coach gun, its own recipe)
+  'foe.draw':           ['features/foes/sim.js',  'x, y, z, foe (out of the holster)', 'audio'],
+  'foe.aim':            ['features/foes/sim.js',  'x, y, z, foe, gun (the hammer back: the shot\'s telegraph begins)', 'audio'],
+  'foe.shoot':          ['features/foes/sim.js',  'x, y, h (the muzzle), z, vx, vy (unit: the way it flies), foe, gun, who, n (rounds left)', 'gunfx, audio, wildlife'],
+  'foe.reload':         ['features/foes/sim.js',  'x, y, z, foe, gun, phase (start | eject | round | done), n (spent cases on eject, rounds in after)', 'gunfx (cases), audio'],
+  'foe.holster':        ['features/foes/sim.js',  'x, y, z, foe', 'audio'],
+  'foe.ground':         ['features/foes/look.js (a view: nothing in the sim listens)', 'x, y, z, foe (a dead gunman hits the ground: the death clip\'s ground mark)', 'audio'],
+  'foe.clip':           ['features/foes/look.js (a view: nothing in the sim listens)', 'x, y, z, foe, gun, mark (dump | load | close: the reload you see drops the spent shells, seats a shell, snaps shut)', 'audio'],
+  'frontier.read':      ['features/frontier.js',  'x, y, what (wanted | sign), name (the poster\'s outlaw, or null)', 'foes (a bounty gang)'],
+  'combat.hit':         ['features/combat/core.js', 'x, y, h, who (the target), kind, dmg, crit, broke, quiet (every damage: an enemy, a prop, a dummy); by (arrow | bullet | impact: a hit through the arrow chain, else undefined), hx, hy, hh (where the shot met it; else the target\'s x, y, h), dx, dy (unit: the shot\'s way; 0 without one)', 'audio (a gunman\'s flesh hit, a crit heavier; the player\'s hit-confirm on an enemy), gunfx (the hit marker), flow (the camera kick), blood'],
   'combat.explode':     ['features/combat/core.js', 'x, y, r', 'wind, lights, garden, grass, props, atmos, flow, wildlife, audio, music'],
   'combat.loot':        ['features/combat/core.js', 'x, y, n (coins spilled)', 'wildlife, audio, music'],
   'combat.coin':        ['features/combat/core.js', 'x, y (the player: every 5th coin picked up)', 'audio, music'],
@@ -51,6 +73,7 @@ export const EVENTS = {
   'wildlife.critter_dash': ['features/wildlife.js', 'x, y', 'audio'],
   'wildlife.splash':    ['features/wildlife.js',  'x, y, small: true, wl: true', 'atmos, wildlife, audio'],
   'wildlife.bird_perch': ['features/wildlife.js', 'x, y, h, prop, off, big, scared (a bird lands on / leaves a top)', 'wind'],
+  'tumbleweed.bounce':  ['features/tumbleweed.js', 'x, y, k (0..1: how hard it came down / was knocked; near the player, on screen)', 'audio'],
 };
 
 const warned = new Set();

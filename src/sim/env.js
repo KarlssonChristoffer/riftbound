@@ -77,6 +77,9 @@ export const WEATHER = {
 };
 const CH = ['cloud', 'rain', 'snow', 'fog', 'storm', 'wind'];
 const GREY = [.94, .96, 1], HAZE = [.55, .6, .7];   // clouds pull the light toward a cool grey; the haze they add
+// the desert's (world/desert.js) haze is warm dust, not the cool grey; and a wind over a breeze lifts a faint dust haze of its
+// own (DUST_K at a full gale's sky wind, from 1.2). Presentation only: mood() is read by the lighting, never by the sim
+const DUST = [.8, .66, .46], DUST_K = .09;
 // which spells each biome (and season) draws from, with weights
 const CLIMATE = {
   ruins: {
@@ -88,6 +91,7 @@ const CLIMATE = {
   frost: {winter: {clear: 2, fair: 1, cloudy: 1.5, windy: 1.2, fog: 1, snow: 3, blizzard: 1}},
   ember: {none: {haze: 3, clear: 1, ash: 2, windy: 1}},
   rift: {none: {void: 1}},
+  desert: {none: {clear: 5, fair: 1.5, haze: 2, windy: 1.5, storm: .2}},   // world/desert.js: dry; now and then a summer storm
 };
 const SEASONAL = {ruins: true};               // biomes whose look follows the seasons
 const FIXED = {frost: 'winter'};              // biomes stuck in one season
@@ -202,12 +206,15 @@ export function createEnv({moods, biome, Q = flags}) {
     // the weather on top: clouds soften the sun and its shadows and grey the light; fog / rain / snow thicken the haze
     const S = E.sky, c = S.cloud, lum = o.amb[0] * .3 + o.amb[1] * .55 + o.amb[2] * .15;
     o.sun.k *= 1 - .55 * c; o.shadow.a *= 1 - .8 * c;
+    const HZ = bid === 'desert' ? DUST : HAZE, dust = bid === 'desert' ? DUST_K * clamp((S.wind - 1.2) / 1.6, 0, 1) : 0;
     for (let j = 0; j < 3; j++) {
       o.amb[j] = lerp(o.amb[j], lum * GREY[j], .35 * c) * (1 - .1 * c - .12 * S.rain - .2 * S.storm);
       o.sun.c[j] = lerp(o.sun.c[j], .85, .5 * c);
-      o.fog[j] += HAZE[j] * (.05 * c + .1 * S.rain + .16 * S.fog + .08 * S.snow);
+      o.fog[j] += HZ[j] * (.05 * c + .1 * S.rain + .16 * S.fog + .08 * S.snow);
+      if (dust) o.fog[j] += DUST[j] * dust;
     }
     o.fog[3] = Math.min(.5, o.fog[3] + .05 * c + .1 * S.rain + .16 * S.fog + .08 * S.snow);
+    if (dust) o.fog[3] = Math.min(.5, o.fog[3] + dust);
     o.glow *= 1 + .3 * c;
     return o;
   };

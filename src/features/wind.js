@@ -78,6 +78,8 @@ const BIOME = {
   ember: {base: .12, gust: .35, sway: .5, fronts: {every: [5, 10], speed: [4, 5], len: [10, 18], amp: [.5, .9], edge: [2.5, 5], half: [14, 36]}, cloth: [.3, .8]},
   frost: {base: .45, gust: 2.1, sway: 1, fronts: {every: [1.6, 4], speed: [6, 8], len: [6, 11], amp: [.6, 1], edge: [1, 3], half: [12, 30]}, cloth: [.7, 2.2]},
   rift: {base: 0, gust: 1.1, sway: .85, pulse: {every: [5.5, 9], speed: [2, 2.6], len: [2.4, 3.4], amp: [.7, 1]}, cloth: [0, 1.6]},
+  // the desert (world/desert.js): a dry wind that keeps up between the gusts, and fast gust fronts that lift sand and roll the tumbleweeds
+  desert: {base: .38, gust: .85, sway: .8, fronts: {every: [3, 7], speed: [6, 8.5], len: [7, 13], amp: [.55, 1], edge: [1.5, 3.5], half: [10, 30]}, cloth: [.6, 1.7]},
 };
 // WIND STRENGTH (render3d): the weather of the wind, on top of the gust fronts. A multiplier on every wind speed the field
 // returns (base + gusts), so everything that reads the field feels it: foliage springs and 3D trees (lean, the leaves'
@@ -109,6 +111,9 @@ const FLEX = {
   frost: {tuft: {px: 1.6, w: 15, z: .35, fq: 1.1, curve: 'twig'}, bush: {px: 1.8, w: 8, z: .4, fq: .7, curve: 'bush'},
     tree: {px: 2.6, w: 3, z: .45, fq: .3, curve: 'pine'}, reed: {px: 2, w: 13, z: .33, fq: 1.1, curve: 'reed'}},
   rift: {bush: {px: 2, w: 7, z: .3, fq: .45, curve: 'coral'}},
+  // the desert: stiff straw tufts, sagebrush and creosote (bush variants 0, 3) give a little; saguaros (no tree entry), prickly
+  // pear and barrel cactus (rigid: bush variants 1, 2) stand still
+  desert: {tuft: {px: 2.2, w: 16, z: .34, fq: 1.2, curve: 'tip'}, bush: {px: 1.6, w: 10, z: .38, fq: .7, curve: 'bush'}, rigid: {bush: [1, 2]}},
 };
 const CURVES = {   // the arena's row weights: u = 0 at the sprite's base row .. 1 at its top row; c = crown start (trees)
   tip: u => u < .2 ? 0 : ((u - .2) / .8) ** 1.25,
@@ -307,6 +312,7 @@ export async function create(host) {
   }
   function flexOf(p) {
     const F = FLEX[biome]; if (!F) return null;
+    if (F.rigid?.[p.kind]?.includes(p.variant | 0)) return null;
     if (p.kind === 'tree' && F.dead && (p.variant | 0) === 2) return F.dead;
     if (p.kind === 'tree' && F.willow && (p.variant | 0) === 3) return F.willow;
     return F[p.kind] || null;

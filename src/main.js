@@ -39,7 +39,7 @@
 // THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
 // dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
 // host.setBiome / setTime / teleport / setYaw.
-// HOST (see `host` below): player, arrows, spawnArrow, events, mods (modifiers), props, entities (add / remove / hide /
+// HOST (see `host` below): player, arrows, spawnArrow, events, mods (modifiers), weapon (the loadout's), props, entities (add / remove / hide /
 //   query / near), itemOf, elev, inStream, blocked, layout,
 //   hitstop, shake, knock, play, aim, mouse, keys, toView(x, y, h) -> view px, sprite, point, line, layer(name),
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE,
@@ -49,7 +49,7 @@ import {createGfx, DEG} from './render/gfx.js';
 import {WORLD, elev, inStream} from './world/world.js';
 import {BIOMES} from './world/biomes.js';
 import {MOODS, TIMES} from './content/moods.js';   // the lighting tables (forked from the arena's lighting.js)
-import {createHero, loadLoadout} from './view/hero.js';   // the Ranger's card: loadouts, the composite, cloak, hair, armour, HD bow
+import {createHero, loadLoadout, SET_NAMES} from './view/hero.js';   // the Ranger's card: loadouts, the composite, cloak, hair, armour, HD bow
 import {BUSY} from './sim/player/player.js';
 import {createPlayerHost} from './sim/player/adapter.js';
 import {createGame} from './game/game.js';
@@ -77,7 +77,8 @@ const t00 = performance.now();
 
 // ---------------------------------------------------------------- the Ranger: loadouts (packed atlases)
 // the loadout (view/hero.js LOADOUTS). Default: the runtime cloth (cloak + scarf tail answer the wind; ?set=basic = the baked cloak)
-const loadI = {basic: 0, body: 2, sim: 1}[Q.get('set')] ?? 1;
+// (?set=gunslinger | outlaw: the cowboys, a revolver each: content/weapons.js)
+const loadI = SET_NAMES.includes(Q.get('set')) ? SET_NAMES.indexOf(Q.get('set')) : 1;
 $('#load').textContent = 'Loading the Ranger…';
 const TIMING = {}, mark = (k, t0) => { TIMING[k] = +((performance.now() - t0) / 1000).toFixed(2); };
 let tp = performance.now();
@@ -159,6 +160,7 @@ const host = {
   // the entity registry (world/entities.js): add / remove props, live queries by kind, near(x, y, r); props = its list
   get entities() { return stage.ents; }, get propsVersion() { return stage.ents.ver; },
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY, mods,
+  get weapon() { return hero.weapon; },   // the loadout's weapon (content/weapons.js): kind 'bow' | 'gun', abilities
   itemOf: p => stage.world.itemOf(p), elev, inStream, blocked: (x, y, z = P.z, air = false) => pa.blocked(x, y, z, air),
   hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); }, play: (frame, sec) => PL.hold(frame, sec),
   aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target}; },

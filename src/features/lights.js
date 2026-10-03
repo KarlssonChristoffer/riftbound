@@ -52,8 +52,10 @@ const lerp3 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, 
 
 const D = SCONCE_D;   // a sconce's stick stands this far off the wall face (the arm shows a few px past the stick)
 const TORCH_H = 1.72, BRAZ_H = 1.22;   // flame heights of the arena's torch / brazier sprites (their lights' h)
-const GLOW = {ruins: '#7af0c8', ember: '#ff9a50', frost: '#9ad8ff', rift: '#e070ff'};
-const WISP = {ruins: '#a8ffd8', ember: '#ffc070', frost: '#bfe8ff', rift: '#ff9cf0'};
+// (null: the biome has none: the desert, world/desert.js, grows no glowing mushrooms and has no will-o'-wisps)
+const GLOW = {ruins: '#7af0c8', ember: '#ff9a50', frost: '#9ad8ff', rift: '#e070ff', desert: null};
+const WISP = {ruins: '#a8ffd8', ember: '#ffc070', frost: '#bfe8ff', rift: '#ff9cf0', desert: null};
+const shroomsOn = id => GLOW[id] !== null, wispsOn = id => WISP[id] !== null;
 const FIRE = ['#fff6c8', '#ffd060', '#ff8a30', '#c84a1c'].map(rgb), SMOKE = ['#6a625a', '#57514b', '#46423e'].map(rgb);
 const BURNS = {crate: 9, barrel: 11, barrel_x: 1.1, dummy: 12};   // seconds alight before it crumbles (keg: cooks off; dummies go out)
 const ASHC = ['#9e9890', '#7e7a74', '#64605b', '#4a4744'].map(rgb), ASH1 = rgb('#3e3a37');   // ash greys; a cooled ember
@@ -361,6 +363,7 @@ export async function create(host) {
   function stepArrows(dt) {
     const fp = flamePoints();
     for (const a of host.arrows) {
+      if (a.kind === 'bullet') continue;   // a revolver's bullet (sim/player/gun.js) never catches fire
       if (a._lt === undefined) {   // just loosed: next to a flame, it's dipped
         a._lt = 0; a._id = aid++;
         if (fp.some(([x, y]) => Math.hypot(x - a.x, y - a.y) < 1.5) || candles.some(c => c.lit && F.on && Math.hypot(c.x - a.x, c.y - a.y) < 1.3)) { a.fire = 1; burst(a.x, a.y, a.h, 6, FIRE, .8); }
@@ -692,11 +695,12 @@ export async function create(host) {
   }
   function drawSmall() {
     for (const c of candles) if (near(c.x, c.y)) spr(`candles_${c.v}_${c.lit ? (Math.floor(T * 7 + c.ph) % 4) : 4}`, c.x, c.y, c.h, {shadow: true});
-    for (const s of shrooms) if (near(s.x, s.y)) spr(`shroom_${s.v}_${s.b > 1.05 ? 2 : s.b > .55 ? 1 : 0}`, s.x, s.y, 0, {shadow: true});
+    if (shroomsOn(biomeId)) for (const s of shrooms) if (near(s.x, s.y)) spr(`shroom_${s.v}_${s.b > 1.05 ? 2 : s.b > .55 ? 1 : 0}`, s.x, s.y, 0, {shadow: true});
   }
   const wispCols = {};   // biome -> [colour, core] (made once: no arrays a frame)
   const wispCol = id => { let wc = wispCols[id]; if (!wc) { const c = rgb(WISP[id] || WISP.ruins); wc = wispCols[id] = [c, lerp3(c, [1, 1, 1], .6)]; } return wc; };
   function drawWisps() {   // (points through pt's kept options; no closure in the loop: V8 made a context for every wisp, drawn or not)
+    if (!wispsOn(biomeId)) return;
     for (const w of wisps) {
       if (w.fade < .05 || !near(w.x, w.y)) continue;
       const wc = wispCol(biomeId), c = wc[0], core = wc[1], a = w.fade;
@@ -784,7 +788,8 @@ export async function create(host) {
       if (near(o.x, o.y, 14)) host.events.push({type: 'fire.crackle', x: o.x, y: o.y, big});
     }
     if (F.on) {
-      stepShrooms(dt); stepWisps(dt);
+      if (shroomsOn(biomeId)) stepShrooms(dt);
+      if (wispsOn(biomeId)) stepWisps(dt);
       if (near(camp.x, camp.y, 20)) {   // the campfire's sparks and smoke (as big as the fire)
         if (R() < dt * 14 * Math.min(1, campK)) parts.push(part(camp.x + rr(-.12, .12), camp.y + rr(-.08, .08), .4, rr(-.2, .2), rr(-.2, .2), rr(1, 2.3), rr(.6, 1.4), 'spark', FIRE[0], null, -.2));
         if (R() < dt * 7) parts.push(part(camp.x + rr(-.08, .08), camp.y, .9, 0, 0, rr(.35, .55), rr(2.2, 3.4), 'smoke', SMOKE[R() * 3 | 0], null, 0, 2));
@@ -837,8 +842,8 @@ export async function create(host) {
       lrec(camp.x, camp.y, .3 + .45 * Math.min(1, ck), '#ffa048', 6.5 * (.6 + .4 * ck), 1.25 * (.28 + .72 * ck), .55, 9101, .05);
       if (!beacon.unlit) lrec(beacon.x, beacon.y, beacon.z + 1.45, host.biome.style.torch || '#ffc850', 8.5, 1.45, .4, 9102, .06);
       for (const c of candles) if (c.lit) lrec(c.x, c.y, c.h + .3, '#ffc070', 2.3, .75, .35, c.id, .015);
-      for (const s of shrooms) lrec(s.x, s.y, .3, GLOW[biomeId] || GLOW.ruins, 2.4 + s.b * .8, .45 + s.b * .45, 0, s.id);
-      for (const w of wisps) if (w.fade > .05) lrec(w.x, w.y, w.h, WISP[biomeId] || WISP.ruins, 3.1, 1.15 * w.fade, .12, w.id);
+      if (shroomsOn(biomeId)) for (const s of shrooms) lrec(s.x, s.y, .3, GLOW[biomeId] || GLOW.ruins, 2.4 + s.b * .8, .45 + s.b * .45, 0, s.id);
+      if (wispsOn(biomeId)) for (const w of wisps) if (w.fade > .05) lrec(w.x, w.y, w.h, WISP[biomeId] || WISP.ruins, 3.1, 1.15 * w.fade, .12, w.id);
     }
     for (const [p, b] of burning) { const k = Math.min(1, b.t / .4) * flameK(p, b); lrec(p.x, p.y, burnTop(p, b) + .32, '#ff9a40', 3.4, 1.05 * k, .6, 9200 + (p.x * 7 | 0) % 90, .04); }
     for (const [p, e] of ashes) if (e.t < 14) lrec(p.x, p.y, (p.z || 0) + .45, '#ff8a3a', 2.8, .9 * (1 - e.t / 14) ** 1.5, .6, 9500 + (p.x * 7 | 0) % 90, .03);

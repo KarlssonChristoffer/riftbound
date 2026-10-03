@@ -16,7 +16,7 @@ export const FLAG_DOCS = {
   yaw:       'the camera\'s starting yaw (deg)',
   zoom:      '2: start zoomed in',
   // ---- the player
-  set:       'basic | sim | body: the loadout (baked cloak / runtime cloth / bare body)',
+  set:       'basic | sim | body | gunslinger | outlaw: the loadout (baked cloak / runtime cloth / bare body; the cowboys with their revolvers)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
   lantern:   '1: start with the lantern lit',
   detail:    'low: the low detail tier (no wind lines, wildlife, depth layer or grass; menu > Graphics > Detail)',
@@ -35,7 +35,12 @@ export const FLAG_DOCS = {
   litter: '0: the fallen leaves stay as baked (no wind moves them, none are lifted); also the low detail tier',
   riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', grass: '0: no grass (features/grass.js)', wildlife: '0: no wildlife', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
+  tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
+  foes: '0: no gunmen in the desert sandbox (features/foes.js)', blood: '0: no blood from bullet hits (features/blood.js; menu > Graphics > Effects > Blood)',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
+  gunsfx: 'spaghetti | hollywood | gritty: the gun sounds\' western-movie flavor (audio/runtime/events.js GUN_SFX; menu > Audio > Gun sounds, remembered)',
+  battlemusic: '1: the premade Six Chambers songs follow the fight (features/battlemusic.js); off by default: the procedural score plays',
+  bmforce: 'state[:song[:x]]: dev, pin the battle music (dev/bmusic.js), e.g. boss:iron:.25 (x = the champion health) or battle:dust:.8 (x = intensity)',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
   lineup: 'trees: the procedural trees side by side for review',

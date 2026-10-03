@@ -7,11 +7,13 @@
 //                  through a gate, along the bank), or null when it can go straight at you (the core does that)
 //   spots(...)     spawn spots: open cells in a band of WALKING distance (never across the stream from you), spaced out
 // It's rebuilt per stage (build()) since the world's fixed props come with the layout.
+// o.area(x, y) -> bool: the ground it may use (default: inside the arena's walls or on the trail; the desert's gunmen,
+// features/foes, walk all the ground the player can: the fort's square and 3 m round it too).
 import {PLAY, TRAIL, WORLD, elev, inStream} from './world.js';
 
 const C = .5, TAU = Math.PI * 2;
 
-export function createNav(host) {
+export function createNav(host, o = {}) {
   const NX = Math.ceil(WORLD.WM / C), NY = Math.ceil(WORLD.HM / C), N = NX * NY;
   const open = new Uint8Array(N), dist = new Float32Array(N).fill(Infinity), queue = new Int32Array(N);
   let fieldT = 0, built = false;
@@ -21,7 +23,7 @@ export function createNav(host) {
 
   function build() {
     const fixed = host.props.filter(p => !p.gone && !p.broken && !p.breakable && !p.sparring && !p.outside && !p.interact && (p.rect || p.r > 0));
-    const inArea = (x, y) => (x > PLAY.x0 && x < PLAY.x1 + .6 && y > PLAY.y0 && y < PLAY.y1) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1);
+    const inArea = o.area || ((x, y) => (x > PLAY.x0 && x < PLAY.x1 + .6 && y > PLAY.y0 && y < PLAY.y1) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1));
     for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
       const x = (i + .5) * C, y = (j + .5) * C;
       let ok = inArea(x, y) && elev(x, y) === 0 && !inStream(x, y);
