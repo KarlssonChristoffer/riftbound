@@ -27,6 +27,9 @@ export const EVENTS = {
   'player.holster':     ['sim/player/gun.js',     'x, y, z, gun (the twirl ends in the holster)', 'audio'],
   'player.hit':         ['features/combat/core.js, features/foes/sim.js', 'x, y, vx, vy, player: true (a brute landed on him; a gunman\'s bullet hit him)', 'atmos, wildlife, audio, music'],
   'player.hurt':        ['features/combat/core.js, features/foes/sim.js', 'dmg, by (the brute | \'blast\' | the gunman), x, y', 'game, battlemusic'],
+  // the desert sandbox's stakes (game/game.js, while features/foes.js says a fight is on)
+  'player.down':        ['game/game.js',          'x, y (your health ran out in the desert sandbox: the gang stops shooting)', 'foes'],
+  'player.respawn':     ['game/game.js',          'x, y (up again at the fort: the gunmen are gone, the next gang comes later)', 'foes'],
   'arrow.hit':          ['sim/projectiles.js',    'x, y (the prop), vx, vy (the arrow; a bullet: x its push), prop, kind? (bullet)', 'game, wind, props, atmos, wildlife, audio, music, gunfx'],
   'arrow.splash':       ['sim/projectiles.js',    'x, y, small: true (an arrow or a bullet into the stream)', 'atmos, wildlife, audio'],
   'bullet.impact':      ['sim/projectiles.js, features/foes/sim.js', 'x, y, h (where it ended), x0, y0, h0 (where it was as that step began), surf (hit | ground | water | tree | prop | air | player: a gunman\'s bullet in you), gun, dx, dy, foe? (the gunman\'s type)', 'gunfx, audio, wildlife, battlemusic'],

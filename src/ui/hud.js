@@ -71,12 +71,14 @@ export function createHud(host) {
         text(q, f.s, x, y - rise, (f.big ? 17 : 13) * u, f.col, {align: 'center', w: 800});
         q.globalAlpha = 1;
       }
-      if (v.run) {
-        // health + build (bottom left)
-        const bx = Math.round(20 * u), bw = Math.round(300 * u), bh = Math.round(16 * u), by = Math.round(Hh - 30 * u - bh);
+      const bx = Math.round(20 * u), bw = Math.round(300 * u), bh = Math.round(16 * u), by = Math.round(Hh - 30 * u - bh);
+      if (v.run || v.health) {   // health (bottom left): in a run; in the sandbox while a fight has stakes (v.health: game.js)
         bar(q, bx, by, bw, bh, S.hp / S.maxHp, S.hpShow / S.maxHp, S.hp < S.maxHp * .3 ? '#e0483a' : '#c8403a', {glow: S.healT * .8});
         text(q, `${Math.ceil(S.hp)} / ${S.maxHp}`, bx + 8 * u, by + bh / 2 + 1, 12 * u, '#f4efe4', {base: 'middle', w: 700});
         if (S.regen > 0) text(q, `+${S.regen.toFixed(1)}/s`, bx + bw - 6 * u, by + bh / 2 + 1, 10 * u, '#b8e0a0', {align: 'right', base: 'middle', w: 600});
+      }
+      if (v.run) {
+        // the build (bottom left, over the health)
         const is = Math.round(28 * u), gap = Math.round(5 * u), iy = by - is - Math.round(10 * u), mx = (host.VW / 2 + (host.mouse.x - host.VW / 2) * host.zoom) * sc, my = (host.VH / 2 + (host.mouse.y - host.VH / 2) * host.zoom) * sc;
         hoverTip = null;
         v.build.forEach((e, i) => {
