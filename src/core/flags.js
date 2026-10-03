@@ -42,7 +42,7 @@ export const FLAG_DOCS = {
   riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', grass: '0: no grass (features/grass.js)', wildlife: '0: no wildlife', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
-  foes: '0: no gunmen in the desert sandbox (features/foes.js)', ragdoll: '1: the bandit dies as a live 3D ragdoll instead of his death clips (features/foes/look.js, view/ragdoll.js; a prototype)',
+  foes: '0: no gunmen in the desert sandbox (features/foes.js)', ragdoll: '0: the gunmen die by their death clips instead of as live 3D ragdolls (features/foes/look.js, view/ragdoll.js; ragdolls are the default)',
   blood: '0: no blood from bullet hits (features/blood.js; menu > Graphics > Effects > Blood)',
   smoke: 'pixel | hybrid | strands | soft: the gun smoke\'s look (features/gunfx/smoke.js; Shift+V cycles it in dev mode)',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',

@@ -10,7 +10,7 @@
 // OWNS: nothing of the game's: its own list of pairs.  READS: the foes feature's look (sets, rag), host.yaw.
 export function attach(host) {
   const F = host.feature('foes'), look = F.look, rag = look.rag, TAU = Math.PI * 2;
-  if (!rag) throw new Error('raglook: no ragdolls (start the page with ?ragdoll=1)');
+  if (!rag) throw new Error('raglook: no ragdolls (the page was started with ?ragdoll=0)');
   const items = [], O = {img: null, nrm: null, sx: 0, sy: 0, sw: 0, sh: 0, x: 0, y: 0, h: 0, px: 0, py: 0, type: 7, shadow: true, alpha: 1};
   let slots = [];
   const frame0 = F.frame;

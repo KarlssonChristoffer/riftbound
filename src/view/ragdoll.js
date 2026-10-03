@@ -1,5 +1,5 @@
 // RAGDOLL: a gunman's death as a live 3D body thrown by the killing shot (features/foes/look.js spawns one where the
-// death clip would play; ?ragdoll=1: the bandit, the sheriff, the bruiser). VIEW only: nothing in the sim reads it (?views=0 changes nothing).
+// death clip would play; the default (?ragdoll=0: the clips) for the bandit, the sheriff, the bruiser). VIEW only: nothing in the sim reads it (?views=0 changes nothing).
 // The body is the sprite atlas's own Blender model in rigid per-bone segments (tools/blender/ragdoll_export.py), drawn
 // by render/rigmesh.js with the pixelizer's rules; this module moves it.
 // THE PHYSICS (position based, no library): 16 points on the body (the pelvis block: pelvis, the hips, the belly; the

@@ -80,7 +80,7 @@ export const TUNE = {
   // back in `fall` (s), `land` (s), then `crouch`, faded over old: [from, to] s, sliding `slide` m/s, lifted `lift` m
   corpse: {hold: 9, fade: .8, max: 10, early: .5, side: 40, travel: {die_b: .8, die_f: .7, die_s: -.2}, puff: {n: 14, r: .6},
     fall: .24, land: .2, old: [.7, 1.5], slide: 1.6, lift: .22},
-  // the RAGDOLL death (?ragdoll=1, the bandit: features/foes/look.js + view/ragdoll.js): the live 3D body takes the death
+  // the RAGDOLL death (the default, all three gunmen; ?ragdoll=0 = the death clips: features/foes/look.js + view/ragdoll.js): the live 3D body takes the death
   // sprite's place and falls by physics. Per 1/sub s substep, iters constraint passes; gravity m/s^2; damp (velocity kept
   // per substep, in the air); mu: ground friction (body, the gun, the hat: the share of sliding speed lost per contact
   // substep); bounce: what the gun and the hat keep of a fall's speed. muscles: the body holds its pose against gravity,
