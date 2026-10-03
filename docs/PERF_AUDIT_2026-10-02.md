@@ -8,7 +8,8 @@ and the rules in `docs/ARCHITECTURE.md` 3.3; this doc says where today's frame b
 **Status:** stage 1 committed (5df7f51; results in E.1). Stage 2: the flames (E.2), the water's reflections (E.3), the
 cloud shadows and the lava's heat haze (E.4), the vignette (E.5), the contact shadows (E.7), the GPU layer batch (E.8),
 wind's cloth atlas (E.9) and the hero's compositor in arrays (E.10) are done. The trees' sway was measured and left (E.9).
-Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 not started.
+Stage 3: the world cards in instanced batches (E.6; a fix in E.8). Stage 4 (E.11): done. In a real window at 164 Hz the
+game misses 0-3 vsyncs in 10 s in every scenario.
 
 **Correction (same day):** the horde's 6.15 ms in C.1 was inflated by the machine's load. On a less loaded machine
 (load ~20%) the same code measured 2.7-3.1 ms (E.1). The shares in C.2 hold, but horde is not as far over budget as C.1
@@ -721,17 +722,93 @@ A windowed 164 Hz run on the dev machine (stage 4) is the way to settle it.
 
 **Expected after stages 1-3:** day ~3.9 -> ~1.5-2 ms JS, horde ~6.2 -> ~2.5-3 ms.
 
+### E.11 Stage 4 as built (2026-10-03)
+
+**`preserveDrawingBuffer` off.** The renderer kept the canvas's drawing buffer between frames, which costs a copy of the
+3440 x 1440 back buffer every frame.
+
+- Every frame draws every pixel, and the captures (golden, cap tools) read the canvas in the task that drew it, so nothing
+  needed it. `?preserve=1` keeps it for a capture that reads the canvas later.
+- golden: 16 / 16 identical.
+- Interleaved A/B: -7..-12% a frame (median slice 0.92), `G.render` -11% by day and in the horde (0.63 -> 0.56 ms, 0.71
+  -> 0.62 ms). The GPU timer doesn't see the copy (it happens in the compositor).
+
+**The frame's counts in F3 and the bench.**
+
+- render/glstats.js wraps the WebGL context while the profiler shows them (F3 up, or `?bench=1`) and counts:
+  - draw calls and uniform calls;
+  - texture uploads from a canvas / image (Chrome snapshots it whole) and from an array, with their bytes;
+  - buffer bytes.
+- core/perf.js `counts()` rolls them per frame with the JS heap: its growth between collections (KB a frame) and the
+  collections a second (drops of `performance.memory`). F3 shows two more lines.
+- The bench prints a counts line under each scenario (`--enable-precise-memory-info` for exact heap numbers). After each
+  measured window it also takes a 3 s trace of the GC's pauses (MinorGC / MajorGC: ms a second, how many, the longest).
+
+**A zoomed-out bench scenario** (`zoomed-out`: the wheel's widest, half the window's scale). It's the worst case and shows
+two things to do next:
+
+- 243 draws and 711 uniform calls, about twice the day's;
+- **one canvas upload a frame of ~2.2 MB**: the stream's sky glints (`skyBand`, the last per-frame canvas user, E.8)
+  are on screen there and upload the whole ground-layer canvas. `G.render` is 1.11 ms there, against 0.48 by day.
+
+**A windowed, vsync'd run: tools/perf/vsync.mjs.** A real full-screen Chrome window at the display's refresh rate (the
+compositor and DWM in the loop). It records every rAF time and counts the missed vsyncs. On the dev machine (3440 x
+1440, 164 Hz, 10 s a scenario):
+
+| scenario | frames | missed | longest | JS avg / p95 |
+|---|---|---|---|---|
+| day | 1647 | 3 (0.18%) | 12.2 ms | 1.60 / 2.10 ms |
+| walk | 1650 | 0 | 6.3 ms | 1.67 / 2.20 ms |
+| night-fires | 1649 | 1 (0.06%) | 12.2 ms | 1.23 / 1.60 ms |
+| storm | 1650 | 0 | 6.2 ms | 1.58 / 2.10 ms |
+| horde (60) | 1650 | 0 | 6.3 ms | 1.60 / 2.10 ms |
+| zoomed-out | 1650 | 0 | 6.3 ms | 2.30 / 3.10 ms |
+
+This also answers E.10's open question: whatever the GPU timer reads, the frames make their vsync.
+
+**The interleaved A/B, ported: tools/perf/ab.mjs.** Either side is a folder next to `src/` or `git:REV`: that
+revision's `src/` is extracted beside it and removed afterwards (`--a git:HEAD~1` compares the last commit with the
+working tree). `--qa` / `--qb` add a switch to one side. It prints the per-slice ratio, the systems' medians and the counts.
+
+**The bench at 3440 x 1440** (2026-10-03, 3 runs a scenario, the median run; the machine was 22% busy with other apps,
+so the baseline was NOT saved: run `node tools/perf/bench.mjs --save` on a quiet machine). Every scenario is within
+budget:
+
+| scenario | JS avg | frame p95 | GPU p95 | draws | uploads a frame | heap / frame | GC |
+|---|---|---|---|---|---|---|---|
+| day | 1.27 ms | 2.1 ms | 1.46 ms | 117 | 3.3 array (69 KB) | +133 KB | 1.6 ms/s |
+| night-fires | 0.81 | 1.4 | 0.74 | 59 | 3.2 array | +141 KB | 2.0 ms/s |
+| walk | 1.05 | 1.6 | 1.06 | 91 | 1 canvas + 3.2 array (843 KB) | +143 KB | 2.1 ms/s |
+| run | 1.34 | 2.0 | 1.55 | 145 | 1 canvas + 3.1 array (842 KB) | +164 KB | 2.6 ms/s |
+| storm | 1.11 | 1.6 | 1.29 | 116 | 3.3 array | +188 KB | 1.7 ms/s |
+| snow | 1.03 | 1.5 | 1.40 | 114 | 3.3 array | +227 KB | 3.3 ms/s |
+| horde (60) | 1.11 | 1.6 | 1.42 | 116 | 3.2 array | +155 KB | 2.4 ms/s |
+| zoomed-out | 1.68 | 2.4 | 2.27 | 242 | 1 canvas + 3.4 array (2218 KB) | +182 KB | 1.5 ms/s |
+
+**Findings for later:**
+
+- **Two canvases still go up every frame in some views**, both on the ground layer's canvas path (E.8):
+  - flow's ground decals (footprints and marks: an affine with rotation, clipped by the plateau), whenever there are
+    marks in view (walk, run);
+  - the stream's sky glints (`skyBand`, pixel work), whenever the stream is in view (zoomed out).
+
+  Each costs a whole-canvas upload (0.8-2.2 MB). On the GPU, both would leave a normal frame with no canvas upload at all.
+- The heap still grows ~130-230 KB a frame between collections (stage 1 aimed at under 100 KB). GC takes ~1.5-3.3 ms a
+  second, longest ~2.7 ms.
+
 ---
 
 ## F. How it was measured (reproducible)
 
-Scripts in `tmp/perf-tools/` (git-ignored; output goes to `tmp/perf-tools/out/`), all modelled on
-`tools/perf/bench.mjs`. Their ports are HTTP 8143 / 8145 and Chrome debug 9372 / 9373 (the test tools' ports are 9342 /
+The checked-in tools are in `tools/perf/` (E.11): `bench.mjs` (the budget, the counts, the GC), `ab.mjs` (the
+interleaved A/B) and `vsync.mjs` (the windowed 164 Hz run). The rest are scratch scripts in `tmp/perf-tools/`
+(git-ignored; output goes to `tmp/perf-tools/out/`), all modelled on `tools/perf/bench.mjs`. Their ports are HTTP 8143 / 8145 and Chrome debug 9372 / 9373 (the test tools' ports are 9342 /
 9351 / 9352 / 9354). `--path src-perf0` points any of them at the copy of `src/` from before stage 1 (`D:/Game/src-perf0/`,
 excluded in `.git/info/exclude`).
 
-- **`ab.mjs`: the interleaved A/B.** Use it to compare code on a loaded machine. Two pages run in one Chrome with rAF
-  off, each stepped by hand (`__r3d.step`) in alternating slices. It reports ms per frame and the per-slice ratio.
+- **`ab.mjs`: the interleaved A/B (now `tools/perf/ab.mjs`).** Use it to compare code on a loaded machine. Two pages
+  run in one Chrome with rAF off, each stepped by hand (`__r3d.step`) in alternating slices. It reports ms per frame and
+  the per-slice ratio.
 - **`own.mjs`:** a short drive with `?owncheck=1`, then prints the ownership report.
 
 - **CPU profile:** `Profiler.start` with a 100 µs sampling interval for 6 s. The analysis gives self time by function
@@ -742,4 +819,4 @@ excluded in `.git/info/exclude`).
 - **Heap:** `HeapProfiler.startSampling` (4 KB interval, including objects collected by minor and major GC), divided by
   frames (fps x seconds).
 
-Worth porting into `tools/perf/` (stage 4).
+`ab.mjs` was ported to `tools/perf/` (stage 4); the profiles, traces and heap sampling stay scratch scripts.

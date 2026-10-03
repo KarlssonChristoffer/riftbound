@@ -22,6 +22,7 @@ export function createLoop(E) {
   const promptCtx = {host, pa, features, G};   // ui/prompt.js
   let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null, freeze = 0;
   let views = E.flags.get('views') !== '0';   // ?views=0: the sim alone (tools/test/simview.mjs: it must come out the same)
+  const BENCH = E.flags.get('bench') === '1';   // (the bench reads the counts: render/glstats.js -> perf.counts)
   const SIM_DT = 1 / 60, MAX_STEPS = 4;
   let acc = 0, alpha = 1;   // acc: real time the sim is behind (<= 0: ahead); alpha: where the draw sits in the last step
   let hovIt = null;         // the world item with the hover pulse on (the aimed target)
@@ -98,6 +99,7 @@ export function createLoop(E) {
     if (opt.zones) drawZones({G, host, world: stage.world});
     perf.begin('mood+lights', 'view'); lighting.apply(PX, PY, t); perf.end('mood+lights');
     perf.begin('G.render', 'render'); G.render(); perf.end('G.render');
+    const cnt = perf.on || BENCH; G.glStats.enable(cnt); if (cnt) perf.counts(G.glStats.take());   // (draws, uploads... while F3 is up)
     // HD overlay
     const dpr = devicePixelRatio || 1, sc = cv.scale * dpr;
     hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);

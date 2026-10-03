@@ -21,6 +21,7 @@ import {flags} from '../core/flags.js';
 import {AUTUMN as AU, AUTUMN_MID} from '../core/autumn.js';
 import {hypot2} from '../core/mathx.js';
 import {cssRGBA} from '../core/color.js';
+import {createGLStats} from './glstats.js';
 import {createLitterSim} from './litter.js';
 
 export const DEG = Math.PI / 180;
@@ -1012,7 +1013,10 @@ void main() {
 
 // ---------------------------------------------------------------- the renderer
 export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH}) {
-  const renderer = new THREE.WebGLRenderer({canvas, antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: true});
+  // (the drawing buffer is not kept between frames: keeping it costs a copy of the 3440 x 1440 back buffer each frame. Every
+  // frame draws every pixel, and the captures read the canvas in the task that drew it; ?preserve=1 keeps it)
+  const renderer = new THREE.WebGLRenderer({canvas, antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: flags.get('preserve') === '1'});
+  const glStats = createGLStats(renderer.getContext());   // (what a frame asks of WebGL, counted while the profiler shows it)
   renderer.setPixelRatio(1); renderer.setSize(VW, VH, false);
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the arena does its maths on sRGB numbers: so do we
   renderer.autoClear = false;
@@ -1999,7 +2003,7 @@ void main() {
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
-    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, tex, texData, QUAD,
+    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, tex, texData, glStats, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }

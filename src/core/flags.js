@@ -29,6 +29,7 @@ export const FLAG_DOCS = {
   debug:     'a debug view index (G cycles them)',
   sshadow:   '0: every shadow caster in the per-frame sun shadow (no cached static map; an A/B)',
   cards:     '0: every world card its own mesh and draw (no instanced card batches; an A/B)',
+  preserve:  '1: keep the WebGL drawing buffer between frames (a capture that reads the canvas outside the frame that drew it)',
   // ---- features (0 turns one off)
   wind: '0: no wind', windlevel: 'calm | breeze | brisk | gale: lock the wind strength', windlines: '0 | hd | pixel: the wind lines',
   litter: '0: the fallen leaves stay as baked (no wind moves them, none are lifted); also the low detail tier',

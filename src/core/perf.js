@@ -7,7 +7,9 @@
 //   perf.instrument(features)           wrap every feature hook: update -> sim, view / frame / lights / camera -> view, hd -> ui
 //   perf.begin(label, group) ... perf.end(label)   time a span of host code (main.js)
 //   perf.frameStart() / perf.frameEnd()  around the whole frame (the main thread's JS); the rAF interval gives the fps
-//   perf.report() -> {fps, frame: {p50, p95, p99, max}, js: {...}, groups: [{group, avg, budget}], systems: [...]}
+//   perf.counts(o)                      this frame's counts (render/glstats.js take(): draws, uniforms, uploads...; the loop
+//                                       feeds them while F3 is up or the bench runs); the JS heap is read with them
+//   perf.report() -> {fps, frame: {p50, p95, p99, max}, js: {...}, groups: [{group, avg, budget}], systems: [...], counts}
 //   perf.draw(q, sc)                    the overlay (q = the HD canvas' 2D context, sc = display px per view px)
 //
 // BUDGETS: milliseconds per frame on the dev machine (RTX 4070, a 3440x1440 display at 164 Hz), which is the target: as
@@ -28,6 +30,13 @@ export function createPerf({on = false} = {}) {
   const S = new Map();   // label -> {group, t0, cur (this frame), ring: Float32Array(N)}
   let i = 0, filled = 0, f0 = 0, lastStart = 0;
   const jsRing = new Float32Array(N), dtRing = new Float32Array(N);
+  // COUNTS per frame, rolled like the systems: what the frame asks of WebGL (render/glstats.js) and the JS heap, its growth
+  // between collections and the collections (a drop of performance.memory's used heap: Chrome; coarse unless Chrome runs
+  // with --enable-precise-memory-info, as the bench does). Only while someone feeds them (perf.counts each frame)
+  const CN = ['draws', 'uniforms', 'texCanvas', 'texData', 'texBytes', 'bufBytes', 'heapUp', 'gc'], cRing = {}, cCur = {}, cOn = new Uint8Array(N);
+  for (const k of CN) { cRing[k] = new Float32Array(N); cCur[k] = 0; }
+  let counted = false, heapPrev = 0;
+  function counts(o) { counted = true; for (const k in o) if (k in cCur) cCur[k] += o[k]; }
   const sys = (label, group) => { let s = S.get(label); if (!s) S.set(label, s = {label, group, t0: 0, cur: 0, ring: new Float32Array(N)}); return s; };
 
   function begin(label, group = 'host') { const s = sys(label, group); s.t0 = now(); }
@@ -46,6 +55,13 @@ export function createPerf({on = false} = {}) {
   function frameEnd() {
     jsRing[i] = now() - f0;
     for (const s of S.values()) { s.ring[i] = s.cur; s.cur = 0; }
+    if (counted) {
+      const m = performance.memory?.usedJSHeapSize || 0;
+      if (m && heapPrev) { if (m < heapPrev) cCur.gc++; else cCur.heapUp += m - heapPrev; }
+      heapPrev = m;
+    } else heapPrev = 0;
+    for (const k of CN) { cRing[k][i] = cCur[k]; cCur[k] = 0; }
+    cOn[i] = counted ? 1 : 0; counted = false;
     i = (i + 1) % N; if (filled < N) filled++;
   }
 
@@ -58,9 +74,17 @@ export function createPerf({on = false} = {}) {
     const js = {avg: +avg(jsRing).toFixed(3), p95: +pct(jsRing, .95).toFixed(2), budget: BUDGET.frame};
     const dt = avg(dtRing);
     return {fps: dt ? +(1000 / dt).toFixed(1) : 0, frame: {p50: +pct(dtRing, .5).toFixed(2), p95: +pct(dtRing, .95).toFixed(2), p99: +pct(dtRing, .99).toFixed(2),
-      max: +Math.max(...dtRing.subarray(0, filled), 0).toFixed(2), budget: BUDGET.p95}, js, groups, systems, frames: filled};
+      max: +Math.max(...dtRing.subarray(0, filled), 0).toFixed(2), budget: BUDGET.p95}, js, groups, systems, frames: filled, counts: countReport()};
   }
-  function reset() { filled = 0; i = 0; jsRing.fill(0); dtRing.fill(0); for (const s of S.values()) s.ring.fill(0); }
+  function countReport() {   // the frames that were counted: averages, the most draws, collections a second -> null if none
+    let n = 0, secs = 0; const sum = {}; for (const k of CN) sum[k] = 0; let dMax = 0;
+    for (let k = 0; k < filled; k++) { if (!cOn[k]) continue; n++; secs += dtRing[k] / 1000; for (const c of CN) sum[c] += cRing[c][k]; dMax = Math.max(dMax, cRing.draws[k]); }
+    if (!n) return null;
+    const a = k => sum[k] / n;
+    return {draws: +a('draws').toFixed(1), drawsMax: dMax, uniforms: +a('uniforms').toFixed(1), texCanvas: +a('texCanvas').toFixed(2), texData: +a('texData').toFixed(2),
+      texKB: +(a('texBytes') / 1024).toFixed(1), bufKB: +(a('bufBytes') / 1024).toFixed(1), heapKB: +(a('heapUp') / 1024).toFixed(1), gcPerSec: secs ? +(sum.gc / secs).toFixed(2) : 0, frames: n};
+  }
+  function reset() { filled = 0; i = 0; jsRing.fill(0); dtRing.fill(0); for (const s of S.values()) s.ring.fill(0); for (const k of CN) cRing[k].fill(0); cOn.fill(0); heapPrev = 0; }
 
   // ---- the overlay: frame-time graph, the groups against their budgets, the most expensive systems
   let rep = null, repT = 0;
@@ -68,7 +92,7 @@ export function createPerf({on = false} = {}) {
     if (!P.on) return;
     const t = now(); if (!rep || t - repT > 250) { rep = report(); repT = t; }   // (sorting 240 samples 4x a second, not every frame)
     const u = Math.max(1, sc / 3), W = 300 * u, x0 = q.canvas.width - W - 12 * u, y0 = 12 * u, lh = 13 * u;
-    const top = rep.systems.slice(0, 9), H = (96 + (GROUPS.length + top.length) * 13 + 30) * u;
+    const top = rep.systems.slice(0, 9), cn = rep.counts, H = (96 + (GROUPS.length + top.length + (cn ? 2 : 0)) * 13 + 30) * u;
     q.save(); q.setTransform(1, 0, 0, 1, 0, 0);
     q.fillStyle = 'rgba(12,14,13,.86)'; q.fillRect(x0, y0, W, H);
     q.font = `${Math.round(11 * u)}px ui-monospace, Consolas, monospace`; q.textBaseline = 'top';
@@ -76,9 +100,14 @@ export function createPerf({on = false} = {}) {
     const p = 8 * u, ok = (v, b) => v <= b ? '#7fd67a' : v <= b * 1.5 ? '#f0c060' : '#ff6a5a';
     txt(`${rep.fps.toFixed(0)} fps · frame p50 ${rep.frame.p50.toFixed(1)} / p95 ${rep.frame.p95.toFixed(1)} ms`, x0 + p, y0 + p, ok(rep.frame.p95, BUDGET.p95));
     txt(`JS ${rep.js.avg.toFixed(2)} ms (budget ${BUDGET.frame})`, x0 + p, y0 + p + lh, ok(rep.js.avg, BUDGET.frame));
+    let yc = y0 + p + 2 * lh;
+    if (cn) {   // what the frame asks of WebGL, and the heap (render/glstats.js; performance.memory)
+      txt(`draws ${cn.draws.toFixed(0)} · uniforms ${cn.uniforms.toFixed(0)} · up ${cn.texCanvas.toFixed(1)} canvas ${cn.texData.toFixed(1)} data ${cn.texKB.toFixed(0)} KB · buf ${cn.bufKB.toFixed(0)} KB`, x0 + p, yc, '#b8b2a4'); yc += lh;
+      txt(`heap +${cn.heapKB.toFixed(0)} KB/frame · GC ${cn.gcPerSec.toFixed(1)}/s`, x0 + p, yc, cn.heapKB > 100 ? '#f0c060' : '#b8b2a4'); yc += lh;
+    }
     // the graph: JS per frame (stacked by group would cost more than it tells), frame interval as a line; marks at 16.7 ms,
     // the p95 budget (164 Hz) and the JS budget
-    const gx = x0 + p, gy = y0 + p + 2.4 * lh, gw = W - 2 * p, gh = 56 * u, sy = v => gy + gh - Math.min(gh, v / 20 * gh);
+    const gx = x0 + p, gy = yc + .4 * lh, gw = W - 2 * p, gh = 56 * u, sy = v => gy + gh - Math.min(gh, v / 20 * gh);
     q.fillStyle = 'rgba(255,255,255,.05)'; q.fillRect(gx, gy, gw, gh);
     for (const [v, c] of [[16.7, 'rgba(255,106,90,.5)'], [BUDGET.p95, 'rgba(240,192,96,.5)'], [BUDGET.frame, 'rgba(127,214,122,.5)']]) { q.fillStyle = c; q.fillRect(gx, sy(v), gw, Math.max(1, u)); }
     const bw = gw / N;
@@ -100,7 +129,7 @@ export function createPerf({on = false} = {}) {
     q.restore();
   }
 
-  const P = {on, begin, end, wrap, instrument, frameStart, frameEnd, report, reset, draw, BUDGET,
+  const P = {on, begin, end, wrap, instrument, frameStart, frameEnd, counts, report, reset, draw, BUDGET,
     toggle() { P.on = !P.on; }};
   return P;
 }
