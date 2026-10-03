@@ -108,7 +108,7 @@ export function createHud(host) {
           const b = v.boss, w = Math.round(Math.min(W * .5, 440 * u)), h = Math.round(10 * u), x = Math.round(W / 2 - w / 2), y = Math.round(72 * u);
           const chip = Math.max(b.hp, (lag.get(b) ?? b.hp) - b.maxHp * .006); lag.set(b, chip);
           text(q, b.name, W / 2, y - 6 * u, 13 * u, b.aura || '#f2d27a', {align: 'center'});
-          bar(q, x, y, w, h, b.hp / b.maxHp, chip / b.maxHp, '#d8483a');
+          bar(q, x, y, w, h, b.hp / b.maxHp, chip / b.maxHp, b.bar || '#d8483a');   // (bar: an affix's colour, features/affixes.js)
         }
       }
       // banners + toasts (centre)

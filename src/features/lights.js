@@ -852,7 +852,8 @@ export async function create(host) {
     LLIST.length = nLR; return LLIST;
   };
   F.onArrowHit = (a, p) => { if (a.fire && BURNS[p.kind]) ignite(p); };   // nothing returned: combat resolves the hit
-  // OTHER FEATURES' FIRE (the equipment experiment's fire flask and dynamite: features/equip; the omens' lightning: features/omens):
+  // OTHER FEATURES' FIRE (the equipment experiment's fire flask and dynamite: features/equip; the omens' lightning: features/omens;
+  // the affixes' burning ground: features/affixes):
   // ignite(p) sets a prop alight through this fire as a fire arrow does (it chars, spreads, burns through; only what burns: BURNS)
   // -> true if it caught now; fireNear(x, y, r): does a fire light x, y from within r m (a lit torch / brazier, the campfire and the
   // lit beacon as flamePoints sees them, something burning, a fire arrow)? SIM state only: an eclipse's rule reads it; flame(...)

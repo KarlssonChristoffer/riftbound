@@ -15,9 +15,17 @@ export const ENEMIES = {
 // later stages and later waves hit harder and take more
 export const scaleOf = (stage, wave) => ({hp: (1 + .5 * stage) * (1 + .06 * wave), dmg: 1 + .25 * stage});
 
+// DECORATORS: a feature may change a new enemy before it joins the world (features/affixes.js: an elite's affix, its
+// name, aura, bar colour and numbers): onSpawn(fn), fn(o, type, sc) edits the spawn options o in place (core.spawnBrute's:
+// what it adds to them stays on the enemy as its creator's fields). They run in the order added, every spawn.
+const decorators = [];
+export const onSpawn = fn => { decorators.push(fn); };
+
 export function spawnEnemy(core, type, x, y, sc) {
   const E = ENEMIES[type];
-  return core.spawnBrute({x, y, type, name: E.name, hp: Math.round(E.hp * sc.hp), dmg: Math.round(E.dmg * sc.dmg), coins: E.coins,
+  const o = {x, y, type, name: E.name, hp: Math.round(E.hp * sc.hp), dmg: Math.round(E.dmg * sc.dmg), coins: E.coins,
     elite: !!E.elite, boss: !!E.boss, aura: E.aura, knock: E.knock, reach: E.reach, pause: E.pause, hopT: E.hopT, hopD: E.hopD, hopH: E.hopH,
-    hitR: E.boss ? .55 : undefined});
+    hitR: E.boss ? .55 : undefined};
+  for (const fn of decorators) fn(o, type, sc);
+  return core.spawnBrute(o);
 }
