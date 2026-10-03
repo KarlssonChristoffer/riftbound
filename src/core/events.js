@@ -74,6 +74,10 @@ export const EVENTS = {
   'wildlife.splash':    ['features/wildlife.js',  'x, y, small: true, wl: true', 'atmos, wildlife, audio'],
   'wildlife.bird_perch': ['features/wildlife.js', 'x, y, h, prop, off, big, scared (a bird lands on / leaves a top)', 'wind'],
   'tumbleweed.bounce':  ['features/tumbleweed.js', 'x, y, k (0..1: how hard it came down / was knocked; near the player, on screen)', 'audio'],
+  // stage omens (features/omens.js: an omen turns the world's weather, wind and light into a stage's rules)
+  'omen.begin':         ['features/omens.js',     'id (content/omens.js), stage (the run\'s stage index, -1 in the sandbox)', '(none yet)'],
+  'omen.end':           ['features/omens.js',     'id', '(none yet)'],
+  'omen.strike':        ['features/omens/storm.js', 'x, y, r (m: what it hurts), h (where the bolt ends: a rod\'s top), rod (what drew it: arrow | lead | a prop kind | \'\')', '(none yet)'],
 };
 
 const warned = new Set();
