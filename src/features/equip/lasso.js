@@ -29,7 +29,7 @@ import {clamp, hypot2, hypot3, TAU} from '../../core/mathx.js';
 import {PROP_TOP, walkable} from '../../world/world.js';
 
 const MOVABLE = new Set(['crate', 'barrel', 'barrel_x']);
-const TOP = {crate: .8, barrel: .9, barrel_x: .9, pot: .5, rock: .5, rock_big: 1.1, brazier: 1.1, torch: 1.7, well: .9, bench: .5, stall: 2, woodpile: .4,
+const TOP = {lasso_snag: 4.3, crate: .8, barrel: .9, barrel_x: .9, pot: .5, rock: .5, rock_big: 1.1, brazier: 1.1, torch: 1.7, well: .9, bench: .5, stall: 2, woodpile: .4,
   campfire: .15, beacon: 1.5, chest: .6, dummy: 1.4, crystal: 1.2, pillar: 2.6, pillar_broken: 1.4, tree: 6, ruin: 2, scarecrow: 1.5, merchant: 1.6, goods: .7,
   bush: 0, tuft: 0, fern: 0, reed: 0, gadget: 0, gadget_cache: .7};
 const SEGMAX = 640;
@@ -90,7 +90,7 @@ export function createLassoSim(host, eq) {
         const h = (p.z || 0) + ANCHOR_TOP[p.kind]; addSeg(p.x, p.y, h, p.x, p.y, h, .3, p);
       }
     }
-    const A = eq.anchors?.(); if (A) for (let i = 0; i < A.n; i++) { const a = A.seg, j = i * 7; if (hypot2((a[j] + a[j + 3]) / 2 - x, (a[j + 1] + a[j + 4]) / 2 - y) < r + 4) addSeg(a[j], a[j + 1], a[j + 2], a[j + 3], a[j + 4], a[j + 5], a[j + 6], A.src); }
+    const A = eq.anchors?.(); if (A) for (let i = 0; i < A.n; i++) { const a = A.seg, j = i * 7; if (hypot2((a[j] + a[j + 3]) / 2 - x, (a[j + 1] + a[j + 4]) / 2 - y) < r + 4) addSeg(a[j], a[j + 1], a[j + 2], a[j + 3], a[j + 4], a[j + 5], a[j + 6], A.src[i]); }
   }
   // the closest point of segment i to (x, y, h) -> its distance; Q = the point
   const Q = {x: 0, y: 0, h: 0, t: 0};
@@ -273,7 +273,7 @@ export function createLassoSim(host, eq) {
     }
     const k = eq.dmgK(), o = {dur: Y.dur, h: Y.h, dmg: Y.dmg * k, dmgFly: Y.dmgFly * k, bowl: Y.bowl, stun: L.boss ? Y.stunBoss : L.elite ? Y.stunElite : Y.stun,
       spin: (eq.R() < .5 ? -1 : 1) * TAU * (1.25 + eq.R() * .5), onLand: landed};
-    const tx = P.x - ux * Y.stop, ty = P.y - uy * Y.stop;
+    const st = L.kind === 'gunman' ? Y.stopMan : Y.stop, tx = P.x - ux * st, ty = P.y - uy * st;
     const ok = L.kind === 'brute' ? core()?.fling(p, tx, ty, o) : foes()?.fling(p, tx, ty, o);
     events.push({type: 'lasso.yank', x: p.x, y: p.y, who: p, ok: !!ok});
     host.shake(2, .1);
@@ -384,9 +384,10 @@ export function createLassoSim(host, eq) {
         L.loop.x = p.x; L.loop.y = p.y; L.loop.h = (p.z || 0) + (p.h || 0) + (p.hitH ?? 1.6) * .5;
         break;
       }
-      case 'swing':
+      case 'swing':   // F held climbs the rope, let go of it (or Space) lets go of the rope
         L.t += dt;
-        if (press) Z.letGo();
+        if (press) { L.fHeld = true; Z.climb(true); }
+        if (up) { L.fHeld = false; Z.climb(false); Z.letGo(); }
         if (Z.mode !== 'hang') back();
         break;
       case 'back': reel(dt); break;

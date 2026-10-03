@@ -20,9 +20,10 @@ export const TUNE = {
   // the rope stretches `stretch` m before it holds you back; a roped enemy can't attack; it slips after `slip` s (elites
   // `slipElite`, the champion `slipBoss`); a press of F shorter than `tapMax` s is a yank
   hold: {len: 9, haul: .45, slip: 3.4, slipElite: 2.2, slipBoss: 4.5, drag: 3.2, dragElite: 1.2, stretch: .3, tapMax: .22},
-  // YANK (tap F while roped): it flies at you off its feet in `dur` s, `h` m up at the middle, lands `stop` m short of you,
-  // takes `dmg` (+ `dmgFly` to anyone it bowls over on the way) and lies stunned `stun` s (elites `stunElite`)
-  yank: {dur: .42, h: 1.1, stop: 1.15, dmg: 18, dmgFly: 12, stun: 1.5, stunElite: .9, stunBoss: .8, bowl: .55},
+  // YANK (tap F while roped): it flies at you off its feet in `dur` s, `h` m up at the middle, lands `stop` m short of you
+  // (a gunman `stopMan`: he falls flat on his back toward you), takes `dmg` (+ `dmgFly` to anyone it bowls over on the way)
+  // and lies stunned `stun` s (elites `stunElite`)
+  yank: {dur: .42, h: 1.1, stop: 1.15, stopMan: 2.1, dmg: 18, dmgFly: 12, stun: 1.5, stunElite: .9, stunBoss: .8, bowl: .55},
   // CHAMPION: a tug of war: it heaves you toward it at `pull` m/s for `heave` s, then slackens `slack` s (the window: a
   // yank then lands; one outside it jolts you `jolt` m/s toward it instead)
   boss: {pull: 2.1, heave: 1.05, slack: .42, jolt: 6},
@@ -31,10 +32,11 @@ export const TUNE = {
   prop: {yankV: 6.5, towMax: 4.5},
   // SWING (an anchor >= anchorMin m up): a pendulum (gravity `g`) round the anchor; the rope's length is the distance at the
   // catch shortened by `lift` (reeled in over `reelT` s; at most the anchor's height less `clear` + the hang, so his feet
-  // clear the ground under it, but never below `minLen`); his speed at the catch + `up` m/s up is the start. WASD pumps
-  // (`pump` m/s2). Tap F or Space to let go: he flies on (the player's fall). It ends by itself after `max` s, a bump on
-  // a wall (`bump` x the speed back), or `rest` s on the ground
-  swing: {g: 15, lift: .12, reelT: .28, clear: .35, minLen: 1.1, up: 2.2, pump: 3.5, max: 6, bump: .25, rest: .3, hang: 2.05, damp: .02},
+  // clear the ground under it, but never below `minLen`); his speed at the catch + `up` m/s up + `push` m/s toward the
+  // anchor's foot is the start (he jumps off). WASD pumps (`pump` m/s2); feet on the ground slow him (`drag` /s); F held
+  // climbs the rope (`climb` m/s: shorter, the swing quickens). Let go of F (or Space): he flies on (the player's fall).
+  // It ends by itself after `max` s, a bump on a wall (`bump` x the speed back), or `rest` s on the ground
+  swing: {g: 15, lift: .12, reelT: .28, clear: .35, minLen: 1.1, up: 2.2, push: 1.6, pump: 3.5, drag: 2.5, climb: 2.6, max: 6, bump: .25, rest: .3, damp: .02},
   // HAMMER (hold F while roped, a stretch): it swings round you at `rps` turns a second; let go flings it out `v` m/s,
   // `dmg` to it and to whoever it hits
   hammer: {rps: 1.1, r: 2.2, v: 9, dmg: 22, hold: .25},
@@ -46,6 +48,7 @@ export const POSES = {
   walk: {pre: 'lws_', fb: 'walk.'},                                  // walking / running with the spinning arm (the walk / run legs)
   run: {pre: 'lrs_', fb: 'run.'},
   throw: {clip: 'lasso_throw', fb: ['reach_up', 'lunge', 'lunge', 'lunge'], fps: 14, release: 1},   // its marks.release: the loop leaves
+  take: {clip: 'lasso_take', fb: ['skid_b'], fps: 12},              // the rope goes taut: the throw's end into the hold
   haul: {pose: ['lasso_haul_0', 'lasso_haul_1'], fb: ['skid_b', 'skid_a']},   // the taut hold, leaning back (two: a step)
   yank: {clip: 'lasso_yank', fb: ['skid_a', 'skid_b', 'skid_b'], fps: 12},
   hang: {pose: ['lasso_hang_0', 'lasso_hang_1', 'lasso_hang_2'], fb: ['climb.0', 'climb.1', 'climb.2']},   // legs forward / straight / back

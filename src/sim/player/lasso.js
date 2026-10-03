@@ -47,7 +47,7 @@ export function createLasso(PL, I) {
   function tls() {
     if (TLsp === A.SP && TL) return TL;
     TLsp = A.SP; TL = {};
-    for (const k of ['spin', 'throw', 'yank']) {
+    for (const k of ['spin', 'throw', 'yank', 'take']) {
       const Q = POSES[k], c0 = A.CLIP[Q.clip];
       let names, ms = null, fps = Q.fps || 12, rel = Q.release ?? 0;
       if (c0 && has(Q.clip + '.0')) {
@@ -66,6 +66,11 @@ export function createLasso(PL, I) {
   }
   const at = (L, t, loop) => { if (loop) t %= L.total; let i = 0; while (i < L.names.length - 1 && t >= L.ends[i]) i++; return L.names[i]; };
 
+  // the pose preview's list: [kind, which, s, label, pose index]
+  const PV = [['clip', 'spin', 2, 'lasso_spin'], ['clip', 'throw', 1.6, 'lasso_throw'], ['clip', 'take', 1.2, 'lasso_take'],
+    ['pose', 'haul', 1.4, 'lasso_haul_0', 0], ['pose', 'haul', 1.4, 'lasso_haul_1', 1], ['clip', 'yank', 1.6, 'lasso_yank'],
+    ['pose', 'hang', 1.4, 'lasso_hang_0', 0], ['pose', 'hang', 1.4, 'lasso_hang_1', 1], ['pose', 'hang', 1.4, 'lasso_hang_2', 2],
+    ['cycle', 'walk', 2.4, 'lws_0..7'], ['cycle', 'run', 2.4, 'lrs_0..7']];
   // ---- the rope hands: where the pose's grip is this frame, in the world (the meta bones: [hx, hy, tx, ty], the HEAD is the
   //      grip; without the markers the higher hand's fist, the hand bone's tail) ----
   const HB = {x: 0, y: 0};
@@ -95,12 +100,14 @@ export function createLasso(PL, I) {
   }
   const wx = () => P.x * c + P.y * s, wy = () => -P.x * s + P.y * c;   // (after yaw())
   // walking with the rope: speed toward the input, a share of his own (the modifiers' SPEED), sliding along what blocks
+  // -> WK {d: the distance moved, sp: the speed} (one kept object: this runs every step)
+  const WK = {d: 0, sp: 0};
   function walk(dt, mx, my, share) {
     const target = (keys.has('q') ? SPEED.walk : keys.has('shift') ? SPEED.sprint : SPEED.run) * share;
     let sp = hypot2(P.vx, P.vy);
     if (mx || my) { sp = sp < target ? Math.min(target, sp + 22 * dt) : Math.max(target, sp - 22 * dt); P.vx = mx * sp; P.vy = my * sp; }
     else { const k = Math.max(0, sp - 26 * dt); if (sp > 1e-6) { P.vx *= k / sp; P.vy *= k / sp; } sp = k; }
-    return {d: moveBy(P.vx * dt, P.vy * dt), sp};
+    WK.d = moveBy(P.vx * dt, P.vy * dt); WK.sp = sp; return WK;
   }
   // the legs' phase by the distance walked: the walk / run frame and its foot puffs (as player.js gaitDistance)
   function gait(d, sp, L) {
@@ -129,8 +136,8 @@ export function createLasso(PL, I) {
         else { P.state = 'idle'; P.frame = at(L.spin, S.t, true); P.prevF = -1; }
         return true;
       }
-      case 'throw': {
-        plant(dt); P.state = 'idle';
+      case 'throw': {   // (on the move he keeps going at the spin's pace: a running throw; standing he plants)
+        const {sp} = walk(dt, mx, my, TUNE.spin.walk); P.state = sp > .2 ? 'move' : 'idle';
         if (S.t <= dt * 1.5) faceTo(dt, 0); else faceTo(dt, AIM_TURN_RATE);
         P.frame = at(L.throw, S.t, false);
         if (!S.loose && S.t >= L.throw.rel) { S.loose = true; ev({type: 'lasso.loose', x: P.x, y: P.y, z: P.z}); }
@@ -143,7 +150,17 @@ export function createLasso(PL, I) {
         faceTo(dt, AIM_TURN_RATE);
         P.state = sp > .2 ? 'move' : 'idle';
         if (sp > .2) S.ph = (S.ph + d / .5) % 1;   // a step every half metre: the two hold poses
-        P.frame = L.haul[sp > .2 ? (S.ph < .5 ? 0 : 1) : 0];
+        P.frame = sp <= .2 && L.take.real && S.t < L.take.total ? at(L.take, S.t, false) : L.haul[sp > .2 ? (S.ph < .5 ? 0 : 1) : 0];   // (the rope goes taut: take)
+        return true;
+      }
+      case 'preview': {   // (the sandbox's "Lasso: preview poses": every lasso pose in place, in turn; moving ends it)
+        if (mx || my) { S.mode = ''; P.t = 0; return false; }
+        plant(dt); P.state = 'idle';
+        const it = PV[S.pi % PV.length], k = it[0], per = it[2] || 1.6;
+        if (S.t >= per) { S.t -= per; S.pi = (S.pi + 1) % PV.length; }
+        const t = S.t, n = PV[S.pi % PV.length];
+        S.pvName = n[3];
+        P.frame = n[0] === 'pose' ? L[n[1]][n[4]] : n[0] === 'cycle' ? L[n[1]][Math.floor(t * 10) % L[n[1]].length] : at(L[n[1]], t, true);
         return true;
       }
       case 'yank': {
@@ -182,7 +199,12 @@ export function createLasso(PL, I) {
     const go = gripOff(fr);
     // pumping: WASD (the camera's frame) in the world
     const iw = toW(mx, my), ix = iw[0], iy = iw[1];
+    // the rope's length: reeled in to Lt over reelT s at the catch; F held climbs it (shorter: the swing quickens, as
+    // his angular momentum keeps: the speed across the rope x the old length / the new)
+    if (S.climb && S.t >= SW.reelT) S.Lt = Math.max(SW.minLen, S.Lt - SW.climb * dt);
+    const Lold = S.L;
     S.L = S.t < SW.reelT ? S.L0 + (S.Lt - S.L0) * (S.t / SW.reelT) : S.Lt;
+    if (S.t >= SW.reelT && S.L < Lold && S.air) { const q = Math.min(1.06, Lold / S.L); S.vx *= q; S.vy *= q; S.vh *= q; }
     for (let k = 0; k < n; k++) {
       S.vh -= SW.g * h; S.vx += ix * SW.pump * h; S.vy += iy * SW.pump * h;
       const dk = 1 - SW.damp * h; S.vx *= dk; S.vy *= dk; S.vh *= dk;
@@ -200,7 +222,7 @@ export function createLasso(PL, I) {
       if (feet < gz + .02) {
         if (gz <= 0 && W.water(nx, ny)) { S.gx = nx; S.gy = ny; S.gh = nh; place(go); letGo('water'); return; }   // he touches the creek: he falls in
         nh = gz + go.z; if (S.vh < 0) S.vh = 0;
-        const fk = Math.exp(-h * 5); S.vx *= fk; S.vy *= fk;
+        const fk = Math.exp(-h * SW.drag); S.vx *= fk; S.vy *= fk;
       }
       // a wall, a trunk, a cliff face: bump and drop
       if (W.solid(nx - S.fx * 0, ny, Math.max(gz, feet), feet + 1.6, .26)) {
@@ -231,6 +253,8 @@ export function createLasso(PL, I) {
   return {
     S, step, hand, tls,
     get mode() { return S.mode; },
+    // the sandbox's pose preview (features/equip.js menu): on / off
+    preview(on) { if (on) { PL.gun?.stow?.(); S.mode = 'preview'; S.t = 0; S.pi = 0; } else if (S.mode === 'preview') { S.mode = ''; P.t = 0; } return S.mode === 'preview'; },
     // spin the loop overhead (on) / stop (off: only from spin)
     spin(on) {
       if (on) { if (S.mode === 'hang' || S.mode === 'haul') return false; PL.gun?.stow?.(); S.mode = 'spin'; S.t = 0; S.faceOn = false; P.prevF = -1; return true; }
@@ -248,17 +272,20 @@ export function createLasso(PL, I) {
     hang(ax, ay, ah, W) {
       if (BUSY.has(P.state) || P.state === 'roll' || P.state === 'backstep') return false;
       const L = tls(); yaw();
-      S.W = W; S.ax = ax; S.ay = ay; S.ah = ah; S.mode = 'hang'; S.t = 0; S.ground = 0; S.air = false;
+      S.W = W; S.ax = ax; S.ay = ay; S.ah = ah; S.mode = 'hang'; S.t = 0; S.ground = 0; S.air = false; S.climb = false;
       const go = gripOff(L.hang[1]), px = wx(), py = wy(), r = toW(go.x, 0);
       S.gx = px + r[0]; S.gy = py + r[1]; S.gh = P.z + go.z;
-      const vv = toW(P.vx, P.vy); S.vx = vv[0]; S.vy = vv[1]; S.vh = SW.up;
+      // he jumps off: his own speed, up, and a push toward the anchor's foot (he swings out under it)
+      const vv = toW(P.vx, P.vy), ex = ax - px, ey = ay - py, el = hypot2(ex, ey) || 1;
+      S.vx = vv[0] + ex / el * SW.push; S.vy = vv[1] + ey / el * SW.push; S.vh = SW.up;
       const sv = hypot2(S.vx, S.vy);
-      if (sv > .3) { S.fx = S.vx / sv; S.fy = S.vy / sv; } else { const dx = ax - px, dy = ay - py, l = hypot2(dx, dy) || 1; S.fx = dx / l; S.fy = dy / l; }
+      if (sv > .3) { S.fx = S.vx / sv; S.fy = S.vy / sv; } else { S.fx = ex / el; S.fy = ey / el; }
       const d0 = hypot3(S.gx - ax, S.gy - ay, S.gh - ah), floor = ah - W.elev(ax, ay) - go.z - SW.clear;
       S.L0 = S.L = d0; S.Lt = Math.max(SW.minLen, Math.min(d0 * (1 - SW.lift), floor >= SW.minLen ? floor : d0));
       P.state = 'rope'; P.t = 0; P.aimRoll = false;
       return true;
     },
+    climb(on) { S.climb = !!on && S.mode === 'hang'; },   // F held on a swing: up the rope
     // off the rope: from a swing he flies on; from anything else he stands again
     letGo() { if (S.mode === 'hang') letGo('key'); else if (S.mode) { S.mode = ''; S.leashOn = false; P.t = 0; } },
     stop() { if (S.mode === 'hang') letGo('stop'); S.mode = ''; S.leashOn = false; },

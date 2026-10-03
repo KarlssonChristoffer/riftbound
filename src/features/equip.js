@@ -23,6 +23,7 @@
 import {createEquipSim} from './equip/sim.js';
 import {createLook} from './equip/look.js';
 import {createEquipSlot} from '../ui/equipslot.js';
+import {createAnchors} from './equip/anchors.js';
 import {GADGETS, GADGET_IDS, fits} from '../content/gadgets.js';
 import {flags} from '../core/flags.js';
 
@@ -35,6 +36,8 @@ const remember = on => { try { localStorage.setItem(KEY, on ? '1' : '0'); } catc
 export const order = {before: ['lights']};
 export async function create(host) {
   const sim = createEquipSim(host), look = createLook(host, sim), slot = createEquipSlot();
+  const anchors = createAnchors(host);   // the lasso's own anchors (snags over the stream), there while the lasso is
+  sim.setAnchors(() => anchors.list);
   const q = flags.get('equip');
   if (q && GADGETS[q]) sim.S.start = q;
   let tU = 0, tF = 0;
@@ -45,7 +48,7 @@ export async function create(host) {
   addEventListener('keyup', e => { if (F.on && e.key.toLowerCase() === 'f') sim.S.fUp = true; });
   function set(on) {
     F.on = on; sim.setOn(on);
-    if (on) look.load(); else look.clear();
+    if (on) look.load(); else { look.clear(); anchors.clear(); anchors.dropMeshes(); }
   }
   function cycle(d = 1) {   // (only what this loadout can carry: the lasso is a gun's)
     let i = sim.S.slot ? GADGET_IDS.indexOf(sim.S.slot.id) : -1;
@@ -72,6 +75,15 @@ export async function create(host) {
     slot.glyph(q2, id, bx, by, r, GADGETS[id].col);
     q2.globalAlpha = 1;
   }
+  // the pose preview's name over the cowboy (the sandbox's "Lasso: preview poses")
+  function previewLabel(q2, sc) {
+    const Z = host.PL.lasso; if (Z?.mode !== 'preview') return;
+    const P = host.player; host.G.toScreenInto(P.x, P.z + 2.5, P.y, PV);
+    if (sc !== fSc) { const u = Math.max(.8, sc / 2.4); fSc = sc; fBig = `700 ${Math.round(12 * u)}px "Segoe UI", system-ui, sans-serif`; fSmall = `600 ${Math.round(10 * u)}px "Segoe UI", system-ui, sans-serif`; lw = Math.max(2, 2.4 * u); }
+    q2.font = fBig; q2.textAlign = 'center'; q2.textBaseline = 'alphabetic'; q2.lineJoin = 'round'; q2.globalAlpha = 1;
+    const txt = `${Z.S.pvName || ''}  ·  ${host.PL.P.frame}`;
+    q2.lineWidth = lw; q2.strokeStyle = 'rgba(10,8,12,.9)'; q2.strokeText(txt, PV[0] * sc, PV[1] * sc); q2.fillStyle = '#e0c084'; q2.fillText(txt, PV[0] * sc, PV[1] * sc);
+  }
   function labels(q2, sc) {
     const c = sim.cache; if (!(c && !c.spent) && !sim.drops.length) return;
     if (sc !== fSc) { const u = Math.max(.8, sc / 2.4); fSc = sc; fBig = `700 ${Math.round(12 * u)}px "Segoe UI", system-ui, sans-serif`; fSmall = `600 ${Math.round(10 * u)}px "Segoe UI", system-ui, sans-serif`; lw = Math.max(2, 2.4 * u); }
@@ -88,13 +100,13 @@ export async function create(host) {
     name: 'equip', label: 'Equipment', on: false, sim, look, GADGETS, ms: 0,
     claims: k => F.on && k === 'f',
     give: id => sim.give(id),
-    update(dt, evs) { if (!F.on) return; const t0 = now(); sim.update(dt, evs); tU += now() - t0; },
+    update(dt, evs) { if (!F.on) return; const t0 = now(); anchors.update(host.weapon?.kind === 'gun'); sim.update(dt, evs); tU += now() - t0; },
     view(dt, evs) { const t0 = now(); look.view(dt, evs); tU += now() - t0; },
-    frame() { const t0 = now(); look.frame(); tF = now() - t0; },
+    frame() { const t0 = now(); anchors.draw(); look.frame(); tF = now() - t0; },
     lights: () => look.lights(),
     hd(q2, sc) {
       const t0 = now();
-      if (!host.hudOff && (game()?.mode === 'run' || game()?.mode === 'sandbox')) { slot.draw(q2, sc, sim.S); labels(q2, sc); }
+      if (!host.hudOff && (game()?.mode === 'run' || game()?.mode === 'sandbox')) { slot.draw(q2, sc, sim.S); labels(q2, sc); previewLabel(q2, sc); }
       const ms = tU + tF + now() - t0; tU = 0; F.ms = F.ms * .95 + ms * .05;
     },
     onKey(k, e) {
@@ -111,10 +123,12 @@ export async function create(host) {
     menu() {
       if (!F.on || game()?.mode !== 'sandbox') return [];
       const G = sim.S.slot ? GADGETS[sim.S.slot.id] : null;
+      const Z = host.PL.lasso, gun = host.weapon?.kind === 'gun';
       return [{label: `Gadget: ${G ? G.name : 'none'} (next)`, run: () => cycle(1)},
+        ...(gun && Z ? [{label: `Lasso: preview poses (${Z.mode === 'preview' ? 'on' : 'off'}; WASD stops it)`, run: () => Z.preview(Z.mode !== 'preview')}] : []),
         {label: 'Spawn a pack of brutes (gadget test)', run: () => { const P = host.player, a = host.yaw; sim.spawnPack(6, P.x - Math.sin(a) * 6, P.y - Math.cos(a) * 6); }}];
     },
-    biomeChanged() { sim.clearWorld(); look.clear(); },
+    biomeChanged() { sim.clearWorld(); look.clear(); anchors.biomeChanged(); },
     hud: () => {
       if (!F.on) return '';
       const S = sim.S, sl = S.slot;
