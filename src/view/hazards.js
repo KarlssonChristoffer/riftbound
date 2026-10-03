@@ -186,7 +186,7 @@ export function createHazardLook(host, H, {name = 'hazards'} = {}) {
     if (k > .4) ring(x, y, g, h.r * .96, lo, -t, 6, 2, false);
     // WHEN: closing in from far out (a strike from the sky, a blast), or filling out (a nova from its centre)
     if (h.style === 'frost') ring(x, y, g, h.r * k, hi, -t * 2, 5, 3, true);
-    else { const far = h.style === 'strike' ? 2.6 : 1.6; ring(x, y, g, h.r * (far - (far - 1) * k), hi, -t * 2.2, 3, 2, true); }
+    else { const far = h.style === 'strike' ? 2 : 1.6; ring(x, y, g, h.r * (far - (far - 1) * k), hi, -t * 2.2, 3, 2, true); }
     if (h.style === 'strike') {
       for (let i = -2; i <= 2; i++) if (i) { pt(x + i * .09, y, g, mid, 1, true); pt(x, y + i * .09, g, mid, 1, true); }
       pt(x, y, g + .05 + k * .9, hi, 2, true);

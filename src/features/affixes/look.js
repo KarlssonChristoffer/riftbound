@@ -360,7 +360,7 @@ export function createAffixLook(host, sim) {
       const g = gameF(), run = g?.mode === 'run', u = clamp(sc / 2.6, .7, 2.8), G = host.G;
       q.save();
       for (let i = 0; i < sim.bearers.length; i++) {   // the nameplates the HUD doesn't draw
-        const b = sim.bearers[i]; if (b.broken || b.gone || (run && (b.elite || b.boss))) continue;
+        const b = sim.bearers[i]; if (b.broken || b.gone || b.affix === 'splitling' || (run && (b.elite || b.boss))) continue;
         const h = (b.z || 0) + (b.h || 0) + (b.hitH ?? 1.6) + .45;
         if (!G.onScreen(b.x, h, b.y, 20)) continue;
         G.toScreenInto(b.x, h, b.y, SV);

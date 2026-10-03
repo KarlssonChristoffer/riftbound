@@ -21,7 +21,8 @@
 //               the front until broken (it grows back); flank shots, falling arrows and blasts go round it; a piercing
 //               shot hits it three times as hard and goes on through when it breaks it
 //   vampiric    now and then it reaches a beam out to you (the telegraph); latched, it drains you and heals itself; get
-//               out of reach or dodge-roll to snap it. Its blows heal it too (combat core heal)
+//               out of reach, behind cover (a wall, a crate, another body) or dodge-roll to snap it. Its blows heal it too
+//               (combat core heal)
 // THE PLAYER is hurt the game's way (player.hurt; the kit respects every dodge / i-frame: sim/hazards.js).
 // OWNS: the bearers' fight states, the pending splits, the hazard kit ('affixes': its zones and its slow note), the
 //   generator. READS: the game (mode, phase, run stage), the combat core (immune, heal, spawnBrute), the player, the
@@ -31,7 +32,7 @@
 //   sim.update(dt, evs) / onArrowHit(a, p) / trial(id, type) / clear() / stateOf(b) / H (the kit) / bearers / stats
 import {mulberry32, simSeed} from '../../core/rng.js';
 import {TAU, clamp, hypot2} from '../../core/mathx.js';
-import {AFFIXES, AFFIX_IDS, CHANCE, WEIGHT, BRUTE_UP, TIER} from '../../content/affixes.js';
+import {AFFIXES, AFFIX_IDS, CHANCE, WEIGHT, BRUTE_UP, ELITE_COINS, TIER} from '../../content/affixes.js';
 import {onSpawn, spawnEnemy, scaleOf} from '../../game/enemies.js';
 import {roamable} from '../../world/world.js';
 import {createHazards} from '../../sim/hazards.js';
@@ -80,6 +81,7 @@ export function createAffixSim(host, F) {
     const A = AFFIXES[id];
     o.affix = id; o.bar = A.bar; o.aura = A.col; o.name = `${A.name} ${o.name}`;
     if (type === 'brute') { o.hp = Math.round(o.hp * BRUTE_UP.hp); o.dmg = Math.round(o.dmg * BRUTE_UP.dmg); o.coins = BRUTE_UP.coins; }
+    else if (o.coins) o.coins = [Math.round(o.coins[0] * ELITE_COINS), Math.round(o.coins[1] * ELITE_COINS)];   // worth more
     pendK = sc?.dmg ?? 1; pendH = sc?.hp ?? 1; stats.rolled++;
   });
 
@@ -105,7 +107,7 @@ export function createAffixSim(host, F) {
     const v = Math.sqrt(vx * vx + vy * vy);
     for (let i = 1; i < n; i++) {
       let x, y;
-      if (i === 1 && v > 1) { const l = Math.min(2.6, v * T.lead); x = px + vx / v * l; y = py + vy / v * l; }
+      if (i === 1 && v > 1) { const l = Math.min(T.leadMax, v * T.lead); x = px + vx / v * l; y = py + vy / v * l; }
       else { const a = R() * TAU, r = T.spread[0] + R() * (T.spread[1] - T.spread[0]); x = px + Math.sin(a) * r; y = py + Math.cos(a) * r; }
       strike(x, y, s, b, T, T.warn, i);
     }
@@ -116,19 +118,25 @@ export function createAffixSim(host, F) {
     const max = W.turn[s.tier] * DEG * dt, d = wrap(Math.atan2(P.x - b.x, P.y - b.y) - s.ang);
     s.ang = wrap(s.ang + clamp(d, -max, max));
   }
+  // a clear line for the beam: no wall, crate or other body between (sampled every ~.5 m, clear of both ends)
+  function lineClear(b) {
+    const dx = P.x - b.x, dy = P.y - b.y, d = Math.sqrt(dx * dx + dy * dy), n = Math.floor((d - .9) / .5);
+    for (let i = 1; i <= n; i++) { const k = (.5 + i * .5) / d; if (host.blocked(b.x + dx * k, b.y + dy * k, b.z || 0, true)) return false; }   // (air: the beam passes over the stream)
+    return true;
+  }
   function snap(s, V) { s.bp = 0; s.bt = 0; s.cd = V.every[s.tier] * (.85 + R() * .3); s.snapN++; }
   function beam(b, s, dt) {
     const V = s.A.beam, d = hypot2(P.x - b.x, P.y - b.y), same = Math.abs(P.z - (b.z || 0)) < 1 && P.state !== 'climb';
     if (s.bp === 0) {
       if ((s.cd -= dt) > 0) return;
-      if (d < V.range && same) { s.bp = 1; s.bt = 0; } else s.cd = .3;
+      if (d < V.range && same && lineClear(b)) { s.bp = 1; s.bt = 0; } else s.cd = .3;
     } else if (s.bp === 1) {   // reaching for you: the telegraph
       s.bt += dt;
-      if (d > V.snap || !same) snap(s, V);
+      if (d > V.snap || !same || !lineClear(b)) snap(s, V);
       else if (s.bt >= V.reach) { if (P.untouchable) snap(s, V); else { s.bp = 2; s.bt = 0; s.tick = 0; } }
     } else {                   // latched: drain until you break it or it lets go
       s.bt += dt;
-      if (d > V.snap || !same || P.untouchable || s.bt >= V.dur) { snap(s, V); return; }
+      if (d > V.snap || !same || P.untouchable || s.bt >= V.dur || !lineClear(b)) { snap(s, V); return; }
       if ((s.tick -= dt) <= 0) {
         s.tick = V.tick;
         const dmg = V.dps[s.tier] * V.tick * s.k;

@@ -21,6 +21,8 @@ export const WEIGHT = {
 };
 // what an affix does to a REGULAR brute that rolls one (an elite or a champion keeps its numbers: it is already one)
 export const BRUTE_UP = {hp: 1.7, dmg: 1.2, coins: [3, 6]};
+// an elite or a champion with an affix drops this many times its coins
+export const ELITE_COINS = 1.5;
 
 // THE AFFIXES: name (the prefix), col (aura ring, light, nameplate), bar (its HP bar), desc (what it does: the docs and
 // the trial rows), by tier (brute / elite / champion: scaled numbers), plus each one's own tuning
@@ -37,7 +39,7 @@ export const AFFIXES = {
   overloaded: {name: 'Overloaded', col: '#b48cff', bar: '#a97cff', desc: 'calls lightning on you: rings close in, then the bolt',
     // every `every` s (+- jitter) while you're within `range`: `n` strikes, the first on you, one where you're heading,
     // the rest round you; each a ring closing in for `warn` s, then the bolt (dmg, knock) on whoever stands in r
-    strike: {every: [5, 3.4, 2.6], jitter: .6, range: 13, n: [1, 2, 3], r: .95, warn: 1.15, dmg: [8, 12, 16], knock: 8, lead: .8, spread: [1.4, 2.4]},
+    strike: {every: [5, 3.4, 2.6], jitter: .6, range: 13, n: [1, 2, 3], r: .95, warn: 1.15, dmg: [8, 12, 16], knock: 8, lead: .8, leadMax: 3.5, spread: [1.4, 2.4]},
     death: {n: [0, 3, 5], r: 1, warn: 1.25, dmg: [8, 10, 14], ring: 1.6}},   // a last discharge round where it fell
   splitting: {name: 'Splitting', col: '#7ae05a', bar: '#6ad04a', desc: 'splits into smaller, faster brutes when it dies',
     // n children, each with hp = the parent's max x hp (at least min), dmg x dmg, quicker hops; they don't split again
@@ -47,9 +49,10 @@ export const AFFIXES = {
     // the ward's health, the arc it covers (deg either side of where it points), how fast it turns after you (deg/s: you can
     // outrun it by circling), how long it takes to grow back once broken; a piercing shot hits it x pierce
     ward: {hp: [24, 60, 150], half: 62, turn: [40, 32, 26], regrow: 7, pierce: 3}},
-  vampiric: {name: 'Vampiric', col: '#ff3a5a', bar: '#e0284a', desc: 'drains you with a beam (break it: get away or roll); heals from its hits',
+  vampiric: {name: 'Vampiric', col: '#ff3a5a', bar: '#e0284a', desc: 'drains you with a beam (break it: get away, behind cover or roll); heals from its hits',
     // the beam: every `every` s, within `range`, it reaches for you for `reach` s (the telegraph), then drains `dps` while
-    // latched (up to `dur` s); out past `snap` m or a dodge roll snaps it. It heals x heal of what it drains, x melee of its hits
+    // latched (up to `dur` s); out past `snap` m, cover between (a wall, a crate, a body) or a dodge roll snaps it. It heals
+    // x heal of what it drains, x melee of its hits
     beam: {every: [6.5, 5, 4], range: 5.5, reach: .8, dur: 2.5, dps: [4, 6, 8], tick: .5, snap: 7, heal: 3},
     melee: 2},
   // a splitting enemy's children: no behaviour, only the look (green, and their name)
