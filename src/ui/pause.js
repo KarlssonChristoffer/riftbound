@@ -28,6 +28,7 @@ const CLAIM = {
   weather: {'Weather fx': gfx('World', 'Rain, snow & lightning', 'rain')},
   lights: {'Heat ripple': gfx('Effects', 'Heat shimmer', 'heat')},
   atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd')},
+  blood: {'': gfx('Effects', 'Blood', 'blood', 'blood')},   // (features/blood.js: on by default; ?blood=0)
   audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
     'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'}},
 };

@@ -34,7 +34,7 @@ export const FLAG_DOCS = {
   riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', grass: '0: no grass (features/grass.js)', wildlife: '0: no wildlife', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
-  foes: '0: no gunmen in the desert sandbox (features/foes.js)',
+  foes: '0: no gunmen in the desert sandbox (features/foes.js)', blood: '0: no blood from bullet hits (features/blood.js; menu > Graphics > Effects > Blood)',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
   battlemusic: '1: the premade Six Chambers songs follow the fight (features/battlemusic.js); off by default: the procedural score plays',
   bmforce: 'state[:song[:x]]: dev, pin the battle music (dev/bmusic.js), e.g. boss:iron:.25 (x = the champion health) or battle:dust:.8 (x = intensity)',
