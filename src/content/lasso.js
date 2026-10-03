@@ -7,7 +7,7 @@ export const TUNE = {
   // SPIN (F held): the loop grows to full size over `grow` s, turns `rps` times a second overhead (with the art: as the
   // hand turns), `h` m over his hand, its honda trailing the hand by `lag` rad; he walks at `walk` x his speed; a throw
   // before `min` s still goes, from a smaller loop
-  spin: {grow: .3, rps: 2, r: .36, h: .3, lag: .5, tilt: .18, walk: .5, min: .08},
+  spin: {grow: .3, rps: 2, r: .36, h: .45, lag: .5, tilt: .14, walk: .5, min: .08},
   // AIM: what the loop goes for (under the cursor): an enemy or a prop within `range` m, a high anchor (>= anchorMin m up)
   // within `range` m of the hand and `pick` px of the cursor on screen, else the ground (at most `range` m out)
   range: 10, pick: 18, anchorMin: 2.5,
@@ -54,7 +54,12 @@ export const POSES = {
   take: {clip: 'lasso_take', fb: ['skid_b'], fps: 12},              // the rope goes taut: the throw's end into the hold
   haul: {pose: ['lasso_haul_0', 'lasso_haul_1'], fb: ['skid_b', 'skid_a']},   // the taut hold, leaning back (two: a step)
   yank: {clip: 'lasso_yank', fb: ['skid_a', 'skid_b', 'skid_b'], fps: 12, mark: 'pull', at: 1},   // marks.pull: it comes off its feet
-  hang: {pose: ['lasso_hang_0', 'lasso_hang_1', 'lasso_hang_2'], fb: ['climb.0', 'climb.1', 'climb.2']},   // legs forward / straight / back
+  // legs forward / straight / back; grip: the marker the rope's end is pinned to (RopeHand0 | RopeHand1, or 'auto': the
+  // higher of the two in each frame: the hand on the rope, whichever the art uses)
+  hang: {pose: ['lasso_hang_0', 'lasso_hang_1', 'lasso_hang_2'], fb: ['climb.0', 'climb.1', 'climb.2'], grip: 'RopeHand0'},
+  // onto the rope: the arm goes up, the hat slides onto his back (backward as he lets go); marks.grip: the fist closes on the
+  // rope (before it he is still on his feet: the swing lifts him from there)
+  hangIn: {clip: 'lasso_hang_in', fb: [], mark: 'grip', at: 0},
 };
 // the rope hands in the packed meta bones (each [hx, hy, tx, ty]: the HEAD point is the grip); the hand bones stand in
 export const HANDS = {grip: 'RopeHand0', upper: 'RopeHand1', fb: ['RightHand', 'LeftHand']};
