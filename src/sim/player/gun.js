@@ -9,7 +9,8 @@
 //   way player.js does (it runs inside player.js's step: the player's code, in two files).
 // READS: the atlas (gun poses; the GunMuzzle0 / GunHold0 bones = the barrel on screen), the cursor, the modifiers' notes
 //   (weapon.dmg / reload / gap / spread / fanSpread / last / quick), H.weapon() (the loadout's weapon).
-// EMITS (player.js's queue, turned into world coordinates by the loop): player.draw / shoot / dryfire / reload / holster.
+// EMITS (player.js's queue, turned into world coordinates by the loop): player.draw / shoot / dryfire / reload / holster /
+//   melee (the pistol whip's blow: features/gun.js lands it through combat).
 // BUDGET: part of player.step (sim group): aiming on the move scores <= 70 poses a step, like the bow's stance search.
 //
 // THE ACTIONS (S.act): '' ready (the gun up, aimed at the cursor: standing twists / steps / pivots, or the walk / run
@@ -17,10 +18,12 @@
 // the palm sweeps the hammer, a shot each sweep, the feet planted) | reload (R, or after the empty click: dry) | twirl
 // (the cylinder closed) | holster (the twirl into the holster, after `ready` s without a shot) | the gunslinger's blow
 // (smoke off the barrel: after a kill or an emptied cylinder, when calm), duel (crouched over the holster while an elite
-// is near), tip (Y: the hat). P.state is 'draw' while the gun is up (the reticle, the hover pulse, player.aiming) and
-// 'pose' during holster / blow / tip / duel.
-//   const gun = createGun(PL, internals); gun.on() / step(dt, mx, my) / press() / fan() / reload() / emote('tip') /
-//   cue('kill') / setCues(calm, duel); gun.S (read: the HUD, the views)
+// is near), tip (Y: the hat), and from an atlas that has them (the gunslinger's): turn (a draw at a target behind him while
+// he stands: the spin round onto it, the shot at its end; gun_turnshot) | whip (V, or the empty click with a foe in reach:
+// the pistol whip, gun_whip; its blow is player.melee). P.state is 'draw' while the gun is up (the reticle, the hover
+// pulse, player.aiming) and 'pose' during holster / blow / tip / duel.
+//   const gun = createGun(PL, internals); gun.on() / step(dt, mx, my) / press() / fan() / reload() / melee() / emote('tip') /
+//   cue('kill') / setCues(calm, duel, near); gun.S (read: the HUD, the views)
 import {mulberry32} from '../../core/rng.js';
 import {clamp} from '../../core/mathx.js';
 
@@ -39,6 +42,9 @@ export const TUNE = {
   fanKick: .5,      // x the weapon's recoil push for a fanned shot (the palm, not the arm, takes it)
   settle: 2.5,      // the cursor on open ground (no target under it, the same level): the shot meets the ground this x the
   settleMin: 6,     //   cursor's distance out (at least settleMin m), so a miss kicks up dirt you can see; 0: flat to its range
+  turnBehind: 115,  // deg: a draw at a target this far round from his facing, standing, spins him round onto it (gun_turnshot)
+  whipLunge: 2.4,   // m/s: the whip's blow carries him forward into it (plant() takes it up: ~.13 m)
+  melee: {dmg: 20, reach: 1.5, arc: 80, push: 1},   // a gun without its own `melee` (content/weapons.js)
   clipFb: {gun_draw: [4, 16], gun_fire: [3, 20], gun_fan: [2, 14], gun_reload: [6, 6], gun_twirl: [4, 16], gun_holster: [5, 16],
     gaim_step_l: [4, 16], gaim_step_r: [4, 16], gaim_pivot_l: [3, 24], gaim_pivot_r: [3, 24], gun_hipfire: [3, 18], gun_blow: [5, 6], gun_fan_out: [3, 28],
     duel_ready: [4, 5], hat_tip: [5, 6]},
@@ -59,7 +65,8 @@ export function createGun(PL, I) {
     want: 0, wantT: 0, fanWant: false, reloadWant: false, tipWant: false,
     rph: '', rt: 0, rmul: 1, resume: false, hip: false, quick: false, fanT: 0,
     flourish: false, calm: true, duel: false, aimSpeed: 0, lastSa: NaN, aclip: null, twName: '0',
-    shotN: 0, lastHow: '', lastShotAt: -9, clock: 0, reloadK: 0, rfirst: true};
+    shotN: 0, lastHow: '', lastShotAt: -9, clock: 0, reloadK: 0, rfirst: true,
+    whipWant: false, near: false, done: false};   // (the whip's key; a foe in reach: the gun feature's cue; turn / whip: its shot / blow is out)
   const weapon = () => H.weapon?.() || null;
   const on = () => { const w = weapon(); return !!w && w.kind === 'gun' && has('gun_aim'); };
 
@@ -135,6 +142,7 @@ export function createGun(PL, I) {
   function fire(w, how) {   // how: 'aim' | 'move' | 'hip' | 'fan'
     // the muzzle of the pose the shot leaves from (a draw frame still holds the gun low: its aim pose instead)
     const pose = how === 'hip' ? 'gun_hipfire.0' : how === 'fan' ? nm('gun_fan', mark('gun_fan', 'shot', 1))
+      : how === 'turn' ? nm('gun_turnshot', mark('gun_turnshot', 'shot', 7))   // (the frame is turned round: his facing is still the start's)
       : /^(gun_aim|gws_|grs_)/.test(P.frame) ? P.frame : 'gun_aim';
     const c = cursorAim(), m = muzzle(pose, P.face, c), ND = A.ND;
     let a = Math.atan2(c.x - m.x, c.y - m.y);
@@ -142,7 +150,7 @@ export function createGun(PL, I) {
       const b = (P.bodyAim ?? P.face) * TAU / ND, da = ((a - b + Math.PI * 3) % TAU) - Math.PI;
       a = b + clamp(da, -w.cone * DEG, w.cone * DEG);
     }
-    const sp = w.spread[how] * DEG * mv(how === 'fan' ? 'weapon.fanSpread' : 'weapon.spread', 1);
+    const sp = (w.spread[how] ?? w.spread.hip) * DEG * mv(how === 'fan' ? 'weapon.fanSpread' : 'weapon.spread', 1);   // (the turn: the hip's)
     a += sp * (rng() - rng());   // triangular: most shots near the line
     const v = w.speed, fx = Math.sin(a), fy = Math.cos(a), dist = Math.max(1, Math.hypot(c.x - m.x, c.y - m.y));
     let vh = c.target || Math.abs(c.h - m.h) > .5 ? clamp((c.h - m.h) / (dist / v), -v * .4, v * .4) : 0;   // straight at it: no drop
@@ -186,10 +194,33 @@ export function createGun(PL, I) {
     if (S.ammo <= 0) { dry(w); return; }
     S.act = 'fan'; S.fanT = 0; S.aclip = null; S.idle = 0; P.state = 'draw';
   }
+  // the turn shot: a draw at a target behind him. He faces away from it and the clip's frames (turned round) spin him onto it;
+  // the shot leaves at its mark, from that frame's muzzle (at the start's facing: the frame carries the turn), then his
+  // facing turns round to where the frames ended (the turn's last frame is gun_aim there)
+  function behind() { const c = cursorAim(); return angDiff(Math.atan2(c.x - P.x, c.y - P.y), P.face * TAU / A.ND) > TUNE.turnBehind * DEG; }
+  function startTurn(w) {
+    const c = cursorAim(), ND = A.ND;
+    S.out = false; S.act = 'turn'; S.done = false; S.quick = true; S.hip = false; S.aclip = null; S.lastSa = NaN; S.want = 0; S.next = '';
+    P.face = P.want = (dirOf(c.x - P.x, c.y - P.y) + ND / 2) % ND;
+    S.at = startOf('gun_turnshot', 1) / w.draw;   // (frame 0 is the ready idle he stands in: from mid-turn, the facing's change unseen)
+    P.state = 'draw'; P.aimBack = false; P.stanceAge = 9; P.snapFace = false; P.frame = frameAt('gun_turnshot', S.at * w.draw);
+    emit('player.draw', w, {hip: false});
+  }
+  // the pistol whip: squared up to the cursor, the clip from the aim; its blow (mark hit) is the melee
+  function startWhip(w) {
+    const c = cursorAim();
+    P.face = P.want = dirOf(c.x - P.x, c.y - P.y);
+    S.act = 'whip'; S.at = 0; S.done = false; S.want = 0; S.idle = 0; S.aclip = null; S.next = ''; P.state = 'draw'; P.frame = nm('gun_whip', 0);
+  }
+  function whipLands(w) {   // the blow: along his facing (features/gun.js lands it on what's in its arc, through combat), a lunge into it
+    const f = vecOf(P.face), M = w.melee || TUNE.melee;
+    P.vx += f[0] * TUNE.whipLunge; P.vy += f[1] * TUNE.whipLunge;
+    emit('player.melee', w, {vx: f[0], vy: f[1], reach: M.reach, arc: M.arc, dmg: Math.round(mv('weapon.melee', M.dmg)), push: M.push});
+  }
   // LMB, in the step: what a press means right now
   function consumePress(w, moving) {
     switch (S.act) {
-      case 'draw': case 'fan': case 'dry': return;   // the draw fires it once the gun is out; the rest run their course
+      case 'draw': case 'fan': case 'dry': case 'turn': case 'whip': return;   // the draw fires it once the gun is out; the rest run their course
       case 'hip': if (stepAt('gun_hipfire', S.at) < mark('gun_hipfire', 'free', 99)) return; S.act = ''; break;   // its rise to the aim: cut short
       case 'raise': S.act = ''; break;
       case 'reload': if (S.ammo > 0) { S.act = ''; S.resume = false; break; } S.want = 0; return;   // rounds in: fire them (R reloads on later)
@@ -200,9 +231,10 @@ export function createGun(PL, I) {
     }
     if (!S.out) {
       if (S.resume && S.ammo <= 0) { S.want = 0; startReload(w, true); return; }   // a reload a roll cut short: on with it
+      if (!moving && S.ammo > 0 && has('gun_turnshot.0') && behind()) { startTurn(w); return; }   // a target behind him: the turn shot
       startDraw(w, true); return;
     }
-    if (S.ammo <= 0) { dry(w); return; }
+    if (S.ammo <= 0) { if (S.near && has('gun_whip.0')) { S.want = 0; startWhip(w); return; } dry(w); return; }   // empty, a foe in reach: whip him
     if (S.cool > 0) return;   // the gap between shots: the press waits (buffered)
     S.want = 0; fire(w, moving ? 'move' : 'aim');
   }
@@ -353,6 +385,12 @@ export function createGun(PL, I) {
       if (!moving && has('hat_tip.0') && (S.act === '' || S.act === 'duel')) { if (S.out) { S.act = 'holster'; S.at = 0; S.next = 'tip'; } else { S.act = 'tip'; S.at = 0; } }
     }
     if (S.fanWant) { S.fanWant = false; if (S.act !== 'fan' && S.act !== 'reload') startFan(w); }
+    if (S.whipWant) {
+      S.whipWant = false;
+      if (has('gun_whip.0') && (S.act === '' || S.act === 'fire' || S.act === 'raise' || S.act === 'twirl' || S.act === 'dry' || S.act === 'blow' || S.act === 'tip' || S.act === 'duel' || S.act === 'hip')) {
+        if (S.out) startWhip(w); else { startDraw(w, false); S.next = 'whip'; }
+      }
+    }
     if (S.want) consumePress(w, moving);
     if (S.resume && S.out && !S.act && !S.want) startReload(w, true);
     if (!S.out && !S.act && P.state === 'draw') startDraw(w, false);   // LMB held out of a roll: the gun comes up (no shot)
@@ -368,11 +406,27 @@ export function createGun(PL, I) {
         if (S.hip && !moving && stepAt('gun_draw', td) >= mark('gun_draw', 'hip', 2)) { S.out = true; S.act = 'hip'; S.at = 0; S.want = 0; S.hip = false; plant(dt); fire(w, 'hip'); P.frame = nm('gun_hipfire', 0); break; }
         if (!over('gun_draw', td)) { if (moving) movingAim(dt, mx, my); else { plant(dt); P.frame = frameAt('gun_draw', td); } break; }
         S.out = true; S.act = ''; S.at = 0; S.hip = false;   // out: the shot it was drawn for, or the ready pose
-        if (S.next === 'fan') { S.next = ''; startFan(w); } else if (S.want) consumePress(w, moving);
-        if (S.act === 'fan' || S.act === 'fire' || S.act === 'dry') { plant(dt); P.frame = S.act === 'fan' ? nm('gun_fan', 0) : S.act === 'fire' ? nm('gun_fire', 0) : P.frame; break; }
+        if (S.next === 'fan') { S.next = ''; startFan(w); } else if (S.next === 'whip') startWhip(w); else if (S.want) consumePress(w, moving);
+        if (S.act === 'fan' || S.act === 'fire' || S.act === 'dry' || S.act === 'whip') { plant(dt); P.frame = S.act === 'fan' ? nm('gun_fan', 0) : S.act === 'fire' ? nm('gun_fire', 0) : S.act === 'whip' ? nm('gun_whip', 0) : P.frame; break; }
         if (moving) movingAim(dt, mx, my); else standingAim(dt);
         break;
       }
+      case 'turn': {   // the spin round onto a target behind him (at the draw's speed): the shot at its mark, then his facing round
+        S.at += dt; plant(dt);
+        const td = S.at * w.draw;
+        if (!S.done && stepAt('gun_turnshot', td) >= mark('gun_turnshot', 'shot', 7)) { S.done = true; S.out = true; if (S.ammo > 0) fire(w, 'turn'); }   // (it starts only with a round in)
+        if (over('gun_turnshot', td) || (S.done && moving)) {   // (moving off after the shot: the gun stays up)
+          P.face = P.want = (P.face + A.ND / 2) % A.ND; S.out = true; S.act = ''; S.at = 0;
+          if (moving) movingAim(dt, mx, my); else standingAim(dt);
+        } else P.frame = frameAt('gun_turnshot', td);
+        break;
+      }
+      case 'whip':   // the pistol whip (feet planted, the blow's lunge): the melee at its mark, back to the aim
+        S.at += dt; plant(dt);
+        if (!S.done && stepAt('gun_whip', S.at) >= mark('gun_whip', 'hit', 4)) { S.done = true; whipLands(w); }
+        if (over('gun_whip', S.at)) { S.act = ''; S.idle = 0; if (moving) movingAim(dt, mx, my); else standingAim(dt); }
+        else P.frame = frameAt('gun_whip', S.at);
+        break;
       case 'hip':
         S.at += dt;
         if (over('gun_hipfire', S.at)) { S.act = ''; standingAim(dt); } else { plant(dt); P.frame = frameAt('gun_hipfire', S.at); }
@@ -443,7 +497,7 @@ export function createGun(PL, I) {
         }
         if (moving) movingAim(dt, mx, my); else standingAim(dt);
     }
-    if (S.act === 'draw' || S.act === 'hip' || S.act === 'fire' || S.act === 'fan' || S.act === 'raise' || S.act === 'reload' || S.act === 'dry' || S.act === 'twirl' || (S.out && !S.act)) P.state = 'draw';
+    if (S.act === 'draw' || S.act === 'hip' || S.act === 'fire' || S.act === 'fan' || S.act === 'raise' || S.act === 'reload' || S.act === 'dry' || S.act === 'twirl' || S.act === 'turn' || S.act === 'whip' || (S.out && !S.act)) P.state = 'draw';
     P.t = S.out && S.ammo > 0 && (S.act === '' || S.act === 'fire' || S.act === 'raise' || S.act === 'twirl') ? 1 : 0;   // the reticle: gold when a shot is ready
     return true;
   }
@@ -457,9 +511,12 @@ export function createGun(PL, I) {
     S, TUNE, on, step, press, weapon,
     fan() { if (on()) S.fanWant = true; return on(); },             // RMB
     reload() { if (on()) S.reloadWant = true; return on(); },       // R
+    melee() { if (on() && has('gun_whip.0')) { S.whipWant = true; return true; } return false; },   // V: the pistol whip (an atlas with it)
+    get canMelee() { return on() && has('gun_whip.0'); },
     emote(kind) { if (on() && kind === 'tip' && has('hat_tip.0')) { S.tipWant = true; return true; } return false; },   // Y
     cue(kind) { if (kind === 'kill' && S.out && has('gun_blow.0')) S.flourish = true; },   // a kill: smoke to blow off, when calm
-    setCues(calm, duel) { S.calm = calm; S.duel = duel; },          // the gun feature, each step: nothing hunting nearby / an elite near
+    setCues(calm, duel, near = false) { S.calm = calm; S.duel = duel; S.near = near; },   // the gun feature, each step: nothing hunting
+                                                                    // nearby / an elite near / a foe within the whip's reach
     // the hands are wanted for something else (sim/player/lasso.js: the lasso): the gun goes back in the holster at once
     stow() { if (!S.out && !S.act) return; interrupt(); if (P.state === 'draw' || P.state === 'pose') { P.state = 'idle'; P.t = 0; } },
     get reloading() { return S.act === 'reload'; },

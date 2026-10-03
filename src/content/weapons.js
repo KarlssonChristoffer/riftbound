@@ -11,10 +11,12 @@
 //           the empty click before the reload starts), ready (s the gun stays up after the last shot), cone (deg: on the
 //           move the shot leaves within this of the torso's aim), pen {through (bodies a bullet passes through: a
 //           gunman, a brute; walls and props still stop it), dmg (x its damage after each body), speed (x its speed)},
-//           kick (m/s: the recoil shoves him back against the shot, standing; planted, he gives ~kick / 18 m)
+//           kick (m/s: the recoil shoves him back against the shot, standing; planted, he gives ~kick / 18 m),
+//           melee {dmg, reach (m from him), arc (deg in front), push (x the debris' shove)}: the pistol whip (an atlas with
+//           gun_whip: the gunslinger's; V, or the empty click with a foe in reach)
 // Game effects are notes on these (core/modifiers.js; gun.js applies them): weapon.dmg, weapon.reload, weapon.gap,
 // weapon.spread, weapon.fanSpread, weapon.last (extra damage x for the cylinder's last round), weapon.quick (the
-// first shot from the holster).
+// first shot from the holster), weapon.melee (the whip's damage).
 export const WEAPONS = {
   bow: {id: 'bow', kind: 'bow', name: 'Bow', abilities: true,
     v0: 14, vDraw: 12, dmg0: 10, dmgDraw: 14, drawK: 1.5, life: 1.6, cone: 35, muzzle: .35, vhMin: -12, vhMax: 8, lift: .45},
@@ -23,11 +25,11 @@ export const WEAPONS = {
     rounds: 6, speed: 160, range: 42, dmg: 15, push: .13, spread: {aim: .7, move: 2.4, hip: 3.2, fan: 8},
     gap: .2, fanGap: .095, fanDmg: .85, draw: 1.6, hip: true,
     reload: {up: .16, eject: .2, round: .2, close: .2}, dry: .3, ready: 3, cone: 25,
-    pen: {through: 1, dmg: .6, speed: .75}, kick: 1.1},
+    pen: {through: 1, dmg: .6, speed: .75}, kick: 1.1, melee: {dmg: 22, reach: 1.5, arc: 80, push: 1}},
   // the outlaw's brass-framed Navy: a heavier hit, wider spread, a slower reload
   brass_navy: {id: 'brass_navy', kind: 'gun', name: 'Brass Navy', abilities: false,
     rounds: 6, speed: 140, range: 38, dmg: 23, push: .2, spread: {aim: 1.8, move: 3.8, hip: 5, fan: 12},
     gap: .3, fanGap: .13, fanDmg: .85, draw: 1.05, hip: false,
     reload: {up: .22, eject: .28, round: .29, close: .26}, dry: .35, ready: 3, cone: 25,
-    pen: {through: 2, dmg: .7, speed: .85}, kick: 1.7},
+    pen: {through: 2, dmg: .7, speed: .85}, kick: 1.7, melee: {dmg: 28, reach: 1.5, arc: 80, push: 1.2}},
 };
