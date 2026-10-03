@@ -41,7 +41,7 @@ import {createMusic} from './music.js';   // the adaptive score, layered with th
 import {createEngine, REVERBS} from '../../audio/runtime/engine.js';
 import {createBakery} from '../../audio/runtime/bakery.js';
 import {createDirector} from '../../audio/runtime/director.js';
-import {EVENTS, AMBIENCE, SOURCES} from '../../audio/runtime/events.js';
+import {EVENTS, AMBIENCE, SOURCES, SPATIAL, groundCase} from '../../audio/runtime/events.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
 
@@ -211,7 +211,10 @@ function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (t
 // ~0.45, an explosion hits the compressor. Soft, woody, low: nothing above ~6 kHz carries much energy.
 // ======================================================================================================================
 const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift', desert: 'desert'};
-const MAT = {dummy: 'straw', brute: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};
+// a bullet's end by what it met (bullet.impact surf 'prop'): the prop's material by its kind (ctx.propAt); the rest is wood
+const PROP_MAT = {stock_tank: 'metal', ore_cart: 'metal', well: 'stone', wall_n: 'stone', wall_w: 'stone', wall_e: 'stone', wall_s: 'stone',
+  tower: 'stone', gatepost: 'stone', pot: 'stone', crystal: 'stone'};
+const MAT = {dummy: 'straw', brute: 'straw', gunman: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};   // (gunman: the desert's, a dull hit)
 
 // the ground texture of one footfall (shared by steps, landings, scuffs); k = weight 0..1.5
 function surface(E, v, dt, surf, k = .6) {
@@ -243,6 +246,9 @@ function surface(E, v, dt, surf, k = .6) {
   }
 }
 
+// the screen rule for the coach gun's synth fallbacks, as the director applies it to the forge's (events.js SPATIAL.combat):
+// a gain falling by fadeDbPerM a metre off screen, 0 (silent) past cullOff
+const offK = o => { const S = SPATIAL.combat, off = Math.max(0, +o.off || 0); return off > S.cullOff ? 0 : Math.pow(10, -S.fadeDbPerM * off / 20); };
 const SFX = {
   // ---------------- player ----------------
   step(E, o) {   // o.surf, o.k weight (walk .25 .. sprint 1, plant 1.3)
@@ -336,6 +342,43 @@ const SFX = {
   foeDraw(E, o) { SFX.gunHolster(E, {...o, g: (o.g ?? 1) * .5}); },
   foeReload(E, o) { SFX.gunReload(E, {...o, g: (o.g ?? 1) * .7}); },
   foeHolster(E, o) { SFX.gunHolster(E, {...o, g: (o.g ?? 1) * .5}); },
+  foeFall(E, o) { SFX.land(E, {...o, big: 1, g: (o.g ?? 1) * .8}); },   // a body hits the ground
+  // bullets (fallbacks for the forge's 'bullet' recipe while it bakes / ?forge=0): the old thuds, screen-bound like the forge's
+  bulletHit(E, o) {
+    const k = offK(o); if (!k) return;
+    if (o.mat === 'sand') SFX.stuck(E, {...o, surf: 'ruins', g: .55 * k});
+    else if (o.mat === 'stone' || o.mat === 'metal') SFX.stuck(E, {...o, surf: 'stone', g: .6 * k});
+    else SFX.hit(E, {...o, mat: 'wood', g: .7 * k});
+  },
+  fleshHit(E, o) { const k = offK(o); if (k) SFX.hit(E, {...o, mat: 'straw', g: (o.crit ? 1.25 : 1) * k}); },
+  hitConfirm(E, o) {   // a soft low thock
+    const v = E.voice({...o, g: (o.g ?? 1) * .35}, 'hitConfirm', .1, {cd: .03}); if (!v) return;
+    E.O(v, 0, {f: 410, a: .002, d: .03, g: .4}); E.N(v, 0, {b: E.PK, type: 'lowpass', f: 700, a: .001, d: .015, g: .2});
+  },
+  bulletPierce(E, o) { const k = offK(o); if (k) SFX.hit(E, {...o, mat: 'body', g: .6 * k}); },
+  // the bruiser's coach gun (fallbacks for the forge's 'coachgun' recipe while it bakes / ?forge=0), screen-bound like it
+  coachShot(E, o) {   // deeper and longer than the revolver's: a broad bark, a low sweep, a long dark tail
+    const k = offK(o); if (!k) return;
+    const v = E.voice({...o, g: (o.g ?? 1) * 1.5 * k}, 'coachShot', 1.4, {pri: 3, cd: .02}); if (!v) return;
+    E.N(v, 0, {type: 'highpass', f: 380, a: .0008, d: .014, g: .45});
+    E.N(v, 0, {b: E.PK, type: 'lowpass', f: 1300, a: .003, d: .12, g: .7});
+    E.O(v, 0, {f: 62, f2: 38, sw: .12, a: .003, d: .22, g: .75});
+    E.N(v, .02, {b: E.BR, type: 'lowpass', f: 600, a: .03, d: .7, g: .3});
+  },
+  coachCock(E, o) {   // a hammer thumbed back: two low notch clicks
+    const k = offK(o); if (!k) return;
+    const v = E.voice({...o, g: (o.g ?? 1) * .6 * k}, 'coachCock', .2, {cd: .06}); if (!v) return;
+    E.N(v, 0, {type: 'bandpass', f: 1500, q: 3, d: .005, g: .25}); E.N(v, .04, {type: 'bandpass', f: 1800, q: 3, d: .007, g: .45}); E.O(v, .04, {f: 650, a: .001, d: .02, g: .12});
+  },
+  coachReload(E, o) {   // o.mark break | dump (the shells into the sand) | load | close: dull thuds, a click or two
+    const k = offK(o); if (!k) return;
+    const v = E.voice({...o, g: (o.g ?? 1) * .7 * k}, 'coachReload', .6, {cd: .03}); if (!v) return;
+    const thud = (dt, f, g, d = .03) => { E.N(v, dt, {b: E.PK, type: 'lowpass', f, a: .001, d, g}); E.O(v, dt, {f: f * .35, a: .001, d, g: g * .4}); };
+    if (o.mark === 'break') { E.N(v, 0, {type: 'bandpass', f: 1600, q: 3, d: .005, g: .2}); thud(.12, 900, .5); }
+    else if (o.mark === 'dump') { E.N(v, 0, {b: E.PK, type: 'bandpass', f: 850, q: 1.2, a: .02, d: .03, g: .15}); thud(.28, 800, .35, .02); thud(.34, 800, .25, .02); }
+    else if (o.mark === 'close') { thud(.07, 700, .7, .04); E.N(v, .085, {type: 'bandpass', f: 1600, q: 3, d: .006, g: .3}); }
+    else thud(.05, 1000, .45, .02);
+  },
   gunHolster(E, o) {   // the twirl drops into leather
     const v = E.voice(o, 'gunHolster', .3, {cd: .15}); if (!v) return;
     E.N(v, 0, {b: E.PK, type: 'bandpass', f: 700, q: .8, a: .05, d: .06, g: .18}); E.N(v, .15, {b: E.PK, type: 'lowpass', f: 1100, a: .001, d: .015, g: .45});
@@ -818,6 +861,13 @@ export function createAudio(ctx, host = {}) {
     if (RT) { try { if (RT.D.post(name, {...pos, dist: pos.d, x: px, y: py, ...o})) return; } catch (e) { console.warn('audio: forge', name, e); } }
     try { SFX[name](E, {...pos, ...o}); } catch (e) { console.warn('audio:', name, e); }   // legacy synth (not baked yet / ?forge=0)
   }
+  // the ground a bullet ended in: the desert's painter (stone and rock hard, sand and hardpan dull); elsewhere rock where it is
+  // raised (a plateau's face or top), else the footsteps' ground (flagstones hard; grass, gravel, snow dull)
+  function groundMat(biome, x, y, h) {
+    if (biome === 'desert') { const g = ctx.ground?.(x, y); return g === 'stone' || g === 'rock' ? 'stone' : 'sand'; }
+    if (h > .3) return 'stone';
+    const c = groundCase({surf: SURF[biome] || 'ruins', x, y}); return c === 'stone' || c === 'crystal' ? 'stone' : 'sand';
+  }
   function play(name, o = {}) { unlock(); if (E && SFX[name]) fire(name, L.x, L.y, {surf: bedId || 'ruins', ...o}); }
 
   // Props that can make sound (torches / braziers, brutes, barrels) are collected into short lists, rebuilt when the
@@ -913,15 +963,27 @@ export function createAudio(ctx, host = {}) {
         case 'player.draw': fire('gunDraw', e.x, e.y); break;
         case 'player.reload': fire('gunReload', e.x, e.y, {phase: e.phase}); break;
         case 'player.holster': fire('gunHolster', e.x, e.y); break;
-        // the desert's gunmen (features/foes/sim.js): the same revolver, heard where they stand
-        case 'foe.shoot': fire('foeShot', e.x, e.y, {gun: e.gun}); break;
-        case 'foe.aim': fire('foeCock', e.x, e.y); break;
+        // the desert's gunmen (features/foes/sim.js): the revolvers sound like yours; the bruiser's coach gun (gun 'coach')
+        // has its own: its reload breaks open with the sim's start, the rest lands on the frames you see (foe.clip, the view's)
+        case 'foe.shoot': fire(e.gun === 'coach' ? 'coachShot' : 'foeShot', e.x, e.y, {gun: e.gun}); break;
+        case 'foe.aim': fire(e.gun === 'coach' ? 'coachCock' : 'foeCock', e.x, e.y); break;
         case 'foe.draw': fire('foeDraw', e.x, e.y); break;
-        case 'foe.reload': fire('foeReload', e.x, e.y, {phase: e.phase, gun: e.gun}); break;
+        case 'foe.reload': if (e.gun !== 'coach') fire('foeReload', e.x, e.y, {phase: e.phase, gun: e.gun}); else if (e.phase === 'start') fire('coachReload', e.x, e.y, {mark: 'break'}); break;
+        case 'foe.clip': if (e.gun === 'coach') fire('coachReload', e.x, e.y, {mark: e.mark}); break;   // (features/foes/look.js)
         case 'foe.holster': fire('foeHolster', e.x, e.y); break;
-        case 'bullet.impact': if (e.surf === 'ground') fire('stuck', e.x, e.y, {surf, g: .55}); else if (e.surf === 'tree' || e.surf === 'prop') fire('hit', e.x, e.y, {mat: 'wood', g: .7}); break;
+        case 'foe.ground': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: e.foe === 'bruiser'})); break;   // (features/foes/look.js)
+        // a bullet's end (sim/projectiles.js, features/foes/sim.js) by what it met; water is arrow.splash's, a hit combat.hit's
+        case 'bullet.impact': {
+          const s = e.surf; if (s !== 'ground' && s !== 'tree' && s !== 'prop') break;
+          fire('bulletHit', e.x, e.y, {mat: s === 'tree' ? 'wood' : s === 'prop' ? PROP_MAT[ctx.propAt?.(e.x, e.y)] || 'wood' : groundMat(pl.biome, e.x, e.y, e.h), foe: !!e.foe}); break;
+        }
+        // a hit (features/combat/core.js damage): a gunman's flesh (a crit heavier); with a gun loadout the player's confirm on
+        // any enemy, at the listener (the bow's hits keep their own thunks)
+        case 'combat.hit': if (!e.quiet && e.who) { if (e.who.kind === 'gunman') fire('fleshHit', e.x, e.y, {crit: !!e.crit}); if (e.who.hunter && pl.gun) fire('hitConfirm', L.x, L.y, {crit: !!e.crit}); } break;
+        case 'bullet.pierce': fire('bulletPierce', e.x, e.y); break;   // a bullet through a gunman (the feel branch's event: core/events.js there)
         case 'arrow.hit': case 'player.hit': {
           const props = get(host.props) || [], p = !e.player && (e.prop || props.find(p => p.x === e.x && p.y === e.y));
+          if (p?.kind === 'gunman') break;   // (a gunman's hit sounds by its damage: combat.hit below)
           fire('hit', e.x, e.y, {mat: e.player ? 'body' : MAT[p?.kind] || 'wood'}); break;
         }
         case 'prop.break': fire('brk', e.x, e.y, {kind: e.kind}); break;

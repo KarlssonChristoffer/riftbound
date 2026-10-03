@@ -43,14 +43,17 @@ export const EVENTS = {
   'prop.respawn':       ['features/combat/props.js', 'x, y, prop: true (drifted / reset home)', 'audio, music (the same sound + stinger as a brute\'s)'],
   'brute.respawn':      ['features/combat/core.js', 'x, y (a sparring brute is back)', 'audio, music'],
   'enemy.kill':         ['features/combat/core.js', 'x, y, who (the enemy)', 'game, gun, battlemusic'],
-  // the desert's gunmen (features/foes/sim.js); foe = their type (bandit | sheriff | bruiser), gun = the revolver recipe's
-  // shot they sound like (peacemaker | navy: the coach gun)
+  // the desert's gunmen (features/foes/sim.js); foe = their type (bandit | sheriff | bruiser), gun = the sound of their gun
+  // (content/foes.js gun.sound: peacemaker = the revolver recipe's shot, coach = the bruiser's coach gun, its own recipe)
   'foe.draw':           ['features/foes/sim.js',  'x, y, z, foe (out of the holster)', 'audio'],
   'foe.aim':            ['features/foes/sim.js',  'x, y, z, foe, gun (the hammer back: the shot\'s telegraph begins)', 'audio'],
   'foe.shoot':          ['features/foes/sim.js',  'x, y, h (the muzzle), z, vx, vy (unit: the way it flies), foe, gun, who, n (rounds left)', 'gunfx, audio, wildlife'],
   'foe.reload':         ['features/foes/sim.js',  'x, y, z, foe, gun, phase (start | eject | round | done), n (spent cases on eject, rounds in after)', 'gunfx (cases), audio'],
   'foe.holster':        ['features/foes/sim.js',  'x, y, z, foe', 'audio'],
+  'foe.ground':         ['features/foes/look.js (a view: nothing in the sim listens)', 'x, y, z, foe (a dead gunman hits the ground: the death clip\'s ground mark)', 'audio'],
+  'foe.clip':           ['features/foes/look.js (a view: nothing in the sim listens)', 'x, y, z, foe, gun, mark (dump | load | close: the reload you see drops the spent shells, seats a shell, snaps shut)', 'audio'],
   'frontier.read':      ['features/frontier.js',  'x, y, what (wanted | sign), name (the poster\'s outlaw, or null)', 'foes (a bounty gang)'],
+  'combat.hit':         ['features/combat/core.js', 'x, y, h, who (the target), kind, dmg, crit, broke, quiet (every damage: an enemy, a prop, a dummy)', 'audio (a gunman\'s flesh hit, a crit heavier; the player\'s hit-confirm on an enemy)'],
   'combat.explode':     ['features/combat/core.js', 'x, y, r', 'wind, lights, garden, grass, props, atmos, flow, wildlife, audio, music'],
   'combat.loot':        ['features/combat/core.js', 'x, y, n (coins spilled)', 'wildlife, audio, music'],
   'combat.coin':        ['features/combat/core.js', 'x, y (the player: every 5th coin picked up)', 'audio, music'],

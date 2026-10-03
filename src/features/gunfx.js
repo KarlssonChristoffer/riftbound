@@ -129,7 +129,7 @@ export async function create(host) {
       const g = gun();
       for (const e of evs) {
         if (e.type === 'foe.shoot') {   // a gunman's shot: the flash at its muzzle along the shot, the smoke
-          const navy = e.gun === 'navy', Q = OF[ofI]; ofI = (ofI + 1) % OF.length;
+          const navy = e.gun === 'coach' || e.gun === 'navy', Q = OF[ofI]; ofI = (ofI + 1) % OF.length;   // (coach: the bruiser's coach gun, the big flash)
           Q.t = TUNE.flash.life; Q.v = (R() * 3) | 0; Q.k = navy ? TUNE.flash.navy * 1.15 : 1; Q.x = e.x; Q.y = e.y; Q.h = e.h;
           view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h); Q.a = Math.atan2(SC[1] - y0, SC[0] - x0);
           OLIGHT.x = e.x; OLIGHT.y = e.y; OLIGHT.h = e.h; OFL.t = TUNE.flash.life; OFL.k = Q.k;
