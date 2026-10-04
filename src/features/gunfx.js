@@ -18,12 +18,14 @@
 //            tan chips and a dusty puff; wood splinters; metal a burst of sparks. Bits are world points, sparks glowing
 //            streaks, puffs the smoke's (tinted). A mark: a scuff in the ground (features/flow.js F.stamp), a hole in a
 //            wall, prop or tree (world points just off its face, fading). A body hit is blood's (features/blood.js)
+//   ricochet a bullet glancing off metal or stone (bullet.ricochet: sim/projectiles.js, while ricochets are on): its streak
+//            into the face, sparks thrown on along its new way (stone: a few chips too), a scar where it struck
 //   others   the desert's gunmen (features/foes): their shots (foe.shoot) flash, spit grains and smoke at the muzzle the
 //            event names (a few at once), their reloads drop cases (foe.reload), their bullets end like yours
 //            (bullet.impact); their tracers in flight are drawn by their own view with this look (tracer(), exported)
 // OWNS: its pools (typed arrays, capped; reused, nothing allocated per frame) and its smoke (gunfx/smoke.js).
-// READS: host.P, host.PL.gun, host.weapon, host.arrows, events (player.shoot / reload, foe.shoot / reload, bullet.impact,
-// arrow.hit, combat.hit), host.wind (the smoke's drift), host.yaw / zoom, host.mouse / VW / VH (the reticle),
+// READS: host.P, host.PL.gun, host.weapon, host.arrows, the modifiers' note 'gunfx.flash', events (player.shoot / reload, foe.shoot / reload, bullet.impact,
+// arrow.hit, combat.hit, bullet.ricochet), host.wind (the smoke's drift), host.yaw / zoom, host.mouse / VW / VH (the reticle),
 // host.entities.near + host.biome.groundAt (what a bullet hit), flow's F.stamp (the ground's scuffs).
 // BUDGET: view ~.03 ms with a fanned cylinder in the air and its impacts (<= 320 bits, 48 holes); flashes: one instanced draw.
 import {WEAPONS} from '../content/weapons.js';
@@ -31,6 +33,7 @@ import {rgbOf} from '../core/color.js';
 import {hypot2, hypot3} from '../core/mathx.js';
 import {SMOKE, createSmoke} from './gunfx/smoke.js';
 import {createFlashes} from '../render/flashes.js';
+import {matOf} from '../content/materials.js';
 
 export const TUNE = {
   // the flash: s, its length (m along the shot), x its thickness, x for the Navy / a fanned shot; its glow (HD: m, alpha);
@@ -56,14 +59,9 @@ export const TUNE = {
   },
   sparks: {speed: [2.5, 6.5], up: [.4, 3], life: [.08, .24], grav: 9, streak: .022},   // streak: s of its travel each spark draws
   holes: {max: 48, life: 7, fade: 2, back: .03},   // in walls, props, trees: s shown, the last s fading, m off the face
+  rico: {sparks: [4, 8], speed: 1.3, life: 1.3, spread: .35, chips: 4},   // a ricochet: sparks (n lo, hi; x the sparks' speed / life; sideways), stone chips
 };
-// what a prop is made of, by its kind (a bullet's impact): stone also stands for brick and clay; walls in the desert are adobe
-const MAT = {wall_n: 'stone', wall_s: 'stone', wall_w: 'stone', wall_e: 'stone', tower: 'stone', gatepost: 'stone', pillar: 'stone',
-  pillar_broken: 'stone', rubble: 'stone', rock: 'stone', rock_big: 'stone', ruin: 'stone', well: 'stone', crystal: 'stone', pot: 'stone',
-  campfire: 'stone', beacon: 'stone', crate: 'wood', barrel: 'wood', woodpile: 'wood', stall: 'wood', bench: 'wood', hitch_rail: 'wood',
-  trough: 'wood', wanted_board: 'wood', signpost: 'wood', wagon: 'wood', outhouse: 'wood', rail_fence: 'wood', windmill: 'wood',
-  mine_portal: 'wood', water_tower: 'wood', tree: 'wood', goods: 'wood', chest: 'wood', dummy: 'wood', merchant: 'wood',
-  barrel_x: 'metal', stock_tank: 'metal', ore_cart: 'metal', brazier: 'metal', torch: 'metal'};
+// what a prop is made of, by its kind (a bullet's impact): content/materials.js (matOf: walls in the desert are adobe)
 const C = {head: rgbOf('#fff6d8'), mid: rgbOf('#ffd27a'), tail: rgbOf('#b8642e'), brass: rgbOf('#d8a93c'), brassHi: rgbOf('#ffe08a')};
 // the bits' palettes, light -> dark, flattened once (bk = the colour's index; EMIT: it glows)
 // (each with a light and a dark tone against its own surface: chips off adobe show its pale inside and its shadow)
@@ -105,6 +103,8 @@ export async function create(host) {
 
   // ---- state: the flashes (render/flashes.js), the smoke (gunfx/smoke.js), tracers' last streaks, cases, bits, holes ----
   const flashes = createFlashes(host.G, 8);
+  // the flash's size (and so its light) x the modifiers' note 'gunfx.flash' (base 1: dev/gunfeel.js tunes it live), on change
+  let FLK = 1; if (host.mods) { const f = () => { FLK = host.mods.value('gunfx.flash', 1); }; host.mods.watch(f); f(); }
   // a flash: t its time left (it runs on below 0 while its light fades), v its variant, k x its size, a its angle on
   // screen, s art px a metre along the shot there, the muzzle (x, y, h: the sim's), the shot's way (ux, uy)
   const mkFlash = () => ({t: -9, v: 0, k: 1, a: 0, s: 1, x: 0, y: 0, h: 0, ux: 1, uy: 0});
@@ -116,7 +116,7 @@ export async function create(host) {
   const LCH = mkChain(7450), OCH = mkChain(7460), LITS = [], GLOW = [1, .78, .42];
   // a shot's flash from its event (x, y, h the muzzle; vx, vy its way): where, which way on screen, how big
   function flashOf(Q, e, k) {
-    Q.t = TUNE.flash.life; Q.v = (R() * 3) | 0; Q.k = k; Q.x = e.x; Q.y = e.y; Q.h = e.h; Q.ux = e.vx; Q.uy = e.vy;
+    Q.t = TUNE.flash.life; Q.v = (R() * 3) | 0; Q.k = k * FLK; Q.x = e.x; Q.y = e.y; Q.h = e.h; Q.ux = e.vx; Q.uy = e.vy;
     view(e.x, e.y, e.h); const x0 = SC[0], y0 = SC[1]; view(e.x + e.vx, e.y + e.vy, e.h);
     Q.a = Math.atan2(SC[1] - y0, SC[0] - x0); Q.s = Math.hypot(SC[0] - x0, SC[1] - y0) / (host.zoom || 1);
   }
@@ -184,8 +184,7 @@ export async function create(host) {
         const p = hitProp = propAt(e, e.surf === 'hit');
         if (!p) return e.surf === 'hit' ? 'flesh' : 'stone';
         if (p.hunter || p.sparring || p.kind === 'gunman') return 'flesh';
-        const m = MAT[p.kind] || 'stone';
-        return m === 'stone' && host.biome.id === 'desert' && p.kind.startsWith('wall') ? 'adobe' : m;
+        return matOf(p.kind, host.biome.id);
       }
     }
     return '';
@@ -222,6 +221,16 @@ export async function create(host) {
     // the mark: a scuff in the ground (flow's), a hole in a wall / prop / tree (ours)
     if (ground) host.feature('flow')?.stamp?.('bullet', e.x, e.y, ux, uy);
     else if (e.surf === 'prop' || e.surf === 'tree') hole(x, y, h, m);
+  }
+  // a ricochet (bullet.ricochet): sparks thrown on along the bullet's new way (dx, dy, dh), chips off stone, the scar
+  function ricochet(e) {
+    const S = TUNE.sparks, K = TUNE.rico, b0 = BASE.spark, ux = e.dx || 0, uy = e.dy || 0, uh = e.dh || 0, n = Math.round(RR(K.sparks[0], K.sparks[1]));
+    for (let i = 0; i < n; i++) {
+      const v = RR(S.speed[0], S.speed[1]) * K.speed, sd = RR(-K.spread, K.spread);
+      bit(e.x, e.y, e.h, (ux - uy * sd) * v, (uy + ux * sd) * v, uh * v + RR(S.up[0], S.up[1]), RR(S.life[0], S.life[1]) * K.life, b0 + (i % 3), S.grav);
+    }
+    if (e.mat === 'stone') { const st = TUNE.impact.stone.bits, c0 = BASE.stone; for (let i = 0; i < K.chips; i++) bit(e.x, e.y, e.h, RR(-1, 1) * st[2], RR(-1, 1) * st[2], RR(st[3][0], st[3][1]), RR(st[4][0], st[4][1]), c0 + i % 3, st[5]); }
+    hole(e.x, e.y, e.h, e.mat === 'metal' ? 'metal' : 'stone');
   }
   // a shot's burning powder: grains out of the muzzle along the shot (ux, uy unit), n of them
   function blast(x, y, h, ux, uy, n) {
@@ -263,6 +272,10 @@ export async function create(host) {
           const T = TR[trI]; trI = (trI + 1) % TRN;
           T.x0 = e.x0 ?? e.x; T.y0 = e.y0 ?? e.y; T.h0 = e.h0 ?? e.h; T.x1 = e.x; T.y1 = e.y; T.h1 = e.h; T.t = 0;
           impact(e);
+        } else if (e.type === 'bullet.ricochet') {   // its streak into the face (the bullet flies on: its tracer starts again there)
+          const T = TR[trI]; trI = (trI + 1) % TRN;
+          T.x0 = e.x0 ?? e.x; T.y0 = e.y0 ?? e.y; T.h0 = e.h0 ?? e.h; T.x1 = e.x; T.y1 = e.y; T.h1 = e.h; T.t = 0;
+          ricochet(e);
         } else if ((e.type === 'player.reload' || e.type === 'foe.reload') && e.phase === 'eject' && e.n > 0) {
           for (let i = 0; i < e.n; i++) {
             const k = cI; cI = (cI + 1) % CM; if (cN < CM) cN++;

@@ -136,6 +136,8 @@ export async function create(host) {
   let {VW, VH} = host;   // the view size: F.resize follows the window
   const F = {name: 'flow', label: 'Flow (camera, trails, marks)', key: '8', on: Q.get('flow') !== '0', ms: 0, TUNE, T: TUNE};
   const K = TUNE.cam;
+  // the revolver's kick x the modifiers' note 'flow.gunKick' (base 1: dev/gunfeel.js tunes it live), read when the notes change
+  let GK = 1; if (host.mods) { const f = () => { GK = host.mods.value('flow.gunKick', 1); }; host.mods.watch(f); f(); }
   let biome = '', time = 'day', acc = 0, simT = 0;
   const R = mulberry32(71);
   const rr = (a, b) => a + R() * (b - a);
@@ -676,8 +678,8 @@ export async function create(host) {
         const L = P.leap; if (L) { const [ldx, ldy] = toW(L.dx, L.dy); crescent(e.x - ldx * .12, e.y - ldy * .12, -ldx, -ldy, {tone: 2}); }
       } else if (e.type === 'player.splash' && !e.small && P.state === 'splash') { splashT = simT; wetFrom = -99; }   // HIS splash
       else if (e.type === 'combat.explode') scorch(e.x, e.y, e.r || 2);
-      else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
-      else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, e.broke || e.crit ? K.hitKickBig : K.hitKick);
+      else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * GK * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
+      else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, (e.broke || e.crit ? K.hitKickBig : K.hitKick) * GK);
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }

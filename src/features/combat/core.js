@@ -56,7 +56,8 @@ export function createCore(host) {
   for (const k of SLOTS) Object.assign(AB[k], {t: 0, ready: 0, deny: 0, cast: 0});
   // MODIFIERS (core/modifiers.js, host.mods): items, augments and a run's rules leave notes on these; T / AB.cd are
   // always this file's authored numbers (T0, CD0) with the notes applied, recomputed when the notes change
-  const MOD_T = ['crit', 'critMul', 'msN', 'boomR', 'boomBlast', 'rainN', 'trapRoot', 'propRespawn', 'chestReset', 'enemyDmg', 'enemyPace', 'enemyCoins'];
+  const MOD_T = ['crit', 'critMul', 'msN', 'boomR', 'boomBlast', 'rainN', 'trapRoot', 'propRespawn', 'chestReset', 'enemyDmg', 'enemyPace', 'enemyCoins',
+    'hsShot', 'hsShotCrit', 'hsShotKill', 'shakeShot'];   // (a bullet's hit-stop and shake: dev/gunfeel.js tunes them live)
   const T0 = {...T}, CD0 = Object.fromEntries(SLOTS.map(k => [k, AB[k].cd]));
   function applyMods() {
     const M = host.mods; if (!M) return;

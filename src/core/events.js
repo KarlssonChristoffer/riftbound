@@ -35,6 +35,7 @@ export const EVENTS = {
   'arrow.splash':       ['sim/projectiles.js',    'x, y, small: true (an arrow or a bullet into the stream)', 'atmos, wildlife, audio'],
   'bullet.impact':      ['sim/projectiles.js, features/foes/sim.js', 'x, y, h (where it ended), x0, y0, h0 (where it was as that step began), surf (hit | ground | water | tree | prop | air | player: a gunman\'s bullet in you), gun, dx, dy, foe? (the gunman\'s type)', 'gunfx, audio, wildlife, battlemusic'],
   'bullet.pierce':      ['sim/projectiles.js',    'x, y, h (where it leaves the body), vx, vy (unit: the way it flies on), who (the body it went through: a gunman, a brute), gun (the weapon id)', 'blood, audio (a through-shot)'],
+  'bullet.ricochet':    ['sim/projectiles.js',    'x, y, h (where it glanced off), x0, y0, h0 (where it was as that step began), dx, dy, dh (unit: its way on), mat (metal | stone), gun, n (its ricochets so far), who (the solid): only while ricochets are on (the trick-shot range, ?rico=1)', 'gunfx (sparks, the streak, a scar), audio (the whine), trickshot (the plate rings, the count)'],
   'prop.break':         ['features/combat/core.js', 'x, y, kind, who (the prop), ash (burnt through)', 'props, atmos, wildlife, audio, music'],
   'prop.tip':           ['features/combat/props.js', 'x, y, kind, prop: true', 'wildlife, audio'],
   'prop.kick':          ['features/combat/props.js', 'x, y, kind, prop: true', 'wildlife, audio'],
@@ -115,6 +116,14 @@ export const EVENTS = {
   'lasso.swish':        ['features/equip/lassolook.js (a view)', 'x, y (a turn of the loop overhead)', 'audio'],
   'lasso.creak':        ['features/equip/lassolook.js (a view)', 'x, y, k (the rope strains)', 'audio'],
   'combat.bowl':        ['features/combat/core.js', 'x, y, who, by (a flung body bowls another over: combat fling)', 'audio'],
+  // the trick-shot range (features/trickshot/sim.js, ?trick=1: the sandbox only); who = its prop (a bottle, a can)
+  'trick.shatter':      ['features/trickshot/sim.js', 'x, y, h, dx, dy (unit: the shot\'s way; 0 without one), by (bullet | arrow | blast | melee), who (the bottle), glass (amber | green | clear): a bottle breaks', 'trickshot (view: the glass), audio'],
+  'trick.ping':         ['features/trickshot/sim.js', 'x, y, h, dx, dy, by, who (the can), air (it was in the air), n (the juggle so far: its airborne hits in a row): a can is hit', 'trickshot (view: the spin, the count), audio'],
+  'trick.toss':         ['features/trickshot/sim.js', 'x, y, h, who (the can): a can tossed up out of the hand', 'audio'],
+  'trick.clink':        ['features/trickshot/sim.js', 'x, y, k (0..1: how hard), who (the can), n (a juggle that ended here, else 0), best (it was a new best): a can bounces or lands', 'trickshot (view), audio'],
+  'trick.ding':         ['features/trickshot/sim.js', 'x, y, h, k (0..1), who (the steel plate), edge (it met the edge of the plate: bullet.impact / bullet.ricochet sound it): a shot, a blast or the whip rings the plate', 'trickshot (view: the swing), audio (not an edge)'],
+  'trick.reset':        ['features/trickshot/sim.js', 'x, y (the fence): the bottles and the stacked cans are set up again', 'trickshot (view), audio'],
+  'trick.clear':        ['features/trickshot/sim.js', 'x, y (the fence), t (s: the run against the clock), shots, best (a new best time): the fence is cleared', 'trickshot (view: the banner), audio'],
 };
 
 const warned = new Set();
