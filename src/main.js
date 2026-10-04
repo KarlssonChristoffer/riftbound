@@ -135,10 +135,13 @@ const hero = createHero({G, set, loadI, ctxO, app});
 const pa = createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: () => stage.world, ents: () => stage.ents, biome: () => stage.biome,
   opt: () => opt, proj, flags: Q, mods});
 const {PL, P, player} = pa;
-// ?live=1 (a prototype: docs/exp/livehero.md): the player drawn LIVE (view/livehero.js: his Blender model through
-// render/rigmesh.js) instead of his sprite, for the loadouts with a live model (the outlaw); the loop calls its compose
-// instead of hero.compose while it's on (dev/livekeys.js: Shift+7 flips it)
-const live = Q.get('live') === '1' ? await import('./view/livehero.js').then(m => m.createLiveHero({G, app, hero, pa, mouse, cam, ctxO}))
+// THE LIVE HERO (docs/exp/livehero.md): the player drawn LIVE (view/livehero.js: his Blender model through
+// render/rigmesh.js) instead of his sprite. By default for the gunslinger (LIVE_LOADOUTS); ?live=1 every loadout with a
+// live model (the outlaw too), ?live=0 none. The loop calls its compose instead of hero.compose while he wears one
+// (dev/livekeys.js: Shift+7 flips sprite / live)
+const LIVE_LOADOUTS = ['gunslinger'];
+const live = Q.get('live') !== '0' ? await import('./view/livehero.js')
+  .then(m => m.createLiveHero({G, app, hero, pa, mouse, cam, ctxO, only: Q.get('live') === '1' ? null : LIVE_LOADOUTS}))
   .catch(e => { console.warn('live hero: not loaded', e); return null; }) : null;
 
 const setYaw = cv.setYaw, setBiome = i => stage.setBiome(i);
@@ -189,7 +192,7 @@ const host = {
   // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame. Their
   // size is img.width / img.height; h is the player's height above the ground (metres), like every host h.
   playerSprite: () => live?.on ? live.sprite() : hero.sprite(),
-  // the muzzle of the gun as DRAWN (?live=1: the live hero's stances and kicks move it off the sim's atlas muzzle): world
+  // the muzzle of the gun as DRAWN (live: the live hero's stances and kicks move it off the sim's atlas muzzle): world
   // {x, y, h}, the last frame's, or null (the sprite: the sim's muzzle is the drawn one). For the shot's flash (gunfx)
   playerMuzzle: () => live?.on ? live.muzzle() : null,
 };

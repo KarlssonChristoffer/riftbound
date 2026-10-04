@@ -11,15 +11,18 @@ doesn't make the pixels swim?** It draws the outlaw live (his own Blender model 
 pixelizer's rules on the GPU), adds a "pixel-friendly motion" layer whose knobs are measured one by one, shows what
 going live buys (aiming at any angle, layering, IK, physics), and measures look, shimmer and cost against the sprite.
 
-It is **off by default**: with `?live` absent nothing runs (the golden captures are bit-identical, smoke and simview
-pass), and the live path is view-only (simview with `?live=1` passes: the sim never reads it).
+**The gunslinger is live by default** (2026-10-04, main.js `LIVE_LOADOUTS`); the other loadouts stay sprites.
+`?live=1` makes every loadout with a live model live (the outlaw too), `?live=0` none. A loadout drawn live loads its
+body the first time he wears it, and the rig (render targets, passes, shaders compiled off the frame) is made then: a
+Ranger who never wears the gunslinger costs nothing. The golden captures (the Ranger) are bit-identical, smoke and
+simview pass, and the live path is view-only (simview as the live gunslinger passes: the sim never reads it).
 
 ## Trying it
 
-- `?mode=sandbox&set=outlaw&live=1` (the outlaw is the loadout with a full live model: his poncho is baked, no runtime
-  cloth). The gunslinger has one too (`set=gunslinger`); his duster's long panel is the atlas's runtime cloth, simulated
-  on his live bones (THE DUSTER below). Each loadout's live body loads the first time he wears it (O switches);
-  the knobs and the demo carry over.
+- `?mode=sandbox&set=gunslinger` (live by default; his duster's long panel is the atlas's runtime cloth, simulated on
+  his live bones: THE DUSTER below), or the pause menu's Character picker / O mid-game.
+  `?mode=sandbox&set=outlaw&live=1` for the outlaw (his poncho is baked, no runtime cloth). Each loadout's live body
+  loads the first time he wears it; the knobs and the demo carry over.
 - **Shift+7** flips sprite <-> live at runtime (the A/B), **Shift+8** steps through the motion knobs' presets
   (Shift+Alt+8 turns the procedural layers off / on), **Shift+9** the demos (none, `lasso`, `swing`, then the live
   model's own emotes `cheer`, `wave`, `shrug`, `squat`: stand still to see one). A note in the top-left corner says
@@ -357,7 +360,8 @@ shadows / afterimages via the atlas frame, the procedural layers.
 
 ## A full switch to live characters: the steps
 
-1. **The cowboys' gun play live** (the outlaw today, the gunslinger next): make `?live=1` a setting; re-export when a
+1. **The cowboys' gun play live** (the gunslinger by default since 2026-10-04, the outlaw with `?live=1`): a player
+   setting next; re-export when a
    loadout changes (5 s, a build step instead of a render). Drop the `gws_` / `grs_` / `gwr_` / `grr_` families and the
    standing twists from new loadouts: the live hero needs only the twist-0 gait frames and the standing aim.
 2. **The runtime cloth, live.** The duster is already a 3D Verlet grid in metres (`view/cloth.js`): its pinned rows
@@ -411,7 +415,7 @@ shadows / afterimages via the atlas frame, the procedural layers.
   changes, 100+ flicker px a frame). Stepped time, whole-pixel anchors and camera-relative facings are the ones that
   matter; hysteresis and hold-until-change for procedural motion.
 
-The duster cloth (step 2) is in, so the gunslinger can go live with the outlaw. Keep the atlas
+The duster cloth (step 2) is in, and the gunslinger is live by default (2026-10-04); the outlaw can follow. Keep the atlas
 pipeline as the look's reference and for everything that stays a sprite.
 
 ### Open questions

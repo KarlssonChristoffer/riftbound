@@ -1,4 +1,4 @@
-// LIVE HERO (?live=1, a prototype: docs/exp/livehero.md): the player drawn LIVE instead of as his atlas sprite. The model
+// LIVE HERO (the gunslinger's by default, main.js; docs/exp/livehero.md): the player drawn LIVE instead of as his atlas sprite. The model
 // is the atlas's own Blender model in rigid per-bone segments with every atlas pose as bone matrices and the clips'
 // timing (tools/blender/ragdoll_export.py --atlas), drawn by render/rigmesh.js (the pixelizer's rules on the GPU, the
 // character's pixel type 4). It shows the SAME frame the sprite path picks each step (P.frame at P.face), so the two
@@ -47,7 +47,7 @@
 // restarts on the new pose instead of swinging the arm across. (Within a clip, frame to frame, nothing is blended: that
 // motion is drawn as authored.)
 // VIEW only: reads the player (P, the gun's state), the cursor; writes its own state, its rig, and hides the hero's card
-// while it draws (hero.card.setVisible). The sim never reads any of it (?views=0 and ?live=1 leave the sim the same).
+// while it draws (hero.card.setVisible). The sim never reads any of it (?views=0 and ?live leave the sim the same).
 // OWNS: the live model and its rig (render/rigmesh.js), the knobs, the drawn pose, the lineup (dev: setLineup).
 // READS: app (P, PL, player, yaw, zoom, cam, mouse), hero (atlas, card, loadName), pa (hoverTarget, faceRest), G.
 // BUDGET: char: ~25 bones a frame (slerp + FK + ~100 projected tips), ~.02 ms; render: rigmesh's A + B + S (3 draws).
@@ -934,14 +934,20 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   return live;
 }
 
-// THE LIVE HERO: the body of the loadout he wears (MODELS), loaded on first wear; the shared rig, knobs and switch
+// THE LIVE HERO: the body of the loadout he wears (MODELS), loaded on first wear; the shared rig, knobs and switch.
+// o.only: the loadouts drawn live (main.js: the gunslinger by default; null: every one in MODELS); the others stay
+// sprites. The rig (its render targets, its passes) is made, and its shaders compiled, when the first body loads: a
+// Ranger who never wears a live loadout costs nothing, and the switch to one shows the sprite until the body is ready.
 export async function createLiveHero(o) {
-  const slots = o.slots ?? 17, rig = createRigMesh(o.G, {slots, xray: true}), hero = o.hero, flashes = createFlashes(o.G, 2);
+  const slots = o.slots ?? 17, hero = o.hero, only = o.only ?? null;
   const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: ''}, want = flags.get('livedemo') || '';
   const bodies = {}, loading = {};
-  let on = true, shown = null;
+  let on = true, shown = null, rig = null, flashes = null, warmed = null;
+  const lives = n => n in MODELS && (!only || only.includes(n));   // this loadout is drawn live
   function load(name) {
-    return loading[name] ??= createLiveBody({...o, url: MODELS[name], rig, flashes, K, slots}).then(b => {
+    rig ??= createRigMesh(o.G, {slots, xray: true}); flashes ??= createFlashes(o.G, 2);
+    return loading[name] ??= createLiveBody({...o, url: MODELS[name], rig, flashes, K, slots}).then(async b => {
+      await (warmed ??= rig.warm().catch(e => console.warn('live hero: shaders not warmed', e)));   // (compiled off the frame: no hitch on his first live frame)
       bodies[name] = b;
       if (want && !K.demo && b.demos.includes(want)) K.demo = want;
       return b;
@@ -949,18 +955,18 @@ export async function createLiveHero(o) {
   }
   // the body he wears now (a body not loaded yet starts loading: null meanwhile); a switch starts it with no history
   function cur() {
-    const n = hero.loadName, b = bodies[n];
-    if (!b) { if (n in MODELS) load(n); return null; }
+    const n = hero.loadName; if (!lives(n)) return null;
+    const b = bodies[n]; if (!b) { load(n); return null; }
     if (b !== shown) { shown = b; b.reset(); }
     return b;
   }
   const NOSTATS = {held: 0, frames: 0, smears: 0, smearK: 0, ms: 0, msRender: 0};
-  if (hero.loadName in MODELS) await load(hero.loadName);
+  if (lives(hero.loadName)) await load(hero.loadName);
   const live = {
-    K, rig,
+    K, get rig() { return rig; },
     get on() { return on && !!cur(); },
-    get available() { return hero.loadName in MODELS; },
-    toggle(v = !on) { on = !!v; shown = null; flashes.frame(); if (!on) hero.rig?.reset(); return on; },   // (no flash left armed: compose stops; the sprite's cloth, idle while he was live, starts over)
+    get available() { return lives(hero.loadName); },
+    toggle(v = !on) { on = !!v; shown = null; flashes?.frame(); if (!on) hero.rig?.reset(); return on; },   // (no flash left armed: compose stops; the sprite's cloth, idle while he was live, starts over)
     set(x) { Object.assign(K, x); cur()?.reset(); return K; },
     preset(name) { return live.set(PRESETS[name]); },
     get presetName() { for (const [n, v] of Object.entries(PRESETS)) if (Object.keys(v).every(k => v[k] === K[k])) return n; return 'custom'; },
@@ -972,7 +978,7 @@ export async function createLiveHero(o) {
     setLineup(items) { cur()?.setLineup(items); },
     snapshot: () => cur().snapshot(), restore: S => cur().restore(S),
     compose: (PX, PY, perf) => cur().compose(PX, PY, perf), sprite: () => cur().sprite(),
-    get bytes() { return rig.bytes; },
+    get bytes() { return rig?.bytes ?? 0; },
     get atlas() { return hero.atlas; },
     load,   // (dev / tests: a loadout's body now)
   };

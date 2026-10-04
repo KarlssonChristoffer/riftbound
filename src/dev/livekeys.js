@@ -1,4 +1,4 @@
-// LIVE KEYS (dev; ?live=1, view/livehero.js): Shift+7 flips the player between his sprite and his live body (the A/B),
+// LIVE KEYS (dev; the live hero, view/livehero.js): Shift+7 flips the player between his sprite and his live body (the A/B),
 // Shift+8 steps through the motion knobs' presets (livehero PRESETS: smooth, step, face16, hyst, hold, snap, smear, all,
 // allsmear, free32), Shift+9 through the demos (none, lasso, swing, then the live model's own emotes: cheer, wave, shrug,
 // squat, played while he stands still: view/livehero.js emote()), Shift+Alt+9 turns FLOW and the COMBAT STYLE (the
@@ -14,7 +14,7 @@ function show(text) {
   }
   note.textContent = text; note.style.opacity = '1'; clearTimeout(noteT); noteT = setTimeout(() => { note.style.opacity = '0'; }, 2500);
 }
-export const liveState = live => `${live.on ? 'LIVE' : 'SPRITE'}${live.available ? '' : ' (no live model for this loadout)'} · knobs ${live.presetName}` +
+export const liveState = live => `${live.on ? 'LIVE' : 'SPRITE'}${live.available ? '' : ' (this loadout is a sprite; ?live=1: every live model)'} · knobs ${live.presetName}` +
   ` · procedural ${live.K.proc ? 'on' : 'off'} · flow ${live.K.flow ? 'on' : 'off'}${live.K.demo ? ' · demo ' + live.K.demo : ''}`;
 // -> true when the key was the live hero's
 export function liveKey(e, live) {
