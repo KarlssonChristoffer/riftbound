@@ -495,6 +495,17 @@ const SFX = {
       E.N(v, t, {type: 'bandpass', f: 1600, q: 1.5, a: .02, d: .18, g: .09});
     }
   },
+  howl(E, o) {    // the night's canids (wildlife.howl; the forge's canid recipe plays first): desertCalls' coyote, placed (o.kind, o.call)
+    const v = E.voice({...o, wet: .55}, 'howl', 3, {pri: 1, cd: .7}); if (!v) return;
+    const wolf = o.kind === 'wolf', fox = o.kind === 'fox', yips = o.call === 'yips' || fox;
+    const n = yips ? 3 + (R() * 4 | 0) : R() < .5 ? 1 : 2, fy = fox ? RR(480, 600) : RR(620, 820);
+    for (let i = 0; i < n && yips; i++) E.O(v, i * RR(.12, .18), {w: 'triangle', f: fy, f2: fy * (fox ? 1.15 : 1.35), sw: .08, a: .01, d: fox ? .16 : .1, g: .05, type: 'lowpass', ff: 1600});
+    if (yips) return;
+    const f = wolf ? RR(300, 360) : RR(480, 560), up = wolf ? 1.45 : 1.6, len = wolf ? 1.6 : .9;
+    E.O(v, 0, {w: 'triangle', f, f2: f * up, sw: len * .4, a: .25, hold: len * .6, d: .3, g: .06, type: 'lowpass', ff: wolf ? 1100 : 1500});
+    E.O(v, len * .9, {w: 'triangle', f: f * up, f2: f * (wolf ? .95 : 1.1), sw: .8, a: .02, d: .9, g: .05, type: 'lowpass', ff: wolf ? 1000 : 1400});
+    for (let i = 0; i < n; i++) E.O(v, len * 1.8 + i * RR(.14, .2), {w: 'triangle', f: fy, f2: fy * 1.35, sw: .08, a: .01, d: .1, g: .03, type: 'lowpass', ff: 1600});
+  },
   plop(E, o) {    // a fish or a frog breaking the water surface (a frog adds a short throaty croak)
     const v = E.voice({...o, g: (o.g ?? 1) * .8}, 'plop', .6, {pri: 1, cd: .15}); if (!v) return;
     if (o.surf === 'ember' || o.surf === 'rift') { E.N(v, 0, {type: 'highpass', f: 2400, a: .005, d: .12, g: .08}); return; }
@@ -1033,6 +1044,7 @@ export function createAudio(ctx, host = {}) {
         case 'wildlife.fish_jump': fire('plop', e.x, e.y, {surf, fish: 1}); break;
         case 'wildlife.frog_jump': fire('plop', e.x, e.y, {surf, frog: 1}); break;
         case 'wildlife.critter_dash': fire('rustle', e.x, e.y, {surf}); break;
+        case 'wildlife.howl': fire('howl', e.x, e.y, {kind: e.kind, call: e.call}); break;   // (features/wildlife/coyotes.js: a coyote / fox / wolf at night)
         case 'tumbleweed.bounce': fire('rustle', e.x, e.y, {surf, g: .35 + .45 * (e.k || 0), gainDb: -6 + 4 * (e.k || 0), semi: -3}); break;   // dry twigs on the ground
         // the equipment experiment (features/equip/sim.js): its gadgets on the closest recipes there are
         case 'equip.throw': fire('jump', e.x, e.y, {surf, g: .6}); break;   // (a cloth swish: the arm swinging)

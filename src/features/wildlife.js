@@ -40,7 +40,12 @@
 //   F.frame(f)           sprites + the ground layer
 //   F.lights()           jellies' faint glow
 //   F.biomeChanged()     repopulate for the new biome (time of day is read from host.time every step)
-// EXTRAS: F.TUNE, F.dbg(), F.sheet(z) (the atlas, zoomed), F._ (internals)
+//   F.settings()         Fight reactions (on / off: wildlife/fightlife.js; ?wildfight=0 starts it off)
+// EXTRAS: F.TUNE, F.dbg(), F.sheet(z) (the atlas, zoomed), F._ (internals), F.fight (the fight reactions: its dbg(), sheet(), TUNE)
+// THE FIGHT REACTIONS (features/wildlife/: fightlife.js, scavengers.js, coyotes.js, fightart.js): a fight level that
+// flushes the area's flocks in waves and keeps them off while it lasts, carrion birds gathering at kills, a coyote pack /
+// a fox / wolves at night. Hooked in here only through K (wildlife's internals they use) and four calls: populate,
+// applyTime, view (after the noise), frame (the ground layer, the sprites).
 //
 // host (main.js): ctxO, G (view), yaw, zoom, player (world frame), props, arrows, events, layout (stream, plateaus,
 // lightGarden), biome (sprite(), groundLights), time, itemOf(p) (live mesh / card), wind (F.at), elev, inStream,
@@ -51,6 +56,7 @@ import {flags} from '../core/flags.js';
 import {clamp, clearArray, hypot2} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {hex255 as hex} from '../core/color.js';
+import {createFightLife} from './wildlife/fightlife.js';   // the fight reactions: scavengers at kills, night canids, the flush (docs/exp/wildfight.md)
 
 const TAU = Math.PI * 2;
 const CALM = {x: 0, y: 0, g: 0};
@@ -1360,6 +1366,7 @@ export async function create(host) {
     if (C.jellies) for (const [x, y] of [[14, 12], [26, 18.5], [38, 14], [50, 20.5]].slice(0, C.jellies)) newJelly(x, y);
     if (C.eyes) placeEyes(C.eyes);
     if (C.motes) newSchool(C.motes);
+    FL.populate();
     needTime = true;
   }
   function applyTime() {
@@ -1388,6 +1395,7 @@ export async function create(host) {
       } else if (time !== 'night' && wasNight && f.mode === 'perch') f.t = Math.min(f.t, rr(1, 5));
     }
     wasNight = time === 'night';
+    FL.applyTime();
   }
 
   // =================================================================== drawing
@@ -1467,6 +1475,7 @@ export async function create(host) {
       { const s_ = SPR.mote[b > .9 ? 'mb' : MOTEK[b > .6 ? 0 : b > -.2 ? 1 : 2]]; SP0.x = m.x; SP0.y = m.y; SP0.h = m.h; put(s_, 1); }
     }
     if (JA && jellies.length) drawJellies();
+    FL.sprites();   // (the fight reactions: scavengers, canids)
   }
   // jellies: the bell + tendrils that trail behind the drift (along the SCREEN's x) and sway; tips and bell glow
   const jdef = {};
@@ -1541,6 +1550,7 @@ export async function create(host) {
     for (const a of bugs) if (!a.rest && a.kind === 'butterfly') shadowAt(a.x, a.y, a.h - elev(a.x, a.y) + 1.2);
     for (const a of bugs) if (a.kind === 'dragonfly' && a.st !== 'perch') shadowAt(a.x, a.y, a.h - gH(a.x, a.y) + 1.2);   // (on the water too: gH is the surface there)
     for (const j of jellies) { const e = elev(j.x, j.y), hA = j.h - e, [X, Y] = gxy(j.x, j.y, e); if (inV(X, Y, 4)) bput(hA < 2.2 ? SHC[1] : SHC[2], X - z, Y, 3 * z, z); }
+    FL.ground(g);   // (the fight reactions' shadows: scavengers, canids)
     flush(g);
     for (const v of vultures) {   // the big soaring shadow, turned with the camera
       if (v.off) continue;
@@ -1549,12 +1559,24 @@ export async function create(host) {
     }
   }
 
+  // =================================================================== the fight reactions (features/wildlife/fightlife.js)
+  // K: the internals they use, read live (getters: wildlife reassigns its lists at populate and its view axes every step)
+  const FL = createFightLife({
+    host, ctx, get on() { return WL.on; }, get biome() { return biome; }, get time() { return time; }, get T() { return T; }, get P() { return P; },
+    get RX() { return RX; }, get RY() { return RY; }, get FX() { return FX; }, get FY() { return FY; }, get ZM() { return ZM; }, VB,
+    get flocks() { return flocks; }, get vultures() { return vultures; }, get SPR() { return SPR; }, get SHC() { return SHC; }, SP0,
+    threat, near, onScreen, emit, takeOff, elev, gH, solid, inStream, put, bput, gxy, inV, shadowAt, vultureShadow, vHeading,
+  });
+
   // =================================================================== the contract
   const LI = [], PK = {x: 0, y: 0, z: 0, vx: 0, vy: 0, state: '', gait: ''};
   const inPool = a => a.pool, jumping = a => a.jump, frogBusy = a => a.jump || a.st !== 'sit';   // (made once, not a step)
   Object.assign(WL, {
     toggle() { WL.on = !WL.on; if (!WL.on) WL.ms = 0; return WL.on; },
     biomeChanged() { need = true; },
+    // Menu > Dev (under Wildlife): the fight reactions on / off (wildlife/fightlife.js; ?wildfight=0 starts them off)
+    settings: () => [{label: 'Fight reactions', options: ['on', 'off'], get: () => FL.on ? 'on' : 'off', set: v => FL.setOn(v === 'on')}],
+    fight: FL,
     view(dt, evs) {
       const t0 = performance.now();
       WL.ms = WL.ms * .95 + acc * .05; acc = 0;
@@ -1576,6 +1598,7 @@ export async function create(host) {
       if (needTime) applyTime();
       for (const k in CD) if (CD[k] > 0) CD[k] -= dt;
       gatherNoise(evs);
+      FL.view(dt, evs);   // the fight reactions: the fight level + the flush (before the flocks step), scavengers, canids
       for (const f of flocks) stepFlock(f, dt);
       for (const b of birds) stepBird(b, dt);
       for (const a of hoppers) stepHopper(a, dt);

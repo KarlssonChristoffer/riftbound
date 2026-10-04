@@ -76,6 +76,7 @@ export const EVENTS = {
   'wildlife.critter_dash': ['features/wildlife.js', 'x, y', 'audio'],
   'wildlife.splash':    ['features/wildlife.js',  'x, y, small: true, wl: true', 'atmos, wildlife, audio'],
   'wildlife.bird_perch': ['features/wildlife.js', 'x, y, h, prop, off, big, scared (a bird lands on / leaves a top)', 'wind'],
+  'wildlife.howl':      ['features/wildlife/coyotes.js (a view)', 'x, y, kind (coyote | fox | wolf), call (howl | yips | bark): a canid at night calls, one howls and the pack answers', 'audio'],
   'tumbleweed.bounce':  ['features/tumbleweed.js', 'x, y, k (0..1: how hard it came down / was knocked; near the player, on screen)', 'audio'],
   // the shrines experiment (features/shrines.js, ?shrines=1); its sounds ride on chest.open / combat.coin / combat.loot / combat.trap /
   // player.dryfire, emitted with it
