@@ -167,10 +167,11 @@ export function createHero({G, set, loadI, ctxO, app}) {
   // clothPos: the Ranger's motion in the view frame, without the camera's turns (moveCloth, each sim step)
   const clothPos = [0, 0];
   const moveCloth = (dx, dy) => { clothPos[0] += dx; clothPos[1] += dy; };
-  function stepCloth(dt, perf) {
+  function stepCloth(dt, perf, sim = true) {   // (sim false: the wind only, the live hero runs his own cloth)
     if (!rig.active) return;
     const P = app.P, W = app.feat('wind');
     setClothWind(W?.on && W.cloth?.() || CLOTH_CALM);
+    if (!sim) return;
     perf?.begin('cloth.sim', 'char'); rig.update(dt, SP[P.frame]?.sim, P.face, clothPos); perf?.end('cloth.sim');
   }
 

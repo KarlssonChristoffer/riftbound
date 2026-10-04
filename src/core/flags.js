@@ -21,7 +21,7 @@ export const FLAG_DOCS = {
   // ---- the player
   set:       'basic | sim | body | gunslinger | outlaw: the loadout (baked cloak / runtime cloth / bare body; the cowboys with their revolvers)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
-  live:      '1: the player drawn LIVE (view/livehero.js: his Blender model through render/rigmesh.js, the pixelizer rules on the GPU) instead of his sprite, for a loadout with a live model (?set=outlaw; set=gunslinger without the skirt of his duster); Shift+7 flips sprite / live, Shift+8 the motion knobs, Shift+9 the demos (dev/livekeys.js); a prototype (docs/exp/livehero.md)',
+  live:      '1: the player drawn LIVE (view/livehero.js: his Blender model through render/rigmesh.js, the pixelizer rules on the GPU) instead of his sprite, for a loadout with a live model (?set=outlaw, ?set=gunslinger: the long panel of his duster is runtime cloth on the live bones); Shift+7 flips sprite / live, Shift+8 the motion knobs, Shift+9 the demos (dev/livekeys.js); a prototype (docs/exp/livehero.md)',
   livek:     'with ?live=1: the preset of the motion knobs to start with (view/livehero.js PRESETS: smooth, step, face16, hyst, hold, snap, smear, all (default), allsmear, free32)',
   livedemo:  'with ?live=1: a procedural demo to start with (lasso: the rope hand spinning a loop overhead, two-bone IK; swing: hanging from a rope, a pendulum), or an emote made for the live model only (cheer, wave, shrug, squat: played while he stands still)',
   lantern:   '1: start with the lantern lit',

@@ -17,8 +17,8 @@ pass), and the live path is view-only (simview with `?live=1` passes: the sim ne
 ## Trying it
 
 - `?mode=sandbox&set=outlaw&live=1` (the outlaw is the loadout with a full live model: his poncho is baked, no runtime
-  cloth). The gunslinger has one too (`set=gunslinger`), but without his duster's long panel (runtime cloth, not on live
-  bones yet): only its shoulder cape shows. Each loadout's live body loads the first time he wears it (O switches);
+  cloth). The gunslinger has one too (`set=gunslinger`); his duster's long panel is the atlas's runtime cloth, simulated
+  on his live bones (THE DUSTER below). Each loadout's live body loads the first time he wears it (O switches);
   the knobs and the demo carry over.
 - **Shift+7** flips sprite <-> live at runtime (the A/B), **Shift+8** steps through the motion knobs' presets
   (Shift+Alt+8 turns the procedural layers off / on), **Shift+9** the demos (none, `lasso`, `swing`, then the live
@@ -41,8 +41,8 @@ of that atlas, posed by the model's own `pose()` exactly as `pixel_rig.py` rende
 plus the atlas's clip timing (fps, `play`, `ms`, `marks`, stride / advances). The outlaw: 22 segments, 24 bones, 321
 poses, 7356 triangle corners; 147 KB of mesh + 611 KB of JSON, exported in **5 seconds** (the atlas it replaces: 27 MB
 of PNG in 8 sheets of 1536 x 8160 px, ~50 MB each once decoded, and a Blender render of every pose at 16 facings). The
-gunslinger exports the same way (`out/live/gunslinger`, 345 poses), but his duster's long panel is runtime cloth and is
-not in the mesh: only the rigid shoulder cape is (see the plan).
+gunslinger exports the same way (`out/live/gunslinger`, 345 poses); his duster's long panel is runtime cloth and is
+not in the mesh (only the rigid shoulder cape is): the live hero runs it on his bones (THE DUSTER).
 
 ```
 D:\Blender\blender.exe -b --factory-startup --python tools/blender/ragdoll_export.py -- \
@@ -195,7 +195,33 @@ his way and shoots back instead of turning to back up. Those shots are `rear`: t
 it is (no twist-0 base), trimmed by at most 30 deg of spine twist. Checked headless (`tmp/live-emotes/angleplay.mjs`):
 running with the target behind, every shot after the first flies back at it; a target beside him gets `cx`; walking
 still backs up. The sim comes out the same with the live hero on. Reel: `tmp/live-emotes/angles_gunslinger.gif`.
-Next: the gunslinger's duster on live bones.
+
+## THE DUSTER (the runtime cloth, live)
+
+The gunslinger's long duster panel was the one thing his live body lacked: in the sprite path it is runtime cloth
+(`view/cloth.js` `ClothRig`: a 9 x 7 Verlet grid on Spine2, 2 pinned rows, the body's capsules to collide with, drawn on
+the CPU into the sprite). Live, the same cloth runs on the live bones (plan step 2):
+
+- `view/livehero.js` THE RUNTIME CLOTH: a `ClothRig` of its own on the atlas's cloth definitions (`hero.rig.idx`, the
+  poses .json), fed every frame from the DRAWN pose (after the transitions' blend). Spine2's matrix comes from the live
+  bone, and the capsules come from the live bones: each capsule's ends are stored once as offsets in its bone's frame,
+  taken from the atlas's `idle.0` capsules against the live model's `idle.0` bones. The facing is continuous (the
+  ClothRig takes a fractional facing step), and his motion goes in as hero.js's `clothPos` does (the view frame without
+  the camera's turns). Snaps (a reversal, a pose switch) turn the cloth with the bone, as on the sprite path.
+- `render/rigmesh.js` `attach(model, corners, families)`: a dynamic mesh drawn with the model's first body. Its corners
+  are in the hips' segment frame, with a flat normal per facet, the `oilskin` family and the cloth's bias, and a part
+  of its own. It goes through passes A, B, S and X like the body's triangles: the body's bands, interior lines and
+  outline, real depth against the legs, the sun shadow and the x-ray. 9 x 7 grid = 288 corners a frame, rewritten in
+  place (no allocation).
+- The sprite path's own cloth sim rests while he is live (`loop.js` passes `sim = false` to `hero.stepCloth`, which still
+  sets the wind). Flipping back to the sprite (Shift+7) restarts its cloth.
+
+Cost (headless, playing: running in circles and shooting; `tmp/live-emotes/clothperf.mjs`): `cloth.sim` .22-.24 ms a
+frame live, against .20-.21 ms for the sprite's sim; the live hero's char group comes to .29-.30 ms (budget .4). The
+sprite path spends .52 ms there because of its CPU raster.
+Checked: `tmp/live-emotes/angleplay.mjs` (the coat trails his run and flares on turns, like the sprite's) and
+`tmp/live-emotes/clothtoggle.mjs` (live, then sprite, then live again, then outlaw, then gunslinger again: no errors,
+and the coat comes and goes with the loadout). Reel: `tmp/live-emotes/duster_live.gif`.
 
 ## Measurements
 
@@ -316,7 +342,7 @@ warnings or errors through the meters' sessions (every preset, both demos, the a
 
 | | sprite path | live | |
 |---|---|---|---|
-| runtime cloth (the Ranger's cloak, the gunslinger's duster) | `view/cloth.js`: a 3D Verlet grid pinned to a bone per pose, drawn on the CPU into the sprite | **missing** | the outlaw has none; see the plan |
+| runtime cloth (the Ranger's cloak, the gunslinger's duster) | `view/cloth.js`: a 3D Verlet grid pinned to a bone per pose, drawn on the CPU into the sprite | **the duster: done** (THE DUSTER) | the same ClothRig on the live bones, drawn through rigmesh; the Ranger has no live model |
 | hair streaming in strong wind | `hero.hairWind` repaints edge pixels | missing | cheap to add as a GPU vertex sway of the hair parts or the same pixel trick on pass B |
 | shiny armour (the Ranger) | metal mask -> composite glints | missing | a per-family metal flag into the G-buffer's E.w (pass B writes 0 today) |
 | HD bow / pixel bow (the Ranger) | `PL.drawPixelBow` from the render's overlays | missing | the bow string becomes a live line between two bones |
@@ -350,7 +376,7 @@ shadows / afterimages via the atlas frame, the procedural layers.
 
 ### Risks
 
-- **Cloth**: the biggest piece of work (step 2); until then the gunslinger's duster is a rigid cape.
+- **Cloth**: step 2 is done for the duster (THE DUSTER); the Ranger's cloak waits for a live Ranger.
 - **Hair**: small; but any secondary motion now has to be authored as code, not baked.
 - **Lighting normals**: the live normals are the mesh's own (the same mesh the atlas's normal pass rendered), so the
   composite lights both alike; the tone bands are computed per pixel at run time, and a band boundary moves a pixel
@@ -385,7 +411,7 @@ shadows / afterimages via the atlas frame, the procedural layers.
   changes, 100+ flicker px a frame). Stepped time, whole-pixel anchors and camera-relative facings are the ones that
   matter; hysteresis and hold-until-change for procedural motion.
 
-Do the duster cloth (step 2) before making live the default for the gunslinger; the outlaw can go first. Keep the atlas
+The duster cloth (step 2) is in, so the gunslinger can go live with the outlaw. Keep the atlas
 pipeline as the look's reference and for everything that stays a sprite.
 
 ### Open questions

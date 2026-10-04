@@ -66,7 +66,7 @@ export function createLoop(E) {
     if (acc > 0) acc = 0;   // still behind after MAX_STEPS (a stall): let it go rather than spiral
     alpha = 1 + acc / SIM_DT;
     if (!views || held) return;
-    hero.stepCloth(sdt, perf);
+    hero.stepCloth(sdt, perf, !E.live?.on);   // (the live hero simulates his own cloth on his drawn pose)
     for (const f of features) if (f.on !== false) f.view?.(sdt, frameEvs);   // VIEW
     cv.stepShake(sdt);
   }

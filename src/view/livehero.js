@@ -36,6 +36,11 @@
 // the hip stance; on the move the hip stance's upper body over the legs; changing as the fight goes (he sets off, stops,
 // a few shots in), cross-faded. The spine twist aims whichever it is. The drawn muzzle goes to the gun's flash
 // (live.muzzle(): host.playerMuzzle, features/gunfx.js), since the sim's muzzle is its atlas frame's.
+// THE RUNTIME CLOTH (the gunslinger's duster's long panel: runtime cloth on the sprite path, view/cloth.js): the atlas's
+// cloth simulated by a ClothRig of its own, fed every frame from the DRAWN pose (the bone it hangs from; the body's
+// capsules carried by the live bones), his motion and his continuous facing; drawn through rigmesh with his body
+// (rig.attach: its points in the hips' frame, a flat normal a facet, its family and bias, a part of its own), so pass B
+// gives it the body's bands, lines and outline and the depth buffer sorts it against his legs. (cloth())
 // TRANSITIONS (with FLOW): when what is drawn switches (another clip, stance, layer or angle family, the aim on or off) or
 // his facing steps, the drawn body blends from what was on screen over TB.dur / TB.face s, in his frame turned by the
 // facing (so a facing step turns smoothly too), joints held together (a local blend, then FK); and the aim's spring
@@ -53,6 +58,7 @@
 // demo (K) are shared, so a preset or an emote carries over a loadout switch.
 import {createRigMesh} from '../render/rigmesh.js';
 import {createFlashes} from '../render/flashes.js';
+import {ClothRig} from './cloth.js';
 import {flags} from '../core/flags.js';
 import {LOADOUTS} from './hero.js';
 import {WEAPONS} from '../content/weapons.js';
@@ -107,8 +113,8 @@ const COMBAT = {near: 3, far: 7, fade: .15, settle: .3, shift: .22,
     kneel: ['cb_dr_kneel']},
   move: ['aim', 'hip']};   // the stances his upper body has on the move
 export const DEMOS = ['', 'lasso', 'swing'];
-// the loadouts with a live model (view/hero.js names). The gunslinger's lacks his duster's long panel (runtime cloth in the
-// sprite path, view/cloth.js; not on live bones yet: docs/exp/livehero.md, the plan's step 2): only its shoulder cape shows
+// the loadouts with a live model (view/hero.js names). The gunslinger's duster's long panel isn't in his mesh: it is the
+// atlas's runtime cloth, run on his live bones (THE RUNTIME CLOTH below)
 const MODELS = {outlaw: '../concepts/sprites/out/live/outlaw/', gunslinger: '../concepts/sprites/out/live/gunslinger/'};
 
 // ---------------------------------------------------------------- quaternions (x, y, z, w) and rigid transforms in Float64Arrays
@@ -524,6 +530,102 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   // the drawn muzzle (the world: arena x, y, height), for the shot's flash (host.playerMuzzle): the last drawn frame's
   const MW = {x: 0, y: 0, h: 0, ok: false};
 
+  // ---------------------------------------------------------------- THE RUNTIME CLOTH (the duster's long panel)
+  // set up the first time this loadout's atlas is there (hero.rig: the sprite path's ClothRig, its idx = the atlas's poses
+  // .json, whose sim.cloths are the cloths' grids in their bones' frames): a ClothRig of our own on the same cloths; each
+  // capsule's ends as offsets in its bone's frame, from the atlas's idle.0 capsules against the live model's idle.0 bones
+  const CLO = {rig: null, D: null, tried: false, sim: null, capB: null, capL: null, matB: null, hip: -1, cn: 0, g: [0, 0], lx: NaN, ly: 0, lyaw: NaN};
+  function clothSetup() {
+    const R0 = hero.rig, idx = R0?.idx;
+    if (!R0?.active || !idx || idx.model !== J.meta.loadout) return;   // (another loadout's atlas still: try again next frame)
+    CLO.tried = true;
+    const ref = hero.SP?.['idle.0']?.sim, live0 = poseOf('idle.0'), hip = J.segs.findIndex(sg => sg.bone === 'Hips');
+    if (!ref || !live0 || hip < 0) return;
+    const names = idx.sim.capsule_names || [], nc = names.length;
+    CLO.capB = Int16Array.from(names, n => IX[n] ?? -1); CLO.capL = new Float64Array(nc * 7);
+    for (let i = 0; i < nc; i++) {
+      const b = CLO.capB[i], c = ref.caps[i]; if (b < 0 || !c) continue;
+      const o = b * 7; QI[0] = -live0.w[o]; QI[1] = -live0.w[o + 1]; QI[2] = -live0.w[o + 2]; QI[3] = live0.w[o + 3];
+      for (let e = 0; e < 2; e++) {
+        qrot(QI, 0, c[e * 3] - live0.w[o + 4], c[e * 3 + 1] - live0.w[o + 5], c[e * 3 + 2] - live0.w[o + 6], V3, 0);
+        CLO.capL[i * 7 + e * 3] = V3[0]; CLO.capL[i * 7 + e * 3 + 1] = V3[1]; CLO.capL[i * 7 + e * 3 + 2] = V3[2];
+      }
+      CLO.capL[i * 7 + 6] = c[6];
+    }
+    const rig2 = new ClothRig(idx); if (!rig2.active) return;
+    const fams = [], corners = rig2.cloths.reduce((a, C) => a + (C.rows - 1) * (C.cols - 1) * 6, 0);
+    for (const C of rig2.cloths) {
+      const f = J.families.find(x => x.name === C.def.fam); if (!f) return;   // (its family's ramp: the live model's own)
+      fams.push(f);
+    }
+    CLO.sim = {mats: {}, caps: Array.from({length: nc}, () => [0, 0, 0, 0, 0, 0, 0])};
+    CLO.matB = rig2.cloths.map(C => { CLO.sim.mats[C.def.bone] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]; return IX[C.def.bone] ?? -1; });
+    if (CLO.matB.some(b => b < 0)) return;
+    CLO.D = rig.attach(model, corners, fams); CLO.rig = rig2; CLO.hip = hip; CLO.cn = corners;
+    // the corners' fixed info: the hips' segment, a part of its own a cloth (after the model's), its family, shaded
+    let k = 0;
+    rig2.cloths.forEach((C, ci) => {
+      const part = J.parts.length + 1 + ci, bias = Math.max(-127, Math.min(127, Math.round((C.def.bias ?? 0) * 100)));
+      for (let i = 0; i < (C.rows - 1) * (C.cols - 1) * 6; i++, k++) {
+        CLO.D.info[k * 4] = hip; CLO.D.info[k * 4 + 1] = part; CLO.D.info[k * 4 + 2] = CLO.D.fam[ci]; CLO.D.info[k * 4 + 3] = 0; CLO.D.nrm[k * 4 + 3] = bias;
+      }
+    });
+  }
+  // a step of the cloth on the drawn pose w (his body space, at the facing phi), then its triangles into the attached mesh.
+  // (no allocation: the scratch below, plain loops)
+  const CT = new Float64Array(4 * 3);
+  let clC = 1, clS = 0, clO = null, clW = null, clH = 0, clV = 0;
+  function clLocal(p, j) {   // a point in the rig's world -> his body space (its facing's turn undone) -> the hips' frame, CT[j..]
+    const dx = p[0] - clO[0], dy = p[1] - clO[1], bx = clC * dx + clS * dy, by = -clS * dx + clC * dy;
+    qrot(QI, 0, bx - clW[clH + 4], by - clW[clH + 5], p[2] - clW[clH + 6], V3, 0); CT[j] = V3[0]; CT[j + 1] = V3[1]; CT[j + 2] = V3[2];
+  }
+  function clTri(D, a, b, c) {   // a facet of CT's corners a, b, c with its flat normal
+    const ux = CT[b * 3] - CT[a * 3], uy = CT[b * 3 + 1] - CT[a * 3 + 1], uz = CT[b * 3 + 2] - CT[a * 3 + 2];
+    const wx = CT[c * 3] - CT[a * 3], wy = CT[c * 3 + 1] - CT[a * 3 + 1], wz = CT[c * 3 + 2] - CT[a * 3 + 2];
+    let nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx; const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;   // (not Math.hypot: it boxes)
+    nx = Math.round(nx / nl * 127); ny = Math.round(ny / nl * 127); nz = Math.round(nz / nl * 127);
+    for (let e = 0; e < 3; e++) {
+      const j = (e === 0 ? a : e === 1 ? b : c) * 3, v = clV++;
+      D.pos[v * 3] = CT[j]; D.pos[v * 3 + 1] = CT[j + 1]; D.pos[v * 3 + 2] = CT[j + 2];
+      D.nrm[v * 4] = nx; D.nrm[v * 4 + 1] = ny; D.nrm[v * 4 + 2] = nz;
+    }
+  }
+  function cloth(w, phi, yaw, dt, P) {
+    if (!CLO.tried) clothSetup();
+    const R = CLO.rig; if (!R) return;
+    // his motion in the view's frame, without the camera's turns (hero.js's clothPos)
+    if (yaw === CLO.lyaw && CLO.lx === CLO.lx) { CLO.g[0] += P.x - CLO.lx; CLO.g[1] += P.y - CLO.ly; }
+    CLO.lx = P.x; CLO.ly = P.y; CLO.lyaw = yaw;
+    // the bones the cloths hang from (rows of 3x4) and the capsules, off the drawn pose
+    for (let ci = 0; ci < R.cloths.length; ci++) {
+      const o = CLO.matB[ci] * 7, M = CLO.sim.mats[R.cloths[ci].def.bone], x = w[o], y = w[o + 1], z = w[o + 2], q = w[o + 3];
+      M[0] = 1 - 2 * (y * y + z * z); M[1] = 2 * (x * y - z * q); M[2] = 2 * (x * z + y * q); M[3] = w[o + 4];
+      M[4] = 2 * (x * y + z * q); M[5] = 1 - 2 * (x * x + z * z); M[6] = 2 * (y * z - x * q); M[7] = w[o + 5];
+      M[8] = 2 * (x * z - y * q); M[9] = 2 * (y * z + x * q); M[10] = 1 - 2 * (x * x + y * y); M[11] = w[o + 6];
+    }
+    for (let i = 0; i < CLO.capB.length; i++) {
+      const b = CLO.capB[i], c = CLO.sim.caps[i]; if (b < 0) { c[6] = 0; continue; }
+      const o = b * 7;
+      for (let e = 0; e < 2; e++) { qrot(w, o, CLO.capL[i * 7 + e * 3], CLO.capL[i * 7 + e * 3 + 1], CLO.capL[i * 7 + e * 3 + 2], V3, 0); c[e * 3] = V3[0] + w[o + 4]; c[e * 3 + 1] = V3[1] + w[o + 5]; c[e * 3 + 2] = V3[2] + w[o + 6]; }
+      c[6] = CLO.capL[i * 7 + 6];
+    }
+    const N = R.N, k = wrap(phi - yaw) / (TAU / N);   // his facing from the camera, in the atlas's facing steps (fractional)
+    R.update(dt, CLO.sim, k, CLO.g);
+    // the triangles: two facets a grid cell, in the hips' frame (the segment the corners name)
+    const a = (R.idx.cam.yaw0 + 360 / N * k) * DEG;
+    clC = Math.cos(a); clS = Math.sin(a); clO = R.origin; clW = w; clH = SEG[CLO.hip] * 7; clV = 0;
+    QI[0] = -w[clH]; QI[1] = -w[clH + 1]; QI[2] = -w[clH + 2]; QI[3] = w[clH + 3];
+    for (let ci = 0; ci < R.cloths.length; ci++) {
+      const C = R.cloths[ci], pts = C.pos, cols = C.cols; if (!pts) continue;
+      for (let r = 0; r < C.rows - 1; r++) for (let c = 0; c < cols - 1; c++) {
+        const i00 = r * cols + c;   // CT corners: 0 = (r, c), 1 = (r, c + 1), 2 = (r + 1, c), 3 = (r + 1, c + 1)
+        clLocal(pts[i00], 0); clLocal(pts[i00 + 1], 3); clLocal(pts[i00 + cols], 6); clLocal(pts[i00 + cols + 1], 9);
+        clTri(CLO.D, 0, 2, 1); clTri(CLO.D, 1, 2, 3);
+      }
+    }
+    CLO.D.update(clV);
+  }
+
   // ---------------------------------------------------------------- body space -> the render's world (render/rigmesh.js matrices)
   let fc = 1, fs = 0, AX = 0, AY = 0, AZ = 0, FX = 0, FZ = -1;
   function toWorld(x, y, z, o, k) { o[k] = fc * x - fs * y + AX; o[k + 1] = z + AY; o[k + 2] = -fs * x - fc * y + AZ; }
@@ -756,6 +858,9 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       toLocalTurned(show, phi, LW); turnedParts(show, phi, TBP, null); tbHave = true;
       tbGun = GUN >= 0 && gunNear(show) ? barrel(show) + phi : NaN;
     } else tbHave = false;
+    perf?.end('live.pose'); perf?.begin('cloth.sim', 'char');
+    cloth(show, phi, yaw, dt, P);   // THE RUNTIME CLOTH on the drawn pose (the sprite's own sim rests meanwhile: loop.js)
+    perf?.end('cloth.sim'); perf?.begin('live.pose', 'char');
     // 8) the segments' matrices, the smear, the rig
     aim.ok = GUN >= 0 && gunNear(show);
     if (aim.ok) { barrel(show); screenOf(MUZ[0], MUZ[1], MUZ[2], SC); aim.mx = SC[0]; aim.my = SC[1]; const o = GUN * 7; screenOf(show[o + 4], show[o + 5], show[o + 6], SC); aim.a = Math.atan2(aim.my - SC[1], aim.mx - SC[0]); }
@@ -815,7 +920,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     stats, model, poseOf, BN, J,
     // (a knob changed, the body (re)shown: no history carried over)
     reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false;
-      twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; tbHave = false; tbT = tbDur = 1; },
+      twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; tbHave = false; tbT = tbDur = 1; CLO.rig?.reset(); CLO.lx = NaN; },
     muzzle: () => MW.ok ? MW : null,
     setLineup(items) { lineup = items || []; },
     aim,
@@ -855,7 +960,7 @@ export async function createLiveHero(o) {
     K, rig,
     get on() { return on && !!cur(); },
     get available() { return hero.loadName in MODELS; },
-    toggle(v = !on) { on = !!v; shown = null; flashes.frame(); return on; },   // (no flash left armed: compose stops)
+    toggle(v = !on) { on = !!v; shown = null; flashes.frame(); if (!on) hero.rig?.reset(); return on; },   // (no flash left armed: compose stops; the sprite's cloth, idle while he was live, starts over)
     set(x) { Object.assign(K, x); cur()?.reset(); return K; },
     preset(name) { return live.set(PRESETS[name]); },
     get presetName() { for (const [n, v] of Object.entries(PRESETS)) if (Object.keys(v).every(k => v[k] === K[k])) return n; return 'custom'; },

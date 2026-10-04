@@ -23,6 +23,10 @@
 //   then rig.render() (pass A now, B and S armed for this frame's G.render). rig.warm() once the models are added (at load:
 //   no first-use hitch). rig.bytes.
 //   {xray: true}: a fourth pass X marks where a character body (type 4) is hidden, for the composite's x-ray (gfx.js).
+//   rig.attach(model, corners, families) -> a DYNAMIC mesh drawn with the model's FIRST body each frame (the live hero's
+//   runtime cloth, view/livehero.js): {pos (corners x 3: in the frame of the segment its info names), nrm (x 4, int8:
+//   normal x 127, bias x 100), info (x 4: segment, part, family (an index into `families`, mapped here), flags; written
+//   once, before the first frame: it goes up with the first draw), fam, update(n): n corners of pos + nrm this frame}. It goes through passes A, B, S and X as the body's own triangles do.
 // OWNS: its target, the transforms texture, the ramps texture, its meshes and materials.
 // READS: G (camera, view size, frame, extra).  EMITS: nothing.  BUDGET: render: per model 2 draws (A, S) + 1 (B) a frame while bodies show;
 //   CPU: the transforms texture upload (slots x 74 texels) when a body moved; no allocation per frame.
@@ -184,13 +188,7 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     if (J.segs.length > SEGMAX) throw new Error(`rigmesh: ${J.segs.length} segments (max ${SEGMAX})`);
     // the model's families -> the ramps texture's rows; a family another model already brought (the same name and tones:
     // skin, leather, iron ...) shares its row
-    const FM = J.families.map(f => {
-      const key = f.name + ':' + f.ramp.join(';'); let row = famRow.get(key);
-      if (row !== undefined) return row;
-      if (famN * 6 * 4 >= rampData.length) { const d = new Uint8Array(rampData.length * 2); d.set(rampData); rampData = d; ramp.image = {data: d, width: 6, height: d.length / 24}; ramp.dispose(); }
-      f.ramp.forEach((c, t) => rampData.set([c[0], c[1], c[2], 255], (famN * 6 + t) * 4)); famRow.set(key, row = famN++);
-      return row;
-    });
+    const FM = J.families.map(famRowOf);
     ramp.needsUpdate = true;
     const pos = new Float32Array(n * 3), nrm = new Int8Array(n * 4), info = new Uint8Array(n * 4);
     for (let i = 0; i < n; i++) {
@@ -207,9 +205,32 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     const mA = new THREE.Mesh(geo, matA), mS = new THREE.Mesh(geo, matS);
     for (const m of [mA, mS]) { m.frustumCulled = false; m.matrixAutoUpdate = false; }
     sceneA.add(mA); G.extra(mS, 'shadow');
-    const M = {J, geo, iSlot, mA, mS, n: 0, segs: J.segs.length, bytes: pos.byteLength + nrm.byteLength + info.byteLength};
+    const M = {J, geo, iSlot, mA, mS, n: 0, segs: J.segs.length, bytes: pos.byteLength + nrm.byteLength + info.byteLength, att: []};
     models.push(M);
     return M;
+  }
+  function famRowOf(f) {
+    const key = f.name + ':' + f.ramp.join(';'); let row = famRow.get(key);
+    if (row !== undefined) return row;
+    if (famN * 6 * 4 >= rampData.length) { const d = new Uint8Array(rampData.length * 2); d.set(rampData); rampData = d; ramp.image = {data: d, width: 6, height: d.length / 24}; ramp.dispose(); }
+    f.ramp.forEach((c, t) => rampData.set([c[0], c[1], c[2], 255], (famN * 6 + t) * 4)); famRow.set(key, row = famN++);
+    return row;
+  }
+  // a dynamic mesh drawn with model M's first body (see the API above): its buffers, rewritten by the caller
+  function attach(M, corners, families) {
+    const fam = families.map(famRowOf); ramp.needsUpdate = true;
+    const pos = new Float32Array(corners * 3), nrm = new Int8Array(corners * 4), info = new Uint8Array(corners * 4);
+    const geo = new THREE.InstancedBufferGeometry(), A = [new THREE.BufferAttribute(pos, 3), new THREE.BufferAttribute(nrm, 4, true), new THREE.BufferAttribute(info, 4, false)];
+    for (const a of A) a.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('position', A[0]); geo.setAttribute('aNrm', A[1]); geo.setAttribute('aInfo', A[2]); geo.setAttribute('iSlot', M.iSlot);
+    geo.instanceCount = 0; geo.setDrawRange(0, 0);
+    const mA = new THREE.Mesh(geo, matA), mS = new THREE.Mesh(geo, matS);
+    for (const m of [mA, mS]) { m.frustumCulled = false; m.matrixAutoUpdate = false; m.visible = false; }
+    sceneA.add(mA); G.extra(mS, 'shadow');
+    const D = {pos, nrm, info, fam, n: 0, geo, mA, mS,
+      update(n) { D.n = n; geo.setDrawRange(0, n); for (let i = 0; i < 2; i++) { const a = A[i]; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; } }};
+    M.att.push(D); M.bytes += pos.byteLength + nrm.byteLength + info.byteLength;
+    return D;
   }
   // one body this frame: its segments' matrices (rows of 3x4, segs x 12 floats) and its params
   function put(M, slot, mats, P) {
@@ -240,7 +261,10 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
   }
   function render() {
     const fr = G.frame;
-    for (const M of models) { M.geo.instanceCount = M.n; M.mA.visible = M.n > 0; if (M.n) { M.iSlot.needsUpdate = true; M.mS.userData.frame = fr; } }
+    for (const M of models) {
+      M.geo.instanceCount = M.n; M.mA.visible = M.n > 0; if (M.n) { M.iSlot.needsUpdate = true; M.mS.userData.frame = fr; }
+      for (const D of M.att) { const on = M.n > 0 && D.n > 0; D.geo.instanceCount = on ? 1 : 0; D.mA.visible = on; if (on) D.mS.userData.frame = fr; }   // (the first body)
+    }
     if (!used && warmN > 0) {   // the warm frame: every pass once, no instances
       warmN--;
       for (const M of models) { M.mA.visible = true; M.mS.userData.frame = fr; }
@@ -266,5 +290,5 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     for (const M of models) M.n = 0;
     used = false;
   }
-  return {addModel, put, render, warm, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
+  return {addModel, attach, put, render, warm, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
 }
