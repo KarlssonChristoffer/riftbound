@@ -24,6 +24,11 @@
 // overhead: a two-bone IK hand, the loop drawn as rope) and 'swing' (hanging from a rope, swinging as a pendulum).
 // EMOTES (K.demo = a clip of J.live: animations made for the live model only, no atlas render: western.py OUTLAW_EMOTES,
 // exported with ragdoll_export.py --clips): played by their own timing while he stands still (emote() below).
+// FLOW (K.flow, with the procedural layers: gunplay that moves): the aim LEADS with the head and the chest follows on a
+// spring that overshoots a little and settles (the world's aim angle springs, so re-planted legs don't jolt it), the gun
+// arm trails a fast swing; the body leans into its acceleration; the free arm pumps with the stride on the move; every
+// shot kicks a little differently (RECOIL: the wrist's flip, the shoulder's rock, the whole chest), the standing kick
+// included (gun_aim + a kick instead of gun_fire's one). All of it on the drawn pose only, stepped with the knobs.
 // VIEW only: reads the player (P, the gun's state), the cursor; writes its own state, its rig, and hides the hero's card
 // while it draws (hero.card.setVisible). The sim never reads any of it (?views=0 and ?live=1 leave the sim the same).
 // OWNS: the live model and its rig (render/rigmesh.js), the knobs, the drawn pose, the lineup (dev: setLineup).
@@ -60,7 +65,20 @@ export const PRESETS = {
   allsmear: {step: true, face: 16, hyst: 7, hold: true, snap: true, smear: true},
   free32: {step: false, face: 32, hyst: 7, hold: true, snap: true, smear: false},   // smooth time, 32 facings, the rest on
 };
-for (const v of Object.values(PRESETS)) v.proc ??= true;   // (every preset but exact: the procedural layers on)
+for (const v of Object.values(PRESETS)) { v.proc ??= true; v.flow ??= v.proc; }   // (every preset but exact: the procedural layers on)
+// FLOW's numbers: the aim spring (w rad/s, z damping: ~10 % overshoot, settled in ~.2 s), the head's lead (share of the
+// chest's lag, at most headMax deg), the gun arm's drag (s of the swing's speed, at most dragMax deg), the free arm's
+// pump (deg at a full stride: walk, run), the lean into acceleration (deg per m/s^2, at most max; tau s of smoothing)
+const FLOW = {w: 26, z: .55, head: .85, headMax: 40, drag: .03, dragMax: 12, pump: {walk: 14, run: 26}, stride: .22,
+  lean: {k: .3, max: 7, tau: .12}, kickHz: 24};
+// the shots' kicks: weight (how often), dur (s), and deg at the peak: the wrist's flip (the gun in the fist), the arm up at
+// the shoulder, the chest back, the head's flinch; each shot draws one, x .85..1.15 (the Navy kicks x 1.25, a fan x .5)
+const RECOIL = [
+  {w: 4, dur: .15, wrist: 28, arm: 8, chest: 2, head: 3},   // the wrist flips the muzzle up
+  {w: 3, dur: .2, wrist: 12, arm: 15, chest: 5, head: 5},   // the shoulder rocks back
+  {w: 2, dur: .24, wrist: 16, arm: 7, chest: 9, head: 2},   // the whole chest takes it
+];
+const RECOIL_W = RECOIL.reduce((a, r) => a + r.w, 0);
 export const DEMOS = ['', 'lasso', 'swing'];
 // the loadouts with a live model (view/hero.js names). The gunslinger's lacks his duster's long panel (runtime cloth in the
 // sprite path, view/cloth.js; not on live bones yet: docs/exp/livehero.md, the plan's step 2): only its shoulder cape shows
@@ -118,6 +136,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const SMEARS = Uint8Array.from(J.segs, s => s.kind === 'hat' || s.kind === 'coil' ? 0 : 1);
   const B_ = n => IX[n] ?? -1;
   const HIPS = B_('Hips'), SPINE = B_('Spine'), SPINE1 = B_('Spine1'), SPINE2 = B_('Spine2'), HEAD = B_('Head'), GUN = B_('GunHold0'), HAND_R = B_('RightHand');
+  const NECK = B_('Neck'), ARM_L = B_('LeftArm'), FOOT_L = B_('LeftFoot'), FOOT_R = B_('RightFoot');
   const ARM_R = B_('RightArm'), FARM_R = B_('RightForeArm'), HAND_L = B_('LeftHand'), UPLEG_L = B_('LeftUpLeg'), UPLEG_R = B_('RightUpLeg');
   // the muzzle in the gun's frame (GunMuzzle0 is a fixed child of GunHold0: rest^-1 x rest)
   const MZ = new Float64Array(3);
@@ -173,6 +192,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const Wb = new Float64Array(NB * 7), Wshow = new Float64Array(NB * 7), Wt = new Float64Array(NB * 7);
   let clipNow = '', frameNow = '', frameT = 0, fadeT = 1, haveShow = false;
   let wf = NaN, twist = 0, twistShown = NaN, demoA = NaN, stepK = -1, sampT = 0, lastT = -1, aimPhi = NaN, aimBase = '';
+  let twistHeld = NaN, aimOn = false, aimX = 0, aimV = 0, aimShow = 0, aimVShow = 0;   // (FLOW: the aim's spring, world angle)
+  let rc = null, rcT = 0, rcK = 1, rcN = -1, accX = 0, accY = 0, lvx = NaN, lvy = 0;   // (FLOW: the kick, the smoothed acceleration)
   const MATS = new Float32Array(24 * 12), PR = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 4};
   const TIPS = new Float64Array(NB * 4), TIPS2 = new Float64Array(NB * 4), PREV = new Float64Array(NB * 3), SC = [0, 0, 0];
   let prevOk = false;
@@ -307,6 +328,69 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     ROPE[0] = px; ROPE[1] = py; ROPE[2] = pz + SWING.lift;
     ROPE[3] = (w[l + 4] + w[r + 4]) / 2; ROPE[4] = (w[l + 5] + w[r + 5]) / 2; ROPE[5] = (w[l + 6] + w[r + 6]) / 2 + .05;
     ropeN = 2;
+  }
+
+  // ---------------------------------------------------------------- FLOW (K.flow): gunplay that moves (body space, in w)
+  // the aim as a WORLD angle (the facing + the twist) springs toward the held one, so legs that re-plant or turn don't jolt
+  // it; stepped: what shows is the spring at the procedural ticks. -> the twist to draw
+  function aimFlow(phi, tw, dt, sample) {
+    const target = phi + tw;
+    if (!aimOn) { aimOn = true; aimX = aimShow = target; aimV = aimVShow = 0; return tw; }
+    const n = Math.max(1, Math.ceil(dt / .008)), h = dt / n, W2 = FLOW.w * FLOW.w, Z2 = 2 * FLOW.z * FLOW.w;
+    for (let i = 0; i < n; i++) { aimV += (W2 * wrap(target - aimX) - Z2 * aimV) * h; aimX += aimV * h; }
+    if (Math.abs(wrap(target - aimX)) < .4 * DEG && Math.abs(aimV) < .3) { aimX = target; aimV = 0; }   // (settled: on it, still)
+    if (!K.step || sample) { aimShow = aimX; aimVShow = aimV; }
+    return wrap(aimShow - phi);
+  }
+  // the head ahead of the chest (lag: the held twist - the shown one), the gun arm trailing the swing (its speed)
+  function lead(w, lag) {
+    const a = Math.max(-FLOW.headMax, Math.min(FLOW.headMax, lag * FLOW.head / DEG)) * DEG;
+    if (NECK >= 0 && Math.abs(a) > .5 * DEG) { axisAngle(0, 0, 1, a, R4); turnTree(w, NECK, R4, w[NECK * 7 + 4], w[NECK * 7 + 5], w[NECK * 7 + 6]); }
+    const d = Math.max(-FLOW.dragMax, Math.min(FLOW.dragMax, -aimVShow * FLOW.drag / DEG)) * DEG;
+    if (ARM_R >= 0 && Math.abs(d) > .5 * DEG) { axisAngle(0, 0, 1, d, R4); turnTree(w, ARM_R, R4, w[ARM_R * 7 + 4], w[ARM_R * 7 + 5], w[ARM_R * 7 + 6]); }
+  }
+  // the free (left) arm on the move: swung against the left leg (its foot forward: the arm back), about the chest's side
+  function pump(w, run) {
+    if (ARM_L < 0 || FOOT_L < 0 || FOOT_R < 0 || SPINE2 < 0) return;
+    const s = (w[FOOT_L * 7 + 5] - w[FOOT_R * 7 + 5]) / FLOW.stride, a = -Math.max(-1, Math.min(1, s)) * (run ? FLOW.pump.run : FLOW.pump.walk) * DEG;
+    if (Math.abs(a) < .5 * DEG) return;
+    qrot(w, SPINE2 * 7, 1, 0, 0, V3, 0); axisAngle(V3[0], V3[1], V3[2], a, R4);
+    turnTree(w, ARM_L, R4, w[ARM_L * 7 + 4], w[ARM_L * 7 + 5], w[ARM_L * 7 + 6]);
+  }
+  // the chest leans into his acceleration (smoothed): sideways into a strafe's change, forward as he sets off. P's velocity
+  // is in the view's frame (his facing there: phiV = his facing - the yaw); a turn of the camera turns it too: that frame skipped
+  let lyaw = NaN;
+  function lean(w, P, dt, phiV, yaw) {
+    const vx = P.vx || 0, vy = P.vy || 0;
+    if (!(lvx === lvx) || yaw !== lyaw || dt <= 0) { lvx = vx; lvy = vy; lyaw = yaw; return; }
+    const k = 1 - Math.exp(-dt / FLOW.lean.tau); accX += ((vx - lvx) / dt - accX) * k; accY += ((vy - lvy) / dt - accY) * k; lvx = vx; lvy = vy;
+    const c = Math.cos(phiV), s = Math.sin(phiV), bx = c * accX - s * accY, by = -s * accX - c * accY, M = FLOW.lean.max;   // (into his frame)
+    const roll = Math.max(-M, Math.min(M, bx * FLOW.lean.k)), pitch = Math.max(-M, Math.min(M, -by * FLOW.lean.k));
+    if (SPINE < 0 || (Math.abs(roll) < .5 && Math.abs(pitch) < .5)) return;
+    const o = SPINE * 7;
+    axisAngle(0, 1, 0, roll * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);    // (top toward +x: his left)
+    axisAngle(1, 0, 0, pitch * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);   // (top toward -y: ahead)
+  }
+  // a shot (the sim's count went up): a kick drawn from RECOIL. Its shape: up to the peak in the first 18 %, eased out;
+  // about the barrel's side axis (d x up: + lifts the barrel and tips the chest and the head back), stepped at kickHz
+  function startKick(S) {
+    let r = Math.random() * RECOIL_W, i = 0; while (i < RECOIL.length - 1 && (r -= RECOIL[i].w) > 0) i++;
+    rc = RECOIL[i]; rcT = 0;
+    rcK = (.85 + .3 * Math.random()) * (LOADOUTS[hero.loadI]?.[2] === 'brass_navy' ? 1.25 : 1) * (S.lastHow === 'fan' ? .5 : 1);
+  }
+  function kick(w, dt) {
+    const S = app.PL.gun?.S;
+    if (S) { if (rcN >= 0 && S.shotN > rcN) startKick(S); rcN = S.shotN; }
+    if (!rc) return;
+    rcT += dt; if (rcT >= rc.dur) { rc = null; return; }
+    if (GUN < 0 || !gunNear(w)) return;
+    const tq = K.step ? Math.floor(rcT * FLOW.kickHz) / FLOW.kickHz : rcT, u = tq / rc.dur, e = (u < .18 ? u / .18 : ((1 - u) / .82) ** 2) * rcK;
+    barrel(w); const l = Math.hypot(V3[0], V3[1]); if (l < 1e-4) return;
+    const ax = V3[1] / l, ay = -V3[0] / l;
+    if (SPINE >= 0 && rc.chest) { const o = SPINE * 7; axisAngle(ax, ay, 0, rc.chest * e * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    if (ARM_R >= 0 && rc.arm) { const o = ARM_R * 7; axisAngle(ax, ay, 0, rc.arm * e * DEG, R4); turnTree(w, ARM_R, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    if (rc.wrist) { const o = GUN * 7; axisAngle(ax, ay, 0, rc.wrist * e * DEG, R4); turnTree(w, GUN, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    if (NECK >= 0 && rc.head) { const o = NECK * 7; axisAngle(ax, ay, 0, rc.head * e * DEG, R4); turnTree(w, NECK, R4, w[o + 4], w[o + 5], w[o + 6]); }
   }
 
   // ---------------------------------------------------------------- body space -> the render's world (render/rigmesh.js matrices)
@@ -449,7 +533,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     const S = app.PL.gun?.S, proc = K.proc;
     let baseName = f, layer = '', upper = -1, aiming = false;
     if (proc && p.fam && (p.fam === 'gws' || p.fam === 'grs')) { baseName = nm(p.fam + '_0_', p.i); aiming = true; }   // aim on the move: the twist-0 pose
-    else if (proc && f.startsWith('gun_aim')) { baseName = 'gun_aim'; aiming = true; }                                  // the standing twists: gun_aim
+    else if (proc && (f.startsWith('gun_aim') || (K.flow && f.startsWith('gun_fire')))) { baseName = 'gun_aim'; aiming = true; }   // the standing twists (and with FLOW the kick): gun_aim
     else if (proc && p.fam && (p.fam === 'gwr' || p.fam === 'grr') && S) { baseName = nm(p.loco + '.', p.i); layer = 'reload'; upper = reloadAt(S); }
     if (K.demo === 'swing') baseName = poseOf('reach_up') ? 'reach_up' : 'idle.0';
     const A = poseOf(baseName) || poseOf(f);
@@ -479,12 +563,20 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     const phi = facing(P, yaw, dt);
     fc = Math.cos(phi); fs = Math.sin(phi); AX = PX; AY = P.z - sinkPx / ctxO.PPMH; AZ = PY; FX = -Math.sin(yaw); FZ = -Math.cos(yaw);
     // 5) aim at any angle: the twist onto the cursor (held by the hysteresis, sampled with the step)
+    const flowOn = K.flow && proc;
     if (aiming && GUN >= 0) {   // (and at once when the legs re-plant or turn: a stale twist on new legs points anywhere)
-      if (sample || !(twistShown === twistShown) || phi !== aimPhi || baseName !== aimBase) {
-        twist = aimTwist(Wt, twist); twistShown = phi !== aimPhi || baseName !== aimBase ? twist : hystOf(twistShown, twist); aimPhi = phi; aimBase = baseName;
+      if (sample || !(twistHeld === twistHeld) || phi !== aimPhi || baseName !== aimBase) {
+        twist = aimTwist(Wt, twist); twistHeld = phi !== aimPhi || baseName !== aimBase ? twist : hystOf(twistHeld, twist); aimPhi = phi; aimBase = baseName;
       }
+      twistShown = flowOn ? aimFlow(phi, twistHeld, dt, sample) : twistHeld;
       spineTwist(Wt, twistShown);
-    } else twistShown = NaN;
+      if (flowOn) {   // FLOW: the head leads, the arm trails, the free arm pumps on the move, the chest leans into it
+        lead(Wt, twistHeld - twistShown);
+        if (p.fam === 'gws' || p.fam === 'grs') pump(Wt, p.fam === 'grs');
+        lean(Wt, P, dt, phi - yaw, yaw);
+      }
+    } else { twistShown = twistHeld = NaN; aimOn = false; lvx = NaN; }
+    if (flowOn) kick(Wt, dt); else rc = null;   // (any gun pose: the hip shot's, the fan's too)
     // 6) the demos
     ropeN = 0;
     if (K.demo === 'lasso' && !(S && S.out)) {
@@ -560,7 +652,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const live = {
     stats, model, poseOf, BN, J,
     // (a knob changed, the body (re)shown: no history carried over)
-    reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false; },
+    reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false;
+      twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; },
     setLineup(items) { lineup = items || []; },
     aim,
     // (dev: the shimmer meter draws several knob sets off ONE sim step, each from its own history)
