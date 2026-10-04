@@ -44,7 +44,9 @@
 //   query / near), itemOf, elev, inStream, blocked, layout,
 //   hitstop, shake, knock, play, aim, mouse, keys, toView(x, y, h) -> view px, sprite, point, line, layer(name),
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE,
-//   paused (the menu is open), openMenu(), uiSound(name) (the menu's sounds: hover, click, confirm, back, open).
+//   paused (the menu is open), openMenu(), uiSound(name) (the menu's sounds: hover, click, confirm, back, open),
+//   playerHidden (photo mode hides him: leave out what you draw of him).
+// PHOTO MODE (F4, the menu's Game tab: ui/photo.js): the loop hands it the frame's step while it's open (docs/exp/photomode.md).
 import * as THREE from 'three';
 import {createGfx, DEG} from './render/gfx.js';
 import {WORLD, elev, inStream} from './world/world.js';
@@ -57,6 +59,7 @@ import {createGame} from './game/game.js';
 import {createPerf} from './core/perf.js';   // the frame profiler: per-system ms against the budget (F3, ?perf=1)
 import {createEnv} from './sim/env.js';   // the world clock: time of day, seasons, weather
 import {createPause} from './ui/pause.js';   // the pause / settings menu (Escape)
+import {createPhoto} from './ui/photo.js';   // photo mode (F4, the menu's Game tab): free camera, frozen time, the look, PNG export
 import {createLighting} from './render/lighting.js';
 import {createProjectiles} from './sim/projectiles.js';
 import {flags} from './core/flags.js';
@@ -148,7 +151,7 @@ const setYaw = cv.setYaw, setBiome = i => stage.setBiome(i);
 
 // ---------------------------------------------------------------- feel: shake (render/camera.js), hitstop (core/loop.js), knock
 const shake = cv.shake;
-let loop = null;
+let loop = null, photo = null;
 
 // ---------------------------------------------------------------- the host features see
 // host.sprite's arguments for G.sprite (arena -> world axes), in ONE reused object: G.sprite reads it at once and keeps
@@ -183,6 +186,8 @@ const host = {
   get hits() { return proj.hits; },
   // the menu (ui/menu.js): open it (the title's Settings), its wooden UI sounds (the audio feature), open or not
   get paused() { return pause.paused; }, openMenu: () => pause.toggle(true), uiSound: n => feat('audio')?.ui?.(n),
+  // photo mode (ui/photo.js) has hidden the player: a feature that draws something of him (his contact shadow, the lantern) leaves it out
+  get playerHidden() { return !!photo?.hidePlayer; },
   // game controls (game/game.js): dev keys + debug HUD on/off, player input locked, the simulation's speed, the world
   dev: true, lock: false, timeScale: 1, hudOff: false, BIOMES, TIMES,
   get biomeI() { return stage.biomeI; }, get timeI() { return TIMES.indexOf(env.bucket); },
@@ -219,12 +224,14 @@ const lighting = createLighting({G, host, features, opt});   // render/lighting.
 // E: the engine's context for its own modules (core/input.js, ui/pause.js, core/loop.js): what boot made, by name.
 // Boot fills it once; the modules read it and never write it. (Features get `host`, above.)
 const E = {G, canvas, hdc, hq, cv, stage, env, hero, live, proj, pa, PL, P, player, keys, mouse, cam, events, features, host, game, perf, opt, flags: Q,
-  applyOpts, lighting, feat, setBiome, setYaw, dev, input: null, pause: null};
+  applyOpts, lighting, feat, setBiome, setYaw, dev, input: null, pause: null, photo: null, loop: null};
 E.input = createInput(E);   // the keyboard + mouse (before the menu: the order its listeners run in)
 const pause = E.pause = createPause(E);
+photo = E.photo = createPhoto(E);   // (before the loop: it hands photo mode the frame's step while it's open)
 pause.menu.restore(Q);   // the player's remembered settings (Graphics, Controls)
 addEventListener('fullscreenchange', () => pause.menu.refresh());
-loop = createLoop(E);
+loop = E.loop = createLoop(E);
+if (Q.get('photo') === '1') photo.toggle(true);   // ?photo=1: straight into photo mode (tests)
 $('#load').classList.add('hidden');
 console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} s (${set.packed ? 'packed atlas' : 'per-file atlas'})`, JSON.stringify(TIMING));
 
@@ -232,5 +239,5 @@ console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} 
 window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout: i => hero.switchLoadout(i), TIMING, perf,
   get world() { return stage.world; }, get yaw() { return cv.yaw; }, set zoom(v) { cv.zoomTo(Math.round(cv.dsBase * v)); }, get zoomState() { return {scale: cv.scale, zoom: cv.zoom, dsBase: cv.dsBase, dsGoal: cv.dsGoal}; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { cv.snapMode = i; },
   set props(m) { stage.propMode = m; }, get rig() { return hero.rig; },
-  step: (n, dt) => loop.run(n, dt), applyOpts, hud: loop.hud, owncheck: ownReport, live};
+  step: (n, dt) => loop.run(n, dt), applyOpts, hud: loop.hud, owncheck: ownReport, live, photo};
 loop.start();

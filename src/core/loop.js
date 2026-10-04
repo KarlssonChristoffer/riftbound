@@ -7,7 +7,9 @@
 //   draw(t) renders the world ALPHA of the way from the last step's start to its end (entities, arrows, the player:
 //     their lerpBegin / lerpEnd), so motion is smooth on a 144 / 165 Hz screen; at 60 fps alpha is 1 (no blending)
 // Paused, only the views of the features that declare `ambient` run (nature goes on behind the menu); in hitstop, the
-// sim steps run only the F.always updates and the views hold (a freeze frame).
+// sim steps run only the F.always updates and the views hold (a freeze frame). In PHOTO MODE (ui/photo.js) the frame's
+// step is photo mode's (its free camera; the game stands still, nature as its "living world" says), and the draw leaves
+// the player, the reticle and (a still world) the clock out as it asks.
 // OWNS: the frame's timing (last, lastDt, fps, the HUD's refresh), the sim's clock (acc, alpha), hitstop (freeze), the
 //   season's leaf ramp version.
 // READS: E (main.js; E.dev: the colliders overlay + the debug HUD), the modifiers' note 'sim.speed'.  BUDGET: core/perf.js (F3).
@@ -18,7 +20,7 @@ import {drawPrompt} from '../ui/prompt.js';
 import {clearArray} from './mathx.js';
 
 export function createLoop(E) {
-  const {G, cv, pa, P, PL, player, keys, mouse, cam, events, features, host, env, proj, hero, stage, perf, opt, lighting, hq, hdc, input, pause, game} = E;
+  const {G, cv, pa, P, PL, player, keys, mouse, cam, events, features, host, env, proj, hero, stage, perf, opt, lighting, hq, hdc, input, pause, game, photo} = E;
   const {drawZones, drawHud} = E.dev;
   const promptCtx = {host, pa, features, G};   // ui/prompt.js
   let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null, freeze = 0;
@@ -48,6 +50,7 @@ export function createLoop(E) {
   // ONE frame: the camera, the sim's fixed steps, the views
   function step(dt) {
     pa.tick();
+    if (photo && photo.open) { photo.step(dt); return; }   // photo mode: its camera, the game stands still (ui/photo.js)
     // camera rotation: keys / middle-drag, then (in a step mode) ease onto the nearest step once you let go.
     // A climb started at an angle eases the camera to north first, climbs, then returns.
     const rot = (keys.has('x') ? 1 : 0) - (keys.has('z') ? 1 : 0), paused = pause.paused;
@@ -71,8 +74,10 @@ export function createLoop(E) {
     cv.stepShake(sdt);
   }
   // the draw: the world alpha of the way through the last sim step (put back after)
+  let lastT = 0;
   function draw(t) {
-    pa.tick();
+    if (photo && photo.open) t = photo.time(t);   // (a still photo: the frame's clock held)
+    lastT = t; pa.tick();
     pa.lerpBegin(alpha); stage.ents.lerpBegin(alpha); proj.lerpBegin(alpha);
     try { render(t); } finally { proj.lerpEnd(); stage.ents.lerpEnd(); pa.lerpEnd(); }
   }
@@ -83,7 +88,7 @@ export function createLoop(E) {
     if (!views) return;   // (the camera follows without views too: it's the frame the cursor is read in, the sim's input)
     // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js); or,
     // with ?live=1 and the live hero on, his live 3D body (view/livehero.js)
-    const sinkPx = E.live?.on ? E.live.compose(PX, PY, perf) : hero.compose(PX, PY, perf);
+    const ph = photo && photo.open, sinkPx = ph && photo.hidePlayer ? photo.noPlayer() : E.live?.on ? E.live.compose(PX, PY, perf) : hero.compose(PX, PY, perf);
     // props, hover pulse on the aimed target
     const hov = P.state === 'draw' ? pa.hoverTarget()?.target : null, hi = hov ? stage.world.itemOf(hov) : null;
     if (hovIt && hovIt !== hi) hovIt.hover = 0;   // (only the aimed item's pulse is ever on: no write per item per frame)
@@ -93,10 +98,11 @@ export function createLoop(E) {
     // the season's leaves (env.leafRamp: changes a few times per season; a rebuilt world starts from the biome's own ramp)
     const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || stage.world !== leafWorld)) { stage.world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = stage.world; }
     proj.draw(host);
-    for (const f of features) if (f.on !== false) f.frame?.({dt: lastDt, t});
+    const fdt = ph && photo.still ? 0 : lastDt;   // (a still photo: nothing moves in the features' frames either)
+    for (const f of features) if (f.on !== false) f.frame?.({dt: fdt, t});
     // the aim reticle (pixel cross at the cursor, front layer; drawn by the GPU: the layer's 2D canvas went up whole every
     // frame a gun was out for these 4 pixels' rects)
-    if (P.state === 'draw') {
+    if (P.state === 'draw' && !ph) {
       const q = G.glayer('front'), mx = Math.round(cv.VW / 2 + (mouse.x - cv.VW / 2) * cv.zoom), my = Math.round(cv.VH / 2 + (mouse.y - cv.VH / 2) * cv.zoom);
       q.fillStyle = P.t > .5 ? '#f2d27a' : '#e9e4da';
       q.fillRect(mx - 3, my, 2, 1); q.fillRect(mx + 2, my, 2, 1); q.fillRect(mx, my - 3, 1, 2); q.fillRect(mx, my + 2, 1, 2);
@@ -125,6 +131,8 @@ export function createLoop(E) {
     start: () => requestAnimationFrame(frame),
     hitstop: sec => { freeze = Math.max(freeze, sec); },   // host.hitstop: the sim holds (F.always features run on)
     run(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { lastDt = dt; step(dt); draw(performance.now() / 1000); } },
+    // one more draw of the same moment, no step and no time passing (photo mode's export renders the frame again at its size)
+    redraw() { const d = lastDt; lastDt = 0; try { draw(lastT); } finally { lastDt = d; } },
     hud,
   };
 }

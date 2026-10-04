@@ -116,6 +116,7 @@ export function createEnv({moods, biome, Q = flags}) {
     year: 0, tinted: false, snowCover: 0, wet: 0, leafK: 1, leafFall: 0, autumn: 0,   // year 0..4 (spring .. winter); tinted = the biome's colours follow the season
     ver: {part: 0, season: 0, weather: 0, leaf: 0}, frozen: false, seasonLock: null, weatherLock: null};
   let spellLeft = 0, lastBiome = null;
+  let pv = null, truth = null;   // PREVIEW (below): what photo mode asks to see; the readings as they were before it
   const R = mulberry32(simSeed());   // the weather's next spell: the sim's own draws (core/rng.js), never presentation's
   // ---- persistence: {t (in-game hours since the start), weather, spellLeft}
   const KEY = 'rb.env.v1', url = {hour: Q.get('hour'), season: Q.get('season'), weather: Q.get('weather'), daymin: Q.get('daymin'), time: Q.get('time')};
@@ -130,22 +131,24 @@ export function createEnv({moods, biome, Q = flags}) {
   if (WEATHER[url.weather]) E.weatherLock = url.weather;
   else if (Q.has('bench')) E.weatherLock = 'fair';   // the perf bench compares runs: no random rain in its scenarios
   let saveT = 0;
-  function save() { try { localStorage.setItem(KEY, JSON.stringify({hours, weather: E.weather, spellLeft, snowCover: E.snowCover, wet: E.wet})); } catch (e) {} }
+  function save() { const S = truth ? truth.r : E; try { localStorage.setItem(KEY, JSON.stringify({hours, weather: S.weather, spellLeft, snowCover: S.snowCover, wet: S.wet})); } catch (e) {} }   // (the truth, not a preview)
   if (typeof addEventListener === 'function') addEventListener('pagehide', save);
 
   // ---- clock -> hour, day, part, season
   function syncClock() {
-    E.hour = ((hours % 24) + 24) % 24; E.day = Math.floor(hours / 24); E.t = hours;
+    const H = pv && pv.hour != null ? Math.floor(hours / 24) * 24 + pv.hour : hours;   // (a preview's hour: the same day)
+    E.hour = ((H % 24) + 24) % 24; E.day = Math.floor(H / 24); E.t = H;
     const h = E.hour, part = h < 5.6 || h >= 20.3 ? 'night' : h < 7.2 ? 'dawn' : h < 18 ? 'day' : 'dusk';
     if (part !== E.part) { E.part = part; E.bucket = part === 'dawn' ? 'dusk' : part; E.ver.part++; }
-    const b = biome(), yearH = TUNE.seasonDays * 24, sf = ((hours / yearH) % 4 + 4) % 4, si = Math.floor(sf), into = sf - si;
+    const b = biome(), yr = pv && pv.year != null && SEASONAL[b] ? pv.year : null;   // (a preview's point of the year)
+    const yearH = TUNE.seasonDays * 24, sf = yr !== null ? (yr % 4 + 4) % 4 : ((hours / yearH) % 4 + 4) % 4, si = Math.floor(sf), into = sf - si;
     let s = SEASONS[si], n = SEASONS[(si + 1) % 4], k = smooth((into - (1 - TUNE.seasonBlend)) / TUNE.seasonBlend);
-    if (E.seasonLock) { s = n = E.seasonLock; k = 0; }
+    if (E.seasonLock && yr === null) { s = n = E.seasonLock; k = 0; }
     if (FIXED[b]) { s = n = FIXED[b]; k = 0; }
     if (s !== E.season) E.ver.season++;
     E.season = s; E.seasonNext = n; E.seasonK = k;
     E.seasonal = !!SEASONAL[b] || !!FIXED[b]; E.tinted = !!SEASONAL[b];
-    E.year = E.seasonLock ? SEASONS.indexOf(E.seasonLock) + .5 : sf;
+    E.year = E.seasonLock && yr === null ? SEASONS.indexOf(E.seasonLock) + .5 : sf;
     let j = 0; while (j < LEAF_YEAR.length - 2 && E.year >= LEAF_YEAR[j + 1][0]) j++;
     const [y0, l0] = LEAF_YEAR[j], [y1, l1] = LEAF_YEAR[j + 1]; E.leafK = SEASONAL[b] ? lerp(l0, l1, smooth((E.year - y0) / (y1 - y0))) : 1;
     j = 0; while (j < LEAF_FALL.length - 2 && E.year >= LEAF_FALL[j + 1][0]) j++;
@@ -265,6 +268,40 @@ export function createEnv({moods, biome, Q = flags}) {
   // (ease: s, this spell's channels ease toward it faster or slower than TUNE.ease: an omen's storm rolls in over a few s)
   E.setWeather = (w, ease = 0) => { E.weatherLock = WEATHER[w] ? w : null; if (!E.weatherLock) setSpell(pick()); easeS = ease; };
   E.setDayMinutes = m => { if (m <= 0) E.frozen = true; else { E.frozen = false; TUNE.dayMinutes = m; } };
+  // ---- PREVIEW (ui/photo.js: photo mode, while the sim stands still): another hour, point of the year, weather or wind
+  // shown through every reading above (hour, part, season, year, leafK, autumn, sky, windLevel, weather, the ground's snow
+  // and wet, so mood(), leafRamp() and every view follow) without touching the truth: the clock, the spell, its generator
+  // and the ground's memory stay as they are. preview(null) puts every reading back exactly as it was, the change
+  // counters (ver) too: a view that saw the preview sees them differ and refreshes, a sim system that didn't sees no change.
+  // Nothing may step the clock (env.step) or call its setters while a preview is on (photo mode holds the sim).
+  //   env.preview({hour?: 0..24, year?: 0..4 (spring .. winter; seasonal biomes), weather?: a WEATHER key, wind?: a level}) | null
+  //   env.previewing (bool). Snow / rain previewed lie on the ground (snowCover / wet 1); a season other than winter melts it
+  const READINGS = ['hour', 'day', 't', 'part', 'bucket', 'season', 'seasonNext', 'seasonK', 'seasonal', 'tinted', 'year', 'leafK', 'leafFall', 'autumn',
+    'weather', 'windLevel', 'snowCover', 'wet'];
+  E.preview = o => {
+    if (!o) {
+      if (!truth) return;
+      pv = null; for (const k of READINGS) E[k] = truth.r[k];
+      Object.assign(E.sky, truth.sky); Object.assign(E.ver, truth.ver);
+      leafKey = truth.leafKey; for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) leafOut[i][j] = truth.leaf[i * 3 + j];
+      truth = null; return;
+    }
+    if (!truth) {   // (once, as the preview begins)
+      const r = {}; for (const k of READINGS) r[k] = E[k];
+      truth = {r, sky: {...E.sky}, ver: {...E.ver}, leafKey, leaf: leafOut.flat()};
+    }
+    pv = o; syncClock();
+    const T = truth.r, w = WEATHER[o.weather] ? o.weather : T.weather, W = WEATHER[w];
+    if (w !== E.weather) { E.weather = w; E.ver.weather++; }
+    if (WEATHER[o.weather]) for (const c of CH) E.sky[c] = W[c] ?? (c === 'wind' ? 1 : 0);   // (at once: the world stands still)
+    else Object.assign(E.sky, truth.sky);
+    if (o.wind != null) E.sky.wind = o.wind;
+    E.windLevel = E.sky.wind;
+    const sn = SEASONAL[biome()], shown = WEATHER[o.weather];
+    E.snowCover = sn && shown && W.snow ? 1 : sn && o.year != null && E.season !== 'winter' && E.seasonNext !== 'winter' ? 0 : T.snowCover;
+    E.wet = shown && W.rain ? 1 : T.wet;
+  };
+  Object.defineProperty(E, 'previewing', {get: () => !!truth, enumerable: false});
   E.clock = () => { const h = Math.floor(E.hour), m = Math.floor((E.hour - h) * 60); return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`; };
   E.label = () => `${E.clock()} ${E.part} · day ${E.day + 1}${E.seasonal ? ' · ' + E.season + (E.seasonK > .02 ? ' -> ' + E.seasonNext : '') : ''} · ${E.weather}`;
   if (url.time && PART_H[url.time] !== undefined) E.setPart(url.time);   // the old ?time=day|dusk|night
