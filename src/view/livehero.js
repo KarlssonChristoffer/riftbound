@@ -29,6 +29,13 @@
 // arm trails a fast swing; the body leans into its acceleration; the free arm pumps with the stride on the move; every
 // shot kicks a little differently (RECOIL: the wrist's flip, the shoulder's rock, the whole chest), the standing kick
 // included (gun_aim + a kick instead of gun_fire's one). All of it on the drawn pose only, stepped with the knobs.
+// COMBAT STYLE (with FLOW, a model with the cb_* clips: western.py COMBAT_LIVE): the STANCE he shoots from, picked each
+// time the gun comes out by how far the target is and whether he is moving (up close: low at the hip; further: the aim,
+// a deep crouch, side-on like a duelist, down on a knee two-handed), the DRAW into it (straight, a sweep out wide, a spin
+// out of the holster, up by the cheek, dropping to the knee) laid over the sim's draw by its progress, the hip shot from
+// the hip stance; on the move the hip stance's upper body over the legs; changing as the fight goes (he sets off, stops,
+// a few shots in), cross-faded. The spine twist aims whichever it is. The drawn muzzle goes to the gun's flash
+// (live.muzzle(): host.playerMuzzle, features/gunfx.js), since the sim's muzzle is its atlas frame's.
 // VIEW only: reads the player (P, the gun's state), the cursor; writes its own state, its rig, and hides the hero's card
 // while it draws (hero.card.setVisible). The sim never reads any of it (?views=0 and ?live=1 leave the sim the same).
 // OWNS: the live model and its rig (render/rigmesh.js), the knobs, the drawn pose, the lineup (dev: setLineup).
@@ -43,6 +50,7 @@ import {createRigMesh} from '../render/rigmesh.js';
 import {createFlashes} from '../render/flashes.js';
 import {flags} from '../core/flags.js';
 import {LOADOUTS} from './hero.js';
+import {WEAPONS} from '../content/weapons.js';
 
 const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const C20 = Math.cos(20 * DEG), S55 = Math.sin(55 * DEG), K_UP = Math.tan(20 * DEG) * C20 / S55;   // the sprite camera's squash
@@ -79,6 +87,14 @@ const RECOIL = [
   {w: 2, dur: .24, wrist: 16, arm: 7, chest: 9, head: 2},   // the whole chest takes it
 ];
 const RECOIL_W = RECOIL.reduce((a, r) => a + r.w, 0);
+// COMBAT STYLE's numbers: each stance's weight by the target's distance [up close (< near m), mid, far (> far m)], the
+// draws into it ('' = the sim's own gun_draw), the cross-fade (s), how long he stands before a standing stance comes
+// back after moving (s), the chance a shot (from the 2nd after a pick) changes the stance
+const COMBAT = {near: 3, far: 7, fade: .15, settle: .3, shift: .22,
+  w: {aim: [1, 4, 2], hip: [7, 1, 0], crouch: [2, 2.5, 1.5], duel: [0, 2, 3.5], kneel: [0, 1.5, 3]},
+  draws: {aim: ['', 'cb_dr_sweep', 'cb_dr_spin'], hip: ['cb_dr_hip'], crouch: ['cb_dr_crouch', 'cb_dr_spin'], duel: ['cb_dr_high'],
+    kneel: ['cb_dr_kneel']},
+  move: ['aim', 'hip']};   // the stances his upper body has on the move
 export const DEMOS = ['', 'lasso', 'swing'];
 // the loadouts with a live model (view/hero.js names). The gunslinger's lacks his duster's long panel (runtime cloth in the
 // sprite path, view/cloth.js; not on live bones yet: docs/exp/livehero.md, the plan's step 2): only its shoulder cape shows
@@ -119,7 +135,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const model = rig.addModel(J, bin);
   const CL = J.clips || {};
   const HIDE = J.hide || {};   // pose -> pieces it hides (the lasso's coil packed away: the poses carry no scale)
-  const EMOTES = (J.live || []).filter(c => CL[c]), demos = [...DEMOS, ...EMOTES];
+  const EMOTES = (J.live || []).filter(c => CL[c] && !c.startsWith('cb_')), demos = [...DEMOS, ...EMOTES];   // (cb_*: combat)
   for (const c of Object.values(CL)) if (c.advance && !c.cum) { c.cum = [0]; c.advance.forEach((a, i) => c.cum.push(c.cum[i] + a)); }   // (render/atlas.js's)
   // the bones in depth-first order (a bone's subtree is the range [b, END[b])), those the poses carry
   const names = Object.keys(J.bones).filter(b => J.poses['idle.0']?.[b] || J.poses[Object.keys(J.poses)[0]][b]);
@@ -194,10 +210,11 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   let wf = NaN, twist = 0, twistShown = NaN, demoA = NaN, stepK = -1, sampT = 0, lastT = -1, aimPhi = NaN, aimBase = '';
   let twistHeld = NaN, aimOn = false, aimX = 0, aimV = 0, aimShow = 0, aimVShow = 0;   // (FLOW: the aim's spring, world angle)
   let rc = null, rcT = 0, rcK = 1, rcN = -1, accX = 0, accY = 0, lvx = NaN, lvy = 0;   // (FLOW: the kick, the smoothed acceleration)
+  let fadeDur = FADE;   // (the cross-fade now: a clip change's, or COMBAT.fade for a stance's)
   const MATS = new Float32Array(24 * 12), PR = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 4};
   const TIPS = new Float64Array(NB * 4), TIPS2 = new Float64Array(NB * 4), PREV = new Float64Array(NB * 3), SC = [0, 0, 0];
   let prevOk = false;
-  const stats = {held: 0, frames: 0, smears: 0, smearK: 0, ms: 0, msRender: 0};
+  const stats = {held: 0, frames: 0, smears: 0, smearK: 0, ms: 0, msRender: 0, cb: ''};   // (cb: the combat stance / draw now)
   const aim = {ok: false, mx: 0, my: 0, a: 0};   // the drawn gun on screen (view px): the muzzle, the barrel's angle (the meter's aim error)
 
   // ---------------------------------------------------------------- which pose: the frame, its clip, the next frame, the fraction
@@ -393,6 +410,59 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     if (NECK >= 0 && rc.head) { const o = NECK * 7; axisAngle(ax, ay, 0, rc.head * e * DEG, R4); turnTree(w, NECK, R4, w[o + 4], w[o + 5], w[o + 6]); }
   }
 
+  // ---------------------------------------------------------------- COMBAT STYLE (K.flow and the cb_* clips)
+  const CBS = Object.keys(COMBAT.w).filter(k => CL['cb_st_' + k]), CB = CBS.length ? {} : null;
+  let cbSt = '', cbDraw = '', cbT = 0, cbStill = 0, cbN = 0, cbMove = false, cbDist = 5;
+  const SCR = {x: 0, y: 0, ppm: 0};   // (his anchor on screen and px a metre there: the last frame's, for the target's distance)
+  function cbPick(avoid) {
+    const band = cbDist < COMBAT.near ? 0 : cbDist > COMBAT.far ? 2 : 1;
+    let sum = 0; for (const k of CBS) if (k !== avoid) sum += COMBAT.w[k][band];
+    let r = Math.random() * sum;
+    for (const k of CBS) { if (k === avoid) continue; r -= COMBAT.w[k][band]; if (r <= 0) return k; }
+    return CBS.includes('aim') ? 'aim' : CBS[0];
+  }
+  const cbMovePick = () => { const m = COMBAT.move.filter(k => CBS.includes(k)); return m[Math.floor(Math.random() * m.length)] || 'aim'; };
+  // the stance's frame now (its breath looped) / the draw's frame by the sim's draw progress
+  const cbFrame = st => { const C = CL['cb_st_' + st]; return nm('cb_st_' + st + '.', Math.floor(t * C.fps) % C.frames); };
+  function drawFrame() {
+    const C = CL[cbDraw], G0 = CL.gun_draw, w = WEAPONS[LOADOUTS[hero.loadI]?.[2]];
+    const total = (G0 ? G0.frames / G0.fps : .25) / (w?.draw || 1), u = Math.min(1, cbT / total);
+    return nm(cbDraw + '.', Math.min(C.frames - 1, Math.floor(u * C.frames)));
+  }
+  // -> null (the sim's frame as it is) or {base: the pose to draw instead, aim: aimed by the twist, upper: a pose whose upper
+  // body goes over the gait's legs (on the move), key: the cross-fade's identity}
+  const CBR = {base: '', aim: false, upper: '', key: ''};
+  function combat(f, p, P, S, dt) {
+    if (!CB || !S) return null;
+    const out = S.out || S.act === 'draw' || S.act === 'hip';
+    if (!out || S.act === 'turn' || S.act === 'whip') { if (!out) cbSt = stats.cb = ''; return null; }
+    const moving = !!p.loco;   // (any gait frame: aiming on it, reloading on it)
+    if (!cbSt) {   // the gun coming out: a stance for how far he is and whether he moves, and a draw into it
+      cursor(); const D = SCR.ppm > 0 ? Math.hypot(CUR[0] - SCR.x, CUR[1] - SCR.y) / SCR.ppm : 5; cbDist = D;
+      cbSt = moving ? cbMovePick() : cbPick(''); cbMove = moving; cbStill = 0; cbN = S.shotN; cbT = 0;
+      const ds = (COMBAT.draws[cbSt] || ['']).filter(d => !d || CL[d]); cbDraw = S.act === 'draw' ? ds[Math.floor(Math.random() * ds.length)] || '' : '';
+    }
+    if (S.act === 'draw') cbT += dt; else cbDraw = '';
+    // the fight goes on: he sets off (a standing stance gives way to one for the move), stops (a standing one comes back
+    // after COMBAT.settle s), a shot from the 2nd after a pick may change it
+    if (moving) { cbStill = 0; if (!COMBAT.move.includes(cbSt)) cbSt = cbMovePick(); cbMove = true; }
+    else if (cbMove) { cbStill += dt; if (cbStill > COMBAT.settle) { cbMove = false; cbSt = cbPick(''); cbN = S.shotN; } }
+    if (S.shotN !== cbN && !moving) {
+      if (S.shotN - cbN >= 2 && Math.random() < COMBAT.shift) { cbSt = cbPick(cbSt); cbN = S.shotN; }
+      else if (S.shotN < cbN) cbN = S.shotN;
+    }
+    CBR.base = ''; CBR.aim = false; CBR.upper = ''; CBR.key = moving ? 'cb:' + cbSt + ':m' : 'cb:' + cbSt;   // (setting off / stopping: a fade too)
+    stats.cb = S.act === 'draw' && cbDraw ? cbDraw : cbSt;
+    if (S.act === 'draw' && !moving && cbDraw && f.startsWith('gun_draw')) { CBR.base = drawFrame(); CBR.key = 'cb:' + cbDraw; return CBR; }
+    if (f.startsWith('gun_hipfire')) { if (CL.cb_st_hip) { CBR.base = cbFrame('hip'); CBR.aim = true; CBR.key = 'cb:hip'; return CBR; } return null; }
+    if (!moving && (f.startsWith('gun_aim') || f.startsWith('gun_fire') || f.startsWith('gaim_'))) { CBR.base = cbFrame(cbSt); CBR.aim = true; return CBR; }
+    if (!moving && f.startsWith('gun_reload') && cbSt !== 'aim') { CBR.base = cbFrame(cbSt); CBR.upper = f; return CBR; }   // (reloading IN the stance: its legs, the reload's hands)
+    if (moving && cbSt !== 'aim' && CL['cb_st_' + cbSt] && (p.fam === 'gws' || p.fam === 'grs')) { CBR.upper = cbFrame(cbSt); return CBR; }
+    return moving ? CBR : null;   // (on the move with the aim: the gait's own twist-0 pose; the key keeps the fade quiet)
+  }
+  // the drawn muzzle (the world: arena x, y, height), for the shot's flash (host.playerMuzzle): the last drawn frame's
+  const MW = {x: 0, y: 0, h: 0, ok: false};
+
   // ---------------------------------------------------------------- body space -> the render's world (render/rigmesh.js matrices)
   let fc = 1, fs = 0, AX = 0, AY = 0, AZ = 0, FX = 0, FZ = -1;
   function toWorld(x, y, z, o, k) { o[k] = fc * x - fs * y + AX; o[k + 1] = z + AY; o[k + 2] = -fs * x - fc * y + AZ; }
@@ -528,11 +598,17 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // 1) the frame and its clip, the time it has shown
     const f = emote(poseOf(P.frame) ? P.frame : 'idle.0', P, dt), p = parse(f);
     if (f !== frameNow) { frameNow = f; frameT = 0; } else frameT += dt;
-    if (p.clip !== clipNow) { if (haveShow && !K.step) { Lfrom.set(Ll); fadeT = 0; } clipNow = p.clip; }
+    const S = app.PL.gun?.S, proc = K.proc, flowOn = K.flow && proc;
+    const cb = flowOn ? combat(f, p, P, S, dt) : null, ck = cb ? cb.key : p.clip;   // (COMBAT STYLE: its stance / draw)
+    if (ck !== clipNow) {   // a clip change cross-fades (smooth); a stance's change always (COMBAT.fade)
+      const cbf = flowOn && (ck.startsWith('cb:') || clipNow.startsWith('cb:'));
+      if (haveShow && (!K.step || cbf)) { Lfrom.set(Ll); fadeT = 0; fadeDur = cbf ? COMBAT.fade : FADE; }
+      clipNow = ck;
+    }
     // 2) the base pose (world, body space) into Wt
-    const S = app.PL.gun?.S, proc = K.proc;
-    let baseName = f, layer = '', upper = -1, aiming = false;
-    if (proc && p.fam && (p.fam === 'gws' || p.fam === 'grs')) { baseName = nm(p.fam + '_0_', p.i); aiming = true; }   // aim on the move: the twist-0 pose
+    let baseName = f, layer = '', upper = -1, aiming = false, upName = '';
+    if (cb && cb.base) { baseName = cb.base; aiming = cb.aim; if (cb.upper) { layer = 'upper'; upName = cb.upper; } }   // COMBAT STYLE: the stance / the draw (/ a reload over its legs)
+    else if (proc && p.fam && (p.fam === 'gws' || p.fam === 'grs')) { baseName = nm(p.fam + '_0_', p.i); aiming = true; if (cb && cb.upper) { layer = 'upper'; upName = cb.upper; } }   // aim on the move: the twist-0 pose (and a stance's upper body)
     else if (proc && (f.startsWith('gun_aim') || (K.flow && f.startsWith('gun_fire')))) { baseName = 'gun_aim'; aiming = true; }   // the standing twists (and with FLOW the kick): gun_aim
     else if (proc && p.fam && (p.fam === 'gwr' || p.fam === 'grr') && S) { baseName = nm(p.loco + '.', p.i); layer = 'reload'; upper = reloadAt(S); }
     if (K.demo === 'swing') baseName = poseOf('reach_up') ? 'reach_up' : 'idle.0';
@@ -541,7 +617,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       const nx = next(baseName === f ? p : parse(baseName), P, f), B = nx.name && poseOf(nx.name);
       if (B) blendLocal(A.l, B.l, nx.u, Ll); else Ll.set(A.l);
     } else Ll.set(A.l);
-    if (fadeT < 1) { fadeT = Math.min(1, fadeT + dt / FADE); blendLocal(Lfrom, Ll, fadeT * fadeT * (3 - 2 * fadeT), Ltmp); Ll.set(Ltmp); }
+    if (fadeT < 1) { fadeT = Math.min(1, fadeT + dt / fadeDur); blendLocal(Lfrom, Ll, fadeT * fadeT * (3 - 2 * fadeT), Ltmp); Ll.set(Ltmp); }
     fk(Ll, Wt);
     if (GUN >= 0 && !K.step) {   // the gun held away from the hand (the holster) blends in body space, not along the arm
       const nx = NX.name ? poseOf(NX.name) : null;
@@ -550,8 +626,9 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // the procedural time: sampled at STEP_HZ (step) or every frame
     const tk = Math.floor(t * STEP_HZ), sample = !K.step || tk !== stepK; if (sample) { stepK = tk; sampT = K.step ? tk / STEP_HZ : t; }
     // 3) layering: the reload's upper body (Spine and up, as posed in the stand) over these legs, the spine's base on theirs
-    if (layer === 'reload') {
-      const a = Math.floor(upper), u = K.step ? 0 : upper - a, RA = poseOf(nm('gun_reload.', a)), RB = poseOf(nm('gun_reload.', Math.min(a + 1, (CL.gun_reload?.frames || 13) - 1)));
+    if (layer === 'reload' || layer === 'upper') {   // (or a combat stance's upper body over the gait)
+      const a = Math.floor(upper), u = K.step || layer === 'upper' ? 0 : upper - a, RA = layer === 'upper' ? poseOf(upName) : poseOf(nm('gun_reload.', a)),
+        RB = layer === 'upper' ? null : poseOf(nm('gun_reload.', Math.min(a + 1, (CL.gun_reload?.frames || 13) - 1)));
       if (RA && SPINE >= 0) {
         if (RB && u > 0) { blendLocal(RA.l, RB.l, u, Ltmp); fk(Ltmp, Wb); } else Wb.set(RA.w);
         const o = SPINE * 7, dx = Wt[o + 4] - Wb[o + 4], dy = Wt[o + 5] - Wb[o + 5], dz = Wt[o + 6] - Wb[o + 6];
@@ -563,7 +640,6 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     const phi = facing(P, yaw, dt);
     fc = Math.cos(phi); fs = Math.sin(phi); AX = PX; AY = P.z - sinkPx / ctxO.PPMH; AZ = PY; FX = -Math.sin(yaw); FZ = -Math.cos(yaw);
     // 5) aim at any angle: the twist onto the cursor (held by the hysteresis, sampled with the step)
-    const flowOn = K.flow && proc;
     if (aiming && GUN >= 0) {   // (and at once when the legs re-plant or turn: a stale twist on new legs points anywhere)
       if (sample || !(twistHeld === twistHeld) || phi !== aimPhi || baseName !== aimBase) {
         twist = aimTwist(Wt, twist); twistHeld = phi !== aimPhi || baseName !== aimBase ? twist : hystOf(twistHeld, twist); aimPhi = phi; aimBase = baseName;
@@ -600,6 +676,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     aim.ok = GUN >= 0 && gunNear(show);
     if (aim.ok) { barrel(show); screenOf(MUZ[0], MUZ[1], MUZ[2], SC); aim.mx = SC[0]; aim.my = SC[1]; const o = GUN * 7; screenOf(show[o + 4], show[o + 5], show[o + 6], SC); aim.a = Math.atan2(aim.my - SC[1], aim.mx - SC[0]); }
     if (shotWant) { shotWant = false; if (aim.ok) shot(); }   // (an emote's shot: the gun in his hand)
+    MW.ok = aim.ok; if (aim.ok) { toWorld(MUZ[0], MUZ[1], MUZ[2], WP, 0); MW.x = WP[0]; MW.y = WP[2]; MW.h = WP[1]; }
+    screenOf(0, 0, 0, SC); SCR.x = SC[0]; SCR.y = SC[1]; G.toScreenInto(AX + 1, AY, AZ, SO); SCR.ppm = Math.abs(SO[0] - SC[0]) || SCR.ppm;
     flash(dt);
     mats(show, A.hide);
     stats.smears += K.smear ? smear(show) : (prevOk = false, 0);
@@ -653,7 +731,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     stats, model, poseOf, BN, J,
     // (a knob changed, the body (re)shown: no history carried over)
     reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false;
-      twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; },
+      twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; },
+    muzzle: () => MW.ok ? MW : null,
     setLineup(items) { lineup = items || []; },
     aim,
     // (dev: the shimmer meter draws several knob sets off ONE sim step, each from its own history)
@@ -699,6 +778,7 @@ export async function createLiveHero(o) {
     presets: Object.keys(PRESETS),
     get demos() { return cur()?.demos ?? DEMOS; }, get emotes() { return cur()?.emotes ?? []; },
     get stats() { return cur()?.stats ?? NOSTATS; }, get aim() { return cur()?.aim; },
+    muzzle: () => on ? cur()?.muzzle() ?? null : null,   // (the drawn muzzle: host.playerMuzzle, the shot's flash)
     get model() { return cur()?.model; }, get J() { return cur()?.J; }, get BN() { return cur()?.BN; }, poseOf: n => cur()?.poseOf(n),
     setLineup(items) { cur()?.setLineup(items); },
     snapshot: () => cur().snapshot(), restore: S => cur().restore(S),

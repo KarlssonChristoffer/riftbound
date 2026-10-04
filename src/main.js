@@ -189,6 +189,9 @@ const host = {
   // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame. Their
   // size is img.width / img.height; h is the player's height above the ground (metres), like every host h.
   playerSprite: () => live?.on ? live.sprite() : hero.sprite(),
+  // the muzzle of the gun as DRAWN (?live=1: the live hero's stances and kicks move it off the sim's atlas muzzle): world
+  // {x, y, h}, the last frame's, or null (the sprite: the sim's muzzle is the drawn one). For the shot's flash (gunfx)
+  playerMuzzle: () => live?.on ? live.muzzle() : null,
 };
 
 // ---------------------------------------------------------------- features

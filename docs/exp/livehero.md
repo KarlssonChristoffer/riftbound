@@ -138,6 +138,36 @@ showed in every pose; it is now its own piece, and `model.json` `hide` lists the
 draws a hidden piece with a zero matrix). A `_clip`'s in-between lost that scale in `western.py` too (a blend of the
 keys' bones); its `pose()` now packs the coil away again after the blend outside the lasso's clips.
 
+## Gunplay that flows: FLOW and the COMBAT STYLE (2026-10-03)
+
+The user asked for more variation in combat: many draws, more angles to shoot from, the body moving fluidly while
+roughly on target. On the live hero (`view/livehero.js`, knob `K.flow`, on in every preset but `exact`; **Shift+Alt+9**
+turns it off / on):
+
+- **FLOW** (procedural, any model with a gun). The aim is a WORLD angle on a spring (w 26 rad/s, damping .55: ~10 %
+  overshoot, settled in ~.2 s): the head leads (the chest's lag x .85, up to 40 deg), the chest follows, and the gun arm
+  trails a fast swing (up to 12 deg). Re-planted legs don't jolt it, since the world angle is what springs. The chest leans
+  into his acceleration (up to 7 deg sideways / forward), and the free arm pumps with the stride on the move. Every shot
+  kicks differently (`RECOIL`: the wrist's flip, the shoulder's rock, the whole chest; x .85-1.15, the Navy x 1.25, a fan
+  x .5), the standing shot included (the stance + a kick instead of `gun_fire`'s frames). Alone this is subtle at ~45 px:
+  a pixel or two.
+- **COMBAT STYLE** (models with the `cb_*` clips: `western.py` `COMBAT_LIVE`, exported with `--clips`). Each time the
+  gun comes out he picks a STANCE by the target's distance (`COMBAT.w`: up close the hip; mid the aim, a deep crouch, the
+  duelist's side-on, a knee; far the duel and the knee most) and a DRAW into it (`cb_dr_*`: straight, a sweep out wide,
+  a spin out of the holster, up by the cheek, dropping to the knee, into the crouch), laid over the sim's draw by its
+  progress. The gunslinger's hip shot comes from the hip stance. On the move his upper body takes the hip or the aim over
+  the gait's legs, and stopping brings a standing stance back after .3 s. From the 2nd shot after a pick, a shot changes
+  the stance with p .22. A reload in a low stance keeps its legs (the reload's hands over them). Every change cross-fades
+  (.15 s). The spine twist aims whichever stance it is.
+- The **drawn muzzle** goes to the shot's flash and smoke (`live.muzzle()` -> `host.playerMuzzle` -> `features/gunfx.js`).
+  The sim's muzzle is its atlas frame's, inches off a stance's gun. The bullet itself still leaves from the sim's muzzle.
+
+View only: the sim is unchanged (simview with `?live=1` passes). Reels: `tmp/live-emotes/combat_outlaw.gif`,
+`combat_gunslinger.gif` (`combatreel.mjs`: scripted fights in the real game; `gunflow.mjs`: flow off | on).
+Next: shooting ANGLES the sim allows (a shot back over the shoulder while running away, across the body) need the sim's
+muzzle and cone for them, from atlas frames (the gunslinger session's route: `pixel_rig --append`) or a sim-readable
+table; and the gunslinger's duster on live bones.
+
 ## Measurements
 
 ### The shimmer meter

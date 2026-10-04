@@ -2633,3 +2633,58 @@ ANIMS['gun_turnshot'] = _routine([('idle_in', 40), ('~', .5, 40), ('lv_ts_grab',
                                   ('gun_lv_ts_aim', 60)])
 ANIMS['gun_whip'] = _routine([('gun_aim', 40), ('~', .5, 40), ('gun_lv_pw_wind', 70), ('~', .5, 30), ('gun_lv_pw_hit', 50, 'hit'),
                               ('~', .5, 50), ('gun_lv_pw_follow', 90), ('~', .5, 60), ('gun_aim', 70)])
+
+
+# ================================================================ the live gunplay: stances and draws (live only) ======
+# Combat for the LIVE hero (src/view/livehero.js COMBAT STYLE): the poses he shoots FROM, picked by the view each time the
+# gun comes out (how far the target is, whether he is moving) and changed as the fight goes (he stops, he sets off, a few
+# shots in), each aimed at the cursor by the live hero's spine twist; and the draws that bring the gun into them. Clips
+# named cb_* (combat): the live hero keeps them out of the Shift+9 emotes. Exported with ragdoll_export.py --clips.
+#   cb_st_aim     the standing aim (gun_aim), breathing
+#   cb_st_hip     low and wide, the gun at the hip (the quickdraw's hip shot): up close, and his upper body on the run
+#   cb_st_crouch  knees bent deep, leaning in, the arm out, the free hand toward the knee: steady
+#   cb_st_duel    side-on, feet in line, at arm's length, the free fist on the small of the back (the duelist's)
+#   cb_st_kneel   down on the right knee, two-handed (the kneel's)
+#   cb_dr_*       a draw into a stance: hip (straight to the hip), sweep (out wide to his right, then onto him), spin
+#                 (twirled out of the holster), high (up by the cheek, lowered at arm's length: the duel), kneel (dropping
+#                 onto the knee), crouch
+COMBAT_LIVE = ('cb_st_aim', 'cb_st_hip', 'cb_st_crouch', 'cb_st_duel', 'cb_st_kneel',
+               'cb_dr_hip', 'cb_dr_sweep', 'cb_dr_spin', 'cb_dr_high', 'cb_dr_kneel', 'cb_dr_crouch')
+
+
+def _like(new, src, extra=None):
+    """POSES[new] = POSES[src] with `extra` rotations after its own, and src's way of holding (the hook tables)."""
+    spec = {k: (list(v) if isinstance(v, list) else v) for k, v in POSES[src].items()}
+    for k, v in (extra or {}).items():
+        spec[k] = spec.get(k, []) + v
+    POSES[new] = spec
+    for T in (LIVE_AT, LIVE_GUN, LIVE_LEFT, GUN_SPIN, REACH, LEFT_TO_GUN):
+        if src in T:
+            T[new] = T[src]
+
+
+# the stances: each a key and its breath (the chest 2 deg lower), looped slowly
+_BREATH = {'Spine2': [('X', 2)]}
+_DEEP = {'LeftUpLeg': [('X', -42), ('Y', -10)], 'LeftLeg': [('X', 64)], 'LeftFoot': [('X', -20)],
+         'RightUpLeg': [('X', -24), ('Y', 10)], 'RightLeg': [('X', 58)], 'RightFoot': [('X', -28), ('Z', 10)]}
+POSES['gun_cb_crouch_a'] = _gpose(_BLADE, _AIM_ARM, {'LeftArm': [('Y', 28), ('X', -38)], 'LeftForeArm': [('X', -36)]},
+                                  legs=_DEEP, lean=16)
+for _s, _src in (('aim', 'gun_aim'), ('hip', 'gun_lv_qd_hip'), ('crouch', 'gun_cb_crouch_a'), ('duel', 'gun_lv_dl_aim'),
+                 ('kneel', 'gun_lv_kn_aim')):
+    if _src != f'gun_cb_{_s}_a':
+        _like(f'gun_cb_{_s}_a', _src)
+    _like(f'gun_cb_{_s}_b', f'gun_cb_{_s}_a', _BREATH)
+    ANIMS[f'cb_st_{_s}'] = _clip([f'gun_cb_{_s}_a', f'gun_cb_{_s}_b'], [0, 1], 2, loop=True)
+
+# the draws (the view plays one over the sim's draw, by its progress: their fps is nominal)
+POSES['gun_cb_sw_out'] = _gpose(12, {'RightShoulder': [('Y', 6)], 'RightArm': [('Y', 40), ('X', -20)], 'RightForeArm': [('X', -20)]},
+                                lean=4)
+LIVE_GUN['gun_cb_sw_out'] = {'dir': (-.8, -.3, .5)}   # (out to his right, the muzzle up)
+ANIMS['cb_dr_hip'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_cb_hip_a'], [0, .5, 1, 1.5, 2], 32)
+ANIMS['cb_dr_sweep'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_cb_sw_out', 'gun_cb_aim_a'], [0, 1, 1.5, 2, 2.5, 3], 32)
+ANIMS['cb_dr_spin'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_spin_1', 'gun_spin_2', 'gun_spin_3', 'gun_cb_aim_a'],
+                            [0, 1, 2, 3, 4, 4.5, 5], 32)
+ANIMS['cb_dr_high'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_lv_dl_up', 'gun_cb_duel_a'], [0, 1, 1.5, 2, 2.5, 3], 32)
+ANIMS['cb_dr_kneel'] = _clip(['gdraw_grab', 'gun_lv_kn_down', 'gun_cb_kneel_a'], [0, .5, 1, 1.5, 2], 32)
+ANIMS['cb_dr_crouch'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_cb_crouch_a'], [0, 1, 1.5, 2], 32)
+

@@ -80,7 +80,7 @@ const R = Math.random, RR = (a, b) => a + R() * (b - a);   // presentation's ran
 // come: a fresh one is short): a white-hot head, a gold middle (both glowing), a dull copper tail. Other shooters' bullets
 // (features/foes) are drawn with it too
 export function tracer(host, x, y, h, ux, uy, uh, L) {
-  const T = TUNE.tracer; L = Math.min(T.len, L); if (!(L > 0)) return;   // (still at the muzzle: the flash is there)
+  const T = TUNE.tracer; L = Math.min(T.len, L);
   seg(host, x, y, h, ux, uy, uh, 0, Math.min(L, T.head), C.head, true);
   if (L > T.head) seg(host, x, y, h, ux, uy, uh, T.head, Math.min(L, T.mid), C.mid, true);
   if (L > T.mid) seg(host, x, y, h, ux, uy, uh, T.mid, L, C.tail, false);
@@ -109,6 +109,7 @@ export async function create(host) {
   // screen, s art px a metre along the shot there, the muzzle (x, y, h: the sim's), the shot's way (ux, uy)
   const mkFlash = () => ({t: -9, v: 0, k: 1, a: 0, s: 1, x: 0, y: 0, h: 0, ux: 1, uy: 0});
   const FL = mkFlash();   // yours
+  const PM = {x: 0, y: 0, h: 0, vx: 0, vy: 0};   // (your shot from the gun as drawn live: host.playerMuzzle)
   const OF = []; for (let i = 0; i < 6; i++) OF.push(mkFlash());   // other shooters' (foe.shoot): the newest one lights
   let ofI = 0, OFL = OF[0];
   const mkChain = id => TUNE.flash.light.chain.map((c, i) => ({x: 0, y: 0, h: 0, color: TUNE.flash.light.color, radius: 1, intensity: 0, flicker: 0, id: id + i, halo: false}));
@@ -250,10 +251,13 @@ export async function create(host) {
         } else if (e.type === 'player.shoot') {
           const w = WEAPONS[e.gun] || {}, navy = e.gun === 'brass_navy';
           // the flash at the shot's muzzle (where the sim put it: the pose's muzzle on screen, the aim's depth), along the
-          // shot, not the barrel of the frame showing: that one is already kicking up
-          flashOf(FL, e, (navy ? TUNE.flash.navy : 1) * (e.fan ? TUNE.flash.fan : 1));
-          blast(e.x, e.y, e.h, e.vx, e.vy, navy ? TUNE.blast.navy : TUNE.blast.n);
-          smoke.shot(e.x, e.y, e.h, e.vx, e.vy, SMOKE.puffs + (navy ? 1 : 0), navy ? 1.25 : 1, w.push ? 1 + w.push : 1, true);   // (+ the cylinder gap's jets)
+          // shot, not the barrel of the frame showing: that one is already kicking up. Drawn live (?live=1) the gun is
+          // where the live hero drew it (its stances): host.playerMuzzle, with the shot's own way
+          const m = host.playerMuzzle?.(), q = m ? PM : e;
+          if (m) { PM.x = m.x; PM.y = m.y; PM.h = m.h; PM.vx = e.vx; PM.vy = e.vy; }
+          flashOf(FL, q, (navy ? TUNE.flash.navy : 1) * (e.fan ? TUNE.flash.fan : 1));
+          blast(q.x, q.y, q.h, q.vx, q.vy, navy ? TUNE.blast.navy : TUNE.blast.n);
+          smoke.shot(q.x, q.y, q.h, q.vx, q.vy, SMOKE.puffs + (navy ? 1 : 0), navy ? 1.25 : 1, w.push ? 1 + w.push : 1, true);   // (+ the cylinder gap's jets)
           wispFor = SMOKE.wisp;
         } else if (e.type === 'bullet.impact') {
           const T = TR[trI]; trI = (trI + 1) % TRN;
@@ -307,14 +311,12 @@ export async function create(host) {
       if (FL.t > 0) drawFlash(FL);
       for (const Q of OF) if (Q.t > 0) drawFlash(Q);
       flashes.frame();
-      // tracers: every bullet in flight, a streak behind its head, no longer than its head (as drawn) is from the muzzle
-      // it left: drawn between sim steps the head is only alpha of the way along a 2.5 m step, so a length from the
-      // sim's distance ran a fresh shot's streak back past the gun, through his arm
+      // tracers: every bullet in flight, a streak behind its head (length capped by how far it has come)
       const T = TUNE.tracer;
       for (const a of host.arrows) {
         if (a.kind !== 'bullet' || a.life <= -9) continue;
-        const v = hypot3(a.vx, a.vy, a.vh) || 1, ux = a.vx / v, uy = a.vy / v, uh = a.vh / v;
-        tracer(host, a.x, a.y, a.h, ux, uy, uh, a.ox === undefined ? T.len : hypot3(a.x - a.ox, a.y - a.oy, a.h - a.oh));
+        const w = WEAPONS[a.gun], v = hypot3(a.vx, a.vy, a.vh) || 1, ux = a.vx / v, uy = a.vy / v, uh = a.vh / v;
+        tracer(host, a.x, a.y, a.h, ux, uy, uh, w ? (w.range / w.speed - a.life) * w.speed + .3 : T.len);
       }
       for (const S of TR) {   // a bullet's last step, shrinking into where it ended
         if (S.t >= T.last) continue;
