@@ -59,7 +59,7 @@ export function createLighting({G, host, features, opt}) {
     // (every record is reused frame to frame: LOUT goes to the shader, CAND holds the candidates, FREC copies features' lights)
     nL = 0;
     if (m.lift[0] + m.lift[1] + m.lift[2] > 0) putL(PX, P.z + .9, PY, m.lift, 1.7, 1, true);
-    if (opt.lantern || lanternMod > 0) {
+    if ((opt.lantern || lanternMod > 0) && !host.playerHidden) {   // (photo mode may hide him: his lantern goes with him)
       const a = player.faceAngle, fx = Math.sin(a), fy = Math.cos(a), fk2 = flick(LANTERN, t);
       putL(PX + fx * LANTERN.fwd - fy * LANTERN.side, P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side, LANTERN.c, LANTERN.r * lanternR * (1 + (fk2 - 1) * .15), fk2, false);
     }

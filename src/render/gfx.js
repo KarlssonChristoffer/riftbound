@@ -1945,14 +1945,19 @@ void main() {
   }
 
   let waterSpeed = 1, waterT = -1;
+  // POST (photo mode, render/photofx.js): setPost(p) sends the finished frame into p.target (a target the canvas's size)
+  // instead of the canvas, then p.run(renderer) draws it on; p.still holds the shaders' clocks (the leaves' flutter, the
+  // water, the heat ripple): the world stands still. setPost(null): the frame goes to the canvas as before
+  let post = null;
+  const setPost = p => { post = p || null; };
   const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
   function render() {
-    const t0 = performance.now();
+    const t0 = performance.now(), still = post !== null && post.still;
     if (rflFrame !== frameNo) compU.uRf.value.x = 0;   // (the reflections, clouds and haze show only on frames depth.js set them)
     if (clFrame !== frameNo) compU.uCl.value.x = 0;
     if (hzFrame !== frameNo) compU.uHz.value.x = 0;
-    U.time.value = (t0 / 1000) % 3600;
-    const dtw = waterT < 0 ? 0 : Math.min(.1, (t0 - waterT) / 1000); waterT = t0;   // the water's clock: its own, so G.setWater never makes the pattern jump
+    if (!still) U.time.value = (t0 / 1000) % 3600;
+    const dtw = waterT < 0 || still ? 0 : Math.min(.1, (t0 - waterT) / 1000); waterT = t0;   // the water's clock: its own, so G.setWater never makes the pattern jump
     U.wPhase.value = (U.wPhase.value + dtw * waterSpeed) % 65536;
     flushBatches(); syncCards(); packCards();
     let ns = 0; for (const g2 of groups.values()) ns += g2.n;
@@ -2016,15 +2021,16 @@ void main() {
         fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
         renderer.setRenderTarget(heatRT); renderer.clear(true, false, false); renderer.render(heatScene, camera);
       }
-      blitU.uHeat.value = hN ? 1 : 0; blitU.uT.value = performance.now() / 1000 % 1000; blitU.uZ.value = view.zoom;
-      renderer.setRenderTarget(null); renderer.render(blitScene, dummyCam);
+      blitU.uHeat.value = hN ? 1 : 0; if (!still) blitU.uT.value = performance.now() / 1000 % 1000; blitU.uZ.value = view.zoom;
+      renderer.setRenderTarget(post && post.target); renderer.render(blitScene, dummyCam);
       if (fxN || fxX) {
         fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
         renderer.render(fxScene, camera);
       }
-    } else { renderer.setRenderTarget(null); renderer.render(compScene, dummyCam); }
+    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); }
     if (vgFrame === frameNo) { vgU.uVgS.value.set(VW * DS, VH * DS); renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it
+    if (post) post.run(renderer);
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
     stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
@@ -2112,6 +2118,6 @@ void main() {
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD,
-    fx, heat, setDisplay, resize, fxU, get display() { return DS; },
+    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost,
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }

@@ -59,6 +59,7 @@ export const FLAG_DOCS = {
   lineup: 'trees: the procedural trees side by side for review',
   views: '0: run the sim alone, no presentation step or drawing (tools/test/simview.mjs: the sim must come out the same)',
   owncheck: '1: record writes to entity fields by systems that do not own them (dev/owncheck.js; slow: for checks)',
+  photo: '1: open straight into photo mode (ui/photo.js; F4 or the menu otherwise: tests)',
 };
 const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
 const warned = new Set();

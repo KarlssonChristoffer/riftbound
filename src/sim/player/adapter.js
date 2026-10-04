@@ -4,7 +4,7 @@
 // world coordinates, the world-frame view of him every system reads (`player`), turning his view-frame state when the
 // camera turns, the cursor's target (ARPG aim), the nearest interactable, and climbing at any camera angle (the camera
 // eases to north for the climb and back after: `assist`).
-// OWNS: PL (player.js) and P (its state), the aim memo, the climb assist.  READS: the world, the entities (near: what
+// OWNS: PL (player.js) and P (its state), the aim memo, the climb assist, the held frame (photo mode).  READS: the world, the entities (near: what
 //   blocks him, what he can interact with), the camera, the hero's atlas, features' aimTarget / interact.
 // EMITS (via player.js): player.step / land / jump / splash (turned into world coordinates here; core/events.js).
 //   const pa = createPlayerHost({...}); const {PL, P, player} = pa
@@ -86,6 +86,19 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     const n = Math.round(faceAcc);
     if (n) { P.face = (((P.face + n) % ND) + ND) % ND; P.want = (((P.want + n) % ND) + ND) % ND; faceAcc -= n; }
   }
+  // HOLD (ui/photo.js: photo mode turns the camera while the sim stands still): hold() notes what turnFrame turns; release()
+  // puts it back exactly, once the camera is back at the yaw it was noted at (turned there and back in floating point it
+  // wouldn't be bit for bit, and the sim must leave photo mode as it came in)
+  let held = null;
+  function hold() {
+    const L = P.leap;
+    held = {x: P.x, y: P.y, vx: P.vx, vy: P.vy, rollDir: P.rollDir, back: P.back, leap: L ? [L.x0, L.y0, L.dx, L.dy] : null, face: P.face, want: P.want, faceAcc};
+  }
+  function release() {
+    const h = held; if (!h) return; held = null;
+    P.x = h.x; P.y = h.y; P.vx = h.vx; P.vy = h.vy; P.rollDir = h.rollDir; P.back = h.back; P.face = h.face; P.want = h.want; faceAcc = h.faceAcc;
+    if (h.leap && P.leap) [P.leap.x0, P.leap.y0, P.leap.dx, P.leap.dy] = h.leap;
+  }
   // the player's events are in the view frame: into the world's
   function toWorldEvent(e) {
     if (e.x !== undefined && e.y !== undefined) [e.x, e.y] = toWorld(e.x, e.y);
@@ -161,7 +174,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     const [vx, vy] = toView(l0 + (x - l0) * k, l1 + (y - l1) * k); P.x = vx; P.y = vy; P.z = l2 + (z - l2) * k;
   }
   function lerpEnd() { if (!lerping) return; P.x = c0; P.y = c1; P.z = c2; lerping = false; }
-  return {PL, P, player, blocked, syncPlateaus, turnFrame, toWorldEvent, hoverTarget, nearProp, climbSpotW, stepAssist, teleport, snap, lerpBegin, lerpEnd,
+  return {PL, P, player, blocked, syncPlateaus, turnFrame, hold, release, toWorldEvent, hoverTarget, nearProp, climbSpotW, stepAssist, teleport, snap, lerpBegin, lerpEnd,
     tick() { hoverKey++; }, get assist() { return A.assist; }, set assist(v) { A.assist = v; },
     // (views) the part of a facing step the camera has turned since P.face last moved with it (turnFrame's remainder):
     // his facing in the world without the camera's 16-step rounding is (P.face + faceRest) x 360 / ND + yaw (view/livehero.js)
