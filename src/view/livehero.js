@@ -36,6 +36,11 @@
 // the hip stance; on the move the hip stance's upper body over the legs; changing as the fight goes (he sets off, stops,
 // a few shots in), cross-faded. The spine twist aims whichever it is. The drawn muzzle goes to the gun's flash
 // (live.muzzle(): host.playerMuzzle, features/gunfx.js), since the sim's muzzle is its atlas frame's.
+// TRANSITIONS (with FLOW): when what is drawn switches (another clip, stance, layer or angle family, the aim on or off) or
+// his facing steps, the drawn body blends from what was on screen over TB.dur / TB.face s, in his frame turned by the
+// facing (so a facing step turns smoothly too), joints held together (a local blend, then FK); and the aim's spring
+// restarts on the new pose instead of swinging the arm across. (Within a clip, frame to frame, nothing is blended: that
+// motion is drawn as authored.)
 // VIEW only: reads the player (P, the gun's state), the cursor; writes its own state, its rig, and hides the hero's card
 // while it draws (hero.card.setVisible). The sim never reads any of it (?views=0 and ?live=1 leave the sim the same).
 // OWNS: the live model and its rig (render/rigmesh.js), the knobs, the drawn pose, the lineup (dev: setLineup).
@@ -59,7 +64,10 @@ const PLAYER_SUN = 1.6;   // m toward the sun of his chest where the composite t
 const XFAMS = new Set(['ob', 'ub', 'cx']);   // the angles' gait families (sim/player/gun.js TWX): drawn as they are, trimmed by
                                              // at most XLIM of spine twist (their upper bodies aren't the aim's twist-0)
 const XLIM = 30 * Math.PI / 180;
-const SHOT_FX = {life: .065, len: .62};   // an emote's shot: the flash's life (s) and length (m along the barrel), as gunfx's
+const SHOT_FX = {life: .065, len: .62};
+// TRANSITIONS: s a switch / a facing step blends over at least; longer for a bigger change (the hands, the gun, the head,
+// the feet moving at most `speed` art px / s on screen; the gun's heading turning at most `turn` deg / s), at most max s
+const TB = {dur: .12, face: .09, speed: 300, turn: 720, max: .28};   // (turn: deg / s the barrel's heading may swing)   // an emote's shot: the flash's life (s) and length (m along the barrel), as gunfx's
 const SMEAR = {px: 3, k: .55, max: .3, kmax: 2};   // a tip jump past px screen px: stretched back k of its move (at most
                                                    // max m, at most kmax x the piece's own extent along the move)
 // the knobs' presets (dev/livekeys.js cycles them; the shimmer meter runs each)
@@ -76,7 +84,7 @@ export const PRESETS = {
   allsmear: {step: true, face: 16, hyst: 7, hold: true, snap: true, smear: true},
   free32: {step: false, face: 32, hyst: 7, hold: true, snap: true, smear: false},   // smooth time, 32 facings, the rest on
 };
-for (const v of Object.values(PRESETS)) { v.proc ??= true; v.flow ??= v.proc; }   // (every preset but exact: the procedural layers on)
+for (const v of Object.values(PRESETS)) { v.proc ??= true; v.flow ??= v.proc; v.blend ??= v.flow; }   // (blend: TRANSITIONS)   // (every preset but exact: the procedural layers on)
 // FLOW's numbers: the aim spring (w rad/s, z damping: ~10 % overshoot, settled in ~.2 s), the head's lead (share of the
 // chest's lag, at most headMax deg), the gun arm's drag (s of the swing's speed, at most dragMax deg), the free arm's
 // pump (deg at a full stride: walk, run), the lean into acceleration (deg per m/s^2, at most max; tau s of smoothing)
@@ -157,6 +165,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const HIPS = B_('Hips'), SPINE = B_('Spine'), SPINE1 = B_('Spine1'), SPINE2 = B_('Spine2'), HEAD = B_('Head'), GUN = B_('GunHold0'), HAND_R = B_('RightHand');
   const NECK = B_('Neck'), ARM_L = B_('LeftArm'), FOOT_L = B_('LeftFoot'), FOOT_R = B_('RightFoot');
   const ARM_R = B_('RightArm'), FARM_R = B_('RightForeArm'), HAND_L = B_('LeftHand'), UPLEG_L = B_('LeftUpLeg'), UPLEG_R = B_('RightUpLeg');
+  const TB_PARTS = [GUN, HAND_R, HAND_L, HEAD, FOOT_L, FOOT_R].filter(b => b >= 0);
   // the muzzle in the gun's frame (GunMuzzle0 is a fixed child of GunHold0: rest^-1 x rest)
   const MZ = new Float64Array(3);
   if (J.bones.GunMuzzle0 && J.bones.GunHold0) {
@@ -211,9 +220,15 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const Wb = new Float64Array(NB * 7), Wshow = new Float64Array(NB * 7), Wt = new Float64Array(NB * 7);
   let clipNow = '', frameNow = '', frameT = 0, fadeT = 1, haveShow = false;
   let wf = NaN, twist = 0, twistShown = NaN, demoA = NaN, stepK = -1, sampT = 0, lastT = -1, aimPhi = NaN, aimBase = '';
-  let twistHeld = NaN, aimOn = false, aimX = 0, aimV = 0, aimShow = 0, aimVShow = 0;   // (FLOW: the aim's spring, world angle)
+  let twistHeld = NaN, aimOn = false, aimX = 0, aimV = 0, aimShow = 0, aimVShow = 0, aimSpringPhi = 0;   // (FLOW: the aim's spring, world angle)
   let rc = null, rcT = 0, rcK = 1, rcN = -1, accX = 0, accY = 0, lvx = NaN, lvy = 0;   // (FLOW: the kick, the smoothed acceleration)
   let fadeDur = FADE;   // (the cross-fade now: a clip change's, or COMBAT.fade for a stance's)
+  // TRANSITIONS: what was drawn last (its clip, layer, the upper body's clip, aiming, the facing) and its pose as locals in
+  // his frame turned by the facing; the blend from it
+  const LW = new Float64Array(NB * 7), TBF = new Float64Array(NB * 7), LTB = new Float64Array(NB * 7), WTB = new Float64Array(NB * 7);
+  let tbClip = '', tbLayer = '', tbUp = '', tbAim = false, tbPhi = NaN, tbT = 1, tbDur = 1, tbHave = false;
+  const TBP = new Float64Array(3 * 8), TBQ = new Float64Array(3 * 8);
+  let tbGun = NaN;   // (the drawn barrel's heading in the world, last frame: NaN with the gun not in his hand)   // (the parts whose travel sets the blend's length; where they were drawn, turned)
   const MATS = new Float32Array(24 * 12), PR = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 4};
   const TIPS = new Float64Array(NB * 4), TIPS2 = new Float64Array(NB * 4), PREV = new Float64Array(NB * 3), SC = [0, 0, 0];
   let prevOk = false;
@@ -278,14 +293,31 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     screenOf(TW_TMP[o + 4], TW_TMP[o + 5], TW_TMP[o + 6], SO);
     return wrap(Math.atan2(CUR[1] - my, CUR[0] - mx) - Math.atan2(my - SO[1], mx - SO[0]));
   }
+  // Robust (the TRANSITIONS work): when the last answer is far off (a new pose, the cursor swung) a coarse look over the
+  // whole range first, each candidate's error plus a little for straying from the last answer (AIM.stick: where the barrel
+  // points into the screen, side-on, many twists look alike on screen and the bare secant hopped between them, -5 / -23 /
+  // +3 / +15 deg with the cursor still); then the secant. An answer already within AIM.keep is kept unless a better one is
+  // near (no swing of more than AIM.jump for a degree or two)
+  const AIM = {coarse: 12 * DEG, steps: 10, stick: .12, tol: .5 * DEG, keep: 4 * DEG, jump: 20 * DEG, gain: 3 * DEG};
   function aimTwist(w, d0, LIM = 110 * DEG) {
     cursor();
-    let a = d0 === d0 ? d0 : 0, ea = screenErr(w, a), b = a + (ea > 0 ? -1 : 1) * 12 * DEG, eb = screenErr(w, b);
-    for (let it = 0; it < 5 && Math.abs(eb) > .5 * DEG; it++) {
+    const c0 = d0 === d0 ? Math.max(-LIM, Math.min(LIM, d0)) : 0, e0 = screenErr(w, c0);
+    let a = c0, ea = e0;
+    if (Math.abs(e0) > AIM.coarse) {
+      let best = Math.abs(e0);
+      for (let k = 0; k <= AIM.steps; k++) {
+        const x = -LIM + 2 * LIM * k / AIM.steps, e = screenErr(w, x), c = Math.abs(e) + AIM.stick * Math.abs(x - c0);
+        if (c < best) { best = c; a = x; ea = e; }
+      }
+    }
+    let b = Math.max(-LIM, Math.min(LIM, a + (ea > 0 ? -1 : 1) * 8 * DEG)), eb = screenErr(w, b);
+    for (let it = 0; it < 5 && Math.abs(eb) > AIM.tol; it++) {
       const den = eb - ea; let c = Math.abs(den) < 1e-6 ? b + 6 * DEG : b - eb * (b - a) / den;
       c = Math.max(-LIM, Math.min(LIM, c)); a = b; ea = eb; b = c; eb = screenErr(w, b);
     }
-    return Math.abs(eb) <= Math.abs(ea) ? b : a;
+    const r = Math.abs(eb) <= Math.abs(ea) ? b : a, er = Math.min(Math.abs(eb), Math.abs(ea));
+    if (Math.abs(e0) < AIM.keep && Math.abs(r - c0) > AIM.jump) return c0;   // (good enough: no long swing for a degree or two)
+    return er < Math.abs(e0) - AIM.gain || Math.abs(r - c0) < 2 * DEG ? r : c0;   // (it moves for a clear gain only)
   }
   // hysteresis: v follows target only when it moved more than K.hyst degrees (0: always)
   const hystOf = (shown, target) => !(shown === shown) || !K.hyst || Math.abs(wrap(target - shown)) > K.hyst * DEG ? target : shown;
@@ -350,12 +382,38 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     ropeN = 2;
   }
 
+  // ---------------------------------------------------------------- TRANSITIONS: his pose in his frame turned by the facing
+  // w (his body space) -> locals with the roots turned by phi about the vertical (the children's locals don't change)
+  const QZ = new Float64Array(4);
+  function toLocalTurned(w, phi, out) {
+    toLocal(w, out); axisAngle(0, 0, 1, phi, QZ);
+    for (let i = 0; i < NB; i++) {
+      if (PI[i] >= 0) continue;
+      const o = i * 7; qmul(QZ, 0, out, o, out, o); qrot(QZ, 0, out[o + 4], out[o + 5], out[o + 6], V3, 0); out[o + 4] = V3[0]; out[o + 5] = V3[1]; out[o + 6] = V3[2];
+    }
+  }
+  // the TB_PARTS of w turned by phi -> out (x, y, z each); -> the most any moved from `prev` (m), if given
+  function turnedParts(w, phi, out, prev) {
+    const c = Math.cos(phi), s = Math.sin(phi); let d = 0;
+    for (let k = 0; k < TB_PARTS.length; k++) {
+      const o = TB_PARTS[k] * 7, x = c * w[o + 4] - s * w[o + 5], y = s * w[o + 4] + c * w[o + 5], z = w[o + 6];
+      if (prev) d = Math.max(d, Math.hypot(x - prev[k * 3], y - prev[k * 3 + 1], z - prev[k * 3 + 2]));
+      out[k * 3] = x; out[k * 3 + 1] = y; out[k * 3 + 2] = z;
+    }
+    return d;
+  }
+  // a turned pose (world-like, after FK) back into his body space at the facing phi
+  function unturn(w, phi) {
+    axisAngle(0, 0, 1, -phi, QZ);
+    for (let i = 0; i < NB; i++) { const o = i * 7; qmul(QZ, 0, w, o, w, o); qrot(QZ, 0, w[o + 4], w[o + 5], w[o + 6], V3, 0); w[o + 4] = V3[0]; w[o + 5] = V3[1]; w[o + 6] = V3[2]; }
+  }
+
   // ---------------------------------------------------------------- FLOW (K.flow): gunplay that moves (body space, in w)
   // the aim as a WORLD angle (the facing + the twist) springs toward the held one, so legs that re-plant or turn don't jolt
   // it; stepped: what shows is the spring at the procedural ticks. -> the twist to draw
-  function aimFlow(phi, tw, dt, sample) {
+  function aimFlow(phi, tw, dt, sample, restart) {
     const target = phi + tw;
-    if (!aimOn) { aimOn = true; aimX = aimShow = target; aimV = aimVShow = 0; return tw; }
+    if (!aimOn || restart) { aimOn = true; aimX = aimShow = target; aimV = aimVShow = 0; return tw; }   // (a switch: the blend carries it)
     const n = Math.max(1, Math.ceil(dt / .008)), h = dt / n, W2 = FLOW.w * FLOW.w, Z2 = 2 * FLOW.z * FLOW.w;
     for (let i = 0; i < n; i++) { aimV += (W2 * wrap(target - aimX) - Z2 * aimV) * h; aimX += aimV * h; }
     if (Math.abs(wrap(target - aimX)) < .4 * DEG && Math.abs(aimV) < .3) { aimX = target; aimV = 0; }   // (settled: on it, still)
@@ -603,9 +661,10 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     if (f !== frameNow) { frameNow = f; frameT = 0; } else frameT += dt;
     const S = app.PL.gun?.S, proc = K.proc, flowOn = K.flow && proc;
     const cb = flowOn ? combat(f, p, P, S, dt) : null, ck = cb ? cb.key : p.clip;   // (COMBAT STYLE: its stance / draw)
-    if (ck !== clipNow) {   // a clip change cross-fades (smooth); a stance's change always (COMBAT.fade)
+    if (ck !== clipNow) {   // a clip change cross-fades (smooth); a stance's change always (COMBAT.fade); with TRANSITIONS
+      // on, neither: the blend after the aim carries it (a fade here would have the aim solved on a half-blended pose)
       const cbf = flowOn && (ck.startsWith('cb:') || clipNow.startsWith('cb:'));
-      if (haveShow && (!K.step || cbf)) { Lfrom.set(Ll); fadeT = 0; fadeDur = cbf ? COMBAT.fade : FADE; }
+      if (haveShow && (!K.step || cbf) && !(flowOn && K.blend)) { Lfrom.set(Ll); fadeT = 0; fadeDur = cbf ? COMBAT.fade : FADE; }
       clipNow = ck;
     }
     // 2) the base pose (world, body space) into Wt
@@ -617,6 +676,10 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     else if (proc && p.fam && (p.fam === 'gwr' || p.fam === 'grr') && S) { baseName = nm(p.loco + '.', p.i); layer = 'reload'; upper = reloadAt(S); }
     if (K.demo === 'swing') baseName = poseOf('reach_up') ? 'reach_up' : 'idle.0';
     const A = poseOf(baseName) || poseOf(f);
+    // TRANSITIONS: has what is drawn switched? (parse()'s clip names are cached strings: no allocation)
+    const tbOn = flowOn && K.blend, bclip = parse(baseName).clip, uclip = upName ? parse(upName).clip : '', swap = tbOn && tbHave &&
+      (bclip !== tbClip || layer !== tbLayer || uclip !== tbUp || aiming !== tbAim);
+    tbClip = bclip; tbLayer = layer; tbUp = uclip; tbAim = aiming;
     if (!K.step) {   // smooth: toward the next frame
       const nx = next(baseName === f ? p : parse(baseName), P, f), B = nx.name && poseOf(nx.name);
       if (B) blendLocal(A.l, B.l, nx.u, Ll); else Ll.set(A.l);
@@ -648,7 +711,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       if (sample || !(twistHeld === twistHeld) || phi !== aimPhi || baseName !== aimBase) {
         twist = aimTwist(Wt, twist, XFAMS.has(p.tw) ? XLIM : undefined); twistHeld = phi !== aimPhi || baseName !== aimBase ? twist : hystOf(twistHeld, twist); aimPhi = phi; aimBase = baseName;
       }
-      twistShown = flowOn ? aimFlow(phi, twistHeld, dt, sample) : twistHeld;
+      const bigTurn = Math.abs(wrap(phi - aimSpringPhi)) > 60 * DEG; aimSpringPhi = phi;   // (a pivot: the spring restarts there too)
+      twistShown = flowOn ? Math.max(-110 * DEG, Math.min(110 * DEG, aimFlow(phi, twistHeld, dt, sample, swap || bigTurn))) : twistHeld;
       spineTwist(Wt, twistShown);
       if (flowOn) {   // FLOW: the head leads, the arm trails, the free arm pumps on the move, the chest leans into it
         lead(Wt, twistHeld - twistShown);
@@ -667,7 +731,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       const a = hystOf(demoA, th); demoA = a; swing(Wt, a, dth);
     } else demoA = NaN;
     // 7) hold until it changes by a pixel
-    stats.frames++;
+    stats.frames++; stats.base = baseName; stats.layer = layer; stats.key = clipNow; stats.fade = fadeT;   // (dev: what this frame drew)
+    stats.tw = twistShown; stats.twH = twistHeld; stats.twS = twist; stats.kick = rc ? rcT : -1; stats.tb = tbT < tbDur ? tbT / tbDur : 1; stats.tbDur = tbDur;
     let show = Wt;
     if (K.hold && haveShow) {
       tips(Wt, TIPS); tips(Wshow, TIPS2);
@@ -676,6 +741,21 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     } else Wshow.set(Wt);
     haveShow = true;
     if (show !== Wt) toLocal(Wshow, Ll);   // (Ll: the shown local pose, a clip change's cross-fade starts from it)
+    // 7b) TRANSITIONS: a switch or a facing step blends from what was drawn (turned by its facing) to this
+    if (tbOn) {
+      if (tbHave && (swap || Math.abs(wrap(phi - tbPhi)) > 4 * DEG)) {   // (a step: not the smooth facing's easing)
+        const far = turnedParts(show, phi, TBQ, TBP) * (SCR.ppm || 30) / TB.speed;   // (s the biggest travel takes at TB.speed)
+        const hd = GUN >= 0 && gunNear(show) ? barrel(show) + phi : NaN, turn = hd === hd && tbGun === tbGun ? Math.abs(wrap(hd - tbGun)) / DEG / TB.turn : 0;
+        TBF.set(LW); tbT = 0; tbDur = Math.min(TB.max, Math.max(swap ? TB.dur : TB.face, far, turn));
+      }
+      tbPhi = phi;
+      if (tbT < tbDur) {
+        tbT += dt; const u = Math.min(1, tbT / tbDur), e = u * u * (3 - 2 * u);
+        toLocalTurned(show, phi, LTB); blendLocal(TBF, LTB, e, LTB); fk(LTB, WTB); unturn(WTB, phi); show = WTB;
+      }
+      toLocalTurned(show, phi, LW); turnedParts(show, phi, TBP, null); tbHave = true;
+      tbGun = GUN >= 0 && gunNear(show) ? barrel(show) + phi : NaN;
+    } else tbHave = false;
     // 8) the segments' matrices, the smear, the rig
     aim.ok = GUN >= 0 && gunNear(show);
     if (aim.ok) { barrel(show); screenOf(MUZ[0], MUZ[1], MUZ[2], SC); aim.mx = SC[0]; aim.my = SC[1]; const o = GUN * 7; screenOf(show[o + 4], show[o + 5], show[o + 6], SC); aim.a = Math.atan2(aim.my - SC[1], aim.mx - SC[0]); }
@@ -735,7 +815,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     stats, model, poseOf, BN, J,
     // (a knob changed, the body (re)shown: no history carried over)
     reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false;
-      twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; },
+      twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; tbHave = false; tbT = tbDur = 1; },
     muzzle: () => MW.ok ? MW : null,
     setLineup(items) { lineup = items || []; },
     aim,

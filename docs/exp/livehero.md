@@ -164,6 +164,26 @@ turns it off / on):
 
 View only: the sim is unchanged (simview with `?live=1` passes). Reels: `tmp/live-emotes/combat_outlaw.gif`,
 `combat_gunslinger.gif` (`combatreel.mjs`: scripted fights in the real game; `gunflow.mjs`: flow off | on).
+**Transitions (the jumps between animations).** Measured with `tmp/live-emotes/popmeter.mjs`: a scripted fight full of
+transitions, every drawn frame's largest body-part move on screen, each sorted by what changed: his facing stepped, what
+is drawn switched (clip, stance, layer, angle family), the next frame of the same clip (authored), or the same pose (the
+procedural layers). The pops had three causes, and the fixes:
+- A switch or a facing step drew the new pose at once: the arms and gun jumped 20-50 px. Now (`K.blend`, with FLOW;
+  `TB`) the drawn body blends from what was on screen, in his frame turned by the facing (so a 22.5 deg facing step
+  turns smoothly), as a local blend + FK (joints stay together). It runs 0.12 s at least, longer for a bigger change
+  (the hands / gun / head / feet at <= 300 px / s, the barrel's heading at <= 720 deg / s), at most 0.28 s. With it,
+  the base pose's own cross-fade before the aim is off, so the aim is solved on the clean pose.
+- The aim spring sprang across a switch: another base pose needs another spine twist for the same aim, so its target
+  jumped and the arm swung away and back. The spring now restarts on a switch and on a facing step over 60 deg; the
+  blend carries the visual.
+- The spine-twist solve hopped. At a switch it hit its 110 deg limit, and side-on (the barrel into the screen) it gave
+  -5 / -23 / +3 / +15 deg with the cursor still. `aimTwist` now does a coarse scan of the range when the last answer is
+  12+ deg off, prefers answers near the last one, and moves only for a clear gain (3 deg).
+Gunslinger, the same fight: facing steps' jumps median 10.7 -> 1.6 px (max 51 -> 7.9), switches' max 33 -> 3.6 (none
+over 6 px); outlaw: 43 -> 13.5 and 36 -> 4.7. What still moves fast is motion, not a pop: a blend chasing a fast cursor
+swing, the kicks, the reload's hands on the run. The sprite path (no `?live=1`) is frames: it can't blend.
+Reel: `tmp/live-emotes/transitions_outlaw.gif` (before | after).
+
 **New shooting angles (gameplay, sprite and live).** On the move the stances can also aim with three upper bodies the
 torso twists (-90..+45) can't reach: the gun back over the right shoulder (`ob`), back past the left side under the arm
 (`ub`), across the chest to his left (`cx`). Each is laid over every walk / run frame (`gws_<fam>_<i>` / `grs_<fam>_<i>`,
