@@ -255,6 +255,7 @@ uniform sampler2D uTex, uEm; uniform vec2 uTexSize; uniform float uSmooth, uHasE
 // steep ground (the ravine wall): a cliff texture (rock strata, the waterfall) by world x (z on east / west faces) and
 // depth below the bank, 1 texel = 1 px at yaw 0 (uPx = PPM, PPMH), repeating; drawn as a textured face (type 5)
 uniform sampler2D uCliff; uniform float uHasCliff, uCliffOff; uniform vec2 uCliffSize, uPx;
+uniform float uCliffTop;   // steep ground only below this height takes the cliff texture (walkable terrain: its banks above 0 stay ground)
 ` + WATER_FS + `
 // FALLEN LEAVES (world.js bakes the source, one texel per 2 x 2 ground texels: R = how thick the leaves lie here once the crowns are bare,
 // G = which tree palette they came from; uLitPal = that palette's colours, 4 stages x 3 tones along x, one row per group). A leaf
@@ -265,6 +266,9 @@ uniform sampler2D uCliff; uniform float uHasCliff, uCliffOff; uniform vec2 uClif
 // its field: the wind has moved the leaves about, R already holds how much has fallen, G is the palette itself. uLitCap: never denser
 precision highp sampler2D;
 uniform sampler2D uLit, uLitPal; uniform float uHasLit, uLive, uLitCap; uniform vec4 uLitK;
+// GROUND DECALS on walkable terrain (G.setGroundDecals: features/flow.js's ground layer): marks in world px (x PPM, z PPMY) read at
+// the fragment's own world position, so they lie on a slope as on flat ground (without terrain flow draws them through a plane)
+uniform sampler2D uDecal; uniform float uHasDecal, uDecalOn; uniform vec4 uDecalRect; uniform vec2 uDecalPx;
 float lh(ivec2 p, uint salt) { p = max(p, ivec2(0)); uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u + salt * 2246822519u; h = (h ^ (h >> 13)) * 1274126177u; return float((h ^ (h >> 16)) & 65535u) / 65536.; }
 float lorg(ivec2 o, ivec2 mx, ivec2 ls) {   // does a leaf start at texel o? (the density here, as much as has fallen; a leaf covers ~2 texels: half the odds)
   return lh(o, 1u) < min(texelFetch(uLit, clamp(o, ivec2(0), mx) * ls / (mx + 1), 0).r * (uLive > .5 ? 1. : uLitK.x), uLitCap) * .5 ? 1. : 0.;
@@ -291,12 +295,13 @@ void main() {
   vec2 uvS = (s + clamp((t - s) / d, -.5, .5)) / uTexSize;            // smooth-pixel: sharp, blended only across texel seams
   // the triangle's own plane (the grid's smooth normals blend a 0.25 m cliff cell into its flat neighbours)
   vec3 fn = normalize(cross(dFdx(vW), dFdy(vW))); if (dot(fn, vN) < 0.) fn = -fn;
-  if (uHasCliff > .5 && abs(fn.y) < .45) {
+  if (uHasCliff > .5 && abs(fn.y) < .45 && vW.y < uCliffTop) {
     vec3 n = fn;
     float along = abs(n.z) >= abs(n.x) ? vW.x : vW.z;
     vec2 ct = vec2((along + uCliffOff) * uPx.x, -vW.y * uPx.y);
     vec4 cc = texture(uCliff, (floor(ct) + .5) / uCliffSize);
     float al = cc.a * 255.;   // alpha 250: a glowing fall (lava); 252: a fall of water (streams down: fall())
+    if (al < .5) discard;     // (alpha 0: no wall drawn here: the 3D cliffs stand in front, world.js / cliffs3d.js)
     o0 = vec4(abs(al - 252.) < .5 ? fall(cc.rgb, floor(ct), uCliffSize.y) : cc.rgb, float(5 * 4) / 255.);
     o1 = vec4(n, uObj); o2 = vec4(abs(al - 250.) < .5 ? cc.rgb : vec3(0.), 0.);
     return;
@@ -327,6 +332,10 @@ void main() {
   if (uHasLit > .5 && uLitK.x > 0. && uType < 1.5 && wfl < .5) {
     ivec2 mx = ivec2(uTexSize) - 1; vec4 lc = leafAt(clamp(ivec2(floor(t)), ivec2(0), mx), mx);
     if (lc.a > 0.) { c.rgb = lc.rgb; leaf = 1.; }
+  }
+  if (uHasDecal > .5 && uDecalOn > .5 && wfl < .5) {
+    vec2 dp = vec2(vW.x * uDecalPx.x, vW.z * uDecalPx.y) - uDecalRect.xy;
+    if (dp.x >= 0. && dp.y >= 0. && dp.x < uDecalRect.z && dp.y < uDecalRect.w) { vec4 dc = texelFetch(uDecal, ivec2(dp), 0); c.rgb = mix(c.rgb, dc.rgb, dc.a); }
   }
   vec3 em = vec3(0.);
   if (uHasEm > .5) { vec4 e = mix(texture(uEm, uvN), texture(uEm, uvS), uSmooth); em = e.rgb * e.a; }
@@ -1133,6 +1142,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     leafK: {value: 1},  // how full the crowns are this season (features/weather.js from sim/env.js leafK)
     autumn: {value: 0}, // how far autumn has turned the leaves, 0 green .. 1 (setGround, from sim/env.js autumn): shaders colour leaves by it
     litK: {value: new THREE.Vector4()},   // the fallen leaves: x how much has fallen (0 = none), y how far they have turned (setGround; SURF_FS)
+    decalT: {value: null}, decalOn: {value: 0}, decalRect: {value: new THREE.Vector4()}, decalPx: {value: new THREE.Vector2(1, 1)},   // setGroundDecals (SURF_FS)
     // the moving water (setWaterLook at every build, the clock in render()): see WATER_FS
     wPhase: {value: 0}, wA: {value: new THREE.Vector4(0, 3, 12, -1)}, wB: {value: new THREE.Vector4(.8, .76, 0, 2)}, wRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())},
   };
@@ -1201,7 +1211,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
-  const surfMat = ({tex, em = null, planar, world, origin = null, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, litter = null}) => raw(SURF_VS, SURF_FS, {
+  const surfMat = ({tex, em = null, planar, world, origin = null, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, litter = null, decals = false, cliffTop = 1e9}) => raw(SURF_VS, SURF_FS, {
+    uCliffTop: {value: cliffTop},
+    uDecal: U.decalT, uHasDecal: {value: decals ? 1 : 0}, uDecalOn: U.decalOn, uDecalRect: U.decalRect, uDecalPx: U.decalPx,
     uLit: litter?.u || {value: null}, uLitPal: {value: litter?.pal || null}, uHasLit: {value: litter ? 1 : 0}, uLitK: U.litK, uLive: litter?.live || {value: 0}, uLitCap: litter?.cap || {value: 1},
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
     uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)}, uOrigin: {value: origin || new THREE.Vector2(0, 0)},
@@ -1607,6 +1619,13 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // are shown as premultiplied: straight colours whose alpha is 0 or 255 are both). drawImage takes it like a canvas; after
   // changing the array, G.texData(img, x, y, w, h, data, w, x, y) uploads that rect (no canvas between: flow's marks)
   const dataImage = (w, h, data) => ({width: w, height: h, data, isData: true});
+  // setGroundDecals(img, x0, y0, pxX, pxY): the ground surfaces made with {decals: true} show img (a dataImage, kept current with
+  // texData) at world px (x pxX - x0, z pxY - y0) under each fragment (walkable terrain: features/flow.js). null: off
+  let gDecal = null;
+  function setGroundDecals(img, x0 = 0, y0 = 0, pxX = 1, pxY = 1) {
+    gDecal = img; U.decalOn.value = img ? 1 : 0;
+    if (img) { U.decalRect.value.set(x0, y0, img.width, img.height); U.decalPx.value.set(pxX, pxY); U.decalT.value = imgTex(img); } else U.decalT.value = null;
+  }
   // an image or canvas drawn by a GPU context: its texture, made (and uploaded) once; unused for 600 frames, it is let go
   const imgT = new WeakMap(), imgLive = new Set();
   function imgTex(img) {
@@ -1953,6 +1972,7 @@ void main() {
   const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
   function render() {
     const t0 = performance.now(), still = post !== null && post.still;
+    if (gDecal) U.decalT.value = imgTex(gDecal);   // (a GPU context's image: used this frame, so it isn't let go)
     if (rflFrame !== frameNo) compU.uRf.value.x = 0;   // (the reflections, clouds and haze show only on frames depth.js set them)
     if (clFrame !== frameNo) compU.uCl.value.x = 0;
     if (hzFrame !== frameNo) compU.uHz.value.x = 0;
@@ -2117,7 +2137,7 @@ void main() {
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
-    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD,
+    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost,
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }

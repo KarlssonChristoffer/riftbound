@@ -57,6 +57,7 @@ import {clamp, clearArray, hypot2} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {hex255 as hex} from '../core/color.js';
 import {createFightLife} from './wildlife/fightlife.js';   // the fight reactions: scavengers at kills, night canids, the flush (docs/exp/wildfight.md)
+import {TERRAIN_ON, steep, onGround} from '../world/world.js';   // walkable terrain (docs/TERRAIN.md): ground animals follow it
 
 const TAU = Math.PI * 2;
 const CALM = {x: 0, y: 0, g: 0};
@@ -439,7 +440,7 @@ export async function create(host) {
   const nearS = [];   // the grid's candidates (host.entities.near): what stands here
   function solid(x, y, z) {
     const wb = ctx.bounds; if (x < wb.x0 + .6 || y < wb.y0 + .6 || x > wb.x1 - .6 || y > wb.y1 - .6) return true;   // the world's edge
-    if (Math.abs(elev(x, y) - z) > .2) return true;
+    if (TERRAIN_ON ? steep(x, y) || Math.abs(elev(x, y) - z) > .45 : Math.abs(elev(x, y) - z) > .2) return true;   // (terrain: a step, not a cliff)
     if (z < .1 && inStream(x, y)) return true;
     for (const p of host.entities.near(x, y, .1, nearS)) {
       if (p.broken || p.gone || Math.abs((p.z || 0) - z) > .8) continue;
@@ -649,7 +650,7 @@ export async function create(host) {
         if (f.t > 0 || night) break;
         if (f.calmT < 4 || (P && f.home && Math.hypot(f.home.x - P.x, f.home.y - P.y) < 5)) { f.t = rr(3, 6); break; }
         if (f.sp.solo) {
-          if (R() < .45) { const q = freeNear(c.x, c.y + 2, 5, 0, 20); if (q && (!P || Math.hypot(q[0] - P.x, q[1] - P.y) > 6)) { f.home = {x: q[0], y: q[1], z: 0, r: 1.5}; f.homes = [[q[0], q[1]]]; takeOff(f, false, 'home'); break; } }
+          if (R() < .45) { const q = freeNear(c.x, c.y + 2, 5, 0, 20); if (q && (!P || Math.hypot(q[0] - P.x, q[1] - P.y) > 6)) { f.home = {x: q[0], y: q[1], z: TERRAIN_ON ? elev(q[0], q[1]) : 0, r: 1.5}; f.homes = [[q[0], q[1]]]; takeOff(f, false, 'home'); break; } }
           takeOff(f, false, 'perch');
         } else takeOff(f, false, 'home');
         break;
@@ -683,7 +684,7 @@ export async function create(host) {
     }
     if (b.hop) {
       const H = b.hop; H.t += dt; const k = Math.min(1, H.t / H.d);
-      b.x = H.x0 + (H.x1 - H.x0) * k; b.y = H.y0 + (H.y1 - H.y0) * k; b.h = b.z + Math.sin(k * Math.PI) * H.a;
+      b.x = H.x0 + (H.x1 - H.x0) * k; b.y = H.y0 + (H.y1 - H.y0) * k; if (TERRAIN_ON) b.z = elev(b.x, b.y); b.h = b.z + Math.sin(k * Math.PI) * H.a;
       if (k >= 1) { b.hop = null; b.h = b.z; }
       return;
     }
@@ -696,7 +697,7 @@ export async function create(host) {
     if (b.walk) {
       const Wk = b.walk; Wk.t -= dt;
       const x1 = b.x + Wk.vx * dt, y1 = b.y + Wk.vy * dt;
-      if (Wk.t <= 0 || solid(x1, y1, b.z)) b.walk = null; else { b.x = x1; b.y = y1; }
+      if (Wk.t <= 0 || solid(x1, y1, b.z)) b.walk = null; else { b.x = x1; b.y = y1; if (TERRAIN_ON) b.h = b.z = elev(x1, y1); }
       b.act = ((T * 5 + b.ph) | 0) & 1 ? 'bob' : 'stand';
       if (!b.walk) { b.act = 'stand'; b.at = rr(.2, .8); }
       return;
@@ -771,7 +772,7 @@ export async function create(host) {
     a.dashCD -= dt;
     if (a.hop) {
       const H = a.hop; H.t += dt; const k = Math.min(1, H.t / H.d);
-      a.x = H.x0 + (H.x1 - H.x0) * k; a.y = H.y0 + (H.y1 - H.y0) * k; a.h = a.z + Math.sin(k * Math.PI) * H.a;
+      a.x = H.x0 + (H.x1 - H.x0) * k; a.y = H.y0 + (H.y1 - H.y0) * k; if (TERRAIN_ON) a.z = elev(a.x, a.y); a.h = a.z + Math.sin(k * Math.PI) * H.a;
       if (k < 1) return; a.hop = null; a.h = a.z;
     }
     if (a.st === 'gone') { a.hide -= dt; if (a.hide <= 0 && !near(a.hx, a.hy)) { a.x = a.hx; a.y = a.hy; a.st = a.cover ? 'hide' : 'graze'; a.hide = rr(2, 5); } else if (a.hide <= 0) a.hide = 2; return; }
@@ -855,7 +856,7 @@ export async function create(host) {
     if (a.st === 'dart') {
       const x1 = a.x + a.vx * dt, y1 = a.y + a.vy * dt;
       if (solid(x1, y1, a.z)) { a.st = 'freeze'; a.at = rr(.8, 2.5); }
-      else { a.x = x1; a.y = y1; a.ph += dt * 14; }
+      else { a.x = x1; a.y = y1; a.ph += dt * 14; if (TERRAIN_ON) a.z = elev(x1, y1); }
       if ((a.at -= dt) <= 0) { a.st = 'freeze'; a.at = rr(1.2, 4); }
       return;
     }
@@ -1209,7 +1210,7 @@ export async function create(host) {
     for (let i = 0; i < 3; i++) { const p = pick(pillars); if (p) tryProp(p, rr(.9, 1.7), 0); }
     const pl = (host.layout.plateaus || [])[0];
     if (pl) for (let i = 0; i < 3; i++) cand.push({x: rr(pl.x0 + 1, pl.x1 - 1), y: pl.y1 + .03, h: rr(.6, 1.8), ground: true});
-    for (let i = 0; i < 6; i++) { const q = freeNear(rr(10, 56), rr(8, 25), .1, 0, 1); if (q && !inStream(q[0], q[1]) && elev(q[0], q[1]) === 0) cand.push({x: q[0], y: q[1], h: 0, ground: true, floor: true}); }
+    for (let i = 0; i < 6; i++) { const q = freeNear(rr(10, 56), rr(8, 25), .1, 0, 1); if (q && !inStream(q[0], q[1]) && onGround(q[0], q[1])) cand.push({x: q[0], y: q[1], h: TERRAIN_ON ? elev(q[0], q[1]) : 0, ground: true, floor: true}); }
     for (let i = cand.length - 1; i > 0; i--) { const k = R() * (i + 1) | 0; [cand[i], cand[k]] = [cand[k], cand[i]]; }
     const out = [];
     for (const c of cand) { if (out.length >= n) break; if (out.some(o => Math.hypot(o.x - c.x, o.y - c.y) < 1.6)) continue; out.push(c); }
@@ -1343,7 +1344,7 @@ export async function create(host) {
       const f = newFlock(C.solos.sp, 1, []), b = f.birds[0];
       b.x = rr(10, 30); b.y = rr(8, 22);
       if (!placePerched(f)) { const q = freeNear(20, 12, 6, 0, 30) || [20, 12]; f.homes = [q]; placeFeeding(f, q); }
-      f.home = {x: b.x, y: b.y + 2, z: 0, r: 1.5}; f.homes = [[b.x, b.y + 2]];
+      f.home = {x: b.x, y: b.y + 2, z: TERRAIN_ON ? elev(b.x, b.y + 2) : 0, r: 1.5}; f.homes = [[b.x, b.y + 2]];
     }
     const bushes = props.filter(p => p.kind === 'bush' && !p.outside);
     if (C.rabbits) { const bs = [...bushes].sort(() => R() - .5); for (let i = 0; i < C.rabbits && i < bs.length; i++) { const b = bs[i]; newHopper('rabbit', b.x + rr(-.8, .8), b.y + rr(.5, 1.2), b); } }

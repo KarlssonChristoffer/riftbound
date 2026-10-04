@@ -28,7 +28,7 @@
 // BUDGET: off: nothing (update returns; no Math.random, no props, no draws). On: update ~.01 ms (a few records); view +
 //   frame ~.05 ms (<= 8 sprites, <= 512 points, <= 6 lights); <= 6 static meshes.
 import * as WORLD from '../world/world.js';
-import {roamable, elev, inStream, PLAY, TRAIL} from '../world/world.js';
+import {roamable, elev, inStream, PLAY, TRAIL, sameLevel} from '../world/world.js';
 import {mulberry32, viewRandom} from '../core/rng.js';
 import {clamp, hypot2, TAU, clearArray} from '../core/mathx.js';
 import {rgbOf} from '../core/color.js';
@@ -86,8 +86,8 @@ export async function create(host) {
   // ================================================================ placement (sim)
   // free ground: enemies may roam it at height z, no water, nothing solid within r (soft scatter and enemies don't count)
   function freeAt(x, y, r, z = 0) {
-    if (!roamable(x, y) || elev(x, y) !== z || inStream(x, y)) return false;
-    for (let k = 0; k < 8; k++) { const a = k * TAU / 8, sx = x + Math.sin(a) * r, sy = y + Math.cos(a) * r; if (!roamable(sx, sy) || elev(sx, sy) !== z || inStream(sx, sy)) return false; }
+    if (!roamable(x, y) || !sameLevel(elev(x, y), z, .15) || inStream(x, y)) return false;   // (a level footprint: within .15 m on walkable terrain)
+    for (let k = 0; k < 8; k++) { const a = k * TAU / 8, sx = x + Math.sin(a) * r, sy = y + Math.cos(a) * r; if (!roamable(sx, sy) || !sameLevel(elev(sx, sy), z, .15) || inStream(sx, sy)) return false; }
     for (const p of host.entities.near(x, y, r + .8, NEAR)) {
       if (p.gone || p.hunter || (!(p.r > 0) && !p.rect)) continue;
       if (Math.abs((p.z || 0) - z) > 1) continue;

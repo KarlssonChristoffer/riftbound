@@ -46,6 +46,7 @@ import {mulberry32} from '../core/rng.js';
 import {clearArray} from '../core/mathx.js';
 import {hexAny255 as hex3, lum} from '../core/color.js';
 import {createWaterLife} from './atmos/waterlife.js';
+import {sameLevel} from '../world/world.js';
 
 const TAU = Math.PI * 2;
 // palettes are ordered bright -> dim; fades step toward the end
@@ -465,7 +466,7 @@ export async function create(host) {
     if (biome === 'frost') {
       const side = e.foot === 'R' ? -1 : 1, x = e.x + dirY * side * .09, y = e.y - dirX * side * .09;   // left of travel = (dy, -dx)
       let dup = false; for (let i = Math.max(0, prints.length - 4); i < prints.length; i++) if (Math.hypot(prints[i].x - x, prints[i].y - y) < .07) dup = true;
-      if (!dup && !(z === 0 && wet(x, y)) && elevAt(x, y) === z) {   // no prints on water or hanging over the cliff lip
+      if (!dup && !(z === 0 && wet(x, y)) && sameLevel(elevAt(x, y), z, .2)) {   // no prints on water or hanging over the cliff lip
         prints.push({x, y, z, t: 0, dx: dirX, dy: dirY, tab: PRINT});   // (the shape follows the stride ON SCREEN: picked when drawn)
         if (prints.length > 240) prints.shift();
       }
@@ -475,7 +476,7 @@ export async function create(host) {
       const gr = host.biome.groundAt?.(e.x, e.y), tab = gr === 'sand' ? PRINT_SAND : gr === 'pan' ? PRINT_PAN : null;
       const side = e.foot === 'R' ? -1 : 1, x = e.x + dirY * side * .09, y = e.y - dirX * side * .09;
       let dup = !tab; for (let i = Math.max(0, prints.length - 4); i < prints.length && !dup; i++) if (Math.hypot(prints[i].x - x, prints[i].y - y) < .07) dup = true;
-      if (!dup && !(z === 0 && wet(x, y)) && elevAt(x, y) === z) { prints.push({x, y, z, t: 0, dx: dirX, dy: dirY, tab}); if (prints.length > 240) prints.shift(); }
+      if (!dup && !(z === 0 && wet(x, y)) && sameLevel(elevAt(x, y), z, .2)) { prints.push({x, y, z, t: 0, dx: dirX, dy: dirY, tab}); if (prints.length > 240) prints.shift(); }
     } else if (biome === 'ruins') {   // grass rustle: kicking through a tuft throws a few blades
       for (const p of host.entities.near(e.x, e.y, .6, nearT)) if (p.kind === 'tuft' && Math.abs(p.x - e.x) < .6 && Math.abs(p.y - e.y) < .45 && Math.abs((p.z || 0) - z) < .3) { emitFx(p.x, p.y, z + .05, 3, GRASS); break; }
     }

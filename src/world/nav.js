@@ -13,13 +13,16 @@
 // It's rebuilt per stage (build()) since the world's fixed props come with the layout.
 // o.area(x, y) -> bool: the ground it may use (default: layout.navArea, inside the arena's walls or on the trail; the desert's
 // gunmen, features/foes, walk all the ground the player can: the fort's square and 3 m round it too).
-import {WORLD, navArea, elev, inStream} from './world.js';
+import {WORLD, navArea, elev, inStream, TERRAIN_ON, steep, PLATEAUS} from './world.js';
 
 const C = .5, TAU = Math.PI * 2, FIELD_R = 40;   // FIELD_R: how far (m of walking) the flow field reaches; spawns are 5-10 m out
 
 export function createNav(host, o = {}) {
   const X0 = WORLD.x0, Y0 = WORLD.y0, NX = Math.ceil(WORLD.WM / C), NY = Math.ceil(WORLD.HM / C), N = NX * NY;   // cell (i, j) = X0 + i C .. (the world's origin)
   const open = new Uint8Array(N), dist = new Float32Array(N).fill(Infinity), queue = new Int32Array(N);
+  // walkable terrain (docs/TERRAIN.md): a cell is open where the ground isn't a cliff (nor the plateau's top), and two open cells
+  // join only if their ground differs by at most a step (a terrace's edge parts them; its ramp joins them)
+  const hgt = TERRAIN_ON ? new Float32Array(N) : null, STEP = .45, onPlateau = (x, y) => PLATEAUS.some(q => x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1);
   let fieldT = 0, built = false, lastT = 0;   // lastT: how many cells the last field reached (queue[0 .. lastT): reset only those)
   const lures = [];   // addLure's providers
   const idx = (x, y) => { const i = Math.floor((x - X0) / C), j = Math.floor((y - Y0) / C); return i < 0 || j < 0 || i >= NX || j >= NY ? -1 : j * NX + i; };
@@ -30,7 +33,8 @@ export function createNav(host, o = {}) {
     const inArea = o.area || navArea;
     for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
       const x = X0 + (i + .5) * C, y = Y0 + (j + .5) * C;
-      open[j * NX + i] = inArea(x, y) && elev(x, y) === 0 && !inStream(x, y) ? 1 : 0;
+      if (hgt) { hgt[j * NX + i] = elev(x, y); open[j * NX + i] = inArea(x, y) && !onPlateau(x, y) && !steep(x, y) && !inStream(x, y) ? 1 : 0; }
+      else open[j * NX + i] = inArea(x, y) && elev(x, y) === 0 && !inStream(x, y) ? 1 : 0;
     }
     // each fixed prop closes the open cells whose centre is within .3 m of it: only the cells under its box are tested
     for (const p of host.props) {
@@ -70,6 +74,7 @@ export function createNav(host, o = {}) {
         const a = i + di, b = j + dj; if (a < 0 || b < 0 || a >= NX || b >= NY) continue;
         const n = b * NX + a; if (!open[n] || dist[n] !== Infinity) continue;
         if (di && dj && (!open[j * NX + a] || !open[b * NX + i])) continue;   // no cutting a corner
+        if (hgt && Math.abs(hgt[n] - hgt[k]) > STEP) continue;
         dist[n] = d + (di && dj ? 1.414 : 1) * C; queue[t++] = n;
       }
     }

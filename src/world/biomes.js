@@ -648,18 +648,66 @@ function dampPool(K, S) {
   }
 }
 
+// ---------------------------------------------------------------- the meadow's texture (ruins)
+// After the base fill (grass / earth, by material): blade strokes in the sward (lit tips and dark gaps, in patches), the bare
+// earth mottled (dusty and damp clusters ~.3 m) with specks, pebbles and lone sprouts. Only on the grass and earth ramps:
+// whatever is painted later (stones, paths, water, banks) goes over it
+function pebble(K, x, y, R, E) { K.G.p(x, y, R, 1); K.G.p(x + 1, y, R, hsh(x, y, 28) < .5 ? 0 : 1); K.G.p(x, y + 1, E, 3); K.G.p(x + 1, y + 1, E, 3); }
+function meadowDetail(K, S, r = null) {   // r: only this rect (m: {x0, y0, x1, y1})
+  const {G, WPX, HPX, PPM, PPMY} = K, gr = S.grass, ea = S.earth, GI = gr.id, EI = ea.id, m = G.m, t = G.t;
+  const xa = r ? Math.max(0, Math.floor(r.x0 * PPM)) : 0, xb = r ? Math.min(WPX - 1, Math.ceil(r.x1 * PPM)) : WPX - 1;
+  const ya = r ? Math.max(1, Math.floor(r.y0 * PPMY)) : 1, yb = r ? Math.min(HPX - 1, Math.ceil(r.y1 * PPMY)) : HPX - 1;
+  for (let y = ya; y < yb; y++) for (let x = xa; x < xb; x++) {
+    const i = y * WPX + x, mx = x / PPM, my = y / PPMY;
+    if (m[i] === GI) {
+      // (the GPU grass stands its blades on this: the strokes are few, in patches, so the sward reads as clusters, not as noise)
+      const h = hsh(x, y, 21); if (h >= .0315) continue;   // (.0315: the most d can be)
+      const d = Math.max(0, vn(mx * 1.3, my * 1.3, 23) - .55) * .07;
+      if (h < d) { G.p(x, y, gr, Math.max(0, t[i] - 1)); if (m[i - WPX] === GI) G.p(x, y - 1, gr, Math.max(0, t[i - WPX] - 1)); }   // a lit tip (2 px)
+    } else if (m[i] === EI) {
+      const v = vn(mx * 3.4, my * 3.4, 24), b = t[i], h = hsh(x, y, 26);
+      let tt = v > .68 && b > 0 ? b - 1 : v < .12 && b < 2 ? b + 1 : b;   // dusty clusters; a damp one now and then
+      if (h < .02) tt = Math.max(0, tt - 1); else if (h > .985) tt = Math.min(3, tt + 1);
+      if (tt !== b) G.p(x, y, ea, tt);
+      if (hsh(x, y, 27) < .0035) pebble(K, x, y, S.rock, ea);
+      else if (hsh(x, y, 29) < .006) { G.p(x, y, gr, 1); G.p(x, y - 1, gr, 0); }   // a lone sprout
+    }
+  }
+}
+// where the sward meets bare earth below it (on screen: south of it) it stands over the edge: the first earth row under the grass
+// is its shadow, and blades lean out over it. Run after everything that paints earth (paths, worn patches)
+function meadowLip(K, S) {
+  const {G, WPX, HPX} = K, gr = S.grass, ea = S.earth, GI = gr.id, EI = ea.id, m = G.m, t = G.t;
+  for (let y = HPX - 1; y > 1; y--) for (let x = 0; x < WPX; x++) {   // (bottom up: a row's change never feeds the row below it)
+    const i = y * WPX + x; if (m[i] !== EI) continue;
+    if (m[i - WPX] === GI) { if (hsh(x, y, 41) < .4) G.p(x, y, gr, 2); else G.p(x, y, ea, Math.min(3, t[i] + 1)); }
+    else if (m[i - 2 * WPX] === GI && m[i - WPX] === EI && hsh(x, y, 42) < .5) G.p(x, y, ea, Math.min(3, t[i] + 1));
+  }
+}
+
 // ---------------------------------------------------------------- RUINS ground
 function cliffRuins(K) { return mx => K.HM - 2.2 + (vn(mx * .3, .5, 91) - .5) * 1.3; }
 function groundRuins(q, ctx, B) {
-  const K = kit(q, ctx), S = STYLES.ruins, {G, PLAY, X, Y, PPMH} = K, cliff0 = cliffRuins(K), cliff = mx => K.clampEdge(mx, cliff0(mx));
-  const F = K.field((mx, my) => fbm(mx * .2, my * .2, 14));
+  const K = kit(q, ctx), S = STYLES.ruins, {G, PLAY, X, Y, PPMH, WPX, HPX} = K, cliff0 = cliffRuins(K), cliff = mx => K.clampEdge(mx, cliff0(mx));
+  // the light on the ground: its swells (F's slope). With walkable terrain (ctx.ground) they are the REAL slopes, with a little of
+  // the painted noise left for texture; without it the painted noise alone suggests them
+  const GH = ctx.ground, F = K.field(GH ? (mx, my) => GH(mx, my) + fbm(mx * .2, my * .2, 14) * .3 : (mx, my) => fbm(mx * .2, my * .2, 14));
+  // the meadow and its bare patches. g: the large field (bare earth where it's low: round the gate roads, a few worn patches).
+  // Its edge is broken by a finer noise (fingers and islands of grass, ~.4 m) and a pixel's jitter, so a patch ends in a ragged
+  // band, not on a contour line. The tone is the swells' light (F's slope: lit toward the north-west), dithered the same way, so
+  // a swell's light and shade come in clusters, not in bands
   K.fill((x, y, mx, my) => {
     const ins = K.inside(mx, my, .6), pd = K.pathD(mx, my);
-    const g = fbm(mx * .2, my * .2, 11) + (ins ? -.32 : .12) - (pd < 1.5 ? .6 - pd * .2 : 0), sl = K.slope(F, x, y);
+    const g = fbm(mx * .2, my * .2, 11) + (ins ? -.32 : .12) - (pd < 1.5 ? .6 - pd * .2 : 0);
+    // (the noises only matter near a threshold: |jitter| < .065 for the edge, < .032 for the light; elsewhere they're skipped)
+    const e = Math.abs(g - .5) < .066 ? g + (vn(mx * 2.4, my * 2.4, 12) - .5) * .1 + (hsh(x, y, 13) - .5) * .03 : g;
     const th = K.inTrail(mx, my) ? .03 : 0;   // the trail is playable: flatter meadow
-    if (g > .5) G.p(x, y, S.grass, g < .52 ? 2 : sl > .05 + th ? 0 : sl < -.065 - th ? 2 : 1);
-    else G.p(x, y, S.earth, g > .47 ? 1 : sl > .06 ? 0 : sl < -.07 ? 2 : 1);
+    let sl = K.slope(F, x, y);
+    if (Math.min(Math.abs(sl - .05 - th), Math.abs(sl + .065 + th), Math.abs(sl - .06), Math.abs(sl + .07)) < .033) sl += (vn(mx * 2, my * 2, 16) - .5) * .045 + (hsh(x, y, 17) - .5) * .018;
+    if (e > .5) G.p(x, y, S.grass, sl > .05 + th ? 0 : sl < -.065 - th ? 2 : 1);
+    else G.p(x, y, S.earth, sl > .06 ? 0 : sl < -.07 ? 2 : 1);
   });
+  meadowDetail(K, S);
   // grass tufts on the meadows (sparse clusters)
   const rt = rng(72);
   for (let i = 0; i < 700; i++) {
@@ -695,10 +743,19 @@ function groundRuins(q, ctx, B) {
     });
     if (s.v > .45 && s.v < .56) crack(K, xa + 4 + (s.v * 97 % 12 | 0), ya + 2, 7, S.floor, 2, s.r * 31 + s.k);
   }
-  marks(K, S, inlayStyle(K, S, {over: {path(x, y, d, hw, mx, my) {   // a worn earth trail, darker at its ragged edge
-    const n = vn(mx * 1.1, my * 1.1, 33);
-    G.p(x, y, S.earth, hw - d < .09 ? 2 : n > .7 ? 0 : 1);
+  marks(K, S, inlayStyle(K, S, {over: {path(x, y, d, hw, mx, my) {
+    // a worn earth trail: the meadow reaches into its edge in fingers, the trodden margin is darker (broken), the middle dusty in
+    // patches, damp in others; a few pebbles kicked about
+    const k = d / hw, n = vn(mx * 2.6, my * 2.6, 33);
+    if (k > .72 && vn(mx * 5.5, my * 5.5, 36) + (k - .72) * 1.6 > .82) return;
+    let t = k < .6 && n > .5 ? 0 : n < .14 ? 2 : 1;   // the worn middle dusty, a damp patch now and then
+    if (k > .84 && hsh(x, y, 35) < .55) t = 2;
+    else if (k < .5 && hsh(x, y, 34) < .05) t = 0;
+    else if (hsh(x, y, 37) < .02) t = Math.min(3, t + 1);
+    G.p(x, y, S.earth, t);
+    if (k < .85 && hsh(x, y, 38) < .003) pebble(K, x, y, S.rock, S.earth);
   }}}));
+  meadowLip(K, S);
   wallAO(K);
   // low foundations of older buildings outside the walls
   const found = [[1.2, 3.2, 4.5], [34.2, 1.4, 3.4], [1.5, 11.5, 3.2], [1.2, 26, 3.6], [11, 1.6, 5], [26, 2.2, 3.4]];
@@ -758,7 +815,8 @@ function groundRuins(q, ctx, B) {
   paintPlateau(K, {
     top(x, y, mx, my, rs, climb) {
       if (climb && rs < 6) { G.p(x, y, S.earth, rs === 0 ? 0 : 1); return; }
-      const sl = fbm(mx * .3, (my + .3) * .3, 15) - fbm(mx * .3, (my - .3) * .3, 15) + (fbm((mx + .3) * .3, my * .3, 15) - fbm((mx - .3) * .3, my * .3, 15)) * .5;
+      const sl = fbm(mx * .3, (my + .3) * .3, 15) - fbm(mx * .3, (my - .3) * .3, 15) + (fbm((mx + .3) * .3, my * .3, 15) - fbm((mx - .3) * .3, my * .3, 15)) * .5
+        + (vn(mx * 2, my * 2, 16) - .5) * .05 + (hsh(x, y, 17) - .5) * .02;   // (dithered, as the meadow below)
       G.p(x, y, S.grass, rs === 0 ? 0 : sl > .08 ? 0 : sl < -.09 ? 2 : 1);
     },
     face(x, y, r, hp) {
@@ -780,6 +838,7 @@ function groundRuins(q, ctx, B) {
       else if (stem) G.p(x, y, S.bark, 1);
     },
   });
+  for (const q of K.plats) meadowDetail(K, S, q);   // (its top, repainted above)
   // the plateau's spring and the rill it feeds: water welling up in a basin of mossy stones (ripple rings held as painted), then a
   // shallow channel west and south to the plateau's south edge between dark earth banks, with white riffles where it narrows (waterSample holds
   // those too), a foam lip at the edge; the fall, the pool and the outflow below are painted with the stream

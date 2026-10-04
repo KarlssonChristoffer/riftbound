@@ -34,6 +34,7 @@ import {hypot2, hypot3} from '../core/mathx.js';
 import {SMOKE, createSmoke} from './gunfx/smoke.js';
 import {createFlashes} from '../render/flashes.js';
 import {matOf} from '../content/materials.js';
+import {TERRAIN_ON, plateauAt} from '../world/layout.js';
 
 export const TUNE = {
   // the flash: s, its length (m along the shot), x its thickness, x for the Navy / a fanned shot; its glow (HD: m, alpha);
@@ -175,7 +176,7 @@ export async function create(host) {
       case 'ground': {
         const g = host.biome.groundAt?.(e.x, e.y);
         if (g) return g === 'sand' ? 'sand' : g === 'pan' ? 'dirt' : g === 'water' ? 'water' : 'stone';   // (stone: the fort's paving; rock)
-        return host.biome.id === 'frost' ? 'snow' : e.h > .05 ? 'stone' : 'dirt';   // (a plateau's top is rock)
+        return host.biome.id === 'frost' ? 'snow' : (TERRAIN_ON ? plateauAt(e.x, e.y) : e.h > .05) ? 'stone' : 'dirt';   // (a plateau's top is rock; walkable terrain's hills aren't)
       }
       case 'tree': return 'wood';
       case 'water': return 'water';

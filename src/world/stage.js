@@ -3,7 +3,7 @@
 // the trees (procedural 3D | painted cards). The wind feature sways cards and trees through the world's hooks.
 // THE ENTITIES (world/entities.js): the registry over the world's props, made with the first world and kept across
 // rebuilds like the props themselves (host.entities).
-// OWNS: biomeI, world, ents, propMode, trees3d.  READS: flags (biome, props, trees3d), features (biomeChanged, the wind's hooks).
+// OWNS: biomeI, world, ents, propMode, trees3d.  READS: flags (biome, props, trees3d, cliffs), features (biomeChanged, the wind's hooks).
 //   const stage = createStage({G, ctxO, PPM, PPMH, features, flags}); await stage.setBiome(stage.biomeI)
 import {buildWorld, WORLD} from './world.js';
 import {createEntities} from './entities.js';
@@ -15,6 +15,7 @@ export function createStage({G, ctxO, PPM, PPMH, features, flags: Q}) {
   let biomeI = Math.max(0, BIOMES.findIndex(b => b.id === Q.get('biome')));
   let world = null, ents = null, propMode = Q.get('props') === 'yaw' ? 'yaw' : 'live';
   let trees3d = Q.get('trees3d') !== '0';   // procedural 3D trees (trees3d.js) or the painted cards (Shift+P rebuilds)
+  const cliffs3d = Q.get('cliffs') !== '0';  // the 3D rock cliffs (cliffs3d.js) or the painted strata planes (an A/B)
   // the wind sways painted foliage cards (per-row bend) and gives braziers / torches a live flame. (The wind feature is
   // looked up once it exists, not per card per frame: the features are made at boot and never replaced)
   let windF = null;
@@ -27,7 +28,7 @@ export function createStage({G, ctxO, PPM, PPMH, features, flags: Q}) {
     $('#load').classList.remove('hidden'); $('#load').textContent = 'Building ' + BIOMES[biomeI].name + '…';
     const keep = world?.props;   // props keep their state (broken, opened, moved) across a biome switch
     world?.dispose();
-    world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH, props: keep, trees3d});
+    world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH, props: keep, trees3d, cliffs3d});
     world.hooks.card = cardHook; world.hooks.mesh = meshHook;   // a rebuilt world has fresh hooks
     ents ??= createEntities(world.props, {x0: WORLD.x0, y0: WORLD.y0, x1: WORLD.x1, y1: WORLD.y1});
     world.setMode(propMode);

@@ -31,6 +31,9 @@ const SHIM = `(() => {
   performance.now = () => T; Date.now = () => 1790000000000 + Math.floor(T);
   window.__clock = {advance(ms) { T += ms; }, get t() { return T; }};
   window.requestAnimationFrame = () => 0;
+  // every scenario starts clean: the world clock keeps its weather in localStorage (sim/env.js 'rb.env.v1', saved on its
+  // first step and on pagehide), and whether the previous scenario's pagehide save landed was a race (the run captures flickered)
+  try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}
 })();`;
 
 // the tour: [scenario, query, async steps(R, cap, frames)] - cap(name) captures, frames(n) steps n frames of 1/60 s

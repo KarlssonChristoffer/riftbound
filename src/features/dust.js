@@ -22,6 +22,7 @@
 import {flags} from '../core/flags.js';
 import {clamp, hypot2, smooth} from '../core/mathx.js';
 import {rgbOf} from '../core/color.js';
+import {TERRAIN_ON, onGround, steep} from '../world/layout.js';   // walkable terrain: devils go over hills, not up cliffs
 
 const TAU = Math.PI * 2, R = Math.random, rr = (a, b) => a + R() * (b - a);
 // ---------------------------------------------------------------- tunables
@@ -159,7 +160,7 @@ export async function create(host) {
       if (x < 1 || y < 1 || x > ctx.WM - 1 || y > ctx.HM - 3.5) continue;
       const gr = groundAt(x, y); if (gr !== 'sand' && gr !== 'pan') continue;
       if (P && hypot2(P.x - x, P.y - y) < 3) continue;
-      if (host.elev(x, y) > .05 || wallNear(x, y, 1.2)) continue;
+      if ((TERRAIN_ON ? !onGround(x, y) : host.elev(x, y) > .05) || wallNear(x, y, 1.2)) continue;
       SPOT[0] = x; SPOT[1] = y; return SPOT;
     }
     return null;
@@ -196,8 +197,8 @@ export async function create(host) {
     const ws = hypot2(WA.x, WA.y), wk = ws > 1e-3 ? Math.min(D.wind * ws, D.windMax) / ws : 0;   // (carried by the wind, at most windMax m/s)
     let vx = WA.x * wk + Math.cos(d.ang) * d.sp, vy = WA.y * wk + Math.sin(d.ang) * d.sp;
     const nx = d.x + vx * dt, ny = d.y + vy * dt;
-    if (wallNear(nx, ny, d.r) || host.inStream(nx, ny) || host.elev(nx, ny) > d.gz + .3) { d.ang += Math.PI * (.6 + R() * .5); d.age += dt * 4; vx = vy = 0; }   // (turned away, and it weakens)
-    else { d.x = nx; d.y = ny; }
+    if (wallNear(nx, ny, d.r) || host.inStream(nx, ny) || (TERRAIN_ON ? steep(nx, ny) || host.elev(nx, ny) > d.gz + .3 : host.elev(nx, ny) > d.gz + .3)) { d.ang += Math.PI * (.6 + R() * .5); d.age += dt * 4; vx = vy = 0; }   // (turned away, and it weakens)
+    else { d.x = nx; d.y = ny; if (TERRAIN_ON) d.gz = host.elev(nx, ny); }
     const gr = groundAt(d.x, d.y); if (gr !== 'sand' && gr !== 'pan') d.age += dt * 2.5;   // off the sand it starves
     if (PL.ok && hypot2(PL.x - d.x, PL.y - d.y) < d.r * 1.6) d.age += dt * 2;   // walked through: breaking up
     d.k = smooth(d.age / 2.6) * smooth((d.life - d.age) / 3.5);
