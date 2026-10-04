@@ -52,6 +52,8 @@ export const FLAG_DOCS = {
   battlemusic: '1: the premade Six Chambers songs follow the fight (features/battlemusic.js); off by default: the procedural score plays',
   bmforce: 'state[:song[:x]]: dev, pin the battle music (dev/bmusic.js), e.g. boss:iron:.25 (x = the champion health) or battle:dust:.8 (x = intensity)',
   shrines: '1 | 0: shrines and mini-events in a run (features/shrines.js, an experiment; off by default; the Dev tab toggle remembers it)',
+  trick: '1 | 0: the trick-shot range in the sandbox (features/trickshot.js, an experiment: bottles on a fence, cans to toss and juggle, a steel plate, ricochets on; off by default; the Dev toggle and the Game tab remember it); docs/exp/trickshot.md',
+  rico: '1: bullets glance off metal and stone at shallow angles everywhere (sim/projectiles.js RICO); 0: never, not even at the trick-shot range; absent: on while the range stands',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
   lineup: 'trees: the procedural trees side by side for review',

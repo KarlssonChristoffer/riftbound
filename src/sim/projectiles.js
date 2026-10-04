@@ -9,17 +9,28 @@
 // PENETRATION: a bullet carries its weapon's pen {through, dmg, speed} (content/weapons.js); when the hit chain says
 // 'pierce' (combat: a body, while it has `through` left) it goes on through: a.pn bodies passed, a.penK the share of its
 // damage left (combat multiplies its hits by it), slower by pen.speed; 'bullet.pierce' at the point it leaves the body.
+// GLASS: a hit chain's 'pass' (features/trickshot.js: a bottle) lets an arrow or a bullet on unchanged (no pierce, no slowing).
+// RICOCHETS (off unless the modifiers' note 'proj.ricochet' > 0: the trick-shot range turns them on while it stands in the
+// sandbox, ?rico=1 everywhere, ?rico=0 never): a bullet that meets a metal or stone solid (content/materials.js; a desert
+// wall is adobe and stops it) at a shallow angle glances off instead of stopping: its way along the face kept, RICO.keep of
+// its way into the face turned back out of it, a small random turn from this module's own generator (a fixed seed: the
+// sim replays), slower (RICO.speed) and weaker (penK x RICO.dmg: combat multiplies its hits by it), at most RICO.max
+// times; the steeper it comes in, the likelier it stops (always at RICO[mat] deg). 'bullet.ricochet' says where.
 // WIND: a run rule may push what flies (features/omens.js, a gale): host.mods 'proj.windX' / 'proj.windY' (m/s^2, world x / y,
 // base 0) accelerate every arrow in flight; a bullet feels 'proj.windBullet' x of that (base 1). None: nothing changes.
 // OWNS: arrows (a bullet's pn / penK and its muzzle ox / oy / oh too), pops, dust, the hit count. READS: the world (trees, elevation, stream), the
-// entities (near: what an arrow hits or sticks in), features' arrow hooks, the mods' wind notes.
-// EMITS: arrow.hit, arrow.splash, bullet.impact, bullet.pierce (core/events.js). BUDGET: part of sim.
+// entities (near: what an arrow hits or sticks in), features' arrow hooks, the mods' wind and ricochet notes, the props'
+// materials (content/materials.js), ?rico (core/flags.js).
+// EMITS: arrow.hit, arrow.splash, bullet.impact, bullet.pierce, bullet.ricochet (core/events.js). BUDGET: part of sim.
 //   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH, mods})
 //   proj.spawn(o) | proj.step(dt) | proj.draw(host) | proj.arrows / dust / hits
 //   proj.lerpBegin(alpha) / lerpEnd(): drawn between sim steps (an arrow's lx / ly / lh: where it was at the step's start)
 import {elev, inStream, PROP_TOP} from '../world/world.js';
 import {rgbOf} from '../core/color.js';
 import {clearArray, hypot2, hypot3} from '../core/mathx.js';
+import {mulberry32} from '../core/rng.js';
+import {PROP_MAT} from '../content/materials.js';
+import {flags} from '../core/flags.js';
 
 const ARROW = {shaft: rgbOf('#9a6c44'), head: rgbOf('#cfcbbf'), fletch: rgbOf('#efe4c8')};
 const DUST = ['#b8a888', '#8a7a60', '#5e5444'].map(rgbOf), POP = rgbOf('#f2d27a');
@@ -27,11 +38,22 @@ const DUST = ['#b8a888', '#8a7a60', '#5e5444'].map(rgbOf), POP = rgbOf('#f2d27a'
 // prop it went through (combat core: up to 1.2 m along its flight) in the same pass
 const REACH = 2;
 const SUB = .3, REACH_B = .6;   // a bullet's sub-step (m) and how far round each to look (any hitR <= .55)
+const DEG = Math.PI / 180;
+// a ricochet: the steepest angle (deg, between its way and the face) it may glance off metal / stone at; x the speed into the
+// face it keeps out of it; x its speed and its damage share per ricochet; a random turn (deg either way); ricochets a bullet
+export const RICO = {metal: 24, stone: 14, keep: .3, speed: .7, dmg: .55, scatter: 3, max: 2};
+const RICO_BASE = flags.get('rico') === '1' ? 1 : 0;   // (?rico=1: on everywhere; the note 'proj.ricochet' adds to it)
 
 export function createProjectiles({world: worldOf, ents: entsOf, features, events, opt: optOf, toWorld, PPM, PPMH, mods = null}) {
   const arrows = [], pops = [], dust = [], nearH = [], nearS = [];
   let hits = 0, WX = 0, WY = 0, WB = 1;   // the wind's push (m/s^2) and a bullet's share of it: the mods' notes, on change
-  const applyWind = () => { WX = mods.value('proj.windX', 0); WY = mods.value('proj.windY', 0); WB = mods.value('proj.windBullet', 1); };
+  let RON = RICO_BASE;   // ricochets on (> 0): the note 'proj.ricochet' on ?rico's base (?rico=0: never)
+  const rr = mulberry32(0x2f6b3c1d);   // the ricochets' draws (a fixed seed: no Math.random in the sim)
+  const NO_RICO = flags.get('rico') === '0';
+  const applyWind = () => {
+    WX = mods.value('proj.windX', 0); WY = mods.value('proj.windY', 0); WB = mods.value('proj.windBullet', 1);
+    RON = NO_RICO ? 0 : mods.value('proj.ricochet', RICO_BASE);
+  };
   if (mods) { mods.watch(applyWind); applyWind(); }
   function spawn(o) {
     const a = {life: 1.6, vh: 0, kind: 'arrow', ...o};
@@ -53,7 +75,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
         if (Math.hypot(p.x - a.x, p.y - a.y) < (p.hitR ?? .45) && rel > -.2 && rel < (p.hitH ?? 1.6)) {
           hits++; pops.push({x: p.x, y: p.y, z: (p.z || 0) + (p.h || 0), t: 0}); events.push({type: 'arrow.hit', x: p.x, y: p.y, vx: a.vx, vy: a.vy, prop: p});
           let r; for (const f of features) { r = f.onArrowHit?.(a, p); if (r) break; }
-          if (r === 'pierce') (a.hitSet ??= new Set()).add(p); else { a.life = -9; break; }
+          if (r === 'pierce' || r === 'pass') (a.hitSet ??= new Set()).add(p); else { a.life = -9; break; }
         }
       }
       if (a.life <= -9) continue;
@@ -90,13 +112,14 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
           const k = a.push ?? 1;
           events.push({type: 'arrow.hit', x: p.x, y: p.y, vx: a.vx * k, vy: a.vy * k, prop: p, kind: 'bullet'});
           let r; for (const f of features) { r = f.onArrowHit?.(a, p); if (r) break; }
-          if (r === 'pierce') { (a.hitSet ??= new Set()).add(p); if (a.pen) pierce(a, p, x, y, h); } else return endBullet(a, 'hit', x, y, h);
+          if (r === 'pierce' || r === 'pass') { (a.hitSet ??= new Set()).add(p); if (a.pen && r === 'pierce') pierce(a, p, x, y, h); } else return endBullet(a, 'hit', x, y, h);
         }
       }
       const ground = elev(x, y);
       const tree = world.treeHit?.(px, py, ph, x, y, h);
       if (tree) return endBullet(a, 'tree', tree.x, tree.y, tree.h);
-      if (solidAt(world, ents, a, x, y, h)) return endBullet(a, 'prop', x, y, h);
+      const solid = solidAt(world, ents, a, x, y, h);
+      if (solid) { if (RON > 0 && ricochet(a, solid, px, py, ph, x, y, h, world)) return; return endBullet(a, 'prop', x, y, h); }
       if (h <= ground && ground === 0 && inStream(x, y)) { events.push({type: 'arrow.splash', x, y, small: true}); return endBullet(a, 'water', x, y, ground); }
       if (h <= ground) return endBullet(a, 'ground', x, y, ground);
       px = x; py = y; ph = h;
@@ -113,13 +136,54 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
     events.push({type: 'bullet.pierce', x: x + ux * out, y: y + uy * out, h: h + a.vh / l * out, vx: ux, vy: uy, who: p, gun: a.gun});
     a.vx *= P.speed; a.vy *= P.speed; a.vh *= P.speed;
   }
-  function solidAt(world, ents, a, x, y, h) {   // a wall, a crate, a solid prop at this point (as an arrow sticks in it)
+  function solidAt(world, ents, a, x, y, h) {   // a wall, a crate, a solid prop at this point (as an arrow sticks in it), or null
     for (const p of ents.near(x, y, 0, nearS)) {
       if (p.broken || p.gone || (a.hitSet && a.hitSet.has(p)) || world.itemOf(p)?.pose) continue;
       if (!(p.rect ? x > p.rect[0] && x < p.rect[2] && y > p.rect[1] && y < p.rect[3] : p.r > .3 && hypot2(p.x - x, p.y - y) < p.r)) continue;
-      if (h > (p.z || 0) && h < (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5)) return true;
+      if (h > (p.z || 0) && h < (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5)) return p;
     }
-    return false;
+    return null;
+  }
+  // a bullet meets solid p between (px, py, ph) (outside it) and (x, y, h) (inside): glance off (true) or not (false: it stops).
+  // The face it came in through: a box's side or its top, a round solid's side; the point where it crossed it
+  function ricochet(a, p, px, py, ph, x, y, h, world) {
+    if ((a.rico || 0) >= RICO.max) return false;
+    const mat = PROP_MAT[p.kind];
+    if (mat !== 'metal' && (mat !== 'stone' || (world.biome?.id === 'desert' && p.kind.startsWith('wall')))) return false;   // (adobe stops it)
+    const ex = x - px, ey = y - py, eh = h - ph, top = (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5);
+    let nx = 0, ny = 0, nh = 0, t = -1;
+    if (ph >= top && eh < 0) { t = (top - ph) / eh; nh = 1; }   // down onto its top
+    else if (p.rect) {   // the side crossed last is the one it came in through
+      const R = p.rect, tx = px <= R[0] && ex > 0 ? (R[0] - px) / ex : px >= R[2] && ex < 0 ? (R[2] - px) / ex : -1;
+      const ty = py <= R[1] && ey > 0 ? (R[1] - py) / ey : py >= R[3] && ey < 0 ? (R[3] - py) / ey : -1;
+      if (tx < 0 && ty < 0) return false;   // (it started inside)
+      if (tx >= ty) { t = tx; nx = px <= R[0] ? -1 : 1; } else { t = ty; ny = py <= R[1] ? -1 : 1; }
+    } else {   // a round solid: where the path first meets its circle
+      const fx = px - p.x, fy = py - p.y, A = ex * ex + ey * ey, B = 2 * (fx * ex + fy * ey), C = fx * fx + fy * fy - p.r * p.r, D = B * B - 4 * A * C;
+      if (C <= 0 || D < 0 || A < 1e-9) return false;
+      t = (-B - Math.sqrt(D)) / (2 * A);
+      nx = (fx + ex * t) / p.r; ny = (fy + ey * t) / p.r;
+    }
+    if (!(t >= 0 && t <= 1)) return false;
+    const v = hypot3(a.vx, a.vy, a.vh) || 1, ux = a.vx / v, uy = a.vy / v, uh = a.vh / v;
+    const into = -(ux * nx + uy * ny + uh * nh), lim = Math.sin(RICO[mat] * DEG);   // into: the sine of the angle it meets the face at
+    if (!(into > 0) || into >= lim) return false;
+    const k = into / lim; if (rr() < k * k) return false;   // the steeper, the likelier it stops
+    // along the face it keeps its way; out of the face, `keep` of what went into it; then a small random turn
+    const kk = into * (1 + RICO.keep);
+    let ox = ux + nx * kk, oy = uy + ny * kk, oh = uh + nh * kk;
+    const s = RICO.scatter * DEG, ta = (rr() - rr()) * s, c = Math.cos(ta), sn = Math.sin(ta), qx = ox * c - oy * sn;
+    oy = ox * sn + oy * c; ox = qx; oh += (rr() - rr()) * s * .5;
+    const out = ox * nx + oy * ny + oh * nh;
+    if (out < .03) { ox += nx * (.03 - out); oy += ny * (.03 - out); oh += nh * (.03 - out); }   // (it leaves the face)
+    const l = hypot3(ox, oy, oh), sp = v * RICO.speed;
+    a.vx = ox / l * sp; a.vy = oy / l * sp; a.vh = oh / l * sp;
+    a.x = px + ex * t + nx * .02; a.y = py + ey * t + ny * .02; a.h = ph + eh * t + nh * .02;
+    a.ox = a.x; a.oy = a.y; a.oh = a.h;   // its tracer starts again here (gunfx)
+    a.rico = (a.rico || 0) + 1; a.penK = (a.penK ?? 1) * RICO.dmg;
+    (a.hitSet ??= new Set()).add(p);   // (not this solid again: it glances on along it)
+    events.push({type: 'bullet.ricochet', x: a.x, y: a.y, h: a.h, x0: a.lx, y0: a.ly, h0: a.lh, dx: ox / l, dy: oy / l, dh: oh / l, mat, gun: a.gun, n: a.rico, who: p});
+    return true;
   }
   // gone: where it ended (x0..: where it was at this step's start, for the tracer's last streak), what it met
   function endBullet(a, surf, x, y, h) {

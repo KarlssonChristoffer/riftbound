@@ -60,6 +60,30 @@ const MAXV = 30;   // simultaneous SFX voices (priority 2 / 3 sounds may go 6 / 
 // The ravine's lip: the stream's centre x there, y ~ 27.9 (the biome's own edge as world.js cliffZ reads it; depth.js WA.yEnd 27.85). A proper 'fall' case of the stream
 // recipe (more spray, no extra highs) would be the next step: audio/forge/recipes/stream.js.
 const WATERFALL = {recipe: 'stream', case: 'rapids', gainDb: -22};
+// THE TRICK-SHOT RANGE (features/trickshot.js, ?trick=1): its sounds on banks the forge already bakes (no recipe of its own),
+// added to the director by its options like the waterfall (events.js's EVENTS is not written). Short and damped, as the
+// user likes them (nothing hollow, nothing ringing): a bottle is the ice's shatter (snap, fragments) over a stone chip, a
+// can the bullet's metal clank pitched up thin (a tin, not a plate), a can's bounce a smaller one, a ricochet the bullet
+// recipe's whine over the hit, a toss the arm's swish, the fence set up a wooden knock, the fence cleared the loot chime
+const flv = o => (GUN_SFX.includes(o?.gunsfx) ? o.gunsfx : GUN_SFX_DEF);
+const TL = (recipe, c, x) => ({recipe, case: c, ...x});
+const flBanks = c => GUN_SFX.map(s => ['bullet', `${s}_${c}`]);
+const TRICK_HIT = {cat: 'combat', bus: 'sfx.impacts', priority: 60, maxInstances: 4, steal: 'quietest', coalesceMs: 25, send: .14, pitchSemi: 1.2, gainJitDb: 2,
+  variants: 6, bakePriority: 3};
+const TRICK_EVENTS = {
+  trickShatter: {...TRICK_HIT, priority: 70, gainDb: -3, cooldownMs: 20,
+    pick: o => [TL('ice', 'shatter'), TL('bullet', `${flv(o)}_stone`, {gainDb: -10, semi: 5})], banks: [['ice', 'shatter'], ...flBanks('stone')]},
+  trickPing: {...TRICK_HIT, gainDb: -5, cooldownMs: 15, pick: o => TL('bullet', `${flv(o)}_metal`, {semi: o.air ? 7 : 5}), banks: flBanks('metal')},
+  trickClink: {...TRICK_HIT, cat: 'world', bus: 'sfx.world', priority: 35, maxInstances: 3, gainDb: -15, cooldownMs: 45,
+    pick: o => TL('bullet', `${flv(o)}_metal`, {semi: 10}), gainFrom: o => ((o.k ?? .5) - .5) * 10, banks: flBanks('metal')},
+  trickRicochet: {...TRICK_HIT, priority: 55, gainDb: -5, cooldownMs: 30,
+    pick: o => [TL('bullet', `${flv(o)}_ricochet`), TL('bullet', `${flv(o)}_${o.mat === 'metal' ? 'metal' : 'stone'}`, {gainDb: -7})],
+    banks: [...flBanks('ricochet'), ...flBanks('metal'), ...flBanks('stone')]},
+  trickDing: {...TRICK_HIT, priority: 65, gainDb: -3, cooldownMs: 20, pick: o => TL('bullet', `${flv(o)}_metal`, {semi: -1.5}), banks: flBanks('metal')},
+  trickToss: {...TRICK_HIT, cat: 'player', bus: 'sfx.player', priority: 40, maxInstances: 2, gainDb: -11, cooldownMs: 60, pick: () => TL('cloth', 'jump'), banks: [['cloth', 'jump']]},
+  trickReset: {...TRICK_HIT, cat: 'world', bus: 'sfx.world', priority: 40, maxInstances: 2, gainDb: -9, cooldownMs: 200, pick: () => TL('impact', 'wood', {semi: 3}), banks: [['impact', 'wood']]},
+  trickClear: {...TRICK_HIT, cat: 'ui', bus: 'ui', priority: 90, maxInstances: 1, gainDb: -6, send: 0, pitchSemi: 0, gainJitDb: 0, cooldownMs: 500, pick: () => TL('coin', 'chime'), banks: [['coin', 'chime']]},
+};
 const FALL = {dScale: 1.8, ravineY: 27.9, reach: 32};
 // THE DESERT (world/desert.js, "Red Mesa"). Its forge ambience is made of banks the forge already bakes, added to the director
 // by its options like the waterfall (events.js's AMBIENCE is not written): a hot, dry wind by day (ember_hot: a low wind, a
@@ -219,7 +243,7 @@ function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (t
 const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift', desert: 'desert'};
 // a bullet's end by what it met (bullet.impact surf 'prop'): the prop's material by its kind (ctx.propAt); the rest is wood
 const PROP_MAT = {stock_tank: 'metal', ore_cart: 'metal', well: 'stone', wall_n: 'stone', wall_w: 'stone', wall_e: 'stone', wall_s: 'stone',
-  tower: 'stone', gatepost: 'stone', pot: 'stone', crystal: 'stone'};
+  tower: 'stone', gatepost: 'stone', pot: 'stone', crystal: 'stone', trick_plate: 'metal'};   // (trick_plate: the trick-shot range's steel plate)
 const MAT = {dummy: 'straw', brute: 'straw', gunman: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};   // (gunman: the desert's, a dull hit)
 
 // the ground texture of one footfall (shared by steps, landings, scuffs); k = weight 0..1.5
@@ -362,6 +386,24 @@ const SFX = {
     E.O(v, 0, {f: 410, a: .002, d: .03, g: .4}); E.N(v, 0, {b: E.PK, type: 'lowpass', f: 700, a: .001, d: .015, g: .2});
   },
   bulletPierce(E, o) { const k = offK(o); if (k) SFX.hit(E, {...o, mat: 'body', g: .6 * k}); },
+  // the trick-shot range (fallbacks for TRICK_EVENTS while the forge bakes / ?forge=0): short, nothing rings
+  trickShatter(E, o) {   // a snap, a short bright burst, glass bits falling (each tink a few cs), a grit or two
+    const k = offK(o); if (!k) return;
+    const v = E.voice({...o, g: (o.g ?? 1) * 1.2 * k}, 'trickShatter', .5, {pri: 2, cd: .02}); if (!v) return;
+    E.N(v, 0, {type: 'highpass', f: 4200, d: .008, g: .3}); E.N(v, 0, {type: 'bandpass', f: 2600, q: 1.2, d: .05, g: .22}); E.O(v, 0, {f: 260, f2: 150, d: .04, g: .12});
+    for (let i = 0; i < 10; i++) E.O(v, RR(.02, .3), {f: RR(2200, 4800), a: .001, d: RR(.02, .06), g: RR(.02, .05)});
+  },
+  trickPing(E, o) { const k = offK(o); if (!k) return; const v = E.voice({...o, g: (o.g ?? 1) * k}, 'trickPing', .15, {cd: .015}); if (!v) return;
+    E.N(v, 0, {type: 'bandpass', f: 2900, q: 2, d: .012, g: .3}); E.O(v, 0, {f: 1250, a: .001, d: .025, g: .07}); E.O(v, 0, {f: 330, f2: 220, d: .03, g: .1}); },
+  trickClink(E, o) { const k = offK(o); if (!k) return; const v = E.voice({...o, g: (o.g ?? 1) * (.3 + .5 * (o.k ?? .5)) * k}, 'trickClink', .1, {cd: .04}); if (!v) return;
+    E.N(v, 0, {type: 'bandpass', f: 3400, q: 2.5, d: .008, g: .2}); E.O(v, 0, {f: 1500, a: .001, d: .015, g: .04}); },
+  trickRicochet(E, o) { const k = offK(o); if (!k) return; SFX.bulletHit(E, {...o, mat: o.mat || 'stone'});   // a falling whine, dark
+    const v = E.voice({...o, g: (o.g ?? 1) * k}, 'trickRicochet', .45, {cd: .03}); if (!v) return;
+    E.O(v, .01, {f: 1900, f2: 800, sw: .32, a: .004, d: .12, g: .045}); E.N(v, .01, {type: 'bandpass', f: 1700, f2: 700, sw: .3, q: 4, a: .01, d: .1, g: .05}); },
+  trickDing(E, o) { SFX.bulletHit(E, {...o, mat: 'metal'}); },
+  trickToss(E, o) { SFX.jump(E, {...o, g: (o.g ?? 1) * .6}); },
+  trickReset(E, o) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * .45}); },
+  trickClear(E, o) { SFX.coin(E, o); },
   // the bruiser's coach gun (fallbacks for the forge's 'coachgun' recipe while it bakes / ?forge=0), screen-bound like it
   coachShot(E, o) {   // deeper and longer than the revolver's: a broad bark, a low sweep, a long dark tail
     const k = offK(o); if (!k) return;
@@ -807,7 +849,7 @@ export function createAudio(ctx, host = {}) {
   if (!disabled && !forgeOff) {
     try {
       const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac, {reverbs: {...REVERBS, ...DESERT_REVERBS}}), B = createBakery(ac);
-      const D = createDirector(EN, B, {EVENTS, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL}});
+      const D = createDirector(EN, B, {EVENTS: {...EVENTS, ...TRICK_EVENTS}, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL}});
       try { EN.prepareReverbs?.(); } catch (e) {}
       D.prefetch({biome: 'ruins', skip: otherGunSfx(gunsfx)});   // (only the playing gun flavor's banks)
       RT = {ac, EN, B, D}; AU.forge = RT;
@@ -1012,6 +1054,7 @@ export function createAudio(ctx, host = {}) {
         case 'arrow.hit': case 'player.hit': {
           const props = get(host.props) || [], p = !e.player && (e.prop || props.find(p => p.x === e.x && p.y === e.y));
           if (p?.kind === 'gunman') break;   // (a gunman's hit sounds by its damage: combat.hit below)
+          if (p?.kind === 'trick_bottle' || p?.kind === 'trick_can' || p?.kind === 'trick_plate') break;   // (the trick-shot range's: its own events below)
           fire('hit', e.x, e.y, {mat: e.player ? 'body' : MAT[p?.kind] || 'wood'}); break;
         }
         case 'prop.break': fire('brk', e.x, e.y, {kind: e.kind}); break;
@@ -1058,6 +1101,16 @@ export function createAudio(ctx, host = {}) {
         case 'lasso.swing': fire('jump', e.x, e.y, {surf, g: .9}); break;
         case 'lasso.bump': fire('hit', e.x, e.y, {mat: 'body', g: .8}); break;
         case 'combat.bowl': fire('hit', e.x, e.y, {mat: 'body', g: .7}); break;
+        // the trick-shot range (features/trickshot.js): glass, tin, a ricochet's whine (sim/projectiles.js), the toss, the
+        // fence set up and cleared, the steel plate rung (its edge: bullet.impact's metal, PROP_MAT)
+        case 'trick.shatter': fire('trickShatter', e.x, e.y); break;
+        case 'trick.ping': fire('trickPing', e.x, e.y, {air: !!e.air}); break;
+        case 'trick.clink': fire('trickClink', e.x, e.y, {k: e.k}); break;
+        case 'trick.toss': fire('trickToss', e.x, e.y, {surf}); break;
+        case 'trick.ding': if (!e.edge) fire('trickDing', e.x, e.y); break;
+        case 'trick.reset': fire('trickReset', e.x, e.y); break;
+        case 'trick.clear': fire('trickClear', L.x, L.y); break;
+        case 'bullet.ricochet': fire('trickRicochet', e.x, e.y, {mat: e.mat}); break;
         case 'lasso.creak': { const c = (RT && RT.D.makeCreak?.()) || makeCreak(E), k = clamp(e.k ?? .6, 0, 1); c.set(k * .7, 1.5, t, 1 / 60); c.set(k, 0, t + .12, 1 / 60); c.stop(t + .3); break; }
       }
     }
