@@ -166,7 +166,7 @@ export function createGun(PL, I) {
     let vh = c.target || Math.abs(c.h - m.h) > .5 ? clamp((c.h - m.h) / (dist / v), -v * .4, v * .4) : 0;   // straight at it: no drop
     // open ground under the cursor: a slight slope down (at the cursor it's still at ~.6 of the muzzle's height, inside
     // every body's hit height: nothing short of where it lands is any harder to hit)
-    if (!vh && !c.target && TUNE.settle) vh = -(m.h - P.z) / (Math.max(TUNE.settleMin, dist * TUNE.settle) / v);
+    if (!vh && !c.target && TUNE.settle) vh = -(m.h - (H.terrain ? c.h - AIM_H : P.z)) / (Math.max(TUNE.settleMin, dist * TUNE.settle) / v);   // (walkable terrain: the ground at the cursor)
     vh += v * sp * .3 * (rng() - rng());
     let dmg = mv('weapon.dmg', w.dmg) * (how === 'fan' ? w.fanDmg : 1);
     if (S.ammo === 1) dmg *= 1 + mv('weapon.last', 0);

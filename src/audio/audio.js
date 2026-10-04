@@ -36,7 +36,7 @@
 // AU.E (the live engine; AU.E.counts = triggers per sound), AU.ms (update cost), and the standalone export renderOffline(list, opts) -> [{name, peak, rms}]
 // that renders SFX / beds in an OfflineAudioContext to check levels (see the bottom of this file).
 
-import {STREAM, elev as elevOf} from '../world/layout.js';
+import {STREAM, elev as elevOf, TERRAIN_ON, plateauAt} from '../world/layout.js';
 import {createMusic} from './music.js';   // the adaptive score, layered with the beds (U toggles it)
 // Phase 2 (docs/AUDIO.md): the Sound Forge runtime. Forge sounds baked in a Worker at load play first; this file's
 // synth below is the FALLBACK for anything not baked yet (or with ?forge=0, to compare).
@@ -893,7 +893,7 @@ export function createAudio(ctx, host = {}) {
   // raised (a plateau's face or top), else the footsteps' ground (flagstones hard; grass, gravel, snow dull)
   function groundMat(biome, x, y, h) {
     if (biome === 'desert') { const g = ctx.ground?.(x, y); return g === 'stone' || g === 'rock' ? 'stone' : 'sand'; }
-    if (h > .3) return 'stone';
+    if (TERRAIN_ON ? plateauAt(x, y) : h > .3) return 'stone';   // (a plateau's top is rock; walkable terrain's hills aren't)
     const c = groundCase({surf: SURF[biome] || 'ruins', x, y}); return c === 'stone' || c === 'crystal' ? 'stone' : 'sand';
   }
   function play(name, o = {}) { unlock(); if (E && SFX[name]) fire(name, L.x, L.y, {surf: bedId || 'ruins', ...o}); }

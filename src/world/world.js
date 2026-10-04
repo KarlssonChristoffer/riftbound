@@ -36,7 +36,7 @@
 //            G.setWater({speed}) (gfx.js) scales the water's clock: brief D drives it from rain.
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow} from './layout.js';
+import {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, TERRAIN} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {cliffGeometry} from './cliffs3d.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
@@ -478,7 +478,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
 
   // ---- ground: the biome's painter, top-down
   const WPX = Math.ceil(WM * PPM), HPX = Math.ceil(HM * PPM);
-  const ctxT = {PPM, PPMY: PPM, PPMH: 0, toS: (x, y) => [x * PPM, y * PPM], WM, HM, WPX, HPX, PLAY, layout, VW: G.VW, VH: G.VH};
+  // ground: the walkable terrain's height (layout.js; ?terrain=0: none) for the painters to shade its real slopes; null = flat
+  const ctxT = {PPM, PPMY: PPM, PPMH: 0, toS: (x, y) => [x * PPM, y * PPM], WM, HM, WPX, HPX, PLAY, layout, VW: G.VW, VH: G.VH, ground: TERRAIN_ON ? terrainField().H : null};
   const gc = document.createElement('canvas'); gc.width = WPX; gc.height = HPX;
   const gq = gc.getContext('2d', {willReadFrequently: true});
   biome.paintGround(gq, ctxT);
@@ -510,7 +511,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     } else c = rawCliff(x);
     cliffCache.set(k, c); return c;
   };
-  const hAt = (x, z) => z >= cliffZ(x) ? DROP : inStream(x, z) || inPool(x, z, .01, POOL_GROW) ? WATER_H : 0;   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
+  // walkable terrain (layout.js; ?terrain=0: none): the field's height under every vertex (it is held flat at the water, the ravine's rim)
+  const TF = TERRAIN_ON ? terrainField() : null, tH = TF ? TF.H : () => 0;
+  const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) ? WATER_H : 0) + tH(x, z);   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
   // a patch's grid, s m cells, from (rx0, rz0) to (rx1, rz1). It follows the edge exactly: the last bank vertex of each column
   // moves onto the edge line and the next one to just past it at the ravine's depth, so the wall is one smooth face (a plain
   // 0.25 m grid made it a staircase). Neighbouring patches share their border vertices (one lattice, one edge line per column)
@@ -519,7 +522,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
       const x = i * s + rx0; let z = j * s + rz0, h;
       const cz = cliffZ(x);
-      if (z <= cz && z + s > cz) { z = cz - .001; h = inStream(x, z) ? WATER_H : 0; }   // the lip
+      if (z <= cz && z + s > cz) { z = cz - .001; h = (inStream(x, z) ? WATER_H : 0) + tH(x, z); }   // the lip
       else if (z > cz && z - s <= cz) { z = cz + .02; h = DROP; }                       // the foot
       else h = hAt(x, z);
       pos.push(x, h, z); uv.push(x / WM, z / HM);
@@ -546,10 +549,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     let wx0 = 1e9, wx1 = -1e9;
     for (let y = STREAM.y0; y <= STREAM.y1; y += .25) { const c = STREAM.cx(y), w = STREAM.w(y) / 2; wx0 = Math.min(wx0, c - w); wx1 = Math.max(wx1, c + w); }
     const wet = (x0, z0, x1, z1) => x1 > wx0 - 1 && x0 < wx1 + 1 && z1 > STREAM.y0 - 1 && z0 < STREAM.y1 + 1;
+    const hilly = (x0, z0, x1, z1) => { if (!TF) return false; for (let x = x0; x <= x1; x += .5) for (let z = z0; z <= z1; z += .5) if (Math.abs(tH(x, z)) > .002) return true; return false; };
     for (let j = 0; j + 1 < zs.length; j++) for (let i = 0; i + 1 < xs.length; i++) {
       const x0 = xs[i], x1 = xs[i + 1], z0 = zs[j], z1 = zs[j + 1];
       if (x0 >= hx0 && x1 <= hx1 && z0 >= hz0 && z1 <= hz1) continue;   // the Proving Grounds' patch
-      openTiles.push([x0, z0, x1, z1, z1 > Y1 - 8 || wet(x0, z0, x1, z1) ? S : COARSE]);
+      openTiles.push([x0, z0, x1, z1, z1 > Y1 - 8 || wet(x0, z0, x1, z1) || hilly(x0, z0, x1, z1) ? S : COARSE]);
     }
   }
   // the south ravine's wall (any steep ground): rock strata with the biome's grass / ash / snow lip, and a WATERFALL where
@@ -596,7 +600,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
   const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
   if (lit) { lit.sim = G.litterSim(lit); disposers.push(lit.dispose); }   // (the living layer: render/litter.js, driven by features/litter.js)
-  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, water: wTex, litter: lit}, false); disposers.push(() => ground.dispose());
+  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, water: wTex, litter: lit, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false); disposers.push(() => ground.dispose());
+  // walkable terrain's shadows: the drawn ground casts nothing (it would shadow itself: acne), so a SHADOW-ONLY copy of it, sunk
+  // CAST_SINK m, goes into the cached sun shadow and the point lights' height map: a hill throws its shadow over what lies
+  // behind it at a low sun, flat ground never reaches the ground it stands for
+  const CAST_SINK = .15;
+  const caster = geo => { const g = geo.clone(), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) - CAST_SINK); p.needsUpdate = true;
+    const s = G.surface(g, {tex: gTex, planar: true, world: world2, type: 1, obj: 0}, true); s.gm.visible = false; disposers.push(() => { s.dispose(); g.dispose(); }); };
+  if (TERRAIN_ON) caster(gGeo);
   // the open land: a stand-in texture until the world plan's step 3 paints the land itself. Plain ground in the biome's own colours:
   // the 3 commonest texels of a 5 m square of the Proving Grounds' ground outside their walls (the north-west corner), speckled
   // in proportion by a hash, OPEN_PATCH m a side, repeated
@@ -614,7 +625,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const pTex = texOf(pc, true); pTex.wrapS = pTex.wrapT = THREE.RepeatWrapping; pTex.needsUpdate = true;
     const size = new THREE.Vector2(OPEN_PATCH, OPEN_PATCH);
     for (const [x0, z0, x1, z1, s] of openTiles) {
-      const m = G.surface(gridGeo(x0, z0, x1, z1, s), {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff}, false);
+      const tg = gridGeo(x0, z0, x1, z1, s), m = G.surface(tg, {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
+      if (TERRAIN_ON && s === S) caster(tg);   // (the fine tiles are where the ground varies)
       disposers.push(() => m.dispose());
     }
   }
@@ -660,6 +672,42 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         run([[q.x0, q.y1], [q.x1, q.y1]], 0, 1, 31, {keep: keepS, minBot: WATER_H - .05}),   // south (the waterfall, the pool, the climb)
         run([[q.x1, q.y1], [q.x1, q.y0]], 1, 0, 37), run([[q.x1, q.y0], [q.x0, q.y0]], 0, -1, 41), run([[q.x0, q.y0], [q.x0, q.y1]], -1, 0, 43));
       for (const c of climbs) o.ladders.push({x: c.x, z: q.y1, h: q.h, nx: 0, nz: 1});
+    }
+    // walkable terrain's rock (layout.js TERRAIN, shapes with rock: true): a terrace's edges, a ramp's sides as walls whose top follows
+    // it. Each run's foot is the ground just outside (elev: the plateau's box too), so the rock is gone where a ramp meets a terrace,
+    // the plateau or the ground, and only stands where there is a drop
+    if (TERRAIN_ON) {
+      const avoidT = (x, z) => wet(x, z) || near.some(([px, py]) => Math.hypot(px - x, py - z) < .55);
+      const outward = (pts, cx, cz) => {   // a polyline's runs, travelled so that (-tz, tx) points away from (cx, cz)
+        const a = pts[0], b = pts.at(-1), mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2, tx = b[0] - a[0], tz = b[1] - a[1];
+        return -tz * (mx - cx) + tx * (mz - cz) >= 0 ? pts : pts.slice().reverse();
+      };
+      const edgeRun = (pts, top, seed) => {
+        const n = [0, 0], nrm = (x, z) => { let bx = 0, bz = 0; for (let i = 0; i + 1 < pts.length; i++) { const tx = pts[i + 1][0] - pts[i][0], tz = pts[i + 1][1] - pts[i][1], l = Math.hypot(tx, tz) || 1; bx += -tz / l; bz += tx / l; } const l = Math.hypot(bx, bz) || 1; n[0] = bx / l; n[1] = bz / l; return n; };
+        nrm(0, 0); const nx = n[0], nz = n[1];
+        let lo = 1e9; for (let i = 0; i + 1 < pts.length; i++) for (let k = 0; k <= 8; k++) { const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * k / 8, z = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * k / 8; lo = Math.min(lo, elev(x + nx * .3, z + nz * .3)); }
+        return {pts, top, bot: (x, z) => elev(x + nx * .3, z + nz * .3), minBot: lo - .05, base: .06, relief: .8, talus: true, avoid: avoidT, lip, seed};
+      };
+      const terrRuns = [];
+      TERRAIN.forEach((s, k) => {
+        if (!s.rock) return;
+        if (s.type === 'terrace') {
+          const P = s.pts, cx = P.reduce((a, p) => a + p[0], 0) / P.length, cz = P.reduce((a, p) => a + p[1], 0) / P.length;
+          P.forEach((p, i) => terrRuns.push(edgeRun(outward([p, P[(i + 1) % P.length]], cx, cz), s.h, 61 + k * 13 + i)));
+        } else if (s.type === 'ramp') {   // its two sides, w / 2 off its line (per segment: the corner is the next segment's start)
+          for (let i = 0; i + 1 < s.pts.length; i++) {
+            const [ax, az] = s.pts[i], [bx, bz] = s.pts[i + 1], l = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / l, uz = (bz - az) / l;
+            for (const sd of [-1, 1]) {
+              const ox = -uz * sd * s.w / 2, oz = ux * sd * s.w / 2, side = outward([[ax + ox, az + oz], [bx + ox, bz + oz]], (ax + bx) / 2, (az + bz) / 2);
+              const r = edgeRun(side, null, 71 + k * 13 + i * 2 + (sd > 0 ? 1 : 0)), nn = [r.pts[1][1] - r.pts[0][1], r.pts[0][0] - r.pts[1][0]], nl = Math.hypot(...nn) || 1;
+              r.top = (x, z) => TF.H(x + nn[0] / nl * .1, z + nn[1] / nl * .1);   // (the ramp's surface just inside the wall)
+              terrRuns.push(r);
+            }
+          }
+        }
+      });
+      const tg = terrRuns.length ? cliffGeometry(terrRuns, {...o, ladders: []}) : null;
+      if (tg) { const m = G.mesh(tg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); tg.dispose(); }); }
     }
     const pg = cliffGeometry(plateauRuns, o);
     if (pg) { const m = G.mesh(pg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); pg.dispose(); }); }
@@ -899,4 +947,4 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
-export {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow};
+export {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel};

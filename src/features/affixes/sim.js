@@ -34,7 +34,7 @@ import {mulberry32, simSeed} from '../../core/rng.js';
 import {TAU, clamp, hypot2} from '../../core/mathx.js';
 import {AFFIXES, AFFIX_IDS, CHANCE, WEIGHT, BRUTE_UP, ELITE_COINS, TIER} from '../../content/affixes.js';
 import {onSpawn, spawnEnemy, scaleOf} from '../../game/enemies.js';
-import {roamable} from '../../world/world.js';
+import {roamable, onGround, sameLevel, TERRAIN_ON} from '../../world/world.js';
 import {createHazards} from '../../sim/hazards.js';
 
 const DEG = Math.PI / 180;
@@ -168,7 +168,7 @@ export function createAffixSim(host, F) {
       H.add({x, y, z, r: B.r[tier], warn: B.warn, dmg: B.dmg[tier] * s.k, knock: B.knock, style: 'blast', col: A.col, by: b, data: 'burst'});
       for (let i = 0, n = B.patches[tier], a0 = R() * TAU; i < n; i++) {
         const a = a0 + i / n * TAU + (R() - .5) * .5, d = B.r[tier] * (.35 + R() * .5), px = x + Math.sin(a) * d, py = y + Math.cos(a) * d;
-        if (host.inStream(px, py) || host.elev(px, py) !== z) continue;
+        if (host.inStream(px, py) || !sameLevel(host.elev(px, py), z)) continue;
         if (H.add({x: px, y: py, z, r: T.r[tier] * (.8 + R() * .3), warn: B.warn + .05 + R() * .2, last: T.last[tier] * (.8 + R() * .4), dps: T.dps * s.k, tick: T.tick, style: 'fire', col: A.col, by: b, data: 'patch'})) stats.patches++;
       }
     } else if (s.id === 'glacial') {
@@ -193,8 +193,8 @@ export function createAffixSim(host, F) {
       const a = q.ang + i / n * TAU;
       let x = q.x + Math.sin(a) * Sp.spread, y = q.y + Math.cos(a) * Sp.spread;
       const dp = hypot2(x - P.x, y - P.y);
-      if (dp < .85 && Math.abs(P.z) < 1) { const ux = dp > .05 ? (x - P.x) / dp : Math.sin(a), uy = dp > .05 ? (y - P.y) / dp : Math.cos(a); x = P.x + ux * .9; y = P.y + uy * .9; }
-      if (!roamable(x, y) || host.inStream(x, y) || host.elev(x, y) !== 0 || host.blocked(x, y, 0)) { x = q.x; y = q.y; }
+      if (dp < .85 && Math.abs(P.z - (TERRAIN_ON ? host.elev(x, y) : 0)) < 1) { const ux = dp > .05 ? (x - P.x) / dp : Math.sin(a), uy = dp > .05 ? (y - P.y) / dp : Math.cos(a); x = P.x + ux * .9; y = P.y + uy * .9; }
+      if (!roamable(x, y) || host.inStream(x, y) || !onGround(x, y) || host.blocked(x, y, host.elev(x, y))) { x = q.x; y = q.y; }
       pendK = q.k;
       c.spawnBrute({x, y, type: 'brute', name: C.name, hp: Math.max(Sp.min, Math.round(q.maxHp * Sp.hp[q.tier])), dmg: Math.max(1, Math.round(q.dmg * Sp.dmg)),
         coins: C.coins, elite: false, boss: false, aura: L.col, bar: L.bar, affix: 'splitling',
@@ -253,7 +253,7 @@ export function createAffixSim(host, F) {
     const c = coreOf(), g = gameF(); if (!F.on || !c || !g || !AFFIXES[id] || (g.mode !== 'sandbox' && g.mode !== 'run')) return null;
     for (let k = 0; k < 24; k++) {
       const a = (trialN * 5 + k) * TAU / 24, r = 5 + (k % 3) * .8, x = at && !k ? at.x : P.x + Math.sin(a) * r, y = at && !k ? at.y : P.y + Math.cos(a) * r;
-      if (!roamable(x, y) || host.inStream(x, y) || host.elev(x, y) !== 0 || host.blocked(x, y, 0)) continue;
+      if (!roamable(x, y) || host.inStream(x, y) || !onGround(x, y) || host.blocked(x, y, host.elev(x, y))) continue;
       trialN++; want = id;
       const b = spawnEnemy(c, type, x, y, scaleOf(Math.max(0, g.run?.stage ?? 0), 0));
       want = null; return b;

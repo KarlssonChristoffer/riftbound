@@ -689,7 +689,9 @@ function meadowLip(K, S) {
 function cliffRuins(K) { return mx => K.HM - 2.2 + (vn(mx * .3, .5, 91) - .5) * 1.3; }
 function groundRuins(q, ctx, B) {
   const K = kit(q, ctx), S = STYLES.ruins, {G, PLAY, X, Y, PPMH, WPX, HPX} = K, cliff0 = cliffRuins(K), cliff = mx => K.clampEdge(mx, cliff0(mx));
-  const F = K.field((mx, my) => fbm(mx * .2, my * .2, 14));
+  // the light on the ground: its swells (F's slope). With walkable terrain (ctx.ground) they are the REAL slopes, with a little of
+  // the painted noise left for texture; without it the painted noise alone suggests them
+  const GH = ctx.ground, F = K.field(GH ? (mx, my) => GH(mx, my) + fbm(mx * .2, my * .2, 14) * .3 : (mx, my) => fbm(mx * .2, my * .2, 14));
   // the meadow and its bare patches. g: the large field (bare earth where it's low: round the gate roads, a few worn patches).
   // Its edge is broken by a finer noise (fingers and islands of grass, ~.4 m) and a pixel's jitter, so a patch ends in a ragged
   // band, not on a contour line. The tone is the swells' light (F's slope: lit toward the north-west), dithered the same way, so

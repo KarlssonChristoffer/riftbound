@@ -17,7 +17,7 @@
 // PH.frame() every rendered frame
 // (matrices, chunk meshes); PH.biomeChanged() (the world's meshes were disposed); PH.shove(q, vx, vy); PH.T; PH.dbg.
 import * as THREE from 'three';
-import {walkable} from '../../world/world.js';
+import {walkable, TERRAIN_ON} from '../../world/world.js';
 
 const MOVABLE = new Set(['crate', 'barrel', 'barrel_x']);
 const DEBRIS = {crate: ['plank', 5], barrel: ['stave', 6], barrel_x: ['stave', 5], pot: ['shard', 5], crystal: ['stone', 0], chest: ['plank', 0]};
@@ -141,6 +141,7 @@ export async function createPropPhysics(host, core) {
       if (q.tip) { const a = q.tip.axis * Math.PI / 180; q.tip.phi += (q.vy * Math.cos(a) + q.vx * Math.sin(a)) * dt / .3; }
       const e = host.elev(q.x, q.y);
       if (e < (q.z || 0) - .3) { q.h = (q.z || 0) - e; q.z = e; q.vh = 0; }   // rolled off the edge
+      else if (TERRAIN_ON && !q.h && e !== (q.z || 0)) q.z = e;            // (walkable terrain: it rolls up and down the slopes)
       if (e === 0 && !q.h && host.inStream(q.x, q.y)) { enterWater(q); return; }
     } else {
       // bounce: reflect about the contact normal, lose most of the speed; hard hits damage both
@@ -265,8 +266,9 @@ export async function createPropPhysics(host, core) {
       if (c.t > c.life) { release(c); flying.splice(i, 1); continue; }
       if (c.rest) continue;
       c.vh -= 16 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.h += c.vh * dt; c.rot += c.spin * dt;
-      if (c.h <= 0) {
-        c.h = 0;
+      const gh = TERRAIN_ON ? host.elev(c.x, c.y) - (c.z || 0) : 0;   // (walkable terrain: the ground under it, relative to where it broke)
+      if (c.h <= gh) {
+        c.h = gh;
         if (host.inStream(c.x, c.y) && !c.z) { release(c); flying.splice(i, 1); continue; }
         if (Math.abs(c.vh) < 1.6) { c.rest = true; c.vh = 0; c.rot = Math.round(c.rot); continue; }
         c.vh *= -.35; c.vx *= .55; c.vy *= .55; c.spin *= .5;

@@ -8,6 +8,8 @@
 //   numbers, HP bars, ability bar      -> F.hd (display resolution)
 // Ground rings are world circles: under any yaw they project to the arena's ellipse (r * PPM, r * PPMY) * zoom.
 
+import {TERRAIN_ON} from '../../world/layout.js';   // walkable terrain: rings follow the ground point by point
+
 export function createDraw(host, core, phys) {
   const {T, AB, SLOTS, S} = core, D = core.dbg;
   const TAU = Math.PI * 2, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -54,10 +56,11 @@ export function createDraw(host, core, phys) {
   // the same ellipse as world points on the ground (depth-tested): fn(i, n) -> colour | null
   function ringPts(x, y, h, r, fn) {
     const ex = r * host.PPM, ey = r * host.PPMY, n = Math.max(12, Math.round((ex + ey) * 1.6)), ca = Math.cos(host.yaw), sa = Math.sin(host.yaw);
+    const off = TERRAIN_ON ? h - host.elev(x, y) : 0;   // (terrain: each point as far over the ground under it as the centre is)
     for (let i = 0; i < n; i++) {
       const c = fn(i, n); if (!c) continue;
-      const a = i / n * TAU, vx = Math.cos(a) * r, vy = Math.sin(a) * r;   // view-frame offset -> world
-      pt(x + vx * ca + vy * sa, y - vx * sa + vy * ca, h, c, z);
+      const a = i / n * TAU, vx = Math.cos(a) * r, vy = Math.sin(a) * r, wx = x + vx * ca + vy * sa, wy = y - vx * sa + vy * ca;   // view-frame offset -> world
+      pt(wx, wy, TERRAIN_ON ? host.elev(wx, wy) + off : h, c, z);
     }
   }
 

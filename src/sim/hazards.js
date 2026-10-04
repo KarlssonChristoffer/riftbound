@@ -32,6 +32,7 @@
 //   data, id, fired (it went off)}. Its events carry src: the kit's name (the look picks its own bursts out by it).
 // BUDGET: ~.01 ms a step with a few dozen.
 
+import {TERRAIN_ON} from '../world/layout.js';
 const AIR = new Set(['leap', 'fall', 'climb', 'splash']);
 const BODY = .25;   // the player's body radius (sim/player/adapter.js R_BODY): a zone reaches him at its edge
 
@@ -110,7 +111,8 @@ export function createHazards(host, {name = 'hazards', cap = 64} = {}) {
       for (let i = 0; i < n; i++) {
         const h = list[i]; h.t += dt;
         if (!h.fired && h.t >= h.warn) { h.fired = true; goOff(h); }
-        if (h.fired && h.last > 0 && h.dps > 0 && lingerT <= 0 && grounded && Math.abs(pz - h.z) < .35) {
+        // (walkable terrain: a zone lies over sloping ground: on its feet on the ground under him, and that ground the zone's level)
+        if (h.fired && h.last > 0 && h.dps > 0 && lingerT <= 0 && grounded && (TERRAIN_ON ? Math.abs(pz - host.elev(px, py)) < .35 && Math.abs(pz - h.z) < 1 : Math.abs(pz - h.z) < .35)) {
           const dx = px - h.x, dy = py - h.y, rr = h.r + BODY * .5;
           if (dx * dx + dy * dy < rr * rr && hurt(h.dps * h.tick, h.by)) lingerT = h.tick;
         }

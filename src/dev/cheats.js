@@ -18,7 +18,7 @@
 // BUDGET: closed and no cheat on: nothing. Open: a few text writes 4 times a second; placing: 10 points a frame.
 import {spawnEnemy, scaleOf, ENEMIES} from '../game/enemies.js';
 import {TYPES} from '../content/foes.js';
-import {roamable} from '../world/world.js';
+import {roamable, onGround} from '../world/world.js';
 import {WEATHER} from '../sim/env.js';
 import {mulberry32} from '../core/rng.js';
 import {hypot2, TAU} from '../core/mathx.js';
@@ -98,7 +98,7 @@ export function createCheats({host, cam, canvas}) {
     }
     return true;
   }
-  const bruteOk = (x, y) => roamable(x, y) && host.elev(x, y) === 0 && !host.blocked(x, y, 0) && free(x, y, .5);   // (combat's brutes: inside the walls, the trail)
+  const bruteOk = (x, y) => roamable(x, y) && onGround(x, y) && !host.blocked(x, y, host.elev(x, y)) && free(x, y, .5);   // (combat's brutes: inside the walls, the trail)
   const gunOk = (x, y) => { const n = foes()?.sim.nav; return !!n?.built && n.isOpen(x, y) && free(x, y, .5); };   // (the gunmen's own nav: the ground you walk)
   // a spot that passes test: (x0, y0) itself (r0 = 0) or between r0 and r1 m from it, the ring widening as tries fail
   function spot(test, x0, y0, r0, r1) {
@@ -162,10 +162,10 @@ export function createCheats({host, cam, canvas}) {
   // the ground under the cursor (world m): the cursor's view-frame point at height h, h found from the ground there
   function ground(out) {
     const a = host.yaw, ca = Math.cos(a), sa = Math.sin(a);
-    for (let i = 0, h = 0; i < 4; i++) {
+    for (let i = 0, h = 0; i < 12; i++) {   // (a damped fixed point: it settles on walkable slopes too)
       const vx = (mouse.x + cam.x) / host.PPM, vy = (mouse.y + cam.y + h * host.PPMH) / host.PPMY;
       out.x = vx * ca + vy * sa; out.y = -vx * sa + vy * ca;
-      const e = host.elev(out.x, out.y); if (e === h) break; h = e;
+      const e = host.elev(out.x, out.y); if (Math.abs(e - h) < .01) break; h = i < 3 ? e : h + (e - h) * .6;
     }
     return out;
   }
