@@ -28,3 +28,10 @@ re-apply them when updating three.js. None changes what's drawn.
   boxed every comparison's result). Both sorts are stable: the same order.
 - `WebGLAttributes` `updateBuffer`: the update ranges are sorted only when there are two or more.
 - `flatten`: `typeof firstElem === 'number'` instead of `firstElem <= 0 || firstElem > 0`.
+
+**Local patch** (2026-10-04, `readRenderTargetPixelsAsync`, marked `LOCAL PATCH`): the stock code leaves its
+`PIXEL_PACK_BUFFER` bound from its `readPixels` until the GPU fence clears (a few frames), so every synchronous
+`readPixels` / `readRenderTargetPixels` meanwhile failed with INVALID_OPERATION and returned zeros (render/litter.js asks
+for its mirror every 2.5 s; a photo export or test read landing in that window got a blank image). It now unbinds the
+pack buffer right after the `readPixels` and again after `getBufferSubData`, and frees the buffer and the fence when the
+wait fails too. No new allocation; same pixels read.

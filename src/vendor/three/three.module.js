@@ -31452,6 +31452,11 @@ class WebGLRenderer {
 					_gl.bufferData( _gl.PIXEL_PACK_BUFFER, buffer.byteLength, _gl.STREAM_READ );
 					_gl.readPixels( x, y, width, height, utils.convert( textureFormat ), utils.convert( textureType ), 0 );
 
+					// LOCAL PATCH (the game, 2026-10-04; src/vendor/README.md): the pack buffer is unbound before the wait and
+					// after the read. Left bound for the frames the wait takes, every synchronous readPixels in between (three's
+					// readRenderTargetPixels, a capture) failed with INVALID_OPERATION and gave back zeros
+					_gl.bindBuffer( _gl.PIXEL_PACK_BUFFER, null );
+
 					// reset the frame buffer to the currently set buffer before waiting
 					const currFramebuffer = _currentRenderTarget !== null ? properties.get( _currentRenderTarget ).__webglFramebuffer : null;
 					state.bindFramebuffer( _gl.FRAMEBUFFER, currFramebuffer );
@@ -31461,13 +31466,22 @@ class WebGLRenderer {
 
 					_gl.flush();
 
-					await probeAsync( _gl, sync, 4 );
+					try {
 
-					// read the data and delete the buffer
-					_gl.bindBuffer( _gl.PIXEL_PACK_BUFFER, glBuffer );
-					_gl.getBufferSubData( _gl.PIXEL_PACK_BUFFER, 0, buffer );
-					_gl.deleteBuffer( glBuffer );
-					_gl.deleteSync( sync );
+						await probeAsync( _gl, sync, 4 );
+
+						// read the data and delete the buffer
+						_gl.bindBuffer( _gl.PIXEL_PACK_BUFFER, glBuffer );
+						_gl.getBufferSubData( _gl.PIXEL_PACK_BUFFER, 0, buffer );
+
+					} finally {
+
+						// (LOCAL PATCH: also when the wait fails: the buffer and the fence went unfreed then)
+						_gl.bindBuffer( _gl.PIXEL_PACK_BUFFER, null );
+						_gl.deleteBuffer( glBuffer );
+						_gl.deleteSync( sync );
+
+					}
 
 					return buffer;
 
