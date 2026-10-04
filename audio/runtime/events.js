@@ -391,6 +391,14 @@ export const EVENTS = {
     banks: [['creature', 'fish'], ['creature', 'frog'], ['plunk', 'small'], ['splash', 'lava', 7], ['splash', 'rift', 7], ['creature', 'lava_belch', 7], ['creature', 'rift_shimmer', 7]],
   },
   rustle: {...WILD, gainDb: -12, cooldownMs: 200, pick: () => L('creature', 'critter'), banks: [['creature', 'critter']]},
+  // the night's canids (features/wildlife/coyotes.js: wildlife.howl {kind: coyote | fox | wolf, call: howl | yips | bark}):
+  // the canid recipe. Combat's screen rule (they sit at the view's edge and call from just past it: heard a little off screen)
+  howl: {
+    ...WILD, cat: 'combat', gainDb: -13, cooldownMs: 700, variants: 4, bakePriority: 7,
+    pick: o => L('canid', o.kind === 'wolf' ? 'wolf_howl' : o.kind === 'fox' ? 'fox_bark' : o.call === 'yips' ? 'coyote_yips' : 'coyote_howl'),
+    gainFrom: o => o.call === 'yips' ? -2 : 0,
+    banks: [['canid', 'coyote_howl'], ['canid', 'coyote_yips'], ['canid', 'wolf_howl', 8], ['canid', 'fox_bark', 8]],
+  },
 
   // ================================================ UI (pause menu) ================================================
   ui_hover: {...UI, gainDb: -13, maxInstances: 1, cooldownMs: 40, pick: () => L('ui', 'hover'), banks: [['ui', 'hover']]},
