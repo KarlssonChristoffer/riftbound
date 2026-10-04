@@ -38,6 +38,7 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
+import {cliffGeometry} from './cliffs3d.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
 
@@ -427,11 +428,12 @@ const FALL_LOOK = {
   rift: {mode: 'glow', ramp: () => EMIT.rune.rift.map(h => '#' + h)},
   desert: {mode: 'water', ramp: S => S.water.h},
 };
-function fallFace(cv, q, PPM, rock, look, ramp) {
+// only: the fall alone on a clear sheet (the 3D cliffs stand behind it: cliffs3d.js), no rock
+function fallFace(cv, q, PPM, rock, look, ramp, only = false) {
   const rows = cv.height, per = q.h / rows, foot = Math.ceil(-WATER_H / per), H = rows + foot, W = cv.width, out = document.createElement('canvas');
-  out.width = W; out.height = H; const g = out.getContext('2d', {willReadFrequently: true}); g.drawImage(cv, 0, 0);
+  out.width = W; out.height = H; const g = out.getContext('2d', {willReadFrequently: true}); if (!only) g.drawImage(cv, 0, 0);
   const id = g.getImageData(0, 0, W, H), d = id.data, put = (x, y, c, a = 255) => { const i = (y * W + x) * 4; d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = a; };
-  for (let y = rows; y < H; y++) for (let x = 0; x < W; x++) put(x, y, rock[3]);                       // the foot, below the ground line: dark, wet rock
+  if (!only) for (let y = rows; y < H; y++) for (let x = 0; x < W; x++) put(x, y, rock[3]);            // the foot, below the ground line: dark, wet rock
   if (!look) { g.putImageData(id, 0, 0); return {cv: out, h: H * per}; }   // (a biome without a fall: the foot only)
   const col = (FALL.x - q.x0) / (q.x1 - q.x0) * W, hw = FALL.hw * PPM, C = ramp.map(hex255);
   for (let y = 0; y < H; y++) {
@@ -458,8 +460,9 @@ function fallFace(cv, q, PPM, rock, look, ramp) {
 }
 
 // ---------------------------------------------------------------- build
+const FALL_OUT = .03;   // with the 3D cliffs: the plateau's waterfall sheet hangs this far (m) in front of the face line, the rock behind it
 const POOL_GROW = .25;   // the ground mesh (.25 m cells) is lowered this far (m) beyond the pool's painted edge, so the painted outline is the drawn one
-export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null, trees3d = true}) {
+export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null, trees3d = true, cliffs3d = true}) {
   GT = G;
   // keep: the live prop list of the previous world (a biome switch): the items must point at the props gameplay uses
   // WM x HM: the Proving Grounds' painted ground (GROUNDS, from 0, 0); the world round it (WORLD) can be bigger
@@ -561,9 +564,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const ge = groundEmit ? groundEmit.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, groundEmit.width, groundEmit.height).data : null;
     const edgeZ = x => { for (let z = Y1 - 7; z < Y1 + SKIRT; z += .05) if (hAt(x, z) < -1) return z; return null; };
     for (let cx = 0; cx < cliff.width; cx++) {
-      const x = cx / PPM - cliffOff, ze = edgeZ(x); if (ze === null) continue;
-      const zs = ze - .35, off = Math.abs(x - STREAM.cx(zs)) - STREAM.w(zs) / 2;
-      if (off > 0) continue;
+      const x = cx / PPM - cliffOff, ze = edgeZ(x);
+      const zs = ze === null ? 0 : ze - .35, off = ze === null ? 1 : Math.abs(x - STREAM.cx(zs)) - STREAM.w(zs) / 2;
+      if (off > 0) {   // no fall here: with the 3D cliffs the rock is live (below), and the ground's own steep cells draw nothing (alpha 0: SURF_FS)
+        if (cliffs3d) for (let r = 0; r < CH; r++) d[(r * cliff.width + cx) * 4 + 3] = 0;
+        continue;
+      }
       const at = z => (Math.min(HPX - 1, Math.max(0, Math.round(z * PPM))) * WPX + Math.min(WPX - 1, Math.max(0, Math.round(x * PPM)))) * 4;
       let gi = at(zs), glows = false;
       if (ge) for (let z = zs - .6; z <= zs; z += 1 / PPM) {   // a glowing stream (lava): its brightest molten pixel near the edge
@@ -622,13 +628,53 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y1, 0], [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y0, Math.PI],
       [q.y1 - q.y0, q.x1, (q.y0 + q.y1) / 2, Math.PI / 2], [q.y1 - q.y0, q.x0, (q.y0 + q.y1) / 2, -Math.PI / 2]];
     faces.forEach(([len, cx, cz, ry], k) => {
+      // with the 3D cliffs (below) the rock is live; only the south face's waterfall stays a sheet, standing just in front of it
+      if (cliffs3d && !(k === 0 && q === PLATEAUS[0] && FL)) return;
       let cvs = strataCanvas(len, q.h, PPM, PPMH, R.rock, R.cov, k + 2, R.rockB), hgt = q.h;
-      if (k === 0 && q === PLATEAUS[0]) ({cv: cvs, h: hgt} = fallFace(cvs, q, PPM, R.rock, FL, FL?.ramp(biome.style)));   // the south face: the waterfall, and the foot down to the pool
+      if (k === 0 && q === PLATEAUS[0]) ({cv: cvs, h: hgt} = fallFace(cvs, q, PPM, R.rock, FL, FL?.ramp(biome.style), cliffs3d));   // the south face: the waterfall, and the foot down to the pool
+      if (cliffs3d) cz += FALL_OUT;
       const geo = new THREE.PlaneGeometry(len, hgt); geo.translate(0, q.h - hgt / 2, 0); geo.rotateY(ry); geo.translate(cx, 0, cz);
       const uvA = geo.attributes.uv; for (let i = 0; i < uvA.count; i++) uvA.setY(i, 1 - uvA.getY(i));   // canvas rows go down
       const tex = texOf(cvs, true);
-      const f = G.surface(geo, {tex, planar: false, type: 5, obj: 1}); disposers.push(() => f.dispose());
+      const f = G.surface(geo, {tex, planar: false, type: 5, obj: 1}, !cliffs3d); disposers.push(() => f.dispose());   // (the sheet of water alone casts no shadow)
     });
+  }
+
+  // ---- the 3D cliffs (cliffs3d.js): the plateau's four faces and the ravine's wall as live rock. Runs travel with the outside
+  // on their (-tz, tx) side: east along a south face
+  if (cliffs3d) {
+    const famOf = name => Math.max(0, FAMS.indexOf(name)), lip = !!R.cov && biome.id !== 'ember';   // (ember's cover is ash: it doesn't hang)
+    const o = {fam: famOf, rockB: R.rockB ? famOf('stone') : null, cover: R.cov ? famOf('cover') : null, ladders: []};
+    // props near a face keep the stones off them (built once per world: no per-frame scan)
+    const near = props.filter(p => !p.outside || !biome.hole?.(p.x, p.y, ctxO)).map(p => [p.x, p.y]);
+    const wet = (x, z) => hAt(x, z) < -.01 || inOutflow(x, z) || inRill(x, z);
+    const plateauRuns = [];
+    for (const q of PLATEAUS) {
+      const P = q === PLATEAUS[0], climbs = q.climbs || [];
+      const keepS = (x, z) => P && FL && Math.abs(x - FALL.x) < FALL.hw + .16 ? FALL_OUT - .04 : climbs.some(c => Math.abs(x - c.x) < c.w / 2 + .08) ? -.02 : null;
+      const avoid = (x, z) => wet(x, z) || climbs.some(c => Math.abs(x - c.x) < c.w / 2 + .5 && z > q.y1 - .1) || near.some(([px, py]) => Math.hypot(px - x, py - z) < .55);
+      const foot = (nx, nz) => (x, z) => Math.min(hAt(x + nx * .2, z + nz * .2), 0);   // the ground just outside (the pool lowers it)
+      const dark = y => y < .45 ? -.05 : 0;
+      const run = (pts, nx, nz, seed, more = {}) => ({pts, top: q.h, bot: foot(nx, nz), minBot: -.05, talus: true, avoid, lip, dark, seed, ...more});
+      plateauRuns.push(
+        run([[q.x0, q.y1], [q.x1, q.y1]], 0, 1, 31, {keep: keepS, minBot: WATER_H - .05}),   // south (the waterfall, the pool, the climb)
+        run([[q.x1, q.y1], [q.x1, q.y0]], 1, 0, 37), run([[q.x1, q.y0], [q.x0, q.y0]], 0, -1, 41), run([[q.x0, q.y0], [q.x0, q.y1]], -1, 0, 43));
+      for (const c of climbs) o.ladders.push({x: c.x, z: q.y1, h: q.h, nx: 0, nz: 1});
+    }
+    const pg = cliffGeometry(plateauRuns, o);
+    if (pg) { const m = G.mesh(pg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); pg.dispose(); }); }
+    // the ravine: along its edge line (the ground's own steep cells draw only the waterfall: the cliff texture's alpha, above),
+    // gapped where the stream falls over it; shading toward its floor
+    if (RAVINE) {
+      const pts = [];
+      for (let x = WORLD.x0 - SKIRT; x <= WORLD.x1 + SKIRT + 1e-6; x += .5) { const z = cliffZ(x); if (isFinite(z)) pts.push([x, z]); }
+      const fallAt = (x, z) => { const zs = z - .35; return Math.abs(x - STREAM.cx(zs)) - STREAM.w(zs) / 2 < .04; };
+      if (pts.length > 1) {
+        const rg = cliffGeometry([{pts, top: 0, bot: () => DROP, minBot: DROP - .05, relief: .85, skip: fallAt, lip,
+          dark: y => -.34 * smooth(-y / 2.8), seed: 53}], {...o, ladders: []});
+        if (rg) { const m = G.mesh(rg, 0, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); rg.dispose(); }); }
+      }
+    }
   }
 
   // ---- props

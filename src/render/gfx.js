@@ -297,6 +297,7 @@ void main() {
     vec2 ct = vec2((along + uCliffOff) * uPx.x, -vW.y * uPx.y);
     vec4 cc = texture(uCliff, (floor(ct) + .5) / uCliffSize);
     float al = cc.a * 255.;   // alpha 250: a glowing fall (lava); 252: a fall of water (streams down: fall())
+    if (al < .5) discard;     // (alpha 0: no wall drawn here: the 3D cliffs stand in front, world.js / cliffs3d.js)
     o0 = vec4(abs(al - 252.) < .5 ? fall(cc.rgb, floor(ct), uCliffSize.y) : cc.rgb, float(5 * 4) / 255.);
     o1 = vec4(n, uObj); o2 = vec4(abs(al - 250.) < .5 ? cc.rgb : vec3(0.), 0.);
     return;
