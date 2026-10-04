@@ -56,6 +56,9 @@ const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const C20 = Math.cos(20 * DEG), S55 = Math.sin(55 * DEG), K_UP = Math.tan(20 * DEG) * C20 / S55;   // the sprite camera's squash
 const FADE = .08, STEP_HZ = 12, TURN = 1200 * DEG;   // clip cross-fade (s), procedural steps / s, eased facing (rad/s)
 const PLAYER_SUN = 1.6;   // m toward the sun of his chest where the composite tests whether he stands in shade (the sprite: .5)
+const XFAMS = new Set(['ob', 'ub', 'cx']);   // the angles' gait families (sim/player/gun.js TWX): drawn as they are, trimmed by
+                                             // at most XLIM of spine twist (their upper bodies aren't the aim's twist-0)
+const XLIM = 30 * Math.PI / 180;
 const SHOT_FX = {life: .065, len: .62};   // an emote's shot: the flash's life (s) and length (m along the barrel), as gunfx's
 const SMEAR = {px: 3, k: .55, max: .3, kmax: 2};   // a tip jump past px screen px: stretched back k of its move (at most
                                                    // max m, at most kmax x the piece's own extent along the move)
@@ -275,8 +278,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     screenOf(TW_TMP[o + 4], TW_TMP[o + 5], TW_TMP[o + 6], SO);
     return wrap(Math.atan2(CUR[1] - my, CUR[0] - mx) - Math.atan2(my - SO[1], mx - SO[0]));
   }
-  function aimTwist(w, d0) {
-    const LIM = 110 * DEG; cursor();
+  function aimTwist(w, d0, LIM = 110 * DEG) {
+    cursor();
     let a = d0 === d0 ? d0 : 0, ea = screenErr(w, a), b = a + (ea > 0 ? -1 : 1) * 12 * DEG, eb = screenErr(w, b);
     for (let it = 0; it < 5 && Math.abs(eb) > .5 * DEG; it++) {
       const den = eb - ea; let c = Math.abs(den) < 1e-6 ? b + 6 * DEG : b - eb * (b - a) / den;
@@ -457,7 +460,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     if (f.startsWith('gun_hipfire')) { if (CL.cb_st_hip) { CBR.base = cbFrame('hip'); CBR.aim = true; CBR.key = 'cb:hip'; return CBR; } return null; }
     if (!moving && (f.startsWith('gun_aim') || f.startsWith('gun_fire') || f.startsWith('gaim_'))) { CBR.base = cbFrame(cbSt); CBR.aim = true; return CBR; }
     if (!moving && f.startsWith('gun_reload') && cbSt !== 'aim') { CBR.base = cbFrame(cbSt); CBR.upper = f; return CBR; }   // (reloading IN the stance: its legs, the reload's hands)
-    if (moving && cbSt !== 'aim' && CL['cb_st_' + cbSt] && (p.fam === 'gws' || p.fam === 'grs')) { CBR.upper = cbFrame(cbSt); return CBR; }
+    if (moving && cbSt !== 'aim' && CL['cb_st_' + cbSt] && (p.fam === 'gws' || p.fam === 'grs') && !XFAMS.has(p.tw)) { CBR.upper = cbFrame(cbSt); return CBR; }
     return moving ? CBR : null;   // (on the move with the aim: the gait's own twist-0 pose; the key keeps the fade quiet)
   }
   // the drawn muzzle (the world: arena x, y, height), for the shot's flash (host.playerMuzzle): the last drawn frame's
@@ -608,6 +611,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // 2) the base pose (world, body space) into Wt
     let baseName = f, layer = '', upper = -1, aiming = false, upName = '';
     if (cb && cb.base) { baseName = cb.base; aiming = cb.aim; if (cb.upper) { layer = 'upper'; upName = cb.upper; } }   // COMBAT STYLE: the stance / the draw (/ a reload over its legs)
+    else if (proc && p.fam && (p.fam === 'gws' || p.fam === 'grs') && XFAMS.has(p.tw)) { aiming = true; }   // an angle (over the shoulder, across): itself, trimmed
     else if (proc && p.fam && (p.fam === 'gws' || p.fam === 'grs')) { baseName = nm(p.fam + '_0_', p.i); aiming = true; if (cb && cb.upper) { layer = 'upper'; upName = cb.upper; } }   // aim on the move: the twist-0 pose (and a stance's upper body)
     else if (proc && (f.startsWith('gun_aim') || (K.flow && f.startsWith('gun_fire')))) { baseName = 'gun_aim'; aiming = true; }   // the standing twists (and with FLOW the kick): gun_aim
     else if (proc && p.fam && (p.fam === 'gwr' || p.fam === 'grr') && S) { baseName = nm(p.loco + '.', p.i); layer = 'reload'; upper = reloadAt(S); }
@@ -642,7 +646,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // 5) aim at any angle: the twist onto the cursor (held by the hysteresis, sampled with the step)
     if (aiming && GUN >= 0) {   // (and at once when the legs re-plant or turn: a stale twist on new legs points anywhere)
       if (sample || !(twistHeld === twistHeld) || phi !== aimPhi || baseName !== aimBase) {
-        twist = aimTwist(Wt, twist); twistHeld = phi !== aimPhi || baseName !== aimBase ? twist : hystOf(twistHeld, twist); aimPhi = phi; aimBase = baseName;
+        twist = aimTwist(Wt, twist, XFAMS.has(p.tw) ? XLIM : undefined); twistHeld = phi !== aimPhi || baseName !== aimBase ? twist : hystOf(twistHeld, twist); aimPhi = phi; aimBase = baseName;
       }
       twistShown = flowOn ? aimFlow(phi, twistHeld, dt, sample) : twistHeld;
       spineTwist(Wt, twistShown);

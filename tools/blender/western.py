@@ -2688,3 +2688,34 @@ ANIMS['cb_dr_high'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_lv_dl_up', 'gun
 ANIMS['cb_dr_kneel'] = _clip(['gdraw_grab', 'gun_lv_kn_down', 'gun_cb_kneel_a'], [0, .5, 1, 1.5, 2], 32)
 ANIMS['cb_dr_crouch'] = _clip(['gdraw_grab', 'gun_draw_lift', 'gun_cb_crouch_a'], [0, 1, 1.5, 2], 32)
 
+
+# ================================================================ the gunplay's new angles (atlas + live) =============
+# Aiming on the move where the bladed aim and its torso twists (-90..+45) can't reach without turning the legs: the gun
+# back over the right shoulder (ob: a target behind him to his right), back past the left side under the arm (ub: behind
+# him to his left), across the chest to his left (cx). Each is an upper body over every walk / run frame, named like the
+# aim's twist families (gws_<fam>_<i> / grs_<fam>_<i>): the sim scores them by their rendered barrels and shoots from
+# their muzzles (sim/player/gun.js movingAim, TWX), so they are rendered into the atlases (pixel_rig.py --append --poses);
+# the live hero draws them too (its spine twist trims their aim a little).
+ANGLE_FAMS = ('ob', 'ub', 'cx')
+ANGLE_POSES = [f'{pre}_{fam}_{i}' for fam in ANGLE_FAMS for pre in ('gws', 'grs') for i in range(8)]
+_ANGLES = {
+    # over the shoulder: the gun hand by the right ear (carried by the chest), the barrel back and a little out, near
+    # level; the head turned back over the shoulder; the free arm loose
+    'ob': (6, {k: v for k, v in _OS.items() if not k.startswith('Left')}, [('Right', 'Spine2', (-.31, .03, 1.38))],
+           {'dir': (-.35, 1, .1)}),
+    # under the arm: the gun hand across to the left hip (carried by the hips), the barrel back past the left side, the
+    # left forearm lifted clear (its wrist on the chest), the head turned a little after it
+    'ub': (-8, _UA, [('Right', 'Hips', (.23, -.05, .93)), ('Left', 'Spine2', (.1, -.17, 1.15))], {'dir': (.3, 1, -.04)}),
+    # across the body: square, the right arm across the chest, the gun out past the left shoulder (the wrist carried by
+    # the chest), the head turned left onto the target
+    'cx': (0, {'RightShoulder': [('Z', 14)], 'RightArm': [('Y', -20), ('X', -60), ('Z', 40)], 'RightForeArm': [('X', -30)],
+               'Neck': [('Z', 40)], 'Head': [('Z', 24)]}, [('Right', 'Spine2', (.24, -.3, 1.24))], {'dir': (1, -.12, .02)}),
+}
+for _fam, (_blade, _spec, _at, _gun) in _ANGLES.items():
+    POSES[f'gun_ang_{_fam}'] = _gpose(_blade, _spec)   # (standing, for looking at it)
+    LIVE_AT[f'gun_ang_{_fam}'], LIVE_GUN[f'gun_ang_{_fam}'] = _at, _gun
+    _up = _upper(POSES[f'gun_ang_{_fam}'], _blade)
+    for _i in range(8):
+        for _pre, _c in (('gws', 'walk'), ('grs', 'run')):
+            POSES[f'{_pre}_{_fam}_{_i}'] = _on_legs(_i, _up, _c)
+            LIVE_AT[f'{_pre}_{_fam}_{_i}'], LIVE_GUN[f'{_pre}_{_fam}_{_i}'] = _at, _gun

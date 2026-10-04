@@ -164,9 +164,18 @@ turns it off / on):
 
 View only: the sim is unchanged (simview with `?live=1` passes). Reels: `tmp/live-emotes/combat_outlaw.gif`,
 `combat_gunslinger.gif` (`combatreel.mjs`: scripted fights in the real game; `gunflow.mjs`: flow off | on).
-Next: shooting ANGLES the sim allows (a shot back over the shoulder while running away, across the body) need the sim's
-muzzle and cone for them, from atlas frames (the gunslinger session's route: `pixel_rig --append`) or a sim-readable
-table; and the gunslinger's duster on live bones.
+**New shooting angles (gameplay, sprite and live).** On the move the stances can also aim with three upper bodies the
+torso twists (-90..+45) can't reach: the gun back over the right shoulder (`ob`), back past the left side under the arm
+(`ub`), across the chest to his left (`cx`). Each is laid over every walk / run frame (`gws_<fam>_<i>` / `grs_<fam>_<i>`,
+`western.py` `ANGLE_FAMS`) and rendered into the gunslinger's and the outlaw's atlases (`pixel_rig.py --append --poses`,
+then pixelize and pack_atlas: ~5 min a character). `sim/player/gun.js` `movingAim` scores them with the twists (`TWX`, their
+barrels' real angles in `TWX_DEG`; `TUNE.angles`). Running (not walking, Q) with the target behind him, he keeps running
+his way and shoots back instead of turning to back up. Those shots are `rear`: the cone round the shoulder's aim, no kick,
+`spread.rear` (Peacemaker 4.2 deg, Navy 6). `cx` shots are ordinary `move` shots. The live hero draws an angle frame as
+it is (no twist-0 base), trimmed by at most 30 deg of spine twist. Checked headless (`tmp/live-emotes/angleplay.mjs`):
+running with the target behind, every shot after the first flies back at it; a target beside him gets `cx`; walking
+still backs up. The sim comes out the same with the live hero on. Reel: `tmp/live-emotes/angles_gunslinger.gif`.
+Next: the gunslinger's duster on live bones.
 
 ## Measurements
 

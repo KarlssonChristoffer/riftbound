@@ -13,6 +13,10 @@
 //   melee (the pistol whip's blow: features/gun.js lands it through combat).
 // BUDGET: part of player.step (sim group): aiming on the move scores <= 70 poses a step, like the bow's stance search.
 //
+// THE ANGLES (an atlas that has them: tools/blender/western.py ANGLE_FAMS): on the move the stances also aim with TWX, upper
+// bodies the twists can't reach: the gun back over the right shoulder (ob), back past the left side under the arm (ub),
+// across the chest to his left (cx). Running (not walking, Q) with the target behind him he keeps running his way and
+// shoots back over his shoulder instead of backing up (TUNE.angles); their shots are 'rear' (spread.rear: less sure).
 // THE ACTIONS (S.act): '' ready (the gun up, aimed at the cursor: standing twists / steps / pivots, or the walk / run
 // stances) | draw (from the holster; the gunslinger's first shot leaves from the hip: hip) | fire (the kick) | fan (RMB:
 // the palm sweeps the hammer, a shot each sweep, the feet planted) | reload (R, or after the empty click: dry) | twirl
@@ -44,6 +48,9 @@ export const TUNE = {
   settleMin: 6,     //   cursor's distance out (at least settleMin m), so a miss kicks up dirt you can see; 0: flat to its range
   turnBehind: 115,  // deg: a draw at a target this far round from his facing, standing, spins him round onto it (gun_turnshot)
   whipLunge: 2.4,   // m/s: the whip's blow carries him forward into it (plant() takes it up: ~.13 m)
+  // the angles (TWX) in the moving stance search: cost added to a stance aimed with one (the twists win a tie), and to
+  // backing up while running when the atlas has them (he'd rather keep running and shoot over his shoulder)
+  angles: {cost: .6, backRun: 2.2},
   melee: {dmg: 20, reach: 1.5, arc: 80, push: 1},   // a gun without its own `melee` (content/weapons.js)
   clipFb: {gun_draw: [4, 16], gun_fire: [3, 20], gun_fan: [2, 14], gun_reload: [6, 6], gun_twirl: [4, 16], gun_holster: [5, 16],
     gaim_step_l: [4, 16], gaim_step_r: [4, 16], gaim_pivot_l: [3, 24], gaim_pivot_r: [3, 24], gun_hipfire: [3, 18], gun_blow: [5, 6], gun_fan_out: [3, 28],
@@ -53,6 +60,9 @@ export const TUNE = {
 // the right up to 90 deg, across to the left up to 45)
 const TWS = ['gun_aim_m45', 'gun_aim_m34', 'gun_aim_m22', 'gun_aim_m11', 'gun_aim', 'gun_aim_p11', 'gun_aim_p22', 'gun_aim_p34', 'gun_aim_p45'];
 const TWM = ['m90', 'm67', 'm45', 'm22', '0', 'p22', 'p45'], TWM_DEG = [-90, -67.5, -45, -22.5, 0, 22.5, 45];
+// the angles' upper bodies on the same legs (forward legs only): each one's barrel from the legs' facing (deg, + = his
+// left: western.py's LIVE_GUN dirs), and whether its shot is 'rear' (behind him: the wider spread) or 'move'
+const TWX = ['ob', 'ub', 'cx'], TWX_DEG = [-161, 163, 83], TWX_REAR = [true, true, false];
 const RELOAD_STAND = {up: 0, eject: 1, fetch: 3, close: 5};   // gun_reload frames (load: 2 / 4 by the round)
 
 export function createGun(PL, I) {
@@ -64,7 +74,7 @@ export function createGun(PL, I) {
   const S = {wid: '', out: false, act: '', at: 0, ammo: 6, cap: 6, cool: 0, idle: 0, next: '',
     want: 0, wantT: 0, fanWant: false, reloadWant: false, tipWant: false,
     rph: '', rt: 0, rmul: 1, resume: false, hip: false, quick: false, fanT: 0,
-    flourish: false, calm: true, duel: false, aimSpeed: 0, lastSa: NaN, aclip: null, twName: '0',
+    flourish: false, calm: true, duel: false, aimSpeed: 0, lastSa: NaN, aclip: null, twName: '0', rear: false,
     shotN: 0, lastHow: '', lastShotAt: -9, clock: 0, reloadK: 0, rfirst: true,
     whipWant: false, near: false, done: false};   // (the whip's key; a foe in reach: the gun feature's cue; turn / whip: its shot / blow is out)
   const weapon = () => H.weapon?.() || null;
@@ -139,14 +149,14 @@ export function createGun(PL, I) {
   const emit = (type, w, o) => { o.type = type; o.x = P.x; o.y = P.y; o.z = P.z; o.gun = w.id; ev(o); };
 
   // ---------------------------------------------------------------- the shot
-  function fire(w, how) {   // how: 'aim' | 'move' | 'hip' | 'fan'
+  function fire(w, how) {   // how: 'aim' | 'move' | 'rear' (on the move, over the shoulder: TWX) | 'hip' | 'fan'
     // the muzzle of the pose the shot leaves from (a draw frame still holds the gun low: its aim pose instead)
     const pose = how === 'hip' ? 'gun_hipfire.0' : how === 'fan' ? nm('gun_fan', mark('gun_fan', 'shot', 1))
       : how === 'turn' ? nm('gun_turnshot', mark('gun_turnshot', 'shot', 7))   // (the frame is turned round: his facing is still the start's)
       : /^(gun_aim|gws_|grs_)/.test(P.frame) ? P.frame : 'gun_aim';
     const c = cursorAim(), m = muzzle(pose, P.face, c), ND = A.ND;
     let a = Math.atan2(c.x - m.x, c.y - m.y);
-    if (how === 'move') {   // on the move the shot leaves where the torso can aim (never over the shoulder)
+    if (how === 'move' || how === 'rear') {   // on the move the shot leaves where the torso can aim (over the shoulder: TWX)
       const b = (P.bodyAim ?? P.face) * TAU / ND, da = ((a - b + Math.PI * 3) % TAU) - Math.PI;
       a = b + clamp(da, -w.cone * DEG, w.cone * DEG);
     }
@@ -162,7 +172,7 @@ export function createGun(PL, I) {
     if (S.ammo === 1) dmg *= 1 + mv('weapon.last', 0);
     if (S.quick) { dmg *= 1 + mv('weapon.quick', 0); S.quick = false; }
     H.onShoot({x: m.x, y: m.y, h: m.h, vx: fx * v, vy: fy * v, vh, life: w.range / v, dmg: Math.round(dmg), kind: 'bullet', gun: w.id, push: w.push, back: TUNE.back, pen: w.pen});
-    if (how !== 'move' && w.kick) { const k = w.kick * (how === 'fan' ? TUNE.fanKick : 1); P.vx -= fx * k; P.vy -= fy * k; }   // the recoil: back against the shot (plant() takes it up)
+    if (how !== 'move' && how !== 'rear' && w.kick) { const k = w.kick * (how === 'fan' ? TUNE.fanKick : 1); P.vx -= fx * k; P.vy -= fy * k; }   // the recoil: back against the shot (plant() takes it up)
     S.ammo--; PL.shots++; S.shotN++; S.idle = 0; S.lastHow = how; S.lastShotAt = S.clock;
     if (!S.ammo && how !== 'fan' && mv('weapon.endless', 0) > 0) S.ammo = S.cap;   // endless (a dev cheat: dev/cheats.js); a fan refills as it ends
     S.cool = (how === 'fan' ? 0 : w.gap) * mv('weapon.gap', 1);
@@ -237,7 +247,7 @@ export function createGun(PL, I) {
     }
     if (S.ammo <= 0) { if (S.near && has('gun_whip.0')) { S.want = 0; startWhip(w); return; } dry(w); return; }   // empty, a foe in reach: whip him
     if (S.cool > 0) return;   // the gap between shots: the press waits (buffered)
-    S.want = 0; fire(w, moving ? 'move' : 'aim');
+    S.want = 0; fire(w, moving ? (S.rear ? 'rear' : 'move') : 'aim');
   }
 
   // ---------------------------------------------------------------- legs on the move (aiming / reloading)
@@ -263,23 +273,31 @@ export function createGun(PL, I) {
     const ND = A.ND, c = cursorAim(), aim = dirOf(c.x - P.x, c.y - P.y), mvd = dirOf(mx, my);
     const Q = ND / 4, HALF = ND / 2, CRAB = ND / 8, rel = (aim - mvd + ND) % ND, behind = rel > Q && rel < ND - Q;
     const back0 = !!P.aimBack, run = !keys.has('q'), pre = run ? 'grs' : 'gws';
-    const f = legs(dt, mx, my, back0, run);
+    const f = legs(dt, mx, my, back0, run), X = has(st(pre, TWX[0], f));   // (the angles, if this atlas has them)
     let bc = 1e9, bb = false, bf = P.face;
     for (let bi = 0; bi < 2; bi++) for (let k = -CRAB; k <= CRAB; k++) {
       const back = bi === 1, face = ((back ? mvd + HALF : mvd) + k + ND) % ND;
       if (back !== back0 && P.stanceAge < TUNE.stanceHold) continue;
-      const legCost = Math.abs(k) + (back !== behind ? 2.5 : 0) + (back !== back0 ? 1 : 0) + (face !== P.want ? .3 : 0);
+      const legBase = Math.abs(k) + (back !== back0 ? 1 : 0) + (face !== P.want ? .3 : 0) + (back && run && X ? TUNE.angles.backRun : 0);
       let e = 9; for (const tw of TWM) e = Math.min(e, aimErr(st(pre, tw, f), face));
-      const cost = legCost + e / DEG / 6;
+      let cost = legBase + (back !== behind ? 2.5 : 0) + e / DEG / 6;
+      if (X && !back) {   // forward legs aimed with an angle: no 'behind' cost (that's what they're for)
+        let ex = 9; for (const tw of TWX) ex = Math.min(ex, aimErr(st(pre, tw, f), face));
+        cost = Math.min(cost, legBase + TUNE.angles.cost + ex / DEG / 6);
+      }
       if (cost < bc) { bc = cost; bb = back; bf = face; }
     }
     P.stanceAge = bb !== back0 ? 0 : (P.stanceAge ?? 9) + dt;
     P.aimBack = bb; P.want = bf;
     if (P.snapFace) { P.face = P.want; P.snapFace = false; } else turnToward(P.want, dt, AIM_TURN_RATE);
-    let tw = S.twName, te = aimErr(st(pre, tw, f), P.face) / DEG;
+    let tw = S.twName; const xi0 = TWX.indexOf(tw);
+    if (xi0 >= 0 && (!X || P.aimBack)) tw = '0';   // (an angle needs forward legs and an atlas with them)
+    let te = aimErr(st(pre, tw, f), P.face) / DEG + (TWX.includes(tw) ? TUNE.angles.cost * 6 : 0);
     for (const n of TWM) { const e = aimErr(st(pre, n, f), P.face) / DEG; if (e < te - TUNE.hyst) { te = e; tw = n; } }
+    if (X && !P.aimBack) for (const n of TWX) { const e = aimErr(st(pre, n, f), P.face) / DEG + TUNE.angles.cost * 6; if (e < te - TUNE.hyst) { te = e; tw = n; } }
     S.twName = tw;
-    P.bodyAim = (P.face + Math.round(TWM_DEG[TWM.indexOf(tw)] / (360 / ND)) + ND) % ND;
+    const xi = TWX.indexOf(tw); S.rear = xi >= 0 && TWX_REAR[xi];
+    P.bodyAim = (P.face + Math.round((xi >= 0 ? TWX_DEG[xi] : TWM_DEG[TWM.indexOf(tw)]) / (360 / ND)) + ND) % ND;
     const name = st(pre, tw, f);
     stepPuff(run, f, name);
     P.frame = A.SP[name] ? name : st('gws', tw, f); P.moveAim = true;
