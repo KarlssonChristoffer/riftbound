@@ -80,7 +80,7 @@ const R = Math.random, RR = (a, b) => a + R() * (b - a);   // presentation's ran
 // come: a fresh one is short): a white-hot head, a gold middle (both glowing), a dull copper tail. Other shooters' bullets
 // (features/foes) are drawn with it too
 export function tracer(host, x, y, h, ux, uy, uh, L) {
-  const T = TUNE.tracer; L = Math.min(T.len, L);
+  const T = TUNE.tracer; L = Math.min(T.len, L); if (!(L > 0)) return;   // (still at the muzzle: the flash is there)
   seg(host, x, y, h, ux, uy, uh, 0, Math.min(L, T.head), C.head, true);
   if (L > T.head) seg(host, x, y, h, ux, uy, uh, T.head, Math.min(L, T.mid), C.mid, true);
   if (L > T.mid) seg(host, x, y, h, ux, uy, uh, T.mid, L, C.tail, false);
@@ -307,12 +307,14 @@ export async function create(host) {
       if (FL.t > 0) drawFlash(FL);
       for (const Q of OF) if (Q.t > 0) drawFlash(Q);
       flashes.frame();
-      // tracers: every bullet in flight, a streak behind its head (length capped by how far it has come)
+      // tracers: every bullet in flight, a streak behind its head, no longer than its head (as drawn) is from the muzzle
+      // it left: drawn between sim steps the head is only alpha of the way along a 2.5 m step, so a length from the
+      // sim's distance ran a fresh shot's streak back past the gun, through his arm
       const T = TUNE.tracer;
       for (const a of host.arrows) {
         if (a.kind !== 'bullet' || a.life <= -9) continue;
-        const w = WEAPONS[a.gun], v = hypot3(a.vx, a.vy, a.vh) || 1, ux = a.vx / v, uy = a.vy / v, uh = a.vh / v;
-        tracer(host, a.x, a.y, a.h, ux, uy, uh, w ? (w.range / w.speed - a.life) * w.speed + .3 : T.len);
+        const v = hypot3(a.vx, a.vy, a.vh) || 1, ux = a.vx / v, uy = a.vy / v, uh = a.vh / v;
+        tracer(host, a.x, a.y, a.h, ux, uy, uh, a.ox === undefined ? T.len : hypot3(a.x - a.ox, a.y - a.oy, a.h - a.oh));
       }
       for (const S of TR) {   // a bullet's last step, shrinking into where it ended
         if (S.t >= T.last) continue;

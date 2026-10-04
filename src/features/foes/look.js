@@ -556,11 +556,11 @@ export function createLook(host, sim) {
         if (c.clip) corpseAO(c, set, set.SP[pose] ? pose : 'idle.0', f, lift, lie, a);
       }
       if (rag) rag.frame(f.dt);
-      // their bullets in flight: gunfx's tracer look
+      // their bullets in flight: gunfx's tracer look (no longer than they've flown: never back past the muzzle)
       const B = sim.B;
       for (let i = 0; i < B.n; i++) {
         const v = hypot3(B.vx[i], B.vy[i], B.vh[i]) || 1;
-        tracer(host, B.x[i], B.y[i], B.h[i], B.vx[i] / v, B.vy[i] / v, B.vh[i] / v, B.flown[i] + .3);
+        tracer(host, B.x[i], B.y[i], B.h[i], B.vx[i] / v, B.vy[i] / v, B.vh[i] / v, B.flown[i]);
       }
     },
     hd(q, sc) {   // health bars (combat's look: a lagging white chip), the sheriff's name over his

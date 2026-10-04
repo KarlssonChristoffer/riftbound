@@ -11,7 +11,7 @@
 // damage left (combat multiplies its hits by it), slower by pen.speed; 'bullet.pierce' at the point it leaves the body.
 // WIND: a run rule may push what flies (features/omens.js, a gale): host.mods 'proj.windX' / 'proj.windY' (m/s^2, world x / y,
 // base 0) accelerate every arrow in flight; a bullet feels 'proj.windBullet' x of that (base 1). None: nothing changes.
-// OWNS: arrows (a bullet's pn / penK too), pops, dust, the hit count. READS: the world (trees, elevation, stream), the
+// OWNS: arrows (a bullet's pn / penK and its muzzle ox / oy / oh too), pops, dust, the hit count. READS: the world (trees, elevation, stream), the
 // entities (near: what an arrow hits or sticks in), features' arrow hooks, the mods' wind notes.
 // EMITS: arrow.hit, arrow.splash, bullet.impact, bullet.pierce (core/events.js). BUDGET: part of sim.
 //   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH, mods})
@@ -33,7 +33,11 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
   let hits = 0, WX = 0, WY = 0, WB = 1;   // the wind's push (m/s^2) and a bullet's share of it: the mods' notes, on change
   const applyWind = () => { WX = mods.value('proj.windX', 0); WY = mods.value('proj.windY', 0); WB = mods.value('proj.windBullet', 1); };
   if (mods) { mods.watch(applyWind); applyWind(); }
-  function spawn(o) { const a = {life: 1.6, vh: 0, kind: 'arrow', ...o}; for (const f of features) f.arrow?.(a); arrows.push(a); }
+  function spawn(o) {
+    const a = {life: 1.6, vh: 0, kind: 'arrow', ...o};
+    if (a.kind === 'bullet') { a.ox = a.x; a.oy = a.y; a.oh = a.h; }   // the muzzle it left (gunfx: its tracer never reaches back past it)
+    for (const f of features) f.arrow?.(a); arrows.push(a);
+  }
   function step(dt) {
     const world = worldOf(), ents = entsOf();
     for (const a of arrows) {
