@@ -714,6 +714,7 @@ void main() {
 
 // ---------------------------------------------------------------- shader: lighting / composite
 const NL = 32;
+const MIST_N = 12;   // the mist's water stretches (COMP_FS MIST, G.setMist)
 const COMP_VS = HEAD + `in vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
 const COMP_FS = HEAD + `
 uniform sampler2D tA, tN, tE, tD, tS, tX, uRamps;
@@ -780,6 +781,74 @@ uniform vec4 uHz, uHzM, uHzO;                      // haze: on, band (px), zoom,
 ivec2 viewTexel(ivec2 p, vec4 M, vec2 o) {   // view pixel p (GL, y up) -> the top-down map's texel (the pattern's nearest sample)
   vec2 c = vec2(float(p.x) + .5, uRes.y - float(p.y) - .5) - o;
   return ivec2(floor(vec2(M.x * c.x + M.y * c.y, M.z * c.x + M.w * c.y)));
+}
+// ---- MIST (features/mist.js sets it every frame it shows it: G.setMist; ?mist=0 or the feature off: the old screen haze). A layer
+// lying LOW in the world: its top is a height (m) that wanders with a noise drifting on the wind and rises over the water (the
+// nearest stretch's water + uMistW.x, falling off over uMistW.y m of bank). A pixel shows the world point P through the mist the view
+// ray crosses on its way down to it (top - P.y m of it: the ravine's floor through 3-4 m, the meadow through a film, the plateau's top
+// through none), as a veil 1 - exp(-sigma t) cut into uMistQ.x hard LEVELS, flat, the edge between two dithered by a 4x4 Bayer
+// matrix fixed to the WORLD (indexed from the world origin's screen pixel, uMistO.xy, in world texels: uMistQ.z px each; the camera
+// pans in whole pixels, so the pattern stays on the ground). Its colour is the mood's light (uMistC), lit by the lamps round it.
+// mistAt(P) is the medium's local density for light through it (god rays): uMistK.x the air's own, more inside the mist
+uniform vec4 uMist;    // on, the top over open ground (m), sigma (1 / m), the thickest level's opacity
+uniform vec4 uMistC;   // colour (rgb), how much of the lamps' light round it the mist takes
+uniform vec4 uMistW;   // the rise over water (m), its reach over the bank (m), the noise's wander (m), its scale (1 / m)
+uniform vec4 uMistD;   // the drift (m: added to the noise's ground point), the aerial term (far haze toward the mist), the view's half depth (m)
+uniform vec4 uMistO;   // the world origin's screen pixel (GL), the view's centre on the ground (x, z)
+uniform vec4 uMistQ;   // levels, the dithered edge's half width (px), the dither's cell (px: a world texel), the water stretches in use
+uniform vec4 uMistK;   // the medium's density 0..1 (the air: fog weather 1, a clear noon ~0), the highest the mist can reach (m), the far haze's share
+uniform vec4 uMistS[${MIST_N}]; uniform vec4 uMistH[${MIST_N}];   // the water's stretches: (x0, z0, x1, z1); (half width, its water's height, 0, 0)
+float mistTop(vec2 g) {
+  vec2 q = g * uMistW.w + uMistD.xy;
+  // (the noise's contrast is raised: banks with an edge, open ground between them, instead of a slope the levels dither all over)
+  float n = vnC(q) * .65 + vnC(q * 2.7 + vec2(5.1, 1.3)) * .35, top = uMist.y + uMistW.z * (smoothstep(.28, .72, n) - .5) * 2.;
+  if (uMistQ.w < .5) return top;
+  // over the water it gathers in banks (a slower noise: some stretches lie thick, some clear) and spills over the bank unevenly
+  float nw = vnC(q * .45 + vec2(9.7, 3.1)), rise = uMistW.x * (.3 + 1.2 * nw), reach = uMistW.y * (.65 + .7 * n);
+  for (int i = 0; i < ${MIST_N}; i++) {
+    if (float(i) >= uMistQ.w) break;
+    vec4 s = uMistS[i]; vec2 ab = s.zw - s.xy, pa = g - s.xy;
+    float t = clamp(dot(pa, ab) / max(dot(ab, ab), 1e-4), 0., 1.), d = length(pa - ab * t) - uMistH[i].x;
+    float f = 1. - smoothstep(0., reach, d);
+    // (past its reach a stretch sinks away, so high water, the creek on the mesa, never lifts the mist over the land round it)
+    top = max(top, uMistH[i].y + rise * f * f - 3. * (1. - f));
+  }
+  return top;
+}
+float mistAt(vec3 P) { return uMist.x < .5 ? 0. : max(uMistK.x, P.y < uMistK.y ? smoothstep(0., .4, mistTop(P.xz) - P.y) : 0.); }
+${BAYER}
+// the veil at ground point g, height y, in levels (level k shows where it is >= k; <= 0 above the top): 1 - exp(-sigma t) (+ .4: the
+// last level is reached, not only approached), and billows: where it lies deep (the veil near 1, the ravine brimming with it) its own
+// slower noise heaps it a level up or thins it a level down in patches, drifting with the rest, so a deep fill isn't one flat tone
+float mistV(vec2 g, float y) {
+  float t = mistTop(g) - y; if (t <= 0.) return t;
+  float w = 1. - exp(-uMist.z * t), nb = vnC(g * .42 + uMistD.xy * 2.5 + vec2(17.3, 4.1));
+  return w * (uMistQ.x + .4) + w * w * (smoothstep(.3, .7, nb) - .5) * 1.4;
+}
+// shade: the sun shadow on the point (0..1 x its opacity); ny: its normal's y (ground-like above .5, else a face, a card, a figure)
+vec3 mistOver(vec3 col, vec3 P, vec3 pts, float shade, float ny) {
+  // the far haze: lighting's fog (uFog, x uMistK.z), by how far behind the view's centre the pixel's GROUND lies (0 at the view's bottom
+  // edge, 1 at its top: the old screen gradient on the ground; a tree takes the haze of the ground it stands on, not of its screen row)
+  vec2 back = -normalize(uView.xz);
+  float far = clamp(dot(P.xz - uMistO.zw, back) / (2. * uMistD.w) + .5, 0., 1.);
+  col += uFog.rgb * uFog.a * (.4 + 1.2 * far) * uMistK.z;
+  // (the lamps round it light it, and the lightning; where a shadow falls on the ground the mist over it lies in it too, dimmer)
+  vec3 mc = uMistC.rgb * (1. - .35 * shade) + pts * uMistC.a + uFlashC * .8;
+  col = mix(col, mc, uMistD.z * far);
+  if (P.y >= uMistK.y) return col;
+  float v = mistV(P.xz, P.y); if (v < .5) return col;
+  // flat levels, dithered only along the EDGE between two: within uMistQ.y px of it (the veil's change over one pixel, from the world one
+  // pixel to the right and one up the screen: along the ground, or up a face), so a level never shows as a pattern over an area; where
+  // the veil barely changes the edge is a clean line, where it jumps (a step, an object's outline) it is left crisp
+  float L = uMistQ.x, lv = clamp(floor(v), 0., L), k = clamp(floor(v + .5), 1., L), e = v - k;
+  if (abs(e) < .15) {
+    float ppx = uWPx.y; vec2 right = vec2(-back.y, back.x);
+    float gx = abs(mistV(P.xz + right / ppx, P.y) - v);
+    float gy = abs((ny > .5 ? mistV(P.xz + back / (ppx * .81915), P.y) : mistV(P.xz, P.y + 1. / (ppx * .93969))) - v);
+    float gp = max(gx, gy), dp = e / max(gp, 1e-4);   // px past the edge (+ inside the upper level)
+    if (gp < .5 && abs(dp) < uMistQ.y) lv = k - (bayer(ivec2(floor((gl_FragCoord.xy - uMistO.xy) / uMistQ.z))) < .5 + .5 * dp / uMistQ.y ? 0. : 1.);
+  }
+  return mix(col, mc, uMist.w * lv / L);
 }
 vec4 reflAt(ivec2 p, float hw, out vec3 rE) {   // the mirrored albedo (a = 1: found) seen at p over water at height hw
   rE = vec3(0.);
@@ -1037,7 +1106,8 @@ void main() {
     vec2 dp = (vec2(ip0) + .5 - uHalo[i].xy); dp.y /= .9;
     float t2 = dot(dp, dp) / (uHalo[i].z * uHalo[i].z); if (t2 < 1.) { float u = 1. - t2; col += uHaloC[i] * u * u * uHalo[i].w; }
   }
-  col += uFog.rgb * uFog.a * (.4 + 1.2 * gl_FragCoord.y / uRes.y);       // haze, stronger toward the far (top) edge
+  if (uMist.x > .5) col = mistOver(col, P, pts, sh * uShadowA, N.y);      // the world's mist + the far haze by depth (MIST above)
+  else col += uFog.rgb * uFog.a * (.4 + 1.2 * gl_FragCoord.y / uRes.y);  // haze, stronger toward the far (top) edge (?mist=0)
   // x-ray (the arena's look): where something hides the player, a dim fill with a light 1 px rim. Not where a particle
   // (obj -1) is in front: a dust mote or raindrop over him would otherwise be a lone rim pixel, a bright speck
   if (texelFetch(tX, ip, 0).r > .5 && type != 4 && N0.w > -.5) {
@@ -1759,6 +1829,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uCl: {value: new THREE.Vector4()}, uClM: {value: new THREE.Vector4()}, uClO: {value: new THREE.Vector4()}, uClC: {value: new THREE.Vector3()},
     uHz: {value: new THREE.Vector4()}, uHzM: {value: new THREE.Vector4()}, uHzO: {value: new THREE.Vector4()},
     uAo: {value: new THREE.Vector4()},
+    uMist: {value: new THREE.Vector4()}, uMistC: {value: new THREE.Vector4()}, uMistW: {value: new THREE.Vector4()}, uMistD: {value: new THREE.Vector4(0, 0, 0, 1)},   // features/mist.js (G.setMist)
+    uMistO: {value: new THREE.Vector4()}, uMistQ: {value: new THREE.Vector4(3, .7, 1, 0)}, uMistK: {value: new THREE.Vector4()},
+    uMistS: {value: Array.from({length: MIST_N}, () => new THREE.Vector4())}, uMistH: {value: Array.from({length: MIST_N}, () => new THREE.Vector4())},
   };
   const compScene = new THREE.Scene();
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
@@ -2041,6 +2114,7 @@ void main() {
     compU.uAo.value.w = aoN ? compU.uAo.value.w : 0;
     if (aoN) { aoGeo.instanceCount = aoN; setRange(aoBuf, 0, aoN * 8); renderer.render(aoScene, dummyCam); }
     compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
+    if (msFrame !== frameNo) { compU.uMist.value.x = 0; mist.on = false; } else mistAnchors();
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
     let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
     if (DS > 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
@@ -2131,6 +2205,32 @@ void main() {
     C.uRfW.value.set(o.S, o.ripple, o.gust, o.t); C.uRfV.value.set(o.oy, o.zoom, o.reach, o.puddleA || 0);
     C.uRfP.value.set(p ? p.x : 0, p ? p.y : 0, p ? p.rx : 0, p ? p.ry : 0);
   }
+  // THE MIST (features/mist.js, every frame it shows it; COMP_FS MIST): {top (m), sigma (1 / m), alpha, col: [r, g, b] 0..1, light,
+  // water (m), reach (m), amp (m), freq (1 / m), drift: [x, z] (m), aerial, far, levels, dither (px), medium 0..1, max (m), segs (Float32Array,
+  // 8 numbers a stretch of water: x0, z0, x1, z1, half width, its water's height, 0, 0), n (stretches), ver (bump when segs changed)}.
+  // A frame without a call: no mist (the old screen haze). G.mist: what shows now, read-only ({on, medium, top, max}: the medium's
+  // density for light through the air; in COMP_FS, mistAt(P))
+  let msFrame = -1, msVer = -1;
+  const mist = {on: false, medium: 0, top: 0, max: 0}, MS3 = [0, 0, 0];
+  function setMist(o) {
+    msFrame = frameNo; const C = compU;
+    C.uMist.value.set(1, o.top, o.sigma, o.alpha); C.uMistC.value.set(o.col[0], o.col[1], o.col[2], o.light);
+    C.uMistW.value.set(o.water, o.reach, o.amp, o.freq); C.uMistD.value.x = o.drift[0]; C.uMistD.value.y = o.drift[1]; C.uMistD.value.z = o.aerial;
+    C.uMistQ.value.x = o.levels; C.uMistQ.value.y = o.dither; C.uMistQ.value.w = Math.min(MIST_N, o.n); C.uMistK.value.set(o.medium, o.max, o.far ?? 1, 0);
+    if (o.ver !== msVer) {
+      msVer = o.ver; const s = o.segs;
+      for (let i = 0; i < MIST_N; i++) { const j = i * 8; if (i < o.n) { C.uMistS.value[i].set(s[j], s[j + 1], s[j + 2], s[j + 3]); C.uMistH.value[i].set(s[j + 4], s[j + 5], 0, 0); } else C.uMistH.value[i].set(0, -1e3, 0, 0); }
+    }
+    mist.on = true; mist.medium = o.medium; mist.top = o.top; mist.max = o.max;
+  }
+  // (render, after the view is set) the world origin's screen pixel, made whole (its fraction is the same every frame: the camera moves
+  // in whole pixels), the dither's cell (a world texel: zoom px), the view's centre on the ground and its half depth (m)
+  function mistAnchors() {
+    const z = view.zoom, up = view.T.y * PPMH / PPMY, C = compU;
+    toScreenInto(0, 0, 0, MS3);
+    C.uMistO.value.set(Math.floor(MS3[0] + .25), Math.floor(VH - MS3[1] + .25), view.T.x - Math.sin(view.yaw) * up, view.T.z - Math.cos(view.yaw) * up);
+    C.uMistQ.value.z = Math.max(1, Math.floor(z + .01)); C.uMistD.value.w = VH / 2 / (PPMY * z);
+  }
   // (sun: how far toward the sun his shadow test looks, .5 m; a live 3D body would shade its own test point: view/livehero.js)
   const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; };
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
@@ -2149,5 +2249,6 @@ void main() {
     setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost,
     godrays: rays, setRays: rays.set,   // (render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    setMist, get mist() { return mist; }};
 }

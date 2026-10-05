@@ -38,6 +38,7 @@ export const FLAG_DOCS = {
   sshadow:   '0: every shadow caster in the per-frame sun shadow (no cached static map; an A/B)',
   godrays:   '0: no shadow-map god rays (render/godrays.js: sunbeams through crowns and between pillars; the painted shafts of features/depth.js come back)',
   cards:     '0: every world card its own mesh and draw (no instanced card batches; an A/B)',
+  mist:      '0: the old screen-space haze instead of the world mist (an A/B; features/mist.js)',
   preserve:  '1: keep the WebGL drawing buffer between frames (a capture that reads the canvas outside the frame that drew it)',
   // ---- features (0 turns one off)
   wind: '0: no wind', windlevel: 'calm | breeze | brisk | gale: lock the wind strength', windlines: '0 | hd | pixel: the wind lines',
