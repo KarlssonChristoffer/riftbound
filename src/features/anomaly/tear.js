@@ -31,9 +31,11 @@ void main() {
   vec3 right = vec3(cos(uYaw), 0., -sin(uYaw));
   vec3 w = uAnchor + right * ((c.x - .5) * uSize.x / uPx.x) + vec3(0., c.y * uSize.y / uPx.y, 0.);
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
+#ifndef CINE
   vec4 a = projectionMatrix * viewMatrix * vec4(uAnchor, 1.);   // the anchor on a pixel corner: the texels on the pixels
   vec2 p = (a.xy * .5 + .5) * uSnap;
   gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
+#endif   // (the cinema camera, gfx.js setCine: no snap, it glides with the world)
 }`;
 const FS = `
 layout(location = 0) out vec4 o0;
@@ -99,8 +101,8 @@ export function createTear(G, THREE, {PPM, PPMH, W = SIZE.W, H = SIZE.H, margin 
     uSize: {value: new THREE.Vector2(W, H)}, uT: new NumU(0), uPulse: new NumU(0), uHW: {value: hw}, uMargin: {value: margin}, uPal: {value: pal}};
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', G.QUAD.getAttribute('position'));   // (never dispose: it shares the quad's GL buffer)
-  const mesh = new THREE.Mesh(geo, new THREE.RawShaderMaterial({vertexShader: HEAD + VS, fragmentShader: HEAD + FS, glslVersion: THREE.GLSL3,
-    uniforms: U, side: THREE.DoubleSide}));
+  const mesh = new THREE.Mesh(geo, G.cineMat(new THREE.RawShaderMaterial({vertexShader: HEAD + VS, fragmentShader: HEAD + FS, glslVersion: THREE.GLSL3,
+    uniforms: U, side: THREE.DoubleSide})));
   mesh.frustumCulled = false; mesh.matrixAutoUpdate = false;
   G.extra(mesh, 'gbuf');
   return {

@@ -45,7 +45,7 @@ void main() {
   vec2 s = (p.xy * .5 + .5) * uSnap, c = mod(W * uZoom, 2.) > .5 ? floor(s) + .5 : floor(s + .5);
   vL = (position.xy - .5) * W;   // art px from the middle, y up
 #ifdef CINE
-  gl_Position = vec4((c + vL * uZoom) / uSnap * 2. - 1., p.z - .00125, pw > 0. ? 1. : -1.);   // (w -1: behind it, clipped)
+  gl_Position = vec4((c + vL * uZoom) / uSnap * 2. - 1., p.z - .15 * -projectionMatrix[3][2] / (pw * pw), pw > 0. ? 1. : -1.);   // (15 cm toward the camera; w -1: behind it, clipped)
 #else
   gl_Position = vec4((c + vL * uZoom) / uSnap * 2. - 1., p.z - .00125, 1.);
 #endif

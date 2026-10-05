@@ -106,7 +106,7 @@ export async function create(host) {
     if (!active() || !spot) return;
     const x0 = spot.x, y0 = spot.y, g = spot.g, h0 = g + TUNE.hover;
     if (!G.onScreen(x0, h0 + 1.1, y0, TUNE.cull)) return;
-    const t0 = performance.now(), z = host.zoom;
+    const t0 = performance.now(), z = host.G.cine ? host.G.view.zoom : host.zoom;   // (the cinema camera draws finer: gfx.js setCine)
     tear.set(x0, h0, y0, T, pulse); tear.arm();
     specks.set(x0, g, y0, T, pulse, Math.max(1, Math.round(z))); specks.arm();
     // the ground: the decal (laid before the light: the rift's own light makes it glow)

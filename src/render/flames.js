@@ -107,7 +107,7 @@ void main() {
   vec2 c = mod(size, 2.) > .5 ? floor(s) + .5 : floor(s + .5);
 #endif
 #ifdef CINE
-  gl_Position = vec4((c + (position.xy - .5) * size * uZoom) / uSnap * 2. - 1., p.z - .00125, pw > 0. ? 1. : -1.);   // (w -1: behind it, clipped; uZoom: the cinema's k)
+  gl_Position = vec4((c + (position.xy - .5) * size * uZoom) / uSnap * 2. - 1., p.z - .15 * -projectionMatrix[3][2] / (pw * pw), pw > 0. ? 1. : -1.);   // (15 cm toward the camera; w -1: behind it, clipped; uZoom: the cinema's k)
 #else
   gl_Position = vec4((c + (position.xy - .5) * size) / uSnap * 2. - 1., p.z - .00125, 1.);
 #endif

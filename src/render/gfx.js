@@ -376,7 +376,11 @@ void main() {
     gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
 #endif
   }
+#ifdef CINE
+  gl_Position.z -= uBias * 120. * -projectionMatrix[3][2] / gl_Position.w;   // (the bias in metres: an oblique b is b x R_DEPTH m)
+#else
   gl_Position.z -= uBias * gl_Position.w;
+#endif
 }`;
 const CARD_FS = HEAD + OUTS + `
 in vec2 vUv; in vec2 vC; in vec2 vSp;
@@ -481,7 +485,11 @@ void main() {
     gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
 #endif
   }
+#ifdef CINE
+  gl_Position.z -= uBias * 120. * -projectionMatrix[3][2] / gl_Position.w;   // (the bias in metres: an oblique b is b x R_DEPTH m)
+#else
   gl_Position.z -= uBias * gl_Position.w;
+#endif
 }`;
 const BCARD_FS = HEAD + OUTS + `
 in vec2 vUv; in vec2 vC; in vec2 vSp;
@@ -545,7 +553,14 @@ const LINE_VS = HEAD + `
 in vec3 position; in vec4 color;   // a = emissive (1) or lit (0)
 uniform mat4 viewMatrix, projectionMatrix;
 out vec4 vCol;
-void main() { vCol = color; gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.); gl_Position.z -= .00125 * gl_Position.w; }`;
+void main() {
+  vCol = color; gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.);
+#ifdef CINE
+  gl_Position.z -= .15 * -projectionMatrix[3][2] / gl_Position.w;   // (15 cm: the oblique .00125 x R_DEPTH)
+#else
+  gl_Position.z -= .00125 * gl_Position.w;
+#endif
+}`;
 const LINE_FS = HEAD + OUTS + `
 in vec4 vCol;
 void main() { o0 = vec4(vCol.rgb, float(6 * 4) / 255.); o1 = vec4(0., 1., 0., 7.); o2 = vec4(vCol.rgb * vCol.a, 0.); }`;
@@ -585,7 +600,11 @@ void main() {
     gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
 #endif
   }
+#ifdef CINE
+  gl_Position.z -= uBias * 120. * -projectionMatrix[3][2] / gl_Position.w;   // (the bias in metres: an oblique b is b x R_DEPTH m)
+#else
   gl_Position.z -= uBias * gl_Position.w;
+#endif
 }`;
 const BAYER = `float bayer(ivec2 p) { int i = (p.x & 3) + (p.y & 3) * 4;
   const float B[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.); return (B[i] + .5) / 16.; }\n`;
@@ -627,7 +646,7 @@ void main() {
   vec2 c = mod(aMisc.x, 2.) > .5 ? floor(s) + .5 : floor(s + .5);   // odd sizes centre on a pixel, even on a corner
 #endif
 #ifdef CINE
-  gl_Position = vec4(c / uSnap * 2. - 1., p.z - .00125, pw > 0. ? 1. : -1.);   // (w -1: behind it, clipped)
+  gl_Position = vec4(c / uSnap * 2. - 1., p.z - .15 * -projectionMatrix[3][2] / (pw * pw), pw > 0. ? 1. : -1.);   // (15 cm toward the camera; w -1: behind it, clipped)
   gl_PointSize = aMisc.x * uPtK;
 #else
   gl_Position = vec4(c / uSnap * 2. - 1., p.z - .00125, 1.);

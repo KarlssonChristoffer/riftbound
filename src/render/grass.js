@@ -20,6 +20,7 @@
 //   a, b: Float32Array(n * 4) per blade: a = (root X, root Y (ground height), root Z, height m), b = (ramp * 4 + tone,
 //   phase 0..1, flower colour 0 none / 1..4, rest lean: whole part = its size in 32nds of the height, fraction = its angle / 2 pi);
 //   ramps: 4 x [highlight, tone 0 .. 3] as [r, g, b] 0..1
+// THE CINEMA CAMERA (gfx.js setCine): a variant of the blades' shader divides by w (a perspective) and clips blades behind it.
 // OWNS: its mesh (in G.gScene), the blade buffers, the trample targets. READS: G.camera, G.view.zoom, G.VW / VH, G.U.time.
 // BUDGET: CPU: in features/grass.js's frame (~0.04 ms). GPU: one instanced draw (~50k blades x 8 vertices) + one 384 x 192
 // pass; the bench's GPU p95 at 3440x1440 stayed within ~0.1-0.3 ms of grass=0 (a busy machine: noisy), budget 4.5 ms.
@@ -86,6 +87,12 @@ void main() {
   vec3 Pw = root + vec3(lean.x * t * sqrt(t), hv * t, lean.y * t * sqrt(t)), Tw = root + vec3(lean.x, hv, lean.y);
   mat4 PV = projectionMatrix * viewMatrix;
   vec4 cr = PV * vec4(root, 1.), cp = PV * vec4(Pw, 1.), ct = PV * vec4(Tw, 1.);
+#ifdef CINE
+  // the cinema camera (gfx.js setCine): a perspective, so divide by w; a blade with its root or tip behind it is not drawn
+  if (cr.w < .05 || cp.w < .05 || ct.w < .05) { gl_Position = vec4(2., 2., 2., 1.); return; }
+  float cz = cp.z / cp.w - .03 * -projectionMatrix[3][2] / (cp.w * cp.w);   // (3 cm toward the camera: the oblique .00025 x R_DEPTH)
+  cr.xy /= cr.w; cp.xy /= cp.w; ct.xy /= ct.w;
+#endif
   vec2 S = uRes / uZoom * .5;   // NDC -> art px (y up)
   vec2 sr = (cr.xy + 1.) * S, rc = floor(sr) + .5;
   vec2 pc = rc + floor((cp.xy + 1.) * S - sr + .5);
@@ -93,7 +100,11 @@ void main() {
   pc.x += vFl > .5 ? position.x * 2. + .5 : position.x;   // (a flowering blade is 2 px wide: the head; FS keeps the stem 1 px)
   vSide = position.x;
   if (t < .01) pc.y -= .5; else if (t > .99) pc.y += .5;   // the root row and the tip row are whole pixels
+#ifdef CINE
+  gl_Position = vec4(pc / S - 1., cz, 1.);
+#else
   gl_Position = vec4(pc / S - 1., cp.z - .00025, 1.);   // (a hair in front of the ground it stands on)
+#endif
   vT = t; vHp = max(1., floor((ct.y + 1.) * S.y - sr.y + .5) + 1.);
   // the foot in the ground's own tone; the blade a tone lighter (a quarter of them darker: depth in the sward), some tips lighter still
   int ri = int(iB.x + .5), rp = ri / 4 * 5, tn = ri - ri / 4 * 4 + 1;
@@ -182,7 +193,7 @@ export function createGrass(G) {
     uFlower: {value: Array.from({length: 4}, () => new THREE.Vector3())},
     uWG: {value: v4s(2)}, uWF: {value: v4s(MAX_FRONTS * 4)},
   };
-  const mat = raw(BLADE_VS, BLADE_FS, U, {side: THREE.DoubleSide});
+  const mat = G.cineMat(raw(BLADE_VS, BLADE_FS, U, {side: THREE.DoubleSide}));   // (its cinema variant: gfx.js setCine)
   let mesh = null, geo = null, count = 0, visible = true;
 
   // blades: (a, b, n), ramps (4 x [highlight, tone 0 .. 3]) as documented above; flowers: [r, g, b] x 4

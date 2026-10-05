@@ -12,7 +12,7 @@
 // the pose, before the renderer takes its view), frame (the director: starts, cuts, fades), hd (the bars and fades; cineHd:
 // core/loop.js draws only such overlays while the cinema camera is on), menu, toggle, info, start / stop (tests).
 // OWNS: the cinema camera's pose and sky (CAM, handed to G.setCine), the shot, its bars and fades, its input listeners.
-// READS: host.player / P / mood / env / biome / paused / lock / elev / entities.near / world.lights / feature('game'), the
+// READS: host.player / P / mood / env / biome / paused / lock / photoOpen / elev / entities.near / world.lights / feature('game'), the
 //   frame's events. EMITS: nothing. BUDGET: ~0.02 ms a frame (a shot is planned every 6-11 s: ~0.1 ms then).
 import {flags} from '../core/flags.js';
 import {clamp, hypot2} from '../core/mathx.js';
@@ -76,7 +76,7 @@ export async function create(host) {
   let state = 'off', fadeK = 0, barK = 0, phase = '', tStart = 0, pending = false, cuts = 0, lastKinds = ['', ''], newsT = -1e9;
 
   const game = () => host.feature('game');
-  const allowed = () => F.on && !host.paused && !host.lock && game()?.mode === 'sandbox' && (HOLD || host.P.state === 'idle');
+  const allowed = () => F.on && !host.paused && !host.lock && !host.photoOpen && game()?.mode === 'sandbox' && (HOLD || host.P.state === 'idle');   // (photo mode: its own camera)
   const feet = o => { const p = host.player; o.x = p.x; o.y = p.y; o.h = host.P.z || 0; return o; };
   const ground = (x, y) => host.elev(x, y) || 0;
 

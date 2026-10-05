@@ -190,6 +190,7 @@ const host = {
   get paused() { return pause.paused; }, openMenu: () => pause.toggle(true), uiSound: n => feat('audio')?.ui?.(n),
   // photo mode (ui/photo.js) has hidden the player: a feature that draws something of him (his contact shadow, the lantern) leaves it out
   get playerHidden() { return !!photo?.hidePlayer; },
+  get photoOpen() { return !!photo?.open; },   // photo mode is open (its own camera: the cinematic mode keeps out)
   // game controls (game/game.js): dev keys + debug HUD on/off, player input locked, the simulation's speed, the world
   dev: true, lock: false, timeScale: 1, hudOff: false, BIOMES, TIMES,
   get biomeI() { return stage.biomeI; }, get timeI() { return TIMES.indexOf(env.bucket); },

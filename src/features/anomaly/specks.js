@@ -73,9 +73,16 @@ void main() {
   if (!show) { gl_Position = vec4(2., 2., 2., 1.); return; }
   size *= uZ;
   vec4 p = projectionMatrix * viewMatrix * vec4(w, 1.);   // (the oblique projection is orthographic: w = 1)
+#ifdef CINE
+  float pw = p.w; p.xyz /= pw;   // (the cinema camera's perspective: gfx.js setCine)
+#endif
   vec2 s = (p.xy * .5 + .5) * uSnap;
   vec2 c = mod(size, 2.) > .5 ? floor(s) + .5 : floor(s + .5);   // odd sizes centre on a pixel, even on a corner (gfx.js POINT_VS)
+#ifdef CINE
+  gl_Position = vec4((c + (position.xy - .5) * size) / uSnap * 2. - 1., p.z - .15 * -projectionMatrix[3][2] / (pw * pw), pw > 0. ? 1. : -1.);   // (15 cm; behind it, clipped)
+#else
   gl_Position = vec4((c + (position.xy - .5) * size) / uSnap * 2. - 1., p.z - .00125, 1.);
+#endif
 }`;
 const VEIN_VS = `
 in vec3 position; in vec2 aV;   // aV: the vein, the segment
@@ -84,7 +91,12 @@ out vec4 vCol;
 void main() {
   float lit = floor(fract(uT / uBreath + aV.x * .13) * ${COUNTS.vseg + 3}.);   // the segment the light runs along now
   vCol = vec4(aV.y == lit ? uC[2] : aV.y == lit - 1. ? uC[3] : uC[4], 1.);
-  gl_Position = projectionMatrix * viewMatrix * vec4(uA + position, 1.); gl_Position.z -= .00125 * gl_Position.w;
+  gl_Position = projectionMatrix * viewMatrix * vec4(uA + position, 1.);
+#ifdef CINE
+  gl_Position.z -= .15 * -projectionMatrix[3][2] / gl_Position.w;   // (15 cm, as the oblique .00125: gfx.js setCine)
+#else
+  gl_Position.z -= .00125 * gl_Position.w;
+#endif
 }`;
 const VEIN_FS = `
 layout(location = 0) out vec4 o0;
@@ -117,8 +129,8 @@ export function createSpecks(G, THREE, {PPM, PPMH, hover, breath, ring}) {
   const geo = new THREE.InstancedBufferGeometry();
   geo.setAttribute('position', G.QUAD.getAttribute('position'));   // (never dispose: it shares the quad's GL buffer)
   geo.setAttribute('aK', new THREE.InstancedBufferAttribute(new Float32Array(K), 4)); geo.instanceCount = n;
-  const pts = new THREE.Mesh(geo, new THREE.RawShaderMaterial({vertexShader: G.shaders.HEAD + SPECKS_VS, fragmentShader: G.shaders.POINT_FS,
-    glslVersion: THREE.GLSL3, uniforms: U, side: THREE.DoubleSide}));
+  const pts = new THREE.Mesh(geo, G.cineMat(new THREE.RawShaderMaterial({vertexShader: G.shaders.HEAD + SPECKS_VS, fragmentShader: G.shaders.POINT_FS,
+    glslVersion: THREE.GLSL3, uniforms: U, side: THREE.DoubleSide})));
   pts.frustumCulled = false; pts.matrixAutoUpdate = false;
   // the cracks: zigzag segments out from under it (fixed: a hash), as offsets (m) from its foot
   const P = [], V = [], hs = (a, b, c) => { let x = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453; return x - Math.floor(x); };
@@ -132,8 +144,8 @@ export function createSpecks(G, THREE, {PPM, PPMH, hover, breath, ring}) {
   }
   const lgeo = new THREE.BufferGeometry();
   lgeo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); lgeo.setAttribute('aV', new THREE.Float32BufferAttribute(V, 2));
-  const lines = new THREE.LineSegments(lgeo, new THREE.RawShaderMaterial({vertexShader: G.shaders.HEAD + VEIN_VS, fragmentShader: G.shaders.HEAD + VEIN_FS,
-    glslVersion: THREE.GLSL3, uniforms: U}));
+  const lines = new THREE.LineSegments(lgeo, G.cineMat(new THREE.RawShaderMaterial({vertexShader: G.shaders.HEAD + VEIN_VS, fragmentShader: G.shaders.HEAD + VEIN_FS,
+    glslVersion: THREE.GLSL3, uniforms: U})));
   lines.frustumCulled = false; lines.matrixAutoUpdate = false;
   G.extra(pts, 'gbuf'); G.extra(lines, 'gbuf');
   return {
