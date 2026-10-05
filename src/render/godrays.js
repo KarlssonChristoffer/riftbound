@@ -20,6 +20,15 @@
 // pillars or trunks, an arch, the space under an awning. Not the open meadow, nor the air beside a lone pillar's shadow, nor
 // the slabs of light hugging low things' shadows (the margin: a shaft starts a metre down-sun of its opening). A beam runs
 // from its opening down-sun to the ground.
+// THE TIME. A pixel's count of glowing samples is a coarse thing: which planes fall inside a beam is a matter of phase, so a
+// beam's edge gains or loses a sample whenever the planes or the beam shift a hair (the sun turning, a crown's leaves
+// fluttering in the wind), and cut into hard levels that flickered (hundreds of px a frame). So the count is SMOOTHED over the
+// last frames (TUNE.tau) in a history that follows the view (a pan moves the picture by whole art px: the history is read at
+// the point's place last frame; where the depth there doesn't match, something moved in front: it starts over), the planes
+// are shifted by a different fraction of their spacing every frame (TUNE.jitter: the history averages the phases out, so it
+// holds metres of lit air, not one phase's luck; a step of the sun's direction changes nothing much), and a level changes
+// only when the smoothed count is TUNE.hyst samples past its threshold (no pixel flickering on a threshold). A beam that
+// moves (a crown leaning in a gust) follows within ~tau; a turn of the camera or a zoom finds the points' places the same way.
 // THE LOOK. The glowing samples (metres of beam the ray passes through) are cut into 3 hard levels (TUNE.lv), cleaned on screen
 // (no beam under 3 px across, no crumbs, the top level only in a shaft's core) and drawn as flat amounts (TUNE.amt) of the
 // sun's colour, warmed, and turned to amber as the sun sinks (TUNE.warm / gold). Bold, few, hard-edged; no gradients, no noise.
@@ -30,11 +39,12 @@
 // SPEED. Most air is open: the MIN MAPS (below) answer "is anything between the sun and the air round this point" in one fetch
 // per shadow map (first for a run of 4 planes, then per plane), and each side test in one fetch per map; only a lit sample
 // with something round it pays for the side tests. The shape passes are a few fetches of a byte a pixel.
-// OWNS: its passes (materials, uniforms, the min map targets), TUNE, the strength. READS: gfx.js compU's G-buffer depth, both
+// OWNS: its passes (materials, uniforms, the min map targets, the history), TUNE, the strength. READS: gfx.js compU's G-buffer depth, both
 // sun shadow maps and their matrices (shared uniform objects, never written), uShadowA / uShadowOn (is there a sun shadow
 // this frame), uView (the yaw), uSunDir. No allocation per frame, no CPU pixel work.
 // BUDGET (GPU): ~0.16-0.23 ms at 688 x 288 (3440 x 1440 at scale 5) on the RTX 4070 (min maps ~.02, shape ~.02, the march);
 // CPU: a few uniforms, 13 small draws (the static map's 5 more when it was re-rendered). The programs compile at load.
+// The sun's direction the maps are cast along turns in steps (gfx.js setSun: SUN_STEP), not a hair every frame.
 //   const rays = createGodrays({THREE, renderer, raw, tri, cam, compU}); rays.draw() right after the composite, into the
 //   same target; rays.restatic() when the static shadow map was re-rendered; rays.set(o) the strength inputs; rays.enabled
 //   (features/depth.js: its painted shafts step aside); rays.TUNE (live)
@@ -61,6 +71,10 @@ export const TUNE = {
   shadow: .3,       // the mood's shadow strength (clouds and the dusk -> night fade already in it) at which the beams are full
   mist: .8, wet: .5,   // more in mist (sky.fog) and on wet ground (after rain): x (1 + mist x fog + wet x wet)
   max: 1.8,
+  tau: .3,          // s: the count is smoothed over about this long (THE TIME): flutter and the planes' phase average out
+  hyst: .7,         // samples: a level comes on this much past its threshold and goes this much below it
+  jitter: true,     // the planes shifted by a new fraction of their spacing every frame (the history averages the phases)
+  dtol: .25,        // m: a pixel's depth may differ this much from its place last frame and still be the same surface
 };
 
 const VS = `precision highp float; precision highp int;\nin vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
@@ -78,7 +92,10 @@ uniform vec4 uSide;      // uv from a sample to its side windows across the sun:
 uniform float uMargin;   // light depth (per-frame map units) something in a side window must lie nearer the sun than the sample
 uniform vec4 uMinOff;    // uv from a map's texel grid to its min map's blocks (fixed in the world: below): per-frame x, y; static x, y
 uniform vec3 uLv;        // glowing samples for levels 1, 2, 3
-out vec4 oc;             // the level (0 none, 1..3) / 4, into the level target (SHAPE_FS draws it)
+uniform sampler2D tH;    // THE TIME: last frame's history (the smoothed count, the level, the depth)
+uniform vec4 uHist;      // this frame's weight in it (1 - exp(-dt / tau)), the hysteresis (samples), depth tolerance, 1: start over
+uniform mat4 uPrevPV;    // last frame's projection (this pixel's point there: its place and depth then)
+out vec4 oc;             // the history: the smoothed count, the level (0 none, 1..3: the morphology below reads it), the depth
 vec3 worldAt(ivec2 p, float d) { vec2 ndc = (vec2(p) + .5) / uRes * 2. - 1.; vec4 w = uInvPV * vec4(ndc, d * 2. - 1., 1.); return w.xyz / w.w; }
 // something nearer the sun than the sample in map m at the sample's uv + o (c: the sample in light NDC): the per-frame map (round
 // the view: what moves), the static one (the world: what doesn't), as gfx.js sunShadow; the min maps take the same test
@@ -90,14 +107,15 @@ bool side(sampler2D mS, sampler2D mSS, vec3 a, vec3 b, vec2 oa, vec2 ob) { retur
 void main() {
   ivec2 ip = ivec2(gl_FragCoord.xy);
   float d = texelFetch(tD, ip, 0).r;
-  if (d > .99999) { oc = vec4(0.); return; }   // nothing there (beyond the world)
+  if (d > .99999) { oc = vec4(0., 0., d, 0.); return; }   // nothing there (beyond the world)
   // the view ray, toward the viewer (the projection is affine: NDC z maps to one world direction), crossing the planes over
   // this pixel's surface, up through uPn.w m of air: the first crossing and the step from plane to plane, in the world and
   // in both light spaces (orthographic: linear)
   vec3 P = worldAt(ip, d), V = -normalize(uInvPV[2].xyz), n3 = uPn.xyz;
-  float dn = uBand.x, nV = dot(n3, V), t0 = dot(n3, P) / dn, t1 = (dot(n3, P) + uPn.w / V.y * nV) / dn;
+  // (the planes at n . X = (k + uBand.w) dn: this frame's phase)
+  float dn = uBand.x, nV = dot(n3, V), t0 = dot(n3, P) / dn - uBand.w, t1 = (dot(n3, P) + uPn.w / V.y * nV) / dn - uBand.w;
   float k0 = floor(t0) + 1.;
-  vec3 X0 = P + V * ((k0 * dn - dot(n3, P)) / nV), dX = V * (dn / nV);
+  vec3 X0 = P + V * (((k0 + uBand.w) * dn - dot(n3, P)) / nV), dX = V * (dn / nV);
   vec3 a0 = (uLightPV * vec4(X0, 1.)).xyz, da = (uLightPV * vec4(dX, 0.)).xyz;
   vec3 b0 = (uLightPVS * vec4(X0, 1.)).xyz, db = (uLightPVS * vec4(dX, 0.)).xyz;
   vec2 Z = vec2(0.), sxa = vec2(uSide.x, 0.), sxb = vec2(uSide.z, 0.);
@@ -117,10 +135,23 @@ void main() {
       if (occS(tS, a, Z, uBand.z) || occSS(tSS, b, Z, uBand.z)) continue;        // shadowed air: no light to scatter
       // lit, with shadow close on either side: light through an opening (a shaft)
       if (side(tXS, tXSS, a, b, sxa, sxb) && side(tXS, tXSS, a, b, -sxa, -sxb)) n += 1.;
-      if (n >= uLv.z) { full = true; break; }   // (the top level: nothing more to count)
+      if (n >= uLv.z + 2.) { full = true; break; }   // (past the top level and its hysteresis: nothing more to count)
     }
   }
-  oc = vec4((n >= uLv.z ? 3. : n >= uLv.y ? 2. : n >= uLv.x ? 1. : 0.) / 4., 0., 0., 1.);
+  // THE TIME: blended into the history at this point's place last frame (a pan: whole art px), if the same surface was
+  // there (its depth then matches: else something moved in front of it or away, and it starts over)
+  float c = n, L0 = -1.;
+  vec4 o = uPrevPV * vec4(P, 1.); vec3 pp = o.xyz / o.w * .5 + .5;
+  ivec2 q = ivec2(floor(pp.xy * uRes));
+  if (uHist.w < .5 && all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, ivec2(uRes)))) {
+    vec4 h = texelFetch(tH, q, 0);
+    if (abs(h.z - pp.z) < uHist.z) { c = mix(h.x, n, uHist.x); L0 = h.y; }
+  }
+  // the level: up only past threshold + hyst, down only below threshold - hyst (a fresh pixel: the plain thresholds)
+  vec3 H = vec3(uHist.y);
+  float up = dot(step(uLv + H, vec3(c)), vec3(1.)), dw = dot(step(uLv - H, vec3(c)), vec3(1.));
+  float L = L0 < 0. ? dot(step(uLv, vec3(c)), vec3(1.)) : clamp(L0, up, dw);
+  oc = vec4(c, L, d, 0.);
 }`;
 // THE SHAPE: the levels are cleaned on screen, in whole art px, by grey-scale morphology along short segments ACROSS the beams
 // and ALONG them (the sun's direction as the projection draws it; MORPH_FS: the min (erode) or max (dilate) over a segment of
@@ -129,8 +160,8 @@ void main() {
 // long, vanishes; a wider one keeps its edges; a level shows only where it is that wide (the top level only in a shaft's
 // heart). No hairlines, no 1 px stripes, no dashes. 7 passes at art px (the last, a dilate along, draws: SHAPE_FS adds the
 // level's colour). The lattice is the screen's art px, which a pan moves whole: the shapes move with the ground unchanged
-const SEG = `
-float lvAt(sampler2D t, ivec2 q, ivec2 sz) { return texelFetch(t, clamp(q, ivec2(0), sz - 1), 0).r * 4.; }   // (the edge repeats: a beam leaving the view isn't eroded there)
+const SEG = (at = '.r * 4.') => `
+float lvAt(sampler2D t, ivec2 q, ivec2 sz) { return texelFetch(t, clamp(q, ivec2(0), sz - 1), 0)${at}; }   // (the edge repeats: a beam leaving the view isn't eroded there)
 // the segment: the px at round(dir k), k = -r .. r, and, where it steps diagonally, both corners of the step (a 4-connected,
 // point-symmetric line: a purely diagonal one let a pass leave a checkerboard of holes)
 float seg(sampler2D t, vec2 dir, int r, bool grow) {
@@ -145,11 +176,11 @@ float seg(sampler2D t, vec2 dir, int r, bool grow) {
   }
   return floor(m + .5);
 }`;
-const MORPH_FS = `precision highp float; precision highp int;
-uniform sampler2D tLv; uniform vec2 uDir; uniform int uR; uniform float uGrow; out vec4 oc;${SEG}
+const MORPH_FS = at => `precision highp float; precision highp int;
+uniform sampler2D tLv; uniform vec2 uDir; uniform int uR; uniform float uGrow; out vec4 oc;${SEG(at)}
 void main() { oc = vec4(seg(tLv, uDir, uR, uGrow > .5) / 4., 0., 0., 1.); }`;
 const SHAPE_FS = `precision highp float; precision highp int;
-uniform sampler2D tLv; uniform vec2 uDir; uniform vec3 uCol[3]; out vec4 oc;${SEG}
+uniform sampler2D tLv; uniform vec2 uDir; uniform vec3 uCol[3]; out vec4 oc;${SEG()}
 void main() {
   float o = seg(tLv, uDir, 2, true);
   if (o < .5) discard;
@@ -207,21 +238,24 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     uSBias: compU.uSBias, uSOn: compU.uSOn, uRes: compU.uRes,
     tNS: {value: MIN.S.near.texture}, tNSS: {value: MIN.SS.near.texture}, tCS: {value: MIN.S.coarse.texture}, tCSS: {value: MIN.SS.coarse.texture}, tXS: {value: MIN.S.x.texture}, tXSS: {value: MIN.SS.x.texture},
     uBand: {value: new THREE.Vector4()}, uPn: {value: new THREE.Vector4()}, uSide: {value: new THREE.Vector4()}, uMargin: {value: 0}, uMinOff: {value: new THREE.Vector4()},
-    uLv: {value: new THREE.Vector3()}};
+    uLv: {value: new THREE.Vector3()}, tH: {value: null}, uHist: {value: new THREE.Vector4()}, uPrevPV: {value: new THREE.Matrix4()}};
   const full = (vs, fs, u, extra) => { const sc = new THREE.Scene(); sc.matrixAutoUpdate = false; const m = new THREE.Mesh(tri, raw(vs, fs, u, {depthTest: false, depthWrite: false, ...extra})); m.frustumCulled = false; m.matrixAutoUpdate = false; sc.add(m); return sc; };
-  // the march into the level target (art px, one byte), then its shape added into the target the composite drew
+  // the march into the history (art px: the smoothed count, the level, the depth; two, this frame's and last frame's), its
+  // levels cleaned in the level targets (one byte), then their shape added into the target the composite drew
   const lvT = () => new THREE.WebGLRenderTarget(compU.uRes.value.x, compU.uRes.value.y, {format: THREE.RedFormat, minFilter: nf, magFilter: nf, depthBuffer: false, generateMipmaps: false});
   const lvRT = lvT(), lvB = lvT();   // (ping-pong for the morphology)
+  const hT = () => new THREE.WebGLRenderTarget(compU.uRes.value.x, compU.uRes.value.y, {type: THREE.FloatType, minFilter: nf, magFilter: nf, depthBuffer: false, generateMipmaps: false});
+  const HI = {a: hT(), b: hT(), t: 0, f: 0, pv: new THREE.Matrix4()};   // (f: frames drawn: the planes' phase)
   const ALONG = new THREE.Vector2(1, 0), ACROSS = new THREE.Vector2(0, 1);   // unit steps on screen (art px), set each frame
   const SU = {tLv: {value: lvRT.texture}, uDir: {value: ALONG}, uCol: {value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]}};
   const MU = {tLv: {value: null}, uDir: {value: ACROSS}, uR: {value: 1}, uGrow: {value: 0}};
-  const scene = full(VS, FS, U, {}), morphScene = full(VS, MORPH_FS, MU, {});
-  const morph = (src, dst, dir, r, grow) => { MU.tLv.value = src.texture; MU.uDir.value = dir; MU.uR.value = r; MU.uGrow.value = grow ? 1 : 0; renderer.setRenderTarget(dst); renderer.render(morphScene, cam); };
+  const scene = full(VS, FS, U, {}), morphScene = full(VS, MORPH_FS(), MU, {}), morphHScene = full(VS, MORPH_FS('.y'), MU, {});   // (H: from the history's level)
+  const morph = (src, dst, dir, r, grow, sc = morphScene) => { MU.tLv.value = src.texture; MU.uDir.value = dir; MU.uR.value = r; MU.uGrow.value = grow ? 1 : 0; renderer.setRenderTarget(dst); renderer.render(sc, cam); };
   const _pv = new THREE.Matrix4(), _d = new THREE.Vector4();
   const shapeScene = full(VS, SHAPE_FS, SU, {transparent: true, blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor});
   // compiled now, while the page loads (else the first sunlit frame waits ~80 ms for them: a hitch at dawn after a night start)
-  for (const sc of [scene, morphScene, shapeScene, redScene, dilScene]) renderer.compile(sc, cam);
+  for (const sc of [scene, morphScene, morphHScene, shapeScene, redScene, dilScene]) renderer.compile(sc, cam);
   // the strength inputs (render/lighting.js, every frame): the sun's elevation (deg) and colour, the mood's shadow strength,
   // the sky's cloud and mist, the ground's wetness
   const In = {el: 45, c: [1, 1, 1], shadow: 0, cloud: 0, mist: 0, wet: 0};
@@ -243,6 +277,7 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
   const ph = (t, n) => ((-Math.round((t * .5 + .5) * n * RED)) % RED + RED) % RED;
   function draw() {
     const T = TUNE;
+    let re = !R.live;   // the history starts over after a frame without the rays (and at the first)
     R.live = false;
     if (!T.on || compU.uShadowA.value <= 0 || compU.uShadowOn.value < .5 || base <= .01) return;   // (no sun shadow map this frame)
     if (compU.uDebug.value) return;   // (a debug view: albedo, normals, the shadow mask... shows only itself)
@@ -259,7 +294,7 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     const wl = -1 / (Math.hypot(iv[8], iv[9], iv[10]) || 1), Vx = iv[8] * wl, Vy = iv[9] * wl, Vz = iv[10] * wl, vs = Vx * sx + Vy * sy + Vz * sz;
     let nx = Vx - vs * sx, ny = Vy - vs * sy, nz = Vz - vs * sz; const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
     U.uPn.value.set(nx, ny, nz, T.band);
-    U.uBand.value.set(T.dn, Math.min(128, T.planes), T.bias, 0);
+    U.uBand.value.set(T.dn, Math.min(128, T.planes), T.bias, T.jitter ? (HI.f * .6180339887) % 1 : 0);   // (w: this frame's phase)
     U.uMargin.value = T.margin * Math.hypot(e[2], e[6], e[10]) / 2;   // (light depth per metre: half the light matrix's third row)
     U.uLv.value.set(T.lv[0] / T.dn - .01, T.lv[1] / T.dn - .01, T.lv[2] / T.dn - .01);   // (n: whole samples, gap fractions)
     // the colour: the sun's, warmed (its own hue pushed further: a dusk sun's orange deepens, a noon sun's white barely moves)
@@ -268,7 +303,7 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     for (let i = 0; i < 3; i++) SU.uCol.value[i].set(wr * T.amt[i] * k, wg * T.amt[i] * k, wb * T.amt[i] * k);
     // the beams on screen: the sun's direction through the projection (the inverse projection, inverted), in art px
     const VW = compU.uRes.value.x, VH = compU.uRes.value.y;
-    if (lvRT.width !== VW || lvRT.height !== VH) { lvRT.setSize(VW, VH); lvB.setSize(VW, VH); }
+    if (lvRT.width !== VW || lvRT.height !== VH) { lvRT.setSize(VW, VH); lvB.setSize(VW, VH); HI.a.setSize(VW, VH); HI.b.setSize(VW, VH); re = true; }
     _d.set(sx, sy, sz, 0).applyMatrix4(_pv.copy(compU.uInvPV.value).invert());
     const bx = _d.x * VW, by = _d.y * VH, bl = Math.hypot(bx, by);
     if (bl > 1e-6) { ALONG.set(bx / bl, by / bl); ACROSS.set(-by / bl, bx / bl); }
@@ -283,8 +318,17 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     }
     U.uMinOff.value.set(ox / (SZ * RED), oy / (SZ * RED), MIN.oSS[0] / (SZS * RED), MIN.oSS[1] / (SZS * RED));
     U.uSide.value.set((kx + 1) / SZ, 0, (MIN.kSS + 1) / SZS, 0);
-    renderer.setRenderTarget(lvRT); renderer.render(scene, cam);
-    morph(lvRT, lvB, ACROSS, 1, true); morph(lvB, lvRT, ACROSS, 1, false);                 // close across: seams fill
+    // THE TIME: this frame's weight in the history (by the real time since the last: any frame rate smooths alike), the
+    // hysteresis, the depth tolerance (metres along the view ray -> depth units), and whether it starts over (the first frame
+    // after none, a gap, a resize); last frame's projection, to find each point's place then
+    const now = performance.now(), dt = Math.min(.1, Math.max(0, (now - HI.t) / 1000));
+    if (now - HI.t > 250) re = true;
+    HI.t = now; HI.f++;
+    U.uHist.value.set(re || T.tau <= 0 ? 1 : 1 - Math.exp(-dt / T.tau), T.hyst, T.dtol / (2 * Math.hypot(iv[8], iv[9], iv[10]) || 1), re ? 1 : 0);
+    U.uPrevPV.value.copy(HI.pv); HI.pv.copy(_pv);
+    const hNow = HI.a; HI.a = HI.b; HI.b = hNow; U.tH.value = HI.a.texture;   // (a: last frame's, read; b: this frame's)
+    renderer.setRenderTarget(hNow); renderer.render(scene, cam);
+    morph(hNow, lvB, ACROSS, 1, true, morphHScene); morph(lvB, lvRT, ACROSS, 1, false);   // close across: seams fill
     morph(lvRT, lvB, ALONG, 2, true); morph(lvB, lvRT, ALONG, 4, false);                   // close along (+ the open's erode along): gaps bridge
     morph(lvRT, lvB, ACROSS, 1, false); morph(lvB, lvRT, ACROSS, 1, true);                 // the open across
     renderer.setRenderTarget(rt); renderer.render(shapeScene, cam);                        // (the open's dilate along: drawn)

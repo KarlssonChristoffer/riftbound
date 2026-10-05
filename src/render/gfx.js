@@ -1327,7 +1327,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const sunCam = new THREE.OrthographicCamera(-SHADOW_E, SHADOW_E, SHADOW_E, -SHADOW_E, 1, 220);
   // STATIC SUN SHADOW: what doesn't move (world props made with mesh(..., {static: true}), the terrain: sStatic, layer 2,
   // not 0) is drawn into a world-wide map that is re-rendered only when one of them appears / goes / changes model or
-  // starts / stops moving, or the sun has turned > SUN_STEP (the clock turns it ~.2 deg/s). The per-frame map round the view
+  // starts / stops moving, or the sun has turned > SUN_STEP (the clock turns it ~.3 deg/s). The per-frame map round the view
   // (sunCam, layer 0) then holds only what moves: characters, cards, swaying trees, debris. A static prop that moves (a
   // hit wobble, a push, burning) casts into the per-frame map until it has been still STILL_FRAMES. ~180 -> ~55 shadow
   // draws a frame. ?sshadow=0 puts everything back in the per-frame map (A/B)
@@ -1345,7 +1345,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const sunCamS = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2); sunCamS.layers.set(2);
   let sDue = 0;   // the frame by which the static map must be re-rendered (Infinity: it's up to date)
   const staticSoon = frames => { sDue = Math.min(sDue, frameNo + frames); };
-  const sDir = new THREE.Vector3(0, 2, 0), sunNow = new THREE.Vector3(0, 1, 0), _sc = new THREE.Vector3(), _scR = new THREE.Vector3(), _scU = new THREE.Vector3(), movers = new Set();
+  // sCast: the sun as BOTH maps cast, turned in steps of SUN_STEP (setSun); sDir: the one the static map was drawn along
+  const sDir = new THREE.Vector3(0, 2, 0), sunNow = new THREE.Vector3(0, 1, 0), sCast = new THREE.Vector3(), _sc = new THREE.Vector3(), _scR = new THREE.Vector3(), _scU = new THREE.Vector3(), movers = new Set();
   function fitStatic(d) {   // look along the sun at the world's centre; the ortho box = the world's 8 corners in light space
     const cx = (SBOX[0] + SBOX[1]) / 2, cy = (SBOX[2] + SBOX[3]) / 2, cz = (SBOX[4] + SBOX[5]) / 2;
     sunCamS.position.set(cx, cy, cz).addScaledVector(d, 100); sunCamS.lookAt(cx, cy, cz); sunCamS.updateMatrixWorld(true);
@@ -2300,13 +2301,18 @@ void main() {
 
   // ---- sun: direction toward the sun (world), shadow camera snapped to its texel grid around the view target
   // dir: the sun as it LIGHTS (shading, rims, glints); sdir: the sun as it CASTS shadows (same azimuth, the elevation
-  // the caller wants for shadow length; main.js keeps the arena's longest shadow), default the same
+  // the caller wants for shadow length; main.js keeps the arena's longest shadow), default the same.
+  // The shadows are cast along sCast, which follows sdir in steps of SUN_STEP (a jump, a new hour: at once), the per-frame
+  // map with the static one: a map turned a hair every frame rasterised every edge a hair differently every frame, so the
+  // tree shadows shimmered and the god rays (render/godrays.js, marched through both maps) boiled. A step moves a long
+  // shadow's tip a few cm (an art px at most); the shading keeps the smooth dir
   const _sl = new THREE.Vector3(), _sr = new THREE.Vector3(), _su = new THREE.Vector3();
   function setSun(dir, sdir = dir) {
     compU.uSunDir.value.copy(dir); sunNow.copy(sdir).normalize();
+    if (!(sunNow.dot(sCast) >= Math.cos(SUN_STEP))) sCast.copy(sunNow);   // (the first call: sCast is 0)
     U.sunYaw.value = Math.atan2(dir.x, dir.z);   // cards turned so their face points at the sun (normal = (sin, 0, cos))
     const T = view.T, texel = 2 * SHADOW_E / SM;
-    sunCam.position.copy(T).addScaledVector(sdir, 100); sunCam.lookAt(T); sunCam.updateMatrixWorld(true);
+    sunCam.position.copy(T).addScaledVector(sCast, 100); sunCam.lookAt(T); sunCam.updateMatrixWorld(true);
     // snap: move the light camera so the WORLD's origin sits on a texel corner in light space: the texel grid stays put in the
     // world as the view moves (no shadow crawl while walking; render/godrays.js samples it at fixed world points). (It took the
     // target, which always sits at the light camera's centre: a no-op, and the map slid by fractions of a texel with the view)
@@ -2366,9 +2372,9 @@ void main() {
         const cx = Math.round(view.T.x / SSTEP) * SSTEP, cz = Math.round(view.T.z / SSTEP) * SSTEP;
         if (cx !== sCx || cz !== sCz) { sCx = cx; sCz = cz; SBOX[0] = cx - SFOLLOW; SBOX[1] = cx + SFOLLOW; SBOX[4] = cz - SFOLLOW; SBOX[5] = cz + SFOLLOW; sDue = Math.min(sDue, frameNo); }
       }
-      if (STATIC_SHADOW && (frameNo >= sDue || sunNow.dot(sDir) < Math.cos(SUN_STEP))) {
+      if (STATIC_SHADOW && (frameNo >= sDue || !sDir.equals(sCast))) {
         for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); sScene.remove(S.sm); sStatic.add(S.sm); movers.delete(S); }
-        sDir.copy(sunNow); fitStatic(sDir); sDue = Infinity;
+        sDir.copy(sCast); fitStatic(sDir); sDue = Infinity;
         renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sStatic, sunCamS); renderer.render(sScene, sunCamS);   // (sScene: a layer-2 caster added from outside)
         lap('shadowS', renderer.info.render.calls);
         rays.restatic();   // (render/godrays.js: its min map of the static shadow follows)
