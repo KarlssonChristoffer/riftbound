@@ -392,7 +392,7 @@ void main() {
   // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
   // composite doesn't push them through the season's matrix a second time
   float leaf = 0.;
-  if (uHasLit > .5 && uLitK.x > 0. && uType < 1.5 && wfl < .5) {
+  if (uHasLit > .5 && uLitK.x > 0. && uType < 1.5 && wfl < .5 && all(greaterThanEqual(t, vec2(0.))) && all(lessThan(t, uTexSize))) {   // (none past the map's edge: the ground goes on mirrored there, its last row of leaves would smear)
     ivec2 mx = ivec2(uTexSize) - 1; vec4 lc = leafAt(clamp(ivec2(floor(t)), ivec2(0), mx), mx);
     if (lc.a > 0.) { c.rgb = lc.rgb; leaf = 1.; }
   }

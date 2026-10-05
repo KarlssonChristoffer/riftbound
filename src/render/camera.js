@@ -126,8 +126,10 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     const ex = hx * c + hy * s, ez = hx * s + hy * c;
     let [gx, gz] = toWorld(vx, vy - lift);
     // (ga: airborne, the clamp gives way by his height above where he stood; 0 on the ground)
-    gx = ex * 2 >= WORLD.WM ? WORLD.x0 + WORLD.WM / 2 : Math.min(WORLD.x1 - ex + ga, Math.max(WORLD.x0 + ex - ga, gx));
-    gz = ez * 2 >= WORLD.HM ? WORLD.y0 + WORLD.HM / 2 : Math.min(WORLD.y1 - ez + ga, Math.max(WORLD.y0 + ez - ga, gz));
+    // (it may go WORLD.past m past the world's edges, where the ground goes on: near a border the player stays centred)
+    const pa = WORLD.past || 0, PW = WORLD.WM + 2 * pa, PH = WORLD.HM + 2 * pa;
+    gx = ex * 2 >= PW ? WORLD.x0 + WORLD.WM / 2 : Math.min(WORLD.x1 + pa - ex + ga, Math.max(WORLD.x0 - pa + ex - ga, gx));
+    gz = ez * 2 >= PH ? WORLD.y0 + WORLD.HM / 2 : Math.min(WORLD.y1 + pa - ez + ga, Math.max(WORLD.y0 - pa + ez - ga, gz));
     [vx, vy] = toView(gx, gz); vy += lift;
     if (V === FR) { const [fx, fz] = toWorld(vx, vy); FR.x = fx; FR.z = fz; }   // (the free target stays where the view can go)
     // the lattice, in art px at this zoom (x; y: screen rows): with a pad the drawn centre lies K / 2 px right of / below this

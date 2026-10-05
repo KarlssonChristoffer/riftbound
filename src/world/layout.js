@@ -46,7 +46,9 @@ const BIG = flags.get('world') === 'big';
 // With it the Proving Grounds are 10 m wider (the plateau became a mesa: room for its east side)
 export const TERRAIN_ON = flags.get('terrain') !== '0';
 const GX1 = TERRAIN_ON ? 72 : 62;
-export const WORLD = BIG ? {x0: -40, y0: -60, x1: 122, y1: 30, WM: 162, HM: 90} : {x0: 0, y0: 0, x1: GX1, y1: 30, WM: GX1, HM: 30};
+// past: how far (m) past its edges the view may go (render/camera.js keeps the player centred up to there; world.js lays ground out to
+// past + 2 m, the painted ground mirrored on outward)
+export const WORLD = BIG ? {x0: -40, y0: -60, x1: 122, y1: 30, WM: 162, HM: 90, past: 12} : {x0: 0, y0: 0, x1: GX1, y1: 30, WM: GX1, HM: 30, past: 12};
 export const GROUNDS = {x0: 0, y0: 0, x1: GX1, y1: 30};
 export const PLAY = {x0: 7, y0: 6, x1: 33, y1: 24};
 export const SCONCE_D = .21;   // a wall sconce's stick stands this far off the wall face (the east torches; lights.js mounts them)

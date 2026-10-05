@@ -551,10 +551,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const world2 = new THREE.Vector2(WM, HM), origin2 = new THREE.Vector2(G0.x0, G0.y0);
   // the open land's tiles [x0, z0, x1, z1, cell]: the world + skirt outside the Proving Grounds' patch, cut on a TILE m lattice
   // from the skirt's corner and at the patch's sides. Fine cells (S) where the ground can step: the ravine's band (rawCliff
-  // looks 7 m in from the south edge) and the stream's box; COARSE cells on flat land (they meet fine ones only where both are flat)
-  const openTiles = [];
+  // looks 7 m in from the south edge) and the stream's box; COARSE cells on flat land (they meet fine ones only where both are flat).
+  // Out to RING m past the world (the view goes WORLD.past past it: render/camera.js)
+  const openTiles = [], RING = Math.max(SKIRT, (WORLD.past || 0) + 2);
   {
-    const ax = WORLD.x0 - SKIRT, az = WORLD.y0 - SKIRT, bx = WORLD.x1 + SKIRT, bz = WORLD.y1 + SKIRT;
+    const ax = WORLD.x0 - RING, az = WORLD.y0 - RING, bx = WORLD.x1 + RING, bz = WORLD.y1 + RING;
     const cuts = (a, b, h0, h1) => { const v = new Set([a, b, h0, h1]); for (let t = a; t < b; t += TILE) v.add(t); return [...v].filter(t => t >= a && t <= b).sort((p, q) => p - q); };
     const xs = cuts(ax, bx, hx0, hx1), zs = cuts(az, bz, hz0, hz1);
     let wx0 = 1e9, wx1 = -1e9;
@@ -635,8 +636,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     pq.putImageData(id, 0, 0);
     const pTex = texOf(pc, true); pTex.wrapS = pTex.wrapT = THREE.RepeatWrapping; pTex.needsUpdate = true;
     const size = new THREE.Vector2(OPEN_PATCH, OPEN_PATCH);
+    // (the Proving Grounds alone (no open land): the tiles round them are past the world's edge, where the painted ground goes on
+    // mirrored, as on the patch's skirt: no seam)
+    const alone = GROUNDS.x0 <= WORLD.x0 && GROUNDS.y0 <= WORLD.y0 && GROUNDS.x1 >= WORLD.x1 && GROUNDS.y1 >= WORLD.y1;
     for (const [x0, z0, x1, z1, s] of openTiles) {
-      const tg = gridGeo(x0, z0, x1, z1, s), m = G.surface(tg, {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
+      const tg = gridGeo(x0, z0, x1, z1, s), m = G.surface(tg, alone ? {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}
+        : {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
       if (TERRAIN_ON && s === S) caster(tg);   // (the fine tiles are where the ground varies)
       disposers.push(() => m.dispose());
     }
