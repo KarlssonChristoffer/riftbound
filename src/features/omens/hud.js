@@ -34,7 +34,7 @@ export function createOmenHud(host) {
       text(q, name, x + s + 10 * u, y + s * .42, 15 * u, def.col);
       text(q, def.rule, x + s + 10 * u, y + s * .42 + 15 * u, 11 * u, '#e8e2d2', SMALL);
       // the tooltip (hover the icon or its name)
-      const mx = (host.VW / 2 + (host.mouse.x - host.VW / 2) * host.zoom) * sc, my = (host.VH / 2 + (host.mouse.y - host.VH / 2) * host.zoom) * sc;
+      const mx = (host.VW / 2 + (host.mouse.x - host.VW / 2) * host.zoom) * sc + host.G.sub.x * sc / host.G.display, my = (host.VH / 2 + (host.mouse.y - host.VH / 2) * host.zoom) * sc + host.G.sub.y * sc / host.G.display;   // (+ the sub-pixel camera's slide: the HUD stays put)
       if (mx >= x && mx < x + s + 200 * u && my >= y && my < y + s) {
         q.font = `500 ${Math.round(11 * u)}px ${FONT}`;
         let w = 0; for (const l of def.tip) w = Math.max(w, q.measureText(l).width);

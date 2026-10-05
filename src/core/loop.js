@@ -85,6 +85,7 @@ export function createLoop(E) {
     cv.stepZoom(lastDt);
     const PX = player.x, PY = player.y;
     cv.follow(lastDt, PX, PY, P, cam);   // the camera eases after him (render/camera.js)
+    input.remap?.();   // (the cursor on the image as the sub-pixel camera slid it this frame: what the next steps aim at)
     if (!views) return;   // (the camera follows without views too: it's the frame the cursor is read in, the sim's input)
     // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js); or,
     // with ?live=1 and the live hero on, his live 3D body (view/livehero.js)
@@ -115,8 +116,11 @@ export function createLoop(E) {
     const dpr = devicePixelRatio || 1, sc = cv.scale * dpr;
     hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);
     for (const f of features) if (f.on !== false && f.hd && (!host.hudOff || f === game)) { hq.save(); f.hd(hq, sc); hq.restore(); }   // hudOff: the title
+    // (the HD bow and the prompt hang on the world: slid with the pixel image, G.hdShift; the features' hd() do their own)
+    hq.save(); G.hdShift?.(hq, sc);
     if (opt.hdBow && !sinkPx) hero.drawHDBow(hq, sc);
     drawPrompt(hq, sc, promptCtx);
+    hq.restore();
     perf.draw(hq, sc);
   }
   function frame(now) {

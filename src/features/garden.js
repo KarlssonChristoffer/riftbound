@@ -382,6 +382,7 @@ export async function create(host) {
   };
   F.hd = (q, sc) => {   // his speech bubble, at display resolution over his hat
     if (!M.say || M.sayT <= 0) return;
+    host.G.hdShift?.(q, sc);   // (slid with the pixel image: the sub-pixel camera; the host restores q after)
     const [sx, sy] = host.G.toScreen(MERCH.x, 2.05, MERCH.y), dpr = devicePixelRatio || 1, a = Math.min(1, M.sayT * 3);
     q.font = `${Math.round(11 * dpr)}px ui-monospace, Consolas, monospace`; q.textAlign = 'center';
     const w = q.measureText(M.say).width + 16 * dpr, h = 20 * dpr, x = sx * sc, y = sy * sc - 12 * dpr;

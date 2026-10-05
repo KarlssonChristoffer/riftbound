@@ -1951,9 +1951,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // HEAT: heat(...) blobs (over flames) add up in heatRT (view res, smooth); where it's warm the blit reads the pixel image
   // a little to the side, in rising ripples, at display resolution: the pixels behind the hot air wobble smoothly
   const heatRT = new THREE.WebGLRenderTarget(VW, VH, {minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false});
-  const BLIT_FS = HEAD + `uniform sampler2D tOut, tHeat; uniform float uDS, uHeat, uT, uZ; uniform vec2 uRes; out vec4 oc;
+  // (uSub: the sub-pixel camera's slide, canvas px, GL rows: setSubpixel below)
+  const BLIT_FS = HEAD + `uniform sampler2D tOut, tHeat; uniform float uDS, uHeat, uT, uZ; uniform vec2 uRes, uSub; out vec4 oc;
 void main() {
-  vec2 p = gl_FragCoord.xy / uDS;
+  vec2 p = (gl_FragCoord.xy + uSub) / uDS;
   if (uHeat > .5) {
     float s = min(.8, texture(tHeat, p / uRes).r);
     if (s > .003) {
@@ -1964,7 +1965,8 @@ void main() {
   }
   oc = texelFetch(tOut, ivec2(clamp(p, vec2(0.), uRes - 1.)), 0);
 }`;
-  const blitU = {tOut: {value: outRT.texture}, tHeat: {value: heatRT.texture}, uDS: {value: 1}, uHeat: {value: 0}, uT: {value: 0}, uZ: {value: 1}, uRes: {value: new THREE.Vector2(VW, VH)}},
+  const blitU = {tOut: {value: outRT.texture}, tHeat: {value: heatRT.texture}, uDS: {value: 1}, uHeat: {value: 0}, uT: {value: 0}, uZ: {value: 1}, uRes: {value: new THREE.Vector2(VW, VH)},
+      uSub: {value: new THREE.Vector2()}},
     blitScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, BLIT_FS, blitU, {depthTest: false, depthWrite: false})); m.frustumCulled = false; m.matrixAutoUpdate = false; blitScene.add(m); }
   const FX_VS = HEAD + `
@@ -1978,19 +1980,19 @@ void main() {
 }`;
   const FX_FS = HEAD + `
 in vec2 vUv; in vec4 vCol;
-uniform sampler2D tD; uniform float uDS, uR, uSoft, uSharp;
+uniform sampler2D tD; uniform float uDS, uR, uSoft, uSharp; uniform vec2 uSub;
 out vec4 oc;
 void main() {
   float r2 = dot(vUv, vUv); if (r2 > 1.) discard;
   float a = max(0., exp(-r2 * uSharp) - exp(-uSharp));
-  float sd = texelFetch(tD, ivec2(gl_FragCoord.xy / uDS), 0).r;
+  float sd = texelFetch(tD, ivec2((gl_FragCoord.xy + uSub) / uDS), 0).r;   // (the scene's pixel under it, as the blit slid it: uSub)
   if (!(sd > .0005 && sd <= 1.)) sd = 1.;   // an unreadable depth (some drivers): draw rather than hide everything
   float behind = (gl_FragCoord.z - sd) * 2. * uR;   // metres behind the scene
   a *= clamp(1. - behind / uSoft, 0., 1.);
   if (a <= .002) discard;
   oc = vec4(vCol.rgb, vCol.a * a);
 }`;
-  const fxU = {tD: {value: gbuf.depthTexture}, uDS: {value: 1}, uR: {value: R_DEPTH}, uSoft: {value: .14}, uSharp: {value: 3.2}, uPxM: {value: new THREE.Vector2()}};
+  const fxU = {tD: {value: gbuf.depthTexture}, uDS: {value: 1}, uR: {value: R_DEPTH}, uSoft: {value: .14}, uSharp: {value: 3.2}, uPxM: {value: new THREE.Vector2()}, uSub: blitU.uSub};
   const HEAT_FS = HEAD + `
 in vec2 vUv; in vec4 vCol;
 uniform sampler2D tD; uniform float uR;
@@ -2032,17 +2034,17 @@ void main() {
   // gradients, worked out per display pixel and laid over everything in the canvas (they were a display-sized canvas blitted
   // into the HD overlay every frame: ~3% of the frame's JS). Stops as atmos.js painted them: the vignette radial (r .62 -> 1.42 of
   // the half-size, 7 stops, alpha va (i / 6)^1.8 rounded to 4 places), the haze linear over the top 30% (ha, .35 ha at .45, 0)
-  const VG_FS = HEAD + `uniform vec4 uVg; uniform vec3 uVgC, uVhC; uniform vec2 uVgS; out vec4 oc;
+  const VG_FS = HEAD + `uniform vec4 uVg; uniform vec3 uVgC, uVhC; uniform vec2 uVgS; uniform float uVgP; out vec4 oc;
 float vstop(float i) { return floor(uVg.y * pow(i / 6., 1.8) * 1e4 + .5) / 1e4; }
 void main() {
-  vec2 p = vec2(gl_FragCoord.x, uVgS.y - gl_FragCoord.y);   // canvas px, y down (a pixel's centre)
+  vec2 p = vec2(gl_FragCoord.x, uVgS.y + uVgP - gl_FragCoord.y);   // canvas px, y down (a pixel's centre), of what shows (uVgP: the sub-pixel pad's rows below it)
   float ah = 0.;
   if (uVg.z > 0. && p.y < uVgS.y * .3) { float t = p.y / (uVgS.y * .3); ah = t < .45 ? mix(uVg.z, uVg.z * .35, t / .45) : mix(uVg.z * .35, 0., (t - .45) / .55); }
   float x = clamp((length((p - uVgS * .5) / (uVgS * .5)) - .62) / .8, 0., 1.) * 6., i = min(floor(x), 5.), av = mix(vstop(i), vstop(i + 1.), x - i);
   float a = av + ah * (1. - av); if (a <= 0.) discard;   // (the vignette over the haze: source-over, as the canvas did)
   oc = vec4((uVgC * av + uVhC * ah * (1. - av)) / a, a);
 }`;
-  const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}}, vgScene = new THREE.Scene();
+  const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}, uVgP: {value: 0}}, vgScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
   vgScene.matrixAutoUpdate = false;
   let vgFrame = -1;
@@ -2060,7 +2062,27 @@ void main() {
     const i = B.n * 4, P = B.P.array, C = B.C.array;
     P[i] = x; P[i + 1] = y; P[i + 2] = z; P[i + 3] = r; C[i] = c[0]; C[i + 1] = c[1]; C[i + 2] = c[2]; C[i + 3] = a; B.n++;
   }
-  function setDisplay(s) { s = Math.max(1, Math.round(s)); if (s === DS) return; DS = s; renderer.setSize(VW * s, VH * s, false); blitU.uDS.value = fxU.uDS.value = s; }
+  function setDisplay(s) { s = Math.max(1, Math.round(s)); if (s === DS) return; DS = s; renderer.setSize(VW * s, VH * s, false); blitU.uDS.value = fxU.uDS.value = s; subApply(); }
+  // SUB-PIXEL CAMERA (render/camera.js, every frame): setSubpixel(ex, ey, pad): the view is drawn from its target snapped DOWN to
+  // the art lattice; ex, ey (art px, 0..1) is how far the true view lies right of / below it, and the view runs `pad` art px
+  // past what the window shows, right and below. The blit slides the blown-up image left / up by the remainder, rounded to
+  // whole canvas px (sub.x, sub.y <= 0: at most one art px, into the pad), so the view glides at display resolution while the
+  // art stays put; the fx pass draws through the same slide (hdCam), the vignette keeps to what shows. The HD overlay's
+  // world-anchored drawings (bars, bubbles, the HD bow) slide with it: G.hdShift(q, sc) before drawing them; the HUD doesn't.
+  // sub is read by the cursor (core/input.js: what's under it is what's shown)
+  const sub = {x: 0, y: 0, ex: 0, ey: 0, pad: 0};
+  function subApply() { sub.x = -Math.round(sub.ex * DS) || 0; sub.y = -Math.round(sub.ey * DS) || 0; blitU.uSub.value.set(-sub.x, sub.y); }
+  function setSubpixel(ex, ey, pad = 0) { sub.ex = ex; sub.ey = ey; sub.pad = pad; subApply(); }
+  // the overlay q (drawn at sc device px per view px) slid as the pixel image is
+  const hdShift = (q, sc) => { if (sub.x || sub.y) q.translate(sub.x * sc / DS, sub.y * sc / DS); };
+  // the fx pass's camera: the view's, its projection slid by the same whole canvas px (no allocation; only while it slides)
+  const hdCam = new THREE.Camera(); hdCam.matrixWorldAutoUpdate = false;
+  function hdCamNow() {
+    hdCam.matrixWorld.copy(camera.matrixWorld); hdCam.matrixWorldInverse.copy(camera.matrixWorldInverse); hdCam.projectionMatrix.copy(camera.projectionMatrix);
+    const e = hdCam.projectionMatrix.elements; e[12] += 2 * sub.x / (VW * DS); e[13] -= 2 * sub.y / (VH * DS);   // (w = 1: a shift in NDC)
+    hdCam.projectionMatrixInverse.copy(hdCam.projectionMatrix).invert();
+    return hdCam;
+  }
   // resize(w, h): a new view size in art px (the window changed shape: ultrawide, fullscreen; main.js fit). The view-sized
   // targets and the screen layers follow; the projection, toScreen and the fx sizes read VW / VH every frame anyway
   function resize(w, h) {
@@ -2196,10 +2218,10 @@ void main() {
       if (fxN || fxX) {
         fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
-        renderer.render(fxScene, camera);
+        renderer.render(fxScene, sub.x || sub.y ? hdCamNow() : camera);   // (slid as the blit slid the image: setSubpixel)
       }
     } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); rays.draw(); }
-    if (vgFrame === frameNo) { vgU.uVgS.value.set(VW * DS, VH * DS); renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it
+    if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)
     if (post) post.run(renderer);
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
@@ -2317,7 +2339,7 @@ void main() {
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
-    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost,
+    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub,
     godrays: rays, setRays: rays.set,   // (render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};

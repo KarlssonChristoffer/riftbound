@@ -195,7 +195,7 @@ export function createDraw(host, core, phys) {
   function hd(og, scale) {
     hdCanvas = og.canvas;
     const H = (x, y, h) => { const s = host.toView(x, y, h); return [s[0] * scale, s[1] * scale]; };
-    og.save();
+    og.save(); host.G.hdShift?.(og, scale);   // (bars and numbers hang on the world: slid with the pixel image, the sub-pixel camera; the bar below stays put)
     // HP bars over hurt brutes (with a lagging white chip)
     for (const b of core.brutes) {
       if (b.broken || b.hp >= b.maxHp) { b.hpShow = b.hp; continue; }

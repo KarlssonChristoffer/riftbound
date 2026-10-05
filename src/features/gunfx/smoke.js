@@ -207,6 +207,7 @@ export function createSmoke(host) {
     hd(q, sc) {
       if (style() !== 'soft' || !sN) return;
       const px = host.PPM * host.zoom * sc;   // display px per metre
+      G.hdShift?.(q, sc);   // (slid with the pixel image: the sub-pixel camera; the host restores q after)
       for (let i = 0; i < sN; i++) {
         const k = st[i] / sl[i], s = G.toScreenInto(sx[i], sh[i], sy[i], SC), r = (ss[i] + S.grow * sg[i] * Math.sqrt(st[i])) * px;
         q.globalAlpha = Math.min(1, S.alpha * sa[i] * (sg[i] < 1 ? .6 : 1) * (k < .1 ? k / .1 : 1 - (k - .1) / .9) ** 1.4);

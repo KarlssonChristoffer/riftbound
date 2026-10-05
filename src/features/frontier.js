@@ -267,6 +267,7 @@ export async function create(host) {
   };
   F.hd = (q, sc) => {   // the bubble at display resolution over the board / the sign
     if (!SAY.lines) return;
+    host.G.hdShift?.(q, sc);   // (slid with the pixel image: the sub-pixel camera; the host restores q after)
     const [sx, sy] = host.G.toScreen(SAY.x, SAY.h, SAY.y), dpr = devicePixelRatio || 1, a = Math.min(1, SAY.t * 3), lh = 14 * dpr;
     q.font = `${Math.round(11 * dpr)}px ui-monospace, Consolas, monospace`; q.textAlign = 'center';
     let w = 0; for (const l of SAY.lines) w = Math.max(w, q.measureText(l).width);

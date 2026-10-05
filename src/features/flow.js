@@ -4,7 +4,7 @@
 //
 //   camera      a spring instead of the host's plain ease: leans toward the aim while drawing the bow, a small kick back
 //               on release, a dip on hard landings, a little overshoot before settling; the player's screen pixel is held
-//               with hysteresis (no +-1 px toggling). A revolver's shot (player.shoot) kicks it back harder (the Navy
+//               with hysteresis (no +-1 px toggling; with the sub-pixel camera the spring goes out unrounded). A revolver's shot (player.shoot) kicks it back harder (the Navy
 //               more, a fanned shot less), a bullet's hit on a body (combat.hit) a little more on top
 //   motion      sprint speed streaks (1 px lines peeling off the body), a short afterimage trail on the dodge roll
 //               (2-3 flat-tinted silhouettes of earlier frames, behind the player)
@@ -273,6 +273,9 @@ export async function create(host) {
     if (Math.abs(pxs - C.x - C.ox) > H) C.ox = Math.round(pxs - C.x);
     if (Math.abs(pys - C.y - C.oy) > H) C.oy = Math.round(pys - C.y);
     C.outX = pxs - C.ox + Math.round(C.px); C.outY = pys - C.oy + Math.round(C.py);
+    // (the sub-pixel camera, render/camera.js: the view glides in screen px, so the spring goes out as it is; a held whole-px
+    // offset would jump the whole view an art px each time it let go)
+    if (host.G.sub?.pad > 0) { C.outX = C.x + Math.round(C.px); C.outY = C.y + Math.round(C.py); }
     tick(t0);
     return {x: C.outX - TX, y: C.outY - TY};
   }

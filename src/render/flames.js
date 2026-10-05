@@ -128,7 +128,7 @@ void main() {
   gl_Position = vec4(c.xy + vUv * R * uPxM * c.w, c.z, c.w);
 }`;
   const F = G.fxU, glow = new THREE.Mesh(geo, new THREE.RawShaderMaterial({vertexShader: GLOW_VS, fragmentShader: FX_FS, glslVersion: THREE.GLSL3,
-    uniforms: {...U, tD: F.tD, uDS: F.uDS, uR: F.uR, uSoft: F.uSoft, uSharp: F.uSharp, uPxM: F.uPxM},
+    uniforms: {...U, tD: F.tD, uDS: F.uDS, uR: F.uR, uSoft: F.uSoft, uSharp: F.uSharp, uPxM: F.uPxM, uSub: F.uSub},   // (uSub: the sub-pixel camera's slide)
     depthTest: false, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending}));
   glow.frustumCulled = false; glow.matrixAutoUpdate = false; glow.renderOrder = 1;   // (with the other additive fx, after smoke)
   G.extra(pixels, 'gbuf'); G.extra(glow, 'fx');

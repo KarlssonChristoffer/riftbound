@@ -306,6 +306,9 @@ export function createPhoto(E) {
     let data = null;
     try { E.loop.redraw(); data = fx.read(rt); }
     finally { fx.out = null; if (s !== 1) G.setDisplay(ds); rt.dispose(); E.loop.redraw(); }   // (the canvas again: a resize cleared it)
+    // the sub-pixel camera's pad (render/camera.js: the view drawn that far past what shows, right and below) isn't in the photo
+    const k = (G.sub?.pad || 0) * ds * s;
+    if (k) { const W2 = w - k, H2 = h - k, d2 = new Uint8Array(W2 * H2 * 4); for (let y = 0; y < H2; y++) d2.set(data.subarray((y + k) * w * 4, ((y + k) * w + W2) * 4), y * W2 * 4); return {w: W2, h: H2, data: d2}; }
     return {w, h, data};
   }
   function toPng({w, h, data}) {

@@ -10,7 +10,15 @@
 // view keeps its size (the design's 480 x 270 if the page boots hidden) until the window is back, so the view is never
 // 0 px (no view-sized canvas made empty) and the zoom isn't re-scaled to an empty window.
 // FREE (photo mode, ui/photo.js): freeOn() / freeMove / freeReset / freeOff(): the view leaves the player (below).
-// OWNS: cv = {VW, VH, scale, zoom, dsBase, dsGoal, yaw, snapMode}, the target, the free target, the shake.  READS: the window, opt.
+// SUB-PIXEL (t3ssel8r's trick; ?subpx=0: off, an A/B): the target still snaps to the art lattice, so the art never crawls,
+// and the snap's remainder (cv.sub: how far the true view lies right of / below the drawn one, 0..1 art px) goes to the
+// renderer (G.setSubpixel), which slides the blown-up image back by it in whole SCREEN px: the view glides at display
+// resolution, not a whole art px (DS screen px) at a time. So the shift never bares an edge, the view is drawn cv.pad art
+// px wider and taller than the window shows, the pad on the right and below (the snap rounds DOWN with a pad: the image
+// only ever slides left / up) and the drawn centre that far right of / below the chest (pad / 2); the canvas runs past its
+// place by the pad (negative margins, clipped), so the page, the cursor's origin and the HD overlay sit as before. At
+// display scale 1 there's nothing finer to show: no pad, rounding to the nearest as before
+// OWNS: cv = {VW, VH, scale, zoom, dsBase, dsGoal, yaw, snapMode, pad, sub}, the target, the free target, the shake.  READS: the window, opt.
 //   const cv = createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: () => opt, onTurn, flags})   (the view size, before the renderer)
 //   cv.attach({G, canvas, hdc, features}); cv.fit()                                             (once they exist)
 import * as THREE from 'three';
@@ -42,7 +50,11 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   // easing (stepZoom). host.zoom is this (view px per art px), so features size their pixels right while it eases
   const cv = {VW: 480, VH: 270, scale: 1, zoom: 1, dsBase: 1, dsGoal: 1, yaw: (+Q.get('yaw') || 0) * DEG, snapMode: +(Q.get('snap') ?? 0) || 0};
   cv.dsBase = baseScale(); cv.dsGoal = Q.get('zoom') === '2' ? cv.dsBase * 2 : cv.dsBase; cv.scale = cv.dsGoal;   // the window's scale, the wheel's goal, the view's scale now
+  // the sub-pixel view (header): the pad (art px, even: the view's centre stays on the lattice) and the remainder now
+  const SUB = Q.get('subpx') !== '0', padAt = s => SUB && s > 1 ? 2 : 0;
+  cv.pad = padAt(cv.scale); cv.sub = {x: 0, y: 0};
   [cv.VW, cv.VH] = shown() ? viewAt(cv.scale) : [Math.min(VIEW.maxW, VIEW.w), Math.min(VIEW.maxH, VIEW.h)];   // (booting hidden: the design's)
+  cv.VW += cv.pad; cv.VH += cv.pad;
   ctxO.VW = cv.VW; ctxO.VH = cv.VH;
   cv.toView = (X, Z, a = cv.yaw) => viewOf(X, Z, a);
   cv.toWorld = (vx, vy, a = cv.yaw) => worldOf(vx, vy, a);   // (render/viewxf.js at this camera's yaw)
@@ -53,11 +65,14 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     if (!shown()) return;   // hidden: the view stays as it is; the window's resize event when it's back fits it
     const b = baseScale();
     if (b !== cv.dsBase) { const [lo, hi] = scaleRange(b); cv.dsGoal = Math.max(lo, Math.min(hi, Math.round(cv.dsGoal * b / cv.dsBase))); cv.dsBase = b; cv.scale = cv.dsGoal; cv.zoom = 1; }   // (the same zoom, relative)
-    const [w, h] = viewAt(cv.scale);
+    const pad = padAt(cv.scale), [w0, h0] = viewAt(cv.scale), w = w0 + pad, h = h0 + pad;   // (what the window shows + the pad)
+    cv.pad = pad;
     if (w !== cv.VW || h !== cv.VH) { cv.VW = ctxO.VW = w; cv.VH = ctxO.VH = h; G.resize(w, h); for (const f of features) f.resize?.(w, h); }
     canvas.style.width = cv.VW * cv.scale + 'px'; canvas.style.height = cv.VH * cv.scale + 'px';
+    // (the pad runs past the canvas's place on the right and below: negative margins keep it centred where it was, the clip hides it)
+    const pp = pad * cv.scale; canvas.style.marginRight = canvas.style.marginBottom = pad ? -pp + 'px' : ''; canvas.style.clipPath = pad ? `inset(0 ${pp}px ${pp}px 0)` : '';
     G.setDisplay?.(cv.scale);   // the canvas at display size: the pixel image is blown up on the GPU, HD effects draw over it
-    const dpr = devicePixelRatio || 1; hdc.width = cv.VW * cv.scale * dpr; hdc.height = cv.VH * cv.scale * dpr; hdc.style.width = canvas.style.width; hdc.style.height = canvas.style.height;
+    const dpr = devicePixelRatio || 1; hdc.width = w0 * cv.scale * dpr; hdc.height = h0 * cv.scale * dpr; hdc.style.width = w0 * cv.scale + 'px'; hdc.style.height = h0 * cv.scale + 'px';   // (what shows: no pad)
     const r = canvas.getBoundingClientRect(); hdc.style.left = r.left + 'px'; hdc.style.top = r.top + 'px';
   };
 
@@ -104,10 +119,10 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   // clamps its camera to the world the same way: no void past the edge), then the target snaps to the pixel lattice
   // (V: the target to place, T or the free one, FR; ga: how far the clamp gives way, m)
   function snapTarget(ox, oy, V = T, ga = airH * PPMH / PPMY) {
-    const z = cv.zoom, h = V.y, lift = h * PPMH / PPMY;   // the ground at screen centre lies `lift` m further back than the target
+    const z = cv.zoom, h = V.y, lift = h * PPMH / PPMY, K = cv.pad;   // the ground at screen centre lies `lift` m further back than the target
     let [vx, vy] = toView(V.x, V.z); vx += ox / PPM; vy += oy / PPMY;
-    // the view's ground rectangle: half extents in the view frame, then its world-axis extents at this yaw
-    const hx = cv.VW / (2 * PPM * z), hy = cv.VH / (2 * PPMY * z), c = Math.abs(Math.cos(cv.yaw)), s = Math.abs(Math.sin(cv.yaw));
+    // the view's ground rectangle (what shows: no pad): half extents in the view frame, then its world-axis extents at this yaw
+    const hx = (cv.VW - K) / (2 * PPM * z), hy = (cv.VH - K) / (2 * PPMY * z), c = Math.abs(Math.cos(cv.yaw)), s = Math.abs(Math.sin(cv.yaw));
     const ex = hx * c + hy * s, ez = hx * s + hy * c;
     let [gx, gz] = toWorld(vx, vy - lift);
     // (ga: airborne, the clamp gives way by his height above where he stood; 0 on the ground)
@@ -115,7 +130,11 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     gz = ez * 2 >= WORLD.HM ? WORLD.y0 + WORLD.HM / 2 : Math.min(WORLD.y1 - ez + ga, Math.max(WORLD.y0 + ez - ga, gz));
     [vx, vy] = toView(gx, gz); vy += lift;
     if (V === FR) { const [fx, fz] = toWorld(vx, vy); FR.x = fx; FR.z = fz; }   // (the free target stays where the view can go)
-    const sx = Math.round(vx * PPM * z) / (PPM * z), S = Math.round((vy * PPMY - h * PPMH) * z), vy2 = (S / z + h * PPMH) / PPMY;
+    // the lattice, in art px at this zoom (x; y: screen rows): with a pad the drawn centre lies K / 2 px right of / below this
+    // one, rounded DOWN, and the remainder goes to the renderer (header); without one, rounded to the nearest
+    const lx = vx * PPM * z + K / 2, ly = (vy * PPMY - h * PPMH) * z + K / 2, Lx = K ? Math.floor(lx) : Math.round(lx), Ly = K ? Math.floor(ly) : Math.round(ly);
+    cv.sub.x = K ? lx - Lx : 0; cv.sub.y = K ? ly - Ly : 0;
+    const sx = Lx / (PPM * z), vy2 = (Ly / z + h * PPMH) / PPMY;
     const [X, Zw] = toWorld(sx, vy2); Ts.set(X, h, Zw);
   }
   // every rendered frame: ease after the player with a little look-ahead (the arena's), feel offsets from features, shake.
@@ -126,7 +145,7 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   // the world's edges; on the ground it is 0 and the clamp is as it was
   let airH = 0, groundZ = 0;
   cv.follow = function follow(dt, PX, PY, P, cam) {
-    if (free) { snapTarget(0, 0, FR, 0); G.setView(Ts, cv.yaw, cv.zoom); return; }   // (cam, the cursor's frame, stays as it was)
+    if (free) { snapTarget(0, 0, FR, 0); G.setView(Ts, cv.yaw, cv.zoom); G.setSubpixel?.(cv.sub.x, cv.sub.y, cv.pad); return; }   // (cam, the cursor's frame, stays as it was)
     if (!camInit) { T.set(PX, P.z, PY); camInit = true; }
     const air = P.state === 'rope' || P.state === 'fall';
     if (!air) groundZ = P.z;
@@ -138,7 +157,7 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     for (const f of features) if (f.on !== false && f.camera) { const o = f.camera(dt); if (o) { ox += o.x || 0; oy += o.y || 0; } }
     const sk = shakeS.t > 0 ? shakeS.a * Math.min(1, shakeS.t * 8) : 0;
     ox += Math.round((Math.random() * 2 - 1) * sk); oy += Math.round((Math.random() * 2 - 1) * sk);
-    snapTarget(ox, oy); G.setView(Ts, cv.yaw, cv.zoom);
+    snapTarget(ox, oy); G.setView(Ts, cv.yaw, cv.zoom); G.setSubpixel?.(cv.sub.x, cv.sub.y, cv.pad);
     const [tvx, tvy] = toView(Ts.x, Ts.z);
     cam.x = cam.fx = tvx * PPM - cv.VW / 2; cam.y = cam.fy = tvy * PPMY - Ts.y * PPMH - cv.VH / 2;
   };
@@ -146,9 +165,9 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   // ground stays inside the world like the follow's; no look-ahead, feel or shake. The follow's own target and the
   // cursor's frame (cam) aren't touched meanwhile: after freeOff() the follow goes on exactly from where it was, and the
   // renderer's view is put back at once as the follow last set it (a sim step before the next draw reads the screen: the aim)
-  let free = false; const FR = new THREE.Vector3(), TS0 = new THREE.Vector3();
-  cv.freeOn = (x, y, h) => { free = true; TS0.copy(Ts); if (camInit) FR.copy(T); else FR.set(x, h, y); };   // (x, y, h: where to look if the follow hasn't run yet)
-  cv.freeOff = () => { if (!free) return; free = false; Ts.copy(TS0); if (camInit) G.setView(Ts, cv.yaw, cv.zoom); };   // (after the yaw and zoom are back)
+  let free = false; const FR = new THREE.Vector3(), TS0 = new THREE.Vector3(), SUB0 = {x: 0, y: 0};   // (SUB0: the follow's remainder, kept with TS0)
+  cv.freeOn = (x, y, h) => { free = true; TS0.copy(Ts); SUB0.x = cv.sub.x; SUB0.y = cv.sub.y; if (camInit) FR.copy(T); else FR.set(x, h, y); };   // (x, y, h: where to look if the follow hasn't run yet)
+  cv.freeOff = () => { if (!free) return; free = false; Ts.copy(TS0); cv.sub.x = SUB0.x; cv.sub.y = SUB0.y; if (camInit) { G.setView(Ts, cv.yaw, cv.zoom); G.setSubpixel?.(cv.sub.x, cv.sub.y, cv.pad); } };   // (after the yaw and zoom are back)
   cv.freeReset = (x, y, h) => { if (camInit) FR.copy(T); else FR.set(x, h, y); };   // back over the player (where the follow is)
   cv.freeMove = (dx, dy) => { FR.x += dx; FR.z += dy; };     // world metres (x east, y south)
   cv.freeAt = o => { o.x = FR.x; o.y = FR.z; o.h = FR.y; return o; };

@@ -621,6 +621,7 @@ export async function create(host) {
   F.hd = (q, sc) => {
     if (!game || game.mode === 'title') return;
     const u = clamp(sc / 2.6, .7, 2.8);
+    q.save(); host.G.hdShift?.(q, sc);   // (the cards hang on the shrines: slid with the pixel image, the sub-pixel camera; the icon below stays put)
     for (const s of shrines) {
       if (s.spent) continue;
       if (s.kind === 'exchange' && s.offer && !s.offer.away) card(q, sc, u, s, offerLines(s.offer));
@@ -630,6 +631,7 @@ export async function create(host) {
         text(q, FOES[Math.min(12, s.left)], SC[0] * sc, SC[1] * sc, 13 * u, GLOW[s.kind][1]);
       }
     }
+    q.restore();
     if (mountain.on && game.mode === 'run' && sheet) {   // the run rule's icon (top left), as the build's icons are drawn; under
       // a stage omen's icon when one holds (features/omens.js draws it at the same corner), above the affixes' cards
       const f = sheet.fr.mountain, is = Math.round(30 * u), x = Math.round(20 * u), y = Math.round((host.feature('omens')?.active ? 58 : 20) * u);

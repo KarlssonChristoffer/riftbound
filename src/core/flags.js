@@ -28,6 +28,7 @@ export const FLAG_DOCS = {
   detail:    'low: the low detail tier (no wind lines, wildlife, depth layer or grass; menu > Graphics > Detail)',
   // ---- renderer A/B
   snap:      '0 | 1 | 2: camera rotation free / 22.5 deg steps / 90 deg steps',
+  subpx:     '0: the camera moves in whole art pixels (no sub-pixel image shift; an A/B)',
   sampling:  'auto | nearest | smooth: ground texture sampling',
   smooth:    '1: = sampling=smooth',
   props:     'yaw: the 16-angle pre-rendered props instead of live 3D (reference)',
