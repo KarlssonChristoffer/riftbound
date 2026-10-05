@@ -47,7 +47,7 @@ const AIM_TURN_RATE = 1200;
 const STANCE_HOLD = .25;  // s: a moving-aim stance (running forward / backing up) can't flip back sooner (no flip-flop)
 // states in which the player is taken over by a move (no aiming, rolling or new actions); 'rope': hanging from a lasso
 // (sim/player/lasso.js, the equipment experiment's)
-export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'splash', 'hold', 'knock', 'rope']);
+export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'hold', 'knock', 'rope']);
 // The dodge (Space). The roll clip is a FORWARD roll, so a roll never reverses:
 // - running into a roll more than leadMin deg off the way he faces: he plants and turns first (the run's turn frames,
 //   lead s each, untouchable from the plant)
@@ -61,6 +61,14 @@ const DODGE = {lead: .045, leadMin: 67.5, leadSpeed: 2.3, steerRate: 360, steerM
   backCos: -.3, backDist: 1.3, backDur: .3, backExit: 2.7, guard: .15};
 const D2R = Math.PI / 180;
 const CLIMB_T = 1.1, MANTLE_T = .28;
+// VAULT (Space at a low ledge, walkable terrain): a rise of more than a step (STEP_UP) and at most VAULT_H m within VAULT_REACH m
+// ahead, its top level enough to stand on and clear: up and onto it in VAULT_T s (higher: a ladder)
+const VAULT_H = 1.25, VAULT_REACH = .8, VAULT_T = .46;
+// SLIDE (walkable terrain): on ground too steep to stand on (a grass bank: slope rise / run over `on`; a cliff, over `cliff`, is a drop
+// instead) he loses his footing and slides down it, `g` m/s^2 at a 45 deg bank, `fric` 1/s, steering a little (`steer` m/s^2),
+// until the ground eases under `off`. H.grad(x, y, out) -> out = [gx, gy (this frame), slope]
+const SLIDE = {on: .8, off: .45, cliff: 2.6, g: 9, fric: 1.6, steer: 4, max: 7};
+const _grad = [0, 0, 0];
 const angDiff = (a, b) => Math.abs(((a - b) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
 
 // ---------------- atlas loading (one atlas per loadout: body + garments rendered together) ----------------
@@ -286,6 +294,34 @@ export function createPlayer(H) {
     ev({type: 'player.jump', x: P.x, y: P.y, z: P.z});
     return true;
   }
+  // a low ledge ahead along (dx, dy): -> {d: metres to where he lands, z: the top's height} or null. The ledge's foot (the ground
+  // rising more than a step) within VAULT_REACH, its top no more than VAULT_H up, and level for .3 m where he lands (not a slope
+  // running on up), clear of anything solid
+  function vaultPlan(dx, dy) {
+    if (!H.terrain) return null;
+    const z0 = elev(P.x, P.y); let foot = -1;
+    if (elev(P.x + dx * VAULT_REACH, P.y + dy * VAULT_REACH) <= z0 + STEP_UP && elev(P.x + dx * .45, P.y + dy * .45) <= z0 + STEP_UP) return null;   // (no ledge: the usual case, two reads)
+    for (let d = .1; d <= VAULT_REACH; d += .05) { if (elev(P.x + dx * d, P.y + dy * d) > z0 + STEP_UP) { foot = d; break; } }
+    if (foot < 0) return null;
+    for (let d = foot; d <= foot + .9; d += .05) {
+      const x = P.x + dx * d, y = P.y + dy * d, e = elev(x, y);
+      if (e > z0 + VAULT_H) return null;
+      const e1 = elev(x + dx * .3, y + dy * .3);
+      if (Math.abs(e1 - e) < .06 && e > z0 + STEP_UP) { const l = d + .2; return H.blocked(P.x + dx * l, P.y + dy * l, e, false) ? null : {d: l, z: elev(P.x + dx * l, P.y + dy * l)}; }
+    }
+    return null;
+  }
+  const vaultDir = () => { let [dx, dy] = moveInput(); if (!dx && !dy) [dx, dy] = vecOf(P.face); return [dx, dy]; };
+  const canVault = () => !BUSY.has(P.state) && !dodging() && !!vaultPlan(...vaultDir());   // (the hint: Space climbs up here)
+  function tryVault() {
+    if (P.z > elev(P.x, P.y) + .05 || BUSY.has(P.state)) return false;
+    const [dx, dy] = vaultDir(), plan = vaultPlan(dx, dy); if (!plan) return false;
+    P.face = P.want = dirOf(dx, dy);
+    P.vault = {x0: P.x, y0: P.y, dx, dy, d: plan.d, z0: P.z, z1: plan.z};
+    P.state = 'vault'; P.t = 0; P.aimRoll = false; P.vx = P.vy = 0;
+    ev({type: 'player.jump', x: P.x, y: P.y, z: P.z});
+    return true;
+  }
   function startFall() { P.state = 'fall'; P.t = 0; P.vz = 0; P.fall0 = P.z; P.vx *= .8; P.vy *= .8; P.aimRoll = false; }
   function land(drop) {
     P.state = 'land'; P.t = 0; P.z = elev(P.x, P.y);
@@ -329,6 +365,22 @@ export function createPlayer(H) {
   function stepTraverse(dt) {   // returns true when it handled this frame
     // walked or rolled off a ledge: fall (any edge; climbing UP needs a climb spot)
     if (!BUSY.has(P.state) && P.z > elev(P.x, P.y) + .05) startFall();
+    if (H.grad && !BUSY.has(P.state) && !dodging() && H.grad(P.x, P.y, _grad)[2] > SLIDE.on && _grad[2] < SLIDE.cliff) {   // (a bank: still steep half a metre on down it, not a small step)
+      const k = .5 / _grad[2]; if (H.grad(P.x - _grad[0] * k, P.y - _grad[1] * k, _grad)[2] > SLIDE.off) { P.state = 'slide'; P.t = 0; P.aimRoll = false; }
+    }
+    if (P.state === 'slide') {   // down the bank: pulled along its fall line, a little steering, friction; off it where it eases
+      const g = H.grad(P.x, P.y, _grad), sl = g[2], [ix, iy] = moveInput();
+      if (sl > 1e-4) { const a = SLIDE.g * sl / Math.sqrt(1 + sl * sl) * Math.SQRT2; P.vx -= g[0] / sl * a * dt; P.vy -= g[1] / sl * a * dt; }
+      P.vx += ix * SLIDE.steer * dt; P.vy += iy * SLIDE.steer * dt;
+      const damp = Math.exp(-dt * SLIDE.fric), sp = Math.hypot(P.vx, P.vy), cap = sp > SLIDE.max ? SLIDE.max / sp : 1; P.vx *= damp * cap; P.vy *= damp * cap;
+      const z0 = P.z; moveBy(P.vx * dt, P.vy * dt, true); const e = elev(P.x, P.y);
+      if (e < z0 - .5) { P.z = z0; startFall(); return true; }   // (over an edge: a fall)
+      P.z = e;
+      if (Math.hypot(P.vx, P.vy) > .6) P.face = P.want = dirOf(P.vx, P.vy);
+      P.frame = A.SP.crouch ? 'crouch' : 'lunge';
+      if (sl < SLIDE.off && P.t > .15) { P.state = 'idle'; P.t = 0; P.prevF = -1; puff('L', P.frame, 1); }
+      return true;
+    }
     if (P.state === 'leap') {
       const L = P.leap, k = Math.min(1, P.t / L.dur), z0 = elev(L.x0, L.y0);
       moveBy(P.vx * dt, P.vy * dt, true);
@@ -369,6 +421,14 @@ export function createPlayer(H) {
           if (k >= 1) { P.z = H0; P.y = face + .35; P.state = 'idle'; P.t = 0; P.face = P.want = 0; }
         }
       }
+      return true;
+    }
+    if (P.state === 'vault') {   // up onto the ledge: the body rises first, then he steps forward onto the top
+      const V = P.vault, k = Math.min(1, P.t / VAULT_T), up = Math.min(1, k / .55), on = Math.max(0, (k - .22) / .78);
+      P.z = V.z0 + (V.z1 - V.z0) * up * up * (3 - 2 * up);
+      const f = V.d * on * on * (3 - 2 * on); P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
+      P.frame = k < .55 ? (has('mantle.0') ? 'mantle.0' : has('reach_up') ? 'reach_up' : 'crouch') : 'crouch';
+      if (k >= 1) { P.z = elev(P.x, P.y); P.vault = null; P.state = 'idle'; P.t = 0; P.prevF = -1; puff('L', A.SP.crouch ? 'crouch' : 'idle.0', 1); }
       return true;
     }
     if (P.state === 'hold') {   // a pose held briefly (abilities)
@@ -686,7 +746,7 @@ export function createPlayer(H) {
   }
 
   // ---------------- input (the host maps its keys / buttons to these) ----------------
-  function onSpace() { if (dodging() || BUSY.has(P.state)) return; if (!tryLeap()) startRoll(); }   // also while aiming
+  function onSpace() { if (dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
   function press() {   // LMB down: draw (kept through a roll)
@@ -899,6 +959,6 @@ export function createPlayer(H) {
   const faceShot = (dx, dy) => { P.face = P.want = dirOf(dx, dy); P.twang = 0; };
   const flicker = sec => { P.blink = sec; };
   const regrid = (n0, n1) => { P.face = Math.round(P.face * n1 / n0) % n1; P.want = P.face; };
-  return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, faceShot, flicker, regrid,
+  return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, tryVault, canVault, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, faceShot, flicker, regrid,
     press, release, hold, knock, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
 }

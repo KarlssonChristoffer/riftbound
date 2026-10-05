@@ -392,7 +392,10 @@ export async function create(host) {
     const M = host.layout.mesa;   // (walkable terrain: the mesa's cliffs, a spot every ~1 m along each lip, a hand in from its edge)
     if (M) for (const c of M.cliffs) for (let i = 0, run = .6; i + 1 < c.pts.length; i++) {
       const [ax, ay] = c.pts[i], [bx, by] = c.pts[i + 1], l = Math.hypot(bx - ax, by - ay), nx = (c.nrm[i][0] + c.nrm[i + 1][0]) / 2, ny = (c.nrm[i][1] + c.nrm[i + 1][1]) / 2;
-      if (c.core[i] && c.core[i + 1]) for (; run < l; run += 1.05) spots.push({p: null, kind: 'ledge', occ: null, x: ax + (bx - ax) * run / l - nx * .12, y: ay + (by - ay) * run / l - ny * .12, h: M.h, ok: true});
+      if (c.core[i] && c.core[i + 1]) for (; run < l; run += 1.05) {
+        const x = ax + (bx - ax) * run / l - nx * .12, y = ay + (by - ay) * run / l - ny * .12;
+        if (!host.layout.inCleft?.(x, y, .3)) spots.push({p: null, kind: 'ledge', occ: null, x, y, h: M.h, ok: true});   // (not over a cleft's mouth)
+      }
       run = Math.max(0, run - l);   // (only on the cliff proper: where it sinks into a bank its lip is lower)
     }
     for (const s of spots) s.nb = [];

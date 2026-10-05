@@ -35,6 +35,14 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
       : p.r && Math.hypot(p.x - x, p.y - y) < p.r + R_BODY)) return true;
     return false;
   }
+  // the ground's slope at view-frame (x, y): out = [gx, gy] its rise per metre along the view's x and y, out[2] = rise / run the steepest
+  // way (no allocation: the world <-> view turn inline, viewxf's)
+  const E2 = .125;
+  function gradV(x, y, out) {
+    const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw), X = x * c + y * s, Z = -x * s + y * c;
+    const gx = (elev(X + E2, Z) - elev(X - E2, Z)) / (2 * E2), gz = (elev(X, Z + E2) - elev(X, Z - E2)) / (2 * E2);
+    out[0] = gx * c - gz * s; out[1] = gx * s + gz * c; out[2] = Math.hypot(gx, gz); return out;
+  }
   // the plateau as the player sees it. Exact when the camera faces north; turned, the climb spot is handled here
   const plateausV = PLATEAUS.map(q => ({...q}));
   // the climbs as the player sees them: a face is climbed in the camera's frame at the yaw that looks straight at it (the face then lies
@@ -54,6 +62,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     lasso: createLasso, yaw: () => cv.yaw,      // the lasso's hands (idle unless features/equip/lasso.js uses them); the camera's yaw (its swing is in the world)
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
     elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
+    grad: TERRAIN_ON ? gradV : null,   // walkable terrain's slope (player.js SLIDE)
     inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
     pixelBow: () => !optOf().hdBow,   // J: the bowstring + nocked / flying arrows at art pixels (default) or the HD overlay
     onShoot: a => { const [x, y] = toWorld(a.x, a.y), [vx, vy] = toWorld(a.vx, a.vy); proj.spawn({...a, x, y, vx, vy}); },
@@ -92,6 +101,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     if (P.rollDir) P.rollDir = rot(...P.rollDir);
     if (P.back) P.back = rot(...P.back);
     if (P.leap) { [P.leap.x0, P.leap.y0] = rot(P.leap.x0, P.leap.y0); [P.leap.dx, P.leap.dy] = rot(P.leap.dx, P.leap.dy); }
+    if (P.vault) { [P.vault.x0, P.vault.y0] = rot(P.vault.x0, P.vault.y0); [P.vault.dx, P.vault.dy] = rot(P.vault.dx, P.vault.dy); }
     // (the lasso's swing keeps its state in the world and writes P from it every step: nothing of it to turn)
     faceAcc -= d / (2 * Math.PI / ND);
     const n = Math.round(faceAcc);
@@ -102,13 +112,14 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   // wouldn't be bit for bit, and the sim must leave photo mode as it came in)
   let held = null;
   function hold() {
-    const L = P.leap;
-    held = {x: P.x, y: P.y, vx: P.vx, vy: P.vy, rollDir: P.rollDir, back: P.back, leap: L ? [L.x0, L.y0, L.dx, L.dy] : null, face: P.face, want: P.want, faceAcc};
+    const L = P.leap, V = P.vault;
+    held = {x: P.x, y: P.y, vx: P.vx, vy: P.vy, rollDir: P.rollDir, back: P.back, leap: L ? [L.x0, L.y0, L.dx, L.dy] : null, vault: V ? [V.x0, V.y0, V.dx, V.dy] : null, face: P.face, want: P.want, faceAcc};
   }
   function release() {
     const h = held; if (!h) return; held = null;
     P.x = h.x; P.y = h.y; P.vx = h.vx; P.vy = h.vy; P.rollDir = h.rollDir; P.back = h.back; P.face = h.face; P.want = h.want; faceAcc = h.faceAcc;
     if (h.leap && P.leap) [P.leap.x0, P.leap.y0, P.leap.dx, P.leap.dy] = h.leap;
+    if (h.vault && P.vault) [P.vault.x0, P.vault.y0, P.vault.dx, P.vault.dy] = h.vault;
   }
   // the player's events are in the view frame: into the world's
   function toWorldEvent(e) {

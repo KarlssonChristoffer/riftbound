@@ -5,8 +5,9 @@
 //   terrace  {type: 'terrace', pts: [[x, y], ...] (a polygon), h, bank, banks}: a raised flat area; its edge falls to the ground
 //            round it over `bank` m (smoothstep). A bank under ~1.5 h / WALK is too steep to walk: a cliff (rock: cliffs3d.js).
 //            banks (optional): one bank per point, blended along each edge (a mesa: cliffs here, a grass slope there)
-//   ramp     {type: 'ramp', pts: [[x, y], ...] (a polyline), w, h0, h1, shoulder}: a walkway rising evenly from h0 at its first
-//            point to h1 at its last, w m wide, over whatever is there; its sides blend back to the ground over `shoulder` m
+//   ramp     {type: 'ramp', pts: [[x, y], ...] (a polyline), w, h0, h1, shoulder, steps}: a walkway rising evenly from h0 at its first
+//            point to h1 at its last, w m wide, over whatever is there; its sides blend back to the ground over `shoulder` m.
+//            steps: true = in level treads (stepsOf: ~RISER m risers; the first a riser up from h0, the last at h1)
 //   swell    {type: 'swell', amp, k, seed}: low rolling ground (value noise, two octaves, 0..amp m: never below the flat ground,
 //            which many effects treat as a floor), the meadows' undulation
 //   channel  {type: 'channel', pts, bed: [h per point], hw: [half width per point], bank}: a stream's bed cut into whatever is
@@ -101,7 +102,7 @@ function evalShapes(shapes, mask, x, y, tmp) {
       run += L;
     }
     if (past || best >= hw + sh) continue;   // (square ends: a ramp stops at its first and last points, it doesn't round past them)
-    const hr = s.h0 + (s.h1 - s.h0) * (total > 0 ? along / total : 0);
+    const f = total > 0 ? along / total : 0, hr = s.h0 + (s.h1 - s.h0) * (s.steps ? Math.min(s.steps, Math.floor(f * s.steps + 1e-9) + 1) / s.steps : f);   // (steps: level treads, each a riser above the last)
     h = best <= hw ? hr : hr + (h - hr) * smooth((best - hw) / sh);
   }
   for (const s of shapes) {   // the cuts: a stream's bed, a pool's hollow (they only lower)
@@ -121,6 +122,8 @@ function evalShapes(shapes, mask, x, y, tmp) {
   return h;
 }
 
+// a stepped ramp's treads: risers of about RISER m (under a lattice cell's WALK rise, .175 m: not steep, walked up in stride)
+export const RISER = .165, stepsOf = (h0, h1) => Math.max(1, Math.round(Math.abs(h1 - h0) / RISER));
 // the shapes ready to evaluate: copies (the caller's stay as given) with their reach, a ramp end given as null set to the ground
 // there (the field without the ramps)
 function resolve(shapes, mask) {
@@ -128,6 +131,7 @@ function resolve(shapes, mask) {
   for (const s of own) if (s.type === 'ramp') {
     if (s.h0 == null) s.h0 = evalShapes(noRamps, mask, s.pts[0][0], s.pts[0][1], tmp0);
     if (s.h1 == null) s.h1 = evalShapes(noRamps, mask, s.pts.at(-1)[0], s.pts.at(-1)[1], tmp0);
+    if (s.steps === true) s.steps = stepsOf(s.h0, s.h1);
   }
   return own;
 }

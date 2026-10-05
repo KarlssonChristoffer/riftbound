@@ -11,6 +11,7 @@ export function drawPrompt(hq, sc, {host, pa, features, G}) {
     at = [p.x, p.y, (p.z || 0) + 1.1]; txt = r?.text ?? r ?? 'E  open'; col = r?.color ?? col;
   }
   else if (!BUSY.has(P.state) && pa.climbSpotW()) { at = [player.x, player.y, P.z + 2]; txt = pa.climbSpotW().dir < 0 ? 'E  climb down' : 'E  climb'; }
+  else if (pa.PL.canVault?.()) { at = [player.x, player.y, P.z + 2]; txt = 'Space  climb up'; }   // (a low ledge ahead: walkable terrain)
   if (!at) return;
   const [sx, sy] = G.toScreen(at[0], at[2], at[1]);
   hq.font = `${Math.round(11 * (devicePixelRatio || 1))}px ui-monospace, Consolas, monospace`; hq.textAlign = 'center';

@@ -86,9 +86,22 @@ export const inStream = (x, y) => {
 const BOX = {x0: 43, y0: 2.8, x1: 60, y1: 11, h: 2.4,
   climbs: [{x: 51.5, w: 1.2}]};         // climb spot on the south face (x = centre, w = width)
 export const PLATEAUS = TERRAIN_ON ? [] : [BOX];
-export const elev = (x, y) => { for (const p of PLATEAUS) if (x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) return p.h; return TERRAIN_ON ? terrainField().H(x, y) : 0; };
-// too steep to walk up (walkable terrain: a terrace's cliff, a ramp's side); never on flat ground or the plateau's top
-export const steep = (x, y) => TERRAIN_ON && !PLATEAUS.some(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) && terrainField().steep(x, y);
+export const elev = (x, y) => { for (const p of PLATEAUS) if (x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) return p.h; if (!TERRAIN_ON) return 0; const h = terrainField().H(x, y), d = deckAt(x, y); return d > h ? d : h; };
+// too steep to walk up (walkable terrain: a terrace's cliff, a ramp's side); never on flat ground, the plateau's top or a bridge's deck
+export const steep = (x, y) => TERRAIN_ON && !PLATEAUS.some(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) && terrainField().steep(x, y) && deckAt(x, y) < -1e8;
+// BRIDGES (walkable terrain): footbridges, a deck from a to b (its ends on the banks) w m wide, rising arch m in the middle; deckAt(x, y)
+// -> the deck's height there or -1e9 off every deck. elev takes the deck where it lies above the ground (what is under it stays: a
+// creek runs on below; nothing walks under a deck). Set up with the creek's bed (below): ends, heights, the box to test first
+export const BRIDGES = [];
+function deckAt(x, y) {
+  for (let i = 0; i < BRIDGES.length; i++) {
+    const B = BRIDGES[i]; if (x < B.box[0] || x > B.box[2] || y < B.box[1] || y > B.box[3]) continue;
+    const u = ((x - B.a[0]) * B.ux + (y - B.a[1]) * B.uy) / B.len, v = (x - B.a[0]) * -B.uy + (y - B.a[1]) * B.ux;
+    if (u < 0 || u > 1 || Math.abs(v) > B.w / 2) continue;
+    return B.h0 + (B.h1 - B.h0) * u + B.arch * Math.sin(Math.PI * u);
+  }
+  return -1e9;
+}
 // on the open ground: not a plateau's top, not a cliff (spawn spots, scatter, caches: "where elev === 0" in the flat world, exactly)
 export const onGround = (x, y) => TERRAIN_ON ? !PLATEAUS.some(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) && !terrainField().steep(x, y) : elev(x, y) === 0;
 // two heights the same level: equal in the flat world, within `tol` m on walkable terrain
@@ -165,6 +178,38 @@ function inset(P, banks) {
   });
 }
 export const MESA = TERRAIN_ON ? {h: MESA_H, ...mesaOutline(MESA_CTL)} : null;
+// LEDGES: the low rock the same way (a terrace with a natural outline, rock round it, drawn in behind it): the yard's lookout (stone
+// steps up its west side: the steps' stretch straight) and shelves on the slopes, low enough to scramble up (player.js VAULT_H)
+const LEDGE_CTL = [
+  {h: 1.15, ctl: [[56.8, 14.75, .12], [58.4, 14.6, .12], [60.2, 14.8, .12], [60.75, 16.3, .12], [60.55, 18.4, .12], [60.1, 20.0, .12],
+    [58.6, 20.3, .12], [57.0, 20.05, .12], [56.6, 18.6, .12], [56.65, 16.85, .12, 1], [56.65, 15.15, .12]]},   // the lookout
+  // a step in the gully's west slope (its uphill side opens into the slope: rock only where it drops), one under the mesa's east side
+  // (its back a grass bank)
+  {h: .9, ctl: [[43.7, 7.7, .12], [44.9, 7.25, 1.6], [45.7, 7.9, 1.6], [45.4, 9.0, .12], [44.4, 9.4, .12], [43.6, 8.7, .12]]},
+  {h: .8, ctl: [[67.9, 8.7, .12], [69.1, 8.4, 1.6], [69.7, 9.6, 1.6], [69.0, 10.8, .12], [67.8, 10.4, .12]]},
+];
+export const LEDGES = TERRAIN_ON ? LEDGE_CTL.map(L => ({h: L.h, ...mesaOutline(L.ctl)})) : [];
+// CLEFTS: a slot cut into the mesa at ground level from its south face, opening into a small chamber (a chest in it): pts = its axis from
+// the mouth (just outside the face) in, hw = half its width, chamber {x, y, r}. The cut is a channel and a basin at 0 (walls: world.js
+// rock along walls(c)); drawn CLEFT_IN wider, so the drawn ground's steep cells lie behind the rock, like the mesa's
+const CLEFT_IN = .35;
+export const CLEFTS = TERRAIN_ON ? [{pts: [[60.15, 11.85], [60.3, 10.6], [60.7, 9.6], [61.1, 9.0]], hw: .62, chamber: {x: 61.2, y: 8.55, r: 1.05}}] : [];
+// a cleft's wall as one line (cliffs3d.js's way: the open floor on its right): up its west side, round the chamber's far side, down its
+// east side
+export function cleftWall(c) {
+  const P = c.pts, n = P.length, side = (k, sg) => P.map((p, i) => {
+    const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, tx = (b[0] - a[0]) / l, ty = (b[1] - a[1]) / l;
+    return [p[0] + ty * sg * k, p[1] - tx * sg * k];   // (sg 1: the left of the way in)
+  });
+  const W = side(c.hw, 1).slice(0, -1), E = side(c.hw, -1).slice(0, -1), C = c.chamber, ang = q => Math.atan2(q[1] - C.y, q[0] - C.x);
+  let a0 = ang(W.at(-1)), a1 = ang(E.at(-1)); while (a1 <= a0) a1 += 2 * Math.PI;
+  const ring = []; for (let k = 1; k < 12; k++) { const a = a0 + (a1 - a0) * k / 12; ring.push([C.x + Math.cos(a) * C.r, C.y + Math.sin(a) * C.r]); }
+  return [...W, ...ring, ...E.reverse()];
+}
+// within m of a cleft's floor (the mesa's own rock stops at its mouth)
+export const inCleft = (x, y, m = 0) => CLEFTS.some(c => { if (Math.hypot(x - c.chamber.x, y - c.chamber.y) < c.chamber.r + m) return true;
+  for (let i = 0; i + 1 < c.pts.length; i++) { const [ax, ay] = c.pts[i], [bx, by] = c.pts[i + 1], vx = bx - ax, vy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy))); if (Math.hypot(x - ax - vx * t, y - ay - vy * t) < c.hw + m) return true; }
+  return false; });
 // CLIMBS: where a cliff is climbed (a ladder). x, y = the middle of its foot on the face's line, nx, ny = the face's outward normal (you
 // stand there to climb up), w = its width, h0 / h1 = the ground at its foot / the top, reach = how far in from the face the top's level
 // ground starts (where the mantle puts him: the mesa's ground lies behind its rock, CLIFF_IN); yaw = the camera's yaw that looks
@@ -185,11 +230,17 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   {type: 'terrace', pts: [[45, -30], [69.5, -30], [69.5, 1.4], [45, 1.4]], h: 3.4, bank: 2},   // the highland
   // the mesa, and the walk down its gully: a ramp from its top to the ground by the pool, beside the creek (its sides blend into the
   // gully's banks)
-  {type: 'terrace', pts: MESA.ground, banks: MESA.banks, h: MESA_H, rock: true, cliffs: MESA.cliffs},
+  {type: 'terrace', pts: MESA.pts, drawn: {pts: MESA.ground}, banks: MESA.banks, h: MESA_H, rock: true, cliffs: MESA.cliffs},
   {type: 'ramp', pts: [[49.9, 6.2], [48.5, 8.4], [47.6, 10.6], [47.4, 12.8]], w: 2.8, h0: MESA_H, h1: null, shoulder: 2.2},
-  // the yard: a lookout terrace in the east, rock all round, stone steps up from the west
-  {type: 'terrace', pts: [[56.6, 14.6], [60.6, 14.6], [60.6, 20.2], [56.6, 20.2]], h: 1.15, bank: .12, rock: true},
-  {type: 'ramp', pts: [[53, 16], [56.9, 16]], w: 1.5, h0: null, h1: 1.15, shoulder: .12, rock: true},
+  // the yard: a lookout terrace in the east, rock all round, stone steps up from the west (onto a landing level with its top: the
+  // terrace is drawn in behind its rock), and the low shelves (LEDGES)
+  ...LEDGES.map(L => ({type: 'terrace', pts: L.pts, drawn: {pts: L.ground}, banks: L.banks, h: L.h, rock: true, cliffs: L.cliffs})),
+  {type: 'ramp', pts: [[53, 16], [56.65, 16]], w: 1.5, h0: 0, h1: 1.15, shoulder: .12, rock: true, steps: true},   // (h0 given: the stones' heights are the treads')
+  {type: 'ramp', pts: [[56.65, 16], [57.4, 16]], w: 1.5, h0: 1.15, h1: 1.15, shoulder: .12, rock: true},
+  // the clefts: cut down to the ground (their rock: world.js)
+  ...CLEFTS.flatMap(c => [
+    {type: 'channel', pts: c.pts, bed: c.pts.map(() => 0), hw: c.pts.map(() => c.hw), bank: .06, drawn: {hw: c.pts.map(() => c.hw + CLEFT_IN)}},
+    {type: 'basin', x: c.chamber.x, y: c.chamber.y, rx: c.chamber.r, ry: c.chamber.r, h: 0, rim: .06, drawn: {rx: c.chamber.r + CLEFT_IN, ry: c.chamber.r + CLEFT_IN}}]),
   // hills where the sparring brutes live, and a knoll between the paths
   {type: 'hill', x: 47.8, y: 23.6, rx: 2.9, ry: 2.1, h: .75},
   {type: 'hill', x: 52.8, y: 24.6, rx: 2.2, ry: 1.6, h: .55},
@@ -216,9 +267,40 @@ function terrainMask(x, y) {
   for (const [px, py, r, f] of PADS) m = Math.min(m, fade(Math.hypot(x - px, y - py) - r, f));
   return m;
 }
-let FIELD = null;
+let FIELD = null, DRAWN = null;
 export function terrainField() {   // baked on the first read (the shapes and the mask are this module's: no import order to mind)
   return FIELD ??= createField({bounds: {x0: WORLD.x0 - 8, y0: WORLD.y0 - 8, x1: WORLD.x1 + 8, y1: WORLD.y1 + 8}, shapes: TERRAIN, mask: terrainMask});
+}
+// the DRAWN ground's height (the ground mesh, its painter, its shadow): the field, but where a shape says how it is drawn (`drawn`: its
+// own values for that, the mesa's outline drawn in behind its rock (CLIFF_IN), a cleft's cut wider) those. Walkers, props and
+// everything else stand on the field (terrainField: its top runs to the rock's face); the drawn ground falls away under the rock's
+// cap. A small second bake over those shapes only
+export function groundDrawn() {
+  if (DRAWN) return DRAWN;
+  const F = terrainField(), own = TERRAIN.filter(s => s.drawn);
+  if (!own.length) return (DRAWN = F.H);
+  // the field's own lattice over those shapes, its values copied, re-worked only where a drawn shape differs from its walked one: near a
+  // terrace's outline, along a cut's edges (most of the box is the same: the mesa's top, the open ground)
+  const S = sampler(TERRAIN.map(s => s.drawn ? {...s, ...s.drawn} : s), terrainMask), c = F.cell, seg = [0, 0, 0, 0];
+  const lineD = (x, y, P, closed) => { let d = 1e9; for (let i = 0, n = P.length; i < (closed ? n : n - 1); i++) { const [ax, ay] = P[i], [bx, by] = P[(i + 1) % n], vx = bx - ax, vy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1))); d = Math.min(d, Math.hypot(x - ax - vx * t, y - ay - vy * t)); } return d; };
+  const near = (s, x, y) => s.type === 'terrace' ? lineD(x, y, s.pts, true) < CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6
+    : s.type === 'channel' ? lineD(x, y, s.pts, false) < Math.max(...s.drawn.hw) + s.bank + .5
+    : Math.hypot((x - s.x) / (s.drawn.rx + s.rim + .5), (y - s.y) / (s.drawn.ry + s.rim + .5)) < 1;
+  let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+  for (const s of own) for (const [x, y] of s.pts || [[s.x - s.rx, s.y - s.ry], [s.x + s.rx, s.y + s.ry]]) { bx0 = Math.min(bx0, x); by0 = Math.min(by0, y); bx1 = Math.max(bx1, x); by1 = Math.max(by1, y); }
+  const i0 = Math.max(0, Math.floor((bx0 - 2 - F.x0) / c)), j0 = Math.max(0, Math.floor((by0 - 2 - F.y0) / c)), i1 = Math.min(F.nx - 1, Math.ceil((bx1 + 2 - F.x0) / c)), j1 = Math.min(F.ny - 1, Math.ceil((by1 + 2 - F.y0) / c));
+  const W = i1 - i0 + 1, D = new Float32Array(W * (j1 - j0 + 1));
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const x = F.x0 + i * c, y = F.y0 + j * c;
+    D[(j - j0) * W + i - i0] = own.some(s => near(s, x, y)) ? S(x, y) : F.data[j * F.nx + i];
+  }
+  const X0 = F.x0 + i0 * c, Y0 = F.y0 + j0 * c, X1 = F.x0 + i1 * c, Y1 = F.y0 + j1 * c;
+  return (DRAWN = (x, y) => {   // (bilinear on the same lattice: away from the edges it is the field exactly)
+    if (x < X0 || y < Y0 || x >= X1 || y >= Y1) return F.H(x, y);
+    const fx = (x - X0) / c, fy = (y - Y0) / c, ii = fx | 0, jj = fy | 0, u = fx - ii, v = fy - jj, k = jj * W + ii;
+    const a = D[k], b = D[k + 1], d0 = D[k + W], d1 = D[k + W + 1];
+    return a + (b - a) * u + (d0 - a) * v + (a - b - d0 + d1) * u * v;
+  });
 }
 export const plateauAt = (x, y) => PLATEAUS.find(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) || null;
 // on the mesa's top (terrain): inside its outline and level with it (not down the gully). False without terrain
@@ -408,6 +490,12 @@ if (TERRAIN_ON) {
     CASCADES.push({l: L[i], x: P[i][0] + dx * .12, y: P[i][1] + dy * .12, dx, dy, hw: RILL.hw[i] + .03, top: bed[i], bot: last ? POOL_WATER : bed[i + 1], last});
   });
   const F = CASCADES.at(-1); FALL.x = F.x; FALL.y = F.y; FALL.h = F.top; FALL.foot.x = F.x; FALL.foot.y = POOL.clip + .25;
+  // a footbridge across the creek in the gully, between its third and fourth cascades: from the walk (east) to the west slope, its ends
+  // 1.05 m out from the creek's axis on the ground the creek is cut into
+  { const i = at((CASC_L[2] + CASC_L[3]) / 2), a = P[Math.max(0, i - 2)], b = P[Math.min(n - 1, i + 2)], tl = Math.hypot(b[0] - a[0], b[1] - a[1]), nx = (b[1] - a[1]) / tl, ny = -(b[0] - a[0]) / tl;
+    const A = [P[i][0] - nx * 1.05, P[i][1] - ny * 1.05], Bq = [P[i][0] + nx * 1.05, P[i][1] + ny * 1.05], len = Math.hypot(Bq[0] - A[0], Bq[1] - A[1]), w = .95;
+    BRIDGES.push({a: A, b: Bq, w, len, ux: (Bq[0] - A[0]) / len, uy: (Bq[1] - A[1]) / len, h0: G(A[0], A[1]) + .04, h1: G(Bq[0], Bq[1]) + .04, arch: .1,
+      box: [Math.min(A[0], Bq[0]) - w, Math.min(A[1], Bq[1]) - w, Math.max(A[0], Bq[0]) + w, Math.max(A[1], Bq[1]) + w]}); }
   // the cut: every third sample, and both sides of every drop
   const keep = []; for (let i = 0; i < n; i++) if (i % 3 === 0 || i === n - 1 || lip.includes(i) || lip.includes(i - 1)) keep.push(i);
   TERRAIN.push({type: 'channel', pts: keep.map(i => P[i]), bed: keep.map(i => bed[i]), hw: keep.map(i => RILL.hw[i] + .08), bank: .45},
@@ -492,6 +580,11 @@ export function buildLayout(seed = 7) {
   add('chest', 55.5, 5.4, {r: .45, interact: 'open', opened: false});
   for (const [x, y] of [[49, 4.6], [49.7, 4.2], [58.2, 8.4]]) brk('pot', x, y, 10, {r: .22});
   brk('crystal', TERRAIN_ON ? 47.4 : 46, TERRAIN_ON ? 4 : 6, 40, {r: .4});   // (terrain: the gully's head is where it stood)
+  for (const c of CLEFTS) add('chest', c.chamber.x + .15, c.chamber.y - .3, {r: .45, interact: 'open', opened: false});   // (in the cleft's chamber)
+  if (TERRAIN_ON) {   // at the gully's head: knock one over and it rolls down the gully (combat/props.js: a lying barrel rolls downhill)
+    brk('barrel', 50.6, 5.5, 25, {r: .3});
+    brk('barrel_x', 51.3, 5.1, 10, {r: .3, explode: {r: 2.4, dmg: 40}});
+  }
   add('tree', 59, 3.6, {variant: 1, r: .5});   // a lone tree on the plateau
   // yard below the cliff
   for (const [x, y] of [[46.2, 14.2], [46.9, 14.6], [46.5, 15.3]]) brk('crate', x, y, 20);
@@ -539,5 +632,5 @@ export function buildLayout(seed = 7) {
     : [[57.75, 6.25, 0], [57.7, 7.5, 1], [56.45, 6.2, 2]]) add('rock', x, y, {r: 0, variant: v});
   return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5},
     trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt, spring: SPRING, rill: RILL, fall: FALL, pool: POOL, outflow: OUTFLOW, inRill, rillAt, inPool, poolEdge, inOutflow, outflowAt,
-    mesa: MESA, mesaAt, climbs: CLIMBS, cascades: CASCADES};
+    mesa: MESA, mesaAt, climbs: CLIMBS, cascades: CASCADES, clefts: CLEFTS, inCleft, bridges: BRIDGES};
 }

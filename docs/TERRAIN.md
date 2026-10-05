@@ -36,6 +36,7 @@ listed under each step.
 | 4. The Proving Grounds shaped | hills and swells in the meadows, a terrace with a ramp on the east trail, a ramp up the plateau (beside the ladder), rock faces on terrace cliffs (cliffs3d runs with a top that follows the ground), the big world's open land | first pass done (2026-10-04): layout.js TERRAIN; the open land is still to come |
 | 5. On by default | golden re-save (intended), bench, docs | done (2026-10-04) |
 | 6. The plateau as terrain | the plateau's box becomes a MESA in the field: a natural outline, cliffs (rock) on most sides, a walkable gully down its south-west corner where the creek comes down in cascades into the pool, ladders on its south and east faces, the world 10 m wider | done (2026-10-04); ?terrain=0 keeps the box |
+| 7. Moving through it, more of it | scramble up low ledges (Space), slide down steep grass, lying barrels roll downhill; natural low rock (the yard's lookout, shelves on the slopes), a slot cut into the mesa with a chamber, a footbridge over the creek, stone steps (stepped ramps) | done (2026-10-05) |
 
 ### Step 6: the plateau as terrain (the user's ask: no box with dead-straight walls; follow the water up a hill)
 
@@ -63,6 +64,33 @@ listed under each step.
 - Things that stood on the old box moved: the beacon (onto the south lip, east of the ladder), the crystal (off the gully's
   head), the lasso's snag (onto the west cliff); the cache's crate wall got an east side (the world is wider). Birds perch
   along the cliffs' lips, eyes peer out of their south faces.
+
+### Step 7: moving through it, more of it (the user's picks: traversal and more terrain)
+
+- SCRAMBLE (player.js VAULT): Space at a ledge more than a step and at most 1.25 m up, within .8 m, level where he lands and
+  clear: up and onto it in .46 s (Space: a leap over water first, then this, then the roll). The prompt says "Space  climb up".
+  Higher: a ladder.
+- SLIDE (player.js SLIDE): on a bank too steep to stand on (slope over .8, still steep half a metre on down it: not a small step
+  like a cascade's; over 2.6 is a cliff: a drop) he slides down its fall line, a little steering, until it eases under .45.
+  The adapter gives the slope in the camera's frame (`grad`, no allocation).
+- ROLLING (combat/props.js): a LYING barrel on a slope rolls down it (slopeG; only steeper than ~1 in 3 beats its rolling
+  friction); upright ones and crates stay. Two barrels (one explosive) stand at the gully's head.
+- LEDGES (layout.js): the mesa's machinery for low rock: the yard's lookout (natural outline, its steps' stretch straight) and
+  shelves on the slopes whose uphill sides open into the slope (rock only where they drop). Each a terrace with `cliffs`
+  and `drawn`.
+- The walked ground and the DRAWN ground are two things now (`terrainField` / `groundDrawn`): the field's tops run to the
+  rock's face (you stop at it, you step off at the visible edge), the drawn ground falls away behind it (the mesh's steep cells
+  under the rock's cap). A shape's `drawn` holds its drawn values (an outline drawn in, a cut drawn wider); the drawn bake
+  re-works only the lattice points near those edges (69 ms).
+- CLEFTS (layout.js): a slot cut into the mesa's south face at ground level (a channel at 0, walls of rock facing in:
+  `cleftWall`), opening into a round chamber with a chest. The mesa's own rock stops at its mouth (`inCleft`).
+- BRIDGES (layout.js): a footbridge across the creek between its third and fourth cascades; `elev` takes its deck where it
+  lies above the ground, `steep` is false on it (walkers and the nav cross it); planks, stringers, posts and rails in
+  cliffs3d.js.
+- Stepped ramps (terrain.js `steps`): level treads, risers of ~.165 m (under a lattice cell's WALK rise: not steep, walked up
+  in stride), stone slabs on them (cliffs3d.js stairs): the lookout's steps.
+- Left for later: a rolling boulder (needs its own model and roll), hollows below the ground (rain, dust and fog treat 0 as the
+  floor).
 
 ### As built (steps 1-3)
 
