@@ -1,4 +1,4 @@
-// CLIFFS3D: the world's rock faces as live 3D rock: the plateau's four sides and the south ravine's wall (world.js lays the
+// CLIFFS3D: the world's rock faces as live 3D rock: the plateau's sides (the mesa's cliffs), terraces' and ramps' walls and the south ravine's wall (world.js lays the
 // runs). ONE geometry per cliff with the prop pipeline's attributes (aPart / aFam / aBias / aFixed, as trees3d.js), so it is
 // toned by the biome's ramps, outlined, seamed and shadowed like the kit's rocks, and it reads right at every yaw.
 //   strata  a face is cut into horizontal LAYERS (.3-.6 m) whose bedding lines wander a little up and down along the face.
@@ -15,7 +15,7 @@
 //           it stands out it shows as a rocky rim, with the biome's cover (moss, snow, ash) on what faces up (gfx.js MESH_FS)
 //   lip     tufts of the cover hanging over the cap's front and lying on its rim (the painted face's grass hang)
 //   talus   loose stones at the foot of a run whose foot is dry ground (the plateau's)
-//   ladder  a wooden ladder against a face (the plateau's climb spot)
+//   ladder  a wooden ladder against a face (a climb spot: layout.js CLIMBS)
 // cliffGeometry(runs, o) -> BufferGeometry | null (no rock at all)
 //   run = {pts: [[x, z], ...] the face line (m; x east, z south), travelled so the OUTSIDE lies at (-tz, tx) of the direction
 //          of travel (east along a south face), top (m: the ground above), bot(x, z) -> the foot's height there (minBot: its
@@ -26,7 +26,7 @@
 //          may lie (props, water), lip: the cover hangs over the cap, dark(y) -> extra tone bias by height (a deep ravine
 //          shades toward its floor), seed}
 //   o = {fam(name) -> family index (world.js FAMS), rockB: a second family for alternate layers (the desert's bands) or null,
-//        cover: the lip's family or null, ladders: [{x, z, h, nx, nz}] (foot centre, height, the outward normal)}
+//        cover: the lip's family or null, ladders: [{x, z, h, y0, nx, nz}] (foot centre, top height, the foot's height (0), the outward normal)}
 // Frame: world metres, x east, y up, z south (the geometry is placed with an identity matrix). Built once per world.
 import * as THREE from 'three';
 import {vnoise, clamp} from '../core/mathx.js';
@@ -247,11 +247,11 @@ export function cliffGeometry(runs, o) {
       }
     }
   }
-  // ladders: two rails and rungs, standing against the face (their foot a little sunk)
+  // ladders: two rails and rungs, standing against the face (their foot a little sunk) from y0 (the ground at the foot, 0 if unset)
   for (const L of o.ladders || []) {
-    const u = [-L.nz, 0, L.nx], w = [L.nx, 0, L.nz], H = L.h + .32, rail = .028;
-    for (const sx of [-1, 1]) cuboid(B, [L.x + u[0] * .3 * sx + w[0] * .02, H / 2 - .04, L.z + u[2] * .3 * sx + w[2] * .02], u, UP, w, rail, H / 2, rail, famWood, B.part(), 0);
-    for (let y = .26; y < L.h + .1; y += .3) cuboid(B, [L.x + w[0] * .025, y, L.z + w[2] * .025], u, UP, w, .3, .02, .02, famWood, B.part(), .06);
+    const u = [-L.nz, 0, L.nx], w = [L.nx, 0, L.nz], y0 = L.y0 || 0, H = L.h - y0 + .32, rail = .028;
+    for (const sx of [-1, 1]) cuboid(B, [L.x + u[0] * .3 * sx + w[0] * .02, y0 + H / 2 - .04, L.z + u[2] * .3 * sx + w[2] * .02], u, UP, w, rail, H / 2, rail, famWood, B.part(), 0);
+    for (let y = y0 + .26; y < L.h + .1; y += .3) cuboid(B, [L.x + w[0] * .025, y, L.z + w[2] * .025], u, UP, w, .3, .02, .02, famWood, B.part(), .06);
   }
   return B.geometry();
 }

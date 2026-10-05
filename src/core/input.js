@@ -32,7 +32,7 @@ export function createInput(E) {
     if (k === ' ') {   // a leap's player.jump is emitted here, between steps: into world coordinates like the step's own
       const n0 = events.length; PL.onSpace(); for (let i = n0; i < events.length; i++) pa.toWorldEvent(events[i]);
     }
-    if (k === 'e') { if (!pa.nearProp() && pa.climbSpotW() && Math.abs(cv.yaw) > 1e-6 && !BUSY.has(P.state)) pa.assist = {back: cv.yaw, phase: 'in'}; else PL.onInteractKey(); }
+    if (k === 'e') { if (!pa.climbAssist()) PL.onInteractKey(); }   // (at a climb spot facing away: the camera turns to the wall first)
     if (k >= '1' && k <= '4' && !BUSY.has(P.state)) features.some(f => f.ability?.(+k));
     devKey(k, e, E);
     if (k === 'home') setYaw(0);

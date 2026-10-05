@@ -35,7 +35,7 @@ export const FLAG_DOCS = {
   trees3d:   '0: painted tree cards instead of the procedural 3D trees',
   cliffs:    '0: the old painted strata planes on the plateau and the ravine wall instead of the 3D rock (world/cliffs3d.js)',
   water:     '0: the old water look (no depth colour, bed, refraction or contact foam: world/waterbed.js, gfx.js WATER_FS wDeep; an A/B)',
-  terrain:   '0: flat ground (no hills, terraces or ramps: world/terrain.js, the shapes in layout.js TERRAIN; docs/TERRAIN.md), an A/B',
+  terrain:   '0: flat ground (no hills, terraces or ramps: world/terrain.js, the shapes in layout.js TERRAIN; docs/TERRAIN.md) and the plateau as its old box with the waterfall (not the mesa with its gully), the world 62 m wide: an A/B',
   debug:     'a debug view index (G cycles them)',
   sshadow:   '0: every shadow caster in the per-frame sun shadow (no cached static map; an A/B)',
   godrays:   '0: no shadow-map god rays (render/godrays.js: sunbeams through crowns and between pillars; the painted shafts of features/depth.js come back)',

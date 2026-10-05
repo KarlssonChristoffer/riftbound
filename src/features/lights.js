@@ -12,7 +12,7 @@
 //             embers (and is restocked while nobody is near). Sparks, smoke, a scorched ring, heat haze, a dancing light
 //   embers    now and then one drops off a torch head or spills over a brazier's rim: it floats down glowing, may
 //             bounce (sparks), lies on the ground and cools to grey ash
-//   beacon    on the plateau's lip, above the climb: a stone plinth + iron basket (3D), UNLIT. E (or a fire arrow)
+//   beacon    on the plateau's lip, by the climb: a stone plinth + iron basket (3D), UNLIT. E (or a fire arrow)
 //             lights it: a flare, then a big light that spills down over the cliff onto the yard
 //   candles   clusters on the broken pillar, by the rubble, by the west wall and just inside the west gate. A blast, a roll right past or an arrow
 //             through them snuffs them (smoke curls); they relight after a while (a fire arrow relights them at once)
@@ -220,7 +220,10 @@ export async function create(host) {
   const clearAround = (x, y, r) => { for (const q of props()) if ((q.kind === 'tuft' || q.kind === 'bush' || q.kind === 'rock') && Math.hypot(q.x - x, q.y - y) < r) host.entities.hide(q); };
   let camp = props().find(p => p.kind === 'campfire'), beacon = props().find(p => p.kind === 'beacon');
   if (!camp) { camp = host.entities.add({kind: 'campfire', x: 50.8, y: 19.4, z: 0, r: .55}); clearAround(camp.x, camp.y, 1.3); }
-  if (!beacon) { beacon = host.entities.add({kind: 'beacon', x: 49.6, y: 10.35, z: 2.4, r: .45, unlit: true, interact: 'light the beacon'}); clearAround(beacon.x, beacon.y, 1); }
+  if (!beacon) {   // (walkable terrain: on the mesa's south lip, east of the ladder; the plateau's corner it stood on is the gully now)
+    const [bx, by] = WORLD.TERRAIN_ON ? [53.5, 10.15] : [49.6, 10.35];   // (as far from the ladder as before: E at its top climbs)
+    beacon = host.entities.add({kind: 'beacon', x: bx, y: by, z: WORLD.TERRAIN_ON ? WORLD.elev(bx, by) : 2.4, r: .45, unlit: true, interact: 'light the beacon'}); clearAround(beacon.x, beacon.y, 1);
+  }
   // the woodpile beside the campfire (a prop: it collides; arrows fly over it)
   let pile = props().find(p => p.kind === 'woodpile');
   if (!pile) { pile = host.entities.add({kind: 'woodpile', x: camp.x + 1.05, y: camp.y - .32, z: 0, r: .3, a: 1.05}); clearAround(pile.x, pile.y, .7); }

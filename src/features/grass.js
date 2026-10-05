@@ -15,7 +15,7 @@
 //
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle, ms.
 // OWNS: the blades (render/grass.js), its per-walker scratch (a WeakMap). READS: host.world.groundCanvas, host.biome (style
-// ramps, hole), host.elev / inStream / layout.inPool, host.wind (gpu), host.env (year, snowCover), host.player / P, the
+// ramps, hole), host.elev / inStream / layout.inPool, world.js steep, host.wind (gpu), host.env (year, snowCover), host.player / P, the
 // registry (a live query: brutes, barrels). EMITS: nothing.
 // BUDGET: view ~0, frame ~0.04 ms (F3, measured 2026-10-02: the uniforms, the pushers, the trample pass submitted); the build
 // ~40 ms at a world rebuild (~50k blades in the ruins); the GPU cost is in render/grass.js.
@@ -23,6 +23,7 @@ import {flags} from '../core/flags.js';
 import {mulberry32} from '../core/rng.js';
 import {vnoise} from '../core/mathx.js';
 import {createGrass, MAX_FRONTS, MAX_PUSH} from '../render/grass.js';
+import {steep} from '../world/world.js';   // walkable terrain (docs/TERRAIN.md)
 
 // ---------------------------------------------------------------- tunables
 const TUNE = {
@@ -86,7 +87,7 @@ export async function create(host) {
       const ri = cd >> 2, Rm = TUNE.ramps[names[ri]];
       const thin = TUNE.thin.lo + (1 - TUNE.thin.lo) * vnoise(x * TUNE.thin.k, y * TUNE.thin.k, 41);
       if (r1 * dMax > Rm.d * thin) continue;
-      if (hole?.(x, y) || host.inStream(x, y) || lay.inPool?.(x, y, .01, .45)) continue;
+      if (hole?.(x, y) || host.inStream(x, y) || lay.inPool?.(x, y, .01, .45) || steep(x, y)) continue;   // (walkable terrain: none on a cliff's face)
       const inArena = x > PLAY.x0 && x < PLAY.x1 && y > PLAY.y0 && y < PLAY.y1;
       const tall = TUNE.clump.lo + (TUNE.clump.hi - TUNE.clump.lo) * vnoise(x * TUNE.clump.k, y * TUNE.clump.k, 42);
       const h = (Rm.h[0] + (Rm.h[1] - Rm.h[0]) * r2) * tall * (inArena ? TUNE.arena : 1);

@@ -389,6 +389,12 @@ export async function create(host) {
     }
     for (const q of host.layout.plateaus || []) for (let x = q.x0 + .7; x < q.x1 - .4; x += 1.05)
       spots.push({p: null, kind: 'ledge', occ: null, x, y: q.y1 - .12, h: q.h, ok: true});
+    const M = host.layout.mesa;   // (walkable terrain: the mesa's cliffs, a spot every ~1 m along each lip, a hand in from its edge)
+    if (M) for (const c of M.cliffs) for (let i = 0, run = .6; i + 1 < c.pts.length; i++) {
+      const [ax, ay] = c.pts[i], [bx, by] = c.pts[i + 1], l = Math.hypot(bx - ax, by - ay), nx = (c.nrm[i][0] + c.nrm[i + 1][0]) / 2, ny = (c.nrm[i][1] + c.nrm[i + 1][1]) / 2;
+      if (c.core[i] && c.core[i + 1]) for (; run < l; run += 1.05) spots.push({p: null, kind: 'ledge', occ: null, x: ax + (bx - ax) * run / l - nx * .12, y: ay + (by - ay) * run / l - ny * .12, h: M.h, ok: true});
+      run = Math.max(0, run - l);   // (only on the cliff proper: where it sinks into a bank its lip is lower)
+    }
     for (const s of spots) s.nb = [];
     for (let i = 0; i < spots.length; i++) for (let k = i + 1; k < spots.length; k++) {
       const a = spots[i], b = spots[k];
@@ -1210,6 +1216,9 @@ export async function create(host) {
     for (let i = 0; i < 3; i++) { const p = pick(pillars); if (p) tryProp(p, rr(.9, 1.7), 0); }
     const pl = (host.layout.plateaus || [])[0];
     if (pl) for (let i = 0; i < 3; i++) cand.push({x: rr(pl.x0 + 1, pl.x1 - 1), y: pl.y1 + .03, h: rr(.6, 1.8), ground: true});
+    const M = host.layout.mesa;   // (walkable terrain: in the mesa's south-facing cliffs, the ones the camera sees)
+    if (M) { const face = []; for (const c of M.cliffs) for (let i = 2; i < c.pts.length - 2; i++) if (c.core[i] && c.nrm[i][1] > .7) face.push([c.pts[i][0] + c.nrm[i][0] * .03, c.pts[i][1] + c.nrm[i][1] * .03]);
+      if (face.length) for (let i = 0; i < 3; i++) { const f = face[R() * face.length | 0]; cand.push({x: f[0], y: f[1], h: rr(.6, 1.8), ground: true}); } }
     for (let i = 0; i < 6; i++) { const q = freeNear(rr(10, 56), rr(8, 25), .1, 0, 1); if (q && !inStream(q[0], q[1]) && onGround(q[0], q[1])) cand.push({x: q[0], y: q[1], h: TERRAIN_ON ? elev(q[0], q[1]) : 0, ground: true, floor: true}); }
     for (let i = cand.length - 1; i > 0; i--) { const k = R() * (i + 1) | 0; [cand[i], cand[k]] = [cand[k], cand[i]]; }
     const out = [];

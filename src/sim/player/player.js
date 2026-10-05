@@ -16,7 +16,9 @@
 //   blocked(x, y, z, air) -> bool     collision (air = leaping / falling: ignore water)
 //   onShoot(arrow)                    host adds {x, y, h, vx, vy, vh, life, dmg, kind} to its arrows
 // H — optional:
-//   elev(x, y) -> ground height (m); inStream(x, y) -> water you can leap over; plateaus [{x0, y0, x1, y1, h, climbs}]
+//   elev(x, y) -> ground height (m); inStream(x, y) -> water you can leap over; plateaus [{x0, y0, x1, y1, h}] (the cursor's levels);
+//   climbs [{x, y, w, h0, h1, reach}]: where a face can be climbed, in this frame (the face to the north: its foot's middle, width, the
+//   ground at its foot and the top, how far in the mantle goes; out of reach (x 1e9) unless the camera faces it: sim/player/adapter.js)
 //   aimTarget() -> {x, y, h, target} | null   (snap the aim to something under the cursor)
 //   pixelBow() -> bool: the bow set is pixel art: the host calls PL.drawPixelBow(g, spriteLeft, spriteTop) right after the
 //            sprite and PL.drawPixelArrow(g, arrow) for each flying arrow in its pixel pass (before lighting); drawHD
@@ -104,7 +106,7 @@ export const atlasOf = s => ({SP: s.SP, CLIP: s.CLIP, OV: s.OV, DIRS: s.idx.dirs
 
 export function createPlayer(H) {
   const A = H.atlas, {keys, mouse, cam} = H, T = H.ctx;
-  const elev = H.elev || (() => 0), inStream = H.inStream || (() => false), plateaus = H.plateaus || [];
+  const elev = H.elev || (() => 0), inStream = H.inStream || (() => false), plateaus = H.plateaus || [], climbs = H.climbs || [];
   const P = {x: 0, y: 0, z: 0, vx: 0, vy: 0, face: 0, want: 0, turnT: 0, state: 'idle', t: 0, ph: 0, gait: 'walk',
     frame: 'idle.0', prevF: -1, rollDir: [0, 1]};
   const PL = {P, shots: 0, BUSY};
@@ -309,10 +311,10 @@ export function createPlayer(H) {
     return [bx, by];
   }
   function climbSpot() {   // a climb spot within reach: from below (up) or from the top (down)
-    for (const q of plateaus) for (const c of q.climbs || []) {
+    for (const c of climbs) {
       if (Math.abs(P.x - c.x) > c.w / 2 + .45) continue;
-      if (P.z < .05 && P.y >= q.y1 - .05 && P.y < q.y1 + 1.3) return {q, c, dir: 1};
-      if (Math.abs(P.z - q.h) < .05 && P.y <= q.y1 && P.y > q.y1 - 1.3) return {q, c, dir: -1};
+      if (P.z < c.h0 + .05 && P.y >= c.y - .05 && P.y < c.y + 1.3) return {c, dir: 1};
+      if (Math.abs(P.z - c.h1) < .05 && P.y <= c.y && P.y > c.y - 1.3) return {c, dir: -1};
     }
     return null;
   }
@@ -354,17 +356,17 @@ export function createPlayer(H) {
       return true;
     }
     if (P.state === 'climb') {
-      const C = P.climb, Hh = C.q.h, face = C.q.y1 + .05, top = C.q.y1 - .45, CL = A.CLIP.climb;
+      const C = P.climb, Hh = C.c.h1, H0 = C.c.h0, face = C.c.y + .05, top = C.c.y - C.c.reach, CL = A.CLIP.climb;
       const climbF = has('climb.0') ? `climb.${Math.floor(P.t * (CL?.fps || 7)) % (CL?.frames || 4)}` : Math.floor(P.t / .2) % 2 ? 'reach_up' : 'idle.0';
       const mantleF = has('mantle.0') ? 'mantle.0' : 'crouch';
       if (C.dir > 0) {   // up the face, then mantle over the lip
-        if (P.t < CLIMB_T) { P.y = face; P.z = Hh * (P.t / CLIMB_T); P.frame = climbF; }
+        if (P.t < CLIMB_T) { P.y = face; P.z = H0 + (Hh - H0) * (P.t / CLIMB_T); P.frame = climbF; }
         else { const k = Math.min(1, (P.t - CLIMB_T) / MANTLE_T); P.z = Hh; P.y = face + (top - face) * k; P.frame = mantleF; if (k >= 1) { P.state = 'idle'; P.t = 0; } }
       } else {           // over the lip, then down the face
         if (P.t < MANTLE_T) { const k = P.t / MANTLE_T; P.z = Hh; P.y = top + (face - top) * k; P.frame = mantleF; }
         else {
-          const k = Math.min(1, (P.t - MANTLE_T) / CLIMB_T); P.y = face; P.z = Hh * (1 - k); P.frame = climbF;
-          if (k >= 1) { P.z = 0; P.y = face + .35; P.state = 'idle'; P.t = 0; P.face = P.want = 0; }
+          const k = Math.min(1, (P.t - MANTLE_T) / CLIMB_T); P.y = face; P.z = H0 + (Hh - H0) * (1 - k); P.frame = climbF;
+          if (k >= 1) { P.z = H0; P.y = face + .35; P.state = 'idle'; P.t = 0; P.face = P.want = 0; }
         }
       }
       return true;

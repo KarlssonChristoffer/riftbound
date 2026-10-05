@@ -1,6 +1,6 @@
 # Walkable terrain: hills, terraces and ramps
 
-Status: 2026-10-04, built and on by default. The goal (the user's): ground you walk up and down without a climb: rolling hills in the meadows
+Status: 2026-10-04, built and on by default; the plateau is terrain too (step 6). The goal (the user's): ground you walk up and down without a climb: rolling hills in the meadows
 AND terraces joined by ramps (the steep steps between levels drawn as the 3D rock of `world/cliffs3d.js`), built into the
 Proving Grounds as they are (the walled arena stays flat). Everything that stands, walks, flies or is drawn on the ground
 follows one height field.
@@ -35,6 +35,34 @@ listed under each step.
 | 3. Drawn right | ground decals + footprints (flow.js keys layers by exact height: a world-space decal layer instead), puddles / fog / cloud shadows (screen <-> ground through one plane today), the painter shading the REAL slopes (the painted swells were fake relief), terrain shadows (the ground isn't a caster today), cards sinking into up-slopes, lying bodies' plane | done: decals, slope painting, shadows, rings; left as they are (small on gentle hills): cloud shadows and the ground fog through the h 0 plane, lying ragdolls' flat plane |
 | 4. The Proving Grounds shaped | hills and swells in the meadows, a terrace with a ramp on the east trail, a ramp up the plateau (beside the ladder), rock faces on terrace cliffs (cliffs3d runs with a top that follows the ground), the big world's open land | first pass done (2026-10-04): layout.js TERRAIN; the open land is still to come |
 | 5. On by default | golden re-save (intended), bench, docs | done (2026-10-04) |
+| 6. The plateau as terrain | the plateau's box becomes a MESA in the field: a natural outline, cliffs (rock) on most sides, a walkable gully down its south-west corner where the creek comes down in cascades into the pool, ladders on its south and east faces, the world 10 m wider | done (2026-10-04); ?terrain=0 keeps the box |
+
+### Step 6: the plateau as terrain (the user's ask: no box with dead-straight walls; follow the water up a hill)
+
+- `layout.js` MESA: the outline as control points [x, y, bank, firm] (a bank under .6 m is a cliff), wandering a little between
+  them (`mesaOutline`: pieces under .9 m standing off the line by up to .16 m; firm edges stay straight: the desert's mine,
+  the ladders). Its north side lies under the HIGHLAND (a terrace beyond the trail's edge: the ground rises on into higher
+  land). `MESA.cliffs` = the stretches of cliff (one edge more into the banks either side, where the rock sinks into the
+  slope), `MESA.ground` = the outline drawn in .4 m at the cliffs: the ground mesh's steep cells (a .25 m lattice) then lie
+  behind the rock's face, under its cap, not in front of it. `mesaAt(x, y)`: on its level top.
+- `terrain.js`: a terrace may have a bank per point (`banks`); `channel` (a bed cut along a polyline, its height per point)
+  and `basin` (a pool's hollow, clipped under a lip) only lower the ground; `sampler()` evaluates the shapes unbaked; every
+  shape has a reach (the bake skips it outside: the bigger world bakes faster than the old one).
+- The gully: a ramp from the top down the south-west corner (w 2.8, shoulders 2.2 m: a .33 slope) between wide banks; the
+  CREEK (the rill's path, `path()`: any direction) runs west across the top and down the gully's west half. Its bed is
+  worked out from the ground before the cut: level on the top, then reaches falling .07 m per m to a LIP every 1.15 m, each a
+  ~.3 m drop (CASCADES), the last (.55 m) into the pool. `FALL` is that last one; `RILL.pace / foam / riffle` say where the
+  water runs fast and stays white.
+- Drawn: the mesa's cliffs are cliffs3d runs along `MESA.cliffs` (top: the ground inside the face; foot: the lowest ground
+  round it), a low rock rim along the pool's lip, a fall sheet per cascade (`fallFace` for any sheet: the biome's water,
+  lava or ice). The ground texture mirrors past its edges (a camera turned to face the east edge over the border's raised
+  banks saw the last texel column smeared). The painters: the creek's foam at each cascade; the mesa's top by each biome's
+  plateau top painter (sand and rock in the desert, snow, ash, tiles; the ruins' meadow is its own).
+- CLIMBS (`layout.js`): ladders on any face {x, y, nx, ny, w, h0, h1, reach, yaw}; player.js climbs in the camera's frame at
+  the yaw that faces the wall (the adapter eases the camera there and back: `climbAssist`, `stepAssist`).
+- Things that stood on the old box moved: the beacon (onto the south lip, east of the ladder), the crystal (off the gully's
+  head), the lasso's snag (onto the west cliff); the cache's crate wall got an east side (the world is wider). Birds perch
+  along the cliffs' lips, eyes peer out of their south faces.
 
 ### As built (steps 1-3)
 

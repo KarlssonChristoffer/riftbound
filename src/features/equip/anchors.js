@@ -11,13 +11,14 @@
 // per frame nothing (static meshes, culled by the camera).
 import * as THREE from 'three';
 import {along, geoOf} from '../../world/kit3d.js';
-import {propTop} from '../../world/world.js';
+import {propTop, TERRAIN_ON} from '../../world/world.js';
 
 propTop({lasso_snag: 4.3});   // (how high it stops an arrow: the trunk; the limb above is the lasso's)
 // where they stand (arena metres): base (x, y, the ground's height there), the limb's tip (x, y, h over the ground at the
 // base), which way the bank is (the trunk leans out over the water)
 const SNAGS = [
-  {base: [44.25, 7.7], z: 2.4, tip: [40.7, 7.9, 4.7], seed: 3},      // on the plateau by its west edge, out over the ledge and the stream
+  TERRAIN_ON ? {base: [45.95, 3.4], z: 2.4, tip: [40.9, 3.7, 4.7], seed: 3}   // (walkable terrain: on the mesa's west cliff, north of its gully)
+    : {base: [44.25, 7.7], z: 2.4, tip: [40.7, 7.9, 4.7], seed: 3},      // on the plateau by its west edge, out over the ledge and the stream
   {base: [37.0, 23.55], z: 0, tip: [41.8, 25.2, 5.8], seed: 7},       // from the west bank over the stream's south stretch (its trunk north of
                                                                        // where you run out under the limb: behind you from the default camera)
 ];

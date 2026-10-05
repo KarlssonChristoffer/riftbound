@@ -38,7 +38,7 @@ const BIO = {
 const TUNE = {
   fleck: {rill: 8, out: 4, narrows: 8},     // flecks per track
   rain: {rill: 7, out: 4, size: [.18, .3]},  // rings a second at full rain (on screen), and their reach (m)
-  spray: {foot: [5, 9], lip: [4, 7], mist: [9, 13]},   // per second at normal flow: [plateau fall, ravine fall]
+  spray: {foot: [5, 9, 1.6], lip: [4, 7, .8], mist: [9, 13, 1.5]},   // per second at normal flow: [plateau fall, ravine fall, a cascade on the mesa's creek]
   ravine: 27.95,                            // the ruins' stream tips over the ravine edge here (world.js cliffZ; depth.js WA.yEnd 27.85) if biome.hole can't say
 };
 // chevrons / flecks as flat [i, j, ...] art px: i across the flow, j along it (downstream +)
@@ -132,6 +132,8 @@ export function createWaterLife(host, A) {
     if (!cfg.falls) return;
     const f = L.fall;
     falls.push({id: 0, x: f.x, y: f.foot.y - .06, hw: f.hw * .9, h0: WH(), lipY: f.y + .03, lipH: f.h - .05, acc0: 0, acc1: 0, acc2: 0, on: false});
+    for (const c of L.cascades || []) if (!c.last)   // (walkable terrain: the creek's steps down the mesa's gully, small)
+      falls.push({id: 2, x: c.x, y: c.y + c.dy * .08, hw: c.hw * .85, h0: c.bot + .01, lipY: c.y - c.dy * .08, lipH: c.top - .02, acc0: 0, acc1: 0, acc2: 0, on: false});
     if (biome === 'ruins' || biome === 'ember') {
       const y = ravineY(), hw = S.w(y) / 2 - .12;
       falls.push({id: 1, x: S.cx(y), y: y + .05, hw, h0: -3.44, lipY: y - .03, lipH: WH(), acc0: 0, acc1: 0, acc2: 0, on: false});
@@ -345,7 +347,8 @@ export function createWaterLife(host, A) {
     for (const f of falls) {
       if (!f.on) continue;
       for (let k = 0; k < 10; k++) {
-        const p = (Tw * 1.15 + k * .6180339) % 1, u = ((k * .381966) % 1) * 2 - 1, x = f.x + u * f.hw * (.9 + p * .5), y = f.y + .06 + p * (.35 + .2 * Math.abs(u)) * (f.id ? 1.4 : 1);
+        if (f.id === 2 && k >= 5) break;   // (a cascade's churn is small)
+        const p = (Tw * 1.15 + k * .6180339) % 1, u = ((k * .381966) % 1) * 2 - 1, x = f.x + u * f.hw * (.9 + p * .5), y = f.y + .06 + p * (.35 + .2 * Math.abs(u)) * (f.id === 1 ? 1.4 : f.id ? .5 : 1);
         if (!f.id && !L.inPool(x, y)) continue;
         const X = Math.floor(SX(x, y, f.h0)), Y = Math.floor(SY(x, y, f.h0)); if (!inView(X, Y, 4 * V.z)) continue;
         lp(bk, p < .35 ? pal[0] : p < .7 ? pal[1] : pal[2], X, Y, 0, 0, p < .5 ? 2 : 1, 1);
