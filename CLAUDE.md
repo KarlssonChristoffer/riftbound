@@ -43,3 +43,7 @@ Rules that apply to every change now:
   ...). The 2D arena (`concepts/`) and the first 2D game (`concepts/legacy-game/`) are frozen references.
 - Syntax-check ES modules as `.mjs` copies (`node --check` on a `.js` file missed a duplicate `const` here).
 - Shadow casters that never move go on sScene layers 1 + 2 (cached static map); moving ones stay on layer 0.
+- **Headless Chrome** (a tool or a scratch script): start it with `launch(tag, args)` from `tools/lib/chrome.mjs` (from a
+  scratchpad: `import {launch} from 'file:///D:/Game/tools/lib/chrome.mjs'`) and call its `kill()` on exit. Its profile
+  goes in `%TEMP%\riftbound-chrome\` with flags that keep it ~12 MB, and every launch sweeps the dead ones. Never pass
+  your own `--user-data-dir` in %TEMP%: a killed run leaves ~57 MB behind (C: lost 17 GB in half a day that way).
