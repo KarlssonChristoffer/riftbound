@@ -57,6 +57,7 @@ export const FLAG_DOCS = {
   trick: '1 | 0: the trick-shot range in the sandbox (features/trickshot.js, an experiment: bottles on a fence, cans to toss and juggle, a steel plate, ricochets on; off by default; the Dev toggle and the Game tab remember it); docs/exp/trickshot.md',
   rico: '1: bullets glance off metal and stone at shallow angles everywhere (sim/projectiles.js RICO); 0: never, not even at the trick-shot range; absent: on while the range stands',
   anomaly: '0: no rift anomaly in the sandbox (features/anomaly.js: a tear in the air on open ground, VISUALS ONLY, a reminder of the gameplay to come; on by default; menu > Dev > Features; docs/exp/anomaly.md)',
+  bells: '1 | 0: bells and ricochet plates in the sandbox (features/bells.js, an experiment: steel plates bullets always glance off, hanging bells that ring, scattered round the Proving Grounds; off by default; the Game tab row and the Dev toggle remember on); docs/exp/bells.md',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
   lineup: 'trees: the procedural trees side by side for review',
