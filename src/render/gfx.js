@@ -792,7 +792,10 @@ vec4 reflAt(ivec2 p, float hw, out vec3 rE) {   // the mirrored albedo (a = 1: f
     float ny = (float(q.y) + .5) / uRes.y * 2. - 1.;   // (the projection is affine: a pixel's world height is linear in ndc and depth)
     float Qy = uInvPV[0][1] * nx + uInvPV[1][1] * ny + uInvPV[2][1] * (dq * 2. - 1.) + uInvPV[3][1];
     float d = 2. * (Qy - hw) * uRfW.x - float(k);
-    if (d >= -.5 && prev < -.5) {
+    // the crossing has to lie ON what is there (d near 0: a surface goes through the mirror height between these rows). A jump from
+    // below straight to far above is a thing in the AIR (the leaping Ranger, an overhanging crown): the mirrored ray passed under it,
+    // and taking its lowest pixel smeared that pixel down to the water as a dark column. Search on past it instead
+    if (d >= -.5 && d < 1.5 + 1.5 * uRfV.y && prev < -.5) {
       // the world's things (props, trees, their cards, the character), not the batched sprites (obj 9: riverside plants, lily
       // pads lying on the water, wildlife, decor) nor particles (obj -1): what depth.js mirrored
       vec4 aq = texelFetch(tA, q, 0); int tq = int(aq.a * 255. + .5) / 4; float ob = texelFetch(tN, q, 0).w;
