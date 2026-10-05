@@ -36,6 +36,7 @@ export const FLAG_DOCS = {
   terrain:   '0: flat ground (no hills, terraces or ramps: world/terrain.js, the shapes in layout.js TERRAIN; docs/TERRAIN.md), an A/B',
   debug:     'a debug view index (G cycles them)',
   sshadow:   '0: every shadow caster in the per-frame sun shadow (no cached static map; an A/B)',
+  godrays:   '0: no shadow-map god rays (render/godrays.js: sunbeams through crowns and between pillars; the painted shafts of features/depth.js come back)',
   cards:     '0: every world card its own mesh and draw (no instanced card batches; an A/B)',
   preserve:  '1: keep the WebGL drawing buffer between frames (a capture that reads the canvas outside the frame that drew it)',
   // ---- features (0 turns one off)

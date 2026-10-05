@@ -24,6 +24,7 @@ import {hypot2, clearArray} from '../core/mathx.js';
 import {cssRGBA} from '../core/color.js';
 import {createGLStats} from './glstats.js';
 import {createLitterSim} from './litter.js';
+import {createGodrays} from './godrays.js';
 
 export const DEG = Math.PI / 180;
 // a uniform-shaped holder whose value is only ever a number (a card's sway: written every frame). Its own class keeps
@@ -1763,6 +1764,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const compMesh = new THREE.Mesh(tri, raw(COMP_VS, COMP_FS, compU, {depthTest: false, depthWrite: false})); compMesh.frustumCulled = false; compMesh.matrixAutoUpdate = false; compScene.add(compMesh);
   const dummyCam = new THREE.Camera();
+  // GOD RAYS (render/godrays.js): sunbeams marched through the sun's shadow maps, added to the pixel image right after the composite
+  const rays = createGodrays({THREE, renderer, raw, tri, cam: dummyCam, compU});
 
   // ---- CONTACT SHADOWS (features/contact.js, every frame it shows them): the arena's contact AO stamps, drawn by the GPU
   // into the x-ray target's G channel (AO_VS / AO_FS) and laid on the ground by the composite (uAo: the mood's shadow colour
@@ -1958,8 +1961,10 @@ void main() {
     U.sunYaw.value = Math.atan2(dir.x, dir.z);   // cards turned so their face points at the sun (normal = (sin, 0, cos))
     const T = view.T, texel = 2 * SHADOW_E / SM;
     sunCam.position.copy(T).addScaledVector(sdir, 100); sunCam.lookAt(T); sunCam.updateMatrixWorld(true);
-    // snap: move the light camera so the target sits on a texel corner in light space (no shadow crawl while walking)
-    const lt = _sl.copy(T).applyMatrix4(sunCam.matrixWorldInverse);
+    // snap: move the light camera so the WORLD's origin sits on a texel corner in light space: the texel grid stays put in the
+    // world as the view moves (no shadow crawl while walking; render/godrays.js samples it at fixed world points). (It took the
+    // target, which always sits at the light camera's centre: a no-op, and the map slid by fractions of a texel with the view)
+    const lt = _sl.set(0, 0, 0).applyMatrix4(sunCam.matrixWorldInverse);
     const dx = lt.x - Math.round(lt.x / texel) * texel, dy = lt.y - Math.round(lt.y / texel) * texel;
     const right = _sr.setFromMatrixColumn(sunCam.matrixWorld, 0), up = _su.setFromMatrixColumn(sunCam.matrixWorld, 1);
     sunCam.position.addScaledVector(right, dx).addScaledVector(up, dy); sunCam.updateMatrixWorld(true);
@@ -2015,6 +2020,7 @@ void main() {
         sDir.copy(sunNow); fitStatic(sDir); sDue = Infinity;
         renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sStatic, sunCamS); renderer.render(sScene, sunCamS);   // (sScene: a layer-2 caster added from outside)
         lap('shadowS', renderer.info.render.calls);
+        rays.restatic();   // (render/godrays.js: its min map of the static shadow follows)
       }
       renderer.setRenderTarget(shadow); renderer.clear(true, true, false); renderer.render(sScene, sunCam);
       lap('shadow', renderer.info.render.calls);
@@ -2038,7 +2044,7 @@ void main() {
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
     let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
     if (DS > 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
-      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam);
+      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam); rays.draw();
       if (hN) {
         const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
         fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
@@ -2051,7 +2057,7 @@ void main() {
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
         renderer.render(fxScene, camera);
       }
-    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); }
+    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); rays.draw(); }
     if (vgFrame === frameNo) { vgU.uVgS.value.set(VW * DS, VH * DS); renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it
     if (post) post.run(renderer);
     lap('post');
@@ -2142,5 +2148,6 @@ void main() {
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost,
+    godrays: rays, setRays: rays.set,   // (render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }
