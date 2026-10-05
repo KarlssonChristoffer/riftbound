@@ -11,7 +11,7 @@ export const simSeed = () => Math.floor(Math.random() * 4294967296);
 // time), and its own stream per name. (Seeding each one from Math.random as its feature's module loaded made the seeds
 // depend on the order the features' modules happen to arrive in: they load in parallel, and golden flickered.)
 const VIEW_SEED = simSeed();
-const nameHash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h | 0; };
+export const nameHash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h | 0; };
 export const viewRandom = name => mulberry32(VIEW_SEED ^ nameHash(name));
 export function mulberry32(seed) {
   let s = seed | 0;

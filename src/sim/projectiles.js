@@ -16,12 +16,19 @@
 // its way into the face turned back out of it, a small random turn from this module's own generator (a fixed seed: the
 // sim replays), slower (RICO.speed) and weaker (penK x RICO.dmg: combat multiplies its hits by it), at most RICO.max
 // times; the steeper it comes in, the likelier it stops (always at RICO[mat] deg). 'bullet.ricochet' says where.
+// DEFLECTORS (features/bells.js: steel plates on posts, hanging bells; independent of the ricochets above, no note needed): a
+// prop registered with setDeflector(p, shape) is met EXACTLY along a bullet's sub-step or an arrow's step (a segment against
+// the plate's rectangle or the bell's sphere), before the hit chain and the solids, and ALWAYS glances off it: a mirror
+// about the face's normal at the hit point (angle in = angle out), no random draw, slower and weaker by DEFLECT (a bullet's
+// penK x dmg: combat multiplies its hits by it), at most DEFLECT.max a shot (the next one stops it on the steel).
+// 'bullet.ricochet' (with defl: plate | bell, shot: the bullet) / 'arrow.deflect' say where.
 // WIND: a run rule may push what flies (features/omens.js, a gale): host.mods 'proj.windX' / 'proj.windY' (m/s^2, world x / y,
 // base 0) accelerate every arrow in flight; a bullet feels 'proj.windBullet' x of that (base 1). None: nothing changes.
-// OWNS: arrows (a bullet's pn / penK and its muzzle ox / oy / oh too), pops, dust, the hit count. READS: the world (trees, elevation, stream), the
+// OWNS: arrows (a bullet's pn / penK and its muzzle ox / oy / oh too; a shot's defl count), pops, dust, the hit count, the
+// deflector table (setDeflector: its writers' shapes). READS: the world (trees, elevation, stream), the
 // entities (near: what an arrow hits or sticks in), features' arrow hooks, the mods' wind and ricochet notes, the props'
 // materials (content/materials.js), ?rico (core/flags.js).
-// EMITS: arrow.hit, arrow.splash, bullet.impact, bullet.pierce, bullet.ricochet (core/events.js). BUDGET: part of sim.
+// EMITS: arrow.hit, arrow.splash, arrow.deflect, bullet.impact, bullet.pierce, bullet.ricochet (core/events.js). BUDGET: part of sim.
 //   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH, mods})
 //   proj.spawn(o) | proj.step(dt) | proj.draw(host) | proj.arrows / dust / hits
 //   proj.lerpBegin(alpha) / lerpEnd(): drawn between sim steps (an arrow's lx / ly / lh: where it was at the step's start)
@@ -43,6 +50,39 @@ const DEG = Math.PI / 180;
 // face it keeps out of it; x its speed and its damage share per ricochet; a random turn (deg either way); ricochets a bullet
 export const RICO = {metal: 24, stone: 14, keep: .3, speed: .7, dmg: .55, scatter: 3, max: 2};
 const RICO_BASE = flags.get('rico') === '1' ? 1 : 0;   // (?rico=1: on everywhere; the note 'proj.ricochet' adds to it)
+// a deflector (above): x a bullet's speed and damage share off a plate / a bell; x an arrow's speed; the most a shot glances off
+export const DEFLECT = {plate: {speed: .92, dmg: .9}, bell: {speed: .86, dmg: .85}, arrow: .6, max: 6};
+// the deflectors: prop -> its shape (world metres, h up), set by the prop's owner while the prop stands, null to take it out:
+//   {kind: 'plate', x, y, h (its middle), nx, ny, nh (unit normal), ux, uy, uh / vx, vy, vh (unit, along / up its face), hw, hh (half sizes)}
+//   {kind: 'bell', x, y, h, r}: a sphere. A plate's x, y (and a bell's) is its prop's, within .3 m of every point of it (a sub-step's near() reaches .6 m)
+const DEFL = new Map();
+export function setDeflector(p, shape) { if (shape) DEFL.set(p, shape); else DEFL.delete(p); }
+const DH = {t: 2, nx: 0, ny: 0, nh: 0, p: null, s: null};   // the deflector hit found last (deflHit)
+// the first deflector among cand that the segment (x0, y0, h0) -> (x1, y1, h1) meets from outside: DH, true; else false
+function deflHit(cand, x0, y0, h0, x1, y1, h1) {
+  const ex = x1 - x0, ey = y1 - y0, eh = h1 - h0;
+  let best = 2;
+  for (let i = 0; i < cand.length; i++) {
+    const p = cand[i], s = DEFL.get(p); if (s === undefined || p.gone) continue;
+    if (s.kind === 'plate') {
+      const d0 = (x0 - s.x) * s.nx + (y0 - s.y) * s.ny + (h0 - s.h) * s.nh, d1 = (x1 - s.x) * s.nx + (y1 - s.y) * s.ny + (h1 - s.h) * s.nh;
+      if (d0 === 0 || (d0 > 0 ? d1 > 0 : d1 < 0)) continue;   // (on one side all along, or starting on it)
+      const t = d0 / (d0 - d1); if (!(t <= 1 && t < best)) continue;
+      const qx = x0 + ex * t - s.x, qy = y0 + ey * t - s.y, qh = h0 + eh * t - s.h;
+      if (Math.abs(qx * s.ux + qy * s.uy + qh * s.uh) > s.hw || Math.abs(qx * s.vx + qy * s.vy + qh * s.vh) > s.hh) continue;
+      const sg = d0 > 0 ? 1 : -1;   // the face it came in on
+      best = t; DH.nx = s.nx * sg; DH.ny = s.ny * sg; DH.nh = s.nh * sg; DH.p = p; DH.s = s;
+    } else {
+      const fx = x0 - s.x, fy = y0 - s.y, fh = h0 - s.h, A = ex * ex + ey * ey + eh * eh, B = 2 * (fx * ex + fy * ey + fh * eh), C = fx * fx + fy * fy + fh * fh - s.r * s.r;
+      if (C <= 0 || A < 1e-12) continue;   // (it started inside)
+      const D = B * B - 4 * A * C; if (D < 0) continue;
+      const t = (-B - Math.sqrt(D)) / (2 * A); if (!(t >= 0 && t <= 1 && t < best)) continue;
+      best = t; DH.nx = (fx + ex * t) / s.r; DH.ny = (fy + ey * t) / s.r; DH.nh = (fh + eh * t) / s.r; DH.p = p; DH.s = s;
+    }
+  }
+  DH.t = best;
+  return best <= 1;
+}
 
 export function createProjectiles({world: worldOf, ents: entsOf, features, events, opt: optOf, toWorld, PPM, PPMH, mods = null}) {
   const arrows = [], pops = [], dust = [], nearH = [], nearS = [];
@@ -68,8 +108,14 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
       if (a.kind === 'bullet') { stepBullet(a, dt, world, ents); continue; }
       if (WX || WY) { a.vx += WX * dt; a.vy += WY * dt; }
       a.x += a.vx * dt; a.y += a.vy * dt; a.h += a.vh * dt; a.vh -= .9 * dt; a.life -= dt;
+      const cand = ents.near(a.x, a.y, REACH, nearH);
+      if (DEFL.size && deflHit(cand, a.lx, a.ly, a.lh, a.x, a.y, a.h)) {   // a deflector on this step's way (features/bells.js): off it, on next step
+        deflect(a, a.lx, a.ly, a.lh, a.x - a.lx, a.y - a.ly, a.h - a.lh);
+        if (a.life > -9) { (a.trail ??= []).push([a.x, a.y, a.h]); if (a.trail.length > 7) a.trail.shift(); }
+        continue;
+      }
       (a.trail ??= []).push([a.x, a.y, a.h]); if (a.trail.length > 7) a.trail.shift();
-      for (const p of ents.near(a.x, a.y, REACH, nearH)) {
+      for (const p of cand) {
         if (p.broken || p.gone || !(p.target || p.hp > 0) || (a.hitSet && a.hitSet.has(p))) continue;
         const rel = a.h - (p.z || 0) - (p.h || 0);
         if (Math.hypot(p.x - a.x, p.y - a.y) < (p.hitR ?? .45) && rel > -.2 && rel < (p.hitH ?? 1.6)) {
@@ -104,7 +150,9 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
     a.life -= dt;
     for (let i = 1; i <= n; i++) {
       const t = i / n, x = x0 + ex * t, y = y0 + ey * t, h = h0 + eh * t;
-      for (const p of ents.near(x, y, REACH_B, nearH)) {
+      const cand = ents.near(x, y, REACH_B, nearH);
+      if (DEFL.size && deflHit(cand, px, py, ph, x, y, h)) { deflect(a, px, py, ph, x - px, y - py, h - ph); return; }   // (features/bells.js)
+      for (const p of cand) {
         if (p.broken || p.gone || !(p.target || p.hp > 0) || (a.hitSet && a.hitSet.has(p))) continue;
         const rel = h - (p.z || 0) - (p.h || 0);
         if (hypot2(p.x - x, p.y - y) < (p.hitR ?? .45) && rel > -.2 && rel < (p.hitH ?? 1.6)) {
@@ -184,6 +232,24 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
     (a.hitSet ??= new Set()).add(p);   // (not this solid again: it glances on along it)
     events.push({type: 'bullet.ricochet', x: a.x, y: a.y, h: a.h, x0: a.lx, y0: a.ly, h0: a.lh, dx: ox / l, dy: oy / l, dh: oh / l, mat, gun: a.gun, n: a.rico, who: p});
     return true;
+  }
+  // off the deflector deflHit found (DH) on the way (x0, y0, h0) + t (ex, ey, eh): mirrored about its normal there, slower
+  // (a bullet weaker too), set 2 cm off the face (the rest of the step is lost, as a ricochet's). After DEFLECT.max it stops
+  function deflect(a, x0, y0, h0, ex, ey, eh) {
+    const s = DH.s, p = DH.p, t = DH.t, n = a.defl || 0, bullet = a.kind === 'bullet';
+    const hx = x0 + ex * t, hy = y0 + ey * t, hh = h0 + eh * t, nx = DH.nx, ny = DH.ny, nh = DH.nh;
+    if (n >= DEFLECT.max) { if (bullet) endBullet(a, 'prop', hx, hy, hh); else { a.x = hx; a.y = hy; a.h = hh; a.life = -9; } return; }
+    const vn = a.vx * nx + a.vy * ny + a.vh * nh, k = bullet ? DEFLECT[s.kind].speed : DEFLECT.arrow;
+    if (vn < 0) { a.vx = (a.vx - 2 * vn * nx) * k; a.vy = (a.vy - 2 * vn * ny) * k; a.vh = (a.vh - 2 * vn * nh) * k; }
+    a.x = hx + nx * .02; a.y = hy + ny * .02; a.h = hh + nh * .02;
+    a.defl = n + 1;
+    const v = hypot3(a.vx, a.vy, a.vh) || 1;
+    if (bullet) {
+      a.ox = a.x; a.oy = a.y; a.oh = a.h;   // its tracer starts again here (gunfx)
+      a.penK = (a.penK ?? 1) * DEFLECT[s.kind].dmg;
+      events.push({type: 'bullet.ricochet', x: a.x, y: a.y, h: a.h, x0: a.lx, y0: a.ly, h0: a.lh, dx: a.vx / v, dy: a.vy / v, dh: a.vh / v, mat: 'metal', gun: a.gun,
+        n: (a.rico || 0) + a.defl, who: p, defl: s.kind, shot: a});
+    } else events.push({type: 'arrow.deflect', x: a.x, y: a.y, h: a.h, dx: a.vx / v, dy: a.vy / v, dh: a.vh / v, v, n: a.defl, who: p, defl: s.kind, shot: a});
   }
   // gone: where it ended (x0..: where it was at this step's start, for the tracer's last streak), what it met
   function endBullet(a, surf, x, y, h) {

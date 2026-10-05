@@ -68,6 +68,7 @@ const WATERFALL = {recipe: 'stream', case: 'rapids', gainDb: -22};
 const flv = o => (GUN_SFX.includes(o?.gunsfx) ? o.gunsfx : GUN_SFX_DEF);
 const TL = (recipe, c, x) => ({recipe, case: c, ...x});
 const flBanks = c => GUN_SFX.map(s => ['bullet', `${s}_${c}`]);
+const BELL_HZ = [392, 440, 523.25, 587.33, 659.25, 783.99, 880];   // (the bells' notes: features/bells/sim.js TUNE.notes; the fallback synth's)
 const TRICK_HIT = {cat: 'combat', bus: 'sfx.impacts', priority: 60, maxInstances: 4, steal: 'quietest', coalesceMs: 25, send: .14, pitchSemi: 1.2, gainJitDb: 2,
   variants: 6, bakePriority: 3};
 const TRICK_EVENTS = {
@@ -83,6 +84,22 @@ const TRICK_EVENTS = {
   trickToss: {...TRICK_HIT, cat: 'player', bus: 'sfx.player', priority: 40, maxInstances: 2, gainDb: -11, cooldownMs: 60, pick: () => TL('cloth', 'jump'), banks: [['cloth', 'jump']]},
   trickReset: {...TRICK_HIT, cat: 'world', bus: 'sfx.world', priority: 40, maxInstances: 2, gainDb: -9, cooldownMs: 200, pick: () => TL('impact', 'wood', {semi: 3}), banks: [['impact', 'wood']]},
   trickClear: {...TRICK_HIT, cat: 'ui', bus: 'ui', priority: 90, maxInstances: 1, gainDb: -6, send: 0, pitchSemi: 0, gainJitDb: 0, cooldownMs: 500, pick: () => TL('coin', 'chime'), banks: [['coin', 'chime']]},
+};
+// THE BELLS AND PLATES (features/bells.js, the sandbox): a bell rings its own note (the forge's 'bell' recipe: one case per note
+// of the pentatonic scale, short and warm; no pitch jitter, it is tuned), its clapper's later strikes the same note softer
+// and darker; a steel plate pings on the trick-shot plate's bank (the bullet's metal, pitched for a plate) and a glance
+// off either whines on the ricochet bank (softer off a bell: its note carries it); an arrow's glance is the arrow's ricochet.
+// Added to the director by its options like TRICK_EVENTS. No cooldowns: a chain rings its bells ~20 ms apart
+const BELL_NOTES = ['g4', 'a4', 'c5', 'd5', 'e5', 'g5', 'a5'];   // (sim TUNE.notes; audio/forge/recipes/bell.js)
+const bellCase = o => BELL_NOTES[Math.max(0, Math.min(BELL_NOTES.length - 1, o?.note | 0))];
+const BELL_HIT = {...TRICK_HIT, maxInstances: 3, coalesceMs: 0, pitchSemi: .03, gainJitDb: 1.2, variants: 2, bakePriority: 6};
+const BELL_EVENTS = {
+  bellsRing: {...BELL_HIT, priority: 66, gainDb: -4, send: .2, pick: o => TL('bell', bellCase(o), {key: 'bell_' + bellCase(o)}),
+    gainFrom: o => ((o.k ?? 1) - 1) * 9, banks: BELL_NOTES.map(n => ['bell', n])},
+  bellsToll: {...BELL_HIT, priority: 40, gainDb: -13, send: .25, pick: o => TL('bell', bellCase(o), {key: 'toll_' + bellCase(o), lpf: 2600}),
+    gainFrom: o => ((o.k ?? .4) - .5) * 10, banks: BELL_NOTES.map(n => ['bell', n])},
+  bellsPlate: {...TRICK_HIT, priority: 62, gainDb: -4, coalesceMs: 0, pick: o => TL('bullet', `${flv(o)}_metal`, {semi: -2}), gainFrom: o => ((o.k ?? 1) - 1) * 8, banks: flBanks('metal')},
+  bellsWhine: {...TRICK_HIT, priority: 54, gainDb: -6, coalesceMs: 0, pick: o => TL('bullet', `${flv(o)}_ricochet`), gainFrom: o => o.bell ? -5 : 0, banks: flBanks('ricochet')},
 };
 const FALL = {dScale: 1.8, ravineY: 27.9, reach: 32};
 // THE DESERT (world/desert.js, "Red Mesa"). Its forge ambience is made of banks the forge already bakes, added to the director
@@ -243,7 +260,7 @@ function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (t
 const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift', desert: 'desert'};
 // a bullet's end by what it met (bullet.impact surf 'prop'): the prop's material by its kind (ctx.propAt); the rest is wood
 const PROP_MAT = {stock_tank: 'metal', ore_cart: 'metal', well: 'stone', wall_n: 'stone', wall_w: 'stone', wall_e: 'stone', wall_s: 'stone',
-  tower: 'stone', gatepost: 'stone', pot: 'stone', crystal: 'stone', trick_plate: 'metal'};   // (trick_plate: the trick-shot range's steel plate)
+  tower: 'stone', gatepost: 'stone', pot: 'stone', crystal: 'stone', trick_plate: 'metal', bells_bell: 'metal'};   // (trick_plate: the trick-shot range's steel plate; bells_bell: features/bells.js)
 const MAT = {dummy: 'straw', brute: 'straw', gunman: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};   // (gunman: the desert's, a dull hit)
 
 // the ground texture of one footfall (shared by steps, landings, scuffs); k = weight 0..1.5
@@ -404,6 +421,20 @@ const SFX = {
   trickToss(E, o) { SFX.jump(E, {...o, g: (o.g ?? 1) * .6}); },
   trickReset(E, o) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * .45}); },
   trickClear(E, o) { SFX.coin(E, o); },
+  // the bells and plates (fallbacks for BELL_EVENTS while the forge bakes / ?forge=0): a bell's note (a few partials, short), its
+  // clapper's softer; the plate's ping and the glance's whine are the trick-shot range's
+  bellsRing(E, o) {
+    const k = offK(o); if (!k) return;
+    const v = E.voice({...o, g: (o.g ?? 1) * (.35 + .65 * (o.k ?? 1)) * k, jit: .002}, 'bellsRing', 1, {pri: 2}); if (!v) return;
+    const f = BELL_HZ[Math.max(0, Math.min(6, o.note | 0))];
+    E.O(v, 0, {f, a: .002, d: .8, g: .07}); E.O(v, 0, {f: f * 2.002, a: .002, d: .35, g: .03}); E.O(v, 0, {f: f * 3.01, a: .001, d: .14, g: .012});
+    E.N(v, 0, {type: 'bandpass', f: 2600, q: 1.5, d: .006, g: .08});
+  },
+  bellsToll(E, o) { const k = offK(o); if (!k) return; const v = E.voice({...o, g: (o.g ?? 1) * (o.k ?? .4) * k, jit: .002}, 'bellsToll', .7); if (!v) return;
+    const f = BELL_HZ[Math.max(0, Math.min(6, o.note | 0))]; E.O(v, 0, {f, a: .004, d: .6, g: .05}); E.O(v, 0, {f: f * 2.002, a: .004, d: .2, g: .015}); },
+  bellsPlate(E, o) { SFX.bulletHit(E, {...o, mat: 'metal'}); },
+  bellsWhine(E, o) { const k = offK(o); if (!k) return; const v = E.voice({...o, g: (o.g ?? 1) * (o.bell ? .55 : 1) * k}, 'bellsWhine', .45, {cd: .02}); if (!v) return;
+    E.O(v, .01, {f: 1900, f2: 800, sw: .32, a: .004, d: .12, g: .045}); E.N(v, .01, {type: 'bandpass', f: 1700, f2: 700, sw: .3, q: 4, a: .01, d: .1, g: .05}); },
   // the bruiser's coach gun (fallbacks for the forge's 'coachgun' recipe while it bakes / ?forge=0), screen-bound like it
   coachShot(E, o) {   // deeper and longer than the revolver's: a broad bark, a low sweep, a long dark tail
     const k = offK(o); if (!k) return;
@@ -860,7 +891,7 @@ export function createAudio(ctx, host = {}) {
   if (!disabled && !forgeOff) {
     try {
       const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac, {reverbs: {...REVERBS, ...DESERT_REVERBS}}), B = createBakery(ac);
-      const D = createDirector(EN, B, {EVENTS: {...EVENTS, ...TRICK_EVENTS}, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL}});
+      const D = createDirector(EN, B, {EVENTS: {...EVENTS, ...TRICK_EVENTS, ...BELL_EVENTS}, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL}});
       try { EN.prepareReverbs?.(); } catch (e) {}
       D.prefetch({biome: 'ruins', skip: otherGunSfx(gunsfx)});   // (only the playing gun flavor's banks)
       RT = {ac, EN, B, D}; AU.forge = RT;
@@ -1122,7 +1153,13 @@ export function createAudio(ctx, host = {}) {
         case 'trick.ding': if (!e.edge) fire('trickDing', e.x, e.y); break;
         case 'trick.reset': fire('trickReset', e.x, e.y); break;
         case 'trick.clear': fire('trickClear', L.x, L.y); break;
-        case 'bullet.ricochet': fire('trickRicochet', e.x, e.y, {mat: e.mat}); break;
+        case 'bullet.ricochet': if (e.defl) fire('bellsWhine', e.x, e.y, {bell: e.defl === 'bell'}); else fire('trickRicochet', e.x, e.y, {mat: e.mat}); break;
+        // the bells and plates (features/bells.js): a bell's note (its clapper's later strikes: the view's tolls), a plate's
+        // ping (a glance off either whines: bullet.ricochet above), an arrow's glance
+        case 'bells.ring': fire('bellsRing', e.x, e.y, {note: e.note, k: e.k}); break;
+        case 'bells.toll': fire('bellsToll', e.x, e.y, {note: e.note, k: e.k}); break;
+        case 'bells.ping': fire('bellsPlate', e.x, e.y, {k: e.k}); break;
+        case 'arrow.deflect': fire('stuck', e.x, e.y, {ricochet: true, surf: 'stone'}); break;
         case 'lasso.creak': { const c = (RT && RT.D.makeCreak?.()) || makeCreak(E), k = clamp(e.k ?? .6, 0, 1); c.set(k * .7, 1.5, t, 1 / 60); c.set(k, 0, t + .12, 1 / 60); c.stop(t + .3); break; }
       }
     }
