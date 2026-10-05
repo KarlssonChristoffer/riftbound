@@ -1,0 +1,294 @@
+// GOD RAYS: real sunbeams out of the sun's shadow maps (t3ssel8r's "God Rays in 3D Pixel Art Game Engine": sample the light
+// space depth map at world positions on a series of parallel planes aligned with the light direction and add light where a
+// plane point in front of the scene is lit; David Holland's Godot recreation does it as ONE full-screen pass that marches
+// those planes in the shader). Here: a full-screen march at ART resolution into a level target, cleaned into bold shapes (THE
+// SHAPE, below) and added into the pixel image right after the composite (gfx.js outRT, or the canvas when there is no blit),
+// before it is blown up: the beams are whole art pixels.
+//
+// THE MARCH. Every pixel's view ray is a fixed line in the world (the projection is oblique: all rays parallel; the camera
+// target snaps to the art-pixel lattice). Its samples are where it crosses a stack of PLANES FIXED IN THE WORLD, n . X = k dn,
+// from the pixel's surface up through TUNE.band m of air. The planes CONTAIN THE SUN'S DIRECTION s and face the camera as
+// squarely as that allows (n = V - (V . s) s): a beam (a tube of light along s) cuts each plane in a strip along s, so the
+// slices of a beam line up into a band with straight edges (horizontal planes cut it into offset slices: a sawtooth). A sample
+// is a world point, not a step in screen or view space: panning moves the beams with the ground pixel for pixel and nothing
+// crawls (a turn of the camera or the sun turns the planes). The light-space position of a sample is linear along the ray:
+// two matrix products a pixel, then an add per plane.
+// WHICH AIR GLOWS. Lit air in the open is everywhere (adding it would only lift the whole picture like fog). What reads as a
+// sunbeam is lit air with shadow round it: light that came through an opening. A sample counts when it is lit (neither shadow
+// map has anything between it and the sun) and there is shadow on BOTH sides of it across the sun (the light camera's x:
+// horizontal), within TUNE.reach m and at least TUNE.margin m nearer the sun than it: a hole in a crown, the slot between two
+// pillars or trunks, an arch, the space under an awning. Not the open meadow, nor the air beside a lone pillar's shadow, nor
+// the slabs of light hugging low things' shadows (the margin: a shaft starts a metre down-sun of its opening). A beam runs
+// from its opening down-sun to the ground.
+// THE LOOK. The glowing samples (metres of beam the ray passes through) are cut into 3 hard levels (TUNE.lv), cleaned on screen
+// (no beam under 3 px across, no crumbs, the top level only in a shaft's core) and drawn as flat amounts (TUNE.amt) of the
+// sun's colour, warmed, and turned to amber as the sun sinks (TUNE.warm / gold). Bold, few, hard-edged; no gradients, no noise.
+// STRENGTH (render/lighting.js, every frame through G.setRays: the mood and the world clock's sky): a low sun is stronger
+// (morning, dusk), clouds take the beams away (overcast: none), mist and wet ground after rain make them stronger, and
+// looking toward the sun (forward scattering) they are strongest. Off at night (no sun shadow map then), with the shadows
+// off (opt.shadows) and with ?godrays=0.
+// SPEED. Most air is open: the MIN MAPS (below) answer "is anything between the sun and the air round this point" in one fetch
+// per shadow map (first for a run of 4 planes, then per plane), and each side test in one fetch per map; only a lit sample
+// with something round it pays for the side tests. The shape passes are a few fetches of a byte a pixel.
+// OWNS: its passes (materials, uniforms, the min map targets), TUNE, the strength. READS: gfx.js compU's G-buffer depth, both
+// sun shadow maps and their matrices (shared uniform objects, never written), uShadowA / uShadowOn (is there a sun shadow
+// this frame), uView (the yaw), uSunDir. No allocation per frame, no CPU pixel work.
+// BUDGET (GPU): ~0.16-0.23 ms at 688 x 288 (3440 x 1440 at scale 5) on the RTX 4070 (min maps ~.02, shape ~.02, the march);
+// CPU: a few uniforms, 13 small draws (the static map's 5 more when it was re-rendered). The programs compile at load.
+//   const rays = createGodrays({THREE, renderer, raw, tri, cam, compU}); rays.draw() right after the composite, into the
+//   same target; rays.restatic() when the static shadow map was re-rendered; rays.set(o) the strength inputs; rays.enabled
+//   (features/depth.js: its painted shafts step aside); rays.TUNE (live)
+import {flags} from '../core/flags.js';
+
+export const TUNE = {
+  on: flags.get('godrays') !== '0',
+  band: 6,          // m of air over each pixel's surface that the march covers
+  dn: 1 / 12,       // m between the planes (a beam thinner than this across them breaks into strips: at 1/8 the thin beams read as rain)
+  planes: 128,      // at most this many a pixel (the shader's loops: 32 runs of 4)
+  reach: .7,        // m: how far to each side of a lit sample the shadows round an opening may be (a shaft up to twice that wide)
+  lv: [.3, .7, 1.5],           // m of glowing air along the view ray for levels 1, 2, 3 (a sliver .. a thin beam .. a wide one)
+  amt: [.08, .16, .3],       // light added per level, x the sun's colour (warmed) x strength: a clear first step, a glowing core
+  warm: 1.15,       // the sun's colour to this power: a little warmer than the light it casts (noon's white barely moves)
+  gold: [1, .66, .22], goldK: .85, goldEl: [15, 50],   // and toward gold as the sun sinks (full below goldEl[0], none above [1]):
+                    // dust in low sunlight glows amber, not the sun's pink-orange (which over the violet dusk stone reads mauve)
+  bias: .00005,     // light depth (the per-frame map's units, ~1 cm) a sample must lie behind the stored depth to be in shadow
+  margin: 1,        // m: what makes the shadow round an opening must lie this much nearer the sun than the sample (a shaft
+                    // starts a metre down-sun of its opening: no slabs of light hugging low things' shadows)
+  k: 1.2,           // overall strength
+  el: [16, 55, .3], // the sun's elevation (deg): full below el[0], x el[2] above el[1] (noon: faint)
+  view: [.5, 1],    // looking away from the sun .. toward it
+  cloud: [.4, .82], // the beams fade out between these cloud covers (sim/env.js sky.cloud)
+  shadow: .3,       // the mood's shadow strength (clouds and the dusk -> night fade already in it) at which the beams are full
+  mist: .8, wet: .5,   // more in mist (sky.fog) and on wet ground (after rain): x (1 + mist x fog + wet x wet)
+  max: 1.8,
+};
+
+const VS = `precision highp float; precision highp int;\nin vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
+const FS = `precision highp float; precision highp int;
+uniform sampler2D tD, tS, tSS;
+uniform sampler2D tNS, tNSS;   // the min maps, NEAR: anything between the sun and the air within reach (+ a block) of a texel
+uniform sampler2D tCS, tCSS;   // COARSE: NEAR one block wider, round a run of 4 planes (a sample moves dn across the sun a plane)
+uniform sampler2D tXS, tXSS;   // SIDE across: the same along the light's x only within half the reach, looked up to one side
+uniform mat4 uInvPV, uLightPV, uLightPVS;
+uniform float uSBias, uSOn;
+uniform vec2 uRes;
+uniform vec4 uBand;      // dn (m between planes), max planes, bias (per-frame map depth units), (unused)
+uniform vec4 uPn;        // the planes' normal (world, unit, n . V > 0), band (m of air over the surface)
+uniform vec4 uSide;      // uv from a sample to its side windows across the sun: per-frame map (x), static map (z)
+uniform float uMargin;   // light depth (per-frame map units) something in a side window must lie nearer the sun than the sample
+uniform vec4 uMinOff;    // uv from a map's texel grid to its min map's blocks (fixed in the world: below): per-frame x, y; static x, y
+uniform vec3 uLv;        // glowing samples for levels 1, 2, 3
+out vec4 oc;             // the level (0 none, 1..3) / 4, into the level target (SHAPE_FS draws it)
+vec3 worldAt(ivec2 p, float d) { vec2 ndc = (vec2(p) + .5) / uRes * 2. - 1.; vec4 w = uInvPV * vec4(ndc, d * 2. - 1., 1.); return w.xyz / w.w; }
+// something nearer the sun than the sample in map m at the sample's uv + o (c: the sample in light NDC): the per-frame map (round
+// the view: what moves), the static one (the world: what doesn't), as gfx.js sunShadow; the min maps take the same test
+bool occS(sampler2D m, vec3 c, vec2 o, float bias) { vec3 s = c * .5 + .5; s.xy += o; return all(greaterThanEqual(s.xy, vec2(0.))) && all(lessThanEqual(s.xy, vec2(1.))) && s.z - bias > textureLod(m, s.xy, 0.).r; }
+bool occSS(sampler2D m, vec3 c, vec2 o, float bias) { vec3 s = c * .5 + .5; s.xy += o; return uSOn > .5 && all(greaterThanEqual(s.xy, vec2(0.))) && all(lessThanEqual(s.xy, vec2(1.))) && s.z - bias * uSBias > textureLod(m, s.xy, 0.).r; }
+// a side window (both maps): shadow there, clearly nearer the sun than the sample (the margin: the ground, which casts into the
+// static map, comes nearer the sun across a block; a window is one block thick, so only the lowest few cm see it)
+bool side(sampler2D mS, sampler2D mSS, vec3 a, vec3 b, vec2 oa, vec2 ob) { return occS(mS, a, oa + uMinOff.xy, uMargin) || occSS(mSS, b, ob + uMinOff.zw, uMargin); }
+void main() {
+  ivec2 ip = ivec2(gl_FragCoord.xy);
+  float d = texelFetch(tD, ip, 0).r;
+  if (d > .99999) { oc = vec4(0.); return; }   // nothing there (beyond the world)
+  // the view ray, toward the viewer (the projection is affine: NDC z maps to one world direction), crossing the planes over
+  // this pixel's surface, up through uPn.w m of air: the first crossing and the step from plane to plane, in the world and
+  // in both light spaces (orthographic: linear)
+  vec3 P = worldAt(ip, d), V = -normalize(uInvPV[2].xyz), n3 = uPn.xyz;
+  float dn = uBand.x, nV = dot(n3, V), t0 = dot(n3, P) / dn, t1 = (dot(n3, P) + uPn.w / V.y * nV) / dn;
+  float k0 = floor(t0) + 1.;
+  vec3 X0 = P + V * ((k0 * dn - dot(n3, P)) / nV), dX = V * (dn / nV);
+  vec3 a0 = (uLightPV * vec4(X0, 1.)).xyz, da = (uLightPV * vec4(dX, 0.)).xyz;
+  vec3 b0 = (uLightPVS * vec4(X0, 1.)).xyz, db = (uLightPVS * vec4(dX, 0.)).xyz;
+  vec2 Z = vec2(0.), sxa = vec2(uSide.x, 0.), sxb = vec2(uSide.z, 0.);
+  float n = 0.;
+  int N = int(min(uBand.y, floor(t1) - floor(t0)));
+  bool full = false;
+  for (int g = 0; g < 32; g++) {   // runs of 4 planes: a run in open air costs two fetches (the light depth: the run's farthest)
+    int kg = g * 4, kl = min(kg + 3, N - 1);
+    if (kg >= N || full) break;
+    vec3 am = a0 + da * (float(kg + kl) * .5), bm = b0 + db * (float(kg + kl) * .5);
+    float za = max(a0.z + da.z * float(kg), a0.z + da.z * float(kl)), zb = max(b0.z + db.z * float(kg), b0.z + db.z * float(kl));
+    if (!(occS(tCS, vec3(am.xy, za), uMinOff.xy, uMargin) || occSS(tCSS, vec3(bm.xy, zb), uMinOff.zw, uMargin))) continue;
+    for (int j = 0; j < 4; j++) {
+      int k = kg + j; if (k >= N) break;
+      vec3 a = a0 + da * float(k), b = b0 + db * float(k);
+      if (!(occS(tNS, a, uMinOff.xy, uMargin) || occSS(tNSS, b, uMinOff.zw, uMargin))) continue;   // open air: nothing round it in either map
+      if (occS(tS, a, Z, uBand.z) || occSS(tSS, b, Z, uBand.z)) continue;        // shadowed air: no light to scatter
+      // lit, with shadow close on either side: light through an opening (a shaft)
+      if (side(tXS, tXSS, a, b, sxa, sxb) && side(tXS, tXSS, a, b, -sxa, -sxb)) n += 1.;
+      if (n >= uLv.z) { full = true; break; }   // (the top level: nothing more to count)
+    }
+  }
+  oc = vec4((n >= uLv.z ? 3. : n >= uLv.y ? 2. : n >= uLv.x ? 1. : 0.) / 4., 0., 0., 1.);
+}`;
+// THE SHAPE: the levels are cleaned on screen, in whole art px, by grey-scale morphology along short segments ACROSS the beams
+// and ALONG them (the sun's direction as the projection draws it; MORPH_FS: the min (erode) or max (dilate) over a segment of
+// 2 r + 1 px). A CLOSE across (a 1-2 px dark seam inside a shaft fills in) and along (a beam the planes broke into dashes joins
+// up again), then an OPEN by a rectangle 3 px across x 5 px along: a beam less than 3 px across, or a crumb less than 5 px
+// long, vanishes; a wider one keeps its edges; a level shows only where it is that wide (the top level only in a shaft's
+// heart). No hairlines, no 1 px stripes, no dashes. 7 passes at art px (the last, a dilate along, draws: SHAPE_FS adds the
+// level's colour). The lattice is the screen's art px, which a pan moves whole: the shapes move with the ground unchanged
+const SEG = `
+float lvAt(sampler2D t, ivec2 q, ivec2 sz) { return texelFetch(t, clamp(q, ivec2(0), sz - 1), 0).r * 4.; }   // (the edge repeats: a beam leaving the view isn't eroded there)
+// the segment: the px at round(dir k), k = -r .. r, and, where it steps diagonally, both corners of the step (a 4-connected,
+// point-symmetric line: a purely diagonal one let a pass leave a checkerboard of holes)
+float seg(sampler2D t, vec2 dir, int r, bool grow) {
+  ivec2 p = ivec2(gl_FragCoord.xy), sz = textureSize(t, 0), pq = ivec2(round(dir * float(-r)));
+  float m = lvAt(t, p + pq, sz);
+  for (int k = -3; k <= 4; k++) {
+    if (k <= -r || k > r) continue;
+    ivec2 q = ivec2(round(dir * float(k)));
+    float a = lvAt(t, p + q, sz), b = lvAt(t, p + ivec2(q.x, pq.y), sz), c = lvAt(t, p + ivec2(pq.x, q.y), sz);
+    m = grow ? max(m, max(a, max(b, c))) : min(m, min(a, min(b, c)));
+    pq = q;
+  }
+  return floor(m + .5);
+}`;
+const MORPH_FS = `precision highp float; precision highp int;
+uniform sampler2D tLv; uniform vec2 uDir; uniform int uR; uniform float uGrow; out vec4 oc;${SEG}
+void main() { oc = vec4(seg(tLv, uDir, uR, uGrow > .5) / 4., 0., 0., 1.); }`;
+const SHAPE_FS = `precision highp float; precision highp int;
+uniform sampler2D tLv; uniform vec2 uDir; uniform vec3 uCol[3]; out vec4 oc;${SEG}
+void main() {
+  float o = seg(tLv, uDir, 2, true);
+  if (o < .5) discard;
+  oc = vec4(uCol[int(o) - 1], 0.);
+}`;
+
+// THE MIN MAPS: each shadow map cut into blocks of RED x RED texels, a block's nearest depth to the sun (REDUCE_FS), then spread
+// over the neighbouring blocks (DILATE_FS: one axis a pass). SIDE by K blocks along the light's x only (half the reach): a side
+// window is looked up K + 1 blocks away, so it starts past the sample's own block (a lit sample just off one shadow's edge
+// doesn't find that shadow on both sides) and is one block thick (the ground, which casts into the static map, comes nearer the
+// sun down the light's y: it stays out). NEAR is both side windows in one (2K + 1 blocks across, the sample's row); COARSE is
+// NEAR a block wider all round (a run of 4 planes moves 4 dn across the sun). The per-frame map's every frame the rays draw (5
+// passes at 256 x 256: ~.02 ms), the static map's when it was re-rendered (restatic(): gfx.js calls it). The blocks are FIXED
+// IN THE WORLD: the per-frame map moves with the view by whole texels (gfx.js setSun snaps it to the world's texel grid), so
+// block b holds texels 8 b - off .. 8 b - off + 7, off following the world origin's texel (else a block's decision would shift
+// under a beam as the view pans: it would shimmer)
+const RED = 8, KMAX = 16;
+const REDUCE_FS = `precision highp float; precision highp int;
+uniform sampler2D tIn; uniform ivec2 uOff; out vec4 oc;
+void main() {
+  ivec2 o = ivec2(gl_FragCoord.xy) * ${RED} - uOff, sz = textureSize(tIn, 0); float m = 1.;
+  for (int y = 0; y < ${RED}; y++) for (int x = 0; x < ${RED}; x++) m = min(m, texelFetch(tIn, clamp(o + ivec2(x, y), ivec2(0), sz - 1), 0).r);
+  oc = vec4(m, 0., 0., 1.);
+}`;
+const DILATE_FS = `precision highp float; precision highp int;
+uniform sampler2D tIn, tAlso; uniform ivec2 uDir, uR; uniform int uAlso; out vec4 oc;   // blocks uR.x .. uR.y along uDir (and tAlso's own)
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy), sz = textureSize(tIn, 0); float m = 1.;
+  for (int i = -${KMAX}; i <= ${KMAX}; i++) { if (i < uR.x || i > uR.y) continue; m = min(m, texelFetch(tIn, clamp(p + uDir * i, ivec2(0), sz - 1), 0).r); }
+  if (uAlso > 0) m = min(m, texelFetch(tAlso, p, 0).r);
+  oc = vec4(m, 0., 0., 1.);
+}`;
+
+export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
+  const nf = THREE.NearestFilter, mk = n => new THREE.WebGLRenderTarget(n, n, {type: THREE.FloatType, format: THREE.RedFormat, minFilter: nf, magFilter: nf, depthBuffer: false, generateMipmaps: false});
+  const SZ = compU.tS.value.image.width / RED, SZS = compU.tSS.value.image.width / RED;   // (2048 / 8, 4096 / 8)
+  // per map: reduced, side x, side y, scratch, near
+  const maps = n => ({r: mk(n), x: mk(n), t: mk(n), near: mk(n), coarse: mk(n)});
+  const MIN = {S: maps(SZ), SS: maps(SZS), staticDirty: true, kSS: 1, oSS: [0, 0]};   // (kSS: the static map's reach in blocks)
+  const redU = {tIn: {value: null}, uOff: {value: new THREE.Vector2()}}, dilU = {tIn: {value: null}, tAlso: {value: null}, uDir: {value: new THREE.Vector2()}, uR: {value: new THREE.Vector2()}, uAlso: {value: 0}};
+  const pass = fs => { const sc = new THREE.Scene(); sc.matrixAutoUpdate = false; const m = new THREE.Mesh(tri, raw(VS, fs, fs === REDUCE_FS ? redU : dilU, {depthTest: false, depthWrite: false})); m.frustumCulled = false; m.matrixAutoUpdate = false; sc.add(m); return sc; };
+  const redScene = pass(REDUCE_FS), dilScene = pass(DILATE_FS);
+  // dst = src's min over blocks lo .. hi along (x, y) [and also's own]
+  const dilate = (src, dst, x, y, lo, hi, also = null) => {
+    dilU.tIn.value = src.texture; dilU.uDir.value.set(x, y); dilU.uR.value.set(lo, hi); dilU.tAlso.value = also ? also.texture : src.texture; dilU.uAlso.value = also ? 1 : 0;
+    renderer.setRenderTarget(dst); renderer.render(dilScene, cam);
+  };
+  // a shadow map (depth texture) -> its min maps: side (kx across), near (2 kx + 1 across), coarse (near + 1 round)
+  function minMaps(depth, T, kx, ox, oy) {
+    redU.tIn.value = depth; redU.uOff.value.set(ox, oy); renderer.setRenderTarget(T.r); renderer.render(redScene, cam);
+    dilate(T.r, T.x, 1, 0, -kx, kx); dilate(T.r, T.near, 1, 0, -2 * kx - 1, 2 * kx + 1);
+    dilate(T.near, T.t, 1, 0, -1, 1); dilate(T.t, T.coarse, 0, 1, -1, 1);
+  }
+  const U = {tD: compU.tD, tS: compU.tS, tSS: compU.tSS, uInvPV: compU.uInvPV, uLightPV: compU.uLightPV, uLightPVS: compU.uLightPVS,
+    uSBias: compU.uSBias, uSOn: compU.uSOn, uRes: compU.uRes,
+    tNS: {value: MIN.S.near.texture}, tNSS: {value: MIN.SS.near.texture}, tCS: {value: MIN.S.coarse.texture}, tCSS: {value: MIN.SS.coarse.texture}, tXS: {value: MIN.S.x.texture}, tXSS: {value: MIN.SS.x.texture},
+    uBand: {value: new THREE.Vector4()}, uPn: {value: new THREE.Vector4()}, uSide: {value: new THREE.Vector4()}, uMargin: {value: 0}, uMinOff: {value: new THREE.Vector4()},
+    uLv: {value: new THREE.Vector3()}};
+  const full = (vs, fs, u, extra) => { const sc = new THREE.Scene(); sc.matrixAutoUpdate = false; const m = new THREE.Mesh(tri, raw(vs, fs, u, {depthTest: false, depthWrite: false, ...extra})); m.frustumCulled = false; m.matrixAutoUpdate = false; sc.add(m); return sc; };
+  // the march into the level target (art px, one byte), then its shape added into the target the composite drew
+  const lvT = () => new THREE.WebGLRenderTarget(compU.uRes.value.x, compU.uRes.value.y, {format: THREE.RedFormat, minFilter: nf, magFilter: nf, depthBuffer: false, generateMipmaps: false});
+  const lvRT = lvT(), lvB = lvT();   // (ping-pong for the morphology)
+  const ALONG = new THREE.Vector2(1, 0), ACROSS = new THREE.Vector2(0, 1);   // unit steps on screen (art px), set each frame
+  const SU = {tLv: {value: lvRT.texture}, uDir: {value: ALONG}, uCol: {value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]}};
+  const MU = {tLv: {value: null}, uDir: {value: ACROSS}, uR: {value: 1}, uGrow: {value: 0}};
+  const scene = full(VS, FS, U, {}), morphScene = full(VS, MORPH_FS, MU, {});
+  const morph = (src, dst, dir, r, grow) => { MU.tLv.value = src.texture; MU.uDir.value = dir; MU.uR.value = r; MU.uGrow.value = grow ? 1 : 0; renderer.setRenderTarget(dst); renderer.render(morphScene, cam); };
+  const _pv = new THREE.Matrix4(), _d = new THREE.Vector4();
+  const shapeScene = full(VS, SHAPE_FS, SU, {transparent: true, blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor});
+  // compiled now, while the page loads (else the first sunlit frame waits ~80 ms for them: a hitch at dawn after a night start)
+  for (const sc of [scene, morphScene, shapeScene, redScene, dilScene]) renderer.compile(sc, cam);
+  // the strength inputs (render/lighting.js, every frame): the sun's elevation (deg) and colour, the mood's shadow strength,
+  // the sky's cloud and mist, the ground's wetness
+  const In = {el: 45, c: [1, 1, 1], shadow: 0, cloud: 0, mist: 0, wet: 0};
+  let base = 0;   // the strength before the view's share
+  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  function set(o) {
+    In.el = o.el; In.c = o.c; In.shadow = o.shadow; In.cloud = o.cloud || 0; In.mist = o.mist || 0; In.wet = o.wet || 0;
+    const T = TUNE, kEl = 1 - (1 - T.el[2]) * smooth(T.el[0], T.el[1], In.el), kCl = 1 - smooth(T.cloud[0], T.cloud[1], In.cloud);
+    const kSh = Math.min(1, Math.max(0, In.shadow / T.shadow));
+    base = Math.min(T.max, T.k * kEl * kCl * kSh * (1 + T.mist * In.mist + T.wet * In.wet));
+  }
+  const R = {live: false, strength: 0, TUNE, set, draw, restatic: () => { MIN.staticDirty = true; },
+    get enabled() { return TUNE.on && compU.uShadowOn.value > .5; }};
+  // K: half the reach in blocks of a min map, at m metres per block (at least one). A block's size in metres across / up:
+  // 2 / (light NDC per metre x blocks), the NDC per metre being the length of the light matrix's first / second row
+  const kOf = (m, r = TUNE.reach) => Math.max(1, Math.min(KMAX >> 1, Math.round(r / 2 / m)));
+  const blk = (L0, L1, L2, n) => 2 / ((Math.hypot(L0, L1, L2) || 1) * n);
+  // the blocks' phase in a map: from the world origin's texel (whole texels: the maps sit on the world's texel grid)
+  const ph = (t, n) => ((-Math.round((t * .5 + .5) * n * RED)) % RED + RED) % RED;
+  function draw() {
+    const T = TUNE;
+    R.live = false;
+    if (!T.on || compU.uShadowA.value <= 0 || compU.uShadowOn.value < .5 || base <= .01) return;   // (no sun shadow map this frame)
+    if (compU.uDebug.value) return;   // (a debug view: albedo, normals, the shadow mask... shows only itself)
+    // looking toward the sun: the camera's forward on the ground (away from the viewer) against the sun's bearing
+    const v = compU.uView.value, s = compU.uSunDir.value, sl = Math.hypot(s.x, s.z) || 1, vl = Math.hypot(v.x, v.z) || 1;
+    const fw = -(v.x * s.x + v.z * s.z) / (vl * sl), k = base * (T.view[0] + (T.view[1] - T.view[0]) * smooth(-.4, .9, fw));
+    R.strength = k;
+    if (k <= .01) return;
+    // the planes contain the light's direction s (the casting sun: the light matrix's view axis) and face the camera as
+    // squarely as that allows: n = V - (V . s) s, V toward the viewer (the inverse projection's NDC z axis). Fixed in the world
+    // while the view pans (V and s don't change); a turn of the camera or of the sun turns them
+    const e = compU.uLightPV.value.elements, f = compU.uLightPVS.value.elements, iv = compU.uInvPV.value.elements;
+    const ql = -1 / (Math.hypot(e[2], e[6], e[10]) || 1), sx = e[2] * ql, sy = e[6] * ql, sz = e[10] * ql;
+    const wl = -1 / (Math.hypot(iv[8], iv[9], iv[10]) || 1), Vx = iv[8] * wl, Vy = iv[9] * wl, Vz = iv[10] * wl, vs = Vx * sx + Vy * sy + Vz * sz;
+    let nx = Vx - vs * sx, ny = Vy - vs * sy, nz = Vz - vs * sz; const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+    U.uPn.value.set(nx, ny, nz, T.band);
+    U.uBand.value.set(T.dn, Math.min(128, T.planes), T.bias, 0);
+    U.uMargin.value = T.margin * Math.hypot(e[2], e[6], e[10]) / 2;   // (light depth per metre: half the light matrix's third row)
+    U.uLv.value.set(T.lv[0] / T.dn - .01, T.lv[1] / T.dn - .01, T.lv[2] / T.dn - .01);   // (n: whole samples, gap fractions)
+    // the colour: the sun's, warmed (its own hue pushed further: a dusk sun's orange deepens, a noon sun's white barely moves)
+    const c = In.c, gk = T.goldK * (1 - smooth(T.goldEl[0], T.goldEl[1], In.el)), G = T.gold;
+    const wr = Math.pow(c[0], T.warm) * (1 - gk) + G[0] * gk, wg = Math.pow(c[1], T.warm) * (1 - gk) + G[1] * gk, wb = Math.pow(c[2], T.warm) * (1 - gk) + G[2] * gk;
+    for (let i = 0; i < 3; i++) SU.uCol.value[i].set(wr * T.amt[i] * k, wg * T.amt[i] * k, wb * T.amt[i] * k);
+    // the beams on screen: the sun's direction through the projection (the inverse projection, inverted), in art px
+    const VW = compU.uRes.value.x, VH = compU.uRes.value.y;
+    if (lvRT.width !== VW || lvRT.height !== VH) { lvRT.setSize(VW, VH); lvB.setSize(VW, VH); }
+    _d.set(sx, sy, sz, 0).applyMatrix4(_pv.copy(compU.uInvPV.value).invert());
+    const bx = _d.x * VW, by = _d.y * VH, bl = Math.hypot(bx, by);
+    if (bl > 1e-6) { ALONG.set(bx / bl, by / bl); ACROSS.set(-by / bl, bx / bl); }
+    // the min maps (the side windows sit K + 1 blocks off the sample), then the march into the target the composite drew
+    const rt = renderer.getRenderTarget();
+    const kx = kOf(blk(e[0], e[4], e[8], SZ));
+    const ox = ph(e[12], SZ), oy = ph(e[13], SZ);
+    minMaps(compU.tS.value, MIN.S, kx, ox, oy);
+    if (MIN.staticDirty && compU.uSOn.value > .5) {
+      MIN.staticDirty = false; MIN.kSS = kOf(blk(f[0], f[4], f[8], SZS)); MIN.oSS[0] = ph(f[12], SZS); MIN.oSS[1] = ph(f[13], SZS);
+      minMaps(compU.tSS.value, MIN.SS, MIN.kSS, MIN.oSS[0], MIN.oSS[1]);
+    }
+    U.uMinOff.value.set(ox / (SZ * RED), oy / (SZ * RED), MIN.oSS[0] / (SZS * RED), MIN.oSS[1] / (SZS * RED));
+    U.uSide.value.set((kx + 1) / SZ, 0, (MIN.kSS + 1) / SZS, 0);
+    renderer.setRenderTarget(lvRT); renderer.render(scene, cam);
+    morph(lvRT, lvB, ACROSS, 1, true); morph(lvB, lvRT, ACROSS, 1, false);                 // close across: seams fill
+    morph(lvRT, lvB, ALONG, 2, true); morph(lvB, lvRT, ALONG, 4, false);                   // close along (+ the open's erode along): gaps bridge
+    morph(lvRT, lvB, ACROSS, 1, false); morph(lvB, lvRT, ACROSS, 1, true);                 // the open across
+    renderer.setRenderTarget(rt); renderer.render(shapeScene, cam);                        // (the open's dilate along: drawn)
+    R.live = true;
+  }
+  return R;
+}

@@ -64,8 +64,8 @@ await run('biome (N)', key('n') + step(5), 3000);
 await run('after the biome', step(30));
 await run('pause (Esc)', key('Escape') + step(30));
 await run('resume (Esc)', key('Escape') + step(30));
-await run('climb at an angle (E: the camera eases north, climbs, eases back)', `const R = window.__r3d; import('/${PAGE}world/world.js').then(({PLATEAUS}) => {
-  const q = PLATEAUS.find(q => q.climbs?.length), c = q.climbs[0]; R.host.teleport(c.x, q.y1 + .6); R.setYaw(.6); R.step(5);
+await run('climb at an angle (E: the camera eases round to face the wall, climbs, eases back)', `const R = window.__r3d; import('/${PAGE}world/world.js').then(({CLIMBS}) => {
+  const c = CLIMBS[0]; R.host.teleport(c.x + c.nx * .6, c.y + c.ny * .6); R.setYaw(c.yaw + .6); R.step(5);
   ${key('e').replace(/`/g, '\`')} R.step(240); window.__climb = {z: R.P.z, yaw: R.yaw, state: R.P.state}; });`, 1500);
 console.log('     after the climb:', JSON.stringify(await ev('window.__climb')));
 await run('camera turn (X)', 'window.__r3d.keys.add("x");' + step(40) + 'window.__r3d.keys.delete("x");' + step(5));

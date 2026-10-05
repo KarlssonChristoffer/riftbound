@@ -34,11 +34,15 @@
 //            cliff texture with alpha FALL_ALPHA (252, next to the alpha-250 note in buildWorld); the shader streams it down
 //            (gfx.js fall(): light streaks slide down in stepped time, the foam in the last 6 rows flickers).
 //            G.setWater({speed}) (gfx.js) scales the water's clock: brief D drives it from rain.
+//            What lies UNDER it (the bed, the depth bands, the contact foam: the clear shallows and the dark deep): world/waterbed.js,
+//            baked with the water texture (bakeWater); ?water=0 leaves it out.
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, TERRAIN} from './layout.js';
+import {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, TERRAIN, MESA, CLIMBS, CASCADES, mesaAt, groundDrawn, CLEFTS, cleftWall, inCleft, BRIDGES} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {cliffGeometry} from './cliffs3d.js';
+import {stepsOf} from './terrain.js';
+import {waterBed} from './waterbed.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
 
@@ -193,10 +197,10 @@ export function waterSample(x, y, out) {
   const c = STREAM.cx(y), hw = STREAM.w(y) / 2, a = x - c;
   if (a > hw) {   // beyond the east bank: the plateau's rill (on its top) or, south of its face, the pool and its outflow
     if (y < FALL.y) {
-      if (x < RILL.x1 - .5 || x > 58 || y < 5.8 || !rillAt(x, y, _rs)) return out;
+      if (!rillAt(x, y, _rs)) return out;   // (rillAt keeps to the rill's own reach)
       const u = _rs.l / RILL_LEN, k = Math.max(0, Math.min(1, (u - .3) / .7));
-      out.kind = 2; out.a = _rs.a; out.hw = _rs.hw; out.edge = _rs.hw - _rs.d; out.s = _rs.l * RILL_K; out.speed = .45 + 1.35 * k * k * (3 - 2 * k);
-      out.hold = (Math.hypot(x - SPRING.x, y - SPRING.y) < SPRING.r || RILL.riffle(_rs.l, _rs.hw) || FALL.y - y < .1) ? 1 : 0;   // (the spring, the riffles, the lip's foam stay as painted)
+      out.kind = 2; out.a = _rs.a; out.hw = _rs.hw; out.edge = _rs.hw - _rs.d; out.s = _rs.l * RILL_K; out.speed = RILL.pace ? RILL.pace(_rs.l) : .45 + 1.35 * k * k * (3 - 2 * k);
+      out.hold = (Math.hypot(x - SPRING.x, y - SPRING.y) < SPRING.r || RILL.riffle(_rs.l, _rs.hw) || FALL.y - y < .1) ? 1 : 0;   // (the spring, the riffles / the cascades' white water, the lip's foam stay as painted)
       return out;
     }
     const inP = inPool(x, y), inO = outflowAt(x, y, _os);
@@ -255,6 +259,7 @@ export const WATER_TUNE = {
 //   A  across the flow, signed texels from the axis in 1/2 texel, + 128 (clamped: +-63.5 texels, 2.08 m at PPM 30.5)
 function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
   const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
+  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ});   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
   const toneOf = k => { for (let t = 0; t < ramp.length; t++) if (px[k] === ramp[t][0] && px[k + 1] === ramp[t][1] && px[k + 2] === ramp[t][2]) return t; return -1; };
   for (let y = 0; y < HPX; y++) for (let x = 0; x < WPX; x++) {
     const mx = (x + .5) / PPM, my = (y + .5) / PPM;
@@ -270,6 +275,7 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
     data[k] = state << 6 | tone << 4 | (Math.round(Math.min(1.875, o.speed) * 8) & 15);
     data[k + 1] = ring << 5 | s13 >> 8; data[k + 2] = s13 & 255;
     data[k + 3] = Math.max(0, Math.min(255, Math.round(o.a * PPM * 2) + 128));
+    if (bed) bed.add(x, y, o);
   }
   for (let y = 0; y < HPX; y++) for (let x = 0; x < WPX; x++) {   // dry texels beside water: SURF_FS blends across them when the camera turns
     const k = (y * WPX + x) * 4; if (data[k] >> 6) continue;
@@ -280,6 +286,7 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
   }
   const tex = new THREE.DataTexture(data, WPX, HPX, THREE.RGBAFormat, THREE.UnsignedByteType);
   tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.colorSpace = THREE.NoColorSpace; tex.needsUpdate = true;
+  tex.userData.bed = bed ? bed.finish(data) : null;   // {tex, rect, ...its look}: G.setWaterLook's bed
   return tex;
 }
 
@@ -428,14 +435,15 @@ const FALL_LOOK = {
   rift: {mode: 'glow', ramp: () => EMIT.rune.rift.map(h => '#' + h)},
   desert: {mode: 'water', ramp: S => S.water.h},
 };
-// only: the fall alone on a clear sheet (the 3D cliffs stand behind it: cliffs3d.js), no rock
-function fallFace(cv, q, PPM, rock, look, ramp, only = false) {
-  const rows = cv.height, per = q.h / rows, foot = Math.ceil(-WATER_H / per), H = rows + foot, W = cv.width, out = document.createElement('canvas');
+// only: the fall alone on a clear sheet (the 3D cliffs stand behind it: cliffs3d.js), no rock. F: the fall (x = its centre, hw); deep: the
+// sheet hangs on below the ground line to the pool's surface (a cascade's sheet ends where its water does: false)
+function fallFace(cv, q, PPM, rock, look, ramp, only = false, F = FALL, deep = true) {
+  const rows = cv.height, per = q.h / rows, foot = deep ? Math.ceil(-WATER_H / per) : 0, H = rows + foot, W = cv.width, out = document.createElement('canvas');
   out.width = W; out.height = H; const g = out.getContext('2d', {willReadFrequently: true}); if (!only) g.drawImage(cv, 0, 0);
   const id = g.getImageData(0, 0, W, H), d = id.data, put = (x, y, c, a = 255) => { const i = (y * W + x) * 4; d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = a; };
   if (!only) for (let y = rows; y < H; y++) for (let x = 0; x < W; x++) put(x, y, rock[3]);            // the foot, below the ground line: dark, wet rock
   if (!look) { g.putImageData(id, 0, 0); return {cv: out, h: H * per}; }   // (a biome without a fall: the foot only)
-  const col = (FALL.x - q.x0) / (q.x1 - q.x0) * W, hw = FALL.hw * PPM, C = ramp.map(hex255);
+  const col = (F.x - q.x0) / (q.x1 - q.x0) * W, hw = F.hw * PPM, C = ramp.map(hex255);
   for (let y = 0; y < H; y++) {
     const t = y / (H - 1), half = hw + 2.2 * t * t + (y > rows - 2 ? (hsh(y, 3) < .5 ? 1 : 0) : 0);   // spreads a little toward the foot
     for (let x = Math.floor(col - half - 1); x <= Math.ceil(col + half + 1); x++) {
@@ -479,12 +487,15 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // ---- ground: the biome's painter, top-down
   const WPX = Math.ceil(WM * PPM), HPX = Math.ceil(HM * PPM);
   // ground: the walkable terrain's height (layout.js; ?terrain=0: none) for the painters to shade its real slopes; null = flat
-  const ctxT = {PPM, PPMY: PPM, PPMH: 0, toS: (x, y) => [x * PPM, y * PPM], WM, HM, WPX, HPX, PLAY, layout, VW: G.VW, VH: G.VH, ground: TERRAIN_ON ? terrainField().H : null};
+  const ctxT = {PPM, PPMY: PPM, PPMH: 0, toS: (x, y) => [x * PPM, y * PPM], WM, HM, WPX, HPX, PLAY, layout, VW: G.VW, VH: G.VH, ground: TERRAIN_ON ? groundDrawn() : null};
   const gc = document.createElement('canvas'); gc.width = WPX; gc.height = HPX;
   const gq = gc.getContext('2d', {willReadFrequently: true});
   biome.paintGround(gq, ctxT);
   const groundEmit = biome.groundEmit, groundLights = (biome.groundLights || []).slice();
   const gTex = texOf(gc, true), eTex = groundEmit ? texOf(groundEmit, true) : null;
+  // past the painted ground's edges (the patch's SKIRT) the texture MIRRORS: a camera turned to face an edge over the border's raised banks
+  // (the east ladder's climb) sees the ground carry on there, not its last texel column stretched into stripes
+  for (const t of [gTex, eTex]) if (t) { t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.needsUpdate = true; }
   // the ground's pixels (the waterfall takes the stream's painted colour at the edge)
   const px = gq.getImageData(0, 0, WPX, HPX).data;
   // the ground mesh, in PATCHES (each drawn and culled on its own): the Proving Grounds under their painted texture and, in a
@@ -512,7 +523,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     cliffCache.set(k, c); return c;
   };
   // walkable terrain (layout.js; ?terrain=0: none): the field's height under every vertex (it is held flat at the water, the ravine's rim)
-  const TF = TERRAIN_ON ? terrainField() : null, tH = TF ? TF.H : () => 0;
+  const TF = TERRAIN_ON ? terrainField() : null, tH = TF ? groundDrawn() : () => 0;   // (the drawn ground: the mesa's falls away behind its rock)
   const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) ? WATER_H : 0) + tH(x, z);   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
   // a patch's grid, s m cells, from (rx0, rz0) to (rx1, rz1). It follows the edge exactly: the last bank vertex of each column
   // moves onto the edge line and the next one to just past it at the ravine's depth, so the wall is one smooth face (a plain
@@ -540,10 +551,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const world2 = new THREE.Vector2(WM, HM), origin2 = new THREE.Vector2(G0.x0, G0.y0);
   // the open land's tiles [x0, z0, x1, z1, cell]: the world + skirt outside the Proving Grounds' patch, cut on a TILE m lattice
   // from the skirt's corner and at the patch's sides. Fine cells (S) where the ground can step: the ravine's band (rawCliff
-  // looks 7 m in from the south edge) and the stream's box; COARSE cells on flat land (they meet fine ones only where both are flat)
-  const openTiles = [];
+  // looks 7 m in from the south edge) and the stream's box; COARSE cells on flat land (they meet fine ones only where both are flat).
+  // Out to RING m past the world (the view goes WORLD.past past it: render/camera.js)
+  const openTiles = [], RING = Math.max(SKIRT, (WORLD.past || 0) + 2);
   {
-    const ax = WORLD.x0 - SKIRT, az = WORLD.y0 - SKIRT, bx = WORLD.x1 + SKIRT, bz = WORLD.y1 + SKIRT;
+    const ax = WORLD.x0 - RING, az = WORLD.y0 - RING, bx = WORLD.x1 + RING, bz = WORLD.y1 + RING;
     const cuts = (a, b, h0, h1) => { const v = new Set([a, b, h0, h1]); for (let t = a; t < b; t += TILE) v.add(t); return [...v].filter(t => t >= a && t <= b).sort((p, q) => p - q); };
     const xs = cuts(ax, bx, hx0, hx1), zs = cuts(az, bz, hz0, hz1);
     let wx0 = 1e9, wx1 = -1e9;
@@ -595,8 +607,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const cTex = texOf(cliff); cTex.wrapS = cTex.wrapT = THREE.RepeatWrapping; cTex.needsUpdate = true;
   // the moving water: the baked texture (rebuilt, and the old one disposed, with the world) + the biome's look for the shader
   const WT = WATER_TUNE[biome.id], wTex = WT ? bakeWater(biome, WT, {WPX, HPX, PPM, px, cliffZ}) : null;
-  if (wTex) disposers.push(() => wTex.dispose());
-  G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark} : null);
+  if (wTex) disposers.push(() => { wTex.dispose(); wTex.userData.bed?.tex.dispose(); });
+  G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark, bed: wTex.userData.bed} : null);
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
   const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
   if (lit) { lit.sim = G.litterSim(lit); disposers.push(lit.dispose); }   // (the living layer: render/litter.js, driven by features/litter.js)
@@ -624,8 +636,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     pq.putImageData(id, 0, 0);
     const pTex = texOf(pc, true); pTex.wrapS = pTex.wrapT = THREE.RepeatWrapping; pTex.needsUpdate = true;
     const size = new THREE.Vector2(OPEN_PATCH, OPEN_PATCH);
+    // (the Proving Grounds alone (no open land): the tiles round them are past the world's edge, where the painted ground goes on
+    // mirrored, as on the patch's skirt: no seam)
+    const alone = GROUNDS.x0 <= WORLD.x0 && GROUNDS.y0 <= WORLD.y0 && GROUNDS.x1 >= WORLD.x1 && GROUNDS.y1 >= WORLD.y1;
     for (const [x0, z0, x1, z1, s] of openTiles) {
-      const tg = gridGeo(x0, z0, x1, z1, s), m = G.surface(tg, {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
+      const tg = gridGeo(x0, z0, x1, z1, s), m = G.surface(tg, alone ? {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}
+        : {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
       if (TERRAIN_ON && s === S) caster(tg);   // (the fine tiles are where the ground varies)
       disposers.push(() => m.dispose());
     }
@@ -651,6 +667,34 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const f = G.surface(geo, {tex, planar: false, type: 5, obj: 1}, !cliffs3d); disposers.push(() => f.dispose());   // (the sheet of water alone casts no shadow)
     });
   }
+  // ---- the creek's cascades (terrain: layout.js CASCADES): at each step a sheet of falling water across the creek, facing downstream,
+  // from the water above to the water below (the last into the pool); the biome's fall look (FALL_LOOK), no rock. ONE mesh: the
+  // sheets side by side in one texture, each at its foot (SURF_FS's fall() reads only the texel's own column and row: the foam is
+  // the texture's last rows, every sheet's foot)
+  if (FL && CASCADES.length) {
+    const sheets = CASCADES.map(c => {
+      const len = c.hw * 2 + .5, drop = c.top - c.bot, blank = document.createElement('canvas');
+      blank.width = Math.max(4, Math.round(len * PPM)); blank.height = Math.max(3, Math.round(drop * PPMH));
+      const {cv, h} = fallFace(blank, {x0: -len / 2, x1: len / 2, h: drop}, PPM, R.rock, FL, FL.ramp(biome.style), true, {x: 0, hw: c.hw}, false);
+      return {c, len, h, cv};
+    });
+    const AW = sheets.reduce((a, q) => a + q.cv.width + 1, 0), AH = Math.max(...sheets.map(q => q.cv.height)), atlas = document.createElement('canvas');
+    atlas.width = AW; atlas.height = AH; const aq = atlas.getContext('2d');
+    const pos = [], nrm = [], uv = [], idx = [];
+    let ax = 0;
+    for (const {c, len, h, cv} of sheets) {
+      aq.drawImage(cv, ax, AH - cv.height);
+      const ux = (c.dy), uz = -c.dx, u0 = ax / AW, u1 = (ax + cv.width) / AW, v0 = (AH - cv.height) / AH, n = pos.length / 3;   // (u: along the sheet, its right as seen from downstream)
+      for (const [s, y, u, v] of [[-.5, c.top, u0, v0], [.5, c.top, u1, v0], [-.5, c.top - h, u0, 1], [.5, c.top - h, u1, 1]]) {
+        pos.push(c.x + ux * s * len, y, c.y + uz * s * len); nrm.push(c.dx, 0, c.dy); uv.push(u, v);
+      }
+      idx.push(n, n + 2, n + 1, n + 1, n + 2, n + 3);
+      ax += cv.width + 1;
+    }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setIndex(idx);
+    const f = G.surface(geo, {tex: texOf(atlas, true), planar: false, type: 5, obj: 1}, false); disposers.push(() => f.dispose());
+  }
 
   // ---- the 3D cliffs (cliffs3d.js): the plateau's four faces and the ravine's wall as live rock. Runs travel with the outside
   // on their (-tz, tx) side: east along a south face
@@ -671,8 +715,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       plateauRuns.push(
         run([[q.x0, q.y1], [q.x1, q.y1]], 0, 1, 31, {keep: keepS, minBot: WATER_H - .05}),   // south (the waterfall, the pool, the climb)
         run([[q.x1, q.y1], [q.x1, q.y0]], 1, 0, 37), run([[q.x1, q.y0], [q.x0, q.y0]], 0, -1, 41), run([[q.x0, q.y0], [q.x0, q.y1]], -1, 0, 43));
-      for (const c of climbs) o.ladders.push({x: c.x, z: q.y1, h: q.h, nx: 0, nz: 1});
     }
+    for (const c of CLIMBS) o.ladders.push({x: c.x, z: c.y, h: c.h1, y0: c.h0, nx: c.nx, nz: c.ny});   // (the plateau's, or the mesa's)
     // walkable terrain's rock (layout.js TERRAIN, shapes with rock: true): a terrace's edges, a ramp's sides as walls whose top follows
     // it. Each run's foot is the ground just outside (elev: the plateau's box too), so the rock is gone where a ramp meets a terrace,
     // the plateau or the ground, and only stands where there is a drop
@@ -688,10 +732,23 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         let lo = 1e9; for (let i = 0; i + 1 < pts.length; i++) for (let k = 0; k <= 8; k++) { const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * k / 8, z = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * k / 8; lo = Math.min(lo, elev(x + nx * .3, z + nz * .3)); }
         return {pts, top, bot: (x, z) => elev(x + nx * .3, z + nz * .3), minBot: lo - .05, base: .06, relief: .8, talus: true, avoid: avoidT, lip, seed};
       };
+      // a terrace with a bank per point (the mesa): rock only along its cliffs (layout.js: the stretches of steep edges), each stretch ONE
+      // run (the strata carry on round its bends); its foot is the lowest ground just round the face (the stretch bends, so no one
+      // normal), flush at a ladder and no stones in front of one
+      const ladder = (x, z, inner, outer, side) => CLIMBS.some(c => { const dx = x - c.x, dz = z - c.y, o = dx * c.nx + dz * c.ny, a = dz * c.nx - dx * c.ny; return Math.abs(a) < c.w / 2 + side && o > inner && o < outer; });
+      const mesaRuns = (s, seed) => {
+        const foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
+        return (s.cliffs || []).map(({pts}, j) => {
+          let lo = 1e9; for (const [x, z] of pts) lo = Math.min(lo, foot(x, z));
+          return {pts, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: lo - .05, base: 0, relief: .9, talus: true, lip, seed: seed + j,   // (top: the ground inside its face, whichever way that is: blocks past a stretch's end sink with it)
+            keep: (x, z) => ladder(x, z, -.4, .4, .08) ? -.02 : null, avoid: (x, z) => avoidT(x, z) || ladder(x, z, -.1, 1.2, .5), skip: (x, z) => inCleft(x, z, .02)};   // (no rock across a cleft's mouth)
+        });
+      };
       const terrRuns = [];
       TERRAIN.forEach((s, k) => {
         if (!s.rock) return;
-        if (s.type === 'terrace') {
+        if (s.type === 'terrace' && s.banks) terrRuns.push(...mesaRuns(s, 61 + k * 13));
+        else if (s.type === 'terrace') {
           const P = s.pts, cx = P.reduce((a, p) => a + p[0], 0) / P.length, cz = P.reduce((a, p) => a + p[1], 0) / P.length;
           P.forEach((p, i) => terrRuns.push(edgeRun(outward([p, P[(i + 1) % P.length]], cx, cz), s.h, 61 + k * 13 + i)));
         } else if (s.type === 'ramp') {   // its two sides, w / 2 off its line (per segment: the corner is the next segment's start)
@@ -706,7 +763,17 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
           }
         }
       });
-      const tg = terrRuns.length ? cliffGeometry(terrRuns, {...o, ladders: []}) : null;
+      // the clefts (layout.js CLEFTS): rock up their sides and round their chambers, facing in (a slot through the mesa's cliff)
+      CLEFTS.forEach((c, j) => terrRuns.push({pts: cleftWall(c), top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)),
+        bot: () => 0, minBot: -.05, base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 131 + j}));
+      // the creek's last step (layout.js CASCADES): a low rock rim along the pool's north edge, under the lip (the fall's sheet in its gap)
+      if (CASCADES.length) {
+        const F = CASCADES.at(-1), y = POOL.clip - .03;
+        terrRuns.push({pts: [[POOL.x - 1.15, y], [POOL.x + 1.15, y]], top: (x, z) => TF.H(x, z - .4), bot: (x, z) => inPool(x, z + .2, 0, .25) ? WATER_H : TF.H(x, z + .3),
+          minBot: WATER_H - .05, base: 0, relief: .7, talus: false, lip, seed: 97, skip: (x, z) => Math.abs(x - F.x) < F.hw + .02});
+      }
+      const stairs = TERRAIN.filter(s => s.type === 'ramp' && s.steps).map((s, k) => { const h0 = s.h0 ?? TF.H(...s.pts[0]), h1 = s.h1 ?? TF.H(...s.pts.at(-1)); return {pts: [s.pts[0], s.pts.at(-1)], w: s.w, h0, h1, n: stepsOf(h0, h1), seed: 29 + k}; });
+      const tg = terrRuns.length ? cliffGeometry(terrRuns, {...o, ladders: [], bridges: BRIDGES, stairs}) : null;   // (+ the footbridges, the stone steps)
       if (tg) { const m = G.mesh(tg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); tg.dispose(); }); }
     }
     const pg = cliffGeometry(plateauRuns, o);
@@ -947,4 +1014,4 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
-export {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel};
+export {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, MESA, CLIMBS, CASCADES, mesaAt};

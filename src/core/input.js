@@ -6,7 +6,7 @@
 // OWNS: the drag (dragging, dragX, dragYaw: the yaw the drag asks for since the last sim step).
 // WRITES: keys, mouse (the shared input state player.js reads).  READS: E (main.js).
 //   const input = createInput(E); input.dragging / takeYaw() (the loop: the drag's yaw, once) / look(dx) (the menu's
-//   backdrop drag) / cancelDrag()
+//   backdrop drag) / cancelDrag() / remap() (the loop, after the camera: the cursor on the image as it slid this frame)
 import {BUSY} from '../sim/player/player.js';
 
 export function createInput(E) {
@@ -32,7 +32,7 @@ export function createInput(E) {
     if (k === ' ') {   // a leap's player.jump is emitted here, between steps: into world coordinates like the step's own
       const n0 = events.length; PL.onSpace(); for (let i = n0; i < events.length; i++) pa.toWorldEvent(events[i]);
     }
-    if (k === 'e') { if (!pa.nearProp() && pa.climbSpotW() && Math.abs(cv.yaw) > 1e-6 && !BUSY.has(P.state)) pa.assist = {back: cv.yaw, phase: 'in'}; else PL.onInteractKey(); }
+    if (k === 'e') { if (!pa.climbAssist()) PL.onInteractKey(); }   // (at a climb spot facing away: the camera turns to the wall first)
     if (k >= '1' && k <= '4' && !BUSY.has(P.state)) features.some(f => f.ability?.(+k));
     devKey(k, e, E);
     if (k === 'home') setYaw(0);
@@ -41,10 +41,16 @@ export function createInput(E) {
   addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys.delete(k); if (k === 'e') PL.onInteractUp(); });
   addEventListener('blur', () => { keys.clear(); mouse.down = false; dragging = false; });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
+  // the cursor as the screen shows it: mx0, my0 = where it fell (view px at zoom 1, as the player reads it) on the image as
+  // drawn, k0 = view px per canvas px then; the sub-pixel camera slides the image by whole canvas px every frame (G.sub,
+  // render/camera.js), so remap() (the loop: after the camera, every frame) takes what's under a still cursor now
+  let mx0 = NaN, my0 = NaN, k0 = 0;
+  const remap = () => { if (mx0 === mx0) { mouse.x = mx0 - E.G.sub.x * k0; mouse.y = my0 - E.G.sub.y * k0; } };
   addEventListener('mousemove', e => {
     if (E.photo?.open) return;   // (photo mode: the cursor isn't the game's; it's where it was when you come back)
     const r = canvas.getBoundingClientRect(), s = r.width / cv.VW, mx = (e.clientX - r.left) / s, my = (e.clientY - r.top) / s;
-    mouse.x = cv.VW / 2 + (mx - cv.VW / 2) / cv.zoom; mouse.y = cv.VH / 2 + (my - cv.VH / 2) / cv.zoom;   // the player reads the screen at zoom 1
+    mx0 = cv.VW / 2 + (mx - cv.VW / 2) / cv.zoom; my0 = cv.VH / 2 + (my - cv.VH / 2) / cv.zoom; k0 = 1 / (s * cv.zoom);   // the player reads the screen at zoom 1
+    remap();
     if (dragging) { dragYaw += (e.clientX - dragX) * -.006; dragX = e.clientX; }
   });
   canvas.addEventListener('mousedown', e => {
@@ -60,5 +66,6 @@ export function createInput(E) {
     takeYaw() { const d = dragYaw; dragYaw = 0; return d; },
     look(dx) { dragYaw += dx * -.006; },
     cancelDrag() { dragging = false; },
+    remap,
   };
 }

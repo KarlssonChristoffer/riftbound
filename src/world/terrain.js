@@ -2,20 +2,29 @@
 // Proving Grounds' own) and baked once into a grid on the ground mesh's lattice (CELL m, aligned to whole multiples of CELL),
 // read bilinearly: every per-frame caller (feet, props, particles, projectiles) pays a few multiplies, nothing is allocated.
 //   hill     {type: 'hill', x, y, rx, ry, h, rot}: a smooth bump (raised cosine of the elliptic distance: level at its rim)
-//   terrace  {type: 'terrace', pts: [[x, y], ...] (a polygon), h, bank}: a raised flat area; its edge falls to the ground
-//            round it over `bank` m (smoothstep). A bank under ~1.5 h / WALK is too steep to walk: a cliff (rock: cliffs3d.js)
-//   ramp     {type: 'ramp', pts: [[x, y], ...] (a polyline), w, h0, h1, shoulder}: a walkway rising evenly from h0 at its first
-//            point to h1 at its last, w m wide, over whatever is there; its sides blend back to the ground over `shoulder` m
+//   terrace  {type: 'terrace', pts: [[x, y], ...] (a polygon), h, bank, banks}: a raised flat area; its edge falls to the ground
+//            round it over `bank` m (smoothstep). A bank under ~1.5 h / WALK is too steep to walk: a cliff (rock: cliffs3d.js).
+//            banks (optional): one bank per point, blended along each edge (a mesa: cliffs here, a grass slope there)
+//   ramp     {type: 'ramp', pts: [[x, y], ...] (a polyline), w, h0, h1, shoulder, steps}: a walkway rising evenly from h0 at its first
+//            point to h1 at its last, w m wide, over whatever is there; its sides blend back to the ground over `shoulder` m.
+//            steps: true = in level treads (stepsOf: ~RISER m risers; the first a riser up from h0, the last at h1)
 //   swell    {type: 'swell', amp, k, seed}: low rolling ground (value noise, two octaves, 0..amp m: never below the flat ground,
 //            which many effects treat as a floor), the meadows' undulation
+//   channel  {type: 'channel', pts, bed: [h per point], hw: [half width per point], bank}: a stream's bed cut into whatever is
+//            there: the bed's height (linear between the points) across hw m either side of the line, blending back up to the
+//            ground over `bank` m. It only ever LOWERS the ground (where the bed lies above it, nothing changes)
+//   basin    {type: 'basin', x, y, rx, ry, h, rim, clip, clipRim}: a pool's hollow: h inside the ellipse, blending back up over `rim` m
+//            (lowers only); clip (optional): none north of y = clip (back up over clipRim m: a step at a lip over the pool)
 // Composition: hills + swells, times the MASK (0 = held flat: the arena, the water and its banks, the ravine's rim...), then
-// terraces (the higher wins), then ramps (they cut through a terrace's edge). The plateau is not in the field (layout.js
-// elev puts its exact box on top).
+// terraces (the higher wins), then ramps (they cut through a terrace's edge), then channels and basins (cut into all of it).
+// ?terrain=0's plateau is not in the field (layout.js elev puts its exact box on top); with terrain it is a terrace (a mesa).
 //   const F = createField({bounds: {x0, y0, x1, y1}, shapes, mask: (x, y) => 0..1})
 //   F.H(x, y)          the height (m); outside the grid: its nearest edge
 //   F.steep(x, y)      too steep to walk here (slope > WALK, rise / run)
 //   F.normal(x, y, o)  o = [nx, ny (up), nz] (world axes: x east, y up, z south), from the grid's slope
 //   F.slope(x, y)      rise / run (the steepest way)
+//   sampler(shapes, mask) -> (x, y) => m: the same shapes evaluated at a point without a bake (for laying out what the field
+//   then holds: a stream's bed follows the ground it is cut into)
 // OWNS: nothing global (each field is its own). READS: nothing (pure functions of its shapes and mask).
 import {vnoise, clamp, smooth} from '../core/mathx.js';
 
@@ -27,18 +36,39 @@ function segDist(x, y, ax, ay, bx, by, out) {
   const vx = bx - ax, vy = by - ay, l2 = vx * vx + vy * vy, u = l2 > 0 ? ((x - ax) * vx + (y - ay) * vy) / l2 : 0, t = clamp(u, 0, 1);
   out[0] = Math.hypot(x - ax - vx * t, y - ay - vy * t); out[1] = t; out[2] = u; return out;
 }
-// signed distance to a polygon (negative inside)
-function polyDist(x, y, pts, tmp) {
+// signed distance to a polygon (negative inside); near (optional) = [edge (its first point's index), t along it] of the nearest point
+function polyDist(x, y, pts, tmp, near = null) {
   let d = 1e9, inside = false;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const [ax, ay] = pts[j], [bx, by] = pts[i];
-    d = Math.min(d, segDist(x, y, ax, ay, bx, by, tmp)[0]);
+    segDist(x, y, ax, ay, bx, by, tmp);
+    if (tmp[0] < d) { d = tmp[0]; if (near) { near[0] = j; near[1] = tmp[1]; } }
     if ((ay > y) !== (by > y) && x < (bx - ax) * (y - ay) / (by - ay) + ax) inside = !inside;
   }
   return inside ? -d : d;
 }
+// the nearest point of a polyline: out = [d, index of its segment's first point, t along that segment (clamped), t unclamped]
+function lineNear(x, y, P, tmp, out) {
+  out[0] = 1e9;
+  for (let i = 0; i + 1 < P.length; i++) {
+    segDist(x, y, P[i][0], P[i][1], P[i + 1][0], P[i + 1][1], tmp);
+    if (tmp[0] < out[0]) { out[0] = tmp[0]; out[1] = i; out[2] = tmp[1]; out[3] = tmp[2]; }
+  }
+  return out;
+}
+// a shape's reach (x0, y0, x1, y1): outside it the shape changes nothing (the bake skips it there)
+function reachOf(s) {
+  const box = (pts, m) => { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return [x0 - m, y0 - m, x1 + m, y1 + m]; };
+  if (s.type === 'terrace') return box(s.pts, Math.max(.02, s.bank ?? .1, ...(s.banks || [])) + .01);
+  if (s.type === 'ramp') return box(s.pts, s.w / 2 + (s.shoulder ?? .6) + .01);
+  if (s.type === 'channel') return box(s.pts, Math.max(...s.hw) + s.bank + .01);
+  if (s.type === 'basin') return [s.x - s.rx - s.rim - .01, s.y - s.ry - s.rim - .01, s.x + s.rx + s.rim + .01, s.y + s.ry + s.rim + .01];
+  return null;
+}
 
 // the shapes' height at a point (unbaked: the bake calls this once per lattice point)
+const _near = [0, 0], _ln = [0, 0, 0, 0];
+const outside = (s, x, y) => { const r = s._reach; return r !== null && r !== undefined && (x < r[0] || y < r[1] || x > r[2] || y > r[3]); };
 function evalShapes(shapes, mask, x, y, tmp) {
   let base = 0;
   for (const s of shapes) {
@@ -52,13 +82,16 @@ function evalShapes(shapes, mask, x, y, tmp) {
   }
   let h = base * (mask ? mask(x, y) : 1);
   for (const s of shapes) {
-    if (s.type !== 'terrace') continue;
-    const d = polyDist(x, y, s.pts, tmp), b = Math.max(.02, s.bank ?? .1);
+    if (s.type !== 'terrace' || outside(s, x, y)) continue;
+    const d = polyDist(x, y, s.pts, tmp, s.banks ? _near : null);
+    let b = s.bank ?? .1;
+    if (s.banks) { const B = s.banks, j = _near[0]; b = B[j] + (B[(j + 1) % B.length] - B[j]) * _near[1]; }
+    b = Math.max(.02, b);
     const v = d <= 0 ? s.h : d < b ? s.h * (1 - smooth(d / b)) : 0;
     if (v > h) h = v;
   }
   for (const s of shapes) {
-    if (s.type !== 'ramp') continue;
+    if (s.type !== 'ramp' || outside(s, x, y)) continue;
     const P = s.pts, sh = s.shoulder ?? .6, hw = s.w / 2;
     let best = 1e9, along = 0, run = 0, total = 0, past = false;
     for (let i = 0; i + 1 < P.length; i++) total += Math.hypot(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]);
@@ -69,17 +102,47 @@ function evalShapes(shapes, mask, x, y, tmp) {
       run += L;
     }
     if (past || best >= hw + sh) continue;   // (square ends: a ramp stops at its first and last points, it doesn't round past them)
-    const hr = s.h0 + (s.h1 - s.h0) * (total > 0 ? along / total : 0);
+    const f = total > 0 ? along / total : 0, hr = s.h0 + (s.h1 - s.h0) * (s.steps ? Math.min(s.steps, Math.floor(f * s.steps + 1e-9) + 1) / s.steps : f);   // (steps: level treads, each a riser above the last)
     h = best <= hw ? hr : hr + (h - hr) * smooth((best - hw) / sh);
+  }
+  for (const s of shapes) {   // the cuts: a stream's bed, a pool's hollow (they only lower)
+    if ((s.type !== 'channel' && s.type !== 'basin') || outside(s, x, y)) continue;
+    let bed, k;   // k: 0 in the cut, 1 at the rim's outer edge
+    if (s.type === 'channel') {
+      lineNear(x, y, s.pts, tmp, _ln); const i = _ln[1], t = _ln[2], w = s.hw[i] + (s.hw[i + 1] - s.hw[i]) * t;
+      bed = s.bed[i] + (s.bed[i + 1] - s.bed[i]) * t; k = Math.max(0, _ln[0] - w) / s.bank;
+    } else {
+      const u = (x - s.x) / s.rx, v = (y - s.y) / s.ry, r = Math.hypot(u, v);
+      bed = s.h; k = r <= 1 ? 0 : (r - 1) * r / Math.hypot(u / s.rx, v / s.ry) / s.rim;   // (metres past the rim, first order)
+      if (s.clip !== undefined && y < s.clip) k = Math.max(k, (s.clip - y) / s.clipRim);   // clip: no hollow north of it (a lip over the pool)
+    }
+    if (h <= bed || k >= 1) continue;
+    h = bed + (h - bed) * smooth(k);
   }
   return h;
 }
 
+// a stepped ramp's treads: risers of about RISER m (under a lattice cell's WALK rise, .175 m: not steep, walked up in stride)
+export const RISER = .165, stepsOf = (h0, h1) => Math.max(1, Math.round(Math.abs(h1 - h0) / RISER));
+// the shapes ready to evaluate: copies (the caller's stay as given) with their reach, a ramp end given as null set to the ground
+// there (the field without the ramps)
+function resolve(shapes, mask) {
+  const tmp0 = [0, 0], own = shapes.map(s => ({...s, _reach: reachOf(s)})), noRamps = own.filter(s => s.type !== 'ramp');
+  for (const s of own) if (s.type === 'ramp') {
+    if (s.h0 == null) s.h0 = evalShapes(noRamps, mask, s.pts[0][0], s.pts[0][1], tmp0);
+    if (s.h1 == null) s.h1 = evalShapes(noRamps, mask, s.pts.at(-1)[0], s.pts.at(-1)[1], tmp0);
+    if (s.steps === true) s.steps = stepsOf(s.h0, s.h1);
+  }
+  return own;
+}
+// the shapes' height at any point, unbaked (a layout working out where a stream's bed lies in the ground it cuts): (x, y) -> m
+export function sampler(shapes, mask = null) {
+  const own = resolve(shapes, mask), tmp = [0, 0];
+  return (x, y) => evalShapes(own, mask, x, y, tmp);
+}
+
 export function createField({bounds, shapes = [], mask = null, cell = CELL}) {
-  // a ramp end given as null starts / ends at the ground there (the field without the ramps)
-  const tmp0 = [0, 0], noRamps = shapes.filter(s => s.type !== 'ramp');
-  shapes = shapes.map(s => s.type !== 'ramp' || (s.h0 != null && s.h1 != null) ? s : {...s,
-    h0: s.h0 ?? evalShapes(noRamps, mask, s.pts[0][0], s.pts[0][1], tmp0), h1: s.h1 ?? evalShapes(noRamps, mask, s.pts.at(-1)[0], s.pts.at(-1)[1], tmp0)});
+  shapes = resolve(shapes, mask);
   // the lattice: whole multiples of cell covering the bounds
   const x0 = Math.floor(bounds.x0 / cell) * cell, y0 = Math.floor(bounds.y0 / cell) * cell;
   const nx = Math.ceil((bounds.x1 - x0) / cell) + 1, ny = Math.ceil((bounds.y1 - y0) / cell) + 1;

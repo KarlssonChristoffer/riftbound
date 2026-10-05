@@ -128,7 +128,8 @@ export async function create(host) {
     lights: () => look.lights(),
     hd(q2, sc) {
       const t0 = now();
-      if (!host.hudOff && (game()?.mode === 'run' || game()?.mode === 'sandbox')) { slot.draw(q2, sc, sim.S); labels(q2, sc); previewLabel(q2, sc); lassoHint(q2, sc); }
+      // (the labels hang on the world: slid with the pixel image, G.hdShift, the sub-pixel camera; the slot stays put)
+      if (!host.hudOff && (game()?.mode === 'run' || game()?.mode === 'sandbox')) { slot.draw(q2, sc, sim.S); q2.save(); host.G.hdShift?.(q2, sc); labels(q2, sc); previewLabel(q2, sc); lassoHint(q2, sc); q2.restore(); }
       const ms = tU + tF + now() - t0; tU = 0; F.ms = F.ms * .95 + ms * .05;
     },
     onKey(k, e) {

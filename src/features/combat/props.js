@@ -37,7 +37,7 @@ export function extraProps(ents) {
 export async function createPropPhysics(host, core) {
   const P = host.player;
   const T = {
-    rollFric: 1.1, slideFric: 7, pushV: 1.7, pushDelay: .16, kick: 1.1, kickMin: 2.2, kickMax: 6, tipSpeed: 4.2, tipMax: 5.5, arrowTip: 2.6, tiltT: .09,
+    rollFric: 1.1, slopeG: 4.6, slideFric: 7, pushV: 1.7, pushDelay: .16, kick: 1.1, kickMin: 2.2, kickMax: 6, tipSpeed: 4.2, tipMax: 5.5, arrowTip: 2.6, tiltT: .09,
     blast: 7.5, impact: 2.2, boomImpact: 2.1, flow: .9, sinkT: .45, idleReset: 22, resetAway: 6,
     sinkCrate: CRATE_H - .02, sinkFloat: .22,   // 3D: how deep a sunk crate / a floating barrel sits (the arena: .5 / .22)
   };
@@ -130,6 +130,12 @@ export async function createPropPhysics(host, core) {
         const hard = q.vh < -5; q.vh = hard && q.tip ? 2.2 : 0; if (q.vh) q.h = .001;
         if (hard) { host.events.push({type: 'prop.land', prop: true, x: q.x, y: q.y, kind: q.kind}); if (q.kind === 'barrel_x') strike(q, 99, 0, 1); else strike(q, 8, 0, 1); }
       }
+    }
+    // walkable terrain: a barrel lying on a slope rolls down it (gravity along the fall line, slopeG m/s^2 at 45 deg, beats its rolling
+    // friction on anything steeper than ~1 in 6); upright ones and crates stay where they stand
+    if (TERRAIN_ON && q.tip && !q.h) {
+      const gx = (host.elev(q.x + .15, q.y) - host.elev(q.x - .15, q.y)) / .3, gy = (host.elev(q.x, q.y + .15) - host.elev(q.x, q.y - .15)) / .3, sl = Math.hypot(gx, gy);
+      if (sl * T.slopeG > T.rollFric * 1.4 && sl < 3) { const a = T.slopeG * Math.SQRT2 / Math.sqrt(1 + sl * sl) * dt; q.vx -= gx * a; q.vy -= gy * a; setAxis(q); }
     }
     const s = speedOf(q);
     if (s < .04) { q.vx = q.vy = 0; if (!q.stone && (q.tip || Math.hypot(q.x - q.home3[0], q.y - q.home3[1]) > .3)) q.idle += dt; return; }

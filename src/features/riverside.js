@@ -65,6 +65,7 @@ export async function create(host) {
 
   // ================================================================ where the plants stand (the sim: once, from a fixed seed)
   const marks = (host.layout.marks || []).filter(m => m.type === 'path'), plateaus = host.layout.plateaus || [];
+  const outMouth = host.layout.mesa && host.layout.outflow ? host.layout.outflow.pts.at(-1)[1] : null;
   const segD = (x, y, ax, ay, bx, by) => { const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1))); return hypot(x - ax - dx * t, y - ay - dy * t); };
   const pathD = (x, y) => { let d = 1e9; for (const m of marks) for (let i = 0; i + 1 < m.pts.length; i++) d = Math.min(d, segD(x, y, m.pts[i][0], m.pts[i][1], m.pts[i + 1][0], m.pts[i + 1][1]) - m.w / 2); return d; };
   const shrooms = T0.shrooms.map(([y, side, m]) => [S.cx(y) + side * (S.w(y) / 2 + m), y]);
@@ -74,6 +75,7 @@ export async function create(host) {
     if (Math.abs(y - S.narrows.y) < T0.narrows) return true;
     for (const s of S.stones) if (Math.abs(y - s.y) < T0.stones) return true;
     if (side > 0) for (const q of plateaus) if (x > q.x0 - 2 && y > q.y0 - .5 && y < q.y1 + 1.5) return true;
+    if (side > 0 && outMouth !== null && Math.abs(y - outMouth) < .9) return true;   // (walkable terrain: the pool's outflow meets the bank there)
     return false;
   }
   const NEAR = [];

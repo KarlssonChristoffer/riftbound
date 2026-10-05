@@ -8,10 +8,10 @@
 //   blocks him, what he can interact with), the camera, the hero's atlas, features' aimTarget / interact.
 // EMITS (via player.js): player.step / land / jump / splash (turned into world coordinates here; core/events.js).
 //   const pa = createPlayerHost({...}); const {PL, P, player} = pa
-import {createPlayer} from './player.js';
+import {createPlayer, BUSY} from './player.js';
 import {createGun} from './gun.js';   // a gun loadout's revolver (player.js H.gun)
 import {createLasso} from './lasso.js';   // the equipment experiment's lasso in his hands (player.js H.lasso)
-import {walkable, elev, inStream, PLATEAUS, steep, TERRAIN_ON} from '../../world/world.js';
+import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON} from '../../world/world.js';
 
 const R_BODY = .25;
 
@@ -35,15 +35,34 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
       : p.r && Math.hypot(p.x - x, p.y - y) < p.r + R_BODY)) return true;
     return false;
   }
+  // the ground's slope at view-frame (x, y): out = [gx, gy] its rise per metre along the view's x and y, out[2] = rise / run the steepest
+  // way (no allocation: the world <-> view turn inline, viewxf's)
+  const E2 = .125;
+  function gradV(x, y, out) {
+    const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw), X = x * c + y * s, Z = -x * s + y * c;
+    const gx = (elev(X + E2, Z) - elev(X - E2, Z)) / (2 * E2), gz = (elev(X, Z + E2) - elev(X, Z - E2)) / (2 * E2);
+    out[0] = gx * c - gz * s; out[1] = gx * s + gz * c; out[2] = Math.hypot(gx, gz); return out;
+  }
   // the plateau as the player sees it. Exact when the camera faces north; turned, the climb spot is handled here
   const plateausV = PLATEAUS.map(q => ({...q}));
-  function syncPlateaus() { PLATEAUS.forEach((q, i) => Object.assign(plateausV[i], Math.abs(cv.yaw) < 1e-6 ? {...q} : {h: q.h, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, climbs: []})); }
+  // the climbs as the player sees them: a face is climbed in the camera's frame at the yaw that looks straight at it (the face then lies
+  // to the north there, as player.js climbs); at any other yaw it is out of his reach and climbSpotW / climbAssist handle it here
+  const climbsV = CLIMBS.map(c => ({x: 1e9, y: 0, w: c.w, h0: c.h0, h1: c.h1, reach: c.reach, cos: Math.cos(c.yaw), sin: Math.sin(c.yaw)}));
+  const yawOff = a => { let d = a - cv.yaw; if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI; return d; };
+  function syncPlateaus() {
+    PLATEAUS.forEach((q, i) => Object.assign(plateausV[i], Math.abs(cv.yaw) < 1e-6 ? {...q} : {h: q.h, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, climbs: []}));
+    for (let i = 0; i < CLIMBS.length; i++) {   // (viewxf toView at the climb's own yaw)
+      const c = CLIMBS[i], v = climbsV[i];
+      if (Math.abs(yawOff(c.yaw)) < 1e-6) { v.x = c.x * v.cos - c.y * v.sin; v.y = c.x * v.sin + c.y * v.cos; } else v.x = 1e9;
+    }
+  }
   const PL = createPlayer({
-    ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, mods, plateaus: plateausV, wind: windV, terrain: TERRAIN_ON,
+    ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, mods, plateaus: plateausV, climbs: climbsV, wind: windV, terrain: TERRAIN_ON,
     weapon: () => hero.weapon, gun: createGun,   // the loadout's weapon (content/weapons.js) and, for a gun, its revolver
     lasso: createLasso, yaw: () => cv.yaw,      // the lasso's hands (idle unless features/equip/lasso.js uses them); the camera's yaw (its swing is in the world)
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
     elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
+    grad: TERRAIN_ON ? gradV : null,   // walkable terrain's slope (player.js SLIDE)
     inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
     pixelBow: () => !optOf().hdBow,   // J: the bowstring + nocked / flying arrows at art pixels (default) or the HD overlay
     onShoot: a => { const [x, y] = toWorld(a.x, a.y), [vx, vy] = toWorld(a.vx, a.vy); proj.spawn({...a, x, y, vx, vy}); },
@@ -82,6 +101,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     if (P.rollDir) P.rollDir = rot(...P.rollDir);
     if (P.back) P.back = rot(...P.back);
     if (P.leap) { [P.leap.x0, P.leap.y0] = rot(P.leap.x0, P.leap.y0); [P.leap.dx, P.leap.dy] = rot(P.leap.dx, P.leap.dy); }
+    if (P.vault) { [P.vault.x0, P.vault.y0] = rot(P.vault.x0, P.vault.y0); [P.vault.dx, P.vault.dy] = rot(P.vault.dx, P.vault.dy); }
     // (the lasso's swing keeps its state in the world and writes P from it every step: nothing of it to turn)
     faceAcc -= d / (2 * Math.PI / ND);
     const n = Math.round(faceAcc);
@@ -92,13 +112,14 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   // wouldn't be bit for bit, and the sim must leave photo mode as it came in)
   let held = null;
   function hold() {
-    const L = P.leap;
-    held = {x: P.x, y: P.y, vx: P.vx, vy: P.vy, rollDir: P.rollDir, back: P.back, leap: L ? [L.x0, L.y0, L.dx, L.dy] : null, face: P.face, want: P.want, faceAcc};
+    const L = P.leap, V = P.vault;
+    held = {x: P.x, y: P.y, vx: P.vx, vy: P.vy, rollDir: P.rollDir, back: P.back, leap: L ? [L.x0, L.y0, L.dx, L.dy] : null, vault: V ? [V.x0, V.y0, V.dx, V.dy] : null, face: P.face, want: P.want, faceAcc};
   }
   function release() {
     const h = held; if (!h) return; held = null;
     P.x = h.x; P.y = h.y; P.vx = h.vx; P.vy = h.vy; P.rollDir = h.rollDir; P.back = h.back; P.face = h.face; P.want = h.want; faceAcc = h.faceAcc;
     if (h.leap && P.leap) [P.leap.x0, P.leap.y0, P.leap.dx, P.leap.dy] = h.leap;
+    if (h.vault && P.vault) [P.vault.x0, P.vault.y0, P.vault.dx, P.vault.dy] = h.vault;
   }
   // the player's events are in the view frame: into the world's
   function toWorldEvent(e) {
@@ -134,24 +155,33 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     for (const p of ents().near(px, py, bd, nearI)) if (p.interact && !p.opened && Math.abs((p.z || 0) - P.z) < .5) { const d = Math.hypot(p.x - px, p.y - py); if (d < bd) { bd = d; best = p; } }
     return best;
   }
-  // climbing at any camera angle: the climb spot is checked in the world; the climb itself runs at yaw 0 (the camera
-  // eases there while you climb, and back to where it was after)
-  function climbSpotW() {   // player.js climbSpot, in the world
+  // climbing at any camera angle: the climb spot is checked in the world; the climb itself runs at the yaw that faces its wall (the
+  // camera eases there while you climb, and back to where it was after)
+  const CS = {c: null, dir: 0};
+  function climbSpotW() {   // player.js climbSpot, in the world: -> {c (layout.js CLIMBS), dir: 1 up / -1 down} (one object, reused) or null
     const x = player.x, y = player.y;
-    for (const q of PLATEAUS) for (const c of q.climbs || []) {
-      if (Math.abs(x - c.x) > c.w / 2 + .45) continue;
-      if (P.z < .05 && y >= q.y1 - .05 && y < q.y1 + 1.3) return true;
-      if (Math.abs(P.z - q.h) < .05 && y <= q.y1 && y > q.y1 - 1.3) return true;
+    for (const c of CLIMBS) {
+      const dx = x - c.x, dy = y - c.y, o = dx * c.nx + dy * c.ny, a = dy * c.nx - dx * c.ny;   // (o: out from the face, a: along it)
+      if (Math.abs(a) > c.w / 2 + .45) continue;
+      if (P.z < c.h0 + .05 && o >= -.05 && o < 1.3) { CS.c = c; CS.dir = 1; return CS; }
+      if (Math.abs(P.z - c.h1) < .05 && o <= 0 && o > -1.3) { CS.c = c; CS.dir = -1; return CS; }
     }
-    return false;
+    return null;
   }
-  const A = {assist: null};   // {back: yaw to return to, phase: 'in' | 'climb' | 'back'}
+  // E at a climb spot while the camera looks another way: the camera eases round to face the wall, then he climbs (true: started)
+  function climbAssist() {
+    if (nearProp() || BUSY.has(P.state)) return false;
+    const cs = climbSpotW(); if (!cs || Math.abs(yawOff(cs.c.yaw)) <= 1e-6) return false;
+    A.assist = {back: cv.yaw, phase: 'in', to: cs.c.yaw}; return true;
+  }
+  const A = {assist: null};   // {back: yaw to return to, phase: 'in' | 'climb' | 'back', to: the yaw to climb at (0)}
   function stepAssist(dt, ny) {
     const assist = A.assist, climbing = P.state === 'climb' || P.state === 'mantle';
     if (assist.phase === 'in') {
-      ny = Math.abs(cv.yaw) < .004 ? 0 : cv.yaw * Math.exp(-dt * 12);
-      if (ny === 0) { cv.setYaw(0); syncPlateaus(); PL.onInteractKey(); PL.onInteractUp(); assist.phase = P.state === 'climb' ? 'climb' : 'back'; }
-    } else if (assist.phase === 'climb') { ny = 0; if (!climbing) assist.phase = 'back'; }
+      const to = assist.to || 0, d = yawOff(to);
+      ny = Math.abs(d) < .004 ? to : to - d * Math.exp(-dt * 12);
+      if (ny === to) { cv.setYaw(to); syncPlateaus(); PL.onInteractKey(); PL.onInteractUp(); assist.phase = P.state === 'climb' ? 'climb' : 'back'; }
+    } else if (assist.phase === 'climb') { ny = assist.to || 0; if (!climbing) assist.phase = 'back'; }
     else {
       const d = Math.atan2(Math.sin(assist.back - cv.yaw), Math.cos(assist.back - cv.yaw));
       ny = Math.abs(d) < .002 ? assist.back : cv.yaw + d * (1 - Math.exp(-dt * 8)); if (Math.abs(d) < .002) A.assist = null;
@@ -176,7 +206,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     const [vx, vy] = toView(l0 + (x - l0) * k, l1 + (y - l1) * k); P.x = vx; P.y = vy; P.z = l2 + (z - l2) * k;
   }
   function lerpEnd() { if (!lerping) return; P.x = c0; P.y = c1; P.z = c2; lerping = false; }
-  return {PL, P, player, blocked, syncPlateaus, turnFrame, hold, release, toWorldEvent, hoverTarget, nearProp, climbSpotW, stepAssist, teleport, snap, lerpBegin, lerpEnd,
+  return {PL, P, player, blocked, syncPlateaus, turnFrame, hold, release, toWorldEvent, hoverTarget, nearProp, climbSpotW, climbAssist, stepAssist, teleport, snap, lerpBegin, lerpEnd,
     tick() { hoverKey++; }, get assist() { return A.assist; }, set assist(v) { A.assist = v; },
     // (views) the part of a facing step the camera has turned since P.face last moved with it (turnFrame's remainder):
     // his facing in the world without the camera's 16-step rounding is (P.face + faceRest) x 360 / ND + yaw (view/livehero.js)

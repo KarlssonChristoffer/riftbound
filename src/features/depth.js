@@ -424,7 +424,9 @@ export async function create(host) {
     return f.tpl;
   }
   function drawShafts() {
-    if (!TUNE.shafts.on) return 0;
+    // (by day the real sunbeams of render/godrays.js take over where they are on: these painted ones stand at fixed spots and
+    // ignore the shadows. At night, with no sun shadow map to march, the painted moonbeams of frost / rift stay)
+    if (!TUNE.shafts.on || (host.G?.godrays?.enabled && timeName() !== 'night')) return 0;
     ensureShafts(); if (!SH.col) return 0;
     const z = V.z, reach = (TUNE.shafts.lenMax + 30) * z;
     let n = 0, q = null;

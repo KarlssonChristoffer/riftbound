@@ -24,6 +24,7 @@ import {hypot2, clearArray} from '../core/mathx.js';
 import {cssRGBA} from '../core/color.js';
 import {createGLStats} from './glstats.js';
 import {createLitterSim} from './litter.js';
+import {createGodrays} from './godrays.js';
 
 export const DEG = Math.PI / 180;
 // a uniform-shaped holder whose value is only ever a number (a card's sway: written every frame). Its own class keeps
@@ -202,6 +203,63 @@ float wlay(float a, float s, float ph, float ca, float cs, float seed) {
   float d = s - mod(floor(ph), 768.);
   return wvn(vec2((a + sin(d * .2618) * 1.3) / ca + seed, d / cs), 768. / cs);
 }
+// DEPTH, BED AND CONTACT FOAM (world/waterbed.js bakes uWBed over the water's box, once per world; uWBedOn 0 = none and the old
+// water runs untouched: ?water=0, the lava). A moving texel's depth BAND (uWCut) gives its surface's base tone (uWTone) and how
+// much water covers the bed there (uWOp): clear light shallows where the bed's own texel shows through, tinted (uWTint), dark deep
+// water where it doesn't. The bed is read through the surface's ripple (REFRACTION): its lookup moves by WHOLE texels, a field that
+// travels with the flow at the pattern's own whole-texel steps, a texel in the shallows, up to uWCut.w in the deep, so pebbles wobble
+// a pixel at a time. Light crests stay surface over the bed (uWLook.x). Where a thing stands in the water (the bake's contact rings)
+// a 1-texel foam line hugs it, its gaps wandering, and a ripple pulses out from it a texel per step; the player's feet (uWFoot)
+// ring the same way while he wades (his feet at the surface, on water). All of it in world texels and the stepped clock: still under
+// camera turns and pans
+uniform sampler2D uWBed; uniform float uWBedOn;
+uniform vec4 uWBedR;                 // the box: its first texel (x, y) and size (w, h)
+uniform vec4 uWCut;                  // the depth bands' cuts (0..1): very shallow | shallow | mid | deep; w = the refraction's reach (texels)
+uniform vec4 uWOp, uWTone;           // per band: the water's cover over the bed (0 = the bed .. 1 = water), the surface's base tone
+uniform vec4 uWLook;                 // x: the light crests' cover, y: how much of the bed's own hue shows (0: only its light and dark), z: the bed's mean luminance,
+                                     // w: how much darker the dark layer must be to take the deep a step darker still (0 = as dark as it darkens the rest)
+uniform vec3 uWTint, uWFoam;         // the bed seen through the water (multiplied), the foam
+uniform vec4 uWFoot;                 // the player's feet: x, y, z (m); w 1 = known
+uniform vec2 uWorld, uOrigin;        // (SURF_VS's planar mapping: where his feet are in texels)
+vec4 wBed(ivec2 ti) { return texelFetch(uWBed, clamp(ti - ivec2(uWBedR.xy), ivec2(0), ivec2(uWBedR.zw) - 1), 0); }
+int wBand(vec4 b) { float d = float(int(b.a * 255. + .5) >> 3) / 31.; return d < uWCut.x ? 0 : d < uWCut.y ? 1 : d < uWCut.z ? 2 : 3; }
+// wPrep, once per fragment from its own texel (the smooth sampling's four neighbours share it: the shader stays small, wTexel is
+// inlined five times): the ripple's slope (wRg, -.5 .. .5: x 2.4 x the band's reach = the bed's offset, whole texels), the foam's
+// dashes (wDash: the contact line, its ripple, the feet's ring, its ripple), the ripple's ring (wPu) and where his feet are (wFt: texel
+// x, y; z 1 = he wades: his feet at the surface, on water)
+vec2 wRg; vec4 wDash; float wPu; vec3 wFt;
+void wPrep(ivec2 ti) {
+  vec4 w = texelFetch(uWater, ti, 0);
+  int rc = int(w.r * 255. + .5), gg = int(w.g * 255. + .5);
+  float s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .5, d = s - mod(floor(uWPhase * uWA.x * float(rc & 15) * .125), 768.);
+  wRg = vec2(wvn(vec2(a / 5. + 1.3, d / 12.), 64.), wvn(vec2(a / 5. + 6.1, d / 12. + 2.7), 64.)) - .5;
+  float st = mod(floor(uWPhase * 4.), 96.); vec2 p = vec2(ti);   // 4 steps a second
+  wPu = 2. + mod(st, 5.);   // the ripple's ring, 2 .. 6 texels out
+  wDash = vec4(wvn(p / 2.6 + vec2(st * .37, 3.1), 1e4), wvn(p / 2.2 + vec2(9.7, st * .29), 1e4), wvn(p / 1.8 + vec2(st * .41, 5.3), 1e4), wvn(p / 2. + vec2(1.3, st * .33), 1e4));
+  vec2 f = (uWFoot.xz - uOrigin) / uWorld * uTexSize;
+  float dz = uWFoot.y - vW.y;   // (his feet stand on the field, a few cm over the creek's carved bed; the river's surface is 18 cm under its bank)
+  wFt = vec3(f, uWFoot.w > .5 && dz > -.05 && dz < .15 && texelFetch(uWater, clamp(ivec2(f), ivec2(0), ivec2(uTexSize) - 1), 0).r > .5 ? 1. : 0.);
+}
+// the contact foam on the fragment's texel ti (main, once: the line is crisp even while the smooth sampling blends): c = texels from
+// what stands in the water (1 = touching .. 7; 0 none): the line against it, a few gaps drifting round, and its ripple; the same
+// round the player's feet (r texels from them) while he wades
+vec3 wFoam(vec3 res, ivec2 ti, int c) {
+  float r = wFt.z > .5 ? length(vec2(ti) + .5 - wFt.xy) : 99.;
+  bool line = (c == 1 && wDash.x > .27) || (r >= 8.5 && r < 9.5 && wDash.z > .25);   // (his: round both boots, just past his contact shadow)
+  bool ring = (c > 1 && float(c) == wPu && wDash.y > .5 - .05 * wPu) || (abs(r - 8. - wPu * 1.5) < .5 && wDash.w > .45);
+  return mix(res, uWFoam, line ? 1. : ring ? .55 : 0.);
+}
+// the moving texel's colour over its bed: t the pattern's tone, t0 its band's base, h / l the light / dark layers
+vec3 wDeep(vec3 res, int t, int t0, int band, float h, float l, vec4 bd, ivec2 ti) {
+  if (band == 3 && t == t0 && l > uWB.y + uWLook.w && h <= uWB.x && t0 < 3) res = uWRamp[t0 + 1];   // the deep's dark streaks go a step darker
+  float op = t < t0 ? max(uWOp[band], uWLook.x) : uWOp[band];
+  float k = band == 0 ? 1. : band == 1 ? max(1., uWCut.w - 1.) : uWCut.w;   // the refraction's reach: deeper water bends more
+  if (op < .999) {   // the bed through the water: its light and dark on the water's own colour, and a share of its hue, tinted
+    vec3 b = wBed(ti + ivec2(floor(wRg * 2.4 * k + .5))).rgb;
+    res = mix(mix(res * dot(b, vec3(.3, .55, .15)) / uWLook.z, b * uWTint, uWLook.y), res, op);
+  }
+  return res;
+}
 // one ground texel as the water makes it: moving water (state 3) or the painted texel
 vec3 wTexel(ivec2 ti, ivec2 mx) {
   ti = clamp(ti, ivec2(0), mx);
@@ -217,6 +275,8 @@ vec3 wTexel(ivec2 ti, ivec2 mx) {
   // the broad bands drift too: the base tone is read from a texel slid across by a slow wobble that travels with the flow (a band's edge meanders)
   float sw = floor((wvn(vec2(.5, (s - mod(floor(ph * .35), 768.)) / 48.), 16.) - .5) * 7. + .5);
   if (sw != 0.) { vec4 w2 = texelFetch(uWater, clamp(ti + ivec2(int(sw), 0), ivec2(0), mx), 0); int r2 = int(w2.r * 255. + .5); if (r2 >= 192) t = (r2 >> 4) & 3; }
+  vec4 bd = vec4(0.); int band = 3, t0 = t;   // the bed (wDeep): the base tone is the depth band's, read through the same slide
+  if (uWBedOn > .5) { bd = wBed(ti); bool sl = sw != 0. && texelFetch(uWater, clamp(ti + ivec2(int(sw), 0), ivec2(0), mx), 0).r > .745; band = wBand(sl ? wBed(ti + ivec2(int(sw), 0)) : bd); t = t0 = int(uWTone[band]); }
   if (h > uWB.x) t -= 1;
   if (h > uWB.x + .09) t -= 1;
   if (l > uWB.y) t += 1;
@@ -226,6 +286,7 @@ vec3 wTexel(ivec2 ti, ivec2 mx) {
     if (float(ring) == pos && wvn(vec2(3.7, (s - mod(floor(uWPhase * 3.), 768.)) / 8.), 96.) > .42) t = int(uWA.w);
   }
   res = uWRamp[t];
+  if (uWBedOn > .5) res = wDeep(res, t, t0, band, h, l, bd, ti);
   return res;
 }
 // a fall of water: the baked colour is the base; light streaks slide DOWN the sheet in whole texels at their own pace per column,
@@ -321,6 +382,7 @@ void main() {
     int rc = int(texelFetch(uWater, ti, 0).r * 255. + .5);
     if (rc >= 64) {
       wfl = rc >= 128 ? 1. : 0.;   // water: the G-buffer's tone 1
+      if (uWBedOn > .5) wPrep(ti);   // (the bed's ripple and the foam's dashes, once for this texel and its neighbours: WATER_FS)
       vec3 cN = wTexel(ti, mx);
       if (uSmooth <= 0.) c.rgb = cN;
       else {
@@ -328,12 +390,13 @@ void main() {
         vec3 cS = mix(mix(wTexel(i0, mx), wTexel(i0 + ivec2(1, 0), mx), f.x), mix(wTexel(i0 + ivec2(0, 1), mx), wTexel(i0 + ivec2(1, 1), mx), f.x), f.y);
         c.rgb = mix(cN, cS, uSmooth);
       }
+      if (uWBedOn > .5 && rc >= 128) c.rgb = wFoam(c.rgb, ti, int(wBed(ti).a * 255. + .5) & 7);   // (contact foam: WATER_FS)
     }
   }
   // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
   // composite doesn't push them through the season's matrix a second time
   float leaf = 0.;
-  if (uHasLit > .5 && uLitK.x > 0. && uType < 1.5 && wfl < .5) {
+  if (uHasLit > .5 && uLitK.x > 0. && uType < 1.5 && wfl < .5 && all(greaterThanEqual(t, vec2(0.))) && all(lessThan(t, uTexSize))) {   // (none past the map's edge: the ground goes on mirrored there, its last row of leaves would smear)
     ivec2 mx = ivec2(uTexSize) - 1; vec4 lc = leafAt(clamp(ivec2(floor(t)), ivec2(0), mx), mx);
     if (lc.a > 0.) { c.rgb = lc.rgb; leaf = 1.; }
   }
@@ -754,6 +817,7 @@ void main() {
 
 // ---------------------------------------------------------------- shader: lighting / composite
 const NL = 32;
+const MIST_N = 12;   // the mist's water stretches (COMP_FS MIST, G.setMist)
 const COMP_VS = HEAD + `in vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
 const COMP_FS = HEAD + `
 uniform sampler2D tA, tN, tE, tD, tS, tX, uRamps;
@@ -825,6 +889,74 @@ ivec2 viewTexel(ivec2 p, vec4 M, vec2 o) {   // view pixel p (GL, y up) -> the t
   vec2 c = vec2(float(p.x) + .5, uRes.y - float(p.y) - .5) - o;
   return ivec2(floor(vec2(M.x * c.x + M.y * c.y, M.z * c.x + M.w * c.y)));
 }
+// ---- MIST (features/mist.js sets it every frame it shows it: G.setMist; ?mist=0 or the feature off: the old screen haze). A layer
+// lying LOW in the world: its top is a height (m) that wanders with a noise drifting on the wind and rises over the water (the
+// nearest stretch's water + uMistW.x, falling off over uMistW.y m of bank). A pixel shows the world point P through the mist the view
+// ray crosses on its way down to it (top - P.y m of it: the ravine's floor through 3-4 m, the meadow through a film, the plateau's top
+// through none), as a veil 1 - exp(-sigma t) cut into uMistQ.x hard LEVELS, flat, the edge between two dithered by a 4x4 Bayer
+// matrix fixed to the WORLD (indexed from the world origin's screen pixel, uMistO.xy, in world texels: uMistQ.z px each; the camera
+// pans in whole pixels, so the pattern stays on the ground). Its colour is the mood's light (uMistC), lit by the lamps round it.
+// mistAt(P) is the medium's local density for light through it (god rays): uMistK.x the air's own, more inside the mist
+uniform vec4 uMist;    // on, the top over open ground (m), sigma (1 / m), the thickest level's opacity
+uniform vec4 uMistC;   // colour (rgb), how much of the lamps' light round it the mist takes
+uniform vec4 uMistW;   // the rise over water (m), its reach over the bank (m), the noise's wander (m), its scale (1 / m)
+uniform vec4 uMistD;   // the drift (m: added to the noise's ground point), the aerial term (far haze toward the mist), the view's half depth (m)
+uniform vec4 uMistO;   // the world origin's screen pixel (GL), the view's centre on the ground (x, z)
+uniform vec4 uMistQ;   // levels, the dithered edge's half width (px), the dither's cell (px: a world texel), the water stretches in use
+uniform vec4 uMistK;   // the medium's density 0..1 (the air: fog weather 1, a clear noon ~0), the highest the mist can reach (m), the far haze's share
+uniform vec4 uMistS[${MIST_N}]; uniform vec4 uMistH[${MIST_N}];   // the water's stretches: (x0, z0, x1, z1); (half width, its water's height, 0, 0)
+float mistTop(vec2 g) {
+  vec2 q = g * uMistW.w + uMistD.xy;
+  // (the noise's contrast is raised: banks with an edge, open ground between them, instead of a slope the levels dither all over)
+  float n = vnC(q) * .65 + vnC(q * 2.7 + vec2(5.1, 1.3)) * .35, top = uMist.y + uMistW.z * (smoothstep(.28, .72, n) - .5) * 2.;
+  if (uMistQ.w < .5) return top;
+  // over the water it gathers in banks (a slower noise: some stretches lie thick, some clear) and spills over the bank unevenly
+  float nw = vnC(q * .45 + vec2(9.7, 3.1)), rise = uMistW.x * (.3 + 1.2 * nw), reach = uMistW.y * (.65 + .7 * n);
+  for (int i = 0; i < ${MIST_N}; i++) {
+    if (float(i) >= uMistQ.w) break;
+    vec4 s = uMistS[i]; vec2 ab = s.zw - s.xy, pa = g - s.xy;
+    float t = clamp(dot(pa, ab) / max(dot(ab, ab), 1e-4), 0., 1.), d = length(pa - ab * t) - uMistH[i].x;
+    float f = 1. - smoothstep(0., reach, d);
+    // (past its reach a stretch sinks away, so high water, the creek on the mesa, never lifts the mist over the land round it)
+    top = max(top, uMistH[i].y + rise * f * f - 3. * (1. - f));
+  }
+  return top;
+}
+float mistAt(vec3 P) { return uMist.x < .5 ? 0. : max(uMistK.x, P.y < uMistK.y ? smoothstep(0., .4, mistTop(P.xz) - P.y) : 0.); }
+${BAYER}
+// the veil at ground point g, height y, in levels (level k shows where it is >= k; <= 0 above the top): 1 - exp(-sigma t) (+ .4: the
+// last level is reached, not only approached), and billows: where it lies deep (the veil near 1, the ravine brimming with it) its own
+// slower noise heaps it a level up or thins it a level down in patches, drifting with the rest, so a deep fill isn't one flat tone
+float mistV(vec2 g, float y) {
+  float t = mistTop(g) - y; if (t <= 0.) return t;
+  float w = 1. - exp(-uMist.z * t), nb = vnC(g * .42 + uMistD.xy * 2.5 + vec2(17.3, 4.1));
+  return w * (uMistQ.x + .4) + w * w * (smoothstep(.3, .7, nb) - .5) * 1.4;
+}
+// shade: the sun shadow on the point (0..1 x its opacity); ny: its normal's y (ground-like above .5, else a face, a card, a figure)
+vec3 mistOver(vec3 col, vec3 P, vec3 pts, float shade, float ny) {
+  // the far haze: lighting's fog (uFog, x uMistK.z), by how far behind the view's centre the pixel's GROUND lies (0 at the view's bottom
+  // edge, 1 at its top: the old screen gradient on the ground; a tree takes the haze of the ground it stands on, not of its screen row)
+  vec2 back = -normalize(uView.xz);
+  float far = clamp(dot(P.xz - uMistO.zw, back) / (2. * uMistD.w) + .5, 0., 1.);
+  col += uFog.rgb * uFog.a * (.4 + 1.2 * far) * uMistK.z;
+  // (the lamps round it light it, and the lightning; where a shadow falls on the ground the mist over it lies in it too, dimmer)
+  vec3 mc = uMistC.rgb * (1. - .35 * shade) + pts * uMistC.a + uFlashC * .8;
+  col = mix(col, mc, uMistD.z * far);
+  if (P.y >= uMistK.y) return col;
+  float v = mistV(P.xz, P.y); if (v < .5) return col;
+  // flat levels, dithered only along the EDGE between two: within uMistQ.y px of it (the veil's change over one pixel, from the world one
+  // pixel to the right and one up the screen: along the ground, or up a face), so a level never shows as a pattern over an area; where
+  // the veil barely changes the edge is a clean line, where it jumps (a step, an object's outline) it is left crisp
+  float L = uMistQ.x, lv = clamp(floor(v), 0., L), k = clamp(floor(v + .5), 1., L), e = v - k;
+  if (abs(e) < .15) {
+    float ppx = uWPx.y; vec2 right = vec2(-back.y, back.x);
+    float gx = abs(mistV(P.xz + right / ppx, P.y) - v);
+    float gy = abs((ny > .5 ? mistV(P.xz + back / (ppx * .81915), P.y) : mistV(P.xz, P.y + 1. / (ppx * .93969))) - v);
+    float gp = max(gx, gy), dp = e / max(gp, 1e-4);   // px past the edge (+ inside the upper level)
+    if (gp < .5 && abs(dp) < uMistQ.y) lv = k - (bayer(ivec2(floor((gl_FragCoord.xy - uMistO.xy) / uMistQ.z))) < .5 + .5 * dp / uMistQ.y ? 0. : 1.);
+  }
+  return mix(col, mc, uMist.w * lv / L);
+}
 vec4 reflAt(ivec2 p, float hw, out vec3 rE) {   // the mirrored albedo (a = 1: found) seen at p over water at height hw
   rE = vec3(0.);
   int kMax = int(uRfV.z), H = int(uRes.y);
@@ -837,7 +969,10 @@ vec4 reflAt(ivec2 p, float hw, out vec3 rE) {   // the mirrored albedo (a = 1: f
     float ny = (float(q.y) + .5) / uRes.y * 2. - 1.;   // (the projection is affine: a pixel's world height is linear in ndc and depth)
     float Qy = uInvPV[0][1] * nx + uInvPV[1][1] * ny + uInvPV[2][1] * (dq * 2. - 1.) + uInvPV[3][1];
     float d = 2. * (Qy - hw) * uRfW.x - float(k);
-    if (d >= -.5 && prev < -.5) {
+    // the crossing has to lie ON what is there (d near 0: a surface goes through the mirror height between these rows). A jump from
+    // below straight to far above is a thing in the AIR (the leaping Ranger, an overhanging crown): the mirrored ray passed under it,
+    // and taking its lowest pixel smeared that pixel down to the water as a dark column. Search on past it instead
+    if (d >= -.5 && d < 1.5 + 1.5 * uRfV.y && prev < -.5) {
       // the world's things (props, trees, their cards, the character), not the batched sprites (obj 9: riverside plants, lily
       // pads lying on the water, wildlife, decor) nor particles (obj -1): what depth.js mirrored
       vec4 aq = texelFetch(tA, q, 0); int tq = int(aq.a * 255. + .5) / 4; float ob = texelFetch(tN, q, 0).w;
@@ -1112,7 +1247,8 @@ void main() {
     col = mix(col, airAt(v), 1. - exp(-dist * uCine.w));
   }
 #else
-  col += uFog.rgb * uFog.a * (.4 + 1.2 * gl_FragCoord.y / uRes.y);       // haze, stronger toward the far (top) edge
+  if (uMist.x > .5) col = mistOver(col, P, pts, sh * uShadowA, N.y);      // the world's mist + the far haze by depth (MIST above)
+  else col += uFog.rgb * uFog.a * (.4 + 1.2 * gl_FragCoord.y / uRes.y);  // haze, stronger toward the far (top) edge (?mist=0)
 #endif
   // x-ray (the arena's look): where something hides the player, a dim fill with a light 1 px rim. Not where a particle
   // (obj -1) is in front: a dust mote or raindrop over him would otherwise be a lone rim pixel, a bright speck
@@ -1243,6 +1379,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     decalT: {value: null}, decalOn: {value: 0}, decalRect: {value: new THREE.Vector4()}, decalPx: {value: new THREE.Vector2(1, 1)},   // setGroundDecals (SURF_FS)
     // the moving water (setWaterLook at every build, the clock in render()): see WATER_FS
     wPhase: {value: 0}, wA: {value: new THREE.Vector4(0, 3, 12, -1)}, wB: {value: new THREE.Vector4(.8, .76, 0, 2)}, wRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())},
+    // its depth, bed and contact foam (setWaterLook's bed: world/waterbed.js; the feet: setPlayer): see WATER_FS wDeep
+    wBed: {value: null}, wBedOn: {value: 0}, wBedR: {value: new THREE.Vector4(0, 0, 1, 1)}, wCut: {value: new THREE.Vector4(.13, .33, .6, 2)},
+    wOp: {value: new THREE.Vector4(1, 1, 1, 1)}, wTone: {value: new THREE.Vector4(1, 1, 2, 2)}, wLook: {value: new THREE.Vector4(.86, 0, 0, 0)},
+    wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
   };
   const raw = (vs, fs, uniforms, extra = {}) => {
     const m = new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
@@ -1320,7 +1460,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)}, uOrigin: {value: origin || new THREE.Vector2(0, 0)},
     uCliff: {value: cliff}, uHasCliff: {value: cliff ? 1 : 0}, uCliffOff: {value: cliffOff}, uPx: U.px,
     uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)},
-    uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp}, {side: THREE.FrontSide});
+    uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp,
+    uWBed: U.wBed, uWBedOn: U.wBedOn, uWBedR: U.wBedR, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
   // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test
@@ -1857,6 +1998,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uCl: {value: new THREE.Vector4()}, uClM: {value: new THREE.Vector4()}, uClO: {value: new THREE.Vector4()}, uClC: {value: new THREE.Vector3()},
     uHz: {value: new THREE.Vector4()}, uHzM: {value: new THREE.Vector4()}, uHzO: {value: new THREE.Vector4()},
     uAo: {value: new THREE.Vector4()},
+    uMist: {value: new THREE.Vector4()}, uMistC: {value: new THREE.Vector4()}, uMistW: {value: new THREE.Vector4()}, uMistD: {value: new THREE.Vector4(0, 0, 0, 1)},   // features/mist.js (G.setMist)
+    uMistO: {value: new THREE.Vector4()}, uMistQ: {value: new THREE.Vector4(3, .7, 1, 0)}, uMistK: {value: new THREE.Vector4()},
+    uMistS: {value: Array.from({length: MIST_N}, () => new THREE.Vector4())}, uMistH: {value: Array.from({length: MIST_N}, () => new THREE.Vector4())},
     uCine: CINE, uCamP: {value: new THREE.Vector3()}, uSunP: {value: new THREE.Vector4(0, 1, 0, 1)},   // the cinema camera (setCine)
     uSkyZ: {value: new THREE.Vector3()}, uSkyH: {value: new THREE.Vector3()}, uSunCol: {value: new THREE.Vector3()},
   };
@@ -1864,6 +2008,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const compMesh = new THREE.Mesh(tri, raw(COMP_VS, COMP_FS, compU, {depthTest: false, depthWrite: false})); compMesh.frustumCulled = false; compMesh.matrixAutoUpdate = false; compScene.add(compMesh);
   const dummyCam = new THREE.Camera();
+  // GOD RAYS (render/godrays.js): sunbeams marched through the sun's shadow maps, added to the pixel image right after the composite
+  const rays = createGodrays({THREE, renderer, raw, tri, cam: dummyCam, compU});   // (not drawn under the cinema camera: they march the oblique view's parallel rays)
 
   // ---- CONTACT SHADOWS (features/contact.js, every frame it shows them): the arena's contact AO stamps, drawn by the GPU
   // into the x-ray target's G channel (AO_VS / AO_FS) and laid on the ground by the composite (uAo: the mood's shadow colour
@@ -1914,9 +2060,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // HEAT: heat(...) blobs (over flames) add up in heatRT (view res, smooth); where it's warm the blit reads the pixel image
   // a little to the side, in rising ripples, at display resolution: the pixels behind the hot air wobble smoothly
   const heatRT = new THREE.WebGLRenderTarget(VW, VH, {minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false});
-  const BLIT_FS = HEAD + `uniform sampler2D tOut, tHeat; uniform float uDS, uHeat, uT, uZ; uniform vec2 uRes; out vec4 oc;
+  // (uSub: the sub-pixel camera's slide, canvas px, GL rows: setSubpixel below)
+  const BLIT_FS = HEAD + `uniform sampler2D tOut, tHeat; uniform float uDS, uHeat, uT, uZ; uniform vec2 uRes, uSub; out vec4 oc;
 void main() {
-  vec2 p = gl_FragCoord.xy / uDS;
+  vec2 p = (gl_FragCoord.xy + uSub) / uDS;
   if (uHeat > .5) {
     float s = min(.8, texture(tHeat, p / uRes).r);
     if (s > .003) {
@@ -1927,7 +2074,8 @@ void main() {
   }
   oc = texelFetch(tOut, ivec2(clamp(p, vec2(0.), uRes - 1.)), 0);
 }`;
-  const blitU = {tOut: {value: outRT.texture}, tHeat: {value: heatRT.texture}, uDS: {value: 1}, uHeat: {value: 0}, uT: {value: 0}, uZ: {value: 1}, uRes: {value: new THREE.Vector2(VW, VH)}},
+  const blitU = {tOut: {value: outRT.texture}, tHeat: {value: heatRT.texture}, uDS: {value: 1}, uHeat: {value: 0}, uT: {value: 0}, uZ: {value: 1}, uRes: {value: new THREE.Vector2(VW, VH)},
+      uSub: {value: new THREE.Vector2()}},
     blitScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, BLIT_FS, blitU, {depthTest: false, depthWrite: false})); m.frustumCulled = false; m.matrixAutoUpdate = false; blitScene.add(m); }
   const FX_VS = HEAD + `
@@ -1945,7 +2093,7 @@ void main() {
 }`;
   const FX_FS = HEAD + `
 in vec2 vUv; in vec4 vCol;
-uniform sampler2D tD; uniform float uDS, uR, uSoft, uSharp; uniform vec4 uCine;
+uniform sampler2D tD; uniform float uDS, uR, uSoft, uSharp; uniform vec2 uSub; uniform vec4 uCine;
 out vec4 oc;
 #ifdef CINE
 float linD(float z) { return 2. * uCine.y * uCine.z / (uCine.z + uCine.y - (z * 2. - 1.) * (uCine.z - uCine.y)); }   // the cinema camera's depth -> m
@@ -1953,7 +2101,7 @@ float linD(float z) { return 2. * uCine.y * uCine.z / (uCine.z + uCine.y - (z * 
 void main() {
   float r2 = dot(vUv, vUv); if (r2 > 1.) discard;
   float a = max(0., exp(-r2 * uSharp) - exp(-uSharp));
-  float sd = texelFetch(tD, ivec2(gl_FragCoord.xy / uDS), 0).r;
+  float sd = texelFetch(tD, ivec2((gl_FragCoord.xy + uSub) / uDS), 0).r;   // (the scene's pixel under it, as the blit slid it: uSub)
   if (!(sd > .0005 && sd <= 1.)) sd = 1.;   // an unreadable depth (some drivers): draw rather than hide everything
 #ifdef CINE
   float behind = linD(gl_FragCoord.z) - linD(sd);
@@ -1964,7 +2112,7 @@ void main() {
   if (a <= .002) discard;
   oc = vec4(vCol.rgb, vCol.a * a);
 }`;
-  const fxU = {tD: {value: gbuf.depthTexture}, uDS: {value: 1}, uR: {value: R_DEPTH}, uSoft: {value: .14}, uSharp: {value: 3.2}, uPxM: {value: new THREE.Vector2()}, uCine: CINE};
+  const fxU = {tD: {value: gbuf.depthTexture}, uDS: {value: 1}, uR: {value: R_DEPTH}, uSoft: {value: .14}, uSharp: {value: 3.2}, uPxM: {value: new THREE.Vector2()}, uSub: blitU.uSub, uCine: CINE};
   const HEAT_FS = HEAD + `
 in vec2 vUv; in vec4 vCol;
 uniform sampler2D tD; uniform float uR; uniform vec4 uCine;
@@ -2013,17 +2161,17 @@ void main() {
   // gradients, worked out per display pixel and laid over everything in the canvas (they were a display-sized canvas blitted
   // into the HD overlay every frame: ~3% of the frame's JS). Stops as atmos.js painted them: the vignette radial (r .62 -> 1.42 of
   // the half-size, 7 stops, alpha va (i / 6)^1.8 rounded to 4 places), the haze linear over the top 30% (ha, .35 ha at .45, 0)
-  const VG_FS = HEAD + `uniform vec4 uVg; uniform vec3 uVgC, uVhC; uniform vec2 uVgS; out vec4 oc;
+  const VG_FS = HEAD + `uniform vec4 uVg; uniform vec3 uVgC, uVhC; uniform vec2 uVgS; uniform float uVgP; out vec4 oc;
 float vstop(float i) { return floor(uVg.y * pow(i / 6., 1.8) * 1e4 + .5) / 1e4; }
 void main() {
-  vec2 p = vec2(gl_FragCoord.x, uVgS.y - gl_FragCoord.y);   // canvas px, y down (a pixel's centre)
+  vec2 p = vec2(gl_FragCoord.x, uVgS.y + uVgP - gl_FragCoord.y);   // canvas px, y down (a pixel's centre), of what shows (uVgP: the sub-pixel pad's rows below it)
   float ah = 0.;
   if (uVg.z > 0. && p.y < uVgS.y * .3) { float t = p.y / (uVgS.y * .3); ah = t < .45 ? mix(uVg.z, uVg.z * .35, t / .45) : mix(uVg.z * .35, 0., (t - .45) / .55); }
   float x = clamp((length((p - uVgS * .5) / (uVgS * .5)) - .62) / .8, 0., 1.) * 6., i = min(floor(x), 5.), av = mix(vstop(i), vstop(i + 1.), x - i);
   float a = av + ah * (1. - av); if (a <= 0.) discard;   // (the vignette over the haze: source-over, as the canvas did)
   oc = vec4((uVgC * av + uVhC * ah * (1. - av)) / a, a);
 }`;
-  const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}}, vgScene = new THREE.Scene();
+  const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}, uVgP: {value: 0}}, vgScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
   vgScene.matrixAutoUpdate = false;
   let vgFrame = -1;
@@ -2042,6 +2190,27 @@ void main() {
     P[i] = x; P[i + 1] = y; P[i + 2] = z; P[i + 3] = r; C[i] = c[0]; C[i + 1] = c[1]; C[i + 2] = c[2]; C[i + 3] = a; B.n++;
   }
   function setDisplay(s) { gS = Math.max(1, Math.round(s)); applySize(); }
+  // SUB-PIXEL CAMERA (render/camera.js, every frame): setSubpixel(ex, ey, pad): the view is drawn from its target snapped DOWN to
+  // the art lattice; ex, ey (art px, 0..1) is how far the true view lies right of / below it, and the view runs `pad` art px
+  // past what the window shows, right and below. The blit slides the blown-up image left / up by the remainder, rounded to
+  // whole canvas px (sub.x, sub.y <= 0: at most one art px, into the pad), so the view glides at display resolution while the
+  // art stays put; the fx pass draws through the same slide (hdCam), the vignette keeps to what shows. The HD overlay's
+  // world-anchored drawings (bars, bubbles, the HD bow) slide with it: G.hdShift(q, sc) before drawing them; the HUD doesn't.
+  // sub is read by the cursor (core/input.js: what's under it is what's shown)
+  const sub = {x: 0, y: 0, ex: 0, ey: 0, pad: 0};
+  // (the cinema camera, setCine: no slide; it is drawn from its own camera, not the game's snapped view)
+  function subApply() { sub.x = cine ? 0 : -Math.round(sub.ex * DS) || 0; sub.y = cine ? 0 : -Math.round(sub.ey * DS) || 0; blitU.uSub.value.set(-sub.x, sub.y); }
+  function setSubpixel(ex, ey, pad = 0) { sub.ex = ex; sub.ey = ey; sub.pad = pad; subApply(); }
+  // the overlay q (drawn at sc device px per view px) slid as the pixel image is
+  const hdShift = (q, sc) => { if (sub.x || sub.y) q.translate(sub.x * sc / DS, sub.y * sc / DS); };
+  // the fx pass's camera: the view's, its projection slid by the same whole canvas px (no allocation; only while it slides)
+  const hdCam = new THREE.Camera(); hdCam.matrixWorldAutoUpdate = false;
+  function hdCamNow() {
+    hdCam.matrixWorld.copy(camera.matrixWorld); hdCam.matrixWorldInverse.copy(camera.matrixWorldInverse); hdCam.projectionMatrix.copy(camera.projectionMatrix);
+    const e = hdCam.projectionMatrix.elements; e[12] += 2 * sub.x / (VW * DS); e[13] -= 2 * sub.y / (VH * DS);   // (w = 1: a shift in NDC)
+    hdCam.projectionMatrixInverse.copy(hdCam.projectionMatrix).invert();
+    return hdCam;
+  }
   // resize(w, h): a new view size in art px (the window changed shape: ultrawide, fullscreen; main.js fit). The view-sized
   // targets and the screen layers follow; the projection, toScreen and the fx sizes read VW / VH every frame anyway
   function resize(w, h) { gW = w; gH = h; applySize(); }
@@ -2054,7 +2223,7 @@ void main() {
       SNAP.value.set(VW, VH); compU.uRes.value.set(VW, VH); blitU.uRes.value.set(VW, VH);
       for (const L of layerList) { L.c.width = VW; L.c.height = VH; L.q.imageSmoothingEnabled = false; L.dirty = false; L.t.dispose(); L.t.needsUpdate = true; L.rt.setSize(VW, VH); }
     }
-    if (s !== DS) { DS = s; blitU.uDS.value = fxU.uDS.value = s; }
+    if (s !== DS) { DS = s; blitU.uDS.value = fxU.uDS.value = s; subApply(); }
     if (gW * gS !== canW || gH * gS !== canH) { canW = gW * gS; canH = gH * gS; renderer.setSize(canW, canH, false); }   // (the canvas: the game's, whatever is drawn)
   }
 
@@ -2107,6 +2276,7 @@ void main() {
     if (was !== !!cine) for (const m of cineMats) setDef(m, !!cine);
     applySize();
     if (cine) cineView(); else if (was) gameView();   // (at once: a frame drawn before the next setView sees the right camera)
+    subApply();
   }
   // world -> internal-canvas px (y down), for halos / HUD / tests: through what is drawn (the cinema camera while it is set;
   // a point behind it lands far off the screen, so nothing is drawn for it mirrored)
@@ -2137,8 +2307,10 @@ void main() {
     U.sunYaw.value = Math.atan2(dir.x, dir.z);   // cards turned so their face points at the sun (normal = (sin, 0, cos))
     const T = view.T, texel = 2 * SHADOW_E / SM;
     sunCam.position.copy(T).addScaledVector(sdir, 100); sunCam.lookAt(T); sunCam.updateMatrixWorld(true);
-    // snap: move the light camera so the target sits on a texel corner in light space (no shadow crawl while walking)
-    const lt = _sl.copy(T).applyMatrix4(sunCam.matrixWorldInverse);
+    // snap: move the light camera so the WORLD's origin sits on a texel corner in light space: the texel grid stays put in the
+    // world as the view moves (no shadow crawl while walking; render/godrays.js samples it at fixed world points). (It took the
+    // target, which always sits at the light camera's centre: a no-op, and the map slid by fractions of a texel with the view)
+    const lt = _sl.set(0, 0, 0).applyMatrix4(sunCam.matrixWorldInverse);
     const dx = lt.x - Math.round(lt.x / texel) * texel, dy = lt.y - Math.round(lt.y / texel) * texel;
     const right = _sr.setFromMatrixColumn(sunCam.matrixWorld, 0), up = _su.setFromMatrixColumn(sunCam.matrixWorld, 1);
     sunCam.position.addScaledVector(right, dx).addScaledVector(up, dy); sunCam.updateMatrixWorld(true);
@@ -2199,6 +2371,7 @@ void main() {
         sDir.copy(sunNow); fitStatic(sDir); sDue = Infinity;
         renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sStatic, sunCamS); renderer.render(sScene, sunCamS);   // (sScene: a layer-2 caster added from outside)
         lap('shadowS', renderer.info.render.calls);
+        rays.restatic();   // (render/godrays.js: its min map of the static shadow follows)
       }
       renderer.setRenderTarget(shadow); renderer.clear(true, true, false); renderer.render(sScene, sunCam);
       lap('shadow', renderer.info.render.calls);
@@ -2219,10 +2392,11 @@ void main() {
     compU.uAo.value.w = aoN ? compU.uAo.value.w : 0;
     if (aoN) { aoGeo.instanceCount = aoN; setRange(aoBuf, 0, aoN * 8); renderer.render(aoScene, dummyCam); }
     compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
+    if (msFrame !== frameNo) { compU.uMist.value.x = 0; mist.on = false; } else mistAnchors();
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
     let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
     if (DS > 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
-      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam);
+      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam); if (!cine) rays.draw();
       if (hN) {
         const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
         fxPxM();
@@ -2233,10 +2407,10 @@ void main() {
       if (fxN || fxX) {
         fxPxM();
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
-        renderer.render(fxScene, camera);
+        renderer.render(fxScene, sub.x || sub.y ? hdCamNow() : camera);   // (slid as the blit slid the image: setSubpixel)
       }
-    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); }
-    if (vgFrame === frameNo) { vgU.uVgS.value.set(VW * DS, VH * DS); renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it
+    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) rays.draw(); }
+    if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)
     if (post) post.run(renderer);
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
@@ -2309,14 +2483,43 @@ void main() {
     C.uRfW.value.set(o.S, o.ripple, o.gust, o.t); C.uRfV.value.set(o.oy, o.zoom, o.reach, o.puddleA || 0);
     C.uRfP.value.set(p ? p.x : 0, p ? p.y : 0, p ? p.rx : 0, p ? p.ry : 0);
   }
+  // THE MIST (features/mist.js, every frame it shows it; COMP_FS MIST): {top (m), sigma (1 / m), alpha, col: [r, g, b] 0..1, light,
+  // water (m), reach (m), amp (m), freq (1 / m), drift: [x, z] (m), aerial, far, levels, dither (px), medium 0..1, max (m), segs (Float32Array,
+  // 8 numbers a stretch of water: x0, z0, x1, z1, half width, its water's height, 0, 0), n (stretches), ver (bump when segs changed)}.
+  // A frame without a call: no mist (the old screen haze). G.mist: what shows now, read-only ({on, medium, top, max}: the medium's
+  // density for light through the air; in COMP_FS, mistAt(P))
+  let msFrame = -1, msVer = -1;
+  const mist = {on: false, medium: 0, top: 0, max: 0}, MS3 = [0, 0, 0];
+  function setMist(o) {
+    msFrame = frameNo; const C = compU;
+    C.uMist.value.set(1, o.top, o.sigma, o.alpha); C.uMistC.value.set(o.col[0], o.col[1], o.col[2], o.light);
+    C.uMistW.value.set(o.water, o.reach, o.amp, o.freq); C.uMistD.value.x = o.drift[0]; C.uMistD.value.y = o.drift[1]; C.uMistD.value.z = o.aerial;
+    C.uMistQ.value.x = o.levels; C.uMistQ.value.y = o.dither; C.uMistQ.value.w = Math.min(MIST_N, o.n); C.uMistK.value.set(o.medium, o.max, o.far ?? 1, 0);
+    if (o.ver !== msVer) {
+      msVer = o.ver; const s = o.segs;
+      for (let i = 0; i < MIST_N; i++) { const j = i * 8; if (i < o.n) { C.uMistS.value[i].set(s[j], s[j + 1], s[j + 2], s[j + 3]); C.uMistH.value[i].set(s[j + 4], s[j + 5], 0, 0); } else C.uMistH.value[i].set(0, -1e3, 0, 0); }
+    }
+    mist.on = true; mist.medium = o.medium; mist.top = o.top; mist.max = o.max;
+  }
+  // (render, after the view is set) the world origin's screen pixel, made whole (its fraction is the same every frame: the camera moves
+  // in whole pixels), the dither's cell (a world texel: zoom px), the view's centre on the ground and its half depth (m)
+  function mistAnchors() {
+    const z = view.zoom, up = view.T.y * PPMH / PPMY, C = compU;
+    toScreenInto(0, 0, 0, MS3);
+    C.uMistO.value.set(Math.floor(MS3[0] + .25), Math.floor(VH - MS3[1] + .25), view.T.x - Math.sin(view.yaw) * up, view.T.z - Math.cos(view.yaw) * up);
+    C.uMistQ.value.z = Math.max(1, Math.floor(z + .01)); C.uMistD.value.w = VH / 2 / (PPMY * z);
+  }
   // (sun: how far toward the sun his shadow test looks, .5 m; a live 3D body would shade its own test point: view/livehero.js)
-  const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; };
+  const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; U.wFoot.value.set(x, h - .9, z, 1); };   // (h: his chest, .9 m over his feet: the water rings them when he wades)
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
   // advances at, so changing it never makes the pattern jump
   const setWater = ({speed} = {}) => { if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0); };
   // the biome's water (world.js buildWorld, at every build, from WATER_TUNE): {ramp: [[r, g, b] 0..1] light -> dark (padded to 4), rate,
   // across, along, hi, lo, range: [lightest, darkest] tone, lap (tone | -1), refl, spark} | null = no moving water (the rift)
   function setWaterLook(L) {
+    const B = L?.bed;   // the depth, bed and contact foam (world/waterbed.js: {tex, rect, cuts, op, tone, hiOp, tint, hue, lum, dark, refr, foam}; none: the old water)
+    U.wBed.value = B ? B.tex : null; U.wBedOn.value = B ? 1 : 0;
+    if (B) { U.wBedR.value.set(...B.rect); U.wCut.value.set(...B.cuts, B.refr); U.wOp.value.set(...B.op); U.wTone.value.set(...B.tone); U.wLook.value.set(B.hiOp, B.hue, B.lum, B.dark); U.wTint.value.set(...B.tint); U.wFoam.value.set(...B.foam); }
     if (!L) { compU.uWRefl.value.set(0, 0, 0, 0); return; }
     for (let i = 0; i < 4; i++) U.wRamp.value[i].set(...L.ramp[Math.min(i, L.ramp.length - 1)]);
     U.wA.value.set(L.rate, L.across, L.along, L.lap); U.wB.value.set(L.hi, L.lo, L.range[0], L.range[1]);
@@ -2325,6 +2528,8 @@ void main() {
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
-    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost,
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
+    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub,
+    godrays: rays, setRays: rays.set,   // (render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    setMist, get mist() { return mist; }};
 }

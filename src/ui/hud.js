@@ -60,8 +60,9 @@ export function createHud(host) {
         const g = q.createRadialGradient(W / 2, Hh / 2, Math.min(W, Hh) * .35, W / 2, Hh / 2, Math.max(W, Hh) * .72);
         g.addColorStop(0, 'rgba(160,20,20,0)'); g.addColorStop(1, `rgba(170,24,24,${red})`); q.fillStyle = g; q.fillRect(0, 0, W, Hh);
       }
-      // world: nameplates over elites / the champion, floating text
+      // world: nameplates over elites / the champion, floating text (slid with the pixel image: G.hdShift, the sub-pixel camera)
       const at = (x, y, h) => { const s = host.toView(x, y, h); return [s[0] * sc, s[1] * sc]; };
+      q.save(); host.G.hdShift?.(q, sc);
       for (const b of v.enemies) {
         if (!b.elite && !b.boss) continue;
         const [x, y] = at(b.x, b.y, (b.h || 0) + (b.hitH ?? 1.6) + .45);   // just over combat's HP bar (+.35)
@@ -73,6 +74,7 @@ export function createHud(host) {
         text(q, f.s, x, y - rise, (f.big ? 17 : 13) * u, f.col, {align: 'center', w: 800});
         q.globalAlpha = 1;
       }
+      q.restore();
       const bx = Math.round(20 * u), bw = Math.round(300 * u), bh = Math.round(16 * u), by = Math.round(Hh - 30 * u - bh);
       if (v.run || v.health) {   // health (bottom left): in a run; in the sandbox while a fight has stakes (v.health: game.js)
         bar(q, bx, by, bw, bh, S.hp / S.maxHp, S.hpShow / S.maxHp, S.hp < S.maxHp * .3 ? '#e0483a' : '#c8403a', {glow: S.healT * .8});
@@ -81,7 +83,7 @@ export function createHud(host) {
       }
       if (v.run) {
         // the build (bottom left, over the health)
-        const is = Math.round(28 * u), gap = Math.round(5 * u), iy = by - is - Math.round(10 * u), mx = (host.VW / 2 + (host.mouse.x - host.VW / 2) * host.zoom) * sc, my = (host.VH / 2 + (host.mouse.y - host.VH / 2) * host.zoom) * sc;
+        const is = Math.round(28 * u), gap = Math.round(5 * u), iy = by - is - Math.round(10 * u), mx = (host.VW / 2 + (host.mouse.x - host.VW / 2) * host.zoom) * sc + host.G.sub.x * sc / host.G.display, my = (host.VH / 2 + (host.mouse.y - host.VH / 2) * host.zoom) * sc + host.G.sub.y * sc / host.G.display;   // (+ the sub-pixel camera's slide: the mouse is read on the slid image, the HUD stays put)
         hoverTip = null;
         v.build.forEach((e, i) => {
           const x = bx + i * (is + gap);

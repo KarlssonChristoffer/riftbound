@@ -486,9 +486,24 @@ function slab(K, s, R, {fh = 3, ring = null, top = null, rim = null} = {}) {
   const ox = Math.round(s.x * K.PPM - cx), oy = Math.round(s.y * K.PPMY - cy);
   stamp(K.G, P, ox, oy); stamp(K.E, E2, ox, oy);
 }
-// the plateau: its top surface lifted by h (hides the ground behind it), the south cliff face, the climb spot
+// the plateau: its top surface lifted by h (hides the ground behind it), the south cliff face, the climb spot. With walkable terrain the
+// plateau is the MESA (layout.js): only its top is painted here, by st.top (no lip row, no climb: its cliffs and ladders are 3D), where
+// it lies inside its outline and level with it (not down its gully); st.mesaTop === false: not even that (the ground's own fill is it)
 function paintPlateau(K, st) {
   const {G, X, Y, PPM, PPMY, PPMH} = K;
+  const M = K.layout.mesa;
+  if (M && st.mesaTop !== false && K.ground) {
+    const P = M.pts; let y0 = 1e9, y1 = -1e9; for (const [, py] of P) { y0 = Math.min(y0, py); y1 = Math.max(y1, py); }
+    const xs = [];
+    for (let y = Math.max(0, Math.floor(y0 * PPMY)); y <= Math.min(K.HPX - 1, Math.ceil(y1 * PPMY)); y++) {
+      const my = (y + .5) / PPMY; xs.length = 0;   // the outline's crossings of this row (even-odd spans)
+      for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[j][1] > my) !== (P[i][1] > my)) xs.push(P[j][0] + (P[i][0] - P[j][0]) * (my - P[j][1]) / (P[i][1] - P[j][1]));
+      xs.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xs.length; k += 2) for (let x = Math.max(0, Math.ceil(xs[k] * PPM - .5)); x <= Math.min(K.WPX - 1, Math.floor(xs[k + 1] * PPM - .5)); x++) {
+        const mx = (x + .5) / PPM; if (K.ground(mx, my) > M.h - .06) st.top(x, y, mx, my, 99, false);
+      }
+    }
+  }
   for (const q of K.plats) {
     const hp = Math.round(q.h * PPMH), xa = X(q.x0), xb = X(q.x1), yt = Y(q.y0) - hp, yf = Y(q.y1) - hp, yb = Y(q.y1);
     const climbX = x => q.climbs.some(c => x >= X(c.x - c.w / 2) - 2 && x < X(c.x + c.w / 2) + 2);
@@ -547,7 +562,7 @@ function dampBanks(K, S, cliff) {
     const my = (y + .5) / PPMY, c = SM.cx(my), hw = SM.w(my) / 2;
     if (my > cliff(c) - .6 || my < 2.2 || Math.abs(my - SM.narrows.y) < 2.7) continue;
     for (const side of [-1, 1]) {
-      if (side > 0 && my < 12.4) continue;
+      if (side > 0 && (K.layout.mesa ? Math.abs(my - K.layout.outflow.pts.at(-1)[1]) < 1.1 : my < 12.4)) continue;   // (terrain: the mesa stands back from the bank: only the outflow's mouth)
       const xa = Math.floor((c + side * (hw + .25)) * PPM), xb = Math.ceil((c + side * (hw + 1.1)) * PPM);
       for (let x = Math.min(xa, xb); x <= Math.max(xa, xb); x++) {
         const mx = (x + .5) / PPM, e = Math.abs(mx - c) - hw + (vn(x / 4, y / 3, 71) - .5) * .05;   // (paintStream's own edge)
@@ -563,6 +578,9 @@ function dampBanks(K, S, cliff) {
 }
 
 // ---------------------------------------------------------------- the plateau's water (layout.js SPRING / RILL / FALL / POOL / OUTFLOW)
+// rillGlow(K, ...pts): where a glowing rill's lights stand along it: the given points (the plateau's rill), or with walkable terrain as many
+// points spread along the mesa's creek (its top, its gully)
+const rillGlow = (K, ...pts) => { if (!K.layout.mesa) return pts; const P = K.layout.rill.pts; return pts.map((p, i) => P[Math.round((P.length - 1) * (.45 + .4 * (pts.length > 1 ? i / (pts.length - 1) : .5)))]); };
 // paintRill: st.px(x, y, e, side, mx, my, o) for every pixel of the plateau's top within .45 m of the rill's edge (e < 0 in the water, metres
 // from the edge; side -1 where the nearest bank is north / west of the pixel, the shadow side, +1 south / east; o = rillAt's {d, a, l, hw}: o.a metres
 // across the rill (+ to the left of the flow: south of a westward stretch), o.l metres from the spring). The spring's basin is the rill's round
@@ -811,8 +829,9 @@ function groundRuins(q, ctx, B) {
       } else G.c(x, y, vn(x / 26, y / 9, 95) > .62 ? abyss2 : abyss);
     }
   }
-  // the plateau: meadow on top, layered rock face, an ivy curtain (with pegs) at the climb spot
+  // the plateau: meadow on top, layered rock face, an ivy curtain (with pegs) at the climb spot (the mesa: the meadow's own fill already)
   paintPlateau(K, {
+    mesaTop: false,
     top(x, y, mx, my, rs, climb) {
       if (climb && rs < 6) { G.p(x, y, S.earth, rs === 0 ? 0 : 1); return; }
       const sl = fbm(mx * .3, (my + .3) * .3, 15) - fbm(mx * .3, (my - .3) * .3, 15) + (fbm((mx + .3) * .3, my * .3, 15) - fbm((mx - .3) * .3, my * .3, 15)) * .5
@@ -852,6 +871,7 @@ function groundRuins(q, ctx, B) {
       const cell = Math.floor(o.l * K.PPM / 8), ph = o.l * K.PPM / 8 - cell, riff = K.layout.rill.riffle(o.l, o.hw) && hsh(cell, 3) < .5 && ph < .06 + hsh(cell, 4) * .1 && Math.abs(o.a + (hsh(cell, 6) - .5) * o.hw) < o.hw * (.15 + hsh(cell, 5) * .4) && hsh(x, y, 10) < .9;   // (crests across the flow, short and uneven)
       t = riff ? 0 : side < 0 && d < .09 ? 3 : side > 0 && d < .04 ? 0 : Math.abs(o.a) < o.hw * .45 ? 2 : 1;
       if (my > K.layout.fall.y - .1 && hsh(x, y, 13) < .8) t = 0;   // the foam lip (held as painted)
+      const fm = K.layout.rill.foam?.(o.l) || 0; if (fm && hsh(x, y, 14) < fm) t = 0;   // (the mesa's creek: white on each cascade's lip and in the churn below it)
     }
     G.p(x, y, W, t);
   }});
@@ -975,7 +995,7 @@ function groundEmber(q, ctx, B) {
   // the plateau's spring: lava seeping up in a ring of basalt, a thin trickle in the stream's own colours (crust rafts, a hot seam along
   // each bank) to the south edge, then a glowing fall into the pool, and a trickle on from the pool to the stream
   {
-    const SP = K.layout.spring, top = K.plats[0].h;
+    const SP = K.layout.spring, top = K.plats[0]?.h ?? K.layout.mesa.h;
     paintRill(K, {px(x, y, e, side, mx, my, o) {
       if (e >= 0) { E.off(x, y); if (e < .07) G.p(x, y, S.wall, 3); else if (e < .15) G.p(x, y, S.wall, side < 0 ? 1 : 0); else if (e < .24 && hsh(x, y, 4) < .5) G.p(x, y, S.wall, 2); return; }
       const rs = Math.hypot(mx - SP.x, my - SP.y);
@@ -985,7 +1005,7 @@ function groundEmber(q, ctx, B) {
     }});
     for (const [a, r, sz, v] of [[-2.25, .56, 1, 1], [-1.55, .52, .9, 2], [-.85, .56, 1.1, 3], [-.1, .6, .9, 4], [.6, .62, 1, 5], [1.3, .62, 1.1, 6], [2.0, .6, .8, 7]])
       boulder(K, SP.x + Math.cos(a) * r, SP.y + Math.sin(a) * r, 5 * sz + 1.5, 3.2 * sz + 1, S.wall, v * 13, S.ash);
-    for (const [x, y, rad, k] of [[SP.x, SP.y, 2.2, .7], [50.4, 6.9, 2, .45], [45.6, 9.7, 2, .5]]) K.lights.push({x, y, h: top + .3, color: '#ff7a2e', radius: rad, intensity: k, flicker: .22});
+    for (const [x, y, rad, k] of [[SP.x, SP.y, 2.2, .7], ...rillGlow(K, [50.4, 6.9], [45.6, 9.7]).map(([x, y], i) => [x, y, 2, i ? .5 : .45])]) K.lights.push({x, y, h: (K.ground ? K.ground(x, y) : top) + .3, color: '#ff7a2e', radius: rad, intensity: k, flicker: .22});
   }
   K.finish(B);
   B.hole = (x, y, c) => y > cliff(x) - .3 || inPool(x, y) < 1.3 || K.streamE(x, y) < .4 || (c && behindPlateau(c, x, y));
@@ -1230,7 +1250,7 @@ function groundRift(q, ctx, B) {
   // the plateau's spring: a rune ring where the ley line surfaces and the line itself, a dashed glowing seam to the south edge, pouring
   // down the face as light into the crack, and on from the pool to the river's crack
   {
-    const SP = K.layout.spring, top = K.plats[0].h;
+    const SP = K.layout.spring, top = K.plats[0]?.h ?? K.layout.mesa.h;
     paintRill(K, {px(x, y, e, side, mx, my, o) {
       if (e >= 0) return;
       const rs = Math.hypot(mx - SP.x, my - SP.y), ad = Math.abs(o.a);
@@ -1242,7 +1262,7 @@ function groundRift(q, ctx, B) {
       const ad = Math.abs(o.a);
       if (ad < .035 && Math.floor(o.l * K.PPM / 5) % 4 !== 3) { const c = ad < .014 ? DIM : LEY, ec = ad < .014 ? DIM : LEYE; G.c(x, y, c); E.c(x, y, ec); }
     }});
-    for (const [x, y, rad, k] of [[SP.x, SP.y, 2.4, .55], [47.5, 7.9, 2, .35]]) K.lights.push({x, y, h: top + .3, color: '#c070ff', radius: rad, intensity: k, flicker: .15});
+    for (const [x, y, rad, k] of [[SP.x, SP.y, 2.4, .55], ...rillGlow(K, [47.5, 7.9]).map(([x, y]) => [x, y, 2, .35])]) K.lights.push({x, y, h: (K.ground ? K.ground(x, y) : top) + .3, color: '#c070ff', radius: rad, intensity: k, flicker: .15});
     if (K.layout.fall) K.lights.push({x: K.layout.fall.foot.x, y: K.layout.fall.foot.y + .5, h: .4, color: '#c070ff', radius: 2.4, intensity: .5, flicker: .15});
   }
   K.finish(B);

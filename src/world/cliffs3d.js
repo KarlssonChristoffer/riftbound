@@ -1,4 +1,4 @@
-// CLIFFS3D: the world's rock faces as live 3D rock: the plateau's four sides and the south ravine's wall (world.js lays the
+// CLIFFS3D: the world's rock faces as live 3D rock: the plateau's sides (the mesa's cliffs), terraces' and ramps' walls and the south ravine's wall (world.js lays the
 // runs). ONE geometry per cliff with the prop pipeline's attributes (aPart / aFam / aBias / aFixed, as trees3d.js), so it is
 // toned by the biome's ramps, outlined, seamed and shadowed like the kit's rocks, and it reads right at every yaw.
 //   strata  a face is cut into horizontal LAYERS (.3-.6 m) whose bedding lines wander a little up and down along the face.
@@ -15,7 +15,8 @@
 //           it stands out it shows as a rocky rim, with the biome's cover (moss, snow, ash) on what faces up (gfx.js MESH_FS)
 //   lip     tufts of the cover hanging over the cap's front and lying on its rim (the painted face's grass hang)
 //   talus   loose stones at the foot of a run whose foot is dry ground (the plateau's)
-//   ladder  a wooden ladder against a face (the plateau's climb spot)
+//   ladder  a wooden ladder against a face (a climb spot: layout.js CLIMBS)
+//   bridge  a wooden footbridge (layout.js BRIDGES); stairs: stone steps up a ramp
 // cliffGeometry(runs, o) -> BufferGeometry | null (no rock at all)
 //   run = {pts: [[x, z], ...] the face line (m; x east, z south), travelled so the OUTSIDE lies at (-tz, tx) of the direction
 //          of travel (east along a south face), top (m: the ground above), bot(x, z) -> the foot's height there (minBot: its
@@ -26,7 +27,8 @@
 //          may lie (props, water), lip: the cover hangs over the cap, dark(y) -> extra tone bias by height (a deep ravine
 //          shades toward its floor), seed}
 //   o = {fam(name) -> family index (world.js FAMS), rockB: a second family for alternate layers (the desert's bands) or null,
-//        cover: the lip's family or null, ladders: [{x, z, h, nx, nz}] (foot centre, height, the outward normal)}
+//        cover: the lip's family or null, ladders: [{x, z, h, y0, nx, nz}] (foot centre, top height, the foot's height (0), the outward normal),
+//        bridges: layout.js BRIDGES, stairs: [{pts: [a, b], w, h0, h1, n}] (a stepped ramp's line, width, heights, treads)}
 // Frame: world metres, x east, y up, z south (the geometry is placed with an identity matrix). Built once per world.
 import * as THREE from 'three';
 import {vnoise, clamp} from '../core/mathx.js';
@@ -247,11 +249,32 @@ export function cliffGeometry(runs, o) {
       }
     }
   }
-  // ladders: two rails and rungs, standing against the face (their foot a little sunk)
+  // ladders: two rails and rungs, standing against the face (their foot a little sunk) from y0 (the ground at the foot, 0 if unset)
   for (const L of o.ladders || []) {
-    const u = [-L.nz, 0, L.nx], w = [L.nx, 0, L.nz], H = L.h + .32, rail = .028;
-    for (const sx of [-1, 1]) cuboid(B, [L.x + u[0] * .3 * sx + w[0] * .02, H / 2 - .04, L.z + u[2] * .3 * sx + w[2] * .02], u, UP, w, rail, H / 2, rail, famWood, B.part(), 0);
-    for (let y = .26; y < L.h + .1; y += .3) cuboid(B, [L.x + w[0] * .025, y, L.z + w[2] * .025], u, UP, w, .3, .02, .02, famWood, B.part(), .06);
+    const u = [-L.nz, 0, L.nx], w = [L.nx, 0, L.nz], y0 = L.y0 || 0, H = L.h - y0 + .32, rail = .028;
+    for (const sx of [-1, 1]) cuboid(B, [L.x + u[0] * .3 * sx + w[0] * .02, y0 + H / 2 - .04, L.z + u[2] * .3 * sx + w[2] * .02], u, UP, w, rail, H / 2, rail, famWood, B.part(), 0);
+    for (let y = y0 + .26; y < L.h + .1; y += .3) cuboid(B, [L.x + w[0] * .025, y, L.z + w[2] * .025], u, UP, w, .3, .02, .02, famWood, B.part(), .06);
+  }
+  // bridges (layout.js BRIDGES): planks across a deck rising in a gentle arch, a stringer under each side, a post at each corner and a
+  // rail along each side
+  for (const D of o.bridges || []) {
+    const R = mulberry32(D.seed || 17), u = [D.ux, 0, D.uy], v = [-D.uy, 0, D.ux], hw = D.w / 2;
+    const deck = s => D.h0 + (D.h1 - D.h0) * s / D.len + D.arch * Math.sin(Math.PI * s / D.len), at3 = (s, side, y) => [D.a[0] + D.ux * s - D.uy * side, y, D.a[1] + D.uy * s + D.ux * side];
+    for (let s = .08; s < D.len - .02; s += .155) cuboid(B, at3(s + (R() - .5) * .02, (R() - .5) * .03, deck(s) - .025), u, UP, v, .066, .022, hw + (R() - .5) * .05, famWood, B.part(), (R() - .5) * .14);
+    for (const sd of [-1, 1]) {
+      for (let s = 0; s < D.len - .01; s += .35) { const e = Math.min(D.len, s + .35), m = (s + e) / 2; cuboid(B, at3(m, sd * (hw - .08), deck(m) - .085), u, UP, v, (e - s) / 2 + .01, .04, .05, famWood, B.part(), -.05); }
+      for (const s of [.04, D.len - .04]) { const y0 = deck(s) - .35, y1 = deck(s) + .78; cuboid(B, at3(s, sd * (hw + .02), (y0 + y1) / 2), u, UP, v, .045, (y1 - y0) / 2, .045, famWood, B.part(), .04); }
+      for (let s = .04; s < D.len - .05; s += .25) { const e = Math.min(D.len - .04, s + .25), m = (s + e) / 2; cuboid(B, at3(m, sd * (hw + .02), deck(m) + .7), u, UP, v, (e - s) / 2 + .01, .022, .025, famWood, B.part(), .02); }
+    }
+  }
+  // stairs: stone steps up a stepped ramp (terrain.js steps: the ground's treads are the stones' tops), each a slab a little askew
+  for (const S of o.stairs || []) {
+    const [a, b] = S.pts, L = Math.hypot(b[0] - a[0], b[1] - a[1]), u = [(b[0] - a[0]) / L, 0, (b[1] - a[1]) / L], v = [-u[2], 0, u[0]];
+    const n = S.n, run = L / n, R = mulberry32(S.seed || 29);
+    for (let k = 0; k < n; k++) {
+      const sm = (k + .5) * run, top = S.h0 + (S.h1 - S.h0) * (k + 1) / n - .005, bot = S.h0 - .2;
+      cuboid(B, [a[0] + u[0] * sm, (top + bot) / 2, a[1] + u[2] * sm], u, UP, v, run / 2 + .02, (top - bot) / 2, S.w / 2 + (R() - .5) * .08, famRock, B.part(), (R() - .5) * .16 + (k & 1 ? .04 : 0), R, .06);
+    }
   }
   return B.geometry();
 }

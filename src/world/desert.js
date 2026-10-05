@@ -194,6 +194,7 @@ function groundDesert(q, ctx, B) {
     else {
       t = side < 0 && d < .09 ? 3 : side > 0 && d < .04 ? 0 : Math.abs(o.a) < o.hw * .45 ? 2 : 1;
       if (my > K.layout.fall.y - .1 && hsh(x, y, 13) < .8) t = 0;
+      const fm = K.layout.rill.foam?.(o.l) || 0; if (fm && hsh(x, y, 14) < fm) t = 0;   // (the mesa's creek: its cascades' white water)
     }
     G.p(x, y, W, t);
   }});
@@ -234,6 +235,7 @@ function groundOf(ctx, B) {
     if (streamE(mx, my) < 0) return 'water';
     if (my > ctx.HM - 3.4 && B.hole(mx, my)) return 'rock';   // the canyon's rim and below
     for (const q of plats) if (mx > q.x0 && mx < q.x1 && my > q.y0 && my < q.y1) return fbm(mx * .25, my * .25, 127) - .5 > .06 ? 'rock' : 'sand';   // the mesa's top
+    if (L.mesa && L.mesaAt(mx, my)) return fbm(mx * .25, my * .25, 127) - .5 > .06 ? 'rock' : 'sand';   // (walkable terrain's mesa)
     if (inside(mx, my, .5)) {   // the paving, unless worn through to the ground under it
       const ed = Math.min(mx - PLAY.x0, PLAY.x1 - mx, my - PLAY.y0, PLAY.y1 - my);
       const wear = fbm(mx * .4, my * .4, 3) + Math.max(0, 1.8 - ed) * .2 - (Math.hypot(mx - cx, my - cy - .5) < 5.5 ? .25 : 0);

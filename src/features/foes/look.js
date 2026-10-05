@@ -571,7 +571,7 @@ export function createLook(host, sim) {
         if (!hurt && !p.elite) continue;
         G.toScreenInto(p.x, (p.z || 0) + (p.h || 0) + (p.hitH ?? 1.6) + .35, p.y, SC);
         const x = SC[0] * sc, y = SC[1] * sc;
-        if (!any) { q.save(); any = true; }
+        if (!any) { q.save(); any = true; G.hdShift?.(q, sc); }   // (slid with the pixel image: the sub-pixel camera)
         if (hurt) {
           const w = Math.round(12 * sc), hh = Math.max(3, Math.round(sc * 1.1)), x0 = Math.round(x - w / 2), y0 = Math.round(y);
           q.fillStyle = 'rgba(14,10,14,.85)'; q.fillRect(x0 - 1, y0 - 1, w + 2, hh + 2);
