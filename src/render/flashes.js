@@ -25,9 +25,16 @@ void main() {
   float L = max(3., iP.w), W = 2. * ceil(L) + 5.;   // (odd: the muzzle on a pixel's middle)
   vLen = L; vA = iA;
   vec4 p = projectionMatrix * viewMatrix * vec4(iP.xyz, 1.);
+#ifdef CINE
+  float pw = p.w; p.xyz /= pw;   // (a cinema camera's perspective: gfx.js setCine)
+#endif
   vec2 s = (p.xy * .5 + .5) * uSnap, c = mod(W * uZoom, 2.) > .5 ? floor(s) + .5 : floor(s + .5);
   vL = (position.xy - .5) * W;   // art px from the muzzle, y up
+#ifdef CINE
+  gl_Position = vec4((c + vL * uZoom) / uSnap * 2. - 1., p.z - .00125, pw > 0. ? 1. : -1.);   // (w -1: behind it, clipped)
+#else
   gl_Position = vec4((c + vL * uZoom) / uSnap * 2. - 1., p.z - .00125, 1.);
+#endif
 }`;
   const FS = HEAD + `layout(location = 0) out vec4 o0;\nlayout(location = 1) out vec4 o1;\nlayout(location = 2) out vec4 o2;
 in vec2 vL; flat in vec4 vA; flat in float vLen;
@@ -61,8 +68,8 @@ void main() {
   geo.setAttribute('position', G.QUAD.getAttribute('position'));   // (never dispose: it shares the quad's GL buffer)
   geo.setAttribute('iP', iP); geo.setAttribute('iA', iA); geo.instanceCount = 0;
   const uSnap = {value: new THREE.Vector2(G.VW, G.VH)}, uZoom = {value: 1};
-  const mesh = new THREE.Mesh(geo, new THREE.RawShaderMaterial({vertexShader: VS, fragmentShader: FS, glslVersion: THREE.GLSL3,
-    uniforms: {uSnap, uZoom}, side: THREE.DoubleSide}));
+  const mesh = new THREE.Mesh(geo, G.cineMat(new THREE.RawShaderMaterial({vertexShader: VS, fragmentShader: FS, glslVersion: THREE.GLSL3,
+    uniforms: {uSnap, uZoom}, side: THREE.DoubleSide})));
   mesh.frustumCulled = false; mesh.matrixAutoUpdate = false;
   G.extra(mesh, 'gbuf');
   function popRanges() { const u = this.updateRanges; while (u.length) u.pop(); }

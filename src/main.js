@@ -110,6 +110,7 @@ const env = createEnv({moods: MOODS, biome: () => stage.biome.id, Q});
 // reads the current yaw / zoom / player without this file passing them every call. (Features get `host`, below.)
 const app = {
   get P() { return P; }, get PL() { return PL; }, get player() { return player; }, get yaw() { return cv.yaw; }, get zoom() { return cv.zoom; },
+  get viewYaw() { return G.cine ? G.view.yaw : cv.yaw; },   // the heading things are DRAWN from (a cinema camera's; yaw: the game's frame)
   get VW() { return cv.VW; }, get VH() { return cv.VH; }, get opt() { return opt; }, get cam() { return cam; }, get arrows() { return arrows; },
   feat: name => feat(name), toView: (x, y, a) => toView(x, y, a),
 };
@@ -166,7 +167,7 @@ const sprite = o => {
 const host = {
   THREE, G, PPM, PPMY, PPMH, get VW() { return cv.VW; }, get VH() { return cv.VH; }, ctxO,
   get world() { return stage.world; }, get biome() { return stage.biome; }, get time() { return env.bucket; }, get mood() { return env.mood(stage.biome.id); }, env,
-  get yaw() { return cv.yaw; }, get zoom() { return cv.zoom; }, get props() { return stage.world.props; }, get layout() { return stage.world.layout; },
+  get yaw() { return cv.yaw; }, get viewYaw() { return G.cine ? G.view.yaw : cv.yaw; }, get zoom() { return cv.zoom; }, get props() { return stage.world.props; }, get layout() { return stage.world.layout; },
   // the entity registry (world/entities.js): add / remove props, live queries by kind, near(x, y, r); props = its list
   get entities() { return stage.ents; }, get propsVersion() { return stage.ents.ver; },
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY, mods,

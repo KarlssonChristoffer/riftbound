@@ -813,8 +813,8 @@ export function createPlayer(H) {
       i++;
     }
   }
-  function drawPixelBow(g, sx, sy) {
-    const ov = A.OV[P.frame]?.[A.DIRS[P.face]]; if (!ov) return;
+  function drawPixelBow(g, sx, sy, face = P.face) {   // (face: the column as drawn: view/hero.js faceCol, a cinema camera's)
+    const ov = A.OV[P.frame]?.[A.DIRS[face]]; if (!ov) return;
     const ten = drawTension();
     g.save(); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
     if (ov.string) {

@@ -53,11 +53,15 @@ void main() {
   vN = vec3(dot(r0.xyz, aNrm.xyz), dot(r1.xyz, aNrm.xyz), dot(r2.xyz, aNrm.xyz));
   vec4 bp = texelFetch(uXf, ivec2(${PCOL}, b), 0);   // anchor X, Z, squash k, alpha
   vW = w;
-  w.xz -= uFwd * dot(w.xz - bp.xy, uFwd) * (1. - bp.z);
+#ifndef CINE
+  w.xz -= uFwd * dot(w.xz - bp.xy, uFwd) * (1. - bp.z);   // (a cinema camera, gfx.js setCine, sees the true body: no squash)
+#endif
   vInfo = aInfo; vSlot = float(b); vBias = aNrm.w * 1.27;   // (bias x 100 as an int8: 127 -> 1)
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
   vec4 sa = texelFetch(uXf, ivec2(${PCOL + 2}, b), 0);   // the snap anchor (where he stood: the last sprite's anchor), on
+#ifndef CINE
   if (sa.w > .5) { vec4 a = projectionMatrix * viewMatrix * vec4(sa.xyz, 1.); vec2 p = (a.xy * .5 + .5) * uSnap; gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.; }
+#endif   // (a cinema camera, gfx.js setCine: no snap, the body glides with the world)
 }`;
 const A_FS = HEAD + `
 in vec3 vN; in vec3 vW; flat in vec4 vInfo; flat in float vSlot; flat in float vBias;
@@ -173,7 +177,7 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     uBox: {value: new THREE.Vector4(-1, -1, 1, 1)},
   };
   const sceneA = new THREE.Scene(); sceneA.matrixAutoUpdate = false; sceneA.matrixWorldAutoUpdate = false;
-  const matA = raw(A_VS, A_FS, U, {side: THREE.DoubleSide}), matS = raw(S_VS, S_FS, U, {side: THREE.DoubleSide});
+  const matA = G.cineMat(raw(A_VS, A_FS, U, {side: THREE.DoubleSide})), matS = raw(S_VS, S_FS, U, {side: THREE.DoubleSide});
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const meshB = new THREE.Mesh(tri, raw(B_VS, B_FS, U)); meshB.frustumCulled = false; meshB.matrixAutoUpdate = false;
   G.extra(meshB, 'gbuf');
@@ -285,7 +289,7 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     r.setRenderTarget(prev);
     meshB.userData.frame = fr; if (meshX) { U.uGDep.value = G.compU.tD.value; meshX.userData.frame = fr; }
     const rp = BOX_R * G.camera.projectionMatrix.elements[0] * VW / 2 + 2;   // (px a metre at this zoom: the projection's x scale)
-    U.uBox.value.set(Math.max(-1, (box[0] - rp) / VW * 2 - 1), Math.max(-1, 1 - (box[3] + rp) / VH * 2), Math.min(1, (box[2] + rp) / VW * 2 - 1), Math.min(1, 1 - (box[1] - rp) / VH * 2));
+    if (G.cine) U.uBox.value.set(-1, -1, 1, 1); else U.uBox.value.set(Math.max(-1, (box[0] - rp) / VW * 2 - 1), Math.max(-1, 1 - (box[3] + rp) / VH * 2), Math.min(1, (box[2] + rp) / VW * 2 - 1), Math.min(1, 1 - (box[1] - rp) / VH * 2));
     box[0] = box[1] = 1e9; box[2] = box[3] = -1e9;
     for (const M of models) M.n = 0;
     used = false;

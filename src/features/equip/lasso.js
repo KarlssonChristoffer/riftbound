@@ -15,7 +15,7 @@
 //   SWING    an anchor: PL.lasso.hang (the pendulum is the player's); F or Space lets go; then the loop comes home
 // Fixed 1/60 s steps; every random draw from the equipment sim's generator (passed in); nothing read back from the view.
 // OWNS: L (the phase, the aim, the loop's flight, what's held, the anchor, the stunned list), the anchor segments' scratch.
-// READS: host.player / aim / mouse / G (toScreenInto: the cursor's anchors, as the game's hover does) / entities (near) /
+// READS: host.player / aim / mouse / G (gameToScreen: the cursor's anchors through the game's view, as the game's hover does) / entities (near) /
 //   elev / inStream / items (3D trees' bones), PL.lasso (mode, hand), the combat core (BS), the gunmen (sim), the lasso's
 //   own anchors (features/equip/anchors.js).
 // CALLS: PL.lasso spin / face / throwAt / haul / leash / yank / hang / letGo / stop; combat core hold / shift / fling;
@@ -110,12 +110,12 @@ export function createLassoSim(host, eq) {
   // ---------------------------------------------------------------- the aim (while spinning)
   const SA = [0, 0, 0], SB = [0, 0, 0];
   function pickAnchor(A) {   // the anchor point nearest the cursor on screen (within `pick` px), in reach
-    const Gx = host.G; if (!Gx?.toScreenInto) return false;
+    const Gx = host.G; if (!Gx?.gameToScreen) return false;
     const z = host.zoom, mx = host.VW / 2 + (host.mouse.x - host.VW / 2) * z, my = host.VH / 2 + (host.mouse.y - host.VH / 2) * z;
     let best = -1, bd = TUNE.pick * z, bx = 0, by = 0, bh = 0;
     for (let i = 0; i < nSeg; i++) {
       const j = i * 7;
-      Gx.toScreenInto(SEG[j], SEG[j + 2], SEG[j + 1], SA); Gx.toScreenInto(SEG[j + 3], SEG[j + 5], SEG[j + 4], SB);
+      Gx.gameToScreen(SEG[j], SEG[j + 2], SEG[j + 1], SA); Gx.gameToScreen(SEG[j + 3], SEG[j + 5], SEG[j + 4], SB);
       const ex = SB[0] - SA[0], ey = SB[1] - SA[1], l2 = ex * ex + ey * ey, t = l2 > 0 ? clamp(((mx - SA[0]) * ex + (my - SA[1]) * ey) / l2, 0, 1) : 0;
       const d = hypot2(SA[0] + ex * t - mx, SA[1] + ey * t - my);
       if (d >= bd) continue;

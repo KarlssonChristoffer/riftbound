@@ -89,14 +89,14 @@ export function createLoop(E) {
     if (hovIt && hovIt !== hi) hovIt.hover = 0;   // (only the aimed item's pulse is ever on: no write per item per frame)
     if (hi) hi.hover = .16 + .08 * Math.sin(performance.now() / 110);
     hovIt = hi;
-    perf.begin('world.update', 'view'); stage.world.update(cv.yaw); perf.end('world.update');
+    perf.begin('world.update', 'view'); stage.world.update(G.cine ? G.view.yaw : cv.yaw); perf.end('world.update');   // (the props' angles as drawn: a cinema camera's heading)
     // the season's leaves (env.leafRamp: changes a few times per season; a rebuilt world starts from the biome's own ramp)
     const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || stage.world !== leafWorld)) { stage.world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = stage.world; }
     proj.draw(host);
     for (const f of features) if (f.on !== false) f.frame?.({dt: lastDt, t});
     // the aim reticle (pixel cross at the cursor, front layer; drawn by the GPU: the layer's 2D canvas went up whole every
     // frame a gun was out for these 4 pixels' rects)
-    if (P.state === 'draw') {
+    if (P.state === 'draw' && !G.cine) {
       const q = G.glayer('front'), mx = Math.round(cv.VW / 2 + (mouse.x - cv.VW / 2) * cv.zoom), my = Math.round(cv.VH / 2 + (mouse.y - cv.VH / 2) * cv.zoom);
       q.fillStyle = P.t > .5 ? '#f2d27a' : '#e9e4da';
       q.fillRect(mx - 3, my, 2, 1); q.fillRect(mx + 2, my, 2, 1); q.fillRect(mx, my - 3, 1, 2); q.fillRect(mx, my + 2, 1, 2);
@@ -108,9 +108,12 @@ export function createLoop(E) {
     // HD overlay
     const dpr = devicePixelRatio || 1, sc = cv.scale * dpr;
     hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);
-    for (const f of features) if (f.on !== false && f.hd && (!host.hudOff || f === game)) { hq.save(); f.hd(hq, sc); hq.restore(); }   // hudOff: the title
-    if (opt.hdBow && !sinkPx) hero.drawHDBow(hq, sc);
-    drawPrompt(hq, sc, promptCtx);
+    // (hudOff: the title; a cinema camera (features/cinema.js) shows only the overlays that draw for it: f.cineHd)
+    for (const f of features) if (f.on !== false && f.hd && (G.cine ? f.cineHd : !host.hudOff || f === game)) { hq.save(); f.hd(hq, sc); hq.restore(); }
+    if (!G.cine) {
+      if (opt.hdBow && !sinkPx) hero.drawHDBow(hq, sc);
+      drawPrompt(hq, sc, promptCtx);
+    }
     perf.draw(hq, sc);
   }
   function frame(now) {

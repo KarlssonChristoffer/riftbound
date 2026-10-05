@@ -46,7 +46,11 @@ in float aFlex; in float aPhase; uniform vec2 uLean, uFlut; uniform vec3 uLeanX,
 vec3 sway() {
   vec2 l = uLean * aFlex;
   if (aPhase >= 0.) { float f = 1.6 + fract(aPhase * 3.7) * 1.6; l += uFlut * vec2(sin(uTime * f * 6.2832 + aPhase), .6 * sin(uTime * f * 4.4 + aPhase * 1.7)); }
+#ifdef CINE
+  return uLeanX * l.x + uLeanY * l.y;   // (the cinema camera: no whole-pixel steps; near its lens one is several pixels)
+#else
   vec2 s = floor(l + .5); return uLeanX * s.x + uLeanY * s.y;
+#endif
 }
 `;
 // AUTUMN (core/autumn.js is the model; the numbers are its): how fast a leaf clump turns, per tree. aSpray = the clump's
@@ -358,8 +362,10 @@ void main() {
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
   if (uSnap.x > 0.) {
     vec4 a = projectionMatrix * viewMatrix * vec4(uAnchor, 1.);
+#ifndef CINE
     vec2 p = (a.xy * .5 + .5) * uSnap;
     gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
+#endif
   }
   gl_Position.z -= uBias * gl_Position.w;
 }`;
@@ -461,8 +467,10 @@ void main() {
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
   if (uSnap.x > 0.) {
     vec4 a = projectionMatrix * viewMatrix * vec4(iA.xyz, 1.);
+#ifndef CINE
     vec2 p = (a.xy * .5 + .5) * uSnap;
     gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
+#endif
   }
   gl_Position.z -= uBias * gl_Position.w;
 }`;
@@ -563,8 +571,10 @@ void main() {
   if (lie > 0. && uSun < .5) gl_Position.z = mix(gl_Position.z, (projectionMatrix * viewMatrix * vec4(fl, 1.)).z, lie);
   if (uSnap.x > 0.) {
     vec4 a = projectionMatrix * viewMatrix * vec4(iAnchor.xyz, 1.);
+#ifndef CINE
     vec2 p = (a.xy * .5 + .5) * uSnap;
     gl_Position.xy += (floor(p + .5) - p) / uSnap * 2.;
+#endif
   }
   gl_Position.z -= uBias * gl_Position.w;
 }`;
@@ -593,15 +603,27 @@ void main() { if (texture(uTex, vUv).a < .5) discard; if (vMisc.x < .999 && vMis
 // pixel particles: one screen pixel (or a few) each, snapped to the pixel grid, lit or emissive
 const POINT_VS = HEAD + `
 in vec3 position; in vec4 color; in vec2 aMisc;   // color.a = emissive; aMisc = size px, alpha
-uniform mat4 viewMatrix, projectionMatrix; uniform vec2 uSnap;
+uniform mat4 viewMatrix, projectionMatrix; uniform vec2 uSnap; uniform float uPtK;   // uPtK: the cinema camera's k (gfx.js setCine)
 out vec4 vCol; flat out float vAlpha;
 void main() {
   vCol = color; vAlpha = aMisc.y;
   vec4 p = projectionMatrix * viewMatrix * vec4(position, 1.);
+#ifdef CINE
+  float pw = p.w; p.xyz /= pw;   // (the cinema camera's perspective: gfx.js setCine)
+#endif
   vec2 s = (p.xy * .5 + .5) * uSnap;
+#ifdef CINE
+  vec2 c = mod(aMisc.x * uPtK, 2.) > .5 ? floor(s) + .5 : floor(s + .5);   // odd sizes centre on a pixel, even on a corner
+#else
   vec2 c = mod(aMisc.x, 2.) > .5 ? floor(s) + .5 : floor(s + .5);   // odd sizes centre on a pixel, even on a corner
+#endif
+#ifdef CINE
+  gl_Position = vec4(c / uSnap * 2. - 1., p.z - .00125, pw > 0. ? 1. : -1.);   // (w -1: behind it, clipped)
+  gl_PointSize = aMisc.x * uPtK;
+#else
   gl_Position = vec4(c / uSnap * 2. - 1., p.z - .00125, 1.);
   gl_PointSize = aMisc.x;
+#endif
 }`;
 const POINT_FS = HEAD + OUTS + BAYER + `
 in vec4 vCol; flat in float vAlpha;
@@ -710,6 +732,10 @@ uniform sampler2D tA, tN, tE, tD, tS, tX, uRamps;
 uniform mat4 uInvPV, uLightPV;
 uniform sampler2D tSS; uniform mat4 uLightPVS; uniform float uSBias, uSOn;   // the static sun shadow (world-wide, cached): matrix, bias scale, on
 uniform vec2 uRes; uniform float uR;
+// THE CINEMA CAMERA (G.setCine; features/cinema.js): uCine.x 1 = a free perspective camera instead of the oblique view, y / z
+// its near / far (m), w the air's density (1/m: distance fog toward the horizon, so the world's edge melts into it); its
+// position; the sky: zenith and horizon colours, the sun's disk (direction toward it, cos of its radius) and colour
+uniform vec4 uCine, uSunP; uniform vec3 uCamP, uSkyZ, uSkyH, uSunCol;
 uniform vec3 uBg, uAmb, uSunDir, uShadowC, uFill, uGrade, uXCol;
 uniform float uShadowA, uShadowOn, uSunK, uBanded, uOutline, uGradeK, uEmin, uShadowTexel;
 uniform float uSoftFam;   // a ramp family drawn without inner seams / occlusion lines (the trees' leaves; -1 = none)
@@ -798,8 +824,26 @@ vec3 post(vec3 col, ivec2 ip) {
   if (uLay.z > .5) { vec4 f = lay(tFront, ip); col = col * (1. - f.a) + f.rgb; }
   return col;
 }
+#ifdef CINE
+float nearOf(float d) { return -2. * uCine.y * uCine.z / (uCine.z + uCine.y - (d * 2. - 1.) * (uCine.z - uCine.y)); }   // (its depth is not linear)
+#else
 float nearOf(float d) { return -(d * 2. - 1.) * uR; }
+#endif
 vec3 worldAt(ivec2 p, float d) { vec2 ndc = (vec2(p) + .5) / uRes * 2. - 1.; vec4 w = uInvPV * vec4(ndc, d * 2. - 1., 1.); return w.xyz / w.w; }
+#ifdef CINE
+// the cinema camera's sky along r: the horizon's band up to the zenith, the sun's glow (wide and warm when it is low) and
+// its disk (whole view pixels, like everything), stars when the zenith is dark, the haze below the horizon
+vec3 skyAt(vec3 r) {
+  float h = max(r.y, 0.), s = dot(r, uSunP.xyz), up = step(-.12, uSunP.y), low = 1. - smoothstep(0., .4, uSunP.y);
+  vec3 c = mix(uSkyH, uSkyZ, sqrt(smoothstep(0., .55, h)));
+  c += uSunCol * (pow(max(s, 0.), 5.) * (.18 + .55 * low) + pow(max(s, 0.), 90.) * .6) * up;
+  if (s > uSunP.w && uSunP.y > -.04 && r.y > -.01) c = uSunCol * 1.25 + vec3(.3, .28, .22);
+  float night = clamp(1. - dot(uSkyZ, vec3(2.2)), 0., 1.);
+  if (night > 0. && r.y > .04) { vec3 q = floor(r * 230.); float st = hC(q.xy * 1.31 + q.z * 17.3); if (st > .9965) c += vec3(.75, .8, 1.) * night * min(1., (st - .9965) * 400.); }
+  return r.y < 0. ? mix(c, uSkyH * .85, smoothstep(0., .06, -r.y)) : c;
+}
+vec3 airAt(vec3 r) { return uSkyH + uSunCol * pow(max(dot(r, uSunP.xyz), 0.), 4.) * (.12 + .3 * (1. - smoothstep(0., .4, uSunP.y))) * step(-.12, uSunP.y); }
+#endif
 int typeAt(ivec2 p) { return int(texelFetch(tA, p, 0).a * 255. + .5) / 4; }
 // bias: in light depth (0..1 over the sun camera's 219 m). .0006 (13 cm along the ray) keeps props / the plateau from
 // shadowing themselves; the terrain casts nothing into the map, so it takes ~1 cm. Its 13 cm, bias x cos(el) along the
@@ -844,7 +888,11 @@ void main() {
   vec4 a0 = texelFetch(tA, ip, 0);
   int code = int(a0.a * 255. + .5), type = code / 4, tone = code - type * 4;
   bool water = type == 1 && tone == 1;   // (tone is only used by meshes otherwise)
+#ifdef CINE
+  if (type == 0) { oc = vec4(clamp(skyAt(normalize(worldAt(ip0, 1.) - uCamP)), 0., 1.), 1.); return; }   // (no screen layers: see render)
+#else
   if (type == 0) { oc = vec4(clamp(post(uBg, ip0), 0., 1.), 1.); return; }
+#endif
   float d0 = texelFetch(tD, ip, 0).r;
   vec4 N0 = texelFetch(tN, ip, 0), E0 = texelFetch(tE, ip, 0);
   vec3 P = worldAt(ip, d0), N = normalize(N0.xyz), alb = a0.rgb;
@@ -971,7 +1019,11 @@ void main() {
     float wt = mod(floor(uWPhase * 12.), 997.), pm = uWPx.y;
     vec2 Fh = normalize(uView.xz), Rh = vec2(Fh.y, -Fh.x);
     vec3 wl = vec3(0.);
+#ifdef CINE
+    if (false) {   // (the streaks are where the OBLIQUE view mirrors a light)
+#else
     if (uWRefl.x > 0.) {
+#endif
       float night = clamp((1. - dot(uAmb, vec3(.3, .55, .15))) * 1.6, .2, 1.);
       for (int i = 0; i < ${NL}; i++) {
         if (i >= uNL) break; if (uLC[i].w > .5) continue;
@@ -1024,7 +1076,16 @@ void main() {
     vec2 dp = (vec2(ip0) + .5 - uHalo[i].xy); dp.y /= .9;
     float t2 = dot(dp, dp) / (uHalo[i].z * uHalo[i].z); if (t2 < 1.) { float u = 1. - t2; col += uHaloC[i] * u * u * uHalo[i].w; }
   }
+#ifdef CINE
+  {   // the cinema camera: the water mirrors the sky (more at a grazing look), the haze and the air by distance
+    vec3 v = P - uCamP; float dist = length(v); v /= dist;
+    if (water) col = mix(col, skyAt(reflect(v, vec3(0., 1., 0.))), .12 + .55 * pow(1. - clamp(-v.y, 0., 1.), 5.));
+    col += uFog.rgb * uFog.a * clamp(dist / 22., .3, 1.6);
+    col = mix(col, airAt(v), 1. - exp(-dist * uCine.w));
+  }
+#else
   col += uFog.rgb * uFog.a * (.4 + 1.2 * gl_FragCoord.y / uRes.y);       // haze, stronger toward the far (top) edge
+#endif
   // x-ray (the arena's look): where something hides the player, a dim fill with a light 1 px rim. Not where a particle
   // (obj -1) is in front: a dust mote or raindrop over him would otherwise be a lone rim pixel, a bright speck
   if (texelFetch(tX, ip, 0).r > .5 && type != 4 && N0.w > -.5) {
@@ -1081,6 +1142,24 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // recomputed only when it was flagged (matrixWorldNeedsUpdate: setMatrix, syncCards, a new mesh) or it updates itself
   gScene.matrixAutoUpdate = sScene.matrixAutoUpdate = xScene.matrixAutoUpdate = false;
   const camera = new THREE.Camera();
+  // the GAME's view (setView's oblique projection, whatever is drawn): what the sim reads the screen through (gameToScreen:
+  // the cursor's aim, the lasso's pick), so a cinema camera never changes what the game does
+  const gcam = new THREE.Camera();
+  // THE CINEMA CAMERA (features/cinema.js: setCine): for the frames it is set, the same passes draw the scene through a free
+  // PERSPECTIVE camera instead of the oblique view (at the art's resolution: still pixels). CINE is the shaders' uCine
+  const CINE = {value: new THREE.Vector4(0, .15, 400, 0)}, cinePC = new THREE.PerspectiveCamera(40, 16 / 9, .15, 400);
+  let cine = null;
+  // the materials with `#ifdef CINE` code (cineMat): the cinema camera's own program variant, switched as setCine turns it on
+  // or off (behind its fade). The oblique view's program is the old text exactly, so a GPU compiler's reorderings of the
+  // cinema branches never reach the game's pixels. A moving perspective view has no pixel lattice: its variants snap no
+  // sprite's anchor and step no crown's sway by whole pixels (each would hop against the world round it: a bounce)
+  const cineMats = new Set();
+  const setDef = (m, on) => { if (on === ('CINE' in m.defines)) return; if (on) m.defines.CINE = ''; else delete m.defines.CINE; m.needsUpdate = true; };
+  function cineMat(m) {
+    if (cineMats.has(m)) return m;
+    m.defines ??= {}; cineMats.add(m); setDef(m, !!cine); m.addEventListener('dispose', () => cineMats.delete(m));
+    return m;
+  }
   const sunCam = new THREE.OrthographicCamera(-SHADOW_E, SHADOW_E, SHADOW_E, -SHADOW_E, 1, 220);
   // STATIC SUN SHADOW: what doesn't move (world props made with mesh(..., {static: true}), the terrain: sStatic, layer 2,
   // not 0) is drawn into a world-wide map that is re-rendered only when one of them appears / goes / changes model or
@@ -1136,7 +1215,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     // the moving water (setWaterLook at every build, the clock in render()): see WATER_FS
     wPhase: {value: 0}, wA: {value: new THREE.Vector4(0, 3, 12, -1)}, wB: {value: new THREE.Vector4(.8, .76, 0, 2)}, wRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())},
   };
-  const raw = (vs, fs, uniforms, extra = {}) => new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
+  const raw = (vs, fs, uniforms, extra = {}) => {
+    const m = new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
+    return vs.includes('#ifdef CINE') || fs.includes('#ifdef CINE') ? cineMat(m) : m;   // (its cinema variant follows setCine)
+  };
 
   // ---- textures: one per source image (canvas / Image / ImageBitmap), nearest, no colour management.
   // dynamic: a live canvas, re-uploaded at most once per frame. Give the canvas a `version` number (bump it whenever you
@@ -1463,7 +1545,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const pPos = new THREE.BufferAttribute(new Float32Array(PMAX * 3), 3), pCol = new THREE.BufferAttribute(new Float32Array(PMAX * 4), 4), pMisc = new THREE.BufferAttribute(new Float32Array(PMAX * 2), 2);
   for (const a of [pPos, pCol, pMisc]) a.setUsage(THREE.DynamicDrawUsage);
   pointGeo.setAttribute('position', pPos); pointGeo.setAttribute('color', pCol); pointGeo.setAttribute('aMisc', pMisc);
-  const pointObj = new THREE.Points(pointGeo, raw(POINT_VS, POINT_FS, {uSnap: SNAP})); pointObj.frustumCulled = false; pointObj.matrixAutoUpdate = false; gScene.add(pointObj);
+  const PTK = {value: 1};   // (the cinema camera's k: points keep their size in screen px)
+  const pointObj = new THREE.Points(pointGeo, raw(POINT_VS, POINT_FS, {uSnap: SNAP, uPtK: PTK})); pointObj.frustumCulled = false; pointObj.matrixAutoUpdate = false; gScene.add(pointObj);
   let nPoints = 0;
   const NOOPT = {};
   function point(x, y, z, c, o = NOOPT) {
@@ -1736,6 +1819,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uCl: {value: new THREE.Vector4()}, uClM: {value: new THREE.Vector4()}, uClO: {value: new THREE.Vector4()}, uClC: {value: new THREE.Vector3()},
     uHz: {value: new THREE.Vector4()}, uHzM: {value: new THREE.Vector4()}, uHzO: {value: new THREE.Vector4()},
     uAo: {value: new THREE.Vector4()},
+    uCine: CINE, uCamP: {value: new THREE.Vector3()}, uSunP: {value: new THREE.Vector4(0, 1, 0, 1)},   // the cinema camera (setCine)
+    uSkyZ: {value: new THREE.Vector3()}, uSkyH: {value: new THREE.Vector3()}, uSunCol: {value: new THREE.Vector3()},
   };
   const compScene = new THREE.Scene();
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
@@ -1782,6 +1867,11 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // pixels, then fx(...) particles draw on top, smooth: gaussian blobs, additive (fire, glow, embers) or blended (smoke),
   // each depth-tested against the pixel scene (soft particles: they fade out where the scene stands in front of them)
   let DS = 1;
+  // the GAME's view (art px) and display scale as camera.js sets them (resize, setDisplay); VW / VH / DS are what is drawn:
+  // the same, or finer while the cinema camera is on: setCine's c.px screen px a pixel (a whole number, so every pixel is
+  // the same size on screen; at most the game's own scale). A perspective view moving at the art's resolution jumps a
+  // whole art px, DS screen px, every few frames; finer it glides, and a sprite's texel is still a block. cineK = gS / px
+  let gW = VW, gH = VH, gS = DS, cineK = 1, cinePx = 1, canW = 0, canH = 0;
   const outRT = new THREE.WebGLRenderTarget(VW, VH, {minFilter: near, magFilter: near, depthBuffer: false});
   // HEAT: heat(...) blobs (over flames) add up in heatRT (view res, smooth); where it's warm the blit reads the pixel image
   // a little to the side, in rising ripples, at display resolution: the pixels behind the hot air wobble smoothly
@@ -1809,35 +1899,53 @@ out vec2 vUv; out vec4 vCol;
 void main() {
   vec4 c = projectionMatrix * viewMatrix * vec4(iPos.xyz, 1.);
   vUv = position.xy * 2. - 1.; vCol = iCol;
+#ifdef CINE
+  gl_Position = vec4(c.xy + vUv * iPos.w * uPxM, c.z, c.w);   // (the cinema camera: uPxM is its projection's scale, divided by the distance like the rest)
+#else
   gl_Position = vec4(c.xy + vUv * iPos.w * uPxM * c.w, c.z, c.w);
+#endif
 }`;
   const FX_FS = HEAD + `
 in vec2 vUv; in vec4 vCol;
-uniform sampler2D tD; uniform float uDS, uR, uSoft, uSharp;
+uniform sampler2D tD; uniform float uDS, uR, uSoft, uSharp; uniform vec4 uCine;
 out vec4 oc;
+#ifdef CINE
+float linD(float z) { return 2. * uCine.y * uCine.z / (uCine.z + uCine.y - (z * 2. - 1.) * (uCine.z - uCine.y)); }   // the cinema camera's depth -> m
+#endif
 void main() {
   float r2 = dot(vUv, vUv); if (r2 > 1.) discard;
   float a = max(0., exp(-r2 * uSharp) - exp(-uSharp));
   float sd = texelFetch(tD, ivec2(gl_FragCoord.xy / uDS), 0).r;
   if (!(sd > .0005 && sd <= 1.)) sd = 1.;   // an unreadable depth (some drivers): draw rather than hide everything
+#ifdef CINE
+  float behind = linD(gl_FragCoord.z) - linD(sd);
+#else
   float behind = (gl_FragCoord.z - sd) * 2. * uR;   // metres behind the scene
+#endif
   a *= clamp(1. - behind / uSoft, 0., 1.);
   if (a <= .002) discard;
   oc = vec4(vCol.rgb, vCol.a * a);
 }`;
-  const fxU = {tD: {value: gbuf.depthTexture}, uDS: {value: 1}, uR: {value: R_DEPTH}, uSoft: {value: .14}, uSharp: {value: 3.2}, uPxM: {value: new THREE.Vector2()}};
+  const fxU = {tD: {value: gbuf.depthTexture}, uDS: {value: 1}, uR: {value: R_DEPTH}, uSoft: {value: .14}, uSharp: {value: 3.2}, uPxM: {value: new THREE.Vector2()}, uCine: CINE};
   const HEAT_FS = HEAD + `
 in vec2 vUv; in vec4 vCol;
-uniform sampler2D tD; uniform float uR;
+uniform sampler2D tD; uniform float uR; uniform vec4 uCine;
 out vec4 oc;
+#ifdef CINE
+float linD(float z) { return 2. * uCine.y * uCine.z / (uCine.z + uCine.y - (z * 2. - 1.) * (uCine.z - uCine.y)); }
+#endif
 void main() {
   float r2 = dot(vUv, vUv); if (r2 > 1.) discard;
   float sd = texelFetch(tD, ivec2(gl_FragCoord.xy), 0).r;
   if (!(sd > .0005 && sd <= 1.)) sd = 1.;
+#ifdef CINE
+  float a = (1. - r2) * (1. - r2) * clamp(1. - (linD(gl_FragCoord.z) - linD(sd)) / .3, 0., 1.);
+#else
   float a = (1. - r2) * (1. - r2) * clamp(1. - (gl_FragCoord.z - sd) * 2. * uR / .3, 0., 1.);
+#endif
   oc = vec4(a * vCol.a, 0., 0., 1.);
 }`;
-  const heatU = {tD: fxU.tD, uR: fxU.uR, uPxM: fxU.uPxM}, heatScene = new THREE.Scene();
+  const heatU = {tD: fxU.tD, uR: fxU.uR, uPxM: fxU.uPxM, uCine: CINE}, heatScene = new THREE.Scene();
   const fxScene = new THREE.Scene(), FXMAX = 6000, fxB = {};
   // EXTRA passes owned by other modules (render/flames.js, render/rigmesh.js): extra(mesh, 'gbuf' | 'fx' | 'shadow' | 'xray') puts a
   // mesh in the G-buffer, the HD fx pass, the per-frame sun shadow (a caster that moves: layer 0) or the player's x-ray mark
@@ -1895,37 +2003,92 @@ void main() {
     const i = B.n * 4, P = B.P.array, C = B.C.array;
     P[i] = x; P[i + 1] = y; P[i + 2] = z; P[i + 3] = r; C[i] = c[0]; C[i + 1] = c[1]; C[i + 2] = c[2]; C[i + 3] = a; B.n++;
   }
-  function setDisplay(s) { s = Math.max(1, Math.round(s)); if (s === DS) return; DS = s; renderer.setSize(VW * s, VH * s, false); blitU.uDS.value = fxU.uDS.value = s; }
+  function setDisplay(s) { gS = Math.max(1, Math.round(s)); applySize(); }
   // resize(w, h): a new view size in art px (the window changed shape: ultrawide, fullscreen; main.js fit). The view-sized
   // targets and the screen layers follow; the projection, toScreen and the fx sizes read VW / VH every frame anyway
-  function resize(w, h) {
-    if (w === VW && h === VH) return;
-    VW = w; VH = h;
-    renderer.setSize(VW * DS, VH * DS, false);
-    for (const rt of [gbuf, xray, outRT, heatRT]) rt.setSize(VW, VH);
-    SNAP.value.set(VW, VH); compU.uRes.value.set(VW, VH); blitU.uRes.value.set(VW, VH);
-    for (const L of layerList) { L.c.width = VW; L.c.height = VH; L.q.imageSmoothingEnabled = false; L.dirty = false; L.t.dispose(); L.t.needsUpdate = true; L.rt.setSize(VW, VH); }
+  function resize(w, h) { gW = w; gH = h; applySize(); }
+  function applySize() {
+    const s = cine ? Math.min(gS, cinePx) : gS, w = cine ? Math.ceil(gW * gS / s) : gW, h = cine ? Math.ceil(gH * gS / s) : gH;
+    cineK = gS / s;
+    if (w !== VW || h !== VH) {
+      VW = w; VH = h;
+      for (const rt of [gbuf, xray, outRT, heatRT]) rt.setSize(VW, VH);
+      SNAP.value.set(VW, VH); compU.uRes.value.set(VW, VH); blitU.uRes.value.set(VW, VH);
+      for (const L of layerList) { L.c.width = VW; L.c.height = VH; L.q.imageSmoothingEnabled = false; L.dirty = false; L.t.dispose(); L.t.needsUpdate = true; L.rt.setSize(VW, VH); }
+    }
+    if (s !== DS) { DS = s; blitU.uDS.value = fxU.uDS.value = s; }
+    if (gW * gS !== canW || gH * gS !== canH) { canW = gW * gS; canH = gH * gS; renderer.setSize(canW, canH, false); }   // (the canvas: the game's, whatever is drawn)
   }
 
   // ---- view: target (snapped to the pixel lattice by the caller), yaw, zoom
   const view = {T: new THREE.Vector3(), yaw: 0, zoom: 1};
+  function oblique(c, T, yaw, zoom, w, h) {   // the game's projection into camera c, for a view of w x h art px
+    c.position.copy(T); c.rotation.set(0, yaw, 0); c.updateMatrixWorld(true);
+    const A = 2 * PPM * zoom / w, B = 2 * PPMH * zoom / h, C = 2 * PPMY * zoom / h, Nn = Math.hypot(PPMY, PPMH);
+    c.projectionMatrix.set(A, 0, 0, 0, 0, B, -C, 0, 0, -PPMY / Nn / R_DEPTH, -PPMH / Nn / R_DEPTH, 0, 0, 0, 0, 1);
+    c.projectionMatrixInverse.copy(c.projectionMatrix).invert();
+  }
+  // the game's view as camera.js last set it: gcam always (at the game's own size), what is drawn unless the cinema camera is set
+  const gT = new THREE.Vector3(); let gYaw = 0, gZoom = 1;
   function setView(T, yaw, zoom) {
-    view.T.copy(T); view.yaw = yaw; view.zoom = zoom;
-    camera.position.copy(T); camera.rotation.set(0, yaw, 0); camera.updateMatrixWorld(true);
-    const A = 2 * PPM * zoom / VW, B = 2 * PPMH * zoom / VH, C = 2 * PPMY * zoom / VH, Nn = Math.hypot(PPMY, PPMH);
-    camera.projectionMatrix.set(A, 0, 0, 0, 0, B, -C, 0, 0, -PPMY / Nn / R_DEPTH, -PPMH / Nn / R_DEPTH, 0, 0, 0, 0, 1);
-    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+    gT.copy(T); gYaw = yaw; gZoom = zoom;
+    oblique(gcam, T, yaw, zoom, gW, gH);
+    if (cine) cineView(); else gameView();
+  }
+  function gameView() {
+    const yaw = gYaw, zoom = gZoom;
+    view.T.copy(gT); view.yaw = yaw; view.zoom = zoom;
+    oblique(camera, gT, yaw, zoom, VW, VH);
     compU.uView.value.set(Math.sin(yaw) * .93969, .34202, Math.cos(yaw) * .93969);   // the sprite camera's toward-the-viewer
     U.camYaw.value = yaw; compU.uWPx.value.set(PPM, PPM * zoom);
     U.leanX.value.set(Math.cos(yaw) / PPM, 0, -Math.sin(yaw) / PPM); U.leanY.value.set(Math.sin(yaw) / PPMY, 0, Math.cos(yaw) / PPMY);   // art px -> m
   }
-  // world -> internal-canvas px (y down), for halos / HUD / tests
+  // the cinema camera (features/cinema.js), in place of the view while it is set: c = {pos, look (Vector3, m), fov (deg,
+  // vertical), near, far (m), air (1/m: the distance fog), sky: {zen, hor, sun (rgb 0..1), dir (toward the sun), disk (rad)}}.
+  // It is read at every setView (the camera calls that every frame) and at setCine: view.T = what it looks at (the sun's
+  // shadow box centres there), view.yaw = its heading (the cards turn to it), view.zoom = cineK (its resolution over the
+  // view's: what is drawn in px, puffs, flashes, flames, points, is that much bigger). setCine(null): the game's own view again
+  const _cf = new THREE.Vector3();
+  function cineView() {
+    const c = cine;
+    view.T.copy(c.look); view.zoom = cineK; PTK.value = cineK;   // (zoom: what is drawn in px is k x: puffs, flashes, flames, points)
+    camera.position.copy(c.pos); camera.up.set(0, 1, 0); camera.lookAt(c.look); camera.updateMatrixWorld(true);
+    cinePC.fov = c.fov; cinePC.aspect = VW / VH; cinePC.near = c.near ?? .15; cinePC.far = c.far ?? 400; cinePC.updateProjectionMatrix();
+    camera.projectionMatrix.copy(cinePC.projectionMatrix); camera.projectionMatrixInverse.copy(cinePC.projectionMatrixInverse);
+    const f = _cf.subVectors(c.look, c.pos).normalize(), yaw = Math.atan2(-f.x, -f.z);
+    view.yaw = yaw; U.camYaw.value = yaw;
+    CINE.value.set(1, cinePC.near, cinePC.far, c.air ?? .012);
+    compU.uCamP.value.copy(c.pos); compU.uView.value.set(-f.x, -f.y, -f.z); compU.uWPx.value.set(PPM, PPM);   // (uView: toward the viewer)
+    U.leanX.value.set(Math.cos(yaw) / PPM, 0, -Math.sin(yaw) / PPM); U.leanY.value.set(Math.sin(yaw) / PPMY, 0, Math.cos(yaw) / PPMY);
+    const s = c.sky;
+    if (s) { compU.uSkyZ.value.fromArray(s.zen); compU.uSkyH.value.fromArray(s.hor); compU.uSunCol.value.fromArray(s.sun); compU.uSunP.value.set(s.dir[0], s.dir[1], s.dir[2], Math.cos(s.disk ?? .03)); }
+  }
+  function setCine(c) {
+    const was = !!cine; cine = c || null;
+    if (!cine) CINE.value.x = 0; else cinePx = Math.max(1, Math.round(c.px || 1e9));   // (none: the art's own pixels)
+    if (was !== !!cine) for (const m of cineMats) setDef(m, !!cine);
+    applySize();
+    if (cine) cineView(); else if (was) gameView();   // (at once: a frame drawn before the next setView sees the right camera)
+  }
+  // world -> internal-canvas px (y down), for halos / HUD / tests: through what is drawn (the cinema camera while it is set;
+  // a point behind it lands far off the screen, so nothing is drawn for it mirrored)
   const _v = new THREE.Vector3();
-  function toScreen(x, y, z) { _v.set(x, y, z).project(camera); return [(_v.x + 1) / 2 * VW, (1 - _v.y) / 2 * VH, _v.z]; }
+  const behind = () => cine && !(_v.z >= -1 && _v.z <= 1);
+  function toScreen(x, y, z) { _v.set(x, y, z).project(camera); if (behind()) return [-1e5, -1e5, _v.z]; return [(_v.x + 1) / 2 * VW, (1 - _v.y) / 2 * VH, _v.z]; }
   // the same into out (3 numbers), no allocation: for per-frame loops
-  function toScreenInto(x, y, z, out) { _v.set(x, y, z).project(camera); out[0] = (_v.x + 1) / 2 * VW; out[1] = (1 - _v.y) / 2 * VH; out[2] = _v.z; return out; }
+  function toScreenInto(x, y, z, out) { _v.set(x, y, z).project(camera); if (behind()) { out[0] = out[1] = -1e5; out[2] = _v.z; return out; } out[0] = (_v.x + 1) / 2 * VW; out[1] = (1 - _v.y) / 2 * VH; out[2] = _v.z; return out; }
+  // the same through the GAME's view (gcam), into out: for the sim (the cursor's aim, the lasso's pick)
+  function gameToScreen(x, y, z, out) { _v.set(x, y, z).project(gcam); out[0] = (_v.x + 1) / 2 * gW; out[1] = (1 - _v.y) / 2 * gH; out[2] = _v.z; return out; }
+  // view px per metre at a world point (a size in metres there -> px): the oblique view's PPM x zoom; through the cinema
+  // camera the perspective's at that distance (0 behind it)
+  const _pw = new THREE.Vector4();
+  function pxPerM(x, y, z) {
+    if (!cine) return PPM * view.zoom;
+    const d = -_pw.set(x, y, z, 1).applyMatrix4(camera.matrixWorldInverse).z;
+    return d > .05 ? camera.projectionMatrix.elements[5] * VH / 2 / d : 0;
+  }
   // is world (X, Y up, Z) on screen, give or take m view px? (allocation-free: for culling effects every frame)
-  function onScreen(x, y, z, m = 0) { _v.set(x, y, z).project(camera); const sx = (_v.x + 1) / 2 * VW, sy = (1 - _v.y) / 2 * VH; return sx > -m && sx < VW + m && sy > -m && sy < VH + m; }
+  function onScreen(x, y, z, m = 0) { _v.set(x, y, z).project(camera); if (behind()) return false; const sx = (_v.x + 1) / 2 * VW, sy = (1 - _v.y) / 2 * VH; return sx > -m && sx < VW + m && sy > -m && sy < VH + m; }
 
   // ---- sun: direction toward the sun (world), shadow camera snapped to its texel grid around the view target
   // dir: the sun as it LIGHTS (shading, rims, glints); sdir: the sun as it CASTS shadows (same azimuth, the elevation
@@ -1945,6 +2108,8 @@ void main() {
   }
 
   let waterSpeed = 1, waterT = -1;
+  // the fx blobs' NDC per metre of radius: the oblique view's px per metre; the cinema camera's projection scale (FX_VS divides it by the distance)
+  const fxPxM = () => cine ? fxU.uPxM.value.set(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]) : fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
   const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
   function render() {
     const t0 = performance.now();
@@ -1969,6 +2134,9 @@ void main() {
     drawLayers();
     const lay = compU.uLay.value, on = n => +(layers[n].runs.length > 0);
     lay.set(on('ground'), on('pre'), on('front'), on('add')); compU.uLayE.value = on('emit'); compU.uLayD.value = on('distort');
+    if (cine) {   // the cinema camera: the screen layers, cloud shadows, heat haze and reflections are painted for the oblique view
+      lay.set(0, 0, 0, 0); compU.uLayE.value = compU.uLayD.value = 0; compU.uCl.value.x = compU.uHz.value.x = compU.uRf.value.x = 0;
+    }
     lap('layers');
     for (const s of litters) s.run();   // the fallen leaves' field (render/litter.js): the ticks that are due; the ground shader reads the result
     lap('litter');
@@ -2002,8 +2170,8 @@ void main() {
     const calls = renderer.info.render.calls;
     lap('gbuf', calls);
     for (const m of xExtra) m.visible = m.userData.frame === frameNo;
-    renderer.setRenderTarget(xray); renderer.clear(true, false, false); renderer.render(xScene, camera);
-    if (aoFrame !== frameNo) aoN = 0;
+    renderer.setRenderTarget(xray); renderer.clear(true, false, false); if (!cine) renderer.render(xScene, camera);   // (no x-ray, no contact
+    if (aoFrame !== frameNo || cine) aoN = 0;                                                                         // shadows: the cinema camera)
     compU.uAo.value.w = aoN ? compU.uAo.value.w : 0;
     if (aoN) { aoGeo.instanceCount = aoN; setRange(aoBuf, 0, aoN * 8); renderer.render(aoScene, dummyCam); }
     compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
@@ -2013,13 +2181,13 @@ void main() {
       renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam);
       if (hN) {
         const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
-        fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
+        fxPxM();
         renderer.setRenderTarget(heatRT); renderer.clear(true, false, false); renderer.render(heatScene, camera);
       }
       blitU.uHeat.value = hN ? 1 : 0; blitU.uT.value = performance.now() / 1000 % 1000; blitU.uZ.value = view.zoom;
       renderer.setRenderTarget(null); renderer.render(blitScene, dummyCam);
       if (fxN || fxX) {
-        fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
+        fxPxM();
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
         renderer.render(fxScene, camera);
       }
@@ -2111,7 +2279,7 @@ void main() {
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
-    setView, setSun, toScreen, toScreenInto, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD,
+    setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; },
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; }};
 }

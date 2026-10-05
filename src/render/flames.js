@@ -86,7 +86,7 @@ export function createFlames(G) {
   // the pixel flame: a size x size square on the pixel lattice per particle (gfx.js POINT_VS's snap: odd sizes centre on a
   // pixel, even ones on a corner, so the square's edges lie on pixel edges and it covers what the point sprite did)
   const PIXELS_VS = HEAD + FLAME + `
-in vec3 position; uniform mat4 viewMatrix, projectionMatrix; uniform vec2 uSnap; uniform float uStyle;
+in vec3 position; uniform mat4 viewMatrix, projectionMatrix; uniform vec2 uSnap; uniform float uStyle, uZoom;
 out vec4 vCol; flat out float vAlpha;
 void main() {
   vec3 w; float Tm, zf; int t, fi;
@@ -97,13 +97,24 @@ void main() {
   vAlpha = outer ? .62 : Tm < .22 ? .55 : 1.;
   vCol = vec4(fd(fi, 5 + t).rgb, 1.);   // emissive (POINT_FS: a = 1)
   vec4 p = projectionMatrix * viewMatrix * vec4(w, 1.);
+#ifdef CINE
+  float pw = p.w; p.xyz /= pw;   // (a cinema camera's perspective: gfx.js setCine)
+#endif
   vec2 s = (p.xy * .5 + .5) * uSnap;
+#ifdef CINE
+  vec2 c = mod(size * uZoom, 2.) > .5 ? floor(s) + .5 : floor(s + .5);
+#else
   vec2 c = mod(size, 2.) > .5 ? floor(s) + .5 : floor(s + .5);
+#endif
+#ifdef CINE
+  gl_Position = vec4((c + (position.xy - .5) * size * uZoom) / uSnap * 2. - 1., p.z - .00125, pw > 0. ? 1. : -1.);   // (w -1: behind it, clipped; uZoom: the cinema's k)
+#else
   gl_Position = vec4((c + (position.xy - .5) * size) / uSnap * 2. - 1., p.z - .00125, 1.);
+#endif
 }`;
-  const uSnap = {value: new THREE.Vector2(G.VW, G.VH)};
-  const pixels = new THREE.Mesh(geo, new THREE.RawShaderMaterial({vertexShader: PIXELS_VS, fragmentShader: POINT_FS, glslVersion: THREE.GLSL3,
-    uniforms: {...U, uSnap}, side: THREE.DoubleSide}));
+  const uSnap = {value: new THREE.Vector2(G.VW, G.VH)}, uZoom = {value: 1};   // (uZoom: a cinema camera's k, G.view.zoom: its variant only)
+  const pixels = new THREE.Mesh(geo, G.cineMat(new THREE.RawShaderMaterial({vertexShader: PIXELS_VS, fragmentShader: POINT_FS, glslVersion: THREE.GLSL3,
+    uniforms: {...U, uSnap, uZoom}, side: THREE.DoubleSide})));
   pixels.frustumCulled = false; pixels.matrixAutoUpdate = false;
   // the HD glow: a soft quad per particle that has one this frame (gfx.js FX_VS / FX_FS: display resolution, additive)
   const GLOW_VS = HEAD + FLAME + `
@@ -125,11 +136,15 @@ void main() {
   }
   vCol = vec4(col, al);
   vec4 c = projectionMatrix * viewMatrix * vec4(w, 1.);
+#ifdef CINE
+  gl_Position = vec4(c.xy + vUv * R * uPxM, c.z, c.w);   // (a cinema camera, gfx.js setCine: uPxM is its projection's scale, divided by the distance)
+#else
   gl_Position = vec4(c.xy + vUv * R * uPxM * c.w, c.z, c.w);
+#endif
 }`;
-  const F = G.fxU, glow = new THREE.Mesh(geo, new THREE.RawShaderMaterial({vertexShader: GLOW_VS, fragmentShader: FX_FS, glslVersion: THREE.GLSL3,
-    uniforms: {...U, tD: F.tD, uDS: F.uDS, uR: F.uR, uSoft: F.uSoft, uSharp: F.uSharp, uPxM: F.uPxM},
-    depthTest: false, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending}));
+  const F = G.fxU, glow = new THREE.Mesh(geo, G.cineMat(new THREE.RawShaderMaterial({vertexShader: GLOW_VS, fragmentShader: FX_FS, glslVersion: THREE.GLSL3,
+    uniforms: {...U, tD: F.tD, uDS: F.uDS, uR: F.uR, uSoft: F.uSoft, uSharp: F.uSharp, uPxM: F.uPxM, uCine: F.uCine},
+    depthTest: false, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending})));
   glow.frustumCulled = false; glow.matrixAutoUpdate = false; glow.renderOrder = 1;   // (with the other additive fx, after smoke)
   G.extra(pixels, 'gbuf'); G.extra(glow, 'fx');
 
@@ -183,7 +198,7 @@ void main() {
       geo.instanceCount = top;
       U.uTm.value = T % 2048; U.uPh13.value = (T * 13) % TAU;
       U.uPh.value.set((T * 2.9) % TAU, (T * 6.1) % TAU, (T * 2.4) % TAU, (T * 5.3) % TAU);
-      U.uStyle.value = STYLE[style] ?? 1; uSnap.value.set(G.VW, G.VH);
+      U.uStyle.value = STYLE[style] ?? 1; uSnap.value.set(G.VW, G.VH); uZoom.value = G.view.zoom;
       pixels.userData.frame = glow.userData.frame = top ? G.frame : -1;   // shown on this frame's render only (and only with particles)
     },
   };

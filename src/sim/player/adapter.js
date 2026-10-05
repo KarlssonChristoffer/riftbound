@@ -99,6 +99,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     if (hoverAt === hoverKey) return hoverMemo;
     hoverAt = hoverKey; return (hoverMemo = hoverFind());
   }
+  const HS0 = [0, 0, 0], HS1 = [0, 0, 0];   // (screen points: through the GAME's view, G.gameToScreen, whatever a cinema camera draws)
   function hoverFind() {
     for (const f of features) { const t = f.aimTarget?.(); if (t) return t; }
     let best = null, bn = -1e9, bh = 0;
@@ -106,7 +107,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     for (const p of aimable) {
       if (p.broken || p.gone || !(p.target || p.hp > 0)) continue;
       const z0 = (p.z || 0) + (p.h || 0), hh = p.hitH ?? (p.kind === 'pot' ? .55 : p.kind === 'crate' ? .75 : 1.6), rr = Math.max(.3, p.hitR ?? p.r ?? .4);
-      const [x0, y0] = G.toScreen(p.x, z0 + hh, p.y), [, y1] = G.toScreen(p.x, z0, p.y), w = rr * PPM * cv.zoom;
+      const s0 = G.gameToScreen(p.x, z0 + hh, p.y, HS0), x0 = s0[0], y0 = s0[1], y1 = G.gameToScreen(p.x, z0, p.y, HS1)[1], w = rr * PPM * cv.zoom;
       if (mx > x0 - w - 2 && mx < x0 + w + 2 && my > y0 - 3 && my < y1 + 3) {
         const n = toView(p.x, p.y)[1];
         if (n > bn) { bn = n; best = p; bh = z0 + hh * Math.max(.08, Math.min(.95, (y1 - my) / (y1 - y0 || 1))); }

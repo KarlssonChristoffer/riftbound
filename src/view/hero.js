@@ -133,12 +133,18 @@ export function createHero({G, set, loadI, ctxO, app}) {
     armor.toggle(); armor.setAtlas(LOADOUTS[loadI][1]);
     if (armor.on) { armor.preload(Object.keys(SP)); Object.keys(SP).forEach(maskOf); }
   }
+  // the facing column AS DRAWN: P.face is his facing in the game's view frame (the atlas's steps); a cinema camera
+  // (app.viewYaw: its heading, features/cinema.js) sees him from another side, so the column turns by the difference
+  function faceCol() {
+    const P = app.P, vy = app.viewYaw;
+    return vy === app.yaw ? P.face : ((Math.round(P.face + (app.yaw - vy) / (2 * Math.PI / ND)) % ND) + ND) % ND;
+  }
   function drawMetal(frame, sinkPx) {   // the metal mask of this frame into the composite's layout, minus what the cloak covers
     const P = app.P;
     mq.clearRect(0, 0, 192, 160);
     const m = armor.on && !sinkPx ? maskOf(frame) : null;
     card.g.uniforms.uHasMetal.value = m ? 1 : 0; if (!m) return;
-    mq.drawImage(m, P.face * FW, 0, FW, FH, CX, CY, FW, FH);
+    mq.drawImage(m, faceCol() * FW, 0, FW, FH, CX, CY, FW, FH);
     if (rig.active) {
       const id = mq.getImageData(CX, CY, FW, FH), d = id.data;
       for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) { const k = (y * FW + x) * 4; if (d[k] && rig.covers(x, y)) d[k] = d[k + 1] = d[k + 2] = 0; }
@@ -172,7 +178,7 @@ export function createHero({G, set, loadI, ctxO, app}) {
     const P = app.P, W = app.feat('wind');
     setClothWind(W?.on && W.cloth?.() || CLOTH_CALM);
     if (!sim) return;
-    perf?.begin('cloth.sim', 'char'); rig.update(dt, SP[P.frame]?.sim, P.face, clothPos); perf?.end('cloth.sim');
+    perf?.begin('cloth.sim', 'char'); rig.update(dt, SP[P.frame]?.sim, faceCol(), clothPos); perf?.end('cloth.sim');
   }
 
   // HAIR IN THE WIND: once the wind at the Ranger is more than a breeze (the wind feature's strength), the hair's edge pixels
@@ -210,12 +216,12 @@ export function createHero({G, set, loadI, ctxO, app}) {
     return (byFace[face] = {bx, by, n: xs.length, x: Int16Array.from(xs), y: Int16Array.from(ys), f: Uint8Array.from(fs), ca: Uint32Array.from(ca), cn: sp.nrm ? Uint32Array.from(cn) : null});
   }
   function hairWind(fr) {
-    const P = app.P, player = app.player, yaw = app.yaw;
+    const P = app.P, player = app.player, yaw = app.viewYaw, fc = faceCol();
     const W = app.feat('wind'); if (!W?.on || !W.at) return;
     const k = Math.min(1, Math.max(0, ((W.strength || 0) - 1.05) / 1.3)); if (k <= 0) return;
-    const sp = SP[fr], hb = sp?.bones?.[DIRS[P.face]]?.Head; if (!hb) return;
+    const sp = SP[fr], hb = sp?.bones?.[DIRS[fc]]?.Head; if (!hb) return;
     const a = W.at(player.x, player.y, HAIR_A), dir = Math.sign(a.x * Math.cos(yaw) - a.y * Math.sin(yaw)) || 1;   // downwind on screen
-    const H = hairOf(sp, P.face, hb); if (!H) return;
+    const H = hairOf(sp, fc, hb); if (!H) return;
     const x0 = CX + H.bx, y0 = CY + H.by, tk = Math.floor(performance.now() / 100), cl = rig.active ? rig : null;
     const fOut = dir > 0 ? 2 : 1, fOut2 = dir > 0 ? 8 : 4;
     for (let i = 0; i < H.n; i++) {
@@ -239,12 +245,12 @@ export function createHero({G, set, loadI, ctxO, app}) {
     const fr = SP[P.frame] ? P.frame : 'idle.0', sp = SP[fr];
     A.clearBox(); N.clearBox();
     const sinkPx = Math.round((P.sink || 0) * 22);
-    const sa = bytesOf(armor.albedo(fr, sp.img)), sn = sp.nrm ? bytesOf(sp.nrm) : null;   // (armor: metal repainted)
-    if (sa) A.blit(sa.u32, sa.w, P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx);
-    if (sn) N.blit(sn.u32, sn.w, P.face * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx);
-    if (rig.active && sp.depth && !sinkPx) rig.draw(A, CX, CY, depthOf(sp.depth), P.face, N);
+    const sa = bytesOf(armor.albedo(fr, sp.img)), sn = sp.nrm ? bytesOf(sp.nrm) : null, fc = faceCol();   // (armor: metal repainted)
+    if (sa) A.blit(sa.u32, sa.w, fc * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx);
+    if (sn) N.blit(sn.u32, sn.w, fc * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx);
+    if (rig.active && sp.depth && !sinkPx) rig.draw(A, CX, CY, depthOf(sp.depth), fc, N);
     if (!sinkPx) hairWind(fr);
-    if (!sinkPx && !opt.hdBow && weapon.kind === 'bow') PL.drawPixelBow(A, CX, CY);   // (a gun loadout has no string / nocked arrow)
+    if (!sinkPx && !opt.hdBow && weapon.kind === 'bow') PL.drawPixelBow(A, CX, CY, fc);   // (a gun loadout has no string / nocked arrow)
     drawMetal(fr, sinkPx);
     send(charCv, A); send(nrmCv, N);
     perf?.end('hero.compose');
@@ -274,7 +280,7 @@ export function createHero({G, set, loadI, ctxO, app}) {
   // (img / nrm: the canvases, filled from the arrays when read)
   // (one kept object, filled per call: its readers use it at once; flow's afterimage copies what it keeps)
   const SPRO = {get img() { sync(); return charCv; }, get nrm() { sync(); return nrmCv; }, px: 0, py: 0, x: 0, y: 0, h: 0, frame: '', face: 0};
-  const sprite = () => { const P = app.P, player = app.player, o = SPRO; o.px = PIV[0] + CX; o.py = PIV[1] + CY; o.x = player.x; o.y = player.y; o.h = P.z; o.frame = P.frame; o.face = P.face; return o; };
+  const sprite = () => { const P = app.P, player = app.player, o = SPRO; o.px = PIV[0] + CX; o.py = PIV[1] + CY; o.x = player.x; o.y = player.y; o.h = P.z; o.frame = P.frame; o.face = faceCol(); return o; };
 
   return {atlas, card, armor, toggleArmour, switchLoadout, moveCloth, stepCloth, compose, drawHDBow, sprite,
     get SP() { return SP; }, get rig() { return rig; }, get ND() { return ND; }, get set() { return set; }, get loadI() { return loadI; }, get loadName() { return LOADOUTS[loadI][0]; },

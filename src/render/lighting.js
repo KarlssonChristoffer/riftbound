@@ -86,8 +86,9 @@ export function createLighting({G, host, features, opt}) {
       U.uLP.value[i].set(l.x, l.y, l.z, l.r); U.uLC.value[i].set(l.c[0] * l.gain, l.c[1] * l.gain, l.c[2] * l.gain, l.flat ? 1 : 0);
       if (l.flat || !l.halo) continue;   // (halo: false, a feature light without one: a muzzle flash)
       const a = Math.min(.75, HALO_A * l.gain * (m.glow ?? 1) * (.3 + .7 * dark) + Math.max(0, l.gain - 1.5) * .12); if (a < .02) continue;
-      const sv = G.toScreenInto(l.x, l.y, l.z, SV3), sx = sv[0], sy = sv[1];
-      U.uHalo.value[nh].set(sx, VH - sy, (HALO_R + .12 * Math.min(2, l.gain) + Math.max(0, l.gain - 1.3) * .35) * PPM * zoom, a); U.uHaloC.value[nh].set(l.c[0], l.c[1], l.c[2]); nh++;
+      const sv = G.toScreenInto(l.x, l.y, l.z, SV3), sx = sv[0], sy = sv[1], hr = HALO_R + .12 * Math.min(2, l.gain) + Math.max(0, l.gain - 1.3) * .35;
+      const pm = G.cine ? G.pxPerM(l.x, l.y, l.z) : 1; if (pm <= 0) continue;   // (a cinema camera: px a metre there, its perspective; 0 behind it)
+      U.uHalo.value[nh].set(sx, G.VH - sy, G.cine ? hr * pm : hr * PPM * zoom, a); U.uHaloC.value[nh].set(l.c[0], l.c[1], l.c[2]); nh++;
     }
     U.uNH.value = nh;
     return m;
