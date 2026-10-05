@@ -22,16 +22,16 @@
 // Run it before committing anything that touches the frame (a feature, the renderer, the host). Headless Chrome on the
 // dev machine is ~10-20% faster than a visible window; the budgets in perf.js already account for that.
 import {spawn} from 'node:child_process';
-import {readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync} from 'node:fs';
-import {tmpdir, cpus} from 'node:os';
+import {readFileSync, writeFileSync, existsSync} from 'node:fs';
+import {cpus} from 'node:os';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {launch} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..'), BASE = join(ROOT, 'tools', 'perf', 'baseline.json');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; }, flag = k => process.argv.includes('--' + k);
 const HORDE = +arg('horde', 60);
 const PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, '') + '/', RUNS = Math.max(1, +arg('runs', flag('save') ? 3 : 1)), THROTTLE = +arg('throttle', 1), EXTRA = arg('q', ''), SECS = +arg('secs', 6), PORT = +arg('port', 8139), [W, H] = arg('res', '3440x1440').split('x').map(Number), ONLY = arg('only', '');
-const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 
 // ---- scenarios: a page query + an optional driver (runs in the page once it's ready)
 const WALK = `(() => { const R = window.__r3d; let i = 0; window.__drive = setInterval(() => { R.keys.clear(); R.keys.add('wasd'[(i++ >> 4) % 4]); }, 60); })()`;
@@ -67,16 +67,12 @@ async function cpuBusy(ms = 1500) {
 }
 const LOAD0 = await cpuBusy();
 const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
-const prof = mkdtempSync(join(tmpdir(), 'bench-chrome-'));
-const chrome = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit', '--enable-precise-memory-info',
-  `--window-size=${W},${H}`, '--remote-debugging-port=9342', '--user-data-dir=' + prof, 'about:blank'], {stdio: 'ignore'});
-// the throwaway profile (100-150 MB in %TEMP%) goes with Chrome, which lets go of its files a moment after the kill; if a
-// Chrome child process is slow to die (a busy machine), a detached node keeps trying for two minutes. 'exit' also
-// covers an uncaught error, Ctrl+C goes through quit
-const rmProfile = () => { for (let k = 0; k < 20; k++) { try { return rmSync(prof, {recursive: true, force: true}); } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); }
-  spawn(process.execPath, ['-e', 'for (let k = 0; k < 120; k++) { try { require("fs").rmSync(process.argv[1], {recursive: true, force: true}); break; } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000); }', prof], {detached: true, stdio: 'ignore', windowsHide: true}).unref(); };
+// Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run left
+// behind). 'exit' also covers an uncaught error, Ctrl+C goes through quit
+const chrome = launch('bench', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit', '--enable-precise-memory-info',
+  `--window-size=${W},${H}`, '--remote-debugging-port=9342', 'about:blank']);
 let stopped = false;
-const stop = () => { if (stopped) return; stopped = true; try { chrome.kill(); } catch {} try { server.kill(); } catch {} rmProfile(); };
+const stop = () => { if (stopped) return; stopped = true; chrome.kill(); try { server.kill(); } catch {} };
 const quit = code => { stop(); process.exit(code); };
 process.on('exit', stop); process.on('SIGINT', () => quit(130));
 

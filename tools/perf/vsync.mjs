@@ -12,15 +12,13 @@
 // the screen and keyboard focus, and anything else drawing makes misses that aren't the game's.
 // Ports: HTTP 8136, Chrome debug 9345.
 import {spawn} from 'node:child_process';
-import {mkdtempSync, rmSync} from 'node:fs';
-import {tmpdir} from 'node:os';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {launch} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
 const SECS = +arg('secs', 10), SETTLE = +arg('settle', 3), ONLY = arg('only', ''), PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, ''), PORT = 8136, DBG = 9345;
-const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const SPAWN = `(() => { const R = window.__r3d, C = R.host.feature('combat').core, x = R.host.player.x, y = R.host.player.y; C.immune = () => true;
   for (let i = 0; i < 60; i++) { const r = 3.5 + (i % 4) * 1.6, a = i * 2.39996; C.spawnBrute({x: x + Math.cos(a) * r, y: y + Math.sin(a) * r * .7, hp: 1e6, dmg: 0, type: 'brute', name: 'Brute', coins: [0, 0]}); } })()`;
 const WALK = `(() => { const R = window.__r3d; let i = 0; window.__drive = setInterval(() => { R.keys.clear(); R.keys.add('wasd'[(i++ >> 4) % 4]); }, 60); })()`;
@@ -35,14 +33,13 @@ const SCENARIOS = [
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore', cwd: ROOT});
-const prof = mkdtempSync(join(tmpdir(), 'vsync-chrome-'));
-// a real window (no --headless), full screen without browser UI, never treated as hidden or in the background
-const chrome = spawn(CHROME, ['--kiosk', '--window-position=0,0', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--no-first-run', '--no-default-browser-check',
+// a real window (no --headless), full screen without browser UI, never treated as hidden or in the background; its
+// throwaway profile goes with it (tools/lib/chrome.mjs)
+const chrome = launch('vsync', ['--kiosk', '--window-position=0,0', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist',
   '--disable-features=CalculateNativeWinOcclusion', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
-  `--remote-debugging-port=${DBG}`, '--user-data-dir=' + prof, 'about:blank'], {stdio: 'ignore'});
+  `--remote-debugging-port=${DBG}`, 'about:blank']);
 let stopped = false;
-const stop = () => { if (stopped) return; stopped = true; try { chrome.kill(); } catch {} try { server.kill(); } catch {}
-  for (let k = 0; k < 20; k++) { try { rmSync(prof, {recursive: true, force: true}); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); } } };
+const stop = () => { if (stopped) return; stopped = true; chrome.kill(); try { server.kill(); } catch {} };
 const quit = c => { stop(); process.exit(c); };
 process.on('exit', stop); process.on('SIGINT', () => quit(130));
 

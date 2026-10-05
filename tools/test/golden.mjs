@@ -9,18 +9,17 @@
 //   node tools/test/golden.mjs --compare tmp/golden/base                    capture again and compare
 //   options: --path src/ (the page folder: src/, or concepts/render3d/ in commits before the move) --only day,run --port 8141
 import {spawn} from 'node:child_process';
-import {mkdirSync, writeFileSync, readFileSync, existsSync, mkdtempSync, rmSync} from 'node:fs';
+import {mkdirSync, writeFileSync, readFileSync, existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {tmpdir} from 'node:os';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {launch} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
 const SAVE = arg('save'), CMP = arg('compare'), OUT = SAVE || join(ROOT, 'tmp', 'golden', 'last');
 const PAGE = arg('path', existsSync(join(ROOT, 'src', 'index.html')) ? 'src/' : 'concepts/render3d/').replace(/^\/|\/?$/g, '') + '/';
 const PORT = +arg('port', 8141), ONLY = arg('only', '');
-const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 if (!SAVE && !CMP) { console.log('usage: --save <dir> | --compare <dir>'); process.exit(2); }
 
 // in the page, before any script: seeded random, a virtual clock, no rAF loop
@@ -66,16 +65,12 @@ const SCENARIOS = [
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
-const PROFILE = mkdtempSync(join(tmpdir(), 'golden-'));
-const chrome = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1920,1080',
-  '--remote-debugging-port=9351', '--user-data-dir=' + PROFILE, 'about:blank'], {stdio: 'ignore'});
-// the throwaway profile (100-150 MB in %TEMP%) goes with Chrome, which lets go of its files a moment after the kill; if a
-// Chrome child process is slow to die (a busy machine), a detached node keeps trying for two minutes. 'exit' also
-// covers an uncaught error, Ctrl+C goes through quit
-const rmProfile = () => { for (let k = 0; k < 20; k++) { try { return rmSync(PROFILE, {recursive: true, force: true}); } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); }
-  spawn(process.execPath, ['-e', 'for (let k = 0; k < 120; k++) { try { require("fs").rmSync(process.argv[1], {recursive: true, force: true}); break; } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000); }', PROFILE], {detached: true, stdio: 'ignore', windowsHide: true}).unref(); };
+// Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run left
+// behind). 'exit' also covers an uncaught error, Ctrl+C goes through quit
+const chrome = launch('golden', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1920,1080',
+  '--remote-debugging-port=9351', 'about:blank']);
 let stopped = false;
-const stop = () => { if (stopped) return; stopped = true; try { chrome.kill(); } catch {} try { server.kill(); } catch {} rmProfile(); };
+const stop = () => { if (stopped) return; stopped = true; chrome.kill(); try { server.kill(); } catch {} };
 const quit = code => { stop(); process.exit(code); };
 process.on('exit', stop); process.on('SIGINT', () => quit(130));
 let tabs; for (let k = 0; k < 80; k++) { try { tabs = await (await fetch('http://127.0.0.1:9351/json')).json(); if (tabs.find(t => t.type === 'page')) break; } catch {} await sleep(250); }

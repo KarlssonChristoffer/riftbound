@@ -16,16 +16,15 @@
 // A git:REV side is extracted (git archive of its src/) to src-ab-REV/ next to src/ and removed at the end.
 // Ports: HTTP 8137, Chrome debug 9344 (bench 9342, golden 9351, simview 9352, smoke 9354).
 import {spawn, spawnSync} from 'node:child_process';
-import {mkdtempSync, rmSync, existsSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {rmSync, existsSync} from 'node:fs';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {launch} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
 const Q = arg('q', 'mode=sandbox'), QA = arg('qa', ''), QB = arg('qb', ''), DRIVE = arg('drive', ''), SL = +arg('slices', 14), NF = +arg('frames', 150);
 const [W, H] = arg('res', '3440x1440').split('x').map(Number), PORT = 8137, DBG = 9344;
-const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 if (!arg('a')) { console.log('usage: node tools/perf/ab.mjs --a <folder | git:REV> [--b src/] [--q ...]   (see the header)'); process.exit(2); }
 
 // a side: a folder next to src/, or git:REV extracted there
@@ -47,13 +46,12 @@ const A = side(arg('a')), B = side(arg('b', 'src/'));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore', cwd: ROOT});
-const prof = mkdtempSync(join(tmpdir(), 'ab-chrome-'));
-const chrome = spawn(CHROME, ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit',
-  '--enable-precise-memory-info', `--window-size=${W},${H}`, `--remote-debugging-port=${DBG}`, '--user-data-dir=' + prof, 'about:blank'], {stdio: 'ignore'});
+const chrome = launch('ab', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit',
+  '--enable-precise-memory-info', `--window-size=${W},${H}`, `--remote-debugging-port=${DBG}`, 'about:blank']);   // (its profile: tools/lib/chrome.mjs)
 let stopped = false;
 const stop = () => {
-  if (stopped) return; stopped = true; try { chrome.kill(); } catch {} try { server.kill(); } catch {}
-  for (const d of [...made, prof]) for (let k = 0; k < 20; k++) { try { rmSync(d, {recursive: true, force: true}); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); } }
+  if (stopped) return; stopped = true; chrome.kill(); try { server.kill(); } catch {}
+  for (const d of made) for (let k = 0; k < 20; k++) { try { rmSync(d, {recursive: true, force: true}); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); } }
 };
 const quit = c => { stop(); process.exit(c); };
 process.on('exit', stop); process.on('SIGINT', () => quit(130));

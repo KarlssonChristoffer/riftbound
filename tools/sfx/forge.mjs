@@ -9,11 +9,11 @@
 // (a contact sheet with audio players, spectrograms, metrics, pass/fail, and the reference next to each case).
 // Prints one line per variant: pass/fail, key metrics, and the variant-to-variant similarity range per case.
 
-import {writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, rmSync} from 'node:fs';
+import {writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync} from 'node:fs';
 import {deflateSync} from 'node:zlib';
-import {spawn} from 'node:child_process';
 import {dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
+import {launch} from '../lib/chrome.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const FORGE = join(ROOT, 'audio/forge');
@@ -46,15 +46,12 @@ const imgW = sec => Math.round(Math.min(900, Math.max(360, sec * 900)));
 
 // ---------------------------------------------------------------- references (decoded by headless Chrome)
 async function decodeRefs(files) {
-  const port = 9400 + Math.floor(Math.random() * 90), dir = join(process.env.TEMP || '/tmp', 'forge_cdp_' + port);
-  const chrome = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe', ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', 'about:blank'], {stdio: 'ignore'});
-  // the throwaway profile (100+ MB in %TEMP%) goes with Chrome, which lets go of its files a moment after the kill; if a
-  // Chrome child process is slow to die (a busy machine), a detached node keeps trying for two minutes. 'exit' also
-  // covers an uncaught error, and Ctrl+C
-  const rmProfile = () => { for (let k = 0; k < 20; k++) { try { return rmSync(dir, {recursive: true, force: true}); } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); }
-    spawn(process.execPath, ['-e', 'for (let k = 0; k < 120; k++) { try { require("fs").rmSync(process.argv[1], {recursive: true, force: true}); break; } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000); }', dir], {detached: true, stdio: 'ignore', windowsHide: true}).unref(); };
+  const port = 9400 + Math.floor(Math.random() * 90);
+  // Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run
+  // left behind). 'exit' also covers an uncaught error, and Ctrl+C
+  const chrome = launch('forge', ['--headless=new', `--remote-debugging-port=${port}`, 'about:blank']);
   let stopped = false;
-  const stop = () => { if (stopped) return; stopped = true; try { chrome.kill(); } catch {} rmProfile(); }, onInt = () => { stop(); process.exit(130); };
+  const stop = () => { if (stopped) return; stopped = true; chrome.kill(); }, onInt = () => { stop(); process.exit(130); };
   process.on('exit', stop); process.on('SIGINT', onInt);
   const sleep = ms => new Promise(r => setTimeout(r, ms)); let ws, id = 0; const pend = new Map();
   const send = (m, p = {}) => new Promise(ok => { const i = ++id; pend.set(i, ok); ws.send(JSON.stringify({id: i, method: m, params: p})); });
