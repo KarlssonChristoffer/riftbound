@@ -199,6 +199,63 @@ float wlay(float a, float s, float ph, float ca, float cs, float seed) {
   float d = s - mod(floor(ph), 768.);
   return wvn(vec2((a + sin(d * .2618) * 1.3) / ca + seed, d / cs), 768. / cs);
 }
+// DEPTH, BED AND CONTACT FOAM (world/waterbed.js bakes uWBed over the water's box, once per world; uWBedOn 0 = none and the old
+// water runs untouched: ?water=0, the lava). A moving texel's depth BAND (uWCut) gives its surface's base tone (uWTone) and how
+// much water covers the bed there (uWOp): clear light shallows where the bed's own texel shows through, tinted (uWTint), dark deep
+// water where it doesn't. The bed is read through the surface's ripple (REFRACTION): its lookup moves by WHOLE texels, a field that
+// travels with the flow at the pattern's own whole-texel steps, a texel in the shallows, up to uWCut.w in the deep, so pebbles wobble
+// a pixel at a time. Light crests stay surface over the bed (uWLook.x). Where a thing stands in the water (the bake's contact rings)
+// a 1-texel foam line hugs it, its gaps wandering, and a ripple pulses out from it a texel per step; the player's feet (uWFoot)
+// ring the same way while he wades (his feet at the surface, on water). All of it in world texels and the stepped clock: still under
+// camera turns and pans
+uniform sampler2D uWBed; uniform float uWBedOn;
+uniform vec4 uWBedR;                 // the box: its first texel (x, y) and size (w, h)
+uniform vec4 uWCut;                  // the depth bands' cuts (0..1): very shallow | shallow | mid | deep; w = the refraction's reach (texels)
+uniform vec4 uWOp, uWTone;           // per band: the water's cover over the bed (0 = the bed .. 1 = water), the surface's base tone
+uniform vec4 uWLook;                 // x: the light crests' cover, y: how much of the bed's own hue shows (0: only its light and dark), z: the bed's mean luminance,
+                                     // w: how much darker the dark layer must be to take the deep a step darker still (0 = as dark as it darkens the rest)
+uniform vec3 uWTint, uWFoam;         // the bed seen through the water (multiplied), the foam
+uniform vec4 uWFoot;                 // the player's feet: x, y, z (m); w 1 = known
+uniform vec2 uWorld, uOrigin;        // (SURF_VS's planar mapping: where his feet are in texels)
+vec4 wBed(ivec2 ti) { return texelFetch(uWBed, clamp(ti - ivec2(uWBedR.xy), ivec2(0), ivec2(uWBedR.zw) - 1), 0); }
+int wBand(vec4 b) { float d = float(int(b.a * 255. + .5) >> 3) / 31.; return d < uWCut.x ? 0 : d < uWCut.y ? 1 : d < uWCut.z ? 2 : 3; }
+// wPrep, once per fragment from its own texel (the smooth sampling's four neighbours share it: the shader stays small, wTexel is
+// inlined five times): the ripple's slope (wRg, -.5 .. .5: x 2.4 x the band's reach = the bed's offset, whole texels), the foam's
+// dashes (wDash: the contact line, its ripple, the feet's ring, its ripple), the ripple's ring (wPu) and where his feet are (wFt: texel
+// x, y; z 1 = he wades: his feet at the surface, on water)
+vec2 wRg; vec4 wDash; float wPu; vec3 wFt;
+void wPrep(ivec2 ti) {
+  vec4 w = texelFetch(uWater, ti, 0);
+  int rc = int(w.r * 255. + .5), gg = int(w.g * 255. + .5);
+  float s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .5, d = s - mod(floor(uWPhase * uWA.x * float(rc & 15) * .125), 768.);
+  wRg = vec2(wvn(vec2(a / 5. + 1.3, d / 12.), 64.), wvn(vec2(a / 5. + 6.1, d / 12. + 2.7), 64.)) - .5;
+  float st = mod(floor(uWPhase * 4.), 96.); vec2 p = vec2(ti);   // 4 steps a second
+  wPu = 2. + mod(st, 5.);   // the ripple's ring, 2 .. 6 texels out
+  wDash = vec4(wvn(p / 2.6 + vec2(st * .37, 3.1), 1e4), wvn(p / 2.2 + vec2(9.7, st * .29), 1e4), wvn(p / 1.8 + vec2(st * .41, 5.3), 1e4), wvn(p / 2. + vec2(1.3, st * .33), 1e4));
+  vec2 f = (uWFoot.xz - uOrigin) / uWorld * uTexSize;
+  float dz = uWFoot.y - vW.y;   // (his feet stand on the field, a few cm over the creek's carved bed; the river's surface is 18 cm under its bank)
+  wFt = vec3(f, uWFoot.w > .5 && dz > -.05 && dz < .15 && texelFetch(uWater, clamp(ivec2(f), ivec2(0), ivec2(uTexSize) - 1), 0).r > .5 ? 1. : 0.);
+}
+// the contact foam on the fragment's texel ti (main, once: the line is crisp even while the smooth sampling blends): c = texels from
+// what stands in the water (1 = touching .. 7; 0 none): the line against it, a few gaps drifting round, and its ripple; the same
+// round the player's feet (r texels from them) while he wades
+vec3 wFoam(vec3 res, ivec2 ti, int c) {
+  float r = wFt.z > .5 ? length(vec2(ti) + .5 - wFt.xy) : 99.;
+  bool line = (c == 1 && wDash.x > .27) || (r >= 8.5 && r < 9.5 && wDash.z > .25);   // (his: round both boots, just past his contact shadow)
+  bool ring = (c > 1 && float(c) == wPu && wDash.y > .5 - .05 * wPu) || (abs(r - 8. - wPu * 1.5) < .5 && wDash.w > .45);
+  return mix(res, uWFoam, line ? 1. : ring ? .55 : 0.);
+}
+// the moving texel's colour over its bed: t the pattern's tone, t0 its band's base, h / l the light / dark layers
+vec3 wDeep(vec3 res, int t, int t0, int band, float h, float l, vec4 bd, ivec2 ti) {
+  if (band == 3 && t == t0 && l > uWB.y + uWLook.w && h <= uWB.x && t0 < 3) res = uWRamp[t0 + 1];   // the deep's dark streaks go a step darker
+  float op = t < t0 ? max(uWOp[band], uWLook.x) : uWOp[band];
+  float k = band == 0 ? 1. : band == 1 ? max(1., uWCut.w - 1.) : uWCut.w;   // the refraction's reach: deeper water bends more
+  if (op < .999) {   // the bed through the water: its light and dark on the water's own colour, and a share of its hue, tinted
+    vec3 b = wBed(ti + ivec2(floor(wRg * 2.4 * k + .5))).rgb;
+    res = mix(mix(res * dot(b, vec3(.3, .55, .15)) / uWLook.z, b * uWTint, uWLook.y), res, op);
+  }
+  return res;
+}
 // one ground texel as the water makes it: moving water (state 3) or the painted texel
 vec3 wTexel(ivec2 ti, ivec2 mx) {
   ti = clamp(ti, ivec2(0), mx);
@@ -214,6 +271,8 @@ vec3 wTexel(ivec2 ti, ivec2 mx) {
   // the broad bands drift too: the base tone is read from a texel slid across by a slow wobble that travels with the flow (a band's edge meanders)
   float sw = floor((wvn(vec2(.5, (s - mod(floor(ph * .35), 768.)) / 48.), 16.) - .5) * 7. + .5);
   if (sw != 0.) { vec4 w2 = texelFetch(uWater, clamp(ti + ivec2(int(sw), 0), ivec2(0), mx), 0); int r2 = int(w2.r * 255. + .5); if (r2 >= 192) t = (r2 >> 4) & 3; }
+  vec4 bd = vec4(0.); int band = 3, t0 = t;   // the bed (wDeep): the base tone is the depth band's, read through the same slide
+  if (uWBedOn > .5) { bd = wBed(ti); bool sl = sw != 0. && texelFetch(uWater, clamp(ti + ivec2(int(sw), 0), ivec2(0), mx), 0).r > .745; band = wBand(sl ? wBed(ti + ivec2(int(sw), 0)) : bd); t = t0 = int(uWTone[band]); }
   if (h > uWB.x) t -= 1;
   if (h > uWB.x + .09) t -= 1;
   if (l > uWB.y) t += 1;
@@ -223,6 +282,7 @@ vec3 wTexel(ivec2 ti, ivec2 mx) {
     if (float(ring) == pos && wvn(vec2(3.7, (s - mod(floor(uWPhase * 3.), 768.)) / 8.), 96.) > .42) t = int(uWA.w);
   }
   res = uWRamp[t];
+  if (uWBedOn > .5) res = wDeep(res, t, t0, band, h, l, bd, ti);
   return res;
 }
 // a fall of water: the baked colour is the base; light streaks slide DOWN the sheet in whole texels at their own pace per column,
@@ -318,6 +378,7 @@ void main() {
     int rc = int(texelFetch(uWater, ti, 0).r * 255. + .5);
     if (rc >= 64) {
       wfl = rc >= 128 ? 1. : 0.;   // water: the G-buffer's tone 1
+      if (uWBedOn > .5) wPrep(ti);   // (the bed's ripple and the foam's dashes, once for this texel and its neighbours: WATER_FS)
       vec3 cN = wTexel(ti, mx);
       if (uSmooth <= 0.) c.rgb = cN;
       else {
@@ -325,6 +386,7 @@ void main() {
         vec3 cS = mix(mix(wTexel(i0, mx), wTexel(i0 + ivec2(1, 0), mx), f.x), mix(wTexel(i0 + ivec2(0, 1), mx), wTexel(i0 + ivec2(1, 1), mx), f.x), f.y);
         c.rgb = mix(cN, cS, uSmooth);
       }
+      if (uWBedOn > .5 && rc >= 128) c.rgb = wFoam(c.rgb, ti, int(wBed(ti).a * 255. + .5) & 7);   // (contact foam: WATER_FS)
     }
   }
   // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
@@ -1219,6 +1281,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     decalT: {value: null}, decalOn: {value: 0}, decalRect: {value: new THREE.Vector4()}, decalPx: {value: new THREE.Vector2(1, 1)},   // setGroundDecals (SURF_FS)
     // the moving water (setWaterLook at every build, the clock in render()): see WATER_FS
     wPhase: {value: 0}, wA: {value: new THREE.Vector4(0, 3, 12, -1)}, wB: {value: new THREE.Vector4(.8, .76, 0, 2)}, wRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())},
+    // its depth, bed and contact foam (setWaterLook's bed: world/waterbed.js; the feet: setPlayer): see WATER_FS wDeep
+    wBed: {value: null}, wBedOn: {value: 0}, wBedR: {value: new THREE.Vector4(0, 0, 1, 1)}, wCut: {value: new THREE.Vector4(.13, .33, .6, 2)},
+    wOp: {value: new THREE.Vector4(1, 1, 1, 1)}, wTone: {value: new THREE.Vector4(1, 1, 2, 2)}, wLook: {value: new THREE.Vector4(.86, 0, 0, 0)},
+    wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
   };
   const raw = (vs, fs, uniforms, extra = {}) => new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
 
@@ -1293,7 +1359,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uSmooth: U.smooth, uType: {value: type}, uObj: {value: obj}, uPlanar: {value: planar ? 1 : 0}, uWorld: {value: world || new THREE.Vector2(1, 1)}, uOrigin: {value: origin || new THREE.Vector2(0, 0)},
     uCliff: {value: cliff}, uHasCliff: {value: cliff ? 1 : 0}, uCliffOff: {value: cliffOff}, uPx: U.px,
     uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)},
-    uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp}, {side: THREE.FrontSide});
+    uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp,
+    uWBed: U.wBed, uWBedOn: U.wBedOn, uWBedR: U.wBedR, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
   // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test
@@ -2232,13 +2299,16 @@ void main() {
     C.uMistQ.value.z = Math.max(1, Math.floor(z + .01)); C.uMistD.value.w = VH / 2 / (PPMY * z);
   }
   // (sun: how far toward the sun his shadow test looks, .5 m; a live 3D body would shade its own test point: view/livehero.js)
-  const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; };
+  const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; U.wFoot.value.set(x, h - .9, z, 1); };   // (h: his chest, .9 m over his feet: the water rings them when he wades)
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
   // advances at, so changing it never makes the pattern jump
   const setWater = ({speed} = {}) => { if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0); };
   // the biome's water (world.js buildWorld, at every build, from WATER_TUNE): {ramp: [[r, g, b] 0..1] light -> dark (padded to 4), rate,
   // across, along, hi, lo, range: [lightest, darkest] tone, lap (tone | -1), refl, spark} | null = no moving water (the rift)
   function setWaterLook(L) {
+    const B = L?.bed;   // the depth, bed and contact foam (world/waterbed.js: {tex, rect, cuts, op, tone, hiOp, tint, hue, lum, dark, refr, foam}; none: the old water)
+    U.wBed.value = B ? B.tex : null; U.wBedOn.value = B ? 1 : 0;
+    if (B) { U.wBedR.value.set(...B.rect); U.wCut.value.set(...B.cuts, B.refr); U.wOp.value.set(...B.op); U.wTone.value.set(...B.tone); U.wLook.value.set(B.hiOp, B.hue, B.lum, B.dark); U.wTint.value.set(...B.tint); U.wFoam.value.set(...B.foam); }
     if (!L) { compU.uWRefl.value.set(0, 0, 0, 0); return; }
     for (let i = 0; i < 4; i++) U.wRamp.value[i].set(...L.ramp[Math.min(i, L.ramp.length - 1)]);
     U.wA.value.set(L.rate, L.across, L.along, L.lap); U.wB.value.set(L.hi, L.lo, L.range[0], L.range[1]);

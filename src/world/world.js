@@ -34,11 +34,14 @@
 //            cliff texture with alpha FALL_ALPHA (252, next to the alpha-250 note in buildWorld); the shader streams it down
 //            (gfx.js fall(): light streaks slide down in stepped time, the foam in the last 6 rows flickers).
 //            G.setWater({speed}) (gfx.js) scales the water's clock: brief D drives it from rain.
+//            What lies UNDER it (the bed, the depth bands, the contact foam: the clear shallows and the dark deep): world/waterbed.js,
+//            baked with the water texture (bakeWater); ?water=0 leaves it out.
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, TERRAIN} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {cliffGeometry} from './cliffs3d.js';
+import {waterBed} from './waterbed.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
 
@@ -255,6 +258,7 @@ export const WATER_TUNE = {
 //   A  across the flow, signed texels from the axis in 1/2 texel, + 128 (clamped: +-63.5 texels, 2.08 m at PPM 30.5)
 function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
   const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
+  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ});   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
   const toneOf = k => { for (let t = 0; t < ramp.length; t++) if (px[k] === ramp[t][0] && px[k + 1] === ramp[t][1] && px[k + 2] === ramp[t][2]) return t; return -1; };
   for (let y = 0; y < HPX; y++) for (let x = 0; x < WPX; x++) {
     const mx = (x + .5) / PPM, my = (y + .5) / PPM;
@@ -270,6 +274,7 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
     data[k] = state << 6 | tone << 4 | (Math.round(Math.min(1.875, o.speed) * 8) & 15);
     data[k + 1] = ring << 5 | s13 >> 8; data[k + 2] = s13 & 255;
     data[k + 3] = Math.max(0, Math.min(255, Math.round(o.a * PPM * 2) + 128));
+    if (bed) bed.add(x, y, o);
   }
   for (let y = 0; y < HPX; y++) for (let x = 0; x < WPX; x++) {   // dry texels beside water: SURF_FS blends across them when the camera turns
     const k = (y * WPX + x) * 4; if (data[k] >> 6) continue;
@@ -280,6 +285,7 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
   }
   const tex = new THREE.DataTexture(data, WPX, HPX, THREE.RGBAFormat, THREE.UnsignedByteType);
   tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.colorSpace = THREE.NoColorSpace; tex.needsUpdate = true;
+  tex.userData.bed = bed ? bed.finish(data) : null;   // {tex, rect, ...its look}: G.setWaterLook's bed
   return tex;
 }
 
@@ -595,8 +601,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const cTex = texOf(cliff); cTex.wrapS = cTex.wrapT = THREE.RepeatWrapping; cTex.needsUpdate = true;
   // the moving water: the baked texture (rebuilt, and the old one disposed, with the world) + the biome's look for the shader
   const WT = WATER_TUNE[biome.id], wTex = WT ? bakeWater(biome, WT, {WPX, HPX, PPM, px, cliffZ}) : null;
-  if (wTex) disposers.push(() => wTex.dispose());
-  G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark} : null);
+  if (wTex) disposers.push(() => { wTex.dispose(); wTex.userData.bed?.tex.dispose(); });
+  G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark, bed: wTex.userData.bed} : null);
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
   const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
   if (lit) { lit.sim = G.litterSim(lit); disposers.push(lit.dispose); }   // (the living layer: render/litter.js, driven by features/litter.js)
