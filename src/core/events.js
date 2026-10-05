@@ -35,6 +35,8 @@ export const EVENTS = {
   'arrow.splash':       ['sim/projectiles.js',    'x, y, small: true (an arrow or a bullet into the stream)', 'atmos, wildlife, audio'],
   'bullet.impact':      ['sim/projectiles.js, features/foes/sim.js', 'x, y, h (where it ended), x0, y0, h0 (where it was as that step began), surf (hit | ground | water | tree | prop | air | player: a gunman\'s bullet in you), gun, dx, dy, foe? (the gunman\'s type)', 'gunfx, audio, wildlife, battlemusic'],
   'bullet.pierce':      ['sim/projectiles.js',    'x, y, h (where it leaves the body), vx, vy (unit: the way it flies on), who (the body it went through: a gunman, a brute), gun (the weapon id)', 'blood, audio (a through-shot)'],
+  'bullet.ricochet':    ['sim/projectiles.js',    'x, y, h (where it glanced off), x0, y0, h0 (where it was as that step began), dx, dy, dh (unit: its way on), mat (metal | stone), gun, n (its ricochets so far), who (the solid): only while ricochets are on (the trick-shot range, ?rico=1); or off a deflector (features/bells.js, always): defl (plate | bell), shot (the bullet: live while it flies), mat metal', 'gunfx (sparks, the streak, a scar), audio (the whine), trickshot (the plate rings, the count), bells (rings, chains)'],
+  'arrow.deflect':      ['sim/projectiles.js',    'x, y, h (where it glanced off), dx, dy, dh (unit: its way on), v (m/s), n (its glances so far), who (the deflector\'s prop), defl (plate | bell), shot (the arrow): an arrow off a deflector (features/bells.js)', 'bells (rings, chains, sparks), audio (a glance)'],
   'prop.break':         ['features/combat/core.js', 'x, y, kind, who (the prop), ash (burnt through)', 'props, atmos, wildlife, audio, music'],
   'prop.tip':           ['features/combat/props.js', 'x, y, kind, prop: true', 'wildlife, audio'],
   'prop.kick':          ['features/combat/props.js', 'x, y, kind, prop: true', 'wildlife, audio'],
@@ -76,6 +78,7 @@ export const EVENTS = {
   'wildlife.critter_dash': ['features/wildlife.js', 'x, y', 'audio'],
   'wildlife.splash':    ['features/wildlife.js',  'x, y, small: true, wl: true', 'atmos, wildlife, audio'],
   'wildlife.bird_perch': ['features/wildlife.js', 'x, y, h, prop, off, big, scared (a bird lands on / leaves a top)', 'wind'],
+  'wildlife.howl':      ['features/wildlife/coyotes.js (a view)', 'x, y, kind (coyote | fox | wolf), call (howl | yips | bark): a canid at night calls, one howls and the pack answers', 'audio'],
   'tumbleweed.bounce':  ['features/tumbleweed.js', 'x, y, k (0..1: how hard it came down / was knocked; near the player, on screen)', 'audio'],
   // the shrines experiment (features/shrines.js, ?shrines=1); its sounds ride on chest.open / combat.coin / combat.loot / combat.trap /
   // player.dryfire, emitted with it
@@ -115,6 +118,19 @@ export const EVENTS = {
   'lasso.swish':        ['features/equip/lassolook.js (a view)', 'x, y (a turn of the loop overhead)', 'audio'],
   'lasso.creak':        ['features/equip/lassolook.js (a view)', 'x, y, k (the rope strains)', 'audio'],
   'combat.bowl':        ['features/combat/core.js', 'x, y, who, by (a flung body bowls another over: combat fling)', 'audio'],
+  // the trick-shot range (features/trickshot/sim.js, ?trick=1: the sandbox only); who = its prop (a bottle, a can)
+  'trick.shatter':      ['features/trickshot/sim.js', 'x, y, h, dx, dy (unit: the shot\'s way; 0 without one), by (bullet | arrow | blast | melee), who (the bottle), glass (amber | green | clear): a bottle breaks', 'trickshot (view: the glass), audio'],
+  'trick.ping':         ['features/trickshot/sim.js', 'x, y, h, dx, dy, by, who (the can), air (it was in the air), n (the juggle so far: its airborne hits in a row): a can is hit', 'trickshot (view: the spin, the count), audio'],
+  'trick.toss':         ['features/trickshot/sim.js', 'x, y, h, who (the can): a can tossed up out of the hand', 'audio'],
+  'trick.clink':        ['features/trickshot/sim.js', 'x, y, k (0..1: how hard), who (the can), n (a juggle that ended here, else 0), best (it was a new best): a can bounces or lands', 'trickshot (view), audio'],
+  'trick.ding':         ['features/trickshot/sim.js', 'x, y, h, k (0..1), who (the steel plate), edge (it met the edge of the plate: bullet.impact / bullet.ricochet sound it): a shot, a blast or the whip rings the plate', 'trickshot (view: the swing), audio (not an edge)'],
+  'trick.reset':        ['features/trickshot/sim.js', 'x, y (the fence): the bottles and the stacked cans are set up again', 'trickshot (view), audio'],
+  'trick.clear':        ['features/trickshot/sim.js', 'x, y (the fence), t (s: the run against the clock), shots, best (a new best time): the fence is cleared', 'trickshot (view: the banner), audio'],
+  // the bells and ricochet plates (features/bells/sim.js: the sandbox, ?bells=0 off); who = its prop (a bell, a plate's)
+  'bells.ring':         ['features/bells/sim.js', 'x, y, h (the bell\'s middle), k (0..1: how hard), note (0..6: its step on the scale, sim TUNE.notes), who (the bell), by (bullet | arrow | blast | melee | can), dx, dy (unit: the blow\'s way; 0 without one)', 'bells (view: the swing, the clapper), audio (its note)'],
+  'bells.ping':         ['features/bells/sim.js', 'x, y, h (where it was hit), k (0..1), who (the plate), by (bullet | arrow | blast): a steel plate rung', 'bells (view: a glint), audio (the plate\'s ping)'],
+  'bells.chain':        ['features/bells/sim.js', 'x, y, h (its last glance), bells (rung by the one shot / blast), plates, n (glances in all), by (bullet | arrow | blast), best (a new best of the session), rec (the best so far)', 'bells (view: the floating text)'],
+  'bells.toll':         ['features/bells/view.js (a view: nothing in the sim listens)', 'x, y, h, k (0..1), note, who (the bell): its clapper strikes it again as it swings', 'audio (its note, softer)'],
 };
 
 const warned = new Set();

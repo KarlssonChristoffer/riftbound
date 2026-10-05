@@ -32,6 +32,9 @@ import {WEAPONS} from '../../content/weapons.js';   // the bow's numbers (shoot)
 import {ramps} from './harmonize.js';   // the character palette (pixel bow layer)
 import {clamp} from '../../core/mathx.js';
 export const AIM_H = 1.25;   // arrows fly at chest height
+// walkable terrain (docs/TERRAIN.md): a step up is taken in stride up to STEP_UP m (H.blocked stops anything higher), a step
+// down up to SNAP m (a slope walked or rolled down); a bigger drop is a ledge, and he falls
+export const STEP_UP = .3, SNAP = .16;
 export const SPEED = {walk: 1.4, run: 4.6, sprint: 7.2};
 const SPEED0 = {...SPEED};   // the authored speeds; SPEED = these with the modifiers' 'player.speed' notes (H.mods)  // m/s; the clips follow whatever distance is really covered
 export const ACC = {start: 38, sprintUp: 5.5, sprintDown: 8, stop: 30, skid: 13};   // m/s^2
@@ -150,9 +153,22 @@ export function createPlayer(H) {
       const x = (mouse.x + cam.x) / T.PPM, y = (mouse.y + cam.y + (h0 + AIM_H) * T.PPMH) / T.PPMY;
       if (elev(x, y) === h0) return {x, y, h: h0 + AIM_H};
     }
+    if (H.terrain) { const g = pickGround(AIM_H); if (g) return g; }   // sloping ground (walkable terrain)
     return {x: (mouse.x + cam.x) / T.PPM, y: (mouse.y + cam.y + AIM_H * T.PPMH) / T.PPMY, h: AIM_H};
   }
-  const cursorGround = () => ({x: (mouse.x + cam.x) / T.PPM, y: (mouse.y + cam.y) / T.PPMY});
+  // the ground point under the cursor read `lift` m above the ground there, on sloping ground: a damped fixed point from his
+  // own height (it settles on any walkable slope: the view rises PPMH / PPMY m on screen per metre of height). null: no settle
+  function pickGround(lift) {
+    const x = (mouse.x + cam.x) / T.PPM, my = mouse.y + cam.y;
+    let h = P.z, y = 0;
+    for (let i = 0; i < 12; i++) {
+      y = (my + (h + lift) * T.PPMH) / T.PPMY;
+      const e = elev(x, y); if (Math.abs(e - h) < .01) return {x, y, h: e + lift};
+      h += (e - h) * .6;
+    }
+    return null;
+  }
+  const cursorGround = () => { if (H.terrain) { const g = pickGround(0); if (g) return {x: g.x, y: g.y}; } return {x: (mouse.x + cam.x) / T.PPM, y: (mouse.y + cam.y) / T.PPMY}; };
   function moveInput() {
     const dx = (keys.has('d') || keys.has('arrowright')) - (keys.has('a') || keys.has('arrowleft'));
     const dy = (keys.has('s') || keys.has('arrowdown')) - (keys.has('w') || keys.has('arrowup'));
@@ -223,7 +239,13 @@ export function createPlayer(H) {
     let d = 0;
     if (dx && !H.blocked(P.x + dx, P.y, P.z, air)) { P.x += dx; d += dx * dx; } else P.vx = 0;
     if (dy && !H.blocked(P.x, P.y + dy, P.z, air)) { P.y += dy; d += dy * dy; } else P.vy = 0;
+    if (!air && d) groundFollow();
     return Math.sqrt(d);
+  }
+  // on his feet, the ground carries him: up a slope or a small step, down a slope (flat ground and a plateau's top: no change)
+  function groundFollow() {
+    const e = elev(P.x, P.y), dz = e - P.z;
+    if (dz !== 0 && (dz > 0 ? dz <= STEP_UP : dz >= -SNAP)) P.z = e;
   }
   function puff(side, frameName, big = 1) {
     // at the landing foot, read from the rendered bone positions of the contact frame

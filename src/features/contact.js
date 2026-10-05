@@ -104,7 +104,7 @@ export async function create(host) {
       n = 0;
       // the player: his bottom rows this frame (feet apart when aiming / running: the stamp spans both)
       const ps = host.playerSprite(), P = host.P, pl = host.player, gz = host.elev(pl.x, pl.y);
-      if (!(P.blink && Math.floor(P.blink * 12) % 2) && !(P.sink > .05)) {
+      if (!(P.blink && Math.floor(P.blink * 12) % 2) && !(P.sink > .05) && !host.playerHidden) {   // (photo mode may hide him)
         let byF = pfoot.get(ps.frame); if (!byF) { pfoot.set(ps.frame, byF = []); if (pfoot.size > 120) pfoot.delete(pfoot.keys().next().value); }   // (frame -> facing: no key string a frame)
         let fp = byF[ps.face];
         if (fp === undefined) { fp = measure(ps.img, ps.px, ps.py); byF[ps.face] = fp; }

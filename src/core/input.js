@@ -1,4 +1,5 @@
-// INPUT: the keyboard and the mouse. Keys go to the menu while paused, to the game alone while host.lock (or a dev key
+// INPUT: the keyboard and the mouse. Keys go to photo mode while it's open (ui/photo.js: F4 opens it; it has its own
+// mouse over the screen, and the game's cursor rests meanwhile), to the menu while paused, to the game alone while host.lock (or a dev key
 // outside dev mode), else to the features (F.onKey, then their hotkey toggles), then the player's own keys, then the dev
 // keys (dev/devkeys.js, handed in by the boot as E.dev). The mouse: the cursor in the view (at zoom 1, as player.js
 // reads it), the bow (LMB), abilities (RMB), turning the camera by dragging with the middle button, the wheel's zoom.
@@ -14,8 +15,10 @@ export function createInput(E) {
   const claimed = k => { for (const f of features) if (f.claims?.(k)) return true; return false; };
   addEventListener('keydown', e => {
     const k = e.key.toLowerCase(), pause = E.pause;
+    if (E.photo?.open && k !== 'f3') { E.photo.key(k, e); return; }   // photo mode has the keys, Escape too (ui/photo.js)
     if (k === 'escape') { if (!e.repeat) pause.toggle(); return; }
     if (k === 'f3') { e.preventDefault(); if (!e.repeat) { perf.toggle(); pause.menu.refresh(); } return; }   // the frame profiler
+    if (k === 'f4') { e.preventDefault(); if (!e.repeat) E.photo?.toggle(true); return; }   // photo mode (also from the menu)
     if (pause.paused) { pause.menu.key(k, e); return; }   // the menu has the keys: arrows, Tab, Enter
     if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'tab'].includes(k)) e.preventDefault();
     if (e.repeat) return;
@@ -39,17 +42,18 @@ export function createInput(E) {
   addEventListener('blur', () => { keys.clear(); mouse.down = false; dragging = false; });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   addEventListener('mousemove', e => {
+    if (E.photo?.open) return;   // (photo mode: the cursor isn't the game's; it's where it was when you come back)
     const r = canvas.getBoundingClientRect(), s = r.width / cv.VW, mx = (e.clientX - r.left) / s, my = (e.clientY - r.top) / s;
     mouse.x = cv.VW / 2 + (mx - cv.VW / 2) / cv.zoom; mouse.y = cv.VH / 2 + (my - cv.VH / 2) / cv.zoom;   // the player reads the screen at zoom 1
     if (dragging) { dragYaw += (e.clientX - dragX) * -.006; dragX = e.clientX; }
   });
   canvas.addEventListener('mousedown', e => {
-    if (E.pause.paused || host.lock) return;
+    if (E.pause.paused || host.lock || E.photo?.open) return;
     if (e.button === 0) { PL.press(); mouse.down = true; }
     if (e.button === 1) { e.preventDefault(); dragging = true; dragX = e.clientX; }
     if (e.button === 2 && !BUSY.has(P.state)) features.some(f => f.ability?.('rmb'));
   });
-  addEventListener('mouseup', e => { if (e.button === 0) { if (!E.pause.paused) PL.release(); mouse.down = false; } if (e.button === 1) dragging = false; });
+  addEventListener('mouseup', e => { if (e.button === 0) { if (!E.pause.paused && !E.photo?.open) PL.release(); mouse.down = false; } if (e.button === 1) dragging = false; });
   canvas.addEventListener('wheel', e => { e.preventDefault(); cv.onWheel(e); }, {passive: false});
   return {
     get dragging() { return dragging; },

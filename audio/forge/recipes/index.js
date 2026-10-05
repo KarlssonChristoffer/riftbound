@@ -42,6 +42,10 @@ export const RECIPES = [
   'insects', 'prop_roll',
   // the western loadouts
   'revolver', 'coachgun', 'bullet',
+  // wildlife's fight reactions (the night's canids: wildlife.howl)
+  'canid',
+  // the sandbox's bells and plates (features/bells.js): tuned brass bells
+  'bell',
 ];
 export async function loadRecipes(ids = RECIPES) {
   const out = {};

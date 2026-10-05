@@ -25,6 +25,7 @@
 import {rgbOf, hex255} from '../core/color.js';
 import {viewRandom} from '../core/rng.js';
 import {TAU, clamp, hash3, vnoise} from '../core/mathx.js';
+import {TERRAIN_ON} from '../world/layout.js';   // walkable terrain: rings follow the ground point by point
 
 const C = c => rgbOf(c);
 const PAL = {
@@ -93,10 +94,10 @@ export function createHazardLook(host, H, {name = 'hazards'} = {}) {
   // a dashed ring of world points on the ground, one per screen pixel round its ellipse: `on` of every `of` lit, crawling
   function ring(x, y, h, r, c, turn, of, on, emit, alpha = 1) {
     if (r <= .02) return;
-    const n = Math.max(12, Math.round(r * (host.PPM + host.PPMY) * 1.6)), sh = Math.floor(turn * n / TAU);
+    const n = Math.max(12, Math.round(r * (host.PPM + host.PPMY) * 1.6)), sh = Math.floor(turn * n / TAU), off = TERRAIN_ON ? h - host.elev(x, y) : 0;
     for (let i = 0; i < n; i++) {
       if ((((i + sh) % of) + of) % of >= on) continue;
-      const a = i / n * TAU; pt(x + Math.sin(a) * r, y + Math.cos(a) * r, h, c, 1, emit, alpha);
+      const a = i / n * TAU, px = x + Math.sin(a) * r, py = y + Math.cos(a) * r; pt(px, py, TERRAIN_ON ? host.elev(px, py) + off : h, c, 1, emit, alpha);
     }
   }
   const seen = (x, y, h, m = 60) => host.G.onScreen(x, h, y, m);

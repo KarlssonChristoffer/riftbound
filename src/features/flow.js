@@ -61,6 +61,7 @@ import {clamp, hash3 as hsh, vnoise as vn, clearArray} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {hexAny255 as hex3, lum} from '../core/color.js';
 import {toView, toWorld} from '../render/viewxf.js';
+import {TERRAIN_ON} from '../world/layout.js';
 
 const TAU = Math.PI * 2;
 
@@ -136,6 +137,8 @@ export async function create(host) {
   let {VW, VH} = host;   // the view size: F.resize follows the window
   const F = {name: 'flow', label: 'Flow (camera, trails, marks)', key: '8', on: Q.get('flow') !== '0', ms: 0, TUNE, T: TUNE};
   const K = TUNE.cam;
+  // the revolver's kick x the modifiers' note 'flow.gunKick' (base 1: dev/gunfeel.js tunes it live), read when the notes change
+  let GK = 1; if (host.mods) { const f = () => { GK = host.mods.value('flow.gunKick', 1); }; host.mods.watch(f); f(); }
   let biome = '', time = 'day', acc = 0, simT = 0;
   const R = mulberry32(71);
   const rr = (a, b) => a + R() * (b - a);
@@ -296,6 +299,7 @@ export async function create(host) {
     }
     const w = x1 - x0, h = y1 - y0, D = new Uint8ClampedArray(w * h * 4);
     levels.set(z, L = {z, x0, y0, w, h, D, gi: host.G.dataImage(w, h, D)});
+    if (TERRAIN_ON && z === 0) host.G.setGroundDecals?.(L.gi, x0, y0, PPM, PPMY);   // (walkable terrain: the ground surfaces show it themselves)
     return L;
   }
   // the ground texture (world.js paints it top-down at PPM px / m) for the multiply: read back lazily in 64 px tiles
@@ -312,8 +316,11 @@ export async function create(host) {
   }
   const WHITE = [255, 255, 255], TX = [0, 0, 0];
   // a decal pixel on the surface at height z: not on the water, not over the cliff lip
-  const valid = (X, Y, z) => { const mx = (X + .5) / PPM, my = (Y + .5) / PPMY; return host.elev(mx, my) === z && !(z === 0 && host.inStream(mx, my)); };
-  function decal(ramp, st, z) { return {pix: [], set: new Map(), ramp, rgb: ramp.map(rgb8), st, z, t: 0, stage: 0, min: 9, x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9, d: null}; }
+  const valid = (X, Y, z) => { const mx = (X + .5) / PPM, my = (Y + .5) / PPMY; return (TERRAIN_ON && z === 0 ? !host.layout.plateauAt(mx, my) : Math.abs(host.elev(mx, my) - z) < .01) && !(z === 0 && host.inStream(mx, my)); };
+  // WALKABLE TERRAIN (docs/TERRAIN.md, step 3 to come): a layer per height would be a world-sized layer per decal on a slope, so a
+  // decal off a plateau's top goes on the ground's layer (0), and valid() keeps only its pixels where the ground lies level with it
+  const levelZ = z => !TERRAIN_ON || z === 0 || plats().some(q => q.h === z) ? z : 0;
+  function decal(ramp, st, z) { z = levelZ(z); return {pix: [], set: new Map(), ramp, rgb: ramp.map(rgb8), st, z, t: 0, stage: 0, min: 9, x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9, d: null}; }
   function dot(d, x, y, tone) {   // add one pixel (deduped, the darkest tone wins)
     const k = x * 4096 + y, i = d.set.get(k);
     if (i !== undefined) { if (tone < d.pix[i + 2]) d.pix[i + 2] = tone; }
@@ -363,7 +370,7 @@ export async function create(host) {
       if (st + d.min >= d.ramp.length) decals.splice(i, 1);
     }
   }
-  const ground = (x, y) => host.elev(x, y);
+  const ground = (x, y) => levelZ(host.elev(x, y));
   const wpx = (x, y) => [Math.round(x * PPM), Math.round(y * PPMY)];
   // a crescent of soil pushed up at a foot, bulging toward (ux, uy) (ground dir). rx, ry px, span rad either side
   function crescent(x, y, ux, uy, o = {}) {
@@ -493,6 +500,7 @@ export async function create(host) {
   }
   function drawDecals() {
     for (const L of levels.values()) {
+      if (TERRAIN_ON && L.z === 0) continue;   // (the ground surfaces draw the ground's layer: G.setGroundDecals)
       let u0 = 1e9, v0 = 1e9, u1 = -1e9, v1 = -1e9;
       for (const d of decals) if (d.z === L.z) { if (d.x0 < u0) u0 = d.x0; if (d.y0 < v0) v0 = d.y0; if (d.x1 > u1) u1 = d.x1; if (d.y1 > v1) v1 = d.y1; }
       if (u1 <= u0) continue;
@@ -676,8 +684,8 @@ export async function create(host) {
         const L = P.leap; if (L) { const [ldx, ldy] = toW(L.dx, L.dy); crescent(e.x - ldx * .12, e.y - ldy * .12, -ldx, -ldy, {tone: 2}); }
       } else if (e.type === 'player.splash' && !e.small && P.state === 'splash') { splashT = simT; wetFrom = -99; }   // HIS splash
       else if (e.type === 'combat.explode') scorch(e.x, e.y, e.r || 2);
-      else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
-      else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, e.broke || e.crit ? K.hitKickBig : K.hitKick);
+      else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * GK * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
+      else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, (e.broke || e.crit ? K.hitKickBig : K.hitKick) * GK);
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }

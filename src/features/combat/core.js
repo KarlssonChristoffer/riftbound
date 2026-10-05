@@ -16,7 +16,7 @@
 //     with host.entities.remove. Each list's join() sets up combat's own fields for a newcomer.
 // Everything else (tuning T, ability table AB, palettes, timings, RNG and its seed) is the arena's.
 
-import {roamable} from '../../world/world.js';
+import {roamable, TERRAIN_ON, steep} from '../../world/world.js';
 import {parkMiller} from '../../core/rng.js';
 
 export const TAU = Math.PI * 2;
@@ -56,7 +56,8 @@ export function createCore(host) {
   for (const k of SLOTS) Object.assign(AB[k], {t: 0, ready: 0, deny: 0, cast: 0});
   // MODIFIERS (core/modifiers.js, host.mods): items, augments and a run's rules leave notes on these; T / AB.cd are
   // always this file's authored numbers (T0, CD0) with the notes applied, recomputed when the notes change
-  const MOD_T = ['crit', 'critMul', 'msN', 'boomR', 'boomBlast', 'rainN', 'trapRoot', 'propRespawn', 'chestReset', 'enemyDmg', 'enemyPace', 'enemyCoins'];
+  const MOD_T = ['crit', 'critMul', 'msN', 'boomR', 'boomBlast', 'rainN', 'trapRoot', 'propRespawn', 'chestReset', 'enemyDmg', 'enemyPace', 'enemyCoins',
+    'hsShot', 'hsShotCrit', 'hsShotKill', 'shakeShot'];   // (a bullet's hit-stop and shake: dev/gunfeel.js tunes them live)
   const T0 = {...T}, CD0 = Object.fromEntries(SLOTS.map(k => [k, AB[k].cd]));
   function applyMods() {
     const M = host.mods; if (!M) return;
@@ -105,6 +106,10 @@ export function createCore(host) {
 
   // ---------------- helpers ----------------
   const pz = p => p.z || 0;
+  // the ground a brute may step or hop onto from height z: its own level (the flat world: exact), or on walkable terrain
+  // (docs/TERRAIN.md) within a hop's rise and not a cliff; a brute's z follows the ground it lands on (hops, shoves, respawns)
+  const HOP_RISE = .45;
+  const sameGround = TERRAIN_ON ? (z, x, y) => Math.abs(host.elev(x, y) - z) <= HOP_RISE && !steep(x, y) : (z, x, y) => host.elev(x, y) === z;
   function hitstop(sec) {
     if (simT > hs.end + T.hsWindow) hs.used = 0;          // a new chain of hits
     const add = Math.min(sec, T.hsCap - hs.used); if (add < .01) return;
@@ -234,14 +239,19 @@ export function createCore(host) {
   const inWall = (x, y, m) => walls.some(w => x > w.rect[0] - m && x < w.rect[2] + m && y > w.rect[1] - m && y < w.rect[3] + m);
   function freeSpot(b, x, y) {
     if (!inArea(x, y) || inWall(x, y, b.r0 * .8)) return false;
-    if (host.inStream(x, y) || host.elev(x, y) !== pz(b)) return false;
+    if (host.inStream(x, y) || !sameGround(pz(b), x, y)) return false;
     if (Math.hypot(P.x - x, (P.y - y) * SQ) < .78 && Math.abs(P.z - pz(b)) < 1) return false;
     for (const p of ents.near(x, y, b.r0 * .9, nearF, colliders)) if (p !== b && !p.broken && !p.gone && p.r > 0 && Math.abs(pz(p) - pz(b)) < 1 && Math.hypot(p.x - x, (p.y - y) * SQ) < p.r + b.r0 * .9) return false;
     for (const o of brutes) { const h = o !== b && BS.get(o)?.hop; if (h && Math.hypot(h.x1 - x, h.y1 - y) < o.r0 + b.r0) return false; }   // where another one lands
     return true;
   }
-  function pathOk(b, x, y) {   // no leaping the stream, no climbing, not through a wall
-    for (let k = .25; k < 1; k += .25) { const sx = b.x + (x - b.x) * k, sy = b.y + (y - b.y) * k; if (host.inStream(sx, sy) || host.elev(sx, sy) !== pz(b) || inWall(sx, sy, .1)) return false; }
+  function pathOk(b, x, y) {   // no leaping the stream, no climbing, not through a wall (terrain: each quarter of the way from the last)
+    let z = pz(b);
+    for (let k = .25; k < 1; k += .25) {
+      const sx = b.x + (x - b.x) * k, sy = b.y + (y - b.y) * k;
+      if (host.inStream(sx, sy) || !sameGround(z, sx, sy) || inWall(sx, sy, .1)) return false;
+      if (TERRAIN_ON) z = host.elev(sx, sy);
+    }
     return true;
   }
   function planHop(b, s, tx, ty, stop) {
@@ -260,7 +270,7 @@ export function createCore(host) {
       if (b.hunter || b.retired) return;   // enemies don't come back; retired = the yard's pair while a run is on
       s.dead -= dt;
       if (s.dead <= 0 && Math.hypot(P.x - b.home[0], P.y - b.home[1]) > 1.1) {   // respawn with a poof
-        Object.assign(b, {broken: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0, flash: 1, wob: 1, lit: false}); ents.moved(b);
+        Object.assign(b, {broken: false, stage: 0, hp: b.maxHp, r: b.r0, x: b.home[0], y: b.home[1], h: 0, flash: 1, wob: 1, lit: false}); if (TERRAIN_ON) b.z = host.elev(b.x, b.y); ents.moved(b);
         flashing.add(b); Object.assign(s, {mode: 'idle', wait: .8, hop: null, root: 0, fail: 0, calm: 0});
         puff(b.x, b.y, pz(b), 16, .8);
         for (let i = 0; i < 8; i++) part(b.x + VR(-.3, .3), b.y, pz(b) + VR(.2, 1.3), VR(-.8, .8), 0, VR(.3, 1), VR(.3, .6), SMOKE, {sz: 2, drag: 2});
@@ -274,6 +284,7 @@ export function createCore(host) {
     if (s.hop) {
       const H = s.hop; H.t += dt; const k = Math.min(1, H.t / H.dur);
       b.x = H.x0 + (H.x1 - H.x0) * k; b.y = H.y0 + (H.y1 - H.y0) * k; b.h = 4 * H.H * k * (1 - k) + (H.h0 || 0) * (1 - k); b.air = true; b.squash = 0;   // (h0: thrown from up in the air: fling o.h0)
+      if (TERRAIN_ON) b.z = H.z0 + (H.z1 - H.z0) * k;   // (walkable terrain: from the ground it left to the ground it lands on)
       if (H.fling) flying(b, H, k);
       if (k >= 1) landBrute(b, s);
       return;
@@ -306,7 +317,7 @@ export function createCore(host) {
     }
     if (!to) { s.wait = .45; return; }
     if (to.x !== b.x || to.y !== b.y) b.faceW = [to.x - b.x, to.y - b.y];
-    s.hop = {x0: b.x, y0: b.y, x1: to.x, y1: to.y, t: 0, dur: (b.hopT ?? T.bruteHopT) * T.enemyPace, H: (to.x === b.x && to.y === b.y ? .8 : 1) * (b.hopH ?? T.bruteHopH)};
+    s.hop = {x0: b.x, y0: b.y, x1: to.x, y1: to.y, t: 0, dur: (b.hopT ?? T.bruteHopT) * T.enemyPace, H: (to.x === b.x && to.y === b.y ? .8 : 1) * (b.hopH ?? T.bruteHopH), z0: pz(b), z1: host.elev(to.x, to.y)};
   }
   // a FLING (fling(): features/equip/lasso.js's yank): it tumbles over its facings as it flies, and bowls over whoever it
   // meets on the way (o.dmgFly to them, a moment's hold); o.onLand(b) is told when it comes down
@@ -324,6 +335,7 @@ export function createCore(host) {
   function landBrute(b, s) {
     const fl = s.hop?.fling;
     s.hop = null; b.h = 0; b.air = false; s.land = .12; b.squash = 1;
+    if (TERRAIN_ON) b.z = host.elev(b.x, b.y);
     if (fl) {   // a fling comes down: a thud, no strike; it lies held (stunned) where it fell, takes its damage
       s.held = Math.max(s.held || 0, fl.stun); s.wait = fl.stun + .2; s.mode = 'aggro';
       puff(b.x, b.y, pz(b), 16, .8); shake(3, .18);
@@ -337,7 +349,8 @@ export function createCore(host) {
     let sd = Math.hypot(P.x - b.x, (P.y - b.y) * SQ);
     if (sd < .72 && Math.abs(P.z - pz(b)) < 1) {
       const d = Math.hypot(P.x - b.x, P.y - b.y) || 1, ux = (b.x - P.x) / d, uy = (b.y - P.y) / d;
-      for (let k = 0; k < 12 && sd < .75; k++) { const nx = b.x + ux * .08, ny = b.y + uy * .08; if (host.inStream(nx, ny) || host.elev(nx, ny) !== pz(b)) break; b.x = nx; b.y = ny; sd = Math.hypot(P.x - b.x, (P.y - b.y) * SQ); }
+      for (let k = 0; k < 12 && sd < .75; k++) { const nx = b.x + ux * .08, ny = b.y + uy * .08; if (host.inStream(nx, ny) || !sameGround(pz(b), nx, ny)) break; b.x = nx; b.y = ny; sd = Math.hypot(P.x - b.x, (P.y - b.y) * SQ); }
+      if (TERRAIN_ON) b.z = host.elev(b.x, b.y);
     }
     puff(b.x, b.y, pz(b), 8, .5);
     const d = Math.hypot(P.x - b.x, P.y - b.y);
@@ -505,7 +518,7 @@ export function createCore(host) {
     // an ENEMY: a brute that hunts you (no home, no leash, no respawn). o: x, y, hp, and optionally dmg, knock, reach,
     // hopT, hopD, hopH, pause, coins [min, max], r, plus anything the game wants to keep on it (type, elite, boss, name)
     spawnBrute(o) {
-      const b = {kind: 'brute', z: 0, r: .35, stage: 0, target: true, sparring: true, hunter: true, ...o, maxHp: o.hp, home: [o.x, o.y]};
+      const b = {kind: 'brute', z: TERRAIN_ON ? host.elev(o.x, o.y) : 0, r: .35, stage: 0, target: true, sparring: true, hunter: true, ...o, maxHp: o.hp, home: [o.x, o.y]};
       Object.assign(b, {r0: b.r, h: 0, faceW: [P.x - b.x, P.y - b.y], squash: 0, air: false, flash: 1});
       BS.set(b, {mode: 'aggro', wait: o.wait ?? .6, hop: null, root: 0, dead: 0, land: 0, fail: 0});
       ents.add(b); flashing.add(b); enemyVer++;   // joins the world: hittables, colliders, brutes
@@ -534,7 +547,7 @@ export function createCore(host) {
       const s = BS.get(p); if (!s || p.broken || s.hop) return 0;
       const d = Math.hypot(dx, dy); if (d < 1e-6) return 0;
       const n = Math.ceil(d / .12); let moved = 0;
-      for (let i = 0; i < n; i++) { const x = p.x + dx / n, y = p.y + dy / n; if (!freeSpot(p, x, y)) break; p.x = x; p.y = y; moved += d / n; }
+      for (let i = 0; i < n; i++) { const x = p.x + dx / n, y = p.y + dy / n; if (!freeSpot(p, x, y)) break; p.x = x; p.y = y; moved += d / n; if (TERRAIN_ON) p.z = host.elev(x, y); }
       return moved;
     },
     fling(p, x, y, o) {
@@ -543,7 +556,7 @@ export function createCore(host) {
       for (let k = 0; k <= 12; k++) { const cx = x + dx * k / 12, cy = y + dy * k / 12; if (freeSpot(p, cx, cy)) { tx = cx; ty = cy; break; } }
       const a0 = Math.atan2(p.faceW?.[0] ?? 0, p.faceW?.[1] ?? 1);
       if (!Array.isArray(p.faceW)) p.faceW = [0, 1];
-      s.hop = {x0: p.x, y0: p.y, x1: tx, y1: ty, t: 0, dur: o.dur, H: o.h, h0: o.h0 || 0, fling: {...o, x0: p.x, y0: p.y, a0, hit: []}};
+      s.hop = {x0: p.x, y0: p.y, x1: tx, y1: ty, t: 0, dur: o.dur, H: o.h, h0: o.h0 || 0, z0: pz(p), z1: host.elev(tx, ty), fling: {...o, x0: p.x, y0: p.y, a0, hit: []}};
       s.root = 0; p.rooted = false; s.held = 0; s.wait = 0;
       return s.hop;
     },

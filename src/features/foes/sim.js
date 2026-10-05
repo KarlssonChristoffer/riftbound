@@ -33,7 +33,9 @@
 import {mulberry32} from '../../core/rng.js';
 import {hypot2, hypot3, TAU} from '../../core/mathx.js';
 import {createNav} from '../../world/nav.js';
-import {PLAY, TRAIL, WORLD, elev, inStream, PROP_TOP} from '../../world/world.js';
+import {PLAY, TRAIL, WORLD, elev, inStream, PROP_TOP, TERRAIN_ON} from '../../world/world.js';
+// walkable terrain (docs/TERRAIN.md): a gunman's z follows the ground under him as he walks, is shoved or lands; flat world: no change
+const toGround = TERRAIN_ON ? p => { p.z = elev(p.x, p.y); } : () => {};
 import {TYPES, TUNE} from '../../content/foes.js';
 
 const DEG = Math.PI / 180;
@@ -104,7 +106,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
   function standable(x, y, self) {
     if (!nav.isOpen(x, y)) return false;
     for (const p of ents.near(x, y, .6, nearS)) {
-      if (p === self || p.broken || p.gone || (p.z || 0) > .9) continue;
+      if (p === self || p.broken || p.gone || (TERRAIN_ON ? Math.abs((p.z || 0) - elev(x, y)) > .9 : (p.z || 0) > .9)) continue;   // (what stands on another level)
       const m = p.kind === 'gunman' ? .1 : .28;   // (mates: a touch of overlap is fine, the separation spreads them)
       if (p.rect ? x > p.rect[0] - m && x < p.rect[2] + m && y > p.rect[1] - m && y < p.rect[3] + m : p.r > 0 && hypot2(p.x - x, p.y - y) < p.r + m) return false;
     }
@@ -321,6 +323,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
       else if (sx && standable(p.x + sx, p.y, p)) { p.x += sx; g.vy *= .5; }
       else if (sy && standable(p.x, p.y + sy, p)) { p.y += sy; g.vx *= .5; }
       else { g.vx = g.vy = 0; if (++g.stuck > 20) { g.stuck = 0; g.strafe = -g.strafe; g.wayT = 0; g.sideT = .7; } }
+      toGround(p);
     }
     g.speed = hypot2(g.vx, g.vy); g.gait = g.speed > .15 ? gait || 'walk' : '';
     // the body turns: to its aim while the gun is out, else the way it goes
@@ -440,7 +443,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
     if (D.ph === 'carry') { if (D.t > .25) { D.ph = 'fly'; D.t = 0; D.x0 = D.x1 = p.x; D.y0 = D.y1 = p.y; D.dur = .3; D.H = 0; D.h0 = p.h; } }   // (let go of without a throw: he drops)
     else if (D.ph === 'fly') {
       const k = Math.min(1, D.t / D.dur);
-      p.x = D.x0 + (D.x1 - D.x0) * k; p.y = D.y0 + (D.y1 - D.y0) * k; p.h = 4 * D.H * k * (1 - k) + (D.h0 || 0) * (1 - k);
+      p.x = D.x0 + (D.x1 - D.x0) * k; p.y = D.y0 + (D.y1 - D.y0) * k; p.h = 4 * D.H * k * (1 - k) + (D.h0 || 0) * (1 - k); toGround(p);
       if (D.dmgFly && p.h < 1.3) for (const o of gang) {
         const q = o.p; if (o === g || q.broken || D.hit.includes(q) || hypot2(q.x - p.x, q.y - p.y) > D.bowl + q.hitR) continue;
         D.hit.push(q); host.feature('combat')?.core.damage(q, D.dmgFly, {dir: [(q.x - p.x) * 3, (q.y - p.y) * 3]}); o.flinch = Math.max(o.flinch, .45);
@@ -465,6 +468,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
     const d = hypot2(dx, dy); if (d < 1e-6) return 0;
     const n = Math.ceil(d / .12); let moved = 0;
     for (let i = 0; i < n; i++) { const x = p.x + dx / n, y = p.y + dy / n; if (!standable(x, y, p)) break; p.x = x; p.y = y; moved += d / n; }
+    toGround(p);
     return moved;
   }
   // carry(p, x, y, h): held up off his feet at (x, y), h m up (the lasso's hammer throw): a down state that holds while it's

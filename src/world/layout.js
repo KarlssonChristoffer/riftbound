@@ -29,6 +29,8 @@
 //   +--------[   ]-------------------------+                ~                     [cache]      |
 //            S gate
 import {flags} from '../core/flags.js';
+import {smooth} from '../core/mathx.js';
+import {createField} from './terrain.js';
 
 // WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
 // cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
@@ -73,7 +75,67 @@ export const inStream = (x, y) => {
 // ---- elevation: one plateau with a south cliff face ----
 export const PLATEAUS = [{x0: 43, y0: 2.8, x1: 60, y1: 11, h: 2.4,
   climbs: [{x: 51.5, w: 1.2}]}];        // climb spot on the south face (x = centre, w = width)
-export const elev = (x, y) => { for (const p of PLATEAUS) if (x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) return p.h; return 0; };
+export const elev = (x, y) => { for (const p of PLATEAUS) if (x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) return p.h; return TERRAIN_ON ? terrainField().H(x, y) : 0; };
+// too steep to walk up (walkable terrain: a terrace's cliff, a ramp's side); never on flat ground or the plateau's top
+export const steep = (x, y) => TERRAIN_ON && !PLATEAUS.some(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) && terrainField().steep(x, y);
+// on the open ground: not a plateau's top, not a cliff (spawn spots, scatter, caches: "where elev === 0" in the flat world, exactly)
+export const onGround = (x, y) => TERRAIN_ON ? !PLATEAUS.some(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) && !terrainField().steep(x, y) : elev(x, y) === 0;
+// two heights the same level: equal in the flat world, within `tol` m on walkable terrain
+export const sameLevel = (a, b, tol = .3) => TERRAIN_ON ? Math.abs(a - b) <= tol : a === b;
+
+// ---- WALKABLE TERRAIN (docs/TERRAIN.md; on by default, ?terrain=0: the ground flat at 0, the world before it, for an A/B).
+// The shapes (world/terrain.js) and the MASK that holds the ground flat where the world needs it level: the walled arena with
+// its gates' aprons, the stream and its banks, the pool and its outflow, the ground in front of the climb, the ravine's rim.
+// The plateau isn't in the field: elev puts its box on top
+export const TERRAIN_ON = flags.get('terrain') !== '0';
+// THE PROVING GROUNDS' TERRAIN (step 4). rock: true = its steep edges are 3D rock (world.js: cliffs3d.js runs along a terrace's
+// edges, a ramp's sides); the rest are grass banks. Kept clear of the yard's props and the frontier's pads
+const W_ = WORLD;
+export const TERRAIN = [
+  // the meadows' low roll (the mask holds it flat round the arena, the water, the climb, the ravine's rim and the pads)
+  {type: 'swell', amp: .28, k: .16, seed: 5},
+  // the world's borders rise in grass banks: behind the plateau and the arena's north wall, along the west and east edges (not
+  // walkable: they frame the grounds)
+  {type: 'terrace', pts: [[W_.x0 - 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - .3], [W_.x0 - 30, W_.y0 - .3]], h: 1.4, bank: 3.2},
+  {type: 'terrace', pts: [[W_.x0 - 30, W_.y0 - 30], [W_.x0 - .3, W_.y0 - 30], [W_.x0 - .3, W_.y1 + 30], [W_.x0 - 30, W_.y1 + 30]], h: 1.2, bank: 3},
+  {type: 'terrace', pts: [[W_.x1 + .3, W_.y0 - 30], [W_.x1 + 30, W_.y0 - 30], [W_.x1 + 30, W_.y1 + 30], [W_.x1 + .3, W_.y1 + 30]], h: 1.3, bank: 2.6},
+  // the plateau: a ramp up its south face beside the ladder, walled in rock, to a landing level with the top (its north half lies
+  // under the plateau's box: the whole landing opens onto the top)
+  {type: 'ramp', pts: [[52.2, 11.72], [56.1, 11.72]], w: 1.6, h0: null, h1: 2.4, shoulder: .12, rock: true},
+  {type: 'ramp', pts: [[56.1, 11.72], [57.7, 11.72]], w: 1.6, h0: 2.4, h1: 2.4, shoulder: .12, rock: true},
+  // the yard: a lookout terrace in the east, rock all round, stone steps up from the west
+  {type: 'terrace', pts: [[56.6, 14.6], [60.6, 14.6], [60.6, 20.2], [56.6, 20.2]], h: 1.15, bank: .12, rock: true},
+  {type: 'ramp', pts: [[53, 16], [56.9, 16]], w: 1.5, h0: null, h1: 1.15, shoulder: .12, rock: true},
+  // hills where the sparring brutes live, and a knoll between the paths
+  {type: 'hill', x: 47.8, y: 23.6, rx: 2.9, ry: 2.1, h: .75},
+  {type: 'hill', x: 52.8, y: 24.6, rx: 2.2, ry: 1.6, h: .55},
+  {type: 'hill', x: 49.6, y: 15.4, rx: 1.8, ry: 1.3, h: .45},
+  // the west border: low mounds round the old foundations
+  {type: 'hill', x: 1.6, y: 11.5, rx: 2.4, ry: 3.2, h: .5},
+  {type: 'hill', x: 1.6, y: 26, rx: 2.2, ry: 2.4, h: .4},
+];
+// PADS: things built at a fixed height that the ground must meet (features place them at 0): [x, y, r (held flat), fade]
+const PADS = [[50.8, 19.4, 1.5, 1.2],   // the campfire and its woodpile (features/lights.js)
+  // the desert's frontier pieces (features/frontier.js: built at 0): the windmill and its tank, the street, the wagon, the outhouse,
+  // the water tower, the mine's mouth and its cart
+  [35.6, 9.6, 2.2, 1], [35.9, 18.3, 2.6, 1], [35.6, 22.95, 1.6, 1], [5.2, 21.75, 1, 1], [58.45, 13.35, 1.8, 1], [54.5, 11.9, 1.6, 1]];
+const _tm = {d: 0, a: 0, l: 0, hw: 0};
+function terrainMask(x, y) {
+  const fade = (d, w) => d <= 0 ? 0 : d >= w ? 1 : smooth(d / w);
+  let m = fade(Math.max(PLAY.x0 - 3.2 - x, x - PLAY.x1 - 3.2, PLAY.y0 - 3.2 - y, y - PLAY.y1 - 3.2), 2);   // the arena
+  if (m === 0) return 0;
+  if (y > STREAM.y0 - 2 && y < STREAM.y1 + 2) m = Math.min(m, fade(Math.abs(x - STREAM.cx(y)) - STREAM.w(y) / 2 - 1.1, 1.6));   // the stream
+  m = Math.min(m, fade(Math.hypot((x - POOL.x) / (POOL.rx + 1.2), (y - POOL.y) / (POOL.ry + 1.2)) - 1, .9));            // the pool
+  outflowAt(x, y, _tm); if (_tm.d < 9) m = Math.min(m, fade(_tm.d - _tm.hw - .8, 1.2));                                // its outflow
+  for (const q of PLATEAUS) for (const c of q.climbs || []) m = Math.min(m, fade(Math.max(Math.abs(x - c.x) - c.w / 2 - .9, y - q.y1 - 2.6), 1.2));   // the climb
+  m = Math.min(m, fade(GROUNDS.y1 - 3.9 - y, 1.5));   // the ravine's rim
+  for (const [px, py, r, f] of PADS) m = Math.min(m, fade(Math.hypot(x - px, y - py) - r, f));
+  return m;
+}
+let FIELD = null;
+export function terrainField() {   // baked on the first read (the shapes and the mask are this module's: no import order to mind)
+  return FIELD ??= createField({bounds: {x0: WORLD.x0 - 8, y0: WORLD.y0 - 8, x1: WORLD.x1 + 8, y1: WORLD.y1 + 8}, shapes: TERRAIN, mask: terrainMask});
+}
 export const plateauAt = (x, y) => PLATEAUS.find(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) || null;
 
 // ---- the plateau's water (river brief B, moved to the south face by B2): a spring, a shallow rill across the top, a waterfall down the
@@ -246,7 +308,7 @@ export function buildLayout(seed = 7) {
   // yard below the cliff
   for (const [x, y] of [[46.2, 14.2], [46.9, 14.6], [46.5, 15.3]]) brk('crate', x, y, 20);
   for (const [x, y] of [[55, 14.3], [55.6, 14.9]]) brk('barrel', x, y, 25, {r: .3});
-  for (const [x, y] of [[49, 17], [49.5, 17.5], [52.8, 16.4], [44.6, 21.5], [45.1, 22.1]]) brk('pot', x, y, 10, {r: .22});
+  for (const [x, y] of [[49, 17], [49.5, 17.5], TERRAIN_ON ? [52.45, 17.05] : [52.8, 16.4], [44.6, 21.5], [45.1, 22.1]]) brk('pot', x, y, 10, {r: .22});   // (terrain: one pot steps aside off the foot of the lookout's steps)
   for (const [x, y] of [[53.6, 19.2], [55.3, 18.2], [57.6, 16.9]]) brk('barrel_x', x, y, 10, {r: .3, explode: {r: 2.4, dmg: 40}});   // explosive, spaced to chain
   for (const [x, y] of [[54.4, 17.2], [56.2, 17.6]]) brk('crate', x, y, 20);   // caught in the blast
   // a crate wall across the SE corner; the cache behind it is only reachable by breaking through
@@ -261,7 +323,7 @@ export function buildLayout(seed = 7) {
   for (let i = 0; i < 40; i++) {
     const x = TRAIL.x0 + 1 + rnd() * (TRAIL.x1 - TRAIL.x0 - 2), y = TRAIL.y0 + .5 + rnd() * (TRAIL.y1 - TRAIL.y0 - 1);
     if (inStream(x, y) || Math.abs(x - STREAM.cx(y)) < STREAM.w(y) / 2 + .5 || wantsClear(x, y) || props.some(p => Math.hypot(p.x - x, p.y - y) < 1)) continue;
-    if (elev(x, y) === 0 && y < 12 && x > 42.5) continue;   // right under the cliff lip
+    if (onGround(x, y) && y < 12 && x > 42.5) continue;   // right under the cliff lip
     const k = rnd(); add(k < .45 ? 'tuft' : k < .75 ? 'bush' : 'rock', x, y, {variant: rnd() * 3 | 0, r: 0});   // (soft)
   }
 

@@ -29,7 +29,7 @@ import {GADGETS, GADGET_IDS, SHOP, THROW, fits} from '../../content/gadgets.js';
 import {createLassoSim} from './lasso.js';
 import {mulberry32} from '../../core/rng.js';
 import {clamp, hypot2, TAU} from '../../core/mathx.js';
-import {PROP_TOP} from '../../world/world.js';
+import {PROP_TOP, onGround, TERRAIN_ON, steep} from '../../world/world.js';
 
 // how high a prop stops a thrown gadget (m over its base): the walls' own (world.js PROP_TOP), these, else 1
 const TOP = {crate: .8, barrel: .9, barrel_x: .9, pot: .5, crystal: 1.2, dummy: 1.4, chest: .6, pillar: 2.6, pillar_broken: 1.4,
@@ -212,7 +212,7 @@ export function createEquipSim(host) {
     // rest bounce off and fall on (a thing that keeps meeting the same solid without getting out of it goes through)
     const g0 = host.elev(o.x, o.y), g1 = host.elev(nx, ny);
     const p = o.stuck > 4 ? null : solidAt(o.x, o.y, o.h, nx, ny, nh, .08, null);
-    if (p || (g1 > nh && g1 > g0)) {
+    if (p || (g1 > nh && g1 > g0 && (!TERRAIN_ON || steep(nx, ny) || g1 - g0 > .3))) {   // (walkable terrain: a slope is ground to land on, not a face)
       if (o.id === 'flask' || o.id === 'smoke') { burst(o, null); return; }
       o.stuck++;
       const v = p ? reflect(o, p, .45) : cliff(o);
@@ -260,6 +260,7 @@ export function createEquipSim(host) {
     const nx = o.x + o.vx * dt, ny = o.y + o.vy * dt, g1 = host.elev(nx, ny);
     const p = solidAt(o.x, o.y, o.h + .1, nx, ny, o.h + .1, .08, null) || creatureAt(nx, ny, o.h + .1, .08);
     if (p) { const v = reflect(o, p, .4); if (v > 1) events.push({type: 'equip.bounce', x: o.x, y: o.y, gadget: o.id, speed: v}); return; }
+    if (TERRAIN_ON && !steep(nx, ny) && Math.abs(g1 - o.h) <= .15) { o.x = nx; o.y = ny; o.h = g1; if (water(nx, ny, g1)) wet(o); return; }   // (up and down a slope)
     if (g1 > o.h + .05) { cliff(o); return; }
     o.x = nx; o.y = ny;
     if (g1 < o.h - .05) { o.rest = false; o.settled = false; o.vh = 0; return; }   // off a ledge: falling again
@@ -522,7 +523,7 @@ export function createEquipSim(host) {
     const chests = c?.chests || [];
     for (let k = 0; k < 16; k++) {
       const a = 2.1 + k * .77, d = 2.7 + (k % 3) * .5, x = ring.x + Math.sin(a) * d, y = ring.y + Math.cos(a) * d;
-      if (host.blocked(x, y, 0) || host.elev(x, y) !== 0 || host.inStream(x, y)) continue;
+      if (!onGround(x, y) || host.blocked(x, y, host.elev(x, y)) || host.inStream(x, y)) continue;
       if (hypot2(x - ring.x, y - (ring.y - 2.2)) < 1.6 || hypot2(x - P.x, y - P.y) < 1.4) continue;   // (the portal's spot, you)
       let near = false; for (const q of chests) if (hypot2(q.x - x, q.y - y) < 2) near = true;
       if (near) continue;
@@ -642,7 +643,7 @@ export function createEquipSim(host) {
       let k = 0;
       for (let i = 0; i < 40 && k < n; i++) {
         const a = i * 2.4, d = .8 + (i % 4) * .7, bx = x + Math.sin(a) * d, by = y + Math.cos(a) * d;
-        if (host.blocked(bx, by, 0) || host.elev(bx, by) !== 0 || host.inStream(bx, by)) continue;
+        if (!onGround(bx, by) || host.blocked(bx, by, host.elev(bx, by)) || host.inStream(bx, by)) continue;
         c.spawnBrute({x: bx, y: by, hp: 40, dmg: 10, coins: [1, 2], type: 'brute', name: 'Brute', wait: .8 + k * .1}); k++;
       }
       return k;

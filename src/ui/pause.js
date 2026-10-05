@@ -40,7 +40,7 @@ const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'spr
   [['LMB'], 'hold to draw, release to shoot'], [['RMB'], 'multishot'], [['1', '2', '3', '4'], 'abilities'], [['E'], 'open · talk · climb'],
   [['LMB'], 'revolver: draw · shoot'], [['RMB'], 'revolver: fan the hammer'], [['R'], 'revolver: reload'], [['Y'], 'tip the hat'],
   [['Z', 'X'], 'turn the camera (or drag with the middle button)'], [['Home'], 'reset the camera'], [['Wheel'], 'zoom in / out'],
-  [['M'], 'mute'], [['U'], 'music on / off'], [['Esc'], 'this menu']];
+  [['M'], 'mute'], [['U'], 'music on / off'], [['F4'], 'photo mode'], [['Esc'], 'this menu']];
 
 const CHARS = {Ranger: 'ranger + cloth sim', Gunslinger: 'gunslinger', Outlaw: 'outlaw'};   // the menu's names -> LOADOUTS names
 const charOf = name => name === 'gunslinger' ? 'Gunslinger' : name === 'outlaw' ? 'Outlaw' : 'Ranger';
@@ -72,6 +72,7 @@ export function createPause(E) {
     const out = [], dv = (group, it) => out.push({tab: 'dev', group, ...it}), A = feat('audio')?.AU;
     // Game: resume, then the game's own rows (start / abandon a run, back to title)
     if (game.mode !== 'title') out.push({tab: 'game', label: 'Resume', main: true, sound: 'back', run() {}});
+    if (E.photo?.allowed) out.push({tab: 'game', label: 'Photo mode', run: () => E.photo.toggle(true)});   // (ui/photo.js; F4)
     for (const m of features.flatMap(f => f.menu?.() || [])) out.push({tab: 'game', label: m.label, run: m.run});
     // the character: the Ranger (bow), the gunslinger (Peacemaker), the outlaw (Brass Navy): view/hero.js LOADOUTS
     out.push({tab: 'game', group: 'Character', label: 'Character', ...pick(Object.keys(CHARS), () => charOf(hero.loadName), v => {

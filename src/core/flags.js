@@ -32,6 +32,8 @@ export const FLAG_DOCS = {
   smooth:    '1: = sampling=smooth',
   props:     'yaw: the 16-angle pre-rendered props instead of live 3D (reference)',
   trees3d:   '0: painted tree cards instead of the procedural 3D trees',
+  cliffs:    '0: the old painted strata planes on the plateau and the ravine wall instead of the 3D rock (world/cliffs3d.js)',
+  terrain:   '0: flat ground (no hills, terraces or ramps: world/terrain.js, the shapes in layout.js TERRAIN; docs/TERRAIN.md), an A/B',
   debug:     'a debug view index (G cycles them)',
   sshadow:   '0: every shadow caster in the per-frame sun shadow (no cached static map; an A/B)',
   cards:     '0: every world card its own mesh and draw (no instanced card batches; an A/B)',
@@ -41,7 +43,7 @@ export const FLAG_DOCS = {
   // ---- features (0 turns one off)
   wind: '0: no wind', windlevel: 'calm | breeze | brisk | gale: lock the wind strength', windlines: '0 | hd | pixel: the wind lines',
   litter: '0: the fallen leaves stay as baked (no wind moves them, none are lifted); also the low detail tier',
-  riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', grass: '0: no grass (features/grass.js)', wildlife: '0: no wildlife', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
+  riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', grass: '0: no grass (features/grass.js)', wildlife: '0: no wildlife', wildfight: '0: wildlife ignores fights (no flush, no scavengers at kills, no coyotes / fox / wolves at night; features/wildlife/fightlife.js; menu > Dev > Fight reactions)', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
   foes: '0: no gunmen in the desert sandbox (features/foes.js); unarmed: two at a time who never draw (targets to test on)', ragdoll: '0: the gunmen die by their death clips instead of as live 3D ragdolls (features/foes/look.js, view/ragdoll.js; ragdolls are the default)',
@@ -54,11 +56,16 @@ export const FLAG_DOCS = {
   battlemusic: '1: the premade Six Chambers songs follow the fight (features/battlemusic.js); off by default: the procedural score plays',
   bmforce: 'state[:song[:x]]: dev, pin the battle music (dev/bmusic.js), e.g. boss:iron:.25 (x = the champion health) or battle:dust:.8 (x = intensity)',
   shrines: '1 | 0: shrines and mini-events in a run (features/shrines.js, an experiment; off by default; the Dev tab toggle remembers it)',
+  trick: '1 | 0: the trick-shot range in the sandbox (features/trickshot.js, an experiment: bottles on a fence, cans to toss and juggle, a steel plate, ricochets on; off by default; the Dev toggle and the Game tab remember it); docs/exp/trickshot.md',
+  rico: '1: bullets glance off metal and stone at shallow angles everywhere (sim/projectiles.js RICO); 0: never, not even at the trick-shot range; absent: on while the range stands',
+  anomaly: '0: no rift anomaly in the sandbox (features/anomaly.js: a tear in the air on open ground, VISUALS ONLY, a reminder of the gameplay to come; on by default; menu > Dev > Features; docs/exp/anomaly.md)',
+  bells: '1 | 0: bells and ricochet plates in the sandbox (features/bells.js, an experiment: steel plates bullets always glance off, hanging bells that ring, scattered round the Proving Grounds; off by default; the Game tab row and the Dev toggle remember on); docs/exp/bells.md',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
   lineup: 'trees: the procedural trees side by side for review',
   views: '0: run the sim alone, no presentation step or drawing (tools/test/simview.mjs: the sim must come out the same)',
   owncheck: '1: record writes to entity fields by systems that do not own them (dev/owncheck.js; slow: for checks)',
+  photo: '1: open straight into photo mode (ui/photo.js; F4 or the menu otherwise: tests)',
 };
 const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
 const warned = new Set();
