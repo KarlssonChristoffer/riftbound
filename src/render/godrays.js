@@ -18,8 +18,17 @@
 // map has anything between it and the sun) and there is shadow on BOTH sides of it across the sun (the light camera's x:
 // horizontal), within TUNE.reach m and at least TUNE.margin m nearer the sun than it: a hole in a crown, the slot between two
 // pillars or trunks, an arch, the space under an awning. Not the open meadow, nor the air beside a lone pillar's shadow, nor
-// the slabs of light hugging low things' shadows (the margin: a shaft starts a metre down-sun of its opening). A beam runs
-// from its opening down-sun to the ground.
+// the slabs of light hugging low things' shadows (the margin: a shaft starts a metre down-sun of its opening). Only SOLID
+// things make an opening: a min map block counts where its nearest layer (TUNE.layer m deep) fills TUNE.solid of it (leaf
+// clumps, walls, pillars, trunks), not where a few thin things cross it (bare branches, poles, ropes: their slivers of light
+// read as spotlights). An opening in what MOVES (the per-frame map: the trees) counts only under a dense canopy: the share of
+// the ground the trees shade round the sample, seen from the sun (TUNE.dense: over its m), must be high, so a gap in a full
+// crown makes a shaft and the slot between two branches of a bare tree doesn't (walls, pillars and arches, the static map,
+// need no canopy). And a sample counts LESS the further it lies below its opening (the nearest of its side shadows' things,
+// a crown's top): fully within TUNE.len[0] m, nothing TUNE.len[1] m further down-sun, so a shaft hangs under its crown and
+// fades out instead of streaking across the ground (at a low sun a beam from a 4 m crown runs 15 m to the ground). The sun
+// reaching a sample is what the clouds let through where its sun ray meets the ground (render/clouds.js: a cloud shadow half
+// or all of it, a front's storm all of it): a clouded light patch dims its own beam, along the beam, not across the picture.
 // THE TIME. A pixel's count of glowing samples is a coarse thing: which planes fall inside a beam is a matter of phase, so a
 // beam's edge gains or loses a sample whenever the planes or the beam shift a hair (the sun turning, a crown's leaves
 // fluttering in the wind), and cut into hard levels that flickered (hundreds of px a frame). So the count is SMOOTHED over the
@@ -43,12 +52,13 @@
 // sun shadow maps and their matrices (shared uniform objects, never written), uShadowA / uShadowOn (is there a sun shadow
 // this frame), uView (the yaw), uSunDir. No allocation per frame, no CPU pixel work.
 // BUDGET (GPU): ~0.16-0.23 ms at 688 x 288 (3440 x 1440 at scale 5) on the RTX 4070 (min maps ~.02, shape ~.02, the march);
-// CPU: a few uniforms, 13 small draws (the static map's 5 more when it was re-rendered). The programs compile at load.
+// CPU: a few uniforms, 15 small draws (the static map's 5 more when it was re-rendered). The programs compile at load.
 // The sun's direction the maps are cast along turns in steps (gfx.js setSun: SUN_STEP), not a hair every frame.
 //   const rays = createGodrays({THREE, renderer, raw, tri, cam, compU}); rays.draw() right after the composite, into the
 //   same target; rays.restatic() when the static shadow map was re-rendered; rays.set(o) the strength inputs; rays.enabled
 //   (features/depth.js: its painted shafts step aside); rays.TUNE (live)
 import {flags} from '../core/flags.js';
+import {CLOUD_GLSL} from './clouds.js';
 
 export const TUNE = {
   on: flags.get('godrays') !== '0',
@@ -67,10 +77,14 @@ export const TUNE = {
   k: 1.2,           // overall strength
   el: [16, 55, .3], // the sun's elevation (deg): full below el[0], x el[2] above el[1] (noon: faint)
   view: [.5, 1],    // looking away from the sun .. toward it
-  cloud: [.4, .82], // the beams fade out between these cloud covers (sim/env.js sky.cloud)
+  cloud: [.4, .82], // the beams fade out between these cloud covers (sim/env.js light.cloud: the view's sky); each sample's sun
+                    // is what the clouds let through on its ray (render/clouds.js: none under thick cloud or a storm, half under thin)
   shadow: .3,       // the mood's shadow strength (clouds and the dusk -> night fade already in it) at which the beams are full
   mist: .8, wet: .5,   // more in mist (sky.fog) and on wet ground (after rain): x (1 + mist x fog + wet x wet)
   max: 1.8,
+  solid: .45, layer: 1.5,   // a min map block makes an opening where its nearest layer (this many m deep) fills this share of it
+  len: [4, 6],      // m below its opening (the nearest thing round it, up-sun) a sample counts fully, then fades to nothing over
+  dense: [.4, .65, .8],   // a tree opening: the canopy's share round it from nothing .. full count, over this many m (radius)
   tau: .3,          // s: the count is smoothed over about this long (THE TIME): flutter and the planes' phase average out
   hyst: .7,         // samples: a level comes on this much past its threshold and goes this much below it
   jitter: true,     // the planes shifted by a new fraction of their spacing every frame (the history averages the phases)
@@ -95,6 +109,9 @@ uniform vec3 uLv;        // glowing samples for levels 1, 2, 3
 uniform sampler2D tH;    // THE TIME: last frame's history (the smoothed count, the level, the depth)
 uniform vec4 uHist;      // this frame's weight in it (1 - exp(-dt / tau)), the hysteresis (samples), depth tolerance, 1: start over
 uniform mat4 uPrevPV;    // last frame's projection (this pixel's point there: its place and depth then)
+uniform vec4 uDM;        // m per light depth unit: the per-frame map, the static map; full below an opening (m), the fade after (m)
+uniform vec3 uSun;       // toward the sun the maps are cast along (unit, world)
+uniform mat4 uPV;        // this frame's projection (a sample's sun ray's ground point -> its view px: the cloud shadow there)
 out vec4 oc;             // the history: the smoothed count, the level (0 none, 1..3: the morphology below reads it), the depth
 vec3 worldAt(ivec2 p, float d) { vec2 ndc = (vec2(p) + .5) / uRes * 2. - 1.; vec4 w = uInvPV * vec4(ndc, d * 2. - 1., 1.); return w.xyz / w.w; }
 // something nearer the sun than the sample in map m at the sample's uv + o (c: the sample in light NDC): the per-frame map (round
@@ -103,7 +120,20 @@ bool occS(sampler2D m, vec3 c, vec2 o, float bias) { vec3 s = c * .5 + .5; s.xy 
 bool occSS(sampler2D m, vec3 c, vec2 o, float bias) { vec3 s = c * .5 + .5; s.xy += o; return uSOn > .5 && all(greaterThanEqual(s.xy, vec2(0.))) && all(lessThanEqual(s.xy, vec2(1.))) && s.z - bias * uSBias > textureLod(m, s.xy, 0.).r; }
 // a side window (both maps): shadow there, clearly nearer the sun than the sample (the margin: the ground, which casts into the
 // static map, comes nearer the sun across a block; a window is one block thick, so only the lowest few cm see it)
-bool side(sampler2D mS, sampler2D mSS, vec3 a, vec3 b, vec2 oa, vec2 ob) { return occS(mS, a, oa + uMinOff.xy, uMargin) || occSS(mSS, b, ob + uMinOff.zw, uMargin); }
+uniform float uMarginM;   // the margin (m)
+uniform sampler2D tDen; uniform vec2 uDense;   // the trees' canopy share round a point (per-frame map blocks), the gate's ramp
+// how far up-sun (m) the nearest thing in a side window is, in either map, if at least the margin (1e4: nothing there)
+float occD(sampler2D m, vec3 c, vec2 o, float mpu) { vec3 s = c * .5 + .5; s.xy += o; if (any(lessThan(s.xy, vec2(0.))) || any(greaterThan(s.xy, vec2(1.)))) return 1e4; float d = (s.z - textureLod(m, s.xy, 0.).r) * mpu; return d >= uMarginM ? d : 1e4; }
+vec2 sideD(sampler2D mS, sampler2D mSS, vec3 a, vec3 b, vec2 oa, vec2 ob) { return vec2(occD(mS, a, oa + uMinOff.xy, uDM.x), uSOn > .5 ? occD(mSS, b, ob + uMinOff.zw, uDM.y) : 1e4); }   // (per-frame, static)
+${CLOUD_GLSL}
+// the sun the clouds let through to X: the cloud shadow / a front's storm where X's sun ray meets the ground (render/clouds.js)
+float sunThrough(vec3 X) {
+  if (uCl.x < .5) return 1.;
+  vec3 G = X - uSun * (X.y / uSun.y);
+  vec4 c = uPV * vec4(G, 1.);
+  vec3 cl = cloudAt(ivec2(floor((c.xy / c.w * .5 + .5) * uRes)), G);
+  return (cl.x > 1.5 ? 0. : cl.x > .5 ? .5 : 1.) * cl.z;
+}
 void main() {
   ivec2 ip = ivec2(gl_FragCoord.xy);
   float d = texelFetch(tD, ip, 0).r;
@@ -133,8 +163,13 @@ void main() {
       vec3 a = a0 + da * float(k), b = b0 + db * float(k);
       if (!(occS(tNS, a, uMinOff.xy, uMargin) || occSS(tNSS, b, uMinOff.zw, uMargin))) continue;   // open air: nothing round it in either map
       if (occS(tS, a, Z, uBand.z) || occSS(tSS, b, Z, uBand.z)) continue;        // shadowed air: no light to scatter
-      // lit, with shadow close on either side: light through an opening (a shaft)
-      if (side(tXS, tXSS, a, b, sxa, sxb) && side(tXS, tXSS, a, b, -sxa, -sxb)) n += 1.;
+      // lit, with shadow close on either side: light through an opening (a shaft), fading below it, as much as the clouds let through
+      vec2 sl = sideD(tXS, tXSS, a, b, sxa, sxb), sr = sideD(tXS, tXSS, a, b, -sxa, -sxb);
+      float dO = max(min(sl.x, sl.y), min(sr.x, sr.y));
+      if (dO < 1e3) {   // (static things on both sides: no canopy needed; else the trees round it must be dense)
+        float g = max(sl.y, sr.y) < 1e3 ? 1. : smoothstep(uDense.x, uDense.y, textureLod(tDen, a.xy * .5 + .5 + uMinOff.xy, 0.).r);
+        if (g > 0.) n += clamp(1. - (dO - uDM.z) / uDM.w, 0., 1.) * g * sunThrough(X0 + dX * float(k));
+      }
       if (n >= uLv.z + 2.) { full = true; break; }   // (past the top level and its hysteresis: nothing more to count)
     }
   }
@@ -187,7 +222,8 @@ void main() {
   oc = vec4(uCol[int(o) - 1], 0.);
 }`;
 
-// THE MIN MAPS: each shadow map cut into blocks of RED x RED texels, a block's nearest depth to the sun (REDUCE_FS), then spread
+// THE MIN MAPS: each shadow map cut into blocks of RED x RED texels, a block's nearest depth to the sun (REDUCE_FS: where that
+// nearest layer, TUNE.layer m deep, fills TUNE.solid of the block; else nothing: thin things make no openings), then spread
 // over the neighbouring blocks (DILATE_FS: one axis a pass). SIDE by K blocks along the light's x only (half the reach): a side
 // window is looked up K + 1 blocks away, so it starts past the sample's own block (a lit sample just off one shadow's edge
 // doesn't find that shadow on both sides) and is one block thick (the ground, which casts into the static map, comes nearer the
@@ -199,11 +235,23 @@ void main() {
 // under a beam as the view pans: it would shimmer)
 const RED = 8, KMAX = 16;
 const REDUCE_FS = `precision highp float; precision highp int;
-uniform sampler2D tIn; uniform ivec2 uOff; out vec4 oc;
+uniform sampler2D tIn; uniform ivec2 uOff; uniform vec2 uSolid; out vec4 oc;   // uSolid: the layer's depth (map units), its share
+void main() {   // (r: the nearest depth where its layer is solid, else 1; g: the share of the block anything stands in: THE CANOPY)
+  ivec2 o = ivec2(gl_FragCoord.xy) * ${RED} - uOff, sz = textureSize(tIn, 0); float m = 1., a = 0., n = 0.;
+  for (int y = 0; y < ${RED}; y++) for (int x = 0; x < ${RED}; x++) { float d = texelFetch(tIn, clamp(o + ivec2(x, y), ivec2(0), sz - 1), 0).r; m = min(m, d); a += d < 1. ? 1. : 0.; }
+  if (m >= 1.) { oc = vec4(1., 0., 0., 1.); return; }   // (an empty block: most of the per-frame map)
+  for (int y = 0; y < ${RED}; y++) for (int x = 0; x < ${RED}; x++) n += texelFetch(tIn, clamp(o + ivec2(x, y), ivec2(0), sz - 1), 0).r < m + uSolid.x ? 1. : 0.;
+  oc = vec4(n >= uSolid.y * ${RED * RED}. ? m : 1., a / ${RED * RED}., 0., 1.);
+}`;
+// THE CANOPY: per block of the per-frame map, the share of its texels anything stands in (the trees, what moves: the ground
+// isn't in that map; REDUCE_FS's g), averaged over the blocks round it (BOX_FS, one axis a pass: the first from g, the
+// second from r): how dense the canopy is round a point
+const BOX_FS = `precision highp float; precision highp int;
+uniform sampler2D tIn; uniform ivec2 uDir; uniform int uR, uG; out vec4 oc;
 void main() {
-  ivec2 o = ivec2(gl_FragCoord.xy) * ${RED} - uOff, sz = textureSize(tIn, 0); float m = 1.;
-  for (int y = 0; y < ${RED}; y++) for (int x = 0; x < ${RED}; x++) m = min(m, texelFetch(tIn, clamp(o + ivec2(x, y), ivec2(0), sz - 1), 0).r);
-  oc = vec4(m, 0., 0., 1.);
+  ivec2 p = ivec2(gl_FragCoord.xy), sz = textureSize(tIn, 0); float s = 0.;
+  for (int i = -${KMAX}; i <= ${KMAX}; i++) { if (i < -uR || i > uR) continue; vec4 t = texelFetch(tIn, clamp(p + uDir * i, ivec2(0), sz - 1), 0); s += uG > 0 ? t.g : t.r; }
+  oc = vec4(s / float(2 * uR + 1), 0., 0., 1.);
 }`;
 const DILATE_FS = `precision highp float; precision highp int;
 uniform sampler2D tIn, tAlso; uniform ivec2 uDir, uR; uniform int uAlso; out vec4 oc;   // blocks uR.x .. uR.y along uDir (and tAlso's own)
@@ -215,22 +263,29 @@ void main() {
 }`;
 
 export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
-  const nf = THREE.NearestFilter, mk = n => new THREE.WebGLRenderTarget(n, n, {type: THREE.FloatType, format: THREE.RedFormat, minFilter: nf, magFilter: nf, depthBuffer: false, generateMipmaps: false});
+  const nf = THREE.NearestFilter, mk = (n, f = THREE.RedFormat) => new THREE.WebGLRenderTarget(n, n, {type: THREE.FloatType, format: f, minFilter: nf, magFilter: nf, depthBuffer: false, generateMipmaps: false});
   const SZ = compU.tS.value.image.width / RED, SZS = compU.tSS.value.image.width / RED;   // (2048 / 8, 4096 / 8)
   // per map: reduced, side x, side y, scratch, near
-  const maps = n => ({r: mk(n), x: mk(n), t: mk(n), near: mk(n), coarse: mk(n)});
+  const maps = n => ({r: mk(n, THREE.RGFormat), x: mk(n), t: mk(n), near: mk(n), coarse: mk(n)});   // (r: + the canopy share)
   const MIN = {S: maps(SZ), SS: maps(SZS), staticDirty: true, kSS: 1, oSS: [0, 0]};   // (kSS: the static map's reach in blocks)
-  const redU = {tIn: {value: null}, uOff: {value: new THREE.Vector2()}}, dilU = {tIn: {value: null}, tAlso: {value: null}, uDir: {value: new THREE.Vector2()}, uR: {value: new THREE.Vector2()}, uAlso: {value: 0}};
+  MIN.S.den = mk(SZ); MIN.S.den2 = mk(SZ);   // (the per-frame map's canopy density, and a scratch)
+  const redU = {tIn: {value: null}, uOff: {value: new THREE.Vector2()}, uSolid: {value: new THREE.Vector2()}}, dilU = {tIn: {value: null}, tAlso: {value: null}, uDir: {value: new THREE.Vector2()}, uR: {value: new THREE.Vector2()}, uAlso: {value: 0}};
   const pass = fs => { const sc = new THREE.Scene(); sc.matrixAutoUpdate = false; const m = new THREE.Mesh(tri, raw(VS, fs, fs === REDUCE_FS ? redU : dilU, {depthTest: false, depthWrite: false})); m.frustumCulled = false; m.matrixAutoUpdate = false; sc.add(m); return sc; };
   const redScene = pass(REDUCE_FS), dilScene = pass(DILATE_FS);
+  const boxU = {tIn: {value: null}, uDir: {value: new THREE.Vector2()}, uR: {value: 1}, uG: {value: 1}};
+  const boxScene = (() => { const sc = new THREE.Scene(); sc.matrixAutoUpdate = false; const m = new THREE.Mesh(tri, raw(VS, BOX_FS, boxU, {depthTest: false, depthWrite: false})); m.frustumCulled = false; m.matrixAutoUpdate = false; sc.add(m); return sc; })();
+  function canopy(T, r) {   // the per-frame map's canopy share (its reduced map's g) averaged over r blocks round each
+    boxU.uR.value = r; boxU.tIn.value = T.r.texture; boxU.uG.value = 1; boxU.uDir.value.set(1, 0); renderer.setRenderTarget(T.den2); renderer.render(boxScene, cam);
+    boxU.tIn.value = T.den2.texture; boxU.uG.value = 0; boxU.uDir.value.set(0, 1); renderer.setRenderTarget(T.den); renderer.render(boxScene, cam);
+  }
   // dst = src's min over blocks lo .. hi along (x, y) [and also's own]
   const dilate = (src, dst, x, y, lo, hi, also = null) => {
     dilU.tIn.value = src.texture; dilU.uDir.value.set(x, y); dilU.uR.value.set(lo, hi); dilU.tAlso.value = also ? also.texture : src.texture; dilU.uAlso.value = also ? 1 : 0;
     renderer.setRenderTarget(dst); renderer.render(dilScene, cam);
   };
   // a shadow map (depth texture) -> its min maps: side (kx across), near (2 kx + 1 across), coarse (near + 1 round)
-  function minMaps(depth, T, kx, ox, oy) {
-    redU.tIn.value = depth; redU.uOff.value.set(ox, oy); renderer.setRenderTarget(T.r); renderer.render(redScene, cam);
+  function minMaps(depth, T, kx, ox, oy, layer) {   // (layer: TUNE.layer m in this map's depth units)
+    redU.tIn.value = depth; redU.uOff.value.set(ox, oy); redU.uSolid.value.set(layer, TUNE.solid); renderer.setRenderTarget(T.r); renderer.render(redScene, cam);
     dilate(T.r, T.x, 1, 0, -kx, kx); dilate(T.r, T.near, 1, 0, -2 * kx - 1, 2 * kx + 1);
     dilate(T.near, T.t, 1, 0, -1, 1); dilate(T.t, T.coarse, 0, 1, -1, 1);
   }
@@ -238,7 +293,10 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     uSBias: compU.uSBias, uSOn: compU.uSOn, uRes: compU.uRes,
     tNS: {value: MIN.S.near.texture}, tNSS: {value: MIN.SS.near.texture}, tCS: {value: MIN.S.coarse.texture}, tCSS: {value: MIN.SS.coarse.texture}, tXS: {value: MIN.S.x.texture}, tXSS: {value: MIN.SS.x.texture},
     uBand: {value: new THREE.Vector4()}, uPn: {value: new THREE.Vector4()}, uSide: {value: new THREE.Vector4()}, uMargin: {value: 0}, uMinOff: {value: new THREE.Vector4()},
-    uLv: {value: new THREE.Vector3()}, tH: {value: null}, uHist: {value: new THREE.Vector4()}, uPrevPV: {value: new THREE.Matrix4()}};
+    uLv: {value: new THREE.Vector3()}, tH: {value: null}, uHist: {value: new THREE.Vector4()}, uPrevPV: {value: new THREE.Matrix4()},
+    uDM: {value: new THREE.Vector4()}, uMarginM: {value: 1}, uSun: {value: new THREE.Vector3()}, uPV: {value: null},
+    tDen: {value: MIN.S.den.texture}, uDense: {value: new THREE.Vector2()}};
+  for (const k of ['tTop', 'uCl', 'uClM', 'uClO', 'uClC', 'uClT', 'uFr', 'uFrB', 'uFrK', 'uFrC', 'uFrS', 'uFrQ']) U[k] = compU[k];   // (the clouds: render/clouds.js)
   const full = (vs, fs, u, extra) => { const sc = new THREE.Scene(); sc.matrixAutoUpdate = false; const m = new THREE.Mesh(tri, raw(vs, fs, u, {depthTest: false, depthWrite: false, ...extra})); m.frustumCulled = false; m.matrixAutoUpdate = false; sc.add(m); return sc; };
   // the march into the history (art px: the smoothed count, the level, the depth; two, this frame's and last frame's), its
   // levels cleaned in the level targets (one byte), then their shape added into the target the composite drew
@@ -251,11 +309,11 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
   const MU = {tLv: {value: null}, uDir: {value: ACROSS}, uR: {value: 1}, uGrow: {value: 0}};
   const scene = full(VS, FS, U, {}), morphScene = full(VS, MORPH_FS(), MU, {}), morphHScene = full(VS, MORPH_FS('.y'), MU, {});   // (H: from the history's level)
   const morph = (src, dst, dir, r, grow, sc = morphScene) => { MU.tLv.value = src.texture; MU.uDir.value = dir; MU.uR.value = r; MU.uGrow.value = grow ? 1 : 0; renderer.setRenderTarget(dst); renderer.render(sc, cam); };
-  const _pv = new THREE.Matrix4(), _d = new THREE.Vector4();
+  const _pv = new THREE.Matrix4(), _d = new THREE.Vector4(); U.uPV.value = _pv;
   const shapeScene = full(VS, SHAPE_FS, SU, {transparent: true, blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor});
   // compiled now, while the page loads (else the first sunlit frame waits ~80 ms for them: a hitch at dawn after a night start)
-  for (const sc of [scene, morphScene, morphHScene, shapeScene, redScene, dilScene]) renderer.compile(sc, cam);
+  for (const sc of [scene, morphScene, morphHScene, shapeScene, redScene, dilScene, boxScene]) renderer.compile(sc, cam);
   // the strength inputs (render/lighting.js, every frame): the sun's elevation (deg) and colour, the mood's shadow strength,
   // the sky's cloud and mist, the ground's wetness
   const In = {el: 45, c: [1, 1, 1], shadow: 0, cloud: 0, mist: 0, wet: 0};
@@ -295,7 +353,9 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     let nx = Vx - vs * sx, ny = Vy - vs * sy, nz = Vz - vs * sz; const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
     U.uPn.value.set(nx, ny, nz, T.band);
     U.uBand.value.set(T.dn, Math.min(128, T.planes), T.bias, T.jitter ? (HI.f * .6180339887) % 1 : 0);   // (w: this frame's phase)
-    U.uMargin.value = T.margin * Math.hypot(e[2], e[6], e[10]) / 2;   // (light depth per metre: half the light matrix's third row)
+    const dpm = Math.hypot(e[2], e[6], e[10]) / 2, dpmS = Math.hypot(f[2], f[6], f[10]) / 2 || 1;   // (light depth per metre: half the light matrix's third row)
+    U.uMargin.value = T.margin * dpm;
+    U.uDM.value.set(1 / dpm, 1 / dpmS, T.len[0], Math.max(.01, T.len[1])); U.uMarginM.value = T.margin; U.uSun.value.set(sx, sy, sz);
     U.uLv.value.set(T.lv[0] / T.dn - .01, T.lv[1] / T.dn - .01, T.lv[2] / T.dn - .01);   // (n: whole samples, gap fractions)
     // the colour: the sun's, warmed (its own hue pushed further: a dusk sun's orange deepens, a noon sun's white barely moves)
     const c = In.c, gk = T.goldK * (1 - smooth(T.goldEl[0], T.goldEl[1], In.el)), G = T.gold;
@@ -311,10 +371,12 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     const rt = renderer.getRenderTarget();
     const kx = kOf(blk(e[0], e[4], e[8], SZ));
     const ox = ph(e[12], SZ), oy = ph(e[13], SZ);
-    minMaps(compU.tS.value, MIN.S, kx, ox, oy);
+    minMaps(compU.tS.value, MIN.S, kx, ox, oy, T.layer * dpm);
+    canopy(MIN.S, Math.max(1, Math.min(KMAX, Math.round(T.dense[2] / blk(e[0], e[4], e[8], SZ)))));
+    U.uDense.value.set(T.dense[0], T.dense[1]);
     if (MIN.staticDirty && compU.uSOn.value > .5) {
       MIN.staticDirty = false; MIN.kSS = kOf(blk(f[0], f[4], f[8], SZS)); MIN.oSS[0] = ph(f[12], SZS); MIN.oSS[1] = ph(f[13], SZS);
-      minMaps(compU.tSS.value, MIN.SS, MIN.kSS, MIN.oSS[0], MIN.oSS[1]);
+      minMaps(compU.tSS.value, MIN.SS, MIN.kSS, MIN.oSS[0], MIN.oSS[1], T.layer * dpmS);
     }
     U.uMinOff.value.set(ox / (SZ * RED), oy / (SZ * RED), MIN.oSS[0] / (SZS * RED), MIN.oSS[1] / (SZS * RED));
     U.uSide.value.set((kx + 1) / SZ, 0, (MIN.kSS + 1) / SZS, 0);
