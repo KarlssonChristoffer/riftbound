@@ -64,6 +64,9 @@ const CLIMB_T = 1.1, MANTLE_T = .28;
 // VAULT (Space at a low ledge, walkable terrain): a rise of more than a step (STEP_UP) and at most VAULT_H m within VAULT_REACH m
 // ahead, its top level enough to stand on and clear: up and onto it in VAULT_T s (higher: a ladder)
 const VAULT_H = 1.25, VAULT_REACH = .8, VAULT_T = .46;
+// VAULT OVER a breach in a stone wall (H.wallOver: sim/player/adapter.js finds it): up over its stones in an arc (OVER_LIFT m clear of
+// them) and down on its far side, in VAULT_OVER_T s; Space as for a ledge
+const VAULT_OVER_T = .58, OVER_LIFT = .12;
 // SLIDE (walkable terrain): on ground too steep to stand on (a grass bank: slope rise / run over `on`; a cliff, over `cliff`, is a drop
 // instead) he loses his footing and slides down it, `g` m/s^2 at a 45 deg bank, `fric` 1/s, steering a little (`steer` m/s^2),
 // until the ground eases under `off`. H.grad(x, y, out) -> out = [gx, gy (this frame), slope]
@@ -312,12 +315,15 @@ export function createPlayer(H) {
     return null;
   }
   const vaultDir = () => { let [dx, dy] = moveInput(); if (!dx && !dy) [dx, dy] = vecOf(P.face); return [dx, dy]; };
-  const canVault = () => !BUSY.has(P.state) && !dodging() && !!vaultPlan(...vaultDir());   // (the hint: Space climbs up here)
+  // a way over a breach in a stone wall ahead: {d, top, z1} or null (the adapter's H.wallOver)
+  const overPlan = (dx, dy) => H.wallOver ? H.wallOver(P.x, P.y, dx, dy, P.z) : null;
+  // (the hint: 'up' Space climbs a ledge here, 'over' vaults a breach, false neither)
+  const canVault = () => { if (BUSY.has(P.state) || dodging()) return false; const [dx, dy] = vaultDir(); return vaultPlan(dx, dy) ? 'up' : overPlan(dx, dy) ? 'over' : false; };
   function tryVault() {
     if (P.z > elev(P.x, P.y) + .05 || BUSY.has(P.state)) return false;
-    const [dx, dy] = vaultDir(), plan = vaultPlan(dx, dy); if (!plan) return false;
+    const [dx, dy] = vaultDir(), up = vaultPlan(dx, dy), over = up ? null : overPlan(dx, dy), plan = up || over; if (!plan) return false;
     P.face = P.want = dirOf(dx, dy);
-    P.vault = {x0: P.x, y0: P.y, dx, dy, d: plan.d, z0: P.z, z1: plan.z};
+    P.vault = over ? {x0: P.x, y0: P.y, dx, dy, d: over.d, z0: P.z, z1: over.z1, top: over.top} : {x0: P.x, y0: P.y, dx, dy, d: plan.d, z0: P.z, z1: plan.z};
     P.state = 'vault'; P.t = 0; P.aimRoll = false; P.vx = P.vy = 0;
     ev({type: 'player.jump', x: P.x, y: P.y, z: P.z});
     return true;
@@ -420,6 +426,19 @@ export function createPlayer(H) {
           const k = Math.min(1, (P.t - MANTLE_T) / CLIMB_T); P.y = face; P.z = H0 + (Hh - H0) * (1 - k); P.frame = climbF;
           if (k >= 1) { P.z = H0; P.y = face + .35; P.state = 'idle'; P.t = 0; P.face = P.want = 0; }
         }
+      }
+      return true;
+    }
+    if (P.state === 'vault' && P.vault?.top !== undefined) {   // over a breach: up over its stones and down beyond, moving on through it
+      const V = P.vault, k = Math.min(1, P.t / VAULT_OVER_T), zc = Math.max(V.z0, V.z1, V.top + OVER_LIFT), sm = t => t * t * (3 - 2 * t);
+      P.z = k < .45 ? V.z0 + (zc - V.z0) * sm(k / .45) : zc + (V.z1 - zc) * sm((k - .45) / .55) ** 1.6;
+      const f = V.d * (k * .35 + .65 * sm(k)); P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
+      // (the leap's frames, facing his way: the climbing frames face the wall, his back to the camera when he vaults toward it)
+      P.frame = has('leap.1') ? `leap.${k < .15 ? 0 : k < .45 ? 1 : k < .78 ? 2 : 3}` : k < .12 || k > .9 ? 'crouch' : 'lunge';
+      if (k >= 1) {
+        P.z = elev(P.x, P.y); P.vault = null; P.state = 'idle'; P.t = 0; P.prevF = -1;
+        puff('L', A.SP.crouch ? 'crouch' : 'idle.0', 2); puff('R', A.SP.crouch ? 'crouch' : 'idle.0', 1);
+        ev({type: 'player.land', x: P.x, y: P.y, z: P.z});
       }
       return true;
     }

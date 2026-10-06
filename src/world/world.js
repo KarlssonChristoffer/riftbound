@@ -180,8 +180,11 @@ export const PROP_TOP = {wall_n: 2.4, wall_w: 2.4, wall_e: 2.4, wall_s: .9, towe
 export function propTop(table) { Object.assign(PROP_TOP, table); }
 // a prop's own top where the world built it its own height (the stone walls' pieces, towers and posts: walls3d.js, broken to their
 // own heights), else its kind's (PROP_TOP); undefined for a kind with neither. Arrows, gadgets, the lasso and the gunmen read it
-const TOPS = new WeakMap();
+const TOPS = new WeakMap(), FULL = new WeakMap();
 export const topOfProp = p => TOPS.get(p) ?? PROP_TOP[p.kind];
+// a stone wall's segment broken below its run's full height (a BREACH): its own top (m over its base), else null (whole, or not one
+// of the stone walls). The player steps over the lowest and vaults the rest (sim/player/adapter.js)
+export const breachTop = p => { const t = TOPS.get(p), f = FULL.get(p); return t !== undefined && f !== undefined && t < f - .12 ? t : null; };
 
 // ---------------------------------------------------------------- water: the sampler
 export const FALL_ALPHA = 252;   // a cliff / face texel with this alpha is falling water (SURF_FS streams it); 250 = a glowing fall (lava)
@@ -870,7 +873,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // segment prop on its line (between the midpoints of their centres), each piece moved into its prop's frame: the prop's mesh
   // (towers and gateposts too: each its own geometry; every piece's own top goes to topOfProp)
   const wallGeo = new Map(), wo = {fam: famOf, cover: R.cov ? famOf('cover') : null}, wground = TERRAIN_ON ? (x, z) => elev(x, z) : null;
-  const own = (p, g, top) => { if (g) { g.translate(-p.x, -(p.z || 0), -p.y); g.computeBoundingSphere(); g.computeBoundingBox(); disposers.push(() => g.dispose()); } wallGeo.set(p, g); TOPS.set(p, top); };
+  const own = (p, g, top, full) => { if (g) { g.translate(-p.x, -(p.z || 0), -p.y); g.computeBoundingSphere(); g.computeBoundingBox(); disposers.push(() => g.dispose()); } wallGeo.set(p, g); TOPS.set(p, top); if (full !== undefined) FULL.set(p, full); };
   if (flags.get('walls') !== 'old') for (const run of layout.walls || []) {
     if (run.type === 'tower' || run.type === 'post') {   // the tower / post prop standing there
       const kind = run.type === 'tower' ? 'tower' : 'gatepost', p = props.find(q => q.kind === kind && Math.hypot(q.x - run.at[0], q.y - run.at[1]) < .1); if (!p) continue;
@@ -882,7 +885,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     if (!segs.length) continue;
     const S = segs.map(sOf), cuts = [0, ...S.slice(1).map((v, i) => (S[i] + v) / 2), L];
     const {geos, tops} = wallRun({...run, cuts, ground: wground}, wo);
-    segs.forEach((p, i) => own(p, geos[i] || null, tops[i]));
+    segs.forEach((p, i) => own(p, geos[i] || null, tops[i], run.h));
   }
   const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose, static: !it.pose, autumn: it.pose?.autumn}); if (it.pose) m.sm.layers.disable(1); return m; };
   for (const p of props) {

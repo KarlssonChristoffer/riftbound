@@ -11,9 +11,13 @@
 import {createPlayer, BUSY} from './player.js';
 import {createGun} from './gun.js';   // a gun loadout's revolver (player.js H.gun)
 import {createLasso} from './lasso.js';   // the equipment experiment's lasso in his hands (player.js H.lasso)
-import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON} from '../../world/world.js';
+import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON, breachTop} from '../../world/world.js';
 
 const R_BODY = .25;
+// THE STONE WALLS' BREACHES (world/walls3d.js, world.js breachTop): rubble no higher than STEP_OVER over his feet is stepped over (it
+// doesn't block him); a breach up to VAULT_OVER is vaulted (Space: player.js tryVault, H.wallOver below); a whole stretch stays a wall.
+// Only the player: the brutes' nav and colliders still treat every segment as a wall
+const STEP_OVER = .3, VAULT_OVER = 1.25, WALLK = new Set(['wall_n', 'wall_s', 'wall_w', 'wall_e']);
 
 export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags, mods}) {
   const toView = cv.toView, toWorld = cv.toWorld;
@@ -32,8 +36,36 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     if (elev(x, y) > z + .3) return true;
     if (!air && steep(x, y) && elev(x, y) > z + .01) return true;   // walkable terrain: no walking up a cliff or a ramp's side (not even in small steps)
     for (const p of ents().near(x, y, R_BODY, nearB)) if (!p.broken && !p.gone && Math.abs((p.z || 0) - z) < 1 && (p.rect ? x > p.rect[0] - R_BODY && x < p.rect[2] + R_BODY && y > p.rect[1] - R_BODY && y < p.rect[3] + R_BODY
-      : p.r && Math.hypot(p.x - x, p.y - y) < p.r + R_BODY)) return true;
+      : p.r && Math.hypot(p.x - x, p.y - y) < p.r + R_BODY) && !rubble(p, z)) return true;
     return false;
+  }
+  // a wall segment broken down to rubble he steps over
+  function rubble(p, z) { if (!WALLK.has(p.kind)) return false; const b = breachTop(p); return b !== null && (p.z || 0) + b <= z + STEP_OVER; }
+  // a breach to vault, ahead of him along (ux, uz) (world frame) -> {d (m to where he lands), top (the stones' top), z1 (the ground
+  // there)} or null: a stone wall's segment within reach whose top (with those either side of where he crosses: the highest) is more
+  // than a step and at most VAULT_OVER over his feet, every one of them a breach (a whole stretch is no way over), and a clear spot on
+  // walkable ground about level with his on its far side
+  const nearW = [];
+  function wallAt(x, z) { for (const p of ents().near(x, z, .8, nearW)) if (WALLK.has(p.kind) && p.rect && !p.gone && x > p.rect[0] && x < p.rect[2] && z > p.rect[1] && z < p.rect[3]) return p; return null; }
+  function wallOver(X, Z, ux, uz, z) {
+    for (let d = .1; d <= .85; d += .05) {
+      const qx = X + ux * d, qz = Z + uz * d; if (!wallAt(qx, qz)) continue;
+      let top = -1;
+      for (const s of [-R_BODY, 0, R_BODY]) {   // (across his line: the body's width)
+        const p = wallAt(qx - uz * s, qz + ux * s); if (!p) continue;
+        const b = breachTop(p); if (b === null) return null;
+        top = Math.max(top, (p.z || 0) + b);
+      }
+      if (top - z <= STEP_OVER || top - z > VAULT_OVER) return null;
+      for (let d2 = d + .3; d2 <= d + 1.6; d2 += .05) {
+        const lx = X + ux * d2, lz = Z + uz * d2, e = elev(lx, lz);
+        if (wallAt(lx, lz) || blocked(lx, lz, e, false)) continue;   // (still in the wall, or against it)
+        if (Math.abs(e - z) > .6) return null;
+        return {d: d2 + .08, top, z1: elev(X + ux * (d2 + .08), Z + uz * (d2 + .08))};
+      }
+      return null;
+    }
+    return null;
   }
   // the ground's slope at view-frame (x, y): out = [gx, gy] its rise per metre along the view's x and y, out[2] = rise / run the steepest
   // way (no allocation: the world <-> view turn inline, viewxf's)
@@ -61,6 +93,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     weapon: () => hero.weapon, gun: createGun,   // the loadout's weapon (content/weapons.js) and, for a gun, its revolver
     lasso: createLasso, yaw: () => cv.yaw,      // the lasso's hands (idle unless features/equip/lasso.js uses them); the camera's yaw (its swing is in the world)
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
+    wallOver: (x, y, dx, dy, z) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallOver(X, Z, ux, uz, z); },   // (a rotation: d is the same in his frame)
     elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
     grad: TERRAIN_ON ? gradV : null,   // walkable terrain's slope (player.js SLIDE)
     inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
