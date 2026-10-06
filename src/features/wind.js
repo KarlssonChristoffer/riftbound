@@ -15,7 +15,7 @@
 //   flames    the arena's live flame renderer (coals fixed, flame rows re-sampled to a flickering height, leaning
 //             downwind along the SCREEN's x, tip licks, a detached ember) at TUNE.flameFps; the canvas replaces the
 //             brazier / torch emit. The card shader paints emit-only pixels as albedo (= the arena's flameAlbedo).
-//   cloth     the arena's Verlet banners (north gate), standards (east gate), tower pennants, prayer flags (trail),
+//   cloth     the arena's Verlet banners (on the walls flanking the north and east gates), tower pennants, prayer flags (trail),
 //             dummy strips and hanging lanterns, simulated in world metres as before, rasterised with the CAMERA's
 //             projection (yaw) at TUNE.clothFps (and whenever the camera turned) into ONE cloth atlas; every piece is a
 //             camera-facing card anchored where it hangs (depth-correct against walls, posts, the player). Seen from
@@ -513,7 +513,7 @@ export async function create(host) {
     return {cols, rows, n, P, O: P.slice(), P0: P.slice(), N: new Float32Array(n * 3), U, V: Vv, D: Dd, pin, L: Float32Array.from(L),
       k: o.k, flut: o.flut ?? 1, waves: o.waves ?? 1, freq: o.freq ?? 2, seed: R() * TAU, iters: o.iters ?? 3, damp: o.damp ?? .985,
       minY: o.minY ?? null, minX: o.minX ?? null, pat: o.pat || (() => 0), outline: o.outline || 'in', fray: !!o.fray, rope: o.rope ?? null, pinFn: o.pinFn || null,
-      SX: new Float32Array(n), SY: new Float32Array(n), ZT: new Float32Array(n), LM: new Float32Array(n), nRest: null, wind0: 0};
+      SX: new Float32Array(n), SY: new Float32Array(n), ZT: new Float32Array(n), LM: new Float32Array(n), nRest: null, wind0: o.wind0 ?? 0};
   }
   function normals(pc) {
     const {P, N, cols, rows} = pc;
@@ -628,25 +628,19 @@ export async function create(host) {
   }
   // a rod (the arena's rodSprite) as world lines: [x0, y, h] its left end (top row), wPx its length in px
   const rodOf = (pal, x0, y, h, wPx, alongY = false) => ({x0, y, h, len: (wPx - 1) / ctx.PPM, c: pal.wood, m: pal.metal, alongY});   // x0 / y: its start
-  function wallBanner(x, yFace, pal) {
-    const w = .5, len = .9, top = 1.12, wPx = w * ctx.PPM, lPx = len * ctx.PPMH;
-    const pc = grid({cols: 5, rows: 8, org: [x - w / 2, yFace + .03, top], ax: [w, 0, 0], ay: [0, 0, -len], pin: r => r === 0,
-      k: .75, flut: .5, waves: .8, freq: 1.4, minY: yFace + .02, pat: bannerPat(pal, wPx, lPx), fray: pal.fray});
-    const it = item('banner', x, yFace + .06, [pc], pal);
-    it.anchor = [x, yFace + .06, top]; it.rods = [rodOf(pal, x - w / 2 - .05, yFace + .03, top + .02, Math.round(wPx) + 2)];
-    return it;
-  }
-  // a freestanding banner pole with a crossbar (flanking the east gate). The banner FACES EAST / WEST, toward whoever comes
-  // through the gate (its crossbar runs north-south), and hangs on the pole's east side: the prevailing wind (W -> E) hits its
-  // face and swings it out, away from the pole (minX keeps it from passing through the pole on a west gust). (It used to
-  // span east-west: edge-on to the gate, and the wind blew along its plane, so it barely moved.)
-  function standard(x, y, pal) {
-    const H = 2.45, w = .5, len = 1.05, wPx = w * ctx.PPM, lPx = len * ctx.PPMH, bar = H - .12;
-    const pc = grid({cols: 5, rows: 9, org: [x + .06, y - w / 2, bar - .03], ax: [0, w, 0], ay: [0, 0, -len], pin: r => r === 0,
-      k: .9, flut: .6, waves: .8, freq: 1.3, minX: x + .045, pat: bannerPat(pal, wPx, lPx, {point: true, band: true}), fray: pal.fray});
-    const it = item('standard', x + .08, y, [pc], pal);
-    it.anchor = [x + .08, y, bar]; it.posts = [[DA.add(postSprite(pal.wood, pal.metal, Math.round(H * ctx.PPMH)).img, 1, Math.round(H * ctx.PPMH) + 1), x, y, 0]];
-    it.rods = [rodOf(pal, x + .06, y - w / 2 - .09, bar, Math.round(wPx) + 4, true)]; it.shadow = [x, y];
+  // a banner on a rod against a wall's face: (x, y) its middle on the face, face 'S' (the south face of an E-W wall) or 'E'
+  // (the east face of a N-S wall). The cloth's front (u x v) points out of the wall, so its front is fixed by construction
+  // (seen edge-on at yaw 0, the east one can't tell it from the winding there); min keeps it off the wall.
+  // o: {w, len, top (m: the cloth's top edge), rows} + bannerPat's {point, band}
+  function wallBanner(x, y, face, pal, o = {}) {
+    const {w = .5, len = .9, top = 1.12, rows = 8} = o, wPx = w * ctx.PPM, lPx = len * ctx.PPMH, E = face === 'E';
+    const nx = E ? 1 : 0, ny = E ? 0 : 1, ox = x + nx * .03, oy = y + ny * .03, rodPx = (w + .1) * ctx.PPM + 1;   // the rod: .05 m past each side
+    const pc = grid({cols: 5, rows, org: E ? [ox, y + w / 2, top] : [x - w / 2, oy, top], ax: E ? [0, -w, 0] : [w, 0, 0], ay: [0, 0, -len],
+      pin: r => r === 0, k: .75, flut: .5, waves: .8, freq: 1.4, minY: E ? null : y + .02, minX: E ? x + .02 : null, wind0: 1,
+      pat: bannerPat(pal, wPx, lPx, o), fray: pal.fray});
+    const it = item('banner', x + nx * .06, y + ny * .06, [pc], pal);
+    it.anchor = [x + nx * .06, y + ny * .06, top]; it.face = [nx, ny];
+    it.rods = [E ? rodOf(pal, ox, y - w / 2 - .05, top + .02, rodPx, true) : rodOf(pal, x - w / 2 - .05, oy, top + .02, rodPx)];
     return it;
   }
   // the tower's roof centre: the top of its 3D model (or the painted sprite's, like the arena, if it has none)
@@ -740,7 +734,7 @@ export async function create(host) {
   }
   function item(kind, x, y, pieces, pal) {
     const it = {kind, x, y, pieces, pal, ramps: {}, groups: null, rastered: false, posts: [], rods: [], shadow: null, anchor: null,
-      lantern: null, rope: null, dummy: null, active: false, g: 0};
+      lantern: null, rope: null, dummy: null, face: null, active: false, g: 0};
     for (const k of ['main', 'trim', 'alt', 'blue']) if (pal[k]) it.ramps[k] = ramp(pal[k]);
     it.groups = pieces.length ? [{pieces, box: null, slot: null, anchor: () => it.anchor}] : [];
     for (const pc of pieces) { pc.nx = 0; pc.ny = 0; normals(pc); }
@@ -754,8 +748,9 @@ export async function create(host) {
     const add = it => { if (it) decor.push(it); };
     DA = decorAtlas();
     R.seed(777);
-    for (const x of [cx - 3.2, cx + 3.2]) add(wallBanner(x, PLAY.y0, pal));          // flanking the north gate, on the wall's inner face
-    for (const y of [cy - 1.85, cy + 1.85]) add(standard(PLAY.x1 + 1.2, y, pal));    // flanking the east gate, trail side
+    for (const x of [cx - 3.2, cx + 3.2]) add(wallBanner(x, PLAY.y0, 'S', pal));     // flanking the north gate, on the wall's inner face
+    for (const y of [cy - 2.6, cy + 2.6])   // flanking the east gate, on the wall's outer (trail) face, the rod just under the capstones (2.3 m)
+      add(wallBanner(PLAY.x1 + .5, y, 'E', pal, {w: .6, len: 1.25, top: 2.2, rows: 9, point: true, band: true}));
     for (const p of props) if (p.kind === 'tower') add(pennant(p, pal));
     const paths = marks.filter(m => m.type === 'path');
     if (paths.length) {
@@ -801,7 +796,7 @@ export async function create(host) {
     let nx = 0, ny = 0, nz = 0; for (let i = 0; i < pc.n; i++) { nx += pc.N[i * 3]; ny += pc.N[i * 3 + 1]; nz += pc.N[i * 3 + 2]; }
     const l = Math.hypot(nx, ny, nz) || 1; pc.nRest = [nx / l, ny / l, nz / l];
     const P = pc.P, sx = i => P[i * 3] * ctx.PPM, sy = i => P[i * 3 + 1] * ctx.PPMY - P[i * 3 + 2] * ctx.PPMH, a = 1, c = pc.cols + 1;
-    pc.wind0 = Math.sign((sy(a) - sy(c)) * (sx(0) - sx(c)) + (sx(c) - sx(a)) * (sy(0) - sy(c))) || 1;
+    if (!pc.wind0) pc.wind0 = Math.sign((sy(a) - sy(c)) * (sx(0) - sx(c)) + (sx(c) - sx(a)) * (sy(0) - sy(c))) || 1;
   }
 
   // ---------------------------------------------------------------- the cloth atlas (one texture for every piece's box)
@@ -974,9 +969,9 @@ export async function create(host) {
   function drawItem(it, g) {
     if (it.shadow) for (let i = 0; i < it.shadow.length; i += 2) shadowAt(g, it.shadow[i], it.shadow[i + 1]);
     for (const [e, x, y, h] of it.posts) { const o = SPD; o.img = DA.cv; o.em = DA.ecv; o.sx = e.sx; o.sy = e.sy; o.sw = e.sw; o.sh = e.sh; o.px = e.px; o.py = e.py; o.x = x; o.y = y; o.h = h; host.sprite(o); }
-    // a wall banner hangs on the wall's south face: from the north the wall hides it. (Cards and world lines carry a depth
+    // a wall banner hangs on a wall's face: from the other side the wall hides it. (Cards and world lines carry a depth
     // bias of ~0.15 m; the banner's top hem and rod sit closer than that to the wall's top edge and would show over it.)
-    const behindWall = it.kind === 'banner' && FY < -.02;
+    const behindWall = it.face !== null && it.face[0] * FX + it.face[1] * FY < -.02;
     if (!behindWall) for (const grp of it.groups) {
       const b = grp.box, sl = grp.slot; if (!b || !b.any || !sl || sl.gen !== CA.gen) continue;
       const [ax, ay, ah] = grp.anchor(), AX = Math.round((ax * RX + ay * RY) * ctx.PPM), AY = Math.round((ax * FX + ay * FY) * ctx.PPMY - ah * ctx.PPMH);
