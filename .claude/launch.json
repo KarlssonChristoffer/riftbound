@@ -82,6 +82,16 @@
         "8134"
       ],
       "port": 8134
+    },
+    {
+      "name": "western",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "D:/Game/serve.py",
+        "8190"
+      ],
+      "port": 8190,
+      "url": "http://localhost:8190"
     }
   ]
 }
