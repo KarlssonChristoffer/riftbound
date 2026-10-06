@@ -831,6 +831,8 @@ uniform vec2 uRes; uniform float uR;
 uniform vec4 uCine, uSunP; uniform vec3 uCamP, uSkyZ, uSkyH, uSunCol;
 uniform vec3 uBg, uAmb, uSunDir, uShadowC, uFill, uGrade, uXCol;
 uniform float uShadowA, uShadowOn, uSunK, uBanded, uOutline, uGradeK, uEmin, uShadowTexel;
+// the coloured shade (render/lighting.js SHADE): a sun shadow's multiply (rgb; w 1 on, 0 the old flat tint), its lift, the hue alone
+uniform vec4 uShadeT; uniform vec3 uShadeL, uShadeH;
 uniform float uSoftFam;   // a ramp family drawn without inner seams / occlusion lines (the trees' leaves; -1 = none)
 // the world clock (features/weather.js sets them): the season's colour matrix for green pixels + how much it applies,
 // lying snow 0..1, wet ground 0..1, the lightning flash (rgb light added for an instant)
@@ -1136,7 +1138,10 @@ void main() {
     }
   }
   sh *= 1. - frD;
-  alb = mix(alb, uShadowC, sh * uShadowA);
+  // (the coloured shade keeps the hue of what the shadow falls on, turned toward the mood's shadow hue; ?shade=0 the old tint)
+  // (on the water mostly darker: a shadow there hides the sky it mirrors, it doesn't turn it a brighter blue)
+  if (uShadeT.w > .5) { vec3 t = water ? mix(vec3(dot(uShadeT.rgb, vec3(.3, .55, .15))), uShadeT.rgb, .3) : uShadeT.rgb; alb = alb * mix(vec3(1.), t, sh) + uShadeL * sh; }
+  else alb = mix(alb, uShadowC, sh * uShadowA);
 
   // ---- light: ambient + pools (falloff (1 - t^2)^2, vertical distance weighted .25), the arena's soft knee
   vec3 pts = vec3(0.);
@@ -1166,8 +1171,9 @@ void main() {
     if (uBanded > .5) s = s < .93 ? (type == 4 ? .84 : .92) : s > 1.07 ? 1.15 : 1.;
     else if (type != 4) s = max(s, .9);
     L *= s;
+    if (s < .93 && type != 4) L *= uShadeH;   // a prop's side turned from the sun takes the shade's hue (1: none)
   }
-  if (faceAway) L *= uShadowA > 0. ? .62 : .8;
+  if (faceAway) L *= (uShadowA > 0. ? .62 : .8) * uShadeH;
   if (type == 4) { alb = mix(alb, clamp(alb * uGrade, 0., 1.), uGradeK); L += min(uFill, L * .25); }
   vec3 col = alb * L;
   col += alb * uFlashC;   // lightning: the whole scene lit for an instant (features/weather.js)
@@ -1980,6 +1986,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uInvPV: {value: new THREE.Matrix4()}, uLightPV: {value: new THREE.Matrix4()},
     uRes: {value: new THREE.Vector2(VW, VH)}, uR: {value: R_DEPTH},
     uBg: {value: new THREE.Vector3(.1, .12, .11)}, uAmb: {value: new THREE.Vector3(1, 1, 1)}, uSunDir: {value: new THREE.Vector3(0, 1, 0)},
+    uShadeT: {value: new THREE.Vector4(1, 1, 1, 0)}, uShadeL: {value: new THREE.Vector3()}, uShadeH: {value: new THREE.Vector3(1, 1, 1)},   // lighting.js SHADE
     uShadowC: {value: new THREE.Vector3()}, uFill: {value: new THREE.Vector3()}, uGrade: {value: new THREE.Vector3(1, 1, 1)}, uXCol: {value: new THREE.Vector3(.17, .14, .21)},
     tSS: {value: shadowS.depthTexture}, uLightPVS: {value: new THREE.Matrix4()}, uSBias: {value: 1}, uSOn: {value: 1},
     uShadowA: {value: 0}, uShadowOn: {value: 1}, uSunK: {value: .34}, uBanded: {value: 1}, uOutline: {value: 1}, uGradeK: {value: 0}, uEmin: {value: .1}, uShadowTexel: {value: 1 / SM},

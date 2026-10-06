@@ -12,6 +12,7 @@ import {DEG} from './gfx.js';
 import {CHAR} from '../content/moods.js';
 import {lum, rgbOf} from '../core/color.js';
 import {hypot2} from '../core/mathx.js';
+import {flags} from '../core/flags.js';
 
 const GRADE = {ruins: [1.039, 1.029, .818], ember: [1.166, .958, .82], frost: [.896, 1.013, 1.161], rift: [1.056, .792, 1.649], desert: [1.09, 1.0, .84]};
 const BG = {ruins: [.10, .13, .11], ember: [.11, .06, .05], frost: [.10, .12, .17], rift: [.06, .04, .10], desert: [.15, .10, .07]};
@@ -25,6 +26,17 @@ function flick(l, t) {
 // LIGHTS from low down (warm grazing light, rims), but its shadows stop growing at this length: the true 1 / tan(el)
 // stretched trees and towers 4-6x their height across the map
 const SUN_LEN_MAX = 1.7, SHADOW_EL_MIN = Math.atan(1 / SUN_LEN_MAX);
+// COLOURED SHADE (?shade=0: the old look): a sun shadow keeps the colour of what it falls on and turns it toward the mood's
+// shadow hue (moods.js shadow.c: blue by day, violet at dusk, the biome's own), the way sky light fills a shadow: sunlit grass
+// yellow-green, shaded grass teal. The old shadow mixed every colour toward that one dark colour (grass, stone and path alike
+// went the same grey-blue mud). dark: how much of the mood's shadow opacity (shadow.a) darkens it; hue: how far toward the hue
+// (at full opacity: a weak, cloudy shadow is barely tinted); lift: a trace of the shadow colour added (dark things don't go
+// black); face: the share of the hue on what faces away from the sun (cliff faces in shade, the dark side of props); cool: how far
+// the hue leans toward the open sky's blue (SKY); unwarm: how much of a warm ambient's colour the shade takes back out (the
+// shadow is lit by the sky, not by the low sun: at dusk the shade would otherwise go pink). Live-tunable (import this module in
+// the page and set SHADE's fields)
+export const SHADE = {on: flags.get('shade') !== '0', dark: .62, hue: .45, lift: .25, face: .6, cool: .4, unwarm: .6};
+const SKY = [.6, .72, 1];
 
 export function createLighting({G, host, features, opt}) {
   const sunDir = new THREE.Vector3(), shadowDir = new THREE.Vector3();
@@ -40,6 +52,20 @@ export function createLighting({G, host, features, opt}) {
   let lanternMod = 0, lanternR = 1;
   if (host.mods) { const f = () => { lanternMod = host.mods.value('light.lantern', 0); lanternR = host.mods.value('light.lanternR', 1); }; host.mods.watch(f); f(); }
   function putL(x, y, z, c, r, gain, flat, halo = true) { const o = LOUT[nL] ??= {}; nL++; o.x = x; o.y = y; o.z = z; o.c = c; o.r = r; o.gain = gain; o.flat = flat; o.halo = halo; }
+  // the coloured shade's uniforms (SHADE): T the shadow's multiply (rgb, w on), L its lift, H the hue alone (luminance 1)
+  const HUE = [0, 0, 0];
+  function shade(c, a, amb, U) {
+    const T = U.uShadeT.value, L = U.uShadeL.value, H = U.uShadeH.value;
+    if (!SHADE.on || a <= 0) { T.set(1, 1, 1, SHADE.on ? 1 : 0); L.set(0, 0, 0); H.set(1, 1, 1); return; }
+    // the hue: the shadow colour's (normalised to its brightest channel), leaning toward the sky, the ambient's warmth taken back
+    // out, at luminance 1; then applied by w (a weak shadow barely tinted) and darkened by the shadow's opacity
+    const mx = Math.max(c[0], c[1], c[2], 1e-3), la = Math.max(.02, lum(amb));
+    for (let j = 0; j < 3; j++) HUE[j] = (c[j] / mx + (SKY[j] - c[j] / mx) * SHADE.cool) * Math.pow(la / Math.max(.02, amb[j]), SHADE.unwarm);
+    const l = Math.max(.05, lum(HUE)), w = SHADE.hue * Math.min(1, a / .4), d = 1 - a * SHADE.dark, f = SHADE.face;
+    const h0 = 1 + (HUE[0] / l - 1) * w, h1 = 1 + (HUE[1] / l - 1) * w, h2 = 1 + (HUE[2] / l - 1) * w;
+    T.set(h0 * d, h1 * d, h2 * d, 1); L.set(c[0] * a * SHADE.lift, c[1] * a * SHADE.lift, c[2] * a * SHADE.lift);
+    H.set(1 + (h0 - 1) * f, 1 + (h1 - 1) * f, 1 + (h2 - 1) * f);
+  }
   function apply(PX, PY, t) {
     const env = host.env, world = host.world, P = host.P, player = host.player, VH = host.VH, zoom = host.zoom, PPM = host.PPM;
     const biome = host.biome.id, time = env.bucket, m = env.mood(biome), U = G.compU;   // the clock's blended mood
@@ -54,6 +80,7 @@ export function createLighting({G, host, features, opt}) {
     U.uFog.value.set(m.fog[0], m.fog[1], m.fog[2], m.fog[3]);
     // the god rays: the sun's elevation and colour, the mood's shadow strength (clouds and nightfall in it), the view's cloud (env.light), the mist, wet ground
     if (G.setRays) { RAYS.el = m.sun.el; RAYS.c = sc; RAYS.shadow = U.uShadowA.value; RAYS.cloud = env.light.cloud; RAYS.mist = G.mist?.on ? Math.max(env.sky.fog, G.mist.medium) : env.sky.fog; RAYS.wet = env.wet; G.setRays(RAYS); }
+    shade(m.shadow.c, U.uShadowA.value, amb, U);
     const la = Math.max(.02, lum(m.amb)), fk = lum(m.fill || [0, 0, 0]) / la * CHAR.fillK;
     U.uFill.value.set(amb[0] * fk, amb[1] * fk, amb[2] * fk); const gr = GRADE[biome]; U.uGrade.value.set(gr[0], gr[1], gr[2]); U.uGradeK.value = CHAR.gradeK[time] ?? 0;
     const dark = Math.max(0, 1 - lum(m.amb));
