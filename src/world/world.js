@@ -43,6 +43,8 @@ import {treeModel, boneHit} from './trees3d.js';
 import {cliffGeometry} from './cliffs3d.js';
 import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
+import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
+import {TOWER_PLAN} from './layout.js';
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
@@ -896,6 +898,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // the standing stones (stonecircle.js): each 'menhir' prop its own stone and top (a lying stone's extra colliders: a top, no mesh)
   for (const r of stoneMeshes(props, wo, wground || undefined)) own(r.p, r.geo, r.top);
   STONE_LIGHTS.forEach((l, i) => groundL.push({x: l.x, y: l.h + (wground ? wground(l.x, l.y) : 0), z: l.y, c: rgbOf(l.color), r: l.radius, k: l.intensity, flicker: 0, id: 9500 + i, halo: l.halo}));
+  // the West Downs' watchtower (world/watchtower.js, layout.js TOWER_PLAN): its mesh on the 'watchtower' prop, its colliders' own tops
+  // (how high the wall stands over each: arrows stick in it up to there)
+  if (TOWER_PLAN) {
+    const r = watchtowerRun(TOWER_PLAN, wo, TF ? TF.H : () => 0);
+    for (const p of props) if (p.kind === 'watchtower') own(p, r.geo, r.top - (p.z || 0)); else if (p.kind === 'towerwall') own(p, null, colTop(TOWER_PLAN, p.x, p.y, p.z || 0));
+  }
   const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose, static: !it.pose, autumn: it.pose?.autumn}); if (it.pose) m.sm.layers.disable(1); return m; };
   for (const p of props) {
     const z0 = p.z || 0;

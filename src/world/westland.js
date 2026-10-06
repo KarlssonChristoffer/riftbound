@@ -13,6 +13,7 @@
 // OWNS: nothing at run time (constants and pure functions). READS: core/flags.js, core/mathx.js.
 //   WEST_ON, WEST {x0, y0, x1, y1}, LAND (WEST and the painted land past its edges), HILLS / BORDERS (terrain shapes), TRACK /
 //   TRAIL_N (polylines), PROPS ([kind, x, y, extra]), FIELD_WALLS / FOUNDATIONS / OLD_WALL_LEGS (the old walls), oldWallD(x, y),
+//   TOWER_ON / TOWER (the watchtower on the western hill: world/watchtower.js),
 //   trackD(x, y) (m to the nearest track's centre line, minus its half width: < 0 on it), trackK(x, y) (its distance over its half
 //   width), zone(x, y, elev, out) -> out {tall, ankle}, STONES_ON (the standing stones on the south-west hill: world/stonecircle.js)
 import {flags} from '../core/flags.js';
@@ -74,9 +75,14 @@ export const trackK = (x, y) => Math.min(segD(x, y + wander(x, y), TRACK.pts) / 
 // ---- the props: [kind, x, y, extra]. Oaks (trees3d.js 'oak': variants 0 / 1, scale: a big old one is 1.7 x) with a trunk collider,
 // mossy boulders, bushes (rabbits hide by them, butterflies visit), two broken pillars of the old ruins near the oak's hilltop
 const oak = (x, y, scale, variant = 0, seed = 0) => ['tree', x, y, {variant, scale, r: .45 * scale, seed}];
+// ---- THE WATCHTOWER (world/watchtower.js builds it; layout.js gives it its lookout, its ladder and its colliders; ?tower=0: none): a
+// ruined square tower on the western hill's summit (the oak that stood there grows down its west slope), turned rot deg off the
+// camera's axis (two faces read at the default yaw); S its side, d its shell, floor: its lookout's height over the summit (m)
+export const TOWER_ON = WEST_ON && flags.get('tower') !== '0' && flags.get('terrain') !== '0';   // (its lookout is a deck in the terrain field)
+export const TOWER = !TOWER_ON ? null : {x: -36, y: 7.5, rot: 20, S: 5.2, d: .78, floor: 4, seed: 307};
 export const OAKS = !WEST_ON ? [] : [
   oak(-22.4, 6.4, 1.7, 0, 3),                                   // the old oak, on the highest hill
-  oak(-8.8, 6.5, 1.3, 1, 1), oak(-36.4, 7.2, 1.4, 0, 5), oak(-15.5, 11.2, 1.05, 1, 2), STONES_ON ? oak(-24, 17, 1.05, 0, 6) : oak(-29.6, 21.2, 1.25, 0, 6),
+  oak(-8.8, 6.5, 1.3, 1, 1), oak(...(TOWER_ON ? [-42.8, 10.2] : [-36.4, 7.2]), 1.4, 0, 5), oak(-15.5, 11.2, 1.05, 1, 2), STONES_ON ? oak(-24, 17, 1.05, 0, 6) : oak(-29.6, 21.2, 1.25, 0, 6),
   oak(-13.2, 22.8, 1.1, 1, 4), oak(-10.6, 24.4, .95, 0, 7), oak(-43, 21.6, 1.2, 1, 0), oak(-4.2, 21.5, 1, 0, 2),
   oak(-27.5, 10.4, .9, 1, 1), oak(-2.6, 5.5, 1, 1, 6),
   // the grove in the north-west

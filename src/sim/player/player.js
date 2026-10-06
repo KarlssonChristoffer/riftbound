@@ -60,7 +60,7 @@ export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 
 const DODGE = {lead: .045, leadMin: 67.5, leadSpeed: 2.3, steerRate: 360, steerMax: 90, steerIgnore: 150, steerEnd: .65,
   backCos: -.3, backDist: 1.3, backDur: .3, backExit: 2.7, guard: .15};
 const D2R = Math.PI / 180;
-const CLIMB_T = 1.1, MANTLE_T = .28;
+const CLIMB_T = 1.1, MANTLE_T = .28;   // (CLIMB_T: up to 2.4 m, the mesa's faces; a taller one at the same pace: the watchtower's ladder)
 // VAULT (Space at a low ledge, walkable terrain): a rise of more than a step (STEP_UP) and at most VAULT_H m within VAULT_REACH m
 // ahead, its top level enough to stand on and clear: up and onto it in VAULT_T s (higher: a ladder)
 const VAULT_H = 1.25, VAULT_REACH = .8, VAULT_T = .46;
@@ -414,16 +414,18 @@ export function createPlayer(H) {
       return true;
     }
     if (P.state === 'climb') {
-      const C = P.climb, Hh = C.c.h1, H0 = C.c.h0, face = C.c.y + .05, top = C.c.y - C.c.reach, CL = A.CLIP.climb;
+      const C = P.climb, Hh = C.c.h1, face = C.c.y + .05, top = C.c.y - C.c.reach, CL = A.CLIP.climb;
+      // (down: to the ground where he steps off, a hand out from the face: under a ladder on a hill it lies lower than the climb's foot)
+      const H0 = C.dir > 0 ? C.c.h0 : Math.min(C.c.h0, elev(C.c.x, face + .35)), CT = CLIMB_T * Math.max(1, (Hh - H0) / 2.4);
       const climbF = has('climb.0') ? `climb.${Math.floor(P.t * (CL?.fps || 7)) % (CL?.frames || 4)}` : Math.floor(P.t / .2) % 2 ? 'reach_up' : 'idle.0';
       const mantleF = has('mantle.0') ? 'mantle.0' : 'crouch';
       if (C.dir > 0) {   // up the face, then mantle over the lip
-        if (P.t < CLIMB_T) { P.y = face; P.z = H0 + (Hh - H0) * (P.t / CLIMB_T); P.frame = climbF; }
-        else { const k = Math.min(1, (P.t - CLIMB_T) / MANTLE_T); P.z = Hh; P.y = face + (top - face) * k; P.frame = mantleF; if (k >= 1) { P.state = 'idle'; P.t = 0; } }
+        if (P.t < CT) { P.y = face; P.z = H0 + (Hh - H0) * (P.t / CT); P.frame = climbF; }
+        else { const k = Math.min(1, (P.t - CT) / MANTLE_T); P.z = Hh; P.y = face + (top - face) * k; P.frame = mantleF; if (k >= 1) { P.state = 'idle'; P.t = 0; } }
       } else {           // over the lip, then down the face
         if (P.t < MANTLE_T) { const k = P.t / MANTLE_T; P.z = Hh; P.y = top + (face - top) * k; P.frame = mantleF; }
         else {
-          const k = Math.min(1, (P.t - MANTLE_T) / CLIMB_T); P.y = face; P.z = H0 + (Hh - H0) * (1 - k); P.frame = climbF;
+          const k = Math.min(1, (P.t - MANTLE_T) / CT); P.y = face; P.z = H0 + (Hh - H0) * (1 - k); P.frame = climbF;
           if (k >= 1) { P.z = H0; P.y = face + .35; P.state = 'idle'; P.t = 0; P.face = P.want = 0; }
         }
       }

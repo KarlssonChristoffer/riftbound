@@ -39,6 +39,8 @@ import {smooth} from '../core/mathx.js';
 import {createField, sampler} from './terrain.js';
 import {WEST_ON, WEST, LAND as WEST_LAND, HILLS as WEST_HILLS, BORDERS as WEST_BORDERS, PROPS as WEST_PROPS, OLD_WALL_LEGS, WALL_D, SEG as WALL_SEG, oldWallD} from './westland.js';
 import {TERRAIN as STONE_TERRAIN, PROPS as STONE_PROPS} from './stonecircle.js';   // the West Downs' standing stones
+import {TOWER} from './westland.js';   // the West Downs' watchtower (world/watchtower.js)
+import {towerPlan, towerCols, inTower} from './watchtower.js';
 
 // WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
 // cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
@@ -281,7 +283,7 @@ function terrainMask(x, y) {
   if (y > STREAM.y0 - 2 && y < STREAM.y1 + 2) m = Math.min(m, fade(Math.abs(x - STREAM.cx(y)) - STREAM.w(y) / 2 - 1.1, 1.6));   // the stream
   m = Math.min(m, fade(Math.hypot((x - POOL.x) / (POOL.rx + 1.2), (y - POOL.y) / (POOL.ry + 1.2)) - 1, .9));            // the pool
   outflowAt(x, y, _tm); if (_tm.d < 9) m = Math.min(m, fade(_tm.d - _tm.hw - .8, 1.2));                                // its outflow
-  for (const c of CLIMBS) { const dx = x - c.x, dy = y - c.y, o = dx * c.nx + dy * c.ny, a = dy * c.nx - dx * c.ny; m = Math.min(m, fade(Math.max(Math.abs(a) - c.w / 2 - .9, o - 2.6, -o - .3), 1.2)); }   // the climbs' feet
+  for (const c of CLIMBS) { if (c.hill) continue; const dx = x - c.x, dy = y - c.y, o = dx * c.nx + dy * c.ny, a = dy * c.nx - dx * c.ny; m = Math.min(m, fade(Math.max(Math.abs(a) - c.w / 2 - .9, o - 2.6, -o - .3), 1.2)); }   // the climbs' feet
   m = Math.min(m, fade(GROUNDS.y1 - 3.9 - y, 1.5));   // the ravine's rim
   for (const [px, py, r, f] of PADS) m = Math.min(m, fade(Math.hypot(x - px, y - py) - r, f));
   return m;
@@ -522,6 +524,13 @@ if (TERRAIN_ON) {
     {type: 'channel', pts: OUTFLOW.pts.filter((p, i) => i % 3 === 0), bed: OUTFLOW.pts.filter((p, i) => i % 3 === 0).map(() => 0), hw: OUTFLOW.hw.filter((p, i) => i % 3 === 0).map(w => w + .1), bank: .5});
 }
 
+// ---- THE WATCHTOWER on the West Downs' western hill (westland.js TOWER, world/watchtower.js; ?tower=0: none): its plan on the ground the
+// shapes make (the terrain field, before any deck), its lookout a deck over its whole footprint (elev: from below the tower is solid,
+// on top the floor; drawn by its own mesh, not as a bridge), a ladder up its south face into the breach (a climb: the camera turns to
+// face it; the hill in front of it keeps its slope: terrainMask). buildLayout adds its colliders and the prop that carries its mesh
+export const TOWER_PLAN = TOWER && TERRAIN_ON ? towerPlan(TOWER, sampler(TERRAIN, terrainMask)) : null;
+if (TOWER_PLAN) { BRIDGES.push(TOWER_PLAN.deck); CLIMBS.push(TOWER_PLAN.climb); }
+
 export function buildLayout(seed = 7) {
   let s = seed; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
   const props = [], marks = [], lights = [];
@@ -699,6 +708,13 @@ export function buildLayout(seed = 7) {
     }
     // the standing stones (stonecircle.js): a 'menhir' per stone, a round collider (a lying one a row of them); world.js builds their stone
     for (const [kind, x, y, extra] of STONE_PROPS) add(kind, x, y, {...extra});
+  }
+  // ---- the watchtower (TOWER_PLAN): soft scatter in its footprint goes; the prop that carries its mesh (world.js: its geometry, perches
+  // on its broken tops), and its colliders, 'towerwall': a ring round its foot at the ground's height, a ring on the lookout at the floor's
+  if (TOWER_PLAN) {
+    for (let i = props.length - 1; i >= 0; i--) { const p = props[i]; if (!(p.r > 0) && inTower(TOWER_PLAN, p.x, p.y, .5)) props.splice(i, 1); }
+    add('watchtower', TOWER_PLAN.x, TOWER_PLAN.y, {r: 0});
+    for (const c of towerCols(TOWER_PLAN, terrainField().H)) add('towerwall', c.x, c.y, {r: c.r}).z = c.z;
   }
   return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5}, west: WEST_ON ? WEST : null, walls,
     trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt, spring: SPRING, rill: RILL, fall: FALL, pool: POOL, outflow: OUTFLOW, inRill, rillAt, inPool, poolEdge, inOutflow, outflowAt,

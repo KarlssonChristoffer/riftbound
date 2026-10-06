@@ -258,6 +258,7 @@ export function cliffGeometry(runs, o) {
   // bridges (layout.js BRIDGES): planks across a deck rising in a gentle arch, a stringer under each side, a post at each corner and a
   // rail along each side
   for (const D of o.bridges || []) {
+    if (D.own) continue;   // (a deck its owner draws: the watchtower's lookout, world/watchtower.js)
     const R = mulberry32(D.seed || 17), u = [D.ux, 0, D.uy], v = [-D.uy, 0, D.ux], hw = D.w / 2;
     const deck = s => D.h0 + (D.h1 - D.h0) * s / D.len + D.arch * Math.sin(Math.PI * s / D.len), at3 = (s, side, y) => [D.a[0] + D.ux * s - D.uy * side, y, D.a[1] + D.uy * s + D.ux * side];
     for (let s = .08; s < D.len - .02; s += .155) cuboid(B, at3(s + (R() - .5) * .02, (R() - .5) * .03, deck(s) - .025), u, UP, v, .066, .022, hw + (R() - .5) * .05, famWood, B.part(), (R() - .5) * .14);

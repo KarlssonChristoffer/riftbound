@@ -107,3 +107,19 @@ oak as before.
 - **Measured:** 10 meshes (static: their shadows in the cached map), 2,639 triangles, 16 props (10 'menhir', 6 'menhir_part'),
   built in ~3 ms; standing in the ring the frame's draws 144 -> 152 (perf report, `?stones=0` vs on). Smoke + simview pass, owncheck
   clean; golden, bench and A/B not run on the branch (measured after merging).
+- **The watchtower (2026-10-06):** a ruined square tower on the western hill's summit (-36, 7.5), turned 20 deg off the camera's axis
+  (two faces read at yaw 0): `world/watchtower.js`, built by walls3d.js's mason (exported for it) from `westland.js` TOWER (5.2 m a side,
+  a .78 m shell). Level courses from under its lowest foot (buried uphill), a plinth and a string course at the lookout's floor, the corners
+  interlocking; its back (north, west) faces stand ~4 m over the lookout, the north-west corner with a parapet fragment (coping, merlons,
+  a crenel), the east face stepping down, the front a broken parapet. A doorway at the foot of the south face (jambs, a lintel, a step)
+  choked with the fallen stair; slit windows in both storeys; pockets where face stones fell out, darker damp feet, rain streaks, moss up
+  from the grass and down from the tops, ivy on three faces; flagstones on the lookout; 60-odd stones fallen round its foot, most under
+  the broken faces. **The lookout** is 4 m over the summit (F): a deck over its whole footprint (layout.js BRIDGES, `own`: drawn by the
+  tower, not as a bridge), so elev is F there and from below the tower is solid; a **ladder** up the south face into a breach in the
+  parapet (CLIMBS, `hill`: the slope in front of it isn't flattened by terrainMask; the camera eases 20 deg to face it); 76 'towerwall'
+  colliders: a ring round its foot at the ground's height (the body stays off the faces; arrows stick up to the wall's top: colTop) and one
+  on the lookout where its walls stand (none in the breach: he climbs down there, or walks off it and drops). Climbs taller than the
+  mesa's 2.4 m take proportionally longer (player.js), a climb down ends on the real ground under the ladder. Birds perch on its tops
+  (wildlife.js PERCH 'watchtower'; crows / ravens like it best, one of the downs' crows starts on it); a **watch fire** on the lookout
+  (features/lights.js: a brazier, unlit; E or a fire arrow lights it). The summit's oak grows down its west slope. 8.8k triangles, one
+  mesh (static shadow), built in ~7-12 ms; `?tower=0`: none (the oak on the summit again).

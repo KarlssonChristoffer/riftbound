@@ -58,6 +58,7 @@ import {mulberry32} from '../core/rng.js';
 import {hex255 as hex} from '../core/color.js';
 import {createFightLife} from './wildlife/fightlife.js';   // the fight reactions: scavengers at kills, night canids, the flush (docs/exp/wildfight.md)
 import {TERRAIN_ON, steep, onGround, WEST_ON} from '../world/world.js';   // walkable terrain (docs/TERRAIN.md): ground animals follow it
+import {TOWER} from '../world/westland.js';   // the West Downs' watchtower (world/watchtower.js)
 
 const TAU = Math.PI * 2;
 const CALM = {x: 0, y: 0, g: 0};
@@ -126,6 +127,14 @@ if (WEST_ON) {
   const C = CAST.ruins;
   C.flocks.push({sp: 'sparrow', n: 9, homes: [[-12, 15.8], [-26, 15.6], [-38.5, 18.6], [-18, 20.6]]}, {sp: 'pigeon', n: 6, homes: [[-24, 12], [-34, 18], [-8, 13.8]]});
   C.solos.n += 2; C.solos.at = [null, null, [-22.4, 6.4], [-36.4, 7.2]]; C.rabbits += 4; C.butterflies += 5;
+}
+// the West Downs' watchtower (world/watchtower.js; the 'watchtower' prop carries its whole mesh): birds perch on its broken tops (the
+// highest point over columns across it: its merlons, the tall back walls), crows and ravens like it best; one of the downs' crows
+// starts on it (the oak it sat in grows down the hill now)
+if (TOWER) {
+  PERCH.watchtower = {dx: [-80, -50, -22, 8, 38, 68], sink: 0, jx: 3};
+  for (const [sp, w] of [['crow', 5], ['raven', 5], ['hawk', 4], ['pigeon', 3]]) SPECIES[sp].perch.watchtower = w;
+  CAST.ruins.solos.at[3] = [TOWER.x + .4, TOWER.y + 2];
 }
 
 // ---------------------------------------------------------------- art (the arena's, unchanged)

@@ -31,6 +31,7 @@
 // combat still resolves it. Props it adds (sconces, the campfire, the beacon) live in host.props like the layout's.
 import {ART} from '../world/biomes.js';
 import {STREAM, PLAY, SCONCE_D} from '../world/layout.js';
+import {TOWER_PLAN} from '../world/layout.js';   // the West Downs' watchtower: its watch fire (world/watchtower.js)
 import * as WORLD from '../world/world.js';
 import {geoOf, M4, along} from '../world/kit3d.js';
 import {createFires} from './firesim.js';
@@ -224,6 +225,13 @@ export async function create(host) {
     const [bx, by] = WORLD.TERRAIN_ON ? [53.5, 10.15] : [49.6, 10.35];   // (as far from the ladder as before: E at its top climbs)
     beacon = host.entities.add({kind: 'beacon', x: bx, y: by, z: WORLD.TERRAIN_ON ? WORLD.elev(bx, by) : 2.4, r: .45, unlit: true, interact: 'light the beacon'}); clearAround(beacon.x, beacon.y, 1);
   }
+  // the watchtower's WATCH FIRE (layout.js TOWER_PLAN.fire): a brazier on its lookout before the tall north wall, UNLIT; E (or a fire
+  // arrow) lights it, like the beacon
+  let watch = null;
+  if (TOWER_PLAN) {
+    const [wx, wy] = TOWER_PLAN.fire;
+    watch = props().find(p => p.kind === 'brazier' && Math.hypot(p.x - wx, p.y - wy) < .05) || host.entities.add({kind: 'brazier', x: wx, y: wy, z: TOWER_PLAN.F, r: .35, light: 0, unlit: true, interact: 'light the watch fire'});
+  }
   // the woodpile beside the campfire (a prop: it collides; arrows fly over it)
   let pile = props().find(p => p.kind === 'woodpile');
   if (!pile) { pile = host.entities.add({kind: 'woodpile', x: camp.x + 1.05, y: camp.y - .32, z: 0, r: .3, a: 1.05}); clearAround(pile.x, pile.y, .7); }
@@ -231,6 +239,7 @@ export async function create(host) {
   pile.n = PILE.length; camp.interact = 'tend the fire';
   const sconcesAdded = mountSconces();
   await Promise.all(sconcesAdded.map(p => host.world.addItem(p)));
+  if (watch && !host.itemOf(watch)) await host.world.addItem(watch);   // (its coals and flame sprite, its light)
 
   // candles: on the broken pillar's top (ray cast on its model) and on the ground by the rubble
   const ray = new THREE.Raycaster();
@@ -352,6 +361,7 @@ export async function create(host) {
     flare(p.x, p.y, h, c, p === beacon ? 9 : 5, p === beacon ? 3 : 2.4, p === beacon ? 1.1 : .6);
     burst(p.x, p.y, h, p === beacon ? 40 : 18, FIRE, p === beacon ? 2.6 : 1.6);
     if (p === beacon) { p.opened = true; host.shake?.(2, .2); }
+    if (p === watch) p.opened = true;   // (no more an E target)
     host.events.push({type: 'fire.ignite', x: p.x, y: p.y, kind: p.kind});
   }
   function ignite(p) {
@@ -908,10 +918,11 @@ export async function create(host) {
   F.flame = (key, kind, col, x, y, h, on = 1, scale = 1, height = 1) => { fires.draw(key, kind, col, x, y, h, fo(on, scale, height)); };
   F.interact = p => {
     if (p === beacon && beacon.unlit) { light(beacon); return true; }
+    if (p === watch && watch.unlit) { light(watch); return true; }
     if (p === camp && F.on) { tend(); return true; }
     return false;
   };
-  F.prompt = p => p === beacon && beacon.unlit ? 'E  light the beacon' : p === camp && F.on ? (canAdd() ? 'E  add a log' : 'E  stir the fire') : null;   // the host's prompt hook (the whole label)
+  F.prompt = p => p === beacon && beacon.unlit ? 'E  light the beacon' : p === watch && watch.unlit ? 'E  light the watch fire' : p === camp && F.on ? (canAdd() ? 'E  add a log' : 'E  stir the fire') : null;   // the host's prompt hook (the whole label)
   F.toggle = () => {   // off: the sprites' own flames
     F.on = !F.on; for (const p of flames) p.fx = F.on;
     camp.interact = F.on ? 'tend the fire' : undefined;
@@ -921,7 +932,7 @@ export async function create(host) {
   };
   F.biomeChanged = async () => {
     syncBiome();
-    for (const p of props()) if (p.kind === 'torch' && !host.itemOf(p)) await host.world.addItem(p);
+    for (const p of props()) if ((p.kind === 'torch' || p === watch) && !host.itemOf(p)) await host.world.addItem(p);
     meshes.length = 0; buildMeshes();   // the rebuilt world disposed our meshes
   };
   F.hud = () => `flames ${fires.TUNE.style} (F, HD fx ${host.G.stats.fx ?? 0}, heat ${host.G.stats.heat ?? 0}) · camp ${campK.toFixed(2)} (${logs.length} logs, pile ${pile.n}) · fire arrows ${host.arrows.filter(a => a.fire).length} · burning ${burning.size} · ash ${ashes.size}`;

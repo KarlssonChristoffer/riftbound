@@ -66,7 +66,8 @@ function coursesTo(top, R, y0 = -.06) {
 }
 
 // THE MASON: one build's random, families and sinks, and the ways it lays stone (world space; a frame is a line's u (along) and w
-// (across), unit vectors on the ground). Exported: world/stonecircle.js lays its moss and its fallen chips with it
+// (across), unit vectors on the ground). Exported: world/stonecircle.js lays its moss and its fallen chips with it; world/watchtower.js
+// (the West Downs' watchtower) its courses round openings
 export function mason(seed, o) {
   const R = mulberry32((seed | 0) * 7919 + 13), rr = (a, b) => a + (b - a) * R(), fs = o.fam('stone'), fc = o.cover;
   const M = {R, rr, fs, fc, tops: []};   // tops: the stones and slabs that end a column (the moss and the grass lie on them)
