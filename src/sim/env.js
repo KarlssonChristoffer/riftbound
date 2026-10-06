@@ -102,6 +102,13 @@ export const WEATHER = {
 };
 const CH = ['cloud', 'rain', 'snow', 'fog', 'storm', 'wind'];
 const GREY = [.94, .96, 1], HAZE = [.55, .6, .7];   // clouds pull the light toward a cool grey; the haze they add
+// rain (and a storm, a heavy overcast) washes the light blue-teal and fills the air with a cool veil: the whole view turns
+// toward slate and teal, not just darker (c: a multiply on the ambient at full rain; haze: its veil's colour, veil its share, a
+// the opacity it adds: the darks lift, as in the air of a downpour; k: the share of it all, 0 the old grey; not in the desert).
+// (c never raises a channel: a brighter ambient leaves the lamps' pools no headroom under the light's soft knee, gfx.js COMP_FS,
+// and they flatten into discs; the blue comes from the veil, added after the light)
+// Live-tunable
+export const WET = {k: 1, c: [.78, .9, 1], haze: [.34, .5, .7], veil: .75, a: .13};
 // the desert's (world/desert.js) haze is warm dust, not the cool grey; and a wind over a breeze lifts a faint dust haze of its
 // own (DUST_K at a full gale's sky wind, from 1.2). Presentation only: mood() is read by the lighting, never by the sim
 const DUST = [.8, .66, .46], DUST_K = .09;
@@ -283,13 +290,14 @@ export function createEnv({moods, biome, Q = flags, focus = null}) {
     const S = E.light, c = S.cloud, lum = o.amb[0] * .3 + o.amb[1] * .55 + o.amb[2] * .15;   // (the view's light: a front's clear side while it shows)
     o.sun.k *= 1 - .55 * c; o.shadow.a *= 1 - .8 * c;
     const HZ = bid === 'desert' ? DUST : HAZE, dust = bid === 'desert' ? DUST_K * clamp((S.wind - 1.2) / 1.6, 0, 1) : 0;
+    const wash = bid === 'desert' ? 0 : WET.k * Math.min(1, S.rain + .5 * S.storm + .25 * Math.max(0, c - .6) / .4);
     for (let j = 0; j < 3; j++) {
-      o.amb[j] = lerp(o.amb[j], lum * GREY[j], .35 * c) * (1 - .1 * c - .12 * S.rain - .2 * S.storm);
+      o.amb[j] = lerp(o.amb[j], lum * GREY[j], .35 * c) * (1 - .1 * c - .12 * S.rain - .2 * S.storm) * (1 + (WET.c[j] - 1) * wash);
       o.sun.c[j] = lerp(o.sun.c[j], .85, .5 * c);
-      o.fog[j] += HZ[j] * (.05 * c + .1 * S.rain + .16 * S.fog + .08 * S.snow);
+      o.fog[j] += HZ[j] * (.05 * c + .1 * S.rain + .16 * S.fog + .08 * S.snow) + WET.haze[j] * WET.veil * wash;
       if (dust) o.fog[j] += DUST[j] * dust;
     }
-    o.fog[3] = Math.min(.5, o.fog[3] + .05 * c + .1 * S.rain + .16 * S.fog + .08 * S.snow);
+    o.fog[3] = Math.min(.5, o.fog[3] + .05 * c + .1 * S.rain + .16 * S.fog + .08 * S.snow + WET.a * wash);
     if (dust) o.fog[3] = Math.min(.5, o.fog[3] + dust);
     o.glow *= 1 + .3 * c;
     for (let j = 0; j < grades.length; j++) grade(o, grades[j].g);   // another system's grade on top (setGrade, below)
