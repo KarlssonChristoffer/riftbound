@@ -37,7 +37,7 @@
 import {flags} from '../core/flags.js';
 import {smooth} from '../core/mathx.js';
 import {createField, sampler} from './terrain.js';
-import {WEST_ON, WEST, LAND as WEST_LAND, HILLS as WEST_HILLS, BORDERS as WEST_BORDERS, PROPS as WEST_PROPS} from './westland.js';
+import {WEST_ON, WEST, LAND as WEST_LAND, HILLS as WEST_HILLS, BORDERS as WEST_BORDERS, PROPS as WEST_PROPS, OLD_WALL_LEGS, WALL_D, SEG as WALL_SEG, oldWallD} from './westland.js';
 
 // WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
 // cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
@@ -681,6 +681,20 @@ export function buildLayout(seed = 7) {
       p.outside = false; p.r = p.kind === 'tree' ? .45 : .75;
     }
     for (const [kind, x, y, extra] of WEST_PROPS) add(kind, x, y, {...extra});
+    // the old walls (westland.js OLD_WALL_LEGS): a 'fieldwall' segment every WALL_SEG m along each leg, a round collider (touching its
+    // neighbours: no way through), none in a doorway; the leg as a run for world/walls3d.js (its a / b moved by ext). A bush or a
+    // stone lying on a wall's line goes
+    for (let i = props.length - 1; i >= 0; i--) { const p = props[i]; if ((p.kind === 'bush' || p.kind === 'tuft' || p.kind === 'rock') && !(p.r > 0) && oldWallD(p.x, p.y) < .8) props.splice(i, 1); }
+    for (const L of OLD_WALL_LEGS) {
+      const [ax, ay] = L.a, l = Math.hypot(L.b[0] - ax, L.b[1] - ay), ux = (L.b[0] - ax) / l, uy = (L.b[1] - ay) / l;
+      const n = Math.max(1, Math.round(l / WALL_SEG)), step = l / n;
+      for (let k = 0; k < n; k++) {
+        const s = (k + .5) * step; if (L.gaps.some(([g0, g1]) => s > g0 - .1 && s < g1 + .1)) continue;
+        add('fieldwall', ax + ux * s, ay + uy * s, {r: .3});
+      }
+      walls.push({kind: 'fieldwall', a: [ax - ux * L.ext[0], ay - uy * L.ext[0]], b: [L.b[0] + ux * L.ext[1], L.b[1] + uy * L.ext[1]], h: L.h, d: WALL_D, ruin: L.ruin,
+        keep: [], seed: L.seed, gaps: L.gaps.map(([g0, g1]) => [g0 + L.ext[0], g1 + L.ext[0]]), sink: -.16, rough: L.rough, tol: .06});
+    }
   }
   return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5}, west: WEST_ON ? WEST : null, walls,
     trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt, spring: SPRING, rill: RILL, fall: FALL, pool: POOL, outflow: OUTFLOW, inRill, rillAt, inPool, poolEdge, inOutflow, outflowAt,

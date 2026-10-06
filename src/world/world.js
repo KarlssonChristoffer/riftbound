@@ -185,6 +185,9 @@ export const topOfProp = p => TOPS.get(p) ?? PROP_TOP[p.kind];
 // a stone wall's segment broken below its run's full height (a BREACH): its own top (m over its base), else null (whole, or not one
 // of the stone walls). The player steps over the lowest and vaults the rest (sim/player/adapter.js)
 export const breachTop = p => { const t = TOPS.get(p), f = FULL.get(p); return t !== undefined && f !== undefined && t < f - .12 ? t : null; };
+// how high a wall segment is where the player may get over it (sim/player/adapter.js: stepped over as rubble, else vaulted): an arena
+// wall's only where it's a breach; an old field wall (the West Downs: kind 'fieldwall', world/westland.js) anywhere; else null
+export const vaultTop = p => p.kind === 'fieldwall' ? TOPS.get(p) ?? null : breachTop(p);
 
 // ---------------------------------------------------------------- water: the sampler
 export const FALL_ALPHA = 252;   // a cliff / face texel with this alpha is falling water (SURF_FS streams it); 250 = a glowing fall (lava)
@@ -881,7 +884,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       own(p, r.geo, r.top); continue;
     }
     const [ax, az] = run.a, L = Math.hypot(run.b[0] - ax, run.b[1] - az), ux = (run.b[0] - ax) / L, uz = (run.b[1] - az) / L;
-    const sOf = p => (p.x - ax) * ux + (p.y - az) * uz, segs = props.filter(p => p.kind === run.kind && Math.abs(-(p.x - ax) * uz + (p.y - az) * ux) < .3 && sOf(p) > -.1 && sOf(p) < L + .1).sort((p, q) => sOf(p) - sOf(q));
+    // (its segments: on its line within run.tol (.3; the old field walls' legs, which meet at bends, closer), each taken once)
+    const tol = run.tol ?? .3, sOf = p => (p.x - ax) * ux + (p.y - az) * uz;
+    const segs = props.filter(p => p.kind === run.kind && !wallGeo.has(p) && Math.abs(-(p.x - ax) * uz + (p.y - az) * ux) < tol && sOf(p) > -.1 && sOf(p) < L + .1).sort((p, q) => sOf(p) - sOf(q));
     if (!segs.length) continue;
     const S = segs.map(sOf), cuts = [0, ...S.slice(1).map((v, i) => (S[i] + v) / 2), L];
     const {geos, tops} = wallRun({...run, cuts, ground: wground}, wo);

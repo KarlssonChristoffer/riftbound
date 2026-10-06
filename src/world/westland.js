@@ -12,7 +12,7 @@
 // carries on west as the TRACK. ?west=0: the world as before (it ends at x 0).
 // OWNS: nothing at run time (constants and pure functions). READS: core/flags.js, core/mathx.js.
 //   WEST_ON, WEST {x0, y0, x1, y1}, LAND (WEST and the painted land past its edges), HILLS / BORDERS (terrain shapes), TRACK /
-//   TRAIL_N (polylines), PROPS ([kind, x, y, extra]),
+//   TRAIL_N (polylines), PROPS ([kind, x, y, extra]), FIELD_WALLS / FOUNDATIONS / OLD_WALL_LEGS (the old walls), oldWallD(x, y),
 //   trackD(x, y) (m to the nearest track's centre line, minus its half width: < 0 on it), trackK(x, y) (its distance over its half
 //   width), zone(x, y, elev, out) -> out {tall, ankle}
 import {flags} from '../core/flags.js';
@@ -92,6 +92,48 @@ export const PROPS = !WEST_ON ? [] : [
     [-44, -3.2], [-37.5, -2.4], [-30.4, -4.6], [-24, -2.8], [-16.8, -4.2], [-10.5, -2.6], [-4.2, -4.8], [-50.5, -3.5]]
     .map(([x, y], i) => ['tree', x, y, {variant: i % 3 === 2 ? 1 : 0, outside: true}]),
 ];
+
+// ---- THE OLD WALLS (world/walls3d.js builds them; ?walls=old: none): dry-stone FIELD WALLS (~1 m, following the hills, broken in
+// places) bounding the meadows either side of the track, and the FOUNDATIONS of two old buildings (low walls round a room, a doorway,
+// a flagstone floor: biomes.js westRuins paints it): one on the old oak's hill round its broken pillar, a barn's by the track in the
+// west. layout.js lays a 'fieldwall' segment every SEG m along each leg (a round collider: vaulted, stepped over where it's rubble,
+// sim/player/adapter.js); world.js hands each its piece of its leg
+export const FIELD_ON = WEST_ON && flags.get('walls') !== 'old';
+export const FIELD_WALLS = !FIELD_ON ? [] : [
+  {pts: [[-5, 10.3], [-10.5, 12.3], [-14, 13.6]], h: .95, ruin: .45, seed: 201},
+  {pts: [[-29.5, 12.9], [-34.5, 12.3], [-40, 13.1]], h: 1, ruin: .5, seed: 203},
+  {pts: [[-17, 22.4], [-20.5, 23.8], [-23, 26]], h: .9, ruin: .6, seed: 205},
+];
+export const FOUNDATIONS = !FIELD_ON ? [] : [
+  {x0: -21, y0: 1.8, x1: -16.8, y1: 5.4, door: {side: 's', at: -19.1, w: 1}, h: .75, ruin: .6, seed: 211},
+  {x0: -40.4, y0: 19.6, x1: -36.6, y1: 23, door: {side: 'n', at: -38.5, w: 1}, h: .7, ruin: .55, seed: 213},
+];
+export const WALL_D = .48, SEG = .6;
+// both as LEGS, straight runs for walls3d.js: {a, b (the leg's own line), ext: [m added at a, at b] (a polyline's legs overlap a
+// little at a bend; a foundation's north / south walls run past its corners, its east / west ones stop inside them), h, ruin, seed,
+// gaps: [[s0, s1]] (m from a: a doorway, no stones), rough (how unevenly the stones lie)}
+export const OLD_WALL_LEGS = [];
+for (const [k, W] of FIELD_WALLS.entries()) for (let i = 0; i + 1 < W.pts.length; i++)
+  OLD_WALL_LEGS.push({a: W.pts[i], b: W.pts[i + 1], ext: [i > 0 ? WALL_D / 2 : 0, i + 2 < W.pts.length ? WALL_D / 2 : 0], h: W.h, ruin: W.ruin, seed: W.seed + i * 2, gaps: [], rough: 2.2});
+for (const F of FOUNDATIONS) {
+  const {x0, y0, x1, y1, door: dr} = F, e = WALL_D / 2;
+  const sides = {n: [[x0, y0], [x1, y0], e], e: [[x1, y0], [x1, y1], -e], s: [[x1, y1], [x0, y1], e], w: [[x0, y1], [x0, y0], -e]};
+  for (const [side, [a, b, ext]] of Object.entries(sides)) {
+    const gaps = [];
+    if (dr.side === side) { const at = side === 'n' ? dr.at - x0 : side === 's' ? x1 - dr.at : side === 'e' ? dr.at - y0 : y1 - dr.at; gaps.push([at - dr.w / 2, at + dr.w / 2]); }
+    OLD_WALL_LEGS.push({a, b, ext: [ext, ext], h: F.h, ruin: F.ruin, seed: F.seed + side.charCodeAt(0), gaps, rough: 1.5});
+  }
+}
+// m from (x, y) to the nearest old wall's line (its legs as drawn, ext included); Infinity without them
+export function oldWallD(x, y) {
+  let d = Infinity;
+  for (const L of OLD_WALL_LEGS) {
+    const [ax, ay] = L.a, [bx, by] = L.b, l = Math.hypot(bx - ax, by - ay), ux = (bx - ax) / l, uy = (by - ay) / l;
+    const t = Math.max(-L.ext[0], Math.min(l + L.ext[1], (x - ax) * ux + (y - ay) * uy)), dx = x - ax - ux * t, dy = y - ay - uy * t;
+    d = Math.min(d, Math.hypot(dx, dy));
+  }
+  return d;
+}
 
 // ---- the sward's zones at (x, y) (h: the ground's height there): tall (0..1) knee-high drifts, ankle (0..1) short grass. Tall grass
 // gathers in the hollows and on the lower slopes in big drifts (a slow noise), never on the track, thinning toward the hilltops;

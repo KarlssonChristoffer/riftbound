@@ -259,7 +259,7 @@ function makeEngine(ac, dest = null) {   // dest: where the legacy chain ends (t
 // ======================================================================================================================
 const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift', desert: 'desert'};
 // a bullet's end by what it met (bullet.impact surf 'prop'): the prop's material by its kind (ctx.propAt); the rest is wood
-const PROP_MAT = {stock_tank: 'metal', ore_cart: 'metal', well: 'stone', wall_n: 'stone', wall_w: 'stone', wall_e: 'stone', wall_s: 'stone',
+const PROP_MAT = {stock_tank: 'metal', ore_cart: 'metal', well: 'stone', wall_n: 'stone', wall_w: 'stone', wall_e: 'stone', wall_s: 'stone', fieldwall: 'stone',
   tower: 'stone', gatepost: 'stone', pot: 'stone', crystal: 'stone', trick_plate: 'metal', bells_bell: 'metal'};   // (trick_plate: the trick-shot range's steel plate; bells_bell: features/bells.js)
 const MAT = {dummy: 'straw', brute: 'straw', gunman: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};   // (gunman: the desert's, a dull hit)
 

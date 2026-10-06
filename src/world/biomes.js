@@ -33,7 +33,7 @@ import {mulberry32 as rng} from '../core/rng.js';
 import {hexU32 as hex} from '../core/color.js';
 import {speciesOf} from './trees3d.js';   // which tree a prop is (the painted cards draw the same species as the 3D ones)
 import {flags} from '../core/flags.js';
-import {trackK, PROPS as WEST_PROPS} from './westland.js';   // the West Downs' ground (westRuins)
+import {trackK, PROPS as WEST_PROPS, FOUNDATIONS, WALL_D} from './westland.js';   // the West Downs' ground (westRuins)
 
 // ============================================================ pixel toolkit
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -758,6 +758,17 @@ function westRuins(q, ctx) {
     if (k < .85 && hsh(x, y, 38) < .003) pebble(K, x, y, S.rock, S.earth);
   });
   meadowLip(K, S);
+  // the old buildings' floors (westland.js FOUNDATIONS, their walls: world/walls3d.js): worn flagstones, many gone (the meadow grows
+  // in), the rest mossy at their edges
+  for (const F of FOUNDATIONS) {
+    const e = WALL_D / 2 - .02;
+    for (const s of flagstones(F.x0 + e, F.y0 + e, F.x1 - e, F.y1 - e, F.seed, [.5, .75], [.5, .95])) {
+      const mx = (s.x0 + s.x1) / 2, my = (s.y0 + s.y1) / 2, wear = fbm(mx * .5, my * .5, F.seed) + (s.v - .5) * .35;
+      if (wear > .58) continue;
+      stone(K, {...s, x0: Math.max(s.x0, F.x0 + e), y0: Math.max(s.y0, F.y0 + e), x1: Math.min(s.x1, F.x1 - e), y1: Math.min(s.y1, F.y1 - e)}, s.v > .7 ? S.floorB : S.floor, s.v > .85 ? 0 : 1,
+        (x, y, joint) => { if (joint && hsh(x, y, F.seed) < .5) { G.p(x, y, S.grass, 2); return true; } return false; });
+    }
+  }
   // the south edge: the ground breaks off into the ravine (its rock is 3D: world.js; the face texture's strata stand behind it)
   const Rk = S.rock, abyss = hex('#1a211d');
   for (let x = 0; x < WPX; x++) {

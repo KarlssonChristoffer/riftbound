@@ -73,3 +73,7 @@ the world as before (it starts at x 0).
   west=0 vs on: B / A .99 (world.update +.016 ms: the extra props). Smoke + simview pass; golden differs (the bigger world: a re-save).
 - **Open:** the other biomes' downs painter; footprints (flow.js decals) and fallen leaves (litter) cover the Proving Grounds' canvas
   only; the arena's grass rebuilt with the world (~230 ms per biome switch).
+- **Old walls (2026-10-06, the stone wall remodel's phase 4):** dry-stone field walls either side of the track and two old buildings'
+  foundations (the hall round the broken pillar on the old oak's hill, a barn by the track in the west, flagstone floors painted in
+  them), built by `world/walls3d.js` from `westland.js` FIELD_WALLS / FOUNDATIONS; a 'fieldwall' segment every .6 m (round collider):
+  vaulted anywhere (Space), stepped over where broken to rubble, birds perch on them. `?walls=old`: none.

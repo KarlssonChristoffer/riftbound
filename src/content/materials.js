@@ -3,7 +3,7 @@
 // ricochet off metal or stone). Stone also stands for brick and clay; walls in the desert are adobe (matOf).
 // A feature's own prop kinds are registered once, at its module's load (setMaterials, like world.js propTop).
 // (Moved here from features/gunfx.js MAT, unchanged, so the sim can read it too.)
-export const PROP_MAT = {wall_n: 'stone', wall_s: 'stone', wall_w: 'stone', wall_e: 'stone', tower: 'stone', gatepost: 'stone', pillar: 'stone',
+export const PROP_MAT = {wall_n: 'stone', wall_s: 'stone', wall_w: 'stone', wall_e: 'stone', fieldwall: 'stone', tower: 'stone', gatepost: 'stone', pillar: 'stone',
   pillar_broken: 'stone', rubble: 'stone', rock: 'stone', rock_big: 'stone', ruin: 'stone', well: 'stone', crystal: 'stone', pot: 'stone',
   campfire: 'stone', beacon: 'stone', crate: 'wood', barrel: 'wood', woodpile: 'wood', stall: 'wood', bench: 'wood', hitch_rail: 'wood',
   trough: 'wood', wanted_board: 'wood', signpost: 'wood', wagon: 'wood', outhouse: 'wood', rail_fence: 'wood', windmill: 'wood',

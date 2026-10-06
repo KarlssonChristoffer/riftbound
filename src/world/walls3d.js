@@ -19,7 +19,9 @@
 //   (world.js gives each 1 m wall prop its piece as its mesh: collision, perches, arrows and the rest keep working per segment)
 //   run = {a: [x, z], b: [x, z] (its line, m; x east, z south), h (its full height), d (its thickness), ruin (0..1: how much of it is
 //          broken), keep: [[s0, s1], ...] (stretches held whole: mounts, a gate's jambs, the towers' sides), seed, cuts,
-//          ground(x, z) -> m (the ground under it: 0 when omitted)}
+//          ground(x, z) -> m (the ground under it: 0 when omitted), gaps: [[s0, s1], ...] (no stones: a doorway; broken down to it
+//          over .5 m either side), sink (m: where its foot course starts, under the ground: -.06; a field wall on a slope deeper),
+//          rough (1: how unevenly its stones lie: a dry-stone field wall's more)}
 // towerRun(t, o) -> {geo, top}: a square tower round (t.x, t.z): t.S (its side), t.h (to its stone floor), t.d (its shell), t.ruin,
 //   t.stump (m: collapsed down to about this, 0: standing), t.out ([dx, dz]: the way its fallen stones spread most), seed, ground;
 //   a parapet of merlons round its floor (some gone); top: its highest standing point over its foot
@@ -37,18 +39,24 @@ const COPE = .1, SHRINK = .006, UP = [0, 1, 0];
 // the run's top along it: full height but where its noise breaks it (by `ruin`), never in a keep stretch (fading back up over 1.2 m
 // beyond one); a break goes down to under a third of the height
 export function profile(run) {
-  const {h, ruin = 0, keep = [], seed = 0} = run;
+  const {h, ruin = 0, keep = [], seed = 0, gaps = []} = run;
   return s => {
+    let g = 1;   // (a gap: nothing in it, the wall broken down to it either side)
+    for (const [s0, s1] of gaps) { const d = s < s0 ? s0 - s : s > s1 ? s - s1 : 0; g = Math.min(g, d <= 0 ? 0 : .25 + .75 * smooth(d / .5)); }
+    if (g <= 0) return 0;
+    return g * whole(s);
+  };
+  function whole(s) {
     let k = 1;
     for (const [s0, s1] of keep) { const d = s < s0 ? s0 - s : s > s1 ? s - s1 : 0; k = Math.min(k, smooth(d / 1.2)); }
     if (k <= 0 || ruin <= 0) return h;
     const n = vnoise(s * .3, .5, seed) * .65 + vnoise(s * 1.05, 2.5, seed + 1) * .35;
     return h - h * .72 * smooth((n - (1 - ruin)) / .2) * k;
-  };
+  }
 }
 // a course plan up to `top`: [[y, h], ...] from just under the ground (a plinth, then courses; the last fills up to top)
-function coursesTo(top, R) {
-  const out = []; let y = -.06, k = 0;
+function coursesTo(top, R, y0 = -.06) {
+  const out = []; let y = y0, k = 0;
   while (y < top - .12) {
     let hk = k === 0 ? PLINTH[0] + (PLINTH[1] - PLINTH[0]) * R() : COURSE[0] + (COURSE[1] - COURSE[0]) * R();
     if (y + hk > top - .14) hk = top - y;
@@ -90,11 +98,11 @@ function mason(seed, o) {
       const sc = s0 + l / 2; s0 += l;
       const t = Math.min(top(sc), top(clamp(sc - l * .35, 0, len)), top(clamp(sc + l * .35, 0, len)));
       if (y + hk * .55 > t) continue;                              // broken off here
-      const loose = y + hk > t - .02 && t < H - .02;               // the topmost of a broken column: knocked askew
-      const [U, V, W] = M.axes(L.u, L.w, (R() - .5) * (loose ? .14 : .04), (R() - .5) * (loose ? .12 : .05), (R() - .5) * (loose ? .1 : .025));
-      const out = (R() - .5) * (loose ? .05 : .025) + (L.off || 0), x = L.a[0] + L.u[0] * sc + L.w[0] * out, z = L.a[1] + L.u[2] * sc + L.w[2] * out, g = ground(x, z);
+      const loose = y + hk > t - .02 && t < H - .02, rg = L.rough || 1;   // (loose: the topmost of a broken column, knocked askew)
+      const [U, V, W] = M.axes(L.u, L.w, (R() - .5) * (loose ? .14 : .04) * rg, (R() - .5) * (loose ? .12 : .05) * rg, (R() - .5) * (loose ? .1 : .025) * rg);
+      const out = (R() - .5) * (loose ? .05 : .025) * rg + (L.off || 0), x = L.a[0] + L.u[0] * sc + L.w[0] * out, z = L.a[1] + L.u[2] * sc + L.w[2] * out, g = ground(x, z);
       const B = pieceOf(sc);
-      cuboid(B, [x, g + y + hk / 2, z], U, V, W, l / 2 - SHRINK, hk / 2 - SHRINK, L.D / 2 + proud, fs, B.part(), M.tone() + (k === 0 ? -.04 : 0), R, .06);
+      cuboid(B, [x, g + y + hk / 2, z], U, V, W, l / 2 - SHRINK, hk / 2 - SHRINK, L.D / 2 + proud, fs, B.part(), M.tone() + (k === 0 ? -.04 : 0), R, .06 * rg);
       // (it ends its column where the next course is broken off over it; in the last course, where no coping lies on it)
       if (next ? y + hk + next * .55 > top(sc) : t < H - .01) M.tops.push({x, z, u: L.u, w: L.w, l, d: L.D, y: g + y + hk + (loose ? .01 : 0), B, cope: false, broken: t < H - .02});
     }
@@ -143,9 +151,9 @@ export function wallRun(run, o) {
   const ground = run.ground || (() => 0), top = profile(run);
   const cuts = run.cuts || [0, L], sinks = cuts.slice(1).map(() => sink());
   const pieceOf = s => { let i = 0; while (i < sinks.length - 1 && s >= cuts[i + 1]) i++; return sinks[i]; };
-  const line = {a: [ax, az], u, w, L, D};
+  const line = {a: [ax, az], u, w, L, D, rough: run.rough || 1};
   // ---- the courses
-  const C = coursesTo(H - COPE, R);
+  const C = coursesTo(H - COPE, R, run.sink ?? -.06);
   C.forEach(([y, hk], k) => M.row(line, y, hk, k, C[k + 1]?.[1] || 0, top, H, ground, pieceOf, k === 0 ? .025 : 0));
   // ---- the coping where the wall stands whole: long slabs a little proud of both faces, the odd one gone
   for (let s = 0; s < L - .05;) {

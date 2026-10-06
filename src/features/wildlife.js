@@ -101,7 +101,8 @@ const PERCH = {
   tower: {dx: [-14, -5, 5, 14], sink: 0, jx: 1}, gatepost: {dx: [-3, 3], sink: 0, jx: 1}, pillar: {dx: [-6, 0, 6], sink: 0, jx: 1},
   pillar_broken: {dx: [-2, 18], sink: 0, jx: 1}, wall_n: {dx: [-9, 0, 9], sink: 1, deep: 6}, wall_s: {dx: [-9, 0, 9], sink: 1, deep: 3},
   wall_w: {dx: [0], sink: 2, jx: 1, deep: 3}, wall_e: {dx: [0], sink: 2, jx: 1, deep: 3}, tree: {dx: [-14, 0, 14], sink: 2, deep: 3},
-  rock_big: {dx: [-6, 6], sink: 1, deep: 1}, rock: {dx: [0], sink: 1, jx: 1}, bush: {dx: [-3, 4], sink: 2, jx: 1, deep: 2}, dummy: {dx: [0], sink: 0, jx: 0},
+  rock_big: {dx: [-6, 6], sink: 1, deep: 1}, rock: {dx: [0], sink: 1, jx: 1}, fieldwall: {dx: [0], sink: 1, jx: 5},   // (fieldwall: the West Downs' old walls)
+  bush: {dx: [-3, 4], sink: 2, jx: 1, deep: 2}, dummy: {dx: [0], sink: 0, jx: 0},
 };
 const CAST = {
   ruins: {flocks: [{sp: 'pigeon', n: 8, homes: [[15.5, 11.5], [25.5, 11], [14.5, 19.8], [25, 20.5]]},
