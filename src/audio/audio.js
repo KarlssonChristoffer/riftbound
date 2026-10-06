@@ -261,6 +261,7 @@ const SURF = {ruins: 'ruins', ember: 'ember', frost: 'frost', rift: 'rift', dese
 // a bullet's end by what it met (bullet.impact surf 'prop'): the prop's material by its kind (ctx.propAt); the rest is wood
 const PROP_MAT = {stock_tank: 'metal', ore_cart: 'metal', well: 'stone', wall_n: 'stone', wall_w: 'stone', wall_e: 'stone', wall_s: 'stone', fieldwall: 'stone',
   tower: 'stone', gatepost: 'stone', pot: 'stone', crystal: 'stone', trick_plate: 'metal', bells_bell: 'metal'};   // (trick_plate: the trick-shot range's steel plate; bells_bell: features/bells.js)
+PROP_MAT.menhir = PROP_MAT.menhir_part = 'stone';   // (the West Downs' standing stones: world/stonecircle.js)
 const MAT = {dummy: 'straw', brute: 'straw', gunman: 'straw', crate: 'wood', barrel: 'wood', barrel_x: 'wood', pot: 'clay', crystal: 'glass', chest: 'wood'};   // (gunman: the desert's, a dull hit)
 
 // the ground texture of one footfall (shared by steps, landings, scuffs); k = weight 0..1.5

@@ -15,6 +15,7 @@ export const FLAG_DOCS = {
   at:        'x,y (m): start the player there',
   walls:     'old: the walls as the kit 1 m segments (even courses, a coping on every metre) instead of stone runs, broken in places (world/walls3d.js)',
   west:      '0: no West Downs (world/westland.js: the rolling meadow hills, oaks and tall grass west of the arena); the world starts at x 0 as before',
+  stones:    '0: no standing-stone circle on the south-west hill of the West Downs (world/stonecircle.js; the hill and its oak as before)',
   world:     'big: the grown world, 162 x 90 m round the Proving Grounds (layout.js WORLD; the world plan: open land in step 3)',
   yaw:       'the camera\'s starting yaw (deg)',
   zoom:      '2: start zoomed in',

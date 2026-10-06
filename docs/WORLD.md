@@ -77,3 +77,33 @@ the world as before (it starts at x 0).
   foundations (the hall round the broken pillar on the old oak's hill, a barn by the track in the west, flagstone floors painted in
   them), built by `world/walls3d.js` from `westland.js` FIELD_WALLS / FOUNDATIONS; a 'fieldwall' segment every .6 m (round collider):
   vaulted anywhere (Space), stepped over where broken to rubble, birds perch on them. `?walls=old`: none.
+
+### The standing stones (2026-10-06)
+
+A stone circle on the south-west hill (x -35..-23, y 16..27), `world/stonecircle.js`; on by default, `?stones=0`: the hill and its
+oak as before.
+
+- **The hill:** the old dome (h 1.4) put a ring on its slopes, so with the stones it is the circle's own: a broad raised cosine whose
+  top is levelled into a floor at 1.1 m (a terrace a little under the cosine's crown, which still rises .2 m under the altar); the
+  ravine's rim holds the ground flat south of y ~25, so the floor is an ellipse (3.6 x 2.8 m, its outline wandering) and the ring
+  too (3 x 2.6 m). Walkable all round (no steep cells), the ground outside x -35..-23 / y 16..27 moves at most 3 cm. The oak that
+  stood on the top is at (-24, 17) now, east of the ring.
+- **The stones:** the TRILITHON on the dusk axis (bearing 295: the sun's at ~18:50-19:25, sim/env.js sunAz under the dusk mood),
+  two flat-topped uprights 1.02 m apart with a lintel across them; six more uprights round the ring (2-3.1 m, one snapped with its
+  top at its foot), a stump with its top lying by it, one fallen outward on the far side of the axis and broken in two (the beams'
+  way out stays open), a recumbent ALTAR on the crown, its length on the axis. Each stone is lofted from a rounded-box section
+  through 8 rings (tapering more from one side, a little bellied, leaning, every corner in or out its own way: facets the art light
+  tones as planes, their shading normals exaggerated as cliffs3d.js's), chipped, with a domed, slanted, snapped or flat top; pale
+  lichen spots (its own family and part, a tone lighter: no seams), moss creeping up the north faces and round the feet, moss lying
+  on the lintel and the altar (walls3d.js mason), the cover on what faces up; small chips round the broken ones.
+- **The light:** at golden hour the sun shines through the trilithon onto the altar and render/godrays.js sees a slot between solid
+  things: a shaft from the opening to the altar, more between the ring's stones (strongest looking into the sun, yaw ~65); long
+  shadows (1.7 x their height, the renderer's cap) across the floor. A faint cool light over the altar (a world ground light, always
+  on: lost in daylight, a glow on the floor at night).
+- **Play:** a 'menhir' prop per stone (round collider; arrows stop at its own top: world.js TOPS; crows and ravens perch on them,
+  pigeons and buntings now and then: wildlife.js PERCH; bullets chip them as stone), a lying stone a row of colliders (its middle the
+  mesh, the rest 'menhir_part'); the trilithon's opening is a way in. The grass grows to their feet, none inside a stone, the
+  ring's floor cropped to ankle-high turf (features/grass.js asks `stoneSward`).
+- **Measured:** 10 meshes (static: their shadows in the cached map), 2,639 triangles, 16 props (10 'menhir', 6 'menhir_part'),
+  built in ~3 ms; standing in the ring the frame's draws 144 -> 152 (perf report, `?stones=0` vs on). Smoke + simview pass, owncheck
+  clean; golden, bench and A/B not run on the branch (measured after merging).

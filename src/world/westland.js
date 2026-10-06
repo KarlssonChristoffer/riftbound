@@ -14,11 +14,13 @@
 //   WEST_ON, WEST {x0, y0, x1, y1}, LAND (WEST and the painted land past its edges), HILLS / BORDERS (terrain shapes), TRACK /
 //   TRAIL_N (polylines), PROPS ([kind, x, y, extra]), FIELD_WALLS / FOUNDATIONS / OLD_WALL_LEGS (the old walls), oldWallD(x, y),
 //   trackD(x, y) (m to the nearest track's centre line, minus its half width: < 0 on it), trackK(x, y) (its distance over its half
-//   width), zone(x, y, elev, out) -> out {tall, ankle}
+//   width), zone(x, y, elev, out) -> out {tall, ankle}, STONES_ON (the standing stones on the south-west hill: world/stonecircle.js)
 import {flags} from '../core/flags.js';
 import {vnoise as vn, smooth} from '../core/mathx.js';
 
 export const WEST_ON = flags.get('west') !== '0';
+// the stone circle on the south-west hill (world/stonecircle.js: its own hill there, this one's oak moved off the top); ?stones=0: none
+export const STONES_ON = WEST_ON && flags.get('stones') !== '0';
 export const WEST = {x0: -48, y0: 0, x1: 0, y1: 30};
 // LAND: what is painted and grown: the downs and on past the world's west and north edges (the view sees ~8 m past an edge the
 // player stands at: the meadow carries on up the border's banks to a forest edge, instead of stopping at a line)
@@ -33,7 +35,7 @@ export const HILLS = !WEST_ON ? [] : [
   {type: 'hill', x: -36, y: 7.5, rx: 7.5, ry: 5.8, h: 2, rot: .3},
   {type: 'hill', x: -45, y: 4, rx: 5, ry: 4.5, h: 1.3},
   {type: 'hill', x: -14, y: 22.5, rx: 6.5, ry: 3.8, h: 1.1, rot: .1},
-  {type: 'hill', x: -29, y: 21.5, rx: 7, ry: 4.2, h: 1.4, rot: -.2},
+  ...(STONES_ON ? [] : [{type: 'hill', x: -29, y: 21.5, rx: 7, ry: 4.2, h: 1.4, rot: -.2}]),   // (with the stones: stonecircle.js TERRAIN)
   {type: 'hill', x: -42.5, y: 22, rx: 5.5, ry: 4, h: 1.2},
   {type: 'hill', x: -26, y: 18.2, rx: 3.5, ry: 2.4, h: .55},
   {type: 'hill', x: -4, y: 10.5, rx: 3, ry: 2.2, h: .5},
@@ -74,7 +76,7 @@ export const trackK = (x, y) => Math.min(segD(x, y + wander(x, y), TRACK.pts) / 
 const oak = (x, y, scale, variant = 0, seed = 0) => ['tree', x, y, {variant, scale, r: .45 * scale, seed}];
 export const OAKS = !WEST_ON ? [] : [
   oak(-22.4, 6.4, 1.7, 0, 3),                                   // the old oak, on the highest hill
-  oak(-8.8, 6.5, 1.3, 1, 1), oak(-36.4, 7.2, 1.4, 0, 5), oak(-15.5, 11.2, 1.05, 1, 2), oak(-29.6, 21.2, 1.25, 0, 6),
+  oak(-8.8, 6.5, 1.3, 1, 1), oak(-36.4, 7.2, 1.4, 0, 5), oak(-15.5, 11.2, 1.05, 1, 2), STONES_ON ? oak(-24, 17, 1.05, 0, 6) : oak(-29.6, 21.2, 1.25, 0, 6),
   oak(-13.2, 22.8, 1.1, 1, 4), oak(-10.6, 24.4, .95, 0, 7), oak(-43, 21.6, 1.2, 1, 0), oak(-4.2, 21.5, 1, 0, 2),
   oak(-27.5, 10.4, .9, 1, 1), oak(-2.6, 5.5, 1, 1, 6),
   // the grove in the north-west

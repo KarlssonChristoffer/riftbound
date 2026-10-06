@@ -104,6 +104,8 @@ const PERCH = {
   rock_big: {dx: [-6, 6], sink: 1, deep: 1}, rock: {dx: [0], sink: 1, jx: 1}, fieldwall: {dx: [0], sink: 1, jx: 5},   // (fieldwall: the West Downs' old walls)
   bush: {dx: [-3, 4], sink: 2, jx: 1, deep: 2}, dummy: {dx: [0], sink: 0, jx: 0},
 };
+// the West Downs' standing stones (world/stonecircle.js 'menhir'): on the highest point across a stone's top; the crows and ravens like them
+PERCH.menhir = {dx: [-3, 3], sink: 0, jx: 2}; for (const [s, w] of [['crow', 4], ['raven', 4], ['pigeon', 1], ['bunting', 1]]) SPECIES[s].perch.menhir = w;
 const CAST = {
   ruins: {flocks: [{sp: 'pigeon', n: 8, homes: [[15.5, 11.5], [25.5, 11], [14.5, 19.8], [25, 20.5]]},
     {sp: 'sparrow', n: 7, homes: [[36, 18.2], [36.5, 11.5], [45, 18.6], [43.6, 25.5], [51.5, 7.6]]}],

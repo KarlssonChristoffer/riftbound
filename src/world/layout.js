@@ -38,6 +38,7 @@ import {flags} from '../core/flags.js';
 import {smooth} from '../core/mathx.js';
 import {createField, sampler} from './terrain.js';
 import {WEST_ON, WEST, LAND as WEST_LAND, HILLS as WEST_HILLS, BORDERS as WEST_BORDERS, PROPS as WEST_PROPS, OLD_WALL_LEGS, WALL_D, SEG as WALL_SEG, oldWallD} from './westland.js';
+import {TERRAIN as STONE_TERRAIN, PROPS as STONE_PROPS} from './stonecircle.js';   // the West Downs' standing stones
 
 // WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
 // cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
@@ -265,6 +266,7 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   {type: 'hill', x: 1.6, y: 26, rx: 2.2, ry: 2.4, h: .4},
   // the West Downs' rolling hills (westland.js)
   ...WEST_HILLS,
+  ...STONE_TERRAIN,   // the standing stones' hill on the south-west (stonecircle.js; ?stones=0: westland.js's dome)
 ];
 // PADS: things built at a fixed height that the ground must meet (features place them at 0): [x, y, r (held flat), fade]
 const PADS = [[50.8, 19.4, 1.5, 1.2],   // the campfire and its woodpile (features/lights.js)
@@ -695,6 +697,8 @@ export function buildLayout(seed = 7) {
       walls.push({kind: 'fieldwall', a: [ax - ux * L.ext[0], ay - uy * L.ext[0]], b: [L.b[0] + ux * L.ext[1], L.b[1] + uy * L.ext[1]], h: L.h, d: WALL_D, ruin: L.ruin,
         keep: [], seed: L.seed, gaps: L.gaps.map(([g0, g1]) => [g0 + L.ext[0], g1 + L.ext[0]]), sink: -.16, rough: L.rough, tol: .06});
     }
+    // the standing stones (stonecircle.js): a 'menhir' per stone, a round collider (a lying one a row of them); world.js builds their stone
+    for (const [kind, x, y, extra] of STONE_PROPS) add(kind, x, y, {...extra});
   }
   return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5}, west: WEST_ON ? WEST : null, walls,
     trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt, spring: SPRING, rill: RILL, fall: FALL, pool: POOL, outflow: OUTFLOW, inRill, rillAt, inPool, poolEdge, inOutflow, outflowAt,

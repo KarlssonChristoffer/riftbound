@@ -25,6 +25,7 @@ import {vnoise} from '../core/mathx.js';
 import {createGrass, MAX_FRONTS, MAX_PUSH} from '../render/grass.js';
 import {steep, WORLD, WEST_ON, WEST_LAND as WEST} from '../world/world.js';   // walkable terrain (docs/TERRAIN.md); the world's bounds, the West Downs
 import {zone as westZone, oldWallD, WALL_D} from '../world/westland.js';
+import {stoneSward} from '../world/stonecircle.js';   // the standing stones: no blade in a stone, the ring's floor cropped short
 
 // ---------------------------------------------------------------- tunables
 const TUNE = {
@@ -137,6 +138,7 @@ export async function create(host) {
       const cd = code(x, y); if (cd === undefined) continue;
       if (hole?.(x, y) || steep(x, y) || oldWallD(x, y) < WALL_D / 2 + .04) continue;   // (none inside an old wall's stones)
       const ri = cd >> 2, Rm = TUNE.ramps[names[ri]], h0 = host.elev(x, y), Z = westZone(x, y, h0, ZN);
+      if (stoneSward(x, y, Z)) continue;
       const thin = TUNE.thin.lo + (1 - TUNE.thin.lo) * vnoise(x * TUNE.thin.k, y * TUNE.thin.k, 41);
       const d = Z.tall * T.tall.d + Z.ankle * T.ankle.d + (1 - Z.tall - Z.ankle) * Rm.d;
       if (r1 * dMax > d * thin) continue;
