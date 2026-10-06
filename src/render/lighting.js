@@ -33,9 +33,11 @@ const SUN_LEN_MAX = 1.7, SHADOW_EL_MIN = Math.atan(1 / SUN_LEN_MAX);
 // (at full opacity: a weak, cloudy shadow is barely tinted); lift: a trace of the shadow colour added (dark things don't go
 // black); face: the share of the hue on what faces away from the sun (cliff faces in shade, the dark side of props); cool: how far
 // the hue leans toward the open sky's blue (SKY); unwarm: how much of a warm ambient's colour the shade takes back out (the
-// shadow is lit by the sky, not by the low sun: at dusk the shade would otherwise go pink). Live-tunable (import this module in
-// the page and set SHADE's fields)
-export const SHADE = {on: flags.get('shade') !== '0', dark: .62, hue: .45, lift: .25, face: .6, cool: .4, unwarm: .6};
+// shadow is lit by the sky, not by the low sun: at dusk the shade would otherwise go pink). crest: the 1 px light line along a
+// block's top edge (gfx.js COMP_FS crest; ?crest=0 none); rim / rimLow: how much of the sun's colour it catches by day / with
+// the sun low (golden rims at dusk and dawn). Live-tunable (import this module in the page and set SHADE's fields)
+export const SHADE = {on: flags.get('shade') !== '0', dark: .62, hue: .45, lift: .25, face: .6, cool: .4, unwarm: .6,
+  crest: flags.get('crest') !== '0', rim: .12, rimLow: .45};
 const SKY = [.6, .72, 1];
 
 export function createLighting({G, host, features, opt}) {
@@ -81,6 +83,7 @@ export function createLighting({G, host, features, opt}) {
     // the god rays: the sun's elevation and colour, the mood's shadow strength (clouds and nightfall in it), the view's cloud (env.light), the mist, wet ground
     if (G.setRays) { RAYS.el = m.sun.el; RAYS.c = sc; RAYS.shadow = U.uShadowA.value; RAYS.cloud = env.light.cloud; RAYS.mist = G.mist?.on ? Math.max(env.sky.fog, G.mist.medium) : env.sky.fog; RAYS.wet = env.wet; G.setRays(RAYS); }
     shade(m.shadow.c, U.uShadowA.value, amb, U);
+    U.uCrest.value.set(SHADE.crest ? 1 : 0, U.uShadowA.value > 0 ? SHADE.rim + (SHADE.rimLow - SHADE.rim) * (1 - Math.min(1, Math.max(0, (m.sun.el - 8) / 27))) : 0);
     const la = Math.max(.02, lum(m.amb)), fk = lum(m.fill || [0, 0, 0]) / la * CHAR.fillK;
     U.uFill.value.set(amb[0] * fk, amb[1] * fk, amb[2] * fk); const gr = GRADE[biome]; U.uGrade.value.set(gr[0], gr[1], gr[2]); U.uGradeK.value = CHAR.gradeK[time] ?? 0;
     const dark = Math.max(0, 1 - lum(m.amb));

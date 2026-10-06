@@ -833,6 +833,9 @@ uniform vec3 uBg, uAmb, uSunDir, uShadowC, uFill, uGrade, uXCol;
 uniform float uShadowA, uShadowOn, uSunK, uBanded, uOutline, uGradeK, uEmin, uShadowTexel;
 // the coloured shade (render/lighting.js SHADE): a sun shadow's multiply (rgb; w 1 on, 0 the old flat tint), its lift, the hue alone
 uniform vec4 uShadeT; uniform vec3 uShadeL, uShadeH;
+// CRESTS (lighting.js SHADE.crest): a block's top face lights up in a 1 px line where it turns down into its own front face; x on,
+// y how much of the sun's colour it catches (more as the sun sinks: the golden rims of a low sun)
+uniform vec2 uCrest;
 uniform float uSoftFam;   // a ramp family drawn without inner seams / occlusion lines (the trees' leaves; -1 = none)
 // the world clock (features/weather.js sets them): the season's colour matrix for green pixels + how much it applies,
 // lying snow 0..1, wet ground 0..1, the lightning flash (rgb light added for an instant)
@@ -1060,10 +1063,11 @@ void main() {
   vec4 N0 = texelFetch(tN, ip, 0), E0 = texelFetch(tE, ip, 0);
   vec3 P = worldAt(ip, d0), N = normalize(N0.xyz), alb = a0.rgb;
 
-  // ---- the pixelizer's rules, live, on ramp meshes: silhouette outline (selective), seams, occlusion lines
+  // ---- the pixelizer's rules, live, on ramp meshes: silhouette outline (selective), seams, occlusion lines, crests
+  float rim = 0.;   // a crest (it catches the sun below)
   if (type == 2 && uOutline > .5) {
     float n0 = nearOf(d0), obj = N0.w, pk = E0.w, fam = mod(pk, 32.), part = floor(pk / 32. + .001);
-    bool outLit = false, outDark = false, line = false, seam = false, edge = false, soft = abs(fam - uSoftFam) < .5;
+    bool outLit = false, outDark = false, line = false, seam = false, edge = false, crest = false, soft = abs(fam - uSoftFam) < .5;
     // soft (the leaves): no seams and no dark occlusion lines between its own parts; where a clump stands in front of
     // another, the one behind only steps one tone darker along the edge (the painted blob's shaded rim). Dark lines in a
     // crown come only from a branch in front of it; the silhouette keeps its outline
@@ -1078,10 +1082,14 @@ void main() {
         float pq = texelFetch(tE, q, 0).w, famq = mod(pq, 32.), partq = floor(pq / 32. + .001);
         if (nq > n0 + .12) { if (!soft || abs(famq - fam) > .5) line = true; else edge = true; }   // my own front edge hides me here
         else if (!soft && k >= 2 && abs(partq - part) > .5 && abs(famq - fam) < .5) seam = true;   // plank meets plank
+        // (a face that looks up, over its own face below turned toward the view: the crest along the top of a block, a wall, a cap;
+        // a corner, not a curve: the faces over 60 deg apart, so a round pot's belly gets no band)
+        if (k == 3 && !soft && uCrest.x > .5 && N.y > .6 && abs(nq - n0) < .12) { vec3 Nq = normalize(texelFetch(tN, q, 0).xyz); if (Nq.y < .4 && dot(N, Nq) < .5) crest = true; }
       }
     }
     int ti = outDark ? 4 : outLit ? 5 : line ? 3 : seam ? min(tone + 1, 3) : edge ? min(tone + 1, 2) : tone;
     alb = texelFetch(uRamps, ivec2(ti, int(fam + .5)), 0).rgb;
+    if (crest && !outDark && !outLit && !line) { alb = mix(texelFetch(uRamps, ivec2(0, int(fam + .5)), 0).rgb, vec3(1.), .16); rim = 1.; }   // (lighter than the highlight)
     if (soft) {   // a crown turned by autumn (MESH_FS wrote its spray's colour into tA): keep it, and give the outline / edge tones its hue
       vec3 r0 = texelFetch(uRamps, ivec2(tone, int(fam + .5)), 0).rgb, kk = abs(a0.rgb / max(r0, vec3(.02)) - 1.);
       if (max(kk.r, max(kk.g, kk.b)) > .02) alb = clamp(alb * a0.rgb / max(r0, vec3(.02)), 0., 1.);
@@ -1176,6 +1184,7 @@ void main() {
   if (faceAway) L *= (uShadowA > 0. ? .62 : .8) * uShadeH;
   if (type == 4) { alb = mix(alb, clamp(alb * uGrade, 0., 1.), uGradeK); L += min(uFill, L * .25); }
   vec3 col = alb * L;
+  if (rim > 0. && dot(N, uSunDir) > .1) col += alb * uSunC * uCrest.y * (1. - sh);   // the crest in the sun: its rim of sunlight
   col += alb * uFlashC;   // lightning: the whole scene lit for an instant (features/weather.js)
   vec3 emit = E0.rgb + rfE;
   if (uLayE > .5) emit += lay(tEmitL, ip).rgb;
@@ -1986,7 +1995,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uInvPV: {value: new THREE.Matrix4()}, uLightPV: {value: new THREE.Matrix4()},
     uRes: {value: new THREE.Vector2(VW, VH)}, uR: {value: R_DEPTH},
     uBg: {value: new THREE.Vector3(.1, .12, .11)}, uAmb: {value: new THREE.Vector3(1, 1, 1)}, uSunDir: {value: new THREE.Vector3(0, 1, 0)},
-    uShadeT: {value: new THREE.Vector4(1, 1, 1, 0)}, uShadeL: {value: new THREE.Vector3()}, uShadeH: {value: new THREE.Vector3(1, 1, 1)},   // lighting.js SHADE
+    uShadeT: {value: new THREE.Vector4(1, 1, 1, 0)}, uShadeL: {value: new THREE.Vector3()}, uShadeH: {value: new THREE.Vector3(1, 1, 1)}, uCrest: {value: new THREE.Vector2()},   // lighting.js SHADE
     uShadowC: {value: new THREE.Vector3()}, uFill: {value: new THREE.Vector3()}, uGrade: {value: new THREE.Vector3(1, 1, 1)}, uXCol: {value: new THREE.Vector3(.17, .14, .21)},
     tSS: {value: shadowS.depthTexture}, uLightPVS: {value: new THREE.Matrix4()}, uSBias: {value: 1}, uSOn: {value: 1},
     uShadowA: {value: 0}, uShadowOn: {value: 1}, uSunK: {value: .34}, uBanded: {value: 1}, uOutline: {value: 1}, uGradeK: {value: 0}, uEmin: {value: .1}, uShadowTexel: {value: 1 / SM},
