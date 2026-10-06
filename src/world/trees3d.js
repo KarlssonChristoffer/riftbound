@@ -36,8 +36,12 @@
 //   SEEDS shapes per species, each turned and scaled per tree. p.seed picks a shape (the lineup does).
 // Frame: x east, y up, z south, metres, origin = the ground point (as the glb props).
 import * as THREE from 'three';
+import {flags} from '../core/flags.js';
 
 export const SEEDS = 8;
+// the leaf clusters (gfx.js MESH_FS uLeaf; ?leafcells=0 the old crowns) come with a stronger light up the crown and fuller oak
+// clumps: the references' dense crowns, lit lime on top, deep green under, no bare limbs between the clumps
+const CELLS = flags.get('leafcells') !== '0';
 export const TUNE = {
   detail: 5,        // clump sphere subdivision (IcosahedronGeometry detail: 20 (d + 1)^2 triangles; 5 -> 720, edges ~3.5 px;
                     // the small fringe clumps use 3 -> 320)
@@ -45,9 +49,11 @@ export const TUNE = {
   lump: .42,        // big lumps on a clump's surface (fraction of its radius)
   jag: .3,          // fine serration of a clump's edge (the leafy silhouette)
   jitter: 0,        // per-triangle tone bias jitter on the leaves (the mesh shader adds a 3D noise jitter: aFixed -2)
-  light: .22,       // tone bias up the crown (lit top, dark underside); vertical only, so it holds when a tree is turned
+  light: CELLS ? .32 : .22,   // tone bias up the crown (lit top, dark underside); vertical only, so it holds when a tree is turned
+  full: CELLS ? 1.14 : 1,     // the oak's clumps this much bigger (not its dark core): a denser crown
   inner: .12,       // tone bias down toward the crown's centre (clumps deep inside are in their neighbours' shade)
-  lift: .08,        // tone bias on every clump (the painted crown is about a third light, a third mid, a third dark)
+  lift: CELLS ? -.04 : .08,   // tone bias on every clump (the painted crown is about a third light, a third mid, a third dark; the leaf
+                              // clusters light each one's top, so less of it here)
 };
 
 // ---------------------------------------------------------------- noise + random
@@ -213,7 +219,7 @@ function oak(seed, fam) {
     const e = V((q.c.x - C.x) / R.x, (q.c.y - C.y) / R.y, (q.c.z - C.z) / R.z);
     const bias = TUNE.lift + (q.core ? -.2 : TUNE.light * e.y / .6 - TUNE.inner * (1 - Math.min(1, e.length() / .6)) + (r() - .5) * .08);
     B.part('leaf', bias, -2, crown(q.c.y), q.core ? -1 : (i * 2.39996 + seed * .7) % (Math.PI * 2), sprayOf(q.c, C, R, seed, i));   // the dark core stays put: no gaps open
-    clump(B, q.c, q.rad, .82, seed * 13 + i, C, R, bias, r, q.small ? 3 : TUNE.detail);
+    clump(B, q.c, q.core ? q.rad : q.rad * TUNE.full, .82, seed * 13 + i, C, R, bias, r, q.small ? 3 : TUNE.detail);
   }
   B.autumn = AUTUMN_OAK;
   return B;

@@ -41,6 +41,7 @@ export const FLAG_DOCS = {
   godrays:   '0: no shadow-map god rays (render/godrays.js: sunbeams through crowns and between pillars; the painted shafts of features/depth.js come back)',
   cards:     '0: every world card its own mesh and draw (no instanced card batches; an A/B)',
   mist:      '0: the old screen-space haze instead of the world mist (an A/B; features/mist.js)',
+  leafcells: '0: the crowns toned in soft blotches (a 3D noise) instead of small leaf clusters, each lit on top with a dark crescent under it (gfx.js MESH_FS uLeaf)',
   palette:   'old: the ruins in their first palette (khaki stone, olive grass) instead of the cool one (mauve-grey stone, yellow-green grass and leaves, lavender V flowers: world/biomes.js, world.js, sim/env.js LEAF, features/grass.js; an A/B)',
   crest:     '0: no light line along the top edges of blocks, walls and caps (gfx.js COMP_FS crest, render/lighting.js SHADE)',
   shade:     '0: shadows as the old flat tint toward the shadow colour of the mood, not the coloured shade that keeps the hue of what they fall on (render/lighting.js SHADE; an A/B)',

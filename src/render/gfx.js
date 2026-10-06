@@ -99,6 +99,21 @@ uniform float uLeafK;     // leaves only: how full the crowns are this season (1
 uniform vec3 uCover;      // x: amount (0 = none), y: up threshold, z: cover family
 uniform vec2 uEmitFam;    // families that glow in this biome (-1 = none)
 uniform vec4 uBurn;       // burning wood (mesh.burn): char, ember glow, time (s), ash; 0 = untouched
+// LEAF CLUSTERS (U.leaf; ?leafcells=0 the old blotches): the leaves' tone broken into Worley cells in the model's frame, x m
+// across (~4 art px), each a cluster of leaves lit on its upper part (y: how much) with a dark crescent along its lower rim
+// where it meets the next (z: its width in cell units), so a crown reads as many small leaf clusters (the user's reference
+// trees, 2026-10-06), not as smooth balls; w on
+uniform vec4 uLeaf;
+vec3 h33(vec3 p) { p = fract(p * vec3(.1031, .103, .0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx); }
+// the leaf cluster at P (cell units): the distance to its border (F2 - F1), rel = P minus the cluster's point
+float leafCell(vec3 P, out vec3 rel) {
+  vec3 qi = floor(P), qf = fract(P); float f1 = 9., f2 = 9.; rel = vec3(0.);
+  for (int z = -1; z <= 1; z++) for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec3 g = vec3(float(x), float(y), float(z)), r = g + h33(qi + g) - qf; float d = dot(r, r);
+    if (d < f1) { f2 = f1; f1 = d; rel = -r; } else if (d < f2) f2 = d;
+  }
+  return sqrt(f2) - sqrt(f1);
+}
 float hsh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(hsh(i), hsh(i + vec2(1, 0)), f.x), mix(hsh(i + vec2(0, 1)), hsh(i + vec2(1, 1)), f.x), f.y); }
@@ -134,9 +149,15 @@ void main() {
     float d = dot(n, uLArt) + fBias;
     // aFixed -2 (leaves): the painted blobs' jitter, a 3D noise in the model's own frame (it stays on the leaves as the
     // camera turns), so the tone bands break into leafy patches
-    if (fFixed < -1.5) { jn = vn3(vPL * 7.5 + vec3(uSeed.x, 0., uSeed.y)); d += (jn - .5) * .42
-      + uRip.w * sin(dot(vW.xz, uRip.xy) - uRip.z); }   // wind: bands of light rolling through the leaves (uRip: k along the wind, phase, amount)
+    bool crescent = false;
+    if (fFixed < -1.5) { jn = vn3(vPL * 7.5 + vec3(uSeed.x, 0., uSeed.y));
+      if (uLeaf.w > .5) {   // leaf clusters (uLeaf): less of the blotchy noise, each cluster's top lit, a crescent under it
+        vec3 rel; float b = leafCell(vPL / uLeaf.x + vec3(uSeed.x, 0., uSeed.y) * .31, rel);
+        d += (jn - .5) * .2 + rel.y * uLeaf.y; crescent = b < uLeaf.z && rel.y < -.05;
+      } else d += (jn - .5) * .42;
+      d += uRip.w * sin(dot(vW.xz, uRip.xy) - uRip.z); }   // wind: bands of light rolling through the leaves (uRip: k along the wind, phase, amount)
     tone = d > .62 ? 0 : d > .12 ? 1 : 2;
+    if (crescent) tone = min(tone + 1, 2);
   }
   // biome cover (moss / ash / snow) on what faces up AT REST (the prop's own frame, so it tips and rolls with it):
   // patchy, never on the glow / void families; the pattern is seeded per object. aFixed -2 = toned, never covered (leaves; nor the -1.25 berries)
@@ -1388,6 +1409,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     lArt: {value: new THREE.Vector3(-.55, .775, .314).normalize()},   // the pixelizer's top-left light, world-fixed
     ramps: {value: null}, cover: {value: new THREE.Vector3(0, .86, 0)}, emitFam: {value: new THREE.Vector2(-1, -1)},
     smooth: {value: 0},
+    leaf: {value: new THREE.Vector4(.15, .55, .2, flags.get('leafcells') !== '0' ? 1 : 0)},   // the leaf clusters (MESH_FS uLeaf): cell m, top light, crescent width, on
     leanX: {value: new THREE.Vector3(1 / PPM, 0, 0)}, leanY: {value: new THREE.Vector3(0, 0, 1 / PPMY)},   // sway: m per art px (setView)
     time: {value: 0},   // s, for the leaves' flutter (render())
     leafK: {value: 1},  // how full the crowns are this season (features/weather.js from sim/env.js leafK)
@@ -1466,7 +1488,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     return v;
   };
   const meshMat = (obj, seed, sw = null, aut = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
-    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
+    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
   const surfMat = ({tex, em = null, planar, world, origin = null, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, litter = null, decals = false, cliffTop = 1e9}) => raw(SURF_VS, SURF_FS, {
