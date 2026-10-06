@@ -1,6 +1,7 @@
 // MIST (view): the world's low mist and the far haze, in the world instead of on the screen. A layer of mist lies LOW: its top is a
 // height that pools it in the hollows (the south ravine, floor -3.5 m; the stream's channel and a little of its banks, the pool's basin,
-// the creek) while flat open ground and the plateau's top (2.4 m) stay clear (fog weather alone covers them); the view looks down
+// the creek; the West Downs' hollows between their hills, at dawn and dusk) while flat open ground and the plateau's top (2.4 m) stay
+// clear (fog weather alone covers them); the view looks down
 // through it to the ground (gfx.js COMP_FS MIST: flat hard levels, dithered only along the edge between two, the pattern fixed to the
 // world). Its amount follows the world clock (sim/env.js: the hour, the weather):
 // morning mist over the water from ~5 that burns off by noon, thicker again at dusk and through the night; fog, rain, snow and storms
@@ -48,7 +49,7 @@ export const TUNE = {
   // colour (x fog): pale blue-white by day, peach at dawn and dusk, blue-grey at night
   col: {amb: .95, grey: .35, tint: [.93, .98, 1.05], fog: 1},
 };
-const MAX_SEG = 12, SKY = Object.keys(TUNE.sky);
+const MAX_SEG = 16, SKY = Object.keys(TUNE.sky);   // (gfx.js MIST_N)
 
 // ORDER (core/features.js): frame only (it reads the wind's field as this frame's step left it)
 export const order = {after: ['wind']};
@@ -75,6 +76,10 @@ export async function create(host) {
     if (S) for (let y = S.y0; y < S.y1 - .01; y += 4) { const y1 = Math.min(S.y1, y + 4); put(S.cx(y), y, S.cx(y1), y1, S.w((y + y1) / 2) / 2, wh); }
     const Pl = L.pool; if (Pl && Pl.rx) { const e = Math.max(0, Pl.rx - Pl.ry); put(Pl.x - e, Pl.y, Pl.x + e, Pl.y, Pl.ry, wh); }
     along(L.outflow, 1, () => wh * .5);
+    // the West Downs (world/westland.js): two wide stretches over their hollows at the ground's own height (0), so the mist rises there
+    // as it does over the water: banks filling the hollows between the hills at dawn and dusk (the hilltops and the oaks stand out of
+    // it), a breath at night, gone by midday
+    const wd = L.west; if (wd) { put(wd.x0 - 4, 8.5, wd.x1 - 2.5, 8.5, 7, 0); put(wd.x0 - 4, 20.5, wd.x1 - 2.5, 20.5, 6, 0); }
     along(L.rill, MAX_SEG - nSeg, (x0, z0, x1, z1) => Math.min(host.elev(x0, z0), host.elev(x1, z1)) - .05);   // (the creek down the mesa's gully: each stretch at its lower end)
   }
   // ---- the day's curve, eased between its keys

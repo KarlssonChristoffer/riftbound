@@ -839,7 +839,7 @@ void main() {
 
 // ---------------------------------------------------------------- shader: lighting / composite
 const NL = 32;
-const MIST_N = 12;   // the mist's water stretches (COMP_FS MIST, G.setMist)
+const MIST_N = 16;   // the mist's stretches (COMP_FS MIST, G.setMist): the water's, the West Downs' hollows (features/mist.js)
 const COMP_VS = HEAD + `in vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
 const COMP_FS = HEAD + `
 uniform sampler2D tA, tN, tE, tD, tS, tX, uRamps;

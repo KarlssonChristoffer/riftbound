@@ -3,7 +3,9 @@
 // in metres above the ground. The biome decides how things look; this file decides WHERE things are, what they
 // collide with, how high the ground is (elev) and where the traversal features are.
 //
-//   world 72 x 30 m (WORLD: the bounds of everything; GROUNDS: the Proving Grounds' own rect, the same today; ?terrain=0: 62 x 30)
+//   world 120 x 30 m (WORLD: the bounds of everything; GROUNDS: the Proving Grounds' own rect, 72 x 30; ?terrain=0: 62 x 30)
+//   x -48..0  the WEST DOWNS (world/westland.js; ?west=0: none, the world starts at x 0): rolling meadow hills, oaks, a track
+//             on from the west gate's road
 //   x 7..33   walled arena (movement ring, range lane, pillar grove, light garden, N/S dummies)
 //   x 33..60  the trail, out of the east gate:
 //               stream   runs N-S at x ~40; 2.9 m wide (sprint-leap only), a 1.4 m narrows in front of the gate
@@ -35,6 +37,7 @@
 import {flags} from '../core/flags.js';
 import {smooth} from '../core/mathx.js';
 import {createField, sampler} from './terrain.js';
+import {WEST_ON, WEST, LAND as WEST_LAND, HILLS as WEST_HILLS, BORDERS as WEST_BORDERS, PROPS as WEST_PROPS} from './westland.js';
 
 // WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
 // cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
@@ -48,7 +51,10 @@ export const TERRAIN_ON = flags.get('terrain') !== '0';
 const GX1 = TERRAIN_ON ? 72 : 62;
 // past: how far (m) past its edges the view may go (render/camera.js keeps the player centred up to there; world.js lays ground out to
 // past + 2 m, the painted ground mirrored on outward)
-export const WORLD = BIG ? {x0: -40, y0: -60, x1: 122, y1: 30, WM: 162, HM: 90, past: 12} : {x0: 0, y0: 0, x1: GX1, y1: 30, WM: GX1, HM: 30, past: 12};
+// The WEST DOWNS (westland.js, on by default) grow the world west to WEST.x0
+const WX0 = WEST_ON ? WEST.x0 : 0;
+export const WORLD = BIG ? {x0: Math.min(-40, WX0), y0: -60, x1: 122, y1: 30, WM: 122 - Math.min(-40, WX0), HM: 90, past: 12} : {x0: WX0, y0: 0, x1: GX1, y1: 30, WM: GX1 - WX0, HM: 30, past: 12};
+export {WEST_ON, WEST, WEST_LAND};
 export const GROUNDS = {x0: 0, y0: 0, x1: GX1, y1: 30};
 export const PLAY = {x0: 7, y0: 6, x1: 33, y1: 24};
 export const SCONCE_D = .21;   // a wall sconce's stick stands this far off the wall face (the east torches; lights.js mounts them)
@@ -59,9 +65,15 @@ export const TRAIL = {x0: 33, y0: 2.6, x1: TERRAIN_ON ? 69.5 : 60, y1: 27.5};   
 //   roamable(x, y)  enemies (combat's brutes): the arena .35 m in from its edges, the trail .5 m in (.4 m at its south edge)
 //   navArea(x, y)   the nav grid's open cells: the arena and .6 m past its east edge (the east gate meets the trail), the trail
 // Walls, water and plateaus are tested on top of these by their users
-export const walkable = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1);
-export const roamable = (x, y) => (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35) || (x > TRAIL.x0 + .5 && x < TRAIL.x1 - .5 && y > TRAIL.y0 + .5 && y < TRAIL.y1 - .4);
-export const navArea = (x, y) => (x > PLAY.x0 && x < PLAY.x1 + .6 && y > PLAY.y0 && y < PLAY.y1) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1);
+//   the WEST DOWNS (westland.js): from the west border's bank to the arena's west gate apron (the strip west of the arena's wall is
+//   theirs: its trees and rocks are solid), from the north bank to short of the ravine's rim
+const DOWNS = WEST_ON ? {x0: WEST.x0 + 1.4, y0: .6, x1: PLAY.x0 - 2.5, y1: 26.4} : null;
+const inDowns = (x, y, m) => !!DOWNS && x > DOWNS.x0 + m && x < DOWNS.x1 && y > DOWNS.y0 + m && y < DOWNS.y1 - m;
+export const walkable = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1) || inDowns(x, y, 0);
+export const roamable = (x, y) => (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35) || (x > TRAIL.x0 + .5 && x < TRAIL.x1 - .5 && y > TRAIL.y0 + .5 && y < TRAIL.y1 - .4)
+  || inDowns(x, y, .5) || (!!DOWNS && x >= DOWNS.x1 - .1 && x < PLAY.x0 + .4 && Math.abs(y - (PLAY.y0 + PLAY.y1) / 2) < 1.3);   // (the downs and the west gate between them and the arena)
+export const navArea = (x, y) => (x > PLAY.x0 && x < PLAY.x1 + .6 && y > PLAY.y0 && y < PLAY.y1) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1)
+  || inDowns(x, y, 0) || (!!DOWNS && x >= DOWNS.x1 - .1 && x <= PLAY.x0 && Math.abs(y - (PLAY.y0 + PLAY.y1) / 2) < 1.6);
 
 // ---- stream: centreline x and width per y (metres) ----
 export const STREAM = {
@@ -226,8 +238,9 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   {type: 'swell', amp: .28, k: .16, seed: 5},
   // the world's borders rise in grass banks: behind the arena's north wall, along the west and east edges (not walkable: they frame
   // the grounds); behind the mesa, higher land
-  {type: 'terrace', pts: [[W_.x0 - 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - .3], [W_.x0 - 30, W_.y0 - .3]], h: 1.4, bank: 3.2},
-  {type: 'terrace', pts: [[W_.x0 - 30, W_.y0 - 30], [W_.x0 - .3, W_.y0 - 30], [W_.x0 - .3, W_.y1 + 30], [W_.x0 - 30, W_.y1 + 30]], h: 1.2, bank: 3},
+  // (with the West Downs the north bank starts at their east edge and theirs, wavy, take over west of it: westland.js BORDERS)
+  {type: 'terrace', pts: [[WEST_ON ? WEST.x1 : W_.x0 - 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - .3], [WEST_ON ? WEST.x1 : W_.x0 - 30, W_.y0 - .3]], h: 1.4, bank: 3.2},
+  ...(WEST_ON ? WEST_BORDERS : [{type: 'terrace', pts: [[W_.x0 - 30, W_.y0 - 30], [W_.x0 - .3, W_.y0 - 30], [W_.x0 - .3, W_.y1 + 30], [W_.x0 - 30, W_.y1 + 30]], h: 1.2, bank: 3}]),
   {type: 'terrace', pts: [[W_.x1 + .3, W_.y0 - 30], [W_.x1 + 30, W_.y0 - 30], [W_.x1 + 30, W_.y1 + 30], [W_.x1 + .3, W_.y1 + 30]], h: 1.3, bank: 2.6},
   {type: 'terrace', pts: [[45, -30], [69.5, -30], [69.5, 1.4], [45, 1.4]], h: 3.4, bank: 2},   // the highland
   // the mesa, and the walk down its gully: a ramp from its top to the ground by the pool, beside the creek (its sides blend into the
@@ -250,6 +263,8 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   // the west border: low mounds round the old foundations
   {type: 'hill', x: 1.6, y: 11.5, rx: 2.4, ry: 3.2, h: .5},
   {type: 'hill', x: 1.6, y: 26, rx: 2.2, ry: 2.4, h: .4},
+  // the West Downs' rolling hills (westland.js)
+  ...WEST_HILLS,
 ];
 // PADS: things built at a fixed height that the ground must meet (features place them at 0): [x, y, r (held flat), fade]
 const PADS = [[50.8, 19.4, 1.5, 1.2],   // the campfire and its woodpile (features/lights.js)
@@ -632,7 +647,18 @@ export function buildLayout(seed = 7) {
   for (let i = props.length - 1; i >= 0; i--) { const p = props[i]; if (!p.outside && !(p.r > 0) && (p.kind === 'tuft' || p.kind === 'bush' || p.kind === 'rock') && wet(p)) props.splice(i, 1); }
   for (const [x, y, v] of TERRAIN_ON ? [[.75, -.6, 0], [.7, .65, 1], [-.55, -.65, 2]].map(([dx, dy, v]) => [SPRING.x + dx, SPRING.y + dy, v])
     : [[57.75, 6.25, 0], [57.7, 7.5, 1], [56.45, 6.2, 2]]) add('rock', x, y, {r: 0, variant: v});
-  return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5},
+  // ---- the West Downs (westland.js): their oaks, boulders, bushes and pillars (added last: no random draw above moves). The strip
+  // between the downs and the arena's west wall became walkable: the trees and rocks standing there (unreachable surroundings
+  // before) are solid now, and those on the west road's line out of the gate are taken away
+  if (WEST_ON) {
+    for (let i = props.length - 1; i >= 0; i--) {
+      const p = props[i]; if (!p.outside || p.x > PLAY.x0 - 1.5 || p.y < DOWNS.y0 || p.y > DOWNS.y1 + 1) continue;
+      if (Math.abs(p.y - cy) < 1.9) { props.splice(i, 1); continue; }
+      p.outside = false; p.r = p.kind === 'tree' ? .45 : .75;
+    }
+    for (const [kind, x, y, extra] of WEST_PROPS) add(kind, x, y, {...extra});
+  }
+  return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5}, west: WEST_ON ? WEST : null,
     trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt, spring: SPRING, rill: RILL, fall: FALL, pool: POOL, outflow: OUTFLOW, inRill, rillAt, inPool, poolEdge, inOutflow, outflowAt,
     mesa: MESA, mesaAt, climbs: CLIMBS, cascades: CASCADES, clefts: CLEFTS, inCleft, bridges: BRIDGES};
 }

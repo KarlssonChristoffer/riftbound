@@ -58,8 +58,9 @@ const KINDS = {
       pals: [['#a4ae52', '#7a8a3c', '#4e5c2a'], ['#d0a44a', '#a47a34', '#6c5024'], ['#b8643a', '#8a4428', '#5a2c1c']]},
     // pollen: pale specks hanging in the air, brownian, pushed aside by the player
     {id: 'pollen', mode: 'float', n: 22, lo: .3, hi: 2.4, life: [5, 9], wk: .3, jit: .8, pal: ['#eee4a4', '#c4b878', '#8a8458'], wake: 1.2},
-    // fireflies: slow wanderers that blink (emissive)
-    {id: 'fly', mode: 'firefly', n: 12, lo: .4, hi: 1.6, big: 1, pal: ['#e4ff8e', '#9cc84a', '#56762a'], emit: true, wake: .5},
+    // fireflies: slow wanderers that blink (emissive). A pool of 36, a third of them out (the arena's 12) but over the West Downs'
+    // meadow (world/westland.js: the player west of the arena), where all of them rise out of the tall grass (actOf: downs)
+    {id: 'fly', mode: 'firefly', n: 36, lo: .4, hi: 1.6, big: 1, pal: ['#e4ff8e', '#9cc84a', '#56762a'], emit: true, wake: .5, downs: 1 / 3},
   ],
   ember: [
     {id: 'ashFar', mode: 'fall', n: 28, hMax: 6, v: [.18, .3], wk: .5, par: .84, sway: [1, .8], pal: ['#6a625e', '#524c48', '#403a38'], pass: 'ground'},
@@ -311,6 +312,7 @@ export async function create(host) {
     if (biome === 'frost' && K.id.startsWith('snow')) k = .12 + .88 * Math.min(1, E.sky.snow + E.sky.storm * .3);
     else if (E.tinted && SEASON_KIND[K.id]) k = SEASON_KIND[K.id][E.season] ?? 1;
     if (K.id === 'pollen' || K.id === 'fly') k *= 1 - .8 * E.sky.rain;
+    if (K.downs) { const wd = host.layout?.west, P = host.player; if (!(wd && P && P.x < wd.x1 - 1)) k *= K.downs; }   // (the West Downs: all of them)
     return Math.round(n * k);
   }
   function populate() {

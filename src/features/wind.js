@@ -233,7 +233,9 @@ export async function create(host) {
   function extent() {
     // the Proving Grounds' corners: the fronts cross them as they always have (a bigger world's open land gets the base wind; the
     // world plan's step 3 decides how gusts reach it)
-    const wb = ctx.grounds, c = [[wb.x0, wb.y0], [wb.x1, wb.y0], [wb.x0, wb.y1], [wb.x1, wb.y1]];
+    // (+ the West Downs west of them, world/westland.js: the gusts roll on over their tall grass)
+    const g0 = ctx.grounds, wd = ctx.layout?.west, wb = wd ? {x0: Math.min(g0.x0, wd.x0), y0: Math.min(g0.y0, wd.y0), x1: g0.x1, y1: Math.max(g0.y1, wd.y1)} : g0;
+    const c = [[wb.x0, wb.y0], [wb.x1, wb.y0], [wb.x0, wb.y1], [wb.x1, wb.y1]];
     const sv = c.map(([x, y]) => x * UX + y * UY), tv = c.map(([x, y]) => -x * UY + y * UX);
     S0 = Math.min(...sv); S1 = Math.max(...sv); T0 = Math.min(...tv); T1 = Math.max(...tv);
   }

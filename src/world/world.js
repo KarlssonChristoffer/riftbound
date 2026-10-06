@@ -38,7 +38,7 @@
 //            baked with the water texture (bakeWater); ?water=0 leaves it out.
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, TERRAIN, MESA, CLIMBS, CASCADES, mesaAt, groundDrawn, CLEFTS, cleftWall, inCleft, BRIDGES} from './layout.js';
+import {WORLD, GROUNDS, WEST_ON, WEST, WEST_LAND, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, TERRAIN, MESA, CLIMBS, CASCADES, mesaAt, groundDrawn, CLEFTS, cleftWall, inCleft, BRIDGES} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {cliffGeometry} from './cliffs3d.js';
 import {stepsOf} from './terrain.js';
@@ -553,6 +553,18 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const hx1 = G0.x1 + (G0.x1 >= WORLD.x1 ? SKIRT : 0), hz1 = G0.y1 + (G0.y1 >= WORLD.y1 ? SKIRT : 0);
   const gGeo = gridGeo(hx0, hz0, hx1, hz1, S);
   const world2 = new THREE.Vector2(WM, HM), origin2 = new THREE.Vector2(G0.x0, G0.y0);
+  // THE WEST DOWNS (westland.js): their own painted ground (biome.paintWest; a biome without it leaves them to the open land's
+  // stand-in) over their LAND (the downs and on past the world's west and north edges) on a patch of their own, the Proving
+  // Grounds' western neighbour: from LAND's west edge to GROUNDS.x0, over the same z as theirs. Planar like theirs, with LAND's origin
+  const WD = WEST_ON && biome.paintWest ? WEST_LAND : null;
+  let westCanvas = null, wdTex = null;
+  const wdx0 = WD ? WD.x0 : 0, wdWorld = WD ? new THREE.Vector2(WD.x1 - WD.x0, WD.y1 - WD.y0) : null, wdOrigin = WD ? new THREE.Vector2(WD.x0, WD.y0) : null;
+  if (WD) {
+    const wpx = Math.ceil((WD.x1 - WD.x0) * PPM), hpx = Math.ceil((WD.y1 - WD.y0) * PPM);
+    westCanvas = document.createElement('canvas'); westCanvas.width = wpx; westCanvas.height = hpx;
+    biome.paintWest(westCanvas.getContext('2d', {willReadFrequently: true}), {PPM, WPX: wpx, HPX: hpx, X0: WD.x0, Y0: WD.y0, ground: TERRAIN_ON ? groundDrawn() : null, layout});
+    wdTex = texOf(westCanvas, true); wdTex.wrapS = wdTex.wrapT = THREE.MirroredRepeatWrapping; wdTex.needsUpdate = true;
+  }
   // the open land's tiles [x0, z0, x1, z1, cell]: the world + skirt outside the Proving Grounds' patch, cut on a TILE m lattice
   // from the skirt's corner and at the patch's sides. Fine cells (S) where the ground can step: the ravine's band (rawCliff
   // looks 7 m in from the south edge) and the stream's box; COARSE cells on flat land (they meet fine ones only where both are flat).
@@ -562,6 +574,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const ax = WORLD.x0 - RING, az = WORLD.y0 - RING, bx = WORLD.x1 + RING, bz = WORLD.y1 + RING;
     const cuts = (a, b, h0, h1) => { const v = new Set([a, b, h0, h1]); for (let t = a; t < b; t += TILE) v.add(t); return [...v].filter(t => t >= a && t <= b).sort((p, q) => p - q); };
     const xs = cuts(ax, bx, hx0, hx1), zs = cuts(az, bz, hz0, hz1);
+    if (WD && !xs.includes(wdx0)) { xs.push(wdx0); xs.sort((p, q) => p - q); }   // (the West Downs' patch edge)
     let wx0 = 1e9, wx1 = -1e9;
     for (let y = STREAM.y0; y <= STREAM.y1; y += .25) { const c = STREAM.cx(y), w = STREAM.w(y) / 2; wx0 = Math.min(wx0, c - w); wx1 = Math.max(wx1, c + w); }
     const wet = (x0, z0, x1, z1) => x1 > wx0 - 1 && x0 < wx1 + 1 && z1 > STREAM.y0 - 1 && z0 < STREAM.y1 + 1;
@@ -569,6 +582,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     for (let j = 0; j + 1 < zs.length; j++) for (let i = 0; i + 1 < xs.length; i++) {
       const x0 = xs[i], x1 = xs[i + 1], z0 = zs[j], z1 = zs[j + 1];
       if (x0 >= hx0 && x1 <= hx1 && z0 >= hz0 && z1 <= hz1) continue;   // the Proving Grounds' patch
+      if (WD && x0 >= wdx0 && x1 <= hx0 && z0 >= hz0 && z1 <= hz1) continue;   // the West Downs' patch
       openTiles.push([x0, z0, x1, z1, z1 > Y1 - 8 || wet(x0, z0, x1, z1) || hilly(x0, z0, x1, z1) ? S : COARSE]);
     }
   }
@@ -624,6 +638,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const caster = geo => { const g = geo.clone(), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) - CAST_SINK); p.needsUpdate = true;
     const s = G.surface(g, {tex: gTex, planar: true, world: world2, type: 1, obj: 0}, true); s.gm.visible = false; disposers.push(() => { s.dispose(); g.dispose(); }); };
   if (TERRAIN_ON) caster(gGeo);
+  if (WD) {   // the West Downs' patch (above)
+    const wg = gridGeo(wdx0, hz0, hx0, hz1, S), m = G.surface(wg, {tex: wdTex, planar: true, world: wdWorld, origin: wdOrigin, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
+    disposers.push(() => { m.dispose(); wdTex.dispose(); });
+    if (TERRAIN_ON) caster(wg);
+  }
   // the open land: a stand-in texture until the world plan's step 3 paints the land itself. Plain ground in the biome's own colours:
   // the 3 commonest texels of a 5 m square of the Proving Grounds' ground outside their walls (the north-west corner), speckled
   // in proportion by a hash, OPEN_PATCH m a side, repeated
@@ -642,9 +661,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const size = new THREE.Vector2(OPEN_PATCH, OPEN_PATCH);
     // (the Proving Grounds alone (no open land): the tiles round them are past the world's edge, where the painted ground goes on
     // mirrored, as on the patch's skirt: no seam)
+    // (the West Downs (WD): the tiles past the world's edge beside them take their ground, mirrored, the ones beside the Proving Grounds
+    // theirs; the big world's open land inside it, the stand-in)
     const alone = GROUNDS.x0 <= WORLD.x0 && GROUNDS.y0 <= WORLD.y0 && GROUNDS.x1 >= WORLD.x1 && GROUNDS.y1 >= WORLD.y1;
+    const inWorld = (x0, z0, x1, z1) => x0 >= WORLD.x0 && x1 <= WORLD.x1 && z0 >= WORLD.y0 && z1 <= WORLD.y1;
     for (const [x0, z0, x1, z1, s] of openTiles) {
-      const tg = gridGeo(x0, z0, x1, z1, s), m = G.surface(tg, alone ? {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}
+      const ring = WD && !inWorld(x0, z0, x1, z1), west = ring && (x0 + x1) / 2 < GROUNDS.x0;
+      const tg = gridGeo(x0, z0, x1, z1, s), m = G.surface(tg, west ? {tex: wdTex, planar: true, world: wdWorld, origin: wdOrigin, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}
+        : alone || ring ? {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}
         : {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
       if (TERRAIN_ON && s === S) caster(tg);   // (the fine tiles are where the ground varies)
       disposers.push(() => m.dispose());
@@ -985,7 +1009,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length;
   litterDirty = true;   // (the first bake: the trees are all here)
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
-    setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc, trees3d,
+    setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc, westCanvas, trees3d,
     itemOf: p => byProp.get(p) || null,
     // a view's veil over a prop (features/omens/fog.js: an enemy lost in the fog): not drawn, nothing else changes (the
     // sim, its collider, the registry). It stays until lifted: veil(p, false)
@@ -1018,4 +1042,4 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
-export {WORLD, GROUNDS, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, MESA, CLIMBS, CASCADES, mesaAt};
+export {WORLD, GROUNDS, WEST_ON, WEST, WEST_LAND, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, MESA, CLIMBS, CASCADES, mesaAt};

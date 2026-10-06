@@ -660,7 +660,7 @@ export function boneHit(tr, x0, y0, h0, x1, y1, h1) {
 export function treeModel(p, biome, fam) {
   const species = speciesOf(p, biome); if (!species) return null;
   const h = hashXY(p.x, p.y), seed = p.seed ?? ((h * 9973 | 0) % SEEDS);
-  const s = treeShape(species, seed, fam), scale = p.lineup ? 1 : .9 + hashXY(p.y, p.x) * .2;
+  const s = treeShape(species, seed, fam), scale = p.lineup ? 1 : p.scale ?? .9 + hashXY(p.y, p.x) * .2;   // (p.scale: a prop's own size, the West Downs' big old oaks)
   return {...s, yaw: p.lineup || FIXED_YAW[species] ? 0 : h * Math.PI * 2, scale, top: s.top * scale};
 }
 export function clearTreeCache() { for (const s of cache.values()) s.geo.dispose(); cache.clear(); }

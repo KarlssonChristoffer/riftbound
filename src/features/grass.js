@@ -23,7 +23,8 @@ import {flags} from '../core/flags.js';
 import {mulberry32} from '../core/rng.js';
 import {vnoise} from '../core/mathx.js';
 import {createGrass, MAX_FRONTS, MAX_PUSH} from '../render/grass.js';
-import {steep} from '../world/world.js';   // walkable terrain (docs/TERRAIN.md)
+import {steep, WORLD, WEST_ON, WEST_LAND as WEST} from '../world/world.js';   // walkable terrain (docs/TERRAIN.md); the world's bounds, the West Downs
+import {zone as westZone} from '../world/westland.js';
 
 // ---------------------------------------------------------------- tunables
 const TUNE = {
@@ -50,6 +51,9 @@ const TUNE = {
   push: {player: [.5, 1.25], brute: [.62, 1.25], barrel: [.38, 1]},
   trample: {walk: .38, run: .65, roll: .95, land: .85, brute: .5, barrel: .55, blast: 1, blastR: 1.35},
   max: 300000,
+  // THE WEST DOWNS (world/westland.js zone()): TALL drifts, knee high, in the 'lush' ramp (lighter, yellower blades than the ground,
+  // in its light): tufts per m2, height range (m), blades a tuft; ANKLE high grass (the track's verges, round the oaks, the hilltops)
+  west: {seed: 61, tall: {d: 24, h: [.42, .82], n: [4, 7], r: .06, fan: [.12, .42]}, ankle: {d: 36, h: [.05, .12]}},
 };
 // the cool palette (the default; ?palette=old, world/biomes.js): the wildflowers mostly a bright lavender, a few more of them (the references)
 if (flags.get('palette') !== 'old') Object.assign(TUNE.flowers, {p: .4, lo: .56, cols: ['#e6e0d2', '#e8c650', '#c49cf2', '#e898bc'], w: [.22, .16, .46, .16]});
@@ -59,7 +63,8 @@ export const order = {after: ['wind']};   // reads the wind's gust fronts after 
 export async function create(host) {
   const F = {name: 'grass', label: 'Grass', ambient: true, on: true, ms: 0, _: {TUNE}};
   if (flags.get('grass') === '0') { F.on = false; return F; }
-  const G = host.G, grass = createGrass(G);
+  // (the trample map covers the world's bounds, + 1 m: the West Downs too)
+  const G = host.G, grass = createGrass(G, {x0: WORLD.x0 - 1, z0: WORLD.y0 - 1, w: WORLD.WM + 2, d: WORLD.HM + 2, ppm: 6});
   F._.grass = grass;
   if (flags.get('palette') !== 'old') grass.setFlowerShape(1);   // (V heads with the cool palette's lavender: the references' flowers)
   grass.setCalm(flags.get('calm') !== '0');   // a calm sward: the blades in the ground's tone, light tips (render/grass.js setCalm)
@@ -112,8 +117,50 @@ export async function create(host) {
         n++;
       }
     }
+    n = buildWest(A, B, n, look, names, pick);
     grass.setBlades(A, B, n, ramps, Fl.cols.map(h => rgb(h).map(v => v / 255)));
     F._.built = {n, ms: +(performance.now() - t0).toFixed(1)};
+    return n;
+  }
+  // ---- the West Downs' sward (world/westland.js), after the Proving Grounds' (its own generator: theirs stays as it was): over the
+  // downs' own painted ground over their LAND (world.westCanvas, origin WEST_LAND.x0 / y0: on past the world's edges; the same ramps, so the same colour lookup), by westZone():
+  // a cell grows a TALL tuft (knee high, the lush ramp, 4-7 blades fanned out), an ANKLE high one or the meadow's own, each
+  // at its zone's density; wildflowers in the meadow and the tall grass alike
+  const ZN = {tall: 0, ankle: 0};
+  function buildWest(A, B, n, look, names, pick) {
+    const wc = WEST_ON && host.world.westCanvas; if (!wc) return n;
+    const W = wc.width, H = wc.height, ppm = W / (WEST.x1 - WEST.x0), px = wc.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, W, H).data;
+    const code = (x, y) => { const tx = Math.floor((x - WEST.x0) * ppm), ty = Math.floor((y - WEST.y0) * ppm); if (tx < 0 || ty < 0 || tx >= W || ty >= H) return undefined; const k = (ty * W + tx) * 4; return look.get(px[k] << 16 | px[k + 1] << 8 | px[k + 2]); };
+    const T = TUNE.west, R = mulberry32(T.seed), c = TUNE.grid, dMax = 1 / (c * c), hole = host.biome.hole, Tf = TUNE.tuft, Fl = TUNE.flowers, LUSH = names.indexOf('lush');
+    for (let gy = 0; gy < (WEST.y1 - WEST.y0) / c && n < TUNE.max - 8; gy++) for (let gx = 0; gx < (WEST.x1 - WEST.x0) / c && n < TUNE.max - 8; gx++) {
+      const x = WEST.x0 + (gx + R()) * c, y = WEST.y0 + (gy + R()) * c, r1 = R(), r2 = R(), r3 = R(), r4 = R(), r5 = R();
+      const cd = code(x, y); if (cd === undefined) continue;
+      if (hole?.(x, y) || steep(x, y)) continue;
+      const ri = cd >> 2, Rm = TUNE.ramps[names[ri]], h0 = host.elev(x, y), Z = westZone(x, y, h0, ZN);
+      const thin = TUNE.thin.lo + (1 - TUNE.thin.lo) * vnoise(x * TUNE.thin.k, y * TUNE.thin.k, 41);
+      const d = Z.tall * T.tall.d + Z.ankle * T.ankle.d + (1 - Z.tall - Z.ankle) * Rm.d;
+      if (r1 * dMax > d * thin) continue;
+      const kind = r3 < Z.tall ? 2 : r3 < Z.tall + Z.ankle ? 1 : 0;   // 2 tall, 1 ankle, 0 the meadow's own
+      const tallK = TUNE.clump.lo + (TUNE.clump.hi - TUNE.clump.lo) * vnoise(x * TUNE.clump.k, y * TUNE.clump.k, 42);
+      const h = kind === 2 ? (T.tall.h[0] + (T.tall.h[1] - T.tall.h[0]) * r2) * (.82 + .18 * tallK) : kind === 1 ? T.ankle.h[0] + (T.ankle.h[1] - T.ankle.h[0]) * r2 : (Rm.h[0] + (Rm.h[1] - Rm.h[0]) * r2) * tallK;
+      const bc0 = kind === 2 && LUSH >= 0 ? LUSH * 4 + Math.min(2, cd & 3) : cd;   // (tall: the lush ramp in the ground's light)
+      let fl = 0;
+      if (kind !== 1 && names[ri] === 'grass') {
+        const pf = Math.min(1, Math.max(0, (vnoise(x * Fl.k, y * Fl.k, 43) - Fl.lo) / (Fl.hi - Fl.lo)));
+        if (r4 < pf * Fl.p) fl = R() < Fl.other ? pick(R()) : pick(vnoise(x * Fl.k * .5 + 7, y * Fl.k * .5, 44));
+      }
+      const k = kind === 2 ? T.tall.n[0] + Math.floor(R() * (T.tall.n[1] - T.tall.n[0] + 1)) : r5 < Tf.single ? 1 : Tf.n[0] + Math.floor(R() * (Tf.n[1] - Tf.n[0] + 1));
+      const a0 = R() * Math.PI * 2, rT = kind === 2 ? T.tall.r : Tf.r, fan = kind === 2 ? T.tall.fan : Tf.fan;
+      for (let i = 0; i < k && n < TUNE.max; i++) {
+        const a = a0 + i * Math.PI * 2 / k + (R() - .5) * .9, rr = k === 1 ? 0 : rT * (.3 + .7 * R());
+        const bx = x + Math.cos(a) * rr, by = y + Math.sin(a) * rr, bc = k === 1 || kind === 2 ? bc0 : code(bx, by) ?? cd;
+        const lean = k === 1 ? Tf.lone[0] + (Tf.lone[1] - Tf.lone[0]) * R() : fan[0] + (fan[1] - fan[0]) * R(), la = k === 1 ? R() : ((a / (Math.PI * 2)) % 1 + 1) % 1;
+        const o = n * 4;
+        A[o] = bx; A[o + 1] = host.elev(bx, by); A[o + 2] = by; A[o + 3] = h * (k === 1 ? 1 : .72 + .28 * R());
+        B[o] = bc; B[o + 1] = R(); B[o + 2] = i === 0 ? fl : 0; B[o + 3] = Math.floor(Math.min(.9, lean) * 32) + Math.min(.999, la);
+        n++;
+      }
+    }
     return n;
   }
   build();

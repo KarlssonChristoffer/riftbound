@@ -33,6 +33,7 @@ import {mulberry32 as rng} from '../core/rng.js';
 import {hexU32 as hex} from '../core/color.js';
 import {speciesOf} from './trees3d.js';   // which tree a prop is (the painted cards draw the same species as the 3D ones)
 import {flags} from '../core/flags.js';
+import {trackK, PROPS as WEST_PROPS} from './westland.js';   // the West Downs' ground (westRuins)
 
 // ============================================================ pixel toolkit
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -683,12 +684,12 @@ function dampPool(K, S) {
 // earth mottled (dusty and damp clusters ~.3 m) with specks, pebbles and lone sprouts. Only on the grass and earth ramps:
 // whatever is painted later (stones, paths, water, banks) goes over it
 function pebble(K, x, y, R, E) { K.G.p(x, y, R, 1); K.G.p(x + 1, y, R, hsh(x, y, 28) < .5 ? 0 : 1); K.G.p(x, y + 1, E, 3); K.G.p(x + 1, y + 1, E, 3); }
-function meadowDetail(K, S, r = null) {   // r: only this rect (m: {x0, y0, x1, y1})
-  const {G, WPX, HPX, PPM, PPMY} = K, gr = S.grass, ea = S.earth, GI = gr.id, EI = ea.id, m = G.m, t = G.t;
-  const xa = r ? Math.max(0, Math.floor(r.x0 * PPM)) : 0, xb = r ? Math.min(WPX - 1, Math.ceil(r.x1 * PPM)) : WPX - 1;
-  const ya = r ? Math.max(1, Math.floor(r.y0 * PPMY)) : 1, yb = r ? Math.min(HPX - 1, Math.ceil(r.y1 * PPMY)) : HPX - 1;
+function meadowDetail(K, S, r = null) {   // r: only this rect (m: {x0, y0, x1, y1}); K.ox / oy: the canvas' world origin (the West Downs': 0 elsewhere)
+  const {G, WPX, HPX, PPM, PPMY} = K, gr = S.grass, ea = S.earth, GI = gr.id, EI = ea.id, m = G.m, t = G.t, ox = K.ox || 0, oy = K.oy || 0;
+  const xa = r ? Math.max(0, Math.floor((r.x0 - ox) * PPM)) : 0, xb = r ? Math.min(WPX - 1, Math.ceil((r.x1 - ox) * PPM)) : WPX - 1;
+  const ya = r ? Math.max(1, Math.floor((r.y0 - oy) * PPMY)) : 1, yb = r ? Math.min(HPX - 1, Math.ceil((r.y1 - oy) * PPMY)) : HPX - 1;
   for (let y = ya; y < yb; y++) for (let x = xa; x < xb; x++) {
-    const i = y * WPX + x, mx = x / PPM, my = y / PPMY;
+    const i = y * WPX + x, mx = ox + x / PPM, my = oy + y / PPMY;
     if (m[i] === GI) {
       // (the GPU grass stands its blades on this: the strokes are few, in patches, so the sward reads as clusters, not as noise)
       const h = hsh(x, y, 21); if (h >= .0315) continue;   // (.0315: the most d can be)
@@ -714,6 +715,63 @@ function meadowLip(K, S) {
     else if (m[i - 2 * WPX] === GI && m[i - WPX] === EI && hsh(x, y, 42) < .5) G.p(x, y, ea, Math.min(3, t[i] + 1));
   }
 }
+
+// ---------------------------------------------------------------- the WEST DOWNS' ground (ruins; world/westland.js)
+// Its own canvas over WEST (ctx: PPM, WPX, HPX, X0 / Y0 = its world origin, ground = the drawn terrain's height; square px like
+// the Proving Grounds' ground, world.js lays it on its own patch). The meadow over the hills lit by their REAL slopes, as
+// groundRuins lights its swells (the composite gives ground no N.L: without this the hills would be flat), the same large field
+// of grass and bare earth in world coordinates (so the noise carries on over the seam at x 0), worn earth round the boulders,
+// the TRACK (the west road carried on) and the foot trail to the old oak in groundRuins' trail style, the meadow's detail
+// strokes, the sward's lip over the earth, and the ravine's edge in the south (groundRuins' cliff line, which runs on west)
+function westRuins(q, ctx) {
+  const S = STYLES.ruins, {PPM, WPX, HPX, X0, Y0} = ctx, GH = ctx.ground, G = new Pix(WPX, HPX);
+  const K = {...ctx, PPMY: PPM, G, ox: X0, oy: Y0, X: m => Math.round((m - X0) * PPM), Y: m => Math.round((m - Y0) * PPM)};
+  const fill = fn => { for (let y = 0; y < HPX; y++) { const my = Y0 + y / PPM; for (let x = 0; x < WPX; x++) fn(x, y, X0 + x / PPM, my); } };
+  const F = new Float32Array(WPX * HPX);
+  fill((x, y, mx, my) => { F[y * WPX + x] = (GH ? GH(mx, my) : 0) + fbm(mx * .2, my * .2, 14) * .3; });
+  const r3 = Math.round(.3 * PPM), slope = (x, y) => {
+    const yn = Math.max(0, y - r3), ys = Math.min(HPX - 1, y + r3), xw = Math.max(0, x - r3), xe = Math.min(WPX - 1, x + r3);
+    return (F[ys * WPX + x] - F[yn * WPX + x]) + (F[y * WPX + xe] - F[y * WPX + xw]) * .5;
+  };
+  const rocks = WEST_PROPS.filter(([k]) => k === 'rock_big').map(([, x, y]) => [x, y]);
+  const cliff = mx => 30 - 2.2 + (vn(mx * .3, .5, 91) - .5) * 1.3;   // (groundRuins' cliffRuins: the ravine runs on west)
+  fill((x, y, mx, my) => {
+    let bare = 0; for (const [rx, ry] of rocks) { const d = Math.hypot(mx - rx, (my - ry) * 1.25); if (d < 1.15) bare = Math.max(bare, (1.15 - d) * .5); }
+    const g = fbm(mx * .2, my * .2, 11) + .27 - bare;   // (mostly meadow: bare earth only in the field's lowest hollows)
+    const e = Math.abs(g - .5) < .066 ? g + (vn(mx * 2.4, my * 2.4, 12) - .5) * .1 + (hsh(x, y, 13) - .5) * .03 : g;
+    let sl = slope(x, y);
+    if (Math.min(Math.abs(sl - .05), Math.abs(sl + .065), Math.abs(sl - .06), Math.abs(sl + .07)) < .033) sl += (vn(mx * 2, my * 2, 16) - .5) * .045 + (hsh(x, y, 17) - .5) * .018;
+    if (e > .5) G.p(x, y, S.grass, sl > .05 ? 0 : sl < -.065 ? 2 : 1);
+    else G.p(x, y, S.earth, sl > .06 ? 0 : sl < -.07 ? 2 : 1);
+  });
+  meadowDetail(K, S);
+  // the track: groundRuins' worn earth trail (the meadow reaching into its edge in fingers, a darker trodden margin, a dusty middle)
+  fill((x, y, mx, my) => {
+    const k = trackK(mx, my); if (k >= 1) return;
+    if (k > .72 && vn(mx * 5.5, my * 5.5, 36) + (k - .72) * 1.6 > .82) return;
+    const n = vn(mx * 2.6, my * 2.6, 33);
+    let t = k < .6 && n > .5 ? 0 : n < .14 ? 2 : 1;
+    if (k > .84 && hsh(x, y, 35) < .55) t = 2;
+    else if (k < .5 && hsh(x, y, 34) < .05) t = 0;
+    else if (hsh(x, y, 37) < .02) t = Math.min(3, t + 1);
+    G.p(x, y, S.earth, t);
+    if (k < .85 && hsh(x, y, 38) < .003) pebble(K, x, y, S.rock, S.earth);
+  });
+  meadowLip(K, S);
+  // the south edge: the ground breaks off into the ravine (its rock is 3D: world.js; the face texture's strata stand behind it)
+  const Rk = S.rock, abyss = hex('#1a211d');
+  for (let x = 0; x < WPX; x++) {
+    const mx = X0 + x / PPM, ey = K.Y(cliff(mx));
+    for (let y = Math.max(0, ey); y < HPX; y++) {
+      const r2 = y - ey;
+      if (r2 < 2 && hsh(x, 3) < .6 - r2 * .3) G.p(x, y, S.grass, r2 ? 2 : 1);
+      else if (r2 < 30) G.p(x, y, Rk, r2 % 9 === 0 ? 1 : r2 % 9 > 6 ? 2 : 1);
+      else G.c(x, y, abyss);
+    }
+  }
+  q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
+}
+const WEST_GROUND = {ruins: westRuins};
 
 // ---------------------------------------------------------------- RUINS ground
 function cliffRuins(K) { return mx => K.HM - 2.2 + (vn(mx * .3, .5, 91) - .5) * 1.3; }
@@ -2210,6 +2268,8 @@ function makeBiome(id) {
   const B = {
     id, name: S.name, style: S, groundEmit: null, groundLights: [], hole: () => false,
     paintGround(q, ctx) { GROUND[id](q, ctx, B); },
+    // the West Downs' ground (world/westland.js), on a canvas of its own (ctx.X0 / Y0: its world origin); null: this biome has none (a stand-in)
+    paintWest: WEST_GROUND[id] ? (q, ctx) => WEST_GROUND[id](q, ctx, B) : null,
     sprite(p, ctx) {
       // fast path: this prop's sprite at the current ground projection and state (breakable stage, open, facing)
       const sig = (p.stage | 0) * 4 + (p.opened ? 2 : 0) + (p.kind === 'brute' && faceLeft(p) ? 1 : 0) + (p.sconce ? 64 : 0) + (p.unlit ? 128 : 0) + (p.model ? 256 : 0) + (p.fx ? 512 : 0), hit = memo.get(p);

@@ -46,3 +46,30 @@ That is what `?world=big` builds; the user hasn't confirmed the numbers yet.
   ground-colour reads (atmos, wildlife) cover the Proving Grounds' canvas; the open land needs its own answer for each.
 - The edges: what lies past the west, north and east borders; the rift (void beyond its platforms) and frost (a frozen
   lake on the south edge) on the open land; the stream's head (`STREAM.y0`) moves north to the pond.
+
+## The West Downs (2026-10-06)
+
+Built from the user's brief ("a new area west of the starting ruins: rolling hills, tall grass that dances in the wind, oak trees,
+birds, beautiful light, some grass ankle high, grass that moves when walked through and in the wind"). On by default; `?west=0` is
+the world as before (it starts at x 0).
+
+- **Where:** x -48..0, y 0..30 (`WORLD.x0` = -48: the world is 120 x 30 m; `?world=big` grows from -48 too). The arena's west road
+  comes out of its gate and carries on as a TRACK between the hills; a foot trail climbs to the old oak on the highest hill.
+- **Data:** `src/world/westland.js` (WEST, LAND = WEST + the land painted past the world's west and north edges, HILLS, BORDERS (wavy
+  banks: a straight bank painted as a ruler-straight band), TRACK / TRAIL_N, PROPS (15 oaks, the old one 1.7 x, boulders, bushes, two
+  broken pillars, a forest edge past the borders), `zone()`: tall drifts in the hollows, ankle-high grass on the hilltops, the track's
+  verges and under the oaks). layout.js takes its walkable / roamable / nav area, its hills and props; the strip between the downs and
+  the arena's west wall became walkable (its trees and rocks are solid now, the two on the road's line are gone).
+- **Ground:** `biomes.js westRuins` paints LAND on a canvas of its own (the meadow lit by the hills' real slopes, the track in the
+  trail style, the ravine's edge); `world.js` lays it on a patch of its own (planar, LAND's origin); the band past the world's edge
+  mirrors whichever patch it lies beside. Other biomes have no painter yet: their downs are the open land's stand-in.
+- **Grass:** `features/grass.js buildWest` (its own generator: the Proving Grounds' blades are unchanged): tall tufts (.42-.82 m, the
+  lush ramp, 4-7 blades) sway in slow waves rolling downwind (render/grass.js), ankle-high ones (.05-.12 m), the meadow's own; the
+  blades are drawn in 12 m chunks the view culls; the trample map covers the world's bounds.
+- **Life and light:** wind fronts cross the downs too; two more flocks (sparrows by the track, pigeons under the old oak's hill), two
+  crows in the oaks, more rabbits and butterflies; the mist rises in the downs' hollows at dawn and dusk (two stretches over them,
+  features/mist.js; gfx.js MIST_N 16); fireflies rise out of the meadow at night (atmos.js: all 36 over the downs, 12 elsewhere).
+- **Measured:** 207k blades (all grass) built in ~230 ms; standing in the downs GPU p95 2.06 ms (arena 2.39); main-thread A/B
+  west=0 vs on: B / A .99 (world.update +.016 ms: the extra props). Smoke + simview pass; golden differs (the bigger world: a re-save).
+- **Open:** the other biomes' downs painter; footprints (flow.js decals) and fallen leaves (litter) cover the Proving Grounds' canvas
+  only; the arena's grass rebuilt with the world (~230 ms per biome switch).

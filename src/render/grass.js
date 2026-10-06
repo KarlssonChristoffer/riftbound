@@ -15,8 +15,11 @@
 // meadow blades carry a flower (G-buffer tone 2: its own colour, outside the season's matrix). obj -1 (like particles):
 // grass in front of the player never draws the x-ray rim. Grass casts no shadow and is in no point-light height map.
 //
-// API: createGrass(G) -> {setBlades(a, b, n, ramps, flowers), step(dt), setWind(buf | null), setPushers(arr, n), blast(x, z, r, k),
-//   setLook(snowK, flowerK), setFlowerShape(v), setCalm(v), setVisible(v), dispose(), mesh, count}
+// API: createGrass(G, box = TBOX) -> {setBlades(a, b, n, ramps, flowers), step(dt), setWind(buf | null), setPushers(arr, n), blast(x, z, r, k),
+//   setLook(snowK, flowerK), setFlowerShape(v), setCalm(v), setVisible(v), dispose(), mesh, meshes, count}
+//   box: the trample map's world rect {x0, z0, w, d (m), ppm} (features/grass.js: the world's bounds + 1 m)
+//   The blades are drawn in CHUNKS (CHUNK m squares, each its own instanced mesh with its own bounds): the view's frustum culls
+//   the ones off screen (a grown world has ~3x the Proving Grounds' blades; the view sees a few chunks)
 //   setFlowerShape: 0 a 2 px head (default), 1 a V of two petals over a centre, 3 px wide (the cool palette: features/grass.js)
 //   setCalm: 1 the blades in the ground's own tone with light tips (a calm sward), 0 each blade a tone lighter (features/grass.js)
 //   a, b: Float32Array(n * 4) per blade: a = (root X, root Y (ground height), root Z, height m), b = (ramp * 4 + tone,
@@ -33,6 +36,7 @@ const OUTS = `layout(location = 0) out vec4 o0;\nlayout(location = 1) out vec4 o
 export const MAX_FRONTS = 12, MAX_PUSH = 16, MAX_BLAST = 4;
 // the trample map's box (world X / Z, m: the Proving Grounds + 1 m) and its texels per metre
 const TBOX = {x0: -1, z0: -1, w: 64, d: 32, ppm: 6};
+const CHUNK = 12, LEAN_PAD = 1.4;   // m: a chunk's side; how far past its roots a chunk's blades may reach (their height, bent)
 
 // the gust field (features/wind.js field()): uWG[0] = (UX, UY, base, gust), uWG[1] = (LV, T, n, mode 0 off / 1 fronts /
 // 2 pulse rings (the rift: not drawn here, no grass there)), uWF = 4 vec4 a front, as W.gpu() packs them
@@ -78,6 +82,10 @@ void main() {
   vec2 lean = vec2(cos(ra), sin(ra)) * floor(iB.w) / 32. * h + w.xy * uK.x * h;   // its own growth (a tuft fans out) + the wind
   float ft = uTime * (2.1 + ph * 1.7) + ph * 6.2832 + dot(root.xz, vec2(.9, .7));
   lean += vec2(sin(ft), cos(ft * 1.3)) * (uK.y + uK.z * w.z) * h;
+  // tall grass (the West Downs' drifts, knee high): a slow sway rolling through it along the wind, between the gusts too (waves
+  // travelling downwind at ~1.6 m/s); its amount grows with the blade's height over ~.3 m, so short grass barely shows it
+  float tallK = max(0., h - .3);
+  if (tallK > 0.) { float wl = length(w.xy); vec2 wd = wl > 1e-3 ? w.xy / wl : vec2(.94, .34); lean += wd * sin(dot(root.xz, wd) * 1.4 - uTime * 2.3 + ph * 1.1) * tallK * (.15 + .1 * min(3., wl)); }
   for (int i = 0; i < ${MAX_PUSH}; i++) {
     if (i >= uNP) break;
     vec4 P = uPush[i]; vec2 d = root.xz - P.xy; float l = length(d);
@@ -176,16 +184,16 @@ void main() {
   o = vec4(s, 1.);
 }`;
 
-export function createGrass(G) {
+export function createGrass(G, TB = TBOX) {
   const raw = (vs, fs, uniforms, extra = {}) => new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
   const v4s = n => Array.from({length: n}, () => new THREE.Vector4());
   // ---- the trample map (ping-pong)
-  const TW = TBOX.w * TBOX.ppm, TH = TBOX.d * TBOX.ppm;
+  const TW = Math.ceil(TB.w * TB.ppm), TH = Math.ceil(TB.d * TB.ppm);
   const rtOpt = {type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false};
   const rts = [new THREE.WebGLRenderTarget(TW, TH, rtOpt), new THREE.WebGLRenderTarget(TW, TH, rtOpt)];
   let cur = 0, clean = false;
   const push = v4s(MAX_PUSH), pushV = v4s(MAX_PUSH), blasts = v4s(MAX_BLAST);
-  const trU = {uPrev: {value: rts[0].texture}, uBox: {value: new THREE.Vector4(TBOX.x0, TBOX.z0, TBOX.ppm, TBOX.ppm)}, uDt: {value: 0}, uRec: {value: new THREE.Vector2(.02, .05)},
+  const trU = {uPrev: {value: rts[0].texture}, uBox: {value: new THREE.Vector4(TB.x0, TB.z0, TB.ppm, TB.ppm)}, uDt: {value: 0}, uRec: {value: new THREE.Vector2(.02, .05)},
     uPush: {value: push}, uPushV: {value: pushV}, uNP: {value: 0}, uBlast: {value: blasts}, uNB: {value: 0}};
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const trScene = new THREE.Scene(), trCam = new THREE.Camera();
@@ -200,13 +208,13 @@ export function createGrass(G) {
     uRes: {value: new THREE.Vector2(G.VW, G.VH)}, uZoom: {value: 1}, uTime: G.U.time, uSnowK: {value: 1}, uFlowerK: {value: 0}, uFlowerV: {value: 0}, uCalm: {value: 0},
     uK: {value: new THREE.Vector4(.32, .05, .16, .92)}, uSheen: {value: new THREE.Vector2(.17, .42)},
     uPush: {value: push}, uNP: {value: 0},
-    uTr: {value: rts[0].texture}, uTrBox: {value: new THREE.Vector4(TBOX.x0, TBOX.z0, 1 / TBOX.w, 1 / TBOX.d)}, uTrOn: {value: 1},
+    uTr: {value: rts[0].texture}, uTrBox: {value: new THREE.Vector4(TB.x0, TB.z0, 1 / TB.w, 1 / TB.d)}, uTrOn: {value: 1},
     uRamp: {value: Array.from({length: 20}, () => new THREE.Vector3())},
     uFlower: {value: Array.from({length: 4}, () => new THREE.Vector3())},
     uWG: {value: v4s(2)}, uWF: {value: v4s(MAX_FRONTS * 4)},
   };
   const mat = G.cineMat(raw(BLADE_VS, BLADE_FS, U, {side: THREE.DoubleSide}));   // (its cinema variant: gfx.js setCine)
-  let mesh = null, geo = null, count = 0, visible = true;
+  const meshes = []; let count = 0, visible = true;
 
   // blades: (a, b, n), ramps (4 x [highlight, tone 0 .. 3]) as documented above; flowers: [r, g, b] x 4
   function setBlades(a, b, n, ramps, flowers) {
@@ -214,15 +222,35 @@ export function createGrass(G) {
     for (let r = 0; r < 4; r++) for (let t = 0; t < 5; t++) U.uRamp.value[r * 5 + t].set(...(ramps[r]?.[t] || [0, 0, 0]));
     for (let i = 0; i < 4; i++) U.uFlower.value[i].set(...(flowers[i] || [1, 1, 1]));
     if (!n) return;
-    geo = new THREE.InstancedBufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(STRIP_P, 3)); geo.setIndex(STRIP_I);
-    geo.setAttribute('iA', new THREE.InstancedBufferAttribute(a.slice(0, n * 4), 4));   // (copies: the builder's big arrays can go)
-    geo.setAttribute('iB', new THREE.InstancedBufferAttribute(b.slice(0, n * 4), 4));
-    geo.instanceCount = n; count = n;
-    mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.matrixAutoUpdate = false; mesh.visible = visible;
-    G.gScene.add(mesh); clean = false;
+    // the chunks: each blade by its root's CHUNK m square (from the blades' own corner), its instances copied into its chunk's buffers
+    // (the builder's big arrays can go), the chunk's bounds round its roots + LEAN_PAD (the frustum culls it off screen)
+    let gx0 = 1e9, gz0 = 1e9, gx1 = -1e9, gz1 = -1e9;   // (the blades' own extent: they may grow past the trample map's box)
+    for (let i = 0; i < n; i++) { const x = a[i * 4], z = a[i * 4 + 2]; if (x < gx0) gx0 = x; if (x > gx1) gx1 = x; if (z < gz0) gz0 = z; if (z > gz1) gz1 = z; }
+    const NX = Math.max(1, Math.ceil((gx1 - gx0 + 1e-3) / CHUNK)), NZ = Math.max(1, Math.ceil((gz1 - gz0 + 1e-3) / CHUNK)), key = new Int32Array(n), cnt = new Int32Array(NX * NZ);
+    for (let i = 0; i < n; i++) {
+      const cx = Math.min(NX - 1, Math.floor((a[i * 4] - gx0) / CHUNK)), cz = Math.min(NZ - 1, Math.floor((a[i * 4 + 2] - gz0) / CHUNK));
+      key[i] = cz * NX + cx; cnt[key[i]]++;
+    }
+    const CA = [], CB = [], fillN = new Int32Array(NX * NZ);
+    for (let k = 0; k < NX * NZ; k++) { CA.push(cnt[k] ? new Float32Array(cnt[k] * 4) : null); CB.push(cnt[k] ? new Float32Array(cnt[k] * 4) : null); }
+    for (let i = 0; i < n; i++) { const k = key[i], o = fillN[k]++ * 4; for (let j = 0; j < 4; j++) { CA[k][o + j] = a[i * 4 + j]; CB[k][o + j] = b[i * 4 + j]; } }
+    for (let k = 0; k < NX * NZ; k++) {
+      if (!cnt[k]) continue;
+      const A = CA[k]; let y0 = 1e9, y1 = -1e9, hMax = 0;
+      for (let i = 0; i < cnt[k]; i++) { y0 = Math.min(y0, A[i * 4 + 1]); y1 = Math.max(y1, A[i * 4 + 1]); hMax = Math.max(hMax, A[i * 4 + 3]); }
+      const geo = new THREE.InstancedBufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(STRIP_P, 3)); geo.setIndex(STRIP_I);
+      geo.setAttribute('iA', new THREE.InstancedBufferAttribute(A, 4)); geo.setAttribute('iB', new THREE.InstancedBufferAttribute(CB[k], 4));
+      geo.instanceCount = cnt[k];
+      const cx = gx0 + ((k % NX) + .5) * CHUNK, cz = gz0 + (Math.floor(k / NX) + .5) * CHUNK, cy = (y0 + y1 + hMax) / 2;
+      geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), Math.hypot(CHUNK * .7071, (y1 + hMax - y0) / 2) + LEAN_PAD);
+      geo.boundingBox = new THREE.Box3(new THREE.Vector3(cx - CHUNK / 2 - LEAN_PAD, y0 - .1, cz - CHUNK / 2 - LEAN_PAD), new THREE.Vector3(cx + CHUNK / 2 + LEAN_PAD, y1 + hMax + .2, cz + CHUNK / 2 + LEAN_PAD));
+      const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.matrixAutoUpdate = false; mesh.visible = visible;
+      G.gScene.add(mesh); meshes.push(mesh);
+    }
+    count = n; clean = false;
   }
-  function drop() { if (mesh) { G.gScene.remove(mesh); geo.dispose(); mesh = geo = null; } count = 0; }
+  function drop() { for (const m of meshes) { G.gScene.remove(m); m.geometry.dispose(); } meshes.length = 0; count = 0; }
 
   // the wind: buf as W.gpu() filled it (or null: still)
   function setWind(buf) {
@@ -245,15 +273,15 @@ export function createGrass(G) {
   // once a frame, before G.render(): the trample pass, the view's size and zoom
   function step(dt) {
     U.uRes.value.set(G.VW, G.VH); U.uZoom.value = G.view.zoom || 1;
-    if (!mesh || !visible) { nb = 0; return; }
+    if (!meshes.length || !visible) { nb = 0; return; }
     const R = G.renderer, prev = R.getRenderTarget();
     if (!clean) { for (const rt of rts) { R.setRenderTarget(rt); R.setClearColor(0x000000, 0); R.clear(true, false, false); } clean = true; }
     trU.uPrev.value = rts[cur].texture; trU.uDt.value = Math.min(.1, dt); trU.uNB.value = nb;
     R.setRenderTarget(rts[1 - cur]); R.render(trScene, trCam); R.setRenderTarget(prev);
     cur = 1 - cur; U.uTr.value = rts[cur].texture; nb = 0;
   }
-  function setVisible(v) { visible = v; if (mesh) mesh.visible = v; }
+  function setVisible(v) { visible = v; for (const m of meshes) m.visible = v; }
   function dispose() { drop(); mat.dispose(); for (const rt of rts) rt.dispose(); trScene.children[0].material.dispose(); tri.dispose(); }
-  return {setBlades, setWind, setPushers, blast, setLook, setFlowerShape, setCalm, step, setVisible, dispose, U, get count() { return count; }, get mesh() { return mesh; },
-    get trample() { return rts[cur]; }, TBOX};   // (the trample map now: for a look in dev tools)
+  return {setBlades, setWind, setPushers, blast, setLook, setFlowerShape, setCalm, step, setVisible, dispose, U, get count() { return count; }, get mesh() { return meshes[0] || null; }, meshes,
+    get trample() { return rts[cur]; }, TBOX: TB};   // (the trample map now: for a look in dev tools)
 }

@@ -57,7 +57,7 @@ import {clamp, clearArray, hypot2} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {hex255 as hex} from '../core/color.js';
 import {createFightLife} from './wildlife/fightlife.js';   // the fight reactions: scavengers at kills, night canids, the flush (docs/exp/wildfight.md)
-import {TERRAIN_ON, steep, onGround} from '../world/world.js';   // walkable terrain (docs/TERRAIN.md): ground animals follow it
+import {TERRAIN_ON, steep, onGround, WEST_ON} from '../world/world.js';   // walkable terrain (docs/TERRAIN.md): ground animals follow it
 
 const TAU = Math.PI * 2;
 const CALM = {x: 0, y: 0, g: 0};
@@ -117,6 +117,13 @@ const CAST = {
   desert: {flocks: [{sp: 'pigeon', n: 6, homes: [[37.2, 19.2], [44.6, 18.4], [43.8, 24.6]]}, {sp: 'sparrow', n: 6, homes: [[36.6, 12.2], [45.6, 15.6], [37.2, 24.4]]}],
     solos: {sp: 'hawk', n: 1}, hares: 2, lizards: 5, vultures: 3, fish: 2, frogs: 2, moths: 2},
 };
+// the West Downs (world/westland.js): a sparrow flock feeding along the track, pigeons round the old oak's hill, more crows (the
+// oaks are their perches), rabbits by the downs' bushes, butterflies over them
+if (WEST_ON) {
+  const C = CAST.ruins;
+  C.flocks.push({sp: 'sparrow', n: 9, homes: [[-12, 15.8], [-26, 15.6], [-38.5, 18.6], [-18, 20.6]]}, {sp: 'pigeon', n: 6, homes: [[-24, 12], [-34, 18], [-8, 13.8]]});
+  C.solos.n += 2; C.solos.at = [null, null, [-22.4, 6.4], [-36.4, 7.2]]; C.rabbits += 4; C.butterflies += 5;
+}
 
 // ---------------------------------------------------------------- art (the arena's, unchanged)
 // '0'-'3' = the species ramp [hi, base, shade, outline], letters = accents, '.' = empty; x, y = the anchor pixel (ground
@@ -1353,8 +1360,8 @@ export async function create(host) {
     const C = CAST[biome] || {};
     for (const F of C.flocks || []) { const f = newFlock(F.sp, F.n, F.homes); placeFeeding(f, F.homes[0]); f.t = rr(15, 40); }
     if (C.solos) for (let i = 0; i < C.solos.n; i++) {
-      const f = newFlock(C.solos.sp, 1, []), b = f.birds[0];
-      b.x = rr(10, 30); b.y = rr(8, 22);
+      const f = newFlock(C.solos.sp, 1, []), b = f.birds[0], at = C.solos.at?.[i];   // (at: a solo's own start, the West Downs' crows in their oaks)
+      if (at) { b.x = at[0]; b.y = at[1]; } else { b.x = rr(10, 30); b.y = rr(8, 22); }
       if (!placePerched(f)) { const q = freeNear(20, 12, 6, 0, 30) || [20, 12]; f.homes = [q]; placeFeeding(f, q); }
       f.home = {x: b.x, y: b.y + 2, z: TERRAIN_ON ? elev(b.x, b.y + 2) : 0, r: 1.5}; f.homes = [[b.x, b.y + 2]];
     }
