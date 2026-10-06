@@ -1,7 +1,8 @@
 // WEATHER (render3d, view): the world clock's weather and seasons made visible. It reads sim/env.js (host.env) and writes
 // only render inputs and its own particles; the clock itself never waits on it. OWNER: the trees / wind-feel session.
 //   rain     streaks (short 1 px world lines in two tones, slanted by the wind), as many as env.sky.rain asks; each drop
-//            lands as a splash on the ground or a ring on the stream
+//            lands as a splash on the ground or a ring on the stream. A weather FRONT on its way (sim/env.js): it rains
+//            (snows) only where its storm is (env.skyAt), as much of the view as that covers (FRONT below)
 //   snow     flakes (1 px points, a few 2 px near ones) drifting with the wind, where the biome has no snow of its own
 //            (atmos.js keeps the frost lands' snow and scales it by the weather)
 //   storm    lightning (env.sky.storm): the scene lit for an instant in two or three pulses (gfx setFlash, strongest at
@@ -55,8 +56,26 @@ export async function create(host) {
   function placeX(o) { const ox = rr(-1, 1) * V.hw, oy = rr(-1, 1.6) * V.hh; o[0] = V.cx + V.RX * ox + V.FX * oy; o[1] = V.cy + V.RY * ox + V.FY * oy; }
   const out = (x, y) => { const dx = (x - V.cx) * V.RX + (y - V.cy) * V.RY, dy = (x - V.cx) * V.FX + (y - V.cy) * V.FY; return Math.abs(dx) > V.hw + 1 || dy < -V.hh - 1 || dy > V.hh * 1.6 + 1; };
   const Q2 = [0, 0];
-  function spawnRain(i, fresh) { placeX(Q2); rX[i] = Q2[0]; rY[i] = Q2[1]; rH[i] = host.elev(Q2[0], Q2[1]) + (fresh ? rr(0, TUNE.rain.top) : rr(TUNE.rain.top * .8, TUNE.rain.top)); rV[i] = rr(...TUNE.rain.v); }
-  function spawnSnow(i, fresh) { placeX(Q2); sX[i] = Q2[0]; sY[i] = Q2[1]; sH[i] = host.elev(Q2[0], Q2[1]) + (fresh ? rr(0, TUNE.snow.top) : rr(TUNE.snow.top * .8, TUNE.snow.top)); sV[i] = rr(...TUNE.snow.v); sP[i] = R() * TAU; }
+  // FRONT: with a front on screen, how much of the view each falls on (the mean over a 4 x 4 grid of ground points: the pool's
+  // size) and the most it falls anywhere there; a drop is placed where it falls (a few tries: a point is kept with the odds
+  // channel there / the most). Without a front: the sky's own (no extra random draws: the same drops as before)
+  const FRT = {on: false, rain: 0, snow: 0, rainMax: 0, snowMax: 0};
+  function frontCover(E) {
+    FRT.on = !!(E.front && E.front.on && E.skyAt); if (!FRT.on) return;
+    let r = 0, n = 0, rm = 0, nm = 0;
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      const ox = ((i + .5) / 2 - 1) * V.hw, oy = (-1 + (j + .5) / 4 * 2.6) * V.hh, x = V.cx + V.RX * ox + V.FX * oy, y = V.cy + V.RY * ox + V.FY * oy;
+      const a = E.skyAt(x, y, 'rain'), b = E.skyAt(x, y, 'snow'); r += a; n += b; rm = Math.max(rm, a); nm = Math.max(nm, b);
+    }
+    FRT.rain = r / 16; FRT.snow = n / 16; FRT.rainMax = rm; FRT.snowMax = nm;
+  }
+  function placeUnder(o, c, most) {
+    const E = host.env;
+    for (let k = 0; k < 16; k++) { placeX(o); if (R() * most <= E.skyAt(o[0], o[1], c)) return; }
+  }
+  const place = (o, c) => { if (FRT.on) placeUnder(o, c, c === 'rain' ? FRT.rainMax : FRT.snowMax); else placeX(o); };
+  function spawnRain(i, fresh) { place(Q2, 'rain'); rX[i] = Q2[0]; rY[i] = Q2[1]; rH[i] = host.elev(Q2[0], Q2[1]) + (fresh ? rr(0, TUNE.rain.top) : rr(TUNE.rain.top * .8, TUNE.rain.top)); rV[i] = rr(...TUNE.rain.v); }
+  function spawnSnow(i, fresh) { place(Q2, 'snow'); sX[i] = Q2[0]; sY[i] = Q2[1]; sH[i] = host.elev(Q2[0], Q2[1]) + (fresh ? rr(0, TUNE.snow.top) : rr(TUNE.snow.top * .8, TUNE.snow.top)); sV[i] = rr(...TUNE.snow.v); sP[i] = R() * TAU; }
   function splash(x, y, ring) {
     if (pn >= PN) return;
     const i = pn++; pX[i] = x; pY[i] = y; pK[i] = ring ? 1 : 0; pT[i] = 0; pH[i] = ring ? (host.world?.waterH ?? -.18) + .01 : host.elev(x, y) + .01;
@@ -104,8 +123,9 @@ export async function create(host) {
     if (!E) return;
     view();
     const S = E.sky, area = Math.min(1.6, V.hw * V.hh / 70);   // a zoomed-in view needs fewer drops
-    // rain: the pool grows / shrinks toward what the sky asks for
-    const wantR = Math.round(TUNE.rain.max * clamp(S.rain, 0, 1) * area * (F.fx ? 1 : 0));
+    frontCover(E);
+    // rain: the pool grows / shrinks toward what the sky asks for (a front: the share of the view it rains on)
+    const wantR = Math.round(TUNE.rain.max * clamp(FRT.on ? FRT.rain : S.rain, 0, 1) * area * (F.fx ? 1 : 0));
     while (rn < wantR) spawnRain(rn++, true);
     if (rn > wantR) rn = Math.max(wantR, rn - Math.ceil(dt * 400));   // stop gradually (no hole in the air)
     const wv = w?.at ? w.at(V.cx, V.cy, WV) : CALM, wx = wv.x * 1.3, wy = wv.y * 1.3;
@@ -116,7 +136,7 @@ export async function create(host) {
       else if (out(rX[i], rY[i])) spawnRain(i, false);
     }
     // snow (not in the frost lands: atmos.js snows there)
-    const wantS = host.biome.id === 'frost' ? 0 : Math.round(TUNE.snow.max * clamp(S.snow, 0, 1) * area * (F.fx ? 1 : 0));
+    const wantS = host.biome.id === 'frost' ? 0 : Math.round(TUNE.snow.max * clamp(FRT.on ? FRT.snow : S.snow, 0, 1) * area * (F.fx ? 1 : 0));
     while (sn < wantS) spawnSnow(sn++, true);
     if (sn > wantS) sn = Math.max(wantS, sn - Math.ceil(dt * 200));
     for (let i = 0; i < sn; i++) {

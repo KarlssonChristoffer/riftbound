@@ -25,6 +25,7 @@ import {cssRGBA} from '../core/color.js';
 import {createGLStats} from './glstats.js';
 import {createLitterSim} from './litter.js';
 import {createGodrays} from './godrays.js';
+import {CLOUD_GLSL} from './clouds.js';
 
 export const DEG = Math.PI / 180;
 // a uniform-shaped holder whose value is only ever a number (a card's sway: written every frame). Its own class keeps
@@ -881,14 +882,11 @@ float rippleOff(ivec2 p, vec3 P, bool puddle) {   // depth.js rippleCopy: whole-
 // Each was a 2D canvas painted every frame through the ground plane's affine (a pattern fill into the PRE layer; row shifts
 // masked by the lava into the DISTORT layer) and uploaded; here a view pixel goes back through that affine to a texel of a
 // small top-down map uploaded only when it changes: the same nearest texel the pattern fill sampled. Both maps share ONE texture
-// (tTop: the cloud levels in rows 0.., the lava's mask below them): this shader is at the 16 texture units a GPU guarantees
-uniform sampler2D tTop; uniform vec4 uTopH;                                 // (the lava mask's width, height, first row)
-uniform vec4 uCl, uClM, uClO; uniform vec3 uClC;   // clouds: on, the two alphas; view -> texel (2x2); origin (view px), tile size; colour
+// (tTop: the cloud noise in rows 0.., the lava's mask below them): this shader is at the 16 texture units a GPU guarantees.
+// The clouds (and a weather front's storm side) are render/clouds.js's: tTop, their uniforms, viewTexel, cloudAt
+${CLOUD_GLSL}
+uniform vec4 uTopH;                                // (the lava mask's width, height, first row)
 uniform vec4 uHz, uHzM, uHzO;                      // haze: on, band (px), zoom, clock (s); view -> texel; origin (view px), the world origin's view row
-ivec2 viewTexel(ivec2 p, vec4 M, vec2 o) {   // view pixel p (GL, y up) -> the top-down map's texel (the pattern's nearest sample)
-  vec2 c = vec2(float(p.x) + .5, uRes.y - float(p.y) - .5) - o;
-  return ivec2(floor(vec2(M.x * c.x + M.y * c.y, M.z * c.x + M.w * c.y)));
-}
 // ---- MIST (features/mist.js sets it every frame it shows it: G.setMist; ?mist=0 or the feature off: the old screen haze). A layer
 // lying LOW in the world: its top is a height (m) that wanders with a noise drifting on the wind and rises over the water (the
 // nearest stretch's water + uMistW.x, falling off over uMistW.y m of bank). A pixel shows the world point P through the mist the view
@@ -1102,10 +1100,12 @@ void main() {
     }
   }
   if (uLay.y > .5) { vec4 g = lay(tPre, ip); alb = alb * (1. - g.a) + g.rgb; }
+  float frD = 0.;   // a weather front's storm side: how much darker than the view's light it is here (render/clouds.js)
   if (uCl.x > .5) {   // cloud shadows: the level map fixed to the ground plane (h 0), drifting with the wind, two hard levels
-    ivec2 t = viewTexel(ip, uClM, uClO.xy);
-    float L = texelFetch(tTop, ivec2(mod(vec2(t), uClO.zw)), 0).r * 255.;   // (the tile repeats: mod, never negative)
-    alb = mix(alb, uClC, L > 1.5 ? uCl.z : L > .5 ? uCl.y : 0.);
+    vec3 cl = cloudAt(ip, P);
+    frD = cl.y;   // (the storm: greyer and darker, as its own light would draw it: no cloud shadows, no sun shadows, the sun barely shapes things)
+    alb = mix(alb, uClC, (cl.x > 1.5 ? uCl.z : cl.x > .5 ? uCl.y : 0.) * (1. - frD));
+    if (frD > 0.) alb = mix(alb, vec3(dot(alb, vec3(.3, .55, .15))) * uFrC.rgb, uFrK.z * frD) * (1. - uFrK.w * frD);
   }
 
   // ---- the world clock (sim/env.js via features/weather.js): the SEASON turns the green of the ground and of painted
@@ -1135,6 +1135,7 @@ void main() {
       else if (type != 3 && type != 7) sh = sunShadow(P, N, N0.w < .5 ? .00004 : .0006);   // obj 0: the terrain (casts nothing)   // cards would shadow themselves through their own sun card
     }
   }
+  sh *= 1. - frD;
   alb = mix(alb, uShadowC, sh * uShadowA);
 
   // ---- light: ambient + pools (falloff (1 - t^2)^2, vertical distance weighted .25), the arena's soft knee
@@ -1161,7 +1162,7 @@ void main() {
   }
   // ---- form: the sun / moon shapes meshes and the character (wrapped N.L), snapped to 3 bands
   if (type == 2 || type == 4 || type == 7) {
-    float w = (dot(N, uSunDir) + .35) / 1.35, s = 1. + uSunK * (w - .55) * 1.5;
+    float w = (dot(N, uSunDir) + .35) / 1.35, s = 1. + uSunK * (1. - uFrS.x * frD) * (w - .55) * 1.5;
     if (uBanded > .5) s = s < .93 ? (type == 4 ? .84 : .92) : s > 1.07 ? 1.15 : 1.;
     else if (type != 4) s = max(s, .9);
     L *= s;
@@ -1997,6 +1998,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uRf: {value: new THREE.Vector4()}, uRfC: {value: new THREE.Vector3()}, uRfW: {value: new THREE.Vector4()}, uRfV: {value: new THREE.Vector4()}, uRfP: {value: new THREE.Vector4()},
     tTop: {value: (t => { t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.unpackAlignment = 1; return t; })(new THREE.DataTexture(new Uint8Array(1), 1, 1, THREE.RedFormat, THREE.UnsignedByteType))}, uTopH: {value: new THREE.Vector4()},
     uCl: {value: new THREE.Vector4()}, uClM: {value: new THREE.Vector4()}, uClO: {value: new THREE.Vector4()}, uClC: {value: new THREE.Vector3()},
+    uClT: {value: new THREE.Vector4()}, uFr: {value: new THREE.Vector4()}, uFrB: {value: new THREE.Vector4()}, uFrK: {value: new THREE.Vector4()},
+    uFrC: {value: new THREE.Vector4()}, uFrS: {value: new THREE.Vector4()}, uFrQ: {value: new THREE.Vector4()},
     uHz: {value: new THREE.Vector4()}, uHzM: {value: new THREE.Vector4()}, uHzO: {value: new THREE.Vector4()},
     uAo: {value: new THREE.Vector4()},
     uMist: {value: new THREE.Vector4()}, uMistC: {value: new THREE.Vector4()}, uMistW: {value: new THREE.Vector4()}, uMistD: {value: new THREE.Vector4(0, 0, 0, 1)},   // features/mist.js (G.setMist)
@@ -2454,9 +2457,11 @@ void main() {
   // the reflections in the water (features/depth.js, every frame it shows them; COMP_FS reflAt): {on, tint: [r, g, b] 0..1, tintK,
   // alpha, glow, S (view px per metre of height), ripple (px), gust (0..1), t (the ripple's clock, s), oy (the world origin's view
   // row), zoom, reach (px to search up), puddleA (the puddles' ground-layer alpha x 255, 0 = none), pool: {x, y, rx, ry} | null}
-  // the cloud shadows (features/depth.js, every frame it shows them; COMP_FS): {lv (Uint8Array TW x TH: 0 / 1 / 2), TW, TH, ver
-  // (bump when lv changed: re-uploaded), col [r, g, b] 0..1, a1, a2 (the two levels' alpha), m [4] (view px -> texel), e, f (the
-  // tile's origin in view px)}. The haze (ember's lava): {mask (Uint8Array W x H, 255 = lava), W, H, ver, band (px), zoom, t (s),
+  // the cloud shadows (features/depth.js, every frame it shows them; COMP_FS, render/clouds.js): {lv (Uint8Array TW x 2 TH: the
+  // noise's bins, / 4 then the last 2 bits), TW, TH, ver (bump when lv changed: re-uploaded), col [r, g, b] 0..1, a1, a2 (the two
+  // levels' alpha), T [4] (the levels' thresholds: ahead of a front / behind it), m [4] (view px -> texel), e, f (the tile's
+  // origin in view px), Q [4] (the noise's quantile bins at .2 .. .8), front: null | {dir [2], s, band [2], bend [3] (m, rad / m,
+  // phase), storm, arrive, grey [3], greyK, darkK, sunK}}. The haze (ember's lava): {mask (Uint8Array W x H, 255 = lava), W, H, ver, band (px), zoom, t (s),
   // m [4], e, f (view -> mask texel at the lava's height), oy (the world origin's view row)}
   // the shared top-down texture (tTop): the cloud levels at the top, the lava's mask under them; rebuilt and re-uploaded only
   // when one of them changes (the cover in 1/16 steps; the mask once per world)
@@ -2473,9 +2478,13 @@ void main() {
   let clFrame = -1, clVer = -1, hzFrame = -1, hzVer = -1;
   function setClouds(o) {
     clFrame = frameNo; const C = compU;
-    if (o.ver !== clVer) { clVer = o.ver; top.cl = o.lv; top.clW = o.TW; top.clH = o.TH; topUpload(); }
+    if (o.ver !== clVer) { clVer = o.ver; top.cl = o.lv; top.clW = o.TW; top.clH = o.lv.length / o.TW; topUpload(); }
     C.uCl.value.set(1, o.a1, o.a2, 0); C.uClC.value.set(o.col[0], o.col[1], o.col[2]);
-    C.uClM.value.set(o.m[0], o.m[1], o.m[2], o.m[3]); C.uClO.value.set(o.e, o.f, o.TW, o.TH);
+    C.uClM.value.set(o.m[0], o.m[1], o.m[2], o.m[3]); C.uClO.value.set(o.e, o.f, o.TW, o.TH); C.uClT.value.set(o.T[0], o.T[1], o.T[2], o.T[3]); C.uFrQ.value.set(o.Q[0], o.Q[1], o.Q[2], o.Q[3]);
+    const f = o.front;
+    if (!f) { C.uFr.value.w = 0; C.uFrS.value.x = 0; return; }
+    C.uFr.value.set(f.dir[0], f.dir[1], f.s, 1); C.uFrB.value.set(f.band[0], f.band[1], f.bend[0], f.bend[1]);
+    C.uFrK.value.set(f.storm, f.arrive ? 1 : 0, f.greyK, f.darkK); C.uFrC.value.set(f.grey[0], f.grey[1], f.grey[2], f.bend[2]); C.uFrS.value.set(f.sunK, 0, 0, 0);
   }
   function setHaze(o) {
     hzFrame = frameNo; const C = compU;

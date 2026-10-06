@@ -52,8 +52,8 @@ export function createLighting({G, host, features, opt}) {
     const sc = m.sun.c || ONE3; U.uSunC.value.set(sc[0], sc[1], sc[2]); U.uSunStr.value = m.sun.el > 2 ? (m.shadow.a > 0 ? 1 : .45) * (m.sun.k ?? .4) * 2.2 : 0;   // armour glints
     U.uSunK.value = m.sun.k; U.uShadowA.value = m.shadow.a > 0 && m.sun.el > 2 ? m.shadow.a : 0; U.uShadowC.value.set(m.shadow.c[0], m.shadow.c[1], m.shadow.c[2]);
     U.uFog.value.set(m.fog[0], m.fog[1], m.fog[2], m.fog[3]);
-    // the god rays: the sun's elevation and colour, the mood's shadow strength (clouds and nightfall in it), the sky's cloud / mist, wet ground
-    if (G.setRays) { RAYS.el = m.sun.el; RAYS.c = sc; RAYS.shadow = U.uShadowA.value; RAYS.cloud = env.sky.cloud; RAYS.mist = G.mist?.on ? Math.max(env.sky.fog, G.mist.medium) : env.sky.fog; RAYS.wet = env.wet; G.setRays(RAYS); }
+    // the god rays: the sun's elevation and colour, the mood's shadow strength (clouds and nightfall in it), the view's cloud (env.light), the mist, wet ground
+    if (G.setRays) { RAYS.el = m.sun.el; RAYS.c = sc; RAYS.shadow = U.uShadowA.value; RAYS.cloud = env.light.cloud; RAYS.mist = G.mist?.on ? Math.max(env.sky.fog, G.mist.medium) : env.sky.fog; RAYS.wet = env.wet; G.setRays(RAYS); }
     const la = Math.max(.02, lum(m.amb)), fk = lum(m.fill || [0, 0, 0]) / la * CHAR.fillK;
     U.uFill.value.set(amb[0] * fk, amb[1] * fk, amb[2] * fk); const gr = GRADE[biome]; U.uGrade.value.set(gr[0], gr[1], gr[2]); U.uGradeK.value = CHAR.gradeK[time] ?? 0;
     const dark = Math.max(0, 1 - lum(m.amb));

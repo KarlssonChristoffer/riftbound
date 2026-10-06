@@ -10,6 +10,8 @@
 //            the dusk mood lit from the east), the sun sweeping through the northern sky so shadows keep falling toward
 //            the camera side like the art, then the weather on top (clouds soften the sun and its shadows, fog thickens)
 //   wind     windLevel: the wind strength the weather asks for (the wind feature's 'auto' mode follows it)
+//   fronts   a spell that turns the sky over (fair -> rain or storm, a storm clearing) ARRIVES: an edge rolls in along the
+//            wind from upwind (FRONTS below); sky is the weather where the player stands, light the light over the view
 //   seasons  leafRamp(): the ruins' leaf ramp for the season (spring fresh, summer deep, autumn a late green, winter withered),
 //            blended across a season's change; ver.leaf counts its changes (update on change, never per frame)
 //   ground   the weather's memory: snowCover (builds in snowfall, melts slowly in winter, fast in spring), wet (rain wets,
@@ -21,10 +23,24 @@
 // READS: the biome id (biome()), the mood tables (moods, content). EMITS: nothing; ver.{part, season, weather, leaf} count
 // changes for whoever needs to react. BUDGET: ~0.01 ms per step, ~0.01 ms per mood(); no allocation after creation.
 //
-// createEnv({moods, biome, Q}) -> env. env.step(dt) once per sim step. Dev: setHour / setPart / setSeason / setWeather /
-// setDayMinutes; URL ?hour= ?season= ?weather= ?daymin= (0 = the clock stands still); ?time=day|dusk|night still works.
+// createEnv({moods, biome, Q, focus}) -> env (focus() -> {x, y}: the player, where the weather is felt). env.step(dt)
+// once per sim step. Dev: setHour / setPart / setSeason / setWeather / setDayMinutes; URL ?hour= ?season= ?weather= ?daymin=
+// (0 = the clock stands still); ?time=day|dusk|night still works.
 // Other systems: setWeather(w, ease) (an omen's storm rolls in over a few s), setGrade(source, g) / clearGrade(source): a
-// colour grade over mood() (features/omens.js: a blood moon, an eclipse; GRADES below).
+// colour grade over mood() (features/omens.js: a blood moon, an eclipse; GRADES below). env.front / frontAt(x, y) /
+// skyAt(x, y, channel): the front on its way (features/depth.js draws it, render/clouds.js keeps the god rays out of its
+// shadow, features/weather.js rains under it).
+//
+// FRONTS. The sky used to ease from one spell to the next everywhere at once (TUNE.ease s), rain and cloud together. Now a
+// spell that turns it over (TUNE.front.dCloud of cloud, or rain / snow starting or stopping) comes as a front: a straight
+// edge, bent a little along its length, rolling DOWNWIND (TUNE.front.dir, the wind feature's prevailing wind) at
+// TUNE.front.v from TUNE.front.lead m upwind of the player. Behind it the new weather, ahead of it the old, the change spread
+// over TUNE.front.band m. What the player feels (sky: the rain, the wind, the storm) changes as the edge passes the player, each
+// channel at its own place (TUNE.front.at: the wind ahead of the edge, the rain a few m into the storm). What the view is LIT
+// by (light: the mood's channels) is the clear side's while that side is on screen, and the storm's once it covers the
+// view (TUNE.front.view, crossed over TUNE.front.fade m): one light can't be both, so the clear one holds and the storm side
+// is drawn darker on the ground (features/depth.js); an arriving storm darkens the land edge first and rains after, a
+// clearing one breaks into holes with the sun (and its beams) through them. A natural spell waits for a front to pass.
 import {flags} from '../core/flags.js';
 import {clamp, smooth, lerp} from '../core/mathx.js';
 import {hex01 as hex} from '../core/color.js';
@@ -42,6 +58,12 @@ export const TUNE = {
   // winter, fast in spring); rain wets the ground, the sun dries it
   snowGrow: .35, snowMelt: {winter: .025, spring: .3, summer: .6, autumn: .15},
   wetGrow: .9, wetDry: {winter: .08, spring: .2, summer: .4, autumn: .15},
+  // FRONTS (above): the way they travel (features/wind.js W.dir: the prevailing wind, the clouds drift along it), m/s, how
+  // far upwind of the player one starts (m), the change behind / ahead of the edge (m), the edge's bends (m, m along it),
+  // half the view across the wind (m) and the light's cross-over there (m), what makes a change a front, and where each
+  // channel the player feels changes (m into the storm side; < 0: on the clear side, before the edge reaches the player)
+  front: {dir: [.94, .34], v: 2.4, lead: 70, band: [14, 14], wobble: [6, 38], view: 22, fade: 10, dCloud: .3,
+    at: {cloud: 0, rain: 7, snow: 7, storm: 4, fog: 2, wind: -12}},
 };
 // how full the ruins' crowns are through the year (year position 0..4 = spring .. winter): budding in spring, full in
 // summer, thinning through autumn, bare in winter
@@ -109,13 +131,14 @@ export const LEAF = {
 };
 const LEAF_RGB = Object.fromEntries(Object.entries(LEAF).map(([k, v]) => [k, v.map(hex)]));
 
-export function createEnv({moods, biome, Q = flags}) {
+export function createEnv({moods, biome, Q = flags, focus = null}) {
   const DAY = () => TUNE.dayMinutes * 60;   // real s per day
   const E = {TUNE, hour: 0, day: 0, t: 0, part: 'day', bucket: 'day', season: 'spring', seasonNext: 'summer', seasonK: 0,
     weather: 'fair', sky: {cloud: 0, rain: 0, snow: 0, fog: 0, storm: 0, wind: 1}, windLevel: 1,
+    light: {cloud: 0, rain: 0, snow: 0, fog: 0, storm: 0, wind: 1},   // the channels the view is lit by (= sky but in a front)
     year: 0, tinted: false, snowCover: 0, wet: 0, leafK: 1, leafFall: 0, autumn: 0,   // year 0..4 (spring .. winter); tinted = the biome's colours follow the season
     ver: {part: 0, season: 0, weather: 0, leaf: 0}, frozen: false, seasonLock: null, weatherLock: null};
-  let spellLeft = 0, lastBiome = null;
+  let spellLeft = 0, lastBiome = null, lastW = null, instant = false;   // (instant: the next change eases, no front)
   let pv = null, truth = null;   // PREVIEW (below): what photo mode asks to see; the readings as they were before it
   const R = mulberry32(simSeed());   // the weather's next spell: the sim's own draws (core/rng.js), never presentation's
   // ---- persistence: {t (in-game hours since the start), weather, spellLeft}
@@ -173,16 +196,62 @@ export function createEnv({moods, biome, Q = flags}) {
   }
   let easeS = 0;   // s: setWeather's own ease for the spell it set (0: TUNE.ease)
   function setSpell(w) { if (w !== E.weather) E.ver.weather++; E.weather = w; spellLeft = lerp(TUNE.spell[0], TUNE.spell[1], R()); easeS = 0; }
+  // ---- FRONTS (the header): the edge's place along the wind (s, m: dot(x, dir)), which side the storm is on, the channels
+  // ahead (A) and behind (B) of it, the player's distance ahead of it (up, m), the storm's share of the light (0..1)
+  const FD = TUNE.front.dir, FL = Math.hypot(FD[0], FD[1]) || 1;
+  const F = E.front = {on: false, n: 0, s: 0, dir: [FD[0] / FL, FD[1] / FL], arrive: true, A: {}, B: {}, up: 0, storm: 0, wob: 0};
+  const darkOf = c => (c.cloud ?? 0) + (c.rain ?? 0) + (c.snow ?? 0) + (c.storm ?? 0);
+  // the weather behind the edge's share at u m ahead of it (0 well ahead .. 1 well behind); the edge's bend at a point
+  const behind = u => 1 - smooth((u + TUNE.front.band[0]) / (TUNE.front.band[0] + TUNE.front.band[1]));
+  const bend = (x, y) => TUNE.front.wobble[0] * Math.sin((y * F.dir[0] - x * F.dir[1]) * 2 * Math.PI / TUNE.front.wobble[1] + F.wob);
+  const aheadOf = (x, y) => x * F.dir[0] + y * F.dir[1] - F.s + bend(x, y);   // m ahead of the edge (downwind)
+  function startFront(W) {
+    const T = TUNE.front, p = focus && focus();
+    if (!p) return false;
+    const wet = c => (c.rain ?? 0) + (c.snow ?? 0) > .3;
+    if (Math.abs((W.cloud ?? 0) - E.sky.cloud) < T.dCloud && wet(W) === wet(E.sky)) return false;
+    for (const c of CH) { F.A[c] = E.sky[c]; F.B[c] = W[c] ?? (c === 'wind' ? 1 : 0); }
+    F.arrive = darkOf(F.B) > darkOf(F.A); F.n++; F.wob = F.n * 2.17;
+    F.s = 0; F.s = aheadOf(p.x, p.y) - T.lead;   // (the edge T.lead m upwind of the player, bend and all)
+    F.on = true;
+    return true;
+  }
+  function stepFront(dt) {
+    const T = TUNE.front, p = focus();
+    F.s += T.v * dt;
+    const up = F.up = aheadOf(p.x, p.y), sd = F.arrive ? -1 : 1;   // (sd: the storm side's way along u)
+    for (const c of CH) E.sky[c] = lerp(F.A[c], F.B[c], behind(up - sd * (T.at[c] ?? 0)));
+    // the light: the clear side's while it shows (arriving: until the edge leaves the view downwind; clearing: from when
+    // it comes into the view upwind), crossed over T.fade m
+    const vis = F.arrive ? smooth((up + T.view + T.fade) / (2 * T.fade)) : smooth((T.view + T.fade - up) / (2 * T.fade));
+    const St = F.arrive ? F.B : F.A, Cl = F.arrive ? F.A : F.B;
+    for (const c of CH) E.light[c] = lerp(St[c], Cl[c], vis);
+    F.storm = 1 - vis;
+    if (up < -(T.view + T.fade + T.band[0])) F.on = false;   // past the view: the spell's own channels from here
+  }
+  // the storm's share at a world point (0: the clear side's weather .. 1: the storm's), -1 without a front; a channel of the
+  // weather felt at a world point (features/weather.js: the rain falls where the storm is), = sky without a front
+  E.frontAt = (x, y) => { if (!F.on) return -1; const b = behind(aheadOf(x, y)); return F.arrive ? b : 1 - b; };
+  E.skyAt = (x, y, c) => F.on ? lerp(F.A[c], F.B[c], behind(aheadOf(x, y) - (F.arrive ? -1 : 1) * (TUNE.front.at[c] ?? 0))) : E.sky[c];
   function stepWeather(dt, dh) {
     const b = biome();
     if (b !== lastBiome) {   // a new biome: its climate takes over at once (no snow carried into the ember wastes)
       lastBiome = b; const C = climate();
-      if (!E.weatherLock && !(E.weather in C)) setSpell(pick());
+      if (!E.weatherLock && !(E.weather in C)) { setSpell(pick()); instant = true; }
     }
     if (E.weatherLock) { if (E.weather !== E.weatherLock) { E.weather = E.weatherLock; E.ver.weather++; } }
-    else if ((spellLeft -= dh) <= 0 || (!TUNE.precip && WEATHER[E.weather]?.precip)) setSpell(pick());
-    const W = WEATHER[E.weather] || WEATHER.fair, k = 1 - Math.exp(-dt / (easeS || TUNE.ease));
-    for (const c of CH) E.sky[c] += ((W[c] ?? (c === 'wind' ? 1 : 0)) - E.sky[c]) * k;
+    else if (((spellLeft -= dh) <= 0 && !F.on) || (!TUNE.precip && WEATHER[E.weather]?.precip)) setSpell(pick());   // (a natural spell waits for a front)
+    const W = WEATHER[E.weather] || WEATHER.fair;
+    if (E.weather !== lastW) {   // a new spell: a front, or the plain ease (an omen's own ease, a new biome)
+      const inst = instant || easeS > 0; lastW = E.weather; instant = false;
+      if (inst || !startFront(W)) F.on = false;
+    }
+    if (F.on) stepFront(dt);
+    else {
+      const k = 1 - Math.exp(-dt / (easeS || TUNE.ease));
+      for (const c of CH) { E.sky[c] += ((W[c] ?? (c === 'wind' ? 1 : 0)) - E.sky[c]) * k; E.light[c] = E.sky[c]; }
+      F.storm = 0;
+    }
     E.windLevel = E.sky.wind;
   }
   E.step = dt => {
@@ -211,7 +280,7 @@ export function createEnv({moods, biome, Q = flags}) {
     const nightW = (n0 === 'night' ? 1 - k : 0) + (n1 === 'night' ? k : 0);
     o.sun.az = angMix(sunAz(h), M.night.sun.az, nightW);
     // the weather on top: clouds soften the sun and its shadows and grey the light; fog / rain / snow thicken the haze
-    const S = E.sky, c = S.cloud, lum = o.amb[0] * .3 + o.amb[1] * .55 + o.amb[2] * .15;
+    const S = E.light, c = S.cloud, lum = o.amb[0] * .3 + o.amb[1] * .55 + o.amb[2] * .15;   // (the view's light: a front's clear side while it shows)
     o.sun.k *= 1 - .55 * c; o.shadow.a *= 1 - .8 * c;
     const HZ = bid === 'desert' ? DUST : HAZE, dust = bid === 'desert' ? DUST_K * clamp((S.wind - 1.2) / 1.6, 0, 1) : 0;
     for (let j = 0; j < 3; j++) {
@@ -282,20 +351,21 @@ export function createEnv({moods, biome, Q = flags}) {
     if (!o) {
       if (!truth) return;
       pv = null; for (const k of READINGS) E[k] = truth.r[k];
-      Object.assign(E.sky, truth.sky); Object.assign(E.ver, truth.ver);
+      Object.assign(E.sky, truth.sky); Object.assign(E.light, truth.light); Object.assign(E.ver, truth.ver); F.on = truth.front;
       leafKey = truth.leafKey; for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) leafOut[i][j] = truth.leaf[i * 3 + j];
       truth = null; return;
     }
     if (!truth) {   // (once, as the preview begins)
       const r = {}; for (const k of READINGS) r[k] = E[k];
-      truth = {r, sky: {...E.sky}, ver: {...E.ver}, leafKey, leaf: leafOut.flat()};
+      truth = {r, sky: {...E.sky}, light: {...E.light}, ver: {...E.ver}, leafKey, leaf: leafOut.flat(), front: F.on};
     }
     pv = o; syncClock();
     const T = truth.r, w = WEATHER[o.weather] ? o.weather : T.weather, W = WEATHER[w];
     if (w !== E.weather) { E.weather = w; E.ver.weather++; }
-    if (WEATHER[o.weather]) for (const c of CH) E.sky[c] = W[c] ?? (c === 'wind' ? 1 : 0);   // (at once: the world stands still)
-    else Object.assign(E.sky, truth.sky);
-    if (o.wind != null) E.sky.wind = o.wind;
+    if (WEATHER[o.weather]) for (const c of CH) E.sky[c] = E.light[c] = W[c] ?? (c === 'wind' ? 1 : 0);   // (at once: the world stands still)
+    else { Object.assign(E.sky, truth.sky); Object.assign(E.light, truth.light); }
+    F.on = WEATHER[o.weather] ? false : truth.front;   // (a previewed weather is everywhere: no front)
+    if (o.wind != null) E.sky.wind = E.light.wind = o.wind;
     E.windLevel = E.sky.wind;
     const sn = SEASONAL[biome()], shown = WEATHER[o.weather];
     E.snowCover = sn && shown && W.snow ? 1 : sn && o.year != null && E.season !== 'winter' && E.seasonNext !== 'winter' ? 0 : T.snowCover;
@@ -306,8 +376,9 @@ export function createEnv({moods, biome, Q = flags}) {
   E.label = () => `${E.clock()} ${E.part} · day ${E.day + 1}${E.seasonal ? ' · ' + E.season + (E.seasonK > .02 ? ' -> ' + E.seasonNext : '') : ''} · ${E.weather}`;
   if (url.time && PART_H[url.time] !== undefined) E.setPart(url.time);   // the old ?time=day|dusk|night
   syncClock(); lastBiome = biome();
-  for (const c of CH) E.sky[c] = (WEATHER[E.weather] || WEATHER.fair)[c] ?? (c === 'wind' ? 1 : 0);
+  for (const c of CH) E.sky[c] = E.light[c] = (WEATHER[E.weather] || WEATHER.fair)[c] ?? (c === 'wind' ? 1 : 0);
   E.windLevel = E.sky.wind;
   if (!E.weatherLock && (!spellLeft || (!TUNE.precip && WEATHER[E.weather]?.precip))) setSpell(pick());
+  lastW = E.weather; instant = !!E.weatherLock && E.weatherLock !== E.weather;   // (a ?weather= lock eases in from where the sky was set above, as before: no front)
   return E;
 }

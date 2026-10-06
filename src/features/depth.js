@@ -6,7 +6,9 @@
 //                boughs + icicles; rift: shards / crystal spires) along the world's four borders, drawn near the
 //                camera with parallax > 1 in the FRONT layer; they fade when the player is behind them
 //   clouds       cloud shadows drifting with the wind over ground and sprites alike (PRE layer), day and dusk, strength
-//                from the mood's sun shadow; 2 hard-edged levels, never a gradient
+//                from the mood's sun shadow; 2 hard-edged levels, never a gradient. A weather FRONT (sim/env.js) on its way:
+//                the clouds thicken toward its storm side (or break up toward its clear side) across its band, and the
+//                storm side lies darker, greyer and in shade (render/clouds.js)
 //   shafts       slanted additive light bands from the sun's side with dust motes (ADD layer); they turn with the camera
 //   reflections  the stream mirrors the Ranger (standing on the bank / a stepping stone, or leaping over it), bushes,
 //                tufts, rocks, pots and trees beside it, plus a sky glint, broken up by ripples (GROUND layer: ground
@@ -73,7 +75,10 @@ const DEG = Math.PI / 180;
 const TUNE = {
   fg: {on: false /* off by default: the user found the screen-edge silhouettes didn't look good in 3D (menu / ?fg=1) */, fade: [1, .66, .34], fadeStep: .09, body: [-10, -50, 10, 2], sway: 1, hyst: .12 /* 3D: slot swap hysteresis */},
   clouds: {on: true, tileM: [40, 30], cover: .31, core: .19, s: [.24, .12], time: {day: 1, dusk: .55, night: 0}, speed: 1.9, none: ['rift'],
-    mixC: .45 /* 3D: the mix colour = shadow colour x this (approximates the arena's multiply) */},
+    mixC: .45 /* 3D: the mix colour = shadow colour x this (approximates the arena's multiply) */,
+    // 3D: a front's storm side (rain, snow or storm there): its cover, and how much greyer / darker than the clear side's light
+    // it is drawn (x the mood's own difference, sim/env.js mood(): .35 c grey, ambient x (1 - .1 c - .12 rain - .2 storm))
+    front: {cover: .94, grey: 1, dark: 1, sun: 1, col: [.92, .95, 1]}},
   shafts: {on: true, max: 5, lenMax: 120, el: [38, 62], time: {day: .85, dusk: 1, night: .5}, night: ['frost', 'rift'], motes: 9, yawStep: 1 /* 3D: deg */},
   refl: {on: true, alpha: .6, tint: .38, ripple: 1, reach: 2.5, glowDim: .5, bed: -.18 /* 3D: the stream bed's height (m) = world.waterH */,
     height: 6 /* 3D: how tall a thing still mirrors whole (m over the water): how far up the GPU searches */},
@@ -282,8 +287,8 @@ export async function create(host) {
   }
 
   // ================================================================ CLOUD SHADOWS
-  const CL = {R: 0, val: null, H: null, lv: null, TW: 0, TH: 0, key: '', cover: -1, cv: null, pat: null, x: 0, y: 0};
-  function buildCloudLevels() {   // the arena's level map, in world metres (tile 40 x 30 m, 1 texel = 1 / PPM m)
+  const CL = {R: 0, val: null, H: null, noise: null, TW: 0, TH: 0, x: 0, y: 0, thr: new Map()};
+  function buildCloudLevels() {   // the arena's noise field, in world metres (tile 40 x 30 m, 1 texel = 1 / PPM m)
     const R = PPM, [TWm, THm] = TUNE.clouds.tileM, TW = Math.round(TWm * R), TH = Math.round(THm * R);
     const oct = [[3, 2, .56], [7, 5, .29], [15, 11, .15]].map(([nx, ny, w], k) => ({nx, ny, w, v: Float32Array.from({length: nx * ny}, (_, i) => hsh(i, k, 404))}));
     const val = new Float32Array(TW * TH), H = new Uint32Array(1024);
@@ -297,31 +302,53 @@ export async function create(host) {
       }
       val[y * TW + x] = v; H[Math.min(1023, v * 1024 | 0)]++;
     }
-    Object.assign(CL, {R, val, H, lv: new Uint8Array(TW * TH), TW, TH, key: '', cover: -1});
+    // the field as bins of 1 / 1024 for the GPU (render/clouds.js): / 4 in the first TH rows, the last 2 bits in the next TH
+    // (a byte texture). A texel is cloud where its bin reaches a threshold: the bins taken from val, as the old CPU levels were
+    const noise = new Uint8Array(TW * TH * 2);
+    for (let i = 0; i < TW * TH; i++) { const b = Math.min(1023, Math.floor(val[i] * 1024)); noise[i] = b >> 2; noise[TW * TH + i] = b & 3; }
+    Object.assign(CL, {R, val, H, noise, TW, TH}); CL.thr.clear();
   }
-  // the level map for a cover fraction (the noise field above is built once; this re-thresholds it, ~ms, on a change only)
-  function cloudLevels(cover) {
-    if (CL.cover === cover) return;
-    const {val, H, lv} = CL, core = cover * TUNE.clouds.core / TUNE.clouds.cover;
-    const qf = f => { let n = 0; const want = val.length * (1 - f); for (let i = 0; i < 1024; i++) { n += H[i]; if (n >= want) return (i + 1) / 1024; } return 1; };
-    const tE = qf(cover), tC = qf(core);
-    for (let i = 0; i < lv.length; i++) lv[i] = val[i] >= tC ? 2 : val[i] >= tE ? 1 : 0;
-    CL.cover = cover;
+  // the levels' thresholds for a cover fraction: the bins (0..1024) at which a texel is cloud (edge) / thick cloud (core): the
+  // histogram's quantiles, the same cut the old CPU level map made (a few per cover, cached: a cover is in 1/16ths or a front's)
+  function thresholds(cover) {
+    let t = CL.thr.get(cover); if (t) return t;
+    const {val, H} = CL, core = cover * TUNE.clouds.core / TUNE.clouds.cover;
+    const qf = f => { let n = 0; const want = val.length * (1 - f); for (let i = 0; i < 1024; i++) { n += H[i]; if (n >= want) return i + 1; } return 1024; };
+    CL.thr.set(cover, t = [qf(cover), qf(core)]);
+    return t;
   }
-  // the sky's cover from the world clock (sim/env.js sky.cloud: clear = no cloud shadows, more as it clouds over; the
-  // shadows themselves soften as the sun does under an overcast sky), quantised to 1/16; the old fixed cover without a clock
-  const coverNow = () => { const E = host.env; if (!E) return TUNE.clouds.cover; const c = E.sky.cloud; return c < .08 ? 0 : Math.round(Math.min(.78, .08 + .62 * c) * 16) / 16; };
-  // the cloud shadows for gfx.js COMP_FS (G.setClouds): the level map (re-uploaded when the cover changes), its colour and two
-  // alphas, and the ground plane's view -> texel affine with the drift. The map used to be painted into an RGBA tile and laid
-  // over the view as a pattern fill into the PRE layer every frame (and that layer uploaded); the shader samples the same texel
-  const CLS = {lv: null, TW: 0, TH: 0, ver: 0, col: [0, 0, 0], a1: 0, a2: 0, m: [0, 0, 0, 0], e: 0, f: 0};
+  // the sky's cover from the world clock (sim/env.js light.cloud: the view's sky; clear = no cloud shadows, more as it clouds
+  // over; the shadows themselves soften as the sun does under an overcast sky), quantised to 1/16; the old fixed cover without
+  // a clock. A front's sides: their own cloud's, the storm side's raised to TUNE.clouds.front.cover
+  const coverOf = c => c < .08 ? 0 : Math.round(Math.min(.78, .08 + .62 * c) * 16) / 16;
+  const coverNow = () => { const E = host.env; return E ? coverOf(E.light.cloud) : TUNE.clouds.cover; };
+  const sideCover = (ch, storm) => storm && ch.rain + ch.snow + ch.storm > .3 ? Math.max(coverOf(ch.cloud), TUNE.clouds.front.cover) : coverOf(ch.cloud);
+  // the cloud shadows for gfx.js COMP_FS (G.setClouds): the noise (uploaded once), the thresholds, its colour and two alphas, and
+  // the ground plane's view -> texel affine with the drift; a front's edge, sides and storm look. The map used to be painted into
+  // an RGBA tile and laid over the view as a pattern fill into the PRE layer every frame (and that layer uploaded); the shader
+  // samples the same texel
+  const CLS = {lv: null, TW: 0, TH: 0, ver: 0, col: [0, 0, 0], a1: 0, a2: 0, T: [1024, 1024, 1024, 1024], Q: [1024, 1024, 1024, 1024], m: [0, 0, 0, 0], e: 0, f: 0, front: null,
+    fr: {dir: null, s: 0, band: null, bend: [0, 0, 0], storm: 0, arrive: true, grey: [1, 1, 1], greyK: 0, darkK: 0, sunK: 0}};
+  const ambK = c => 1 - .1 * c.cloud - .12 * c.rain - .2 * c.storm;   // (sim/env.js mood(): the weather's share of the ambient)
   function drawClouds() {
     if (!host.G.setClouds) return false;
-    const tn = timeName(), k = (TUNE.clouds.time[tn] ?? 0) * (TUNE.clouds.none.includes(biome) ? 0 : 1), M = host.mood, cover = coverNow();
+    const E = host.env, Fr = E && E.front && E.front.on && !E.previewing ? E.front : null;
+    const tn = timeName(), k = (TUNE.clouds.time[tn] ?? 0) * (TUNE.clouds.none.includes(biome) ? 0 : 1), M = host.mood;
+    const St = Fr && (Fr.arrive ? Fr.B : Fr.A), cA = Fr ? sideCover(Fr.A, Fr.A === St) : coverNow(), cB = Fr ? sideCover(Fr.B, Fr.B === St) : cA;
     const a = M ? M.shadow.a : 0, s = Math.min(1.2, a / .46) * k;
-    if (s <= .01 || cover <= 0) return false;
+    if (s <= .01 || cA + cB <= 0) return false;
     if (!CL.val) buildCloudLevels();
-    if (CL.cover !== cover || CLS.lv !== CL.lv) { cloudLevels(cover); CLS.lv = CL.lv; CLS.TW = CL.TW; CLS.TH = CL.TH; CLS.ver++; }
+    if (CLS.lv !== CL.noise) { CLS.lv = CL.noise; CLS.TW = CL.TW; CLS.TH = CL.TH; CLS.ver++; for (let i = 0; i < 4; i++) CLS.Q[i] = thresholds((i + 1) / 5)[0]; }   // (the quantiles a front's storm tears by)
+    const tA = thresholds(cA), tB = thresholds(cB); CLS.T[0] = tA[0]; CLS.T[1] = tA[1]; CLS.T[2] = tB[0]; CLS.T[3] = tB[1];
+    CLS.front = null;
+    if (Fr) {   // the front: its edge, and its storm side against the light (the clear side's while it shows)
+      const T = E.TUNE.front, f = CLS.fr, Cl = Fr.arrive ? Fr.A : Fr.B, FT = TUNE.clouds.front, dc = Math.max(0, St.cloud - Cl.cloud);
+      f.dir = Fr.dir; f.s = Fr.s; f.band = T.band; f.bend[0] = T.wobble[0]; f.bend[1] = 2 * Math.PI / T.wobble[1]; f.bend[2] = Fr.wob;
+      f.storm = Fr.storm; f.arrive = Fr.arrive; f.grey = FT.col;
+      f.greyK = Math.min(1, .35 * dc * FT.grey); f.darkK = Math.min(.8, Math.max(0, 1 - ambK(St) / ambK(Cl)) * FT.dark);
+      f.sunK = Math.min(1, Math.max(0, 1 - (1 - .55 * St.cloud) / (1 - .55 * Cl.cloud)) * FT.sun);   // (mood(): the sun's strength x (1 - .55 c))
+      CLS.front = f;
+    }
     const c = M.shadow.c, mx = TUNE.clouds.mixC, R = CL.R;
     for (let i = 0; i < 3; i++) CLS.col[i] = Math.round(255 * c[i] * mx) / 255;
     CLS.a1 = Math.round(255 * TUNE.clouds.s[1] * s) / 255; CLS.a2 = Math.round(255 * TUNE.clouds.s[0] * s) / 255;

@@ -109,7 +109,7 @@ cv.attach({G, canvas, hdc, features}); cv.fit(); addEventListener('resize', () =
 // host.time is its day / dusk / night bucket (dawn counts as dusk), host.mood its blended mood, host.setTime jumps it
 // THE STAGE (world/stage.js): the biome, the built world, the props' display mode, the trees
 const stage = createStage({G, ctxO, PPM, PPMH, features, flags: Q});
-const env = createEnv({moods: MOODS, biome: () => stage.biome.id, Q});
+const env = createEnv({moods: MOODS, biome: () => stage.biome.id, Q, focus: () => P});   // (focus: where the weather is felt: a front reaches the player)
 // APP: the engine's own context for the modules split out of this file (view/hero.js, ...): live getters, so a module
 // reads the current yaw / zoom / player without this file passing them every call. (Features get `host`, below.)
 const app = {
