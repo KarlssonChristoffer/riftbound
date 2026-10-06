@@ -77,7 +77,7 @@ void main() {
     let r = a.__range; if (!r) { r = a.__range = {start: 0, count: 0}; a.clearUpdateRanges = popRanges; }
     r.start = 0; r.count = n * 4; a.clearUpdateRanges(); a.updateRanges.push(r); a.needsUpdate = true;
   };
-  let n = 0;
+  let n = 0, warm = false;
   return {
     get count() { return n; },
     put(x, y, h, len, ang, k, variant, width) {
@@ -89,7 +89,9 @@ void main() {
     frame() {
       if (n) { range(iP, n); range(iA, n); }
       geo.instanceCount = n; uSnap.value.set(G.VW, G.VH); uZoom.value = G.view.zoom;
-      mesh.userData.frame = n ? G.frame : -1;   // shown on this frame's render only (and only with flashes)
+      // shown on this frame's render only, and only with flashes; and once with none on the first frame, so its shader
+      // compiles at boot, not on the first shot (render/puffs.js)
+      mesh.userData.frame = n || !warm ? G.frame : -1; warm = true;
       n = 0;
     },
   };
