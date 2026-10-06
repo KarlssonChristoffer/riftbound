@@ -32,7 +32,7 @@
 //   const proj = createProjectiles({world: () => world, ents: () => ents, features, events, opt: () => opt, toWorld, PPM, PPMH, mods})
 //   proj.spawn(o) | proj.step(dt) | proj.draw(host) | proj.arrows / dust / hits
 //   proj.lerpBegin(alpha) / lerpEnd(): drawn between sim steps (an arrow's lx / ly / lh: where it was at the step's start)
-import {elev, inStream, PROP_TOP} from '../world/world.js';
+import {elev, inStream, topOfProp} from '../world/world.js';   // (topOfProp: a prop's own top, the stone walls' broken ones too)
 import {rgbOf} from '../core/color.js';
 import {clearArray, hypot2, hypot3} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
@@ -130,7 +130,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
       const tree = world.treeHit?.(a.x - a.vx * dt, a.y - a.vy * dt, a.h - a.vh * dt, a.x, a.y, a.h);
       if (tree) { a.x = tree.x; a.y = tree.y; a.h = tree.h; a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
       else if (!a.stuck && ents.near(a.x, a.y, 0, nearS).some(p => !p.broken && !p.gone && !(a.hitSet && a.hitSet.has(p)) && !world.itemOf(p)?.pose && (p.rect ? a.x > p.rect[0] && a.x < p.rect[2] && a.y > p.rect[1] && a.y < p.rect[3] : p.r > .3 && Math.hypot(p.x - a.x, p.y - a.y) < p.r)
-        && a.h > (p.z || 0) && a.h < (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5))) { a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
+        && a.h > (p.z || 0) && a.h < (p.z || 0) + (topOfProp(p) ?? 2.5))) { a.stuck = true; a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
       else if (!a.stuck && a.h <= ground && ground === 0 && inStream(a.x, a.y)) { a.life = -9; events.push({type: 'arrow.splash', x: a.x, y: a.y, small: true}); features.forEach(f => f.onArrowStuck?.(a)); }
       else if (!a.stuck && (a.h <= ground || a.life <= 0)) { a.stuck = true; a.h = Math.max(ground, Math.min(a.h, ground + 2.4)); a.life = 3; features.forEach(f => f.onArrowStuck?.(a)); }
     }
@@ -188,7 +188,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
     for (const p of ents.near(x, y, 0, nearS)) {
       if (p.broken || p.gone || (a.hitSet && a.hitSet.has(p)) || world.itemOf(p)?.pose) continue;
       if (!(p.rect ? x > p.rect[0] && x < p.rect[2] && y > p.rect[1] && y < p.rect[3] : p.r > .3 && hypot2(p.x - x, p.y - y) < p.r)) continue;
-      if (h > (p.z || 0) && h < (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5)) return p;
+      if (h > (p.z || 0) && h < (p.z || 0) + (topOfProp(p) ?? 2.5)) return p;
     }
     return null;
   }
@@ -198,7 +198,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
     if ((a.rico || 0) >= RICO.max) return false;
     const mat = PROP_MAT[p.kind];
     if (mat !== 'metal' && (mat !== 'stone' || (world.biome?.id === 'desert' && p.kind.startsWith('wall')))) return false;   // (adobe stops it)
-    const ex = x - px, ey = y - py, eh = h - ph, top = (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5);
+    const ex = x - px, ey = y - py, eh = h - ph, top = (p.z || 0) + (topOfProp(p) ?? 2.5);
     let nx = 0, ny = 0, nh = 0, t = -1;
     if (ph >= top && eh < 0) { t = (top - ph) / eh; nh = 1; }   // down onto its top
     else if (p.rect) {   // the side crossed last is the one it came in through

@@ -38,7 +38,7 @@ const LAYER = [.3, .6], DEPTH = .6, EXT = .12, CAP_SINK = .005, CAP_SLOPE = .08;
 const JOINT_HARD = [1.1, 3.2], JOINT_SOFT = [.45, 1.3], FACET = [.25, .5], EXAG = 1.8;
 
 // the geometry being built: flat-shaded polygons, each turned to face along a hint direction (or away from a centre)
-function sink() {
+export function sink() {   // (walls3d.js builds its stones with it too)
   const pos = [], nrm = [], part = [], fam = [], bias = [], fixed = [];
   let pid = 0;
   const B = {
@@ -124,7 +124,7 @@ function cutsOf(run, fr) {
 
 // a box on its own axes (unit vectors u, v up, w) round centre c, half sizes hu, hv, hw; jit: corner jitter (a stone), taper: the
 // top's corners drawn in toward the centre
-function cuboid(B, c, u, v, w, hu, hv, hw, f, p, b, R = null, jit = 0, taper = 1) {
+export function cuboid(B, c, u, v, w, hu, hv, hw, f, p, b, R = null, jit = 0, taper = 1) {
   const C = [];
   for (const sv of [-1, 1]) for (const sw of [-1, 1]) for (const su of [-1, 1]) {
     const k = sv > 0 ? taper : 1, ju = R ? 1 + (R() - .5) * jit : 1, jv = R ? 1 + (R() - .5) * jit : 1, jw = R ? 1 + (R() - .5) * jit : 1;

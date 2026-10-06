@@ -41,6 +41,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, GROUNDS, WEST_ON, WEST, WEST_LAND, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, TERRAIN, MESA, CLIMBS, CASCADES, mesaAt, groundDrawn, CLEFTS, cleftWall, inCleft, BRIDGES} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
 import {cliffGeometry} from './cliffs3d.js';
+import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
@@ -177,6 +178,10 @@ const WALL_ID = {wall_n: 2, wall_s: 3, wall_w: 4, wall_e: 5};
 export const PROP_TOP = {wall_n: 2.4, wall_w: 2.4, wall_e: 2.4, wall_s: .9, tower: 3.9, gatepost: 2.85};
 // a feature's own prop kinds: how high each stops arrows (registered once, at its module's load)
 export function propTop(table) { Object.assign(PROP_TOP, table); }
+// a prop's own top where the world built it its own height (the stone walls' pieces, towers and posts: walls3d.js, broken to their
+// own heights), else its kind's (PROP_TOP); undefined for a kind with neither. Arrows, gadgets, the lasso and the gunmen read it
+const TOPS = new WeakMap();
+export const topOfProp = p => TOPS.get(p) ?? PROP_TOP[p.kind];
 
 // ---------------------------------------------------------------- water: the sampler
 export const FALL_ALPHA = 252;   // a cliff / face texel with this alpha is falling water (SURF_FS streams it); 250 = a glowing fall (lava)
@@ -861,17 +866,36 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // a crown overhangs: in the top-down height map it would stand as a solid pillar and black out the light under it
   // (props cast into the cached static sun shadow, gfx mesh {static}; the swaying 3D trees cast every frame). A tree brings its
   // autumn ramps (trees3d.js B.autumn): its crown turns spray by spray with the season (gfx.js MESH_FS)
+  // the walls in stone (walls3d.js; ?walls=old: the kit's 1 m segments): each run (layout.js walls) built once and cut into a piece per
+  // segment prop on its line (between the midpoints of their centres), each piece moved into its prop's frame: the prop's mesh
+  // (towers and gateposts too: each its own geometry; every piece's own top goes to topOfProp)
+  const wallGeo = new Map(), wo = {fam: famOf, cover: R.cov ? famOf('cover') : null}, wground = TERRAIN_ON ? (x, z) => elev(x, z) : null;
+  const own = (p, g, top) => { if (g) { g.translate(-p.x, -(p.z || 0), -p.y); g.computeBoundingSphere(); g.computeBoundingBox(); disposers.push(() => g.dispose()); } wallGeo.set(p, g); TOPS.set(p, top); };
+  if (flags.get('walls') !== 'old') for (const run of layout.walls || []) {
+    if (run.type === 'tower' || run.type === 'post') {   // the tower / post prop standing there
+      const kind = run.type === 'tower' ? 'tower' : 'gatepost', p = props.find(q => q.kind === kind && Math.hypot(q.x - run.at[0], q.y - run.at[1]) < .1); if (!p) continue;
+      const r = (run.type === 'tower' ? towerRun : postRun)({...run, x: p.x, z: p.y, ground: wground}, wo);
+      own(p, r.geo, r.top); continue;
+    }
+    const [ax, az] = run.a, L = Math.hypot(run.b[0] - ax, run.b[1] - az), ux = (run.b[0] - ax) / L, uz = (run.b[1] - az) / L;
+    const sOf = p => (p.x - ax) * ux + (p.y - az) * uz, segs = props.filter(p => p.kind === run.kind && Math.abs(-(p.x - ax) * uz + (p.y - az) * ux) < .3 && sOf(p) > -.1 && sOf(p) < L + .1).sort((p, q) => sOf(p) - sOf(q));
+    if (!segs.length) continue;
+    const S = segs.map(sOf), cuts = [0, ...S.slice(1).map((v, i) => (S[i] + v) / 2), L];
+    const {geos, tops} = wallRun({...run, cuts, ground: wground}, wo);
+    segs.forEach((p, i) => own(p, geos[i] || null, tops[i]));
+  }
   const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose, static: !it.pose, autumn: it.pose?.autumn}); if (it.pose) m.sm.layers.disable(1); return m; };
   for (const p of props) {
     const z0 = p.z || 0;
     if (p.outside && biome.hole?.(p.x, p.y, ctxO)) continue;   // over the ravine / in the stream
     const sp = biome.sprite(p, ctxO);
-    const tm = treeOf(p), st = stateOf(p), geo = tm ? tm.geo : st && haveGlb ? await glbGeometry(loader, st) : null;
+    const tm = treeOf(p), st = stateOf(p), geo = wallGeo.has(p) ? wallGeo.get(p) : tm ? tm.geo : st && haveGlb ? await glbGeometry(loader, st) : null;
+    if (wallGeo.has(p) && !geo) continue;   // (a wall's piece with nothing left standing in it)
     const obj = WALL_ID[p.kind] ?? nextId++;
     const it = {p, st, obj, sp: null, hover: 0, pose: tm, ...ITEM0};
     if (geo) {
       it.live = liveOf(it, geo, p.x, z0, p.y);
-      const yw = yawIdx && yawOf(p, st);
+      const yw = yawIdx && !wallGeo.has(p) && yawOf(p, st);   // (a stone wall's piece has no pre-renders)
       if (yw && yawIdx.frames[yw[0] + '_y0']) {
         it.yaw = {base: yw[0], off: yw[1], card: null};   // (its card: made the first time the pre-renders show, update(); 90 hidden cards in every scene cost each pass a walk)
       }

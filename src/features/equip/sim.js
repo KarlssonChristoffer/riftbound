@@ -29,7 +29,7 @@ import {GADGETS, GADGET_IDS, SHOP, THROW, fits} from '../../content/gadgets.js';
 import {createLassoSim} from './lasso.js';
 import {mulberry32} from '../../core/rng.js';
 import {clamp, hypot2, TAU} from '../../core/mathx.js';
-import {PROP_TOP, onGround, TERRAIN_ON, steep} from '../../world/world.js';
+import {topOfProp, onGround, TERRAIN_ON, steep} from '../../world/world.js';
 
 // how high a prop stops a thrown gadget (m over its base): the walls' own (world.js PROP_TOP), these, else 1
 const TOP = {crate: .8, barrel: .9, barrel_x: .9, pot: .5, crystal: 1.2, dummy: 1.4, chest: .6, pillar: 2.6, pillar_broken: 1.4,
@@ -97,7 +97,7 @@ export function createEquipSim(host) {
       if (p === skip || p.broken || p.gone || p.outside || creature(p) || p.kind === 'gadget') continue;
       if (p.kind === 'tree') { tree = true; continue; }
       if (!(p.rect || p.r > .2)) continue;
-      const z0 = p.z || 0, top = z0 + (PROP_TOP[p.kind] ?? TOP[p.kind] ?? 1);
+      const z0 = p.z || 0, top = z0 + (topOfProp(p) ?? TOP[p.kind] ?? 1);
       if (h < z0 - .05 || h > top) continue;
       if (p.rect ? x > p.rect[0] - rad && x < p.rect[2] + rad && y > p.rect[1] - rad && y < p.rect[3] + rad : hypot2(p.x - x, p.y - y) < p.r + rad) return p;
     }
@@ -148,14 +148,14 @@ export function createEquipSim(host) {
     let best = null, bd = G.snap;
     for (const p of ents.near(gx, gy, G.snap + 1, nearA)) {
       if (p.broken || p.gone || p.outside || creature(p) || p.kind === 'gadget' || p.kind === 'scarecrow' || !(p.rect || p.r > .2)) continue;
-      if ((PROP_TOP[p.kind] ?? TOP[p.kind] ?? 1) < .3) continue;
+      if ((topOfProp(p) ?? TOP[p.kind] ?? 1) < .3) continue;
       const e = p.rect ? hypot2(clamp(gx, p.rect[0], p.rect[2]) - gx, clamp(gy, p.rect[1], p.rect[3]) - gy) : Math.max(0, hypot2(p.x - gx, p.y - gy) - p.r);
       if (e < bd) { bd = e; best = p; }
     }
     if (best) {
       const px = best.rect ? clamp(gx, best.rect[0], best.rect[2]) : best.x, py = best.rect ? clamp(gy, best.rect[1], best.rect[3]) : best.y;
       if (hypot2(px - P.x, py - P.y) < G.range + 1) {
-        A.prop = best; A.ground = false; A.ax = px; A.ay = py; A.ah = (best.z || 0) + Math.min(1.2, (PROP_TOP[best.kind] ?? TOP[best.kind] ?? 1) * .7);
+        A.prop = best; A.ground = false; A.ax = px; A.ay = py; A.ah = (best.z || 0) + Math.min(1.2, (topOfProp(best) ?? TOP[best.kind] ?? 1) * .7);
         A.stop = (best.rect ? 0 : best.r) + G.stop + .25; A.x = px; A.y = py; A.d = hypot2(px - P.x, py - P.y);
       }
     }

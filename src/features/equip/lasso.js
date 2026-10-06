@@ -26,7 +26,7 @@
 import {TUNE, ANCHOR_TOP} from '../../content/lasso.js';
 import {GADGETS} from '../../content/gadgets.js';
 import {clamp, hypot2, hypot3, TAU} from '../../core/mathx.js';
-import {PROP_TOP, walkable} from '../../world/world.js';
+import {topOfProp, walkable} from '../../world/world.js';
 
 const MOVABLE = new Set(['crate', 'barrel', 'barrel_x']);
 const TOP = {lasso_snag: 4.3, crate: .8, barrel: .9, barrel_x: .9, pot: .5, rock: .5, rock_big: 1.1, brazier: 1.1, torch: 1.7, well: .9, bench: .5, stall: 2, woodpile: .4,
@@ -64,7 +64,9 @@ export function createLassoSim(host, eq) {
   const brazier = p => !!p && p.kind === 'brazier' && !p.gone && !p.unlit;
   function brazierAt(x, y) { for (const p of ents.near(x, y, 1.2, nearA)) if (brazier(p) && hypot2(p.x - x, p.y - y) < .75) return p; return null; }
   const bodyMid = p => (p.z || 0) + (p.h || 0) + (p.hitH ?? 1.6) * .55;
-  const topOf = p => PROP_TOP[p.kind] ?? TOP[p.kind] ?? 1.2;
+  const topOf = p => topOfProp(p) ?? TOP[p.kind] ?? 1.2;
+  // (a tower's or a gatepost's own top where the world built it its own: a broken one, a stump: world.js topOfProp)
+  const anchorTop = p => p.kind === 'tower' || p.kind === 'gatepost' ? topOfProp(p) ?? ANCHOR_TOP[p.kind] : ANCHOR_TOP[p.kind];
 
   // ---------------------------------------------------------------- anchor segments (world): the 3D trees' limbs high enough,
   // the lasso's own anchors (eq.anchors()), tall props' tops (ANCHOR_TOP). A flat scratch: x0 y0 h0 x1 y1 h1 r; src per segment
@@ -92,7 +94,7 @@ export function createLassoSim(host, eq) {
         for (const b of highBones(pose)) addSeg(p.x + (b[0] * c + b[2] * s) * k, p.y + (-b[0] * s + b[2] * c) * k, z + b[1] * k,
           p.x + (b[3] * c + b[5] * s) * k, p.y + (-b[3] * s + b[5] * c) * k, z + b[4] * k, Math.max(b[6], b[7]) * k, p);
       } else if (ANCHOR_TOP[p.kind] !== undefined && hypot2(p.x - x, p.y - y) < r + 1) {
-        const h = (p.z || 0) + ANCHOR_TOP[p.kind]; addSeg(p.x, p.y, h, p.x, p.y, h, .3, p);
+        const h = (p.z || 0) + anchorTop(p); addSeg(p.x, p.y, h, p.x, p.y, h, .3, p);
       }
     }
     const A = eq.anchors?.(); if (A) for (let i = 0; i < A.n; i++) { const a = A.seg, j = i * 7; if (hypot2((a[j] + a[j + 3]) / 2 - x, (a[j + 1] + a[j + 4]) / 2 - y) < r + 4) addSeg(a[j], a[j + 1], a[j + 2], a[j + 3], a[j + 4], a[j + 5], a[j + 6], A.src[i]); }

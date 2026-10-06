@@ -538,6 +538,30 @@ export function buildLayout(seed = 7) {
     if (!gate(y + .5, cy)) add('wall_e', x1 + .25, y + .5, {rect: [x1, y, x1 + .5, y + 1]});
   }
   for (const [x, y] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) add('tower', x, y, {r: .7});
+  // the walls as RUNS for world/walls3d.js (?walls=old: the kit's 1 m segments): its line, full height, thickness, how much of it is
+  // broken (ruin) and the stretches it keeps whole (keep: m along it from a). Each 1 m segment above stays the wall's logic (collision,
+  // arrows, perches, sounds); world.js gives it its piece of the run as its mesh. The NORTH wall (the range lane's backdrop): two runs
+  // from the corner towers to the gate's posts, broken in their middles, whole by the towers and by the gate (its torches and banners
+  // hang there: features/lights.js, wind.js)
+  // The WEST wall: whole by the west gate (its sconces, lights.js: cy +- 2.6), broken toward the south-west tower, which fell. The
+  // EAST wall, the trail's face (its banners outside at cy +- 2.6, wind.js; torches inside at cy - 3.2 and cy + 5.4): mostly whole.
+  // The SOUTH wall stays low (the camera looks over it), broken here and there. TOWERS (type 'tower', at a tower prop): the north-east
+  // nearly whole, the north-west and south-east broken round their parapets, the south-west fallen to a stump, its stones out over
+  // the corner; GATEPOSTS (type 'post'): the west gate's south one broken, its capstone at its foot
+  const walls = [
+    {kind: 'wall_n', a: [x0, y0 - .25], b: [cx - 1, y0 - .25], h: 2.4, d: .5, ruin: .55, keep: [[0, 1.3], [cx - 1 - x0 - 3.2, 99]], seed: 31},
+    {kind: 'wall_n', a: [cx + 1, y0 - .25], b: [x1, y0 - .25], h: 2.4, d: .5, ruin: .55, keep: [[0, 3], [x1 - cx - 1 - 1.3, 99]], seed: 37},
+    {kind: 'wall_w', a: [x0 - .25, y0], b: [x0 - .25, cy - 1], h: 2.4, d: .5, ruin: .6, keep: [[0, 1.3], [cy - 1 - y0 - 3.4, 99]], seed: 41},
+    {kind: 'wall_w', a: [x0 - .25, cy + 1], b: [x0 - .25, y1], h: 2.4, d: .5, ruin: .7, keep: [[0, 3]], seed: 43},
+    {kind: 'wall_e', a: [x1 + .25, y0], b: [x1 + .25, cy - 1], h: 2.4, d: .5, ruin: .45, keep: [[0, 1.3], [cy - 1 - y0 - 4.3, 99]], seed: 47},
+    {kind: 'wall_e', a: [x1 + .25, cy + 1], b: [x1 + .25, y1], h: 2.4, d: .5, ruin: .45, keep: [[0, 3], [3.6, 5.2], [y1 - cy - 1 - 1.3, 99]], seed: 53},
+    {kind: 'wall_s', a: [x0, y1 + .25], b: [cx - 1, y1 + .25], h: .9, d: .5, ruin: .6, keep: [[cx - 1 - x0 - 1.5, 99]], seed: 59},
+    {kind: 'wall_s', a: [cx + 1, y1 + .25], b: [x1, y1 + .25], h: .9, d: .5, ruin: .5, keep: [[0, 1.5], [x1 - cx - 1 - 1.3, 99]], seed: 61},
+    {type: 'tower', at: [x0, y0], S: 1.5, h: 3, d: .42, ruin: .45, seed: 71}, {type: 'tower', at: [x1, y0], S: 1.5, h: 3, d: .42, ruin: .15, seed: 73},
+    {type: 'tower', at: [x1, y1], S: 1.5, h: 3, d: .42, ruin: .55, seed: 79}, {type: 'tower', at: [x0, y1], S: 1.5, h: 3, d: .42, stump: 1.25, out: [-.7, .7], seed: 83},
+    ...[[cx - 1.6, y0], [cx + 1.6, y0], [cx - 1.6, y1], [cx + 1.6, y1], [x0, cy - 1.6], [x0, cy + 1.6], [x1, cy - 1.6], [x1, cy + 1.6]]
+      .map((at, i) => ({type: 'post', at, S: .72, h: 2.6, broken: i === 5, seed: 91 + i})),
+  ];
   for (const [x, y] of [[cx - 1.6, y0], [cx + 1.6, y0], [cx - 1.6, y1], [cx + 1.6, y1], [x0, cy - 1.6], [x0, cy + 1.6], [x1, cy - 1.6], [x1, cy + 1.6]])
     add('gatepost', x, y, {r: .35});
 
@@ -658,7 +682,7 @@ export function buildLayout(seed = 7) {
     }
     for (const [kind, x, y, extra] of WEST_PROPS) add(kind, x, y, {...extra});
   }
-  return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5}, west: WEST_ON ? WEST : null,
+  return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5}, west: WEST_ON ? WEST : null, walls,
     trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt, spring: SPRING, rill: RILL, fall: FALL, pool: POOL, outflow: OUTFLOW, inRill, rillAt, inPool, poolEdge, inOutflow, outflowAt,
     mesa: MESA, mesaAt, climbs: CLIMBS, cascades: CASCADES, clefts: CLEFTS, inCleft, bridges: BRIDGES};
 }

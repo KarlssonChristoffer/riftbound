@@ -33,7 +33,7 @@
 import {mulberry32} from '../../core/rng.js';
 import {hypot2, hypot3, TAU} from '../../core/mathx.js';
 import {createNav} from '../../world/nav.js';
-import {PLAY, TRAIL, WORLD, elev, inStream, PROP_TOP, TERRAIN_ON} from '../../world/world.js';
+import {PLAY, TRAIL, WORLD, elev, inStream, topOfProp, TERRAIN_ON} from '../../world/world.js';
 // walkable terrain (docs/TERRAIN.md): a gunman's z follows the ground under him as he walks, is shoved or lands; flat world: no change
 const toGround = TERRAIN_ON ? p => { p.z = elev(p.x, p.y); } : () => {};
 import {TYPES, TUNE} from '../../content/foes.js';
@@ -89,7 +89,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
     for (const p of ents.near(x, y, 0, nearL)) {
       if (p.broken || p.gone || p.kind === 'gunman' || host.itemOf(p)?.pose) continue;
       if (!(p.rect ? x > p.rect[0] && x < p.rect[2] && y > p.rect[1] && y < p.rect[3] : p.r > .3 && hypot2(p.x - x, p.y - y) < p.r)) continue;
-      if (h > (p.z || 0) && h < (p.z || 0) + (PROP_TOP[p.kind] ?? 2.5)) return true;
+      if (h > (p.z || 0) && h < (p.z || 0) + (topOfProp(p) ?? 2.5)) return true;
     }
     return false;
   }

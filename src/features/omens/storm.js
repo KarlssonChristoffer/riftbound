@@ -19,6 +19,7 @@ import {TUNE as ALL} from '../../content/omens.js';
 import {viewRandom} from '../../core/rng.js';
 import {clamp, smooth, hypot2} from '../../core/mathx.js';
 import {TAU, C} from './kit.js';
+import {topOfProp} from '../../world/world.js';   // (a broken tower's own top: the rods)
 
 const T = ALL.storm;
 // what draws a bolt: m above the prop's foot where it ends (tall things, iron); a shorter reach than your iron (ROD_REACH)
@@ -61,7 +62,8 @@ export function createStorm(host, K) {
     if (!rod) {
       let pd = ROD_REACH;
       for (const p of host.entities.near(x, y, ROD_REACH, near)) {
-        const top = ROD[p.kind]; if (!top || p.broken || p.gone) continue;
+        const rod = ROD[p.kind], own = rod && (p.kind === 'tower' || p.kind === 'gatepost') ? topOfProp(p) : undefined, top = own !== undefined ? Math.min(rod, own) : rod;   // (a broken tower's own top: world.js)
+        if (!top || p.broken || p.gone) continue;
         const d = hypot2(p.x - x, p.y - y); if (d < pd) { pd = d; bx = p.x; by = p.y; bh = (p.z || 0) + top; rod = p.kind; }
       }
     }

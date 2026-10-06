@@ -652,7 +652,7 @@ export async function create(host) {
     const sp = host.biome.sprite(tp, ctx); return sp ? (tp.z || 0) + (sp.pivot[1] - TUNE.towerTop) / ctx.PPMH : null;
   }
   function pennant(tp, pal) {   // on a mast on top of a tower
-    const hTop = towerTop(tp); if (hTop === null) return null;
+    const hTop = towerTop(tp); if (hTop === null || hTop - (tp.z || 0) < 2.5) return null;   // (no mast on a tower fallen to a stump: world/walls3d.js)
     const mast = 1.05, len = .78, hgt = .3, top = hTop + mast - .05, wPx = len * ctx.PPM;
     const pc = grid({cols: 6, rows: 3, org: [tp.x + .04, tp.y + .01, top], ax: [len, 0, 0], ay: [0, 0, -hgt], pin: (r, k) => k === 0,
       k: 4.5, flut: 1.4, waves: .9, freq: 2.2, bend: .45, dist: u => u,
