@@ -16,8 +16,9 @@
 // grass in front of the player never draws the x-ray rim. Grass casts no shadow and is in no point-light height map.
 //
 // API: createGrass(G) -> {setBlades(a, b, n, ramps, flowers), step(dt), setWind(buf | null), setPushers(arr, n), blast(x, z, r, k),
-//   setLook(snowK, flowerK), setFlowerShape(v), setVisible(v), dispose(), mesh, count}
+//   setLook(snowK, flowerK), setFlowerShape(v), setCalm(v), setVisible(v), dispose(), mesh, count}
 //   setFlowerShape: 0 a 2 px head (default), 1 a V of two petals over a centre, 3 px wide (the cool palette: features/grass.js)
+//   setCalm: 1 the blades in the ground's own tone with light tips (a calm sward), 0 each blade a tone lighter (features/grass.js)
 //   a, b: Float32Array(n * 4) per blade: a = (root X, root Y (ground height), root Z, height m), b = (ramp * 4 + tone,
 //   phase 0..1, flower colour 0 none / 1..4, rest lean: whole part = its size in 32nds of the height, fraction = its angle / 2 pi);
 //   ramps: 4 x [highlight, tone 0 .. 3] as [r, g, b] 0..1
@@ -62,6 +63,7 @@ in vec3 position;   // x: side (-.5 / .5 art px), y: t (0 root .. 1 tip)
 in vec4 iA; in vec4 iB;
 uniform mat4 viewMatrix, projectionMatrix;
 uniform vec2 uRes; uniform float uZoom, uTime, uSnowK, uFlowerK, uFlowerV;
+uniform float uCalm;   // 1: a calm sward (setCalm): the blades in the ground's own tone, light tips, a few dark strokes; 0: each a tone lighter
 uniform vec4 uK;   // (lean per m/s of wind, flutter at rest, flutter per unit of gust, max lean) in blade heights
 uniform vec2 uSheen;   // the wind's lean (blade heights) where the sheen starts / is full
 uniform vec4 uPush[${MAX_PUSH}]; uniform int uNP;   // (x, z, radius, strength in blade heights)
@@ -111,6 +113,12 @@ void main() {
   int ri = int(iB.x + .5), rp = ri / 4 * 5, tn = ri - ri / 4 * 4 + 1;
   bool dark = fract(ph * 5.13) < .25;
   int body = dark ? tn : tn - 1, tip = max(0, tn - (dark ? 1 : fract(ph * 7.31) < .45 ? 2 : 1));
+  // the calm sward (the user's reference meadows): a field reads as ONE tone, its blades only showing where they stand against
+  // something else (a path, a shadow's edge, a stone: a jagged fringe) and as light tips; a tenth darker (depth in the sward)
+  if (uCalm > .5) { dark = fract(ph * 5.13) < .1; body = dark ? min(tn + 1, 4) : tn; tip = dark ? tn : fract(ph * 7.31) < .5 ? tn - 1 : tn;
+    // ~4 % of the tufts stand out a tone lighter, the whole tuft (its cell of the placing grid, features/grass.js TUNE.grid): the light
+    // little sprouts sprinkled over a calm sward
+    if (fract(sin(dot(floor(root.xz / .14), vec2(12.9898, 78.233))) * 43758.5453) < .04) { body = tn - 1; tip = max(0, tn - 2); } }
   // the wind's sheen: blades bent over by the wind show their lighter side, so a gust front rolls across the meadow as a
   // band of lighter grass (blade by blade, dithered by its own number: the band's edge is ragged, not a line)
   // (trodden grass shows it too: a path through the meadow is a lighter streak)
@@ -189,7 +197,7 @@ export function createGrass(G) {
   for (const t of [0, .34, .67, 1]) STRIP_P.push(-.5, t, 0, .5, t, 0);
   for (let s = 0; s < 3; s++) { const a = s * 2; STRIP_I.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
   const U = {
-    uRes: {value: new THREE.Vector2(G.VW, G.VH)}, uZoom: {value: 1}, uTime: G.U.time, uSnowK: {value: 1}, uFlowerK: {value: 0}, uFlowerV: {value: 0},
+    uRes: {value: new THREE.Vector2(G.VW, G.VH)}, uZoom: {value: 1}, uTime: G.U.time, uSnowK: {value: 1}, uFlowerK: {value: 0}, uFlowerV: {value: 0}, uCalm: {value: 0},
     uK: {value: new THREE.Vector4(.32, .05, .16, .92)}, uSheen: {value: new THREE.Vector2(.17, .42)},
     uPush: {value: push}, uNP: {value: 0},
     uTr: {value: rts[0].texture}, uTrBox: {value: new THREE.Vector4(TBOX.x0, TBOX.z0, 1 / TBOX.w, 1 / TBOX.d)}, uTrOn: {value: 1},
@@ -233,6 +241,7 @@ export function createGrass(G) {
   function blast(x, z, r, k) { if (nb < MAX_BLAST) blasts[nb++].set(x, z, r, k); }
   function setLook(snowK, flowerK) { U.uSnowK.value = snowK; U.uFlowerK.value = flowerK; }   // (positional: called every frame, no object)
   function setFlowerShape(v) { U.uFlowerV.value = v ? 1 : 0; }
+  function setCalm(v) { U.uCalm.value = v ? 1 : 0; }
   // once a frame, before G.render(): the trample pass, the view's size and zoom
   function step(dt) {
     U.uRes.value.set(G.VW, G.VH); U.uZoom.value = G.view.zoom || 1;
@@ -245,6 +254,6 @@ export function createGrass(G) {
   }
   function setVisible(v) { visible = v; if (mesh) mesh.visible = v; }
   function dispose() { drop(); mat.dispose(); for (const rt of rts) rt.dispose(); trScene.children[0].material.dispose(); tri.dispose(); }
-  return {setBlades, setWind, setPushers, blast, setLook, setFlowerShape, step, setVisible, dispose, U, get count() { return count; }, get mesh() { return mesh; },
+  return {setBlades, setWind, setPushers, blast, setLook, setFlowerShape, setCalm, step, setVisible, dispose, U, get count() { return count; }, get mesh() { return mesh; },
     get trample() { return rts[cur]; }, TBOX};   // (the trample map now: for a look in dev tools)
 }

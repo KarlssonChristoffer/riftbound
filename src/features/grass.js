@@ -62,6 +62,7 @@ export async function create(host) {
   const G = host.G, grass = createGrass(G);
   F._.grass = grass;
   if (flags.get('palette') !== 'old') grass.setFlowerShape(1);   // (V heads with the cool palette's lavender: the references' flowers)
+  grass.setCalm(flags.get('calm') !== '0');   // a calm sward: the blades in the ground's tone, light tips (render/grass.js setCalm)
   const WBUF = new Float32Array(8 + 16 * MAX_FRONTS), PBUF = new Float32Array(8 * MAX_PUSH), BL = new Float32Array(12);   // BL: this frame's blasts (x, y, r) x 4
   let nbl = 0;
   const walkers = host.entities.query('grass.walkers', p => p.kind === 'brute' || p.sparring || p.kind === 'barrel' || p.kind === 'barrel_x');
