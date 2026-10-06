@@ -935,14 +935,14 @@ export async function create(host) {
   const padList = () => host.feature?.('riverside')?.pads?.() || [];
   const padTop = q => (host.world?.waterH ?? WATER) + .012 + q.h;   // the pad's surface (riverside.js draws it at waterH + .012 + its bob)
   const padFree = q => { for (const f of frogs) if (f.pad === q) return false; return true; };
-  function pickPad(y0) {   // the free pad nearest y0 (the bigger ones a little preferred), not within 5 m of the player
+  function pickPad(y0, x0 = null) {   // the free pad nearest y0 (and x0, if given: the brook's pool) (the bigger ones a little preferred), not within 5 m of the player
     const L = padList(); let best = null, bd = 1e9;
-    for (let i = 0; i < L.length; i++) { const q = L[i]; if (!padFree(q) || (P && Math.hypot(q.x - P.x, q.y - P.y) < 5)) continue; const d = Math.abs(q.y - y0) - q.r * 4; if (d < bd) { bd = d; best = q; } }
+    for (let i = 0; i < L.length; i++) { const q = L[i]; if (!padFree(q) || (P && Math.hypot(q.x - P.x, q.y - P.y) < 5)) continue; const d = Math.abs(q.y - y0) + (x0 === null ? 0 : Math.abs(q.x - x0)) - q.r * 4; if (d < bd) { bd = d; best = q; } }
     return best;
   }
   function newFrog(y, side, pad) {
     const [x] = bankPoint(y, side);
-    const a = {x, y, side, h: 0, st: 'sit', at: rr(1, 4), fx: -side, fy: 0, jump: null, gone: 0, pulse: 0, pad: pad || null, padFrog: !!pad, zone: y};
+    const a = {x, y, side, h: 0, st: 'sit', at: rr(1, 4), fx: -side, fy: 0, jump: null, gone: 0, pulse: 0, pad: pad || null, padFrog: !!pad, zone: y, zoneX: null};
     if (pad) { a.x = pad.x; a.y = pad.y; a.h = padTop(pad); }
     frogs.push(a); return a;
   }
@@ -961,7 +961,7 @@ export async function create(host) {
     if (a.st === 'gone') {
       if ((a.gone -= dt) > 0) return;
       if (a.padFrog) {   // back onto a free pad, jumping up out of the water beside it (or later, if none is free / the player is by)
-        const q = pickPad(a.zone); if (!q) { a.gone = 2; return; }
+        const q = pickPad(a.zone, a.zoneX); if (!q) { a.gone = 2; return; }
         Object.assign(a, {pad: q, side: R() < .5 ? -1 : 1, st: 'sit', at: rr(2, 5), fy: 0, x: q.x, y: q.y, h: padTop(q)}); a.fx = -a.side;
         if (near(q.x, q.y)) { a.jump = {x0: q.x + a.side * (q.r + .3), y0: q.y + .15, x1: q.x, y1: q.y, t: 0, d: .3, a: .2, water: false, hb: a.h, e0: 0, e1: q.r + .09}; a.x = a.jump.x0; a.y = a.jump.y0; splash(a.x, a.y); }
         return;
@@ -996,14 +996,15 @@ export async function create(host) {
     const a = {y, u: rr(-.3, .3), v: rr(.25, .5) * (R() < .5 ? -1 : 1), du: 0, st: 'swim', at: rr(1, 4), jump: null, x: 0, h: 0, fx: 1, fy: 0, ph: R() * TAU, dart: 0};
     fish.push(a); return a;
   }
-  // a fish in the plateau's pool (layout.pool: deep, so inStream): it circles slowly, a margin off the bank, bolts when startled and jumps now and then
-  function newPoolFish(k) {
-    const a = {y: 11.5, u: 0, v: 0, du: 0, st: 'swim', at: rr(1, 4), jump: null, x: 0, h: 0, fx: 1, fy: 0, ph: R() * TAU, dart: 0, pool: true, ang: R() * TAU, w: k % 2 ? 1 : -1, rk: rr(.55, .8), hx: 1, hy: 0};
+  // a fish in the plateau's pool (layout.pool: deep, so inStream): it circles slowly, a margin off the bank, bolts when startled and jumps now and then.
+  // Pl: its pool (the West Downs' brook has one too: layout.brook.pool, no clip)
+  function newPoolFish(k, Pl = host.layout.pool) {
+    const a = {y: Pl.y, u: 0, v: 0, du: 0, st: 'swim', at: rr(1, 4), jump: null, x: 0, h: 0, fx: 1, fy: 0, ph: R() * TAU, dart: 0, pool: true, P: Pl, ang: R() * TAU, w: k % 2 ? 1 : -1, rk: rr(.55, .8), hx: 1, hy: 0};
     fish.push(a); poolPlace(a); return a;
   }
-  function poolPlace(a) { const Pl = host.layout.pool; a.x = Pl.x + Math.cos(a.ang) * (Pl.rx - .3) * a.rk; a.y = Math.max(Pl.clip + .2, Pl.y + Math.sin(a.ang) * (Pl.ry - .2) * a.rk); }
+  function poolPlace(a) { const Pl = a.P, y = Pl.y + Math.sin(a.ang) * (Pl.ry - .2) * a.rk; a.x = Pl.x + Math.cos(a.ang) * (Pl.rx - .3) * a.rk; a.y = Pl.clip === undefined ? y : Math.max(Pl.clip + .2, y); }
   function stepPoolFish(a, dt) {
-    if (!host.layout.pool) return;
+    if (!a.P) return;
     const th = near(a.x, a.y) ? threat(a.x, a.y, 0, SPECIES.fish) : null;
     if (th && th.t >= 1 && a.dart <= 0) a.dart = rr(.6, 1);
     if (a.dart > 0) a.dart -= dt;
@@ -1018,7 +1019,7 @@ export async function create(host) {
       a.x = J.x0 + (J.x1 - J.x0) * k; a.y = J.y0 + (J.y1 - J.y0) * k; a.h = Math.sin(k * Math.PI) * J.a;
       if (k >= 1) {
         a.jump = null; a.h = 0; splash(a.x, a.y);
-        if (a.pool) { const Pl = host.layout.pool; a.ang = Math.atan2((a.y - Pl.y) / Pl.ry, (a.x - Pl.x) / Pl.rx); a.rk = clamp(Math.hypot((a.x - Pl.x) / Pl.rx, (a.y - Pl.y) / Pl.ry) / .75, .45, .85); }
+        if (a.pool) { const Pl = a.P; a.ang = Math.atan2((a.y - Pl.y) / Pl.ry, (a.x - Pl.x) / Pl.rx); a.rk = clamp(Math.hypot((a.x - Pl.x) / Pl.rx, (a.y - Pl.y) / Pl.ry) / .75, .45, .85); }
         else a.u = (a.x - s.cx(a.y)) / s.w(a.y);
       }
       return;
@@ -1398,6 +1399,14 @@ export async function create(host) {
     if (C.jellies) for (const [x, y] of [[14, 12], [26, 18.5], [38, 14], [50, 20.5]].slice(0, C.jellies)) newJelly(x, y);
     if (C.eyes) placeEyes(C.eyes);
     if (C.motes) newSchool(C.motes);
+    // the West Downs' brook (world/brook.js): two fish in its pool (deep, so inStream: drawn under the water like the plateau pool's), a frog
+    // on one of its lily pads (riverside.js)
+    const BK = host.layout.brook;
+    if (BK && C.poolFish) {
+      for (let i = 0; i < 2; i++) newPoolFish(i + 1, BK.pool);
+      const q = nFrogs ? pickPad(BK.pool.y, BK.pool.x) : null;
+      if (q && Math.abs(q.x - BK.pool.x) < 3) { const f = newFrog(q.y, 1, q); f.zone = BK.pool.y; f.zoneX = BK.pool.x; }
+    }
     FL.populate();
     needTime = true;
   }

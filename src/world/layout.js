@@ -41,6 +41,7 @@ import {WEST_ON, WEST, LAND as WEST_LAND, HILLS as WEST_HILLS, BORDERS as WEST_B
 import {TERRAIN as STONE_TERRAIN, PROPS as STONE_PROPS} from './stonecircle.js';   // the West Downs' standing stones
 import {TOWER} from './westland.js';   // the West Downs' watchtower (world/watchtower.js)
 import {towerPlan, towerCols, inTower} from './watchtower.js';
+import {BROOK, BRIDGE as BROOK_BRIDGE, lay as layBrook, inBrookPool, gapsOn as brookGaps, away as brookAway} from './brook.js';   // the West Downs' brook
 
 // WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
 // cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
@@ -93,7 +94,7 @@ export const STREAM = {
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
 export const inStream = (x, y) => {
   if (y < STREAM.y0 || y > STREAM.y1) return false;
-  if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y);   // (the plateau's pool is deep water too)
+  if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y) || inBrookPool(x, y);   // (the plateau's pool is deep water too; so is the brook's, brook.js)
   return !STREAM.stones.some(s => Math.hypot(x - s.x, (y - s.y) * 1.3) < s.r);   // stones are dry footing
 };
 
@@ -523,6 +524,9 @@ if (TERRAIN_ON) {
     {type: 'basin', x: POOL.x, y: POOL.y, rx: POOL.rx + .3, ry: POOL.ry + .3, h: 0, rim: .35, clip: POOL.clip - .05, clipRim: .1},
     {type: 'channel', pts: OUTFLOW.pts.filter((p, i) => i % 3 === 0), bed: OUTFLOW.pts.filter((p, i) => i % 3 === 0).map(() => 0), hw: OUTFLOW.hw.filter((p, i) => i % 3 === 0).map(w => w + .1), bank: .5});
 }
+// ---- the West Downs' BROOK (brook.js; ?brook=0: none): its bed worked out from the ground it is cut into, its cuts, its bridge's deck and
+// its stepping stones (decks: elev, steep)
+if (BROOK) { layBrook(sampler(TERRAIN, terrainMask)); TERRAIN.push(...BROOK.shapes); BRIDGES.push(...BROOK.decks); }
 
 // ---- THE WATCHTOWER on the West Downs' western hill (westland.js TOWER, world/watchtower.js; ?tower=0: none): its plan on the ground the
 // shapes make (the terrain field, before any deck), its lookout a deck over its whole footprint (elev: from below the tower is solid,
@@ -691,20 +695,27 @@ export function buildLayout(seed = 7) {
       if (Math.abs(p.y - cy) < 1.9) { props.splice(i, 1); continue; }
       p.outside = false; p.r = p.kind === 'tree' ? .45 : .75;
     }
-    for (const [kind, x, y, extra] of WEST_PROPS) add(kind, x, y, {...extra});
+    for (const [kind, x, y, extra] of WEST_PROPS) { const q = kind === 'bush' ? brookAway(x, y, .55) : null; add(kind, q ? q[0] : x, q ? q[1] : y, {...extra}); }   // (a bush on the brook's bank steps back)
     // the old walls (westland.js OLD_WALL_LEGS): a 'fieldwall' segment every WALL_SEG m along each leg, a round collider (touching its
     // neighbours: no way through), none in a doorway; the leg as a run for world/walls3d.js (its a / b moved by ext). A bush or a
     // stone lying on a wall's line goes
     for (let i = props.length - 1; i >= 0; i--) { const p = props[i]; if ((p.kind === 'bush' || p.kind === 'tuft' || p.kind === 'rock') && !(p.r > 0) && oldWallD(p.x, p.y) < .8) props.splice(i, 1); }
     for (const L of OLD_WALL_LEGS) {
-      const [ax, ay] = L.a, l = Math.hypot(L.b[0] - ax, L.b[1] - ay), ux = (L.b[0] - ax) / l, uy = (L.b[1] - ay) / l;
+      const [ax, ay] = L.a, l = Math.hypot(L.b[0] - ax, L.b[1] - ay), ux = (L.b[0] - ax) / l, uy = (L.b[1] - ay) / l, gaps = [...L.gaps, ...brookGaps(L)];   // (+ where the brook runs through it)
       const n = Math.max(1, Math.round(l / WALL_SEG)), step = l / n;
       for (let k = 0; k < n; k++) {
-        const s = (k + .5) * step; if (L.gaps.some(([g0, g1]) => s > g0 - .1 && s < g1 + .1)) continue;
+        const s = (k + .5) * step; if (gaps.some(([g0, g1]) => s > g0 - .1 && s < g1 + .1)) continue;
         add('fieldwall', ax + ux * s, ay + uy * s, {r: .3});
       }
       walls.push({kind: 'fieldwall', a: [ax - ux * L.ext[0], ay - uy * L.ext[0]], b: [L.b[0] + ux * L.ext[1], L.b[1] + uy * L.ext[1]], h: L.h, d: WALL_D, ruin: L.ruin,
-        keep: [], seed: L.seed, gaps: L.gaps.map(([g0, g1]) => [g0 + L.ext[0], g1 + L.ext[0]]), sink: -.16, rough: L.rough, tol: .06});
+        keep: [], seed: L.seed, gaps: gaps.map(([g0, g1]) => [g0 + L.ext[0], g1 + L.ext[0]]), sink: -.16, rough: L.rough, tol: .06});
+    }
+    // the brook's bridge: its parapets' colliders (round, touching: no way through; nothing drawn: the bridge is world.js's mesh), and
+    // stones round its spring and by its water
+    if (BROOK) {
+      for (const [x, y] of BROOK.parapets) add('parapet', x, y, {r: BROOK_BRIDGE.para.r});
+      for (const [dx, dy, v] of [[-.62, -.12, 0], [.6, -.2, 1], [-.5, .5, 2]]) add('rock', BROOK.spring.x + dx, BROOK.spring.y + dy, {r: 0, variant: v});
+      for (const q of BROOK.rocks) add('rock', q.x, q.y, {r: 0, variant: q.variant});   // (and a few at its water's edge)
     }
     // the standing stones (stonecircle.js): a 'menhir' per stone, a round collider (a lying one a row of them); world.js builds their stone
     for (const [kind, x, y, extra] of STONE_PROPS) add(kind, x, y, {...extra});
@@ -718,5 +729,5 @@ export function buildLayout(seed = 7) {
   }
   return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5}, west: WEST_ON ? WEST : null, walls,
     trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt, spring: SPRING, rill: RILL, fall: FALL, pool: POOL, outflow: OUTFLOW, inRill, rillAt, inPool, poolEdge, inOutflow, outflowAt,
-    mesa: MESA, mesaAt, climbs: CLIMBS, cascades: CASCADES, clefts: CLEFTS, inCleft, bridges: BRIDGES};
+    mesa: MESA, mesaAt, climbs: CLIMBS, cascades: CASCADES, clefts: CLEFTS, inCleft, bridges: BRIDGES, brook: BROOK};
 }

@@ -47,6 +47,8 @@ import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watc
 import {TOWER_PLAN} from './layout.js';
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
+import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
+import {bridgeGeometry} from './bridge3d.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
 import {flags} from '../core/flags.js';
@@ -178,7 +180,7 @@ function yawOf(p, st) {
 }
 const WALL_ID = {wall_n: 2, wall_s: 3, wall_w: 4, wall_e: 5};
 // masonry tops (m) as the 3D kit builds them (tools/blender/props3d_glb.py SIZES_3D; the arena's are lower)
-export const PROP_TOP = {wall_n: 2.4, wall_w: 2.4, wall_e: 2.4, wall_s: .9, tower: 3.9, gatepost: 2.85};
+export const PROP_TOP = {wall_n: 2.4, wall_w: 2.4, wall_e: 2.4, wall_s: .9, tower: 3.9, gatepost: 2.85, parapet: .56};   // (parapet: the brook's bridge, over its deck)
 // a feature's own prop kinds: how high each stops arrows (registered once, at its module's load)
 export function propTop(table) { Object.assign(PROP_TOP, table); }
 // a prop's own top where the world built it its own height (the stone walls' pieces, towers and posts: walls3d.js, broken to their
@@ -211,6 +213,7 @@ const OUT_U0 = .3, OUT_W = .6, ease = u => u <= OUT_U0 ? 0 : u < OUT_U0 + OUT_W 
 const outAxisY = x => { const P = OUTFLOW.pts, f = Math.max(0, Math.min(P.length - 1.001, (OUTFLOW.x0 - x) / OUTFLOW.dx)), i = f | 0; return P[i][1] + (P[i + 1][1] - P[i][1]) * (f - i); };
 export function waterSample(x, y, out) {
   out.kind = 0;
+  if (x < 0) { brookSample(x, y, out); return out; }   // (west of the Proving Grounds: the West Downs' brook, kinds 4 and 5: world/brook.js)
   if (y < -1 || y > 31) return out;
   const c = STREAM.cx(y), hw = STREAM.w(y) / 2, a = x - c;
   if (a > hw) {   // beyond the east bank: the plateau's rill (on its top) or, south of its face, the pool and its outflow
@@ -275,12 +278,15 @@ export const WATER_TUNE = {
 //   G  bits 7-5 ring: texels from the bank (1 = the first texel .. 7; 0 = further in);  bits 4-0 = travel bits 12-8
 //   B  travel bits 7-0: the travel coordinate s in 1/8 texel (13 bits: up to 1023 texels)
 //   A  across the flow, signed texels from the axis in 1/2 texel, + 128 (clamped: +-63.5 texels, 2.08 m at PPM 30.5)
-function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
+// X0 / Y0: the canvas's world origin (the West Downs' own: 0, 0 is the Proving Grounds'); box: [x0, y0, x1, y1] m, the part to bake (the rest dry)
+function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = null}) {
   const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
-  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ});   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
+  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth: brookDepth, dry: X0 || Y0 ? BROOK?.dry : null});   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
   const toneOf = k => { for (let t = 0; t < ramp.length; t++) if (px[k] === ramp[t][0] && px[k + 1] === ramp[t][1] && px[k + 2] === ramp[t][2]) return t; return -1; };
-  for (let y = 0; y < HPX; y++) for (let x = 0; x < WPX; x++) {
-    const mx = (x + .5) / PPM, my = (y + .5) / PPM;
+  const bx0 = box ? Math.max(0, Math.floor((box[0] - X0) * PPM)) : 0, by0 = box ? Math.max(0, Math.floor((box[1] - Y0) * PPM)) : 0;
+  const bx1 = box ? Math.min(WPX, Math.ceil((box[2] - X0) * PPM)) : WPX, by1 = box ? Math.min(HPX, Math.ceil((box[3] - Y0) * PPM)) : HPX;
+  for (let y = by0; y < by1; y++) for (let x = bx0; x < bx1; x++) {
+    const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM;
     waterSample(mx, my, o);
     if (!o.kind || my >= cliffZ(mx)) continue;                  // (the ravine takes the stream over its edge: below it is the waterfall's pool)
     const i = y * WPX + x, k = i * 4, p = toneOf(i * 4);
@@ -295,7 +301,7 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ}) {
     data[k + 3] = Math.max(0, Math.min(255, Math.round(o.a * PPM * 2) + 128));
     if (bed) bed.add(x, y, o);
   }
-  for (let y = 0; y < HPX; y++) for (let x = 0; x < WPX; x++) {   // dry texels beside water: SURF_FS blends across them when the camera turns
+  for (let y = Math.max(0, by0 - 1); y < Math.min(HPX, by1 + 1); y++) for (let x = Math.max(0, bx0 - 1); x < Math.min(WPX, bx1 + 1); x++) {   // dry texels beside water: SURF_FS blends across them when the camera turns
     const k = (y * WPX + x) * 4; if (data[k] >> 6) continue;
     for (let j = -1; j <= 1; j++) for (let l = -1; l <= 1; l++) {
       const u = x + l, v = y + j; if (u < 0 || v < 0 || u >= WPX || v >= HPX) continue;
@@ -542,7 +548,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   };
   // walkable terrain (layout.js; ?terrain=0: none): the field's height under every vertex (it is held flat at the water, the ravine's rim)
   const TF = TERRAIN_ON ? terrainField() : null, tH = TF ? groundDrawn() : () => 0;   // (the drawn ground: the mesa's falls away behind its rock)
-  const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) ? WATER_H : 0) + tH(x, z);   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
+  const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) || inBrookPool(x, z, POOL_GROW) ? WATER_H : 0) + tH(x, z);   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
   // a patch's grid, s m cells, from (rx0, rz0) to (rx1, rz1). It follows the edge exactly: the last bank vertex of each column
   // moves onto the edge line and the next one to just past it at the ravine's depth, so the wall is one smooth face (a plain
   // 0.25 m grid made it a staircase). Neighbouring patches share their border vertices (one lattice, one edge line per column)
@@ -571,13 +577,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // stand-in) over their LAND (the downs and on past the world's west and north edges) on a patch of their own, the Proving
   // Grounds' western neighbour: from LAND's west edge to GROUNDS.x0, over the same z as theirs. Planar like theirs, with LAND's origin
   const WD = WEST_ON && biome.paintWest ? WEST_LAND : null;
-  let westCanvas = null, wdTex = null;
+  let westCanvas = null, wdTex = null, westPx = null;
   const wdx0 = WD ? WD.x0 : 0, wdWorld = WD ? new THREE.Vector2(WD.x1 - WD.x0, WD.y1 - WD.y0) : null, wdOrigin = WD ? new THREE.Vector2(WD.x0, WD.y0) : null;
   if (WD) {
     const wpx = Math.ceil((WD.x1 - WD.x0) * PPM), hpx = Math.ceil((WD.y1 - WD.y0) * PPM);
     westCanvas = document.createElement('canvas'); westCanvas.width = wpx; westCanvas.height = hpx;
     biome.paintWest(westCanvas.getContext('2d', {willReadFrequently: true}), {PPM, WPX: wpx, HPX: hpx, X0: WD.x0, Y0: WD.y0, ground: TERRAIN_ON ? groundDrawn() : null, layout});
     wdTex = texOf(westCanvas, true); wdTex.wrapS = wdTex.wrapT = THREE.MirroredRepeatWrapping; wdTex.needsUpdate = true;
+    if (BROOK) westPx = westCanvas.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, wpx, hpx).data;   // (the brook's water: its fall's colour, its moving texture)
   }
   // the open land's tiles [x0, z0, x1, z1, cell]: the world + skirt outside the Proving Grounds' patch, cut on a TILE m lattice
   // from the skirt's corner and at the patch's sides. Fine cells (S) where the ground can step: the ravine's band (rawCliff
@@ -613,7 +620,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const edgeZ = x => { for (let z = Y1 - 7; z < Y1 + SKIRT; z += .05) if (hAt(x, z) < -1) return z; return null; };
     for (let cx = 0; cx < cliff.width; cx++) {
       const x = cx / PPM - cliffOff, ze = edgeZ(x);
-      const zs = ze === null ? 0 : ze - .35, off = ze === null ? 1 : Math.abs(x - STREAM.cx(zs)) - STREAM.w(zs) / 2;
+      const zs = ze === null ? 0 : ze - .35, offS = ze === null ? 1 : Math.abs(x - STREAM.cx(zs)) - STREAM.w(zs) / 2, offB = ze === null || !westPx ? 1 : brookFallOff(x, zs), off = Math.min(offS, offB);   // (offB: the West Downs' brook falls here too)
       if (off > 0) {   // no fall here: with the 3D cliffs the rock is live (below), and the ground's own steep cells draw nothing (alpha 0: SURF_FS)
         if (cliffs3d) for (let r = 0; r < CH; r++) d[(r * cliff.width + cx) * 4 + 3] = 0;
         continue;
@@ -625,7 +632,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         if (px[k] * .3 + px[k + 1] * .55 + px[k + 2] * .15 > px[gi] * .3 + px[gi + 1] * .55 + px[gi + 2] * .15) gi = k;
       }
       if (!glows) gi = at(zs);
-      const base = [px[gi], px[gi + 1], px[gi + 2]], edge = off > -.08, streak = hsh(cx, 17) < .3;
+      if (offB < offS) { glows = false; gi = (Math.min(WD.y1 - WD.y0 - .01, Math.max(0, zs - WD.y0)) * PPM | 0) * westCanvas.width * 4 + (Math.max(0, x - WD.x0) * PPM | 0) * 4; }   // (the brook's own colour)
+      const pix = offB < offS ? westPx : px, base = [pix[gi], pix[gi + 1], pix[gi + 2]], edge = off > -.08, streak = hsh(cx, 17) < .3;
       for (let r = 0; r < CH; r++) {
         const k = (r * cliff.width + cx) * 4, foam = r > CH - 6 && hsh(cx, r) < .6, lip = r < 2;
         const live = !glows && !edge && !lip;   // a sheet of falling water: the shader adds the moving streaks and the foam
@@ -640,6 +648,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // the moving water: the baked texture (rebuilt, and the old one disposed, with the world) + the biome's look for the shader
   const WT = WATER_TUNE[biome.id], wTex = WT ? bakeWater(biome, WT, {WPX, HPX, PPM, px, cliffZ}) : null;
   if (wTex) disposers.push(() => { wTex.dispose(); wTex.userData.bed?.tex.dispose(); });
+  // the West Downs' brook (world/brook.js): its own moving water on their canvas, baked over its box only, with its own bed (gfx.js surface bed)
+  const wdWater = WT && westPx ? bakeWater(biome, WT, {WPX: westCanvas.width, HPX: westCanvas.height, PPM, px: westPx, cliffZ, X0: WD.x0, Y0: WD.y0, box: BROOK.box}) : null;
+  if (wdWater) disposers.push(() => { wdWater.dispose(); wdWater.userData.bed?.tex.dispose(); });
   G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark, bed: wTex.userData.bed} : null);
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
   const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
@@ -653,7 +664,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const s = G.surface(g, {tex: gTex, planar: true, world: world2, type: 1, obj: 0}, true); s.gm.visible = false; disposers.push(() => { s.dispose(); g.dispose(); }); };
   if (TERRAIN_ON) caster(gGeo);
   if (WD) {   // the West Downs' patch (above)
-    const wg = gridGeo(wdx0, hz0, hx0, hz1, S), m = G.surface(wg, {tex: wdTex, planar: true, world: wdWorld, origin: wdOrigin, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
+    const wg = gridGeo(wdx0, hz0, hx0, hz1, S), m = G.surface(wg, {tex: wdTex, planar: true, world: wdWorld, origin: wdOrigin, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9,
+      ...(wdWater ? {water: wdWater, bed: wdWater.userData.bed} : {})}, false);   // (the brook's water: its own bed, not the Proving Grounds')
     disposers.push(() => { m.dispose(); wdTex.dispose(); });
     if (TERRAIN_ON) caster(wg);
   }
@@ -815,7 +827,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
           minBot: WATER_H - .05, base: 0, relief: .7, talus: false, lip, seed: 97, skip: (x, z) => Math.abs(x - F.x) < F.hw + .02});
       }
       const stairs = TERRAIN.filter(s => s.type === 'ramp' && s.steps).map((s, k) => { const h0 = s.h0 ?? TF.H(...s.pts[0]), h1 = s.h1 ?? TF.H(...s.pts.at(-1)); return {pts: [s.pts[0], s.pts.at(-1)], w: s.w, h0, h1, n: stepsOf(h0, h1), seed: 29 + k}; });
-      const tg = terrRuns.length ? cliffGeometry(terrRuns, {...o, ladders: [], bridges: BRIDGES, stairs}) : null;   // (+ the footbridges, the stone steps)
+      const tg = terrRuns.length ? cliffGeometry(terrRuns, {...o, ladders: [], bridges: BRIDGES.filter(b => !b.stone), stairs}) : null;   // (+ the footbridges, the stone steps; the brook's stone bridge and stones: below)
       if (tg) { const m = G.mesh(tg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); tg.dispose(); }); }
     }
     const pg = cliffGeometry(plateauRuns, o);
@@ -825,13 +837,20 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     if (RAVINE) {
       const pts = [];
       for (let x = WORLD.x0 - SKIRT; x <= WORLD.x1 + SKIRT + 1e-6; x += .5) { const z = cliffZ(x); if (isFinite(z)) pts.push([x, z]); }
-      const fallAt = (x, z) => { const zs = z - .35; return Math.abs(x - STREAM.cx(zs)) - STREAM.w(zs) / 2 < .04; };
+      const fallAt = (x, z) => { const zs = z - .35; return Math.abs(x - STREAM.cx(zs)) - STREAM.w(zs) / 2 < .04 || (!!westPx && brookFallOff(x, zs) < .04); };   // (and the brook's)
       if (pts.length > 1) {
         const rg = cliffGeometry([{pts, top: 0, bot: () => DROP, minBot: DROP - .05, relief: .85, skip: fallAt, lip,
           dark: y => -.34 * smooth(-y / 2.8), seed: 53}], {...o, ladders: []});
         if (rg) { const m = G.mesh(rg, 0, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); rg.dispose(); }); }
       }
     }
+  }
+
+  // ---- the West Downs' brook (world/brook.js): its stone arch bridge, its stepping stones and the rocks in its water, one static mesh
+  // (world/bridge3d.js: the mason's stone); its deck and the stones' tops are layout.js decks (BRIDGES), the parapets 'parapet' props
+  if (BROOK) {
+    const bg = bridgeGeometry(BROOK, {fam: name => Math.max(0, FAMS.indexOf(name)), cover: R.cov ? FAMS.indexOf('cover') : null, ground: tH});
+    if (bg) { const m = G.mesh(bg, 6, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); bg.dispose(); }); }
   }
 
   // ---- props

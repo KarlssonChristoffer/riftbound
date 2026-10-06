@@ -21,7 +21,8 @@
 //
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle, pads, ms.
 // OWNS: the reed / fern / willow props it makes (identity fields only: kind, variant, x, y, z, r), the pads, its atlas.
-// READS: layout.stream (STREAM), layout.marks (the paths), layout.plateaus, host.world.waterH, host.env.season, host.yaw, host.G.
+// READS: layout.stream (STREAM), layout.brook (the West Downs' brook: world/brook.js), layout.marks (the paths), layout.plateaus, host.world.waterH,
+// host.env.season, host.yaw, host.G.
 // EMITS: nothing.
 // BUDGET: view <= 0.03 ms, frame <= 0.05 ms (F3); the props are ~32 painted cards (23 reeds, 7 ferns, 2 willows: draws + the contact / mirror passes): see the commit.
 import {flags} from '../core/flags.js';
@@ -124,6 +125,31 @@ export async function create(host) {
   for (const [y, side, m, v] of [[25.7, -1, 1.2, 1], [26.4, -1, 1.7, 0], [25.9, 1, 1.3, 0], [26.5, 1, 1.9, 1]]) {
     const x = S.cx(y) + side * (S.w(y) / 2 + m); if (spotOk(x, y, .5)) plant('fern', x, y, v);
   }
+  // ---- the West Downs' BROOK (world/brook.js): reeds in groups along its banks and round its pool, clear of its head, the bridge, the
+  // stepping stones and the lip; ferns by its spring, beside the bridge and at the lip. Its own generator (the river's draws stay as they were)
+  const BK = host.layout.brook, RB = mulberry32(TUNE.seed + 101), rb = (a, b) => a + RB() * (b - a), BPADS = [];
+  if (BK) {
+    const {px, py, hw, n} = BK, tx = BK.C.tx, ty = BK.C.ty;
+    const off = (l, side, m) => {   // the bank m out from its water at l (the pool's rim where it widens)
+      const i = Math.max(0, Math.min(n - 1, Math.round(l / BK.ds))), nx = -ty[i] * side, ny = tx[i] * side;
+      let d = hw[i] + m; while (BK.inPool(px[i] + nx * d, py[i] + ny * d, m * .8) && d < 3) d += .08;
+      return [px[i] + nx * d, py[i] + ny * d];
+    };
+    const busy = l => l < 1.7 || Math.abs(l - BK.bridgeL) < 2.4 || BK.stones.some(s => Math.abs(l - s.l) < 1.2) || l > BK.fallL - 1.2;
+    for (const side of [-1, 1]) for (let l = 1.7 + rb(0, 1.5); l < BK.fallL - 1;) {
+      const k = 2 + (RB() * 3 | 0), take = RB() < .66, step = rb(.36, .58), v0 = RB() * 3 | 0;
+      if (take) for (let j = 0, ll = l; j < k; j++, ll += step * rb(.8, 1.2)) {
+        if (busy(ll)) continue;
+        const [x, y] = off(ll, side, rb(.1, .5));
+        if (spotOk(x, y)) plant('reed', x, y, RB() < .55 ? v0 : RB() * 3 | 0);
+      }
+      l += (take ? (k - 1) * step : 0) + rb(.9, 2.2);
+    }
+    const S0 = BK.spring, fern = (x, y, v) => { if (spotOk(x, y, .45)) plant('fern', x, y, v); };
+    fern(S0.x - .85, S0.y + .2, 0); fern(S0.x + .9, S0.y + .35, 1);
+    for (const [dl, side, v] of [[-1.6, -1, 1], [-1.7, 1, 0], [1.6, -1, 0], [1.75, 1, 1]]) { const [x, y] = off(BK.bridgeL + dl, side, .45); fern(x, y, v); }
+    for (const [side, v] of [[-1, 0], [1, 1]]) { const [x, y] = off(BK.fallL - .6, side, .5); fern(x, y, v); }
+  }
   await Promise.all(mine.map(p => host.world.addItem(p)));   // their cards / meshes (a world built before this feature)
   F._.mine = mine; F._.willows = willows;
 
@@ -150,6 +176,12 @@ export async function create(host) {
       if (g.n) GROUPS.push(g);
     }
     for (let k = 0, got = 0; got < P0.flowers && k < 60 && PADS.length; k++) { const q = PADS[R() * PADS.length | 0]; if (!q.flower && q.size > 0) { q.flower = true; q.fi = got % 2; got++; } }
+    // and a few on the brook's pool (its own generator), one in flower
+    if (BK) for (let k = 0, t = 0; k < 5 && t < 80; t++) {
+      const size = k === 0 ? 2 : RB() < .5 ? 1 : 0, r = P0.size[size], a = RB() * TAU, d = Math.sqrt(RB()), x = BK.pool.x + Math.cos(a) * BK.pool.rx * d, y = BK.pool.y + Math.sin(a) * BK.pool.ry * d;
+      if (BK.poolEdge(x, y) < r + .22 || BPADS.some(q => hypot(q.x0 - x, q.y0 - y) < q.r + r + .06)) continue;
+      const q = {x0: x, y0: y, x, y, h: 0, r, size, ang0: RB() * TAU, ang: 0, ph: RB() * TAU, w: .5 + RB() * .5, flower: k === 0, fi: 1, notch: 0}; PADS.push(q); BPADS.push(q); k++;
+    }
   }
   F._.groups = GROUPS;
 

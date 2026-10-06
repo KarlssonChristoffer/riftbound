@@ -661,6 +661,7 @@ export async function create(host) {
     buildWater(); if (!WA.mask && !WA.puddles.length) return;
     const z = V.z, fp = footprint(0, FPA), fb = footprint(TUNE.refl.bed, FPB), S = host.layout.stream;
     const streamIn = WA.mask && Math.max(fp.x1, fb.x1) > WA.x0 && Math.min(fp.x0, fb.x0) < WA.x1 && Math.min(fp.y0, fb.y0) < WA.yEnd;
+    const BK = biome === 'ruins' ? host.layout.brook : null, brookIn = !!BK && fp.x1 > BK.box[0] && fp.x0 < BK.box[2] && fp.y1 > BK.box[1] && Math.min(fp.y0, fb.y0) < BK.box[3];   // (the West Downs' brook mirrors too: world/brook.js)
     // puddles on the floor first (their colours follow the sky; re-rasterised when the yaw / zoom / time changes)
     const tn = timeName(), pk = Math.round(V.yaw / (.5 * DEG)) + '|' + tn, vis = [];
     for (const u of WA.puddles) {
@@ -670,7 +671,7 @@ export async function create(host) {
       u.X = Math.round(sx - u.W0 * z / 2) - u.mx * z; u.Y = Math.round(sy - u.H0 * z / 2) - u.my * z;
       vis.push(u);
     }
-    if (!streamIn && !vis.length) return;
+    if (!streamIn && !brookIn && !vis.length) return;
     const g = host.glayer('ground');   // (the GPU draws them: G.glayer)
     g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over';
     if (vis.length) {   // (at the puddles' own alpha: gfx.js COMP_FS reads it as "a puddle here" and mirrors what stands over it)

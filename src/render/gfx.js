@@ -839,7 +839,7 @@ void main() {
 
 // ---------------------------------------------------------------- shader: lighting / composite
 const NL = 32;
-const MIST_N = 16;   // the mist's stretches (COMP_FS MIST, G.setMist): the water's, the West Downs' hollows (features/mist.js)
+const MIST_N = 20;   // the mist's stretches (COMP_FS MIST, G.setMist): the water's, the West Downs' hollows and their brook (features/mist.js)
 const COMP_VS = HEAD + `in vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
 const COMP_FS = HEAD + `
 uniform sampler2D tA, tN, tE, tD, tS, tX, uRamps;
@@ -1491,7 +1491,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
-  const surfMat = ({tex, em = null, planar, world, origin = null, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, litter = null, decals = false, cliffTop = 1e9}) => raw(SURF_VS, SURF_FS, {
+  // bed: a surface's OWN water bed ({tex, rect} | null: world/waterbed.js; the West Downs' brook on their canvas), not setWaterLook's (omitted: that one)
+  const surfMat = ({tex, em = null, planar, world, origin = null, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, bed, litter = null, decals = false, cliffTop = 1e9}) => raw(SURF_VS, SURF_FS, {
     uCliffTop: {value: cliffTop},
     uDecal: U.decalT, uHasDecal: {value: decals ? 1 : 0}, uDecalOn: U.decalOn, uDecalRect: U.decalRect, uDecalPx: U.decalPx,
     uLit: litter?.u || {value: null}, uLitPal: {value: litter?.pal || null}, uHasLit: {value: litter ? 1 : 0}, uLitK: U.litK, uLive: litter?.live || {value: 0}, uLitCap: litter?.cap || {value: 1},
@@ -1500,7 +1501,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uCliff: {value: cliff}, uHasCliff: {value: cliff ? 1 : 0}, uCliffOff: {value: cliffOff}, uPx: U.px,
     uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)},
     uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp,
-    uWBed: U.wBed, uWBedOn: U.wBedOn, uWBedR: U.wBedR, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot}, {side: THREE.FrontSide});
+    uWBed: bed === undefined ? U.wBed : {value: bed?.tex || null}, uWBedOn: bed === undefined ? U.wBedOn : {value: bed ? 1 : 0},
+    uWBedR: bed === undefined ? U.wBedR : {value: new THREE.Vector4(...(bed?.rect || [0, 0, 1, 1]))}, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
   // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test

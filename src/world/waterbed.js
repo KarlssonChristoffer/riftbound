@@ -58,9 +58,11 @@ export const BED_TUNE = {
 };
 const PAD = 4, MAXD = 7, REACH = 3;   // (REACH: the refraction's farthest offset, 2 texels, + 1)
 
-// waterBed(biome, {WPX, HPX, PPM, cliffZ}) -> null (no bed) | {add(x, y, o), finish(data) -> {tex, rect, ...the look} | null}
-// bakeWater calls add for every texel it makes water (o: waterSample's out there), then finish with its finished bytes
-export function waterBed(biome, {WPX, HPX, PPM, cliffZ}) {
+// waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth, dry}) -> null (no bed) | {add(x, y, o), finish(data) -> {tex, rect, ...the look} | null}
+// bakeWater calls add for every texel it makes water (o: waterSample's out there), then finish with its finished bytes. X0 / Y0: the canvas's
+// world origin (the West Downs' canvas: its brook; the river, the creek and the pool are the Proving Grounds', at 0, 0); depth(o, x, y): the
+// depth of a body this file doesn't know (kind 4 and up: world/brook.js); dry: [{x, y, r}] things standing in that water (their foam lines)
+export function waterBed(biome, {WPX, HPX, PPM, cliffZ, X0 = 0, Y0 = 0, depth = null, dry = null}) {
   const T = ON && BED_TUNE[biome.id];
   if (!T) return null;
   const dep = new Uint8Array(WPX * HPX);   // depth + 1 per water texel (0 = not water); freed with the closure
@@ -69,6 +71,7 @@ export function waterBed(biome, {WPX, HPX, PPM, cliffZ}) {
   const curv = y => y === cy0 ? cv0 : (cy0 = y, cv0 = (STREAM.cx(y + .5) - 2 * STREAM.cx(y) + STREAM.cx(y - .5)) * 4);
   function depthOf(o, mx, my) {
     let d;
+    if (o.kind >= 4 && depth) return depth(o, mx, my);
     if (o.kind === 1) {
       // the stream: a shelf along each bank (narrower where it narrows), then the channel; deeper toward the outside of a bend
       // (the centre of the bend lies on the side x'' points to: the far side is scoured, the near side a sand bar); bars and holes
@@ -94,7 +97,7 @@ export function waterBed(biome, {WPX, HPX, PPM, cliffZ}) {
   }
   return {
     add(x, y, o) {
-      dep[y * WPX + x] = 1 + Math.round(depthOf(o, (x + .5) / PPM, (y + .5) / PPM) * 31);
+      dep[y * WPX + x] = 1 + Math.round(depthOf(o, X0 + (x + .5) / PPM, Y0 + (y + .5) / PPM) * 31);
       if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
     },
     finish(data) {
@@ -109,7 +112,8 @@ export function waterBed(biome, {WPX, HPX, PPM, cliffZ}) {
       const DISC = []; for (let j = -MAXD; j <= MAXD; j++) for (let i = -MAXD; i <= MAXD; i++) { const r = Math.round(hypot2(i, j)); if (r <= MAXD) DISC.push(i, j, r); }
       const stampC = (u, v) => { for (let q = 0; q < DISC.length; q += 3) { const a = u + DISC[q], b = v + DISC[q + 1]; if (a >= 0 && b >= 0 && a < bw && b < bh && con[b * bw + a] > DISC[q + 2]) con[b * bw + a] = DISC[q + 2]; } };
       const touches = (u, v) => (u > 0 && water(u - 1, v)) || (u < bw - 1 && water(u + 1, v)) || (v > 0 && water(u, v - 1)) || (v < bh - 1 && water(u, v + 1));
-      for (let v = 0; v < bh; v++) {
+      const own = !X0 && !Y0;   // (the river's stones, the cascades' and the fall's feet: the Proving Grounds' canvas)
+      for (let v = 0; v < bh && own; v++) {
         const my = (v + y0 + .5) / PPM; if (my <= STREAM.y0 || my >= STREAM.y1) continue;
         const c = STREAM.cx(my), hw = STREAM.w(my) / 2 - .1;
         for (let u = Math.max(0, Math.ceil((c - hw) * PPM - .5) - x0), ue = Math.min(bw - 1, Math.floor((c + hw) * PPM - .5) - x0); u <= ue; u++)
@@ -119,8 +123,12 @@ export function waterBed(biome, {WPX, HPX, PPM, cliffZ}) {
         const k = Math.ceil(hypot2(bx - ax, by - ay) * PPM) + 1;
         for (let i = 0; i <= k; i++) stampC(Math.floor((ax + (bx - ax) * i / k) * PPM) - x0, Math.floor((ay + (by - ay) * i / k) * PPM) - y0);
       };
-      for (const c of LAYOUT.CASCADES || []) if (!c.last) line(c.x - c.dy * c.hw, c.y + c.dx * c.hw, c.x + c.dy * c.hw, c.y - c.dx * c.hw);
-      if (FALL && POOL) line(FALL.x - FALL.hw, POOL.clip + .02, FALL.x + FALL.hw, POOL.clip + .02);
+      if (own) for (const c of LAYOUT.CASCADES || []) if (!c.last) line(c.x - c.dy * c.hw, c.y + c.dx * c.hw, c.x + c.dy * c.hw, c.y - c.dx * c.hw);
+      if (own && FALL && POOL) line(FALL.x - FALL.hw, POOL.clip + .02, FALL.x + FALL.hw, POOL.clip + .02);
+      for (const s of dry || []) {   // (another canvas's things in the water: the dry texels of each that touch it)
+        const cu = Math.round((s.x - X0) * PPM) - x0, cv = Math.round((s.y - Y0) * PPM) - y0, r = Math.ceil(s.r * PPM) + 1;
+        for (let v = Math.max(0, cv - r); v <= Math.min(bh - 1, cv + r); v++) for (let u = Math.max(0, cu - r); u <= Math.min(bw - 1, cu + r); u++) if (!water(u, v) && touches(u, v)) stampC(u, v);
+      }
       // ---- THE BED: sand in clusters of three tones (two noises, no per-texel dither: under the refraction a speckle would crawl), the
       // stream's ripple marks across its flow, silt in the deep, the bank's earth under and along the dry ground, weed in tufts; then
       // gravel and pebbles stamped on (in patches, denser toward the banks and the ford) and a few stones, each with its shadow on the bed
@@ -137,7 +145,7 @@ export function waterBed(biome, {WPX, HPX, PPM, cliffZ}) {
       const set = (i, c) => { out[i * 4] = c[0]; out[i * 4 + 1] = c[1]; out[i * 4 + 2] = c[2]; };
       const mul = (i, k) => { out[i * 4] *= k; out[i * 4 + 1] *= k; out[i * 4 + 2] *= k; };   // (Uint8Array: rounds down)
       for (let v = 0; v < bh; v++) for (let u = 0; u < bw; u++) {
-        const X = u + x0, Y = v + y0, i = v * bw + u, mx = (X + .5) / PPM, my = (Y + .5) / PPM, dv = dep[Y * WPX + X];
+        const X = u + x0, Y = v + y0, i = v * bw + u, mx = X0 + (X + .5) / PPM, my = Y0 + (Y + .5) / PPM, dv = dep[Y * WPX + X];
         if (!need[i]) continue;
         const ring = water(u, v) ? data[(Y * WPX + X) * 4 + 1] >> 5 : 0;   // texels from the bank (1 .. 7; 0: further in)
         const nz = vnoise(mx * 1.6, my * 1.6, 41) * .62 + vnoise(mx * 4.6, my * 4.6, 42) * .38;

@@ -37,6 +37,7 @@
 // that renders SFX / beds in an OfflineAudioContext to check levels (see the bottom of this file).
 
 import {STREAM, elev as elevOf, TERRAIN_ON, plateauAt} from '../world/layout.js';
+import {wet as brookWet} from '../world/brook.js';
 import {createMusic} from './music.js';   // the adaptive score, layered with the beds (U toggles it)
 // Phase 2 (docs/AUDIO.md): the Sound Forge runtime. Forge sounds baked in a Worker at load play first; this file's
 // synth below is the FALLBACK for anything not baked yet (or with ?forge=0, to compare).
@@ -102,6 +103,9 @@ const BELL_EVENTS = {
   bellsWhine: {...TRICK_HIT, priority: 54, gainDb: -6, coalesceMs: 0, pick: o => TL('bullet', `${flv(o)}_ricochet`), gainFrom: o => o.bell ? -5 : 0, banks: flBanks('ricochet')},
 };
 const FALL = {dScale: 1.8, ravineY: 27.9, reach: 32};
+// THE WEST DOWNS' BROOK (world/brook.js): its babble as a source at its nearest point (the stream recipe's brook, under the river's bed
+// level), its fall over the ravine as the waterfall's loop (heard from a little nearer: brookFall), a small splash under every step in it
+const BROOK_SND = {recipe: 'stream', case: 'brook', gainDb: -27}, BROOK_FALL = {dScale: 2.3, reach: 24, hear: 16};
 // THE DESERT (world/desert.js, "Red Mesa"). Its forge ambience is made of banks the forge already bakes, added to the director
 // by its options like the waterfall (events.js's AMBIENCE is not written): a hot, dry wind by day (ember_hot: a low wind, a
 // faint roar, next to no leaves), the gustier one at dusk and night, insects by day (a hum, far rasps), crickets at night, the
@@ -892,7 +896,7 @@ export function createAudio(ctx, host = {}) {
   if (!disabled && !forgeOff) {
     try {
       const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac, {reverbs: {...REVERBS, ...DESERT_REVERBS}}), B = createBakery(ac);
-      const D = createDirector(EN, B, {EVENTS: {...EVENTS, ...TRICK_EVENTS, ...BELL_EVENTS}, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL}});
+      const D = createDirector(EN, B, {EVENTS: {...EVENTS, ...TRICK_EVENTS, ...BELL_EVENTS}, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL, brook: BROOK_SND}});
       try { EN.prepareReverbs?.(); } catch (e) {}
       D.prefetch({biome: 'ruins', skip: otherGunSfx(gunsfx)});   // (only the playing gun flavor's banks)
       RT = {ac, EN, B, D}; AU.forge = RT;
@@ -988,6 +992,7 @@ export function createAudio(ctx, host = {}) {
   // (docs/ARCHITECTURE.md rule). Every frame only touches these few.
   const C = {props: null, ver: -1, tick: 0, fires: [], brutes: [], rollers: [], sources: []};
   const FALLS = [{kind: 'waterfall', id: 'fall:plateau', x: 0, y: 0, pan: 0, d: 0, off: 0}, {kind: 'waterfall', id: 'fall:ravine', x: 0, y: 0, pan: 0, d: 0, off: 0}];   // (reused: no allocation per step)
+  const BROOKS = [{kind: 'waterfall', id: 'fall:brook', x: 0, y: 0, pan: 0, d: 0, off: 0}, {kind: 'brook', id: 'brook', x: 0, y: 0, pan: 0, d: 0, off: 0}];   // (its fall, its babble)
   function candidates() {
     const props = get(host.props) || [], ver = get(host.propsVersion) ?? props.length;
     if (props === C.props && ver === C.ver && (++C.tick % 60)) return C;
@@ -1035,6 +1040,13 @@ export function createAudio(ctx, host = {}) {
           if (Math.hypot(w.x - pl.x, w.y - pl.y) > FALL.reach) continue;
           const a = at(w.x, w.y); if (a.off < 3) { w.pan = a.pan; w.d = a.d * FALL.dScale; w.off = a.off; sources.push(w); }
         }
+        const bk = ctx.layout?.brook;
+        if (bk?.fall) {   // the West Downs' brook: its fall, and its babble from its nearest point (every 8th sample: ~40 points)
+          const w = BROOKS[0], b = BROOKS[1]; w.x = bk.fall.x; w.y = bk.fall.y;
+          if (Math.hypot(w.x - pl.x, w.y - pl.y) <= BROOK_FALL.reach) { const a = at(w.x, w.y); if (a.off < 3) { w.pan = a.pan; w.d = a.d * BROOK_FALL.dScale; w.off = a.off; sources.push(w); } }
+          let bd = 1e9; for (let i = 0; i < bk.n; i += 8) { const d = (bk.px[i] - pl.x) ** 2 + (bk.py[i] - pl.y) ** 2; if (d < bd) { bd = d; b.x = bk.px[i]; b.y = bk.py[i]; } }
+          if (bd < BROOK_FALL.hear ** 2) { const a = at(b.x, b.y); if (a.off < 3) { b.pan = a.pan; b.d = a.d; b.off = a.off; sources.push(b); } }
+        }
       }
       RT.D.ambience.update({biome: pl.biome, time: pl.time || 'day', listener: {x: pl.x, y: pl.y}, stream: {prox, pan: at(sx, pl.y).pan}, gust, dt, sources, combat: E.music?.state?.I ?? 0});
       const fb = (RT.D.ambience.state?.beds?.length || 0) > 0;
@@ -1065,7 +1077,7 @@ export function createAudio(ctx, host = {}) {
     // ---- events ----
     for (const e of events) {
       switch (e.type) {
-        case 'player.step': if (!landed) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)})); break;
+        case 'player.step': if (!landed) { fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)})); if (pl.biome === 'ruins' && brookWet(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, g: .45}); } break;   // (wading the brook: a splash too)
         case 'prop.land': fire('propDrop', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;   // a prop dropped off the plateau (combat/props.js)
         case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: 1.3, g: 1})); break;   // sprint plant
         case 'player.jump': fire('jump', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); break;

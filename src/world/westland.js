@@ -11,7 +11,7 @@
 // The downs run from WEST.x0 to the Proving Grounds' west edge (x 0); the arena's west road comes out of its gate along y ~15 and
 // carries on west as the TRACK. ?west=0: the world as before (it ends at x 0).
 // OWNS: nothing at run time (constants and pure functions). READS: core/flags.js, core/mathx.js.
-//   WEST_ON, WEST {x0, y0, x1, y1}, LAND (WEST and the painted land past its edges), HILLS / BORDERS (terrain shapes), TRACK /
+//   WEST_ON, BROOK_ON, WEST {x0, y0, x1, y1}, LAND (WEST and the painted land past its edges), HILLS / BORDERS (terrain shapes), TRACK /
 //   TRAIL_N (polylines), PROPS ([kind, x, y, extra]), FIELD_WALLS / FOUNDATIONS / OLD_WALL_LEGS (the old walls), oldWallD(x, y),
 //   TOWER_ON / TOWER (the watchtower on the western hill: world/watchtower.js),
 //   trackD(x, y) (m to the nearest track's centre line, minus its half width: < 0 on it), trackK(x, y) (its distance over its half
@@ -22,6 +22,8 @@ import {vnoise as vn, smooth} from '../core/mathx.js';
 export const WEST_ON = flags.get('west') !== '0';
 // the stone circle on the south-west hill (world/stonecircle.js: its own hill there, this one's oak moved off the top); ?stones=0: none
 export const STONES_ON = WEST_ON && flags.get('stones') !== '0';
+// the BROOK (world/brook.js: its course, bed, pool, bridge; ?brook=0: none) runs on the walkable terrain only (?terrain=0: none)
+export const BROOK_ON = WEST_ON && flags.get('brook') !== '0' && flags.get('terrain') !== '0';
 export const WEST = {x0: -48, y0: 0, x1: 0, y1: 30};
 // LAND: what is painted and grown: the downs and on past the world's west and north edges (the view sees ~8 m past an edge the
 // player stands at: the meadow carries on up the border's banks to a forest edge, instead of stopping at a line)
@@ -55,7 +57,8 @@ export const BORDERS = !WEST_ON ? [] : [
 
 // ---- the track: the arena's west road (biomes.js pathD: y ~15 out of the gate) carried on west between the hills, and a foot
 // trail up to the old oak. hw: half its width (m)
-export const TRACK = {hw: .62, pts: [[1.5, 15], [-2, 15.3], [-6, 16.5], [-10, 17.4], [-14, 17.2], [-18, 15.9], [-22, 14.7], [-26, 14], [-30, 14.2],
+// (with the brook its stretch over the bridge is straight: (-9.2, 17.35) -> (-15.2, 17.2), where (-10, 17.4) -> (-14, 17.2) bent before)
+export const TRACK = {hw: .62, pts: [[1.5, 15], [-2, 15.3], [-6, 16.5], BROOK_ON ? [-9.2, 17.35] : [-10, 17.4], BROOK_ON ? [-15.2, 17.2] : [-14, 17.2], [-18, 15.9], [-22, 14.7], [-26, 14], [-30, 14.2],
   [-34, 15.3], [-38, 16.6], [-42, 17.1], [-46, 16.6], [-52, 16]]};
 export const TRAIL_N = {hw: .36, pts: [[-21.2, 14.9], [-21.5, 12.4], [-22.3, 10.1], [-22.6, 8.3]]};
 const segD = (x, y, P) => {
@@ -83,7 +86,9 @@ export const TOWER = !TOWER_ON ? null : {x: -36, y: 7.5, rot: 20, S: 5.2, d: .78
 export const OAKS = !WEST_ON ? [] : [
   oak(-22.4, 6.4, 1.7, 0, 3),                                   // the old oak, on the highest hill
   oak(-8.8, 6.5, 1.3, 1, 1), oak(...(TOWER_ON ? [-42.8, 10.2] : [-36.4, 7.2]), 1.4, 0, 5), oak(-15.5, 11.2, 1.05, 1, 2), STONES_ON ? oak(-24, 17, 1.05, 0, 6) : oak(-29.6, 21.2, 1.25, 0, 6),
-  oak(-13.2, 22.8, 1.1, 1, 4), oak(-10.6, 24.4, .95, 0, 7), oak(-43, 21.6, 1.2, 1, 0), oak(-4.2, 21.5, 1, 0, 2),
+  // (with the brook these two step aside, so the bridge and its pool show from the south: world/brook.js)
+  BROOK_ON ? oak(-16.0, 23.7, 1.1, 1, 4) : oak(-13.2, 22.8, 1.1, 1, 4), BROOK_ON ? oak(-14.0, 26.2, .95, 0, 7) : oak(-10.6, 24.4, .95, 0, 7),
+  oak(-43, 21.6, 1.2, 1, 0), oak(-4.2, 21.5, 1, 0, 2),
   oak(-27.5, 10.4, .9, 1, 1), oak(-2.6, 5.5, 1, 1, 6),
   // the grove in the north-west
   oak(-41.5, 3.2, 1.15, 0, 4), oak(-44.2, 6.2, 1, 1, 3), oak(-39.2, 1.8, .95, 1, 7), oak(-46.4, 2.6, 1.1, 0, 5),

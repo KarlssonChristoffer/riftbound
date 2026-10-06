@@ -123,3 +123,40 @@ oak as before.
   (wildlife.js PERCH 'watchtower'; crows / ravens like it best, one of the downs' crows starts on it); a **watch fire** on the lookout
   (features/lights.js: a brazier, unlit; E or a fire arrow lights it). The summit's oak grows down its west slope. 8.8k triangles, one
   mesh (static shadow), built in ~7-12 ms; `?tower=0`: none (the oak on the summit again).
+### The brook (2026-10-06)
+
+A brook through the West Downs' east corridor (x -16..-7), on by default with walkable terrain; `?brook=0`: the downs as before.
+
+- **Course:** `world/brook.js` (data + pure functions; layout.js lays it): a SPRING welling up in a ring of mossy stones at the foot
+  of the north bank (-14.75, 1), south through the saddle between the two big hills (1.2 m east of the hall's foundation), through a
+  gap it broke in the east field wall, under a STONE ARCH BRIDGE where it crosses the track (the track's stretch there straightened:
+  (-9.2, 17.35) -> (-15.2, 17.2)), into a deep POOL in the bend east of the southern hill (-8.6, 20.7), over three STEPPING STONES
+  and over the ravine's edge at x -7.7 in a second WATERFALL. Two oaks stepped aside (to (-16, 23.7) and (-14, 26.2)) so the bridge
+  and the pool show from the south; bushes on its banks step back (`away`).
+- **Ground:** its bed is a terrain `channel` (banks 1.45 m wide: walkable down where it cuts ~.35 m through the meadow's swell), the
+  spring's hollow and the pool's `basin`; the bed never rises downstream (.5 m at the spring, -.03 m most of the way, the pool's
+  surface -.18, -.24 at the lip). Its surface is its bed (painted water on the drawn ground, like the creek).
+- **Play:** shallow and wadeable (not water to the sim: a splash under each step), the pool deep (`inStream`: blocked, falling in is
+  a respawn; world.js lowers the ground there by WATER_H like the plateau's pool). The bridge's deck and the stepping stones are
+  layout.js BRIDGES (`stone: true`: elev / steep walk them, cliffs3d.js draws no planks on them); the parapets are 'parapet' props
+  (round colliders every .38 m, nothing drawn; PROP_TOP .56); nothing walks under the arch (a deck covers it).
+- **Water:** the West Downs' canvas gets the brook in the river's four tones (`brook.paint`, from biomes.js westRuins) and a water
+  texture of its own (world.js bakeWater with the canvas's origin, over the brook's box only), with its own bed (waterbed.js with an
+  origin and the brook's `depth`; gfx.js surface `bed`: per-surface bed uniforms): waterSample's kinds 4 (the brook) and 5 (its pool).
+  The fall: the ravine's cliff texture streams in its columns (FALL_ALPHA, its colour from the West Downs' canvas), the 3D ravine
+  rock is gapped there, the foot is painted on the ravine's floor. Reflections (depth.js) when it is in view.
+- **Bridge:** `world/bridge3d.js` with the mason of walls3d.js (now exported): a segmental arch (2.3 m span, .62 m rise) of 15
+  voussoirs with a proud keystone, springers down to the springing line, spandrels and abutments in courses cut round the ring (in
+  strips over its back), paving on the hump, parapets laid to its slope with a coping (one stone gone) and end blocks, moss and grass on
+  the copings; 6.2 x 2.3 m, the deck's crown 1.13 m (.85 over the track's ends). The stepping stones are flat rocks in the same mesh.
+- **Life:** reeds and cattails in groups along its banks, ferns by the spring, beside the bridge and at the lip, five lily pads on the
+  pool (one in flower: riverside.js, its own generator); two fish in the pool and a frog on a pad (wildlife.js: a pool fish takes its
+  pool); four mist stretches at its water's height (mist.js; gfx.js MIST_N 16 -> 20); flecks riding three stretches of it and the
+  fall's spray, mist and churn (atmos/waterlife.js); its babble from its nearest point and its fall as the waterfall's loop (audio.js).
+  The grass keeps off it and the bridge (grass.js `clear`).
+- **Measured** (ruins, loaded machine): build +~130 ms per world (painting ~35-45 ms, the water bake ~70 ms, the bridge 6-9 ms, its
+  bed ~12 ms at load); the bridge is one static mesh (5k triangles, one draw, in the cached sun shadow); +1 water texture (the West
+  Downs' canvas size, 8 MB) and its bed (~1 MB); per frame ~40 distance tests in audio, one more fall in waterlife. Smoke + simview pass.
+- **Open:** the other biomes' downs have no painter yet: there the brook is a dry gully under its bridge, and its pool is deep water
+  you can't see; the camera can't look under the arch; no rain rings or fallen leaves on it (waterlife's rings and leaves are the
+  plateau's).

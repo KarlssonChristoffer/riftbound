@@ -19,7 +19,7 @@
 // Per biome: ruins all of it; frost the frozen fall's cold mist at the pool, the flecks, the riffles at 70 %; ember the sparks and the
 // flecks; rift nothing (its water doesn't flow).
 //
-// OWNS: its tracks, marks, particle / ring / leaf pools. READS: host.layout (stream, rill, fall, pool, outflow, in* tests), world.js
+// OWNS: its tracks, marks, particle / ring / leaf pools. READS: host.layout (stream, rill, fall, pool, outflow, brook, in* tests), world.js
 // waterSample + WATER_TUNE (the pace), host.env (season, part, sky, leafFall), host.elev, host.biome.hole (the ravine's edge). EMITS: nothing.
 // BUDGET: view + draw ~ .01 ms (+ ~.02 ms for the ~60 fillRects it adds to the ground layer's flush) with both falls and the narrows on
 // screen; nothing allocated per frame (tmp-harness node test: 70 KB heap over 20000 frames), every pool capped, off-screen sites skipped.
@@ -36,9 +36,9 @@ const BIO = {
   ember: {fleck: ['#ffd070', '#f08a30', '#a8401a'], emit: true, ring: ['#ffc860', '#e07028', '#8a2c12'], falls: 'lava', riffle: 0, spark: ['#ffd27e', '#f28a36', '#b8481c', '#5e200e']},
 };
 const TUNE = {
-  fleck: {rill: 8, out: 4, narrows: 8},     // flecks per track
+  fleck: {rill: 8, out: 4, narrows: 8, brook: 4},   // flecks per track (brook: each of the West Downs' brook's three stretches)
   rain: {rill: 7, out: 4, size: [.18, .3]},  // rings a second at full rain (on screen), and their reach (m)
-  spray: {foot: [5, 9, 1.6], lip: [4, 7, .8], mist: [9, 13, 1.5]},   // per second at normal flow: [plateau fall, ravine fall, a cascade on the mesa's creek]
+  spray: {foot: [5, 9, 1.6, 4], lip: [4, 7, .8, 3], mist: [9, 13, 1.5, 6]},   // per second at normal flow: [plateau fall, ravine fall, a cascade on the mesa's creek, the brook's fall]
   ravine: 27.95,                            // the ruins' stream tips over the ravine edge here (world.js cliffZ; depth.js WA.yEnd 27.85) if biome.hole can't say
 };
 // chevrons / flecks as flat [i, j, ...] art px: i across the flow, j along it (downstream +)
@@ -88,7 +88,7 @@ export function createWaterLife(host, A) {
     const x = t.px[lo] + (t.px[hi] - t.px[lo]) * f, y = t.py[lo] + (t.py[hi] - t.py[lo]) * f, hw = t.hw[lo] + (t.hw[hi] - t.hw[lo]) * f, tx = t.tx[lo], ty = t.ty[lo];
     _p.x = x - ty * a * hw; _p.y = y + tx * a * hw; _p.tx = tx; _p.ty = ty; _p.hw = hw; _p.v = t.v[lo]; return _p;
   }
-  let rillT = null, outT = null, narT = null, riverV = null;
+  let rillT = null, outT = null, narT = null, riverV = null, brookT = [];
   const RY0 = -1, RDY = .25;
   // m/s the river runs at (speed 1) down its centreline at y (the shader's pace, every streak and leaf on the river follows it)
   const paceAt = y => { if (!riverV) return 0; const f = clamp((y - RY0) / RDY, 0, riverV.length - 1.001), i = f | 0; return riverV[i] + (riverV[i + 1] - riverV[i]) * (f - i); };
@@ -113,6 +113,14 @@ export function createWaterLife(host, A) {
     flecks.length = 0;
     const add = (t, n) => { for (let i = 0; i < n; i++) flecks.push({t, ph: (i + R() * .7) / n, a: rr(-.7, .7), kind: R() < .3 ? 1 : 0, sp: rr(.92, 1.08)}); };
     add(rillT, TUNE.fleck.rill); add(outT, TUNE.fleck.out); if (cfg.riffle) add(narT, TUNE.fleck.narrows);
+    for (const t of brookT) add(t, TUNE.fleck.brook);
+  }
+  // the West Downs' brook (world/brook.js): three tracks, its head to the bridge, the bridge to the pool, the pool to the lip (none under the
+  // bridge's deck, through the pool or over the lip: h 0 reads the surface from host.elev, which is the deck there)
+  function brookTracks(B) {
+    if (!B) return [];
+    const cut = (l0, l1) => { const P = [], H = []; for (let i = Math.max(0, Math.round(l0 / B.ds)), e = Math.min(B.n - 1, Math.round(l1 / B.ds)); i <= e; i += 2) { P.push([B.px[i], B.py[i]]); H.push(B.hw[i]); } return P.length > 4 ? track(P, H, 0) : null; };
+    return [cut(1.8, B.bridgeL - 1.5), cut(B.bridgeL + 1.5, B.poolL - 1.6), cut(B.poolL + 1.6, B.fallL - .35)].filter(Boolean);
   }
 
   // ------------------------------------------------------------------ falls (where the water drops: foot spray, mist, churn, lip drops)
@@ -138,6 +146,8 @@ export function createWaterLife(host, A) {
       const y = ravineY(), hw = S.w(y) / 2 - .12;
       falls.push({id: 1, x: S.cx(y), y: y + .05, hw, h0: -3.44, lipY: y - .03, lipH: WH(), acc0: 0, acc1: 0, acc2: 0, on: false});
     }
+    const bf = biome === 'ruins' ? L.brook?.fall : null;   // the West Downs' brook over the ravine (world/brook.js; painted in the ruins only)
+    if (bf) falls.push({id: 3, x: bf.x, y: bf.y + .05, hw: bf.hw - .1, h0: -3.44, lipY: bf.y - .03, lipH: bf.h, acc0: 0, acc1: 0, acc2: 0, on: false});
   }
   W.falls = () => falls;
   // a fall is on screen when its foot, its lip or the middle of the sheet is
@@ -235,7 +245,8 @@ export function createWaterLife(host, A) {
     ok = false; biome = host.biome.id; cfg = BIO[biome] || null; L = host.layout; S = L?.stream;
     mps = (WATER_TUNE[biome]?.rate || 0) / PPM;
     pn = 0; rn = 0; for (const q of lq) q.st = -1;
-    if (!cfg || !S || !L.rill || !L.fall || !mps) { falls.length = 0; mn = 0; flecks.length = 0; riverV = rillT = outT = narT = null; return; }
+    if (!cfg || !S || !L.rill || !L.fall || !mps) { falls.length = 0; mn = 0; flecks.length = 0; riverV = rillT = outT = narT = null; brookT = []; return; }
+    brookT = biome === 'ruins' ? brookTracks(L.brook) : [];
     rillT = track(L.rill.pts, L.rill.hw, 0); outT = track(L.outflow.pts, L.outflow.hw, 0, .6);   // (its mouth: the pattern there moves with the river's travel, not along the channel: the pace is floored)
       // (h 0: the surface is read from host.elev)
     const ny = S.narrows.y, np = [], nh = []; for (let y = ny - 2.3; y <= ny + 2.3; y += .1) { np.push([S.cx(y), y]); nh.push(S.w(y) / 2); }

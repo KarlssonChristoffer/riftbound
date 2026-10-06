@@ -26,6 +26,7 @@ import {createGrass, MAX_FRONTS, MAX_PUSH} from '../render/grass.js';
 import {steep, WORLD, WEST_ON, WEST_LAND as WEST} from '../world/world.js';   // walkable terrain (docs/TERRAIN.md); the world's bounds, the West Downs
 import {zone as westZone, oldWallD, WALL_D} from '../world/westland.js';
 import {stoneSward} from '../world/stonecircle.js';   // the standing stones: no blade in a stone, the ring's floor cropped short
+import {clear as brookClear} from '../world/brook.js';
 
 // ---------------------------------------------------------------- tunables
 const TUNE = {
@@ -136,7 +137,7 @@ export async function create(host) {
     for (let gy = 0; gy < (WEST.y1 - WEST.y0) / c && n < TUNE.max - 8; gy++) for (let gx = 0; gx < (WEST.x1 - WEST.x0) / c && n < TUNE.max - 8; gx++) {
       const x = WEST.x0 + (gx + R()) * c, y = WEST.y0 + (gy + R()) * c, r1 = R(), r2 = R(), r3 = R(), r4 = R(), r5 = R();
       const cd = code(x, y); if (cd === undefined) continue;
-      if (hole?.(x, y) || steep(x, y) || oldWallD(x, y) < WALL_D / 2 + .04) continue;   // (none inside an old wall's stones)
+      if (hole?.(x, y) || steep(x, y) || oldWallD(x, y) < WALL_D / 2 + .04 || brookClear(x, y)) continue;   // (none inside an old wall's stones, in the brook or under its bridge)
       const ri = cd >> 2, Rm = TUNE.ramps[names[ri]], h0 = host.elev(x, y), Z = westZone(x, y, h0, ZN);
       if (stoneSward(x, y, Z)) continue;
       const thin = TUNE.thin.lo + (1 - TUNE.thin.lo) * vnoise(x * TUNE.thin.k, y * TUNE.thin.k, 41);

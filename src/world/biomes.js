@@ -34,6 +34,7 @@ import {hexU32 as hex} from '../core/color.js';
 import {speciesOf} from './trees3d.js';   // which tree a prop is (the painted cards draw the same species as the 3D ones)
 import {flags} from '../core/flags.js';
 import {trackK, PROPS as WEST_PROPS, FOUNDATIONS, WALL_D} from './westland.js';   // the West Downs' ground (westRuins)
+import {paint as paintBrook} from './brook.js';   // (and their brook)
 
 // ============================================================ pixel toolkit
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -780,6 +781,7 @@ function westRuins(q, ctx) {
       else G.c(x, y, abyss);
     }
   }
+  paintBrook(K, S, {hsh, vn, hex, boulder});   // the brook (world/brook.js: its water, banks, spring and the foot of its fall)
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
 }
 const WEST_GROUND = {ruins: westRuins};

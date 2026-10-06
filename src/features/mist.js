@@ -11,7 +11,7 @@
 // lies instead of by its screen row, and leans a little toward the mist's colour (aerial).
 // SHOW ONLY: nothing here changes how the game plays. ?mist=0 starts off (the old screen-space haze: an A/B); F.toggle().
 // OWNS: its TUNE, the drift, the water's stretches (rebuilt when the world is). READS: host.env (hour, sky), host.mood, host.biome,
-// host.layout (stream, pool, outflow, rill), host.world (waterH), host.elev, host.wind (at), host.G (view, setMist).
+// host.layout (stream, pool, outflow, rill, brook), host.world (waterH), host.elev, host.wind (at), host.G (view, setMist).
 // WRITES: G.setMist, every frame it shows (gfx.js owns the uniforms; lighting.js keeps uFog).
 // THE MEDIUM: F.medium (0..1, this frame) and G.mist.medium: how thick the air is overall, for light through it (god rays); in
 // COMP_FS, mistAt(P) is the local density (the medium, more inside the mist). F.at(x, y, h) -> the mist's veil there on the CPU
@@ -80,6 +80,11 @@ export async function create(host) {
     // as it does over the water: banks filling the hollows between the hills at dawn and dusk (the hilltops and the oaks stand out of
     // it), a breath at night, gone by midday
     const wd = L.west; if (wd) { put(wd.x0 - 4, 8.5, wd.x1 - 2.5, 8.5, 7, 0); put(wd.x0 - 4, 20.5, wd.x1 - 2.5, 20.5, 6, 0); }
+    // their brook (world/brook.js): four stretches down it at its water's height (its bed, not elev: a stretch's end may lie under the bridge's deck)
+    const bk = L.brook; if (bk) for (let k = 0, m = Math.round(bk.fallL / bk.ds); k < 4; k++) {
+      const a = Math.round(k * m / 4), b = Math.round((k + 1) * m / 4);
+      put(bk.px[a], bk.py[a], bk.px[b], bk.py[b], bk.hw[(a + b) >> 1], Math.min(bk.bed[a], bk.bed[b]) - .03);
+    }
     along(L.rill, MAX_SEG - nSeg, (x0, z0, x1, z1) => Math.min(host.elev(x0, z0), host.elev(x1, z1)) - .05);   // (the creek down the mesa's gully: each stretch at its lower end)
   }
   // ---- the day's curve, eased between its keys

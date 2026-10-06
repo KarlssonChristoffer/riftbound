@@ -85,7 +85,7 @@ export async function createPropPhysics(host, core) {
   function setAxis(q) { if (q.tip && speedOf(q) > .05) q.tip.axis = Math.atan2(q.vx, q.vy) * 180 / Math.PI; }
   function enterWater(q) {
     host.events.push({type: 'prop.splash', prop: true, x: q.x, y: q.y});
-    if (q.kind === 'crate') {   // slides on into the water, sinks to its lid and stays: dry footing across the stream
+    if (q.kind === 'crate' && q.x > 0) {   // slides on into the water, sinks to its lid and stays: dry footing across the stream (not the West Downs' brook's pool: it floats)
       const S = stream(), l = speedOf(q) || 1, ux = q.vx / l, uy = q.vy / l;
       let tx = q.x + ux * .6, ty = q.y + uy * .6;
       for (let k = 0; k < 3; k++) if (S.stones.some(o => Math.hypot(o.x - tx, o.y - ty) < .6)) { tx += ux * .72; ty += uy * .72; }   // past a crate already sunk
