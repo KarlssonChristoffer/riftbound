@@ -3,8 +3,10 @@
 // the page blurs it (index.html #pause); drag the backdrop to look around, the wheel zooms, a click on it resumes.
 // TABS: Game (resume, the run's actions), Graphics, Audio, Controls: what a player sets. Dev (only in dev mode: the
 // sandbox, ?dev=1, the ` key): character / world / renderer A/B, every feature toggle, debug views, tools.
+// GROUPS: a tab lists its rows under group headings (opts.groups: the order); a PAGED tab (opts.paged: Dev) shows one group
+// at a time instead, with a button per group above the rows (remembered on this machine, 'rb.menu'). The body scrolls.
 // ITEMS come from opts.items() (main.js builds them: it owns the state they change), read fresh every time it draws:
-//   {tab, group?, label, key? (a keycap hint),
+//   {tab, group?, label, key? (a keycap hint), sub? (a setting under the row above: indented),
 //    options: [...], get() -> one of them, set(v)     a choice (on / off ones read On / Off)
 //    min, max, get() -> n, set(n)                      a level, in 10% steps
 //    value() -> text, run(d)                           a value it cycles itself (d = +1 / -1: the arrows)
@@ -14,20 +16,21 @@
 //                                                      'rb.settings'); 'param': unless the URL sets it (?depth=0)}
 // SOUNDS: the forge's wooden UI family (audio/forge/recipes/ui.js) through opts.sound(name): hover, click, confirm,
 // back, open.
-// OWNS: the #pause DOM, the open tab, focus, 'rb.settings'. READS: opts.items(), opts.dev(), opts.title().
+// OWNS: the #pause DOM, the open tab and group, focus, 'rb.settings', 'rb.menu'. READS: opts.items(), opts.dev(), opts.title().
 // BUDGET: nothing per frame; the DOM is rebuilt only when something changes.
 const TABS = [['game', 'Game'], ['graphics', 'Graphics'], ['audio', 'Audio'], ['controls', 'Controls'], ['dev', 'Dev']];
-const STORE = 'rb.settings';
+const STORE = 'rb.settings', PAGES = 'rb.menu';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const isSwitch = it => it.options?.length === 2 && it.options.includes('on') && it.options.includes('off');
 const pct = (it, v) => Math.round((v - it.min) / ((it.max - it.min) || 1) * 100) + '%';
 
-export function createMenu({root, items, dev = () => false, title = () => ['Paused', ''], groups = {}, sound = () => {},
+export function createMenu({root, items, dev = () => false, title = () => ['Paused', ''], groups = {}, paged = [], sound = () => {},
   changed = () => {}, resume = () => {}, look = () => {}, zoom = () => {}}) {
   root.innerHTML = `<div id="menu"></div><div class="m-hint">drag to look around · wheel to zoom · click to resume</div>`;
   const panel = root.querySelector('#menu');
-  let open = false, tab = 'game', list = [], hov = '', drag = null;
+  let open = false, tab = 'game', list = [], hov = '', drag = null, cats = [];
   let saved = {}; try { saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) {}
+  let page = {}; try { page = JSON.parse(localStorage.getItem(PAGES) || '{}') || {}; } catch (e) {}   // paged tab -> its open group
 
   function remember(it) {
     if (!it.keep || !it.id) return;
@@ -40,35 +43,45 @@ export function createMenu({root, items, dev = () => false, title = () => ['Paus
     if (it.keys) return `<div class="m-keys">${it.keys.map(([k, what]) => `<div><span>${esc([].concat(k).join(' '))}</span><span>${esc(what)}</span></div>`).join('')}</div>`;
     if (it.run && !it.value) return `<button class="m-act${it.main ? ' main' : ''}" data-i="${i}">${esc(it.label)}</button>`;
     const sw = isSwitch(it), v = it.run ? it.value() : it.min !== undefined ? pct(it, it.get()) : sw ? (it.get() === 'on' ? 'On' : 'Off') : it.get();
-    return `<button class="m-row" data-i="${i}"${sw ? ` role="switch" aria-checked="${it.get() === 'on'}"` : ''}><span>${esc(it.label)}${it.key ? `<small>${esc(it.key)}</small>` : ''}</span>` +
+    return `<button class="m-row${it.sub ? ' sub' : ''}" data-i="${i}"${sw ? ` role="switch" aria-checked="${it.get() === 'on'}"` : ''}><span>${esc(it.label)}${it.key ? `<small>${esc(it.key)}</small>` : ''}</span>` +
       `<span class="m-val">${sw ? esc(v) : `<i data-d="-1">‹</i>${esc(v)}<i data-d="1">›</i>`}</span></button>`;
   }
 
   function draw() {
-    const body = panel.querySelector('.m-body'), top = body?.scrollTop || 0, fi = document.activeElement?.dataset?.i;
+    const body = panel.querySelector('.m-body'), top = body?.scrollTop || 0, fd = document.activeElement?.dataset || {}, fi = fd.i, fc = fd.cat;
     list = items();
     const tabs = tabsShown();
     if (!tabs.some(t => t[0] === tab)) tab = tabs[0]?.[0] || 'graphics';
     // rows by group: the tab's preferred order first (opts.groups), the rest as they come
     const mine = list.map((it, i) => [it, i]).filter(([it]) => it.tab === tab), order = [...(groups[tab] || [])];
     for (const [it] of mine) if (!order.includes(it.group || '')) order.push(it.group || '');
+    const used = order.filter(g => mine.some(([it]) => (it.group || '') === g)), pg = paged.includes(tab);
+    cats = pg ? used : [];
+    if (pg && !cats.includes(page[tab])) page[tab] = cats[0];
     const rows = [];
-    for (const g of order) {
-      const rs = mine.filter(([it]) => (it.group || '') === g); if (!rs.length) continue;
-      if (g) rows.push(`<h4>${esc(g)}</h4>`);
-      for (const [it, i] of rs) rows.push(row(it, i));
+    for (const g of pg ? [page[tab]] : used) {
+      if (g && !pg) rows.push(`<h4>${esc(g)}</h4>`);
+      for (const [it, i] of mine) if ((it.group || '') === g) rows.push(row(it, i));
     }
     const [head, sub] = title();
     panel.innerHTML = `<header><div><div class="m-title">${esc(head)}</div>${sub ? `<div class="m-sub">${esc(sub)}</div>` : ''}</div>
         <button class="m-close" data-close title="Resume">Esc</button></header>
       <nav>${tabs.map(([id, name]) => `<button class="m-tab${id === tab ? ' on' : ''}" data-tab="${id}">${name}</button>`).join('')}</nav>
+      ${cats.length ? `<div class="m-cats">${cats.map(g => `<button class="m-cat${g === page[tab] ? ' on' : ''}" data-cat="${esc(g)}">${esc(g || 'Other')}</button>`).join('')}</div>` : ''}
       <div class="m-body">${rows.join('')}${tab === 'dev' ? '<p class="m-note">Test toggles, A/B and debug views. This tab shows in dev mode only (the ` key).</p>' : ''}</div>`;
     panel.querySelector('.m-body').scrollTop = top;
     if (fi !== undefined) panel.querySelector(`[data-i="${fi}"]`)?.focus({preventScroll: true});
+    else if (fc !== undefined) catEl(fc)?.focus({preventScroll: true});
   }
+  const catEl = g => [...panel.querySelectorAll('[data-cat]')].find(b => b.dataset.cat === g);
 
   function setTab(id) { if (id === tab) return; tab = id; sound('click'); draw(); panel.querySelector('.m-body').scrollTop = 0; }
   function stepTab(d) { const t = tabsShown().map(x => x[0]), i = t.indexOf(tab); if (t.length) setTab(t[(i + d + t.length) % t.length]); }
+  function setCat(g) {
+    if (g === page[tab] || !cats.includes(g)) return;
+    page[tab] = g; try { localStorage.setItem(PAGES, JSON.stringify(page)); } catch (e) {}
+    sound('click'); draw(); panel.querySelector('.m-body').scrollTop = 0;
+  }
   function activate(i, d = 1) {
     const it = list[i]; if (!it) return;
     if (it.run && !it.value) { sound(it.sound || 'confirm'); resume(null); it.run(); return; }   // an action: close, then run
@@ -82,11 +95,12 @@ export function createMenu({root, items, dev = () => false, title = () => ['Paus
   panel.addEventListener('click', e => {
     if (e.target.closest('[data-close]')) { resume('back'); return; }
     const tb = e.target.closest('[data-tab]'); if (tb) { setTab(tb.dataset.tab); return; }
+    const cb = e.target.closest('[data-cat]'); if (cb) { setCat(cb.dataset.cat); return; }
     const el = e.target.closest('[data-i]'); if (!el) return;
     activate(+el.dataset.i, +(e.target.closest('[data-d]')?.dataset.d || 1));
   });
   panel.addEventListener('pointerover', e => {
-    const el = e.target.closest('[data-i], [data-tab], [data-close]'), k = el ? el.dataset.i ?? el.dataset.tab ?? 'x' : '';
+    const el = e.target.closest('[data-i], [data-tab], [data-cat], [data-close]'), k = el ? el.dataset.i ?? el.dataset.tab ?? (el.dataset.cat !== undefined ? 'c:' + el.dataset.cat : 'x') : '';
     if (k !== hov) { hov = k; if (k) sound('hover'); }
   });
   // the backdrop: drag to turn the camera, the wheel zooms, a click resumes
@@ -107,14 +121,23 @@ export function createMenu({root, items, dev = () => false, title = () => ['Paus
     hide(snd = 'back') { if (!open) return; open = false; drag = null; if (snd) sound(snd); root.classList.add('hidden'); },
     refresh() { if (open) draw(); },
     // keys while open (main.js forwards them; Escape is main's): Tab / Q / E change tab, arrows (or WASD) move and change
-    // values, Enter / Space press (the browser's own button handling)
+    // values, Enter / Space press (the browser's own button handling). In a paged tab, up from the first row reaches the
+    // group buttons: left / right there change the group, down goes back to the rows
     key(k, e) {
       if (k === 'tab' || k === 'q' || k === 'e') { e.preventDefault(); if (!e.repeat) stepTab(k === 'q' || (k === 'tab' && e.shiftKey) ? -1 : 1); return; }
       if (e.repeat && 'wasd'.includes(k)) return;   // still held from play: only the arrows repeat
       const els = [...panel.querySelectorAll('.m-body [data-i]')], cur = els.indexOf(document.activeElement), it = cur >= 0 ? list[+els[cur].dataset.i] : null;
       const v = k === 'arrowdown' || k === 's' ? 1 : k === 'arrowup' || k === 'w' ? -1 : 0, h = k === 'arrowright' || k === 'd' ? 1 : k === 'arrowleft' || k === 'a' ? -1 : 0;
+      const onCat = document.activeElement?.dataset?.cat;
+      if (onCat !== undefined && (v || h)) {
+        e.preventDefault();
+        if (h) { const g = cats[((cats.indexOf(onCat) + h) % cats.length + cats.length) % cats.length]; setCat(g); catEl(g)?.focus({preventScroll: true}); }
+        else if (v > 0 && els.length) { els[0].focus({preventScroll: true}); els[0].scrollIntoView({block: 'nearest'}); sound('hover'); }
+        return;
+      }
       if (v) {
         e.preventDefault(); if (!els.length) return;
+        if (cur === 0 && v < 0 && cats.length) { catEl(page[tab])?.focus({preventScroll: true}); sound('hover'); return; }
         const j = cur < 0 ? (v > 0 ? 0 : els.length - 1) : Math.max(0, Math.min(els.length - 1, cur + v));
         if (j !== cur) { els[j].focus({preventScroll: true}); els[j].scrollIntoView({block: 'nearest'}); sound('hover'); }
       } else if (h) {

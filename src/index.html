@@ -18,13 +18,14 @@
   #help td:first-child { color: var(--key); white-space: nowrap; }
   #load { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: var(--bg); font-size: 14px; }
   /* the menu (ui/menu.js): plain white text, centred over the living world, which is blurred (drag it to look around) */
-  #pause { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 32px 16px; box-sizing: border-box;
+  /* (one 1fr cell: the menu's max-height is the screen's, so a long tab scrolls in .m-body instead of running off it) */
+  #pause { position: fixed; inset: 0; z-index: 20; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; padding: 32px 16px 44px; box-sizing: border-box;
     background: rgba(0, 0, 0, .42); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px);
     color: #fff; font: 15px/1.4 "Segoe UI", system-ui, sans-serif; text-shadow: 0 1px 3px rgba(0, 0, 0, .7); cursor: grab; animation: m-fade .2s ease-out; }
   #pause.turning { cursor: grabbing; }
   body:has(#pause:not(.hidden)) :is(#hud, #help) { visibility: hidden; }
   @keyframes m-fade { from { opacity: 0; } }
-  #menu { position: relative; width: min(380px, 100%); max-height: 100%; display: flex; flex-direction: column; cursor: default; }
+  #menu { position: relative; width: min(500px, 100%); max-height: 100%; display: flex; flex-direction: column; cursor: default; }
   #menu header { padding-bottom: 8px; text-align: center; }
   .m-title { font-size: 26px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; }
   .m-sub { font-size: 13px; opacity: .6; }
@@ -34,13 +35,19 @@
   .m-tab { padding: 2px 0; font: inherit; font-size: 14px; color: #fff; text-shadow: inherit; opacity: .5; background: none; border: 0; cursor: pointer; }
   .m-tab:hover, .m-tab:focus-visible { opacity: .85; outline: none; }
   .m-tab.on { opacity: 1; text-decoration: underline; text-underline-offset: 6px; }
-  .m-body { overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .25) transparent; }
+  .m-cats { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; padding: 0 0 12px; }
+  .m-cat { padding: 2px 9px; font: inherit; font-size: 13px; color: #fff; text-shadow: inherit; opacity: .6; background: rgba(255, 255, 255, .05);
+    border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px; cursor: pointer; }
+  .m-cat:hover, .m-cat:focus-visible { opacity: .9; background: rgba(255, 255, 255, .12); outline: none; }
+  .m-cat.on { opacity: 1; background: rgba(255, 255, 255, .2); border-color: rgba(255, 255, 255, .5); }
+  .m-body { min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .25) transparent; }
   .m-body h4 { margin: 14px 10px 2px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; opacity: .5; }
   .m-row, .m-act { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 5px 10px; box-sizing: border-box;
     font: inherit; color: #fff; text-shadow: inherit; text-align: left; opacity: .85; background: none; border: 0; border-radius: 4px; cursor: pointer; }
   .m-row:hover, .m-row:focus-visible, .m-act:hover, .m-act:focus-visible { opacity: 1; background: rgba(255, 255, 255, .09); outline: none; }
   .m-act { justify-content: center; padding: 7px 10px; font-size: 18px; }
   .m-row small { margin-left: 8px; font-size: 11px; opacity: .45; }
+  .m-row.sub { padding-left: 26px; font-size: 14px; }
   .m-val { display: flex; align-items: center; white-space: nowrap; }
   .m-val i { padding: 0 6px; font-style: normal; opacity: .45; }
   .m-val i:hover { opacity: 1; }

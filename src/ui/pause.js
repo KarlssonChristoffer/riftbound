@@ -33,6 +33,15 @@ const CLAIM = {
     'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'},
     'Gun sounds': {tab: 'audio', group: 'Sound', label: 'Gun sounds'}},   // (the western-movie flavor: features/audio.js, remembered there)
 };
+// DEV CATEGORIES: the Dev tab shows one group at a time (a button each); a feature's toggle and its unclaimed settings go
+// in its group here (a feature not listed: Other)
+const DEV_GROUP = {
+  wind: 'Nature', windlines: 'Nature', litter: 'Nature', grass: 'Nature', riverside: 'Nature', wildlife: 'Nature', atmos: 'Nature',
+  weather: 'Nature', dust: 'Nature', tumbleweed: 'Nature',
+  lights: 'Effects', flow: 'Effects', contact: 'Effects', gunfx: 'Effects', depth: 'Effects', blood: 'Effects',
+  foes: 'World',
+  affixes: 'Experiments', equip: 'Experiments', omens: 'Experiments', shrines: 'Experiments',
+};
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
 const LOW_OFF = ['windlines', 'wildlife', 'depth', 'grass', 'litter', 'dust', 'tumbleweed'];
@@ -103,12 +112,14 @@ export function createPause(E) {
     dv('Renderer', {label: 'Banded light', key: 'V', ...onOff(() => opt.banded, v => { opt.banded = v; })});
     dv('Renderer', {label: 'Debug view', key: 'G', ...pick(DEBUG, () => DEBUG[opt.debug], v => { opt.debug = DEBUG.indexOf(v); })});
     dv('Renderer', {label: 'Colliders', key: 'Shift+G', ...onOff(() => opt.zones, v => { opt.zones = v; })});
-    // the features' toggles and settings: Dev > Features, unless CLAIMed for a player tab
+    // the features' toggles and settings: Dev, in the feature's DEV_GROUP, unless CLAIMed for a player tab (a setting sits
+    // indented under its feature's toggle when both are in Dev)
     for (const f of features) {
       if (!f.toggle && !f.settings) continue;
-      const claim = CLAIM[f.name] || {}, put = (k, it) => out.push(claim[k] ? {...it, key: undefined, ...claim[k]} : {...it, tab: 'dev', group: 'Features'});
+      const claim = CLAIM[f.name] || {}, put = (k, it) => out.push(claim[k] ? {...it, key: undefined, sub: false, ...claim[k]} : {...it, tab: 'dev', group: DEV_GROUP[f.name] || 'Other'});
       if (f.toggle) put('', {label: f.label || f.name, key: f.key?.toUpperCase(), ...onOff(() => f.on !== false, v => { if ((f.on !== false) !== v) f.toggle(); })});
-      for (const s of f.settings?.() || []) put(s.label, s.options ? {label: s.label, ...pick(s.options, s.get, s.set)} : {label: s.label, min: s.min ?? 0, max: s.max ?? 1, step: s.step ?? .01, get: s.get, set: s.set});
+      const sub = !!f.toggle && !claim[''];
+      for (const s of f.settings?.() || []) put(s.label, s.options ? {label: s.label, sub, ...pick(s.options, s.get, s.set)} : {label: s.label, sub, min: s.min ?? 0, max: s.max ?? 1, step: s.step ?? .01, get: s.get, set: s.set});
     }
     if (A) out.push({tab: 'audio', group: 'Sound', label: 'Music', key: 'U', ...onOff(() => A.musicOn, v => { if (A.musicOn !== v) A.toggleMusic(); })});
     out.push({tab: 'graphics', group: 'Effects', label: 'Screen shake', id: 'shake', keep: true, ...onOff(() => opt.shake, v => { opt.shake = v; })});
@@ -120,7 +131,8 @@ export function createPause(E) {
   const menu = createMenu({
     root: $('#pause'), items: menuItems, dev: () => host.dev, sound: host.uiSound, changed: E.applyOpts,
     title: () => E.game.mode === 'title' ? ['Settings', ''] : ['Paused', E.game.mode === 'run' && E.game.run ? `Run · stage ${E.game.run.stage + 1}` : E.game.mode === 'sandbox' ? 'Proving Grounds' : ''],
-    groups: {graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys'], dev: ['Character', 'World', 'Renderer', 'Features', 'Tools']},
+    groups: {graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys'], dev: ['Character', 'World', 'Nature', 'Effects', 'Renderer', 'Experiments', 'Tools', 'Other']},
+    paged: ['dev'],
     resume: snd => toggle(false, snd),
     look: dx => { E.input.look(dx); lookT = performance.now(); },
     zoom: e => cv.onWheel(e),
