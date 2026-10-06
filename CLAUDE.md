@@ -11,8 +11,9 @@ Rules that apply to every change now:
   GPU, compared with `tools/perf/baseline.json`) before it's committed; put the before/after in the commit message.
   In the game, F3 (or `?perf=1`) shows ms per system against the budget. Budgets: `src/core/perf.js`.
   Run the bench on a quiet machine; it warns when other work is competing for the CPU. On a busy machine compare with
-  `node tools/perf/ab.mjs --a git:HEAD` (both versions stepped in one Chrome, alternating: load hits both alike);
-  `node tools/perf/vsync.mjs` counts missed frames at the display's refresh rate (a real full-screen window).
+  `node tools/perf/ab.mjs --a git:HEAD` (both versions stepped in one Chrome, alternating: load hits both alike).
+  `node tools/perf/vsync.mjs` counts missed frames at the display's refresh rate, but it opens a real full-screen window
+  on the user's monitor: run it ONLY when the user asks for it at that moment.
 - **Behaviour checks.** A change that should not change what you see (a refactor, a move) passes
   `node tools/test/golden.mjs --compare tmp/golden/ref4` (bit-exact captures of a scripted tour); any engine change
   passes `node tools/test/smoke.mjs` (keys, menu, loadouts, resize, a run); anything touching a feature's update / view
@@ -43,6 +44,10 @@ Rules that apply to every change now:
   ...). The 2D arena (`concepts/`) and the first 2D game (`concepts/legacy-game/`) are frozen references.
 - Syntax-check ES modules as `.mjs` copies (`node --check` on a `.js` file missed a duplicate `const` here).
 - Shadow casters that never move go on sScene layers 1 + 2 (cached static map); moving ones stay on layer 0.
+- **Never open a visible browser window** for tests, captures, probes or measurements (no `--window`, `--kiosk` or
+  windowed runs, no foreground tabs): the user works on that machine and a window that pops up full screen takes over
+  their monitor. Everything automated runs headless, in the background. A visible window only when the user asks for
+  one at that moment (e.g. to watch a demo).
 - **Headless Chrome** (a tool or a scratch script): start it with `launch(tag, args)` from `tools/lib/chrome.mjs` (from a
   scratchpad: `import {launch} from 'file:///D:/Game/tools/lib/chrome.mjs'`) and call its `kill()` on exit. Its profile
   goes in `%TEMP%\riftbound-chrome\` with flags that keep it ~12 MB, and every launch sweeps the dead ones. Never pass
