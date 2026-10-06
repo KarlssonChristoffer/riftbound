@@ -16,7 +16,8 @@
 // grass in front of the player never draws the x-ray rim. Grass casts no shadow and is in no point-light height map.
 //
 // API: createGrass(G) -> {setBlades(a, b, n, ramps, flowers), step(dt), setWind(buf | null), setPushers(arr, n), blast(x, z, r, k),
-//   setLook(snowK, flowerK), setVisible(v), dispose(), mesh, count}
+//   setLook(snowK, flowerK), setFlowerShape(v), setVisible(v), dispose(), mesh, count}
+//   setFlowerShape: 0 a 2 px head (default), 1 a V of two petals over a centre, 3 px wide (the cool palette: features/grass.js)
 //   a, b: Float32Array(n * 4) per blade: a = (root X, root Y (ground height), root Z, height m), b = (ramp * 4 + tone,
 //   phase 0..1, flower colour 0 none / 1..4, rest lean: whole part = its size in 32nds of the height, fraction = its angle / 2 pi);
 //   ramps: 4 x [highlight, tone 0 .. 3] as [r, g, b] 0..1
@@ -60,7 +61,7 @@ const BLADE_VS = HEAD + WIND + `
 in vec3 position;   // x: side (-.5 / .5 art px), y: t (0 root .. 1 tip)
 in vec4 iA; in vec4 iB;
 uniform mat4 viewMatrix, projectionMatrix;
-uniform vec2 uRes; uniform float uZoom, uTime, uSnowK, uFlowerK;
+uniform vec2 uRes; uniform float uZoom, uTime, uSnowK, uFlowerK, uFlowerV;
 uniform vec4 uK;   // (lean per m/s of wind, flutter at rest, flutter per unit of gust, max lean) in blade heights
 uniform vec2 uSheen;   // the wind's lean (blade heights) where the sheen starts / is full
 uniform vec4 uPush[${MAX_PUSH}]; uniform int uNP;   // (x, z, radius, strength in blade heights)
@@ -97,7 +98,7 @@ void main() {
   vec2 sr = (cr.xy + 1.) * S, rc = floor(sr) + .5;
   vec2 pc = rc + floor((cp.xy + 1.) * S - sr + .5);
   vFl = iB.z > .5 && fract(ph * 13.7) < uFlowerK ? iB.z : 0.;
-  pc.x += vFl > .5 ? position.x * 2. + .5 : position.x;   // (a flowering blade is 2 px wide: the head; FS keeps the stem 1 px)
+  pc.x += vFl > .5 ? (uFlowerV > .5 ? position.x * 3. : position.x * 2. + .5) : position.x;   // (a flowering blade is 2 px wide (a V: 3, centred): the head; FS keeps the stem 1 px)
   vSide = position.x;
   if (t < .01) pc.y -= .5; else if (t > .99) pc.y += .5;   // the root row and the tip row are whole pixels
 #ifdef CINE
@@ -118,13 +119,16 @@ void main() {
 }`;
 const BLADE_FS = HEAD + OUTS + `
 in float vT; in float vSide; flat in vec3 vC0; flat in vec3 vC1; flat in vec3 vC2; flat in float vHp; flat in float vFl;
-uniform vec3 uFlower[4];
+uniform vec3 uFlower[4]; uniform float uFlowerV;
 void main() {
   float py = vT * vHp;   // art px up from the root row
-  if (vSide > .1 && py < vHp - 1.) discard;   // a flowering blade's right column: only its head (vSide: a plain blade's pixel 0, a flower's columns -.25 / .25)
+  // a V head (uFlowerV): columns 0 1 2 across its 3 px; the petals in the top row's outer two, the centre under them, the stem below
+  bool vee = vFl > .5 && uFlowerV > .5; int col = int(floor((vSide + .5) * 3.));
+  if (vee ? (py > vHp - 1. ? col == 1 : col != 1) : vSide > .1 && py < vHp - 1.) discard;   // (else a flowering blade's right column: only its head; vSide: a plain blade's pixel 0, a flower's columns -.25 / .25)
   vec3 c = py < max(1., vHp * .34) ? vC0 : py > vHp - 1.2 ? vC2 : vC1;
   int tone = 0;
-  if (vFl > .5 && py > vHp - 1.) { c = uFlower[int(vFl + .5) - 1] * (vSide > .1 ? .82 : 1.); tone = 2; }   // a 2 px head, its right half in shade (tone 2: own colours, outside the season's matrix)
+  if (vee) { if (py > vHp - 2.) { c = uFlower[int(vFl + .5) - 1] * (py > vHp - 1. ? (col == 2 ? .82 : 1.) : .72); tone = 2; } }   // the right petal in shade, the centre darker
+  else if (vFl > .5 && py > vHp - 1.) { c = uFlower[int(vFl + .5) - 1] * (vSide > .1 ? .82 : 1.); tone = 2; }   // a 2 px head, its right half in shade (tone 2: own colours, outside the season's matrix)
   o0 = vec4(c, float(4 + tone) / 255.);   // type 1: ground (tone 1 would be WATER: never)
   o1 = vec4(0., 1., 0., -1.);
   o2 = vec4(0.);
@@ -185,7 +189,7 @@ export function createGrass(G) {
   for (const t of [0, .34, .67, 1]) STRIP_P.push(-.5, t, 0, .5, t, 0);
   for (let s = 0; s < 3; s++) { const a = s * 2; STRIP_I.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
   const U = {
-    uRes: {value: new THREE.Vector2(G.VW, G.VH)}, uZoom: {value: 1}, uTime: G.U.time, uSnowK: {value: 1}, uFlowerK: {value: 0},
+    uRes: {value: new THREE.Vector2(G.VW, G.VH)}, uZoom: {value: 1}, uTime: G.U.time, uSnowK: {value: 1}, uFlowerK: {value: 0}, uFlowerV: {value: 0},
     uK: {value: new THREE.Vector4(.32, .05, .16, .92)}, uSheen: {value: new THREE.Vector2(.17, .42)},
     uPush: {value: push}, uNP: {value: 0},
     uTr: {value: rts[0].texture}, uTrBox: {value: new THREE.Vector4(TBOX.x0, TBOX.z0, 1 / TBOX.w, 1 / TBOX.d)}, uTrOn: {value: 1},
@@ -228,6 +232,7 @@ export function createGrass(G) {
   let nb = 0;
   function blast(x, z, r, k) { if (nb < MAX_BLAST) blasts[nb++].set(x, z, r, k); }
   function setLook(snowK, flowerK) { U.uSnowK.value = snowK; U.uFlowerK.value = flowerK; }   // (positional: called every frame, no object)
+  function setFlowerShape(v) { U.uFlowerV.value = v ? 1 : 0; }
   // once a frame, before G.render(): the trample pass, the view's size and zoom
   function step(dt) {
     U.uRes.value.set(G.VW, G.VH); U.uZoom.value = G.view.zoom || 1;
@@ -240,6 +245,6 @@ export function createGrass(G) {
   }
   function setVisible(v) { visible = v; if (mesh) mesh.visible = v; }
   function dispose() { drop(); mat.dispose(); for (const rt of rts) rt.dispose(); trScene.children[0].material.dispose(); tri.dispose(); }
-  return {setBlades, setWind, setPushers, blast, setLook, step, setVisible, dispose, U, get count() { return count; }, get mesh() { return mesh; },
+  return {setBlades, setWind, setPushers, blast, setLook, setFlowerShape, step, setVisible, dispose, U, get count() { return count; }, get mesh() { return mesh; },
     get trample() { return rts[cur]; }, TBOX};   // (the trample map now: for a look in dev tools)
 }

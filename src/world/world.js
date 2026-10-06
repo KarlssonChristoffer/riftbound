@@ -45,6 +45,7 @@ import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
+import {flags} from '../core/flags.js';
 
 export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
@@ -68,6 +69,9 @@ const PAL = {
     stone: ['d6b88e', 'bc9c72', '9c7e58', '6a5440'], rock: ['c97e5c', 'ab6246', '874a36', '562c22'], rope: ['dcc890', 'bea872', '988456', '625438'],
     cover: ['ead4a4', 'dcc08c', 'c2a272', '90724e'], coverK: .1, coverT: .86, rockB: ['d89a70', 'be7e58', '9a6244', '643e2c']},   // (rockB: banded cliffs)
 };
+// the cool palette (the default; ?palette=old, biomes.js): the ruins' props in mauve-grey stone and rock, a yellow-green moss
+if (flags.get('palette') !== 'old') Object.assign(PAL.ruins, {stone: ['a39ba2', '878088', '6b656f', '47424c'], rock: ['827a83', '6a636d', '544e58', '38343d'],
+  cover: ['8aa866', '6c8b50', '536e42', '3a5036']});
 const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {ember: ['ffe08a', 'ffa040', 'e0541e', '6e1c12']}};
 // (bark, leaf: the procedural trees, trees3d.js; char, ash, ember: burning wood, gfx.js MESH_FS uBurn; birch, aspen, berry: the
 // birch's white bark, the aspen's grey-green bark, the rowan's berries, trees3d.js; appended, so the kit's family indices stay put.

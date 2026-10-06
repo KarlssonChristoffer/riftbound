@@ -136,6 +136,9 @@ export const LEAF = {
   autumn: ['#789262', '#5f7a4e', '#4a6040', '#33422f'],
   winter: ['#80806a', '#646451', '#4c4c3f', '#33332c'],
 };
+// the cool palette (the default; ?palette=old, world/biomes.js): a brighter yellow-green leaf, light over the grass as in the references
+if (flags.get('palette') !== 'old') Object.assign(LEAF, {spring: ['#accc6c', '#86a856', '#5e8246', '#3c5a3c'],
+  summer: ['#a2c262', '#7a9e4c', '#527642', '#34503c'], autumn: ['#a6b060', '#808e4a', '#5a6a40', '#3c4a34']});
 const LEAF_RGB = Object.fromEntries(Object.entries(LEAF).map(([k, v]) => [k, v.map(hex)]));
 
 export function createEnv({moods, biome, Q = flags, focus = null}) {

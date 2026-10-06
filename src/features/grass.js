@@ -51,6 +51,8 @@ const TUNE = {
   trample: {walk: .38, run: .65, roll: .95, land: .85, brute: .5, barrel: .55, blast: 1, blastR: 1.35},
   max: 300000,
 };
+// the cool palette (the default; ?palette=old, world/biomes.js): the wildflowers mostly a bright lavender, a few more of them (the references)
+if (flags.get('palette') !== 'old') Object.assign(TUNE.flowers, {p: .4, lo: .56, cols: ['#e6e0d2', '#e8c650', '#c49cf2', '#e898bc'], w: [.22, .16, .46, .16]});
 
 export const order = {after: ['wind']};   // reads the wind's gust fronts after its view has stepped them
 
@@ -59,6 +61,7 @@ export async function create(host) {
   if (flags.get('grass') === '0') { F.on = false; return F; }
   const G = host.G, grass = createGrass(G);
   F._.grass = grass;
+  if (flags.get('palette') !== 'old') grass.setFlowerShape(1);   // (V heads with the cool palette's lavender: the references' flowers)
   const WBUF = new Float32Array(8 + 16 * MAX_FRONTS), PBUF = new Float32Array(8 * MAX_PUSH), BL = new Float32Array(12);   // BL: this frame's blasts (x, y, r) x 4
   let nbl = 0;
   const walkers = host.entities.query('grass.walkers', p => p.kind === 'brute' || p.sparring || p.kind === 'barrel' || p.kind === 'barrel_x');

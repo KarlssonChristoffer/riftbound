@@ -15,6 +15,7 @@
 // BUDGET: ~0.15 ms per frame at full rain (900 drops + splashes), nothing without weather.
 import {clamp} from '../core/mathx.js';
 import {viewRandom} from '../core/rng.js';
+import {flags} from '../core/flags.js';
 const TAU = Math.PI * 2;
 const R = viewRandom('weather'), rr = (a, b) => a + R() * (b - a);
 export const TUNE = {
@@ -33,6 +34,9 @@ const SEASON_M = {
   autumn: [.55, .75, 0, .25, .55, .05, .2, .15, .25],
   winter: [.45, .4, .1, .3, .5, .15, .25, .35, .3],
 };
+// the cool palette (the default; ?palette=old, world/biomes.js) paints a brighter, more saturated green: a softer autumn keeps its meadow ochre,
+// not a field of orange
+if (flags.get('palette') !== 'old') SEASON_M.autumn = [.48, .64, 0, .24, .5, .06, .2, .16, .26];
 
 // ORDER (core/features.js): rain slants with this step's wind
 export const order = {after: ['wind']};

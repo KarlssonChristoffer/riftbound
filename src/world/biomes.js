@@ -32,6 +32,7 @@ import {hash3 as hsh, vnoise as vn} from '../core/mathx.js';
 import {mulberry32 as rng} from '../core/rng.js';
 import {hexU32 as hex} from '../core/color.js';
 import {speciesOf} from './trees3d.js';   // which tree a prop is (the painted cards draw the same species as the 3D ones)
+import {flags} from '../core/flags.js';
 
 // ============================================================ pixel toolkit
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -287,6 +288,17 @@ const STYLES = {
     rune: '#ff8ae8', runeDim: '#8a4ad8', torch: '#d68cff', braz: ['#ffb04a', '#7fc8ff', '#e070ff'],
   },
 };
+// THE COOL PALETTE (the default, from the user's reference images, 2026-10-05; ?palette=old: the first one): the ruins' stone a mauve grey instead of
+// khaki, the grass a brighter yellow-green (the shade turns it teal: render/lighting.js SHADE). Each tone keeps about its value, so
+// the ramps' light and dark stay where they were; the props' stone, rock and moss follow in world.js (PAL.ruins), the leaves in sim/env.js (LEAF)
+if (flags.get('palette') !== 'old') Object.assign(STYLES.ruins, {
+  floor: ramp('#8e878b', '#79727a', '#635d66', '#47434b'), floorB: ramp('#8a8689', '#737076', '#5e5c63', '#444349'),
+  grass: ramp('#7c9a5c', '#617f4a', '#4b663d', '#344a33'),
+  inlay: ramp('#b4aab0', '#9f959c', '#80787f', '#59535b'), pad: ramp('#958d93', '#857e85', '#6c666d', '#4e4a50'),
+  wall: ramp('#958f96', '#7c7780', '#635f68', '#433f48'), wallB: ramp('#8b8990', '#727078', '#5c5b62', '#3e3d44'),
+  rock: ramp('#827a83', '#6a636d', '#544e58', '#38343d'), leaf: ramp('#a2c262', '#7a9e4c', '#527642', '#34503c'),
+  bark: ramp('#9c6a4e', '#7c4e3c', '#5c3830', '#3a2420'),   // a warm red-brown trunk (the references'), not grey-brown
+});
 
 // ============================================================ ground
 function kit(q, ctx) {
