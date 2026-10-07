@@ -12,10 +12,13 @@
 //   willows   'tree' props, variant 3 (trees3d.js: speciesOf 'willow'; the painted card is the trees3d=0 fallback and what the
 //             water mirrors): crowns overhanging the water, their curtains hanging to ~0.3 m above the ground
 //   pads      lily pads: NOT entities, this file's own list. 8-9 groups of 2-5 on the calm stretches (not the narrows, the
-//             stepping stones or the ravine's lip). Each lies flat on the water (host.world.waterH), drawn as a camera-facing
-//             card painted as an ellipse (a circle on the ground projects to the same ellipse at every yaw; the notch and the
-//             veins are chosen per yaw from a packed atlas), drifting a pixel and turning slowly in the current, bobbing a
-//             hair. In spring and summer two carry a flower (host.env.season). F.pads() -> the live list for dragonflies / frogs
+//             stepping stones or the ravine's lip). Each lies flat on the water (host.world.waterH), drifting a pixel and turning
+//             slowly in the current, bobbing a hair. In spring and summer two carry a flower (host.env.season). F.pads() -> the
+//             live list for dragonflies / frogs. TRUE 3D (the pivot; ?props2d=1: the old camera-facing ellipse cards, the notch
+//             and veins picked per yaw from a packed atlas): every pad a flat disc in the moss-green family with its notch cut
+//             out, in five sectors (the seams between them draw the veins), the lilies' petals in two rings round a gold heart;
+//             ALL of them one mesh whose vertices are rewritten from the pads' drift and turn PAD3.hz times a second while the
+//             river is near the view (the motion steps a pixel at a time, like the water's), casting nothing
 // WHERE THINGS STAND is the world's truth: decided once in create() from a fixed seed (core/rng.js mulberry32), so every load
 // and ?views=0 give the same props. The pads' motion and drawing are presentation (F.view / F.frame, Math.random never needed).
 //
@@ -28,7 +31,7 @@
 import {flags} from '../core/flags.js';
 import {mulberry32} from '../core/rng.js';
 import {ART} from '../world/biomes.js';
-import {pack} from '../world/kit3d.js';
+import {pack, geoOf, M4} from '../world/kit3d.js';
 
 const TAU = Math.PI * 2;
 // ---------------------------------------------------------------- tunables
@@ -52,6 +55,7 @@ const TUNE = {
   },
 };
 const NOTCHES = 16;   // the pad atlas: notch angles per size
+const PAD3 = {hz: 10, sectors: 5, seg: 15, notch: .32};   // the 3D pads: updates a second, vein sectors, rim segments, the notch's half angle (rad)
 
 // ORDER (core/features.js): after the garden. It adds its plants to the registry once everything the garden stood there (its stall, its
 // plants, the scatter it cleared) is in, so a clump finds the gaps among them; nothing here reads the garden's state
@@ -216,6 +220,60 @@ export async function create(host) {
   });
   const atlas = pack(items, 512), A = atlas.fr, FR = frames.map(row => row.map(n => A[n]));
 
+  // ================================================================ the true-3D pads (see the header)
+  const P2D = flags.get('props2d') === '1', THREE = host.THREE;
+  let pad3 = null, pad3T = 0, pad3Bloom = null;   // {mesh, geo, ranges: [start, count, flowerStart] per pad, L0: local positions, N0: local normals}
+  function padParts(q) {   // local: y up, the pad's centre on the water; the notch along +x (q.ang turns it)
+    const L = [], r = q.r, S = PAD3.sectors, n = PAD3.seg, a0 = PAD3.notch, span = Math.PI * 2 - 2 * a0;
+    for (let k = 0; k < S; k++) {   // a fan of triangles per sector, each sector its own part
+      const g = new THREE.BufferGeometry(), P = [], m = Math.ceil(n / S);
+      for (let j = 0; j < m; j++) {
+        const t0 = a0 + span * (k * m + j) / (S * m), t1 = a0 + span * (k * m + j + 1) / (S * m);
+        P.push(0, 0, 0, Math.cos(t0) * r, 0, -Math.sin(t0) * r, Math.cos(t1) * r, 0, -Math.sin(t1) * r);   // (counter-clockwise from above: it faces up)
+      }
+      g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.computeVertexNormals();
+      L.push({g, m: new THREE.Matrix4(), fam: 'cover', fixed: 1});
+    }
+    const fl = L.length;
+    if (q.flower) {   // the lily: a gold heart, five inner petals standing up, eight outer ones opening out
+      const pet = q.fi ? 'berryCream' : 'bone';
+      L.push({g: new THREE.CylinderGeometry(.028, .032, .04, 6), m: M4([0, .025, 0]), fam: 'gold', fixed: 1});
+      for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; L.push({g: new THREE.BoxGeometry(.05, .014, .11), m: M4([Math.sin(a) * .065, .026, Math.cos(a) * .065], [0, a, 0]).multiply(M4([0, 0, 0], [-.55, 0, 0])), fam: pet, fixed: i & 1}); }   // (turned out to a, its tip lifted)
+      for (let i = 0; i < 5; i++) { const a = (i + .5) / 5 * Math.PI * 2; L.push({g: new THREE.BoxGeometry(.04, .012, .08), m: M4([Math.sin(a) * .04, .05, Math.cos(a) * .04], [0, a, 0]).multiply(M4([0, 0, 0], [-.9, 0, 0])), fam: pet, fixed: 0}); }
+    }
+    return {L, fl};
+  }
+  function build3() {   // one geometry for every pad (and lily), their local shapes kept to turn and place them
+    const pos = [], nrm = [], part = [], fam = [], bias = [], fix = [], ranges = [];
+    for (const q of PADS) {
+      const {L, fl} = padParts(q), gp = geoOf(L.slice(0, fl)), gf = fl < L.length ? geoOf(L.slice(fl)) : null, start = pos.length / 3;
+      for (const g of gf ? [gp, gf] : [gp]) {
+        const A = g.attributes; pos.push(...A.position.array); nrm.push(...A.normal.array); part.push(...A.aPart.array); fam.push(...A.aFam.array); bias.push(...A.aBias.array); fix.push(...A.aFixed.array);
+        g.dispose();
+      }
+      ranges.push([start, pos.length / 3 - start, gf ? start + gp.attributes.position.count : -1]);
+    }
+    const geo = new THREE.BufferGeometry(), A = (k, a, n) => { const b = new THREE.Float32BufferAttribute(a, n); geo.setAttribute(k, b); return b; };
+    A('position', pos, 3).setUsage(THREE.DynamicDrawUsage); A('normal', nrm, 3).setUsage(THREE.DynamicDrawUsage); A('aPart', part, 1); A('aFam', fam, 1); A('aBias', bias, 1); A('aFixed', fix, 1);
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const q of PADS) { x0 = Math.min(x0, q.x0); x1 = Math.max(x1, q.x0); y0 = Math.min(y0, q.y0); y1 = Math.max(y1, q.y0); }
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3((x0 + x1) / 2, WATER_H(), (y0 + y1) / 2), Math.hypot(x1 - x0, y1 - y0) / 2 + 1);   // (all the pads, the drift in it)
+    geo.boundingBox = new THREE.Box3(new THREE.Vector3(x0 - 1, WATER_H() - .5, y0 - 1), new THREE.Vector3(x1 + 1, WATER_H() + .5, y1 + 1));
+    return {mesh: host.world.mesh(geo, null, {shadow: false}), geo, ranges, L0: Float32Array.from(pos), N0: Float32Array.from(nrm)};
+  }
+  function place3(bloom) {   // every pad turned and placed (its lily folded away out of season)
+    const P = pad3.geo.attributes.position.array, N = pad3.geo.attributes.normal.array, L0 = pad3.L0, N0 = pad3.N0, wh = WATER_H() + .006;
+    for (let i = 0; i < PADS.length; i++) {
+      const q = PADS[i], [s, n, f] = pad3.ranges[i], c = Math.cos(q.ang), sn = Math.sin(q.ang), py = wh + q.h, end = f >= 0 && !bloom ? f : s + n;
+      for (let v = s, j = s * 3; v < end; v++, j += 3) {
+        const x = L0[j], z = L0[j + 2], nx = N0[j], nz = N0[j + 2];
+        P[j] = q.x + x * c + z * sn; P[j + 1] = py + L0[j + 1]; P[j + 2] = q.y - x * sn + z * c;
+        N[j] = nx * c + nz * sn; N[j + 1] = N0[j + 1]; N[j + 2] = -nx * sn + nz * c;
+      }
+      for (let v = end, j = end * 3; v < s + n; v++, j += 3) { P[j] = q.x; P[j + 1] = py; P[j + 2] = q.y; }   // (out of season: the lily's triangles all on one point)
+    }
+    pad3.geo.attributes.position.needsUpdate = true; pad3.geo.attributes.normal.needsUpdate = true;
+  }
+
   // ================================================================ the show
   let T = 0, padsOn = false;
   const syncBiome = () => { padsOn = host.biome.id === 'ruins'; };
@@ -231,7 +289,16 @@ export async function create(host) {
     F.ms = F.ms * .95 + (performance.now() - t0) * .05;
   };
   F.frame = () => {
-    syncBiome(); if (!padsOn) return;
+    syncBiome();
+    if (!P2D) {   // the 3D pads: shown in the ruins, re-placed PAD3.hz times a second while the river is near (and when the season turns)
+      if (!pad3 && padsOn && PADS.length) { pad3 = build3(); pad3T = -1; }
+      if (!pad3) return;
+      pad3.mesh.setVisible(padsOn && F.on); if (!padsOn) return;
+      const sea = host.env?.season, bloom = sea === 'spring' || sea === 'summer', t = host.G.view.T;
+      if (bloom !== pad3Bloom || (Math.floor(T * PAD3.hz) !== pad3T && Math.abs(t.x - S.cx(t.z)) < 22)) { pad3Bloom = bloom; pad3T = Math.floor(T * PAD3.hz); place3(bloom); }
+      return;
+    }
+    if (!padsOn) return;
     const G = host.G, yaw = host.yaw, sy = Math.sin(yaw), cy = Math.cos(yaw), wh = WATER_H() + .012, sea = host.env?.season, bloom = sea === 'spring' || sea === 'summer';
     for (let i = 0; i < PADS.length; i++) {
       const q = PADS[i];
@@ -246,10 +313,10 @@ export async function create(host) {
     }
   };
   F.biomeChanged = async () => {
-    syncBiome();
+    syncBiome(); pad3 = null;   // (the rebuilt world disposed the pads' mesh: made again on the next frame in the ruins)
     for (const p of mine) if (!host.itemOf(p)) await host.world.addItem(p);   // (a rebuilt world already made them; only a prop it skipped is re-offered)
   };
-  F.toggle = () => { F.on = !F.on; };
+  F.toggle = () => { F.on = !F.on; pad3?.mesh.setVisible(F.on && padsOn); };
   F._.PADS = PADS; F._.atlas = atlas;
   return F;
 }
