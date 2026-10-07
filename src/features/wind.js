@@ -475,7 +475,7 @@ export async function create(host) {
     }
     return null;
   }
-  // the host's MESH hook: a 3D tree (render3d/trees3d.js) on the same spring as its card would be. {x, y: the lean at the
+  // the host's MESH hook: a 3D tree (render3d/trees3d.js) or a 3D plant (world/flora3d.js) on the same spring as its card would be. {x, y: the lean at the
   // top in metres (arena axes: the spring's px / PPM), shake: the arrow shudder, art px along the screen's x}. The host
   // projects it, keeps the hysteresis, and the shader bends the model by its baked weights (stiff trunk, crown as a block)
   // + the leaves' own dance (flut, art px) and a band of light rolling through them along the wind (wx, wy, ph, wave), both
@@ -484,7 +484,7 @@ export async function create(host) {
   function mesh(it) {
     const p = it.p; if (!W.on || !FOLK[p.kind]) return null;
     const F = flexOf(p), st = F && fst.get(p); if (!st) return null;
-    const k = STRENGTH.tree3d / ctx.PPM, a = field(p.x, p.y), e = LV * (.25 + a.g), sp = hypot2(a.x, a.y) || 1;
+    const k = (p.kind === 'tree' ? STRENGTH.tree3d : 1) / ctx.PPM, a = field(p.x, p.y), e = LV * (.25 + a.g), sp = hypot2(a.x, a.y) || 1;   // (a 3D plant, world/flora3d.js: its card's lean)
     MH.x = st.dx * k; MH.y = st.dy * k; MH.shake = st.shake > .05 ? st.shake * 1.7 * Math.sin(T * 44 + st.ph) : 0;
     MH.flut = Math.min(3, Math.max(0, e * STRENGTH.dance - STRENGTH.danceMin));
     MH.wx = a.x / sp; MH.wy = a.y / sp; MH.ph = wphQ; MH.wave = Math.min(.24, LV * a.g * STRENGTH.wave);

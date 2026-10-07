@@ -272,10 +272,12 @@ src/
                          mathx.js, rng.js, color.js, autumn.js (how a leaf turns: one model for the crowns' shader and wind.js)
   render/                gfx.js (the renderer), camera.js (size, zoom, yaw, follow, shake, sampling), viewxf.js,
                          lighting.js (mood + lights -> the composite), options.js (opt + applying it), atlas.js,
-                         litter.js (the fallen-leaf carpet: a small GPU simulation the wind drives)
+                         litter.js (the fallen-leaf carpet: a small GPU simulation the wind drives),
+                         flora.js (the low plants drawn instanced: one draw per plant shape, its lean / autumn per instance)
   world/                 world.js (build + props), stage.js (biome, rebuilds, prop mode, trees, the registry),
                          entities.js (the registry: join / leave / hide, live queries, near), spatial.js (the grid),
-                         biomes.js, layout.js, trees3d.js, kit3d.js, nav.js
+                         biomes.js, layout.js, trees3d.js (every biome's trees), flora3d.js (bushes, ferns, tufts, reeds as
+                         3D shapes), kit3d.js, nav.js
   sim/                   env.js (clock, seasons, weather), projectiles.js (arrows, pops, dust),
                          player/ (player.js, harmonize.js, adapter.js: the camera-frame bridge, climbing, the cursor;
                          gun.js: a gun loadout's revolver, handed LMB and the frame by player.js through H.gun)

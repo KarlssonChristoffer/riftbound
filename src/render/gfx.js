@@ -1000,7 +1000,7 @@ vec4 reflAt(ivec2 p, float hw, out vec3 rE) {   // the mirrored albedo (a = 1: f
       // the world's things (props, trees, their cards, the character), not the batched sprites (obj 9: riverside plants, lily
       // pads lying on the water, wildlife, decor) nor particles (obj -1): what depth.js mirrored
       vec4 aq = texelFetch(tA, q, 0); int tq = int(aq.a * 255. + .5) / 4; float ob = texelFetch(tN, q, 0).w;
-      if ((tq == 2 || tq == 3 || tq == 4 || tq == 7) && ob > -.5 && abs(ob - 9.) > .5) { rE = texelFetch(tE, q, 0).rgb; return vec4(aq.rgb, 1.); }
+      if ((tq == 2 || tq == 3 || tq == 4 || tq == 7 || (tq == 1 && ob > .5)) && ob > -.5 && abs(ob - 9.) > .5) { rE = texelFetch(tE, q, 0).rgb; return vec4(aq.rgb, 1.); }   // (type 1 with an object id: the 3D plants' blades, render/flora.js; the ground is obj 0)
     }
     prev = d;
   }

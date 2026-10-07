@@ -22,6 +22,7 @@
 //          white branches arching out and thin whips with small leaf clumps hanging from them: a light, see-through crown
 //   aspen  (variant 6; ~20 %, in groves) a straight grey-green trunk (the aspen family) bare to ~2.8 m, a narrow oval crown of ~45 round-leaved
 //          clumps on short ascending branches (a fork on each: a bare aspen is a column of fine twigs); the shape seed picks its autumn palette
+//   pine / saguaro / spire / shard   the other biomes' trees (frost, desert, ember, rift: speciesOf), below with the code
 // B.autumn = [s1, s2, s3, s4] (each [hi, base, shade]): the species' autumn colours, kept on the shape as shape.autumn (every leafy species; rowan, birch, aspen here, the oak
 //   and willow's are brief T1's)
 // treeModel(p, biome, fam) -> {geo, yaw, scale, top, bones, crown, autumn, species, seed} | null (no model: the prop keeps its
