@@ -82,7 +82,19 @@ const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {em
 // (bark, leaf: the procedural trees, trees3d.js; char, ash, ember: burning wood, gfx.js MESH_FS uBurn; birch, aspen, berry: the
 // birch's white bark, the aspen's grey-green bark, the rowan's berries, trees3d.js; appended, so the kit's family indices stay put.
 // The rowan's berry part sits on 'berry' (ripe, scarlet); MESH_FS steps its family by the season, to the next rows: orange, green (unripe), cream (flowers))
-export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry', 'berryOrange', 'berryGreen', 'berryCream'];
+export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry', 'berryOrange', 'berryGreen', 'berryCream',
+  // (the true-3D props, world/props3d.js and the features' 3D pieces: gem = a crystal's facets (the biome's style.gem), flame = the warm
+  // glow of a flame or a lantern's glass, shroom = the biome's own glow (the mushrooms' caps), bone = bleached bone, wax, linen; GLOW3
+  // below. They light themselves only where a mesh says so: gfx.js mesh.setGlow. NB the composite keeps a family in 5 bits (E.w =
+  // part x 32 + family): at most 32 families)
+  'gem', 'flame', 'shroom', 'bone'];
+// the true-3D props' families per biome, [hi, base, shade, outline] (gem: the biome's style.gem; shroom: a glow colour, ramped)
+const GLOW3 = {
+  flame: {ruins: ['fff4d0', 'ffd070', 'e09838', '7a4a1c'], ember: ['ffe8b0', 'ffa848', 'd8682a', '6e2a12'], frost: ['fff6d8', 'ffd890', 'd8a050', '7a5428'],
+    rift: ['ffe8fc', 'ff9ae8', 'c85ad8', '5a2468']},
+  shroom: {ruins: '7af0c8', ember: 'ff9a50', frost: '9ad8ff', rift: 'e070ff', desert: '7af0e0'},
+  bone: {ruins: ['f4ecd6', 'e0d4b4', 'b8a888', '7a6e58'], frost: ['f4f8ff', 'd8e2f0', 'aab8cc', '6e7a8c'], rift: ['8a7aa8', '6a5a88', '4e4268', '2e2644']},
+};
 const mix = (a, b, k) => a.map((x, i) => Math.round(x + (b[i] - x) * k));
 const ramp6 = r4 => { const r = r4.map(hexrgb); return [r[0], r[1], r[2], mix(r[3], r[2], .25), r[3], r[2]]; };   // + line, outline_shadow, outline_lit
 function palette(biome, style) {
@@ -100,6 +112,9 @@ function palette(biome, style) {
   const st = P.stone;
   P.rune = EMIT.rune[biome] ? ramp6(EMIT.rune[biome]) : st;
   P.crack = EMIT.crack[biome] ? ramp6(EMIT.crack[biome]) : [st[3], st[3], st[3], st[4], st[4], st[4]];
+  // the true-3D props' (GLOW3)
+  P.gem = sr('gem') || P.stone; P.flame = ramp6(GLOW3.flame[biome] || GLOW3.flame.ruins); P.bone = ramp6(GLOW3.bone[biome] || GLOW3.bone.ruins);
+  { const g = hexrgb(GLOW3.shroom[biome] || GLOW3.shroom.ruins), r = [mix(g, [255, 255, 255], .35), g, mix(g, [0, 0, 0], .35), mix(g, [0, 0, 0], .65)]; P.shroom = [r[0], r[1], r[2], mix(r[3], r[2], .25), r[3], r[2]]; }
   return P;
 }
 export function rampTexture(biome, style = null) {
@@ -1101,8 +1116,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     mesh: (geo, matrix, o = {}) => {
       const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4(), {static: !!o.static}), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
       if (!o.occlude) m.sm.layers.disable(1);
+      if (o.shadow === false) m.sm.layers.disableAll();   // (casts nothing: a flame, a lily pad flat on the water)
       return m;
     },
+    // which way a view saw a prop struck (features/wind.js, from combat.hit): a props3d.js model that rocks when hit (the dummy)
+    // rocks that way. Arena axes; kept per prop until the next
+    push(p, dx, dy) { const l = Math.hypot(dx, dy); if (!(l > 1e-6)) return; let d = PUSH.get(p); if (!d) PUSH.set(p, d = [0, 0]); d[0] = dx / l; d[1] = dy / l; },
     waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
 export {WORLD, GROUNDS, WEST_ON, WEST, WEST_LAND, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, MESA, CLIMBS, CASCADES, mesaAt};

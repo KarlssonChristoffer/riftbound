@@ -37,6 +37,7 @@ export const FLAG_DOCS = {
   sampling:  'auto | nearest | smooth: ground texture sampling',
   smooth:    '1: = sampling=smooth',
   props:     'yaw: the 16-angle pre-rendered props instead of live 3D (reference)',
+  props2d:   '1: the old camera-facing cards and sprites for what the true-3D pivot made 3D meshes (dummies, crystals, the bones and the mine lantern of the desert, the posts / poles / mast / lanterns of the wind decor, candles, mushrooms, sconce torches, the lantern / potions / flowers of the stall, tumbleweeds, lily pads; an A/B)',
   trees3d:   '0: painted tree cards instead of the procedural 3D trees',
   cliffs:    '0: the old painted strata planes on the plateau and the ravine wall instead of the 3D rock (world/cliffs3d.js)',
   water:     '0: the old water look (no depth colour, bed, refraction or contact foam: world/waterbed.js, gfx.js WATER_FS wDeep; an A/B)',
