@@ -24,6 +24,8 @@ import {ART} from '../world/biomes.js';
 import {geoOf, M4, box, along, pack, art} from '../world/kit3d.js';
 import {clamp} from '../core/mathx.js';
 import {viewRandom} from '../core/rng.js';
+import {flags} from '../core/flags.js';
+import {lanternParts} from '../world/props3d.js';   // the true-3D hanging lantern (the wind decor's and the mine's too)
 
 const TAU = Math.PI * 2;
 const R = viewRandom('garden'), rr = (a, b) => a + R() * (b - a);
@@ -39,6 +41,14 @@ const TREES = [[25.8, 20.9, 0], [24.4, 11.5, 1]];
 const BUSHES = [[26.9, 12.3, 0], [24.9, 14.2, 1], [31.9, 18.8, 2], [24.6, 18.4, 1], [32.1, 13.7, 0]];
 const TUFTS = [[27.6, 13.4], [30.9, 13.6], [25.2, 16.0], [26.0, 19.5], [28.3, 20.4], [32.2, 17.6]];
 const FLOWERS = [[28.4, 13.7, 0], [30.0, 13.6, 1], [26.1, 18.3, 2], [31.5, 19.7, 0], [27.3, 20.0, 1], [25.9, 15.0, 2], [32.0, 16.0, 0]];
+// THE TRUE-3D PIECES (?props2d=1: the sprites as before). The stall's lantern: a 3D lantern on its chain (its glass lights itself,
+// dimmer when LAN.lit is false), hung along the chain as it swings. The three potions on the upper shelf: 3D bottles in the stall's
+// mesh, their draughts in the red, gold and the biome's glow families, lighting themselves (the base mesh's setGlow: nothing else in
+// it is of those families). The flower clumps: a mound of 3D leaf blades each (all seven in one static mesh) with their blossoms as
+// lit pixels over it (a petal is a pixel or two: a mesh that small is all outline in the pixelizer)
+const P2D = flags.get('props2d') === '1';
+const POT3 = [['red', '#ff7a5a'], ['gold', '#ffd25a'], ['shroom', null]];   // the potions' draught families and their lights' colours (null: the biome's glow)
+const GLOWC = {ruins: '#7af0c8', ember: '#ff9a50', frost: '#9ad8ff', rift: '#e070ff', desert: '#7af0e0'};   // (world.js GLOW3.shroom)
 
 // ---------------------------------------------------------------- the merchant (3/4 front facing screen-left, and back)
 const MF = [
@@ -233,6 +243,16 @@ export async function create(host) {
     L.push({g: new THREE.CylinderGeometry(.2, .2, .02, 10), m: M4([-.45, .665, -1.45]), fam: 'wood', bias: .2});
     // the sign, nailed to the north front post
     L.push(box('wood', [.035, .3, .5], [.46, 1.62, -Z + .3], [0, 0, 0], {bias: .2}), box('metal', [.04, .05, .4], [.46, 1.49, -Z + .3], [0, 0, 0], {fixed: 2}));
+    if (!P2D) {   // the potions on the upper shelf (the sprites' sizes: a round flask, a tall bottle, a squat vial), glowing (buildMeshes)
+      const sh = 1.57, X = 2.28;
+      [[-.6, 'flask'], [-.2, 'tall'], [.25, 'vial']].forEach(([z, k], i) => {
+        const fam = POT3[i][0];
+        if (k === 'flask') L.push({g: new THREE.SphereGeometry(.07, 8, 5), m: M4([X, sh + .07, z], [0, 0, 0], [1, .9, 1]), fam}, {g: new THREE.CylinderGeometry(.022, .026, .07, 6), m: M4([X, sh + .16, z]), fam: 'bone', bias: .2});
+        else if (k === 'tall') L.push({g: new THREE.CylinderGeometry(.045, .05, .15, 7), m: M4([X, sh + .075, z]), fam}, {g: new THREE.CylinderGeometry(.02, .03, .06, 6), m: M4([X, sh + .18, z]), fam: 'bone', bias: .2});
+        else L.push({g: new THREE.CylinderGeometry(.05, .055, .09, 7), m: M4([X, sh + .045, z]), fam}, {g: new THREE.CylinderGeometry(.02, .03, .04, 6), m: M4([X, sh + .11, z]), fam: 'bone', bias: .2});
+        L.push({g: new THREE.CylinderGeometry(.02, .018, .025, 6), m: M4([X, sh + (k === 'flask' ? .205 : k === 'tall' ? .22 : .14), z]), fam: 'wood', bias: .1});   // the cork
+      });
+    }
     return {base: geoOf(L), top: geoOf(C)};
   }
   function archGeo() {   // local: x east, y up, z south; the opening runs along z
@@ -261,7 +281,25 @@ export async function create(host) {
     return geoOf([box('stone', [.2, .36, .34], [-.55, .18, 0], [0, .03, 0], {bias: -.15}), box('stone', [.2, .36, .34], [.55, .18, 0], [0, -.04, 0], {bias: -.15}),
       box('stone', [1.55, .1, .44], [0, .41, 0], [0, 0, .015], {bias: .2})]);
   }
-  const GEO = {stall: stallGeo(), arch: archGeo(), bench: benchGeo()};
+  // the flower clumps (true 3D): a mound of leaf blades fanning out of the ground; the blossoms are points (F.frame), BLOOMS per variant
+  // [x, z, h] (m) over the clump's ground point
+  const BLOOMS = [0, 1, 2].map(v => { const r = ART.rng(71 + v), n = [7, 8, 6][v], out = [];
+    for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2 + r() * .6, d = .05 + r() * .13; out.push([Math.cos(a) * d * 1.2, Math.sin(a) * d * .8, .1 + r() * .11, i & 1]); }
+    return out; });
+  function flowersGeo() {
+    const L = [];
+    FLOWERS.forEach(([fx, fy, v], j) => {
+      const r = ART.rng(91 + j), a0 = r() * 3;
+      for (let i = 0; i < 11; i++) {   // the blades: thin cones leaning out of the middle
+        const a = a0 + i / 11 * Math.PI * 2 + r() * .4, lean = .5 + r() * .5, len = .13 + r() * .1;
+        L.push({g: new THREE.ConeGeometry(.032, len, 4), m: M4([fx + Math.cos(a) * .08, len / 2 * Math.cos(lean) - .005, fy + Math.sin(a) * .06], [Math.sin(a) * lean, 0, -Math.cos(a) * lean]), fam: 'leaf', bias: (i & 1) * .15 - .05});
+      }
+      for (const [x, z, h] of BLOOMS[v]) L.push({...along([fx + x * .6, 0, fy + z * .6], [fx + x, h - .015, fy + z], .007, .006, 3), fam: 'leaf', bias: -.1});   // the stalks
+    });
+    return geoOf(L);
+  }
+  const GEO = {stall: stallGeo(), arch: archGeo(), bench: benchGeo(), flowers: P2D ? null : flowersGeo(), lantern: P2D ? null : geoOf(lanternParts())};
+  const FLC = {ruins: ['#f2d36a', '#e8e4f2', '#d8573e'], ember: ['#ff7a3a', '#ffc04a', '#d8443a'], frost: ['#bfe4ff', '#ffffff', '#9ab8ff'], rift: ['#ff7af0', '#7ae8ff', '#c08aff']};   // (the sprites' petals)
 
   // ================================================================ props (colliders, interaction, the biome's plants)
   const tag = (p, extra) => Object.assign(p, {garden: true}, extra);
@@ -289,11 +327,18 @@ export async function create(host) {
     for (const m of meshes) m.dispose(); meshes.length = 0;
     // the bases block point lights; the canopy and the arch's curve don't (a height map would fill in under them)
     const stallM = M4([STALL.x, 0, STALL.y]), archM = M4([ARCH.x, 0, ARCH.y], [0, Math.PI / 2, 0]);   // the arch's local z (the opening) runs east-west
-    meshes.push(host.world.mesh(GEO.stall.base, stallM, {occlude: true}), host.world.mesh(GEO.stall.top, stallM));
+    const base = host.world.mesh(GEO.stall.base, stallM, {occlude: true}); meshes.push(base, host.world.mesh(GEO.stall.top, stallM));
+    if (!P2D) {   // the potions glow (stallGeo), the flower clumps, the lantern (posed every frame: F.frame)
+      POT3.forEach(([fam], i) => base.setGlow(i, WORLD.FAMS.indexOf(fam), .7));
+      meshes.push(host.world.mesh(GEO.flowers, null, {static: true}));
+      lan3 = host.world.mesh(GEO.lantern); lan3.setGlow(0, WORLD.FAMS.indexOf('flame'), 1); meshes.push(lan3);
+    }
     meshes.push(host.world.mesh(GEO.arch.base, archM, {occlude: true}), host.world.mesh(GEO.arch.top, archM));
     meshes.push(host.world.mesh(GEO.bench, M4([BENCH.x, 0, BENCH.y], [0, .05, 0]), {occlude: true}));
   }
-  function syncBiome() { if (host.biome.id !== biomeId) { biomeId = host.biome.id; atlas = buildAtlas(); } }
+  let lan3 = null, lanLit = true;   // the 3D lantern's mesh, its glass's state shown
+  function syncBiome() { if (host.biome.id !== biomeId) { biomeId = host.biome.id; atlas = buildAtlas(); bloomC = (FLC[biomeId] || FLC.ruins).map(c => host.rgb(c)); potC = POT3.map(([, c]) => c || GLOWC[biomeId] || GLOWC.ruins); } }
+  let bloomC = null, potC = null;
   syncBiome(); buildMeshes();
 
   // ================================================================ the lantern (a pendulum on a chain)
@@ -358,11 +403,23 @@ export async function create(host) {
       drawMerchant();
       const [lx, ly, lh] = lanPos();
       host.line(LAN.ax, LAN.ay, LAN.ah, lx, ly, lh + .02, CHAIN);
-      spr(LAN.lit === false ? 'lantern_dim' : 'lantern', lx, ly, lh + .02, NOSH);
-      for (let i = 0; i < 3; i++) spr(POT[i], STALL.x + 2.28, STALL.y + POTZ[i], 1.57, NOSH);
+      if (lan3) poseLan(lx, ly, lh + .02);
+      else { spr(LAN.lit === false ? 'lantern_dim' : 'lantern', lx, ly, lh + .02, NOSH); for (let i = 0; i < 3; i++) spr(POT[i], STALL.x + 2.28, STALL.y + POTZ[i], 1.57, NOSH); }
     }
-    for (let i = 0; i < FLOWERS.length; i++) { const f = FLOWERS[i]; if (near(f[0], f[1])) spr(FLN[i], f[0], f[1], 0, NOSH); }
+    if (P2D) { for (let i = 0; i < FLOWERS.length; i++) { const f = FLOWERS[i]; if (near(f[0], f[1])) spr(FLN[i], f[0], f[1], 0, NOSH); } }
+    else for (let i = 0; i < FLOWERS.length; i++) {   // the blossoms: a pixel each (two colours a clump), lit by the scene, over the 3D blades
+      const f = FLOWERS[i]; if (!near(f[0], f[1])) continue;
+      const B = BLOOMS[f[2]], c0 = bloomC[f[2] % 3], c1 = bloomC[(f[2] + 1) % 3];
+      for (const b of B) host.point(f[0] + b[0], f[1] + b[1], b[2], b[3] ? c1 : c0, BLOOM);
+    }
   };
+  // the 3D lantern hung along its chain: its ring at the chain's end (x, y, h), its up toward the hook (no allocation: kept scratch)
+  const BLOOM = {emit: false}, LQ = new THREE.Quaternion(), LP3 = new THREE.Vector3(), LD3 = new THREE.Vector3(), LUP = new THREE.Vector3(0, 1, 0), LS3 = new THREE.Vector3(1, 1, 1), LM3 = new THREE.Matrix4();
+  function poseLan(x, y, h) {
+    LD3.set(LAN.ax - x, LAN.ah - h, LAN.ay - y).normalize(); LQ.setFromUnitVectors(LUP, LD3);
+    lan3.setMatrix(LM3.compose(LP3.set(x, h, y), LQ, LS3));
+    const lit = LAN.lit !== false; if (lit !== lanLit) { lanLit = lit; lan3.setGlow(0, WORLD.FAMS.indexOf('flame'), lit ? 1 : .4); }
+  }
   // the lantern's light and the potions' glow: records reused every frame (lighting.js copies them at once)
   const GLR = [{x: 0, y: 0, h: 0, color: '#ffc878', radius: 4.6, intensity: 1.05, flicker: .25, id: 9501},
     ...['#7cff8a', '#7ad8ff', '#e58aff'].map((color, i) => ({x: 0, y: 0, h: 1.62, color, radius: 1.3, intensity: .55, flicker: .05, id: 9502 + i}))];
@@ -370,7 +427,7 @@ export async function create(host) {
   F.lights = () => {
     if (!near(STALL.x, STALL.y, 26)) return NOL;
     const [lx, ly, lh] = lanPos(), a = GLR[0]; a.x = lx; a.y = ly; a.h = lh;
-    for (let i = 0; i < 3; i++) { const o = GLR[i + 1]; o.x = STALL.x + 2.15; o.y = STALL.y + POTY[i]; }
+    for (let i = 0; i < 3; i++) { const o = GLR[i + 1]; o.x = STALL.x + 2.15; o.y = STALL.y + POTY[i]; if (!P2D) o.color = potC[i]; }   // (the 3D potions' draughts: red, gold, the biome's glow)
     return GLR;
   };
   F.prompt = p => p === merchant ? 'E  talk' : null;
@@ -394,7 +451,7 @@ export async function create(host) {
   F.biomeChanged = async () => {
     syncBiome();
     for (const p of props()) if (p.garden && ['tree', 'bush', 'tuft'].includes(p.kind) && !host.itemOf(p)) await host.world.addItem(p);
-    meshes.length = 0; buildMeshes();   // the rebuilt world disposed our meshes
+    meshes.length = 0; lan3 = null; lanLit = true; buildMeshes();   // the rebuilt world disposed our meshes
   };
   F._ = {merchant, M, LAN, atlas: () => atlas, GEO};
   return F;
