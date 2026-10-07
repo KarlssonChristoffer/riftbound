@@ -62,6 +62,7 @@ export const FLAG_DOCS = {
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
   livefoes: '0: the desert gunmen drawn from their 16-facing sprite atlases instead of LIVE (their Blender models through render/rigmesh.js with every atlas pose and clip: view/livebody.js, features/foes/look.js; the aim twists procedural)',
   brute3d: '0: the brutes (a run brute, elite, champion, the yard pair) as the biome painted card mirrored to their facing instead of the 3D figure built in code (features/brutes3d.js, view/brute3d.js); menu > Dev > Features > 3D brutes',
+  merchant3d: '0: the light garden merchant as his painted card (front / back, mirrored) instead of the 3D figure built in code (view/merchant3d.js)',
   foes: '0: no gunmen in the desert sandbox (features/foes.js); unarmed: two at a time who never draw (targets to test on)', ragdoll: '0: the gunmen die by their death clips instead of as live 3D ragdolls (features/foes/look.js, view/ragdoll.js; ragdolls are the default)',
   blood: '0: no blood from bullet hits (features/blood.js; menu > Graphics > Effects > Blood)',
   smoke: 'pixel | hybrid | strands | soft: the gun smoke\'s look (features/gunfx/smoke.js; Shift+V cycles it in dev mode)',

@@ -24,6 +24,8 @@ import {ART} from '../world/biomes.js';
 import {geoOf, M4, box, along, pack, art} from '../world/kit3d.js';
 import {clamp} from '../core/mathx.js';
 import {viewRandom} from '../core/rng.js';
+import {flags} from '../core/flags.js';
+import {createMerchant3d} from '../view/merchant3d.js';   // (the merchant as a 3D figure: ?merchant3d=0 his card)
 
 const TAU = Math.PI * 2;
 const R = viewRandom('garden'), rr = (a, b) => a + R() * (b - a);
@@ -334,7 +336,9 @@ export async function create(host) {
   }
   // his frames by view x eyes ('mb_c' does not exist: the back has no blink); MFO: his sprite's options, kept
   const MNAME = {mb: {a: 'mb_a', b: 'mb_b', c: 'mb_a'}, mw: {a: 'mw_a', b: 'mw_b', c: 'mw_c'}, mf: {a: 'mf_a', b: 'mf_b', c: 'mf_c'}}, MFO = {flip: false};
+  const m3d = flags.get('merchant3d') !== '0' ? createMerchant3d(host, MERCH) : null;   // (view/merchant3d.js: he turns, breathes, blinks, greets in 3D)
   function drawMerchant() {
+    if (m3d?.draw(M, T)) return;
     const yaw = host.yaw, fx = Math.cos(M.ang), fy = Math.sin(M.ang);
     const back = fx * -Math.sin(yaw) + fy * -Math.cos(yaw) > .15, side = fx * Math.cos(yaw) + fy * -Math.sin(yaw);   // (the camera's forward, its right)
     const v = back ? 'mb' : M.wave > 0 ? 'mw' : 'mf', fr = M.blink > 0 && !back ? 'c' : (Math.floor(T * 1.1) % 2 ? 'b' : 'a');
