@@ -1,7 +1,7 @@
 // MERCHANT 3D: the light garden's merchant (features/garden.js) as a 3D figure built in code (view/rigkit.js) and drawn
 // live through render/rigmesh.js (view/livebody.js), instead of his painted front / back cards mirrored to face you: a
-// short, stout old trader in his wide green hat with its gold band, a white beard, a yellow scarf over his wine-red robe,
-// a canvas apron, a belt with a gold buckle, boots. He does what the card did, from garden.js's own state (M):
+// short, stout old trader in his wide green hat with its gold band, a big full white beard down to mid-chest over a gold
+// scarf draped on his shoulders, a tan vest over his wine-red robe, a belt with a gold buckle, boots. He does what the card did, from garden.js's own state (M):
 //   turns    to face you as you come near (M.ang, garden's smoothed angle): his body in 16 steps relative to the camera,
 //            held within .6 of a step; his head turns the rest of the way (in 2 steps)
 //   breathes the chest and shoulders rise and fall (2 steps, the card's 1.1 Hz)
@@ -37,28 +37,31 @@ function merchantModel() {
       .bone(L('UpLeg', s), 'Hips', [.1 * s, 0, .74], [.1 * s, -.01, .4]).bone(L('Leg', s), L('UpLeg', s), [.1 * s, -.01, .4], [.1 * s, 0, .08])
       .bone(L('Foot', s), L('Leg', s), [.1 * s, 0, .08], [.1 * s, -.15, .03], {z: [0, 0, 1]});
   }
-  // the robe: a long skirt (a cone to the ankles), the body, the sleeves; the apron in front, the belt and its buckle
+  // the robe: a long skirt (a cone to the ankles) and the sleeves; over it the tan VEST (the card's: the body from the shawl
+  // to below the belt, open down the front, its hem flaring over the skirt), the belt and its gold buckle
   K.tube('Hips', 'skirt', 'robe', .31, .23, .74, [0, .01, .43], {sides: 12, bias: -.05})
-    .ball('Spine1', 'body', 'robe', [.26, .21, .22], [0, 0, 1.0], {detail: 2})
-    .ball('Spine2', 'chest', 'robe', [.27, .2, .17], [0, -.01, 1.1], {detail: 1})
-    .box('Hips', 'apron', 'apron', [.34, .04, .58], [0, -.285, .48], {rot: [-.12, 0, 0], bias: .1})
-    .box('Spine1', 'bib', 'apron', [.24, .04, .2], [0, -.215, .96], {rot: [.08, 0, 0], bias: .1})
-    .tube('Hips', 'belt', 'leather', .245, .245, .05, [0, -.005, .81], {sides: 12})
-    .box('Hips', 'buckle', 'gold', [.06, .025, .045], [0, -.255, .81], {bias: .3});
+    .ball('Spine1', 'vest', 'apron', [.27, .22, .23], [0, 0, 1.0], {detail: 2})
+    .ball('Spine2', 'vest', 'apron', [.28, .21, .17], [0, -.01, 1.1], {detail: 1})
+    .tube('Hips', 'hem', 'apron', .285, .25, .3, [0, -.005, .69], {sides: 12, bias: -.05})
+    .box('Spine1', 'opening', 'apron', [.016, .02, .26], [0, -.222, .96], {rot: [.12, 0, 0], fixed: 3, outline: false})
+    .tube('Hips', 'belt', 'leather', .272, .272, .05, [0, -.005, .82], {sides: 12})
+    .box('Hips', 'buckle', 'gold', [.065, .025, .05], [0, -.282, .82], {bias: .3});
   for (const s of [1, -1]) {
     K.limb(L('Arm', s), 'sleeve' + s, 'robe', .065, .07).limb(L('ForeArm', s), 'cuff' + s, 'robe', .07, .075, {ext: .02})
       .ball(L('Hand', s), 'hand' + s, 'skin', [.045, .045, .05], K.at(L('Hand', s), .5), {detail: 1})
       .box(L('Foot', s), 'boot' + s, 'leather', [.09, .18, .07], [.1 * s, -.07, .035], {bias: -.1});
   }
-  // the scarf: round the neck, its two ends down the front
-  K.tube('Neck', 'scarf', 'scarf', .13, .11, .08, [0, -.03, 1.18], {sides: 10, bias: .15})
-    .box('Spine2', 'scarfL', 'scarf', [.06, .03, .2], [.07, -.17, 1.06], {rot: [-.15, 0, .1], bias: .15})
-    .box('Spine2', 'scarfR', 'scarf', [.06, .03, .16], [-.05, -.17, 1.08], {rot: [-.15, 0, -.15], bias: .15});
+  // the gold scarf: round the neck, and draped wide over the shoulders like a short shawl (the beard covers its front)
+  K.tube('Neck', 'scarf', 'scarf', .14, .12, .08, [0, -.03, 1.19], {sides: 10, bias: .15})
+    .tube('Spine2', 'shawl', 'scarf', .3, .16, .11, [0, -.01, 1.135], {sides: 12, bias: .15});
   // the head: his face, a white beard and moustache, his nose; the hat: the brim, the crown, the gold band
   K.ball('Head', 'face', 'skin', [.12, .12, .13], [0, -.05, 1.35], {detail: 2})
     .ball('Head', 'nose', 'skin', [.028, .032, .028], [0, -.155, 1.33], {detail: 0, bias: .1})
-    .ball('Head', 'beard', 'beard', [.13, .09, .11], [0, -.12, 1.17], {detail: 1, bias: .1})
-    .box('Head', 'stache', 'beard', [.12, .035, .028], [0, -.165, 1.29], {bias: .2})
+       // the beard: big and full, wider than his face, from his cheeks down over the scarf to mid-chest (the card's identity)
+    .ball('Head', 'beard', 'beard', [.165, .11, .1], [0, -.13, 1.25], {detail: 2, bias: .1})
+    .ball('Head', 'beard', 'beard', [.155, .1, .13], [0, -.175, 1.12], {detail: 2, bias: .1})
+    .ball('Head', 'beard', 'beard', [.11, .075, .085], [0, -.205, 1.0], {detail: 1, bias: .05})
+    .box('Head', 'stache', 'beard', [.16, .04, .03], [0, -.17, 1.29], {bias: .2})
     .tube('Head', 'brim', 'hat', .24, .24, .025, [0, -.02, 1.465], {sides: 14, bias: .1})
     .tube('Head', 'crown', 'hat', .13, .11, .16, [0, -.02, 1.55], {sides: 10})
     .tube('Head', 'band', 'gold', .132, .13, .035, [0, -.02, 1.495], {sides: 10, bias: .2});
@@ -82,15 +85,15 @@ export function createMerchant3d(host, at) {
     } catch (e) { failed = true; console.warn('merchant3d: no 3D merchant (his card instead)', e); }
   }
   const D = {w: null, key: 0, phi: 0, x: 0, y: 0, z: 0, sx: 0, sy: 0, sh: 0, aim: false, alpha: 1, flash: 0, lie: 0, type: 7, hide: null};
+  const tn = (n, ax, a) => M.turn(T, M.B[n], ax, a);   // (made once: no closure a pose)
   function pose(m, t, headTurn) {
-    const tn = (n, ax, a) => M.turn(T, M.B[n], ax, a), breath = Math.floor(t * 1.1) & 1, blink = m.blink > 0, wave = m.wave > 0;
+    const breath = Math.floor(t * 1.1) & 1, blink = m.blink > 0, wave = m.wave > 0;
     const rock = wave ? Math.floor(t * 6) & 1 : 0, hs = Math.round(headTurn / (22.5 * DEG));
     const k = ((breath * 2 + (blink ? 1 : 0)) * 3 + (wave ? 1 + rock : 0)) * 9 + hs + 4;
     if (k === key) return;
     key = k; M.reset(T);
-    // stance: hands folded a little forward, a slight stoop
-    for (const s of ['Left', 'Right']) { tn(s + 'Arm', 0, 14 * DEG); tn(s + 'ForeArm', 0, 30 * DEG); }
-    tn('Spine1', 0, 4 * DEG);
+    // stance: upright, hands folded a little forward
+    tn('LeftArm', 0, 6 * DEG); tn('RightArm', 0, 6 * DEG); tn('LeftForeArm', 0, 16 * DEG); tn('RightForeArm', 0, 16 * DEG);
     if (breath) { tn('Spine2', 0, -3 * DEG); tn('LeftShoulder', 2, 5 * DEG); tn('RightShoulder', 2, -5 * DEG); }
     if (hs) tn('Neck', 1, hs * 22.5 * DEG);   // (his head the rest of the way to you)
     if (wave) {   // the near hand to the hat's brim, the forearm rocking: a greeting
