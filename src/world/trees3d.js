@@ -22,6 +22,7 @@
 //          white branches arching out and thin whips with small leaf clumps hanging from them: a light, see-through crown
 //   aspen  (variant 6; ~20 %, in groves) a straight grey-green trunk (the aspen family) bare to ~2.8 m, a narrow oval crown of ~45 round-leaved
 //          clumps on short ascending branches (a fork on each: a bare aspen is a column of fine twigs); the shape seed picks its autumn palette
+//   pine / saguaro / spire / shard   the other biomes' trees (frost, desert, ember, rift: speciesOf), below with the code
 // B.autumn = [s1, s2, s3, s4] (each [hi, base, shade]): the species' autumn colours, kept on the shape as shape.autumn (every leafy species; rowan, birch, aspen here, the oak
 //   and willow's are brief T1's)
 // treeModel(p, biome, fam) -> {geo, yaw, scale, top, bones, crown, autumn, species, seed} | null (no model: the prop keeps its
@@ -603,7 +604,283 @@ function aspen(seed, fam) {
   return B;
 }
 
-const SPECIES = {oak, dead, willow, rowan, birch, aspen};
+// ---------------------------------------------------------------- the other biomes' trees (the true-3D pivot, 2026-10-07)
+// frost PINE, desert SAGUARO, ember SPIRE, rift SHARD: each grown to fit its biome's painted card (biomes.js tree(), desert.js
+// saguaro()). Their shape seed folds in the prop's variant (treeModel: + SEEDS x variant, VARIANT_SEEDED), so every variant keeps
+// its card's proportions (a taller pine, the saguaro's arms) in SEEDS shapes of its own. B.rigid: no sway (a static mesh, its sun
+// shadow in the cached static map, world.js liveOf); B.litter false: no fallen leaves under it (world.js bakeNow).
+// aFixed codes (gfx.js MESH_FS): -1 toned + the biome's cover (snow on the pines' tiers, ash on the spires' ledges); NO_COVER
+// toned and never covered (it falls between MESH_FS's cover (> -1.1), berry (-1.4 .. -1.1) and leaf (< -1.5) ranges: the
+// saguaro takes no sand, the crystals no frost); >= 0 a fixed tone
+export const NO_COVER = -1.45;
+// tri, wound to face along its normals (the rigid trees are drawn single-sided)
+const _e1 = V(), _e2 = V(), _fn = V(), _na = V();
+function triO(B, a, b, c, na, nb, nc, bias) {
+  _fn.crossVectors(_e1.subVectors(b, a), _e2.subVectors(c, a)); _na.copy(na).add(nb).add(nc);
+  if (_fn.dot(_na) >= 0) B.tri(a, b, c, na, nb, nc, bias); else B.tri(a, c, b, na, nc, nb, bias);
+}
+// a quad (a b c d round its edge) with ONE normal (flat: the face takes one tone), turned to agree with `out`
+function quadF(B, a, b, c, d, out, bias) {
+  const n = V().crossVectors(V().subVectors(c, a), V().subVectors(d, b)); if (n.lengthSq() < 1e-12) return;
+  n.normalize(); if (n.dot(out) < 0) n.negate();
+  triO(B, a, b, c, n, n, n, bias); triO(B, a, c, d, n, n, n, bias);
+}
+// a grid of points G[row][col] (cols wrap round) as a smooth surface: normals from the grid's neighbours, each turned toward ref(p, n)
+// (a vector the outside points along); bias(i, j) per vertex (or a number)
+function gridSurf(B, G, ref, bias = 0) {
+  const R = G.length, C = G[0].length, N = [];
+  for (let i = 0; i < R; i++) {
+    N.push([]);
+    for (let j = 0; j < C; j++) {
+      const du = V().subVectors(G[i][(j + 1) % C], G[i][(j - 1 + C) % C]), dv = V().subVectors(G[Math.min(R - 1, i + 1)][j], G[Math.max(0, i - 1)][j]);
+      const n = V().crossVectors(du, dv); if (n.lengthSq() < 1e-12) n.set(0, 1, 0); n.normalize();
+      if (n.dot(ref(G[i][j], i, j)) < 0) n.negate();
+      N[i].push(n);
+    }
+  }
+  const bi = typeof bias === 'function' ? bias : () => bias;
+  for (let i = 0; i + 1 < R; i++) for (let j = 0; j < C; j++) {
+    const k = (j + 1) % C, b0 = (bi(i, j) + bi(i, k) + bi(i + 1, j) + bi(i + 1, k)) / 4;
+    triO(B, G[i][j], G[i][k], G[i + 1][k], N[i][j], N[i][k], N[i + 1][k], b0); triO(B, G[i][j], G[i + 1][k], G[i + 1][j], N[i][j], N[i + 1][k], N[i + 1][j], b0);
+  }
+}
+// a FLUTED tube (a cactus's column, an arm): `ribs` ridges round it, every flute face flat (one tone: the card's ribs, a stripe every
+// ~3 px), along a polyline (parallel-transport frames, as tube()); cap: a ribbed dome closes the end. Radius >= 7 cm: bones
+function fluted(B, pts, rad, ribs, rot, cap = true, groove = .86) {
+  const n = pts.length, T = [], N = [], Bn = [], K = ribs * 2;
+  for (let i = 0; i < n - 1; i++) B.bones.push([pts[i].x, pts[i].y, pts[i].z, pts[i + 1].x, pts[i + 1].y, pts[i + 1].z, rad[i], rad[i + 1]]);
+  for (let i = 0; i < n; i++) T.push((i === 0 ? pts[1].clone().sub(pts[0]) : i === n - 1 ? pts[i].clone().sub(pts[i - 1]) : pts[i + 1].clone().sub(pts[i - 1])).normalize());
+  N.push(V().crossVectors(T[0], Math.abs(T[0].y) < .9 ? V(0, 1, 0) : V(1, 0, 0)).normalize());
+  for (let i = 1; i < n; i++) { const q = N[i - 1].clone().addScaledVector(T[i], -N[i - 1].dot(T[i])); N.push(q.lengthSq() > 1e-8 ? q.normalize() : N[i - 1].clone()); }
+  for (let i = 0; i < n; i++) Bn.push(V().crossVectors(T[i], N[i]));
+  const dir = (i, k) => { const a = rot + k / K * Math.PI * 2; return N[i].clone().multiplyScalar(Math.cos(a)).addScaledVector(Bn[i], Math.sin(a)); };
+  const at = (i, k, s = 1, f = 1) => pts[i].clone().addScaledVector(dir(i, k), rad[i] * s * (k % 2 ? 1 - (1 - groove) * f : 1));   // (odd k: a groove)
+  for (let i = 0; i < n - 1; i++) for (let k = 0; k < K; k++) {
+    const mid = pts[i].clone().lerp(pts[i + 1], .5), a = at(i, k), b = at(i, k + 1), c = at(i + 1, k + 1), d = at(i + 1, k);
+    quadF(B, a, b, c, d, a.clone().add(b).add(c).add(d).multiplyScalar(.25).sub(mid), 0);
+  }
+  if (!cap) return;
+  const i = n - 1, L = [0, .45, .75, .93];   // the dome: rings rising off the end, the flutes fading toward its top
+  let prev = null;
+  for (const [m, u] of L.entries()) {
+    const s = Math.cos(u * Math.PI / 2), up = Math.sin(u * Math.PI / 2) * rad[i] * .85, ring = [];
+    for (let k = 0; k < K; k++) ring.push(at(i, k, s, 1 - u).addScaledVector(T[i], up));
+    if (prev) for (let k = 0; k < K; k++) { const a = prev[k], b = prev[(k + 1) % K], c = ring[(k + 1) % K], d = ring[k]; quadF(B, a, b, c, d, a.clone().add(c).multiplyScalar(.5).sub(pts[i]), 0); }
+    prev = ring; if (m === L.length - 1) break;
+  }
+  const apex = pts[i].clone().addScaledVector(T[i], rad[i] * .88);
+  for (let k = 0; k < K; k++) { const a = prev[k], b = prev[(k + 1) % K], o = a.clone().add(b).multiplyScalar(.5).sub(pts[i]); quadF(B, a, b, apex, apex.clone().lerp(a, .001), o, 0); }
+}
+
+// frost PINE (Frost Hollow's snowy pines, biomes.js tree() frost): a straight trunk and 6-8 whorled TIERS of needles narrowing to a leader,
+// stacked like plates. A tier is a skirt of branch tips (a star of long ones and short ones between): out to ~.86 of its reach it lies
+// gentle and then its hem droops steeply (the green edge), a dark underside closing it, and a cap of SNOW lies on its top (the cover family,
+// below). The needles are the leaf family (frost: the pine ramp; soft: tiers meet in tone, not lines), toned, never covered or thinned (the
+// snow is the caps, not blotches wherever a normal points up); each tier moves as one block (needles and snow) on
+// the wind (wind.js CURVES.pine), stiff: no flutter. variant: taller (the card's 3.6 + .5 v m). Evergreen: no autumn, no litter; the
+// crown is for the snow a gust blows off it (wind.js shed) and the birds
+function pine(seed, fam) {
+  const v = Math.floor(seed / SEEDS) % 4, r = rng(seed * 59 + 23), TAU = Math.PI * 2;
+  const H = 3.45 + .5 * v + r() * .35, y0 = .42 + r() * .1, R0 = .7 + r() * .12, Rt = .2;
+  const flex = y => { const u = Math.max(0, y) / H; return u < .08 ? 0 : ((u - .08) / .92) ** 1.7; };
+  const B = new Build(fam, flex); B.litter = false;
+  B.crown = {x: 0, z: 0, y0, y1: H, r: R0 * .8};
+  const la = r() * TAU, ld = .02 + r() * .05, ax = y => V(Math.cos(la) * ld * y / H, y, Math.sin(la) * ld * y / H);   // (the axis leans a hair)
+  const tp = []; for (let i = 0; i <= 5; i++) tp.push(ax(-.15 + (H * .92 + .15) * i / 5));
+  B.part('bark'); tube(B, tp, tp.map((q, i) => i === 0 ? .15 : .11 * (1 - .75 * i / 5)), 6, r(), false);
+  for (let i = 0; i < 3; i++) {   // the foot flares into three roots
+    const a = i / 3 * TAU + r() * .8, d = V(Math.cos(a), 0, Math.sin(a));
+    tube(B, [V(0, .22, 0).addScaledVector(d, .05), V(0, .06, 0).addScaledVector(d, .17), V(0, -.05, 0).addScaledVector(d, .32)], [.07, .05, .025], 5, r());
+  }
+  // the tiers: reach R(y) narrowing up the tree (a cone from R0 at the foot), each tier's apex .6 R + 14 cm over its hem and the next
+  // tier's hem just over it (the upper skirt hides the trunk between them), until the top; the last ones steeper (a fir's spire)
+  const Rof = y => Rt * .5 + (R0 - Rt * .5) * Math.pow(Math.max(0, 1 - (y - y0) / (H - y0)), .92), M = 14, S = [0, .22, .45, .66, .8, .86, .93, 1];
+  let hem = y0, k = 0;
+  while (hem < H - .42 && k < 12) {
+    const R = Rof(hem) * (.94 + r() * .12), th = .6 * R + .14, apex = hem + th, c = ax(apex), rot = r() * TAU, o = seed * 3.1 + k * 7.7, long = j => j % 2 === 0;
+    const len = Array.from({length: M}, (_, j) => long(j) ? .9 + r() * .2 : .74 + r() * .12);   // each branch's own reach
+    // the drop under the apex at s (0 apex .. 1 hem) along branch j: gentle out to .86 (a long branch's ~24 deg, a notch's ~35), then the droop
+    const drop = (s, j) => { const g = Math.min(s, .86) / .86, e = Math.max(0, s - .86) / .14; return R * ((long(j) ? .34 : .56) * g + .04 * g * g + (long(j) ? .26 : .12) * e ** 1.2); };
+    const at = (s, j, lift = 0) => {   // the tier's surface at s along branch j (+ lift m over it)
+      const a = rot + j / M * TAU, f = 1 + (len[j] - 1) * s * s, n0 = vn3(Math.cos(a) * 2 + o, s * 3, Math.sin(a) * 2 - o, 4) - .5, rr = R * s * f * (1 + n0 * .16);
+      return V(c.x + Math.cos(a) * rr, apex - drop(s, j) * (1 + n0 * .2) - .12 * s ** 8 + lift, c.z + Math.sin(a) * rr);
+    };
+    const top = S.map(s => Array.from({length: M}, (_, j) => at(s, j)));
+    // the underside: back in from the hem, up to the trunk
+    const hemRow = top[S.length - 1], under = [hemRow, hemRow.map(p => V(c.x + (p.x - c.x) * .6, hem + R * .2, c.z + (p.z - c.z) * .6)), hemRow.map(p => V(c.x + (p.x - c.x) * .12, hem + R * .42, c.z + (p.z - c.z) * .12))];
+    const bias = .03 * Math.min(1, (hem - y0) / (H - y0)), fl = flex((hem + apex) / 2);
+    B.part('leaf', bias, NO_COVER, fl, -1);   // (the needles take no cover: the snow is the cap below, not blotches wherever a normal points up)
+    gridSurf(B, top, p => V(p.x - c.x, 0, p.z - c.z).multiplyScalar(.4).add(V(0, 1, 0)), i => bias + (i >= S.length - 2 ? -.08 : 0));
+    gridSurf(B, under, () => V(0, -1, 0), bias - .32);
+    // the SNOW lying on the tier: one continuous cap over its top (the cover family: frost's snow ramp, toned), thickest up by the trunk and
+    // thinning out to a clean scalloped rim (further out along the long branches), the dark green droop showing under it. The upper tier
+    // hides the cap's middle: what shows is a white band along each tier's shoulder, its edge a clean line (the card's white edges)
+    const edge = j => (long(j) ? .8 : .68) * (.96 + .08 * h3(j, k, seed, 3)), SC = [0, .25, .5, .75, .92, 1];
+    const cap = SC.map((u, i) => Array.from({length: M}, (_, j) => { const e = edge(j), sj = e * u; return at(sj, j, i === SC.length - 1 ? .006 : .014 + .03 * Math.pow(1 - u, .7)); }));
+    B.part('cover', bias + .08, -1, fl, -1);
+    gridSurf(B, cap, p => V(p.x - c.x, 0, p.z - c.z).multiplyScalar(.3).add(V(0, 1, 0)), bias + .08);
+    hem += th * 1.02; k++;
+  }
+  const N = k;
+  { // the leader: a short spike over the top tier
+    const a = ax(H - .2), t = ax(H), M2 = 6, rr = .06, rot = r() * TAU;
+    for (let j = 0; j < M2; j++) {
+      const a0 = rot + j / M2 * TAU, a1 = rot + (j + 1) / M2 * TAU, p0 = V(a.x + Math.cos(a0) * rr, a.y, a.z + Math.sin(a0) * rr), p1 = V(a.x + Math.cos(a1) * rr, a.y, a.z + Math.sin(a1) * rr);
+      const n = V(Math.cos((a0 + a1) / 2), .4, Math.sin((a0 + a1) / 2)).normalize();
+      triO(B, p0, p1, t, n, n, n, .05);
+    }
+  }
+  B.tiers = N;
+  return B;
+}
+
+// desert SAGUARO (Red Mesa, desert.js saguaro()): a ribbed column (12 flutes, each face flat: the card's stripes every ~3 px) closed by a
+// round crown, and arms that leave it level, elbow and turn up (one of the old giant's droops). The variants are the card's: 0 two arms,
+// 1 three (white blossoms on its crown), 2 a young one without arms, 3 the old giant (the river's slot) with four. Rigid: no sway, a static
+// mesh; the flesh takes no sand (NO_COVER); column and arms are bones (arrows and bullets stick, the lasso's anchors)
+const SAGUARO_ARMS = [   // [side (1 / -1, or the angle round the column in quarter turns), joins at (of the column's height), reach (m past the column), rises (of the height), droops]
+  [[-1, .55, .17, .28], [1, .42, .2, .3]],
+  [[-1, .6, .17, .25], [1, .5, .2, .3], [-.5, .36, .14, .16]],
+  [],
+  [[-1, .62, .2, .3], [1, .55, .23, .32], [.5, .32, .17, .14], [-1.5, .4, .17, .2, true]],
+];
+function saguaro(seed, fam) {
+  const v = Math.floor(seed / SEEDS) % 4, r = rng(seed * 61 + 29), TAU = Math.PI * 2;
+  const H = [3.6, 4.2, 2.4, 4.8][v] * (.94 + r() * .1), r0 = (v === 2 ? .17 : .2) + r() * .025, ra = r0 * .72;
+  const B = new Build(fam, () => 0); B.rigid = true; B.litter = false;
+  const a0 = r() * TAU, lx = (r() - .5) * .1, lz = (r() - .5) * .1, top = H - r0 * .85;
+  const axis = y => V(lx * (y / H) ** 2, y, lz * (y / H) ** 2);
+  const pts = []; for (let i = 0; i <= 6; i++) pts.push(axis(-.15 + (top + .15) * i / 6));
+  B.part('cactus', 0, NO_COVER);
+  fluted(B, pts, pts.map((q, i) => r0 * (i === 0 ? 1.03 : 1 - .07 * (i / 6) ** 2)), 12, r() * TAU, true, .8);
+  const tips = [V().copy(axis(H))];
+  for (const [side, f, out, up, droop] of SAGUARO_ARMS[v]) {
+    const az = a0 + (side === 1 ? 0 : side === -1 ? Math.PI : side * Math.PI) + (r() - .5) * .5, d = V(Math.cos(az), 0, Math.sin(az));
+    const yj = top * f * (.96 + r() * .08), P0 = axis(yj), reach = r0 + out * (.9 + r() * .2), rise = top * up * (.92 + r() * .16), rb = ra * 1.15, sg = droop ? -1 : 1;
+    // out level (a hair up), round the elbow (a quarter circle of radius rb), then straight up (or down) to its crown
+    const path = [P0.clone(), P0.clone().addScaledVector(d, reach - rb).add(V(0, .03, 0))];
+    const e0 = path[1];
+    for (let q = 1; q <= 4; q++) { const t = q / 4 * Math.PI / 2; path.push(e0.clone().addScaledVector(d, Math.sin(t) * rb).add(V(0, sg * (1 - Math.cos(t)) * rb, 0))); }
+    const e1 = path[path.length - 1], len = Math.max(.2, rise - rb);
+    for (let q = 1; q <= 2; q++) path.push(e1.clone().add(V(0, sg * len * q / 2, 0)).addScaledVector(d, (r() - .5) * .02 * q));
+    B.part('cactus', 0, NO_COVER);
+    fluted(B, path, path.map((q, i) => ra * (i === 0 ? .9 : 1 - .05 * i / path.length)), 10, r() * TAU, true, .82);
+    if (!droop) tips.push(path[path.length - 1].clone().add(V(0, ra * .8, 0)));
+  }
+  if (v === 1) {   // white blossoms on the crown and the arms' tips (the card's three, pale yellow hearts)
+    B.part('gold', .2, 0);
+    for (const t of tips) for (let k = 0; k < 3; k++) { const a = r() * TAU, q = t.clone().add(V(Math.cos(a) * .07, .02 + r() * .03, Math.sin(a) * .07)); lobeOf(B, q, V(Math.cos(a), .6, Math.sin(a)), V(0, 1, 0), .045, .04, .035, k + 31, q, V(1, 1, 1), 0, .2, r, 0, .1); }
+  }
+  B.arms = SAGUARO_ARMS[v].length;
+  return B;
+}
+
+// ember SPIRE (the Ember Wastes' ash spires, biomes.js tree() ember): a jagged basalt NEEDLE, six-sided, stacked in drums that step in at
+// their joints (each drum its own part: the composite's seams draw the card's dark bands; the ledges face up: the ember cover settles ash
+// on them, MESH_FS) and twist a little, a broken top; a smaller needle leans on it, and a glowing crack (the crack family glows in the
+// ember lands) climbs the big one from its foot. variant: taller (the card's 3 + .7 v m). Rock: rigid, static; the drums are bones
+function spire(seed, fam) {
+  const v = Math.floor(seed / SEEDS) % 4, r = rng(seed * 67 + 31), TAU = Math.PI * 2;
+  const H = (3 + v * .7) * (.9 + r() * .16), B = new Build(fam, () => 0); B.rigid = true; B.litter = false;
+  const needle = (base, h, R0, R1, lean, rot0, crack) => {
+    const nd = Math.max(3, Math.round(h / .45)), drums = [];
+    let y = 0, rot = rot0, rr = R0;
+    for (let d = 0; d < nd; d++) {
+      const t1 = (d + 1) / nd, hh = h / nd * (.7 + r() * .6), y1 = d === nd - 1 ? h : Math.min(h, y + hh);
+      const rN = R0 + (R1 - R0) * Math.pow(t1, .75), jut = (r() - .5) * .05;
+      drums.push({y0: y, y1, r: rr, rot, c0: base.clone().addScaledVector(lean, y), c1: base.clone().addScaledVector(lean, y1).add(V(jut, 0, (r() - .5) * .05))});
+      y = y1; rot += (r() - .5) * .6; rr = Math.max(R1 * .7, rN * (.78 + r() * .34)); if (y >= h) break;
+    }
+    const ring = (c, rad, rt, yy) => Array.from({length: 6}, (_, k) => { const a = rt + k / 6 * TAU, j = 1 + (vn3(k * 1.7, yy * 3, seed, 9) - .5) * .46; return V(c.x + Math.cos(a) * rad * j, c.y + yy, c.z + Math.sin(a) * rad * j); });
+    for (const [di, D] of drums.entries()) {
+      const last = di === drums.length - 1, lo = ring(D.c0, D.r, D.rot, D.y0), hi = ring(D.c1, last ? D.r * .55 : D.r * .97, D.rot + (r() - .5) * .1, D.y1);
+      B.part('rock', (r() - .5) * .08, -1);
+      for (let k = 0; k < 6; k++) { const a = lo[k], b = lo[(k + 1) % 6], c = hi[(k + 1) % 6], d = hi[k], m = a.clone().add(b).multiplyScalar(.5); quadF(B, a, b, c, d, V(m.x - D.c0.x, 0, m.z - D.c0.z), 0); }
+      const next = drums[di + 1];
+      const capTo = next ? ring(next.c0, next.r, next.rot, next.y0) : null;
+      if (last) {   // a broken top: the last ring to a slanted ridge
+        const tip = D.c1.clone().add(V((r() - .5) * D.r * .6, D.y1 + D.r * (.25 + r() * .3), (r() - .5) * D.r * .6));
+        for (let k = 0; k < 6; k++) { const a = hi[k], b = hi[(k + 1) % 6], n = V().crossVectors(V().subVectors(b, a), V().subVectors(tip, a)).normalize(); if (n.y < 0) n.negate(); triO(B, a, b, tip, n, n, n, .04); }
+      } else {   // the ledge: from this drum's top ring in to the next drum's foot (it faces up: the ash lies there)
+        for (let k = 0; k < 6; k++) { const a = hi[k], b = hi[(k + 1) % 6]; const up = V(0, 1, 0); triO(B, a, b, capTo[k], up, up, up, .06); triO(B, b, capTo[(k + 1) % 6], capTo[k], up, up, up, .06); }
+      }
+      B.bones.push([D.c0.x, D.y0, D.c0.z, D.c1.x, D.y1, D.c1.z, D.r * .9, D.r * .85]);
+    }
+    if (crack) {   // the glowing crack: up two of the faces from the foot, a zig-zag across the drums, a hair off the rock
+      for (const face of [0, 2, 4]) {   // (three faces: one shows at every yaw)
+        let x = (r() - .5) * .4;
+        for (const [di, D] of drums.entries()) {
+          if (D.y0 > crack) break;
+          const a = D.rot + (face + .5) / 6 * TAU, nrm = V(Math.cos(a), 0, Math.sin(a)), tg = V(-nrm.z, 0, nrm.x), ap = D.r * Math.cos(Math.PI / 6) * 1.012, x1 = Math.max(-.6, Math.min(.6, x + (r() - .5) * .7));
+          const y1 = Math.min(D.y1, crack), w = .028 + .018 * (1 - D.y0 / crack);
+          const p0 = D.c0.clone().addScaledVector(nrm, ap).addScaledVector(tg, x * D.r * .8).add(V(0, D.y0, 0)), p1 = D.c0.clone().addScaledVector(nrm, ap * .99).addScaledVector(tg, x1 * D.r * .8).add(V(0, y1, 0));
+          B.part('crack', 0, D.y0 < crack * .6 ? 0 : 1);
+          quadF(B, p0.clone().addScaledVector(tg, -w), p0.clone().addScaledVector(tg, w), p1.clone().addScaledVector(tg, w), p1.clone().addScaledVector(tg, -w), nrm, 0);
+          x = x1;
+        }
+      }
+    }
+  };
+  const la = r() * TAU, lean = V(Math.cos(la), 0, Math.sin(la)).multiplyScalar(.02 + r() * .04);
+  needle(V(0, 0, 0), H, .56 + r() * .06, .17, lean, r() * TAU, 1.1 + v * .25 + r() * .3);
+  // the smaller needle, leaning in against the big one (the card's, beside it)
+  const a2 = r() * TAU, d2 = V(Math.cos(a2), 0, Math.sin(a2)), h2 = H * (.42 + r() * .1);
+  needle(d2.clone().multiplyScalar(.62), h2, .3, .08, d2.clone().multiplyScalar(-.12), r() * TAU, 0);
+  return B;
+}
+
+// rift SHARD (the Rift's floating islands, biomes.js tree() rift): a piece of the floor torn loose, hanging 1.1-2.6 m over it: a flat
+// irregular top (the floor's stone, a hair of rim), under it a jagged rock body tapering to a spike (and a smaller one beside it),
+// one or two glowing CRYSTALS standing on top (the rune family glows in the rift; NO_COVER), dim rune flecks in the rock. variant:
+// higher, wider, two crystals. Rigid, static (its shadow falls on the floor from the cached map); rock and crystals are bones
+function shard(seed, fam) {
+  const v = Math.floor(seed / SEEDS) % 4, r = rng(seed * 71 + 37), TAU = Math.PI * 2;
+  const B = new Build(fam, () => 0); B.rigid = true; B.litter = false;
+  const lift = 1.1 + v * .5 + r() * .15, hw = .62 + v * .13 + r() * .08, depth = .95 + v * .15 + r() * .15, yt = lift + depth;
+  const n = 9, rot = r() * TAU, rim = [];
+  for (let k = 0; k < n; k++) { const a = rot + (k + (r() - .5) * .5) / n * TAU, rr = hw * (.72 + r() * .32); rim.push(V(Math.cos(a) * rr, yt, Math.sin(a) * rr)); }
+  // the top: a slab of floor (its face up, its edge a band down to the rock)
+  const c = V(0, yt, 0), slab = .1, up = V(0, 1, 0);
+  B.part('stone', .05, NO_COVER);
+  for (let k = 0; k < n; k++) triO(B, c, rim[k], rim[(k + 1) % n], up, up, up, .05);
+  const low = rim.map(p => p.clone().add(V(0, -slab, 0)));
+  for (let k = 0; k < n; k++) { const a = rim[k], b = rim[(k + 1) % n], m = a.clone().add(b).multiplyScalar(.5); quadF(B, a, b, low[(k + 1) % n], low[k], V(m.x, 0, m.z), 0); }
+  // the body: rings narrowing down to the spike, jittered
+  const tip = V((r() - .5) * hw * .4, lift, (r() - .5) * hw * .4), rings = [low];
+  for (const [f, s] of [[.28, .84], [.6, .52]]) rings.push(low.map(p => V(p.x * s * (.85 + r() * .3) + tip.x * f, yt - slab - (yt - slab - lift) * f * (.9 + r() * .2), p.z * s * (.85 + r() * .3) + tip.z * f)));
+  B.part('rock', 0, NO_COVER);
+  for (let q = 0; q + 1 < rings.length; q++) for (let k = 0; k < n; k++) { const a = rings[q][k], b = rings[q][(k + 1) % n], cc = rings[q + 1][(k + 1) % n], d = rings[q + 1][k], m = a.clone().add(b).multiplyScalar(.5); quadF(B, a, b, cc, d, V(m.x - tip.x, -.2, m.z - tip.z), (q - 1) * .06); }
+  const last = rings[rings.length - 1];
+  for (let k = 0; k < n; k++) { const a = last[k], b = last[(k + 1) % n], m = a.clone().add(b).multiplyScalar(.5); quadF(B, a, b, tip, tip.clone().lerp(a, .001), V(m.x - tip.x, -.5, m.z - tip.z), -.08); }
+  { // a smaller spike off the side of the body
+    const k0 = r() * n | 0, a = last[k0], b = last[(k0 + 2) % n], m = rings[1][(k0 + 1) % n], t2 = a.clone().lerp(b, .5).add(V(0, -.35 - r() * .2, 0)).lerp(m, -.2);
+    for (const [p, q] of [[a, m], [m, b], [b, a]]) { const o = p.clone().add(q).multiplyScalar(.5).sub(V(tip.x, (lift + yt) / 2, tip.z)); quadF(B, p, q, t2, t2.clone().lerp(p, .001), o, -.06); }
+  }
+  B.bones.push([0, yt - .05, 0, tip.x * .5, (lift + yt) / 2, tip.z * .5, hw * .7, hw * .4]);
+  // dim rune flecks in the rock (glow, darkest tone)
+  B.part('rune', 0, 2);
+  for (let i = 0; i < 3; i++) {
+    const k = r() * n | 0, a = rings[1][k], b = rings[1][(k + 1) % n], m = a.clone().lerp(b, .3 + r() * .4), o = V(m.x - tip.x, 0, m.z - tip.z).normalize(), pt = m.clone().addScaledVector(o, .012).add(V(0, .04, 0)), s = .035;
+    const t = V(-o.z, 0, o.x);
+    quadF(B, pt.clone().add(V(0, s, 0)), pt.clone().addScaledVector(t, s), pt.clone().add(V(0, -s, 0)), pt.clone().addScaledVector(t, -s), o, 0);
+  }
+  // the crystals: hexagonal prisms with pointed tops, leaning a little, standing in the top
+  const nc = 3 + (v > 0 ? 1 : 0), a00 = r() * TAU, d00 = hw * r() * .15;   // (the big one, its neighbour (variants 1-3), two small ones at their feet)
+  for (let i = 0; i < nc; i++) {
+    const big = i === 0, sm = i >= nc - 2, a = big ? a00 : a00 + (r() - .5) * 1.4 + (i % 2 ? 1 : -1) * .6, d = big ? d00 : hw * (sm ? .2 + r() * .12 : .3 + r() * .15);
+    const base = V(Math.cos(a) * d, yt - .06, Math.sin(a) * d), h = (big ? .9 : sm ? .26 : .55) * (.9 + r() * .2), cr = big ? .09 : sm ? .04 : .06;
+    const ax = V((r() - .5) * .25, 1, (r() - .5) * .25).normalize(), tg = V().crossVectors(ax, V(1, 0, 0)).normalize(), bt = V().crossVectors(ax, tg), rt = r() * TAU;
+    const ringAt = (s, rad) => Array.from({length: 6}, (_, k) => { const q = rt + k / 6 * TAU; return base.clone().addScaledVector(ax, s).addScaledVector(tg, Math.cos(q) * rad).addScaledVector(bt, Math.sin(q) * rad); });
+    const r0 = ringAt(0, cr), r1 = ringAt(h * .78, cr * 1.08), ap = base.clone().addScaledVector(ax, h);
+    B.part('rune', .08, NO_COVER);
+    for (let k = 0; k < 6; k++) { const m = r0[k].clone().add(r0[(k + 1) % 6]).multiplyScalar(.5).sub(base); quadF(B, r0[k], r0[(k + 1) % 6], r1[(k + 1) % 6], r1[k], m, 0); }
+    for (let k = 0; k < 6; k++) { const m = r1[k].clone().add(r1[(k + 1) % 6]).multiplyScalar(.5).sub(base).addScaledVector(ax, -h * .5); quadF(B, r1[k], r1[(k + 1) % 6], ap, ap.clone().lerp(r1[k], .001), m, .1); }
+    B.bones.push([base.x, base.y, base.z, ap.x, ap.y, ap.z, cr, cr * .5]);
+  }
+  return B;
+}
+
+const SPECIES = {oak, dead, willow, rowan, birch, aspen, pine, saguaro, spire, shard};
 // Which tree grows where (the ruins; the painted cards ask the same, biomes.js tree()). A tree's `variant`: 2 = dead, 3 = willow (the river), 4 / 5 /
 // 6 = rowan / birch / aspen (the lineup sets them); 0 / 1 = a live tree: the garden's and the plateau's stay oaks, and the surroundings' trees
 // (`outside`) are a mix chosen from their own position, deterministic: oak 40 % / birch 25 % / aspen 20 % / rowan 15 % over the whole world, but
@@ -621,10 +898,13 @@ function groveOf(x, y) {
   return u < wO ? 'oak' : u < wO + wB ? 'birch' : u < wO + wB + wA ? 'aspen' : 'rowan';
 }
 const VARIANT_SPECIES = ['oak', 'oak', 'dead', 'willow', 'rowan', 'birch', 'aspen'];
+// the other biomes grow one species each (the true-3D pivot): every variant of it, as their painted cards do
+const BIOME_SPECIES = {frost: 'pine', desert: 'saguaro', ember: 'spire', rift: 'shard'};
 export function speciesOf(p, biome) {
   if (biome === 'ruins') { const v = p.variant | 0; return v === 0 || v === 1 ? (p.outside ? groveOf(p.x, p.y) : 'oak') : VARIANT_SPECIES[v] || 'oak'; }
-  return null;   // ember spires, frost pines, rift shards: still the painted cards
+  return BIOME_SPECIES[biome] || null;
 }
+const VARIANT_SEEDED = {pine: 1, saguaro: 1, spire: 1, shard: 1};   // their shape seed carries the variant (+ SEEDS x variant, 0..3)
 const FIXED_YAW = {willow: 1};   // never turned: its lean is toward the water (east); the others stand at any angle
 const cache = new Map();
 export function treeShape(species, seed, fam) {
@@ -632,7 +912,8 @@ export function treeShape(species, seed, fam) {
   let s = cache.get(key);
   if (!s) {
     const B = SPECIES[species](seed, fam), geo = B.geometry();
-    s = {geo, top: geo.boundingBox.max.y, bones: B.bones, crown: B.crown || null, autumn: B.leafy ? B.autumn || AUTUMN_DEFAULT : null, species, seed};   // (a leafy species that sets no B.autumn turns rust)
+    s = {geo, top: geo.boundingBox.max.y, bones: B.bones, crown: B.crown || null, autumn: B.leafy ? B.autumn || AUTUMN_DEFAULT : null, species, seed,   // (a leafy species that sets no B.autumn turns rust)
+      rigid: !!B.rigid, litter: B.litter !== false};   // rigid: no sway, a static mesh; litter false: no fallen leaves under it (world.js)
     cache.set(key, s);
   }
   return s;
@@ -659,8 +940,10 @@ export function boneHit(tr, x0, y0, h0, x1, y1, h1) {
 }
 export function treeModel(p, biome, fam) {
   const species = speciesOf(p, biome); if (!species) return null;
-  const h = hashXY(p.x, p.y), seed = p.seed ?? ((h * 9973 | 0) % SEEDS);
+  const h = hashXY(p.x, p.y), seed = (p.seed ?? ((h * 9973 | 0) % SEEDS)) + (VARIANT_SEEDED[species] ? SEEDS * Math.max(0, Math.min(3, p.variant | 0)) : 0);
   const s = treeShape(species, seed, fam), scale = p.lineup ? 1 : p.scale ?? .9 + hashXY(p.y, p.x) * .2;   // (p.scale: a prop's own size, the West Downs' big old oaks)
   return {...s, yaw: p.lineup || FIXED_YAW[species] ? 0 : h * Math.PI * 2, scale, top: s.top * scale};
 }
 export function clearTreeCache() { for (const s of cache.values()) s.geo.dispose(); cache.clear(); }
+// the builders, for the low plants (world/flora3d.js: bushes, ferns, cacti grown the same way)
+export {Build, tube, clump, lobeOf, fluted, quadF, triO, rng, vn3, h3};

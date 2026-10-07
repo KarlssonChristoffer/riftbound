@@ -5,9 +5,10 @@
 //   plateau  a real block: its painted top, rock-strata faces
 //   props    live 3D meshes (Blender prop kit -> glb, toned on the GPU with the pixelizer's ramps and rules) or, for the
 //            A/B test, the same props pre-rendered at 16 yaws (cards); trees are grown in the browser (trees3d.js: the
-//            biomes it has species for; trees3d: false = the painted cards); everything else the kit doesn't model
-//            (bushes, tufts, braziers, torches, brutes) stays a painted billboard card; the dummy and the crystal are
-//            procedural meshes (world/props3d.js; ?props2d=1: their cards)
+//            biomes it has species for; trees3d: false = the painted cards); the low plants too (bushes, ferns, tufts, reeds:
+//            world/flora3d.js, drawn instanced by render/flora.js; ?flora=cards: the cards); everything else the kit doesn't
+//            model (braziers, torches) stays a painted billboard card; the dummy and the crystal are
+//            procedural meshes (world/props3d.js; ?props2d=1: their cards), the brutes 3D figures (features/brutes3d.js)
 //   lights   from the biome's sprites (braziers, torches, crystals) and ground (lava, runes), in metres
 //   leaves   fallen leaves lie under and downwind of the 3D trees: a density map baked here (LITTER, bakeLitter) that gfx.js SURF_FS
 //            draws from, by how far autumn has gone (the season looks: gfx.js setGround). The plants' autumn: plantOf, below
@@ -41,6 +42,8 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {WORLD, GROUNDS, WEST_ON, WEST, WEST_LAND, PLAY, TRAIL, walkable, roamable, navArea, buildLayout, elev, inStream, PLATEAUS, STREAM, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, TERRAIN, MESA, CLIMBS, CASCADES, mesaAt, groundDrawn, CLEFTS, cleftWall, inCleft, BRIDGES} from './layout.js';
 import {treeModel, boneHit} from './trees3d.js';
+import {floraShapes, bladeRamps} from './flora3d.js';   // the low plants in 3D (the true-3D pivot): bushes, ferns, tufts, reeds
+import {createFlora} from '../render/flora.js';
 import {cliffGeometry} from './cliffs3d.js';
 import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
@@ -55,7 +58,8 @@ import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
 import {flags} from '../core/flags.js';
 
-export const WATER_H = -.18;   // the stream bed sits this much below the ground (features: world.waterH)
+export const WATER_H = -.18;
+const FLORA = flags.get('flora') !== 'cards';   // the low plants as 3D shapes drawn instanced (world/flora3d.js, render/flora.js); cards: the painted cards   // the stream bed sits this much below the ground (features: world.waterH)
 const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
 
 // ---------------------------------------------------------------- the pixelizer's palettes (props_pixelize.py BIOMES)
@@ -89,7 +93,9 @@ export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'h
   // glow of a flame or a lantern's glass, shroom = the biome's own glow (the mushrooms' caps), bone = bleached bone, wax, linen; GLOW3
   // below. They light themselves only where a mesh says so: gfx.js mesh.setGlow. NB the composite keeps a family in 5 bits (E.w =
   // part x 32 + family): at most 32 families)
-  'gem', 'flame', 'shroom', 'bone'];
+  'gem', 'flame', 'shroom', 'bone',
+  // (cactus: the desert's saguaros and cactus bushes, trees3d.js / flora3d.js: the true-3D pivot's flora)
+  'cactus'];
 // the true-3D props' families per biome, [hi, base, shade, outline] (gem: the biome's style.gem; shroom: a glow colour, ramped)
 const GLOW3 = {
   flame: {ruins: ['fff4d0', 'ffd070', 'e09838', '7a4a1c'], ember: ['ffe8b0', 'ffa848', 'd8682a', '6e2a12'], frost: ['fff6d8', 'ffd890', 'd8a050', '7a5428'],
@@ -107,6 +113,7 @@ function palette(biome, style) {
   P.bark = sr('bark') || P.wood; P.leaf = sr('leaf') || sr('pine') || P.rock;
   P.birch = sr('birch') || P.stone; P.aspen = sr('aspen') || P.bark; P.berry = sr('berry') || P.red;   // (ruins' STYLES has them; the other biomes grow no such trees)
   P.berryOrange = sr('berryOrange') || P.gold; P.berryGreen = sr('berryGreen') || P.leaf; P.berryCream = sr('berryCream') || P.stone;
+  P.cactus = sr('cactus') || P.leaf;   // (the desert's STYLE.cactus)
   const w = P.wood; P.void = [...Array(3).fill(mix(w[4], [0, 0, 0], .3)), ...Array(3).fill(mix(w[4], [0, 0, 0], .45))];
   P.cover = B.cover ? ramp6(B.cover) : P.stone;
   P.char = ramp6(['3a3330', '26211f', '161312', '0c0a0a']); P.ash = ramp6(['8e8982', '75716b', '5e5a55', '403d3a']);
@@ -885,7 +892,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // every item starts with ALL its fields (one shape: the per-frame loop's loads stay monomorphic). k*: what update() last
   // built the live mesh from (kv: the mesh's matrix version), kvis / kfl: the visibility and flash it last set
   const ITEM0 = {live: null, card: null, yaw: null, lsp: null, lrec: null, emSp: null, lean: null, manageMatrix: false,
-    kx: NaN, ky: NaN, kz: NaN, kw: NaN, ks: NaN, kl: NaN, km: null, kv: -1, kvis: null, kfl: NaN, veil: false, own: false, pm: null};   // own: another view draws it (own()); pm: a props3d.js model (the dummy, the crystal)
+    kx: NaN, ky: NaN, kz: NaN, kw: NaN, ks: NaN, kl: NaN, km: null, kv: -1, kvis: null, kfl: NaN, veil: false, own: false, pm: null, flora: null, rigid: false};   // own: another view draws it (own()); pm: a props3d.js model (the dummy, the crystal); flora: a 3D plant's instances (render/flora.js handles); rigid: it never leans (a cactus)
   let litterDirty = false;   // fallen leaves: a tree joined or left (bakeNow, below)
   let nextId = 10;
   const SHADOWLESS = new Set(['tuft', 'reed', 'fern']);
@@ -904,6 +911,21 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     let pal = palOf.get(key); if (!pal) palOf.set(key, pal = [P, A].flatMap(q => q.stages.flatMap(st => st.map(hex01))));
     return {kind: PLANT_KIND[p.kind], seed: hsh(p.x, p.y, 5), delay: P.delay[0] + (P.delay[1] - P.delay[0]) * hsh(p.y, p.x, 9), ramp: biome.style[PA.ramp].h.map(hex01), pal};
   };
+  // THE LOW PLANTS IN 3D (bush, fern, tuft, reed: world/flora3d.js shapes, every plant of a shape in one instanced draw, render/flora.js):
+  // a plant item has no card and no mesh of its own, it.flora = its instances (one per shape: a frost tuft is a snow mound and its
+  // twigs); it.sp stays the painted sprite (what its card would have shown: the features that read a plant's size from it). Turned and
+  // scaled per plant from its position; its autumn (plantOf) as the card's. ?flora=cards: the painted cards (an A/B)
+  const flora = FLORA ? createFlora(G) : null;
+  if (flora) { flora.setRamps(bladeRamps(biome.id, biome.style)); disposers.push(() => flora.dispose()); }
+  const FLORA_KINDS = {bush: 1, fern: 1, tuft: 1, reed: 1}, TAU = Math.PI * 2;
+  function floraOf(it, p) {
+    if (!flora || !FLORA_KINDS[p.kind]) return null;
+    const sh = floraShapes(p.kind, biome.id, p.variant, famOf); if (!sh || (!sh.mesh && !sh.blades)) return null;
+    const yaw = hsh(p.x, p.y, 11) * TAU, sc = .88 + hsh(p.y, p.x, 13) * .24, seed = hsh(p.x, p.y, 17), pl = plantOf(p), z0 = p.z || 0, out = [];
+    if (sh.mesh) out.push(flora.add(flora.shape(sh.key, sh.mesh.geo, 'mesh', {casts: sh.mesh.casts}), p.x, z0, p.y, yaw, sc, it.obj, pl, seed));
+    if (sh.blades) out.push(flora.add(flora.shape(sh.key, sh.blades.geo, 'blade'), p.x, z0, p.y, yaw, sc, it.obj, pl, seed));
+    it.rigid = sh.rigid; return out;
+  }
   // procedural trees (trees3d.js): a live mesh instead of the painted card, turned and scaled per tree (it.pose)
   const famOf = name => Math.max(0, FAMS.indexOf(name));
   const treeOf = p => trees3d && p.kind === 'tree' && !p.painted ? treeModel(p, biome.id, famOf) : null;
@@ -952,7 +974,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const r = watchtowerRun(TOWER_PLAN, wo, TF ? TF.H : () => 0);
     for (const p of props) if (p.kind === 'watchtower') own(p, r.geo, r.top - (p.z || 0)); else if (p.kind === 'towerwall') own(p, null, colTop(TOWER_PLAN, p.x, p.y, p.z || 0));
   }
-  const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose, static: !it.pose, autumn: it.pose?.autumn}); if (it.pose) m.sm.layers.disable(1); if (it.pm) pmLive(it, m); return m; };
+  // (a rigid 3D tree, trees3d.js shape.rigid: the saguaros, spires, shards: a static mesh like any prop, no sway)
+  const swayOf = it => !!it.pose && !it.pose.rigid;
+  const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: swayOf(it), static: !swayOf(it), autumn: it.pose?.autumn}); if (swayOf(it)) m.sm.layers.disable(1); if (it.pm) pmLive(it, m); return m; };
   for (const p of props) {
     const z0 = p.z || 0;
     if (p.outside && biome.hole?.(p.x, p.y, ctxO)) continue;   // over the ravine / in the stream
@@ -969,7 +993,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       if (yw && yawIdx.frames[yw[0] + '_y0']) {
         it.yaw = {base: yw[0], off: yw[1], card: null};   // (its card: made the first time the pre-renders show, update(); 90 hidden cards in every scene cost each pass a walk)
       }
-    } else if (sp) {
+    } else if (sp && (it.flora = floraOf(it, p))) it.sp = sp;   // (a 3D plant)
+    else if (sp) {
       it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind), plant: plantOf(p)}); it.sp = sp;
       it.card.anchor = new THREE.Vector3(p.x, z0, p.y);
     } else continue;
@@ -986,13 +1011,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const it = {p, st, obj, sp: null, hover: 0, pose: tm, ...ITEM0};
     it.pm = pm;
     if (geo) it.live = liveOf(it, geo, p.x, p.z || 0, p.y);
+    else if (sp && (it.flora = floraOf(it, p))) it.sp = sp;   // (a 3D plant)
     else if (sp) { it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind), plant: plantOf(p)}); it.sp = sp; } else return null;
     items.push(it); byProp.set(p, it); if (p.kind === 'tree') litterDirty = true; return it;
   }
   // a prop that leaves the world for good (a killed enemy): its card / mesh go with it
   function removeItem(p) {
     const it = byProp.get(p); if (!it) return;
-    it.live?.dispose(); it.card?.dispose(); it.yaw?.card?.dispose();
+    it.live?.dispose(); it.card?.dispose(); it.yaw?.card?.dispose(); if (it.flora) for (const h of it.flora) flora.remove(h);
     items.splice(items.indexOf(it), 1); byProp.delete(p); if (p.kind === 'tree') litterDirty = true;
   }
   // fallen leaves (LITTER): the trees as the bake wants them (a 3D tree's crown, rotated and scaled as it stands; a painted one's guess;
@@ -1008,7 +1034,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       discs.push([p.x, p.y, Math.min(LITTER.trunk, p.r || .22 * (it.pose?.scale || 1))]);   // the trunk
       const w = it.pose;
       if (w) {
-        const c = w.crown; if (!c) continue;
+        const c = w.crown; if (!c || w.litter === false) continue;   // (an evergreen sheds no leaves: trees3d.js shape.litter)
         const co = Math.cos(w.yaw), si = Math.sin(w.yaw), wl = w.species === 'willow';
         trees.push({x: p.x + (c.x * co + c.z * si) * w.scale, y: p.y + (c.z * co - c.x * si) * w.scale, R: c.r * w.scale * (wl ? LITTER.willow.r : 1.2), w: wl ? LITTER.willow.w : 1, autumn: w.autumn});
       } else if (it.card && !dead(p)) trees.push({x: p.x, y: p.y, R: (p.variant | 0) === 3 ? LITTER.willow.r * 1.15 : LITTER.card, w: 1, autumn: null});
@@ -1045,6 +1071,16 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const f = L?.flut || 0; it.live.setFlutter?.(f, f * .5);
     it.live.setRipple?.((L?.wx || 0) * RIP_K, (L?.wy || 0) * RIP_K, L?.ph || 0, L?.wave || 0);
   }
+  // a 3D plant's lean (render/flora.js): the wind's spring as the trees' (leanTree: art px, the hysteresis), the clumps' dance halved (a
+  // bush's clump is a few px, not a crown's)
+  function leanPlant(it, yaw) {
+    const L = hooks.mesh?.(it), d = it.lean ||= {x: 0, y: 0};
+    let sx = 0, sy = 0;
+    if (L) { const c = Math.cos(yaw), s = Math.sin(yaw); sx = (L.x * c - L.y * s) * PPM; sy = (L.x * s + L.y * c) * ctxO.PPMY; }
+    if (!L || hypot2(sx - d.x, sy - d.y) > TREE_HYST) { d.x = sx; d.y = sy; }
+    const sh = L?.shake || 0, f = (L?.flut || 0) * .5;
+    for (let i = 0; i < it.flora.length; i++) flora.setLean(it.flora[i], d.x + sh, d.y, f);
+  }
   // every frame: follow the props (stage, lid, hop, wobble, flash, gone), collect their lights, pick the yaw frames.
   // A live mesh's model state and matrix are worked out only when what they're made of changed since the last frame
   // (position, wobble, stage, lid, who poses it) or someone else set its matrix since (mesh.ver: a burning prop's slump):
@@ -1076,9 +1112,16 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
           else if (!it.manageMatrix) L.setMatrix(placeOf(it, p.x + wob / PPM, z0, p.y, M));
           it.kx = p.x; it.ky = p.y; it.kz = z0; it.kw = wob; it.ks = p.stage; it.kl = p.lid; it.km = it.manageMatrix; it.kv = L.ver;
         }
-        if (it.pose) leanTree(it, yaw);
+        if (it.pose && !it.pose.rigid) leanTree(it, yaw);
         const vis = !p.gone && !useYaw && !it.veil && !it.own; if (vis !== it.kvis) { it.kvis = vis; L.setVisible(vis); }   // (the world is their only writer)
         if (flash !== it.kfl) { it.kfl = flash; L.flash = flash; }
+      }
+      if (it.flora) {   // a 3D plant: its instances (render/flora.js) shown or not, flashed, moved, leaned
+        const F = it.flora, vis = !p.gone && !!sp && !it.veil;
+        if (vis !== it.kvis) { it.kvis = vis; for (let i = 0; i < F.length; i++) flora.setVisible(F[i], vis); }
+        if (flash !== it.kfl) { it.kfl = flash; for (let i = 0; i < F.length; i++) flora.setFlash(F[i], flash); }
+        if (p.x !== it.kx || p.y !== it.ky || z0 !== it.kz) { it.kx = p.x; it.ky = p.y; it.kz = z0; for (let i = 0; i < F.length; i++) flora.setPlace(F[i], p.x, z0, p.y); }
+        if (vis && !it.rigid) leanPlant(it, yaw);
       }
       if (it.yaw && (useYaw || it.yaw.card)) {
         it.yaw.card ??= G.card({tex: texOf(yawAlb), nrm: texOf(yawNrm), w: 1, h: 1, px: 0, py: 0, type: 7, obj: it.obj, bias: .00125});
@@ -1103,11 +1146,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         it.card.flash = flash; it.card.setVisible(!p.gone && !!sp && !it.veil && !it.own);
       }
     }
+    flora?.commit();
   }
-  const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length;
+  const yawCount = items.filter(it => it.yaw).length, liveCount = items.filter(it => it.live).length, cardCount = items.filter(it => it.card).length, floraCount = items.filter(it => it.flora).length;
   litterDirty = true;   // (the first bake: the trees are all here)
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
-    setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, haveGlb, groundCanvas: gc, westCanvas, trees3d,
+    setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, floraCount, flora, haveGlb, groundCanvas: gc, westCanvas, trees3d,
     itemOf: p => byProp.get(p) || null,
     // a view's veil over a prop (features/omens/fog.js: an enemy lost in the fog): not drawn, nothing else changes (the
     // sim, its collider, the registry). It stays until lifted: veil(p, false)

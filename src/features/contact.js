@@ -114,7 +114,7 @@ export async function create(host) {
       for (const it of host.world.items) {
         const p = it.p; if (p.gone || p.broken || SKIP.has(p.kind) || p.rect) continue;
         const base = p.z || 0, air = Math.max(0, p.h || 0);
-        if (it.card && it.sp) { const fp = footOf(it.sp); if (fp) stamp(p.x, p.y, base, fp, air, fp.py, p.occluder || p.kind === 'tree' || p.kind === 'rock_big'); }
+        if ((it.card || it.flora) && it.sp) { const fp = footOf(it.sp); if (fp) stamp(p.x, p.y, base, fp, air, fp.py, p.occluder || p.kind === 'tree' || p.kind === 'rock_big'); }   // (it.flora: a 3D plant, world.js: its painted card's foot)
         else if (it.live && p.r > 0 && !p.float && !(p.sink > .05)) { RFP.hw = Math.round(p.r * host.PPM * .8); stamp(p.x, p.y, base, RFP, air, 14, false); }
       }
       for (const p of walkers) { if (p.gone || p.broken) continue; WFP.hw = p.foot; stamp(p.x, p.y, p.z || 0, WFP, Math.max(0, p.h || 0), 14, false); }
