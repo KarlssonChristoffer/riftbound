@@ -113,6 +113,19 @@ function crystalCluster(stage) {
     L.push({g: new THREE.OctahedronGeometry(1, 0), m: M4([x, .025, z], [1.2, a, .3], [.06, .03, .1]), fam: 'gem', bias: .1});
   return L;
 }
+// a hanging lantern (the wind decor's, the stall's, the mine's): a ring on top, a cap, a glass box in four corner posts, a base.
+// Frame: origin = the top of its ring (it hangs from there), y up, so the body is below 0; ~.27 m. The glass is the flame family:
+// light it with mesh.setGlow(slot, FAMS 'flame', k)
+export function lanternParts(s = 1) {
+  const L = [], v = (x, y, z) => [x * s, y * s, z * s];
+  L.push({g: new THREE.TorusGeometry(.024 * s, .007 * s, 3, 8), m: M4(v(0, -.026, 0)), fam: 'metal', bias: .2});
+  L.push({g: new THREE.ConeGeometry(.085 * s, .055 * s, 6), m: M4(v(0, -.075, 0)), fam: 'metal', bias: .25});
+  L.push(cyl('metal', .088 * s, .088 * s, .014 * s, v(0, -.105, 0), [0, 0, 0], 6, {bias: -.1}));
+  L.push(box('flame', [.11 * s, .125 * s, .11 * s], v(0, -.175, 0), [0, 0, 0], {fixed: 1}));
+  for (const x of [-1, 1]) for (const z of [-1, 1]) L.push(box('metal', [.018 * s, .135 * s, .018 * s], v(x * .057, -.175, z * .057), [0, 0, 0], {bias: x < 0 ? .15 : -.15}));
+  L.push(cyl('metal', .07 * s, .078 * s, .022 * s, v(0, -.25, 0), [0, 0, 0], 6, {bias: -.2}));
+  return L;
+}
 export function gemChunk() { return geoOf([{g: new THREE.OctahedronGeometry(1, 0), m: M4([0, .05, 0], [.4, .3, .2], [.05, .05, .12]), fam: 'gem', bias: .1}]); }
 
 // straw: the family's faces toned in streaks (a tone bias per sector round the y axis, n sectors, and per part), so a bundle

@@ -16,13 +16,14 @@
 // Where: open sand outside the walls, clear of the creek, the paths, the camp's open ground, the climb, the gates.
 // OWNS: its props (kinds: PROP_TOP below), the scatter it hid under them (hidden while in the desert), its meshes
 //   (world.mesh: five static clusters, cast into the cached static shadow map, sScene layers 1 + 2; the windmill's head
-//   and wheel move: layer 0, hidden while the windmill is out of view), its painted faces (one G.surface over one atlas)
-//   and bone / lantern cards (G.card), the windmill's motion (view), the speech bubble.
+//   and wheel move: layer 0, hidden while the windmill is out of view), its painted faces (one G.surface over one atlas),
+//   the bones and the mine's lantern (3D, merged into the clusters: the yard's lights the lantern's glass, mesh.setGlow;
+//   ?props2d=1: the old bone / lantern cards, G.card), the windmill's motion (view), the speech bubble.
 // READS: host.biome, host.wind.at (the windmill), host.entities (add / remove / hide / near), host.G (view, toScreen).
 // EMITS: frontier.read {what: 'wanted' | 'sign', name: the poster's outlaw or null} as you read one (features/foes: a
 //   wanted poster calls a bounty gang in the desert sandbox).
 // BUDGET: static pieces: no per-frame work (built once, placed per desert world): 5 cluster meshes + 1 face surface +
-//   11 small cards, culled by the camera; F.view ~.015 ms measured (real clock, the windmill in view: one wind sample,
+//   (props2d: 11 small cards), culled by the camera; F.view ~.015 ms measured (real clock, the windmill in view: one wind sample,
 //   a few lines of spring maths, two setMatrix; nothing when it's out of view); F.lights one preallocated record near
 //   the mine; F.hd only while a bubble shows. Draw calls in view: <= 4 cluster + 1 face + 2 windmill (+ 2 shadow).
 import * as THREE from 'three';
@@ -31,6 +32,8 @@ import {geoOf, M4, pack} from '../world/kit3d.js';
 import {clamp} from '../core/mathx.js';
 import {frontierArt} from './frontier/art.js';
 import * as MD from './frontier/models.js';
+import {lanternParts} from '../world/props3d.js';   // the true-3D lantern (the wind decor's and the stall's too)
+import {flags} from '../core/flags.js';
 
 const TAU = Math.PI * 2, I4 = new THREE.Matrix4();
 // how high these stop arrows (world.js PROP_TOP, read by sim/projectiles.js): the lattices let them through
@@ -60,6 +63,8 @@ const FENCES = [[33.95, 7.55, 3.3, 'e', 3, [[1, 'low']], 'mill'], [8.7, 26.35, 4
 const BONES = [['skull', 37.25, 7.6, 1.07], ['skull', 4.47, 20.62, 1.07], ['skull', 54.5, 11.32, 2.15], ['skull', 11.3, 25.85, 0], ['ribs', 11.95, 25.98, 0],
   ['bone', 10.75, 26.12, 0], ['ribs', 34.35, 25.0, 0], ['bone', 34.95, 25.35, 0], ['skull', 59.3, 17.9, 0], ['bone', 6.2, 24.7, 0]];
 const LANTERN = {x: 53.97, y: 11.36, h: 2.1};
+// (?props2d=1: the bones and the lantern as the old cards, an A/B; else 3D pieces merged into the cluster nearest each)
+const P2D = flags.get('props2d') === '1';
 // what the posters and the sign say (E)
 const POSTERS = ["WANTED: 'Two-Gun' Calloway | robbed the Tres Piedras stage | $500 reward", 'WANTED: Kid Ybarra, horse thief | $200, brought in alive',
   "Scratched in the wood: | 'water at the windmill, whiskey at the fort'"];
@@ -96,7 +101,22 @@ export async function create(host) {
       west: [...piece(MD.outhouse(), OUTHOUSE.x, OUTHOUSE.y)],
     };
     for (const [x, y, len, h, seed, brk, c] of FENCES) C[c].push(...piece(MD.fence(len, {seed, brk}), x, y, [0, rot(h), 0]));
-    GEO = {clusters: Object.values(C).map(geoOf), head: geoOf(MD.millHead()), wheel: geoOf(MD.millWheel()), faces: buildFaces()};
+    if (!P2D) bones3d(C);
+    GEO = {clusters: Object.values(C).map(geoOf), names: Object.keys(C), head: geoOf(MD.millHead()), wheel: geoOf(MD.millWheel()), faces: buildFaces()};
+  }
+  // THE BONES IN 3D: lying in the sand, turned their own way (a skull rests a little tilted, half the ribs sunk); a skull on a post
+  // or the mine's cap is nailed to its face, looking out (south), the snout down. The mine's lantern hangs from an iron hook on the
+  // cap (its glass lights itself: the yard's mesh, buildVisuals). Each piece goes into the cluster nearest it (no draw of its own)
+  function bones3d(C) {
+    const AT = {mill: MILL, street: STREET.wagon, yard: MINE, south: WELL, west: OUTHOUSE};
+    const near = (x, y) => { let b = 'south', bd = 1e9; for (const k in AT) { const d = Math.hypot(AT[k].x - x, AT[k].y - y); if (d < bd) { bd = d; b = k; } } return C[b]; };
+    for (const [k, x, y, h] of BONES) {
+      const a = (x * 7.31 + y * 3.17) % TAU, P = k === 'skull' ? MD.skull() : k === 'ribs' ? MD.ribs() : MD.longBone();
+      if (h > 0) near(x, y).push(...piece(P, x, y + (h > 2 ? .02 : .06), [1.2, 0, 0], h + (h > 2 ? .17 : .04)));   // on a post / the cap: looking out
+      else near(x, y).push(...piece(P, x, y, k === 'skull' ? [.12, a, .18] : [0, a, 0], k === 'ribs' ? -.015 : 0));
+    }
+    const L = LANTERN, hook = [MD.beam('metal', [0, .05, -.075], [0, .05, 0], .014, .014), MD.beam('metal', [0, .055, 0], [0, -.004, 0], .012, .012)];
+    near(L.x, L.y).push(...piece([...hook, ...lanternParts()], L.x, L.y, [0, 0, 0], 2.12));
   }
   // the painted faces in one geometry over one atlas: the posters, the sign boards (front and back), the moon on the
   // outhouse's door, the water in the tank, the trough and the well. A face is a plane at 1 texel per art px seen square on
@@ -192,13 +212,15 @@ export async function create(host) {
     c.anchor = new THREE.Vector3(x, h, y); cards.push(c);
   }
   function buildVisuals() {
-    for (const g of GEO.clusters) meshes.push(host.world.mesh(g, I4, {occlude: true, static: true}));   // (still: the cached static shadow)
+    GEO.clusters.forEach((g, i) => {   // (still: the cached static shadow)
+      const m = host.world.mesh(g, I4, {occlude: true, static: true}); meshes.push(m);
+      if (!P2D) m.setGlow(0, WORLD.FAMS.indexOf('flame'), 1);   // the lantern's glass (no other piece is of the flame family)
+    });
     MV.head = host.world.mesh(GEO.head, new THREE.Matrix4()); MV.wheel = host.world.mesh(GEO.wheel, new THREE.Matrix4());
     meshes.push(MV.head, MV.wheel); MV.shown = true; poseMill();
     // the painted faces (gfx type 5, a textured surface: lit and shadowed by the scene, no outline, casting nothing)
     faces.push(host.G.surface(GEO.faces.geo, {tex: host.G.tex(GEO.faces.img), planar: false, type: 5, obj: 1}, false));
-    for (const [k, x, y, h] of BONES) card(ART[k], x, h, y);
-    card(ART.lantern, LANTERN.x, LANTERN.h, LANTERN.y, ART.lantern.em);
+    if (P2D) { for (const [k, x, y, h] of BONES) card(ART[k], x, h, y); card(ART.lantern, LANTERN.x, LANTERN.h, LANTERN.y, ART.lantern.em); }
   }
   function dropVisuals() {   // (the world's rebuild already disposed the meshes it lent us)
     meshes.length = 0; MV.head = MV.wheel = null;

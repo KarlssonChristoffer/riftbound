@@ -340,3 +340,33 @@ export function oreCart() {
   for (let i = 0; i < 5; i++) L.push({g: new THREE.IcosahedronGeometry(1, 0), m: M4([(r() - .5) * .45, .8 + r() * .06, (r() - .5) * .55], [r() * 3, r() * 3, r() * 3], [.13, .1, .12]), fam: 'rock', bias: (r() - .5) * .3});
   return L;
 }
+
+// ================================================================ bones (the true-3D pivot: once upright cards, now lying in the sand)
+// a cow skull: frame x across the horns, y up, z the way the snout points; origin = under its middle (it rests there)
+export function skull() {
+  const L = [];
+  L.push({g: new THREE.IcosahedronGeometry(1, 1), m: M4([0, .07, -.04], [0, 0, 0], [.11, .07, .1]), fam: 'bone', bias: .1});   // the cranium
+  L.push({g: new THREE.CylinderGeometry(.045, .075, .24, 6), m: M4([0, .045, .13], [PI / 2 - .12, 0, 0], [1, 1, .62]), fam: 'bone'});   // the long face
+  for (const s of [-1, 1]) {
+    L.push(box('void', [.05, .035, .04], [s * .055, .1, .035], [-.3, s * .3, 0], {fixed: 2}));   // the eye sockets
+    L.push(box('void', [.018, .02, .03], [s * .016, .07, .25], [-.2, 0, 0], {fixed: 2}));        // the nostrils
+    L.push(rod('bone', [s * .08, .09, -.07], [s * .2, .11, -.08], .022), rod('bone', [s * .2, .11, -.08], [s * .26, .2, -.06], .016), rod('bone', [s * .26, .2, -.06], [s * .23, .27, -.05], .01, {fixed: 2}));   // the horns, curving up
+  }
+  return L;
+}
+// a rib cage on its back, half sunk: frame x along the spine, origin = its middle on the ground (chunky: at 30 px a metre a thin rib
+// would be all outline)
+export function ribs() {
+  const L = [rod('bone', [-.3, .05, 0], [.3, .045, .01], .032, {bias: .1})];
+  for (let i = 0; i < 4; i++) {
+    const x = -.2 + i * .13, r = .15 + .04 * Math.sin((i + .5) / 4 * PI);
+    L.push({g: new THREE.TorusGeometry(r, .024, 3, 7, PI * 1.1), m: M4([x, .01, .01], [0, PI / 2, -.08 + i * .04]), fam: 'bone', bias: (i & 1) * .15});   // a rib: an arc over the spine
+  }
+  return L;
+}
+// a long bone: frame x along it, the knobs at its ends; origin = its middle on the ground
+export function longBone() {
+  const L = [rod('bone', [-.18, .03, 0], [.18, .03, 0], .026)];
+  for (const s of [-1, 1]) L.push({g: new THREE.IcosahedronGeometry(1, 0), m: M4([s * .19, .035, 0], [0, s, 0], [.045, .035, .06]), fam: 'bone', bias: .1});
+  return L;
+}
