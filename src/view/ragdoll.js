@@ -19,9 +19,13 @@
 // the head from their blocks; the limbs by parallel transport, so a straight arm never flips) x the offset fixed at the
 // start (frame^-1 x the bone's posed matrix); the body's pitch follows how far down it is (`lie`: the hips -> head tilt,
 // a running max), the sprite camera's 20 deg upright .. the world's 41 deg lying (render/rigmesh.js).
-// API: const R = createRagdolls(host); await R.load(name, url); R.warm(name) (once, at load); R.ready(name); R.spawn(slot, name, o) (o: x, y, z (the
-//   ground), face (rad), pose (a sprite pose name), hit {x, y, h, dx, dy, power} | null, flash, frozen); R.step(dt);
+// API: const R = createRagdolls(host, {rig}?); await R.load(name, url); R.warm(name) (once, at load); R.ready(name); R.spawn(slot, name, o) (o: x, y, z (the
+//   ground), face (rad), pose (a sprite pose name), mats (instead of pose: the pose on screen as bone -> 3x4, body space: a
+//   live body's, view/livebody.js boneMats), hit {x, y, h, dx, dy, power} | null, flash, frozen); R.step(dt);
 //   R.frame(); R.alpha(slot, a); R.free(slot); R.onGround = (slot) => {} (the torso first hits the ground); R.bytes; R.ms.
+//   SHARED RIG ({rig}: a render/rigmesh.js rig its owner made, the live bodies drawn in it too: one draw per model and pass
+//   for the bodies standing and the bodies falling): R.adopt(name, J, M, {mass}) takes a model that rig already has (no
+//   second copy of the mesh), the ragdolls use slots 0..15, and the owner warms and renders the rig (frame() only puts).
 // OWNS: the bodies (points, offsets, frames), the models, its rig renderer.
 // EMITS: nothing (onGround tells its owner: features/foes/look.js emits foe.ground).
 // READS: host.elev, host.entities (near), host.G (via render/rigmesh.js), TUNE.ragdoll.
@@ -91,8 +95,8 @@ function invert(A, a, O, o) {   // a rigid frame's inverse: R^T, -R^T t
   for (let i = 0; i < 3; i++) O[o + i * 4 + 3] = -(O[o + i * 4] * A[a + 3] + O[o + i * 4 + 1] * A[a + 7] + O[o + i * 4 + 2] * A[a + 11]);
 }
 
-export function createRagdolls(host) {
-  const rig = createRigMesh(host.G, {slots: NB});
+export function createRagdolls(host, {rig: ext = null} = {}) {
+  const rig = ext || createRigMesh(host.G, {slots: NB});
   const RND = viewRandom('ragdoll'), RR = (a, b) => a + RND() * (b - a), RA = r => RR(r[0], r[1]);
   const models = {};
   // per body (slot): the points (current, previous), the constraints' lengths, the segments' offsets, the frames, its state
@@ -107,32 +111,37 @@ export function createRagdolls(host) {
   async function load(name, url) {
     if (models[name]) return models[name];
     const [J, bin] = await Promise.all([fetch(url + 'model.json').then(r => r.json()), fetch(url + 'model.bin').then(r => r.arrayBuffer())]);
-    const M = rig.addModel(J, bin);
-    // the bones' rest lengths; each pose's bones as render-ready 3x4 Blender-world matrices (made once)
-    const poses = {};
-    for (const [pn, bones] of Object.entries(J.poses)) {
-      const out = {};
-      for (const [bn, v] of Object.entries(bones)) {
-        const [x, y, z, w, tx, ty, tz] = v, m = new Float64Array(12);
-        m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y - z * w); m[2] = 2 * (x * z + y * w); m[3] = tx;
-        m[4] = 2 * (x * y + z * w); m[5] = 1 - 2 * (x * x + z * z); m[6] = 2 * (y * z - x * w); m[7] = ty;
-        m[8] = 2 * (x * z - y * w); m[9] = 2 * (y * z + x * w); m[10] = 1 - 2 * (x * x + y * y); m[11] = tz;
-        out[bn] = m;
-      }
-      poses[pn] = out;
+    return adopt(name, J, rig.addModel(J, bin));
+  }
+  // a pose's bones as render-ready 3x4 Blender-world matrices, made on first use (a live model brings every atlas pose)
+  function poseMats(J, poses, pn) {
+    let out = poses[pn]; if (out || !J.poses[pn]) return out;
+    out = poses[pn] = {};
+    for (const [bn, v] of Object.entries(J.poses[pn])) {
+      const [x, y, z, w, tx, ty, tz] = v, m = new Float64Array(12);
+      m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y - z * w); m[2] = 2 * (x * z + y * w); m[3] = tx;
+      m[4] = 2 * (x * y + z * w); m[5] = 1 - 2 * (x * x + z * z); m[6] = 2 * (y * z - x * w); m[7] = ty;
+      m[8] = 2 * (x * z - y * w); m[9] = 2 * (y * z + x * w); m[10] = 1 - 2 * (x * x + y * y); m[11] = tz;
+      out[bn] = m;
     }
+    return out;
+  }
+  // a model the rig already holds (the shared rig: a live body's), or the one load() just added
+  function adopt(name, J, M, o = {}) {
+    if (models[name]) return models[name];
+    const poses = {}, pm = pn => poseMats(J, poses, pn);
     const segFrame = J.segs.map(s => FRAME_OF[s.bone] ?? 0);
     // the loose pieces' points from their boxes (the bone's frame: y along the gun / up through the hat): the gun's grip
     // (half the stock behind the hand), its muzzle, a point off its side; the hat's brim in three and its crown
-    const pts = PTS.map(q => q.slice()), box = bone => J.segs.find(s => s.bone === bone);
+    const pts = PTS.map(q => q.slice()), box = bone => J.segs.find(s => s.bone === bone);   // (a model without a gun or a hat: their points ride the hips, never drawn)
     const g = box('GunHold0'), h = box('HatHold0');
     if (g) { pts[G0] = ['GunHold0', 0, g.min[1] * .5, 0]; pts[G0 + 1] = ['GunHold0', 0, g.max[1] * .96, 0]; pts[G0 + 2] = ['GunHold0', g.max[0] * .85, 0, 0]; }
     if (h) {
       const r = Math.min(h.max[0], h.max[2]) * .8, y = h.min[1] + .02;
       pts[H0] = ['HatHold0', r, y, 0]; pts[H0 + 1] = ['HatHold0', -r / 2, y, r * .866]; pts[H0 + 2] = ['HatHold0', -r / 2, y, -r * .866]; pts[H0 + 3] = ['HatHold0', 0, h.max[1] * .88, 0];
     }
-    const gunRef = poses.gun_aim ? handOffset(poses.gun_aim, [0, 0, 0]) : null;
-    return (models[name] = {J, M, poses, names: Object.keys(poses), segFrame, segBone: J.segs.map(s => s.bone), pts, gunRef, mass: T.mass?.[name] ?? 1});
+    const gunRef = pm('gun_aim') ? handOffset(pm('gun_aim'), [0, 0, 0]) : null;
+    return (models[name] = {J, M, pm, names: Object.keys(J.poses), segFrame, segBone: J.segs.map(s => s.bone), pts, gunRef, mass: o.mass ?? T.mass?.[name] ?? 1});
   }
   // where the gun's origin sits in the right hand's frame in a pose (Blender axes): in the hand it rides the grip (as in
   // gun_aim, give or take a spin about it); in the holster it is a hand's span and more away
@@ -145,10 +154,10 @@ export function createRagdolls(host) {
   const HO = [0, 0, 0];
   // the exported pose nearest a sprite pose name (features/foes/look.js poseOf's names)
   function poseFor(m, name) {
-    if (m.poses[name]) return name;
+    if (m.J.poses[name]) return name;
     const [clip, i] = name.split('.');
     if (clip === 'idle') return +i >= 2 && +i < 6 ? 'idle.4' : 'idle.0';
-    if (clip === 'gun_holster' && m.poses[`gun_holster.${Math.max(0, i - 1)}`]) return `gun_holster.${Math.max(0, i - 1)}`;
+    if (clip === 'gun_holster' && m.J.poses[`gun_holster.${Math.max(0, i - 1)}`]) return `gun_holster.${Math.max(0, i - 1)}`;
     let g = /^g[wr][sr]_([mp]?\d+|0|up|load|fetch)_(\d)$/.exec(name);
     if (g && name.startsWith('gws') || g && name.startsWith('grs')) {
       const d = g[1] === '0' ? 0 : (g[1][0] === 'm' ? -1 : 1) * +g[1].slice(1), tw = ['m90', 'm45', '0', 'p45'];
@@ -199,7 +208,7 @@ export function createRagdolls(host) {
   }
   function spawn(s, name, o) {
     const m = models[name]; if (!m) return false;
-    const B = BODY[s], pose = m.poses[poseFor(m, o.pose || 'idle.0')] || m.poses['idle.0'] || m.poses[m.names[0]];
+    const B = BODY[s], pose = o.mats || m.pm(poseFor(m, o.pose || 'idle.0')) || m.pm('idle.0') || m.pm(m.names[0]);
     const c = Math.cos(o.face), sn = Math.sin(o.face), b = s * NP * 3;
     for (let i = 0; i < NP; i++) {
       const [bone, lx, ly, lz] = m.pts[i];
@@ -417,7 +426,7 @@ export function createRagdolls(host) {
       rig.put(m.M, s, B.mats, PR);
       contact(B, s);
     }
-    rig.render();
+    if (!ext) rig.render();   // (a shared rig: its owner renders it once all its bodies are in)
     msF = msF * .9 + (performance.now() - t0) * .1;
   }
   // the contact shadow (as the death clips' corpses have one: gfx.js G.ao, laid on the ground pixels by the composite at the
@@ -457,10 +466,10 @@ export function createRagdolls(host) {
     }
     const G = host.G;
     if (G.aoStamp) for (const S of [AO_BIG, AO_SMALL]) if (!S.r || S.r.epoch !== G.aoEpoch) S.r = G.aoStamp(S.w, S.h, S.d);
-    await rig.warm();
+    if (!ext) await rig.warm();   // (a shared rig: its owner warms it)
   }
   const R = {
-    load, warm, ready: name => !!models[name], spawn, push, step, frame, poseFor: (name, p) => models[name] && poseFor(models[name], p),
+    load, adopt, warm, ready: name => !!models[name], spawn, push, step, frame, poseFor: (name, p) => models[name] && poseFor(models[name], p),
     alpha(s, a) { BODY[s].alpha = a; },
     free(s) { BODY[s].on = false; },
     body: s => BODY[s], onGround: null,

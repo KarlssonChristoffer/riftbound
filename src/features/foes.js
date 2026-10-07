@@ -13,7 +13,7 @@
 // barrel glints: roll (the dodge's i-frames let bullets by) or step out of the line. An empty gun is reloaded standing:
 // the window to punish. Their bullets are slower than yours: you see the tracers.
 //   foes/sim.js    the truth: the gunmen's records, AI, guns, bullets, gangs (its own seeded generator, fixed steps)
-//   foes/look.js   the view: their sprites (the outfits' atlases), death, the glint, tracers, health bars, the name, the
+//   foes/look.js   the view: their live 3D bodies (?livefoes=0: the outfits' atlases), death, the glint, tracers, health bars, the name, the
 //                  reload's marks as seen (foe.clip: the coach gun's sounds land on its frames)
 //   content/foes.js the numbers (TYPES, TUNE)
 // They are entities (kind 'gunman') hurt through combat's damage path: hit numbers, hitstop, coins, enemy.kill (the

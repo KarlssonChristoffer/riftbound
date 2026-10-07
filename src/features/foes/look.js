@@ -1,5 +1,16 @@
 // FOES LOOK: the desert's gunmen as you see them (features/foes.js is the feature; foes/sim.js the truth). VIEW only:
 // it reads the sim's records and bullets and writes its own state; ?views=0 or the feature off changes nothing in play.
+//   LIVE     (the default; ?livefoes=0: the atlases below) each gunman is a LIVE 3D body (view/livebody.js: his outfit's
+//            Blender model with every atlas pose and the clips' timing, out/pivot3d_chars/<type>/, drawn by render/rigmesh.js
+//            with the pixelizer's rules, the live hero's pixel knobs: the sim's stepped frames, 16 facings relative to the
+//            camera, whole-pixel anchors). The timelines pick the same frames as for the sprites (a set made from the model:
+//            liveSet); the AIM is procedural: the twist-0 stance (gun_aim, the walk's gws_0_*), the gun arm turned to the
+//            target's elevation and the spine twisted until the drawn barrel is on him on screen (re-solved at 12 Hz, 7 deg of
+//            hysteresis; the kick's frames keep it), the legs on the move picked by how far past the twists' range the aim
+//            would be. The glint sits on the drawn muzzle; the death hands the drawn pose (twist and all) to the ragdoll, and
+//            the bodies standing and falling share one rig (one draw per model and pass). A type whose model doesn't load
+//            uses its atlas. Measured against the atlas (tmp/pivot3d_chars, 12 gunmen): the frame -22 %, G.render -36 %,
+//            the same shimmer
 //   bodies   one sprite each from its outfit's atlas (render/atlas.js, the player's loader: 16 facings x the gun's
 //            clips, albedo + normals), drawn through the renderer's sprite batch (gfx.js G.sprite type 7: lit by the
 //            scene's lights through its normals, a sun-shadow card; one draw per pose image on screen, no per-gunman
@@ -52,7 +63,7 @@
 // READS: the sim (gang, B), host.yaw / zoom / G (toScreenInto), host.player, the events (arrow.hit: the way a hit came).
 // EMITS (a view's, like wildlife's calls: nothing in the sim listens): foe.ground (a body hits the ground), foe.clip (the
 //   reload's marks as seen).
-// BUDGET: view; frame ~.15 ms with 6 gunmen fighting (measured 2026-10-03 in headless Chrome on a busy machine: the pose
+// BUDGET: view; frame ~.15 ms with 6 gunmen fighting, live or not (live: ~.15 ms with 12; render: per model A + S, one B); (measured 2026-10-03 in headless Chrome on a busy machine: the pose
 //   picks ~.035 ms, the sprites ~.04 ms; a pick scores <= 3 facings x 9 twists, or 2 stances x 5 legs x 7 twists walking,
 //   against barrel angles worked out once per pose); render: a sprite + a shadow draw per pose image on screen; a corpse's
 //   contact shadow: one G.ao stamp (made once per death frame and facing seen, a few KB in the stamp atlas).
@@ -63,14 +74,24 @@ import {tracer} from '../gunfx.js';
 import {hypot3} from '../../core/mathx.js';
 import {flags} from '../../core/flags.js';
 import {createRagdolls} from '../../view/ragdoll.js';
+import {createRigMesh} from '../../render/rigmesh.js';
+import {liveModel, createLiveBody} from '../../view/livebody.js';
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180, OUT = '../concepts/sprites/out/';
 const NEED = ['idle.0', 'walk.0', 'run.0', 'gun_draw.0', 'gun_aim', 'gun_fire.0', 'gun_reload.0'];
 const TWS = ['gun_aim_m45', 'gun_aim_m34', 'gun_aim_m22', 'gun_aim_m11', 'gun_aim', 'gun_aim_p11', 'gun_aim_p22', 'gun_aim_p34', 'gun_aim_p45'];
 const TWM = ['m90', 'm67', 'm45', 'm22', '0', 'p22', 'p45'];
 const angDiff = (a, b) => Math.abs(((a - b) + Math.PI * 3) % TAU - Math.PI);
+const wrap = a => a - TAU * Math.round(a / TAU);
 const GLINT = ['#fff8e0', '#ffe2a0', '#ffc86a'];
 const RAG = flags.get('ragdoll') !== '0', RAG_TYPES = {bandit: 'ragdoll/bandit/', sheriff: 'ragdoll/sheriff/', bruiser: 'ragdoll/bruiser/'};   // these types die as ragdolls by default (their models' folders under out/); ?ragdoll=0: the death clips
+// LIVE (the default; ?livefoes=0: the atlases): each type's Blender model with every atlas pose and the clips' timing, out/<LIVE_DIR><type>/
+// (tools/blender/ragdoll_export.py --model tools/blender/loadouts/<type>.py --out .../pivot3d_chars/<type> --atlas .../outfits/<type>);
+// a type whose model doesn't load falls back to its atlas. One rig for them all: the ragdolls' (and live death clips') slots
+// 0..RSL-1, the standing gunmen's RSL.. (LSL of them)
+const LIVE = flags.get('livefoes') !== '0', LIVE_DIR = 'pivot3d_chars/', RSL = 16, LSL = 24;
+const AIM0 = -2 * DEG, TWLO = -90 * DEG, TWHI = 45 * DEG;   // live: where the twist-0 walking aim's barrel points (off his legs' facing), the twists' range moving (western.py gws_m90 .. p45)
+const LV = {stand: [-55 * DEG, 55 * DEG], walk: [-95 * DEG, 50 * DEG]};   // live: the spine twist's limits standing (gun_aim, gun_fire) and on the move
 // the poses a gunman may show (poseOf, the corpses, the fallbacks), warmed as its atlas loads: a pose first seen mid-fight
 // would otherwise be cut from its big sheet then (render/atlas.js warm: tens of ms each)
 const SHOWN = /^(idle|walk|run|gun_draw|gun_holster|gun_fire|gun_reload|hit_[fb]|die_[bfs]|gun_aim(_[mp]\d+)?|gws_[mp0-9]+_\d+|fall|land|crouch)(\.\d+)?$/;
@@ -81,28 +102,15 @@ async function rootOf(name) {
   try { const idx = await fetch(full + 'poses.json').then(r => r.ok ? r.json() : null); if (idx && NEED.every(n => idx.poses.includes(n))) return full; } catch (e) {}
   return `${OUT}western/art_g2b/${name}/all/`;
 }
-// one type's atlas, with what the poses need made once: names, clip timelines, the twists it has
-function prep(s, root) {
-  const a = atlasOf(s), SP = a.SP, has = n => !!SP[n];
+// the clips' timelines (sim/player/gun.js tl: play order, ms per step or 1 / fps) for a set's CLIP table: what the poses need
+// made once (an atlas's: prep; a live model's: liveSet)
+function clipKit(CLIP, has) {
   const NM = {}, nm = (base, i) => (NM[base] ??= [])[i] ??= base + '.' + i;
   const ST = {}, st = (pre, tw, f) => ((ST[pre] ??= {})[tw] ??= [])[f] ??= `${pre}_${tw}_${f}`;
   const TL = {};
-  // the barrel per pose and facing (the GunMuzzle0 + GunHold0 bones): its screen angle and the muzzle's px from the pivot,
-  // [a, mx, my] x ND (NaN: no gun bones), worked out once per pose
-  const BAR = new Map();
-  function barrel(frame) {
-    let b = BAR.get(frame); if (b) return b;
-    b = new Float32Array(a.ND * 3).fill(NaN); const sp = SP[frame];
-    if (sp && sp.bones) for (let f = 0; f < a.ND; f++) {
-      const k = sp.bones[a.DIRS[f]], m = k && k.GunMuzzle0; if (!m) continue;
-      let dx = m[2] - m[0], dy = m[3] - m[1]; const h = k.GunHold0; if (h) { dx += h[2] - h[0]; dy += h[3] - h[1]; }
-      b[f * 3] = Math.atan2(dy, dx); b[f * 3 + 1] = m[0] - a.PIV[0]; b[f * 3 + 2] = m[1] - a.PIV[1];
-    }
-    BAR.set(frame, b); return b;
-  }
   function tl(name) {   // a clip's timeline (sim/player/gun.js tl: play order, ms per step or 1 / fps)
     if (TL[name]) return TL[name];
-    const c = a.CLIP[name]; if (!c) return null;
+    const c = CLIP[name]; if (!c) return null;
     const n = c.play ? c.play.length : c.frames, ends = new Float64Array(n); let t = 0;
     for (let i = 0; i < n; i++) { t += c.ms ? c.ms[i] / 1000 : 1 / c.fps; ends[i] = t; }
     return (TL[name] = {c, n, ends, total: t, play: c.play || null});
@@ -119,7 +127,38 @@ function prep(s, root) {
     let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
     return nm(name, L.play ? L.play[i] : i);
   }
-  const ok = name => !!a.CLIP[name] && has(nm(name, 0));   // the clip is in this atlas
+  const ok = name => !!CLIP[name] && has(nm(name, 0));   // the clip is in this set
+  // the frame of clip `name` a fraction k (0..1) through it
+  function frameAt(name, k) {
+    const L = tl(name); if (!L) return null;
+    const t = Math.max(0, Math.min(.9999, k)) * L.total; let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
+    return nm(name, L.play ? L.play[i] : i);
+  }
+  // how far down the body is in the frame t s into clip `name` (its `lie`: 0 upright .. 1 lying), 0 without it
+  function lieAt(name, t) {
+    const L = tl(name), v = L && L.c.lie; if (!v) return 0;
+    let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
+    return v[L.play ? L.play[i] : i] || 0;
+  }
+  return {nm, st, tl, markT, frameAtT, ok, frameAt, lieAt};
+}
+// one type's atlas, with what the poses need made once: names, clip timelines, the twists it has
+function prep(s, root) {
+  const a = atlasOf(s), SP = a.SP, has = n => !!SP[n];
+  const K = clipKit(a.CLIP, has), {nm, st, tl} = K;
+  // the barrel per pose and facing (the GunMuzzle0 + GunHold0 bones): its screen angle and the muzzle's px from the pivot,
+  // [a, mx, my] x ND (NaN: no gun bones), worked out once per pose
+  const BAR = new Map();
+  function barrel(frame) {
+    let b = BAR.get(frame); if (b) return b;
+    b = new Float32Array(a.ND * 3).fill(NaN); const sp = SP[frame];
+    if (sp && sp.bones) for (let f = 0; f < a.ND; f++) {
+      const k = sp.bones[a.DIRS[f]], m = k && k.GunMuzzle0; if (!m) continue;
+      let dx = m[2] - m[0], dy = m[3] - m[1]; const h = k.GunHold0; if (h) { dx += h[2] - h[0]; dy += h[3] - h[1]; }
+      b[f * 3] = Math.atan2(dy, dx); b[f * 3 + 1] = m[0] - a.PIV[0]; b[f * 3 + 2] = m[1] - a.PIV[1];
+    }
+    BAR.set(frame, b); return b;
+  }
   // how far ahead of the sprite's pivot his root stands as the clip begins (m along his facing; - behind): the Hips bone
   // in the side view (E: screen x is his forward) at its first frame. A death clip ends with the body on the pivot, so
   // the sprite goes this far back from where he stood. null without the bones
@@ -127,12 +166,6 @@ function prep(s, root) {
   function rootShift(name) {
     const L = tl(name), sp = L && SP[nm(name, L.play ? L.play[0] : 0)], h = sp && sp.bones && sp.bones.E && sp.bones.E.Hips;
     return h ? (h[0] - a.PIV[0]) / ppm : null;
-  }
-  // the frame of clip `name` a fraction k (0..1) through it
-  function frameAt(name, k) {
-    const L = tl(name); if (!L) return null;
-    const t = Math.max(0, Math.min(.9999, k)) * L.total; let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
-    return nm(name, L.play ? L.play[i] : i);
   }
   // a death clip renders the falling body raised a whole number of px up the image (its `shift`: m along the ground away
   // from the camera, so the depth stays in range; tools/blender/western.py): those frames are drawn with the pivot as many
@@ -144,26 +177,37 @@ function prep(s, root) {
     let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
     return px[L.play ? L.play[i] : i] || 0;
   }
-  // how far down the body is in the frame t s into clip `name` (its `lie`: 0 upright .. 1 lying), 0 without it
-  function lieAt(name, t) {
-    const L = tl(name), v = L && L.c.lie; if (!v) return 0;
-    let i = 0; while (i < L.n - 1 && t >= L.ends[i]) i++;
-    return v[L.play ? L.play[i] : i] || 0;
+  return {root, ...a, SP, has, ...K, rootShift, shiftPx, barrel, tws: TWS.filter(has), twm: TWM.filter(t => has(st('gws', t, 0))), preview: !root.includes('/outfits/')};
+}
+// a type's LIVE model as a set (view/livebody.js liveModel): the same names and timelines as its atlas (the model is
+// exported with the atlas's poses and clips: tools/blender/ragdoll_export.py --atlas), 16 facings for the snap, no images.
+// The aim twists are procedural (the spine twist onto the target on screen: livebody.js), so its only twist families are
+// the twist-0 ones; a death clip's root shift comes from its first frame's Hips (Blender -y: his forward); no image shift
+const NOBAR = new Float32Array(16 * 3).fill(NaN);
+function liveSet(LM, root) {
+  const J = LM.J, SP = J.poses, has = n => !!SP[n], K = clipKit(LM.CL, has);
+  function rootShift(name) {
+    const L = K.tl(name), h = L && SP[K.nm(name, L.play ? L.play[0] : 0)]?.Hips;
+    return h ? -h[5] : null;
   }
-  return {root, ...a, SP, has, nm, st, tl, frameAt, frameAtT, markT, ok, rootShift, shiftPx, lieAt, barrel, tws: TWS.filter(has), twm: TWM.filter(t => has(st('gws', t, 0))), preview: !root.includes('/outfits/')};
+  return {root, live: LM, SP, CLIP: LM.CL, ND: 16, has, ...K, rootShift, shiftPx: () => 0, barrel: () => NOBAR,
+    tws: has('gun_aim') ? ['gun_aim'] : [], twm: has('gws_0_0') ? ['0'] : [], preview: false};
 }
 
 export function createLook(host, sim) {
   const sets = {}, G = host.G;
-  let loading = null, failed = '', rag = null;
+  let loading = null, failed = '', rag = null, rig = null;
   function load() {
     if (loading) return loading;
+    if (LIVE) rig = createRigMesh(G, {slots: RSL + LSL});   // (the live bodies' and the ragdolls' one rig)
     if (RAG) {   // (the ragdolls' models: a type without one keeps its death clips)
-      rag = createRagdolls(host);
+      rag = createRagdolls(host, rig ? {rig} : undefined);
       rag.onGround = s => { const c = corpses[s]; if (c.on && c.rag) { rag.point(s, 0, SC); c.x = SC[0]; c.y = SC[2]; c.z = host.elev(SC[0], SC[2]); ground(c); } };
-      for (const [k, dir] of Object.entries(RAG_TYPES)) rag.load(k, OUT + dir).then(() => rag.warm(k)).catch(e => console.warn(`foes: the ${k} ragdoll failed to load`, e));   // (warm: no hitch at the first death)
+      if (!LIVE) for (const [k, dir] of Object.entries(RAG_TYPES)) rag.load(k, OUT + dir).then(() => rag.warm(k)).catch(e => console.warn(`foes: the ${k} ragdoll failed to load`, e));   // (warm: no hitch at the first death)
     }
     return (loading = Promise.all(Object.keys(TYPES).map(async k => {
+      if (LIVE && await loadLive(k)) return;   // (live: no atlas; a model that won't load: the atlas)
+      if (rag && LIVE && RAG_TYPES[k]) rag.load(k, OUT + RAG_TYPES[k]).then(() => rag.warm(k)).catch(e => console.warn(`foes: the ${k} ragdoll failed to load`, e));
       let root = await rootOf(TYPES[k].atlas), s;
       try { s = await loadAtlas(root, {normals: true}); }
       catch (e) { if (!root.includes('/outfits/')) throw e; root = `${OUT}western/art_g2b/${TYPES[k].atlas}/all/`; s = await loadAtlas(root, {normals: true}); }
@@ -175,8 +219,27 @@ export function createLook(host, sim) {
         const bt = set.ok(c) ? set.markT(c, 'back') : null, fl = TYPES[k].flinch;
         if (host.dev && bt !== null && fl > 0 && Math.abs(bt - fl) > .03) console.warn(`foes: ${k} ${c} 'back' is at ${bt.toFixed(2)} s, TYPES.${k}.flinch is ${fl} s`);
       }
-    })).catch(e => { failed = String(e); console.warn('foes: an atlas failed to load', e); }));
+    })).then(() => rig?.warm()).catch(e => { failed = String(e); console.warn('foes: an atlas failed to load', e); }));   // (the rig's programs compiled off the frame: no hitch at the first sight)
   }
+  // a type's live model (view/livebody.js) as its set; the ragdoll takes the same model (no second copy of the mesh)
+  async function loadLive(k) {
+    try {
+      const url = OUT + LIVE_DIR + TYPES[k].atlas + '/';
+      const [J, bin] = await Promise.all([fetch(url + 'model.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }), fetch(url + 'model.bin').then(r => r.arrayBuffer())]);
+      const LM = liveModel(rig, J, bin);
+      sets[k] = liveSet(LM, url); pool[k] = [];
+      if (rag && RAG_TYPES[k]) { rag.adopt(k, J, LM.model); rag.warm(k); }
+      return true;
+    } catch (e) { console.warn(`foes: the ${k} live model failed to load (its atlas instead)`, e); return false; }
+  }
+  // the live bodies: a pool per type, one per rig slot, made the first time that slot shows that type (no allocation after)
+  const pool = {}, slotUsed = new Uint8Array(RSL + LSL);
+  function bodyAt(k, slot) { const P = pool[k]; return P[slot] ??= createLiveBody(sets[k].live, rig, slot, G); }
+  function takeBody(k) {
+    for (let s = RSL; s < RSL + LSL; s++) if (!slotUsed[s]) { slotUsed[s] = 1; const b = bodyAt(k, s); b.reset(); return b; }
+    return null;   // (more gunmen than slots: the rest aren't drawn)
+  }
+  function dropBody(v) { if (v.body) { slotUsed[v.body.slot] = 0; v.body = null; } }
 
   // their textures, uploaded ahead in idle slices (the renderer's own: G.tex is what host.sprite draws with): a pose's
   // first draw uploads two (albedo + normals, ~.3 ms each plus the GPU process's copy), ~100 a second as a fight starts
@@ -197,7 +260,7 @@ export function createLook(host, sim) {
   // ---------------------------------------------------------------- per gunman: the view's own state
   const VS = new Map();   // entity -> {f, tw, ph, pose, face0, hpShow, idle}
   const vsOf = p => { let v = VS.get(p); if (!v) VS.set(p, v = {f: 0, tw: 'gun_aim', twm: '0', back: false, ph: 0, pose: 'idle.0', hpShow: p.hp, idle: (p.x * 7.3 + p.y * 3.1) % 1, seen: 0, hx: 0, hy: 0, face: 0,
-    nx: 0, ny: 0, nt: 9, rs: -1, rph: '', ram: 0, dox: 0, doy: 0, dl: 0, de: 0}); return v; };   // dox / doy / dl / de: knocked down (downPose)   // nx / ny / nt: a bullet's shove (its way, its age); rs: the reload clip's next step to say a mark for (-1: not reloading); rph / ram: the phase and rounds last seen
+    nx: 0, ny: 0, nt: 9, rs: -1, rph: '', ram: 0, dox: 0, doy: 0, dl: 0, de: 0, body: null}); return v; };   // body: its live body (live sets)   // dox / doy / dl / de: knocked down (downPose)   // nx / ny / nt: a bullet's shove (its way, its age); rs: the reload clip's next step to say a mark for (-1: not reloading); rph / ram: the phase and rounds last seen
   const SC = [0, 0, 0], SM = [0, 0, 0];
   let yaw = 0, z = 1;
   const faceOf = (set, w) => { const n = set.ND; return ((Math.round((w - yaw) / (TAU / n)) % n) + n) % n; };   // world angle -> the atlas's facing at this yaw
@@ -207,8 +270,10 @@ export function createLook(host, sim) {
     const b = set.barrel(frame), i = f * 3, a = b[i]; if (a !== a) return 9;
     return angDiff(a, Math.atan2(ty - (oy + b[i + 2] * z), tx - (ox + b[i + 1] * z)));
   }
-  // standing with the gun up: the facing near its aim and the twist whose barrel lines up best (kept unless clearly beaten)
+  // standing with the gun up: the facing near its aim and the twist whose barrel lines up best (kept unless clearly beaten).
+  // Live: the facing nearest the aim (held within .6 of a step: no flip-flop at a boundary), the twist the live body's own
   function standAim(set, g, v, ox, oy, tx, ty) {
+    if (set.live) { if (Math.abs(wrap(g.aim - worldOf(set, v.f))) > .6 * TAU / set.ND) v.f = faceOf(set, g.aim); v.tw = 'gun_aim'; return 'gun_aim'; }
     const f0 = faceOf(set, g.aim), n = set.ND;
     let bf = v.f, bt = set.has(v.tw) ? v.tw : 'gun_aim', be = aimErr(set, bt, bf, ox, oy, tx, ty) - 2 * DEG;
     for (let k = -1; k <= 1; k++) {
@@ -223,6 +288,15 @@ export function createLook(host, sim) {
     const n = set.ND, mvd = faceOf(set, Math.atan2(g.vx, g.vy)), aimF = faceOf(set, g.aim), Q = n / 4, crab = n / 8;
     const rel = (aimF - mvd + n) % n, behind = rel > Q && rel < n - Q;
     let bc = 1e9;
+    if (set.live) {   // live: the legs as the sprites pick them, scored by how far past the spine twist's range the aim would be
+      for (let bi = 0; bi < 2; bi++) for (let k = -crab; k <= crab; k++) {
+        const back = bi === 1, f = ((back ? mvd + n / 2 : mvd) + k + n) % n, need = wrap(g.aim - worldOf(set, f) - AIM0);
+        const past = need < TWLO ? TWLO - need : need > TWHI ? need - TWHI : 0;
+        const c = Math.abs(k) + (back !== behind ? 2.5 : 0) + (back !== v.back ? .8 : 0) + (f !== v.f ? .3 : 0) + past / DEG / 6;
+        if (c < bc) { bc = c; v.f = f; v.back = back; }
+      }
+      v.twm = '0'; return set.st('gws', '0', gf);
+    }
     for (let bi = 0; bi < 2; bi++) for (let k = -crab; k <= crab; k++) {
       const back = bi === 1, f = ((back ? mvd + n / 2 : mvd) + k + n) % n;
       const leg = Math.abs(k) + (back !== behind ? 2.5 : 0) + (back !== v.back ? .8 : 0) + (f !== v.f ? .3 : 0);
@@ -289,10 +363,10 @@ export function createLook(host, sim) {
     const power = l;   // (arrow.hit's way for a bullet: the weapon's push x the bullet's speed)
     if (l < 1e-3) { dx = p.x - host.player.x; dy = p.y - host.player.y; l = hypot3(dx, dy, 0) || 1; }
     dx /= l; dy /= l;
-    if (rag && RAG_TYPES[p.foe] && rag.ready(p.foe)) {   // the ragdoll: the live body in the sprite's pose and facing, pushed on its first view step
-      const R = TUNE.ragdoll, s = corpses.indexOf(c), face = worldOf(set, v.f);
-      if (rag.spawn(s, p.foe, {x: p.x, y: p.y, z: p.z || 0, face, pose: v.pose, hit: null, flash: Math.min(1, (p.flash || 0) * TUNE.hit.flash), alpha: R.swap ? 0 : 1})) {
-        c.on = true; c.set = set; c.clip = ''; c.rag = true; c.pend = true; c.p = p; c.f = v.f; c.pose = v.pose; c.swap = R.swap; c.power = power;
+    if (rag && RAG_TYPES[p.foe] && rag.ready(p.foe)) {   // the ragdoll: the live body in the sprite's pose and facing (a live gunman's: the pose drawn, twist and all), pushed on its first view step
+      const R = TUNE.ragdoll, s = corpses.indexOf(c), face = worldOf(set, v.f), sw = set.live ? 0 : R.swap;
+      if (rag.spawn(s, p.foe, {x: p.x, y: p.y, z: p.z || 0, face, pose: v.pose, mats: v.body ? v.body.boneMats(BMO) : null, hit: null, flash: Math.min(1, (p.flash || 0) * TUNE.hit.flash), alpha: sw ? 0 : 1})) {
+        c.on = true; c.set = set; c.clip = ''; c.rag = true; c.pend = true; c.p = p; c.f = v.f; c.pose = v.pose; c.swap = sw; c.power = power;
         c.z = p.z || 0; c.t = 0; c.lift = 0; c.vx = dx; c.vy = dy; c.foe = p.foe; c.x = c.fx = p.x; c.y = c.fy = p.y; c.face = face;
         c.grounded = false; c.fadeAt = R.fall + C.hold; c.fadeLen = C.fade;
         return;
@@ -349,9 +423,9 @@ export function createLook(host, sim) {
     }
     v.rph = g.rph; v.ram = g.ammo;
   }
-  const RAGHIT = {x: 0, y: 0, h: 0, dx: 0, dy: 0, power: 0};
+  const RAGHIT = {x: 0, y: 0, h: 0, dx: 0, dy: 0, power: 0}, BMO = {}, MZO = new Float64Array(5);   // BMO: a live body's drawn pose for the ragdoll (bone -> 3x4), MZO: its muzzle
   let frameN = 0;
-  function sweep(v, p) { if (v.seen === frameN) return; if (p.broken) fell(v, p); VS.delete(p); }   // (gone: killed, or the gang left)
+  function sweep(v, p) { if (v.seen === frameN) return; if (p.broken) fell(v, p); dropBody(v); VS.delete(p); }   // (gone: killed, or the gang left; its live body back in the pool)
 
   // ---------------------------------------------------------------- the frame
   const O = {img: null, nrm: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, x: 0, y: 0, h: 0, px: 0, py: 0, type: 7, shadow: true, alpha: 1, flash: 0, flip: false, sway: 0, dynamic: false, lie: 0};
@@ -362,6 +436,20 @@ export function createLook(host, sim) {
     O.img = img; O.nrm = sp.nrm || null; O.sx = f * set.FW; O.sy = 0; O.sw = set.FW; O.sh = set.FH;
     O.x = x; O.y = y; O.h = h; O.px = set.PIV[0] - wob; O.py = set.PIV[1] - lift; O.alpha = alpha; O.flash = flash; O.lie = lie;
     host.sprite(O); O.img = O.nrm = null;
+  }
+  // a LIVE gunman (view/livebody.js): the pose the timeline picked, at his snapped facing; the aim's poses (gun_aim, the
+  // kick, the twist-0 walk) twisted onto his target on screen; the bullet's shove and combat's wobble move the anchor (the
+  // wobble's art px along the view's right), the snap follows it (whole pixels, as the sprite's pivot)
+  const LO = {pose: '', phi: 0, x: 0, y: 0, z: 0, sx: 0, sy: 0, sh: 0, aim: false, tx: 0, ty: 0, th: 0, lo: 0, hi: 0, alpha: 1, flash: 0, lie: 0, type: 7, pitchRef: '', hold: false};
+  function liveDraw(set, g, v, wob, nd, t) {
+    const b = v.body ??= takeBody(g.type); if (!b) return;
+    const p = g.p, pose = v.pose, mv = pose.startsWith('gws_'), L = mv ? LV.walk : LV.stand, wx = wob / host.PPM;
+    const kick = pose.startsWith('gun_fire');
+    LO.pose = pose; LO.phi = worldOf(set, v.f); LO.aim = mv || kick || pose === 'gun_aim'; LO.lo = L[0]; LO.hi = L[1]; LO.pitchRef = kick ? 'gun_aim' : ''; LO.hold = kick;
+    LO.tx = g.tx; LO.ty = g.ty; LO.th = g.th;
+    LO.x = LO.sx = p.x + v.nx * nd + v.dox + Math.cos(yaw) * wx; LO.y = LO.sy = p.y + v.ny * nd + v.doy - Math.sin(yaw) * wx; LO.z = LO.sh = (p.z || 0) + (p.h || 0);
+    LO.alpha = 1; LO.flash = Math.min(1, (p.flash || 0) * TUNE.hit.flash); LO.lie = v.de;
+    b.draw(LO, t);
   }
   // a corpse's contact shadow (view only): contact.js's kind of stamp, drawn by the GPU (gfx.js G.ao: laid on the ground
   // by the composite at the mood's tint and strength, which contact.js sets each frame; under the light, ground pixels
@@ -452,6 +540,7 @@ export function createLook(host, sim) {
       case 'draw': v.f = faceOf(set, g.face); return set.frameAt('gun_draw', g.at / G2.draw);
       case 'holster': v.f = faceOf(set, g.face); return set.has('gun_holster.0') ? set.frameAt('gun_holster', g.at / G2.holster) : set.frameAt('gun_draw', 1 - g.at / G2.holster);
       case 'fire': {
+        if (set.live) { if (Math.abs(wrap(g.aim - worldOf(set, v.f))) > .6 * TAU / set.ND) v.f = faceOf(set, g.aim); return set.frameAt('gun_fire', g.at / G2.recover); }   // (live: the twist keeps the kick on target)
         const last = set.nm('gun_fire', (set.CLIP.gun_fire?.frames || 1) - 1); let bf = v.f, be = 9;
         for (let k = -1; k <= 1; k++) { const f = (faceOf(set, g.aim) + k + set.ND) % set.ND, e = aimErr(set, last, f, ox, oy, tx, ty); if (e < be) { be = e; bf = f; } }   // squared up for the kick
         v.f = bf; return set.frameAt('gun_fire', g.at / G2.recover);
@@ -475,21 +564,25 @@ export function createLook(host, sim) {
         { const ci = set.CLIP.idle; return ci ? set.nm('idle', Math.floor(t * ci.fps + v.idle * ci.frames) % ci.frames) : 'idle.0'; }
     }
   }
-  function glint(set, g, v) {   // the barrel glints through the lock: a small star on the 'add' layer, growing
-    const B = set.barrel(v.pose), i = v.f * 3; if (B[i] !== B[i]) return;
+  function glint(set, g, v) {   // the barrel glints through the lock: a small star on the 'add' layer, growing (live: at the drawn muzzle)
     const G2 = g.T.gun, k = Math.min(1, (g.at - (G2.aim - G2.lock)) / G2.lock);
-    G.toScreenInto(g.p.x, g.p.z, g.p.y, SC);
-    const x = Math.round(SC[0] + B[i + 1] * z), y = Math.round(SC[1] + B[i + 2] * z), r = 1 + Math.round(k * 2), q = host.glayer('add');   // (the GPU layer: no canvas upload)
+    let x, y;
+    if (set.live) { if (!v.body || !v.body.muzzle(MZO)) return; x = Math.round(MZO[3]); y = Math.round(MZO[4]); }
+    else {
+      const B = set.barrel(v.pose), i = v.f * 3; if (B[i] !== B[i]) return;
+      G.toScreenInto(g.p.x, g.p.z, g.p.y, SC); x = Math.round(SC[0] + B[i + 1] * z); y = Math.round(SC[1] + B[i + 2] * z);
+    }
+    const r = 1 + Math.round(k * 2), q = host.glayer('add');   // (the GPU layer: no canvas upload)
     q.fillStyle = GLINT[2]; q.fillRect(x - r * z, y, (2 * r + 1) * z, z); q.fillRect(x, y - r * z, z, (2 * r + 1) * z);
     q.fillStyle = GLINT[1]; q.fillRect(x - z, y - z, 3 * z, 3 * z);
     q.fillStyle = GLINT[0]; q.fillRect(x, y, z, z);
   }
 
   const L = {
-    get sets() { return sets; }, get failed() { return failed; }, load, VS, corpses, get rag() { return rag; },
+    get sets() { return sets; }, get failed() { return failed; }, load, VS, corpses, get rag() { return rag; }, get rig() { return rig; }, live: LIVE,
     view(dt, evs, on) {
       if (!on) {   // (out of the desert sandbox)
-        if (VS.size) VS.clear();
+        if (VS.size) { VS.forEach(dropBody); VS.clear(); }
         for (let i = 0; i < CM; i++) { const c = corpses[i]; if (c.rag) { rag.free(i); c.rag = false; } c.on = false; }
         return;
       }
@@ -533,7 +626,8 @@ export function createLook(host, sim) {
         v.pose = set.SP[pose] ? pose : 'idle.0';
         const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, H = TUNE.hit;
         const k = v.nt < H.out ? v.nt / H.out : v.nt < H.out + H.back ? 1 - (v.nt - H.out) / H.back : 0, nd = H.nudge * k * (2 - k);   // (out fast, back eased)
-        put(set, v.pose, v.f, p.x + v.nx * nd + v.dox, p.y + v.ny * nd + v.doy, (p.z || 0) + (p.h || 0), 1, Math.min(1, (p.flash || 0) * H.flash), wob, v.dl, v.de);
+        if (set.live) liveDraw(set, g, v, wob, nd, t);
+        else put(set, v.pose, v.f, p.x + v.nx * nd + v.dox, p.y + v.ny * nd + v.doy, (p.z || 0) + (p.h || 0), 1, Math.min(1, (p.flash || 0) * H.flash), wob, v.dl, v.de);
         if (g.act === 'aim' && g.locked) glint(set, g, v);
       }
       if (VS.size > sim.gang.length) VS.forEach(sweep);
@@ -552,10 +646,16 @@ export function createLook(host, sim) {
           : c.t < C.fall ? (set.has('fall') ? 'fall' : c.pose) : c.t < C.fall + C.land ? (set.has('land') ? 'land' : c.pose) : set.has('crouch') ? 'crouch' : c.pose;
         const a = c.t < c.fadeAt ? 1 : Math.max(0, 1 - (c.t - c.fadeAt) / c.fadeLen), f = faceOf(set, c.face);
         const lift = c.clip ? set.shiftPx(c.clip, c.t) : 0, lie = c.clip ? set.lieAt(c.clip, c.t) : 0;
+        if (set.live) {   // a live death clip (?ragdoll=0): the clip's frames on the live body in this corpse's slot, lying down by its lie
+          LO.pose = pose; LO.phi = worldOf(set, f); LO.aim = false; LO.x = LO.sx = c.x; LO.y = LO.sy = c.y; LO.z = LO.sh = c.z + c.lift;
+          LO.alpha = a; LO.flash = 0; LO.lie = lie; bodyAt(c.foe, i).draw(LO, t);
+          continue;
+        }
         put(set, pose, f, c.x, c.y, c.z + c.lift, a, 0, 0, lift, lie);
         if (c.clip) corpseAO(c, set, set.SP[pose] ? pose : 'idle.0', f, lift, lie, a);
       }
       if (rag) rag.frame(f.dt);
+      if (rig) rig.render();   // (the shared rig, once: the gunmen standing, the bodies falling)
       // their bullets in flight: gunfx's tracer look (no longer than they've flown: never back past the muzzle)
       const B = sim.B;
       for (let i = 0; i < B.n; i++) {
