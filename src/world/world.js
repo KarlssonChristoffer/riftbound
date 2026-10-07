@@ -82,7 +82,8 @@ const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {em
 // (bark, leaf: the procedural trees, trees3d.js; char, ash, ember: burning wood, gfx.js MESH_FS uBurn; birch, aspen, berry: the
 // birch's white bark, the aspen's grey-green bark, the rowan's berries, trees3d.js; appended, so the kit's family indices stay put.
 // The rowan's berry part sits on 'berry' (ripe, scarlet); MESH_FS steps its family by the season, to the next rows: orange, green (unripe), cream (flowers))
-export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry', 'berryOrange', 'berryGreen', 'berryCream'];
+// (cactus: the desert's saguaros and cactus bushes, trees3d.js / flora3d.js: the true-3D pivot's flora; appended like the others)
+export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry', 'berryOrange', 'berryGreen', 'berryCream', 'cactus'];
 const mix = (a, b, k) => a.map((x, i) => Math.round(x + (b[i] - x) * k));
 const ramp6 = r4 => { const r = r4.map(hexrgb); return [r[0], r[1], r[2], mix(r[3], r[2], .25), r[3], r[2]]; };   // + line, outline_shadow, outline_lit
 function palette(biome, style) {
@@ -93,6 +94,7 @@ function palette(biome, style) {
   P.bark = sr('bark') || P.wood; P.leaf = sr('leaf') || sr('pine') || P.rock;
   P.birch = sr('birch') || P.stone; P.aspen = sr('aspen') || P.bark; P.berry = sr('berry') || P.red;   // (ruins' STYLES has them; the other biomes grow no such trees)
   P.berryOrange = sr('berryOrange') || P.gold; P.berryGreen = sr('berryGreen') || P.leaf; P.berryCream = sr('berryCream') || P.stone;
+  P.cactus = sr('cactus') || P.leaf;   // (the desert's STYLE.cactus)
   const w = P.wood; P.void = [...Array(3).fill(mix(w[4], [0, 0, 0], .3)), ...Array(3).fill(mix(w[4], [0, 0, 0], .45))];
   P.cover = B.cover ? ramp6(B.cover) : P.stone;
   P.char = ramp6(['3a3330', '26211f', '161312', '0c0a0a']); P.ash = ramp6(['8e8982', '75716b', '5e5a55', '403d3a']);
@@ -923,7 +925,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const r = watchtowerRun(TOWER_PLAN, wo, TF ? TF.H : () => 0);
     for (const p of props) if (p.kind === 'watchtower') own(p, r.geo, r.top - (p.z || 0)); else if (p.kind === 'towerwall') own(p, null, colTop(TOWER_PLAN, p.x, p.y, p.z || 0));
   }
-  const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose, static: !it.pose, autumn: it.pose?.autumn}); if (it.pose) m.sm.layers.disable(1); return m; };
+  // (a rigid 3D tree, trees3d.js shape.rigid: the saguaros, spires, shards: a static mesh like any prop, no sway)
+  const swayOf = it => !!it.pose && !it.pose.rigid;
+  const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: swayOf(it), static: !swayOf(it), autumn: it.pose?.autumn}); if (swayOf(it)) m.sm.layers.disable(1); return m; };
   for (const p of props) {
     const z0 = p.z || 0;
     if (p.outside && biome.hole?.(p.x, p.y, ctxO)) continue;   // over the ravine / in the stream
@@ -976,7 +980,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       discs.push([p.x, p.y, Math.min(LITTER.trunk, p.r || .22 * (it.pose?.scale || 1))]);   // the trunk
       const w = it.pose;
       if (w) {
-        const c = w.crown; if (!c) continue;
+        const c = w.crown; if (!c || w.litter === false) continue;   // (an evergreen sheds no leaves: trees3d.js shape.litter)
         const co = Math.cos(w.yaw), si = Math.sin(w.yaw), wl = w.species === 'willow';
         trees.push({x: p.x + (c.x * co + c.z * si) * w.scale, y: p.y + (c.z * co - c.x * si) * w.scale, R: c.r * w.scale * (wl ? LITTER.willow.r : 1.2), w: wl ? LITTER.willow.w : 1, autumn: w.autumn});
       } else if (it.card && !dead(p)) trees.push({x: p.x, y: p.y, R: (p.variant | 0) === 3 ? LITTER.willow.r * 1.15 : LITTER.card, w: 1, autumn: null});
@@ -1041,7 +1045,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
           if (!it.manageMatrix) L.setMatrix(placeOf(it, p.x + wob / PPM, z0, p.y, M));
           it.kx = p.x; it.ky = p.y; it.kz = z0; it.kw = wob; it.ks = p.stage; it.kl = p.lid; it.km = it.manageMatrix; it.kv = L.ver;
         }
-        if (it.pose) leanTree(it, yaw);
+        if (it.pose && !it.pose.rigid) leanTree(it, yaw);
         const vis = !p.gone && !useYaw && !it.veil; if (vis !== it.kvis) { it.kvis = vis; L.setVisible(vis); }   // (the world is their only writer)
         if (flash !== it.kfl) { it.kfl = flash; L.flash = flash; }
       }
