@@ -3,7 +3,7 @@
 // aFam / aBias / aFixed), toned by the biome's ramps, outlined, seamed, lit per pixel and casting a sun shadow like every live
 // prop; it reads right from every side. world.js makes the live mesh (instead of the card) and poses it; ?props2d=1 keeps the cards.
 //   dummy    a straw man on a post: a cross-plank foot, the post, an arm bar at ARM.h with straw at its ends, a straw body bound
-//            with two bands, a linen sack head, a painted target on its chest AND its back (shot from either side it reads as
+//            with two bands, a burlap sack head, a painted target on its chest AND its back (shot from either side it reads as
 //            a target). Ember: charred planks, an iron breastplate and helmet, embers glowing in the wood (the crack family);
 //            frost: icicles under the arms (the snow on its top is the biome's cover); rift: a crystal on a stone post, a rune
 //            ring round it. It faces the archer: a lane dummy its shooting mark, the others the arena's ring. The hit wobble is a
@@ -59,15 +59,16 @@ function strawDummy(id) {
     L.push(cyl('rope', .052, .052, .025, [s * (ARM.half - .1), ARM.h, 0], [0, 0, Math.PI / 2], 6, {fixed: 2}));
   }
   const tw = Math.PI / 12;   // (a face of the 12-gon to the front: the target sits flat on it)
-  L.push(cyl('rope', .16, .215, .32, [0, .48, 0], [0, tw, 0], 12), cyl('rope', .215, .17, .38, [0, .83, 0], [0, tw, 0], 12));   // the straw body (streaked: streak())
-  for (const [y, r] of [[.42, .2], [.9, .2]]) L.push(cyl('rope', r + .012, r + .012, .035, [0, y, 0], [0, tw, 0], 12, {fixed: 2}));   // its bands
+  // (as stout as the painted card's: ~.5 m across, and the arrows, stopped at its .3 m collider, stick in close to the straw)
+  L.push(cyl('rope', .15, .25, .3, [0, .47, 0], [0, tw, 0], 12), cyl('rope', .25, .15, .36, [0, .8, 0], [0, tw, 0], 12));   // the straw body, a fat oval (streaked: streak())
+  for (const [y, r] of [[.43, .2], [.9, .185]]) L.push(cyl('rope', r + .012, r + .012, .035, [0, y, 0], [0, tw, 0], 12, {fixed: 2}));   // its bands
   for (let i = 0; i < 8; i++) {   // straw poking out at the hem
     const a = i / 8 * TAU + .2;
-    L.push({g: new THREE.ConeGeometry(.03, .1, 4), m: M4([Math.sin(a) * .16, .29, Math.cos(a) * .16], [Math.PI + Math.cos(a) * .35, 0, -Math.sin(a) * .35]), fam: 'rope', bias: (i & 1) * .15 - .1});
+    L.push({g: new THREE.ConeGeometry(.03, .1, 4), m: M4([Math.sin(a) * .19, .29, Math.cos(a) * .19], [Math.PI + Math.cos(a) * .35, 0, -Math.sin(a) * .35]), fam: 'rope', bias: (i & 1) * .15 - .1});
   }
-  L.push(cyl('rope', .065, .075, .06, [0, 1.03, 0], [0, 0, 0], 6, {fixed: 2}));                                            // the neck tie
-  L.push(lump('bone', [0, 1.17, 0], [.2, .4, .1], [.155, .17, .15], {}, 1));                                               // the linen sack head
-  const fz = .206 * Math.cos(tw) + .004, fy = .7;
+  L.push(cyl('rope', .06, .07, .07, [0, 1.01, 0], [0, 0, 0], 6, {fixed: 2}));                                            // the neck tie
+  L.push(lump('rope', [0, 1.19, 0], [.2, .4, .1], [.15, .15, .145], {bias: -.22}, 1));                                   // the sack head (burlap: the straw's darker tones)
+  const fz = .228 * Math.cos(tw) + .004, fy = .7;
   for (const s of [1, -1]) L.push(disc('red', .105, s * fz, fy), disc('bone', .06, s * (fz + .006), fy, {fixed: 0}), disc('red', .024, s * (fz + .012), fy, {fixed: 1}));   // the target, front and back
   if (frost) for (const [x, l] of [[-.3, .11], [-.21, .07], [.19, .1], [.28, .08], [-.1, .06], [.09, .08]])   // icicles under the arms and the hem
     L.push({g: new THREE.ConeGeometry(.018, l, 4), m: M4([x, (Math.abs(x) > .15 ? ARM.h - .03 : .3) - l / 2, .01], [Math.PI, 0, 0]), fam: 'clay', bias: .1});

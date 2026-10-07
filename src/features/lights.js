@@ -68,7 +68,7 @@ const TOP = {crate: .72, barrel: .9, barrel_x: .9, dummy: 1.25};
 // torches' stick, cup and pitch head (3D, all in one static mesh; the torch prop paints nothing then: biomes.js, p.model, and its
 // light is this file's, F.lights)
 const P2D = flags.get('props2d') === '1';
-const CANDLES = [[[-.13, .03, .17], [-.03, -.05, .27], [.09, .04, .14]], [[-.1, .05, .23], [.02, -.04, .14], [.12, .02, .2]]];   // per variant: [x, z, height] (m)
+const CANDLES = [[[-.14, .04, .17], [0, -.06, .27], [.13, .03, .14]], [[-.13, .06, .23], [.01, -.05, .14], [.14, .02, .2]]];   // per variant: [x, z, height] (m), side by side like the sprite's
 const TORCH3 = {h: 1.744, r: 4, k: .9, fl: .6};   // the sconce torch's light (the painted sprite's record: biomes.js torch)
 const SHROOM_K = [.45, .8, 1.25];   // the 3D caps' own light by brightness step (the sprite's three emit frames)
 
@@ -203,19 +203,18 @@ export async function create(host) {
     return geoOf(L);
   }
   const campGeo = campfireGeo(), beacGeo = beaconGeo(), brazGeo = brazierGeo();
-  // the true-3D candles: a cluster's wax (puddle, candles, drips, wicks) (local: y up, the cluster's ground point)
+  // the true-3D candles: a cluster's wax (puddle, candles, drips, wicks) as parts (local: y up, the cluster's ground point): every
+  // cluster's go into ONE static mesh (build3d)
   const geo3 = new Map(), cache3 = (k, f) => { let g = geo3.get(k); if (!g) geo3.set(k, g = f()); return g; };
-  function candleGeos(id, v) {
-    return cache3('candle|' + id + '|' + v, () => {
-      const L = [], C = CANDLES[v], r = ART.rng(31 + v);
-      L.push({g: new THREE.CylinderGeometry(.15, .17, .01, 9), m: M4([.01, .005, 0], [0, r() * 3, 0], [1, 1, .8]), fam: 'bone', fixed: 2});   // the wax puddle
-      for (const [x, z, h] of C) {
-        L.push({g: new THREE.CylinderGeometry(.032, .036, h, 7), m: M4([x, h / 2, z]), fam: 'bone'});
-        if (r() < .7) L.push({g: new THREE.SphereGeometry(.014, 5, 3), m: M4([x + .028, h * (.55 + r() * .3), z + .012], [0, 0, 0], [1, 1.8, 1]), fam: 'bone', bias: .25});   // a drip
-        L.push({g: new THREE.BoxGeometry(.012, .03, .012), m: M4([x, h + .012, z]), fam: 'void', fixed: 2});   // the wick
-      }
-      return {wax: geoOf(L)};
-    });
+  function candleParts(v) {
+    const L = [], C = CANDLES[v], r = ART.rng(31 + v);
+    L.push({g: new THREE.CylinderGeometry(.15, .17, .01, 9), m: M4([.01, .005, 0], [0, r() * 3, 0], [1, 1, .8]), fam: 'bone', fixed: 2});   // the wax puddle
+    for (const [x, z, h] of C) {
+      L.push({g: new THREE.CylinderGeometry(.046, .05, h, 7), m: M4([x, h / 2, z]), fam: 'bone', fixed: 1});   // (3 px across: a thinner candle is all outline; the wax's own cream, as painted)
+      if (r() < .45) L.push({g: new THREE.SphereGeometry(.016, 5, 3), m: M4([x + .042, h * (.55 + r() * .3), z + .014], [0, 0, 0], [1, 1.8, 1]), fam: 'bone', bias: .25});   // a drip
+      L.push({g: new THREE.BoxGeometry(.012, .03, .012), m: M4([x, h + .012, z]), fam: 'void', fixed: 2});   // the wick
+    }
+    return L;
   }
   // the true-3D mushrooms: the sprite's sets [stem x px, stem height px, cap width px, cap height px], in metres, given some depth
   const SHROOMS = [[[4, 6, 6, 3], [11, 9, 8, 3], [16, 4, 5, 2], [8, 2, 4, 2], [19, 2, 3, 2]], [[3, 3, 4, 2], [8, 7, 7, 3], [14, 10, 8, 4], [18, 3, 4, 2], [12, 2, 3, 2]],
@@ -224,7 +223,7 @@ export async function create(host) {
     return cache3('shroom|' + v, () => {
       const L = [], r = ART.rng(57 + v);
       SHROOMS[v].forEach(([x, sh, cw, ch], i) => {
-        const px = (x + 1 - 12) / PPM, z = ((i * 3) % 5 - 2) * .045, hg = Math.max(.05, sh / PPMH), cr = cw / 2 / PPM, chh = ch / PPMH * .9, lean = (r() - .5) * .3;
+        const px = (x + 1 - 12) / PPM, z = ((i * 3) % 5 - 2) * .04, hg = Math.max(.085, sh / PPMH), cr = Math.max(.06, cw / 2 / PPM), chh = Math.max(.055, ch / PPMH * .9), lean = (r() - .5) * .3;   // (the small ones a little bigger than the sprite's: two-pixel caps are all outline)
         L.push({...along([px, 0, z], [px + lean * hg, hg, z], .022 + cw * .002, .018 + cw * .0015, 6), fam: 'bone', bias: -.05});
         const tx = px + lean * hg;
         L.push({g: new THREE.SphereGeometry(1, 8, 3, 0, TAU, 0, Math.PI / 2), m: M4([tx, hg - .012, z], [lean * .6, r() * 3, 0], [cr, chh, cr]), fam: 'shroom', bias: .05});   // the cap
@@ -235,10 +234,11 @@ export async function create(host) {
     });
   }
   // the sconce torch in the bracket's frame (x out of the wall, y up, z along it): the stick through the collar, the cup, the pitch head
-  const torchParts = () => [{...along([D, .9, 0], [D, 1.5, 0], .021, .028, 6), fam: 'wood'},
-    {g: new THREE.CylinderGeometry(.058, .036, .075, 7, 1, true), m: M4([D, 1.505, 0]), fam: 'metal', bias: .1},
-    {g: new THREE.CylinderGeometry(.046, .04, .05, 7), m: M4([D, 1.52, 0]), fam: 'char'}];
-  const c3 = [], s3 = [];   // the 3D candle clusters ({wax, tops: [x, y, h] per candle (the wick), c}) and mushroom clusters ({m, lv, s})
+  const torchParts = () => [{...along([D, .9, 0], [D, 1.5, 0], .03, .04, 6), fam: 'wood'},   // (as thick as the painted stick: 3 px)
+    {g: new THREE.CylinderGeometry(.068, .045, .08, 7, 1, true), m: M4([D, 1.505, 0]), fam: 'metal', bias: .1},
+    {g: new THREE.CylinderGeometry(.056, .05, .05, 7), m: M4([D, 1.525, 0]), fam: 'char'}];
+  const c3 = [], s3 = [];   // the 3D candle clusters ({tops: [x, y, h] per candle (the wick), c}) and mushroom clusters ({m, lv, s})
+  let wax3 = null;   // every candle cluster's wax: one static mesh
   const FLAME3 = {rift: ['#ffe0fa', '#ff8ae8', '#c85ad8'], frost: ['#f0fbff', '#9ad8ff', '#5a9ad8'], other: ['#fff6c8', '#ffc860', '#ff8a30']};   // (the sprite's flame tones)
   const flame3 = {}; for (const k in FLAME3) flame3[k] = FLAME3[k].map(rgb);
   let torch3 = null;
@@ -376,12 +376,14 @@ export async function create(host) {
     if (!P2D) build3d();
   }
   function build3d() {   // the true-3D candles, mushrooms and sconce torches (see P2D above)
-    c3.length = s3.length = 0; torch3 = null;
-    const id = host.biome.id;
+    c3.length = s3.length = 0; torch3 = wax3 = null;
+    const id = host.biome.id, W3 = [];
     for (const c of candles) {
-      const a = c.id * 1.7, ca = Math.cos(a), sa = Math.sin(a), wax = host.world.mesh(candleGeos(id, c.v).wax, M4([c.x, c.h, c.y], [0, a, 0]), {static: true});
-      meshes.push(wax); c3.push({wax, c, tops: CANDLES[c.v].map(([x, z, h]) => [c.x + x * ca + z * sa, c.y - x * sa + z * ca, c.h + h])});   // (a turn about y: x' = x cos + z sin, z' = z cos - x sin)
+      const a = c.id * 1.7, ca = Math.cos(a), sa = Math.sin(a), P = M4([c.x, c.h, c.y], [0, a, 0]);
+      for (const q of candleParts(c.v)) { q.m.premultiply(P); W3.push(q); }
+      c3.push({c, tops: CANDLES[c.v].map(([x, z, h]) => [c.x + x * ca + z * sa, c.y - x * sa + z * ca, c.h + h])});   // (a turn about y: x' = x cos + z sin, z' = z cos - x sin)
     }
+    if (W3.length) { wax3 = host.world.mesh(geoOf(W3), null, {static: true}); meshes.push(wax3); }
     if (shroomsOn(id)) for (const s of shrooms) {
       const m = host.world.mesh(shroomGeo(s.v), M4([s.x, 0, s.y], [0, s.id * .9, 0]), {static: true}); meshes.push(m);
       m.setGlow(0, WORLD.FAMS.indexOf('shroom'), SHROOM_K[1]); s3.push({m, lv: 1, s});
@@ -409,7 +411,7 @@ export async function create(host) {
     for (const q of s3) { const lv = q.s.b > 1.05 ? 2 : q.s.b > .55 ? 1 : 0; if (lv !== q.lv) { q.lv = lv; q.m.setGlow(0, WORLD.FAMS.indexOf('shroom'), SHROOM_K[lv]); } }
   }
   function show3d(on) {   // (lights off: no candles, no mushrooms, the torches back to their painted cards)
-    for (const q of c3) q.wax.setVisible(on);
+    wax3?.setVisible(on);
     for (const q of s3) q.m.setVisible(on);
     torch3?.setVisible(on);
     for (const p of props()) if (p.kind === 'torch' && p.mount) { p.model = on; if (!on && !host.itemOf(p)) host.world.addItem(p); }

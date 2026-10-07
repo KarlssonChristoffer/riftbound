@@ -275,7 +275,8 @@ src/
                          litter.js (the fallen-leaf carpet: a small GPU simulation the wind drives)
   world/                 world.js (build + props), stage.js (biome, rebuilds, prop mode, trees, the registry),
                          entities.js (the registry: join / leave / hide, live queries, near), spatial.js (the grid),
-                         biomes.js, layout.js, trees3d.js, kit3d.js, nav.js
+                         biomes.js, layout.js, trees3d.js, kit3d.js, nav.js, props3d.js (the true-3D props: the dummy, the crystal,
+                         the shared hanging lantern; ?props2d=1 brings back their cards)
   sim/                   env.js (clock, seasons, weather), projectiles.js (arrows, pops, dust),
                          player/ (player.js, harmonize.js, adapter.js: the camera-frame bridge, climbing, the cursor;
                          gun.js: a gun loadout's revolver, handed LMB and the frame by player.js through H.gun)
@@ -316,6 +317,7 @@ never write each other's state. `dev/` reaches the engine only as `E.dev`, hande
 | a game effect on another system's number | a note in `host.mods` (core/modifiers.js); the owner applies it | never write the number |
 | truth or looks | `F.update` (sim: own seeded generator, always runs) vs `F.view` (presentation: Math.random, after the sim, while `F.on`); `F.ambient` for while paused | tools/test/simview.mjs proves the split |
 | how much detail | menu > Graphics > Detail (`?detail=low`): low turns cosmetic views off (wind lines, wildlife, depth) | it can't change play: views don't feed the sim |
+| a mesh that lights itself | `mesh.setGlow(slot, family, k)` (gfx.js MESH_FS uGlowF / uGlowK: up to four families per mesh, emit = the family's tone x k); the families are world.js `FAMS` (+ gem, flame, shroom, bone for the true-3D props) | the composite keeps a family in 5 bits (E.w = part x 32 + family): at most 32 families, 28 used |
 
 ### 2.4 A system, concretely
 

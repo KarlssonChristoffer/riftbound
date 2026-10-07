@@ -232,7 +232,7 @@ export async function create(host) {
         P.push(0, 0, 0, Math.cos(t0) * r, 0, -Math.sin(t0) * r, Math.cos(t1) * r, 0, -Math.sin(t1) * r);   // (counter-clockwise from above: it faces up)
       }
       g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.computeVertexNormals();
-      L.push({g, m: new THREE.Matrix4(), fam: 'cover', fixed: 1});
+      L.push({g, m: new THREE.Matrix4(), fam: 'cover', fixed: 0});   // (the moss green's light tone: as bright as the painted pads)
     }
     const fl = L.length;
     if (q.flower) {   // the lily: a gold heart, five inner petals standing up, eight outer ones opening out
@@ -263,7 +263,7 @@ export async function create(host) {
   function place3(bloom) {   // every pad turned and placed (its lily folded away out of season)
     const P = pad3.geo.attributes.position.array, N = pad3.geo.attributes.normal.array, L0 = pad3.L0, N0 = pad3.N0, wh = WATER_H() + .006;
     for (let i = 0; i < PADS.length; i++) {
-      const q = PADS[i], [s, n, f] = pad3.ranges[i], c = Math.cos(q.ang), sn = Math.sin(q.ang), py = wh + q.h, end = f >= 0 && !bloom ? f : s + n;
+      const q = PADS[i], rg = pad3.ranges[i], s = rg[0], n = rg[1], f = rg[2], c = Math.cos(q.ang), sn = Math.sin(q.ang), py = wh + q.h, end = f >= 0 && !bloom ? f : s + n;
       for (let v = s, j = s * 3; v < end; v++, j += 3) {
         const x = L0[j], z = L0[j + 2], nx = N0[j], nz = N0[j + 2];
         P[j] = q.x + x * c + z * sn; P[j + 1] = py + L0[j + 1]; P[j + 2] = q.y - x * sn + z * c;

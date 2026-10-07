@@ -284,15 +284,15 @@ export async function create(host) {
   // the flower clumps (true 3D): a mound of leaf blades fanning out of the ground; the blossoms are points (F.frame), BLOOMS per variant
   // [x, z, h] (m) over the clump's ground point
   const BLOOMS = [0, 1, 2].map(v => { const r = ART.rng(71 + v), n = [7, 8, 6][v], out = [];
-    for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2 + r() * .6, d = .05 + r() * .13; out.push([Math.cos(a) * d * 1.2, Math.sin(a) * d * .8, .1 + r() * .11, i & 1]); }
+    for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2 + r() * .6, d = .06 + r() * .13; out.push([Math.cos(a) * d * 1.3, Math.sin(a) * d * .8, .07 + r() * .07, i & 1]); }
     return out; });
   function flowersGeo() {
     const L = [];
     FLOWERS.forEach(([fx, fy, v], j) => {
       const r = ART.rng(91 + j), a0 = r() * 3;
       for (let i = 0; i < 11; i++) {   // the blades: thin cones leaning out of the middle
-        const a = a0 + i / 11 * Math.PI * 2 + r() * .4, lean = .5 + r() * .5, len = .13 + r() * .1;
-        L.push({g: new THREE.ConeGeometry(.032, len, 4), m: M4([fx + Math.cos(a) * .08, len / 2 * Math.cos(lean) - .005, fy + Math.sin(a) * .06], [Math.sin(a) * lean, 0, -Math.cos(a) * lean]), fam: 'leaf', bias: (i & 1) * .15 - .05});
+        const a = a0 + i / 11 * Math.PI * 2 + r() * .4, lean = .8 + r() * .45, len = .1 + r() * .08;   // (low and wide, as the painted clump)
+        L.push({g: new THREE.ConeGeometry(.032, len, 4), m: M4([fx + Math.cos(a) * (.08 + len * .4), len / 2 * Math.cos(lean) - .005, fy + Math.sin(a) * (.06 + len * .3)], [Math.sin(a) * lean, 0, -Math.cos(a) * lean]), fam: 'leaf', bias: (i & 1) * .15 - .05});
       }
       for (const [x, z, h] of BLOOMS[v]) L.push({...along([fx + x * .6, 0, fy + z * .6], [fx + x, h - .015, fy + z], .007, .006, 3), fam: 'leaf', bias: -.1});   // the stalks
     });
