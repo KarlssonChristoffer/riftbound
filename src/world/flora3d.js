@@ -29,11 +29,12 @@ const CURVE = {
 // blade flex as (u0, power) for the shader: the same curves as a start and a power
 const BLADE_FLEX = {tip: [.2, 1.25], reed: [.12, 1.15], twig: [.38, 1], bush: [.22, 1.1], none: [2, 1]};
 // the blade ramps per biome: 4 of the style's ramps (ramp index 0..3 of a blade's colour code)
-export const BLADE_RAMPS = {ruins: ['grass', 'reed', 'cattail', 'bark'], frost: ['bark', 'straw', 'cattail', 'snow'], desert: ['grass', 'bark', 'straw', 'rock'],
+// (a key of the biome's style, or a ramp of its own: frost's twigs are the card's warm bark, biomes.js tuft frost, not the pines')
+export const BLADE_RAMPS = {ruins: ['grass', 'reed', 'cattail', 'bark'], frost: [['#a2725a', '#7c5040', '#5c3a30', '#3a2420'], 'straw', 'cattail', 'snow'], desert: ['grass', 'bark', 'straw', 'rock'],
   ember: ['ash', 'wall', 'lava', 'floor'], rift: ['floor', 'wall', 'crystal', 'rock']};
 const hex01 = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
 export function bladeRamps(biome, style) {
-  return (BLADE_RAMPS[biome] || BLADE_RAMPS.ruins).map(k => (style[k]?.h || style.grass?.h || ['#808080', '#606060', '#404040', '#202020']).map(hex01));
+  return (BLADE_RAMPS[biome] || BLADE_RAMPS.ruins).map(k => (Array.isArray(k) ? k : style[k]?.h || style.grass?.h || ['#808080', '#606060', '#404040', '#202020']).map(hex01));
 }
 // blade colour codes: ramp * 4 + scheme (scheme 0 a blade: dark foot, mid body, light tip; 1 a head: lit left, shaded right; 2 a blade a
 // tone darker (behind, the long leaves); 3 the ramp's light tone (snow on a head))
@@ -101,16 +102,19 @@ const SHAPES = {
   'ruins:reed': (v, B, r, BL) => reedClump(BL, r, v, {stem: 1, head: 2, snow: false}),
   // ---- frost: a squat snowy conifer shrub, bare twigs out of a snow mound, dry reeds with snow on the heads
   'frost:bush': (v, B, r) => { leafDome(B, r, v * 7 + 5, {n: 5 + (v % 2), R: .3 + v * .03, H: .42, rad: .2, fixed: LEAF_COVERED, squash: .7, lumpK: 1.1}); return {h: .45}; },
-  'frost:tuft': (v, B, r, BL) => {
-    B.part('cover', 0, -1, 0, -1); clump(B, V(0, -.02, 0), .15, .38, v * 3 + 1, V(0, 0, 0), V(.2, .1, .2), .05, r, 1, .8);
-    for (let i = 0; i < 3 + (v % 2); i++) { const a = i * 2.2 + r(), p = V(Math.cos(a) * .04, .02, Math.sin(a) * .04); blade(BL, p, V(Math.cos(a) * .04, 0, Math.sin(a) * .04), .08 + r() * .08, COL(0, 0), r(), {rows: 3}); }
-    return {h: .16};
+  'frost:tuft': (v, B, r, BL) => {   // (the card's footprint: a snow mound ~.3 m across, its top lit, and dry stalks poking out of it, warm brown and straw)
+    B.part('cover', .16, -1, 0, -1); clump(B, V(0, -.012, 0), .17, .4, v * 3 + 1, V(0, 0, 0), V(.22, .08, .22), .16, r, 2, .45);
+    for (let i = 0; i < 5 + (v % 2); i++) {
+      const a = i * 2.39996 + r() * .5, rr = .02 + r() * .08, p = V(Math.cos(a) * rr, .02, Math.sin(a) * rr), h = .1 + r() * .1;
+      blade(BL, p, V(Math.cos(a), 0, Math.sin(a)).multiplyScalar(.02 + h * .3 * r()), h, COL(i % 3 === 2 ? 1 : 0, i % 3 === 2 ? 0 : 2), r(), {rows: 3});
+    }
+    return {h: .2};
   },
   'frost:reed': (v, B, r, BL) => reedClump(BL, r, v, {stem: 1, head: 2, snow: true}),
   // ---- the desert (desert.js): sagebrush, prickly pear, barrel cactus, creosote; dry grass
   'desert:bush': (v, B, r) => [sage, pear, barrel, creosote][v % 4](B, r, v),
   'desert:tuft': (v, B, r, BL) => {
-    grassTuft(BL, r, v, 0, {n: 7 + (v % 2), h: [.12, .26], stiff: true});
+    grassTuft(BL, r, v, 0, {n: 7 + (v % 2), h: [.13, .27], stiff: true, spread: 1.35});
     if (v === 2) { B.part('rock', 0, -1, 0, -1); lobeOf(B, V(.06, .04, .05), V(1, .1, .3), V(0, 1, 0), .085, .055, .07, 5, V(.06, .04, .05), V(1, 1, 1), 0, 0, r, 1, .2); return {h: .24}; }
     return {h: .24, noMesh: true};
   },
@@ -170,10 +174,10 @@ function crystal(B, base, ax, h, cr, r) {
   for (let k = 0; k < 6; k++) { const m = r1[k].clone().add(r1[(k + 1) % 6]).multiplyScalar(.5).sub(base).addScaledVector(ax, -h * .4); quadF(B, r1[k], r1[(k + 1) % 6], ap, ap.clone().lerp(r1[k], .001), m, .1); }
 }
 // a grass tuft: n blades from a small ring, the outer ones shorter and leaning out, the middle ones tall (the card's fan)
-function grassTuft(BL, r, v, ramp, {n, h, stiff = false}) {
+function grassTuft(BL, r, v, ramp, {n, h, stiff = false, spread = 1}) {
   for (let i = 0; i < n; i++) {
-    const a = i * 2.39996 + v * 1.3 + r() * .4, rr = .02 + r() * .09, p = V(Math.cos(a) * rr, 0, Math.sin(a) * rr), hh = h[0] + (h[1] - h[0]) * (1 - rr / .12) * (.75 + r() * .35);
-    const out = V(Math.cos(a), 0, Math.sin(a)).multiplyScalar(hh * (stiff ? .35 : .45) * (.6 + r() * .6));   // (the blades stand across ~.25 m, as the card's, the outer ones leaning out)
+    const a = i * 2.39996 + v * 1.3 + r() * .4, rr = (.02 + r() * .09) * spread, p = V(Math.cos(a) * rr, 0, Math.sin(a) * rr), hh = h[0] + (h[1] - h[0]) * (1 - rr / (.12 * spread)) * (.75 + r() * .35);
+    const out = V(Math.cos(a), 0, Math.sin(a)).multiplyScalar(hh * (stiff ? .4 : .45) * (.6 + r() * .6) * spread);   // (the blades stand across ~.25 m, as the card's, the outer ones leaning out)
     blade(BL, p, out, hh, COL(ramp, r() < .25 ? 2 : 0), r(), {curl: stiff ? 0 : hh * .12 * r(), rows: 4});
   }
 }
@@ -182,11 +186,11 @@ function grassTuft(BL, r, v, ramp, {n, h, stiff = false}) {
 function reedClump(BL, r, v, {stem, head, snow}) {
   const n = [8, 6, 7][v % 3];
   for (let i = 0; i < n; i++) {
-    const cat = v === 1 || (v === 2 && i % 2 === 1), a = i * 2.39996 + v + r() * .5, rr = .04 + r() * .14, p = V(Math.cos(a) * rr, 0, Math.sin(a) * rr * .8);
-    const f = rr / .18, len = (cat ? 1.28 : 1.14) * (1 - f * .22) + (r() - .5) * .18, out = V(Math.cos(a), 0, Math.sin(a)).multiplyScalar(.04 + f * .12 + r() * .05);
+    const cat = v === 1 || (v === 2 && i % 2 === 1), a = i * 2.39996 + v + r() * .5, rr = .05 + r() * .16, p = V(Math.cos(a) * rr, 0, Math.sin(a) * rr * .8);
+    const f = rr / .21, len = (cat ? 1.28 : 1.14) * (1 - f * .22) + (r() - .5) * .18, out = V(Math.cos(a), 0, Math.sin(a)).multiplyScalar(.07 + f * .16 + r() * .06);
     const dim = f > .7 ? 2 : 0, curl = cat ? .02 : .05 + r() * .06;
-    const s = blade(BL, p, out, len, COL(stem, dim), r(), {w: 2, curl, t1: cat ? .3 : .46, rows: 3});
-    BL.strip(s.R, s.M, s.T, cat ? .3 : .46, 1, 1, COL(stem, dim), r(), 4);
+    const s = blade(BL, p, out, len, COL(stem, Math.max(dim, 2)), r(), {w: 2, curl, t1: .12, rows: 2});   // (a 2 px dark foot, the rest 1 px: the card's stems; wider, the clump's feet ran into one block)
+    BL.strip(s.R, s.M, s.T, .12, 1, 1, COL(stem, dim), r(), 4);
     if (cat) {   // the head: a brown run, 3 px wide, from .7 to .87 of the stem (the stem goes on above it: the spike)
       BL.strip(s.R, s.M, s.T, .7, .87, 3, COL(head, 1), r(), 3);
       if (snow) BL.strip(s.R, s.M, s.T, .855, .875, 3, COL(3, 3), r(), 2);
@@ -240,15 +244,18 @@ function sage(B, r, v) {
   return {h: .45};
 }
 function pear(B, r, v) {
-  // pads: a foot pad standing on the ground, the others growing off the earlier ones' rims, out and up at 25-70 deg, each turned its own way
+  // pads: three standing round the foot, facing out, and 2-3 more growing off their rims, leaning out at 35-70 deg, each its own way
   const pads = [], a0 = r() * TAU;
-  pads.push({c: V(0, .12, 0), n: V(Math.cos(a0), 0, Math.sin(a0)), w: .15, h: .12});
-  for (let i = 0; i < 5 + (v % 2); i++) {
-    const p = pads[Math.floor(r() * Math.min(pads.length, 3))], side = V(-p.n.z, 0, p.n.x), sg = r() < .5 ? -1 : 1, th = (25 + r() * 45) * Math.PI / 180;
-    const dir = side.clone().multiplyScalar(sg * Math.cos(th)).add(V(0, Math.sin(th), 0)), w = .1 + r() * .05, h = .085 + r() * .035;
-    const rim = p.c.clone().addScaledVector(side, sg * Math.cos(th) * p.w).add(V(0, Math.sin(th) * p.h, 0));
-    const a = a0 + (i + 1) * 2.39996 + (r() - .5) * .5, n = V(Math.cos(a), 0, Math.sin(a));   // (each pad faces its own way round: a cluster from every side)
-    pads.push({c: rim.addScaledVector(dir, h * .7), n, w, h, up: dir});
+  for (let k = 0; k < 3; k++) {
+    const a = a0 + k * TAU / 3 + (r() - .5) * .4, n = V(Math.cos(a), 0, Math.sin(a)), w = .13 + r() * .03, h = .12 + r() * .03;
+    pads.push({c: V(n.x * .08, h * .92, n.z * .08), n, w, h, up: V(n.x * .3, 1, n.z * .3).normalize()});
+  }
+  for (let i = 0; i < 2 + (v % 2); i++) {
+    const p = pads[i % 3], up = p.up, side = V().crossVectors(up, p.n).normalize(), sg = r() < .5 ? -1 : 1, th = (35 + r() * 35) * Math.PI / 180;
+    const dir = side.clone().multiplyScalar(sg * Math.cos(th)).addScaledVector(up, Math.sin(th)).normalize();
+    const rim = p.c.clone().addScaledVector(side, sg * Math.cos(th) * p.w).addScaledVector(up, Math.sin(th) * p.h);
+    const w = .1 + r() * .03, h = .09 + r() * .03, a = Math.atan2(p.n.z, p.n.x) + sg * (.5 + r() * .5), n = V(Math.cos(a), 0, Math.sin(a));
+    pads.push({c: rim.addScaledVector(dir, h * .8), n, w, h, up: dir});
   }
   B.part('cactus', 0, NO_COVER, 0, -1);
   for (const [i, q] of pads.entries()) {   // a pad: a flat oval, its long axis along the way it grew

@@ -673,15 +673,15 @@ function fluted(B, pts, rad, ribs, rot, cap = true, groove = .86) {
 }
 
 // frost PINE (Frost Hollow's snowy pines, biomes.js tree() frost): a straight trunk and 6-8 whorled TIERS of needles narrowing to a leader,
-// stacked like plates. A tier is a skirt of branch tips (a star of long ones and short ones between): out to ~.84 of its reach it lies
-// gentle along the long branches (the snow settles there: the frost cover on normals over .78, MESH_FS; rays of snow along the branches,
-// green in the steeper notches between) and then its hem droops steeply (the green edge), a dark underside closing it. The needles are the
-// leaf family (frost: the pine ramp; soft: tiers meet in tone, not lines), toned (-1), never thinned; each tier moves as one block on
+// stacked like plates. A tier is a skirt of branch tips (a star of long ones and short ones between): out to ~.86 of its reach it lies
+// gentle and then its hem droops steeply (the green edge), a dark underside closing it, and a cap of SNOW lies on its top (the cover family,
+// below). The needles are the leaf family (frost: the pine ramp; soft: tiers meet in tone, not lines), toned, never covered or thinned (the
+// snow is the caps, not blotches wherever a normal points up); each tier moves as one block (needles and snow) on
 // the wind (wind.js CURVES.pine), stiff: no flutter. variant: taller (the card's 3.6 + .5 v m). Evergreen: no autumn, no litter; the
 // crown is for the snow a gust blows off it (wind.js shed) and the birds
 function pine(seed, fam) {
   const v = Math.floor(seed / SEEDS) % 4, r = rng(seed * 59 + 23), TAU = Math.PI * 2;
-  const H = 3.45 + .5 * v + r() * .35, y0 = .42 + r() * .1, R0 = .74 + r() * .12, Rt = .2;
+  const H = 3.45 + .5 * v + r() * .35, y0 = .42 + r() * .1, R0 = .7 + r() * .12, Rt = .2;
   const flex = y => { const u = Math.max(0, y) / H; return u < .08 ? 0 : ((u - .08) / .92) ** 1.7; };
   const B = new Build(fam, flex); B.litter = false;
   B.crown = {x: 0, z: 0, y0, y1: H, r: R0 * .8};
@@ -692,32 +692,34 @@ function pine(seed, fam) {
     const a = i / 3 * TAU + r() * .8, d = V(Math.cos(a), 0, Math.sin(a));
     tube(B, [V(0, .22, 0).addScaledVector(d, .05), V(0, .06, 0).addScaledVector(d, .17), V(0, -.05, 0).addScaledVector(d, .32)], [.07, .05, .025], 5, r());
   }
-  // the tiers: reach R(y) narrowing up the tree (a cone from R0 at the foot), each tier's apex .6 R + 12 cm over its hem and the next
-  // tier's hem 95 % of that higher (they overlap: no trunk between them), until the top; the last ones steeper (a fir's spire)
+  // the tiers: reach R(y) narrowing up the tree (a cone from R0 at the foot), each tier's apex .6 R + 14 cm over its hem and the next
+  // tier's hem just over it (the upper skirt hides the trunk between them), until the top; the last ones steeper (a fir's spire)
   const Rof = y => Rt * .5 + (R0 - Rt * .5) * Math.pow(Math.max(0, 1 - (y - y0) / (H - y0)), .92), M = 14, S = [0, .22, .45, .66, .8, .86, .93, 1];
   let hem = y0, k = 0;
   while (hem < H - .42 && k < 12) {
-    const R = Rof(hem) * (.94 + r() * .12), th = .6 * R + .12, apex = hem + th, c = ax(apex), rot = r() * TAU, o = seed * 3.1 + k * 7.7, long = j => j % 2 === 0;
+    const R = Rof(hem) * (.94 + r() * .12), th = .6 * R + .14, apex = hem + th, c = ax(apex), rot = r() * TAU, o = seed * 3.1 + k * 7.7, long = j => j % 2 === 0;
     const len = Array.from({length: M}, (_, j) => long(j) ? .9 + r() * .2 : .74 + r() * .12);   // each branch's own reach
     // the drop under the apex at s (0 apex .. 1 hem) along branch j: gentle out to .86 (a long branch's ~24 deg, a notch's ~35), then the droop
     const drop = (s, j) => { const g = Math.min(s, .86) / .86, e = Math.max(0, s - .86) / .14; return R * ((long(j) ? .34 : .56) * g + .04 * g * g + (long(j) ? .26 : .12) * e ** 1.2); };
-    const top = [];
-    for (const s of S) {
-      const row = [];
-      for (let j = 0; j < M; j++) {
-        const a = rot + j / M * TAU, f = 1 + (len[j] - 1) * s * s, n0 = vn3(Math.cos(a) * 2 + o, s * 3, Math.sin(a) * 2 - o, 4) - .5;
-        const rr = R * s * f * (1 + n0 * .16);
-        row.push(V(c.x + Math.cos(a) * rr, apex - drop(s, j) * (1 + n0 * .2) - .12 * s ** 8, c.z + Math.sin(a) * rr));
-      }
-      top.push(row);
-    }
+    const at = (s, j, lift = 0) => {   // the tier's surface at s along branch j (+ lift m over it)
+      const a = rot + j / M * TAU, f = 1 + (len[j] - 1) * s * s, n0 = vn3(Math.cos(a) * 2 + o, s * 3, Math.sin(a) * 2 - o, 4) - .5, rr = R * s * f * (1 + n0 * .16);
+      return V(c.x + Math.cos(a) * rr, apex - drop(s, j) * (1 + n0 * .2) - .12 * s ** 8 + lift, c.z + Math.sin(a) * rr);
+    };
+    const top = S.map(s => Array.from({length: M}, (_, j) => at(s, j)));
     // the underside: back in from the hem, up to the trunk
     const hemRow = top[S.length - 1], under = [hemRow, hemRow.map(p => V(c.x + (p.x - c.x) * .6, hem + R * .2, c.z + (p.z - c.z) * .6)), hemRow.map(p => V(c.x + (p.x - c.x) * .12, hem + R * .42, c.z + (p.z - c.z) * .12))];
-    const bias = .03 * Math.min(1, (hem - y0) / (H - y0));
-    B.part('leaf', bias, -1, flex((hem + apex) / 2), -1);
+    const bias = .03 * Math.min(1, (hem - y0) / (H - y0)), fl = flex((hem + apex) / 2);
+    B.part('leaf', bias, NO_COVER, fl, -1);   // (the needles take no cover: the snow is the cap below, not blotches wherever a normal points up)
     gridSurf(B, top, p => V(p.x - c.x, 0, p.z - c.z).multiplyScalar(.4).add(V(0, 1, 0)), i => bias + (i >= S.length - 2 ? -.08 : 0));
     gridSurf(B, under, () => V(0, -1, 0), bias - .32);
-    hem += th * .95; k++;
+    // the SNOW lying on the tier: one continuous cap over its top (the cover family: frost's snow ramp, toned), thickest up by the trunk and
+    // thinning out to a clean scalloped rim (further out along the long branches), the dark green droop showing under it. The upper tier
+    // hides the cap's middle: what shows is a white band along each tier's shoulder, its edge a clean line (the card's white edges)
+    const edge = j => (long(j) ? .8 : .68) * (.96 + .08 * h3(j, k, seed, 3)), SC = [0, .25, .5, .75, .92, 1];
+    const cap = SC.map((u, i) => Array.from({length: M}, (_, j) => { const e = edge(j), sj = e * u; return at(sj, j, i === SC.length - 1 ? .006 : .014 + .03 * Math.pow(1 - u, .7)); }));
+    B.part('cover', bias + .08, -1, fl, -1);
+    gridSurf(B, cap, p => V(p.x - c.x, 0, p.z - c.z).multiplyScalar(.3).add(V(0, 1, 0)), bias + .08);
+    hem += th * 1.02; k++;
   }
   const N = k;
   { // the leader: a short spike over the top tier
@@ -797,7 +799,7 @@ function spire(seed, fam) {
       const next = drums[di + 1];
       const capTo = next ? ring(next.c0, next.r, next.rot, next.y0) : null;
       if (last) {   // a broken top: the last ring to a slanted ridge
-        const tip = D.c1.clone().add(V((r() - .5) * D.r * .6, D.y1 + D.r * (.4 + r() * .5), (r() - .5) * D.r * .6));
+        const tip = D.c1.clone().add(V((r() - .5) * D.r * .6, D.y1 + D.r * (.25 + r() * .3), (r() - .5) * D.r * .6));
         for (let k = 0; k < 6; k++) { const a = hi[k], b = hi[(k + 1) % 6], n = V().crossVectors(V().subVectors(b, a), V().subVectors(tip, a)).normalize(); if (n.y < 0) n.negate(); triO(B, a, b, tip, n, n, n, .04); }
       } else {   // the ledge: from this drum's top ring in to the next drum's foot (it faces up: the ash lies there)
         for (let k = 0; k < 6; k++) { const a = hi[k], b = hi[(k + 1) % 6]; const up = V(0, 1, 0); triO(B, a, b, capTo[k], up, up, up, .06); triO(B, b, capTo[(k + 1) % 6], capTo[k], up, up, up, .06); }
@@ -805,14 +807,14 @@ function spire(seed, fam) {
       B.bones.push([D.c0.x, D.y0, D.c0.z, D.c1.x, D.y1, D.c1.z, D.r * .9, D.r * .85]);
     }
     if (crack) {   // the glowing crack: up two of the faces from the foot, a zig-zag across the drums, a hair off the rock
-      for (const face of [0, 3]) {
+      for (const face of [0, 2, 4]) {   // (three faces: one shows at every yaw)
         let x = (r() - .5) * .4;
         for (const [di, D] of drums.entries()) {
           if (D.y0 > crack) break;
           const a = D.rot + (face + .5) / 6 * TAU, nrm = V(Math.cos(a), 0, Math.sin(a)), tg = V(-nrm.z, 0, nrm.x), ap = D.r * Math.cos(Math.PI / 6) * 1.012, x1 = Math.max(-.6, Math.min(.6, x + (r() - .5) * .7));
-          const y1 = Math.min(D.y1, crack), w = .022 + .012 * (1 - D.y0 / crack);
+          const y1 = Math.min(D.y1, crack), w = .028 + .018 * (1 - D.y0 / crack);
           const p0 = D.c0.clone().addScaledVector(nrm, ap).addScaledVector(tg, x * D.r * .8).add(V(0, D.y0, 0)), p1 = D.c0.clone().addScaledVector(nrm, ap * .99).addScaledVector(tg, x1 * D.r * .8).add(V(0, y1, 0));
-          B.part('crack', 0, D.y0 < crack * .4 ? 0 : 1);
+          B.part('crack', 0, D.y0 < crack * .6 ? 0 : 1);
           quadF(B, p0.clone().addScaledVector(tg, -w), p0.clone().addScaledVector(tg, w), p1.clone().addScaledVector(tg, w), p1.clone().addScaledVector(tg, -w), nrm, 0);
           x = x1;
         }
@@ -820,7 +822,7 @@ function spire(seed, fam) {
     }
   };
   const la = r() * TAU, lean = V(Math.cos(la), 0, Math.sin(la)).multiplyScalar(.02 + r() * .04);
-  needle(V(0, 0, 0), H, .56 + r() * .06, .13, lean, r() * TAU, .9 + v * .25 + r() * .3);
+  needle(V(0, 0, 0), H, .56 + r() * .06, .17, lean, r() * TAU, 1.1 + v * .25 + r() * .3);
   // the smaller needle, leaning in against the big one (the card's, beside it)
   const a2 = r() * TAU, d2 = V(Math.cos(a2), 0, Math.sin(a2)), h2 = H * (.42 + r() * .1);
   needle(d2.clone().multiplyScalar(.62), h2, .3, .08, d2.clone().multiplyScalar(-.12), r() * TAU, 0);
