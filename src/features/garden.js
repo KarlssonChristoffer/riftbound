@@ -281,10 +281,11 @@ export async function create(host) {
     return geoOf([box('stone', [.2, .36, .34], [-.55, .18, 0], [0, .03, 0], {bias: -.15}), box('stone', [.2, .36, .34], [.55, .18, 0], [0, -.04, 0], {bias: -.15}),
       box('stone', [1.55, .1, .44], [0, .41, 0], [0, 0, .015], {bias: .2})]);
   }
-  // the flower clumps (true 3D): a mound of leaf blades fanning out of the ground; the blossoms are points (F.frame), BLOOMS per variant
-  // [x, z, h] (m) over the clump's ground point
-  const BLOOMS = [0, 1, 2].map(v => { const r = ART.rng(71 + v), n = [7, 8, 6][v], out = [];
-    for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2 + r() * .6, d = .06 + r() * .13; out.push([Math.cos(a) * d * 1.3, Math.sin(a) * d * .8, .07 + r() * .07, i & 1]); }
+  // the flower clumps (true 3D): a mound of leaf blades fanning out of the ground; the blossoms are points (F.frame): each a flower head
+  // of three pixels (a heart, a petal either side along the screen's x, like the painted ones), held up over the blades in a crown.
+  // BLOOMS per variant [x, z, h (m) over the clump's ground point, colour pair]
+  const BLOOMS = [0, 1, 2].map(v => { const r = ART.rng(71 + v), n = [8, 9, 7][v], out = [];
+    for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2 + r() * .6, d = .04 + r() * .12; out.push([Math.cos(a) * d * 1.3, Math.sin(a) * d * .8, .12 + r() * .05, i % 3 === 2 ? 1 : 0]); }
     return out; });
   function flowersGeo() {
     const L = [];
@@ -292,14 +293,14 @@ export async function create(host) {
       const r = ART.rng(91 + j), a0 = r() * 3;
       for (let i = 0; i < 11; i++) {   // the blades: thin cones leaning out of the middle
         const a = a0 + i / 11 * Math.PI * 2 + r() * .4, lean = .8 + r() * .45, len = .1 + r() * .08;   // (low and wide, as the painted clump)
-        L.push({g: new THREE.ConeGeometry(.032, len, 4), m: M4([fx + Math.cos(a) * (.08 + len * .4), len / 2 * Math.cos(lean) - .005, fy + Math.sin(a) * (.06 + len * .3)], [Math.sin(a) * lean, 0, -Math.cos(a) * lean]), fam: 'leaf', bias: (i & 1) * .15 - .05});
+        L.push({g: new THREE.ConeGeometry(.032, len, 4), m: M4([fx + Math.cos(a) * (.08 + len * .4), len / 2 * Math.cos(lean) - .005, fy + Math.sin(a) * (.06 + len * .3)], [Math.sin(a) * lean, 0, -Math.cos(a) * lean]), fam: 'leaf', fixed: i & 1});   // (the leaf's light and base tones: a blade is too thin to be toned by the light)
       }
       for (const [x, z, h] of BLOOMS[v]) L.push({...along([fx + x * .6, 0, fy + z * .6], [fx + x, h - .015, fy + z], .007, .006, 3), fam: 'leaf', bias: -.1});   // the stalks
     });
     return geoOf(L);
   }
   const GEO = {stall: stallGeo(), arch: archGeo(), bench: benchGeo(), flowers: P2D ? null : flowersGeo(), lantern: P2D ? null : geoOf(lanternParts())};
-  const FLC = {ruins: ['#f2d36a', '#e8e4f2', '#d8573e'], ember: ['#ff7a3a', '#ffc04a', '#d8443a'], frost: ['#bfe4ff', '#ffffff', '#9ab8ff'], rift: ['#ff7af0', '#7ae8ff', '#c08aff']};   // (the sprites' petals)
+  const FLC = {ruins: ['#f2d36a', '#e8e4f2', '#b48ae0'], ember: ['#ff7a3a', '#ffc04a', '#d8443a'], frost: ['#bfe4ff', '#ffffff', '#9ab8ff'], rift: ['#ff7af0', '#7ae8ff', '#c08aff']};   // (the sprites' petals: points take any colour)
 
   // ================================================================ props (colliders, interaction, the biome's plants)
   const tag = (p, extra) => Object.assign(p, {garden: true}, extra);
@@ -407,10 +408,16 @@ export async function create(host) {
       else { spr(LAN.lit === false ? 'lantern_dim' : 'lantern', lx, ly, lh + .02, NOSH); for (let i = 0; i < 3; i++) spr(POT[i], STALL.x + 2.28, STALL.y + POTZ[i], 1.57, NOSH); }
     }
     if (P2D) { for (let i = 0; i < FLOWERS.length; i++) { const f = FLOWERS[i]; if (near(f[0], f[1])) spr(FLN[i], f[0], f[1], 0, NOSH); } }
-    else for (let i = 0; i < FLOWERS.length; i++) {   // the blossoms: a pixel each (two colours a clump), lit by the scene, over the 3D blades
-      const f = FLOWERS[i]; if (!near(f[0], f[1])) continue;
-      const B = BLOOMS[f[2]], c0 = bloomC[f[2] % 3], c1 = bloomC[(f[2] + 1) % 3];
-      for (const b of B) host.point(f[0] + b[0], f[1] + b[1], b[2], b[3] ? c1 : c0, BLOOM);
+    else {   // the blossoms: a three-pixel flower head each (a heart, its petals a pixel either side along the screen's x), lit by the scene
+      const rx = Math.cos(host.yaw) / host.PPM, ry = -Math.sin(host.yaw) / host.PPM;
+      for (let i = 0; i < FLOWERS.length; i++) {
+        const f = FLOWERS[i]; if (!host.G.onScreen(f[0], .1, f[1], 8)) continue;   // (on screen only: three points a blossom)
+        const B = BLOOMS[f[2]], c0 = bloomC[f[2] % 3], c1 = bloomC[(f[2] + 1) % 3], c2 = bloomC[(f[2] + 2) % 3];
+        for (const b of B) {
+          const x = f[0] + b[0], y = f[1] + b[1], pet = b[3] ? c2 : c1;
+          host.point(x, y, b[2], c0, BLOOM); host.point(x - rx, y - ry, b[2], pet, BLOOM); host.point(x + rx, y + ry, b[2], pet, BLOOM);
+        }
+      }
     }
   };
   // the 3D lantern hung along its chain: its ring at the chain's end (x, y, h), its up toward the hook (no allocation: kept scratch)

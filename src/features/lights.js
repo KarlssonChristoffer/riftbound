@@ -68,7 +68,8 @@ const TOP = {crate: .72, barrel: .9, barrel_x: .9, dummy: 1.25};
 // torches' stick, cup and pitch head (3D, all in one static mesh; the torch prop paints nothing then: biomes.js, p.model, and its
 // light is this file's, F.lights)
 const P2D = flags.get('props2d') === '1';
-const CANDLES = [[[-.14, .04, .17], [0, -.06, .27], [.13, .03, .14]], [[-.13, .06, .23], [.01, -.05, .14], [.14, .02, .2]]];   // per variant: [x, z, height] (m), side by side like the sprite's
+// per variant: [x, z, height] (m): four candles of clearly different heights, apart in both x and z (from any yaw they don't merge)
+const CANDLES = [[[-.17, .05, .2], [-.04, -.1, .34], [.1, .07, .12], [.2, -.06, .26]], [[-.18, -.05, .29], [-.04, .09, .15], [.09, -.08, .37], [.2, .06, .1]]];
 const TORCH3 = {h: 1.744, r: 4, k: .9, fl: .6};   // the sconce torch's light (the painted sprite's record: biomes.js torch)
 const SHROOM_K = [.45, .8, 1.25];   // the 3D caps' own light by brightness step (the sprite's three emit frames)
 
@@ -208,27 +209,29 @@ export async function create(host) {
   const geo3 = new Map(), cache3 = (k, f) => { let g = geo3.get(k); if (!g) geo3.set(k, g = f()); return g; };
   function candleParts(v) {
     const L = [], C = CANDLES[v], r = ART.rng(31 + v);
-    L.push({g: new THREE.CylinderGeometry(.15, .17, .01, 9), m: M4([.01, .005, 0], [0, r() * 3, 0], [1, 1, .8]), fam: 'bone', fixed: 2});   // the wax puddle
-    for (const [x, z, h] of C) {
-      L.push({g: new THREE.CylinderGeometry(.046, .05, h, 7), m: M4([x, h / 2, z]), fam: 'bone', fixed: 1});   // (3 px across: a thinner candle is all outline; the wax's own cream, as painted)
-      if (r() < .45) L.push({g: new THREE.SphereGeometry(.016, 5, 3), m: M4([x + .042, h * (.55 + r() * .3), z + .014], [0, 0, 0], [1, 1.8, 1]), fam: 'bone', bias: .25});   // a drip
+    C.forEach(([x, z, h], i) => {
+      L.push({g: new THREE.CylinderGeometry(.066, .075, .01, 7), m: M4([x + .01, .005, z], [0, r() * 3, 0]), fam: 'bone', fixed: 2});   // its own little puddle
+      // (3 px across: a thinner candle is all outline; the wax's own cream, as painted, the light and base tones alternating: neighbours part)
+      L.push({g: new THREE.CylinderGeometry(.044, .048, h, 7), m: M4([x, h / 2, z]), fam: 'bone', fixed: i & 1});
+      if (h > .2 && r() < .6) L.push({g: new THREE.SphereGeometry(.016, 5, 3), m: M4([x + .04, h * (.55 + r() * .3), z + .014], [0, 0, 0], [1, 1.8, 1]), fam: 'bone', fixed: i & 1});   // a drip
       L.push({g: new THREE.BoxGeometry(.012, .03, .012), m: M4([x, h + .012, z]), fam: 'void', fixed: 2});   // the wick
-    }
+    });
     return L;
   }
-  // the true-3D mushrooms: the sprite's sets [stem x px, stem height px, cap width px, cap height px], in metres, given some depth
-  const SHROOMS = [[[4, 6, 6, 3], [11, 9, 8, 3], [16, 4, 5, 2], [8, 2, 4, 2], [19, 2, 3, 2]], [[3, 3, 4, 2], [8, 7, 7, 3], [14, 10, 8, 4], [18, 3, 4, 2], [12, 2, 3, 2]],
-    [[5, 8, 7, 3], [12, 5, 6, 3], [17, 2, 4, 2], [2, 2, 3, 2]]];
+  // the true-3D mushrooms: per variant [x, z, stem height, cap radius] (m): three to five apart, at different heights, the cluster at least
+  // the sprite's footprint (24 x 17 px: ~.8 x .55 m); pale stems, wide domed caps over darker gills
+  const SHROOMS = [[[-.3, .06, .22, .11], [-.08, -.08, .34, .13], [.14, .07, .26, .12], [.33, -.04, .16, .09]],
+    [[-.33, -.03, .16, .09], [-.13, .08, .3, .12], [.08, -.07, .38, .14], [.27, .07, .22, .11], [.42, -.06, .13, .075]],
+    [[-.22, .05, .32, .13], [.02, -.07, .24, .12], [.24, .07, .17, .1]]];   // (no one cap much bigger than the rest: from above it would hide them)
   function shroomGeo(v) {
     return cache3('shroom|' + v, () => {
       const L = [], r = ART.rng(57 + v);
-      SHROOMS[v].forEach(([x, sh, cw, ch], i) => {
-        const px = (x + 1 - 12) / PPM, z = ((i * 3) % 5 - 2) * .04, hg = Math.max(.085, sh / PPMH), cr = Math.max(.06, cw / 2 / PPM), chh = Math.max(.055, ch / PPMH * .9), lean = (r() - .5) * .3;   // (the small ones a little bigger than the sprite's: two-pixel caps are all outline)
-        L.push({...along([px, 0, z], [px + lean * hg, hg, z], .022 + cw * .002, .018 + cw * .0015, 6), fam: 'bone', bias: -.05});
-        const tx = px + lean * hg;
-        L.push({g: new THREE.SphereGeometry(1, 8, 3, 0, TAU, 0, Math.PI / 2), m: M4([tx, hg - .012, z], [lean * .6, r() * 3, 0], [cr, chh, cr]), fam: 'shroom', bias: .05});   // the cap
-        L.push({g: new THREE.CylinderGeometry(cr * .96, cr * .55, .018, 8), m: M4([tx, hg - .02, z], [lean * .6, 0, 0]), fam: 'shroom', fixed: 2});   // the gills under it
-        if (cw > 4) for (let k = 0; k < 2; k++) { const a = r() * TAU; L.push({g: new THREE.SphereGeometry(.012, 4, 2), m: M4([tx + Math.cos(a) * cr * .5, hg - .012 + chh * .75, z + Math.sin(a) * cr * .5]), fam: 'bone', fixed: 0}); }   // pale spots
+      SHROOMS[v].forEach(([px, z, hg, cr], i) => {
+        const cr2 = cr * 1.15, chh = cr2 * .45, lean = (r() - .5) * .25, tx = px + lean * hg, sr = .026 + cr * .12;   // (wide flat umbrellas on stems 2-3 px thick, as painted)
+        L.push({...along([px, 0, z], [tx, hg, z], sr * 1.15, sr, 7), fam: 'bone', fixed: 0});   // the stem, pale
+        L.push({g: new THREE.SphereGeometry(1, 10, 4, 0, TAU, 0, Math.PI / 2), m: M4([tx, hg - .01, z], [lean * .6, r() * 3, 0], [cr2, chh, cr2]), fam: 'shroom', bias: .05});   // the cap
+        L.push({g: new THREE.CylinderGeometry(cr2 * .97, sr * 1.6, cr * .2, 10), m: M4([tx, hg - .01 - cr * .1, z], [lean * .6, 0, 0]), fam: 'shroom', fixed: 2});   // the gills under it
+        if (cr > .1) for (let k = 0; k < 3; k++) { const a = r() * TAU; L.push({g: new THREE.SphereGeometry(.014, 4, 2), m: M4([tx + Math.cos(a) * cr2 * .5, hg - .01 + chh * .8, z + Math.sin(a) * cr2 * .5]), fam: 'bone', fixed: 0}); }   // pale spots
       });
       return geoOf(L);
     });
@@ -386,7 +389,7 @@ export async function create(host) {
     if (W3.length) { wax3 = host.world.mesh(geoOf(W3), null, {static: true}); meshes.push(wax3); }
     if (shroomsOn(id)) for (const s of shrooms) {
       const m = host.world.mesh(shroomGeo(s.v), M4([s.x, 0, s.y], [0, s.id * .9, 0]), {static: true}); meshes.push(m);
-      m.setGlow(0, WORLD.FAMS.indexOf('shroom'), SHROOM_K[1]); s3.push({m, lv: 1, s});
+      m.setGlow(0, WORLD.FAMS.indexOf('shroom'), SHROOM_K[1]); m.setGlow(1, WORLD.FAMS.indexOf('bone'), .3); s3.push({m, lv: 1, s});   // (the pale stems faintly too: they show at night)
     }
     const T3 = [];
     for (const p of props()) if (p.kind === 'torch' && p.mount) {

@@ -105,14 +105,16 @@ export async function create(host) {
     GEO = {clusters: Object.values(C).map(geoOf), names: Object.keys(C), head: geoOf(MD.millHead()), wheel: geoOf(MD.millWheel()), faces: buildFaces()};
   }
   // THE BONES IN 3D: lying in the sand, turned their own way (a skull rests a little tilted, half the ribs sunk); a skull on a post
-  // or the mine's cap is nailed to its face, looking out (south), the snout down. The mine's lantern hangs from an iron hook on the
-  // cap (its glass lights itself: the yard's mesh, buildVisuals). Each piece goes into the cluster nearest it (no draw of its own)
+  // rests on its top, its brow tipped a little to the south; the mine's is nailed to the cap's face, looking out, the snout down. The
+  // mine's lantern hangs from an iron hook on the cap (its glass lights itself: the yard's mesh, buildVisuals). Each piece goes into
+  // the cluster nearest it (no draw of its own)
   function bones3d(C) {
     const AT = {mill: MILL, street: STREET.wagon, yard: MINE, south: WELL, west: OUTHOUSE};
     const near = (x, y) => { let b = 'south', bd = 1e9; for (const k in AT) { const d = Math.hypot(AT[k].x - x, AT[k].y - y); if (d < bd) { bd = d; b = k; } } return C[b]; };
     for (const [k, x, y, h] of BONES) {
       const a = (x * 7.31 + y * 3.17) % TAU, P = k === 'skull' ? MD.skull() : k === 'ribs' ? MD.ribs() : MD.longBone();
-      if (h > 0) near(x, y).push(...piece(P, x, y + (h > 2 ? .02 : .06), [1.2, 0, 0], h + (h > 2 ? .17 : .04)));   // on a post / the cap: looking out
+      if (h > 2) near(x, y).push(...piece(P, x, y + .02, [1.0, 0, 0], h + .17));   // on the mine's cap: nailed to its face, looking out
+      else if (h > 0) near(x, y).push(...piece(P, x, y + .01, [.2, 0, 0], h - .03));   // resting on a post's top, its brow tipped a little to the south (it reads from above at any yaw)
       else near(x, y).push(...piece(P, x, y, k === 'skull' ? [.12, a, .18] : [0, a, 0], k === 'ribs' ? -.015 : 0));
     }
     const L = LANTERN, hook = [MD.beam('metal', [0, .05, -.075], [0, .05, 0], .014, .014), MD.beam('metal', [0, .055, 0], [0, -.004, 0], .012, .012)];
