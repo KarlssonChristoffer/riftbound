@@ -11,8 +11,9 @@
 //           shadows, snows on, wets and season-tints them like the grass round them). Each blade is a quadratic curve root -> ctrl ->
 //           tip (local metres) and a run t0..t1 of it, w px wide, coloured by the biome's blade ramps (BLADE_RAMPS) and a scheme
 // Every shape is in the plant's own frame (x east, y up, z south, metres, origin = its ground point), turned and scaled per plant.
-// flex: the wind's bend weight by height (features/wind.js CURVES, u = height / the plant's height): per clump (a clump moves as a
-// block) or per vertex (a twig, a frond); the lean itself is the wind's spring per plant (world.js, render/flora.js).
+// flex: the wind's bend weight by height (features/wind.js CURVES, u = height / the plant's height), per vertex: a plant bends row by
+// row from its planted foot (weight 0 at the ground) like its card's rows, its clumps never torn apart into blocks; the lean itself is
+// the wind's spring per plant (world.js, render/flora.js).
 // floraShapes(kind, biome, variant, fam, style) -> {mesh: {geo, casts} | null, blades: {geo} | null, h (m), key} | null (no 3D shape:
 // the plant keeps its card). Cached per (biome, kind, variant). bladeRamps(biome, style) -> 4 ramps x 4 tones [r, g, b] 0..1.
 // OWNS: the plant shapes (cached).  READS: trees3d.js's builders.
@@ -77,7 +78,7 @@ function leafDome(B, r, seed, {n, R, H, rad, fixed = LEAF, curve = 'bush', bias 
   if (core) list.push({c: V(0, H * .38, 0), rad: Math.min(R, H) * .62, core: true});
   for (const [i, q] of list.entries()) {
     const ey = (q.c.y - C.y) / Rv.y, b = bias + (q.core ? -.22 : .26 * ey - .06 + (r() - .5) * .08);
-    B.part('leaf', b, fixed, CURVE[curve](Math.min(1, q.c.y / H)), q.core ? -1 : (i * 2.39996 + seed * .7) % TAU);
+    B.flexOf = y => CURVE[curve](Math.min(1, Math.max(0, y) / H)); B.part('leaf', b, fixed, null, q.core ? -1 : (i * 2.39996 + seed * .7) % TAU);   // (per vertex: the dome bends row by row from its planted foot, as the card's rows did, never torn into blocks)
     clump(B, q.c, q.rad, squash, seed * 13 + i, C, Rv, b, r, detail, lumpK);
   }
 }
@@ -215,7 +216,7 @@ function fernShape(B, r, v) {
     const W = t => .085 * Math.sin(Math.PI * Math.min(1, Math.pow(t, .62))) + .006;
     for (let k = 0; k < NS; k++) {   // stretches along the frond (each a block on the wind: the tip's moves most)
       const ta = .06 + .94 * k / NS, tb = .06 + .94 * (k + 1) / NS, fl = CURVE.bush(Math.min(1, .3 + .7 * tb)), bias = .1 + .16 * (P((ta + tb) / 2).y / H) - .12 * (1 - tb) + (r() - .5) * .06;
-      B.part('leaf', bias, FERN, fl, ph);
+      B.flexOf = y => CURVE.bush(Math.min(1, Math.max(0, y) / H)); B.part('leaf', bias, FERN, null, ph);   // (per vertex, by height: the crown planted)
       const m = Math.round(NE / NS);
       for (let q = 0; q < m; q++) {
         const t0 = ta + (tb - ta) * q / m, t1 = ta + (tb - ta) * (q + 1) / m, c0 = P(t0), c1 = P(t1), tg = Tn((t0 + t1) / 2), nrm = V().crossVectors(tg, s).normalize(); if (nrm.y < 0) nrm.negate();
@@ -239,7 +240,7 @@ function sage(B, r, v) {
   for (let i = 0; i < 11; i++) {
     const a = i * 2.39996 + r() * .5, e = (i + .5) / 11, rr = .3 * Math.sqrt(1 - e * .8) * (.5 + r() * .5), c = V(Math.cos(a) * rr, .14 + .28 * e + r() * .05, Math.sin(a) * rr);
     const b = .2 * (c.y - .25) / .2 + (r() - .5) * .1;
-    B.part('leaf', b, LEAF, CURVE.bush(Math.min(1, c.y / .45)), (i * 2.39996) % TAU); clump(B, c, .085 + r() * .04, .8, v * 17 + i, C, Rv, b, r, 1, 1.6);
+    B.flexOf = y => CURVE.bush(Math.min(1, Math.max(0, y) / .45)); B.part('leaf', b, LEAF, null, (i * 2.39996) % TAU); clump(B, c, .085 + r() * .04, .8, v * 17 + i, C, Rv, b, r, 1, 1.6);
   }
   return {h: .45};
 }
@@ -278,7 +279,7 @@ function creosote(B, r, v) {
   const tips = [];
   for (let k = 0; k < 4; k++) { const a = k / 4 * TAU + r() * .7, d = V(Math.cos(a) * .5, 1, Math.sin(a) * .5).normalize(); twig(B, r, V(0, -.02, 0), d, .17 + r() * .06, .02, 2, .55, 'bush', 'bark', tips); }
   const C = V(0, .35, 0), Rv = V(.3, .25, .3);
-  for (const [i, t] of tips.entries()) { const b = -.12 + (r() - .5) * .1; B.part('leaf', b, LEAF, CURVE.bush(Math.min(1, t.p.y / .55)), (i * 2.39996) % TAU); clump(B, t.p.clone().addScaledVector(t.d, .03), .065 + r() * .02, .75, v * 23 + i, C, Rv, b, r, 1, 1.4); }
+  for (const [i, t] of tips.entries()) { const b = -.12 + (r() - .5) * .1; B.flexOf = y => CURVE.bush(Math.min(1, Math.max(0, y) / .55)); B.part('leaf', b, LEAF, null, (i * 2.39996) % TAU); clump(B, t.p.clone().addScaledVector(t.d, .03), .065 + r() * .02, .75, v * 23 + i, C, Rv, b, r, 1, 1.4); }
   return {h: .55};
 }
 

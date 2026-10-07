@@ -24,7 +24,9 @@ import * as THREE from 'three';
 const HEAD = `precision highp float; precision highp int;\n`;
 const OUTS = `layout(location = 0) out vec4 o0;\nlayout(location = 1) out vec4 o1;\nlayout(location = 2) out vec4 o2;\n`;
 const STRIDE = 16;
-const LEAF_MIN = '.35';   // the least of its leaves a plant keeps through the winter (withered: the autumn's last stage), of what a full one has
+// THE SEASON'S THINNING on a plant (uLeafK, sim/env.js leafK): finer than the crowns' (gaps of ~2 cm, not holes of ~18: a thinned bush keeps
+// its dome, just sparser) and never below LEAF_MIN of a full one (it keeps its leaves through the winter, withered: the autumn's last stage)
+const LEAF_MIN = '.62', THIN = 'vn3(vPL * 26. + vec3(sd.y, 1.7, sd.x))';
 function popRanges() { const u = this.updateRanges; while (u.length) u.pop(); }   // floats an instance: iT (x, h, z, yaw), iS (scale, obj, flash, visible), iL (lean x, lean y, flutter, seed), iA (autumn kind, seed, delay, palette row)
 
 // ---- shared GLSL: the instance's place and sway (as gfx.js SWAY), the noises (as gfx.js MESH_FS)
@@ -98,7 +100,7 @@ void main() {
   bool leaf = fFixed < -1.5, inner = !gl_FrontFacing;
   if (inner && (!leaf || uLeafK >= .999)) discard;
   vec2 sd = vec2(fSeed * 37.1, fSeed * 11.3);
-  if (leaf && uLeafK < .999 && vn3(vPL * 5.5 + vec3(sd.y, 1.7, sd.x)) > max(uLeafK, ${LEAF_MIN}) * 1.1 - .05) discard;   // (the season thins the leaves: gfx.js LEAF_GONE; a plant keeps some, withered, through the winter)
+  if (leaf && uLeafK < .999 && ${THIN} > max(uLeafK, ${LEAF_MIN}) * 1.1 - .05) discard;   // (the season thins the leaves: gfx.js LEAF_GONE; a plant keeps some, withered, through the winter)
   vec3 n = normalize(vN); if (inner) n = -n;
   float fam = fFam; int tone;
   if (fFixed >= 0.) tone = int(fFixed);
@@ -143,7 +145,7 @@ void main() {
 }`;
 const SHADOW_FS = HEAD + `layout(location = 0) out vec4 o0;\n` + NOISE + `
 in vec3 vPL; flat in float fFixed; flat in float fSeed; uniform float uLeafK;
-void main() { vec2 sd = vec2(fSeed * 37.1, fSeed * 11.3); if (fFixed < -1.5 && uLeafK < .999 && vn3(vPL * 5.5 + vec3(sd.y, 1.7, sd.x)) > max(uLeafK, ${LEAF_MIN}) * 1.1 - .05) discard; o0 = vec4(1.); }`;
+void main() { vec2 sd = vec2(fSeed * 37.1, fSeed * 11.3); if (fFixed < -1.5 && uLeafK < .999 && ${THIN} > max(uLeafK, ${LEAF_MIN}) * 1.1 - .05) discard; o0 = vec4(1.); }`;
 
 // ---------------------------------------------------------------- the blade plants (render/grass.js's blades, one plant's worth a shape)
 const BLADE_VS = HEAD + INST + `
