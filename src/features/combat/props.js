@@ -17,10 +17,13 @@
 // PH.frame() every rendered frame
 // (matrices, chunk meshes); PH.biomeChanged() (the world's meshes were disposed); PH.shove(q, vx, vy); PH.T; PH.dbg.
 import * as THREE from 'three';
-import {walkable, TERRAIN_ON} from '../../world/world.js';
+import {walkable, TERRAIN_ON, FAMS} from '../../world/world.js';
+import {gemChunk} from '../../world/props3d.js';   // (the true-3D crystal's shards: a procedural chunk, glowing; ?props2d=1 none, as before)
+import {flags} from '../../core/flags.js';
 
 const MOVABLE = new Set(['crate', 'barrel', 'barrel_x']);
-const DEBRIS = {crate: ['plank', 5], barrel: ['stave', 6], barrel_x: ['stave', 5], pot: ['shard', 5], crystal: ['stone', 0], chest: ['plank', 0]};
+const P2D = flags.get('props2d') === '1';
+const DEBRIS = {crate: ['plank', 5], barrel: ['stave', 6], barrel_x: ['stave', 5], pot: ['shard', 5], crystal: P2D ? ['stone', 0] : ['gem', 6], chest: ['plank', 0]};
 const CHUNK_KINDS = ['plank', 'stave', 'shard', 'stone', 'iron'];
 const R_BODY = .25;
 // the barrel models (glb bounds): height, radius
@@ -225,6 +228,7 @@ export async function createPropPhysics(host, core) {
       if (!g.boundingBox) g.computeBoundingBox();
       const b = g.boundingBox; CH[k] = {geo: g, c: new THREE.Vector3().addVectors(b.min, b.max).multiplyScalar(.5)};
     }));
+    if (!P2D) CH.gem = {geo: gemChunk(), c: new THREE.Vector3(0, .05, 0)};   // (world/props3d.js: a crystal shard, its gem family glowing)
   }
   await loadChunks().catch(e => console.warn('combat: chunk meshes', e));
   let pool = [];
@@ -232,7 +236,7 @@ export async function createPropPhysics(host, core) {
     const ch = CH[c.kind]; if (!ch) return null;
     let m = pool.pop();
     if (m) { m.setGeometry(ch.geo); m.setVisible(true); } else m = host.world.mesh(ch.geo);
-    m.flash = 0; return m;
+    m.flash = 0; m.setGlow?.(0, c.kind === 'gem' ? FAMS.indexOf('gem') : -1, .6); return m;
   }
   function release(c) { if (c.m) { c.m.setVisible(false); pool.push(c.m); c.m = null; } }
 

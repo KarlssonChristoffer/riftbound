@@ -19,7 +19,12 @@
 //            darker than the sand so it reads on it; ROLL frames a turn for 4 axes
 //            (the screen directions it can roll in, 45 deg apart; the opposite way plays them backward), with hysteresis
 //            on the axis so a wobble in the wind doesn't flick it. One atlas, built once. A camera-facing card with a sun
-//            shadow (the shadow is the tangle's own lace)
+//            shadow (the shadow is the tangle's own lace). (?props2d=1: these cards; else the TRUE-3D tangle below)
+//   3D       the true-3D pivot: a tangle of some two dozen curling twigs per variant as a real mesh (thick enough to read at
+//            30 px a metre: a thinner twig is all outline), the outer ones bleached straw (rope family), the inner ones weathered
+//            bark; it turns about its TRUE axis: a quaternion per weed (view state), turned each view step by its angular
+//            velocity (rolling: up x v / r, no slip; in the air it keeps turning, slowing; lodged it shivers about its last
+//            axis; afloat it turns half as fast). A pool of meshes (one per weed slot), per-frame shadow, hidden off screen
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle; F.weeds (the pool, tests), F.info().
 // OWNS: its weeds (a fixed pool), its atlas. READS: host.wind (at, level), host.entities.near (props: kind, r / rect, z,
 // gone / broken), host.elev / inStream, host.biome (id, hole, style.wallH), host.world.waterH, host.layout.stream,
@@ -32,7 +37,7 @@ import {flags} from '../core/flags.js';
 import {clamp, hypot2} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {ART} from '../world/biomes.js';
-import {pack} from '../world/kit3d.js';
+import {pack, geoOf, along} from '../world/kit3d.js';
 
 const TAU = Math.PI * 2, R = Math.random, rr = (a, b) => a + R() * (b - a);
 // ---------------------------------------------------------------- tunables
@@ -146,6 +151,44 @@ export async function create(host) {
   for (let i = 0; i < MAXN; i++) weeds.push({on: false, v: 0, r: .3, x: 0, y: 0, h: 0, gz: 0, vx: 0, vy: 0, vh: 0, th: 0, w: 0, bin: 0, sgn: 1, hopIn: 1,
     st: 'roll', lodge: 0, nx: 0, ny: 0, age: 0, wet: 0, fall: false, hit: null, kick: 0, tow: null});   // tow: on a lasso (F.snag)
   F.weeds = weeds;
+  // ================================================================ the true-3D tangles (see the header: 3D)
+  const P2D = flags.get('props2d') === '1', THREE = host.THREE;
+  const W3 = weeds.map(() => ({m: null, v: -1, q: new THREE.Quaternion(), ax: 1, az: 0, wx: 0, wy: 0, wz: 0}));   // per slot: mesh, variant shown, turn, last axis, angular velocity
+  let geo3 = null, pool3 = false;
+  function tangle3(seed, rad) {   // thick curling twigs inside the ball of radius rad (m): outer ones on its shell, three inner ones
+    const Rn = mulberry32(seed), L = [], n = Math.round(23 * (rad / .34) ** .8);
+    for (let i = 0; i < n; i++) {
+      const inner = i < 3;
+      let x, y, z; do { x = Rn() * 2 - 1; y = Rn() * 2 - 1; z = Rn() * 2 - 1; } while (x * x + y * y + z * z > 1 || x * x + y * y + z * z < .01);
+      const l0 = Math.hypot(x, y, z), sh = inner ? .3 + Rn() * .35 : .82 + Rn() * .16; x = x / l0 * sh; y = y / l0 * sh; z = z / l0 * sh;
+      let dx = Rn() * 2 - 1, dy = Rn() * 2 - 1, dz = Rn() * 2 - 1;
+      { const k = (dx * x + dy * y + dz * z) / (sh * sh); dx -= k * x; dy -= k * y; dz -= k * z; const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l; }
+      const curl = (Rn() * 2 - 1) * 3.5, segs = 9 + (Rn() * 7 | 0), step = .16, tr = (inner ? .024 : .028) * (.85 + Rn() * .3);
+      for (let s = 0; s < segs; s++) {
+        const l = Math.hypot(x, y, z) || 1, ux = x / l, uy = y / l, uz = z / l;
+        dx += ((uy * dz - uz * dy) * curl + (Rn() - .5) * 1.4) * step; dy += ((uz * dx - ux * dz) * curl + (Rn() - .5) * 1.4) * step; dz += ((ux * dy - uy * dx) * curl + (Rn() - .5) * 1.4) * step;
+        const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+        let nx = x + dx * step, ny = y + dy * step, nz = z + dz * step; const r2 = Math.hypot(nx, ny, nz), lim = s > segs - 2 ? 1.08 : 1; if (r2 > lim) { nx *= lim / r2; ny *= lim / r2; nz *= lim / r2; }
+        L.push({...along([x * rad, y * rad, z * rad], [nx * rad, ny * rad, nz * rad], tr * (1 - s / segs * .4), tr * (1 - (s + 1) / segs * .4), 4), fam: inner ? 'bark' : 'rope', bias: (Rn() - .5) * .3});
+        x = nx; y = ny; z = nz;
+      }
+    }
+    return geoOf(L);
+  }
+  // per view step: each weed's turn from its motion (see the header)
+  const DQ = new THREE.Quaternion(), AX3 = new THREE.Vector3();
+  function spin3(dt) {
+    for (let i = 0; i < weeds.length; i++) {
+      const q = weeds[i], S = W3[i]; if (!q.on) continue;
+      if (q.st === 'lodge') { const w = q.w; S.wx = S.ax * w; S.wy = 0; S.wz = S.az * w; }   // (shivering about its last axis)
+      else if (q.h < .02 && q.vh <= 0) {   // rolling (or afloat, half as fast): up x v / r
+        const k = (q.st === 'float' ? .5 : 1) / q.r; S.wx = q.vy * k; S.wy = 0; S.wz = -q.vx * k;
+        const l = Math.hypot(S.wx, S.wz); if (l > .3) { S.ax = S.wx / l; S.az = S.wz / l; }
+      } else { const k = Math.max(0, 1 - dt * .6); S.wx *= k; S.wy *= k; S.wz *= k; }   // in the air: it keeps turning, slowing
+      const w = Math.hypot(S.wx, S.wy, S.wz); if (w < 1e-5) continue;
+      DQ.setFromAxisAngle(AX3.set(S.wx / w, S.wy / w, S.wz / w), w * dt); S.q.premultiply(DQ);
+    }
+  }
   let biomeOn = false, T = 0, spawnIn = 1, wanted = 0, count = 0, waterH = -.18, dustF = null, wallH = 1.2, arrows = null;   // (dustF: the dust feature, looked up once)
   // the player, read once a view step (host.player's getters turn his view frame into the world's on every read)
   const PL = {ok: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, roll: false};
@@ -393,6 +436,7 @@ export async function create(host) {
       if (!q.on) continue;
       for (let s = 0; s < steps && q.on; s++) step(q, h, lv);
       if (!q.on) continue;
+      if (!P2D && q.age <= h * steps + 1e-6) W3[weeds.indexOf(q)].q.setFromAxisAngle(AX3.set(0, 1, 0), q.th);   // (just spawned: a fresh turn)
       const out = outside(q.x, q.y);
       // gone: well off-screen (not while it is just coming in), too old off-screen, out of the map
       if ((out > TUNE.gone && q.age > 3) || out > TUNE.gone + 6 || (q.age > TUNE.life && out > .5) || (q.wet > 25 && out > .5) || q.x < -3 || q.x > ctx.WM + 3 || q.y < -3) { drop(q); continue; }
@@ -400,10 +444,25 @@ export async function create(host) {
     }
     if (count < wanted) { spawnIn -= dt * Math.max(.5, lv); if (spawnIn <= 0) { if (spawn()) count++; spawnIn = rr(TUNE.every[0], TUNE.every[1]); } }
     else spawnIn = Math.max(spawnIn, .5);
+    if (!P2D) spin3(dt);
     F.ms = F.ms * .95 + (performance.now() - t0) * .05;
   };
+  const M3 = new THREE.Matrix4(), P3 = new THREE.Vector3(), S3 = new THREE.Vector3(1, 1, 1);
+  function hide3() { if (pool3) for (const S of W3) if (S.m && S.m.gm.visible) S.m.setVisible(false); }
   F.frame = () => {
-    if (!F.on || !biomeOn || !count) return;
+    if (!F.on || !biomeOn || !count) { hide3(); return; }
+    if (!P2D) {   // the 3D tangles: the pool's meshes (made after a world's build: it disposes them), posed from each weed's turn
+      if (!geo3) geo3 = TUNE.size.map((rad, v) => tangle3(911 + v * 37, rad));
+      if (!pool3) { pool3 = true; for (const S of W3) { S.m = host.world.mesh(geo3[0]); S.m.setVisible(false); S.v = 0; } }
+      for (let i = 0; i < weeds.length; i++) {
+        const q = weeds[i], S = W3[i], show = q.on && G.onScreen(q.x, q.gz + q.h + q.r, q.y, 24);
+        if (show !== S.m.gm.visible) S.m.setVisible(show);
+        if (!show) continue;
+        if (S.v !== q.v) { S.v = q.v; S.m.setGeometry(geo3[q.v]); }
+        S.m.setMatrix(M3.compose(P3.set(q.x, q.gz + q.h + q.r, q.y), S.q, S3));
+      }
+      return;
+    }
     for (const q of weeds) {
       if (!q.on) continue;
       const y = q.gz + q.h;
@@ -425,8 +484,8 @@ export async function create(host) {
   };
   F.tow = (q, x, y) => { if (q.on && q.tow) { q.tow.x = x; q.tow.y = y; q.age = 0; } return q.on; };
   F.unsnag = (q, up = 1.2) => { if (!q.tow) return; q.tow = null; q.vh = Math.max(q.vh, up); };
-  F.biomeChanged = () => { for (const q of weeds) { q.on = false; q.tow = null; } count = 0; spawnIn = 1; };
-  F.toggle = () => { F.on = !F.on; if (!F.on) F.biomeChanged(); return F.on; };
+  F.biomeChanged = () => { for (const q of weeds) { q.on = false; q.tow = null; } count = 0; spawnIn = 1; pool3 = false; for (const S of W3) S.m = null; };   // (the world's rebuild disposed the meshes)
+  F.toggle = () => { F.on = !F.on; if (!F.on) { hide3(); for (const q of weeds) { q.on = false; q.tow = null; } count = 0; spawnIn = 1; } return F.on; };
   F.info = () => ({on: F.on, desert: biomeOn, wanted, count, weeds: weeds.filter(q => q.on).map(q => ({x: +q.x.toFixed(2), y: +q.y.toFixed(2), h: +q.h.toFixed(2), st: q.st, v: +hypot2(q.vx, q.vy).toFixed(2), age: +q.age.toFixed(1)}))});
   F.TUNE = TUNE;
   return F;

@@ -99,6 +99,7 @@ uniform float uLeafK;     // leaves only: how full the crowns are this season (1
 uniform vec3 uCover;      // x: amount (0 = none), y: up threshold, z: cover family
 uniform vec2 uEmitFam;    // families that glow in this biome (-1 = none)
 uniform vec4 uBurn;       // burning wood (mesh.burn): char, ember glow, time (s), ash; 0 = untouched
+uniform vec4 uGlowF, uGlowK;   // (mesh.setGlow) up to four families that glow on THIS mesh (-1 = none) and how much (emit = tone x k)
 // LEAF CLUSTERS (U.leaf; ?leafcells=0 the old blotches): the leaves' tone broken into Worley cells in the model's frame, x m
 // across (~4 art px), each a cluster of leaves lit on its upper part (y: how much) with a dark crescent along its lower rim
 // where it meets the next (z: its width in cell units), so a crown reads as many small leaf clusters (the user's reference
@@ -199,7 +200,9 @@ void main() {
   }
   o0 = vec4(alb, float(2 * 4 + tone) / 255.);
   o1 = vec4(n, uObj);
-  o2 = vec4((glow ? alb : vec3(0.)) + vec3(uFlash) + em, fPart * 32. + fam);
+  // a family this mesh lights itself (the true-3D props: a crystal, a candle's flame, a lantern's glass, a mushroom's cap)
+  float gk = abs(fam - uGlowF.x) < .5 ? uGlowK.x : abs(fam - uGlowF.y) < .5 ? uGlowK.y : abs(fam - uGlowF.z) < .5 ? uGlowK.z : abs(fam - uGlowF.w) < .5 ? uGlowK.w : 0.;
+  o2 = vec4((glow ? alb : vec3(0.)) + alb * gk + vec3(uFlash) + em, fPart * 32. + fam);
 }`;
 
 // THE MOVING WATER (SURF_FS). world.js bakes the water texture uWater (its layout is documented there: state, base tone, speed,
@@ -1488,6 +1491,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     return v;
   };
   const meshMat = (obj, seed, sw = null, aut = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
+    uGlowF: {value: new THREE.Vector4(-1, -1, -1, -1)}, uGlowK: {value: new THREE.Vector4()},
     uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
@@ -1710,6 +1714,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
       setGeometry(g) { if (gm.geometry !== g) { if (caster()) hDirty = true; if (inStatic()) staticSoon(0); } gm.geometry = g; sm.geometry = g; },
       // burning wood: char 0..1 (blackens), glow 0..1 (ember veins), t (s: the veins crawl), ash 0..1 (settles on top)
       burn(char = 0, glow = 0, t = 0, ash = 0) { gm.material.uniforms.uBurn.value.set(char, glow, t, ash); },
+      // a family that lights itself on this mesh (MESH_FS uGlowF / uGlowK): slot 0..3, the family's index (world.js FAMS; -1 none), k (emit = its tone x k)
+      setGlow(slot, fam, k) { const u = gm.material.uniforms; u.uGlowF.value.setComponent(slot, fam); u.uGlowK.value.setComponent(slot, k); },
       setLean(x, y) { if (!lean || (lean.value.x === x && lean.value.y === y)) return; lean.value.set(x, y); if (sm.layers.isEnabled(1)) hDirty = true; },
       // the leaves' own dance (art px, x along the screen / y toward the camera) and the light rolling through them:
       // (kx, kz: rad per m along the wind, phase, amount of tone bias)

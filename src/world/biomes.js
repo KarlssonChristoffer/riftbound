@@ -1668,7 +1668,9 @@ function brazier(p, ctx, S) {   // p.model (the 3D view): the bowl and tripod ar
 }
 function torch(p, ctx, S) {   // wall torch: the bracket reaches right to the east wall
   // p.sconce (the 3D view): stick + cup only; its bracket is a real 3D arm there, so it reads right from every side.
+  // p.sconce + p.model (the true-3D pivot, lights.js): the stick and cup are 3D too and lights.js gives its light: no card at all.
   // p.unlit: a charred tip, no flame, no light (a fire arrow lights it)
+  if (p.sconce && p.model) return null;
   const m = M(ctx), reach = p.sconce ? 0 : Math.round(.6 * ctx.PPM), W = Math.max(9, reach + 6), H = m.H(1.85), sx = 4;
   return build(W, H, [sx, H], (P, E) => {
     const b = H - 1, ay = b - m.H(1.05), ty = b - m.H(1.5);
