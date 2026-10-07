@@ -465,7 +465,7 @@ export async function create(host) {
       const it = host.itemOf(p), m = it?.live; if (!m?.burn) continue;
       const u = b.t / b.dur, cr = crumbleOf(b);
       m.burn(.04 + sstep(0, .75, u), clamp(u * 6, 0, 1) * (.75 + .25 * Math.sin(T * 3 + b.sd)), T + b.sd, sstep(.65, 1, u) * .4);
-      if (cr > 0 && !it.manageMatrix) {   // it sags and slumps as it burns through
+      if (cr > 0 && !it.manageMatrix && p.kind !== 'dummy') {   // it sags and slumps as it burns through (a dummy goes out: world/props3d.js, its mesh stays up)
         _ax.set(Math.cos(b.sd), 0, Math.sin(b.sd)); _q.setFromAxisAngle(_ax, cr * .14);
         m.setMatrix(_M.compose(_v.set(p.x, (p.z || 0) + (p.h || 0), p.y), _q, _s.set(1 + cr * .14, 1 - cr * .6, 1 + cr * .14)));
       }

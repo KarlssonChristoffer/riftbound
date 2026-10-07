@@ -52,6 +52,7 @@ import {clamp, smooth, hash3 as hsh, hypot2, hypot3} from '../core/mathx.js';   
 import {mulberry32} from '../core/rng.js';
 import {hexU32 as rgba} from '../core/color.js';
 import {fallStage} from '../core/autumn.js';
+import {ARM as ARM3} from '../world/props3d.js';   // the true-3D dummy's arm (its strips' knots)
 
 const TAU = Math.PI * 2;
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -703,12 +704,24 @@ export async function create(host) {
   function strips(dp, pal) {   // cloth strips tied to a target dummy's arm (and a short one on the other arm now and then)
     const out = [], rift = biome === 'rift', arms = rift ? [[9, .9, .42]] : [[11, .87, .46]];
     if (!rift && hsh(dp.x * 10 | 0, dp.y * 10 | 0) > .45) arms.push([-11, .87, .3]);
+    // (the true-3D dummy, world/props3d.js: the knot is on its real arm bar (props3d ARM; the rift's crystal: by its rune ring), turned
+    // and rocked with the mesh; each strip its own card at its knot, so the dummy's body hides the one behind it)
+    const D3 = () => { const t = host.itemOf(dp); return t && t.pm && t.live ? t.live.gm.matrix.elements : null; };
     for (const [ox, oh, len] of arms) {
       const pc = grid({cols: 2, rows: 6, org: [dp.x + ox / ctx.PPM, dp.y + .02, (dp.z || 0) + oh], ax: [.07, 0, 0], ay: [0, 0, -len], pin: r => r === 0,
         k: 3.2, flut: 1.2, waves: .7, freq: 2.4, bend: .4, outline: 'out', pat: uv => pal.rime && uv[1] < .15 ? 1 + 128 : 0});
       pc.ramp0 = pal.strip;
-      // the dummy is a camera-facing card, so its arm is always on the screen's x: the strip's knot follows the camera
+      const lx = Math.sign(ox) * (rift ? .25 : ARM3.half - .1), lh = rift ? .93 : ARM3.h;
       pc.pinFn = q => {
+        const e = D3();
+        if (e) {   // the 3D dummy: its arm, in the mesh's frame (x along the arm), the mesh's turn and rock, at the dummy's place now
+          for (let k = 0; k < 2; k++) {
+            const x = lx + k * .07 - .035;
+            q.P0[k * 3] = dp.x + e[0] * x + e[4] * lh; q.P0[k * 3 + 1] = dp.y + e[2] * x + e[6] * lh; q.P0[k * 3 + 2] = (dp.z || 0) + e[1] * x + e[5] * lh;
+          }
+          return;
+        }
+        // the dummy is a camera-facing card (?props2d=1), so its arm is always on the screen's x: the strip's knot follows the camera
         const wob = dp.wob ? Math.round(Math.sin(dp.wob * 18) * dp.wob * 2) / ctx.PPM : 0;
         for (let k = 0; k < 2; k++) {
           const o = ox / ctx.PPM + wob + k * .07 - .035;
@@ -719,7 +732,9 @@ export async function create(host) {
     }
     const it = item('strips', dp.x, dp.y + .02, out, pal);
     it.dummy = dp;
-    it.groups = [{pieces: out, box: null, slot: null, anchor: () => [dp.x + FX * .06, dp.y + FY * .06, (dp.z || 0) + .9]}];   // just in front of the dummy
+    const A0 = [0, 0, 0];   // (the anchors' kept arrays: no array a frame)
+    it.groups = D3() ? out.map(pc => { const A = [0, 0, 0]; return {pieces: [pc], box: null, slot: null, anchor: () => { A[0] = (pc.P[0] + pc.P[3]) / 2 + FX * .05; A[1] = (pc.P[1] + pc.P[4]) / 2 + FY * .05; A[2] = pc.P[2]; return A; }}; })
+      : [{pieces: out, box: null, slot: null, anchor: () => { A0[0] = dp.x + FX * .06; A0[1] = dp.y + FY * .06; A0[2] = (dp.z || 0) + .9; return A0; }}];   // just in front of the dummy
     return it;
   }
   function lantern(x, y, pal, i) {
@@ -1181,6 +1196,8 @@ export async function create(host) {
       if (e.type === 'arrow.hit' && e.prop && e.prop.kind === 'dummy') {   // the strips jump with the hit
         const v = Math.hypot(e.vx || 0, e.vy || 0) || 1;
         for (const it of decor) if (it.dummy === e.prop) for (const pc of it.pieces) kick(pc, (e.vx || 0) / v * 1.6, (e.vy || 0) / v * 1.2, .8, 1);
+      } else if (e.type === 'combat.hit' && e.who && e.who.kind === 'dummy' && (e.dx || e.dy)) {   // the 3D dummy rocks the way the shot went (world.js push)
+        host.world.push?.(e.who, e.dx, e.dy);
       } else if (e.type === 'combat.explode') {   // a blast wave: foliage whips, cloth billows away from it
         const r = (e.r || 2.4) * 2.5;
         const S = SHED[biome], loose = S?.kind === 'leaf' ? leafRate(S) : 0;

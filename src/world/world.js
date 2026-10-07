@@ -6,7 +6,8 @@
 //   props    live 3D meshes (Blender prop kit -> glb, toned on the GPU with the pixelizer's ramps and rules) or, for the
 //            A/B test, the same props pre-rendered at 16 yaws (cards); trees are grown in the browser (trees3d.js: the
 //            biomes it has species for; trees3d: false = the painted cards); everything else the kit doesn't model
-//            (bushes, tufts, braziers, torches, dummies, brutes, crystal) stays a painted billboard card
+//            (bushes, tufts, braziers, torches, brutes) stays a painted billboard card; the dummy and the crystal are
+//            procedural meshes (world/props3d.js; ?props2d=1: their cards)
 //   lights   from the biome's sprites (braziers, torches, crystals) and ground (lava, runes), in metres
 //   leaves   fallen leaves lie under and downwind of the 3D trees: a density map baked here (LITTER, bakeLitter) that gfx.js SURF_FS
 //            draws from, by how far autumn has gone (the season looks: gfx.js setGround). The plants' autumn: plantOf, below
@@ -49,6 +50,7 @@ import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
 import {bridgeGeometry} from './bridge3d.js';
+import {propModel} from './props3d.js';   // the true-3D props: the dummy and the crystal as live meshes (?props2d=1: their cards)
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
 import {flags} from '../core/flags.js';
@@ -883,7 +885,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // every item starts with ALL its fields (one shape: the per-frame loop's loads stay monomorphic). k*: what update() last
   // built the live mesh from (kv: the mesh's matrix version), kvis / kfl: the visibility and flash it last set
   const ITEM0 = {live: null, card: null, yaw: null, lsp: null, lrec: null, emSp: null, lean: null, manageMatrix: false,
-    kx: NaN, ky: NaN, kz: NaN, kw: NaN, ks: NaN, kl: NaN, km: null, kv: -1, kvis: null, kfl: NaN, veil: false};
+    kx: NaN, ky: NaN, kz: NaN, kw: NaN, ks: NaN, kl: NaN, km: null, kv: -1, kvis: null, kfl: NaN, veil: false, pm: null};   // pm: a props3d.js model (the dummy, the crystal)
   let litterDirty = false;   // fallen leaves: a tree joined or left (bakeNow, below)
   let nextId = 10;
   const SHADOWLESS = new Set(['tuft', 'reed', 'fern']);
@@ -905,7 +907,19 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // procedural trees (trees3d.js): a live mesh instead of the painted card, turned and scaled per tree (it.pose)
   const famOf = name => Math.max(0, FAMS.indexOf(name));
   const treeOf = p => trees3d && p.kind === 'tree' && !p.painted ? treeModel(p, biome.id, famOf) : null;
-  const placeOf = (it, x, h, z, M) => it.pose ? M.makeRotationY(it.pose.yaw).scale(_scl.setScalar(it.pose.scale)).setPosition(x, h, z) : M.makeTranslation(x, h, z);
+  const placeOf = (it, x, h, z, M) => it.pose ? M.makeRotationY(it.pose.yaw).scale(_scl.setScalar(it.pose.scale)).setPosition(x, h, z) : it.pm ? placePm(it, x, h, z, M, 0) : M.makeTranslation(x, h, z);
+  // a props3d.js model (?props2d=1: none, the cards): turned to its yaw; one that rocks when hit (the dummy) tipped about its foot by
+  // w TILT steps (its wobble, update()) the way the shot went (push(), below) or, not known, back from its front
+  const P2D = flags.get('props2d') === '1', TILT = {k: .012, steps: 8}, PUSH = new WeakMap();
+  const PQ = new THREE.Quaternion(), PQY = new THREE.Quaternion(), PAX = new THREE.Vector3(), PV = new THREE.Vector3(), PUP = new THREE.Vector3(0, 1, 0), PONE = new THREE.Vector3(1, 1, 1);
+  const pmOf = p => P2D ? null : propModel(p, biome, layout);
+  function placePm(it, x, h, z, M, w) {
+    PQY.setFromAxisAngle(PUP, it.pm.yaw);
+    if (w) { const d = PUSH.get(it.p), dx = d ? d[0] : -Math.sin(it.pm.yaw), dy = d ? d[1] : -Math.cos(it.pm.yaw); PQ.setFromAxisAngle(PAX.set(dy, 0, -dx), w * TILT.k).multiply(PQY); }
+    else PQ.copy(PQY);
+    return M.compose(PV.set(x, h, z), PQ, PONE);
+  }
+  const pmLive = (it, m) => { if (!it.pm.occlude) m.sm.layers.disable(1); if (it.pm.glow) m.setGlow(0, famOf(it.pm.glow), it.pm.glowK(it.p.stage)); };
   // a crown overhangs: in the top-down height map it would stand as a solid pillar and black out the light under it
   // (props cast into the cached static sun shadow, gfx mesh {static}; the swaying 3D trees cast every frame). A tree brings its
   // autumn ramps (trees3d.js B.autumn): its crown turns spray by spray with the season (gfx.js MESH_FS)
@@ -938,15 +952,17 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const r = watchtowerRun(TOWER_PLAN, wo, TF ? TF.H : () => 0);
     for (const p of props) if (p.kind === 'watchtower') own(p, r.geo, r.top - (p.z || 0)); else if (p.kind === 'towerwall') own(p, null, colTop(TOWER_PLAN, p.x, p.y, p.z || 0));
   }
-  const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose, static: !it.pose, autumn: it.pose?.autumn}); if (it.pose) m.sm.layers.disable(1); return m; };
+  const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: !!it.pose, static: !it.pose, autumn: it.pose?.autumn}); if (it.pose) m.sm.layers.disable(1); if (it.pm) pmLive(it, m); return m; };
   for (const p of props) {
     const z0 = p.z || 0;
     if (p.outside && biome.hole?.(p.x, p.y, ctxO)) continue;   // over the ravine / in the stream
     const sp = biome.sprite(p, ctxO);
-    const tm = treeOf(p), st = stateOf(p), geo = wallGeo.has(p) ? wallGeo.get(p) : tm ? tm.geo : st && haveGlb ? await glbGeometry(loader, st) : null;
+    const tm = treeOf(p), st = stateOf(p), pm = !tm && !st && !wallGeo.has(p) ? pmOf(p) : null;
+    const geo = wallGeo.has(p) ? wallGeo.get(p) : tm ? tm.geo : pm ? pm.geo(p.stage) : st && haveGlb ? await glbGeometry(loader, st) : null;
     if (wallGeo.has(p) && !geo) continue;   // (a wall's piece with nothing left standing in it)
     const obj = WALL_ID[p.kind] ?? nextId++;
     const it = {p, st, obj, sp: null, hover: 0, pose: tm, ...ITEM0};
+    it.pm = pm;
     if (geo) {
       it.live = liveOf(it, geo, p.x, z0, p.y);
       const yw = yawIdx && !wallGeo.has(p) && yawOf(p, st);   // (a stone wall's piece has no pre-renders)
@@ -965,9 +981,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // an item for a prop created later (a feature adds props to world.props: extra crates, respawns)
   async function addItem(p) {
     if (byProp.has(p)) return byProp.get(p);
-    const tm = treeOf(p), st = stateOf(p), geo = tm ? tm.geo : st && haveGlb ? await glbGeometry(loader, st) : null, sp = biome.sprite(p, ctxO), obj = nextId++;
+    const tm = treeOf(p), st = stateOf(p), pm = !tm && !st ? pmOf(p) : null, geo = tm ? tm.geo : pm ? pm.geo(p.stage) : st && haveGlb ? await glbGeometry(loader, st) : null, sp = biome.sprite(p, ctxO), obj = nextId++;
     if (p.dead || byProp.has(p)) return byProp.get(p) || null;   // gone (or added) while the model loaded
     const it = {p, st, obj, sp: null, hover: 0, pose: tm, ...ITEM0};
+    it.pm = pm;
     if (geo) it.live = liveOf(it, geo, p.x, p.z || 0, p.y);
     else if (sp) { it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind), plant: plantOf(p)}); it.sp = sp; } else return null;
     items.push(it); byProp.set(p, it); if (p.kind === 'tree') litterDirty = true; return it;
@@ -1047,13 +1064,16 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         if (it.lsp !== sp) { it.lsp = sp; it.lrec = lightRecs(it, sp); }
         for (const o of it.lrec) { o.x = p.x + (o.l.dx || 0); o.y = base + (o.l.h || 0); o.z = p.y + (o.l.dy || 0); lights.push(o); }
       }
-      const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, flash = Math.min(1, Math.max(p.flash || 0, it.hover || 0));
+      // (a props3d.js model that rocks when hit: its wobble in TILT steps, a turn about its foot (first with the shot), not the cards' 2 px shake)
+      const tilt = it.pm !== null && it.pm.tilt, wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * (tilt ? -TILT.steps : 2)) : 0, flash = Math.min(1, Math.max(p.flash || 0, it.hover || 0));
       const useYaw = mode === 'yaw' && it.yaw && !p.stage && !it.manageMatrix && !p.gone && !it.veil;
       if (it.live) {
         const L = it.live;
         if (p.x !== it.kx || p.y !== it.ky || z0 !== it.kz || wob !== it.kw || p.stage !== it.ks || p.lid !== it.kl || it.manageMatrix !== it.km || L.ver !== it.kv) {
           const st = stateOf(p); if (st && st !== it.st) setState(it, st);
-          if (!it.manageMatrix) L.setMatrix(placeOf(it, p.x + wob / PPM, z0, p.y, M));
+          if (it.pm !== null && p.stage !== it.ks) { L.setGeometry(it.pm.geo(p.stage)); if (it.pm.glow) L.setGlow(0, famOf(it.pm.glow), it.pm.glowK(p.stage)); }   // (the crystal cracks, breaks, grows back)
+          if (it.pm !== null) { if (!it.manageMatrix) L.setMatrix(placePm(it, tilt ? p.x : p.x + wob / PPM, z0, p.y, M, tilt ? wob : 0)); }
+          else if (!it.manageMatrix) L.setMatrix(placeOf(it, p.x + wob / PPM, z0, p.y, M));
           it.kx = p.x; it.ky = p.y; it.kz = z0; it.kw = wob; it.ks = p.stage; it.kl = p.lid; it.km = it.manageMatrix; it.kv = L.ver;
         }
         if (it.pose) leanTree(it, yaw);
