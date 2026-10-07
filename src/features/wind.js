@@ -52,7 +52,9 @@ import {clamp, smooth, hash3 as hsh, hypot2, hypot3} from '../core/mathx.js';   
 import {mulberry32} from '../core/rng.js';
 import {hexU32 as rgba} from '../core/color.js';
 import {fallStage} from '../core/autumn.js';
-import {ARM as ARM3} from '../world/props3d.js';   // the true-3D dummy's arm (its strips' knots)
+import {ARM as ARM3, lanternParts} from '../world/props3d.js';   // the true-3D dummy's arm (its strips' knots), the 3D lantern
+import {geoOf, M4, box, along} from '../world/kit3d.js';
+import {FAMS} from '../world/world.js';
 
 const TAU = Math.PI * 2;
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -667,6 +669,8 @@ export async function create(host) {
     const it = item('pennant', tp.x, tp.y + .02, [pc], pal);
     const mp = metalPole(pal.metal, Math.round(mast * ctx.PPMH));
     it.anchor = [tp.x, tp.y + .02, top]; it.posts = [[DA.add(mp.img, mp.px, mp.py), tp.x, tp.y + .01, hTop]];
+    if (D3) D3.push({...along([tp.x, hTop - .05, tp.y + .01], [tp.x, top + .1, tp.y + .01], .024, .018, 6), fam: 'metal'},   // the mast and its finial
+      {g: new host.THREE.IcosahedronGeometry(.035, 0), m: M4([tp.x, top + .14, tp.y + .01]), fam: 'metal', bias: .3});
     return it;
   }
   function flagString(A, Bp, pal) {   // prayer flags on a sagging rope between two poles
@@ -698,6 +702,7 @@ export async function create(host) {
     for (const Qp of [A, Bp]) {   // a pole shared by two ropes is drawn once
       const key = Qp.x.toFixed(2) + ',' + Qp.y.toFixed(2); if (poleKeys.has(key)) continue; poleKeys.add(key);
       it.posts.push([post, Qp.x, Qp.y, 0]); it.shadow.push(Qp.x, Qp.y);
+      if (D3) post3d(Qp.x, Qp.y, H + .05);
     }
     return it;
   }
@@ -747,6 +752,12 @@ export async function create(host) {
     L.bx = L.ox = L.ax; L.by = L.oy = y; L.bz = L.oz = L.az - chain;
     const it = item('lantern', x, y, [], pal);
     it.posts = [[post, x, y, 0]]; it.shadow = [x, y];
+    if (D3) {   // the post, its arm east with a brace, the hook the chain hangs from
+      post3d(x, y, L.armH + .05);
+      D3.push(box('wood', [L.ax - x + .03, .05, .05], [(x + L.ax) / 2 + .01, L.armH, y], [0, 0, 0], {bias: .1}));
+      D3.push({...along([x + .03, L.armH - .24, y], [x + .2, L.armH - .02, y], .016, .016, 4), fam: 'wood', bias: -.1});
+      D3.push({...along([L.ax, L.armH - .02, y], [L.ax, L.az, y], .01, .01, 4), fam: 'metal'});
+    }
     it.lantern = L; lanterns.push(L); return it;
   }
   function item(kind, x, y, pieces, pal) {
@@ -758,8 +769,28 @@ export async function create(host) {
     return it;
   }
   const poleKeys = new Set();
+  // THE TRUE-3D DECOR (?props2d=1: the decor atlas's sprites as before): the prayer-flag poles, the lantern posts with their arms,
+  // braces and hooks, the towers' pennant masts: one static mesh (D3: its parts while building, then merged; it casts into the
+  // cached static sun shadow); each hanging lantern its own mesh, hung along its chain from the hook (lanternParts: its glass lights
+  // itself), posed every frame from the pendulum. The cloth, ropes, rods and chains are as before. The world's rebuild disposes them
+  const P2D = flags.get('props2d') === '1';
+  let D3 = null, deco3 = [];
+  const post3d = (x, y, H) => D3.push(box('wood', [.085, H, .085], [x, H / 2, y], [0, .4, 0]), box('metal', [.11, .045, .11], [x, H + .02, y], [0, .4, 0], {bias: .2}),
+    {g: new host.THREE.IcosahedronGeometry(.03, 0), m: M4([x, H + .06, y]), fam: 'metal', bias: .3});
+  const lanGeo = P2D ? null : geoOf(lanternParts());
+  function build3d() {
+    if (D3 && D3.length) { const m = host.world.mesh(geoOf(D3), null, {static: true}); m.setVisible(W.on); deco3.push(m); }
+    D3 = null;
+    for (const L of lanterns) { L.m = host.world.mesh(lanGeo); L.m.setGlow(0, FAMS.indexOf('flame'), 1); L.m.setVisible(W.on); deco3.push(L.m); }
+  }
+  const LQ = new host.THREE.Quaternion(), LPV = new host.THREE.Vector3(), LDV = new host.THREE.Vector3(), LUP = new host.THREE.Vector3(0, 1, 0), LS1 = new host.THREE.Vector3(1, 1, 1), LMX = new host.THREE.Matrix4();
+  function poseLantern(L) {   // hung along its chain: its ring at the chain's end, its up toward the hook
+    LDV.set(L.ax - L.bx, L.az - L.bz, L.y - L.by).normalize(); LQ.setFromUnitVectors(LUP, LDV);
+    L.m.setMatrix(LMX.compose(LPV.set(L.bx, L.bz, L.by), LQ, LS1));
+  }
   function buildDecor() {
     needDecor = false; decor = []; lanterns = []; poleKeys.clear();
+    deco3 = []; D3 = P2D ? null : [];   // (the old meshes went with the world's rebuild)
     const pal = PAL[biome] || PAL.ruins, PLAY = ctx.PLAY, props = host.props, marks = ctx.layout?.marks || [];
     const cx = (PLAY.x0 + PLAY.x1) / 2, cy = (PLAY.y0 + PLAY.y1) / 2;
     const add = it => { if (it) decor.push(it); };
@@ -781,6 +812,7 @@ export async function create(host) {
       if (P1 && P1.length > 2) add(lantern(P1[1][0] + (P1[2][0] - P1[1][0]) * .65 + .5, P1[1][1] + (P1[2][1] - P1[1][1]) * .65 - .7, pal, li++));
     }
     for (const p of props) if (p.kind === 'dummy' && p.target) add(strips(p, pal));
+    if (!P2D) build3d();
     DA.build();
     resetCloth();
     for (let i = 0; i < 90; i++) stepDecor(1 / 60, true);   // settle: hang still before the first frame
@@ -972,6 +1004,7 @@ export async function create(host) {
     host.point(x1 + ux * dx, y1 + uy * dx, r.h, C3(r.m[0])); host.point(x1 + ux * dx, y1 + uy * dx, r.h - dh, C3(r.m[2]));
   }
   function drawLantern(L) {
+    if (L.m) { poseLantern(L); host.line(L.ax, L.y, L.az, L.bx, L.by, L.bz, C3(L.pal.metal[3])); return; }   // the 3D lantern: its chain is still a world line
     const pal = L.pal, Rm = pal.wood, M = pal.metal, dh = 1 / ctx.PPMH, dx = 1 / ctx.PPM, x2 = L.x + (L.armPx + 2) * dx;
     // arm east from the post with its brace and the hook (the arena's sprite rows 3-5), then the chain
     host.line(L.x + 2 * dx, L.y, L.armH, x2, L.y, L.armH, C3(Rm[1])); host.line(L.x + 2 * dx, L.y, L.armH - dh, x2, L.y, L.armH - dh, C3(Rm[3]));
@@ -985,7 +1018,7 @@ export async function create(host) {
   const SPD = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0, shadow: true}, SPC = {img: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, px: 0, py: 0, x: 0, y: 0, h: 0};
   function drawItem(it, g) {
     if (it.shadow) for (let i = 0; i < it.shadow.length; i += 2) shadowAt(g, it.shadow[i], it.shadow[i + 1]);
-    for (const [e, x, y, h] of it.posts) { const o = SPD; o.img = DA.cv; o.em = DA.ecv; o.sx = e.sx; o.sy = e.sy; o.sw = e.sw; o.sh = e.sh; o.px = e.px; o.py = e.py; o.x = x; o.y = y; o.h = h; host.sprite(o); }
+    if (P2D) for (const [e, x, y, h] of it.posts) { const o = SPD; o.img = DA.cv; o.em = DA.ecv; o.sx = e.sx; o.sy = e.sy; o.sw = e.sw; o.sh = e.sh; o.px = e.px; o.py = e.py; o.x = x; o.y = y; o.h = h; host.sprite(o); }
     // a wall banner hangs on a wall's face: from the other side the wall hides it. (Cards and world lines carry a depth
     // bias of ~0.15 m; the banner's top hem and rod sit closer than that to the wall's top edge and would show over it.)
     const behindWall = it.face !== null && it.face[0] * FX + it.face[1] * FY < -.02;
@@ -1248,7 +1281,7 @@ export async function create(host) {
     fst.clear(); flames.clear(); parts.length = 0; fol = null;
   }
   Object.assign(W, {
-    toggle() { W.on = !W.on; if (!W.on) { W.gust = 0; W.ms = 0; parts.length = 0; } return W.on; },
+    toggle() { W.on = !W.on; if (!W.on) { W.gust = 0; W.ms = 0; parts.length = 0; } for (const m of deco3) m.setVisible(W.on); return W.on; },   // (off: no decor, as the sprites were)
     // the strength: B cycles the modes (dev key), the pause menu lists them
     onKey(k, e) { if (k !== 'b' || e?.shiftKey) return false; setMode(MODES[(MODES.indexOf(W.mode) + 1) % MODES.length]); return true; },   // (Shift+B: windlines.js)
     settings: () => [{label: 'Wind strength', options: MODES, get: () => W.mode, set: setMode}],
