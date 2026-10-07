@@ -122,16 +122,19 @@ export function createLiveBody(LM, rig, slot, G) {
   const {NB, NS, SEG, MZ, GUN, HAND_R, ARM_R} = LM;
   const W = new Float64Array(NB * 7), TW = new Float64Array(NB * 7), PW = new Float64Array(NB * 7);
   const MATS = new Float32Array(NS * 12), TB = new Float64Array(NS * 3);   // (TB: each segment's translation before the anchor)
-  const PR = {x: 0, y: 0, z: 0, k: K_UP, alpha: 1, flash: 0, pitch: 20 * DEG, sx: 0, sy: 0, sz: 0, snap: 1, type: 7};
+  const PV = new Float64Array(12);   // the body's params for the rig (rigmesh putv)
   const SC = [0, 0, 0], SO = [0, 0, 0], WP = new Float64Array(3), MUZ = new Float64Array(3), CUR = new Float64Array(2);
-  let kPose = null, kPhi = NaN, kTw = NaN, kLie = -1, kHide = null, mx = NaN, my = 0, mz = 0;   // what the matrices were built from, their anchor
+  let kPose = null, kPhi = NaN, kTw = NaN, kLie = -1, kHide = null;   // what the matrices were built from
   let twist = 0, twistHeld = NaN, stepK = -1, aimBase = null, aimPhi = NaN, haveMuz = false, lift = 0, kLift = 0;
-  // body space -> the render's world (X east, Y up, Z south) at the facing (fc, fs) and anchor (AX, AY, AZ)
-  let fc = 1, fs = 0, AX = 0, AY = 0, AZ = 0, FX = 0, FZ = -1, KQ = K_UP;
-  const toWorld = (x, y, z, o, k) => { o[k] = fc * x - fs * y + AX; o[k + 1] = z + AY; o[k + 2] = -fs * x - fc * y + AZ; };
+  // body space -> the render's world (X east, Y up, Z south) at the facing (N[0], N[1]: cos, sin) and anchor (N[2], N[3], N[4]);
+  // N[5], N[6] the camera's forward on the ground, N[7] the squash, N[8..10] the anchor the matrices were placed at
+  // (the frame's numbers live in a typed array: a closure's own variables would box every double written into them, and
+  // these are written every frame for every body: ~180 bytes a body a frame)
+  const N = new Float64Array(11); N[0] = 1; N[6] = -1; N[7] = K_UP; N[8] = NaN;
+  const toWorld = (x, y, z, o, k) => { o[k] = N[0] * x - N[1] * y + N[2]; o[k + 1] = z + N[3]; o[k + 2] = -N[1] * x - N[0] * y + N[4]; };
   function screenOf(x, y, z, out) {   // body space -> view px, the sprite camera's squash applied
     toWorld(x, y, z, WP, 0);
-    const dd = (WP[0] - AX) * FX + (WP[2] - AZ) * FZ, X = WP[0] - FX * dd * (1 - KQ), Z = WP[2] - FZ * dd * (1 - KQ);
+    const dd = (WP[0] - N[2]) * N[5] + (WP[2] - N[4]) * N[6], X = WP[0] - N[5] * dd * (1 - N[7]), Z = WP[2] - N[6] * dd * (1 - N[7]);
     return G.toScreenInto(X, WP[1], Z, out);
   }
   function barrel(w) {   // the muzzle into MUZ (body space)
@@ -152,7 +155,7 @@ export function createLiveBody(LM, rig, slot, G) {
     const o = GUN * 7; qrot(w, o, MZ[0], MZ[1], MZ[2], V3, 0); const l = Math.hypot(V3[0], V3[1]); if (l < 1e-4) return;
     axisAngle(V3[1] / l, -V3[0] / l, 0, a, R4); const s = ARM_R * 7; LM.turnTree(w, ARM_R, R4, w[s + 4], w[s + 5], w[s + 6]);
   }
-  const gunNear = w => GUN >= 0 && HAND_R >= 0 && Math.hypot(w[GUN * 7 + 4] - w[HAND_R * 7 + 4], w[GUN * 7 + 5] - w[HAND_R * 7 + 5], w[GUN * 7 + 6] - w[HAND_R * 7 + 6]) < .15;
+  const gunNear = w => { if (GUN < 0 || HAND_R < 0) return false; const g = GUN * 7, h = HAND_R * 7, x = w[g + 4] - w[h + 4], y = w[g + 5] - w[h + 5], z = w[g + 6] - w[h + 6]; return x * x + y * y + z * z < .0225; };   // (the gun in the hand: within 15 cm)
   // the spine twist (western.py _TWIST: .4 / .3 / .3 over Spine, Spine1, Spine2, about the vertical through each)
   const TWB = Int16Array.of(LM.SPINE, LM.SPINE1, LM.SPINE2), TWF = Float64Array.of(.4, .3, .3);
   function spineTwist(w, d) {
@@ -186,31 +189,31 @@ export function createLiveBody(LM, rig, slot, G) {
     if (Math.abs(e0) < A.keep && Math.abs(r - c0) > A.jump) return c0;
     return er < Math.abs(e0) - A.gain || Math.abs(r - c0) < 2 * DEG ? r : c0;
   }
-  function place() { for (let s = 0; s < NS; s++) { const m = s * 12; MATS[m + 3] = TB[s * 3] + AX; MATS[m + 7] = TB[s * 3 + 1] + AY; MATS[m + 11] = TB[s * 3 + 2] + AZ; } }
+  function place() { for (let s = 0; s < NS; s++) { const m = s * 12; MATS[m + 3] = TB[s * 3] + N[2]; MATS[m + 7] = TB[s * 3 + 1] + N[3]; MATS[m + 11] = TB[s * 3 + 2] + N[4]; } }
   function mats(w, hide) {
     for (let s = 0; s < NS; s++) {
       const o = SEG[s] * 7, m = s * 12, x = w[o], y = w[o + 1], z = w[o + 2], q = w[o + 3];
       const r00 = 1 - 2 * (y * y + z * z), r01 = 2 * (x * y - z * q), r02 = 2 * (x * z + y * q);
       const r10 = 2 * (x * y + z * q), r11 = 1 - 2 * (x * x + z * z), r12 = 2 * (y * z - x * q);
       const r20 = 2 * (x * z - y * q), r21 = 2 * (y * z + x * q), r22 = 1 - 2 * (x * x + y * y);
-      MATS[m] = fc * r00 - fs * r10; MATS[m + 1] = fc * r01 - fs * r11; MATS[m + 2] = fc * r02 - fs * r12;
+      MATS[m] = N[0] * r00 - N[1] * r10; MATS[m + 1] = N[0] * r01 - N[1] * r11; MATS[m + 2] = N[0] * r02 - N[1] * r12;
       MATS[m + 4] = r20; MATS[m + 5] = r21; MATS[m + 6] = r22;
-      MATS[m + 8] = -fs * r00 - fc * r10; MATS[m + 9] = -fs * r01 - fc * r11; MATS[m + 10] = -fs * r02 - fc * r12;
-      const px = w[o + 4], py = w[o + 5]; TB[s * 3] = fc * px - fs * py; TB[s * 3 + 1] = w[o + 6]; TB[s * 3 + 2] = -fs * px - fc * py;
+      MATS[m + 8] = -N[1] * r00 - N[0] * r10; MATS[m + 9] = -N[1] * r01 - N[0] * r11; MATS[m + 10] = -N[1] * r02 - N[0] * r12;
+      const px = w[o + 4], py = w[o + 5]; TB[s * 3] = N[0] * px - N[1] * py; TB[s * 3 + 1] = w[o + 6]; TB[s * 3 + 2] = -N[1] * px - N[0] * py;
     }
     place();
     if (hide) for (let s = 0; s < NS; s++) if (hide[s]) { MATS.fill(0, s * 12, s * 12 + 12); TB.fill(0, s * 3, s * 3 + 3); }   // (a zero matrix draws nothing)
   }
   const body = {
     slot, W, get twist() { return twistHeld; }, stats: {solves: 0, rebuilds: 0},
-    reset() { kPose = null; kPhi = NaN; twistHeld = NaN; twist = 0; stepK = -1; aimBase = null; haveMuz = false; mx = NaN; },
+    reset() { kPose = null; kPhi = NaN; twistHeld = NaN; twist = 0; stepK = -1; aimBase = null; haveMuz = false; N[8] = NaN; },
     // the frame's draw (see the header). t: the view's clock (s), for the twist's stepped sampling
     draw(o, t) {
       const A = o.w ? null : LM.poseOf(o.pose) || LM.poseOf('idle.0'); if (!A && !o.w) return false;
-      const key = A || o.key, src = A ? A.w : o.w, hide = A ? A.hide : null;   // (o.w: a pose made in code, view/rigkit.js; o.key: its identity)
+      const key = A || o.key, src = A ? A.w : o.w, hide = A ? A.hide : o.hide || null;   // (o.w: a pose made in code, view/rigkit.js; o.key: its identity, o.hide its pieces drawn as nothing: a blink)
       const phi = o.phi, yaw = G.view.yaw, lie = o.lie || 0;
-      fc = Math.cos(phi); fs = Math.sin(phi); AX = o.x; AY = o.z; AZ = o.y; FX = -Math.sin(yaw); FZ = -Math.cos(yaw);
-      const pitch = 20 * DEG + (PITCH_LIE - 20 * DEG) * lie; KQ = Math.tan(pitch) * C20 / S55;
+      N[0] = Math.cos(phi); N[1] = Math.sin(phi); N[2] = o.x; N[3] = o.z; N[4] = o.y; N[5] = -Math.sin(yaw); N[6] = -Math.cos(yaw);
+      const pitch = 20 * DEG + (PITCH_LIE - 20 * DEG) * lie; N[7] = Math.tan(pitch) * C20 / S55;
       // the twist: re-solved when its sample ticks (STEP_HZ), the pose or the facing changed; held by the hysteresis
       let tw = 0, lf = 0;
       if (A && o.aim && GUN >= 0 && gunNear(A.w)) {
@@ -220,7 +223,7 @@ export function createLiveBody(LM, rig, slot, G) {
           stepK = tk; G.toScreenInto(o.tx, o.th, o.ty, SC); CUR[0] = SC[0]; CUR[1] = SC[1];
           // the lift: the reference pose's barrel (o.pitchRef: the kick's frames take the aim's, so the kick still flips up)
           // onto the target's elevation from the muzzle, in whole degrees
-          barrel(A.w); const d = Math.hypot(o.tx - AX, o.ty - AZ) || 1, el = Math.atan2(o.th - (AY + MUZ[2]), d);
+          barrel(A.w); const d = Math.hypot(o.tx - N[2], o.ty - N[4]) || 1, el = Math.atan2(o.th - (N[3] + MUZ[2]), d);
           lift = Math.round((el - pitchOf((o.pitchRef && LM.poseOf(o.pitchRef)) || A)) / DEG) * DEG;
           PW.set(A.w); armLift(PW, lift);
           twist = aimTwist(PW, fresh ? (twistHeld === twistHeld ? twistHeld : 0) : twist, o.lo ?? -50 * DEG, o.hi ?? 50 * DEG); body.stats.solves++;
@@ -231,15 +234,16 @@ export function createLiveBody(LM, rig, slot, G) {
       } else { twistHeld = NaN; aimBase = null; }
       if (key !== kPose || phi !== kPhi || tw !== kTw || lf !== kLift || lie !== kLie) {   // what the matrices are made of changed: rebuild
         W.set(src); if (lf) armLift(W, lf); if (tw) spineTwist(W, tw);
-        mats(W, hide); kPose = key; kPhi = phi; kTw = tw; kLift = lf; kLie = lie; kHide = hide; mx = AX; my = AY; mz = AZ; body.stats.rebuilds++;
+        mats(W, hide); kPose = key; kPhi = phi; kTw = tw; kLift = lf; kLie = lie; kHide = hide; N[8] = N[2]; N[9] = N[3]; N[10] = N[4]; body.stats.rebuilds++;
         haveMuz = GUN >= 0 && gunNear(W); if (haveMuz) barrel(W);
-      } else if (AX !== mx || AY !== my || AZ !== mz) {   // moved only: the translations follow
+      } else if (N[2] !== N[8] || N[3] !== N[9] || N[4] !== N[10]) {   // moved only: the translations follow
         place(); if (kHide) for (let s = 0; s < NS; s++) if (kHide[s]) { const m = s * 12; MATS[m + 3] = MATS[m + 7] = MATS[m + 11] = 0; }
-        mx = AX; my = AY; mz = AZ;
+        N[8] = N[2]; N[9] = N[3]; N[10] = N[4];
       }
-      PR.x = AX; PR.y = AY; PR.z = AZ; PR.k = KQ; PR.pitch = pitch; PR.alpha = o.alpha ?? 1; PR.flash = o.flash || 0;
-      PR.sx = o.sx ?? o.x; PR.sy = o.sh ?? o.z; PR.sz = o.sy ?? o.y; PR.snap = o.snap === false ? 0 : 1; PR.type = o.type || 7;
-      rig.put(LM.model, slot, MATS, PR);
+      // the params (rigmesh putv's order: x, z, k, alpha, flash, pitch, y, type, sx, sy, sz, snap)
+      PV[0] = N[2]; PV[1] = N[4]; PV[2] = N[7]; PV[3] = o.alpha ?? 1; PV[4] = o.flash || 0; PV[5] = pitch; PV[6] = N[3]; PV[7] = o.type || 7;
+      PV[8] = o.sx ?? o.x; PV[9] = o.sh ?? o.z; PV[10] = o.sy ?? o.y; PV[11] = o.snap === false ? 0 : 1;
+      rig.putv(LM.model, slot, MATS, PV);
       return true;
     },
     // the drawn muzzle: world (arena x, y, height) -> out[0..2], on screen -> out[3..4]; false without a gun in hand
@@ -248,6 +252,13 @@ export function createLiveBody(LM, rig, slot, G) {
       toWorld(MUZ[0], MUZ[1], MUZ[2], WP, 0); out[0] = WP[0]; out[1] = WP[2]; out[2] = WP[1];
       screenOf(MUZ[0], MUZ[1], MUZ[2], SC); out[3] = SC[0]; out[4] = SC[1];
       return true;
+    },
+    // a point riding bone b (its index; x, y, z in its frame) in the drawn pose -> the world (arena x, y, height), squashed
+    // as the body is drawn (so a point laid on the body lands on it: the brutes' glowing eyes)
+    pointOn(b, x, y, z, out) {
+      const o = b * 7; qrot(W, o, x, y, z, V3, 0); toWorld(W[o + 4] + V3[0], W[o + 5] + V3[1], W[o + 6] + V3[2], WP, 0);
+      const dd = (WP[0] - N[2]) * N[5] + (WP[2] - N[4]) * N[6]; out[0] = WP[0] - N[5] * dd * (1 - N[7]); out[1] = WP[2] - N[6] * dd * (1 - N[7]); out[2] = WP[1];
+      return out;
     },
     // the drawn pose as view/ragdoll.js's pose object (bone name -> 3x4 row-major, body space, Blender axes): the death
     // starts from exactly what was on screen (the twist included)

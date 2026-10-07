@@ -20,7 +20,8 @@
 //   params) for each body (mats: Float32Array segs x 12, rows of each segment's 3x4 world matrix; params: x, y, z (the
 //   squash anchor), k, alpha, flash, pitch (rad), sx, sy, sz (the snap anchor, world axes), snap (1: on), type (the
 //   G-buffer pixel type pass B writes: 0 / absent = 7, the lit card; 4 = the character, as the player's card: view/livehero.js)),
-//   then rig.render() (pass A now, B and S armed for this frame's G.render). rig.warm() once the models are added (at load:
+//   then rig.render() (pass A now, B and S armed for this frame's G.render). rig.putv(model, slot, mats, pv): the same with the
+//   params as a Float64Array in that order (x, z, k, alpha, flash, pitch, y, type, sx, sy, sz, snap): no per-frame boxing. rig.warm() once the models are added (at load:
 //   no first-use hitch). rig.bytes.
 //   {xray: true}: a fourth pass X marks where a character body (type 4) is hidden, for the composite's x-ray (gfx.js).
 //   rig.attach(model, corners, families) -> a DYNAMIC mesh drawn with the model's FIRST body each frame (the live hero's
@@ -247,6 +248,17 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     G.toScreenInto(P.x ?? 0, P.y ?? 0, P.z ?? 0, SCR);
     if (SCR[0] < box[0]) box[0] = SCR[0]; if (SCR[1] < box[1]) box[1] = SCR[1]; if (SCR[0] > box[2]) box[2] = SCR[0]; if (SCR[1] > box[3]) box[3] = SCR[1];
   }
+  // the same with the params as numbers in KEYS order (a Float64Array of 12: x, z, k, alpha, flash, pitch, y, type, sx, sy,
+  // sz, snap): no property reads by name (a keyed read of a double field boxes it: ~120 bytes a body a frame through put)
+  function putv(M, slot, mats, pv) {
+    const o = slot * XW * 4, s = M.segs * 12;
+    for (let i = 0; i < s; i++) if (xfData[o + i] !== mats[i]) { xfData[o + i] = mats[i]; dirty = true; }
+    const q = o + PCOL * 4;
+    for (let i = 0; i < 12; i++) { const f = Math.fround(pv[i]); if (xfData[q + i] !== f) { xfData[q + i] = f; dirty = true; } }
+    M.iSlot.array[M.n++] = slot; used = true;
+    G.toScreenInto(pv[0], pv[6], pv[1], SCR);
+    if (SCR[0] < box[0]) box[0] = SCR[0]; if (SCR[1] < box[1]) box[1] = SCR[1]; if (SCR[0] > box[2]) box[2] = SCR[0]; if (SCR[1] > box[3]) box[3] = SCR[1];
+  }
   const BOX_R = 2.4, SCR = [0, 0, 0], box = [1e9, 1e9, -1e9, -1e9];
   const KEYS = ['x', 'z', 'k', 'alpha', 'flash', 'pitch', 'y', 'type', 'sx', 'sy', 'sz', 'snap'];
   const S20 = Math.sin(20 * Math.PI / 180), C20 = Math.cos(20 * Math.PI / 180);
@@ -294,5 +306,5 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     for (const M of models) M.n = 0;
     used = false;
   }
-  return {addModel, attach, put, render, warm, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
+  return {addModel, attach, put, putv, render, warm, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
 }

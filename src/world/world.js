@@ -868,7 +868,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // every item starts with ALL its fields (one shape: the per-frame loop's loads stay monomorphic). k*: what update() last
   // built the live mesh from (kv: the mesh's matrix version), kvis / kfl: the visibility and flash it last set
   const ITEM0 = {live: null, card: null, yaw: null, lsp: null, lrec: null, emSp: null, lean: null, manageMatrix: false,
-    kx: NaN, ky: NaN, kz: NaN, kw: NaN, ks: NaN, kl: NaN, km: null, kv: -1, kvis: null, kfl: NaN, veil: false};
+    kx: NaN, ky: NaN, kz: NaN, kw: NaN, ks: NaN, kl: NaN, km: null, kv: -1, kvis: null, kfl: NaN, veil: false, own: false};   // own: another view draws it (own())
   let litterDirty = false;   // fallen leaves: a tree joined or left (bakeNow, below)
   let nextId = 10;
   const SHADOWLESS = new Set(['tuft', 'reed', 'fern']);
@@ -1033,7 +1033,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         for (const o of it.lrec) { o.x = p.x + (o.l.dx || 0); o.y = base + (o.l.h || 0); o.z = p.y + (o.l.dy || 0); lights.push(o); }
       }
       const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, flash = Math.min(1, Math.max(p.flash || 0, it.hover || 0));
-      const useYaw = mode === 'yaw' && it.yaw && !p.stage && !it.manageMatrix && !p.gone && !it.veil;
+      const useYaw = mode === 'yaw' && it.yaw && !p.stage && !it.manageMatrix && !p.gone && !it.veil && !it.own;
       if (it.live) {
         const L = it.live;
         if (p.x !== it.kx || p.y !== it.ky || z0 !== it.kz || wob !== it.kw || p.stage !== it.ks || p.lid !== it.kl || it.manageMatrix !== it.km || L.ver !== it.kv) {
@@ -1042,7 +1042,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
           it.kx = p.x; it.ky = p.y; it.kz = z0; it.kw = wob; it.ks = p.stage; it.kl = p.lid; it.km = it.manageMatrix; it.kv = L.ver;
         }
         if (it.pose) leanTree(it, yaw);
-        const vis = !p.gone && !useYaw && !it.veil; if (vis !== it.kvis) { it.kvis = vis; L.setVisible(vis); }   // (the world is their only writer)
+        const vis = !p.gone && !useYaw && !it.veil && !it.own; if (vis !== it.kvis) { it.kvis = vis; L.setVisible(vis); }   // (the world is their only writer)
         if (flash !== it.kfl) { it.kfl = flash; L.flash = flash; }
       }
       if (it.yaw && (useYaw || it.yaw.card)) {
@@ -1065,7 +1065,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         if (hk?.bend) { it.card.g.uniforms.uBend.value = hk.bend; u.uHasBend.value = 1; } else u.uHasBend.value = 0;   // per-row flex (8 weights, bottom -> top)
         if (hk?.em) { it.card.g.uniforms.uEm.value = G.tex(hk.em, DYN); it.card.g.uniforms.uHasEm.value = 1; it.emSp = null; }
         else if (it.sp && it.emSp !== it.sp) { it.emSp = it.sp; it.card.g.uniforms.uEm.value = it.sp.emit ? texOf(it.sp.emit) : null; it.card.g.uniforms.uHasEm.value = it.sp.emit ? 1 : 0; }
-        it.card.flash = flash; it.card.setVisible(!p.gone && !!sp && !it.veil);
+        it.card.flash = flash; it.card.setVisible(!p.gone && !!sp && !it.veil && !it.own);
       }
     }
   }
@@ -1077,6 +1077,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     // a view's veil over a prop (features/omens/fog.js: an enemy lost in the fog): not drawn, nothing else changes (the
     // sim, its collider, the registry). It stays until lifted: veil(p, false)
     veil(p, on) { const it = byProp.get(p); if (it) it.veil = !!on; },
+    // another view draws this prop itself (features/brutes3d.js: a brute as a 3D body): its card / mesh hidden, nothing else
+    // changes (its item stays: the contact shadow, the hover). -> false while it has no item yet (addItem is async). veiled(p):
+    // whether a veil is on it (the view that draws it keeps to the veils too)
+    own(p, on) { const it = byProp.get(p); if (it) it.own = !!on; return !!it; },
+    veiled: p => !!byProp.get(p)?.veil,
     // repaint one family of the ramp texture: r4 = 4 tones, rgb 0..1, light -> dark (+ the line / outline tones derived as
     // ramp6 does). The seasons' leaves (sim/env.js leafRamp); call it on change, not per frame
     setFamily(name, r4) {
