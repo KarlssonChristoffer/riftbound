@@ -1071,14 +1071,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const f = L?.flut || 0; it.live.setFlutter?.(f, f * .5);
     it.live.setRipple?.((L?.wx || 0) * RIP_K, (L?.wy || 0) * RIP_K, L?.ph || 0, L?.wave || 0);
   }
-  // a 3D plant's lean (render/flora.js): the wind's spring as the trees' (leanTree: art px, the hysteresis), the clumps' dance halved (a
-  // bush's clump is a few px, not a crown's)
+  // a 3D plant's lean (render/flora.js): the wind's spring as the trees' (leanTree: art px, the hysteresis), the clumps' dance a third of a
+  // crown's (a bush's clump is a few px: more and its dome comes apart in a gale)
   function leanPlant(it, yaw) {
     const L = hooks.mesh?.(it), d = it.lean ||= {x: 0, y: 0};
     let sx = 0, sy = 0;
     if (L) { const c = Math.cos(yaw), s = Math.sin(yaw); sx = (L.x * c - L.y * s) * PPM; sy = (L.x * s + L.y * c) * ctxO.PPMY; }
     if (!L || hypot2(sx - d.x, sy - d.y) > TREE_HYST) { d.x = sx; d.y = sy; }
-    const sh = L?.shake || 0, f = (L?.flut || 0) * .5;
+    const sh = L?.shake || 0, f = (L?.flut || 0) * .3;
     for (let i = 0; i < it.flora.length; i++) flora.setLean(it.flora[i], d.x + sh, d.y, f);
   }
   // every frame: follow the props (stage, lid, hop, wobble, flash, gone), collect their lights, pick the yaw frames.
