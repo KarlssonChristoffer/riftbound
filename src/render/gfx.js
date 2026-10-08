@@ -1458,6 +1458,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     const t = img.isData ? imgTex(img) : texCache.get(img) || tex(img), U = dataUps[dataN] ||= {t: null, x: 0, y: 0, w: 0, h: 0, data: null, rowLen: 0, sx: 0, sy: 0};
     dataN++; U.t = t; U.x = x; U.y = y; U.w = w; U.h = h; U.data = data; U.rowLen = rowLen; U.sx = sx; U.sy = sy;
   }
+  // (three never sets the unpack rect, and a canvas upload honours it too: WebGL 2 cuts that rect out of the canvas)
+  const unpack0 = gl => { gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0); gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0); };
   function uploadData() {   // (render: with the other uploads, before any pass reads them)
     if (!dataN) return;
     const gl = renderer.getContext();
@@ -1466,7 +1468,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
       const U = dataUps[i];
       if (bound !== U.t) {
         let p = renderer.properties.get(U.t);
-        if (!p.__webglTexture) { renderer.initTexture(U.t); p = renderer.properties.get(U.t); }   // (its first upload: the whole canvas, then the block over it)
+        if (!p.__webglTexture) { unpack0(gl); renderer.initTexture(U.t); p = renderer.properties.get(U.t); }   // (its first upload: the whole canvas, then the block over it; at rect 0, not the last block's)
         renderer.state.bindTexture(gl.TEXTURE_2D, p.__webglTexture); bound = U.t;
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);   // (as tex() uploads it)
       }
@@ -1474,7 +1476,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
       gl.texSubImage2D(gl.TEXTURE_2D, 0, U.x, U.y, U.w, U.h, gl.RGBA, gl.UNSIGNED_BYTE, U.data);
       U.data = null;
     }
-    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0); gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0); renderer.state.unbindTexture();   // (three never sets these: back to 0)
+    unpack0(gl); renderer.state.unbindTexture();   // (back to 0 for three's uploads)
     dataN = 0;
   }
 
@@ -1924,13 +1926,19 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
       const t = img.isData ? new THREE.DataTexture(img.data, img.width, img.height, THREE.RGBAFormat, THREE.UnsignedByteType) : new THREE.Texture(img);
       t.flipY = false; t.premultiplyAlpha = !img.isData; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace;
       t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true;
-      e = {t, used: 0, gone: false}; imgT.set(img, e); imgLive.add(e);
-    } else if (e.gone) { e.gone = false; e.t.needsUpdate = true; imgLive.add(e); }
+      e = {t, used: 0, gone: false, w: img.width, h: img.height}; imgT.set(img, e); imgLive.add(e);
+    } else if (e.gone) { e.gone = false; e.w = img.width; e.h = img.height; e.t.needsUpdate = true; imgLive.add(e); }
     e.used = frameNo;
     return e.t;
   }
-  // touch(img): an image a GPU context draws was painted again: upload it before it is shown next
-  function touch(img) { const e = imgT.get(img); if (e && !e.gone) e.t.needsUpdate = true; }
+  // touch(img): an image a GPU context draws was painted again: upload it before it is shown next. Resized, its texture is
+  // made again (three sizes a texture's storage once, at its first upload: a re-upload of another size fails, the depth
+  // feature's puddles re-fit their canvases as the camera turns)
+  function touch(img) {
+    const e = imgT.get(img); if (!e || e.gone) return;
+    if (img.width !== e.w || img.height !== e.h) { e.t.dispose(); e.w = img.width; e.h = img.height; }
+    e.t.needsUpdate = true;
+  }
   function gctx(L) {
     // S: the fill (string, rgba), alpha, blend, the transform (a b c d e f, as the canvas's) and the clip (null: none)
     const S = {fs: '#000', c: cssRGBA('#000'), ga: 1, add: false, ma: 1, mb: 0, mc: 0, md: 1, me: 0, mf: 0, clip: null}, stack = [], clips = [];
