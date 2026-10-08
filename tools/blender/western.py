@@ -2370,11 +2370,16 @@ def _live_gun(pose_name):
     arm = bpy.data.objects[ROOT]
     pbs, bones = arm.pose.bones, arm.data.bones
     k = PROP['height'] / 1.8
+    held = pbs['GunHold0'].matrix.copy() if 'GunHold0' in pbs else None   # (where the gun is now: in its holster outside the gun moves)
     for side, bone, p in at:
         _reach(side, _carried(bone, Vector(p) * k) if bone else Vector(p) * k)
     if H is None:
         H = {} if key.startswith(GUN_POSES) else None   # (the hand moved: the gun is placed again, as _gun_hold does)
     if H is None:
+        # a holstered revolver is the right hand's child: a wrist put on a point (a climb's, a vault's) must not pull it out
+        if held is not None and any(sd == 'Right' for sd, _, _ in at):
+            pbs['GunHold0'].matrix = held
+            bpy.context.view_layer.update()
         return
     side = H.get('hand', 'Right')
     fa, hd = pbs[side + 'ForeArm'], pbs[side + 'Hand']
@@ -2778,3 +2783,138 @@ ANIMS['mv_land_hard'] = _clip(['mv_fall_reach', 'mv_land_deep', 'mv_land_up', 'i
 ANIMS['mv_vault'] = _clip(['mv_vt_reach', 'mv_vt_plant', 'mv_vt_over', 'mv_vt_drop'], [0, .5, 1, 1.5, 2, 2.5, 3], 12)
 ANIMS['mv_climb'] = _clip(['mv_cl_reach', 'mantle_0', 'mv_cl_knee', 'mv_cl_stand'], [0, 1, 1.5, 2, 2.5, 3], 12)
 
+
+# ================================================================ adaptive jumps (the live hero only) =================
+# The moves Space picks by the obstacle (sim/player/player.js JUMP; docs/exp/livereact.md), made for the live model only and
+# exported with ragdoll_export.py --clips (JUMP_LIVE: tools/blender/live_export.mjs --add). The live hero picks their frames
+# from the vault's or the leap's progress and puts the hands (and the feet) on the real top at run time: the heights here
+# are a typical one. Their marks: plant / free (frames: the hands on the obstacle from plant until free; the hand the sim's
+# `side` names, both for two-handed moves: hands 2), step (the frame the lead foot is planted on the top from)
+#   mv_step     up a low ledge at a run, no hands: the lead foot up onto it, the push up over it, the back leg through
+#   mv_knee     up a ledge to the hip: the left hand on the lip, the right knee onto it, up over the knee, standing
+#               (mv_knee_r: the same on the other side, mirrored())
+#   mv_hop      a speed vault over low stones: the left hand on them, the legs swung past on its right, landing running
+#               (mv_hop_r: the other hand)
+#   mv_over     over a high wall: both hands on top, a knee up onto it, crouched on top, down the far side
+#   mv_long     a long jump: the push, two hitch-kicks in the air (the arms wheeling), the legs out in front, reaching
+#   mv_catch    a short leap's end: hanging from the far bank's lip by both hands, pulling up, the chest over, a knee, up
+JUMP_LIVE = ('mv_step', 'mv_knee', 'mv_knee_r', 'mv_hop', 'mv_hop_r', 'mv_over', 'mv_long', 'mv_catch')
+# up a low ledge: the lead (left) foot lifted high and planted on the top, the body pushed up over it, the back leg through
+POSES['mv_st_lift'] = _merge(_mv_legs(-78, 96, 6, 24, 22, 34), _arms(30, -50, -28, -70, lower=30), _MV_LEAN(12))
+POSES['mv_st_plant'] = _merge(_mv_legs(-56, 64, -14, 18, 30, 24), _arms(20, -36, -26, -60, lower=30), _MV_LEAN(18))
+POSES['mv_st_push'] = _merge(_mv_legs(-24, 30, -10, 26, 64, 10), _arms(-10, -10, -30, -40, lower=32), _MV_LEAN(16))
+POSES['mv_st_through'] = _merge(_mv_legs(-8, 16, -6, -46, 80, -12), _arms(-30, 26, -50, -24, lower=32), _MV_LEAN(10))
+ANIMS['mv_step'] = _clip(['mv_st_lift', 'mv_st_plant', 'mv_st_push', 'mv_st_through', 'rn_contact'], [0, 1, 2, 3, 4], 16, marks={'step': 1})
+# up a ledge to the hip: the left hand reaching for the lip, the right knee driven up onto it, up over the knee, standing
+POSES['mv_kn_reach'] = _merge(_mv_legs(-14, 30, -8, -70, 100, 10), _arms(-70, 30, -16, -40, lower=24), _MV_LEAN(22))
+POSES['mv_kn_plant'] = _merge(_mv_legs(12, 34, 20, -92, 124, -6), _arms(-56, 36, -10, -50, lower=22), _MV_LEAN(34))
+POSES['mv_kn_rise'] = _merge(_mv_legs(-62, 100, -10, -36, 60, -14), _arms(-30, 10, -40, -40, lower=28), _MV_LEAN(20))
+ANIMS['mv_knee'] = _clip(['mv_kn_reach', 'mv_kn_plant', 'mv_kn_rise', 'mv_cl_stand'], [0, 1, 2, 3], 8, marks={'plant': 1, 'free': 3, 'step': 1})
+for _k in ('mv_kn_reach', 'mv_kn_plant', 'mv_kn_rise'):
+    POSES[_k + '_r'] = mirrored(POSES[_k])
+ANIMS['mv_knee_r'] = _clip(['mv_kn_reach_r', 'mv_kn_plant_r', 'mv_kn_rise_r', 'mv_cl_stand'], [0, 1, 2, 3], 8, marks={'plant': 1, 'free': 3, 'step': 1})
+# a speed vault: the left hand down on the stones, the pelvis turned to the right so the tucked legs pass on that side, the
+# chest over the hand, the right arm out; the right leg reaching down for the ground beyond; running on
+POSES['mv_hp_reach'] = _merge(_mv_legs(8, 20, 24, -56, 70, 10), _arms(-74, -20, -14, -60, lower=26), _MV_LEAN(20), {'Hips': [('Z', -15)]})
+POSES['mv_hp_over'] = _merge(_mv_legs(-80, 96, 0, -70, 110, 4), _arms(-60, -40, -6, -30, lower=24), _MV_LEAN(14),
+                             {'Hips': [('Z', -40)], 'Spine1': [('Z', 20), ('Y', 12)], 'RightArm': [('Y', -40)]})
+POSES['mv_hp_down'] = _merge(_mv_legs(-40, 30, -12, -10, 60, -8), _arms(-30, 20, -30, -30, lower=40), _MV_LEAN(8), {'Hips': [('Z', -15)]})
+ANIMS['mv_hop'] = _clip(['mv_hp_reach', 'mv_hp_over', 'mv_hp_down', 'rn_contact'], [0, 1, 2, 3], 10, marks={'plant': 0, 'free': 2})
+for _k in ('mv_hp_reach', 'mv_hp_over', 'mv_hp_down'):
+    POSES[_k + '_r'] = mirrored(POSES[_k])
+ANIMS['mv_hop_r'] = _clip(['mv_hp_reach_r', 'mv_hp_over_r', 'mv_hp_down_r', 'rn_contact'], [0, 1, 2, 3], 10, marks={'plant': 0, 'free': 2})
+# over a high wall: both hands up on its top, the chest over with a knee up (the climb's), crouched on the stones, down the
+# far side reaching for the ground
+POSES['mv_ov_reach'] = _merge(_mv_legs(-24, 36, -8, 10, 30, 14), _arms(-100, -100, -20, -20, lower=18), _MV_LEAN(12))
+POSES['mv_ov_top'] = _merge(_mv_legs(-96, 130, -30, -80, 125, -26), _arms(-50, -50, -40, -40, lower=22), _MV_LEAN(30))
+POSES['mv_ov_drop'] = _merge(_mv_legs(-40, 50, -10, -10, 70, 10), _arms(-30, -30, -40, -40, lower=50), _MV_LEAN(4))
+LIVE_AT['mv_ov_reach'] = [('Left', None, (.2, -.3, 1.2)), ('Right', None, (-.2, -.3, 1.2))]
+ANIMS['mv_over'] = _clip(['mv_ov_reach', 'mv_cl_knee', 'mv_ov_top', 'mv_ov_drop', 'mv_fall_reach'], [0, 1, 2, 3, 4], 8, marks={'plant': 0, 'free': 3, 'hands': 2})
+# a long jump: the leap's push, two hitch-kicks (the legs cycling, the arms wheeling the other way), sailing with both legs
+# coming forward and the arms up, the legs out in front and the chest over them, reaching
+POSES['mv_lj_kick_a'] = _merge(_mv_legs(-70, 60, -4, 40, 80, 20), _arms(40, -120, -30, -20, lower=40), _MV_LEAN(2))
+POSES['mv_lj_kick_b'] = _merge(_mv_legs(40, 80, 20, -70, 60, -4), _arms(-120, 40, -20, -30, lower=40), _MV_LEAN(0))
+POSES['mv_lj_sail'] = _merge(_mv_legs(-70, 40, -10, -60, 60, -6), _arms(-150, -150, -20, -20, lower=40), _MV_LEAN(-6, 4))
+POSES['mv_lj_reach'] = _merge(_mv_legs(-84, 14, -14, -78, 22, -10), _arms(-40, -40, -30, -30, lower=40), _MV_LEAN(32))
+ANIMS['mv_long'] = _clip(['mv_lp_push', 'mv_lj_kick_a', 'mv_lj_kick_b', 'mv_lj_sail', 'mv_lj_reach'], [0, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4], 18)
+# hanging from the far bank's lip (arms up, the legs hanging), pulling up (elbows down, a knee up), then the climb's own
+POSES['mv_ca_hang'] = _merge(_mv_legs(6, 20, 30, -4, 30, 34), _arms(-160, -160, -14, -14, lower=20), _MV_LEAN(-4, -16))
+POSES['mv_ca_pull'] = _merge(_mv_legs(-50, 80, 10, 4, 30, 30), _arms(-130, -130, -90, -90, lower=30), _MV_LEAN(10, -8))
+LIVE_AT['mv_ca_hang'] = [('Left', None, (.2, -.22, 1.95)), ('Right', None, (-.2, -.22, 1.95))]
+LIVE_AT['mv_ca_pull'] = [('Left', None, (.22, -.28, 1.45)), ('Right', None, (-.22, -.28, 1.45))]
+ANIMS['mv_catch'] = _clip(['mv_ca_hang', 'mv_ca_pull', 'mantle_0', 'mv_cl_knee', 'mv_cl_stand'], [0, 1, 2, 3, 4], 8, marks={'plant': 0, 'free': 3, 'hands': 2})
+
+
+# ================================================================ idles and context moves (the live hero only) =========
+# What he does standing still (docs/exp/livereact.md IDLES; exported with --clips IDLE_LIVE: live_export.mjs --add). The
+# live hero picks them itself and plays them by their own timing (play / ms; marks.loop: the step a looping one goes back to),
+# only while the sim says idle: any input ends one at once (the TRANSITIONS blend carries the change).
+#   id_shift   the weight onto the left leg a while (the hip out), then onto the right: the base of a long idle
+#   id_hat     the left hand to the brim, a nod (the gunslinger's atlas hat tip, live for both cowboys)
+#   id_gun     a look down at the holstered revolver, the right hand over its grip, a tap
+#   id_neck    the head rolled to one side, the other, up: loosening the neck
+#   id_scuff   the right toe scuffing the dirt twice, the head down
+#   cx_sit     down onto a seat at hip height (the hips over the body's origin, the feet .4 m ahead), seated with a breath,
+#              then the elbows on the knees; looping from marks.loop
+#   cx_lean    back against a wall: leaning on it, the arms crossed, a while, then one boot up against it; looping
+#   cx_drink   down on the right knee at the water, the right hand down into it (marks.dip: that frame), up to the mouth;
+#              looping
+IDLE_LIVE = ('id_shift', 'id_hat', 'id_gun', 'id_neck', 'id_scuff', 'cx_sit', 'cx_lean', 'cx_drink')
+_ID = POSES['idle_in']
+# the weight shift: the standing leg straight, the other knee bent and turned in, the pelvis dropped on its side
+POSES['id_sh_l'] = {**_ID, 'LeftUpLeg': [('X', 2), ('Y', 3)], 'LeftLeg': [('X', 2)], 'LeftFoot': [('X', -2)],
+                    'RightUpLeg': [('X', -10), ('Y', -4)], 'RightLeg': [('X', 22)], 'RightFoot': [('X', -12)],
+                    'Hips': [('Y', 6)], 'Spine': [('Y', -4)], 'Neck': [('Y', -2)]}
+POSES['id_sh_r'] = {**_ID, 'RightUpLeg': [('X', 2), ('Y', -3)], 'RightLeg': [('X', 2)], 'RightFoot': [('X', -2)],
+                    'LeftUpLeg': [('X', -10), ('Y', 4)], 'LeftLeg': [('X', 22)], 'LeftFoot': [('X', -12)],
+                    'Hips': [('Y', -6)], 'Spine': [('Y', 4)], 'Neck': [('Y', 2)]}
+ANIMS['id_shift'] = _clip(['id_sh_l', 'idle_in', 'id_sh_r'], [0, .5, 1, 1.5, 2, 1.5, 1, .5], 6, play=list(range(8)),
+                          ms=[2200, 180, 180, 180, 2200, 180, 180, 180], marks={'loop': 0})
+ANIMS['id_hat'] = _clip(['idle_in', 'hat_tip_0', 'hat_tip_1', 'hat_tip_2'], [.5, 1, 1.5, 2, 2.5, 3], 12,
+                        play=[0, 1, 2, 3, 4, 5, 4, 3, 2, 1, 0], ms=[70, 70, 80, 80, 90, 650, 90, 80, 80, 70, 70])
+# the revolver: the head turned down to the right hip, the right hand hovering over the grip, then on it (a tap)
+POSES['id_gn_0'] = {**_ID, 'Neck': [('X', 16), ('Z', -12)], 'Head': [('X', 10), ('Z', -6)], 'Spine2': [('Z', -4)]}
+POSES['id_gn_1'] = {**POSES['id_gn_0'], 'Head': [('X', 14), ('Z', -8)]}
+REACH.update({'id_gn_0': [_over_grip(-.02, .0, .14)], 'id_gn_1': [_over_grip(-.01, .01, .08)]})
+ANIMS['id_gun'] = _clip(['idle_in', 'id_gn_0', 'id_gn_1', 'idle_in'], [0, .5, 1, 2, 1, 2, 1, 2.5, 3], 8, play=list(range(9)),
+                        ms=[110, 120, 500, 140, 160, 140, 650, 140, 120])
+# the neck: rolled to the left, to the right, back (the shoulders down and back)
+POSES['id_nk_l'] = {**_ID, 'Neck': [('Y', 12), ('X', 4)], 'Head': [('Y', 8)]}
+POSES['id_nk_r'] = {**_ID, 'Neck': [('Y', -12), ('X', 4)], 'Head': [('Y', -8)]}
+POSES['id_nk_up'] = {**_ID, 'Neck': [('X', -14)], 'Head': [('X', -8)], 'Spine2': [('X', -4)]}
+ANIMS['id_neck'] = _clip(['idle_in', 'id_nk_l', 'id_nk_r', 'id_nk_up', 'idle_in'], [0, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4], 8, play=list(range(9)),
+                         ms=[140, 150, 500, 200, 500, 200, 700, 200, 150])
+# the scuff: the right toe forward onto the dirt, dragged back, twice; the head down watching it
+_SC = {'Neck': [('X', 18)], 'Head': [('X', 6)]}
+POSES['id_sc_0'] = {**_ID, **_SC, 'RightUpLeg': [('X', -16)], 'RightLeg': [('X', 14)], 'RightFoot': [('X', 26)]}
+POSES['id_sc_1'] = {**_ID, **_SC, 'RightUpLeg': [('X', 8)], 'RightLeg': [('X', 24)], 'RightFoot': [('X', 36)]}
+ANIMS['id_scuff'] = _clip(['idle_in', 'id_sc_0', 'id_sc_1', 'idle_in'], [0, .5, 1, 2, 1, 2, 2.5, 3], 8, play=list(range(8)),
+                          ms=[130, 130, 260, 300, 260, 300, 160, 130])
+# sitting: down (half), seated (the hands on the knees), a breath, the elbows on the knees and the hands together
+POSES['cx_si_down'] = _merge(_mv_legs(-60, 82, -14, -60, 82, -14), _arms(-24, -24, -40, -40, lower=26), _MV_LEAN(22))
+POSES['cx_si_seat'] = _merge(_mv_legs(-90, 88, -2, -86, 92, 0), _arms(-30, -26, -60, -56, lower=18), _MV_LEAN(6))
+POSES['cx_si_breath'] = _merge(POSES['cx_si_seat'], {'Spine2': [('X', -3)], 'Neck': [('X', -4)]})
+POSES['cx_si_rest'] = _merge(_mv_legs(-90, 96, 4, -84, 88, -4), _arms(-50, -50, -90, -90, lower=20), _MV_LEAN(26))
+LIVE_AT.update({'cx_si_seat': [('Left', None, (.16, -.38, .8)), ('Right', None, (-.16, -.38, .8))],
+                'cx_si_breath': [('Left', None, (.16, -.38, .8)), ('Right', None, (-.16, -.38, .8))],
+                'cx_si_rest': [('Left', None, (.04, -.44, .74)), ('Right', None, (-.04, -.44, .74))]})
+ANIMS['cx_sit'] = _clip(['idle_in', 'cx_si_down', 'cx_si_seat', 'cx_si_breath', 'cx_si_rest'], [0, .5, 1, 1.5, 2, 3, 3.5, 4], 8,
+                        play=[0, 1, 2, 3, 4, 5, 4, 5, 4, 6, 7, 7, 6], ms=[90, 90, 110, 140, 1500, 1300, 1500, 1300, 1500, 200, 2500, 2500, 200],
+                        marks={'loop': 4})
+# leaning back on a wall: the feet a little ahead, the body back, the arms crossed; then the right boot up against it
+_LE = {'Spine': [('X', -6)], 'Spine1': [('X', -3)], 'Neck': [('X', 6)]}
+POSES['cx_le_rest'] = _merge(_mv_legs(-14, 4, 6, -10, 6, 4), _LE, _arms(-20, -20, -110, -110, lower=14))
+POSES['cx_le_breath'] = _merge(POSES['cx_le_rest'], {'Spine2': [('X', -3)]})
+POSES['cx_le_foot'] = _merge(_mv_legs(-14, 4, 6, -40, 110, -10), _LE, _arms(-20, -20, -110, -110, lower=14))
+_CROSS = [('Left', None, (-.15, -.17, 1.03)), ('Right', None, (.15, -.15, 1.07))]
+LIVE_AT.update({'cx_le_rest': _CROSS, 'cx_le_breath': _CROSS, 'cx_le_foot': _CROSS})
+ANIMS['cx_lean'] = _clip(['idle_in', 'cx_le_rest', 'cx_le_breath', 'cx_le_foot'], [0, .5, 1, 2, 2.5, 3], 8,
+                         play=[0, 1, 2, 3, 2, 3, 2, 4, 5, 5, 4], ms=[100, 120, 1600, 1300, 1600, 1300, 1600, 150, 2600, 2600, 150], marks={'loop': 2})
+# drinking: down on the right knee, the right hand down into the water ahead, up to the mouth (the head back a little)
+POSES['cx_dr_kneel'] = _merge(_KNEEL, _arms(-20, -30, -60, -40, lower=24), _MV_LEAN(22))
+POSES['cx_dr_dip'] = _merge(_KNEEL, _arms(-10, -84, -70, -12, lower=24), _MV_LEAN(32))
+POSES['cx_dr_sip'] = _merge(_KNEEL, _arms(-30, -60, -60, -120, lower=24), _MV_LEAN(14), {'Neck': [('X', -10)]})
+LIVE_AT.update({'cx_dr_dip': [('Right', None, (-.12, -.5, .32))], 'cx_dr_sip': [('Right', None, (-.04, -.18, 1.12))]})
+ANIMS['cx_drink'] = _clip(['idle_in', 'cx_dr_kneel', 'cx_dr_dip', 'cx_dr_sip'], [0, .5, 1, 1.5, 2, 2.5, 3], 8,
+                          play=[0, 1, 2, 3, 4, 5, 6, 6, 5, 3, 2], ms=[100, 120, 300, 150, 700, 150, 900, 400, 150, 150, 1600],
+                          marks={'loop': 3, 'dip': 4})

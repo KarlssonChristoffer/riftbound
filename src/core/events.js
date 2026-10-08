@@ -17,7 +17,7 @@ export const EVENTS = {
   'player.step':        ['sim/player/player.js',  'x, y, z, foot (L|R), big (0 walk, 1 turn)', 'atmos, flow, audio'],
   'player.land':        ['sim/player/player.js',  'x, y, z, foot?, big (2 sprint footfall / landing foot, 3 a drop > 1.2 m)', 'atmos, flow, wildlife, audio'],
   'player.jump':        ['sim/player/player.js',  'x, y, z (emitted from the Space key handler, turned there)', 'atmos, flow, wildlife, audio'],
-  'player.splash':      ['sim/player/player.js',  'x, y', 'atmos, flow, wildlife, audio'],
+  'player.splash':      ['sim/player/player.js',  'x, y, small? (his legs in the water: a leap that came up short caught the far bank)', 'atmos, flow, wildlife, audio'],
   'player.roll':        ['(reserved: not emitted yet)', 'x, y', 'atmos (frost puff)'],
   // the revolver (sim/player/gun.js, a gun loadout); gun = the weapon's id (content/weapons.js: peacemaker | brass_navy)
   'player.draw':        ['sim/player/gun.js',     'x, y, z, gun, hip (the first shot leaves from the hip)', 'audio'],

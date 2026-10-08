@@ -62,11 +62,19 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
         const lx = X + ux * d2, lz = Z + uz * d2, e = elev(lx, lz);
         if (wallAt(lx, lz) || blocked(lx, lz, e, false)) continue;   // (still in the wall, or against it)
         if (Math.abs(e - z) > .6) return null;
-        return {d: d2 + .08, top, z1: elev(X + ux * (d2 + .08), Z + uz * (d2 + .08))};
+        return {d: d2 + .08, top, z1: elev(X + ux * (d2 + .08), Z + uz * (d2 + .08)), near: d, thick: d2 - d};   // (near: m to its face; thick: through it)
       }
       return null;
     }
     return null;
+  }
+  // the wall's face where he meets it (Space, once: player.js tryVault): its first stone along two lines .3 m to his left and
+  // right of his way, from near - .5 to near + .6 m -> {slant (rad: 0 square on), side (+1: nearer on his left, -1 his right,
+  // 0 square)} or null (a line meets no stone). His left is (uz, -ux) in the world as in his view frame (the same hand)
+  function wallSlant(X, Z, ux, uz, near) {
+    const lx = uz, lz = -ux, hit = s => { for (let e = Math.max(.05, near - .5); e <= near + .6; e += .05) if (wallAt(X + ux * e + lx * s, Z + uz * e + lz * s)) return e; return -1; };
+    const dl = hit(.3), dr = hit(-.3); if (dl < 0 || dr < 0) return null;
+    return {slant: Math.atan2(Math.abs(dr - dl), .6), side: dl < dr - .02 ? 1 : dl > dr + .02 ? -1 : 0};
   }
   // the ground's slope at view-frame (x, y): out = [gx, gy] its rise per metre along the view's x and y, out[2] = rise / run the steepest
   // way (no allocation: the world <-> view turn inline, viewxf's)
@@ -95,6 +103,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     lasso: createLasso, yaw: () => cv.yaw,      // the lasso's hands (idle unless features/equip/lasso.js uses them); the camera's yaw (its swing is in the world)
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
     wallOver: (x, y, dx, dy, z) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallOver(X, Z, ux, uz, z); },   // (a rotation: d is the same in his frame)
+    wallSlant: (x, y, dx, dy, near) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallSlant(X, Z, ux, uz, near); },
     elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
     grad: TERRAIN_ON ? gradV : null,   // walkable terrain's slope (player.js SLIDE)
     inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },

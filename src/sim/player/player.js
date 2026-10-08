@@ -70,6 +70,22 @@ export const VAULT_OVER_T = .58, OVER_LIFT = .12;
 // LANDING: a drop of more than LAND.big m lands hard (into the knees, LAND.hard s, he stops); anything less lands soft
 // (LAND.soft s), and with a direction held he lands running: no braking, the run goes on
 const LAND = {soft: .12, hard: .34, big: 1.2};
+// ADAPTIVE TRAVERSAL (docs/exp/livereact.md): Space picks the move the obstacle needs, by what the plan measures (kept on
+// P.vault / P.leap: the live hero picks its clip by `kind` and puts the hands on the real top; the sprites keep their frames):
+//   up a ledge h m over his feet   step (h <= JUMP.step: a foot onto it, no hands: he keeps his pace), knee (<= JUMP.knee: a
+//                                  hand and a knee; keeps JUMP.kneeKeep of his pace), climb (higher: both hands, the chest over)
+//   over a breach, its top h up    hop (h <= JUMP.hop: a hand on the stones, the legs swung past: he keeps his pace), tuck
+//                                  (<= JUMP.tuck: both hands, the knees tucked; keeps JUMP.tuckKeep), over (higher: up onto
+//                                  the stones and down the far side)
+//   a leap                         stride, or long from JUMP.long m; from bank to bank at their own heights. One that comes up
+//                                  short within JUMP.reach m of the far bank catches its lip and climbs out ('catch')
+//   a drop of more than LAND.big   with a direction held and faster than JUMP.rollSpeed: a roll out of the landing, going on
+// side: the hand that plants, +1 his left, -1 his right: the one nearer the face when he meets it at more than JUMP.slant deg,
+// else his left (the gun hand stays free). Times (s): step / knee / climb [base, per m of h], hop at least hopMin at hopSpeed
+// m/s or faster, over [base, per m over 1 m] and catch their own (catchHang of it hanging from the lip)
+export const JUMP = {step: .55, knee: .9, hop: .62, tuck: .98, long: 2.8, reach: .75, rollSpeed: 2.2, slant: 18,
+  stepT: [.22, .24], kneeT: [.36, .2], climbT: [VAULT_T - .1, .1], hopMin: .3, hopSpeed: 3.2, overT: [.84, .25], catchT: .8, catchHang: .2,
+  kneeKeep: .35, tuckKeep: .5};
 // SLIDE (walkable terrain): on ground too steep to stand on (a grass bank: slope rise / run over `on`; a cliff, over `cliff`, is a drop
 // instead) he loses his footing and slides down it, `g` m/s^2 at a 45 deg bank, `fric` 1/s, steering a little (`steer` m/s^2),
 // until the ground eases under `off`. H.grad(x, y, out) -> out = [gx, gy (this frame), slope]
@@ -285,8 +301,10 @@ export function createPlayer(H) {
     const land = s1 + .25, lx = P.x + dx * land, ly = P.y + dy * land;
     // (a leap never lands higher than it started: the plateau's pool lies right under its south face, so the far "bank" there is the cliff's top,
     // and a roll toward the pool from a metre away would turn into a leap that ends against the face, in the water)
-    if (s1 > 0 && land <= reach && elev(lx, ly) <= elev(P.x, P.y) + .3 && !H.blocked(lx, ly, elev(lx, ly), false)) return {dist: Math.max(1.2, land), safe: true};
-    if (s0 <= .5) return {dist: reach, safe: false};
+    if (s1 > 0 && land <= reach && elev(lx, ly) <= elev(P.x, P.y) + .3 && !H.blocked(lx, ly, elev(lx, ly), false)) {
+      const dist = Math.max(1.2, land); return {dist, safe: true, z1: elev(P.x + dx * dist, P.y + dy * dist), gap: s1 - s0};
+    }
+    if (s0 <= .5) return {dist: reach, safe: false, z1: null, gap: s1 > 0 ? s1 - s0 : -1};
     return null;
   }
   function tryLeap() {
@@ -295,7 +313,8 @@ export function createPlayer(H) {
     const plan = leapPlan(dx, dy); if (!plan) return false;
     P.face = P.want = dirOf(dx, dy);
     const dur = .36 + plan.dist * .05;
-    P.leap = {x0: P.x, y0: P.y, dx, dy, dist: plan.dist, dur, top: .35 + plan.dist * .12, safe: plan.safe};
+    P.leap = {x0: P.x, y0: P.y, dx, dy, dist: plan.dist, dur, top: .35 + plan.dist * .12, safe: plan.safe,
+      kind: plan.dist >= JUMP.long ? 'long' : 'stride', z1: plan.z1, gap: plan.gap};   // (z1: the far bank's height where he lands; null: short)
     P.state = 'leap'; P.t = 0; P.aimRoll = false; P.vx = dx * plan.dist / dur; P.vy = dy * plan.dist / dur;
     ev({type: 'player.jump', x: P.x, y: P.y, z: P.z});
     return true;
@@ -313,7 +332,7 @@ export function createPlayer(H) {
       const x = P.x + dx * d, y = P.y + dy * d, e = elev(x, y);
       if (e > z0 + VAULT_H) return null;
       const e1 = elev(x + dx * .3, y + dy * .3);
-      if (Math.abs(e1 - e) < .06 && e > z0 + STEP_UP) { const l = d + .2; return H.blocked(P.x + dx * l, P.y + dy * l, e, false) ? null : {d: l, z: elev(P.x + dx * l, P.y + dy * l)}; }
+      if (Math.abs(e1 - e) < .06 && e > z0 + STEP_UP) { const l = d + .2; return H.blocked(P.x + dx * l, P.y + dy * l, e, false) ? null : {d: l, z: elev(P.x + dx * l, P.y + dy * l), foot}; }
     }
     return null;
   }
@@ -322,21 +341,82 @@ export function createPlayer(H) {
   const overPlan = (dx, dy) => H.wallOver ? H.wallOver(P.x, P.y, dx, dy, P.z) : null;
   // (the hint: 'up' Space climbs a ledge here, 'over' vaults a breach, false neither)
   const canVault = () => { if (BUSY.has(P.state) || dodging()) return false; const [dx, dy] = vaultDir(); return vaultPlan(dx, dy) ? 'up' : overPlan(dx, dy) ? 'over' : false; };
+  // the hand that plants (+1 his left, -1 his right) and how slanted the face is (deg) from {slant (rad), side} | null
+  function sideOf(sl) {
+    const deg = sl ? sl.slant / D2R : 0;
+    return {slant: deg, side: sl && deg > JUMP.slant && sl.side ? sl.side : 1};
+  }
+  // a ledge's face at its foot, from the ground's slope there (uphill: into the ledge): {slant, side (+1: nearer on his left)}
+  function ledgeSlant(dx, dy, foot) {
+    if (!H.grad) return null;
+    const g = H.grad(P.x + dx * (foot + .05), P.y + dy * (foot + .05), _grad), l = Math.hypot(g[0], g[1]); if (l < 1e-4) return null;
+    const ux = g[0] / l, uy = g[1] / l, c = Math.max(-1, Math.min(1, dx * ux + dy * uy)), lr = dy * ux - dx * uy;   // (his left: (dy, -dx))
+    return {slant: Math.acos(c), side: lr > .02 ? 1 : lr < -.02 ? -1 : 0};
+  }
   function tryVault() {
     if (P.z > elev(P.x, P.y) + .05 || BUSY.has(P.state)) return false;
     const [dx, dy] = vaultDir(), up = vaultPlan(dx, dy), over = up ? null : overPlan(dx, dy), plan = up || over; if (!plan) return false;
     P.face = P.want = dirOf(dx, dy);
-    P.vault = over ? {x0: P.x, y0: P.y, dx, dy, d: over.d, z0: P.z, z1: over.z1, top: over.top} : {x0: P.x, y0: P.y, dx, dy, d: plan.d, z0: P.z, z1: plan.z};
+    const spd = Math.max(0, P.vx * dx + P.vy * dy);   // (his pace along the way he vaults)
+    if (over) {
+      const h = over.top - P.z, kind = h <= JUMP.hop ? 'hop' : h <= JUMP.tuck ? 'tuck' : 'over', sl = H.wallSlant ? H.wallSlant(P.x, P.y, dx, dy, over.near) : null;
+      const sp = Math.max(spd, JUMP.hopSpeed), dur = kind === 'hop' ? Math.max(JUMP.hopMin, over.d / sp) : kind === 'tuck' ? VAULT_OVER_T : JUMP.overT[0] + JUMP.overT[1] * Math.max(0, h - 1);
+      P.vault = {x0: P.x, y0: P.y, dx, dy, d: over.d, z0: P.z, z1: over.z1, top: over.top, kind, h, dur, near: over.near, thick: over.thick,
+        exit: kind === 'hop' ? spd : kind === 'tuck' ? spd * JUMP.tuckKeep : 0, ...sideOf(sl)};
+    } else {
+      const h = plan.z - P.z, kind = h <= JUMP.step ? 'step' : h <= JUMP.knee ? 'knee' : 'climb', T = JUMP[kind + 'T'];
+      let d = plan.d;
+      if (kind === 'step') {   // (at his pace he carries on further onto the top, where it is clear and level)
+        const far = spd * (T[0] + T[1] * h), fx = P.x + dx * far, fy = P.y + dy * far;
+        if (far > d && Math.abs(elev(fx, fy) - plan.z) < .08 && !H.blocked(fx, fy, plan.z, false)) d = far;
+      }
+      P.vault = {x0: P.x, y0: P.y, dx, dy, d, z0: P.z, z1: plan.z, kind, h, dur: T[0] + T[1] * h, near: plan.foot, thick: 0,
+        exit: kind === 'step' ? spd : kind === 'knee' ? spd * JUMP.kneeKeep : 0, ...sideOf(ledgeSlant(dx, dy, plan.foot))};
+    }
     P.state = 'vault'; P.t = 0; P.aimRoll = false; P.vx = P.vy = 0;
     ev({type: 'player.jump', x: P.x, y: P.y, z: P.z});
     return true;
   }
+  // a vault's end: on the ground there; with a direction held he goes on at the pace the kind keeps (V.exit: the step and
+  // the hop all of it), else he stands
+  function endVault(V) {
+    P.z = elev(P.x, P.y); P.vault = null; P.t = 0; P.prevF = -1;
+    const [mx, my] = moveInput(), ex = (mx || my) ? V.exit || 0 : 0;
+    P.vx = V.dx * ex; P.vy = V.dy * ex; P.curSpeed = P.lastSpeed = ex;
+    if (ex > 2.3) { P.state = 'move'; P.gait = 'run'; P.ph = .02; P.prevF = 'run0'; P.frame = 'run.0'; }
+    else P.state = 'idle';
+  }
   function startFall() { P.state = 'fall'; P.t = 0; P.vz = 0; P.fall0 = P.z; P.vx *= .8; P.vy *= .8; P.aimRoll = false; }
   function land(drop) {
+    const [mx, my] = moveInput(), sp = Math.hypot(P.vx, P.vy);
+    if (drop > LAND.big && (mx || my) && sp > JUMP.rollSpeed && has('roll.0')) { landRoll(sp); return; }
     P.state = 'land'; P.t = 0; P.z = elev(P.x, P.y); P.landDur = drop > LAND.big ? LAND.hard : LAND.soft;
     const f = A.SP[P.frame] ? P.frame : 'idle.0';
     puff('L', f, 2); puff('R', f, 1);
     if (drop > LAND.big) { H.shake?.(2, .18); ev({type: 'player.land', x: P.x, y: P.y, z: P.z, big: 3}); }
+  }
+  // a big drop while running: the landing goes into a roll the way he was going (a roll's own steering, its speed easing from
+  // his down to the run's: P.rollV0), no hard stop
+  function landRoll(sp) {
+    P.z = elev(P.x, P.y);
+    const f = A.SP[P.frame] ? P.frame : 'idle.0'; puff('L', f, 2); puff('R', f, 1);
+    ev({type: 'player.land', x: P.x, y: P.y, z: P.z, big: 2}); H.shake?.(1, .1);
+    P.rollDir = [P.vx / sp, P.vy / sp]; P.face = P.want = dirOf(P.vx, P.vy);
+    P.state = 'roll'; P.t = 0; P.rollDev = 0; P.rollLead = null; P.aimRoll = false; P.queuedShot = false; P.recover = 0; P.rollV0 = sp;
+  }
+  // a leap that came up short: the far bank's lip within JUMP.reach m ahead, its top no more than 1.4 m over the water's bed and
+  // clear: he catches it and climbs out (a vault of kind 'catch'); -> false: none (he falls in)
+  function catchBank(L) {
+    for (let s = 0; s <= JUMP.reach; s += .05) {
+      if (inStream(P.x + L.dx * s, P.y + L.dy * s)) continue;
+      const l = s + .3, bx = P.x + L.dx * l, by = P.y + L.dy * l, z1 = elev(bx, by), zb = elev(P.x, P.y);
+      if (z1 - zb > 1.4 || inStream(bx, by) || H.blocked(bx, by, z1, false)) return false;
+      P.vault = {x0: P.x, y0: P.y, dx: L.dx, dy: L.dy, d: l, z0: zb, z1, kind: 'catch', h: z1 - zb, dur: JUMP.catchT, near: s, thick: 0, exit: 0, slant: 0, side: 1};
+      P.state = 'vault'; P.t = 0; P.vx = P.vy = 0; P.z = Math.max(zb + .08, z1 - 1.35);
+      ev({type: 'player.splash', x: P.x, y: P.y, small: true});
+      return true;
+    }
+    return false;
   }
   function splash(backTo) {
     P.state = 'splash'; P.t = 0; P.z = 0; P.back = backTo;
@@ -391,11 +471,11 @@ export function createPlayer(H) {
       return true;
     }
     if (P.state === 'leap') {
-      const L = P.leap, k = Math.min(1, P.t / L.dur), z0 = elev(L.x0, L.y0);
+      const L = P.leap, k = Math.min(1, P.t / L.dur), z0 = elev(L.x0, L.y0), z1 = L.z1 ?? z0;
       moveBy(P.vx * dt, P.vy * dt, true);
-      P.z = z0 + 4 * L.top * k * (1 - k);
+      P.z = z0 + (z1 - z0) * k + 4 * L.top * k * (1 - k);
       P.frame = has('leap.1') ? `leap.${k < .15 ? 0 : k < .5 ? 1 : k < .85 ? 2 : 3}` : k < .12 || k > .9 ? 'crouch' : 'lunge';
-      if (k >= 1) { if (inStream(P.x, P.y)) splash([L.x0, L.y0]); else land(0); }
+      if (k >= 1) { if (inStream(P.x, P.y)) { if (!catchBank(L)) splash([L.x0, L.y0]); } else land(Math.max(0, z0 + L.top * .5 - elev(P.x, P.y))); }
       return true;
     }
     if (P.state === 'splash') {   // fell in: sink for a moment, then back on the bank you came from
@@ -437,24 +517,48 @@ export function createPlayer(H) {
       return true;
     }
     if (P.state === 'vault' && P.vault?.top !== undefined) {   // over a breach: up over its stones and down beyond, moving on through it
-      const V = P.vault, k = Math.min(1, P.t / VAULT_OVER_T), zc = Math.max(V.z0, V.z1, V.top + OVER_LIFT), sm = t => t * t * (3 - 2 * t);
-      P.z = k < .45 ? V.z0 + (zc - V.z0) * sm(k / .45) : zc + (V.z1 - zc) * sm((k - .45) / .55) ** 1.6;
-      const f = V.d * (k * .35 + .65 * sm(k)); P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
+      const V = P.vault, k = Math.min(1, P.t / (V.dur || VAULT_OVER_T)), sm = t => t * t * (3 - 2 * t), K = V.kind || 'tuck';
+      if (K === 'hop') {   // a hand on the stones, the legs swung past: straight through at his pace, just clearing them
+        const zc = Math.max(V.z0, V.z1, V.top + .06);
+        P.z = k < .4 ? V.z0 + (zc - V.z0) * sm(k / .4) : zc + (V.z1 - zc) * sm((k - .4) / .6);
+        const f = V.d * k; P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
+      } else if (K === 'over') {   // up onto the stones (a knee), a moment on top, then down the far side
+        const on = Math.min(V.d, V.near + V.thick * .5), f = k < .45 ? on * sm(k / .45) : k < .55 ? on : on + (V.d - on) * sm((k - .55) / .45);
+        P.z = k < .4 ? V.z0 + (V.top - V.z0) * sm(k / .4) : k < .55 ? V.top : V.top + (V.z1 - V.top) * ((k - .55) / .45) ** 2;
+        P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
+      } else {
+        const zc = Math.max(V.z0, V.z1, V.top + OVER_LIFT);
+        P.z = k < .45 ? V.z0 + (zc - V.z0) * sm(k / .45) : zc + (V.z1 - zc) * sm((k - .45) / .55) ** 1.6;
+        const f = V.d * (k * .35 + .65 * sm(k)); P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
+      }
       // (the leap's frames, facing his way: the climbing frames face the wall, his back to the camera when he vaults toward it)
-      P.frame = has('leap.1') ? `leap.${k < .15 ? 0 : k < .45 ? 1 : k < .78 ? 2 : 3}` : k < .12 || k > .9 ? 'crouch' : 'lunge';
+      P.frame = K === 'over' && k < .55 ? (k < .4 && has('mantle.0') ? 'mantle.0' : 'crouch')
+        : has('leap.1') ? `leap.${k < .15 ? 0 : k < .45 ? 1 : k < .78 ? 2 : 3}` : k < .12 || k > .9 ? 'crouch' : 'lunge';
       if (k >= 1) {
-        P.z = elev(P.x, P.y); P.vault = null; P.state = 'idle'; P.t = 0; P.prevF = -1;
         puff('L', A.SP.crouch ? 'crouch' : 'idle.0', 2); puff('R', A.SP.crouch ? 'crouch' : 'idle.0', 1);
-        ev({type: 'player.land', x: P.x, y: P.y, z: P.z});
+        ev({type: 'player.land', x: P.x, y: P.y, z: elev(P.x, P.y)});
+        endVault(V);
       }
       return true;
     }
     if (P.state === 'vault') {   // up onto the ledge: the body rises first, then he steps forward onto the top
-      const V = P.vault, k = Math.min(1, P.t / VAULT_T), up = Math.min(1, k / .55), on = Math.max(0, (k - .22) / .78);
-      P.z = V.z0 + (V.z1 - V.z0) * up * up * (3 - 2 * up);
-      const f = V.d * on * on * (3 - 2 * on); P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
-      P.frame = k < .55 ? (has('mantle.0') ? 'mantle.0' : has('reach_up') ? 'reach_up' : 'crouch') : 'crouch';
-      if (k >= 1) { P.z = elev(P.x, P.y); P.vault = null; P.state = 'idle'; P.t = 0; P.prevF = -1; puff('L', A.SP.crouch ? 'crouch' : 'idle.0', 1); }
+      const V = P.vault, K = V.kind || 'climb', k = Math.min(1, P.t / (V.dur || VAULT_T)), sm = t => t * t * (3 - 2 * t);
+      if (K === 'step') {   // a foot onto it and up, at his pace
+        const up = Math.min(1, k / .55); P.z = V.z0 + (V.z1 - V.z0) * sm(up);
+        const f = V.d * k; P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
+        P.frame = has('leap.1') ? (k < .45 ? 'leap.0' : 'leap.3') : 'lunge';
+      } else if (K === 'catch') {   // hanging from the lip (his legs in the water), then up and out
+        const hang = JUMP.catchHang / V.dur, zh = Math.max(V.z0 + .08, V.z1 - 1.35), up = Math.max(0, Math.min(1, (k - hang) / (.75 - hang))), on = Math.max(0, (k - .45) / .55);
+        P.z = zh + (V.z1 - zh) * sm(up);
+        const f = V.d * sm(on); P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
+        P.frame = k < hang ? (has('reach_up') ? 'reach_up' : 'crouch') : k < .7 ? (has('mantle.0') ? 'mantle.0' : 'crouch') : 'crouch';
+      } else {   // knee (a hand and a knee: up sooner, onto it later) and climb (both hands, the chest over)
+        const kn = K === 'knee', up = Math.min(1, k / (kn ? .6 : .55)), on = Math.max(0, (k - (kn ? .25 : .22)) / (kn ? .75 : .78));
+        P.z = V.z0 + (V.z1 - V.z0) * sm(up);
+        const f = V.d * sm(on); P.x = V.x0 + V.dx * f; P.y = V.y0 + V.dy * f;
+        P.frame = k < .55 ? (has('mantle.0') ? 'mantle.0' : has('reach_up') ? 'reach_up' : 'crouch') : 'crouch';
+      }
+      if (k >= 1) { puff('L', A.SP.crouch ? 'crouch' : 'idle.0', 1); endVault(V); }
       return true;
     }
     if (P.state === 'hold') {   // a pose held briefly (abilities)
@@ -565,11 +669,11 @@ export function createPlayer(H) {
       const R = CLIP.roll, dur = R.frames / R.fps, k = Math.min(1, P.t / dur);
       const held = !!(mx || my), exit = held ? (keys.has('shift') ? SPEED.run + 1 : SPEED.run) : 1.2;
       if (held && k < DODGE.steerEnd) steerRoll(mx, my, dt);
-      const sp = exit + (8.6 - exit) * (1 - k) * (1 - k);   // quick launch, then ease DOWN TO the exit speed (no stop)
+      const v0 = P.rollV0 ? Math.max(exit, P.rollV0) : 8.6, sp = exit + (v0 - exit) * (1 - k) * (1 - k);   // quick launch (a landing's: his speed), then ease DOWN TO the exit speed (no stop)
       moveBy(P.rollDir[0] * sp * dt, P.rollDir[1] * sp * dt);
       P.frame = `roll.${Math.min(R.frames - 1, Math.floor(P.t * R.fps))}`;
       if (P.t >= dur) {
-        P.vx = P.rollDir[0] * exit; P.vy = P.rollDir[1] * exit; P.curSpeed = P.lastSpeed = exit;
+        P.vx = P.rollDir[0] * exit; P.vy = P.rollDir[1] * exit; P.curSpeed = P.lastSpeed = exit; P.rollV0 = 0;
         if (mouse.down || P.queuedShot) {
           // come out of the roll straight into full draw (no re-draw); a release during the roll fires right now
           P.state = 'draw'; P.t = 1; P.moveAim = false; P.snapFace = true;   // land already in the aiming stance

@@ -93,6 +93,32 @@ export const PRESETS = {
   free32: {step: false, face: 32, hyst: 7, hold: true, snap: true, smear: false},   // smooth time, 32 facings, the rest on
 };
 for (const v of Object.values(PRESETS)) { v.proc ??= true; v.flow ??= v.proc; v.blend ??= v.flow; v.feet ??= v.proc; v.move ??= v.proc; }   // (blend: TRANSITIONS)   // (every preset but exact: the procedural layers on)
+for (const v of Object.values(PRESETS)) { v.look ??= v.proc; v.hit ??= v.proc; v.mlean ??= v.flow; v.wx ??= v.proc; v.idle ??= v.proc; }   // (REACTIONS: the head's look, the flinches, the lean on the move, the weather, the idles)
+// REACTIONS' numbers (docs/exp/livereact.md). LOOK: the head's turn to what he notices: deg the neck takes (neck), deg
+// more the chest adds (chest), past max (round behind him) he doesn't look; the pitch's limits up / down (the sombrero's
+// brim tips a lot); the spring (w rad/s, z damping; fast: w for danger: a gunman aiming, a shot, a blast, a hit, a bullet
+// landing close); hyst: deg the target may drift before the held one moves; fade s
+const LOOK = {neck: 62, chest: 28, max: 125, up: 12, down: 18, w: 13, fast: 22, z: .8, hyst: 4, fade: .2,
+  danger: new Set(['aim', 'locked', 'shot', 'explode', 'hit', 'miss'])};
+// FLINCH: a hit bends him along its push: deg at strength 1 for the chest, the head (more: it whips), the arms (flung the
+// other way); up to the peak in rise s, eased out by dur s, stepped at hz; a knock (the sim's: a brute, a blast) x knock
+const FLINCH = {chest: 15, head: 10, arm: 16, rise: .05, dur: .34, knock: 1.6, hz: 24};
+// MLEAN: the lean on the move with his gun away (FLOW's lean has it while he aims): deg per m/s^2 of acceleration, at most
+// side (into a turn), fwd (setting off), back (stopping); tau s of smoothing, fade s in / out
+const MLEAN = {k: .45, side: 11, fwd: 8, back: 7, tau: .15, fade: .15};
+// WEATHER: the hat held in a gust (the wind's strength over hat.on, let go under hat.off after hat.hold s; the left hand on
+// the brim hat.fwd m before the hat's band, hat.side to his left, hat.up over it), leaning into the wind (deg at a gale) with
+// the head down; the rain's hunch (from rain.on, all of it at rain.full: shoulders up, the head down, the chest forward,
+// deg) and a hand over the eyes in heavy rain (over rain.shade, standing or walking); the cold's hug (the hands on the other
+// arm, from cold.on, standing or walking) and its shivers (bursts of burst s every 2.5 to 5 s: the shoulders deg, the chest
+// chest deg, at hz); fade s in / out
+const WX = {hat: {on: 1.85, off: 1.45, hold: .7, fwd: .12, side: .1, up: -.02, fade: .25}, lean: {max: 5, head: 7},
+  rain: {on: .3, full: .8, shoulder: 9, head: 10, chest: 4, shade: .6, fade: .6},
+  cold: {on: .3, full: .7, burst: .45, every: [2.5, 5], deg: 3, chest: 1.5, hz: 14, fade: .5}};
+// IDLES: standing calm a while: after `spot` s a place for a context move (the senses' spot(), again every `retry` s while there
+// is none), the body eased onto it over `ease` s; else after `shift` s the weight shift, and every `every` s one of the
+// fidgets; calm again `calm` s after a hit
+const IDLE = {spot: 2.5, retry: 3, ease: .45, shift: 5, every: [6, 12], calm: 3, fidgets: ['id_hat', 'id_gun', 'id_neck', 'id_scuff']};
 // FLOW's numbers: the aim spring (w rad/s, z damping: ~10 % overshoot, settled in ~.2 s), the head's lead (share of the
 // chest's lag, at most headMax deg), the gun arm's drag (s of the swing's speed, at most dragMax deg), the free arm's
 // pump (deg at a full stride: walk, run), the lean into acceleration (deg per m/s^2, at most max; tau s of smoothing)
@@ -149,8 +175,8 @@ function fromTo(ax, ay, az, bx, by, bz, o) {   // the shortest rotation taking d
 }
 const wrap = a => a - TAU * Math.round(a / TAU);
 
-async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, rig, flashes, K, slots}) {
-  const [J, bin] = await Promise.all([fetch(base + 'model.json').then(r => r.json()), fetch(base + 'model.bin').then(r => r.arrayBuffer())]);
+async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, rig, flashes, K, slots, bust = ''}) {   // (bust: a reload's query, past the browser's cache)
+  const [J, bin] = await Promise.all([fetch(base + 'model.json' + bust).then(r => r.json()), fetch(base + 'model.bin' + bust).then(r => r.arrayBuffer())]);
   const model = rig.addModel(J, bin);
   const CL = J.clips || {};
   const HIDE = J.hide || {};   // pose -> pieces it hides (the lasso's coil packed away: the poses carry no scale)
@@ -786,22 +812,68 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       if (st === 'land') { mvHard = prev === 'fall' && mvTop - P.z > MV.hard; mvT = 0; }
       if (prev === 'vault' && mvOver && st !== 'fall' && HAS_MV) mvAfter = CL.mv_land_soft.frames / CL.mv_land_soft.fps;   // (over a breach: lands running)
     }
-    mvT += dt; if (st === 'vault') mvOver = P.vault?.top !== undefined;
+    mvT += dt; if (st === 'vault') mvOver = P.vault?.top !== undefined && (P.vault.kind || 'tuck') === 'tuck';   // (the hop runs on in its own last frame)
     if (!HAS_MV || !K.move) return null;
     switch (st) {
-      case 'leap': return P.leap ? mvLast = mvAt('mv_leap', P.t / P.leap.dur) : null;
+      case 'leap': return P.leap ? mvLast = mvAt(P.leap.kind === 'long' && CL.mv_long ? 'mv_long' : 'mv_leap', P.t / P.leap.dur) : null;   // (ADAPTIVE JUMPS: a long jump's own)
       case 'fall': {
         const h = P.z - elev(app.player.x, app.player.y);
         if (h < MV.near && P.t > MV.off) return mvLast = nm('mv_fall.', h < MV.near * .4 ? 4 : 3);   // (stepping off an edge, the ground under him is still the edge's)
         const s = Math.floor(P.t * MV.fallHz) % 4; return mvLast = nm('mv_fall.', s === 3 ? 1 : s);   // (0 1 2 1 0 1 2 ...)
       }
       case 'land': return mvLast = mvHard ? mvAt('mv_land_hard', mvT * CL.mv_land_hard.fps / CL.mv_land_hard.frames) : mvAt('mv_land_soft', mvT * CL.mv_land_soft.fps / CL.mv_land_soft.frames);
-      case 'vault': return P.vault ? mvLast = P.vault.top !== undefined ? mvAt('mv_vault', P.t / VAULT_OVER_T) : mvAt('mv_climb', P.t / VAULT_T) : null;
+      case 'vault': { const V = P.vault; if (!V) return null; const c = vaultClip(V); return mvLast = mvAt(c, P.t / (V.dur || (V.top !== undefined ? VAULT_OVER_T : VAULT_T))); }   // (ADAPTIVE JUMPS: by its kind)
     }
     if (MV_FRAMES.has(P.frame) && mvLast) return mvLast;   // (the step a move ends on still names its atlas frame: the last of ours held)
     mvLast = '';
     if (mvAfter > 0) { const C = CL.mv_land_soft, k = 1 - mvAfter * C.fps / C.frames; mvAfter -= dt; if (st === 'idle' || st === 'move') return mvAt('mv_land_soft', k); }
     return null;
+  }
+
+  // ---------------------------------------------------------------- ADAPTIVE JUMPS (docs/exp/livereact.md; K.move)
+  // The vault's kind (sim/player/player.js JUMP) picks its clip (western.py JUMP_LIVE); a kind the model lacks falls back
+  // to the tuck vault / the climb. While one plays, PLANTS fits the body to the real obstacle (the clips are posed for a
+  // typical height): the clip's marks say when the hands are on it (plant .. free: the hand its `side` names, both for
+  // hands 2) and from when the lead foot stands on the top (step); a planted hand goes onto the surface under it (the
+  // wall's top where it is over the stones, else the ground: two-bone IK, the hand's own turn kept), a stepping foot onto
+  // the top, and no foot is left in the ground or the stones.
+  const VCLIP = {step: 'mv_step', knee: 'mv_knee', climb: 'mv_climb', catch: 'mv_catch', hop: 'mv_hop', tuck: 'mv_vault', over: 'mv_over'};
+  function vaultClip(V) {
+    const k = V.kind || (V.top !== undefined ? 'tuck' : 'climb'), c = VCLIP[k], r = V.side < 0 && CL[c + '_r'] ? c + '_r' : c;
+    return CL[r] ? r : V.top !== undefined ? 'mv_vault' : 'mv_climb';
+  }
+  const FARM_L = B_('LeftForeArm'), PLANT = {hand: .04, slack: .05};
+  let F0A = NaN;   // (the ankle's height over the sole: idle.0's)
+  // the surface under body-space point (bx, by) during vault V: the stones' top where it is over the wall (V.near .. + V.thick
+  // along the vault from where it began), else the ground (its world height, over his anchor's: body space)
+  function surfaceAt(bx, by, V) {
+    const X = fc * bx - fs * by + AX, Z = -fs * bx - fc * by + AZ, e = elev(X, Z) - AY;
+    if (V.top === undefined) return e;
+    const a = app.yaw, c = Math.cos(a), s = Math.sin(a), vx = X * c - Z * s, vy = X * s + Z * c;   // (the world -> his view frame, viewxf's)
+    const along = (vx - V.x0) * V.dx + (vy - V.y0) * V.dy;
+    return along > V.near - PLANT.slack && along < V.near + V.thick + PLANT.slack ? Math.max(e, V.top - AY) : e;
+  }
+  function plants(w, P, f) {
+    const V = P.vault; if (!V || P.state !== 'vault' || !K.move) return;
+    const pc = parse(f), C = CL[pc.clip], M = C && C.marks; if (!M) return;
+    const right = pc.clip.endsWith('_r'), fi = pc.i;
+    if (M.plant !== undefined && fi >= M.plant && fi < (M.free ?? 99)) {
+      for (let h = 0; h < 2; h++) {
+        const left = h === 0; if (M.hands !== 2 && left === right) continue;
+        const a = left ? ARM_L : ARM_R, b = left ? FARM_L : FARM_R, c = left ? HAND_L : HAND_R; if (a < 0 || b < 0 || c < 0) continue;
+        const o = c * 7, z = surfaceAt(w[o + 4], w[o + 5], V) + PLANT.hand; if (!(Math.abs(z - w[o + 6]) < .6)) continue;   // (more than .6 m off: not over what it was posed for)
+        const held = !left && holstered(), g0 = GUN * 7, gn = held ? (END[GUN] - GUN) * 7 : 0;   // (the holstered revolver is the right hand's child: it stays put)
+        if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) GSAVE[i] = w[g0 + i];
+        ikLeg(w, a, b, c, w[o + 4], w[o + 5], z);
+        if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) w[g0 + i] = GSAVE[i];
+      }
+    }
+    if (!(F0A === F0A)) { const I = poseOf('idle.0'); F0A = I && FOOT_L >= 0 ? I.w[FOOT_L * 7 + 6] : .08; }
+    for (let k = 0; k < 2 && FEET_OK; k++) {
+      const ft = FT[k], o = ft * 7, lead = (k === 0) !== right, g = surfaceAt(w[o + 4], w[o + 5], V) + F0A;
+      const want = M.step !== undefined && lead && fi >= M.step && g - F0A > V.z0 - AY + .15 ? g : Math.max(g, w[o + 6]);   // (planted on the top / out of the ground)
+      if (Math.abs(want - w[o + 6]) > .01 && Math.abs(want - w[o + 6]) < .7) ikLeg(w, FU[k], FL[k], ft, w[o + 4], w[o + 5], want);
+    }
   }
 
   // ---------------------------------------------------------------- the emotes (K.demo = one of EMOTES)
@@ -853,6 +925,302 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     flashes.frame();
   }
 
+  // ---------------------------------------------------------------- REACTIONS (K.look, K.hit, K.mlean; docs/exp/livereact.md)
+  // What he notices (features/senses.js, a view-only feature: app.feat('senses').S) moves him, over the pose:
+  //   LOOK   his head turns to what he looks at (a gunman aiming at him, a shot, an explosion, the nearest hunter, a bird):
+  //          a spring toward the held target, drawn at the procedural ticks; the neck up to LOOK.neck deg, the chest the
+  //          rest (Spine1 + Spine2, the holstered gun left where it hangs); further round than LOOK.max he doesn't look.
+  //          Not while he aims (FLOW's lead has the head), an emote plays, or off his feet
+  //   FLINCH a hit bends him along its push (the chest, the head more, the arms flung the other way), stepped at
+  //          FLINCH.hz; a knock (the sim's: a brute, a blast) harder and longer; a hit from nowhere (a blast) hunches him
+  //   MLEAN  on the move with his gun away: the chest leans into his acceleration (into a turn, forward setting off, back
+  //          stopping), as FLOW's lean does while he aims; drawn at the procedural ticks
+  // View only: reads the senses and P (state, velocity), writes only this body's own state.
+  let SEN = null;
+  const LOOK_ON = new Set(['idle', 'move', 'land', 'pose', 'hold', 'backstep', 'draw', 'release', 'slide', 'knock']);
+  let lkK = 0, lkY = 0, lkP = 0, lkVY = 0, lkVP = 0, lkTY = 0, lkTP = 0, lkSY = 0, lkSP = 0, lkHave = false;
+  // the revolver in his hand or on its way (the gun's own state: drawn, or drawing / holstering / reloading ...), else in its
+  // holster (the idle's right hand rests on it there: its distance to the hand can't tell)
+  const gunOut = () => { const S = app.PL.gun?.S; return !!S && !!(S.out || S.act); }, holstered = () => GUN >= 0 && !gunOut();
+  const GSAVE = new Float64Array(7 * 4), CHEST = Int16Array.of(SPINE1, SPINE2), ARMS2 = Int16Array.of(ARM_L, ARM_R), ARMS1 = Int16Array.of(ARM_L);
+  // a turn of the chest (Spine1 + Spine2, half each, about their heads) that leaves a holstered gun where it hangs (the
+  // gun is the right hand's child: the hand swings with the chest, the holster doesn't)
+  function chestTurn(w, ax, ay, az, a) {
+    const held = holstered(), g0 = GUN * 7, gn = held ? (END[GUN] - GUN) * 7 : 0;
+    if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) GSAVE[i] = w[g0 + i];
+    for (let j = 0; j < 2; j++) { const o = CHEST[j] * 7; axisAngle(ax, ay, az, a / 2, R4); turnTree(w, CHEST[j], R4, w[o + 4], w[o + 5], w[o + 6]); }
+    if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) w[g0 + i] = GSAVE[i];
+  }
+  function look(w, P, dt, sample, free) {
+    const L = SEN && SEN.S.look; let want = 0;
+    if (K.look && free && L && L.on && LOOK_ON.has(P.state) && NECK >= 0) {
+      // where he looks, in his body space (the world -> his frame: the facing's turn is its own inverse), from his neck
+      const dx = L.x - AX, dz = L.y - AZ, bx = fc * dx - fs * dz, by = -fs * dx - fc * dz, o = NECK * 7;
+      const hx = bx - w[o + 4], hy = by - w[o + 5], d = Math.hypot(hx, hy), ty = Math.atan2(hx, -hy);   // (his front is -y, his left +x)
+      if (d > .4 && Math.abs(ty) <= LOOK.max * DEG) {
+        const M = (LOOK.neck + LOOK.chest) * DEG, H = LOOK.hyst * DEG, tyc = Math.max(-M, Math.min(M, ty));
+        const tp = Math.max(-LOOK.down * DEG, Math.min(LOOK.up * DEG, Math.atan2(L.h - AY - w[o + 6], d)));
+        if (!lkHave || Math.abs(tyc - lkTY) > H || Math.abs(tp - lkTP) > H) { lkTY = tyc; lkTP = tp; lkHave = true; }   // (held within hyst)
+        want = 1;
+      }
+    }
+    lkK = dt > 0 ? (want > lkK ? Math.min(want, lkK + dt / LOOK.fade) : Math.max(want, lkK - dt / LOOK.fade)) : want;
+    if (lkK <= 0) { lkY = lkP = lkVY = lkVP = lkSY = lkSP = 0; lkHave = false; return; }
+    const lw = LOOK.danger.has(L.kind) ? LOOK.fast : LOOK.w, n = Math.max(1, Math.ceil(dt / .008)), h = dt / n, W2 = lw * lw, Z2 = 2 * LOOK.z * lw;
+    for (let i = 0; i < n; i++) { lkVY += (W2 * (lkTY - lkY) - Z2 * lkVY) * h; lkY += lkVY * h; lkVP += (W2 * (lkTP - lkP) - Z2 * lkVP) * h; lkP += lkVP * h; }
+    if (!K.step || sample) { lkSY = lkY; lkSP = lkP; }
+    const k = lkK * lkK * (3 - 2 * lkK), Y = lkSY * k, Pp = lkSP * k, N = LOOK.neck * DEG;
+    const ny = Math.max(-N, Math.min(N, Y)), cy = Y - ny, o = NECK * 7;
+    // the neck: its pitch about his side first (+ up), then its turn about his up; then the chest's share turns them all
+    if (Math.abs(Pp) > .3 * DEG) { axisAngle(1, 0, 0, -Pp, R4); turnTree(w, NECK, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    if (Math.abs(ny) > .3 * DEG) { axisAngle(0, 0, 1, ny, R4); turnTree(w, NECK, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    if (Math.abs(cy) > .3 * DEG && SPINE1 >= 0 && SPINE2 >= 0) chestTurn(w, 0, 0, 1, cy);
+  }
+  let flN = -1, flT = 99, flDur = 1, flK = 0, flX = 0, flY = 0;
+  function flinch(w, P, dt, aiming) {
+    const H = SEN && SEN.S.hit;
+    if (H && flN >= 0 && H.n !== flN && K.hit) {
+      const kn = P.state === 'knock';
+      flT = 0; flK = H.k * (kn ? FLINCH.knock : 1); flDur = FLINCH.dur * (kn ? 1.3 : 1);
+      flX = fc * H.dx - fs * H.dy; flY = -fs * H.dx - fc * H.dy;   // (the push into his frame)
+    }
+    if (H) flN = H.n;
+    if (flT >= flDur) return;
+    flT += dt;
+    const r = FLINCH.rise / flDur, tq = K.step ? Math.floor(flT * FLINCH.hz) / FLINCH.hz : flT, u = Math.min(1, tq / flDur);
+    const e = (u < r ? u / r : ((1 - u) / (1 - r)) ** 2) * flK;
+    if (e <= .01) return;
+    // the axis that takes his top along the push (up x push); no push: about his side, the top forward (a hunch)
+    let ax = -flY, ay = flX; const l = Math.hypot(ax, ay);
+    if (l < 1e-3) { ax = 1; ay = 0; } else { ax /= l; ay /= l; }
+    if (SPINE >= 0) { const o = SPINE * 7; axisAngle(ax, ay, 0, FLINCH.chest * e * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    if (NECK >= 0) { const o = NECK * 7; axisAngle(ax, ay, 0, FLINCH.head * e * DEG, R4); turnTree(w, NECK, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    const held = holstered(), g0 = GUN * 7, gn = held ? (END[GUN] - GUN) * 7 : 0;
+    if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) GSAVE[i] = w[g0 + i];
+    const AR = aiming ? ARMS1 : ARMS2;
+    for (let j = 0; j < AR.length; j++) {   // (the arms lag: flung the other way; the aiming arm stays on the aim)
+      const b = AR[j]; if (b < 0) continue; const o = b * 7; axisAngle(ax, ay, 0, -FLINCH.arm * e * DEG, R4); turnTree(w, b, R4, w[o + 4], w[o + 5], w[o + 6]);
+    }
+    if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) w[g0 + i] = GSAVE[i];
+  }
+  let mlvx = NaN, mlvy = 0, mlax = 0, mlay = 0, mlyaw = NaN, mlK = 0, mlR = 0, mlP = 0;
+  function mlean(w, P, dt, phiV, yaw, free, sample) {
+    const vx = P.vx || 0, vy = P.vy || 0;
+    if (!(mlvx === mlvx) || yaw !== mlyaw || dt <= 0) { mlvx = vx; mlvy = vy; mlyaw = yaw; return; }   // (a camera turn turns P's velocity: skipped)
+    const k = 1 - Math.exp(-dt / MLEAN.tau); mlax += ((vx - mlvx) / dt - mlax) * k; mlay += ((vy - mlvy) / dt - mlay) * k; mlvx = vx; mlvy = vy;
+    const want = K.mlean && free && (P.state === 'move' || P.state === 'idle') ? 1 : 0;
+    mlK = want > mlK ? Math.min(want, mlK + dt / MLEAN.fade) : Math.max(want, mlK - dt / MLEAN.fade);
+    if (mlK <= 0 || SPINE < 0) { mlR = mlP = 0; return; }
+    if (!K.step || sample) {
+      const c = Math.cos(phiV), s = Math.sin(phiV), bx = c * mlax - s * mlay, by = -s * mlax - c * mlay;   // (into his frame)
+      mlR = Math.max(-MLEAN.side, Math.min(MLEAN.side, bx * MLEAN.k)); mlP = Math.max(-MLEAN.back, Math.min(MLEAN.fwd, -by * MLEAN.k));
+    }
+    const R = mlR * mlK, Pt = mlP * mlK; if (Math.abs(R) < .5 && Math.abs(Pt) < .5) return;
+    const o = SPINE * 7;
+    axisAngle(0, 1, 0, R * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);    // (top toward +x: his left)
+    axisAngle(1, 0, 0, Pt * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);   // (top toward -y: ahead)
+  }
+  // (the hold's extra test: two points .2 m off the head across its length, carried by it, on screen: a turn of the head
+  // about its own length (the look) moves no bone's tip, but the face and the hat's brim turn with it)
+  const HT = new Float64Array(3), HA = [0, 0, 0], HB = [0, 0, 0];
+  function headTurned(a, b) {
+    if (HEAD < 0 || !(lkK > 0 || flT < flDur)) return false;
+    const o = HEAD * 7;
+    for (let k = 0; k < 2; k++) {
+      qrot(a, o, k ? 0 : .2, 0, k ? .2 : 0, HT, 0); screenOf(a[o + 4] + HT[0], a[o + 5] + HT[1], a[o + 6] + HT[2], HA);
+      qrot(b, o, k ? 0 : .2, 0, k ? .2 : 0, HT, 0); screenOf(b[o + 4] + HT[0], b[o + 5] + HT[1], b[o + 6] + HT[2], HB);
+      if (Math.abs(HA[0] - HB[0]) >= 1 || Math.abs(HA[1] - HB[1]) >= 1) return true;
+    }
+    return false;
+  }
+  // (TRANSITIONS: a holstered revolver is the right hand's child, so blending the bones' local turns flew it along with a
+  // big swing of the arm (a leap into a hang): held in the holster in both, it rides the blended hips as it sits on the
+  // target's (gun world = blended hips x target hips^-1 x target gun))
+  const HQ = new Float64Array(4), HQ2 = new Float64Array(4), HV = new Float64Array(3);
+  function holster(tgt, w) {
+    if (HIPS < 0 || !holstered()) return;
+    const h = HIPS * 7;
+    QI[0] = -tgt[h]; QI[1] = -tgt[h + 1]; QI[2] = -tgt[h + 2]; QI[3] = tgt[h + 3]; qmul(w, h, QI, 0, HQ, 0);   // (the hips' turn from the target to the blend)
+    for (let b = GUN; b < END[GUN]; b++) {
+      const o = b * 7; qmul(HQ, 0, tgt, o, HQ2, 0); qrot(HQ, 0, tgt[o + 4] - tgt[h + 4], tgt[o + 5] - tgt[h + 5], tgt[o + 6] - tgt[h + 6], HV, 0);
+      w[o] = HQ2[0]; w[o + 1] = HQ2[1]; w[o + 2] = HQ2[2]; w[o + 3] = HQ2[3]; w[o + 4] = w[h + 4] + HV[0]; w[o + 5] = w[h + 5] + HV[1]; w[o + 6] = w[h + 6] + HV[2];
+    }
+  }
+  // ---- WEATHER (K.wx): the weather at his spot (the senses' S.wx) on his body: a hand on the hat in a gust and a lean into
+  // the wind, the rain's hunch and a hand over the eyes, the cold's hug and shivers. Not while he aims or plays an emote;
+  // the hand on the hat while he runs too, the others standing or walking
+  const SHOULDER_L = B_('LeftShoulder'), SHOULDER_R = B_('RightShoulder'), HAT = B_('HatHold0');
+  const HDL = new Float64Array(9), HDW = new Float64Array(9);
+  let hdOk = false, hatK = 0, hatOn = false, hatT = 0, rainK = 0, shadeK = 0, coldK = 0, hugK = 0, shivT = 0, shivNext = 3, windK = 0;
+  const WX_ON = new Set(['idle', 'move', 'pose', 'land', 'backstep', 'hold']);
+  const ease = (k, want, dt, fade) => want > k ? Math.min(want, k + dt / fade) : Math.max(want, k - dt / fade);
+  // the head's front, left and up now (body space): idle.0's head frame calibrates them once (the head's own axes)
+  function headFrame(w) {
+    const o = HEAD * 7;
+    if (!hdOk) { const I = poseOf('idle.0'); if (!I) return false; const q = I.w; QI[0] = -q[o]; QI[1] = -q[o + 1]; QI[2] = -q[o + 2]; QI[3] = q[o + 3];
+      qrot(QI, 0, 0, -1, 0, HDL, 0); qrot(QI, 0, 1, 0, 0, HDL, 3); qrot(QI, 0, 0, 0, 1, HDL, 6); hdOk = true; }
+    for (let k = 0; k < 3; k++) qrot(w, o, HDL[k * 3], HDL[k * 3 + 1], HDL[k * 3 + 2], HDW, k * 3);
+    return true;
+  }
+  // an arm's hand onto body-space point T, k of the way from where it is posed (two-bone IK; a holstered revolver kept)
+  function reachTo(w, left, Tx, Ty, Tz, k) {
+    const a = left ? ARM_L : ARM_R, b = left ? FARM_L : FARM_R, c = left ? HAND_L : HAND_R; if (a < 0 || b < 0 || c < 0 || k <= .01) return;
+    const o = c * 7, x = w[o + 4] + (Tx - w[o + 4]) * k, y = w[o + 5] + (Ty - w[o + 5]) * k, z = w[o + 6] + (Tz - w[o + 6]) * k;
+    const held = !left && holstered(), g0 = GUN * 7, gn = held ? (END[GUN] - GUN) * 7 : 0;
+    if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) GSAVE[i] = w[g0 + i];
+    ikLeg(w, a, b, c, x, y, z);
+    if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) w[g0 + i] = GSAVE[i];
+  }
+  // the shoulders up by a deg (each clavicle about his front axis at its root; a holstered revolver kept)
+  function shrug(w, a) {
+    if (SHOULDER_L < 0 || SHOULDER_R < 0 || Math.abs(a) < .2) return;
+    const held = holstered(), g0 = GUN * 7, gn = held ? (END[GUN] - GUN) * 7 : 0;
+    if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) GSAVE[i] = w[g0 + i];
+    let o = SHOULDER_L * 7; axisAngle(0, 1, 0, -a * DEG, R4); turnTree(w, SHOULDER_L, R4, w[o + 4], w[o + 5], w[o + 6]);
+    o = SHOULDER_R * 7; axisAngle(0, 1, 0, a * DEG, R4); turnTree(w, SHOULDER_R, R4, w[o + 4], w[o + 5], w[o + 6]);
+    if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) w[g0 + i] = GSAVE[i];
+  }
+  function weather(w, P, dt, sample, free) {
+    const X = SEN && SEN.S.wx, on = !!(K.wx && free && X && WX_ON.has(P.state) && HEAD >= 0), slow = Math.hypot(P.vx || 0, P.vy || 0) < 2.3 && P.state !== 'land';
+    // the hat: held through a gust, let go a while after it has eased
+    if (on && X.wind > WX.hat.on) { hatOn = true; hatT = 0; } else if (hatOn && (!on || X.wind < WX.hat.off) && (hatT += dt) > WX.hat.hold) hatOn = false;
+    hatK = ease(hatK, on && hatOn ? 1 : 0, dt, WX.hat.fade);
+    windK = ease(windK, on ? Math.max(0, Math.min(1, (X.wind - 1.2) / 1.8)) : 0, dt, .4);
+    rainK = ease(rainK, on ? Math.max(0, Math.min(1, (X.rain - WX.rain.on) / (WX.rain.full - WX.rain.on))) : 0, dt, WX.rain.fade);
+    shadeK = ease(shadeK, on && slow && hatK < .05 && X.rain > WX.rain.shade ? 1 : 0, dt, WX.rain.fade);
+    coldK = ease(coldK, on ? Math.max(0, Math.min(1, (X.cold - WX.cold.on) / (WX.cold.full - WX.cold.on))) : 0, dt, WX.cold.fade);
+    hugK = ease(hugK, on && slow && hatK < .05 && shadeK < .05 && !gunOut() && coldK > .3 ? 1 : 0, dt, WX.cold.fade);
+    stats.wx = hatK > .5 ? 'hat' : shadeK > .5 ? 'shade' : hugK > .5 ? 'hug' : rainK > .3 ? 'hunch' : '';
+    if (hatK + windK + rainK + shadeK + coldK + hugK <= 0 || !headFrame(w)) return;
+    const o = SPINE * 7, n = NECK * 7;
+    // into the wind: the chest's top against the way it blows, the head down in a gust
+    if (windK > 0 && SPINE >= 0) {
+      const bx = -(fc * X.wdx - fs * X.wdy), by = -(-fs * X.wdx - fc * X.wdy), l = Math.hypot(bx, by);
+      if (l > .1) { axisAngle(-by / l, bx / l, 0, WX.lean.max * windK * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    }
+    // the rain's hunch (and the cold's): shoulders up, the chest forward, the head down (and in a gust)
+    const hunch = Math.max(rainK, coldK * .7);
+    if (hunch > 0) { shrug(w, WX.rain.shoulder * hunch); if (SPINE >= 0) { axisAngle(1, 0, 0, WX.rain.chest * hunch * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]); } }
+    const down = WX.rain.head * hunch + WX.lean.head * hatK;
+    if (down > .3 && NECK >= 0) { axisAngle(1, 0, 0, down * DEG, R4); turnTree(w, NECK, R4, w[n + 4], w[n + 5], w[n + 6]); }
+    headFrame(w);   // (after the chest and the neck moved: the head's axes now)
+    const F = HDW, h = (HAT >= 0 ? HAT : HEAD) * 7;
+    // the left hand on the brim: before the band, to his left, a little over it
+    if (hatK > 0) reachTo(w, true, w[h + 4] + F[0] * WX.hat.fwd + F[3] * WX.hat.side + F[6] * WX.hat.up, w[h + 5] + F[1] * WX.hat.fwd + F[4] * WX.hat.side + F[7] * WX.hat.up,
+      w[h + 6] + F[2] * WX.hat.fwd + F[5] * WX.hat.side + F[8] * WX.hat.up, hatK);
+    // the left hand over the eyes: before the brow, under the brim
+    const e = HEAD * 7;
+    if (shadeK > 0) reachTo(w, true, w[e + 4] + F[0] * .17 + F[3] * .03 + F[6] * .1, w[e + 5] + F[1] * .17 + F[4] * .03 + F[7] * .1, w[e + 6] + F[2] * .17 + F[5] * .03 + F[8] * .1, shadeK);
+    // the hug: each hand on the other arm, before the chest
+    if (hugK > 0 && ARM_L >= 0 && ARM_R >= 0) {
+      const L = ARM_L * 7, R = ARM_R * 7, fx = F[0] * .11, fy = F[1] * .11;
+      reachTo(w, true, w[R + 4] * .6 + w[L + 4] * .1 + fx, w[R + 5] * .6 + w[L + 5] * .1 + fy + w[o + 5] * .3, w[R + 6] - .14, hugK);
+      reachTo(w, false, w[L + 4] * .6 + w[R + 4] * .1 + fx, w[L + 5] * .6 + w[R + 5] * .1 + fy + w[o + 5] * .3, w[L + 6] - .16, hugK);
+    }
+    // the shivers: bursts while he stands in the cold, stepped at the shiver's own rate
+    if (coldK > .3 && P.state === 'idle') {
+      shivT += dt; if (shivT > shivNext + WX.cold.burst) { shivT = 0; shivNext = WX.cold.every[0] + Math.random() * (WX.cold.every[1] - WX.cold.every[0]); }
+      if (shivT > shivNext) { const sg = Math.floor((shivT - shivNext) * WX.cold.hz) % 2 ? 1 : -1; shrug(w, WX.cold.deg * sg * coldK); stats.wx = 'shiver';
+        if (SPINE1 >= 0) { const q = SPINE1 * 7; axisAngle(0, 1, 0, WX.cold.chest * sg * coldK * DEG, R4); turnTree(w, SPINE1, R4, w[q + 4], w[q + 5], w[q + 6]); } }
+    } else shivT = 0;
+  }
+  // ---------------------------------------------------------------- IDLES (K.idle; docs/exp/livereact.md)
+  // Standing still and calm (the sim's idle, the gun holstered, no emote, nothing dangerous the senses know of, no weather on
+  // him), he does something of his own, by the clip's own timing (play / ms; looping from marks.loop):
+  //   after IDLE.spot s, a context move where there is a place for one within reach (the senses' spot()): cx_sit on a seat,
+  //     cx_lean against a wall, cx_drink at the water. The body is drawn there: its origin eased onto the spot (the sim keeps
+  //     him where he stopped: at most the spot's reach away), turned the spot's way once halfway (the TRANSITIONS blend turns
+  //     him); seated, the hips stay on the seat and the legs reach the ground; drinking, the hand goes into the water at
+  //     marks.dip
+  //   else after IDLE.shift s, the weight shift (id_shift) as his idle, and every 6-12 s a fidget (IDLE.fidgets) once
+  // Anything else (a move, a draw, a hit, danger, rain or cold on him) ends it at once; the body eases back.
+  const CLT = new Map();   // (a clip's timing: its steps' start times, its loop's step)
+  function timing(name) {
+    let T = CLT.get(name); if (T) return T;
+    const C = CL[name]; if (!C) return null;
+    const n = C.play ? C.play.length : C.frames, at = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) at[i + 1] = at[i] + (C.ms ? C.ms[i] / 1000 : 1 / C.fps);
+    T = {n, at, loop: C.marks?.loop ?? -1, play: C.play || null}; CLT.set(name, T); return T;
+  }
+  // the clip's frame at time t (looping from its loop step); a one-shot past its end: -1
+  function frameAt(T, t) {
+    const end = T.at[T.n];
+    if (t >= end) { if (T.loop < 0) return -1; t = T.at[T.loop] + (t - end) % (end - T.at[T.loop]); }
+    let st = 0; while (st < T.n - 1 && T.at[st + 1] <= t) st++;
+    return T.play ? T.play[st] : st;
+  }
+  const CX = {kind: '', x: 0, y: 0, h: 0, face: 0, wx: 0, wy: 0, wh: 0, d: 0, px: 0, py: 0};   // (the spot he took: the senses' copied; px, py: where the sim had him then)
+  let idK = '', idClip = '', idT = 0, idCalm = 0, idSpotT = 0, idNext = 8, cxK = 0, cxOn = false, hipSit = NaN;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  function calmNow(P) {
+    if (!K.idle || P.state !== 'idle' || gunOut() || K.demo || !SEN) return false;
+    const S = SEN.S; if (S.aimedAt > 0 || S.hit.t < IDLE.calm || (S.look.on && LOOK.danger.has(S.look.kind))) return false;
+    return hatK < .05 && shadeK < .05 && hugK < .05;
+  }
+  function idles(f, P, dt) {
+    SEN ??= app.feat('senses');
+    const pl = app.player, moved = idK === 'cx' && Math.hypot(pl.x - CX.px, pl.y - CX.py) > .25;   // (put somewhere else: a teleport, a respawn)
+    const calm = calmNow(P) && !moved;
+    idCalm = calm ? idCalm + dt : 0;
+    if (!calm) { idK = ''; idClip = ''; cxOn = false; idSpotT = 0; }
+    cxK = cxOn ? Math.min(1, cxK + dt / IDLE.ease) : Math.max(0, cxK - dt / (IDLE.ease * .4));
+    if (!cxK && !cxOn) CX.kind = '';
+    if (!calm) return f;
+    if ((!idK || idK === 'shift') && idCalm > IDLE.spot && (idSpotT -= dt) <= 0) {   // a place for a context move?
+      idSpotT = IDLE.retry;
+      const sp = SEN.spot && SEN.spot(), clip = sp ? sp.kind === 'sit' ? 'cx_sit' : sp.kind === 'lean' ? 'cx_lean' : 'cx_drink' : '';
+      if (sp && CL[clip]) { Object.assign(CX, sp); CX.px = pl.x; CX.py = pl.y; idK = 'cx'; idClip = clip; idT = 0; cxOn = true; }
+    }
+    if (!idK && idCalm > IDLE.shift && CL.id_shift) { idK = 'shift'; idClip = 'id_shift'; idT = 0; idNext = rnd(IDLE.every[0], IDLE.every[1]); }
+    if (idK === 'shift' && (idNext -= dt) <= 0) {   // a fidget, once
+      let c = '', n = 0; do c = IDLE.fidgets[(Math.random() * IDLE.fidgets.length) | 0]; while (!CL[c] && ++n < 8);
+      if (CL[c]) { idK = 'fidget'; idClip = c; idT = 0; }
+      idNext = rnd(IDLE.every[0], IDLE.every[1]);
+    }
+    stats.idle = idK ? idClip : '';   // (dev)
+    if (!idK) return f;
+    idT += dt;
+    const T = timing(idClip); if (!T) { idK = ''; return f; }
+    let fr = frameAt(T, idT);
+    if (fr < 0) { idK = 'shift'; idClip = 'id_shift'; idT = 0; const T2 = timing(idClip); if (!T2) { idK = ''; return f; } fr = frameAt(T2, 0); }   // (a fidget's end: back to the shift)
+    return nm(idClip + '.', fr);
+  }
+  // the drawn facing: the spot's once the move is halfway in (snapped to the knobs' facings, as facing() does)
+  function cxFace(phi, yaw) {
+    if (!(cxK > .5) || !CX.kind) return phi;
+    if (!K.face) return CX.face;
+    const q = TAU / K.face; return yaw + Math.round((CX.face - yaw) / q) * q;
+  }
+  // the body's origin onto the spot (AX / AY / AZ: compose's anchor), eased: seated, the hips at the seat's top
+  function cxPlace() {
+    if (!(cxK > 0) || !CX.kind) return;
+    const e = cxK * cxK * (3 - 2 * cxK);
+    let h = CX.h;
+    if (CX.kind === 'sit') { if (!(hipSit === hipSit)) { const S = poseOf('cx_sit.4'); hipSit = S && HIPS >= 0 ? S.w[HIPS * 7 + 6] : .47; } h = CX.h - hipSit; }
+    AX += (CX.x - AX) * e; AZ += (CX.y - AZ) * e; AY += (h - AY) * e;
+  }
+  // after the feet: seated, the hips stay on the seat (feet() lowered the body to the lower foot's ground) and each leg
+  // reaches the ground; drinking, the right hand into the water at the dip
+  function cxBody(w, f) {
+    if (!(cxK > 0) || !CX.kind) return;
+    if (CX.kind === 'sit' && FEET_OK) {
+      const d = stats.drop || 0; if (d) for (let i = 0; i < NB; i++) w[i * 7 + 6] -= d;
+      if (!(F0A === F0A)) { const I = poseOf('idle.0'); F0A = I && FOOT_L >= 0 ? I.w[FOOT_L * 7 + 6] : .08; }
+      for (let k = 0; k < 2; k++) {
+        const ft = FT[k], o = ft * 7, X = fc * w[o + 4] - fs * w[o + 5] + AX, Z = -fs * w[o + 4] - fc * w[o + 5] + AZ, g = elev(X, Z) - AY + F0A;
+        if (Math.abs(g - w[o + 6]) > .01 && Math.abs(g - w[o + 6]) < .5) ikLeg(w, FU[k], FL[k], ft, w[o + 4], w[o + 5], g);
+      }
+    }
+    if (CX.kind === 'drink' && cxK > .9) {
+      const pc = parse(f), M = CL[pc.clip]?.marks;
+      if (M && M.dip === pc.i) {
+        const dx = CX.wx - AX, dz = CX.wy - AZ;
+        reachTo(w, false, fc * dx - fs * dz, -fs * dx - fc * dz, CX.wh - AY + .03, 1);
+      }
+    }
+  }
+  function reactReset() { idK = ''; idClip = ''; idCalm = 0; cxK = 0; cxOn = false; CX.kind = ''; hatK = hatT = rainK = shadeK = coldK = hugK = shivT = windK = 0; hatOn = false; lkK = 0; lkHave = false; lkY = lkP = lkVY = lkVP = lkSY = lkSP = 0; flT = 99; flN = -1; mlvx = NaN; mlK = 0; mlR = mlP = 0; }
+
   // ---------------------------------------------------------------- the frame
   // the facing: his facing in the world without the camera's 16-step rounding ((P.face + faceRest) steps + yaw), eased
   // (smooth) or as the sim has it (step), then snapped relative to the camera (K.face) or left free
@@ -871,7 +1239,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     t += dt; lastT = t0;   // (the view's own clock: the frame's real time)
     const sinkPx = Math.round((P.sink || 0) * 22);
     // 1) the frame and its clip, the time it has shown
-    const mv = motion(P, dt), f = emote(mv || (poseOf(P.frame) ? P.frame : 'idle.0'), P, dt), p = parse(f);   // (MOTION: the live movement clips)
+    const mv = motion(P, dt), f = emote(idles(mv || (poseOf(P.frame) ? P.frame : 'idle.0'), P, dt), P, dt), p = parse(f);   // (MOTION: the live movement clips; IDLES)
     if (f !== frameNow) { frameNow = f; frameT = 0; } else frameT += dt;
     const S = app.PL.gun?.S, proc = K.proc, flowOn = K.flow && proc;
     const cb = flowOn ? combat(f, p, P, S, dt) : null, ck = cb ? cb.key : p.clip;   // (COMBAT STYLE: its stance / draw)
@@ -918,9 +1286,12 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       }
     }
     // 4) the facing and the anchor
-    const phi = facing(P, yaw, dt);
+    const phi = cxFace(facing(P, yaw, dt), yaw);   // (IDLES: a context move's own facing)
     fc = Math.cos(phi); fs = Math.sin(phi); AX = PX; AY = P.z - sinkPx / ctxO.PPMH; AZ = PY; FX = -Math.sin(yaw); FZ = -Math.cos(yaw);
+    cxPlace();   // (IDLES: the body onto the spot)
     feet(Wt, P, dt);   // FEET ON THE GROUND: each foot on the ground under it, the body down by the lower one
+    plants(Wt, P, f);   // ADAPTIVE JUMPS: the hands and the feet on the real obstacle
+    cxBody(Wt, f);   // IDLES: seated, the hips on the seat; drinking, the hand in the water
     // 5) aim at any angle: the twist onto the cursor (held by the hysteresis, sampled with the step)
     if (aiming && GUN >= 0) {   // (and at once when the legs re-plant or turn: a stale twist on new legs points anywhere)
       if (sample || !(twistHeld === twistHeld) || phi !== aimPhi || baseName !== aimBase) {
@@ -936,6 +1307,12 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       }
     } else { twistShown = twistHeld = NaN; aimOn = false; lvx = NaN; }
     if (flowOn) kick(Wt, dt); else rc = null;   // (any gun pose: the hip shot's, the fan's too)
+    // REACTIONS: the lean on the move and the head's look while he doesn't aim (nor plays an emote, nor hangs from the swing's
+    // rope), a hit's flinch always
+    SEN ??= app.feat('senses');
+    const free = proc && !aiming && emS < 0 && K.demo !== 'swing' && idK !== 'fidget';   // (a fidget has the head itself)
+    mlean(Wt, P, dt, phi - yaw, yaw, free && flowOn, sample); look(Wt, P, dt, sample, free); weather(Wt, P, dt, sample, free); flinch(Wt, P, dt, aiming);
+    stats.look = lkK > 0 ? (SEN?.S.look.kind || '') : ''; stats.flinch = flT < flDur ? flT / flDur : -1;   // (dev)
     // 6) the demos
     ropeN = 0;
     if (K.demo === 'lasso' && !(S && S.out)) {
@@ -952,7 +1329,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     if (K.hold && haveShow) {
       tips(Wt, TIPS); tips(Wshow, TIPS2);
       let mx = 0; for (let i = 0; i < NB * 4; i++) { const d = Math.abs(TIPS[i] - TIPS2[i]); if (d > mx) mx = d; }
-      if (mx < 1) { show = Wshow; stats.held++; } else Wshow.set(Wt);
+      if (mx < 1 && !headTurned(Wt, Wshow)) { show = Wshow; stats.held++; } else Wshow.set(Wt);
     } else Wshow.set(Wt);
     haveShow = true;
     if (show !== Wt) toLocal(Wshow, Ll);   // (Ll: the shown local pose, a clip change's cross-fade starts from it)
@@ -966,7 +1343,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       tbPhi = phi;
       if (tbT < tbDur) {
         tbT += dt; const u = Math.min(1, tbT / tbDur), e = u * u * (3 - 2 * u);
-        toLocalTurned(show, phi, LTB); blendLocal(TBF, LTB, e, LTB); fk(LTB, WTB); unturn(WTB, phi); show = WTB;
+        toLocalTurned(show, phi, LTB); blendLocal(TBF, LTB, e, LTB); fk(LTB, WTB); unturn(WTB, phi); holster(show, WTB); show = WTB;
       }
       toLocalTurned(show, phi, LW); turnedParts(show, phi, TBP, null); tbHave = true;
       tbGun = GUN >= 0 && gunNear(show) ? barrel(show) + phi : NaN;
@@ -1027,6 +1404,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   Object.defineProperty(SPRO, 'img', {get() { fill(); return cv; }}); Object.defineProperty(SPRO, 'nrm', {get() { fill(); return cn; }});
   function sprite() {
     const P = app.P, pl = app.player, A = hero.atlas; SPRO.px = A.PIV[0] + 48; SPRO.py = A.PIV[1] + 40; SPRO.x = pl.x; SPRO.y = pl.y; SPRO.h = P.z; SPRO.frame = P.frame; SPRO.face = P.face;
+    if (cxK > 0 && CX.kind) { SPRO.x = DRAWN.x; SPRO.y = DRAWN.z; SPRO.h = DRAWN.h; if (cxK > .5 && CX.kind !== 'lean' && A.SP?.crouch) SPRO.frame = 'crouch'; }   // (IDLES: where he is drawn, low when seated or kneeling)
     return SPRO;
   }
 
@@ -1045,6 +1423,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     demos, emotes: EMOTES,
     compose, sprite,
   };
+  const reset0 = live.reset; live.reset = () => { reset0(); reactReset(); };   // (REACTIONS: no history carried over either)
   return live;
 }
 
@@ -1095,6 +1474,16 @@ export async function createLiveHero(o) {
     get bytes() { return rig?.bytes ?? 0; },
     get atlas() { return hero.atlas; },
     load,   // (dev / tests: a loadout's body now)
+    // (dev: the model re-exported (tools/blender/live_export.mjs): its body made again from the files now, shown at once with
+    // no history; the old one's model stays in the rig, never put again (rigmesh has no removal; a dev session's leak))
+    modelUrl: n => lives(n) ? MODELS[n] : null,   // (dev: the folder a loadout's live model is read from, the page's relative URL)
+    async reload(name = hero.loadName) {
+      if (!(name in MODELS)) return null;
+      const b = await createLiveBody({...o, url: MODELS[name], rig, flashes, K, slots, bust: '?v=' + Date.now()});
+      bodies[name] = b; loading[name] = Promise.resolve(b); shown = null;
+      if (want && !K.demo && b.demos.includes(want)) K.demo = want;
+      return b;
+    },
   };
   return live;
 }

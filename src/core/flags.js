@@ -29,6 +29,7 @@ export const FLAG_DOCS = {
   live:      'the player drawn LIVE (view/livehero.js: his Blender model through render/rigmesh.js, the pixelizer rules on the GPU) instead of his sprite. Absent: the gunslinger is live (his duster is runtime cloth on the live bones), the others are sprites; 1: every loadout with a live model (the outlaw too); 0: none. Shift+7 flips sprite / live, Shift+8 the motion knobs, Shift+9 the demos (dev/livekeys.js); docs/exp/livehero.md',
   livek:     'the live hero (?live): the preset of the motion knobs to start with (view/livehero.js PRESETS: smooth, step, face16, hyst, hold, snap, smear, all (default), allsmear, free32)',
   livedemo:  'the live hero (?live): a procedural demo to start with (lasso: the rope hand spinning a loop overhead, two-bone IK; swing: hanging from a rope, a pendulum), or an emote made for the live model only (cheer, wave, shrug, squat: played while he stands still)',
+  livereload: 'dev, the live hero: 1 watches the live model he wears (its model.json, once a second) and reloads his body when it changes (tools/blender/live_export.mjs: an animation edited in tools/blender/western.py shows in the running game; dev/livekeys.js watchLive)',
   lantern:   '1: start with the lantern lit',
   detail:    'low: the low detail tier (no wind lines, wildlife, depth layer or grass; menu > Graphics > Detail)',
   // ---- renderer A/B

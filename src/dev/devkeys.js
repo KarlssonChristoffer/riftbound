@@ -4,6 +4,7 @@
 // Each has its row in the menu's Dev tab (ui/pause.js).  WRITES: opt, cv.snapMode, stage.propMode / trees3d (their setters).
 import {SAMPLING, DEBUG} from '../render/options.js';
 import {liveKey} from './livekeys.js';
+export {watchLive} from './livekeys.js';   // (?livereload=1: main.js starts it)
 
 // sandbox / test keys (9: light sources, f: the flames' look, b: wind strength; 5-8, k: features' own; 0: a gang of gunmen
 // now, Shift+0 one, in the desert sandbox: features/foes.js; not C, which is the player's crouch)

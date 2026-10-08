@@ -150,6 +150,7 @@ const LIVE_LOADOUTS = ['gunslinger'];
 const live = Q.get('live') !== '0' ? await import('./view/livehero.js')
   .then(m => m.createLiveHero({G, app, hero, pa, mouse, cam, ctxO, only: Q.get('live') === '1' ? null : LIVE_LOADOUTS}))
   .catch(e => { console.warn('live hero: not loaded', e); return null; }) : null;
+if (live && Q.get('livereload') === '1') dev.watchLive(live, hero);   // (dev: a re-exported live model shows at once: dev/livekeys.js)
 
 const setYaw = cv.setYaw, setBiome = i => stage.setBiome(i);
 
