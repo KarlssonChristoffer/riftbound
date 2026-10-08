@@ -13,11 +13,14 @@
 // with the bank (sinkCrate), since here the player stands at h = 0 on a real box (the arena sank it .5 m and clipped
 // the sprite at a painted waterline).
 //
+//   carried  (the live cowboys' lift: features/brawl.js, docs/exp/brawl.md) PH.carry(q, x, y, h, yaw) each step holds it at his
+//            hands (no physics, no collider: q.r 0 while held; a barrel lies across his arms), PH.toss(q, vx, vy, vh) throws it
+//            (its own air time, landing and impacts take it; it flies past him for a moment), PH.put(q, x, y) sets it down
 // createPropPhysics(host, core) -> PH: PH.update(dt, evs) after combat's update (sim); PH.view(dt) the tumbling debris;
 // PH.frame() every rendered frame
-// (matrices, chunk meshes); PH.biomeChanged() (the world's meshes were disposed); PH.shove(q, vx, vy); PH.T; PH.dbg.
+// (matrices, chunk meshes); PH.biomeChanged() (the world's meshes were disposed); PH.shove(q, vx, vy); PH.carry / toss / put; PH.T; PH.dbg.
 import * as THREE from 'three';
-import {walkable, TERRAIN_ON, FAMS} from '../../world/world.js';
+import {walkable, TERRAIN_ON, FAMS, topOfProp} from '../../world/world.js';
 import {gemChunk} from '../../world/props3d.js';   // (the true-3D crystal's shards: a procedural chunk, glowing; ?props2d=1 none, as before)
 import {flags} from '../../core/flags.js';
 
@@ -57,11 +60,13 @@ export async function createPropPhysics(host, core) {
   // what stops q at (x, y): null | 'edge' | 'player' | a prop
   function hitAt(q, x, y) {
     if (!inBounds(x, y)) return 'edge';
-    if (host.elev(x, y) > (q.z || 0) + .3) return 'edge';   // a cliff face from below
-    const r = q.tip ? .3 : q.r || .32;
-    if (Math.abs(P.z - (q.z || 0)) < .8 && Math.hypot(P.x - x, P.y - y) < r + R_BODY) return 'player';
+    const air = q.h > .05 ? q.h : 0;   // (thrown: what it meets at its height)
+    if (host.elev(x, y) > (q.z || 0) + air + .3) return 'edge';   // a cliff face from below
+    const r = q.tip ? .3 : q.r || q.r0h || .32;
+    if (!(q.tossT < .35) && Math.abs(P.z - (q.z || 0) - air) < .8 + (air ? 1 : 0) && Math.hypot(P.x - x, P.y - y) < r + R_BODY) return 'player';
     for (const p of ents.near(x, y, r, nearQ)) {
-      if (p === q || p.broken || p.gone || Math.abs((p.z || 0) - (q.z || 0)) > .9) continue;
+      if (p === q || p.broken || p.gone || Math.abs((p.z || 0) - (q.z || 0)) > .9 + air) continue;
+      if (air && (q.z || 0) + air > (p.z || 0) + (p.hitH ?? topOfProp(p) ?? 1.2) + .1) continue;   // (over it)
       if (p.rect) { if (x > p.rect[0] - r && x < p.rect[2] + r && y > p.rect[1] - r && y < p.rect[3] + r) return p; }
       else if (p.r > 0 && Math.hypot(p.x - x, p.y - y) < p.r + r * .9) return p;
     }
@@ -102,7 +107,7 @@ export async function createPropPhysics(host, core) {
   function resetHome(q, quiet) {
     dropStone(q);
     [q.x, q.y, q.z] = q.home3;
-    Object.assign(q, {vx: 0, vy: 0, h: 0, vh: 0, tip: null, sink: 0, sinkT: undefined, float: false, idle: 0, r: q.kind === 'crate' ? (q.wall ? .38 : .34) : .3});
+    Object.assign(q, {vx: 0, vy: 0, h: 0, vh: 0, tip: null, sink: 0, sinkT: undefined, float: false, idle: 0, r: q.kind === 'crate' ? (q.wall ? .38 : .34) : .3, held: false, tossT: undefined});
     ents.hide(q, false); ents.moved(q);   // a jump home: the grid follows now, not next step
     if (q.kind === 'crate') q.push = !q.wall;
     if (q.gone === false && q.broken && q.goneBroken) { q.broken = false; q.goneBroken = false; }
@@ -113,6 +118,8 @@ export async function createPropPhysics(host, core) {
 
   function step(q, dt) {
     if (q.tilt > 0) q.tilt -= dt;
+    if (q.held) { q.idle = 0; return; }   // (in his hands: carry() places it)
+    if (q.tossT !== undefined && (q.tossT += dt) > 2) q.tossT = undefined;
     if (q.broken) { dropStone(q); q.wasBroken = true; return; }
     if (q.wasBroken) { q.wasBroken = false; if (q.x !== q.home3[0] || q.y !== q.home3[1] || q.tip) resetHome(q); return; }   // combat restocked it
     if (q.gone) { q.idle += dt; if (q.idle > T.idleReset * .5 && Math.hypot(P.x - q.home3[0], P.y - q.home3[1]) > T.resetAway) { q.broken = false; resetHome(q); } return; }
@@ -128,6 +135,7 @@ export async function createPropPhysics(host, core) {
     }
     // air (fell off the plateau): gravity on the height above the surface under it
     if (q.h > 0 || q.vh) {
+      if (q.tossT !== undefined && q.h > .001) { const e = host.elev(q.x, q.y), z0 = q.z || 0; if (e !== z0) { q.h += z0 - e; q.z = e; } }   // (thrown: its height over the ground under it now)
       q.vh = (q.vh || 0) - 18 * dt; q.h = Math.max(0, (q.h || 0) + q.vh * dt);
       if (q.h === 0) {
         const hard = q.vh < -5; q.vh = hard && q.tip ? 2.2 : 0; if (q.vh) q.h = .001;
@@ -173,6 +181,7 @@ export async function createPropPhysics(host, core) {
       q.wob = Math.min(1, (q.wob || 0) + s * .15);
       setAxis(q);
     }
+    if (q.tossT !== undefined && q.h > .02) return;   // (thrown, in the air: no friction till it comes down)
     const fr = (q.tip ? T.rollFric : T.slideFric) * dt, s2 = speedOf(q);
     if (s2 <= fr) { q.vx = q.vy = 0; } else { q.vx *= (s2 - fr) / s2; q.vy *= (s2 - fr) / s2; }
   }
@@ -316,7 +325,7 @@ export async function createPropPhysics(host, core) {
     for (const q of mov) {
       const it = host.itemOf(q); if (!it?.live) continue;
       const wob = q.wob ? Math.round(Math.sin(q.wob * 18) * q.wob * 2) : 0;
-      const manage = !q.broken && !q.gone && q.stage !== 2 && (!!q.tip || !!q.sink);
+      const manage = !q.broken && !q.gone && q.stage !== 2 && (!!q.tip || !!q.sink || !!q.held || (q.tossT !== undefined && q.h > .001));   // (held or thrown: features/brawl.js)
       it.manageMatrix = manage;
       if (!manage) continue;
       if (q.tip && BARREL[q.kind]) it.live.setMatrix(barrelMatrix(q, M, wob * rx, wob * rz));
@@ -344,5 +353,32 @@ export async function createPropPhysics(host, core) {
   }
   function biomeChanged() { pool = []; for (const c of flying) c.m = null; }   // the old world disposed every mesh it lent us
 
-  return {T, update, view, frame, biomeChanged, shove, mov, resetAll, dbg: {flying, mov, hitAt, pool: () => pool}};
+  // ---------------- carried (features/brawl.js: the live cowboys lift and throw): held at his hands, thrown, set down ----------------
+  // carry(q, x, y, h, yaw): held there this step (h: absolute height of its base; yaw: his facing, rad: a barrel lies across his arms)
+  function carry(q, x, y, h, yaw) {
+    if (q.broken || q.gone || q.sink || q.float) return false;
+    if (!q.held) {
+      q.held = true; q.r0h = q.r || q.r0h || .32; q.r = 0; q.wasUp = (q.kind === 'barrel' || q.kind === 'barrel_x') && !q.tip; q.pushT = 0;
+      if (q.wasUp) { q.tip = {axis: 0, phi: 0}; q.tilt = 0; }
+    }
+    q.vx = q.vy = q.vh = 0; q.idle = 0; q.x = x; q.y = y; q.z = host.elev(x, y); q.h = Math.max(.001, h - q.z);
+    if (q.tip) q.tip.axis = yaw * 180 / Math.PI + 90;   // (its long axis across his arms)
+    return true;
+  }
+  // toss(q, vx, vy, vh): out of his hands with this velocity (m/s); it flies past him for a moment, then hits what it meets
+  function toss(q, vx, vy, vh) {
+    if (!q.held) return false;
+    q.held = false; q.r = q.r0h || .32; q.vx = vx; q.vy = vy; q.vh = vh; q.tossT = 0; q.idle = 0; q.wob = .4;
+    if (q.tip) q.tip.axis = Math.atan2(vx, vy) * 180 / Math.PI;
+    return true;
+  }
+  // put(q, x, y): set down on the ground there (a barrel lifted upright stands again)
+  function put(q, x, y) {
+    if (!q.held) return false;
+    q.held = false; q.r = q.r0h || .32; q.x = x; q.y = y; q.z = host.elev(x, y); q.h = 0; q.vh = q.vx = q.vy = 0; q.idle = 0;
+    if (q.wasUp) { q.tip = null; q.tilt = 0; q.wasUp = false; }
+    ents.moved(q);
+    return true;
+  }
+  return {T, update, view, frame, biomeChanged, shove, carry, toss, put, mov, resetAll, dbg: {flying, mov, hitAt, pool: () => pool}};
 }

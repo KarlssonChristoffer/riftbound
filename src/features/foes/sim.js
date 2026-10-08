@@ -37,6 +37,9 @@ import {PLAY, TRAIL, WORLD, elev, inStream, topOfProp, TERRAIN_ON} from '../../w
 // walkable terrain (docs/TERRAIN.md): a gunman's z follows the ground under him as he walks, is shoved or lands; flat world: no change
 const toGround = TERRAIN_ON ? p => { p.z = elev(p.x, p.y); } : () => {};
 import {TYPES, TUNE} from '../../content/foes.js';
+import {flight, throwBody, stepFlight, feetOf} from '../../sim/bodyfly.js';   // a kicked gunman's flight (docs/exp/brawl.md)
+import {TUNE as BRAWL} from '../../content/brawl.js';
+const CALLS = TUNE.calls, BODY = BRAWL.body;
 
 const DEG = Math.PI / 180;
 const wrap = a => a - TAU * Math.floor((a + Math.PI) / TAU);   // -> [-pi, pi)
@@ -171,20 +174,22 @@ export function createFoesSim(host, {unarmed = false} = {}) {
   }
   function add(type, x, y, name) {
     const T = TYPES[type], G = T.gun;
-    const p = {kind: 'gunman', foe: type, x, y, z: elev(x, y), h: 0, r: T.r, hitR: T.hitR, hitH: T.hitH, hp: T.hp, maxHp: T.hp, target: true, hunter: true,
+    const p = {kind: 'gunman', foe: type, x, y, z: elev(x, y), h: 0, r: T.r, hitR: T.hitR, hitH: T.hitH + CALLS.hat, hp: T.hp, maxHp: T.hp, target: true, hunter: true,
       coins: T.coins, foot: T.foot, elite: !!T.elite, name: name || T.name};
     const face = Math.atan2(P.x - x, P.y - y);
     const g = {p, T, type, mode: 'enter', act: 'holstered', at: 0, ammo: G.rounds, cool: 0, locked: false,
       face, aim: face, tx: P.x, ty: P.y, th: P.z + A.chest, vx: 0, vy: 0, speed: 0, gait: '', strafe: R() < .5 ? -1 : 1, strafeT: RR(A.strafe[0], A.strafe[1]),
       look: R() * A.perceive, d: hypot2(P.x - x, P.y - y), los: false, lost: 0, rph: '', rt: 0, rk: 0, rfirst: true, r0: 0,
       stuck: 0, sideT: 0, way: false, wx: 0, wy: 0, wayT: 0, flinch: 0, hitAge: 99, hitFront: true,
-      rope: 0, down: null};   // rope: s left on a lasso (features/equip/lasso.js); down: knocked off his feet (fling below)
+      rope: 0, down: null,   // rope: s left on a lasso (features/equip/lasso.js); down: knocked off his feet (fling below)
+      hat: true, gunIn: true, fetch: null, sting: 0, stag: 0, limp: 0, wet: 0, spare: 0, F: null};   // BRAWL (below): his hat on, his gun in his hand or holster, what he goes to pick up, the hand stung, staggering, limping, his powder wet, the spare's clock, a kick's flight
     ents.add(p); gang.push(g); byP.set(p, g);
     return g;
   }
   function removeAll() {
     for (const g of gang) { if (!g.p.broken) ents.remove(g.p); byP.delete(g.p); }
     gang.length = 0; B.n = 0; S.aiming = 0; S.bounty = false;
+    for (let i = 0; i < LN; i++) loose[i].on = false;
   }
 
   // ---------------------------------------------------------------- the gun
@@ -257,7 +262,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
       case 'ready':
         g.cool -= dt;
         if (g.lost > A.lose || S.down) { startAct(g, g.ammo < G.rounds && !S.down ? 'reload' : 'holster'); break; }   // (loads up before it goes looking)
-        if (g.cool <= 0 && can && S.aiming < A.maxAiming) startAct(g, 'aim');
+        if (g.cool <= 0 && can && S.aiming < A.maxAiming && !(g.wet > 0)) startAct(g, 'aim');   // (his powder wet from the water: no shot: BRAWL)
         break;
       case 'aim':
         if (!g.locked) {
@@ -313,6 +318,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
       }
       const l = hypot2(mx, my); if (l > 1e-3) { mx /= l; my /= l; } else speed = 0;
     }
+    if (g.limp > 0) speed *= CALLS.limpK;   // (shot in the leg: BRAWL)
     // ease the velocity toward the wish, then move (sliding along what blocks)
     const k = Math.min(1, A.accel * dt / Math.max(.5, speed || 1));
     g.vx += (mx * speed - g.vx) * k; g.vy += (my * speed - g.vy) * k;
@@ -424,6 +430,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
       g.hitAge += dt;
       if (g.down) { downStep(g, dt); continue; }
       g.d = hypot2(P.x - p.x, P.y - p.y);
+      if (hands(g, dt, i)) continue;   // stung, staggering, going for his hat or his gun (BRAWL)
       if ((g.look -= dt) <= 0) {
         g.look += A.perceive;
         const same = Math.abs(P.z - p.z) < 1.2 || g.d > 4;   // (on the mesa you're seen from below, not from under its lip)
@@ -433,6 +440,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
       legs(g, dt, i);
     }
     stepBullets(dt);
+    for (let i = 0; i < LN; i++) if (loose[i].on) stepLoose(loose[i], dt);
   }
 
   // ---------------------------------------------------------------- the lasso (features/equip/lasso.js)
@@ -440,6 +448,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
   // legs, the aim let go. o.dmg (combat's damage) as he lands; o.onLand(p) is told; he bowls over a mate he flies into
   function downStep(g, dt) {
     const D = g.down, p = g.p; D.t += dt;
+    if (D.ph === 'thrown') { thrownStep(g, D, dt); g.d = hypot2(P.x - p.x, P.y - p.y); return; }   // a kick's flight (BRAWL)
     if (D.ph === 'carry') { if (D.t > .25) { D.ph = 'fly'; D.t = 0; D.x0 = D.x1 = p.x; D.y0 = D.y1 = p.y; D.dur = .3; D.H = 0; D.h0 = p.h; } }   // (let go of without a throw: he drops)
     else if (D.ph === 'fly') {
       const k = Math.min(1, D.t / D.dur);
@@ -454,8 +463,8 @@ export function createFoesSim(host, {unarmed = false} = {}) {
         if (c && D.dmg) c.damage(p, D.dmg, {dir: [(p.x - D.x0) / l * 3, (p.y - D.y0) / l * 3]});
         D.onLand?.(p);
       }
-    } else if (D.ph === 'lie') { if (D.t >= D.stun) { D.ph = 'up'; D.t = 0; } }
-    else if (D.t >= A.getUp) { g.down = null; g.act = 'holstered'; g.at = 0; g.vx = g.vy = 0; g.lost = 0; }
+    } else if (D.ph === 'lie') { if (D.t >= D.stun) { standUp(g); D.ph = 'up'; D.t = 0; } }
+    else if (D.t >= A.getUp) { g.down = null; g.act = 'holstered'; g.at = 0; g.vx = g.vy = 0; g.lost = 0; afterDown(g); }   // (BRAWL: his hat or gun lying near)
     g.d = hypot2(P.x - p.x, P.y - p.y);
   }
   // roped(p, sec): on a lasso sec s more (his gun goes down: gun() above; he leans away: legs()); shift(p, dx, dy): dragged
@@ -491,8 +500,246 @@ export function createFoesSim(host, {unarmed = false} = {}) {
     return g.down;
   }
 
+  // ================================================================ BRAWL (docs/exp/brawl.md): kicked, called shots
+  // THROWN (launch: the player's boot or barge, features/brawl.js): his body flies by sim/bodyfly.js in the world: a wall stops
+  // it (a slam hurts him), off a ledge he falls on (a drop past BODY.fall0 hurts), into the water he splashes (lies wet, then
+  // out on the bank; his powder wet: no shot for BODY.powder s), into the canyon he's gone; whoever he flies into is knocked
+  // down too. Then he lies (BODY.stun) and gets up as after a lasso's yank (lie -> up), where he can stand
+  const hole = (x, y) => y > WORLD.y1 - 3.6 && !!host.biome.hole?.(x, y);
+  const FW = {elev, water: (x, y) => inStream(x, y), void: hole,
+    solid: (x, y, h0, h1, r) => (!walkArea(x, y) && !hole(x, y)) || colSolid(x, y, h0, h1, r)};
+  // something solid in the column (x, y) between h0 and h1 within r (walls, crates, props, trunks; not a body)
+  function colSolid(x, y, h0, h1, r) {
+    for (const q of ents.near(x, y, r + .8, nearL)) {
+      if (q.broken || q.gone || q.kind === 'gunman' || q.hunter || q.sparring || !(q.rect || q.r > .15)) continue;
+      const z0 = q.z || 0, top = z0 + (topOfProp(q) ?? (q.kind === 'tree' ? 6 : 1.2)); if (h1 < z0 || h0 > top) continue;
+      if (q.rect ? x > q.rect[0] - r && x < q.rect[2] + r && y > q.rect[1] - r && y < q.rect[3] + r : hypot2(q.x - x, q.y - y) < q.r + r) return true;
+    }
+    return false;
+  }
+  const combatCore = () => host.feature('combat')?.core || null;
+  // launch(p, vx, vy, up, o): thrown off his feet at (vx, vy) m/s along the ground and up m/s; o.stun (s lying after), o.dmgFly (to
+  // whoever he flies into), o.hatK / o.gunK (the chance his hat / his gun, if it's out, flies off), o.onLand(p) -> false: he can't be now
+  function launch(p, vx, vy, up, o = {}) {
+    const g = byP.get(p); if (!g || p.broken) return false;
+    if (g.down && g.down.ph !== 'thrown' && g.down.ph !== 'fly' && g.down.ph !== 'carry') return false;
+    const out = g.act === 'ready' || g.act === 'aim' || g.act === 'fire';
+    if (g.act === 'aim') S.aiming--;
+    g.act = 'holstered'; g.at = 0; g.rope = 0; g.flinch = 0; g.vx = g.vy = 0; g.speed = 0; g.gait = ''; g.fetch = null; g.sting = g.stag = 0;
+    const F = g.F ??= flight();
+    if (!g.down || g.down.ph !== 'thrown') F.on = false;
+    throwBody(F, p.x, p.y, p.z || 0, vx, vy, up, {mid: .95, lie: .16, r: .26, h0: (p.h || 0) + .95});
+    g.face = Math.atan2(-vx, -vy);   // (thrown off it: he faces back the way it came)
+    g.down = {ph: 'thrown', t: 0, x0: p.x, y0: p.y, x1: p.x, y1: p.y, dur: 0, H: 0, h0: 0, dmg: 0, stun: o.stun ?? BODY.stun, dmgFly: o.dmgFly ?? BODY.bowlDmg,
+      bowl: BODY.bowl, hit: [], onLand: o.onLand || null, wet: false};
+    if (g.hat && R() < (o.hatK ?? .5)) hatOff(p, vx, vy, .6);   // (a boot: the hat often flies, the gun sometimes)
+    if (out && g.gunIn && (o.gunK ?? 0) > 0 && R() < o.gunK) dropGun(g, vx, vy, .7);
+    return true;
+  }
+  function thrownStep(g, D, dt) {
+    const p = g.p, F = g.F; if (!F) { D.ph = 'lie'; D.t = 0; return; }
+    stepFlight(F, dt, FW);
+    p.x = F.x; p.y = F.y; toGround(p); p.h = Math.max(0, feetOf(F) - (p.z || 0));
+    if (F.on) g.face = wrap(g.face + dt * 7 * Math.min(1, hypot2(F.vx, F.vy) / 6));   // (tumbling)
+    const c = combatCore();
+    // whoever he flies into: knocked down too
+    if (D.dmgFly && p.h < 1.3) for (const o of gang) {
+      const q = o.p; if (o === g || q.broken || D.hit.includes(q) || hypot2(q.x - p.x, q.y - p.y) > D.bowl + q.hitR) continue;
+      D.hit.push(q); c?.damage(q, D.dmgFly, {dir: [(q.x - p.x) * 3, (q.y - p.y) * 3]});
+      const l = hypot2(q.x - p.x, q.y - p.y) || 1;
+      launch(q, (q.x - p.x) / l * 2.5 + F.vx * .4, (q.y - p.y) / l * 2.5 + F.vy * .4, 1.6, {dmgFly: 0, hatK: .3});
+      emitBody('combat.bowl', q.x, q.y, q);
+    }
+    const ev = F.ev;
+    if (ev === 'slam') { c?.damage(p, Math.min(BODY.slamMax, BODY.slam0 + (F.speed - 2.6) * BODY.slamK), {dir: [F.hx * 2, F.hy * 2]}); emitBody('body.slam', p.x, p.y, p).n = F.speed; host.shake(2, .12); }
+    else if (ev === 'land') { if (F.drop > BODY.fall0) c?.damage(p, (F.drop - BODY.fall0) * BODY.fallK, {dir: [0, 0]}); emitBody('body.land', p.x, p.y, p).n = F.drop; }
+    else if (ev === 'water') { D.wet = true; emitBody('body.splash', p.x, p.y, p); emit('arrow.splash', p.x, p.y, 0); g.wet = BODY.powder; }
+    else if (ev === 'void') { c?.damage(p, 9999, {dir: [0, 0], quiet: true}); emitBody('body.fall', p.x, p.y, p); }
+    if (!F.on && !p.broken) {   // at rest: he lies (in the water longer), then gets up where he can stand
+      p.h = 0; D.ph = 'lie'; D.t = 0; if (D.wet) D.stun = BODY.wet;
+      D.onLand?.(p);
+    }
+  }
+  // getting up in the water or off the ground he can walk (the creek, the mesa's foot): the nearest spot he can stand, toward
+  // where the flight began
+  function standUp(g) {
+    const p = g.p; if (standable(p.x, p.y, p) && !inStream(p.x, p.y)) return;
+    const D = g.down, dx = D ? D.x0 - p.x : 0, dy = D ? D.y0 - p.y : 1, a0 = Math.atan2(dx, dy);
+    for (let r = .3; r < 6; r += .3) for (let k = 0; k < 12; k++) {
+      const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * .5, x = p.x + Math.sin(a) * r, y = p.y + Math.cos(a) * r;
+      if (standable(x, y, p) && !inStream(x, y)) { p.x = x; p.y = y; toGround(p); return; }
+    }
+  }
+  function emitBody(type, x, y, who) { const e = emit(type, x, y, elev(x, y)); e.who = who; return e; }
+  // up again (the end of a knock-down): his hat or his gun lying near, he goes for it
+  function afterDown(g) {
+    if (!g.gunIn) g.fetch = {kind: 'gun', it: null, ph: 'look', t: 0};
+    else if (!g.hat && mine(g, 'hat')) g.fetch = {kind: 'hat', it: null, ph: 'look', t: 0};
+  }
+
+  // CALLED SHOTS (features/calls.js says where a shot met him): the hat off, the gun out of his hand, a leg
+  // LOOSE THINGS: his hat or his gun on the ground (or flying, kicked, carried by you): a small pool, the sim's
+  const LN = 12, loose = [];
+  for (let i = 0; i < LN; i++) loose.push({on: false, kind: '', foe: '', owner: null, x: 0, y: 0, h: 0, vx: 0, vy: 0, vh: 0, rest: false, held: false, t: 0, yaw: 0, spin: 0, by: null});
+  function spawnLoose(kind, g, x, y, h, vx, vy, vh) {
+    let it = null; for (let i = 0; i < LN; i++) if (!loose[i].on) { it = loose[i]; break; }
+    if (!it) { it = loose[0]; for (let i = 1; i < LN; i++) if (loose[i].t > it.t) it = loose[i]; }   // (all in use: the oldest goes)
+    it.on = true; it.kind = kind; it.foe = g.type; it.owner = g; it.x = x; it.y = y; it.h = h; it.vx = vx; it.vy = vy; it.vh = vh;
+    it.rest = false; it.held = false; it.t = 0; it.yaw = g.face; it.spin = (R() < .5 ? -1 : 1) * (6 + R() * 8); it.by = null;
+    return it;
+  }
+  // the gun in his hand while it's out, in the world -> out {x, y, h} (the called shot's test, the aim's snap), else null
+  const GP = {x: 0, y: 0, h: 0}, GP2 = {x: 0, y: 0, h: 0};
+  function gunPoint(p, out = GP) {
+    const g = byP.get(p); if (!g || !g.gunIn || g.down || !(g.act === 'ready' || g.act === 'aim' || g.act === 'fire')) return null;
+    const a = g.aim, f = CALLS.gun, s = Math.sin(a), c = Math.cos(a);
+    out.x = p.x + s * f[0] - c * f[1]; out.y = p.y + c * f[0] + s * f[1]; out.h = (p.z || 0) + f[2];   // (his right: (-cos, sin) of his facing)
+    return out;
+  }
+  function hatOff(p, dx, dy, k = 1) {
+    const g = byP.get(p); if (!g || !g.hat || p.broken) return false;
+    g.hat = false; p.hitH = g.T.hitH;
+    const l = hypot2(dx, dy) || 1, F = CALLS.fly;
+    spawnLoose('hat', g, p.x + dx / l * .1, p.y + dy / l * .1, (p.z || 0) + (p.h || 0) + CALLS.brim + .12, dx / l * F[0] * k, dy / l * F[0] * k, F[1] * (.6 + .4 * k));
+    if (!g.down && !g.fetch) g.fetch = {kind: 'hat', it: null, ph: 'look', t: 0};
+    const e = emitBody('foe.hat', p.x, p.y, p); e.foe = g.type;
+    return true;
+  }
+  function dropGun(g, dx, dy, k) {
+    const p = g.p, l = hypot2(dx, dy) || 1, F = CALLS.gunFly, gp = gunPoint(p, GP2);
+    const x = gp ? gp.x : p.x, y = gp ? gp.y : p.y, h = gp ? gp.h : (p.z || 0) + 1;
+    g.gunIn = false; if (g.act === 'aim') S.aiming--;
+    g.act = 'holstered'; g.at = 0;
+    spawnLoose('gun', g, x, y, h, dx / l * F[0] * k, dy / l * F[0] * k, F[1] * k);
+    const e = emitBody('foe.disarm', p.x, p.y, p); e.foe = g.type; e.gun = g.T.gun.sound;
+  }
+  function disarm(p, dx, dy) {
+    const g = byP.get(p); if (!g || !g.gunIn || p.broken || g.down || !gunPoint(p)) return false;
+    dropGun(g, dx, dy, 1);
+    g.sting = CALLS.sting; g.stag = 0; g.fetch = {kind: 'gun', it: null, ph: 'look', t: 0}; g.spare = CALLS.spare;
+    return true;
+  }
+  function stagger(p) {
+    const g = byP.get(p); if (!g || p.broken || g.down) return false;
+    if (g.act === 'aim') { S.aiming--; g.act = 'ready'; g.at = 0; g.cool = .4; }
+    g.stag = CALLS.stagger; g.limp = CALLS.limp; g.flinch = 0;
+    emitBody('foe.stagger', p.x, p.y, p).foe = g.type;
+    return true;
+  }
+  // a gunman's reactions while they last: true while they drive him (no gun, no legs of the fight)
+  function hands(g, dt, i) {
+    if (g.wet > 0) g.wet -= dt;
+    if (g.limp > 0) g.limp -= dt;
+    if (g.sting > 0) { g.sting -= dt; halt(g, dt); return true; }
+    if (g.stag > 0) { g.stag -= dt; halt(g, dt); return true; }
+    if (!g.gunIn && g.spare > 0 && (g.spare -= dt) <= 0) {   // his spare (from his boot): the fight again
+      g.gunIn = true; if (g.fetch?.kind === 'gun') g.fetch = null; g.act = 'holstered'; g.at = 0; g.lost = 0;
+    }
+    const f = g.fetch;
+    if (!f) { if (g.gunIn) return false; keepAway(g, dt); return true; }
+    f.t += dt;
+    const elite = g.T.elite ? CALLS.elite : 1;
+    if (f.ph === 'look') {   // a beat to see where it went
+      halt(g, dt);
+      if (f.t >= CALLS.look / elite) { f.it = mine(g, f.kind); f.ph = f.it ? 'go' : 'none'; f.t = 0; }
+      return true;
+    }
+    if (f.ph === 'none') { g.fetch = null; return !g.gunIn; }
+    const it = f.it;
+    if (f.ph === 'go') {
+      if (!it.on || it.held || it.owner !== g || (it.rest && !reachable(it)) || f.t > CALLS.chase) { g.fetch = null; return !g.gunIn; }   // (gone, yours, in reach of nobody: he gives up on it)
+      const dx = it.x - g.p.x, dy = it.y - g.p.y, d = hypot2(dx, dy);
+      if (d < .55 && it.rest) { f.ph = 'stoop'; f.t = 0; halt(g, dt); return true; }
+      const run = f.kind === 'gun' || d > 3.5;
+      walkTo(g, dx / (d || 1), dy / (d || 1), (run ? g.T.speed.run : g.T.speed.walk) * elite, run ? 'run' : 'walk', dt);
+      return true;
+    }
+    if (f.ph === 'stoop') {   // the pick-up (fx_pickup): the thing leaves the ground at its grab mark
+      halt(g, dt); g.face = Math.atan2(it.x - g.p.x, it.y - g.p.y); g.aim = g.face;
+      const st = CALLS.stoop / elite;
+      if (it.on && (it.held || !it.rest || it.owner !== g)) { g.fetch = null; return !g.gunIn; }   // (snatched away under his hand)
+      if (it.on && f.t >= st * CALLS.grab) {
+        it.on = false; const e = emitBody('foe.pickup', g.p.x, g.p.y, g.p); e.foe = f.kind;
+        if (f.kind === 'gun') { g.gunIn = true; g.spare = 0; }
+      }
+      if (!it.on && f.t >= st) {
+        if (f.kind === 'hat') { f.ph = 'on'; f.t = 0; }
+        else { g.fetch = null; g.act = 'holstered'; g.at = 0; g.lost = 0; if (!g.hat && mine(g, 'hat')) g.fetch = {kind: 'hat', it: null, ph: 'look', t: 0}; }
+      }
+      return true;
+    }
+    if (f.ph === 'on') {   // the hat back on (fx_hat_on's mark: his hitH grows by it again)
+      halt(g, dt);
+      if (!g.hat && f.t >= CALLS.on * .5 / elite) { g.hat = true; g.p.hitH = g.T.hitH + CALLS.hat; }
+      if (f.t >= CALLS.on / elite) g.fetch = null;
+      return true;
+    }
+    return false;
+  }
+  const mine = (g, kind) => { for (let i = 0; i < LN; i++) { const it = loose[i]; if (it.on && it.owner === g && it.kind === kind && !it.held) return it; } return null; };
+  const reachable = it => !inStream(it.x, it.y) && nav.isOpen(it.x, it.y);
+  function halt(g, dt) {
+    const d = Math.exp(-dt * 14); g.vx *= d; g.vy *= d; g.speed = hypot2(g.vx, g.vy); g.gait = '';
+    if (g.act === 'aim') { S.aiming--; g.act = 'ready'; g.at = 0; g.cool = .3; }
+  }
+  function walkTo(g, ux, uy, speed, gait, dt) {
+    const p = g.p, k = Math.min(1, A.accel * dt / Math.max(.5, speed));
+    g.vx += (ux * speed - g.vx) * k; g.vy += (uy * speed - g.vy) * k;
+    const sx = g.vx * dt, sy = g.vy * dt;
+    if (standable(p.x + sx, p.y + sy, p)) { p.x += sx; p.y += sy; }
+    else if (standable(p.x + sx, p.y, p)) p.x += sx; else if (standable(p.x, p.y + sy, p)) p.y += sy;
+    toGround(p);
+    g.speed = hypot2(g.vx, g.vy); g.gait = g.speed > .15 ? gait : '';
+    const want = Math.atan2(g.vx, g.vy), da = wrap(want - g.face), st = A.turn * dt;
+    if (g.speed > .2) g.face = wrap(g.face + (Math.abs(da) <= st ? da : Math.sign(da) * st));
+    g.aim = g.face;
+  }
+  function keepAway(g, dt) {   // no gun to go for: back to it if it lies where he can get it, else away from you till his spare's out
+    const it = mine(g, 'gun');
+    if (it && it.rest && reachable(it)) { g.fetch = {kind: 'gun', it, ph: 'go', t: 0}; return; }
+    if (g.act !== 'holstered') { if (g.act === 'aim') S.aiming--; g.act = 'holstered'; g.at = 0; }
+    const p = g.p, dx = p.x - P.x, dy = p.y - P.y, d = hypot2(dx, dy) || 1;
+    if (d < 6) walkTo(g, dx / d, dy / d, g.T.speed.walk, 'walk', dt); else halt(g, dt);
+  }
+  // a loose thing's flight: gravity, walls and props stop it, it bounces and slides to rest; in the water it's gone; it lies
+  // CALLS.keep s (not while its owner goes for it). Thrown by you (it.by), a gunman it meets takes a knock
+  function stepLoose(it, dt) {
+    it.t += dt;
+    if (it.held) return;
+    if (it.rest) { if (it.t > CALLS.keep && it.owner?.fetch?.it !== it) it.on = false; return; }
+    it.vh -= 18 * dt;
+    const nx = it.x + it.vx * dt, ny = it.y + it.vy * dt;
+    if (colSolid(nx, ny, it.h - .05, it.h + .1, .08) || !walkArea(nx, ny)) { it.vx *= -.3; it.vy *= -.3; }
+    else { it.x = nx; it.y = ny; }
+    it.h += it.vh * dt;
+    const gz = elev(it.x, it.y);
+    if (it.h <= gz) {
+      it.h = gz;
+      if (inStream(it.x, it.y)) { it.on = false; emit('arrow.splash', it.x, it.y, 0).small = true; return; }
+      if (it.vh < -2.2) { const k = Math.min(1, -it.vh / 6); it.vh = -it.vh * .28; it.vx *= .55; it.vy *= .55; const e = emit('foe.loose', it.x, it.y, gz); e.foe = it.kind; e.n = k; }
+      else {
+        it.vh = 0; const k = Math.exp(-dt * 7); it.vx *= k; it.vy *= k;
+        if (hypot2(it.vx, it.vy) < .12) { it.vx = it.vy = 0; it.rest = true; it.t = 0; it.by = null; }
+      }
+    }
+    if (it.by && !it.rest) {
+      for (const o of gang) {
+        const q = o.p; if (q.broken) continue;
+        const rel = it.h - (q.z || 0); if (rel < 0 || rel > q.hitH || hypot2(q.x - it.x, q.y - it.y) > q.hitR) continue;
+        combatCore()?.damage(q, it.kind === 'gun' ? 8 : 3, {dir: [it.vx, it.vy], canCrit: false}); if (o.flinch <= 0 && o.T.flinch > 0) o.flinch = o.T.flinch;
+        it.vx *= -.2; it.vy *= -.2; it.by = null; break;
+      }
+    }
+  }
+  // the player's side (features/brawl.js): kicked away, picked up (held: it rides his hands, its owner gives up on it), thrown
+  function kickLoose(it, vx, vy, vh) { if (!it.on || it.held) return false; it.vx = vx; it.vy = vy; it.vh = vh; it.rest = false; it.t = 0; it.h += .05; return true; }
+  function holdLoose(it, on) { if (!it.on) return false; it.held = !!on; it.rest = false; it.t = 0; if (on && it.owner?.fetch?.it === it) it.owner.fetch = null; return true; }
+  function carryLoose(it, x, y, h, yaw) { if (!it.on || !it.held) return; it.x = x; it.y = y; it.h = h; it.yaw = yaw; }
+  function tossLoose(it, vx, vy, vh) { if (!it.on) return false; it.held = false; it.rest = false; it.vx = vx; it.vy = vy; it.vh = vh; it.t = 0; it.by = 'player'; return true; }
+
   return {
     gang, B, S, nav, KINDS, update, removeAll, roped, shift, fling, carry, TUNE_GETUP: A.getUp, unarmed: !!U,
+    launch, hatOff, disarm, stagger, loose, kickLoose, holdLoose, carryLoose, tossLoose, gunPoint, recOf: p => byP.get(p) || null,   // BRAWL (below)
     get alive() { return gang.length; },
     request(n = 0, o = null) { S.want = n || -1; S.wantO = o; },   // a gang now (-1: the usual size): read by the next step
     spawnAt: (type, x, y, name = null) => add(type, x, y, name),   // (tests: a gunman of a type, there, now)

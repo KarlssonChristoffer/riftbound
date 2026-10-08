@@ -13,6 +13,12 @@
 //   YANK     tap F: it flies at you off its feet (combat's / the gunmen's fling: a tumble, whoever it meets bowled over),
 //            lands a little short of you, takes the impact and lies stunned; a prop is shoved at you
 //   SWING    an anchor: PL.lasso.hang (the pendulum is the player's); F or Space lets go; then the loop comes home
+//   ZIP      an anchor caught well under his hand and away (TUNE.zip: thrown from up high, the watchtower's lookout, the mesa):
+//            PL.lasso.zip: he hitches his end and slides down the line to it (docs/exp/brawl.md)
+//   ROPE UP  an anchor at the lip of a top he can stand on (the lookout's low parapet, a tree on a ledge), him near the face's
+//            foot below it (TUNE.ropeup): PL.lasso.ropeup: he climbs the rope up the face and over onto the top
+//   STONES   the top of a stone wall's broken stretch too high to vault (TUNE.pull): caught as a hold; a tap of F pulls its top
+//            course down toward you (world.pullWall: now it can be vaulted), the stones hurting whoever stands under them
 // Fixed 1/60 s steps; every random draw from the equipment sim's generator (passed in); nothing read back from the view.
 // OWNS: L (the phase, the aim, the loop's flight, what's held, the anchor, the stunned list), the anchor segments' scratch.
 // READS: host.player / aim / mouse / G (gameToScreen: the cursor's anchors through the game's view, as the game's hover does) / entities (near) /
@@ -26,13 +32,15 @@
 import {TUNE, ANCHOR_TOP} from '../../content/lasso.js';
 import {GADGETS} from '../../content/gadgets.js';
 import {clamp, hypot2, hypot3, TAU} from '../../core/mathx.js';
-import {topOfProp, walkable} from '../../world/world.js';
+import {topOfProp, walkable, vaultTop} from '../../world/world.js';
+import {TOWER_PLAN} from '../../world/layout.js';   // (the watchtower's lookout: its low parapet is a rope-up anchor)
 
 const MOVABLE = new Set(['crate', 'barrel', 'barrel_x']);
 const TOP = {lasso_snag: 4.3, crate: .8, barrel: .9, barrel_x: .9, pot: .5, rock: .5, rock_big: 1.1, brazier: 1.1, torch: 1.7, well: .9, bench: .5, stall: 2, woodpile: .4,
   campfire: .15, beacon: 1.5, chest: .6, dummy: 1.4, crystal: 1.2, pillar: 2.6, pillar_broken: 1.4, tree: 6, ruin: 2, scarecrow: 1.5, merchant: 1.6, goods: .7,
   bush: 0, tuft: 0, fern: 0, reed: 0, gadget: 0, gadget_cache: .7};
 const SEGMAX = 640;
+const ZIP = TUNE.zip, RU = TUNE.ropeup, PULL = TUNE.pull, WALLK = new Set(['wall_n', 'wall_s', 'wall_w', 'wall_e']);
 
 export function createLassoSim(host, eq) {
   const ents = host.entities, P = host.player, events = host.events, G = GADGETS.lasso;
@@ -95,6 +103,8 @@ export function createLassoSim(host, eq) {
           p.x + (b[3] * c + b[5] * s) * k, p.y + (-b[3] * s + b[5] * c) * k, z + b[4] * k, Math.max(b[6], b[7]) * k, p);
       } else if (ANCHOR_TOP[p.kind] !== undefined && hypot2(p.x - x, p.y - y) < r + 1) {
         const h = (p.z || 0) + anchorTop(p); addSeg(p.x, p.y, h, p.x, p.y, h, .3, p);
+      } else if (p.kind === 'towerwall' && TOWER_PLAN && Math.abs((p.z || 0) - TOWER_PLAN.F) < .05 && hypot2(p.x - x, p.y - y) < r + 1) {   // (the lookout's parapet where it's low)
+        const t = topOfProp(p) ?? 9; if (t <= 1.6) { const h = (p.z || 0) + t; addSeg(p.x, p.y, h, p.x, p.y, h, .25, p); }
       }
     }
     const A = eq.anchors?.(); if (A) for (let i = 0; i < A.n; i++) { const a = A.seg, j = i * 7; if (hypot2((a[j] + a[j + 3]) / 2 - x, (a[j + 1] + a[j + 4]) / 2 - y) < r + 4) addSeg(a[j], a[j + 1], a[j + 2], a[j + 3], a[j + 4], a[j + 5], a[j + 6], A.src[i]); }
@@ -107,7 +117,7 @@ export function createLassoSim(host, eq) {
     Q.x = ax + dx * t; Q.y = ay + dy * t; Q.h = ah + dh * t; Q.t = t;
     return hypot3(x - Q.x, y - Q.y, h - Q.h);
   }
-  const high = (x, y, h) => h - host.elev(x, y) >= TUNE.anchorMin;
+  const high = (x, y, h, src) => h - host.elev(x, y) >= TUNE.anchorMin || src?.kind === 'towerwall';   // (the lookout's parapet: a lip over its deck, high over the downs)
 
   // ---------------------------------------------------------------- the aim (while spinning)
   const SA = [0, 0, 0], SB = [0, 0, 0];
@@ -122,7 +132,7 @@ export function createLassoSim(host, eq) {
       const d = hypot2(SA[0] + ex * t - mx, SA[1] + ey * t - my);
       if (d >= bd) continue;
       const x = SEG[j] + (SEG[j + 3] - SEG[j]) * t, y = SEG[j + 1] + (SEG[j + 4] - SEG[j + 1]) * t, h = SEG[j + 2] + (SEG[j + 5] - SEG[j + 2]) * t;
-      if (!high(x, y, h) || hypot3(x - HP[0], y - HP[1], h - HP[2]) > TUNE.range) continue;
+      if (!high(x, y, h, SRC[i]) || hypot3(x - HP[0], y - HP[1], h - HP[2]) > (HP[2] - h > ZIP.drop ? ZIP.range : TUNE.range)) continue;   // (a zip line reaches further down)
       best = i; bd = d; bx = x; by = y; bh = h;
     }
     if (best < 0) return false;
@@ -139,8 +149,9 @@ export function createLassoSim(host, eq) {
       A.d = hypot2(t.x - P.x, t.y - P.y); A.ok = A.d <= R + (t.hitR ?? .3);
       if (A.ok) return A;
     }
-    gather(P.x, P.y, R);
+    gather(P.x, P.y, Math.max(R, ZIP.range));
     if (pickAnchor(A)) return A;
+    if (pickWall(A)) return A;   // the top of a broken stretch of stone wall (STONES)
     // the ground under the cursor (host.aim reads it at chest height: the ground is that much further up the screen)
     let gx = a.x, gy = a.y;
     if (!t) { const k = (a.h - host.elev(a.x, a.y)) * host.PPMH / host.PPMY; gx -= Math.sin(host.yaw) * k; gy -= Math.cos(host.yaw) * k; }
@@ -165,13 +176,63 @@ export function createLassoSim(host, eq) {
       A.kind = creature(p) ? 'enemy' : 'prop'; A.who = p; A.x = p.x; A.y = p.y; A.h = creature(p) ? bodyMid(p) : (p.z || 0) + topOf(p) * .6;
       A.d = hypot2(p.x - P.x, p.y - P.y); A.ok = A.d <= R + (p.hitR ?? .3); return A;
     }
-    gather(P.x, P.y, R);
+    gather(P.x, P.y, Math.max(R, ZIP.range));
     let best = -1, bd = .6, bx = 0, by = 0, bh = 0;
-    for (let i = 0; i < nSeg; i++) { const d = segDist(i, PIN.x, PIN.y, PIN.h); if (d < bd && high(Q.x, Q.y, Q.h)) { bd = d; best = i; bx = Q.x; by = Q.y; bh = Q.h; } }
-    if (best >= 0) { A.kind = 'anchor'; A.who = SRC[best]; A.x = bx; A.y = by; A.h = bh; A.d = hypot3(bx - HP[0], by - HP[1], bh - HP[2]); A.ok = A.d <= R; return A; }
+    for (let i = 0; i < nSeg; i++) { const d = segDist(i, PIN.x, PIN.y, PIN.h); if (d < bd && high(Q.x, Q.y, Q.h, SRC[i])) { bd = d; best = i; bx = Q.x; by = Q.y; bh = Q.h; } }
+    if (best >= 0) { A.kind = 'anchor'; A.who = SRC[best]; A.x = bx; A.y = by; A.h = bh; A.d = hypot3(bx - HP[0], by - HP[1], bh - HP[2]); A.ok = A.d <= (HP[2] - bh > ZIP.drop ? ZIP.range : R); return A; }
+    for (const p of ents.near(PIN.x, PIN.y, 1, nearA)) if (pullable(p) && hypot2(p.x - PIN.x, p.y - PIN.y) < .7) {   // (a wall's top to pull)
+      const t = vaultTop(p) ?? topOfProp(p) ?? 2.4; A.kind = 'wall'; A.who = p; A.x = p.x; A.y = p.y; A.h = (p.z || 0) + t; A.d = hypot3(p.x - HP[0], p.y - HP[1], A.h - HP[2]); A.ok = A.d <= R; return A;
+    }
     let dx = PIN.x - P.x, dy = PIN.y - P.y, d = hypot2(dx, dy) || 1; dx /= d; dy /= d; d = clamp(d, 1, R);
     A.kind = 'ground'; A.x = P.x + dx * d; A.y = P.y + dy * d; A.h = host.elev(A.x, A.y); A.d = d; A.ok = true;
     return A;
+  }
+
+  // ---------------------------------------------------------------- STONES: a stone wall's broken top (docs/exp/brawl.md)
+  // pullable: a segment of the arena's stone walls broken below its full height but still over PULL.min (too high to vault)
+  function pullable(p) {
+    if (!p || p.gone || !WALLK.has(p.kind)) return false;
+    const t = topOfProp(p); return t !== undefined && t > PULL.min && t <= PULL.max;
+  }
+  function pickWall(A) {   // a pullable top near the cursor on screen (within `pick` px), in reach
+    const Gx = host.G; if (!Gx?.gameToScreen) return false;
+    const z = host.zoom, mx = host.VW / 2 + (host.mouse.x - host.VW / 2) * z, my = host.VH / 2 + (host.mouse.y - host.VH / 2) * z;
+    let best = null, bd = TUNE.pick * z, bh = 0;
+    for (const p of ents.near(P.x, P.y, TUNE.range + 1, nearB)) {
+      if (!pullable(p)) continue;
+      const h = (p.z || 0) + topOfProp(p); Gx.gameToScreen(p.x, h, p.y, SA);
+      const d = hypot2(SA[0] - mx, SA[1] - my); if (d >= bd || hypot3(p.x - HP[0], p.y - HP[1], h - HP[2]) > TUNE.range) continue;
+      best = p; bd = d; bh = h;
+    }
+    if (!best) return false;
+    A.kind = 'wall'; A.who = best; A.x = best.x; A.y = best.y; A.h = bh; A.d = hypot3(best.x - HP[0], best.y - HP[1], bh - HP[2]); A.ok = true;
+    return true;
+  }
+  function catchWall(p) {
+    const Z = lz(); L.who = p; L.kind = 'wall'; L.boss = false; L.elite = false;
+    L.len = clamp(hypot2(p.x - P.x, p.y - P.y), 1.2, TUNE.hold.len); L.held = 0; L.slip = TUNE.hold.slip * 1.5; L.give = 0; L.fHeld = false;
+    Z.haul(true); Z.leash(p.x, p.y, L.len + TUNE.hold.stretch);
+    L.phase = 'hold'; L.t = 0; L.taut = true;
+    events.push({type: 'lasso.catch', x: p.x, y: p.y, h: L.loop.h, what: 'wall', who: p});
+    host.shake(1, .06);
+  }
+  // the yank on a wall: its top comes down toward you (world.pullWall), the stones on whoever stands under them on your side
+  function pullIt() {
+    const p = L.who; if (!p) { back(); return; }
+    const dx = P.x - p.x, dy = P.y - p.y, d = hypot2(dx, dy) || 1, ok = !!host.world.pullWall?.(p, PULL.dh, PULL.w, PULL.floor, P.x, P.y);
+    events.push({type: 'lasso.yank', x: p.x, y: p.y, who: p, ok});
+    if (ok) {
+      host.shake(4, .3); host.hitstop(.08);
+      const c = core(), k = eq.dmgK(), z = p.z || 0;
+      for (const q of ents.near(p.x, p.y, PULL.hit + 1, nearA)) {   // (your side of the wall: the stones come down toward you)
+        if (!creature(q) || Math.abs((q.z || 0) - z) > 1 || hypot2(q.x - p.x, q.y - p.y) > PULL.hit || (q.x - p.x) * dx + (q.y - p.y) * dy < -.2) continue;
+        c?.damage(q, PULL.dmg * k, {dir: [dx / d * 2, dy / d * 2]});
+      }
+      c?.part && c.puff?.(p.x + dx / d * .5, p.y + dy / d * .5, z, 16, 1);
+      events.push({type: 'lasso.stones', x: p.x, y: p.y, z, who: p});
+    }
+    if (lz().mode === 'haul') lz().haul(false);
+    back();
   }
 
   // ---------------------------------------------------------------- spin, throw, flight
@@ -190,7 +251,7 @@ export function createLassoSim(host, eq) {
     const O = L.loop, A = L.aim;
     lz().hand(false, HP);
     O.x = O.lx = O.x0 = HP[0]; O.y = O.ly = O.y0 = HP[1]; O.h = O.lh = O.h0 = HP[2];
-    O.who = A.kind === 'enemy' || A.kind === 'prop' ? A.who : null; O.kind = A.kind;
+    O.who = A.kind === 'enemy' || A.kind === 'prop' ? A.who : null; O.kind = A.kind; O.wall = A.kind === 'wall' ? A.who : null;
     O.tx = A.x; O.ty = A.y; O.th = A.kind === 'ground' ? A.h + .04 : A.h;
     const d = hypot3(O.tx - O.x0, O.ty - O.y0, O.th - O.h0), Th = TUNE.throw;
     O.T = clamp(Th.t0 + Th.tk * d, Th.t0, Th.tMax); O.arc = Th.arc * d / 10 + .15 + (A.kind === 'anchor' ? .5 : 0); O.t = 0; O.open = 1;
@@ -210,11 +271,16 @@ export function createLassoSim(host, eq) {
       const f = i / n, x = O.lx + (nx - O.lx) * f, y = O.ly + (ny - O.ly) * f, h = O.lh + (nh - O.lh) * f;
       if (catchAt(x, y, h, k)) return;
       const g = host.elev(x, y);
-      if (h <= g + .02 || (k > .2 && solid(x, y, h, h, .05, O.kind === 'anchor' ? L.aim.who : null))) { O.x = x; O.y = y; O.h = Math.max(g + .02, Math.min(h, O.lh)); miss(); return; }
+      const over = O.kind === 'anchor' && hypot2(x - O.tx, y - O.ty) < 1.6;   // (dropping over its anchor: the lip it's on doesn't stop it)
+      if (h <= g + .02 && !over || (k > .2 && !over && solid(x, y, h, h, .05, O.kind === 'anchor' || O.kind === 'wall' ? L.aim.who : null, L.aim.who?.kind === 'towerwall'))) {   // (at the lookout: past the tower's walls)
+        if (O.kind === 'wall' && O.wall && hypot2(x - O.wall.x, y - O.wall.y) < .9) { O.x = x; O.y = y; O.h = h; catchWall(O.wall); return; }   // (the loop over its stones)
+        O.x = x; O.y = y; O.h = Math.max(g + .02, Math.min(h, O.lh)); miss(); return;
+      }
     }
     O.x = nx; O.y = ny; O.h = nh;
     if (k >= 1) {   // there: what it was thrown at, if it's still there
       if (O.kind === 'anchor') { catchAnchor(L.aim.x, L.aim.y, L.aim.h, L.aim.who); return; }
+      if (O.kind === 'wall' && O.wall && !O.wall.gone) { catchWall(O.wall); return; }
       if (O.who && hypot2(O.who.x - O.x, O.who.y - O.y) < (O.who.hitR ?? O.who.r ?? .4) + TUNE.throw.catchR + .2) { catchThing(O.who); return; }
       O.h = host.elev(O.x, O.y) + .02; miss();
     }
@@ -235,7 +301,7 @@ export function createLassoSim(host, eq) {
     if (L.loop.kind === 'anchor' || k < .5) return false;
     for (let i = 0; i < nSeg; i++) {
       if (segDist(i, x, y, h) > R + SEG[i * 7 + 6]) continue;
-      if (!high(Q.x, Q.y, Q.h)) continue;
+      if (!high(Q.x, Q.y, Q.h, SRC[i])) continue;
       catchAnchor(Q.x, Q.y, Q.h, SRC[i]); return true;
     }
     return false;
@@ -271,12 +337,18 @@ export function createLassoSim(host, eq) {
     host.shake(1, .06);
   }
   function holdIt(sec) {
-    const p = L.who;
+    const p = L.who; if (L.kind === 'wall') return;
     if (L.kind === 'brute') core()?.hold(p, sec); else if (L.kind === 'gunman') foes()?.roped(p, sec);
   }
   function stepHold(dt) {
     const p = L.who, Z = lz(), T2 = TUNE.hold;
     if (!p || p.broken || p.gone || (L.kind === 'prop' && (p.sink || p.float))) { slip('gone'); return; }
+    if (L.kind === 'wall') {   // (the stones hold: the rope's taut till a tap of F pulls them)
+      if (Z.mode !== 'haul') { slip('drop'); return; }
+      L.held += dt; L.t += dt; if (L.held >= L.slip) { slip('slip'); return; }
+      Z.leash(p.x, p.y, L.len + T2.stretch); L.taut = true; L.loop.x = p.x; L.loop.y = p.y; L.loop.h = (p.z || 0) + (topOfProp(p) ?? 2) - .05;
+      return;
+    }
     if (Z.mode !== 'haul') { slip('drop'); return; }
     L.held += dt; L.t += dt;
     if (L.held >= L.slip) { slip('slip'); return; }
@@ -351,6 +423,7 @@ export function createLassoSim(host, eq) {
     const p = L.who, Y = TUNE.yank;
     if (!p || p.broken || p.gone) { back(); return; }
     const dx = P.x - p.x, dy = P.y - p.y, d = hypot2(dx, dy) || 1, ux = dx / d, uy = dy / d;
+    if (L.kind === 'wall') { pullIt(); return; }   // (STONES: its top comes down)
     if (L.kind === 'prop') {   // (the speed that brings it to your feet: a barrel rolls, a crate slides, each its own friction)
       const PT = phys()?.T, fr = PT ? (p.tip || p.kind !== 'crate' ? PT.rollFric : PT.slideFric) : 3;
       const v = clamp(Math.sqrt(2 * fr * Math.max(0, d - TUNE.prop.stop)) * 1.05, 1.5, TUNE.prop.yankV);
@@ -393,10 +466,10 @@ export function createLassoSim(host, eq) {
   };
   // something solid in the column (x, y) between h0 and h1 within r: higher ground (a cliff's face), a wall, a trunk, a prop
   // up to its top (world.js PROP_TOP, else TOP above)
-  function solid(x, y, h0, h1, r, skip = null) {   // (skip: the tree / snag a loop is thrown at: it flies past its own trunk)
+  function solid(x, y, h0, h1, r, skip = null, tower = false) {   // (skip: the tree / snag a loop is thrown at: it flies past its own trunk; tower: the watchtower's walls)
     if (host.elev(x, y) > h0 + .3) return true;
     for (const p of ents.near(x, y, r + .8, nearA)) {
-      if (p === skip || p.broken || p.gone || creature(p) || p.kind === 'gadget' || !(p.rect || p.r > .15)) continue;
+      if (p === skip || p.broken || p.gone || creature(p) || p.kind === 'gadget' || !(p.rect || p.r > .15) || (tower && p.kind === 'towerwall')) continue;
       const z0 = p.z || 0, top = z0 + topOf(p); if (h1 < z0 || h0 > top) continue;
       if (p.rect ? x > p.rect[0] - r && x < p.rect[2] + r && y > p.rect[1] - r && y < p.rect[3] + r : hypot2(p.x - x, p.y - y) < p.r + r) return true;
     }
@@ -405,10 +478,44 @@ export function createLassoSim(host, eq) {
   function catchAnchor(x, y, h, src) {
     const O = L.loop; O.x = x; O.y = y; O.h = h;
     events.push({type: 'lasso.catch', x, y, h, what: 'anchor', who: src && src.kind ? src : null});
-    if (!lz().hang(x, y, h, W)) { miss(); return; }
     L.anchor.x = x; L.anchor.y = y; L.anchor.h = h; L.anchor.src = src;
+    lz().hand(false, HP);
+    const drop = HP[2] - h, run = hypot2(x - HP[0], y - HP[1]);
+    if (drop > ZIP.drop && run > ZIP.min && lz().zip(HP[0], HP[1], HP[2], x, y, h, W)) {   // ZIP: from up here down to it
+      L.zip = L.zip || {ax: 0, ay: 0, ah: 0}; L.zip.ax = HP[0]; L.zip.ay = HP[1]; L.zip.ah = HP[2];
+      L.phase = 'zip'; L.t = 0; events.push({type: 'lasso.swing', x, y, h, zip: true}); return;
+    }
+    const R2 = ledge(x, y, h);
+    if (R2 && lz().ropeup(x, y, h, R2.fx, R2.fy, R2.tx, R2.ty, R2.tz, W)) { L.phase = 'ropeup'; L.t = 0; events.push({type: 'lasso.swing', x, y, h, up: true}); return; }   // ROPE UP
+    if (!lz().hang(x, y, h, W)) { miss(); return; }
     L.phase = 'swing'; L.t = 0;
     events.push({type: 'lasso.swing', x, y, h});
+  }
+  // ROPE UP: a top he can stand on by the anchor (within RU.reach, at most RU.under under it, RU.high over his feet), and the foot of
+  // its face on his side (where the ground first falls a metre under the top) within RU.near of him -> {tx, ty, tz (the top), fx, fy
+  // (the foot: a hand out from the face)} or null
+  const RUP = {tx: 0, ty: 0, tz: 0, fx: 0, fy: 0};
+  function ledge(ax, ay, ah) {
+    const pz = P.z, el = (x, y) => host.elev(x, y);
+    let best = -1e9, tx = 0, ty = 0, tz = 0;
+    for (let r = .3; r <= RU.reach; r += .3) for (let k = 0; k < 12; k++) {   // the highest standable spot round the anchor, under it
+      const a = k / 12 * TAU, x = ax + Math.cos(a) * r, y = ay + Math.sin(a) * r, e = el(x, y);
+      if (e > ah + .2 || e < ah - RU.under || e < pz + RU.high || !walkable(x, y) || solid(x, y, e + .1, e + 1.5, .2)) continue;
+      const sc = e - r * .3; if (sc > best) { best = sc; tx = x; ty = y; tz = e; }
+    }
+    if (best < -1e8) return null;
+    // the face's foot: from the top toward him, the first spot down at his own level (a hand out from the face)
+    const dx = P.x - tx, dy = P.y - ty, d = hypot2(dx, dy); if (d < .3) return null;
+    const ux = dx / d, uy = dy / d;
+    for (let s = .2; s <= d; s += .1) {
+      const x = tx + ux * s, y = ty + uy * s;
+      if (el(x, y) < tz - 1) {   // (past the face: its foot, wherever the ground is there; he walks to it)
+        const fx = x + ux * .32, fy = y + uy * .32;
+        if (hypot2(fx - P.x, fy - P.y) > RU.near || !walkable(fx, fy)) return null;
+        RUP.tx = tx; RUP.ty = ty; RUP.tz = tz; RUP.fx = fx; RUP.fy = fy; return RUP;
+      }
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------- home again
@@ -443,8 +550,8 @@ export function createLassoSim(host, eq) {
       else if (e.type === 'lasso.drop') {
         if (L.phase === 'spin' || L.phase === 'wind') { L.phase = ''; eq.S.aiming = false; }
         else if (L.phase === 'hold') slip(e.why === 'gun' ? 'gun' : 'drop');
-        else if (L.phase === 'swing') back();
-      } else if ((e.type === 'lasso.letgo' || e.type === 'lasso.bump') && L.phase === 'swing') back();
+        else if (L.phase === 'swing' || L.phase === 'zip' || L.phase === 'ropeup') back();
+      } else if ((e.type === 'lasso.letgo' || e.type === 'lasso.bump') && (L.phase === 'swing' || L.phase === 'zip' || L.phase === 'ropeup')) back();
     }
     const press = L.fPress, up = eq.S.fUp; L.fPress = false; eq.S.fUp = false;
     const sl = eq.S.slot;
@@ -488,6 +595,11 @@ export function createLassoSim(host, eq) {
         if (up) { L.fHeld = false; Z.climb(false); Z.letGo(); }
         if (Z.mode !== 'hang') back();
         break;
+      case 'zip': case 'ropeup':   // (F or Space lets go)
+        L.t += dt;
+        if (press) Z.letGo();
+        if (Z.mode !== 'zip' && Z.mode !== 'ropeup') back();
+        break;
       case 'back': reel(dt); break;
     }
     if (L.fUpLate && L.phase !== 'spin') L.fUpLate = false;
@@ -498,7 +610,7 @@ export function createLassoSim(host, eq) {
     get busy() { return L.phase !== ''; },
     press() { L.fPress = true; },
     // Space while swinging lets go (features/equip.js onKey): true when it took the key
-    space() { if (L.phase !== 'swing') return false; lz()?.letGo(); return true; },
+    space() { if (L.phase !== 'swing' && L.phase !== 'zip' && L.phase !== 'ropeup') return false; lz()?.letGo(); return true; },
     seg: () => ({SEG, n: nSeg}),
     // (tests) pin the aim to a world point (null: the cursor again)
     pin(x, y, h) { pinned = x !== null && x !== undefined; if (pinned) { PIN.x = x; PIN.y = y; PIN.h = h || 0; } },

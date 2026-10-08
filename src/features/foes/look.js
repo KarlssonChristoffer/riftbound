@@ -76,6 +76,7 @@ import {flags} from '../../core/flags.js';
 import {createRagdolls} from '../../view/ragdoll.js';
 import {createRigMesh} from '../../render/rigmesh.js';
 import {liveModel, createLiveBody} from '../../view/livebody.js';
+import {pieceOf, drawPiece} from '../../view/loosepiece.js';   // a gunman's hat or gun lying loose (docs/exp/brawl.md)
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180, OUT = '../concepts/sprites/out/';
 const NEED = ['idle.0', 'walk.0', 'run.0', 'gun_draw.0', 'gun_aim', 'gun_fire.0', 'gun_reload.0'];
@@ -89,7 +90,7 @@ const RAG = flags.get('ragdoll') !== '0', RAG_TYPES = {bandit: 'ragdoll/bandit/'
 // (tools/blender/ragdoll_export.py --model tools/blender/loadouts/<type>.py --out .../pivot3d_chars/<type> --atlas .../outfits/<type>);
 // a type whose model doesn't load falls back to its atlas. One rig for them all: the ragdolls' (and live death clips') slots
 // 0..RSL-1, the standing gunmen's RSL.. (LSL of them)
-const LIVE = flags.get('livefoes') !== '0', LIVE_DIR = 'pivot3d_chars/', RSL = 16, LSL = 24;
+const LIVE = flags.get('livefoes') !== '0', LIVE_DIR = 'pivot3d_chars/', RSL = 16, LSL = 24, LOOSE = 8;   // (LOOSE: slots after those for the loose hats and guns: BRAWL)
 const AIM0 = -2 * DEG, TWLO = -90 * DEG, TWHI = 45 * DEG;   // live: where the twist-0 walking aim's barrel points (off his legs' facing), the twists' range moving (western.py gws_m90 .. p45)
 const LV = {stand: [-55 * DEG, 55 * DEG], walk: [-95 * DEG, 50 * DEG]};   // live: the spine twist's limits standing (gun_aim, gun_fire) and on the move
 // the poses a gunman may show (poseOf, the corpses, the fallbacks), warmed as its atlas loads: a pose first seen mid-fight
@@ -199,7 +200,7 @@ export function createLook(host, sim) {
   let loading = null, failed = '', rag = null, rig = null;
   function load() {
     if (loading) return loading;
-    if (LIVE) rig = createRigMesh(G, {slots: RSL + LSL});   // (the live bodies' and the ragdolls' one rig)
+    if (LIVE) rig = createRigMesh(G, {slots: RSL + LSL + LOOSE});   // (the live bodies', the ragdolls' and the loose pieces' one rig)
     if (RAG) {   // (the ragdolls' models: a type without one keeps its death clips)
       rag = createRagdolls(host, rig ? {rig} : undefined);
       rag.onGround = s => { const c = corpses[s]; if (c.on && c.rag) { rag.point(s, 0, SC); c.x = SC[0]; c.y = SC[2]; c.z = host.elev(SC[0], SC[2]); ground(c); } };
@@ -260,7 +261,7 @@ export function createLook(host, sim) {
   // ---------------------------------------------------------------- per gunman: the view's own state
   const VS = new Map();   // entity -> {f, tw, ph, pose, face0, hpShow, idle}
   const vsOf = p => { let v = VS.get(p); if (!v) VS.set(p, v = {f: 0, tw: 'gun_aim', twm: '0', back: false, ph: 0, pose: 'idle.0', hpShow: p.hp, idle: (p.x * 7.3 + p.y * 3.1) % 1, seen: 0, hx: 0, hy: 0, face: 0,
-    nx: 0, ny: 0, nt: 9, rs: -1, rph: '', ram: 0, dox: 0, doy: 0, dl: 0, de: 0, body: null}); return v; };   // body: its live body (live sets)   // dox / doy / dl / de: knocked down (downPose)   // nx / ny / nt: a bullet's shove (its way, its age); rs: the reload clip's next step to say a mark for (-1: not reloading); rph / ram: the phase and rounds last seen
+    nx: 0, ny: 0, nt: 9, rs: -1, rph: '', ram: 0, dox: 0, doy: 0, dl: 0, de: 0, body: null, drop: null, dropV: 0, dropK: 0}); return v; };   // drop: the hat / gun drawn as nothing while it's off him (BRAWL)   // body: its live body (live sets)   // dox / doy / dl / de: knocked down (downPose)   // nx / ny / nt: a bullet's shove (its way, its age); rs: the reload clip's next step to say a mark for (-1: not reloading); rph / ram: the phase and rounds last seen
   const SC = [0, 0, 0], SM = [0, 0, 0];
   let yaw = 0, z = 1;
   const faceOf = (set, w) => { const n = set.ND; return ((Math.round((w - yaw) / (TAU / n)) % n) + n) % n; };   // world angle -> the atlas's facing at this yaw
@@ -348,16 +349,22 @@ export function createLook(host, sim) {
   // from his right side (his left: (cos face, -sin face) on the ground), or the fallback
   const CM = 16, corpses = [];
   for (let i = 0; i < CM; i++) corpses.push({on: false, set: null, clip: '', x: 0, y: 0, z: 0, face: 0, vx: 0, vy: 0, t: 0, pose: '', lift: 0,
-    groundT: 0, grounded: true, fadeAt: 0, fadeLen: 1, foe: '', fx: 0, fy: 0, rag: false, pend: false, p: null, f: 0, swap: 0, power: 0});
+    groundT: 0, grounded: true, fadeAt: 0, fadeLen: 1, foe: '', fx: 0, fy: 0, rag: false, pend: false, p: null, f: 0, swap: 0, power: 0, thrown: null});
   // fx / fy: where he stood; rag: a ragdoll (its slot = this corpse's index); pend: its push not given yet (p: the gunman, for
   // combat.hit's point; power: arrow.hit's push); f: the sprite's facing; swap: frames of cross-fade left
   function fell(v, p) {
     const set = sets[p.foe], C = TUNE.corpse; if (!set) return;
+    const T = THR.get(p);
+    if (T) {   // (killed in a kick's flight: the ragdoll he flies in is his corpse now, loose: BRAWL)
+      const c = corpses[T.slot]; THR.delete(p);
+      c.fadeAt = c.t + TUNE.ragdoll.fall + C.hold; c.fadeLen = C.fade; c.p = null; c.pend = false; c.thrown = null;
+      return;
+    }
     let n = 0, old = null;   // at most C.max lie about: the oldest still lying starts to fade now
     for (const q of corpses) if (q.on) { n++; if (q.t < q.fadeAt && (!old || q.t > old.t)) old = q; }
     if (n >= C.max && old) { old.fadeAt = old.t; old.fadeLen = C.early; }
     let c = null; for (const q of corpses) if (!q.on) { c = q; break; }
-    if (!c) { c = corpses[0]; for (const q of corpses) if (q.t > c.t) c = q; }   // (all in use: the oldest goes)
+    if (!c) { c = corpses.find(q => !q.thrown) || corpses[0]; for (const q of corpses) if (q.t > c.t && !q.thrown) c = q; }   // (all in use: the oldest goes; not a gunman thrown alive)
     if (c.rag) { rag.free(corpses.indexOf(c)); c.rag = false; }
     let dx = v.hx, dy = v.hy, l = hypot3(dx, dy, 0);
     const power = l;   // (arrow.hit's way for a bullet: the weapon's push x the bullet's speed)
@@ -365,7 +372,8 @@ export function createLook(host, sim) {
     dx /= l; dy /= l;
     if (rag && RAG_TYPES[p.foe] && rag.ready(p.foe)) {   // the ragdoll: the live body in the sprite's pose and facing (a live gunman's: the pose drawn, twist and all), pushed on its first view step
       const R = TUNE.ragdoll, s = corpses.indexOf(c), face = worldOf(set, v.f), sw = set.live ? 0 : R.swap;
-      if (rag.spawn(s, p.foe, {x: p.x, y: p.y, z: p.z || 0, face, pose: v.pose, mats: v.body ? v.body.boneMats(BMO) : null, hit: null, flash: Math.min(1, (p.flash || 0) * TUNE.hit.flash), alpha: sw ? 0 : 1})) {
+      const I = SEGI.get(set), drop = v.dropK && I ? [v.dropK & 1 ? I[0] : -1, v.dropK & 2 ? I[1] : -1] : null;   // (his hat or gun already lost: BRAWL)
+      if (rag.spawn(s, p.foe, {x: p.x, y: p.y, z: p.z || 0, face, pose: v.pose, mats: v.body ? v.body.boneMats(BMO) : null, hit: null, flash: Math.min(1, (p.flash || 0) * TUNE.hit.flash), alpha: sw ? 0 : 1, drop})) {
         c.on = true; c.set = set; c.clip = ''; c.rag = true; c.pend = true; c.p = p; c.f = v.f; c.pose = v.pose; c.swap = sw; c.power = power;
         c.z = p.z || 0; c.t = 0; c.lift = 0; c.vx = dx; c.vy = dy; c.foe = p.foe; c.x = c.fx = p.x; c.y = c.fy = p.y; c.face = face;
         c.grounded = false; c.fadeAt = R.fall + C.hold; c.fadeLen = C.fade;
@@ -425,7 +433,41 @@ export function createLook(host, sim) {
   }
   const RAGHIT = {x: 0, y: 0, h: 0, dx: 0, dy: 0, power: 0}, BMO = {}, MZO = new Float64Array(5);   // BMO: a live body's drawn pose for the ragdoll (bone -> 3x4), MZO: its muzzle
   let frameN = 0;
-  function sweep(v, p) { if (v.seen === frameN) return; if (p.broken) fell(v, p); dropBody(v); VS.delete(p); }   // (gone: killed, or the gang left; its live body back in the pool)
+  function sweep(v, p) {
+    if (v.seen === frameN) return;
+    if (p.broken) fell(v, p);
+    else if (THR.has(p)) { const T = THR.get(p), c = corpses[T.slot]; rag.free(T.slot); c.on = false; c.rag = false; c.thrown = null; THR.delete(p); }
+    dropBody(v); VS.delete(p);
+  }
+  // THROWN ALIVE (a kick, a barge: foes/sim.js launch; docs/exp/brawl.md): the body on screen goes into a ragdoll (a corpse's slot,
+  // drawn by the ragdolls as theirs) whose pelvis is pulled to the sim's flying body (its flight: g.F), the limbs trailing and
+  // flailing, his hat on his head and his gun in his hand unless the sim knocked them loose; lying, the pull is soft. Up again
+  // (the sim's 'up'), his own body takes over with the knock-down's get-up frames
+  const THR = new Map(), THROWN = {pull: .45, down: .08, off: .15, spin: .6, muscles: .4, headR: .2}, TP = [0, 0, 0];
+  const ATTACH_HAT = {HatHold0: 'Head'}, ATTACH_BOTH = {HatHold0: 'Head', GunHold0: 'RightHand'};
+  function thrown(g, v, dt) {
+    const p = g.p, D = g.down, on = !!D && (D.ph === 'thrown' || D.ph === 'lie'), T = THR.get(p);
+    if (!T) {
+      if (!on || D.ph !== 'thrown' || !rag || !RAG_TYPES[p.foe] || !rag.ready(p.foe) || !g.F || !v.body) return;
+      let c = null, s = -1; for (let i = 0; i < CM; i++) if (!corpses[i].on) { c = corpses[i]; s = i; break; }
+      if (!c) return;   // (every slot in use: the knock-down's frames as before)
+      const set = sets[p.foe], I = SEGI.get(set), gunOut = g.gunIn && v.body.muzzle(MZO), drop = I ? [g.hat ? -1 : I[0], g.gunIn ? -1 : I[1]] : null;
+      if (c.rag) rag.free(s);
+      if (!rag.spawn(s, p.foe, {x: p.x, y: p.y, z: p.z || 0, face: worldOf(set, v.f), mats: v.body.boneMats(BMO), muscles: THROWN.muscles, headR: THROWN.headR,
+        drop, attach: gunOut ? ATTACH_BOTH : ATTACH_HAT, flash: Math.min(1, (p.flash || 0) * TUNE.hit.flash)})) return;
+      const F = g.F; rag.shove(s, F.vx, F.vc, F.vy, THROWN.spin);
+      let ox = 0, oh = 0, oz = 0; for (let i = 0; i < 4; i++) { rag.point(s, i, TP); ox += TP[0] / 4; oh += TP[1] / 4; oz += TP[2] / 4; }
+      Object.assign(c, {on: true, set, clip: '', rag: true, pend: false, p: null, f: v.f, pose: v.pose, swap: 0, power: 0, z: p.z || 0, t: 0, lift: 0, vx: 0, vy: 0, foe: p.foe,
+        x: p.x, y: p.y, fx: p.x, fy: p.y, face: worldOf(set, v.f), grounded: false, fadeAt: 1e9, fadeLen: 1, thrown: p});
+      THR.set(p, {slot: s, t: 0, ox: ox - F.x, oh: oh - F.c, oz: oz - F.y});
+      return;
+    }
+    const c = corpses[T.slot];
+    if (!on) { rag.free(T.slot); c.on = false; c.rag = false; c.thrown = null; THR.delete(p); return; }   // up again: his own body
+    T.t += dt; const d = Math.exp(-T.t / THROWN.off), F = g.F, fly = D.ph === 'thrown' && F && F.on;
+    const x = fly ? F.x : p.x, y = fly ? F.y : p.y, h = fly ? F.c : (p.z || 0) + .16;
+    rag.drive(T.slot, x + T.ox * d, h + T.oh * d, y + T.oz * d, fly ? THROWN.pull : THROWN.down);
+  }   // (gone: killed, or the gang left; its live body back in the pool)
 
   // ---------------------------------------------------------------- the frame
   const O = {img: null, nrm: null, em: null, sx: 0, sy: 0, sw: 0, sh: 0, x: 0, y: 0, h: 0, px: 0, py: 0, type: 7, shadow: true, alpha: 1, flash: 0, flip: false, sway: 0, dynamic: false, lie: 0};
@@ -449,7 +491,50 @@ export function createLook(host, sim) {
     LO.tx = g.tx; LO.ty = g.ty; LO.th = g.th;
     LO.x = LO.sx = p.x + v.nx * nd + v.dox + Math.cos(yaw) * wx; LO.y = LO.sy = p.y + v.ny * nd + v.doy - Math.sin(yaw) * wx; LO.z = LO.sh = (p.z || 0) + (p.h || 0);
     LO.alpha = 1; LO.flash = Math.min(1, (p.flash || 0) * TUNE.hit.flash); LO.lie = v.de;
-    b.draw(LO, t);
+    dropMask(set, g, v); LO.drop = v.drop; LO.dropV = v.dropV;
+    b.draw(LO, t); LO.drop = null;
+  }
+  // BRAWL (docs/exp/brawl.md): his hat or his gun drawn as nothing while it's off him (lying loose, in your hands, gone)
+  const SEGI = new Map();   // set -> [the hat's segment, the gun's]
+  function dropMask(set, g, v) {
+    let I = SEGI.get(set); if (!I) { const S2 = set.live.J.segs; SEGI.set(set, I = [S2.findIndex(s => s.bone === 'HatHold0'), S2.findIndex(s => s.bone === 'GunHold0')]); }
+    const k = (g.hat ? 0 : 1) | (g.gunIn ? 0 : 2);
+    if (!k) { v.drop = null; v.dropK = 0; return; }
+    if (k !== v.dropK || !v.drop) {
+      v.drop ??= new Uint8Array(set.live.J.segs.length); v.drop.fill(0);
+      if (k & 1 && I[0] >= 0) v.drop[I[0]] = 1; if (k & 2 && I[1] >= 0) v.drop[I[1]] = 1;
+      v.dropK = k; v.dropV++;
+    }
+  }
+  // the pose of what BRAWL has him doing (null: the fight's): fx_sting (the gun shot out of his hand), fx_stagger (a leg), the
+  // fetch: a look at where it went, the pick-up (fx_pickup by its time), the hat back on (fx_hat_on). Without the clips: hit_f /
+  // hit_b, crouch, idle
+  function brawlPose(set, g, v) {
+    const C2 = TUNE.calls, el = g.T.elite ? C2.elite : 1;
+    if (g.sting > 0) { v.f = faceOf(set, g.face); return set.ok('fx_sting') ? set.frameAt('fx_sting', 1 - g.sting / C2.sting) : set.ok('hit_f') ? set.frameAt('hit_f', 1 - g.sting / C2.sting) : null; }
+    if (g.stag > 0) { v.f = faceOf(set, g.face); return set.ok('fx_stagger') ? set.frameAt('fx_stagger', 1 - g.stag / C2.stagger) : set.ok('hit_b') ? set.frameAt('hit_b', 1 - g.stag / C2.stagger) : null; }
+    const f = g.fetch; if (!f) return null;
+    if (f.ph === 'stoop') { v.f = faceOf(set, g.face); return set.ok('fx_pickup') ? set.frameAt('fx_pickup', f.t / (C2.stoop / el)) : set.has('crouch') ? 'crouch' : null; }
+    if (f.ph === 'on') { v.f = faceOf(set, g.face); return set.ok('fx_hat_on') ? set.frameAt('fx_hat_on', f.t / (C2.on / el)) : set.has('idle.0') ? 'idle.0' : null; }
+    if (f.ph === 'look' && g.speed < .15) { v.f = faceOf(set, g.face); return set.has('idle.0') ? 'idle.0' : null; }
+    return null;
+  }
+  // the loose hats and guns (the sim's: features/foes/sim.js loose): each its owner's model's piece, in a slot of its own; flying it
+  // tumbles end over end (the view's spin), at rest it lies (a gun on its side)
+  const PIECE = new Map();   // set -> {hat, gun}
+  function drawLoose(t) {
+    if (!rig) return;
+    let n = 0;
+    for (const it of sim.loose) {
+      if (!it.on || n >= LOOSE) continue;
+      const set = sets[it.foe]; if (!set || !set.live) continue;
+      let pc = PIECE.get(set); if (!pc) PIECE.set(set, pc = {hat: pieceOf(set.live, 'HatHold0', 'idle.0'), gun: pieceOf(set.live, 'GunHold0', set.has('gun_aim') ? 'gun_aim' : 'idle.0')});
+      const P2 = pc[it.kind]; if (!P2) continue;
+      const hat = it.kind === 'hat', air = !it.rest && !it.held;
+      const a = air ? it.t * it.spin : hat ? 0 : Math.PI / 2, lift = air || it.held ? 0 : hat ? .03 : .015;
+      drawPiece(rig, set.live, RSL + LSL + n, P2, it.x, it.y, it.h + (hat ? P2.half * .35 : P2.half * .25) + lift, it.yaw, hat || air ? 1 : 0, hat || air ? 0 : 1, 0, a, 1, 0);
+      n++;
+    }
   }
   // a corpse's contact shadow (view only): contact.js's kind of stamp, drawn by the GPU (gfx.js G.ao: laid on the ground
   // by the composite at the mood's tint and strength, which contact.js sets each frame; under the light, ground pixels
@@ -509,7 +594,7 @@ export function createLook(host, sim) {
   // getting up, the same frames backward, then a crouch
   function downPose(set, g, v) {
     const D = g.down; v.f = faceOf(set, g.face);
-    if (D.ph === 'fly' || D.ph === 'carry') return set.has('fall') ? 'fall' : set.has('land') ? 'land' : 'idle.0';
+    if (D.ph === 'fly' || D.ph === 'carry' || D.ph === 'thrown') return set.has('fall') ? 'fall' : set.has('land') ? 'land' : 'idle.0';   // (thrown: a kick, BRAWL)
     const clip = set.ok('die_b') ? 'die_b' : null;
     if (!clip) return set.has('crouch') ? 'crouch' : 'idle.0';
     const L = set.tl(clip), t0 = L.ends[Math.min(3, L.n - 1)], k = D.ph === 'up' ? D.t / sim.TUNE_GETUP : 0;
@@ -534,8 +619,9 @@ export function createLook(host, sim) {
         v.f = faceOf(set, g.face); return set.frameAtT(hc, g.hitAge);
       }
     }
+    const bp = brawlPose(set, g, v); if (bp) return bp;   // (the hand stung, a stagger, stooping for his hat or gun: BRAWL)
     // the legs' phase (walk / run, or backing up: the phase runs back)
-    const run = g.gait === 'run', C = set.CLIP[run ? 'run' : 'walk'];
+    const run = g.gait === 'run', limp = g.limp > 0 && !run && set.ok('fx_limp'), C = limp ? set.CLIP.fx_limp : set.CLIP[run ? 'run' : 'walk'];   // (limping: BRAWL)
     switch (act) {
       case 'draw': v.f = faceOf(set, g.face); return set.frameAt('gun_draw', g.at / G2.draw);
       case 'holster': v.f = faceOf(set, g.face); return set.has('gun_holster.0') ? set.frameAt('gun_holster', g.at / G2.holster) : set.frameAt('gun_draw', 1 - g.at / G2.holster);
@@ -558,7 +644,7 @@ export function createLook(host, sim) {
         if (moving && C) {
           v.f = faceOf(set, Math.atan2(g.vx, g.vy));
           v.ph = (v.ph + g.speed * dt / C.stride) % 1;
-          return set.nm(run ? 'run' : 'walk', gaitFrame(C, v.ph));
+          return set.nm(run ? 'run' : limp ? 'fx_limp' : 'walk', gaitFrame(C, v.ph));
         }
         v.f = faceOf(set, g.face);
         { const ci = set.CLIP.idle; return ci ? set.nm('idle', Math.floor(t * ci.fps + v.idle * ci.frames) % ci.frames) : 'idle.0'; }
@@ -583,7 +669,8 @@ export function createLook(host, sim) {
     view(dt, evs, on) {
       if (!on) {   // (out of the desert sandbox)
         if (VS.size) { VS.forEach(dropBody); VS.clear(); }
-        for (let i = 0; i < CM; i++) { const c = corpses[i]; if (c.rag) { rag.free(i); c.rag = false; } c.on = false; }
+        for (let i = 0; i < CM; i++) { const c = corpses[i]; if (c.rag) { rag.free(i); c.rag = false; } c.on = false; c.thrown = null; }
+        THR.clear();
         return;
       }
       for (const e of evs) if (e.type === 'arrow.hit' && e.prop?.kind === 'gunman') {   // (the way the last hit came; a bullet's shove)
@@ -595,6 +682,7 @@ export function createLook(host, sim) {
         if (g.p.broken) continue;
         const v = vsOf(g.p); if (v.nt < 9) v.nt += dt;
         marks(g, v);
+        if (LIVE) thrown(g, v, dt);   // (a kick's flight: his ragdoll, BRAWL)
       }
       const C = TUNE.corpse;
       for (let i = 0; i < CM; i++) {   // a ragdoll's push: at its first view step (after the kill's hitstop), at combat.hit's point if it came
@@ -626,7 +714,7 @@ export function createLook(host, sim) {
         v.pose = set.SP[pose] ? pose : 'idle.0';
         const wob = p.wob ? Math.round(Math.sin(p.wob * 18) * p.wob * 2) : 0, H = TUNE.hit;
         const k = v.nt < H.out ? v.nt / H.out : v.nt < H.out + H.back ? 1 - (v.nt - H.out) / H.back : 0, nd = H.nudge * k * (2 - k);   // (out fast, back eased)
-        if (set.live) liveDraw(set, g, v, wob, nd, t);
+        if (set.live) { if (!THR.has(p)) liveDraw(set, g, v, wob, nd, t); }   // (thrown: his ragdoll draws him, BRAWL)
         else put(set, v.pose, v.f, p.x + v.nx * nd + v.dox, p.y + v.ny * nd + v.doy, (p.z || 0) + (p.h || 0), 1, Math.min(1, (p.flash || 0) * H.flash), wob, v.dl, v.de);
         if (g.act === 'aim' && g.locked) glint(set, g, v);
       }
@@ -655,6 +743,7 @@ export function createLook(host, sim) {
         if (c.clip) corpseAO(c, set, set.SP[pose] ? pose : 'idle.0', f, lift, lie, a);
       }
       if (rag) rag.frame(f.dt);
+      drawLoose(t);   // (a hat or a gun lying loose: BRAWL)
       if (rig) rig.render();   // (the shared rig, once: the gunmen standing, the bodies falling)
       // their bullets in flight: gunfx's tracer look (no longer than they've flown: never back past the muzzle)
       const B = sim.B;

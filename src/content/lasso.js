@@ -47,6 +47,20 @@ export const TUNE = {
   // turns to `rps` a second over `spinUp` s; whoever it swings into (within `bowl` m) takes `dmg` (it half); let go (or
   // after `max` s) and it's flung out along its way at `v` m/s for `dur` s, `dmg` on landing, stunned
   hammer: {hold: .25, rps: 1.1, spinUp: .5, r: 2.1, h: .7, bowl: .6, dmg: 22, v: 9, dur: .55, max: 3},
+  // TRAVERSAL (docs/exp/brawl.md). ZIP: an anchor caught more than `drop` m under his hand and `min` m away (his throw reaches
+  // `range` m from up high) is a zip line: the rope's end hitched where he stands (`hitch` s), he hangs from it by his hands and
+  // slides down: gravity along the line, `fric` (x g, the hands' grip) and `drag` (1/s) against it, at most `max` m/s; he drops
+  // off `end` m short of the anchor (flying on), where his feet touch the ground (he runs on), or with F / Space. The hitch is
+  // `over` m over his hanging grip (he hops off the edge); nothing stops him the first `clear` m (the parapet he leaves)
+  zip: {drop: 1.1, min: 3, range: 16, hitch: .22, fric: .08, drag: .15, max: 13, end: .6, v0: 1.2, over: .35, clear: 2.2},
+  // ROPE UP: an anchor at the lip of something to stand on (the watchtower lookout's parapet, a ledge's tree), `high` m or more
+  // over his feet, a top to stand on within `reach` m of it (under it, at most `under` m), him within `near` m of the face's foot:
+  // he walks to the foot (`walk` m/s), climbs the rope up the face (`climb` m/s), mantles over onto the top (`mantle` s)
+  ropeup: {high: 1.8, reach: 1.6, under: 4.5, near: 4.5, walk: 2.2, climb: 1.7, mantle: .38},
+  // PULL STONES: the top of a stone wall's broken stretch too high to vault (over `min` m, at most `max` m: a whole stretch is
+  // never pulled) is a target; caught, a tap of F brings its top course down toward you: the stretch is `dh` m lower over `w` m
+  // (world.js pullWall: never under `floor` m), the stones fall your side, hurting whoever stands within `hit` m of its foot
+  pull: {min: 1.25, max: 2.35, dh: .7, w: 1.2, floor: .8, hit: 1.4, dmg: 14},
 };
 // the poses (the art: concepts/sprites/out/outfits/<cowboy>/; frames of a clip are `<clip>.<i>`, the rest stand alone). `fb`:
 // what plays in an atlas without them (a frame list, or for the walk / run the gait's own frames)

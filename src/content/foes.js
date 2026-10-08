@@ -101,4 +101,16 @@ export const TUNE = {
   // the view's hit (features/foes/look.js): a bullet shoves the sprite `nudge` m along its way in `out` s and it eases
   // back over `back` s (only the picture: the body doesn't move); combat's white flash shows x `flash` (held full at first)
   hit: {nudge: .1, out: .035, back: .15, flash: 1.6},
+  // CALLED SHOTS (docs/exp/brawl.md; features/calls.js reads where a shot met him, foes/sim.js reacts). The hat adds `hat` m to
+  // his hitH while he wears it; a shot over `head` m (his crown: the hat's own band, the aim snaps onto it), or over `brim` m wide of
+  // his head's axis (> `skull` m),
+  // takes the hat: it flies along the shot (`fly` [m/s along, up]) and he goes for it (after `look` s), stoops (`stoop` s, the
+  // pick-up's grab at `grab` of it) and puts it on (`on` s); the sheriff at x `elite` the pace. The GUN (out, in his hand: `gun`
+  // [m ahead, m to his right, m up], within `gunR` m of the shot's line): it flies out of his hand (`gunFly`), 2 hp, he shakes
+  // his hand `sting` s, runs for it, stoops, draws again; a gun he can't get back (in the water, held by you, gone over the
+  // edge) is replaced by his spare after `spare` s. A LEG shot (under `legs` m): x `legDmg` damage, staggered `stagger` s (no
+  // shot, his aim starts over), then limping `limp` s at x `limpK` his speed. A loose hat or gun lies `keep` s, then is gone
+  calls: {hat: .13, head: 1.64, brim: 1.55, skull: .15, fly: [2.8, 3.4], look: .3, stoop: .67, grab: .5, on: .4, elite: 1.5,
+    gun: [.62, .2, 1.21], gunR: .15, gunFly: [3.4, 2.6], sting: .43, spare: 7, legs: .72, legDmg: .7, stagger: .57, limp: 4, limpK: .55,
+    keep: 30, chase: 9},
 };

@@ -181,6 +181,7 @@ const host = {
   get entities() { return stage.ents; }, get propsVersion() { return stage.ents.ver; },
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY, mods,
   get weapon() { return hero.weapon; },   // the loadout's weapon (content/weapons.js): kind 'bow' | 'gun', abilities
+  get live() { return !!live?.available; },   // the loadout he wears is drawn live (view/livehero.js): its body has the live-only moves (features/brawl.js)
   itemOf: p => stage.world.itemOf(p), elev, inStream, blocked: (x, y, z = P.z, air = false) => pa.blocked(x, y, z, air),
   hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); },
   launch: (vx, vy, vz) => { const [a, b] = toView(vx, vy); return PL.launch(a, b, vz); },   // thrown (sim/player/launch.js): false -> knock him instead

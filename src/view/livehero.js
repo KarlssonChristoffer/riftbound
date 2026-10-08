@@ -817,6 +817,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     }
     mvT += dt; if (st === 'vault') mvOver = P.vault?.top !== undefined && (P.vault.kind || 'tuck') === 'tuck';   // (the hop runs on in its own last frame)
     if (!HAS_MV || !K.move) return null;
+    const bz = brawlMotion(P); if (bz) return bz;   // BRAWL: the boot, the barge, lifting, carrying, throwing (docs/exp/brawl.md)
     switch (st) {
       case 'leap': return P.leap ? mvLast = mvAt(P.leap.kind === 'long' && CL.mv_long ? 'mv_long' : 'mv_leap', P.t / P.leap.dur) : null;   // (ADAPTIVE JUMPS: a long jump's own)
       case 'fall': {
@@ -830,6 +831,25 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     if (MV_FRAMES.has(P.frame) && mvLast) return mvLast;   // (the step a move ends on still names its atlas frame: the last of ours held)
     mvLast = '';
     if (mvAfter > 0) { const C = CL.mv_land_soft, k = 1 - mvAfter * C.fps / C.frames; mvAfter -= dt; if (st === 'idle' || st === 'move') return mvAt('mv_land_soft', k); }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- BRAWL (docs/exp/brawl.md; K.move): the clips made for the moves
+  // (western.py BRAWL_LIVE) by the sim's state and its progress (sim/player/brawl.js): mv_kick, mv_barge, mv_lift, mv_throw; while he
+  // carries something, mv_carry standing and mv_carry_walk / mv_carry_run for the walk's and the run's frames (the same timing:
+  // the sim's gait frame by index). A model without one keeps the sim's stand-in
+  const BRAWL_CLIP = {kick: 'mv_kick', barge: 'mv_barge', lift: 'mv_lift', throw: 'mv_throw'};
+  function brawlMotion(P) {
+    const b = app.PL.brawl; if (!b) return null;
+    const c = BRAWL_CLIP[P.state];
+    if (c) return CL[c] ? mvAt(c, b.progress) : null;
+    if (P.state === 'rope' && CL.mv_zip && app.PL.lasso?.mode === 'zip' && app.PL.lasso.S.zp?.ph === 'ride') return nm('mv_zip.', Math.floor(t * (CL.mv_zip.fps || 4)) % CL.mv_zip.frames);   // (the zip line: hanging by both hands)
+    if (!b.carrying || !CL.mv_carry) return null;
+    if (P.state === 'move') {
+      const q = parse(P.frame), c2 = q.clip === 'walk' ? 'mv_carry_walk' : q.clip === 'run' || q.clip === 'sprint' || q.clip === 'drive' ? 'mv_carry_run' : '';
+      if (c2 && CL[c2]) return nm(c2 + '.', Math.min(q.i, CL[c2].frames - 1));
+    }
+    if (P.state === 'idle' || P.state === 'pose' || P.state === 'move') return nm('mv_carry.', Math.floor(t * (CL.mv_carry.fps || 3)) % CL.mv_carry.frames);
     return null;
   }
 
@@ -1376,6 +1396,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     lineupDraw();
     perf?.end('live.pose');
     const t1 = performance.now();
+    rig.noXray = !!app.PL.brawl?.carrying;   // (BRAWL: what he carries is in front of him: no x-ray outline of him through it)
     perf?.begin('live.rig', 'render'); rig.render(); perf?.end('live.rig');
     G.setPlayer(PX, P.z + .9, PY, PLAYER_SUN);   // (his one sun-shadow test, past his own 3D body: it cast onto the point and flickered)
     stats.ms = stats.ms * .95 + (t1 - t0) * .05; stats.msRender = stats.msRender * .95 + (performance.now() - t1) * .05;

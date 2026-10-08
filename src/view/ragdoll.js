@@ -22,7 +22,7 @@
 // API: const R = createRagdolls(host, {rig}?); await R.load(name, url); R.warm(name) (once, at load); R.ready(name); R.spawn(slot, name, o) (o: x, y, z (the
 //   ground), face (rad), pose (a sprite pose name), mats (instead of pose: the pose on screen as bone -> 3x4, body space: a
 //   live body's, view/livebody.js boneMats), hit {x, y, h, dx, dy, power} | null, flash, frozen, muscles (x the muscles' hold: 1), headR (m: the head's radius
-//   against the ground and walls; a hat that stays on needs its brim's)); R.step(dt);
+//   against the ground and walls; a hat that stays on needs its brim's), drop (segment indices drawn as nothing: a lost hat or gun)); R.step(dt);
 //   R.frame(); R.alpha(slot, a); R.free(slot); R.onGround = (slot) => {} (the torso first hits the ground); R.bytes; R.ms.
 //   DRIVEN (the player thrown: view/herorag.js, which draws the body itself from R.frames and never calls R.frame): R.drive(slot,
 //   x, h, z, k) pulls the pelvis block toward a target (render axes) in every constraint pass (k a pass), the target eased from the
@@ -242,7 +242,8 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
       for (let k = 0; k < 3; k++) HOLD[h + k] = FI[k * 4] * x + FI[k * 4 + 1] * y + FI[k * 4 + 2] * z + FI[k * 4 + 3];
     }
     B.sx = o.x; B.sy = o.z; B.sz = o.y;   // (the snap anchor: where he stood, render axes)
-    Object.assign(B, {on: true, model: m, t: 0, acc: 0, asleep: !!o.frozen, frozen: !!o.frozen, drawn: false, still: 0, lie: 0, alpha: o.alpha ?? 1, flash: o.flash || 0, thud: false, np: 0, drv: 0, mk: o.muscles ?? 1, headR: o.headR || 0});
+    Object.assign(B, {on: true, model: m, t: 0, acc: 0, asleep: !!o.frozen, frozen: !!o.frozen, drawn: false, still: 0, lie: 0, alpha: o.alpha ?? 1, flash: o.flash || 0, thud: false, np: 0, drv: 0, mk: o.muscles ?? 1, headR: o.headR || 0,
+      drop: o.drop || null});   // (drop: segments drawn as nothing: a hat or a gun he had lost before he fell, lying elsewhere: docs/exp/brawl.md)
     B.segFrame.set(m.segFrame);
     // a gun not in the hand (its origin off the grip by more than RH m against gun_aim: holstered, slung) stays on the
     // body, on the right thigh or the chest, whichever it is nearer (it flies only from the hand)
@@ -252,6 +253,14 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
       boneWorld(pose, 'GunHold0', c, sn, o.x, o.y, o.z, MW);
       const dT = Math.hypot(MW[3] - (P[b + 6] + P[b + 42]) / 2, MW[7] - (P[b + 7] + P[b + 43]) / 2, MW[11] - (P[b + 8] + P[b + 44]) / 2);
       const dC = Math.hypot(MW[3] - P[b + 12], MW[7] - P[b + 13], MW[11] - P[b + 14]), fr = dT <= dC ? 10 : 2;
+      B.segFrame[i] = fr; invert(FRM, fr * 12, FI, 0); compose(FI, 0, MW, 0, TMP, 0);
+      for (let k = 0; k < 12; k++) OFF[(s * SEGMAX + i) * 12 + k] = TMP[k];
+    }
+    // o.attach {segment's bone: bone}: that piece rides the bone's frame instead of flying loose (a body thrown alive: his hat on
+    // his head, his gun in his hand: features/foes/look.js, docs/exp/brawl.md)
+    if (o.attach) for (let i = 0; i < m.segBone.length; i++) {
+      const to = o.attach[m.segBone[i]], fr = to ? FRAME_OF[to] ?? -1 : -1; if (fr < 0) continue;
+      boneWorld(pose, m.segBone[i], c, sn, o.x, o.y, o.z, MW);
       B.segFrame[i] = fr; invert(FRM, fr * 12, FI, 0); compose(FI, 0, MW, 0, TMP, 0);
       for (let k = 0; k < 12; k++) OFF[(s * SEGMAX + i) * 12 + k] = TMP[k];
     }
@@ -434,6 +443,7 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
         B.drawn = true;
         for (let f = 0; f < NF; f++) frameOf(s, f, FRM, f * 12, B.frozen);
         for (let i = 0; i < m.segBone.length; i++) compose(FRM, B.segFrame[i] * 12, OFF, (s * SEGMAX + i) * 12, MATS, i * 12);
+        if (B.drop) for (let k = 0; k < B.drop.length; k++) { const i = B.drop[k]; if (i >= 0) MATS.fill(0, i * 12, i * 12 + 12); }
         // how far down: the hips -> head tilt from upright, 12 .. 78 deg eased (a running max: tools/blender/western.py _lie_now)
         const hx = P[b + 21] - P[b], hy = P[b + 22] - P[b + 1], hz = P[b + 23] - P[b + 2];
         const a = Math.acos(Math.max(-1, Math.min(1, hy / (Math.hypot(hx, hy, hz) || 1)))) / DEG, u = Math.max(0, Math.min(1, (a - 12) / 66));

@@ -21,7 +21,9 @@
 //          broken), keep: [[s0, s1], ...] (stretches held whole: mounts, a gate's jambs, the towers' sides), seed, cuts,
 //          ground(x, z) -> m (the ground under it: 0 when omitted), gaps: [[s0, s1], ...] (no stones: a doorway; broken down to it
 //          over .5 m either side), sink (m: where its foot course starts, under the ground: -.06; a field wall on a slope deeper),
-//          rough (1: how unevenly its stones lie: a dry-stone field wall's more)}
+//          rough (1: how unevenly its stones lie: a dry-stone field wall's more), pulls: [[s0, s1, dh, side], ...] (stretches whose top
+//          course was PULLED down by the lasso, docs/exp/brawl.md: dh m lower, its stones fallen to that side: +1 along w, -1 against;
+//          every random draw is made as without them, so the rest of the run comes out stone for stone the same)}
 // towerRun(t, o) -> {geo, top}: a square tower round (t.x, t.z): t.S (its side), t.h (to its stone floor), t.d (its shell), t.ruin,
 //   t.stump (m: collapsed down to about this, 0: standing), t.out ([dx, dz]: the way its fallen stones spread most), seed, ground;
 //   a parapet of merlons round its floor (some gone); top: its highest standing point over its foot
@@ -39,13 +41,21 @@ const COPE = .1, SHRINK = .006, UP = [0, 1, 0];
 // the run's top along it: full height but where its noise breaks it (by `ruin`), never in a keep stretch (fading back up over 1.2 m
 // beyond one); a break goes down to under a third of the height
 export function profile(run) {
-  const {h, ruin = 0, keep = [], seed = 0, gaps = []} = run;
-  return s => {
+  const {h, ruin = 0, keep = [], seed = 0, gaps = [], pulls = null} = run;
+  const base = s => {
     let g = 1;   // (a gap: nothing in it, the wall broken down to it either side)
     for (const [s0, s1] of gaps) { const d = s < s0 ? s0 - s : s > s1 ? s - s1 : 0; g = Math.min(g, d <= 0 ? 0 : .25 + .75 * smooth(d / .5)); }
     if (g <= 0) return 0;
     return g * whole(s);
   };
+  if (!pulls || !pulls.length) return base;
+  const top = s => {   // (pulled: the notch, its sides easing over .3 m)
+    let t = base(s);
+    for (const [s0, s1, dh] of pulls) { const d = s < s0 ? s0 - s : s > s1 ? s - s1 : 0; if (d < .3) t -= dh * (1 - smooth(d / .3)); }
+    return Math.max(0, t);
+  };
+  top.base = base;
+  return top;
   function whole(s) {
     let k = 1;
     for (const [s0, s1] of keep) { const d = s < s0 ? s0 - s : s > s1 ? s - s1 : 0; k = Math.min(k, smooth(d / 1.2)); }
@@ -71,6 +81,7 @@ function coursesTo(top, R, y0 = -.06) {
 export function mason(seed, o) {
   const R = mulberry32((seed | 0) * 7919 + 13), rr = (a, b) => a + (b - a) * R(), fs = o.fam('stone'), fc = o.cover;
   const M = {R, rr, fs, fc, tops: []};   // tops: the stones and slabs that end a column (the moss and the grass lie on them)
+  let VOID = null; M.void = () => VOID ??= sink();   // (where a pulled stone is built: its draws made, its geometry thrown away)
   // a stone's tone: most of them the masonry's own, some lighter (a cleaner block), some darker (weathered)
   M.tone = () => { const q = R(); return q < .12 ? .26 + R() * .06 : q < .34 ? -.22 - R() * .06 : (R() - .5) * .14; };
   // a stone's own axes on a frame: turned (yaw) about the vertical, leaning (pitch) about its length, rolled about its depth
@@ -86,6 +97,7 @@ export function mason(seed, o) {
   // broken top is knocked askew), next: the next course's height (0: the last course), ground(x, z), pieceOf(s), off: the line's
   // centre shifted across it (m)
   M.row = (L, y, hk, k, next, top, H, ground, pieceOf, proud = 0) => {
+    const tb = top.base || top;   // (pulled, docs/exp/brawl.md: the draws as without the pull; a stone over the pulled top is built into the void)
     const lens = [], q0 = QUOIN[k % 2], q1 = QUOIN[(k + 1) % 2], len = L.L;
     if (len < .5) lens.push(len);
     else {
@@ -97,15 +109,16 @@ export function mason(seed, o) {
     let s0 = 0;
     for (const l of lens) {
       const sc = s0 + l / 2; s0 += l;
-      const t = Math.min(top(sc), top(clamp(sc - l * .35, 0, len)), top(clamp(sc + l * .35, 0, len)));
+      const t = Math.min(tb(sc), tb(clamp(sc - l * .35, 0, len)), tb(clamp(sc + l * .35, 0, len)));
       if (y + hk * .55 > t) continue;                              // broken off here
-      const loose = y + hk > t - .02 && t < H - .02, rg = L.rough || 1;   // (loose: the topmost of a broken column, knocked askew)
+      const tp = tb === top ? t : Math.min(top(sc), top(clamp(sc - l * .35, 0, len)), top(clamp(sc + l * .35, 0, len))), gone = y + hk * .55 > tp;
+      const loose = y + hk > tp - .02 && tp < H - .02, rg = L.rough || 1;   // (loose: the topmost of a broken column, knocked askew)
       const [U, V, W] = M.axes(L.u, L.w, (R() - .5) * (loose ? .14 : .04) * rg, (R() - .5) * (loose ? .12 : .05) * rg, (R() - .5) * (loose ? .1 : .025) * rg);
       const out = (R() - .5) * (loose ? .05 : .025) * rg + (L.off || 0), x = L.a[0] + L.u[0] * sc + L.w[0] * out, z = L.a[1] + L.u[2] * sc + L.w[2] * out, g = ground(x, z);
-      const B = pieceOf(sc);
+      const B = gone ? M.void() : pieceOf(sc);
       cuboid(B, [x, g + y + hk / 2, z], U, V, W, l / 2 - SHRINK, hk / 2 - SHRINK, L.D / 2 + proud, fs, B.part(), M.tone() + (k === 0 ? -.04 : 0), R, .06 * rg);
       // (it ends its column where the next course is broken off over it; in the last course, where no coping lies on it)
-      if (next ? y + hk + next * .55 > top(sc) : t < H - .01) M.tops.push({x, z, u: L.u, w: L.w, l, d: L.D, y: g + y + hk + (loose ? .01 : 0), B, cope: false, broken: t < H - .02});
+      if (next ? y + hk + next * .55 > tb(sc) : t < H - .01) M.tops.push({x, z, u: L.u, w: L.w, l, d: L.D, y: g + y + hk + (loose ? .01 : 0), B, cope: false, broken: t < H - .02});
     }
   };
   // a flat slab (a coping stone, a floor, a capstone) centred at c on the frame, sizes along / up / across
@@ -149,7 +162,7 @@ export function mason(seed, o) {
 export function wallRun(run, o) {
   const [ax, az] = run.a, [bx, bz] = run.b, L = Math.hypot(bx - ax, bz - az); if (L < .05) return {geos: [], tops: []};
   const u = [(bx - ax) / L, 0, (bz - az) / L], w = [-u[2], 0, u[0]], H = run.h, D = run.d, M = mason(run.seed, o), {R, rr} = M;
-  const ground = run.ground || (() => 0), top = profile(run);
+  const ground = run.ground || (() => 0), top = profile(run), tb = top.base || top;
   const cuts = run.cuts || [0, L], sinks = cuts.slice(1).map(() => sink());
   const pieceOf = s => { let i = 0; while (i < sinks.length - 1 && s >= cuts[i + 1]) i++; return sinks[i]; };
   const line = {a: [ax, az], u, w, L, D, rough: run.rough || 1};
@@ -159,19 +172,27 @@ export function wallRun(run, o) {
   // ---- the coping where the wall stands whole: long slabs a little proud of both faces, the odd one gone
   for (let s = 0; s < L - .05;) {
     const l = Math.min(rr(.45, .78), L - s), sc = s + l / 2; s += l;
-    if (top(s - l + .04) < H - .01 || top(s - .04) < H - .01 || R() < .1) continue;
-    const x = ax + u[0] * sc, z = az + u[2] * sc, g = ground(x, z), B = pieceOf(sc);
+    if (tb(s - l + .04) < H - .01 || tb(s - .04) < H - .01 || R() < .1) continue;
+    const x = ax + u[0] * sc, z = az + u[2] * sc, g = ground(x, z), B = top(s - l + .04) < H - .01 || top(s - .04) < H - .01 ? M.void() : pieceOf(sc);   // (pulled: gone)
     M.slab(B, [x, g + H - COPE / 2, z], u, w, l, COPE, D + .06);
     M.tops.push({x, z, u, w, l, d: D, y: g + H, B, cope: true, broken: false});
   }
-  for (const T of M.tops) M.moss(T, run.seed);
+  for (const T of M.tops) { const pulled = tb !== top && T.y - ground(T.x, T.z) > top(clamp((T.x - ax) * u[0] + (T.z - az) * u[2], 0, L)) + .05; if (pulled) T.B = M.void(); M.moss(T, run.seed); }
   // ---- rubble: stones fallen from the broken stretches, in the grass at the foot (more on one side)
   for (let s = .2; s < L - .2; s += .45) {
-    const drop = H - top(s); if (drop < .35 || R() > drop / H * 1.3) continue;
+    const drop = H - tb(s); if (drop < .35 || R() > drop / H * 1.3) continue;
     const n = 1 + (R() < .35 ? 1 : 0);
     for (let i = 0; i < n; i++) {
       const side = R() < .6 ? 1 : -1, off = side * (D / 2 + rr(.1, .65)), sc = clamp(s + (R() - .5) * .4, 0, L - 1e-3);
       M.fallen(pieceOf(sc), ax + u[0] * sc + w[0] * off, az + u[2] * sc + w[2] * off, ground);
+    }
+  }
+  // the PULLED stones (docs/exp/brawl.md): on the ground at the foot, the side they were pulled to (their own draws, after all the rest)
+  if (run.pulls) { const Rp = mulberry32((run.seed | 0) * 31 + 977), rp = (a, b) => a + (b - a) * Rp();
+    for (const [s0, s1, dh, side] of run.pulls) for (let i = 0, n = 3 + Math.round(dh * 6); i < n; i++) {
+      const sc = clamp(rp(s0, s1), 0, L - 1e-3), off = (side || 1) * (D / 2 + rp(.15, 1.1)), x = ax + u[0] * sc + w[0] * off, z = az + u[2] * sc + w[2] * off, g = ground(x, z);
+      const l = rp(.3, .6), hk = rp(.2, .34), dd = rp(.25, .4), [U, V, W] = M.axes([1, 0, 0], [0, 0, 1], Rp() * Math.PI, (Rp() - .5) * .5, (Rp() - .5) * .4);
+      const B = pieceOf(sc); cuboid(B, [x, g + hk * .3, z], U, V, W, l / 2, hk / 2, dd / 2, M.fs, B.part(), M.tone() * .5 - .05, Rp, .1);
     }
   }
   // each piece's highest standing point (arrows, gadgets and the lasso read it: world.js topOfProp)

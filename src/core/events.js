@@ -120,9 +120,27 @@ export const EVENTS = {
   'lasso.slip':         ['features/equip/lasso.js', 'x, y, who, why (slip | gone | drop | gun | jolt: the rope lets go of it)', 'audio'],
   'lasso.swing':        ['features/equip/lasso.js', 'x, y, h (the anchor: he swings)', 'audio'],
   'lasso.home':         ['features/equip/lasso.js', 'x, y (the loop is back in the hand)', '(none yet)'],
+  'lasso.stones':       ['features/equip/lasso.js', 'x, y, z, who (the wall segment): a yank brought the top course of a broken wall down (world.pullWall; docs/exp/brawl.md)', 'audio'],
   'lasso.swish':        ['features/equip/lassolook.js (a view)', 'x, y (a turn of the loop overhead)', 'audio'],
   'lasso.creak':        ['features/equip/lassolook.js (a view)', 'x, y, k (the rope strains)', 'audio'],
-  'combat.bowl':        ['features/combat/core.js', 'x, y, who, by (a flung body bowls another over: combat fling)', 'audio'],
+  'combat.bowl':        ['features/combat/core.js, features/foes/sim.js', 'x, y, who, by (a flung or kicked body bowls another over: combat fling, a body thrown by sim/bodyfly.js)', 'audio'],
+  // BRAWL (docs/exp/brawl.md): the live cowboys' boot, barge, lift and throw (sim/player/brawl.js: x, y in the view frame, turned by
+  // the loop; features/brawl.js does what they do), bodies thrown by them (sim/bodyfly.js: combat's brutes, the gunmen), and the
+  // gunmen's called shots (features/calls.js says where a shot met him; features/foes/sim.js reacts)
+  'player.kick':        ['sim/player/brawl.js',   'x, y, z, vx, vy (unit: the way of the blow), barge (the shoulder barge: every step of its blow, n its count)', 'brawl (lands it)'],
+  'player.lift':        ['sim/player/brawl.js',   'x, y, z, phase (start | grab: it leaves the ground | put: set down | drop: let fall), vx, vy', 'brawl, audio'],
+  'player.throw':       ['sim/player/brawl.js',   'x, y, z, vx, vy (unit: the way), d (m to where it should land), h (the hands)', 'brawl (launches it), audio'],
+  'kick.hit':           ['features/brawl.js',     'x, y, who (the body / prop, or null), kind (body | a prop kind | hat | gun | air: a swing at nothing), barge', 'audio'],
+  'carry.throw':        ['features/brawl.js',     'x, y, who (the prop, or null: a loose hat / gun), kind, heavy', 'audio'],
+  'body.slam':          ['features/combat/core.js, features/foes/sim.js', 'x, y, z?, who, n (m/s into the wall): a thrown body hits a wall', 'audio'],
+  'body.land':          ['features/combat/core.js, features/foes/sim.js', 'x, y, z?, who, n (m of drop): a thrown body comes down', 'audio'],
+  'body.splash':        ['features/combat/core.js, features/foes/sim.js', 'x, y, z?, who: a thrown body lands in the water (arrow.splash follows for its look)', 'audio'],
+  'body.fall':          ['features/foes/sim.js',  'x, y, z, who: a thrown gunman goes over the rim of the canyon', 'audio'],
+  'foe.hat':            ['features/foes/sim.js',  'x, y, z, who, foe: his hat shot (or kicked) off', 'audio'],
+  'foe.disarm':         ['features/foes/sim.js',  'x, y, z, who, foe, gun: the gun shot (or kicked) out of his hand', 'audio'],
+  'foe.stagger':        ['features/foes/sim.js',  'x, y, z, who, foe: shot in the leg', 'audio'],
+  'foe.pickup':         ['features/foes/sim.js',  'x, y, z, who, foe (hat | gun: what he picked up)', 'audio'],
+  'foe.loose':          ['features/foes/sim.js',  'x, y, z, foe (hat | gun), n (0..1: how hard): a loose hat or gun bounces', 'audio'],
   // the trick-shot range (features/trickshot/sim.js, ?trick=1: the sandbox only); who = its prop (a bottle, a can)
   'trick.shatter':      ['features/trickshot/sim.js', 'x, y, h, dx, dy (unit: the shot\'s way; 0 without one), by (bullet | arrow | blast | melee), who (the bottle), glass (amber | green | clear): a bottle breaks', 'trickshot (view: the glass), audio'],
   'trick.ping':         ['features/trickshot/sim.js', 'x, y, h, dx, dy, by, who (the can), air (it was in the air), n (the juggle so far: its airborne hits in a row): a can is hit', 'trickshot (view: the spin, the count), audio'],

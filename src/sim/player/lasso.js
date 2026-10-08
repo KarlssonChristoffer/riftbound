@@ -12,6 +12,11 @@
 //   hang   on a rope from an anchor (P.state 'rope', in BUSY): a pendulum in the WORLD (gravity, the rope's length reeled
 //          in a little, the ground, the stream, walls, WASD pumps), lasso_hang_0..2 by the swing (legs forward / straight /
 //          back), facing the way he swings; letting go he flies on with its speed (player.js's fall / land / splash)
+//   zip    (docs/exp/brawl.md) a ZIP LINE from where he stood (the hitch, high) down to the anchor: a moment to hitch the rope,
+//          then he hangs from it by his hands (lasso_hang_1; the live mv_zip) and slides down it, gravity along the line, the
+//          grip's friction; off near its end (he flies on), where his feet touch ground (he runs on), at a wall (a bump) or F / Space
+//   ropeup (docs/exp/brawl.md) the rope from an anchor at a lip he can stand on: he walks to the face's foot under it, climbs
+//          the rope up the face (the climb's frames) and mantles over onto the top
 // What ends a mode from his side: a roll or a dodge, a knock, a leap or a fall (the rope slips: lasso.drop), LMB (the gun:
 // he drops the rope and draws, sim/player/gun.js takes the press), a wall or the water in a swing (lasso.bump / letgo).
 // The camera may turn at any time: the swing lives in the world and P (the view frame) is written from it every step.
@@ -125,7 +130,7 @@ export function createLasso(PL, I) {
   function step(dt, mx, my) {
     if (!S.mode) return false;
     if (S.mode === 'drop') return drop(dt);
-    if (S.mode === 'hang') { if (P.state !== 'rope') { S.mode = ''; ev({type: 'lasso.drop', x: P.x, y: P.y, z: P.z, why: P.state}); return false; } }
+    if (S.mode === 'hang' || S.mode === 'zip' || S.mode === 'ropeup') { if (P.state !== 'rope') { S.mode = ''; ev({type: 'lasso.drop', x: P.x, y: P.y, z: P.z, why: P.state}); return false; } }
     else if (BUSY.has(P.state) || P.state === 'roll' || P.state === 'backstep') { abort(P.state); return false; }
     else if (PL.gun?.S.want) { abort('gun'); return false; }   // LMB: he lets the rope go and draws (gun.js takes the press)
     const L = tls();
@@ -179,6 +184,8 @@ export function createLasso(PL, I) {
         return true;
       }
       case 'hang': swing(dt, mx, my, L); return true;
+      case 'zip': zipStep(dt, L); return true;
+      case 'ropeup': ropeStep(dt, L); return true;
     }
     return false;
   }
@@ -280,11 +287,74 @@ export function createLasso(PL, I) {
     return true;
   }
   function letGo(why) {
-    if (S.mode !== 'hang') return;
+    if (S.mode !== 'hang' && S.mode !== 'zip' && S.mode !== 'ropeup') return;
     S.mode = tls().hangIn.names.length ? 'drop' : ''; S.t = 0; yaw();
     const v = toV(S.vx, S.vy);
     P.state = 'fall'; P.t = 0; P.vx = v[0]; P.vy = v[1]; P.vz = S.vh; P.fall0 = Math.max(P.z, S.W.elev(wx(), wy())); P.aimRoll = false;
     ev({type: 'lasso.letgo', x: P.x, y: P.y, z: P.z, vx: P.vx, vy: P.vy, vz: S.vh, why});
+  }
+
+  // ---------------------------------------------------------------- the zip line (docs/exp/brawl.md)
+  const ZP = TUNE.zip, RU = TUNE.ropeup;
+  function zipStep(dt, L) {
+    const Z = S.zp, W = S.W;
+    { const v = toV(Z.ux, Z.uy); P.want = dirOf(v[0], v[1]); turnToward(P.want, dt, TURN_RATE); }
+    if (Z.ph === 'hitch') {   // the rope's end hitched where he stands (the take: the rope goes taut), then he's off
+      plant(dt); P.frame = L.take.real ? at(L.take, S.t, false) : L.haul[0];
+      if (S.t >= ZP.hitch) { Z.ph = 'ride'; Z.v = ZP.v0; Z.s = Z.s0; S.pt = 0; }
+      return;
+    }
+    const fr = L.hang[1], go = gripOff(fr); P.frame = fr;
+    const a = SW.g * -Z.uh - ZP.fric * SW.g - ZP.drag * Z.v;   // (uh < 0: down the line)
+    Z.v = clamp(Z.v + a * dt, 0, ZP.max); Z.s += Z.v * dt; S.pt += dt;
+    S.gx = Z.ax + Z.ux * Z.s; S.gy = Z.ay + Z.uy * Z.s; S.gh = Z.ah + Z.uh * Z.s;
+    S.vx = Z.ux * Z.v; S.vy = Z.uy * Z.v; S.vh = Z.uh * Z.v;
+    const feet = S.gh - go.z, gz = W.elev(S.gx, S.gy);
+    if (gz > Z.floor - .25) Z.off = Z.s;   // (the floor he set off from: its parapet is hopped, not a wall)
+    if (Z.s > ZP.clear && Z.s > (Z.off || 0) + 1 && W.solid(S.gx, S.gy, Math.max(feet, gz), feet + 1.6, .26)) { S.vx *= -SW.bump; S.vy *= -SW.bump; S.vh = Math.min(S.vh, 0); place(go); ev({type: 'lasso.bump', x: P.x, y: P.y, z: P.z}); letGo('bump'); return; }   // (not the parapet he hops off: the first ZP.clear m)
+    if (feet < gz + .03 && gz > Z.floor - .25) { place(go); P.z = Math.max(P.z, gz); return; }   // (still over the floor he set off from: his feet skim it to its edge)
+    if (feet < gz + .03 && Z.s > .4) {   // his feet touch ground: he runs off it
+      place(go); P.z = gz; S.mode = ''; const v = toV(S.vx, S.vy); P.vx = v[0]; P.vy = v[1];
+      const sp = hypot2(P.vx, P.vy); P.curSpeed = P.lastSpeed = sp;
+      if (sp > 2.3) { P.state = 'move'; P.gait = 'run'; P.ph = .02; P.prevF = 'run0'; P.frame = 'run.0'; } else { P.state = 'idle'; P.vx = P.vy = 0; }
+      P.t = 0; ev({type: 'lasso.letgo', x: P.x, y: P.y, z: P.z, vx: P.vx, vy: P.vy, vz: 0, why: 'ground'}); return;
+    }
+    place(go);
+    if (Z.s >= Z.L - ZP.end || S.pt > 9) letGo('end');
+  }
+  // ---------------------------------------------------------------- climbing the rope (docs/exp/brawl.md): to the foot, up, over
+  function ropeStep(dt, L) {
+    const R = S.ru;
+    R.t += dt;
+    if (R.ph === 'walk') {
+      const px = wx(), py = wy(), dx = R.fx - px, dy = R.fy - py, d = hypot2(dx, dy);
+      if (d < .1 || R.t > 3) { R.ph = 'climb'; R.t = 0; R.z0 = P.z; }
+      else {
+        const v = toV(dx / d, dy / d), sp = Math.min(RU.walk, d / dt);
+        P.vx = v[0] * sp; P.vy = v[1] * sp; const got = moveBy(P.vx * dt, P.vy * dt);
+        if (got < sp * dt * .3 && R.t > .3) { R.ph = 'climb'; R.t = 0; R.z0 = P.z; }   // (against the face already)
+        P.want = dirOf(v[0], v[1]); turnToward(P.want, dt, TURN_RATE);
+        const WC = A.CLIP.walk, n = WC?.frames || 8; P.ph = (P.ph + got / (WC?.stride || 1)) % 1; P.frame = has('walk.0') ? 'walk.' + (Math.floor(P.ph * n) % n) : 'idle.0';
+        return;
+      }
+    }
+    // facing the face (toward the anchor)
+    { const v = toV(R.ax - R.fx, R.ay - R.fy); if (v[0] * v[0] + v[1] * v[1] > 1e-4) { P.face = P.want = dirOf(v[0], v[1]); } }
+    if (R.ph === 'climb') {
+      P.vx = P.vy = 0;
+      const v = toV(R.fx, R.fy); P.x = v[0]; P.y = v[1];
+      P.z = Math.min(R.tz - .9, R.z0 + RU.climb * R.t);
+      const CL = A.CLIP.climb; P.frame = has('climb.0') ? 'climb.' + (Math.floor(R.t * (CL?.fps || 7)) % (CL?.frames || 4)) : L.hang[1];
+      if (P.z >= R.tz - .9) { R.ph = 'mantle'; R.t = 0; R.mz = P.z; }
+      return;
+    }
+    if (R.ph === 'mantle') {   // over the lip onto the top
+      const k = Math.min(1, R.t / RU.mantle), e = k * k * (3 - 2 * k);
+      const x = R.fx + (R.tx - R.fx) * e, y = R.fy + (R.ty - R.fy) * e, v = toV(x, y); P.x = v[0]; P.y = v[1];
+      P.z = R.mz + (R.tz - R.mz) * Math.min(1, e * 1.6);
+      P.frame = has('mantle.0') ? 'mantle.0' : 'crouch';
+      if (k >= 1) { P.z = R.tz; S.mode = ''; P.state = 'idle'; P.t = 0; P.prevF = -1; ev({type: 'lasso.letgo', x: P.x, y: P.y, z: P.z, vx: 0, vy: 0, vz: 0, why: 'top'}); }
+    }
   }
 
   // ---------------------------------------------------------------- the API (features/equip/lasso.js)
@@ -326,8 +396,24 @@ export function createLasso(PL, I) {
       return true;
     },
     climb(on) { S.climb = !!on && S.mode === 'hang'; },   // F held on a swing: up the rope
+    // a ZIP LINE (world): from the hitch (ax, ay, ah: his hands where he stands, high) down to the anchor (bx, by, bh); W as for hang
+    zip(ax, ay, ah, bx, by, bh, W) {
+      if (BUSY.has(P.state) || P.state === 'roll' || P.state === 'backstep') return false;
+      yaw(); ah = P.z + gripOff(tls().hang[1]).z + ZP.over;   // (hitched over his head: he hangs from it with his feet at the deck, and hops off)
+      const dx = bx - ax, dy = by - ay, dh = bh - ah, L = hypot3(dx, dy, dh); if (L < 1 || dh > -.3) return false;
+      S.W = W; S.zp = {ph: 'hitch', ax, ay, ah, bx, by, bh, L, ux: dx / L, uy: dy / L, uh: dh / L, s: 0, s0: 0, v: 0, floor: P.z};
+      S.mode = 'zip'; S.t = 0; S.pt = 0; P.state = 'rope'; P.t = 0; P.aimRoll = false;
+      return true;
+    },
+    // CLIMB THE ROPE (world): to the face's foot (fx, fy), up to the top (tx, ty, tz) under the anchor (ax, ay, ah)
+    ropeup(ax, ay, ah, fx, fy, tx, ty, tz, W) {
+      if (BUSY.has(P.state) || P.state === 'roll' || P.state === 'backstep') return false;
+      yaw(); S.W = W; S.ru = {ph: 'walk', t: 0, ax, ay, ah, fx, fy, tx, ty, tz, z0: P.z, mz: 0};
+      S.mode = 'ropeup'; S.t = 0; P.state = 'rope'; P.t = 0; P.aimRoll = false; P.vx = P.vy = 0;
+      return true;
+    },
     // off the rope: from a swing he flies on; from anything else he stands again
-    letGo() { if (S.mode === 'hang') letGo('key'); else if (S.mode) { S.mode = ''; S.leashOn = false; P.t = 0; } },
-    stop() { if (S.mode === 'hang') letGo('stop'); S.mode = ''; S.leashOn = false; },
+    letGo() { if (S.mode === 'hang' || S.mode === 'zip' || S.mode === 'ropeup') letGo('key'); else if (S.mode) { S.mode = ''; S.leashOn = false; P.t = 0; } },
+    stop() { if (S.mode === 'hang' || S.mode === 'zip' || S.mode === 'ropeup') letGo('stop'); S.mode = ''; S.leashOn = false; },
   };
 }

@@ -35,6 +35,7 @@ import {WEAPONS} from '../../content/weapons.js';   // the bow's numbers (shoot)
 import {ramps} from './harmonize.js';   // the character palette (pixel bow layer)
 import {clamp} from '../../core/mathx.js';
 import {createLaunch, STATES as THROWN} from './launch.js';   // thrown by a blast: flying, slammed, down, getting up
+import {STATES as BRAWLS} from './brawl.js';   // the live cowboys' boot, barge, lift, throw (sim/player/brawl.js: H.brawl)
 export const AIM_H = 1.25;   // arrows fly at chest height
 // walkable terrain (docs/TERRAIN.md): a step up is taken in stride up to STEP_UP m (H.blocked stops anything higher), a step
 // down up to SNAP m (a slope walked or rolled down); a bigger drop is a ledge, and he falls
@@ -49,7 +50,7 @@ const AIM_TURN_RATE = 1200;
 const STANCE_HOLD = .25;  // s: a moving-aim stance (running forward / backing up) can't flip back sooner (no flip-flop)
 // states in which the player is taken over by a move (no aiming, rolling or new actions); 'rope': hanging from a lasso
 // (sim/player/lasso.js, the equipment experiment's)
-export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'hold', 'knock', 'rope', ...THROWN]);
+export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'hold', 'knock', 'rope', ...THROWN, ...BRAWLS]);
 // The dodge (Space). The roll clip is a FORWARD roll, so a roll never reverses:
 // - running into a roll more than leadMin deg off the way he faces: he plants and turns first (the run's turn frames,
 //   lead s each, untouchable from the plant)
@@ -657,6 +658,7 @@ export function createPlayer(H) {
     const {SP, CLIP} = A, WALK = CLIP.walk, RUN = CLIP.run, ND = A.ND;
     const [mx, my] = moveInput();
     P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt); thrown.tick(dt);
+    if (brawl && brawl.step(dt, mx, my)) return;   // a boot, a barge, a lift, a throw (sim/player/brawl.js; nothing while it's idle)
     if (lasso && lasso.step(dt, mx, my)) return;   // the lasso in his hands (sim/player/lasso.js; nothing while it's idle)
     if (gun && gun.step(dt, mx, my)) return;   // a gun loadout: the revolver drives the frame while it's in hand (sim/player/gun.js)
     if (stepTraverse(dt)) return;
@@ -883,6 +885,7 @@ export function createPlayer(H) {
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
   function press() {   // LMB down: draw (kept through a roll)
+    if (brawl?.press()) return;   // carrying something: LMB throws it (sim/player/brawl.js)
     if (gun?.on()) return gun.press();   // a gun loadout: the trigger (sim/player/gun.js)
     mouse.down = true; P.recover = 0;
     if (!dodging() && !BUSY.has(P.state)) {
@@ -1085,6 +1088,8 @@ export function createPlayer(H) {
   PL.gun = gun;
   const lasso = H.lasso ? H.lasso(PL, internals) : null;   // (the equipment experiment's lasso: sim/player/lasso.js)
   PL.lasso = lasso;
+  const brawl = H.brawl ? H.brawl(PL, internals) : null;   // (the live cowboys' boot, barge, lift and throw: sim/player/brawl.js)
+  PL.brawl = brawl;
   const thrown = createLaunch({...internals, elev, inStream, splash, dryBack});   // a blast's throw (sim/player/launch.js: PL.launch)
 
   // for the systems around him (they ask, they don't write P): face a shot along a view-frame direction (the string

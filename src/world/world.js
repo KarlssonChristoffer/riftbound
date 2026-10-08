@@ -949,6 +949,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // segment prop on its line (between the midpoints of their centres), each piece moved into its prop's frame: the prop's mesh
   // (towers and gateposts too: each its own geometry; every piece's own top goes to topOfProp)
   const wallGeo = new Map(), wo = {fam: famOf, cover: R.cov ? famOf('cover') : null}, wground = TERRAIN_ON ? (x, z) => elev(x, z) : null;
+  const RUNOF = new Map();   // a stone wall's segment -> its run as built ({run, cuts, segs, pulls}: pullWall makes it again)
   const own = (p, g, top, full) => { if (g) { g.translate(-p.x, -(p.z || 0), -p.y); g.computeBoundingSphere(); g.computeBoundingBox(); disposers.push(() => g.dispose()); } wallGeo.set(p, g); TOPS.set(p, top); if (full !== undefined) FULL.set(p, full); };
   if (flags.get('walls') !== 'old') for (const run of layout.walls || []) {
     if (run.type === 'tower' || run.type === 'post') {   // the tower / post prop standing there
@@ -964,6 +965,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const S = segs.map(sOf), cuts = [0, ...S.slice(1).map((v, i) => (S[i] + v) / 2), L];
     const {geos, tops} = wallRun({...run, cuts, ground: wground}, wo);
     segs.forEach((p, i) => own(p, geos[i] || null, tops[i], run.h));
+    const rec = {run, cuts, segs, pulls: [], u: [ux, uz], a: [ax, az]}; for (const p of segs) RUNOF.set(p, rec);   // (pullWall: a run made again)
   }
   // the standing stones (stonecircle.js): each 'menhir' prop its own stone and top (a lying stone's extra colliders: a top, no mesh)
   for (const r of stoneMeshes(props, wo, wground || undefined)) own(r.p, r.geo, r.top);
@@ -1153,6 +1155,27 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
     setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, floraCount, flora, haveGlb, groundCanvas: gc, westCanvas, trees3d,
     itemOf: p => byProp.get(p) || null,
+    // PULL a stone wall's broken top down (the lasso, docs/exp/brawl.md): the stretch round segment p's middle (w m along the run)
+    // dh m lower, never under floor m, its stones fallen toward (px, py); the run is made again (walls3d.js pulls: every other
+    // stone as it was) and the pieces that changed swap their geometry; their tops (topOfProp, vaultTop) follow -> false: not a
+    // stone wall's segment, or it's as low as it goes
+    pullWall(p, dh, w = 1.2, floor = .8, px, py) {
+      const rec = RUNOF.get(p), cur = TOPS.get(p); if (!rec || cur === undefined) return false;
+      const t = Math.max(floor, cur - dh); if (t > cur - .08) return false;
+      const i = rec.segs.indexOf(p), sc = (rec.cuts[i] + rec.cuts[i + 1]) / 2, [ux, uz] = rec.u;
+      const side = px === undefined ? 1 : Math.sign((px - rec.a[0]) * -uz + (py - rec.a[1]) * ux) || 1;
+      rec.pulls.push([sc - w / 2, sc + w / 2, cur - t, side]);
+      const {geos, tops} = wallRun({...rec.run, cuts: rec.cuts, ground: wground, pulls: rec.pulls}, wo);
+      rec.segs.forEach((q, k) => {
+        const g = geos[k], near = Math.abs((rec.cuts[k] + rec.cuts[k + 1]) / 2 - sc) < w / 2 + 1.4;
+        if (!near || !g) { g?.dispose(); return; }
+        g.translate(-q.x, -(q.z || 0), -q.y); g.computeBoundingSphere(); g.computeBoundingBox();
+        const it = byProp.get(q), old = wallGeo.get(q); if (it?.live) it.live.setGeometry(g); else { g.dispose(); return; }
+        if (old && old !== g) old.dispose();
+        disposers.push(() => g.dispose()); wallGeo.set(q, g); TOPS.set(q, tops[k]);
+      });
+      return true;
+    },
     // a view's veil over a prop (features/omens/fog.js: an enemy lost in the fog): not drawn, nothing else changes (the
     // sim, its collider, the registry). It stays until lifted: veil(p, false)
     veil(p, on) { const it = byProp.get(p); if (it) it.veil = !!on; },

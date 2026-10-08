@@ -19,6 +19,9 @@
 import {roamable, TERRAIN_ON, steep} from '../../world/world.js';
 import {parkMiller} from '../../core/rng.js';
 import {throwOf} from '../../sim/player/launch.js';   // a blast's throw (by how close he stood)
+import {flight, throwBody, stepFlight, feetOf} from '../../sim/bodyfly.js';   // a kicked brute's flight (launch below: docs/exp/brawl.md)
+import {TUNE as BRAWL} from '../../content/brawl.js';
+import {walkable} from '../../world/world.js';
 
 export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -283,6 +286,7 @@ export function createCore(host) {
     s.root = Math.max(0, s.root - dt); b.rooted = s.root > 0;
     s.land = Math.max(0, s.land - dt);
     const held = (s.held = Math.max(0, (s.held || 0) - dt)) > 0;   // (an outside hold: hold() / a fling's stun; no root pegs)
+    if (s.fly) { flyBrute(b, s, dt); return; }   // kicked off its feet (launch: docs/exp/brawl.md)
     if (s.hop) {
       const H = s.hop; H.t += dt; const k = Math.min(1, H.t / H.dur);
       b.x = H.x0 + (H.x1 - H.x0) * k; b.y = H.y0 + (H.y1 - H.y0) * k; b.h = 4 * H.H * k * (1 - k) + (H.h0 || 0) * (1 - k); b.air = true; b.squash = 0;   // (h0: thrown from up in the air: fling o.h0)
@@ -334,6 +338,55 @@ export function createCore(host) {
       events.push({type: 'combat.bowl', x: q.x, y: q.y, who: q, by: b});
     }
   }
+  // A KICKED BRUTE (launch: the player's boot or barge, features/brawl.js): its body flies by sim/bodyfly.js in the world: a
+  // wall stops it (a slam hurts it), off a ledge it falls on (a drop hurts), into the water it splashes; it tumbles over its
+  // facings and bowls over whoever it meets; at rest it lies held (stunned) where it can stand (the nearest spot, if not there)
+  const BODY = BRAWL.body;
+  const FLYW = {elev: (x, y) => host.elev(x, y), water: (x, y) => host.inStream(x, y),
+    solid: (x, y, h0, h1, r) => {
+      if (!walkable(x, y) || inWall(x, y, r * .5)) return true;
+      for (const q of ents.near(x, y, r + .8, nearF, colliders)) {
+        if (q.broken || q.gone || q.hunter || q.sparring || q.kind === 'gunman' || !(q.r > .15)) continue;
+        const z0 = pz(q), top = z0 + (HGT[q.kind] ?? (q.kind === 'tree' ? 6 : 1.2)); if (h1 < z0 || h0 > top) continue;
+        if (Math.hypot(q.x - x, q.y - y) < q.r + r) return true;
+      }
+      return false;
+    }};
+  function flyBrute(b, s, dt) {
+    const L = s.fly, F = L.F;
+    stepFlight(F, dt, FLYW);
+    b.x = F.x; b.y = F.y; b.z = TERRAIN_ON ? host.elev(b.x, b.y) : pz(b); b.h = Math.max(0, feetOf(F) - pz(b)); b.air = F.on; b.squash = 0;
+    if (F.on && Array.isArray(b.faceW)) { const a = Math.atan2(b.faceW[0], b.faceW[1]) + dt * 9 * Math.min(1, Math.hypot(F.vx, F.vy) / 6); b.faceW[0] = Math.sin(a); b.faceW[1] = Math.cos(a); }
+    if (L.dmgFly && b.h < 1.3) for (const q of ents.near(b.x, b.y, BODY.bowl + .5, nearF)) {   // whoever it flies into: knocked down too
+      if (q === b || q.broken || q.gone || !(q.hunter || q.sparring) || L.hit.includes(q)) continue;
+      if (Math.abs(pz(q) - pz(b)) > 1 || Math.hypot(q.x - b.x, q.y - b.y) > BODY.bowl + (q.hitR ?? .35)) continue;
+      L.hit.push(q); damage(q, L.dmgFly, {canCrit: false, dir: [(q.x - b.x) * 3, (q.y - b.y) * 3]});
+      const l = Math.hypot(q.x - b.x, q.y - b.y) || 1;
+      if (BS.has(q)) C.launch(q, (q.x - b.x) / l * 2.4 + F.vx * .4, (q.y - b.y) / l * 2.4 + F.vy * .4, 1.5, {dmgFly: 0});
+      else host.feature('foes')?.sim?.launch(q, (q.x - b.x) / l * 2.4 + F.vx * .4, (q.y - b.y) / l * 2.4 + F.vy * .4, 1.5, {dmgFly: 0, hatK: .3});
+      events.push({type: 'combat.bowl', x: q.x, y: q.y, who: q, by: b});
+    }
+    const ev = F.ev;
+    if (ev === 'slam') { damage(b, Math.min(BODY.slamMax, BODY.slam0 + (F.speed - 2.6) * BODY.slamK), {dir: [F.hx * 2, F.hy * 2]}); events.push({type: 'body.slam', x: b.x, y: b.y, who: b, n: F.speed}); shake(2, .12); }
+    else if (ev === 'land') { if (F.drop > BODY.fall0) damage(b, (F.drop - BODY.fall0) * BODY.fallK, {dir: [0, 0]}); events.push({type: 'body.land', x: b.x, y: b.y, who: b, n: F.drop}); puff(b.x, b.y, pz(b), 10, .6); }
+    else if (ev === 'water') { L.wet = true; events.push({type: 'body.splash', x: b.x, y: b.y, who: b}); events.push({type: 'arrow.splash', x: b.x, y: b.y, small: false}); }
+    if (!F.on) {   // at rest (b may be broken by now: a slam or a drop killed it)
+      s.fly = null; b.h = 0; b.air = false; s.land = .12; b.squash = 1;
+      if (b.broken) return;
+      if (!freeSpot(b, b.x, b.y)) {   // (in the water, on a ledge it can't stand on, against a wall): the nearest spot it can, back the way it flew
+        const a0 = Math.atan2(L.x0 - b.x, L.y0 - b.y);
+        out: for (let r = .3; r < 6; r += .3) for (let k = 0; k < 12; k++) {
+          const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * .5, x = b.x + Math.sin(a) * r, y = b.y + Math.cos(a) * r;
+          if (TERRAIN_ON) b.z = host.elev(x, y);
+          if (freeSpot(b, x, y)) { b.x = x; b.y = y; ents.moved(b); break out; }
+        }
+        if (TERRAIN_ON) b.z = host.elev(b.x, b.y);
+      }
+      s.held = Math.max(s.held || 0, L.wet ? BODY.wet : L.stun); s.wait = s.held + .2; s.mode = 'aggro'; s.root = 0; b.rooted = false;
+      L.onLand?.(b);
+    }
+  }
+
   function landBrute(b, s) {
     const fl = s.hop?.fling;
     s.hop = null; b.h = 0; b.air = false; s.land = .12; b.squash = 1;
@@ -568,6 +621,19 @@ export function createCore(host) {
       s.hop = {x0: p.x, y0: p.y, x1: tx, y1: ty, t: 0, dur: o.dur, H: o.h, h0: o.h0 || 0, z0: pz(p), z1: host.elev(tx, ty), fling: {...o, x0: p.x, y0: p.y, a0, hit: []}};
       s.root = 0; p.rooted = false; s.held = 0; s.wait = 0;
       return s.hop;
+    },
+    // launch(p, vx, vy, up, o): one of the core's brutes THROWN off its feet (the player's boot, a barge: docs/exp/brawl.md) at
+    // (vx, vy) m/s along the ground and up m/s, physics all the way (above: flyBrute); o.stun (s held after), o.dmgFly (to whoever
+    // it flies into), o.onLand(b). A second launch mid-flight adds to it. -> false: not one of its brutes, or down
+    launch(p, vx, vy, up, o = {}) {
+      const s = BS.get(p); if (!s || p.broken || p.retired) return false;
+      const L = s.fly ??= {F: flight(), x0: p.x, y0: p.y, hit: [], dmgFly: 0, stun: 0, wet: false, onLand: null};
+      if (!s.fly.F.on) { L.F.on = false; L.x0 = p.x; L.y0 = p.y; L.hit.length = 0; L.wet = false; }
+      L.dmgFly = o.dmgFly ?? BRAWL.body.bowlDmg; L.stun = o.stun ?? BRAWL.body.stun; L.onLand = o.onLand || null;
+      throwBody(L.F, p.x, p.y, pz(p), vx, vy, up, {mid: .8, lie: .2, r: (p.r0 || .35) * .8, h0: (p.h || 0) + .8});
+      s.hop = null; s.root = 0; p.rooted = false; s.held = 0; s.wait = 0;
+      if (!Array.isArray(p.faceW)) p.faceW = [0, 1];
+      return true;
     },
     // hold one of the core's brutes where it stands for sec s (the equipment experiment's bear trap: features/equip/sim.js):
     // a hop ends where it is, a hold it has already is never shortened. -> false if it isn't one of them, or down

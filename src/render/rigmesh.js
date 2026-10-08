@@ -299,12 +299,13 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(true, true, false);
     r.render(sceneA, G.camera);
     r.setRenderTarget(prev);
-    meshB.userData.frame = fr; if (meshX) { U.uGDep.value = G.compU.tD.value; meshX.userData.frame = fr; }
+    meshB.userData.frame = fr; if (meshX && !api.noXray) { U.uGDep.value = G.compU.tD.value; meshX.userData.frame = fr; }   // (noXray: its owner asks for none this frame: the live hero carrying a crate in front of him, docs/exp/brawl.md)
     const rp = BOX_R * G.camera.projectionMatrix.elements[0] * VW / 2 + 2;   // (px a metre at this zoom: the projection's x scale)
     if (G.cine) U.uBox.value.set(-1, -1, 1, 1); else U.uBox.value.set(Math.max(-1, (box[0] - rp) / VW * 2 - 1), Math.max(-1, 1 - (box[3] + rp) / VH * 2), Math.min(1, (box[2] + rp) / VW * 2 - 1), Math.min(1, 1 - (box[1] - rp) / VH * 2));
     box[0] = box[1] = 1e9; box[2] = box[3] = -1e9;
     for (const M of models) M.n = 0;
     used = false;
   }
-  return {addModel, attach, put, putv, render, warm, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
+  const api = {addModel, attach, put, putv, render, warm, noXray: false, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
+  return api;
 }

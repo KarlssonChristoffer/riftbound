@@ -172,11 +172,15 @@ export function createLassoLook(host, lsim) {
       if (ph === 'spin') aimMark();
       return;
     }
-    Z.hand(ph === 'swing', HA);
+    Z.hand(ph === 'swing' || ph === 'zip' || ph === 'ropeup', HA);
     const O = L.loop;
-    if (ph === 'swing') {   // the rope to the anchor, the loop cinched round it
+    if (ph === 'swing' || ph === 'zip' || ph === 'ropeup') {   // the rope to the anchor, the loop cinched round it
       const A = L.anchor; hemp(HA[0], HA[1], HA[2], A.x, A.y, A.h, 0);
       flatRing(A.x, A.y, A.h + .02, .13, 10, T * .3, 0); host.line(A.x, A.y, A.h, A.x + .05, A.y + .03, A.h - .22, C3[1], false);
+      if (ph === 'zip' && L.zip) {   // (a zip line: the rope on up to where he hitched it, a knot there: docs/exp/brawl.md)
+        const Zp = L.zip; hemp(Zp.ax, Zp.ay, Zp.ah, HA[0], HA[1], HA[2], 0);
+        flatRing(Zp.ax, Zp.ay, Zp.ah, .07, 8, 0, 0); host.line(Zp.ax, Zp.ay, Zp.ah, Zp.ax, Zp.ay, Zp.ah - .25, C3[1], false);
+      }
       return;
     }
     // the loop: open in flight (facing its way), flat on the ground, a tight ring on what it holds

@@ -2888,6 +2888,388 @@ ANIMS['mv_getup_b'] = _clip(['gu_b_lie', 'gu_b_sit', 'gu_b_tuck', 'gu_b_kneel', 
 ANIMS['mv_getup_f'] = _clip(['gu_f_lie', 'gu_f_push', 'gu_f_fours', 'gu_f_kneel', 'mv_land_up', 'idle_in'], _GU_TW, 14, marks={'run': 6})
 
 
+# ================================================================ brawl (live only: docs/exp/brawl.md) ====
+# The kick, the shoulder barge, lifting / carrying / throwing, the zip down a rope (the live cowboys: BRAWL_LIVE), and the
+# called shots' reactions (the live gunmen: BRAWL_FOES), made for the live models only and exported with ragdoll_export.py
+# --clips (the cowboys: tools/blender/live_export.mjs --add; the gunmen: ragdoll_export.py into pivot3d_chars/<type>). The
+# game reads these names and marks; a model without a clip falls back to an atlas pose. Every key here holds the revolver
+# in its holster unless its name starts with gun_ (the stagger's: the gun in the hand, as gun_aim holds it).
+#   mv_kick        a front push-kick with the right leg: weight onto the left, the knee chambered, the leg driven out (hit:
+#                  the sole forward at belt height, leaning back, arms out), the knee pulled back, the foot set down a short
+#                  step ahead (plant), settling toward idle
+#   mv_barge       a shoulder charge out of a sprint: turned to his right so the left shoulder leads, the left arm tucked
+#                  across the chest, head down, a driving lunge (hit), back up into the run's lean (the last frame = run.0)
+#   mv_lift        squat (the back fairly straight), both hands onto the sides of a box / barrel on the ground ahead (grab),
+#                  rising into the carry hold
+#   mv_carry       the hold standing: the load in both hands before the belly, elbows bent, a slight lean back; a breath
+#   mv_carry_walk  walk.<i>'s legs under the hold (the walk's own ground data, copied from the atlas: BRAWL_GAIT)
+#   mv_carry_run   run.<i>'s legs under the hold, a heavier jog (the run's ground data)
+#   mv_throw       a two-handed heave from the hold: a dip, driving up, the release forward-up on his toes (release),
+#                  the follow-through, settling toward idle
+#   mv_zip         hanging by both fists from a line above (RopeHand0 at the lasso hang's grip height, LASSO_HANG), leaning
+#                  back, the knees drawn forward; a small sway. The arms rise in front of the brim, so the hat stays on
+#   fx_pickup      a gunman stoops (hips and knees, the left hand on the left knee) and picks a thing up off the ground ahead
+#                  with the right hand (grab: the fingertips just over the ground), up again with it at the belt
+#   fx_hat_on      the left hand lifts the hat back onto the head (on: the hat is shown from here) and lets go
+#   fx_stagger     shot in the leg: the right knee buckles, the left hand clutches the right thigh, the gun arm flung out,
+#                  a hop on the left foot, recovering (back)
+#   fx_sting       the gun shot out of his hand: the right hand jerked back and up, shaken twice, the body flinching to his
+#                  right, the left hand over to hold the right wrist (back)
+#   fx_limp        a limping walk (the walk's ground data) favouring the right leg: short stiff steps on it, dipping on it
+# The kit: BRAWL_AT puts a fist (or a wrist, or the fingertips) on a point after the spec (two-bone IK, two passes); a
+# point in his frame (bone None) has its height over the GROUND the pose snaps to (measured before the snap, the arms left
+# out), so a hand at .3 m is .3 m over the ground whatever the knees do; a bone's name carries a rest-space point with it.
+# After it the revolver is put back where its hook put it (the holster on the posed thigh, or the hand), and again after a
+# clip's in-between blend (the blend carried the holstered gun on the moving hand). _root (the foes' hook) keeps the feet
+# where they stood while the hips go back in a squat. The bruiser's coach gun is not re-posed here: it hangs from his right
+# fist as built (the game hides it in fx_pickup and fx_sting). Contact sheets and probes: tmp/brawl/.
+import json
+BRAWL_LIVE = ('mv_kick', 'mv_lift', 'mv_carry', 'mv_carry_walk', 'mv_carry_run', 'mv_throw', 'mv_barge', 'mv_zip')
+BRAWL_FOES = ('fx_pickup', 'fx_hat_on', 'fx_stagger', 'fx_sting', 'fx_limp')
+BRAWL_AT = {}     # pose key -> [(side, bone | None | '.', (x, y, z) m at 1.8 m, 'fist' | 'wrist' | 'tip')] ('.': his frame
+                  # before the snap, as LIVE_AT's None: the hips at .76)
+BRAWL_GAIT = {}   # clip -> the atlas clip whose ground data (fps, loop, planted, advance, stride, contacts) it takes
+_ZIP_KEYS = ('bw_zip_a', 'bw_zip_b')
+_ZIP_FIT = {}
+
+
+def _bw_ground():
+    """The ground the pose will snap to, before the snap: the lowest point of what the snap counts, the arms left out."""
+    import numpy as np
+    skip = set(_arm_parts())
+    dg = bpy.context.evaluated_depsgraph_get()
+    lo = 1e9
+    for ob in bpy.data.collections[COL].objects:
+        base = ob.name.split('.')[0]
+        if ob.type != 'MESH' or ob.hide_render or base in SOFT_PARTS or base in skip:
+            continue
+        oe = ob.evaluated_get(dg)
+        me = oe.to_mesh()
+        if len(me.vertices):
+            a = np.empty(len(me.vertices) * 3)
+            me.vertices.foreach_get('co', a)
+            Mw = np.array(oe.matrix_world)
+            lo = min(lo, float((a.reshape(-1, 3) @ Mw[2, :3] + Mw[2, 3]).min()))
+        oe.to_mesh_clear()
+    return lo
+
+
+def _bw_regun(pose_name):
+    """The revolver where its hook puts it for this pose (the holster on the posed right thigh, or the hand)."""
+    if any(g in LOADOUT for g in GUN_ITEMS) and 'GunHold0' in bpy.data.objects[ROOT].pose.bones:
+        _gun_hold(pose_name)
+
+
+def _bw_hold(pose_name):
+    """HOLD hook (last): a brawl key's hands onto their points (BRAWL_AT), then the revolver put back."""
+    at = BRAWL_AT.get(_key(pose_name))
+    if not at:
+        return
+    pbs = bpy.data.objects[ROOT].pose.bones
+    k = PROP['height'] / 1.8
+    g = _bw_ground() if any(b is None for _, b, _, _ in at) else 0.0
+    for _ in range(2):   # (a fist's point is set back along the hand, whose direction the reach changes: twice)
+        for side, bone, p, mode in at:
+            t = (Vector(p) * k + Vector((0, 0, g)) if bone is None else Vector(p) * k if bone == '.' else
+                 _carried(bone, Vector(p) * k))
+            hd = pbs[side + 'Hand']
+            _reach(side, t - (hd.tail - hd.head) * {'wrist': 0.0, 'fist': .5, 'tip': 1.0}[mode])
+    _bw_regun(pose_name)
+
+
+def _zip_fit():
+    """The zip's keys lifted (_air) so the right fist's grip (RopeHand0) is at the lasso hang's grip height above the
+    pivot in both (the same rope height as the hang: LASSO_HANG['grip'])."""
+    arm = bpy.data.objects[ROOT]
+    if 'RopeHand0' not in arm.pose.bones:
+        return
+    if 'grip' not in LASSO_HANG:
+        _hang_fit()
+    for k in _ZIP_KEYS:
+        POSES[k]['_air'] = 0.0
+        _pose_key(k)
+        _ZIP_FIT[k] = _grip_z()
+    for k in _ZIP_KEYS:
+        POSES[k]['_air'] = LASSO_HANG['grip'] - _ZIP_FIT[k]
+    _ZIP_FIT['grip'] = LASSO_HANG['grip']
+    print('ZIP grip (RopeHand0)', round(LASSO_HANG['grip'], 4), 'm above the pivot; snapped:',
+          {k: round(_ZIP_FIT[k], 4) for k in _ZIP_KEYS})
+
+
+_pose_brawl = pose
+
+
+def pose(name):
+    """The pose() above; a brawl clip's in-between (and the live movement's, the jumps' and the get-ups') gets its
+    revolver put back (the blend carried it on the hand); the zip fits its grip height first."""
+    clip, _, i = name.partition('.')
+    if (name in _ZIP_KEYS or clip == 'mv_zip') and 'grip' not in _ZIP_FIT:
+        _zip_fit()
+    zmin = _pose_brawl(name)
+    if i and clip in BRAWL_LIVE + BRAWL_FOES + MOVE_LIVE + JUMP_LIVE + GETUP_LIVE:
+        _bw_regun(name)
+    return zmin
+
+
+_build_brawl = build
+
+
+def build():
+    """The builds above, then the brawl keys' hand hook after every other."""
+    names = _build_brawl()
+    if _bw_hold not in HOLD_HOOKS:
+        HOLD_HOOKS.append(_bw_hold)
+    return names
+
+
+_clips_meta_brawl = clips_meta
+
+
+def clips_meta():
+    """The clips above; a gait clip (BRAWL_GAIT) takes its source's ground data from the atlas (--atlas: poses.json), so it
+    plays exactly as the walk / run it walks on (without the atlas: as measured from its own frames)."""
+    out = _clips_meta_brawl()
+    a = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
+    src = {}
+    if '--atlas' in a:
+        p = os.path.join(a[a.index('--atlas') + 1], 'poses.json')
+        if os.path.exists(p):
+            src = json.load(open(p)).get('clips', {})
+    for c, s in BRAWL_GAIT.items():
+        if c in out and s in src:
+            out[c].update({k: src[s][k] for k in ('fps', 'loop', 'planted', 'advance', 'stride', 'contacts', 'contact_foot')
+                           if k in src[s]})
+    return out
+
+
+def _bw_legs(hips, thighs, shins, feet):
+    """Legs by their WORLD angles about X under a pelvis tipped `hips` (+ forward): thighs (L, R) from straight down (-
+    forward), shins (L, R) (+ the foot behind the knee), feet (L, R) (+ toe down; 0 = flat). The spec's own angles are
+    relative (each rotation lands on its parent's)."""
+    out = {'Hips': [('X', hips)]}
+    for i, s in enumerate(('Left', 'Right')):
+        out[s + 'UpLeg'] = [('X', thighs[i] - hips)]
+        out[s + 'Leg'] = [('X', shins[i] - thighs[i])]
+        out[s + 'Foot'] = [('X', feet[i] - shins[i])]
+    return out
+
+
+def _bw_spine(spine, s1=0.0, neck=0.0, head=0.0, turn=None):
+    """The back bent `spine` / `s1` (+ forward), the neck and head (relative), turn: (spine, spine1, spine2, neck, head)
+    about Z (+ toward his left)."""
+    out = {'Spine': [('X', spine)], 'Spine1': [('X', s1)], 'Neck': [('X', neck)], 'Head': [('X', head)]}
+    if turn:
+        for b, z in zip(('Spine', 'Spine1', 'Spine2', 'Neck', 'Head'), turn):
+            if z:
+                out[b] = [('Z', z)] + out.get(b, [])
+    return out
+
+
+def _bw_over(base, over, *bends):
+    """`base` with the bones of `over` replaced, then `bends` added to it (_merge: after the bone's own rotations)."""
+    spec = {k: (list(v) if isinstance(v, list) else v) for k, v in base.items()}
+    spec.update({k: list(v) for k, v in over.items()})
+    return _merge(spec, *bends)
+
+
+# ---- the kick: the right leg; the left stands. Torso leaning back at the contact (pelvis -10, spine -12: ~20 deg)
+_KK_ARMS = lambda la, ra, lfa, rfa, lower=22: _arms(la, ra, lfa, rfa, lower=lower)
+POSES['bw_kk_load'] = _merge(_bw_legs(0, (-4, -34), (10, 6), (0, 14)), _bw_spine(-2, 0, 2), _KK_ARMS(-24, 18, -30, -24, 30),
+                             {'Hips': [('Y', 4)]})
+POSES['bw_kk_chamber'] = _merge(_bw_legs(-6, (-2, -100), (12, -8), (0, 10)), _bw_spine(-4, -2, 10),
+                                _KK_ARMS(-50, 34, -36, -24))
+POSES['bw_kk_extend'] = _merge(_bw_legs(-8, (-4, -98), (10, -60), (0, -56)), _bw_spine(-6, -2, 12),
+                               _KK_ARMS(-62, 40, -30, -22), {'Hips': [('Z', 6)], 'Spine': [('Z', -4)]})
+POSES['bw_kk_hit'] = _merge(_bw_legs(-10, (-4, -103), (10, -101), (0, -97)), _bw_spine(-8, -3, 18),
+                            _KK_ARMS(-74, 46, -28, -20, 18), {'Hips': [('Z', 12)], 'Spine': [('Z', -8)]})
+POSES['bw_kk_hold'] = _merge(_bw_legs(-9, (-4, -103), (10, -98), (0, -94)), _bw_spine(-7, -3, 16),
+                             _KK_ARMS(-68, 42, -30, -22, 20), {'Hips': [('Z', 10)], 'Spine': [('Z', -6)]})
+POSES['bw_kk_recoil'] = _merge(_bw_legs(-4, (-2, -84), (12, 4), (0, 6)), _bw_spine(-2, 0, 6), _KK_ARMS(-40, 26, -34, -26, 26))
+POSES['bw_kk_plant'] = _merge(_bw_legs(2, (12, -24), (16, -6), (0, 0)), _bw_spine(4, 1, -4), _KK_ARMS(-6, 6, -30, -28, 34))
+ANIMS['mv_kick'] = _clip(['bw_kk_load', 'bw_kk_chamber', 'bw_kk_extend', 'bw_kk_hit', 'bw_kk_hold', 'bw_kk_recoil', 'bw_kk_plant',
+                          'idle_in'], [0, 1, 2, 3, 4, 5, 6, 6.6], 18, marks={'hit': 3, 'plant': 6})
+
+# ---- the lift: a squat with the back fairly straight (the pelvis tipped forward), the feet kept under him (_root: the
+# hips go back as the knees go forward), both fists onto the load's sides ahead; up into the carry hold
+_CARRY_AT = [('Left', 'Spine2', (.24, -.40, 1.0), 'fist'), ('Right', 'Spine2', (-.24, -.40, 1.0), 'fist')]   # (-> +-.24, -.36, 1.05)
+_CARRY_ARMS = _arms(-40, -40, -95, -95, lower=26)
+POSES['bw_carry_a'] = _merge(_bw_legs(-2, (-6, -6), (4, 4), (0, 0)), _bw_spine(-4, -2, 4), _CARRY_ARMS)
+POSES['bw_carry_b'] = _merge(_bw_legs(-2, (-6, -6), (4, 4), (0, 0)), _bw_spine(-4, -2, 4), _CARRY_ARMS, {'Spine2': [('X', -2)]})
+BRAWL_AT['bw_carry_a'] = BRAWL_AT['bw_carry_b'] = _CARRY_AT
+_LIFT_ARMS = _arms(-60, -60, -20, -20, lower=24)
+POSES['bw_lf_bend'] = _merge(_bw_legs(18, (-40, -40), (24, 24), (0, 0)), _bw_spine(6, 2, -16), _arms(-30, -30, -30, -30, 28),
+                             {'LeftUpLeg': [('Y', -6)], 'RightUpLeg': [('Y', 6)], '_root': (0, .08)})
+POSES['bw_lf_squat'] = _merge(_bw_legs(34, (-80, -80), (32, 32), (0, 0)), _bw_spine(6, 2, -30), _LIFT_ARMS,
+                              {'LeftUpLeg': [('Y', -10)], 'RightUpLeg': [('Y', 10)], '_root': (0, .16)})
+POSES['bw_lf_grab'] = _merge(_bw_legs(38, (-86, -86), (34, 34), (0, 0)), _bw_spine(6, 2, -32), _LIFT_ARMS,
+                             {'LeftUpLeg': [('Y', -10)], 'RightUpLeg': [('Y', 10)], '_root': (0, .17)})
+POSES['bw_lf_rise'] = _merge(_bw_legs(26, (-56, -56), (28, 28), (0, 0)), _bw_spine(4, 1, -24), _LIFT_ARMS,
+                             {'LeftUpLeg': [('Y', -8)], 'RightUpLeg': [('Y', 8)], '_root': (0, .11)})
+POSES['bw_lf_up'] = _merge(_bw_legs(8, (-22, -22), (14, 14), (0, 0)), _bw_spine(0, 0, -8), _CARRY_ARMS, {'_root': (0, .04)})
+BRAWL_AT.update({'bw_lf_squat': [('Left', None, (.25, -.43, .40), 'fist'), ('Right', None, (-.25, -.43, .40), 'fist')],
+                 'bw_lf_grab': [('Left', None, (.22, -.45, .30), 'fist'), ('Right', None, (-.22, -.45, .30), 'fist')],
+                 'bw_lf_rise': [('Left', None, (.22, -.43, .58), 'fist'), ('Right', None, (-.22, -.43, .58), 'fist')],
+                 'bw_lf_up': [('Left', None, (.23, -.39, .88), 'fist'), ('Right', None, (-.23, -.39, .88), 'fist')]})
+ANIMS['mv_lift'] = _clip(['idle_in', 'bw_lf_bend', 'bw_lf_squat', 'bw_lf_grab', 'bw_lf_rise', 'bw_lf_up', 'bw_carry_a'],
+                         [0, 1, 2, 3, 4, 5, 6], 14, marks={'grab': 3})
+ANIMS['mv_carry'] = _clip(['bw_carry_a', 'bw_carry_b'], [0, 1], 3, loop=True)
+
+# ---- carrying on the move: the gait's legs (and its ground data) under the hold, the chest steady (_stable)
+_CARRY_UP = {k: v for k, v in POSES['bw_carry_a'].items() if k not in LEG_BONES and not k.startswith('_')}
+for _i in range(8):
+    for _g, _c in (('bw_cw', 'walk'), ('bw_cr', 'run')):
+        POSES[f'{_g}_{_i}'] = _on_legs(_i, _CARRY_UP, _c)
+        BRAWL_AT[f'{_g}_{_i}'] = _CARRY_AT
+ANIMS['mv_carry_walk'] = dict(_clip([f'bw_cw_{i}' for i in range(8)], list(range(8)), 10, loop=True), locomotion=True)
+ANIMS['mv_carry_run'] = dict(_clip([f'bw_cr_{i}' for i in range(8)], list(range(8)), 13, loop=True), locomotion=True)
+BRAWL_GAIT.update({'mv_carry_walk': 'walk', 'mv_carry_run': 'run'})
+
+# ---- the throw: from the hold, a dip, driving up, the release forward-up on his toes, the follow-through
+POSES['bw_th_dip'] = _merge(_bw_legs(10, (-34, -34), (24, 24), (0, 0)), _bw_spine(2, 0, -6), _CARRY_ARMS, {'_root': (0, .05)})
+POSES['bw_th_drive'] = _merge(_bw_legs(2, (-10, -10), (8, 8), (10, 10)), _bw_spine(-2, -1, 0), _arms(-70, -70, -40, -40, 24))
+POSES['bw_th_release'] = _merge(_bw_legs(4, (-2, -2), (2, 2), (34, 34)), _bw_spine(10, 3, -16), _arms(-100, -100, -14, -14, 22))
+POSES['bw_th_follow'] = _merge(_bw_legs(6, (-6, 8), (8, 16), (14, 26)), _bw_spine(10, 4, -12), _arms(-80, -80, -16, -16, 24))
+POSES['bw_th_settle'] = _merge(_bw_legs(4, (-6, 6), (8, 12), (0, 6)), _bw_spine(6, 2, -6), _arms(-30, -30, -24, -24, 30))
+BRAWL_AT.update({'bw_th_dip': [('Left', None, (.23, -.30, .82), 'fist'), ('Right', None, (-.23, -.30, .82), 'fist')],
+                 'bw_th_drive': [('Left', None, (.22, -.42, 1.12), 'fist'), ('Right', None, (-.22, -.42, 1.12), 'fist')],
+                 'bw_th_release': [('Left', None, (.21, -.58, 1.47), 'fist'), ('Right', None, (-.21, -.58, 1.47), 'fist')]})
+ANIMS['mv_throw'] = _clip(['bw_carry_a', 'bw_th_dip', 'bw_th_drive', 'bw_th_release', 'bw_th_follow', 'bw_th_settle', 'idle_in'],
+                          [0, 1, 2, 3, 4, 5, 5.6], 16, marks={'release': 3})
+
+# ---- the barge: turned 55 deg to his right (the pelvis 25, the back the rest: the chest at ~55 with the lean), the left
+# shoulder leading, the left forearm across the chest, the head down and turned back to the way he runs; a lunge on the
+# left leg, the right driving behind
+_BG_TUCK = {'LeftShoulder': [('Z', -8)], 'LeftArm': [('Y', 24), ('X', -36), ('Z', -20)], 'LeftForeArm': [('X', -100)]}
+_BG_BACK = {'RightShoulder': [('Z', 4)], 'RightArm': [('Y', -36), ('X', 34)], 'RightForeArm': [('X', -40)]}
+POSES['bw_bg_low'] = _merge(_bw_legs(14, (-40, 24), (10, 50), (-10, 40)), _bw_spine(10, 4, -8, -4, turn=(-14, -10, -6, 18, 8)),
+                            {'Hips': [('Z', -14)]}, _BG_TUCK, _BG_BACK)
+POSES['bw_bg_drive'] = _merge(_bw_legs(20, (-56, 30), (6, 40), (-16, 50)), _bw_spine(12, 4, -6, 6, turn=(-12, -8, -5, 27, 14)),
+                              {'Hips': [('Z', -25)]}, _BG_TUCK, _BG_BACK)
+POSES['bw_bg_hit'] = _merge(_bw_legs(22, (-62, 34), (2, 44), (-18, 56)), _bw_spine(14, 4, -4, 10, turn=(-11, -7, -4, 26, 14)),
+                            {'Hips': [('Z', -26)]}, _BG_TUCK, _BG_BACK, {'LeftArm': [('X', -10)]})
+POSES['bw_bg_back'] = _merge(_bw_legs(16, (-40, 30), (20, 60), (-10, 30)), _bw_spine(10, 4, -10, 0, turn=(-8, -6, -2, 16, 6)),
+                             {'Hips': [('Z', -12)]}, _arms(20, -20, -60, -70, lower=30))
+BRAWL_AT.update({k: [('Left', 'Spine2', (-.04, -.25, 1.10), 'fist')] for k in ('bw_bg_low', 'bw_bg_drive', 'bw_bg_hit')})
+ANIMS['mv_barge'] = _clip(['bw_bg_low', 'bw_bg_drive', 'bw_bg_hit', 'bw_bg_back', ANIMS['run']['keys'][0]], [0, 1, 2, 3, 3.5, 4], 16,
+                          marks={'hit': 2})
+
+# ---- the zip: hanging by both fists from a line over him, leaning back 25 deg (the legs forward of the pelvis, knees
+# bent and drawn up), the arms rising in front of the face to the line (they pass before the brim: the hat stays on); the
+# fists one before the other on the line; a sway between the keys
+_ZIP_ARMS = {'LeftShoulder': [('Y', -30)], 'RightShoulder': [('Y', 30)],
+             'LeftArm': [('Y', 30), ('X', -100)], 'RightArm': [('Y', -30), ('X', -100)],
+             'LeftForeArm': [('X', -14)], 'RightForeArm': [('X', -14)]}
+POSES['bw_zip_a'] = _merge(_bw_legs(-20, (-48, -38), (-8, 0), (24, 32)), _bw_spine(-2, 0, 4, 2), _ZIP_ARMS)
+POSES['bw_zip_b'] = _merge(_bw_legs(-23, (-54, -46), (-12, -6), (26, 30)), _bw_spine(-1, 0, 5, 2), _ZIP_ARMS,
+                           {'Hips': [('Y', 2)]})
+# (the fists carried by the chest: before the brim's front edge and under it, the head in line with the back, the hat
+# tipped back 10 deg on it: the sombrero's rolled front edge clears the fists)
+BRAWL_AT.update({k: [('Right', 'Spine2', (-.04, -.42, 1.55), 'fist'), ('Left', 'Spine2', (.04, -.50, 1.48), 'fist')] for k in _ZIP_KEYS})
+LASSO_HAT.update({k: 10 for k in _ZIP_KEYS})
+ANIMS['mv_zip'] = _clip(list(_ZIP_KEYS), [0, 1], 4, loop=True)
+
+# ---- the gunmen: picking up, the hat back on, the leg shot, the stung hand, the limp
+_KNEE_L = ('Left', 'LeftUpLeg', (.11, -.10, .44), 'fist')       # the left palm on the left thigh above the knee
+POSES['fx_pk_bend'] = _merge(_bw_legs(24, (-40, -40), (24, 24), (0, 0)), _bw_spine(6, 2, -14), _arms(-10, -40, -40, -20, 30),
+                             {'_root': (0, .07)})
+POSES['fx_pk_stoop'] = _merge(_bw_legs(44, (-70, -70), (30, 30), (0, 0)), _bw_spine(10, 4, -26), _arms(-10, -70, -40, -14, 30),
+                              {'LeftUpLeg': [('Y', -6)], 'RightUpLeg': [('Y', 6)], '_root': (0, .13)})
+POSES['fx_pk_reach'] = _merge(_bw_legs(54, (-82, -82), (32, 32), (0, 0)), _bw_spine(14, 5, -32), _arms(-10, -84, -40, -10, 30),
+                              {'LeftUpLeg': [('Y', -8)], 'RightUpLeg': [('Y', 8)], '_root': (0, .15)}, {'RightHand': [('X', 50)]})
+POSES['fx_pk_grab'] = _merge(_bw_legs(58, (-86, -86), (34, 34), (0, 0)), _bw_spine(16, 6, -34), _arms(-10, -88, -40, -10, 30),
+                             {'LeftUpLeg': [('Y', -8)], 'RightUpLeg': [('Y', 8)], '_root': (0, .16)}, {'RightHand': [('X', 56)]})
+POSES['fx_pk_lift'] = _merge(_bw_legs(36, (-60, -60), (28, 28), (0, 0)), _bw_spine(8, 3, -24), _arms(-10, -60, -40, -30, 30),
+                             {'LeftUpLeg': [('Y', -6)], 'RightUpLeg': [('Y', 6)], '_root': (0, .11)})
+POSES['fx_pk_rise'] = _merge(_bw_legs(14, (-26, -26), (14, 14), (0, 0)), _bw_spine(4, 1, -10), _arms(-4, -30, -30, -60, 32),
+                             {'_root': (0, .04)})
+POSES['fx_pk_up'] = _merge(_bw_legs(0, (-4, -4), (4, 4), (0, 0)), _bw_spine(0, 0, 2), _arms(4, -10, -24, -70, 34))
+BRAWL_AT.update({'fx_pk_bend': [_KNEE_L, ('Right', None, (-.16, -.32, .45), 'tip')],
+                 'fx_pk_stoop': [_KNEE_L, ('Right', None, (-.14, -.40, .22), 'tip')],
+                 'fx_pk_reach': [_KNEE_L, ('Right', None, (-.14, -.46, .17), 'fist')],
+                 'fx_pk_grab': [_KNEE_L, ('Right', None, (-.14, -.46, .12), 'fist')],
+                 'fx_pk_lift': [_KNEE_L, ('Right', None, (-.15, -.38, .35), 'fist')],
+                 'fx_pk_rise': [('Right', None, (-.19, -.27, .66), 'fist')],
+                 'fx_pk_up': [('Right', None, (-.17, -.19, .82), 'fist')]})
+ANIMS['fx_pickup'] = _clip(['idle_in', 'fx_pk_bend', 'fx_pk_stoop', 'fx_pk_reach', 'fx_pk_grab', 'fx_pk_lift', 'fx_pk_rise', 'fx_pk_up'],
+                           [0, 1, 2, 3, 4, 5, 6, 7], 12, marks={'grab': 4})
+
+POSES['fx_ho_low'] = _bw_over(POSES['idle_in'], {'LeftArm': [('Y', 30), ('X', -40)], 'LeftForeArm': [('X', -70)]}, _bw_spine(2, 0, 10, 6))
+POSES['fx_ho_up'] = _bw_over(POSES['idle_in'], {'LeftArm': [('Y', -20), ('X', -70)], 'LeftForeArm': [('X', -60)]}, _bw_spine(0, 0, -4, -2))
+POSES['fx_ho_on'] = _bw_over(POSES['idle_in'], {'LeftArm': [('Y', 0), ('X', -60)], 'LeftForeArm': [('X', -100)]}, _bw_spine(2, 0, 12, 8))
+POSES['fx_ho_off'] = _bw_over(POSES['idle_in'], {'LeftArm': [('Y', 20), ('X', -50)], 'LeftForeArm': [('X', -60)]}, _bw_spine(0, 0, 4, 2))
+BRAWL_AT.update({'fx_ho_low': [('Left', None, (.14, -.36, 1.02), 'fist')],
+                 'fx_ho_up': [('Left', None, (.10, -.30, 1.62), 'fist')],
+                 'fx_ho_on': [('Left', 'Head', (.07, -.31, 1.70), 'fist')],
+                 'fx_ho_off': [('Left', None, (.26, -.36, 1.28), 'fist')]})
+ANIMS['fx_hat_on'] = _clip(['fx_ho_low', 'fx_ho_up', 'fx_ho_on', 'fx_ho_off'], [0, 1, 2, 3], 10, marks={'on': 2})
+
+_THIGH_R = ('Left', 'RightUpLeg', (-.08, -.11, .55), 'fist')    # the left hand clutching the front of the right thigh
+_FLUNG = lambda y, x, fx: {'RightShoulder': [('Z', -4)], 'RightArm': [('Y', y), ('X', x)], 'RightForeArm': [('X', fx)]}
+POSES['gun_fx_st_hit'] = _merge(_bw_legs(10, (-18, 2), (16, 62), (0, 40)), _bw_spine(14, 4, -12, 0), _FLUNG(0, -16, -20),
+                                {'Hips': [('Y', -6)]})
+POSES['gun_fx_st_drop'] = _merge(_bw_legs(16, (-36, -2), (28, 90), (0, 60)), _bw_spine(18, 6, -16, 4), _FLUNG(6, -10, -16),
+                                 {'Hips': [('Y', -8)]})
+POSES['gun_fx_st_lurch'] = _merge(_bw_legs(12, (-32, 8), (24, 84), (0, 60)), _bw_spine(14, 4, -12, 2), _FLUNG(10, -4, -14),
+                                  {'Hips': [('Y', 4)], 'Spine': [('Y', 6)]})
+POSES['gun_fx_st_hop'] = _merge(_bw_legs(8, (-14, 14), (8, 86), (22, 60)), _bw_spine(10, 3, -8, 0), _FLUNG(12, -4, -12),
+                                {'Hips': [('Y', 6)], 'Spine': [('Y', 4)], '_air': .06})
+POSES['gun_fx_st_land'] = _merge(_bw_legs(12, (-32, 4), (24, 70), (0, 50)), _bw_spine(12, 4, -10, 0), _FLUNG(8, -8, -16),
+                                 {'Hips': [('Y', 4)]})
+POSES['gun_fx_st_steady'] = _merge(_bw_legs(8, (-18, -6), (14, 46), (0, 24)), _bw_spine(8, 2, -6, 0), _FLUNG(-10, -30, -16))
+POSES['gun_fx_st_back'] = _merge(_bw_legs(4, (-10, 2), (8, 10), (0, 2)), _bw_spine(4, 1, -4, 0), _arm(y=-30, x=-50, fx=-10, sz=-4),
+                                 _LEFT_LOOSE)
+BRAWL_AT.update({k: [_THIGH_R] for k in ('gun_fx_st_hit', 'gun_fx_st_drop', 'gun_fx_st_lurch', 'gun_fx_st_hop', 'gun_fx_st_land',
+                                         'gun_fx_st_steady')})
+ANIMS['fx_stagger'] = _clip(['gun_fx_st_hit', 'gun_fx_st_drop', 'gun_fx_st_lurch', 'gun_fx_st_hop', 'gun_fx_st_land',
+                             'gun_fx_st_steady', 'gun_fx_st_back', 'gun_aim'], [0, 1, 2, 3, 4, 5, 6, 6.6], 14, marks={'back': 6})
+
+_FLINCH = {'Spine': [('Y', -8), ('Z', -12)], 'Spine1': [('Y', -4), ('Z', -6)], 'Neck': [('Z', -10), ('X', 6)], 'Head': [('Z', -6)]}
+_WRIST_R = ('Left', 'RightForeArm', (-.52, -.03, .87), 'fist')   # the left hand round the right wrist
+_R_UP = {'RightShoulder': [('Z', -10), ('Y', 10)], 'RightArm': [('Y', -30), ('X', 20)], 'RightForeArm': [('X', -120)]}
+_R_IN = {'RightShoulder': [('Z', -8)], 'RightArm': [('Y', -34), ('X', -10)], 'RightForeArm': [('X', -100)]}
+_LEFT_IN = lambda y, x, fx, z=0: {'LeftShoulder': [('Z', -4)], 'LeftArm': [('Y', y), ('X', x)] + ([('Z', z)] if z else []),
+                                   'LeftForeArm': [('X', fx)], 'LeftHand': []}
+POSES['fx_sg_jerk'] = _bw_over(POSES['idle_in'], {**_R_UP, 'RightHand': [('X', -20)], **_LEFT_IN(14, -36, -40)}, _FLINCH)
+POSES['fx_sg_shake_a'] = _bw_over(POSES['idle_in'], {**_R_UP, 'RightHand': [('X', 50)], **_LEFT_IN(12, -44, -56)}, _FLINCH)
+POSES['fx_sg_shake_b'] = _bw_over(POSES['idle_in'], {**_R_UP, 'RightHand': [('X', -40)], **_LEFT_IN(10, -48, -70)}, _FLINCH)
+POSES['fx_sg_take'] = _bw_over(POSES['idle_in'], {**_R_IN, 'RightHand': [('X', 40)], **_LEFT_IN(10, -40, -80, -20)},
+                               {'Spine': [('X', 8), ('Y', -6), ('Z', -10)], 'Neck': [('X', 6), ('Z', -8)]})
+POSES['fx_sg_hold'] = _bw_over(POSES['idle_in'], {**_R_IN, 'RightHand': [('X', 10)], **_LEFT_IN(10, -40, -80, -20)},
+                               {'Spine': [('X', 14), ('Y', -4), ('Z', -8)], 'Spine1': [('X', 4)], 'Neck': [('X', 4), ('Z', -6)]})
+POSES['fx_sg_back'] = _bw_over(POSES['idle_in'], {**_R_IN, 'RightHand': [('X', 10)], **_LEFT_IN(16, -30, -70, -20)},
+                               {'Spine': [('X', 6), ('Z', -4)], 'Neck': [('Z', -2)]})
+BRAWL_AT.update({'fx_sg_jerk': [('Right', None, (-.33, .07, 1.17), 'wrist')],
+                 'fx_sg_shake_a': [('Right', None, (-.36, .03, 1.05), 'wrist')],
+                 'fx_sg_shake_b': [('Right', None, (-.33, .07, 1.15), 'wrist')],
+                 'fx_sg_take': [('Right', None, (-.20, -.25, 1.08), 'wrist'), _WRIST_R],
+                 'fx_sg_hold': [('Right', None, (-.13, -.27, .97), 'wrist'), _WRIST_R],
+                 'fx_sg_back': [('Right', None, (-.16, -.24, .91), 'wrist'), _WRIST_R]})
+ANIMS['fx_sting'] = _clip(['fx_sg_jerk', 'fx_sg_shake_a', 'fx_sg_shake_b', 'fx_sg_take', 'fx_sg_hold', 'fx_sg_back'],
+                          [0, 1, 2, 3, 4, 5], 14, marks={'back': 5})
+
+# the limp: walk.<i> with the right leg stiff and short through its stance (frames 4-7: the right foot planted), the body
+# dipping and leaning over it there, a quick step through on the left
+for _i in range(8):
+    _w = expand(POSES[ANIMS['walk']['keys'][_i]])
+    _sp = {k: list(v) for k, v in _w.items() if not k.startswith('_')}
+    if _i >= 4:   # on the bad leg (walk's planted foot: L in 0-3, R in 4-7): the knee gives, the hips and chest dip over it
+        _sp['RightLeg'] = _sp.get('RightLeg', []) + [('X', 10)]
+        _sp['RightFoot'] = _sp.get('RightFoot', []) + [('X', -10)]
+        _sp['Hips'] = _sp.get('Hips', []) + [('Y', -6)]
+        _sp['Spine'] = _sp.get('Spine', []) + [('Y', -6), ('X', 5)]
+        _sp['Neck'] = _sp.get('Neck', []) + [('Y', 6), ('X', -3)]
+    elif _i:      # swinging it through: stiff (the knee kept straight), short, the hip hitched and the leg swung out
+        _sp['RightLeg'] = [(a, d * .45) for a, d in _sp.get('RightLeg', [])]
+        _sp['RightUpLeg'] = [(a, d * .75) for a, d in _sp.get('RightUpLeg', [])] + [('Y', 6)]
+        _sp['Hips'] = _sp.get('Hips', []) + [('Y', 4)]
+        _sp['Spine'] = _sp.get('Spine', []) + [('X', 2), ('Y', -2)]
+    else:         # (the heel strike on the good leg: the bad one still pushing off behind)
+        _sp['Spine'] = _sp.get('Spine', []) + [('X', 2)]
+    POSES[f'fx_lp_{_i}'] = _sp
+ANIMS['fx_limp'] = dict(_clip([f'fx_lp_{i}' for i in range(8)], list(range(8)), 10, loop=True), locomotion=True)
+BRAWL_GAIT['fx_limp'] = 'walk'
+
+
 # ================================================================ idles and context moves (the live hero only) =========
 # What he does standing still (docs/exp/livereact.md IDLES; exported with --clips IDLE_LIVE: live_export.mjs --add). The
 # live hero picks them itself and plays them by their own timing (play / ms; marks.loop: the step a looping one goes back to),

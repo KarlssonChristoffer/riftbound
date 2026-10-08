@@ -11,6 +11,7 @@
 import {createPlayer, BUSY} from './player.js';
 import {createGun} from './gun.js';   // a gun loadout's revolver (player.js H.gun)
 import {createLasso} from './lasso.js';   // the equipment experiment's lasso in his hands (player.js H.lasso)
+import {createBrawl} from './brawl.js';   // the live cowboys' boot, barge, lift and throw (player.js H.brawl; features/brawl.js uses it)
 import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON, vaultTop} from '../../world/world.js';
 
 const R_BODY = .25;
@@ -101,6 +102,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     ctx: ctxO, atlas: hero.atlas, keys, mouse, cam, events, mods, plateaus: plateausV, climbs: climbsV, wind: windV, terrain: TERRAIN_ON,
     weapon: () => hero.weapon, gun: createGun,   // the loadout's weapon (content/weapons.js) and, for a gun, its revolver
     lasso: createLasso, yaw: () => cv.yaw,      // the lasso's hands (idle unless features/equip/lasso.js uses them); the camera's yaw (its swing is in the world)
+    brawl: createBrawl,   // the boot, the barge, lifting and throwing (idle unless features/brawl.js asks: a live loadout)
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
     wallOver: (x, y, dx, dy, z) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallOver(X, Z, ux, uz, z); },   // (a rotation: d is the same in his frame)
     wallSlant: (x, y, dx, dy, near) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallSlant(X, Z, ux, uz, near); },

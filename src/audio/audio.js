@@ -1160,6 +1160,20 @@ export function createAudio(ctx, host = {}) {
         case 'lasso.swing': fire('jump', e.x, e.y, {surf, g: .9}); break;
         case 'lasso.bump': fire('hit', e.x, e.y, {mat: 'body', g: .8}); break;
         case 'combat.bowl': fire('hit', e.x, e.y, {mat: 'body', g: .7}); break;
+        // BRAWL (features/brawl.js, docs/exp/brawl.md): the boot / barge on what it met, a lift and a throw on the cloth swish, a thrown
+        // body into a wall or onto the ground the gunmen's fall thud, the called shots: the hat a soft cloth hit, the gun a steel ping
+        case 'kick.hit': if (e.kind === 'air') fire('jump', e.x, e.y, {surf, g: .5}); else if (e.kind === 'body') fire('hit', e.x, e.y, {mat: 'body', g: e.barge ? .9 : 1.1}); else fire('kick', e.x, e.y, {mat: MAT[e.kind] || (e.kind === 'gun' ? 'clay' : 'straw')}); break;
+        case 'player.lift': if (e.phase === 'grab') fire('jump', e.x, e.y, {surf, g: .45}); else if (e.phase === 'put') fire('propDrop', e.x, e.y, {mat: 'wood', surf}); break;
+        case 'carry.throw': fire('jump', e.x, e.y, {surf, g: e.heavy ? 1 : .7}); break;
+        case 'body.slam': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: (e.n || 0) > 6})); break;
+        case 'body.land': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: (e.n || 0) > 2})); break;
+        case 'body.splash': fire('splash', e.x, e.y, {surf}); break;
+        case 'body.fall': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); break;
+        case 'foe.hat': fire('hit', e.x, e.y, {mat: 'straw', g: .55}); break;
+        case 'foe.disarm': fire('trickPing', e.x, e.y, {air: false}); break;
+        case 'foe.loose': fire('kick', e.x, e.y, {mat: e.foe === 'gun' ? 'clay' : 'straw', g: .35 + .4 * (e.n || 0)}); break;
+        case 'foe.pickup': fire('rustle', e.x, e.y, {surf, g: .35}); break;
+        case 'lasso.stones': fire('propDrop', e.x, e.y, {mat: 'stone', surf}); fire('hit', e.x, e.y, {mat: 'stone', g: 1.3}); break;   // (a wall's top course pulled down)
         // the trick-shot range (features/trickshot.js): glass, tin, a ricochet's whine (sim/projectiles.js), the toss, the
         // fence set up and cleared, the steel plate rung (its edge: bullet.impact's metal, PROP_MAT)
         case 'trick.shatter': fire('trickShatter', e.x, e.y); break;

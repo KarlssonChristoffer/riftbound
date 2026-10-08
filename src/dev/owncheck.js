@@ -24,6 +24,7 @@ export const OWNERS = {
   hp: C, stage: C, broken: C, r0: C, respawnAt: C, resetAt: C, lit: C, dead: C, retired: C, faceW: C, squash: C, air: C, rooted: C,
   face: C, hpShow: C, opened: CC, lid: C, tip: C, tilt: C, vh: C, vx: C, vy: C, sink: C, sinkT: C, float: C, slide: C, stone: C,
   goneBroken: C, wasBroken: C, pushT: C, pushSnd: C, home3: C, push: C, idle: C, wob: C, flash: C,
+  held: C, r0h: C, wasUp: C, tossT: C,   // (carried and thrown: combat/props.js carry / toss / put, docs/exp/brawl.md)
   // in or out of the world (hidden, kept for a reset): the registry's (world/entities.js hide)
   gone: ['entities'],
   // lights: what burns and glows

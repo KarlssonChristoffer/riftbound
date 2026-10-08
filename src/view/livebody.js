@@ -23,6 +23,8 @@
 //               whose barrel sets that turn, for frames moving off it, the kick; o.hold: keep the twist and the lift as they are,
 //               the kick's frames: its flip is drawn as authored)
 //   o.alpha, o.flash, o.lie (0 upright .. 1 lying: the pitch the death clips' lying frames are drawn at, as the ragdolls)
+//   o.drop      a Uint8Array (a byte per segment: 1 = drawn as nothing) over the pose's own hidden pieces: a gunman's hat or gun
+//               lying on the ground (features/foes/look.js, docs/exp/brawl.md); o.dropV its version (the matrices rebuild when it changes)
 // The matrices are rebuilt only when what they're made of changed (the pose, the facing, the twist); a body that only
 // moved has its translations shifted. muzzle(out) -> the drawn muzzle (world), boneMats(out) the drawn pose as the
 // ragdoll's pose object (bone -> 3x4, body space: view/ragdoll.js spawn's o.mats), screenBox.
@@ -124,7 +126,8 @@ export function createLiveBody(LM, rig, slot, G) {
   const MATS = new Float32Array(NS * 12), TB = new Float64Array(NS * 3);   // (TB: each segment's translation before the anchor)
   const PV = new Float64Array(12);   // the body's params for the rig (rigmesh putv)
   const SC = [0, 0, 0], SO = [0, 0, 0], WP = new Float64Array(3), MUZ = new Float64Array(3), CUR = new Float64Array(2);
-  let kPose = null, kPhi = NaN, kTw = NaN, kLie = -1, kHide = null;   // what the matrices were built from
+  let kPose = null, kPhi = NaN, kTw = NaN, kLie = -1, kHide = null, kDropV = -1;   // what the matrices were built from
+  const HM = new Uint8Array(NS);   // (the pose's hidden pieces and o.drop together)
   let twist = 0, twistHeld = NaN, stepK = -1, aimBase = null, aimPhi = NaN, haveMuz = false, lift = 0, kLift = 0;
   // body space -> the render's world (X east, Y up, Z south) at the facing (N[0], N[1]: cos, sin) and anchor (N[2], N[3], N[4]);
   // N[5], N[6] the camera's forward on the ground, N[7] the squash, N[8..10] the anchor the matrices were placed at
@@ -206,11 +209,13 @@ export function createLiveBody(LM, rig, slot, G) {
   }
   const body = {
     slot, W, get twist() { return twistHeld; }, stats: {solves: 0, rebuilds: 0},
-    reset() { kPose = null; kPhi = NaN; twistHeld = NaN; twist = 0; stepK = -1; aimBase = null; haveMuz = false; N[8] = NaN; },
+    reset() { kPose = null; kPhi = NaN; twistHeld = NaN; twist = 0; stepK = -1; aimBase = null; haveMuz = false; N[8] = NaN; kDropV = -1; },
     // the frame's draw (see the header). t: the view's clock (s), for the twist's stepped sampling
     draw(o, t) {
       const A = o.w ? null : LM.poseOf(o.pose) || LM.poseOf('idle.0'); if (!A && !o.w) return false;
-      const key = A || o.key, src = A ? A.w : o.w, hide = A ? A.hide : o.hide || null;   // (o.w: a pose made in code, view/rigkit.js; o.key: its identity, o.hide its pieces drawn as nothing: a blink)
+      const key = A || o.key, src = A ? A.w : o.w, hide0 = A ? A.hide : o.hide || null;   // (o.w: a pose made in code, view/rigkit.js; o.key: its identity, o.hide its pieces drawn as nothing: a blink)
+      let hide = hide0; const dropV = o.drop ? o.dropV ?? 0 : -1;
+      if (o.drop) { for (let s = 0; s < NS; s++) HM[s] = (hide0 ? hide0[s] : 0) | o.drop[s]; hide = HM; }   // (a dropped hat or gun: features/foes/look.js)
       const phi = o.phi, yaw = G.view.yaw, lie = o.lie || 0;
       N[0] = Math.cos(phi); N[1] = Math.sin(phi); N[2] = o.x; N[3] = o.z; N[4] = o.y; N[5] = -Math.sin(yaw); N[6] = -Math.cos(yaw);
       const pitch = 20 * DEG + (PITCH_LIE - 20 * DEG) * lie; N[7] = Math.tan(pitch) * C20 / S55;
@@ -232,9 +237,9 @@ export function createLiveBody(LM, rig, slot, G) {
         }
         tw = twistHeld; lf = lift;
       } else { twistHeld = NaN; aimBase = null; }
-      if (key !== kPose || phi !== kPhi || tw !== kTw || lf !== kLift || lie !== kLie) {   // what the matrices are made of changed: rebuild
+      if (key !== kPose || phi !== kPhi || tw !== kTw || lf !== kLift || lie !== kLie || dropV !== kDropV) {   // what the matrices are made of changed: rebuild
         W.set(src); if (lf) armLift(W, lf); if (tw) spineTwist(W, tw);
-        mats(W, hide); kPose = key; kPhi = phi; kTw = tw; kLift = lf; kLie = lie; kHide = hide; N[8] = N[2]; N[9] = N[3]; N[10] = N[4]; body.stats.rebuilds++;
+        mats(W, hide); kPose = key; kPhi = phi; kTw = tw; kLift = lf; kLie = lie; kHide = hide; kDropV = dropV; N[8] = N[2]; N[9] = N[3]; N[10] = N[4]; body.stats.rebuilds++;
         haveMuz = GUN >= 0 && gunNear(W); if (haveMuz) barrel(W);
       } else if (N[2] !== N[8] || N[3] !== N[9] || N[4] !== N[10]) {   // moved only: the translations follow
         place(); if (kHide) for (let s = 0; s < NS; s++) if (kHide[s]) { const m = s * 12; MATS[m + 3] = MATS[m + 7] = MATS[m + 11] = 0; }

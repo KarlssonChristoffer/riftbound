@@ -94,8 +94,9 @@ export async function create(host) {
     if (H && H !== s.hop) { s.hop = H; s.lead = -s.lead; s.attack = !H.fling && hyp(H.x1 - P.x, H.y1 - P.y) < (b.reach ?? .95) + .5; }
     else if (!H && s.hop) s.hop = null;
     const near = hyp(P.x - b.x, P.y - b.y) < TUNE.attackD && cs?.mode === 'aggro';
-    st.mode = H?.fling ? 'fling' : H ? 'air' : (cs?.held > 0 || b.rooted) ? 'held' : cs?.land > 0 ? 'land' : (b.squash || 0) > .05 ? 'crouch' : 'idle';
-    st.c = b.squash || 0; st.u = H ? Math.min(1, H.t / H.dur) : 0; st.lead = s.lead; st.t = t; st.seed = s.seed;
+    const Fl = cs?.fly?.F;   // (kicked: its flight, combat/core.js launch: tumbling as a fling's)
+    st.mode = H?.fling || Fl ? 'fling' : H ? 'air' : (cs?.held > 0 || b.rooted) ? 'held' : cs?.land > 0 ? 'land' : (b.squash || 0) > .05 ? 'crouch' : 'idle';
+    st.c = b.squash || 0; st.u = H ? Math.min(1, H.t / H.dur) : Fl ? Math.min(1, Fl.t / .7) : 0; st.lead = s.lead; st.t = t; st.seed = s.seed;
     st.attack = st.mode === 'crouch' ? near : st.mode === 'land' ? s.attack : st.mode === 'air' ? s.attack : false;
     st.hit = b.wob || 0;
     // the facing: combat's world facing, 16 steps relative to the camera, held within .6 of a step
