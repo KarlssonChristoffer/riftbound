@@ -56,7 +56,7 @@ const GAME_ROWS = ['cinema', 'game'];   // (in this order, after Resume and Phot
 const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places'};
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
-const LOW_OFF = ['windlines', 'wildlife', 'depth', 'grass', 'litter', 'dust', 'tumbleweed'];
+const LOW_OFF = ['windlines', 'wildlife', 'depth', 'grass', 'litter', 'dust', 'tumbleweed', 'mist', 'airfx'];
 const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'sprint'], [['Q'], 'walk'], [['C'], 'crouch'], [['Space'], 'roll · leap'],
   [['LMB'], 'hold to draw, release to shoot'], [['RMB'], 'multishot'], [['1', '2', '3', '4'], 'abilities'], [['E'], 'open · talk · climb'], [['F'], 'use the gadget (when you carry one)'],
   [['LMB'], 'revolver: draw · shoot'], [['RMB'], 'revolver: fan the hammer'], [['R'], 'revolver: reload'], [['V'], 'revolver: pistol whip'], [['Y'], 'tip the hat'],
