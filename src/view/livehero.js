@@ -62,6 +62,8 @@ import {ClothRig} from './cloth.js';
 import {flags} from '../core/flags.js';
 import {LOADOUTS} from './hero.js';
 import {WEAPONS} from '../content/weapons.js';
+import {elev} from '../world/world.js';   // (the ground under his feet: FEET ON THE GROUND)
+import {VAULT_T, VAULT_OVER_T} from '../sim/player/player.js';   // (MOTION: the vaults' frames by their progress)
 
 const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const C20 = Math.cos(20 * DEG), S55 = Math.sin(55 * DEG), K_UP = Math.tan(20 * DEG) * C20 / S55;   // the sprite camera's squash
@@ -90,7 +92,7 @@ export const PRESETS = {
   allsmear: {step: true, face: 16, hyst: 7, hold: true, snap: true, smear: true},
   free32: {step: false, face: 32, hyst: 7, hold: true, snap: true, smear: false},   // smooth time, 32 facings, the rest on
 };
-for (const v of Object.values(PRESETS)) { v.proc ??= true; v.flow ??= v.proc; v.blend ??= v.flow; }   // (blend: TRANSITIONS)   // (every preset but exact: the procedural layers on)
+for (const v of Object.values(PRESETS)) { v.proc ??= true; v.flow ??= v.proc; v.blend ??= v.flow; v.feet ??= v.proc; v.move ??= v.proc; }   // (blend: TRANSITIONS)   // (every preset but exact: the procedural layers on)
 // FLOW's numbers: the aim spring (w rad/s, z damping: ~10 % overshoot, settled in ~.2 s), the head's lead (share of the
 // chest's lag, at most headMax deg), the gun arm's drag (s of the swing's speed, at most dragMax deg), the free arm's
 // pump (deg at a full stride: walk, run), the lean into acceleration (deg per m/s^2, at most max; tau s of smoothing)
@@ -152,7 +154,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const model = rig.addModel(J, bin);
   const CL = J.clips || {};
   const HIDE = J.hide || {};   // pose -> pieces it hides (the lasso's coil packed away: the poses carry no scale)
-  const EMOTES = (J.live || []).filter(c => CL[c] && !c.startsWith('cb_')), demos = [...DEMOS, ...EMOTES];   // (cb_*: combat)
+  const EMOTES = (J.live || []).filter(c => CL[c] && !c.startsWith('cb_') && !c.startsWith('mv_')), demos = [...DEMOS, ...EMOTES];   // (cb_*: combat, mv_*: MOTION)
   for (const c of Object.values(CL)) if (c.advance && !c.cum) { c.cum = [0]; c.advance.forEach((a, i) => c.cum.push(c.cum[i] + a)); }   // (render/atlas.js's)
   // the bones in depth-first order (a bone's subtree is the range [b, END[b])), those the poses carry
   const names = Object.keys(J.bones).filter(b => J.poses['idle.0']?.[b] || J.poses[Object.keys(J.poses)[0]][b]);
@@ -171,6 +173,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const HIPS = B_('Hips'), SPINE = B_('Spine'), SPINE1 = B_('Spine1'), SPINE2 = B_('Spine2'), HEAD = B_('Head'), GUN = B_('GunHold0'), HAND_R = B_('RightHand');
   const NECK = B_('Neck'), ARM_L = B_('LeftArm'), FOOT_L = B_('LeftFoot'), FOOT_R = B_('RightFoot');
   const ARM_R = B_('RightArm'), FARM_R = B_('RightForeArm'), HAND_L = B_('LeftHand'), UPLEG_L = B_('LeftUpLeg'), UPLEG_R = B_('RightUpLeg');
+  const LEG_L = B_('LeftLeg'), LEG_R = B_('RightLeg'), TOE_L = B_('LeftToeBase'), TOE_R = B_('RightToeBase');
   const TB_PARTS = [GUN, HAND_R, HAND_L, HEAD, FOOT_L, FOOT_R].filter(b => b >= 0);
   // the muzzle in the gun's frame (GunMuzzle0 is a fixed child of GunHold0: rest^-1 x rest)
   const MZ = new Float64Array(3);
@@ -240,6 +243,10 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   let prevOk = false;
   const stats = {held: 0, frames: 0, smears: 0, smearK: 0, ms: 0, msRender: 0, cb: ''};   // (cb: the combat stance / draw now)
   const aim = {ok: false, mx: 0, my: 0, a: 0};   // the drawn gun on screen (view px): the muzzle, the barrel's angle (the meter's aim error)
+  // the pose drawn this frame (body space, BN order, 7 a bone) and where: the world's x, height, z of his anchor and his facing
+  // (render world: x' = cos phi x - sin phi y + x, h' = z + h, z' = -sin phi x - cos phi y + z). Read by the movement meters
+  // (feet on the ground, slide); n counts the frames drawn
+  const DRAWN = {w: null, phi: 0, x: 0, h: 0, z: 0, n: 0};
 
   // ---------------------------------------------------------------- which pose: the frame, its clip, the next frame, the fraction
   const NAME = {}, nm = (pre, i) => (NAME[pre] ??= [])[i] ??= pre + i;
@@ -342,6 +349,70 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     fromTo(w[e + 4] - Sx, w[e + 5] - Sy, w[e + 6] - Sz, Ex - Sx, Ey - Sy, Ez - Sz, R4); turnTree(w, ARM_R, R4, Sx, Sy, Sz);
     const Wx = Sx + dx * d, Wy = Sy + dy * d, Wz = Sz + dz * d;
     fromTo(w[h + 4] - w[e + 4], w[h + 5] - w[e + 5], w[h + 6] - w[e + 6], Wx - w[e + 4], Wy - w[e + 5], Wz - w[e + 6], R4); turnTree(w, FARM_R, R4, w[e + 4], w[e + 5], w[e + 6]);
+  }
+  // two-bone IK on a leg: bone a's head (the hip) stays, b's head (the knee) bends in the plane it bends in now (straight: toward
+  // -y, his front), c's head (the ankle) onto body-space point T; c's subtree keeps the world rotation it had (the foot as posed)
+  const QC = new Float64Array(4), QD = new Float64Array(4);
+  function ikLeg(w, a, b, c, Tx, Ty, Tz) {
+    const s = a * 7, e = b * 7, h = c * 7, Sx = w[s + 4], Sy = w[s + 5], Sz = w[s + 6];
+    const L1 = Math.hypot(w[e + 4] - Sx, w[e + 5] - Sy, w[e + 6] - Sz), L2 = Math.hypot(w[h + 4] - w[e + 4], w[h + 5] - w[e + 5], w[h + 6] - w[e + 6]);
+    QC[0] = w[h]; QC[1] = w[h + 1]; QC[2] = w[h + 2]; QC[3] = w[h + 3];
+    let dx = Tx - Sx, dy = Ty - Sy, dz = Tz - Sz; const d0 = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-6, d = Math.max(Math.abs(L1 - L2) + 1e-3, Math.min(L1 + L2 - 1e-4, d0));
+    dx /= d0; dy /= d0; dz /= d0;
+    let px = w[e + 4] - Sx, py = w[e + 5] - Sy, pz = w[e + 6] - Sz; const pd = px * dx + py * dy + pz * dz;   // the pole: the knee now
+    px -= dx * pd; py -= dy * pd; pz -= dz * pd; let pl = Math.sqrt(px * px + py * py + pz * pz);
+    if (pl < 1e-4) { px = 0; py = -1; pz = 0; const k = py * dy; px -= dx * k; py -= dy * k; pz -= dz * k; pl = Math.sqrt(px * px + py * py + pz * pz) || 1; }
+    px /= pl; py /= pl; pz /= pl;
+    const ca = Math.max(-1, Math.min(1, (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d))), sa = Math.sqrt(1 - ca * ca);
+    const Ex = Sx + L1 * (dx * ca + px * sa), Ey = Sy + L1 * (dy * ca + py * sa), Ez = Sz + L1 * (dz * ca + pz * sa);
+    fromTo(w[e + 4] - Sx, w[e + 5] - Sy, w[e + 6] - Sz, Ex - Sx, Ey - Sy, Ez - Sz, R4); turnTree(w, a, R4, Sx, Sy, Sz);
+    const Wx = Sx + dx * d, Wy = Sy + dy * d, Wz = Sz + dz * d;
+    fromTo(w[h + 4] - w[e + 4], w[h + 5] - w[e + 5], w[h + 6] - w[e + 6], Wx - w[e + 4], Wy - w[e + 5], Wz - w[e + 6], R4); turnTree(w, b, R4, w[e + 4], w[e + 5], w[e + 6]);
+    QI[0] = -w[h]; QI[1] = -w[h + 1]; QI[2] = -w[h + 2]; QI[3] = w[h + 3]; qmul(QC, 0, QI, 0, QD, 0); turnTree(w, c, QD, w[h + 4], w[h + 5], w[h + 6]);
+  }
+  // FEET ON THE GROUND (K.feet): the atlas's poses stand on flat ground, and he is drawn at the ground's height under his
+  // anchor, so on a slope, a step or the stairs one foot sinks in and the other floats. Each foot follows the ground under it
+  // instead (the middle of its ankle and ball, by the drawn facing and anchor): the body goes down by the lower foot's ground
+  // (relative to the anchor's; up by the higher if both are higher) and the other leg bends to its own (ikLeg), the swing foot
+  // as high over its ground as the pose has it. A foot whose ground is more than FEET.reach off (over a drop, in a rock face) is
+  // left as posed. On while he's on his feet (FEET_ON), eased in and out over FEET.fade s (a landing, a roll's end)
+  // A foot on the ground (lifted less than FEET.tilt m over where it stands in idle.0) also tilts with the ground's slope under
+  // it (at most FEET.slope; none across a step's edge, where the ground under it isn't a plane), less the higher it is lifted
+  const FEET = {reach: .4, drop: .4, fade: .1, tilt: .06, slope: .6, e: .1};
+  const FEET_ON = new Set(['idle', 'move', 'draw', 'release', 'pose', 'land', 'knock', 'hold', 'backstep', 'slide']);
+  const FT = Int16Array.of(FOOT_L, FOOT_R), FB = Int16Array.of(TOE_L, TOE_R), FU = Int16Array.of(UPLEG_L, UPLEG_R), FL = Int16Array.of(LEG_L, LEG_R);
+  const FD = new Float64Array(2), FG = new Float64Array(4), FW = new Float64Array(2), F0 = new Float64Array(4);   // (per foot: offset, slope in body x / y, tilt weight; idle.0's ankle and ball heights)
+  const FEET_OK = FOOT_L >= 0 && FOOT_R >= 0 && TOE_L >= 0 && TOE_R >= 0 && UPLEG_L >= 0 && UPLEG_R >= 0 && LEG_L >= 0 && LEG_R >= 0;
+  let feetK = 0, f0 = false;
+  function feet(w, P, dt) {
+    const want = K.feet && FEET_ON.has(P.state) && !P.sink ? 1 : 0;
+    feetK = dt > 0 ? (want > feetK ? Math.min(want, feetK + dt / FEET.fade) : Math.max(want, feetK - dt / FEET.fade)) : want;
+    stats.drop = 0; if (feetK <= 0 || !FEET_OK) return;
+    if (!f0) { const I = poseOf('idle.0'); if (!I) return; for (let k = 0; k < 2; k++) { F0[k * 2] = I.w[FT[k] * 7 + 6]; F0[k * 2 + 1] = I.w[FB[k] * 7 + 6]; } f0 = true; }
+    let drop = 9;
+    for (let k = 0; k < 2; k++) {
+      const a = FT[k] * 7, b = FB[k] * 7, bx = (w[a + 4] + w[b + 4]) / 2, by = (w[a + 5] + w[b + 5]) / 2, X = fc * bx - fs * by + AX, Z = -fs * bx - fc * by + AZ;
+      // the ground's slope there (world x, z -> his body x, y); not a plane (a step's edge under the foot): the foot rests on the
+      // higher of the ground under its heel and its ball (a foot over a step's edge stands on the tread, not into the riser)
+      const e0 = elev(X, Z), E = FEET.e, xp = elev(X + E, Z) - e0, xm = e0 - elev(X - E, Z), zp = elev(X, Z + E) - e0, zm = e0 - elev(X, Z - E);
+      const plane = Math.abs(xp - xm) <= .02 && Math.abs(zp - zm) <= .02;
+      const g = (plane ? e0 : Math.max(elev(fc * w[a + 4] - fs * w[a + 5] + AX, -fs * w[a + 4] - fc * w[a + 5] + AZ),
+        elev(fc * w[b + 4] - fs * w[b + 5] + AX, -fs * w[b + 4] - fc * w[b + 5] + AZ))) - AY, out = Math.abs(g) > FEET.reach;
+      FD[k] = out ? 0 : g * feetK; if (FD[k] < drop) drop = FD[k];
+      const lift = Math.max(0, Math.min(w[a + 6] - F0[k * 2], w[b + 6] - F0[k * 2 + 1]));   // (how much of the slope the foot takes)
+      FW[k] = out || !plane ? 0 : Math.max(0, 1 - lift / FEET.tilt) * feetK;
+      const gx = (xp + xm) / (2 * E), gz = (zp + zm) / (2 * E);
+      FG[k * 2] = Math.max(-FEET.slope, Math.min(FEET.slope, gx * fc - gz * fs)); FG[k * 2 + 1] = Math.max(-FEET.slope, Math.min(FEET.slope, -gx * fs - gz * fc));
+    }
+    drop = Math.max(-FEET.drop, Math.min(FEET.drop, drop));
+    if (drop !== 0) for (let i = 0; i < NB; i++) w[i * 7 + 6] += drop;
+    for (let k = 0; k < 2; k++) {
+      const dz = FD[k] - drop, a = FT[k] * 7;
+      if (dz > 1e-4) ikLeg(w, FU[k], FL[k], FT[k], w[a + 4], w[a + 5], w[a + 6] + dz);
+      const sx = FG[k * 2] * FW[k], sy = FG[k * 2 + 1] * FW[k];   // (the foot turned from level onto the slope, about the ankle)
+      if (sx * sx + sy * sy > 4e-4) { fromTo(0, 0, 1, -sx, -sy, 1, R4); turnTree(w, FT[k], R4, w[a + 4], w[a + 5], w[a + 6]); }
+    }
+    stats.drop = drop;
   }
   // the reload's frame for the gun's phase + progress (sim/player/gun.js reloadFrame, as a fraction for the smooth path)
   function reloadAt(S) {
@@ -692,6 +763,47 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     return n;
   }
 
+  // ---------------------------------------------------------------- MOTION (K.move): the live movement clips
+  // The jumps made for the live model (western.py MOVE_LIVE: mv_*), their frames picked from the sim's state and how far
+  // through it he is, instead of the atlas's leap / fall / land frames the sim names (the sprites keep those):
+  //   leap         mv_leap by the leap's progress (push off, rise, the top, coming down, reaching for the ground)
+  //   fall         mv_fall's first three frames back and forth (MV.fallHz), its reach once the ground is MV.near m under him
+  //                (after the first MV.off s)
+  //   land         after a fall of more than MV.hard m: mv_land_hard (deep into the knees, up again) by its own time; else
+  //                mv_land_soft by the landing's time (he lands running)
+  //   vault        over a breach: mv_vault by its progress (VAULT_OVER_T); up a ledge: mv_climb (VAULT_T)
+  //   (the vault over ends running: mv_land_soft's frames for its length after, while he is on his feet again)
+  // A model without them (or K.move off) draws the sim's frames as before
+  const MV = {fallHz: 8, near: 1.2, off: .08, hard: 1.2};
+  const HAS_MV = !!(CL.mv_leap && CL.mv_fall && CL.mv_land_soft && CL.mv_land_hard && CL.mv_vault && CL.mv_climb);
+  let mvPrev = '', mvTop = 0, mvHard = false, mvT = 0, mvAfter = 0, mvOver = false, mvLast = '';
+  const MV_FRAMES = new Set(['land', 'fall', 'leap.0', 'leap.1', 'leap.2', 'leap.3', 'mantle.0', 'reach_up', 'crouch', 'lunge']);   // (the atlas's, while a move of ours ends)
+  const mvAt = (clip, k) => nm(clip + '.', Math.max(0, Math.min(CL[clip].frames - 1, Math.floor(k * CL[clip].frames))));
+  function motion(P, dt) {
+    const st = P.state, prev = mvPrev; mvPrev = st;
+    if (st !== prev) {
+      if (st === 'fall') mvTop = P.z;
+      if (st === 'land') { mvHard = prev === 'fall' && mvTop - P.z > MV.hard; mvT = 0; }
+      if (prev === 'vault' && mvOver && st !== 'fall' && HAS_MV) mvAfter = CL.mv_land_soft.frames / CL.mv_land_soft.fps;   // (over a breach: lands running)
+    }
+    mvT += dt; if (st === 'vault') mvOver = P.vault?.top !== undefined;
+    if (!HAS_MV || !K.move) return null;
+    switch (st) {
+      case 'leap': return P.leap ? mvLast = mvAt('mv_leap', P.t / P.leap.dur) : null;
+      case 'fall': {
+        const h = P.z - elev(app.player.x, app.player.y);
+        if (h < MV.near && P.t > MV.off) return mvLast = nm('mv_fall.', h < MV.near * .4 ? 4 : 3);   // (stepping off an edge, the ground under him is still the edge's)
+        const s = Math.floor(P.t * MV.fallHz) % 4; return mvLast = nm('mv_fall.', s === 3 ? 1 : s);   // (0 1 2 1 0 1 2 ...)
+      }
+      case 'land': return mvLast = mvHard ? mvAt('mv_land_hard', mvT * CL.mv_land_hard.fps / CL.mv_land_hard.frames) : mvAt('mv_land_soft', mvT * CL.mv_land_soft.fps / CL.mv_land_soft.frames);
+      case 'vault': return P.vault ? mvLast = P.vault.top !== undefined ? mvAt('mv_vault', P.t / VAULT_OVER_T) : mvAt('mv_climb', P.t / VAULT_T) : null;
+    }
+    if (MV_FRAMES.has(P.frame) && mvLast) return mvLast;   // (the step a move ends on still names its atlas frame: the last of ours held)
+    mvLast = '';
+    if (mvAfter > 0) { const C = CL.mv_land_soft, k = 1 - mvAfter * C.fps / C.frames; mvAfter -= dt; if (st === 'idle' || st === 'move') return mvAt('mv_land_soft', k); }
+    return null;
+  }
+
   // ---------------------------------------------------------------- the emotes (K.demo = one of EMOTES)
   // While he stands still (the sim's idle, his gun holstered and idle) the clip's frame replaces the sim's, by the clip's
   // own timing (its play order and ms, else its fps), from the start each time he stops. After the last step it loops
@@ -759,7 +871,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     t += dt; lastT = t0;   // (the view's own clock: the frame's real time)
     const sinkPx = Math.round((P.sink || 0) * 22);
     // 1) the frame and its clip, the time it has shown
-    const f = emote(poseOf(P.frame) ? P.frame : 'idle.0', P, dt), p = parse(f);
+    const mv = motion(P, dt), f = emote(mv || (poseOf(P.frame) ? P.frame : 'idle.0'), P, dt), p = parse(f);   // (MOTION: the live movement clips)
     if (f !== frameNow) { frameNow = f; frameT = 0; } else frameT += dt;
     const S = app.PL.gun?.S, proc = K.proc, flowOn = K.flow && proc;
     const cb = flowOn ? combat(f, p, P, S, dt) : null, ck = cb ? cb.key : p.clip;   // (COMBAT STYLE: its stance / draw)
@@ -808,6 +920,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // 4) the facing and the anchor
     const phi = facing(P, yaw, dt);
     fc = Math.cos(phi); fs = Math.sin(phi); AX = PX; AY = P.z - sinkPx / ctxO.PPMH; AZ = PY; FX = -Math.sin(yaw); FZ = -Math.cos(yaw);
+    feet(Wt, P, dt);   // FEET ON THE GROUND: each foot on the ground under it, the body down by the lower one
     // 5) aim at any angle: the twist onto the cursor (held by the hysteresis, sampled with the step)
     if (aiming && GUN >= 0) {   // (and at once when the legs re-plant or turn: a stale twist on new legs points anywhere)
       if (sample || !(twistHeld === twistHeld) || phi !== aimPhi || baseName !== aimBase) {
@@ -869,6 +982,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     screenOf(0, 0, 0, SC); SCR.x = SC[0]; SCR.y = SC[1]; G.toScreenInto(AX + 1, AY, AZ, SO); SCR.ppm = Math.abs(SO[0] - SC[0]) || SCR.ppm;
     flash(dt);
     mats(show, A.hide);
+    DRAWN.w = show; DRAWN.phi = phi; DRAWN.x = AX; DRAWN.h = AY; DRAWN.z = AZ; DRAWN.n++;
     stats.smears += K.smear ? smear(show) : (prevOk = false, 0);
     const blinkOff = P.blink && Math.floor(P.blink * 12) % 2;
     PR.x = AX; PR.y = AY; PR.z = AZ; PR.sx = PX; PR.sy = P.z; PR.sz = PY; PR.snap = K.snap ? 1 : 0; PR.alpha = 1;
@@ -920,10 +1034,10 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     stats, model, poseOf, BN, J,
     // (a knob changed, the body (re)shown: no history carried over)
     reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false;
-      twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; tbHave = false; tbT = tbDur = 1; CLO.rig?.reset(); CLO.lx = NaN; },
+      twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; tbHave = false; tbT = tbDur = 1; CLO.rig?.reset(); CLO.lx = NaN; feetK = 0; mvPrev = ''; mvAfter = 0; },
     muzzle: () => MW.ok ? MW : null,
     setLineup(items) { lineup = items || []; },
-    aim,
+    aim, drawn: DRAWN,
     // (dev: the shimmer meter draws several knob sets off ONE sim step, each from its own history)
     snapshot: () => ({v: [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase],
       a: [Ll.slice(), Lfrom.slice(), Wshow.slice(), PREV.slice()], K: {...K}}),
@@ -972,7 +1086,7 @@ export async function createLiveHero(o) {
     get presetName() { for (const [n, v] of Object.entries(PRESETS)) if (Object.keys(v).every(k => v[k] === K[k])) return n; return 'custom'; },
     presets: Object.keys(PRESETS),
     get demos() { return cur()?.demos ?? DEMOS; }, get emotes() { return cur()?.emotes ?? []; },
-    get stats() { return cur()?.stats ?? NOSTATS; }, get aim() { return cur()?.aim; },
+    get stats() { return cur()?.stats ?? NOSTATS; }, get aim() { return cur()?.aim; }, get drawn() { return cur()?.drawn; },
     muzzle: () => on ? cur()?.muzzle() ?? null : null,   // (the drawn muzzle: host.playerMuzzle, the shot's flash)
     get model() { return cur()?.model; }, get J() { return cur()?.J; }, get BN() { return cur()?.BN; }, poseOf: n => cur()?.poseOf(n),
     setLineup(items) { cur()?.setLineup(items); },

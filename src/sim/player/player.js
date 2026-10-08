@@ -63,10 +63,13 @@ const D2R = Math.PI / 180;
 const CLIMB_T = 1.1, MANTLE_T = .28;   // (CLIMB_T: up to 2.4 m, the mesa's faces; a taller one at the same pace: the watchtower's ladder)
 // VAULT (Space at a low ledge, walkable terrain): a rise of more than a step (STEP_UP) and at most VAULT_H m within VAULT_REACH m
 // ahead, its top level enough to stand on and clear: up and onto it in VAULT_T s (higher: a ladder)
-const VAULT_H = 1.25, VAULT_REACH = .8, VAULT_T = .46;
+export const VAULT_H = 1.25, VAULT_REACH = .8, VAULT_T = .46;   // (exported: the live hero times its frames by them)
 // VAULT OVER a breach in a stone wall (H.wallOver: sim/player/adapter.js finds it): up over its stones in an arc (OVER_LIFT m clear of
 // them) and down on its far side, in VAULT_OVER_T s; Space as for a ledge
-const VAULT_OVER_T = .58, OVER_LIFT = .12;
+export const VAULT_OVER_T = .58, OVER_LIFT = .12;
+// LANDING: a drop of more than LAND.big m lands hard (into the knees, LAND.hard s, he stops); anything less lands soft
+// (LAND.soft s), and with a direction held he lands running: no braking, the run goes on
+const LAND = {soft: .12, hard: .34, big: 1.2};
 // SLIDE (walkable terrain): on ground too steep to stand on (a grass bank: slope rise / run over `on`; a cliff, over `cliff`, is a drop
 // instead) he loses his footing and slides down it, `g` m/s^2 at a 45 deg bank, `fric` 1/s, steering a little (`steer` m/s^2),
 // until the ground eases under `off`. H.grad(x, y, out) -> out = [gx, gy (this frame), slope]
@@ -330,10 +333,10 @@ export function createPlayer(H) {
   }
   function startFall() { P.state = 'fall'; P.t = 0; P.vz = 0; P.fall0 = P.z; P.vx *= .8; P.vy *= .8; P.aimRoll = false; }
   function land(drop) {
-    P.state = 'land'; P.t = 0; P.z = elev(P.x, P.y);
+    P.state = 'land'; P.t = 0; P.z = elev(P.x, P.y); P.landDur = drop > LAND.big ? LAND.hard : LAND.soft;
     const f = A.SP[P.frame] ? P.frame : 'idle.0';
     puff('L', f, 2); puff('R', f, 1);
-    if (drop > 1.2) { H.shake?.(2, .18); ev({type: 'player.land', x: P.x, y: P.y, z: P.z, big: 3}); }
+    if (drop > LAND.big) { H.shake?.(2, .18); ev({type: 'player.land', x: P.x, y: P.y, z: P.z, big: 3}); }
   }
   function splash(backTo) {
     P.state = 'splash'; P.t = 0; P.z = 0; P.back = backTo;
@@ -408,9 +411,11 @@ export function createPlayer(H) {
       return true;
     }
     if (P.state === 'land') {
-      const damp = Math.exp(-dt * 14); P.vx *= damp; P.vy *= damp; moveBy(P.vx * dt, P.vy * dt);
+      const [mx, my] = moveInput(), dur = P.landDur ?? LAND.soft;
+      if (!(mx || my) || dur > LAND.soft) { const damp = Math.exp(-dt * 14); P.vx *= damp; P.vy *= damp; }   // (soft, a direction held: running on)
+      moveBy(P.vx * dt, P.vy * dt);
       P.frame = has('land') ? 'land' : 'crouch';
-      if (P.t > .12) { P.state = 'idle'; P.t = 0; P.prevF = -1; }
+      if (P.t > dur) { P.state = 'idle'; P.t = 0; P.prevF = -1; }
       return true;
     }
     if (P.state === 'climb') {

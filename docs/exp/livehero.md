@@ -226,6 +226,14 @@ Checked: `tmp/live-emotes/angleplay.mjs` (the coat trails his run and flares on 
 `tmp/live-emotes/clothtoggle.mjs` (live, then sprite, then live again, then outlaw, then gunslinger again: no errors,
 and the coat comes and goes with the loadout). Reel: `tmp/live-emotes/duster_live.gif`.
 
+## Movement on the live hero (2026-10-06)
+
+The live body no longer just replays the atlas's leap / fall / land poses: its feet stand on the ground under them (slopes,
+steps, banks: leg IK, knob `feet`) and the jumps are clips made for the live model only (`mv_leap`, `mv_fall`, `mv_land_soft`,
+`mv_land_hard`, `mv_vault`, `mv_climb`: knob `move`), picked from the sim's state and progress; the sim's landing lasts by the
+drop and runs on. Shift+Alt+7 flips the new movement off / on. The movement course that measures it (feet against the
+ground, slide, pops, a station for each move) and the numbers: [livemove.md](livemove.md).
+
 ## Measurements
 
 ### The shimmer meter

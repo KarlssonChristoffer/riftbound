@@ -2719,3 +2719,62 @@ for _fam, (_blade, _spec, _at, _gun) in _ANGLES.items():
         for _pre, _c in (('gws', 'walk'), ('grs', 'run')):
             POSES[f'{_pre}_{_fam}_{_i}'] = _on_legs(_i, _up, _c)
             LIVE_AT[f'{_pre}_{_fam}_{_i}'], LIVE_GUN[f'{_pre}_{_fam}_{_i}'] = _at, _gun
+
+
+# ================================================================ live movement (the live hero only) =================
+# The jumps redone for the live model: the leap over water, the fall, the landings, the vault over a wall's breach and the
+# scramble up a ledge. The atlas's leap (4 keys), fall and land (one pose each) keep serving the sprites; these are
+# exported with ragdoll_export.py --clips (MOVE_LIVE) and the live hero picks their frames from the sim's state and its
+# progress (view/livehero.js MOTION), not by time. No root motion (the sim moves and lifts him): every key is snapped to
+# the ground like the atlas's (_air 0), the sim's arc puts him in the air.
+#   mv_leap     push off (the lead knee driven up, the back leg extended), rise (both legs fold), the top (a split stride in
+#               the air, arms out), coming down (the front leg reaching, heel first), reaching for the ground
+#   mv_fall     arms flailing loosely, legs paddling (a loop), then reaching for the ground (mv_fall_reach)
+#   mv_land     a running landing (the front leg takes it, the back one already swinging through) -> mv_land_soft;
+#               a big drop: deep into the knees, the chest over them, then coming up (mv_land_hard)
+#   mv_vault    a tuck vault: both hands reach for the stones, plant on them as the knees tuck up to the chest, the legs
+#               swing through and over, reaching down on the far side
+#   mv_climb    up a ledge: both hands onto the lip, the chest over it and a knee up, the foot on, standing up
+MOVE_LIVE = ('mv_leap', 'mv_fall', 'mv_land_soft', 'mv_land_hard', 'mv_vault', 'mv_climb')
+def _mv_legs(lu, ll, lf, ru, rl, rf):
+    """skeleton.py's _legs (its name is a loop's variable by the end of skeleton.py): thigh X- forward, shin X+ bent, foot X+ toe down."""
+    return {'LeftUpLeg': [('X', lu)], 'LeftLeg': [('X', ll)], 'LeftFoot': [('X', lf)],
+            'RightUpLeg': [('X', ru)], 'RightLeg': [('X', rl)], 'RightFoot': [('X', rf)]}
+
+
+_MV_LEAN = lambda a, n=None: {'Spine': [('X', a)], 'Spine1': [('X', a * .45)], 'Neck': [('X', -a * .8 if n is None else n)]}
+POSES['mv_lp_push'] = _merge(_mv_legs(-72, 96, 8, 26, 12, 40), _arms(32, -72, -30, -64, lower=28), _MV_LEAN(14))
+POSES['mv_lp_rise'] = _merge(_mv_legs(-82, 104, 2, 12, 74, 34), _arms(-14, -96, -44, -56, lower=38), _MV_LEAN(8))
+POSES['mv_lp_top'] = _merge(_mv_legs(-62, 54, -6, 30, 94, 22), _arms(-8, -42, -34, -40, lower=62), _MV_LEAN(4, 0))
+POSES['mv_lp_down'] = _merge(_mv_legs(-48, 20, -16, 8, 66, 12), _arms(-28, 12, -32, -30, lower=52), _MV_LEAN(1, 6))
+POSES['mv_lp_reach'] = _merge(_mv_legs(-34, 16, -12, -12, 36, -4), _arms(-40, -18, -36, -30, lower=42), _MV_LEAN(6, 8))
+# landings: running (one leg takes it) and a big drop (both, deep)
+POSES['mv_land_run'] = _merge(_mv_legs(-26, 46, -12, 22, 66, 8), _arms(26, -46, -30, -52, lower=34), _MV_LEAN(16))
+POSES['mv_land_deep'] = _merge(_mv_legs(-84, 120, -36, -66, 108, -40), _arms(-48, -36, -40, -46, lower=26), _MV_LEAN(34),
+                               {'LeftUpLeg': [('Y', -12)], 'RightUpLeg': [('Y', 12)]})
+POSES['mv_land_up'] = _merge(_mv_legs(-38, 62, -22, -26, 52, -22), _arms(-16, -10, -32, -30, lower=34), _MV_LEAN(14))
+# the fall: two loose keys looped, and the reach before the ground
+POSES['mv_fall_a'] = _merge(_mv_legs(-34, 56, 14, 6, 44, 22), _MV_LEAN(-6, 18),
+                            {'LeftArm': [('Y', -64), ('X', -40)], 'LeftForeArm': [('X', -30)], 'RightArm': [('Y', 58), ('X', 34)], 'RightForeArm': [('X', -36)]})
+POSES['mv_fall_b'] = _merge(_mv_legs(-14, 40, 20, -26, 64, 10), _MV_LEAN(-3, 14),
+                            {'LeftArm': [('Y', -40), ('X', 20)], 'LeftForeArm': [('X', -44)], 'RightArm': [('Y', 70), ('X', -36)], 'RightForeArm': [('X', -24)]})
+POSES['mv_fall_reach'] = _merge(_mv_legs(-30, 30, -10, -14, 40, -8), _arms(-30, -30, -30, -30, lower=56), _MV_LEAN(6, 12))
+# the vault: hands on the stones ahead at hip height (LIVE_AT, his frame before the snap: the hips at .76), knees tucked
+POSES['mv_vt_reach'] = _merge(_mv_legs(-40, 44, -10, 28, 52, 24), _arms(-62, -62, -24, -24, lower=22), _MV_LEAN(24))
+POSES['mv_vt_plant'] = _merge(_mv_legs(-104, 124, -10, -96, 120, -14), _arms(-50, -50, -14, -14, lower=20), _MV_LEAN(30))
+POSES['mv_vt_over'] = _merge(_mv_legs(-74, 44, -12, -60, 60, -10), _arms(20, 20, -16, -16, lower=24), _MV_LEAN(8))
+POSES['mv_vt_drop'] = _merge(_mv_legs(-32, 22, -12, -10, 40, -6), _arms(-30, -20, -30, -30, lower=46), _MV_LEAN(6, 8))
+LIVE_AT['mv_vt_plant'] = [('Left', None, (.19, -.34, .66)), ('Right', None, (-.19, -.34, .66))]
+LIVE_AT['mv_vt_over'] = [('Left', None, (.2, .1, .78)), ('Right', None, (-.2, .1, .78))]
+# up a ledge: both hands up on the lip, then the chest over (the atlas's mantle_0), a knee onto it, standing up on it
+POSES['mv_cl_reach'] = _merge(_mv_legs(-24, 36, -8, 10, 30, 14), _arms(-130, -130, -20, -20, lower=18), _MV_LEAN(8, -20))
+POSES['mv_cl_knee'] = _merge(_mv_legs(-100, 124, -4, 6, 20, 30), _arms(-30, -30, -60, -60, lower=26), _MV_LEAN(34))
+POSES['mv_cl_stand'] = _merge(_mv_legs(-42, 58, -16, 14, 40, 20), _arms(10, -20, -30, -34, lower=34), _MV_LEAN(14))
+LIVE_AT['mv_cl_reach'] = [('Left', None, (.2, -.3, 1.62)), ('Right', None, (-.2, -.3, 1.62))]
+ANIMS['mv_leap'] = _clip(['mv_lp_push', 'mv_lp_rise', 'mv_lp_top', 'mv_lp_down', 'mv_lp_reach'], [0, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4], 18)
+ANIMS['mv_fall'] = _clip(['mv_fall_a', 'mv_fall_b', 'mv_fall_reach'], [0, .5, 1, 1.5, 2], 8, marks={'loop_end': 3})
+ANIMS['mv_land_soft'] = _clip(['mv_lp_reach', 'mv_land_run', 'rn_down'], [1, 1.5, 2], 24)
+ANIMS['mv_land_hard'] = _clip(['mv_fall_reach', 'mv_land_deep', 'mv_land_up', 'idle_in'], [1, 1.5, 2, 2.5, 3], 14)
+ANIMS['mv_vault'] = _clip(['mv_vt_reach', 'mv_vt_plant', 'mv_vt_over', 'mv_vt_drop'], [0, .5, 1, 1.5, 2, 2.5, 3], 12)
+ANIMS['mv_climb'] = _clip(['mv_cl_reach', 'mantle_0', 'mv_cl_knee', 'mv_cl_stand'], [0, 1, 1.5, 2, 2.5, 3], 12)
+
