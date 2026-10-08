@@ -13,7 +13,7 @@
 //   exchange  trades one of your items for a random one of the next tier, shown before you take it (E accepts, walking
 //             away declines; the offer stands while you hold the item)
 //   trader    a wandering trader's cart: one item, shown, for gold
-// They go on a stage change and when the run ends. In the sandbox the pause menu's Game tab places each kind next to you
+// They go on a stage change and when the run ends. In the sandbox the pause menu's Sandbox tab places each kind next to you
 // (the sandbox's gold, health and build).
 // SIM / VIEW: what the shrines are, their props, prices, rolls, packs and rewards are sim (update, interact: the feature's
 // own generator, seeded per stage from the run's); the glyphs' bob, the lights' swell and fade, the particles and the

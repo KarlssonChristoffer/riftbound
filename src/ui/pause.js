@@ -4,8 +4,11 @@
 // birds fly, rain falls and fires flicker. The cloak still answers the wind. The camera drifts slowly (drag the
 // backdrop to look around) and eases back to where it was on resume. The audio feature ducks music + effects; the
 // ambience plays on. (flow isn't ambient: its streaks / tracks follow the player's frozen speed)
-// OWNS: paused, the pause drift (pauseYaw / pauseGoal / lookT), the menu and its items (Game / Graphics / Audio / Controls /
-// Dev tabs).  READS: E (the engine context, main.js).
+// THE MAP: Game (resume, photo, the run, the character) · Sandbox (the Proving Grounds' test actions: features' F.menu
+// rows, paged by SANDBOX_GROUP) · Graphics / Audio / Controls (what a player sets: the host's own rows + CLAIM) · Dev (dev
+// mode: every other toggle and setting, paged by DEV_GROUP).
+// OWNS: paused, the pause drift (pauseYaw / pauseGoal / lookT), the menu and its items (Game / Sandbox / Graphics / Audio /
+// Controls / Dev tabs).  READS: E (the engine context, main.js).
 //   const pause = createPause(E); pause.paused / toggle(force, snd) / stepPaused(dt) / pauseTurn(dt) / menu
 import {createMenu} from './menu.js';
 import {SNAP_NAME} from '../render/camera.js';
@@ -27,7 +30,9 @@ const CLAIM = {
   depth: {'': gfx('World', 'Clouds, light shafts & reflections', 'depth', 'depth'), 'Foreground silhouettes': gfx('World', 'Foreground foliage', 'fg')},
   weather: {'Weather fx': gfx('World', 'Rain, snow & lightning', 'rain')},
   lights: {'Heat ripple': gfx('Effects', 'Heat shimmer', 'heat')},
-  atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd')},
+  atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd'),
+    'Weather (K)': {tab: 'dev', group: 'Nature', label: 'Air particles + ground fog', key: 'K'}},   // (not the weather: World > Weather)
+  cinema: {'': {tab: 'controls', group: 'Camera', label: 'Cinematic camera when idle', id: 'cinema', keep: 'cinema'}},
   blood: {'': gfx('Effects', 'Blood', 'blood', 'blood')},   // (features/blood.js: on by default; ?blood=0)
   audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
     'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'},
@@ -37,11 +42,18 @@ const CLAIM = {
 // in its group here (a feature not listed: Other)
 const DEV_GROUP = {
   wind: 'Nature', windlines: 'Nature', litter: 'Nature', grass: 'Nature', riverside: 'Nature', wildlife: 'Nature', atmos: 'Nature',
-  weather: 'Nature', dust: 'Nature', tumbleweed: 'Nature',
+  weather: 'Nature', dust: 'Nature', tumbleweed: 'Nature', mist: 'Nature', airfx: 'Nature',
   lights: 'Effects', flow: 'Effects', contact: 'Effects', gunfx: 'Effects', depth: 'Effects', blood: 'Effects',
-  foes: 'World',
-  affixes: 'Experiments', equip: 'Experiments', omens: 'Experiments', shrines: 'Experiments',
+  foes: 'World', anomaly: 'World',
+  brutes3d: 'Renderer',
+  affixes: 'Experiments', equip: 'Experiments', omens: 'Experiments', shrines: 'Experiments', trickshot: 'Experiments', bells: 'Experiments',
+  cheats: 'Tools', gunfeel: 'Tools',
 };
+// THE FEATURES' ROWS (F.menu): the game's own (start / abandon a run, back to title) and the player's views (the cinematic
+// camera) stay in Game; every other feature's are test actions for the sandbox: the Sandbox tab, one page per group here
+// (a feature not listed: Other)
+const GAME_ROWS = ['cinema', 'game'];   // (in this order, after Resume and Photo mode: back to title stays last)
+const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places'};
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
 const LOW_OFF = ['windlines', 'wildlife', 'depth', 'grass', 'litter', 'dust', 'tumbleweed'];
@@ -79,12 +91,14 @@ export function createPause(E) {
   function menuItems() {
     const game = E.game, setBiome = E.setBiome;
     const out = [], dv = (group, it) => out.push({tab: 'dev', group, ...it}), A = feat('audio')?.AU;
-    // Game: resume, then the game's own rows (start / abandon a run, back to title)
+    // Game: resume, photo mode, the cinematic camera, then the game's own rows (start / abandon a run, back to title)
     if (game.mode !== 'title') out.push({tab: 'game', label: 'Resume', main: true, sound: 'back', run() {}});
     if (E.photo?.allowed) out.push({tab: 'game', label: 'Photo mode', run: () => E.photo.toggle(true)});   // (ui/photo.js; F4)
-    for (const m of features.flatMap(f => f.menu?.() || [])) out.push({tab: 'game', label: m.label, run: m.run});
+    for (const n of GAME_ROWS) for (const m of feat(n)?.menu?.() || []) out.push({tab: 'game', label: m.label, run: m.run});
+    // Sandbox: the other features' rows, a page per group (spawn an elite, place a shrine, force an omen, go to the range)
+    for (const f of features) if (f.menu && !GAME_ROWS.includes(f.name)) for (const m of f.menu() || []) out.push({tab: 'sandbox', group: SANDBOX_GROUP[f.name] || 'Other', label: m.label, run: m.run});
     // the character: the Ranger (bow), the gunslinger (Peacemaker), the outlaw (Brass Navy): view/hero.js LOADOUTS
-    out.push({tab: 'game', group: 'Character', label: 'Character', ...pick(Object.keys(CHARS), () => charOf(hero.loadName), v => {
+    out.push({tab: 'game', group: 'Character', label: 'Play as', ...pick(Object.keys(CHARS), () => charOf(hero.loadName), v => {
       const i = LOADOUTS.findIndex(l => l[0] === CHARS[v]); if (i >= 0 && i !== hero.loadI) hero.switchLoadout(i); })});
     // Graphics, Controls: the host's own
     // (fullscreen keeps Escape for the menu: keyboard lock, where the browser has it; holding Esc still leaves fullscreen)
@@ -131,8 +145,9 @@ export function createPause(E) {
   const menu = createMenu({
     root: $('#pause'), items: menuItems, dev: () => host.dev, sound: host.uiSound, changed: E.applyOpts,
     title: () => E.game.mode === 'title' ? ['Settings', ''] : ['Paused', E.game.mode === 'run' && E.game.run ? `Run · stage ${E.game.run.stage + 1}` : E.game.mode === 'sandbox' ? 'Proving Grounds' : ''],
-    groups: {graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys'], dev: ['Character', 'World', 'Nature', 'Effects', 'Renderer', 'Experiments', 'Tools', 'Other']},
-    paged: ['dev'],
+    groups: {sandbox: ['Elites', 'Gadgets', 'Shrines', 'Omens', 'Places', 'Other'], graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys'],
+      dev: ['Character', 'World', 'Nature', 'Effects', 'Renderer', 'Experiments', 'Tools', 'Other']},
+    paged: ['sandbox', 'dev'],
     resume: snd => toggle(false, snd),
     look: dx => { E.input.look(dx); lookT = performance.now(); },
     zoom: e => cv.onWheel(e),

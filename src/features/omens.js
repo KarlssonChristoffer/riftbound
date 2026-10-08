@@ -16,7 +16,7 @@
 //   omens/fog.js    Rift Fog (veiled enemies, eyes, crits)     omens/moons.js  Blood Moon, Eclipse, Golden Hour
 //   omens/kit.js    rings, eyes                                omens/hud.js    the icon + tooltip
 // ON / OFF: off by default. ?omens=1 (or the Dev tab's 'Stage omens' toggle, remembered: localStorage 'rb.omens') rolls them
-// in runs; ?omen=<id> brings that one on every stage (and in the sandbox from the start). In the sandbox the menu's Game tab
+// in runs; ?omen=<id> brings that one on every stage (and in the sandbox from the start). In the sandbox the menu's Sandbox tab
 // has a row per omen to force it on and off (while omens are on). Off, nothing here runs or draws (no generator draws, no
 // notes, no menu rows but the Dev toggle).
 // SIM vs VIEW: update() is the truth (the roll, strikes, regen: its own generator, seeded from the clock like the game's);
@@ -156,7 +156,7 @@ export async function create(host) {
       if (m.marks) for (const x of m.marks) if (x.on) alert = 1;
       hud.draw(q, sc, active.def, active.name, active.t, alert, active.def.id === 'gale' ? m.dir : null);
     },
-    menu() {   // the sandbox, while omens are on: force each omen on / off (the Game tab)
+    menu() {   // the sandbox, while omens are on: force each omen on / off (Sandbox > Omens)
       const g = game(); if (g?.mode !== 'sandbox' || !(enabled || active)) return [];
       return OMENS.map(o => ({label: `Omen: ${o.name}${active?.def.id === o.id ? '  (on)' : ''}`, run: () => F.force(o.id)}));
     },

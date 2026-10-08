@@ -9,7 +9,7 @@
 //   Warded       a ward in front of it stops your shots until broken: flank it, blow it up, pierce it
 //   Vampiric     a drain beam (break it: get out of reach or roll); heals from its blows
 // OFF by default: ?affixes=1, or menu > Dev > Features > Elite affixes (remembered on this machine). In the sandbox
-// (dev): the Game tab's "Try:" rows, or the . key (Shift: a champion), put one ~5 m from you to fight; the sandbox doesn't
+// (dev): the menu's Sandbox > Elites rows, or the . key (Shift: a champion), put one ~5 m from you to fight; the sandbox doesn't
 // count hurts, so the ones you would have taken float up in red.
 //   features/affixes/sim.js   the truth (rolls, behaviours, deaths, the ward, the beam; the hazard kit: sim/hazards.js)
 //   features/affixes/look.js  the view (marks, ward, beam, deaths, chill; the zones: view/hazards.js)

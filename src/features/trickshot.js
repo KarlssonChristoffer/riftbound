@@ -1,6 +1,6 @@
-// TRICK-SHOT RANGE (an experiment, ?trick=1; off unless that or the Dev toggle / the Game tab's row, which remember it):
+// TRICK-SHOT RANGE (an experiment, ?trick=1; off unless that or the Dev toggle / the Sandbox tab's row, which remember it):
 // a place in the sandbox to play with the guns and tune how they feel. In the Proving Grounds' north-west corner, along the
-// north wall and north of the bow's lane (the desert's fort has the same walls), ~12 m from the spawn (the Game tab's "go to
+// north wall and north of the bow's lane (the desert's fort has the same walls), ~12 m from the spawn (the Sandbox tab's "go to
 // the mark" takes you there):
 //   bottles   six on a fence rail. A bullet or an arrow breaks one (glass flies along the shot, the shot goes on through);
 //             so does a blast or the pistol whip. They are set up again 2.5 s after the last one breaks, or with E at the
@@ -48,7 +48,7 @@ export async function create(host) {
     if (!v) S.teardown();   // (off, the views and draws stop: the meshes go now)
   }
   F.toggle = () => setOn(!F.on);
-  // the sandbox's Game tab: open the range, or (open) go there, set it up again, close it
+  // the menu's Sandbox tab (Places): open the range, or (open) go there, set it up again, close it
   F.menu = () => {
     if (!sandbox()) return [];
     if (!F.on) return [{label: 'Open the trick-shot range', run: () => setOn(true)}];

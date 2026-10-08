@@ -1,8 +1,9 @@
 // THE MENU (Escape): pause + settings, plain white text in the middle of the screen, over the living world. While it's
 // open the game stands still (main.js runs only the nature features: wind, foliage, wildlife, weather, clouds, fire) and
 // the page blurs it (index.html #pause); drag the backdrop to look around, the wheel zooms, a click on it resumes.
-// TABS: Game (resume, the run's actions), Graphics, Audio, Controls: what a player sets. Dev (only in dev mode: the
-// sandbox, ?dev=1, the ` key): character / world / renderer A/B, every feature toggle, debug views, tools.
+// TABS: Game (resume, the run's actions), Sandbox (the Proving Grounds' test actions: spawn, place, go to), Graphics,
+// Audio, Controls: what a player sets. Dev (only in dev mode: the sandbox, ?dev=1, the ` key): character / world /
+// renderer A/B, every feature toggle, debug views, tools. A tab shows only while it has rows.
 // GROUPS: a tab lists its rows under group headings (opts.groups: the order); a PAGED tab (opts.paged: Dev) shows one group
 // at a time instead, with a button per group above the rows (remembered on this machine, 'rb.menu'). The body scrolls.
 // ITEMS come from opts.items() (main.js builds them: it owns the state they change), read fresh every time it draws:
@@ -18,7 +19,7 @@
 // back, open.
 // OWNS: the #pause DOM, the open tab and group, focus, 'rb.settings', 'rb.menu'. READS: opts.items(), opts.dev(), opts.title().
 // BUDGET: nothing per frame; the DOM is rebuilt only when something changes.
-const TABS = [['game', 'Game'], ['graphics', 'Graphics'], ['audio', 'Audio'], ['controls', 'Controls'], ['dev', 'Dev']];
+const TABS = [['game', 'Game'], ['sandbox', 'Sandbox'], ['graphics', 'Graphics'], ['audio', 'Audio'], ['controls', 'Controls'], ['dev', 'Dev']];
 const STORE = 'rb.settings', PAGES = 'rb.menu';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const isSwitch = it => it.options?.length === 2 && it.options.includes('on') && it.options.includes('off');
@@ -41,7 +42,7 @@ export function createMenu({root, items, dev = () => false, title = () => ['Paus
   // plain text rows: "Label   On", "Label   ‹ value ›" (sliders too: 10% steps)
   function row(it, i) {
     if (it.keys) return `<div class="m-keys">${it.keys.map(([k, what]) => `<div><span>${esc([].concat(k).join(' '))}</span><span>${esc(what)}</span></div>`).join('')}</div>`;
-    if (it.run && !it.value) return `<button class="m-act${it.main ? ' main' : ''}" data-i="${i}">${esc(it.label)}</button>`;
+    if (it.run && !it.value) return `<button class="m-act${it.main ? ' main' : ''}${it.tab !== 'game' ? ' tool' : ''}" data-i="${i}">${esc(it.label)}</button>`;   // (tool: a test action, smaller)
     const sw = isSwitch(it), v = it.run ? it.value() : it.min !== undefined ? pct(it, it.get()) : sw ? (it.get() === 'on' ? 'On' : 'Off') : it.get();
     return `<button class="m-row${it.sub ? ' sub' : ''}" data-i="${i}"${sw ? ` role="switch" aria-checked="${it.get() === 'on'}"` : ''}><span>${esc(it.label)}${it.key ? `<small>${esc(it.key)}</small>` : ''}</span>` +
       `<span class="m-val">${sw ? esc(v) : `<i data-d="-1">‹</i>${esc(v)}<i data-d="1">›</i>`}</span></button>`;

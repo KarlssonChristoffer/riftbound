@@ -14,7 +14,7 @@
 //             the same spot every load for a biome, found again after every world build (the first view after it)
 //   motion    the view's own clock (F.view, ambient: it goes on behind the menu and in photo mode's living world; a still
 //             photo freezes it). No Math.random anywhere (no draw from the shared generator: golden stays put elsewhere)
-// ?anomaly=0: none (on by default in the sandbox); Dev > Features: the toggle, Space warp, HD glow; the Game tab: go there.
+// ?anomaly=0: none (on by default in the sandbox); Dev > World: the toggle, Space warp, HD glow; Sandbox > Places: go there.
 // FEATURE CONTRACT (main.js): view, frame, lights, biomeChanged, toggle, menu, settings; ambient.
 // OWNS: F.on, the spot, its clock, the tear's / specks' meshes (tear.js, specks.js), the decal canvas, its light record.
 // READS: the game's mode (sandbox), host.elev / inStream / layout / entities.near (place.js), host.biome, host.zoom,
@@ -78,7 +78,7 @@ export async function create(host) {
   F.biomeChanged = () => { spotWorld = null; };   // (found again at the next view: after every feature has built its pieces)
   F.settings = () => [{label: 'Space warp', options: ['on', 'off'], get: () => warp ? 'on' : 'off', set: v => { warp = v === 'on'; }},
     {label: 'HD glow', options: ['on', 'off'], get: () => hdGlow ? 'on' : 'off', set: v => { hdGlow = v === 'on'; }}];
-  // the sandbox's Game tab: go and look at it (stand a couple of metres south of it, the camera's side at yaw 0)
+  // the menu's Sandbox tab (Places): go and look at it (stand a couple of metres south of it, the camera's side at yaw 0)
   F.menu = () => {
     if (!active() || !spot) return [];
     return [{label: 'Rift anomaly: go there', run: () => {

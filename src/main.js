@@ -34,7 +34,7 @@
 //                               (a hidden window keeps the last view: render/camera.js)
 //   F.arrow?(a)                 every arrow as it is spawned (scale its damage, tag it, spawn extras with a.extra)
 //   F.prompt?(prop) -> text | {text, color}   the "E ..." prompt over a prop you can interact with
-//   F.menu?() -> [{label, run}] rows in the menu's Game tab (ui/menu.js)
+//   F.menu?() -> [{label, run}] rows in the menu's Sandbox tab, or its Game tab (ui/pause.js GAME_ROWS, SANDBOX_GROUP)
 // THE MENU (Escape, ui/pause.js + ui/menu.js): pauses the game but not the world: while host.paused only the AMBIENT
 // features update (nature, see stepPaused), behind a blur. A feature's toggle / settings land in its Dev tab unless
 // CLAIM gives them to a player tab (Graphics, Audio).

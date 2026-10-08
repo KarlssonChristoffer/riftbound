@@ -15,7 +15,7 @@
 // the water), seeded by the biome: the same layout every load of a biome, placed again on a biome change. Runs never see it.
 // SIM / VIEW: features/bells/sim.js is the truth (props, deflectors, rings, chains; its own generator); features/bells/view.js
 // the look (meshes, the swing, the clapper's tolls, sparks, the floats). docs/exp/bells.md
-// OWNS: F.on (an experiment: off by default; the Game tab's row and the Dev toggle remember on: 'riftbound3d.bells'), the stands (their sim and view).
+// OWNS: F.on (an experiment: off by default; the Sandbox tab's row and the Dev toggle remember on: 'riftbound3d.bells'), the stands (their sim and view).
 // READS: the game (sandbox or not), the trick-shot range's cans (a live query: kind trick_can).
 // BUDGET: off / not the sandbox: nothing (update returns; no props, no draws). Standing: sim a pass over the step's events and
 // <= 8 chain records; 1 static draw (its shadow in the cached map) + 1 draw per bell in view (static too while it hangs still);
@@ -45,7 +45,7 @@ export async function create(host) {
     if (!v) { S.teardown(); built = null; }
   }
   F.toggle = () => setOn(!F.on);
-  // the sandbox's Game tab: walk to a nest's standing spot (the next one each time)
+  // the menu's Sandbox tab (Places): walk to a nest's standing spot (the next one each time)
   let nestI = 0;
   F.menu = () => {
     if (!sandbox()) return [];
