@@ -81,7 +81,7 @@ export async function create(host) {
       return false;
     },
     claims: k => k === 'v' && !!gun()?.canMelee,   // (core/input.js: V reaches onKey outside dev mode while a whip is to hand)
-    hd(q, sc) { const g = gun(); if (g) cyl.draw(q, sc, g.S, host.weapon); },
+    hd(q, sc) { const g = gun(); if (g) cyl.draw(q, host.hudScale, g.S, host.weapon); },   // (HUD: its size by the window, not the zoom)
     hud: () => { const g = gun(); return g ? `${host.weapon.name} ${g.S.ammo}/${g.S.cap} ${g.S.act || (g.S.out ? 'ready' : 'holstered')}` : ''; },
   };
   return F;

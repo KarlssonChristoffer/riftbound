@@ -18,7 +18,7 @@ export function createOmenHud(host) {
     // def: the omen (content/omens.js), name: as shown (the frost lands' thundersnow), age (s since it began), alert 0..1,
     // wind: [ux, uy] (the Gale: the arrow's way in the world)
     draw(q, sc, def, name, age, alert, wind) {
-      const u = clamp(sc / 2.6, .7, 2.8), s = Math.round(34 * u), x = Math.round(20 * u), y = Math.round(16 * u), W = q.canvas.width;
+      const u = clamp(host.hudScale / 2.6, .7, 2.8), s = Math.round(34 * u), x = Math.round(20 * u), y = Math.round(16 * u), W = q.canvas.width;
       q.save(); q.globalAlpha = clamp(age / .6, 0, 1);
       q.fillStyle = 'rgba(16,14,20,.88)'; q.fillRect(x, y, s, s);
       q.strokeStyle = alert > 0 && ((age * 10) | 0) % 2 === 0 ? '#ffffff' : def.col; q.lineWidth = Math.max(1.5, 2 * u * .8); q.strokeRect(x + 1, y + 1, s - 2, s - 2);

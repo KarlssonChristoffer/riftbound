@@ -219,7 +219,7 @@ export function createDraw(host, core, phys) {
     }
     og.globalAlpha = 1;
     og.restore();
-    bar(og, scale);
+    bar(og, host.hudScale);   // (the ability bar: its size by the window, not the zoom)
   }
   // the ability bar + gold (+ tooltip). While nothing on it moves (no cooldown, flash, cast, gold pop) it is drawn once
   // into a cache canvas and blitted (text + fonts cost ~.15 ms a frame otherwise)

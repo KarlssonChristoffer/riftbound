@@ -177,6 +177,7 @@ export function createBellsView(host, S) {
   function hd(q, sc) {
     if (!floats.length) return;
     const u = clamp(sc / 2.6, .7, 2.8), T = TUNE.float;
+    host.G.hdShift?.(q, sc);   // (over the world: slid and magnified with the pixel image, the sub-pixel camera and the wheel's zoom; the host restores q)
     for (const f of floats) {
       const k = f.t / T.life, a = k < .08 ? k / .08 : k > .7 ? (1 - k) / .3 : 1;
       host.G.toScreenInto(f.x, f.h + k * T.rise, f.y, SC);

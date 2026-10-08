@@ -21,7 +21,9 @@
 //   F.frame?(f)                 every rendered frame, camera set: push host.sprite / point / line, paint host.layer(...)
 //                               f = {dt, t (s)}
 //   F.lights?() -> [{x, y, h, color ('#rrggbb' | [r, g, b]), radius, intensity, flicker, id}]   arena coordinates
-//   F.hd?(q, scale)             the display-resolution overlay (2D context; scale = display px per view px)
+//   F.hd?(q, scale)             the display-resolution overlay (2D context; scale = display px per view px at this zoom:
+//                               place world-pinned things by it; size screen-fixed HUD by host.hudScale, which the
+//                               wheel's zoom doesn't change, so the HUD keeps its size)
 //   F.camera?(dt) -> {x, y}     camera feel: an offset in view px (spring, lean, kick)
 //   F.onKey?(k, e) -> bool      consume a key (k = e.key lower-case)
 //   F.onArrowHit?(a, prop) -> 'stop' | 'pierce'   F.onArrowStuck?(a)   F.ability?(slot) -> bool   F.interact?(prop) -> bool
@@ -171,7 +173,7 @@ const sprite = o => {
 const host = {
   THREE, G, PPM, PPMY, PPMH, get VW() { return cv.VW; }, get VH() { return cv.VH; }, ctxO,
   get world() { return stage.world; }, get biome() { return stage.biome; }, get time() { return env.bucket; }, get mood() { return env.mood(stage.biome.id); }, env,
-  get yaw() { return cv.yaw; }, get viewYaw() { return G.cine ? G.view.yaw : cv.yaw; }, get zoom() { return cv.zoom; }, get props() { return stage.world.props; }, get layout() { return stage.world.layout; },
+  get yaw() { return cv.yaw; }, get viewYaw() { return G.cine ? G.view.yaw : cv.yaw; }, get zoom() { return cv.zoom; }, get hudScale() { return cv.dsBase * (devicePixelRatio || 1); }, get props() { return stage.world.props; }, get layout() { return stage.world.layout; },
   // the entity registry (world/entities.js): add / remove props, live queries by kind, near(x, y, r); props = its list
   get entities() { return stage.ents; }, get propsVersion() { return stage.ents.ver; },
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY, mods,

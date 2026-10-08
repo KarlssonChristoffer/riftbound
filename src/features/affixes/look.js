@@ -372,7 +372,7 @@ export function createAffixLook(host, sim) {
       LLIST.length = nL; return LLIST;
     },
     hd(q, sc) {
-      const g = gameF(), run = g?.mode === 'run', u = clamp(sc / 2.6, .7, 2.8), G = host.G;
+      const g = gameF(), run = g?.mode === 'run', G = host.G; let u = clamp(sc / 2.6, .7, 2.8);   // (the plates scale with the world; the cards: below)
       q.save();
       q.save(); G.hdShift?.(q, sc);   // (over the world: slid with the pixel image, the sub-pixel camera; the cards below stay put)
       for (let i = 0; i < sim.bearers.length; i++) {   // the nameplates the HUD doesn't draw
@@ -390,7 +390,7 @@ export function createAffixLook(host, sim) {
         text(q, f.s, SV[0] * sc, SV[1] * sc - rise, (f.big ? 15 : 12) * u, f.col);
         q.globalAlpha = 1;
       }
-      q.restore();
+      q.restore(); u = clamp(host.hudScale / 2.6, .7, 2.8);
       // the first-sighting cards (top left, under the run's banner line)
       for (let i = 0; i < CARDS.length; i++) {
         const c = CARDS[i], A = AFFIXES[c.id], a = clamp(Math.min(c.t / .3, (CARD_T - c.t) / .6), 0, 1), x = 22 * u, y = (110 + i * 46) * u;

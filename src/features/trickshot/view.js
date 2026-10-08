@@ -252,7 +252,7 @@ export function createRangeView(host, S) {
   }
   function hd(q, sc) {
     if (!S.active) return;
-    const P = host.player, d = hypot2(P.x - S.A.x, P.y - S.A.y), u = clamp(sc / 2.6, .7, 2.8);
+    const P = host.player, d = hypot2(P.x - S.A.x, P.y - S.A.y); let u = clamp(sc / 2.6, .7, 2.8);   // (the floats scale with the world; the panel: below)
     // over the cans: the juggle so far (slid with the pixel image: G.hdShift, the sub-pixel camera; the panel stays put)
     q.save(); host.G.hdShift?.(q, sc);
     for (const f of floats) {
@@ -264,7 +264,7 @@ export function createRangeView(host, S) {
       else text(q, `Juggle ×${f.n}` + (f.best ? '  best!' : ''), SC[0] * sc, SC[1] * sc, 14 * u, f.best ? '#9af07a' : '#f2d27a');
       q.globalAlpha = 1;
     }
-    q.restore();
+    q.restore(); u = clamp(host.hudScale / 2.6, .7, 2.8);
     if (d > ST.near + 4 && banner.t >= TUNE.banner) return;
     // the panel, top right
     if (lines() || u !== pcU) paintPanel(u);

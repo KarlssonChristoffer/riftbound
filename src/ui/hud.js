@@ -52,7 +52,9 @@ export function createHud(host) {
     },
     // v: {run, stats, build, stage, stages, stageName, wave, waves, left, phase, time, kills, boss, enemies, cost}
     draw(q, sc, v) {
-      const W = q.canvas.width, Hh = q.canvas.height, u = clamp(sc / 2.6, .7, 2.8);   // 1.5 at 1080p (4x)
+      // u: the HUD's size, by the window (host.hudScale: the same at every zoom), 1.5 at 1080p (4x); uw: the labels over the
+      // world, which scale with it (sc)
+      const W = q.canvas.width, Hh = q.canvas.height, u = clamp(host.hudScale / 2.6, .7, 2.8), uw = clamp(sc / 2.6, .7, 2.8);
       q.save();
       // hit vignette, low-health pulse
       const S = v.stats.S, low = S.hp > 0 && S.hp < S.maxHp * .3 ? (.5 + .5 * Math.sin(performance.now() / 180)) * .25 : 0, red = Math.max(S.hurtT * .55, low);
@@ -66,12 +68,12 @@ export function createHud(host) {
       for (const b of v.enemies) {
         if (!b.elite && !b.boss) continue;
         const [x, y] = at(b.x, b.y, (b.h || 0) + (b.hitH ?? 1.6) + .45);   // just over combat's HP bar (+.35)
-        text(q, b.name, x, y, 11 * u, b.aura || '#f4efe4', {align: 'center', w: 700});
+        text(q, b.name, x, y, 11 * uw, b.aura || '#f4efe4', {align: 'center', w: 700});
       }
       for (const f of floats) {
-        const [x, y] = at(f.x, f.y, f.h), k = f.t, rise = (1 - (1 - k) ** 2) * 26 * u;
+        const [x, y] = at(f.x, f.y, f.h), k = f.t, rise = (1 - (1 - k) ** 2) * 26 * uw;
         q.globalAlpha = k > .7 ? 1 - (k - .7) / .3 : 1;
-        text(q, f.s, x, y - rise, (f.big ? 17 : 13) * u, f.col, {align: 'center', w: 800});
+        text(q, f.s, x, y - rise, (f.big ? 17 : 13) * uw, f.col, {align: 'center', w: 800});
         q.globalAlpha = 1;
       }
       q.restore();

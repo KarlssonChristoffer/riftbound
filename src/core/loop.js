@@ -124,7 +124,7 @@ export function createLoop(E) {
       drawPrompt(hq, sc, promptCtx);
       hq.restore();
     }
-    perf.draw(hq, sc);
+    perf.draw(hq, host.hudScale);   // (HUD: the window's scale, not the zoom's)
   }
   function frame(now) {
     const dt = Math.max(0, Math.min(.05, (now - last) / 1000)); last = now; lastDt = dt;

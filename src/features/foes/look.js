@@ -694,7 +694,7 @@ export function createLook(host, sim) {
         if (SC[0] > 2 && SC[0] < VW - 2 && SC[1] > 2 && SC[1] < VH - 2) continue;
         const dx = SC[0] - cx, dy = SC[1] - cy, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l;
         const t = Math.min(Math.abs(dx) > 1e-3 ? (cx - inset) / Math.abs(dx) : 1e9, Math.abs(dy) > 1e-3 ? (cy - inset) / Math.abs(dy) : 1e9);
-        const ex = (cx + dx * t) * sc, ey = (cy + dy * t) * sc, u = Math.max(.7, Math.min(2.8, sc / 2.6)), s = (g.locked ? 10 : 7) * u;
+        const ex = (cx + dx * t) * sc, ey = (cy + dy * t) * sc, u = Math.max(.7, Math.min(2.8, host.hudScale / 2.6)), s = (g.locked ? 10 : 7) * u;   // (HUD: its size by the window)
         q.fillStyle = g.locked ? '#fff4c8' : '#ffb84a'; q.strokeStyle = 'rgba(30,14,8,.85)'; q.lineWidth = Math.max(1.5, 1.5 * u);
         q.beginPath(); q.moveTo(ex + ux * s, ey + uy * s); q.lineTo(ex - ux * s * .4 - uy * s * .75, ey - uy * s * .4 + ux * s * .75); q.lineTo(ex - ux * s * .4 + uy * s * .75, ey - uy * s * .4 - ux * s * .75); q.closePath();
         q.stroke(); q.fill();
