@@ -41,15 +41,19 @@ export function createInput(E) {
   addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys.delete(k); if (k === 'e') PL.onInteractUp(); });
   addEventListener('blur', () => { keys.clear(); mouse.down = false; dragging = false; });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
-  // the cursor as the screen shows it: mx0, my0 = where it fell (view px at zoom 1, as the player reads it) on the image as
-  // drawn, k0 = view px per canvas px then; the sub-pixel camera slides the image by whole canvas px every frame (G.sub,
-  // render/camera.js), so remap() (the loop: after the camera, every frame) takes what's under a still cursor now
-  let mx0 = NaN, my0 = NaN, k0 = 0;
-  const remap = () => { if (mx0 === mx0) { mouse.x = mx0 - E.G.sub.x * k0; mouse.y = my0 - E.G.sub.y * k0; } };
+  // the cursor as the screen shows it: cx0, cy0 = where it is on the page (css px). remap() (the loop: after the camera,
+  // every frame) reads what's under it now on the image as drawn (view px, as the player reads it): the wheel's ease
+  // magnifies the image about the middle of what shows (cv.dz) and the sub-pixel camera slides it by whole canvas px
+  // (G.sub, render/camera.js), so a still cursor's point moves. The canvas's place and scale are the camera's (cv.fit)
+  let cx0 = NaN, cy0 = NaN;
+  const remap = () => {
+    if (cx0 !== cx0) return;
+    const s = cv.scale, mx = (cx0 - cv.cl) / s, my = (cy0 - cv.ct) / s, hx = (cv.VW - cv.pad) / 2, hy = (cv.VH - cv.pad) / 2;
+    mouse.x = hx + (mx - hx) / cv.dz - E.G.sub.x / s; mouse.y = hy + (my - hy) / cv.dz - E.G.sub.y / s;
+  };
   addEventListener('mousemove', e => {
     if (E.photo?.open) return;   // (photo mode: the cursor isn't the game's; it's where it was when you come back)
-    const r = canvas.getBoundingClientRect(), s = r.width / cv.VW, mx = (e.clientX - r.left) / s, my = (e.clientY - r.top) / s;
-    mx0 = cv.VW / 2 + (mx - cv.VW / 2) / cv.zoom; my0 = cv.VH / 2 + (my - cv.VH / 2) / cv.zoom; k0 = 1 / (s * cv.zoom);   // the player reads the screen at zoom 1
+    cx0 = e.clientX; cy0 = e.clientY;
     remap();
     if (dragging) { dragYaw += (e.clientX - dragX) * -.006; dragX = e.clientX; }
   });

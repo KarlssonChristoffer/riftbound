@@ -18,7 +18,7 @@
 // only ever slides left / up) and the drawn centre that far right of / below the chest (pad / 2); the canvas runs past its
 // place by the pad (negative margins, clipped), so the page, the cursor's origin and the HD overlay sit as before. At
 // display scale 1 there's nothing finer to show: no pad, rounding to the nearest as before
-// OWNS: cv = {VW, VH, scale, zoom, dsBase, dsGoal, yaw, snapMode, pad, sub}, the target, the free target, the shake.  READS: the window, opt.
+// OWNS: cv = {VW, VH, scale, zoom, dz, dsBase, dsGoal, yaw, snapMode, pad, sub, cl, ct}, the target, the free target, the shake.  READS: the window, opt.
 //   const cv = createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: () => opt, onTurn, flags})   (the view size, before the renderer)
 //   cv.attach({G, canvas, hdc, features}); cv.fit()                                             (once they exist)
 import * as THREE from 'three';
@@ -29,10 +29,16 @@ export const SNAP = [0, 22.5 * DEG, 90 * DEG], SNAP_NAME = ['free', '22.5° step
 export const ROT_SPEED = 110 * DEG;
 // LEVELS are whole display scales, so every zoom at rest is pixel-perfect (scaleRange: out to twice the world on screen,
 // in to twice the size). A wheel notch moves the goal one level; the view EASES there (in log space, so in and out feel
-// alike, ZOOM.ease per second) drawn at its current size with `zoom` as the in-between factor, and when it arrives it's
-// re-made at the new scale (fit): crisp again. Trackpads' small deltas add up to notches (ZOOM.notch). The camera
-// centres the Ranger's chest (FOCUS_H), so he stays put on screen while the world scales around him
-export const ZOOM = {ease: 11, notch: 100, done: .004}, FOCUS_H = .9;
+// alike, ZOOM.ease per second). The world is never drawn at an in-between size: the art is drawn at a whole scale
+// (`scale`, at most the shown size: zooming out it drops to the goal at once) and the finished pixel image is MAGNIFIED
+// on screen by `dz` (>= 1, the renderer's display zoom: G.setDisplay), each art pixel a solid block with a one-screen-px
+// soft edge. A fractional projection (the old way) dropped and doubled rows and columns of every texel, every frame: the
+// art shimmered and its 1 px outlines came and went. When it arrives it's re-made at the goal (fit): the same art pixels,
+// dz 1. The ease's tail moves at least ZOOM.min (log scale per second), so it ends in a step no bigger than the last few
+// (cutting a slow exponential tail short made the arrival a visible jump at the screen's edges). Trackpads' small deltas
+// add up to notches (ZOOM.notch). The camera centres the Ranger's chest (FOCUS_H), and the image is magnified about there,
+// so he stays put on screen while the world scales around him
+export const ZOOM = {ease: 11, notch: 100, min: .12}, FOCUS_H = .9;
 const SMOOTH_IN = 12, SMOOTH_OUT = 3, TURN_HOLD = .12;   // ground sampling: smooth while turning (auto)
 const MIN_WIN = 16;   // px: a window smaller than this either way counts as hidden (the view keeps its size)
 
@@ -46,9 +52,10 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   const viewAt = s => [Math.min(VIEW.maxW, even(innerWidth / s)), Math.min(VIEW.maxH, even(innerHeight / s))];
   // zoom levels: out to half the base scale (twice the world on screen), in to twice it. ?zoom=2 starts zoomed in
   const scaleRange = b => [Math.max(1, Math.ceil(b / 2)), b * 2];
-  // zoom: the projection's extra scale ON TOP of `scale` (the display scale). 1 at rest; between zoom levels it carries the
-  // easing (stepZoom). host.zoom is this (view px per art px), so features size their pixels right while it eases
-  const cv = {VW: 480, VH: 270, scale: 1, zoom: 1, dsBase: 1, dsGoal: 1, yaw: (+Q.get('yaw') || 0) * DEG, snapMode: +(Q.get('snap') ?? 0) || 0};
+  // zoom: the projection's extra scale ON TOP of `scale` (view px per art px; host.zoom, which features size their pixels
+  // by): always 1 now, the in-between steps are dz's. dz: the finished image's magnification on screen (1 at rest; the
+  // ease, stepZoom); the screen shows scale x dz px per art px. cl, ct: the canvas's place on the page (css px, at fit)
+  const cv = {VW: 480, VH: 270, scale: 1, zoom: 1, dz: 1, dsBase: 1, dsGoal: 1, cl: 0, ct: 0, yaw: (+Q.get('yaw') || 0) * DEG, snapMode: +(Q.get('snap') ?? 0) || 0};
   cv.dsBase = baseScale(); cv.dsGoal = Q.get('zoom') === '2' ? cv.dsBase * 2 : cv.dsBase; cv.scale = cv.dsGoal;   // the window's scale, the wheel's goal, the view's scale now
   // the sub-pixel view (header): the pad (art px, even: the view's centre stays on the lattice) and the remainder now
   const SUB = Q.get('subpx') !== '0', padAt = s => SUB && s > 1 ? 2 : 0;
@@ -61,25 +68,30 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   const toView = cv.toView, toWorld = cv.toWorld;
   cv.attach = o => { ({G, canvas, hdc, features} = o); };
 
-  cv.fit = function fit() {   // the window changed, or a zoom arrived (stepZoom): the view at `scale`
+  cv.fit = function fit() {   // the window changed, a zoom arrived (stepZoom) or one out began (zoomTo): the view at `scale`
     if (!shown()) return;   // hidden: the view stays as it is; the window's resize event when it's back fits it
     const b = baseScale();
-    if (b !== cv.dsBase) { const [lo, hi] = scaleRange(b); cv.dsGoal = Math.max(lo, Math.min(hi, Math.round(cv.dsGoal * b / cv.dsBase))); cv.dsBase = b; cv.scale = cv.dsGoal; cv.zoom = 1; }   // (the same zoom, relative)
+    if (b !== cv.dsBase) { const [lo, hi] = scaleRange(b); cv.dsGoal = Math.max(lo, Math.min(hi, Math.round(cv.dsGoal * b / cv.dsBase))); cv.dsBase = b; cv.scale = cv.dsGoal; cv.dz = 1; }   // (the same zoom, relative)
     const pad = padAt(cv.scale), [w0, h0] = viewAt(cv.scale), w = w0 + pad, h = h0 + pad;   // (what the window shows + the pad)
     cv.pad = pad;
     if (w !== cv.VW || h !== cv.VH) { cv.VW = ctxO.VW = w; cv.VH = ctxO.VH = h; G.resize(w, h); for (const f of features) f.resize?.(w, h); }
     canvas.style.width = cv.VW * cv.scale + 'px'; canvas.style.height = cv.VH * cv.scale + 'px';
     // (the pad runs past the canvas's place on the right and below: negative margins keep it centred where it was, the clip hides it)
     const pp = pad * cv.scale; canvas.style.marginRight = canvas.style.marginBottom = pad ? -pp + 'px' : ''; canvas.style.clipPath = pad ? `inset(0 ${pp}px ${pp}px 0)` : '';
-    G.setDisplay?.(cv.scale);   // the canvas at display size: the pixel image is blown up on the GPU, HD effects draw over it
+    G.setDisplay?.(cv.scale, cv.dz);   // the canvas at display size: the pixel image is blown up on the GPU (and magnified by dz), HD effects draw over it
     const dpr = devicePixelRatio || 1; hdc.width = w0 * cv.scale * dpr; hdc.height = h0 * cv.scale * dpr; hdc.style.width = w0 * cv.scale + 'px'; hdc.style.height = h0 * cv.scale + 'px';   // (what shows: no pad)
-    const r = canvas.getBoundingClientRect(); hdc.style.left = r.left + 'px'; hdc.style.top = r.top + 'px';
+    const r = canvas.getBoundingClientRect(); hdc.style.left = r.left + 'px'; hdc.style.top = r.top + 'px'; cv.cl = r.left; cv.ct = r.top;
   };
 
   // ---- the wheel
   let wheelAcc = 0, wheelT = 0;
-  // (now: there at once, no ease: photo mode's way back to the zoom you played at)
-  cv.zoomTo = function zoomTo(goal, now = false) { const [lo, hi] = scaleRange(cv.dsBase); cv.dsGoal = Math.max(lo, Math.min(hi, goal)); if (now && (cv.scale !== cv.dsGoal || cv.zoom !== 1)) { cv.scale = cv.dsGoal; cv.zoom = 1; cv.fit(); } };
+  // (now: there at once, no ease: photo mode's way back to the zoom you played at.) Out past the drawn view: the goal's
+  // bigger view is drawn at once, magnified (dz) to look as it did, so the ease only ever magnifies (dz >= 1: never a gap)
+  cv.zoomTo = function zoomTo(goal, now = false) {
+    const [lo, hi] = scaleRange(cv.dsBase); cv.dsGoal = Math.max(lo, Math.min(hi, goal));
+    if (now) { if (cv.scale !== cv.dsGoal || cv.dz !== 1) { cv.scale = cv.dsGoal; cv.dz = 1; cv.fit(); } }
+    else if (cv.dsGoal < cv.scale) { cv.dz *= cv.scale / cv.dsGoal; cv.scale = cv.dsGoal; cv.fit(); }
+  };
   cv.onWheel = function onWheel(e) {
     const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 300 : e.deltaY, now = performance.now();
     if (now - wheelT > 400 || Math.sign(d) !== Math.sign(wheelAcc)) wheelAcc = 0;   // a new gesture, or turned around
@@ -87,9 +99,11 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     while (Math.abs(wheelAcc) >= ZOOM.notch) { cv.zoomTo(cv.dsGoal - Math.sign(wheelAcc)); wheelAcc -= Math.sign(wheelAcc) * ZOOM.notch; }   // up = in
   };
   cv.stepZoom = function stepZoom(dt) {   // every rendered frame (the menu's backdrop zooms too)
-    const eff = cv.scale * cv.zoom; if (eff === cv.dsGoal) return;
-    const le = Math.log(eff), lg = Math.log(cv.dsGoal), l = Math.abs(lg - le) < ZOOM.done ? lg : le + (lg - le) * (1 - Math.exp(-dt * ZOOM.ease));
-    if (l === lg) { cv.scale = cv.dsGoal; cv.zoom = 1; cv.fit(); } else cv.zoom = Math.exp(l) / cv.scale;   // arrived: the view re-made at the goal scale
+    const eff = cv.scale * cv.dz; if (eff === cv.dsGoal && cv.dz === 1) return;
+    const le = Math.log(eff), lg = Math.log(cv.dsGoal), d = lg - le, st = Math.max(Math.abs(d) * (1 - Math.exp(-dt * ZOOM.ease)), ZOOM.min * dt);
+    const l = Math.abs(d) <= st ? lg : le + Math.sign(d) * st;
+    if (l === lg) { cv.scale = cv.dsGoal; cv.dz = 1; cv.fit(); }   // arrived: the view re-made at the goal scale
+    else { cv.dz = Math.exp(l) / cv.scale; G.setDisplay?.(cv.scale, cv.dz); }
   };
 
   // ---- the yaw: the player keeps view-frame coordinates, so a turn turns them too (onTurn)
@@ -121,8 +135,8 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   function snapTarget(ox, oy, V = T, ga = airH * PPMH / PPMY) {
     const z = cv.zoom, h = V.y, lift = h * PPMH / PPMY, K = cv.pad;   // the ground at screen centre lies `lift` m further back than the target
     let [vx, vy] = toView(V.x, V.z); vx += ox / PPM; vy += oy / PPMY;
-    // the view's ground rectangle (what shows: no pad): half extents in the view frame, then its world-axis extents at this yaw
-    const hx = (cv.VW - K) / (2 * PPM * z), hy = (cv.VH - K) / (2 * PPMY * z), c = Math.abs(Math.cos(cv.yaw)), s = Math.abs(Math.sin(cv.yaw));
+    // the view's ground rectangle (what shows: no pad, magnified by dz): half extents in the view frame, then its world-axis extents at this yaw
+    const hx = (cv.VW - K) / (2 * PPM * z * cv.dz), hy = (cv.VH - K) / (2 * PPMY * z * cv.dz), c = Math.abs(Math.cos(cv.yaw)), s = Math.abs(Math.sin(cv.yaw));
     const ex = hx * c + hy * s, ez = hx * s + hy * c;
     let [gx, gz] = toWorld(vx, vy - lift);
     // (ga: airborne, the clamp gives way by his height above where he stood; 0 on the ground)

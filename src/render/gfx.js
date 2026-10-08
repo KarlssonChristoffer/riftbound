@@ -2105,15 +2105,21 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // the same, or finer while the cinema camera is on: setCine's c.px screen px a pixel (a whole number, so every pixel is
   // the same size on screen; at most the game's own scale). A perspective view moving at the art's resolution jumps a
   // whole art px, DS screen px, every few frames; finer it glides, and a sprite's texel is still a block. cineK = gS / px
-  let gW = VW, gH = VH, gS = DS, cineK = 1, cinePx = 1, canW = 0, canH = 0;
+  let gW = VW, gH = VH, gS = DS, gZ = 1, DZ = 1, cineK = 1, cinePx = 1, canW = 0, canH = 0;   // (gZ: the game's display zoom, DZ: what is drawn's)
   const outRT = new THREE.WebGLRenderTarget(VW, VH, {minFilter: near, magFilter: near, depthBuffer: false});
   // HEAT: heat(...) blobs (over flames) add up in heatRT (view res, smooth); where it's warm the blit reads the pixel image
   // a little to the side, in rising ripples, at display resolution: the pixels behind the hot air wobble smoothly
   const heatRT = new THREE.WebGLRenderTarget(VW, VH, {minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false});
-  // (uSub: the sub-pixel camera's slide, canvas px, GL rows: setSubpixel below)
-  const BLIT_FS = HEAD + `uniform sampler2D tOut, tHeat; uniform float uDS, uHeat, uT, uZ; uniform vec2 uRes, uSub; out vec4 oc;
+  // (uSub: the sub-pixel camera's slide, canvas px, GL rows: setSubpixel below. uZm: the display zoom, setDisplay below:
+  // x = dz, yz = the centre it magnifies about (canvas px, GL rows), w = 1 / (uDS dz): art px per screen px.)
+  // A magnified pixel keeps its block: sharp bilinear, a texel's own colour to within half a screen px of its edge, blended
+  // across that one screen px (nearest at a fractional scale makes blocks 1 px wider or narrower by turns: the art crawls)
+  const BLIT_FS = HEAD + `uniform sampler2D tOut, tHeat; uniform float uDS, uHeat, uT, uZ; uniform vec2 uRes, uSub; uniform vec4 uZm; out vec4 oc;
+vec4 tx(ivec2 i) { return texelFetch(tOut, clamp(i, ivec2(0), ivec2(uRes) - 1), 0); }
 void main() {
-  vec2 p = (gl_FragCoord.xy + uSub) / uDS;
+  vec2 q = gl_FragCoord.xy;
+  if (uZm.x > 1.) q = uZm.yz + (q - uZm.yz) / uZm.x;
+  vec2 p = (q + uSub) / uDS;
   if (uHeat > .5) {
     float s = min(.8, texture(tHeat, p / uRes).r);
     if (s > .003) {
@@ -2122,10 +2128,13 @@ void main() {
       p += vec2(a * .68 + b * .32, sin(w.x * .5 + w.y * .45 - uT * 6.3) * .35) * s * .75 * uZ;   // (under an art px)
     }
   }
-  oc = texelFetch(tOut, ivec2(clamp(p, vec2(0.), uRes - 1.)), 0);
+  if (uZm.x <= 1.) { oc = texelFetch(tOut, ivec2(clamp(p, vec2(0.), uRes - 1.)), 0); return; }
+  vec2 t = p - .5, f = fract(t); ivec2 i = ivec2(floor(t));
+  f = clamp((f - .5) / uZm.w + .5, 0., 1.);
+  oc = mix(mix(tx(i), tx(i + ivec2(1, 0)), f.x), mix(tx(i + ivec2(0, 1)), tx(i + ivec2(1, 1)), f.x), f.y);
 }`;
   const blitU = {tOut: {value: outRT.texture}, tHeat: {value: heatRT.texture}, uDS: {value: 1}, uHeat: {value: 0}, uT: {value: 0}, uZ: {value: 1}, uRes: {value: new THREE.Vector2(VW, VH)},
-      uSub: {value: new THREE.Vector2()}},
+      uSub: {value: new THREE.Vector2()}, uZm: {value: new THREE.Vector4(1, 0, 0, 1)}},
     blitScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, BLIT_FS, blitU, {depthTest: false, depthWrite: false})); m.frustumCulled = false; m.matrixAutoUpdate = false; blitScene.add(m); }
   const FX_VS = HEAD + `
@@ -2143,7 +2152,7 @@ void main() {
 }`;
   const FX_FS = HEAD + `
 in vec2 vUv; in vec4 vCol;
-uniform sampler2D tD; uniform float uDS, uR, uSoft, uSharp; uniform vec2 uSub; uniform vec4 uCine;
+uniform sampler2D tD; uniform float uDS, uR, uSoft, uSharp; uniform vec2 uSub; uniform vec4 uCine, uZm;
 out vec4 oc;
 #ifdef CINE
 float linD(float z) { return 2. * uCine.y * uCine.z / (uCine.z + uCine.y - (z * 2. - 1.) * (uCine.z - uCine.y)); }   // the cinema camera's depth -> m
@@ -2151,7 +2160,8 @@ float linD(float z) { return 2. * uCine.y * uCine.z / (uCine.z + uCine.y - (z * 
 void main() {
   float r2 = dot(vUv, vUv); if (r2 > 1.) discard;
   float a = max(0., exp(-r2 * uSharp) - exp(-uSharp));
-  float sd = texelFetch(tD, ivec2((gl_FragCoord.xy + uSub) / uDS), 0).r;   // (the scene's pixel under it, as the blit slid it: uSub)
+  vec2 q = uZm.x > 1. ? uZm.yz + (gl_FragCoord.xy - uZm.yz) / uZm.x : gl_FragCoord.xy;   // (> 1: a material without uZm, 0, draws as at rest)
+  float sd = texelFetch(tD, ivec2((q + uSub) / uDS), 0).r;   // (the scene's pixel under it, as the blit slid and magnified it: uSub, uZm)
   if (!(sd > .0005 && sd <= 1.)) sd = 1.;   // an unreadable depth (some drivers): draw rather than hide everything
 #ifdef CINE
   float behind = linD(gl_FragCoord.z) - linD(sd);
@@ -2162,7 +2172,7 @@ void main() {
   if (a <= .002) discard;
   oc = vec4(vCol.rgb, vCol.a * a);
 }`;
-  const fxU = {tD: {value: gbuf.depthTexture}, uDS: {value: 1}, uR: {value: R_DEPTH}, uSoft: {value: .14}, uSharp: {value: 3.2}, uPxM: {value: new THREE.Vector2()}, uSub: blitU.uSub, uCine: CINE};
+  const fxU = {tD: {value: gbuf.depthTexture}, uDS: {value: 1}, uR: {value: R_DEPTH}, uSoft: {value: .14}, uSharp: {value: 3.2}, uPxM: {value: new THREE.Vector2()}, uSub: blitU.uSub, uZm: blitU.uZm, uCine: CINE};
   const HEAT_FS = HEAD + `
 in vec2 vUv; in vec4 vCol;
 uniform sampler2D tD; uniform float uR; uniform vec4 uCine;
@@ -2239,7 +2249,12 @@ void main() {
     const i = B.n * 4, P = B.P.array, C = B.C.array;
     P[i] = x; P[i + 1] = y; P[i + 2] = z; P[i + 3] = r; C[i] = c[0]; C[i + 1] = c[1]; C[i + 2] = c[2]; C[i + 3] = a; B.n++;
   }
-  function setDisplay(s) { gS = Math.max(1, Math.round(s)); applySize(); }
+  // setDisplay(s, dz): s = whole screen px per art px (the canvas is s x the view); dz = the DISPLAY ZOOM (render/camera.js,
+  // every frame its wheel zoom eases; 1 at rest): what is drawn is magnified dz x on screen about the middle of what shows
+  // (where the camera's target lands), so the art keeps its pixels while the view eases between whole scales. The blit
+  // magnifies the pixel image (BLIT_FS), the fx pass draws through the same zoom (hdCamNow), the HD overlay's world
+  // drawings too (hdShift); the vignette keeps to the screen. Not under the cinema camera (its own resolution, setCine)
+  function setDisplay(s, dz = 1) { gS = Math.max(1, Math.round(s)); gZ = dz > 1 ? dz : 1; applySize(); }
   // SUB-PIXEL CAMERA (render/camera.js, every frame): setSubpixel(ex, ey, pad): the view is drawn from its target snapped DOWN to
   // the art lattice; ex, ey (art px, 0..1) is how far the true view lies right of / below it, and the view runs `pad` art px
   // past what the window shows, right and below. The blit slides the blown-up image left / up by the remainder, rounded to
@@ -2249,15 +2264,26 @@ void main() {
   // sub is read by the cursor (core/input.js: what's under it is what's shown)
   const sub = {x: 0, y: 0, ex: 0, ey: 0, pad: 0};
   // (the cinema camera, setCine: no slide; it is drawn from its own camera, not the game's snapped view)
-  function subApply() { sub.x = cine ? 0 : -Math.round(sub.ex * DS) || 0; sub.y = cine ? 0 : -Math.round(sub.ey * DS) || 0; blitU.uSub.value.set(-sub.x, sub.y); }
+  function subApply() { sub.x = cine ? 0 : -Math.round(sub.ex * DS) || 0; sub.y = cine ? 0 : -Math.round(sub.ey * DS) || 0; blitU.uSub.value.set(-sub.x, sub.y); zoomApply(); }
+  // the display zoom (setDisplay) about the middle of what shows (canvas px, GL rows; the pad lies right of and below it)
+  function zoomApply() { DZ = cine ? 1 : gZ; blitU.uZm.value.set(DZ, (VW - sub.pad) * DS / 2, (VH + sub.pad) * DS / 2, 1 / (DS * DZ)); }
   function setSubpixel(ex, ey, pad = 0) { sub.ex = ex; sub.ey = ey; sub.pad = pad; subApply(); }
-  // the overlay q (drawn at sc device px per view px) slid as the pixel image is
-  const hdShift = (q, sc) => { if (sub.x || sub.y) q.translate(sub.x * sc / DS, sub.y * sc / DS); };
-  // the fx pass's camera: the view's, its projection slid by the same whole canvas px (no allocation; only while it slides)
+  // the overlay q (drawn at sc device px per view px) slid and magnified as the pixel image is
+  function hdShift(q, sc) {
+    if (DZ !== 1) { const cx = (VW - sub.pad) * sc / 2, cy = (VH - sub.pad) * sc / 2; q.translate(cx, cy); q.scale(DZ, DZ); q.translate(-cx, -cy); }
+    if (sub.x || sub.y) q.translate(sub.x * sc / DS, sub.y * sc / DS);
+  }
+  // the fx pass's camera: the view's, its projection slid by the same whole canvas px and magnified about the same middle
+  // (no allocation; only while it slides or zooms)
   const hdCam = new THREE.Camera(); hdCam.matrixWorldAutoUpdate = false;
   function hdCamNow() {
     hdCam.matrixWorld.copy(camera.matrixWorld); hdCam.matrixWorldInverse.copy(camera.matrixWorldInverse); hdCam.projectionMatrix.copy(camera.projectionMatrix);
     const e = hdCam.projectionMatrix.elements; e[12] += 2 * sub.x / (VW * DS); e[13] -= 2 * sub.y / (VH * DS);   // (w = 1: a shift in NDC)
+    if (DZ !== 1) {   // NDC' = c + (NDC - c) dz, c = the zoom's middle in NDC
+      const Z = blitU.uZm.value, cx = 2 * Z.y / (VW * DS) - 1, cy = 2 * Z.z / (VH * DS) - 1;
+      e[0] *= DZ; e[4] *= DZ; e[8] *= DZ; e[1] *= DZ; e[5] *= DZ; e[9] *= DZ;
+      e[12] = cx + (e[12] - cx) * DZ; e[13] = cy + (e[13] - cy) * DZ;
+    }
     hdCam.projectionMatrixInverse.copy(hdCam.projectionMatrix).invert();
     return hdCam;
   }
@@ -2273,7 +2299,8 @@ void main() {
       SNAP.value.set(VW, VH); compU.uRes.value.set(VW, VH); blitU.uRes.value.set(VW, VH);
       for (const L of layerList) { L.c.width = VW; L.c.height = VH; L.q.imageSmoothingEnabled = false; L.dirty = false; L.t.dispose(); L.t.needsUpdate = true; L.rt.setSize(VW, VH); }
     }
-    if (s !== DS) { DS = s; blitU.uDS.value = fxU.uDS.value = s; subApply(); }
+    if (s !== DS) { DS = s; blitU.uDS.value = fxU.uDS.value = s; }
+    subApply();   // (the slide in canvas px and the zoom's middle follow DS, VW and dz)
     if (gW * gS !== canW || gH * gS !== canH) { canW = gW * gS; canH = gH * gS; renderer.setSize(canW, canH, false); }   // (the canvas: the game's, whatever is drawn)
   }
 
@@ -2374,7 +2401,7 @@ void main() {
 
   let waterSpeed = 1, waterT = -1;
   // the fx blobs' NDC per metre of radius: the oblique view's px per metre; the cinema camera's projection scale (FX_VS divides it by the distance)
-  const fxPxM = () => cine ? fxU.uPxM.value.set(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]) : fxU.uPxM.value.set(2 * PPM * view.zoom / VW, 2 * PPM * view.zoom / VH);
+  const fxPxM = () => cine ? fxU.uPxM.value.set(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]) : fxU.uPxM.value.set(2 * PPM * view.zoom * DZ / VW, 2 * PPM * view.zoom * DZ / VH);
   // POST (photo mode, render/photofx.js): setPost(p) sends the finished frame into p.target (a target the canvas's size)
   // instead of the canvas, then p.run(renderer) draws it on; p.still holds the shaders' clocks (the leaves' flutter, the
   // water, the heat ripple): the world stands still. setPost(null): the frame goes to the canvas as before
@@ -2450,7 +2477,7 @@ void main() {
     if (msFrame !== frameNo) { compU.uMist.value.x = 0; mist.on = false; } else mistAnchors();
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
     let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
-    if (DS > 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
+    if (DS > 1 || DZ !== 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
       renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam); if (!cine) rays.draw();
       if (hN) {
         const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
@@ -2462,7 +2489,7 @@ void main() {
       if (fxN || fxX) {
         fxPxM();
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
-        renderer.render(fxScene, sub.x || sub.y ? hdCamNow() : camera);   // (slid as the blit slid the image: setSubpixel)
+        renderer.render(fxScene, sub.x || sub.y || DZ !== 1 ? hdCamNow() : camera);   // (slid and magnified as the blit did the image: setSubpixel, setDisplay)
       }
     } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) rays.draw(); }
     if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)

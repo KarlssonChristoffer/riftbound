@@ -241,7 +241,7 @@ console.log(`render3d ready in ${((performance.now() - t00) / 1000).toFixed(1)} 
 
 // debug handle for scripted tests (drive frames while the pane is hidden: rAF pauses there)
 window.__r3d = {G, THREE, P, PL, host, player, keys, mouse, cam, opt, arrows, features, game, toView, toWorld, setYaw, setBiome, switchLoadout: i => hero.switchLoadout(i), TIMING, perf,
-  get world() { return stage.world; }, get yaw() { return cv.yaw; }, set zoom(v) { cv.zoomTo(Math.round(cv.dsBase * v)); }, get zoomState() { return {scale: cv.scale, zoom: cv.zoom, dsBase: cv.dsBase, dsGoal: cv.dsGoal}; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { cv.snapMode = i; },
+  get world() { return stage.world; }, get yaw() { return cv.yaw; }, set zoom(v) { cv.zoomTo(Math.round(cv.dsBase * v)); }, get zoomState() { return {scale: cv.scale, zoom: cv.zoom, dz: cv.dz, dsBase: cv.dsBase, dsGoal: cv.dsGoal}; }, set time(i) { env.setPart(TIMES[i]); }, env, set snap(i) { cv.snapMode = i; },
   set props(m) { stage.propMode = m; }, get rig() { return hero.rig; },
   step: (n, dt) => loop.run(n, dt), applyOpts, hud: loop.hud, owncheck: ownReport, live, photo};
 loop.start();

@@ -257,7 +257,7 @@ export function createPhoto(E) {
     if (ny !== y0) { cv.setYaw(ny); pa.syncPlateaus(); }
     cv.stepSampling(dt, cv.yaw !== y0);
     // move: a share of the view's width per second, along the screen (W up, D right); the drag moves the world with the cursor
-    const mx = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0), my = (held.has('s') ? 1 : 0) - (held.has('w') ? 1 : 0), z = cv.zoom;
+    const mx = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0), my = (held.has('s') ? 1 : 0) - (held.has('w') ? 1 : 0), z = cv.zoom * cv.dz;   // (dz: the wheel's ease, the shown view's magnification)
     let vx = 0, vy = 0;
     if (mx || my) { const sp = TUNE.move * cv.VW / (host.PPM * z) * (held.has('shift') ? TUNE.fast : 1) * dt / Math.hypot(mx, my); vx += mx * sp; vy += my * sp * host.PPM / host.PPMY; }
     if (panX || panY) { vx -= panX / cv.scale / (host.PPM * z); vy -= panY / cv.scale / (host.PPMY * z); panX = panY = 0; }
