@@ -20,7 +20,7 @@ const R_BODY = .25;
 // broken down. Only the player: the brutes' nav and colliders still treat every segment as a wall
 const STEP_OVER = .3, VAULT_OVER = 1.25, WALLK = new Set(['wall_n', 'wall_s', 'wall_w', 'wall_e', 'fieldwall']);
 
-export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags, mods}) {
+export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags, mods, canLaunch = null}) {
   const toView = cv.toView, toWorld = cv.toWorld;
   const nearB = [], nearI = [];   // the grid's candidates (world/entities.js near)
   const aimable = ents().query('player.aim', p => p.hp > 0 || p.target || p.breakable);   // what the cursor can aim at (a live list)
@@ -118,6 +118,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
       for (let i = 0; i < 3 + big * 2; i++) { const [vx, vy] = toWorld((Math.random() - .5) * .45, 0); proj.dust.push({x, y, h: PL.P.z + .02, vx, vy, vh: Math.random() * .2, t: 0, life: .3 + Math.random() * .2}); }
     },
     shake: (a, sec) => cv.shake(a, sec),
+    canLaunch,   // a blast may throw him (sim/player/launch.js): main.js, his loadout drawn live
   });
   const P = PL.P;
   { const at = (flags.get('at') || '').split(',').map(Number), sp = worldOf().layout.spawn, [vx, vy] = toView(at.length === 2 ? at[0] : sp.x, at.length === 2 ? at[1] : sp.y); P.x = vx; P.y = vy; P.z = elev(...toWorld(vx, vy)); }

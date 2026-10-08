@@ -2845,6 +2845,49 @@ LIVE_AT['mv_ca_pull'] = [('Left', None, (.22, -.28, 1.45)), ('Right', None, (-.2
 ANIMS['mv_catch'] = _clip(['mv_ca_hang', 'mv_ca_pull', 'mantle_0', 'mv_cl_knee', 'mv_cl_stand'], [0, 1, 2, 3, 4], 8, marks={'plant': 0, 'free': 3, 'hands': 2})
 
 
+# ================================================================ getting up (the live hero only) ====================
+# Thrown by a blast (sim/player/launch.js; docs/exp/launch.md) he lies where his ragdoll left him (view/herorag.js) and gets
+# up with these, made for the live model only (GETUP_LIVE: tools/blender/live_export.mjs --add). The view picks one by how he
+# lies and plays it by the sim's get-up progress, turned to the way his body lies. Each starts lying with the pelvis over the
+# pivot (Hips X -90: on his back, the head behind him; +90: on his front, the head before him), so the ragdoll's last pose
+# blends into the first key in place, and ends standing (facing his feet from his back, his head from his front). By the
+# kneel key (3 of 5: 60% in) the weight is over the front foot: a held direction runs him out of it from there.
+#   mv_getup_b  on his back: sits up on both hands planted behind him, turns over his right hip onto his left knee with the
+#               right hand on the ground, kneels (the right foot planted, the hand on the knee), pushes up, stands
+#   mv_getup_f  face down: the hands by the shoulders, a push-up, the knees drawn under him (on all fours), the right foot
+#               forward with the hands coming off the ground, pushes up, stands
+# The hands' points are in his frame before the ground snap (LIVE_AT: hips at .76), each on the ground the pose snaps to.
+GETUP_LIVE = ('mv_getup_b', 'mv_getup_f')
+POSES['gu_b_lie'] = _merge({'Hips': [('X', -86)], 'Neck': [('X', 30)], 'Head': [('X', 22)]},   # (the head up: the hat off the ground)
+                           _mv_legs(-14, 22, 12, -6, 12, 14), {'LeftArm': [('Z', -28)], 'RightArm': [('Z', 24)], 'LeftForeArm': [('X', -14)], 'RightForeArm': [('X', -18)]})
+POSES['gu_b_sit'] = _merge({'Hips': [('X', -40)], 'Spine': [('X', 12)], 'Spine1': [('X', 6)], 'Neck': [('X', 10)]},
+                           _mv_legs(-90, 84, 46, -80, 76, 44), _arms(46, 46, -18, -18, lower=30))
+# (turned 38 deg to his right: the spine's bend about his own left axis, as world X and Y parts)
+POSES['gu_b_tuck'] = _merge({'Hips': [('X', -6), ('Y', -30), ('Z', -38)], 'Spine': [('X', 36), ('Y', -30)], 'Spine1': [('X', 16), ('Y', -12)],
+                             'Neck': [('X', -18), ('Y', 12)]},
+                            _mv_legs(-30, 118, 60, -96, 100, 6), _arms(-34, -40, -40, -24, lower=30))
+POSES['gu_b_kneel'] = _merge({'Hips': [('Z', -14)], 'Spine': [('X', 16)], 'Spine1': [('X', 6)], 'Neck': [('X', -10)]},
+                             _mv_legs(-4, 94, 60, -88, 90, 0), _arms(-28, -40, -44, -60, lower=32))
+LIVE_AT['gu_b_sit'] = [('Left', None, (.26, .2, .66)), ('Right', None, (-.26, .2, .66))]
+LIVE_AT['gu_b_tuck'] = [('Right', None, (-.42, -.16, .4))]
+LIVE_AT['gu_b_kneel'] = [('Right', None, (-.12, -.33, .8))]
+POSES['gu_f_lie'] = _merge({'Hips': [('X', 86)], 'Neck': [('X', -40)], 'Head': [('X', -14), ('Z', 18)]},   # (the head up: the brim off the ground)
+                           _mv_legs(4, 10, 20, 8, 14, 22))
+POSES['gu_f_push'] = _merge({'Hips': [('X', 86)], 'Spine': [('X', -26)], 'Spine1': [('X', -18)], 'Neck': [('X', -12)]},   # (the hips stay down: the chest up on the arms)
+                            _mv_legs(2, 8, 26, 4, 10, 26))
+POSES['gu_f_fours'] = _merge({'Hips': [('X', 80)], 'Spine': [('X', 4)], 'Neck': [('X', -30)]},
+                             _mv_legs(-80, 96, 70, -84, 100, 70), _arms(-70, -70, -16, -16, lower=34))
+POSES['gu_f_kneel'] = _merge({'Hips': [('X', 34)], 'Spine': [('X', 10)], 'Neck': [('X', -36)]},
+                             _mv_legs(-36, 104, 60, -118, 118, -30), _arms(-50, -60, -30, -50, lower=32))
+LIVE_AT['gu_f_lie'] = [('Left', None, (.34, -.56, .68)), ('Right', None, (-.34, -.56, .68))]
+LIVE_AT['gu_f_push'] = [('Left', None, (.24, -.46, .66)), ('Right', None, (-.24, -.46, .66))]
+LIVE_AT['gu_f_fours'] = [('Left', None, (.22, -.58, .43)), ('Right', None, (-.22, -.58, .43))]
+LIVE_AT['gu_f_kneel'] = [('Right', None, (-.16, -.4, .62))]
+_GU_TW = [0, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5]
+ANIMS['mv_getup_b'] = _clip(['gu_b_lie', 'gu_b_sit', 'gu_b_tuck', 'gu_b_kneel', 'mv_land_up', 'idle_in'], _GU_TW, 14, marks={'run': 6})
+ANIMS['mv_getup_f'] = _clip(['gu_f_lie', 'gu_f_push', 'gu_f_fours', 'gu_f_kneel', 'mv_land_up', 'idle_in'], _GU_TW, 14, marks={'run': 6})
+
+
 # ================================================================ idles and context moves (the live hero only) =========
 # What he does standing still (docs/exp/livereact.md IDLES; exported with --clips IDLE_LIVE: live_export.mjs --add). The
 # live hero picks them itself and plays them by their own timing (play / ms; marks.loop: the step a looping one goes back to),

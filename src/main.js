@@ -44,7 +44,7 @@
 // host.setBiome / setTime / teleport / setYaw.
 // HOST (see `host` below): player, arrows, spawnArrow, events, mods (modifiers), weapon (the loadout's), props, entities (add / remove / hide /
 //   query / near), itemOf, elev, inStream, blocked, layout,
-//   hitstop, shake, knock, play, aim, mouse, keys, toView(x, y, h) -> view px, sprite, point, line, layer(name),
+//   hitstop, shake, knock, launch, play, aim, mouse, keys, toView(x, y, h) -> view px, sprite, point, line, layer(name),
 //   world, biome, time, mood, wind (the wind feature, if any), feature(name), PPM / PPMY / PPMH, G, THREE,
 //   paused (the menu is open), openMenu(), uiSound(name) (the menu's sounds: hover, click, confirm, back, open),
 //   playerHidden (photo mode hides him: leave out what you draw of him).
@@ -119,6 +119,7 @@ const app = {
   get viewYaw() { return G.cine ? G.view.yaw : cv.yaw; },   // the heading things are DRAWN from (a cinema camera's; yaw: the game's frame)
   get VW() { return cv.VW; }, get VH() { return cv.VH; }, get opt() { return opt; }, get cam() { return cam; }, get arrows() { return arrows; },
   feat: name => feat(name), toView: (x, y, a) => toView(x, y, a),
+  get entities() { return stage.ents; },   // (the live hero's ragdoll: what stands near his body, view/herorag.js)
 };
 tp = performance.now();
 await stage.setBiome(stage.biomeI);
@@ -140,8 +141,9 @@ const hero = createHero({G, set, loadI, ctxO, app});
 // THE PLAYER (sim/player/adapter.js): player.js in the camera's frame, bridged to the world (collision, the world-frame
 // `player`, turning with the camera, the cursor's target, interaction, climbing at any angle)
 const pa = createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: () => stage.world, ents: () => stage.ents, biome: () => stage.biome,
-  opt: () => opt, proj, flags: Q, mods});
+  opt: () => opt, proj, flags: Q, mods, canLaunch: () => LAUNCH && !!live?.available});   // (a blast throws him only in a live body: his ragdoll, view/herorag.js)
 const {PL, P, player} = pa;
+const LAUNCH = Q.get('launch') !== '0';   // (a blast throws him: sim/player/launch.js; ?launch=0 the old skid)
 // THE LIVE HERO (docs/exp/livehero.md): the player drawn LIVE (view/livehero.js: his Blender model through
 // render/rigmesh.js) instead of his sprite. By default for the gunslinger (LIVE_LOADOUTS); ?live=1 every loadout with a
 // live model (the outlaw too), ?live=0 none. The loop calls its compose instead of hero.compose while he wears one
@@ -180,7 +182,9 @@ const host = {
   player, P, PL, arrows, spawnArrow, events, keys, mouse, BUSY, mods,
   get weapon() { return hero.weapon; },   // the loadout's weapon (content/weapons.js): kind 'bow' | 'gun', abilities
   itemOf: p => stage.world.itemOf(p), elev, inStream, blocked: (x, y, z = P.z, air = false) => pa.blocked(x, y, z, air),
-  hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); }, play: (frame, sec) => PL.hold(frame, sec),
+  hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); },
+  launch: (vx, vy, vz) => { const [a, b] = toView(vx, vy); return PL.launch(a, b, vz); },   // thrown (sim/player/launch.js): false -> knock him instead
+  play: (frame, sec) => PL.hold(frame, sec),
   aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target}; },
   toView: (x, y, h = 0) => { const s = G.toScreen(x, h, y); return [s[0], s[1]]; },         // world -> view px (rotated)
   sprite,                                                                              // {img, x, y, h, px, py, ...}

@@ -33,6 +33,7 @@
 // BUDGET: ~.01 ms a step with a few dozen.
 
 import {TERRAIN_ON} from '../world/layout.js';
+import {throwOf} from './player/launch.js';   // a blast's throw (by how close he stood)
 const AIR = new Set(['leap', 'fall', 'climb', 'splash']);
 const BODY = .25;   // the player's body radius (sim/player/adapter.js R_BODY): a zone reaches him at its edge
 
@@ -75,7 +76,8 @@ export function createHazards(host, {name = 'hazards', cap = 64} = {}) {
       const dx = P.x - h.x, dy = P.y - h.y, d = Math.sqrt(dx * dx + dy * dy);
       if (d < h.r + BODY && canHit()) {
         const ux = d > .05 ? dx / d : 0, uy = d > .05 ? dy / d : 1;
-        if (h.knock > 0) host.knock(ux * h.knock, uy * h.knock);
+        const th = h.style === 'blast' ? throwOf(1 - d / (h.r + BODY)) : null;   // a burst close by THROWS him (sim/player/launch.js; a live loadout)
+        if (h.knock > 0 && !(th && host.launch?.(ux * th[0], uy * th[0], th[1]))) host.knock(ux * h.knock, uy * h.knock);
         if (h.slowMul < 1) slow(h.slowMul, h.slowDur);
         if (h.dmg > 0) {
           const k = emit('player.hit', P.x, P.y, P.z); k.vx = ux * 4; k.vy = uy * 4; k.player = true;

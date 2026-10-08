@@ -19,6 +19,11 @@ export const EVENTS = {
   'player.jump':        ['sim/player/player.js',  'x, y, z (emitted from the Space key handler, turned there)', 'atmos, flow, wildlife, audio'],
   'player.splash':      ['sim/player/player.js',  'x, y, small? (his legs in the water: a leap that came up short caught the far bank)', 'atmos, flow, wildlife, audio'],
   'player.roll':        ['(reserved: not emitted yet)', 'x, y', 'atmos (frost puff)'],
+  // thrown by a blast (sim/player/launch.js, a live loadout): flying, into a wall, down, up
+  'player.launch':      ['sim/player/launch.js',  'x, y, vx, vy (m/s along the ground), up (m/s)', '(none yet: view/herorag.js follows P.state)'],
+  'player.slam':        ['sim/player/launch.js',  'x, y, vx, vy (his speed into what stopped him), speed (m/s)', 'combat (hitstop, grit), audio'],
+  'player.floored':     ['sim/player/launch.js',  'x, y (the body came to rest, lying)', 'audio'],
+  'player.getup':       ['sim/player/launch.js',  'x, y', '(none yet)'],
   // the revolver (sim/player/gun.js, a gun loadout); gun = the weapon's id (content/weapons.js: peacemaker | brass_navy)
   'player.draw':        ['sim/player/gun.js',     'x, y, z, gun, hip (the first shot leaves from the hip)', 'audio'],
   'player.shoot':       ['sim/player/gun.js',     'x, y, h (the muzzle), z, vx, vy (unit: the way it flies), gun, fan, hip, left (rounds)', 'gunfx, flow (the camera kick), audio, wildlife, music'],
@@ -27,7 +32,7 @@ export const EVENTS = {
   'player.holster':     ['sim/player/gun.js',     'x, y, z, gun (the twirl ends in the holster)', 'audio'],
   'player.melee':       ['sim/player/gun.js',     'x, y, z, vx, vy (unit: the way of the blow), reach (m), arc (deg), dmg, push, gun (the pistol whip lands its blow)', 'gun (lands it through combat: combat.hit by melee)'],
   'player.hit':         ['features/combat/core.js, features/foes/sim.js, sim/hazards.js', 'x, y, vx, vy, player: true (a brute landed on him; a gunman\'s bullet hit him; a hazard went off on him)', 'atmos, wildlife, audio, music'],
-  'player.hurt':        ['features/combat/core.js, features/foes/sim.js, sim/hazards.js', 'dmg, by (the brute | \'blast\' | the gunman | the enemy a hazard or a drain is from), x, y', 'game, battlemusic, affixes (an affix\'s blow: Glacial chills, Vampiric heals)'],
+  'player.hurt':        ['features/combat/core.js, features/foes/sim.js, sim/hazards.js, sim/player/launch.js', 'dmg, by (\'slam\': thrown into a wall | the brute | \'blast\' | the gunman | the enemy a hazard or a drain is from), x, y', 'game, battlemusic, affixes (an affix\'s blow: Glacial chills, Vampiric heals)'],
   // the desert sandbox's stakes (game/game.js, while features/foes.js says a fight is on)
   'player.down':        ['game/game.js',          'x, y (your health ran out in the desert sandbox: the gang stops shooting)', 'foes'],
   'player.respawn':     ['game/game.js',          'x, y (up again at the fort: the gunmen are gone, the next gang comes later)', 'foes'],

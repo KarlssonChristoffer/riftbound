@@ -28,11 +28,13 @@
 //   events []                          pushes {type: 'player.step'|'player.land'|'player.jump'|'player.splash', x, y, ...} (core/events.js)
 //   shake(px, sec)
 //   gun(PL, internals) -> a revolver (sim/player/gun.js createGun): while the loadout's weapon is a gun it gets LMB and the frame
+//   canLaunch() -> bool               a blast may THROW him (sim/player/launch.js: PL.launch; false: the skid, PL.knock)
 //   lasso(PL, internals) -> the lasso's hands (sim/player/lasso.js createLasso): while the equipment experiment's lasso has
 //            something to do it drives the frame (before the gun); PL.lasso is its API
 import {WEAPONS} from '../../content/weapons.js';   // the bow's numbers (shoot)
 import {ramps} from './harmonize.js';   // the character palette (pixel bow layer)
 import {clamp} from '../../core/mathx.js';
+import {createLaunch, STATES as THROWN} from './launch.js';   // thrown by a blast: flying, slammed, down, getting up
 export const AIM_H = 1.25;   // arrows fly at chest height
 // walkable terrain (docs/TERRAIN.md): a step up is taken in stride up to STEP_UP m (H.blocked stops anything higher), a step
 // down up to SNAP m (a slope walked or rolled down); a bigger drop is a ledge, and he falls
@@ -47,7 +49,7 @@ const AIM_TURN_RATE = 1200;
 const STANCE_HOLD = .25;  // s: a moving-aim stance (running forward / backing up) can't flip back sooner (no flip-flop)
 // states in which the player is taken over by a move (no aiming, rolling or new actions); 'rope': hanging from a lasso
 // (sim/player/lasso.js, the equipment experiment's)
-export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'hold', 'knock', 'rope']);
+export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'hold', 'knock', 'rope', ...THROWN]);
 // The dodge (Space). The roll clip is a FORWARD roll, so a roll never reverses:
 // - running into a roll more than leadMin deg off the way he faces: he plants and turns first (the run's turn frames,
 //   lead s each, untouchable from the plant)
@@ -243,7 +245,7 @@ export function createPlayer(H) {
     P.face = P.want = dirOf(D[0], D[1]);
   }
   // untouchable: rolling (from the plant on), or the first moment of a backstep (the game's i-frames)
-  const untouchable = () => P.state === 'roll' || (P.state === 'backstep' && P.t < DODGE.guard);
+  const untouchable = () => P.state === 'roll' || (P.state === 'backstep' && P.t < DODGE.guard) || thrown.guard();   // (thrown: sim/player/launch.js)
   function shoot() {
     if (gun?.on()) return;   // a gun fires on the press (sim/player/gun.js); a release does nothing here
     const W = WEAPONS.bow;
@@ -452,6 +454,7 @@ export function createPlayer(H) {
     P.x = cs.c.x; return true;
   }
   function stepTraverse(dt) {   // returns true when it handled this frame
+    if (thrown.step(dt)) return true;   // thrown by a blast (sim/player/launch.js)
     // walked or rolled off a ledge: fall (any edge; climbing UP needs a climb spot)
     if (!BUSY.has(P.state) && P.z > elev(P.x, P.y) + .05) startFall();
     if (H.grad && !BUSY.has(P.state) && !dodging() && H.grad(P.x, P.y, _grad)[2] > SLIDE.on && _grad[2] < SLIDE.cliff) {   // (a bank: still steep half a metre on down it, not a small step)
@@ -653,7 +656,7 @@ export function createPlayer(H) {
   function step(dt) {
     const {SP, CLIP} = A, WALK = CLIP.walk, RUN = CLIP.run, ND = A.ND;
     const [mx, my] = moveInput();
-    P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt);
+    P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt); thrown.tick(dt);
     if (lasso && lasso.step(dt, mx, my)) return;   // the lasso in his hands (sim/player/lasso.js; nothing while it's idle)
     if (gun && gun.step(dt, mx, my)) return;   // a gun loadout: the revolver drives the frame while it's in hand (sim/player/gun.js)
     if (stepTraverse(dt)) return;
@@ -876,7 +879,7 @@ export function createPlayer(H) {
   }
 
   // ---------------- input (the host maps its keys / buttons to these) ----------------
-  function onSpace() { if (dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
+  function onSpace() { if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
   function press() {   // LMB down: draw (kept through a roll)
@@ -892,7 +895,7 @@ export function createPlayer(H) {
     if (P.state === 'draw') shoot(); else if ((P.state === 'roll' && P.aimRoll) || P.state === 'backstep') P.queuedShot = true;
   }
   function hold(frame, sec) { if (BUSY.has(P.state) || dodging()) return; P.hold = {frame: A.SP[frame] ? frame : 'release.0', sec}; P.state = 'hold'; P.t = 0; }
-  function knock(vx, vy) { if (P.state === 'climb') return; P.vx = vx; P.vy = vy; P.state = 'knock'; P.t = 0; }
+  function knock(vx, vy) { if (P.state === 'climb' || THROWN.includes(P.state)) return; P.vx = vx; P.vy = vy; P.state = 'knock'; P.t = 0; }   // (thrown: a skid doesn't cut the flight short)
 
   // ---------------- HD bow layer (display resolution, over the pixel art) ----------------
   // The bowstring is left out of the pixel sprite; its tip -> nock -> tip path and per-sample visibility (hidden where
@@ -1082,6 +1085,7 @@ export function createPlayer(H) {
   PL.gun = gun;
   const lasso = H.lasso ? H.lasso(PL, internals) : null;   // (the equipment experiment's lasso: sim/player/lasso.js)
   PL.lasso = lasso;
+  const thrown = createLaunch({...internals, elev, inStream, splash, dryBack});   // a blast's throw (sim/player/launch.js: PL.launch)
 
   // for the systems around him (they ask, they don't write P): face a shot along a view-frame direction (the string
   // settles: twang 0), flicker as he's hurt (i-frames; the respawn's flicker too), re-count the facings for an atlas
@@ -1090,5 +1094,5 @@ export function createPlayer(H) {
   const flicker = sec => { P.blink = sec; };
   const regrid = (n0, n1) => { P.face = Math.round(P.face * n1 / n0) % n1; P.want = P.face; };
   return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, tryVault, canVault, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, faceShot, flicker, regrid,
-    press, release, hold, knock, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
+    press, release, hold, knock, launch: thrown.start, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
 }

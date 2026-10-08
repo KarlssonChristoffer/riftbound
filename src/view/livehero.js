@@ -64,6 +64,7 @@ import {LOADOUTS} from './hero.js';
 import {WEAPONS} from '../content/weapons.js';
 import {elev} from '../world/world.js';   // (the ground under his feet: FEET ON THE GROUND)
 import {VAULT_T, VAULT_OVER_T} from '../sim/player/player.js';   // (MOTION: the vaults' frames by their progress)
+import {createHeroRag} from './herorag.js';   // THROWN: his ragdoll while a blast throws him (sim/player/launch.js)
 
 const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const C20 = Math.cos(20 * DEG), S55 = Math.sin(55 * DEG), K_UP = Math.tan(20 * DEG) * C20 / S55;   // the sprite camera's squash
@@ -273,6 +274,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   // (render world: x' = cos phi x - sin phi y + x, h' = z + h, z' = -sin phi x - cos phi y + z). Read by the movement meters
   // (feet on the ground, slide); n counts the frames drawn
   const DRAWN = {w: null, phi: 0, x: 0, h: 0, z: 0, n: 0};
+  // THROWN (view/herorag.js): while a blast throws him (P.state launch / down / getup) his pose is a ragdoll's, pinned to the sim's body
+  const HR = createHeroRag({app, G, rig, model, J, BN, PI, toLocal, fk, blendLocal, poseOf, K}); HR.warm();
 
   // ---------------------------------------------------------------- which pose: the frame, its clip, the next frame, the fraction
   const NAME = {}, nm = (pre, i) => (NAME[pre] ??= [])[i] ??= pre + i;
@@ -1348,6 +1351,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       toLocalTurned(show, phi, LW); turnedParts(show, phi, TBP, null); tbHave = true;
       tbGun = GUN >= 0 && gunNear(show) ? barrel(show) + phi : NaN;
     } else tbHave = false;
+    // THROWN: the ragdoll's pose instead (and drawn as far down as it lies); his own animation again as he gets up
+    show = HR.frame(show, P, phi, AX, AY, AZ, dt); PR.k = HR.k; PR.pitch = HR.pitch;
     perf?.end('live.pose'); perf?.begin('cloth.sim', 'char');
     cloth(show, phi, yaw, dt, P);   // THE RUNTIME CLOTH on the drawn pose (the sprite's own sim rests meanwhile: loop.js)
     perf?.end('cloth.sim'); perf?.begin('live.pose', 'char');
@@ -1422,8 +1427,10 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     restore(S) { [t, lastT, clipNow, frameNow, frameT, fadeT, haveShow, wf, twist, twistShown, demoA, stepK, sampT, prevOk, on, aimPhi, aimBase] = S.v; Ll.set(S.a[0]); Lfrom.set(S.a[1]); Wshow.set(S.a[2]); PREV.set(S.a[3]); Object.assign(K, S.K); },
     demos, emotes: EMOTES,
     compose, sprite,
+    rag: HR,   // (THROWN: his ragdoll, view/herorag.js; tests)
   };
   const reset0 = live.reset; live.reset = () => { reset0(); reactReset(); };   // (REACTIONS: no history carried over either)
+  const reset1 = live.reset; live.reset = () => { reset1(); HR.reset(); };   // (THROWN: nor a ragdoll)
   return live;
 }
 
@@ -1467,6 +1474,7 @@ export async function createLiveHero(o) {
     get demos() { return cur()?.demos ?? DEMOS; }, get emotes() { return cur()?.emotes ?? []; },
     get stats() { return cur()?.stats ?? NOSTATS; }, get aim() { return cur()?.aim; }, get drawn() { return cur()?.drawn; },
     muzzle: () => on ? cur()?.muzzle() ?? null : null,   // (the drawn muzzle: host.playerMuzzle, the shot's flash)
+    get rag() { return cur()?.rag ?? null; },
     get model() { return cur()?.model; }, get J() { return cur()?.J; }, get BN() { return cur()?.BN; }, poseOf: n => cur()?.poseOf(n),
     setLineup(items) { cur()?.setLineup(items); },
     snapshot: () => cur().snapshot(), restore: S => cur().restore(S),

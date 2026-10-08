@@ -1096,6 +1096,9 @@ export function createAudio(ctx, host = {}) {
         case 'foe.reload': if (e.gun !== 'coach') fire('foeReload', e.x, e.y, {phase: e.phase, gun: e.gun}); else if (e.phase === 'start') fire('coachReload', e.x, e.y, {mark: 'break'}); break;
         case 'foe.clip': if (e.gun === 'coach') fire('coachReload', e.x, e.y, {mark: e.mark}); break;   // (features/foes/look.js)
         case 'foe.holster': fire('foeHolster', e.x, e.y); break;
+        // thrown by a blast (sim/player/launch.js): his body into a wall, onto the ground (the gunmen's fall: a body's thud)
+        case 'player.slam': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: e.speed > 6})); break;
+        case 'player.floored': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); break;
         case 'foe.ground': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: e.foe === 'bruiser'})); break;   // (features/foes/look.js)
         // a bullet's end (sim/projectiles.js, features/foes/sim.js) by what it met; water is arrow.splash's, a hit combat.hit's
         case 'bullet.impact': {

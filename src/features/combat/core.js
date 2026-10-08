@@ -18,6 +18,7 @@
 
 import {roamable, TERRAIN_ON, steep} from '../../world/world.js';
 import {parkMiller} from '../../core/rng.js';
+import {throwOf} from '../../sim/player/launch.js';   // a blast's throw (by how close he stood)
 
 export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -227,7 +228,8 @@ export function createCore(host) {
     }
     if (Math.abs(P.z - z) < 1.2 && dP < r + .8 && !['climb', 'leap', 'fall'].includes(P.state) && !C.immune?.()) {
       const k = 1 - dP / (r + .8), ux = dP > .05 ? (P.x - x) / dP : 0, uy = dP > .05 ? (P.y - y) / dP : 1, sp = 6 + 9 * k;
-      host.knock(ux * sp, uy * sp);
+      const th = throwOf(k);   // close enough: THROWN (sim/player/launch.js: a live loadout flies, slams, lies, gets up); else the skid
+      if (!th || !host.launch?.(ux * th[0], uy * th[0], th[1])) host.knock(ux * sp, uy * sp);
       if (barrel) events.push({type: 'player.hurt', dmg: Math.round(dmg * .5 * (.4 + .6 * k)), by: 'blast', x: P.x, y: P.y});   // powder kegs hurt you too
     }
   }
@@ -512,6 +514,13 @@ export function createCore(host) {
       return true;
     },
 
+    // thrown into a wall (sim/player/launch.js player.slam): a beat of hitstop, grit and dust off the wall where he hit it
+    slam(e) {
+      hitstop(e.speed > 6 ? T.hsBreak : T.hsHit);
+      const l = Math.hypot(e.vx, e.vy) || 1, ux = e.vx / l, uy = e.vy / l, x = e.x + ux * .3, y = e.y + uy * .3, z = host.elev(e.x, e.y);
+      chunks(x, y, z + .8, e.speed > 6 ? 8 : 5, PAL.stone, {dir: [-ux * 1.4, -uy * 1.4], speed: 1.3, big: 0, spreadH: .6});
+      puff(x, y, z + .5, 8, .45);
+    },
     // ---- the game's hooks (game/): enemies, immunity, steering, stage resets ----
     immune: null,   // () -> bool: the player can't be hit now (dodge roll, i-frames)
     steer: null,    // (brute) -> {x, y, stop} | null: the next waypoint for an enemy (game/nav.js)

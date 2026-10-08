@@ -21,8 +21,14 @@
 // a running max), the sprite camera's 20 deg upright .. the world's 41 deg lying (render/rigmesh.js).
 // API: const R = createRagdolls(host, {rig}?); await R.load(name, url); R.warm(name) (once, at load); R.ready(name); R.spawn(slot, name, o) (o: x, y, z (the
 //   ground), face (rad), pose (a sprite pose name), mats (instead of pose: the pose on screen as bone -> 3x4, body space: a
-//   live body's, view/livebody.js boneMats), hit {x, y, h, dx, dy, power} | null, flash, frozen); R.step(dt);
+//   live body's, view/livebody.js boneMats), hit {x, y, h, dx, dy, power} | null, flash, frozen, muscles (x the muscles' hold: 1), headR (m: the head's radius
+//   against the ground and walls; a hat that stays on needs its brim's)); R.step(dt);
 //   R.frame(); R.alpha(slot, a); R.free(slot); R.onGround = (slot) => {} (the torso first hits the ground); R.bytes; R.ms.
+//   DRIVEN (the player thrown: view/herorag.js, which draws the body itself from R.frames and never calls R.frame): R.drive(slot,
+//   x, h, z, k) pulls the pelvis block toward a target (render axes) in every constraint pass (k a pass), the target eased from the
+//   last call's over the step's substeps; R.shove(slot, vx, vh, vz, legs) adds a velocity to every body point (the legs x (1 +
+//   legs), the head x (1 - legs / 2): a spin); R.frames(slot, out) the NF driving frames (3x4 each); R.boneFrame(bone) its frame
+//   (-1: none of its own).
 //   SHARED RIG ({rig}: a render/rigmesh.js rig its owner made, the live bodies drawn in it too: one draw per model and pass
 //   for the bodies standing and the bodies falling): R.adopt(name, J, M, {mass}) takes a model that rig already has (no
 //   second copy of the mesh), the ragdolls use slots 0..15, and the owner warms and renders the rig (frame() only puts).
@@ -104,7 +110,8 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
   const JL = new Float64Array(SL * 4), HOLD = new Float64Array(SL * NB * 3), XP = new Float64Array(SL * NF * 3);   // the muscles' targets (pelvis frame), the transported x axes
   const OFF = new Float32Array(SL * SEGMAX * 12), FRM = new Float64Array(NF * 12), FI = new Float64Array(12), MATS = new Float32Array(SEGMAX * 12);
   const BODY = []; for (let s = 0; s < SL; s++) BODY.push({on: false, model: null, t: 0, acc: 0, asleep: false, frozen: false, still: 0, lie: 0, alpha: 1, flash: 0,
-    thud: false, ground: 0, props: new Float64Array(8 * 7), np: 0, segFrame: new Int8Array(SEGMAX), sx: 0, sy: 0, sz: 0, holstered: false, drawn: false, mats: new Float32Array(SEGMAX * 12)});
+    thud: false, ground: 0, props: new Float64Array(8 * 7), np: 0, segFrame: new Int8Array(SEGMAX), sx: 0, sy: 0, sz: 0, holstered: false, drawn: false, mats: new Float32Array(SEGMAX * 12),
+    drv: 0, dp: new Float64Array(6), dt3: new Float64Array(3), mk: 1, headR: 0});   // (DRIVEN: k a pass (0: free), the targets (the last call's, this one's), this substep's)
   const nearOut = [], TMP = new Float64Array(12);
   let ms = 0, msF = 0;   // the steps' time, the draw's (matrices + the rig's pass A): ms a frame, smoothed
 
@@ -235,7 +242,7 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
       for (let k = 0; k < 3; k++) HOLD[h + k] = FI[k * 4] * x + FI[k * 4 + 1] * y + FI[k * 4 + 2] * z + FI[k * 4 + 3];
     }
     B.sx = o.x; B.sy = o.z; B.sz = o.y;   // (the snap anchor: where he stood, render axes)
-    Object.assign(B, {on: true, model: m, t: 0, acc: 0, asleep: !!o.frozen, frozen: !!o.frozen, drawn: false, still: 0, lie: 0, alpha: o.alpha ?? 1, flash: o.flash || 0, thud: false, np: 0});
+    Object.assign(B, {on: true, model: m, t: 0, acc: 0, asleep: !!o.frozen, frozen: !!o.frozen, drawn: false, still: 0, lie: 0, alpha: o.alpha ?? 1, flash: o.flash || 0, thud: false, np: 0, drv: 0, mk: o.muscles ?? 1, headR: o.headR || 0});
     B.segFrame.set(m.segFrame);
     // a gun not in the hand (its origin off the grip by more than RH m against gun_aim: holstered, slung) stays on the
     // body, on the right thigh or the chest, whichever it is nearer (it flies only from the hand)
@@ -293,7 +300,7 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
     }
   }
   function collide(B, s, i) {
-    const b = s * NP * 3 + i * 3, r = RAD[i];
+    const b = s * NP * 3 + i * 3, r = i === 7 && B.headR ? B.headR : RAD[i];
     let x = P[b], y = P[b + 1], z = P[b + 2], hit = false;
     for (let k = 0; k < B.np; k++) {
       const q = k * 7; if (y - r > B.props[q + 6] || y + r < B.props[q + 5]) continue;
@@ -331,7 +338,7 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
       frameOf(s, 0, FRM, 0, true);
       for (let i = 4; i < NB; i++) {
         const tl = LEG[i] ? M.legs : M.body; if (B.t >= tl) continue;
-        const u = 1 - B.t / tl, kk = M.k * u * u, h = (s * NB + i) * 3, k = b + i * 3;
+        const u = 1 - B.t / tl, kk = M.k * B.mk * u * u, h = (s * NB + i) * 3, k = b + i * 3;
         for (let a = 0; a < 3; a++) {
           const tg = FRM[a * 4] * HOLD[h] + FRM[a * 4 + 1] * HOLD[h + 1] + FRM[a * 4 + 2] * HOLD[h + 2] + FRM[a * 4 + 3];
           P[k + a] += (tg - P[k + a]) * kk;
@@ -349,6 +356,7 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
         P[j] -= dx * f * wj; P[j + 1] -= dy * f * wj; P[j + 2] -= dz * f * wj;
       }
       joints(s);
+      if (B.drv) pull(B, b);
       for (let i = 0; i < NP; i++) if (collide(B, s, i)) CONTACT[i] = 1;
     }
     // friction where it touches (the sliding speed along the ground), a little bounce for the gun and the hat
@@ -365,6 +373,12 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
     }
     B.t += dt;
     if (B.t > T.sleep.after && mx < T.sleep.eps) { if ((B.still += dt) > T.sleep.still) B.asleep = true; } else B.still = 0;
+  }
+  // DRIVEN: the pelvis block (points 0-3, moved as one) k of the way to this substep's target
+  function pull(B, b) {
+    let cx = 0, cy = 0, cz = 0; for (let i = 0; i < 4; i++) { cx += P[b + i * 3]; cy += P[b + i * 3 + 1]; cz += P[b + i * 3 + 2]; }
+    const k = B.drv, dx = (B.dt3[0] - cx / 4) * k, dy = (B.dt3[1] - cy / 4) * k, dz = (B.dt3[2] - cz / 4) * k;
+    for (let i = 0; i < 4; i++) { P[b + i * 3] += dx; P[b + i * 3 + 1] += dy; P[b + i * 3 + 2] += dz; }
   }
   // elbows and knees: within their fold .. straight, and bending one way (the middle toward the block's front: elbows
   // the chest's, knees the pelvis's: the shin goes back)
@@ -399,7 +413,12 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
       if (B.asleep) continue;
       gather(B, s);
       B.acc = Math.min(B.acc + dt, 6 * h);
-      while (B.acc >= h) { substep(B, s, h); B.acc -= h; }
+      const n = Math.max(1, Math.floor(B.acc / h)), D = B.dp; let i = 0;   // (DRIVEN: the target eased over the substeps)
+      while (B.acc >= h) {
+        if (B.drv) { const u = Math.min(1, ++i / n); for (let a = 0; a < 3; a++) B.dt3[a] = D[a] + (D[3 + a] - D[a]) * u; }
+        substep(B, s, h); B.acc -= h;
+      }
+      if (B.drv) for (let a = 0; a < 3; a++) D[a] = D[3 + a];
     }
     ms = ms * .9 + (performance.now() - t0) * .1;
   }
@@ -468,8 +487,26 @@ export function createRagdolls(host, {rig: ext = null} = {}) {
     if (G.aoStamp) for (const S of [AO_BIG, AO_SMALL]) if (!S.r || S.r.epoch !== G.aoEpoch) S.r = G.aoStamp(S.w, S.h, S.d);
     if (!ext) await rig.warm();   // (a shared rig: its owner warms it)
   }
+  // DRIVEN (view/herorag.js): the target and its pull; a velocity for the whole body; the frames for its owner to draw
+  function drive(s, x, h, z, k) {
+    const B = BODY[s]; if (!B.on) return;
+    const D = B.dp; if (!B.drv) { D[0] = x; D[1] = h; D[2] = z; }
+    D[3] = x; D[4] = h; D[5] = z; B.drv = k;
+    if (B.asleep && !B.frozen && Math.hypot(D[3] - D[0], D[4] - D[1], D[5] - D[2]) > 1e-3) { B.asleep = false; B.still = 0; }   // (it moves on: awake)
+  }
+  function shove(s, vx, vh, vz, legs = 0) {
+    const B = BODY[s]; if (!B.on || B.frozen) return;
+    const b = s * NP * 3, dt = 1 / T.sub;
+    for (let i = 0; i < NP; i++) {
+      const k = (1 + (LEG[i] ? legs : i === 7 ? -legs / 2 : 0)) * dt;
+      Q[b + i * 3] -= vx * k; Q[b + i * 3 + 1] -= vh * k; Q[b + i * 3 + 2] -= vz * k;
+    }
+    B.asleep = false; B.still = 0;
+  }
+  function frames(s, out) { for (let f = 0; f < NF; f++) frameOf(s, f, out, f * 12, BODY[s].frozen); return out; }
   const R = {
     load, adopt, warm, ready: name => !!models[name], spawn, push, step, frame, poseFor: (name, p) => models[name] && poseFor(models[name], p),
+    drive, shove, frames, boneFrame: n => FRAME_OF[n] ?? -1, NF,
     alpha(s, a) { BODY[s].alpha = a; },
     free(s) { BODY[s].on = false; },
     body: s => BODY[s], onGround: null,

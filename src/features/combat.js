@@ -51,6 +51,7 @@ export async function create(host) {
     update(dt, evs) {
       const t0 = now(), n0 = host.events.length;
       core.update(dt);
+      for (const e of evs) if (e.type === 'player.slam') core.slam(e);   // (thrown into a wall: sim/player/launch.js)
       // the props see this step's events and the ones combat just pushed (break, explode): the arena ran both on the
       // same step's list. They are marked as seen, so next step's copy of them is skipped
       phys.update(dt, host.events.length > n0 ? evs.concat(host.events.slice(n0)) : evs);
