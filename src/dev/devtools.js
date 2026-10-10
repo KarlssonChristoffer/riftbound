@@ -1,13 +1,14 @@
 // DEV TOOLS: things for building the game, not playing it. The colliders overlay (Shift+G), the debug HUD (top left,
 // dev mode), the tree lineup (?lineup=trees). Loaded by the boot, which hands it to the engine as E.dev; nothing in the
 // game imports this.
-import {PLAY, topOfProp} from '../world/world.js';
+import {PLAY} from '../world/world.js';
+import {heightOf} from '../world/collide.js';
 import {DEG} from '../render/gfx.js';
 import {SNAP_NAME} from '../render/camera.js';
 import {DEBUG} from '../render/options.js';
 const $ = s => document.querySelector(s);
 
-// Shift+G: colliders (red at their base, dim at their top where the world gives one: world.js topOfProp), the playable rectangle
+// Shift+G: colliders (red at their base, dim at their top: world/collide.js heightOf), the playable rectangle
 // (cyan), his body's circle at his feet (yellow; magenta while he's inside something: docs/COLLISION.md)
 const R_BODY = .25;
 export function drawZones({G, host, world}) {
@@ -17,7 +18,7 @@ export function drawZones({G, host, world}) {
   poly([[PLAY.x0, PLAY.y0], [PLAY.x1, PLAY.y0], [PLAY.x1, PLAY.y1], [PLAY.x0, PLAY.y1]], 0, '#3ad0ff');
   for (const p of world.props) {
     if (p.gone || p.broken || !(p.rect || p.r)) continue;
-    const z = p.z || 0, t = topOfProp(p);
+    const z = p.z || 0, t = heightOf(p);
     for (const [h, col] of t ? [[z, '#ff5050'], [z + t, 'rgba(255,80,80,.45)']] : [[z, '#ff5050']]) {
       if (p.rect) poly([[p.rect[0], p.rect[1]], [p.rect[2], p.rect[1]], [p.rect[2], p.rect[3]], [p.rect[0], p.rect[3]]], h, col);
       else ring(p.x, p.y, p.r, h, col);

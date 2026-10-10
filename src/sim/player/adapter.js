@@ -13,6 +13,7 @@ import {createGun} from './gun.js';   // a gun loadout's revolver (player.js H.g
 import {createLasso} from './lasso.js';   // the equipment experiment's lasso in his hands (player.js H.lasso)
 import {createBrawl} from './brawl.js';   // the live cowboys' boot, barge, lift and throw (player.js H.brawl; features/brawl.js uses it)
 import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON, vaultTop} from '../../world/world.js';
+import {createCollide} from '../../world/collide.js';   // the world's solids (docs/COLLISION.md)
 
 const R_BODY = .25;
 // THE STONE WALLS' BREACHES (world/walls3d.js, world.js vaultTop): rubble no higher than STEP_OVER over his feet is stepped over (it
@@ -42,8 +43,16 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   let PWX = 0, PWY = 0; const PWV = [0, 0];
   if (mods) { const f = () => { PWX = mods.value('player.windX', 0); PWY = mods.value('player.windY', 0); }; mods.watch(f); f(); }
   const windV = () => { if (!PWX && !PWY) return null; const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); PWV[0] = PWX * c - PWY * s; PWV[1] = PWX * s + PWY * c; return PWV; };
-  // collision in the world (round, so it doesn't change with the camera; the arena squashes it to match its 2D look)
-  function blocked(x, y, z, air) {
+  // COLLISION in the world (round, so it doesn't change with the camera): world/collide.js with his body PB (its props: within 1 m of
+  // his feet's height, rubble low enough stepped over; the ground: tested at his middle). ?collide=old: the old test (blockedOld: a box
+  // grown square at its corners, no unstick)
+  const OLD = flags.get('collide') === 'old', C = createCollide(ents);
+  const PB = {r: R_BODY,
+    counts: (p, z) => !p.broken && !p.gone && Math.abs((p.z || 0) - z) < 1,
+    through: (p, z) => rubble(p, z),
+    ground: (x, y, z, air) => !walkable(x, y) || (!air && inStream(x, y)) || elev(x, y) > z + .3 || (!air && steep(x, y) && elev(x, y) > z + .01)};   // (steep: no walking up a cliff or a ramp's side, not even in small steps)
+  function blocked(x, y, z, air) { return OLD ? blockedOld(x, y, z, air) : C.overlap(PB, x, y, z, air); }
+  function blockedOld(x, y, z, air) {
     if (!walkable(x, y)) return true;
     if (!air && inStream(x, y)) return true;
     if (elev(x, y) > z + .3) return true;
@@ -55,7 +64,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   // THE UNSTICK (UN above): US = the last free spot (world sx, sy, sz; NaN: none yet), the time to the next note, the spot he's
   // walking out to (tx, ty; NaN: none), the time to the next search after one found nothing (wait), how many times he was got out
   // (n: the tools read it)
-  const unOn = flags.get('collide') !== 'old', US = {sx: NaN, sy: NaN, sz: 0, note: 0, tx: NaN, ty: NaN, wait: 0, n: 0};
+  const US = {sx: NaN, sy: NaN, sz: 0, note: 0, tx: NaN, ty: NaN, wait: 0, n: 0};
   // the nearest free spot round world (x, y) at about height z (no higher than a step: blocked; no lower than UN.drop) -> true (US.tx / ty)
   function freeSpot(x, y, z) {
     const hx = US.sx - x, hy = US.sy - y;   // (toward the last free spot; none: NaN, every score NaN, the first free one)
@@ -73,7 +82,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   // world (x, y) -> his view-frame place (viewxf's turn, inline: no allocation)
   function placeW(x, y) { const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); P.x = x * c - y * s; P.y = x * s + y * c; }
   function unstick(dt) {
-    if (!unOn) return;
+    if (OLD) return;
     const x = player.x, y = player.y;
     if ((BUSY.has(P.state) && !UN_ACT.has(P.state)) || PL.ropewall?.active || P.z > elev(x, y) + .05) { US.tx = NaN; return; }
     if (!blocked(x, y, P.z, false)) {
