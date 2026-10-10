@@ -68,6 +68,7 @@ export const FLAG_DOCS = {
   carry:   '0: E lifts nothing (crates, barrels, powder kegs, the dropped hat or gun of a gunman) (features/brawl.js: E lifts, LMB throws, E sets down; a live loadout)',
   calls:   '0: no called shots on the desert gunmen (features/calls.js: a shot over the head takes his hat, at his gun hand the gun, at the legs a stagger)',
   launch:  '0: a blast only skids the player back (the old knock) instead of THROWING him (sim/player/launch.js: a live loadout flies, slams into walls, ragdolls, lies, gets up; view/herorag.js); docs/exp/launch.md',
+  collide: 'old: the collision as it was (docs/COLLISION.md): no unstick, so once he is inside a collider (a fall, a move that sets his place, something moving into him) he stays there',
   brute3d: '0: the brutes (a run brute, elite, champion, the yard pair) as the biome painted card mirrored to their facing instead of the 3D figure built in code (features/brutes3d.js, view/brute3d.js); menu > Dev > Features > 3D brutes',
   merchant3d: '0: the light garden merchant as his painted card (front / back, mirrored) instead of the 3D figure built in code (view/merchant3d.js)',
   foes: '0: no gunmen in the desert sandbox (features/foes.js); unarmed: two at a time who never draw (targets to test on)', ragdoll: '0: the gunmen die by their death clips instead of as live 3D ragdolls (features/foes/look.js, view/ragdoll.js; ragdolls are the default)',

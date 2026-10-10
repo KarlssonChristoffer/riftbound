@@ -1,20 +1,30 @@
 // DEV TOOLS: things for building the game, not playing it. The colliders overlay (Shift+G), the debug HUD (top left,
 // dev mode), the tree lineup (?lineup=trees). Loaded by the boot, which hands it to the engine as E.dev; nothing in the
 // game imports this.
-import {PLAY} from '../world/world.js';
+import {PLAY, topOfProp} from '../world/world.js';
 import {DEG} from '../render/gfx.js';
 import {SNAP_NAME} from '../render/camera.js';
 import {DEBUG} from '../render/options.js';
 const $ = s => document.querySelector(s);
 
-export function drawZones({G, host, world}) {   // Shift+G: colliders (red), the playable rectangle (cyan)
+// Shift+G: colliders (red at their base, dim at their top where the world gives one: world.js topOfProp), the playable rectangle
+// (cyan), his body's circle at his feet (yellow; magenta while he's inside something: docs/COLLISION.md)
+const R_BODY = .25;
+export function drawZones({G, host, world}) {
   const q = G.layer('front'); q.lineWidth = 1;
-  const poly = (pts, col) => { q.strokeStyle = col; q.beginPath(); pts.forEach(([x, y], i) => { const [sx, sy] = host.toView(x, y, 0); i ? q.lineTo(sx, sy) : q.moveTo(sx, sy); }); q.closePath(); q.stroke(); };
-  poly([[PLAY.x0, PLAY.y0], [PLAY.x1, PLAY.y0], [PLAY.x1, PLAY.y1], [PLAY.x0, PLAY.y1]], '#3ad0ff');
+  const poly = (pts, h, col) => { q.strokeStyle = col; q.beginPath(); pts.forEach(([x, y], i) => { const [sx, sy] = host.toView(x, y, h); i ? q.lineTo(sx, sy) : q.moveTo(sx, sy); }); q.closePath(); q.stroke(); };
+  const ring = (x, y, r, h, col) => poly(Array.from({length: 16}, (_, i) => [x + Math.cos(i / 16 * 6.283) * r, y + Math.sin(i / 16 * 6.283) * r]), h, col);
+  poly([[PLAY.x0, PLAY.y0], [PLAY.x1, PLAY.y0], [PLAY.x1, PLAY.y1], [PLAY.x0, PLAY.y1]], 0, '#3ad0ff');
   for (const p of world.props) {
-    if (p.rect) poly([[p.rect[0], p.rect[1]], [p.rect[2], p.rect[1]], [p.rect[2], p.rect[3]], [p.rect[0], p.rect[3]]], '#ff5050');
-    else if (p.r) poly(Array.from({length: 10}, (_, i) => [p.x + Math.cos(i / 10 * 6.283) * p.r, p.y + Math.sin(i / 10 * 6.283) * p.r]), '#ff5050');
+    if (p.gone || p.broken || !(p.rect || p.r)) continue;
+    const z = p.z || 0, t = topOfProp(p);
+    for (const [h, col] of t ? [[z, '#ff5050'], [z + t, 'rgba(255,80,80,.45)']] : [[z, '#ff5050']]) {
+      if (p.rect) poly([[p.rect[0], p.rect[1]], [p.rect[2], p.rect[1]], [p.rect[2], p.rect[3]], [p.rect[0], p.rect[3]]], h, col);
+      else ring(p.x, p.y, p.r, h, col);
+    }
   }
+  const pl = host.player, z = pl.z;
+  ring(pl.x, pl.y, R_BODY, z, host.blocked(pl.x, pl.y, z, false) ? '#ff40ff' : '#ffe040');
 }
 
 // the debug HUD (dev mode): biome, clock, loadout; features' own lines; the camera; the features; frame stats

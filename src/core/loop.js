@@ -38,7 +38,7 @@ export function createLoop(E) {
     perf.begin('env', 'sim'); env.step(dt); perf.end('env');   // the world clock first: everything after reads this step's time / weather
     if (freeze > 0) { freeze -= dt; for (const f of features) if (f.always) f.update?.(dt, []); return; }
     const n0 = events.length, px0 = P.x, py0 = P.y;
-    perf.begin('player.step', 'sim'); PL.step(dt); perf.end('player.step');
+    perf.begin('player.step', 'sim'); PL.step(dt); pa.unstick(dt); perf.end('player.step');   // (unstick: never left inside a collider, sim/player/adapter.js)
     for (let i = n0; i < events.length; i++) pa.toWorldEvent(events[i]);   // the player's events are in the view frame
     hero.moveCloth(P.x - px0, P.y - py0);   // its motion in the view frame, without the camera's turns
     perf.begin('arrows', 'sim'); proj.step(dt); perf.end('arrows');

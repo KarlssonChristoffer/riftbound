@@ -8,7 +8,7 @@
 //   blocks him, what he can interact with), the camera, the hero's atlas, features' aimTarget / interact.
 // EMITS (via player.js): player.step / land / jump / splash (turned into world coordinates here; core/events.js).
 //   const pa = createPlayerHost({...}); const {PL, P, player} = pa
-import {createPlayer, BUSY} from './player.js';
+import {createPlayer, BUSY, STEP_UP, SNAP} from './player.js';
 import {createGun} from './gun.js';   // a gun loadout's revolver (player.js H.gun)
 import {createLasso} from './lasso.js';   // the equipment experiment's lasso in his hands (player.js H.lasso)
 import {createBrawl} from './brawl.js';   // the live cowboys' boot, barge, lift and throw (player.js H.brawl; features/brawl.js uses it)
@@ -20,6 +20,17 @@ const R_BODY = .25;
 // walls stays a wall. The West Downs' old field walls ('fieldwall': round colliders) are low: vaulted anywhere, stepped over where
 // broken down. Only the player: the brutes' nav and colliders still treat every segment as a wall
 const STEP_OVER = .3, VAULT_OVER = 1.25, WALLK = new Set(['wall_n', 'wall_s', 'wall_w', 'wall_e', 'fieldwall']);
+// UNSTICK (docs/COLLISION.md phase 1): blocked() asks where he would go, never where he is, so once he was inside something (a fall
+// that came down in a collider, a move that set his place, something that moved into him) every step was refused and he stayed
+// there for good. After each step, on his feet and inside: he walks out at UN.speed m/s to the nearest free spot at about his level
+// (rings round him UN.ring m apart, UN.dirs ways, out to UN.max m; of a ring's free spots, the one toward where he last stood free;
+// UN.edge m past the rim). None in reach: back to that last free spot (noted every UN.note s while he stands free), with the
+// splash's blink. Not while a move carries him (player.js BUSY: a climb, a vault, a leap, a fall, a rope, thrown, a brawl or a fist
+// move place him themselves; a new move too, unless it's in UN_ACT: on his feet, pushed or held) or he's off the ground.
+// ?collide=old: off
+const UN = {ring: .05, max: 1.5, dirs: 16, speed: 4, note: .5, edge: .02, drop: .5};
+const UN_ACT = new Set(['land', 'hold', 'knock', 'chop']);
+const UN_DIR = Array.from({length: UN.dirs}, (_, i) => [Math.sin(i * 2 * Math.PI / UN.dirs), Math.cos(i * 2 * Math.PI / UN.dirs)]);
 
 export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags, mods, canLaunch = null}) {
   const toView = cv.toView, toWorld = cv.toWorld;
@@ -40,6 +51,49 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     for (const p of ents().near(x, y, R_BODY, nearB)) if (!p.broken && !p.gone && Math.abs((p.z || 0) - z) < 1 && (p.rect ? x > p.rect[0] - R_BODY && x < p.rect[2] + R_BODY && y > p.rect[1] - R_BODY && y < p.rect[3] + R_BODY
       : p.r && Math.hypot(p.x - x, p.y - y) < p.r + R_BODY) && !rubble(p, z)) return true;
     return false;
+  }
+  // THE UNSTICK (UN above): US = the last free spot (world sx, sy, sz; NaN: none yet), the time to the next note, the spot he's
+  // walking out to (tx, ty; NaN: none), the time to the next search after one found nothing (wait), how many times he was got out
+  // (n: the tools read it)
+  const unOn = flags.get('collide') !== 'old', US = {sx: NaN, sy: NaN, sz: 0, note: 0, tx: NaN, ty: NaN, wait: 0, n: 0};
+  // the nearest free spot round world (x, y) at about height z (no higher than a step: blocked; no lower than UN.drop) -> true (US.tx / ty)
+  function freeSpot(x, y, z) {
+    const hx = US.sx - x, hy = US.sy - y;   // (toward the last free spot; none: NaN, every score NaN, the first free one)
+    for (let r = UN.ring; r <= UN.max + 1e-9; r += UN.ring) {
+      let best = -1, bs = 0;
+      for (let i = 0; i < UN.dirs; i++) {
+        const u = UN_DIR[i], qx = x + u[0] * r, qy = y + u[1] * r;
+        if (blocked(qx, qy, z, false) || elev(qx, qy) < z - UN.drop) continue;
+        const s = u[0] * hx + u[1] * hy; if (best < 0 || s > bs) { best = i; bs = s; }
+      }
+      if (best >= 0) { const u = UN_DIR[best], e = r + UN.edge; US.tx = x + u[0] * e; US.ty = y + u[1] * e; return true; }
+    }
+    return false;
+  }
+  // world (x, y) -> his view-frame place (viewxf's turn, inline: no allocation)
+  function placeW(x, y) { const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); P.x = x * c - y * s; P.y = x * s + y * c; }
+  function unstick(dt) {
+    if (!unOn) return;
+    const x = player.x, y = player.y;
+    if ((BUSY.has(P.state) && !UN_ACT.has(P.state)) || PL.ropewall?.active || P.z > elev(x, y) + .05) { US.tx = NaN; return; }
+    if (!blocked(x, y, P.z, false)) {
+      US.tx = NaN;
+      if ((US.note -= dt) <= 0) { US.note = UN.note; US.sx = x; US.sy = y; US.sz = P.z; }
+      return;
+    }
+    if (US.tx !== US.tx) {
+      if (US.wait > 0) { US.wait -= dt; return; }
+      if (!freeSpot(x, y, P.z)) {   // (nothing free in reach: back where he last stood free; nowhere: a search every UN.note s, not every step)
+        if (US.sx === US.sx && !blocked(US.sx, US.sy, US.sz, false)) { placeW(US.sx, US.sy); P.z = US.sz; P.vx = P.vy = 0; P.blink = .6; US.n++; }
+        else US.wait = UN.note;
+        return;
+      }
+    }
+    const dx = US.tx - x, dy = US.ty - y, d = Math.hypot(dx, dy), k = d > UN.speed * dt ? UN.speed * dt / d : 1;
+    const nx = x + dx * k, ny = y + dy * k, e = elev(nx, ny);
+    placeW(nx, ny);
+    if (e <= P.z + STEP_UP && e >= P.z - SNAP) P.z = e;   // (on the ground as he goes; a bigger drop: player.js's fall takes it)
+    if (k === 1) { US.tx = NaN; US.n++; }
   }
   // a wall segment broken down to rubble he steps over
   function rubble(p, z) { if (!WALLK.has(p.kind)) return false; const b = vaultTop(p); return b !== null && (p.z || 0) + b <= z + STEP_OVER; }
@@ -253,6 +307,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   }
   function lerpEnd() { if (!lerping) return; P.x = c0; P.y = c1; P.z = c2; lerping = false; }
   return {PL, P, player, blocked, syncPlateaus, turnFrame, hold, release, toWorldEvent, hoverTarget, nearProp, climbSpotW, climbAssist, stepAssist, teleport, snap, lerpBegin, lerpEnd,
+    unstick, get unstuck() { return US.n; },   // (the loop: after each player step; the tools: how often it got him out)
     tick() { hoverKey++; }, get assist() { return A.assist; }, set assist(v) { A.assist = v; },
     // (views) the part of a facing step the camera has turned since P.face last moved with it (turnFrame's remainder):
     // his facing in the world without the camera's 16-step rounding is (P.face + faceRest) x 360 / ND + yaw (view/livehero.js)
