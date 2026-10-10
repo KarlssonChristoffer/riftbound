@@ -1,18 +1,30 @@
 # Collision: why you get stuck, and the plan to fix it
 
-Status (2026-10-10): phases 0 and 1 built (uncommitted), the rest planned. Decisions taken: the recommendations in section 5
+Status (2026-10-10): phases 0-1 committed (e9f4102); phases 2-3 committed (the module, then move and slide with the field walls'
+smooth rows from phase 5). Phase 4 is in progress, the rest planned. Decisions taken: the recommendations in section 5
 (pots nudged aside, broken by a roll or a sprint; brutes push softly; standing on things later). The architecture already
 planned the module (ARCHITECTURE.md 2.3: `world/collide.js (blocked, raycast, arrow tests)`, principle 7: "can I walk here"
 answered by one service); it was never built.
 
 Measured by `node tools/test/collide.mjs` (sandbox, set=gunslinger):
 
-| | before | after phase 1 |
-|---|---|---|
-| census: a spot just inside a collider, stuck after 40 steps + 30 steps of trying | 97 / 97 | 0 / 97 (out in .24 m on average, 1.2 m at most) |
-| drops (tower ladder .5 / 1 / 2 m, the lookout's breach, beside field walls) + thrown into a wall | 5 / 8 | 0 / 8 |
-| running at a pot / post / brazier / dummy / tree, stopped dead | 9 / 10 | 10 / 10 (phase 3) |
-| sliding along a wall at 22.5-67.5 deg, speed kept along it | 9% | 9% (phase 3) |
+| | before | after phase 1 | after phase 3 |
+|---|---|---|---|
+| census: a spot just inside a collider, stuck after 40 steps + 30 steps of trying | 97 / 97 | 0 / 97 (out in .24 m on average, 1.2 m at most) | 0 / 97 |
+| drops (tower ladder .5 / 1 / 2 m, the lookout's breach, beside field walls) + thrown into a wall | 5 / 8 | 0 / 8 | 0 / 8 |
+| running at a pot / brazier / dummy / pillar / tree, head on and .2 m off centre: stopped | - | 10 / 10 (24-34% of a free run) | 0 / 10 (76-94%) |
+| sliding along the arena wall and a field wall at 22.5-67.5 deg, % of a perfect slide (cos angle) | 9% | 9% | 105% |
+| sliding along the ground's edges (water, higher ground, the border) at 45 deg: stuck / speed kept | - | 16 / 24, 18% | 0 / 24, 90% |
+| leaning on a loose crate pushes it / sprinting into a barrel tips it | - | 2.03 m / tipped | 2.03 m / tipped |
+
+(The "run at" set changed with phase 3: the gateposts it first took all stand in a wall's end, where stopping is right; pillars
+came in. Both columns after "before" are the new set, from frozen copies on one base.)
+
+Checks for phases 2 and 3 (frozen copies of phase 1, 2 and 3 on one base):
+- golden: 16 / 16 captures identical, both phases;
+- simview: passes, both;
+- smoke: passes, all three;
+- ab.mjs: `player.step` 0.005 -> 0.006 ms a frame.
 
 ## 1. How it works today
 
@@ -130,7 +142,20 @@ stands, 16 directions, 5 cm steps, up to 1.5 m; preallocated) and ease him there
 forever" whatever put him there. Also keep a **last safe spot** (on the ground, free, not water, refreshed about once a
 second) as the final fallback. It uses today's `blocked`, so it can land before the rest.
 
-### Phase 2: one collision module, `world/collide.js`
+### Phase 2: one collision module, `world/collide.js`: BUILT (the player's part)
+
+As built:
+- `createCollide(entsOf)`: `overlap(who, x, y, z, air)`, `touch(p, x, y, r, who, z)` (CN: the way out, the depth) and `move`
+  (phase 3).
+- **The body**: `who = {r, counts(p, z), through(p, z), ground(x, y, z, air)}`. These are functions rather than masks, so the
+  player's rubble and the ground rule fit. The player's is `PB` in sim/player/adapter.js, and his `blocked()` is `C.overlap(PB, ...)`.
+- **Shapes**: circles and boxes, with a box grown round at its corners (it was square). The column test still uses the ±1 m band:
+  that's phase 4.
+- **Heights**: `HEIGHT` / `heightOf(p)` is the one table, merged from the lasso's, the gadgets', combat's and the gunmen's. Only the
+  Shift+G overlay reads it so far; phases 4 and 6 move the rest onto it.
+- Not yet: capsules as their own shape, `nearestFree` (still the adapter's `freeSpot`), the other systems (phase 6).
+
+The plan as written:
 
 - **Shapes**: circle, box (the walls' rects; oriented boxes), capsule (a segment with a radius). Each has a vertical span, base
   to top, from **one height table** (merge `PROP_TOP`, combat's `HGT`, the lasso's `TOP` and the scattered `?? 1.2 / 2.5 / 6`
@@ -144,7 +169,24 @@ second) as the final fallback. It uses today's `blocked`, so it can land before 
   (`p.hunter`, `p.sparring`, `kind === 'gunman'` ...).
 - **Determinism**: no Math.random, the same answers in the same order (sim code: simview must pass).
 
-### Phase 3: move and slide for the player
+### Phase 3: move and slide for the player: BUILT
+
+As built (world/collide.js MOVE AND SLIDE):
+- **Pieces**: the move is cut into pieces of at most 0.1 m. Each piece goes straight, then is pushed out of every overlapping prop
+  in turn (up to 4 rounds).
+- **Ground edges**: if the ground stops it, the piece slides along the edge. The edge direction comes from 8 ground tests in a
+  ring round the spot; the ground is still tested at the body's middle, so you get as close to water and cliffs as before. If
+  that fails too, it tries one world axis at a time.
+- **Slip**: round any lone round thing up to r .5 (pots, posts, braziers, dummies, pillars, trees; not wall pieces), going round
+  its open side.
+- **Velocity**: after a hit it turns the way he went, keeping its speed if he got a third of the way or more. Head-on into a wall
+  he slows to a stop.
+- **Rows** (from phase 5): the round pieces of a field wall, the watchtower's rings, the bridge's parapets and a lying stone are
+  joined to their neighbours by the capsule between them, so there are no notches to catch in.
+- **Wiring**: the adapter's `moveV` turns view-frame moves into the world frame and back. player.js `moveBy` and launch.js's
+  flight use it; the flight now bounces off the wall by its real normal. `?collide=old` brings back the per-axis moves.
+
+The plan as written:
 
 `moveBy` turns the step into the world frame and calls `collide.move`. That fixes B, C and G:
 
@@ -167,6 +209,9 @@ second) as the final fallback. It uses today's `blocked`, so it can land before 
 - **The ladder drop** starts from a free spot.
 
 ### Phase 5: colliders that match what you see
+
+Done early (phase 3): the field walls', the watchtower rings', the parapets' and the lying stones' rows are smooth: joined pieces,
+not new capsule props. Trees keep r .5 for now; the slip takes them head on.
 
 - **Trees**: the trunk (.3) for walking.
 - **Field walls**: one capsule per run between gaps instead of a row of circles, giving a smooth face with the doorways and

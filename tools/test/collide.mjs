@@ -6,9 +6,14 @@
 //   drop        falls that come down in a collider: beside the watchtower's south face as the ladder's Space drops him (.5 / 1
 //               / 2 m), beside a field wall, off the lookout's breach at a walk
 //   launch      thrown into the arena's north wall (a live loadout: the default set=gunslinger)
-//   pass        running at a pot, a post, a brazier, a dummy, a tree: head on and .2 m off centre (progress in 45 steps, % of a free run)
+//   pass        running at a pot, a post, a brazier, a dummy, a pillar, a tree (one with a way round it on both sides): head on and .2 m
+//               off centre (progress in 45 steps, % of a free run)
 //   slide       along the arena's north wall and a field wall at 0 / 22.5 / 45 / 67.5 deg into it (% of the speed along the
 //               wall a perfect slide keeps: cos(angle) of a free run)
+//   push        leaning on a loose crate pushes it (along a world axis, 80 steps: how far it went); sprinting into an upright
+//               barrel tips it (the movable props must not be slipped round)
+//   edge        along the ground's edges (the water's, higher ground's, the map's border) at 45 deg into them, from spots spread over
+//               the map: STUCK if he got under .3 m along it in 30 steps, or ended inside something
 //   node tools/test/collide.mjs [--path src/] [--port 8152] [--dbg 9356] [--q set=gunslinger] [--only census,drop,...]
 //                               [--n 4 (census spots per kind)] [--out tmp/collide/last.json]
 import {spawn} from 'node:child_process';
@@ -166,18 +171,19 @@ function lib(W) {
   }
   function pass() {
     const out = [], D0 = freeRun();
-    for (const kind of ['pot', 'gatepost', 'brazier', 'dummy', 'tree']) {
+    for (const kind of ['pot', 'gatepost', 'brazier', 'dummy', 'pillar', 'tree']) {
       const list = H.props.filter(p => p.kind === kind && prop(p) && !(p.r > .6));
       let done = false;
       for (const p of list) {
         if (done) break;
-        for (let k = 0; k < 8 && !done; k++) {   // a way past it with free ground before and after (nothing else in the way)
-          const a = k * TAU / 8, ux = Math.sin(a), uy = Math.cos(a), z = p.z || 0;
+        for (let k = 0; k < 8 && !done; k++) {   // a way past it: free ground before and after, nothing else in the way, and a way round it on both sides
+          const a = k * TAU / 8, ux = Math.sin(a), uy = Math.cos(a), z = p.z || 0, side = p.r + BODY + .1;
           let ok = true;
           for (let s = -1.6; s <= 2.4 && ok; s += .2) {
             const x = p.x + ux * s, y = p.y + uy * s;
             if (!freeGround(x, y, z)) ok = false;
             else if (Math.abs(s) > p.r + BODY + .05) { for (const off of [-.3, 0, .3]) if (H.blocked(x - uy * off, y + ux * off, z, false)) ok = false; }
+            else for (const off of [-side, side]) if (H.blocked(x - uy * off, y + ux * off, z, false)) ok = false;
           }
           if (!ok) continue;
           done = true;
@@ -227,7 +233,66 @@ function lib(W) {
     if (!found) out.push({name: 'field wall slide', skipped: 'no straight stretch found'});
     return out;
   }
-  return {census, drops, launches, pass, slides, flags: () => location.search};
+  // ---- the ground's edges: free spots spread over the map with solid ground (by the player's rule) a body's width away
+  const groundSolid = (x, y, z) => !W.walkable(x, y) || W.inStream(x, y) || W.elev(x, y) > z + .3 || (W.steep(x, y) && W.elev(x, y) > z + .01);
+  function edges(n) {
+    const out = [], B = W.WORLD, D0 = freeRun();
+    for (let i = 1; i < 20000 && out.length < n; i++) {
+      const x = B.x0 + 1 + ((i * .6180339887) % 1) * (B.x1 - B.x0 - 2), y = B.y0 + 1 + ((i * .7548776662) % 1) * (B.y1 - B.y0 - 2), z = W.elev(x, y);
+      if (H.blocked(x, y, z, false) || W.steep(x, y)) continue;
+      let nx = 0, ny = 0, k = 0, kind = '';
+      for (let j = 0; j < 16; j++) {
+        const a = j * TAU / 16, qx = x + Math.cos(a) * .45, qy = y + Math.sin(a) * .45;
+        if (groundSolid(qx, qy, z)) { nx -= Math.cos(a); ny -= Math.sin(a); k++; kind ||= !W.walkable(qx, qy) ? 'border' : W.inStream(qx, qy) ? 'water' : 'high ground'; }
+      }
+      const l = Math.hypot(nx, ny); if (k < 2 || k > 7 || l < 1e-6) continue;   // (an edge: solid on one side only)
+      nx /= l; ny /= l;
+      let near = false; for (const p of H.props) if (prop(p) && Math.hypot(p.x - x, p.y - y) < 2.5) { near = true; break; }   // (the ground alone: no props by it)
+      if (near) continue;
+      const tx = -ny, ty = nx, a = Math.PI / 4, dx = tx * Math.cos(a) - nx * Math.sin(a), dy = ty * Math.cos(a) - ny * Math.sin(a);
+      reset(x, y, yawD(dx, dy)); hold(['d'], 30); step(2);
+      const along = (R.player.x - x) * tx + (R.player.y - y) * ty, ins = inside();
+      out.push({name: `along ${kind} at (${x.toFixed(1)}, ${y.toFixed(1)})`, along: +along.toFixed(2), pct: Math.round(along / (D0 * 30 / 45 * Math.cos(a)) * 100), inside: ins, stuck: ins || along < .3, state: P.state, moved: +along.toFixed(2), at: [+R.player.x.toFixed(2), +R.player.y.toFixed(2), +P.z.toFixed(2)]});
+    }
+    return out;
+  }
+  // ---- leaning on a crate / sprinting into a barrel
+  function pushes() {
+    const out = [];
+    let done = false;
+    for (const crate of H.props.filter(p => p.kind === 'crate' && p.push && prop(p))) {
+      if (done) break;
+      for (const [ux, uy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {   // (a side with free ground behind it, and room to stand)
+        const z = crate.z || 0, sx = crate.x - ux * (crate.r + BODY + .3), sy = crate.y - uy * (crate.r + BODY + .3);
+        let ok = freeGround(sx, sy, z) && !H.blocked(sx, sy, z, false);
+        for (let s = crate.r + .3; s <= 2 && ok; s += .2) {   // (behind it: on the map, no other prop; the stream is fine, that's what they're for)
+          const bx = crate.x + ux * s, by = crate.y + uy * s;
+          if (!W.walkable(bx, by) || H.props.some(q => q !== crate && prop(q) && Math.hypot(q.x - bx, q.y - by) < (q.r || 0) + crate.r + .05)) ok = false;
+        }
+        if (!ok) continue;
+        const x0 = crate.x, y0 = crate.y;
+        reset(sx, sy, yawW(ux, uy)); hold(['w'], 80); step(30);
+        const moved = Math.hypot(crate.x - x0, crate.y - y0);
+        out.push({name: `lean on a crate at (${x0.toFixed(1)}, ${y0.toFixed(1)})`, crateMoved: +moved.toFixed(2), ok: moved > .5});
+        done = true; break;
+      }
+    }
+    if (!done) out.push({name: 'lean on a crate', skipped: 'no loose crate with room'});
+    const barrel = H.props.find(p => p.kind === 'barrel' && !p.tip && prop(p) && !H.props.some(q => q !== p && prop(q) && Math.hypot(q.x - p.x, q.y - p.y) < .7));
+    if (barrel) {
+      let done = false;
+      for (let k = 0; k < 8 && !done; k++) {
+        const a = k * TAU / 8, ux = Math.sin(a), uy = Math.cos(a), z = barrel.z || 0, sx = barrel.x - ux * 3, sy = barrel.y - uy * 3;
+        let ok = true; for (let s = -3; s <= -.6 && ok; s += .2) if (!freeGround(barrel.x + ux * s, barrel.y + uy * s, z) || H.blocked(barrel.x + ux * s, barrel.y + uy * s, z, false)) ok = false;
+        if (!ok) continue;
+        done = true; reset(sx, sy, yawW(ux, uy)); hold(['w', 'shift'], 40); step(10);
+        out.push({name: `sprint into a barrel at (${barrel.x.toFixed(1)}, ${barrel.y.toFixed(1)})`, tipped: !!barrel.tip, ok: !!barrel.tip});
+      }
+      if (!done) out.push({name: 'sprint into a barrel', skipped: 'no clear run'});
+    } else out.push({name: 'sprint into a barrel', skipped: 'no lone barrel'});
+    return out;
+  }
+  return {census, drops, launches, pass, slides, pushes, edges, flags: () => location.search};
 }
 
 // ---------------------------------------------------------------- run
@@ -237,11 +302,14 @@ const res = {query: await ev('window.__col.flags()'), at: new Date().toISOString
 const t0 = Date.now();
 const show = r => {
   if (r.skipped) return `skip  ${r.name}: ${r.skipped}`;
+  if ('along' in r && 'stuck' in r) return `${r.stuck ? 'STUCK' : 'ok   '} ${r.name}  ${r.along} m along (${r.pct}% of a perfect slide)${r.inside ? '  INSIDE' : ''}  (${r.state} at ${r.at.join(', ')})`;
   if ('stuck' in r) return `${r.stuck ? 'STUCK' : 'ok   '} ${r.name || r.kind + ' ' + JSON.stringify(r.prop)}  inside ${r.inside ? 'yes' : 'no '}  moved ${r.moved} m  (${r.state} at ${r.at.join(', ')})`;
+  if ('crateMoved' in r) return `${r.ok ? 'ok   ' : 'FAIL '} ${r.name}  it moved ${r.crateMoved} m`;
+  if ('tipped' in r) return `${r.ok ? 'ok   ' : 'FAIL '} ${r.name}  ${r.tipped ? 'tipped' : 'not tipped'}`;
   if ('passed' in r) return `${r.passed ? 'ok   ' : 'STOP '} ${r.name}  ${r.progress} m (${r.pct}% of a free run)`;
   return `      ${r.name}  ${r.along} m along (${r.pct}% of a perfect slide)`;
 };
-for (const [k, call] of [['census', `window.__col.census(${N})`], ['drop', 'window.__col.drops()'], ['launch', 'window.__col.launches()'], ['pass', 'window.__col.pass()'], ['slide', 'window.__col.slides()']]) {
+for (const [k, call] of [['census', `window.__col.census(${N})`], ['drop', 'window.__col.drops()'], ['launch', 'window.__col.launches()'], ['pass', 'window.__col.pass()'], ['slide', 'window.__col.slides()'], ['push', 'window.__col.pushes()'], ['edge', 'window.__col.edges(24)']]) {
   if (!want(k)) continue;
   const n0 = logs.length;
   try { res[k] = await ev(call); } catch (e) { res[k] = [{name: k, skipped: 'error ' + e.message.slice(0, 300)}]; }
@@ -249,9 +317,10 @@ for (const [k, call] of [['census', `window.__col.census(${N})`], ['drop', 'wind
   if (logs.length > n0) console.log('     ' + logs.slice(n0).join('\n     '));
 }
 // the totals: census stuck / total, drops + launch stuck, pass stopped, slide mean %
-const C = res.census || [], D = [...(res.drop || []), ...(res.launch || [])].filter(r => !r.skipped), PS = (res.pass || []).filter(r => !r.skipped), SL = (res.slide || []).filter(r => !r.skipped && !/ 0 deg/.test(r.name));
+const C = res.census || [], D = [...(res.drop || []), ...(res.launch || [])].filter(r => !r.skipped), PS = (res.pass || []).filter(r => !r.skipped), SL = (res.slide || []).filter(r => !r.skipped && !/ 0 deg/.test(r.name)), ED = (res.edge || []).filter(r => !r.skipped);
 res.summary = {censusStuck: `${C.filter(r => r.stuck).length}/${C.length}`, dropStuck: `${D.filter(r => r.stuck).length}/${D.length}`,
-  passStopped: `${PS.filter(r => !r.passed).length}/${PS.length}`, slideKept: SL.length ? Math.round(SL.reduce((s, r) => s + r.pct, 0) / SL.length) + '%' : '-'};
+  passStopped: `${PS.filter(r => !r.passed).length}/${PS.length}`, slideKept: SL.length ? Math.round(SL.reduce((s, r) => s + r.pct, 0) / SL.length) + '%' : '-',
+  pushOk: `${(res.push || []).filter(r => r.ok).length}/${(res.push || []).filter(r => !r.skipped).length}`, edgeStuck: `${ED.filter(r => r.stuck).length}/${ED.length}`, edgeKept: ED.length ? Math.round(ED.reduce((s, r) => s + Math.min(150, r.pct), 0) / ED.length) + '%' : '-'};
 console.log(`---- summary (${((Date.now() - t0) / 1000).toFixed(0)} s)`, JSON.stringify(res.summary));
 mkdirSync(dirname(OUT), {recursive: true}); writeFileSync(OUT, JSON.stringify(res, null, 1));
 console.log('wrote', OUT);

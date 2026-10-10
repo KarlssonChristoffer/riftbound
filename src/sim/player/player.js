@@ -268,9 +268,24 @@ export function createPlayer(H) {
     // moving: hold the aiming stance briefly after the shot (rapid fire while strafing never leaves it); standing: release anim
     if (P.moveAim) { P.state = 'draw'; P.recover = .25; } else P.state = 'release';
   }
-  function moveBy(dx, dy, air = false) {  // collide per axis; returns the distance actually travelled
+  // move by (dx, dy); returns the distance actually travelled. H.move (the adapter: world/collide.js, docs/COLLISION.md): move and
+  // slide; where something stopped him his velocity turns the way he went, its speed kept while he got a third of the way or more (a
+  // glancing slide, a slip round a pot), less the more squarely he met it (none: stopped). Without it (?collide=old): per axis of the
+  // view, an axis that meets something stops
+  function moveBy(dx, dy, air = false) {
     const w = H.wind ? H.wind() : null;   // a run rule's wind (features/omens.js, a gale; H.wind: the adapter): with it faster, against it slower
     if (w) { const l = Math.hypot(dx, dy); if (l > 1e-9) { const k = Math.max(.3, 1 + (dx * w[0] + dy * w[1]) / l); dx *= k; dy *= k; } }
+    if (H.move) {
+      const m = H.move(P.x, P.y, dx, dy, P.z, air), ex = m.x - P.x, ey = m.y - P.y, d = Math.hypot(ex, ey);
+      P.x = m.x; P.y = m.y;
+      if (m.hit) {
+        const want = Math.hypot(dx, dy);
+        if (d > 1e-9 && want > 1e-9) { const v = Math.hypot(P.vx, P.vy) * Math.min(1, 3 * d / want); P.vx = ex / d * v; P.vy = ey / d * v; }
+        else P.vx = P.vy = 0;
+      }
+      if (!air && d) groundFollow();
+      return d;
+    }
     let d = 0;
     if (dx && !H.blocked(P.x + dx, P.y, P.z, air)) { P.x += dx; d += dx * dx; } else P.vx = 0;
     if (dy && !H.blocked(P.x, P.y + dy, P.z, air)) { P.y += dy; d += dy * dy; } else P.vy = 0;

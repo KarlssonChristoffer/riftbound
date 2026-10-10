@@ -52,6 +52,17 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     through: (p, z) => rubble(p, z),
     ground: (x, y, z, air) => !walkable(x, y) || (!air && inStream(x, y)) || elev(x, y) > z + .3 || (!air && steep(x, y) && elev(x, y) > z + .01)};   // (steep: no walking up a cliff or a ramp's side, not even in small steps)
   function blocked(x, y, z, air) { return OLD ? blockedOld(x, y, z, air) : C.overlap(PB, x, y, z, air); }
+  // MOVE AND SLIDE (world/collide.js move) for player.js's moveBy and the flight (launch.js): view frame in and out -> HM {x, y,
+  // hit, nx, ny (the way out of what stopped him)}. Nothing met: exactly (x + dx, y + dy). slip: round lone small things
+  const HM = {x: 0, y: 0, hit: false, nx: 0, ny: 0};
+  function moveV(x, y, dx, dy, z, air, slip = true) {
+    const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw);
+    const m = C.move(PB, x * c + y * s, -x * s + y * c, z, dx * c + dy * s, -dx * s + dy * c, air, slip);
+    HM.hit = m.hit;
+    if (!m.hit) { HM.x = x + dx; HM.y = y + dy; HM.nx = HM.ny = 0; return HM; }
+    HM.x = m.x * c - m.y * s; HM.y = m.x * s + m.y * c; HM.nx = m.nx * c - m.ny * s; HM.ny = m.nx * s + m.ny * c;
+    return HM;
+  }
   function blockedOld(x, y, z, air) {
     if (!walkable(x, y)) return true;
     if (!air && inStream(x, y)) return true;
@@ -167,6 +178,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     lasso: createLasso, yaw: () => cv.yaw,      // the lasso's hands (idle unless features/equip/lasso.js uses them); the camera's yaw (its swing is in the world)
     brawl: createBrawl,   // the boot, the barge, lifting and throwing (idle unless features/brawl.js asks: a live loadout)
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
+    move: OLD ? null : moveV,   // (move and slide; ?collide=old: player.js's per-axis moves)
     wallOver: (x, y, dx, dy, z) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallOver(X, Z, ux, uz, z); },   // (a rotation: d is the same in his frame)
     wallSlant: (x, y, dx, dy, near) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallSlant(X, Z, ux, uz, near); },
     elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },

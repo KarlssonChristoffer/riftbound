@@ -84,24 +84,42 @@ export function createLaunch(I) {
   }
   function fly(dt) {
     P.lv -= G * dt; P.lc += P.lv * dt; if (P.lhit > 0) P.lhit -= dt;
-    // along the ground, per axis (as moveBy, but no wind, no ground following): the walls at his feet's level, any height
+    // along the ground (as moveBy, but no wind, no ground following): the walls at his feet's level, any height. H.move (world/collide.js):
+    // what stops him slams him by his speed into it (its way out: nx, ny), that part bounces back (SLAM.e), the part along it slides on
+    // (SLAM.slide); without it (?collide=old): per axis of the view
     const sx = P.vx, sy = P.vy, dx = sx * dt, dy = sy * dt, zc = Math.min(P.z, elev(P.x, P.y) + .5);
+    if (H.move) {
+      const m = H.move(P.x, P.y, dx, dy, zc, true, false), vn = m.hit ? sx * m.nx + sy * m.ny : 0;
+      P.x = m.x; P.y = m.y;
+      if (vn < 0) {
+        if (-vn > SLAM.min && !(P.lhit > 0)) slam(m.nx * vn, m.ny * vn, -vn);
+        const tx = sx - m.nx * vn, ty = sy - m.ny * vn;
+        P.vx = tx * SLAM.slide - m.nx * vn * SLAM.e; P.vy = ty * SLAM.slide - m.ny * vn * SLAM.e;
+      }
+    } else flyAxes(sx, sy, dx, dy, zc);
+    ground(dt, sx, sy);
+  }
+  // the SLAM (vx, vy: his velocity into what stopped him; vn: its size): hurt a little, the camera shakes, the views take it from the event
+  function slam(vx, vy, vn) {
+    P.lhit = SLAM.cool;
+    ev({type: 'player.slam', x: P.x, y: P.y, vx, vy, speed: vn});
+    ev({type: 'player.hurt', dmg: Math.round(clamp(SLAM.dmg0 + (vn - SLAM.min) * SLAM.dmgK, 1, SLAM.dmgMax)), by: 'slam', x: P.x, y: P.y});
+    H.shake?.(vn > 6 ? 4 : 3, .22);
+    if (P.lv > 0) P.lv *= SLAM.up;   // (the wall takes his rise: he slides down its face)
+  }
+  function flyAxes(sx, sy, dx, dy, zc) {   // (?collide=old)
     let hx = false, hy = false;
     if (dx) { if (!H.blocked(P.x + dx, P.y, zc, true)) P.x += dx; else hx = true; }
     if (dy) { if (!H.blocked(P.x, P.y + dy, zc, true)) P.y += dy; else hy = true; }
     if (hx || hy) {
       const vn = hx && hy ? Math.hypot(sx, sy) : hx ? Math.abs(sx) : Math.abs(sy);
-      if (vn > SLAM.min && !(P.lhit > 0)) {   // the SLAM: hurt a little, the camera shakes, the views take it from the event
-        P.lhit = SLAM.cool;
-        ev({type: 'player.slam', x: P.x, y: P.y, vx: hx ? sx : 0, vy: hy ? sy : 0, speed: vn});
-        ev({type: 'player.hurt', dmg: Math.round(clamp(SLAM.dmg0 + (vn - SLAM.min) * SLAM.dmgK, 1, SLAM.dmgMax)), by: 'slam', x: P.x, y: P.y});
-        H.shake?.(vn > 6 ? 4 : 3, .22);
-        if (P.lv > 0) P.lv *= SLAM.up;   // (the wall takes his rise: he slides down its face)
-      }
+      if (vn > SLAM.min && !(P.lhit > 0)) slam(hx ? sx : 0, hy ? sy : 0, vn);
       if (hx) P.vx = -sx * SLAM.e; else P.vx *= SLAM.slide;
       if (hy) P.vy = -sy * SLAM.e; else P.vy *= SLAM.slide;
     }
-    // the ground
+  }
+  // the ground under him in the flight: he bounces, skids, comes to rest (down; in the water: back to the bank)
+  function ground(dt, sx, sy) {
     const g = elev(P.x, P.y), floor = g + BODY.lie;
     if (P.lc <= floor) {
       P.lc = floor;
