@@ -1,7 +1,8 @@
 # Collision: why you get stuck, and the plan to fix it
 
-Status (2026-10-10): phases 0-1 committed (e9f4102); phases 2-3 committed (the module, then move and slide with the field walls'
-smooth rows from phase 5). Phase 4 is in progress, the rest planned. Decisions taken: the recommendations in section 5
+Status (2026-10-10): phases 0-1 committed (e9f4102); phases 2-3 committed (d801dd1 the module, 7cadabd move and slide with the
+field walls' smooth rows from phase 5); phase 4 committed (the column test, the airborne push-out, free placements); phase 5
+in progress. The rest is planned. Decisions taken: the recommendations in section 5
 (pots nudged aside, broken by a roll or a sprint; brutes push softly; standing on things later). The architecture already
 planned the module (ARCHITECTURE.md 2.3: `world/collide.js (blocked, raycast, arrow tests)`, principle 7: "can I walk here"
 answered by one service); it was never built.
@@ -200,7 +201,30 @@ The plan as written:
 - `moveBy` still returns the distance travelled, so the animation code (gun, fists, lasso, tool, brawl) is unchanged. P.vx /
   P.vy keep the sliding velocity instead of zeroing an axis.
 
-### Phase 4: stop the ways in at the source (so phase 1 is rarely needed)
+### Phase 4: stop the ways in at the source (so phase 1 is rarely needed): BUILT (committed)
+
+As built:
+- **The column test**: his body counts a prop by `C.column(p, feet, feet + 1.6)`, the prop standing from its base to `heightOf`
+  (a top within .05 m under his feet doesn't count), not by the ±1 m band.
+  - A falling body meets the watchtower's wall all the way down.
+  - A leap, a fall or a flight passes over what's under its feet.
+- **Airborne push-out**: in the air (a fall, a leap, a flight) `move(..., free)` first pushes him out of whatever he came down
+  into. This covers the ladder's drop (it holds him .1 m from the wall, inside the foot ring), the lookout's breach, a lasso swing
+  that lets go over something, and low things he falls onto.
+- **Placements**: `C.nearestFree` (the unstick's ring search, moved into the module) puts the boot's spawn (and `?at=`) and
+  `teleport` on a free spot round where they ask.
+- **Left to the unstick**:
+  - wedged pockets where the push-out can't escape, e.g. the inside corner of a field wall with a broken pillar beside it;
+  - placements that are their own moves: the vault's landing (it checks it's clear), the rope wall and the splash put-back.
+
+Measured, phase 3 -> 4 (frozen copies on one base):
+- steps he stood inside something after landing, summed over the 9 drops: 21 -> 10. Every tower drop, the lookout fall and 2 of
+  the 3 field-wall falls are now 0; the 10 left are the field wall's pocket by the pillar.
+- teleported onto a wall, the tower's ring, a field wall, a pillar or a tree: inside 5 / 5 -> 0 / 5 (put down .57-1.37 m away).
+- everything else unchanged (census 0 / 97, run-at 0 / 10, slides 105%, edges 0 / 24, crate and barrel 2 / 2).
+- golden 16 / 16 identical; simview and smoke pass; ab.mjs `player.step` 0.005 -> 0.006 ms a frame.
+
+The plan as written:
 
 - **Falls test the column**: your body (feet to head) against each prop's base-to-top. A wall's face stops you as you fall
   past it, and you slide down its face instead of passing into it.

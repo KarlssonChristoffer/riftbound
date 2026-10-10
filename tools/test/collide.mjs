@@ -4,7 +4,8 @@
 //   census      a spot just inside each kind of collider (a few of each, spread over the map): teleported there, no input
 //               for 40 steps, then a direction away held for 30. STUCK: still inside and moved < .1 m
 //   drop        falls that come down in a collider: beside the watchtower's south face as the ladder's Space drops him (.5 / 1
-//               / 2 m), beside a field wall, off the lookout's breach at a walk
+//               / 2 m), beside a field wall, off the lookout's breach at a walk; 'on the ground inside N steps': how long he stood
+//               inside something after landing (the unstick walking him out; 0: he never got in)
 //   launch      thrown into the arena's north wall (a live loadout: the default set=gunslinger)
 //   pass        running at a pot, a post, a brazier, a dummy, a pillar, a tree (one with a way round it on both sides): head on and .2 m
 //               off centre (progress in 45 steps, % of a free run)
@@ -12,6 +13,7 @@
 //               wall a perfect slide keeps: cos(angle) of a free run)
 //   push        leaning on a loose crate pushes it (along a world axis, 80 steps: how far it went); sprinting into an upright
 //               barrel tips it (the movable props must not be slipped round)
+//   place       teleported onto the middle of a collider (a wall, the tower's ring, a field wall, a pillar, a tree): inside after?
 //   edge        along the ground's edges (the water's, higher ground's, the map's border) at 45 deg into them, from spots spread over
 //               the map: STUCK if he got under .3 m along it in 30 steps, or ended inside something
 //   node tools/test/collide.mjs [--path src/] [--port 8152] [--dbg 9356] [--q set=gunslinger] [--only census,drop,...]
@@ -64,8 +66,10 @@ function lib(W) {
   function keysToward(ux, uy) { let best = null, bd = -2; for (const ks of KEYS) { const [x, y] = keyDir(ks), d = x * ux + y * uy; if (d > bd) { bd = d; best = ks; } } return best; }
   // the yaw at which W moves him along world (ux, uy) / D moves him along it
   const yawW = (ux, uy) => Math.atan2(-ux, -uy), yawD = (ux, uy) => Math.atan2(-uy, ux);
-  function reset(x, y, yaw = 0) {
+  // raw: exactly there, inside something or not (teleport puts him on a free spot round it)
+  function reset(x, y, yaw = 0, raw = false) {
     keys.clear(); R.setYaw(yaw); H.teleport(x, y);
+    if (raw) { const v = R.toView(x, y); P.x = v[0]; P.y = v[1]; P.z = W.elev(x, y); }
     Object.assign(P, {vx: 0, vy: 0, vz: 0, t: 0, turn: null, skid: 0, curSpeed: 0, lastSpeed: 0, vault: null, climb: null, rollDir: null, blink: 0});
   }
   function hold(ks, n) { keys.clear(); for (const k of ks) keys.add(k); step(n); keys.clear(); }
@@ -101,7 +105,7 @@ function lib(W) {
         }
         if (!spot) continue;
         tried++;
-        reset(spot.x, spot.y);
+        reset(spot.x, spot.y, 0, true);
         if (!inside()) { tried--; continue; }
         step(40);
         out.push({kind, prop: [+p.x.toFixed(2), +p.y.toFixed(2)], ...outcome(spot.ux, spot.uy)});
@@ -111,24 +115,29 @@ function lib(W) {
   }
   // ---- drops: a fall from h m at (x, y) with world velocity (vx, vy), then the way out (ux, uy)
   function drop(x, y, h, vx, vy, ux, uy, yaw) {
-    reset(x, y, yaw);
+    reset(x, y, yaw, true);
     const g = W.elev(x, y), v = R.toView(vx, vy);
     Object.assign(P, {state: 'fall', t: 0, z: g + h, vz: 0, fall0: g + h, vx: v[0], vy: v[1]});
-    step(90);
-    return outcome(ux, uy);
+    let gi = 0; for (let i = 0; i < 90; i++) { step(1); if (P.z <= W.elev(R.player.x, R.player.y) + .05 && inside()) gi++; }
+    return {...outcome(ux, uy), groundInside: gi};
   }
   const towerClimb = () => W.CLIMBS.find(c => c.hill);
   function drops() {
     const out = [], c = towerClimb();
     if (c) {   // the ladder holds him .1 m out from the wall (ladder.js L.face); Space: off at 1.2 m/s straight out
       for (const h of [.5, 1, 2]) out.push({name: `tower ladder drop ${h} m`, ...drop(c.x + c.nx * .05, c.y + c.ny * .05, h, c.nx * 1.2, c.ny * 1.2, c.nx, c.ny, c.yaw)});
+      {   // from the lookout's height, .9 m out beside the ladder, drifting in toward the wall at 1.5 m/s
+        const x = c.x + c.nx * .9 - c.ny * 1.4, y = c.y + c.ny * .9 + c.nx * 1.4;
+        out.push({name: 'fall beside the tower drifting into it', ...drop(x, y, c.h1 - W.elev(x, y), -c.nx * 1.5, -c.ny * 1.5, c.nx, c.ny, c.yaw)});
+      }
       // the lookout's breach: from the floor at the ladder's top, walking out (Q + the way out) off the edge
       reset(c.x - c.nx * c.reach, c.y - c.ny * c.reach, c.yaw);
-      hold(['q', ...keysToward(c.nx, c.ny)], 100); step(60);
-      out.push({name: 'walk off the lookout breach', ...outcome(c.nx, c.ny)});
+      keys.clear(); for (const k of ['q', ...keysToward(c.nx, c.ny)]) keys.add(k);
+      let gi = 0; for (let i = 0; i < 160; i++) { step(1); if (i === 99) keys.clear(); if (P.z <= W.elev(R.player.x, R.player.y) + .05 && P.z < c.h1 - .5 && inside()) gi++; }
+      out.push({name: 'walk off the lookout breach', ...outcome(c.nx, c.ny), groundInside: gi});
     } else out.push({name: 'tower', skipped: 'no watchtower'});
     const fw = H.props.filter(p => p.kind === 'fieldwall' && prop(p));
-    for (let i = 0; i < fw.length && out.length < 7; i += Math.max(1, Math.floor(fw.length / 3))) {   // beside a field wall, from 1.5 m
+    for (let i = 0; i < fw.length && out.length < 8; i += Math.max(1, Math.floor(fw.length / 3))) {   // beside a field wall, from 1.5 m
       const p = fw[i]; let q = null, qd = 1e9;
       for (const o of fw) { const d = Math.hypot(o.x - p.x, o.y - p.y); if (o !== p && d < qd) { qd = d; q = o; } }
       if (!q) continue;
@@ -292,7 +301,19 @@ function lib(W) {
     } else out.push({name: 'sprint into a barrel', skipped: 'no lone barrel'});
     return out;
   }
-  return {census, drops, launches, pass, slides, pushes, edges, flags: () => location.search};
+  // ---- teleported onto a collider's middle: a placement puts him on a free spot round it (phase 4)
+  function places() {
+    const out = [];
+    for (const kind of ['wall_n', 'towerwall', 'fieldwall', 'pillar', 'tree']) {
+      const p = H.props.find(q => q.kind === kind && prop(q)); if (!p) continue;
+      const x = p.rect ? (p.rect[0] + p.rect[2]) / 2 : p.x, y = p.rect ? (p.rect[1] + p.rect[3]) / 2 : p.y;
+      reset(x, y); step(2);
+      const ins = inside(), d = Math.hypot(R.player.x - x, R.player.y - y);
+      out.push({name: `teleported onto a ${kind}`, placedInside: ins, ok: !ins, off: +d.toFixed(2)});
+    }
+    return out;
+  }
+  return {census, drops, launches, pass, slides, pushes, places, edges, flags: () => location.search};
 }
 
 // ---------------------------------------------------------------- run
@@ -303,13 +324,14 @@ const t0 = Date.now();
 const show = r => {
   if (r.skipped) return `skip  ${r.name}: ${r.skipped}`;
   if ('along' in r && 'stuck' in r) return `${r.stuck ? 'STUCK' : 'ok   '} ${r.name}  ${r.along} m along (${r.pct}% of a perfect slide)${r.inside ? '  INSIDE' : ''}  (${r.state} at ${r.at.join(', ')})`;
-  if ('stuck' in r) return `${r.stuck ? 'STUCK' : 'ok   '} ${r.name || r.kind + ' ' + JSON.stringify(r.prop)}  inside ${r.inside ? 'yes' : 'no '}  moved ${r.moved} m  (${r.state} at ${r.at.join(', ')})`;
+  if ('stuck' in r) return `${r.stuck ? 'STUCK' : 'ok   '} ${r.name || r.kind + ' ' + JSON.stringify(r.prop)}  inside ${r.inside ? 'yes' : 'no '}  moved ${r.moved} m${'groundInside' in r ? `  on the ground inside ${r.groundInside} steps` : ''}  (${r.state} at ${r.at.join(', ')})`;
+  if ('placedInside' in r) return `${r.ok ? 'ok   ' : 'FAIL '} ${r.name}  ${r.placedInside ? 'inside it' : 'free'}, ${r.off} m from where asked`;
   if ('crateMoved' in r) return `${r.ok ? 'ok   ' : 'FAIL '} ${r.name}  it moved ${r.crateMoved} m`;
   if ('tipped' in r) return `${r.ok ? 'ok   ' : 'FAIL '} ${r.name}  ${r.tipped ? 'tipped' : 'not tipped'}`;
   if ('passed' in r) return `${r.passed ? 'ok   ' : 'STOP '} ${r.name}  ${r.progress} m (${r.pct}% of a free run)`;
   return `      ${r.name}  ${r.along} m along (${r.pct}% of a perfect slide)`;
 };
-for (const [k, call] of [['census', `window.__col.census(${N})`], ['drop', 'window.__col.drops()'], ['launch', 'window.__col.launches()'], ['pass', 'window.__col.pass()'], ['slide', 'window.__col.slides()'], ['push', 'window.__col.pushes()'], ['edge', 'window.__col.edges(24)']]) {
+for (const [k, call] of [['census', `window.__col.census(${N})`], ['drop', 'window.__col.drops()'], ['launch', 'window.__col.launches()'], ['pass', 'window.__col.pass()'], ['slide', 'window.__col.slides()'], ['push', 'window.__col.pushes()'], ['place', 'window.__col.places()'], ['edge', 'window.__col.edges(24)']]) {
   if (!want(k)) continue;
   const n0 = logs.length;
   try { res[k] = await ev(call); } catch (e) { res[k] = [{name: k, skipped: 'error ' + e.message.slice(0, 300)}]; }
@@ -319,8 +341,9 @@ for (const [k, call] of [['census', `window.__col.census(${N})`], ['drop', 'wind
 // the totals: census stuck / total, drops + launch stuck, pass stopped, slide mean %
 const C = res.census || [], D = [...(res.drop || []), ...(res.launch || [])].filter(r => !r.skipped), PS = (res.pass || []).filter(r => !r.skipped), SL = (res.slide || []).filter(r => !r.skipped && !/ 0 deg/.test(r.name)), ED = (res.edge || []).filter(r => !r.skipped);
 res.summary = {censusStuck: `${C.filter(r => r.stuck).length}/${C.length}`, dropStuck: `${D.filter(r => r.stuck).length}/${D.length}`,
+  dropGroundInside: D.reduce((s, r) => s + (r.groundInside || 0), 0),
   passStopped: `${PS.filter(r => !r.passed).length}/${PS.length}`, slideKept: SL.length ? Math.round(SL.reduce((s, r) => s + r.pct, 0) / SL.length) + '%' : '-',
-  pushOk: `${(res.push || []).filter(r => r.ok).length}/${(res.push || []).filter(r => !r.skipped).length}`, edgeStuck: `${ED.filter(r => r.stuck).length}/${ED.length}`, edgeKept: ED.length ? Math.round(ED.reduce((s, r) => s + Math.min(150, r.pct), 0) / ED.length) + '%' : '-'};
+  pushOk: `${(res.push || []).filter(r => r.ok).length}/${(res.push || []).filter(r => !r.skipped).length}`, placeOk: `${(res.place || []).filter(r => r.ok).length}/${(res.place || []).length}`, edgeStuck: `${ED.filter(r => r.stuck).length}/${ED.length}`, edgeKept: ED.length ? Math.round(ED.reduce((s, r) => s + Math.min(150, r.pct), 0) / ED.length) + '%' : '-'};
 console.log(`---- summary (${((Date.now() - t0) / 1000).toFixed(0)} s)`, JSON.stringify(res.summary));
 mkdirSync(dirname(OUT), {recursive: true}); writeFileSync(OUT, JSON.stringify(res, null, 1));
 console.log('wrote', OUT);

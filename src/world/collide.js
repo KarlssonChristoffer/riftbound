@@ -9,14 +9,20 @@
 // (rubble it steps over).
 // A BODY says what stops it: who = {r (its radius), counts(p, z) (a prop stops it, its feet at height z: the cheap test, before the
 // shape), through(p, z)? (a prop it overlaps but passes anyway: rubble it steps over), ground(x, y, z, air) (the ground at (x, y) is
-// solid to it)}. Bodies are made once (no closures a call).
+// solid to it), floor(x, y)? (the ground's height: nearestFree's drop)}. Bodies are made once (no closures a call).
 // OWNS: nothing of the world (reads the props' x / y / z / r / rect, the registry's near(), the world's tops). No allocation a call.
 // BUDGET: overlap() is one near() query + the ground's rule (~1-2 us).
 //   const C = createCollide(() => ents)
 //   C.overlap(who, x, y, z, air) -> bool: the body at (x, y), feet at z, is inside something
 //   C.touch(p, x, y, r, who?, z?) -> bool: the body (radius r) overlaps prop p (who / z: which row neighbours count); C.CN = {nx, ny,
 //     d}: the way out of it and how deep
-//   C.move(who, x, y, z, dx, dy, air, slip) -> {x, y, hit, nx, ny} (one object, reused): MOVE AND SLIDE (phase 3, below)
+//   C.move(who, x, y, z, dx, dy, air, slip, free) -> {x, y, hit, nx, ny} (one object, reused): MOVE AND SLIDE (phase 3, below)
+//   C.nearestFree(who, x, y, z, max, hx?, hy?, drop?) -> bool (C.FREE = [x, y]): the nearest spot round (x, y) where the body stands
+//     free on its feet at height z (rings RING m apart, DIRS ways, out to max m; of a ring's free spots the one most along (hx, hy),
+//     none given: the first; EDGE m past the rim; its ground no more than drop m under z). The player's unstick and placements use it
+//   C.column(p, z0, z1) -> bool: a body from z0 (its feet) to z1 (its head) is within prop p's height (its base to heightOf; a top
+//     within TOP_EPS under the feet doesn't count: he stands level with it). Phase 4: a body counts props by this, not a band round
+//     its feet, so a falling body meets a tall wall's face all the way down and passes over what's under its feet
 //   heightOf(p) -> m: how high a prop stands over its base (one table for every system: docs/COLLISION.md phase 6)
 import {topOfProp} from './world.js';
 
@@ -37,10 +43,12 @@ export const heightOf = p => topOfProp(p) ?? HEIGHT[p.kind] ?? 1.2;
 // head on (the slide kept under half the piece) is gone round at SLIP x the piece, on its open side (a body tested at each flank,
 // beside it across the way: a gatepost at a wall's end is gone round on the gate's side); both open: the side the body is already off
 // its middle (dead on: the piece's right); neither: no slip. A body that starts inside something moves only as far as a push out takes it within the piece's
-// length (+ LIM m); deeper, it stays (the player's unstick walks him out: sim/player/adapter.js)
-const EPS = 1e-4, SUB = .1, PASSES = 4, LIM = .02, G_R = .12, ROUND = .5, SLIP = .8;
+// length (+ LIM m); deeper, it stays (the player's unstick walks him out: sim/player/adapter.js). free (phase 4: a body in the air,
+// which came down into something low from above, or was put in it): it's pushed out of what it overlaps first, however deep
+const EPS = 1e-4, SUB = .1, PASSES = 4, LIM = .02, G_R = .12, ROUND = .5, SLIP = .8, TOP_EPS = .05;
 const JOINED = new Set(['fieldwall', 'towerwall', 'parapet', 'menhir_part']), LINK = 1.25, PUSHED = new Set(['crate', 'barrel', 'barrel_x']);
 const DIR8 = Array.from({length: 8}, (_, i) => [Math.cos(i * Math.PI / 4), Math.sin(i * Math.PI / 4)]);
+const RING = .05, DIRS = 16, EDGE = .02, DIR16 = Array.from({length: DIRS}, (_, i) => [Math.sin(i * 2 * Math.PI / DIRS), Math.cos(i * 2 * Math.PI / DIRS)]);
 
 export function createCollide(entsOf) {
   const near = [], nearL = [];
@@ -149,8 +157,9 @@ export function createCollide(entsOf) {
     if (tryTo(who, z, air, cx + (ax ? px : 0), cy + (ax ? 0 : py), lim) || tryTo(who, z, air, cx + (ax ? 0 : px), cy + (ax ? py : 0), lim)) { hit(gx, gy); return true; }
     hit(gx, gy); return false;
   }
-  function move(who, x, y, z, dx, dy, air, slip) {
+  function move(who, x, y, z, dx, dy, air, slip, free = false) {
     cx = x; cy = y; hx = hy = 0; MV.hit = false;
+    if (free) { const r = resolve(who, x, y, z); if (r.ok && (r.x !== x || r.y !== y) && !who.ground(r.x, r.y, z, air)) { hit(r.nx, r.ny); cx = r.x; cy = r.y; } }
     const L = Math.hypot(dx, dy);
     if (L > 1e-12) {
       const n = Math.ceil(L / SUB), px = dx / n, py = dy / n, l = L / n;
@@ -160,5 +169,19 @@ export function createCollide(entsOf) {
     MV.x = cx; MV.y = cy; MV.nx = h > 1e-9 ? hx / h : 0; MV.ny = h > 1e-9 ? hy / h : 0;
     return MV;
   }
-  return {overlap, touch, CN, move};
+  const column = (p, z0, z1) => { const b = p.z || 0; return z0 < b + heightOf(p) - TOP_EPS && z1 > b; };
+  const FREE = [0, 0];
+  function nearestFree(who, x, y, z, max, hx = NaN, hy = NaN, drop = Infinity) {   // (hx NaN: every score NaN, the first free one)
+    for (let r = RING; r <= max + 1e-9; r += RING) {
+      let best = -1, bs = 0;
+      for (let i = 0; i < DIRS; i++) {
+        const u = DIR16[i], qx = x + u[0] * r, qy = y + u[1] * r;
+        if (overlap(who, qx, qy, z, false) || (who.floor && who.floor(qx, qy) < z - drop)) continue;
+        const s = u[0] * hx + u[1] * hy; if (best < 0 || s > bs) { best = i; bs = s; }
+      }
+      if (best >= 0) { const u = DIR16[best], e = r + EDGE; FREE[0] = x + u[0] * e; FREE[1] = y + u[1] * e; return true; }
+    }
+    return false;
+  }
+  return {overlap, touch, CN, move, column, nearestFree, FREE};
 }

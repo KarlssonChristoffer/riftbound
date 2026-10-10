@@ -15,7 +15,7 @@ import {createBrawl} from './brawl.js';   // the live cowboys' boot, barge, lift
 import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON, vaultTop} from '../../world/world.js';
 import {createCollide} from '../../world/collide.js';   // the world's solids (docs/COLLISION.md)
 
-const R_BODY = .25;
+const R_BODY = .25, H_BODY = 1.6;   // (his body: radius, height from his feet)
 // THE STONE WALLS' BREACHES (world/walls3d.js, world.js vaultTop): rubble no higher than STEP_OVER over his feet is stepped over (it
 // doesn't block him); a breach up to VAULT_OVER is vaulted (Space: player.js tryVault, H.wallOver below); a whole stretch of the arena's
 // walls stays a wall. The West Downs' old field walls ('fieldwall': round colliders) are low: vaulted anywhere, stepped over where
@@ -24,14 +24,12 @@ const STEP_OVER = .3, VAULT_OVER = 1.25, WALLK = new Set(['wall_n', 'wall_s', 'w
 // UNSTICK (docs/COLLISION.md phase 1): blocked() asks where he would go, never where he is, so once he was inside something (a fall
 // that came down in a collider, a move that set his place, something that moved into him) every step was refused and he stayed
 // there for good. After each step, on his feet and inside: he walks out at UN.speed m/s to the nearest free spot at about his level
-// (rings round him UN.ring m apart, UN.dirs ways, out to UN.max m; of a ring's free spots, the one toward where he last stood free;
-// UN.edge m past the rim). None in reach: back to that last free spot (noted every UN.note s while he stands free), with the
+// (world/collide.js nearestFree, out to UN.max m, toward where he last stood free, no lower than UN.drop). None in reach: back to that last free spot (noted every UN.note s while he stands free), with the
 // splash's blink. Not while a move carries him (player.js BUSY: a climb, a vault, a leap, a fall, a rope, thrown, a brawl or a fist
 // move place him themselves; a new move too, unless it's in UN_ACT: on his feet, pushed or held) or he's off the ground.
 // ?collide=old: off
-const UN = {ring: .05, max: 1.5, dirs: 16, speed: 4, note: .5, edge: .02, drop: .5};
+const UN = {max: 1.5, speed: 4, note: .5, drop: .5};
 const UN_ACT = new Set(['land', 'hold', 'knock', 'chop']);
-const UN_DIR = Array.from({length: UN.dirs}, (_, i) => [Math.sin(i * 2 * Math.PI / UN.dirs), Math.cos(i * 2 * Math.PI / UN.dirs)]);
 
 export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags, mods, canLaunch = null}) {
   const toView = cv.toView, toWorld = cv.toWorld;
@@ -43,21 +41,23 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   let PWX = 0, PWY = 0; const PWV = [0, 0];
   if (mods) { const f = () => { PWX = mods.value('player.windX', 0); PWY = mods.value('player.windY', 0); }; mods.watch(f); f(); }
   const windV = () => { if (!PWX && !PWY) return null; const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); PWV[0] = PWX * c - PWY * s; PWV[1] = PWX * s + PWY * c; return PWV; };
-  // COLLISION in the world (round, so it doesn't change with the camera): world/collide.js with his body PB (its props: within 1 m of
-  // his feet's height, rubble low enough stepped over; the ground: tested at his middle). ?collide=old: the old test (blockedOld: a box
-  // grown square at its corners, no unstick)
+  // COLLISION in the world (round, so it doesn't change with the camera): world/collide.js with his body PB (its props: those whose
+  // height his body is within, feet to head: collide.js column; rubble low enough stepped over; the ground: tested at his middle).
+  // ?collide=old: the old test (blockedOld: props within 1 m of his feet's height, a box grown square at its corners; no unstick)
   const OLD = flags.get('collide') === 'old', C = createCollide(ents);
   const PB = {r: R_BODY,
-    counts: (p, z) => !p.broken && !p.gone && Math.abs((p.z || 0) - z) < 1,
+    counts: (p, z) => !p.broken && !p.gone && C.column(p, z, z + H_BODY),
     through: (p, z) => rubble(p, z),
-    ground: (x, y, z, air) => !walkable(x, y) || (!air && inStream(x, y)) || elev(x, y) > z + .3 || (!air && steep(x, y) && elev(x, y) > z + .01)};   // (steep: no walking up a cliff or a ramp's side, not even in small steps)
+    ground: (x, y, z, air) => !walkable(x, y) || (!air && inStream(x, y)) || elev(x, y) > z + .3 || (!air && steep(x, y) && elev(x, y) > z + .01),
+    floor: elev};   // (steep: no walking up a cliff or a ramp's side, not even in small steps)
   function blocked(x, y, z, air) { return OLD ? blockedOld(x, y, z, air) : C.overlap(PB, x, y, z, air); }
   // MOVE AND SLIDE (world/collide.js move) for player.js's moveBy and the flight (launch.js): view frame in and out -> HM {x, y,
-  // hit, nx, ny (the way out of what stopped him)}. Nothing met: exactly (x + dx, y + dy). slip: round lone small things
+  // hit, nx, ny (the way out of what stopped him)}. Nothing met: exactly (x + dx, y + dy). slip: round lone small things. In the air
+  // (a fall, a leap, a flight) whatever he came down into is pushed out of first (collide.js move's free)
   const HM = {x: 0, y: 0, hit: false, nx: 0, ny: 0};
   function moveV(x, y, dx, dy, z, air, slip = true) {
     const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw);
-    const m = C.move(PB, x * c + y * s, -x * s + y * c, z, dx * c + dy * s, -dx * s + dy * c, air, slip);
+    const m = C.move(PB, x * c + y * s, -x * s + y * c, z, dx * c + dy * s, -dx * s + dy * c, air, slip, air);
     HM.hit = m.hit;
     if (!m.hit) { HM.x = x + dx; HM.y = y + dy; HM.nx = HM.ny = 0; return HM; }
     HM.x = m.x * c - m.y * s; HM.y = m.x * s + m.y * c; HM.nx = m.nx * c - m.ny * s; HM.ny = m.nx * s + m.ny * c;
@@ -76,20 +76,9 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   // walking out to (tx, ty; NaN: none), the time to the next search after one found nothing (wait), how many times he was got out
   // (n: the tools read it)
   const US = {sx: NaN, sy: NaN, sz: 0, note: 0, tx: NaN, ty: NaN, wait: 0, n: 0};
-  // the nearest free spot round world (x, y) at about height z (no higher than a step: blocked; no lower than UN.drop) -> true (US.tx / ty)
-  function freeSpot(x, y, z) {
-    const hx = US.sx - x, hy = US.sy - y;   // (toward the last free spot; none: NaN, every score NaN, the first free one)
-    for (let r = UN.ring; r <= UN.max + 1e-9; r += UN.ring) {
-      let best = -1, bs = 0;
-      for (let i = 0; i < UN.dirs; i++) {
-        const u = UN_DIR[i], qx = x + u[0] * r, qy = y + u[1] * r;
-        if (blocked(qx, qy, z, false) || elev(qx, qy) < z - UN.drop) continue;
-        const s = u[0] * hx + u[1] * hy; if (best < 0 || s > bs) { best = i; bs = s; }
-      }
-      if (best >= 0) { const u = UN_DIR[best], e = r + UN.edge; US.tx = x + u[0] * e; US.ty = y + u[1] * e; return true; }
-    }
-    return false;
-  }
+  // the nearest free spot round world (x, y) at about height z, toward where he last stood free (none yet: NaN, the first) -> true (FS)
+  const FS = C.FREE;
+  const freeSpot = (x, y, z) => C.nearestFree(PB, x, y, z, UN.max, US.sx - x, US.sy - y, UN.drop);
   // world (x, y) -> his view-frame place (viewxf's turn, inline: no allocation)
   function placeW(x, y) { const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); P.x = x * c - y * s; P.y = x * s + y * c; }
   function unstick(dt) {
@@ -108,6 +97,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
         else US.wait = UN.note;
         return;
       }
+      US.tx = FS[0]; US.ty = FS[1];
     }
     const dx = US.tx - x, dy = US.ty - y, d = Math.hypot(dx, dy), k = d > UN.speed * dt ? UN.speed * dt / d : 1;
     const nx = x + dx * k, ny = y + dy * k, e = elev(nx, ny);
@@ -198,7 +188,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     canLaunch,   // a blast may throw him (sim/player/launch.js): main.js, his loadout drawn live
   });
   const P = PL.P;
-  { const at = (flags.get('at') || '').split(',').map(Number), sp = worldOf().layout.spawn, [vx, vy] = toView(at.length === 2 ? at[0] : sp.x, at.length === 2 ? at[1] : sp.y); P.x = vx; P.y = vy; P.z = elev(...toWorld(vx, vy)); }
+  { const at = (flags.get('at') || '').split(',').map(Number), sp = worldOf().layout.spawn, [x, y] = freeAt(at.length === 2 ? at[0] : sp.x, at.length === 2 ? at[1] : sp.y), [vx, vy] = toView(x, y); P.x = vx; P.y = vy; P.z = elev(x, y); }
   // the player as features see it: world frame, live
   // (x / y are read dozens of times a frame: computed once per move or turn, not per read)
   let pwX = 0, pwY = 0, pwA = NaN, pwB = NaN, pwYaw = NaN;
@@ -309,9 +299,11 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     }
     return ny;
   }
-  // put the player at world (x, y), standing, and snap the camera there
-  function teleport(x, y) {
-    const [vx, vy] = toView(x, y);
+  // a place to put him at world (x, y): there, or the nearest free spot round it (phase 4: no placement inside anything; ?collide=old: there)
+  function freeAt(x, y) { const z = elev(x, y); return OLD || !blocked(x, y, z, false) || !freeSpot(x, y, z) ? [x, y] : [FS[0], FS[1]]; }
+  // put the player at world (x, y) (a free spot there), standing, and snap the camera there
+  function teleport(x0, y0) {
+    const [x, y] = freeAt(x0, y0), [vx, vy] = toView(x, y);
     Object.assign(P, {x: vx, y: vy, z: elev(x, y), vx: 0, vy: 0, state: 'idle', t: 0, sink: 0, leap: null, hold: null});
     cv.snap(); snap();
   }
