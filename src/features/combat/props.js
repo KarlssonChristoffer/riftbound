@@ -6,6 +6,9 @@
 //             layout.stream.stones (dry footing: host.blocked / inStream read it live)
 //   blasts    explosions shove props (crates hop); powder kegs explode on a hard impact; hard hits damage through combat
 //   chests    the lid follows p.opened (world.js picks chest_0..4 from p.lid)
+//   pots      NUDGED (docs/COLLISION.md phase 5): walking into one slides it out of his way (along the line from him to it: met off
+//             its middle it goes aside), potK x his speed into it at most potMax; a roll or a sprint into it (potBreak m/s) breaks it;
+//             nudged into the water it sinks (gone, back home later like the rest)
 //   debris    the arena's tumbling 3D chunks (chunk_plank / stave / shard / stone / iron) as LIVE meshes from a pool,
 //             tumbling about a random axis in flight, lying flat once they settle, blinking out
 // Changes from the arena (documented): distances are round (the arena squashed y x 1.6 for its 2D collision); the input
@@ -24,7 +27,7 @@ import {walkable, TERRAIN_ON, FAMS, topOfProp} from '../../world/world.js';
 import {gemChunk} from '../../world/props3d.js';   // (the true-3D crystal's shards: a procedural chunk, glowing; ?props2d=1 none, as before)
 import {flags} from '../../core/flags.js';
 
-const MOVABLE = new Set(['crate', 'barrel', 'barrel_x']);
+const MOVABLE = new Set(['crate', 'barrel', 'barrel_x', 'pot']);
 const P2D = flags.get('props2d') === '1';
 const DEBRIS = {crate: ['plank', 5], barrel: ['stave', 6], barrel_x: ['stave', 5], pot: ['shard', 5], crystal: P2D ? ['stone', 0] : ['gem', 6], chest: ['plank', 0]};
 const CHUNK_KINDS = ['plank', 'stave', 'shard', 'stone', 'iron'];
@@ -44,12 +47,13 @@ export async function createPropPhysics(host, core) {
   const P = host.player;
   const T = {
     rollFric: 1.1, slopeG: 4.6, slideFric: 7, pushV: 1.7, pushDelay: .16, kick: 1.1, kickMin: 2.2, kickMax: 6, tipSpeed: 4.2, tipMax: 5.5, arrowTip: 2.6, tiltT: .09,
-    blast: 7.5, impact: 2.2, boomImpact: 2.1, flow: .9, sinkT: .45, idleReset: 22, resetAway: 6,
+    blast: 7.5, impact: 2.2, boomImpact: 2.1, flow: .9, sinkT: .45, idleReset: 22, resetAway: 6, potK: 1.1, potMax: 3, potBreak: 5.2,
     sinkCrate: CRATE_H - .02, sinkFloat: .22,   // 3D: how deep a sunk crate / a floating barrel sits (the arena: .5 / .22)
   };
   const ents = host.entities, stream = () => host.layout.stream, nearQ = [];   // nearQ: the grid's candidates
   // (live queries on the entity registry: a movable prop that joins later gets its physics state as it joins)
-  const mov = host.entities.query('props.movable', p => MOVABLE.has(p.kind), p => { p.home3 = [p.x, p.y, p.z || 0]; p.vx = 0; p.vy = 0; p.push = p.kind === 'crate' && !p.wall; p.idle = 0; });
+  const homeR = new WeakMap();   // (a movable prop's radius as it joined: resetHome gives it back)
+  const mov = host.entities.query('props.movable', p => MOVABLE.has(p.kind), p => { p.home3 = [p.x, p.y, p.z || 0]; p.vx = 0; p.vy = 0; p.push = p.kind === 'crate' && !p.wall; p.idle = 0; homeR.set(p, p.r); });
   const chests = host.entities.query('props.chest', p => p.kind === 'chest');
   let simT = 0, lastPV = [0, 0], lastPS = 0;
   const inBounds = walkable;   // where a pushed prop may go: where the player may (layout.walkable)
@@ -101,13 +105,14 @@ export async function createPropPhysics(host, core) {
       tx = lo < hi ? Math.max(lo, Math.min(hi, tx)) : S.cx(ty);
       q.vx = q.vy = 0; q.sinkT = 0; q.float = false; q.r = 0; q.push = false; q.slide = [q.x, q.y, tx, ty];
       q.stone = {x: tx, y: ty, r: .52}; S.addStone(q.stone);
-    } else { q.float = true; q.r = 0; q.sink = T.sinkFloat; }
+    } else if (q.kind === 'pot') { ents.hide(q); q.broken = true; q.goneBroken = true; q.idle = 0; q.vx = q.vy = 0; }   // (a pot sinks: gone till it's back home)
+    else { q.float = true; q.r = 0; q.sink = T.sinkFloat; }
   }
   function dropStone(q) { if (q.stone) { stream().removeStone(q.stone); q.stone = null; } }
   function resetHome(q, quiet) {
     dropStone(q);
     [q.x, q.y, q.z] = q.home3;
-    Object.assign(q, {vx: 0, vy: 0, h: 0, vh: 0, tip: null, sink: 0, sinkT: undefined, float: false, idle: 0, r: q.kind === 'crate' ? (q.wall ? .38 : .34) : .3, held: false, tossT: undefined});
+    Object.assign(q, {vx: 0, vy: 0, h: 0, vh: 0, tip: null, sink: 0, sinkT: undefined, float: false, idle: 0, r: homeR.get(q) ?? (q.kind === 'crate' ? (q.wall ? .38 : .34) : .3), held: false, tossT: undefined});
     ents.hide(q, false); ents.moved(q);   // a jump home: the grid follows now, not next step
     if (q.kind === 'crate') q.push = !q.wall;
     if (q.gone === false && q.broken && q.goneBroken) { q.broken = false; q.goneBroken = false; }
@@ -196,6 +201,12 @@ export async function createPropPhysics(host, core) {
       if (d > reach) { q.pushT = 0; continue; }
       const ux = dx / (d || 1), uy = dy / (d || 1);
       const toward = ix * ux + iy * uy, vin = lastPV[0] * ux + lastPV[1] * uy;
+      if (q.kind === 'pot') {   // NUDGED: slid out of his way; a roll or a sprint into it breaks it
+        if (rolling || vin > T.potBreak) { strike(q, 99, ux * Math.max(vin, 2), uy * Math.max(vin, 2)); continue; }
+        const v = Math.min(T.potMax, Math.max(vin, toward > .5 ? ps * toward : 0) * T.potK);
+        if (v > .3 && v > speedOf(q)) { q.vx = ux * v; q.vy = uy * v; q.wob = Math.max(q.wob || 0, .35); q.idle = 0; }
+        continue;
+      }
       if ((q.kind === 'barrel' || q.kind === 'barrel_x')) {
         if (!q.tip && (rolling || vin > T.tipSpeed)) { tip(q, ux, uy, Math.min(T.tipMax, Math.max(3, Math.abs(vin) * .75 + (rolling ? 1.2 : 0)))); continue; }
         if (q.tip && speedOf(q) < 1 && (vin > .8 || (rolling && vin > 0) || (toward > .7 && ps > .3))) {

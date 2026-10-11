@@ -13,6 +13,7 @@
 //               wall a perfect slide keeps: cos(angle) of a free run)
 //   push        leaning on a loose crate pushes it (along a world axis, 80 steps: how far it went); sprinting into an upright
 //               barrel tips it (the movable props must not be slipped round)
+//   pot         walking / running into a pot nudges it aside (it moved, unbroken); a roll or a sprint into one breaks it (phase 5)
 //   place       teleported onto the middle of a collider (a wall, the tower's ring, a field wall, a pillar, a tree): inside after?
 //   edge        along the ground's edges (the water's, higher ground's, the map's border) at 45 deg into them, from spots spread over
 //               the map: STUCK if he got under .3 m along it in 30 steps, or ended inside something
@@ -301,6 +302,34 @@ function lib(W) {
     } else out.push({name: 'sprint into a barrel', skipped: 'no lone barrel'});
     return out;
   }
+  // ---- pots: nudged by walking and running, broken by a roll and a sprint (each on a fresh pot with a clear run at it)
+  function pots() {
+    const out = [], used = new Set();
+    const runAt = (name, keysHeld, off, roll, want, n = 70) => {
+      for (const p of H.props) {
+        if (p.kind !== 'pot' || !prop(p) || used.has(p) || H.props.some(q => q !== p && prop(q) && Math.hypot(q.x - p.x, q.y - p.y) < .6)) continue;
+        for (let k = 0; k < 8; k++) {
+          const a = k * TAU / 8, ux = Math.sin(a), uy = Math.cos(a), z = p.z || 0;
+          let ok = true; for (let s = -3; s <= 1.5 && ok; s += .2) if (Math.abs(s) > .5 && (!freeGround(p.x + ux * s, p.y + uy * s, z) || H.blocked(p.x + ux * s, p.y + uy * s, z, false))) ok = false;
+          if (!ok) continue;
+          used.add(p);
+          const x0 = p.x, y0 = p.y;
+          reset(p.x - ux * 3 - uy * off, p.y - uy * 3 + ux * off, yawW(ux, uy)); keys.clear(); for (const kk of keysHeld) keys.add(kk);
+          for (let i = 0; i < n; i++) { step(1); if (roll && i === 14) R.PL.onSpace(); }
+          keys.clear(); step(40);
+          const moved = Math.hypot(p.x - x0, p.y - y0), broke = !!(p.broken || p.gone || p.stage === 2);
+          out.push({name: `${name} (${x0.toFixed(1)}, ${y0.toFixed(1)})`, potMoved: +moved.toFixed(2), broken: broke, ok: want === 'nudge' ? !broke && moved > .05 : broke});
+          return;
+        }
+      }
+      out.push({name, skipped: 'no fresh pot with a clear run'});
+    };
+    runAt('walk into a pot', ['w', 'q'], 0, false, 'nudge', 150);
+    runAt('run into a pot .15 m off centre', ['w'], .15, false, 'nudge');
+    runAt('roll into a pot', ['w'], 0, true, 'break');
+    runAt('sprint into a pot', ['w', 'shift'], 0, false, 'break');
+    return out;
+  }
   // ---- teleported onto a collider's middle: a placement puts him on a free spot round it (phase 4)
   function places() {
     const out = [];
@@ -313,7 +342,7 @@ function lib(W) {
     }
     return out;
   }
-  return {census, drops, launches, pass, slides, pushes, places, edges, flags: () => location.search};
+  return {census, drops, launches, pass, slides, pushes, pots, places, edges, flags: () => location.search};
 }
 
 // ---------------------------------------------------------------- run
@@ -325,13 +354,14 @@ const show = r => {
   if (r.skipped) return `skip  ${r.name}: ${r.skipped}`;
   if ('along' in r && 'stuck' in r) return `${r.stuck ? 'STUCK' : 'ok   '} ${r.name}  ${r.along} m along (${r.pct}% of a perfect slide)${r.inside ? '  INSIDE' : ''}  (${r.state} at ${r.at.join(', ')})`;
   if ('stuck' in r) return `${r.stuck ? 'STUCK' : 'ok   '} ${r.name || r.kind + ' ' + JSON.stringify(r.prop)}  inside ${r.inside ? 'yes' : 'no '}  moved ${r.moved} m${'groundInside' in r ? `  on the ground inside ${r.groundInside} steps` : ''}  (${r.state} at ${r.at.join(', ')})`;
+  if ('potMoved' in r) return `${r.ok ? 'ok   ' : 'FAIL '} ${r.name}  it moved ${r.potMoved} m${r.broken ? ', broken' : ''}`;
   if ('placedInside' in r) return `${r.ok ? 'ok   ' : 'FAIL '} ${r.name}  ${r.placedInside ? 'inside it' : 'free'}, ${r.off} m from where asked`;
   if ('crateMoved' in r) return `${r.ok ? 'ok   ' : 'FAIL '} ${r.name}  it moved ${r.crateMoved} m`;
   if ('tipped' in r) return `${r.ok ? 'ok   ' : 'FAIL '} ${r.name}  ${r.tipped ? 'tipped' : 'not tipped'}`;
   if ('passed' in r) return `${r.passed ? 'ok   ' : 'STOP '} ${r.name}  ${r.progress} m (${r.pct}% of a free run)`;
   return `      ${r.name}  ${r.along} m along (${r.pct}% of a perfect slide)`;
 };
-for (const [k, call] of [['census', `window.__col.census(${N})`], ['drop', 'window.__col.drops()'], ['launch', 'window.__col.launches()'], ['pass', 'window.__col.pass()'], ['slide', 'window.__col.slides()'], ['push', 'window.__col.pushes()'], ['place', 'window.__col.places()'], ['edge', 'window.__col.edges(24)']]) {
+for (const [k, call] of [['census', `window.__col.census(${N})`], ['drop', 'window.__col.drops()'], ['launch', 'window.__col.launches()'], ['pass', 'window.__col.pass()'], ['slide', 'window.__col.slides()'], ['push', 'window.__col.pushes()'], ['pot', 'window.__col.pots()'], ['place', 'window.__col.places()'], ['edge', 'window.__col.edges(24)']]) {
   if (!want(k)) continue;
   const n0 = logs.length;
   try { res[k] = await ev(call); } catch (e) { res[k] = [{name: k, skipped: 'error ' + e.message.slice(0, 300)}]; }
@@ -343,7 +373,7 @@ const C = res.census || [], D = [...(res.drop || []), ...(res.launch || [])].fil
 res.summary = {censusStuck: `${C.filter(r => r.stuck).length}/${C.length}`, dropStuck: `${D.filter(r => r.stuck).length}/${D.length}`,
   dropGroundInside: D.reduce((s, r) => s + (r.groundInside || 0), 0),
   passStopped: `${PS.filter(r => !r.passed).length}/${PS.length}`, slideKept: SL.length ? Math.round(SL.reduce((s, r) => s + r.pct, 0) / SL.length) + '%' : '-',
-  pushOk: `${(res.push || []).filter(r => r.ok).length}/${(res.push || []).filter(r => !r.skipped).length}`, placeOk: `${(res.place || []).filter(r => r.ok).length}/${(res.place || []).length}`, edgeStuck: `${ED.filter(r => r.stuck).length}/${ED.length}`, edgeKept: ED.length ? Math.round(ED.reduce((s, r) => s + Math.min(150, r.pct), 0) / ED.length) + '%' : '-'};
+  pushOk: `${(res.push || []).filter(r => r.ok).length}/${(res.push || []).filter(r => !r.skipped).length}`, placeOk: `${(res.place || []).filter(r => r.ok).length}/${(res.place || []).length}`, potOk: `${(res.pot || []).filter(r => r.ok).length}/${(res.pot || []).filter(r => !r.skipped).length}`, edgeStuck: `${ED.filter(r => r.stuck).length}/${ED.length}`, edgeKept: ED.length ? Math.round(ED.reduce((s, r) => s + Math.min(150, r.pct), 0) / ED.length) + '%' : '-'};
 console.log(`---- summary (${((Date.now() - t0) / 1000).toFixed(0)} s)`, JSON.stringify(res.summary));
 mkdirSync(dirname(OUT), {recursive: true}); writeFileSync(OUT, JSON.stringify(res, null, 1));
 console.log('wrote', OUT);

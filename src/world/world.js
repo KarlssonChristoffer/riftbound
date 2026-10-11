@@ -178,7 +178,8 @@ async function glbGeometry(loader, state) {
 // the arena's kind (+ breakable stage, chest lid) -> prop-kit state (arena/props3d.js frameName; barrels tip and roll
 // as real rotations here, so they have no tilt / roll states)
 const wallV = p => ((Math.round(p.x * 3) * 7 + Math.round(p.y * 5) * 13) >>> 0) % 4;
-const potV = p => ((Math.round(p.x * 7) + Math.round(p.y * 13)) & 1) ? 'pot_b' : 'pot';
+const POTV = new WeakMap();   // (a pot's look from where it first stood, kept: it may be nudged along since, features/combat/props.js)
+const potV = p => { let v = POTV.get(p); if (!v) POTV.set(p, v = ((Math.round(p.x * 7) + Math.round(p.y * 13)) & 1) ? 'pot_b' : 'pot'); return v; };
 export function stateOf(p) {
   switch (p.kind) {
     case 'crate': return p.stage === 2 ? 'crate_broken' : p.stage === 1 ? 'crate_dmg' : 'crate';

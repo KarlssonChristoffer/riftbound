@@ -2,7 +2,7 @@
 
 Status (2026-10-10): phases 0-1 committed (e9f4102); phases 2-3 committed (d801dd1 the module, 7cadabd move and slide with the
 field walls' smooth rows from phase 5); phase 4 committed (the column test, the airborne push-out, free placements); phase 5
-in progress. The rest is planned. Decisions taken: the recommendations in section 5
+committed (trees as trunks, pots nudged). The rest is planned. Decisions taken: the recommendations in section 5
 (pots nudged aside, broken by a roll or a sprint; brutes push softly; standing on things later). The architecture already
 planned the module (ARCHITECTURE.md 2.3: `world/collide.js (blocked, raycast, arrow tests)`, principle 7: "can I walk here"
 answered by one service); it was never built.
@@ -232,10 +232,37 @@ The plan as written:
   put-back, teleports and spawns all go through `nearestFree`.
 - **The ladder drop** starts from a free spot.
 
-### Phase 5: colliders that match what you see
+### Phase 5: colliders that match what you see: BUILT
 
-Done early (phase 3): the field walls', the watchtower rings', the parapets' and the lying stones' rows are smooth: joined pieces,
-not new capsule props. Trees keep r .5 for now; the slip takes them head on.
+As built:
+- **Rows** (early, with phase 3): the field walls', the watchtower rings', the parapets' and the lying stones' rows are smooth:
+  joined pieces in world/collide.js, not new capsule props. The watchtower keeps its ring (no boxes): smoothed, it reaches .05 m
+  past the wall's face, so the body's edge meets the stones.
+- **Trees**: they walk as their trunk, `WALK.tree = .6` of `p.r` in world/collide.js (.3 for the arena's trees, .27 x scale for the
+  oaks). The oak's trunk is about .17-.21 m, flaring to about .3 m at the foot. `p.r` stays the round footprint the other systems
+  use (arrows, the lasso, the brutes' nav) until phase 6.
+- **Pots** (decision 1), features/combat/props.js:
+  - pots joined MOVABLE;
+  - walking or running into one slides it out of his way along the line from him to it (1.1 x his speed into it, at most 3 m/s;
+    met off its middle it goes aside), while the slip takes him round it;
+  - a roll or a sprint into one (over 5.2 m/s) breaks it through combat (shards, coins);
+  - nudged into the stream it sinks, and comes back home later like the crates and barrels;
+  - world.js keeps each pot's look from where it first stood, so a moved pot doesn't swap between its two models.
+- **The overlay audit** (Shift+G, which now draws what a body walks against, `walkR`), one capture per solid kind:
+  - these match their models: pillar, broken pillar, brazier, dummy, pot, crystal, barrel, woodpile, ruin, standing stone, the
+    corner towers, gateposts, benches and the big rock;
+  - the tree's ring now sits at the trunk's foot, inside the root flare;
+  - left as they are: a crate is a square on a round collider (it's pushed and tipped by the physics, so a box would have to move
+    with it, and its corners clip a little), and the chest's circle reaches a little past its front and back.
+
+Measured, phase 4 -> 5 (frozen copies on one base):
+- pots: walk / run into one, it moves (1.17 m / 1.04 m); a roll or a sprint breaks it: 0 / 4 -> 4 / 4;
+- a tree head on: 83% of a free run (it was 76%, by the slip round its .5 m footprint);
+- all else unchanged (census 0 / 93: the trees' rims are smaller, 4 spots fewer; drops 0 / 9; run-at 0 / 10; slides 105%; edges 0 / 24;
+  crate and barrel 2 / 2; placements 5 / 5);
+- golden 16 / 16 identical; simview and smoke pass; ab.mjs `player.step` 0.006 ms either way.
+
+The plan as written:
 
 - **Trees**: the trunk (.3) for walking.
 - **Field walls**: one capsule per run between gaps instead of a row of circles, giving a smooth face with the doorways and

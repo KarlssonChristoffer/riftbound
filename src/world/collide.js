@@ -2,7 +2,8 @@
 // props: a circle (p.r) or an axis-aligned box (p.rect: [x0, y0, x1, y1]), each standing from its base (p.z) to its top (heightOf:
 // the world's own top, else HEIGHT by kind); and the ground, which the body's own rule tests at its middle (off the map, water, too
 // high a step, a steep rise). The body is a circle; against a box its outline is the box grown by that radius with round corners
-// (so a body slides round a corner instead of catching on it). ROWS: the round pieces of a longer solid (JOINED kinds: a field
+// (so a body slides round a corner instead of catching on it). A kind in WALK walks as a share of its p.r (phase 5: a tree's trunk, .6
+// of the round footprint the other systems still use). ROWS: the round pieces of a longer solid (JOINED kinds: a field
 // wall's stones, the watchtower's rings, the bridge's parapets, a lying stone's parts) are joined to their row neighbours (the
 // same kind, bases within .5 m, no further apart than LINK x their radii) by the half of the capsule between them: the row is one
 // smooth solid with no notches to catch in; its gaps (a doorway, the breach) stay open, and so does a neighbour the body passes
@@ -24,6 +25,7 @@
 //     within TOP_EPS under the feet doesn't count: he stands level with it). Phase 4: a body counts props by this, not a band round
 //     its feet, so a falling body meets a tall wall's face all the way down and passes over what's under its feet
 //   heightOf(p) -> m: how high a prop stands over its base (one table for every system: docs/COLLISION.md phase 6)
+//   walkR(p) -> m: a round prop's radius to a body (its r, a tree's trunk: WALK)
 import {topOfProp} from './world.js';
 
 // how high each kind stands over its base (m) where the world builds it no top of its own (world.js topOfProp: walls, towers, posts,
@@ -47,6 +49,9 @@ export const heightOf = p => topOfProp(p) ?? HEIGHT[p.kind] ?? 1.2;
 // which came down into something low from above, or was put in it): it's pushed out of what it overlaps first, however deep
 const EPS = 1e-4, SUB = .1, PASSES = 4, LIM = .02, G_R = .12, ROUND = .5, SLIP = .8, TOP_EPS = .05;
 const JOINED = new Set(['fieldwall', 'towerwall', 'parapet', 'menhir_part']), LINK = 1.25, PUSHED = new Set(['crate', 'barrel', 'barrel_x']);
+const WALK = {tree: .6};
+const radOf = p => p.r * (WALK[p.kind] ?? 1);   // (a round prop's radius to a body)
+export const walkR = radOf;   // (the Shift+G overlay draws what a body walks against)
 const DIR8 = Array.from({length: 8}, (_, i) => [Math.cos(i * Math.PI / 4), Math.sin(i * Math.PI / 4)]);
 const RING = .05, DIRS = 16, EDGE = .02, DIR16 = Array.from({length: DIRS}, (_, i) => [Math.sin(i * 2 * Math.PI / DIRS), Math.cos(i * 2 * Math.PI / DIRS)]);
 
@@ -73,7 +78,7 @@ export function createCollide(entsOf) {
       CN.nx = m === l ? -1 : m === e ? 1 : 0; CN.ny = m === l || m === e ? 0 : m === t ? -1 : 1; CN.d = m + r; return true;
     }
     if (!(p.r > 0)) return false;
-    const R = p.r + r;
+    const R = radOf(p) + r;
     let ox = p.x, oy = p.y, dx = x - ox, dy = y - oy, d2 = dx * dx + dy * dy;
     if (JOINED.has(p.kind)) for (const q of linksOf(p)) {   // (a row: the half capsule toward each neighbour that still stands for this body)
       if (q.gone || q.broken || (who && (!who.counts(q, z) || who.through?.(q, z)))) continue;
@@ -103,7 +108,7 @@ export function createCollide(entsOf) {
         if (!who.counts(p, z) || !touch(p, x, y, who.r, who, z) || who.through?.(p, z)) continue;
         if (k === PASSES) { RS.x = x; RS.y = y; RS.ok = false; return RS; }   // (still in something after every round: wedged)
         any = true; x += CN.nx * (CN.d + EPS); y += CN.ny * (CN.d + EPS); RS.nx += CN.nx; RS.ny += CN.ny;
-        if (!p.rect && p.r <= ROUND && !p.wall && !JOINED.has(p.kind) && !PUSHED.has(p.kind)) { RS.sm = p; RS.snx = CN.nx; RS.sny = CN.ny; }
+        if (!p.rect && radOf(p) <= ROUND && !p.wall && !JOINED.has(p.kind) && !PUSHED.has(p.kind)) { RS.sm = p; RS.snx = CN.nx; RS.sny = CN.ny; }
       }
       if (!any) break;
     }
@@ -138,7 +143,7 @@ export function createCollide(entsOf) {
           const q = r.sm, snx = r.snx, sny = r.sny; let tx = -sny, ty = snx, a = tx * px + ty * py;
           if (Math.abs(a) < 1e-9 * l) a = tx * -py + ty * px;   // (dead on: to the piece's right)
           if (a < 0) { tx = -tx; ty = -ty; }
-          const f = q.r + who.r + .05, open = s => !overlap(who, q.x + tx * s * f, q.y + ty * s * f, z, air);   // (its flank on side s)
+          const f = radOf(q) + who.r + .05, open = s => !overlap(who, q.x + tx * s * f, q.y + ty * s * f, z, air);   // (its flank on side s)
           const side = open(1) ? 1 : open(-1) ? -1 : 0;
           if (side && tryTo(who, z, air, cx + tx * side * l * SLIP, cy + ty * side * l * SLIP, lim)) { hit(snx, sny); return true; }
           resolve(who, cx + px, cy + py, z);   // (RS back to the straight piece's)
