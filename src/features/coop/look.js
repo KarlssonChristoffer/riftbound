@@ -89,8 +89,8 @@ export function createPeerLook(host, C) {
     if (b === undefined) return;
     v.body.pointOn(b, 0, 0, 0, HAND);
     const c = '#c8a46a';
-    if (ph === 'spin') {   // a loop overhead, turning
-      const a0 = performance.now() / 160, cx = HAND[0], cy = HAND[1], ch = HAND[2] + .35, rr = Math.max(.25, r);
+    if (ph === 'spin' || ph === 'wind' || (lx === 0 && ly === 0 && lh === 0)) {   // a loop overhead, turning (still in his hand: the
+      const a0 = performance.now() / 160, cx = HAND[0], cy = HAND[1], ch = HAND[2] + .35, rr = Math.max(.3, r);   // throw's wind-up too)
       for (let i = 0; i < 12; i++) { const a = a0 + i * Math.PI / 6, e = a + Math.PI / 6; host.line(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * .8, ch, cx + Math.cos(e) * rr, cy + Math.sin(e) * rr * .8, ch, c); }
       host.line(HAND[0], HAND[1], HAND[2], cx + Math.cos(a0) * rr, cy + Math.sin(a0) * rr * .8, ch, c);
       return;

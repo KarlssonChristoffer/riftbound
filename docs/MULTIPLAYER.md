@@ -16,6 +16,10 @@ It prints a URL: open `http://localhost:8320/src/?mp=1` in two windows (or two m
 `serve.py` needed). From a git worktree, which lacks the git-ignored renders, add `--assets D:/Game` (files the repo doesn't have
 are read from there). A page served from elsewhere joins with `?mp=host:port`.
 
+On Windows, `play-coop.bat` does both: the server in its own window, then two separate Chrome windows that join it (put them
+side by side: a tab in the background pauses, and its player stands still for the other). `play-coop.bat --seed 1234` keeps the
+same forest from run to run.
+
 In the menu's Sandbox tab, "Co-op: fell the nearest forest tree (test)" asks the server to fell the forest tree nearest you
 (within 4 m): it goes for every player. The woodcutting slice will call the same (`host.feature('coop').act('fell', tree)`).
 
