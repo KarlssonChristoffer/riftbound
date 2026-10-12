@@ -33,6 +33,7 @@ const CLAIM = {
   atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd'),
     'Weather (K)': {tab: 'dev', group: 'Nature', label: 'Air particles + ground fog', key: 'K'}},   // (not the weather: World > Weather)
   cinema: {'': {tab: 'controls', group: 'Camera', label: 'Cinematic camera when idle', id: 'cinema', keep: 'cinema'}},
+  aim: {Aim: {tab: 'controls', group: 'Aim', label: 'Aim help', id: 'aim', keep: 'aim'}},   // (features/aim.js: manual / soft / lock / auto)
   blood: {'': gfx('Effects', 'Blood', 'blood', 'blood')},   // (features/blood.js: on by default; ?blood=0)
   audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
     'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'},

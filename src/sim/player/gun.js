@@ -411,6 +411,7 @@ export function createGun(PL, I) {
         if (S.out) startWhip(w); else { startDraw(w, false); S.next = 'whip'; }
       }
     }
+    if (!S.want && H.autoFire?.() && S.act !== 'reload' && S.act !== 'fan') { S.want = 1; S.wantT = 0; }   // AUTO FIRE (features/aim.js 'auto'): a press, at the gun's own pace
     if (S.want) consumePress(w, moving);
     if (S.resume && S.out && !S.act && !S.want) startReload(w, true);
     if (!S.out && !S.act && P.state === 'draw') startDraw(w, false);   // LMB held out of a roll: the gun comes up (no shot)

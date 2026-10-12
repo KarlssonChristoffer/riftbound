@@ -81,6 +81,7 @@ export const FLAG_DOCS = {
   smoke: 'pixel | hybrid | strands | soft: the gun smoke\'s look (features/gunfx/smoke.js; Shift+V cycles it in dev mode)',
   audio: '0: no audio', forge: 'the forge sound set to use (audio)', sheet: 'a sprite-sheet capture mode (audio stays silent)',
   gunsfx: 'hollywood | gritty: the gun sounds\' western-movie flavor (audio/runtime/events.js GUN_SFX; menu > Audio > Gun sounds, remembered)',
+  aim: 'manual | soft | lock | auto: how much the game helps you aim (features/aim.js; the menu: Controls > Aim)',
   gear: 'content/gear.js ids, comma separated (wool_cap,mail_shirt): wear that set (features/gear.js; tests); none: your own clothes. Else the set last worn on this machine',
   equip: '1 | a gadget id (flask, dynamite, beartrap, scarecrow, smoke, grapple): the equipment experiment on (features/equip.js: a gadget on F), with that one in the slot; 0 forces it off',
   affixes: '1: elite affixes on (features/affixes.js: Blazing, Glacial, Overloaded, Splitting, Warded, Vampiric); 0: off; menu > Dev > Features remembers it',
