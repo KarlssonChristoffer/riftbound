@@ -810,7 +810,8 @@ function forestRuins(q, ctx) {
     return (x, y) => { const fx = x / CG, fy = y / CG, i = fx | 0, j = fy | 0, u = fx - i, v = fy - j, k = j * GW + i, a = D[k], b = D[k + 1], c = D[k + GW], d = D[k + GW + 1];
       return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; };
   };
-  const Hc = coarse((mx, my) => (GH ? GH(mx, my) : 0) + fbm(mx * .2, my * .2, 14) * .3), Gc = coarse((mx, my) => fbm(mx * .2, my * .2, 11)), Mc = coarse((mx, my) => vn(mx * .9, my * .9, 81));
+  const NK = flags.get('onesun') !== '0' ? .12 : .3;   // (the painted noise's share in the slope light: westRuins' with one sun)
+  const Hc = coarse((mx, my) => (GH ? GH(mx, my) : 0) + fbm(mx * .2, my * .2, 14) * NK), Gc = coarse((mx, my) => fbm(mx * .2, my * .2, 11)), Mc = coarse((mx, my) => vn(mx * .9, my * .9, 81));
   const F = new Float32Array(WPX * HPX);
   fill((x, y) => { F[y * WPX + x] = Hc(x, y); });
   const r3 = Math.round(.3 * PPM), slope = (x, y) => {
