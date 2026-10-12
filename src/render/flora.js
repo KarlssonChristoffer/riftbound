@@ -20,6 +20,7 @@
 // BUDGET: CPU: commit() uploads only groups whose instances changed (~16 floats a plant); the per-plant lean is world.js's. GPU: one
 //   instanced draw per shape + its shadow.
 import * as THREE from 'three';
+import {CUT, cutU} from './cut.js';   // the cutaway (a plant goes by its root's height)
 
 const HEAD = `precision highp float; precision highp int;\n`;
 const OUTS = `layout(location = 0) out vec4 o0;\nlayout(location = 1) out vec4 o1;\nlayout(location = 2) out vec4 o2;\n`;
@@ -67,17 +68,17 @@ int stageOf(float kind, float delay, float r1, float e) {
 // ---------------------------------------------------------------- the mesh plants
 const MESH_VS = HEAD + INST + `
 in vec3 position; in vec3 normal; in float aPart; in float aFam; in float aBias; in float aFixed; in float aFlex; in float aPhase;
-out vec3 vN; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed; flat out vec4 fS; flat out vec4 fA; flat out float fSeed; flat out float fYaw;
+flat out vec3 fR; out vec3 vN; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed; flat out vec4 fS; flat out vec4 fA; flat out float fSeed; flat out float fYaw;
 void main() {
   if (iS.w < .5) { gl_Position = vec4(2., 2., 2., 1.); return; }   // (hidden: off the clip volume)
-  fYaw = iT.w;
+  fYaw = iT.w; fR = iT.xyz;
   vec3 w = iT.xyz + turn(position * iS.x) + swayOf(aFlex, aPhase);
   vN = turn(normal); vNL = normal; vPL = position;
   fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed; fS = iS; fA = iA; fSeed = iL.w;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
 }`;
-const MESH_FS = HEAD + OUTS + NOISE + AUTUMN + `
-in vec3 vN; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in vec4 fS; flat in vec4 fA; flat in float fSeed; flat in float fYaw;
+const MESH_FS = HEAD + OUTS + NOISE + AUTUMN + CUT + `
+flat in vec3 fR; in vec3 vN; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in vec4 fS; flat in vec4 fA; flat in float fSeed; flat in float fYaw;
 uniform sampler2D uRamps; uniform vec3 uLArt; uniform vec3 uCover; uniform vec2 uEmitFam; uniform float uLeafK; uniform vec4 uLeaf;
 vec3 h33(vec3 p) { p = fract(p * vec3(.1031, .103, .0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx); }
 float leafCell(vec3 P, out vec3 rel) {   // (gfx.js MESH_FS)
@@ -97,6 +98,7 @@ vec3 patchOf(vec3 P) {   // the nearest of a 3D lattice's jittered points: its c
   return best;
 }
 void main() {
+  if (cutAway(fR + vec3(0., .05, 0.))) discard;   // (the cutaway: render/cut.js)
   bool leaf = fFixed < -1.5, inner = !gl_FrontFacing;
   if (inner && (!leaf || uLeafK >= .999)) discard;
   vec2 sd = vec2(fSeed * 37.1, fSeed * 11.3);
@@ -152,10 +154,10 @@ const BLADE_VS = HEAD + INST + `
 in vec3 position;   // x: side (-.5 / .5), y: f 0 .. 1 along the run
 in vec3 aR; in vec3 aM; in vec3 aT; in vec4 aB; in vec4 aC;   // root, ctrl, tip (m, the plant's frame); (t0, t1, width px, colour); (flex u0, power, plant height, phase)
 uniform vec2 uRes; uniform float uZoom; uniform vec3 uRamp[16];
-out float vF; out float vSide; out float vT; flat out vec3 vC0; flat out vec3 vC1; flat out vec3 vC2; flat out ivec3 vTn; flat out vec4 vX; flat out vec4 vA;
+flat out vec3 vR; out float vF; out float vSide; out float vT; flat out vec3 vC0; flat out vec3 vC1; flat out vec3 vC2; flat out ivec3 vTn; flat out vec4 vX; flat out vec4 vA;
 void main() {
   if (iS.w < .5) { gl_Position = vec4(2., 2., 2., 1.); return; }
-  float t = mix(aB.x, aB.y, position.y), k = 1. - t;
+  vR = iT.xyz; float t = mix(aB.x, aB.y, position.y), k = 1. - t;
   vec3 bl = aR * k * k + aM * 2. * k * t + aT * t * t;   // the curve at t
   vec3 root = iT.xyz + turn(aR * iS.x), pw = iT.xyz + turn(bl * iS.x);
   float u = clamp(bl.y / aC.z, 0., 1.), fw = u < aC.x ? 0. : pow((u - aC.x) / max(.01, 1. - aC.x), aC.y);
@@ -185,10 +187,11 @@ void main() {
   vC0 = uRamp[rp + vTn.x]; vC1 = uRamp[rp + vTn.y]; vC2 = uRamp[rp + vTn.z];
   vX = vec4(float(sc), iS.y, iS.z, aC.w); vA = iA;
 }`;
-const BLADE_FS = HEAD + OUTS + AUTUMN + `
-in float vF; in float vSide; in float vT; flat in vec3 vC0; flat in vec3 vC1; flat in vec3 vC2; flat in ivec3 vTn; flat in vec4 vX; flat in vec4 vA;
+const BLADE_FS = HEAD + OUTS + AUTUMN + CUT + `
+flat in vec3 vR; in float vF; in float vSide; in float vT; flat in vec3 vC0; flat in vec3 vC1; flat in vec3 vC2; flat in ivec3 vTn; flat in vec4 vX; flat in vec4 vA;
 float hh(float a, float b) { return fract(sin(a * 127.1 + b * 311.7) * 43758.5453); }
 void main() {
+  if (cutAway(vR + vec3(0., .05, 0.))) discard;   // (the cutaway: render/cut.js)
   int sc = int(vX.x + .5), tn;
   vec3 c;
   if (sc == 1) { int k = vSide < -.2 ? 0 : vSide > .2 ? 2 : 1; if (vF < .12) k = 2; c = k == 0 ? vC0 : k == 2 ? vC2 : vC1; tn = k == 0 ? vTn.x : k == 2 ? vTn.z : vTn.y; }   // a head: lit left, its foot in shade
@@ -223,11 +226,11 @@ export function createFlora(G) {
   }
   const ramps = {value: Array.from({length: 16}, () => new THREE.Vector3())};
   const res = {value: new THREE.Vector2(G.VW, G.VH)}, zoom = {value: 1};
-  const meshU = {uRamps: U.ramps, uLArt: U.lArt, uCover: U.cover, uEmitFam: U.emitFam, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uPal: palU,
+  const meshU = {...cutU(U), uRamps: U.ramps, uLArt: U.lArt, uCover: U.cover, uEmitFam: U.emitFam, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uPal: palU,
     uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time};
   const meshMat = raw(MESH_VS, MESH_FS, meshU, {side: THREE.DoubleSide});
   const shadowMat = raw(SHADOW_VS, SHADOW_FS, {uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uLeafK: U.leafK}, {side: THREE.DoubleSide});
-  const bladeMat = raw(BLADE_VS, BLADE_FS, {uRes: res, uZoom: zoom, uRamp: ramps, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uAutumn: U.autumn, uPal: palU}, {side: THREE.DoubleSide});
+  const bladeMat = raw(BLADE_VS, BLADE_FS, {...cutU(U), uRes: res, uZoom: zoom, uRamp: ramps, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uAutumn: U.autumn, uPal: palU}, {side: THREE.DoubleSide});
 
   const groups = [];
   // a shape's group: its base geometry's attributes + the instance buffer; kind 'mesh' | 'blade'; o.casts: a shadow draw too

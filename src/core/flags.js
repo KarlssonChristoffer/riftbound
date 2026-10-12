@@ -29,6 +29,8 @@ export const FLAG_DOCS = {
   name:      'co-op: the name the others see over your head (else the server gives one: Player N)',
   seed:      'the forest north of the Proving Grounds, grown from this seed (world/forest.js; offline: in co-op the server sends its own)',
   forest:    '1: the forest with the default seed (world/forest.js); 0: no forest even in co-op',
+  hut:       '0: no stone hut in the forest\'s lakeside clearing (world/hut.js, layout.js HUT: a roofed place to try the cutaway)',
+  cut:       '0: no cutaway (features/cutaway.js: the ground, rock and walls between the camera and the player cut away round him, and a roof over him)',
   // ---- the player
   set:       'basic | sim | body | gunslinger | outlaw: the loadout (baked cloak / runtime cloth / bare body; the cowboys with their revolvers)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
