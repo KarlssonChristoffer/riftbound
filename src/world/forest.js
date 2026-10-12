@@ -201,7 +201,9 @@ export function forestPlan(seed) {
     const cut = {type: 'channel', pts, bed, hw, bank: .06, drawn: {hw: hw.map(v => +(v + CANYON_IN).toFixed(2))}};
     // its wall as one line (cliffs3d.js's way: the floor on its right): up its west side, round the head, down its east side
     const side = sg => pts.map((p, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [p[0] + (b[1] - a[1]) / l * sg * hw[i], p[1] - (b[0] - a[0]) / l * sg * hw[i]]; });
-    const Wl = side(1), El = side(-1), c = pts.at(-1), r = hw.at(-1), ang = q => Math.atan2(q[1] - c[1], q[0] - c[0]);
+    // (from where it is a wall: at the mouth the ground outside is no higher than the floor, and a run of rock there stands loose)
+    const from = sg => { const L = side(sg); let i = 0; while (i < L.length - 2) { const [x, y] = L[i], q = L[i + 1], l = Math.hypot(q[0] - x, q[1] - y) || 1, ox = sg * (q[1] - y) / l, oy = -sg * (q[0] - x) / l; if (ground(x + ox, y + oy) - bed[i] > .3) break; i++; } return L.slice(Math.max(0, i - 1)); };
+    const Wl = from(1), El = from(-1), c = pts.at(-1), r = hw.at(-1), ang = q => Math.atan2(q[1] - c[1], q[0] - c[0]);
     let a0 = ang(Wl.at(-1)), a1 = ang(El.at(-1)); while (a1 <= a0) a1 += 2 * Math.PI;
     const ring = []; for (let k = 1; k < 12; k++) { const a = a0 + (a1 - a0) * k / 12; ring.push([c[0] + Math.cos(a) * r, c[1] + Math.sin(a) * r]); }
     F.canyon = {pts, hw, bed, cut, wall: [...Wl, ...ring, ...El.reverse()].map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]), depth: +(uh - rise).toFixed(2)};
