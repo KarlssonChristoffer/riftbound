@@ -71,7 +71,9 @@ in the middle of what the panel leaves: drag to spin him, right-drag to move, th
 the panel, Tab the next tab, P saves a photo, Esc (or Shift+Tab) back to the game: the camera, zoom and yaw come back as
 they were. "the world" as the backdrop shows him where he stands instead, dimmed round him.
 
-The UI stands round the scene: the TOP bar (the title, the loadout, the tabs, the keys, back to the game), EQUIPMENT on the
+The UI is pixel art like the game: its own pixel font (`dev/pixelfont.js`: 5 x 7 glyphs built into a TrueType font in code,
+'RiftPixel'), 9-slice pixel frames painted in code (wood and brass), pixel slot icons, every edge a whole UI pixel (U css
+px: 2 at 1080, 3 at 1440, 4 at 2160). It stands round the scene: the TOP bar (the title, the loadout, the tabs, the keys, back to the game), EQUIPMENT on the
 left (a card a slot with what he wears there, its colours as a swatch, x takes it off; Random, Undress; the set's weight,
 armor and speed as bars), the tab on the right, and the SCENE bar at the bottom (backdrop and stage swatches, the light:
 now, dawn, day, dusk, night as the clock's preview; his pose: the live hero's emotes; turn 45 degrees, spin, frame, photo).
