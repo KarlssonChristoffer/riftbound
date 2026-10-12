@@ -8,7 +8,8 @@
 //                                  the gun-sound flavors that aren't playing (events.js otherGunSfx)
 //   D.post(name, params) -> bool   false = the bank isn't baked (or the name is unknown): the caller plays its legacy sound.
 //                                  true = handled, which includes "culled because its source is off-screen"
-//                                  params: {pan, dist | d, off, at, x, y, mat, surf, kind, k, g, n, small, big, ...}
+//                                  params: {pan, dist | d, off, at, x, y, mat, surf, kind, k, g, n, small, big, ...}; taps / tapN:
+//                                  its echoes (echo() below)
 //   D.ambience.update({biome, time, stream: {prox, pan}, sources: [{kind, id, x, y, pan, d, off}], combat, gust?, dt})
 //   D.makeCreak() -> {set(k, rate, t, dt), stop(t)} | null             the bow-draw creak (same shape as audio.js makeCreak)
 //   D.makeRoll()  -> {set(speed, pan, d, t, dt, off?), stop(t)} | null   the rolling barrel (same shape as audio.js makeRoll)
@@ -150,9 +151,23 @@ export function createDirector(engine, bakery, {EVENTS = {}, AMBIENCE = {}, SPAT
         steal: ev.steal, coalesceMs: l.coalesceMs ?? ev.coalesceMs ?? 0, cullDb: ev.cullDb,
       });
       if (v) { st.played++; voices.push(v); } else if (i === 0) st.culled++;   // culled, coalesced, rejected or suspended
+      if (i === 0 && v && p.taps) echo(name, p, bank.buffers[vi], {bus: l.bus ?? ev.bus, gainDb: evDb + (l.gainDb || 0), rate: Math.pow(2, semi / 12) * (l.rate || 1),
+        dist, lpfs, minDist: sr.minDist, maxDist: sr.maxDist, at, priority: ev.priority ?? 50});
     });
     if (ev.snapshot && engine.snapshot) { try { engine.snapshot(ev.snapshot.name, ev.snapshot); } catch (e) { st.errors++; } }
     return {ok: true, voices};
+  }
+  // ECHOES (src/audio/acoustics.js taps: the world's faces sending a loud sound back): p.taps [{delay s, gainDb, lpf, pan, send}]
+  // (the first p.tapN of them): the first layer's voice again, as played, that much later, quieter, darker and from the face's
+  // side; its own key (6 at most, the oldest stolen), under the sound itself in priority. Only when that voice played
+  function echo(name, p, buf, h) {
+    const n = Math.min(p.tapN ?? p.taps.length, p.taps.length), t0 = h.at ?? audioNow();
+    for (let k = 0; k < n; k++) {
+      const tp = p.taps[k], v = engine.play(buf, {bus: h.bus, gainDb: h.gainDb + tp.gainDb, rate: h.rate, pan: tp.pan, dist: h.dist,
+        lpf: Math.min(tp.lpf, ...h.lpfs), minDist: h.minDist, maxDist: h.maxDist, send: tp.send ?? .3, at: t0 + tp.delay,
+        priority: h.priority - 20, key: name + '~echo', maxInstances: 6, steal: 'oldest', cullDb: -46});
+      if (v) st.echoes = (st.echoes || 0) + 1;
+    }
   }
   function post(name, params) {
     try { return fire(name, params || {}).ok; } catch (e) { st.errors++; console.warn('director.post', name, e); return false; }
