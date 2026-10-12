@@ -28,7 +28,7 @@ const HALO_A = .16, HALO_R = .3, LANTERN = {fwd: .22, side: .3, h: .95, c: [1, .
 // UNDERGROUND (features/caves.js F.under 0..1: how far the world above has gone dark round him): the mood turns toward the cave's:
 // a faint cold ambient, no sun, no sun shadows, no fog's colour, a black background, a small lift round him (he stays readable);
 // the lights (his lantern, the crystals) do the rest
-const CAVE = {amb: [.03, .032, .042], lift: [.05, .045, .04], fill: .25};
+const CAVE = {amb: [.055, .055, .07], lift: [.05, .045, .04], fill: .25};
 const mixInto = (a, b, k, o) => { o[0] = a[0] + (b[0] - a[0]) * k; o[1] = a[1] + (b[1] - a[1]) * k; o[2] = a[2] + (b[2] - a[2]) * k; return o; };
 function flick(l, t) {
   const f = l.flicker || 0; if (!f) return 1;

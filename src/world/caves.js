@@ -181,7 +181,13 @@ export function cavePlan(seed, m, rect, height = null) {
     Hr[j * nx + i] = bySlot ? Math.max(height ? height(x, y - oy) : cm.g0, slotFloor(cm, tmp[0]) + .4) : Hf[j * nx + i] + T.wall;   // (by the slot: the woods' ground over it)
   }
   const at = (G, x, y) => { const i = Math.round((x - gx0) / CELL), j = Math.round((y - gy0) / CELL); return i < 0 || j < 0 || i >= nx || j >= ny ? null : G[j * nx + i]; };
-  const inside = (x, y) => at(D, x, y) ?? 1e9;
+  const lerp = (G, x, y) => {   // (bilinear: the floor's painter and the walls' outline agree on a line, not a .25 m staircase)
+    const u = (x - gx0) / CELL, v = (y - gy0) / CELL, i = Math.floor(u), j = Math.floor(v);
+    if (i < 0 || j < 0 || i + 1 >= nx || j + 1 >= ny) return null;
+    const a = u - i, b = v - j, k = j * nx + i;
+    return (G[k] * (1 - a) + G[k + 1] * a) * (1 - b) + (G[k + nx] * (1 - a) + G[k + nx + 1] * a) * b;
+  };
+  const inside = (x, y) => lerp(D, x, y) ?? 1e9;
   const floor = (x, y) => at(Hf, x, y) ?? hFoot;
   const C = {seed, band: B, off, mouth: m, copy: cm, nodes, edges, grid: {x0: gx0, y0: gy0, nx, ny, cell: CELL, D, H: Hf, top: Hr}, inside, floor, top: (x, y) => at(Hr, x, y) ?? hFoot + T.wall, wall: T.wall};
   // its GROUND (world/terrain.js 'cave', set): the floor in the open, rock WALL m over it elsewhere (the band past the grid: solid)
