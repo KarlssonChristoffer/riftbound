@@ -146,7 +146,7 @@ export function cliffGeometry(runs, o) {
     if (topF) for (let s = S0; s <= S1 + 1e-6; s += .25) { fr.at(Math.min(s, S1), at); top = Math.max(top, topF(at[0], at[1])); }
     // the layers, top down, to below the deepest foot; their bedding lines (bnd[j](s): the top of layer j) wander along the face
     const layers = [];
-    for (let y = top, i = 0; i < 30; i++) {
+    for (let y = top, i = 0; i < 60; i++) {
       const th = (i === 0 ? .25 + R() * .15 : LAYER[0] + R() * (LAYER[1] - LAYER[0])), hard = i === 0 || R() < .38;
       const off = i === 0 ? .02 + R() * .07 : hard ? -.01 + R() * .09 : -.07 - R() * .14;
       layers.push({yt: y, i, hard, off, f: famB !== null && i > 0 && R() < .45 ? famB : famRock, wave: R() * 100, amp: .04 + R() * .06});

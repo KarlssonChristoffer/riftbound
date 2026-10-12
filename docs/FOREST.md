@@ -79,14 +79,21 @@ ground that rises the way the land does, with rock only where a slope breaks:
   from the slope above.
 - **TORS.** One or two blocks of bare rock on the top (kind 'tor', rock all round, 2.2 .. 3.4 m).
 - **CANYON.** A gorge cut into the upland: from just past its foot north, wandering, to a rounded head 9 m short of the north edge;
-  5 .. 7.5 m across, its floor the ground at its mouth rising .6 .. 1.4 m inward, so the walls grow from nothing at the mouth to
-  6 .. 7.5 m. A channel with no bank (`F.canyon.cut`, in `F.shapes`), drawn .35 m wider than walked like the mesa's cleft, so the drawn
-  ground's steep cells lie behind the rock; world.js lays one rock run up its west wall, round the head and down its east wall
-  (`F.canyon.wall`). You walk in from the home woods; the rims are reached over the upland.
+  3.5 .. 5.5 m across, its floor the ground at its mouth rising .6 .. 1.4 m inward. The land it cleaves rises along it (a RIDGE:
+  5.5 .. 6.5 m, a 2 m flat rim, then falling away walkably over 18 m), from nothing at the mouth to full height 14 .. 54 m in, so
+  its walls grow from nothing to 12 .. 14 m (15 m with the relief). A channel with no bank (`F.canyon.cut`, in `F.shapes`), drawn
+  .35 m wider than walked like the mesa's cleft, so the drawn ground's steep cells lie behind the rock; world.js lays one rock run
+  up its west wall, round the head and down its east wall (`F.canyon.wall`, from where the wall really rises: no loose rock at the
+  mouth). cliffs3d.js stacks up to 60 layers now (was 30: ~13 m), for walls this tall. You walk in from the home woods; the rims
+  are reached over the ridge's outer slopes.
+- **HEIGHT YOU CAN SEE** (2026-10-12: the slopes read as one flat green). The painter (biomes.js `forestRuins`) bands the ground by
+  height, the bands' edges ragged: a gorge's floor (4 m under the ground round it) in a deep, cool grass; the fell's bare top
+  (`F.fellK` over .58) heath with lichen in drifts, heath and grass mixed below it; the upland's open ground (`F.uplandK`) a drier,
+  paler grass. Up the fell the trees thin out and turn to stunted mountain birch with a pine now and then (`fellK` over .25).
 
 Node check (20 seeds, `forestPlan` + `createField` and a walk over the cells that aren't steep, from the clearing): every seed's
 fell top, every crag's shelf, the canyon's floor and head and both rims can be walked to; steep cells away from the rock
-.05 .. .47%; 600 .. 800 trees. The point-light height map (gfx.js) covers up to `WORLD.top` (the fell + 4 m; 20 m without the
+.10 .. .54%; 570 .. 750 trees. The point-light height map (gfx.js) covers up to `WORLD.top` (the fell + 4 m; 20 m without the
 forest, as before).
 
 ## Chunk-friendly
