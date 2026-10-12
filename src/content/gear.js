@@ -89,8 +89,9 @@ export const GEAR = [
   {id: 'tomte_cap', name: 'Tomte cap', slot: 'head', weight: .2, armor: 0, desc: 'A tall red cap. Someone will want it back.',
     soon: 'a tomte may take it back if you are rude',
     look: {hide: ['hat'], add: [
-      {on: 'HatHold0', part: 'tomte', mat: 'felt_red', shape: 'cone', r: .245, len: .56, at: [0, .13, 1.86], rot: [24, 0, 0], o: {sides: 9}},
-      {on: 'HatHold0', part: 'tomte.band', mat: 'wool_cream', shape: 'tube', r0: .245, r1: .238, len: .07, at: [0, .012, 1.61], o: {sides: 10}},
+      {on: 'HatHold0', part: 'tomte.crown', mat: 'felt_red', shape: 'ball', r: [.236, .244, .16], at: [0, .012, 1.66], o: {sides: 10}},
+      {on: 'HatHold0', part: 'tomte', mat: 'felt_red', shape: 'cone', r: .2, len: .5, at: [0, .157, 1.92], rot: [-28, 0, 0], o: {sides: 9}},
+      {on: 'HatHold0', part: 'tomte.band', mat: 'wool_cream', shape: 'tube', r0: .248, r1: .242, len: .07, at: [0, .012, 1.6], o: {sides: 10}},
     ]}},
   {id: 'lamp_cap', name: 'Miner\'s lamp cap', slot: 'head', weight: .8, armor: .02, desc: 'A leather cap with a brass lamp: your lantern is always lit.',
     mods: [{stat: 'light.lantern', add: 1}],
