@@ -905,9 +905,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       if (CAVE) {
         const M = CAVE.mouth, hw = M.w / 2, at = (s, q) => [M.x + M.ux * s - M.uy * q, M.y + M.uy * s + M.ux * q];
         const foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
-        const W = [at(0, -hw), at(M.len * .5, -hw), at(M.len, -hw), at(M.len, hw), at(M.len * .5, hw), at(0, hw)];
-        terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: M.g0 - M.depth - .05,
-          base: 0, relief: .9, talus: false, lip, seed: 171});
+        // (each side up to the brow only: past it the sides and the far end are under the overhang, in the dark, and their tops stood
+        // up through the ground over it)
+        for (const [k, W] of [[0, [at(0, -hw), at(M.brow * .5, -hw), at(M.brow, -hw)]], [1, [at(M.brow, hw), at(M.brow * .5, hw), at(0, hw)]]])
+          terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: M.g0 - M.depth - .05,
+            base: 0, relief: .9, talus: false, lip, seed: 171 + k * 6});
         const B = [at(M.brow, -hw - .1), at(M.brow, hw + .1)], gB = (x, z) => tH(x + M.ux * .3, z + M.uy * .3);
         terrRuns.push({pts: B, top: gB, bot: (x, z) => gB(x, z) - 1.3, minBot: M.g0 - 1.6, base: 0, relief: .9, talus: false, lip, seed: 173, dark: () => -.2});
       }
