@@ -293,8 +293,12 @@ export function waterSample(x, y, out) {
 //   across / along   the pattern's cell size in texels (thin streaks stretched along the flow); along is a divisor of 768
 //   hi / lo   the light / dark share of the surface (the pattern's thresholds: lower = more)     lap  the lapping line's tone (-1 = none)
 //   refl      how much the lanterns, mushrooms and wisps shine in it      spark  sun sparkles
+//   still     STILL water's own look (waterSample's speed 0: the forest's lake; gfx.js WATER_FS wStill): ramp, its four tones (the crests'
+//             sheen, the shelf's calm, the open water's calm with the sky in it, a paw of wind ruffling it darker), tint, its bed seen
+//             through it (peaty water: warm), hue, how much of the bed's own colour shows. None: no still water
 export const WATER_TUNE = {
-  ruins: {ramp: S => S.water.h, hold: [3], bank: 2, streak: 0, deep: 2, shallow: 1, deepFrac: .45, range: [0, 2], rate: 9, across: 2.5, along: 12, hi: .8, lo: .76, lap: 0, refl: 1, spark: 1},
+  ruins: {ramp: S => S.water.h, hold: [3], bank: 2, streak: 0, deep: 2, shallow: 1, deepFrac: .45, range: [0, 2], rate: 9, across: 2.5, along: 12, hi: .8, lo: .76, lap: 0, refl: 1, spark: 1,
+    still: {ramp: ['#86a6ac', '#4b6b74', '#314a55', '#1f2f39'], tint: '#d2b07a', hue: .55}},
   // lava: the crust's three colours drift slowly; the glowing seams (lava-coloured, in the emissive layer) stay put. (The first two
   // colours are literals in biomes.js groundEmber, not exposed by the style: keep them in step)
   ember: {ramp: S => ['#5a1a10', '#3a1410', S.crust], hold: [0], bank: 2, streak: -1, deep: 2, shallow: 2, deepFrac: 0, range: [1, 2], rate: 2.5, across: 5, along: 24, hi: .82, lo: .8, lap: -1, refl: 0, spark: 0},
@@ -707,7 +711,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // the West Downs' brook (world/brook.js): its own moving water on their canvas, baked over its box only, with its own bed (gfx.js surface bed)
   const wdWater = WT && westPx ? bakeWater(biome, WT, {WPX: westCanvas.width, HPX: westCanvas.height, PPM, px: westPx, cliffZ, X0: WD.x0, Y0: WD.y0, box: BROOK.box}) : null;
   if (wdWater) disposers.push(() => { wdWater.dispose(); wdWater.userData.bed?.tex.dispose(); });
-  G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark, bed: wTex.userData.bed} : null);
+  G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark, bed: wTex.userData.bed,
+    still: WT.still && FOREST ? {ramp: WT.still.ramp.map(h => rgbOf(h)), tint: rgbOf(WT.still.tint), hue: WT.still.hue} : null} : null);   // (still water: only the forest's lake has any)
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
   const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
   if (lit) { lit.sim = G.litterSim(lit); disposers.push(lit.dispose); }   // (the living layer: render/litter.js, driven by features/litter.js)

@@ -221,7 +221,8 @@ void main() {
 // function of those WORLD TEXELS and the stepped water clock, never of the screen, so it holds still while the camera turns.
 // A texel's tone is a value noise in (a, s - travelled), cut to the biome's ramp: thin streaks stretched along the flow, sliding
 // by WHOLE texels (floor(clock * rate * speed)), each stretch at its own pace because s is travel TIME (the narrows run faster).
-// FALLING water (a cliff / face texel with alpha 252, world.js FALL_ALPHA) streams down the same way
+// FALLING water (a cliff / face texel with alpha 252, world.js FALL_ALPHA) streams down the same way.
+// STILL water (a texel whose speed is 0: the forest's lake) doesn't flow at all: wStill, wDrops below
 const WATER_FS = `
 uniform sampler2D uWater; uniform float uHasWater;
 uniform float uWPhase;               // the water clock, s: render() advances it at G.setWater's speed
@@ -259,6 +260,76 @@ uniform vec4 uWFoot;                 // the player's feet: x, y, z (m); w 1 = kn
 uniform vec2 uWorld, uOrigin;        // (SURF_VS's planar mapping: where his feet are in texels)
 vec4 wBed(ivec2 ti) { return texelFetch(uWBed, clamp(ti - ivec2(uWBedR.xy), ivec2(0), ivec2(uWBedR.zw) - 1), 0); }
 int wBand(vec4 b) { float d = float(int(b.a * 255. + .5) >> 3) / 31.; return d < uWCut.x ? 0 : d < uWCut.y ? 1 : d < uWCut.z ? 2 : 3; }
+// STILL WATER (the lake: waterSample's speed 0; its colours world.js WATER_TUNE still, its weather features/stillwater.js through
+// G.setWater({still})). Nothing flows: the WIND draws CAT'S PAWS on it, patches of fine ripples drifting across it downwind (more and
+// bigger as it blows harder, whitecaps in a gale) while the rest lies calm, a dark mirror with a few long glassy lines; the SHORE laps
+// in and out; the shallow shelf shows its bed (sand, stones, weed), the drop-off goes dark. RAIN rings it, and now and then a FISH
+// rises in the deep. All in WORLD texels (the surface's texel + its origin: the forest's tiles join seamlessly) and whole-texel steps
+// of the wind's travel and the still clock, so it holds still while the camera turns. The travel wraps at 4608 texels: every
+// pattern's lattice repeats a whole number of times in that, so the wrap never shows
+uniform vec4 uWS;      // the wind's direction x, z (unit, world), the ripples' travel (texels, wraps at 4608), the wind 0..1 (< 0: no still look, the old water)
+uniform vec4 uWS2;     // rain 0..1, fish 0..1, the gust now 0..1, the still clock (s)
+uniform vec3 uWSRamp[4]; uniform vec4 uWSTint;   // the lake's four tones (sheen, calm, body, deep); its bed seen through it (rgb, peaty water: the blues go first) and how much of the bed's hue shows (w)
+ivec2 wOrg() { return ivec2(floor(uOrigin * uTexSize / uWorld + .5)); }   // the surface's first texel in world texels
+vec3 wStill(ivec2 ti, int ring) {
+  vec2 p = vec2(ti + wOrg()), dir = uWS.xy;
+  float al = dot(p, dir), ac = dot(p, vec2(-dir.y, dir.x)), tr = floor(uWS.z), w = clamp(uWS.w + .35 * uWS2.z, 0., 1.), ck = uWS2.w;
+  vec4 bd = vec4(0.); int band = 3;
+  if (uWBedOn > .5) { bd = wBed(ti); band = wBand(bd); }
+  int t0 = band == 0 ? 1 : 2, t = t0;   // calm: the sky's sheen on it (the shelf the lightest); a paw of wind roughens it a tone darker
+  // the paws: two noises drifting downwind at half and three quarters of the ripples' pace; their share of the surface grows with the wind
+  float m = wvn(vec2(ac / 26. + 3.7, (al - tr * .5) / 18.), 128.) * .68 + wvn(vec2(ac / 9. + 9.1, (al - tr * .75) / 8.), 48.) * .32;
+  float k = (m - mix(.8, .38, w)) / .08, r = 0.;
+  ivec2 ro = ivec2(0);
+  if (k > 0.) {
+    float e = min(1., k);
+    r = wvn(vec2(ac / 4.5 + 1.3, (al - tr) / 2.25), 64.);   // fine ripples across the wind, at the wind's own pace
+    if (r > 1. - .3 * e) t = t0 - 1; else if (r < .58 * e) t = t0 + 1;   // the crests catch the sky; the troughs (most of a paw, thinning to its edge) the dark
+    if (w > .6 && r > .9 && wh(floor(p / 2.) + floor(ck * 2.5) * .37) > 1.6 - w) t = -1;   // whitecaps, flickering on the crests
+    ro = ivec2(r > .62 ? 1 : r < .38 ? -1 : 0, 0);   // (the bed wobbles a texel under the ripples)
+  } else if (wvn(vec2(ac / 3. + 5.2, (al - tr * .25) / 16.), 128.) > .9 - .04 * (1. - w)) t -= 1;   // the calm's long glassy lines, lying along the wind
+  // the shore laps: a dashed line creeping in and out over the first texels, a step every ~1.1 s (further and livelier in wind)
+  if (ring > 0) {
+    float st = floor(ck * .9), pos = 1. + abs(mod(st, 4.) - 2.) + (w > .5 ? 1. : 0.);
+    if (float(ring) == pos && wvn(p / 2.6 + vec2(st * .31, 1.7), 1e4) > .5 - .2 * w) t = t0 > 0 ? -1 : 0;
+    else if (ring == 1 && t > 0) t -= 1;
+  }
+  vec3 res = t < 0 ? uWFoam : uWSRamp[min(t, 3)];
+  if (uWBedOn > .5 && t >= 0) {   // the bed through the water, as wDeep: its light and dark on the water's colour, a share of its hue, tinted
+    float op = t < t0 ? max(uWOp[band], uWLook.x) : uWOp[band];
+    if (op < .999) { vec3 b = wBed(ti + ro).rgb; res = mix(mix(res * dot(b, vec3(.3, .55, .15)) / uWLook.z, b * uWSTint.rgb, uWSTint.w), res, op); }
+  }
+  return res;
+}
+// rain rings and a fish now and then on still water (main, once per fragment: crisp under the smooth sampling)
+bool wStillAt(ivec2 ti) { int rc = int(texelFetch(uWater, clamp(ti, ivec2(0), ivec2(uTexSize) - 1), 0).r * 255. + .5); return rc >= 192 && (rc & 15) == 0; }
+vec3 wDrops(vec3 res, ivec2 ti) {
+  ivec2 og = wOrg(); vec2 p = vec2(ti + og) + .5; float ck = uWS2.w;
+  if (uWS2.x > .01) {   // RAIN: a cell of 8 x 8 texels may take a drop every ~.45 s at its own phase; the ring widens to 5 texels and fades;
+    // between them the surface is pocked (a texel lit for 1/10 s here and there), so the rain reads over the whole lake, not only its rings
+    vec2 c0 = floor(p / 8.);
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+      vec2 c = c0 + vec2(i, j); float ph = ck * 2.2 + wh(c + 17.1) * 7., n = floor(ph), a = ph - n;
+      if (wh(c * 1.31 + n * .173) > uWS2.x * .75) continue;
+      vec2 o = c * 8. + 1. + floor(vec2(wh(c + n * .71), wh(c.yx + n * .37 + 3.)) * 6.) + .5;
+      float d = length(p - o), rr = floor(a * 6.);
+      if (rr < .5 ? d < .6 : abs(d - rr) < .5) res = mix(res, uWSRamp[0], rr < .5 ? .95 : .85 - a * .5);
+    }
+    if (wh(p * .917 + floor(ck * 10.) * 1.37) < uWS2.x * .05) res = mix(res, uWSRamp[0], .6);
+  }
+  if (uWS2.y > .01) {   // A FISH RISES: a cell of 40 texels may have one every ~9 s, over deep water: a splash, then two rings spreading 3 texels a second
+    vec2 c = floor(p / 40.); float ph = ck / 9. + wh(c + 5.3), n = floor(ph), a = (ph - n) * 9.;
+    if (a < 3.2 && wh(c * .77 + n * .29) < uWS2.y * .5) {
+      vec2 o = c * 40. + 10. + floor(vec2(wh(c + n), wh(c.yx + n + 1.)) * 20.) + .5; ivec2 oi = ivec2(o) - og;
+      if (wStillAt(oi) && (uWBedOn < .5 || wBand(wBed(oi)) >= 2)) {
+        float d = length(p - o), rr = floor(a * 3.);
+        if (a < .3 && d < 1.3) res = uWFoam;
+        else if ((abs(d - rr) < .5 || (rr >= 3. && abs(d - rr + 3.) < .5)) && rr > 0.) res = mix(res, uWSRamp[0], .8 - a * .2);
+      }
+    }
+  }
+  return res;
+}
 // wPrep, once per fragment from its own texel (the smooth sampling's four neighbours share it: the shader stays small, wTexel is
 // inlined five times): the ripple's slope (wRg, -.5 .. .5: x 2.4 x the band's reach = the bed's offset, whole texels), the foam's
 // dashes (wDash: the contact line, its ripple, the feet's ring, its ripple), the ripple's ring (wPu) and where his feet are (wFt: texel
@@ -304,6 +375,7 @@ vec3 wTexel(ivec2 ti, ivec2 mx) {
   vec3 res = texelFetch(uTex, ti, 0).rgb;
   if (rc < 192) return res;
   int gg = int(w.g * 255. + .5), tone = (rc >> 4) & 3, ring = gg >> 5;
+  if ((rc & 15) == 0 && uWS.w >= 0.) return wStill(ti, ring);   // (still water: the lake)
   float spd = float(rc & 15) * .125, s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .5;
   float ph = uWPhase * uWA.x * spd;
   float h = wlay(a, s, ph, uWA.y, uWA.z, 0.), l = wlay(a, s, ph * .7, uWA.y * 1.4, uWA.z * 1.5, 7.3);
@@ -428,6 +500,7 @@ void main() {
         c.rgb = mix(cN, cS, uSmooth);
       }
       if (uWBedOn > .5 && rc >= 128) c.rgb = wFoam(c.rgb, ti, int(wBed(ti).a * 255. + .5) & 7);   // (contact foam: WATER_FS)
+      if (uWS.w >= 0. && rc >= 192 && (rc & 15) == 0 && uWS2.x + uWS2.y > .01) c.rgb = wDrops(c.rgb, ti);   // (rain rings, a fish: still water)
     }
   }
   // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
@@ -1523,6 +1596,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     wBed: {value: null}, wBedOn: {value: 0}, wBedR: {value: new THREE.Vector4(0, 0, 1, 1)}, wCut: {value: new THREE.Vector4(.13, .33, .6, 2)},
     wOp: {value: new THREE.Vector4(1, 1, 1, 1)}, wTone: {value: new THREE.Vector4(1, 1, 2, 2)}, wLook: {value: new THREE.Vector4(.86, 0, 0, 0)},
     wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
+    // still water (setWaterLook's still, setWater's still: features/stillwater.js): see WATER_FS wStill
+    wS: {value: new THREE.Vector4(1, 0, 0, -1)}, wS2: {value: new THREE.Vector4()}, wSRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())}, wSTint: {value: new THREE.Vector4(1, 1, 1, .25)},
     cut: {value: new THREE.Vector4()}, cutB: {value: new THREE.Vector4()}, cutM: {value: new THREE.Vector4()}, cutP: {value: new THREE.Vector4()},   // the cutaway (render/cut.js; setCut, cutFrame in render())
   };
   const raw = (vs, fs, uniforms, extra = {}) => {
@@ -1607,7 +1682,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uCliffSize: {value: new THREE.Vector2(cliff?.image.width || 1, cliff?.image.height || 1)},
     uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp,
     uWBed: bed === undefined ? U.wBed : {value: bed?.tex || null}, uWBedOn: bed === undefined ? U.wBedOn : {value: bed ? 1 : 0},
-    uWBedR: bed === undefined ? U.wBedR : {value: new THREE.Vector4(...(bed?.rect || [0, 0, 1, 1]))}, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot}, {side: THREE.FrontSide});
+    uWBedR: bed === undefined ? U.wBedR : {value: new THREE.Vector4(...(bed?.rect || [0, 0, 1, 1]))}, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot,
+    uWS: U.wS, uWS2: U.wS2, uWSRamp: U.wSRamp, uWSTint: U.wSTint}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
   // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test
@@ -2755,16 +2831,24 @@ void main() {
   const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; U.wFoot.value.set(x, h - .9, z, 1); };   // (h: his chest, .9 m over his feet: the water rings them when he wades)
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
   // advances at, so changing it never makes the pattern jump
-  const setWater = ({speed} = {}) => { if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0); };
+  // still: the lake's weather, every view while there is still water (features/stillwater.js): {dir: [x, z] unit, travel (texels, wrapped at
+  // 4608), wind 0..1, rain 0..1, fish 0..1, gust 0..1, t (s, its clock)}; ignored while the biome has no still look (setWaterLook)
+  let stillLook = false;
+  const setWater = ({speed, still} = {}) => {
+    if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0);
+    if (still && stillLook) { U.wS.value.set(still.dir[0], still.dir[1], still.travel, still.wind); U.wS2.value.set(still.rain, still.fish, still.gust, still.t); }
+  };
   // the biome's water (world.js buildWorld, at every build, from WATER_TUNE): {ramp: [[r, g, b] 0..1] light -> dark (padded to 4), rate,
   // across, along, hi, lo, range: [lightest, darkest] tone, lap (tone | -1), refl, spark} | null = no moving water (the rift)
   function setWaterLook(L) {
     const B = L?.bed;   // the depth, bed and contact foam (world/waterbed.js: {tex, rect, cuts, op, tone, hiOp, tint, hue, lum, dark, refr, foam}; none: the old water)
     U.wBed.value = B ? B.tex : null; U.wBedOn.value = B ? 1 : 0;
     if (B) { U.wBedR.value.set(...B.rect); U.wCut.value.set(...B.cuts, B.refr); U.wOp.value.set(...B.op); U.wTone.value.set(...B.tone); U.wLook.value.set(B.hiOp, B.hue, B.lum, B.dark); U.wTint.value.set(...B.tint); U.wFoam.value.set(...B.foam); }
-    if (!L) { compU.uWRefl.value.set(0, 0, 0, 0); return; }
+    if (!L) { compU.uWRefl.value.set(0, 0, 0, 0); stillLook = false; U.wS.value.w = -1; return; }
     for (let i = 0; i < 4; i++) U.wRamp.value[i].set(...L.ramp[Math.min(i, L.ramp.length - 1)]);
     U.wA.value.set(L.rate, L.across, L.along, L.lap); U.wB.value.set(L.hi, L.lo, L.range[0], L.range[1]);
+    stillLook = !!L.still; U.wS.value.w = stillLook ? Math.max(0, U.wS.value.w) : -1;   // (L.still: {ramp: [[r, g, b] x 4], tint: [r, g, b]}: the lake's own look)
+    if (L.still) { for (let i = 0; i < 4; i++) U.wSRamp.value[i].set(...L.still.ramp[i]); U.wSTint.value.set(...L.still.tint, L.still.hue); }
     compU.uWRefl.value.set(L.refl, L.spark, 0, 0);
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
