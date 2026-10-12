@@ -55,7 +55,7 @@ function sections({host, opt, stage, env, hero, cv, perf}) {
     ['Panels', [
       ['Esc', 'menu · Dev tab: every switch'], ['F1', 'this help + the debug HUD'],
       ['F2', 'cheats', () => onOff(on('cheats'))], ['F3', 'frame profiler', () => onOff(perf.on)], ['F4', 'photo mode'],
-      ['F8', 'gun feel', () => onOff(on('gunfeel'))], ['M', 'sound', () => on('audio') ? 'on' : 'muted'],
+      ['F7', 'move feel (Shift: A/B)', () => onOff(on('movefeel'))], ['F8', 'gun feel', () => onOff(on('gunfeel'))], ['M', 'sound', () => on('audio') ? 'on' : 'muted'],
       ['U', 'music', () => onOff(f('audio')?.AU.musicOn)], ['`', 'dev mode']]],
     ['World', [
       ['T', 'time of day', () => `${env.clock()} ${env.part}`], ['N', 'biome (Shift: back)', () => stage.biome.name],
