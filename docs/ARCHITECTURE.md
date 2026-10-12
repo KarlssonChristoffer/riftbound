@@ -327,6 +327,11 @@ transport, the client). `core/session.js` settles which world a page plays in (a
 is built; `world/forest.js` grows the seeded forest from it (docs/FOREST.md); `features/coop.js` (+ `coop/look.js`) is the game's
 side of a room.
 
+**Gear (2026-10-12).** `content/gear.js` (pure data, also read by the server), `features/gear.js` (the set worn, its `'gear'`
+notes in `host.mods`), `ui/gearpanel.js` (Tab), `view/dress.js` (a live model dressed: painted, hidden and added parts) and
+`render/rigmesh.js restyle` (a model's triangles swapped, its bodies kept). The look reaches the live hero through
+`host.dressPlayer`. docs/GEAR.md.
+
 ### 2.4 A system, concretely
 
 The existing feature contract is already close; the change is that a system says which layer and phase it lives in,

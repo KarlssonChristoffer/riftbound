@@ -65,6 +65,7 @@ import {WEAPONS} from '../content/weapons.js';
 import {elev} from '../world/world.js';   // (the ground under his feet: FEET ON THE GROUND)
 import {VAULT_T, VAULT_OVER_T} from '../sim/player/player.js';   // (MOTION: the vaults' frames by their progress)
 import {createHeroRag} from './herorag.js';   // THROWN: his ragdoll while a blast throws him (sim/player/launch.js)
+import {dress as dressModel} from './dress.js';   // GEAR: the model as worn (docs/GEAR.md)
 
 const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const C20 = Math.cos(20 * DEG), S55 = Math.sin(55 * DEG), K_UP = Math.tan(20 * DEG) * C20 / S55;   // the sprite camera's squash
@@ -661,15 +662,16 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     CLO.sim = {mats: {}, caps: Array.from({length: nc}, () => [0, 0, 0, 0, 0, 0, 0])};
     CLO.matB = rig2.cloths.map(C => { CLO.sim.mats[C.def.bone] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]; return IX[C.def.bone] ?? -1; });
     if (CLO.matB.some(b => b < 0)) return;
-    CLO.D = rig.attach(model, corners, fams); CLO.rig = rig2; CLO.hip = hip; CLO.cn = corners;
+    CLO.D = rig.attach(model, corners, fams); CLO.rig = rig2; CLO.hip = hip; CLO.cn = corners; CLO.fams = fams;
     // the corners' fixed info: the hips' segment, a part of its own a cloth (after the model's), its family, shaded
     let k = 0;
     rig2.cloths.forEach((C, ci) => {
-      const part = J.parts.length + 1 + ci, bias = Math.max(-127, Math.min(127, Math.round((C.def.bias ?? 0) * 100)));
+      const part = 255 - ci, bias = Math.max(-127, Math.min(127, Math.round((C.def.bias ?? 0) * 100)));
       for (let i = 0; i < (C.rows - 1) * (C.cols - 1) * 6; i++, k++) {
         CLO.D.info[k * 4] = hip; CLO.D.info[k * 4 + 1] = part; CLO.D.info[k * 4 + 2] = CLO.D.fam[ci]; CLO.D.info[k * 4 + 3] = 0; CLO.D.nrm[k * 4 + 3] = bias;
       }
     });
+    if (GEAR.cloth) clothPaint();
   }
   // a step of the cloth on the drawn pose w (his body space, at the facing phi), then its triangles into the attached mesh.
   // (no allocation: the scratch below, plain loops)
@@ -723,7 +725,30 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
         clTri(CLO.D, 0, 2, 1); clTri(CLO.D, 1, 2, 3);
       }
     }
-    CLO.D.update(clV);
+    CLO.D.update(GEAR.cloth === 'off' ? 0 : clV);   // (GEAR: a piece that hides the panel: still stepped, not drawn)
+  }
+
+  // ---------------------------------------------------------------- GEAR: the model as worn (view/dress.js, docs/GEAR.md)
+  // The export's own json + bin stay (J, bin: every pose, clip and bone above reads J); the rig draws the dressed corners.
+  // Made on a change of set only (a few ms), never per frame. The runtime cloth panel takes the set's colour, or hides.
+  const GEAR = {key: '', cloth: null};
+  function clothPaint() {
+    const D = CLO.D; if (!D) return;
+    let k = 0;
+    CLO.rig.cloths.forEach((C, ci) => {
+      const row = D.famRow(GEAR.cloth && GEAR.cloth !== 'off' ? GEAR.cloth : CLO.fams[ci]);
+      for (let i = 0; i < (C.rows - 1) * (C.cols - 1) * 6; i++, k++) D.info[k * 4 + 2] = row;
+    });
+    D.infoChanged();
+  }
+  function wear(pieces, key) {   // pieces: content/gear.js entries in SLOTS order; key: the set's (content/gear.js setKey)
+    if (key === GEAR.key) return false;
+    const was = GEAR.cloth;
+    if (!pieces.length) { rig.restyle(model, J, bin); GEAR.cloth = null; }
+    else { const D = dressModel(J, bin, pieces); rig.restyle(model, D.J, D.bin); GEAR.cloth = D.cloth; }
+    GEAR.key = key;
+    if (GEAR.cloth !== was) clothPaint();
+    return true;
   }
 
   // ---------------------------------------------------------------- body space -> the render's world (render/rigmesh.js matrices)
@@ -1436,6 +1461,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
 
   const live = {
     stats, model, poseOf, BN, J,
+    wear, get worn() { return GEAR.key; },   // GEAR (docs/GEAR.md)
     // (a knob changed, the body (re)shown: no history carried over)
     reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false;
       twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; tbHave = false; tbT = tbDur = 1; CLO.rig?.reset(); CLO.lx = NaN; feetK = 0; mvPrev = ''; mvAfter = 0; },
@@ -1463,7 +1489,7 @@ export async function createLiveHero(o) {
   const slots = o.slots ?? 17, hero = o.hero, only = o.only ?? null;
   const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: ''}, want = flags.get('livedemo') || '';
   const bodies = {}, loading = {};
-  let on = true, shown = null, rig = null, flashes = null, warmed = null;
+  let on = true, shown = null, rig = null, flashes = null, warmed = null, look = null;   // (look: the gear worn, every body dressed in it)
   const lives = n => n in MODELS && (!only || only.includes(n));   // this loadout is drawn live
   function load(name) {
     rig ??= createRigMesh(o.G, {slots, xray: true}); flashes ??= createFlashes(o.G, 2);
@@ -1471,6 +1497,7 @@ export async function createLiveHero(o) {
       await (warmed ??= rig.warm().catch(e => console.warn('live hero: shaders not warmed', e)));   // (compiled off the frame: no hitch on his first live frame)
       bodies[name] = b;
       if (want && !K.demo && b.demos.includes(want)) K.demo = want;
+      if (look) b.wear(look.pieces, look.key);
       return b;
     }).catch(e => { console.warn('live hero: no body for', name, e); });
   }
@@ -1503,6 +1530,10 @@ export async function createLiveHero(o) {
     get bytes() { return rig?.bytes ?? 0; },
     get atlas() { return hero.atlas; },
     load,   // (dev / tests: a loadout's body now)
+    // GEAR (docs/GEAR.md): every body (loaded now or later) drawn in these pieces (content/gear.js entries, SLOTS order;
+    // key: their setKey). A change of set only: a few ms, never per frame.
+    dress(pieces, key) { look = {pieces, key}; for (const b of Object.values(bodies)) b.wear(pieces, key); },
+    get worn() { return look?.key ?? ''; },
     // (dev: the model re-exported (tools/blender/live_export.mjs): its body made again from the files now, shown at once with
     // no history; the old one's model stays in the rig, never put again (rigmesh has no removal; a dev session's leak))
     modelUrl: n => lives(n) ? MODELS[n] : null,   // (dev: the folder a loadout's live model is read from, the page's relative URL)
@@ -1510,6 +1541,7 @@ export async function createLiveHero(o) {
       if (!(name in MODELS)) return null;
       const b = await createLiveBody({...o, url: MODELS[name], rig, flashes, K, slots, bust: '?v=' + Date.now()});
       bodies[name] = b; loading[name] = Promise.resolve(b); shown = null;
+      if (look) b.wear(look.pieces, look.key);
       if (want && !K.demo && b.demos.includes(want)) K.demo = want;
       return b;
     },

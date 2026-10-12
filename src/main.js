@@ -216,6 +216,9 @@ const host = {
   // his DRAWN live pose (view/livehero.js DRAWN: body-space bones in BN order, 7 a bone; phi his facing; n counts the frames drawn;
   // rig the live model's name), or null when he isn't drawn live: co-op sends it to the others (features/coop.js). One reused object
   playerPose: () => { const d = live?.on ? live.drawn : null; if (!d?.w) return null; PPOSE.w = d.w; PPOSE.phi = d.phi; PPOSE.n = d.n; PPOSE.BN = live.BN; PPOSE.rig = hero.loadName; return PPOSE; },
+  // GEAR (features/gear.js, docs/GEAR.md): draw him in these pieces (content/gear.js entries, SLOTS order; key: their setKey).
+  // The live body only (a sprite loadout looks the same); on a change of set, never per frame
+  dressPlayer: (pieces, key) => live?.dress(pieces, key),
 };
 const PPOSE = {w: null, phi: 0, n: 0, BN: null, rig: ''};
 

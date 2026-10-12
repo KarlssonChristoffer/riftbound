@@ -8,6 +8,8 @@
 //                there, the player in reach) and tells everyone, a late joiner included: then (and only then) each client
 //                makes it so. Felling a tree today (act('fell', tree)); the woodcutting slice calls the same
 //   checks       the server refuses a move faster than a body can go (protocol.js MOVE) and puts this client back (fix)
+//   gear         what each player wears is the server's to say (docs/GEAR.md): features/gear.js asks (wear(ids)), the
+//                server checks the set and tells everyone; yours comes back here (F.gear: {ver, ids}), the others' look.js dresses
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
@@ -37,6 +39,7 @@ export async function create(host) {
     const p = treeOf(id); if (!p) return;
     host.world.removeItem?.(p); host.entities.remove(p);
   }
+  const gear = {ver: 0, ids: null};   // your set as the server last took it (features/gear.js wears it)
   let note = '', noteT = 0;
   const say = (t, s = 4) => { note = t; noteT = s; };
 
@@ -80,13 +83,16 @@ export async function create(host) {
   }
 
   const F = {
-    name: 'coop', label: 'Co-op', on: true, net: C, look, act,
+    name: 'coop', label: 'Co-op', on: true, net: C, look, act, gear,
+    get online() { return C.status === 'online'; },
+    wear(ids) { if (C.status !== 'online') return false; C.wear(ids); return true; },   // (features/gear.js: ask for a set)
     update() {
       C.drain(msgs);
       for (const m of msgs) {
         if (m.k === 'world' && m.s === 'felled') fell(m.id);
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
+        else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
       }
       msgs.length = 0;
       for (const q of C.joined) say(`${q.name} joined`); C.joined.length = 0;
