@@ -29,9 +29,9 @@ export const RECIPES = {
       }
       for (let i = 0; i < p.roots; i++) {   // roots flare out and dive in
         const a = (i / p.roots + r.range(-.05, .05)) * Math.PI * 2, L = p.r * r.range(.8, 1.6), c = Math.cos(a), s = Math.sin(a);
-        const mid = [c * (p.r + L * .45), p.h * .1, s * (p.r + L * .45)];
-        b.tube('bark', [c * p.r * .7, p.h * .3, s * p.r * .7], mid, p.r * .3, p.r * .18, {sides: 5});
-        b.tube('bark', mid, [c * (p.r + L), -.05, s * (p.r + L)], p.r * .18, p.r * .06, {sides: 5});
+        const mid = [c * (p.r + L * .4), p.h * .04 + .02, s * (p.r + L * .4)];
+        b.tube('bark', [c * p.r * .7, p.h * .22, s * p.r * .7], mid, p.r * .38, p.r * .24, {sides: 5});
+        b.tube('bark', mid, [c * (p.r + L), -.06, s * (p.r + L)], p.r * .24, p.r * .1, {sides: 5});
       }
       if (r.chance(p.fungus)) {   // shelf fungus stacked up one side
         const a = r.range(0, Math.PI * 2), n = r.int(2, 4);
@@ -76,13 +76,13 @@ export const RECIPES = {
         b.ball('mushwhite', [x, .02 * s, z], .045 * s, {detail: 0});
         b.tube('mushwhite', [x, 0, z], lean, .032 * s, .026 * s, {sides: 6});
         if (!young) b.disc('mushwhite', [x + (lean[0] - x) * .7, h * .7, z + (lean[2] - z) * .7], .04 * s, .012 * s, {sides: 7, bias: -.1});
-        const cr = (young ? .08 : r.range(.12, .16)) * s, ch = (young ? .08 : r.range(.05, .075)) * s;
+        const cr = (young ? .075 : r.range(.13, .17)) * s, ch = (young ? .07 : cr * r.range(.32, .42));
         if (young) b.ball('agaric', [lean[0], h + ch * .3, lean[2]], [cr, ch, cr], {detail: 1});
         else b.cap('agaric', lean, cr, ch, {under: 'mushwhite', droop: .012 * s});
-        const warts = young ? 4 : r.int(6, 11);
+        const warts = young ? 4 : r.int(9, 14);
         for (let k = 0; k < warts; k++) {
-          const q = b.onDome(young ? [lean[0], h + ch * .3, lean[2]] : lean, cr * 1.02, ch * (young ? 1.02 : 1.05), r(), r.range(.2, .85));
-          b.ball('mushwhite', q, .014 * s, {detail: 0});
+          const q = b.onDome(young ? [lean[0], h + ch * .3, lean[2]] : lean, cr * 1.0, ch * (young ? 1.0 : 1.04), r(), r.range(.3, .95));
+          b.ball('mushwhite', q, r.range(.018, .026) * s, {detail: 0, bias: .15});
         }
       }
     },
@@ -105,17 +105,18 @@ export const RECIPES = {
   anthill: {
     about: 'A wood-ant hill: a heaped dome of spruce needles and twigs, as tall as your knee',
     likes: {ground: 'forest', shade: .3, near: 'spruce', cluster: [1, 1]},
-    params: {r: [.65, .4, 1.1], h: [.55, .3, .9], twigs: [12, 0, 24]},
+    params: {r: [.45, .3, .9], h: [.5, .3, .9], twigs: [14, 0, 30]},
     build(b, p, r) {
-      b.ball('needles', [0, 0, 0], [p.r, p.h, p.r], {detail: 2, lump: .07, part: 1});
+      b.ball('needles', [0, 0, 0], [p.r, p.h * .55, p.r], {detail: 2, lump: .08, part: 1});   // the wide foot
+      b.ball('needles', [0, p.h * .25, 0], [p.r * .62, p.h * .75, p.r * .62], {detail: 2, lump: .1, part: 1, bias: .05});   // the heap
       const n = r.int(8, 14);
       for (let i = 0; i < n; i++) {   // little heaps on the dome
-        const q = b.onDome([0, 0, 0], p.r * .92, p.h * .92, r(), r.range(.1, .8));
-        b.ball('needles', q, r.range(.06, .12), {detail: 0, bias: r.range(-.12, .12), part: 1});
+        const q = b.onDome([0, 0, 0], p.r * .7, p.h * .95, r(), r.range(.15, .8));
+        b.ball('needles', q, r.range(.05, .09), {detail: 0, bias: r.range(-.25, .2), part: 2 + i});
       }
       for (let i = 0; i < p.twigs; i++) {   // twigs lying on it
-        const u = r(), v = r.range(.15, .75), q = b.onDome([0, 0, 0], p.r * 1.0, p.h * 1.0, u, v), a = r.range(0, Math.PI * 2), L = r.range(.08, .2);
-        b.tube('deadwood', [q[0] - Math.cos(a) * L, q[1] + r.range(-.02, .02), q[2] - Math.sin(a) * L], [q[0] + Math.cos(a) * L, q[1], q[2] + Math.sin(a) * L], .011, .009, {sides: 3});
+        const u = r(), v = r.range(.1, .8), q = b.onDome([0, 0, 0], p.r * (1 - v * .4), p.h * 1.0, u, v), a = r.range(0, Math.PI * 2), L = r.range(.08, .18);
+        b.tube('deadwood', [q[0] - Math.cos(a) * L, q[1] + r.range(-.02, .02), q[2] - Math.sin(a) * L], [q[0] + Math.cos(a) * L, q[1], q[2] + Math.sin(a) * L], .016, .012, {sides: 4, bias: .1});
       }
     },
   },
@@ -134,8 +135,8 @@ export const RECIPES = {
           b.ball('leaf', tip, [r.range(.05, .075), r.range(.035, .05), r.range(.05, .075)], {detail: 0, lump: .2, bias: r.range(-.05, .1)});
           const mid = [x + (tip[0] - x) * .55 + r.range(-.04, .04), tip[1] * .55, z + (tip[2] - z) * .55];
           b.ball('leaf', mid, [.045, .03, .045], {detail: 0, lump: .2, bias: -.1});
-          if (r.chance(p.berries)) b.ball('blueberry', [tip[0] + r.range(-.03, .03), tip[1] - .045, tip[2] + .03], .02, {detail: 0});
-          if (r.chance(p.berries * .6)) b.ball('blueberry', [mid[0] + .02, mid[1] - .035, mid[2] + .025], .018, {detail: 0});
+          if (r.chance(p.berries)) b.ball('blueberry', [tip[0] + r.range(-.03, .03), tip[1] + .01, tip[2] + .045], .03, {detail: 0, bias: .1});
+          if (r.chance(p.berries * .7)) b.ball('blueberry', [mid[0] + .03, mid[1] + .01, mid[2] + .04], .026, {detail: 0, bias: .1});
         }
       }
     },
@@ -150,13 +151,13 @@ export const RECIPES = {
       b.ball('mushwhite', [0, .03, 0], .07, {detail: 0, lump: .15});
       b.tube('mushwhite', [0, 0, 0], mid, .055, .045, {sides: 7, part: 1});
       b.tube('mushwhite', mid, top, .045, .04, {sides: 7, part: 1});
-      const cr = .22, ch = .13;
+      const cr = .27, ch = .12;
       b.cap('shroom', top, cr, ch, {under: 'mushwhite', droop: .04});
-      for (let k = 0; k < 5; k++) b.ball('mushwhite', b.onDome(top, cr * 1.01, ch * 1.03, r(), r.range(.3, .8)), .02, {detail: 0, bias: -.1});
-      // the eye looks out from under the brim, toward the camera (south)
-      const e = .065 * p.eye, ey = [top[0], top[1] - .02 - e * .6, top[2] + .05];
+      for (let k = 0; k < 5; k++) b.ball('mushwhite', b.onDome(top, cr * 1.01, ch * 1.03, r.range(.55, 1.2), r.range(.3, .8)), .022, {detail: 0, bias: -.1});   // (round the back: the eye has the front)
+      // the eye stares out of the cap's front, up at you (the camera looks down from the south)
+      const e = .11 * p.eye, n = [0, .62, .78], ey = [top[0] + n[0] * (cr * .45), top[1] + ch * .6, top[2] + n[2] * (cr * .45)];
       b.ball('eye', ey, e, {detail: 1});
-      b.ball('pupil', [ey[0], ey[1] - e * .1, ey[2] + e * .78], e * .42, {detail: 1});
+      b.ball('pupil', [ey[0], ey[1] + n[1] * e * .72, ey[2] + n[2] * e * .72], e * .48, {detail: 1});
     },
   },
 };
