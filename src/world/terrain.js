@@ -5,7 +5,6 @@
 //   terrace  {type: 'terrace', pts: [[x, y], ...] (a polygon), h, bank, banks}: a raised flat area; its edge falls to the ground
 //            round it over `bank` m (smoothstep). A bank under ~1.5 h / WALK is too steep to walk: a cliff (rock: cliffs3d.js).
 //            banks (optional): one bank per point, blended along each edge (a mesa: cliffs here, a grass slope there)
-//            base (optional, 0): the height its banks fall to (a tier standing on a lower one: forest.js's mountain)
 //   ramp     {type: 'ramp', pts: [[x, y], ...] (a polyline), w, h0, h1, shoulder, steps}: a walkway rising evenly from h0 at its first
 //            point to h1 at its last, w m wide, over whatever is there; its sides blend back to the ground over `shoulder` m.
 //            steps: true = in level treads (stepsOf: ~RISER m risers; the first a riser up from h0, the last at h1)
@@ -93,7 +92,7 @@ function evalShapes(shapes, mask, x, y, tmp) {
     let b = s.bank ?? .1;
     if (s.banks) { const B = s.banks, j = _near[0]; b = B[j] + (B[(j + 1) % B.length] - B[j]) * _near[1]; }
     b = Math.max(.02, b);
-    const lo = s.base ?? 0, v = d <= 0 ? s.h : d < b ? lo + (s.h - lo) * (1 - smooth(d / b)) : 0;
+    const v = d <= 0 ? s.h : d < b ? s.h * (1 - smooth(d / b)) : 0;
     if (v > h) h = v;
   }
   for (const s of shapes) {

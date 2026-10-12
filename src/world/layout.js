@@ -283,11 +283,9 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   // the West Downs' rolling hills (westland.js)
   ...WEST_HILLS,
   ...STONE_TERRAIN,   // the standing stones' hill on the south-west (stonecircle.js; ?stones=0: westland.js's dome)
-  ...(FOREST ? FOREST.shapes : []),   // the forest's relief, hills and the lake's basin (world/forest.js; its stream's cut is laid below)
-  // the forest's outcrops, big boulders, the mountain's tiers and the canyon's rims (forest.js): terraces with rock where they drop, the ledges' way (mesaOutline)
-  ...(FOREST ? FOREST.outcrops.map(o => { const M = mesaOutline(o.ctl); return {type: 'terrace', pts: M.pts, drawn: {pts: M.ground}, banks: M.banks, h: o.h, base: o.base, rock: true, cliffs: M.cliffs}; }) : []),
-  // and the paths up them: ramps with rock sides along a face, a level landing over its edge (notch: world.js leaves the cliff's rock out there)
-  ...(FOREST ? FOREST.ramps.map(r => ({type: 'ramp', pts: r.pts, w: r.w, h0: r.h0, h1: r.h1, shoulder: r.shoulder, rock: true, notch: r.notch})) : []),
+  ...(FOREST ? FOREST.shapes : []),   // the forest's relief (the fell and the upland in it), hills, the lake's basin and the canyon's cut (world/forest.js; its stream's cut is laid below)
+  // the forest's outcrops, big boulders, the fell's crags and tors (forest.js): terraces with rock where they drop, the ledges' way (mesaOutline)
+  ...(FOREST ? FOREST.outcrops.map(o => { const M = mesaOutline(o.ctl); return {type: 'terrace', pts: M.pts, drawn: {pts: M.ground}, banks: M.banks, h: o.h, rock: true, cliffs: M.cliffs}; }) : []),
 ];
 // PADS: things built at a fixed height that the ground must meet (features place them at 0): [x, y, r (held flat), fade]
 const PADS = [[50.8, 19.4, 1.5, 1.2],   // the campfire and its woodpile (features/lights.js)

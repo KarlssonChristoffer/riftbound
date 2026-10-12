@@ -1,13 +1,13 @@
 # The forest: a seeded place north of the Proving Grounds
 
-Status: 2026-10-12, third slice: the high country (a mountain and a canyon, below); second: the home woods' ground (landforms). First slice 2026-10-11 (`world/forest.js`). Off by default; on with a seed: `?seed=1234`, `?forest=1` (seed 1337), or
+Status: 2026-10-12, third slice: the high country (an upland, a fell and a canyon, below); second: the home woods' ground (landforms). First slice 2026-10-11 (`world/forest.js`). Off by default; on with a seed: `?seed=1234`, `?forest=1` (seed 1337), or
 any co-op session (the server's seed: docs/MULTIPLAYER.md). `?forest=0` keeps it off. It needs walkable terrain (`?terrain=0`:
 no forest).
 
 ## What it is
 
-- **Where.** x -48..72 (the world's width: under the West Downs, the Proving Grounds and the mesa), y -128..0: 120 x 128 m (y -64..0
-  until the high country), more than the rest of the world together. The world grows north to it (`WORLD.y0` = -128); the old north bank, the West Downs' north
+- **Where.** x -48..72 (the world's width: under the West Downs, the Proving Grounds and the mesa), y -160..0: 120 x 160 m (y -64..0
+  until the high country), more than the rest of the world together. The world grows north to it (`WORLD.y0` = -160); the old north bank, the West Downs' north
   bank and the highland behind the mesa give way to it; a bank of its own frames its north and west edges. You walk in from the
   strip north of the arena (its north gate), from the West Downs and from the trail.
 - **Ground.** Rolling relief (value noise, up to ~3.2 m, faded flat over its southern 12 m so it meets the Proving Grounds level,
@@ -58,28 +58,36 @@ Node-only check (10 seeds, `forestPlan` + `createField`, 2026-10-12): every seed
 max height 5.1 .. 8.5 m; steep cells off the cliffs .04 .. .86% (esker ends, outflow banks); plan 12 .. 80 ms, field bake 150 ..
 680 ms. Not yet seen in the game, benched or run through golden / smoke / simview (the sprite assets aren't in the repo).
 
-## The high country: a mountain and a canyon (2026-10-12)
+## The high country: a fell and a canyon (2026-10-12)
 
-The forest grew north to 120 x 128 m (`RECT` y -128..0; the world follows: `WORLD.y0` = -128). The home woods keep the south half
-(`HOME`, y -64..0); the north half is the high country, its rolling relief up to 1.7 x as high. Its own generator (`mix(seed, 4)`), so
-the home woods come out the same for a seed whatever it does. Mountain and canyon take opposite sides, the seed picks which.
+The forest grew north to 120 x 160 m (`RECT` y -160..0; the world follows: `WORLD.y0` = -160). The home woods keep the south part
+(`HOME`, y -64..0); north of it is the high country. Its own generator (`mix(seed, 4)`), so the home woods come out the same for a
+seed whatever it does. Fell and canyon take opposite sides, the seed picks which.
 
-- **MOUNTAIN.** Four rock tiers, each an irregular ellipse a little smaller than the last and set off centre, away from the side
-  its path comes up: the first ~5 m over its ground's highest point, each next 4.5 .. 5.5 m higher, the top ~22 .. 26 m. Cliffs all
-  round (rock, cliffs3d.js). Trees stop above the second tier (the treeline): the top is bare, tufts and stones only.
-- **PATHS.** Each tier has a path up from the level below: a ramp (`F.ramps`, slope ~.5) along its face, standing just off it, rock
-  walls on its open side (world.js draws a ramp's sides), smoothed so its height never jumps at a bend. It ends on a level LANDING
-  that straddles the edge into the tier above; world.js leaves the cliff's rock out across a landing (`notch`). The paths turn round
-  the mountain from tier to tier, the first coming up from the home woods' side.
-- **CANYON.** A winding gorge (5 .. 8 m across) from near the north edge down toward the home woods, between two rock rims 5.5 .. 8 m
-  wide and 7 .. 9 m over their ground (7 .. 11 m deep). Open at both ends; one or two paths up each rim's outer face, never round an
-  end. The rims' edges drop points where the offset line would fold back on itself (a tight bend).
-- **terrain.js** gained one option for this: a terrace's `base`, the height its banks fall to (a tier stands on the one below).
+A first try stacked four rock tiers with ramps along their faces; it read as built (brick walls in rings), the ramps left a slot
+between path and face you could walk into behind the rock, and their outer shoulders showed as bare green sheets. Replaced by
+ground that rises the way the land does, with rock only where a slope breaks:
+
+- **UPLAND.** The whole high country stands 7 .. 8.5 m over the home woods, up a walkable slope (28 m, the foot wavering) that starts
+  just north of them. Part of the field (`highH`).
+- **FELL.** A rounded massif rising 12 .. 13 m from the upland (the top 21.6 .. 24.7 m): straight flanks you can walk up (~.5),
+  longest on the stoss side, shortest on the lee side toward the home woods, a rounded top, its outline wavering, a little lumpy;
+  the rolling relief is calmed on it (its slopes would add to the fell's). No trees on its top (`bare`: above .6 of its rise).
+- **CRAGS.** Five to eight shelves in its flanks, mostly on the lee side: each a terrace (`F.outcrops`, kind 'crag') level with the
+  slope a little above its middle, so its uphill side lies under the slope and its downhill side drops 2 .. 4 m as a rock face. Rock
+  wherever the shelf stands above the slope (bank .12); where it is buried, a bank (no rock). A shelf is a ledge you can walk onto
+  from the slope above.
+- **TORS.** One or two blocks of bare rock on the top (kind 'tor', rock all round, 2.2 .. 3.4 m).
+- **CANYON.** A gorge cut into the upland: from just past its foot north, wandering, to a rounded head 9 m short of the north edge;
+  5 .. 7.5 m across, its floor the ground at its mouth rising .6 .. 1.4 m inward, so the walls grow from nothing at the mouth to
+  6 .. 7.5 m. A channel with no bank (`F.canyon.cut`, in `F.shapes`), drawn .35 m wider than walked like the mesa's cleft, so the drawn
+  ground's steep cells lie behind the rock; world.js lays one rock run up its west wall, round the head and down its east wall
+  (`F.canyon.wall`). You walk in from the home woods; the rims are reached over the upland.
 
 Node check (20 seeds, `forestPlan` + `createField` and a walk over the cells that aren't steep, from the clearing): every seed's
-mountain top and both canyon rims can be walked to; the top 22.5 .. 26.1 m; canyon 6.9 .. 11.3 m deep; steep cells away from the
-rock .07 .. .58%; plan 50 .. 140 ms, field bake 630 .. 970 ms; ~430 .. 580 trees (273 in the 120 x 64 m forest). The point-light
-height map (gfx.js) covers up to `WORLD.top` (the mountain + 4 m; 20 m without the forest, as before).
+fell top, every crag's shelf, the canyon's floor and head and both rims can be walked to; steep cells away from the rock
+.05 .. .47%; 600 .. 800 trees. The point-light height map (gfx.js) covers up to `WORLD.top` (the fell + 4 m; 20 m without the
+forest, as before).
 
 ## Chunk-friendly
 
