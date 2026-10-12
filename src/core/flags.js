@@ -23,6 +23,11 @@ export const FLAG_DOCS = {
   zoom:      '2: start zoomed in',
   omens:     '1: stage omens in a run (features/omens.js: the weather, wind and light turned into a stage\'s rules); 0: off (the Dev toggle remembers it)',
   omen:      'storm | gale | bloodmoon | riftfog | eclipse | golden: that omen on every run stage (and in the sandbox from the start)',
+  // ---- co-op and the forest (docs/MULTIPLAYER.md, docs/FOREST.md)
+  mp:        '1: join the co-op server that served this page (node server/server.mjs; open the page it prints in two windows); host:port or ws://host:port: that server. Its seed decides the forest (core/session.js, features/coop.js)',
+  name:      'co-op: the name the others see over your head (else the server gives one: Player N)',
+  seed:      'the forest north of the Proving Grounds, grown from this seed (world/forest.js; offline: in co-op the server sends its own)',
+  forest:    '1: the forest with the default seed (world/forest.js); 0: no forest even in co-op',
   // ---- the player
   set:       'basic | sim | body | gunslinger | outlaw: the loadout (baked cloak / runtime cloth / bare body; the cowboys with their revolvers)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
