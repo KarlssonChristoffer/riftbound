@@ -72,7 +72,8 @@ export const TUNE = {
   under: {cell: 1.6, jitter: .4, p: .2},
   rocks: {big: 3, small: 3},
   // the SMALL THINGS (content/recipes.js, drawn by world/decor3d.js): chances per 2 m cell (DECOR below), x how well the spot suits
-  decor: {cell: 2, jitter: .4, stump: .045, log: .022, agaric: .028, chant: .012, berry: .1, variants: 3, settle: [3, 5]},
+  decor: {cell: 2, jitter: .4, stump: .045, log: .022, agaric: .028, chant: .012, berry: .1, variants: 3, settle: [3, 5],
+    windthrow: {cell: 4, p: .14, near: [1, 7], len: [3, 4, 5]}},   // (a rotvalta: on the thin soil within near m of bare rock, ~1 per 400 m2 there)
 };
 
 // a seeded generator of its own (mulberry32, as core/rng.js: kept here so node needs nothing else)
@@ -409,9 +410,10 @@ export function forestPlan(seed) {
 //             fresh near the clearing
 //   fly agaric  groups of 1-3 under birch and pine in half shade;  chanterelles  a ring in mossy pine shade, often by a stump or log
 //   blueberry the floor's filler under pines on the drier ground and the esker's slopes; never by the water or in the clearing
+//   windthrow a tipped spruce, its root plate on edge, near bare rock (thin soil); grey (old) in deep shade and by the water. Solid
 // The watcher is its own creature (features/watcher.js); the ant hill is left out
 function decorate(F, slope, K) {
-  const T = TUNE.decor, out = F.decor = [], C = 4, idx = new Map();
+  const T = TUNE.decor, out = F.decor = [], C = 4, idx = new Map();   // (F.decorSolid: below)
   for (const p of F.props) if (p[0] === 'tree') { const k = Math.floor(p[1] / C) + ',' + Math.floor(p[2] / C); let a = idx.get(k); if (!a) idx.set(k, a = []); a.push(p); }
   const E = {shade: 0, pine: 0, dPine: 1e9, dBirch: 1e9, dTrunk: 1e9};
   const env = (x, y) => {
@@ -444,6 +446,27 @@ function decorate(F, slope, K) {
       if (k < 2 && Rc() < .5) { const yaw = Rc() * Math.PI, hx = Math.cos(yaw) * 1.3, hy = Math.sin(yaw) * 1.3;
         if (ok(x + hx, y + hy, 1.5) && ok(x - hx, y - hy, 1.5)) { put('log', x, y, 1.3, Rc, {old: 0}, ci); out[out.length - 1][3].yaw = +yaw.toFixed(3); k++; continue; } }
       put('stump', x, y, .6, Rc, {style: 2}, ci); k++;
+    }
+  }
+  // WINDTHROWS first (they need the most room): a spruce the wind tipped over, its root plate on edge (the recipe's frame: the plate at
+  // its origin facing -x, the pit before it, the trunk along +x, len m), on the thin soil over rock round the outcrops and the boulder
+  // field. Big: solid (F.decorSolid, layout.js: a row of round colliders across the plate, 'rootplate', and along the trunk, 'windlog')
+  const W = T.windthrow, solid = F.decorSolid = [];
+  const rockD = (x, y) => { let d = K.boulders ? Math.hypot(x - K.boulders.x, y - K.boulders.y) - K.boulders.r : 1e9; for (const o of F.outcrops) d = Math.min(d, Math.hypot(o.x - x, o.y - y) - o.r); return d; };
+  for (let ci = 0; ci < F.chunks.length; ci++) {
+    const [cx, cy] = F.chunks[ci], R = rng(mix(F.seed, 6000 + cx, 6000 + cy)), n = Math.round(CHUNK / W.cell);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const x = cx * CHUNK + (i + .2 + R() * .6) * W.cell, y = cy * CHUNK + (j + .2 + R() * .6) * W.cell, roll = R(), yaw = R() * Math.PI * 2, v = Math.floor(R() * T.variants), sc = .9 + R() * .2;
+      const rd = rockD(x, y); if (roll > W.p || rd < W.near[0] || rd > W.near[1] || !ok(x, y, 1.5) || K.clearD(x, y) < 3 || K.bare(x, y)) continue;
+      const len = W.len[v] * sc, c = Math.cos(yaw), sn = Math.sin(yaw), at = (lx, lz) => [x + (lx * c - lz * sn) * sc, y + (lx * sn + lz * c) * sc];
+      let fit = room(x + c * len / 2, y + sn * len / 2, len / 2 + .6);
+      for (let lx = -1.4; fit && lx <= W.len[v]; lx += .7) { const [px, py] = at(lx, 0); fit = ok(px, py, 1) && env(px, py).dTrunk > .7 && Math.abs(F.height(px, py) - F.height(x, y)) < .6; }
+      for (const lz of [-1, 1]) { const [px, py] = at(-.6, lz); fit = fit && ok(px, py, 1) && env(px, py).dTrunk > .6; }
+      if (!fit) continue;
+      placed.push([x + c * len / 2, y + sn * len / 2, len / 2 + .6]);
+      out.push(['windthrow', +x.toFixed(2), +y.toFixed(2), {v, yaw: +yaw.toFixed(3), s: +sc.toFixed(2), params: {len: W.len[v], old: env(x, y).shade > .45 || waterD(F, x, y) < 5 ? 1 : 0}, chunk: ci}]);
+      for (let lz = -.85; lz <= .86; lz += .425) { const [px, py] = at(-.05, lz); solid.push(['rootplate', +px.toFixed(2), +py.toFixed(2), +(.3 * sc).toFixed(2)]); }
+      for (let lx = .45; lx < W.len[v] - .1; lx += .45) { const [px, py] = at(lx, 0); solid.push(['windlog', +px.toFixed(2), +py.toFixed(2), +(.27 * sc).toFixed(2)]); }
     }
   }
   for (let ci = 0; ci < F.chunks.length; ci++) {

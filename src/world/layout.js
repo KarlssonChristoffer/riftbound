@@ -761,6 +761,9 @@ export function buildLayout(seed = 7) {
   if (FOREST) {
     for (const p of props) if (p.outside && p.y < FOREST_S + .5 && !(p.r > 0)) { p.outside = false; p.r = p.kind === 'tree' ? .45 : .75; }
     for (const [kind, x, y, extra] of FOREST.props) add(kind, x, y, {...extra});
+    // the windthrows' solids (forest.js F.decorSolid: rows of round colliders across a root plate, 'rootplate', and along its trunk,
+    // 'windlog'; nothing drawn: world/decor3d.js draws the tree with the floor's other small things, ?decor=0: neither)
+    if (flags.get('decor') !== '0') for (const [kind, x, y, r] of FOREST.decorSolid || []) add(kind, x, y, {r});
     // the HUT (HUT above): its walls as stone runs ('fieldwall' segments, round colliders touching, none in the doorway), its roof on a
     // 'hutroof' prop (world.js: the slabs; no collider: he walks under it). The soft scatter in its footprint goes
     if (HUT) {
