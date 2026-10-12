@@ -179,6 +179,7 @@ export function createMoveFeel({host, atlas}) {
       simT += dt;
       for (const e of evs) if (e.type === 'player.step' || (e.type === 'player.land' && e.big === 2)) {
         if (nStep && simT - steps[(nStep - 1) % STEPS] > .6) nStep = 0;   // (a pause: count from this run's footfalls only)
+        if (nStep && simT === steps[(nStep - 1) % STEPS]) continue;   // (a plant-turn's two feet in one step: one footfall)
         steps[nStep++ % STEPS] = simT;
       }
     },
