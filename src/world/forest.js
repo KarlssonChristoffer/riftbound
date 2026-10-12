@@ -73,7 +73,7 @@ export const TUNE = {
   under: {cell: 1.6, jitter: .4, p: .2},
   rocks: {big: 3, small: 3},
   // the SMALL THINGS (content/recipes.js, drawn by world/decor3d.js): chances per 2 m cell (DECOR below), x how well the spot suits
-  decor: {cell: 2, jitter: .4, stump: .045, log: .022, agaric: .028, chant: .012, berry: .1, berryS: 1.6, variants: 3, settle: [3, 5],
+  decor: {cell: 2, jitter: .4, stump: .045, log: .022, agaric: .028, chant: .012, berry: .1, lingon: .07, berryS: 1.6, variants: 3, settle: [3, 5],
     windthrow: {cell: 4, p: .14, near: [1, 7], len: [3, 4, 5]}},   // (a rotvalta: on the thin soil within near m of bare rock, ~1 per 400 m2 there)
 };
 
@@ -411,6 +411,7 @@ export function forestPlan(seed) {
 //             fresh near the clearing
 //   fly agaric  groups of 1-3 under birch and pine in half shade;  chanterelles  a ring in mossy pine shade, often by a stump or log
 //   blueberry the floor's filler under pines on the drier ground and the esker's slopes; never by the water or in the clearing
+//   lingonberry on the drier, sunnier, poorer ground: open pine, the esker, the thin soil by rock (blueberries and lingon 1.6x: berryS)
 //   windthrow a tipped spruce, its root plate on edge, near bare rock (thin soil); grey (old) in deep shade and by the water. Solid
 // The watcher is its own creature (features/watcher.js); the ant hill is left out
 function decorate(F, slope, K) {
@@ -503,6 +504,8 @@ function decorate(F, slope, K) {
       if (roll < (acc += T.chant * (sh > .45 && nearPine ? 1 : 0))) { if (room(x, y, .35)) put('chanterelles', x, y, .35, R, null, ci); continue; }
       const dry = wd > 3.5, esk = K.eskerH(x, y) > .3;
       if (roll < (acc += T.berry * (dry && (nearPine || esk) && sh > .12 && sh < .85 ? .4 + e.pine + (esk ? .4 : 0) : 0))) { if (room(x, y, .7)) { put('blueberry', x, y, .7, R, v => ({n: 3 + v}), ci); out[out.length - 1][3].s = +(out[out.length - 1][3].s * T.berryS).toFixed(2); } continue; }
+      // lingon: the drier, sunnier, poorer ground (open pine, the esker, the thin soil by rock); after the rest, so it only takes spots none of them wanted
+      if (roll < (acc += T.lingon * (dry && sh < .55 && (nearPine || esk || rockD(x, y) < 6) ? .6 + (esk ? .4 : 0) + (sh < .3 ? .3 : 0) : 0))) { if (room(x, y, .6)) { put('lingonberry', x, y, .6, R, v => ({n: 7 + v * 3}), ci); out[out.length - 1][3].s = +(out[out.length - 1][3].s * T.berryS).toFixed(2); } continue; }
     }
   }
 }

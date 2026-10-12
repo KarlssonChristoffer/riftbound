@@ -109,6 +109,8 @@ drawn by `world/decor3d.js` through the world's instanced flora (`render/flora.j
 - FLY AGARICS in groups of 1-3 under birch and pine in half shade; CHANTERELLE rings in pine shade, often by a stump or log.
 - BLUEBERRIES fill the floor under pines on the drier ground and the esker's slopes; never by the water or in the clearing. Drawn
   1.6x (`TUNE.decor.berryS`): at the recipe's size they read as specks.
+- LINGONBERRIES (`content/recipes.js` lingonberry: low evergreen sprigs, red berries) on the drier, sunnier, poorer ground: open
+  pine, the esker, the thin soil within 6 m of rock; they only take spots the others left, so the rest of the floor is unchanged.
 - WINDTHROWS (rotvälta): a tipped spruce, its root plate on edge (~2 m) over the pit it tore out, the trunk lying away from it,
   on the thin soil 1-7 m from bare rock (outcrops, blocks, crags, the boulder field), placed first as they need the most room;
   grey (old) in deep shade and by the water. Solid: `F.decorSolid` is a row of round colliders across the plate ('rootplate',
