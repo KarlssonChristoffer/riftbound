@@ -1,11 +1,12 @@
 // DEV TOOLS: things for building the game, not playing it. The colliders overlay (Shift+G), the debug HUD (top left,
-// dev mode), the tree lineup (?lineup=trees). Loaded by the boot, which hands it to the engine as E.dev; nothing in the
+// dev mode, F1) with the key help (dev/keyhelp.js), the tree lineup (?lineup=trees). Loaded by the boot, which hands it to the engine as E.dev; nothing in the
 // game imports this.
 import {PLAY} from '../world/world.js';
 import {heightOf, walkR} from '../world/collide.js';
 import {DEG} from '../render/gfx.js';
 import {SNAP_NAME} from '../render/camera.js';
 import {DEBUG} from '../render/options.js';
+import {keyHelp} from './keyhelp.js';
 const $ = s => document.querySelector(s);
 
 // Shift+G: colliders as a body walks against them (red at their base, dim at their top: world/collide.js heightOf, walkR), the playable rectangle
@@ -28,19 +29,33 @@ export function drawZones({G, host, world}) {
   ring(pl.x, pl.y, R_BODY, z, host.blocked(pl.x, pl.y, z, false) ? '#ff40ff' : '#ffe040');
 }
 
-// the debug HUD (dev mode): biome, clock, loadout; features' own lines; the camera; the features; frame stats
-export function drawHud({host, opt, stage, env, hero, cv, features, G, fps, proj, PL}) {
-  $('#hud').classList.toggle('hidden', !host.dev); $('#help').classList.toggle('hidden', !host.dev || !opt.help);
-  if (!host.dev) return;
-  const b = stage.biome, deg = ((cv.yaw / DEG) % 360 + 360) % 360, s = G.stats;
-  const fh = features.map(f => f.hud?.()).filter(Boolean).join(' · ');
-  $('#hud').innerHTML = [
-    `<div class="row"><b>Proving Grounds 3D</b> · ${b.name} · ${env.label()}${opt.lantern ? ' · lantern' : ''} · ${hero.loadName}</div>`,
-    fh ? `<div class="row">${fh}</div>` : '',
-    `<div class="row">camera <b>${deg.toFixed(1)}°</b> (${SNAP_NAME[cv.snapMode]}) · zoom ${(cv.scale * cv.dz / cv.dsBase).toFixed(2)}x (${cv.scale}:1)${opt.debug ? ` · view <b>${DEBUG[opt.debug]}</b>` : ''}</div>`,
-    `<div class="row dim">features: ${features.map(f => `${f.name}${f.on === false ? ' (off)' : ''}`).join(', ') || 'none yet'}</div>`,
-    `<div class="row dim">${fps.toFixed(0)} fps · ${s.ms.toFixed(1)} ms CPU · ${s.calls} draws · ${s.sprites} sprites · ${s.points} pts · hits ${proj.hits}/${PL.shots}</div>`,
-  ].join('');
+// the debug HUD (dev mode, with the key help: F1, opt.help), top left: where you are and what the frame costs, then each
+// feature's own line (F.hud) under its name, wrapped, never cut; the features that are off. Beside it the key help
+// (dev/keyhelp.js). The loop calls this 4 times a second (core/loop.js hud)
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const pre = new Map();   // feature name -> the prefix its hud line starts with ('wind ...', 'affixes: ...'), dropped under its label
+const row = (k, v) => `<div class="hd-row"><i>${k}</i><span>${v}</span></div>`;
+export function drawHud(ctx) {
+  const {host, opt, stage, env, hero, cv, features, G, fps, proj, PL} = ctx;
+  const on = host.dev && opt.help;
+  $('#hud').classList.toggle('hidden', !on); $('#help').classList.toggle('hidden', !on);
+  if (!on) return;
+  keyHelp(ctx);
+  const b = stage.biome, deg = ((cv.yaw / DEG) % 360 + 360) % 360, s = G.stats, mode = host.feature('game')?.mode;
+  const off = features.filter(f => f.on === false).map(f => f.name), sys = [];
+  for (const f of features) {
+    const t = f.hud?.(); if (!t || (f.name === 'game' && t === `mode ${mode}`)) continue;   // (the mode is on the top line)
+    let p = pre.get(f.name); if (!p) pre.set(f.name, p = new RegExp(`^${f.name}:? `));
+    sys.push(`<div class="hd-row"><i>${esc(f.name)}</i><span>${esc(t.replace(p, ''))}</span></div>`);
+  }
+  $('#hud').innerHTML = `<div class="hd-top"><b>${esc(b.name)}</b>${mode ? `<span>${esc(mode)}</span>` : ''}<em>${fps.toFixed(0)} fps</em></div>` +
+    row('time', esc(env.label())) +
+    row('hero', esc(hero.loadName) + (opt.lantern ? ' · lantern' : '')) +
+    row('camera', `<b>${deg.toFixed(1)}°</b> · ${SNAP_NAME[cv.snapMode]} · zoom ${(cv.scale * cv.dz / cv.dsBase).toFixed(2)}x (${cv.scale}:1)${opt.debug ? ` · view <b>${DEBUG[opt.debug]}</b>` : ''}`) +
+    row('frame', `${s.ms.toFixed(1)} ms CPU · ${s.calls} draws · ${s.sprites} sprites · ${s.points} pts`) +
+    row('shots', `${proj.hits} hits / ${PL.shots}`) +
+    row('features', `${features.length - off.length} on${off.length ? ` · off: ${esc(off.join(', '))}` : ''}`) +
+    (sys.length ? `<div class="hd-sys">${sys.join('')}</div>` : '');
 }
 
 // ?lineup=trees: the procedural trees side by side for review, 3 rows of 5 (x 12 .. 26.4), each framed by standing 3.4 m
