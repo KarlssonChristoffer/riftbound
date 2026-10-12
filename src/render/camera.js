@@ -148,8 +148,12 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     if (V === FR) { if (!freeClamp) [vx, vy] = toView(V.x, V.z); else { const [fx, fz] = toWorld(vx, vy); FR.x = fx; FR.z = fz; } }   // (the free target stays where the view can go; unclamped: as it is)
     // the lattice, in art px at this zoom (x; y: screen rows): with a pad the drawn centre lies K / 2 px right of / below this
     // one, rounded DOWN, and the remainder goes to the renderer (header); without one, rounded to the nearest
-    const lx = vx * PPM * z + K / 2, ly = (vy * PPMY - h * PPMH) * z + K / 2, Lx = K ? Math.floor(lx) : Math.round(lx), Ly = K ? Math.floor(ly) : Math.round(ly);
-    cv.sub.x = K ? lx - Lx : 0; cv.sub.y = K ? ly - Ly : 0;
+    // (a STUDIO's free view, unclamped: no lattice at all, the view exactly where it's put, no slide: its subject is drawn on
+    // whole pixels from the view's centre, so as the yaw turns he stays on his pixel; the world's lattice isn't in the frame)
+    const studio = V === FR && !freeClamp;
+    const lx = vx * PPM * z + K / 2, ly = (vy * PPMY - h * PPMH) * z + K / 2;
+    const Lx = studio ? lx - K / 2 : K ? Math.floor(lx) : Math.round(lx), Ly = studio ? ly - K / 2 : K ? Math.floor(ly) : Math.round(ly);
+    cv.sub.x = K && !studio ? lx - Lx : 0; cv.sub.y = K && !studio ? ly - Ly : 0;
     const sx = Lx / (PPM * z), vy2 = (Ly / z + h * PPMH) / PPMY;
     const [X, Zw] = toWorld(sx, vy2); Ts.set(X, h, Zw);
   }
@@ -187,8 +191,8 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   cv.freeReset = (x, y, h) => { if (camInit) FR.copy(T); else FR.set(x, h, y); };   // back over the player (where the follow is)
   cv.freeMove = (dx, dy) => { FR.x += dx; FR.z += dy; };     // world metres (x east, y south)
   cv.freeAt = o => { o.x = FR.x; o.y = FR.z; o.h = FR.y; return o; };
-  // the free view held inside the world (default) or not (a studio that leaves the world out of the frame: dev/wardrobe.js);
-  // freeOff puts it back to held
+  // the free view held inside the world (default) or not: a studio that leaves the world out of the frame (dev/wardrobe.js),
+  // whose view then isn't snapped to the world's pixel lattice either (snapTarget); freeOff puts it back to held
   cv.freeClamp = v => { freeClamp = v !== false; };
   return cv;
 }
