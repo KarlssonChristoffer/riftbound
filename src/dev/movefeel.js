@@ -16,7 +16,7 @@
 // OWNS: the panel (#movefeel + its style), the 'movefeel' notes.  READS: host.mods, host.dev, host.P, the atlas's clips
 // (hero.atlas), player.js's authored numbers (SPEED0, ACC0, STRIDE0) and strideK.
 // BUDGET: closed: nothing. Open: a few text writes 4 times a second.
-import {SPEED0, ACC0, STRIDE0, strideK} from '../sim/player/player.js';
+import {SPEED0, ACC0, STRIDE0, GAIT, ADAPT, strideK} from '../sim/player/player.js';
 
 const STORE = 'rb.movefeel2';   // (2: the profile became Jog's; the first panel's remembered sliders meant other numbers)
 // speed knobs are in m/s and strides as the style (both: their note is x of the authored value); get going / slow down are x
@@ -133,9 +133,13 @@ export function createMoveFeel({host, atlas}) {
       h += `<br>legs <em class="${off > 1.2 || off < .8 ? 'bad' : ''}">${now | 0}</em> steps/min · clip made for ${want | 0}`;
       h += `<br>footsteps heard <em>${heard()}</em>/min`;
     } else h += '<br>&nbsp;<br>&nbsp;';
-    // what each gait's clip looks right at (its own pace x its stride), and how quickly he gets going / stops now
-    const at = k => CL[k]?.stride && CL[k].fps ? f1(CL[k].fps / CL[k].frames * CL[k].stride) : '?';
-    h += `<br><small>clips look right at: walk ${at('walk')} · run ${at('run')} · sprint ${at('sprint')} m/s</small>`;
+    // the speed each gait's legs move at the clip's own pace, with the strides as set now (v / (stride x strideK(v)) = the clip's
+    // cadence: v = (clip pace x style x v0^-ADAPT)^(1 / (1 - ADAPT)), the clamp aside), and how quickly he gets going / stops now
+    const at = k => {
+      const c = CL[k]; if (!c?.stride || !c.fps) return '?';
+      return f1(Math.pow(c.fps / c.frames * c.stride * GAIT.stride[k] * Math.pow(SPEED0[k], -ADAPT), 1 / (1 - ADAPT)));
+    };
+    h += `<br><small>clip pace at: walk ${at('walk')} · run ${at('run')} · sprint ${at('sprint')}</small>`;
     const k = C.ab ? AUTHORED : C, run = k.run, acc = ACC0.start * k.accel, dec = ACC0.stop * k.decel;
     h += `<br><small>0 → run in ${t(run, acc)} · run → stop in ${t(run, dec)}</small>`;
     if (read.innerHTML !== h) read.innerHTML = h;
