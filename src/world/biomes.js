@@ -880,6 +880,19 @@ function forestRuins(q, ctx) {
       else if (d > .45 && hsh(x, y, 88) < .6) G.p(x, y, S.earth, 3);
     }
   }
+  // the windthrows' holes (forest.js F.decorEarth: the recipe's ground(p), ellipses turned with the tree): torn-up bare earth, darker
+  // toward the middle, its edge ragged; no grass (layout.js keeps the tufts out). On a slope this is what shows (the mesh's own flat
+  // layers only lie right on flat ground)
+  if (FO.decorEarth && flags.get('decor') !== '0') for (const [ex, ey, rx, rz, yaw] of FO.decorEarth) {
+    const R = Math.max(rx, rz) * 1.15; if (ex + R < X0 || ey + R < Y0 || ex - R > X0 + WPX / PPM || ey - R > Y0 + HPX / PPM) continue;
+    const c = Math.cos(yaw), sn = Math.sin(yaw);
+    for (let y = Math.max(0, Math.floor((ey - R - Y0) * PPM)); y <= Math.min(HPX - 1, Math.ceil((ey + R - Y0) * PPM)); y++)
+      for (let x = Math.max(0, Math.floor((ex - R - X0) * PPM)); x <= Math.min(WPX - 1, Math.ceil((ex + R - X0) * PPM)); x++) {
+        const mx = X0 + x / PPM, my = Y0 + y / PPM, dx = mx - ex, dy = my - ey, lx = dx * c + dy * sn, lz = -dx * sn + dy * c;   // (into the tree's frame)
+        const d = (lx / rx) ** 2 + (lz / rz) ** 2 + (vn(mx * 3.3, my * 3.3, 94) - .5) * .4 + (hsh(x, y, 95) - .5) * .08;
+        if (d < 1) G.p(x, y, S.earth, d < .45 ? 3 : 2);
+      }
+  }
   meadowLip(K, S);
   paintForestWater(FO, K, S, {hsh, vn, hex, boulder});   // its stream, lake and outflow (world/forest.js)
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
