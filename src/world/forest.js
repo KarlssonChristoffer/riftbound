@@ -46,6 +46,7 @@
 //   F.lay(sampler)               the stream's bed from the ground it is cut into (layout.js, once): F.stream.bed, its channel in F.cuts
 //   sample(F, x, y, out) / depth(o, x, y) / paint(F, K, S, T)    the water for world.js, waterbed.js, biomes.js
 import {vnoise, smooth, clamp, hash3} from '../core/mathx.js';
+import {RECIPES} from '../content/recipes.js';   // (the windthrow's bare earth: its ground(p); pure data, no imports)
 
 export const CHUNK = 16;
 export const RECT = {x0: -48, y0: -160, x1: 72, y1: 0};
@@ -72,7 +73,7 @@ export const TUNE = {
   under: {cell: 1.6, jitter: .4, p: .2},
   rocks: {big: 3, small: 3},
   // the SMALL THINGS (content/recipes.js, drawn by world/decor3d.js): chances per 2 m cell (DECOR below), x how well the spot suits
-  decor: {cell: 2, jitter: .4, stump: .045, log: .022, agaric: .028, chant: .012, berry: .1, variants: 3, settle: [3, 5],
+  decor: {cell: 2, jitter: .4, stump: .045, log: .022, agaric: .028, chant: .012, berry: .1, berryS: 1.6, variants: 3, settle: [3, 5],
     windthrow: {cell: 4, p: .14, near: [1, 7], len: [3, 4, 5]}},   // (a rotvalta: on the thin soil within near m of bare rock, ~1 per 400 m2 there)
 };
 
@@ -451,7 +452,8 @@ function decorate(F, slope, K) {
   // WINDTHROWS first (they need the most room): a spruce the wind tipped over, its root plate on edge (the recipe's frame: the plate at
   // its origin facing -x, the pit before it, the trunk along +x, len m), on the thin soil over rock round the outcrops and the boulder
   // field. Big: solid (F.decorSolid, layout.js: a row of round colliders across the plate, 'rootplate', and along the trunk, 'windlog')
-  const W = T.windthrow, solid = F.decorSolid = [], clear = F.decorClear = [];   // (F.decorClear: [x, y, r] where the soft scatter goes, layout.js)
+  const W = T.windthrow, solid = F.decorSolid = [], clear = F.decorClear = [], earth = F.decorEarth = [];   // (F.decorClear: [x, y, r] where the soft scatter goes, layout.js; F.decorEarth: [x, y, rx, rz, yaw] ellipses of bare earth, biomes.js)
+  const WT = RECIPES.windthrow, WT_DEF = Object.fromEntries(Object.entries(WT.params).map(([k, a]) => [k, a[0]]));
   const rockD = (x, y) => { let d = K.boulders ? Math.hypot(x - K.boulders.x, y - K.boulders.y) - K.boulders.r : 1e9; for (const o of F.outcrops) d = Math.min(d, Math.hypot(o.x - x, o.y - y) - o.r); return d; };
   for (let ci = 0; ci < F.chunks.length; ci++) {
     const [cx, cy] = F.chunks[ci], R = rng(mix(F.seed, 6000 + cx, 6000 + cy)), n = Math.round(CHUNK / W.cell);
@@ -463,11 +465,17 @@ function decorate(F, slope, K) {
       for (let lx = -1.4; fit && lx <= W.len[v]; lx += .7) { const [px, py] = at(lx, 0); fit = ok(px, py, 1) && env(px, py).dTrunk > .7 && Math.abs(F.height(px, py) - F.height(x, y)) < .6; }
       for (const lz of [-1, 1]) { const [px, py] = at(-.6, lz); fit = fit && ok(px, py, 1) && env(px, py).dTrunk > .6; }
       if (!fit) continue;
-      const [hx, hy] = at(-.45, 0);   // (the hole it tore out: bare earth, nothing grows in it: no decor here, no grass, F.decorClear)
-      placed.push([x + c * len / 2, y + sn * len / 2, len / 2 + .6], [hx, hy, 1.15 * sc]);
-      clear.push([+hx.toFixed(2), +hy.toFixed(2), +(1.15 * sc).toFixed(2)]);
+      placed.push([x + c * len / 2, y + sn * len / 2, len / 2 + .6]);
+      // the hole it tore out (the recipe's ground(p): ellipses in its frame): bare earth (F.decorEarth, the ground painter, biomes.js
+      // forestRuins), nothing grows in it (F.decorClear, layout.js: no grass tufts or ferns; no decor here)
+      const params = {len: W.len[v], old: env(x, y).shade > .45 || waterD(F, x, y) < 5 ? 1 : 0};
+      for (const e of WT.ground({...WT_DEF, ...params})) {
+        const [ex, ey] = at(e.x, e.z), rx = e.rx * sc, rz = e.rz * sc;
+        earth.push([+ex.toFixed(2), +ey.toFixed(2), +rx.toFixed(2), +rz.toFixed(2), +yaw.toFixed(3)]);
+        placed.push([ex, ey, Math.max(rx, rz)]); clear.push([+ex.toFixed(2), +ey.toFixed(2), +Math.max(rx, rz).toFixed(2)]);
+      }
       for (let lx = .5; lx < W.len[v]; lx += .8) { const [px, py] = at(lx, 0); clear.push([+px.toFixed(2), +py.toFixed(2), +(.45 * sc).toFixed(2)]); }   // (and nothing poking up through the trunk)
-      out.push(['windthrow', +x.toFixed(2), +y.toFixed(2), {v, yaw: +yaw.toFixed(3), s: +sc.toFixed(2), params: {len: W.len[v], old: env(x, y).shade > .45 || waterD(F, x, y) < 5 ? 1 : 0}, chunk: ci}]);
+      out.push(['windthrow', +x.toFixed(2), +y.toFixed(2), {v, yaw: +yaw.toFixed(3), s: +sc.toFixed(2), params, chunk: ci}]);
       for (let lz = -.85; lz <= .86; lz += .425) { const [px, py] = at(-.05, lz); solid.push(['rootplate', +px.toFixed(2), +py.toFixed(2), +(.3 * sc).toFixed(2)]); }
       for (let lx = .45; lx < W.len[v] - .1; lx += .45) { const [px, py] = at(lx, 0); solid.push(['windlog', +px.toFixed(2), +py.toFixed(2), +(.27 * sc).toFixed(2)]); }
     }
@@ -494,7 +502,7 @@ function decorate(F, slope, K) {
       if (roll < (acc += T.agaric * (sh > .35 && sh < .9 && (e.dBirch < 4 || e.dPine < 4) ? 1 : 0))) { if (room(x, y, .4)) put('fly_agaric', x, y, .4, R, v => ({n: 1 + v}), ci); continue; }
       if (roll < (acc += T.chant * (sh > .45 && nearPine ? 1 : 0))) { if (room(x, y, .35)) put('chanterelles', x, y, .35, R, null, ci); continue; }
       const dry = wd > 3.5, esk = K.eskerH(x, y) > .3;
-      if (roll < (acc += T.berry * (dry && (nearPine || esk) && sh > .12 && sh < .85 ? .4 + e.pine + (esk ? .4 : 0) : 0))) { if (room(x, y, .45)) put('blueberry', x, y, .45, R, v => ({n: 3 + v}), ci); continue; }
+      if (roll < (acc += T.berry * (dry && (nearPine || esk) && sh > .12 && sh < .85 ? .4 + e.pine + (esk ? .4 : 0) : 0))) { if (room(x, y, .7)) { put('blueberry', x, y, .7, R, v => ({n: 3 + v}), ci); out[out.length - 1][3].s = +(out[out.length - 1][3].s * T.berryS).toFixed(2); } continue; }
     }
   }
 }
