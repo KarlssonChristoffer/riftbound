@@ -93,8 +93,8 @@ const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {em
 export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry', 'berryOrange', 'berryGreen', 'berryCream',
   // (the true-3D props, world/props3d.js and the features' 3D pieces: gem = a crystal's facets (the biome's style.gem), flame = the warm
   // glow of a flame or a lantern's glass, shroom = the biome's own glow (the mushrooms' caps), bone = bleached bone, wax, linen; GLOW3
-  // below. They light themselves only where a mesh says so: gfx.js mesh.setGlow. NB the composite keeps a family in 6 bits (E.w =
-  // (part mod 32) x 64 + family): at most 64 families)
+  // below. They light themselves only where a mesh says so: gfx.js mesh.setGlow. NB the composite keeps a family in 5 bits and E.w's
+  // sign (gfx.js: part x 32 + family, negative past 31): at most 64 families)
   'gem', 'flame', 'shroom', 'bone',
   // (cactus: the desert's saguaros and cactus bushes, trees3d.js / flora3d.js: the true-3D pivot's flora)
   'cactus',

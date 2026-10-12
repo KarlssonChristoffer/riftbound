@@ -26,10 +26,9 @@ a thing from tubes, cones, balls, caps and boxes, with a few params and a seeded
 
 ## Families: 64 now
 
-The composite kept a mesh pixel's family in 5 bits of the G-buffer's E.w (`part * 32 + family`): 32 families, 29 used. It is
-now `(part mod 32) * 64 + family` (gfx.js MESH_FS and the composite, render/flora.js): 64 families. Seams compare part ids, so
-two touching parts of one family whose ids differ by exactly 32 no longer get a seam between them (rare: a part id is the shape's
-index in its mesh).
+The composite keeps a mesh pixel's family in the G-buffer's E.w as `part * 32 + family`: 5 bits, 32 families, 29 were used. A
+family past 31 (the paints) is now written as `-(part * 32 + family - 32) - 1`: the sign carries the sixth bit (gfx.js MESH_FS
+and the composite, render/flora.js). The first 32 families pack exactly as before, so nothing already in the world changes.
 
 ## First batch (home woods)
 

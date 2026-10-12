@@ -131,7 +131,7 @@ void main() {
   bool glow = abs(fam - uEmitFam.x) < .5 || abs(fam - uEmitFam.y) < .5;
   o0 = vec4(alb, float(2 * 4 + tone) / 255.);
   o1 = vec4(n, fS.y);
-  o2 = vec4((glow ? alb : vec3(0.)) + vec3(fS.z), mod(fPart, 32.) * 64. + fam);
+  o2 = vec4((glow ? alb : vec3(0.)) + vec3(fS.z), fam < 31.5 ? fPart * 32. + fam : -(fPart * 32. + fam - 32.) - 1.);   // (gfx.js: the sign carries a family past 31)
 }`;
 // its sun shadow: the same leaned pose, minus the leaves the season took
 const SHADOW_VS = HEAD + INST + `
