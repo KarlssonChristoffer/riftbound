@@ -24,11 +24,12 @@ import * as THREE from 'three';
 import {FAMS} from './world.js';   // (read when a recipe is built, never at load: world.js may import this module)
 import {mulberry32, nameHash} from '../core/rng.js';
 import {hash3} from '../core/mathx.js';
+import {RECIPES as BOOK} from '../content/recipes.js';
 
-let RECIPES = {};
+let RECIPES = BOOK;   // (the asset lab swaps in a freshly saved copy: setRecipes)
 const cache = new Map();
 export function setRecipes(table) { RECIPES = table; for (const g of cache.values()) g?.geo.dispose(); cache.clear(); }
-export const recipeList = () => Object.keys(RECIPES);
+export const recipeList = () => Object.keys(RECIPES).filter(n => RECIPES[n].lab !== false);   // (lab: false: a part another file puts together, e.g. the watcher's eye)
 export const recipeOf = name => RECIPES[name] || null;
 export function recipeParams(name) {
   const R = RECIPES[name], out = {};
