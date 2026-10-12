@@ -48,7 +48,8 @@ import {cliffGeometry} from './cliffs3d.js';
 import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
-import {TOWER_PLAN, FOREST} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
+import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
+import {TOWER_PLAN, FOREST, HUT} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
 import {sample as forestSample, depth as forestDepth} from './forest.js';
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
@@ -883,6 +884,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       // the clefts (layout.js CLEFTS): rock up their sides and round their chambers, facing in (a slot through the mesa's cliff)
       CLEFTS.forEach((c, j) => terrRuns.push({pts: cleftWall(c), top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)),
         bot: () => 0, minBot: -.05, base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 131 + j}));
+      // the forest's canyon (world/forest.js: a cut drawn wider than walked, as a cleft): rock up both its walls and round its head, its
+      // foot the floor (rising inward)
+      if (FOREST?.canyon) {
+        const W = FOREST.canyon.wall, foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
+        let lo = 1e9; for (const [x, z] of W) lo = Math.min(lo, foot(x, z));
+        terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: lo - .05,
+          base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 151});
+      }
       // the creek's last step (layout.js CASCADES): a low rock rim along the pool's north edge, under the lip (the fall's sheet in its gap)
       if (CASCADES.length) {
         const F = CASCADES.at(-1), y = POOL.clip - .03;
@@ -1015,6 +1024,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const r = watchtowerRun(TOWER_PLAN, wo, TF ? TF.H : () => 0);
     for (const p of props) if (p.kind === 'watchtower') own(p, r.geo, r.top - (p.z || 0)); else if (p.kind === 'towerwall') own(p, null, colTop(TOWER_PLAN, p.x, p.y, p.z || 0));
   }
+  // the hut's roof (world/hut.js, layout.js HUT): its slabs on the 'hutroof' prop (no collider: he walks under it)
+  if (HUT) { const r = hutRoof(HUT, wo); for (const p of props) if (p.kind === 'hutroof') own(p, r.geo, r.top - (p.z || 0)); }
   // (a rigid 3D tree, trees3d.js shape.rigid: the saguaros, spires, shards: a static mesh like any prop, no sway)
   const swayOf = it => !!it.pose && !it.pose.rigid;
   const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: swayOf(it), static: !swayOf(it), autumn: it.pose?.autumn}); if (swayOf(it)) m.sm.layers.disable(1); if (it.pm) pmLive(it, m); return m; };

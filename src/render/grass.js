@@ -30,6 +30,7 @@
 // BUDGET: CPU: in features/grass.js's frame (~0.04 ms). GPU: one instanced draw (~50k blades x 8 vertices) + one 384 x 192
 // pass; the bench's GPU p95 at 3440x1440 stayed within ~0.1-0.3 ms of grass=0 (a busy machine: noisy), budget 4.5 ms.
 import * as THREE from 'three';
+import {CUT, cutU} from './cut.js';   // the cutaway (a blade goes by its root's height)
 
 const HEAD = `precision highp float; precision highp int;\n`;
 const OUTS = `layout(location = 0) out vec4 o0;\nlayout(location = 1) out vec4 o1;\nlayout(location = 2) out vec4 o2;\n`;
@@ -73,9 +74,9 @@ uniform vec2 uSheen;   // the wind's lean (blade heights) where the sheen starts
 uniform vec4 uPush[${MAX_PUSH}]; uniform int uNP;   // (x, z, radius, strength in blade heights)
 uniform sampler2D uTr; uniform vec4 uTrBox; uniform float uTrOn;
 uniform vec3 uRamp[20];   // per ramp: [highlight, tone 0 .. 3] (light -> dark)
-out float vT; out float vSide; flat out vec3 vC0; flat out vec3 vC1; flat out vec3 vC2; flat out float vHp; flat out float vFl;
+flat out vec3 vR; out float vT; out float vSide; flat out vec3 vC0; flat out vec3 vC1; flat out vec3 vC2; flat out float vHp; flat out float vFl;
 void main() {
-  vec3 root = iA.xyz; float h = iA.w * uSnowK, t = position.y, ph = iB.y;
+  vec3 root = iA.xyz; float h = iA.w * uSnowK, t = position.y, ph = iB.y; vR = root;
   // the tip's sideways push (m, world X / Z)
   vec3 w = windAt(root.xz);
   float ra = fract(iB.w) * 6.2832;
@@ -133,10 +134,11 @@ void main() {
   if (fract(ph * 3.91) < max(smoothstep(uSheen.x, uSheen.y, length(w.xy) * uK.x), trod * 1.8)) { body = max(0, body - 1); tip = max(0, tip - 1); }
   vC0 = uRamp[rp + tn]; vC1 = uRamp[rp + body]; vC2 = uRamp[rp + tip];
 }`;
-const BLADE_FS = HEAD + OUTS + `
-in float vT; in float vSide; flat in vec3 vC0; flat in vec3 vC1; flat in vec3 vC2; flat in float vHp; flat in float vFl;
+const BLADE_FS = HEAD + OUTS + CUT + `
+flat in vec3 vR; in float vT; in float vSide; flat in vec3 vC0; flat in vec3 vC1; flat in vec3 vC2; flat in float vHp; flat in float vFl;
 uniform vec3 uFlower[4]; uniform float uFlowerV;
 void main() {
+  if (cutAway(vR + vec3(0., .05, 0.))) discard;   // (the cutaway: render/cut.js)
   float py = vT * vHp;   // art px up from the root row
   // a V head (uFlowerV): columns 0 1 2 across its 3 px; the petals in the top row's outer two, the centre under them, the stem below
   bool vee = vFl > .5 && uFlowerV > .5; int col = int(floor((vSide + .5) * 3.));
@@ -211,7 +213,7 @@ export function createGrass(G, TB = TBOX) {
     uTr: {value: rts[0].texture}, uTrBox: {value: new THREE.Vector4(TB.x0, TB.z0, 1 / TB.w, 1 / TB.d)}, uTrOn: {value: 1},
     uRamp: {value: Array.from({length: 20}, () => new THREE.Vector3())},
     uFlower: {value: Array.from({length: 4}, () => new THREE.Vector3())},
-    uWG: {value: v4s(2)}, uWF: {value: v4s(MAX_FRONTS * 4)},
+    uWG: {value: v4s(2)}, uWF: {value: v4s(MAX_FRONTS * 4)}, ...cutU(G.U),
   };
   const mat = G.cineMat(raw(BLADE_VS, BLADE_FS, U, {side: THREE.DoubleSide}));   // (its cinema variant: gfx.js setCine)
   const meshes = []; let count = 0, visible = true;
