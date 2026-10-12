@@ -58,7 +58,7 @@ const CANYON_IN = .35;         // the canyon is drawn this much wider than walke
 export const TUNE = {
   relief: {amp: 3.2, north: 0, k: 1 / 30, hills: [2, 3], hillH: [3.8, 5.8], hillR: [11, 15], hillK: 2.8},   // (hillK: a hill is at least that x its height across: walkable)
   ice: {spread: .9},
-  mountain: {h: [11.5, 13], r: [31, 34], stoss: 1.1, lee: .95, wob: .1, lump: .08, calm: .5, crags: [5, 8], cragL: [6, 13], cragD: [5, 8.5], tors: [1, 2], torR: [1.5, 2.4], torRise: [2.2, 3.4], treeline: .6},
+  mountain: {h: [11.5, 13], r: [31, 34], stoss: 1.1, lee: .95, wob: .1, lump: .08, calm: .5, crags: [5, 8], cragL: [6, 13], cragD: [5, 8.5], tors: [1, 3], torN: [3, 5], treeline: .6},
   upland: {h: [7, 8.5], slope: 28},
   canyon: {side: 22, head: 9, wander: 5, hw: [1.7, 2.7], rise: [.6, 1.4], ridge: [5.5, 6.5], rim: 2, fall: 18, in: [14, 40]},
   clearing: {r: 7, off: 4.5},
@@ -196,16 +196,16 @@ export function forestPlan(seed) {
       const drop = ctl.map(([px, py]) => h - ground(px, py));
       if (Math.max(...drop) < 1.2) continue;
       got.push({x, y, L});
-      rockAt({kind: 'crag', x: +x.toFixed(2), y: +y.toFixed(2), r: L / 2, h}, ctl, drop.map(v => v > -.3 ? .12 : 3));   // (under the slope: a bank, no rock)
+      rockAt({kind: 'crag', x: +x.toFixed(2), y: +y.toFixed(2), r: L / 2, h}, ctl, drop.map(v => v > .35 ? .12 : 2));   // (where it hardly stands out of the slope: a bank (its rock sinks into it), no kerb of stone)
     }
-    // the TORS: a block or two of bare rock on its top
+    // the TORS: a pile or two of big boulders on its top (props, placed with the growth: F.tors)
     const tors = MT.tors[0] + Math.floor(Rm() * (MT.tors[1] - MT.tors[0] + 1));
+    F.tors = [];
     for (let i = 0, t = 0; i < tors && t < 30; t++) {
-      const a = Rm() * Math.PI * 2, q = 1.5 + Rm() * fr * .14, x = fx + Math.cos(a) * q, y = fy + Math.sin(a) * q, r = MT.torR[0] + Rm() * (MT.torR[1] - MT.torR[0]), a0 = Rm() * Math.PI, ctl = [];
-      if (got.some(c => Math.hypot(c.x - x, c.y - y) < c.L / 2 + r + 2)) continue;
-      let g = 0; for (let j = 0; j < 7; j++) { const b = a0 + j / 7 * Math.PI * 2, k = 1 + (Rm() - .5) * .5, px = x + Math.cos(b) * r * k, py = y + Math.sin(b) * r * .8 * k; ctl.push([px, py]); g = Math.max(g, ground(px, py)); }
-      got.push({x, y, L: r * 2}); i++;
-      rockAt({kind: 'tor', x: +x.toFixed(2), y: +y.toFixed(2), r, h: g + MT.torRise[0] + Rm() * (MT.torRise[1] - MT.torRise[0])}, ctl, ctl.map(() => .12));
+      const a = Rm() * Math.PI * 2, q = 1.5 + Rm() * fr * .16, x = fx + Math.cos(a) * q, y = fy + Math.sin(a) * q, n = MT.torN[0] + Math.floor(Rm() * (MT.torN[1] - MT.torN[0] + 1));
+      if (got.some(c => Math.hypot(c.x - x, c.y - y) < c.L / 2 + 3.5)) continue;
+      const rocks = []; for (let k = 0; k < n; k++) { const b = Rm() * Math.PI * 2, d = k ? .9 + Rm() * 1.1 : 0; rocks.push([+(x + Math.cos(b) * d).toFixed(2), +(y + Math.sin(b) * d).toFixed(2), Rm() * 3 | 0]); }
+      got.push({x, y, L: 5}); F.tors.push({x: +x.toFixed(2), y: +y.toFixed(2), rocks}); i++;
     }
   }
   // the CANYON's cut: walls straight down (no bank: rock up them, world.js)
@@ -372,9 +372,16 @@ export function forestPlan(seed) {
   // ---- GROWTH, chunk by chunk
   const C0x = Math.floor(RECT.x0 / CHUNK), C1x = Math.ceil(RECT.x1 / CHUNK), C0y = Math.floor(RECT.y0 / CHUNK), C1y = Math.ceil(RECT.y1 / CHUNK);
   F.chunks = [];
-  const keepOut = {clearD, crestD, inRock, eskerH, boulders: BF, bare, fellK: F.fellK};
+  const canyonD = (x, y) => { const B = cy.box; if (x < B[0] || y < B[1] || x > B[2] || y > B[3]) return 1e9; const [d, i, t] = cyNear(x, y); return d - cy.hw[i] - (cy.hw[i + 1] - cy.hw[i]) * t; };   // (m out from its walls)
+  const mouth = cy.pts[0], canyonClear = (x, y) => canyonD(x, y) < 1.8 || Math.hypot(x - mouth[0], y - mouth[1]) < 9;   // (no tree in the slot or crowding its mouth: it hid the floor and the way in)
+  const keepOut = {clearD, crestD, inRock, eskerH, boulders: BF, bare, fellK: F.fellK, canyonClear};
   { let top = 0; for (let y = fy - fr * MT.stoss; y < fy + fr; y += 1) for (let x = fx - fr * 1.2; x < fx + fr * 1.2; x += 1) top = Math.max(top, F.height(x, y)); F.mountain.h = +top.toFixed(2); }
   for (let cy = C0y; cy < C1y; cy++) for (let cx = C0x; cx < C1x; cx++) { F.chunks.push([cx, cy]); grow(F, cx, cy, S, slope, keepOut); }
+  // the fell's tors (each rock in the chunk it lies in)
+  for (const t of F.tors) for (const [x, y, v] of t.rocks) {
+    const ci = F.chunks.findIndex(([a2, b2]) => a2 === Math.floor(x / CHUNK) && b2 === Math.floor(y / CHUNK)); if (ci < 0) continue;
+    F.props.push(['rock_big', x, y, {r: .75, variant: v, chunk: ci}]);
+  }
   // the boulder field's rocks (a global feature: their own generator; each in the chunk it lies in)
   if (BF) {
     const Rb = rng(mix(seed, 3)), n = T.boulders.n[0] + Math.floor(Rb() * (T.boulders.n[1] - T.boulders.n[0] + 1)), at = [];
@@ -448,7 +455,7 @@ function grow(F, cx, cy, S, slope, K) {
   const tc = T.trees.cell, nt = Math.round(CHUNK / tc), trees = [];
   for (let j = 0; j < nt; j++) for (let i = 0; i < nt; i++) {
     const x = x0 + (i + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, y = y0 + (j + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, roll = R(), pick = R(), sc = R(), v = R();
-    if (!inside(x, y, T.trees.edge) || K.clearD(x, y) < 0 || K.crestD(x, y) < .6 || K.inRock(x, y, .8) || inField(x, y, .5)) continue;   // (the clearing, the esker's path, a block, the boulders)
+    if (!inside(x, y, T.trees.edge) || K.clearD(x, y) < 0 || K.crestD(x, y) < .6 || K.inRock(x, y, .8) || inField(x, y, .5) || K.canyonClear(x, y)) continue;   // (the clearing, the esker's path, a block, the boulders, the canyon)
     const wd = waterD(F, x, y); if (wd < T.trees.water || slope(x, y) > T.trees.slope || K.bare(x, y)) continue;   // (none on the fell's top)
     const fk = K.fellK(x, y);   // (up the fell: thinner, stunted mountain birch, a pine now and then)
     if (roll > (T.trees.base + T.trees.dense * dens(x, y)) * (1 - fk * 1.1)) continue;

@@ -846,9 +846,9 @@ function forestRuins(q, ctx) {
       const j = (vn(mx * .45, my * .45, 91) - .5) * .28 + (hsh(x, y, 92) - .5) * .05;
       if (Dc && Dc(x, y) > 2.6 + j * 5) { G.p(x, y, S.dgrass, Math.min(2, tn + (e > .5 ? 0 : 1))); return; }   // a gorge's floor: deep, cool shade
       const fk = Fk(x, y) + j;
-      if (fk > .58) { G.p(x, y, vn(mx * .4, my * .4, 93) > .74 - (fk - .58) * .4 ? S.lichen : S.heath, tn); return; }   // the fell's bare top: heath, lichen in drifts
+      if (fk > .58) { G.p(x, y, vn(mx * 1.6, my * 1.6, 93) > .72 - (fk - .58) * .3 ? S.lichen : S.heath, tn); return; }   // the fell's bare top: heath, lichen in small patches
       if (fk > .4) { G.p(x, y, e > .62 ? S.grass : S.heath, tn); return; }
-      if (Uk(x, y) + j > .72 && c < .55 && e > .5) { G.p(x, y, S.hgrass, tn); return; }   // the upland's open grass: drier
+      if (Uk(x, y) + j * .4 > .55 && c < .55 && e > .5) { G.p(x, y, S.hgrass, tn); return; }   // the upland's open grass: drier
     }
     if (e > .5) G.p(x, y, S.grass, tn);
     else G.p(x, y, S.earth, sl > .06 ? 0 : sl < -.07 ? 2 : 1);
