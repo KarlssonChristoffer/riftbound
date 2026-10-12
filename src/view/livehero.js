@@ -150,7 +150,7 @@ const COMBAT = {near: 3, far: 7, fade: .15, settle: .3, shift: .22,
 export const DEMOS = ['', 'lasso', 'swing'];
 // the loadouts with a live model (view/hero.js names). The gunslinger's duster's long panel isn't in his mesh: it is the
 // atlas's runtime cloth, run on his live bones (THE RUNTIME CLOTH below)
-const MODELS = {outlaw: '../concepts/sprites/out/live/outlaw/', gunslinger: '../concepts/sprites/out/live/gunslinger/'};
+export const MODELS = {outlaw: '../concepts/sprites/out/live/outlaw/', gunslinger: '../concepts/sprites/out/live/gunslinger/'};
 
 // ---------------------------------------------------------------- quaternions (x, y, z, w) and rigid transforms in Float64Arrays
 function qmul(a, i, b, j, o, k) {   // o = a * b

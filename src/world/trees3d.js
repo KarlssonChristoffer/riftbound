@@ -901,6 +901,7 @@ const VARIANT_SPECIES = ['oak', 'oak', 'dead', 'willow', 'rowan', 'birch', 'aspe
 // the other biomes grow one species each (the true-3D pivot): every variant of it, as their painted cards do
 const BIOME_SPECIES = {frost: 'pine', desert: 'saguaro', ember: 'spire', rift: 'shard'};
 export function speciesOf(p, biome) {
+  if (p.species && biome === 'ruins' && SPECIES[p.species]) return p.species;   // (a tree that names its own: the seeded forest's, world/forest.js)
   if (biome === 'ruins') { const v = p.variant | 0; return v === 0 || v === 1 ? (p.outside ? groveOf(p.x, p.y) : 'oak') : VARIANT_SPECIES[v] || 'oak'; }
   return BIOME_SPECIES[biome] || null;
 }

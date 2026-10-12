@@ -1,0 +1,341 @@
+// FOREST: the woods north of the Proving Grounds, grown from a SEED (docs/FOREST.md). The same seed gives the same forest on
+// every machine, to the tree: the co-op server sends its seed (core/session.js) and checks acts against the trees it grows
+// itself from it (server/room.mjs), so everything here is a pure function of the seed and the place: no Math.random, no DOM,
+// no import of the game's state (node runs this file too). Offline: ?seed=N or ?forest=1.
+//   RECT      x -48..72 (the world's width: the West Downs, the Proving Grounds, the mesa), y -64..0: 120 x 64 m, its south edge
+//             meeting the Proving Grounds' north edge, the ground there held level (the relief fades in over its first metres)
+//   CHUNKS    the land is grown in CHUNK m squares on a lattice from 0, 0 (chunk cx, cy covers x cx*CHUNK .. +CHUNK): what grows in
+//             one depends on the seed, its own coordinates and the forest's few global features (the lake, the stream), never on
+//             its neighbours, so the forest can grow by chunks later (a bigger RECT, or chunks made as you walk) without moving a tree
+//   RELIEF    rolling ground (three octaves of value noise, 0 .. ~2.4 m) and a few broad hills, all gentle enough to walk
+//             (terrain.js WALK); a 'field' terrain shape (its height function) + 'hill' shapes, for layout.js's TERRAIN
+//   LAKE      a lake in the lowest hollow the seed's candidates find: a basin cut level into the ground, DEEP water (inStream:
+//             falling in is a respawn, as the river)
+//   STREAM    from a spring on high ground near the north edge it runs down to the lake, wandering, downhill where it can; shallow
+//             and wadeable (not water to the sim); its bed is cut into the ground (lay, with layout.js's sampler: never rising
+//             downstream, into the lake at its surface)
+//   GROWTH    per chunk, on jittered lattices: TREES (3.2 m cells; a density field makes thickets and clearings; conifers on the
+//             higher ground and in their own drifts, oaks, birches, aspens, rowans and a dead one now and then elsewhere, willows by
+//             the water), the UNDERGROWTH (1.6 m cells: bushes and ferns under the trees, tufts in the clearings, reeds at the
+//             water's edge) and ROCKS (boulders on the slopes, stones). Nothing in the water, on its banks or too steep. Each tree has
+//             a stable id (fid: 't<cx>.<cy>.<n>'), the handle co-op and the woodcutting use for it
+// Uses existing kinds only (tree / bush / fern / tuft / reed / rock / rock_big): the art is the ruins' (trees3d.js, flora3d.js, the kit).
+// OWNS: nothing at run time (plain data). READS: core/mathx.js.
+//   const F = forestPlan(seed)   F.shapes, F.props, F.lake, F.stream, F.inLake, F.lakeEdge, F.at, F.height, F.trees (Map fid -> [x, y])
+//   F.lay(sampler)               the stream's bed from the ground it is cut into (layout.js, once): F.stream.bed, its channel in F.cuts
+//   sample(F, x, y, out) / depth(o, x, y) / paint(F, K, S, T)    the water for world.js, waterbed.js, biomes.js
+import {vnoise, smooth, clamp, hash3} from '../core/mathx.js';
+
+export const CHUNK = 16;
+export const RECT = {x0: -48, y0: -64, x1: 72, y1: 0};
+const FADE = [2, 12];
+// the Proving Grounds' river comes out of the north edge here (layout.js STREAM: x 40 at y 0, 2.9 m wide): the lake's outflow runs into it
+export const MOUTH = {x: 40, y: -.4, hw: 1.45};          // the relief is 0 within FADE[0] m of the south edge, full FADE[1] m in
+const WATER_H = -.18;          // the lake's surface under its basin (world.js WATER_H)
+export const TUNE = {
+  relief: {amp: 2.4, k: 1 / 26, hills: [2, 4], hillH: [1.4, 2.6], hillR: [7, 11]},
+  lake: {rx: [6.5, 9.5], ry: [4.5, 6.5], depth: .35, rim: 3.2, minBed: .55},
+  stream: {hw0: .3, hw1: .55, step: .6, depth: .1, bank: 1.25},
+  trees: {cell: 3.2, jitter: .36, base: .12, dense: .78, slope: .5, water: 1.4, edge: 2.2, south: 4},
+  under: {cell: 1.6, jitter: .4, p: .2},
+  rocks: {big: 2, small: 3},
+};
+
+// a seeded generator of its own (mulberry32, as core/rng.js: kept here so node needs nothing else)
+function rng(seed) { let s = seed | 0; return () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mix = (seed, a, b = 0) => (hash3(seed | 0, a, b) * 4294967296) | 0;
+const fbm = (x, y, s) => vnoise(x, y, s) * .55 + vnoise(x * 2.1 + 17.3, y * 2.1 - 4.1, s + 1) * .3 + vnoise(x * 4.3 - 9.7, y * 4.3 + 2.2, s + 2) * .15;
+const southFade = y => smooth((RECT.y1 - y - FADE[0]) / (FADE[1] - FADE[0]));
+
+const plans = new Map();
+export function forestPlan(seed) {
+  seed = seed >>> 0;
+  let F = plans.get(seed); if (F) return F;
+  const S = mix(seed, 1) & 0xffff, R = rng(mix(seed, 2)), T = TUNE;
+  F = {seed, rect: RECT, chunk: CHUNK, shapes: [], cuts: [], props: [], trees: new Map(), laid: false};
+  // ---- RELIEF: the rolling ground, then the hills (away from the south edge)
+  const reliefH = (x, y) => T.relief.amp * smooth((fbm(x * T.relief.k, y * T.relief.k, S) - .3) / .55) * southFade(y);
+  const hills = [];
+  // ---- LAKE: in the lowest hollow of a few candidates (the relief only: the hills keep away from it) whose ground stays high enough
+  // for its water to run out downhill to the river (its surface over the river's: OUTFLOW)
+  {
+    let best = null;
+    for (let i = 0; i < 32; i++) {
+      const x = RECT.x0 + 16 + R() * (RECT.x1 - RECT.x0 - 32), y = RECT.y0 + 12 + R() * (RECT.y1 - RECT.y0 - 32);
+      let m = 0, lo = 1e9; for (let k = 0; k < 17; k++) { const a = k * Math.PI / 8, r = k % 2 ? 1 : .5, h = reliefH(x + Math.cos(a) * 8 * r, y + Math.sin(a) * 5.5 * r); m += h; lo = Math.min(lo, h); }
+      const score = m / 17 + Math.max(0, T.lake.minBed - (lo - T.lake.depth)) * 6 + Math.hypot(x - MOUTH.x, y - MOUTH.y) * .006;   // (low, but not too low; nearer the river wins ties)
+      if (!best || score < best.score) best = {x, y, score};
+    }
+    const rx = T.lake.rx[0] + R() * (T.lake.rx[1] - T.lake.rx[0]), ry = T.lake.ry[0] + R() * (T.lake.ry[1] - T.lake.ry[0]);
+    let lo = 1e9; for (let k = 0; k < 64; k++) { const a = k * Math.PI / 32, r = (k % 4) / 3 * 1.15; lo = Math.min(lo, reliefH(best.x + Math.cos(a) * rx * r, best.y + Math.sin(a) * ry * r)); }
+    F.lake = {x: +best.x.toFixed(2), y: +best.y.toFixed(2), rx: +rx.toFixed(2), ry: +ry.toFixed(2), bed: +Math.max(T.lake.minBed, lo - T.lake.depth).toFixed(3)};
+  }
+  const L = F.lake;
+  const lakeD = (x, y) => Math.hypot((x - L.x) / L.rx, (y - L.y) / L.ry);   // 1 at its edge
+  F.inLake = (x, y, grow = 0) => { const rx = L.rx + grow, ry = L.ry + grow; if (x < L.x - rx || x > L.x + rx || y < L.y - ry || y > L.y + ry) return false; const u = (x - L.x) / rx, v = (y - L.y) / ry; return u * u + v * v < 1; };
+  F.lakeEdge = (x, y) => { const u = (x - L.x) / L.rx, v = (y - L.y) / L.ry, r = Math.hypot(u, v), g = Math.hypot(u / L.rx, v / L.ry); return g > 1e-6 ? (1 - r) * r / g : L.ry; };   // m to its edge (+ inside)
+  for (let i = 0, tries = 0, want = T.relief.hills[0] + Math.floor(R() * (T.relief.hills[1] - T.relief.hills[0] + 1)); i < want && tries < 60; tries++) {
+    const r = T.relief.hillR[0] + R() * (T.relief.hillR[1] - T.relief.hillR[0]), x = RECT.x0 + r + R() * (RECT.x1 - RECT.x0 - 2 * r), y = RECT.y0 + r * .8 + R() * (RECT.y1 - RECT.y0 - r * .8 - FADE[1] - r);
+    if (Math.hypot((x - L.x) / (L.rx + r + 5), (y - L.y) / (L.ry + r + 5)) < 1 || hills.some(h => Math.hypot(h.x - x, h.y - y) < h.rx + r)) continue;
+    if (segD(x, y, L.x, L.y, MOUTH.x, MOUTH.y) < r + 3) continue;   // (not across the outflow's way to the river)
+    const h = T.relief.hillH[0] + R() * (T.relief.hillH[1] - T.relief.hillH[0]);
+    hills.push({type: 'hill', x: +x.toFixed(2), y: +y.toFixed(2), rx: +r.toFixed(2), ry: +(r * (.75 + R() * .3)).toFixed(2), h: +h.toFixed(2), rot: +(R() * Math.PI).toFixed(3)}); i++;
+  }
+  const hillH = (x, y) => { let h = 0; for (const s of hills) { const c = Math.cos(s.rot), n = Math.sin(s.rot), dx = x - s.x, dy = y - s.y, u = (dx * c + dy * n) / s.rx, v = (-dx * n + dy * c) / s.ry, d = u * u + v * v; if (d < 1) h += s.h * .5 * (1 + Math.cos(Math.PI * Math.sqrt(d))); } return h; };
+  // the ground as this plan sees it (relief + hills, the lake's hollow): placement's slope and height tests. The drawn and walked
+  // ground is layout.js's field of these shapes (with its own low swell): within a few cm of this
+  F.height = (x, y) => { const h = reliefH(x, y) + hillH(x, y), d = lakeD(x, y); if (d < 1) return Math.min(h, L.bed); const k = (d - 1) * Math.min(L.rx, L.ry) / T.lake.rim; return k < 1 ? L.bed + (h - L.bed) * smooth(k) : h; };
+  const slope = (x, y) => { const e = .5; return Math.hypot(F.height(x + e, y) - F.height(x - e, y), F.height(x, y + e) - F.height(x, y - e)) / (2 * e); };
+  F.shapes.push({type: 'field', reach: [RECT.x0 - 30, RECT.y0 - 30, RECT.x1 + 30, RECT.y1], fn: reliefH}, ...hills,
+    {type: 'basin', x: L.x, y: L.y, rx: L.rx + .3, ry: L.ry + .3, h: L.bed, rim: T.lake.rim});
+
+  // a watercourse from (x, y) toward (tx, ty): each step mostly toward it, downhill where the ground falls, wandering (the seed's
+  // phase and a noise field), until done(x, y) -> [[x, y], ...] (a point every 3 steps)
+  const walk = (x, y, tx0, ty0, done, ph) => {
+    const pts = [[x, y]]; let dx = tx0 - x, dy = ty0 - y; const l0 = Math.hypot(dx, dy) || 1; dx /= l0; dy /= l0;
+    for (let i = 0; i < 500 && !done(x, y); i++) {
+      const tx = tx0 - x, ty = ty0 - y, tl = Math.hypot(tx, ty) || 1, e = .7;
+      const gx = -(F.height(x + e, y) - F.height(x - e, y)), gy = -(F.height(x, y + e) - F.height(x, y - e)), gl = Math.hypot(gx, gy) || 1;
+      const w = Math.sin(i * .11 + ph) * .55 + (vnoise(x * .15, y * .15, S + 9) - .5) * .9, near = Math.min(1, tl / 8);   // (the wander; straighter at the end)
+      const nx = tx / tl * (.55 + (1 - near)) + gx / gl * .3 * near + dx * .6 - ty / tl * w * .35 * near, ny = ty / tl * (.55 + (1 - near)) + gy / gl * .3 * near + dy * .6 + tx / tl * w * .35 * near;
+      const nl = Math.hypot(nx, ny) || 1; dx = nx / nl; dy = ny / nl;
+      x += dx * T.stream.step; y += dy * T.stream.step;
+      if (i % 3 === 2) pts.push([x, y]);
+    }
+    return pts;
+  };
+  // ---- STREAM: a spring on high ground in the north, down to the lake
+  {
+    let sp = null;
+    for (let i = 0; i < 30; i++) {
+      const x = RECT.x0 + 8 + R() * (RECT.x1 - RECT.x0 - 16), y = RECT.y0 + 5 + R() * 10, d = Math.hypot(x - L.x, y - L.y);
+      if (d < 22 || d > 60) continue;
+      const sc = F.height(x, y) + d * .01; if (!sp || sc > sp.sc) sp = {x, y, sc};
+    }
+    sp ??= {x: L.x + 20, y: RECT.y0 + 8};
+    const pts = walk(sp.x, sp.y, L.x, L.y, (x, y) => lakeD(x, y) < .82, R() * 10), e1 = pts.at(-1), e0 = pts.at(-2) || pts[0];
+    pts.push([e1[0] + (e1[0] - e0[0]) * .5, e1[1] + (e1[1] - e0[1]) * .5]);   // (on into the lake a little: no gap at its mouth)
+    F.stream = course(pts, T.stream.hw0, T.stream.hw1);
+    F.spring = {x: sp.x, y: sp.y, r: .42};
+  }
+  // ---- OUTFLOW: out of the lake's side nearest the river and down to the river's head (MOUTH), widening into it
+  {
+    const a = Math.atan2((MOUTH.y - L.y) / L.ry, (MOUTH.x - L.x) / L.rx), x = L.x + Math.cos(a) * L.rx * .85, y = L.y + Math.sin(a) * L.ry * .85;
+    const pts = walk(x, y, MOUTH.x, MOUTH.y, (px, py) => Math.hypot(px - MOUTH.x, py - MOUTH.y) < 1.2, R() * 10);
+    pts.push([MOUTH.x, MOUTH.y], [MOUTH.x, MOUTH.y + 1.5]);
+    F.outflow = course(pts, T.stream.hw1, MOUTH.hw);
+  }
+  // WET: a 1 m mask over the box, 1 within 1.6 m of any water (the painter's water pass skips the rest)
+  { const A = F.stream.box, B = F.outflow.box, x0 = Math.floor(Math.min(A[0], B[0], L.x - L.rx - 2)), y0 = Math.floor(Math.min(A[1], B[1], L.y - L.ry - 2));
+    const w = Math.ceil(Math.max(A[2], B[2], L.x + L.rx + 2)) - x0 + 1, h = Math.ceil(Math.max(A[3], B[3], L.y + L.ry + 2)) - y0 + 1, d = new Uint8Array(w * h);
+    const mark = (x, y, r) => { for (let j = Math.floor(y - r) - y0; j <= Math.floor(y + r) - y0; j++) for (let i = Math.floor(x - r) - x0; i <= Math.floor(x + r) - x0; i++) if (i >= 0 && j >= 0 && i < w && j < h) d[j * w + i] = 1; };
+    for (const C of [F.stream, F.outflow]) for (let k = 0; k < C.n; k += 3) mark(C.px[k], C.py[k], C.hw[k] + 2.2);
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (Math.hypot((x0 + i + .5 - L.x) / (L.rx + 3), (y0 + j + .5 - L.y) / (L.ry + 3)) < 1) d[j * w + i] = 1;
+    F.wet = {x0, y0, w, h, d}; }
+  { const A = F.stream.box, B = F.outflow.box; F.box = [Math.min(A[0], B[0], L.x - L.rx - 1.5), Math.min(A[1], B[1], L.y - L.ry - 1.5), Math.max(A[2], B[2], L.x + L.rx + 1.5), Math.max(A[3], B[3], L.y + L.ry + 1.5)]; }
+  // the nearer of the two watercourses (out as course().at's; true in its water)
+  F.at = (x, y, out) => {
+    const a = F.stream.at(x, y, out); if (a) return true;
+    const d = out.d - out.hw, b = F.outflow.at(x, y, _q);
+    if (_q.d - _q.hw < d) { out.d = _q.d; out.a = _q.a; out.l = _q.l; out.hw = _q.hw; out.i = _q.i; out.k = 1; return b; }
+    out.k = 0; return false;
+  };
+
+  // ---- GROWTH, chunk by chunk
+  const C0x = Math.floor(RECT.x0 / CHUNK), C1x = Math.ceil(RECT.x1 / CHUNK), C0y = Math.floor(RECT.y0 / CHUNK), C1y = Math.ceil(RECT.y1 / CHUNK);
+  F.chunks = [];
+  for (let cy = C0y; cy < C1y; cy++) for (let cx = C0x; cx < C1x; cx++) { F.chunks.push([cx, cy]); grow(F, cx, cy, S, slope); }
+  plans.set(seed, F);
+  return F;
+}
+
+// m from (x, y) to the stream's water (< 0 in it), the lake's (< 0 in it): the nearer
+const _o = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0}, _q = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0};
+const segD = (x, y, ax, ay, bx, by) => { const vx = bx - ax, vy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1))); return Math.hypot(x - ax - vx * t, y - ay - vy * t); };
+function waterD(F, x, y) { F.at(x, y, _o); return Math.min(_o.d - _o.hw, -F.lakeEdge(x, y)); }
+
+// one chunk's trees, undergrowth and rocks (its own generator: mix(seed, cx, cy))
+const DECID = [['oak', .45], ['birch', .2], ['aspen', .14], ['rowan', .15], ['dead', .06]];
+function grow(F, cx, cy, S, slope) {
+  const ci = F.chunks.length - 1, T = TUNE, R = rng(mix(F.seed, 1000 + cx, 1000 + cy)), x0 = cx * CHUNK, y0 = cy * CHUNK, out = F.props;
+  const inside = (x, y, m) => x > RECT.x0 + m && x < RECT.x1 - m && y > RECT.y0 + m && y < RECT.y1 - T.trees.south;
+  const dens = (x, y) => smooth((vnoise(x / 15, y / 15, S + 3) * .75 + vnoise(x / 6, y / 6, S + 4) * .25 - .28) / .5);   // thickets and clearings
+  const conifer = (x, y) => vnoise(x / 34, y / 34, S + 5) * .8 + F.height(x, y) / 3 * .35 > .55;
+  // TREES
+  const tc = T.trees.cell, nt = Math.round(CHUNK / tc), trees = [];
+  for (let j = 0; j < nt; j++) for (let i = 0; i < nt; i++) {
+    const x = x0 + (i + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, y = y0 + (j + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, roll = R(), pick = R(), sc = R(), v = R();
+    if (!inside(x, y, T.trees.edge)) continue;
+    const wd = waterD(F, x, y); if (wd < T.trees.water || slope(x, y) > T.trees.slope) continue;
+    if (roll > T.trees.base + T.trees.dense * dens(x, y)) continue;
+    let species;
+    if (wd < 4.5 && pick < .45) species = 'willow';
+    else if (conifer(x, y)) species = pick < .9 ? 'pine' : 'birch';
+    else { let a = pick; species = DECID.find(([, w]) => (a -= w) < 0)?.[0] || 'oak'; }
+    const fid = `t${cx}.${cy}.${trees.length}`, s = species === 'pine' ? .95 + sc * .4 : species === 'dead' ? .8 + sc * .3 : .85 + sc * .35;
+    const p = ['tree', +x.toFixed(2), +y.toFixed(2), {species, fid, scale: +s.toFixed(2), r: .45, variant: v * 3 | 0, chunk: ci}];
+    trees.push(p); out.push(p); F.trees.set(fid, [p[1], p[2]]);
+  }
+  // UNDERGROWTH: under and round the trees bushes and ferns, tufts in the open, reeds where the water meets the bank
+  const uc = T.under.cell, nu = Math.round(CHUNK / uc);
+  for (let j = 0; j < nu; j++) for (let i = 0; i < nu; i++) {
+    const x = x0 + (i + .5 + (R() - .5) * 2 * T.under.jitter) * uc, y = y0 + (j + .5 + (R() - .5) * 2 * T.under.jitter) * uc, roll = R(), pick = R(), v = R() * 3 | 0;
+    if (!inside(x, y, 1.2)) continue;
+    const wd = waterD(F, x, y);
+    if (wd > -.05 && wd < .55) { if (roll < .75) out.push(['reed', +x.toFixed(2), +y.toFixed(2), {r: 0, variant: v, chunk: ci}]); continue; }
+    if (wd < .7 || slope(x, y) > .6) continue;
+    const d = dens(x, y);
+    if (roll > T.under.p * (.45 + d)) continue;
+    const kind = d > .45 ? (pick < .55 ? 'fern' : 'bush') : (pick < .7 ? 'tuft' : pick < .9 ? 'bush' : 'fern');
+    if (trees.some(t => Math.hypot(t[1] - x, t[2] - y) < .7)) continue;   // (not in a trunk)
+    out.push([kind, +x.toFixed(2), +y.toFixed(2), {r: 0, variant: v, chunk: ci}]);
+  }
+  // ROCKS: a boulder or two on the slopes (solid), stones about
+  for (let k = 0; k < T.rocks.big + T.rocks.small; k++) {
+    const big = k < T.rocks.big, x = x0 + R() * CHUNK, y = y0 + R() * CHUNK, roll = R(), v = R() * 3 | 0;
+    if (!inside(x, y, 2) || waterD(F, x, y) < (big ? 1.6 : .4)) continue;
+    if (big ? roll > .25 + slope(x, y) * 1.2 : roll > .55) continue;
+    if (trees.some(t => Math.hypot(t[1] - x, t[2] - y) < (big ? 1.6 : .8))) continue;
+    out.push([big ? 'rock_big' : 'rock', +x.toFixed(2), +y.toFixed(2), {r: big ? .75 : 0, variant: v, chunk: ci}]);
+  }
+}
+
+// a course through [x, y] points: Catmull-Rom between them, resampled every DS m; the half width easing from hw0 to hw1; at(x, y,
+// out) its nearest point (out.d, a (+ to the left of the flow), l, hw, i) via a 1 m cell index of the samples near each cell
+const DS = .1;
+function course(ctl, hw0, hw1) {
+  const dense = [];
+  for (let k = 0; k + 1 < ctl.length; k++) {
+    const p0 = ctl[Math.max(0, k - 1)], p1 = ctl[k], p2 = ctl[k + 1], p3 = ctl[Math.min(ctl.length - 1, k + 2)];
+    for (let i = 0; i < 24; i++) {
+      const t = i / 24, t2 = t * t, t3 = t2 * t, cr = (a, b, c, d) => .5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (3 * b - a - 3 * c + d) * t3);
+      dense.push([cr(p0[0], p1[0], p2[0], p3[0]), cr(p0[1], p1[1], p2[1], p3[1])]);
+    }
+  }
+  dense.push(ctl.at(-1));
+  const X = [dense[0][0]], Y = [dense[0][1]], Ls = [0];
+  for (let i = 1, run = 0; i < dense.length; i++) {
+    const a = dense[i - 1], b = dense[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    for (let next = Ls.length * DS; next <= run + l + 1e-9; next = Ls.length * DS) { const t = l > 0 ? (next - run) / l : 0; X.push(a[0] + (b[0] - a[0]) * t); Y.push(a[1] + (b[1] - a[1]) * t); Ls.push(next); }
+    run += l;
+  }
+  const n = X.length, C = {n, px: Float32Array.from(X), py: Float32Array.from(Y), len: Float32Array.from(Ls), hw: new Float32Array(n), bed: new Float32Array(n), total: Ls[n - 1]};
+  for (let i = 0; i < n; i++) { const u = i / (n - 1); C.hw[i] = hw0 + (hw1 - hw0) * smooth(u) + (vnoise(i * .03, 1.7, 77) - .5) * .12; }
+  const REACH = 2.5; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (let i = 0; i < n; i++) { x0 = Math.min(x0, X[i]); y0 = Math.min(y0, Y[i]); x1 = Math.max(x1, X[i]); y1 = Math.max(y1, Y[i]); }
+  const gx0 = Math.floor(x0 - REACH), gy0 = Math.floor(y0 - REACH), gw = Math.ceil(x1 + REACH) - gx0, gh = Math.ceil(y1 + REACH) - gy0, near = new Int32Array(gw * gh).fill(-1), nd = new Float32Array(gw * gh).fill(1e9);
+  for (let i = 0; i < n; i++) for (let cy = Math.floor(Y[i] - REACH) - gy0; cy <= Math.floor(Y[i] + REACH) - gy0; cy++) for (let cx = Math.floor(X[i] - REACH) - gx0; cx <= Math.floor(X[i] + REACH) - gx0; cx++) {
+    const k = cy * gw + cx, d = Math.hypot(cx + gx0 + .5 - X[i], cy + gy0 + .5 - Y[i]); if (d < nd[k]) { nd[k] = d; near[k] = i; }
+  }
+  C.box = [x0 - REACH, y0 - REACH, x1 + REACH, y1 + REACH];
+  C.at = (x, y, out) => {
+    out.d = 1e9; out.a = 0; out.l = 0; out.hw = 0; out.i = 0;
+    const cx = Math.floor(x) - gx0, cy = Math.floor(y) - gy0; if (cx < 0 || cy < 0 || cx >= gw || cy >= gh) return false;
+    const i0 = near[cy * gw + cx]; if (i0 < 0) return false;
+    let bd = 1e18, bj = -1, bt = 0;
+    for (let j = Math.max(0, i0 - 20), e = Math.min(n - 2, i0 + 20); j <= e; j++) {
+      const ax = X[j], ay = Y[j], vx = X[j + 1] - ax, vy = Y[j + 1] - ay, u = ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1), t = u < 0 ? 0 : u > 1 ? 1 : u;
+      const dx = x - ax - vx * t, dy = y - ay - vy * t, d = dx * dx + dy * dy; if (d < bd) { bd = d; bj = j; bt = t; }
+    }
+    if (bj < 0) return false;
+    const j = bj, t = bt, vx = X[j + 1] - X[j], vy = Y[j + 1] - Y[j], d = Math.sqrt(bd), qx = X[j] + vx * t, qy = Y[j] + vy * t;
+    out.d = d; out.l = Ls[j] + (Ls[j + 1] - Ls[j]) * t; out.hw = C.hw[j] + (C.hw[j + 1] - C.hw[j]) * t; out.a = vx * (y - qy) - vy * (x - qx) < 0 ? d : -d; out.i = t < .5 ? j : j + 1;
+    return d < out.hw;
+  };
+  return C;
+}
+
+// the trees' ids and places (the co-op server's check: server/room.mjs)
+export const forestTrees = seed => forestPlan(seed).trees;
+
+// ---- LAY (layout.js, once, with its sampler: the ground the shapes make before these cuts): the beds, the ground less their depth,
+// never rising downstream. The stream meets the lake at its surface; the outflow leaves the lake at its surface and comes down to the
+// river's (WATER_H: the river is its ground lowered by that). The channels cut along them and the spring's hollow (F.cuts)
+export function lay(F, G) {
+  if (F.laid) return; F.laid = true;
+  const T = TUNE.stream, L = F.lake, surf = L.bed + WATER_H;
+  const bedOf = (C, top, lo) => {
+    for (let i = 0; i < C.n; i++) { const g = G(C.px[i], C.py[i]) - T.depth; C.bed[i] = Math.max(lo, Math.min(g, i ? C.bed[i - 1] : top)); }
+  };
+  bedOf(F.stream, 1e9, surf);
+  bedOf(F.outflow, surf, WATER_H - .02);
+  for (const C of [F.stream, F.outflow]) {
+    const keep = []; for (let k = 0; k < C.n; k++) if (k % 3 === 0 || k === C.n - 1) keep.push(k);
+    F.cuts.push({type: 'channel', pts: keep.map(k => [C.px[k], C.py[k]]), bed: keep.map(k => F.inLake(C.px[k], C.py[k], .4) ? 9 : C.bed[k]), hw: keep.map(k => C.hw[k] + .06), bank: T.bank});
+  }
+  F.cuts.push({type: 'basin', x: F.spring.x, y: F.spring.y, rx: F.spring.r + .08, ry: F.spring.r + .08, h: F.stream.bed[0] - .07, rim: .45});
+}
+
+// ---- THE WATER for world.js waterSample (kinds 6 the stream, 7 the lake, 8 its outflow): as brook.js sample. a: m across (+ left of
+// the flow; the lake: m south of its middle), s: the pattern's travel (.55 x m along a course; the lake: a slow drift east), speed,
+// hold (the spring's rings stay as painted). False off it
+const K_S = .55, _w = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0};
+export function sample(F, x, y, out) {
+  if (F.inLake(x, y)) {
+    const L = F.lake; out.kind = 7; out.a = y - L.y; out.hw = L.ry; out.edge = F.lakeEdge(x, y); out.s = (x - L.x) * .3; out.speed = .15; out.hold = 0;
+    return true;
+  }
+  const B = F.box; if (x < B[0] || x > B[2] || y < B[1] || y > B[3] || !F.at(x, y, _w)) return false;
+  const out8 = _w.k === 1;
+  out.kind = out8 ? 8 : 6; out.a = _w.a; out.hw = _w.hw; out.edge = _w.hw - _w.d; out.s = _w.l * K_S + (out8 ? 300 : 0);
+  out.speed = out8 ? .85 + .3 * smooth((_w.l - F.outflow.total + 6) / 6) : _w.l < 1.2 ? .45 : .75 + .25 * vnoise(_w.l * .2, 3.1, 41);
+  out.hold = !out8 && Math.hypot(x - F.spring.x, y - F.spring.y) < F.spring.r ? 1 : 0;
+  return true;
+}
+// how deep its bed lies, 0 (the waterline) .. 1 (waterbed.js): the streams shallow and clear, the spring a well, the lake a bowl
+export function depth(F, o, x, y) {
+  let d;
+  if (o.kind === 7) d = .12 + .88 * smooth(o.edge / 2.2) + (vnoise(x * 2, y * 2, 36) - .5) * .08;
+  else {
+    d = .05 + .22 * smooth(o.edge / Math.max(.08, o.hw)) + (vnoise(x * 3, y * 3, 34) - .5) * .08;
+    const rs = Math.hypot(x - F.spring.x, y - F.spring.y) / F.spring.r; if (o.kind === 6 && rs < 1) d = Math.max(d, .2 + .6 * smooth((1 - rs) / .7));
+  }
+  return clamp(d, 0, 1);
+}
+// the water's box (m: x0, y0, x1, y1), what world.js bakes the moving water over
+export function waterBox(F) { return F.box; }
+
+// ---- PAINT (biomes.js forestRuins): the streams and the lake on the forest's canvas, as brook.js paints its own: the water in the
+// river's four tones exactly (world.js bakeWater moves only texels painted in them), a shadow line under one bank and a lit edge
+// on the other, a deeper middle; earth banks with a damp, lush band; the spring in a ring of mossy stones. K: the painter's kit
+// (G the pixels, PPM, X0 / Y0 the canvas's world origin, WPX / HPX); S the ruins' style; T = {hsh, vn, hex, boulder}
+export function paint(F, K, S, T) {
+  const {G, PPM, X0, Y0, WPX, HPX} = K, {hsh, vn: n2, hex} = T, W = S.water, o = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0}, L = F.lake;
+  const FL = [hex('#f1ecde'), hex('#f0d968'), hex('#c8a6e8'), hex('#f2b9c9')];
+  const box = F.box, xa = Math.max(0, Math.floor((box[0] - X0) * PPM)), xb = Math.min(WPX - 1, Math.ceil((box[2] - X0) * PPM));
+  const ya = Math.max(0, Math.floor((box[1] - Y0) * PPM)), yb = Math.min(HPX - 1, Math.ceil((box[3] - Y0) * PPM));
+  const M = F.wet;
+  for (let x = xa; x <= xb; x++) for (let y = ya; y <= yb; y++) {
+    const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM;
+    if (!M.d[(Math.floor(my) - M.y0) * M.w + Math.floor(mx) - M.x0]) continue;   // (far from any water: most of the box)
+    const inS = F.at(mx, my, o), eL = -F.lakeEdge(mx, my);
+    let e = o.d - o.hw, side = o.a < 0 ? -1 : 1, deep = Math.abs(o.a) < o.hw * .45, lake = false;
+    if (eL < e) { e = eL; lake = true; const u = (mx - L.x) / L.rx, v = (my - L.y) / L.ry; side = u + v < 0 ? -1 : 1; deep = Math.hypot(u, v) < .7; }
+    if (!inS && e > 1.2) continue;
+    e += (n2(x / 4, y / 3, 73) - .5) * (lake ? .12 : .05);
+    if (e >= 1.05) continue;
+    if (e >= 0) {   // the banks: an earth lip, damp ground, then the lusher band
+      if (e < .05) G.p(x, y, S.earth, 3);
+      else if (e < .14) G.p(x, y, S.earth, side < 0 ? 2 : 1);
+      else if (e < .26) { if (hsh(x, y, 4) < .5) G.p(x, y, S.damp, 1); }
+      else if (e < .5 + n2(x / 9, y / 7, 62) * .5) {
+        if (e < .38 && hsh(x, y, 63) < .45) continue;
+        G.p(x, y, S.damp, Math.min(2, Math.max(0, G.tone(x, y))));
+        if (hsh(x, y, 65) < .013) { G.p(x, y, S.lush, 0); G.p(x + 1, y, S.lush, 1); G.p(x, y + 1, S.lush, 2); }
+        else if (hsh(x, y, 66) < .0035) G.c(x, y, FL[hsh(x, y, 67) * 4 | 0]);
+      }
+      continue;
+    }
+    const d = -e, rs = Math.hypot(mx - F.spring.x, my - F.spring.y), sr = F.spring.r;
+    let t;
+    if (!lake && o.k === 0 && rs < sr + .03) t = rs < .07 || (rs > .14 && rs < .18 && hsh(x, y, 8) < .85) || (rs > .27 && rs < .31 && hsh(x, y, 9) < .6) ? 0 : side < 0 && d < .1 ? 3 : side > 0 && d < .04 ? 0 : rs < .2 ? 2 : 1;
+    else t = side < 0 && d < (lake ? .14 : .09) ? 3 : side > 0 && d < (lake ? .06 : .04) ? 0 : deep ? 2 : 1;
+    G.p(x, y, W, t);
+  }
+  // the spring: a ring of mossy stones round where it wells up, open downstream
+  const C = F.stream, dx = C.px[Math.min(C.n - 1, 8)] - C.px[0], dy = C.py[Math.min(C.n - 1, 8)] - C.py[0], a0 = Math.atan2(dy, dx);
+  for (let k = 0; k < 7; k++) {
+    const a = a0 + .7 + k * (Math.PI * 2 - 1.4) / 6, sz = .8 + hsh(k, 3, F.seed & 255) * .25;
+    T.boulder(K, F.spring.x + Math.cos(a) * .52 - X0, F.spring.y + Math.sin(a) * .47 - Y0, 4.5 * sz + 1.5, 3 * sz + 1, S.rock, k * 17 + 3, S.moss);
+  }
+}

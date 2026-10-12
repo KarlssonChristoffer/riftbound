@@ -48,7 +48,8 @@ import {cliffGeometry} from './cliffs3d.js';
 import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
-import {TOWER_PLAN} from './layout.js';
+import {TOWER_PLAN, FOREST} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
+import {sample as forestSample, depth as forestDepth} from './forest.js';
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
@@ -238,6 +239,7 @@ const OUT_U0 = .3, OUT_W = .6, ease = u => u <= OUT_U0 ? 0 : u < OUT_U0 + OUT_W 
 const outAxisY = x => { const P = OUTFLOW.pts, f = Math.max(0, Math.min(P.length - 1.001, (OUTFLOW.x0 - x) / OUTFLOW.dx)), i = f | 0; return P[i][1] + (P[i + 1][1] - P[i][1]) * (f - i); };
 export function waterSample(x, y, out) {
   out.kind = 0;
+  if (FOREST !== null && y < 0) { forestSample(FOREST, x, y, out); return out; }   // (the forest's stream, lake and outflow: kinds 6, 7, 8, world/forest.js)
   if (x < 0) { brookSample(x, y, out); return out; }   // (west of the Proving Grounds: the West Downs' brook, kinds 4 and 5: world/brook.js)
   if (y < -1 || y > 31) return out;
   const c = STREAM.cx(y), hw = STREAM.w(y) / 2, a = x - c;
@@ -304,9 +306,9 @@ export const WATER_TUNE = {
 //   B  travel bits 7-0: the travel coordinate s in 1/8 texel (13 bits: up to 1023 texels)
 //   A  across the flow, signed texels from the axis in 1/2 texel, + 128 (clamped: +-63.5 texels, 2.08 m at PPM 30.5)
 // X0 / Y0: the canvas's world origin (the West Downs' own: 0, 0 is the Proving Grounds'); box: [x0, y0, x1, y1] m, the part to bake (the rest dry)
-function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = null}) {
+function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = null, depth = brookDepth, dry = undefined}) {
   const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
-  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth: brookDepth, dry: X0 || Y0 ? BROOK?.dry : null});   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
+  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth, dry: dry !== undefined ? dry : X0 || Y0 ? BROOK?.dry : null});   // (depth / dry: the forest's own)   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
   const toneOf = k => { for (let t = 0; t < ramp.length; t++) if (px[k] === ramp[t][0] && px[k + 1] === ramp[t][1] && px[k + 2] === ramp[t][2]) return t; return -1; };
   const bx0 = box ? Math.max(0, Math.floor((box[0] - X0) * PPM)) : 0, by0 = box ? Math.max(0, Math.floor((box[1] - Y0) * PPM)) : 0;
   const bx1 = box ? Math.min(WPX, Math.ceil((box[2] - X0) * PPM)) : WPX, by1 = box ? Math.min(HPX, Math.ceil((box[3] - Y0) * PPM)) : HPX;
@@ -573,7 +575,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   };
   // walkable terrain (layout.js; ?terrain=0: none): the field's height under every vertex (it is held flat at the water, the ravine's rim)
   const TF = TERRAIN_ON ? terrainField() : null, tH = TF ? groundDrawn() : () => 0;   // (the drawn ground: the mesa's falls away behind its rock)
-  const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) || inBrookPool(x, z, POOL_GROW) ? WATER_H : 0) + tH(x, z);   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
+  const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) || inBrookPool(x, z, POOL_GROW) || (FOREST !== null && FOREST.inLake(x, z, POOL_GROW)) ? WATER_H : 0) + tH(x, z);   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
   // a patch's grid, s m cells, from (rx0, rz0) to (rx1, rz1). It follows the edge exactly: the last bank vertex of each column
   // moves onto the edge line and the next one to just past it at the ravine's depth, so the wall is one smooth face (a plain
   // 0.25 m grid made it a staircase). Neighbouring patches share their border vertices (one lattice, one edge line per column)
@@ -611,6 +613,26 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     wdTex = texOf(westCanvas, true); wdTex.wrapS = wdTex.wrapT = THREE.MirroredRepeatWrapping; wdTex.needsUpdate = true;
     if (BROOK) westPx = westCanvas.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, wpx, hpx).data;   // (the brook's water: its fall's colour, its moving texture)
   }
+  // THE FOREST (world/forest.js, docs/FOREST.md): its ground in FT m TILES from the world's west edge to its east edge and from its north
+  // edge to the Proving Grounds' (and RING m past the world's edges), each painted on a canvas of its own (biome.paintForest, a tile
+  // with a margin of FM m round it: the painter's neighbour reads (the slope's light, the lip) see the same ground on both sides of a
+  // seam), its own patch, culled on its own; a tile with water gets its water texture (its stream, lake, outflow: bakeWater over the
+  // tile's part of the water's box). A biome without a painter: the open land's stand-in. Chunk-friendly: a tile needs only its place
+  const FT = 32, FM = 1, forestTiles = [];
+  if (FOREST) {
+    const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = WORLD.y0 - RG, fz1 = GROUNDS.y0;
+    const ctxF = {PPM, ground: groundDrawn(), forest: FOREST, layout};
+    for (let z0 = fz0; z0 < fz1 - 1e-6; z0 += FT) for (let x0 = fx0; x0 < fx1 - 1e-6; x0 += FT) {
+      const x1 = Math.min(fx1, x0 + FT), z1 = Math.min(fz1, z0 + FT), T = {x0, z0, x1, z1, canvas: null, px: null, cx0: x0 - FM, cz0: z0 - FM};
+      if (biome.paintForest) {
+        const w = Math.ceil((x1 - x0 + 2 * FM) * PPM), h = Math.ceil((z1 - z0 + 2 * FM) * PPM), c = document.createElement('canvas'); c.width = w; c.height = h;
+        const q = c.getContext('2d', {willReadFrequently: true});
+        biome.paintForest(q, {...ctxF, WPX: w, HPX: h, X0: T.cx0, Y0: T.cz0});
+        T.canvas = c; T.px = q.getImageData(0, 0, w, h).data;
+      }
+      forestTiles.push(T);
+    }
+  }
   // the open land's tiles [x0, z0, x1, z1, cell]: the world + skirt outside the Proving Grounds' patch, cut on a TILE m lattice
   // from the skirt's corner and at the patch's sides. Fine cells (S) where the ground can step: the ravine's band (rawCliff
   // looks 7 m in from the south edge) and the stream's box; COARSE cells on flat land (they meet fine ones only where both are flat).
@@ -629,8 +651,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const x0 = xs[i], x1 = xs[i + 1], z0 = zs[j], z1 = zs[j + 1];
       if (x0 >= hx0 && x1 <= hx1 && z0 >= hz0 && z1 <= hz1) continue;   // the Proving Grounds' patch
       if (WD && x0 >= wdx0 && x1 <= hx0 && z0 >= hz0 && z1 <= hz1) continue;   // the West Downs' patch
+      if (FOREST && z1 <= GROUNDS.y0 + 1e-6) continue;   // the forest's tiles (above)
       openTiles.push([x0, z0, x1, z1, z1 > Y1 - 8 || wet(x0, z0, x1, z1) || hilly(x0, z0, x1, z1) ? S : COARSE]);
     }
+    for (const T of forestTiles) if (!T.canvas) openTiles.push([T.x0, T.z0, T.x1, T.z1, S]);   // (the forest's tiles, unpainted in this biome: the stand-in)
   }
   // the south ravine's wall (any steep ground): rock strata with the biome's grass / ash / snow lip, and a WATERFALL where
   // the stream goes over the edge, in the stream's own painted colour (streaks, dark edges, foam at the foot). Indexed by
@@ -693,6 +717,20 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       ...(wdWater ? {water: wdWater, bed: wdWater.userData.bed} : {})}, false);   // (the brook's water: its own bed, not the Proving Grounds')
     disposers.push(() => { m.dispose(); wdTex.dispose(); });
     if (TERRAIN_ON) caster(wg);
+  }
+  if (forestTiles.length) {   // THE FOREST's tiles (above): their painted canvases (or the open land's stand-in, below), their water
+    const box = FOREST.box, FD = (o, x, y) => forestDepth(FOREST, o, x, y);
+    for (const T of forestTiles) {
+      if (!T.canvas) continue;
+      const tex = texOf(T.canvas, true); tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.needsUpdate = true;
+      const wb = [Math.max(box[0], T.cx0), Math.max(box[1], T.cz0), Math.min(box[2], T.cx0 + T.canvas.width / PPM), Math.min(box[3], T.cz0 + T.canvas.height / PPM)];
+      const water = WT && wb[0] < wb[2] && wb[1] < wb[3] ? bakeWater(biome, WT, {WPX: T.canvas.width, HPX: T.canvas.height, PPM, px: T.px, cliffZ, X0: T.cx0, Y0: T.cz0, box: wb, depth: FD, dry: null}) : null;
+      const tg = gridGeo(T.x0, T.z0, T.x1, T.z1, S), m = G.surface(tg, {tex, planar: true, world: new THREE.Vector2(T.canvas.width / PPM, T.canvas.height / PPM), origin: new THREE.Vector2(T.cx0, T.cz0),
+        type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9, ...(water ? {water, bed: water.userData.bed} : {})}, false);
+      disposers.push(() => { m.dispose(); tex.dispose(); if (water) { water.dispose(); water.userData.bed?.tex.dispose(); } });
+      if (TERRAIN_ON) caster(tg);
+      T.px = null;   // (only the water bake read them)
+    }
   }
   // the open land: a stand-in texture until the world plan's step 3 paints the land itself. Plain ground in the biome's own colours:
   // the 3 commonest texels of a 5 m square of the Proving Grounds' ground outside their walls (the north-west corner), speckled
@@ -1092,12 +1130,41 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // a sprite's light records (outside update's loop: a closure in the loop body, even in a branch seldom taken, made V8
   // allocate a context for every item every frame, ~6 KB of garbage)
   const lightRecs = (it, sp) => sp.lights.map((l, i) => ({x: 0, y: 0, z: 0, c: rgbOf(l.color), r: l.radius || 4, k: l.intensity ?? 1, flicker: l.flicker || 0, id: it.obj * 8 + i, l}));
+  // THE FOREST's chunks on screen this frame (world/forest.js: its props carry their chunk's index): a chunk whose box (the ground up
+  // to a tall tree's crown, CHUNK_UP m) projects off the view by more than CHUNK_M px skips its items' per-frame work below (the wind's
+  // lean, flashes, state) and its meshes leave the G-buffer pass: ~800 forest items cost ~.7 ms a frame otherwise, seen or not. Its
+  // props have no lights, never move by themselves; what changes off screen (a felled tree: removeItem) is not this loop's. Back on
+  // screen, an item is brought up to date in the same frame, before it is drawn
+  // (a swaying tree casts into the per-frame sun shadow: its shadow is drawn while its chunk is within CHUNK_SM px of the view, a long
+  // shadow's reach; further, its shadow mesh rests too: CV 2 = on screen, 1 = only its shadows near enough, 0 = neither)
+  const CHUNK_UP = 9, CHUNK_M = 48, CHUNK_SM = 300, CV = FOREST ? new Uint8Array(FOREST.chunks.length) : null, CS = [0, 0, 0];
+  function chunksOnScreen() {
+    const C = FOREST.chunk, VW = G.VW, VH = G.VH;
+    for (let k = 0; k < CV.length; k++) {
+      const cx = FOREST.chunks[k][0] * C, cy = FOREST.chunks[k][1] * C;
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (let c = 0; c < 8; c++) {
+        G.toScreenInto(cx + (c & 1 ? C : 0), c & 4 ? CHUNK_UP : 0, cy + (c & 2 ? C : 0), CS);
+        if (CS[0] < x0) x0 = CS[0]; if (CS[0] > x1) x1 = CS[0]; if (CS[1] < y0) y0 = CS[1]; if (CS[1] > y1) y1 = CS[1];
+      }
+      CV[k] = x1 > -CHUNK_M && x0 < VW + CHUNK_M && y1 > -CHUNK_M && y0 < VH + CHUNK_M ? 2 : x1 > -CHUNK_SM && x0 < VW + CHUNK_SM && y1 > -CHUNK_SM && y0 < VH + CHUNK_SM ? 1 : 0;
+    }
+  }
   function update(yaw) {
     if (litterDirty) bakeNow();
     clearArray(lights); for (const l of groundL) lights.push(l);
     const k0 = -Math.round(yaw / step);
+    if (CV) chunksOnScreen();
     for (const it of items) {
-      const p = it.p, base = p.z || 0, z0 = base + (p.h || 0);
+      const p = it.p;
+      if (CV !== null && p.chunk !== undefined) {   // (a forest item: off screen it skips the rest, and its G-buffer mesh is taken out of the
+        const gm = it.live?.gm, sm = it.pose && !it.pose.rigid ? it.live?.sm : null;   // pass (three.js walks ~300 trees less a frame); a
+        const v = CV[p.chunk], show = it.kvis !== false;                                // swaying tree's shadow while it can reach the view
+        if (sm && sm.visible !== (show && v > 0)) sm.visible = show && v > 0;
+        if (v < 2) { if (gm && gm.visible) gm.visible = false; continue; }
+        if (gm && !gm.visible && show) gm.visible = true;
+      }
+      const base = p.z || 0, z0 = base + (p.h || 0);
       const sp = biome.sprite(p, ctxO);
       if (sp?.lights) {   // the sprite's lights: records built when the sprite changes, only their positions move per frame
         if (it.lsp !== sp) { it.lsp = sp; it.lrec = lightRecs(it, sp); }
@@ -1156,6 +1223,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
     setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, floraCount, flora, haveGlb, groundCanvas: gc, westCanvas, trees3d,
     itemOf: p => byProp.get(p) || null,
+    // a forest prop whose chunk is off the view this frame (the last update's: world/forest.js chunks): per-frame passes over the items
+    // skip it (features/contact.js)
+    offView: p => CV !== null && p.chunk !== undefined && CV[p.chunk] < 2,
     // PULL a stone wall's broken top down (the lasso, docs/exp/brawl.md): the stretch round segment p's middle (w m along the run)
     // dh m lower, never under floor m, its stones fallen toward (px, py); the run is made again (walls3d.js pulls: every other
     // stone as it was) and the pieces that changed swap their geometry; their tops (topOfProp, vaultTop) follow -> false: not a

@@ -15,6 +15,8 @@
 //            ground over `bank` m. It only ever LOWERS the ground (where the bed lies above it, nothing changes)
 //   basin    {type: 'basin', x, y, rx, ry, h, rim, clip, clipRim}: a pool's hollow: h inside the ellipse, blending back up over `rim` m
 //            (lowers only); clip (optional): none north of y = clip (back up over clipRim m: a step at a lip over the pool)
+//   field    {type: 'field', fn: (x, y) => m, reach: [x0, y0, x1, y1]}: ground given as a function (a generated relief: world/forest.js),
+//            added like a hill (>= 0: the flat ground stays the floor); 0 outside its reach
 // Composition: hills + swells, times the MASK (0 = held flat: the arena, the water and its banks, the ravine's rim...), then
 // terraces (the higher wins), then ramps (they cut through a terrace's edge), then channels and basins (cut into all of it).
 // ?terrain=0's plateau is not in the field (layout.js elev puts its exact box on top); with terrain it is a terrace (a mesa).
@@ -62,6 +64,7 @@ function reachOf(s) {
   if (s.type === 'terrace') return box(s.pts, Math.max(.02, s.bank ?? .1, ...(s.banks || [])) + .01);
   if (s.type === 'ramp') return box(s.pts, s.w / 2 + (s.shoulder ?? .6) + .01);
   if (s.type === 'channel') return box(s.pts, Math.max(...s.hw) + s.bank + .01);
+  if (s.type === 'field') return s.reach || null;
   if (s.type === 'basin') return [s.x - s.rx - s.rim - .01, s.y - s.ry - s.rim - .01, s.x + s.rx + s.rim + .01, s.y + s.ry + s.rim + .01];
   return null;
 }
@@ -75,6 +78,8 @@ function evalShapes(shapes, mask, x, y, tmp) {
     if (s.type === 'hill') {
       const c = Math.cos(s.rot || 0), n = Math.sin(s.rot || 0), dx = x - s.x, dy = y - s.y, u = (dx * c + dy * n) / s.rx, v = (-dx * n + dy * c) / s.ry, d = u * u + v * v;
       if (d < 1) base += s.h * .5 * (1 + Math.cos(Math.PI * Math.sqrt(d)));
+    } else if (s.type === 'field') {
+      if (!outside(s, x, y)) base += s.fn(x, y);
     } else if (s.type === 'swell') {
       const k = s.k, sd = s.seed || 0;
       base += s.amp * smooth((vnoise(x * k, y * k, sd) * .7 + vnoise(x * k * 2.3 + 7, y * k * 2.3 + 3, sd + 1) * .3 - .2) / .6);

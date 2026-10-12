@@ -35,6 +35,7 @@ import {speciesOf} from './trees3d.js';   // which tree a prop is (the painted c
 import {flags} from '../core/flags.js';
 import {trackK, PROPS as WEST_PROPS, FOUNDATIONS, WALL_D} from './westland.js';   // the West Downs' ground (westRuins)
 import {paint as paintBrook} from './brook.js';   // (and their brook)
+import {paint as paintForestWater} from './forest.js';   // the seeded forest's stream, lake and outflow (forestRuins)
 
 // ============================================================ pixel toolkit
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -787,6 +788,86 @@ function westRuins(q, ctx) {
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
 }
 const WEST_GROUND = {ruins: westRuins};
+
+// ---------------------------------------------------------------- THE FOREST's ground (ruins; world/forest.js, docs/FOREST.md)
+// One TILE of it per call (ctx: PPM, WPX, HPX, X0 / Y0 = the tile canvas's world origin, ground = the drawn terrain's height, forest =
+// the plan): everything a pure function of the world position (noise and hashes in world metres, the plan's trees and water), so
+// tiles painted apart meet without a seam (world.js paints each with a margin round it). The floor lit by the real slopes (as the
+// West Downs'), earth and leaf litter under the crowns and grass in the clearings (the canopy: how many crowns are over a spot),
+// moss in drifts and on the north side of the trunks, a darker ring of roots round each trunk, twigs and fallen leaves, the
+// meadow's strokes and lip, then the water (forest.js paint). The low-frequency fields (the ground's height for the slope light, the
+// grass / earth field, the moss drifts) are worked out on a coarse grid (every CG px) and read bilinearly: ~2.5x faster than per pixel
+const CG = 4;
+function forestRuins(q, ctx) {
+  const S = STYLES.ruins, {PPM, WPX, HPX, X0, Y0} = ctx, GH = ctx.ground, FO = ctx.forest, G = new Pix(WPX, HPX);
+  const K = {...ctx, PPMY: PPM, G, ox: X0, oy: Y0, X: m => Math.round((m - X0) * PPM), Y: m => Math.round((m - Y0) * PPM)};
+  const fill = fn => { for (let y = 0; y < HPX; y++) { const my = Y0 + y / PPM; for (let x = 0; x < WPX; x++) fn(x, y, X0 + x / PPM, my); } };
+  // a field on the coarse grid -> (x, y px) => its value, bilinear
+  const GW = Math.ceil(WPX / CG) + 2, GHH = Math.ceil(HPX / CG) + 2;
+  const coarse = fn => {
+    const D = new Float32Array(GW * GHH);
+    for (let j = 0; j < GHH; j++) for (let i = 0; i < GW; i++) D[j * GW + i] = fn(X0 + i * CG / PPM, Y0 + j * CG / PPM);
+    return (x, y) => { const fx = x / CG, fy = y / CG, i = fx | 0, j = fy | 0, u = fx - i, v = fy - j, k = j * GW + i, a = D[k], b = D[k + 1], c = D[k + GW], d = D[k + GW + 1];
+      return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; };
+  };
+  const Hc = coarse((mx, my) => (GH ? GH(mx, my) : 0) + fbm(mx * .2, my * .2, 14) * .3), Gc = coarse((mx, my) => fbm(mx * .2, my * .2, 11)), Mc = coarse((mx, my) => vn(mx * .9, my * .9, 81));
+  const F = new Float32Array(WPX * HPX);
+  fill((x, y) => { F[y * WPX + x] = Hc(x, y); });
+  const r3 = Math.round(.3 * PPM), slope = (x, y) => {
+    const yn = Math.max(0, y - r3), ys = Math.min(HPX - 1, y + r3), xw = Math.max(0, x - r3), xe = Math.min(WPX - 1, x + r3);
+    return (F[ys * WPX + x] - F[yn * WPX + x]) + (F[y * WPX + xe] - F[y * WPX + xw]) * .5;
+  };
+  // the canopy: crowns over a spot (a .5 m grid over the tile; a tree's crown ~2.4 m round its trunk), and the trunks near the tile
+  const CW = Math.ceil(WPX / PPM * 2) + 1, CH = Math.ceil(HPX / PPM * 2) + 1, CAN = new Float32Array(CW * CH), trunks = [];
+  for (const [kind, tx, ty, ex] of FO.props) {
+    if (kind !== 'tree' || tx < X0 - 3 || ty < Y0 - 3 || tx > X0 + WPX / PPM + 3 || ty > Y0 + HPX / PPM + 3) continue;
+    trunks.push([tx, ty, ex.scale || 1]);
+    const R = 2.4 * (ex.scale || 1);
+    for (let j = Math.max(0, Math.floor((ty - R - Y0) * 2)); j <= Math.min(CH - 1, Math.ceil((ty + R - Y0) * 2)); j++)
+      for (let i = Math.max(0, Math.floor((tx - R - X0) * 2)); i <= Math.min(CW - 1, Math.ceil((tx + R - X0) * 2)); i++) {
+        const d = Math.hypot(X0 + i / 2 - tx, Y0 + j / 2 - ty) / R; if (d < 1) CAN[j * CW + i] += 1 - d * d;
+      }
+  }
+  const canopy = (mx, my) => { const fi = (mx - X0) * 2, fj = (my - Y0) * 2, i = Math.max(0, Math.min(CW - 2, fi | 0)), j = Math.max(0, Math.min(CH - 2, fj | 0)), u = Math.min(1, Math.max(0, fi - i)), v = Math.min(1, Math.max(0, fj - j));
+    const a = CAN[j * CW + i], b = CAN[j * CW + i + 1], c = CAN[(j + 1) * CW + i], d = CAN[(j + 1) * CW + i + 1]; return Math.min(1.6, a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v); };
+  // the base: grass in the open, earth (the forest floor) under the crowns and in the hollows, toned by the slope
+  fill((x, y, mx, my) => {
+    const c = canopy(mx, my), g = Gc(x, y) + .34 - c * .42;
+    const e = Math.abs(g - .5) < .066 ? g + (vn(mx * 2.4, my * 2.4, 12) - .5) * .1 + (hsh(x, y, 13) - .5) * .03 : g;
+    let sl = slope(x, y);
+    if (Math.min(Math.abs(sl - .05), Math.abs(sl + .065), Math.abs(sl - .06), Math.abs(sl + .07)) < .033) sl += (vn(mx * 2, my * 2, 16) - .5) * .045 + (hsh(x, y, 17) - .5) * .018;
+    if (e > .5) G.p(x, y, S.grass, sl > .05 ? 0 : sl < -.065 ? 2 : 1);
+    else G.p(x, y, S.earth, sl > .06 ? 0 : sl < -.07 ? 2 : 1);
+  });
+  meadowDetail(K, S);
+  // the forest floor: moss in drifts where the crowns are thick, leaf litter and twigs on the earth, a lone sprout
+  const LEAF = [hex('#a5753f'), hex('#80522c'), hex('#8c6c4a'), hex('#5a3822')];
+  fill((x, y, mx, my) => {
+    const c = canopy(mx, my); if (c < .25) return;
+    const i = y * WPX + x, m0 = G.m[i];
+    const mo = Mc(x, y) * .7 + vn(mx * 3.1, my * 3.1, 82) * .3;
+    if (mo > .64 - c * .1 && (m0 === S.earth.id || m0 === S.grass.id)) { G.p(x, y, S.moss, Math.min(3, Math.max(1, G.t[i] + (mo > .74 ? 0 : 1)))); return; }
+    if (m0 !== S.earth.id) return;
+    const h = hsh(x, y, 83);
+    if (h < .035 * Math.min(1, c)) G.c(x, y, LEAF[hsh(x, y, 84) * 4 | 0]);   // a fallen leaf
+    else if (h > .9965) { const L = 2 + (hsh(x, y, 85) * 3 | 0), dx = hsh(x, y, 86) < .5 ? 1 : -1; for (let k = 0; k < L; k++) G.p(x + k * dx, y + (k >> 1), S.wood, 3); }   // a twig
+  });
+  // the trunks' feet: a ring of darker earth and roots, moss on the north side
+  for (const [tx, ty, sc] of trunks) {
+    const r = .55 * sc, cx = (tx - X0) * PPM, cy = (ty - Y0) * PPM, rp = r * PPM;
+    for (let y = Math.floor(cy - rp); y <= Math.ceil(cy + rp); y++) for (let x = Math.floor(cx - rp); x <= Math.ceil(cx + rp); x++) {
+      const dx = (x + .5 - cx) / rp, dy = (y + .5 - cy) / rp, d = Math.hypot(dx, dy * 1.15); if (d >= 1) continue;
+      const a = Math.atan2(dy, dx), root = Math.abs(Math.sin(a * 3 + tx)) > .82 && d > .35;
+      if (dy < -.15 && d > .3 && hsh(x, y, 87) < .7) G.p(x, y, S.moss, d > .7 ? 2 : 1);
+      else if (root) G.p(x, y, S.bark, d > .75 ? 3 : 2);
+      else if (d > .45 && hsh(x, y, 88) < .6) G.p(x, y, S.earth, 3);
+    }
+  }
+  meadowLip(K, S);
+  paintForestWater(FO, K, S, {hsh, vn, hex, boulder});   // its stream, lake and outflow (world/forest.js)
+  q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
+}
+const FOREST_GROUND = {ruins: forestRuins};
 
 // ---------------------------------------------------------------- RUINS ground
 function cliffRuins(K) { return mx => K.HM - 2.2 + (vn(mx * .3, .5, 91) - .5) * 1.3; }
@@ -2287,6 +2368,8 @@ function makeBiome(id) {
     paintGround(q, ctx) { GROUND[id](q, ctx, B); },
     // the West Downs' ground (world/westland.js), on a canvas of its own (ctx.X0 / Y0: its world origin); null: this biome has none (a stand-in)
     paintWest: WEST_GROUND[id] ? (q, ctx) => WEST_GROUND[id](q, ctx, B) : null,
+    // the seeded forest's ground (world/forest.js), a tile at a time (ctx.X0 / Y0: the tile's world origin); null: a stand-in
+    paintForest: FOREST_GROUND[id] ? (q, ctx) => FOREST_GROUND[id](q, ctx, B) : null,
     sprite(p, ctx) {
       // fast path: this prop's sprite at the current ground projection and state (breakable stage, open, facing)
       const sig = (p.stage | 0) * 4 + (p.opened ? 2 : 0) + (p.kind === 'brute' && faceLeft(p) ? 1 : 0) + (p.sconce ? 64 : 0) + (p.unlit ? 128 : 0) + (p.model ? 256 : 0) + (p.fx ? 512 : 0), hit = memo.get(p);
