@@ -76,6 +76,7 @@ import * as devkeys from './dev/devkeys.js';
 import * as owncheck from './dev/owncheck.js';
 import {createCheats} from './dev/cheats.js';   // the cheat panel (F2): a dev feature the boot adds last
 import {createGunFeel} from './dev/gunfeel.js';   // the gun feel panel (F8): live sliders as modifier notes, a dev feature too
+import {createWardrobe} from './dev/wardrobe.js';   // the dev wardrobe (Shift+Tab): the character's clothes, paint, stats, items, outfits
 import {loadFeatures} from './core/features.js';
 import {createInput} from './core/input.js';
 import {createLoop} from './core/loop.js';
@@ -232,6 +233,7 @@ const game = await createGame(host); features.unshift(game);
 // the cheat panel (dev/cheats.js, F2 in dev mode): last, so what it asks for lands after every feature's step
 features.push(createCheats({host, cam, canvas}));
 features.push(createGunFeel({host}));   // (dev/gunfeel.js: F8 in dev mode)
+features.push(createWardrobe({host, hero}));   // (dev/wardrobe.js: Shift+Tab in dev mode)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;

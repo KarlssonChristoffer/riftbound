@@ -294,7 +294,9 @@ src/
   content/               moods.js (MOODS, TIMES, CHAR), weapons.js (the bow's numbers, the revolvers: view/hero.js LOADOUTS name one each)
   dev/                   devtools.js (colliders, debug HUD, tree lineup), devkeys.js (dev keys, renderer A/B),
                          owncheck.js (the ownership table + ?owncheck=1), cheats.js (the cheat panel, F2 in dev mode:
-                         god mode, spawns, kill all, raids, game speed; its cheats are 'cheats' notes in host.mods)
+                         god mode, spawns, kill all, raids, game speed; its cheats are 'cheats' notes in host.mods),
+                         wardrobe.js (the dev wardrobe, Shift+Tab: clothes, test paint, a piece tuner, stats as 'wardrobe'
+                         notes, items, saved outfits; docs/GEAR.md)
   vendor/three/          three.js 0.170.0
 ```
 

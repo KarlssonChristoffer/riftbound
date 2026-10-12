@@ -47,9 +47,9 @@ function segOf(J, bone) {
 export function dress(J, bin, pieces) {
   const Z = ZONES[J.meta.loadout] || {};
   const fams = J.families.slice(), famIx = new Map(fams.map((f, i) => [f.name, i]));
-  const famOf = m => {
-    const key = 'gear:' + m; let i = famIx.get(key);
-    if (i === undefined) { const t = MATERIALS[m]; if (!t) throw new Error('dress: no material ' + m); i = fams.length; fams.push({name: key, ramp: ramp6(t)}); famIx.set(key, i); }
+  const famOf = m => {   // m: a MATERIALS name, or 4 tones of its own (the dev wardrobe's picked colours: dev/wardrobe.js)
+    const key = 'gear:' + (Array.isArray(m) ? m.join('') : m); let i = famIx.get(key);
+    if (i === undefined) { const t = Array.isArray(m) ? m : MATERIALS[m]; if (!t) throw new Error('dress: no material ' + m); i = fams.length; fams.push({name: key, ramp: ramp6(t)}); famIx.set(key, i); }
     return i;
   };
   const parts = J.parts.slice();

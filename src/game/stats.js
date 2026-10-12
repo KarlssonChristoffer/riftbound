@@ -61,6 +61,7 @@ export function createStats(host, core) {
     addItem(it) { items.set(it.id, (items.get(it.id) || 0) + 1); apply(); },
     removeItem(id) { const n = items.get(id) || 0; if (!n) return false; if (n > 1) items.set(id, n - 1); else items.delete(id); apply(); return true; },   // (one copy: a trade)
     addAugment(a) { augs.add(a.id); apply(); },
+    removeAugment(id) { if (!augs.delete(id)) return false; apply(); return true; },   // (dev/wardrobe.js)
     // the build in pick order, for the HUD: [{def, n, aug}]
     build() { return [...[...augs].map(id => ({def: augmentById(id), n: 1, aug: true})), ...[...items].map(([id, n]) => ({def: itemById(id), n}))]; },
     // damage taken x the 'game.hurt' notes (dev/cheats.js god mode: x 0, nothing taken -> 0)

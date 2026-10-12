@@ -47,7 +47,7 @@ const DEV_GROUP = {
   foes: 'World', anomaly: 'World',
   brutes3d: 'Renderer',
   affixes: 'Experiments', equip: 'Experiments', omens: 'Experiments', shrines: 'Experiments', trickshot: 'Experiments', bells: 'Experiments',
-  cheats: 'Tools', gunfeel: 'Tools',
+  cheats: 'Tools', gunfeel: 'Tools', wardrobe: 'Tools',
 };
 // THE FEATURES' ROWS (F.menu): the game's own (start / abandon a run, back to title) and the player's views (the cinematic
 // camera) stay in Game; every other feature's are test actions for the sandbox: the Sandbox tab, one page per group here

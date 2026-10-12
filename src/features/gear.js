@@ -6,6 +6,8 @@
 // MULTIPLAYER: the set is the server's to say. Offline it is worn at once; in co-op it is asked of the server (features/
 // coop.js wear) and worn when the server's answer comes back (coop.gear), the same moment the others see it.
 // SIM vs VIEW: the set worn and its modifier notes change in update (a step); the look follows in view, on a change only.
+// DEV PREVIEW (dev/wardrobe.js): preview({swap, extra, key}) draws the set with some pieces swapped for edited copies and
+// extra look-only pieces after them (zone paints, a piece being tuned); the look only: no notes, nothing sent. null: off.
 // OWNS: the set (want: chosen; worn: in effect), the 'gear' modifier notes, the panel. READS: flags ('gear'),
 //   localStorage ('rb.gear': the set last chosen here), the co-op feature (online, wear, gear).
 // EMITS: gear.wear.  BUDGET: update ~0 (two compares a step); view: a dress on a change (2-25 ms, rare); panel: DOM, on change.
@@ -41,7 +43,13 @@ export async function create(host) {
   // the panel's choice: a piece into its slot (or the slot emptied); worn next step (online: once the server took it)
   function choose(ids) { S.want = cleanSet(ids); S.wantV++; remember(S.want); }
   const panel = createGearPanel({S, choose, online: () => !!coop()});
-  let shown = -1, shownW = false;
+  let shown = -1, shownW = false, over = null, overV = 0, shownO = 0;
+  // the pieces to draw: the set worn, a piece swapped for its preview copy, then the preview's own (a later paint wins)
+  function look() {
+    if (!over) return [S.worn.map(gearById), S.key];
+    const ps = S.worn.map(id => over.swap?.[id] || gearById(id)); if (over.extra) ps.push(...over.extra);
+    return [ps, S.key + '|' + over.key + '#' + overV];
+  }
 
   const F = {
     name: 'gear', label: 'Gear', on: true, S, panel,
@@ -56,12 +64,14 @@ export async function create(host) {
         }
       } else if (S.wornV !== S.wantV) { S.wornV = S.wantV; put(S.want); S.waiting = false; }
     },
+    // the look only, from the dev wardrobe: {swap: {id: piece}, extra: [piece], key} or null (as worn). Drawn at the next view
+    preview(o) { over = o || null; overV++; },
     view() {
-      if (S.ver === shown && S.waiting === shownW) return;
-      if (S.ver !== shown) host.dressPlayer?.(S.worn.map(gearById), S.key);
-      shown = S.ver; shownW = S.waiting; panel.sync();
+      if (S.ver === shown && S.waiting === shownW && overV === shownO) return;
+      if (S.ver !== shown || overV !== shownO) { const [ps, key] = look(); host.dressPlayer?.(ps, key); }
+      shown = S.ver; shownW = S.waiting; shownO = overV; panel.sync();
     },
-    onKey(k) { if (k !== 'tab') return false; panel.toggle(); return true; },
+    onKey(k, e) { if (k !== 'tab' || e?.shiftKey) return false; panel.toggle(); return true; },   // (Shift+Tab: the dev wardrobe)
     menu: () => [{label: `Gear: ${S.worn.length ? S.worn.map(id => gearById(id).name).join(', ') : 'your own clothes'} (Tab: the gear panel)`, run: () => panel.toggle(true)}],
     hud: () => `gear ${S.key || 'none'} · ${S.stats.kg.toFixed(1)} kg · armor ${Math.round(S.stats.armor * 100)}% · speed x${S.stats.speed.toFixed(2)}${S.waiting ? ' · waiting for the server' : ''}`,
   };
