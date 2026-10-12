@@ -108,14 +108,30 @@ export const RECIPES = {
     likes: {ground: 'forest', shade: .4, near: 'spruce on thin soil over rock (shallow roots), boulders', cluster: [1, 1]},
     params: {R: [1.1, .7, 1.6], len: [4, 2.5, 6], r: [.24, .15, .35], roots: [16, 8, 24], stones: [3, 0, 6], old: [0, 0, 1]},
     // frame: the root plate stands at x = 0 facing -x (its torn underside, toward the pit), the trunk lies along +x
+    // the bare earth it leaves (for whoever places it: paint the ground there as earth, no grass or tufts; the mesh's own flat
+    // layers only sit right on flat ground): ellipses in this frame
+    ground: p => [{x: -p.R * .62, z: 0, rx: p.R * 1.1, rz: p.R * 1.3}, {x: p.R * .1, z: 0, rx: p.R * .5, rz: p.R * 1.1}],
     build(b, p, r) {
       const old = p.old >= .5, R = p.R, cy = R * r.range(.15, .3), th = R * .3, tilt = r.range(-.12, .05);   // (cy: the plate's middle, low: its lower half is still in the ground it tore from)
       // the pit it tore out of: a dark hollow of bare earth on the -x side (water may stand in it)
-      const pz = r.range(-.1, .1);
-      b.ball('soil', [-R * .55, .005, pz], [R * .6, .012, R * .8], {detail: 1, fixed: 3});   // (a flat dark patch reads as the hole from above)
-      for (let i = r.int(5, 8); i > 0; i--) {   // the loose earth thrown up round its far rim
-        const a = r.range(Math.PI * .45, Math.PI * 1.55), c = Math.cos(a), s = Math.sin(a);
-        b.ball('soil', [-R * .55 + c * R * .66, 0, pz + s * R * .86], [R * r.range(.12, .22), R * r.range(.06, .12), R * r.range(.12, .22)], {detail: 0, lump: .3});
+      // the hole it tore out of, right before the plate and round its foot: no grass left, bare earth stepping down to a dark
+      // middle (flat layers just over the ground: the ground can't be dug, so the dark reads as depth from above), torn sod at its
+      // edge, clods thrown out, a few roots still reaching down into it
+      const hx = -R * .62, ha = R * .8, hc = R * 1.05, L = [[1.3, 1.22, 0, 1], [1, 1, .012, 2], [.62, .66, .022, 3]];   // (fixed tones: unlit, and no moss settles on them)
+      for (const [kx, kz, y, f] of L) {   // each layer a cluster of overlapping blobs: a ragged edge, not an oval
+        const cx = hx + (1 - kx) * R * .12, n = f === 3 ? 3 : 6;
+        b.ball('soil', [cx, y, 0], [ha * kx * .8, .02, hc * kz * .8], {detail: 2, lump: .12, fixed: f});
+        for (let i = 0; i < n; i++) {
+          const a = (i / n + r.range(-.06, .06)) * Math.PI * 2, d = r.range(.3, .5);
+          b.ball('soil', [cx + Math.cos(a) * ha * kx * d, y + .001 * i, Math.sin(a) * hc * kz * d], [ha * kx * r.range(.4, .6), .02, hc * kz * r.range(.4, .6)], {detail: 1, lump: .2, fixed: f});
+        }
+      }
+      b.ball('soil', [R * .12, .01, 0], [th * 1.6, .02, R * 1.05], {detail: 1, lump: .1, fixed: 1});   // (round the plate's foot too)
+      for (let i = r.int(7, 11); i > 0; i--) {   // the rim: torn sod (a flap of the forest floor) or a clod of earth
+        const a = r.range(0, Math.PI * 2), c = Math.cos(a), s = Math.sin(a), at = [hx + c * ha * r.range(1.1, 1.4), 0, s * hc * r.range(1.05, 1.3)];
+        if (c > .3 && Math.abs(s) < .6) continue;   // (not under the plate)
+        if (r.chance(.45)) b.at(at, 90 - a / Math.PI * 180, 1, () => b.box('cover', [0, .04, 0], [R * r.range(.18, .3), .05, R * r.range(.12, .2)], [r.range(15, 50), 0, r.range(-10, 10)]));
+        else b.ball('soil', at, [R * r.range(.07, .14), R * r.range(.05, .1), R * r.range(.07, .14)], {detail: 0, lump: .3});
       }
       // the plate: a thick lumpy slab of earth, nearly on edge, torn ragged at the rim (a few lumps hang off it)
       b.at([0, cy, 0], 0, 1, () => {
@@ -143,6 +159,10 @@ export const RECIPES = {
       for (let i = Math.round(p.roots * 1.4); i > 0; i--) {   // rootlets
         const a = r.range(0, Math.PI * 2), d0 = R * r.range(.2, .7), d1 = d0 + R * r.range(.15, .35), a1 = a + r.range(-.4, .4);
         b.tube(skinR, [face - .01, cy + Math.sin(a) * d0, Math.cos(a) * d0], [face - r.range(0, .08), cy + Math.sin(a1) * d1, Math.cos(a1) * d1], p.r * .1, p.r * .04, {sides: 3});
+      }
+      for (let i = r.int(3, 5); i > 0; i--) {   // roots from the plate's foot still reaching down into the hole
+        const z0 = r.range(-.6, .6) * R, y0 = cy - R * r.range(.55, .8), end = [hx + r.range(-.2, .3) * ha, .03, z0 * r.range(.6, 1.1)];
+        const w = p.r * r.range(.25, .4); b.tube(skinR, [face, Math.max(.06, y0), z0], end, w, w * .3, {sides: 4});
       }
       for (let i = r.int(2, 4); i > 0; i--) {   // clumps of earth still caught in the roots
         const a = r.range(0, Math.PI * 2), d = R * r.range(.3, .8);
