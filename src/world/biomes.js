@@ -197,6 +197,9 @@ const STYLES = {
     clay: ramp('#c8845a', '#a8643e', '#7e472c', '#4e2a1c'), gem: ramp('#e4ffc8', '#9ad878', '#58a060', '#2a5a3c'), gemGlow: ['#eaffd8', '#8aff6a'], gemInner: '#1e4a20',
     brute: ramp('#bca985', '#9e8d6b', '#7d6f53', '#514836'),
     rock: ramp('#7e786b', '#666056', '#504b44', '#35322d'), water: ramp('#9cc2c4', '#6e9ca4', '#4f7c8a', '#33556a'),
+    // the forest's height bands (forestRuins): the upland's drier grass, the fell's heath and lichen, the deep shade of a gorge's floor
+    hgrass: ramp('#7a8463', '#636d50', '#4e5741', '#363d30'), heath: ramp('#7d7357', '#665d46', '#504939', '#37322a'),
+    lichen: ramp('#a5aa90', '#888d76', '#6c715f', '#4a4e42'), dgrass: ramp('#4d6152', '#3d4f43', '#303d37', '#222c28'),
     torch: '#ffc850', braz: ['#ffb04a', '#7fc8ff', '#a8ff6a'],
     // the green banks (damp ground, clover, moss, reeds, cattail heads, ferns): clearly green, so the season turns them
     damp: ramp('#587c5a', '#46664c', '#355040', '#243a30'), lush: ramp('#9bc464', '#76a04c', '#57803f', '#355432'), moss: ramp('#8fbb5e', '#6c9a49', '#4f7a3e', '#33502f'),
@@ -812,6 +815,10 @@ function forestRuins(q, ctx) {
   };
   const NK = flags.get('onesun') !== '0' ? .12 : .3;   // (the painted noise's share in the slope light: westRuins' with one sun)
   const Hc = coarse((mx, my) => (GH ? GH(mx, my) : 0) + fbm(mx * .2, my * .2, 14) * NK), Gc = coarse((mx, my) => fbm(mx * .2, my * .2, 11)), Mc = coarse((mx, my) => vn(mx * .9, my * .9, 81));
+  // the height bands (so you can read how high you are): how far up the fell / the upland (forest.js), and how deep a spot lies under
+  // the ground round it (4 m out: a gorge's floor, a hollow)
+  const Fk = FO.fellK ? coarse(FO.fellK) : null, Uk = FO.uplandK ? coarse(FO.uplandK) : null;
+  const Dc = GH ? coarse((mx, my) => { let m = 0; for (let k = 0; k < 8; k++) m += GH(mx + Math.cos(k * .785) * 4, my + Math.sin(k * .785) * 4); return m / 8 - GH(mx, my); }) : null;
   const F = new Float32Array(WPX * HPX);
   fill((x, y) => { F[y * WPX + x] = Hc(x, y); });
   const r3 = Math.round(.3 * PPM), slope = (x, y) => {
@@ -837,7 +844,16 @@ function forestRuins(q, ctx) {
     const e = Math.abs(g - .5) < .066 ? g + (vn(mx * 2.4, my * 2.4, 12) - .5) * .1 + (hsh(x, y, 13) - .5) * .03 : g;
     let sl = slope(x, y);
     if (Math.min(Math.abs(sl - .05), Math.abs(sl + .065), Math.abs(sl - .06), Math.abs(sl + .07)) < .033) sl += (vn(mx * 2, my * 2, 16) - .5) * .045 + (hsh(x, y, 17) - .5) * .018;
-    if (e > .5) G.p(x, y, S.grass, sl > .05 ? 0 : sl < -.065 ? 2 : 1);
+    const tn = sl > .05 ? 0 : sl < -.065 ? 2 : 1;
+    if (Fk) {   // the bands, their edges ragged (a noise and a pixel's jitter)
+      const j = (vn(mx * .45, my * .45, 91) - .5) * .28 + (hsh(x, y, 92) - .5) * .05;
+      if (Dc && Dc(x, y) > 2.6 + j * 5) { G.p(x, y, S.dgrass, Math.min(2, tn + (e > .5 ? 0 : 1))); return; }   // a gorge's floor: deep, cool shade
+      const fk = Fk(x, y) + j;
+      if (fk > .58) { G.p(x, y, vn(mx * 1.6, my * 1.6, 93) > .72 - (fk - .58) * .3 ? S.lichen : S.heath, tn); return; }   // the fell's bare top: heath, lichen in small patches
+      if (fk > .4) { G.p(x, y, e > .62 ? S.grass : S.heath, tn); return; }
+      if (Uk(x, y) + j * .4 > .55 && c < .55 && e > .5) { G.p(x, y, S.hgrass, tn); return; }   // the upland's open grass: drier
+    }
+    if (e > .5) G.p(x, y, S.grass, tn);
     else G.p(x, y, S.earth, sl > .06 ? 0 : sl < -.07 ? 2 : 1);
   });
   meadowDetail(K, S);

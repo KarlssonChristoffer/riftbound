@@ -62,7 +62,7 @@ const WX0 = WEST_ON ? WEST.x0 : 0;
 // THE FOREST (world/forest.js, docs/FOREST.md): grown from a seed north of everything (y -64..0, the world's width); on with a seed
 // (core/session.js: ?seed=N, ?forest=1, a co-op server's) and walkable terrain. It takes the world's north edge out to its own
 export const FOREST = TERRAIN_ON && SESSION.seed !== null ? forestPlan(SESSION.seed) : null;
-export const WORLD = FOREST ? {x0: Math.min(WX0, FOREST_RECT.x0), y0: FOREST_RECT.y0, x1: GX1, y1: 30, WM: GX1 - Math.min(WX0, FOREST_RECT.x0), HM: 30 - FOREST_RECT.y0, past: 12}
+export const WORLD = FOREST ? {x0: Math.min(WX0, FOREST_RECT.x0), y0: FOREST_RECT.y0, x1: GX1, y1: 30, WM: GX1 - Math.min(WX0, FOREST_RECT.x0), HM: 30 - FOREST_RECT.y0, past: 12, top: Math.max(20, Math.ceil(FOREST.mountain.h) + 4)}
   : BIG ? {x0: Math.min(-40, WX0), y0: -60, x1: 122, y1: 30, WM: 122 - Math.min(-40, WX0), HM: 90, past: 12} : {x0: WX0, y0: 0, x1: GX1, y1: 30, WM: GX1 - WX0, HM: 30, past: 12};
 export {WEST_ON, WEST, WEST_LAND};
 export const GROUNDS = {x0: 0, y0: 0, x1: GX1, y1: 30};
@@ -283,7 +283,9 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   // the West Downs' rolling hills (westland.js)
   ...WEST_HILLS,
   ...STONE_TERRAIN,   // the standing stones' hill on the south-west (stonecircle.js; ?stones=0: westland.js's dome)
-  ...(FOREST ? FOREST.shapes : []),   // the forest's relief, hills and the lake's basin (world/forest.js; its stream's cut is laid below)
+  ...(FOREST ? FOREST.shapes : []),   // the forest's relief (the fell and the upland in it), hills, the lake's basin and the canyon's cut (world/forest.js; its stream's cut is laid below)
+  // the forest's outcrops, big boulders, the fell's crags and tors (forest.js): terraces with rock where they drop, the ledges' way (mesaOutline)
+  ...(FOREST ? FOREST.outcrops.map(o => { const M = mesaOutline(o.ctl); return {type: 'terrace', pts: M.pts, drawn: {pts: M.ground}, banks: M.banks, h: o.h, rock: true, cliffs: M.cliffs}; }) : []),
 ];
 // PADS: things built at a fixed height that the ground must meet (features place them at 0): [x, y, r (held flat), fade]
 const PADS = [[50.8, 19.4, 1.5, 1.2],   // the campfire and its woodpile (features/lights.js)
@@ -319,7 +321,8 @@ export function groundDrawn() {
   // terrace's outline, along a cut's edges (most of the box is the same: the mesa's top, the open ground)
   const S = sampler(TERRAIN.map(s => s.drawn ? {...s, ...s.drawn} : s), terrainMask), c = F.cell, seg = [0, 0, 0, 0];
   const lineD = (x, y, P, closed) => { let d = 1e9; for (let i = 0, n = P.length; i < (closed ? n : n - 1); i++) { const [ax, ay] = P[i], [bx, by] = P[(i + 1) % n], vx = bx - ax, vy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1))); d = Math.min(d, Math.hypot(x - ax - vx * t, y - ay - vy * t)); } return d; };
-  const near = (s, x, y) => s.type === 'terrace' ? lineD(x, y, s.pts, true) < CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6
+  const box = own.map(s => { const m = s.type === 'terrace' ? CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6 : s.type === 'channel' ? Math.max(...s.drawn.hw) + s.bank + .5 : 0; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of s.pts || [[s.x - s.drawn.rx - s.rim, s.y - s.drawn.ry - s.rim], [s.x + s.drawn.rx + s.rim, s.y + s.drawn.ry + s.rim]]) { x0 = Math.min(x0, x - m); y0 = Math.min(y0, y - m); x1 = Math.max(x1, x + m); y1 = Math.max(y1, y + m); } return [x0 - .5, y0 - .5, x1 + .5, y1 + .5]; });   // (each shape's reach: most lattice points are near none)
+  const near = (s, k, x, y) => x < box[k][0] || y < box[k][1] || x > box[k][2] || y > box[k][3] ? false : s.type === 'terrace' ? lineD(x, y, s.pts, true) < CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6
     : s.type === 'channel' ? lineD(x, y, s.pts, false) < Math.max(...s.drawn.hw) + s.bank + .5
     : Math.hypot((x - s.x) / (s.drawn.rx + s.rim + .5), (y - s.y) / (s.drawn.ry + s.rim + .5)) < 1;
   let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
@@ -328,7 +331,7 @@ export function groundDrawn() {
   const W = i1 - i0 + 1, D = new Float32Array(W * (j1 - j0 + 1));
   for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
     const x = F.x0 + i * c, y = F.y0 + j * c;
-    D[(j - j0) * W + i - i0] = own.some(s => near(s, x, y)) ? S(x, y) : F.data[j * F.nx + i];
+    D[(j - j0) * W + i - i0] = own.some((s, k) => near(s, k, x, y)) ? S(x, y) : F.data[j * F.nx + i];
   }
   const X0 = F.x0 + i0 * c, Y0 = F.y0 + j0 * c, X1 = F.x0 + i1 * c, Y1 = F.y0 + j1 * c;
   return (DRAWN = (x, y) => {   // (bilinear on the same lattice: away from the edges it is the field exactly)
@@ -551,6 +554,23 @@ if (FOREST) { layForest(FOREST, sampler(TERRAIN, terrainMask)); TERRAIN.push(...
 export const TOWER_PLAN = TOWER && TERRAIN_ON ? towerPlan(TOWER, sampler(TERRAIN, terrainMask)) : null;
 if (TOWER_PLAN) { BRIDGES.push(TOWER_PLAN.deck); CLIMBS.push(TOWER_PLAN.climb); }
 
+// ---- THE HUT (?hut=0: none): a small roofed stone hut in the forest's lakeside clearing (forest.js F.clearing), a place to try the
+// cutaway (features/cutaway.js) under a roof. Its outline x0..x1 by y0..y1 (the walls' middle lines), the walls h over the ground and
+// d thick, a doorway in the south wall (toward the camera at yaw 0), a roof of stone slabs over it all with an overhang (world.js).
+// buildLayout adds its colliders and the prop that carries the roof; roofY: the roof's underside (m), the walls' top over the highest
+// ground under them. The cutaway reads it for "is he under a roof"
+export const HUT = FOREST && TERRAIN_ON && flags.get('hut') !== '0' ? hutPlan(FOREST.clearing, sampler(TERRAIN, terrainMask)) : null;
+function hutPlan(c, ground) {
+  const x0 = c.x - 2.5, x1 = c.x + 2.5, y0 = c.y - 2, y1 = c.y + 2, d = .45, e = d / 2, door = 1.15, L = x1 - x0 + d, h = 2.35;
+  let g = -1e9; for (let x = x0 - e; x <= x1 + e + 1e-6; x += .5) for (const y of [y0, y1]) g = Math.max(g, ground(x, y));
+  for (let y = y0; y <= y1 + 1e-6; y += .5) for (const x of [x0, x1]) g = Math.max(g, ground(x, y));
+  return {x0, y0, x1, y1, h, d, over: .45, roofY: +(g + h).toFixed(3), door: [c.x - door / 2, c.x + door / 2], walls: [
+    {a: [x0 - e, y0], b: [x1 + e, y0], gaps: [], seed: 811},
+    {a: [x0 - e, y1], b: [x1 + e, y1], gaps: [[L / 2 - door / 2, L / 2 + door / 2]], seed: 812},
+    {a: [x0, y0 + e], b: [x0, y1 - e], gaps: [], seed: 813},
+    {a: [x1, y0 + e], b: [x1, y1 - e], gaps: [], seed: 814}]};
+}
+
 export function buildLayout(seed = 7) {
   let s = seed; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
   const props = [], marks = [], lights = [];
@@ -741,6 +761,17 @@ export function buildLayout(seed = 7) {
   if (FOREST) {
     for (const p of props) if (p.outside && p.y < FOREST_S + .5 && !(p.r > 0)) { p.outside = false; p.r = p.kind === 'tree' ? .45 : .75; }
     for (const [kind, x, y, extra] of FOREST.props) add(kind, x, y, {...extra});
+    // the HUT (HUT above): its walls as stone runs ('fieldwall' segments, round colliders touching, none in the doorway), its roof on a
+    // 'hutroof' prop (world.js: the slabs; no collider: he walks under it). The soft scatter in its footprint goes
+    if (HUT) {
+      for (let i = props.length - 1; i >= 0; i--) { const p = props[i]; if (!(p.r > 0) && p.x > HUT.x0 - .7 && p.x < HUT.x1 + .7 && p.y > HUT.y0 - .7 && p.y < HUT.y1 + .7) props.splice(i, 1); }
+      for (const W of HUT.walls) {
+        const [ax, ay] = W.a, l = Math.hypot(W.b[0] - ax, W.b[1] - ay), ux = (W.b[0] - ax) / l, uy = (W.b[1] - ay) / l, n = Math.max(1, Math.round(l / WALL_SEG)), step = l / n;
+        for (let k = 0; k < n; k++) { const s = (k + .5) * step; if (!W.gaps.some(([g0, g1]) => s > g0 - .1 && s < g1 + .1)) add('fieldwall', ax + ux * s, ay + uy * s, {r: .3}); }
+        walls.push({kind: 'fieldwall', a: W.a, b: W.b, h: HUT.h, d: HUT.d, ruin: 0, keep: [], seed: W.seed, gaps: W.gaps, sink: -.16, rough: .5, tol: .06});
+      }
+      add('hutroof', (HUT.x0 + HUT.x1) / 2, (HUT.y0 + HUT.y1) / 2, {r: 0});
+    }
   }
   // ---- the watchtower (TOWER_PLAN): soft scatter in its footprint goes; the prop that carries its mesh (world.js: its geometry, perches
   // on its broken tops), and its colliders, 'towerwall': a ring round its foot at the ground's height, a ring on the lookout at the floor's
