@@ -2627,10 +2627,11 @@ void main() {
   }
   // (sun: how far toward the sun his shadow test looks, .5 m; a live 3D body would shade its own test point: view/livehero.js)
   // THE CUTAWAY (CUT; features/cutaway.js): where he stands (m: x east, f his feet's height, z south), how open the cut is (0..1), its
-  // radius round his body and his height (m), band: the half width (m) of a band the whole height of the view instead (0: the capsule).
+  // radius round his body and his height (m), band: the half width (m) of a band the whole height of the view instead (0: the capsule),
+  // nx, nz: the way (level, world x / z) toward the side the band cuts away (0, 0: toward the camera).
   // Put on the screen at the draw (cutFrame: the view may still move after the call)
-  const cutS = {x: 0, f: 0, z: 0, open: 0, r: 2, h: 1.8, band: 0}, cutP = new THREE.Vector3();
-  function setCut(x, f, z, open, r = 2, h = 1.8, band = 0) { cutS.x = x; cutS.f = f; cutS.z = z; cutS.open = open; cutS.r = r; cutS.h = h; cutS.band = band; }
+  const cutS = {x: 0, f: 0, z: 0, open: 0, r: 2, h: 1.8, band: 0, nx: 0, nz: 0}, cutP = new THREE.Vector3();
+  function setCut(x, f, z, open, r = 2, h = 1.8, band = 0, nx = 0, nz = 0) { cutS.x = x; cutS.f = f; cutS.z = z; cutS.open = open; cutS.r = r; cutS.h = h; cutS.band = band; cutS.nx = nx; cutS.nz = nz; }
   function cutFrame() {
     const C = U.cut.value, B = U.cutB.value;
     if (cine || cutS.open <= 0) { C.w = 0; return; }
@@ -2640,7 +2641,8 @@ void main() {
     C.set(fx, fy, cutP.z * .5 + .5 - .3 / R_DEPTH, Math.min(1, cutS.open));
     B.set(Math.max(0, hy - fy), cutS.r * PPM * view.zoom, 3, cutS.f + .45);
     U.cutM.value.x = cutS.band * PPM * view.zoom;   // (0: the capsule)
-    U.cutP.value.set(cutS.x, cutS.z, Math.sin(view.yaw), Math.cos(view.yaw));   // (the band's upright plane: through him, facing the camera)
+    const nl = Math.hypot(cutS.nx, cutS.nz);   // (the band's upright plane through him: facing the side that hides him, else the camera)
+    if (nl > 1e-3) U.cutP.value.set(cutS.x, cutS.z, cutS.nx / nl, cutS.nz / nl); else U.cutP.value.set(cutS.x, cutS.z, Math.sin(view.yaw), Math.cos(view.yaw));
   }
   const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; U.wFoot.value.set(x, h - .9, z, 1); };   // (h: his chest, .9 m over his feet: the water rings them when he wades)
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
