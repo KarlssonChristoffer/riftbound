@@ -14,14 +14,19 @@
 // front puff the biggest; then the smoke rolls in eddies (a field of them in the camera's plane, stronger with age),
 // rises, drifts downwind and goes.
 // OWNS: its pools (typed arrays, capped, reused) and its puffs' renderer (render/puffs.js).
-// READS: host.G (fx, toScreenInto), host.point / line, host.wind (through gunfx), host.mood (hybrid's haze), host.yaw,
+// THE AIR (view/airdrift.js, AIRK.gun): every puff, wisp, mote and dust puff also takes the moving air (G.air: a blast
+// blows it away and the inflow pulls it back, a muzzle's jet carries it on, a passer-by's wake stirs it): a velocity of
+// its own (sax / say, the motes' mwax / mway: relaxed toward G.air.velAt where it is, k by how light it is) on top of its
+// motion. ?air=0: none of it (the same arithmetic as before).
+// READS: host.G (fx, toScreenInto, air), host.point / line, host.wind (through gunfx), host.mood (hybrid's haze), host.yaw,
 // host.zoom, host.PPM.
-// BUDGET: step ~.02 ms (110 puffs; strands: + 480 motes); frame: one instanced draw (<= 110 puffs), strands <= 2000
+// BUDGET: step ~.02 ms (110 puffs; strands: + 480 motes; the air: a velAt a puff a step, a mote every third step); frame: one instanced draw (<= 110 puffs), strands <= 2000
 // lines / points; soft: <= 110 drawImage calls on the overlay.
 import {flags} from '../../core/flags.js';
 import {viewRandom} from '../../core/rng.js';
 import {clamp} from '../../core/mathx.js';
 import {createPuffs} from '../../render/puffs.js';
+import {AIRK, createDrift} from '../../view/airdrift.js';
 
 export const SMOKE = {
   style: 'pixel', STYLES: ['pixel', 'hybrid', 'strands', 'soft'],
@@ -58,37 +63,40 @@ export function createSmoke(host) {
   // ---- the puffs (SoA): position, velocity, age / life, size (m) / growth (x grow), tint, alpha (x soft's), shape, kind
   const SM = S.max, sx = new Float32Array(SM), sy = new Float32Array(SM), sh = new Float32Array(SM), svx = new Float32Array(SM),
     svy = new Float32Array(SM), svh = new Float32Array(SM), st = new Float32Array(SM), sl = new Float32Array(SM), ss = new Float32Array(SM), sg = new Float32Array(SM),
-    sk = new Uint8Array(SM), sa = new Float32Array(SM), sd = new Uint8Array(SM), sq = new Uint8Array(SM);
+    sk = new Uint8Array(SM), sa = new Float32Array(SM), sd = new Uint8Array(SM), sq = new Uint8Array(SM),
+    sax = new Float32Array(SM), say = new Float32Array(SM);   // its share of the moving air (m/s: view/airdrift.js)
   let sN = 0;
   function puff(x, y, h, vx, vy, vh, life, size, grow = 1, tint = 0, alpha = 1, kind = KIND.shot) {
     let i = sN < SM ? sN++ : -1;
     if (i < 0) { let o = 0; for (let k = 1; k < SM; k++) if (st[k] / sl[k] > st[o] / sl[o]) o = k; i = o; }   // full: the oldest goes
     sx[i] = x; sy[i] = y; sh[i] = h; svx[i] = vx; svy[i] = vy; svh[i] = vh; st[i] = 0; sl[i] = life; ss[i] = size; sg[i] = grow; sk[i] = tint; sa[i] = alpha;
-    sd[i] = (R() * 8) | 0; sq[i] = kind;
+    sd[i] = (R() * 8) | 0; sq[i] = kind; sax[i] = say[i] = 0;
   }
   function kill(i) {
     const j = --sN; if (i === j) return;
     sx[i] = sx[j]; sy[i] = sy[j]; sh[i] = sh[j]; svx[i] = svx[j]; svy[i] = svy[j]; svh[i] = svh[j]; st[i] = st[j]; sl[i] = sl[j]; ss[i] = ss[j]; sg[i] = sg[j];
-    sk[i] = sk[j]; sa[i] = sa[j]; sd[i] = sd[j]; sq[i] = sq[j];
+    sk[i] = sk[j]; sa[i] = sa[j]; sd[i] = sd[j]; sq[i] = sq[j]; sax[i] = sax[j]; say[i] = say[j];
   }
   // ---- the motes (strands): position, velocity, age / life, tone, and a ring of where it was (its trail: TR samples)
   const M = S.motes, MM = M.max, TR = M.trail, mx = new Float32Array(MM), my = new Float32Array(MM), mh = new Float32Array(MM), mvx = new Float32Array(MM),
     mvy = new Float32Array(MM), mvh = new Float32Array(MM), mt = new Float32Array(MM), ml = new Float32Array(MM), mc = new Uint8Array(MM),
     tx = new Float32Array(MM * TR * 3), tn = new Uint8Array(MM), th = new Uint8Array(MM),   // trail xyz, samples in it, its head
-    mwx = new Float32Array(MM), mwy = new Float32Array(MM), mws = new Float32Array(MM), mwk = new Float32Array(MM);   // the wind where it is (m/s, speed, its tearing), a third of them a step
+    mwx = new Float32Array(MM), mwy = new Float32Array(MM), mws = new Float32Array(MM), mwk = new Float32Array(MM),   // the wind where it is (m/s, speed, its tearing), a third of them a step
+    mwax = new Float32Array(MM), mway = new Float32Array(MM);   // its share of the moving air (m/s), a third of them a step
   let mN = 0, trailT = 0, stepN = 0;
   function motes(x, y, h, ux, uy, n, speedK) {
     for (let k = 0; k < n && mN < MM; k++) {
       const i = mN++, sp = S.speed * RR(M.speed[0], M.speed[1]) * speedK, sd0 = RR(-M.side, M.side), o = RR(0, .12);
       mx[i] = x + ux * o + RR(-.03, .03); my[i] = y + uy * o + RR(-.03, .03); mh[i] = h + RR(-.03, .03);
       mvx[i] = ux * sp - uy * sd0; mvy[i] = uy * sp + ux * sd0; mvh[i] = RR(-.15, .35);
-      mt[i] = 0; ml[i] = RR(M.life[0], M.life[1]); mc[i] = R() < .55 ? 0 : 1; tn[i] = 0; th[i] = 0; mwx[i] = mwy[i] = mws[i] = 0; mwk[i] = 1;
+      mt[i] = 0; ml[i] = RR(M.life[0], M.life[1]); mc[i] = R() < .55 ? 0 : 1; tn[i] = 0; th[i] = 0; mwx[i] = mwy[i] = mws[i] = 0; mwk[i] = 1; mwax[i] = mway[i] = 0;
     }
   }
   function killMote(i) {
     const j = --mN; if (i === j) return;
     mx[i] = mx[j]; my[i] = my[j]; mh[i] = mh[j]; mvx[i] = mvx[j]; mvy[i] = mvy[j]; mvh[i] = mvh[j]; mt[i] = mt[j]; ml[i] = ml[j]; mc[i] = mc[j];
     tn[i] = tn[j]; th[i] = th[j]; tx.copyWithin(i * TR * 3, j * TR * 3, (j + 1) * TR * 3); mwx[i] = mwx[j]; mwy[i] = mwy[j]; mws[i] = mws[j]; mwk[i] = mwk[j];
+    mwax[i] = mwax[j]; mway[i] = mway[j];
   }
   // the last shot's flash (hybrid's haze is lit by hand)
   const FX = {x: 0, y: 0, h: 0, t: 0};
@@ -106,10 +114,12 @@ export function createSmoke(host) {
   }
 
   const style = () => S.style === 'hybrid' && !G.fx ? 'pixel' : S.style;   // (no HD fx: hybrid's haze can't draw)
+  const AD = createDrift(host), AK = AIRK.gun;   // the moving air (G.air)
   const PT = {size: 1, alpha: 1, emit: false}, AMB = [1, 1, 1], HC = [0, 0, 0], SC = [0, 0, 0], WA = {x: 0, y: 0, g: 0};
   return {
     SMOKE: S,
     get n() { return sN + mN; },
+    get airN() { return AD.n; },   // (velAt calls in the last step: tests)
     puff,
     // a shot's smoke at its muzzle (x, y, h), along (ux, uy) (unit): n puffs from slow and small at the muzzle to fast and
     // big at the front (sizeK, speedK: the gun's), the cylinder gap's side jets (gap), the strands' motes
@@ -145,19 +155,22 @@ export function createSmoke(host) {
       T += dt; cy = Math.cos(host.yaw); sy0 = Math.sin(host.yaw); stepN++;
       if (FX.t > 0) FX.t -= dt;
       const dr = Math.exp(-S.drag * dt), WN = S.wind, f = WN.follow;
+      const air = AD.begin(dt, AK.gain), aS = air ? AD.a(AK.smoke) : 0, aW = air ? AD.a(AK.wisp) : 0, aD = air ? AD.a(AK.dust) : 0;
       for (let i = sN - 1; i >= 0; i--) {
         let wx = 0, wy = 0, ws = 0, tear = 1;
         if (wind) { wind.at(sx[i], sy[i], WA); wx = WA.x * f; wy = WA.y * f; ws = Math.hypot(WA.x, WA.y); tear = 1 + WN.eat * ws + WN.gust * WA.g; }
         st[i] += dt * tear;   // the wind tears it up: it ages (swells, breaks up, thins) faster
         if (st[i] >= sl[i]) { kill(i); continue; }
         svx[i] = svx[i] * dr + wx * (1 - dr); svy[i] = svy[i] * dr + wy * (1 - dr); svh[i] = svh[i] * dr + S.rise / (1 + WN.flat * ws) * (1 - dr);
+        if (air) { const k = sq[i]; AD.relax(sx[i], sy[i], sh[i], sax[i], say[i], k === KIND.wisp ? aW : k === KIND.dust ? aD : aS); sax[i] = AD.x; say[i] = AD.y; }
         eddy(sx[i], sy[i], sh[i]); const e = Math.min(1, st[i] / W.ramp) * (sq[i] === KIND.wisp ? 1.3 : 1) * (1 + WN.swirl * ws);
-        sx[i] += (svx[i] + cy * EDDY.s * e) * dt; sy[i] += (svy[i] - sy0 * EDDY.s * e) * dt; sh[i] += (svh[i] + EDDY.h * e) * dt;
+        sx[i] += (svx[i] + sax[i] + cy * EDDY.s * e) * dt; sy[i] += (svy[i] + say[i] - sy0 * EDDY.s * e) * dt; sh[i] += (svh[i] + EDDY.h * e) * dt;
       }
       if (!mN) return;
       const sample = (trailT += dt) >= M.every; if (sample) trailT = 0;
-      const mr = Math.exp(-M.catch * dt);
+      const mr = Math.exp(-M.catch * dt), aM = air ? AD.a(AK.motes * 3) : 0;   // (the air: a third of them a step, as the wind)
       for (let i = mN - 1; i >= 0; i--) {
+        if (air && (i + stepN) % 3 === 0) { AD.relax(mx[i], my[i], mh[i], mwax[i], mway[i], aM); mwax[i] = AD.x; mway[i] = AD.y; }
         if (wind && (i + stepN) % 3 === 0) { wind.at(mx[i], my[i], WA); mwx[i] = WA.x * f; mwy[i] = WA.y * f; const ws = mws[i] = Math.hypot(WA.x, WA.y); mwk[i] = 1 + WN.eat * ws + WN.gust * WA.g; }
         mt[i] += dt * mwk[i];
         if (mt[i] >= ml[i]) { killMote(i); continue; }
@@ -165,7 +178,7 @@ export function createSmoke(host) {
         // light: the wind takes them a little quicker than the puffs (the jet's push dies the same way)
         mvx[i] = mvx[i] * mr + mwx[i] * (1 - mr); mvy[i] = mvy[i] * mr + mwy[i] * (1 - mr); mvh[i] = mvh[i] * dr + M.rise / (1 + WN.flat * mws[i]) * (1 - dr);
         eddy(mx[i], my[i], mh[i]); const e = Math.min(1, mt[i] / W.ramp) * M.swirl * (1 + WN.swirl * mws[i]);
-        mx[i] += (mvx[i] + cy * EDDY.s * e) * dt; my[i] += (mvy[i] - sy0 * EDDY.s * e) * dt; mh[i] += (mvh[i] + EDDY.h * e) * dt;
+        mx[i] += (mvx[i] + mwax[i] + cy * EDDY.s * e) * dt; my[i] += (mvy[i] + mway[i] - sy0 * EDDY.s * e) * dt; mh[i] += (mvh[i] + EDDY.h * e) * dt;
       }
     },
     // the world's part (pixel, hybrid, strands): the puffs (render/puffs.js), wisps as points, hybrid's haze, the motes
