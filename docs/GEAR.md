@@ -71,17 +71,23 @@ in the middle of what the panel leaves: drag to spin him, right-drag to move, th
 the panel, Tab the next tab, P saves a photo, Esc (or Shift+Tab) back to the game: the camera, zoom and yaw come back as
 they were. "the world" as the backdrop shows him where he stands instead, dimmed round him.
 
-- **Look.** The loadout; the studio's light (dawn, day, dusk, night: the world clock's preview, nothing changes in the
-  game), his pose (the live hero's emotes), the backdrop and the stage, turn 45 degrees, spin; a piece in each slot
-  (through `features/gear.js choose`: shown at once, worn when you go back to the game; in co-op the server is asked then);
-  test paint on any zone of the model (a material, a picked colour, or hidden) and the duster tail's colour; and the
-  **piece tuner**: pick a piece with shapes, pick a shape, and move, turn and size it on sliders (drawn as you drag, a
-  dress at most every 50 ms). "Copy code" puts the piece's `add` list on the clipboard as content/gear.js lines (and in
-  the console): paste it over the piece's own to keep it. Double-click a slider: back as authored.
+The UI stands round the scene: the TOP bar (the title, the loadout, the tabs, the keys, back to the game), EQUIPMENT on the
+left (a card a slot with what he wears there, its colours as a swatch, x takes it off; Random, Undress; the set's weight,
+armor and speed as bars), the tab on the right, and the SCENE bar at the bottom (backdrop and stage swatches, the light:
+now, dawn, day, dusk, night as the clock's preview; his pose: the live hero's emotes; turn 45 degrees, spin, frame, photo).
+The camera frames him in the middle of what the panes leave, at the zoom where he is about half its height. The tabs:
+
+- **Outfit.** The chosen slot's pieces as cards (their colours, weight, armor; a click wears it: through
+  `features/gear.js choose`, shown at once, worn when you go back to the game; in co-op the server is asked then), the piece
+  under the pointer in detail (what it does now, what it will do later).
+- **Paint.** The model's zones and the duster tail; a palette (every material, a picked colour, off) painted on the chosen one.
+- **Tuner.** Pick a piece with shapes, pick a shape, and move, turn and size it on sliders (drawn as you drag, a dress at
+  most every 50 ms). "Copy code" puts the piece's `add` list on the clipboard as content/gear.js lines (and in the console):
+  paste it over the piece's own to keep it. Double-click a slider: back as authored.
 - **Stats.** Sliders as modifier notes under the source `'wardrobe'`: move speed, damage taken, gun damage, reload, shot gap,
   melee, crit chance / damage, the brutes' damage, the lantern.
 - **Items.** The run's items (a copy more or less) and augments (on / off), through game/stats.js. A run starts empty.
-- **Outfits.** All of it (loadout, gear, paint, tuned pieces, stats, items, augments) saved under a name and worn again in
+- **Saved.** All of it (loadout, gear, paint, tuned pieces, stats, items, augments) saved under a name and worn again in
   one click; "Copy link" gives the gear as `?gear=` and `?set=`.
 
 The paint and tuned pieces are the look only: `features/gear.js preview({swap, extra, key, want})` draws the set (as chosen,
