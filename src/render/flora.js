@@ -233,17 +233,21 @@ export function createFlora(G) {
   const bladeMat = raw(BLADE_VS, BLADE_FS, {...cutU(U), uRes: res, uZoom: zoom, uRamp: ramps, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uAutumn: U.autumn, uPal: palU}, {side: THREE.DoubleSide});
 
   const groups = [];
-  // a shape's group: its base geometry's attributes + the instance buffer; kind 'mesh' | 'blade'; o.casts: a shadow draw too
+  // a shape's group: its base geometry's attributes + the instance buffer; kind 'mesh' | 'blade'; o.casts: a shadow draw too; o.cull:
+  // frustum culled as a whole (a sphere round its instances, o.pad m past their roots: the shape's reach; for groups that never sway
+  // and sit together, world/decor3d.js's per-cell groups; worked out on change in commit)
   function shape(key, geo, kind, o = {}) {
     let g = groups.find(q => q.key === key && q.kind === kind); if (g) return g;
     const ig = new THREE.InstancedBufferGeometry();
     for (const [name, a] of Object.entries(geo.attributes)) ig.setAttribute(name, a);
     if (geo.index) ig.setIndex(geo.index);
     const cap = 16, data = new Float32Array(cap * STRIDE);
-    g = {key, kind, geo: ig, cap, data, ib: null, n: 0, dirty: true, items: [], gm: null, sm: null};
+    g = {key, kind, geo: ig, cap, data, ib: null, n: 0, dirty: true, items: [], gm: null, sm: null, pad: o.cull ? o.pad || 1 : 0};
+    if (g.pad) ig.boundingSphere = new THREE.Sphere();
     bind(g);
     g.gm = new THREE.Mesh(ig, kind === 'mesh' ? meshMat : bladeMat); g.gm.frustumCulled = false; g.gm.matrixAutoUpdate = false; G.gScene.add(g.gm);
     if (kind === 'mesh' && o.casts) { g.sm = new THREE.Mesh(ig, shadowMat); g.sm.frustumCulled = false; g.sm.matrixAutoUpdate = false; G.sScene.add(g.sm); }
+    if (g.pad) { g.gm.frustumCulled = true; if (g.sm) g.sm.frustumCulled = true; }
     ig.instanceCount = 0; g.gm.visible = false; if (g.sm) g.sm.visible = false;
     groups.push(g); return g;
   }
@@ -279,9 +283,14 @@ export function createFlora(G) {
     res.value.set(G.VW, G.VH); zoom.value = G.view.zoom || 1;
     for (const g of groups) {
       g.geo.instanceCount = g.n; g.gm.visible = g.n > 0; if (g.sm) g.sm.visible = g.n > 0;
-      if (g.dirty && g.n) { const r = g.ib.updateRanges; while (r.length) r.pop(); g.range.count = g.n * STRIDE; r.push(g.range); g.ib.needsUpdate = true; }   // (one kept range object: gfx.js setRange)
+      if (g.dirty && g.n) { const r = g.ib.updateRanges; while (r.length) r.pop(); g.range.count = g.n * STRIDE; r.push(g.range); g.ib.needsUpdate = true; if (g.pad) bound(g); }   // (one kept range object: gfx.js setRange)
       g.dirty = false;
     }
+  }
+  function bound(g) {   // (o.cull: the sphere round its instances' roots, + pad x the largest scale)
+    const D = g.data; let x0 = 1e9, y0 = 1e9, z0 = 1e9, x1 = -1e9, y1 = -1e9, z1 = -1e9, sc = 0;
+    for (let i = 0; i < g.n; i++) { const o = i * STRIDE; x0 = Math.min(x0, D[o]); x1 = Math.max(x1, D[o]); y0 = Math.min(y0, D[o + 1]); y1 = Math.max(y1, D[o + 1]); z0 = Math.min(z0, D[o + 2]); z1 = Math.max(z1, D[o + 2]); sc = Math.max(sc, D[o + 4]); }
+    const S = g.geo.boundingSphere; S.center.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); S.radius = Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2 + g.pad * sc;
   }
   function dispose() {
     for (const g of groups) {   // (the shape's own attributes and index belong to its cached geometry: only the instance buffer goes)

@@ -12,6 +12,8 @@ export const PAINTS = {
   bracket:     {all: ['#dcb87c', '#b88e54', '#88623a', '#4c341e']},                                                       // shelf fungus on old wood
   needles:     {all: ['#a47c52', '#84643f', '#62482f', '#38291c'], frost: ['#8a7a6a', '#6c5e52', '#504640', '#302a26']},   // spruce needle duff: ant hills, litter
   blueberry:   {all: ['#6478d8', '#4254ae', '#2e3880', '#1a1e48']},
+  lingon:      {all: ['#f0605a', '#cc2e34', '#8c1a26', '#4a0e16']},                                                       // the lingonberry's berries
+  lingonleaf:  {all: ['#7ea05a', '#4e7a3e', '#33572e', '#1a301c'], frost: ['#6a8a5a', '#46663e', '#30482e', '#18281a']},   // its evergreen leaves: darker, glossier than the biome's leaf
   lichen:      {all: ['#ccd4b4', '#acb898', '#889474', '#505a44']},                                                       // pale reindeer lichen, crust on rock
   deadwood:    {all: ['#a89e8e', '#898072', '#6a6258', '#3e3934']},                                                       // weathered grey wood, bark long gone
   rotwood:     {all: ['#94704c', '#74543a', '#563c2a', '#32221a']},                                                       // soft brown rot: a hollow stump's inside, crumbs, a fresh break
