@@ -901,7 +901,7 @@ function forestRuins(q, ctx) {
     const [bx0, by0, bx1, by1] = FO.cave.slot.reach, hw = CM.w / 2, i0 = Math.max(0, Math.floor((bx0 - X0) * PPM)), i1 = Math.min(WPX - 1, Math.ceil((bx1 - X0) * PPM));
     for (let y = Math.max(0, Math.floor((by0 - Y0) * PPM)); y <= Math.min(HPX - 1, Math.ceil((by1 - Y0) * PPM)); y++) for (let x = i0; x <= i1; x++) {
       const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM, dx = mx - CM.x, dy = my - CM.y, s = dx * CM.ux + dy * CM.uy, a = Math.abs(-dx * CM.uy + dy * CM.ux);
-      if (a < hw + .05 && s > -.05 && s < CM.len + .05) caveFloor(G, S, x, y, mx, my, Math.max(a - hw, -s, s - CM.len));
+      if (a < hw + .05 && s > -.05 && s < CM.brow) caveFloor(G, S, x, y, mx, my, Math.max(a - hw, -s));   // (past the brow: the overhang's own ground, as the woods')
     }
   }
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
@@ -911,7 +911,8 @@ const BLACK = hex('#000000');
 // THE CAVE's floor (world/caves.js, world/cave3d.js): packed earth and grit in the dark, bare rock showing through in sheets, darker
 // and stonier toward the walls (d: m from the wall, < 0 in the open), loose stones; ctx.cave its plan, X0 / Y0 the canvas's origin
 function caveFloor(G, S, x, y, mx, my, d) {
-  if (d > .06) { G.c(x, y, BLACK); return; }   // (under the rock: black, so the floor ends on the walls' line where a wall isn't drawn)
+  if (d > .06) { if (d < .4 && hsh(x, y, 68) < 1.2 - d * 3) G.p(x, y, S.rock, 3); else G.c(x, y, BLACK); return; }   // (under the rock: its foot, darkest rock
+  // thinning out, then black, so the floor ends on the walls' line where a wall isn't drawn)
   const n = fbm(mx * .32, my * .32, 61), w = d > -.3 ? 2 : d > -.75 ? 1 : 0, h = hsh(x, y, 62);
   if (n + (vn(mx * 2.2, my * 2.2, 63) - .5) * .12 > .6 - w * .04) { G.p(x, y, S.rock, Math.min(3, (n > .7 ? 1 : 2) + (w > 1 ? 1 : 0))); return; }   // rock through the floor
   if (h < .05 + w * .05) { G.p(x, y, S.rock, 1 + (hsh(x, y, 64) * 3 | 0)); return; }   // grit
