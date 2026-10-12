@@ -10,6 +10,10 @@
 // (pack.store('woodcut')): a reload finds the stumps where they were.
 //   Sim: the trees' chop counts, the felled set, the stump props, the logs (the feature's own list, not props), the regrowth.
 //   View: the falling trees (copies of their own models: world.mesh {sway, autumn}), the stumps' and logs' meshes, the chips.
+// CO-OP (features/coop.js, docs/MULTIPLAYER.md): a tree of the seeded forest (it has a fid) is a shared tree. The last bite ASKS the
+// server (coop.act('fell')) instead of felling it; when the server says it fell (to everyone, a late joiner too) coop hands it to
+// fellShared: the same fall, stump and logs on every client, the XP to who felled it. Shared trees don't grow back while in co-op
+// (the server keeps them felled). Without co-op nothing changes.
 // Only in the sandbox on the ruins biome (the Proving Grounds and the West Downs: the persistent world), with a live loadout
 // (the cowboys hold the axe: view/heldtool.js). ?woodcut=0 off.
 // OWNS: the chop counts, the felled set and its saved part, the stump props, the logs, their meshes, the falls, the chips.
@@ -73,6 +77,8 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- the sim's state
   const hp = new Map();       // tree -> blows left (a fresh tree has none: its full count)
+  const asked = new Map();    // co-op: a shared tree whose fell was asked of the server -> when (clockT): asked again after 3 s (a refusal)
+  const shared = p => typeof p.fid === 'string' && !!host.feature('coop')?.online;
   const felled = new Map();   // tree -> {key, at (env.t it grows back), stump (its prop)}
   const falls = [];           // {p, I, t, dx, dy (the way it falls), landed}
   const logs = [];            // {x, y, h, vx, vy, vh, t, rest, yaw, spin, dead}
@@ -218,15 +224,32 @@ export async function create(host) {
     host.events.push({type: 'tree.chop', x, y, h, who: p, k: clamp(.35 + .65 * (1 - Math.max(0, left) / I.hp), .1, 1), left: Math.max(0, left), dx: ux, dy: uy});
     host.hitstop(.04); host.shake(1.5, .08);
     if (left > 1e-6) { hp.set(p, left); return; }
+    if (shared(p)) {   // CO-OP: the server fells it, for everyone (fellShared)
+      if (!(clockT - (asked.get(p) ?? -9) < 3)) { asked.set(p, clockT); hp.set(p, 0); host.feature('coop').act('fell', p); }
+      return;
+    }
     hp.delete(p); fell(p, I, ux, uy);
   }
-  function fell(p, I, ux, uy) {
+  function fell(p, I, ux, uy, xp = true, fall = true) {
     const at = (host.env?.t ?? 0) + TUNE.regrow.hours;
     fellNow(p, I, at);
     const s = store(); if (s) { s.felled[keyOf(p)] = at; pack()?.dirty(); }
-    falls.push({p, I, t: 0, dx: ux, dy: uy, landed: false});
-    host.events.push({type: 'tree.fell', x: p.x, y: p.y, who: p, vx: ux, vy: uy, species: I.species, scale: I.s});
-    pack()?.gain('woodcutting', Math.round(XP.fell * I.def.xp * I.s), {x: p.x, y: p.y, h: (p.z || 0) + 2.6});
+    if (fall) {
+      falls.push({p, I, t: 0, dx: ux, dy: uy, landed: false});
+      host.events.push({type: 'tree.fell', x: p.x, y: p.y, who: p, vx: ux, vy: uy, species: I.species, scale: I.s});
+    }
+    if (xp) pack()?.gain('woodcutting', Math.round(XP.fell * I.def.xp * I.s), {x: p.x, y: p.y, h: (p.z || 0) + 2.6});
+  }
+  // CO-OP: the server says a shared tree fell (features/coop.js, in its update: a sim step). by: who felled it (here: his XP); late: it
+  // was felled before we joined (a stump, no fall). It falls away from the one who felled it if we see him, else away from us.
+  // -> false when it isn't a tree the axe knows (coop removes it then)
+  function fellShared(p, mine, late, fx, fy) {
+    if (felled.has(p)) return true;
+    const I = infoOf(p); if (!I) return false;
+    asked.delete(p); hp.delete(p);
+    const P = host.player, ox = fx ?? P.x, oy = fy ?? P.y, d = Math.hypot(p.x - ox, p.y - oy) || 1;
+    fell(p, I, (p.x - ox) / d, (p.y - oy) / d, mine && !late, !late);
+    return true;
   }
   const crownMid = I => { const C = I.pose.crown; return C ? ((C.y0 + C.y1) / 2) * I.s : 3 * I.s; };
   function stepFalls(dt) {
@@ -276,7 +299,7 @@ export async function create(host) {
     if ((tick += dt) < 1) return; tick = 0;
     if (trees.length !== appliedN) apply();
     const P = host.player, t = host.env?.t ?? 0;
-    for (const [p, f] of felled) if (t >= f.at && Math.hypot(p.x - P.x, p.y - P.y) > TUNE.regrow.far && !falls.some(q => q.p === p)) grow(p);
+    for (const [p, f] of felled) if (t >= f.at && !shared(p) && Math.hypot(p.x - P.x, p.y - P.y) > TUNE.regrow.far && !falls.some(q => q.p === p)) grow(p);
   }
 
   // ---------------------------------------------------------------- the view: falls, stumps, logs, chips
@@ -395,6 +418,7 @@ export async function create(host) {
   const F = {
     name: 'woodcut', label: 'Woodcutting', on: ON,
     get felled() { return felled; }, get logs() { return logs; }, infoOf, aimPoint,   // (aimPoint: tests)
+    fellShared,   // (co-op: features/coop.js)
     update(dt, evs) {
       clockT += dt;
       const on = active();

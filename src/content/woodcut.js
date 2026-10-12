@@ -27,4 +27,5 @@ export const TREES = {
   birch: {hp: 4, tier: 1, logs: 2, xp: .8},
   aspen: {hp: 4, tier: 1, logs: 2, xp: .8},
   rowan: {hp: 4, tier: 1, logs: 2, xp: .8},
+  pine: {hp: 5, tier: 1, logs: 3, xp: .9},   // (the seeded forest's conifers: world/forest.js)
 };
