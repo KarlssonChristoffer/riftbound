@@ -74,7 +74,8 @@ export const TUNE = {
   rocks: {big: 3, small: 3},
   // the SMALL THINGS (content/recipes.js, drawn by world/decor3d.js): chances per 2 m cell (DECOR below), x how well the spot suits
   decor: {cell: 2, jitter: .4, stump: .045, log: .022, agaric: .028, chant: .012, berry: .1, lingon: .07, berryS: 1.6, variants: 3, settle: [3, 5],
-    windthrow: {cell: 4, p: .14, near: [1, 7], len: [3, 4, 5]}},   // (a rotvalta: on the thin soil within near m of bare rock, ~1 per 400 m2 there)
+    windthrow: {cell: 4, p: .45, lone: .006, near: [1, 7], len: [3, 4, 5]},   // (rotvältor: p in the storm's lane, lone elsewhere on the thin soil within near m of rock)
+    storm: {half: [22, 34], band: 7, tries: 10, log: 3, stump: 2}},   // (the gale's lane: half its length, its half width (m); more logs / snapped stumps in it)
 };
 
 // a seeded generator of its own (mulberry32, as core/rng.js: kept here so node needs nothing else)
@@ -412,7 +413,8 @@ export function forestPlan(seed) {
 //   fly agaric  groups of 1-3 under birch and pine in half shade;  chanterelles  a ring in mossy pine shade, often by a stump or log
 //   blueberry the floor's filler under pines on the drier ground and the esker's slopes; never by the water or in the clearing
 //   lingonberry on the drier, sunnier, poorer ground: open pine, the esker, the thin soil by rock (blueberries and lingon 1.6x: berryS)
-//   windthrow a tipped spruce, its root plate on edge, near bare rock (thin soil); grey (old) in deep shade and by the water. Solid
+//   windthrow a tipped spruce, its root plate on edge: in the storm's lane (F.storm), all fallen downwind and fresh; elsewhere the odd
+//             old one near bare rock (thin soil). Solid
 // The watcher is its own creature (features/watcher.js); the ant hill is left out
 function decorate(F, slope, K) {
   const T = TUNE.decor, out = F.decor = [], C = 4, idx = new Map();   // (F.decorSolid: below)
@@ -456,20 +458,44 @@ function decorate(F, slope, K) {
   const W = T.windthrow, solid = F.decorSolid = [], clear = F.decorClear = [], earth = F.decorEarth = [];   // (F.decorClear: [x, y, r] where the soft scatter goes, layout.js; F.decorEarth: [x, y, rx, rz, yaw] ellipses of bare earth, biomes.js)
   const WT = RECIPES.windthrow, WT_DEF = Object.fromEntries(Object.entries(WT.params).map(([k, a]) => [k, a[0]]));
   const rockD = (x, y) => { let d = K.boulders ? Math.hypot(x - K.boulders.x, y - K.boulders.y) - K.boulders.r : 1e9; for (const o of F.outcrops) d = Math.min(d, Math.hypot(o.x - x, o.y - y) - o.r); return d; };
+  // THE STORM (one a world, its own generator): a gale from the prevailing west / south-west (+- 25 deg) came through and felled a lane
+  // of trees, so the windthrows tell it: most of them in a band along its track, every one fallen downwind (the plate on the windward
+  // side, the trunk away from it), with more snapped stumps and fresh logs lying the same way among them. Elsewhere only the odd old
+  // one, fallen in some earlier gale from the same side. F.storm = {x, y, yaw, half, band}: its middle, the way it blew (forest.js
+  // yaw: from +x toward +y; -y is north), half its length, half its width. Its middle: the best of a few draws (the most open ground)
+  const ST = T.storm, Rs = rng(mix(F.seed, 7000)), sYaw = -.55 + (Rs() - .5) * .9, sc0 = Math.cos(sYaw), ss0 = Math.sin(sYaw), half = ST.half[0] + Rs() * (ST.half[1] - ST.half[0]);
+  let best = null;
+  for (let t = 0; t < ST.tries; t++) {
+    const mx = RECT.x0 + 15 + Rs() * (RECT.x1 - RECT.x0 - 30), my = RECT.y0 + 15 + Rs() * (RECT.y1 - RECT.y0 - 30); let n = 0;
+    for (let u = -half; u <= half; u += 4) for (let w = -ST.band; w <= ST.band; w += 3.5) { const x = mx + u * sc0 - w * ss0, y = my + u * ss0 + w * sc0; if (ok(x, y, 1.5) && K.clearD(x, y) > 3 && !K.bare(x, y)) n++; }
+    if (!best || n > best.n) best = {n, x: mx, y: my};
+  }
+  const storm = F.storm = {x: +best.x.toFixed(2), y: +best.y.toFixed(2), yaw: +sYaw.toFixed(3), half: +half.toFixed(1), band: ST.band};
+  const inStorm = (x, y) => { const dx = x - storm.x, dy = y - storm.y, u = dx * sc0 + dy * ss0, w = -dx * ss0 + dy * sc0, e = Math.abs(u) / half;   // (its ends taper)
+    return e < 1 && Math.abs(w) < ST.band * (1 - e * e * .6) * (.75 + vnoise(x * .15, y * .15, F.seed + 71) * .5); };
   for (let ci = 0; ci < F.chunks.length; ci++) {
     const [cx, cy] = F.chunks[ci], R = rng(mix(F.seed, 6000 + cx, 6000 + cy)), n = Math.round(CHUNK / W.cell);
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-      const x = cx * CHUNK + (i + .2 + R() * .6) * W.cell, y = cy * CHUNK + (j + .2 + R() * .6) * W.cell, roll = R(), yaw = R() * Math.PI * 2, v = Math.floor(R() * T.variants), sc = .9 + R() * .2;
-      const rd = rockD(x, y); if (roll > W.p || rd < W.near[0] || rd > W.near[1] || !ok(x, y, 1.5) || K.clearD(x, y) < 3 || K.bare(x, y)) continue;
-      const len = W.len[v] * sc, c = Math.cos(yaw), sn = Math.sin(yaw), at = (lx, lz) => [x + (lx * c - lz * sn) * sc, y + (lx * sn + lz * c) * sc];
-      let fit = room(x + c * len / 2, y + sn * len / 2, len / 2 + .6);
-      for (let lx = -1.4; fit && lx <= W.len[v]; lx += .7) { const [px, py] = at(lx, 0); fit = ok(px, py, 1) && env(px, py).dTrunk > .7 && Math.abs(F.height(px, py) - F.height(x, y)) < .6; }
-      for (const lz of [-1, 1]) { const [px, py] = at(-.6, lz); fit = fit && ok(px, py, 1) && env(px, py).dTrunk > .6; }
+      const x = cx * CHUNK + (i + .2 + R() * .6) * W.cell, y = cy * CHUNK + (j + .2 + R() * .6) * W.cell, roll = R(), turn = R(), v0 = Math.floor(R() * T.variants), sc = .9 + R() * .2;
+      const lane = inStorm(x, y); if (!ok(x, y, 1.5) || K.clearD(x, y) < 3 || K.bare(x, y)) continue;
+      if (lane ? roll > W.p : roll > W.lone || rockD(x, y) < W.near[0] || rockD(x, y) > W.near[1]) continue;
+      // downwind: the lane's within +-14 deg of the gale, an old lone one +-34; in the lane a few turns and a shorter tree are tried
+      // (a fallen tree lies where it found room between the standing ones)
+      const fits = (yaw, v) => {
+        const len = W.len[v] * sc, c = Math.cos(yaw), sn = Math.sin(yaw), at = (lx, lz) => [x + (lx * c - lz * sn) * sc, y + (lx * sn + lz * c) * sc];
+        let fit = room(x + c * len / 2, y + sn * len / 2, len / 2 + .6);
+        for (let lx = -1.4; fit && lx <= W.len[v]; lx += .7) { const [px, py] = at(lx, 0); fit = ok(px, py, 1) && env(px, py).dTrunk > .7 && Math.abs(F.height(px, py) - F.height(x, y)) < .6; }
+        for (const lz of [-1, 1]) { const [px, py] = at(-.6, lz); fit = fit && ok(px, py, 1) && env(px, py).dTrunk > .6; }
+        return fit;
+      };
+      let yaw = sYaw + (turn - .5) * (lane ? .5 : 1.2), v = v0, fit = fits(yaw, v);
+      if (lane) for (const [dy, dv] of [[.22, 0], [-.22, 0], [0, -1], [.22, -1], [-.22, -1], [0, -2]]) { if (fit) break; const y2 = sYaw + Math.max(-.3, Math.min(.3, (turn - .5) * .5 + dy)), v2 = v0 + dv; if (v2 >= 0 && fits(y2, v2)) { yaw = y2; v = v2; fit = true; } }
       if (!fit) continue;
+      const len = W.len[v] * sc, c = Math.cos(yaw), sn = Math.sin(yaw), at = (lx, lz) => [x + (lx * c - lz * sn) * sc, y + (lx * sn + lz * c) * sc];
       placed.push([x + c * len / 2, y + sn * len / 2, len / 2 + .6]);
       // the hole it tore out (the recipe's ground(p): ellipses in its frame): bare earth (F.decorEarth, the ground painter, biomes.js
       // forestRuins), nothing grows in it (F.decorClear, layout.js: no grass tufts or ferns; no decor here)
-      const params = {len: W.len[v], old: env(x, y).shade > .45 || waterD(F, x, y) < 5 ? 1 : 0};
+      const params = {len: W.len[v], old: lane ? 0 : 1};   // (the storm's are fresh, a lone one is from an older gale: grey)
       for (const e of WT.ground({...WT_DEF, ...params})) {
         const [ex, ey] = at(e.x, e.z), rx = e.rx * sc, rz = e.rz * sc;
         earth.push([+ex.toFixed(2), +ey.toFixed(2), +rx.toFixed(2), +rz.toFixed(2), +yaw.toFixed(3)]);
@@ -490,12 +516,13 @@ function decorate(F, slope, K) {
       const wd = waterD(F, x, y), old = e.shade > .4 || wd < 5, nearPine = e.dPine < 5, sh = e.shade;
       // the kinds in turn on one roll: a spot gets at most one
       let acc = 0;
-      if (roll < (acc += T.stump * (nearPine ? .5 + sh : .25 * sh))) { if (room(x, y, .5)) { put('stump', x, y, .5, R, {style: -1}, ci); if (pick < .25) ringBy(x, y, R, ci); } continue; }
-      if (roll < (acc += T.log * (.3 + sh))) {
-        const yaw = R() * Math.PI, L = 1.25, hx = Math.cos(yaw) * L, hy = Math.sin(yaw) * L;   // (lying flat: both ends on the same ground, clear of trunks)
+      const lane = inStorm(x, y), sk = lane ? ST.stump : 1;   // (the storm's lane: more snapped stumps and fresh logs, fallen its way)
+      if (roll < (acc += T.stump * sk * (nearPine ? .5 + sh : .25 * sh))) { if (room(x, y, .5)) { put('stump', x, y, .5, R, {style: -1}, ci); if (pick < .25) ringBy(x, y, R, ci); } continue; }
+      if (roll < (acc += T.log * (lane ? ST.log : 1) * (.3 + sh))) {
+        const y0 = R() * Math.PI, yaw = lane ? sYaw + (y0 / Math.PI - .5) * .5 : y0, L = 1.25, hx = Math.cos(yaw) * L, hy = Math.sin(yaw) * L;   // (lying flat: both ends on the same ground, clear of trunks)
         if (!ok(x + hx, y + hy, 1) || !ok(x - hx, y - hy, 1) || env(x + hx, y + hy).dTrunk < .6 || env(x - hx, y - hy).dTrunk < .6 || !room(x, y, 1.3) ||
           Math.abs(F.height(x + hx, y + hy) - F.height(x - hx, y - hy)) > .35) continue;
-        put('log', x, y, 1.3, R, {old: old && K.clearD(x, y) > 10 ? 1 : 0}, ci); out[out.length - 1][3].yaw = +yaw.toFixed(3);
+        put('log', x, y, 1.3, R, {old: !lane && old && K.clearD(x, y) > 10 ? 1 : 0}, ci); out[out.length - 1][3].yaw = +yaw.toFixed(3);
         if (pick < .5) stumpBy(x + Math.cos(yaw) * 2.1, y + Math.sin(yaw) * 2.1, R, ci);   // (its stump by the root end)
         else if (pick < .7) ringBy(x, y, R, ci);
         continue;

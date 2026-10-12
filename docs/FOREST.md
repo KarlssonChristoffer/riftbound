@@ -112,8 +112,11 @@ drawn by `world/decor3d.js` through the world's instanced flora (`render/flora.j
 - LINGONBERRIES (`content/recipes.js` lingonberry: low evergreen sprigs, red berries) on the drier, sunnier, poorer ground: open
   pine, the esker, the thin soil within 6 m of rock; they only take spots the others left, so the rest of the floor is unchanged.
 - WINDTHROWS (rotvälta): a tipped spruce, its root plate on edge (~2 m) over the pit it tore out, the trunk lying away from it,
-  on the thin soil 1-7 m from bare rock (outcrops, blocks, crags, the boulder field), placed first as they need the most room;
-  grey (old) in deep shade and by the water. Solid: `F.decorSolid` is a row of round colliders across the plate ('rootplate',
+  telling a STORM (`F.storm`, one a world, its own generator): a gale from the prevailing west / south-west
+  felled a lane ~50 x 14 m (placed where the ground is most open), so most windthrows (4-9) lie in that lane, fresh, every one
+  fallen downwind (plate on the windward side, trunk away from it, within +-14 deg), with more snapped stumps and fresh logs
+  lying the same way among them. Elsewhere only the odd old, grey one (0-1) on the thin soil near bare rock. Placed first, as
+  they need the most room. Solid: `F.decorSolid` is a row of round colliders across the plate ('rootplate',
   1.5 m high: the plate sits half in the ground) and along the trunk ('windlog', .9 m), added by `layout.js` and joined like a
   field wall's stones (`collide.js`). The hole it tore out is bare: the recipe's `ground(p)` ellipses, turned and scaled with the
   tree (`F.decorEarth`), are painted as earth in the forest ground (`biomes.js` forestRuins, darker in the middle, so the hole
