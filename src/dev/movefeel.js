@@ -7,7 +7,8 @@
 //   Walk / Run / Sprint stride  player.stride.walk / .run / .sprint x   (the clip's stride as the legs advance: > 1 longer
 //                               strides, slower legs at the same speed, the feet slide a little; GAIT.stride)
 // The readout: his speed, the gait, and the legs' cadence (steps a minute) next to the cadence the clip was made at (its own
-// fps over its frames: what the animation looks right at). Presets set every slider at once; Shift+F7 (or the A/B button)
+// fps over its frames: what the animation looks right at), and the footsteps the sound plays a minute (they fire on the clip's contact
+// frames, so they follow the legs). Presets set every slider at once (PageUp / PageDown cycle them); Shift+F7 (or the A/B button)
 // flips between what's set and the game as authored, to feel the two back to back.
 // They hold in DEV MODE only, like the gun feel panel's (dev/gunfeel.js). Remembered on this machine ('rb.movefeel').
 // It is a FEATURE the boot puts at the end of the list (main.js; dev/: nothing in the game imports it).
@@ -30,13 +31,19 @@ const KNOBS = [
 ];
 const AUTHORED = Object.fromEntries(KNOBS.map(n => [n.k, n.base]));
 // the presets: what each one tries (the label's title)
+// (stride for the clip's own pace at speed v: walk v / 1.15, run v / 3.3, sprint v / 4.3)
 const PRESETS = [
   {name: 'As made', title: 'the game as authored', v: {}},
-  {name: 'Slower', title: "the speeds the run / sprint clips were animated at: the legs look right, he's slower", v: {walk: 1.2, run: 3.4, sprint: 5.2}},
+  {name: 'Slower', title: "near the speeds the clips were animated at: the legs look right, he's slower", v: {walk: 1.2, run: 3.4, sprint: 5.2}},
   {name: 'Long stride', title: 'the speeds as now, the strides stretched so the legs move at the clips\' pace (the feet slide)',
-    v: {swalk: 1.5, srun: 1.4, ssprint: 1.6}},
+    v: {swalk: 1.2, srun: 1.4, ssprint: 1.65}},
   {name: 'Weighty', title: 'the speeds as now, but he takes a moment to get going and to stop', v: {accel: .35, decel: .5}},
   {name: 'Blend', title: 'a bit slower, a bit longer strides, a bit of weight', v: {walk: 1.25, run: 3.9, sprint: 6, swalk: 1.15, srun: 1.15, ssprint: 1.3, accel: .5, decel: .6}},
+  {name: 'Jog', title: 'a relaxed exploring pace: slow run, gentle start and stop', v: {walk: 1.15, run: 3, sprint: 5, ssprint: 1.15, accel: .45, decel: .5}},
+  {name: 'Brisk', title: 'a little slower than now, legs at a natural pace, still quick to react', v: {walk: 1.3, run: 4, sprint: 6.2, swalk: 1.1, srun: 1.2, ssprint: 1.4, accel: .7, decel: .8}},
+  {name: 'Heavy boots', title: 'a lumbering cowboy: slow to build up and slow to stop', v: {walk: 1.1, run: 3.5, sprint: 5.4, srun: 1.05, ssprint: 1.2, accel: .22, decel: .3}},
+  {name: 'Sprint burst', title: 'a calm run at the clip\'s pace, and a sprint that is a real burst you build into', v: {run: 3.4, sprint: 6.6, ssprint: 1.5, accel: .6, decel: .7}},
+  {name: 'Nimble', title: 'fast and very responsive, with long natural strides', v: {walk: 1.3, run: 4.3, sprint: 6.6, swalk: 1.1, srun: 1.3, ssprint: 1.5, accel: 1.2, decel: 1.2}},
 ];
 const CSS = `
 #movefeel { position: fixed; left: 10px; top: 64px; z-index: 15; width: 270px; padding: 8px 8px 6px; background: rgba(14, 16, 15, .93);
@@ -76,7 +83,7 @@ export function createMoveFeel({host, atlas}) {
   const root = document.createElement('div'); root.id = 'movefeel'; root.className = 'hidden'; document.body.appendChild(root);
   root.addEventListener('mousedown', e => { if (e.target.tagName !== 'INPUT') e.preventDefault(); });   // (no focus but the sliders': Space stays the game's)
   root.addEventListener('keydown', e => e.target.blur?.());   // (a key on a focused slider is the game's)
-  root.innerHTML = '<header><b>MOVE FEEL</b><small>F7 · Shift+F7 A/B</small></header><div class="read"></div>';
+  root.innerHTML = '<header><b>MOVE FEEL</b><small>F7 · PgUp/PgDn preset · Shift+F7 A/B</small></header><div class="read"></div>';
   const read = root.querySelector('.read');
   const rows = KNOBS.map(n => {
     const l = document.createElement('label'); l.title = n.note || ''; l.innerHTML = `${n.label}<span></span>`;
@@ -90,13 +97,17 @@ export function createMoveFeel({host, atlas}) {
   const bar = document.createElement('div'); bar.className = 'row'; root.appendChild(bar);
   const pbtn = PRESETS.map(p => {
     const b = document.createElement('button'); b.textContent = p.name; b.title = p.title; bar.appendChild(b);
-    b.onclick = () => { Object.assign(C, AUTHORED, p.v); C.ab = false; save(); apply(); sync(); };
+    b.onclick = () => pick(PRESETS.indexOf(p));
     return {p, b};
   });
   const bar2 = document.createElement('div'); bar2.className = 'row'; root.appendChild(bar2);
   const abB = document.createElement('button'); abB.title = "flip between what's set and the game as made (Shift+F7)"; bar2.appendChild(abB);
   abB.onclick = () => flip();
   const flip = () => { C.ab = !C.ab; apply(); sync(); };
+  const current = () => PRESETS.findIndex(p => KNOBS.every(n => C[n.k] === (p.v[n.k] ?? n.base)));
+  let lastP = 0;   // (the preset cycling goes on from: the one set, else the last one picked)
+  const pick = i => { lastP = i; Object.assign(C, AUTHORED, PRESETS[i].v); C.ab = false; save(); apply(); sync(); };
+  const cycle = d => { const c = current(); pick(((c >= 0 ? c : lastP) + d + PRESETS.length) % PRESETS.length); };
 
   const f1 = (v, d = 1) => v.toFixed(d);
   // steps a minute at speed v (m/s) on a clip with stride s (m a cycle: two steps); the clip's own pace: its fps over its frames
@@ -104,11 +115,14 @@ export function createMoveFeel({host, atlas}) {
   function readout() {
     const P = host.P, CL = atlas.CLIP || {}, v = Math.hypot(P.vx, P.vy), g = P.gait, c = CL[g];
     const t = (a, b) => b > 0 ? f1(a / b, 2) + ' s' : '-';
-    let h = `speed <em>${f1(v)}</em> m/s · ${P.state === 'move' ? g : P.state}`;
+    const ci = current();
+    let h = `preset <em>${C.ab ? 'As made (A/B)' : ci >= 0 ? PRESETS[ci].name : 'custom'}</em>`;
+    h += `<br>speed <em>${f1(v)}</em> m/s · ${P.state === 'move' ? g : P.state}`;
     if (P.state === 'move' && c?.stride && c.fps) {
       const now = spm(v, c.stride * (GAIT.stride[g] ?? 1)), want = own(c), off = now / want;
       h += `<br>legs <em class="${off > 1.2 || off < .8 ? 'bad' : ''}">${now | 0}</em> steps/min · clip made for ${want | 0}`;
-    } else h += '<br>&nbsp;';
+      h += `<br>footsteps heard <em>${heard()}</em>/min`;
+    } else h += '<br>&nbsp;<br>&nbsp;';
     // what each gait's clip looks right at (its pace x its stride), and how quickly he gets going / stops now
     const at = k => CL[k]?.stride && CL[k].fps ? f1(CL[k].fps / CL[k].frames * CL[k].stride * (GAIT.stride[k] ?? 1)) : '?';
     h += `<br><small>clips look right at: walk ${at('walk')} · run ${at('run')} · sprint ${at('sprint')} m/s</small>`;
@@ -134,6 +148,15 @@ export function createMoveFeel({host, atlas}) {
     return vis;
   }
 
+  // the footsteps the sound plays (player.step, and a sprint's footfall player.land big 2: features/audio.js): their pace over the
+  // last few, to check against the legs'. Sim times of the last STEPS footfalls in a ring
+  const STEPS = 8, steps = new Float64Array(STEPS); let simT = 0, nStep = 0;
+  const heard = () => {
+    if (nStep < 3 || simT - steps[(nStep - 1) % STEPS] > .6) return '-';   // (not stepping just now)
+    const n = Math.min(nStep, STEPS) - 1, span = steps[(nStep - 1) % STEPS] - steps[(nStep - 1 - n) % STEPS];
+    return span > 0 ? (n / span * 60 | 0) : '-';
+  };
+
   let devWas = null, syncT = 0;
   const F = {
     name: 'movefeel', label: 'Move feel panel', key: 'f7', on: !!C.open,   // (key: the menu's label; onKey takes F7 first)
@@ -143,13 +166,19 @@ export function createMoveFeel({host, atlas}) {
       if (show()) sync();
       return F.on;
     },
-    onKey(k, e) {   // F7 (not Chrome's caret browsing); Shift+F7: the A/B
+    onKey(k, e) {   // F7 (not Chrome's caret browsing); Shift+F7: the A/B; PageUp / PageDown: the presets while it shows
+      if ((k === 'pagedown' || k === 'pageup') && show()) { e?.preventDefault(); cycle(k === 'pagedown' ? 1 : -1); return true; }
       if (k !== 'f7') return false;
       e?.preventDefault();
       if (e?.shiftKey) { if (host.dev) flip(); } else F.toggle();
       return true;
     },
-    update() { if (host.dev !== devWas) { devWas = host.dev; apply(); } },   // (the first step too: the remembered sliders)
+    update(dt, evs) {
+      if (host.dev !== devWas) { devWas = host.dev; apply(); }   // (the first step too: the remembered sliders)
+      if (!F.on) return;
+      simT += dt;
+      for (const e of evs) if (e.type === 'player.step' || (e.type === 'player.land' && e.big === 2)) steps[nStep++ % STEPS] = simT;
+    },
     frame({dt}) { if (!show()) return; if ((syncT -= dt) <= 0) { syncT = .25; sync(); } },
     hud() {
       if (!host.dev) return '';
