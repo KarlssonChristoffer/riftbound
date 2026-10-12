@@ -60,16 +60,18 @@ same whatever he wears; the effects still apply.
 ## The wardrobe screen (Shift+Tab, dev)
 
 A screen of its own for trying combinations and testing clothes (`dev/wardrobe.js`, dev mode only): Shift+Tab, or the
-menu's Game tab: Wardrobe. The game stands still (photo mode's frozen world and camera as its studio:
-`ui/photo.js toggle(true, studio)`, with a plain look: no tilt-shift, no vignette) and the character stands on a little
-STAGE, out of the world: `dev/stage.js` builds a stage (stone plinth, wooden drum, rug, meadow tuft, none) and a backdrop
-(velvet curtain, paper sweep, stone wall, night sky, open sky, or a plain dark / grey) in code (view/rigkit.js), drawn as
-pixel-art 3D like the characters, and `G.isolate(keep, bg)` (render/gfx.js) draws only his rig and the set's, on the
-backdrop's background colour (the world's layers, decals, clouds, mist, rays, particles and the cached static shadow left
-out; the backdrop casts no shadow). The set turns with the camera, so the backdrop stays behind him and the camera keeps him
-in the middle of what the panel leaves: drag to spin him, right-drag to move, the wheel zooms, R frames him again, H hides
-the panel, Tab the next tab, P saves a photo, Esc (or Shift+Tab) back to the game: the camera, zoom and yaw come back as
-they were. "the world" as the backdrop shows him where he stands instead, dimmed round him.
+menu's Game tab: Wardrobe. The game HOLDS (`core/loop.js hold(screen)`: not stepped, not drawn; the screen takes the frame
+and the keys) and the STUDIO takes the screen (`dev/studio.js`): a renderer of its own (`render/gfx.js createGfx` on a
+canvas of its own: an empty scene, no world), a fixed camera looking north, studio light (the ruins' day / dusk / night
+moods with the sun as a key light from the front left, a lamp in front when it's dark), the SET (`dev/stage.js`: a stage
+under him: stone plinth, wooden drum, rug, meadow tuft, none; a backdrop behind: velvet curtain, paper sweep, stone wall,
+night sky, open sky, plain dark / grey; built in code with view/rigkit.js, drawn as pixel-art 3D like the characters), and
+a COPY of the character: his live model (the export the live hero draws) on a body and rig of its own (view/livebody.js,
+render/rigmesh.js), dressed as the wardrobe shows him (view/dress.js), his idle or one of his clips playing, the
+gunslinger's duster tail run as the live hero runs it (a ClothRig on the sprite path's cloth, fed from the drawn pose).
+HE turns on the stage; the camera and the set never move. Drag him to turn him, right-drag to move the view, the wheel
+zooms (whole display scales), R frames him again, Space spins him, arrows / A / D turn him a step, H hides the UI, Tab the
+next tab, P saves a PNG of the scene, Esc (or Shift+Tab) back to the game, which goes on from the frame it held.
 
 The UI is pixel art like the game: its own pixel font (`dev/pixelfont.js`: 5 x 7 glyphs built into a TrueType font in code,
 'RiftPixel'), 9-slice pixel frames painted in code (wood and brass), pixel slot icons, every edge a whole UI pixel (U css
@@ -92,10 +94,10 @@ The camera frames him in the middle of what the panes leave, at the zoom where h
 - **Saved.** All of it (loadout, gear, paint, tuned pieces, stats, items, augments) saved under a name and worn again in
   one click; "Copy link" gives the gear as `?gear=` and `?set=`.
 
-The paint and tuned pieces are the look only: `features/gear.js preview({swap, extra, key, want})` draws the set (as chosen,
-`want`, on the screen) with pieces swapped for edited copies and a look-only piece after them; no weight, no armor, nothing
-sent in co-op (the others see what the server says you wear). Gear's view is ambient (it runs while the world stands
-still), so the look follows on the screen. A material can be 4 tones of its own (`view/dress.js`), which is how a picked
+The clothes chosen show on the studio's copy at once and are worn in the game from the step after you go back (the
+game holds meanwhile). The paint and tuned pieces are the look only: on the studio's copy, and on him in the game through
+`features/gear.js preview({swap, extra, key})` (the set worn with pieces swapped for edited copies and a look-only piece
+after them); no weight, no armor, nothing sent in co-op (the others see what the server says you wear). A material can be 4 tones of its own (`view/dress.js`), which is how a picked
 colour paints. Everything holds in dev mode only and is remembered on this machine (`rb.wardrobe`).
 
 ## Adding a piece

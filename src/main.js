@@ -233,7 +233,7 @@ const game = await createGame(host); features.unshift(game);
 // the cheat panel (dev/cheats.js, F2 in dev mode): last, so what it asks for lands after every feature's step
 features.push(createCheats({host, cam, canvas}));
 features.push(createGunFeel({host}));   // (dev/gunfeel.js: F8 in dev mode)
-features.push(createWardrobe({host, hero, cv, live, photo: () => photo}));   // (dev/wardrobe.js: Shift+Tab in dev mode; a screen on photo mode's studio)
+features.push(createWardrobe({host, hero, live, engine: () => E}));   // (dev/wardrobe.js: Shift+Tab in dev mode; a screen of its own: loop.hold)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;
