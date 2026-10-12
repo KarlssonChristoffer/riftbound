@@ -236,6 +236,7 @@ features.push(createCheats({host, cam, canvas}));
 features.push(createGunFeel({host}));   // (dev/gunfeel.js: F8 in dev mode)
 features.push(createWxPanel({host}));   // (dev/wxpanel.js: F9 in dev mode; wx-D)
 features.push(createMoveFeel({host, atlas: hero.atlas}));   // (dev/movefeel.js: F7 in dev mode)
+if (Q.get('lab')) features.push(await import('./dev/assetlab.js').then(m => m.createLab({host})));   // the asset lab (?lab=1: dev/assetlab.js)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;

@@ -79,6 +79,7 @@ export const FLAG_DOCS = {
   litter: '0: the fallen leaves stay as baked (no wind moves them, none are lifted); also the low detail tier',
   riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', grass: '0: no grass (features/grass.js)', wildlife: '0: no wildlife', wildfight: '0: wildlife ignores fights (no flush, no scavengers at kills, no coyotes / fox / wolves at night; features/wildlife/fightlife.js; menu > Dev > Fight reactions)', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
+  watcher:   '0: no watcher (features/watcher.js: the one-eyed toadstool that peeks at you from behind trees); often: every few seconds (testing)',
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
   livefoes: '0: the desert gunmen drawn from their 16-facing sprite atlases instead of LIVE (their Blender models through render/rigmesh.js with every atlas pose and clip: view/livebody.js, features/foes/look.js; the aim twists procedural)',
   kick:    '0: V is the pistol whip again, not the boot of the live cowboys (features/brawl.js: V kicks, V at a sprint barges; docs/exp/brawl.md)',
@@ -114,6 +115,7 @@ export const FLAG_DOCS = {
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
   lineup: 'trees: the procedural trees side by side for review',
+  lab: '1 | <recipe>: the asset lab (dev/assetlab.js): the recipes of content/recipes.js grown in a row in front of you, sliders, live reload; use with mode=sandbox',
   views: '0: run the sim alone, no presentation step or drawing (tools/test/simview.mjs: the sim must come out the same)',
   owncheck: '1: record writes to entity fields by systems that do not own them (dev/owncheck.js; slow: for checks)',
   photo: '1: open straight into photo mode (ui/photo.js; F4 or the menu otherwise: tests)',
