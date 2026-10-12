@@ -77,6 +77,7 @@ import * as owncheck from './dev/owncheck.js';
 import {createCheats} from './dev/cheats.js';   // the cheat panel (F2): a dev feature the boot adds last
 import {createGunFeel} from './dev/gunfeel.js';   // the gun feel panel (F8): live sliders as modifier notes, a dev feature too
 import {createWxPanel} from './dev/wxpanel.js';   // the weather panel (F9): a change of the weather and the god rays' envelope, read out (wx-D)
+import {createMoveFeel} from './dev/movefeel.js';   // the move feel panel (F7): run / sprint speed, get going / stopping, the strides, as modifier notes
 import {loadFeatures} from './core/features.js';
 import {createInput} from './core/input.js';
 import {createLoop} from './core/loop.js';
@@ -234,6 +235,7 @@ const game = await createGame(host); features.unshift(game);
 features.push(createCheats({host, cam, canvas}));
 features.push(createGunFeel({host}));   // (dev/gunfeel.js: F8 in dev mode)
 features.push(createWxPanel({host}));   // (dev/wxpanel.js: F9 in dev mode; wx-D)
+features.push(createMoveFeel({host, atlas: hero.atlas}));   // (dev/movefeel.js: F7 in dev mode)
 if (Q.get('lab')) features.push(await import('./dev/assetlab.js').then(m => m.createLab({host})));   // the asset lab (?lab=1: dev/assetlab.js)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
