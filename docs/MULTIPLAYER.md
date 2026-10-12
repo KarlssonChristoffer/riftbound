@@ -8,7 +8,8 @@ Proving Grounds' crates, brutes, fires, gunfire, the weather) still runs per cli
 ## Run it
 
 ```
-node server/server.mjs                     (random seed; --seed 1234 for a fixed forest; --port 8320 is the default)
+node server/server.mjs                     (random seed; --seed 1234 for a fixed forest; --port 8320 is the default;
+                                            --hour 22 starts at night, --daymin 20 real minutes a day, --nshift 1)
 ```
 
 It prints a URL: open `http://localhost:8320/src/?mp=1` in two windows (or two machines on the LAN:
@@ -53,6 +54,12 @@ In the menu's Sandbox tab, "Co-op: fell the nearest forest tree (test)" asks the
   (view/livehero.js DRAWN: the aim twist, the lean, the combat stances, a ragdoll), which the receiver shows bone for bone on the
   same model (view/livebody.js through render/rigmesh.js, as the desert's gunmen). A player in a sprite loadout sends only his
   frame's name; he is drawn as the gunslinger playing that frame. His name floats over his head in his colour.
+- **The clock and the uncanny forest** (2026-10-12, protocol 2; docs/UNCANNY.md). The server owns the world's clock (`--hour`,
+  `--daymin`): it sends `clock {t, h, rate}` in the welcome and on every change, and each client's clock (sim/env.js) follows it
+  (put right when it drifts more than a game minute; not saved as the page's own). It also owns the forest's secrets (their
+  states and who opened them: `sec`, all of them in the welcome) and the night elk (in every snapshot as `c`; its knocks as
+  `ev`). Clients ask with `act secret` (a secret whose condition holds for them) and, for tests, `act time` (`?time=night`
+  asks it). Which trees walk at night needs nothing sent: it comes from the seed and the clock.
 - **Sim vs view.** Shared-world changes and fixes are applied in the feature's `update` (a sim step); the others' bodies are view.
   Without `?mp` the feature is an empty shell: the game, golden, smoke and simview are unchanged.
 
@@ -82,7 +89,7 @@ pass without `?mp`. Two visible windows on one machine were not tried (the proje
 - Collisions between players (you walk through each other), and players' footsteps and gunshots for the others (no sound of them).
 - Shared combat, props and enemies: crates pushed, barrels exploding, brutes and gunmen are each client's own. The lasso shows on
   the others, but what it catches is only in its thrower's world.
-- The weather and the clock are each client's own (they start the same way but drift).
+- The weather is each client's own (it starts the same way but drifts). The clock is the server's (see above).
 - A hidden tab (or a minimized browser) stops sending: its player stands still for the others. Electron can keep it running
   (`backgroundThrottling: false`).
 - Reconnecting: a dropped connection shows "disconnected"; reload to rejoin (a new id).
