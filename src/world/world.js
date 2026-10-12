@@ -48,7 +48,8 @@ import {cliffGeometry} from './cliffs3d.js';
 import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
-import {TOWER_PLAN, FOREST} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
+import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
+import {TOWER_PLAN, FOREST, HUT} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
 import {sample as forestSample, depth as forestDepth} from './forest.js';
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
@@ -1023,6 +1024,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const r = watchtowerRun(TOWER_PLAN, wo, TF ? TF.H : () => 0);
     for (const p of props) if (p.kind === 'watchtower') own(p, r.geo, r.top - (p.z || 0)); else if (p.kind === 'towerwall') own(p, null, colTop(TOWER_PLAN, p.x, p.y, p.z || 0));
   }
+  // the hut's roof (world/hut.js, layout.js HUT): its slabs on the 'hutroof' prop (no collider: he walks under it)
+  if (HUT) { const r = hutRoof(HUT, wo); for (const p of props) if (p.kind === 'hutroof') own(p, r.geo, r.top - (p.z || 0)); }
   // (a rigid 3D tree, trees3d.js shape.rigid: the saguaros, spires, shards: a static mesh like any prop, no sway)
   const swayOf = it => !!it.pose && !it.pose.rigid;
   const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: swayOf(it), static: !swayOf(it), autumn: it.pose?.autumn}); if (swayOf(it)) m.sm.layers.disable(1); if (it.pm) pmLive(it, m); return m; };
