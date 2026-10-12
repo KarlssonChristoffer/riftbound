@@ -8,18 +8,28 @@
 //            z up), facing phi (rad, the arena's atan2(x, y)), s = his state (idle, move, roll, ...), pose = the frame drawn,
 //            rig = the live model he wears (gunslinger | outlaw | ''), w = the drawn pose's bones (encodePose) when it changed
 //            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport
-//   act      {a, id}                                      ask the server to change the shared world (a: 'fell' a forest tree)
+//   act      {a, id}                                      ask the server to change the shared world: a 'fell' (id: a forest tree),
+//            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
+//            dawn | day | dusk | night: dev, the world's clock to the next such hour)
 //   ping     {c}                                         c = the client's clock (ms), echoed
 // server -> client
-//   welcome  {v, id, name, color, seed, t, world, peers}  world = {id: state} (what's been done to the world so far), peers = [peer]
+//   welcome  {v, id, name, color, seed, t, world, peers, clock, unc}   world = {id: state} (what's been done to the world so far),
+//            peers = [peer], clock (below), unc = {sec: {id: {s, by, n}}, shift} (the uncanny forest: its secrets' states, the
+//            night shift's strength: docs/UNCANNY.md)
 //   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn}
-//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0], ...]}   every tick; w only when it changed since the last snap
+//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0], ...], c?}   every tick; w only when it changed since the last snap;
+//            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
 //   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it
+//   clock    {t, h, rate}                                the world's clock (the server owns it): at server time t (ms) it was h
+//            in-game hours since the start (sim/env.js E.t), going on at rate hours per ms (0: stopped). In welcome too
+//   sec      {id, s, by, n}                              a secret's state changed (sleeping / awake / triggered / spent), by =
+//            who opened it (ids), n = on which night
+//   ev       {a: 'knock', id, vx, vy}                    the night elk knocked player id down (vx, vy m/s): they drop something
 //   deny     {a, id, why}                                an act refused
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
 //   pong     {c, t}                                      t = the server's clock (ms)
-export const VERSION = 1;
+export const VERSION = 2;
 export const TICK_HZ = 20;          // the server's snapshot rate; a client sends its state at the same rate
 export const INTERP_MS = 110;       // remote players are drawn this far behind the newest snapshot (two ticks and a little)
 export const PATH = '/mp';          // the WebSocket's path on the server, and the HTTP session endpoint (PATH + '/session')
@@ -28,6 +38,9 @@ export const PORT = 8320;           // the server's default port
 export const MOVE = {maxSpeed: 26, slack: 2.5};
 // what an act may reach: a tree is felled from within REACH m of it
 export const REACH = 4;
+// the world's clock when a server starts (in-game hours since the start; 9: the first morning) and real minutes per in-game day
+// (sim/env.js TUNE.dayMinutes; node server/server.mjs --hour / --daymin)
+export const CLOCK = {hour: 9, daymin: 20};
 export const COLORS = ['#f0c060', '#7ec8e3', '#e98aa8', '#9ad07a', '#c9a0ff', '#ff9f5a', '#6fe0c0', '#e0e070'];
 
 export const encode = m => JSON.stringify(m);
