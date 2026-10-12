@@ -7,7 +7,8 @@ no forest).
 ## What it is
 
 - **Where.** x -48..72 (the world's width: under the West Downs, the Proving Grounds and the mesa), y -160..0: 120 x 160 m (y -64..0
-  until the high country), more than the rest of the world together. The world grows north to it (`WORLD.y0` = -160); the old north bank, the West Downs' north
+  until the high country), more than the rest of the world together. The world grows north to it (`WORLD.y0` = -160, and on over its
+  cave's band to -242: docs/CAVES.md); the old north bank, the West Downs' north
   bank and the highland behind the mesa give way to it; a bank of its own frames its north and west edges. You walk in from the
   strip north of the arena (its north gate), from the West Downs and from the trail.
 - **Ground.** Rolling relief (value noise, up to ~3.2 m, faded flat over its southern 12 m so it meets the Proving Grounds level,
@@ -96,6 +97,11 @@ Node check (20 seeds, `forestPlan` + `createField` and a walk over the cells tha
 fell top, every crag's shelf, the canyon's floor and head and both rims can be walked to; steep cells away from the rock
 .10 .. .54%; 570 .. 750 trees. The point-light height map (gfx.js) covers up to `WORLD.top` (the fell + 4 m; 20 m without the
 forest, as before).
+
+## The cave (2026-10-12)
+
+Every forest has a cave: its mouth a slot cut down into level ground in the home woods, its chambers and passages in a band of
+their own north of the forest. Growth keeps off the mouth and the ground in front of it. docs/CAVES.md.
 
 ## Chunk-friendly
 
