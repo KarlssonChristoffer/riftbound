@@ -1,9 +1,21 @@
 # Gear: what a character wears
 
-Status: 2026-10-12, first slice. Five slots (head, body, back, legs, feet), 16 pieces to try on, the character drawn in
-what he wears, weight and armor as game effects, a gear panel on Tab, and the set synced in co-op (the server checks it,
-everyone sees it). No inventory yet: every piece is there to try on, as in a wardrobe. The design talk behind it is the
-"Items and Equipment (WIP)" notes doc (the project's items and equipment thread).
+Status: 2026-10-12. Eight slots (head, body, back, hands, legs, feet, main hand, off hand), 56 pieces to try on: the first
+slice's 15 and a second batch of 41 (hats, armour, clothes and robes, gloves, weapons, shields and things held), the
+character drawn in what he wears, weight and armor as game effects, a gear panel on Tab, the wardrobe screen on Shift+Tab
+(dev), and the set synced in co-op (the server checks it, everyone sees it). No inventory yet: every piece is there to try
+on, as in a wardrobe. The design talk behind it is the "Items and Equipment (WIP)" notes doc.
+
+**Kinds and rarity (provisional, 2026-10-12).** Each piece has a `kind` (clothing, armour, robe, weapon, tool, charm:
+`KINDS`) and a `rarity` (common, fine, rare, masterwork, mythic, a colour each: `RARITY`): a first pass to react to, shown
+in the panels (names and card frames in the rarity's colour) and read by nothing else yet. The categories and rarities are
+to be decided from how the shooting feels (docs/BACKLOG.md: playtest the aim modes first).
+
+**Weapons are carried, not swung.** There are no sword swings, thrusts, blocks or spells yet (that needs animations and the
+combat to decide first): swords, axes, the spear and staffs ride on the back, the mace on the left hip, shields on the left
+forearm (facing forward and out as the arm hangs), the lantern, torch and spellbook in the left hand. What they do now: a
+weapon makes the V blow hit harder (`weapon.melee x`), shields add armour, the lantern, torch and the wizard's staff light
+your lantern (the staff's reaches further). Each piece's "soon" says what it will do once the game can.
 
 ## Try it
 

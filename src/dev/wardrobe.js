@@ -31,7 +31,7 @@
 //   E: loop.hold, pause, keys), content/gear.js, game/items.js.
 // BUDGET: shut and nothing on: nothing. Open: the game holds; the studio's small scene a frame; a few text writes 4 times a
 //   second; a slider drag: one dress at most every 50 ms (2-25 ms each, view/dress.js).
-import {SLOTS, SLOT_NAMES, GEAR, MATERIALS, ZONES, RULES, gearById, cleanSet, setStats} from '../content/gear.js';
+import {SLOTS, SLOT_NAMES, KINDS, RARITY, GEAR, MATERIALS, ZONES, RULES, gearById, cleanSet, setStats} from '../content/gear.js';
 import {ITEMS, AUGMENTS, TIER} from '../game/items.js';
 import {LOADOUTS, SET_NAMES} from '../view/hero.js';
 import {tint} from '../view/rigkit.js';
@@ -133,7 +133,7 @@ const CSS = `
 #wardrobe .wd-card .wd-band { display: flex; height: calc(8 * var(--u)); border: var(--u) solid var(--dark); }
 #wardrobe .wd-card .wd-ct { padding: calc(2 * var(--u)) var(--u) var(--u); }
 #wardrobe .wd-card .wd-ct span { display: block; }
-#wardrobe .wd-card .wd-ct small { font-size: inherit; color: var(--dim); }
+#wardrobe .wd-card .wd-ct small { display: block; font-size: inherit; color: var(--dim); }
 #wardrobe .wd-card .wd-badge { float: right; font-style: normal; color: var(--key); }
 #wardrobe .wd-info { margin-top: calc(4 * var(--u)); padding: calc(3 * var(--u)) calc(4 * var(--u)); min-height: calc(50 * var(--u)); }
 #wardrobe .wd-info b { font-weight: 400; color: var(--key); }
@@ -219,6 +219,9 @@ const ICONS = {
   back: ['..#####..', '.##...##.', '.#######.', '.#######.', '#########', '#########', '#########', '#.#.#.#.#', '.........'],
   legs: ['.#######.', '.#######.', '.###.###.', '.##...##.', '.##...##.', '.##...##.', '.##...##.', '.##...##.', '.........'],
   feet: ['..###....', '..###....', '..###....', '..###....', '..######.', '.#######.', '.########', '.########', '.........'],
+  hands: ['..#.#.#..', '..#.#.#..', '.#######.', '.#######.', '.######..', '..#####..', '..#####..', '..#####..', '.........'],
+  main: ['.......##', '......###', '.....###.', '....###..', '.#.###...', '..###....', '..##.....', '.#..#....', '#........'],
+  off: ['.#######.', '#########', '#########', '#########', '.#######.', '.#######.', '..#####..', '...###...', '....#....'],
 };
 const icoCache = new Map();
 function iconOf(slot, col) {   // a data URL: the icon in col, with a one-pixel dark shadow down-right
@@ -409,7 +412,7 @@ export function createWardrobe({host, hero, live, engine}) {
       rows.push(() => {
         const id = inSlot(slot), g = gearById(id);
         if (id !== shown) { shown = id; ico.src = iconOf(slot, g ? colorsOf(g)[0] : '#8a7c64'); }
-        put(n, 'textContent', g ? g.name : 'his own'); b.classList.toggle('own', !g); b.classList.toggle('on', C.tab === 'outfit' && C.slot === slot);
+        put(n, 'textContent', g ? g.name : 'his own'); put(n.style, 'color', g ? RARITY[g.rarity]?.col ?? '' : ''); b.classList.toggle('own', !g); b.classList.toggle('on', C.tab === 'outfit' && C.slot === slot);
         put(off.style, 'visibility', g ? '' : 'hidden');
       });
     }
@@ -495,14 +498,22 @@ export function createWardrobe({host, hero, live, engine}) {
       if (!g) { info.innerHTML = `<b>His own</b><br><span class="wd-dim">The ${SLOT_NAMES[C.slot].toLowerCase()} as the model was made: no weight, no armor.</span>`; return; }
       const does = [];
       if (g.armor) does.push(`takes ${pct(g.armor)} off the damage you take`);
-      for (const m of g.mods || []) { if (m.stat === 'light.lantern') does.push('your lantern is always lit'); else if (m.stat === 'player.speed') does.push(`you move ${pct(m.mul - 1)} faster`); }
-      info.innerHTML = `<b>${esc(g.name)}</b><br>${esc(g.desc)}<br><span class="wd-key">${g.weight} kg</span>${g.armor ? ` · <span class="wd-key">armor ${pct(g.armor)}</span>` : ''}` +
+      for (const m of g.mods || []) {
+        if (m.stat === 'light.lantern') does.push('your lantern is always lit');
+        else if (m.stat === 'light.lanternR') does.push(m.mul >= 1 ? `its light reaches ${pct(m.mul - 1)} further` : `a smaller light`);
+        else if (m.stat === 'player.speed') does.push(`you move ${pct(m.mul - 1)} faster`);
+        else if (m.stat === 'weapon.melee') does.push(`your blow (V) hits x${m.mul}`);
+      }
+      const R = RARITY[g.rarity];
+      info.innerHTML = `<b style="color:${R?.col ?? ''}">${esc(g.name)}</b><br><span class="wd-dim">${R?.name ?? ''} ${(KINDS[g.kind] || '').toLowerCase()}</span><br>${esc(g.desc)}<br><span class="wd-key">${g.weight} kg</span>${g.armor ? ` · <span class="wd-key">armor ${pct(g.armor)}</span>` : ''}` +
         (does.length ? `<br>Now: ${esc(does.join('; '))}.` : '') + (g.soon ? `<br><span class="wd-soon">Later: ${esc(g.soon)} (not in the game yet)</span>` : '');
     };
     for (const g of [null, ...GEAR.filter(x => x.slot === C.slot)]) {
       const id = g?.id ?? '', b = el('button', 'wd-card', cards), band = el('span', 'wd-band', b), ct = el('span', 'wd-ct', b);
       stripes(colorsOf(g), band);
-      const badge = el('em', 'wd-badge', ct, 'worn'); el('span', '', ct, g ? g.name : 'His own');
+      const badge = el('em', 'wd-badge', ct, 'worn'), nm = el('span', '', ct, g ? g.name : 'His own'), R = g && RARITY[g.rarity];
+      if (R) { nm.style.color = R.col; band.style.borderColor = R.col; }
+      if (g) el('small', 'wd-kind', ct, `${R?.name ?? ''} ${(KINDS[g.kind] || '').toLowerCase()}`);
       el('small', '', ct, g ? `${g.weight} kg${g.armor ? ` · armor ${pct(g.armor)}` : ''}` : 'no weight');
       b.onclick = () => { wearIn(C.slot, id); infoId = id; show(id); sound('confirm'); sync(); };
       b.onmouseenter = () => show(id);
