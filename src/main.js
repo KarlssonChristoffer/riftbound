@@ -238,7 +238,7 @@ const game = await createGame(host); features.unshift(game);
 features.push(createCheats({host, cam, canvas}));
 features.push(createGunFeel({host}));   // (dev/gunfeel.js: F8 in dev mode)
 features.push(createWxPanel({host}));   // (dev/wxpanel.js: F9 in dev mode; wx-D)
-features.push(createWardrobe({host, hero}));   // (dev/wardrobe.js: Shift+Tab in dev mode)
+features.push(createWardrobe({host, hero, cv, live, photo: () => photo}));   // (dev/wardrobe.js: Shift+Tab in dev mode; a screen on photo mode's studio)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;

@@ -1,9 +1,12 @@
-// WARDROBE: the dev wardrobe (Shift+Tab in dev mode; also Menu > Dev > Tools > Wardrobe). One place to try a character
-// out and test clothes: four tabs.
-//   Look     the character (loadout), the camera (turn, spin), the gear in each slot (through features/gear.js, so co-op
-//            still asks the server), test paint on any zone of the model (a material, a picked colour, or hidden), the duster
-//            tail's colour, and the PIECE TUNER: every shape of a piece (position, turn, size, material) on sliders, drawn as
-//            you drag; "Copy code" puts the piece's shapes on the clipboard as content/gear.js lines
+// WARDROBE: the dev wardrobe, a screen of its own (Shift+Tab in dev mode, or the menu's Game tab: Wardrobe). The game stands
+// still (photo mode's frozen world and camera, as its studio: ui/photo.js toggle(true, studio)), the camera comes in close on
+// the character, framed left of the panel on a dimmed backdrop; drag to turn round him, right-drag to move, the wheel zooms,
+// R frames him again, P saves a photo, Esc / Shift+Tab back to the game. The light (day, dusk, night) and his pose (the live
+// hero's emotes) are the studio's. The panel's four tabs:
+//   Look     the character (loadout), the gear in each slot (features/gear.js choose: shown at once, worn when you go back
+//            to the game; co-op asks the server then), test paint on any zone of the model (a material, a picked colour, or
+//            hidden), the duster tail's colour, and the PIECE TUNER: every shape of a piece (position, turn, size, material)
+//            on sliders, drawn as you drag; "Copy code" puts the piece's shapes on the clipboard as content/gear.js lines
 //   Stats    sliders as MODIFIER notes under the source 'wardrobe' (core/modifiers.js), applied by each stat's owner:
 //            player.speed x (player.js)   game.hurt x (game/stats.js)   weapon.dmg / reload / gap / melee x (sim/player/gun.js)
 //            combat.crit + / critMul + / enemyDmg x (combat/core.js)   light.lantern + / lanternR x (render/lighting.js)
@@ -13,14 +16,14 @@
 // The look and the notes hold in DEV MODE only, like the cheat panel's (a run without ?dev=1 drops them; back with it). The
 // paint and the tuned pieces are the look only (features/gear.js preview): no weight, no armor, nothing sent in co-op.
 // Remembered on this machine ('rb.wardrobe').
-// It is a FEATURE the boot puts at the end of the list (main.js; dev/: nothing in the game imports it). F.on is the panel
-// showing. Its update carries out what the panel asked for (gear, items, the camera's spin) inside a sim step, and hands
-// gear the look to preview (a dev look only: gear draws it in its view).
-// OWNS: the panel (#wardrobe + its style), the 'wardrobe' notes, the gear preview it asks for.
-// READS: host (mods, the game's stats, the gear feature, yaw, dev), hero (the loadout: switchLoadout, loadI, loadName),
-//   content/gear.js, game/items.js.
-// BUDGET: closed and nothing on: nothing. Open: a few text writes 4 times a second. A slider drag: one dress at most every
-//   50 ms (2-25 ms each, view/dress.js), never per frame otherwise.
+// It is a FEATURE the boot puts at the end of the list (main.js; dev/: nothing in the game imports it). F.on is the screen
+// open. While it's open the world stands still, so what the panel asks for (items, augments) is done at once; while it's
+// shut, its update keeps the notes and the look in step with dev mode.
+// OWNS: the screen (#wardrobe, #wd-stage + their style), the 'wardrobe' notes, the gear preview it asks for, the studio's
+//   framing. READS: host (mods, the game's stats, the gear feature, dev), hero (the loadout), photo (the studio: its camera,
+//   light, pose), cv (the zoom, the free camera's place), live (the emotes), content/gear.js, game/items.js.
+// BUDGET: shut and nothing on: nothing. Open: the game is frozen; a few text writes 4 times a second; a slider drag: one
+//   dress at most every 50 ms (2-25 ms each, view/dress.js).
 import {SLOTS, SLOT_NAMES, GEAR, MATERIALS, ZONES, gearById, cleanSet, setStats} from '../content/gear.js';
 import {ITEMS, AUGMENTS, TIER} from '../game/items.js';
 import {LOADOUTS, SET_NAMES} from '../view/hero.js';
@@ -45,16 +48,23 @@ const knob0 = n => n.mul ?? n.add;
 // a shape's size fields, by shape (content/gear.js add): the tuner's sliders
 const SIZE = {box: ['size.0', 'size.1', 'size.2'], ball: ['r.0', 'r.1', 'r.2'], tube: ['r0', 'r1', 'len'], disc: ['r', 'len'], cone: ['r', 'len']};
 const TABS = ['look', 'stats', 'items', 'outfits'];
-const DEF = {open: false, tab: 'look', spin: false, paint: {}, cloth: '', custom: '#5a8f6a', tune: {}, stats: {}, piece: '', shape: 0, outfits: []};
+const PANEL_W = 400;   // css px: the panel's column (the character is framed in what's left)
+const LIGHTS = {'as is': null, dawn: 6.6, day: 12, dusk: 19.2, night: 23.5};
+const BACKS = {world: 0, dim: .6, dark: .93};
+const DEF = {tab: 'look', spin: false, back: 'dim', light: 'as is', paint: {}, cloth: '', custom: '#5a8f6a', tune: {}, stats: {}, piece: '', shape: 0, outfits: []};
 const CSS = `
-#wardrobe { position: fixed; right: 10px; top: 64px; z-index: 16; width: 312px; max-height: calc(100vh - 150px); overflow: auto; padding: 8px 8px 6px;
-  background: rgba(14, 16, 15, .94); border: 1px solid var(--line); border-radius: 6px; scrollbar-width: thin; user-select: none; }
-#wardrobe.hidden { display: none; }
-body:has(#pause:not(.hidden)) #wardrobe { visibility: hidden; }
-body:has(#cheats:not(.hidden)) #wardrobe { right: 276px; }
-body:has(#wardrobe:not(.hidden)) #help { right: 332px; max-width: calc(100vw - 760px); }   /* (the key help moves out from under it) */
+#wardrobe { position: fixed; top: 0; right: 0; bottom: 0; z-index: 22; width: ${PANEL_W}px; box-sizing: border-box; overflow: auto; padding: 16px 14px 10px;
+  font-size: 13px; background: rgba(12, 14, 13, .9); border-left: 1px solid var(--line); scrollbar-width: thin; user-select: none; }
+#wardrobe.hidden, #wd-stage.hidden { display: none; }
+#wardrobe.wd-clean { display: none; }
+#wd-stage { position: fixed; inset: 0; z-index: 21; pointer-events: none; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
+#wd-stage .wd-back { position: absolute; inset: 0; background: radial-gradient(ellipse 26% 46% at calc((100% - ${PANEL_W}px) / 2) 52%, transparent 35%, #0b0d0c 100%); }
+#wd-stage .wd-title { position: absolute; left: 22px; top: 16px; font-size: 20px; font-weight: 700; letter-spacing: .24em; }
+#wd-stage .wd-title small { display: block; font-size: 12px; font-weight: 400; letter-spacing: .08em; opacity: .7; }
+#wd-stage .wd-hint { position: absolute; left: 0; right: ${PANEL_W}px; bottom: 14px; text-align: center; font-size: 12px; opacity: .6; }
+body.wd :is(#gear) { display: none; }
 #wardrobe header { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px 4px; }
-#wardrobe header b { color: var(--key); letter-spacing: .14em; }
+#wardrobe header b { color: var(--key); letter-spacing: .14em; font-size: 15px; }
 #wardrobe header small, #wardrobe .w-dim { color: var(--dim); }
 #wardrobe header button { font: inherit; color: var(--dim); background: none; border: 0; cursor: pointer; padding: 0 2px; }
 #wardrobe header button:hover { color: var(--ink); }
@@ -63,7 +73,7 @@ body:has(#wardrobe:not(.hidden)) #help { right: 332px; max-width: calc(100vw - 7
 #wardrobe nav button.on { color: var(--key); border-color: var(--line); background: rgba(240, 192, 96, .12); }
 #wardrobe h5 { margin: 9px 4px 3px; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
 #wardrobe .w-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; }
-#wardrobe .w-row > span:first-child { flex: 0 0 90px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#wardrobe .w-row > span:first-child { flex: 0 0 104px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #wardrobe .w-row.on > span:first-child { color: var(--key); }
 #wardrobe .w-row .w-v { flex: 0 0 44px; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
 #wardrobe .w-row.on .w-v { color: var(--key); }
@@ -104,8 +114,9 @@ function codeOf(g, add) {
   return `    // ${g.id}: look.add (dev/wardrobe.js)\n    add: [\n${add.map(line).join('\n')}\n    ]`;
 }
 
-// opts: {host, hero (the loadout: view/hero.js)}
-export function createWardrobe({host, hero}) {
+// opts: {host, hero (the loadout: view/hero.js), cv (render/camera.js), live (view/livehero.js, or null), photo: () => ui/photo.js
+// (made after the features)}
+export function createWardrobe({host, hero, cv, live, photo}) {
   const C = copy(DEF);
   try { Object.assign(C, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch (e) {}
   if (!TABS.includes(C.tab)) C.tab = 'look';
@@ -113,6 +124,7 @@ export function createWardrobe({host, hero}) {
   if (!Array.isArray(C.outfits)) C.outfits = [];
   for (const id in C.tune) if (!gearById(id)?.look?.add || !Array.isArray(C.tune[id])) delete C.tune[id];
   for (const n of KNOBS) { const v = C.stats[n.k]; if (!(v >= n.min && v <= n.max)) delete C.stats[n.k]; }
+  if (!(C.back in BACKS)) C.back = 'dim'; if (!(C.light in LIGHTS)) C.light = 'as is'; delete C.open;
   let saveT = 0;
   const save = () => { saveT = 0; try { localStorage.setItem(STORE, JSON.stringify(C)); } catch (e) {} };
   const gear = () => host.feature('gear'), game = () => host.feature('game'), stats = () => game()?.stats;
@@ -136,13 +148,13 @@ export function createWardrobe({host, hero}) {
     for (const [z, m] of Object.entries(C.paint)) { if (m === 'hide') hide.push(z); else if (m === 'custom') paint[z] = tonesOf(C.custom); else if (MATERIALS[m]) paint[z] = m; }
     const cloth = C.cloth === 'custom' ? tonesOf(C.custom) : C.cloth === 'off' || MATERIALS[C.cloth] ? C.cloth : '';
     const extra = Object.keys(paint).length || hide.length || cloth ? [{id: 'wardrobe', name: 'Wardrobe', slot: '', look: {paint, hide, cloth: cloth || undefined}}] : [];
-    preview(n || extra.length ? {swap, extra, key: 'wardrobe'} : null);
+    preview(n || extra.length || F.on ? {swap, extra, key: 'wardrobe', want: F.on} : null);   // (the screen: the set as chosen, worn on the way out)
   }
   const lookChanged = () => { lookDirty = true; saveT = .3; };
 
   // ---------------------------------------------------------------- what the panel asks for: carried out in the sim step
   const queue = [];
-  const ask = fn => { queue.push(fn); };
+  const ask = fn => { if (F.on) fn(); else queue.push(fn); };   // (the screen open: the world stands still, nothing is mid-step)
   let msg = '', msgT = 0;
   const say = s => { msg = s; msgT = performance.now(); };
   const wear = ids => ask(() => gear()?.choose(cleanSet(ids)));
@@ -247,8 +259,8 @@ export function createWardrobe({host, hero}) {
 
   function build() {
     rows.length = 0; root.textContent = '';
-    const head = el('header', '', undefined, root); head.innerHTML = '<b>WARDROBE</b><span><small>Shift+Tab</small> <button title="close">×</button></span>';
-    head.querySelector('button').onclick = () => F.toggle();
+    const head = el('header', '', undefined, root); head.innerHTML = '<b>WARDROBE</b><span><small>Esc</small> <button title="back to the game">×</button></span>';
+    head.querySelector('button').onclick = () => close();
     const nav = el('nav', '', undefined, root);
     for (const t of TABS) { const b = el('button', C.tab === t ? 'on' : '', t, nav); b.onclick = () => { C.tab = t; save(); build(); }; }
     body = el('div', '', undefined, root);
@@ -265,8 +277,22 @@ export function createWardrobe({host, hero}) {
     }
     const liveN = note();
     rows.push(() => { put(liveN, 'textContent', host.live ? '' : 'a sprite loadout: the gear\'s look won\'t show (its effects do)'); put(liveN.style, 'display', host.live ? 'none' : ''); });
-    btns([{text: '⟲ 45°', go: () => ask(() => host.setYaw(host.yaw - 45 * DEG))}, {text: 'Spin', go: () => { C.spin = !C.spin; save(); }, on: () => C.spin, title: 'the camera turns slowly round him'},
-      {text: '45° ⟳', go: () => ask(() => host.setYaw(host.yaw + 45 * DEG))}]);
+
+    h5('Studio');
+    {
+      const {r} = row('Light', "the time of day for the light (the world clock's preview: nothing changes in the game)");
+      select(r, Object.keys(LIGHTS).map(k => [k, k]), () => C.light, v => { C.light = v; save(); light(); });
+    }
+    if (live?.emotes?.length) {
+      const {r} = row('Pose', "the live hero's emotes");
+      select(r, [['none', '— standing —'], ...live.emotes.map(e => [e, e.replace(/_/g, ' ')])], () => pose, v => { pose = v; const ph = photo(); if (ph?.open) ph.pose = v; });
+    }
+    {
+      const {r} = row('Backdrop');
+      select(r, Object.keys(BACKS).map(k => [k, k]), () => C.back, v => { C.back = v; save(); backdrop(); });
+    }
+    btns([{text: '⟲ 45°', go: () => photo()?.turn(-45 * DEG)}, {text: 'Spin', go: () => { C.spin = !C.spin; save(); }, on: () => C.spin, title: 'the camera turns slowly round him'},
+      {text: '45° ⟳', go: () => photo()?.turn(45 * DEG)}, {text: 'Frame', title: 'R: the camera on him again', go: () => frame()}]);
 
     h5('Clothes');
     for (const slot of SLOTS) {
@@ -412,43 +438,79 @@ export function createWardrobe({host, hero}) {
     if (msg && performance.now() - msgT > 4000) msg = '';
     put(msgEl, 'textContent', msg);
   }
-  function show() {
-    const vis = F.on && host.dev && game()?.mode !== 'title';
-    if (vis && !body) build();
-    root.classList.toggle('hidden', !vis);
-    return vis;
+
+  // ---------------------------------------------------------------- the screen: photo mode's frozen world as our studio
+  const stage = document.createElement('div'); stage.id = 'wd-stage'; stage.className = 'hidden';
+  stage.innerHTML = '<div class="wd-back"></div><div class="wd-title">WARDROBE<small></small></div>' +
+    '<div class="wd-hint">drag: turn round him · right-drag: move · wheel: zoom · R: frame him · H: hide the panel · P: photo · Esc: back to the game</div>';
+  document.body.appendChild(stage);
+  const backEl = stage.querySelector('.wd-back'), subEl = stage.querySelector('small');
+  let pose = 'none';
+  const backdrop = () => { backEl.style.opacity = BACKS[C.back]; };
+  const light = () => { const ph = photo(); if (ph?.open) ph.setWorld('hour', LIGHTS[C.light]); };
+  // the camera on him: as close as it goes, framed in the middle of what the panel leaves, his body (not his feet) centred
+  function frame() {
+    const ph = photo(); if (!ph?.open) return;
+    const P = host.player;
+    cv.freeReset(P.x, P.y, host.P.z); cv.zoomTo(cv.dsBase * 2, true);
+    const z = cv.zoom * cv.dz, vx = PANEL_W / 2 / cv.scale / (host.PPM * z), vy = -.85 * host.PPMH / host.PPMY;
+    const [wx, wy] = cv.toWorld(vx, vy); ph.move(wx, wy);
+  }
+  const STUDIO = {
+    key(k, e) {
+      if (k === 'tab' && e.shiftKey) { e.preventDefault(); close(); return true; }
+      if (k === 'tab') { e.preventDefault(); C.tab = TABS[(TABS.indexOf(C.tab) + 1) % TABS.length]; save(); build(); return true; }
+      if (k === 'r' || k === 'home') { frame(); return true; }
+      if (k === 'h') { root.classList.toggle('wd-clean'); return true; }
+      return false;   // (the rest is photo mode's: Esc back, P a photo, the wheel, WASD, Z / X)
+    },
+    step(dt) {
+      if (C.spin) photo()?.turn(dt * .5);
+      tick(dt);
+      if (hero.loadI !== loadWas) { const re = loadWas >= 0 && C.tab === 'look'; loadWas = hero.loadI; if (re) build(); }   // (another model: its zones)
+      if ((syncT -= dt) <= 0) { syncT = .25; sync(); put(subEl, 'textContent', hero.loadName); }
+    },
+    closed() {
+      F.on = false; pose = 'none';
+      root.classList.add('hidden'); stage.classList.add('hidden'); document.body.classList.remove('wd');
+      lookDirty = true; lookT = 0; save();   // (the preview without the chosen set: what's worn, from the next step)
+    },
+  };
+  function open() {
+    const ph = photo();
+    if (F.on || !host.dev || !ph?.allowed) return;
+    F.on = true; loadWas = hero.loadI; pose = 'none';
+    ph.toggle(true, STUDIO);
+    if (!ph.open) { F.on = false; return; }
+    build(); root.classList.remove('hidden', 'wd-clean'); stage.classList.remove('hidden'); document.body.classList.add('wd');
+    backdrop(); light(); frame();
+    lookDirty = true; lookT = 0; tick(0);
+    host.uiSound?.('open');
+  }
+  function close() { if (F.on) photo()?.toggle(false); }   // (photo mode puts the camera back, then STUDIO.closed)
+  // the notes, the look and the save, in step with what changed (the update while shut, the studio's step while open)
+  function tick(dt) {
+    if (host.dev !== devWas) { devWas = host.dev; applyNotes(); lookDirty = true; }   // (the first step too: the remembered notes and look)
+    if (lookDirty && (lookT -= dt) <= 0) { lookDirty = false; lookT = .05; applyLook(); }
+    if (saveT > 0 && (saveT -= dt) <= 0) save();
   }
 
   let devWas = null, syncT = 0, loadWas = -1;
   const F = {
-    name: 'wardrobe', label: 'Wardrobe', key: 'shift+tab', on: !!C.open,
-    toggle() {
-      if (!host.dev && !F.on) return F.on;   // (dev mode only)
-      F.on = !F.on; C.open = F.on; save();
-      if (show()) sync();
-      return F.on;
-    },
-    onKey(k, e) { if (k !== 'tab' || !e?.shiftKey) return false; F.toggle(); return true; },
+    name: 'wardrobe', label: 'Wardrobe', key: 'shift+tab', on: false,
+    toggle() { if (F.on) close(); else open(); return F.on; },
+    onKey(k, e) { if (k !== 'tab' || !e?.shiftKey) return false; open(); return true; },
     update(dt) {
-      if (host.dev !== devWas) { devWas = host.dev; applyNotes(); lookDirty = true; }   // (the first step too: the remembered notes and look)
-      if (C.spin && host.dev && !host.lock) host.setYaw(host.yaw + dt * .5);
-      // the look (gear's preview, drawn in its view) and the save: here, since frame() runs only while the panel shows
-      if (lookDirty && (lookT -= dt) <= 0) { lookDirty = false; lookT = .05; applyLook(); }
-      if (saveT > 0 && (saveT -= dt) <= 0) save();
+      tick(dt);
       if (!queue.length) return;
       for (const fn of queue) fn();
-      queue.length = 0; syncT = 0;
+      queue.length = 0;
     },
-    frame({dt}) {
-      if (!show()) return;
-      if (hero.loadI !== loadWas) { const re = loadWas >= 0 && C.tab === 'look'; loadWas = hero.loadI; if (re) build(); }   // (another model: its zones)
-      if ((syncT -= dt) <= 0) { syncT = .25; sync(); }
-    },
-    menu: () => [{label: 'Wardrobe: clothes, paint, piece tuner, stats, items, outfits (Shift+Tab)', run: () => { if (!F.on) F.toggle(); }}],
+    menu: () => host.dev && photo()?.allowed ? [{label: 'Wardrobe', run: open}] : [],
     hud() {
       if (!host.dev) return '';
       const a = [], np = Object.keys(C.paint).length + (C.cloth ? 1 : 0), nt = Object.keys(C.tune).length, ns = Object.keys(C.stats).length;
-      if (np) a.push(`${np} paint${np > 1 ? 's' : ''}`); if (nt) a.push(`${nt} tuned`); if (ns) a.push(`${ns} stat${ns > 1 ? 's' : ''}`); if (C.spin) a.push('spin');
+      if (np) a.push(`${np} paint${np > 1 ? 's' : ''}`); if (nt) a.push(`${nt} tuned`); if (ns) a.push(`${ns} stat${ns > 1 ? 's' : ''}`);
       return a.length ? `<b>wardrobe</b> ${a.join(' · ')}` : '';
     },
   };

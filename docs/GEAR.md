@@ -57,27 +57,32 @@ same whatever he wears; the effects still apply.
   nobody wears any more is restyled into the next one needed.
 - **Sim vs view.** The set and its notes change in `update` (the event `gear.wear`); the look follows in `view`.
 
-## The dev wardrobe (Shift+Tab)
+## The wardrobe screen (Shift+Tab, dev)
 
-A dev panel (`dev/wardrobe.js`, dev mode only; also Menu > Dev > Tools > Wardrobe) for trying combinations and testing
-clothes. Four tabs:
+A screen of its own for trying combinations and testing clothes (`dev/wardrobe.js`, dev mode only): Shift+Tab, or the
+menu's Game tab: Wardrobe. The game stands still (photo mode's frozen world and camera as its studio:
+`ui/photo.js toggle(true, studio)`), the camera comes in as close as it goes on the character, framed left of the panel on
+a dimmed backdrop. Drag to turn round him, right-drag to move, the wheel zooms, R frames him again, H hides the panel, Tab
+the next tab, P saves a photo, Esc (or Shift+Tab) back to the game: the camera, zoom and yaw come back as they were.
 
-- **Look.** The loadout; the camera turned 45 degrees at a click or spinning round him; a piece in each slot (through
-  `features/gear.js choose`, so co-op still asks the server); test paint on any zone of the model (a material, a picked
-  colour, or hidden) and the duster tail's colour; and the **piece tuner**: pick a piece with shapes, pick a shape, and move,
-  turn and size it on sliders (drawn as you drag, a dress at most every 50 ms). "Copy code" puts the piece's `add` list on the
-  clipboard as content/gear.js lines (and in the console): paste it over the piece's own to keep it. Double-click a slider:
-  back as authored.
+- **Look.** The loadout; the studio's light (dawn, day, dusk, night: the world clock's preview, nothing changes in the
+  game), his pose (the live hero's emotes), the backdrop (world, dim, dark), turn 45 degrees, spin; a piece in each slot
+  (through `features/gear.js choose`: shown at once, worn when you go back to the game; in co-op the server is asked then);
+  test paint on any zone of the model (a material, a picked colour, or hidden) and the duster tail's colour; and the
+  **piece tuner**: pick a piece with shapes, pick a shape, and move, turn and size it on sliders (drawn as you drag, a
+  dress at most every 50 ms). "Copy code" puts the piece's `add` list on the clipboard as content/gear.js lines (and in
+  the console): paste it over the piece's own to keep it. Double-click a slider: back as authored.
 - **Stats.** Sliders as modifier notes under the source `'wardrobe'`: move speed, damage taken, gun damage, reload, shot gap,
   melee, crit chance / damage, the brutes' damage, the lantern.
 - **Items.** The run's items (a copy more or less) and augments (on / off), through game/stats.js. A run starts empty.
 - **Outfits.** All of it (loadout, gear, paint, tuned pieces, stats, items, augments) saved under a name and worn again in
   one click; "Copy link" gives the gear as `?gear=` and `?set=`.
 
-The paint and tuned pieces are the look only: `features/gear.js preview({swap, extra, key})` draws the set with pieces
-swapped for edited copies and a look-only piece after them; no weight, no armor, nothing sent in co-op (the others see what
-the server says you wear). A material can be 4 tones of its own (`view/dress.js`), which is how a picked colour paints.
-Everything holds in dev mode only and is remembered on this machine (`rb.wardrobe`).
+The paint and tuned pieces are the look only: `features/gear.js preview({swap, extra, key, want})` draws the set (as chosen,
+`want`, on the screen) with pieces swapped for edited copies and a look-only piece after them; no weight, no armor, nothing
+sent in co-op (the others see what the server says you wear). Gear's view is ambient (it runs while the world stands
+still), so the look follows on the screen. A material can be 4 tones of its own (`view/dress.js`), which is how a picked
+colour paints. Everything holds in dev mode only and is remembered on this machine (`rb.wardrobe`).
 
 ## Adding a piece
 

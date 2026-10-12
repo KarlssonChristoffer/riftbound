@@ -52,7 +52,7 @@ const DEV_GROUP = {
 // THE FEATURES' ROWS (F.menu): the game's own (start / abandon a run, back to title) and the player's views (the cinematic
 // camera) stay in Game; every other feature's are test actions for the sandbox: the Sandbox tab, one page per group here
 // (a feature not listed: Other)
-const GAME_ROWS = ['cinema', 'game'];   // (in this order, after Resume and Photo mode: back to title stays last)
+const GAME_ROWS = ['cinema', 'wardrobe', 'game'];   // (in this order, after Resume and Photo mode: back to title stays last; the wardrobe: dev mode)
 const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places'};
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low

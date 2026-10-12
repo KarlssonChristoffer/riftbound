@@ -16,6 +16,9 @@
 //   PHOTO     P / Enter (or the button): a PNG at 1x (the screen) or 2x, rendered again at that size (the art blown up by
 //             whole pixels, crisp; the soft effects at full size), downloaded as riftbound_YYYYMMDD_HHMMSS.png.
 // H / Tab hides the panel. Keys: arrows walk the panel (up / down a row, left / right its value), Enter / Space press.
+// STUDIO: toggle(true, studio) opens it as another screen's stage (the dev wardrobe, dev/wardrobe.js): the same frozen game
+//   and camera, without photo mode's panel and hint, the world living (ambient views run: the gear's look follows), a left
+//   drag turns and a right drag moves. studio = {key(k, e) -> bool (its keys first), step(dt) (every frame), closed()}.
 // OWNS: open, the #photo DOM + its style, the remembered settings ('rb.photo'), the free camera's input, the world it asks
 //   env to preview, the look (render/photofx.js). READS: E (main.js). EMITS: nothing.
 // BUDGET: nothing while closed (the loop asks `open`); open: the post pass (render/photofx.js) and the ambient views.
@@ -60,7 +63,7 @@ const CSS = `
 @keyframes ph-flash { from { opacity: .6; } to { opacity: 0; } }
 .ph-band { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(255, 255, 255, .6); pointer-events: none; opacity: 0; transition: opacity .5s; }
 .ph-band.on { opacity: 1; transition: none; }
-#photo.ph-clean #ph-panel, #photo.ph-clean .ph-hint { display: none; }
+#photo.ph-clean #ph-panel, #photo.ph-clean .ph-hint, #photo.ph-studio #ph-panel, #photo.ph-studio .ph-hint { display: none; }
 body.photo :is(#hud, #help, #cheats, #gscreen) { visibility: hidden; }
 body.photo.ph-nohud #hd { visibility: hidden; }
 `;
@@ -74,7 +77,7 @@ export function createPhoto(E) {
   let wantDirty = false, seasonal = false;
   const at = {yaw: 0, goal: 1, demo: '', weather: ''};   // what leaving comes back to (and the world's "as is")
   const held = new Set(), FA = {x: 0, y: 0, h: 0};
-  let drag = null, dragYaw = 0, panX = 0, panY = 0;
+  let drag = null, dragYaw = 0, panX = 0, panY = 0, studio = null;
 
   // ---- remembered settings (this machine): the look, the living world, the size
   try {
@@ -210,7 +213,7 @@ export function createPhoto(E) {
   root.addEventListener('contextmenu', e => e.preventDefault());
   root.addEventListener('pointerdown', e => {
     if (panel.contains(e.target)) return;
-    drag = {x: e.clientX, y: e.clientY, turn: e.button !== 0}; root.setPointerCapture(e.pointerId); root.classList.add(drag.turn ? 'turning' : 'panning');
+    drag = {x: e.clientX, y: e.clientY, turn: studio ? e.button === 0 : e.button !== 0}; root.setPointerCapture(e.pointerId); root.classList.add(drag.turn ? 'turning' : 'panning');   // (a studio: the left drag turns round him)
     if (e.button === 1) e.preventDefault();
   });
   root.addEventListener('pointermove', e => {
@@ -225,10 +228,11 @@ export function createPhoto(E) {
   addEventListener('blur', () => { held.clear(); endDrag(); });
 
   // ---- open / close
-  function toggle(on = !open) {
+  function toggle(on = !open, st = null) {
     if (on === open) return;
     if (on) {
       if (!ph.allowed) return;
+      studio = st; root.classList.toggle('ph-studio', !!st);
       if (E.pause.paused) E.pause.toggle(false, null);
       open = true; keys.clear(); E.input.cancelDrag(); held.clear(); drag = null; dragYaw = panX = panY = 0;
       at.yaw = cv.yaw; at.goal = cv.dsGoal; at.demo = E.live?.K?.demo ?? ''; at.weather = env.weather; seasonal = !!env.tinted;
@@ -238,10 +242,11 @@ export function createPhoto(E) {
       fx.on(); fx.still = !living;
       feat('audio')?.duck?.(true);
       root.classList.remove('hidden', 'ph-clean'); document.body.classList.add('photo'); hud(); build(); say('');
-      sound('open');
+      if (!st) sound('open');
       return;
     }
     open = false;
+    const st0 = studio; studio = null;
     env.preview(null); for (const k in want) want[k] = null; wantDirty = false;
     if (pose !== 'none') setPose('none');
     fx.off();
@@ -249,6 +254,7 @@ export function createPhoto(E) {
     feat('audio')?.duck?.(false);
     root.classList.add('hidden'); document.body.classList.remove('photo', 'ph-nohud'); endDrag(); held.clear();
     remember(); sound('back');
+    st0?.closed?.();
   }
 
   // ---- every frame while open (the loop's step): the camera, the world, nature
@@ -265,11 +271,12 @@ export function createPhoto(E) {
     if (panX || panY) { vx -= panX / cv.scale / (host.PPM * z); vy -= panY / cv.scale / (host.PPMY * z); panX = panY = 0; }
     if (vx || vy) { const [wx, wy] = cv.toWorld(vx, vy); cv.freeMove(wx, wy); }
     if (wantDirty) { applyWant(); refresh(); }
-    const moving = living || settle > 0;
+    const moving = living || settle > 0 || !!studio;
     if (moving) { E.pause.stepPaused(dt); if (!living) settle = Math.max(0, settle - dt); }
     fx.still = !moving;
     if (noteT > 0 && (noteT -= dt) <= 0 && !busy) note.textContent = '';
     if ((panelT -= dt) <= 0) { panelT = .25; refresh(); }   // (the size after a zoom, a value a key changed: a few times a second)
+    studio?.step?.(dt);
   }
 
   // ---- keys (core/input.js hands them all over while open)
@@ -277,6 +284,7 @@ export function createPhoto(E) {
   function key(k, e) {
     if (k === 'tab' || k.startsWith('arrow') || k === ' ' || k === 'enter') e.preventDefault();   // (Enter / Space: not the browser's button press too)
     if (k === 'shift') { held.add('shift'); return; }
+    if (studio?.key?.(k, e)) return;
     if (e.repeat && !NAV.includes(k) && !'+-='.includes(k)) return;
     if (k === 'escape' || k === 'f4') { toggle(false); return; }
     if (k === 'h' || k === 'tab') { root.classList.toggle('ph-clean'); sound('click'); return; }
@@ -337,7 +345,8 @@ export function createPhoto(E) {
   }
 
   const ph = {
-    get open() { return open; }, get still() { return open && fx.still; }, get hidePlayer() { return open && !showPlayer; },
+    get open() { return open; }, get studio() { return studio; }, turn(d) { dragYaw += d; },
+    get still() { return open && fx.still; }, get hidePlayer() { return open && !showPlayer; },
     get allowed() { return !open && E.game.mode !== 'title' && !host.lock; },
     toggle, step, key, capture, shoot, fx, look: L,
     time(t) { if (!fx.still) heldT = t; return heldT; },   // the draw's clock: held in a still world
