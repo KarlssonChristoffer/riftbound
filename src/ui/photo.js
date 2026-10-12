@@ -77,7 +77,7 @@ export function createPhoto(E) {
   let wantDirty = false, seasonal = false;
   const at = {yaw: 0, goal: 1, demo: '', weather: ''};   // what leaving comes back to (and the world's "as is")
   const held = new Set(), FA = {x: 0, y: 0, h: 0};
-  let drag = null, dragYaw = 0, panX = 0, panY = 0, studio = null;
+  let drag = null, dragYaw = 0, panX = 0, panY = 0, studio = null, look0 = null;   // (look0: photo mode's own look while a studio has a plain one)
 
   // ---- remembered settings (this machine): the look, the living world, the size
   try {
@@ -231,6 +231,7 @@ export function createPhoto(E) {
     if (on) {
       if (!ph.allowed) return;
       studio = st; root.classList.toggle('ph-studio', !!st);
+      if (st) { look0 = {...L}; Object.assign(L, {tilt: false, vignette: 0, grade: 'natural'}); }   // (a studio: no tilt-shift, no vignette, the colours as they are)
       if (E.pause.paused) E.pause.toggle(false, null);
       open = true; keys.clear(); E.input.cancelDrag(); held.clear(); drag = null; dragYaw = panX = panY = 0;
       at.yaw = cv.yaw; at.goal = cv.dsGoal; at.demo = E.live?.K?.demo ?? ''; at.weather = env.weather; seasonal = !!env.tinted;
@@ -245,6 +246,7 @@ export function createPhoto(E) {
     }
     open = false;
     const st0 = studio; studio = null;
+    if (look0) { Object.assign(L, look0); look0 = null; }
     env.preview(null); for (const k in want) want[k] = null; wantDirty = false;
     if (pose !== 'none') setPose('none');
     fx.off();

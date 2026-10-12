@@ -2416,6 +2416,14 @@ void main() {
   let post = null;
   const setPost = p => { post = p || null; };
   const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
+  // ISOLATE (a studio: dev/wardrobe.js): only what keep(obj) passes is drawn (the G-buffer, the shadows, the x-ray), on the
+  // background colour bg ([r, g, b] 0..1, through the grade); the world's own layers, decals, cloud shadows, haze, reflections,
+  // mist, contact AO, god rays and particles left out, the cached static shadow not used. null: the world as it is.
+  // The objects hidden are put back after the frame (their own visibility is never changed for good). Rare: a dev screen.
+  let iso = null;
+  const isoBg = new THREE.Vector3(), isoBg0 = new THREE.Vector3(), isoHid = [];
+  function isolate(keep, bg) { iso = keep || null; if (bg) isoBg.set(bg[0], bg[1], bg[2]); }
+  function isoHide(scene) { for (const c of scene.children) if (c.visible && !iso(c)) { c.visible = false; isoHid.push(c); } }
   function render() {
     const t0 = performance.now(), still = post !== null && post.still;
     if (gDecal) U.decalT.value = imgTex(gDecal);   // (a GPU context's image: used this frame, so it isn't let go)
@@ -2440,23 +2448,25 @@ void main() {
     drawLayers();
     const lay = compU.uLay.value, on = n => +(layers[n].runs.length > 0);
     lay.set(on('ground'), on('pre'), on('front'), on('add')); compU.uLayE.value = on('emit'); compU.uLayD.value = on('distort');
-    if (cine) {   // the cinema camera: the screen layers, cloud shadows, heat haze and reflections are painted for the oblique view
+    if (cine || iso) {   // the cinema camera: the screen layers, cloud shadows, heat haze and reflections are painted for the oblique view (a studio: not there)
       lay.set(0, 0, 0, 0); compU.uLayE.value = compU.uLayD.value = 0; compU.uCl.value.x = compU.uHz.value.x = compU.uRf.value.x = 0;
     }
+    if (iso) { isoBg0.copy(compU.uBg.value); compU.uBg.value.copy(isoBg); }
     lap('layers');
     for (const s of litters) s.run();   // the fallen leaves' field (render/litter.js): the ticks that are due; the ground shader reads the result
     lap('litter');
     PS.shadowN = PS.hmapN = PS.shadowSN = 0; PS.shadowS = 0;
     // movers that have been still long enough go back to the static map (switched over AT its re-render: no gap)
     for (const S of movers) if (!S.back && ++S.still > STILL_FRAMES) { S.back = true; staticSoon(20); }
-    compU.uSOn.value = STATIC_SHADOW ? 1 : 0;
+    compU.uSOn.value = STATIC_SHADOW && !iso ? 1 : 0;
     for (const m of sExtra) m.visible = m.userData.frame === frameNo;   // (extra casters: before the shadow passes)
+    if (iso) isoHide(sScene);
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
       if (STATIC_SHADOW && sFollow) {   // a big world: the static box follows the view, on its lattice
         const cx = Math.round(view.T.x / SSTEP) * SSTEP, cz = Math.round(view.T.z / SSTEP) * SSTEP;
         if (cx !== sCx || cz !== sCz) { sCx = cx; sCz = cz; SBOX[0] = cx - SFOLLOW; SBOX[1] = cx + SFOLLOW; SBOX[4] = cz - SFOLLOW; SBOX[5] = cz + SFOLLOW; sDue = Math.min(sDue, frameNo); }
       }
-      if (STATIC_SHADOW && (frameNo >= sDue || !sDir.equals(sCast))) {
+      if (STATIC_SHADOW && !iso && (frameNo >= sDue || !sDir.equals(sCast))) {
         for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); sScene.remove(S.sm); sStatic.add(S.sm); movers.delete(S); }
         sDir.copy(sCast); fitStatic(sDir); sDue = Infinity;
         renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sStatic, sunCamS); renderer.render(sScene, sunCamS);   // (sScene: a layer-2 caster added from outside)
@@ -2466,27 +2476,29 @@ void main() {
       renderer.setRenderTarget(shadow); renderer.clear(true, true, false); renderer.render(sScene, sunCam);
       lap('shadow', renderer.info.render.calls);
     } else PS.shadow = 0;
-    if (hDirty && compU.uPtShadow.value > 0) {
+    if (hDirty && compU.uPtShadow.value > 0 && !iso) {
       renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sStatic, hCam); renderer.render(sScene, hCam); hDirty = false;
       for (const H of moved) H.hm.copy(H.sm.matrix);
       lap('hmap', renderer.info.render.calls);
     } else { PS.hmap = 0; tp = performance.now(); }
     moved.clear();
     for (const m of gExtra) m.visible = m.userData.frame === frameNo;
+    if (iso) isoHide(gScene);
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
     const calls = renderer.info.render.calls;
     lap('gbuf', calls);
     for (const m of xExtra) m.visible = m.userData.frame === frameNo;
+    if (iso) isoHide(xScene);
     renderer.setRenderTarget(xray); renderer.clear(true, false, false); if (!cine) renderer.render(xScene, camera);   // (no x-ray, no contact
-    if (aoFrame !== frameNo || cine) aoN = 0;                                                                         // shadows: the cinema camera)
+    if (aoFrame !== frameNo || cine || iso) aoN = 0;                                                                         // shadows: the cinema camera)
     compU.uAo.value.w = aoN ? compU.uAo.value.w : 0;
     if (aoN) { aoGeo.instanceCount = aoN; setRange(aoBuf, 0, aoN * 8); renderer.render(aoScene, dummyCam); }
     compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
-    if (msFrame !== frameNo) { compU.uMist.value.x = 0; mist.on = false; } else mistAnchors();
-    const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
-    let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
+    if (msFrame !== frameNo || iso) { compU.uMist.value.x = 0; mist.on = false; } else mistAnchors();
+    const fxN = iso ? 0 : fxB.add.n + fxB.blend.n, hN = iso ? 0 : fxB.heat.n;
+    let fxX = 0; for (const m of fxExtra) { m.visible = !iso && m.userData.frame === frameNo; if (m.visible) fxX++; }
     if (DS > 1 || DZ !== 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
-      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam); if (!cine) rays.draw();
+      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam); if (!cine && !iso) rays.draw();
       if (hN) {
         const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
         fxPxM();
@@ -2499,10 +2511,11 @@ void main() {
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
         renderer.render(fxScene, sub.x || sub.y || DZ !== 1 ? hdCamNow() : camera);   // (slid and magnified as the blit did the image: setSubpixel, setDisplay)
       }
-    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) rays.draw(); }
+    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine && !iso) rays.draw(); }
     if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)
     if (post) post.run(renderer);
     lap('post');
+    if (iso) { compU.uBg.value.copy(isoBg0); for (const c of isoHid) c.visible = true; clearArray(isoHid); }   // (the world as it was for anything after the frame)
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
     stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
     resetBatches(); for (const L of layerList) { L.used = L.gUsed = false; clearArray(L.runs); } lbN = 0; frameNo++;
@@ -2627,5 +2640,5 @@ void main() {
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub,
     godrays: rays, setRays: rays.set,   // (render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
-    setMist, get mist() { return mist; }};
+    setMist, get mist() { return mist; }, isolate, get isolated() { return !!iso; }};
 }

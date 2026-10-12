@@ -296,7 +296,8 @@ src/
                          owncheck.js (the ownership table + ?owncheck=1), cheats.js (the cheat panel, F2 in dev mode:
                          god mode, spawns, kill all, raids, game speed; its cheats are 'cheats' notes in host.mods),
                          wardrobe.js (the wardrobe screen, Shift+Tab in dev mode: photo mode's frozen world as its studio;
-                         clothes, test paint, a piece tuner, stats as 'wardrobe' notes, items, saved outfits; docs/GEAR.md)
+                         clothes, test paint, a piece tuner, stats as 'wardrobe' notes, items, saved outfits; docs/GEAR.md),
+                         stage.js (its stage + backdrop, drawn alone: G.isolate)
   vendor/three/          three.js 0.170.0
 ```
 

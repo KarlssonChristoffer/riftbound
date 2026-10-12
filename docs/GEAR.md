@@ -61,12 +61,18 @@ same whatever he wears; the effects still apply.
 
 A screen of its own for trying combinations and testing clothes (`dev/wardrobe.js`, dev mode only): Shift+Tab, or the
 menu's Game tab: Wardrobe. The game stands still (photo mode's frozen world and camera as its studio:
-`ui/photo.js toggle(true, studio)`), the camera comes in as close as it goes on the character, framed left of the panel on
-a dimmed backdrop. Drag to turn round him, right-drag to move, the wheel zooms, R frames him again, H hides the panel, Tab
-the next tab, P saves a photo, Esc (or Shift+Tab) back to the game: the camera, zoom and yaw come back as they were.
+`ui/photo.js toggle(true, studio)`, with a plain look: no tilt-shift, no vignette) and the character stands on a little
+STAGE, out of the world: `dev/stage.js` builds a stage (stone plinth, wooden drum, rug, meadow tuft, none) and a backdrop
+(velvet curtain, paper sweep, stone wall, night sky, open sky, or a plain dark / grey) in code (view/rigkit.js), drawn as
+pixel-art 3D like the characters, and `G.isolate(keep, bg)` (render/gfx.js) draws only his rig and the set's, on the
+backdrop's background colour (the world's layers, decals, clouds, mist, rays, particles and the cached static shadow left
+out; the backdrop casts no shadow). The set turns with the camera, so the backdrop stays behind him and the camera keeps him
+in the middle of what the panel leaves: drag to spin him, right-drag to move, the wheel zooms, R frames him again, H hides
+the panel, Tab the next tab, P saves a photo, Esc (or Shift+Tab) back to the game: the camera, zoom and yaw come back as
+they were. "the world" as the backdrop shows him where he stands instead, dimmed round him.
 
 - **Look.** The loadout; the studio's light (dawn, day, dusk, night: the world clock's preview, nothing changes in the
-  game), his pose (the live hero's emotes), the backdrop (world, dim, dark), turn 45 degrees, spin; a piece in each slot
+  game), his pose (the live hero's emotes), the backdrop and the stage, turn 45 degrees, spin; a piece in each slot
   (through `features/gear.js choose`: shown at once, worn when you go back to the game; in co-op the server is asked then);
   test paint on any zone of the model (a material, a picked colour, or hidden) and the duster tail's colour; and the
   **piece tuner**: pick a piece with shapes, pick a shape, and move, turn and size it on sliders (drawn as you drag, a
