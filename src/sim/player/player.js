@@ -321,9 +321,18 @@ export function createPlayer(H) {
     const e = elev(P.x, P.y), dz = e - P.z;
     if (dz !== 0 && (dz > 0 ? dz <= STEP_UP : dz >= -SNAP)) P.z = e;
   }
+  // a footfall's pace for its sound (features/audio.js): his speed where the authored speeds would put it (its place between walk,
+  // run and sprint), so a run sounds like a run at whatever m/s the modifiers made it; the speed itself when they changed none
+  function pace(v) {
+    const a = SPEED, b = SPEED0;
+    if (a.walk === b.walk && a.run === b.run && a.sprint === b.sprint) return v;
+    if (v <= a.walk) return v * b.walk / a.walk;
+    if (v <= a.run) return b.walk + (v - a.walk) * (b.run - b.walk) / Math.max(a.run - a.walk, 1e-3);
+    return b.run + (v - a.run) * (b.sprint - b.run) / Math.max(a.sprint - a.run, 1e-3);
+  }
   function puff(side, frameName, big = 1) {
     // at the landing foot, read from the rendered bone positions of the contact frame
-    ev({type: big > 1 ? 'player.land' : 'player.step', x: P.x, y: P.y, z: P.z, foot: side, big});
+    ev({type: big > 1 ? 'player.land' : 'player.step', x: P.x, y: P.y, z: P.z, foot: side, big, pace: pace(Math.hypot(P.vx, P.vy))});
     if (!H.dust || !A.SP[frameName]) return;
     const b = A.SP[frameName].bones[A.DIRS[P.face]], f = b[(side === 'L' ? 'Left' : 'Right') + 'Foot'];
     const [sx, sy] = T.toS(P.x, P.y, P.z);

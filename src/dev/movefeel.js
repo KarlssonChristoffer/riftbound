@@ -177,7 +177,10 @@ export function createMoveFeel({host, atlas}) {
       if (host.dev !== devWas) { devWas = host.dev; apply(); }   // (the first step too: the remembered sliders)
       if (!F.on) return;
       simT += dt;
-      for (const e of evs) if (e.type === 'player.step' || (e.type === 'player.land' && e.big === 2)) steps[nStep++ % STEPS] = simT;
+      for (const e of evs) if (e.type === 'player.step' || (e.type === 'player.land' && e.big === 2)) {
+        if (nStep && simT - steps[(nStep - 1) % STEPS] > .6) nStep = 0;   // (a pause: count from this run's footfalls only)
+        steps[nStep++ % STEPS] = simT;
+      }
     },
     frame({dt}) { if (!show()) return; if ((syncT -= dt) <= 0) { syncT = .25; sync(); } },
     hud() {
