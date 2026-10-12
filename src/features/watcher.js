@@ -26,6 +26,7 @@ const R = Math.random, rr = (a, b) => a + R() * (b - a), TAU = Math.PI * 2;
 // ---------------------------------------------------------------- tunables
 const TUNE = {
   every: [70, 200],          // s between two visits (by day)
+  first: 90,                 // s before the first
   night: .5, dusk: .75,      // x that at night / at dusk
   often: [5, 9],             // ?watcher=often: s between visits (testing)
   retry: 6,                  // s to look again when no spot was good
@@ -54,7 +55,7 @@ export async function create(host) {
   const THREE = host.THREE, G = host.G, often = flags.get('watcher') === 'often';
   const game = () => host.feature('game');
   // ---------------------------------------------------------------- state (view only)
-  const W = {phase: 'away', wait: often ? rr(...TUNE.often) : rr(...TUNE.every) * .6, x: 0, y: 0, gz: 0, s: 1, h: .7,
+  const W = {phase: 'away', wait: often ? TUNE.often[0] : TUNE.first,   // (no random draw before its first visit: the other views' draws stay as they were) x: 0, y: 0, gz: 0, s: 1, h: .7,
     up: 0, vu: 0, hopY: 0, hopV: 0, hopIn: 0, sq: 0, yaw: 0, lean: 0, leanTo: 0, peekIn: 0, life: 0, off: 0,
     side: 1, d0: 0, blink: 0, blinkIn: 2, dx: 0, dy: 0, dz: 0, dartIn: .5, rx: 1, ry: 0, fx: 0, fy: -1, params: null, A: null};
   F.state = W;
