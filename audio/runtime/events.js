@@ -78,10 +78,27 @@ const GSX = {
 };
 const gsx = o => (GSX[o?.gunsfx] ? o.gunsfx : GUN_SFX_DEF);
 // a flavored layer: the case for o's flavor, with its trim and send
-const GL = (recipe, c, o, extra = {}) => { const s = gsx(o), F = GSX[s]; return L(recipe, `${s}_${c}`, {send: F.send, ...extra, gainDb: (F[c] || 0) + (extra.gainDb || 0)}); };
+const GL = (recipe, c, o, extra = {}) => { const s = gsx(o), F = GSX[s]; return L(recipe, `${s}_${c}`, {send: F.send, ...extra, gainDb: (F[c.replace(/_dry$/, '')] || 0) + (extra.gainDb || 0)}); };
+// o.dry (src/audio/audio.js, where the space gives the shot its place: src/audio/acoustics.js): the shot's '_dry' case, sent to the
+// room's reverb at DRY_SEND (it carries the tail the wet case bakes in); DRY_DB: its peak sits ~1.5 dB over the wet case's (the
+// forge normalises loudness, and the dry one has no tail to share it)
+const DRY_SEND = .5, DRY_DB = -1.5, shotGL = (recipe, c, o) => o.dry ? GL(recipe, c + '_dry', o, {send: DRY_SEND, gainDb: DRY_DB}) : GL(recipe, c, o);
 const gunBanks = (recipe, cases, bp) => GUN_SFX.flatMap(s => cases.map(c => (bp == null ? [recipe, `${s}_${c}`] : [recipe, `${s}_${c}`, bp])));
 // the director's prefetch skips the other flavors' banks (they bake when picked: src/audio/audio.js prefetches again)
 export const otherGunSfx = style => (recipe, c) => { const m = /^(hollywood|gritty)_/.exec(c); return !!m && m[1] !== style; };
+// FISTS (forge recipe 'punch'; the events punch ... foePunch below): a move (content/fists.js MOVES) -> its case; a counter
+// hits one rung up the ladder; per-case trims (dB) so the ladder jab < cross < hook < upper < heavy reads after the forge's
+// loudness normalisation (a jab's bake sits ~2 dB under -20 LUFS: its peak is capped there); per move [dB, semitones] (the
+// clinch's short punches smaller, the knee a shorter kick); a breakable thing's impact case by audio.js's material
+const PUNCH_CASE = {jab: 'jab', jab2: 'jab', cl_l: 'jab', cl_r: 'jab', cross: 'cross', hook_l: 'hook', hook_r: 'hook', upper_l: 'upper', upper_r: 'upper',
+  hay: 'heavy', body: 'body', head: 'head', cl_head: 'head', round: 'kick', knee: 'kick'};
+const PUNCH_UP = {jab: 'cross', cross: 'hook', hook: 'upper', upper: 'heavy'};
+const PUNCH_DB = {jab: -.5, upper: -.5, heavy: 1};
+const PUNCH_MV = {jab2: [0, .4], cl_l: [-1.5, 1], cl_r: [-1.5, .5], cl_head: [-1, .5], knee: [-1, 1.5]};
+const PUNCH_HITS = ['jab', 'cross', 'hook', 'upper', 'heavy', 'body', 'head', 'kick'];
+const PUNCH_THING = {wood: 'wood', clay: 'clay', glass: 'crystal', crystal: 'crystal', stone: 'stone', straw: 'straw'};
+const BIG_SWING = {hay: 0, body: .8, round: -1.5};   // the moves that whoosh at their throw (fistCue): the swing's pitch (semitones)
+const punchCase = o => { const p = o.power ?? .5, c = PUNCH_CASE[o.mv] || (p >= .9 ? 'heavy' : p >= .65 ? 'upper' : p >= .45 ? 'cross' : 'jab'); return o.counter ? PUNCH_UP[c] || c : c; };
 
 export const EVENTS = {
   // ================================================ player movement ================================================
@@ -171,10 +188,10 @@ export const EVENTS = {
   // ================================================ the revolver (src/sim/player/gun.js; forge recipe 'revolver') ================================================
   gunshot: {   // o.gun 'peacemaker' (a sharp crack) | 'brass_navy' (a deeper boom), o.fan (a fanned shot: a touch softer)
     ...PLAYER, priority: 85, maxInstances: 4, coalesceMs: 0, gainDb: 0, send: .1, pitchSemi: .5, gainJitDb: 1, cooldownMs: 20,
-    pick: o => GL('revolver', o.gun === 'brass_navy' ? 'navy' : 'peacemaker', o),
+    pick: o => shotGL('revolver', o.gun === 'brass_navy' ? 'navy' : 'peacemaker', o),
     gainFrom: o => (o.fan ? -1.5 : 0),
     snapshot: {name: 'gunDuck', buses: {amb: -4, music: -2}, attack: .005, hold: .05, release: .4},
-    banks: gunBanks('revolver', ['peacemaker', 'navy']), variants: 5, bakePriority: 1,
+    banks: gunBanks('revolver', ['peacemaker', 'navy', 'peacemaker_dry', 'navy_dry']), variants: 5, bakePriority: 1,
   },
   gunDry: {...PLAYER, priority: 70, gainDb: -6, cooldownMs: 60, pick: () => L('revolver', 'dry'), banks: [['revolver', 'dry']], variants: 4, bakePriority: 2},
   gunDraw: {...PLAYER, priority: 55, gainDb: -10, cooldownMs: 100, pick: o => GL('revolver', 'cock', o), banks: gunBanks('revolver', ['cock']), variants: 4, bakePriority: 2},
@@ -190,8 +207,8 @@ export const EVENTS = {
   // back as a gunman starts to aim: the shot's telegraph in sound. (The bruiser's coach gun has its own: coach* below.)
   foeShot: {
     ...FOE, priority: 80, maxInstances: 4, gainDb: -2, send: .16, cooldownMs: 25, pitchSemi: .6,
-    pick: o => GL('revolver', o.gun === 'navy' ? 'navy' : 'peacemaker', o), gainFrom: o => (o.gun === 'navy' ? 1.5 : 0),
-    banks: gunBanks('revolver', ['peacemaker', 'navy']), variants: 5, bakePriority: 1,
+    pick: o => shotGL('revolver', o.gun === 'navy' ? 'navy' : 'peacemaker', o), gainFrom: o => (o.gun === 'navy' ? 1.5 : 0),
+    banks: gunBanks('revolver', ['peacemaker', 'navy', 'peacemaker_dry', 'navy_dry']), variants: 5, bakePriority: 1,
   },
   foeCock: {...FOE, priority: 62, gainDb: -6, cooldownMs: 60, pick: o => GL('revolver', 'cock', o), banks: gunBanks('revolver', ['cock']), variants: 4, bakePriority: 2},
   foeDraw: {...FOE, priority: 40, gainDb: -12, cooldownMs: 120, pick: () => L('revolver', 'holster'), banks: [['revolver', 'holster']], variants: 4, bakePriority: 4},
@@ -210,7 +227,7 @@ export const EVENTS = {
   // foeHolster above)
   coachShot: {
     ...FOE, priority: 82, maxInstances: 4, gainDb: 0, send: .18, cooldownMs: 25, pitchSemi: .5,
-    pick: o => GL('coachgun', 'fire', o), banks: gunBanks('coachgun', ['fire']), variants: 6, bakePriority: 1,
+    pick: o => shotGL('coachgun', 'fire', o), banks: gunBanks('coachgun', ['fire', 'fire_dry']), variants: 6, bakePriority: 1,
   },
   coachCock: {...FOE, priority: 62, gainDb: -6, cooldownMs: 60, pick: o => GL('coachgun', 'cock', o), banks: gunBanks('coachgun', ['cock']), variants: 4, bakePriority: 2},
   coachReload: {   // o.mark break | dump | load | close
@@ -332,6 +349,127 @@ export const EVENTS = {
     pick: () => L('stomp', 'hop'), banks: [['stomp', 'hop']], variants: 6, bakePriority: 3,
   },
   slam: {...IMPACT, priority: 70, maxInstances: 2, gainDb: -2, pick: () => L('stomp', 'slam'), banks: [['stomp', 'slam']], variants: 4, bakePriority: 7},   // a heavy creature (later)
+
+  // ================================================ fists (forge recipe 'punch'; docs/exp/fists.md) ================================================
+  // the live cowboys' bare-knuckle fight, mapped by src/audio/audio.js: fist.hit / fist.whiff / fist.grab (features/fists.js),
+  // player.fist (sim/player/fists.js), foe.fwind / foe.punch (features/foes/brawler.js). A blow sounds at its contact (the
+  // hitstop's first frame); the small punches have no whoosh of their own (only a whiff at nothing), the big ones (haymaker,
+  // body, roundhouse) whoosh at their throw (fistCue). No cooldowns: a string's punches come 0.1-0.2 s apart
+  punch: {   // fist.hit: o.kind body (a gunman, a brute) | straw (a dummy) | thing (a pot, a crate: o.mat its material); o.mv, o.power
+    // 0..1 (the move's weight and a heavy's charge: +-1 dB), o.counter (one rung heavier, +1.5 dB), o.ko (the heavy's thump under it)
+    ...IMPACT, priority: 78, maxInstances: 4, steal: 'oldest', coalesceMs: 0, gainDb: -3, send: .1, pitchSemi: .6, gainJitDb: 1.2,
+    pick: o => {
+      const c = punchCase(o), m = PUNCH_MV[o.mv] || [0, 0], db = (PUNCH_DB[c] || 0) + m[0] + (o.counter ? 1.5 : 0);
+      if (o.kind === 'straw') return [L('impact', 'straw', {gainDb: -1}), L('punch', c, {gainDb: db - 4, semi: m[1] + 1})];   // a dummy: the straw, the knuckles on burlap under it
+      if (o.kind === 'thing') return [L('impact', PUNCH_THING[o.mat] || 'wood', {gainDb: -1}), L('punch', 'jab', {gainDb: -6})];   // knuckles on a pot, a crate
+      const out = [L('punch', c, {gainDb: db + (o.ko && c === 'heavy' ? 1.5 : 0), semi: m[1]})];
+      if (o.ko && c !== 'heavy') out.push(L('punch', 'heavy', {gainDb: -3, delayMs: [3, 8]}));   // a knockout: the heavy's thump under the blow
+      return out;
+    },
+    gainFrom: o => ((o.power ?? .5) - .5) * 2,
+    banks: [...PUNCH_HITS.map(c => ['punch', c]), ['impact', 'straw'], ['impact', 'wood', 3], ['impact', 'clay', 3], ['impact', 'crystal', 4], ['impact', 'stone', 4]],
+    variants: 6, bakePriority: 1,
+  },
+  punchBlock: {   // a blow on a raised guard: fist.hit kind block (his forearms); o.power (a heavy one blocked: the thud through the guard)
+    ...IMPACT, priority: 70, maxInstances: 3, steal: 'oldest', coalesceMs: 0, gainDb: -4, send: .1, pitchSemi: .8, gainJitDb: 1.2,
+    pick: o => ((o.power ?? .5) >= .7 ? [L('punch', 'block', {semi: -1}), L('punch', 'body', {gainDb: -9, delayMs: 2})] : L('punch', 'block', {semi: (o.power ?? .5) < .35 ? 1 : 0})),
+    gainFrom: o => ((o.power ?? .5) - .5) * 3,
+    banks: [['punch', 'block'], ['punch', 'body']], variants: 6, bakePriority: 1,
+  },
+  whiff: {   // fist.whiff: a small punch at nothing (the big ones whooshed at their throw: fistCue); o.power: a weightier one lower, louder
+    ...PLAYER, priority: 40, maxInstances: 3, gainDb: -12, send: .06, pitchSemi: .9, gainJitDb: 1.5,
+    pick: o => L('punch', 'whiff', {semi: (.3 - (o.power ?? .3)) * 4}),
+    gainFrom: o => ((o.power ?? .3) - .3) * 5,
+    banks: [['punch', 'whiff']], variants: 6, bakePriority: 2,
+  },
+  fistCue: {   // player.fist: o.phase throw (a big one's whoosh, peaking at its contact: o.mv hay | body | round, o.k its charge) | slip
+    // (the bob-and-weave) | counter (the window opened: a fist clenching in leather; subtle, but it reads over the fight) | charge
+    // (a heavy charging: the arm drawn back, the leather creaking). The cues keep their own voices (never stolen by a swing)
+    ...PLAYER, priority: 50, maxInstances: 3, gainDb: -11, send: .06, pitchSemi: .5, gainJitDb: 1,
+    pick: o => {
+      switch (o.phase) {
+        case 'slip': return L('punch', 'slip', {gainDb: -2});
+        case 'counter': return L('punch', 'ready', {gainDb: 1.5, key: 'fistCue_ready'});
+        case 'charge': return L('punch', 'windup', {gainDb: -3, key: 'fistCue_charge'});
+        default: return L('punch', 'swing', {semi: BIG_SWING[o.mv] ?? 0});
+      }
+    },
+    gainFrom: o => (o.phase === 'throw' ? (o.k ?? 0) * 2 : 0),
+    banks: [['punch', 'swing'], ['punch', 'slip'], ['punch', 'ready'], ['punch', 'windup']], variants: 6, bakePriority: 2,
+  },
+  fistGrab: {   // fist.grab: o.ok his shirt caught (two hands on the cloth, chest to chest) | a grab at the air (a short swish)
+    ...PLAYER, priority: 55, maxInstances: 2, gainDb: -7, send: .08, pitchSemi: .6,
+    pick: o => (o.ok ? L('punch', 'grab') : L('punch', 'whiff', {gainDb: -5, semi: -2})),
+    banks: [['punch', 'grab'], ['punch', 'whiff']], variants: 6, bakePriority: 2,
+  },
+  foeWind: {   // foe.fwind: an unarmed gunman's punch telegraph: o.n 1 a jab (a short cloth rustle, low) | 2 a haymaker (his arm drawn back,
+    // the leather creaking: clearer, it is the cue to slip). Where he stands (combat's screen rule)
+    ...FOE, priority: 58, maxInstances: 3, gainDb: -12, send: .1, cooldownMs: 60,
+    pick: o => (o.n === 2 ? L('punch', 'windup', {gainDb: 4, semi: -1.5}) : L('punch', 'slip', {gainDb: -1, semi: 1.5})),
+    banks: [['punch', 'windup'], ['punch', 'slip']], variants: 6, bakePriority: 2,
+  },
+  foePunch: {   // foe.punch: his blow at you: o.phase hit (the smack over your own hurt: player.hit plays that) | block (on your
+    // forearms) | slip / miss (his fist through the air); o.n 1 a jab / 2 a haymaker. Heard as yours (never faded)
+    ...FOE, cat: 'player', bus: 'sfx.impacts', priority: 72, maxInstances: 3, steal: 'oldest', gainDb: -4, send: .1, pitchSemi: .7, gainJitDb: 1.2,
+    pick: o => {
+      const hay = o.n === 2;
+      if (o.phase === 'hit') return L('punch', hay ? 'heavy' : 'jab', {gainDb: hay ? 1 : 0, semi: -1});
+      if (o.phase === 'block') return L('punch', 'block', {gainDb: hay ? 2 : 0});
+      return L('punch', 'whiff', {gainDb: hay ? -5 : -7, semi: hay ? -2.5 : -.5});
+    },
+    banks: [['punch', 'jab'], ['punch', 'heavy'], ['punch', 'block'], ['punch', 'whiff']], variants: 6, bakePriority: 1,
+  },
+
+  // ================================================ WOODCUTTING (forge recipe 'woodcut'; docs/GATHERING.md) ================================================
+  // felling oaks with an axe, mapped by src/audio/audio.js: tree.chop / tree.fell / tree.land / tree.logs / tool.whiff (features/woodcut.js),
+  // pack.add of a log (features/pack.js), fire.addWood (features/campfires.js, lights.js). The axe's work (a bite, a swing, a log into the
+  // pouch) is the player's (never faded); the tree's fall and its logs are world sounds where they land. Every pick's `alt` is the bank
+  // stand-in it replaced, at that stand-in's level, while woodcut bakes (the bake levels: woodcut ~-20..-21 LUFS, impact/wood -21)
+  chop: {   // tree.chop: o.k 0 a glance off wood too hard for the axe | else 0..1 how deep (it grows as the tree weakens: k >= .85 the last,
+    // deepest bites, the trunk starting to give); a deeper bite a little lower and louder
+    ...IMPACT, cat: 'player', priority: 70, maxInstances: 3, steal: 'oldest', coalesceMs: 0, gainDb: -2.5, send: .12, pitchSemi: .6, gainJitDb: 1.2, cooldownMs: 60,
+    pick: o => {
+      const k = o.k ?? .5, alt = [L('impact', 'wood', {gainDb: 1}), L('prop', 'kick', {gainDb: -4.5})];
+      if (!(k > 0)) return L('woodcut', 'glance', {gainDb: -2.5, alt: L('impact', 'clay', {gainDb: -1.5})});
+      return L('woodcut', k >= .85 ? 'chop_deep' : 'chop', {semi: (.6 - k) * 1.5, alt});
+    },
+    gainFrom: o => (o.k > 0 ? (o.k - .5) * 2 : 0),
+    banks: [['woodcut', 'chop'], ['woodcut', 'chop_deep'], ['woodcut', 'glance'], ['impact', 'wood'], ['impact', 'clay', 4], ['prop', 'kick', 4]], variants: 6, bakePriority: 2,
+  },
+  treeCrack: {   // tree.fell: the last bite; the hinge splits as the tree starts to fall (~1 s of cracks over a groan, the last as it tips);
+    // o.scale the tree's size (a bigger one lower)
+    ...WORLD, priority: 72, maxInstances: 2, steal: 'oldest', gainDb: -1, send: .2, pitchSemi: .5, gainJitDb: 1, cooldownMs: 200,
+    pick: o => L('woodcut', 'crack', {semi: clamp((1 - (o.scale ?? 1)) * 3, -2, 1.5), alt: L('crate_break', 'crate')}),
+    banks: [['woodcut', 'crack'], ['crate_break', 'crate', 4]], variants: 4, bakePriority: 3,
+  },
+  treeCrash: {   // tree.land: the crown and the trunk come down (o.r the crown's radius: a bigger tree lower and louder)
+    ...WORLD, priority: 76, maxInstances: 2, steal: 'oldest', gainDb: 1.5, send: .25, pitchSemi: .5, gainJitDb: 1, cooldownMs: 300,
+    pick: o => L('woodcut', 'crash', {semi: clamp((1.3 - (o.r ?? 1.3)) * 1.5, -2, 1.5), alt: [L('impact', 'thud', {gainDb: -.5}), L('creature', 'critter', {gainDb: -13.5})]}),
+    gainFrom: o => clamp(((o.r ?? 1.3) - 1.3) * 2, -2, 2),
+    banks: [['woodcut', 'crash'], ['impact', 'thud', 4], ['creature', 'critter', 5]], variants: 4, bakePriority: 3,
+  },
+  treeLogs: {   // tree.logs: the fallen trunk breaks into o.n logs (3-4 knocks on the earth, a bark scrape)
+    ...WORLD, priority: 55, gainDb: -4, cooldownMs: 200,
+    pick: () => L('woodcut', 'logs', {alt: L('prop', 'drop', {gainDb: 3})}),
+    gainFrom: o => clamp(((o.n ?? 3) - 3) * .8, -1.5, 1.5),
+    banks: [['woodcut', 'logs'], ['prop', 'drop', 5]], variants: 4, bakePriority: 4,
+  },
+  logPick: {   // pack.add of a log: one goes into the pouch (they come in a run: a short cooldown, few voices)
+    ...PLAYER, priority: 35, maxInstances: 3, steal: 'oldest', gainDb: -10, send: .05, pitchSemi: .8, gainJitDb: 1.5, cooldownMs: 40,
+    pick: () => L('woodcut', 'pickup', {alt: L('impact', 'wood', {gainDb: -2})}),
+    banks: [['woodcut', 'pickup'], ['impact', 'wood']], variants: 6, bakePriority: 3,
+  },
+  axeSwing: {   // tool.whiff: the axe through the air at nothing (a bite or a hit is heard at its contact, with no whoosh: there is no
+    // swing-start event, and one at the blow would come after the bite)
+    ...PLAYER, priority: 40, maxInstances: 2, gainDb: -8, send: .06, pitchSemi: .8, gainJitDb: 1.5, cooldownMs: 80,
+    pick: () => L('woodcut', 'swing', {alt: L('cloth', 'jump', {gainDb: -11})}),
+    banks: [['woodcut', 'swing'], ['cloth', 'jump', 4]], variants: 6, bakePriority: 3,
+  },
+  campLog: {   // fire.addWood: a log tossed on a campfire (a soft thump on the embers, then the flare's crackle)
+    ...WORLD, priority: 50, maxInstances: 2, gainDb: -7, send: .15, cooldownMs: 250,
+    pick: () => L('woodcut', 'campfire', {alt: L('impact', 'thud', {gainDb: -4})}),
+    banks: [['woodcut', 'campfire'], ['impact', 'thud', 5]], variants: 4, bakePriority: 5,
+  },
 
   // ================================================ physical props (props3d.js) ================================================
   tip: {...WORLD, priority: 55, gainDb: -3, cooldownMs: 150, pick: () => L('prop', 'tip'), banks: [['prop', 'tip']], variants: 6, bakePriority: 4},

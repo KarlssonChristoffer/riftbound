@@ -729,8 +729,10 @@ function westRuins(q, ctx) {
   const S = STYLES.ruins, {PPM, WPX, HPX, X0, Y0} = ctx, GH = ctx.ground, G = new Pix(WPX, HPX);
   const K = {...ctx, PPMY: PPM, G, ox: X0, oy: Y0, X: m => Math.round((m - X0) * PPM), Y: m => Math.round((m - Y0) * PPM)};
   const fill = fn => { for (let y = 0; y < HPX; y++) { const my = Y0 + y / PPM; for (let x = 0; x < WPX; x++) fn(x, y, X0 + x / PPM, my); } };
-  const F = new Float32Array(WPX * HPX);
-  fill((x, y, mx, my) => { F[y * WPX + x] = (GH ? GH(mx, my) : 0) + fbm(mx * .2, my * .2, 14) * .3; });
+  // (the painted noise's share in the swells' light: .3 lit and shaded the flat ground between the hills in soft blobs as dark as
+  // a cast shadow, shadows with nothing casting them; with one sun (gfx.js setSun, ?onesun=0: .3) the real hills carry it)
+  const F = new Float32Array(WPX * HPX), NK = flags.get('onesun') !== '0' ? .12 : .3;
+  fill((x, y, mx, my) => { F[y * WPX + x] = (GH ? GH(mx, my) : 0) + fbm(mx * .2, my * .2, 14) * NK; });
   const r3 = Math.round(.3 * PPM), slope = (x, y) => {
     const yn = Math.max(0, y - r3), ys = Math.min(HPX - 1, y + r3), xw = Math.max(0, x - r3), xe = Math.min(WPX - 1, x + r3);
     return (F[ys * WPX + x] - F[yn * WPX + x]) + (F[y * WPX + xe] - F[y * WPX + xw]) * .5;
@@ -808,7 +810,8 @@ function forestRuins(q, ctx) {
     return (x, y) => { const fx = x / CG, fy = y / CG, i = fx | 0, j = fy | 0, u = fx - i, v = fy - j, k = j * GW + i, a = D[k], b = D[k + 1], c = D[k + GW], d = D[k + GW + 1];
       return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; };
   };
-  const Hc = coarse((mx, my) => (GH ? GH(mx, my) : 0) + fbm(mx * .2, my * .2, 14) * .3), Gc = coarse((mx, my) => fbm(mx * .2, my * .2, 11)), Mc = coarse((mx, my) => vn(mx * .9, my * .9, 81));
+  const NK = flags.get('onesun') !== '0' ? .12 : .3;   // (the painted noise's share in the slope light: westRuins' with one sun)
+  const Hc = coarse((mx, my) => (GH ? GH(mx, my) : 0) + fbm(mx * .2, my * .2, 14) * NK), Gc = coarse((mx, my) => fbm(mx * .2, my * .2, 11)), Mc = coarse((mx, my) => vn(mx * .9, my * .9, 81));
   const F = new Float32Array(WPX * HPX);
   fill((x, y) => { F[y * WPX + x] = Hc(x, y); });
   const r3 = Math.round(.3 * PPM), slope = (x, y) => {

@@ -7,7 +7,7 @@ everyone sees it). No inventory yet: every piece is there to try on, as in a war
 
 ## Try it
 
-Tab opens the gear panel (left of the screen). Click a piece to wear it, "own" to take that slot off (the character's own
+Tab opens the pack (features/pack.js: bag, pouch, skills) and the gear panel beside it; with `?pack=0` Tab opens the gear panel alone. Click a piece to wear it, "own" to take that slot off (the character's own
 clothes). Point at a piece to read what it is, what it does now and what it will do later ("not in the game yet": the
 systems it needs, like cold or fire, aren't there yet). The bottom line is the set's weight, armor and speed.
 The set is remembered on this machine. `?gear=wool_cap,mail_shirt` wears a set from the URL (tests); `?gear=none` none.

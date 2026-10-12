@@ -148,6 +148,11 @@ const DUR = {fire: 1.9, break: .4, eject: .75, load: .3, close: .45, cock: .2, d
 // hollywood's rings in a small room, gritty's is dry and heavy.
 // Echoes and tails are mixed by ENERGY against the barrel's core above 150 Hz (g = amplitude ratio of the RMS totals).
 const STYLES = ['hollywood', 'gritty'];
+// DRY (the space, src/audio/acoustics.js: the world gives a shot its place): the same shot with only the place's first 45 ms
+// of reflections and a short tail (no discrete echoes, no long roll); the room round the listener adds the rest (its reverb,
+// the echoes off the faces round him). Cases '<flavor>_fire_dry'
+const dryOf = P => ({...P, er: P.er && {...P.er, n: Math.ceil(P.er.n / 2), t: [P.er.t[0], Math.min(P.er.t[1], .045)]}, echoes: [],
+  tail: {...P.tail, rt: .32, roll: 0, g: P.tail.g * .55}, dur: Math.min(P.dur, .9)});
 const energy = b => { let e = 0; for (let i = 0; i < b.length; i++) e += b[i] * b[i]; return e; };
 // a discrete echo of `src` (energy en) at sample i0: smeared by sparse taps over sm s (a rough, far wall), darkened by two
 // low-passes at lp, thinned below hp; energy g^2 of the source's
@@ -252,14 +257,15 @@ const WEST = {
 
 export default {
   id: 'coachgun', version: 3, desc: 'The bruiser\'s double-barrelled coach gun: a black-powder 12-gauge boom with a rolling desert tail, the break, the shells out, a shell in, the close, the hammer; v2-3: the western-movie flavors (hollywood / gritty barrels and cocks)',
-  params: {act: {values: ['fire', 'break', 'eject', 'load', 'close', 'cock', 'dry'], def: 'fire'}, style: {values: ['v1', ...STYLES], def: 'v1'}},
+  params: {act: {values: ['fire', 'break', 'eject', 'load', 'close', 'cock', 'dry'], def: 'fire'}, style: {values: ['v1', ...STYLES], def: 'v1'}, dry: {values: [0, 1], def: 0}},
   cases: {fire: {act: 'fire'}, break: {act: 'break'}, eject: {act: 'eject'}, load: {act: 'load'}, close: {act: 'close'}, cock: {act: 'cock'}, dry: {act: 'dry'},
-    ...Object.fromEntries(STYLES.flatMap(s => ['fire', 'cock'].map(a => [`${s}_${a}`, {act: a, style: s}])))},
+    ...Object.fromEntries(STYLES.flatMap(s => ['fire', 'cock'].map(a => [`${s}_${a}`, {act: a, style: s}]))),
+    ...Object.fromEntries(STYLES.map(s => [`${s}_fire_dry`, {act: 'fire', style: s, dry: 1}]))},
   variants: 6,
   render(p, R, sr) {
     const a = p.act;
     if (p.style !== 'v1' && WEST[p.style]?.[a]) {
-      const P = WEST[p.style][a], out = new Float32Array(Math.round(P.dur * sr));
+      const P = p.dry && a === 'fire' ? dryOf(WEST[p.style][a]) : WEST[p.style][a], out = new Float32Array(Math.round(P.dur * sr));
       if (a === 'cock') wcock(out, sr, R, P); else wfire(out, sr, R, P);
       filter(out, 'highpass', P.out.hp, .7, sr);
       if (P.out.lp) { filter(out, 'lowpass', P.out.lp, .5412, sr); filter(out, 'lowpass', P.out.lp, 1.3066, sr); }   // the optical track's edge

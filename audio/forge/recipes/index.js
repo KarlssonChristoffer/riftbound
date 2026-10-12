@@ -46,6 +46,10 @@ export const RECIPES = [
   'canid',
   // the sandbox's bells and plates (features/bells.js): tuned brass bells
   'bell',
+  // the live cowboys' fists (features/fists.js, docs/exp/fists.md): blows, whooshes, the counter's cue, the clinch
+  'punch',
+  // woodcutting (features/woodcut.js, docs/GATHERING.md): the chop, the glance, the hinge's crack, the crash, the logs, the pickup, the swing, a log on the fire
+  'woodcut',
 ];
 export async function loadRecipes(ids = RECIPES) {
   const out = {};

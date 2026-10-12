@@ -39,6 +39,7 @@ const toGround = TERRAIN_ON ? p => { p.z = elev(p.x, p.y); } : () => {};
 import {TYPES, TUNE} from '../../content/foes.js';
 import {flight, throwBody, stepFlight, feetOf} from '../../sim/bodyfly.js';   // a kicked gunman's flight (docs/exp/brawl.md)
 import {TUNE as BRAWL} from '../../content/brawl.js';
+import {createBrawler} from './brawler.js';   // the unarmed ones box (docs/exp/fists.md)
 const CALLS = TUNE.calls, BODY = BRAWL.body;
 
 const DEG = Math.PI / 180;
@@ -182,6 +183,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
       look: R() * A.perceive, d: hypot2(P.x - x, P.y - y), los: false, lost: 0, rph: '', rt: 0, rk: 0, rfirst: true, r0: 0,
       stuck: 0, sideT: 0, way: false, wx: 0, wy: 0, wayT: 0, flinch: 0, hitAge: 99, hitFront: true,
       rope: 0, down: null,   // rope: s left on a lasso (features/equip/lasso.js); down: knocked off his feet (fling below)
+      snare: 0,   // s left with his legs snared (the lasso's snare: he can't take a step; his gun still works)
       hat: true, gunIn: true, fetch: null, sting: 0, stag: 0, limp: 0, wet: 0, spare: 0, F: null};   // BRAWL (below): his hat on, his gun in his hand or holster, what he goes to pick up, the hand stung, staggering, limping, his powder wet, the spare's clock, a kick's flight
     ents.add(p); gang.push(g); byP.set(p, g);
     return g;
@@ -291,7 +293,8 @@ export function createFoesSim(host, {unarmed = false} = {}) {
     const p = g.p, T = g.T, dx = P.x - p.x, dy = P.y - p.y, d = g.d || 1, ux = dx / d, uy = dy / d;
     let mx = 0, my = 0, speed = 0, gait = '';
     g.strafeT -= dt; g.sideT -= dt;
-    if (g.rope > 0) { mx = -ux; my = -uy; speed = T.speed.walk * A.roped; gait = 'walk'; }   // roped: he leans away from you, slowly
+    if (g.snare > 0) g.snare = Math.max(0, g.snare - dt);   // snared (the lasso's): rooted, not a step (his gun goes on: gun() above)
+    else if (g.rope > 0) { mx = -ux; my = -uy; speed = T.speed.walk * A.roped; gait = 'walk'; }   // roped: he leans away from you, slowly
     else if (!planted(g) && !S.down) {
       const far = g.mode === 'enter' || !g.los || d > T.range[1];
       if (far) {   // close in: the nav's way round walls and water, or straight at you
@@ -411,6 +414,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
       const g = gang[i]; if (!g.p.broken) continue;
       if (g.act === 'aim') S.aiming--;
       if (g.p.name !== g.T.name) S.bounty = false;   // the named one fell: the next poster may call another
+      brawler.gone(g);
       byP.delete(g.p); gang.splice(i, 1);
     }
     // gangs: the clock, a request (the dev key, a poster). Unarmed: the clock waits while any of the pair is up
@@ -431,6 +435,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
       if (g.down) { downStep(g, dt); continue; }
       g.d = hypot2(P.x - p.x, P.y - p.y);
       if (hands(g, dt, i)) continue;   // stung, staggering, going for his hat or his gun (BRAWL)
+      if (brawler.step(g, dt)) continue;   // a fist fight (the unarmed ones: features/foes/brawler.js)
       if ((g.look -= dt) <= 0) {
         g.look += A.perceive;
         const same = Math.abs(P.z - p.z) < 1.2 || g.d > 4;   // (on the mesa you're seen from below, not from under its lip)
@@ -467,6 +472,9 @@ export function createFoesSim(host, {unarmed = false} = {}) {
     else if (D.t >= A.getUp) { g.down = null; g.act = 'holstered'; g.at = 0; g.vx = g.vy = 0; g.lost = 0; afterDown(g); }   // (BRAWL: his hat or gun lying near)
     g.d = hypot2(P.x - p.x, P.y - p.y);
   }
+  // snare(p, sec): his legs snared sec s (the lasso's STRENGTH: too heavy to pull): he stands where he is, his gun still
+  // works -> false when he's down (in the air, lying) or gone
+  function snare(p, sec) { const g = byP.get(p); if (!g || g.down || p.broken) return false; g.snare = Math.max(g.snare, sec); g.rope = 0; g.vx = g.vy = 0; return true; }
   // roped(p, sec): on a lasso sec s more (his gun goes down: gun() above; he leans away: legs()); shift(p, dx, dy): dragged
   // along the ground by up to (dx, dy) (what he can stand on stops it) -> the distance moved; fling(p, x, y, o): yanked off
   // his feet at (x, y) (the first spot he can stand on from there back toward him): o = {dur, h, dmg, stun, dmgFly, bowl,
@@ -485,7 +493,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
   function carry(p, x, y, h) {
     const g = byP.get(p); if (!g || p.broken || (g.down && g.down.ph !== 'carry')) return false;
     if (solid(x, y, h + .3) || elev(x, y) > (p.z || 0) + .3) return false;
-    if (!g.down) { if (g.act === 'aim') S.aiming--; g.act = 'holstered'; g.at = 0; g.rope = 0; g.flinch = 0; g.vx = g.vy = 0; g.speed = 0; g.gait = '';
+    if (!g.down) { if (g.act === 'aim') S.aiming--; g.act = 'holstered'; g.at = 0; g.rope = 0; g.snare = 0; g.flinch = 0; g.vx = g.vy = 0; g.speed = 0; g.gait = '';
       g.down = {ph: 'carry', t: 0, x0: p.x, y0: p.y, x1: p.x, y1: p.y, dur: .3, H: 0, h0: 0, dmg: 0, stun: .6, dmgFly: 0, bowl: .55, hit: [], onLand: null}; }
     g.down.t = 0; p.x = x; p.y = y; p.h = h; g.face = wrap(g.face + .35);
     return true;
@@ -495,7 +503,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
     if (g.act === 'aim') S.aiming--;
     const dx = p.x - x, dy = p.y - y; let tx = p.x, ty = p.y;
     for (let k = 0; k <= 12; k++) { const cx = x + dx * k / 12, cy = y + dy * k / 12; if (standable(cx, cy, p)) { tx = cx; ty = cy; break; } }
-    g.act = 'holstered'; g.at = 0; g.rope = 0; g.flinch = 0; g.vx = g.vy = 0; g.speed = 0; g.gait = '';
+    g.act = 'holstered'; g.at = 0; g.rope = 0; g.snare = 0; g.flinch = 0; g.vx = g.vy = 0; g.speed = 0; g.gait = '';
     g.down = {ph: 'fly', t: 0, x0: p.x, y0: p.y, x1: tx, y1: ty, dur: o.dur, H: o.h, h0: o.h0 || 0, dmg: o.dmg || 0, stun: o.stun || 1, dmgFly: o.dmgFly || 0, bowl: o.bowl ?? .55, hit: [], onLand: o.onLand || null};
     return g.down;
   }
@@ -525,7 +533,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
     if (g.down && g.down.ph !== 'thrown' && g.down.ph !== 'fly' && g.down.ph !== 'carry') return false;
     const out = g.act === 'ready' || g.act === 'aim' || g.act === 'fire';
     if (g.act === 'aim') S.aiming--;
-    g.act = 'holstered'; g.at = 0; g.rope = 0; g.flinch = 0; g.vx = g.vy = 0; g.speed = 0; g.gait = ''; g.fetch = null; g.sting = g.stag = 0;
+    g.act = 'holstered'; g.at = 0; g.rope = 0; g.snare = 0; g.flinch = 0; g.vx = g.vy = 0; g.speed = 0; g.gait = ''; g.fetch = null; g.sting = g.stag = 0;
     const F = g.F ??= flight();
     if (!g.down || g.down.ph !== 'thrown') F.on = false;
     throwBody(F, p.x, p.y, p.z || 0, vx, vy, up, {mid: .95, lie: .16, r: .26, h0: (p.h || 0) + .95});
@@ -737,8 +745,13 @@ export function createFoesSim(host, {unarmed = false} = {}) {
   function carryLoose(it, x, y, h, yaw) { if (!it.on || !it.held) return; it.x = x; it.y = y; it.h = h; it.yaw = yaw; }
   function tossLoose(it, vx, vy, vh) { if (!it.on) return false; it.held = false; it.rest = false; it.vx = vx; it.vy = vy; it.vh = vh; it.t = 0; it.by = 'player'; return true; }
 
+  // FISTS (docs/exp/fists.md): the unarmed gunmen's fist fight, and the player's blows on them (features/fists.js)
+  const brawler = createBrawler(host, {gang, byP, P, R, RR, standable, walkTo, halt, emit, emitBody, launch, hatOff, wrap, toGround, solid, elev, steer, A,
+    unarmed: () => !!U});
+
   return {
-    gang, B, S, nav, KINDS, update, removeAll, roped, shift, fling, carry, TUNE_GETUP: A.getUp, unarmed: !!U,
+    brawler,
+    gang, B, S, nav, KINDS, update, removeAll, roped, shift, fling, carry, snare, TUNE_GETUP: A.getUp, unarmed: !!U,
     launch, hatOff, disarm, stagger, loose, kickLoose, holdLoose, carryLoose, tossLoose, gunPoint, recOf: p => byP.get(p) || null,   // BRAWL (below)
     get alive() { return gang.length; },
     request(n = 0, o = null) { S.want = n || -1; S.wantO = o; },   // a gang now (-1: the usual size): read by the next step

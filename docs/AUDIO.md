@@ -366,6 +366,7 @@ Each one is a pure picker returning `[{buffer, gain, rate, delay}]`.
   - The western loadouts (2026-10-02): recipe `revolver` (cases peacemaker: a sharp crack, navy: a deeper boom, both with a dry desert tail: brown decay + soft low-passed rock slaps, nothing tonal; dry, cock, load, eject, spin, holster: short steel ticks, t60 < 15 ms). Events gunshot (a short ambience duck), gunDry, gunDraw, gunReload {phase}, gunHolster, fired by src/audio/audio.js from player.shoot / dryfire / draw / reload / holster; a bullet is no arrow there (no bow shot, no stuck thud: bullet.impact). Not listened to yet.
   - The bruiser's coach gun (2026-10-03): recipe `coachgun` (fire: a black-powder 12-gauge, one barrel per variant: a long Friedlander pulse low-passed ~3 kHz, a band-passed powder chuff ~300-600 Hz, a roughened pink body, a damped ~50 Hz thump, a rolling brown desert tail with 3-5 ever darker rock slaps; against navy: centroid 160-295 Hz vs 240-460, t60 0.95-1.9 s vs 0.65-0.95, > 4 kHz -55..-46 dB vs -38..-30; break, eject (the shells into sand: dull taps), load, close (a heavy damped lock), cock (one hammer: the aim's telegraph), dry: damped low-mid thocks and low steel ticks, t60 <= 40 ms). Events coachShot (2 dB over the revolvers' foeShot), coachCock (foe.aim), coachReload {mark: break (foe.reload start) | dump | load | close (foe.clip: features/foes/look.js says them on the clip's frames)}, combat's screen rule like every foe sound, synth fallbacks with the same rule; bandit and sheriff keep foeShot / foeCock / foeReload. dry has no trigger yet (a gunman never dry-fires: an empty gun is reloaded). Not listened to yet.
   - Gun feel (2026-10-03, the user: "heavier, more power", audible hit feedback): revolver v2 (peacemaker / navy: a powder blast, more body and thump, a weightier dark tail, an outdoor slapback 65-110 ms out and a faint far answer, darker on top: > 4 kHz peacemaker -38..-30 dB, was -25..-19). Recipe `bullet`: sand (thud, puff, grain spray), stone (a hard chip, chips falling), wood (a solid thunk), metal (a damped clank, at most a spark tick), ricochet (a dark falling whine), flesh (a punchy thump, not gory), crit (heavier), confirm (the player's soft low hit-confirm thock), pierce (a wet, tearing whump). Events bulletHit {mat: sand | stone | wood | metal, foe} from bullet.impact (src/audio/audio.js: the desert's groundAt, a tree, a prop's kind through ctx.propAt; a ricochet layered 14% of the time off stone / metal, 7% for a gunman's), fleshHit {crit} and hitConfirm (gun loadouts, at the listener: never faded) from combat.hit (features/combat/core.js damage), bulletPierce from bullet.pierce (the feel branch's event). Not listened to yet.
+  - The fists (2026-10-08, docs/exp/fists.md; the user: "good feedback is essential"): recipe `punch` (Foley-style layers: a band-passed skin slap, a damped meat / bone knock 260-600 Hz, a low body thump 70-175 Hz under a soft contact, a low-passed mass; a crack on the hard blows; every mode t60 <= ~90 ms: nothing rings). Hits jab < cross < hook < upper < heavy by contact time, thump pitch / length and saturation (zero-padded centroid jab 640-1210 Hz ... heavy 200-475, dur 58-75 ms ... 128-175 ms), body (the gut: soft attack, a breath forced out), block (forearms, padded), head (a dull skull knock, q ~3.5), kick (shin into ribs); whiff (a quick swish), swing (the big ones' whoosh, peaking at the contact), slip, ready (the counter window: a leather creak), windup (a heavy's charge / a gunman's haymaker telegraph), grab (the clinch). Each blow levelled + limited before the forge so a short blow's variants stay within ~2.5 dB under the -1.2 dB peak cap. Events punch {kind body | straw | thing, mat, mv, power, counter: one rung heavier, ko: the heavy's thump under it}, punchBlock, whiff, fistCue {phase throw (hay / body / round only) | slip | counter | charge}, fistGrab {ok}, foeWind {n}, foePunch {n, phase} from fist.* / player.fist / foe.fwind / foe.punch (src/audio/audio.js). Renders in tmp/fists/sounds/ (2 per case + fight_demo.wav). Not listened to yet.
 - **Phase 4 (loudness pass): 2026-10-01.** Measured with `node tools/sfx/mixmeter.mjs`, which taps the engine buses in the live arena. The user's report was "pretty damn loud ambience noise". The cause was MUSIC, not the beds: the idle pad (detuned sawtooth chords) played at -24 LUFS-M, about 25 dB over the wind bed and almost as loud as combat.
   - **Fixes:**
     - Music master 0.25 → 0.1; the idle (pad-only) state a further -4.4 dB.
@@ -382,3 +383,63 @@ Each one is a pure picker returning `[{buffer, gain, rate, delay}]`.
     | fires | about -44 | -44 |
     | idle mix | about 14 dB under combat | -36 |
   - **Open:** the absolute level. Integrated play loudness is about -27 LUFS, quieter than the web norm of -16..-18. If the user wants the whole game louder, raise the forge engine's master: the limiter handles peaks.
+- **Phase 5 (the space: acoustics from the world's shape): 2026-10-08.** The user: "echoes and other effects should take place
+  depending on where the character is in the world and what environment". Until now the Proving Grounds had one reverb
+  everywhere (`ruins`, a 0.9 s room, even in open fields), the desert switched to a canyon reverb past a fixed line, and
+  every gunshot carried its own baked place (the flavors' echo chamber and canyon slaps) wherever it was fired.
+  `src/audio/acoustics.js`, wired by `features/audio.js` (`?acoustics=0`: off, everything as before):
+  - **The map** (built with the world, again when the registry changes, at most every 2 s): 0.5 m cells over the world, each
+    with the ground's height, the highest solid top (walls, towers, posts, standing stones, the watchtower, crate walls, big
+    rocks), its material (rock, stone, wood, a soil hillside), whether it's a small round solid (a boulder, a pillar: it
+    scatters more than it reflects), the trees' foliage and the cover (the cleft's chamber).
+  - **The probe** (6 times a second, or when the player moved 0.75 m): 24 level rays from his ear out to 90 m. What they meet
+    gives the room:
+
+    | room | when | reverb |
+    |---|---|---|
+    | room | under cover (the cleft's chamber) | `room`: 0.5 s, bright, close reflections |
+    | canyon | the desert, within 5 m of the canyon's rim | the desert's `canyon` |
+    | court | faces close on 3 of 4 sides (the arena; the trail between the arena and the mesa) | `court`: 1.1 s |
+    | woods | trees all round | `woods`: 0.8 s, dense and dark |
+    | high | well above the ground round him (the watchtower's lookout) | `high`: the faintest, longest roll |
+    | cliffs | a rock face or wall on one side | `cliffs`: 1.3 s with a pre-delay |
+    | open | none of those | `open`: a faint dark roll (the desert too) |
+
+    A new room must lead for 0.5 s before the reverb changes (a 1.2 s cross-fade).
+  - **Dry shots**: while the space has rooms, `gunshot`, `foeShot` and `coachShot` play new `_dry` cases
+    (`recipes/revolver.js`, `coachgun.js`: the same crack, blast, body and thump with only the first 45 ms of reflections and a
+    0.32 s tail; t60 ~0.37 s against ~1.5 s), sent to the room's reverb at 0.5 and trimmed 1.5 dB (`events.js` shotGL). The
+    room gives them their tail and their echoes.
+  - **Echoes** (`gunshot`, `foeShot`, `coachShot`, `explode`, the bells): the faces the rays met, joined by distance, send the
+    sound back. Each tap is the sound's first layer replayed by the director (`p.taps`, `director.js` echo()). Its delay is the
+    extra path (source → face → listener, less the direct path) / 343 m/s. It is quieter by the path (a 22 m wall about -6 dB,
+    a cliff 60 m off about -11) and the face (material, height, width), darker with distance, and panned from the face's side
+    of the screen. Rules:
+    - at most 3 taps (4 for a blast);
+    - none earlier than 55 ms and none within 40 ms of a louder tap, so closer faces fuse into the room's reverb (no comb
+      filter, nothing hollow);
+    - the desert canyon's far wall stands 26 m past the world's south edge: from the rim it answers at about 170 ms.
+  - **Occlusion**: every positional sound more than 2.5 m off is traced from the listener's ear to it through the map. A wall
+    or the mesa in the way costs 4-10 dB and closes a low-pass to 2.4-0.9 kHz (rock and hillsides more); foliage takes up to
+    4 dB.
+  - **The air**: rain (up to -2.5 dB on echoes, -1.5 dB of reverb), snow cover (-4 dB, darker, -3 dB of reverb), wind (up to
+    -2 dB) and a fog or a still night (+1.5 dB, brighter) change the echoes and the reverb's return.
+  - **Exposure and cover**: the wind's gust layer (`features/windaudio.js` strength) grows on a height and drops among walls
+    and trees; the rain's wash drops under cover.
+  - **Measured** (offline renders of the hollywood Peacemaker in the real engine graph, the player's own shot; levels against
+    the shot). Before, every place decayed 30 dB in 0.63 s with the same baked echoes at 210 and 490 ms:
+
+    | place | room | echoes (delay, level) | -30 dB after |
+    |---|---|---|---|
+    | the cleft's chamber | room | none (too close) | 0.31 s |
+    | oak grove | woods | 117 ms -22 dB | 0.37 s |
+    | West Downs meadow | open | 64 ms -20 dB, 166 ms -14 dB (the arena's west wall, 28 m off) | 0.51 s |
+    | arena centre | court | 76 ms -9 dB | 0.51 s |
+    | under the mesa (yard) | cliffs | 125 ms -12 dB | 0.57 s |
+    | the watchtower's lookout | high | none | 0.60 s |
+    | desert, canyon rim | canyon | 90 ms -10 dB, 125 ms -15 dB, 170 ms -13 dB (the far wall) | 0.80 s |
+
+    A gunman 14 m off below the mesa's edge, heard from its top: -8.2 dB and a 1.5 kHz low-pass. A listening tour (today vs
+    new, per place): `tmp/acoustics/tour.wav` (timestamps in `tour.txt`), made by the session scratchpad's `acou/render.js`.
+  - **Not listened to yet.** Open: the ambience's positional loops (fires, waterfalls) aren't occluded yet; the reload, cock
+    and impact sounds keep their own small rooms; the biomes without rooms (ember, frost, rift) keep their reverb and wet shots.

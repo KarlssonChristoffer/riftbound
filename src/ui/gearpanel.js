@@ -11,6 +11,7 @@ const CSS = `
 #gear { position: fixed; left: 10px; top: 50%; transform: translateY(-50%); z-index: 15; width: 300px; max-height: calc(100vh - 120px); overflow: auto;
   padding: 8px 10px 8px; background: rgba(14, 16, 15, .93); border: 1px solid var(--line); border-radius: 6px; scrollbar-width: thin; user-select: none; }
 #gear.hidden { display: none; }
+body:has(#pack:not(.hidden)) #gear { left: 296px; }   /* (beside the pack's panel: features/pack.js, Tab) */
 body:has(#pause:not(.hidden)) #gear { visibility: hidden; }
 #gear header { display: flex; justify-content: space-between; align-items: baseline; }
 #gear header b { color: var(--key); letter-spacing: .14em; }

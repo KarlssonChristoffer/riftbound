@@ -144,7 +144,9 @@ export function createPhoto(E) {
     if (k === 'act') return `<button class="m-row" data-i="${i}"><span>${esc(r.label)}</span><span class="m-val">›</span></button>`;
     if (k === 'slider') return `<div class="m-row ph-sl" tabindex="-1" data-i="${i}"><span>${esc(r.label)}</span><input type="range" tabindex="-1" min="${r.min}" max="${r.max}" step="${r.step}"><span class="m-val"></span></div>`;
     if (k === 'sw') return `<button class="m-row" role="switch" data-i="${i}"><span>${esc(r.label)}</span><span class="m-val"></span></button>`;
-    return `<button class="m-row" data-i="${i}"><span>${esc(r.label)}</span><span class="m-val"><i data-d="-1">‹</i><b></b><i data-d="1">›</i></span></button>`;
+    // a choice: its value in a box as wide as its widest option (index.html .m-v: the arrows stay put while it changes)
+    const opts = typeof r.options === 'function' ? r.options() : r.options, f = v => String(r.fmt ? r.fmt(v) : v);
+    return `<button class="m-row" data-i="${i}"><span>${esc(r.label)}</span><span class="m-val"><i data-d="-1">‹</i><b class="m-v">${opts.map(o => `<span>${esc(f(o))}</span>`).join('')}<span class="on"></span></b><i data-d="1">›</i></span></button>`;
   }
   function build() {
     shown = ROWS.filter(r => !r.when || r.when());
@@ -159,7 +161,7 @@ export function createPhoto(E) {
       const r = shown[i], el = els[i]; if (!el) continue;
       const k = kindOf(r);
       if (k === 'sw') { const on = r.sw(); el.setAttribute('aria-checked', on); el.querySelector('.m-val').textContent = on ? (r.on || 'On') : (r.off || 'Off'); }
-      else if (k === 'choice') { const v = r.get(); el.querySelector('b').textContent = r.fmt ? r.fmt(v) : v; }
+      else if (k === 'choice') { const v = r.get(); el.querySelector('.m-v > .on').textContent = r.fmt ? r.fmt(v) : v; }
       else if (k === 'slider') {
         const v = r.get(), inp = el.querySelector('input');
         if (document.activeElement !== inp) inp.value = v;   // (not under the pointer: a drag isn't cut)

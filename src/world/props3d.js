@@ -6,8 +6,8 @@
 //            with two bands, a burlap sack head, a painted target on its chest AND its back (shot from either side it reads as
 //            a target). Ember: charred planks, an iron breastplate and helmet, embers glowing in the wood (the crack family);
 //            frost: icicles under the arms (the snow on its top is the biome's cover); rift: a crystal on a stone post, a rune
-//            ring round it. It faces the archer: a lane dummy its shooting mark, the others the arena's ring. The hit wobble is a
-//            real rock about its foot (world.js), the way the shot went (world.push)
+//            ring round it. It faces the screen of the camera's home view (+y), so its target reads face on where you play (turned
+//            to the lane's mark it stood edge on). The hit wobble is a real rock about its foot (world.js), the way the shot went (world.push)
 //   crystal  a rock with a cluster of hexagonal crystals, pointed, leaning out (stage 0); cracked, the big one's tip and the
 //            right one snapped off (1); stubs broken flat with shards lying round (2, broken). The gem family lights itself
 //            (mesh.setGlow: GLOW_K per stage); the light is the painted sprite's record as before (world.js reads it off the card)
@@ -145,17 +145,14 @@ function streak(geo, fam, amt, n, seed) {
 // ---------------------------------------------------------------- the models
 const cache = new Map();
 const cached = (key, fn) => { let v = cache.get(key); if (!v) cache.set(key, v = fn()); return v; };
-// which way a dummy faces (arena x, y): a lane dummy its shooting mark, the others the ring in the arena's middle
-function faceOf(p, layout) {
-  const marks = layout?.marks || [], mk = marks.find(m => m.type === 'mark'), ring = marks.find(m => m.type === 'ring');
-  const T = mk && Math.abs(p.y - mk.y) < .5 && p.x > mk.x ? mk : ring || mk;
-  return T ? Math.atan2(T.x - p.x, T.y - p.y) : 0;
-}
+// which way a dummy faces: +y, toward the camera's home view (yaw 0), every one alike: its target face on where you play.
+// (Turned to the lane's mark, the lane's dummies stood edge on to the screen and read as facing the wrong way.)
+const DUMMY_YAW = 0;
 export function propModel(p, biome, layout) {
   const id = biome.id;
   if (p.kind === 'dummy') {
     const k = id === 'ember' ? 'ember' : id === 'rift' ? 'rift' : id === 'frost' ? 'frost' : 'straw', geo = cached('dummy|' + k, () => k === 'ember' ? geoOf(emberDummy()) : k === 'rift' ? geoOf(riftDummy()) : streak(geoOf(strawDummy(id)), 'rope', .55, 12, 3));
-    return {geo: () => geo, yaw: faceOf(p, layout), tilt: true, occlude: false, glow: k === 'rift' ? 'gem' : null, glowK: () => GLOW_K.rift};
+    return {geo: () => geo, yaw: DUMMY_YAW, tilt: true, occlude: false, glow: k === 'rift' ? 'gem' : null, glowK: () => GLOW_K.rift};
   }
   if (p.kind === 'crystal') {
     const G = [0, 1, 2].map(s => cached('crystal|' + s, () => geoOf(crystalCluster(s))));

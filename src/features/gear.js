@@ -9,7 +9,8 @@
 // DEV PREVIEW (dev/wardrobe.js): preview({swap, extra, key}) draws the set with some pieces swapped for edited copies and
 // extra look-only pieces after them (zone paints, a piece being tuned); the look only: no notes, nothing sent. null: off.
 // OWNS: the set (want: chosen; worn: in effect), the 'gear' modifier notes, the panel. READS: flags ('gear'),
-//   localStorage ('rb.gear': the set last chosen here), the co-op feature (online, wear, gear).
+//   localStorage ('rb.gear': the set last chosen here), the co-op feature (online, wear, gear), the pack's panel (open: Tab opens
+//   the pack, and the gear panel beside it; with no pack, Tab is the gear panel's).
 // EMITS: gear.wear.  BUDGET: update ~0 (two compares a step); view: a dress on a change (2-25 ms, rare); panel: DOM, on change.
 import {gearById, cleanSet, setStats, setKey} from '../content/gear.js';
 import {flags} from '../core/flags.js';
@@ -43,7 +44,7 @@ export async function create(host) {
   // the panel's choice: a piece into its slot (or the slot emptied); worn next step (online: once the server took it)
   function choose(ids) { S.want = cleanSet(ids); S.wantV++; remember(S.want); }
   const panel = createGearPanel({S, choose, online: () => !!coop()});
-  let shown = -1, shownW = false, over = null, overV = 0, shownO = 0;
+  let shown = -1, shownW = false, over = null, overV = 0, shownO = 0, packWas = false;
   // the pieces to draw: the set worn, a piece swapped for its preview copy, then the preview's own (a later paint wins)
   function look() {
     if (!over) return [S.worn.map(gearById), S.key];
@@ -71,8 +72,10 @@ export async function create(host) {
       if (S.ver !== shown || overV !== shownO) { const [ps, key] = look(); host.dressPlayer?.(ps, key); }
       shown = S.ver; shownW = S.waiting; shownO = overV; panel.sync();
     },
-    onKey(k, e) { if (k !== 'tab' || e?.shiftKey) return false; panel.toggle(); return true; },   // (Shift+Tab: the dev wardrobe)
-    menu: () => [{label: `Gear: ${S.worn.length ? S.worn.map(id => gearById(id).name).join(', ') : 'your own clothes'} (Tab: the gear panel)`, run: () => panel.toggle(true)}],
+    // the panel goes with the pack's (Tab: what you carry and what you wear), a compare a frame
+    frame() { const p = host.feature('pack'), o = !!p?.open; if (o !== packWas) { packWas = o; panel.toggle(o); } },
+    onKey(k, e) { if (k !== 'tab' || e?.shiftKey) return false; panel.toggle(); return true; },   // (no pack: Tab is this panel's; Shift+Tab: the dev wardrobe)
+    menu: () => [{label: `Gear: ${S.worn.length ? S.worn.map(id => gearById(id).name).join(', ') : 'your own clothes'} (Tab)`, run: () => panel.toggle(true)}],
     hud: () => `gear ${S.key || 'none'} · ${S.stats.kg.toFixed(1)} kg · armor ${Math.round(S.stats.armor * 100)}% · speed x${S.stats.speed.toFixed(2)}${S.waiting ? ' · waiting for the server' : ''}`,
   };
   return F;
