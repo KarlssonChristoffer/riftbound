@@ -89,7 +89,25 @@ void main() {
   fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed; fM = sprayM(modelMatrix);
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
-const MESH_FS = HEAD + OUTS + `
+// THE CUTAWAY (features/cutaway.js -> G.setCut; ?cut=0 off): what stands between the camera and the player is not drawn round him, so
+// he and what lies behind him show (a gorge's floor under its near rim, a hut's inside under its roof). A fragment goes when it lies in
+// the cut's capsule on screen (round his body from his feet to over his head, uCutB.y px out), NEARER the camera than he is (uCut.z:
+// his depth less a margin: what stands right against him stays) and OVER HIS FLOOR (uCutB.w: his feet + a little: the ground he
+// stands on, and everything behind him, stays). Its rim is an ordered dither uCutB.z px wide (pixel art), and the capsule opens
+// with uCut.w (0 = shut: the test costs one compare). The ground (SURF_FS) and the meshes (MESH_FS: rock, walls, roofs, trees) cut;
+// the shadow passes don't (the gorge stays in the shade of its rim)
+const CUT = `
+uniform vec4 uCut, uCutB;   // (his feet's px x, y, his depth, open 0..1) (the capsule's height px, radius px, rim px, floor m)
+bool cutAway(float wy) {
+  if (uCut.w <= 0. || wy < uCutB.w || gl_FragCoord.z >= uCut.z) return false;
+  vec2 p = gl_FragCoord.xy - uCut.xy; p.y -= clamp(p.y, 0., uCutB.x);
+  float d = uCutB.y * uCut.w - length(p);
+  if (d <= 0.) return false;
+  const float B[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
+  return d / uCutB.z > (B[(int(gl_FragCoord.x) & 3) + (int(gl_FragCoord.y) & 3) * 4] + .5) / 16.;
+}
+`;
+const MESH_FS = HEAD + OUTS + CUT + `
 in vec3 vN; in vec3 vW; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in float fM;
 uniform sampler2D uRamps; uniform vec3 uLArt; uniform float uObj, uFlash; uniform vec2 uSeed;
 uniform vec3 uAut[12];    // leaves only: the species' autumn ramps, stage 1..4 x tone 0..2 (trees3d.js B.autumn); uAutOn 0 = none
@@ -130,6 +148,7 @@ void main() {
   // two-sided), in the shade tone: leaves deeper in the crown. Only where both sides lost their leaves does it open
   // onto what's behind (a thinned crown used to show the ground through every gap). Bark, and a full crown, never show
   // their inside
+  if (cutAway(vW.y)) discard;   // (the cutaway, CUT)
   bool inner = !gl_FrontFacing;
   if (inner && (fFixed > -1.5 || uLeafK >= .999)) discard;
   if (fFixed < -1.5 && leafGone(vPL, fM)) discard;   // (the sprays that turned further go first: LEAF_GONE)
@@ -339,7 +358,7 @@ void main() {
   vN = mat3(modelMatrix) * normal; vW = w.xyz;
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
-const SURF_FS = HEAD + OUTS + `
+const SURF_FS = HEAD + OUTS + CUT + `
 in vec2 vUv; in vec3 vN; in vec3 vW;
 uniform sampler2D uTex, uEm; uniform vec2 uTexSize; uniform float uSmooth, uHasEm, uType, uObj;
 // steep ground (the ravine wall): a cliff texture (rock strata, the waterfall) by world x (z on east / west faces) and
@@ -385,6 +404,7 @@ void main() {
   vec2 uvS = (s + clamp((t - s) / d, -.5, .5)) / uTexSize;            // smooth-pixel: sharp, blended only across texel seams
   // the triangle's own plane (the grid's smooth normals blend a 0.25 m cliff cell into its flat neighbours)
   vec3 fn = normalize(cross(dFdx(vW), dFdy(vW))); if (dot(fn, vN) < 0.) fn = -fn;
+  if (cutAway(vW.y)) discard;   // (the cutaway: after the derivatives)
   if (uHasCliff > .5 && abs(fn.y) < .45 && vW.y < uCliffTop) {
     vec3 n = fn;
     float along = abs(n.z) >= abs(n.x) ? vW.x : vW.z;
@@ -1425,6 +1445,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     wBed: {value: null}, wBedOn: {value: 0}, wBedR: {value: new THREE.Vector4(0, 0, 1, 1)}, wCut: {value: new THREE.Vector4(.13, .33, .6, 2)},
     wOp: {value: new THREE.Vector4(1, 1, 1, 1)}, wTone: {value: new THREE.Vector4(1, 1, 2, 2)}, wLook: {value: new THREE.Vector4(.86, 0, 0, 0)},
     wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
+    cut: {value: new THREE.Vector4()}, cutB: {value: new THREE.Vector4()},   // the cutaway (CUT; setCut, cutFrame in render())
   };
   const raw = (vs, fs, uniforms, extra = {}) => {
     const m = new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
@@ -1492,14 +1513,14 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     }
     return v;
   };
-  const meshMat = (obj, seed, sw = null, aut = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
+  const meshMat = (obj, seed, sw = null, aut = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uCut: U.cut, uCutB: U.cutB, uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
     uGlowF: {value: new THREE.Vector4(-1, -1, -1, -1)}, uGlowK: {value: new THREE.Vector4()},
     uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
   // bed: a surface's OWN water bed ({tex, rect} | null: world/waterbed.js; the West Downs' brook on their canvas), not setWaterLook's (omitted: that one)
   const surfMat = ({tex, em = null, planar, world, origin = null, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, bed, litter = null, decals = false, cliffTop = 1e9}) => raw(SURF_VS, SURF_FS, {
-    uCliffTop: {value: cliffTop},
+    uCliffTop: {value: cliffTop}, uCut: U.cut, uCutB: U.cutB,
     uDecal: U.decalT, uHasDecal: {value: decals ? 1 : 0}, uDecalOn: U.decalOn, uDecalRect: U.decalRect, uDecalPx: U.decalPx,
     uLit: litter?.u || {value: null}, uLitPal: {value: litter?.pal || null}, uHasLit: {value: litter ? 1 : 0}, uLitK: U.litK, uLive: litter?.live || {value: 0}, uLitCap: litter?.cap || {value: 1},
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
@@ -2473,6 +2494,7 @@ void main() {
     } else { PS.hmap = 0; tp = performance.now(); }
     moved.clear();
     for (const m of gExtra) m.visible = m.userData.frame === frameNo;
+    cutFrame();
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
     const calls = renderer.info.render.calls;
     lap('gbuf', calls);
@@ -2606,6 +2628,19 @@ void main() {
     C.uMistQ.value.z = Math.max(1, Math.floor(z + .01)); C.uMistD.value.w = VH / 2 / (PPMY * z);
   }
   // (sun: how far toward the sun his shadow test looks, .5 m; a live 3D body would shade its own test point: view/livehero.js)
+  // THE CUTAWAY (CUT; features/cutaway.js): where he stands (m: x east, f his feet's height, z south), how open the cut is (0..1), its
+  // radius round his body and his height (m). Put on the screen at the draw (cutFrame: the view may still move after the call)
+  const cutS = {x: 0, f: 0, z: 0, open: 0, r: 2, h: 1.8}, cutP = new THREE.Vector3();
+  function setCut(x, f, z, open, r = 2, h = 1.8) { cutS.x = x; cutS.f = f; cutS.z = z; cutS.open = open; cutS.r = r; cutS.h = h; }
+  function cutFrame() {
+    const C = U.cut.value, B = U.cutB.value;
+    if (cine || cutS.open <= 0) { C.w = 0; return; }
+    cutP.set(cutS.x, cutS.f, cutS.z).project(camera); const fx = (cutP.x * .5 + .5) * VW, fy = (cutP.y * .5 + .5) * VH;
+    cutP.set(cutS.x, cutS.f + cutS.h, cutS.z).project(camera); const hy = (cutP.y * .5 + .5) * VH;
+    cutP.set(cutS.x, cutS.f + cutS.h / 2, cutS.z).project(camera);   // (his depth at his middle, less ~.6 m toward the camera: 1 m there is .5 / R_DEPTH)
+    C.set(fx, fy, cutP.z * .5 + .5 - .3 / R_DEPTH, Math.min(1, cutS.open));
+    B.set(Math.max(0, hy - fy), cutS.r * PPM * view.zoom, 3, cutS.f + .45);
+  }
   const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; U.wFoot.value.set(x, h - .9, z, 1); };   // (h: his chest, .9 m over his feet: the water rings them when he wades)
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
   // advances at, so changing it never makes the pattern jump
@@ -2626,6 +2661,6 @@ void main() {
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub,
     godrays: rays, setRays: rays.set,   // (render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
 }
