@@ -1,16 +1,12 @@
-// STAGE: the wardrobe's studio set (dev/wardrobe.js): a little stage under the character and a backdrop behind him, built in
-// code (view/rigkit.js) and drawn as pixel-art 3D like the characters (render/rigmesh.js, view/livebody.js), with the world
-// itself left out of the frame (G.isolate: only his rig and this one are drawn, on the backdrop's background colour).
-// The set turns with the camera (its facing is the camera's yaw), so the backdrop always stands behind him: a drag that
-// turns the camera spins him in front of it.
+// STAGE: the wardrobe studio's set (dev/studio.js, dev/wardrobe.js): a little stage under the character and a backdrop behind
+// him, built in code (view/rigkit.js) and drawn as pixel-art 3D like the characters (render/rigmesh.js, view/livebody.js), in
+// the studio's own renderer (an empty scene of its own: no world). It stands at the studio's middle, the backdrop to the
+// north (behind him, the camera looking north); he turns on it, the set and the camera don't.
 //   STAGES     what he stands on: a stone plinth, a wooden drum, a rug, a tuft of meadow, nothing
-//   BACKDROPS  what stands behind: a velvet curtain, a paper sweep, a stone wall, a night sky, open sky, nothing; each with
-//              the background colour of the rest of the frame
-// API: const st = createStage(host, liveRig); st.set({stage, back}); st.draw(t) (every frame while shown: places and renders
-//   the set at his feet); st.isolate(on) (the world left out, or back); st.stages / st.backs (the names).
-// OWNS: its rig, models and bodies, the isolate it asks of G while shown. READS: host.player, host.P, host.yaw, the live
-//   hero's rig (kept in the frame). BUDGET: shown: two bodies (A + S + B: 3 draws) and a pass over G's scenes' children a
-//   frame (G.isolate); shut: nothing.
+//   BACKDROPS  what stands behind: a velvet curtain, a paper sweep, a stone wall, a night sky, open sky, plain dark / grey;
+//              each with the background colour of the rest of the frame (bg) and a swatch (sw)
+// API: const st = createStage(G); st.set({stage, back}); st.draw(t) (every frame it shows); st.bg; st.stages / st.backs.
+// OWNS: its rig, models and bodies. READS: nothing else. BUDGET: shown: two bodies (A + S + B: 3 draws); made on first draw.
 import {createRigMesh} from '../render/rigmesh.js';
 import {liveModel, createLiveBody} from '../view/livebody.js';
 import {rigKit} from '../view/rigkit.js';
@@ -87,12 +83,11 @@ const BACK_FILL = {
   'open sky': K => { K.tube('Root', 'field', 'grass', 2.3, 2.3, .04, [0, .2, -.32], {sides: 20}); },
 };
 
-export function createStage(host) {
-  const G = host.G;
-  let rig = null, ready = false, failed = false, live = null, cur = {stage: 'stone', back: 'curtain'}, isoOn = false;
+export function createStage(G) {
+  let rig = null, ready = false, failed = false, cur = {stage: 'stone', back: 'curtain'};
   const models = {}, D = {w: null, key: 1, phi: 0, x: 0, y: 0, z: 0, sx: 0, sy: 0, sh: 0, aim: false, alpha: 1, flash: 0, lie: 0, type: 7, hide: null};
   const D2 = {...D};
-  let bodyS = null, bodyB = null, W = null, noShadow = null;
+  let bodyS = null, bodyB = null, W = null;
   function setup() {
     try {
       rig = createRigMesh(G, {slots: 2});
@@ -103,41 +98,29 @@ export function createStage(host) {
       const t = M0.turns();
       W = D.w = D2.w = new Float64Array(M0.NB * 7); M0.reset(t); M0.pose(W, t, null, null);
       rig.warm().then(() => { ready = true; }, () => { ready = true; });
+      bodies();
     } catch (e) { failed = true; console.warn('stage: no studio set', e); }
   }
   function bodies() {
     const ms = models['s:' + cur.stage], mb = models['b:' + cur.back];
     bodyS = ms ? createLiveBody(ms, rig, 0, G) : null;
     bodyB = mb ? createLiveBody(mb, rig, 1, G) : null;
-    noShadow = mb?.model?.mS ?? null;
   }
-  // what the frame keeps: his rig's meshes and the set's (the backdrop casts no shadow: the sun behind it would put him in the dark)
-  const keep = o => (live?.owns(o)) || (rig?.owns(o) && o !== noShadow);
-  const st = {
+  return {
     stages: STAGES, backs: Object.keys(BACKS),
     get ready() { return ready; },
+    get bg() { return BACKS[cur.back].bg; },   // (the rest of the frame: the studio's background colour)
     set({stage = cur.stage, back = cur.back} = {}) {
       cur = {stage: STAGES.includes(stage) ? stage : 'stone', back: back in BACKS ? back : 'curtain'};
       if (rig) bodies();
-      if (isoOn) G.isolate(keep, BACKS[cur.back].bg);
     },
-    // the world left out of the frame (on), or back; liveRig: the live hero's rig (render/rigmesh.js), kept in
-    isolate(on, liveRig) {
-      isoOn = !!on; live = liveRig || null;
-      if (on && !rig && !failed) { setup(); if (rig) bodies(); }
-      G.isolate(on ? keep : null, BACKS[cur.back].bg);
-    },
-    // the set at his feet, turned to the camera (every frame while shown)
+    // the set at the studio's middle (the feet at the origin), the backdrop to the north, behind him (every frame it shows)
     draw(t) {
-      if (failed || !rig || !ready) return;
-      const P = host.player, z = host.P.z || 0;
-      for (const [B, d] of [[bodyS, D], [bodyB, D2]]) {
-        if (!B) continue;
-        d.phi = host.yaw; d.x = d.sx = P.x; d.y = d.sy = P.y; d.z = d.sh = z;
-        B.draw(d, t);
-      }
+      if (!rig && !failed) setup();
+      if (failed || !ready) return;
+      if (bodyS) bodyS.draw(D, t);
+      if (bodyB) bodyB.draw(D2, t);
       rig.render();
     },
   };
-  return st;
 }

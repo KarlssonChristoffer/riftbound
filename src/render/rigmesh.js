@@ -16,8 +16,7 @@
 // THE SPRITE CAMERA: an upright body is drawn with its ground depth squashed toward its anchor (k = tan(pitch) cos 20 /
 // sin 55; at the atlas's 20 deg: .42), so it projects exactly as the sprite camera saw it (heights cos 20 px a metre,
 // ground sin 20); lying (pitch 41.08) k = 1: the game's own ground projection, as the death clips' lying frames.
-// API: const rig = createRigMesh(G, {slots}); rig.id / rig.owns(obj) (its meshes in G's scenes: a studio keeps them alone,
-// G.isolate); rig.addModel(json, bin) -> model; per frame rig.put(model, slot, mats,
+// API: const rig = createRigMesh(G, {slots}); rig.addModel(json, bin) -> model; per frame rig.put(model, slot, mats,
 //   params) for each body (mats: Float32Array segs x 12, rows of each segment's 3x4 world matrix; params: x, y, z (the
 //   squash anchor), k, alpha, flash, pitch (rad), sx, sy, sz (the snap anchor, world axes), snap (1: on), type (the
 //   G-buffer pixel type pass B writes: 0 / absent = 7, the lit card; 4 = the character, as the player's card: view/livehero.js)),
@@ -184,10 +183,9 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
   const matA = G.cineMat(raw(A_VS, A_FS, U, {side: THREE.DoubleSide})), matS = raw(S_VS, S_FS, U, {side: THREE.DoubleSide});
   const tri = new THREE.BufferGeometry(); tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const meshB = new THREE.Mesh(tri, raw(B_VS, B_FS, U)); meshB.frustumCulled = false; meshB.matrixAutoUpdate = false;
-  const id = {};   // this rig: on each of its meshes in G's scenes (userData.rig), so a studio can keep it alone (G.isolate)
-  meshB.userData.rig = id; G.extra(meshB, 'gbuf');
+  G.extra(meshB, 'gbuf');
   let meshX = null;
-  if (xray) { U.uGDep = {value: G.compU.tD.value}; meshX = new THREE.Mesh(tri, raw(B_VS, X_FS, U, {depthTest: false, depthWrite: false})); meshX.frustumCulled = false; meshX.matrixAutoUpdate = false; meshX.userData.rig = id; G.extra(meshX, 'xray'); }
+  if (xray) { U.uGDep = {value: G.compU.tD.value}; meshX = new THREE.Mesh(tri, raw(B_VS, X_FS, U, {depthTest: false, depthWrite: false})); meshX.frustumCulled = false; meshX.matrixAutoUpdate = false; G.extra(meshX, 'xray'); }
   const models = [];
   let dirty = false, used = false, warmN = 0;
 
@@ -198,7 +196,7 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     const geo = geometry(J, bin, iSlot);
     const mA = new THREE.Mesh(geo, matA), mS = new THREE.Mesh(geo, matS);
     for (const m of [mA, mS]) { m.frustumCulled = false; m.matrixAutoUpdate = false; }
-    mS.userData.rig = id; sceneA.add(mA); G.extra(mS, 'shadow');
+    sceneA.add(mA); G.extra(mS, 'shadow');
     const M = {J, geo, iSlot, mA, mS, n: 0, segs: J.segs.length, bytes: geoBytes(geo), att: []};
     models.push(M);
     return M;
@@ -251,7 +249,7 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     geo.instanceCount = 0; geo.setDrawRange(0, 0);
     const mA = new THREE.Mesh(geo, matA), mS = new THREE.Mesh(geo, matS);
     for (const m of [mA, mS]) { m.frustumCulled = false; m.matrixAutoUpdate = false; m.visible = false; }
-    mS.userData.rig = id; sceneA.add(mA); G.extra(mS, 'shadow');
+    sceneA.add(mA); G.extra(mS, 'shadow');
     const D = {pos, nrm, info, fam, n: 0, geo, mA, mS,
       famRow: famRowOf,   // a family -> its row (to repaint info's family bytes; then infoChanged())
       infoChanged() { A[2].needsUpdate = true; ramp.needsUpdate = true; },
@@ -328,6 +326,6 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     for (const M of models) M.n = 0;
     used = false;
   }
-  const api = {addModel, restyle, attach, put, putv, render, warm, noXray: false, id, owns: o => o.userData.rig === id, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
+  const api = {addModel, restyle, attach, put, putv, render, warm, noXray: false, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
   return api;
 }

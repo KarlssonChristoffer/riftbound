@@ -1,10 +1,12 @@
-// WARDROBE: the dev wardrobe, a screen of its own (Shift+Tab in dev mode, or the menu's Game tab: Wardrobe). The game stands
-// still (photo mode's frozen world and camera, as its studio: ui/photo.js toggle(true, studio)) and the character stands on a
-// little stage out of the world (dev/stage.js: a stage and a backdrop, the world left out of the frame: G.isolate; or "the
-// world", dimmed round him), framed in the middle of the screen with the UI round him:
+// WARDROBE: the dev wardrobe, a screen of its own (Shift+Tab in dev mode, or the menu's Game tab: Wardrobe). The game holds
+// (core/loop.js hold: not stepped, not drawn) and the STUDIO takes the screen (dev/studio.js): a renderer of its own with an
+// empty scene, a fixed camera, studio light, a little stage and a backdrop (dev/stage.js), and a copy of the character (his
+// live model, dressed as the wardrobe shows him) who turns on the stage: drag him to spin him, right-drag to move the view,
+// the wheel zooms, R frames him again, Space spins him, arrows / A D turn him a step, H hides the UI, Tab the next tab, P a
+// photo of the scene, Esc / Shift+Tab back to the game. The UI stands round the scene:
 //   TOP      the title, the loadout, the tabs (Outfit, Paint, Tuner, Stats, Items, Saved), the keys, back to the game
-//   LEFT     EQUIPMENT: a card a slot (head, body, back, legs, feet) with what he wears there (its colours, × takes it off),
-//            random / undress, and the set's weight, armor and speed as bars
+//   LEFT     EQUIPMENT: a card a slot (head, body, back, legs, feet) with what he wears there (a pixel icon in its colour, x takes
+//            it off), random / undress, and the set's weight, armor and speed as bars
 //   RIGHT    the tab:  Outfit   the chosen slot's pieces as cards (a click wears it), the piece under the pointer in detail
 //                      Paint    the model's zones, a palette (a material, a picked colour, hidden) painted on the chosen one
 //                      Tuner    a piece's shapes moved / turned / sized on sliders, drawn as you drag; "Copy code" puts them
@@ -14,26 +16,27 @@
 //                               / enemyDmg x, light.lantern + / lanternR x
 //                      Items    the run's items (+ / - a copy) and augments (on / off) through game/stats.js (a run starts empty)
 //                      Saved    everything here saved under a name, worn again in one click; "Copy link" (?gear= ?set=)
-//   BOTTOM   the scene: the backdrop, the stage, the light (the clock's preview), his pose (the live hero's emotes), turn,
-//            spin, frame him, a photo
-// Drag the scene to spin him (the set turns with the camera, so the backdrop stays behind him), right-drag to move, the wheel
-// zooms, R frames him, H hides the UI, Tab the next tab, P a photo, Esc / Shift+Tab back to the game (the camera, zoom and yaw
-// as they were; the clothes chosen are worn from then: features/gear.js preview want, co-op asks the server then).
-// The look and the notes hold in DEV MODE only, like the cheat panel's. Paint and tuned pieces are the look only (no weight,
-// no armor, nothing sent in co-op). Remembered on this machine ('rb.wardrobe').
+//   BOTTOM   the scene: the backdrop, the stage, the light (day, dawn, dusk, night), his pose (idle or one of his clips),
+//            turn, spin, frame him, a photo
+// The clothes chosen show on the studio's copy at once and are worn in the game from the step after you go back
+// (features/gear.js choose: co-op asks the server then). Paint and tuned pieces are the look only (no weight, no armor,
+// nothing sent in co-op): on the studio's copy, and on him in the game (features/gear.js preview). The look and the notes
+// hold in DEV MODE only, like the cheat panel's. The UI is pixel art (dev/pixelfont.js, frames painted in code).
+// Remembered on this machine ('rb.wardrobe').
 // It is a FEATURE the boot puts at the end of the list (main.js; dev/: nothing in the game imports it). F.on is the screen
-// open. While it's open the world stands still, so what the UI asks for (items, augments) is done at once; while it's shut,
-// its update keeps the notes and the look in step with dev mode.
-// OWNS: the screen (#wardrobe + its style), the 'wardrobe' notes, the gear preview it asks for, the studio's framing.
-// READS: host (mods, the game's stats, the gear feature, dev), hero (the loadout), photo (the studio: its camera, light,
-//   pose), cv (the zoom, the free camera's place), live (the emotes, its rig), content/gear.js, game/items.js.
-// BUDGET: shut and nothing on: nothing. Open: the game is frozen; a few text writes 4 times a second; a slider drag: one
-//   dress at most every 50 ms (2-25 ms each, view/dress.js).
+// open. While it's open the game holds, so what the UI asks for (items, augments) is done at once; while it's shut, its
+// update keeps the notes and the look in step with dev mode.
+// OWNS: the screen (#wardrobe + its style), the studio (dev/studio.js), the 'wardrobe' notes, the gear preview it asks for.
+// READS: host (mods, the game's stats, the gear feature, dev), hero (the loadout), live (the model's URL), engine() (the boot's
+//   E: loop.hold, pause, keys), content/gear.js, game/items.js.
+// BUDGET: shut and nothing on: nothing. Open: the game holds; the studio's small scene a frame; a few text writes 4 times a
+//   second; a slider drag: one dress at most every 50 ms (2-25 ms each, view/dress.js).
 import {SLOTS, SLOT_NAMES, GEAR, MATERIALS, ZONES, RULES, gearById, cleanSet, setStats} from '../content/gear.js';
 import {ITEMS, AUGMENTS, TIER} from '../game/items.js';
 import {LOADOUTS, SET_NAMES} from '../view/hero.js';
 import {tint} from '../view/rigkit.js';
-import {createStage, STAGES, STAGE_SW, BACKS as SETS} from './stage.js';
+import {STAGES, STAGE_SW, BACKS as SETS} from './stage.js';
+import {createStudio} from './studio.js';
 import {loadPixelFont} from './pixelfont.js';
 
 const STORE = 'rb.wardrobe', DEG = Math.PI / 180;
@@ -56,9 +59,9 @@ const knob0 = n => n.mul ?? n.add;
 const SIZE = {box: ['size.0', 'size.1', 'size.2'], ball: ['r.0', 'r.1', 'r.2'], tube: ['r0', 'r1', 'len'], disc: ['r', 'len'], cone: ['r', 'len']};
 const TABS = [['outfit', 'Outfit'], ['paint', 'Paint'], ['tuner', 'Tuner'], ['stats', 'Stats'], ['items', 'Items'], ['saved', 'Saved']];
 const TAB_IDS = TABS.map(t => t[0]);
-const LIGHTS = {'as is': null, dawn: 6.6, day: 12, dusk: 19.2, night: 23.5};
-const BACKS = ['world', ...Object.keys(SETS)];   // 'world': no stage, the world dimmed round him (the vignette); else a studio set (dev/stage.js)
-const DEF = {tab: 'outfit', slot: 'head', zone: 'coat', spin: false, back: 'curtain', stage: 'stone', light: 'as is', paint: {}, cloth: '', custom: '#5a8f6a',
+const LIGHTS = ['day', 'dawn', 'dusk', 'night'];   // (dev/studio.js LIGHTS)
+const BACKS = Object.keys(SETS);   // (dev/stage.js)
+const DEF = {tab: 'outfit', slot: 'head', zone: 'coat', spin: false, back: 'curtain', stage: 'stone', light: 'day', paint: {}, cloth: '', custom: '#5a8f6a',
   tune: {}, stats: {}, piece: '', shape: 0, outfits: []};
 const OWN = '#6b5e50';   // the swatch of "his own clothes"
 const CSS = `
@@ -68,7 +71,6 @@ const CSS = `
 #wardrobe *, #wardrobe *::before, #wardrobe *::after { box-sizing: border-box; border-radius: 0 !important; }
 #wardrobe.hidden { display: none; }
 #wardrobe.wd-clean .wd-pane, #wardrobe.wd-clean .wd-msg { display: none; }
-#wardrobe .wd-vig { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse 24% 44% at var(--cx, 50%) var(--cy, 50%), transparent 35%, #0b0d0c 100%); }
 /* the frames: 9-slice pixel art (painted in code: frame9), every edge U px a pixel */
 #wardrobe .wd-pane { position: absolute; pointer-events: auto; border: calc(3 * var(--u)) solid transparent; border-image: var(--f-panel) 3 fill / calc(3 * var(--u)); }
 #wardrobe button { font: inherit; color: inherit; cursor: pointer; padding: 0; background: none; border: 0; text-align: inherit; }
@@ -184,7 +186,7 @@ const CSS = `
 #wardrobe .wd-msg { position: absolute; left: 50%; top: calc(32 * var(--u)); transform: translateX(-50%); padding: calc(2 * var(--u)) calc(6 * var(--u)); color: var(--key);
   border: calc(3 * var(--u)) solid transparent; border-image: var(--f-panel) 3 fill / calc(3 * var(--u)); opacity: 0; }
 #wardrobe .wd-msg.on { opacity: 1; }
-body.wd #gear { display: none; }`;
+body.wd :is(#gear, #hud, #help, #hd, #cheats, #gunfeel) { visibility: hidden; }`;
 
 // the frames: a 9-slice pixel-art image (rings from the outside in: [top-left, bottom-right], then the fill), its outer corner
 // pixels cut (a pixel-rounded corner). Painted once, as data URLs the CSS stretches by whole U px (image-rendering: pixelated)
@@ -256,9 +258,9 @@ function codeOf(g, add) {
   return `    // ${g.id}: look.add (dev/wardrobe.js)\n    add: [\n${add.map(line).join('\n')}\n    ]`;
 }
 
-// opts: {host, hero (the loadout: view/hero.js), cv (render/camera.js), live (view/livehero.js, or null), photo: () => ui/photo.js
-// (made after the features)}
-export function createWardrobe({host, hero, cv, live, photo}) {
+// opts: {host, hero (the loadout: view/hero.js), live (view/livehero.js, or null), engine: () => the boot's E (made after the
+// features: its loop, pause, keys)}
+export function createWardrobe({host, hero, live, engine}) {
   const C = copy(DEF);
   try { Object.assign(C, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch (e) {}
   if (!TAB_IDS.includes(C.tab)) C.tab = 'outfit';
@@ -267,7 +269,7 @@ export function createWardrobe({host, hero, cv, live, photo}) {
   if (!Array.isArray(C.outfits)) C.outfits = [];
   for (const id in C.tune) if (!gearById(id)?.look?.add || !Array.isArray(C.tune[id])) delete C.tune[id];
   for (const n of KNOBS) { const v = C.stats[n.k]; if (!(v >= n.min && v <= n.max)) delete C.stats[n.k]; }
-  if (!BACKS.includes(C.back)) C.back = 'curtain'; if (!STAGES.includes(C.stage)) C.stage = 'stone'; if (!(C.light in LIGHTS)) C.light = 'as is'; delete C.open;
+  if (!BACKS.includes(C.back)) C.back = 'curtain'; if (!STAGES.includes(C.stage)) C.stage = 'stone'; if (!LIGHTS.includes(C.light)) C.light = 'day'; delete C.open;
   let saveT = 0;
   const save = () => { saveT = 0; try { localStorage.setItem(STORE, JSON.stringify(C)); } catch (e) {} };
   const gear = () => host.feature('gear'), game = () => host.feature('game'), stats = () => game()?.stats;
@@ -283,18 +285,23 @@ export function createWardrobe({host, hero, cv, live, photo}) {
   }
   let lookDirty = true, lookT = 0, previewing = false;
   const preview = o => { if (!o && !previewing) return; previewing = !!o; gear().preview(o); };   // (never asked: nothing to undo)
+  // the paint as a look-only piece (after the set: its paint wins), or null
+  function paintPiece() {
+    const paint = {}, hide = [];
+    for (const [z, m] of Object.entries(C.paint)) { if (m === 'hide') hide.push(z); else if (m === 'custom') paint[z] = tonesOf(C.custom); else if (MATERIALS[m]) paint[z] = m; }
+    const cloth = C.cloth === 'custom' ? tonesOf(C.custom) : C.cloth === 'off' || MATERIALS[C.cloth] ? C.cloth : '';
+    return Object.keys(paint).length || hide.length || cloth ? {id: 'wardrobe', name: 'Wardrobe', slot: '', look: {paint, hide, cloth: cloth || undefined}} : null;
+  }
+  // his look in the game (features/gear.js preview): the tuned pieces and the paint over what he wears
   function applyLook() {
     const g = gear(); if (!g?.preview) return;
     if (!host.dev) { preview(null); return; }
     const swap = {}; let n = 0;
     for (const id in C.tune) { const p = gearById(id); swap[id] = {...p, look: {...p.look, add: C.tune[id]}}; n++; }
-    const paint = {}, hide = [];
-    for (const [z, m] of Object.entries(C.paint)) { if (m === 'hide') hide.push(z); else if (m === 'custom') paint[z] = tonesOf(C.custom); else if (MATERIALS[m]) paint[z] = m; }
-    const cloth = C.cloth === 'custom' ? tonesOf(C.custom) : C.cloth === 'off' || MATERIALS[C.cloth] ? C.cloth : '';
-    const extra = Object.keys(paint).length || hide.length || cloth ? [{id: 'wardrobe', name: 'Wardrobe', slot: '', look: {paint, hide, cloth: cloth || undefined}}] : [];
-    preview(n || extra.length || F.on ? {swap, extra, key: 'wardrobe', want: F.on} : null);   // (the screen: the set as chosen, worn on the way out)
+    const x = paintPiece();
+    preview(n || x ? {swap, extra: x ? [x] : [], key: 'wardrobe'} : null);
   }
-  const lookChanged = () => { lookDirty = true; saveT = .3; };
+  const lookChanged = () => { lookDirty = true; lookV++; saveT = .3; };
 
   // ---------------------------------------------------------------- what the UI asks for: carried out in the sim step (or at once: the world stands still)
   const queue = [];
@@ -359,7 +366,7 @@ export function createWardrobe({host, hero, cv, live, photo}) {
     if (e.target.type === 'text') { e.stopPropagation(); if (e.key === 'Escape') e.target.blur(); return; }
     e.target.blur?.();
   });
-  let hov = null;   // (a hover sound once an element)
+  let hov = null, poseSel = null;   // (a hover sound once an element)
   root.addEventListener('pointerover', e => { const b = e.target.closest?.('button'); if (b && b !== hov) { hov = b; sound('hover'); } });
   const rows = [];   // each: sync() (writes only what changed); the tab's are after tabRows
   let tabRows = 0;
@@ -368,7 +375,6 @@ export function createWardrobe({host, hero, cv, live, photo}) {
   const btn = (cls, parent, text, go, title) => { const b = el('button', cls, parent, text); if (title) b.title = title; b.onclick = e => { go(e); sync(); }; return b; };
   const head = (parent, t) => el('div', 'wd-h', parent, t);
 
-  const vig = el('div', 'wd-vig', root);
   const top = el('div', 'wd-pane wd-top', root), left = el('div', 'wd-pane wd-left', root), right = el('div', 'wd-pane wd-right', root);
   const bottom = el('div', 'wd-pane wd-bottom', root), msgEl = el('div', 'wd-msg', root);
   let msgT = 0;
@@ -386,7 +392,7 @@ export function createWardrobe({host, hero, cv, live, photo}) {
       const b = btn('wd-tab', tabs, name, () => { C.tab = id; save(); sound('click'); tab(); });
       rows.push(() => b.classList.toggle('on', C.tab === id));
     }
-    el('div', 'wd-keys', top).innerHTML = 'drag: spin · right-drag: move · wheel: zoom<br>R: frame · H: hide · Tab: next tab · P: photo';
+    el('div', 'wd-keys', top).innerHTML = 'drag: turn him · right-drag: move · wheel: zoom<br>R: frame · Space: spin · H: hide · Tab: next tab · P: photo';
     const back = btn('wd-back', top, '', () => close(), 'back to the game: the clothes chosen are worn from then');
     back.innerHTML = '<kbd>Esc</kbd>Back to the game';
   }
@@ -432,34 +438,29 @@ export function createWardrobe({host, hero, cv, live, photo}) {
     const grp = (label, title) => { const g = el('div', 'wd-grp', bottom); if (title) g.title = title; el('small', '', g, label); return el('div', 'wd-row', g); };
     const bk = grp('Backdrop');
     for (const k of BACKS) {
-      const c = btn('wd-chip', bk, '', () => { C.back = k; save(); backdrop(); sound('click'); }, k === 'world' ? 'the world (no stage: where he stands)' : k);
-      c.style.background = k === 'world' ? 'linear-gradient(160deg, #8cb8e6 0 45%, #6e9d45 45%)' : SETS[k].sw;
+      const c = btn('wd-chip', bk, '', () => { C.back = k; save(); backdrop(); sound('click'); }, k);
+      c.style.background = SETS[k].sw;
       rows.push(() => c.classList.toggle('on', C.back === k));
     }
-    const sg = grp('Stage'), sgGrp = sg.parentNode;
+    const sg = grp('Stage');
     for (const k of STAGES) {
-      const c = btn('wd-chip' + (k === 'none' ? ' tx' : ''), sg, k === 'none' ? '—' : '', () => { C.stage = k; save(); backdrop(); sound('click'); }, k);
+      const c = btn('wd-chip' + (k === 'none' ? ' tx' : ''), sg, k === 'none' ? '\u2014' : '', () => { C.stage = k; save(); backdrop(); sound('click'); }, k);
       if (k !== 'none') c.style.background = STAGE_SW[k];
       rows.push(() => c.classList.toggle('on', C.stage === k));
     }
-    rows.push(() => put(sgGrp.style, 'opacity', C.back === 'world' ? '.35' : ''));
-    const lt = el('div', 'wd-pick', grp('Light', "the time of day for the light (the clock's preview: nothing changes in the game)"));
-    for (const k of Object.keys(LIGHTS)) {
-      const b = btn('', lt, k === 'as is' ? 'Now' : k[0].toUpperCase() + k.slice(1), () => { C.light = k; save(); light(); sound('click'); });
+    const lt = el('div', 'wd-pick', grp('Light', 'the studio light: a key light from the front left, a lamp when it is dark'));
+    for (const k of LIGHTS) {
+      const b = btn('', lt, k[0].toUpperCase() + k.slice(1), () => { C.light = k; save(); light(); sound('click'); });
       rows.push(() => b.classList.toggle('on', C.light === k));
     }
-    if (live?.emotes?.length) {
-      const ps = el('select', '', grp('Pose', "the live hero's emotes"));
-      for (const [v, t] of [['none', 'Standing'], ...live.emotes.map(e => [e, e.replace(/_/g, ' ')])]) { const o = el('option', '', ps, t); o.value = v; }
-      ps.onchange = () => { pose = ps.value; const ph = photo(); if (ph?.open) ph.pose = pose; ps.blur(); };
-      rows.push(() => put(ps, 'value', pose));
-    }
+    poseSel = el('select', '', grp('Pose', 'standing, or one of his clips (played, held, played again)'));
+    poseSel.onchange = () => { pose = poseSel.value; studio.set({pose}); poseSel.blur(); };
     const vw = el('div', 'wd-pick', grp('View'));
-    btn('', vw, '⟲', () => photo()?.turn(-45 * DEG), 'turn 45°');
-    const sp = btn('', vw, 'Spin', () => { C.spin = !C.spin; save(); }, 'he turns slowly');
-    btn('', vw, '⟳', () => photo()?.turn(45 * DEG), 'turn 45°');
-    btn('', vw, 'Frame', () => frame(), 'R: the camera on him again');
-    btn('', vw, 'Photo', () => photo()?.shoot(), 'P: a PNG of the scene (photo mode\'s)');
+    btn('', vw, '\u27f2', () => studio.turn(-45 * DEG), 'turn him 45\u00b0 (arrows, A / D: a step)');
+    const sp = btn('', vw, 'Spin', () => { C.spin = !C.spin; studio.spin = C.spin; save(); }, 'Space: he turns slowly');
+    btn('', vw, '\u27f3', () => studio.turn(45 * DEG), 'turn him 45\u00b0');
+    btn('', vw, 'Frame', () => studio.reframe(), 'R: the view on him again');
+    btn('', vw, 'Photo', () => { studio.photo(); say('photo saved'); }, 'P: a PNG of the scene');
     rows.push(() => sp.classList.toggle('on', C.spin));
   }
   tabRows = rows.length;   // (the panes' rows; the tab's go after them, made again on every change of tab)
@@ -679,85 +680,83 @@ export function createWardrobe({host, hero, cv, live, photo}) {
     for (const r of rows) r();
   }
 
-  // ---------------------------------------------------------------- the scene: photo mode's frozen world as our studio
-  // the studio set (dev/stage.js: the world left out, a stage and a backdrop drawn round him) or the world dimmed round him
-  const set = createStage(host);
-  let pose = 'none';
-  function backdrop() {
-    const world = C.back === 'world';
-    vig.style.opacity = world ? .6 : 0;
-    if (world) set.isolate(false); else { set.set({stage: C.stage, back: C.back}); set.isolate(true, live?.rig); }
-    cv.freeClamp(world);   // (out of the world: the view needn't stay over its ground; near an edge a turn would push him aside)
+  // ---------------------------------------------------------------- the scene: the studio, a renderer of its own (dev/studio.js)
+  // the free area's middle and height (css px): what the panes leave, the whole window with the UI hidden
+  function area() {
+    const W = innerWidth, H = innerHeight;
+    if (root.classList.contains('wd-clean') || root.classList.contains('hidden')) return {cx: W / 2, cy: H / 2, h: H};
+    const l = left.getBoundingClientRect(), r = right.getBoundingClientRect(), t = top.getBoundingClientRect(), b = bottom.getBoundingClientRect();
+    return {cx: (l.right + r.left) / 2, cy: (t.bottom + b.top) / 2, h: b.top - t.bottom};
   }
-  const light = () => { const ph = photo(); if (ph?.open) ph.setWorld('hour', LIGHTS[C.light]); };
-  // the camera on him, in the middle of what the panes leave (his body, not his feet, in the middle); after every turn, zoom
-  // and resize, so he stays there as the camera goes round him
-  const seen = {yaw: NaN, scale: NaN, dz: NaN, w: 0, h: 0, clean: false}, AT = {x: 0, y: 0, h: 0};
-  function center() {
-    const ph = photo(); if (!ph?.open) return;
-    const P = host.player, clean = root.classList.contains('wd-clean'), W = innerWidth, H = innerHeight;
-    if (W !== seen.w || H !== seen.h) unit();
-    let cx = W / 2, cy = H / 2;
-    if (!clean) {
-      const l = left.getBoundingClientRect(), r = right.getBoundingClientRect(), t = top.getBoundingClientRect(), b = bottom.getBoundingClientRect();
-      cx = (l.right + r.left) / 2; cy = (t.bottom + b.top) / 2;
-    }
-    root.style.setProperty('--cx', cx + 'px'); root.style.setProperty('--cy', cy + 'px');
-    // exactly over his feet (the follow's own target leads him by his chest and his motion, in the frame it was made in:
-    // it would swing round him as the camera turns), then the panes' offset and his body's middle, in the view
-    cv.freeReset(P.x, P.y, host.P.z); cv.freeAt(AT); ph.move(P.x - AT.x, P.y - AT.y);
-    // (in whole art px: he sits on the view's pixel lattice, so as the camera turns he stays on his pixel instead of
-    // rounding to the one beside it now and then: a shake)
-    const z = cv.zoom, ox = Math.round(-(cx - W / 2) / cv.scale / cv.dz), oy = Math.round(-(cy - H / 2) / cv.scale / cv.dz - .75 * host.PPMH * z);
-    const vx = ox / (host.PPM * z), vy = oy / (host.PPMY * z);
-    const [wx, wy] = cv.toWorld(vx, vy); ph.move(wx, wy);
-    seen.yaw = cv.yaw; seen.scale = cv.scale; seen.dz = cv.dz; seen.w = W; seen.h = H; seen.clean = clean;
+  const studio = createStudio({host, hero, live, area});
+  let pose = 'idle', lookV = 0, seenW = 0, seenH = 0, seenClean = false, posesFor = '', wantSeen = -1;
+  function backdrop() { studio.set({stage: C.stage, back: C.back}); }
+  const light = () => studio.set({light: C.light});
+  // what the studio's copy of him wears: the set as chosen (worn in the game when you go back), tuned pieces, the paint
+  function studioLook() {
+    const swap = {}; for (const id in C.tune) { const p = gearById(id); swap[id] = {...p, look: {...p.look, add: C.tune[id]}}; }
+    const ids = wearing(), ps = ids.map(id => swap[id] || gearById(id)), x = paintPiece(); if (x) ps.push(x);
+    studio.look(ps, ids.join(',') + '#' + lookV);
   }
-  // frame: the zoom at which he (2 m, the hat's tip) is about half the height the panes leave (a whole display scale), then center
-  function frame() {
-    if (!photo()?.open) return;
-    const h = root.classList.contains('wd-clean') ? innerHeight : bottom.getBoundingClientRect().top - top.getBoundingClientRect().bottom;
-    cv.zoomTo(Math.max(1, Math.floor(.5 * h / (2 * host.PPMH))), true); center();
+  // his poses: idle and his clips (the model's live-only ones: the live hero's emotes), when the model is in
+  function poses() {
+    if (!studio.ready || posesFor === studio.modelName) return;
+    posesFor = studio.modelName; poseSel.textContent = '';
+    for (const [v, t] of [['idle', 'Standing'], ...studio.emotes.map(e => [e, e.replace(/_/g, ' ')])]) { const o = el('option', '', poseSel, t); o.value = v; }
+    if (pose !== 'idle' && !studio.emotes.includes(pose)) pose = 'idle';
+    poseSel.value = pose; studio.set({pose});
   }
-  const STUDIO = {
-    key(k, e) {
-      if (k === 'tab' && e.shiftKey) { e.preventDefault(); close(); return true; }
-      if (k === 'tab') { e.preventDefault(); C.tab = TAB_IDS[(TAB_IDS.indexOf(C.tab) + 1) % TAB_IDS.length]; save(); sound('click'); tab(); return true; }
-      if (k === 'r' || k === 'home') { frame(); return true; }
-      if (k === 'h') { root.classList.toggle('wd-clean'); return true; }
-      return false;   // (the rest is photo mode's: Esc back, P a photo, the wheel, WASD, Z / X)
-    },
-    step(dt) {
-      if (C.spin) photo()?.turn(dt * .5);
-      if (cv.yaw !== seen.yaw || cv.scale !== seen.scale || cv.dz !== seen.dz || innerWidth !== seen.w || innerHeight !== seen.h || root.classList.contains('wd-clean') !== seen.clean) center();
-      tick(dt);
-      if (hero.loadI !== loadWas) { const re = loadWas >= 0 && C.tab === 'paint'; loadWas = hero.loadI; if (re) tab(); }   // (another model: its zones)
+  const SCREEN = {
+    frame(dt, t) {
+      const clean = root.classList.contains('wd-clean');
+      if (innerWidth !== seenW || innerHeight !== seenH || clean !== seenClean) { seenW = innerWidth; seenH = innerHeight; seenClean = clean; unit(); studio.resize(); }
+      tick(dt); poses();
+      const wv = gear()?.S.wantV; if (wv !== wantSeen) { wantSeen = wv; studioLook(); }   // (a piece chosen: on him at once)
+      studio.frame(dt, t);
+      if (hero.loadI !== loadWas) { const re = loadWas >= 0 && C.tab === 'paint'; loadWas = hero.loadI; lookDirty = true; if (re) tab(); }   // (another model: its zones)
       if (msgT > 0 && (msgT -= dt) <= 0) msgEl.classList.remove('on');
       if ((syncT -= dt) <= 0) { syncT = .25; sync(); }
     },
-    closed() {
-      F.on = false; pose = 'none'; set.isolate(false);
-      root.classList.add('hidden'); document.body.classList.remove('wd');
-      lookDirty = true; lookT = 0; save();   // (the preview without the chosen set: what's worn, from the next step)
+    key(k, e) {
+      if (k === 'tab' || k === ' ' || k.startsWith('arrow')) e.preventDefault();
+      if (e.repeat && !k.startsWith('arrow')) return;
+      if (k === 'escape' || (k === 'tab' && e.shiftKey)) { close(); return; }
+      if (k === 'tab') { C.tab = TAB_IDS[(TAB_IDS.indexOf(C.tab) + 1) % TAB_IDS.length]; save(); sound('click'); tab(); return; }
+      if (k === 'r' || k === 'home') { studio.reframe(); sound('click'); return; }
+      if (k === 'h') { root.classList.toggle('wd-clean'); return; }
+      if (k === 'p') { studio.photo(); say('photo saved'); sound('confirm'); return; }
+      if (k === ' ') { C.spin = !C.spin; studio.spin = C.spin; save(); sync(); return; }
+      if (k === 'arrowleft' || k === 'a' || k === 'q') studio.turn(-22.5 * DEG);
+      if (k === 'arrowright' || k === 'd' || k === 'e') studio.turn(22.5 * DEG);
+      if (k === '+' || k === '=') studio.zoom(1);
+      if (k === '-') studio.zoom(-1);
     },
   };
   function open() {
-    const ph = photo();
-    if (F.on || !host.dev || !ph?.allowed) return;
-    F.on = true; loadWas = hero.loadI; pose = 'none';
-    ph.toggle(true, STUDIO);
-    if (!ph.open) { F.on = false; return; }
+    const E = engine();
+    if (F.on || !host.dev || !E?.loop || game()?.mode === 'title' || host.lock) return;
+    if (E.pause.paused) E.pause.toggle(false, null);
+    F.on = true; loadWas = hero.loadI; posesFor = ''; wantSeen = -1;
     unit(); root.classList.remove('hidden', 'wd-clean'); document.body.classList.add('wd');
     tab();
-    backdrop(); light(); frame();
+    studio.show(true); studio.spin = C.spin; backdrop(); light(); studio.set({pose});
+    E.keys?.clear?.(); E.loop.hold(SCREEN);   // (the game holds: not stepped, not drawn, its keys ours)
+    host.feature('audio')?.duck?.(true);
     lookDirty = true; lookT = 0; tick(0);
     sound('open');
   }
-  function close() { if (F.on) photo()?.toggle(false); }   // (photo mode puts the camera back, then STUDIO.closed)
-  // the notes, the look and the save, in step with what changed (the update while shut, the studio's step while open)
+  function close() {
+    if (!F.on) return;
+    const E = engine();
+    E.loop.hold(null); studio.show(false); F.on = false;
+    root.classList.add('hidden'); document.body.classList.remove('wd');
+    host.feature('audio')?.duck?.(false);
+    lookDirty = true; lookT = 0; save(); sound('back');   // (the set chosen is worn from the next step: features/gear.js)
+  }
+  // the notes, the look and the save, in step with what changed (the update while shut, the screen's frame while open)
   function tick(dt) {
     if (host.dev !== devWas) { devWas = host.dev; applyNotes(); lookDirty = true; }   // (the first step too: the remembered notes and look)
-    if (lookDirty && (lookT -= dt) <= 0) { lookDirty = false; lookT = .05; applyLook(); }
+    if (lookDirty && (lookT -= dt) <= 0) { lookDirty = false; lookT = .05; applyLook(); if (F.on) studioLook(); }
     if (saveT > 0 && (saveT -= dt) <= 0) save();
   }
 
@@ -766,14 +765,13 @@ export function createWardrobe({host, hero, cv, live, photo}) {
     name: 'wardrobe', label: 'Wardrobe', key: 'shift+tab', on: false,
     toggle() { if (F.on) close(); else open(); return F.on; },
     onKey(k, e) { if (k !== 'tab' || !e?.shiftKey) return false; open(); return true; },
-    frame({t}) { if (F.on && C.back !== 'world') set.draw(t); },   // (the set at his feet, turned to the camera: every frame it shows)
     update(dt) {
       tick(dt);
       if (!queue.length) return;
       for (const fn of queue) fn();
       queue.length = 0;
     },
-    menu: () => host.dev && photo()?.allowed ? [{label: 'Wardrobe', run: open}] : [],
+    menu: () => host.dev && game()?.mode !== 'title' ? [{label: 'Wardrobe', run: open}] : [],
     hud() {
       if (!host.dev) return '';
       const a = [], np = Object.keys(C.paint).length + (C.cloth ? 1 : 0), nt = Object.keys(C.tune).length, ns = Object.keys(C.stats).length;

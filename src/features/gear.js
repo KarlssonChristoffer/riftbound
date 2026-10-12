@@ -6,10 +6,8 @@
 // MULTIPLAYER: the set is the server's to say. Offline it is worn at once; in co-op it is asked of the server (features/
 // coop.js wear) and worn when the server's answer comes back (coop.gear), the same moment the others see it.
 // SIM vs VIEW: the set worn and its modifier notes change in update (a step); the look follows in view, on a change only.
-// DEV PREVIEW (dev/wardrobe.js): preview({swap, extra, key, want}) draws the set with some pieces swapped for edited copies
-// and extra look-only pieces after them (zone paints, a piece being tuned); the look only: no notes, nothing sent. null: off.
-// want: draw the set as CHOSEN, not yet worn (the wardrobe's screen: the world stands still, the set is worn at the next
-// step). The view is AMBIENT (it runs while the world stands still: the menu, photo mode's living world, the wardrobe).
+// DEV PREVIEW (dev/wardrobe.js): preview({swap, extra, key}) draws the set with some pieces swapped for edited copies and
+// extra look-only pieces after them (zone paints, a piece being tuned); the look only: no notes, nothing sent. null: off.
 // OWNS: the set (want: chosen; worn: in effect), the 'gear' modifier notes, the panel. READS: flags ('gear'),
 //   localStorage ('rb.gear': the set last chosen here), the co-op feature (online, wear, gear), the pack's panel (open: Tab opens
 //   the pack, and the gear panel beside it; with no pack, Tab is the gear panel's).
@@ -46,17 +44,16 @@ export async function create(host) {
   // the panel's choice: a piece into its slot (or the slot emptied); worn next step (online: once the server took it)
   function choose(ids) { S.want = cleanSet(ids); S.wantV++; remember(S.want); }
   const panel = createGearPanel({S, choose, online: () => !!coop()});
-  let shown = -1, shownW = false, over = null, overV = 0, shownO = 0, shownWant = 0, packWas = false;
+  let shown = -1, shownW = false, over = null, overV = 0, shownO = 0, packWas = false;
   // the pieces to draw: the set worn, a piece swapped for its preview copy, then the preview's own (a later paint wins)
   function look() {
     if (!over) return [S.worn.map(gearById), S.key];
-    const ids = over.want ? S.want : S.worn;
-    const ps = ids.map(id => over.swap?.[id] || gearById(id)); if (over.extra) ps.push(...over.extra);
-    return [ps, setKey(ids) + '|' + over.key + '#' + overV];
+    const ps = S.worn.map(id => over.swap?.[id] || gearById(id)); if (over.extra) ps.push(...over.extra);
+    return [ps, S.key + '|' + over.key + '#' + overV];
   }
 
   const F = {
-    name: 'gear', label: 'Gear', on: true, ambient: true, S, panel,
+    name: 'gear', label: 'Gear', on: true, S, panel,
     choose, wear: id => { const g = gearById(id); if (g) choose([...S.want.filter(w => gearById(w).slot !== g.slot), id]); },
     takeOff: slot => choose(S.want.filter(w => gearById(w).slot !== slot)),
     update() {
@@ -71,10 +68,9 @@ export async function create(host) {
     // the look only, from the dev wardrobe: {swap: {id: piece}, extra: [piece], key} or null (as worn). Drawn at the next view
     preview(o) { over = o || null; overV++; },
     view() {
-      const wv = over?.want ? S.wantV : 0;
-      if (S.ver === shown && S.waiting === shownW && overV === shownO && wv === shownWant) return;
-      if (S.ver !== shown || overV !== shownO || wv !== shownWant) { const [ps, key] = look(); host.dressPlayer?.(ps, key); }
-      shown = S.ver; shownW = S.waiting; shownO = overV; shownWant = wv; panel.sync();
+      if (S.ver === shown && S.waiting === shownW && overV === shownO) return;
+      if (S.ver !== shown || overV !== shownO) { const [ps, key] = look(); host.dressPlayer?.(ps, key); }
+      shown = S.ver; shownW = S.waiting; shownO = overV; panel.sync();
     },
     // the panel goes with the pack's (Tab: what you carry and what you wear), a compare a frame
     frame() { const p = host.feature('pack'), o = !!p?.open; if (o !== packWas) { packWas = o; panel.toggle(o); } },
