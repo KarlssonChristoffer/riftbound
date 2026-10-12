@@ -6,7 +6,7 @@ Status: 2026-10-12, first slice: one cave per forest, grown from the seed (`worl
 ## What it is
 
 - **The mouth.** Somewhere in the home woods, on level ground away from the water, the clearing, the esker and the rock, a slot
-  is cut down into the ground: 11 m long, 2.6 m wide, its floor falling 3.6 m, heading north give or take (you walk up the
+  is cut down into the ground: 11 m long, 3.4 m wide, its floor falling 3.6 m, heading north give or take (you walk up the
   screen into it). Rock walls up both sides. Over its last metres the ground runs on uncut: an overhang with a rock brow under its
   edge, dark under it. Nothing grows on it or in front of it.
 - **Going down.** As you walk down the slot the world above goes dark round you (`features/caves.js` F.under, eased): the sun and

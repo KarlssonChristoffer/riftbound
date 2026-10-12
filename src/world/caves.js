@@ -30,7 +30,7 @@ import {mulberry32} from '../core/rng.js';
 
 export const TUNE = {
   band: {gap: 18, depth: 64, margin: 6},
-  mouth: {len: 11, w: 3.4, depth: 3.6, warp: 7.6, hyst: .8, brow: 8.6, south: 18, flat: .7, rise: 2.5},
+  mouth: {len: 11, w: 3.4, depth: 3.6, warp: 7.6, hyst: .8, brow: 9.6, south: 18, flat: .7, rise: 2.5},
   net: {nodes: [10, 14], step: [7.5, 12], hw: [.95, 1.4], room: [2.8, 5.4], bend: .35, fall: [-.15, .7], sep: 2.4, wob: .9, loops: 2, floor: 4.6},
   wall: 3.4,       // m: the rock stands this much over the floor at the walls (what the camera sees of them)
   rough: .55,      // m: how far the walls wander in and out of the plan's line
