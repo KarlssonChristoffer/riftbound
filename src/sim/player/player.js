@@ -47,9 +47,26 @@ export const AIM_H = 1.25;   // arrows fly at chest height
 // walkable terrain (docs/TERRAIN.md): a step up is taken in stride up to STEP_UP m (H.blocked stops anything higher), a step
 // down up to SNAP m (a slope walked or rolled down); a bigger drop is a ledge, and he falls
 export const STEP_UP = .3, SNAP = .16;
-export const SPEED = {walk: 1.4, run: 4.6, sprint: 7.2};
-const SPEED0 = {...SPEED};   // the authored speeds; SPEED = these with the modifiers' 'player.speed' notes (H.mods)  // m/s; the clips follow whatever distance is really covered
-export const ACC = {start: 38, sprintUp: 5.5, sprintDown: 8, stop: 30, skid: 13};   // m/s^2
+// the movement profile, authored (Christoffer's 'Jog', 2026-10-12: a relaxed exploring pace near the clips' own, a gentle start and
+// stop; before it, walk 1.4 / run 4.6 / sprint 7.2 m/s, 38 / 30 m/s^2 to get going / stop, the legs ~1.4-1.7x the clips' pace)
+export const SPEED = {walk: 1.15, run: 3, sprint: 5};
+export const SPEED0 = {...SPEED};   // the authored speeds; SPEED = these with the modifiers' 'player.speed' notes (H.mods)  // m/s; the clips follow whatever distance is really covered
+export const ACC = {start: 17.1, sprintUp: 2.475, sprintDown: 4, stop: 15, skid: 6.5};   // m/s^2
+export const ACC0 = {...ACC};   // the authored rates; ACC = these with the 'player.accel' (setting off, building a sprint) and 'player.decel' (stopping, easing out of a sprint, a skid) notes
+// GAIT: the locomotion clips' stride as the phase advances, x the clip's own per gait: the style (STRIDE0, x the 'player.stride.walk' /
+// '.run' / '.sprint' notes; the drive building into a sprint takes the sprint's), x how fast he really goes against the authored
+// speed of that gait to the ADAPT power (faster: longer strides AND quicker legs, as people run; clamped to STRIDE_R): any build's
+// speed (gear, items, a run rule, the wind) looks right without retuning (strideK, below; the step sounds follow by the event's pace).
+// And the speeds (m/s) the gaits change at: the sprint from `sprint`, its drive below `drive`, a skid on letting go above `skid`; they
+// follow the run and sprint speeds (GAIT0 between SPEED0.run and SPEED0.sprint). dev/movefeel.js tunes all of it live
+export const STRIDE0 = {walk: 1, run: 1, sprint: 1.15}, ADAPT = .6, STRIDE_R = [.7, 1.6];
+const GAIT0 = {sprint: 3.31, drive: 4.62, skid: 3.46};
+export const GAIT = {stride: {walk: 1, run: 1, drive: 1.15, sprint: 1.15}, ...GAIT0};
+// the stride factor for gait g at v m/s (its clip's stride x this per cycle): the style x the speed's share (1 at the authored speed)
+export function strideK(g, v) {
+  const r = clamp(v / SPEED0[g === 'drive' ? 'sprint' : g], STRIDE_R[0], STRIDE_R[1]);
+  return GAIT.stride[g] * (r === 1 ? 1 : Math.pow(r, ADAPT));
+}
 const TURN_RATE = 900;  // deg/s: locomotion (walking / standing turns)
 // Aiming turns FAST (180 deg in 0.15 s): aiming must feel immediate. (Tried 450 deg/s with the draw held until facing
 // the target: it looked smoother but the user found it slow and clumsy to aim.)
@@ -153,7 +170,18 @@ export function createPlayer(H) {
   const has = f => !!A.SP[f];
   const ev = e => { if (H.events) H.events.push(e); };
   // the run speeds follow the modifiers (an item's +speed): recomputed when the notes change, never written from outside
-  const applySpeed = () => { for (const k of Object.keys(SPEED0)) SPEED[k] = H.mods.value('player.speed', SPEED0[k]); };
+  // (a gait's own speed note first, 'player.speed.run', then the whole body's), and so do the rates and the strides (GAIT, above)
+  const applySpeed = () => {
+    const M = H.mods;
+    for (const k of Object.keys(SPEED0)) SPEED[k] = M.value('player.speed', M.value('player.speed.' + k, SPEED0[k]));
+    for (const k of ['start', 'sprintUp']) ACC[k] = M.value('player.accel', ACC0[k]);
+    for (const k of ['sprintDown', 'stop', 'skid']) ACC[k] = M.value('player.decel', ACC0[k]);
+    for (const k of ['walk', 'run', 'sprint']) GAIT.stride[k] = M.value('player.stride.' + k, STRIDE0[k]);
+    GAIT.stride.drive = GAIT.stride.sprint;
+    const same = SPEED.run === SPEED0.run && SPEED.sprint === SPEED0.sprint;   // (as authored: the literal speeds)
+    const at = v => same ? v : SPEED.run + (SPEED.sprint - SPEED.run) * (v - SPEED0.run) / (SPEED0.sprint - SPEED0.run);
+    GAIT.sprint = at(GAIT0.sprint); GAIT.drive = at(GAIT0.drive); GAIT.skid = at(GAIT0.skid);
+  };
   if (H.mods) { H.mods.watch(applySpeed); applySpeed(); }
 
   // ---------------- facing ----------------
@@ -304,9 +332,18 @@ export function createPlayer(H) {
     const e = elev(P.x, P.y), dz = e - P.z;
     if (dz !== 0 && (dz > 0 ? dz <= STEP_UP : dz >= -SNAP)) P.z = e;
   }
+  // a footfall's pace for its sound (features/audio.js): his speed where the authored speeds would put it (its place between walk,
+  // run and sprint), so a run sounds like a run at whatever m/s the modifiers made it; the speed itself when they changed none
+  function pace(v) {
+    const a = SPEED, b = SPEED0;
+    if (a.walk === b.walk && a.run === b.run && a.sprint === b.sprint) return v;
+    if (v <= a.walk) return v * b.walk / a.walk;
+    if (v <= a.run) return b.walk + (v - a.walk) * (b.run - b.walk) / Math.max(a.run - a.walk, 1e-3);
+    return b.run + (v - a.run) * (b.sprint - b.run) / Math.max(a.sprint - a.run, 1e-3);
+  }
   function puff(side, frameName, big = 1) {
     // at the landing foot, read from the rendered bone positions of the contact frame
-    ev({type: big > 1 ? 'player.land' : 'player.step', x: P.x, y: P.y, z: P.z, foot: side, big});
+    ev({type: big > 1 ? 'player.land' : 'player.step', x: P.x, y: P.y, z: P.z, foot: side, big, pace: pace(Math.hypot(P.vx, P.vy))});
     if (!H.dust || !A.SP[frameName]) return;
     const b = A.SP[frameName].bones[A.DIRS[P.face]], f = b[(side === 'L' ? 'Left' : 'Right') + 'Foot'];
     const [sx, sy] = T.toS(P.x, P.y, P.z);
@@ -759,13 +796,13 @@ export function createPlayer(H) {
       const TW = [[0, '0'], [11.25, 'p11'], [22.5, 'p22'], [33.75, 'p33'], [45, 'p45'], [56.25, 'p56'], [67.5, 'p67'], [78.75, 'p78'], [90, 'p90']];
       // 1) motion with the stance we're in (stride along the legs; backing up runs the cycle in reverse)
       const back0 = !!P.aimBack, run = !keys.has('q'), C = run ? RUN : WALK, pre = run ? 'rs' : 'ws';
-      const target = run ? (back0 ? 2.7 : keys.has('shift') ? 3.6 : 3.0) : (back0 ? 1.6 : SPEED.walk);
+      const R = SPEED.run / SPEED0.run, target = run ? (back0 ? 2.7 : keys.has('shift') ? 3.6 : 3.0) * R : (back0 ? 1.6 * SPEED.walk / SPEED0.walk : SPEED.walk);   // (R: the build's pace)
       let speed = Math.hypot(P.vx, P.vy);
       speed = speed < target ? Math.min(target, speed + 25 * dt) : Math.max(target, speed - 30 * dt);
       P.vx = mx * speed; P.vy = my * speed;
       const d = moveBy(P.vx * dt, P.vy * dt);
       const [lx, ly] = vecOf(P.face), along = (mx * lx + my * ly) / (Math.hypot(mx, my) || 1);
-      P.ph = ((P.ph + along * d / C.stride) % 1 + 1) % 1;
+      P.ph = ((P.ph + along * d / (C.stride * strideK(run ? 'run' : 'walk', speed))) % 1 + 1) % 1;   // (the stride follows his real speed: player.js GAIT)
       const at = P.ph * C.stride;
       let f = 0; while (f < C.frames - 1 && at >= C.cum[f + 1]) f++;
       // 2) stance + twist by what you SEE, for THIS gait frame: every (legs forward/back, leg angle, twist) is scored by
@@ -836,7 +873,7 @@ export function createPlayer(H) {
       if (speed < target) speed = Math.min(target, speed + (speed < SPEED.run ? ACC.start : ACC.sprintUp) * dt);  // run fast, sprint builds
       else speed = Math.max(target, speed - (speed > SPEED.run ? ACC.sprintDown : ACC.stop) * dt);                 // ease out of a sprint
     } else {
-      if (speed > 5.2 && !P.skid) { P.skid = 1; P.skidT = 0; }   // let go at sprint speed: skid to a stop
+      if (speed > GAIT.skid && !P.skid) { P.skid = 1; P.skidT = 0; }   // let go at sprint speed: skid to a stop
       speed = Math.max(0, speed - (P.skid ? ACC.skid : ACC.stop) * dt); P.turn = null;
     }
     P.lastSpeed = P.curSpeed ?? speed; P.curSpeed = speed;
@@ -868,7 +905,7 @@ export function createPlayer(H) {
       P.state = 'move';
       // gait from the real speed: walk / run / drive (building into a sprint) / sprint
       const accel = (speed - P.lastSpeed) / Math.max(dt, 1e-3);   // m/s^2
-      P.gait = speed < 2.3 ? 'walk' : speed < 5.0 || !CLIP.sprint ? 'run' : accel > 1 && speed < 6.7 && CLIP.drive ? 'drive' : 'sprint';
+      P.gait = speed < 2.3 ? 'walk' : speed < GAIT.sprint || !CLIP.sprint ? 'run' : accel > 1 && speed < GAIT.drive && CLIP.drive ? 'drive' : 'sprint';
       gaitDistance(d);
     } else {
       if (P.state !== 'idle') { P.state = 'idle'; P.t = 0; P.prevF = -1; }
@@ -894,7 +931,7 @@ export function createPlayer(H) {
     // mid-stride keeps the same foot on the ground. The phase only advances with distance really travelled.
     if (P.state !== 'move') return;
     const C = A.CLIP[P.gait];
-    P.ph = (P.ph + d / C.stride) % 1;
+    P.ph = (P.ph + d / (C.stride * strideK(P.gait, P.curSpeed ?? 0))) % 1;   // (GAIT: the style x his real speed's share)
     const at = P.ph * C.stride;
     let f = 0; while (f < C.frames - 1 && at >= C.cum[f + 1]) f++;
     const key = P.gait + f;
@@ -1115,7 +1152,7 @@ export function createPlayer(H) {
   }
   // a gun loadout's revolver (H.gun: sim/player/gun.js) gets the player's internals; the bow's code above stays as it is
   const internals = {P, A, H, has, ev, dirOf, vecOf, turnToward, moveBy, moveInput, cursorAim, puff, stepTraverse, angDiff,
-    SPEED, BUSY, AIM_TURN_RATE, TURN_RATE, AIM_H};
+    SPEED, SPEED0, strideK, BUSY, AIM_TURN_RATE, TURN_RATE, AIM_H};
   const gun = H.gun ? H.gun(PL, internals) : null;
   PL.gun = gun;
   const lasso = H.lasso ? H.lasso(PL, internals) : null;   // (the equipment experiment's lasso: sim/player/lasso.js)
