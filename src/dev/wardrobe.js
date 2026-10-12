@@ -706,7 +706,10 @@ export function createWardrobe({host, hero, cv, live, photo}) {
     // exactly over his feet (the follow's own target leads him by his chest and his motion, in the frame it was made in:
     // it would swing round him as the camera turns), then the panes' offset and his body's middle, in the view
     cv.freeReset(P.x, P.y, host.P.z); cv.freeAt(AT); ph.move(P.x - AT.x, P.y - AT.y);
-    const z = cv.zoom * cv.dz, vx = -(cx - W / 2) / cv.scale / (host.PPM * z), vy = -(cy - H / 2) / cv.scale / (host.PPMY * z) - .75 * host.PPMH / host.PPMY;
+    // (in whole art px: he sits on the view's pixel lattice, so as the camera turns he stays on his pixel instead of
+    // rounding to the one beside it now and then: a shake)
+    const z = cv.zoom, ox = Math.round(-(cx - W / 2) / cv.scale / cv.dz), oy = Math.round(-(cy - H / 2) / cv.scale / cv.dz - .75 * host.PPMH * z);
+    const vx = ox / (host.PPM * z), vy = oy / (host.PPMY * z);
     const [wx, wy] = cv.toWorld(vx, vy); ph.move(wx, wy);
     seen.yaw = cv.yaw; seen.scale = cv.scale; seen.dz = cv.dz; seen.w = W; seen.h = H; seen.clean = clean;
   }
