@@ -109,7 +109,7 @@ export const RECIPES = {
     params: {R: [1.1, .7, 1.6], len: [4, 2.5, 6], r: [.24, .15, .35], roots: [16, 8, 24], stones: [3, 0, 6], old: [0, 0, 1]},
     // frame: the root plate stands at x = 0 facing -x (its torn underside, toward the pit), the trunk lies along +x
     build(b, p, r) {
-      const old = p.old >= .5, R = p.R, cy = R * .78, th = R * .3, tilt = r.range(-.12, .05);
+      const old = p.old >= .5, R = p.R, cy = R * r.range(.15, .3), th = R * .3, tilt = r.range(-.12, .05);   // (cy: the plate's middle, low: its lower half is still in the ground it tore from)
       // the pit it tore out of: a dark hollow of bare earth on the -x side (water may stand in it)
       const pz = r.range(-.1, .1);
       b.ball('soil', [-R * .55, .005, pz], [R * .6, .012, R * .8], {detail: 1, fixed: 3});   // (a flat dark patch reads as the hole from above)
@@ -153,13 +153,13 @@ export const RECIPES = {
         b.ball('rock', [face + .02, cy + Math.sin(a) * d, Math.cos(a) * d], R * r.range(.1, .2), {detail: 0, lump: .25});
       }
       // the trunk lying away from it, sinking toward its crown end, a few stubs
-      const t0 = [th * .4, cy, 0], t1 = [p.len * .5, p.r * .9 + (cy - p.r) * .25, tilt * p.len * .5], t2 = [p.len, p.r * .8, tilt * p.len];
+      const t0 = [th * .4, Math.max(cy, p.r * 1.1), 0], t1 = [p.len * .5, p.r * .95, tilt * p.len * .5], t2 = [p.len, p.r * .8, tilt * p.len];
       const skin = old ? 'deadwood' : 'bark';
       b.tube(skin, t0, t1, p.r * 1.15, p.r, {sides: 9, part: 63});
       b.tube(skin, t1, t2, p.r, p.r * .8, {sides: 9, part: 63});
       b.tube(old ? 'char' : 'splinter', [t2[0] - .01, t2[1], t2[2]], [t2[0] + .03, t2[1], t2[2]], p.r * .76, p.r * .76, {sides: 9});   // (where the crown broke off)
       for (let i = r.int(2, 5); i > 0; i--) {
-        const t = r.range(.25, .95), x = t * p.len, y = t < .5 ? cy + (t1[1] - cy) * (t / .5) : t1[1] + (t2[1] - t1[1]) * ((t - .5) / .5), z = tilt * x, a = r.range(-1.3, 1.3);
+        const t = r.range(.25, .95), x = t * p.len, y = t < .5 ? t0[1] + (t1[1] - t0[1]) * (t / .5) : t1[1] + (t2[1] - t1[1]) * ((t - .5) / .5), z = tilt * x, a = r.range(-1.3, 1.3);
         const L = r.range(.15, .45);
         b.cone(skin, [x, y + Math.cos(a) * p.r * .9, z + Math.sin(a) * p.r * .9], [x + r.range(.02, .12), y + Math.cos(a) * (p.r + L), z + Math.sin(a) * (p.r + L)], p.r * .2, {sides: 5});
       }
