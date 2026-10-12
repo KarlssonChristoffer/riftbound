@@ -26,9 +26,24 @@ export const TUNE = {
   // (a gunman `stopMan`: he falls flat on his back, his head toward you), takes `dmg` (+ `dmgFly` to anyone it bowls over on the way)
   // and lies stunned `stun` s (elites `stunElite`)
   yank: {dur: .42, h: 1.1, stop: 1.15, stopMan: 2.4, dmg: 18, dmgFly: 12, stun: 1.5, stunElite: .9, stunBoss: .8, bowl: .55},
-  // CHAMPION: a tug of war: it heaves you toward it at `pull` m/s for `heave` s, then slackens `slack` s (the window: a
-  // yank then lands; one outside it jolts you `jolt` m/s toward it instead)
-  boss: {pull: 2.1, heave: 1.05, slack: .42, jolt: 6},
+  // STRENGTH (docs/exp/lasso.md "Strength"): what's on the rope weighs WEIGHT (below) against your PULL: `pull` at a quick
+  // throw x `lo`, up to x `hi` as the loop spins up over `charge` s (it spins `fast` x faster then), x the modifiers'
+  // 'lasso.pull'. The ratio pull / weight is its CLASS: >= `light`: light, >= `even`: even, >= `heavy`: heavy, else strong.
+  //   light   it comes: dragged at hold.drag, a yank throws it at your feet (YANK), the hammer throw
+  //   even    it fights: dragged at even.drag, it tugs back now and then, a yank only trips it (it falls toward you)
+  //   heavy   it won't come: the loop SNARES its legs (SNARE) and you let the rope go
+  //   strong  it pulls YOU: a tug of war (STRONG)
+  str: {pull: 1, lo: .85, hi: 1.3, charge: 1.2, fast: .5, light: 1.15, even: .78, heavy: .42},
+  // EVEN: dragged at `drag` m/s; every `tug` [lo, hi] s it tugs back `tugT` s at `tugV` m/s (the rope drags you along); a yank
+  // trips it: it falls `trip` m toward you (`tripH` m up, `tripDur` s), takes `tripDmg`, lies stunned `stun` s
+  even: {drag: .9, tug: [1.3, 2.1], tugT: .45, tugV: 1.6, trip: 1.1, tripH: .35, tripDur: .32, tripDmg: 8, stun: .9},
+  // SNARE (heavy): the cowboy's snare clip (`clip` s; the rope snapped down onto its legs at `cinch` s), then it stands rooted
+  // `dur` s (an elite `durElite`), the loop round its ankles, the rope let go; then it kicks free and the loop comes home
+  snare: {clip: .55, cinch: .22, dur: 2.4, durElite: 1.8},
+  // STRONG: a tug of war: it heaves, reeling you in at `reel` m/s for `heave` s, then slackens `slack` s (the window: a yank
+  // then trips it, `trip` m, stunned `stun` s; one in a heave jolts you `jolt` m/s toward it and the rope is lost). Reeled in
+  // to `near` m it lets go of the rope, and you're within its reach
+  strong: {reel: 2.1, heave: 1.05, slack: .42, near: 1.5, jolt: 6, trip: .9, stun: .8},
   // PROPS: a barrel / crate on the rope is towed through the prop physics (combat/props.js shove) at up to `towMax` m/s; a
   // yank shoves it at the speed that rolls / slides it to `stop` m short of you (its own friction), at most `yankV` m/s
   prop: {yankV: 8, towMax: 4.5, stop: 1.3},
@@ -83,6 +98,9 @@ export const POSES = {
 export const HANDS = {grip: 'RopeHand0', upper: 'RopeHand1', fb: ['RightHand', 'LeftHand']};
 // the rope's look: lit / mid / shade (hemp)
 export const ROPE = ['#c8a876', '#9a7c50', '#6a5234'];
+// WEIGHT against your pull (TUNE.str): the yard's / a run's brute, an elite brute, a champion (boss), the desert's gunmen by
+// type (an elite type not listed: x `eliteK`), a movable prop
+export const WEIGHT = {brute: .65, elite: 1.7, boss: 3.4, gunman: {bandit: .7, bruiser: 1, sheriff: 1.3}, eliteK: 1.4, prop: .5};
 // high things a loop drops over (their top, m): a prop of these kinds is an anchor (the 3D trees' limbs are too, and the
 // lasso's own: features/equip/anchors.js)
 export const ANCHOR_TOP = {gatepost: 2.85, tower: 3.9, pillar: 2.6, windmill: 4.9, water_tower: 4.1, signpost: 2.7};

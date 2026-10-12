@@ -39,9 +39,8 @@ smoke and simview pass unchanged).
 - **Gunmen** (the desert's): roped, the aim is let go and the gun goes back in the holster; he leans away from you,
   slowly. A yank knocks him off his feet: he flies (`fall`), lands on his back 2.4 m short of you (die_b from his knees,
   placed as a corpse is), lies stunned, gets up (the same frames backward) and draws again.
-- **Elites** hold out: they drag at 1.2 m/s, the rope slips after 2.2 s, they're stunned 0.9 s.
-- **A champion** is a tug of war: it heaves you toward it (2.1 m/s for 1.05 s), then slackens for 0.42 s. Yank in the
-  slack and it's thrown (0.8 s stunned); yank against a heave and it jerks you off your feet toward it and the rope is lost.
+- Heavier bodies don't come so easily: see **Strength** below (an elite brute or a sheriff is snared, a bruiser trips, a
+  champion pulls you in).
 - **Barrels and crates**: towed through the prop physics (an upright barrel tips over and rolls after you, a crate
   slides); a yank shoves it at the speed its own friction brings it to your feet. A powder keg yanked into something can
   go off.
@@ -51,6 +50,48 @@ smoke and simview pass unchanged).
 - **Tumbleweeds** (the desert): a loop that lands by one snags it and it comes bouncing home as the loop is reeled in,
   then the wind takes it again. (Tumbleweeds are a view, so this is the lasso's view's doing: the sim's loop just missed.)
 - **Anchors** (at least 2.5 m up, within 10 m of the hand): you swing.
+
+## Strength
+
+What's on the rope weighs something against your pull, and the ratio sets how the catch goes. Your **pull** is 1 x the
+spin's **charge**: a quick throw pulls at 0.85, a loop spun up for 1.2 s at 1.3 (the loop turns half again as fast and
+grows a little meanwhile), x the modifiers' `lasso.pull` notes (`host.mods`: an item or a run rule can make you stronger).
+The **weights** (content/lasso.js `WEIGHT`): a brute 0.65, a bandit 0.7, a bruiser 1, a sheriff 1.3, an elite brute 1.7,
+a champion 3.4, barrels and crates 0.5. The class is fixed at the catch (pull / weight):
+
+| class | pull / weight | held | a yank (tap F) |
+|---|---|---|---|
+| **light** | >= 1.15 | it comes: dragged at 3.2 m/s; the hammer throw | thrown at your feet (above) |
+| **even** | 0.78 .. 1.15 | it fights: dragged at 0.9 m/s, it tugs back every 1.3-2.1 s (0.45 s at 1.6 m/s: the rope drags you along), slips after 2.2 s | it only **trips**: falls 1.1 m toward you, takes 8, lies 0.9 s |
+| **heavy** | 0.42 .. 0.78 | **snared** at once: you snap the rope down onto its legs, it stands rooted 2.4 s (an elite 1.8 s), the loop round its ankles, the rope let go; then it kicks free and the loop comes home | - |
+| **strong** | < 0.42 | **it pulls you in**: a tug of war: it heaves, reeling you in at 2.1 m/s for 1.05 s, then slackens 0.42 s; reeled in to 1.5 m it lets go of the rope and you're in its reach. Roll or LMB to let go | in its slack: it trips (0.9 m, 0.8 s); in a heave: you're jerked off your feet toward it and the rope is lost |
+
+So with no items: brutes and bandits always come; a bruiser trips on a quick throw and comes on a spun-up one; a sheriff is
+snared on a quick throw and trips on a spun-up one; an elite brute is always snared; a champion always pulls you in.
+A snared gunman can't take a step but his gun still works. Nothing snares in the air (a kicked or flung body): it's held
+as an even one instead.
+
+**Seeing it:** while the loop spins the aim's mark says what the throw would do: gold = yank, amber = trip, blue = snare
+(a second ring at its ankles), red = it pulls you (a dotted line crawling in toward it), and over the target an HD word:
+`yank` / `trip` / `snare` / `pulls you`. Spin longer and the word can change. Held, the first few times: a hint for the
+even (`it fights back · tap F: trip it`) and the strong (`it pulls you in! · tap F in its slack: trip · roll: let go`).
+Dragged in, his heels skid (steps, dust, footprints); the rope creaks faster while it pulls on you.
+
+## Live (the live hero's rope work)
+
+The live cowboys (the gunslinger by default, the outlaw with `?live=1`) do the rope work with clips made for the live
+model (tools/blender/western.py, section "lasso live": `LASSO_LIVE`, ls_*), picked by the lasso's state in
+view/livehero.js (LASSO): the standing spin (ls_spin: its frame by the loop's turn), the throw (ls_throw; ls_throw_up at a
+high anchor, more than 22 deg up from the hand), the catch (ls_take; a strong one's ls_jerk), the hold (ls_hold), the
+strain while it pulls on you (ls_strain; ls_dragged while it drags you), walking with it (ls_haul_walk, backward when you
+back away), the yank (ls_yank), the snare (ls_snare). The throw, the yank and the snare are **warped** onto the sim's own
+timing: the clip's mark (release / pull / cinch) lands on the step the sim acts at, so nothing in the sim changed for them
+(a sprite cowboy still plays the atlas poses). Spinning (standing or walking), the right wrist is IK'd onto the spin circle
+(fitted from the model's ls_spin keys: beside the head, under the brim's edge: no arm reaches over a sombrero) at the
+loop's turn, and the loop rides over the hat with a spoke down to the drawn fist
+(features/equip/lassolook.js reads `host.playerRopeHand`: the live hero's drawn RopeHand0 / 1 and the circle), so the rope
+leaves the hand you see in every phase. While the rope is in his hands the live hero's idles, head look and weather moves
+stay off.
 
 ## The anchors
 
@@ -114,7 +155,11 @@ Small, additive changes in other areas' files (each named in its commit):
 - `miss`: `lie`, `reel`; `weed` (how near a tumbleweed is snagged).
 - `hold`: `len`, `haul`, `slip` / `slipElite` / `slipBoss`, `drag` / `dragElite`, `stretch`, `tapMax`.
 - `yank`: `dur`, `h`, `stop` / `stopMan`, `dmg`, `dmgFly`, `stun` / `stunElite` / `stunBoss`, `bowl`.
-- `boss`: `pull`, `heave`, `slack`, `jolt`.
+- `str`: `pull`, `lo` / `hi` (x the pull at a quick / a spun-up throw), `charge` (s to spin up), `fast` (the loop's
+  turns at full charge), `light` / `even` / `heavy` (the classes' lower bounds of pull / weight). `WEIGHT` (export): the bodies.
+- `even`: `drag`, `tug` [lo, hi] s between tugs, `tugT`, `tugV`, `trip`, `tripH`, `tripDur`, `tripDmg`, `stun`.
+- `snare`: `clip`, `cinch` (the cowboy's snare clip), `dur`, `durElite`.
+- `strong`: `reel`, `heave`, `slack`, `near`, `jolt`, `trip`, `stun`.
 - `prop`: `yankV`, `towMax`, `stop`.
 - `swing`: `hang`, `g`, `lift`, `reelT`, `clear`, `minLen`, `up`, `push`, `pump`, `drag`, `climb`, `max`, `bump`, `rest`, `damp`.
 - `brazier`: `spill`, `r`, `dur` (the coals).

@@ -22,6 +22,7 @@ import {throwOf} from '../../sim/player/launch.js';   // a blast's throw (by how
 import {flight, throwBody, stepFlight, feetOf} from '../../sim/bodyfly.js';   // a kicked brute's flight (launch below: docs/exp/brawl.md)
 import {TUNE as BRAWL} from '../../content/brawl.js';
 import {walkable} from '../../world/world.js';
+import {AIRK, createDrift} from '../../view/airdrift.js';   // (its view's particles in the moving air: AIRK.combat)
 
 export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -121,10 +122,13 @@ export function createCore(host) {
   }
   const shake = (a, s) => host.shake(a, s);
   function light(x, y, h, color, radius, i0, life, flicker = .3) { if (lts.length > 5) lts.shift(); lts.push({x, y, h, color, radius, i0, life, flicker, t: 0, id: 7100 + (lightN++ % 64)}); }
+  // ax, ay: its share of the moving air (G.air, its view's: view/airdrift.js), ai: how it takes it (0 dust, 1 smoke, 2 fire)
   function part(x, y, a, vx, vy, va, life, pal, o = {}) {
     if (fx.length > 900) return;
-    fx.push({x, y, a, vx, vy, va, t: o.delay ? -o.delay : 0, life, pal, emit: !!o.emit, grav: o.grav ?? 0, drag: o.drag ?? 0, sz: o.sz ?? 1});
+    fx.push({x, y, a, vx, vy, va, t: o.delay ? -o.delay : 0, life, pal, emit: !!o.emit, grav: o.grav ?? 0, drag: o.drag ?? 0, sz: o.sz ?? 1,
+      ax: 0, ay: 0, ai: pal === DUST ? 0 : pal === SMOKE ? 1 : 2});
   }
+  const AD = createDrift(host), AKC = AIRK.combat, AIR3 = new Float32Array(3);
   function ring(x, y, z, r, life, pal, emit) { rings.push({x, y, z, r, t: 0, life, pal, emit}); }
   function number(p, dmg, crit, a) {
     nums.push({x: p.x + VR(-.2, .2), y: p.y, h: pz(p) + (p.h || 0) + (a ?? (HGT[p.kind] ?? 1.2)) + .15, v: dmg, crit, t: 0});
@@ -595,6 +599,8 @@ export function createCore(host) {
     // was): o = {dur, h (m up at the middle), dmg (on landing), stun (s held after), spin (rad it tumbles), dmgFly, bowl,
     // onLand(b)} -> the landing spot {x1, y1} or null (not one of the core's, down, or in the air already)
     hold(p, sec) { const s = BS.get(p); if (!s || p.broken || s.hop) return false; s.held = Math.max(s.held || 0, sec); return true; },
+    // airborne(p): one of its brutes in the air (a hop, a fling, the hammer's carry, a kick's flight): the lasso's snare waits
+    airborne(p) { const s = BS.get(p); return !!s && (!!s.hop || !!s.fly?.F.on || !!p.air); },
     // carry(p, x, y, h): held up off its feet at (x, y), h m up (the lasso's hammer throw swings it round you), tumbling;
     // -> false where it can't be (a wall: it stays where it was). Let go with fling (o.h0: from that height)
     carry(p, x, y, h) {
@@ -767,12 +773,15 @@ export function createCore(host) {
           }
         }
       }
-      // particles
+      // particles (and the moving air: G.air, dust and smoke fast, fire and embers slowly; ?air=0 none)
+      const air = AD.begin(dt, AKC.gain);
+      if (air) { AIR3[0] = AD.a(AKC.dust); AIR3[1] = AD.a(AKC.smoke); AIR3[2] = AD.a(AKC.fire); }
       for (let i = fx.length - 1; i >= 0; i--) {
         const q = fx[i]; q.t += dt; if (q.t < 0) continue;
         if (q.t > q.life) { fx[i] = fx[fx.length - 1]; fx.pop(); continue; }
         if (q.drag) { const k = Math.max(0, 1 - q.drag * dt); q.vx *= k; q.vy *= k; q.va *= k; }
-        q.x += q.vx * dt; q.y += q.vy * dt; q.va -= q.grav * dt; q.a += q.va * dt;
+        if (air) { AD.relax(q.x, q.y, q.a, q.ax, q.ay, AIR3[q.ai]); q.ax = AD.x; q.ay = AD.y; }
+        q.x += (q.vx + q.ax) * dt; q.y += (q.vy + q.ay) * dt; q.va -= q.grav * dt; q.a += q.va * dt;
         if (q.grav) { const gz = host.elev(q.x, q.y); if (q.a < gz) { q.a = gz; q.va = -q.va * .3; q.vx *= .5; q.vy *= .5; } }
       }
       for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) > rings[i].life) rings.splice(i, 1);

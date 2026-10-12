@@ -19,6 +19,7 @@ export function createInput(E) {
     if (k === 'escape') { if (!e.repeat) pause.toggle(); return; }
     if (k === 'f3') { e.preventDefault(); if (!e.repeat) { perf.toggle(); pause.menu.refresh(); } return; }   // the frame profiler
     if (k === 'f4') { e.preventDefault(); if (!e.repeat) E.photo?.toggle(true); return; }   // photo mode (also from the menu)
+    if (k === 'f1') e.preventDefault();   // (not the browser's help page: F1 is the key help, dev/devkeys.js)
     if (pause.paused) { pause.menu.key(k, e); return; }   // the menu has the keys: arrows, Tab, Enter
     if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'tab'].includes(k)) e.preventDefault();
     if (e.repeat) return;
@@ -39,7 +40,7 @@ export function createInput(E) {
     applyOpts();
   });
   addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys.delete(k); if (k === 'e') PL.onInteractUp(); });
-  addEventListener('blur', () => { keys.clear(); mouse.down = false; dragging = false; });
+  addEventListener('blur', () => { keys.clear(); mouse.down = false; dragging = false; PL.fists?.release('L'); PL.fists?.release('R'); });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   // the cursor as the screen shows it: cx0, cy0 = where it is on the page (css px). remap() (the loop: after the camera,
   // every frame) reads what's under it now on the image as drawn (view px, as the player reads it): the wheel's ease
@@ -61,9 +62,9 @@ export function createInput(E) {
     if (E.pause.paused || host.lock || E.photo?.open) return;
     if (e.button === 0) { PL.press(); mouse.down = true; }
     if (e.button === 1) { e.preventDefault(); dragging = true; dragX = e.clientX; }
-    if (e.button === 2 && !BUSY.has(P.state)) features.some(f => f.ability?.('rmb'));
+    if (e.button === 2 && !PL.pressR?.() && !BUSY.has(P.state)) features.some(f => f.ability?.('rmb'));   // (the fists up: the right hand, sim/player/fists.js)
   });
-  addEventListener('mouseup', e => { if (e.button === 0) { if (!E.pause.paused && !E.photo?.open) PL.release(); mouse.down = false; } if (e.button === 1) dragging = false; });
+  addEventListener('mouseup', e => { if (e.button === 0) { if (!E.pause.paused && !E.photo?.open) PL.release(); mouse.down = false; } if (e.button === 1) dragging = false; if (e.button === 2) PL.releaseR?.(); });
   canvas.addEventListener('wheel', e => { e.preventDefault(); cv.onWheel(e); }, {passive: false});
   return {
     get dragging() { return dragging; },

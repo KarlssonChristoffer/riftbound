@@ -8,10 +8,13 @@
 //                mark after
 //   smoke        the cloud: soft HD puffs that churn and thin (gfx fx 'blend', drawn over what is in it: you vanish in it),
 //                pixel puffs when the HD fx are off
+//   the air      (G.air, view/airdrift.js, AIRK.equip) the soft puffs and the light bits (sparks, flame pixels, straw, ash)
+//                drift in the moving air; the cloud's puffs are each blown off their place (a blast blows the cloud open,
+//                a runner's wake drags it along), thinner the farther, and drift back as the bomb pours on (the cloud refills)
 //   the rest     traps (open, shut on a leg), scarecrows (sway, flinch, fall apart), the cache and pickups (floating, a ring
 //                and a beam of their colour), bursts on the events (glass, straw, sparks, dirt, steam), lights
 // OWNS: its particles (typed arrays, capped), scorches, flares, the light records. READS: the sim's lists and S, events,
-//   host (yaw, zoom, PPM, toView, G.fx), the wind (smoke drift). CALLS: lights.js F.flame (its flames, drawn before its frame).
+//   host (yaw, zoom, PPM, toView, G.fx, G.air), the wind (smoke drift). CALLS: lights.js F.flame (its flames, drawn before its frame).
 // BUDGET: view + frame ~.05-.15 ms with all six out (points <= ~700 a frame); render: a sprite draw per sheet in use.
 import {paintArt, TIPS} from './art.js';
 import {createLassoLook} from './lassolook.js';
@@ -19,6 +22,7 @@ import {GADGETS, THROW} from '../../content/gadgets.js';
 import {viewRandom} from '../../core/rng.js';
 import {hex01} from '../../core/color.js';
 import {clamp, hypot2, TAU, hash3} from '../../core/mathx.js';
+import {AIRK, createDrift} from '../../view/airdrift.js';
 
 const PM = 900;   // particles cap
 const PALS = {
@@ -49,38 +53,73 @@ export function createLook(host, sim) {
   // ---------------------------------------------------------------- particles (structure of arrays)
   const X = new Float32Array(PM), Y = new Float32Array(PM), H = new Float32Array(PM), VX = new Float32Array(PM), VY = new Float32Array(PM), VH = new Float32Array(PM);
   const PT = new Float32Array(PM), PL = new Float32Array(PM), GR = new Float32Array(PM), DR = new Float32Array(PM), SZ = new Uint8Array(PM), PAL = new Uint8Array(PM);
+  const AX = new Float32Array(PM), AY = new Float32Array(PM);   // its share of the moving air (m/s: view/airdrift.js)
   let N = 0;
   function part(x, y, h, vx, vy, vh, life, pal, o = 0, sz = 1, grav = 0, drag = 0) {
     if (N >= PM) return;
     const i = N++; X[i] = x; Y[i] = y; H[i] = h; VX[i] = vx; VY[i] = vy; VH[i] = vh; PT[i] = -o; PL[i] = life; GR[i] = grav; DR[i] = drag; SZ[i] = sz; PAL[i] = pal;
+    AX[i] = AY[i] = 0;
   }
+  // THE AIR (G.air): k by what a bit is (0: too heavy to care: glass, dirt, iron, water, gold); this step's relaxation per palette
+  const AD = createDrift(host), AK = AIRK.equip, PK = new Float32Array(PCOL.length), PA = new Float32Array(PCOL.length);
+  PK[PIDX.fire] = PK[PIDX.spark] = AK.spark; PK[PIDX.straw] = PK[PIDX.ash] = AK.light; PK[PIDX.smoke] = PK[PIDX.steam] = AK.puff;
+  let airOn = false;
   function burstOf(x, y, h, n, pal, sp, up, life, sz = 1, grav = 9, drag = 2) {
     for (let k = 0; k < n; k++) { const a = V() * TAU, s = VR(.3, 1) * sp; part(x, y, h, Math.sin(a) * s, Math.cos(a) * s * .8, VR(up * .4, up), VR(life * .6, life), pal, 0, sz, grav, drag); }
   }
   function stepParts(dt) {
     for (let i = N - 1; i >= 0; i--) {
       PT[i] += dt; if (PT[i] < 0) continue;
-      if (PT[i] > PL[i]) { const j = --N; X[i] = X[j]; Y[i] = Y[j]; H[i] = H[j]; VX[i] = VX[j]; VY[i] = VY[j]; VH[i] = VH[j]; PT[i] = PT[j]; PL[i] = PL[j]; GR[i] = GR[j]; DR[i] = DR[j]; SZ[i] = SZ[j]; PAL[i] = PAL[j]; continue; }
+      if (PT[i] > PL[i]) { const j = --N; X[i] = X[j]; Y[i] = Y[j]; H[i] = H[j]; VX[i] = VX[j]; VY[i] = VY[j]; VH[i] = VH[j]; PT[i] = PT[j]; PL[i] = PL[j]; GR[i] = GR[j]; DR[i] = DR[j]; SZ[i] = SZ[j]; PAL[i] = PAL[j]; AX[i] = AX[j]; AY[i] = AY[j]; continue; }
       if (DR[i]) { const k = Math.max(0, 1 - DR[i] * dt); VX[i] *= k; VY[i] *= k; VH[i] *= k; }
-      X[i] += VX[i] * dt; Y[i] += VY[i] * dt; VH[i] -= GR[i] * dt; H[i] += VH[i] * dt;
+      if (airOn && PA[PAL[i]] > 0) { AD.relax(X[i], Y[i], H[i], AX[i], AY[i], PA[PAL[i]]); AX[i] = AD.x; AY[i] = AD.y; }
+      X[i] += (VX[i] + AX[i]) * dt; Y[i] += (VY[i] + AY[i]) * dt; VH[i] -= GR[i] * dt; H[i] += VH[i] * dt;
       if (GR[i] > 0) { const g = host.elev(X[i], Y[i]); if (H[i] < g) { H[i] = g; VH[i] = -VH[i] * .3; VX[i] *= .5; VY[i] *= .5; } }
     }
   }
   // soft HD puffs (gfx fx 'blend'): smoke over a fire, steam, a dynamite blast's dust
   const FM = 160, FX = new Float32Array(FM), FY = new Float32Array(FM), FH = new Float32Array(FM), FV = new Float32Array(FM), FR = new Float32Array(FM), FG = new Float32Array(FM),
     FT = new Float32Array(FM), FL = new Float32Array(FM), FA = new Float32Array(FM), FK = new Uint8Array(FM);   // FK: 0 soot, 1 steam, 2 dust, 3 the smoke bomb's
+  const FAX = new Float32Array(FM), FAY = new Float32Array(FM);   // its share of the moving air (m/s)
   let NF = 0;
   function puff(x, y, h, r, grow, rise, life, a, k) {
     if (NF >= FM) return;
-    const i = NF++; FX[i] = x; FY[i] = y; FH[i] = h; FR[i] = r; FG[i] = grow; FV[i] = rise; FT[i] = 0; FL[i] = life; FA[i] = a; FK[i] = k;
+    const i = NF++; FX[i] = x; FY[i] = y; FH[i] = h; FR[i] = r; FG[i] = grow; FV[i] = rise; FT[i] = 0; FL[i] = life; FA[i] = a; FK[i] = k; FAX[i] = FAY[i] = 0;
   }
   const WS = {x: 0, y: 0, g: 0};
   function stepPuffs(dt) {
     const w = host.wind?.on && host.wind.at ? host.wind.at(host.player.x, host.player.y, WS) : null, wx = w ? w.x * .12 : 0, wy = w ? w.y * .12 : 0;
+    const aP = airOn ? AD.a(AK.puff) : 0;
     for (let i = NF - 1; i >= 0; i--) {
       FT[i] += dt;
-      if (FT[i] > FL[i]) { const j = --NF; FX[i] = FX[j]; FY[i] = FY[j]; FH[i] = FH[j]; FR[i] = FR[j]; FG[i] = FG[j]; FV[i] = FV[j]; FT[i] = FT[j]; FL[i] = FL[j]; FA[i] = FA[j]; FK[i] = FK[j]; continue; }
-      FH[i] += FV[i] * dt; FR[i] += FG[i] * dt; FX[i] += wx * dt; FY[i] += wy * dt; FV[i] *= Math.max(0, 1 - dt * .6);
+      if (FT[i] > FL[i]) { const j = --NF; FX[i] = FX[j]; FY[i] = FY[j]; FH[i] = FH[j]; FR[i] = FR[j]; FG[i] = FG[j]; FV[i] = FV[j]; FT[i] = FT[j]; FL[i] = FL[j]; FA[i] = FA[j]; FK[i] = FK[j]; FAX[i] = FAX[j]; FAY[i] = FAY[j]; continue; }
+      if (airOn) { AD.relax(FX[i], FY[i], FH[i], FAX[i], FAY[i], aP); FAX[i] = AD.x; FAY[i] = AD.y; }
+      FH[i] += FV[i] * dt; FR[i] += FG[i] * dt; FX[i] += (wx + FAX[i]) * dt; FY[i] += (wy + FAY[i]) * dt; FV[i] *= Math.max(0, 1 - dt * .6);
+    }
+  }
+  // the smoke bomb's cloud in the moving air: each of its CLOUD_N puffs carries an offset (m) it integrates from its own
+  // air velocity (relaxed toward G.air where the puff is), eased back home over seconds (the bomb pours on: the cloud
+  // fills in again) and drawn thinner the farther it was blown (blown off: thinned out). Made per cloud on first sight
+  // (one small array a bomb; the sim's cloud itself, what the enemies can't see through, never moves)
+  const CLOUD_N = 44, CLOUD_BACK = .35, cloudAir = new WeakMap(), CP = {x: 0, y: 0, h: 0, r: 0, s4: 0};
+  function cloudPuff(c, ci, i, R, big, out) {   // the cloud's puff i where it churns (no air)
+    const s1 = hash3(i, ci, 3), s2 = hash3(i, ci, 5), s3 = hash3(i, ci, 11), s4 = hash3(i, ci, 17);
+    const a = s1 * TAU + c.t * (.12 + .18 * s2) * (s3 < .5 ? -1 : 1), d = Math.sqrt(s2) * R * .85;
+    out.h = c.z + .55 + s4 * 1.7 * big * (1 - .45 * d / R) + Math.sin(c.t * .7 + i) * .1;
+    out.x = c.x + Math.sin(a) * d; out.y = c.y + Math.cos(a) * d * .9; out.r = (.7 + .55 * s3) * big; out.s4 = s4;
+    return out;
+  }
+  function stepClouds(dt) {
+    if (!airOn || !sim.clouds.length) return;
+    const a = AD.a(AK.cloud), back = Math.exp(-dt * CLOUD_BACK), G = GADGETS.smoke;
+    for (let ci = 0; ci < sim.clouds.length; ci++) {
+      const c = sim.clouds[ci], R = sim.cloudR(c), big = R / G.r;
+      let d = cloudAir.get(c); if (!d) cloudAir.set(c, d = new Float32Array(CLOUD_N * 4));   // [dx, dy, wx, wy] a puff
+      for (let i = 0, o = 0; i < CLOUD_N; i++, o += 4) {
+        cloudPuff(c, ci, i, R, big, CP);
+        AD.relax(CP.x + d[o], CP.y + d[o + 1], CP.h, d[o + 2], d[o + 3], a); d[o + 2] = AD.x; d[o + 3] = AD.y;
+        d[o] = d[o] * back + AD.x * dt; d[o + 1] = d[o + 1] * back + AD.y * dt;
+      }
     }
   }
   // scorch marks on the ground (a pool burnt out, a blast) and short light flares
@@ -338,13 +377,13 @@ export function createLook(host, sim) {
   }
   function drawCloud(c, ci) {
     const G = GADGETS.smoke, R = sim.cloudR(c), fin = Math.min(1, c.t / .25), fout = c.t > c.dur - G.fade ? Math.max(0, (c.dur - c.t) / G.fade) : 1, A = fin * fout;
-    const n = 44, big = R / G.r;
+    const n = CLOUD_N, big = R / G.r, D = airOn ? cloudAir.get(c) : null;   // (D: the puffs blown off their places by the air)
     for (let i = 0; i < n; i++) {
-      const s1 = hash3(i, ci, 3), s2 = hash3(i, ci, 5), s3 = hash3(i, ci, 11), s4 = hash3(i, ci, 17);
-      const a = s1 * TAU + c.t * (.12 + .18 * s2) * (s3 < .5 ? -1 : 1), d = Math.sqrt(s2) * R * .85, h = c.z + .55 + s4 * 1.7 * big * (1 - .45 * d / R) + Math.sin(c.t * .7 + i) * .1;
-      const x = c.x + Math.sin(a) * d, y = c.y + Math.cos(a) * d * .9, r = (.7 + .55 * s3) * big;
-      if (host.G.fx) host.G.fx(x, h, y, r, s4 < .25 ? C.smokeD : C.smoke, .58 * A, 'blend');
-      else for (let k = 0; k < 6; k++) pt(x + (k - 3) * .08, y, h + (k & 1) * .1, PCOL[PIDX.smoke][k & 3], z * 3, false, .7 * A);
+      const P = cloudPuff(c, ci, i, R, big, CP), h = P.h, r = P.r, s4 = P.s4;
+      let x = P.x, y = P.y, k0 = A;
+      if (D) { const dx = D[i * 4], dy = D[i * 4 + 1]; x += dx; y += dy; k0 *= clamp(1 - (Math.hypot(dx, dy) - .3 * R) / (.9 * R), 0, 1); if (k0 <= 0) continue; }
+      if (host.G.fx) host.G.fx(x, h, y, r, s4 < .25 ? C.smokeD : C.smoke, .58 * k0, 'blend');
+      else for (let k = 0; k < 6; k++) pt(x + (k - 3) * .08, y, h + (k & 1) * .1, PCOL[PIDX.smoke][k & 3], z * 3, false, .7 * k0);
     }
   }
   const sheetOf = id => id === 'flask' ? art.flask : id === 'dynamite' ? art.dynamite : id === 'smoke' ? art.smoke : id === 'scarecrow' ? art.crow8 : id === 'beartrap' ? TRAP1 : id === 'grapple' ? art.hook : null;
@@ -406,7 +445,9 @@ export function createLook(host, sim) {
     view(dt, evs) {
       if (!art) return;
       T += dt;
-      onEvents(evs); emit(dt); stepParts(dt); stepPuffs(dt); lassoLook.view(dt);
+      airOn = AD.begin(dt, AK.gain);   // the moving air (G.air): this step's relaxation per palette
+      if (airOn) for (let p = 0; p < PK.length; p++) PA[p] = PK[p] > 0 ? AD.a(PK[p]) : 0;
+      onEvents(evs); emit(dt); stepParts(dt); stepPuffs(dt); stepClouds(dt); lassoLook.view(dt);
       for (let i = scorches.length - 1; i >= 0; i--) if ((scorches[i].t += dt) > scorches[i].life) scorches.splice(i, 1);
       for (let i = flares.length - 1; i >= 0; i--) if ((flares[i].t += dt) > flares[i].life) flares.splice(i, 1);
       // a pool burning out leaves its scorch (seen as the sim drops it: the view keeps the last pools it drew)
@@ -415,6 +456,7 @@ export function createLook(host, sim) {
     },
     frame, lights,
     clear() { N = 0; NF = 0; scorches.length = 0; flares.length = 0; seenPools.length = 0; flameKeys.clear(); },
-    get counts() { return {parts: N, puffs: NF, scorches: scorches.length}; },
+    get counts() { return {parts: N, puffs: NF, scorches: scorches.length, airN: AD.n}; },
+    cloudAir: c => cloudAir.get(c) || null,   // (tests: a cloud's puffs' offsets in the air, [dx, dy, wx, wy] each)
   };
 }
