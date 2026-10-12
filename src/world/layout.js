@@ -42,6 +42,8 @@ import {TERRAIN as STONE_TERRAIN, PROPS as STONE_PROPS} from './stonecircle.js';
 import {TOWER} from './westland.js';   // the West Downs' watchtower (world/watchtower.js)
 import {towerPlan, towerCols, inTower} from './watchtower.js';
 import {BROOK, BRIDGE as BROOK_BRIDGE, lay as layBrook, inBrookPool, gapsOn as brookGaps, away as brookAway} from './brook.js';   // the West Downs' brook
+import {SESSION} from '../core/session.js';   // the forest's seed (?seed, ?forest=1, or the co-op server's)
+import {forestPlan, lay as layForest, RECT as FOREST_RECT} from './forest.js';   // the seeded forest north of the Proving Grounds
 
 // WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
 // cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
@@ -57,7 +59,11 @@ const GX1 = TERRAIN_ON ? 72 : 62;
 // past + 2 m, the painted ground mirrored on outward)
 // The WEST DOWNS (westland.js, on by default) grow the world west to WEST.x0
 const WX0 = WEST_ON ? WEST.x0 : 0;
-export const WORLD = BIG ? {x0: Math.min(-40, WX0), y0: -60, x1: 122, y1: 30, WM: 122 - Math.min(-40, WX0), HM: 90, past: 12} : {x0: WX0, y0: 0, x1: GX1, y1: 30, WM: GX1 - WX0, HM: 30, past: 12};
+// THE FOREST (world/forest.js, docs/FOREST.md): grown from a seed north of everything (y -64..0, the world's width); on with a seed
+// (core/session.js: ?seed=N, ?forest=1, a co-op server's) and walkable terrain. It takes the world's north edge out to its own
+export const FOREST = TERRAIN_ON && SESSION.seed !== null ? forestPlan(SESSION.seed) : null;
+export const WORLD = FOREST ? {x0: Math.min(WX0, FOREST_RECT.x0), y0: FOREST_RECT.y0, x1: GX1, y1: 30, WM: GX1 - Math.min(WX0, FOREST_RECT.x0), HM: 30 - FOREST_RECT.y0, past: 12}
+  : BIG ? {x0: Math.min(-40, WX0), y0: -60, x1: 122, y1: 30, WM: 122 - Math.min(-40, WX0), HM: 90, past: 12} : {x0: WX0, y0: 0, x1: GX1, y1: 30, WM: GX1 - WX0, HM: 30, past: 12};
 export {WEST_ON, WEST, WEST_LAND};
 export const GROUNDS = {x0: 0, y0: 0, x1: GX1, y1: 30};
 export const PLAY = {x0: 7, y0: 6, x1: 33, y1: 24};
@@ -73,11 +79,15 @@ export const TRAIL = {x0: 33, y0: 2.6, x1: TERRAIN_ON ? 69.5 : 60, y1: 27.5};   
 //   theirs: its trees and rocks are solid), from the north bank to short of the ravine's rim
 const DOWNS = WEST_ON ? {x0: WEST.x0 + 1.4, y0: .6, x1: PLAY.x0 - 2.5, y1: 26.4} : null;
 const inDowns = (x, y, m) => !!DOWNS && x > DOWNS.x0 + m && x < DOWNS.x1 && y > DOWNS.y0 + m && y < DOWNS.y1 - m;
-export const walkable = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1) || inDowns(x, y, 0);
+//   the FOREST: from its border banks to the strip north of the arena's wall (FOREST_S: meeting the gates' aprons, the downs, the trail)
+const FOREST_S = 3.2;
+const inForest = (x, y, m) => !!FOREST && x > WORLD.x0 + 1.4 + m && x < WORLD.x1 - 1 - m && y > WORLD.y0 + 1.4 + m && y < FOREST_S - m;
+export const walkable = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1) || inDowns(x, y, 0) || inForest(x, y, 0);
 export const roamable = (x, y) => (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35) || (x > TRAIL.x0 + .5 && x < TRAIL.x1 - .5 && y > TRAIL.y0 + .5 && y < TRAIL.y1 - .4)
-  || inDowns(x, y, .5) || (!!DOWNS && x >= DOWNS.x1 - .1 && x < PLAY.x0 + .4 && Math.abs(y - (PLAY.y0 + PLAY.y1) / 2) < 1.3);   // (the downs and the west gate between them and the arena)
+  || inDowns(x, y, .5) || (!!DOWNS && x >= DOWNS.x1 - .1 && x < PLAY.x0 + .4 && Math.abs(y - (PLAY.y0 + PLAY.y1) / 2) < 1.3)   // (the downs and the west gate between them and the arena)
+  || inForest(x, y, .5);
 export const navArea = (x, y) => (x > PLAY.x0 && x < PLAY.x1 + .6 && y > PLAY.y0 && y < PLAY.y1) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1)
-  || inDowns(x, y, 0) || (!!DOWNS && x >= DOWNS.x1 - .1 && x <= PLAY.x0 && Math.abs(y - (PLAY.y0 + PLAY.y1) / 2) < 1.6);
+  || inDowns(x, y, 0) || (!!DOWNS && x >= DOWNS.x1 - .1 && x <= PLAY.x0 && Math.abs(y - (PLAY.y0 + PLAY.y1) / 2) < 1.6) || inForest(x, y, 0);
 
 // ---- stream: centreline x and width per y (metres) ----
 export const STREAM = {
@@ -93,6 +103,7 @@ export const STREAM = {
 };
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
 export const inStream = (x, y) => {
+  if (FOREST !== null && y < 0) return FOREST.inLake(x, y);   // (the forest's lake: deep water, world/forest.js)
   if (y < STREAM.y0 || y > STREAM.y1) return false;
   if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y) || inBrookPool(x, y);   // (the plateau's pool is deep water too; so is the brook's, brook.js)
   return !STREAM.stones.some(s => Math.hypot(x - s.x, (y - s.y) * 1.3) < s.r);   // stones are dry footing
@@ -243,10 +254,12 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   // the world's borders rise in grass banks: behind the arena's north wall, along the west and east edges (not walkable: they frame
   // the grounds); behind the mesa, higher land
   // (with the West Downs the north bank starts at their east edge and theirs, wavy, take over west of it: westland.js BORDERS)
-  {type: 'terrace', pts: [[WEST_ON ? WEST.x1 : W_.x0 - 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - .3], [WEST_ON ? WEST.x1 : W_.x0 - 30, W_.y0 - .3]], h: 1.4, bank: 3.2},
-  ...(WEST_ON ? WEST_BORDERS : [{type: 'terrace', pts: [[W_.x0 - 30, W_.y0 - 30], [W_.x0 - .3, W_.y0 - 30], [W_.x0 - .3, W_.y1 + 30], [W_.x0 - 30, W_.y1 + 30]], h: 1.2, bank: 3}]),
+  // (the FOREST: the north bank along its own north edge, the whole width; the downs' north bank gone, a west bank of its own north of theirs)
+  {type: 'terrace', pts: [[WEST_ON && !FOREST ? WEST.x1 : W_.x0 - 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - 30], [W_.x1 + 30, W_.y0 - .3], [WEST_ON && !FOREST ? WEST.x1 : W_.x0 - 30, W_.y0 - .3]], h: 1.4, bank: 3.2},
+  ...(WEST_ON ? (FOREST ? WEST_BORDERS.slice(0, 1) : WEST_BORDERS) : [{type: 'terrace', pts: [[W_.x0 - 30, W_.y0 - 30], [W_.x0 - .3, W_.y0 - 30], [W_.x0 - .3, W_.y1 + 30], [W_.x0 - 30, W_.y1 + 30]], h: 1.2, bank: 3}]),
+  ...(FOREST && WEST_ON ? [{type: 'terrace', pts: [[W_.x0 - 30, W_.y0 - 30], [W_.x0 - .3, W_.y0 - 30], [W_.x0 - .3, -6], [W_.x0 - 30, -6]], h: 1.2, bank: 3}] : []),
   {type: 'terrace', pts: [[W_.x1 + .3, W_.y0 - 30], [W_.x1 + 30, W_.y0 - 30], [W_.x1 + 30, W_.y1 + 30], [W_.x1 + .3, W_.y1 + 30]], h: 1.3, bank: 2.6},
-  {type: 'terrace', pts: [[45, -30], [69.5, -30], [69.5, 1.4], [45, 1.4]], h: 3.4, bank: 2},   // the highland
+  ...(FOREST ? [] : [{type: 'terrace', pts: [[45, -30], [69.5, -30], [69.5, 1.4], [45, 1.4]], h: 3.4, bank: 2}]),   // the highland (the forest's ground there instead)
   // the mesa, and the walk down its gully: a ramp from its top to the ground by the pool, beside the creek (its sides blend into the
   // gully's banks)
   {type: 'terrace', pts: MESA.pts, drawn: {pts: MESA.ground}, banks: MESA.banks, h: MESA_H, rock: true, cliffs: MESA.cliffs},
@@ -270,6 +283,7 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   // the West Downs' rolling hills (westland.js)
   ...WEST_HILLS,
   ...STONE_TERRAIN,   // the standing stones' hill on the south-west (stonecircle.js; ?stones=0: westland.js's dome)
+  ...(FOREST ? FOREST.shapes : []),   // the forest's relief, hills and the lake's basin (world/forest.js; its stream's cut is laid below)
 ];
 // PADS: things built at a fixed height that the ground must meet (features place them at 0): [x, y, r (held flat), fade]
 const PADS = [[50.8, 19.4, 1.5, 1.2],   // the campfire and its woodpile (features/lights.js)
@@ -527,6 +541,8 @@ if (TERRAIN_ON) {
 // ---- the West Downs' BROOK (brook.js; ?brook=0: none): its bed worked out from the ground it is cut into, its cuts, its bridge's deck and
 // its stepping stones (decks: elev, steep)
 if (BROOK) { layBrook(sampler(TERRAIN, terrainMask)); TERRAIN.push(...BROOK.shapes); BRIDGES.push(...BROOK.decks); }
+// ---- the FOREST's stream (forest.js): its bed from the ground it is cut into, then the cut
+if (FOREST) { layForest(FOREST, sampler(TERRAIN, terrainMask)); TERRAIN.push(...FOREST.cuts); }
 
 // ---- THE WATCHTOWER on the West Downs' western hill (westland.js TOWER, world/watchtower.js; ?tower=0: none): its plan on the ground the
 // shapes make (the terrain field, before any deck), its lookout a deck over its whole footprint (elev: from below the tower is solid,
@@ -720,6 +736,12 @@ export function buildLayout(seed = 7) {
     // the standing stones (stonecircle.js): a 'menhir' per stone, a round collider (a lying one a row of them); world.js builds their stone
     for (const [kind, x, y, extra] of STONE_PROPS) add(kind, x, y, {...extra});
   }
+  // ---- THE FOREST (forest.js): the surroundings north of the arena that are walkable now (FOREST_S) get colliders; then its trees,
+  // undergrowth and rocks (added last: no random draw above moves; a tree carries its fid, its species and size)
+  if (FOREST) {
+    for (const p of props) if (p.outside && p.y < FOREST_S + .5 && !(p.r > 0)) { p.outside = false; p.r = p.kind === 'tree' ? .45 : .75; }
+    for (const [kind, x, y, extra] of FOREST.props) add(kind, x, y, {...extra});
+  }
   // ---- the watchtower (TOWER_PLAN): soft scatter in its footprint goes; the prop that carries its mesh (world.js: its geometry, perches
   // on its broken tops), and its colliders, 'towerwall': a ring round its foot at the ground's height, a ring on the lookout at the floor's
   if (TOWER_PLAN) {
@@ -729,5 +751,5 @@ export function buildLayout(seed = 7) {
   }
   return {props, marks, lights, lane, rail, lightGarden: lg, ring: {x: cx, y: cy + .5, r: 4.5}, spawn: {x: cx, y: cy + .5}, west: WEST_ON ? WEST : null, walls,
     trail: TRAIL, stream: STREAM, inStream, plateaus: PLATEAUS, elev, plateauAt, spring: SPRING, rill: RILL, fall: FALL, pool: POOL, outflow: OUTFLOW, inRill, rillAt, inPool, poolEdge, inOutflow, outflowAt,
-    mesa: MESA, mesaAt, climbs: CLIMBS, cascades: CASCADES, clefts: CLEFTS, inCleft, bridges: BRIDGES, brook: BROOK};
+    mesa: MESA, mesaAt, climbs: CLIMBS, cascades: CASCADES, clefts: CLEFTS, inCleft, bridges: BRIDGES, brook: BROOK, forest: FOREST};
 }

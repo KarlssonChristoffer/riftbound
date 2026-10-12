@@ -16,6 +16,8 @@ export const OWNERS = {
   breakable: ['@creator'], explode: ['@creator'], occluder: ['@creator'], light: ['@creator'], rail: ['@creator'], sparring: ['@creator'],
   home: CC, maxHp: CC, hunter: ['@creator'], interact: ['@creator'], t: ['@creator'], a: ['@creator'], lineup: ['@creator'], seed: ['@creator'],
   painted: ['@creator'],
+  // the seeded forest's (world/forest.js): a tree's id (co-op, the woodcutting), its species and size, the chunk a prop grew in
+  fid: ['@creator'], species: ['@creator'], scale: ['@creator'], chunk: ['@creator'],
   // the body: where it is, how big its collider is. Combat simulates what moves (brutes, the prop physics); the registry
   // draws it between sim steps (lerpBegin / lerpEnd: written back before anything else runs) and, as one joins, writes
   // x / y / z / h / r back unchanged (their storage: entities.js refNumbers)

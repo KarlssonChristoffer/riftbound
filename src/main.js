@@ -65,6 +65,7 @@ import {createPhoto} from './ui/photo.js';   // photo mode (F4, the menu's Game 
 import {createLighting} from './render/lighting.js';
 import {createProjectiles} from './sim/projectiles.js';
 import {flags} from './core/flags.js';
+import {SESSION} from './core/session.js';   // co-op: the server joined and its world seed, settled before the world is built
 import {createModifiers} from './core/modifiers.js';
 import {rgbOf} from './core/color.js';
 import {createCamera} from './render/camera.js';
@@ -86,7 +87,8 @@ const t00 = performance.now();
 // ---------------------------------------------------------------- the Ranger: loadouts (packed atlases)
 // the loadout (view/hero.js LOADOUTS). Default: the runtime cloth (cloak + scarf tail answer the wind; ?set=basic = the baked cloak)
 // (?set=gunslinger | outlaw: the cowboys, a revolver each: content/weapons.js)
-const loadI = SET_NAMES.includes(Q.get('set')) ? SET_NAMES.indexOf(Q.get('set')) : 1;
+// (co-op: the gunslinger, drawn live: the others see his drawn pose as it is, features/coop.js)
+const loadI = SET_NAMES.includes(Q.get('set')) ? SET_NAMES.indexOf(Q.get('set')) : SESSION.mp && SET_NAMES.includes('gunslinger') ? SET_NAMES.indexOf('gunslinger') : 1;
 $('#load').textContent = 'Loading the Ranger…';
 const TIMING = {}, mark = (k, t0) => { TIMING[k] = +((performance.now() - t0) / 1000).toFixed(2); };
 let tp = performance.now();
@@ -211,7 +213,11 @@ const host = {
   // the muzzle of the gun as DRAWN (live: the live hero's stances and kicks move it off the sim's atlas muzzle): world
   // {x, y, h}, the last frame's, or null (the sprite: the sim's muzzle is the drawn one). For the shot's flash (gunfx)
   playerMuzzle: () => live?.on ? live.muzzle() : null,
+  // his DRAWN live pose (view/livehero.js DRAWN: body-space bones in BN order, 7 a bone; phi his facing; n counts the frames drawn;
+  // rig the live model's name), or null when he isn't drawn live: co-op sends it to the others (features/coop.js). One reused object
+  playerPose: () => { const d = live?.on ? live.drawn : null; if (!d?.w) return null; PPOSE.w = d.w; PPOSE.phi = d.phi; PPOSE.n = d.n; PPOSE.BN = live.BN; PPOSE.rig = hero.loadName; return PPOSE; },
 };
+const PPOSE = {w: null, phi: 0, n: 0, BN: null, rig: ''};
 
 // ---------------------------------------------------------------- features
 tp = performance.now();

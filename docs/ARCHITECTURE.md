@@ -321,6 +321,12 @@ never write each other's state. `dev/` reaches the engine only as `E.dev`, hande
 | how much detail | menu > Graphics > Detail (`?detail=low`): low turns cosmetic views off (wind lines, wildlife, depth) | it can't change play: views don't feed the sim |
 | a mesh that lights itself | `mesh.setGlow(slot, family, k)` (gfx.js MESH_FS uGlowF / uGlowK: up to four families per mesh, emit = the family's tone x k); the families are world.js `FAMS` (+ gem, flame, shroom, bone for the true-3D props) | the composite keeps a family in 5 bits (E.w = part x 32 + family): at most 32 families, 28 used |
 
+**As built for co-op and the forest (2026-10-11).** Two new places, both outside the layers above the world: `server/` (node, no
+dependencies: the co-op server and its room, docs/MULTIPLAYER.md) and `src/net/` (the wire protocol shared with the server, the
+transport, the client). `core/session.js` settles which world a page plays in (a co-op server's seed, `?seed`) before the world
+is built; `world/forest.js` grows the seeded forest from it (docs/FOREST.md); `features/coop.js` (+ `coop/look.js`) is the game's
+side of a room.
+
 ### 2.4 A system, concretely
 
 The existing feature contract is already close; the change is that a system says which layer and phase it lives in,
