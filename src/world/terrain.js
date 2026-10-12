@@ -17,8 +17,11 @@
 //            (lowers only); clip (optional): none north of y = clip (back up over clipRim m: a step at a lip over the pool)
 //   field    {type: 'field', fn: (x, y) => m, reach: [x0, y0, x1, y1]}: ground given as a function (a generated relief: world/forest.js),
 //            added like a hill (>= 0: the flat ground stays the floor); 0 outside its reach
+//   cave     {type: 'cave', fn: (x, y) => m | NaN, reach: [x0, y0, x1, y1], mode: 'set' | 'cut'}: a cave's ground (world/caves.js), last of
+//            all: 'set' IS the ground in its reach (the cave's band: its floor, its rock), 'cut' only lowers it where fn is a number (the
+//            mouth's slot); NaN changes nothing
 // Composition: hills + swells, times the MASK (0 = held flat: the arena, the water and its banks, the ravine's rim...), then
-// terraces (the higher wins), then ramps (they cut through a terrace's edge), then channels and basins (cut into all of it).
+// terraces (the higher wins), then ramps (they cut through a terrace's edge), then channels and basins (cut into all of it), then caves.
 // ?terrain=0's plateau is not in the field (layout.js elev puts its exact box on top); with terrain it is a terrace (a mesa).
 //   const F = createField({bounds: {x0, y0, x1, y1}, shapes, mask: (x, y) => 0..1})
 //   F.H(x, y)          the height (m); outside the grid: its nearest edge
@@ -64,7 +67,7 @@ function reachOf(s) {
   if (s.type === 'terrace') return box(s.pts, Math.max(.02, s.bank ?? .1, ...(s.banks || [])) + .01);
   if (s.type === 'ramp') return box(s.pts, s.w / 2 + (s.shoulder ?? .6) + .01);
   if (s.type === 'channel') return box(s.pts, Math.max(...s.hw) + s.bank + .01);
-  if (s.type === 'field') return s.reach || null;
+  if (s.type === 'field' || s.type === 'cave') return s.reach || null;
   if (s.type === 'basin') return [s.x - s.rx - s.rim - .01, s.y - s.ry - s.rim - .01, s.x + s.rx + s.rim + .01, s.y + s.ry + s.rim + .01];
   return null;
 }
@@ -123,6 +126,11 @@ function evalShapes(shapes, mask, x, y, tmp) {
     }
     if (h <= bed || k >= 1) continue;
     h = bed + (h - bed) * smooth(k);
+  }
+  for (const s of shapes) {   // the caves: their band's ground as it is, their mouths' cuts
+    if (s.type !== 'cave' || outside(s, x, y)) continue;
+    const v = s.fn(x, y); if (v !== v) continue;
+    if (s.mode === 'set' || v < h) h = v;
   }
   return h;
 }

@@ -46,6 +46,7 @@
 //   F.lay(sampler)               the stream's bed from the ground it is cut into (layout.js, once): F.stream.bed, its channel in F.cuts
 //   sample(F, x, y, out) / depth(o, x, y) / paint(F, K, S, T)    the water for world.js, waterbed.js, biomes.js
 import {vnoise, smooth, clamp, hash3} from '../core/mathx.js';
+import {placeMouth, cavePlan} from './caves.js';   // the woods' cave: its mouth here, its passages in the band north of the forest
 
 export const CHUNK = 16;
 export const RECT = {x0: -48, y0: -160, x1: 72, y1: 0};
@@ -368,13 +369,23 @@ export function forestPlan(seed) {
     F.boulders = best ? {x: +best.x.toFixed(2), y: +best.y.toFixed(2), r: +best.r.toFixed(2)} : null;
   }
   const BF = F.boulders;
+  // ---- the CAVE (world/caves.js, docs/CAVES.md): its mouth on level ground in the home woods, clear of the water, the clearing, the
+  // esker, the rock and the boulders; its passages in a band of their own north of the forest. Nothing grows on the mouth
+  {
+    const roomC = (x, y, r) => lakeM(x, y) > r + 2 && courseD(x, y) > r + 1.5 && clearD(x, y) > r + 2 && crestD(x, y) > r + 3 && !F.outcrops.some(o => Math.hypot(o.x - x, o.y - y) < o.r * 1.3 + r + 2)
+      && (!BF || Math.hypot(x - BF.x, y - BF.y) > BF.r + r + 2);
+    const m = placeMouth(seed, {height: F.height, home: HOME, room: roomC});
+    F.cave = m ? cavePlan(seed, m, RECT, F.height) : null;
+    if (F.cave) { F.shapes.push(F.cave.slot, F.cave.shape); for (const p of F.cave.props) F.props.push(p); }
+  }
+  const caveNear = (x, y, m) => { if (!F.cave) return false; const M = F.cave.mouth, dx = x - M.x, dy = y - M.y, s = dx * M.ux + dy * M.uy, q = -dx * M.uy + dy * M.ux; return s > -5 - m && s < M.len + 2 + m && Math.abs(q) < M.w / 2 + 2.2 + m; };
 
   // ---- GROWTH, chunk by chunk
   const C0x = Math.floor(RECT.x0 / CHUNK), C1x = Math.ceil(RECT.x1 / CHUNK), C0y = Math.floor(RECT.y0 / CHUNK), C1y = Math.ceil(RECT.y1 / CHUNK);
   F.chunks = [];
   const canyonD = (x, y) => { const B = cy.box; if (x < B[0] || y < B[1] || x > B[2] || y > B[3]) return 1e9; const [d, i, t] = cyNear(x, y); return d - cy.hw[i] - (cy.hw[i + 1] - cy.hw[i]) * t; };   // (m out from its walls)
   const mouth = cy.pts[0], canyonClear = (x, y) => canyonD(x, y) < 1.8 || Math.hypot(x - mouth[0], y - mouth[1]) < 9;   // (no tree in the slot or crowding its mouth: it hid the floor and the way in)
-  const keepOut = {clearD, crestD, inRock, eskerH, boulders: BF, bare, fellK: F.fellK, canyonClear};
+  const keepOut = {clearD, crestD, inRock: (x, y, m) => inRock(x, y, m) || caveNear(x, y, m), eskerH, boulders: BF, bare, fellK: F.fellK, canyonClear};
   { let top = 0; for (let y = fy - fr * MT.stoss; y < fy + fr; y += 1) for (let x = fx - fr * 1.2; x < fx + fr * 1.2; x += 1) top = Math.max(top, F.height(x, y)); F.mountain.h = +top.toFixed(2); }
   for (let cy = C0y; cy < C1y; cy++) for (let cx = C0x; cx < C1x; cx++) { F.chunks.push([cx, cy]); grow(F, cx, cy, S, slope, keepOut); }
   // the fell's tors (each rock in the chunk it lies in)
