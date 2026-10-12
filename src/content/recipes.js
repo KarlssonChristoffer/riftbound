@@ -12,32 +12,63 @@
 // Pure functions, no imports, no Math.random: the same seed grows the same thing on every machine.
 export const RECIPES = {
   stump: {
-    about: 'A spruce stump: sawn flat or snapped, roots gripping the ground, sometimes shelf fungus',
-    likes: {ground: 'forest', shade: .5, near: 'spruce', cluster: [1, 1]},
-    params: {r: [.32, .18, .5], h: [.45, .15, 1], roots: [5, 3, 8], broken: [0, 0, 1], fungus: [.4, 0, 1]},
+    about: 'A spruce stump: snapped by the wind or rotting soft and hollow; sawn flat only where people cut wood',
+    likes: {ground: 'forest', shade: .5, near: 'spruce or a fallen log (style 2, sawn: by the settlement and its woodpiles)', cluster: [1, 1]},
+    // style: -1 the woods' own (snapped or rotten, by seed), 0 snapped by the wind, 1 rotten, 2 sawn by people
+    params: {r: [.32, .18, .5], h: [.45, .15, 1], roots: [5, 3, 8], style: [-1, -1, 2], fungus: [.4, 0, 1]},
     build(b, p, r) {
-      const lx = r.range(-.03, .03), lz = r.range(-.03, .03), top = [lx, p.h, lz];
-      b.tube('bark', [0, -.05, 0], top, p.r * 1.08, p.r, {sides: 9});
-      if (p.broken < .5) b.disc('sawn', [lx, p.h - .015, lz], p.r * .9, .03, {sides: 9});
-      else {   // snapped: a ragged crown of splinters, the heartwood grey
-        b.disc('deadwood', [lx, p.h - .03, lz], p.r * .92, .04, {sides: 9});
-        const n = r.int(6, 9);
+      const style = p.style >= 0 ? p.style : r.chance(.5) ? 0 : 1, rot = style === 1;
+      const h = rot ? p.h * .7 : style === 0 ? p.h * 1.2 : p.h, lx = r.range(-.03, .03), lz = r.range(-.03, .03), top = [lx, h, lz];
+      b.tube(rot && r.chance(.4) ? 'deadwood' : 'bark', [0, -.05, 0], rot ? [lx, h * .72, lz] : top, p.r * (rot ? 1.14 : 1.08), p.r * (rot ? 1.02 : 1), {sides: 9});
+      if (style === 2) b.disc('sawn', [lx, h - .015, lz], p.r * .9, .03, {sides: 9});
+      else if (style === 0) {   // snapped: the break slants, tall splinters on the side away from where the tree fell, pale wood inside
+        const fa = r.range(0, Math.PI * 2), n = r.int(12, 16);
+        b.disc('rotwood', [lx, h - .035, lz], p.r * .9, .04, {sides: 9});
         for (let i = 0; i < n; i++) {
-          const a = (i / n + r.range(-.04, .04)) * Math.PI * 2, rr = p.r * r.range(.45, .85), x = lx + Math.cos(a) * rr, z = lz + Math.sin(a) * rr;
-          b.cone(r.chance(.3) ? 'bark' : 'deadwood', [x, p.h - .02, z], [x * 1.05 + r.range(-.03, .03), p.h + r.range(.08, .3) * p.broken, z * 1.05], p.r * r.range(.12, .2), {sides: 4});
+          const a = (i / n + r.range(-.03, .03)) * Math.PI * 2, back = (1 - Math.cos(a - fa)) / 2, rr = p.r * r.range(.55, .92);
+          const x = lx + Math.cos(a) * rr, z = lz + Math.sin(a) * rr, tall = p.r * (.2 + back * back * r.range(1.4, 2.6));
+          b.cone(rr > p.r * .8 && r.chance(.5) ? 'bark' : r.chance(.5) ? 'deadwood' : 'rotwood', [x, h - .03, z],
+            [x + Math.cos(a) * r.range(-.02, .05), h + tall, z + Math.sin(a) * r.range(-.02, .05)], p.r * r.range(.13, .22), {sides: 4});
+        }
+        if (r.chance(.6)) {   // a long sliver still hanging on: the hinge where the trunk tore away
+          const a = fa + Math.PI + r.range(-.4, .4), x = lx + Math.cos(a) * p.r * .8, z = lz + Math.sin(a) * p.r * .8;
+          b.at([x, 0, z], 90 - a / Math.PI * 180, 1, () => b.box('deadwood', [0, h + p.r * 1.1, 0], [p.r * .22, p.r * 2.4, p.r * .1], [-10, 0, 0]));
+        }
+      } else {   // rotten: soft and sunk, a dark hollow inside a ragged rim of bark plates, moss and crumbs
+        b.disc('rotwood', [lx, h * .72 - .03, lz], p.r * .96, .04, {sides: 9, fixed: 2});   // (fixed: unlit and never mossed, a hole stays dark)
+        b.disc('rotwood', [lx + r.range(-.03, .03), h * .72 - .024, lz + r.range(-.03, .03)], p.r * .5, .04, {sides: 7, fixed: 3});
+        const n = r.int(7, 10);
+        for (let i = 0; i < n; i++) {
+          if (r.chance(.2)) continue;   // a gap where a plate fell off
+          const a = (i / n + r.range(-.04, .04)) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a), ph = p.r * r.range(.4, 1.1), lean = r.range(4, 22);
+          b.at([lx + c * p.r * .98, 0, lz + s * p.r * .98], 90 - a / Math.PI * 180, 1, () =>
+            b.box(r.chance(.25) ? 'deadwood' : 'bark', [0, h * .72 + ph * .3, 0], [p.r * r.range(.5, .75), ph, p.r * .14], [lean, 0, 0]));
+        }
+        for (let i = r.int(2, 4); i > 0; i--) {   // plates that fell, leaning on the foot
+          const a = r.range(0, Math.PI * 2), c = Math.cos(a), s = Math.sin(a), d = p.r * r.range(1.15, 1.4);
+          b.at([c * d, 0, s * d], 90 - a / Math.PI * 180, 1, () => b.box('bark', [0, .04, 0], [p.r * .5, p.r * .7, .03], [70, 0, 0]));
+        }
+        for (let i = r.int(4, 8); i > 0; i--) {   // crumbs of rotten wood in the hollow and spilled at the foot
+          const a = r.range(0, Math.PI * 2), d = i % 2 ? p.r * r.range(0, .6) : p.r * r.range(1.1, 1.6), y = i % 2 ? h * .7 : 0;
+          b.ball('rotwood', [lx * (i % 2) + Math.cos(a) * d, y, lz * (i % 2) + Math.sin(a) * d], p.r * r.range(.1, .2), {detail: 0, lump: .3});
+        }
+        for (let i = r.int(2, 5); i > 0; i--) {   // moss clumps on the rim and down one side
+          const a = r.range(0, Math.PI * 2), y = h * r.range(.35, .8);
+          b.ball('cover', [lx + Math.cos(a) * p.r * 1.02, y, lz + Math.sin(a) * p.r * 1.02], [p.r * .32, p.r * .2, p.r * .32], {detail: 0, lump: .25});
         }
       }
-      for (let i = 0; i < p.roots; i++) {   // roots flare out and dive in
-        const a = (i / p.roots + r.range(-.05, .05)) * Math.PI * 2, L = p.r * r.range(.8, 1.6), c = Math.cos(a), s = Math.sin(a);
-        const mid = [c * (p.r + L * .4), p.h * .04 + .02, s * (p.r + L * .4)];
-        b.tube('bark', [c * p.r * .7, p.h * .22, s * p.r * .7], mid, p.r * .38, p.r * .24, {sides: 5});
-        b.tube('bark', mid, [c * (p.r + L), -.06, s * (p.r + L)], p.r * .24, p.r * .1, {sides: 5});
+      for (let i = 0; i < p.roots; i++) {   // roots flare out and dive in (rotten ones lower, half sunk)
+        // (short and thick, bending down fast: long straight roots read as spikes)
+        const a = (i / p.roots + r.range(-.07, .07)) * Math.PI * 2, L = p.r * r.range(.45, 1.05), c = Math.cos(a), s = Math.sin(a), k = rot ? .75 : 1;
+        const mid = [c * (p.r + L * .35), .03 * k, s * (p.r + L * .35)], w = r.range(.85, 1.15);
+        b.tube(rot && r.chance(.3) ? 'deadwood' : 'bark', [c * p.r * .6, h * r.range(.25, .4) * k, s * p.r * .6], mid, p.r * .42 * k * w, p.r * .28 * k * w, {sides: 5});
+        b.tube('bark', mid, [c * (p.r + L * .75), -.1, s * (p.r + L * .75)], p.r * .28 * k * w, p.r * .12, {sides: 5});
       }
-      if (r.chance(p.fungus)) {   // shelf fungus stacked up one side
+      if (r.chance(rot ? Math.min(1, p.fungus * 1.8) : p.fungus)) {   // shelf fungus stacked up one side
         const a = r.range(0, Math.PI * 2), n = r.int(2, 4);
         for (let i = 0; i < n; i++) {
-          const y = p.h * r.range(.25, .85), aa = a + r.range(-.5, .5), rr = p.r * 1.02;
-          b.cap('bracket', [Math.cos(aa) * rr, y, Math.sin(aa) * rr], r.range(.07, .12), r.range(.025, .04), {under: 'mushwhite'});
+          const y = h * r.range(.25, .85), aa = a + r.range(-.5, .5), rr = p.r * 1.04;
+          b.cap('bracket', [lx + Math.cos(aa) * rr, y, lz + Math.sin(aa) * rr], r.range(.07, .12), r.range(.025, .04), {under: 'mushwhite'});
         }
       }
     },
@@ -144,20 +175,28 @@ export const RECIPES = {
 
   watcher: {
     about: 'Weird: a pale toadstool with one eye under its cap, the kind that is always looking your way',
-    likes: {ground: 'forest', shade: .8, cluster: [1, 2]},
-    params: {h: [.7, .4, 1.3], eye: [1, .6, 1.5], bend: [.12, 0, .3]},
+    likes: {ground: 'forest', shade: .8, cluster: [1, 1]},
+    // eye 0: the body alone (features/watcher.js draws the eye and the pupil apart, to roll them: watcher_eye, watcher_pupil)
+    params: {h: [.7, .4, 1.3], eye: [1, 0, 1.5], bend: [.12, 0, .3]},
+    // where the parts sit (the frame above): the cap's rim centre, its size, the eye's centre and radius, the way it looks out
+    anchors(p) {
+      const top = [p.bend, p.h, 0], cr = .27, ch = .12, n = [0, .62, .78], e = .11 * (p.eye || 1);
+      return {top, cr, ch, n, e, eye: [top[0] + n[0] * (cr * .45), top[1] + ch * .6, top[2] + n[2] * (cr * .45)]};
+    },
     build(b, p, r) {
-      const mid = [p.bend * .4, p.h * .5, 0], top = [p.bend, p.h, r.range(-.03, .03)];
+      const {top, cr, ch, n, e, eye: ey} = this.anchors(p), mid = [p.bend * .4, p.h * .5, 0];
       b.ball('mushwhite', [0, .03, 0], .07, {detail: 0, lump: .15});
       b.tube('mushwhite', [0, 0, 0], mid, .055, .045, {sides: 7, part: 1});
       b.tube('mushwhite', mid, top, .045, .04, {sides: 7, part: 1});
-      const cr = .27, ch = .12;
       b.cap('shroom', top, cr, ch, {under: 'mushwhite', droop: .04});
       for (let k = 0; k < 5; k++) b.ball('mushwhite', b.onDome(top, cr * 1.01, ch * 1.03, r.range(.55, 1.2), r.range(.3, .8)), .022, {detail: 0, bias: -.1});   // (round the back: the eye has the front)
+      if (!p.eye) return;
       // the eye stares out of the cap's front, up at you (the camera looks down from the south)
-      const e = .11 * p.eye, n = [0, .62, .78], ey = [top[0] + n[0] * (cr * .45), top[1] + ch * .6, top[2] + n[2] * (cr * .45)];
       b.ball('eye', ey, e, {detail: 1});
       b.ball('pupil', [ey[0], ey[1] + n[1] * e * .72, ey[2] + n[2] * e * .72], e * .48, {detail: 1});
     },
   },
+  // the watcher's eye and pupil on their own (origin = the eye's centre; the pupil looks down +z), for features/watcher.js
+  watcher_eye: {lab: false, about: "The watcher's eyeball", params: {eye: [1, .6, 1.5]}, build(b, p) { b.ball('eye', [0, 0, 0], .11 * p.eye, {detail: 1}); }},
+  watcher_pupil: {lab: false, about: "The watcher's pupil", params: {eye: [1, .6, 1.5]}, build(b, p) { const e = .11 * p.eye; b.ball('pupil', [0, 0, e * .72], [e * .48, e * .48, e * .3], {detail: 1}); }},
 };
