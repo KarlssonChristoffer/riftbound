@@ -5,7 +5,7 @@
 // choice waits for the server ("waiting for the server").
 // OWNS: the panel (#gear + its style). READS: the feature's S (want, worn, stats, waiting), content/gear.js.
 // BUDGET: closed: nothing. Open: DOM writes on a change of set or of the piece shown (no per-frame work).
-import {SLOTS, SLOT_NAMES, GEAR, RULES, gearById, setStats} from '../content/gear.js';
+import {SLOTS, SLOT_NAMES, GEAR, RULES, RARITY, gearById, setStats} from '../content/gear.js';
 
 const CSS = `
 #gear { position: fixed; left: 10px; top: 50%; transform: translateY(-50%); z-index: 15; width: 300px; max-height: calc(100vh - 120px); overflow: auto;
@@ -49,7 +49,7 @@ export function createGearPanel({S, choose, online}) {
       const row = document.createElement('div'); row.className = 'g-row'; root.appendChild(row);
       for (const g of [null, ...GEAR.filter(x => x.slot === slot)]) {
         const b = document.createElement('button'); b.className = 'g-btn' + (g ? '' : ' own'); b.textContent = g ? g.name : 'own';
-        b.title = g ? g.desc : 'the character\'s own clothes';
+        b.title = g ? g.desc : 'the character\'s own clothes'; if (g && RARITY[g.rarity]) b.style.color = RARITY[g.rarity].col;   // (its rarity's colour)
         b.onclick = () => { const rest = S.want.filter(w => gearById(w).slot !== slot); choose(g ? [...rest, g.id] : rest); if (g) shownId = g.id; sync(); };
         b.onmouseenter = () => { if (g) { shownId = g.id; showInfo(); } };
         row.appendChild(b); btns.push({b, id: g?.id ?? null, slot});
