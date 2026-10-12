@@ -263,6 +263,26 @@ export const RECIPES = {
     },
   },
 
+  lingonberry: {
+    about: 'A patch of lingonberry: ankle-high evergreen sprigs, small glossy dark leaves, clusters of bright red berries',
+    likes: {ground: 'forest', shade: .25, near: 'pine on dry thin soil, rock, the esker', cluster: [1, 4]},
+    params: {n: [9, 4, 16], spread: [.45, .2, .8], berries: [.7, 0, 1]},
+    build(b, p, r) {
+      for (let i = 0; i < p.n; i++) {
+        const a = r.range(0, Math.PI * 2), d = Math.sqrt(r()) * p.spread, x = Math.cos(a) * d, z = Math.sin(a) * d * .8, h = r.range(.08, .15);
+        const tip = [x + r.range(-.03, .03), h, z + r.range(-.03, .03)];
+        b.tube('lingonleaf', [x, 0, z], tip, .008, .006, {sides: 3, bias: -.2});
+        for (let k = 0; k < 3; k++) {   // the leaves up the sprig: small, dense, glossy (a lit top)
+          const t = .35 + k * .3, q = [x + (tip[0] - x) * t + r.range(-.025, .025), h * t, z + (tip[2] - z) * t + r.range(-.025, .025)];
+          b.ball('lingonleaf', q, [r.range(.035, .05), r.range(.022, .032), r.range(.035, .05)], {detail: 0, lump: .15, bias: k === 2 ? .12 : -.05});
+        }
+        if (r.chance(p.berries)) {   // a nodding cluster of berries at the tip
+          for (let k = r.int(2, 4); k > 0; k--) b.ball('lingon', [tip[0] + r.range(-.03, .03), tip[1] - r.range(0, .03), tip[2] + .03 + r.range(-.015, .02)], r.range(.018, .024), {detail: 0, bias: .15});
+        }
+      }
+    },
+  },
+
   watcher: {
     about: 'Weird: a pale toadstool with one eye under its cap, the kind that is always looking your way',
     likes: {ground: 'forest', shade: .8, cluster: [1, 1]},

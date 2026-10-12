@@ -57,6 +57,7 @@ import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
 import {bridgeGeometry} from './bridge3d.js';
 import {PAINTS, paintRamp} from '../content/paints.js';   // the recipes' own colours (content/recipes.js): families appended to FAMS
+import {growDecor} from './decor3d.js';   // the forest floor's small things (world/forest.js F.decor): stumps, logs, mushrooms, blueberries
 import {propModel} from './props3d.js';   // the true-3D props: the dummy and the crystal as live meshes (?props2d=1: their cards)
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
@@ -984,6 +985,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // scaled per plant from its position; its autumn (plantOf) as the card's. ?flora=cards: the painted cards (an A/B)
   const flora = FLORA ? createFlora(G) : null;
   if (flora) { flora.setRamps(bladeRamps(biome.id, biome.style)); disposers.push(() => flora.dispose()); }
+  // the forest floor's small things (world/forest.js F.decor, world/decor3d.js: recipes drawn instanced, placed once; ?decor=0: none)
+  if (flora && FOREST?.decor && flags.get('decor') !== '0') growDecor(flora, FOREST.decor, elev, biome.id, () => nextId++);
   const FLORA_KINDS = {bush: 1, fern: 1, tuft: 1, reed: 1}, TAU = Math.PI * 2;
   function floraOf(it, p) {
     if (!flora || !FLORA_KINDS[p.kind]) return null;
