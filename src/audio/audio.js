@@ -1119,7 +1119,7 @@ export function createAudio(ctx, host = {}) {
     // ---- events ----
     for (const e of events) {
       switch (e.type) {
-        case 'player.step': if (!landed) { const v = e.pace ?? speed; fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(v / 6, .25, 1), g: .55 + clamp(v / 7, 0, .45)})); if (pl.biome === 'ruins' && brookWet(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, g: .45}); } break;   // (wading the brook: a splash too)
+        case 'player.step': if (!landed && (ctx.steps ?? 1) > .02) { const v = e.pace ?? speed; fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(v / 6, .25, 1), g: (.55 + clamp(v / 7, 0, .45)) * (ctx.steps ?? 1)})); if (pl.biome === 'ruins' && brookWet(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, g: .45}); } break;   // (wading the brook: a splash too)
         case 'prop.land': fire('propDrop', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;   // a prop dropped off the plateau (combat/props.js)
         case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: 1.3, g: 1})); break;   // sprint plant
         case 'player.jump': fire('jump', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); break;
@@ -1255,6 +1255,8 @@ export function createAudio(ctx, host = {}) {
         // ping (a glance off either whines: bullet.ricochet above), an arrow's glance
         case 'bells.ring': fire('bellsRing', e.x, e.y, {note: e.note, k: e.k}); break;
         case 'bells.toll': fire('bellsToll', e.x, e.y, {note: e.note, k: e.k}); break;
+        case 'uncanny.hum': fire('bellsToll', e.x, e.y, {note: 0, k: .5}); fire('bellsToll', e.x, e.y, {note: 2, k: .3}); break;   // (a secret opens: two low tolls, a hum more than a bell)
+        case 'uncanny.slide': fire('scrape', e.x, e.y, {surf, g: .55}); break;   // (a tree or a boulder walks nearby: a slow drag)
         case 'bells.ping': fire('bellsPlate', e.x, e.y, {k: e.k}); break;
         case 'arrow.deflect': fire('stuck', e.x, e.y, {ricochet: true, surf: 'stone'}); break;
         case 'lasso.creak': { const c = (RT && RT.D.makeCreak?.()) || makeCreak(E), k = clamp(e.k ?? .6, 0, 1); c.set(k * .7, 1.5, t, 1 / 60); c.set(k, 0, t + .12, 1 / 60); c.stop(t + .3); break; }

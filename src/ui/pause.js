@@ -44,7 +44,7 @@ const DEV_GROUP = {
   wind: 'Nature', windlines: 'Nature', litter: 'Nature', grass: 'Nature', riverside: 'Nature', wildlife: 'Nature', atmos: 'Nature',
   weather: 'Nature', dust: 'Nature', tumbleweed: 'Nature', mist: 'Nature', airfx: 'Nature',
   lights: 'Effects', flow: 'Effects', contact: 'Effects', gunfx: 'Effects', depth: 'Effects', blood: 'Effects',
-  foes: 'World', anomaly: 'World',
+  foes: 'World', anomaly: 'World', uncanny: 'World',
   brutes3d: 'Renderer',
   affixes: 'Experiments', equip: 'Experiments', omens: 'Experiments', shrines: 'Experiments', trickshot: 'Experiments', bells: 'Experiments',
   cheats: 'Tools', gunfeel: 'Tools',
@@ -53,7 +53,7 @@ const DEV_GROUP = {
 // camera) stay in Game; every other feature's are test actions for the sandbox: the Sandbox tab, one page per group here
 // (a feature not listed: Other)
 const GAME_ROWS = ['cinema', 'game'];   // (in this order, after Resume and Photo mode: back to title stays last)
-const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places'};
+const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places', uncanny: 'Places'};
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
 const LOW_OFF = ['windlines', 'wildlife', 'depth', 'grass', 'litter', 'dust', 'tumbleweed', 'mist', 'airfx'];
