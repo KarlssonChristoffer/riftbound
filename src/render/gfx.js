@@ -7,7 +7,7 @@
 //                 A  rgb albedo, a = (type * 4 + tone) / 255
 //                 N  xyz world normal, w = object id (whole numbers; a wall line shares one id: no outline at joints;
 //                    -1 = particles (points), which never count as hiding the player in the x-ray)
-//                 E  rgb emissive, w = part * 32 + family (meshes: seams between parts of the same family)
+//                 E  rgb emissive, w = (part mod 32) * 64 + family (meshes: seams between parts of the same family; 64 families: world.js FAMS)
 //               types: 0 empty, 1 ground (tone 1 = WATER: the composite lights it as water; tone 2 = fallen leaves), 2 ramp mesh (live 3D prop), 3 billboard (painted sprite;
 //                      tone 2 = a plant with its own autumn colours: the composite's season matrix skips tone 2 on types 1 and 3), 4 character,
 //                      5 textured surface (cliff faces), 6 line (arrows), 7 lit card (a prop pre-rendered at 16 angles)
@@ -202,7 +202,7 @@ void main() {
   o1 = vec4(n, uObj);
   // a family this mesh lights itself (the true-3D props: a crystal, a candle's flame, a lantern's glass, a mushroom's cap)
   float gk = abs(fam - uGlowF.x) < .5 ? uGlowK.x : abs(fam - uGlowF.y) < .5 ? uGlowK.y : abs(fam - uGlowF.z) < .5 ? uGlowK.z : abs(fam - uGlowF.w) < .5 ? uGlowK.w : 0.;
-  o2 = vec4((glow ? alb : vec3(0.)) + alb * gk + vec3(uFlash) + em, fPart * 32. + fam);
+  o2 = vec4((glow ? alb : vec3(0.)) + alb * gk + vec3(uFlash) + em, mod(fPart, 32.) * 64. + fam);
 }`;
 
 // THE MOVING WATER (SURF_FS). world.js bakes the water texture uWater (its layout is documented there: state, base tone, speed,
@@ -1090,7 +1090,7 @@ void main() {
   // ---- the pixelizer's rules, live, on ramp meshes: silhouette outline (selective), seams, occlusion lines, crests
   float rim = 0.;   // a crest (it catches the sun below)
   if (type == 2 && uOutline > .5) {
-    float n0 = nearOf(d0), obj = N0.w, pk = E0.w, fam = mod(pk, 32.), part = floor(pk / 32. + .001);
+    float n0 = nearOf(d0), obj = N0.w, pk = E0.w, fam = mod(pk, 64.), part = floor(pk / 64. + .001);
     bool outLit = false, outDark = false, line = false, seam = false, edge = false, crest = false, soft = abs(fam - uSoftFam) < .5;
     // soft (the leaves): no seams and no dark occlusion lines between its own parts; where a clump stands in front of
     // another, the one behind only steps one tone darker along the edge (the painted blob's shaded rim). Dark lines in a
@@ -1103,7 +1103,7 @@ void main() {
       if (tq != 2 || abs(oq - obj) > .5) {
         if (tq == 0 || nq < n0 + .12) { if (k <= 1) outLit = true; else outDark = true; }   // my edge against what lies behind
       } else {
-        float pq = texelFetch(tE, q, 0).w, famq = mod(pq, 32.), partq = floor(pq / 32. + .001);
+        float pq = texelFetch(tE, q, 0).w, famq = mod(pq, 64.), partq = floor(pq / 64. + .001);
         if (nq > n0 + .12) { if (!soft || abs(famq - fam) > .5) line = true; else edge = true; }   // my own front edge hides me here
         else if (!soft && k >= 2 && abs(partq - part) > .5 && abs(famq - fam) < .5) seam = true;   // plank meets plank
         // (a face that looks up, over its own face below turned toward the view: the crest along the top of a block, a wall, a cap;

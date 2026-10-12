@@ -54,6 +54,7 @@ import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
 import {bridgeGeometry} from './bridge3d.js';
+import {PAINTS, paintRamp} from '../content/paints.js';   // the recipes' own colours (content/recipes.js): families appended to FAMS
 import {propModel} from './props3d.js';   // the true-3D props: the dummy and the crystal as live meshes (?props2d=1: their cards)
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
@@ -92,11 +93,14 @@ const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {em
 export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry', 'berryOrange', 'berryGreen', 'berryCream',
   // (the true-3D props, world/props3d.js and the features' 3D pieces: gem = a crystal's facets (the biome's style.gem), flame = the warm
   // glow of a flame or a lantern's glass, shroom = the biome's own glow (the mushrooms' caps), bone = bleached bone, wax, linen; GLOW3
-  // below. They light themselves only where a mesh says so: gfx.js mesh.setGlow. NB the composite keeps a family in 5 bits (E.w =
-  // part x 32 + family): at most 32 families)
+  // below. They light themselves only where a mesh says so: gfx.js mesh.setGlow. NB the composite keeps a family in 6 bits (E.w =
+  // (part mod 32) x 64 + family): at most 64 families)
   'gem', 'flame', 'shroom', 'bone',
   // (cactus: the desert's saguaros and cactus bushes, trees3d.js / flora3d.js: the true-3D pivot's flora)
-  'cactus'];
+  'cactus',
+  // (the paints: content/paints.js, the recipes' colours, world/recipe3d.js; last, so every family above keeps its index)
+  ...Object.keys(PAINTS)];
+if (FAMS.length > 64) console.warn(`world: ${FAMS.length} families, the composite keeps 64 (content/paints.js)`);
 // the true-3D props' families per biome, [hi, base, shade, outline] (gem: the biome's style.gem; shroom: a glow colour, ramped)
 const GLOW3 = {
   flame: {ruins: ['fff4d0', 'ffd070', 'e09838', '7a4a1c'], ember: ['ffe8b0', 'ffa848', 'd8682a', '6e2a12'], frost: ['fff6d8', 'ffd890', 'd8a050', '7a5428'],
@@ -115,6 +119,7 @@ function palette(biome, style) {
   P.birch = sr('birch') || P.stone; P.aspen = sr('aspen') || P.bark; P.berry = sr('berry') || P.red;   // (ruins' STYLES has them; the other biomes grow no such trees)
   P.berryOrange = sr('berryOrange') || P.gold; P.berryGreen = sr('berryGreen') || P.leaf; P.berryCream = sr('berryCream') || P.stone;
   P.cactus = sr('cactus') || P.leaf;   // (the desert's STYLE.cactus)
+  for (const k in PAINTS) P[k] = ramp6(paintRamp(k, biome).map(h => h.replace('#', '')));   // (content/paints.js)
   const w = P.wood; P.void = [...Array(3).fill(mix(w[4], [0, 0, 0], .3)), ...Array(3).fill(mix(w[4], [0, 0, 0], .45))];
   P.cover = B.cover ? ramp6(B.cover) : P.stone;
   P.char = ramp6(['3a3330', '26211f', '161312', '0c0a0a']); P.ash = ramp6(['8e8982', '75716b', '5e5a55', '403d3a']);

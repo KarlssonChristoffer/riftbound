@@ -229,6 +229,7 @@ const game = await createGame(host); features.unshift(game);
 // the cheat panel (dev/cheats.js, F2 in dev mode): last, so what it asks for lands after every feature's step
 features.push(createCheats({host, cam, canvas}));
 features.push(createGunFeel({host}));   // (dev/gunfeel.js: F8 in dev mode)
+if (Q.get('lab')) features.push(await import('./dev/assetlab.js').then(m => m.createLab({host})));   // the asset lab (?lab=1: dev/assetlab.js)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;
