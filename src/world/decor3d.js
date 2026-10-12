@@ -13,7 +13,7 @@ import {propTop} from './world.js';   // (called at build time, never at load: w
 
 const CASTS = {stump: true, log: true, windthrow: true};
 // the windthrow's solids (forest.js F.decorSolid, layout.js): how high they stop arrows, a body (world.js PROP_TOP)
-const TOPS = {rootplate: 2, windlog: .9};
+const TOPS = {rootplate: 1.5, windlog: .9};   // (the plate sits half in the ground it tore from)
 const shapes = new Map();   // key -> geometry with flora's attributes (shares the recipe's cached ones)
 
 function shapeGeo(name, v, params, biomeId) {

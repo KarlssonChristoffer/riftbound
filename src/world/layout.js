@@ -764,6 +764,12 @@ export function buildLayout(seed = 7) {
     // the windthrows' solids (forest.js F.decorSolid: rows of round colliders across a root plate, 'rootplate', and along its trunk,
     // 'windlog'; nothing drawn: world/decor3d.js draws the tree with the floor's other small things, ?decor=0: neither)
     if (flags.get('decor') !== '0') for (const [kind, x, y, r] of FOREST.decorSolid || []) add(kind, x, y, {r});
+    // ... and their holes bare (forest.js F.decorClear: the torn-up earth under the root plate, the ground under the trunk): the soft
+    // scatter (no collider: grass tufts, ferns, bushes) in them goes, as in the hut's footprint below
+    if (flags.get('decor') !== '0' && FOREST.decorClear?.length) for (let i = props.length - 1; i >= 0; i--) {
+      const p = props[i]; if (p.r > 0) continue;
+      for (const [x, y, r] of FOREST.decorClear) if ((p.x - x) ** 2 + (p.y - y) ** 2 < r * r) { props.splice(i, 1); break; }
+    }
     // the HUT (HUT above): its walls as stone runs ('fieldwall' segments, round colliders touching, none in the doorway), its roof on a
     // 'hutroof' prop (world.js: the slabs; no collider: he walks under it). The soft scatter in its footprint goes
     if (HUT) {
