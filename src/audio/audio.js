@@ -1119,7 +1119,7 @@ export function createAudio(ctx, host = {}) {
     // ---- events ----
     for (const e of events) {
       switch (e.type) {
-        case 'player.step': if (!landed) { fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)})); if (pl.biome === 'ruins' && brookWet(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, g: .45}); } break;   // (wading the brook: a splash too)
+        case 'player.step': if (!landed) { const v = e.pace ?? speed; fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(v / 6, .25, 1), g: .55 + clamp(v / 7, 0, .45)})); if (pl.biome === 'ruins' && brookWet(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, g: .45}); } break;   // (wading the brook: a splash too)
         case 'prop.land': fire('propDrop', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;   // a prop dropped off the plateau (combat/props.js)
         case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: 1.3, g: 1})); break;   // sprint plant
         case 'player.jump': fire('jump', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); break;
