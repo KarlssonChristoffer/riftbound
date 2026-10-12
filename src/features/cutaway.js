@@ -52,10 +52,13 @@ export async function create(host) {
     }
   }
   const side = {x: 0, y: 0};   // the side the band cuts away (eased: it turns smoothly as he walks along a bend)
+  // (the looks are asked every few frames, not every one: host.elev allocates a little per call, the answers change slowly)
+  let c = 0, tick = 0;
   F.frame = f => {
     if (!G.setCut) return;
-    const p = host.player, dt = Math.min(.1, f?.dt || 1 / 60), c = cover(p.x, p.y, (p.z || 0) + H * .55);
-    if (c === 1) sideOf(p.x, p.y, p.z || 0);
+    const p = host.player, dt = Math.min(.1, f?.dt || 1 / 60), t = tick++;
+    if (t % 3 === 0) c = cover(p.x, p.y, (p.z || 0) + H * .55);
+    if (c === 1 && (t % 6 === 0 || F.mode !== 1)) sideOf(p.x, p.y, p.z || 0);
     if (c && c !== F.mode) { if (F.open > 0 && F.mode) F.open = Math.min(F.open, .2); F.mode = c; if (c === 1) { side.x = SIDE.x; side.y = SIDE.y; } }   // (a new shape opens from small)
     if (c === 1) { const k = Math.min(1, dt * 6); side.x += (SIDE.x - side.x) * k; side.y += (SIDE.y - side.y) * k; }
     F.open += ((c ? 1 : 0) - F.open) * Math.min(1, dt * EASE);
