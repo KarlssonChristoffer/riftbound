@@ -26,6 +26,7 @@ import {rgbOf, hex255} from '../core/color.js';
 import {viewRandom} from '../core/rng.js';
 import {TAU, clamp, hash3, vnoise} from '../core/mathx.js';
 import {TERRAIN_ON} from '../world/layout.js';   // walkable terrain: rings follow the ground point by point
+import {AIRK, createDrift} from './airdrift.js';   // the particles in the moving air (G.air: a blast's smoke blown about; AIRK.hazards)
 
 const C = c => rgbOf(c);
 const PAL = {
@@ -107,11 +108,14 @@ export function createHazardLook(host, H, {name = 'hazards'} = {}) {
   const PN = 700, px = new Float32Array(PN), py = new Float32Array(PN), ph = new Float32Array(PN), pvx = new Float32Array(PN), pvy = new Float32Array(PN),
     pvh = new Float32Array(PN), pt0 = new Float32Array(PN), plife = new Float32Array(PN), pgrav = new Float32Array(PN), pdrag = new Float32Array(PN),
     psz = new Uint8Array(PN), pem = new Uint8Array(PN), ppal = new Array(PN).fill(null);
+  // its share of the moving air (m/s) and how it takes it (0 sparks / embers / shards: slowly, 1 smoke / rime: fast)
+  const pax = new Float32Array(PN), pay = new Float32Array(PN), pai = new Uint8Array(PN), AD = createDrift(host), AKH = AIRK.hazards, AIR2 = new Float32Array(2);
   let pn = 0;
   function part(x, y, h, vx, vy, vh, life, pal, o) {
     if (pn >= PN) return;
     const i = pn++; px[i] = x; py[i] = y; ph[i] = h; pvx[i] = vx; pvy[i] = vy; pvh[i] = vh; pt0[i] = 0; plife[i] = life; ppal[i] = pal;
     pgrav[i] = o?.grav ?? 0; pdrag[i] = o?.drag ?? 0; psz[i] = o?.sz ?? 1; pem[i] = o?.emit === false ? 0 : 1;
+    pax[i] = pay[i] = 0; pai[i] = pal === PAL.blast.smoke || pal === PAL.frost.rime ? 1 : 0;
   }
   const OG = {grav: 9, drag: 2, sz: 1, emit: true}, OD = {grav: 0, drag: 3, sz: 1, emit: true}, OS = {grav: -.6, drag: 1.5, sz: 2, emit: false}, OB = {grav: 0, drag: 4, sz: 2, emit: true};
   // bolts: a jagged line from the sky, a fork
@@ -233,11 +237,13 @@ export function createHazardLook(host, H, {name = 'hazards'} = {}) {
       for (let i = 0; i < evs.length; i++) { const e = evs[i]; if (e.type === 'hazard.burst' && e.src === name) burst(e); }
       // lingering patches throw sparks now and then
       for (let i = 0; i < H.n; i++) { const h = H.list[i]; if (h.style === 'fire' && h.fired && R() < dt * 5 * h.r) { const a = R() * TAU, d = Math.sqrt(R()) * h.r; part(h.x + Math.sin(a) * d, h.y + Math.cos(a) * d, h.z + .15, rr(-.2, .2), rr(-.2, .2), rr(.8, 2), rr(.4, .9), PAL.fire.spark, OS); } }
+      const air = AD.begin(dt, AKH.gain); if (air) { AIR2[0] = AD.a(AKH.spark); AIR2[1] = AD.a(AKH.smoke); }
       for (let i = pn - 1; i >= 0; i--) {
         pt0[i] += dt;
-        if (pt0[i] > plife[i]) { const j = --pn; if (i !== j) { px[i] = px[j]; py[i] = py[j]; ph[i] = ph[j]; pvx[i] = pvx[j]; pvy[i] = pvy[j]; pvh[i] = pvh[j]; pt0[i] = pt0[j]; plife[i] = plife[j]; pgrav[i] = pgrav[j]; pdrag[i] = pdrag[j]; psz[i] = psz[j]; pem[i] = pem[j]; ppal[i] = ppal[j]; } ppal[j] = null; continue; }
+        if (pt0[i] > plife[i]) { const j = --pn; if (i !== j) { px[i] = px[j]; py[i] = py[j]; ph[i] = ph[j]; pvx[i] = pvx[j]; pvy[i] = pvy[j]; pvh[i] = pvh[j]; pt0[i] = pt0[j]; plife[i] = plife[j]; pgrav[i] = pgrav[j]; pdrag[i] = pdrag[j]; psz[i] = psz[j]; pem[i] = pem[j]; ppal[i] = ppal[j]; pax[i] = pax[j]; pay[i] = pay[j]; pai[i] = pai[j]; } ppal[j] = null; continue; }
         if (pdrag[i]) { const k = Math.max(0, 1 - pdrag[i] * dt); pvx[i] *= k; pvy[i] *= k; pvh[i] *= k; }
-        px[i] += pvx[i] * dt; py[i] += pvy[i] * dt; pvh[i] -= pgrav[i] * dt; ph[i] += pvh[i] * dt;
+        if (air) { AD.relax(px[i], py[i], ph[i], pax[i], pay[i], AIR2[pai[i]]); pax[i] = AD.x; pay[i] = AD.y; }
+        px[i] += (pvx[i] + pax[i]) * dt; py[i] += (pvy[i] + pay[i]) * dt; pvh[i] -= pgrav[i] * dt; ph[i] += pvh[i] * dt;
         if (pgrav[i] > 0) { const gz = host.elev(px[i], py[i]); if (ph[i] < gz) { ph[i] = gz; pvh[i] = -pvh[i] * .3; pvx[i] *= .5; pvy[i] *= .5; } }
       }
       for (const b of BOLTS) if (b.on && (b.t += dt) > .3) b.on = false;

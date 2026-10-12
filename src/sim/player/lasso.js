@@ -4,11 +4,15 @@
 // state and the motion the way player.js does (the player's code, in another file). SIM: fixed steps, no random draws.
 // THE MODES (S.mode; '' = nothing: player.js's own step runs):
 //   spin   F held: the loop spins overhead; standing he faces what he aims at (lasso_spin), moving he walks or runs at a
-//          share of his speed (the walk / run legs with the spinning arm: lws_ / lrs_)
+//          share of his speed (the walk / run legs with the spinning arm: lws_ / lrs_). The longer it spins the harder the
+//          throw pulls (S.charge 0..1 over TUNE.str.charge s) and the faster the loop turns (S.spinPh: turns, the standing
+//          frames by it)
 //   throw  the throw clip, planted, facing the throw; its `release` mark lets the loop go (event lasso.loose)
 //   haul   holding something on the rope: lasso_haul, facing it, walking slowly; the rope is a LEASH: he stays within its
 //          length of what he holds (a target that won't come holds him back; a champion that pulls drags him)
 //   yank   the yank clip, planted, facing what he pulls
+//   snare  (STRENGTH: something too heavy to pull) the rope snapped down onto its legs: planted, a short clip (TUNE.snare.clip
+//          s; the live hero's ls_snare, the yank's frames standing in), `lasso.cinch` at TUNE.snare.cinch; then his hands are free
 //   hang   on a rope from an anchor (P.state 'rope', in BUSY): a pendulum in the WORLD (gravity, the rope's length reeled
 //          in a little, the ground, the stream, walls, WASD pumps), lasso_hang_0..2 by the swing (legs forward / straight /
 //          back), facing the way he swings; letting go he flies on with its speed (player.js's fall / land / splash)
@@ -26,7 +30,8 @@
 //   gun's pending press (PL.gun.S.want), H.yaw (world <-> view), the world helpers the gadget hands to hang() (elev, water,
 //   solid).
 // EMITS (player.js's queue: x / y in the view frame, turned into the world by the loop): lasso.loose (the throw lets go),
-//   lasso.drop {why} (he lost the rope), lasso.letgo {vx, vy, vz} (off the rope), lasso.bump (a wall stopped the swing).
+//   lasso.drop {why} (he lost the rope), lasso.letgo {vx, vy, vz} (off the rope), lasso.bump (a wall stopped the swing),
+//   lasso.cinch (the snare's snap reaches the legs).
 // BUDGET: part of player.step (sim group): a few multiplies a step; the swing 2 sub-steps with a wall test each.
 //   const L = createLasso(PL, internals); L.step(dt, mx, my) -> true while it drives; the API below (features/equip/lasso.js)
 import {TUNE, POSES, HANDS} from '../../content/lasso.js';
@@ -34,8 +39,13 @@ import {clamp, hypot2, hypot3} from '../../core/mathx.js';
 
 export function createLasso(PL, I) {
   const {P, A, H, has, ev, dirOf, turnToward, moveBy, puff, stepTraverse, SPEED, BUSY, TURN_RATE, AIM_TURN_RATE} = I;
-  const {keys} = H, T = H.ctx, SW = TUNE.swing;
+  const {keys} = H, T = H.ctx, SW = TUNE.swing, STR = TUNE.str, SN = TUNE.snare;
   const S = {mode: '', t: 0, ph: 0, tx: 0, ty: 0, faceOn: false, loose: false, leashOn: false, lx: 0, ly: 0, len: 0, prevK: '',
+    // STRENGTH: the spin's charge (0..1) and its turns; what he holds is (light | even | heavy | strong) and pulls on him now
+    // (tug: an even one tugging back, a strong one heaving); the throw's target height (world h: the live hero's throw picks by it)
+    charge: 0, spinPh: 0, cls: '', tug: false, th: 0,
+    // the rope dragging him (m/s: the leash's pull this step, smoothed) and the next skid's clock (his heels: steps + dust)
+    dragV: 0, skid: 0, foot: 'L',
     // the swing (world): the anchor, the grip (where the rope meets his hands), its velocity, the rope's length now and
     // the one it reels in to, time on the ground, the last facing way
     ax: 0, ay: 0, ah: 0, gx: 0, gy: 0, gh: 0, vx: 0, vy: 0, vh: 0, L: 0, L0: 0, Lt: 0, ground: 0, air: false, fx: 0, fy: 1, W: null};
@@ -140,8 +150,10 @@ export function createLasso(PL, I) {
         const {d, sp} = walk(dt, mx, my, TUNE.spin.walk);
         if (mx || my) { P.want = dirOf(mx, my); turnToward(P.want, dt, TURN_RATE); }
         else if (S.faceOn) faceTo(dt, AIM_TURN_RATE);
+        // the charge, and the loop's turns (TUNE.spin.rps at none, x (1 + str.fast) at full): the standing frames by the turn
+        S.charge = Math.min(1, S.t / STR.charge); S.spinPh += dt * TUNE.spin.rps * (1 + STR.fast * S.charge);
         if (sp > .2 && d > 0) { P.state = 'move'; P.frame = gait(d, sp, L); }
-        else { P.state = 'idle'; P.frame = at(L.spin, S.t, true); P.prevF = -1; }
+        else { P.state = 'idle'; P.frame = at(L.spin, (S.spinPh % 1) * L.spin.total, true); P.prevF = -1; }
         return true;
       }
       case 'throw': {   // (planted: the clip is a standing throw; his speed is kept for a swing: throwAt)
@@ -154,11 +166,13 @@ export function createLasso(PL, I) {
       }
       case 'haul': {
         const {d, sp} = walk(dt, mx, my, TUNE.hold.haul);
-        if (S.leashOn) leash();
+        const pulled = S.leashOn ? leash() : 0;
+        S.dragV += (pulled / dt - S.dragV) * Math.min(1, dt * 12);
+        if (S.dragV > .6 && (S.skid -= dt) <= 0) { S.skid = .2; S.foot = S.foot === 'L' ? 'R' : 'L'; puff(S.foot, P.frame, 1); }   // (dragged: his heels skid)
         faceTo(dt, AIM_TURN_RATE);
         P.state = sp > .2 ? 'move' : 'idle';
         if (sp > .2) S.ph = (S.ph + d / .5) % 1;   // a step every half metre: the two hold poses
-        P.frame = sp <= .2 && L.take.real && S.t < L.take.total ? at(L.take, S.t, false) : L.haul[sp > .2 ? (S.ph < .5 ? 0 : 1) : 0];   // (the rope goes taut: take)
+        P.frame = sp <= .2 && L.take.real && S.t < L.take.total ? at(L.take, S.t, false) : L.haul[sp > .2 ? (S.ph < .5 ? 0 : 1) : S.tug ? Math.floor(S.t * 6) & 1 : 0];   // (the rope goes taut: take; pulled on: a struggle)
         return true;
       }
       case 'preview': {   // (the sandbox's "Lasso: preview poses": every lasso pose in place, in turn; moving ends it)
@@ -183,18 +197,25 @@ export function createLasso(PL, I) {
         if (S.t >= L.yank.total) { S.mode = ''; P.t = 0; }
         return true;
       }
+      case 'snare': {   // (STRENGTH: the rope snapped down onto its legs; the yank's frames stand in, over the snare's time)
+        plant(dt); P.state = 'idle'; faceTo(dt, AIM_TURN_RATE);
+        P.frame = at(L.yank, Math.min(S.t / SN.clip, .999) * L.yank.total, false);
+        if (!S.loose && S.t >= SN.cinch) { S.loose = true; ev({type: 'lasso.cinch', x: P.x, y: P.y, z: P.z}); }
+        if (S.t >= SN.clip) { S.mode = ''; P.t = 0; }
+        return true;
+      }
       case 'hang': swing(dt, mx, my, L); return true;
       case 'zip': zipStep(dt, L); return true;
       case 'ropeup': ropeStep(dt, L); return true;
     }
     return false;
   }
-  // the rope holds him within its length of what he holds: back along it by what he's past (a wall may stop that)
+  // the rope holds him within its length of what he holds: back along it by what he's past (a wall may stop that) -> m moved
   function leash() {
     const px = wx(), py = wy(), dx = px - S.lx, dy = py - S.ly, d = hypot2(dx, dy), over = d - S.len;
-    if (over <= 1e-4) return;
+    if (over <= 1e-4) return 0;
     const k = Math.min(over, .5) / d, v = toV(-dx * k, -dy * k);
-    moveBy(v[0], v[1]);
+    return moveBy(v[0], v[1]) || 0;
   }
 
   // ---------------------------------------------------------------- the swing
@@ -368,15 +389,19 @@ export function createLasso(PL, I) {
     preview(on) { if (on) { PL.gun?.stow?.(); S.mode = 'preview'; S.t = 0; S.pi = 0; } else if (S.mode === 'preview') { S.mode = ''; P.t = 0; } return S.mode === 'preview'; },
     // spin the loop overhead (on) / stop (off: only from spin)
     spin(on) {
-      if (on) { if (S.mode === 'hang' || S.mode === 'haul') return false; PL.gun?.stow?.(); S.mode = 'spin'; S.t = 0; S.faceOn = false; P.prevF = -1; return true; }
+      if (on) { if (S.mode === 'hang' || S.mode === 'haul') return false; PL.gun?.stow?.(); S.mode = 'spin'; S.t = 0; S.faceOn = false; P.prevF = -1; S.charge = 0; S.spinPh = 0; return true; }
       if (S.mode === 'spin') { S.mode = ''; P.t = 0; } return true;
     },
     // face this world point while standing (the aim) / throw at it (the clip; lasso.loose at its release mark)
     face(x, y) { S.tx = x; S.ty = y; S.faceOn = true; },
     // (his speed as he throws is kept for a swing: the clip plants him, the swing starts from his run)
-    throwAt(x, y) { PL.gun?.stow?.(); yaw(); const v = toW(P.vx, P.vy); S.v0x = v[0]; S.v0y = v[1]; S.mode = 'throw'; S.t = 0; S.tx = x; S.ty = y; S.loose = false; },
-    // hold something on the rope: face it, the leash (world: what he holds, the rope's length)
-    haul(on) { if (on) { S.mode = 'haul'; S.t = 0; S.ph = 0; S.leashOn = false; } else if (S.mode === 'haul') { S.mode = ''; S.leashOn = false; P.t = 0; } },
+    // (h: the target's height in the world, the live hero's throw picks by it)
+    throwAt(x, y, h = 0) { PL.gun?.stow?.(); yaw(); const v = toW(P.vx, P.vy); S.v0x = v[0]; S.v0y = v[1]; S.mode = 'throw'; S.t = 0; S.tx = x; S.ty = y; S.th = h; S.loose = false; },
+    // hold something on the rope: face it, the leash (world: what he holds, the rope's length); cls: its STRENGTH class
+    haul(on, cls = 'light') { if (on) { S.mode = 'haul'; S.t = 0; S.ph = 0; S.leashOn = false; S.cls = cls; S.tug = false; S.dragV = 0; S.skid = 0; } else if (S.mode === 'haul') { S.mode = ''; S.leashOn = false; P.t = 0; S.tug = false; } },
+    strain(on) { S.tug = !!on && S.mode === 'haul'; },   // (STRENGTH: what he holds pulls on him now: an even one's tug, a strong one's heave)
+    // STRENGTH: snap the rope down onto the legs of what he holds (world x, y: it): the snare clip, lasso.cinch at its mark
+    snare(x, y) { S.tx = x; S.ty = y; S.mode = 'snare'; S.t = 0; S.leashOn = false; S.loose = false; S.tug = false; },
     leash(x, y, len) { S.tx = x; S.ty = y; S.lx = x; S.ly = y; S.len = len; S.leashOn = true; },
     yank(x, y) { if (x !== undefined) { S.tx = x; S.ty = y; } S.mode = 'yank'; S.t = 0; S.leashOn = false; S.loose = false; },
     hammer() { S.mode = 'hammer'; S.t = 0; S.leashOn = false; },   // (the hammer throw: face(x, y) each step turns him with it)
@@ -408,12 +433,22 @@ export function createLasso(PL, I) {
     // CLIMB THE ROPE (world): to the face's foot (fx, fy), up to the top (tx, ty, tz) under the anchor (ax, ay, ah)
     ropeup(ax, ay, ah, fx, fy, tx, ty, tz, W) {
       if (BUSY.has(P.state) || P.state === 'roll' || P.state === 'backstep') return false;
+      // (the controllable wall climb, sim/player/ropewall.js: it takes the rope from here and drives him; the mode stays 'ropeup'
+      // so the gadget's phase, the rope's look and back() carry on; it ends with lasso.letgo and wallDone(). ?ropewall=0: no)
+      if (PL.ropewall?.start(ax, ay, ah, fx, fy, tx, ty, tz, W)) { yaw(); S.W = W; S.ru = {ph: 'wall', ax, ay, ah, fx, fy, tx, ty, tz}; S.mode = 'ropeup'; S.t = 0; P.aimRoll = false; return true; }
       yaw(); S.W = W; S.ru = {ph: 'walk', t: 0, ax, ay, ah, fx, fy, tx, ty, tz, z0: P.z, mz: 0};
       S.mode = 'ropeup'; S.t = 0; P.state = 'rope'; P.t = 0; P.aimRoll = false; P.vx = P.vy = 0;
       return true;
     },
     // off the rope: from a swing he flies on; from anything else he stands again
-    letGo() { if (S.mode === 'hang' || S.mode === 'zip' || S.mode === 'ropeup') letGo('key'); else if (S.mode) { S.mode = ''; S.leashOn = false; P.t = 0; } },
-    stop() { if (S.mode === 'hang' || S.mode === 'zip' || S.mode === 'ropeup') letGo('stop'); S.mode = ''; S.leashOn = false; },
+    letGo() {
+      if (S.mode === 'ropeup' && S.ru?.ph === 'wall') { PL.ropewall?.letGo(); return; }   // (the wall climb lets go its own way)
+      if (S.mode === 'hang' || S.mode === 'zip' || S.mode === 'ropeup') letGo('key'); else if (S.mode) { S.mode = ''; S.leashOn = false; P.t = 0; } },
+    stop() {
+      if (S.mode === 'ropeup' && S.ru?.ph === 'wall') { PL.ropewall?.letGo(); S.mode = ''; S.leashOn = false; return; }   // (the wall climb's own end)
+      if (S.mode === 'hang' || S.mode === 'zip' || S.mode === 'ropeup') letGo('stop'); S.mode = ''; S.leashOn = false;
+    },
+    // the wall climb (sim/player/ropewall.js) ended: it emitted lasso.letgo itself, so a quiet end here (no fall)
+    wallDone() { if (S.mode === 'ropeup' && S.ru?.ph === 'wall') S.mode = ''; },
   };
 }

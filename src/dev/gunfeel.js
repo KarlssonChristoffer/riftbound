@@ -45,6 +45,7 @@ body:has(#pause:not(.hidden)) #gunfeel { visibility: hidden; }
 export function createGunFeel({host}) {
   const C = {open: false}; for (const n of KNOBS) C[n.k] = 1;
   try { Object.assign(C, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch (e) {}
+  C.open = false;   // (closed at the start, like every dev panel: F8 opens it)
   for (const n of KNOBS) if (!(C[n.k] >= n.min && C[n.k] <= n.max)) C[n.k] = 1;
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(C)); } catch (e) {} };
   const game = () => host.feature('game');

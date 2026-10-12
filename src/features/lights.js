@@ -37,6 +37,7 @@ import {geoOf, M4, along} from '../world/kit3d.js';
 import {createFires} from './firesim.js';
 import {clamp, hypot3} from '../core/mathx.js';
 import {mulberry32, simSeed, viewRandom} from '../core/rng.js';
+import {AIRK, createDrift} from '../view/airdrift.js';   // the moving air (G.air): the particles' drift in it
 import {hex01 as rgb} from '../core/color.js';
 import {flags} from '../core/flags.js';
 // how high our props stop arrows (world.js PROP_TOP, read by sim/projectiles.js; 2.5 m otherwise): arrows fly over the campfire
@@ -47,9 +48,10 @@ const TAU = Math.PI * 2;
 const R = viewRandom('lights'), rr = (a, b) => a + R() * (b - a);   // presentation (sparks, smoke, flicker); the sim's own: RS
 // a particle (spark, ember, smoke, spore, drip): all of one shape, so the loops that step and draw them read one hidden
 // class (a dozen literal shapes made those reads megamorphic, and each number read that way was a new heap number:
-// ~20 KB of garbage a frame). tx: NaN until its first step (trail() draws nothing before); the drip's fields are 0 on the rest
+// ~20 KB of garbage a frame). tx: NaN until its first step (trail() draws nothing before); the drip's fields are 0 on the rest.
+// ax, ay: its share of the moving air (m/s: view/airdrift.js, AIRK.lights; 0 with ?air=0)
 const part = (x, y, h, vx, vy, vh, life, k, c = null, pal = null, g = 0, sz = 0, a0 = .5) =>
-  ({x, y, h, vx, vy, vh, t: 0, life, k, c, pal, g, sz, a0, tx: NaN, ty: 0, th: 0, land: 0, heat: 0, gz: 0, cool: 0, sd: 0, bounced: 0});
+  ({x, y, h, vx, vy, vh, t: 0, life, k, c, pal, g, sz, a0, tx: NaN, ty: 0, th: 0, land: 0, heat: 0, gz: 0, cool: 0, sd: 0, bounced: 0, ax: 0, ay: 0});
 const lerp3 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 
 const D = SCONCE_D;   // a sconce's stick stands this far off the wall face (the arm shows a few px past the stick)
@@ -695,8 +697,13 @@ export async function create(host) {
     }
   }
   const WD = {x: 0, y: 0, g: 0}, CALM = {x: 0, y: 0};   // the wind at the player (scratch), none
+  // THE AIR (G.air): smoke and spores take it fast, sparks and embers slowly: a blast blows the campfire's smoke away, a
+  // passer-by bends it (view/airdrift.js; k: AIRK.lights)
+  const AD = createDrift(host), AK = AIRK.lights;
   function stepParts(dt) {
     const wd = host.wind?.on && host.wind.at ? host.wind.at(host.player.x, host.player.y, WD) : CALM;
+    const air = AD.begin(dt, AK.gain), aSm = air ? AD.a(AK.smoke) : 0, aSp = air ? AD.a(AK.spore) : 0, aSk = air ? AD.a(AK.spark) : 0,
+      aEm = air ? AD.a(AK.ember) : 0, aDr = air ? AD.a(AK.drip) : 0;
     for (let i = parts.length - 1; i >= 0; i--) {
       const q = parts[i]; q.t += dt;
       if (q.t >= q.life) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }   // (swap-remove: splice made this O(n^2))
@@ -705,7 +712,8 @@ export async function create(host) {
           q.tx = q.x; q.ty = q.y; q.th = q.h;
           q.vh -= 2.6 * dt; q.vh *= Math.exp(-dt * 1.1);
           q.vx += (Math.sin(q.t * 10 + q.sd) * .5 + (wd.x * .12 - q.vx) * .6) * dt; q.vy += (Math.cos(q.t * 8 + q.sd) * .4 + (wd.y * .12 - q.vy) * .6) * dt;
-          q.x += q.vx * dt; q.y += q.vy * dt; q.h += q.vh * dt; q.heat = Math.max(.62, q.heat - dt * .07);
+          if (air) { AD.relax(q.x, q.y, q.h, q.ax, q.ay, aDr); q.ax = AD.x; q.ay = AD.y; }
+          q.x += (q.vx + q.ax) * dt; q.y += (q.vy + q.ay) * dt; q.h += q.vh * dt; q.heat = Math.max(.62, q.heat - dt * .07);
           if (q.h <= q.gz) {
             q.h = q.gz + .004;
             if (!q.bounced && q.vh < -.8 && R() < .55) {
@@ -721,7 +729,8 @@ export async function create(host) {
       if (q.k === 'spark' || q.k === 'ember') { q.vx += (R() - .5) * dt * 6; q.vy += (R() - .5) * dt * 6; q.vh -= (q.g ?? 0) * dt; }
       if (q.k === 'spore') { q.vh *= Math.exp(-dt * 1.5); q.vx += Math.sin(q.t * 5 + i) * dt * .3; }
       if (q.k === 'spark' || q.k === 'ember') { q.tx = q.x; q.ty = q.y; q.th = q.h; }
-      q.x += q.vx * dt; q.y += q.vy * dt; q.h += q.vh * dt;
+      if (air) { AD.relax(q.x, q.y, q.h, q.ax, q.ay, q.k === 'smoke' ? aSm : q.k === 'spore' ? aSp : q.k === 'ember' ? aEm : aSk); q.ax = AD.x; q.ay = AD.y; }
+      q.x += (q.vx + q.ax) * dt; q.y += (q.vy + q.ay) * dt; q.h += q.vh * dt;
       if (q.k === 'smoke') q.vh *= Math.exp(-dt * .3);
       if (q.h < 0 && q.k !== 'ember') q.h = 0;
     }

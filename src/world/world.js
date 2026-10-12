@@ -1286,9 +1286,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     glb: state => glbGeometry(loader, state),                   // Promise<geometry | null> (debris chunks, ...)
     // an extra live mesh owned by a feature (debris chunks): dispose it when done; a rebuild (biome switch) disposes the rest.
     // It doesn't block point lights unless o.occlude (tumbling chunks next to a blast threw black spikes everywhere).
-    // o.static: it never moves (its sun shadow goes in the cached static map, gfx mesh {static})
+    // o.static: it never moves (its sun shadow goes in the cached static map, gfx mesh {static}). o.sway + o.autumn: a tree's
+    // own geometry with its leaves (features/woodcut.js: a felled tree falling): the crown's flutter and autumn ramps as a
+    // standing tree's (gfx mesh {sway, autumn}; its seed is its matrix's place, so made at the tree's own it matches it)
     mesh: (geo, matrix, o = {}) => {
-      const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4(), {static: !!o.static}), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
+      const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4(), {static: !!o.static && !o.sway, sway: !!o.sway, autumn: o.autumn}), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
       if (!o.occlude) m.sm.layers.disable(1);
       if (o.shadow === false) m.sm.layers.disableAll();   // (casts nothing: a flame, a lily pad flat on the water)
       return m;

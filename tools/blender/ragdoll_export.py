@@ -159,6 +159,13 @@ def run(model, out, poses, clips=None, more=()):
         blob += recs[si]
         first = len(blob)
     open(os.path.join(out, 'model.bin'), 'wb').write(bytes(blob))
+    # the runtime cloths' families (and their stripes'), so the live hero can draw them with the model's own ramps even
+    # when no rigid part shares them (the outlaw's poncho skirt: its dark and green hem bands)
+    for c in ns.get('SIM', ()):
+        for f in [c['fam']] + [b[2] for b in c.get('bands', ())]:
+            if f not in fam_ix and f in fams_src:
+                fam_ix[f] = len(fams)
+                fams.append(f)
 
     bones = {}
     for b in arm.data.bones:

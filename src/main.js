@@ -76,6 +76,7 @@ import * as devkeys from './dev/devkeys.js';
 import * as owncheck from './dev/owncheck.js';
 import {createCheats} from './dev/cheats.js';   // the cheat panel (F2): a dev feature the boot adds last
 import {createGunFeel} from './dev/gunfeel.js';   // the gun feel panel (F8): live sliders as modifier notes, a dev feature too
+import {createWxPanel} from './dev/wxpanel.js';   // the weather panel (F9): a change of the weather and the god rays' envelope, read out (wx-D)
 import {loadFeatures} from './core/features.js';
 import {createInput} from './core/input.js';
 import {createLoop} from './core/loop.js';
@@ -113,7 +114,7 @@ cv.attach({G, canvas, hdc, features}); cv.fit(); addEventListener('resize', () =
 // host.time is its day / dusk / night bucket (dawn counts as dusk), host.mood its blended mood, host.setTime jumps it
 // THE STAGE (world/stage.js): the biome, the built world, the props' display mode, the trees
 const stage = createStage({G, ctxO, PPM, PPMH, features, flags: Q});
-const env = createEnv({moods: MOODS, biome: () => stage.biome.id, Q, focus: () => P});   // (focus: where the weather is felt: a front reaches the player)
+const env = createEnv({moods: MOODS, biome: () => stage.biome.id, Q, focus: () => player});   // (focus: where the weather is felt: a front reaches the player; the world's x, y) (wx-B: was P, his view-frame state: wrong once the camera turned)
 // APP: the engine's own context for the modules split out of this file (view/hero.js, ...): live getters, so a module
 // reads the current yaw / zoom / player without this file passing them every call. (Features get `host`, below.)
 const app = {
@@ -213,6 +214,9 @@ const host = {
   // the muzzle of the gun as DRAWN (live: the live hero's stances and kicks move it off the sim's atlas muzzle): world
   // {x, y, h}, the last frame's, or null (the sprite: the sim's muzzle is the drawn one). For the shot's flash (gunfx)
   playerMuzzle: () => live?.on ? live.muzzle() : null,
+  // the rope hands as DRAWN (live: the lasso's live clips and the spin's IK hand; docs/exp/lasso.md): world {x, y, h (RopeHand0), ux, uy, uh
+  // (RopeHand1), spin, cx, cy, ch, r (the spin's circle)}, the last frame's, or null (the sprite: the sim's hand is the drawn one)
+  playerRopeHand: () => live?.on ? live.ropeHand() : null,
   // his DRAWN live pose (view/livehero.js DRAWN: body-space bones in BN order, 7 a bone; phi his facing; n counts the frames drawn;
   // rig the live model's name), or null when he isn't drawn live: co-op sends it to the others (features/coop.js). One reused object
   playerPose: () => { const d = live?.on ? live.drawn : null; if (!d?.w) return null; PPOSE.w = d.w; PPOSE.phi = d.phi; PPOSE.n = d.n; PPOSE.BN = live.BN; PPOSE.rig = hero.loadName; return PPOSE; },
@@ -229,6 +233,7 @@ const game = await createGame(host); features.unshift(game);
 // the cheat panel (dev/cheats.js, F2 in dev mode): last, so what it asks for lands after every feature's step
 features.push(createCheats({host, cam, canvas}));
 features.push(createGunFeel({host}));   // (dev/gunfeel.js: F8 in dev mode)
+features.push(createWxPanel({host}));   // (dev/wxpanel.js: F9 in dev mode; wx-D)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;
