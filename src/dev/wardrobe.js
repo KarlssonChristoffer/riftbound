@@ -633,11 +633,12 @@ export function createWardrobe({host, hero, cv, live, photo}) {
     const world = C.back === 'world';
     vig.style.opacity = world ? .6 : 0;
     if (world) set.isolate(false); else { set.set({stage: C.stage, back: C.back}); set.isolate(true, live?.rig); }
+    cv.freeClamp(world);   // (out of the world: the view needn't stay over its ground; near an edge a turn would push him aside)
   }
   const light = () => { const ph = photo(); if (ph?.open) ph.setWorld('hour', LIGHTS[C.light]); };
   // the camera on him, in the middle of what the panes leave (his body, not his feet, in the middle); after every turn, zoom
   // and resize, so he stays there as the camera goes round him
-  const seen = {yaw: NaN, scale: NaN, dz: NaN, w: 0, h: 0, clean: false};
+  const seen = {yaw: NaN, scale: NaN, dz: NaN, w: 0, h: 0, clean: false}, AT = {x: 0, y: 0, h: 0};
   function center() {
     const ph = photo(); if (!ph?.open) return;
     const P = host.player, clean = root.classList.contains('wd-clean'), W = innerWidth, H = innerHeight;
@@ -647,7 +648,9 @@ export function createWardrobe({host, hero, cv, live, photo}) {
       cx = (l.right + r.left) / 2; cy = (t.bottom + b.top) / 2;
     }
     root.style.setProperty('--cx', cx + 'px'); root.style.setProperty('--cy', cy + 'px');
-    cv.freeReset(P.x, P.y, host.P.z);
+    // exactly over his feet (the follow's own target leads him by his chest and his motion, in the frame it was made in:
+    // it would swing round him as the camera turns), then the panes' offset and his body's middle, in the view
+    cv.freeReset(P.x, P.y, host.P.z); cv.freeAt(AT); ph.move(P.x - AT.x, P.y - AT.y);
     const z = cv.zoom * cv.dz, vx = -(cx - W / 2) / cv.scale / (host.PPM * z), vy = -(cy - H / 2) / cv.scale / (host.PPMY * z) - .75 * host.PPMH / host.PPMY;
     const [wx, wy] = cv.toWorld(vx, vy); ph.move(wx, wy);
     seen.yaw = cv.yaw; seen.scale = cv.scale; seen.dz = cv.dz; seen.w = W; seen.h = H; seen.clean = clean;
