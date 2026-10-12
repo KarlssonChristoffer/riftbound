@@ -107,11 +107,15 @@ drawn by `world/decor3d.js` through the world's instanced flora (`render/flora.j
 - LOGS: fallen trees lying flat (both ends on level ground, clear of trunks), often with a rotten stump by the root end; grey and
   broken (old) in deep shade and near water, fresh near the clearing.
 - FLY AGARICS in groups of 1-3 under birch and pine in half shade; CHANTERELLE rings in pine shade, often by a stump or log.
-- BLUEBERRIES fill the floor under pines on the drier ground and the esker's slopes; never by the water or in the clearing.
+- BLUEBERRIES fill the floor under pines on the drier ground and the esker's slopes; never by the water or in the clearing. Drawn
+  1.6x (`TUNE.decor.berryS`): at the recipe's size they read as specks.
 - WINDTHROWS (rotvälta): a tipped spruce, its root plate on edge (~2 m) over the pit it tore out, the trunk lying away from it,
   on the thin soil 1-7 m from bare rock (outcrops, blocks, crags, the boulder field), placed first as they need the most room;
   grey (old) in deep shade and by the water. Solid: `F.decorSolid` is a row of round colliders across the plate ('rootplate',
-  2 m high) and along the trunk ('windlog', .9 m), added by `layout.js` and joined like a field wall's stones (`collide.js`).
+  1.5 m high: the plate sits half in the ground) and along the trunk ('windlog', .9 m), added by `layout.js` and joined like a
+  field wall's stones (`collide.js`). The hole it tore out is bare: the recipe's `ground(p)` ellipses, turned and scaled with the
+  tree (`F.decorEarth`), are painted as earth in the forest ground (`biomes.js` forestRuins, darker in the middle, so the hole
+  shows on a slope too), and the grass tufts, ferns and other decor are kept out of them and from under the trunk (`F.decorClear`).
 - Not placed: the watcher (its own creature, `features/watcher.js`) and the ant hill.
 
 What suits a spot comes from the trees within 4 m (shade, the pines' share, the nearest pine / birch). Their own generator per
@@ -120,7 +124,8 @@ every item the world tracks are exactly as before. View only but for the windthr
 colliders, on every client).
 
 Cost: seed 1337 places ~330 things (75 stumps, 22 logs, 10 windthrows, 29 agaric groups, 23 rings, 165 blueberry patches),
-~280k triangles in 22 instanced draws plus 13 shadow draws (only stumps, logs and windthrows cast). Each recipe is grown in 3 variants (its params tied to
+~280k triangles, 22 variants (only stumps, logs and windthrows cast shadows). Grouped by 32 m cells, each group culled as a whole
+(flora's `o.cull`): ~20 draws in a forest view, none outside it. Each recipe is grown in 3 variants (its params tied to
 the variant: a patch of 3, 4 or 5 shrubs), turned and scaled per instance. Placed once at the world's build: no per-frame work.
 
 ## Chunk-friendly
