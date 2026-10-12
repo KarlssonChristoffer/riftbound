@@ -34,7 +34,8 @@ and the composite, render/flora.js). The first 32 families pack exactly as befor
 
 | Recipe | What | Params |
 | --- | --- | --- |
-| stump | spruce stump: snapped by the wind or rotten and hollow (style -1 picks by seed); sawn (style 2) only where people cut wood | r, h, roots, style, fungus |
+| stump | spruce stump: snapped by the wind (the trunk split into torn strips) or rotten and hollow (style -1 picks by seed); sawn (style 2) only where people cut wood | r, h, roots, style, fungus |
+| windthrow | a rotvälta: a tipped-over spruce, its root plate on edge (earth, a tangle of roots, stones, moss on top), the pit, the trunk lying away | R, len, r, roots, stones, old |
 | log | fallen tree, fresh or old and grey, branch stubs | len, r, stubs, old |
 | fly_agaric | red caps with white warts, a young closed one | n, size |
 | chanterelles | a ring of golden funnels | n, size |
