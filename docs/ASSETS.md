@@ -1,6 +1,6 @@
 # Assets: recipes, paints and the asset lab
 
-Status: 2026-10-12, first slice. Work-in-progress notes on the wider idea: the "Painless assets: notes" doc in the project.
+Status: 2026-10-12, first slice, plus natural stumps and the watcher. Work-in-progress notes on the wider idea: the "Painless assets: notes" doc in the project.
 
 ## The idea
 
@@ -34,13 +34,24 @@ and the composite, render/flora.js). The first 32 families pack exactly as befor
 
 | Recipe | What | Params |
 | --- | --- | --- |
-| stump | spruce stump, sawn or snapped, roots, sometimes shelf fungus | r, h, roots, broken, fungus |
+| stump | spruce stump: snapped by the wind or rotten and hollow (style -1 picks by seed); sawn (style 2) only where people cut wood | r, h, roots, style, fungus |
 | log | fallen tree, fresh or old and grey, branch stubs | len, r, stubs, old |
 | fly_agaric | red caps with white warts, a young closed one | n, size |
 | chanterelles | a ring of golden funnels | n, size |
-| anthill | a dome of needles and twigs | r, h, twigs |
+| anthill | a dome of needles and twigs (not wanted in the forest) | r, h, twigs |
 | blueberry | a patch of knee-high shrubs, berries | n, spread, berries |
-| watcher | weird: a pale toadstool with one eye under its cap | h, eye, bend |
+| watcher | weird: a pale toadstool with one eye under its cap (eye 0: the body alone; the creature below rolls its own eye) | h, eye, bend |
+
+## The watcher (features/watcher.js)
+
+An early-game creature built from the `watcher` recipe: now and then (every 70-200 s, half that at night) it rises beside a
+tree trunk 4-10 m away, in a crowded, dark spot near the edge of the view, and only watches: it turns to face you, its eye
+follows you (glances, blinks), it hops and leans out round the trunk. Come within 2.8 m, or rush it, and it yanks itself
+underground in a spray of dirt; left alone it sinks after 15-40 s. It is view-only and private to each player: nothing is
+synced, every player has their own. `?watcher=0` turns it off, `?watcher=often` brings it every few seconds; the sandbox
+menu has Summon the watcher.
+
+## Placing
 
 Not placed in the world yet: the forest's growth (world/forest.js) is being reworked elsewhere; it can read `likes` and call
 `recipeGeo` when it adds the life layer.
