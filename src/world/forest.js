@@ -7,8 +7,16 @@
 //   CHUNKS    the land is grown in CHUNK m squares on a lattice from 0, 0 (chunk cx, cy covers x cx*CHUNK .. +CHUNK): what grows in
 //             one depends on the seed, its own coordinates and the forest's few global features (the lake, the stream), never on
 //             its neighbours, so the forest can grow by chunks later (a bigger RECT, or chunks made as you walk) without moving a tree
-//   RELIEF    rolling ground (three octaves of value noise, 0 .. ~2.4 m) and a few broad hills, all gentle enough to walk
-//             (terrain.js WALK); a 'field' terrain shape (its height function) + 'hill' shapes, for layout.js's TERRAIN
+//   RELIEF    the home woods' ice-age ground (docs/FOREST.md): rolling moraine (three octaves of value noise, 0 .. ~3.2 m) and up to
+//             three rounded hills (3.8 .. 5.8 m, wide enough to walk: terrain.js WALK; one or two fit most seeds); a 'field' terrain shape (its height
+//             function) + 'hill' shapes, for layout.js's TERRAIN
+//   ICE       the way the ice flowed (from the north-west, give or take: the seed's): the esker runs along it, the outcrops face it
+//   CLEARING  a flat spot on the lake's shore kept open for the settlement (F.clearing): nothing grows in it but grass
+//   ESKER     one long winding gravel ridge (2.2 .. 2.8 m high, 36 .. 64 m, a flat crest kept clear: a path along its top), part of the field
+//   OUTCROPS  bedrock humps (roches moutonnees): a gentle slope up from the side the ice came from, a small rock cliff on the side it
+//             went (F.outcrops: {h, ctl: [[x, y, bank], ...]}; layout.js makes each a terrace with rock, as its ledges), and BLOCKS:
+//             big lone boulders, rock all round. Away from the water, the clearing and the esker's crest
+//   BOULDERS  one boulder field in a hollow (F.boulders: {x, y, r}): big and small rocks lying close
 //   LAKE      a lake in the lowest hollow the seed's candidates find: a basin cut level into the ground, DEEP water (inStream:
 //             falling in is a respawn, as the river)
 //   STREAM    from a spring on high ground near the north edge it runs down to the lake, wandering, downhill where it can; shallow
@@ -33,12 +41,18 @@ const FADE = [2, 12];
 export const MOUTH = {x: 40, y: -.4, hw: 1.45};          // the relief is 0 within FADE[0] m of the south edge, full FADE[1] m in
 const WATER_H = -.18;          // the lake's surface under its basin (world.js WATER_H)
 export const TUNE = {
-  relief: {amp: 2.4, k: 1 / 26, hills: [2, 4], hillH: [1.4, 2.6], hillR: [7, 11]},
+  relief: {amp: 3.2, k: 1 / 30, hills: [2, 3], hillH: [3.8, 5.8], hillR: [11, 15], hillK: 2.8},   // (hillK: a hill is at least that x its height across: walkable)
+  ice: {spread: .9},
+  clearing: {r: 7, off: 4.5},
+  esker: {h: [2.2, 2.8], crest: 1.2, w: 8.5, len: [36, 64], taper: .26},
+  outcrop: {n: [3, 6], len: [3.5, 7], wid: [2.4, 4.2], rise: [1.1, 2.3]},
+  block: {n: [3, 6], r: [1.1, 1.9], rise: [1.5, 2.8]},
+  boulders: {r: [4, 5.5], n: [10, 16]},
   lake: {rx: [6.5, 9.5], ry: [4.5, 6.5], depth: .35, rim: 3.2, minBed: .55},
   stream: {hw0: .3, hw1: .55, step: .6, depth: .1, bank: 1.25},
   trees: {cell: 3.2, jitter: .36, base: .12, dense: .78, slope: .5, water: 1.4, edge: 2.2, south: 4},
   under: {cell: 1.6, jitter: .4, p: .2},
-  rocks: {big: 2, small: 3},
+  rocks: {big: 3, small: 3},
 };
 
 // a seeded generator of its own (mulberry32, as core/rng.js: kept here so node needs nothing else)
@@ -53,8 +67,10 @@ export function forestPlan(seed) {
   let F = plans.get(seed); if (F) return F;
   const S = mix(seed, 1) & 0xffff, R = rng(mix(seed, 2)), T = TUNE;
   F = {seed, rect: RECT, chunk: CHUNK, shapes: [], cuts: [], props: [], trees: new Map(), laid: false};
-  // ---- RELIEF: the rolling ground, then the hills (away from the south edge)
-  const reliefH = (x, y) => T.relief.amp * smooth((fbm(x * T.relief.k, y * T.relief.k, S) - .3) / .55) * southFade(y);
+  // ---- RELIEF: the rolling ground (held lower along the lake's way out to the river: its outflow doesn't cut a gorge), then the hills
+  // (away from the south edge)
+  const raw = (x, y) => T.relief.amp * smooth((fbm(x * T.relief.k, y * T.relief.k, S) - .3) / .55) * southFade(y);
+  let reliefH = raw;
   const hills = [];
   // ---- LAKE: in the lowest hollow of a few candidates (the relief only: the hills keep away from it) whose ground stays high enough
   // for its water to run out downhill to the river (its surface over the river's: OUTFLOW)
@@ -62,32 +78,68 @@ export function forestPlan(seed) {
     let best = null;
     for (let i = 0; i < 32; i++) {
       const x = RECT.x0 + 16 + R() * (RECT.x1 - RECT.x0 - 32), y = RECT.y0 + 12 + R() * (RECT.y1 - RECT.y0 - 32);
-      let m = 0, lo = 1e9; for (let k = 0; k < 17; k++) { const a = k * Math.PI / 8, r = k % 2 ? 1 : .5, h = reliefH(x + Math.cos(a) * 8 * r, y + Math.sin(a) * 5.5 * r); m += h; lo = Math.min(lo, h); }
+      let m = 0, lo = 1e9; for (let k = 0; k < 17; k++) { const a = k * Math.PI / 8, r = k % 2 ? 1 : .5, h = raw(x + Math.cos(a) * 8 * r, y + Math.sin(a) * 5.5 * r); m += h; lo = Math.min(lo, h); }
       const score = m / 17 + Math.max(0, T.lake.minBed - (lo - T.lake.depth)) * 6 + Math.hypot(x - MOUTH.x, y - MOUTH.y) * .006;   // (low, but not too low; nearer the river wins ties)
       if (!best || score < best.score) best = {x, y, score};
     }
     const rx = T.lake.rx[0] + R() * (T.lake.rx[1] - T.lake.rx[0]), ry = T.lake.ry[0] + R() * (T.lake.ry[1] - T.lake.ry[0]);
-    let lo = 1e9; for (let k = 0; k < 64; k++) { const a = k * Math.PI / 32, r = (k % 4) / 3 * 1.15; lo = Math.min(lo, reliefH(best.x + Math.cos(a) * rx * r, best.y + Math.sin(a) * ry * r)); }
-    F.lake = {x: +best.x.toFixed(2), y: +best.y.toFixed(2), rx: +rx.toFixed(2), ry: +ry.toFixed(2), bed: +Math.max(T.lake.minBed, lo - T.lake.depth).toFixed(3)};
+    const lx = +best.x.toFixed(2), ly = +best.y.toFixed(2);
+    reliefH = (x, y) => raw(x, y) * (.25 + .75 * smooth((segD(x, y, lx, ly, MOUTH.x, MOUTH.y) - 4) / 12));
+    let lo = 1e9; for (let k = 0; k < 64; k++) { const a = k * Math.PI / 32, r = (k % 4) / 3 * 1.15; lo = Math.min(lo, reliefH(lx + Math.cos(a) * rx * r, ly + Math.sin(a) * ry * r)); }
+    const bed = Math.max(T.lake.minBed, lo - T.lake.depth);
+    let rise = 0; for (let k = 0; k < 32; k++) { const a = k * Math.PI / 16; rise = Math.max(rise, reliefH(lx + Math.cos(a) * (rx + 1.5), ly + Math.sin(a) * (ry + 1.5)) - bed); }
+    F.lake = {x: lx, y: ly, rx: +rx.toFixed(2), ry: +ry.toFixed(2), bed: +bed.toFixed(3), rim: +Math.max(T.lake.rim, rise * 2.3).toFixed(2)};   // (rim: wide enough to walk down to the water)
   }
   const L = F.lake;
   const lakeD = (x, y) => Math.hypot((x - L.x) / L.rx, (y - L.y) / L.ry);   // 1 at its edge
   F.inLake = (x, y, grow = 0) => { const rx = L.rx + grow, ry = L.ry + grow; if (x < L.x - rx || x > L.x + rx || y < L.y - ry || y > L.y + ry) return false; const u = (x - L.x) / rx, v = (y - L.y) / ry; return u * u + v * v < 1; };
   F.lakeEdge = (x, y) => { const u = (x - L.x) / L.rx, v = (y - L.y) / L.ry, r = Math.hypot(u, v), g = Math.hypot(u / L.rx, v / L.ry); return g > 1e-6 ? (1 - r) * r / g : L.ry; };   // m to its edge (+ inside)
+  const ySouth = RECT.y1 - FADE[1];                                        // (the relief fades out south of this: nothing stands proud there)
+  let esker = null; const rock = [], eskerH = (x, y) => esker ? esker(x, y) : 0;
+  // ---- ICE: the way it flowed, from the west-north-west give or take (Sweden's ice moved south-east)
+  const ice = Math.PI / 6 + (R() - .5) * T.ice.spread, ux = Math.cos(ice), uy = Math.sin(ice);
+  F.ice = +ice.toFixed(3);
+  // ---- ESKER: a ridge along the ice's way, wandering, clear of the lake and the outflow's way to the river (shorter if it must); the
+  // hills keep off it, the streams find their way round it or cut through it as streams do
+  {
+    const E = T.esker, reach = E.crest + E.w;
+    for (let t = 0; t < 80 && !esker; t++) {
+      const len = E.len[1] - (E.len[1] - E.len[0]) * Math.min(1, t / 40) * R(), a = ice + (R() - .5) * .5, dx = Math.cos(a), dy = Math.sin(a), ph = R() * 6;
+      const sx = RECT.x0 + 6 + R() * (RECT.x1 - RECT.x0 - 12) - dx * len * .5, sy = RECT.y0 + 6 + R() * (ySouth - 2 - RECT.y0 - 6) - dy * len * .5;   // (a middle anywhere)
+      const ctl = []; for (let i = 0; i <= 5; i++) { const f = i / 5, w = Math.sin(i * 1.3 + ph) * 3 + (R() - .5) * 3; ctl.push([sx + dx * len * f - dy * w, sy + dy * len * f + dx * w]); }
+      if (ctl.some(([x, y]) => x < RECT.x0 + 6 || x > RECT.x1 - 6 || y < RECT.y0 + 6 || y > ySouth - 2)) continue;
+      const C = course(ctl, 0, 0); let ok = true;
+      for (let i = 0; i < C.n && ok; i += 15) {
+        const x = C.px[i], y = C.py[i];
+        if (-F.lakeEdge(x, y) < reach + 3 || segD(x, y, L.x, L.y, MOUTH.x, MOUTH.y) < reach + 3) ok = false;
+      }
+      if (!ok) continue;
+      esker = ridge(C, E.h[0] + R() * (E.h[1] - E.h[0]), E.crest, E.w, E.taper, S);
+      F.esker = {pts: ctl.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]), h: +esker.h.toFixed(2)};
+    }
+  }
+  const crestD = (x, y) => esker ? esker.dist(x, y) - T.esker.crest : 1e9;
   for (let i = 0, tries = 0, want = T.relief.hills[0] + Math.floor(R() * (T.relief.hills[1] - T.relief.hills[0] + 1)); i < want && tries < 60; tries++) {
-    const r = T.relief.hillR[0] + R() * (T.relief.hillR[1] - T.relief.hillR[0]), x = RECT.x0 + r + R() * (RECT.x1 - RECT.x0 - 2 * r), y = RECT.y0 + r * .8 + R() * (RECT.y1 - RECT.y0 - r * .8 - FADE[1] - r);
-    if (Math.hypot((x - L.x) / (L.rx + r + 5), (y - L.y) / (L.ry + r + 5)) < 1 || hills.some(h => Math.hypot(h.x - x, h.y - y) < h.rx + r)) continue;
+    const h = T.relief.hillH[0] + R() * (T.relief.hillH[1] - T.relief.hillH[0]), r = Math.max(T.relief.hillR[0] + R() * (T.relief.hillR[1] - T.relief.hillR[0]), h * T.relief.hillK / .88);
+    const x = RECT.x0 + r + R() * (RECT.x1 - RECT.x0 - 2 * r), y = RECT.y0 + r * .8 + R() * (RECT.y1 - RECT.y0 - r * .8 - FADE[1] - r);
+    if (Math.hypot((x - L.x) / (L.rx + r + 5), (y - L.y) / (L.ry + r + 5)) < 1 || hills.some(q => Math.hypot(q.x - x, q.y - y) < q.rx + r)) continue;
     if (segD(x, y, L.x, L.y, MOUTH.x, MOUTH.y) < r + 3) continue;   // (not across the outflow's way to the river)
-    const h = T.relief.hillH[0] + R() * (T.relief.hillH[1] - T.relief.hillH[0]);
-    hills.push({type: 'hill', x: +x.toFixed(2), y: +y.toFixed(2), rx: +r.toFixed(2), ry: +(r * (.75 + R() * .3)).toFixed(2), h: +h.toFixed(2), rot: +(R() * Math.PI).toFixed(3)}); i++;
+    if (crestD(x, y) < r * .55 + 2) continue;   // (not on the esker)
+    hills.push({type: 'hill', x: +x.toFixed(2), y: +y.toFixed(2), rx: +r.toFixed(2), ry: +(r * (.88 + R() * .17)).toFixed(2), h: +h.toFixed(2), rot: +(R() * Math.PI).toFixed(3)}); i++;
   }
   const hillH = (x, y) => { let h = 0; for (const s of hills) { const c = Math.cos(s.rot), n = Math.sin(s.rot), dx = x - s.x, dy = y - s.y, u = (dx * c + dy * n) / s.rx, v = (-dx * n + dy * c) / s.ry, d = u * u + v * v; if (d < 1) h += s.h * .5 * (1 + Math.cos(Math.PI * Math.sqrt(d))); } return h; };
   // the ground as this plan sees it (relief + hills, the lake's hollow): placement's slope and height tests. The drawn and walked
   // ground is layout.js's field of these shapes (with its own low swell): within a few cm of this
-  F.height = (x, y) => { const h = reliefH(x, y) + hillH(x, y), d = lakeD(x, y); if (d < 1) return Math.min(h, L.bed); const k = (d - 1) * Math.min(L.rx, L.ry) / T.lake.rim; return k < 1 ? L.bed + (h - L.bed) * smooth(k) : h; };
+  // (the rock comes later, away from the water: placed after the watercourses, which walk the ground without it)
+  F.height = (x, y) => {
+    let h = reliefH(x, y) + hillH(x, y) + eskerH(x, y); const d = lakeD(x, y);
+    if (d < 1) h = Math.min(h, L.bed); else { const k = (d - 1) * Math.min(L.rx, L.ry) / L.rim; if (k < 1) h = L.bed + (h - L.bed) * smooth(k); }
+    for (let i = 0; i < rock.length; i++) { const v = terraceH(rock[i], x, y); if (v > h) h = v; }
+    return h;
+  };
   const slope = (x, y) => { const e = .5; return Math.hypot(F.height(x + e, y) - F.height(x - e, y), F.height(x, y + e) - F.height(x, y - e)) / (2 * e); };
-  F.shapes.push({type: 'field', reach: [RECT.x0 - 30, RECT.y0 - 30, RECT.x1 + 30, RECT.y1], fn: reliefH}, ...hills,
-    {type: 'basin', x: L.x, y: L.y, rx: L.rx + .3, ry: L.ry + .3, h: L.bed, rim: T.lake.rim});
+  F.shapes.push({type: 'field', reach: [RECT.x0 - 30, RECT.y0 - 30, RECT.x1 + 30, RECT.y1], fn: (x, y) => reliefH(x, y) + eskerH(x, y)}, ...hills,
+    {type: 'basin', x: L.x, y: L.y, rx: L.rx + .3, ry: L.ry + .3, h: L.bed, rim: L.rim});
 
   // a watercourse from (x, y) toward (tx, ty): each step mostly toward it, downhill where the ground falls, wandering (the seed's
   // phase and a noise field), until done(x, y) -> [[x, y], ...] (a point every 3 steps)
@@ -140,13 +192,129 @@ export function forestPlan(seed) {
     if (_q.d - _q.hw < d) { out.d = _q.d; out.a = _q.a; out.l = _q.l; out.hw = _q.hw; out.i = _q.i; out.k = 1; return b; }
     out.k = 0; return false;
   };
+  const courseD = (x, y) => { F.at(x, y, _o); return _o.d - _o.hw; };   // m to the stream's or the outflow's water (1e9 far from both)
+  const lakeM = (x, y) => -F.lakeEdge(x, y);                              // m to the lake's water (< 0 in it)
+
+  // ---- CLEARING: the flattest spot round the lake's shore, clear of the streams (the settlement's)
+  {
+    const C = T.clearing; let best = null;
+    for (let k = 0; k < 24; k++) {
+      const a = k / 24 * Math.PI * 2, x = L.x + Math.cos(a) * (L.rx + C.off + C.r * .7), y = L.y + Math.sin(a) * (L.ry + C.off + C.r * .7);
+      if (x < RECT.x0 + C.r + 3 || x > RECT.x1 - C.r - 3 || y < RECT.y0 + C.r + 3 || y > RECT.y1 - C.r - 2) continue;
+      let lo = 1e9, hi = -1e9; for (let j = 0; j < 9; j++) { const b = j * Math.PI / 4, q = j ? C.r * .8 : 0, h = F.height(x + Math.cos(b) * q, y + Math.sin(b) * q); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+      const score = hi - lo + (courseD(x, y) < C.r + 1.5 ? 10 : 0) + (crestD(x, y) < C.r + 3 ? 10 : 0) + R() * .05;
+      if (!best || score < best.score) best = {x, y, score};
+    }
+    F.clearing = {x: +best.x.toFixed(2), y: +best.y.toFixed(2), r: C.r};
+  }
+  const CL = F.clearing, clearD = (x, y) => Math.hypot(x - CL.x, y - CL.y) - CL.r;
+  // ---- OUTCROPS (roches moutonnees) and BLOCKS (big boulders): small terraces with rock; the ice made the gentle side and the cliff
+  F.outcrops = [];
+  const room = (x, y, r) => lakeM(x, y) > r + 3.5 && courseD(x, y) > r + 3 && clearD(x, y) > r + 2 && crestD(x, y) > r + T.esker.w * .6 &&
+    !F.outcrops.some(o => Math.hypot(o.x - x, o.y - y) < o.r + r + 2.5) && x > RECT.x0 + r + 6 && x < RECT.x1 - r - 6 && y > RECT.y0 + r + 6 && y < ySouth - r - 1;
+  const keep = (o, ctl, banks) => {
+    const pts = ctl.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]);
+    o.ctl = pts.map((p, i) => [p[0], p[1], banks[i]]); o.h = +o.h.toFixed(3);
+    rock.push({h: o.h, pts, banks, box: boxOf(pts, Math.max(...banks))}); F.outcrops.push(o);
+  };
+  {
+    const O = T.outcrop, want = O.n[0] + Math.floor(R() * (O.n[1] - O.n[0] + 1));
+    for (let t = 0, n = 0; t < 90 && n < want; t++) {
+      const a = (O.len[0] + R() * (O.len[1] - O.len[0])) / 2, b = (O.wid[0] + R() * (O.wid[1] - O.wid[0])) / 2, rise = O.rise[0] + R() * (O.rise[1] - O.rise[0]);
+      const x = RECT.x0 + R() * (RECT.x1 - RECT.x0), y = RECT.y0 + R() * (RECT.y1 - RECT.y0), jit = []; for (let j = 0; j < 9; j++) jit.push(R());
+      if (!room(x, y, a) || slope(x, y) > .35) continue;
+      const h = F.height(x, y) + rise, ctl = [], banks = [], bank = Math.max(2.6, 1.55 * h / .62);   // (the gentle side: walkable up to its top)
+      for (let j = 0; j < 9; j++) {
+        const f = j / 9 * Math.PI * 2, k = 1 + (jit[j] - .5) * .3, lx = Math.cos(f) * a * k, ly = Math.sin(f) * b * k;
+        ctl.push([x + lx * ux - ly * uy, y + lx * uy + ly * ux]); banks.push(Math.cos(f) > -.15 ? .12 : +bank.toFixed(2));   // (the lee side, where the ice plucked it: a cliff)
+      }
+      if (ctl.some(([px, py], j) => banks[j] < 1 && h - F.height(px, py) < .7)) continue;   // (its cliff must show all along)
+      keep({kind: 'outcrop', x: +x.toFixed(2), y: +y.toFixed(2), r: a, h}, ctl, banks); n++;
+    }
+    const B = T.block, wantB = B.n[0] + Math.floor(R() * (B.n[1] - B.n[0] + 1));
+    for (let t = 0, n = 0; t < 90 && n < wantB; t++) {
+      const r = B.r[0] + R() * (B.r[1] - B.r[0]), rise = B.rise[0] + R() * (B.rise[1] - B.rise[0]), a0 = R() * Math.PI;
+      const x = RECT.x0 + R() * (RECT.x1 - RECT.x0), y = RECT.y0 + R() * (RECT.y1 - RECT.y0), jit = []; for (let j = 0; j < 7; j++) jit.push(R());
+      if (!room(x, y, r) || slope(x, y) > .3) continue;
+      const ctl = []; let g = F.height(x, y);
+      for (let j = 0; j < 7; j++) { const f = a0 + j / 7 * Math.PI * 2, k = 1 + (jit[j] - .5) * .5, px = x + Math.cos(f) * r * k, py = y + Math.sin(f) * r * .8 * k; ctl.push([px, py]); g = Math.max(g, F.height(px, py)); }
+      keep({kind: 'block', x: +x.toFixed(2), y: +y.toFixed(2), r, h: g + rise}, ctl, ctl.map(() => .12)); n++;
+    }
+  }
+  const inRock = (x, y, m) => F.outcrops.some(o => o.kind === 'block' && Math.hypot(o.x - x, o.y - y) < o.r * 1.25 + m);
+  // ---- BOULDERS: a field of them in the deepest hollow the seed's candidates find
+  {
+    const B = T.boulders; let best = null;
+    for (let t = 0; t < 30; t++) {
+      const r = B.r[0] + R() * (B.r[1] - B.r[0]), x = RECT.x0 + R() * (RECT.x1 - RECT.x0), y = RECT.y0 + R() * (RECT.y1 - RECT.y0);
+      if (!room(x, y, r)) continue;
+      let ring = 0; for (let j = 0; j < 8; j++) ring += F.height(x + Math.cos(j * Math.PI / 4) * (r + 3), y + Math.sin(j * Math.PI / 4) * (r + 3));
+      const score = F.height(x, y) - ring / 8 + slope(x, y) * 2;
+      if (!best || score < best.score) best = {x, y, r, score};
+    }
+    F.boulders = best ? {x: +best.x.toFixed(2), y: +best.y.toFixed(2), r: +best.r.toFixed(2)} : null;
+  }
+  const BF = F.boulders;
 
   // ---- GROWTH, chunk by chunk
   const C0x = Math.floor(RECT.x0 / CHUNK), C1x = Math.ceil(RECT.x1 / CHUNK), C0y = Math.floor(RECT.y0 / CHUNK), C1y = Math.ceil(RECT.y1 / CHUNK);
   F.chunks = [];
-  for (let cy = C0y; cy < C1y; cy++) for (let cx = C0x; cx < C1x; cx++) { F.chunks.push([cx, cy]); grow(F, cx, cy, S, slope); }
+  const keepOut = {clearD, crestD, inRock, eskerH, boulders: BF};
+  for (let cy = C0y; cy < C1y; cy++) for (let cx = C0x; cx < C1x; cx++) { F.chunks.push([cx, cy]); grow(F, cx, cy, S, slope, keepOut); }
+  // the boulder field's rocks (a global feature: their own generator; each in the chunk it lies in)
+  if (BF) {
+    const Rb = rng(mix(seed, 3)), n = T.boulders.n[0] + Math.floor(Rb() * (T.boulders.n[1] - T.boulders.n[0] + 1)), at = [];
+    for (let t = 0; t < n * 4 && at.length < n; t++) {
+      const a = Rb() * Math.PI * 2, q = Math.sqrt(Rb()) * BF.r, x = BF.x + Math.cos(a) * q, y = BF.y + Math.sin(a) * q, big = Rb() < .4, v = Rb() * 3 | 0;
+      if (at.some(([px, py, pb]) => Math.hypot(px - x, py - y) < (big || pb ? 1.5 : .8)) || slope(x, y) > .55) continue;
+      const ci = F.chunks.findIndex(([a2, b2]) => a2 === Math.floor(x / CHUNK) && b2 === Math.floor(y / CHUNK)); if (ci < 0) continue;
+      at.push([x, y, big]); F.props.push([big ? 'rock_big' : 'rock', +x.toFixed(2), +y.toFixed(2), {r: big ? .75 : 0, variant: v, chunk: ci}]);
+    }
+  }
   plans.set(seed, F);
   return F;
+}
+
+// a terrace's height at a point as terrain.js evaluates it (a bank per point, interpolated along each edge): h inside, falling
+// to 0 over the bank outside (the ground wins where it is higher). For placement's slope and height tests here
+const boxOf = (pts, m) => { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return [x0 - m, y0 - m, x1 + m, y1 + m]; };
+function terraceH(t, x, y) {
+  const b0 = t.box; if (x < b0[0] || y < b0[1] || x > b0[2] || y > b0[3]) return 0;
+  const P = t.pts, n = P.length; let d = 1e9, e = 0, f = 0, inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const [ax, ay] = P[j], [bx, by] = P[i], vx = bx - ax, vy = by - ay, u = clamp(((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1), 0, 1), q = Math.hypot(x - ax - vx * u, y - ay - vy * u);
+    if (q < d) { d = q; e = j; f = u; }
+    if ((ay > y) !== (by > y) && x < vx * (y - ay) / vy + ax) inside = !inside;
+  }
+  if (inside) return t.h;
+  const b = Math.max(.02, t.banks[e] + (t.banks[(e + 1) % n] - t.banks[e]) * f);
+  return d < b ? t.h * (1 - smooth(d / b)) : 0;
+}
+// a ridge along a course: a flat crest crest m either side, falling (raised cosine) to the ground over w m; tapering to nothing over
+// its ends' first `taper` of its length; its height wanders a little along it. -> (x, y) => m, with .dist(x, y) (m to its line,
+// 1e9 far from it) and .h. The nearest of its samples (every .5 m) from a 2 m cell index
+function ridge(C, H, crest, w, taper, S) {
+  const reach = crest + w, xs = [], ys = [], ts = [];
+  for (let i = 0; i < C.n; i += 5) { xs.push(C.px[i]); ys.push(C.py[i]); ts.push(C.len[i] / C.total); }
+  const G = 2, x0 = Math.min(...xs) - reach - G, y0 = Math.min(...ys) - reach - G, gw = Math.ceil((Math.max(...xs) + reach + G - x0) / G), gh = Math.ceil((Math.max(...ys) + reach + G - y0) / G);
+  const cells = Array.from({length: gw * gh}, () => []), R2 = reach + G * .75;
+  for (let k = 0; k < xs.length; k++) for (let j = Math.max(0, Math.floor((ys[k] - R2 - y0) / G)); j <= Math.min(gh - 1, Math.floor((ys[k] + R2 - y0) / G)); j++)
+    for (let i = Math.max(0, Math.floor((xs[k] - R2 - x0) / G)); i <= Math.min(gw - 1, Math.floor((xs[k] + R2 - x0) / G)); i++)
+      if (Math.hypot(x0 + (i + .5) * G - xs[k], y0 + (j + .5) * G - ys[k]) < R2) cells[j * gw + i].push(k);
+  let qt = 0;
+  const dist = (x, y) => {
+    const i = Math.floor((x - x0) / G), j = Math.floor((y - y0) / G); if (i < 0 || j < 0 || i >= gw || j >= gh) return 1e9;
+    const c = cells[j * gw + i]; let bd = 1e18;
+    for (let m = 0; m < c.length; m++) { const k = c[m], dx = x - xs[k], dy = y - ys[k], d = dx * dx + dy * dy; if (d < bd) { bd = d; qt = ts[k]; } }
+    return c.length ? Math.sqrt(bd) : 1e9;
+  };
+  const fn = (x, y) => {
+    const d = dist(x, y); if (d >= reach) return 0;
+    const prof = d <= crest ? 1 : .5 * (1 + Math.cos(Math.PI * (d - crest) / w));
+    return H * (.88 + .24 * vnoise(qt * 6, 2.5, S + 11)) * smooth(Math.min(qt, 1 - qt) / taper) * prof;
+  };
+  fn.dist = dist; fn.h = H;
+  return fn;
 }
 
 // m from (x, y) to the stream's water (< 0 in it), the lake's (< 0 in it): the nearer
@@ -156,16 +324,17 @@ function waterD(F, x, y) { F.at(x, y, _o); return Math.min(_o.d - _o.hw, -F.lake
 
 // one chunk's trees, undergrowth and rocks (its own generator: mix(seed, cx, cy))
 const DECID = [['oak', .45], ['birch', .2], ['aspen', .14], ['rowan', .15], ['dead', .06]];
-function grow(F, cx, cy, S, slope) {
+function grow(F, cx, cy, S, slope, K) {
   const ci = F.chunks.length - 1, T = TUNE, R = rng(mix(F.seed, 1000 + cx, 1000 + cy)), x0 = cx * CHUNK, y0 = cy * CHUNK, out = F.props;
   const inside = (x, y, m) => x > RECT.x0 + m && x < RECT.x1 - m && y > RECT.y0 + m && y < RECT.y1 - T.trees.south;
   const dens = (x, y) => smooth((vnoise(x / 15, y / 15, S + 3) * .75 + vnoise(x / 6, y / 6, S + 4) * .25 - .28) / .5);   // thickets and clearings
-  const conifer = (x, y) => vnoise(x / 34, y / 34, S + 5) * .8 + F.height(x, y) / 3 * .35 > .55;
+  const conifer = (x, y) => vnoise(x / 34, y / 34, S + 5) * .8 + F.height(x, y) / 4 * .35 + K.eskerH(x, y) * .1 > .55;   // (pines on the high, dry ground and the esker)
+  const inField = (x, y, m) => K.boulders !== null && Math.hypot(x - K.boulders.x, y - K.boulders.y) < K.boulders.r + m;
   // TREES
   const tc = T.trees.cell, nt = Math.round(CHUNK / tc), trees = [];
   for (let j = 0; j < nt; j++) for (let i = 0; i < nt; i++) {
     const x = x0 + (i + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, y = y0 + (j + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, roll = R(), pick = R(), sc = R(), v = R();
-    if (!inside(x, y, T.trees.edge)) continue;
+    if (!inside(x, y, T.trees.edge) || K.clearD(x, y) < 0 || K.crestD(x, y) < .6 || K.inRock(x, y, .8) || inField(x, y, .5)) continue;   // (the clearing, the esker's path, a block, the boulders)
     const wd = waterD(F, x, y); if (wd < T.trees.water || slope(x, y) > T.trees.slope) continue;
     if (roll > T.trees.base + T.trees.dense * dens(x, y)) continue;
     let species;
@@ -180,20 +349,21 @@ function grow(F, cx, cy, S, slope) {
   const uc = T.under.cell, nu = Math.round(CHUNK / uc);
   for (let j = 0; j < nu; j++) for (let i = 0; i < nu; i++) {
     const x = x0 + (i + .5 + (R() - .5) * 2 * T.under.jitter) * uc, y = y0 + (j + .5 + (R() - .5) * 2 * T.under.jitter) * uc, roll = R(), pick = R(), v = R() * 3 | 0;
-    if (!inside(x, y, 1.2)) continue;
+    if (!inside(x, y, 1.2) || K.inRock(x, y, .2) || inField(x, y, 0)) continue;
     const wd = waterD(F, x, y);
     if (wd > -.05 && wd < .55) { if (roll < .75) out.push(['reed', +x.toFixed(2), +y.toFixed(2), {r: 0, variant: v, chunk: ci}]); continue; }
     if (wd < .7 || slope(x, y) > .6) continue;
     const d = dens(x, y);
     if (roll > T.under.p * (.45 + d)) continue;
     const kind = d > .45 ? (pick < .55 ? 'fern' : 'bush') : (pick < .7 ? 'tuft' : pick < .9 ? 'bush' : 'fern');
+    if (kind !== 'tuft' && K.clearD(x, y) < 0) continue;   // (only grass in the clearing)
     if (trees.some(t => Math.hypot(t[1] - x, t[2] - y) < .7)) continue;   // (not in a trunk)
     out.push([kind, +x.toFixed(2), +y.toFixed(2), {r: 0, variant: v, chunk: ci}]);
   }
   // ROCKS: a boulder or two on the slopes (solid), stones about
   for (let k = 0; k < T.rocks.big + T.rocks.small; k++) {
     const big = k < T.rocks.big, x = x0 + R() * CHUNK, y = y0 + R() * CHUNK, roll = R(), v = R() * 3 | 0;
-    if (!inside(x, y, 2) || waterD(F, x, y) < (big ? 1.6 : .4)) continue;
+    if (!inside(x, y, 2) || waterD(F, x, y) < (big ? 1.6 : .4) || K.clearD(x, y) < 1 || K.inRock(x, y, .5)) continue;
     if (big ? roll > .25 + slope(x, y) * 1.2 : roll > .55) continue;
     if (trees.some(t => Math.hypot(t[1] - x, t[2] - y) < (big ? 1.6 : .8))) continue;
     out.push([big ? 'rock_big' : 'rock', +x.toFixed(2), +y.toFixed(2), {r: big ? .75 : 0, variant: v, chunk: ci}]);

@@ -1,6 +1,6 @@
 # The forest: a seeded place north of the Proving Grounds
 
-Status: 2026-10-11, first slice (`world/forest.js`). Off by default; on with a seed: `?seed=1234`, `?forest=1` (seed 1337), or
+Status: 2026-10-12, second slice: the home woods' ground (landforms below). First slice 2026-10-11 (`world/forest.js`). Off by default; on with a seed: `?seed=1234`, `?forest=1` (seed 1337), or
 any co-op session (the server's seed: docs/MULTIPLAYER.md). `?forest=0` keeps it off. It needs walkable terrain (`?terrain=0`:
 no forest).
 
@@ -10,8 +10,9 @@ no forest).
   than the rest of the world together. The world grows north to it (`WORLD.y0` = -64); the old north bank, the West Downs' north
   bank and the highland behind the mesa give way to it; a bank of its own frames its north and west edges. You walk in from the
   strip north of the arena (its north gate), from the West Downs and from the trail.
-- **Ground.** Rolling relief (value noise, up to ~2.4 m, faded flat over its southern 12 m so it meets the Proving Grounds level)
-  and two to four broad hills, all walkable. A 'field' terrain shape (world/terrain.js) carries the relief: `elev`, `steep`, the
+- **Ground.** Rolling relief (value noise, up to ~3.2 m, faded flat over its southern 12 m so it meets the Proving Grounds level,
+  held low along the lake's way out to the river) and up to three rounded hills (3.8 .. 5.8 m), all walkable; the landforms
+  below on top. A 'field' terrain shape (world/terrain.js) carries the relief: `elev`, `steep`, the
   ground mesh, the shadows and everything standing on it follow the one height field as before.
 - **Water.** A LAKE in the lowest hollow the seed's candidates find (deep: falling in is a respawn), a STREAM from a spring on the
   high ground in the north down to it, wandering downhill, and an OUTFLOW from the lake down to the Proving Grounds' river where it
@@ -29,6 +30,33 @@ no forest).
   trunks, roots round each trunk, twigs; the streams and the lake with banks, a damp lush band, the spring in a ring of stones.
   Other biomes have no forest painter: their own trees on the open land's stand-in ground (the lake is then invisible deep water,
   as the brook's pool is there).
+
+## Landforms: the home woods (2026-10-12)
+
+The starting area is modelled on Småland (never named so): ground the ice shaped and left strewn with stone, spruce, pine and
+birch on it, small lakes. All from the seed, in this order (`forestPlan`):
+
+- **ICE.** One direction the ice flowed, from the north-west give or take (`F.ice`). The esker runs along it and the outcrops face
+  it, so the landforms line up the way they do in a real moraine landscape.
+- **ESKER.** One long winding gravel ridge (2.2 .. 2.8 m high, 36 .. 64 m long, ~8.5 m wide, a flat 1.2 m crest kept clear of
+  trees: a natural path along its top; the ends taper into the ground). Part of the 'field' shape; it keeps off the lake and its
+  outflow (`F.esker`: its control points and height). Conifers favour it.
+- **HILLS.** Placed after the esker and kept off its crest; each at least 2.8 x its height across, so its slopes stay walkable.
+- **CLEARING.** The flattest spot of 24 on the lake's shore, away from the streams and the esker: r 7 m, only grass grows there
+  (`F.clearing`, kept for the settlement by the water).
+- **OUTCROPS.** 3 .. 6 bedrock humps (roches moutonnées): an ellipse stretched along the ice, a gentle slope up from the side the ice
+  came from, a 1.1 .. 2.3 m rock cliff on the lee side. Rejected where the cliff wouldn't drop at least .7 m all along.
+- **BLOCKS.** 3 .. 6 big lone boulders (1.1 .. 1.9 m across, 1.5 .. 2.8 m tall), rock on every side.
+- **BOULDER FIELD.** In the deepest hollow of 30 candidates (r 4 .. 5.5 m): 10 .. 16 rocks lying close, no trees. Some seeds find
+  no hollow for it.
+
+Outcrops and blocks are `F.outcrops` (`{kind, x, y, r, h, ctl: [[x, y, bank], ...]}`): layout.js makes each a terrace with rock
+where it drops (`mesaOutline`, the ledges' way), so world.js draws them with the cliff rock (cliffs3d.js) and collision walks them
+as any terrace. The forest's own height (`F.height`, for placement) mirrors terrain.js's terrace sum (`terraceH`).
+
+Node-only check (10 seeds, `forestPlan` + `createField`, 2026-10-12): every seed has an esker, 3 .. 6 outcrops and 3 .. 6 blocks;
+max height 5.1 .. 8.5 m; steep cells off the cliffs .04 .. .86% (esker ends, outflow banks); plan 12 .. 80 ms, field bake 150 ..
+680 ms. Not yet seen in the game, benched or run through golden / smoke / simview (the sprite assets aren't in the repo).
 
 ## Chunk-friendly
 

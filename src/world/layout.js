@@ -284,6 +284,8 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   ...WEST_HILLS,
   ...STONE_TERRAIN,   // the standing stones' hill on the south-west (stonecircle.js; ?stones=0: westland.js's dome)
   ...(FOREST ? FOREST.shapes : []),   // the forest's relief, hills and the lake's basin (world/forest.js; its stream's cut is laid below)
+  // the forest's outcrops and big boulders (forest.js OUTCROPS): terraces with rock where they drop, the ledges' way (mesaOutline)
+  ...(FOREST ? FOREST.outcrops.map(o => { const M = mesaOutline(o.ctl); return {type: 'terrace', pts: M.pts, drawn: {pts: M.ground}, banks: M.banks, h: o.h, rock: true, cliffs: M.cliffs}; }) : []),
 ];
 // PADS: things built at a fixed height that the ground must meet (features place them at 0): [x, y, r (held flat), fade]
 const PADS = [[50.8, 19.4, 1.5, 1.2],   // the campfire and its woodpile (features/lights.js)
