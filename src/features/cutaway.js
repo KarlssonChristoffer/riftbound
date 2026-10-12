@@ -51,11 +51,12 @@ export async function create(host) {
     return hit ? 1 : 0;
   }
   // (the looks are asked every few frames, not every one: host.elev allocates a little per call, the answers change slowly)
-  let c = 0, tick = 0, out = WELL;
+  let c = 0, tick = 0, out = WELL, caves = null;
   F.frame = f => {
     if (!G.setCut) return;
     const p = host.player, dt = Math.min(.1, f?.dt || 1 / 60), t = tick++;
-    if (t % 3 === 0) c = cover(p.x, p.y, p.z || 0, (p.z || 0) + H * .55);
+    caves ??= host.feature('caves') || false;
+    if (t % 3 === 0) c = caves && caves.under > .5 ? 0 : cover(p.x, p.y, p.z || 0, (p.z || 0) + H * .55);   // (underground: features/caves.js; the cave's walls in front of him aren't drawn)
     if (c && c !== F.mode) { if (F.open > 0 && F.mode) F.open = Math.min(F.open, .2); F.mode = c; if (c === 1) out = OUT; }   // (a new shape opens from small)
     if (c === 1) out += (OUT - out) * Math.min(1, dt * 4);
     F.open += ((c ? 1 : 0) - F.open) * Math.min(1, dt * EASE);

@@ -208,6 +208,7 @@ const host = {
   get biomeI() { return stage.biomeI; }, get timeI() { return TIMES.indexOf(env.bucket); },
   setBiome: i => setBiome(i), setTime: i => env.setPart(TIMES[i]), setYaw: a => setYaw(a),
   teleport: (x, y) => pa.teleport(x, y),   // put the player at world (x, y), standing, and snap the camera there
+  warp: (dx, dy) => pa.shift(dx, dy),      // move the player by (dx, dy) world m as he is (moving, mid-jump), the camera with him (features/caves.js)
   // the Ranger as drawn this frame (sprite + runtime cloak + pixel bow, and its normals), for afterimages / reflections.
   // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame. Their
   // size is img.width / img.height; h is the player's height above the ground (metres), like every host h.

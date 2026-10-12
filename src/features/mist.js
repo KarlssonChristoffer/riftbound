@@ -164,7 +164,7 @@ export async function create(host) {
       }
     };
     pass(H, A, 1, 0, true); pass(A, B, 0, 1, true); pass(B, A, 1, 0, false); pass(A, B, 0, 1, false);
-    const data = new Float32Array(n * 4);
+    const data = new Float32Array(n * 4), cave = host.world.cave, CQ = [0, 0, 0];   // (the cave, world/caves.js: no mist pools in its mouth or below)
     for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
       const k = j * w + i, x = x0 + i * res, y = z0 + j * res;
       let near = 0, wh = -9;   // the nearest water stretch (the West Downs' hollow stretches left out: they are pools now)
@@ -174,7 +174,8 @@ export async function create(host) {
         const t = clamp((px * bx + pz * bz) / Math.max(bx * bx + bz * bz, 1e-4), 0, 1), d = Math.hypot(px - bx * t, pz - bz * t) - SEG[q + 4];
         const f = 1 - smooth(clamp(d / V.reach, 0, 1)); if (f > near) { near = f; wh = SEG[q + 5]; }
       }
-      data[k * 4] = H[k]; data[k * 4 + 1] = Math.max(0, B[k] - H[k]); data[k * 4 + 2] = near; data[k * 4 + 3] = wh;
+      const dry = !!cave && (cave.inBand(x, y) || cave.slotAt(x, y, CQ)[2] === 1);
+      data[k * 4] = H[k]; data[k * 4 + 1] = dry ? 0 : Math.max(0, B[k] - H[k]); data[k * 4 + 2] = near; data[k * 4 + 3] = wh;
     }
     G.mistField({x0, z0, w, h, res, data});
   }
@@ -252,7 +253,7 @@ export async function create(host) {
     const pl = c[0] * .3 + c[1] * .55 + c[2] * .15, pk = C.pale * smooth(clamp((pl - C.dim[0]) / (C.dim[1] - C.dim[0]), 0, 1));
     for (let j = 0; j < 3; j++) c[j] = Math.min(1, lerp(c[j], pl * C.lift * C.white[j], pk));
   }
-  let dx = 0, dz = 0;   // the drift (m), stepped to world texels when it is sent
+  let dx = 0, dz = 0, caves = null;   // the drift (m), stepped to world texels when it is sent; caves: features/caves.js (under)
   // the mist's numbers now (into O): the clock, the weather, the biome
   function compute() {
     const E = host.env, B = TUNE.biome[host.biome.id] || TUNE.biome.ruins, S = E.sky, K = TUNE.sky;
@@ -289,8 +290,12 @@ export async function create(host) {
     if (w?.at && dt > 0) { w.at(T.x, T.z, WV); dx += WV.x * TUNE.drift * dt; dz += WV.y * TUNE.drift * dt; if (Math.abs(dx) > 4e3 || Math.abs(dz) > 4e3) dx = dz = 0; }
     const R = host.PPM, f = O.freq;
     O.drift[0] = -Math.round(dx * R) / R * f; O.drift[1] = -Math.round(dz * R) / R * f;
+    caves ??= host.feature('caves') || false;
+    const open = caves ? 1 - caves.under : 1;   // (underground, features/caves.js: no mist in the cave)
+    if (open < 1) { O.alpha *= open; O.water *= open; F.medium = O.medium *= open; }
     if (VOL) {   // the volume: its numbers, the drift in the noise's units (whole world texels), the wind's way; the old sheet's veil off
       computeVol(dt, sd);
+      if (open < 1) { OV.film *= open; OV.fill *= open; OV.water *= open; if (OV.under) { OU.film *= open; OU.fill *= open; OU.water *= open; } F.medium = O.medium *= open; }
       // (the drift in whole world texels, into the noise's frame: along the wisps / stretch, across them)
       const V = TUNE.vol, wl = Math.hypot(V.wisp[0], V.wisp[1]) || 1, wx = V.wisp[0] / wl, wz = V.wisp[1] / wl, ex = Math.round(dx * R) / R, ez = Math.round(dz * R) / R;
       OV.wind[0] = wx; OV.wind[1] = wz;

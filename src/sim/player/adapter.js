@@ -326,6 +326,18 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     Object.assign(P, {x: vx, y: vy, z: elev(x, y), vx: 0, vy: 0, state: 'idle', t: 0, sink: 0, leap: null, hold: null});
     cv.snap(); snap();
   }
+  // SHIFT him by (dx, dy) world metres as he is: moving, mid-stride, mid-jump (features/caves.js: from the cave's mouth in the woods
+  // to its copy over the cave, the same ground at the same height); the camera, the draw's last place and the unstick's last free
+  // spot go with him, so nothing on screen jumps but the world round him
+  function shift(dx, dy) {
+    const [a, b] = toView(dx, dy); P.x += a; P.y += b;
+    if (P.leap) { P.leap.x0 += a; P.leap.y0 += b; }
+    if (P.vault) { P.vault.x0 += a; P.vault.y0 += b; }
+    if (l0 === l0) { l0 += dx; l1 += dy; }
+    if (US.sx === US.sx) { US.sx += dx; US.sy += dy; }
+    if (US.tx === US.tx) { US.tx += dx; US.ty += dy; }
+    cv.shift(dx, dy);
+  }
   // DRAWING BETWEEN SIM STEPS (core/loop.js, the fixed step): snap() at each step's start notes where he was, in the
   // WORLD (a camera turn between steps doesn't move him there); lerpBegin(alpha) puts P alpha of the way to where he is
   // now, in the current view frame, for the draw; lerpEnd() puts the true P back
@@ -338,7 +350,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     const [vx, vy] = toView(l0 + (x - l0) * k, l1 + (y - l1) * k); P.x = vx; P.y = vy; P.z = l2 + (z - l2) * k;
   }
   function lerpEnd() { if (!lerping) return; P.x = c0; P.y = c1; P.z = c2; lerping = false; }
-  return {PL, P, player, blocked, syncPlateaus, turnFrame, hold, release, toWorldEvent, hoverTarget, nearProp, climbSpotW, climbAssist, stepAssist, teleport, snap, lerpBegin, lerpEnd,
+  return {PL, P, player, blocked, syncPlateaus, turnFrame, hold, release, toWorldEvent, hoverTarget, nearProp, climbSpotW, climbAssist, stepAssist, teleport, shift, snap, lerpBegin, lerpEnd,
     unstick, get unstuck() { return US.n; },   // (the loop: after each player step; the tools: how often it got him out)
     tick() { hoverKey++; }, get assist() { return A.assist; }, set assist(v) { A.assist = v; },
     // (views) the part of a facing step the camera has turned since P.face last moved with it (turnFrame's remainder):

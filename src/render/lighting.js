@@ -25,6 +25,11 @@ import {flags} from '../core/flags.js';
 const GRADE = {ruins: [1.039, 1.029, .818], ember: [1.166, .958, .82], frost: [.896, 1.013, 1.161], rift: [1.056, .792, 1.649], desert: [1.09, 1.0, .84]};
 const BG = {ruins: [.10, .13, .11], ember: [.11, .06, .05], frost: [.10, .12, .17], rift: [.06, .04, .10], desert: [.15, .10, .07]};
 const HALO_A = .16, HALO_R = .3, LANTERN = {fwd: .22, side: .3, h: .95, c: [1, .76, .48], r: 4.2, k: 1, flicker: .2, id: -7};
+// UNDERGROUND (features/caves.js F.under 0..1: how far the world above has gone dark round him): the mood turns toward the cave's:
+// a faint cold ambient, no sun, no sun shadows, no fog's colour, a black background, a small lift round him (he stays readable);
+// the lights (his lantern, the crystals) do the rest
+const CAVE = {amb: [.03, .032, .042], lift: [.05, .045, .04], fill: .25};
+const mixInto = (a, b, k, o) => { o[0] = a[0] + (b[0] - a[0]) * k; o[1] = a[1] + (b[1] - a[1]) * k; o[2] = a[2] + (b[2] - a[2]) * k; return o; };
 function flick(l, t) {
   const f = l.flicker || 0; if (!f) return 1;
   const s = (l.id ?? 0) * 12.9898 % 6.283, n = .5 * Math.sin(t * 7.3 + s) + .3 * Math.sin(t * 12.7 + s * 2.3) + .2 * Math.sin(t * 23.1 + s * 3.7);
@@ -90,32 +95,36 @@ export function createLighting({G, host, features, opt}) {
     for (let i = 0; i < CHS.length; i++) { const c = CHS[i], w = c === 'wind' ? .3 : 1, a = ((u[c] ?? 0) - (o[c] ?? 0)) * w; n += ((l[c] ?? 0) - (o[c] ?? 0)) * w * a; d += a * a; }
     return d > 1e-9 ? Math.min(1, Math.max(0, n / d)) : 0;
   }
+  let caves = null;   // (features/caves.js, found on the first frame)
+  const AMB = [0, 0, 0], LIFT = [0, 0, 0];
   function apply(PX, PY, t) {
     const env = host.env, world = host.world, P = host.P, player = host.player, VH = host.VH, zoom = host.zoom, PPM = host.PPM;
-    const biome = host.biome.id, time = env.bucket, U = G.compU, sides = env.lightSides ? env.lightSides() : null, two = !!(sides && sides.two);
+    caves ??= features.find(f => f.name === 'caves') || false;
+    const ug = caves ? caves.under : 0, sunK = 1 - ug;   // (UNDERGROUND above)
+    const biome = host.biome.id, time = env.bucket, U = G.compU, sides = env.lightSides ? env.lightSides() : null, two = !!(sides && sides.two) && ug < .01;
     // the clock's blended mood: the open light's while two lights show, else the one (env.light's)
     const m = two ? env.moodFor(biome, sides.open, MO ||= env.blankMood()) : env.mood(biome), mv = two ? env.mood(biome) : m;
-    const amb = m.amb; U.uAmb.value.set(amb[0], amb[1], amb[2]);   // (no spread, no map below: no array a frame)
+    const amb = ug > 0 ? mixInto(m.amb, CAVE.amb, ug, AMB) : m.amb; U.uAmb.value.set(amb[0], amb[1], amb[2]);   // (no spread, no map below: no array a frame)
     const az = m.sun.az * DEG, el = m.sun.el * DEG;
     sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el));
     const sel = Math.max(el, SHADOW_EL_MIN);
     shadowDir.set(Math.sin(az) * Math.cos(sel), Math.sin(sel), -Math.cos(az) * Math.cos(sel));
     G.setSun(sunDir, shadowDir);
-    const sc = m.sun.c || ONE3; U.uSunC.value.set(sc[0], sc[1], sc[2]); U.uSunStr.value = m.sun.el > 2 ? (m.shadow.a > 0 ? 1 : .45) * (m.sun.k ?? .4) * 2.2 : 0;   // armour glints
-    U.uSunK.value = m.sun.k; U.uShadowA.value = m.shadow.a > 0 && m.sun.el > 2 ? m.shadow.a : 0; U.uShadowC.value.set(m.shadow.c[0], m.shadow.c[1], m.shadow.c[2]);
+    const sc = m.sun.c || ONE3; U.uSunC.value.set(sc[0], sc[1], sc[2]); U.uSunStr.value = m.sun.el > 2 ? (m.shadow.a > 0 ? 1 : .45) * (m.sun.k ?? .4) * 2.2 * sunK : 0;   // armour glints
+    U.uSunK.value = m.sun.k * sunK; U.uShadowA.value = m.shadow.a > 0 && m.sun.el > 2 ? m.shadow.a * sunK : 0; U.uShadowC.value.set(m.shadow.c[0], m.shadow.c[1], m.shadow.c[2]);
     const sA = U.uShadowA.value, gap = G.cloudGap ? G.cloudGap() : 1;   // (the cloud shadows take the sun where they lie: the gaps get theirs back, render/clouds.js CLOUD_SUN)
     if (gap !== 1) U.uShadowA.value = Math.min(1, sA * gap);
-    U.uFog.value.set(m.fog[0], m.fog[1], m.fog[2], m.fog[3]);
+    U.uFog.value.set(m.fog[0] * sunK, m.fog[1] * sunK, m.fog[2] * sunK, m.fog[3] * sunK);
     // the god rays: the sun's elevation and colour, the mood's shadow strength (clouds and nightfall in it), the view's cloud (env.light), the mist, wet ground
     if (G.setRays) { RAYS.el = m.sun.el; RAYS.c = sc; RAYS.shadow = sA; RAYS.cloud = env.light.cloud; RAYS.mist = G.mist?.on ? Math.max(env.sky.fog, G.mist.medium) : env.sky.fog; RAYS.wet = env.wet;
-      RAYS.sunView = env.sunView ?? 1 - env.light.cloud * .9; RAYS.broken = env.broken; RAYS.t = t; RAYS.env = env; G.setRays(RAYS); }   // (wx-D)
+      RAYS.sunView = (env.sunView ?? 1 - env.light.cloud * .9) * sunK; RAYS.broken = env.broken; RAYS.t = t; RAYS.env = env; G.setRays(RAYS); }   // (wx-D)
     shade(m.shadow.c, U.uShadowA.value, amb, U.uShadeT.value, U.uShadeL.value, U.uShadeH.value);
     U.uCrest.value.set(SHADE.crest ? 1 : 0, U.uShadowA.value > 0 ? crestRim(m.sun.el) : 0);
-    const la = Math.max(.02, lum(m.amb)), fk = lum(m.fill || [0, 0, 0]) / la * CHAR.fillK;
+    const la = Math.max(.02, lum(m.amb)), fk = lum(m.fill || [0, 0, 0]) / la * CHAR.fillK * (1 + (CAVE.fill - 1) * ug);
     U.uFill.value.set(amb[0] * fk, amb[1] * fk, amb[2] * fk); const gr = GRADE[biome]; U.uGrade.value.set(gr[0], gr[1], gr[2]); U.uGradeK.value = CHAR.gradeK[time] ?? 0;
-    const dark = Math.max(0, 1 - lum(m.amb)), darkV = Math.max(0, 1 - lum(mv.amb));   // (darkV: the view's mean, for the halos)
+    const dark = Math.max(0, 1 - lum(amb)), darkV = Math.max(0, 1 - lum(ug > 0 ? amb : mv.amb));   // (darkV: the view's mean, for the halos)
     U.uEmin.value = .1 + .2 * dark;
-    const bg = BG[biome], bk = .35 + .65 * lum(mv.amb); U.uBg.value.set(bg[0] * bk, bg[1] * bk, bg[2] * bk);
+    const bg = BG[biome], bk = (.35 + .65 * lum(mv.amb)) * sunK; U.uBg.value.set(bg[0] * bk, bg[1] * bk, bg[2] * bk);
     // the UNDER light (TWO LIGHTS above): the same numbers from env.under's mood, into the second set; uLt2: on, the view's mean
     // under share (the composite's fallback), the old storm fake (?wxlight=0), the under light's emitter floor
     const L2 = U.uLt2.value;
@@ -131,7 +140,8 @@ export function createLighting({G, host, features, opt}) {
     // lights: the lift (a flat pool at the player in dark scenes), the lantern, features' lights, the nearest world lights.
     // (every record is reused frame to frame: LOUT goes to the shader, CAND holds the candidates, FREC copies features' lights)
     nL = 0;
-    if (m.lift[0] + m.lift[1] + m.lift[2] > 0) putL(PX, P.z + .9, PY, m.lift, 1.7, 1, true);
+    const lift = ug > 0 ? mixInto(m.lift, CAVE.lift, ug, LIFT) : m.lift;
+    if (lift[0] + lift[1] + lift[2] > 0) putL(PX, P.z + .9, PY, lift, 1.7, 1, true);
     if ((opt.lantern || lanternMod > 0) && !host.playerHidden) {   // (photo mode may hide him: his lantern goes with him)
       const a = player.faceAngle, fx = Math.sin(a), fy = Math.cos(a), fk2 = flick(LANTERN, t);
       putL(PX + fx * LANTERN.fwd - fy * LANTERN.side, P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side, LANTERN.c, LANTERN.r * lanternR * (1 + (fk2 - 1) * .15), fk2, false);
