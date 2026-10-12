@@ -12,27 +12,34 @@
 // Pure functions, no imports, no Math.random: the same seed grows the same thing on every machine.
 export const RECIPES = {
   stump: {
-    about: 'A spruce stump: snapped by the wind or rotting soft and hollow; sawn flat only where people cut wood',
+    about: 'A spruce stump: snapped by the wind (split staves of torn wood) or rotting soft and hollow; sawn flat only where people cut wood',
     likes: {ground: 'forest', shade: .5, near: 'spruce or a fallen log (style 2, sawn: by the settlement and its woodpiles)', cluster: [1, 1]},
     // style: -1 the woods' own (snapped or rotten, by seed), 0 snapped by the wind, 1 rotten, 2 sawn by people
     params: {r: [.32, .18, .5], h: [.45, .15, 1], roots: [5, 3, 8], style: [-1, -1, 2], fungus: [.4, 0, 1]},
     build(b, p, r) {
       const style = p.style >= 0 ? p.style : r.chance(.5) ? 0 : 1, rot = style === 1;
-      const h = rot ? p.h * .7 : style === 0 ? p.h * 1.2 : p.h, lx = r.range(-.03, .03), lz = r.range(-.03, .03), top = [lx, h, lz];
-      b.tube(rot && r.chance(.4) ? 'deadwood' : 'bark', [0, -.05, 0], rot ? [lx, h * .72, lz] : top, p.r * (rot ? 1.14 : 1.08), p.r * (rot ? 1.02 : 1), {sides: 9});
+      const h = rot ? p.h * .7 : style === 0 ? p.h * 1.2 : p.h, lx = r.range(-.03, .03), lz = r.range(-.03, .03), top = [lx, h, lz], h0 = h * r.range(.25, .4);   // (h0: where a snapped trunk's split begins)
+      b.tube(rot && r.chance(.4) ? 'deadwood' : 'bark', [0, -.05, 0], rot ? [lx, h * .72, lz] : style === 0 ? [lx, h0, lz] : top, p.r * (rot ? 1.14 : 1.08), p.r * (rot ? 1.02 : 1), {sides: 9});
       if (style === 2) b.disc('sawn', [lx, h - .015, lz], p.r * .9, .03, {sides: 9});
-      else if (style === 0) {   // snapped: the break slants, tall splinters on the side away from where the tree fell, pale wood inside
-        const fa = r.range(0, Math.PI * 2), n = r.int(12, 16);
-        b.disc('rotwood', [lx, h - .035, lz], p.r * .9, .04, {sides: 9});
+      else if (style === 0) {   // snapped: the trunk split into a few staves down to a third of its height, splayed apart, the tallest
+        // on the side away from where the tree fell (fa); bark outside, pale torn wood inside, a dark crack between them
+        const fa = r.range(0, Math.PI * 2), n = r.int(4, 6);
+        b.tube('rotwood', [lx, h0 - .02, lz], [lx, h0 + (h - h0) * .5, lz], p.r * .5, p.r * .4, {sides: 6, fixed: 3});   // (the crack's dark)
         for (let i = 0; i < n; i++) {
-          const a = (i / n + r.range(-.03, .03)) * Math.PI * 2, back = (1 - Math.cos(a - fa)) / 2, rr = p.r * r.range(.55, .92);
-          const x = lx + Math.cos(a) * rr, z = lz + Math.sin(a) * rr, tall = p.r * (.2 + back * back * r.range(1.4, 2.6));
-          b.cone(rr > p.r * .8 && r.chance(.5) ? 'bark' : r.chance(.5) ? 'deadwood' : 'rotwood', [x, h - .03, z],
-            [x + Math.cos(a) * r.range(-.02, .05), h + tall, z + Math.sin(a) * r.range(-.02, .05)], p.r * r.range(.13, .22), {sides: 4});
+          const a = (i / n + r.range(-.04, .04)) * Math.PI * 2, back = (1 - Math.cos(a - fa)) / 2, w = 2 * p.r * Math.sin(Math.PI / n);
+          const H = Math.max(h0 + .06, h * r.range(.55, .8) + back * back * p.r * r.range(.9, 1.8)), lean = r.range(3, 7) + (H - h0) * 14;
+          b.at([lx + Math.cos(a) * p.r * .05, h0, lz + Math.sin(a) * p.r * .05], 90 - a / Math.PI * 180, 1, () => {
+            const m = r.int(2, 3), sw = w / m;   // each stave torn again into narrow strips of their own heights: fibres, not planks
+            for (let j = 0; j < m; j++) {
+              const ox = (j - (m - 1) / 2) * sw, L = Math.max(.05, (H - h0) * r.range(.45, 1)), ln = lean + r.range(-3, 5);
+              b.box('bark', [ox, L / 2, p.r * .86], [sw * .92, L, p.r * .22], [ln, 0, 0]);
+              b.box(r.chance(.3) ? 'deadwood' : 'splinter', [ox, L / 2 - .01, p.r * .55], [sw * .85, L * r.range(.85, 1.08), p.r * .42], [ln, 0, 0], {bias: back > .6 ? 0 : -.1});
+            }
+          });
         }
-        if (r.chance(.6)) {   // a long sliver still hanging on: the hinge where the trunk tore away
-          const a = fa + Math.PI + r.range(-.4, .4), x = lx + Math.cos(a) * p.r * .8, z = lz + Math.sin(a) * p.r * .8;
-          b.at([x, 0, z], 90 - a / Math.PI * 180, 1, () => b.box('deadwood', [0, h + p.r * 1.1, 0], [p.r * .22, p.r * 2.4, p.r * .1], [-10, 0, 0]));
+        for (let i = r.int(2, 4); i > 0; i--) {   // chips of torn wood on the ground
+          const a = fa + r.range(-1, 1), d = p.r * r.range(1.3, 2.4);
+          b.box('splinter', [Math.cos(a) * d, .02, Math.sin(a) * d], [r.range(.08, .2), .03, r.range(.03, .06)], [0, r.range(0, 180), 0]);
         }
       } else {   // rotten: soft and sunk, a dark hollow inside a ragged rim of bark plates, moss and crumbs
         b.disc('rotwood', [lx, h * .72 - .03, lz], p.r * .96, .04, {sides: 9, fixed: 2});   // (fixed: unlit and never mossed, a hole stays dark)
@@ -92,6 +99,69 @@ export const RECIPES = {
         const t = r.range(-.4, .45), a = r.range(-1.4, 1.4) + (r.chance(.5) ? 0 : Math.PI * .5 * r.sign()), x = t * p.len;
         const rr = p.r * (1 - (t + .5) * .18), y = y0 + Math.cos(a) * rr, z = Math.sin(a) * rr, L = r.range(.12, .4);
         b.cone(skin, [x, y, z], [x + r.range(-.08, .08), y + Math.cos(a) * L, z + Math.sin(a) * L], p.r * r.range(.16, .26), {sides: 5});
+      }
+    },
+  },
+
+  windthrow: {
+    about: 'A rotvälta: a spruce the wind tipped over, its root plate torn up on edge, a wall of earth and roots and stones, a pit before it',
+    likes: {ground: 'forest', shade: .4, near: 'spruce on thin soil over rock (shallow roots), boulders', cluster: [1, 1]},
+    params: {R: [1.1, .7, 1.6], len: [4, 2.5, 6], r: [.24, .15, .35], roots: [16, 8, 24], stones: [3, 0, 6], old: [0, 0, 1]},
+    // frame: the root plate stands at x = 0 facing -x (its torn underside, toward the pit), the trunk lies along +x
+    build(b, p, r) {
+      const old = p.old >= .5, R = p.R, cy = R * .78, th = R * .3, tilt = r.range(-.12, .05);
+      // the pit it tore out of: a dark hollow of bare earth on the -x side (water may stand in it)
+      const pz = r.range(-.1, .1);
+      b.ball('soil', [-R * .55, .005, pz], [R * .6, .012, R * .8], {detail: 1, fixed: 3});   // (a flat dark patch reads as the hole from above)
+      for (let i = r.int(5, 8); i > 0; i--) {   // the loose earth thrown up round its far rim
+        const a = r.range(Math.PI * .45, Math.PI * 1.55), c = Math.cos(a), s = Math.sin(a);
+        b.ball('soil', [-R * .55 + c * R * .66, 0, pz + s * R * .86], [R * r.range(.12, .22), R * r.range(.06, .12), R * r.range(.12, .22)], {detail: 0, lump: .3});
+      }
+      // the plate: a thick lumpy slab of earth, nearly on edge, torn ragged at the rim (a few lumps hang off it)
+      b.at([0, cy, 0], 0, 1, () => {
+        b.ball('soil', [0, 0, 0], [th, R, R * r.range(.9, 1.05)], {detail: 2, lump: .18});
+        for (let i = r.int(3, 5); i > 0; i--) {
+          const a = r.range(0, Math.PI * 2), d = R * r.range(.7, .9);
+          b.ball('soil', [r.range(-.05, .05), Math.sin(a) * d, Math.cos(a) * d], [th * .8, R * r.range(.25, .4), R * r.range(.25, .4)], {detail: 1, lump: .25});
+        }
+        b.ball('cover', [th * .35, R * .72, 0], [th * 1.05, R * .36, R * .8], {detail: 1, lump: .2});   // (the forest floor still on its top)
+      });
+      // roots: a tangle over the torn face, curving out from the middle, thick near it, most pressed flat to the earth; a few
+      // torn ends past the rim bend back toward the trunk; thin rootlets fill between them
+      const skinR = old ? 'deadwood' : 'bark', face = -th * .75;
+      for (let i = 0; i < p.roots; i++) {
+        let a = (i / p.roots + r.range(-.05, .05)) * Math.PI * 2;
+        const bend = r.range(-.5, .5), past = r.chance(.25), reach = past ? r.range(1.02, 1.2) : r.range(.55, .92), w0 = p.r * r.range(.32, .5);
+        let pr = R * r.range(.08, .18), prev = [face + .03, cy + Math.sin(a) * pr, Math.cos(a) * pr], w = w0;
+        for (let k = 1; k <= 3; k++) {
+          a += bend / 3; const d = R * reach * k / 3, last = k === 3;
+          const pt = [face - r.range(0, .06) + (last && past ? th * .5 : 0), cy + Math.sin(a) * d - (Math.sin(a) < -.3 ? r.range(0, .08) : 0), Math.cos(a) * d];
+          b.tube(skinR, prev, pt, w, w * .7, {sides: k === 1 ? 5 : 4});
+          prev = pt; w *= .7;
+        }
+      }
+      for (let i = Math.round(p.roots * 1.4); i > 0; i--) {   // rootlets
+        const a = r.range(0, Math.PI * 2), d0 = R * r.range(.2, .7), d1 = d0 + R * r.range(.15, .35), a1 = a + r.range(-.4, .4);
+        b.tube(skinR, [face - .01, cy + Math.sin(a) * d0, Math.cos(a) * d0], [face - r.range(0, .08), cy + Math.sin(a1) * d1, Math.cos(a1) * d1], p.r * .1, p.r * .04, {sides: 3});
+      }
+      for (let i = r.int(2, 4); i > 0; i--) {   // clumps of earth still caught in the roots
+        const a = r.range(0, Math.PI * 2), d = R * r.range(.3, .8);
+        b.ball('soil', [face - .05, cy + Math.sin(a) * d, Math.cos(a) * d], R * r.range(.08, .14), {detail: 0, lump: .3});
+      }
+      for (let i = 0; i < p.stones; i++) {   // stones the roots lifted with them
+        const a = r.range(0, Math.PI * 2), d = R * r.range(.2, .85);
+        b.ball('rock', [face + .02, cy + Math.sin(a) * d, Math.cos(a) * d], R * r.range(.1, .2), {detail: 0, lump: .25});
+      }
+      // the trunk lying away from it, sinking toward its crown end, a few stubs
+      const t0 = [th * .4, cy, 0], t1 = [p.len * .5, p.r * .9 + (cy - p.r) * .25, tilt * p.len * .5], t2 = [p.len, p.r * .8, tilt * p.len];
+      const skin = old ? 'deadwood' : 'bark';
+      b.tube(skin, t0, t1, p.r * 1.15, p.r, {sides: 9, part: 63});
+      b.tube(skin, t1, t2, p.r, p.r * .8, {sides: 9, part: 63});
+      b.tube(old ? 'char' : 'splinter', [t2[0] - .01, t2[1], t2[2]], [t2[0] + .03, t2[1], t2[2]], p.r * .76, p.r * .76, {sides: 9});   // (where the crown broke off)
+      for (let i = r.int(2, 5); i > 0; i--) {
+        const t = r.range(.25, .95), x = t * p.len, y = t < .5 ? cy + (t1[1] - cy) * (t / .5) : t1[1] + (t2[1] - t1[1]) * ((t - .5) / .5), z = tilt * x, a = r.range(-1.3, 1.3);
+        const L = r.range(.15, .45);
+        b.cone(skin, [x, y + Math.cos(a) * p.r * .9, z + Math.sin(a) * p.r * .9], [x + r.range(.02, .12), y + Math.cos(a) * (p.r + L), z + Math.sin(a) * (p.r + L)], p.r * .2, {sides: 5});
       }
     },
   },

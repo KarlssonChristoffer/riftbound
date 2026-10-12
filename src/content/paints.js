@@ -15,6 +15,8 @@ export const PAINTS = {
   lichen:      {all: ['#ccd4b4', '#acb898', '#889474', '#505a44']},                                                       // pale reindeer lichen, crust on rock
   deadwood:    {all: ['#a89e8e', '#898072', '#6a6258', '#3e3934']},                                                       // weathered grey wood, bark long gone
   rotwood:     {all: ['#94704c', '#74543a', '#563c2a', '#32221a']},                                                       // soft brown rot: a hollow stump's inside, crumbs, a fresh break
+  splinter:    {all: ['#f0dcaa', '#d6bc84', '#aa8e5c', '#645034']},                                                       // torn fresh wood: a snapped trunk's staves
+  soil:        {all: ['#86644a', '#664a36', '#4a3628', '#2a1e16']},                                                       // bare earth: an uprooted tree's root plate, its pit
   sawn:        {all: ['#e6c892', '#cca870', '#a08050', '#5c462a']},                                                       // a fresh cut: stump tops, log ends
   eye:         {all: ['#fbfaf4', '#e8e4d8', '#bcb6a8', '#5a5650']},                                                       // the white of an eye
   pupil:       {all: ['#3a3040', '#241c2a', '#16101a', '#08060a']},
