@@ -49,8 +49,9 @@ import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
 import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
-import {TOWER_PLAN, FOREST, HUT} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
-import {sample as forestSample, depth as forestDepth} from './forest.js';
+import {TOWER_PLAN, FOREST, HUT, CAVE} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
+import {sample as forestSample, depth as forestDepth, RECT as FOREST_RECT} from './forest.js';
+import {buildCave} from './cave3d.js';   // the forest's cave: its floor and walls in the band north of the forest (docs/CAVES.md)
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
@@ -625,8 +626,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // seam), its own patch, culled on its own; a tile with water gets its water texture (its stream, lake, outflow: bakeWater over the
   // tile's part of the water's box). A biome without a painter: the open land's stand-in. Chunk-friendly: a tile needs only its place
   const FT = 32, FM = 1, forestTiles = [];
+  let cave = null;   // the forest's cave (cave3d.js: built with the cliffs, below)
   if (FOREST) {
-    const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = WORLD.y0 - RG, fz1 = GROUNDS.y0;
+    const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = FOREST_RECT.y0 - RG, fz1 = GROUNDS.y0;   // (the forest's own north edge: the cave's band past it draws itself, cave3d.js)
     const ctxF = {PPM, ground: groundDrawn(), forest: FOREST, layout};
     for (let z0 = fz0; z0 < fz1 - 1e-6; z0 += FT) for (let x0 = fx0; x0 < fx1 - 1e-6; x0 += FT) {
       const x1 = Math.min(fx1, x0 + FT), z1 = Math.min(fz1, z0 + FT), T = {x0, z0, x1, z1, canvas: null, px: null, cx0: x0 - FM, cz0: z0 - FM};
@@ -897,6 +899,17 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: lo - .05,
           base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 151});
       }
+      // the cave's MOUTH (world/caves.js): rock up both sides of its slot and across its far end, facing in, and the BROW: a face
+      // hanging from the ground over the slot where it goes in under it (the drawn ground runs on over the rest: the overhang)
+      if (CAVE) {
+        const M = CAVE.mouth, hw = M.w / 2, at = (s, q) => [M.x + M.ux * s - M.uy * q, M.y + M.uy * s + M.ux * q];
+        const foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
+        const W = [at(0, -hw), at(M.len * .5, -hw), at(M.len, -hw), at(M.len, hw), at(M.len * .5, hw), at(0, hw)];
+        terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: M.g0 - M.depth - .05,
+          base: 0, relief: .9, talus: false, lip, seed: 171});
+        const B = [at(M.brow, -hw - .1), at(M.brow, hw + .1)], gB = (x, z) => tH(x + M.ux * .3, z + M.uy * .3);
+        terrRuns.push({pts: B, top: gB, bot: (x, z) => gB(x, z) - 1.3, minBot: M.g0 - 1.6, base: 0, relief: .9, talus: false, lip, seed: 173, dark: () => -.2});
+      }
       // the creek's last step (layout.js CASCADES): a low rock rim along the pool's north edge, under the lip (the fall's sheet in its gap)
       if (CASCADES.length) {
         const F = CASCADES.at(-1), y = POOL.clip - .03;
@@ -907,6 +920,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const tg = terrRuns.length ? cliffGeometry(terrRuns, {...o, ladders: [], bridges: BRIDGES.filter(b => !b.stone), stairs}) : null;   // (+ the footbridges, the stone steps; the brook's stone bridge and stones: below)
       if (tg) { const m = G.mesh(tg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); tg.dispose(); }); }
     }
+    if (CAVE && TERRAIN_ON) cave = buildCave({G, THREE, C: CAVE, biome, PPM, fam: famOf, texOf, elev, field: TF, disposers});   // the cave below (cave3d.js)
     const pg = cliffGeometry(plateauRuns, o);
     if (pg) { const m = G.mesh(pg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); pg.dispose(); }); }
     // the ravine: along its edge line (the ground's own steep cells draw only the waterfall: the cliff texture's alpha, above),
@@ -1168,6 +1182,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   }
   function update(yaw) {
     if (litterDirty) bakeNow();
+    cave?.update(yaw);
     clearArray(lights); for (const l of groundL) lights.push(l);
     const k0 = -Math.round(yaw / step);
     if (CV) chunksOnScreen();
@@ -1238,6 +1253,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   litterDirty = true;   // (the first bake: the trees are all here)
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
     setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, floraCount, flora, haveGlb, groundCanvas: gc, westCanvas, trees3d,
+    cave: CAVE,   // the forest's cave's plan (world/caves.js; null: none): features/caves.js
     itemOf: p => byProp.get(p) || null,
     // a forest prop whose chunk is off the view this frame (the last update's: world/forest.js chunks): per-frame passes over the items
     // skip it (features/contact.js)
