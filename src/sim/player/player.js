@@ -48,8 +48,14 @@ export const AIM_H = 1.25;   // arrows fly at chest height
 // down up to SNAP m (a slope walked or rolled down); a bigger drop is a ledge, and he falls
 export const STEP_UP = .3, SNAP = .16;
 export const SPEED = {walk: 1.4, run: 4.6, sprint: 7.2};
-const SPEED0 = {...SPEED};   // the authored speeds; SPEED = these with the modifiers' 'player.speed' notes (H.mods)  // m/s; the clips follow whatever distance is really covered
+export const SPEED0 = {...SPEED};   // the authored speeds; SPEED = these with the modifiers' 'player.speed' notes (H.mods)  // m/s; the clips follow whatever distance is really covered
 export const ACC = {start: 38, sprintUp: 5.5, sprintDown: 8, stop: 30, skid: 13};   // m/s^2
+export const ACC0 = {...ACC};   // the authored rates; ACC = these with the 'player.accel' (setting off, building a sprint) and 'player.decel' (stopping, easing out of a sprint, a skid) notes
+// GAIT: the locomotion clips' stride as the phase advances, x the clip's own per gait (> 1: longer strides, so slower legs at the same
+// speed, the feet sliding a little; the 'player.stride.walk' / '.run' / '.sprint' notes, the drive building into a sprint takes the
+// sprint's), and the speeds (m/s) the gaits change at: the sprint from `sprint`, its drive below `drive`, a skid on letting go above
+// `skid`. They follow the run and sprint speeds (authored: 5.0 / 6.7 / 5.2 between 4.6 and 7.2). dev/movefeel.js tunes them live
+export const GAIT = {stride: {walk: 1, run: 1, drive: 1, sprint: 1}, sprint: 5.0, drive: 6.7, skid: 5.2};
 const TURN_RATE = 900;  // deg/s: locomotion (walking / standing turns)
 // Aiming turns FAST (180 deg in 0.15 s): aiming must feel immediate. (Tried 450 deg/s with the draw held until facing
 // the target: it looked smoother but the user found it slow and clumsy to aim.)
@@ -153,7 +159,18 @@ export function createPlayer(H) {
   const has = f => !!A.SP[f];
   const ev = e => { if (H.events) H.events.push(e); };
   // the run speeds follow the modifiers (an item's +speed): recomputed when the notes change, never written from outside
-  const applySpeed = () => { for (const k of Object.keys(SPEED0)) SPEED[k] = H.mods.value('player.speed', SPEED0[k]); };
+  // (a gait's own speed note first, 'player.speed.run', then the whole body's), and so do the rates and the strides (GAIT, above)
+  const applySpeed = () => {
+    const M = H.mods;
+    for (const k of Object.keys(SPEED0)) SPEED[k] = M.value('player.speed', M.value('player.speed.' + k, SPEED0[k]));
+    for (const k of ['start', 'sprintUp']) ACC[k] = M.value('player.accel', ACC0[k]);
+    for (const k of ['sprintDown', 'stop', 'skid']) ACC[k] = M.value('player.decel', ACC0[k]);
+    for (const k of ['walk', 'run', 'sprint']) GAIT.stride[k] = M.value('player.stride.' + k, 1);
+    GAIT.stride.drive = GAIT.stride.sprint;
+    const same = SPEED.run === SPEED0.run && SPEED.sprint === SPEED0.sprint;   // (as authored: the literal speeds)
+    const at = v => same ? v : SPEED.run + (SPEED.sprint - SPEED.run) * (v - SPEED0.run) / (SPEED0.sprint - SPEED0.run);
+    GAIT.sprint = at(5.0); GAIT.drive = at(6.7); GAIT.skid = at(5.2);
+  };
   if (H.mods) { H.mods.watch(applySpeed); applySpeed(); }
 
   // ---------------- facing ----------------
@@ -836,7 +853,7 @@ export function createPlayer(H) {
       if (speed < target) speed = Math.min(target, speed + (speed < SPEED.run ? ACC.start : ACC.sprintUp) * dt);  // run fast, sprint builds
       else speed = Math.max(target, speed - (speed > SPEED.run ? ACC.sprintDown : ACC.stop) * dt);                 // ease out of a sprint
     } else {
-      if (speed > 5.2 && !P.skid) { P.skid = 1; P.skidT = 0; }   // let go at sprint speed: skid to a stop
+      if (speed > GAIT.skid && !P.skid) { P.skid = 1; P.skidT = 0; }   // let go at sprint speed: skid to a stop
       speed = Math.max(0, speed - (P.skid ? ACC.skid : ACC.stop) * dt); P.turn = null;
     }
     P.lastSpeed = P.curSpeed ?? speed; P.curSpeed = speed;
@@ -868,7 +885,7 @@ export function createPlayer(H) {
       P.state = 'move';
       // gait from the real speed: walk / run / drive (building into a sprint) / sprint
       const accel = (speed - P.lastSpeed) / Math.max(dt, 1e-3);   // m/s^2
-      P.gait = speed < 2.3 ? 'walk' : speed < 5.0 || !CLIP.sprint ? 'run' : accel > 1 && speed < 6.7 && CLIP.drive ? 'drive' : 'sprint';
+      P.gait = speed < 2.3 ? 'walk' : speed < GAIT.sprint || !CLIP.sprint ? 'run' : accel > 1 && speed < GAIT.drive && CLIP.drive ? 'drive' : 'sprint';
       gaitDistance(d);
     } else {
       if (P.state !== 'idle') { P.state = 'idle'; P.t = 0; P.prevF = -1; }
@@ -894,7 +911,7 @@ export function createPlayer(H) {
     // mid-stride keeps the same foot on the ground. The phase only advances with distance really travelled.
     if (P.state !== 'move') return;
     const C = A.CLIP[P.gait];
-    P.ph = (P.ph + d / C.stride) % 1;
+    P.ph = (P.ph + d / (C.stride * GAIT.stride[P.gait])) % 1;   // (GAIT: x 1 as authored)
     const at = P.ph * C.stride;
     let f = 0; while (f < C.frames - 1 && at >= C.cum[f + 1]) f++;
     const key = P.gait + f;
