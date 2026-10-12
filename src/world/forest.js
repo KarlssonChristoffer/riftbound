@@ -2,14 +2,23 @@
 // every machine, to the tree: the co-op server sends its seed (core/session.js) and checks acts against the trees it grows
 // itself from it (server/room.mjs), so everything here is a pure function of the seed and the place: no Math.random, no DOM,
 // no import of the game's state (node runs this file too). Offline: ?seed=N or ?forest=1.
-//   RECT      x -48..72 (the world's width: the West Downs, the Proving Grounds, the mesa), y -64..0: 120 x 64 m, its south edge
-//             meeting the Proving Grounds' north edge, the ground there held level (the relief fades in over its first metres)
+//   RECT      x -48..72 (the world's width: the West Downs, the Proving Grounds, the mesa), y -128..0: 120 x 128 m, its south edge
+//             meeting the Proving Grounds' north edge, the ground there held level (the relief fades in over its first metres).
+//             HOME, its south half (y -64..0), holds the home woods (the lake, the streams, the esker, the hills, the outcrops);
+//             the HIGH COUNTRY north of it the mountain and the canyon, its relief rising northward
 //   CHUNKS    the land is grown in CHUNK m squares on a lattice from 0, 0 (chunk cx, cy covers x cx*CHUNK .. +CHUNK): what grows in
 //             one depends on the seed, its own coordinates and the forest's few global features (the lake, the stream), never on
 //             its neighbours, so the forest can grow by chunks later (a bigger RECT, or chunks made as you walk) without moving a tree
 //   RELIEF    the home woods' ice-age ground (docs/FOREST.md): rolling moraine (three octaves of value noise, 0 .. ~3.2 m) and up to
 //             three rounded hills (3.8 .. 5.8 m, wide enough to walk: terrain.js WALK; one or two fit most seeds); a 'field' terrain shape (its height
 //             function) + 'hill' shapes, for layout.js's TERRAIN
+//   MOUNTAIN  four rock tiers stacked off centre (each ~5 m over the last, the top ~22 .. 26 m), cliffs all round, with a PATH up
+//             each: a ramp along the face from the level below, standing off it, rock walls on its open side, ending on a level
+//             LANDING over the edge (world.js leaves the cliff's rock out there). Bare above the second tier (F.mountain.treeline)
+//   CANYON    on the other side of the high country: a winding gorge between two rock rims (7 .. 9 m over their ground), open at
+//             both ends, one or two paths up each rim's outer face. Tiers and rims are F.outcrops (kind 'tier' / 'rim', with a
+//             base: the height their cliff falls to), the paths F.ramps; both drawn and walked through layout.js. Their own
+//             generator (mix(seed, 4)): the home woods come out the same whatever they do
 //   ICE       the way the ice flowed (from the north-west, give or take: the seed's): the esker runs along it, the outcrops face it
 //   CLEARING  a flat spot on the lake's shore kept open for the settlement (F.clearing): nothing grows in it but grass
 //   ESKER     one long winding gravel ridge (2.2 .. 2.8 m high, 36 .. 64 m, a flat crest kept clear: a path along its top), part of the field
@@ -35,14 +44,17 @@
 import {vnoise, smooth, clamp, hash3} from '../core/mathx.js';
 
 export const CHUNK = 16;
-export const RECT = {x0: -48, y0: -64, x1: 72, y1: 0};
+export const RECT = {x0: -48, y0: -128, x1: 72, y1: 0};
+export const HOME = {x0: -48, y0: -64, x1: 72, y1: 0};   // the home woods (the lake, the esker, the hills, the outcrops): the south half; the high country north of it
 const FADE = [2, 12];
 // the Proving Grounds' river comes out of the north edge here (layout.js STREAM: x 40 at y 0, 2.9 m wide): the lake's outflow runs into it
 export const MOUTH = {x: 40, y: -.4, hw: 1.45};          // the relief is 0 within FADE[0] m of the south edge, full FADE[1] m in
 const WATER_H = -.18;          // the lake's surface under its basin (world.js WATER_H)
 export const TUNE = {
-  relief: {amp: 3.2, k: 1 / 30, hills: [2, 3], hillH: [3.8, 5.8], hillR: [11, 15], hillK: 2.8},   // (hillK: a hill is at least that x its height across: walkable)
+  relief: {amp: 3.2, north: .7, k: 1 / 30, hills: [2, 3], hillH: [3.8, 5.8], hillR: [11, 15], hillK: 2.8},   // (hillK: a hill is at least that x its height across: walkable)
   ice: {spread: .9},
+  mountain: {tiers: 4, a: [25, 28], ab: [.78, .88], shrink: 5.5, shift: 2.5, turn: [1.6, 2.2], step0: 5, step: [4.5, 5.5], slope: .5, path: 2.2},
+  canyon: {north: 9, south: 5, wander: 5, hw: [2.6, 4.2], rim: [5.5, 8], rise: [7, 9], paths: [1, 2], slope: .56, path: 2.4},
   clearing: {r: 7, off: 4.5},
   esker: {h: [2.2, 2.8], crest: 1.2, w: 8.5, len: [36, 64], taper: .26},
   outcrop: {n: [3, 6], len: [3.5, 7], wid: [2.4, 4.2], rise: [1.1, 2.3]},
@@ -69,7 +81,7 @@ export function forestPlan(seed) {
   F = {seed, rect: RECT, chunk: CHUNK, shapes: [], cuts: [], props: [], trees: new Map(), laid: false};
   // ---- RELIEF: the rolling ground (held lower along the lake's way out to the river: its outflow doesn't cut a gorge), then the hills
   // (away from the south edge)
-  const raw = (x, y) => T.relief.amp * smooth((fbm(x * T.relief.k, y * T.relief.k, S) - .3) / .55) * southFade(y);
+  const raw = (x, y) => T.relief.amp * smooth((fbm(x * T.relief.k, y * T.relief.k, S) - .3) / .55) * southFade(y) * (1 + T.relief.north * smooth((HOME.y0 - y) / 40));   // (higher ground in the high country)
   let reliefH = raw;
   const hills = [];
   // ---- LAKE: in the lowest hollow of a few candidates (the relief only: the hills keep away from it) whose ground stays high enough
@@ -77,7 +89,7 @@ export function forestPlan(seed) {
   {
     let best = null;
     for (let i = 0; i < 32; i++) {
-      const x = RECT.x0 + 16 + R() * (RECT.x1 - RECT.x0 - 32), y = RECT.y0 + 12 + R() * (RECT.y1 - RECT.y0 - 32);
+      const x = RECT.x0 + 16 + R() * (RECT.x1 - RECT.x0 - 32), y = HOME.y0 + 12 + R() * (RECT.y1 - HOME.y0 - 32);
       let m = 0, lo = 1e9; for (let k = 0; k < 17; k++) { const a = k * Math.PI / 8, r = k % 2 ? 1 : .5, h = raw(x + Math.cos(a) * 8 * r, y + Math.sin(a) * 5.5 * r); m += h; lo = Math.min(lo, h); }
       const score = m / 17 + Math.max(0, T.lake.minBed - (lo - T.lake.depth)) * 6 + Math.hypot(x - MOUTH.x, y - MOUTH.y) * .006;   // (low, but not too low; nearer the river wins ties)
       if (!best || score < best.score) best = {x, y, score};
@@ -105,9 +117,9 @@ export function forestPlan(seed) {
     const E = T.esker, reach = E.crest + E.w;
     for (let t = 0; t < 80 && !esker; t++) {
       const len = E.len[1] - (E.len[1] - E.len[0]) * Math.min(1, t / 40) * R(), a = ice + (R() - .5) * .5, dx = Math.cos(a), dy = Math.sin(a), ph = R() * 6;
-      const sx = RECT.x0 + 6 + R() * (RECT.x1 - RECT.x0 - 12) - dx * len * .5, sy = RECT.y0 + 6 + R() * (ySouth - 2 - RECT.y0 - 6) - dy * len * .5;   // (a middle anywhere)
+      const sx = RECT.x0 + 6 + R() * (RECT.x1 - RECT.x0 - 12) - dx * len * .5, sy = HOME.y0 + 6 + R() * (ySouth - 2 - HOME.y0 - 6) - dy * len * .5;   // (a middle anywhere)
       const ctl = []; for (let i = 0; i <= 5; i++) { const f = i / 5, w = Math.sin(i * 1.3 + ph) * 3 + (R() - .5) * 3; ctl.push([sx + dx * len * f - dy * w, sy + dy * len * f + dx * w]); }
-      if (ctl.some(([x, y]) => x < RECT.x0 + 6 || x > RECT.x1 - 6 || y < RECT.y0 + 6 || y > ySouth - 2)) continue;
+      if (ctl.some(([x, y]) => x < RECT.x0 + 6 || x > RECT.x1 - 6 || y < HOME.y0 + 6 || y > ySouth - 2)) continue;
       const C = course(ctl, 0, 0); let ok = true;
       for (let i = 0; i < C.n && ok; i += 15) {
         const x = C.px[i], y = C.py[i];
@@ -118,10 +130,94 @@ export function forestPlan(seed) {
       F.esker = {pts: ctl.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]), h: +esker.h.toFixed(2)};
     }
   }
+  // ---- THE HIGH COUNTRY, north of the home woods (its own generator: the home woods come out the same whatever it does): a MOUNTAIN
+  // of rock tiers stacked off centre, cliffs all round, and a CANYON on the other side: a winding gorge between two rock rims, open at
+  // both ends. PATHS climb the rock: each runs along a face, standing off it, from the level below up to the top, then turns in
+  // through the face (layout.js: ramps with rock sides; world.js leaves the cliff's rock out where one turns in)
+  const Rm = rng(mix(seed, 4)), west = Rm() < .5;
+  F.outcrops = []; F.ramps = []; F.mountain = null; F.canyon = null;
+  const rockAt = (o, ctl, banks, base, firm) => {   // a terrace with rock for the field (layout.js) and for F.height
+    const pts = ctl.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]), b = banks.map(v => +v.toFixed(2));
+    o.ctl = pts.map((p, i) => firm && firm[i] ? [p[0], p[1], b[i], 1] : [p[0], p[1], b[i]]); o.h = +o.h.toFixed(3); o.base = +base.toFixed(3);
+    rock.push({h: o.h, base: o.base, pts, banks: b, box: boxOf(pts, Math.max(...b))}); F.outcrops.push(o);
+  };
+  // a path up the outline P's face to its point j, coming along it from `dir` (+1: from the points before j), len m long, w wide,
+  // half a width off the face, then in through it; rising h0 (null: the ground there, est0 our guess of it) -> h1. firm: the edges
+  // it runs along (kept straight: mesaOutline wanders the rest)
+  const pathUp = (P, j, dir, len, w, h0, h1, est0, firm) => {
+    const n = P.length; let area = 0; for (let i = 0; i < n; i++) { const a = P[i], b = P[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+    const sg = area > 0 ? 1 : -1, nrm = i => { const a = P[(i + n - 1) % n], b = P[(i + 1) % n], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [sg * (b[1] - a[1]) / l, -sg * (b[0] - a[0]) / l]; };   // (outward: by the outline's turn, not its centre: a rim is a banana)
+    const off = w / 2 + .1, at = (i, d) => { const [nx, ny] = nrm(i); return [P[i][0] + nx * d, P[i][1] + ny * d]; };
+    const raw = [at(j, off)]; let run = 0, i = j;
+    while (run < len) { const k = (i - dir + n) % n; run += Math.hypot(P[k][0] - P[i][0], P[k][1] - P[i][1]); firm[dir > 0 ? k : i] = true; i = k; raw.unshift(at(i, off)); }
+    const C = course(raw, 0, 0), pts = []; for (let q = 0; q < C.n - 25; q += 15) pts.push([C.px[q], C.py[q]]); pts.push(raw.at(-1));   // (a smooth line: a ramp's height jumps at a sharp bend; straight for its last 2.5 m, where the landing meets it)
+    const put = (pp, a, b, ww, notch) => { const r = {pts: pp.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]), w: +ww.toFixed(2), h0: a, h1: +b.toFixed(3), est0: +(a ?? est0).toFixed(3), shoulder: .5, notch}; r.box = boxOf(r.pts, ww / 2 + r.shoulder); F.ramps.push(r); };
+    let tot = 0; for (let q = 1; q < pts.length; q++) tot += Math.hypot(pts[q][0] - pts[q - 1][0], pts[q][1] - pts[q - 1][1]);
+    put(pts, h0, (h1 * tot - .4 * (h0 ?? est0)) / (tot - .4), w, false);   // (its last .4 m under the landing: it is at h1 where the landing starts)
+    // the landing at its top: level, on along its way, straddling the face from its outer edge to 1.8 m in (the cliff's rock left out there)
+    const e = pts.at(-1), d = pts.at(-2), tl = Math.hypot(e[0] - d[0], e[1] - d[1]) || 1, tx = (e[0] - d[0]) / tl, ty = (e[1] - d[1]) / tl, [mx, my] = nrm(j), sw = ty * mx - tx * my > 0 ? 1 : -1, nx = ty * sw, ny = -tx * sw;   // (n: square to its way, toward the outside)
+    const wl = off + w / 2 + 1.8, sh = off - (off + w / 2 - 1.8) / 2;   // (its width; how far in from the path's line its own line lies)
+    put([[e[0] - nx * sh - tx * .4, e[1] - ny * sh - ty * .4], [e[0] - nx * sh + tx * 2.6, e[1] - ny * sh + ty * 2.6]], h1, h1, wl, true);   // (from a little back: no crack between two square ends)
+  };
+  {
+    const M = T.mountain, a0 = M.a[0] + Rm() * (M.a[1] - M.a[0]), b0 = a0 * (M.ab[0] + Rm() * (M.ab[1] - M.ab[0])), rot = (Rm() - .5) * .6;
+    const cx = west ? RECT.x0 + a0 + 7 + Rm() * 5 : RECT.x1 - a0 - 7 - Rm() * 5, cy = HOME.y0 - 6 - b0 - Rm() * 3;
+    let th = Math.PI / 2 + (Rm() - .5) * .7, c = [cx, cy], prev = null;   // (th: the side its path comes up; the first toward the home woods)
+    const turn = Rm() < .5 ? 1 : -1, tiers = [];
+    for (let i = 0; i < M.tiers; i++) {
+      const sh = i * M.shrink, a = a0 - sh, b = b0 - sh * b0 / a0, jit = []; for (let j = 0; j < 20; j++) jit.push(Rm());
+      if (i) c = [c[0] - Math.cos(th) * M.shift, c[1] - Math.sin(th) * M.shift];   // (away from its path: room on the tier below for it)
+      const ctl = [];
+      for (let j = 0; j < 20; j++) {
+        const f = j / 20 * Math.PI * 2, k = 1 + (jit[j] - .5) * .2, lx = Math.cos(f) * a * k, ly = Math.sin(f) * b * k;
+        ctl.push([c[0] + lx * Math.cos(rot) - ly * Math.sin(rot), c[1] + lx * Math.sin(rot) + ly * Math.cos(rot)]);
+      }
+      let g = reliefH(c[0], c[1]); for (const [x, y] of ctl) g = Math.max(g, reliefH(x, y), reliefH((x + c[0]) / 2, (y + c[1]) / 2));
+      const h = prev ? prev.h + M.step[0] + Rm() * (M.step[1] - M.step[0]) : g + M.step0;
+      let j = 0, bd = 1e9; for (let q = 0; q < 20; q++) { const e = Math.atan2(ctl[q][1] - c[1], ctl[q][0] - c[0]), d = Math.abs(Math.atan2(Math.sin(e - th), Math.cos(e - th))); if (d < bd) { bd = d; j = q; } }
+      const firm = new Array(20).fill(false), est = prev ? prev.h : reliefH(ctl[j][0], ctl[j][1]);
+      pathUp(ctl, j, turn, (h - est) / M.slope + 1, M.path, prev ? prev.h : null, h, est, firm);
+      const o = {kind: 'tier', x: +c[0].toFixed(2), y: +c[1].toFixed(2), r: a, h};
+      rockAt(o, ctl, ctl.map(() => .12), prev ? prev.h : 0, firm);
+      prev = o; tiers.push(o);
+      th += turn * (M.turn[0] + Rm() * (M.turn[1] - M.turn[0]));
+    }
+    F.mountain = {x: prev.x, y: prev.y, h: prev.h, tiers: tiers.length, treeline: tiers.length > 2 ? +(tiers[1].h + .5).toFixed(2) : 1e9, r: a0};
+  }
+  {
+    const N = T.canyon, xc = west ? RECT.x1 - 19 - Rm() * 6 : RECT.x0 + 19 + Rm() * 6, y0 = RECT.y0 + N.north, y1 = HOME.y0 - N.south, ph = Rm() * 6, ctl = [];
+    for (let i = 0; i <= 6; i++) { const f = i / 6; ctl.push([xc + Math.sin(f * 3.6 + ph) * N.wander + (Rm() - .5) * 2.5, y0 + (y1 - y0) * f]); }
+    const C = course(ctl, 0, 0), st = [];   // stations every 2.5 m: the line, its normal, the gorge's half width, the rims' widths
+    for (let i = 0; i < C.n; i += 25) {
+      const j = Math.min(C.n - 1, i + 20), k = Math.max(0, i - 20), tx = C.px[j] - C.px[k], ty = C.py[j] - C.py[k], l = Math.hypot(tx, ty) || 1, t = C.len[i] / C.total;
+      st.push({x: C.px[i], y: C.py[i], nx: -ty / l, ny: tx / l, hw: N.hw[0] + (N.hw[1] - N.hw[0]) * vnoise(t * 5, 3.3, S + 21), rw: [-1, 1].map(sd => N.rim[0] + (N.rim[1] - N.rim[0]) * vnoise(t * 4, sd * 5.1, S + 23))});
+    }
+    const rims = [], n = st.length, mid = st[n >> 1];
+    for (const [si, sd] of [[0, -1], [1, 1]]) {
+      // its edges: the line offset by the gorge's half width and by that + the rim's width, less any point that folds back (an offset
+      // line crosses itself where the line bends tighter than the offset)
+      const edge = d => { const E = []; st.forEach((p, q) => { const e = [p.x + p.nx * sd * d(p), p.y + p.ny * sd * d(p)], l = E.at(-1); if (!l || (e[0] - l[0]) * (st[q].x - st[q - 1].x) + (e[1] - l[1]) * (st[q].y - st[q - 1].y) > 1.5) E.push(e); }); return E; };
+      const inner = edge(p => p.hw), outer = edge(p => p.hw + p.rw[si]);
+      let g = 0; for (const [x, y] of [...inner, ...outer]) g = Math.max(g, reliefH(x, y));
+      const h = g + N.rise[0] + Rm() * (N.rise[1] - N.rise[0]), P = [...inner, ...outer.slice().reverse()], firm = new Array(P.length).fill(false);
+      const m = outer.length;
+      const span = Math.ceil(((h - reliefH(...outer[m >> 1])) / N.slope + 1) / 2.5) + 2;   // (stations a path takes, give or take)
+      let paths = N.paths[0] + Math.floor(Rm() * (N.paths[1] - N.paths[0] + 1)); if ((m - 2) / paths < span + 2) paths = 1;
+      for (let k = 0; k < paths; k++) {   // up the rim's outer face (outer[q] is P[inner.length + m - 1 - q]), each in its own stretch, coming from the canyon's south or north end
+        const dir = Rm() < .5 ? 1 : -1, lo = 1 + Math.floor(k * (m - 2) / paths), hi = 1 + Math.floor((k + 1) * (m - 2) / paths) - 1, f = Rm();
+        const q = dir > 0 ? Math.floor(lo + Math.max(0, hi - lo - span) * f) : Math.floor(Math.min(hi, lo + span + Math.max(0, hi - lo - span) * f)), j = inner.length + m - 1 - q;   // (dir +1: it comes from the south (higher q))
+        pathUp(P, j, dir, (h - reliefH(...outer[q])) / N.slope + 1, N.path, null, h, reliefH(...outer[q]), firm);
+      }
+      const o = {kind: 'rim', x: +((inner[inner.length >> 1][0] + outer[m >> 1][0]) / 2).toFixed(2), y: +((inner[inner.length >> 1][1] + outer[m >> 1][1]) / 2).toFixed(2), r: 3, h};
+      rockAt(o, P, P.map(() => .12), 0, firm); rims.push(o);
+    }
+    const gm = reliefH(mid.x, mid.y);
+    F.canyon = {pts: ctl.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]), depth: +Math.min(rims[0].h - gm, rims[1].h - gm).toFixed(2)};
+  }
   const crestD = (x, y) => esker ? esker.dist(x, y) - T.esker.crest : 1e9;
   for (let i = 0, tries = 0, want = T.relief.hills[0] + Math.floor(R() * (T.relief.hills[1] - T.relief.hills[0] + 1)); i < want && tries < 60; tries++) {
     const h = T.relief.hillH[0] + R() * (T.relief.hillH[1] - T.relief.hillH[0]), r = Math.max(T.relief.hillR[0] + R() * (T.relief.hillR[1] - T.relief.hillR[0]), h * T.relief.hillK / .88);
-    const x = RECT.x0 + r + R() * (RECT.x1 - RECT.x0 - 2 * r), y = RECT.y0 + r * .8 + R() * (RECT.y1 - RECT.y0 - r * .8 - FADE[1] - r);
+    const x = RECT.x0 + r + R() * (RECT.x1 - RECT.x0 - 2 * r), y = HOME.y0 + r * .8 + R() * (RECT.y1 - HOME.y0 - r * .8 - FADE[1] - r);
     if (Math.hypot((x - L.x) / (L.rx + r + 5), (y - L.y) / (L.ry + r + 5)) < 1 || hills.some(q => Math.hypot(q.x - x, q.y - y) < q.rx + r)) continue;
     if (segD(x, y, L.x, L.y, MOUTH.x, MOUTH.y) < r + 3) continue;   // (not across the outflow's way to the river)
     if (crestD(x, y) < r * .55 + 2) continue;   // (not on the esker)
@@ -135,6 +231,7 @@ export function forestPlan(seed) {
     let h = reliefH(x, y) + hillH(x, y) + eskerH(x, y); const d = lakeD(x, y);
     if (d < 1) h = Math.min(h, L.bed); else { const k = (d - 1) * Math.min(L.rx, L.ry) / L.rim; if (k < 1) h = L.bed + (h - L.bed) * smooth(k); }
     for (let i = 0; i < rock.length; i++) { const v = terraceH(rock[i], x, y); if (v > h) h = v; }
+    for (let i = 0; i < F.ramps.length; i++) h = rampH(F.ramps[i], x, y, h);
     return h;
   };
   const slope = (x, y) => { const e = .5; return Math.hypot(F.height(x + e, y) - F.height(x - e, y), F.height(x, y + e) - F.height(x, y - e)) / (2 * e); };
@@ -160,11 +257,11 @@ export function forestPlan(seed) {
   {
     let sp = null;
     for (let i = 0; i < 30; i++) {
-      const x = RECT.x0 + 8 + R() * (RECT.x1 - RECT.x0 - 16), y = RECT.y0 + 5 + R() * 10, d = Math.hypot(x - L.x, y - L.y);
+      const x = RECT.x0 + 8 + R() * (RECT.x1 - RECT.x0 - 16), y = HOME.y0 + 5 + R() * 10, d = Math.hypot(x - L.x, y - L.y);
       if (d < 22 || d > 60) continue;
       const sc = F.height(x, y) + d * .01; if (!sp || sc > sp.sc) sp = {x, y, sc};
     }
-    sp ??= {x: L.x + 20, y: RECT.y0 + 8};
+    sp ??= {x: L.x + 20, y: HOME.y0 + 8};
     const pts = walk(sp.x, sp.y, L.x, L.y, (x, y) => lakeD(x, y) < .82, R() * 10), e1 = pts.at(-1), e0 = pts.at(-2) || pts[0];
     pts.push([e1[0] + (e1[0] - e0[0]) * .5, e1[1] + (e1[1] - e0[1]) * .5]);   // (on into the lake a little: no gap at its mouth)
     F.stream = course(pts, T.stream.hw0, T.stream.hw1);
@@ -200,7 +297,7 @@ export function forestPlan(seed) {
     const C = T.clearing; let best = null;
     for (let k = 0; k < 24; k++) {
       const a = k / 24 * Math.PI * 2, x = L.x + Math.cos(a) * (L.rx + C.off + C.r * .7), y = L.y + Math.sin(a) * (L.ry + C.off + C.r * .7);
-      if (x < RECT.x0 + C.r + 3 || x > RECT.x1 - C.r - 3 || y < RECT.y0 + C.r + 3 || y > RECT.y1 - C.r - 2) continue;
+      if (x < RECT.x0 + C.r + 3 || x > RECT.x1 - C.r - 3 || y < HOME.y0 + C.r + 3 || y > RECT.y1 - C.r - 2) continue;
       let lo = 1e9, hi = -1e9; for (let j = 0; j < 9; j++) { const b = j * Math.PI / 4, q = j ? C.r * .8 : 0, h = F.height(x + Math.cos(b) * q, y + Math.sin(b) * q); lo = Math.min(lo, h); hi = Math.max(hi, h); }
       const score = hi - lo + (courseD(x, y) < C.r + 1.5 ? 10 : 0) + (crestD(x, y) < C.r + 3 ? 10 : 0) + R() * .05;
       if (!best || score < best.score) best = {x, y, score};
@@ -209,9 +306,8 @@ export function forestPlan(seed) {
   }
   const CL = F.clearing, clearD = (x, y) => Math.hypot(x - CL.x, y - CL.y) - CL.r;
   // ---- OUTCROPS (roches moutonnees) and BLOCKS (big boulders): small terraces with rock; the ice made the gentle side and the cliff
-  F.outcrops = [];
   const room = (x, y, r) => lakeM(x, y) > r + 3.5 && courseD(x, y) > r + 3 && clearD(x, y) > r + 2 && crestD(x, y) > r + T.esker.w * .6 &&
-    !F.outcrops.some(o => Math.hypot(o.x - x, o.y - y) < o.r + r + 2.5) && x > RECT.x0 + r + 6 && x < RECT.x1 - r - 6 && y > RECT.y0 + r + 6 && y < ySouth - r - 1;
+    !F.outcrops.some(o => Math.hypot(o.x - x, o.y - y) < o.r + r + 2.5) && x > RECT.x0 + r + 6 && x < RECT.x1 - r - 6 && y > HOME.y0 + r + 6 && y < ySouth - r - 1;
   const keep = (o, ctl, banks) => {
     const pts = ctl.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]);
     o.ctl = pts.map((p, i) => [p[0], p[1], banks[i]]); o.h = +o.h.toFixed(3);
@@ -221,7 +317,7 @@ export function forestPlan(seed) {
     const O = T.outcrop, want = O.n[0] + Math.floor(R() * (O.n[1] - O.n[0] + 1));
     for (let t = 0, n = 0; t < 90 && n < want; t++) {
       const a = (O.len[0] + R() * (O.len[1] - O.len[0])) / 2, b = (O.wid[0] + R() * (O.wid[1] - O.wid[0])) / 2, rise = O.rise[0] + R() * (O.rise[1] - O.rise[0]);
-      const x = RECT.x0 + R() * (RECT.x1 - RECT.x0), y = RECT.y0 + R() * (RECT.y1 - RECT.y0), jit = []; for (let j = 0; j < 9; j++) jit.push(R());
+      const x = RECT.x0 + R() * (RECT.x1 - RECT.x0), y = HOME.y0 + R() * (RECT.y1 - HOME.y0), jit = []; for (let j = 0; j < 9; j++) jit.push(R());
       if (!room(x, y, a) || slope(x, y) > .35) continue;
       const h = F.height(x, y) + rise, ctl = [], banks = [], bank = Math.max(2.6, 1.55 * h / .62);   // (the gentle side: walkable up to its top)
       for (let j = 0; j < 9; j++) {
@@ -234,7 +330,7 @@ export function forestPlan(seed) {
     const B = T.block, wantB = B.n[0] + Math.floor(R() * (B.n[1] - B.n[0] + 1));
     for (let t = 0, n = 0; t < 90 && n < wantB; t++) {
       const r = B.r[0] + R() * (B.r[1] - B.r[0]), rise = B.rise[0] + R() * (B.rise[1] - B.rise[0]), a0 = R() * Math.PI;
-      const x = RECT.x0 + R() * (RECT.x1 - RECT.x0), y = RECT.y0 + R() * (RECT.y1 - RECT.y0), jit = []; for (let j = 0; j < 7; j++) jit.push(R());
+      const x = RECT.x0 + R() * (RECT.x1 - RECT.x0), y = HOME.y0 + R() * (RECT.y1 - HOME.y0), jit = []; for (let j = 0; j < 7; j++) jit.push(R());
       if (!room(x, y, r) || slope(x, y) > .3) continue;
       const ctl = []; let g = F.height(x, y);
       for (let j = 0; j < 7; j++) { const f = a0 + j / 7 * Math.PI * 2, k = 1 + (jit[j] - .5) * .5, px = x + Math.cos(f) * r * k, py = y + Math.sin(f) * r * .8 * k; ctl.push([px, py]); g = Math.max(g, F.height(px, py)); }
@@ -246,7 +342,7 @@ export function forestPlan(seed) {
   {
     const B = T.boulders; let best = null;
     for (let t = 0; t < 30; t++) {
-      const r = B.r[0] + R() * (B.r[1] - B.r[0]), x = RECT.x0 + R() * (RECT.x1 - RECT.x0), y = RECT.y0 + R() * (RECT.y1 - RECT.y0);
+      const r = B.r[0] + R() * (B.r[1] - B.r[0]), x = RECT.x0 + R() * (RECT.x1 - RECT.x0), y = HOME.y0 + R() * (RECT.y1 - HOME.y0);
       if (!room(x, y, r)) continue;
       let ring = 0; for (let j = 0; j < 8; j++) ring += F.height(x + Math.cos(j * Math.PI / 4) * (r + 3), y + Math.sin(j * Math.PI / 4) * (r + 3));
       const score = F.height(x, y) - ring / 8 + slope(x, y) * 2;
@@ -259,7 +355,7 @@ export function forestPlan(seed) {
   // ---- GROWTH, chunk by chunk
   const C0x = Math.floor(RECT.x0 / CHUNK), C1x = Math.ceil(RECT.x1 / CHUNK), C0y = Math.floor(RECT.y0 / CHUNK), C1y = Math.ceil(RECT.y1 / CHUNK);
   F.chunks = [];
-  const keepOut = {clearD, crestD, inRock, eskerH, boulders: BF};
+  const keepOut = {clearD, crestD, inRock, eskerH, boulders: BF, treeline: F.mountain.treeline};
   for (let cy = C0y; cy < C1y; cy++) for (let cx = C0x; cx < C1x; cx++) { F.chunks.push([cx, cy]); grow(F, cx, cy, S, slope, keepOut); }
   // the boulder field's rocks (a global feature: their own generator; each in the chunk it lies in)
   if (BF) {
@@ -288,7 +384,23 @@ function terraceH(t, x, y) {
   }
   if (inside) return t.h;
   const b = Math.max(.02, t.banks[e] + (t.banks[(e + 1) % n] - t.banks[e]) * f);
-  return d < b ? t.h * (1 - smooth(d / b)) : 0;
+  const lo = t.base ?? 0;
+  return d < b ? lo + (t.h - lo) * (1 - smooth(d / b)) : 0;
+}
+// a ramp's height at a point as terrain.js evaluates it (the walkway over whatever is there, h; its sides blend back to h over its
+// shoulder; square ends): for F.height
+function rampH(r, x, y, h) {
+  const b0 = r.box; if (x < b0[0] || y < b0[1] || x > b0[2] || y > b0[3]) return h;
+  const P = r.pts, hw = r.w / 2; let best = 1e9, along = 0, run = 0, total = 0, past = false;
+  for (let i = 0; i + 1 < P.length; i++) total += Math.hypot(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]);
+  for (let i = 0; i + 1 < P.length; i++) {
+    const [ax, ay] = P[i], [bx, by] = P[i + 1], vx = bx - ax, vy = by - ay, L = Math.hypot(vx, vy), u = ((x - ax) * vx + (y - ay) * vy) / (L * L || 1), t = clamp(u, 0, 1), d = Math.hypot(x - ax - vx * t, y - ay - vy * t);
+    if (d < best) { best = d; along = run + t * L; past = (i === 0 && u < 0) || (i === P.length - 2 && u > 1); }
+    run += L;
+  }
+  if (past || best >= hw + r.shoulder) return h;
+  const hr = r.est0 + (r.h1 - r.est0) * (total > 0 ? along / total : 0);
+  return best <= hw ? hr : hr + (h - hr) * smooth((best - hw) / r.shoulder);
 }
 // a ridge along a course: a flat crest crest m either side, falling (raised cosine) to the ground over w m; tapering to nothing over
 // its ends' first `taper` of its length; its height wanders a little along it. -> (x, y) => m, with .dist(x, y) (m to its line,
@@ -335,7 +447,7 @@ function grow(F, cx, cy, S, slope, K) {
   for (let j = 0; j < nt; j++) for (let i = 0; i < nt; i++) {
     const x = x0 + (i + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, y = y0 + (j + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, roll = R(), pick = R(), sc = R(), v = R();
     if (!inside(x, y, T.trees.edge) || K.clearD(x, y) < 0 || K.crestD(x, y) < .6 || K.inRock(x, y, .8) || inField(x, y, .5)) continue;   // (the clearing, the esker's path, a block, the boulders)
-    const wd = waterD(F, x, y); if (wd < T.trees.water || slope(x, y) > T.trees.slope) continue;
+    const wd = waterD(F, x, y); if (wd < T.trees.water || slope(x, y) > T.trees.slope || F.height(x, y) > K.treeline) continue;   // (none above the mountain's treeline)
     if (roll > T.trees.base + T.trees.dense * dens(x, y)) continue;
     let species;
     if (wd < 4.5 && pick < .45) species = 'willow';
@@ -356,7 +468,7 @@ function grow(F, cx, cy, S, slope, K) {
     const d = dens(x, y);
     if (roll > T.under.p * (.45 + d)) continue;
     const kind = d > .45 ? (pick < .55 ? 'fern' : 'bush') : (pick < .7 ? 'tuft' : pick < .9 ? 'bush' : 'fern');
-    if (kind !== 'tuft' && K.clearD(x, y) < 0) continue;   // (only grass in the clearing)
+    if (kind !== 'tuft' && (K.clearD(x, y) < 0 || F.height(x, y) > K.treeline)) continue;   // (only grass in the clearing and above the treeline)
     if (trees.some(t => Math.hypot(t[1] - x, t[2] - y) < .7)) continue;   // (not in a trunk)
     out.push([kind, +x.toFixed(2), +y.toFixed(2), {r: 0, variant: v, chunk: ci}]);
   }

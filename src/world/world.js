@@ -853,12 +853,15 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       // run (the strata carry on round its bends); its foot is the lowest ground just round the face (the stretch bends, so no one
       // normal), flush at a ladder and no stones in front of one
       const ladder = (x, z, inner, outer, side) => CLIMBS.some(c => { const dx = x - c.x, dz = z - c.y, o = dx * c.nx + dz * c.ny, a = dz * c.nx - dx * c.ny; return Math.abs(a) < c.w / 2 + side && o > inner && o < outer; });
+      // the forest's paths up its rock (layout.js: ramps with notch): no rock across a landing, where the path goes over the edge
+      const notches = TERRAIN.filter(s => s.type === 'ramp' && s.notch).map(s => ({a: s.pts[0], b: s.pts.at(-1), hw: s.w / 2}));
+      const inNotch = (x, z) => notches.some(({a, b, hw}) => { const vx = b[0] - a[0], vz = b[1] - a[1], u = ((x - a[0]) * vx + (z - a[1]) * vz) / (vx * vx + vz * vz || 1); return u >= 0 && u <= 1 && Math.hypot(x - a[0] - vx * u, z - a[1] - vz * u) < hw; });
       const mesaRuns = (s, seed) => {
         const foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
         return (s.cliffs || []).map(({pts}, j) => {
           let lo = 1e9; for (const [x, z] of pts) lo = Math.min(lo, foot(x, z));
           return {pts, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: lo - .05, base: 0, relief: .9, talus: true, lip, seed: seed + j,   // (top: the ground inside its face, whichever way that is: blocks past a stretch's end sink with it)
-            keep: (x, z) => ladder(x, z, -.4, .4, .08) ? -.02 : null, avoid: (x, z) => avoidT(x, z) || ladder(x, z, -.1, 1.2, .5), skip: (x, z) => inCleft(x, z, .02)};   // (no rock across a cleft's mouth)
+            keep: (x, z) => ladder(x, z, -.4, .4, .08) ? -.02 : null, avoid: (x, z) => avoidT(x, z) || ladder(x, z, -.1, 1.2, .5), skip: (x, z) => inCleft(x, z, .02) || inNotch(x, z)};   // (no rock across a cleft's mouth, a path's landing)
         });
       };
       const terrRuns = [];

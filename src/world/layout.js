@@ -62,7 +62,7 @@ const WX0 = WEST_ON ? WEST.x0 : 0;
 // THE FOREST (world/forest.js, docs/FOREST.md): grown from a seed north of everything (y -64..0, the world's width); on with a seed
 // (core/session.js: ?seed=N, ?forest=1, a co-op server's) and walkable terrain. It takes the world's north edge out to its own
 export const FOREST = TERRAIN_ON && SESSION.seed !== null ? forestPlan(SESSION.seed) : null;
-export const WORLD = FOREST ? {x0: Math.min(WX0, FOREST_RECT.x0), y0: FOREST_RECT.y0, x1: GX1, y1: 30, WM: GX1 - Math.min(WX0, FOREST_RECT.x0), HM: 30 - FOREST_RECT.y0, past: 12}
+export const WORLD = FOREST ? {x0: Math.min(WX0, FOREST_RECT.x0), y0: FOREST_RECT.y0, x1: GX1, y1: 30, WM: GX1 - Math.min(WX0, FOREST_RECT.x0), HM: 30 - FOREST_RECT.y0, past: 12, top: Math.max(20, Math.ceil(FOREST.mountain.h) + 4)}
   : BIG ? {x0: Math.min(-40, WX0), y0: -60, x1: 122, y1: 30, WM: 122 - Math.min(-40, WX0), HM: 90, past: 12} : {x0: WX0, y0: 0, x1: GX1, y1: 30, WM: GX1 - WX0, HM: 30, past: 12};
 export {WEST_ON, WEST, WEST_LAND};
 export const GROUNDS = {x0: 0, y0: 0, x1: GX1, y1: 30};
@@ -284,8 +284,10 @@ export const TERRAIN = !TERRAIN_ON ? [] : [
   ...WEST_HILLS,
   ...STONE_TERRAIN,   // the standing stones' hill on the south-west (stonecircle.js; ?stones=0: westland.js's dome)
   ...(FOREST ? FOREST.shapes : []),   // the forest's relief, hills and the lake's basin (world/forest.js; its stream's cut is laid below)
-  // the forest's outcrops and big boulders (forest.js OUTCROPS): terraces with rock where they drop, the ledges' way (mesaOutline)
-  ...(FOREST ? FOREST.outcrops.map(o => { const M = mesaOutline(o.ctl); return {type: 'terrace', pts: M.pts, drawn: {pts: M.ground}, banks: M.banks, h: o.h, rock: true, cliffs: M.cliffs}; }) : []),
+  // the forest's outcrops, big boulders, the mountain's tiers and the canyon's rims (forest.js): terraces with rock where they drop, the ledges' way (mesaOutline)
+  ...(FOREST ? FOREST.outcrops.map(o => { const M = mesaOutline(o.ctl); return {type: 'terrace', pts: M.pts, drawn: {pts: M.ground}, banks: M.banks, h: o.h, base: o.base, rock: true, cliffs: M.cliffs}; }) : []),
+  // and the paths up them: ramps with rock sides along a face, a level landing over its edge (notch: world.js leaves the cliff's rock out there)
+  ...(FOREST ? FOREST.ramps.map(r => ({type: 'ramp', pts: r.pts, w: r.w, h0: r.h0, h1: r.h1, shoulder: r.shoulder, rock: true, notch: r.notch})) : []),
 ];
 // PADS: things built at a fixed height that the ground must meet (features place them at 0): [x, y, r (held flat), fade]
 const PADS = [[50.8, 19.4, 1.5, 1.2],   // the campfire and its woodpile (features/lights.js)
@@ -321,7 +323,8 @@ export function groundDrawn() {
   // terrace's outline, along a cut's edges (most of the box is the same: the mesa's top, the open ground)
   const S = sampler(TERRAIN.map(s => s.drawn ? {...s, ...s.drawn} : s), terrainMask), c = F.cell, seg = [0, 0, 0, 0];
   const lineD = (x, y, P, closed) => { let d = 1e9; for (let i = 0, n = P.length; i < (closed ? n : n - 1); i++) { const [ax, ay] = P[i], [bx, by] = P[(i + 1) % n], vx = bx - ax, vy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1))); d = Math.min(d, Math.hypot(x - ax - vx * t, y - ay - vy * t)); } return d; };
-  const near = (s, x, y) => s.type === 'terrace' ? lineD(x, y, s.pts, true) < CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6
+  const box = own.map(s => { const m = s.type === 'terrace' ? CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6 : s.type === 'channel' ? Math.max(...s.drawn.hw) + s.bank + .5 : 0; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of s.pts || [[s.x - s.drawn.rx - s.rim, s.y - s.drawn.ry - s.rim], [s.x + s.drawn.rx + s.rim, s.y + s.drawn.ry + s.rim]]) { x0 = Math.min(x0, x - m); y0 = Math.min(y0, y - m); x1 = Math.max(x1, x + m); y1 = Math.max(y1, y + m); } return [x0 - .5, y0 - .5, x1 + .5, y1 + .5]; });   // (each shape's reach: most lattice points are near none)
+  const near = (s, k, x, y) => x < box[k][0] || y < box[k][1] || x > box[k][2] || y > box[k][3] ? false : s.type === 'terrace' ? lineD(x, y, s.pts, true) < CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6
     : s.type === 'channel' ? lineD(x, y, s.pts, false) < Math.max(...s.drawn.hw) + s.bank + .5
     : Math.hypot((x - s.x) / (s.drawn.rx + s.rim + .5), (y - s.y) / (s.drawn.ry + s.rim + .5)) < 1;
   let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
@@ -330,7 +333,7 @@ export function groundDrawn() {
   const W = i1 - i0 + 1, D = new Float32Array(W * (j1 - j0 + 1));
   for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
     const x = F.x0 + i * c, y = F.y0 + j * c;
-    D[(j - j0) * W + i - i0] = own.some(s => near(s, x, y)) ? S(x, y) : F.data[j * F.nx + i];
+    D[(j - j0) * W + i - i0] = own.some((s, k) => near(s, k, x, y)) ? S(x, y) : F.data[j * F.nx + i];
   }
   const X0 = F.x0 + i0 * c, Y0 = F.y0 + j0 * c, X1 = F.x0 + i1 * c, Y1 = F.y0 + j1 * c;
   return (DRAWN = (x, y) => {   // (bilinear on the same lattice: away from the edges it is the field exactly)
