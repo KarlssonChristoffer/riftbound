@@ -901,7 +901,9 @@ function forestRuins(q, ctx) {
     const [bx0, by0, bx1, by1] = FO.cave.slot.reach, hw = CM.w / 2, i0 = Math.max(0, Math.floor((bx0 - X0) * PPM)), i1 = Math.min(WPX - 1, Math.ceil((bx1 - X0) * PPM));
     for (let y = Math.max(0, Math.floor((by0 - Y0) * PPM)); y <= Math.min(HPX - 1, Math.ceil((by1 - Y0) * PPM)); y++) for (let x = i0; x <= i1; x++) {
       const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM, dx = mx - CM.x, dy = my - CM.y, s = dx * CM.ux + dy * CM.uy, a = Math.abs(-dx * CM.uy + dy * CM.ux);
-      if (a < hw + .05 && s > -.05 && s < CM.brow) caveFloor(G, S, x, y, mx, my, Math.max(a - hw, -s));   // (past the brow: the overhang's own ground, as the woods')
+      if (!(a < hw + .05 && s > -.05 && s < CM.brow)) continue;   // (past the brow: the overhang's own ground, as the woods')
+      const f = Math.min(1, Math.max(0, (s - CM.brow + 2.4) / 2.4)), h = hsh(x, y, 69);   // (its last metres go into the dark under the brow, dithered)
+      if (h < f * f * 1.15) G.c(x, y, BLACK); else if (h < f * 1.4) G.p(x, y, S.rock, 3); else caveFloor(G, S, x, y, mx, my, Math.max(a - hw, -s));
     }
   }
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
