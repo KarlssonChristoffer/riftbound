@@ -30,13 +30,14 @@ import {mulberry32} from '../core/rng.js';
 
 export const TUNE = {
   band: {gap: 18, depth: 64, margin: 6},
-  mouth: {len: 11, w: 2.6, depth: 3.6, warp: 7.6, hyst: .8, brow: 8.6, south: 18, flat: .7, rise: 2.5},
+  mouth: {len: 11, w: 3.4, depth: 3.6, warp: 7.6, hyst: .8, brow: 8.6, south: 18, flat: .7, rise: 2.5},
   net: {nodes: [10, 14], step: [7.5, 12], hw: [.95, 1.4], room: [2.8, 5.4], bend: .35, fall: [-.15, .7], sep: 2.4, wob: .9, loops: 2, floor: 4.6},
   wall: 3.4,       // m: the rock stands this much over the floor at the walls (what the camera sees of them)
   rough: .55,      // m: how far the walls wander in and out of the plan's line
   crystals: [5, 9],
 };
 const CELL = .25;  // the grid (world/terrain.js CELL: the field's own lattice, so the field reads it exactly)
+const DRAWN_IN = .35;   // m: the woods' slot is drawn this much wider than walked (layout.js CLEFT_IN's way)
 
 const mix = (seed, a, b = 0) => (hash3(seed | 0, a, b) * 4294967296) | 0;
 const segT = (x, y, ax, ay, bx, by) => { const vx = bx - ax, vy = by - ay; return clamp(((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1), 0, 1); };
@@ -189,7 +190,7 @@ export function cavePlan(seed, m, rect, height = null) {
   // the woods' SLOT (world/terrain.js 'cave', cut: it only lowers), drawn uncut past the brow: the overhang
   const sb = slotBox(m);
   C.slot = {type: 'cave', mode: 'cut', reach: sb, pts: [[sb[0], sb[1]], [sb[2], sb[3]]], fn: (x, y) => { slotSQ(m, x, y, tmp); return slotD(m, tmp[0], tmp[1]) <= 0 ? slotFloor(m, tmp[0]) : NaN; },
-    drawn: {fn: (x, y) => { slotSQ(m, x, y, tmp); return slotD(m, tmp[0], tmp[1]) <= 0 && tmp[0] < m.brow ? slotFloor(m, tmp[0]) : NaN; }}};
+    drawn: {fn: (x, y) => { slotSQ(m, x, y, tmp); return Math.abs(tmp[1]) <= m.w / 2 + DRAWN_IN && tmp[0] >= 0 && tmp[0] < m.brow ? slotFloor(m, tmp[0]) : NaN; }}};   // (drawn wider than walked: its ground falls away behind the rock, world.js, as a cleft's)
   // where you cross: s = warp along the slot, either copy (features/caves.js)
   C.slotAt = (x, y, out) => {   // out = [s, q, which: 0 none / 1 the woods' / 2 the band's]
     slotSQ(m, x, y, out); if (slotD(m, out[0], out[1]) < .6) { out[2] = 1; return out; }
@@ -203,8 +204,8 @@ export function cavePlan(seed, m, rect, height = null) {
   const Rp = mulberry32(mix(seed, 10)), wantC = T.crystals[0] + Math.floor(Rp() * (T.crystals[1] - T.crystals[0] + 1)), rooms = nodes.filter((n, k) => k > 0 && n.room);
   for (let t = 0, got = 0; t < 200 && got < wantC && rooms.length; t++) {
     const n = rooms[Math.floor(Rp() * rooms.length)], a = Rp() * Math.PI * 2;
-    let x = n.x, y = n.y; for (let q = 0; q < n.r * 1.6; q += .1) { x = n.x + Math.cos(a) * q; y = n.y + Math.sin(a) * q; if (inside(x, y) > -.55) break; }
-    if (inside(x, y) > -.4 || C.props.some(p => Math.hypot(p[1] - x, p[2] - y) < 1.4)) continue;
+    let x = n.x, y = n.y; for (let q = 0; q < n.r * 1.6; q += .1) { x = n.x + Math.cos(a) * q; y = n.y + Math.sin(a) * q; if (inside(x, y) > -1.05) break; }   // (a metre off the wall: its rock stands out)
+    if (inside(x, y) > -.9 || C.props.some(p => Math.hypot(p[1] - x, p[2] - y) < 1.4)) continue;
     C.props.push(['crystal', +x.toFixed(2), +y.toFixed(2), {breakable: 'crystal', hp: 40, maxHp: 40, stage: 0, r: .4}]); got++;
   }
   for (let t = 0, got = 0; t < 120 && got < 14; t++) {

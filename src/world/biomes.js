@@ -907,14 +907,16 @@ function forestRuins(q, ctx) {
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
 }
 const FOREST_GROUND = {ruins: forestRuins};
+const BLACK = hex('#000000');
 // THE CAVE's floor (world/caves.js, world/cave3d.js): packed earth and grit in the dark, bare rock showing through in sheets, darker
 // and stonier toward the walls (d: m from the wall, < 0 in the open), loose stones; ctx.cave its plan, X0 / Y0 the canvas's origin
 function caveFloor(G, S, x, y, mx, my, d) {
+  if (d > .06) { G.c(x, y, BLACK); return; }   // (under the rock: black, so the floor ends on the walls' line where a wall isn't drawn)
   const n = fbm(mx * .32, my * .32, 61), w = d > -.3 ? 2 : d > -.75 ? 1 : 0, h = hsh(x, y, 62);
   if (n + (vn(mx * 2.2, my * 2.2, 63) - .5) * .12 > .6 - w * .04) { G.p(x, y, S.rock, Math.min(3, (n > .7 ? 1 : 2) + (w > 1 ? 1 : 0))); return; }   // rock through the floor
   if (h < .05 + w * .05) { G.p(x, y, S.rock, 1 + (hsh(x, y, 64) * 3 | 0)); return; }   // grit
-  const e = vn(mx * 1.1, my * 1.1, 65);
-  G.p(x, y, S.earth, Math.min(3, (e > .62 ? 1 : e > .3 ? 2 : 3) + (w > 1 && e > .3 ? 1 : 0)));
+  const e = fbm(mx * 2.1, my * 2.1, 65) + (hsh(x, y, 67) - .5) * .08;   // (packed earth: fine mottling, two tones, the darkest only at the walls)
+  G.p(x, y, S.earth, Math.min(3, (e > .5 ? 1 : 2) + (w > 1 ? 1 : 0)));
 }
 function caveRuins(q, ctx) {
   const S = STYLES.ruins, {PPM, WPX, HPX, X0, Y0, cave: C} = ctx, G = new Pix(WPX, HPX);

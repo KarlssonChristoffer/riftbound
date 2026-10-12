@@ -10,7 +10,8 @@
 import {cliffGeometry} from './cliffs3d.js';
 
 const BINS = 8;
-const SHOW = -.35;     // a stretch shows while its way into the open . the way to the camera > SHOW (side-on ones show)
+const SHOW = .3;       // a stretch shows while its way into the open . the way to the camera > SHOW (the ones facing it; side-on ones stand
+                       // edge-on between him and the camera in a passage that runs toward it, and hide the floor)
 const FLOOR_C = .5;    // m: the floor's grid
 const FLOOR_PAST = .9; // m: the floor runs this far past the open (under the walls' feet)
 
@@ -69,7 +70,7 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
     if (!runs[b].length) { meshes.push(null); continue; }
     const rs = runs[b].map(pts => {
       let lo = 1e9; for (const [x, z] of pts) lo = Math.min(lo, foot(x, z));
-      return {pts, top, bot: foot, minBot: lo - .05, base: 0, relief: .9, talus: true, lip: false, dark: y => -.12, seed: seed++};
+      return {pts, top, bot: foot, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: seed++};
     });
     const geo = cliffGeometry(rs, o);
     if (!geo) { meshes.push(null); continue; }
