@@ -30,8 +30,12 @@
 //             went (F.outcrops: {h, ctl: [[x, y, bank], ...]}; layout.js makes each a terrace with rock, as its ledges), and BLOCKS:
 //             big lone boulders, rock all round. Away from the water, the clearing and the esker's crest
 //   BOULDERS  one boulder field in a hollow (F.boulders: {x, y, r}): big and small rocks lying close
-//   LAKE      a lake in the lowest hollow the seed's candidates find: a basin cut level into the ground, DEEP water (inStream:
-//             falling in is a respawn, as the river)
+//   LAKE      a lake in the lowest hollow the seed's candidates find: a basin cut level into the ground, its floor at the water's
+//             surface; the first TUNE.lake.wade m out from the shore are a shelf you wade, past it DEEP water (F.inDeep, inStream:
+//             falling in is a respawn, as the river). Its SHORE wanders inside the basin's ellipse (bays and points from a few
+//             seeded lobes; full where the stream comes in, where the outflow leaves and toward the clearing): the basin's floor
+//             left dry between the two is a STRAND of sand, gravel and stones at the water's height. Still water (sample's speed
+//             0: gfx.js WATER_FS wStill), a shallow shelf along the shore that drops off to the deep (depth)
 //   STREAM    from a spring on high ground near the north edge it runs down to the lake, wandering, downhill where it can; shallow
 //             and wadeable (not water to the sim); its bed is cut into the ground (lay, with layout.js's sampler: never rising
 //             downstream, into the lake at its surface)
@@ -67,7 +71,7 @@ export const TUNE = {
   outcrop: {n: [3, 6], len: [3.5, 7], wid: [2.4, 4.2], rise: [1.1, 2.3]},
   block: {n: [3, 6], r: [1.1, 1.9], rise: [1.5, 2.8]},
   boulders: {r: [4, 5.5], n: [10, 16]},
-  lake: {rx: [6.5, 9.5], ry: [4.5, 6.5], depth: .35, rim: 3.2, minBed: .55},
+  lake: {rx: [6.5, 9.5], ry: [4.5, 6.5], depth: .35, rim: 3.2, minBed: .55, shore: .36, shelf: 1.3, wade: 1},   // (shore: how far the bays reach in, a share of the radius; shelf: m of shallows before the drop-off; wade: m of it walked)
   stream: {hw0: .3, hw1: .55, step: .6, depth: .1, bank: 1.25},
   trees: {cell: 3.2, jitter: .36, base: .12, dense: .78, slope: .5, water: 1.4, edge: 2.2, south: 4},
   under: {cell: 1.6, jitter: .4, p: .2},
@@ -258,7 +262,7 @@ export function forestPlan(seed) {
   };
   const slope = (x, y) => { const e = .5; return Math.hypot(F.height(x + e, y) - F.height(x - e, y), F.height(x, y + e) - F.height(x, y - e)) / (2 * e); };
   F.shapes.push({type: 'field', reach: [RECT.x0 - 30, RECT.y0 - 30, RECT.x1 + 30, RECT.y1], fn: (x, y) => reliefH(x, y) + highH(x, y) + eskerH(x, y)}, ...hills, F.canyon.cut,
-    {type: 'basin', x: L.x, y: L.y, rx: L.rx + .3, ry: L.ry + .3, h: L.bed, rim: L.rim});
+    {type: 'basin', x: L.x, y: L.y, rx: L.rx + .3, ry: L.ry + .3, h: L.bed + WATER_H, rim: L.rim});   // (its floor at the water's surface: the strand and the shelf are walked at it)
 
   // a watercourse from (x, y) toward (tx, ty): each step mostly toward it, downhill where the ground falls, wandering (the seed's
   // phase and a noise field), until done(x, y) -> [[x, y], ...] (a point every 3 steps)
@@ -325,6 +329,33 @@ export function forestPlan(seed) {
       if (!best || score < best.score) best = {x, y, score};
     }
     F.clearing = {x: +best.x.toFixed(2), y: +best.y.toFixed(2), r: C.r};
+  }
+  // ---- SHORE: the lake's edge wanders inside the basin's ellipse (seeded lobes: bays and points; their own generator, so nothing
+  // after this changes its draws), held at the ellipse where the stream comes in, where the outflow leaves (no gap at either mouth)
+  // and mostly toward the clearing (the settlement's shore). F.inLake / F.lakeEdge from here on are the wandering shore's; what
+  // was placed before (the esker, the hills) kept off the ellipse, which holds the whole lake
+  {
+    const RS = rng(mix(seed, 41)), LS = T.lake.shore, harm = [2, 3, 4, 5, 7].map(k => ({k, a: (.35 + RS()) / k ** .7, p: RS() * Math.PI * 2})), hs = harm.reduce((t, h) => t + h.a, 0);
+    const ang = (x, y) => Math.atan2((y - L.y) / L.ry, (x - L.x) / L.rx), sE = F.stream, o0 = F.outflow;
+    const mouths = [[ang(sE.px[sE.n - 1], sE.py[sE.n - 1]), .34, 1], [ang(o0.px[0], o0.py[0]), .34, 1], [ang(F.clearing.x, F.clearing.y), .5, .75]];
+    const SR = new Float32Array(257);   // the shore's radius (a share of the ellipse's) round the lake, 256 steps: a lookup, not five cosines a call
+    for (let i = 0; i <= 256; i++) {
+      const th = i / 256 * Math.PI * 2 - Math.PI; let s = 0; for (const h of harm) s += h.a * Math.cos(h.k * th + h.p);
+      let k = Math.max(0, Math.min(1, (s / hs + .1) / .8)) ** 1.5; for (const [m, w, q] of mouths) { const d = Math.atan2(Math.sin(th - m), Math.cos(th - m)) / w; k *= 1 - q * Math.exp(-d * d); }
+      SR[i] = 1 - LS * k;
+    }
+    const fOf = (x, y) => { const u = (x - L.x) / L.rx, v = (y - L.y) / L.ry, f = (Math.atan2(v, u) + Math.PI) / (Math.PI * 2) * 256, i = Math.min(255, f | 0); return Math.hypot(u, v) / (SR[i] + (SR[i + 1] - SR[i]) * (f - i)); };
+    F.shoreAt = fOf;   // (1 at the shore, < 1 in the water)
+    F.inLake = (x, y, grow = 0) => {
+      const rx = L.rx + grow, ry = L.ry + grow; if (x < L.x - rx || x > L.x + rx || y < L.y - ry || y > L.y + ry) return false;
+      return grow ? F.lakeEdge(x, y) > -grow : fOf(x, y) < 1;
+    };
+    F.lakeEdge = (x, y) => {   // m to the shore (+ in the water): its value over its slope (exact at the shore, near enough a few m off it)
+      const f = fOf(x, y), e = .05, gx = fOf(x + e, y) - fOf(x - e, y), gy = fOf(x, y + e) - fOf(x, y - e), g = Math.hypot(gx, gy) / (2 * e);
+      return g > 1e-6 ? Math.min(Math.max(L.rx, L.ry), (1 - f) / g) : L.ry;
+    };
+    F.strand = (x, y) => lakeD(x, y) < 1 + .3 / Math.min(L.rx, L.ry) && fOf(x, y) >= 1;   // the basin's dry floor between the shore and the ellipse
+    F.inDeep = (x, y) => F.inLake(x, y) && F.lakeEdge(x, y) > T.lake.wade;   // past the shelf you wade on: deep water (layout.js inStream)
   }
   const CL = F.clearing, clearD = (x, y) => Math.hypot(x - CL.x, y - CL.y) - CL.r;
   // ---- OUTCROPS (roches moutonnees) and BLOCKS (big boulders): small terraces with rock; the ice made the gentle side and the cliff
@@ -706,7 +737,7 @@ export function lay(F, G) {
 const K_S = .55, _w = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0};
 export function sample(F, x, y, out) {
   if (F.inLake(x, y)) {
-    const L = F.lake; out.kind = 7; out.a = y - L.y; out.hw = L.ry; out.edge = F.lakeEdge(x, y); out.s = (x - L.x) * .3; out.speed = .15; out.hold = 0;
+    const L = F.lake; out.kind = 7; out.a = y - L.y; out.hw = L.ry; out.edge = F.lakeEdge(x, y); out.s = (x - L.x) * .3; out.speed = 0; out.hold = 0;   // (speed 0: still water, gfx.js wStill)
     return true;
   }
   const B = F.box; if (x < B[0] || x > B[2] || y < B[1] || y > B[3] || !F.at(x, y, _w)) return false;
@@ -719,7 +750,10 @@ export function sample(F, x, y, out) {
 // how deep its bed lies, 0 (the waterline) .. 1 (waterbed.js): the streams shallow and clear, the spring a well, the lake a bowl
 export function depth(F, o, x, y) {
   let d;
-  if (o.kind === 7) d = .12 + .88 * smooth(o.edge / 2.2) + (vnoise(x * 2, y * 2, 36) - .5) * .08;
+  if (o.kind === 7) {   // the lake: a shallow shelf along the shore (the bed in sight), then the drop-off to the deep, a few holes and humps
+    const sh = TUNE.lake.shelf * (.75 + .5 * vnoise(x * .35, y * .35, 37));
+    d = .05 + .2 * smooth(o.edge / sh) + .75 * smooth((o.edge - sh) / 1.4) + (vnoise(x * 1.3, y * 1.3, 36) - .5) * .1;
+  }
   else {
     d = .05 + .22 * smooth(o.edge / Math.max(.08, o.hw)) + (vnoise(x * 3, y * 3, 34) - .5) * .08;
     const rs = Math.hypot(x - F.spring.x, y - F.spring.y) / F.spring.r; if (o.kind === 6 && rs < 1) d = Math.max(d, .2 + .6 * smooth((1 - rs) / .7));
@@ -746,6 +780,17 @@ export function paint(F, K, S, T) {
     let e = o.d - o.hw, side = o.a < 0 ? -1 : 1, deep = Math.abs(o.a) < o.hw * .45, lake = false;
     if (eL < e) { e = eL; lake = true; const u = (mx - L.x) / L.rx, v = (my - L.y) / L.ry; side = u + v < 0 ? -1 : 1; deep = Math.hypot(u, v) < .7; }
     if (!inS && e > 1.2) continue;
+    if (lake && e >= 0 && F.strand(mx, my)) {   // the STRAND: the basin's floor the water left, at its height: wet sand at the water, then sand,
+      const g = n2(x / 6, y / 5, 81), pe = hsh(x, y, 82);   // gravel in drifts, pebbles; moss creeping in from the land side
+      const out = (Math.hypot((mx - L.x) / L.rx, (my - L.y) / L.ry) - 1) * Math.min(L.rx, L.ry);   // m inside the ellipse's rim (< 0)
+      if (e < .05) G.p(x, y, S.earth, 3);
+      else if (e < .16) G.p(x, y, S.earth, hsh(x, y, 83) < .6 ? 2 : 1);
+      else if (out > -.35 + n2(x / 3, y / 3, 84) * .3 && hsh(x, y, 85) < .7) G.p(x, y, S.moss, hsh(x, y, 86) < .5 ? 2 : 1);
+      else if (pe < .035) { G.p(x, y, S.rock, 0); G.p(x + 1, y, S.rock, 1); G.p(x, y + 1, S.rock, 2); G.p(x + 1, y + 1, S.rock, 3); }   // a pebble, lit from the up-left
+      else if (g > .55) G.p(x, y, S.floor, pe < .45 ? 1 : pe < .8 ? 2 : 3);
+      else G.p(x, y, S.inlay, g < .3 && pe < .5 ? 1 : 2);
+      continue;
+    }
     e += (n2(x / 4, y / 3, 73) - .5) * (lake ? .12 : .05);
     if (e >= 1.05) continue;
     if (e >= 0) {   // the banks: an earth lip, damp ground, then the lusher band
@@ -765,6 +810,14 @@ export function paint(F, K, S, T) {
     if (!lake && o.k === 0 && rs < sr + .03) t = rs < .07 || (rs > .14 && rs < .18 && hsh(x, y, 8) < .85) || (rs > .27 && rs < .31 && hsh(x, y, 9) < .6) ? 0 : side < 0 && d < .1 ? 3 : side > 0 && d < .04 ? 0 : rs < .2 ? 2 : 1;
     else t = side < 0 && d < (lake ? .14 : .09) ? 3 : side > 0 && d < (lake ? .06 : .04) ? 0 : deep ? 2 : 1;
     G.p(x, y, W, t);
+  }
+  // a few big stones on the strand where it is wide (the bays' floors), seeded by their spot round the lake
+  for (let k = 0; k < 48; k++) {
+    const a = k / 48 * Math.PI * 2, cx = Math.cos(a), cy = Math.sin(a); if (hsh(k, 5, F.seed & 255) > .3) continue;
+    let r0 = 0; for (let r = .5; r <= 1.02; r += .01) if (F.strand(L.x + cx * L.rx * r, L.y + cy * L.ry * r)) { r0 = r; break; }
+    if (!r0 || (1.02 - r0) * Math.min(L.rx, L.ry) < .7) continue;   // (the strand too narrow here)
+    const r = r0 + (1.02 - r0) * (.35 + .3 * hsh(k, 6, 9)), sz = .6 + hsh(k, 7, 11) * .6;
+    T.boulder(K, L.x + cx * L.rx * r - X0, L.y + cy * L.ry * r - Y0, 4 * sz + 1.5, 2.8 * sz + 1, S.rock, k * 31 + 7, S.moss);
   }
   // the spring: a ring of mossy stones round where it wells up, open downstream
   const C = F.stream, dx = C.px[Math.min(C.n - 1, 8)] - C.px[0], dy = C.py[Math.min(C.n - 1, 8)] - C.py[0], a0 = Math.atan2(dy, dx);

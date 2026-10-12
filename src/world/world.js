@@ -582,7 +582,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   };
   // walkable terrain (layout.js; ?terrain=0: none): the field's height under every vertex (it is held flat at the water, the ravine's rim)
   const TF = TERRAIN_ON ? terrainField() : null, tH = TF ? groundDrawn() : () => 0;   // (the drawn ground: the mesa's falls away behind its rock)
-  const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) || inBrookPool(x, z, POOL_GROW) || (FOREST !== null && FOREST.inLake(x, z, POOL_GROW)) ? WATER_H : 0) + tH(x, z);   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
+  const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) || inBrookPool(x, z, POOL_GROW) ? WATER_H : 0) + tH(x, z);   // (the forest's lake: its basin's floor is already its water's surface, world/forest.js)   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
   // a patch's grid, s m cells, from (rx0, rz0) to (rx1, rz1). It follows the edge exactly: the last bank vertex of each column
   // moves onto the edge line and the next one to just past it at the ravine's depth, so the wall is one smooth face (a plain
   // 0.25 m grid made it a staircase). Neighbouring patches share their border vertices (one lattice, one edge line per column)

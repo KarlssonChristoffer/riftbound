@@ -103,7 +103,7 @@ export const STREAM = {
 };
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
 export const inStream = (x, y) => {
-  if (FOREST !== null && y < 0) return FOREST.inLake(x, y);   // (the forest's lake: deep water, world/forest.js)
+  if (FOREST !== null && y < 0) return FOREST.inDeep(x, y);   // (the forest's lake past the shelf you wade: deep water, world/forest.js)
   if (y < STREAM.y0 || y > STREAM.y1) return false;
   if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y) || inBrookPool(x, y);   // (the plateau's pool is deep water too; so is the brook's, brook.js)
   return !STREAM.stones.some(s => Math.hypot(x - s.x, (y - s.y) * 1.3) < s.r);   // stones are dry footing
