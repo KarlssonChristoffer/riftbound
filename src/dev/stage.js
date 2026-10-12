@@ -27,14 +27,15 @@ const T = {
   night: ['#3a4a78', '#2a375e', '#1d2747', '#0f1528'], star: ['#fffbe0', '#fff1a8', '#f2d36a', '#9c7a2a'],
 };
 export const STAGES = ['stone', 'wood', 'rug', 'meadow', 'none'];
-export const BACKS = {
-  curtain: {bg: [.1, .04, .06]},
-  paper: {bg: [.55, .53, .5]},
-  'stone wall': {bg: [.12, .12, .11]},
-  'night sky': {bg: [.03, .04, .09]},
-  'open sky': {bg: [.55, .72, .9]},
-  'dark': {bg: [.05, .055, .055]},
-  'grey': {bg: [.32, .33, .32]},
+export const STAGE_SW = {stone: '#918c80', wood: '#a3773f', rug: '#a13b33', meadow: '#6e9d45', none: null};   // (their swatches: the wardrobe's chips)
+export const BACKS = {   // bg: the rest of the frame (G.isolate); sw: the swatch
+  curtain: {bg: [.1, .04, .06], sw: '#8f2c37'},
+  paper: {bg: [.55, .53, .5], sw: '#d9d3c6'},
+  'stone wall': {bg: [.12, .12, .11], sw: '#878073'},
+  'night sky': {bg: [.03, .04, .09], sw: '#2a375e'},
+  'open sky': {bg: [.55, .72, .9], sw: '#8cb8e6'},
+  'dark': {bg: [.05, .055, .055], sw: '#151716'},
+  'grey': {bg: [.32, .33, .32], sw: '#545654'},
 };
 
 // a model of one bone ('Root' at the feet): pieces made by fill(K)
