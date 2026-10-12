@@ -5,10 +5,10 @@
 //   foreground   overhanging branches, vines, broken arch tops (ember: charred branches + chains; frost: snow-laden
 //                boughs + icicles; rift: shards / crystal spires) along the world's four borders, drawn near the
 //                camera with parallax > 1 in the FRONT layer; they fade when the player is behind them
-//   clouds       cloud shadows drifting with the wind over ground and sprites alike (PRE layer), day and dusk, strength
-//                from the mood's sun shadow; 2 hard-edged levels, never a gradient. A weather FRONT (sim/env.js) on its way:
-//                the clouds thicken toward its storm side (or break up toward its clear side) across its band, and the
-//                storm side lies darker, greyer and in shade (render/clouds.js)
+//   clouds       cloud shadows drifting with the wind aloft over ground and sprites alike, day and dusk, strength from the
+//                open sky's sun shadow; 2 hard-edged levels, never a gradient; the cover continuous. A change of weather
+//                (sim/env.js TRANSITIONS): its deck over the same cloud field (a front's torn wall, a breaking deck's gaps),
+//                lit by env.under where it lies (render/clouds.js, core/cloudfield.js)
 //   shafts       slanted additive light bands from the sun's side with dust motes (ADD layer); they turn with the camera
 //   reflections  the stream mirrors the Ranger (standing on the bank / a stepping stone, or leaping over it), bushes,
 //                tufts, rocks, pots and trees beside it, plus a sky glint, broken up by ripples (GROUND layer: ground
@@ -36,9 +36,9 @@
 //                template, offset and parallax is the arena's (same seeds, same RNG order). The host camera is not
 //                clamped to the world like the arena's, so near a border the void beyond it shows; the pieces then
 //                sit where the arena's clamped camera would have them (at the view edge), framing that void.
-//   clouds       the arena's tileable level map, rebuilt top-down in world metres (1 texel = 1/PPM m, like the ground
-//                texture), drawn as ONE pattern fill whose transform is the ground plane's world -> view affine: crisp
-//                nearest texels, no tile seams, fixed to the ground at any yaw. The PRE layer MIXES toward its colour,
+//   clouds       the cloud field in world metres (1 texel = 1/PPM m, like the ground texture), evaluated in the composite at
+//                the ground texel under each pixel through the ground plane's world -> view affine: crisp texels, no seams,
+//                fixed to the ground at any yaw (?wxtrans=0: the arena's tileable level map, the old way). The PRE layer MIXES toward its colour,
 //                so the arena's colour multiply (1 - k (1 - c)) is approximated by mix(alb, c * .45, k) (exact at
 //                albedo .45, within ~6 / 255 elsewhere).
 //   shafts       feet in the world (pillar gaps, gates, trail tree gaps), the slant = the sun's direction projected for
@@ -69,16 +69,26 @@
 // silhouette layer (2-3 dark tones + a 1 px rim on the sun side), calmer than the character.
 import {TAU, clamp, mod, mk, fit, hsh, vn, rng, rgb, css, PAL, SHAFT, WATER, PUDDLES, PUD_COL, KIT, SEED} from './depth/art.js';
 import {flags} from '../core/flags.js';
+import {coverQ, wrapDrift, PERIOD, FIELD_V2, fieldUniforms, density} from '../core/cloudfield.js';
+import {OLD_CLOUDS, CLOUD_SUN, CLOUD_VIEW, SOFT, QUANT_U} from '../render/clouds.js';
 
 const DEG = Math.PI / 180;
 // ============================================================ tunables (live: __r3d.features.find(f => f.name === 'depth').TUNE)
 const TUNE = {
   fg: {on: false /* off by default: the user found the screen-edge silhouettes didn't look good in 3D (menu / ?fg=1) */, fade: [1, .66, .34], fadeStep: .09, body: [-10, -50, 10, 2], sway: 1, hyst: .12 /* 3D: slot swap hysteresis */},
   clouds: {on: true, tileM: [40, 30], cover: .31, core: .19, s: [.24, .12], time: {day: 1, dusk: .55, night: 0}, speed: 1.9, none: ['rift'],
+    sun: [.85, .45] /* render/clouds.js CLOUD_SUN: the share of the sun a cloud takes at its thickest / (the old field) its edge level (the shade is the cast shadows' own: no alphas, no time of day) */,
+    mean: .85 /* (the smooth field) a cloud's mean share over its ground (render/clouds.js SOFT: the soft edge, thinner near it): the gaps' sun back */,
+    // (render/clouds.js CLOUD_VIEW) the whole view dims as a cloud passes over: its share round the player, the soft edge pen m
+    // either side of the cloud's (the sun going in takes a few s: an edge crosses 2 pen at the wind aloft's ~1.3 m/s), averaged with
+    // four points spread m away (weight w each), eased over ease s
+    view: {pen: 3, spread: 7, w: .15, ease: 1.2},
     mixC: .45 /* 3D: the mix colour = shadow colour x this (approximates the arena's multiply) */,
     // 3D: a front's storm side (rain, snow or storm there): its cover, and how much greyer / darker than the clear side's light
     // it is drawn (x the mood's own difference, sim/env.js mood(): .35 c grey, ambient x (1 - .1 c - .12 rain - .2 storm))
-    front: {cover: .94, grey: 1, dark: 1, sun: 1, col: [.92, .95, 1]}},
+    front: {cover: .94, grey: 1, dark: 1, sun: 1, col: [.92, .95, 1],
+      appr: .8 /* the cloud the clear side's shadows thicken to at a front's edge (render/clouds.js: within env.front.appr m) */,
+      viz: null /* dev: [r, g, b] tints the deck in that colour (its shape, in the old composite) */}},
   shafts: {on: true, max: 5, lenMax: 120, el: [38, 62], time: {day: .85, dusk: 1, night: .5}, night: ['frost', 'rift'], motes: 9, yawStep: 1 /* 3D: deg */},
   refl: {on: true, alpha: .6, tint: .38, ripple: 1, reach: 2.5, glowDim: .5, bed: -.18 /* 3D: the stream bed's height (m) = world.waterH */,
     height: 6 /* 3D: how tall a thing still mirrors whole (m over the water): how far up the GPU searches */},
@@ -330,7 +340,89 @@ export async function create(host) {
   const CLS = {lv: null, TW: 0, TH: 0, ver: 0, col: [0, 0, 0], a1: 0, a2: 0, T: [1024, 1024, 1024, 1024], Q: [1024, 1024, 1024, 1024], m: [0, 0, 0, 0], e: 0, f: 0, front: null,
     fr: {dir: null, s: 0, band: null, bend: [0, 0, 0], storm: 0, arrive: true, grey: [1, 1, 1], greyK: 0, darkK: 0, sunK: 0}};
   const ambK = c => 1 - .1 * c.cloud - .12 * c.rain - .2 * c.storm;   // (sim/env.js mood(): the weather's share of the ambient)
+  // THE CLOUD FIELD (render/clouds.js, core/cloudfield.js; ?wxtrans=0: drawCloudsOld below). env owns the field's drift (the sim:
+  // env.aloft.o, so its rain stops in the same gaps that are drawn); the view follows it smoothly between the sim's steps:
+  // its own copy moves at the layers' velocities every frame and is pulled onto the sim's (while the sim runs). Behind the
+  // pause menu the clouds drift on until they are 25 m ahead of the sim's, then hold; back in play they are caught up at
+  // most 2 m/s faster or slower (no jump; only 40 m off, a clock or teleport, at once). The cover is continuous (the quantiles: no steps); the
+  // shadows' strength is the OPEN sky's sun shadow (the mood is the view's mean light); the deck (env.deck) and a front's
+  // edge (env.front) go to the shader as they are. The old composite's storm look (uFrK, uFrS) is the deck against the
+  // view's mean light: it can only darken the deck, not brighten the gaps (render/lighting.js + gfx.js light each pixel
+  // from env.open / env.under once they read cloudAt().y)
+  const DUMMY = new Uint8Array(1), OV = new Float64Array(6), OE = new Float64Array(6), OR = new Float64Array(6), RQ = (v, R) => Math.round(v * R) / R;
+  const CLV = {rt: 0, st: -1, stRt: -1, init: false, g: 0, gInit: false};
+  const coverOfN = c => c <= 0 ? 0 : c < .13 ? c / .13 * .1606 : Math.min(.78, .08 + .62 * c);   // (continuous: the old curve, from 0)
+  const CLU = {uClD: [0, 0, 0, 0], uClW: [0, 0, 0, 0], uDk: [0, 0, 0, 0], uFrE: [0, 0, 0, 0], uClQa: QUANT_U[0], uClQb: QUANT_U[1], uClQc: QUANT_U[2],
+    uCfA: [0, 0, 0, 0], uCfB: [0, 0, 0, 0], uCfC: [0, 0, 0, 0], uCfD: [0, 0, 0, 0]};
+  function driftClouds(dt) {
+    const AL = host.env?.aloft; if (!AL) return;
+    CLV.rt += dt;
+    if (!CLV.init) { CLV.init = true; OV.set(AL.o); }
+    if (AL.t !== CLV.st) { CLV.st = AL.t; CLV.stRt = CLV.rt; }   // (the sim stepped)
+    const live = CLV.rt - CLV.stRt < .1;   // (the sim runs: not paused, not held)
+    let m = 0;
+    for (let i = 0; i < 6; i++) { const P = PERIOD[i >> 1], e = AL.o[i] - OV[i]; OE[i] = P ? e - Math.round(e / P) * P : e; m = Math.max(m, Math.abs(OE[i])); }   // (P 0: that pair never wraps)
+    if (live && m > 40) OV.set(AL.o);
+    else {
+      const go = live || m < 25 ? dt : 0, c = live ? Math.min(1, 3 * dt) : 0;
+      for (let i = 0; i < 6; i++) OV[i] += AL.vel[i] * go + clamp(OE[i] * c, -2 * dt, 2 * dt);
+    }
+    wrapDrift(OV);
+  }
+  // (CLOUD_VIEW) the view's cloud share: the field's soft share (render/clouds.js SOFT, its slope by differences) round the player,
+  // at the view's own drift (OV), eased; CLS.g goes to the composite as uCl.w
+  const VP = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]];
+  function shareAt(x, y, th, pen) {
+    const d = density(x, y, OV), h = .25, gx = (density(x + h, y, OV) - density(x - h, y, OV)) / (2 * h), gy = (density(x, y + h, OV) - density(x, y - h, OV)) / (2 * h);
+    const e = d - th, t = clamp((e / Math.max(1e-5, Math.hypot(gx, gy)) + pen) / (2 * pen), 0, 1), k = clamp(e / SOFT.full, 0, 1);
+    return t * t * (3 - 2 * t) * (SOFT.edge + (1 - SOFT.edge) * k * k * (3 - 2 * k) * (1 - SOFT.thin / 2));
+  }
+  function viewShare(dt) {
+    const E = host.env, p = host.player; if (!CLOUD_VIEW || !E || !p) return;
+    const V = TUNE.clouds.view, cO = coverOfN(E.open.cloud);
+    let c = 0;
+    if (cO > 0) { const th = coverQ(cO); for (let i = 0; i < 5; i++) c += (i ? V.w : 1 - 4 * V.w) * shareAt(p.x + VP[i][0] * V.spread, p.y + VP[i][1] * V.spread, th, V.pen); }
+    CLV.g = CLV.gInit ? CLV.g + (c - CLV.g) * (1 - Math.exp(-dt / V.ease)) : c; CLV.gInit = true;
+  }
   function drawClouds() {
+    if (OLD_CLOUDS) return drawCloudsOld();
+    const E = host.env; if (!host.G.setClouds || !E || !E.aloft || TUNE.clouds.none.includes(biome)) return false;
+    const tn = timeName(), k = TUNE.clouds.time[tn] ?? 0, M = host.mood, O = E.open, L = E.light, Un = E.under, dk = E.deck, Fr = E.front;
+    let a = M ? M.shadow.a : 0;
+    if (O.cloud !== L.cloud) a = a / Math.max(.2, 1 - .8 * L.cloud) * (1 - .8 * O.cloud);   // (mood(): the shadow x (1 - .8 c); the open sky's)
+    const s = Math.min(1.2, a / .46) * k, cO = coverOfN(O.cloud), deck = dk.mode > 0;
+    if (!deck && (s <= .01 || cO <= 0)) return false;
+    if (CLS.lv !== DUMMY) { CLS.lv = DUMMY; CLS.TW = 1; CLS.TH = 1; CLS.ver++; }   // (no tile: one texel for tTop's cloud rows)
+    const cr = TUNE.clouds.core / TUNE.clouds.cover, cA = coverOfN(Math.max(O.cloud, TUNE.clouds.front.appr));
+    CLS.T[0] = coverQ(cO); CLS.T[1] = coverQ(cO * cr); CLS.T[2] = coverQ(cA); CLS.T[3] = coverQ(cA * cr);
+    const R = PPM, U = CLS.u = CLU;
+    U.uClD[0] = RQ(OV[0], R); U.uClD[1] = RQ(OV[1], R); U.uClD[2] = RQ(OV[2], R); U.uClD[3] = RQ(OV[3], R);   // (whole texels: the shadows step, never shimmer)
+    U.uClW[0] = RQ(OV[4], R); U.uClW[1] = RQ(OV[5], R); U.uClW[3] = R;
+    if (FIELD_V2) { OR[0] = RQ(OV[0], R); OR[1] = RQ(OV[1], R); OR[2] = OV[2]; fieldUniforms(OR, U); }   // (the smooth field: each noise's offset, from the drift in whole texels)
+    U.uDk[0] = dk.mode; U.uDk[1] = dk.q; U.uDk[2] = dk.rim;   // (photo mode's preview: as env says (a previewed weather: none))
+    CLS.front = null;
+    if (U.uDk[0] > 0) {   // the deck: a front's edge (mode 2) and the old composite's look of it against the view's mean light
+      const f = CLS.fr, FT = TUNE.clouds.front;
+      f.dir = Fr.dir; f.s = Fr.s; f.band = Fr.band; f.bend[0] = Fr.bend[0]; f.bend[1] = Fr.bend[1]; f.bend[2] = Fr.bend[2];
+      U.uFrE[0] = Fr.bend[3]; U.uFrE[1] = Fr.bend[4]; U.uFrE[2] = Fr.bend[5]; U.uFrE[3] = Fr.appr;
+      f.storm = Fr.storm; f.arrive = true; f.grey = FT.col;
+      f.greyK = Math.min(1, .35 * Math.max(0, Un.cloud - L.cloud) * FT.grey); f.darkK = Math.min(.8, Math.max(0, 1 - ambK(Un) / ambK(L)) * FT.dark);
+      f.sunK = Math.min(1, Math.max(0, 1 - (1 - .55 * Un.cloud) / (1 - .55 * L.cloud)) * FT.sun);
+      if (FT.viz) { f.greyK = 1; f.darkK = .25; f.grey = FT.viz; }   // (dev: the deck tinted, to see its shape in the old composite)
+      CLS.front = f;
+    }
+    const c = M.shadow.c, mx = TUNE.clouds.mixC;
+    for (let i = 0; i < 3; i++) CLS.col[i] = Math.round(255 * c[i] * mx) / 255;
+    CLS.a1 = Math.round(255 * TUNE.clouds.s[1] * s) / 255; CLS.a2 = Math.round(255 * TUNE.clouds.s[0] * s) / 255;
+    // (CLOUD_SUN: the levels take the sun; the mood dims the open sky's by its whole cloud (sim/env.js mood: shadow x (1 - .8 c)),
+    // so the gaps get back the share the patches now carry: the view's mean sun stays the mood's. render/lighting.js applies it)
+    CLS.gap = 1; CLS.g = CLOUD_VIEW ? CLV.g : 0;
+    if (CLOUD_SUN) { const S = TUNE.clouds.sun; CLS.a1 = S[1]; CLS.a2 = S[0]; CLS.gap = 1 / (1 - cO * (FIELD_V2 ? S[0] * TUNE.clouds.mean : (1 - cr) * S[1] + cr * S[0])); }
+    proj2(0, 0, 0, _pp); groundInv(R, CLS.m); CLS.e = _pp[0]; CLS.f = _pp[1];   // (the world's texel grid: the drift is the layers')
+    host.G.setClouds(CLS);
+    return true;
+  }
+  function drawCloudsOld() {
     if (!host.G.setClouds) return false;
     const E = host.env, Fr = E && E.front && E.front.on && !E.previewing ? E.front : null;
     const tn = timeName(), k = (TUNE.clouds.time[tn] ?? 0) * (TUNE.clouds.none.includes(biome) ? 0 : 1), M = host.mood;
@@ -347,6 +439,7 @@ export async function create(host) {
       f.storm = Fr.storm; f.arrive = Fr.arrive; f.grey = FT.col;
       f.greyK = Math.min(1, .35 * dc * FT.grey); f.darkK = Math.min(.8, Math.max(0, 1 - ambK(St) / ambK(Cl)) * FT.dark);
       f.sunK = Math.min(1, Math.max(0, 1 - (1 - .55 * St.cloud) / (1 - .55 * Cl.cloud)) * FT.sun);   // (mood(): the sun's strength x (1 - .55 c))
+      const v = 1 - Fr.storm; f.greyK *= v; f.darkK *= v; f.sunK *= v;   // (cloudAt().y is the storm's mask now: the part the light doesn't carry)
       CLS.front = f;
     }
     const c = M.shadow.c, mx = TUNE.clouds.mixC, R = CL.R;
@@ -725,8 +818,10 @@ export async function create(host) {
     view(dt) {
       const t0 = performance.now();
       T += dt;
-      const dir = windDir(), v = TUNE.clouds.speed * (1 + .5 * gustNow()) * (host.env ? .6 + .4 * host.env.windLevel : 1), [TWm, THm] = TUNE.clouds.tileM;   // (a windy sky races)
-      CL.x = mod(CL.x + dir[0] * v * dt, TWm); CL.y = mod(CL.y + dir[1] * v * dt, THm);   // metres (the arena: px)
+      if (OLD_CLOUDS) {   // (?wxtrans=0: the old tile drifting on the ground wind)
+        const dir = windDir(), v = TUNE.clouds.speed * (1 + .5 * gustNow()) * (host.env ? .6 + .4 * host.env.windLevel : 1), [TWm, THm] = TUNE.clouds.tileM;   // (a windy sky races)
+        CL.x = mod(CL.x + dir[0] * v * dt, TWm); CL.y = mod(CL.y + dir[1] * v * dt, THm);   // metres (the arena: px)
+      } else { driftClouds(dt); viewShare(dt); }   // (the wind aloft's: sim/env.js)
       stepFG(dt); stepMotes(dt);
       acc += performance.now() - t0;
     },
@@ -750,6 +845,6 @@ export async function create(host) {
     },
   });
   F._dbg = {FG, SH, WA, CL, V, PT, proj, inv, footprint};
-  buildCloudLevels();   // ~0.1 s once, while the page loads (not as a hitch the first time the sun comes out)
+  if (OLD_CLOUDS) buildCloudLevels();   // ~0.1 s once, while the page loads (not as a hitch the first time the sun comes out)
   return F;
 }
