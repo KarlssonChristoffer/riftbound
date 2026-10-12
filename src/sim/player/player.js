@@ -31,11 +31,18 @@
 //   canLaunch() -> bool               a blast may THROW him (sim/player/launch.js: PL.launch; false: the skid, PL.knock)
 //   lasso(PL, internals) -> the lasso's hands (sim/player/lasso.js createLasso): while the equipment experiment's lasso has
 //            something to do it drives the frame (before the gun); PL.lasso is its API
+//   ropewall(PL, internals) -> the rope wall (sim/player/ropewall.js createRopeWall): the lasso's rope-up hands him to it, and while it
+//            has him it drives the frame (before anything else); PL.ropewall is its API. ropewallOn: false -> never (?ropewall=0)
+//   ropeCam(yaw)                      the rope wall's camera: side-on to a face whose outward normal is at world yaw `yaw` (the adapter)
+//   ladderOld -> true: the ladder climbs by itself (?ladder=old); else sim/player/ladder.js puts it under his control
 import {WEAPONS} from '../../content/weapons.js';   // the bow's numbers (shoot)
 import {ramps} from './harmonize.js';   // the character palette (pixel bow layer)
 import {clamp} from '../../core/mathx.js';
 import {createLaunch, STATES as THROWN} from './launch.js';   // thrown by a blast: flying, slammed, down, getting up
 import {STATES as BRAWLS} from './brawl.js';   // the live cowboys' boot, barge, lift, throw (sim/player/brawl.js: H.brawl)
+import {STATES as FISTS} from './fists.js';   // the live cowboys' fists: a move, a slip, a clinch (sim/player/fists.js: H.fists)
+import {STATES as TOOLS} from './tool.js';   // a tool in hand: the axe's swing (sim/player/tool.js: H.tool; docs/GATHERING.md)
+import {createLadder} from './ladder.js';   // the ladder under his control: up, down, stop, slide (?ladder=old: the climb below)
 export const AIM_H = 1.25;   // arrows fly at chest height
 // walkable terrain (docs/TERRAIN.md): a step up is taken in stride up to STEP_UP m (H.blocked stops anything higher), a step
 // down up to SNAP m (a slope walked or rolled down); a bigger drop is a ledge, and he falls
@@ -50,7 +57,7 @@ const AIM_TURN_RATE = 1200;
 const STANCE_HOLD = .25;  // s: a moving-aim stance (running forward / backing up) can't flip back sooner (no flip-flop)
 // states in which the player is taken over by a move (no aiming, rolling or new actions); 'rope': hanging from a lasso
 // (sim/player/lasso.js, the equipment experiment's)
-export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'hold', 'knock', 'rope', ...THROWN, ...BRAWLS]);
+export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'hold', 'knock', 'rope', ...THROWN, ...BRAWLS, ...FISTS, ...TOOLS]);
 // The dodge (Space). The roll clip is a FORWARD roll, so a roll never reverses:
 // - running into a roll more than leadMin deg off the way he faces: he plants and turns first (the run's turn frames,
 //   lead s each, untouchable from the plant)
@@ -246,7 +253,7 @@ export function createPlayer(H) {
     P.face = P.want = dirOf(D[0], D[1]);
   }
   // untouchable: rolling (from the plant on), or the first moment of a backstep (the game's i-frames)
-  const untouchable = () => P.state === 'roll' || (P.state === 'backstep' && P.t < DODGE.guard) || thrown.guard();   // (thrown: sim/player/launch.js)
+  const untouchable = () => P.state === 'roll' || (P.state === 'backstep' && P.t < DODGE.guard) || thrown.guard() || !!fists?.untouchable();   // (thrown: sim/player/launch.js; a slip: fists.js)
   function shoot() {
     if (gun?.on()) return;   // a gun fires on the press (sim/player/gun.js); a release does nothing here
     const W = WEAPONS.bow;
@@ -518,6 +525,7 @@ export function createPlayer(H) {
       return true;
     }
     if (P.state === 'climb') {
+      if (ladder.step(dt)) return true;   // under his control (sim/player/ladder.js; ?ladder=old: this automatic climb)
       const C = P.climb, Hh = C.c.h1, face = C.c.y + .05, top = C.c.y - C.c.reach, CL = A.CLIP.climb;
       // (down: to the ground where he steps off, a hand out from the face: under a ladder on a hill it lies lower than the climb's foot)
       const H0 = C.dir > 0 ? C.c.h0 : Math.min(C.c.h0, elev(C.c.x, face + .35)), CT = CLIMB_T * Math.max(1, (Hh - H0) / 2.4);
@@ -673,7 +681,10 @@ export function createPlayer(H) {
     const {SP, CLIP} = A, WALK = CLIP.walk, RUN = CLIP.run, ND = A.ND;
     const [mx, my] = moveInput();
     P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt); thrown.tick(dt);
+    if (ropewall && ropewall.step(dt, mx, my)) return;   // on a rope against a face (sim/player/ropewall.js; nothing while he isn't)
+    if (fists && fists.step(dt, mx, my)) return;   // the fists up: the guard, a punch, a slip, a clinch (sim/player/fists.js; nothing while they're down)
     if (brawl && brawl.step(dt, mx, my)) return;   // a boot, a barge, a lift, a throw (sim/player/brawl.js; nothing while it's idle)
+    if (tool && tool.step(dt, mx, my)) return;   // a tool's swing: the axe (sim/player/tool.js; nothing while it isn't swinging)
     if (lasso && lasso.step(dt, mx, my)) return;   // the lasso in his hands (sim/player/lasso.js; nothing while it's idle)
     if (gun && gun.step(dt, mx, my)) return;   // a gun loadout: the revolver drives the frame while it's in hand (sim/player/gun.js)
     if (stepTraverse(dt)) return;
@@ -896,10 +907,12 @@ export function createPlayer(H) {
   }
 
   // ---------------- input (the host maps its keys / buttons to these) ----------------
-  function onSpace() { if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
+  function onSpace() { if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
   function press() {   // LMB down: draw (kept through a roll)
+    if (tool?.press()) return;   // a tool in hand: LMB swings it (sim/player/tool.js)
+    if (fists?.press('L')) return;   // the fists up: the left hand (sim/player/fists.js)
     if (brawl?.press()) return;   // carrying something: LMB throws it (sim/player/brawl.js)
     if (gun?.on()) return gun.press();   // a gun loadout: the trigger (sim/player/gun.js)
     mouse.down = true; P.recover = 0;
@@ -910,8 +923,12 @@ export function createPlayer(H) {
   }
   function release() {   // LMB up: shoot, or buffer the shot during an aimed roll / a backstep
     mouse.down = false;
+    if (tool?.release()) return;
+    if (fists?.release('L')) return;
     if (P.state === 'draw') shoot(); else if ((P.state === 'roll' && P.aimRoll) || P.state === 'backstep') P.queuedShot = true;
   }
+  // RMB (core/input.js): the right hand while the fists are up -> true: taken (else RMB is an ability's)
+  const pressR = () => !!fists?.press('R'), releaseR = () => !!fists?.release('R');
   function hold(frame, sec) { if (BUSY.has(P.state) || dodging()) return; P.hold = {frame: A.SP[frame] ? frame : 'release.0', sec}; P.state = 'hold'; P.t = 0; }
   function knock(vx, vy) { if (P.state === 'climb' || THROWN.includes(P.state)) return; P.vx = vx; P.vy = vy; P.state = 'knock'; P.t = 0; }   // (thrown: a skid doesn't cut the flight short)
 
@@ -1105,7 +1122,15 @@ export function createPlayer(H) {
   PL.lasso = lasso;
   const brawl = H.brawl ? H.brawl(PL, internals) : null;   // (the live cowboys' boot, barge, lift and throw: sim/player/brawl.js)
   PL.brawl = brawl;
+  const fists = H.fists ? H.fists(PL, internals) : null;   // (the live cowboys' fists: sim/player/fists.js)
+  PL.fists = fists;
+  const tool = H.tool ? H.tool(PL, internals) : null;   // (a tool in hand, the axe: sim/player/tool.js)
+  PL.tool = tool;
+  const ropewall = H.ropewall ? H.ropewall(PL, internals) : null;   // (the rope wall: sim/player/ropewall.js; the lasso's rope-up hands him to it)
+  PL.ropewall = ropewall;
   const thrown = createLaunch({...internals, elev, inStream, splash, dryBack});   // a blast's throw (sim/player/launch.js: PL.launch)
+  const ladder = createLadder({...internals, elev});   // the ladder under his control (sim/player/ladder.js)
+  PL.ladder = ladder;
 
   // for the systems around him (they ask, they don't write P): face a shot along a view-frame direction (the string
   // settles: twang 0), flicker as he's hurt (i-frames; the respawn's flicker too), re-count the facings for an atlas
@@ -1114,5 +1139,5 @@ export function createPlayer(H) {
   const flicker = sec => { P.blink = sec; };
   const regrid = (n0, n1) => { P.face = Math.round(P.face * n1 / n0) % n1; P.want = P.face; };
   return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, tryVault, canVault, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, faceShot, flicker, regrid,
-    press, release, hold, knock, launch: thrown.start, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
+    press, release, pressR, releaseR, hold, knock, launch: thrown.start, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
 }

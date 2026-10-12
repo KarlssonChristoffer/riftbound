@@ -12,6 +12,11 @@
 //            or LMB (the gun). A CHAMPION is a tug of war: it heaves you toward it, then slackens: yank in the slack
 //   YANK     tap F: it flies at you off its feet (combat's / the gunmen's fling: a tumble, whoever it meets bowled over),
 //            lands a little short of you, takes the impact and lies stunned; a prop is shoved at you
+//   STRENGTH what it weighs (content/lasso.js WEIGHT) against your pull (TUNE.str: the spin's charge, the 'lasso.pull'
+//            modifiers) sets its CLASS at the catch: light (the above), even (dragged slowly, it tugs back, a yank only trips
+//            it), heavy (SNARE: the loop is snapped down onto its legs: it stands rooted a while, the rope let go), strong (a
+//            tug of war: its heaves reel you in; a yank in its slack trips it, one in a heave jolts you off your feet). The
+//            aim shows the class it would be (L.aim.cls) as the loop spins up
 //   SWING    an anchor: PL.lasso.hang (the pendulum is the player's); F or Space lets go; then the loop comes home
 //   ZIP      an anchor caught well under his hand and away (TUNE.zip: thrown from up high, the watchtower's lookout, the mesa):
 //            PL.lasso.zip: he hitches his end and slides down the line to it (docs/exp/brawl.md)
@@ -23,13 +28,13 @@
 // OWNS: L (the phase, the aim, the loop's flight, what's held, the anchor, the stunned list), the anchor segments' scratch.
 // READS: host.player / aim / mouse / G (gameToScreen: the cursor's anchors through the game's view, as the game's hover does) / entities (near) /
 //   elev / inStream / items (3D trees' bones), PL.lasso (mode, hand), the combat core (BS), the gunmen (sim), the lasso's
-//   own anchors (features/equip/anchors.js).
-// CALLS: PL.lasso spin / face / throwAt / haul / leash / yank / hang / letGo / stop; combat core hold / shift / fling;
-//   the gunmen's roped / shift / fling; combat's prop physics shove; host.knock / shake.
-// EMITS: lasso.throw / catch / miss / yank / slam / slip / swing / home (core/events.js).
+//   own anchors (features/equip/anchors.js), host.mods ('lasso.pull': the pull's modifiers).
+// CALLS: PL.lasso spin / face / throwAt / haul / strain / leash / yank / snare / hang / letGo / stop; combat core hold / shift /
+//   fling / root / airborne; the gunmen's roped / shift / fling / snare / recOf; combat's prop physics shove; host.knock / shake.
+// EMITS: lasso.throw / catch / miss / yank / slam / slip / swing / home / snare (core/events.js).
 // BUDGET: sim; spinning ~.02-.06 ms a step (the aim: the cursor's anchors among the trees in reach, a few hundred
 //   projections), flying a handful of grid queries a step, holding a few multiplies.
-import {TUNE, ANCHOR_TOP} from '../../content/lasso.js';
+import {TUNE, ANCHOR_TOP, WEIGHT} from '../../content/lasso.js';
 import {GADGETS} from '../../content/gadgets.js';
 import {clamp, hypot2, hypot3, TAU} from '../../core/mathx.js';
 import {topOfProp, walkable, vaultTop} from '../../world/world.js';
@@ -41,6 +46,7 @@ const TOP = {lasso_snag: 4.3, crate: .8, barrel: .9, barrel_x: .9, pot: .5, rock
   bush: 0, tuft: 0, fern: 0, reed: 0, gadget: 0, gadget_cache: .7};
 const SEGMAX = 640;
 const ZIP = TUNE.zip, RU = TUNE.ropeup, PULL = TUNE.pull, WALLK = new Set(['wall_n', 'wall_s', 'wall_w', 'wall_e']);
+const STR = TUNE.str, EVEN = TUNE.even, SNARE = TUNE.snare, STRONG = TUNE.strong;
 
 export function createLassoSim(host, eq) {
   const ents = host.entities, P = host.player, events = host.events, G = GADGETS.lasso;
@@ -55,11 +61,14 @@ export function createLassoSim(host, eq) {
 
   // ---------------------------------------------------------------- state
   const L = {
-    phase: '',   // '' | spin | wind (the throw clip, before its release) | fly | lie | hold | yanked | swing | back
+    phase: '',   // '' | spin | wind (the throw clip, before its release) | fly | lie | hold | yanked | snaring | snared | swing | back
     t: 0, spinT: 0, fPress: false, fHeld: false, fT: 0, simT: 0,
-    aim: {kind: 'ground', who: null, x: 0, y: 0, h: 0, d: 0, ok: true, gx: 0, gy: 0},   // kind: enemy | prop | anchor | ground
+    aim: {kind: 'ground', who: null, x: 0, y: 0, h: 0, d: 0, ok: true, gx: 0, gy: 0, cls: ''},   // kind: enemy | prop | anchor | ground; cls: the STRENGTH class it would be
     loop: {x: 0, y: 0, h: 0, lx: 0, ly: 0, lh: 0, x0: 0, y0: 0, h0: 0, tx: 0, ty: 0, th: 0, T: 1, t: 0, arc: 0, r: .36, who: null, kind: '', open: 1},
     who: null, kind: '', boss: false, elite: false, len: 0, held: 0, slip: 0, give: 1, taut: false, bossT: 0, heave: true,
+    // STRENGTH: the pull the throw had, what it holds is (light | even | heavy | strong), an even one's tug (s to the next / left
+    // of this one), the snare (its time, where the rope's end was let go: world)
+    pull: 1, cls: '', tugIn: 0, tugT: 0, snare: 0, tailX: 0, tailY: 0,
     anchor: {x: 0, y: 0, h: 0, src: null},
     stun: [],   // {p, until (L.simT)}: who lies stunned after a yank (the view's stars)
   };
@@ -75,6 +84,23 @@ export function createLassoSim(host, eq) {
   const topOf = p => topOfProp(p) ?? TOP[p.kind] ?? 1.2;
   // (a tower's or a gatepost's own top where the world built it its own: a broken one, a stump: world.js topOfProp)
   const anchorTop = p => p.kind === 'tower' || p.kind === 'gatepost' ? topOfProp(p) ?? ANCHOR_TOP[p.kind] : ANCHOR_TOP[p.kind];
+
+  // ---------------------------------------------------------------- STRENGTH: weight against pull -> the class
+  // what a body / prop weighs (content/lasso.js WEIGHT): a gunman by his type, a brute by elite / champion, a prop light
+  function weightOf(p) {
+    if (!creature(p)) return WEIGHT.prop;
+    if (p.kind === 'gunman') return WEIGHT.gunman[p.foe] ?? (p.elite ? WEIGHT.eliteK : 1);
+    return p.boss ? WEIGHT.boss : p.elite ? WEIGHT.elite : WEIGHT.brute;
+  }
+  // your pull with the loop spun up `charge` (0..1) and the modifiers' 'lasso.pull' notes (a few: read at the aim and the throw)
+  const pullOf = charge => STR.pull * (STR.lo + (STR.hi - STR.lo) * clamp(charge, 0, 1)) * (host.mods ? host.mods.value('lasso.pull', 1) : 1);
+  function classOf(p, pull) {
+    if (!creature(p)) return 'light';
+    const r = pull / weightOf(p);
+    return r >= STR.light ? 'light' : r >= STR.even ? 'even' : r >= STR.heavy ? 'heavy' : 'strong';
+  }
+  // in the air (a kick's flight, a fling, the hammer's swing, knocked down): no snare takes then
+  function airborne(p) { if (p.kind === 'gunman') return !!foes()?.recOf?.(p)?.down; return !!core()?.airborne?.(p); }
 
   // ---------------------------------------------------------------- anchor segments (world): the 3D trees' limbs high enough,
   // the lasso's own anchors (eq.anchors()), tall props' tops (ANCHOR_TOP). A flat scratch: x0 y0 h0 x1 y1 h1 r; src per segment
@@ -144,9 +170,10 @@ export function createLassoSim(host, eq) {
     if (pinned) return aimPinned(A);
     const a = host.aim(), t = a.target, R = TUNE.range;
     A.who = null;
+    A.cls = '';
     if (t && (creature(t) || movable(t))) {
       A.kind = creature(t) ? 'enemy' : 'prop'; A.who = t; A.x = t.x; A.y = t.y; A.h = creature(t) ? bodyMid(t) : (t.z || 0) + topOf(t) * .6;
-      A.d = hypot2(t.x - P.x, t.y - P.y); A.ok = A.d <= R + (t.hitR ?? .3);
+      A.d = hypot2(t.x - P.x, t.y - P.y); A.ok = A.d <= R + (t.hitR ?? .3); A.cls = classOf(t, pullOf(lz().S.charge));
       if (A.ok) return A;
     }
     gather(P.x, P.y, Math.max(R, ZIP.range));
@@ -172,9 +199,10 @@ export function createLassoSim(host, eq) {
   function aimPinned(A) {
     const R = TUNE.range;
     A.who = null;
+    A.cls = '';
     for (const p of ents.near(PIN.x, PIN.y, 1.2, nearA)) if (!p.gone && !p.broken && (creature(p) || movable(p) || brazier(p)) && hypot2(p.x - PIN.x, p.y - PIN.y) < .6) {
       A.kind = creature(p) ? 'enemy' : 'prop'; A.who = p; A.x = p.x; A.y = p.y; A.h = creature(p) ? bodyMid(p) : (p.z || 0) + topOf(p) * .6;
-      A.d = hypot2(p.x - P.x, p.y - P.y); A.ok = A.d <= R + (p.hitR ?? .3); return A;
+      A.d = hypot2(p.x - P.x, p.y - P.y); A.ok = A.d <= R + (p.hitR ?? .3); A.cls = classOf(p, pullOf(lz().S.charge)); return A;
     }
     gather(P.x, P.y, Math.max(R, ZIP.range));
     let best = -1, bd = .6, bx = 0, by = 0, bh = 0;
@@ -243,7 +271,8 @@ export function createLassoSim(host, eq) {
   }
   function throwIt() {
     aimAt(L.aim);
-    lz().throwAt(L.aim.x, L.aim.y);
+    L.pull = pullOf(lz().S.charge);   // (STRENGTH: the pull this throw has: the spin's charge as it leaves)
+    lz().throwAt(L.aim.x, L.aim.y, L.aim.h);
     L.loop.r = TUNE.spin.r * clamp(.55 + .45 * L.spinT / TUNE.spin.grow, .55, 1);
     L.phase = 'wind'; L.t = 0; eq.S.aiming = false; eq.S.cast = .9;
   }
@@ -327,14 +356,34 @@ export function createLassoSim(host, eq) {
     const c = core(), Z = lz(), T2 = TUNE.hold;
     L.who = p; L.kind = c?.BS.has(p) ? 'brute' : p.kind === 'gunman' ? 'gunman' : 'prop';
     L.boss = !!p.boss; L.elite = !!p.elite;
+    L.cls = L.kind === 'prop' ? 'light' : classOf(p, L.pull);   // STRENGTH: how it goes from here
     L.len = clamp(hypot2(p.x - P.x, p.y - P.y), 1.2, T2.len);
-    L.held = 0; L.slip = L.boss ? T2.slipBoss : L.elite ? T2.slipElite : T2.slip; L.give = L.boss ? 0 : L.kind === 'prop' ? TUNE.prop.towMax : L.elite ? T2.dragElite : T2.drag;
-    L.bossT = 0; L.heave = true; L.fHeld = false;
+    L.held = 0; L.slip = L.cls === 'strong' ? T2.slipBoss : L.cls === 'even' ? T2.slipElite : T2.slip;
+    L.give = L.kind === 'prop' ? TUNE.prop.towMax : L.cls === 'light' ? T2.drag : L.cls === 'even' ? EVEN.drag : 0;
+    L.bossT = 0; L.heave = true; L.fHeld = false; L.tugIn = EVEN.tug[0] + (EVEN.tug[1] - EVEN.tug[0]) * eq.R(); L.tugT = 0;
     holdIt(.2);
-    Z.haul(true); Z.leash(p.x, p.y, L.len + T2.stretch);
+    events.push({type: 'lasso.catch', x: p.x, y: p.y, h: L.loop.h, what: L.kind === 'prop' ? 'prop' : 'enemy', who: p, cls: L.cls});
+    if (L.cls === 'heavy' && !airborne(p)) {   // SNARE: the rope snapped down onto its legs (the cowboy's snare clip: lasso.cinch)
+      Z.snare(p.x, p.y); L.phase = 'snaring'; L.t = 0; L.taut = true; host.shake(1, .06); return;
+    }
+    if (L.cls === 'heavy') L.cls = 'even';   // (in the air: no snare; held as an even one)
+    Z.haul(true, L.cls); Z.leash(p.x, p.y, L.len + T2.stretch);
     L.phase = 'hold'; L.t = 0; L.taut = false;
-    events.push({type: 'lasso.catch', x: p.x, y: p.y, h: L.loop.h, what: L.kind === 'prop' ? 'prop' : 'enemy', who: p});
-    host.shake(1, .06);
+    host.shake(L.cls === 'strong' ? 2 : 1, L.cls === 'strong' ? .12 : .06);
+  }
+  // SNARE: the snap reaches the legs (lasso.cinch): rooted where it stands (combat's root / the gunmen's snare) for the snare's
+  // time; the rope is let go (its end where he stood), the loop stays round its ankles
+  function cinch() {
+    const p = L.who;
+    if (!p || p.broken || p.gone) { back(); return; }
+    const dur = L.elite ? SNARE.durElite : SNARE.dur;
+    const ok = !airborne(p) && (L.kind === 'brute' ? core()?.root(p, dur) : L.kind === 'gunman' ? foes()?.snare?.(p, dur) : false);
+    if (!ok) { slip('slip'); return; }
+    L.phase = 'snared'; L.t = 0; L.snare = dur; L.taut = false;
+    lz().hand(false, HP); L.tailX = HP[0] + (p.x - HP[0]) * .25; L.tailY = HP[1] + (p.y - HP[1]) * .25;
+    L.loop.x = p.x; L.loop.y = p.y; L.loop.h = (p.z || 0) + .14;
+    events.push({type: 'lasso.snare', x: p.x, y: p.y, who: p, dur});
+    host.shake(1, .08);
   }
   function holdIt(sec) {
     const p = L.who; if (L.kind === 'wall') return;
@@ -353,14 +402,23 @@ export function createLassoSim(host, eq) {
     L.held += dt; L.t += dt;
     if (L.held >= L.slip) { slip('slip'); return; }
     // a long press: the hammer throw (a body, not a champion): it's swung off its feet round you
-    if (L.fHeld && (L.fT += dt) > TUNE.hammer.hold && L.kind !== 'prop' && !L.boss) { startHammer(); return; }   // (a prop / a champion: still a yank on release)
+    if (L.fHeld && (L.fT += dt) > TUNE.hammer.hold && L.kind !== 'prop' && L.cls === 'light') { startHammer(); return; }   // (a prop / anything heavier: still a yank on release)
     holdIt(.12);
     let dx = P.x - p.x, dy = P.y - p.y, d = hypot2(dx, dy) || 1e-6;
     const ux = dx / d, uy = dy / d;
-    if (L.boss) {   // the champion's tug of war: it heaves (backs off, dragging you by the leash), then slackens
-      L.bossT += dt; const B = TUNE.boss, per = B.heave + B.slack, ph = L.bossT % per; L.heave = ph < B.heave;
-      if (L.heave) core()?.shift(p, -ux * B.pull * dt, -uy * B.pull * dt);
+    if (L.cls === 'strong') {   // STRONG: a tug of war: it heaves, reeling you in (the rope shortens: the leash brings you), then slackens
+      L.bossT += dt; const per = STRONG.heave + STRONG.slack, ph = L.bossT % per; L.heave = ph < STRONG.heave;
+      if (L.heave) L.len = Math.max(STRONG.near, L.len - STRONG.reel * dt);
+      Z.strain(L.heave);
+      if (L.len <= STRONG.near + 1e-6 && d <= STRONG.near + TUNE.hold.stretch + .05) { slip('reeled'); return; }   // (in its reach: it lets go of the rope)
+    } else if (L.cls === 'even' && L.tugT > 0) {   // EVEN: a tug back: it pulls away (the rope drags you along)
+      L.tugT -= dt; Z.strain(true);
+      const m = EVEN.tugV * dt;
+      if (L.kind === 'brute') core()?.shift(p, -ux * m, -uy * m); else if (L.kind === 'gunman') foes()?.shift(p, -ux * m, -uy * m);
+      if (L.tugT <= 0) L.tugIn = EVEN.tug[0] + (EVEN.tug[1] - EVEN.tug[0]) * eq.R();
     } else {
+      if (L.cls === 'even' && (L.tugIn -= dt) <= 0) L.tugT = EVEN.tugT;
+      Z.strain(false);
       const over = d - L.len;   // past the rope's length: it comes along, at most at its drag speed (L.give m/s)
       if (over > 0) {
         const m = Math.min(over, L.give * dt);
@@ -431,12 +489,21 @@ export function createLassoSim(host, eq) {
       events.push({type: 'lasso.yank', x: p.x, y: p.y, who: p, ok: true}); host.shake(1, .08);
       back(); return;
     }
-    if (L.boss && L.heave) {   // against a heave: it holds, and jerks you off your feet toward it (the rope is lost)
+    if (L.cls === 'strong' && L.heave) {   // against a heave: it holds, and jerks you off your feet toward it (the rope is lost)
       events.push({type: 'lasso.yank', x: p.x, y: p.y, who: p, ok: false});
-      host.knock(-ux * TUNE.boss.jolt, -uy * TUNE.boss.jolt); host.shake(3, .16);
+      host.knock(-ux * STRONG.jolt, -uy * STRONG.jolt); host.shake(3, .16);
       slip('jolt'); return;
     }
-    const k = eq.dmgK(), o = {dur: Y.dur, h: Y.h, dmg: Y.dmg * k, dmgFly: Y.dmgFly * k, bowl: Y.bowl, stun: L.boss ? Y.stunBoss : L.elite ? Y.stunElite : Y.stun,
+    const k = eq.dmgK();
+    if (L.cls === 'even' || L.cls === 'strong') {   // STRENGTH: it can't be thrown: a yank trips it (it falls toward you, a short way)
+      const E = L.cls === 'even', st = Math.max(.8, d - (E ? EVEN.trip : STRONG.trip)), tx = P.x - ux * st, ty = P.y - uy * st;
+      const o = {dur: EVEN.tripDur, h: EVEN.tripH, dmg: EVEN.tripDmg * k, dmgFly: 0, bowl: Y.bowl, stun: E ? EVEN.stun : STRONG.stun, spin: (eq.R() < .5 ? -1 : 1) * TAU * .5, onLand: landed};
+      const ok = L.kind === 'brute' ? core()?.fling(p, tx, ty, o) : foes()?.fling(p, tx, ty, o);
+      events.push({type: 'lasso.yank', x: p.x, y: p.y, who: p, ok: !!ok, trip: true}); host.shake(2, .1);
+      if (!ok) { back(); return; }
+      L.phase = 'yanked'; L.t = 0; L.stunFor = o.stun; return;
+    }
+    const o = {dur: Y.dur, h: Y.h, dmg: Y.dmg * k, dmgFly: Y.dmgFly * k, bowl: Y.bowl, stun: L.elite ? Y.stunElite : Y.stun,
       spin: (eq.R() < .5 ? -1 : 1) * TAU * (1.25 + eq.R() * .5), onLand: landed};
     const st = L.kind === 'gunman' ? Y.stopMan : Y.stop, tx = P.x - ux * st, ty = P.y - uy * st;
     const ok = L.kind === 'brute' ? core()?.fling(p, tx, ty, o) : foes()?.fling(p, tx, ty, o);
@@ -547,9 +614,10 @@ export function createLassoSim(host, eq) {
       const e = evs[i];
       if (e.type === 'lasso.loose') { if (L.phase === 'wind') launch(); }
       else if (e.type === 'lasso.pull') { if (L.phase === 'pull') yank(); }
+      else if (e.type === 'lasso.cinch') { if (L.phase === 'snaring') cinch(); }
       else if (e.type === 'lasso.drop') {
         if (L.phase === 'spin' || L.phase === 'wind') { L.phase = ''; eq.S.aiming = false; }
-        else if (L.phase === 'hold') slip(e.why === 'gun' ? 'gun' : 'drop');
+        else if (L.phase === 'hold' || L.phase === 'snaring') slip(e.why === 'gun' ? 'gun' : 'drop');
         else if (L.phase === 'swing' || L.phase === 'zip' || L.phase === 'ropeup') back();
       } else if ((e.type === 'lasso.letgo' || e.type === 'lasso.bump') && (L.phase === 'swing' || L.phase === 'zip' || L.phase === 'ropeup')) back();
     }
@@ -583,6 +651,22 @@ export function createLassoSim(host, eq) {
         L.t += dt; holdIt(.12);
         if (!L.who || L.who.broken || L.who.gone) back(); else if (L.t > .4 || Z.mode !== 'yank') yank();
         break;
+      case 'snaring': {   // (the snare clip, until its cinch: still held; the loop slides down the body to the legs)
+        L.t += dt; holdIt(.12); const p = L.who;
+        if (press) eq.S.deny = .3;
+        if (!p || p.broken || p.gone) { back(); break; }
+        L.loop.x = p.x; L.loop.y = p.y; L.loop.h = (p.z || 0) + (p.h || 0) + (p.hitH ?? 1.6) * (.5 - .4 * Math.min(1, L.t / SNARE.cinch));
+        if (L.t > SNARE.cinch + .4 || Z.mode !== 'snare') cinch();   // (a safety: the clip's cinch never came)
+        break;
+      }
+      case 'snared': {   // (rooted: the loop round its ankles; free when its time is up)
+        L.t += dt; const p = L.who;
+        if (press) eq.S.deny = .3;
+        if (!p || p.broken || p.gone) { back(); break; }
+        L.loop.x = p.x; L.loop.y = p.y; L.loop.h = (p.z || 0) + .14;
+        if (L.t >= L.snare) { events.push({type: 'lasso.slip', x: p.x, y: p.y, who: p, why: 'free'}); back(); }
+        break;
+      }
       case 'yanked': {
         L.t += dt; const p = L.who;
         if (!p || p.broken || p.gone || L.t > 1.2) { back(); break; }
@@ -610,7 +694,10 @@ export function createLassoSim(host, eq) {
     get busy() { return L.phase !== ''; },
     press() { L.fPress = true; },
     // Space while swinging lets go (features/equip.js onKey): true when it took the key
-    space() { if (L.phase !== 'swing' && L.phase !== 'zip' && L.phase !== 'ropeup') return false; lz()?.letGo(); return true; },
+    space() {
+      if (L.phase === 'ropeup' && host.PL?.ropewall?.active) return false;   // (on the wall climb Space is its push-off: PL.onSpace)
+      if (L.phase !== 'swing' && L.phase !== 'zip' && L.phase !== 'ropeup') return false; lz()?.letGo(); return true;
+    },
     seg: () => ({SEG, n: nSeg}),
     // (tests) pin the aim to a world point (null: the cursor again)
     pin(x, y, h) { pinned = x !== null && x !== undefined; if (pinned) { PIN.x = x; PIN.y = y; PIN.h = h || 0; } },

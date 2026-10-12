@@ -24,7 +24,7 @@ import {createPeerLook} from './coop/look.js';
 // ORDER (core/features.js): after the equipment (the lasso's phase this step) and the combat (a felled tree's world is settled)
 export const order = {after: ['equip', 'combat']};
 export async function create(host) {
-  if (!SESSION.mp) return SESSION.error ? offline(host) : {name: 'coop', on: false, act: () => false};
+  if (!SESSION.mp) return SESSION.error ? offline(host) : {name: 'coop', on: false, online: false, act: () => false};
   let name = flags.get('name') || ''; try { name ||= localStorage.getItem('rb.coop.name') || ''; } catch {}
   const C = createNetClient({transport: wsTransport(SESSION.ws), name});
   const look = createPeerLook(host, C);
@@ -38,6 +38,7 @@ export async function create(host) {
     host.world.removeItem?.(p); host.entities.remove(p);
   }
   let note = '', noteT = 0;
+  const BYS = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};   // (where the one who felled a tree is: its fall's way)
   const say = (t, s = 4) => { note = t; noteT = s; };
 
   // ---------------------------------------------------------------- sending: 20 times a second, after the frame's steps
@@ -80,11 +81,14 @@ export async function create(host) {
   }
 
   const F = {
-    name: 'coop', label: 'Co-op', on: true, net: C, look, act,
+    name: 'coop', label: 'Co-op', on: true, net: C, look, act, get online() { return C.status === 'online'; },
     update() {
       C.drain(msgs);
       for (const m of msgs) {
-        if (m.k === 'world' && m.s === 'felled') fell(m.id);
+        if (m.k === 'world' && m.s === 'felled') {   // the woodcutting fells it (its fall, stump, logs), else it just goes
+          const p = treeOf(m.id), by = C.peers.get(m.by), o = by ? C.sample(by, BYS) : null;
+          if (!p || !host.feature('woodcut')?.fellShared?.(p, m.by === C.id, !!m.late, o?.x, o?.y)) fell(m.id);
+        }
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
       }
@@ -112,7 +116,7 @@ export async function create(host) {
 // asked for co-op but no server answered: say so for a while (the page plays offline)
 function offline(host) {
   let t = 12;
-  return {name: 'coop', on: true, act: () => false,
+  return {name: 'coop', on: true, online: false, act: () => false,
     frame(f) { t -= f.dt; },
     hd(q2) { if (t > 0) banner(q2, host.hudScale, 'co-op: ' + SESSION.error + ' · playing offline'); },
     hud: () => 'co-op: offline (' + SESSION.error + ')'};

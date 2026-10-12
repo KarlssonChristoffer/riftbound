@@ -12,6 +12,10 @@ import {createPlayer, BUSY, STEP_UP, SNAP} from './player.js';
 import {createGun} from './gun.js';   // a gun loadout's revolver (player.js H.gun)
 import {createLasso} from './lasso.js';   // the equipment experiment's lasso in his hands (player.js H.lasso)
 import {createBrawl} from './brawl.js';   // the live cowboys' boot, barge, lift and throw (player.js H.brawl; features/brawl.js uses it)
+import {createTool} from './tool.js';   // a tool in hand (player.js H.tool; features/woodcut.js uses it)
+import {createFists} from './fists.js';   // the live cowboys' fists (player.js H.fists; features/fists.js uses it)
+import {createRopeWall} from './ropewall.js';   // the rope wall: the lasso's rope-up hands him to it (player.js H.ropewall)
+import {TUNE as ROPEWALL} from '../../content/ropewall.js';   // (its camera: side-on to the face)
 import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON, vaultTop} from '../../world/world.js';
 import {createCollide} from '../../world/collide.js';   // the world's solids (docs/COLLISION.md)
 
@@ -167,6 +171,10 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     weapon: () => hero.weapon, gun: createGun,   // the loadout's weapon (content/weapons.js) and, for a gun, its revolver
     lasso: createLasso, yaw: () => cv.yaw,      // the lasso's hands (idle unless features/equip/lasso.js uses them); the camera's yaw (its swing is in the world)
     brawl: createBrawl,   // the boot, the barge, lifting and throwing (idle unless features/brawl.js asks: a live loadout)
+    fists: createFists,   // unarmed fighting (idle unless features/fists.js raises the fists: a live loadout)
+    tool: createTool,   // a tool in hand (idle unless features/woodcut.js takes the axe out: a live loadout)
+    ropewall: createRopeWall, ropewallOn: flags.get('ropewall') !== '0', ladderOld: flags.get('ladder') === 'old',   // the rope wall, the ladder
+    ropeCam: yawN => ropeCam(yawN),   // (the rope wall's camera: below)
     blocked: (x, y, z = PL.P.z, air = false) => { const [X, Z] = toWorld(x, y); return blocked(X, Z, z, air); },
     move: OLD ? null : moveV,   // (move and slide; ?collide=old: player.js's per-axis moves)
     wallOver: (x, y, dx, dy, z) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallOver(X, Z, ux, uz, z); },   // (a rotation: d is the same in his frame)
@@ -285,7 +293,14 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     const cs = climbSpotW(); if (!cs || Math.abs(yawOff(cs.c.yaw)) <= 1e-6) return false;
     A.assist = {back: cv.yaw, phase: 'in', to: cs.c.yaw}; return true;
   }
-  const A = {assist: null};   // {back: yaw to return to, phase: 'in' | 'climb' | 'back', to: the yaw to climb at (0)}
+  const A = {assist: null};   // {back: yaw to return to, phase: 'in' | 'climb' | 'ease' | 'back', to: the yaw to climb at (0)}
+  // THE ROPE WALL's camera (sim/player/ropewall.js start): side-on to the face (ROPEWALL.cam.deg off its normal, the nearer side), unless
+  // the view already is within cam.inside of that; it eases there while he's on the rope ('ease') and back after
+  function ropeCam(yawN) {
+    const off = Math.abs(yawOff(yawN)) / Math.PI * 180, [lo, hi] = ROPEWALL.cam.inside; if (off >= lo && off <= hi) return;
+    const d = ROPEWALL.cam.deg * Math.PI / 180, a = yawN - d, b = yawN + d, to = Math.abs(yawOff(a)) <= Math.abs(yawOff(b)) ? a : b;
+    A.assist = {back: A.assist ? A.assist.back : cv.yaw, phase: 'ease', to};
+  }
   function stepAssist(dt, ny) {
     const assist = A.assist, climbing = P.state === 'climb' || P.state === 'mantle';
     if (assist.phase === 'in') {
@@ -293,6 +308,10 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
       ny = Math.abs(d) < .004 ? to : to - d * Math.exp(-dt * 12);
       if (ny === to) { cv.setYaw(to); syncPlateaus(); PL.onInteractKey(); PL.onInteractUp(); assist.phase = P.state === 'climb' ? 'climb' : 'back'; }
     } else if (assist.phase === 'climb') { ny = assist.to || 0; if (!climbing) assist.phase = 'back'; }
+    else if (assist.phase === 'ease') {   // (the rope wall: eased side-on while he's on the rope)
+      const d = yawOff(assist.to); ny = Math.abs(d) < .002 ? assist.to : cv.yaw + d * (1 - Math.exp(-dt * 4));
+      if (!PL.ropewall?.active) assist.phase = 'back';
+    }
     else {
       const d = Math.atan2(Math.sin(assist.back - cv.yaw), Math.cos(assist.back - cv.yaw));
       ny = Math.abs(d) < .002 ? assist.back : cv.yaw + d * (1 - Math.exp(-dt * 8)); if (Math.abs(d) < .002) A.assist = null;

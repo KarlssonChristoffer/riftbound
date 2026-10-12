@@ -250,18 +250,24 @@ const WEST = {
   },
 };
 const FLAVORED = ['peacemaker', 'navy', 'cock'];
+// DRY (the space, src/audio/acoustics.js: the world gives a shot its place): the same shot with only the place's first 45 ms
+// of reflections and a short tail (no discrete echoes, no long roll); the room round the listener adds the rest (its reverb,
+// the echoes off the faces round him). Cases '<flavor>_<shot>_dry'
+const dryOf = P => ({...P, er: P.er && {...P.er, n: Math.ceil(P.er.n / 2), t: [P.er.t[0], Math.min(P.er.t[1], .045)]}, echoes: [],
+  tail: {...P.tail, rt: .32, roll: 0, g: P.tail.g * .55}, dur: Math.min(P.dur, .9)});
 
 export default {
   id: 'revolver', version: 4, desc: 'Single-action revolvers: shots with a dry desert tail, the dry click, cocking, loading, ejecting, the spin, the holster; v3-4: the western-movie flavors (hollywood / gritty shots and cocks)',
-  params: {act: {values: ['peacemaker', 'navy', 'dry', 'cock', 'load', 'eject', 'spin', 'holster'], def: 'peacemaker'}, style: {values: ['v2', ...STYLES], def: 'v2'}},
+  params: {act: {values: ['peacemaker', 'navy', 'dry', 'cock', 'load', 'eject', 'spin', 'holster'], def: 'peacemaker'}, style: {values: ['v2', ...STYLES], def: 'v2'}, dry: {values: [0, 1], def: 0}},
   cases: {peacemaker: {act: 'peacemaker'}, navy: {act: 'navy'}, dry: {act: 'dry'}, cock: {act: 'cock'}, load: {act: 'load'}, eject: {act: 'eject'},
     spin: {act: 'spin'}, holster: {act: 'holster'},
-    ...Object.fromEntries(STYLES.flatMap(s => FLAVORED.map(a => [`${s}_${a}`, {act: a, style: s}])))},
+    ...Object.fromEntries(STYLES.flatMap(s => FLAVORED.map(a => [`${s}_${a}`, {act: a, style: s}]))),
+    ...Object.fromEntries(STYLES.flatMap(s => ['peacemaker', 'navy'].map(a => [`${s}_${a}_dry`, {act: a, style: s, dry: 1}])))},
   variants: 5,
   render(p, R, sr) {
     const a = p.act;
     if (p.style !== 'v2' && WEST[p.style] && FLAVORED.includes(a)) {
-      const P = WEST[p.style][a], out = new Float32Array(Math.round(P.dur * sr));
+      const P = p.dry && a !== 'cock' ? dryOf(WEST[p.style][a]) : WEST[p.style][a], out = new Float32Array(Math.round(P.dur * sr));
       if (a === 'cock') wcock(out, sr, R, P); else wshot(out, sr, R, P);
       filter(out, 'highpass', P.out.hp, .7, sr);
       if (P.out.lp) { filter(out, 'lowpass', P.out.lp, .5412, sr); filter(out, 'lowpass', P.out.lp, 1.3066, sr); }   // the optical track's edge

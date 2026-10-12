@@ -29,9 +29,11 @@ PROP = dict(
 # object base name -> (part, family, options) for concepts/sprites/pixelize.py (written into meta.json)
 PIXEL = {
     'Head': ['head', 'skin', {'bias': .12}], 'Eye': ['eye', 'char', {'fixed': 3, 'outline': False, 'lines': False, 'thin': True}],
+    'Nose': ['head', 'skin', {'bias': .02}], 'Brow': ['brow', 'hair', {'fixed': 3, 'outline': False, 'lines': False, 'thin': True}],
+    'Mouth': ['mouth', 'skin', {'fixed': 3, 'outline': False, 'lines': False, 'thin': True}],
     'Neck': ['neck', 'skin', {'bias': -.15}], 'Chest': ['torso', 'skin', {}], 'Ribs': ['torso', 'skin', {}],
     'Belly': ['torso', 'skin', {}], 'Pelvis': ['pelvis', 'char', {}],
-    'UpperArm': ['uarm', 'skin', {}], 'ForeArm': ['farm', 'skin', {}], 'Hand': ['hand', 'skin', {}],
+    'UpperArm': ['uarm', 'skin', {}], 'ForeArm': ['farm', 'skin', {}], 'Hand': ['hand', 'skin', {}], 'Thumb': ['hand', 'skin', {}],
     'Thigh': ['thigh', 'skin', {}], 'Shin': ['shin', 'skin', {}], 'Foot': ['foot', 'skin', {'bias': -.05}], 'Toe': ['foot', 'skin', {'bias': -.05}],
 }
 
@@ -174,13 +176,22 @@ def build_body(J, P=PROP):
     loft('Neck', 'Neck', [(0, .01, z('neck') - .02 * s), (0, 0, z('head') + .04 * s)], [(.05 * s, .05 * s), (.048 * s, .048 * s)], n=6)
     # ---- head: angular, flat face plane, jaw tapering to a chin point ----
     c, hh = z('head'), z('top') - z('head')
-    rows = [(0, -.035, .05, .05), (.08, -.012, .13, .14), (.26, 0, .175, .19), (.54, 0, .19, .20),
+    rows = [(0, -.03, .072, .06), (.08, -.012, .135, .143), (.26, 0, .175, .19), (.54, 0, .19, .20),
             (.78, .005, .18, .19), (.93, .01, .12, .13), (1.0, .01, .04, .04)]
     loft('Head', 'Head', [(0, yc * s, c + f * hh) for f, yc, rx, ry in rows], [(rx * s, ry * s) for f, yc, rx, ry in rows], p=2.4)
     for side, sx in (('L', 1), ('R', -1)):
         ez = c + .42 * hh
         loft(f'Eye.{side}', 'Head', [(sx * .075 * s, -.19 * s, ez - .03 * s), (sx * .075 * s, -.19 * s, ez + .03 * s)],
              [(.017 * s, .02 * s)] * 2, n=4, p=2.0)
+        # a brow over each eye (a little lower at its outer end): one dark pixel row, it carries the expression
+        bz = c + .53 * hh
+        loft(f'Brow.{side}', 'Head', [(sx * .045 * s, -.203 * s, bz + .004 * s), (sx * .105 * s, -.198 * s, bz - .006 * s)],
+             [(.009 * s, .006 * s)] * 2, side=(0, 0, 1), n=4, p=2.0)
+    # the nose: a small wedge out of the face plane (one shaded pixel under the eyes), and a mouth line
+    loft('Nose', 'Head', [(0, -.175 * s, c + .37 * hh), (0, -.2 * s, c + .33 * hh), (0, -.214 * s, c + .3 * hh)],
+         [(.016 * s, .016 * s), (.015 * s, .013 * s), (.006 * s, .006 * s)], side=(1, 0, 0), n=4, p=2.0)
+    loft('Mouth', 'Head', [(-.032 * s, -.176 * s, c + .19 * hh), (.032 * s, -.176 * s, c + .19 * hh)],
+         [(.005 * s, .004 * s)] * 2, side=(0, 0, 1), n=4, p=2.0)
     # ---- arms: deltoid cap overlaps the chest, elbow/wrist caps overlap the next segment ----
     for side, m in (('L', 'Left'), ('R', 'Right')):
         sh, el, wr, hd = J['shoulder' + side], J['elbow' + side], J['wrist' + side], J['hand' + side]
@@ -191,8 +202,15 @@ def build_body(J, P=PROP):
         loft(f'ForeArm.{side}', f'{m}ForeArm', [el - f * .025 * s, el + (wr - el) * .3, wr + f * .01 * s],
              [(.046 * s, .046 * s), (.05 * s, .046 * s), (.032 * s, .03 * s)], side=(0, -1, 0))
         h = (hd - wr).normalized()
-        loft(f'Hand.{side}', f'{m}Hand', [wr - h * .01 * s, wr + (hd - wr) * .45, hd],
-             [(.038 * s, .022 * s), (.046 * s, .024 * s), (.03 * s, .018 * s)], side=(0, -1, 0), n=6)
+        # a mitt that reads as a hand at sprite size: shorter and thicker than a flat palm (a loose fist), rounded, and
+        # a thumb on its front (the thumb side in the A-pose: -Y). (It was a 13 cm paddle, 4.8 cm thick: a peg on screen.)
+        loft(f'Hand.{side}', f'{m}Hand', [wr - h * .02 * s, wr + (hd - wr) * .3, wr + (hd - wr) * .62, wr + (hd - wr) * .88],
+             [(.036 * s, .026 * s), (.048 * s, .034 * s), (.047 * s, .033 * s), (.032 * s, .024 * s)], side=(0, -1, 0), n=8, p=2.4)
+        tu = Vector((0, -1, 0)) - h * h.y
+        tu.normalize()
+        loft(f'Thumb.{side}', f'{m}Hand', [wr + h * .02 * s + tu * .03 * s, wr + (hd - wr) * .32 + tu * .05 * s,
+                                          wr + (hd - wr) * .55 + tu * .046 * s],
+             [(.017 * s, .016 * s), (.015 * s, .014 * s), (.011 * s, .01 * s)], side=(1, 0, 0), n=6, p=2.2)
     # ---- legs: thigh overlaps the pelvis, knee cap overlaps the shin, foot + toe ----
     for side, m in (('L', 'Left'), ('R', 'Right')):
         hp, kn, an, ba, to = (J[k + side] for k in ('hip', 'knee', 'ankle', 'ball', 'toe'))

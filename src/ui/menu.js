@@ -10,7 +10,8 @@
 //   {tab, group?, label, key? (a keycap hint), sub? (a setting under the row above: indented),
 //    options: [...], get() -> one of them, set(v)     a choice (on / off ones read On / Off)
 //    min, max, get() -> n, set(n)                      a level, in 10% steps
-//    value() -> text, run(d)                           a value it cycles itself (d = +1 / -1: the arrows)
+//    value() -> text, run(d), sizes?() -> [text]       a value it cycles itself (d = +1 / -1: the arrows; sizes: the
+//                                                      values it can show, so its box keeps one width and the arrows stay put)
 //    run(), main?, sound?                              an action (Resume, Start a run): closes the menu, then runs
 //    keys: [[[cap, ...], what], ...]                   a read-only list of keys
 //    id + keep: true | 'param'                         a player setting remembered on this machine (localStorage
@@ -43,10 +44,14 @@ export function createMenu({root, items, dev = () => false, title = () => ['Paus
   function row(it, i) {
     if (it.keys) return `<div class="m-keys">${it.keys.map(([k, what]) => `<div><span>${esc([].concat(k).join(' '))}</span><span>${esc(what)}</span></div>`).join('')}</div>`;
     if (it.run && !it.value) return `<button class="m-act${it.main ? ' main' : ''}${it.tab !== 'game' ? ' tool' : ''}" data-i="${i}">${esc(it.label)}</button>`;   // (tool: a test action, smaller)
-    const sw = isSwitch(it), v = it.run ? it.value() : it.min !== undefined ? pct(it, it.get()) : sw ? (it.get() === 'on' ? 'On' : 'Off') : it.get();
+    const sw = isSwitch(it), v = String(it.run ? it.value() : it.min !== undefined ? pct(it, it.get()) : sw ? (it.get() === 'on' ? 'On' : 'Off') : it.get());
+    const all = it.options || it.sizes?.() || (it.min !== undefined ? ['100%'] : []);
     return `<button class="m-row${it.sub ? ' sub' : ''}" data-i="${i}"${sw ? ` role="switch" aria-checked="${it.get() === 'on'}"` : ''}><span>${esc(it.label)}${it.key ? `<small>${esc(it.key)}</small>` : ''}</span>` +
-      `<span class="m-val">${sw ? esc(v) : `<i data-d="-1">‹</i>${esc(v)}<i data-d="1">›</i>`}</span></button>`;
+      `<span class="m-val">${sw ? esc(v) : `<i data-d="-1">‹</i>${fit(all, v)}<i data-d="1">›</i>`}</span></button>`;
   }
+  // the value in a box as wide as the widest it can be (every value it can take stacked in one grid cell, only the current
+  // one shown: index.html .m-v), so the arrows stay put while it changes and the same spot clicks again
+  const fit = (all, v) => `<span class="m-v">${[...new Set([...all.map(String), v])].map(t => `<span${t === v ? ' class="on"' : ''}>${esc(t)}</span>`).join('')}</span>`;
 
   function draw() {
     const body = panel.querySelector('.m-body'), top = body?.scrollTop || 0, fd = document.activeElement?.dataset || {}, fi = fd.i, fc = fd.cat;
