@@ -145,7 +145,7 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     gx = ex * 2 >= PW ? WORLD.x0 + WORLD.WM / 2 : Math.min(WORLD.x1 + pa - ex + ga, Math.max(WORLD.x0 - pa + ex - ga, gx));
     gz = ez * 2 >= PH ? WORLD.y0 + WORLD.HM / 2 : Math.min(WORLD.y1 + pa - ez + ga, Math.max(WORLD.y0 - pa + ez - ga, gz));
     [vx, vy] = toView(gx, gz); vy += lift;
-    if (V === FR) { const [fx, fz] = toWorld(vx, vy); FR.x = fx; FR.z = fz; }   // (the free target stays where the view can go)
+    if (V === FR) { if (!freeClamp) [vx, vy] = toView(V.x, V.z); else { const [fx, fz] = toWorld(vx, vy); FR.x = fx; FR.z = fz; } }   // (the free target stays where the view can go; unclamped: as it is)
     // the lattice, in art px at this zoom (x; y: screen rows): with a pad the drawn centre lies K / 2 px right of / below this
     // one, rounded DOWN, and the remainder goes to the renderer (header); without one, rounded to the nearest
     const lx = vx * PPM * z + K / 2, ly = (vy * PPMY - h * PPMH) * z + K / 2, Lx = K ? Math.floor(lx) : Math.round(lx), Ly = K ? Math.floor(ly) : Math.round(ly);
@@ -181,11 +181,14 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   // ground stays inside the world like the follow's; no look-ahead, feel or shake. The follow's own target and the
   // cursor's frame (cam) aren't touched meanwhile: after freeOff() the follow goes on exactly from where it was, and the
   // renderer's view is put back at once as the follow last set it (a sim step before the next draw reads the screen: the aim)
-  let free = false; const FR = new THREE.Vector3(), TS0 = new THREE.Vector3(), SUB0 = {x: 0, y: 0};   // (SUB0: the follow's remainder, kept with TS0)
+  let free = false, freeClamp = true; const FR = new THREE.Vector3(), TS0 = new THREE.Vector3(), SUB0 = {x: 0, y: 0};   // (SUB0: the follow's remainder, kept with TS0)
   cv.freeOn = (x, y, h) => { free = true; TS0.copy(Ts); SUB0.x = cv.sub.x; SUB0.y = cv.sub.y; if (camInit) FR.copy(T); else FR.set(x, h, y); };   // (x, y, h: where to look if the follow hasn't run yet)
-  cv.freeOff = () => { if (!free) return; free = false; Ts.copy(TS0); cv.sub.x = SUB0.x; cv.sub.y = SUB0.y; if (camInit) { G.setView(Ts, cv.yaw, cv.zoom); G.setSubpixel?.(cv.sub.x, cv.sub.y, cv.pad); } };   // (after the yaw and zoom are back)
+  cv.freeOff = () => { if (!free) return; free = false; freeClamp = true; Ts.copy(TS0); cv.sub.x = SUB0.x; cv.sub.y = SUB0.y; if (camInit) { G.setView(Ts, cv.yaw, cv.zoom); G.setSubpixel?.(cv.sub.x, cv.sub.y, cv.pad); } };   // (after the yaw and zoom are back)
   cv.freeReset = (x, y, h) => { if (camInit) FR.copy(T); else FR.set(x, h, y); };   // back over the player (where the follow is)
   cv.freeMove = (dx, dy) => { FR.x += dx; FR.z += dy; };     // world metres (x east, y south)
   cv.freeAt = o => { o.x = FR.x; o.y = FR.z; o.h = FR.y; return o; };
+  // the free view held inside the world (default) or not (a studio that leaves the world out of the frame: dev/wardrobe.js);
+  // freeOff puts it back to held
+  cv.freeClamp = v => { freeClamp = v !== false; };
   return cv;
 }
