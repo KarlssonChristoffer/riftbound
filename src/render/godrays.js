@@ -29,6 +29,21 @@
 // fades out instead of streaking across the ground (at a low sun a beam from a 4 m crown runs 15 m to the ground). The sun
 // reaching a sample is what the clouds let through where its sun ray meets the ground (render/clouds.js: a cloud shadow half
 // or all of it, a front's storm all of it): a clouded light patch dims its own beam, along the beam, not across the picture.
+// THE GAPS (TUNE.gap, ?gapbeams=0): the sun breaking through a broken sky. Air lit THROUGH A CLOUD GAP glows too: a sample
+// whose sun ray meets the ground (h 0) in sun (render/clouds.js cloudAt: the cloud level, a front's storm; as sunThrough)
+// while there is cloud within TUNE.gap.reach m of that point on BOTH sides across the sun: a column of lit air with shade
+// beside it, leaning from its sun patch toward the sun (on screen a band from the patch toward the sun, edges along the
+// sun's direction like a shaft's). A gap wider than about twice the reach makes none (the slab it would make reads as lit
+// ground, not air). It is SEEN only against darker ground: the sun on its way must beat the ground the pixel shows (cloudAt
+// there), so nothing shows over a sun patch itself and the beam hangs over the shade beside it. Subtler than a shaft: not a
+// count of samples but the beam's ROOT, the lowest lit sample over the pixel, by its height (TUNE.gap.fade): TUNE.gap.lv m
+// of glowing air at its foot (level 2, never the top level by itself), stepping down to level 1 and out along its length
+// (higher air is further from the patch: no hard end where the band stops), and only where the shadow maps light it too (a
+// pillar's shadow cuts it). It adds into the same count (history, levels, shape, colour, strength). The GAP MAP (GAP_FS) holds
+// the test for the ground under each view px of the view and its margin down-sun (as many texels as the view), so the march
+// reads one byte a sample, every few planes (TUNE.gap.step m of ground apart; the phase turns frame to frame). Only while the
+// sky is broken (In.broken from render/lighting.js, env.broken; without it the view's cloud TUNE.gap.cloud or a front) and
+// the cloud shadows are on: on a clear or steady sky its uniform is 0, the map isn't drawn and nothing of it runs.
 // THE TIME. A pixel's count of glowing samples is a coarse thing: which planes fall inside a beam is a matter of phase, so a
 // beam's edge gains or loses a sample whenever the planes or the beam shift a hair (the sun turning, a crown's leaves
 // fluttering in the wind), and cut into hard levels that flickered (hundreds of px a frame). So the count is SMOOTHED over the
@@ -42,9 +57,20 @@
 // (no beam under 3 px across, no crumbs, the top level only in a shaft's core) and drawn as flat amounts (TUNE.amt) of the
 // sun's colour, warmed, and turned to amber as the sun sinks (TUNE.warm / gold). Bold, few, hard-edged; no gradients, no noise.
 // STRENGTH (render/lighting.js, every frame through G.setRays: the mood and the world clock's sky): a low sun is stronger
-// (morning, dusk), clouds take the beams away (overcast: none), mist and wet ground after rain make them stronger, and
-// looking toward the sun (forward scattering) they are strongest. Off at night (no sun shadow map then), with the shadows
-// off (opt.shadows) and with ?godrays=0.
+// (morning, dusk), clouds take the beams away (overcast: none), mist makes them stronger, and looking toward the sun (forward
+// scattering) they are strongest. Off at night (no sun shadow map then), with the shadows off (opt.shadows) and with ?godrays=0.
+// THE ENVELOPE (set(), ?rayenv=0: the old formula): a change of the weather tells the story of the sun breaking through. The
+// beams' share of the sun is the share of the view's ground it reaches (env.sunView; without one, from the view's cloud as
+// before), not the view's one swapped light. On top of the day's strength, a BREAKTHROUGH boost: strongest while the sky over
+// the view is broken (env.broken; without one, an estimate from a front's edge crossing the view), the sun is breaking
+// through it (its share rising: not a deck closing in, not a steady sky's gaps) and the air is moist (rain on the ground,
+// mist, fog); and a little for wet ground on its own (TUNE.wetX: at most 1.15x a dry day's for the minutes the ground stays
+// wet; it was 1.5x). Both follow in TIME, on the frame's clock (held in a still photo): the beams GROW in over ~TUNE.rise s
+// as the sun breaks through, never pop, and fade over ~TUNE.fall s when a deck covers it; the boost swells over ~TUNE.swell s
+// and EBBS over ~TUNE.ebb s as the sky clears and the air dries. A steady day (no change, dry ground) is exactly the old
+// formula; a preview (photo mode) shows its weather at once and leaves the smoothed state alone; a frame gap moves it at most
+// TUNE.dtMax s. rays.env holds the parts (dev/wxpanel.js shows them), rays.rate the envelope's time scale (the panel sets it to
+// the game speed).
 // SPEED. Most air is open: the MIN MAPS (below) answer "is anything between the sun and the air round this point" in one fetch
 // per shadow map (first for a run of 4 planes, then per plane), and each side test in one fetch per map; only a lit sample
 // with something round it pays for the side tests. The shape passes are a few fetches of a byte a pixel.
@@ -53,12 +79,14 @@
 // this frame), uView (the yaw), uSunDir. No allocation per frame, no CPU pixel work.
 // BUDGET (GPU): ~0.16-0.23 ms at 688 x 288 (3440 x 1440 at scale 5) on the RTX 4070 (min maps ~.02, shape ~.02, the march);
 // CPU: a few uniforms, 15 small draws (the static map's 5 more when it was re-rendered). The programs compile at load.
+// THE GAPS, while on: ~.03 ms more (the gap map, a cloudAt a pixel over clouded ground, a byte a gap sample), one more draw.
 // The sun's direction the maps are cast along turns in steps (gfx.js setSun: SUN_STEP), not a hair every frame.
 //   const rays = createGodrays({THREE, renderer, raw, tri, cam, compU}); rays.draw() right after the composite, into the
 //   same target; rays.restatic() when the static shadow map was re-rendered; rays.set(o) the strength inputs; rays.enabled
-//   (features/depth.js: its painted shafts step aside); rays.TUNE (live)
+//   (features/depth.js: its painted shafts step aside); rays.TUNE (live); rays.env (the envelope's parts, read-only);
+//   rays.rate (the envelope's time scale: 1)
 import {flags} from '../core/flags.js';
-import {CLOUD_GLSL} from './clouds.js';
+import {CLOUD_GLSL, CLOUD_EXTRA} from './clouds.js';   // (wx-B shim: CLOUD_EXTRA)
 
 export const TUNE = {
   on: flags.get('godrays') !== '0',
@@ -80,8 +108,18 @@ export const TUNE = {
   cloud: [.4, .82], // the beams fade out between these cloud covers (sim/env.js light.cloud: the view's sky); each sample's sun
                     // is what the clouds let through on its ray (render/clouds.js: none under thick cloud or a storm, half under thin)
   shadow: .3,       // the mood's shadow strength (clouds and the dusk -> night fade already in it) at which the beams are full
-  mist: .8, wet: .5,   // more in mist (sky.fog) and on wet ground (after rain): x (1 + mist x fog + wet x wet)
+  mist: .8, wet: .5,   // more in mist (sky.fog) and on wet ground (after rain): x (1 + mist x fog + wet x wet) (wet: ?rayenv=0 only)
   max: 1.8,
+  // THE ENVELOPE (STRENGTH, above; ?rayenv=0: the old formula, no time)
+  env: flags.get('rayenv') !== '0',
+  wetX: .15,        // wet ground alone: x (1 + wetX x wet) over a dry day's (after rain on a clear sky: 1.15x at most)
+  burst: 1,         // the breakthrough: x (1 + burst x broken x moist x breaking) while the sun breaks through a broken sky in moist air
+  breaking: .1,     // the sun's share (0..1) rising this far ahead of the beams' (they lag a rise): fully breaking through
+  moist: 2,         // how moist the air is: the ground's wetness, or this x the mist / fog (a misty dawn: ~.6)
+  rise: 10, fall: 6,   // s: the sun's share in the beams grows in as the sun breaks through / fades as a deck covers it
+  swell: 6, ebb: 30,   // s: the boost swells as the sky breaks / ebbs as it clears and the air dries
+  dtMax: .1,        // s: the most a frame moves the envelope (a stall, a hidden tab: no jump)
+  edge: 36,         // m: without env.broken, a front's edge this near the view's middle breaks the sky over it (most at 0)
   solid: .45, layer: 1.5,   // a min map block makes an opening where its nearest layer (this many m deep) fills this share of it
   len: [4, 6],      // m below its opening (the nearest thing round it, up-sun) a sample counts fully, then fades to nothing over
   dense: [.4, .65, .8],   // a tree opening: the canopy's share round it from nothing .. full count, over this many m (radius)
@@ -89,6 +127,18 @@ export const TUNE = {
   hyst: .7,         // samples: a level comes on this much past its threshold and goes this much below it
   jitter: true,     // the planes shifted by a new fraction of their spacing every frame (the history averages the phases)
   dtol: .25,        // m: a pixel's depth may differ this much from its place last frame and still be the same surface
+  // THE GAPS: beams through the cloud gaps (header)
+  gap: {on: flags.get('gapbeams') !== '0',
+    reach: 2,       // m: the cloud must lie within this, across the sun, on both sides of a sample's sun-ray ground point (a beam
+                    // is at most about this wide: a wider gap makes no beam, the slab it would make reads as lit ground, not air)
+    lv: 1,          // m of glowing air (lv's units) a beam counts as at its root: level 2 there, never the top level by itself
+    fade: [0, 6],   // m over the surface: a beam's root counts fully at fade[0], nothing at fade[1] (it steps down along its length)
+    step: .4,       // m between the gap samples' sun-ray ground points (the stride in planes follows the sun: 2..8)
+    over: 3,        // m: the gap map's margin covers samples this high over the ground plus the band (higher ones see no gap)
+    res: 1,         // the gap map's texels per view px (it covers the view and its margin: a little coarser than the view)
+    edge: .25,      // the sun (cloudAt .z x the level's) a beam's air must have over its sides' ground and the ground behind it
+    broken: [.15, .5],   // on with env.broken (render/lighting.js -> set(): In.broken) from nothing .. full;
+    cloud: [.35, .5]},   // without it: with the view's cloud (In.cloud) from nothing .. full, or a front (full)
 };
 
 const VS = `precision highp float; precision highp int;\nin vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
@@ -132,8 +182,13 @@ float sunThrough(vec3 X) {
   vec3 G = X - uSun * (X.y / uSun.y);
   vec4 c = uPV * vec4(G, 1.);
   vec3 cl = cloudAt(ivec2(floor((c.xy / c.w * .5 + .5) * uRes)), G);
-  return (cl.x > 1.5 ? 0. : cl.x > .5 ? .5 : 1.) * cl.z;
+  return cloudSunLv(cl) * cl.z;
 }
+// THE GAPS: the gap map (GAP_FS below: the sun through a gap at the ground under each of its texels) and how to read it
+uniform sampler2D tGap;
+uniform vec4 uGap;    // the count at a beam's root (samples; 0: off), the side reach (m), the stride (planes), the sun step
+uniform vec4 uGapF;   // the fade up the band: full below x m over the surface, none y m higher; w: this frame's phase (planes)
+uniform vec4 uGM;     // the gap map: the view px of its corner, view px per texel (x, y)
 void main() {
   ivec2 ip = ivec2(gl_FragCoord.xy);
   float d = texelFetch(tD, ip, 0).r;
@@ -172,6 +227,28 @@ void main() {
       }
       if (n >= uLv.z + 2.) { full = true; break; }   // (past the top level and its hysteresis: nothing more to count)
     }
+  }
+  // THE GAPS: the lowest air over this pixel lit through a cloud gap (the gap map where its sun ray meets the ground: brighter
+  // than the ground both sides of it across the sun, and than the ground this pixel shows: nothing over a sun patch itself),
+  // by its height: the beam's root
+  if (uGap.x > 0. && uCl.x > .5 && !full) {
+    vec3 g = cloudAt(ip, P); float g0 = cloudSunLv(g) * g.z, best = 0.;
+    if (g0 < 1.) {
+      // a sample's sun-ray ground point (h 0) and its place in the gap map: linear along the ray (the projection is affine)
+      vec3 G0 = X0 - uSun * (X0.y / uSun.y), dG = dX - uSun * (dX.y / uSun.y);
+      vec2 m0 = (((uPV * vec4(G0, 1.)).xy * .5 + .5) * uRes - uGM.xy) / uGM.zw, dm = (uPV * vec4(dG, 0.)).xy * .5 * uRes / uGM.zw;
+      ivec2 msz = textureSize(tGap, 0);
+      for (int i = 0; i < 64; i++) {   // (up the band: the fade only falls, so the first lit sample is the root)
+        int k = int(uGapF.w) + i * int(uGap.z); if (k >= N) break;
+        float f = 1. - clamp((X0.y + dX.y * float(k) - P.y - uGapF.x) / uGapF.y, 0., 1.); if (f <= 0.) break;
+        ivec2 t = ivec2(floor(m0 + dm * float(k)));
+        if (any(lessThan(t, ivec2(0))) || any(greaterThanEqual(t, msz))) continue;
+        if (texelFetch(tGap, t, 0).r <= g0 + uGap.w) continue;   // (no gap, or no brighter than the ground behind)
+        if (occS(tS, a0 + da * float(k), Z, uBand.z) || occSS(tSS, b0 + db * float(k), Z, uBand.z)) continue;   // (a thing's shadow)
+        best = f; break;
+      }
+    }
+    n += best * uGap.x;
   }
   // THE TIME: blended into the history at this point's place last frame (a pan: whole art px), if the same surface was
   // there (its depth then matches: else something moved in front of it or away, and it starts over)
@@ -220,6 +297,25 @@ void main() {
   float o = seg(tLv, uDir, 2, true);
   if (o < .5) discard;
   oc = vec4(uCol[int(o) - 1], 0.);
+}`;
+
+// THE GAP MAP (THE GAPS): per texel, the ground (h 0) under a view px of the region the samples' sun rays can reach (the view
+// and its margin down-sun): the sun the clouds let through there (render/clouds.js cloudAt) if there is cloud within the reach
+// on BOTH sides of it across the sun (at the reach or half of it: TUNE.gap.edge less sun), else 0 (sun beside it: no
+// column). One fetch a sample in the march instead of six. A byte
+const GAP_FS = `precision highp float; precision highp int;
+uniform vec2 uRes; uniform mat4 uInvPV, uPV; uniform vec3 uSun; uniform vec4 uGap, uGM; out vec4 oc;
+${CLOUD_GLSL}
+float sunOf(vec3 c) { return cloudSunLv(c) * c.z; }
+float sunAt(vec3 G) { vec4 c = uPV * vec4(G, 1.); return sunOf(cloudAt(ivec2(floor((c.xy / c.w * .5 + .5) * uRes)), G)); }
+void main() {
+  vec2 p = uGM.xy + gl_FragCoord.xy * uGM.zw, ndc = p / uRes * 2. - 1.;   // (the texel's view px)
+  vec4 a = uInvPV * vec4(ndc, -1., 1.), b = uInvPV * vec4(ndc, 1., 1.); a /= a.w; b /= b.w;
+  vec3 G = mix(a.xyz, b.xyz, a.y / (a.y - b.y)), sd = normalize(vec3(-uSun.z, 0., uSun.x)) * uGap.y;   // (h 0 there; across the sun)
+  float c = sunOf(cloudAt(ivec2(floor(p)), G));
+  float e = c - uGap.w;   // (a side is shade with less sun than this)
+  if (c > 0. && ((sunAt(G + sd) > e && sunAt(G + sd * .5) > e) || (sunAt(G - sd) > e && sunAt(G - sd * .5) > e))) c = 0.;
+  oc = vec4(c, 0., 0., 1.);
 }`;
 
 // THE MIN MAPS: each shadow map cut into blocks of RED x RED texels, a block's nearest depth to the sun (REDUCE_FS: where that
@@ -295,8 +391,9 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     uBand: {value: new THREE.Vector4()}, uPn: {value: new THREE.Vector4()}, uSide: {value: new THREE.Vector4()}, uMargin: {value: 0}, uMinOff: {value: new THREE.Vector4()},
     uLv: {value: new THREE.Vector3()}, tH: {value: null}, uHist: {value: new THREE.Vector4()}, uPrevPV: {value: new THREE.Matrix4()},
     uDM: {value: new THREE.Vector4()}, uMarginM: {value: 1}, uSun: {value: new THREE.Vector3()}, uPV: {value: null},
-    tDen: {value: MIN.S.den.texture}, uDense: {value: new THREE.Vector2()}};
-  for (const k of ['tTop', 'uCl', 'uClM', 'uClO', 'uClC', 'uClT', 'uFr', 'uFrB', 'uFrK', 'uFrC', 'uFrS', 'uFrQ']) U[k] = compU[k];   // (the clouds: render/clouds.js)
+    tDen: {value: MIN.S.den.texture}, uDense: {value: new THREE.Vector2()},
+    uGap: {value: new THREE.Vector4()}, uGapF: {value: new THREE.Vector4()}, uGM: {value: new THREE.Vector4()}, tGap: {value: null}};   // (THE GAPS)
+  for (const k of ['tTop', 'uCl', 'uClM', 'uClO', 'uClC', 'uClT', 'uFr', 'uFrB', 'uFrK', 'uFrC', 'uFrS', 'uFrQ', ...CLOUD_EXTRA]) U[k] = compU[k];   // (the clouds: render/clouds.js) (wx-B shim: ...CLOUD_EXTRA)
   const full = (vs, fs, u, extra) => { const sc = new THREE.Scene(); sc.matrixAutoUpdate = false; const m = new THREE.Mesh(tri, raw(vs, fs, u, {depthTest: false, depthWrite: false, ...extra})); m.frustumCulled = false; m.matrixAutoUpdate = false; sc.add(m); return sc; };
   // the march into the history (art px: the smoothed count, the level, the depth; two, this frame's and last frame's), its
   // levels cleaned in the level targets (one byte), then their shape added into the target the composite drew
@@ -314,18 +411,62 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor});
   // compiled now, while the page loads (else the first sunlit frame waits ~80 ms for them: a hitch at dawn after a night start)
   for (const sc of [scene, morphScene, morphHScene, shapeScene, redScene, dilScene, boxScene]) renderer.compile(sc, cam);
+  // THE GAPS: the gap map (GAP_FS: a byte a view px of the view and its margin down-sun), drawn before the march when it's on
+  const gapRT = lvT(), GU = {uRes: compU.uRes, uInvPV: compU.uInvPV, uPV: U.uPV, uSun: U.uSun, uGap: U.uGap, uGM: U.uGM};
+  for (const k of ['tTop', 'uCl', 'uClM', 'uClO', 'uClC', 'uClT', 'uFr', 'uFrB', 'uFrK', 'uFrC', 'uFrS', 'uFrQ', ...CLOUD_EXTRA]) GU[k] = compU[k];   // (wx-B shim: ...CLOUD_EXTRA)
+  const gapScene = full(VS, GAP_FS, GU, {}); U.tGap.value = gapRT.texture; renderer.compile(gapScene, cam);
   // the strength inputs (render/lighting.js, every frame): the sun's elevation (deg) and colour, the mood's shadow strength,
-  // the sky's cloud and mist, the ground's wetness
-  const In = {el: 45, c: [1, 1, 1], shadow: 0, cloud: 0, mist: 0, wet: 0};
+  // the sky's cloud and mist, the ground's wetness; THE ENVELOPE's: the share of the view's ground the sun reaches
+  // (env.sunView, else 1 - .9 x cloud), how broken the sky over it is (env.broken; undefined: the estimate below, resolved
+  // here, so In.broken is always a number), the frame's clock (s: the draw's, held in a still photo), the world clock (env:
+  // its front, a preview)
+  const In = {el: 45, c: [1, 1, 1], shadow: 0, cloud: 0, mist: 0, wet: 0, sunView: 1, broken: 0, t: 0, env: null};
   let base = 0;   // the strength before the view's share
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  // THE ENVELOPE's state and parts (rays.env, read-only; dev/wxpanel.js shows them): the sun's share, its target and smoothed
+  // (sun, sunS); how broken the sky is (est: by the estimate below), how moist the air, how fast the sun breaks through
+  // (breaking: 0..1); the boost's target (x = its
+  // wet part wetX + its breakthrough part burst) and smoothed (xS); the result (base: before the view's share) and what the
+  // old formula gives from the same inputs (old); the clock's last reading (t; -1: none yet); held: a preview, shown at once
+  const ENV = {sun: 0, sunS: 0, broken: 0, est: true, moist: 0, breaking: 0, wetX: 0, burst: 0, x: 0, xS: 0, base: 0, old: 0, t: -1, held: false};
+  // without env.broken: a front's edge crossing the view breaks the sky over it (sim/env.js FRONTS: up, the player's m ahead
+  // of the edge: the view's middle), as much as the clouds on its two sides differ
+  function brokenOf(F) {
+    if (!F || !F.on || !(F.up === F.up)) return 0;
+    const dc = Math.abs((F.A?.cloud ?? 0) - (F.B?.cloud ?? 0));
+    return (1 - smooth(0, TUNE.edge, Math.abs(F.up))) * Math.min(1, dc / .5);
+  }
+  const ease = (x, to, dt, up, dn) => x + (to - x) * (1 - Math.exp(-dt / (to > x ? up : dn)));
   function set(o) {
     In.el = o.el; In.c = o.c; In.shadow = o.shadow; In.cloud = o.cloud || 0; In.mist = o.mist || 0; In.wet = o.wet || 0;
     const T = TUNE, kEl = 1 - (1 - T.el[2]) * smooth(T.el[0], T.el[1], In.el), kCl = 1 - smooth(T.cloud[0], T.cloud[1], In.cloud);
     const kSh = Math.min(1, Math.max(0, In.shadow / T.shadow));
-    base = Math.min(T.max, T.k * kEl * kCl * kSh * (1 + T.mist * In.mist + T.wet * In.wet));
+    const old = ENV.old = Math.min(T.max, T.k * kEl * kCl * kSh * (1 + T.mist * In.mist + T.wet * In.wet));
+    const env = In.env = o.env || null;
+    In.sunView = o.sunView ?? 1 - In.cloud * .9; In.t = o.t ?? performance.now() / 1000;
+    ENV.est = o.broken == null; In.broken = ENV.broken = ENV.est ? brokenOf(env?.front) : o.broken;
+    if (!T.env) { base = ENV.base = old; ENV.t = -1; return; }   // (?rayenv=0, or TUNE.env off live: the old formula)
+    // the targets: the sun's share (through TUNE.cloud as the cloud that leaves that much sun), the boost (wet ground, the
+    // breakthrough while the sky is broken in moist air)
+    const sun = ENV.sun = 1 - smooth(T.cloud[0], T.cloud[1], (1 - In.sunView) / .9);
+    const moist = ENV.moist = Math.min(1, Math.max(In.wet, T.moist * In.mist));
+    // (the breakthrough only while the sun BREAKS THROUGH: its share rising ahead of the beams, which lag a rise; a steady sky
+    // or a deck closing in has none: an arriving storm's broken edge, or a cloudy day's gaps, boost nothing)
+    const brk = ENV.breaking = ENV.t < 0 ? 0 : smooth(0, T.breaking, sun - ENV.sunS);
+    ENV.wetX = T.wetX * In.wet; ENV.burst = T.burst * In.broken * moist * brk;
+    const x = ENV.x = ENV.wetX + ENV.burst;
+    // in time: the frame's clock (at most T.dtMax s a frame, x rays.rate); a preview shows its weather at once, the state waits
+    let sS = sun, xS = x;
+    if (!(ENV.held = !!env?.previewing)) {
+      const dt = Math.min(T.dtMax, Math.max(0, In.t - ENV.t)) * R.rate;
+      if (ENV.t < 0) { ENV.sunS = sun; ENV.xS = x; }   // (the first frame: as it is)
+      else if (dt > 0) { ENV.sunS = ease(ENV.sunS, sun, dt, T.rise, T.fall); ENV.xS = ease(ENV.xS, x, dt, T.swell, T.ebb); }
+      ENV.t = In.t; sS = ENV.sunS; xS = ENV.xS;
+    }
+    // (a steady dry day: sS = the old kCl, xS = 0: exactly the old formula)
+    base = ENV.base = Math.min(T.max, T.k * kEl * sS * kSh * (1 + T.mist * In.mist) * (1 + xS));
   }
-  const R = {live: false, strength: 0, TUNE, set, draw, restatic: () => { MIN.staticDirty = true; },
+  const R = {live: false, strength: 0, TUNE, set, draw, restatic: () => { MIN.staticDirty = true; }, env: ENV, In, rate: 1,
     get enabled() { return TUNE.on && compU.uShadowOn.value > .5; }};
   // K: half the reach in blocks of a min map, at m metres per block (at least one). A block's size in metres across / up:
   // 2 / (light NDC per metre x blocks), the NDC per metre being the length of the light matrix's first / second row
@@ -380,6 +521,25 @@ export function createGodrays({THREE, renderer, raw, tri, cam, compU}) {
     }
     U.uMinOff.value.set(ox / (SZ * RED), oy / (SZ * RED), MIN.oSS[0] / (SZS * RED), MIN.oSS[1] / (SZS * RED));
     U.uSide.value.set((kx + 1) / SZ, 0, (MIN.kSS + 1) / SZS, 0);
+    // THE GAPS: on while the sky is broken (In.broken via set(); without it the view's cloud, or a front) and the cloud
+    // shadows are on this frame (0: none of it runs, the map isn't drawn); the root's count; the stride: the planes over which
+    // a sample's sun-ray ground point moves Gp.step m (a plane moves it dX - s dX.y / s.y, dX = V dn / nV), its phase turning
+    const nV = Vx * nx + Vy * ny + Vz * nz, dq = T.dn / Math.max(.05, nV), gy = Vy * dq / Math.max(.05, sy);
+    const Gp = T.gap, st = Math.max(2, Math.min(8, Math.round(Gp.step / (Math.hypot(Vx * dq - sx * gy, Vz * dq - sz * gy) || 1))));
+    const gq = !Gp.on || compU.uCl.value.x < .5 ? 0 : typeof In.broken === 'number' ? smooth(Gp.broken[0], Gp.broken[1], In.broken)
+      : compU.uFr.value.w > .5 ? 1 : smooth(Gp.cloud[0], Gp.cloud[1], In.cloud);
+    U.uGap.value.set(gq > .01 ? gq * Gp.lv / T.dn : 0, Gp.reach, st, Gp.edge);
+    R.gapStride = gq > .01 ? st : 0;   // (a readout: the gap samples' stride this frame, 0 off)
+    if (gq > .01) {   // the gap map: the view and its margin down-sun (a sample's sun ray meets the ground up to (band + over) / s.y m
+      // down-sun of it), as many texels as the view has px; the sun's direction on screen (_d: NDC a metre) -> px a metre of height
+      const MW = Math.max(16, Math.round(VW * Gp.res)), MH = Math.max(16, Math.round(VH * Gp.res));
+      if (gapRT.width !== MW || gapRT.height !== MH) gapRT.setSize(MW, MH);
+      const H = (T.band + Gp.over) / Math.max(.05, sy), mx = -_d.x * .5 * VW * H, my = -_d.y * .5 * VH * H;
+      const x0 = Math.max(-2 * VW, Math.min(0, mx)), x1 = Math.min(3 * VW, VW + Math.max(0, mx)), y0 = Math.max(-2 * VH, Math.min(0, my)), y1 = Math.min(3 * VH, VH + Math.max(0, my));
+      U.uGM.value.set(x0, y0, (x1 - x0) / MW, (y1 - y0) / MH);
+      renderer.setRenderTarget(gapRT); renderer.render(gapScene, cam);
+    }
+    U.uGapF.value.set(Gp.fade[0], Math.max(.01, Gp.fade[1] - Gp.fade[0]), 0, T.jitter ? Math.floor((HI.f * .6180339887) % 1 * st) : 0);
     // THE TIME: this frame's weight in the history (by the real time since the last: any frame rate smooths alike), the
     // hysteresis, the depth tolerance (metres along the view ray -> depth units), and whether it starts over (the first frame
     // after none, a gap, a resize); last frame's projection, to find each point's place then

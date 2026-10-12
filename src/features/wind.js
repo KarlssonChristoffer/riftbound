@@ -318,6 +318,7 @@ export async function create(host) {
     return near;
   }
   function flexOf(p) {
+    if (p.gone) return null;   // (hidden: a felled tree, features/woodcut.js; nothing of it sways, sheds or rustles)
     const F = FLEX[biome]; if (!F) return null;
     if (F.rigid?.[p.kind]?.includes(p.variant | 0)) return null;
     if (p.kind === 'tree' && F.dead && (p.variant | 0) === 2) return F.dead;
@@ -1246,6 +1247,11 @@ export async function create(host) {
           for (const pc of it.pieces) kick(pc, ux * k, uy * k, k * .5);
           if (it.lantern) { it.lantern.ox -= ux * k / 60; it.lantern.oy -= uy * k / 60; }
         }
+      } else if (e.type === 'tree.chop' && e.who) {   // features/woodcut.js: an axe bites: the crown shudders the way the blow went, a few leaves let go
+        const p = e.who, st = fst.get(p), k = e.k || 0;
+        if (st) { st.shake = Math.max(st.shake, .3 + .5 * k); const s = Math.sign((e.dx || 0) * RX + (e.dy || 0) * RY || 1) * 26 * (.4 + k); st.vx += RX * s; st.vy += RY * s; }
+        const S = SHED[biome];
+        if (k > 0 && S?.kind === 'leaf' && leafyTree(p)) { const n = Math.floor((1 + 3 * k) * clamp(.5 + .45 * leafRate(S), .4, 2) + R()); if (n > 0) shed(p, n, 'arrow'); }
       } else if (e.type === 'wildlife.bird_perch' && e.prop) {   // wildlife.js: a bird landed on / took off from a crown or a bush
         const p = e.prop, F = flexOf(p); if (!F || p.kind === 'tuft' || !vis(p.x, p.y)) continue;
         const st = fst.get(p), tree = p.kind === 'tree';   // a crow / raven bobs a branch, a sparrow on a big oak barely does
@@ -1353,6 +1359,16 @@ export async function create(host) {
     // the foliage (trees, bushes, tufts) round the view and the player, for other features' per-step loops (windlines.js):
     // read-only, the same array until the view crosses a cell edge or the props change
     foliage: () => nearList(),
+    // a felled tree's crown meets the ground (features/woodcut.js, its view): n of its leaves thrown up round (x, y) within
+    // r m from about h m, in the tree's own autumn colours (p: the tree)
+    leafBurst(p, x, y, h, n, r) {
+      const S = SHED[biome]; if (!W.on || !S || S.kind !== 'leaf') return;
+      for (let i = 0; i < n; i++) {
+        const a = R() * TAU, d = Math.sqrt(R()) * r;
+        spawnPart({x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, h: h + R() * .6, t: 0, ph: R() * TAU, rest: 0, kind: 'leaf', pal: leafPal(S, autumnOf(p)),
+          vx: Math.cos(a) * (.4 + R()), vy: Math.sin(a) * (.3 + R() * .5), vh: .9 + R() * 1.7, life: 4 + R() * 2, g: 1.4, big: R() < .3, lie: 2});
+      }
+    },
     lights() {
       if (!W.on || needDecor) return EMPTY;
       const out = [];

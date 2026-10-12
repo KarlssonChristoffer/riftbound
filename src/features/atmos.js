@@ -41,12 +41,18 @@
 //
 // RULES the art follows (the arena's): every particle is 1-3 px of solid palette colour, no alpha, no AA; fading =
 // stepping through darker palette entries. Sizes scale with the host's zoom (zoom 2 = 2 x 2 px per art pixel).
+//
+// THE AIR (G.air: render/air.js, view/airdrift.js; k per kind: AIRK.atmos): the fx (dust, the blast's smoke plume, snow
+// puffs, grit, drops, embers) and the ambient particles in world space (leaves, pollen, ash, snow, rising embers / motes,
+// fireflies; not the parallax layers, not resting leaves) carry a velocity of their own in the moving air (ax, ay),
+// relaxed toward G.air.velAt where they are: a blast blows the dust and the pollen away, a run parts them. ?air=0: none.
 import {flags} from '../core/flags.js';
 import {mulberry32} from '../core/rng.js';
 import {clearArray} from '../core/mathx.js';
 import {hexAny255 as hex3, lum} from '../core/color.js';
 import {createWaterLife} from './atmos/waterlife.js';
 import {sameLevel} from '../world/world.js';
+import {AIRK, createDrift} from '../view/airdrift.js';
 
 const TAU = Math.PI * 2;
 // palettes are ordered bright -> dim; fades step toward the end
@@ -183,6 +189,11 @@ export async function create(host) {
   // the embers' sources (a live query: braziers and torches, not every prop) and the grid's candidates for a footstep
   const emberQ = host.entities.query('atmos.ember', p => p.kind === 'brazier' || p.kind === 'torch'), nearT = [];
   const elevAt = (x, y) => host.elev(x, y);
+  // the moving air (G.air): the drift helper, this step's relaxation per fx kind (AIR_FX: dust, grit, ember, snow, smoke) and
+  // per ambient kind (K.aa; its AIRK.atmos key: AIR_AMB, none for the parallax layers)
+  const AD = createDrift(host), AK = AIRK.atmos, AIR_FX = new Float32Array(5);
+  const AIR_AMB = {leaf: 'leaf', pollen: 'pollen', fly: 'fly', ash: 'ash', ember: 'rise', snow: 'snow2', mote: 'rise'};
+  let airOn = false;
   const wet = (x, y) => host.inStream(x, y);
   const tick = t0 => { acc += performance.now() - t0; };
 
@@ -289,7 +300,7 @@ export async function create(host) {
     return vis.length ? vis[R() * vis.length | 0] : null;
   }
   function spawn(K, p, init) {
-    p.pool = 0;
+    p.pool = 0; p.ax = p.ay = 0;
     place(K, p); p.t = 0; p.ph = R(); p.ex = 0; p.ey = 0; p.rest = 0; p.v = K.v ? rr(K.v) : 0;
     if (K.pals) p.pal = K.pals[R() * K.pals.length | 0];
     p.big = !!K.big && R() < K.big;
@@ -320,7 +331,7 @@ export async function create(host) {
     R.seed({ruins: 11, ember: 23, frost: 37, rift: 51}[biome] || 1);
     view();
     kinds = (KINDS[biome] || []).map(D => {
-      const K = {...D, span: D.hMax ?? D.hi ?? 2, ps: []};
+      const K = {...D, span: D.hMax ?? D.hi ?? 2, ps: [], aa: 0};
       for (let i = D.n; i > 0; i--) { const p = {}; spawn(K, p, true); K.ps.push(p); }
       return K;
     });
@@ -337,6 +348,7 @@ export async function create(host) {
       }
     }
     const sw = wind * (K.wk || 0);
+    if (K.aa > 0 && !(p.rest > 0)) { AD.relax(p.x, p.y, p.h, p.ax, p.ay, K.aa); p.ax = AD.x; p.ay = AD.y; }   // the moving air (K.aa: this step's)
     if (K.mode === 'fall') {
       if (p.rest > 0) {
         p.rest -= dt; if (p.rest <= 0) { spawn(K, p, false); return; }
@@ -350,7 +362,7 @@ export async function create(host) {
         }
         return;
       }
-      p.h -= p.v * dt; p.x += (sw + p.ex) * dt; p.y += p.ey * dt;
+      p.h -= p.v * dt; p.x += (sw + p.ex + p.ax) * dt; p.y += (p.ey + p.ay) * dt;
       const gnd = K.par || p.h > 2.6 ? 0 : elevAt(p.x, p.y);   // lands on the plateau top at its height
       if (p.h <= gnd) {
         if (K.rest) {
@@ -366,7 +378,7 @@ export async function create(host) {
         } else { spawn(K, p, false); return; }
       }
     } else if (K.mode === 'rise') {
-      p.h += p.v * dt; p.x += (sw + p.ex + Math.sin(T * 1.3 + p.ph * TAU) * (K.wob || 0)) * dt; p.y += p.ey * dt;
+      p.h += p.v * dt; p.x += (sw + p.ex + p.ax + Math.sin(T * 1.3 + p.ph * TAU) * (K.wob || 0)) * dt; p.y += (p.ey + p.ay) * dt;
       const rg = host.layout?.ring;
       if (K.swirl && rg) {   // a slow current around the rift ring
         const dx = p.x - rg.x, dy = p.y - rg.y, d = Math.hypot(dx, dy) || 1, k = Math.max(0, 1 - Math.abs(d - rg.r) / 3) * .3 * dt;
@@ -377,11 +389,11 @@ export async function create(host) {
       const d = Math.exp(-dt * .8), j = K.jit * dt * 3;
       p.vx = p.vx * d + (R() - .5) * j; p.vy = p.vy * d + (R() - .5) * j; p.vh = p.vh * d + (R() - .5) * j * .5;
       const b = elevAt(p.x, p.y); if (p.h < b + K.lo) p.vh = Math.abs(p.vh) + .05 * dt; if (p.h > b + K.hi) p.vh = -Math.abs(p.vh);
-      p.x += (p.vx + sw + p.ex) * dt; p.y += (p.vy + p.ey) * dt; p.h += p.vh * dt;
+      p.x += (p.vx + sw + p.ex + p.ax) * dt; p.y += (p.vy + p.ey + p.ay) * dt; p.h += p.vh * dt;
       if (p.t >= p.life) { spawn(K, p, false); return; }
     } else if (K.mode === 'firefly') {
       p.a += (R() - .5) * 3 * dt;
-      p.x += (Math.cos(p.a) * .3 + sw + p.ex) * dt; p.y += (Math.sin(p.a) * .2 + p.ey) * dt;
+      p.x += (Math.cos(p.a) * .3 + sw + p.ex + p.ax) * dt; p.y += (Math.sin(p.a) * .2 + p.ey + p.ay) * dt;
       const want = elevAt(p.x, p.y) + (K.lo + K.hi) / 2 + Math.sin(T * .9 + p.ph * TAU) * (K.hi - K.lo) / 2;
       p.h += (want - p.h) * Math.min(1, dt * .8);   // eases up / down over the cliff edge
     }
@@ -447,19 +459,22 @@ export async function create(host) {
   }
 
   // ---------- short-lived fx: hit bursts, snow puffs, grass bits ----------
-  // o: {pal, sp, up, life, gr, drag, bounce, emit, dark, px, py, hold, even}; bx, by: extra ground velocity (m/s)
+  // o: {pal, sp, up, life, gr, drag, bounce, emit, dark, px, py, hold, even, ai}; bx, by: extra ground velocity (m/s).
+  // ai: how it takes the moving air (AIR_FX: 0 dust, 1 grit, 2 ember, 3 snow, 4 smoke, -1 not at all); by default by what
+  // it is: glowing an ember, heavy (gravity 5 and up: drops, chips, bits) grit, the rest (light, slow to fall) dust
   function emitFx(x, y, h, n, o, bx = 0, by = 0, spread = 0) {
+    const ai = o.ai ?? (o.emit ? 2 : (o.gr ?? 9) >= 5 ? 1 : 0);
     for (let i = 0; i < n && fx.length < 500; i++) {
       const a = o.even ? (i + R() * .3) / n * TAU : R() * TAU, sp = rr(o.sp), dark = o.dark && R() < .45;
       const ox = spread ? (R() - .5) * spread : 0, oy = spread ? (R() - .5) * spread * .7 : 0;
       fx.push({x: x + ox, y: y + oy, h, vx: Math.cos(a) * sp + bx, vy: Math.sin(a) * sp * .7 + by, vh: rr(o.up), t: 0, life: rr(o.life), gr: o.gr ?? 9, drag: o.drag || 1.5,
-        bounce: o.bounce, pal: dark ? o.dark : o.pal, emit: o.emit && !dark, px: o.px || (R() < .25 && !dark ? 2 : 1), py: o.py || 1, hold: o.hold || .4, rest: false});
+        bounce: o.bounce, pal: dark ? o.dark : o.pal, emit: o.emit && !dark, px: o.px || (R() < .25 && !dark ? 2 : 1), py: o.py || 1, hold: o.hold || .4, rest: false, ax: 0, ay: 0, ai});
     }
   }
   const dustOf = () => DUST[biome] || DUST.ruins;
   const printTone = f => { const tb = f.tab; for (let i = 0; i < tb.length; i++) if (f.t < tb[i][0]) return tb[i][1]; return tb[tb.length - 1][1]; };   // (its age's tone: no closure per print)
   const flowAt = y => { const L = STREAM_LIFE[biome]; return L && L.v ? WL.pace(y) * waterK : 0; };   // m/s down the river: the shader's pace (+ rain)
-  const SNOWPUFF = {pal: SNOW, sp: [.5, 1.5], up: [.6, 1.5], life: [.35, .6], gr: 7, drag: 3};
+  const SNOWPUFF = {pal: SNOW, sp: [.5, 1.5], up: [.6, 1.5], life: [.35, .6], gr: 7, drag: 3, ai: 3};
   const GRASS = {pal: ['#8ea452', '#6a803c', '#4a5a2a'], sp: [.3, .8], up: [1, 1.7], life: [.35, .55], gr: 7, drag: 2};
   function foot(e) {
     const sp = Math.hypot(P.vx, P.vy); if (sp > .3) { dirX = P.vx / sp; dirY = P.vy / sp; }
@@ -492,7 +507,7 @@ export async function create(host) {
       for (let i = 0; i < n && fx.length < 500; i++) {
         const a = i / n * TAU + R() * .3, r = (1 + R() * .4) * (e.small ? .5 : 1), life = .35 + R() * .25, h = .15 + R() * .9 * k;
         fx.push({x: e.x + Math.cos(a) * r, y: e.y + Math.sin(a) * r * .8, h: WATER_H + h, vx: -Math.cos(a) * r / life, vy: -Math.sin(a) * r * .8 / life, vh: -h / life,
-          t: 0, life, gr: 0, drag: 0, pal: R1.pal, emit: true, px: 1, py: 1, hold: 0, rest: false});
+          t: 0, life, gr: 0, drag: 0, pal: R1.pal, emit: true, px: 1, py: 1, hold: 0, rest: false, ax: 0, ay: 0, ai: -1});   // (pulled into the crack: not by the air)
       }
       return;
     }
@@ -513,7 +528,8 @@ export async function create(host) {
       if (q.t >= q.life) { fx[i] = fx[fx.length - 1]; fx.pop(); continue; }
       if (!q.rest) {
         q.vh -= q.gr * dt; const d = Math.exp(-dt * q.drag); q.vx *= d; q.vy *= d; if (q.gr <= 0) q.vh *= d;
-        q.x += q.vx * dt; q.y += q.vy * dt; q.h += q.vh * dt;
+        if (airOn && q.ai >= 0) { AD.relax(q.x, q.y, q.h, q.ax, q.ay, AIR_FX[q.ai]); q.ax = AD.x; q.ay = AD.y; }
+        q.x += (q.vx + q.ax) * dt; q.y += (q.vy + q.ay) * dt; q.h += q.vh * dt;
         if (q.vh <= 0) {
           const g0 = elevAt(q.x, q.y), w = !g0 && wet(q.x, q.y), gnd = w ? WATER_H : g0;
           if (q.h <= gnd) {
@@ -529,7 +545,7 @@ export async function create(host) {
       const m = plumes[i], k0 = m.t / m.dur; m.t += dt; const k1 = Math.min(1, m.t / m.dur);
       for (let j = Math.round(k0 * m.n); j < Math.round(k1 * m.n) && fx.length < 500; j++)
         fx.push({x: m.x + (R() - .5) * .8, y: m.y + (R() - .5) * .5, h: m.z + .3 + R() * .4, vx: (R() - .5) * .5 + wind * .3, vy: (R() - .5) * .3, vh: 1.2 + R() * .9,
-          t: 0, life: 1.1 + R() * .7, gr: 0, drag: 1.1, pal: SMOKE, px: 2 + (R() < .5 ? 1 : 0), py: 2 + (R() < .4 ? 1 : 0), hold: .6, rest: false});
+          t: 0, life: 1.1 + R() * .7, gr: 0, drag: 1.1, pal: SMOKE, px: 2 + (R() < .5 ? 1 : 0), py: 2 + (R() < .4 ? 1 : 0), hold: .6, rest: false, ax: 0, ay: 0, ai: 4});
       if (m.t >= m.dur) plumes.splice(i, 1);
     }
   }
@@ -755,7 +771,7 @@ export async function create(host) {
       {label: 'Vignette + haze', options: ['on', 'off'], get: () => F.hdOn ? 'on' : 'off', set: v => { F.hdOn = v === 'on'; }},
     ],
     hud: () => F.weather ? '' : 'weather off (K)',
-    counts: () => ({fx: fx.length, prints: prints.length, rings: rings.length, stream: strm.length, ambient: kinds.reduce((n, K) => n + K.ps.length, 0), water: WL.counts()}),
+    counts: () => ({fx: fx.length, prints: prints.length, rings: rings.length, stream: strm.length, ambient: kinds.reduce((n, K) => n + K.ps.length, 0), water: WL.counts(), airN: AD.n}),
     falls: () => WL.falls(),   // the waterfalls of this biome [{id, x, y (the foot), h0 (its height), lipY, lipH, hw}] (sound / tools)
     onArrowStuck: a => WL.arrowStuck(a),   // an arrow in the rill / outflow: a ring + droplets (called in the sim step: it only fills presentation pools)
     dbg: {get kinds() { return kinds; }, V, get fx() { return fx; }, get strm() { return strm; }, WL, get waterK() { return waterK; }},   // tests
@@ -775,10 +791,13 @@ export async function create(host) {
       fogX += wind * (FOG[biome]?.drift || 0) * dt + (biome === 'rift' ? .04 * dt : 0);
       let n = fx.length;
       poolLeaves = 0;
+      airOn = AD.begin(dt, AK.gain);
+      if (airOn) { AIR_FX[0] = AD.a(AK.dust); AIR_FX[1] = AD.a(AK.grit); AIR_FX[2] = AD.a(AK.ember); AIR_FX[3] = AD.a(AK.snow); AIR_FX[4] = AD.a(AK.smoke); }
+      for (const K of kinds) { const key = !K.par && AIR_AMB[K.id]; K.aa = airOn && key ? AD.a(AK[key]) : 0; }
       if (F.weather) { parallax(); for (const K of kinds) { K.act = actOf(K); for (let i = 0; i < K.act; i++) stepP(K, K.ps[i], dt); n += K.act; } } else camW = null;
       if (F.weather && biome === 'frost' && gust > .25 && R() < gust * 7 * dt) {   // spindrift: a gust lifts a little snow off the ground
         const [x, y] = fromVF(V.camx + R() * VW, V.camy + R() * VH);
-        fx.push({x, y, h: elevAt(x, y) + .02, vx: wind * 1.3, vy: (R() - .5) * .3, vh: .5 + R() * .5, t: 0, life: .5 + R() * .5, gr: 1.6, drag: .3, pal: SNOW, px: 1, py: 1, hold: .4});
+        fx.push({x, y, h: elevAt(x, y) + .02, vx: wind * 1.3, vy: (R() - .5) * .3, vh: .5 + R() * .5, t: 0, life: .5 + R() * .5, gr: 1.6, drag: .3, pal: SNOW, px: 1, py: 1, hold: .4, ax: 0, ay: 0, ai: 3});
       }
       if (biome === 'rift') shards((x, y, h) => { if (R() < .5 * dt) emitFx(x, y, h - .1, 1, MOTEFX); });   // shards shed a mote now and then
       if (P.state === 'climb') for (let k = 16 * dt + R(); k >= 1; k--)   // grit trickling off the cliff face under the hands and feet

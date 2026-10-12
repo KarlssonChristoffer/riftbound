@@ -10,7 +10,8 @@
 //   flash    combat's white hit flash (and the aim's hover pulse), through rigmesh's flash
 //   eyes     ember / rift / elites / champions: two emissive points on the drawn eyes (the aura's colour on an elite)
 //   death    combat breaks it (prop.break): the drawn pose goes to a ragdoll (view/ragdoll.js, the shared rig) thrown by the
-//            killing hit (combat.hit's point and way, arrow.hit's push), lies TUNE.lie s and fades
+//            killing hit (combat.hit's point and way, arrow.hit's push), lies TUNE.lie s and fades. Its card stays hidden while
+//            it is down (the yard's pair lies broken until it comes back: the card would stand up in its old death pose)
 //   fog      a brute veiled by the fog (features/omens/fog.js: world.veil) isn't drawn
 // OWNS: its rig, the models (per biome and variant), the bodies and their state, the ragdolls. READS: combat's core (brutes,
 //   BS), host.player, host.world (itemOf, own, veiled), the biome's style, host.yaw. EMITS: nothing.
@@ -78,13 +79,15 @@ export async function create(host) {
   // ---------------------------------------------------------------- the death: the drawn pose thrown by the killing hit
   const HIT = {x: 0, y: 0, h: 0, dx: 0, dy: 0, power: 0}, BMO = {}, SO = {x: 0, y: 0, z: 0, face: 0, mats: null, hit: null, flash: 0};
   function fell(b, s) {
-    if (!s.body || !s.m || (s.gone ?? s.seen) < frameN - 120) { release(b, s); return; }   // (never drawn, or not lately: no body to throw)
-    const i = ci; ci = (ci + 1) % corpses.length; if (corpses[i].on) rag.free(i);
-    const l = Math.hypot(s.hx, s.hy) || 1;
-    HIT.x = s.hitX ?? b.x; HIT.y = s.hitY ?? b.y; HIT.h = s.hitH ?? (b.z || 0) + 1; HIT.dx = s.hx / l; HIT.dy = s.hy / l; HIT.power = s.power || TUNE.power;
-    SO.x = b.x; SO.y = b.y; SO.z = b.z || 0; SO.face = s.phi; SO.mats = s.body.boneMats(BMO); SO.hit = HIT; SO.flash = Math.min(1, (b.flash || 0) * TUNE.flash);
-    if (rag.spawn(i, s.m.key, SO)) { corpses[i].on = true; corpses[i].t = 0; }
-    release(b, s);
+    if (s.body && s.m && (s.gone ?? s.seen) >= frameN - 120) {   // (never drawn, or not lately: no body to throw)
+      const i = ci; ci = (ci + 1) % corpses.length; if (corpses[i].on) rag.free(i);
+      const l = Math.hypot(s.hx, s.hy) || 1;
+      HIT.x = s.hitX ?? b.x; HIT.y = s.hitY ?? b.y; HIT.h = s.hitH ?? (b.z || 0) + 1; HIT.dx = s.hx / l; HIT.dy = s.hy / l; HIT.power = s.power || TUNE.power;
+      SO.x = b.x; SO.y = b.y; SO.z = b.z || 0; SO.face = s.phi; SO.mats = s.body.boneMats(BMO); SO.hit = HIT; SO.flash = Math.min(1, (b.flash || 0) * TUNE.flash);
+      if (rag.spawn(i, s.m.key, SO)) { corpses[i].on = true; corpses[i].t = 0; }
+    }
+    // its card stays hidden (still owned) while it is down; the next life starts a fresh state (its body taken again, no old blow)
+    drop(s); s.hop = null; s.f = -999; s.hx = s.hy = s.power = 0; s.hitX = s.hitY = s.hitH = undefined;
   }
 
   // ---------------------------------------------------------------- the frame's pose of one brute

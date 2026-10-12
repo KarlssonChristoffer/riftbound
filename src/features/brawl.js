@@ -193,10 +193,10 @@ export async function create(host) {
     },
     onKey(k, e) {
       const b = B(); if (!b) return false;
-      if (k === 'v' && KICK) {   // (Shift held is the sprint: V then is the barge, not a key of its own)
+      if (k === 'v' && KICK) {
         if (b.carrying) return true;
         const P = host.player, sp = Math.hypot(P.vx, P.vy);
-        if (sp >= BG.min && host.keys.has('shift') && b.barge()) return true;
+        if (e?.shiftKey) { if (sp < BG.min) return false; b.barge(); return true; }   // (Shift held: at a sprint the barge; else Shift+V stays gunfx's smoke styles)
         const pt = kickPoint(); b.kick(pt.x, pt.y); return true;
       }
       if (k === 'e' && LIFTS) {
