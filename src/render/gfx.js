@@ -481,8 +481,9 @@ void main() {
   gl_Position.z -= uBias * gl_Position.w;
 #endif
 }`;
-const CARD_FS = HEAD + OUTS + `
+const CARD_FS = HEAD + OUTS + CUT + `
 in vec2 vUv; in vec2 vC; in vec2 vSp;
+uniform vec3 uAnchor;   // (CARD_VS's: the cutaway takes a card by its foot)
 uniform sampler2D uTex, uNrm, uEm; uniform vec4 uNrmRect, uRect; uniform vec2 uSize;
 uniform float uHasNrm, uHasEm, uType, uObj, uCamYaw, uFlash, uHasBend, uSway;
 uniform sampler2D uMetal; uniform float uHasMetal;   // the shiny-armour mask (R: 255 steel, 128 gold), aligned with uTex
@@ -521,6 +522,7 @@ vec3 plantTurn(vec3 col, int tn, vec2 sp) {   // sp: the pixel in the sprite (y 
   return uPPal[(r2 > .8 ? 16 : 0) + (stage - 1) * 4 + tn];
 }
 void main() {
+  if (uType != 4. && cutAway(uAnchor + vec3(0., .05, 0.))) discard;   // (the cutaway, render/cut.js: not the characters)
   vec2 C = vC, uv = vUv;
   if (uHasBend > .5) {   // each row shifts by whole pixels: stiff trunks, a crown moving as a block
     float f = clamp(1. - vSp.y / uSize.y, 0., 1.) * 7.; int i = int(floor(f)); float t = f - float(i);
@@ -563,7 +565,7 @@ const BCARD_VS = HEAD + `
 in vec3 position; in vec4 iA; in vec4 iS; in vec4 iO; in vec4 iB0; in vec4 iB1; in vec4 iM; in vec4 iP;
 uniform mat4 viewMatrix, projectionMatrix;
 uniform float uFaceYaw, uCamYaw, uShadow; uniform vec2 uPx, uSnap;   // uShadow 1: the sun card (no bias, no row bend)
-out vec2 vUv; out vec2 vC; out vec2 vSp;
+out vec2 vUv; out vec2 vC; out vec2 vSp; flat out vec3 vAnc;
 flat out vec2 vSize; flat out vec4 vB0; flat out vec4 vB1; flat out vec4 vMisc; flat out vec4 vPlant;   // vMisc: sway, bends, flash, obj
 void main() {
   vec2 c = position.xy;
@@ -573,7 +575,7 @@ void main() {
   float S = uHasBend > .5 ? ceil(abs(uSway)) : 0., sxp = c.x * (uSize.x + 2. * S) - S;
   float px = sxp - uPivot.x + uOff.x + (uHasBend > .5 ? 0. : uSway * c.y), py = uPivot.y - (1. - c.y) * uSize.y + uOff.y;
   vec3 w = iA.xyz + right * (px / uPx.x) + vec3(0., py / uPx.y, 0.);
-  vC = vec2(c.x, 1. - c.y); vSp = vec2(sxp, (1. - c.y) * uSize.y);
+  vC = vec2(c.x, 1. - c.y); vSp = vec2(sxp, (1. - c.y) * uSize.y); vAnc = iA.xyz;
   vUv = vC;
   vSize = uSize; vB0 = iB0; vB1 = iB1; vMisc = vec4(uSway, uHasBend, iM.x, iM.y); vPlant = vec4(iM.z, iM.w, iP.x, iP.y);
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
@@ -590,8 +592,8 @@ void main() {
   gl_Position.z -= uBias * gl_Position.w;
 #endif
 }`;
-const BCARD_FS = HEAD + OUTS + `
-in vec2 vUv; in vec2 vC; in vec2 vSp;
+const BCARD_FS = HEAD + OUTS + CUT + `
+in vec2 vUv; in vec2 vC; in vec2 vSp; flat in vec3 vAnc;
 flat in vec2 vSize; flat in vec4 vB0; flat in vec4 vB1; flat in vec4 vMisc; flat in vec4 vPlant;
 uniform sampler2D uTex, uEm, uPal; uniform float uHasEm, uType, uCamYaw, uAutumn;
 float bend(int i) { return i < 4 ? vB0[i] : vB1[i - 4]; }
@@ -621,6 +623,7 @@ vec3 plantTurn(vec3 col, int tn, vec2 sp) {   // (CARD_FS plantTurn)
   return pal(4 + (r2 > .8 ? 16 : 0) + (stage - 1) * 4 + tn);
 }
 void main() {
+  if (cutAway(vAnc + vec3(0., .05, 0.))) discard;   // (the cutaway, render/cut.js: a card goes by its foot)
   vec2 C = vC, uv = vUv;
   if (vMisc.y > .5) {   // each row shifts by whole pixels (CARD_FS)
     float f = clamp(1. - vSp.y / vSize.y, 0., 1.) * 7.; int i = int(floor(f)); float t = f - float(i);
@@ -675,10 +678,10 @@ const BATCH_VS = HEAD + `
 in vec3 position; in vec4 iAnchor; in vec4 iRect; in vec4 iSize; in vec4 iMisc;
 uniform mat4 viewMatrix, projectionMatrix;
 uniform float uFaceYaw, uCamYaw, uBias, uPy, uSun; uniform vec2 uPx, uSnap;
-out vec2 vUv; out vec2 vC; flat out vec4 vMisc;
+out vec2 vUv; out vec2 vC; flat out vec4 vMisc; flat out vec3 vAnc;
 const float LIE_H = .18;
 void main() {
-  vec2 c = position.xy;
+  vec2 c = position.xy; vAnc = iAnchor.xyz;
   vec3 right = vec3(cos(uFaceYaw), 0., -sin(uFaceYaw));
   if (dot(right, vec3(cos(uCamYaw), 0., -sin(uCamYaw))) < 0.) right = -right;   // shadow cards: never mirrored (CARD_VS)
   float px = c.x * iSize.x - iSize.z + iMisc.z * c.y, py = iSize.w - (1. - c.y) * iSize.y, lie = iAnchor.w;
@@ -707,10 +710,11 @@ void main() {
 }`;
 const BAYER = `float bayer(ivec2 p) { int i = (p.x & 3) + (p.y & 3) * 4;
   const float B[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.); return (B[i] + .5) / 16.; }\n`;
-const BATCH_FS = HEAD + OUTS + BAYER + `
-in vec2 vUv; in vec2 vC; flat in vec4 vMisc;
+const BATCH_FS = HEAD + OUTS + BAYER + CUT + `
+in vec2 vUv; in vec2 vC; flat in vec4 vMisc; flat in vec3 vAnc;
 uniform sampler2D uTex, uEm, uNrm; uniform float uHasEm, uHasNrm, uType, uCamYaw;
 void main() {
+  if (cutAway(vAnc + vec3(0., .05, 0.))) discard;   // (the cutaway, render/cut.js)
   vec4 c = texture(uTex, vUv), e = uHasEm > .5 ? texture(uEm, vUv) : vec4(0.);
   if (c.a < .5 && e.a < .5) discard;
   if (vMisc.x < .999 && vMisc.x <= bayer(ivec2(gl_FragCoord.xy))) discard;   // alpha as an ordered dither (pixel art)
@@ -1136,7 +1140,15 @@ void main() {
   if (type == 0) { oc = vec4(clamp(skyAt(normalize(worldAt(ip0, 1.) - uCamP)), 0., 1.), 1.); return; }   // (no screen layers: see render)
 #else
   if (type == 0) {
-    if (uCut.w > 0. && cutIn(vec2(ip0) + .5) > 0.) { oc = vec4(mix(vec3(.13, .11, .1), uShadowC, .3) * .8, 1.); return; }   // (the cutaway's CAP: what it cut open onto nothing, the ground's inside: solid dark)
+    if (uCut.w > 0.) {   // the cutaway's CAP (render/cut.js): what it opened onto nothing is the ground's inside
+      if (uCutM.y > 0.) {   // (the well: the cut earth, flat at the slice where this pixel's ray crosses it inside the well, banded like strata, a light lip at its rim)
+        vec3 a = worldAt(ip0, 0.), b = worldAt(ip0, 1.); float t = (uCutB.w - a.y) / (b.y - a.y);
+        if (t > 0. && t < 1.) { vec3 h = mix(a, b, t); float d = cutWell(h.xz);
+          if (d > 0.) { vec3 c = mix(vec3(.3, .23, .17), uShadowC, .25); float band = fract(dot(h.xz - uCutP.xy, uCutP.zw) * .9 + vnC(h.xz * .7) * .6);
+            c *= band < .5 ? .82 : .7; if (d < .22) c = mix(vec3(.45, .4, .3), uShadowC, .2);
+            oc = vec4(clamp(post(c, ip0), 0., 1.), 1.); return; } }
+      } else if (cutIn(vec2(ip0) + .5) > 0.) { oc = vec4(mix(vec3(.13, .11, .1), uShadowC, .3) * .8, 1.); return; }
+    }
     oc = vec4(clamp(post(uBg, ip0), 0., 1.), 1.); return;
   }
 #endif
@@ -1647,7 +1659,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   function card(o) {
     if (o.batch && CARD_BATCH && (o.type ?? 3) === 3 && !o.nrm && !o.xray && !o.rect) return bcard(o);   // a world card: in a batch (below)
     const u = cardUniforms(o), geo = cardGeo();
-    const g = raw(CARD_VS, CARD_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
+    const g = raw(CARD_VS, CARD_FS, {...u, ...cutU(U), uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
       uNrmRect: {value: o.nrmRect || new THREE.Vector4(0, 0, 1, 1)}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0},
       uType: {value: o.type ?? 3}, uObj: {value: o.obj ?? 0}, uFlash: {value: 0}, uBend: {value: new Float32Array(8).fill(1)},
       uMetal: {value: null}, uHasMetal: {value: 0}, ...plantU(o.plant)}, {side: THREE.DoubleSide});
@@ -1718,7 +1730,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     const cap = 32, geo = new THREE.InstancedBufferGeometry();
     geo.setAttribute('position', QUAD.getAttribute('position'));   // (never dispose it with the quad's attribute on: shared GL buffer)
     const ib = bBuffer(geo, new Float32Array(cap * BC_STRIDE));
-    const uni = {uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uType: {value: 3}, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP,
+    const uni = {...cutU(U), uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uType: {value: 3}, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP,
       uShadow: {value: 0}, uAutumn: U.autumn, uPal: palU};
     const gm = new THREE.Mesh(geo, raw(BCARD_VS, BCARD_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gm.matrixAutoUpdate = false; gScene.add(gm);
     let sm = null;
@@ -1877,7 +1889,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     const cap = 64, geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
     const A = {iAnchor: 4, iRect: 4, iSize: 4, iMisc: 4}, attrs = {};
     for (const [k, n] of Object.entries(A)) { attrs[k] = new THREE.InstancedBufferAttribute(new Float32Array(cap * n), n); attrs[k].setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, attrs[k]); }
-    const uni = {uTex: {value: null}, uEm: {value: null}, uNrm: {value: null}, uHasEm: {value: 0}, uHasNrm: {value: 0}, uType: {value: o.type ?? 3},
+    const uni = {...cutU(U), uTex: {value: null}, uEm: {value: null}, uNrm: {value: null}, uHasEm: {value: 0}, uHasNrm: {value: 0}, uType: {value: o.type ?? 3},
       uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uPy: PY_U, uSun: SUN_OFF, uSnap: SNAP, uBias: {value: .00125}};
     const gm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gm.matrixAutoUpdate = false; gScene.add(gm);
     let sm = null;
@@ -2721,10 +2733,10 @@ void main() {
   }
   // (sun: how far toward the sun his shadow test looks, .5 m; a live 3D body would shade its own test point: view/livehero.js)
   // THE CUTAWAY (CUT; features/cutaway.js): where he stands (m: x east, f his feet's height, z south), how open the cut is (0..1), its
-  // radius round his body and his height (m), band: the half width (m) of a band the whole height of the view instead (0: the capsule),
-  // nx, nz: the way (level, world x / z) toward the side the band cuts away (0, 0: toward the camera).
+  // radius round his body and his height (m), band: the radius (m) of a well round him instead (render/cut.js; 0: the capsule),
+  // nx, nz: the way (level, world x / z) toward the side the well cuts away (0, 0: toward the camera).
   // Put on the screen at the draw (cutFrame: the view may still move after the call)
-  const cutS = {x: 0, f: 0, z: 0, open: 0, r: 2, h: 1.8, band: 0, nx: 0, nz: 0}, cutP = new THREE.Vector3();
+  const cutS = {x: 0, f: 0, z: 0, open: 0, r: 2, h: 1.8, band: 0, nx: 0, nz: 0}, cutP = new THREE.Vector3(), WELL_ACROSS = 5.5;   // (m: the well's half width across its way)
   function setCut(x, f, z, open, r = 2, h = 1.8, band = 0, nx = 0, nz = 0) { cutS.x = x; cutS.f = f; cutS.z = z; cutS.open = open; cutS.r = r; cutS.h = h; cutS.band = band; cutS.nx = nx; cutS.nz = nz; }
   function cutFrame() {
     const C = U.cut.value, B = U.cutB.value;
@@ -2734,8 +2746,9 @@ void main() {
     cutP.set(cutS.x, cutS.f + cutS.h / 2, cutS.z).project(camera);   // (his depth at his middle, less ~.6 m toward the camera: 1 m there is .5 / R_DEPTH)
     C.set(fx, fy, cutP.z * .5 + .5 - .3 / R_DEPTH, Math.min(1, cutS.open));
     B.set(Math.max(0, hy - fy), cutS.r * PPM * view.zoom, 3, cutS.f + .45);
-    U.cutM.value.x = cutS.band * PPM * view.zoom;   // (0: the capsule)
-    const nl = Math.hypot(cutS.nx, cutS.nz);   // (the band's upright plane through him: facing the side that hides him, else the camera)
+    if (cutS.band > 0) U.cutM.value.set(Math.min(WELL_ACROSS, cutS.band), cutS.band, 1.2, 0);   // (the well: across m, out m, its rim m)
+    else U.cutM.value.set(0, 0, 1, 0);   // (the capsule)
+    const nl = Math.hypot(cutS.nx, cutS.nz);   // (the well's upright plane through him: facing the side that hides him, else the camera)
     if (nl > 1e-3) U.cutP.value.set(cutS.x, cutS.z, cutS.nx / nl, cutS.nz / nl); else U.cutP.value.set(cutS.x, cutS.z, Math.sin(view.yaw), Math.cos(view.yaw));
   }
   const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; U.wFoot.value.set(x, h - .9, z, 1); };   // (h: his chest, .9 m over his feet: the water rings them when he wades)
