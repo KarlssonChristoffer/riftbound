@@ -14,7 +14,7 @@ import {clamp, smooth} from '../../core/mathx.js';
 const TAU = Math.PI * 2;
 const LOOK = {
   heron: {s: 1.15, watch: 22, turn: 5, sink: 1.5},   // size; m it watches you from; 1/s its head turns at; m it sinks at dusk
-  elk: {s: 1.2, stride: 1.7, swing: .5, legs: 1.2, neck: .75, thin: .28},   // m a stride; rad a leg swings; x longer legs / neck, thinner at night
+  elk: {s: 1.2, stride: 1.7, swing: .3, legs: .55, neck: .4, thin: .12},   // m a stride; rad a leg swings (less on longer legs: the same step); x longer legs / neck, a thinner body at night
   ring: {glow: 1.1, light: '#d8e8c4', r: 5.5, k: .7, rise: .45},   // glow x; the light's colour, reach (m), strength; m the mushrooms rise
   marks: {see: 7, fade: 3, h: 1.25},   // m the lantern shows a mark from (x notice), m it fades over; a mark's height on the trunk
   shadow: {n: 4, len: 1.2, k: .9},     // heron shadows: at most; their length (x the heron); how dark
@@ -164,11 +164,11 @@ export function createUncannyLook(host, F) {
       const g = elevAt(E.x, E.y), bh = legL + .22 * s;
       Q.setFromAxisAngle(UP, E.phi); M.compose(V.set(E.x, g + bh + Math.sin(el.phase * 2) * .02, E.y), Q, S.set(thin, 1, 1 + .12 * k));
       el.body.setMatrix(M);
-      const sw = LOOK.elk.swing * clamp(el.speed / .8, 0, 1);
+      const sw = LOOK.elk.swing / (1 + LOOK.elk.legs * k) * clamp(el.speed / .8, 0, 1), lw = 1 / thin;   // (lw: the legs keep their thickness as the body thins)
       for (let i = 0; i < 4; i++) {
         const L = el.legs[i]; if (!L) continue;
         const a = A.legs[i], th = Math.sin(el.phase + FWD[i][0]) * sw;
-        M2.makeRotationX(th); M3.makeScale(thin, legL, thin); M2.multiply(M3);
+        M2.makeRotationX(th); M3.makeScale(lw, legL, lw); M2.multiply(M3);
         M3.makeTranslation(a[0], a[1], a[2]); M3.premultiply(M); M3.multiply(M2); L.setMatrix(M3);
       }
       if (el.neck) {   // the neck: down to graze by day, stretched at night, its head cocked when it stares
