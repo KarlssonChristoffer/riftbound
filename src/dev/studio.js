@@ -5,6 +5,8 @@
 // wardrobe shows (view/dress.js), with the gunslinger's duster tail as the live hero runs it (a ClothRig on the sprite
 // path's cloth, fed from the drawn pose: the live hero's THE RUNTIME CLOTH, the same steps). HE turns (his facing), the
 // camera and the set never do. While it shows, the game holds (core/loop.js hold: not stepped, not drawn).
+//   back    a set's backdrop (dev/stage.js) or a DIORAMA (dev/diorama.js: layers of pictures at depths, parallax with the
+//           pointer and the view's move)
 //   light   'day' | 'dusk' | 'night' | 'dawn': the ruins' moods (content/moods.js) with the sun as a key light from the front
 //           left, its shadow on the set; a lamp in front when it's dark
 //   pose    'idle' (his breathing loop) or one of his clips (an emote: played, held, played again)
@@ -23,6 +25,7 @@ import {dress} from '../view/dress.js';
 import {MOODS, CHAR} from '../content/moods.js';
 import {lum} from '../core/color.js';
 import {createStage} from './stage.js';
+import {createDiorama} from './diorama.js';
 
 const TAU = Math.PI * 2;
 const wrap = a => a - TAU * Math.round(a / TAU);
@@ -41,7 +44,7 @@ export function createStudio({host, hero, live, area}) {
   canvas.style.cssText = 'position:fixed;left:0;top:0;z-index:21;display:none;image-rendering:pixelated;cursor:grab;touch-action:none';
   document.body.appendChild(canvas);
   const PPM = host.PPM, PPMY = host.PPMY, PPMH = host.PPMH;
-  let G = null, rig = null, stage = null, S = 4, VW = 0, VH = 0, shown = false;
+  let G = null, rig = null, stage = null, dio = null, backWant = null, S = 4, VW = 0, VH = 0, shown = false;
   const T = new THREE.Vector3(), sunDir = new THREE.Vector3();
   const st = {phi: 0, spin: false, light: 'day', pose: 'idle', poseT: 0, zoomK: 0, panX: 0, panY: 0};
   // ---------------------------------------------------------------- the character: his live model, a body, his cloth
@@ -194,7 +197,7 @@ export function createStudio({host, hero, live, area}) {
     const la = Math.max(.02, lum(amb)), fk = lum(m.fill || [0, 0, 0]) / la * CHAR.fillK;
     U.uFill.value.set(amb[0] * fk, amb[1] * fk, amb[2] * fk); U.uGrade.value.set(GRADE[0], GRADE[1], GRADE[2]); U.uGradeK.value = CHAR.gradeK[L.mood] ?? 0;
     U.uEmin.value = .1 + .2 * Math.max(0, 1 - la);
-    const bg = stage.bg; U.uBg.value.set(bg[0], bg[1], bg[2]);
+    const bg = dio?.on ? dio.skyTop() : stage.bg, k = dio?.on ? amb : [1, 1, 1]; U.uBg.value.set(bg[0] * k[0], bg[1] * k[1], bg[2] * k[2]);
     let n = 0;
     if (L.lamp) { U.uLP.value[0].set(1.3, 1.5, 1.6, 4.5); U.uLC.value[0].set(L.lamp[0] * L.lamp[3], L.lamp[1] * L.lamp[3], L.lamp[2] * L.lamp[3], 0); n = 1; }
     U.uNL.value = n; U.uNH.value = 0;
@@ -213,6 +216,9 @@ export function createStudio({host, hero, live, area}) {
   });
   const endDrag = () => { drag = null; canvas.style.cursor = 'grab'; };
   canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+  // the pointer over the screen, -1..1 from its middle (the diorama's parallax)
+  const MOUSE = {x: 0, y: 0}, CAM = {x: 0, y: 0}, FEET = {x: 0, y: 0};
+  addEventListener('pointermove', e => { if (!shown) return; MOUSE.x = e.clientX / innerWidth * 2 - 1; MOUSE.y = e.clientY / innerHeight * 2 - 1; });
   canvas.addEventListener('wheel', e => { e.preventDefault(); st2.zoom(e.deltaY < 0 ? 1 : -1); }, {passive: false});
 
   let shot = false;
@@ -230,7 +236,7 @@ export function createStudio({host, hero, live, area}) {
       if (on && !G) {
         G = createGfx(canvas, {VW: 320, VH: 180, PPM, PPMY, PPMH, world: {x0: -6, y0: -6, x1: 6, y1: 6}});
         G.setOptions({outline: true, banded: true, shadows: true, debug: 0});
-        stage = createStage(G);
+        stage = createStage(G); dio = createDiorama(G); if (backWant) st2.set(backWant);
       }
       canvas.style.display = on ? '' : 'none';
       if (on) { size(); if (C.name !== hero.loadName) load(hero.loadName); }
@@ -245,6 +251,11 @@ export function createStudio({host, hero, live, area}) {
         C.body.draw(D, t); cloth(C.body.W, st.phi, dt); rig.render();
       }
       stage.draw(t);
+      if (dio?.on) {   // the diorama's layers, shifted by the view's motion: the pointer (a little), a slow drift, the view's move
+        CAM.x = -st.panX + MOUSE.x * 10 + Math.sin(t * .15) * 3; CAM.y = -st.panY + MOUSE.y * 5;
+        FEET.x = -T.x * PPM; FEET.y = -T.z * PPMY;
+        dio.draw(t, CAM, FEET, T, VW, VH, PPM, PPMY, PPMH, st.light === 'night');
+      }
       light();
       G.render();
       if (shot) { shot = false; save(canvas.toDataURL('image/png')); }   // (read in the task that drew it)
@@ -259,7 +270,13 @@ export function createStudio({host, hero, live, area}) {
       const was = C.clothCol; C.clothCol = Dr.cloth; if (C.clothCol !== was) clothPaint();
     },
     set({stage: sg, back, light: lt, pose} = {}) {
-      if (sg !== undefined || back !== undefined) stage?.set({stage: sg, back});
+      if (sg !== undefined || back !== undefined) {
+        backWant = {stage: sg ?? backWant?.stage, back: back ?? backWant?.back};
+        // a diorama (dev/diorama.js: layers of pictures at depths) instead of a set's backdrop: the set keeps its stage only
+        const b = backWant.back, layered = !!dio?.has(b);
+        dio?.set(layered ? b : null);
+        stage?.set({stage: sg, back: layered ? 'dark' : back});
+      }
       if (lt) st.light = lt;
       if (pose && pose !== st.pose) { st.pose = pose; st.poseT = 0; }
     },
