@@ -13,7 +13,6 @@ const BINS = 8;
 const SHOW = .3;       // a stretch shows while its way into the open . the way to the camera > SHOW (the ones facing it; side-on ones stand
                        // edge-on between him and the camera in a passage that runs toward it, and hide the floor)
 const SLOT_IN = 2;     // m past the warp he still counts as in the slot (its side walls all show)
-const PORTAL_R = 9;    // m round the slot copy's foot: the cave drawn a second time under the woods' overhang (seen through the mouth)
 const PORTAL_IN = 1.5; // m before the brow its floor starts (under the woods' slot floor's end, PORTAL_SINK below it: no seam, no fight)
 const PORTAL_SINK = .03;
 const FLOOR_C = .5;    // m: the floor's grid
@@ -30,8 +29,7 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
   // the PORTAL: the cave just in past the mouth's brow drawn a second time, under the woods' overhang (moved back by OFF), so you see
   // into the cave from outside: the woods' ground hides it everywhere but through the mouth (its face under the brow isn't drawn:
   // biomes.js forestRuins)
-  const cm = C.copy, off = C.off, SQ = [0, 0, 0], fx = cm.x + cm.ux * cm.len, fy = cm.y + cm.uy * cm.len;
-  const inPortal = (x, y, s0 = cm.brow + .05) => C.slotAt(x, y, SQ)[2] === 2 ? SQ[0] > s0 : Math.hypot(x - fx, y - fy) < PORTAL_R;
+  const cm = C.copy, off = C.off, SQ = [0, 0, 0], inPortal = C.inPortal;
   const idxP = [];
   for (let j = 0; j < nys; j++) for (let i = 0; i < nxs; i++) if (near(i, j)) {
     const a = v(i, j), b = v(i + 1, j), c = v(i, j + 1), d = v(i + 1, j + 1); idx.push(a, c, b, b, c, d);

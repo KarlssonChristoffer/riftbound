@@ -2352,7 +2352,33 @@ void main() {
 }`;
   const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}, uVgP: {value: 0}}, vgScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
-  vgScene.matrixAutoUpdate = false;
+  vgScene.matrixAutoUpdate = false;
+  // DISSOLVE (features/caves.js: the step into the cave and back out): while armed (arm() on the frames it might come), the finished
+  // frame is copied aside (a GPU copy, no readback); start(sec) lays that copy over the frames that follow and dithers it away
+  // (whole game pixels, the Bayer order), so a swap of the whole scene between two frames reads as one melting into the other
+  const DSV_FS = HEAD + ONE_OUT + BAYER + `uniform sampler2D uTex; uniform float uA, uPx;
+void main() { if (uA <= bayer(ivec2(gl_FragCoord.xy / uPx))) discard; o0 = vec4(texelFetch(uTex, ivec2(gl_FragCoord.xy), 0).rgb, 1.); }`;
+  const dsvU = {uTex: {value: null}, uA: {value: 0}, uPx: {value: 1}}, dsvScene = new THREE.Scene(), dsvSz = new THREE.Vector2();
+  { const m = new THREE.Mesh(tri, raw(COMP_VS, DSV_FS, dsvU, {depthTest: false, depthWrite: false})); m.frustumCulled = false; m.matrixAutoUpdate = false; dsvScene.add(m); }
+  dsvScene.matrixAutoUpdate = false;
+  const dsv = {armed: -1, t0: 0, dur: 0, on: false, has: false};
+  const dissolve = {
+    arm() { dsv.armed = frameNo; },
+    start(sec) { if (!dsv.has) return; dsv.on = true; dsv.t0 = performance.now(); dsv.dur = Math.max(.05, sec); },
+    get on() { return dsv.on; },
+  };
+  function dissolveFrame(t0) {   // (render(): the frame is on the canvas)
+    if (dsv.on) {
+      const a = 1 - (t0 - dsv.t0) / 1000 / dsv.dur;
+      if (a <= 0) { dsv.on = false; return; }
+      dsvU.uA.value = a * a * (3 - 2 * a); dsvU.uPx.value = DS; renderer.render(dsvScene, dummyCam);
+    } else if (dsv.armed === frameNo) {
+      renderer.getDrawingBufferSize(dsvSz);
+      let t = dsvU.uTex.value;
+      if (!t || t.image.width !== dsvSz.x || t.image.height !== dsvSz.y) { t?.dispose(); t = dsvU.uTex.value = new THREE.FramebufferTexture(dsvSz.x, dsvSz.y); t.minFilter = t.magFilter = THREE.NearestFilter; }
+      renderer.copyFramebufferToTexture(t); dsv.has = true;
+    } else dsv.has = false;   // (a copy is only good for the frame after it: one from long ago would flash an old scene)
+  }
   let vgFrame = -1;
   // {va, ha (0 = no haze), v: [r, g, b], h: [r, g, b] (0..255)}: shown on the next render (atmos.js sets it from F.hd, after this one)
   function setVignette(o) {
@@ -2621,7 +2647,7 @@ void main() {
       }
     } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); } }
     if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)
-    if (post) post.run(renderer);
+    if (post) post.run(renderer); else dissolveFrame(t0);   // (the dissolve, above)
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
     stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
@@ -2770,7 +2796,7 @@ void main() {
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
-    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub,
+    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, dissolve,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};

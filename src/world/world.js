@@ -718,7 +718,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // CAST_SINK m, goes into the cached sun shadow and the point lights' height map: a hill throws its shadow over what lies
   // behind it at a low sun, flat ground never reaches the ground it stands for
   const CAST_SINK = .15;
-  const caster = geo => { const g = geo.clone(), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) - CAST_SINK); p.needsUpdate = true;
+  // (over the cave's PORTAL, world/caves.js C.inPortal: the overhang casts nothing, sunk under the cave's floor, so daylight and the
+  // lantern reach the cave's first stretch under it, as they do in the band past the step)
+  const CVP = CAVE && TERRAIN_ON ? CAVE : null, cvM = CVP?.mouth, cvF = CVP && [cvM.x + cvM.ux * cvM.len, cvM.y + cvM.uy * cvM.len];
+  const overPortal = (x, z) => CVP && Math.abs(x - cvF[0]) < 9.5 && Math.abs(z - cvF[1]) < 9.5 && CVP.inPortal(x + CVP.off[0], z + CVP.off[1], CVP.copy.brow - .3) && CVP.inside(x + CVP.off[0], z + CVP.off[1]) < .3;
+  const caster = geo => { const g = geo.clone(), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, overPortal(p.getX(i), p.getZ(i)) ? CVP.floor(p.getX(i) + CVP.off[0], p.getZ(i) + CVP.off[1]) - 1 : p.getY(i) - CAST_SINK); p.needsUpdate = true;
     const s = G.surface(g, {tex: gTex, planar: true, world: world2, type: 1, obj: 0}, true); s.gm.visible = false; disposers.push(() => { s.dispose(); g.dispose(); }); };
   if (TERRAIN_ON) caster(gGeo);
   if (WD) {   // the West Downs' patch (above)
