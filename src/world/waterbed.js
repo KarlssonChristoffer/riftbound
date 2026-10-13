@@ -58,11 +58,13 @@ export const BED_TUNE = {
 };
 const PAD = 4, MAXD = 7, REACH = 3;   // (REACH: the refraction's farthest offset, 2 texels, + 1)
 
-// waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth, dry}) -> null (no bed) | {add(x, y, o), finish(data) -> {tex, rect, ...the look} | null}
+// waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth, river, dry}) -> null (no bed) | {add(x, y, o), finish(data) -> {tex, rect, ...the look} | null}
 // bakeWater calls add for every texel it makes water (o: waterSample's out there), then finish with its finished bytes. X0 / Y0: the canvas's
 // world origin (the West Downs' canvas: its brook; the river, the creek and the pool are the Proving Grounds', at 0, 0); depth(o, x, y): the
-// depth of a body this file doesn't know (kind 4 and up: world/brook.js); dry: [{x, y, r}] things standing in that water (their foam lines)
-export function waterBed(biome, {WPX, HPX, PPM, cliffZ, X0 = 0, Y0 = 0, depth = null, dry = null}) {
+// depth of a body this file doesn't know (kind 4 and up: world/brook.js); river(o, x, y): the river's own depth instead of the profile below
+// (the ruins draw it the forest's way: world/forest.js courseDepth; the stepping stones' ford still crosses it); dry: [{x, y, r}] things
+// standing in that water (their foam lines)
+export function waterBed(biome, {WPX, HPX, PPM, cliffZ, X0 = 0, Y0 = 0, depth = null, river = null, dry = null}) {
   const T = ON && BED_TUNE[biome.id];
   if (!T) return null;
   const dep = new Uint8Array(WPX * HPX);   // depth + 1 per water texel (0 = not water); freed with the closure
@@ -76,9 +78,12 @@ export function waterBed(biome, {WPX, HPX, PPM, cliffZ, X0 = 0, Y0 = 0, depth = 
       // the stream: a shelf along each bank (narrower where it narrows), then the channel; deeper toward the outside of a bend
       // (the centre of the bend lies on the side x'' points to: the far side is scoured, the near side a sand bar); bars and holes
       const sh = clamp(o.hw * .42, .2, .6), u = o.a / o.hw;
-      d = .62 * smooth(o.edge / sh) + .38 * smooth((o.edge - sh) / Math.max(.05, o.hw - sh));
-      d += clamp(-curv(my) * 3.2 * u, -.34, .3) * smooth(o.edge / .3);
-      d += (vnoise(mx * 1.7, my * .6, 31) - .5) * .3 * smooth(o.edge / .25);
+      if (river) d = river(o, mx, my);
+      else {
+        d = .62 * smooth(o.edge / sh) + .38 * smooth((o.edge - sh) / Math.max(.05, o.hw - sh));
+        d += clamp(-curv(my) * 3.2 * u, -.34, .3) * smooth(o.edge / .3);
+        d += (vnoise(mx * 1.7, my * .6, 31) - .5) * .3 * smooth(o.edge / .25);
+      }
       for (const s of STREAM.stones) {   // the stepping stones stand on a ford: a shallow bar across the flow
         const dx = mx - s.x, dy = my - s.y, r = hypot2(dx, dy * 1.3) - s.r;
         d = Math.min(d, .06 + Math.max(0, r) * 1.1, .14 + hypot2(dx * .32, dy * 1.5) * .9);

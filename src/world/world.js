@@ -52,7 +52,7 @@ import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the W
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
 import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
 import {TOWER_PLAN, FOREST, HUT} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
-import {sample as forestSample, depth as forestDepth, joinRiver} from './forest.js';
+import {sample as forestSample, depth as forestDepth, joinRiver, COURSE_KS, courseSpeed, courseDepth} from './forest.js';
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
@@ -232,17 +232,22 @@ export const vaultTop = p => p.kind === 'fieldwall' ? TOPS.get(p) ?? null : brea
 // ---------------------------------------------------------------- water: the sampler
 export const FALL_ALPHA = 252;   // a cliff / face texel with this alpha is falling water (SURF_FS streams it); 250 = a glowing fall (lava)
 const W_REF = 2.9, S_Y0 = -1, S_DY = .05;   // the stream's reference width (its normal 2.9 m) and the travel table's grid
-let S_TAB = null;
+let S_TAB = null, A_TAB = null;
 function travelTab() {   // S(y) = integral of w(y') / W_REF dy' from y = -1, every 5 cm: built once (the stream never changes shape)
-  const n = Math.round((31 - S_Y0) / S_DY) + 2, t = new Float32Array(n);
-  for (let i = 1; i < n; i++) t[i] = t[i - 1] + STREAM.w(S_Y0 + (i - .5) * S_DY) / W_REF * S_DY;
+  const n = Math.round((31 - S_Y0) / S_DY) + 2, t = new Float32Array(n), A = A_TAB = new Float32Array(n);
+  for (let i = 1; i < n; i++) { const y = S_Y0 + (i - .5) * S_DY; t[i] = t[i - 1] + STREAM.w(y) / W_REF * S_DY; A[i] = A[i - 1] + Math.hypot(S_DY, STREAM.cx(y + S_DY / 2) - STREAM.cx(y - S_DY / 2)); }
   return S_TAB = t;
 }
+// THE RIVER DRAWN THE FOREST'S WAY (the ruins: RIVER_COURSE, set by buildWorld per biome): its pattern travels along it as the forest's
+// streams' do (world/forest.js COURSE_KS x the m along its course, arcAt), at their slow wandering speed (courseSpeed) and over their
+// depth (courseDepth, waterbed.js); the other biomes keep the river's own (travel: by its width, faster mid-channel, waterbed.js's)
+let RIVER_COURSE = false;
+const arcAt = y => { if (!S_TAB) travelTab(); const f = (y - S_Y0) / S_DY, i = Math.min(A_TAB.length - 2, f | 0); return A_TAB[i] + (A_TAB[i + 1] - A_TAB[i]) * (f - i); };
+const riverS = y => RIVER_COURSE ? arcAt(y) * COURSE_KS : travel(y);   // (the pool's outflow joins it: kind 3)
 // waterSample(x, y, out): is (x, y) water and what does the water there do? Fills out (see the header); no allocation.
 // Stones are dry footing (their painted body, out.kind 0); the water round them is flagged out.hold
 const _rs = {d: 0, a: 0, l: 0, hw: 0}, _os = {d: 0, a: 0, l: 0, hw: 0}, _lw = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0}, RILL_K = .55, RILL_LEN = RILL.len[RILL.len.length - 1];
 const travel = y => { const tab = S_TAB || travelTab(), f = (y - S_Y0) / S_DY, i = Math.min(tab.length - 2, f | 0); return tab[i] + (tab[i + 1] - tab[i]) * (f - i); };
-if (FOREST !== null) joinRiver(FOREST, travel(0), STREAM.w(0) / W_REF);   // (the forest's outflow runs into the river at y = 0: its travel and pace there, world/forest.js THE RIVER'S HEAD)
 // the outflow / pool: its travel falls by `ease(u)` metres over the u metres east of the river's bank (0 for the first OUT_U0 m, then eased in:
 // continuous in value and slope, so it joins the river's own s without a seam); its axis's y at x (a linear lookup in OUTFLOW.pts, the ends held)
 const OUT_U0 = .3, OUT_W = .6, ease = u => u <= OUT_U0 ? 0 : u < OUT_U0 + OUT_W ? (u - OUT_U0) ** 2 / (2 * OUT_W) : u - OUT_U0 - OUT_W / 2;
@@ -266,8 +271,8 @@ export function waterSample(x, y, out) {
     const u = a - hw, v = Math.min(1, u / 3);   // u = metres east of the river's bank
     out.kind = 3; out.a = y - outAxisY(x); out.hw = inP ? Math.max(.55, inO ? _os.hw : 0) : _os.hw;
     out.edge = inP ? poolEdge(x, y) : _os.hw - _os.d; if (inP && inO && _os.hw - _os.d > out.edge) out.edge = _os.hw - _os.d;
-    out.s = travel(y) - ease(u);
-    out.speed = Math.max(.2, 1 - .8 * v * v * (3 - 2 * v));   // the river's pace at the bank, a slow churn in the pool
+    out.s = riverS(y) - ease(u) * (RIVER_COURSE ? COURSE_KS : 1);
+    out.speed = Math.max(.2, 1 - .8 * v * v * (3 - 2 * v)) * (RIVER_COURSE ? courseSpeed(arcAt(y)) : 1);   // the river's pace at the bank, a slow churn in the pool
     out.hold = Math.hypot(x - FALL.foot.x, (y - FALL.foot.y) * 1.25) < .6 ? 1 : 0;   // the foam where the fall lands stays as painted
     return out;
   }
@@ -279,8 +284,8 @@ export function waterSample(x, y, out) {
     if ((dx / (s.r + .22)) ** 2 + ((dy - .05) / (s.r / 1.3 + .25)) ** 2 < 1) hold = 1;             // its foam ring and a hair more
   }
   out.kind = 1; out.a = a; out.hw = hw; out.edge = hw - Math.abs(a); out.hold = hold;
-  out.s = travel(y);
-  out.speed = 1 + .3 * (1 - (a / hw) ** 2);
+  out.s = riverS(y);
+  out.speed = RIVER_COURSE ? courseSpeed(arcAt(y)) : 1 + .3 * (1 - (a / hw) ** 2);
   if (a > 0 && y > 11 && y < 13.4 && outflowAt(x, y, _os) && _os.hw - _os.d > out.edge) out.edge = _os.hw - _os.d;   // (the outflow's mouth: no bank here)
   return out;
 }
@@ -323,7 +328,7 @@ export const WATER_TUNE = {
 // X0 / Y0: the canvas's world origin (the West Downs' own: 0, 0 is the Proving Grounds'); box: [x0, y0, x1, y1] m, the part to bake (the rest dry)
 function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = null, depth = brookDepth, dry = undefined}) {
   const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0, lake: 0};
-  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth, dry: dry !== undefined ? dry : X0 || Y0 ? BROOK?.dry : null});   // (depth / dry: the forest's own)   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
+  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth, river: RIVER_COURSE ? courseDepth : null, dry: dry !== undefined ? dry : X0 || Y0 ? BROOK?.dry : null});   // (depth / dry: the forest's own)   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
   const toneOf = k => { for (let t = 0; t < ramp.length; t++) if (px[k] === ramp[t][0] && px[k + 1] === ramp[t][1] && px[k + 2] === ramp[t][2]) return t; return -1; };
   const bx0 = box ? Math.max(0, Math.floor((box[0] - X0) * PPM)) : 0, by0 = box ? Math.max(0, Math.floor((box[1] - Y0) * PPM)) : 0;
   const bx1 = box ? Math.min(WPX, Math.ceil((box[2] - X0) * PPM)) : WPX, by1 = box ? Math.min(HPX, Math.ceil((box[3] - Y0) * PPM)) : HPX;
@@ -710,6 +715,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   }
   const cTex = texOf(cliff); cTex.wrapS = cTex.wrapT = THREE.RepeatWrapping; cTex.needsUpdate = true;
   // the moving water: the baked texture (rebuilt, and the old one disposed, with the world) + the biome's look for the shader
+  RIVER_COURSE = biome.id === 'ruins';
+  if (FOREST !== null) joinRiver(FOREST, riverS(0), RIVER_COURSE ? COURSE_KS * Math.hypot(1, (STREAM.cx(.05) - STREAM.cx(-.05)) / .1) : STREAM.w(0) / W_REF, RIVER_COURSE ? courseSpeed(arcAt(0)) : 1.15);   // (the forest's outflow runs into the river at y = 0: world/forest.js THE RIVER'S HEAD)
   const WT = WATER_TUNE[biome.id], wTex = WT ? bakeWater(biome, WT, {WPX, HPX, PPM, px, cliffZ}) : null;
   if (wTex) disposers.push(() => { wTex.dispose(); wTex.userData.bed?.tex.dispose(); });
   // the West Downs' brook (world/brook.js): its own moving water on their canvas, baked over its box only, with its own bed (gfx.js surface bed)

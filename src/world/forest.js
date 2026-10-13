@@ -786,15 +786,14 @@ function mouthK(F, x, y) {
 // flow, a texel's jitter on their edges (the bake samples texel middles)
 const lakeShare = (x, y, z, a, l) => clamp(smooth((z + MOUTH_K.run) / (MOUTH_K.run + MOUTH_K.plume)) + (vnoise(a * 2.4, l * .45, 78) - .5) * .5 + (hash3(Math.floor(x * 64), Math.floor(y * 64), 77) - .5) * .12, 0, 1);
 // THE RIVER'S HEAD: the outflow runs into the Proving Grounds' river at y = 0, where world.js's own water takes over. joinRiver gives
-// the river's travel there (s0, m) and its travel per m (k); the outflow's travel counts back from it (its pace per m easing from the
-// forest's K_S to k over its last JOIN m), so the pattern runs on across the line without a seam, and over those metres its pace and
-// its depth turn into the river's (world.js: 1.3 mid-channel, 1 at the banks; waterbed.js depthOf: a shelf along each bank, then the
-// channel). joinS: (_w: F.at's) its travel; joinK: how far into the river's look (0 .. 1); both 0 without a join
+// the river's travel there (s0, m), its travel per m (k) and its speed (v); the outflow's travel counts back from it (its pace per m
+// easing from the forest's K_S to k over its last JOIN m), so the pattern runs on across the line without a seam, and over those
+// metres its speed turns into the river's. joinS: (_w: F.at's) its travel; joinK: how far into the river's (0 .. 1); 0 without a join
 const JOIN = 4;
-export function joinRiver(F, s0, k) {
+export function joinRiver(F, s0, k, v) {
   const O = F.outflow; let l = O.total;
   for (let i = 1; i < O.n; i++) if (O.py[i] >= 0) { const f = (0 - O.py[i - 1]) / ((O.py[i] - O.py[i - 1]) || 1); l = O.len[i - 1] + (O.len[i] - O.len[i - 1]) * f; break; }
-  F.join = {s0, k, l};
+  F.join = {s0, k, l, v};
 }
 const joinK = (F, l) => F.join ? smooth(1 - (F.join.l - l) / JOIN) : 0;
 function joinS(F) {
@@ -805,9 +804,9 @@ function joinS(F) {
 function courseFlow(F, out) {
   const out8 = _w.k === 1, C = out8 ? F.outflow : F.stream, rf = C.rif ? C.rif[_w.i] : 0;
   out.a = _w.a; out.hw = _w.hw; out.s = out8 && F.join ? joinS(F) : _w.l * K_S + (out8 ? 300 : 0);
-  out.speed = out8 ? .85 + .3 * smooth((_w.l - F.outflow.total + 6) / 6) : _w.l < 1.2 ? .45 : .75 + .25 * vnoise(_w.l * .2, 3.1, 41);
+  out.speed = out8 ? .85 + .3 * smooth((_w.l - F.outflow.total + 6) / 6) : _w.l < 1.2 ? .45 : courseSpeed(_w.l);
   out.speed += (1.85 - out.speed) * Math.sqrt(rf);   // (a riffle runs white: gfx.js wTexel's white water from 1.3)
-  if (out8) { const j = joinK(F, _w.l); if (j > 0) out.speed += (1 + .3 * (1 - Math.min(1, (_w.a / _w.hw) ** 2)) - out.speed) * j; }
+  if (out8) { const j = joinK(F, _w.l); if (j > 0) out.speed += (F.join.v - out.speed) * j; }
   return out8;
 }
 export function sample(F, x, y, out) {
@@ -829,6 +828,12 @@ export function sample(F, x, y, out) {
   out.hold = !out8 && Math.hypot(x - F.spring.x, y - F.spring.y) < F.spring.r ? 1 : 0;
   return true;
 }
+// A COURSE'S WATER, for any running water drawn the forest's way (the forest's stream and outflow; world.js: the Proving Grounds'
+// river in the ruins): its pattern's travel per m along it (COURSE_KS), its speed l m along it (courseSpeed: a slow wander) and its
+// depth (courseDepth, o: waterSample's: shallow and clear at the banks, deeper mid-channel the wider it runs, a little noise)
+export const COURSE_KS = K_S;
+export const courseSpeed = l => .75 + .25 * vnoise(l * .2, 3.1, 41);
+export const courseDepth = (o, x, y) => .05 + (.22 + .35 * smooth((o.hw - .6) / 1)) * smooth(o.edge / Math.max(.08, o.hw)) + (vnoise(x * 3, y * 3, 34) - .5) * .08;
 // how deep its bed lies, 0 (the waterline) .. 1 (waterbed.js): the streams shallow and clear, the spring a well, the lake a bowl
 export function depth(F, o, x, y) {
   let d;
@@ -838,10 +843,8 @@ export function depth(F, o, x, y) {
     d = Math.max(d, .3 * mouthK(F, x, y));   // (across a mouth: the course's depth, not the shelf's bed)
   }
   else {
-    d = .05 + .22 * smooth(o.edge / Math.max(.08, o.hw)) + (vnoise(x * 3, y * 3, 34) - .5) * .08;
+    d = courseDepth(o, x, y);
     if (F.at(x, y, _d)) { const C = _d.k === 1 ? F.outflow : F.stream; if (C.rif) d = d * (1 - .5 * C.rif[_d.i]) + .5 * C.pool[_d.i] * smooth(o.edge / Math.max(.08, o.hw)); }   // (a riffle runs shallow over its stones, the pool below it is deep)
-    const j = o.kind === 8 ? joinK(F, _d.l) : 0;   // (the river's head: its own depth, waterbed.js depthOf's for the river, without the bends)
-    if (j > 0) { const sh = clamp(o.hw * .42, .2, .6); d += (.62 * smooth(o.edge / sh) + .38 * smooth((o.edge - sh) / Math.max(.05, o.hw - sh)) + (vnoise(x * 1.7, y * .6, 31) - .5) * .3 * smooth(o.edge / .25) - d) * j; }
     const rs = Math.hypot(x - F.spring.x, y - F.spring.y) / F.spring.r; if (o.kind === 6 && rs < 1) d = Math.max(d, .2 + .6 * smooth((1 - rs) / .7));
   }
   return clamp(d, 0, 1);
