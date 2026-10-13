@@ -22,6 +22,15 @@ export const PAINTS = {
   sawn:        {all: ['#e6c892', '#cca870', '#a08050', '#5c462a']},                                                       // a fresh cut: stump tops, log ends
   eye:         {all: ['#fbfaf4', '#e8e4d8', '#bcb6a8', '#5a5650']},                                                       // the white of an eye
   pupil:       {all: ['#3a3040', '#241c2a', '#16101a', '#08060a']},
+  // the uncanny forest (features/uncanny.js, docs/UNCANNY.md): the heron, the elk, the ring of pale mushrooms
+  heron:       {all: ['#c4c8cc', '#9ca2aa', '#6e747e', '#3c4048']},                                                       // a grey heron's back
+  herondark:   {all: ['#8c929c', '#6a707a', '#4c5058', '#2a2c32']},                                                       // its wings, its flight feathers
+  heronwhite:  {all: ['#f0f0ea', '#d6d6d0', '#a8a8a2', '#5e5e5a']},                                                       // its neck and face
+  beak:        {all: ['#f0cc60', '#d0a438', '#9a7424', '#4e3a12']},                                                       // the heron's bill and legs
+  elk:         {all: ['#7a5c44', '#5c4432', '#422f22', '#241912']},                                                       // an elk's dark coat
+  elkleg:      {all: ['#c8bca8', '#a49882', '#7a705e', '#423c32']},                                                       // its pale lower legs
+  antler:      {all: ['#e8dcc0', '#c8b894', '#9a8a68', '#544a36']},
+  paleglow:    {all: ['#f6f8e6', '#dfe6cc', '#b4c0a4', '#6a7462']},                                                       // the night ring's mushroom caps (they glow: mesh.setGlow)
   // the forest's animals (features/fauna.js, docs/FAUNA.md); white fur and the deer's antlers use mushwhite and sawn
   roe:         {all: ['#c08a5a', '#9a6a40', '#70492c', '#3c2618']},                                                       // a roe deer's summer red-brown
   russet:      {all: ['#ec9a4a', '#cc6e2c', '#94481e', '#4e2410']},                                                       // a fox, a red squirrel

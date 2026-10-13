@@ -10,6 +10,8 @@ export const PAL = {
   b: '#7a5232', l: '#9c6e44', d: '#56381f', e: '#dcbc84', r: '#a8824e',   // bark, its light and dark, end grain, a ring
   w: '#a07448', h: '#6a4626',                                              // a haft, its shade
   i: '#8a929c', s: '#d8dee4', k: '#555c66',                                // iron, a ground edge, iron's shade
+  f: '#e4e8ec', g: '#a8b0b8', n: '#4c5058',                                // a heron's feather: its vane, its grey, the dark tip
+  p: '#cfcabe', q: '#9a968a', u: '#f2c87a',                                // a smooth pale stone, its shade, a warmth inside it
 };
 
 export const ITEMS = {
@@ -21,6 +23,17 @@ export const ITEMS = {
     tool: {job: 'chop', tier: 1, power: 1},
     icon: ['..........s.', '........iis.', '.....wiiiis.', '.....hiiiis.', '....wh..kis.', '....wh....s.',
       '...wh.......', '...wh.......', '..wh........', '..wh........', '.wh.........', '.wh.........']},
+  // KEEPSAKES (the uncanny forest: features/uncanny.js, docs/UNCANNY.md): odd things the forest's secrets leave you. They do
+  // nothing yet; they sit in the pouch
+  heron_feather: {name: 'Heron Feather', kind: 'material', col: '#d6dade', desc: 'a long grey feather; it was warm when you picked it up',
+    icon: ['..........ff', '.........fgf', '........fgf.', '.......fgf..', '......fgnf..', '.....fgnf...', '....fgnf....', '...fgnf.....',
+      '..fgf.......', '..ff........', '.k..........', 'k...........']},
+  warm_stone: {name: 'Warm Stone', kind: 'material', col: '#f2c87a', desc: 'a smooth stone from the quiet ring; it stays warm in your hand',
+    icon: ['............', '............', '............', '....pppp....', '..pppppppq..', '.pppuupppqq.', '.ppuuuupqqq.', '.pppuuppqqq.',
+      '..ppppqqqq..', '....qqqq....', '............', '............']},
+  bark_doll: {name: 'Bark Doll', kind: 'material', col: '#c8a070', desc: 'a little figure of bark and twine, left in the hollow under the roots',
+    icon: ['.....ee.....', '....eddb....', '....ebbe....', '.....rr.....', '..lbbbbbbl..', '....bbbb....', '....bddb....', '....rbbr....',
+      '....bbbb....', '...bb..bb...', '...b....b...', '..dd....dd..']},
 };
 
 // the kit a new world starts with (the bag: tools, food; the pouch: materials)

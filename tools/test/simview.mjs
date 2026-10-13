@@ -23,6 +23,7 @@ const SHIM = `(() => {
   Math.random = () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
   let T = 1000; performance.now = () => T; Date.now = () => 1790000000000 + Math.floor(T);
   window.__clock = {advance(ms) { T += ms; }}; window.requestAnimationFrame = () => 0;
+  try { localStorage.clear(); } catch (e) {}   // (each run starts from nothing saved: the last run's pack, secrets, settings)
 })();`;
 
 // the input script (R = window.__r3d; frames(n) steps n x 1/60 s). Aims are set in world terms through the camera
@@ -67,6 +68,19 @@ const SCENARIOS = [
     const cr = crates.sort((a, b) => near(b) - near(a))[0]; R.host.teleport(cr.x - 3.5, cr.y); await frames(20);
     R.host.spawnArrow({x: cr.x - 2.5, y: cr.y, h: (cr.z || 0) + .5, vx: 22, vy: 0, vh: .4, dmg: 1, fire: 1}); await frames(600);
     R.keys.add('w'); await frames(40); key(' '); await frames(60); R.keys.clear(); await frames(100);`, [240, 30]],
+  // the uncanny forest (features/uncanny.js; the forest needs a seed): a tree's dusk slide, the night elk stalking you while
+  // you stand in its patch (it knocks you down, you drop a keepsake or a material and walk back over it), the quiet stones,
+  // the heron's ring with the pretend friend, dawn sending the walkers home. Keyboard and world-space only: all rates
+  ['uncanny', 'mode=sandbox&seed=1337&uncanny=1&daymin=0&hour=11&weather=fair&flow=0', `
+    await frames(30);
+    const F = R.host.feature('uncanny'), U = F.U;
+    R.env.setHour(18.9); await frames(60);
+    R.env.setHour(23); await frames(10);
+    R.host.teleport(F.elk.x + .8, F.elk.y - 3.5); await frames(900);
+    const d = F.dropped[0]; if (d) { R.host.teleport(d.x, d.y); await frames(120); }
+    R.host.teleport(U.stones.x, U.stones.y); await frames(360);
+    F.ringFriend = true; R.host.teleport(U.heron.x, U.heron.y); await frames(200); F.ringFriend = false;
+    R.env.setHour(6.2); await frames(120);`, [240, 30]],
 ].filter(s => !ONLY || ONLY.split(',').includes(s[0]));
 
 const DIGEST = `(() => { const R = window.__r3d, core = R.host.feature('combat')?.core, g = R.game, f5 = v => typeof v === 'number' ? +v.toFixed(5) : v;
@@ -77,6 +91,7 @@ const DIGEST = `(() => { const R = window.__r3d, core = R.host.feature('combat')
     enemies: core ? core.enemies.map(b => [b.type, f5(b.x), f5(b.y), b.hp].join(',')) : [], gold: core?.gold,
     game: [g.mode, g.phase, g.run ? [g.run.stage, g.run.kills, f5(g.run.time), g.run.wave] : null, g.stats?.S.hp],
     env: [f5(R.env.hour), R.env.weather],
+    unc: (u => u?.st ? [JSON.stringify(u.st), f5(u.elk.x), f5(u.elk.y), u.elk.mode, u.dropped.length] : null)(R.host.feature('uncanny')),
     fire: (R.host.feature('lights')?.hud?.() || '').match(/burning ([0-9]+) · ash ([0-9]+)/)?.slice(1)});   // (not the event queue: views emit too, wildlife's calls, fire crackles)
 })()`;
 

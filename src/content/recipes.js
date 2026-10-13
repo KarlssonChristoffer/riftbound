@@ -309,6 +309,123 @@ export const RECIPES = {
   // the watcher's eye and pupil on their own (origin = the eye's centre; the pupil looks down +z), for features/watcher.js
   watcher_eye: {lab: false, about: "The watcher's eyeball", params: {eye: [1, .6, 1.5]}, build(b, p) { b.ball('eye', [0, 0, 0], .11 * p.eye, {detail: 1}); }},
   watcher_pupil: {lab: false, about: "The watcher's pupil", params: {eye: [1, .6, 1.5]}, build(b, p) { const e = .11 * p.eye; b.ball('pupil', [0, 0, e * .72], [e * .48, e * .48, e * .3], {detail: 1}); }},
+
+  // ---- THE UNCANNY FOREST (features/uncanny.js, docs/UNCANNY.md). The creatures face +z (south) in their frame; their moving
+  // parts are recipes of their own (origin at the joint they turn about), so the feature can turn a head or swing a leg
+  // HERON: a grey heron standing at the water, everything but its head (heron_head sits on the neck's top: anchors().neck).
+  // shade 1: every part in one dark family (its shadow lying on the ground, the night ring's trick)
+  heron: {
+    about: 'Weird: a grey heron that stands perfectly still by the water (its head is heron_head: it turns all the way round)',
+    likes: {ground: 'a lake shore', shade: 0, cluster: [1, 1]},
+    params: {s: [1, .7, 1.4], shade: [0, 0, 1]},
+    anchors(p) { return {neck: [0, 1.1 * p.s, .17 * p.s]}; },
+    build(b, p, r) {
+      const s = p.s, f = n => p.shade >= .5 ? 'pupil' : n, sh = p.shade >= .5 ? {fixed: 3} : {};
+      for (const x of [-.055, .055]) {   // the long legs, the feet splayed on the ground
+        b.tube(f('beak'), [x * s, .64 * s, -.03 * s], [x * 1.15 * s, .02, .01 * s], .02 * s, .016 * s, {sides: 5, part: 1, ...sh});
+        for (const a of [-25, 0, 25]) b.box(f('beak'), [x * 1.15 * s + Math.sin(a * Math.PI / 180) * .05 * s, .01, .01 * s + Math.cos(a * Math.PI / 180) * .05 * s], [.012 * s, .012 * s, .1 * s], [0, a, 0], {part: 1, ...sh});
+      }
+      b.ball(f('heron'), [0, .8 * s, -.02 * s], [.15 * s, .16 * s, .3 * s], {detail: 1, ...sh});                                 // the body
+      for (const x of [-1, 1]) b.ball(f('herondark'), [x * .07 * s, .84 * s, -.06 * s], [.1 * s, .1 * s, .28 * s], {detail: 1, bias: -.05, ...sh});   // the folded wings
+      b.cone(f('herondark'), [0, .8 * s, -.24 * s], [0, .74 * s, -.42 * s], .08 * s, {sides: 5, ...sh});                         // the tail's flight feathers
+      b.ball(f('heronwhite'), [0, .9 * s, .16 * s], [.09 * s, .1 * s, .1 * s], {detail: 1, ...sh});                              // the breast
+      b.tube(f('heronwhite'), [0, .9 * s, .18 * s], [0, 1.1 * s, .17 * s], .06 * s, .05 * s, {sides: 6, part: 2, ...sh});       // the lower neck
+      for (let i = 0; i < 4; i++) b.box(f('herondark'), [0, (.95 + i * .045) * s, .225 * s], [.02 * s, .03 * s, .012 * s], [0, 0, 0], {part: 2, ...sh});   // the dark streak down its throat
+      if (r.chance(.5)) b.box(f('heronwhite'), [0, .78 * s, .14 * s], [.12 * s, .05 * s, .04 * s], [20, 0, 0], {bias: .1, ...sh});   // (breast plumes)
+    },
+  },
+  heron_head: {
+    lab: false, about: "The heron's head and upper neck: origin = the neck's top (it turns about its y axis)",
+    params: {s: [1, .7, 1.4], shade: [0, 0, 1]},
+    build(b, p) {
+      const s = p.s, f = n => p.shade >= .5 ? 'pupil' : n, sh = p.shade >= .5 ? {fixed: 3} : {};
+      b.tube(f('heronwhite'), [0, -.02 * s, 0], [0, .13 * s, .03 * s], .05 * s, .045 * s, {sides: 6, part: 1, ...sh});
+      b.ball(f('heronwhite'), [0, .17 * s, .05 * s], [.055 * s, .05 * s, .075 * s], {detail: 1, part: 1, ...sh});
+      b.box(f('pupil'), [0, .2 * s, -.06 * s], [.014 * s, .014 * s, .2 * s], [-12, 0, 0], {...sh});                           // the black plume
+      for (const x of [-1, 1]) b.box(f('pupil'), [x * .04 * s, .185 * s, .05 * s], [.012 * s, .018 * s, .09 * s], [0, 0, 0], {part: 1, ...sh});   // the black brow stripes
+      for (const x of [-1, 1]) b.ball(f('beak'), [x * .047 * s, .175 * s, .085 * s], .012 * s, {detail: 0, bias: .2, ...sh}); // the eyes
+      b.cone(f('beak'), [0, .165 * s, .1 * s], [0, .145 * s, .36 * s], .022 * s, {sides: 5, ...sh});                         // the bill
+    },
+  },
+  // ELK: an elk in parts: elk_body (origin = the middle of its body), four elk_leg (origin = the hip / shoulder, 1 m long down -y:
+  // scaled to the leg's length), elk_neck (origin = the top of its shoulders; neck, head, the antlers' palms)
+  elk_body: {
+    lab: false, about: "An elk's body: barrel, hump, rump (origin its middle; the legs hang at anchors().legs)",
+    params: {s: [1, .7, 1.4]},
+    anchors(p) { const s = p.s; return {legs: [[-.17 * s, -.22 * s, .5 * s], [.17 * s, -.22 * s, .5 * s], [-.17 * s, -.22 * s, -.52 * s], [.17 * s, -.22 * s, -.52 * s]], neck: [0, .22 * s, .6 * s]}; },
+    build(b, p) {
+      const s = p.s;
+      b.ball('elk', [0, 0, 0], [.3 * s, .34 * s, .75 * s], {detail: 1, lump: .05});
+      b.ball('elk', [0, .17 * s, .42 * s], [.29 * s, .32 * s, .34 * s], {detail: 1, bias: -.05});   // the hump over its shoulders
+      b.ball('elk', [0, .04 * s, -.55 * s], [.27 * s, .3 * s, .3 * s], {detail: 1});
+      b.ball('elkleg', [0, -.2 * s, .05 * s], [.22 * s, .12 * s, .5 * s], {detail: 0, bias: -.25});    // the paler belly
+      b.cone('elk', [0, .1 * s, -.8 * s], [0, -.02 * s, -.9 * s], .06 * s, {sides: 5});                // a stub of a tail
+    },
+  },
+  elk_leg: {
+    lab: false, about: "An elk's leg, 1 m long down from its hip (origin): dark above the knee, pale below, a hoof",
+    params: {s: [1, .7, 1.4]},
+    build(b, p) {
+      const s = p.s;
+      b.tube('elk', [0, .02, 0], [0, -.48, .03], .085 * s, .055 * s, {sides: 6, part: 1});
+      b.tube('elkleg', [0, -.48, .03], [0, -.97, 0], .045 * s, .036 * s, {sides: 6, part: 2});
+      b.box('pupil', [0, -.98, .015], [.07 * s, .04, .1 * s], [0, 0, 0], {bias: .1});
+    },
+  },
+  elk_neck: {
+    lab: false, about: "An elk's neck, head and antlers (origin = the top of its shoulders; it faces +z)",
+    params: {s: [1, .7, 1.4], antler: [1, 0, 1.5]},
+    build(b, p, r) {
+      const s = p.s;
+      b.tube('elk', [0, -.08 * s, -.04 * s], [0, .34 * s, .3 * s], .19 * s, .12 * s, {sides: 7, part: 1});
+      b.box('elk', [0, .2 * s, .1 * s], [.06 * s, .1 * s, .36 * s], [-38, 0, 0], {bias: -.2});         // the mane along its neck
+      b.ball('elk', [0, .4 * s, .42 * s], [.12 * s, .14 * s, .17 * s], {detail: 1, part: 2});
+      b.ball('elk', [0, .3 * s, .68 * s], [.1 * s, .12 * s, .17 * s], {detail: 1, part: 2, bias: -.08}); // the long, heavy muzzle
+      b.ball('elkleg', [0, .26 * s, .82 * s], [.07 * s, .07 * s, .05 * s], {detail: 0, bias: -.3});
+      b.cone('elk', [0, .22 * s, .4 * s], [0, -.04 * s, .42 * s], .05 * s, {sides: 5, bias: -.1});     // the bell under its throat
+      for (const x of [-1, 1]) {
+        b.cone('elk', [x * .09 * s, .5 * s, .36 * s], [x * .2 * s, .62 * s, .32 * s], .04 * s, {sides: 4});   // the ears
+        b.ball('pupil', [x * .09 * s, .43 * s, .5 * s], .018 * s, {detail: 0});
+        if (p.antler <= 0) continue;
+        const k = p.antler;   // the antlers: a beam out of the skull, a broad palm, tines along its edge
+        b.tube('antler', [x * .06 * s, .5 * s, .4 * s], [x * .26 * k * s, .6 * s, .36 * s], .03 * s, .025 * s, {sides: 5, part: 3});
+        b.box('antler', [x * .38 * k * s, .66 * s, .34 * s], [.26 * k * s, .03 * s, .2 * k * s], [0, 0, x * 22], {part: 3});
+        for (let i = 0; i < 4; i++) b.cone('antler', [x * (.3 + i * .05) * k * s, .69 * s + i * .012 * s, (.26 + r.range(0, .05)) * s], [x * (.33 + i * .06) * k * s, .82 * s + i * .01 * s, (.22 + r.range(-.03, .03)) * s], .018 * s, {sides: 4, part: 3});
+      }
+    },
+  },
+  // the NIGHT RING: pale mushrooms in a ring that rise where the heron stood (their caps glow: features/uncanny.js setGlow).
+  // lift: each one's height over the ring's middle (m; the feature measures the ground)
+  glowring: {
+    about: 'Weird: a ring of pale mushrooms (a fairy ring) whose caps glow at night; where the heron stood by day',
+    likes: {ground: 'a lake shore, at night', cluster: [1, 1]},
+    params: {r: [1.5, .8, 2.5], n: [13, 6, 20]},
+    build(b, p, r) {
+      for (let i = 0; i < p.n; i++) {
+        const a = (i + r.range(-.25, .25)) / p.n * Math.PI * 2, d = p.r + r.range(-.1, .1), x = Math.cos(a) * d, z = Math.sin(a) * d, y0 = p.lift?.[i] || 0;
+        for (let k = r.chance(.35) ? 2 : 1; k > 0; k--) {
+          const ox = k > 1 ? r.range(-.09, .09) : 0, oz = k > 1 ? r.range(-.09, .09) : 0, h = r.range(.1, .24) * (k > 1 ? .6 : 1), c = r.range(.05, .085) * (k > 1 ? .7 : 1);
+          const top = [x + ox + r.range(-.03, .03), y0 + h, z + oz + r.range(-.03, .03)];
+          b.tube('mushwhite', [x + ox, y0 - .02, z + oz], top, c * .28, c * .22, {sides: 5});
+          b.cap('paleglow', top, c, c * r.range(.45, .7), {under: 'mushwhite', droop: .01, sides: 8});
+        }
+      }
+    },
+  },
+  // the QUIET STONES: low lichen-grey stones in a ring in a glade (inside it your steps make no sound). lift as glowring's
+  ringstones: {
+    about: 'Weird: a ring of low grey stones in a glade; inside it your footsteps go quiet',
+    likes: {ground: 'a glade in the woods', cluster: [1, 1]},
+    params: {r: [2.3, 1.5, 3.5], n: [7, 5, 11]},
+    build(b, p, r) {
+      for (let i = 0; i < p.n; i++) {
+        const a = (i + r.range(-.12, .12)) / p.n * Math.PI * 2, d = p.r + r.range(-.12, .12), x = Math.cos(a) * d, z = Math.sin(a) * d, y0 = p.lift?.[i] || 0;
+        const w = r.range(.2, .3), h = r.range(.16, .3), l = r.range(.2, .32);
+        b.ball('rock', [x, y0 + h * .35, z], [w, h, l], {detail: 1, lump: .3});
+        if (r.chance(.7)) b.ball('lichen', [x + r.range(-.05, .05), y0 + h * 1.25, z + r.range(-.05, .05)], [w * .5, .03, l * .5], {detail: 0, lump: .3, bias: .05});
+      }
+    },
+  },
 };
 
 // ---------------------------------------------------------------- THE FOREST'S ANIMALS (features/fauna.js, docs/FAUNA.md)
