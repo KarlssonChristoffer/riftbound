@@ -60,7 +60,7 @@ const KNOBS = [
 const knob0 = n => n.mul ?? n.add;
 // a shape's size fields, by shape (content/gear.js add): the tuner's sliders
 const SIZE = {box: ['size.0', 'size.1', 'size.2'], ball: ['r.0', 'r.1', 'r.2'], tube: ['r0', 'r1', 'len'], disc: ['r', 'len'], cone: ['r', 'len']};
-const TABS = [['outfit', 'Outfit'], ['paint', 'Paint'], ['tuner', 'Tuner'], ['stats', 'Stats'], ['items', 'Items'], ['saved', 'Saved']];
+const TABS = [['outfit', 'Outfit'], ['scene', 'Scene'], ['paint', 'Paint'], ['tuner', 'Tuner'], ['stats', 'Stats'], ['items', 'Items'], ['saved', 'Saved']];
 const TAB_IDS = TABS.map(t => t[0]);
 const LIGHTS = ['day', 'dawn', 'dusk', 'night'];   // (dev/studio.js LIGHTS)
 const BACKS = Object.keys(SETS);   // (dev/stage.js)
@@ -77,11 +77,11 @@ const CSS = `
 /* the frames: 9-slice pixel art (painted in code: frame9), every edge U px a pixel */
 #wardrobe .wd-pane { position: absolute; pointer-events: auto; border: calc(3 * var(--u)) solid transparent; border-image: var(--f-panel) 3 fill / calc(3 * var(--u)); }
 #wardrobe button { font: inherit; color: inherit; cursor: pointer; padding: 0; background: none; border: 0; text-align: inherit; }
-#wardrobe .wd-btn, #wardrobe .wd-tab, #wardrobe .wd-pick button, #wardrobe .wd-back, #wardrobe .wd-slot, #wardrobe .wd-card, #wardrobe .wd-zone, #wardrobe .wd-tile, #wardrobe .wd-saved {
+#wardrobe .wd-btn, #wardrobe .wd-tab, #wardrobe .wd-pick button, #wardrobe .wd-back, #wardrobe .wd-slot, #wardrobe .wd-card, #wardrobe .wd-zone, #wardrobe .wd-tile, #wardrobe .wd-saved, #wardrobe .wd-mini button, #wardrobe .wd-cell {
   border: calc(2 * var(--u)) solid transparent; border-image: var(--f-btn) 2 fill / calc(2 * var(--u)); }
-#wardrobe :is(.wd-btn, .wd-tab, .wd-pick button, .wd-back, .wd-slot, .wd-card, .wd-zone, button.wd-tile):hover { border-image-source: var(--f-hot); }
-#wardrobe :is(.wd-btn, .wd-tab, .wd-pick button, .wd-back, .wd-slot, .wd-card, .wd-zone, button.wd-tile):active { border-image-source: var(--f-down); }
-#wardrobe :is(.wd-btn, .wd-tab, .wd-pick button, .wd-slot, .wd-card, .wd-zone, .wd-tile).on { border-image-source: var(--f-on); color: #fff3cf; }
+#wardrobe :is(.wd-btn, .wd-tab, .wd-pick button, .wd-back, .wd-slot, .wd-card, .wd-zone, button.wd-tile, .wd-mini button, .wd-cell):hover { border-image-source: var(--f-hot); }
+#wardrobe :is(.wd-btn, .wd-tab, .wd-pick button, .wd-back, .wd-slot, .wd-card, .wd-zone, button.wd-tile, .wd-mini button, .wd-cell):active { border-image-source: var(--f-down); }
+#wardrobe :is(.wd-btn, .wd-tab, .wd-pick button, .wd-slot, .wd-card, .wd-zone, .wd-tile, .wd-mini button, .wd-cell).on { border-image-source: var(--f-on); color: #fff3cf; }
 #wardrobe .wd-card, #wardrobe .wd-slot, #wardrobe .wd-saved, #wardrobe .wd-tile, #wardrobe .wd-zone { border-image-source: var(--f-card); }
 #wardrobe .wd-well { border: calc(2 * var(--u)) solid transparent; border-image: var(--f-well) 2 fill / calc(2 * var(--u)); }
 #wardrobe .wd-h { display: flex; align-items: center; gap: calc(3 * var(--u)); margin: calc(6 * var(--u)) 0 calc(3 * var(--u)); color: var(--key); text-transform: uppercase;
@@ -175,13 +175,16 @@ const CSS = `
 #wardrobe .wd-saved { display: flex; align-items: center; gap: calc(3 * var(--u)); padding: calc(2 * var(--u)); margin-bottom: calc(2 * var(--u)); }
 #wardrobe .wd-saved .n { flex: 1; min-width: 0; }
 #wardrobe .wd-saved .n small { display: block; font-size: inherit; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* bottom: the scene */
-#wardrobe .wd-bottom { left: calc(138 * var(--u)); right: calc(180 * var(--u)); bottom: calc(4 * var(--u)); padding: calc(2 * var(--u)) calc(4 * var(--u));
-  display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; gap: calc(3 * var(--u)) calc(8 * var(--u)); }
-#wardrobe .wd-grp > small { display: block; margin-bottom: calc(2 * var(--u)); font-size: inherit; color: var(--key); text-transform: uppercase; text-align: center;
-  text-shadow: var(--u) var(--u) 0 var(--dark); }
-#wardrobe .wd-grp .wd-row { display: flex; gap: calc(2 * var(--u)); }
-#wardrobe .wd-bottom .wd-chip { width: calc(13 * var(--u)); }
+/* bottom: a small toolbar under him (turn, spin, frame, photo, the Scene tab), faint until the pointer is on it */
+#wardrobe .wd-bottom { position: absolute; left: calc(138 * var(--u)); right: calc(180 * var(--u)); bottom: calc(4 * var(--u)); display: flex; justify-content: center; pointer-events: none; }
+#wardrobe .wd-mini { position: static; display: flex; gap: calc(2 * var(--u)); padding: calc(1 * var(--u)) calc(2 * var(--u)); opacity: .4; transition: opacity .2s; }
+#wardrobe .wd-mini:hover { opacity: 1; }
+#wardrobe .wd-mini button { min-width: calc(14 * var(--u)); padding: var(--u) calc(4 * var(--u)); text-align: center; }
+#wardrobe .wd-chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(3 * var(--u)); }
+#wardrobe .wd-chips button.wd-cell { display: flex; flex-direction: column; align-items: center; gap: var(--u); padding: calc(2 * var(--u)) var(--u); }
+#wardrobe .wd-chips .wd-chip { width: calc(14 * var(--u)); pointer-events: none; }
+#wardrobe .wd-chips small { font-size: inherit; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+#wardrobe .wd-chips button.on small { color: var(--key); }
 #wardrobe .wd-msg { position: absolute; left: 50%; top: calc(32 * var(--u)); transform: translateX(-50%); padding: calc(2 * var(--u)) calc(6 * var(--u)); color: var(--key);
   border: calc(3 * var(--u)) solid transparent; border-image: var(--f-panel) 3 fill / calc(3 * var(--u)); opacity: 0; }
 #wardrobe .wd-msg.on { opacity: 1; }
@@ -336,7 +339,7 @@ export function createWardrobe({host, hero, live, engine}) {
   const head = (parent, t) => el('div', 'wd-h', parent, t);
 
   const top = el('div', 'wd-pane wd-top', root), left = el('div', 'wd-pane wd-left', root), right = el('div', 'wd-pane wd-right', root);
-  const bottom = el('div', 'wd-pane wd-bottom', root), msgEl = el('div', 'wd-msg', root);
+  const bottom = el('div', 'wd-bottom', root), mini = el('div', 'wd-pane wd-mini', bottom), msgEl = el('div', 'wd-msg', root);
   let msgT = 0;
   function say(s) { msgEl.textContent = s; msgEl.classList.add('on'); msgT = 3.5; }
 
@@ -394,42 +397,22 @@ export function createWardrobe({host, hero, live, engine}) {
     el('div', 'wd-note', left, 'Shown now; worn when you go back to the game.');
   }
 
-  // ---- bottom: the scene
+  // ---- bottom: the toolbar (the scene's own choices are in the Scene tab)
   {
-    const grp = (label, title) => { const g = el('div', 'wd-grp', bottom); if (title) g.title = title; el('small', '', g, label); return el('div', 'wd-row', g); };
-    const bk = grp('Backdrop');
-    for (const k of BACKS) {
-      const c = btn('wd-chip', bk, '', () => { C.back = k; save(); backdrop(); sound('click'); }, k);
-      c.style.background = SETS[k].sw;
-      rows.push(() => c.classList.toggle('on', C.back === k));
-    }
-    const sg = grp('Stage');
-    for (const k of STAGES) {
-      const c = btn('wd-chip' + (k === 'none' ? ' tx' : ''), sg, k === 'none' ? '\u2014' : '', () => { C.stage = k; save(); backdrop(); sound('click'); }, k);
-      if (k !== 'none') c.style.background = STAGE_SW[k];
-      rows.push(() => c.classList.toggle('on', C.stage === k));
-    }
-    const lt = el('div', 'wd-pick', grp('Light', 'the studio light: a key light from the front left, a lamp when it is dark'));
-    for (const k of LIGHTS) {
-      const b = btn('', lt, k[0].toUpperCase() + k.slice(1), () => { C.light = k; save(); light(); sound('click'); });
-      rows.push(() => b.classList.toggle('on', C.light === k));
-    }
-    poseSel = el('select', '', grp('Pose', 'standing, or one of his clips (played, held, played again)'));
-    poseSel.onchange = () => { pose = poseSel.value; studio.set({pose}); poseSel.blur(); };
-    const vw = el('div', 'wd-pick', grp('View'));
-    btn('', vw, '\u27f2', () => studio.turn(-45 * DEG), 'turn him 45\u00b0 (arrows, A / D: a step)');
-    const sp = btn('', vw, 'Spin', () => { C.spin = !C.spin; studio.spin = C.spin; save(); }, 'Space: he turns slowly');
-    btn('', vw, '\u27f3', () => studio.turn(45 * DEG), 'turn him 45\u00b0');
-    btn('', vw, 'Frame', () => studio.reframe(), 'R: the view on him again');
-    btn('', vw, 'Photo', () => { studio.photo(); say('photo saved'); }, 'P: a PNG of the scene');
-    rows.push(() => sp.classList.toggle('on', C.spin));
+    btn('', mini, '\u27f2', () => studio.turn(-45 * DEG), 'turn him 45\u00b0 (arrows, A / D: a step)');
+    const sp = btn('', mini, 'Spin', () => { C.spin = !C.spin; studio.spin = C.spin; save(); }, 'Space: he turns slowly');
+    btn('', mini, '\u27f3', () => studio.turn(45 * DEG), 'turn him 45\u00b0');
+    btn('', mini, 'Frame', () => studio.reframe(), 'R: the view on him again');
+    btn('', mini, 'Photo', () => { studio.photo(); say('photo saved'); }, 'P: a PNG of the scene');
+    const sc = btn('', mini, 'Scene', () => { C.tab = 'scene'; save(); sound('click'); tab(); }, 'the backdrop, the stage, the light, his pose');
+    rows.push(() => { sp.classList.toggle('on', C.spin); sc.classList.toggle('on', C.tab === 'scene'); });
   }
   tabRows = rows.length;   // (the panes' rows; the tab's go after them, made again on every change of tab)
 
   // ---------------------------------------------------------------- the right pane: the tab
   function tab() {
     rows.length = tabRows; right.textContent = ''; tip.hide();
-    ({outfit: tOutfit, paint: tPaint, tuner: tTuner, stats: tStats, items: tItems, saved: tSaved})[C.tab]();
+    ({outfit: tOutfit, scene: tScene, paint: tPaint, tuner: tTuner, stats: tStats, items: tItems, saved: tSaved})[C.tab]();
     right.scrollTop = 0;
     sync();
   }
@@ -445,6 +428,32 @@ export function createWardrobe({host, hero, live, engine}) {
     return r;
   }
   const btnRow = (parent, list) => { const r = el('div', 'wd-row2', parent); for (const [t, go, title] of list) btn('wd-btn', r, t, go, title); return r; };
+
+  // SCENE: the backdrop, the stage, the light, his pose
+  function tScene() {
+    const cells = (title, list, get, set, sw) => {
+      head(right, title);
+      const g = el('div', 'wd-chips', right);
+      for (const k of list) {
+        const b = btn('wd-cell', g, '', () => { set(k); save(); sound('click'); }, k), c = el('span', 'wd-chip' + (sw(k) ? '' : ' tx'), b, sw(k) ? '' : '\u2014');
+        if (sw(k)) c.style.background = sw(k);
+        el('small', '', b, k);
+        rows.push(() => b.classList.toggle('on', get() === k));
+      }
+    };
+    cells('Backdrop', BACKS, () => C.back, k => { C.back = k; backdrop(); }, k => SETS[k].sw);
+    cells('Stage', STAGES, () => C.stage, k => { C.stage = k; backdrop(); }, k => STAGE_SW[k]);
+    head(right, 'Light');
+    const lt = el('div', 'wd-pick', right);
+    for (const k of LIGHTS) {
+      const b = btn('', lt, k[0].toUpperCase() + k.slice(1), () => { C.light = k; save(); light(); sound('click'); });
+      rows.push(() => b.classList.toggle('on', C.light === k));
+    }
+    head(right, 'Pose');
+    poseSel = el('select', '', right); poseSel.style.width = '100%'; posesFor = '';
+    poseSel.onchange = () => { pose = poseSel.value; studio.set({pose}); poseSel.blur(); };
+    el('div', 'wd-note', right, 'Standing, or one of his clips: played, held, played again.');
+  }
 
   // OUTFIT: the slot's pieces as icons (ui/gearicons.js), the one under the pointer in a card that follows it (ui/geartip.js:
   // Shift for more); a click wears it
@@ -650,7 +659,7 @@ export function createWardrobe({host, hero, live, engine}) {
   }
   // his poses: idle and his clips (the model's live-only ones: the live hero's emotes), when the model is in
   function poses() {
-    if (!studio.ready || posesFor === studio.modelName) return;
+    if (!studio.ready || !poseSel?.isConnected || posesFor === studio.modelName) return;
     posesFor = studio.modelName; poseSel.textContent = '';
     for (const [v, t] of [['idle', 'Standing'], ...studio.emotes.map(e => [e, e.replace(/_/g, ' ')])]) { const o = el('option', '', poseSel, t); o.value = v; }
     if (pose !== 'idle' && !studio.emotes.includes(pose)) pose = 'idle';

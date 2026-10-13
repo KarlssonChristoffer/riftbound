@@ -95,13 +95,15 @@ art), a card that follows the pointer over a piece (`ui/geartip.js`: what it is,
 hold SHIFT for its materials, modifier notes, what it changes on the model and what wearing it does to your set), every edge a whole UI pixel (U css
 px: 2 at 1080, 3 at 1440, 4 at 2160). It stands round the scene: the TOP bar (the title, the loadout, the tabs, the keys, back to the game), EQUIPMENT on the
 left (a card a slot with the icon of what he wears there, x takes it off; Random, Undress; the set's weight,
-armor and speed as bars), the tab on the right, and the SCENE bar at the bottom (backdrop and stage swatches, the light:
-now, dawn, day, dusk, night as the clock's preview; his pose: the live hero's emotes; turn 45 degrees, spin, frame, photo).
+armor and speed as bars), the tab on the right, and a small toolbar under him, faint until the pointer is on it (turn 45
+degrees, spin, turn back, frame, photo, Scene: the Scene tab).
 The camera frames him in the middle of what the panes leave, at the zoom where he is about half its height. The tabs:
 
 - **Outfit.** The chosen slot's pieces as icons, a rarity gem in the corner (a click wears it: through
   `features/gear.js choose`, shown at once, worn when you go back to the game; in co-op the server is asked then); the piece
   under the pointer in the card (Shift: more).
+- **Scene.** The backdrop and the stage as named swatches, the light (day, dawn, dusk, night as the clock's preview) and his
+  pose (standing, or one of the live hero's clips).
 - **Paint.** The model's zones and the duster tail; a palette (every material, a picked colour, off) painted on the chosen one.
 - **Tuner.** Pick a piece with shapes, pick a shape, and move, turn and size it on sliders (drawn as you drag, a dress at
   most every 50 ms). "Copy code" puts the piece's `add` list on the clipboard as content/gear.js lines (and in the console):
