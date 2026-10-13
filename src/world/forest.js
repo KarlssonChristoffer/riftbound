@@ -36,9 +36,12 @@
 //             seeded lobes; full where the stream comes in, where the outflow leaves and toward the clearing): the basin's floor
 //             left dry between the two is a STRAND of sand, gravel and stones at the water's height. Still water (sample's speed
 //             0: gfx.js WATER_FS wStill), a shallow shelf along the shore that drops off to the deep (depth)
-//   STREAM    from a spring on high ground near the north edge it runs down to the lake, wandering, downhill where it can; shallow
-//             and wadeable (not water to the sim); its bed is cut into the ground (lay, with layout.js's sampler: never rising
-//             downstream, into the lake at its surface)
+//   STREAM    from a spring on high ground near the north edge it runs down to the lake the land's way (ROUTE: along the low
+//             ground, round a hill rather than over it), and MEANDERS where the ground is gentle (straighter where it steepens);
+//             the OUTFLOW runs from the lake to the river's head along its own valley (F.way, routed before the hills: the relief
+//             is held low along it), meandering over the valley's floor. A bend is scoured deep under its outside bank (a dark
+//             cut bank) and leaves a gravel bar inside. Shallow and wadeable (not water to the sim); the bed is cut into the
+//             ground (lay, with layout.js's sampler: never rising downstream, into the lake at its surface)
 //   GROWTH    per chunk, on jittered lattices: TREES (3.2 m cells; a density field makes thickets and clearings; conifers on the
 //             higher ground and in their own drifts, oaks, birches, aspens, rowans and a dead one now and then elsewhere, willows by
 //             the water), the UNDERGROWTH (1.6 m cells: bushes and ferns under the trees, tufts in the clearings, reeds at the
@@ -63,6 +66,7 @@ const CANYON_IN = .35;         // the canyon is drawn this much wider than walke
 export const TUNE = {
   relief: {amp: 3.2, north: 0, k: 1 / 30, hills: [2, 3], hillH: [3.8, 5.8], hillR: [11, 15], hillK: 2.8},   // (hillK: a hill is at least that x its height across: walkable)
   ice: {spread: .9},
+  route: {hi: .35, up: 14},   // (ROUTE: a watercourse's cost per m for every m it lies over the lowest ground, per m it would have to climb)
   mountain: {h: [11.5, 13], r: [31, 34], stoss: 1.1, lee: .95, wob: .1, lump: .08, calm: .5, crags: [5, 8], cragL: [6, 13], cragD: [5, 8.5], tors: [1, 3], torN: [3, 5], treeline: .6},
   upland: {h: [7, 8.5], slope: 28},
   canyon: {side: 22, head: 9, wander: 5, hw: [1.7, 2.7], rise: [.6, 1.4], ridge: [5.5, 6.5], rim: 2, fall: 18, in: [14, 40]},
@@ -73,6 +77,8 @@ export const TUNE = {
   boulders: {r: [4, 5.5], n: [10, 16]},
   lake: {rx: [6.5, 9.5], ry: [4.5, 6.5], depth: .35, rim: 3.2, minBed: .55, shore: .36, shelf: 1.3, wade: 1},   // (shore: how far the bays reach in, a share of the radius; shelf: m of shallows before the drop-off; wade: m of it walked)
   stream: {hw0: .3, hw1: .55, step: .6, depth: .1, bank: 1.25, wander: .3,   // (wander: the width swells and pinches by up to this share along it)
+    meander: [{amp: 1.25, len: 9.5, flat: [.03, .13]}, {amp: 1.2, len: 15, flat: [.02, .08]}],   // (the stream's, the outflow's: MEANDERS below; amp rad, len m a swing, flat: the bed's fall per m from full .. none)
+    approach: 7, bend: 2.4,   // (approach: the outflow's last m come straight down into the river's head; bend: a bend's curvature (1/m) x this = 1, its full lean: deeper outside, a gravel bar inside)
     riffle: {slope: [[.06, .22], [.012, .05]], steps: .4, stones: [.06, .5], r: [.13, .28]}},   // (riffles: the bed's slope from calm to all white, the stream's then the outflow's; steps: how much of a steep stretch runs white (a noise's cut: the rest are its pools); stones: odds a stone stands at a point, in a run .. a riffle; r: its radius, m)
   trees: {cell: 3.2, jitter: .36, base: .12, dense: .78, slope: .5, water: 1.4, edge: 2.2, south: 4},
   under: {cell: 1.6, jitter: .4, p: .2},
@@ -98,7 +104,7 @@ export function forestPlan(seed) {
   // ---- RELIEF: the rolling ground (held lower along the lake's way out to the river: its outflow doesn't cut a gorge), then the hills
   // (away from the south edge)
   const raw = (x, y) => T.relief.amp * smooth((fbm(x * T.relief.k, y * T.relief.k, S) - .3) / .55) * southFade(y) * (1 + T.relief.north * smooth((HOME.y0 - y) / 40));   // (higher ground in the high country)
-  let reliefH = raw;
+  let reliefH = raw, wayD = (x, y) => 20;   // (wayD: m to the outflow's way, F.way, below)
   const hills = [];
   // ---- LAKE: in the lowest hollow of a few candidates (the relief only: the hills keep away from it) whose ground stays high enough
   // for its water to run out downhill to the river (its surface over the river's: OUTFLOW)
@@ -112,7 +118,28 @@ export function forestPlan(seed) {
     }
     const rx = T.lake.rx[0] + R() * (T.lake.rx[1] - T.lake.rx[0]), ry = T.lake.ry[0] + R() * (T.lake.ry[1] - T.lake.ry[0]);
     const lx = +best.x.toFixed(2), ly = +best.y.toFixed(2);
-    reliefH = (x, y) => raw(x, y) * (.25 + .75 * smooth((segD(x, y, lx, ly, MOUTH.x, MOUTH.y) - 4) / 12));
+    // ITS WAY OUT: the cheapest route over the rolling ground (not faded at the south edge, which would draw it along the edge) from the
+    // lake's side to the river's head, approached from the north; eased into a valley's line (F.way). The relief is held low along it:
+    // a valley that bends as the land does, its floor wide enough for the outflow's meanders (wayD: m to the line, from a grid)
+    {
+      const AP = [MOUTH.x, MOUTH.y - T.stream.approach], free = (x, y) => T.relief.amp * smooth((fbm(x * T.relief.k, y * T.relief.k, S) - .3) / .55);
+      const bx = [Math.max(RECT.x0 + 2, Math.min(lx - rx, AP[0]) - 22), Math.max(HOME.y0 + 2, Math.min(ly - ry, AP[1]) - 22), Math.min(RECT.x1 - 2, Math.max(lx + rx, AP[0]) + 22), AP[1] + 1];
+      const r0 = route(free, bx, (x, y) => Math.hypot(x - AP[0], y - AP[1]) < .75, (x, y) => Math.hypot((x - lx) / rx, (y - ly) / ry) < .85, () => true) || [[lx, ly], AP];
+      F.way = easePath([...r0, AP, [MOUTH.x, MOUTH.y]], 4, 3).map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]);
+    }
+    const WG = 1, wb = F.way.reduce((b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)], [1e9, 1e9, -1e9, -1e9]);
+    const gx0 = wb[0] - 20, gy0 = wb[1] - 20, gw = Math.ceil((wb[2] - wb[0] + 40) / WG) + 1, gh = Math.ceil((wb[3] - wb[1] + 40) / WG) + 1, wd = new Float32Array(gw * gh);
+    for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+      const x = gx0 + i * WG, y = gy0 + j * WG; let d = 1e9;
+      for (let k = 1; k < F.way.length; k += 1) { const a = F.way[k - 1], b = F.way[k]; if (Math.abs(x - a[0]) < d + 1.2 && Math.abs(y - a[1]) < d + 1.2) d = Math.min(d, segD(x, y, a[0], a[1], b[0], b[1])); }
+      wd[j * gw + i] = d;
+    }
+    wayD = (x, y) => {
+      const fx = (x - gx0) / WG, fy = (y - gy0) / WG; if (fx < 0 || fy < 0 || fx >= gw - 1 || fy >= gh - 1) return 20;
+      const i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j, k = j * gw + i;
+      return (wd[k] * (1 - u) + wd[k + 1] * u) * (1 - v) + (wd[k + gw] * (1 - u) + wd[k + gw + 1] * u) * v;
+    };
+    reliefH = (x, y) => raw(x, y) * (.25 + .75 * smooth((wayD(x, y) - 4) / 12));
     let lo = 1e9; for (let k = 0; k < 64; k++) { const a = k * Math.PI / 32, r = (k % 4) / 3 * 1.15; lo = Math.min(lo, reliefH(lx + Math.cos(a) * rx * r, ly + Math.sin(a) * ry * r)); }
     const bed = Math.max(T.lake.minBed, lo - T.lake.depth);
     let rise = 0; for (let k = 0; k < 32; k++) { const a = k * Math.PI / 16; rise = Math.max(rise, reliefH(lx + Math.cos(a) * (rx + 1.5), ly + Math.sin(a) * (ry + 1.5)) - bed); }
@@ -139,7 +166,7 @@ export function forestPlan(seed) {
       const C = course(ctl, 0, 0); let ok = true;
       for (let i = 0; i < C.n && ok; i += 15) {
         const x = C.px[i], y = C.py[i];
-        if (-F.lakeEdge(x, y) < reach + 3 || segD(x, y, L.x, L.y, MOUTH.x, MOUTH.y) < reach + 3) ok = false;
+        if (-F.lakeEdge(x, y) < reach + 3 || wayD(x, y) < reach + 3) ok = false;
       }
       if (!ok) continue;
       esker = ridge(C, E.h[0] + R() * (E.h[1] - E.h[0]), E.crest, E.w, E.taper, S);
@@ -246,7 +273,7 @@ export function forestPlan(seed) {
     const h = T.relief.hillH[0] + R() * (T.relief.hillH[1] - T.relief.hillH[0]), r = Math.max(T.relief.hillR[0] + R() * (T.relief.hillR[1] - T.relief.hillR[0]), h * T.relief.hillK / .88);
     const x = RECT.x0 + r + R() * (RECT.x1 - RECT.x0 - 2 * r), y = HOME.y0 + r * .8 + R() * (RECT.y1 - HOME.y0 - r * .8 - FADE[1] - r);
     if (Math.hypot((x - L.x) / (L.rx + r + 5), (y - L.y) / (L.ry + r + 5)) < 1 || hills.some(q => Math.hypot(q.x - x, q.y - y) < q.rx + r)) continue;
-    if (segD(x, y, L.x, L.y, MOUTH.x, MOUTH.y) < r + 3) continue;   // (not across the outflow's way to the river)
+    if (wayD(x, y) < r + 3) continue;   // (not across the outflow's way to the river)
     if (crestD(x, y) < r * .55 + 2) continue;   // (not on the esker)
     hills.push({type: 'hill', x: +x.toFixed(2), y: +y.toFixed(2), rx: +r.toFixed(2), ry: +(r * (.88 + R() * .17)).toFixed(2), h: +h.toFixed(2), rot: +(R() * Math.PI).toFixed(3)}); i++;
   }
@@ -265,6 +292,10 @@ export function forestPlan(seed) {
   F.shapes.push({type: 'field', reach: [RECT.x0 - 30, RECT.y0 - 30, RECT.x1 + 30, RECT.y1], fn: (x, y) => reliefH(x, y) + highH(x, y) + eskerH(x, y)}, ...hills, F.canyon.cut,
     {type: 'basin', x: L.x, y: L.y, rx: L.rx + .3, ry: L.ry + .3, h: L.bed + WATER_H, rim: L.rim});   // (its floor at the water's surface: the strand and the shelf are walked at it)
 
+  // the ground's fall per m along a line, u m along it (MEANDERS: how gentle it runs there)
+  const slopeOn = pts => { const Ls = [0]; for (let i = 1; i < pts.length; i++) Ls.push(Ls[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const at = u => { let i = 1; while (i < pts.length - 1 && Ls[i] < u) i++; const a = pts[i - 1], b = pts[i], t = clamp((u - Ls[i - 1]) / ((Ls[i] - Ls[i - 1]) || 1), 0, 1); return F.height(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t); };
+    return u => Math.abs(at(u - 1.5) - at(u + 1.5)) / 3; };
   // a watercourse from (x, y) toward (tx, ty): each step mostly toward it, downhill where the ground falls, wandering (the seed's
   // phase and a noise field), until done(x, y) -> [[x, y], ...] (a point every 3 steps)
   const walk = (x, y, tx0, ty0, done, ph) => {
@@ -289,16 +320,21 @@ export function forestPlan(seed) {
       const sc = F.height(x, y) + d * .01; if (!sp || sc > sp.sc) sp = {x, y, sc};
     }
     sp ??= {x: L.x + 20, y: HOME.y0 + 8};
-    const pts = walk(sp.x, sp.y, L.x, L.y, (x, y) => lakeD(x, y) < .82, R() * 10), e1 = pts.at(-1), e0 = pts.at(-2) || pts[0];
+    // the land's way down (ROUTE over the ground as it stands: round the hills and the esker where it can, into the lake where the
+    // ground leads it), eased, then MEANDERS where the ground is gentle
+    const ph = R() * 10, bx = [Math.max(RECT.x0 + 3, Math.min(sp.x, L.x - L.rx) - 12), Math.max(HOME.y0 + 1, Math.min(sp.y, L.y - L.ry) - 12), Math.min(RECT.x1 - 3, Math.max(sp.x, L.x + L.rx) + 12), Math.min(ySouth, Math.max(sp.y, L.y + L.ry) + 6)];
+    const r0 = route(F.height, bx, (x, y) => lakeD(x, y) < .85, (x, y) => Math.hypot(x - sp.x, y - sp.y) < .75, () => true);
+    const base = easePath(r0 ? [[sp.x, sp.y], ...r0.slice(1)] : walk(sp.x, sp.y, L.x, L.y, (x, y) => lakeD(x, y) < .82, ph), 3, 3);
+    const pts = meander(base, slopeOn(base), T.stream.meander[0], 2.5, 3, ph, mix(seed, 44) & 0xffff), e1 = pts.at(-1), e0 = pts.at(-5) || pts[0];
     pts.push([e1[0] + (e1[0] - e0[0]) * .5, e1[1] + (e1[1] - e0[1]) * .5]);   // (on into the lake a little: no gap at its mouth)
     F.stream = course(pts, T.stream.hw0, T.stream.hw1);
     F.spring = {x: sp.x, y: sp.y, r: .42};
   }
   // ---- OUTFLOW: out of the lake's side nearest the river and down to the river's head (MOUTH), widening into it
   {
-    const a = Math.atan2((MOUTH.y - L.y) / L.ry, (MOUTH.x - L.x) / L.rx), x = L.x + Math.cos(a) * L.rx * .85, y = L.y + Math.sin(a) * L.ry * .85;
-    const pts = walk(x, y, MOUTH.x, MOUTH.y, (px, py) => Math.hypot(px - MOUTH.x, py - MOUTH.y) < 1.2, R() * 10);
-    pts.push([MOUTH.x, MOUTH.y], [MOUTH.x, MOUTH.y + 1.5]);
+    // along its way (F.way: the valley the relief keeps for it), meandering over the valley's floor, straight down the last metres
+    const ph = R() * 10, pts = meander(F.way, slopeOn(F.way), T.stream.meander[1], 2.5, T.stream.approach, ph, mix(seed, 45) & 0xffff);
+    pts.push([MOUTH.x, MOUTH.y + 1.5]);
     F.outflow = course(pts, T.stream.hw1, MOUTH.hw);
   }
   // the courses swell into slow pools and pinch into runs: their width wanders along them (held at both ends: the spring, the lake's
@@ -622,6 +658,90 @@ const _o = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0}, _q = {d: 0, a: 0, l: 0, hw: 0,
 const segD = (x, y, ax, ay, bx, by) => { const vx = bx - ax, vy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1))); return Math.hypot(x - ax - vx * t, y - ay - vy * t); };
 function waterD(F, x, y) { F.at(x, y, _o); return Math.min(_o.d - _o.hw, -F.lakeEdge(x, y)); }
 
+// ---- WATERCOURSES THE LAND'S WAY. ROUTE: the cheapest way over the ground h (1 m cells, 8 ways, within box [x0, y0, x1, y1] m and
+// ok(x, y)) from the downstream end (src(x, y): cost 0) back up to where the water starts (tgt(x, y)). A metre costs more the higher
+// it lies (TUNE.route.hi per m over the lowest ground: the water keeps to the low ground, the valley floors, round a hill rather
+// than over it) and much more where the water would have to run uphill (route.up per m of rise). -> [[x, y], ...] cell centres,
+// upstream first, or null. Once per plan (allocates)
+function route(h, box, src, tgt, ok) {
+  const RT = TUNE.route, x0 = Math.floor(box[0]), y0 = Math.floor(box[1]), w = Math.ceil(box[2]) - x0, hh = Math.ceil(box[3]) - y0, N = w * hh;
+  const H = new Float32Array(N), cost = new Float64Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), done = new Uint8Array(N), use = new Uint8Array(N);
+  const hk = [], hc = [];
+  const push = (k, c) => { let i = hk.length; hk.push(k); hc.push(c); while (i > 0) { const p = (i - 1) >> 1; if (hc[p] <= c) break; hk[i] = hk[p]; hc[i] = hc[p]; i = p; } hk[i] = k; hc[i] = c; };
+  const pop = () => {
+    const k = hk[0], lk = hk.pop(), lc = hc.pop(), n = hk.length; if (!n) return k;
+    let i = 0; for (;;) { let c = 2 * i + 1; if (c >= n) break; if (c + 1 < n && hc[c + 1] < hc[c]) c++; if (hc[c] >= lc) break; hk[i] = hk[c]; hc[i] = hc[c]; i = c; }
+    hk[i] = lk; hc[i] = lc; return k;
+  };
+  let lo = Infinity;
+  for (let j = 0; j < hh; j++) for (let i = 0; i < w; i++) {
+    const k = j * w + i, x = x0 + i + .5, y = y0 + j + .5; if (!ok(x, y)) continue;
+    use[k] = 1; H[k] = h(x, y); if (H[k] < lo) lo = H[k];
+    if (src(x, y)) { cost[k] = 0; push(k, 0); }
+  }
+  while (hk.length) {
+    const k = pop(); if (done[k]) continue; done[k] = 1;
+    const i = k % w, j = (k - i) / w;
+    if (tgt(x0 + i + .5, y0 + j + .5)) { const pts = []; for (let q = k; q >= 0; q = prev[q]) pts.push([x0 + q % w + .5, y0 + Math.floor(q / w) + .5]); return pts; }
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      const ni = i + di, nj = j + dj; if ((!di && !dj) || ni < 0 || nj < 0 || ni >= w || nj >= hh) continue;
+      const n = nj * w + ni; if (done[n] || !use[n]) continue;
+      const c = cost[k] + (di && dj ? Math.SQRT2 : 1) * (1 + RT.hi * (H[n] - lo)) + RT.up * Math.max(0, H[k] - H[n]);   // (the water runs n -> k)
+      if (c < cost[n]) { cost[n] = c; prev[n] = k; push(n, c); }
+    }
+  }
+  return null;
+}
+// a polyline resampled every `step` m (ends kept)
+function resample(pts, step) {
+  const out = [pts[0].slice()]; let run = 0, next = step;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    while (next <= run + l) { const t = (next - run) / l; out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); next += step; }
+    run += l;
+  }
+  const e = pts.at(-1), q = out.at(-1); if (Math.hypot(e[0] - q[0], e[1] - q[1]) > step * .3) out.push(e.slice()); else out[out.length - 1] = e.slice();
+  return out;
+}
+// the route's stair-steps eased into a valley's line: every 1 m, a moving average `win` points either way, `passes` times (ends held)
+function easePath(pts, win, passes) {
+  let P = resample(pts, 1);
+  for (let p = 0; p < passes; p++) {
+    const Q = P.map(q => q.slice());
+    for (let i = 1; i < P.length - 1; i++) {
+      const r = Math.min(win, i, P.length - 1 - i); let sx = 0, sy = 0;
+      for (let k = -r; k <= r; k++) { sx += P[i + k][0]; sy += P[i + k][1]; }
+      Q[i][0] = sx / (2 * r + 1); Q[i][1] = sy / (2 * r + 1);
+    }
+    P = Q;
+  }
+  return P;
+}
+// MEANDERS: a sine-generated curve (the shape a stream on gentle ground wears itself into: bend after bend, each swinging the other
+// way) laid along the eased line `base`: its heading swings up to M.amp rad either side of the line's, a full swing every ~M.len m
+// (wandering; the bends grow and calm reach by reach and lean as real ones do: a Kinoshita curve's skew), full on flat ground, calming to a wobble as the bed steepens (slope(u): the fall per m along it at u m; M.flat: from .. to) and
+// held straight over the first hold0 / last hold1 m (the spring, the mouths). Ph: a phase, n: the noise's seed. -> points every .25 m
+function meander(base, slope, M, hold0, hold1, ph, n) {
+  const B = resample(base, .5), Ls = [0];
+  for (let i = 1; i < B.length; i++) Ls.push(Ls[i - 1] + Math.hypot(B[i][0] - B[i - 1][0], B[i][1] - B[i - 1][1]));
+  const total = Ls.at(-1), at = (u, o) => {
+    const f = Math.max(0, Math.min(B.length - 1.001, u / .5)), i = Math.floor(f), t = f - i, a = B[i], b = B[Math.min(B.length - 1, i + 1)];
+    const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; o[0] = a[0] + dx * t; o[1] = a[1] + dy * t; o[2] = -dy / l; o[3] = dx / l;
+  };
+  const out = [], q = [0, 0, 0, 0], ds = .25;
+  let u = 0, s = 0, off = 0, a = ph;
+  while (u < total) {
+    const fl = 1 - .78 * smooth((slope(u) - M.flat[0]) / (M.flat[1] - M.flat[0])), hold = Math.min(smooth(u / hold0), smooth((total - u) / hold1));
+    const env = .35 + .75 * smooth((vnoise(s * .035, 4.1, n) - .22) / .5), sk = (vnoise(s * .025, 9.9, n) - .5) * .8;   // (a reach of big bends, then a calmer one; each bend leaning up or down the valley)
+    const th = M.amp * fl * env * (Math.sin(a) + sk * Math.cos(3 * a));
+    at(u, q); const k = hold * hold; out.push([q[0] + q[2] * off * k, q[1] + q[3] * off * k]);
+    off += Math.sin(th) * ds; off -= off * .02 * ds; u += Math.cos(th) * ds; s += ds;
+    a += Math.PI * 2 / (M.len * (.7 + .7 * vnoise(s * .04, 7.7, n))) * ds;
+  }
+  out.push(B.at(-1).slice());
+  return out;
+}
+
 // one chunk's trees, undergrowth and rocks (its own generator: mix(seed, cx, cy))
 const DECID = [['oak', .45], ['birch', .2], ['aspen', .14], ['rowan', .15], ['dead', .06]];
 function grow(F, cx, cy, S, slope, K) {
@@ -693,6 +813,11 @@ function course(ctl, hw0, hw1) {
   }
   const n = X.length, C = {n, px: Float32Array.from(X), py: Float32Array.from(Y), len: Float32Array.from(Ls), hw: new Float32Array(n), bed: new Float32Array(n), total: Ls[n - 1]};
   for (let i = 0; i < n; i++) { const u = i / (n - 1); C.hw[i] = hw0 + (hw1 - hw0) * smooth(u) + (vnoise(i * .03, 1.7, 77) - .5) * .12; }
+  // its BEND per point (C.curv, 1/m, + turning toward -a: the outside of a bend is where a x curv > 0): the heading's turn over +-.6 m,
+  // averaged over +-1 m
+  const hd = new Float32Array(n), cv = C.curv = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const a = Math.max(0, i - 6), b = Math.min(n - 1, i + 6); hd[i] = Math.atan2(Y[b] - Y[a], X[b] - X[a]); }
+  for (let i = 0; i < n; i++) { let t = 0, c = 0; for (let j = Math.max(1, i - 10); j <= Math.min(n - 1, i + 10); j++, c++) { let d = hd[j] - hd[j - 1]; d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2; t += d / DS; } cv[i] = c ? t / c : 0; }
   const REACH = 2.5; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   for (let i = 0; i < n; i++) { x0 = Math.min(x0, X[i]); y0 = Math.min(y0, Y[i]); x1 = Math.max(x1, X[i]); y1 = Math.max(y1, Y[i]); }
   const gx0 = Math.floor(x0 - REACH), gy0 = Math.floor(y0 - REACH), gw = Math.ceil(x1 + REACH) - gx0, gh = Math.ceil(y1 + REACH) - gy0, near = new Int32Array(gw * gh).fill(-1), nd = new Float32Array(gw * gh).fill(1e9);
@@ -832,6 +957,9 @@ export function sample(F, x, y, out) {
 // river in the ruins): its pattern's travel per m along it (COURSE_KS), its speed l m along it (courseSpeed: a slow wander) and its
 // depth (courseDepth, o: waterSample's: shallow and clear at the banks, deeper mid-channel the wider it runs, a little noise)
 export const COURSE_KS = K_S;
+// how far toward a bend's outside a point lies, -1 (the inside bank: a gravel bar, shallow) .. 1 (the outside: cut deep, a steep earth
+// bank); 0 on a straight reach or mid-channel. C, i: the course and its point (F.at's k, i), a / hw: across it
+const bendOut = (C, i, a, hw) => clamp(C.curv[i] * TUNE.stream.bend, -1, 1) * clamp(a / Math.max(.05, hw), -1, 1);
 export const courseSpeed = l => .75 + .25 * vnoise(l * .2, 3.1, 41);
 export const courseDepth = (o, x, y) => .05 + (.22 + .35 * smooth((o.hw - .6) / 1)) * smooth(o.edge / Math.max(.08, o.hw)) + (vnoise(x * 3, y * 3, 34) - .5) * .08;
 // how deep its bed lies, 0 (the waterline) .. 1 (waterbed.js): the streams shallow and clear, the spring a well, the lake a bowl
@@ -844,7 +972,10 @@ export function depth(F, o, x, y) {
   }
   else {
     d = courseDepth(o, x, y);
-    if (F.at(x, y, _d)) { const C = _d.k === 1 ? F.outflow : F.stream; if (C.rif) d = d * (1 - .5 * C.rif[_d.i]) + .5 * C.pool[_d.i] * smooth(o.edge / Math.max(.08, o.hw)); }   // (a riffle runs shallow over its stones, the pool below it is deep)
+    if (F.at(x, y, _d)) {
+      const C = _d.k === 1 ? F.outflow : F.stream; if (C.rif) d = d * (1 - .5 * C.rif[_d.i]) + .5 * C.pool[_d.i] * smooth(o.edge / Math.max(.08, o.hw));   // (a riffle runs shallow over its stones, the pool below it is deep)
+      d *= 1 + .6 * bendOut(C, _d.i, _d.a, _d.hw);   // (a bend: scoured deep under its outside bank, shoaling onto the bar inside)
+    }
     const rs = Math.hypot(x - F.spring.x, y - F.spring.y) / F.spring.r; if (o.kind === 6 && rs < 1) d = Math.max(d, .2 + .6 * smooth((1 - rs) / .7));
   }
   return clamp(d, 0, 1);
@@ -883,9 +1014,18 @@ export function paint(F, K, S, T) {
     e += (n2(x / 4, y / 3, 73) - .5) * (lake ? .12 : .05);
     if (lake && inS) e = Math.min(e, -.01);   // (in both waters, a mouth: water, never the shore's lip)
     if (e >= 1.05) continue;
-    if (e >= 0) {   // the banks: an earth lip, damp ground, then the lusher band
-      if (e < .05) G.p(x, y, S.earth, 3);
-      else if (e < .14) G.p(x, y, S.earth, side < 0 ? 2 : 1);
+    const bo = !lake && o.hw > 0 ? bendOut(o.k === 1 ? F.outflow : F.stream, o.i, o.a, o.hw) : 0;   // (a bend: its bar inside, its cut bank outside)
+    if (e >= 0 && bo < -.2 && e < .75 * -bo - .1 + n2(x / 3, y / 2, 74) * .2) {   // the POINT BAR on a bend's inside: gravel and sand the water left, pebbles
+      const pe = hsh(x, y, 75);
+      if (e < .04) G.p(x, y, S.earth, 2);
+      else if (pe < .05) { G.p(x, y, S.rock, 0); G.p(x + 1, y, S.rock, 1); G.p(x, y + 1, S.rock, 2); G.p(x + 1, y + 1, S.rock, 3); }
+      else if (n2(x / 5, y / 4, 76) > .5) G.p(x, y, S.floor, pe < .5 ? 1 : 2);
+      else G.p(x, y, S.inlay, pe < .4 ? 1 : 2);
+      continue;
+    }
+    if (e >= 0) {   // the banks: an earth lip (wider and darker under a bend's cut outside bank), damp ground, then the lusher band
+      if (e < .05 + (bo > .2 ? .1 * bo : 0)) G.p(x, y, S.earth, 3);
+      else if (e < .14 + (bo > .2 ? .08 * bo : 0)) G.p(x, y, S.earth, side < 0 ? 2 : 1);
       else if (e < .26) { if (hsh(x, y, 4) < .5) G.p(x, y, S.damp, 1); }
       else if (e < .5 + n2(x / 9, y / 7, 62) * .5) {
         if (e < .38 && hsh(x, y, 63) < .45) continue;
