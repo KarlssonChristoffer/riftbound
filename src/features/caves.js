@@ -13,7 +13,7 @@
 import {smooth, clamp} from '../core/mathx.js';
 
 const DARK0 = 1.5;     // m down the slot (in the woods) where the world above starts to go dark
-const DARK_W = .95;    // how dark it is at the warp (the rest at the step into the cave: the woods round him are all but gone by then)
+const DARK_W = 1;      // how dark it is at the warp: the woods round him are gone by then, so the step into the cave changes nothing round him
 const LANTERN_R = 2;   // x the lantern's reach down there
 const EASE = 5;        // 1/s
 const NOWARP = new Set(['rope', 'climb', 'mantle']);   // (a move that places him itself: the warp waits until it ends)

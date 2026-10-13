@@ -38,7 +38,7 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
 
   // ---- the WALLS: each loop cut into stretches by the way they face (a normal averaged over ~2 m, so a rough wall doesn't flicker
   // between bins), the stretches of one bin in one mesh
-  const runs = Array.from({length: BINS}, () => []);
+  const runs = Array.from({length: BINS + 1}, () => []), SQ = [0, 0, 0];   // (runs[BINS]: the stretches that always show)
   const top = (x, z) => Math.max(field.H(x + .55, z), field.H(x - .55, z), field.H(x, z + .55), field.H(x, z - .55));
   const foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
   let seed = 211;
@@ -52,6 +52,8 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
       const a = Math.atan2(ny, nx); return ((Math.round(a / (2 * Math.PI / BINS)) % BINS) + BINS) % BINS;
     };
     const bins = []; for (let i = 0; i < n; i++) bins.push(binOf(i));
+    // (the slot's copy: its side walls always show, as the woods' slot's do, so nothing round him changes at the step in)
+    for (let i = 0; i < n; i++) { const a = L[i], b = L[i + 1]; C.slotAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, SQ); if (SQ[2] === 2 && SQ[0] > -.3 && SQ[0] < C.copy.len + .3 && Math.abs(SQ[1]) > C.copy.w / 2 - .4) bins[i] = BINS; }
     // (lone segments of another bin go with their neighbours: no stretch shorter than two segments)
     for (let i = 0; i < n; i++) { const p = bins[(i - 1 + n) % n], nx = bins[(i + 1) % n]; if (bins[i] !== p && p === nx) bins[i] = p; }
     // start a closed loop where its bin changes (a stretch doesn't wrap round the seam)
@@ -66,7 +68,7 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
   }
   const o = {fam, rockB: null, cover: null, ladders: []};
   const meshes = [];
-  for (let b = 0; b < BINS; b++) {
+  for (let b = 0; b <= BINS; b++) {
     if (!runs[b].length) { meshes.push(null); continue; }
     const rs = runs[b].map(pts => {
       let lo = 1e9; for (const [x, z] of pts) lo = Math.min(lo, foot(x, z));
