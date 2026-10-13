@@ -51,7 +51,7 @@ export const FLAG_DOCS = {
   trees3d:   '0: painted tree cards instead of the procedural 3D trees',
   flora:     'cards: the bushes, ferns, tufts and reeds as the painted cards instead of 3D plants (world/flora3d.js, drawn instanced by render/flora.js; an A/B)',
   cliffs:    '0: the old painted strata planes on the plateau and the ravine wall instead of the 3D rock (world/cliffs3d.js)',
-  stillwater: '0: the surface of the forest lake holds still (no wind ripples, rain rings or rising fish: features/stillwater.js, gfx.js WATER_FS wStill)',
+  stillwater: '0: no weather on the water: the forest lake holds still (no wind ripples or rising fish) and no water rings in the rain (features/stillwater.js, gfx.js WATER_FS wStill, wDrops)',
   water:     '0: the old water look (no depth colour, bed, refraction or contact foam: world/waterbed.js, gfx.js WATER_FS wDeep; an A/B)',
   terrain:   '0: flat ground (no hills, terraces or ramps: world/terrain.js, the shapes in layout.js TERRAIN; docs/TERRAIN.md) and the plateau as its old box with the waterfall (not the mesa with its gully), the world 62 m wide: an A/B',
   debug:     'a debug view index (G cycles them)',

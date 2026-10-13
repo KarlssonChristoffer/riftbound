@@ -1,14 +1,15 @@
-// STILL WATER (render3d): the weather on the forest's lake. The lake's look is the ground shader's (gfx.js WATER_FS wStill: the cat's
-// paws the wind draws, the calm's glassy lines, the lapping shore, the bed on the shallow shelf, rain rings, a fish rising); this file
-// only feeds it, through G.setWater({still}), what the sky and the wind are doing over it:
+// STILL WATER (render3d): the weather on the water, the forest's lake above all. The lake's look is the ground shader's (gfx.js WATER_FS
+// wStill: the cat's paws the wind draws, the calm's glassy lines, the lapping shore, the bed on the shallow shelf, rain rings, a fish
+// rising; wDrops rings every river, stream and pool in the rain too); this file only feeds it, through G.setWater({still}), what the
+// sky and the wind are doing over it:
 //   wind     the wind at the lake (host.wind.at: its direction and strength, the gust fronts crossing it) sets which way the ripples go,
 //            how fast (TUNE.pace texels a second at full wind) and how much of the surface they take; eased, so a gust swells and dies
-//   rain     host.env.sky rain / storm: rings all over it
+//   rain     host.env.sky rain / storm: rings all over it, and over all the moving water (any biome)
 //   fish     rise now and then, most at dawn and dusk, few in the heat of the day or at night, none in a storm or under ice
-// A biome without still water (no forest, or setWaterLook gave it no still look) costs one test a view.
+// Without the forest's lake only the rain and the clock are fed (the wind's sample is skipped).
 // VIEW ONLY: nothing here is read by the sim, no Math.random (the shader's hashes of the texel and the clock decide everything).
 //
-// FEATURE CONTRACT (main.js): create(host) -> F: view, toggle, ms. ?stillwater=0: the lake's surface holds still (no wind, rain or fish).
+// FEATURE CONTRACT (main.js): create(host) -> F: view, toggle, ms. ?stillwater=0: no weather on the water (the lake holds still; no rain rings, no fish).
 // OWNS: its eased wind / travel / clock. READS: host.layout.forest (the lake), host.wind.at, host.env (sky, hour, season), host.G.
 // EMITS: nothing. BUDGET: view < .005 ms (a wind sample and one setter a view).
 import {flags} from '../core/flags.js';
@@ -37,10 +38,10 @@ export async function create(host) {
   }
   F.view = dt => {
     const t0 = performance.now(), L = host.layout?.forest?.lake;
-    if (!L || !host.G?.setWater) return;
+    if (!host.G?.setWater) return;
     S.t = (S.t + dt) % 3600;
     const E = host.env, wf = host.wind;
-    if (F.on && wf && wf.on !== false && wf.at) {
+    if (L && F.on && wf && wf.on !== false && wf.at) {
       wf.at(L.x, L.y, W);
       const v = Math.hypot(W.x, W.y);
       if (v > .05) {   // its direction eases round (a gust front doesn't spin the ripples); the travel follows the eased direction

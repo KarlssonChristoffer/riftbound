@@ -301,10 +301,10 @@ vec3 wStill(ivec2 ti, int ring) {
   }
   return res;
 }
-// rain rings and a fish now and then on still water (main, once per fragment: crisp under the smooth sampling)
+// rain rings on all water and a fish now and then on still water (main, once per fragment: crisp under the smooth sampling; sw: still water)
 bool wStillAt(ivec2 ti) { int rc = int(texelFetch(uWater, clamp(ti, ivec2(0), ivec2(uTexSize) - 1), 0).r * 255. + .5); return rc >= 192 && (rc & 15) == 0; }
-vec3 wDrops(vec3 res, ivec2 ti) {
-  ivec2 og = wOrg(); vec2 p = vec2(ti + og) + .5; float ck = uWS2.w;
+vec3 wDrops(vec3 res, ivec2 ti, bool sw) {
+  ivec2 og = wOrg(); vec2 p = vec2(ti + og) + .5; float ck = uWS2.w; vec3 rl = sw ? uWSRamp[0] : uWRamp[0];   // (a ring: the water's lightest tone)
   if (uWS2.x > .01) {   // RAIN: a cell of 8 x 8 texels may take a drop every ~.45 s at its own phase; the ring widens to 5 texels and fades;
     // between them the surface is pocked (a texel lit for 1/10 s here and there), so the rain reads over the whole lake, not only its rings
     vec2 c0 = floor(p / 8.);
@@ -313,11 +313,11 @@ vec3 wDrops(vec3 res, ivec2 ti) {
       if (wh(c * 1.31 + n * .173) > uWS2.x * .75) continue;
       vec2 o = c * 8. + 1. + floor(vec2(wh(c + n * .71), wh(c.yx + n * .37 + 3.)) * 6.) + .5;
       float d = length(p - o), rr = floor(a * 6.);
-      if (rr < .5 ? d < .6 : abs(d - rr) < .5) res = mix(res, uWSRamp[0], rr < .5 ? .95 : .85 - a * .5);
+      if (rr < .5 ? d < .6 : abs(d - rr) < .5) res = mix(res, rl, rr < .5 ? .95 : .85 - a * .5);
     }
-    if (wh(p * .917 + floor(ck * 10.) * 1.37) < uWS2.x * .05) res = mix(res, uWSRamp[0], .6);
+    if (wh(p * .917 + floor(ck * 10.) * 1.37) < uWS2.x * .05) res = mix(res, rl, .6);
   }
-  if (uWS2.y > .01) {   // A FISH RISES: a cell of 40 texels may have one every ~9 s, over deep water: a splash, then two rings spreading 3 texels a second
+  if (sw && uWS2.y > .01) {   // A FISH RISES: a cell of 40 texels may have one every ~9 s, over deep water: a splash, then two rings spreading 3 texels a second
     vec2 c = floor(p / 40.); float ph = ck / 9. + wh(c + 5.3), n = floor(ph), a = (ph - n) * 9.;
     if (a < 3.2 && wh(c * .77 + n * .29) < uWS2.y * .5) {
       vec2 o = c * 40. + 10. + floor(vec2(wh(c + n), wh(c.yx + n + 1.)) * 20.) + .5; ivec2 oi = ivec2(o) - og;
@@ -395,6 +395,10 @@ vec3 wTexel(ivec2 ti, ivec2 mx) {
   }
   res = uWRamp[t];
   if (uWBedOn > .5) res = wDeep(res, t, t0, band, h, l, bd, ti);
+  // WHITE WATER where it runs fast (a riffle over stones, a rapid: speed 1.3 .. 1.875): the crests of both layers break into foam,
+  // more of them the faster it runs, and a few bubbles ride the flow between them
+  float wf = clamp((spd - 1.3) / .5, 0., 1.);
+  if (wf > 0. && (h > 1. - .42 * wf || l > 1. - .3 * wf || wh(vec2(floor(a), floor(s - mod(floor(ph * 1.3), 768.)))) < .05 * wf)) res = mix(res, uWFoam, .55 + .4 * wf);
   return res;
 }
 // a fall of water: the baked colour is the base; light streaks slide DOWN the sheet in whole texels at their own pace per column,
@@ -500,7 +504,7 @@ void main() {
         c.rgb = mix(cN, cS, uSmooth);
       }
       if (uWBedOn > .5 && rc >= 128) c.rgb = wFoam(c.rgb, ti, int(wBed(ti).a * 255. + .5) & 7);   // (contact foam: WATER_FS)
-      if (uWS.w >= 0. && rc >= 192 && (rc & 15) == 0 && uWS2.x + uWS2.y > .01) c.rgb = wDrops(c.rgb, ti);   // (rain rings, a fish: still water)
+      if (rc >= 192) { bool sw = (rc & 15) == 0 && uWS.w >= 0.; if (uWS2.x + (sw ? uWS2.y : 0.) > .01) c.rgb = wDrops(c.rgb, ti, sw); }   // (rain rings on all water; a fish on still water)
     }
   }
   // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
@@ -2831,12 +2835,13 @@ void main() {
   const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; U.wFoot.value.set(x, h - .9, z, 1); };   // (h: his chest, .9 m over his feet: the water rings them when he wades)
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
   // advances at, so changing it never makes the pattern jump
-  // still: the lake's weather, every view while there is still water (features/stillwater.js): {dir: [x, z] unit, travel (texels, wrapped at
-  // 4608), wind 0..1, rain 0..1, fish 0..1, gust 0..1, t (s, its clock)}; ignored while the biome has no still look (setWaterLook)
+  // still: the water's weather, every view (features/stillwater.js): {dir: [x, z] unit, travel (texels, wrapped at 4608), wind 0..1,
+  // rain 0..1, fish 0..1, gust 0..1, t (s, its clock)}. The rain (and its clock) rings every water; the rest is the still look's,
+  // ignored while the biome has none (setWaterLook)
   let stillLook = false;
   const setWater = ({speed, still} = {}) => {
     if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0);
-    if (still && stillLook) { U.wS.value.set(still.dir[0], still.dir[1], still.travel, still.wind); U.wS2.value.set(still.rain, still.fish, still.gust, still.t); }
+    if (still) { U.wS2.value.set(still.rain, still.fish, still.gust, still.t); if (stillLook) U.wS.value.set(still.dir[0], still.dir[1], still.travel, still.wind); }   // (the rain rings all water; the rest is the still look's)
   };
   // the biome's water (world.js buildWorld, at every build, from WATER_TUNE): {ramp: [[r, g, b] 0..1] light -> dark (padded to 4), rate,
   // across, along, hi, lo, range: [lightest, darkest] tone, lap (tone | -1), refl, spark} | null = no moving water (the rift)
