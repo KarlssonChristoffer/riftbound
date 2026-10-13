@@ -43,6 +43,16 @@ it): it leaps straight up and bolts, the herd with it, and a toast counts your t
 - One hare in each forest is odd. Some nights it is never where it was: once it's out of sight, it sits ahead of you on your way
   again, upright, watching you come (four times a night). Touch it and it's an ordinary hare again.
 
+## Birds in the treetops
+
+By day some trees have birds up in them that you never see until something startles them (`src/features/fauna/crowns.js`).
+A shot (30 m), an axe in a trunk (12 m, and the chopped tree itself is likelier), a tree starting to fall (20 m), something breaking
+or a bullet in a trunk (8 m), a blast (25 m): a little flock of chaffinches bursts out of the top of a crown, or a wood pigeon or
+two with a clatter of wings, the crown shakes and lets a leaf go, and they beat away from the noise, climbing, and are gone. About
+one tree in ten holds birds (a new draw every 20 game minutes), at most two crowns empty at one noise, and a tree that has just
+emptied stays empty four minutes, so the first shot in a stretch of woods sends some up and the next ones mostly find them gone.
+Recipes `finch` and `woodpigeon` (one mesh each, wings spread; in the asset lab too).
+
 ## With friends
 
 Presentation only, like the arena's wildlife: nothing is sent and the sim never reads them. Everyone gets the same animals in
@@ -68,12 +78,13 @@ undergrowth), `wildlife.howl` with kind `fox`, call `yips` (the fox at night). N
 | distances, speeds, hours | `TUNE` in `src/features/fauna.js` (alert / flee m, run / walk m/s, the hours each is out) |
 | sizes and shapes | the recipes in `content/recipes.js`, the pivots in `FAUNA_RIG`; the asset lab: `?mode=sandbox&lab=roe` |
 | noticing, touch, the strange | `TUNE.sus`, `TUNE.touch`, `TUNE.elk`, `TUNE.watcher`, `TUNE.odd` in `src/features/fauna.js` |
-| try the strange | menu > Sandbox > Animals: the nearest herd turns and stares / the odd hare comes (at night) |
+| birds in the crowns | `TUNE.crown` in `src/features/fauna.js` (share of trees, reaches, how many at once, how long empty) |
+| try the strange | menu > Sandbox > Animals: the nearest herd turns and stares / the odd hare comes (at night) / startle the birds in the trees round you |
 | state, for a test | `__r3d.host.feature('fauna').dbg()` (each animal's suspicion, what you can touch, the odd hare) |
 
 ## Not yet
 
-- Small things: songbird flocks in the trees, butterflies over the glades, dragonflies by the lake, a woodpecker drumming.
+- Small things: songbirds you can see sitting in the trees and singing, butterflies over the glades, dragonflies by the lake, a woodpecker drumming.
 - A deer's bark and a hare's thump as sounds of their own.
 - Tracks in the snow, droppings, a fox's den you can find.
 - Hunting (meat and hides) and a fox that comes to trust you if you leave it food: these need items and the server to own the

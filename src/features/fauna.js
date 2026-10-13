@@ -31,6 +31,7 @@ import {FOREST} from '../world/layout.js';
 import {steep} from '../world/world.js';
 import {faunaPlan} from '../world/fauna.js';
 import {createFaunaLook} from './fauna/look.js';
+import {createCrownBirds} from './fauna/crowns.js';
 
 // ---------------------------------------------------------------- tunables
 // alert / flee: m from a person (walking) at which it stops to watch / bolts; rest: x those while it is bedded (it sits tight);
@@ -46,6 +47,9 @@ export const TUNE = {
   touch: 1.5,             // m: an animal that hasn't noticed you, this near: E touches it (it leaps and bolts)
   elk: 1.8,               // the uncanny forest's elk at night (features/uncanny.js) counts as someone this loud: everything gives it room
   watcher: 18,            // m: animals this near the watcher (features/watcher.js) stop and stare at it while it is up
+  // the birds in the crowns (fauna/crowns.js): the share of trees holding some (by day: hours), the chopped tree's own share; m a
+  // shot / a chop / a tree falling / a break / a blast reaches; at most this many crowns empty at one noise; s a tree stays empty
+  crown: {chance: .1, own: .5, hours: [4.5, 21.5], shot: 30, chop: 12, fell: 20, brk: 8, blast: 25, max: 2, cd: 240, pigeon: .25},
   odd: {stare: .12, hare: 4},   // the strange: a herd's chance a minute (at dusk, dawn) of all turning as one to stare at you from
                                 // far; the odd hare's visits a night (it sits ahead of you, watching, wherever you go)
   shot: 38, hit: 14,      // m a gunshot / a hit or a break scares everything within
@@ -403,6 +407,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- appear / go (only out of sight: nothing pops in or out)
   const look = createFaunaLook(host, TUNE);
+  const crowns = createCrownBirds(host, TUNE, (type, at, extra) => emit(type, at, extra));
   function stepGone(a, hr) {
     const away = !outNow(a.S, hr) && !(a.st === 'flee' || a.st === 'fly' || a.st === 'flush' || a.st === 'climb');
     if (away === a.gone) return;
@@ -520,6 +525,7 @@ export async function create(host) {
       if (a.h === 0 || a.sp === 'squirrel') a.z = elev(a.x, a.y);
       else a.z += (elev(a.x, a.y) - a.z) * Math.min(1, dt * 4);
     }
+    crowns.events(evs); crowns.step(dt);
     watcherStares(); oddHare(dt, hr);
     if ((oddAcc += dt) >= 1) { oddAcc -= 1; herdStares(hr); }
     findTouch();
@@ -527,13 +533,13 @@ export async function create(host) {
     acc = performance.now() - t0;
   };
   F.frame = () => {
-    if (!F.on) { look.hideAll(ANIM); return; }
+    if (!F.on) { look.hideAll(ANIM); crowns.hideAll(); return; }
     const t0 = performance.now();
-    look.frame(ANIM, host.env);
+    look.frame(ANIM, host.env); crowns.frame();
     F.ms = F.ms * .95 + (acc + performance.now() - t0) * .05;
   };
-  F.biomeChanged = () => { look.drop(ANIM); trees.clear(); };
-  F.toggle = () => { F.on = !F.on; if (!F.on) look.hideAll(ANIM); return F.on; };
+  F.biomeChanged = () => { look.drop(ANIM); crowns.drop(); trees.clear(); };
+  F.toggle = () => { F.on = !F.on; if (!F.on) { look.hideAll(ANIM); crowns.hideAll(); } return F.on; };
   // the sandbox's menu: go and meet one (the nearest of each kind)
   const game = () => host.feature('game');
   F.menu = () => game()?.mode !== 'sandbox' ? [] : ['roe', 'fox', 'hare', 'squirrel', 'raven', 'capercaillie'].map(sp => ({label: `Animals: go to the nearest ${sp === 'roe' ? 'roe deer' : sp}`, run: () => {
@@ -547,8 +553,10 @@ export async function create(host) {
       if (bL) for (const b of bL) if (!b.gone) stareAt(b, P.x, P.y, 6);
     }},
     {label: 'Animals: the odd hare comes (at night)', run: () => { oddN = 0; oddCD = 0; }},
+    {label: 'Animals: startle the birds in the trees round you', run: () => { const P = host.player; crowns.noise(P.x, P.y, 25); }},
   ]);
-  F.dbg = () => ({count: F.count, ms: +F.ms.toFixed(3), hour: +hour().toFixed(2), touch: touchA?.d.id ?? null, touched: {...touched}, odd: ODD ? {id: ODD.d.id, on: ODD.odd, visits: oddN} : null,
+  F.crowns = crowns;
+  F.dbg = () => ({count: F.count, ms: +F.ms.toFixed(3), hour: +hour().toFixed(2), touch: touchA?.d.id ?? null, crownBirds: crowns.flying, touched: {...touched}, odd: ODD ? {id: ODD.d.id, on: ODD.odd, visits: oddN} : null,
     animals: ANIM.map(a => `${a.d.id} ${a.st}${a.gone ? ' (gone)' : ''} ${a.x.toFixed(1)},${a.y.toFixed(1)}${a.h ? ' h' + a.h.toFixed(1) : ''}${a.sus > .01 ? ' sus' + a.sus.toFixed(2) : ''}`)});
   return F;
 }

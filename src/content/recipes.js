@@ -592,6 +592,25 @@ Object.assign(RECIPES, {
     build(b) { PARTS.squirrel_body(b); b.at(FAUNA_RIG.squirrel.tail, 0, 1, () => PARTS.squirrel_tail(b)); }},
   raven: {about: 'A raven (korp)', likes: {ground: 'high rock, the fell', shade: 0, cluster: [2, 2]}, params: {},
     build(b) { const R = FAUNA_RIG.raven; b.at([0, R.stand, 0], 0, 1, () => { PARTS.raven_body(b); for (const s of [1, -1]) b.at([R.wing[0], R.wing[1], R.wing[2] * s], s > 0 ? 0 : 180, 1, () => b.at([0, 0, 0], 0, 1, () => PARTS.raven_wing(b, {span: .14}))); }); }},
+  // the birds in the crowns (features/fauna/crowns.js): one mesh each, wings spread (in flight they beat by the mesh's span)
+  finch: {about: 'A chaffinch (bofink), wings spread: the small birds that burst out of a crown', likes: {ground: 'forest, in the crowns', shade: .3, cluster: [3, 7]}, params: {},
+    build(b) { b.at([0, 0, 0], 0, 2, () => {
+      b.ball('harefur', [0, 0, 0], [.07, .035, .035], {detail: 1, part: 1});
+      b.ball('russet', [.03, -.008, 0], [.045, .03, .03], {detail: 0});   // the rosy breast
+      b.ball('stone', [.07, .02, 0], .03, {detail: 1, part: 1});          // the blue-grey crown
+      b.cone('furdark', [.095, .018, 0], [.12, .016, 0], .01, {sides: 4});
+      b.box('harefur', [-.085, .004, 0], [.06, .008, .03], [0, 0, 4]);
+      for (const z of [1, -1]) { b.box('furdark', [-.005, .012, z * .07], [.06, .008, .1], [0, 0, 0], {part: 2}); b.box('mushwhite', [.005, .016, z * .05], [.02, .006, .05], [0, 0, 0]); }   // the white wing bars
+    }); }},
+  woodpigeon: {about: 'A wood pigeon (ringduva), wings spread: the loud clatter out of a crown', likes: {ground: 'forest, in the crowns', shade: .3, cluster: [1, 2]}, params: {},
+    build(b) { b.at([0, 0, 0], 0, 1.2, () => {
+      b.ball('stone', [0, 0, 0], [.16, .07, .07], {detail: 1, part: 1});
+      b.ball('stone', [.15, .04, 0], .045, {detail: 1, part: 1});
+      for (const z of [.035, -.035]) b.ball('mushwhite', [.12, .03, z], .014, {detail: 0});   // the white neck patches
+      b.cone('agaric', [.19, .035, 0], [.22, .03, 0], .012, {sides: 4});
+      b.box('stone', [-.2, 0, 0], [.14, .012, .08], [0, 0, 3]);
+      for (const z of [1, -1]) { b.box('stone', [-.01, .01, z * .15], [.12, .012, .22], [0, 0, 0], {part: 2}); b.box('mushwhite', [.02, .016, z * .1], [.025, .008, .08], [0, 0, 0]); b.box('furdark', [-.03, .012, z * .27], [.09, .01, .06], [0, 0, 0]); }
+    }); }},
   capercaillie: {about: 'A capercaillie (tjäder): a cock or a hen', likes: {ground: 'old pine woods, the floor', shade: .6, cluster: [1, 1]}, params: {hen: [0, 0, 1]},
     build(b, p) { b.at([0, FAUNA_RIG.capercaillie.stand * (p.hen ? .8 : 1), 0], 0, 1, () => PARTS.capercaillie_body(b, p)); }},
 });
