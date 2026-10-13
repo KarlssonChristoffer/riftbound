@@ -292,7 +292,7 @@ export async function create(host) {
     O.drift[0] = -Math.round(dx * R) / R * f; O.drift[1] = -Math.round(dz * R) / R * f;
     caves ??= host.feature('caves') || false;
     const open = caves ? 1 - caves.under : 1;   // (underground, features/caves.js: no mist in the cave)
-    if (open < 1) { O.alpha *= open; O.water *= open; F.medium = O.medium *= open; }
+    if (open < 1) { O.alpha *= open; O.water *= open; O.far *= open; O.aerial *= open; F.medium = O.medium *= open; }
     if (VOL) {   // the volume: its numbers, the drift in the noise's units (whole world texels), the wind's way; the old sheet's veil off
       computeVol(dt, sd);
       if (open < 1) { OV.film *= open; OV.fill *= open; OV.water *= open; if (OV.under) { OU.film *= open; OU.fill *= open; OU.water *= open; } F.medium = O.medium *= open; }

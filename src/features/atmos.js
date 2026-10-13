@@ -741,7 +741,7 @@ export async function create(host) {
 
   // ---------- HD overlay ----------
   let O = null, oKey = '';
-  const VG = {va: 0, ha: 0, v: [0, 0, 0], h: [0, 0, 0]};   // (G.setVignette's numbers: the same OVER entry the canvas below is painted from)
+  let cavesF = null; const VG = {va: 0, ha: 0, v: [0, 0, 0], h: [0, 0, 0]};   // (G.setVignette's numbers: the same OVER entry the canvas below is painted from)
   const SPS = {img: null, em: null, x: 0, y: 0, h: 0, px: 2, py: 3, type: 3};   // (the shards' host.sprite options, kept)
   function buildOver(w, h) {
     if (!O) O = cv(w, h); O.width = w; O.height = h;
@@ -855,6 +855,7 @@ export async function create(host) {
       const t0 = performance.now();
       if (host.G.setVignette) {   // the GPU draws it (gfx.js VG_FS), the same gradients, over the canvas: no blit here
         const Vo = OVER[biome] || OVER.ruins; VG.va = Vo.va; VG.v = Vo.v; VG.h = Vo.h; VG.ha = F.weather && Vo.ha ? Vo.ha : 0;
+        cavesF ??= host.feature('caves') || false; if (cavesF) VG.ha *= 1 - cavesF.under;   // (underground, features/caves.js: no sky's haze)
         host.G.setVignette(VG);
       } else {
         const w = q.canvas.width, h = q.canvas.height, key = `${w}x${h}|${biome}|${F.weather}`;
