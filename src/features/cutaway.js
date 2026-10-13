@@ -56,7 +56,9 @@ export async function create(host) {
     if (!G.setCut) return;
     const p = host.player, dt = Math.min(.1, f?.dt || 1 / 60), t = tick++;
     caves ??= host.feature('caves') || false;
-    if (t % 3 === 0) c = caves && caves.under > .5 ? 0 : cover(p.x, p.y, p.z || 0, (p.z || 0) + H * .55);   // (underground: features/caves.js; the cave's walls in front of him aren't drawn)
+    const down = caves && (caves.under > .5 || caves.sinking);   // (underground or going down: features/caves.js; the cave's walls in front of him are cut down to an edge)
+    if (down) { c = 0; F.open = 0; F.mode = 0; }   // (shut at once: its well and cap would open over the surface the sink took)
+    else if (t % 3 === 0) c = cover(p.x, p.y, p.z || 0, (p.z || 0) + H * .55);
     if (c && c !== F.mode) { if (F.open > 0 && F.mode) F.open = Math.min(F.open, .2); F.mode = c; if (c === 1) out = OUT; }   // (a new shape opens from small)
     if (c === 1) out += (OUT - out) * Math.min(1, dt * 4);
     F.open += ((c ? 1 : 0) - F.open) * Math.min(1, dt * EASE);
