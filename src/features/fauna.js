@@ -455,8 +455,11 @@ export async function create(host) {
     if (a.odd) { a.sx = P.x; a.sy = P.y; if (a.st === 'stare') a.t = 1; else a.odd = false; }   // (touched: an ordinary hare again)
     if ((oddCD -= dt) > 0 || look.seen(a) || (a.odd && Math.hypot(a.x - P.x, a.y - P.y) < 12)) return;
     const vx = P.vx || 0, vy = P.vy || 0, sp = Math.hypot(vx, vy); if (sp < 1) return;
-    const R = a.R, d = rr(16, 22, R), j = rr(-4, 4, R), x = P.x + (vx * d - vy * j) / sp, y = P.y + (vy * d + vx * j) / sp;
-    if (!free(x, y) || host.G.onScreen(x, elev(x, y) + .3, y, 0)) { oddCD = .5; return; }   // (just past the edge of the view)
+    // on your way, just past the edge of the view (however wide the screen): out from 14 m until it's off it
+    const R = a.R, j = rr(-4, 4, R); let x = 0, y = 0, d = 14;
+    for (; d < 60; d += 3) { x = P.x + (vx * d - vy * j) / sp; y = P.y + (vy * d + vx * j) / sp; if (!host.G.onScreen(x, elev(x, y) + .3, y, 0)) break; }
+    d += 2; x = P.x + (vx * d - vy * j) / sp; y = P.y + (vy * d + vx * j) / sp;
+    if (d > 60 || !free(x, y)) { oddCD = .5; return; }
     a.x = x; a.y = y; a.h = 0; a.v = 0; a.gone = false; a.lie = a.lieTo = 0; a.sus = 0; a.odd = true;
     a.hd = Math.atan2(P.y - y, P.x - x); stareAt(a, P.x, P.y, 1);
     oddN++; oddCD = rr(8, 20, R);
