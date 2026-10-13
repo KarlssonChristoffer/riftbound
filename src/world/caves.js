@@ -37,7 +37,7 @@ export const TUNE = {
   crystals: [5, 9],
 };
 const CELL = .25;  // the grid (world/terrain.js CELL: the field's own lattice, so the field reads it exactly)
-const PORTAL = {r: 16};  // m round the slot copy's foot: the cave drawn under the woods too (C.inPortal; as far as the view reaches from the step)
+const PORTAL = {r: 22};  // m round the slot copy's foot: the cave drawn under the woods too (C.inPortal; as far as the view reaches from the step)
 const DRAWN_IN = .35;   // m: the woods' slot is drawn this much wider than walked (layout.js CLEFT_IN's way)
 
 const mix = (seed, a, b = 0) => (hash3(seed | 0, a, b) * 4294967296) | 0;

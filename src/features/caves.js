@@ -59,10 +59,11 @@ export async function create(host) {
     if (Math.abs(target - F.under) < 1e-3) F.under = target;
     const G = host.G; if (!G?.setSink) return;
     const p = host.player; if (c) c.slotAt(p.x, p.y, SQ);
+    if (c && c.inBand(p.x, p.y)) { G.setSink(p.x, p.y, -1e3, c.band); return; }   // (in the cave: nothing past its band, as at the step)
     if (!c || SQ[2] !== 1 || SQ[0] < SINK0) { G.setSink(0, 0, null); return; }
     // (gone by warp - hyst: where a step back up out of the cave lands him, so coming up looks as going down did)
     const k = smooth(clamp((SQ[0] - SINK0) / (c.mouth.warp - c.mouth.hyst - SINK0), 0, 1));
-    G.setSink(p.x, p.y, SINK_REACH * (1 - k) - 8 * k);
+    G.setSink(p.x, p.y, SINK_REACH * (1 - k) - 8 * k, c.band);
   };
   F.biomeChanged = () => { target = 0; F.under = 0; host.G?.setSink?.(0, 0, null); if (F.down) { F.down = false; host.mods.clear('caves'); } };
   return F;

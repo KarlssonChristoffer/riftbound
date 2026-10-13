@@ -1524,7 +1524,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     wOp: {value: new THREE.Vector4(1, 1, 1, 1)}, wTone: {value: new THREE.Vector4(1, 1, 2, 2)}, wLook: {value: new THREE.Vector4(.86, 0, 0, 0)},
     wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
     cut: {value: new THREE.Vector4()}, cutB: {value: new THREE.Vector4()}, cutM: {value: new THREE.Vector4()}, cutP: {value: new THREE.Vector4()},   // the cutaway (render/cut.js; setCut, cutFrame in render())
-    sinkP: {value: new THREE.Vector4()},   // the cave's sink (render/cut.js SINK; setSink)
+    sinkP: {value: new THREE.Vector4()}, sinkK: {value: new THREE.Vector4()},   // the cave's sink (render/cut.js SINK; setSink)
   };
   const raw = (vs, fs, uniforms, extra = {}) => {
     const m = new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
@@ -1789,7 +1789,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // B.autumn, [s1..s4] x ['#hi', '#base', '#shade']): its leaves turn, spray by spray, with U.autumn (core/autumn.js)
   function mesh(geom, obj, matrix, o = {}) {
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
-    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); if (o.keep) gm.material.uniforms.uSinkKeep = {value: 1}; gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
+    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); if (o.keep) gm.material.uniforms.uSinkKeep.value = 1; gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
       uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed, uSprayM: gm.material.uniforms.uSprayM, uSprayFix: gm.material.uniforms.uSprayFix}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1);
@@ -1845,7 +1845,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   }
   const M3 = [0, 1, 2, 4, 5, 6, 8, 9, 10];
   function surface(geom, opts, castShadow = true) {
-    const gm = new THREE.Mesh(geom, surfMat(opts)); if (opts.keep) gm.material.uniforms.uSinkKeep = {value: 1}; gScene.add(gm);
+    const gm = new THREE.Mesh(geom, surfMat(opts)); if (opts.keep) gm.material.uniforms.uSinkKeep.value = 1; gScene.add(gm);
     let sm = null;
     if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); if (STATIC_SHADOW) { sm.layers.enable(2); sm.layers.disable(0); } (STATIC_SHADOW ? sStatic : sScene).add(sm); hDirty = true; staticSoon(0); }
     return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sm.parent?.remove(sm); hDirty = true; staticSoon(0); } gm.material.dispose(); }};
@@ -2355,8 +2355,9 @@ void main() {
   { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
   vgScene.matrixAutoUpdate = false;
   // SINK (render/cut.js; features/caves.js): the surface crumbling away round him as he goes down into the cave. setSink(null): off;
-  // setSink(x, z, reach) (his world x, z; m), each frame it shows. A mesh / surface made with {keep: true} never sinks (the cave's)
-  function setSink(x, z, reach) { if (reach === null) U.sinkP.value.w = 0; else U.sinkP.value.set(x, z, reach, 1); }
+  // setSink(x, z, reach, box) (his world x, z; m; box {x0, y0, x1, y1}: kept), each frame it shows. A mesh / surface made with
+  // {keep: true} never sinks (the cave's)
+  function setSink(x, z, reach, box) { if (reach === null) { U.sinkP.value.w = 0; return; } U.sinkP.value.set(x, z, reach, 1); U.sinkK.value.set(box.x0, box.y0, box.x1, box.y1); }
   let vgFrame = -1;
   // {va, ha (0 = no haze), v: [r, g, b], h: [r, g, b] (0..255)}: shown on the next render (atmos.js sets it from F.hd, after this one)
   function setVignette(o) {
