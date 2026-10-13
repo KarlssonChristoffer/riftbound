@@ -2,6 +2,20 @@
 
 Work decided on but not started. Newest first. Each item says what it is, why, and what it touches.
 
+## Playtest the aim modes (added 2026-10-12)
+
+**Play the four aim-help modes and decide what they become.** The prototype is in (`features/aim.js`, `docs/AIM.md`): manual
+(as before), soft (sticky near foes), lock (a held target), auto (he shoots the nearest foe by himself). Christoffer's
+direction: the game shouldn't feel competitive; aim help could be a player setting AND part of builds (items that make it
+stickier, take it away for more damage, an auto-firing gun), with full manual control always an option.
+
+To try: Esc > Controls > Aim help, or `?aim=soft | lock | auto`, against the yard's dummies and sparring brutes or spawned brutes
+and gunmen (F2). Decide after playing:
+- the default for new players (soft?), and whether soft should also bend bullets a little;
+- which modes or strengths become item / build properties (this feeds the item categories and rarities, started fresh from
+  how the shooting feels: the gun, what you wear, trinkets);
+- the bow (auto doesn't fire it yet), and how lock picks / switches targets with a crowd.
+
 ## Ranger v2 (added 2026-10-08)
 
 **The current Ranger (v1) is deprecated and stays deprecated.** It is a sprite atlas, not a live 3D body: the loadouts

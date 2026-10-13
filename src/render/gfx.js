@@ -1478,11 +1478,12 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const SMS = 4096, SUN_STEP = .15 * DEG, STILL_FRAMES = 45;
   // the static map's box (m): the world + its skirt while that is at most SFIT m a side (~50 texels / m: the Proving Grounds'
   // 74 x 42 m); a bigger world gets a box 2 SFOLLOW m a side round the view instead, re-centred on an SSTEP m lattice as the view
-  // moves on (a re-render each time; the view shows at most ~40 x 20 m, so the box holds it plus the long shadows cast into
-  // it: ~43 texels / m), its texel grid kept still in light space so the shadows don't shimmer at a re-centre
+  // moves on (a re-render each time; a 16:9 view shows ~40 x 20 m, so the box holds it plus the long shadows cast into
+  // it: ~43 texels / m), its texel grid kept still in light space so the shadows don't shimmer at a re-centre. A wider view
+  // (an ultrawide window zoomed out: ~56 x 26 m) widens the box to hold it (sReach: whole SSTEPs past the view's footprint)
   const SWORLD = [world.x0 - 6, world.x1 + 6, -4, 9, world.y0 - 6, world.y1 + 6], SFIT = 100, SFOLLOW = 32, SSTEP = 8;
   const sFollow = SWORLD[1] - SWORLD[0] > SFIT || SWORLD[5] - SWORLD[4] > SFIT, SBOX = SWORLD.slice();
-  let sCx = NaN, sCz = NaN;   // the follow box's centre (its lattice point)
+  let sCx = NaN, sCz = NaN, sHx = SFOLLOW, sHz = SFOLLOW;   // the follow box's centre (its lattice point) and half-size (m)
   const shadowS = new THREE.WebGLRenderTarget(SMS, SMS, {minFilter: near, magFilter: near, depthBuffer: true, format: THREE.RedFormat,
     depthTexture: new THREE.DepthTexture(SMS, SMS, THREE.UnsignedIntType)});
   const sunCamS = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2); sunCamS.layers.set(2);
@@ -2517,14 +2518,48 @@ void main() {
   // sun crosses the north: walls toned lit, their shadows cast at the camera
   const ONE_SUN = flags.get('onesun') !== '0', _ld = new THREE.Vector3();
   const _sl = new THREE.Vector3(), _sr = new THREE.Vector3(), _su = new THREE.Vector3();
+  // THE VIEW'S REACH: both shadow boxes hold what the view shows. The per-frame map is SHADOW_E m each way round the target
+  // (plenty for a 16:9 view), but an ultrawide window zoomed out shows ~56 x 26 m: past 22 m to the sides the swaying trees'
+  // shadows (the per-frame map's) stopped on a straight line down the screen, and the static box (SFOLLOW) ran out next.
+  // footprint(): the view's 4 corner rays where they cross FP_H m below / above the target (the ground under it, the crowns
+  // over it), into fp (world xyz) and fpX / fpZ (their farthest from the target along the world's x / z). setSun widens the
+  // per-frame box to hold them in light space (sE: whole 4 m, never below SHADOW_E, so a 16:9 view keeps its map as it was);
+  // the render's follow step widens the static box. Shrinks wait for a step's worth of slack (a turning view doesn't flip
+  // the texel size back and forth). The cinema camera keeps the defaults (its perspective reaches the horizon)
+  const FP_H = [-6, 8], FP_PAD = 1.5, fp = new Float32Array(24), _fa = new THREE.Vector3(), _fb = new THREE.Vector3();
+  let fpX = 0, fpZ = 0, sE = SHADOW_E;
+  function footprint() {
+    const T = view.T; fpX = fpZ = 0;
+    if (cine) return false;
+    for (let i = 0; i < 4; i++) {
+      const x = i & 1 ? 1 : -1, y = i & 2 ? 1 : -1;
+      _fa.set(x, y, -1).applyMatrix4(camera.projectionMatrixInverse).applyMatrix4(camera.matrixWorld);
+      _fb.set(x, y, 1).applyMatrix4(camera.projectionMatrixInverse).applyMatrix4(camera.matrixWorld);
+      const dy = _fb.y - _fa.y;
+      for (let k = 0; k < 2; k++) {
+        const h = T.y + FP_H[k], t = Math.abs(dy) > 1e-6 ? (h - _fa.y) / dy : 0, j = (i * 2 + k) * 3;
+        fp[j] = _fa.x + (_fb.x - _fa.x) * t; fp[j + 1] = h; fp[j + 2] = _fa.z + (_fb.z - _fa.z) * t;
+        fpX = Math.max(fpX, Math.abs(fp[j] - T.x)); fpZ = Math.max(fpZ, Math.abs(fp[j + 2] - T.z));
+      }
+    }
+    return true;
+  }
+  // a box's half-size for a reach r: whole steps st past it, at least lo; the current one h kept while it still holds r with
+  // less than a step to spare (the shrink's slack)
+  const reach = (r, h, lo, st) => { const n = Math.max(lo, Math.ceil(r / st) * st); return n > h || n < h - st ? n : h; };
   function setSun(dir, sdir = dir) {
     compU.uSunDir.value.copy(dir); sunNow.copy(sdir).normalize();
     const step = !(sunNow.dot(sCast) >= Math.cos(SUN_STEP));
     if (step) sCast.copy(sunNow);   // (the first call: sCast is 0)
     if (ONE_SUN && (step || !(_ld.copy(dir).normalize().dot(U.lArt.value) >= Math.cos(SUN_STEP)))) U.lArt.value.copy(dir).normalize();
     U.sunYaw.value = Math.atan2(dir.x, dir.z);   // cards turned so their face points at the sun (normal = (sin, 0, cos))
-    const T = view.T, texel = 2 * SHADOW_E / SM;
+    const T = view.T;
     sunCam.position.copy(T).addScaledVector(sCast, 100); sunCam.lookAt(T); sunCam.updateMatrixWorld(true);
+    let need = 0;   // the view's footprint in light space round the target (the light camera looks at it: x, y from 0)
+    if (footprint()) for (let j = 0; j < 24; j += 3) { const q = _sl.set(fp[j], fp[j + 1], fp[j + 2]).applyMatrix4(sunCam.matrixWorldInverse); need = Math.max(need, Math.abs(q.x), Math.abs(q.y)); }
+    const e = reach(need + FP_PAD, sE, SHADOW_E, 4);
+    if (e !== sE) { sE = e; sunCam.left = sunCam.bottom = -e; sunCam.right = sunCam.top = e; sunCam.updateProjectionMatrix(); }
+    const texel = 2 * sE / SM;
     // snap: move the light camera so the WORLD's origin sits on a texel corner in light space: the texel grid stays put in the
     // world as the view moves (no shadow crawl while walking; render/godrays.js samples it at fixed world points). (It took the
     // target, which always sits at the light camera's centre: a no-op, and the map slid by fractions of a texel with the view)
@@ -2581,8 +2616,9 @@ void main() {
     for (const m of sExtra) m.visible = m.userData.frame === frameNo;   // (extra casters: before the shadow passes)
     if (compU.uShadowA.value > 0 && compU.uShadowOn.value > .5) {
       if (STATIC_SHADOW && sFollow) {   // a big world: the static box follows the view, on its lattice
-        const cx = Math.round(view.T.x / SSTEP) * SSTEP, cz = Math.round(view.T.z / SSTEP) * SSTEP;
-        if (cx !== sCx || cz !== sCz) { sCx = cx; sCz = cz; SBOX[0] = cx - SFOLLOW; SBOX[1] = cx + SFOLLOW; SBOX[4] = cz - SFOLLOW; SBOX[5] = cz + SFOLLOW; sDue = Math.min(sDue, frameNo); }
+        const cx = Math.round(view.T.x / SSTEP) * SSTEP, cz = Math.round(view.T.z / SSTEP) * SSTEP;   // (the box holds the view's footprint: setSun's)
+        const hx = reach(fpX + SSTEP / 2 + FP_PAD, sHx, SFOLLOW, SSTEP), hz = reach(fpZ + SSTEP / 2 + FP_PAD, sHz, SFOLLOW, SSTEP);
+        if (cx !== sCx || cz !== sCz || hx !== sHx || hz !== sHz) { sCx = cx; sCz = cz; sHx = hx; sHz = hz; SBOX[0] = cx - hx; SBOX[1] = cx + hx; SBOX[4] = cz - hz; SBOX[5] = cz + hz; sDue = Math.min(sDue, frameNo); }
       }
       if (STATIC_SHADOW && (frameNo >= sDue || !sDir.equals(sCast))) {
         for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); sScene.remove(S.sm); sStatic.add(S.sm); movers.delete(S); }

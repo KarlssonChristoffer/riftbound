@@ -26,6 +26,8 @@ no forest).
   its banks, nothing too steep. Only existing kinds and art (trees3d.js species, flora3d.js plants, the prop kit's rocks).
 - **Trees are solid** at their trunk (collision phase 5: world/collide.js walks a tree as .6 of its radius) and each has a stable
   id, `fid` (`t<cx>.<cy>.<n>`): the same tree on every machine for the same seed. Co-op fells by it.
+- **At night** the forest has a second life (docs/UNCANNY.md, 2026-10-12): a handful of trees and boulders walk at dusk and slide
+  home at dawn, a heron and an elk that are wrong, three secrets.
 - **Painted ground** (ruins: biomes.js forestRuins): the floor lit by its real slopes like the West Downs', grass in the clearings,
   earth and leaf litter under the crowns (a canopy map from where the trees stand), moss in drifts and on the north side of the
   trunks, roots round each trunk, twigs; the streams and the lake with banks, a damp lush band, the spring in a ring of stones.

@@ -185,6 +185,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     pixelBow: () => !optOf().hdBow,   // J: the bowstring + nocked / flying arrows at art pixels (default) or the HD overlay
     onShoot: a => { const [x, y] = toWorld(a.x, a.y), [vx, vy] = toWorld(a.vx, a.vy); proj.spawn({...a, x, y, vx, vy}); },
     aimTarget: () => { const t = hoverTarget(); if (!t) return null; const v = toView(t.x, t.y); return {x: v[0], y: v[1], h: t.h, target: t.target}; },
+    autoFire: () => { for (const f of features) if (f.autoFire?.()) return true; return false; },   // (an aim mode that shoots for you: features/aim.js)
     nearInteract: () => nearProp(),
     onInteract: p => features.some(f => f.interact?.(p)),
     dust: (fx, fy, side, big) => {   // a foot contact at view-frame world px -> world metres

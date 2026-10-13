@@ -42,6 +42,12 @@ and the composite, render/flora.js). The first 32 families pack exactly as befor
 | anthill | a dome of needles and twigs (not wanted in the forest) | r, h, twigs |
 | blueberry | a patch of knee-high shrubs, berries | n, spread, berries |
 | watcher | weird: a pale toadstool with one eye under its cap (eye 0: the body alone; the creature below rolls its own eye) | h, eye, bend |
+| heron (+ heron_head) | weird: a grey heron standing still; its head is its own piece so it can turn all the way round (shade 1: all dark, its shadow) | s, shade |
+| elk_body, elk_leg, elk_neck | the elk in parts (body, a 1 m leg scaled to length, neck + head + antlers) so the uncanny forest can stretch it at night | s, antler |
+| glowring | a fairy ring of pale mushrooms whose caps glow (mesh.setGlow on `paleglow`) | r, n, lift |
+| ringstones | the quiet stones: low lichen-grey stones in a ring | r, n, lift |
+
+The last four are the uncanny forest's (docs/UNCANNY.md).
 
 ## The watcher (features/watcher.js)
 

@@ -106,6 +106,8 @@ export const EVENTS = {
   'equip.break':        ['features/equip/sim.js', 'x, y, gadget (a scarecrow falls apart; an unsprung trap rusts away)', 'equip (view), audio'],
   'equip.latch':        ['features/equip/sim.js', 'x, y, h, who, prop (the grappling hook bites: an enemy, a prop, else the ground)', 'equip (view), audio'],
   'equip.pick':         ['features/equip/sim.js', 'x, y, gadget, bought (you take a gadget: a pickup, or a stage cache for gold)', 'equip (view), audio'],
+  // gear (features/gear.js, docs/GEAR.md): what the player wears changed (offline at once; in co-op when the server took it)
+  'gear.wear':          ['features/gear.js',      'x, y, ids (the set worn now, content/gear.js SLOTS order), kg, armor, speed (its numbers: setStats)', '(none yet)'],
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
@@ -171,6 +173,10 @@ export const EVENTS = {
   'trick.reset':        ['features/trickshot/sim.js', 'x, y (the fence): the bottles and the stacked cans are set up again', 'trickshot (view), audio'],
   'trick.clear':        ['features/trickshot/sim.js', 'x, y (the fence), t (s: the run against the clock), shots, best (a new best time): the fence is cleared', 'trickshot (view: the banner), audio'],
   // the bells and ricochet plates (features/bells/sim.js: the sandbox, ?bells=0 off); who = its prop (a bell, a plate's)
+  // the uncanny forest (features/uncanny.js, docs/UNCANNY.md)
+  'uncanny.hum':        ['features/uncanny.js',   'x, y, id (a secret opened there: heron | stones | marks)', 'audio'],
+  'uncanny.slide':      ['features/uncanny.js',   'x, y, kind (tree | rock): one of the night\'s walkers near the player starts its slide (at dusk, or home at dawn)', 'audio'],
+  'uncanny.knock':      ['features/uncanny.js',   'x, y, vx, vy (m/s), drop (the item id they lost, or null): the night elk knocked the player down', '(none yet)'],
   'bells.ring':         ['features/bells/sim.js', 'x, y, h (the bell\'s middle), k (0..1: how hard), note (0..6: its step on the scale, sim TUNE.notes), who (the bell), by (bullet | arrow | blast | melee | can), dx, dy (unit: the blow\'s way; 0 without one)', 'bells (view: the swing, the clapper), audio (its note)'],
   'bells.ping':         ['features/bells/sim.js', 'x, y, h (where it was hit), k (0..1), who (the plate), by (bullet | arrow | blast): a steel plate rung', 'bells (view: a glint), audio (the plate\'s ping)'],
   'bells.chain':        ['features/bells/sim.js', 'x, y, h (its last glance), bells (rung by the one shot / blast), plates, n (glances in all), by (bullet | arrow | blast), best (a new best of the session), rec (the best so far)', 'bells (view: the floating text)'],

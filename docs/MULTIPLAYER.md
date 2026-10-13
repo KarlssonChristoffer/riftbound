@@ -8,7 +8,8 @@ Proving Grounds' crates, brutes, fires, gunfire, the weather) still runs per cli
 ## Run it
 
 ```
-node server/server.mjs                     (random seed; --seed 1234 for a fixed forest; --port 8320 is the default)
+node server/server.mjs                     (random seed; --seed 1234 for a fixed forest; --port 8320 is the default;
+                                            --hour 22 starts at night, --daymin 20 real minutes a day, --nshift 1)
 ```
 
 It prints a URL: open `http://localhost:8320/src/?mp=1` in two windows (or two machines on the LAN:
@@ -34,6 +35,8 @@ In the menu's Sandbox tab, "Co-op: fell the nearest forest tree (test)" asks the
                    ◀── snap 20 Hz (everyone's) ────────────   (a fix if it was too fast)
                    ── act {fell, id} ─────────────────────▶   checks it (exists, in reach, not gone): world[id]
                    ◀── world {id, felled} (to all) ────────   late joiners get the whole world in their welcome
+ features/gear.js  ── gear {g: [ids]} ─────────────────────▶  checks the set (content/gear.js), keeps it as the player's
+                   ◀── gear {id, g} (to all) ──────────────   late joiners get everyone's in their welcome (docs/GEAR.md)
  features/coop/look.js  the others drawn live, interpolated 110 ms behind the newest snapshot
 ```
 
@@ -53,6 +56,13 @@ In the menu's Sandbox tab, "Co-op: fell the nearest forest tree (test)" asks the
   (view/livehero.js DRAWN: the aim twist, the lean, the combat stances, a ragdoll), which the receiver shows bone for bone on the
   same model (view/livebody.js through render/rigmesh.js, as the desert's gunmen). A player in a sprite loadout sends only his
   frame's name; he is drawn as the gunslinger playing that frame. His name floats over his head in his colour.
+- **The clock and the uncanny forest** (2026-10-12, protocol 2; docs/UNCANNY.md). The server owns the world's clock (`--hour`,
+  `--daymin`): it sends `clock {t, h, rate}` in the welcome and on every change, and each client's clock (sim/env.js) follows it
+  (put right when it drifts more than a game minute; not saved as the page's own). It also owns the forest's secrets (their
+  states and who opened them: `sec`, all of them in the welcome) and the night elk (in every snapshot as `c`; its knocks as
+  `ev`). Clients ask with `act secret` (a secret whose condition holds for them) and, for tests, `act time` (`?time=night`
+  asks it). Which trees walk at night needs nothing sent: it comes from the seed and the clock. The uncanny forest is off unless the server
+  runs with `--uncanny` (the welcome's `unc` is then set and every client turns it on; without it, null and off).
 - **Sim vs view.** Shared-world changes and fixes are applied in the feature's `update` (a sim step); the others' bodies are view.
   Without `?mp` the feature is an empty shell: the game, golden, smoke and simview are unchanged.
 
@@ -68,7 +78,8 @@ In the menu's Sandbox tab, "Co-op: fell the nearest forest tree (test)" asks the
 | `src/net/client.js` | the client: hello / welcome, the peers' snapshot rings, interpolation, the clock offset |
 | `src/core/session.js` | `?mp` / `?seed`: which world, settled before the world is built (a top-level await) |
 | `src/features/coop.js` | the feature: sends the player, applies the world's changes, `act()`, HUD, menu row |
-| `src/features/coop/look.js` | the others: live bodies, name tags, the lasso's rope |
+| `src/features/coop/look.js` | the others: live bodies (dressed in their gear), name tags, the lasso's rope |
+| `src/features/gear.js` | what you wear: asks the server in co-op, wears its answer (docs/GEAR.md) |
 
 ## Tested (2026-10-11, headless)
 
@@ -82,7 +93,7 @@ pass without `?mp`. Two visible windows on one machine were not tried (the proje
 - Collisions between players (you walk through each other), and players' footsteps and gunshots for the others (no sound of them).
 - Shared combat, props and enemies: crates pushed, barrels exploding, brutes and gunmen are each client's own. The lasso shows on
   the others, but what it catches is only in its thrower's world.
-- The weather and the clock are each client's own (they start the same way but drift).
+- The weather is each client's own (it starts the same way but drifts). The clock is the server's (see above).
 - A hidden tab (or a minimized browser) stops sending: its player stands still for the others. Electron can keep it running
   (`backgroundThrottling: false`).
 - Reconnecting: a dropped connection shows "disconnected"; reload to rejoin (a new id).

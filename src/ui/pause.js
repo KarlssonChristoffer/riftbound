@@ -33,7 +33,9 @@ const CLAIM = {
   atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd'),
     'Weather (K)': {tab: 'dev', group: 'Nature', label: 'Air particles + ground fog', key: 'K'}},   // (not the weather: World > Weather)
   cinema: {'': {tab: 'controls', group: 'Camera', label: 'Cinematic camera when idle', id: 'cinema', keep: 'cinema'}},
+  aim: {Aim: {tab: 'controls', group: 'Aim', label: 'Aim help', id: 'aim', keep: 'aim'}},   // (features/aim.js: manual / soft / lock / auto)
   blood: {'': gfx('Effects', 'Blood', 'blood', 'blood')},   // (features/blood.js: on by default; ?blood=0)
+  uncanny: {'': {tab: 'game', group: 'World', label: 'Uncanny forest', id: 'uncanny', keep: 'uncanny'}},   // (features/uncanny.js: off by default; ?uncanny=1)
   audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
     'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'},
     'Gun sounds': {tab: 'audio', group: 'Sound', label: 'Gun sounds'}},   // (the western-movie flavor: features/audio.js, remembered there)
@@ -44,16 +46,16 @@ const DEV_GROUP = {
   wind: 'Nature', windlines: 'Nature', litter: 'Nature', grass: 'Nature', riverside: 'Nature', wildlife: 'Nature', atmos: 'Nature',
   weather: 'Nature', dust: 'Nature', tumbleweed: 'Nature', mist: 'Nature', airfx: 'Nature',
   lights: 'Effects', flow: 'Effects', contact: 'Effects', gunfx: 'Effects', depth: 'Effects', blood: 'Effects',
-  foes: 'World', anomaly: 'World',
+  foes: 'World', anomaly: 'World', uncanny: 'World',
   brutes3d: 'Renderer',
   affixes: 'Experiments', equip: 'Experiments', omens: 'Experiments', shrines: 'Experiments', trickshot: 'Experiments', bells: 'Experiments',
-  cheats: 'Tools', gunfeel: 'Tools',
+  cheats: 'Tools', gunfeel: 'Tools', wardrobe: 'Tools',
 };
 // THE FEATURES' ROWS (F.menu): the game's own (start / abandon a run, back to title) and the player's views (the cinematic
 // camera) stay in Game; every other feature's are test actions for the sandbox: the Sandbox tab, one page per group here
 // (a feature not listed: Other)
-const GAME_ROWS = ['cinema', 'game'];   // (in this order, after Resume and Photo mode: back to title stays last)
-const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places'};
+const GAME_ROWS = ['cinema', 'wardrobe', 'game'];   // (in this order, after Resume and Photo mode: back to title stays last; the wardrobe: dev mode)
+const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places', uncanny: 'Places'};
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
 const LOW_OFF = ['windlines', 'wildlife', 'depth', 'grass', 'litter', 'dust', 'tumbleweed', 'mist', 'airfx'];

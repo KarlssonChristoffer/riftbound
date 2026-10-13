@@ -8,10 +8,17 @@
 //                there, the player in reach) and tells everyone, a late joiner included: then (and only then) each client
 //                makes it so. Felling a tree today (act('fell', tree)); the woodcutting slice calls the same
 //   checks       the server refuses a move faster than a body can go (protocol.js MOVE) and puts this client back (fix)
+//   the clock    the server owns the world's clock: the page's (sim/env.js) follows it (set when it comes, put right when it
+//                drifts more than a game minute) and isn't saved as the page's own while borrowed. A ?time= asks the server
+//   the uncanny  the forest's secrets and the night elk are the server's too (docs/UNCANNY.md): their messages (sec, ev) are
+//                handed on in F.mail for features/uncanny.js (refilled each step: it reads them in its own update, after this)
+//   gear         what each player wears is the server's to say (docs/GEAR.md): features/gear.js asks (wear(ids)), the
+//                server checks the set and tells everyone; yours comes back here (F.gear: {ver, ids}), the others' look.js dresses
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
-//   the equipment's lasso (features/equip/lasso.js L), host.entities (the forest's trees by their fid).
+//   the equipment's lasso (features/equip/lasso.js L), host.entities (the forest's trees by their fid). WRITES: host.env's clock
+//   (setT, setDayMinutes, borrowed: its API for this).
 // EMITS: nothing. BUDGET: update ~0 (a queue); frame: a send 20 times a second (~.02 ms: a pose packed only when it changed),
 //   the look's.
 import {SESSION} from '../core/session.js';
@@ -28,7 +35,16 @@ export async function create(host) {
   let name = flags.get('name') || ''; try { name ||= localStorage.getItem('rb.coop.name') || ''; } catch {}
   const C = createNetClient({transport: wsTransport(SESSION.ws), name});
   const look = createPeerLook(host, C);
-  const msgs = [], WH = Math.PI * 2;
+  const msgs = [], mail = [], WH = Math.PI * 2;
+  // THE CLOCK: the server's last word {t: its ms, h, rate}; the page's env follows it
+  const clk = {t: 0, h: NaN, rate: 0}, env = host.env;
+  let clkCheck = 0, askedTime = false;
+  const clockNow = () => clk.h + (C.serverNow() - clk.t) * clk.rate;
+  function follow(force) {
+    if (!env || !isFinite(clk.h)) return;
+    const h = clockNow();
+    if (force || Math.abs(h - env.t) > 1 / 60) env.setT(h);
+  }
   // the forest's trees by id (world/forest.js gives each its fid): a live list, a map made on a change
   const trees = host.entities.query('coop.trees', p => typeof p.fid === 'string');
   let byFid = null, byVer = -1;
@@ -37,6 +53,7 @@ export async function create(host) {
     const p = treeOf(id); if (!p) return;
     host.world.removeItem?.(p); host.entities.remove(p);
   }
+  const gear = {ver: 0, ids: null};   // your set as the server last took it (features/gear.js wears it)
   let note = '', noteT = 0;
   const BYS = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};   // (where the one who felled a tree is: its fall's way)
   const say = (t, s = 4) => { note = t; noteT = s; };
@@ -69,9 +86,12 @@ export async function create(host) {
   }
   const same = (a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 2) return false; return true; };
 
-  // the woodcutting slice (and the test row below) asks for a tree to come down: true when asked
+  // the woodcutting slice (and the test row below) asks for a tree to come down: true when asked. features/uncanny.js asks
+  // for a secret (p: its id) when its condition holds; 'time' (p: dawn | day | dusk | night) sets the server's clock (dev)
   function act(a, p) {
-    if (a !== 'fell' || !p || typeof p.fid !== 'string' || C.status !== 'online') return false;
+    if (C.status !== 'online') return false;
+    if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
+    if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }
   function nearestTree() {
@@ -81,16 +101,29 @@ export async function create(host) {
   }
 
   const F = {
-    name: 'coop', label: 'Co-op', on: true, net: C, look, act, get online() { return C.status === 'online'; },
-    update() {
+    name: 'coop', label: 'Co-op', on: true, net: C, look, act, gear,
+    get online() { return C.status === 'online'; },
+    wear(ids) { if (C.status !== 'online') return false; C.wear(ids); return true; },   // (features/gear.js: ask for a set)
+    mail, clockNow,
+    update(dt) {
+      mail.length = 0;
+      if ((clkCheck -= dt) <= 0) { clkCheck = 2; follow(false); }
       C.drain(msgs);
       for (const m of msgs) {
         if (m.k === 'world' && m.s === 'felled') {   // the woodcutting fells it (its fall, stump, logs), else it just goes
           const p = treeOf(m.id), by = C.peers.get(m.by), o = by ? C.sample(by, BYS) : null;
           if (!p || !host.feature('woodcut')?.fellShared?.(p, m.by === C.id, !!m.late, o?.x, o?.y)) fell(m.id);
         }
+        else if (m.k === 'clock') {
+          clk.t = m.t; clk.h = m.h; clk.rate = m.rate;
+          if (env) { env.borrowed = true; env.setDayMinutes(m.rate > 0 ? 24 / (m.rate * 60000) : 0); follow(true); }
+          const want = flags.get('time');   // (dev: a ?time= asks the server's clock for it, once)
+          if (want && !askedTime) { askedTime = true; C.act('time', want); }
+        }
+        else if (m.k === 'sec' || m.k === 'ev') mail.push(m);
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
+        else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
       }
       msgs.length = 0;
       for (const q of C.joined) say(`${q.name} joined`); C.joined.length = 0;

@@ -5,6 +5,9 @@
 //            pose's bones (aim twist, lean, flow, ragdoll and all: protocol.js packPose), which this body shows as they are, in
 //            its own bone order (by name); a peer without one (a sprite loadout) shows the named frame it plays, if the model has
 //            it. Until a model has loaded: a stick figure in the peer's colour
+//   gear     a peer's body is its model DRESSED in the gear it wears (the server's word: q.gear; view/dress.js, docs/GEAR.md):
+//            a model per look (rig + set), shared by the peers who look alike; a look nobody wears any more is restyled into
+//            the next one needed (rigmesh can't remove a model). Made when a peer's set changes (a few ms), never per frame
 //   name     its name over its head in its colour (HD overlay, hung on the world like the prompts)
 //   lasso    the rope from its hand to the loop (spinning overhead, flying, lying, round what it holds, on a swing's anchor)
 // OWNS: the rig, the models, the bodies. READS: the net client (peers, sample), G, host.yaw.
@@ -14,28 +17,42 @@ import {createRigMesh} from '../../render/rigmesh.js';
 import {liveModel, createLiveBody} from '../../view/livebody.js';
 import {MODELS} from '../../view/livehero.js';
 import {unpackPose} from '../../net/protocol.js';
+import {dress} from '../../view/dress.js';
+import {gearById, setKey} from '../../content/gear.js';
 
 const SLOTS = 8;
 export function createPeerLook(host, C) {
   const G = host.G;
   let rig = null, warm = null;
-  const models = new Map();   // rig name -> LM | null (failed) | Promise
+  const base = new Map();     // rig name -> [J, bin] (the export's) | null (failed) | Promise
+  const models = new Map();   // look ('<rig>|<gear key>') -> LM
+  const rigOf = new Map();    // LM -> its rig name (a look's model is only restyled into another look of the same rig)
   const views = new Map();    // peer id -> {LM, body, W, idx, wv, wn, key, tmp}
   const slotUsed = new Uint8Array(SLOTS);
   const S = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};
 
-  function model(name) {
-    const n = name in MODELS ? name : 'gunslinger';
-    if (models.has(n)) { const m = models.get(n); return m instanceof Promise ? null : m; }
-    rig ??= createRigMesh(G, {slots: SLOTS});
-    const url = MODELS[n];
-    models.set(n, Promise.all([fetch(url + 'model.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }), fetch(url + 'model.bin').then(r => r.arrayBuffer())])
-      .then(([J, bin]) => { const LM = liveModel(rig, J, bin); models.set(n, LM); warm ??= rig.warm().catch(() => {}); return LM; })
-      .catch(e => { console.warn('coop: the', n, 'model failed to load (stick figures)', e); models.set(n, null); return null; }));
-    return null;
+  function model(name, gear) {
+    const n = name in MODELS ? name : 'gunslinger', key = n + '|' + setKey(gear);
+    const have = models.get(key); if (have) return have;
+    const b = base.get(n);
+    if (b === undefined) {
+      rig ??= createRigMesh(G, {slots: SLOTS});
+      const url = MODELS[n];
+      base.set(n, Promise.all([fetch(url + 'model.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }), fetch(url + 'model.bin').then(r => r.arrayBuffer())])
+        .then(JB => { base.set(n, JB); })
+        .catch(e => { console.warn('coop: the', n, 'model failed to load (stick figures)', e); base.set(n, null); }));
+      return null;
+    }
+    if (!Array.isArray(b)) return null;   // (loading, or failed)
+    const [J, bin] = b, pieces = gear.map(gearById).filter(Boolean);
+    const D = pieces.length ? dress(J, bin, pieces) : {J, bin};
+    for (const [k, LM] of models) if (rigOf.get(LM) === n && !worn(LM)) { models.delete(k); rig.restyle(LM.model, D.J, D.bin); models.set(key, LM); return LM; }
+    const LM = liveModel(rig, D.J, D.bin); models.set(key, LM); rigOf.set(LM, n); warm ??= rig.warm().catch(() => {});
+    return LM;
   }
+  function worn(LM) { for (const v of views.values()) if (v.LM === LM) return true; return false; }
   function viewOf(q) {
-    let v = views.get(q.id); const LM = model(q.rig);
+    let v = views.get(q.id); const LM = v && v.gv === q.gv && v.rig === q.rig ? v.LM : model(q.rig, q.gear);
     if (!LM) return v?.LM ? v : null;
     if (!v || v.LM !== LM) {
       if (v?.body) slotUsed[v.body.slot] = 0;
@@ -43,9 +60,10 @@ export function createPeerLook(host, C) {
       if (slot < 0) return null;   // (more peers than slots: the rest as stick figures)
       slotUsed[slot] = 1;
       const W = new Float64Array(LM.NB * 7), idle = LM.poseOf('idle.0'); if (idle) W.set(idle.w);
-      v = {LM, body: createLiveBody(LM, rig, slot, G), W, idx: null, wn: null, wv: -1, key: 1, tmp: new Float64Array(64 * 7)};
+      v = {LM, body: createLiveBody(LM, rig, slot, G), W, idx: null, wn: null, wv: -1, key: 1, tmp: new Float64Array(64 * 7), gv: q.gv, rig: q.rig};
       views.set(q.id, v);
     }
+    v.gv = q.gv; v.rig = q.rig;
     return v;
   }
   // the peer's sent pose into the body's bone order (bones it didn't send keep the idle's)
