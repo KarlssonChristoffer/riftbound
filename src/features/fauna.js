@@ -12,7 +12,7 @@
 // knows of (co-op's peers too), so a friend sprinting through a glade scatters the deer on your screen as well. Moment to moment
 // they can differ a little between screens; if animals ever matter to play (hunting, taming), they move to the server.
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle, menu, dbg(). ?fauna=0 starts it off.
-// OWNS: its animals' state, their meshes (look.js). READS: world/layout.js FOREST (the plan), host.player, co-op's peers
+// OWNS: its animals' state, their meshes (look.js). READS: world/layout.js FOREST (the plan), host.player, host.world.cave (keeps out of its mouth), co-op's peers
 //   (host.feature('coop').net), host.env (hour, season, snow), host.elev / inStream, world.js steep, host.entities.near (what
 //   stands where), host.events (gunshots, hits, breaks: they scare).
 // EMITS (core/events.js; the audio feature plays them): wildlife.wings (a raven taking off), wildlife.birds_scatter (a capercaillie's burst), wildlife.caw (the ravens),
@@ -50,9 +50,17 @@ export async function create(host) {
   if (!PLAN) return Object.assign(F, {on: false, dbg: () => ({off: 'no forest'})});
   const elev = (x, y) => host.elev(x, y);
   const NEAR = [];
+  // the cave's mouth (world/caves.js, when the forest has one): its slot and a margin round it, and the cave's band, are no animal's
+  // ground (a slot walled on three sides traps anything that flees into it)
+  const CAVE_KEEP = 2.5;
+  function inCave(x, y) {
+    const c = host.world?.cave; if (!c) return false;
+    const m = c.mouth, dx = x - m.x, dy = y - m.y, s = dx * m.ux + dy * m.uy, q = -dx * m.uy + dy * m.ux;
+    return (s > -CAVE_KEEP && s < m.len + CAVE_KEEP && Math.abs(q) < m.w / 2 + CAVE_KEEP) || !!c.inBand?.(x, y);
+  }
   // can a ground animal stand here: not in deep water, not up a cliff, not in a trunk, a rock or a wall
   function free(x, y) {
-    if (y > -1.5 || host.inStream(x, y) || steep(x, y)) return false;
+    if (y > -1.5 || host.inStream(x, y) || steep(x, y) || inCave(x, y)) return false;
     for (const p of host.entities.near(x, y, .8, NEAR)) {
       if (p.gone || !(p.r > .05)) continue;
       if (p.rect) { if (x > p.rect[0] - .1 && x < p.rect[2] + .1 && y > p.rect[1] - .1 && y < p.rect[3] + .1) return false; }
@@ -154,7 +162,7 @@ export async function create(host) {
     for (let k = 0; k < 10; k++) {
       const ang = ax === undefined ? R() * TAU : base + (R() - .5) * (1.1 + k * .25), d = minR + R() * (r - minR);
       const sx = x + Math.cos(ang) * d, sy = y + Math.sin(ang) * d;
-      if (free(sx, sy) && free((x + sx) / 2, (y + sy) / 2)) { SPOT.x = sx; SPOT.y = sy; return SPOT; }
+      if (free(sx, sy) && free(x + (sx - x) * .33, y + (sy - y) * .33) && free(x + (sx - x) * .67, y + (sy - y) * .67)) { SPOT.x = sx; SPOT.y = sy; return SPOT; }   // (and the way there)
     }
     return null;
   }
