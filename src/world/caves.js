@@ -274,10 +274,12 @@ function contour(Gd) {
     const i = Math.round((mx - x0) / cell), j = Math.round((my - y0) / cell); return v(i, j) < 0; };
   let good = 0; for (let k = 0; k < Math.min(segs.length, 200); k++) if (okSide(segs[k])) good++;
   if (good < Math.min(segs.length, 200) / 2) for (const s of segs) s.reverse();
-  const from = new Map(); for (const s of segs) from.set(key(s[0]), s);
+  const from = new Map(), to = new Map(); for (const s of segs) { from.set(key(s[0]), s); to.set(key(s[1]), s); }
   const loops = [], used = new Set();
-  for (const s of segs) {
-    if (used.has(s)) continue;
+  for (const s0 of segs) {
+    if (used.has(s0)) continue;
+    // (back up to where its line begins first: the scan meets a line running against it from its far end, one segment at a time)
+    let s = s0, p, n = segs.length; while (n-- > 0 && (p = to.get(key(s[0]))) && !used.has(p) && p !== s0) s = p;   // (n: a loop that doesn't come back round to s0)
     const L = [s[0]]; let cur = s;
     while (cur && !used.has(cur)) { used.add(cur); L.push(cur[1]); cur = from.get(key(cur[1])); }
     if (L.length < 6) continue;
