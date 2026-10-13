@@ -40,7 +40,7 @@ export function createHeldTool(rig, model, J, ramp6) {
   const U = unit(sub(up, F.map(x => x * dot(up, F))));
   const famOf = name => J.families.find(f => f.name === name);
   const fams = [{name: 'toolwood', ramp: ramp6(ASH)}, famOf('iron') || {name: 'tooliron', ramp: ramp6(['#9a9aa2', '#6e6e78', '#51515a', '#2a2a30'])}, {name: 'toolsteel', ramp: ramp6(STEEL)}];
-  const MAX = 6 * 36, part = J.parts.length + 9;
+  const MAX = 6 * 36, part = 250;   // (a part of its own: below the cloths' 255 down, above the ones view/dress.js adds after the model's)
   const D = rig.attach(model, MAX, fams);
 
   // ---------------------------------------------------------------- the shape, in its own frame (made once per tool + hold)

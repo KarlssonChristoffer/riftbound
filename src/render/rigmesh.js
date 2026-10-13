@@ -22,12 +22,14 @@
 //   G-buffer pixel type pass B writes: 0 / absent = 7, the lit card; 4 = the character, as the player's card: view/livehero.js)),
 //   then rig.render() (pass A now, B and S armed for this frame's G.render). rig.putv(model, slot, mats, pv): the same with the
 //   params as a Float64Array in that order (x, z, k, alpha, flash, pitch, y, type, sx, sy, sz, snap): no per-frame boxing. rig.warm() once the models are added (at load:
-//   no first-use hitch). rig.bytes.
+//   no first-use hitch). rig.bytes. rig.restyle(model, json, bin): the model's corners replaced (the same segments: gear,
+//   view/dress.js), its bodies and attachments kept.
 //   {xray: true}: a fourth pass X marks where a character body (type 4) is hidden, for the composite's x-ray (gfx.js).
 //   rig.attach(model, corners, families) -> a DYNAMIC mesh drawn with the model's FIRST body each frame (the live hero's
 //   runtime cloth, view/livehero.js): {pos (corners x 3: in the frame of the segment its info names), nrm (x 4, int8:
 //   normal x 127, bias x 100), info (x 4: segment, part, family (an index into `families`, mapped here), flags; written
-//   once, before the first frame: it goes up with the first draw), fam, update(n): n corners of pos + nrm this frame}. It goes through passes A, B, S and X as the body's own triangles do.
+//   once, before the first frame: it goes up with the first draw; rewritten later: infoChanged()), fam, famRow(family) (its row, for
+//   info), update(n): n corners of pos + nrm this frame}. It goes through passes A, B, S and X as the body's own triangles do.
 // OWNS: its target, the transforms texture, the ramps texture, its meshes and materials.
 // READS: G (camera, view size, frame, extra).  EMITS: nothing.  BUDGET: render: per model 2 draws (A, S) + 1 (B) a frame while bodies show;
 //   CPU: the transforms texture upload (slots x 74 texels) when a body moved; no allocation per frame.
@@ -189,10 +191,20 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
 
   // a model from ragdoll_export.py's json + bin: the triangles (de-interleaved once), its families' ramps
   function addModel(J, bin) {
-    const n = J.meta.corners, dv = new DataView(bin);
     if (J.segs.length > SEGMAX) throw new Error(`rigmesh: ${J.segs.length} segments (max ${SEGMAX})`);
-    // the model's families -> the ramps texture's rows; a family another model already brought (the same name and tones:
-    // skin, leather, iron ...) shares its row
+    const iSlot = new THREE.InstancedBufferAttribute(new Float32Array(slots), 1); iSlot.setUsage(THREE.DynamicDrawUsage);
+    const geo = geometry(J, bin, iSlot);
+    const mA = new THREE.Mesh(geo, matA), mS = new THREE.Mesh(geo, matS);
+    for (const m of [mA, mS]) { m.frustumCulled = false; m.matrixAutoUpdate = false; }
+    sceneA.add(mA); G.extra(mS, 'shadow');
+    const M = {J, geo, iSlot, mA, mS, n: 0, segs: J.segs.length, bytes: geoBytes(geo), att: []};
+    models.push(M);
+    return M;
+  }
+  // the model's triangles as a geometry: de-interleaved, families -> the ramps texture's rows (a family another model
+  // already brought (the same name and tones: skin, leather, iron ...) shares its row)
+  function geometry(J, bin, iSlot) {
+    const n = J.meta.corners, dv = new DataView(bin);
     const FM = J.families.map(famRowOf);
     ramp.needsUpdate = true;
     const pos = new Float32Array(n * 3), nrm = new Int8Array(n * 4), info = new Uint8Array(n * 4);
@@ -205,14 +217,20 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     const geo = new THREE.InstancedBufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('aNrm', new THREE.BufferAttribute(nrm, 4, true));
     geo.setAttribute('aInfo', new THREE.BufferAttribute(info, 4, false));
-    const iSlot = new THREE.InstancedBufferAttribute(new Float32Array(slots), 1); iSlot.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iSlot', iSlot);
+    geo.setAttribute('iSlot', iSlot);
     geo.instanceCount = 0;
-    const mA = new THREE.Mesh(geo, matA), mS = new THREE.Mesh(geo, matS);
-    for (const m of [mA, mS]) { m.frustumCulled = false; m.matrixAutoUpdate = false; }
-    sceneA.add(mA); G.extra(mS, 'shadow');
-    const M = {J, geo, iSlot, mA, mS, n: 0, segs: J.segs.length, bytes: pos.byteLength + nrm.byteLength + info.byteLength, att: []};
-    models.push(M);
-    return M;
+    return geo;
+  }
+  const geoBytes = geo => geo.attributes.position.array.byteLength + geo.attributes.aNrm.array.byteLength + geo.attributes.aInfo.array.byteLength;
+  // the model drawn from new corners (view/dress.js: the same segments and bones, other corners and families): its bodies,
+  // slots and attachments stay. Rare (a change of gear), never per frame: a new geometry, the old one's buffers freed.
+  function restyle(M, J, bin) {
+    if (J.segs.length !== M.segs) throw new Error('rigmesh: restyle with other segments');
+    const old = M.geo, geo = geometry(J, bin, M.iSlot);
+    geo.instanceCount = old.instanceCount;
+    M.mA.geometry = M.mS.geometry = geo; M.bytes += geoBytes(geo) - geoBytes(old);
+    old.deleteAttribute('iSlot'); old.dispose();   // (iSlot lives on: the new geometry and the attachments draw with it)
+    M.geo = geo; M.J = J;
   }
   function famRowOf(f) {
     const key = f.name + ':' + f.ramp.join(';'); let row = famRow.get(key);
@@ -233,6 +251,8 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     for (const m of [mA, mS]) { m.frustumCulled = false; m.matrixAutoUpdate = false; m.visible = false; }
     sceneA.add(mA); G.extra(mS, 'shadow');
     const D = {pos, nrm, info, fam, n: 0, geo, mA, mS,
+      famRow: famRowOf,   // a family -> its row (to repaint info's family bytes; then infoChanged())
+      infoChanged() { A[2].needsUpdate = true; ramp.needsUpdate = true; },
       update(n) { D.n = n; geo.setDrawRange(0, n); for (let i = 0; i < 2; i++) { const a = A[i]; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; } }};
     M.att.push(D); M.bytes += pos.byteLength + nrm.byteLength + info.byteLength;
     return D;
@@ -306,6 +326,6 @@ export function createRigMesh(G, {slots = 16, xray = false} = {}) {
     for (const M of models) M.n = 0;
     used = false;
   }
-  const api = {addModel, attach, put, putv, render, warm, noXray: false, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
+  const api = {addModel, restyle, attach, put, putv, render, warm, noXray: false, get bytes() { let b = xfData.byteLength + rampData.byteLength + VW * VH * (8 * 2 + 4); for (const M of models) b += M.bytes; return b; }};
   return api;
 }

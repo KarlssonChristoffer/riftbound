@@ -34,6 +34,8 @@ In the menu's Sandbox tab, "Co-op: fell the nearest forest tree (test)" asks the
                    ◀── snap 20 Hz (everyone's) ────────────   (a fix if it was too fast)
                    ── act {fell, id} ─────────────────────▶   checks it (exists, in reach, not gone): world[id]
                    ◀── world {id, felled} (to all) ────────   late joiners get the whole world in their welcome
+ features/gear.js  ── gear {g: [ids]} ─────────────────────▶  checks the set (content/gear.js), keeps it as the player's
+                   ◀── gear {id, g} (to all) ──────────────   late joiners get everyone's in their welcome (docs/GEAR.md)
  features/coop/look.js  the others drawn live, interpolated 110 ms behind the newest snapshot
 ```
 
@@ -68,7 +70,8 @@ In the menu's Sandbox tab, "Co-op: fell the nearest forest tree (test)" asks the
 | `src/net/client.js` | the client: hello / welcome, the peers' snapshot rings, interpolation, the clock offset |
 | `src/core/session.js` | `?mp` / `?seed`: which world, settled before the world is built (a top-level await) |
 | `src/features/coop.js` | the feature: sends the player, applies the world's changes, `act()`, HUD, menu row |
-| `src/features/coop/look.js` | the others: live bodies, name tags, the lasso's rope |
+| `src/features/coop/look.js` | the others: live bodies (dressed in their gear), name tags, the lasso's rope |
+| `src/features/gear.js` | what you wear: asks the server in co-op, wears its answer (docs/GEAR.md) |
 
 ## Tested (2026-10-11, headless)
 
