@@ -10,7 +10,7 @@
 //   SKY     the puddles' colour by the time of day (depth/art.js PUD_COL: the Proving Grounds' puddles' own)
 // VIEW ONLY: nothing here is read by the sim; no Math.random (the bake is a function of the world).
 //
-// FEATURE CONTRACT (main.js): create(host) -> F: view, toggle, biomeChanged, ms. ?puddles=0: none.
+// FEATURE CONTRACT (main.js): create(host) -> F: view, toggle, biomeChanged, depth(x, y), ms. ?puddles=0: none.
 // OWNS: its map and the eased fill. READS: host.world, host.layout.forest (the lake, the streams), host.env (wet, sky), host.time, host.G.
 // EMITS: nothing. BUDGET: view < .005 ms (a setter); the bake at a build, ~10-30 ms (the forest at 2 texels a metre).
 import {flags} from '../core/flags.js';
@@ -32,12 +32,12 @@ export const order = {after: ['weather']};
 
 export async function create(host) {
   const F = {name: 'puddles', label: 'Rain puddles (forest)', ambient: true, on: flags.get('puddles') !== '0', ms: 0};
-  let built = null, fill = 0;
+  let built = null, fill = 0, map = null;   // map: the bake (F.depth reads it)
   const SKY = {}; for (const k in PUD_COL) SKY[k] = rgbOf(PUD_COL[k].in);
   const sky = [0, 0, 0], _o = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0};
   function bake() {
     built = host.world; const G = host.G, FO = host.layout?.forest;
-    if (!FO || !G?.setPuddles) { G?.setPuddles?.(null); return; }
+    map = null; if (!FO || !G?.setPuddles) { G?.setPuddles?.(null); return; }
     const res = TUNE.res, x0 = WORLD.x0, z0 = WORLD.y0, x1 = WORLD.x1, z1 = Math.min(0, WORLD.y1);
     const w = Math.ceil((x1 - x0) / res) + 1, h = Math.ceil((z1 - z0) / res) + 1, n = w * h;
     const TF = TERRAIN_ON ? terrainField() : null, Hg = (x, y) => TF ? TF.H(x, y) : host.elev(x, y);
@@ -64,6 +64,7 @@ export async function create(host) {
       data[k] = Math.round(clamp((lumps * TUNE.lumps + Math.max(0, B[k] - H[k]) * TUNE.hollow) * fl, 0, 1) * 255);
     }
     G.setPuddles({data, w, h, x0: x0 - res / 2, z0: z0 - res / 2, wm: w * res, hm: h * res});
+    map = {data, w, h, x0, z0, res};
   }
   F.view = dt => {
     const t0 = performance.now();
@@ -73,6 +74,16 @@ export async function create(host) {
     const c = SKY[host.time] || SKY.day; sky[0] = c[0]; sky[1] = c[1]; sky[2] = c[2];
     host.G?.setPuddleLook?.(fill, sky);
     F.ms = F.ms * .95 + (performance.now() - t0) * .05;
+  };
+  // how deep the puddle is at x, y now (0: none .. 1: well inside a full one): the shader's own test (gfx.js SURF_FS) on the bake,
+  // less its fine ragged edge (features/wading.js: the splashing feet)
+  F.depth = (x, y) => {
+    const M = map; if (!M || !F.on || fill < .01) return 0;
+    const fx = (x - M.x0) / M.res, fy = (y - M.z0) / M.res, i = Math.floor(fx), j = Math.floor(fy);
+    if (i < 0 || j < 0 || i >= M.w - 1 || j >= M.h - 1) return 0;
+    const u = fx - i, v = fy - j, D = M.data, k0 = j * M.w + i;
+    const r = ((D[k0] * (1 - u) + D[k0 + 1] * u) * (1 - v) + (D[k0 + M.w] * (1 - u) + D[k0 + M.w + 1] * u) * v) / 255;
+    return clamp((r - (1 - .5 * fill) - .03) / .1, 0, 1);
   };
   F.biomeChanged = () => { built = null; };
   F.toggle = () => { F.on = !F.on; return F.on; };

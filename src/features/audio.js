@@ -41,7 +41,8 @@ export async function create(host) {
   };
   const space = flags.get('acoustics') !== '0' ? createAcoustics({props: () => host.props, biome: () => host.biome, env: () => host.env, wind: () => host.wind, time: () => host.time}) : null;
   let spaceVer = -1, spaceT = 0;
-  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }, ground: (x, y) => host.biome?.groundAt?.(x, y) ?? null, propAt, space};
+  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }, ground: (x, y) => host.biome?.groundAt?.(x, y) ?? null, propAt, space,
+    wade: (x, y) => host.feature('wading')?.wet?.(x, y) || 0};   // (a foot in a puddle or the shallows: the steps splash)
   const screenX = (x, y) => host.toView(x, y, 0)[0];
   const AU = createAudio(ctx, {arrows: () => host.arrows, props: () => host.props, combat: () => host.feature('combat'), wind: () => host.wind});
   const listener = {};
