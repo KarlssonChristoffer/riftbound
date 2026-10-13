@@ -335,10 +335,14 @@ vec3 wDrops(vec3 res, ivec2 ti, bool sw) {
 // dashes (wDash: the contact line, its ripple, the feet's ring, its ripple), the ripple's ring (wPu) and where his feet are (wFt: texel
 // x, y; z 1 = he wades: his feet at the surface, on water)
 vec2 wRg; vec4 wDash; float wPu; vec3 wFt;
+// a moving texel's flow speed (x the biome's rate) from its R byte: bits 3-0 in 1/8ths; a MOUTH texel (tone 3 while there is still water:
+// world.js bakeWater, the course turning into the lake) holds its moving share there in 1/15ths, and slows as it fades (wTexel)
+bool wMouth(int rc) { return ((rc >> 4) & 3) == 3 && uWS.w >= 0.; }
+float wSpd(int rc) { return wMouth(rc) ? .15 + .5 * float(rc & 15) / 15. : float(rc & 15) * .125; }
 void wPrep(ivec2 ti) {
   vec4 w = texelFetch(uWater, ti, 0);
   int rc = int(w.r * 255. + .5), gg = int(w.g * 255. + .5);
-  float s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .5, d = s - mod(floor(uWPhase * uWA.x * float(rc & 15) * .125), 768.);
+  float s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .5, d = s - mod(floor(uWPhase * uWA.x * wSpd(rc)), 768.);
   wRg = vec2(wvn(vec2(a / 5. + 1.3, d / 12.), 64.), wvn(vec2(a / 5. + 6.1, d / 12. + 2.7), 64.)) - .5;
   float st = mod(floor(uWPhase * 4.), 96.); vec2 p = vec2(ti);   // 4 steps a second
   wPu = 2. + mod(st, 5.);   // the ripple's ring, 2 .. 6 texels out
@@ -375,8 +379,9 @@ vec3 wTexel(ivec2 ti, ivec2 mx) {
   vec3 res = texelFetch(uTex, ti, 0).rgb;
   if (rc < 192) return res;
   int gg = int(w.g * 255. + .5), tone = (rc >> 4) & 3, ring = gg >> 5;
-  if ((rc & 15) == 0 && uWS.w >= 0.) return wStill(ti, ring);   // (still water: the lake)
-  float spd = float(rc & 15) * .125, s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .5;
+  bool mo = wMouth(rc); vec3 st = vec3(0.);
+  if (uWS.w >= 0. && ((rc & 15) == 0 || mo)) { st = wStill(ti, mo ? 0 : ring); if (!mo) return st; }   // (still water: the lake; a mouth fades into it, below)
+  float spd = wSpd(rc), s = float(((gg & 31) << 8) | int(w.b * 255. + .5)) * .125, a = (w.a * 255. - 128.) * .5;
   float ph = uWPhase * uWA.x * spd;
   float h = wlay(a, s, ph, uWA.y, uWA.z, 0.), l = wlay(a, s, ph * .7, uWA.y * 1.4, uWA.z * 1.5, 7.3);
   int t = tone;
@@ -399,6 +404,7 @@ vec3 wTexel(ivec2 ti, ivec2 mx) {
   // more of them the faster it runs, and a few bubbles ride the flow between them
   float wf = clamp((spd - 1.3) / .5, 0., 1.);
   if (wf > 0. && (h > 1. - .42 * wf || l > 1. - .3 * wf || wh(vec2(floor(a), floor(s - mod(floor(ph * 1.3), 768.)))) < .05 * wf)) res = mix(res, uWFoam, .55 + .4 * wf);
+  if (mo) res = mix(st, res, float(rc & 15) / 15.);   // a mouth: the flow fading into the lake's still water
   return res;
 }
 // a fall of water: the baked colour is the base; light streaks slide DOWN the sheet in whole texels at their own pace per column,

@@ -25,6 +25,8 @@
 //                         the narrows run faster, with none of the shear a plain y - v t piles up
 //              out.speed  relative speed here (1 = the body's base; the stream runs a little faster mid-channel). 0 = still
 //              out.hold   1 = by a stone: the painted foam stays as painted
+//              out.lake   0..1 (only where a course meets still water, world/forest.js THE MOUTHS; the bake zeroes it first): the
+//                         still look's share, the moving water fading into it
 //            The rill (kind 2, layout.js RILL): a = metres across it (+ to the left of the flow), s = 0.55 x its length from the spring, the
 //            pace rising toward the lip; hold = the spring's basin, the narrow riffles and the lip's foam, where the painted bright streaks
 //            stay put. The pool and its outflow (kind 3, south of the plateau's face, beyond the river's east bank): one body flowing west
@@ -50,7 +52,7 @@ import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the W
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
 import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
 import {TOWER_PLAN, FOREST, HUT} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
-import {sample as forestSample, depth as forestDepth} from './forest.js';
+import {sample as forestSample, depth as forestDepth, joinRiver} from './forest.js';
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
@@ -240,6 +242,7 @@ function travelTab() {   // S(y) = integral of w(y') / W_REF dy' from y = -1, ev
 // Stones are dry footing (their painted body, out.kind 0); the water round them is flagged out.hold
 const _rs = {d: 0, a: 0, l: 0, hw: 0}, _os = {d: 0, a: 0, l: 0, hw: 0}, _lw = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0}, RILL_K = .55, RILL_LEN = RILL.len[RILL.len.length - 1];
 const travel = y => { const tab = S_TAB || travelTab(), f = (y - S_Y0) / S_DY, i = Math.min(tab.length - 2, f | 0); return tab[i] + (tab[i + 1] - tab[i]) * (f - i); };
+if (FOREST !== null) joinRiver(FOREST, travel(0), STREAM.w(0) / W_REF);   // (the forest's outflow runs into the river at y = 0: its travel and pace there, world/forest.js THE RIVER'S HEAD)
 // the outflow / pool: its travel falls by `ease(u)` metres over the u metres east of the river's bank (0 for the first OUT_U0 m, then eased in:
 // continuous in value and slope, so it joins the river's own s without a seam); its axis's y at x (a linear lookup in OUTFLOW.pts, the ends held)
 const OUT_U0 = .3, OUT_W = .6, ease = u => u <= OUT_U0 ? 0 : u < OUT_U0 + OUT_W ? (u - OUT_U0) ** 2 / (2 * OUT_W) : u - OUT_U0 - OUT_W / 2;
@@ -312,20 +315,21 @@ export const WATER_TUNE = {
 //                      stays as painted (the bank's shadow, the bright edge line, foam round a stone); 3 water that MOVES
 //                      (state >= 2 is "water": SURF_FS writes tone 1 into the G-buffer and the composite lights it as water)
 //      bits 5-4 the base tone, 0 light .. 3 dark (which of the ramp's colours the pattern starts from)
-//      bits 3-0 the flow speed here in 1/8ths of the biome's rate (waterSample's speed)
+//      bits 3-0 the flow speed here in 1/8ths of the biome's rate (waterSample's speed). A MOUTH texel (waterSample's lake > 0: moving
+//                 water turning into still) has tone 3 and here its moving share in 1/15ths (gfx.js wSpd; tone 3 never moves in ruins)
 //   G  bits 7-5 ring: texels from the bank (1 = the first texel .. 7; 0 = further in);  bits 4-0 = travel bits 12-8
 //   B  travel bits 7-0: the travel coordinate s in 1/8 texel (13 bits: up to 1023 texels)
 //   A  across the flow, signed texels from the axis in 1/2 texel, + 128 (clamped: +-63.5 texels, 2.08 m at PPM 30.5)
 // X0 / Y0: the canvas's world origin (the West Downs' own: 0, 0 is the Proving Grounds'); box: [x0, y0, x1, y1] m, the part to bake (the rest dry)
 function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = null, depth = brookDepth, dry = undefined}) {
-  const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
+  const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0, lake: 0};
   const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth, dry: dry !== undefined ? dry : X0 || Y0 ? BROOK?.dry : null});   // (depth / dry: the forest's own)   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
   const toneOf = k => { for (let t = 0; t < ramp.length; t++) if (px[k] === ramp[t][0] && px[k + 1] === ramp[t][1] && px[k + 2] === ramp[t][2]) return t; return -1; };
   const bx0 = box ? Math.max(0, Math.floor((box[0] - X0) * PPM)) : 0, by0 = box ? Math.max(0, Math.floor((box[1] - Y0) * PPM)) : 0;
   const bx1 = box ? Math.min(WPX, Math.ceil((box[2] - X0) * PPM)) : WPX, by1 = box ? Math.min(HPX, Math.ceil((box[3] - Y0) * PPM)) : HPX;
   for (let y = by0; y < by1; y++) for (let x = bx0; x < bx1; x++) {
     const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM;
-    waterSample(mx, my, o);
+    o.lake = 0; waterSample(mx, my, o);
     if (!o.kind || my >= cliffZ(mx)) continue;                  // (the ravine takes the stream over its edge: below it is the waterfall's pool)
     const i = y * WPX + x, k = i * 4, p = toneOf(i * 4);
     if (p < 0) continue;                                        // painted over: not (moving) water
@@ -333,8 +337,8 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = n
     let state = 3, tone = p;
     if (T.hold.includes(p) || (p === T.streak && ring <= T.bank) || (o.hold && p === 0)) state = 2;
     else if (p === T.streak) tone = Math.abs(o.a) < T.deepFrac * o.hw ? T.deep : T.shallow;
-    const s13 = Math.min(8191, Math.round(o.s * PPM * 8));
-    data[k] = state << 6 | tone << 4 | (Math.round(Math.min(1.875, o.speed) * 8) & 15);
+    let s13 = Math.round(o.s * PPM * 8); if (s13 < 0 || s13 > 8191) s13 = (s13 % 6144 + 6144) % 6144;   // (out of the 13 bits: wrapped by 768 texels, the pattern's period along: gfx.js wlay)
+    data[k] = state << 6 | (state === 3 && o.lake > 0 ? 3 << 4 | Math.max(1, Math.round((1 - o.lake) * 15)) : tone << 4 | (Math.round(Math.min(1.875, o.speed) * 8) & 15));   // (a mouth: tone 3, never moving in ruins' tones, marks it; gfx.js wSpd)
     data[k + 1] = ring << 5 | s13 >> 8; data[k + 2] = s13 & 255;
     data[k + 3] = Math.max(0, Math.min(255, Math.round(o.a * PPM * 2) + 128));
     if (bed) bed.add(x, y, o);

@@ -762,16 +762,70 @@ export function lay(F, G) {
 // the flow; the lake: m south of its middle), s: the pattern's travel (.55 x m along a course; the lake: a slow drift east), speed,
 // hold (the spring's rings stay as painted). False off it
 const K_S = .55, _w = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0}, _d = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0};
+// THE MOUTHS (where the stream runs into the lake, where the outflow leaves it): the two waters meet without a seam. Over the last
+// MOUTH_K.run m of the course and MOUTH_K.plume m out into the lake its moving water turns into the lake's still water: out.lake, the
+// still look's share (world.js bakeWater, gfx.js wTexel: the colours fade from one to the other and the flow slows), in fingers of
+// current (a noise stretched along the flow). In the lake the course's water carries on as a plume, fanning out (MOUTH_K.fan: how much
+// wider at its far end). Across a mouth the lake has no shore line (its lapping ring, the painted shadow and lit edge) and no shallow
+// shelf: mouthK, 1 at the mouth's middle, 0 a little way off
+const MOUTH_K = {run: 1.4, plume: 2.4, fan: 1.2};
+function mouths(F) {
+  if (F._mouths) return F._mouths;
+  // (at the first texel of the course that is out of the lake: k F.at's course, l its place along it, (tx, ty) the way into the lake)
+  const at = (C, i, k, j) => { const dx = C.px[j] - C.px[i], dy = C.py[j] - C.py[i], n = Math.hypot(dx, dy) || 1; return {x: C.px[i], y: C.py[i], r: C.hw[i] * 2.2 + .8, hw: C.hw[i], k, l: C.len[i], dir: j > i ? 1 : -1, tx: dx / n, ty: dy / n}; };
+  const S = F.stream, O = F.outflow, M = [];
+  for (let i = S.n - 1; i > 0; i--) if (!F.inLake(S.px[i], S.py[i])) { M.push(at(S, Math.min(S.n - 2, i), 0, Math.min(S.n - 1, i + 1))); break; }
+  for (let i = 0; i < O.n - 1; i++) if (!F.inLake(O.px[i], O.py[i])) { M.push(at(O, Math.max(1, i), 1, Math.max(0, i - 1))); break; }
+  return (F._mouths = M);
+}
+function mouthK(F, x, y) {
+  let k = 0; for (const m of mouths(F)) { const d = Math.hypot(x - m.x, y - m.y); if (d < m.r) k = Math.max(k, 1 - smooth(d / m.r)); }
+  return k;
+}
+// the still look's share where a course turns into the lake, z m into it (< 0: up the course), at (a, l) on the course: fingers along the
+// flow, a texel's jitter on their edges (the bake samples texel middles)
+const lakeShare = (x, y, z, a, l) => clamp(smooth((z + MOUTH_K.run) / (MOUTH_K.run + MOUTH_K.plume)) + (vnoise(a * 2.4, l * .45, 78) - .5) * .5 + (hash3(Math.floor(x * 64), Math.floor(y * 64), 77) - .5) * .12, 0, 1);
+// THE RIVER'S HEAD: the outflow runs into the Proving Grounds' river at y = 0, where world.js's own water takes over. joinRiver gives
+// the river's travel there (s0, m) and its travel per m (k); the outflow's travel counts back from it (its pace per m easing from the
+// forest's K_S to k over its last JOIN m), so the pattern runs on across the line without a seam, and over those metres its pace and
+// its depth turn into the river's (world.js: 1.3 mid-channel, 1 at the banks; waterbed.js depthOf: a shelf along each bank, then the
+// channel). joinS: (_w: F.at's) its travel; joinK: how far into the river's look (0 .. 1); both 0 without a join
+const JOIN = 4;
+export function joinRiver(F, s0, k) {
+  const O = F.outflow; let l = O.total;
+  for (let i = 1; i < O.n; i++) if (O.py[i] >= 0) { const f = (0 - O.py[i - 1]) / ((O.py[i] - O.py[i - 1]) || 1); l = O.len[i - 1] + (O.len[i] - O.len[i - 1]) * f; break; }
+  F.join = {s0, k, l};
+}
+const joinK = (F, l) => F.join ? smooth(1 - (F.join.l - l) / JOIN) : 0;
+function joinS(F) {
+  const J = F.join, r = J.l - _w.l, u = Math.min(1, r / JOIN), dk = K_S - J.k;   // (r: m up the outflow from the line; its pace per m J.k + dk u)
+  return J.s0 - (r <= 0 ? r * J.k : JOIN * (J.k * u + dk * u * u / 2) + Math.max(0, r - JOIN) * K_S);
+}
+// the course's flow here (_w: F.at's): its pace and its pattern's coordinates
+function courseFlow(F, out) {
+  const out8 = _w.k === 1, C = out8 ? F.outflow : F.stream, rf = C.rif ? C.rif[_w.i] : 0;
+  out.a = _w.a; out.hw = _w.hw; out.s = out8 && F.join ? joinS(F) : _w.l * K_S + (out8 ? 300 : 0);
+  out.speed = out8 ? .85 + .3 * smooth((_w.l - F.outflow.total + 6) / 6) : _w.l < 1.2 ? .45 : .75 + .25 * vnoise(_w.l * .2, 3.1, 41);
+  out.speed += (1.85 - out.speed) * Math.sqrt(rf);   // (a riffle runs white: gfx.js wTexel's white water from 1.3)
+  if (out8) { const j = joinK(F, _w.l); if (j > 0) out.speed += (1 + .3 * (1 - Math.min(1, (_w.a / _w.hw) ** 2)) - out.speed) * j; }
+  return out8;
+}
 export function sample(F, x, y, out) {
   if (F.inLake(x, y)) {
-    const L = F.lake; out.kind = 7; out.a = y - L.y; out.hw = L.ry; out.edge = F.lakeEdge(x, y); out.s = (x - L.x) * .3; out.speed = 0; out.hold = 0;   // (speed 0: still water, gfx.js wStill)
+    const L = F.lake, z = F.lakeEdge(x, y); out.kind = 7; out.a = y - L.y; out.hw = L.ry; out.edge = z + 1.5 * mouthK(F, x, y); out.s = (x - L.x) * .3; out.speed = 0; out.hold = 0;   // (speed 0: still water, gfx.js wStill; edge: no lapping line across a mouth)
+    if (z < MOUTH_K.plume) for (const m of mouths(F)) {   // a mouth's plume: the course's water carrying on, fanning out and fading
+      const dx = x - m.x, dy = y - m.y, u = dx * m.tx + dy * m.ty, v = Math.abs(dy * m.tx - dx * m.ty), W = m.hw * (1 + MOUTH_K.fan * u / MOUTH_K.plume);
+      if (u < -.3 || u > MOUTH_K.plume || v > W) continue;
+      F.at(x, y, _w); if (_w.k !== m.k) continue;
+      const lk = 1 - (1 - lakeShare(x, y, z, _w.a, _w.l)) * (1 - smooth((v - .5 * W) / (.5 * W)));
+      if (lk < .97) { const e = out.edge; courseFlow(F, out); out.hw = L.ry; out.edge = e; out.lake = lk; }
+      break;
+    }
     return true;
   }
   const B = F.box; if (x < B[0] || x > B[2] || y < B[1] || y > B[3] || !F.at(x, y, _w)) return false;
-  const out8 = _w.k === 1, C = out8 ? F.outflow : F.stream, rf = C.rif ? C.rif[_w.i] : 0;
-  out.kind = out8 ? 8 : 6; out.a = _w.a; out.hw = _w.hw; out.edge = _w.hw - _w.d; out.s = _w.l * K_S + (out8 ? 300 : 0);
-  out.speed = out8 ? .85 + .3 * smooth((_w.l - F.outflow.total + 6) / 6) : _w.l < 1.2 ? .45 : .75 + .25 * vnoise(_w.l * .2, 3.1, 41);
-  out.speed += (1.85 - out.speed) * Math.sqrt(rf);   // (a riffle runs white: gfx.js wTexel's white water from 1.3)
+  const out8 = courseFlow(F, out); out.kind = out8 ? 8 : 6; out.edge = _w.hw - _w.d;
+  const z = F.lakeEdge(x, y); if (z > -MOUTH_K.run) { const lk = lakeShare(x, y, z, _w.a, _w.l); if (lk >= .97) out.speed = 0; else if (lk > 0) out.lake = lk; }   // (a mouth: into the lake's still water)
   out.hold = !out8 && Math.hypot(x - F.spring.x, y - F.spring.y) < F.spring.r ? 1 : 0;
   return true;
 }
@@ -781,10 +835,13 @@ export function depth(F, o, x, y) {
   if (o.kind === 7) {   // the lake: a shallow shelf along the shore (the bed in sight), then the drop-off to the deep, a few holes and humps
     const sh = TUNE.lake.shelf * (.75 + .5 * vnoise(x * .35, y * .35, 37));
     d = .05 + .2 * smooth(o.edge / sh) + .75 * smooth((o.edge - sh) / 1.4) + (vnoise(x * 1.3, y * 1.3, 36) - .5) * .1;
+    d = Math.max(d, .3 * mouthK(F, x, y));   // (across a mouth: the course's depth, not the shelf's bed)
   }
   else {
     d = .05 + .22 * smooth(o.edge / Math.max(.08, o.hw)) + (vnoise(x * 3, y * 3, 34) - .5) * .08;
     if (F.at(x, y, _d)) { const C = _d.k === 1 ? F.outflow : F.stream; if (C.rif) d = d * (1 - .5 * C.rif[_d.i]) + .5 * C.pool[_d.i] * smooth(o.edge / Math.max(.08, o.hw)); }   // (a riffle runs shallow over its stones, the pool below it is deep)
+    const j = o.kind === 8 ? joinK(F, _d.l) : 0;   // (the river's head: its own depth, waterbed.js depthOf's for the river, without the bends)
+    if (j > 0) { const sh = clamp(o.hw * .42, .2, .6); d += (.62 * smooth(o.edge / sh) + .38 * smooth((o.edge - sh) / Math.max(.05, o.hw - sh)) + (vnoise(x * 1.7, y * .6, 31) - .5) * .3 * smooth(o.edge / .25) - d) * j; }
     const rs = Math.hypot(x - F.spring.x, y - F.spring.y) / F.spring.r; if (o.kind === 6 && rs < 1) d = Math.max(d, .2 + .6 * smooth((1 - rs) / .7));
   }
   return clamp(d, 0, 1);
@@ -821,6 +878,7 @@ export function paint(F, K, S, T) {
       continue;
     }
     e += (n2(x / 4, y / 3, 73) - .5) * (lake ? .12 : .05);
+    if (lake && inS) e = Math.min(e, -.01);   // (in both waters, a mouth: water, never the shore's lip)
     if (e >= 1.05) continue;
     if (e >= 0) {   // the banks: an earth lip, damp ground, then the lusher band
       if (e < .05) G.p(x, y, S.earth, 3);
@@ -837,6 +895,7 @@ export function paint(F, K, S, T) {
     const d = -e, rs = Math.hypot(mx - F.spring.x, my - F.spring.y), sr = F.spring.r;
     let t;
     if (!lake && o.k === 0 && rs < sr + .03) t = rs < .07 || (rs > .14 && rs < .18 && hsh(x, y, 8) < .85) || (rs > .27 && rs < .31 && hsh(x, y, 9) < .6) ? 0 : side < 0 && d < .1 ? 3 : side > 0 && d < .04 ? 0 : rs < .2 ? 2 : 1;
+    else if (lake && mouthK(F, mx, my) > .15) t = deep ? 2 : 1;   // (across a mouth: no shore, so no shadow line, no lit edge)
     else t = side < 0 && d < (lake ? .14 : .09) ? 3 : side > 0 && d < (lake ? .06 : .04) ? 0 : deep ? 2 : 1;
     G.p(x, y, W, t);
   }
