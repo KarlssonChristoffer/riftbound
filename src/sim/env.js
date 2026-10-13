@@ -235,7 +235,7 @@ export function createEnv({moods, biome, Q = flags, focus = null}) {
   if (WEATHER[url.weather]) E.weatherLock = url.weather;
   else if (Q.has('bench')) E.weatherLock = 'fair';   // the perf bench compares runs: no random rain in its scenarios
   let saveT = 0;
-  function save() { const S = truth ? truth.r : E; try { localStorage.setItem(KEY, JSON.stringify({hours, weather: S.weather, spellLeft, snowCover: S.snowCover, wet: S.wet})); } catch (e) {} }   // (the truth, not a preview)
+  function save() { if (E.borrowed) return; const S = truth ? truth.r : E; try { localStorage.setItem(KEY, JSON.stringify({hours, weather: S.weather, spellLeft, snowCover: S.snowCover, wet: S.wet})); } catch (e) {} }   // (the truth, not a preview)
   if (typeof addEventListener === 'function') addEventListener('pagehide', save);
 
   // ---- clock -> hour, day, part, season
@@ -649,6 +649,10 @@ export function createEnv({moods, biome, Q = flags, focus = null}) {
     if (!OLD) derive(); else { E.sunView = 1 - .9 * E.light.cloud; E.broken = 0; }
   };
   E.setDayMinutes = m => { if (m <= 0) E.frozen = true; else { E.frozen = false; TUNE.dayMinutes = m; } };
+  // co-op (features/coop.js): the server owns the world's clock; the page follows it (setT: in-game hours since the start) and
+  // doesn't keep a borrowed clock as its own (borrowed: save() skips it, so playing offline again goes on from where it was)
+  E.borrowed = false;
+  E.setT = h => { if (isFinite(h)) { hours = h; syncClock(); } };
   // ---- PREVIEW (ui/photo.js: photo mode, while the sim stands still): another hour, point of the year, weather or wind
   // shown through every reading above (hour, part, season, year, leafK, autumn, sky, windLevel, weather, the ground's snow
   // and wet, so mood(), leafRamp() and every view follow) without touching the truth: the clock, the spell, its generator

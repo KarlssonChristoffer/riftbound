@@ -204,6 +204,7 @@ const host = {
   // photo mode (ui/photo.js) has hidden the player: a feature that draws something of him (his contact shadow, the lantern) leaves it out
   get playerHidden() { return !!photo?.hidePlayer; },
   get photoOpen() { return !!photo?.open; },   // photo mode is open (its own camera: the cinematic mode keeps out)
+  get lantern() { return !!opt.lantern; },   // the player's lantern is lit (L, menu > Character; a run rule's 'light.lantern' note is the mods'): features/uncanny.js
   // game controls (game/game.js): dev keys + debug HUD on/off, player input locked, the simulation's speed, the world
   dev: true, lock: false, timeScale: 1, hudOff: false, BIOMES, TIMES,
   get biomeI() { return stage.biomeI; }, get timeI() { return TIMES.indexOf(env.bucket); },
