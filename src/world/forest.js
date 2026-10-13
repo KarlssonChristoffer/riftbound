@@ -72,7 +72,8 @@ export const TUNE = {
   block: {n: [3, 6], r: [1.1, 1.9], rise: [1.5, 2.8]},
   boulders: {r: [4, 5.5], n: [10, 16]},
   lake: {rx: [6.5, 9.5], ry: [4.5, 6.5], depth: .35, rim: 3.2, minBed: .55, shore: .36, shelf: 1.3, wade: 1},   // (shore: how far the bays reach in, a share of the radius; shelf: m of shallows before the drop-off; wade: m of it walked)
-  stream: {hw0: .3, hw1: .55, step: .6, depth: .1, bank: 1.25},
+  stream: {hw0: .3, hw1: .55, step: .6, depth: .1, bank: 1.25, wander: .3,   // (wander: the width swells and pinches by up to this share along it)
+    riffle: {slope: [[.06, .22], [.012, .05]], steps: .4, stones: [.06, .5], r: [.13, .28]}},   // (riffles: the bed's slope from calm to all white, the stream's then the outflow's; steps: how much of a steep stretch runs white (a noise's cut: the rest are its pools); stones: odds a stone stands at a point, in a run .. a riffle; r: its radius, m)
   trees: {cell: 3.2, jitter: .36, base: .12, dense: .78, slope: .5, water: 1.4, edge: 2.2, south: 4},
   under: {cell: 1.6, jitter: .4, p: .2},
   rocks: {big: 3, small: 3},
@@ -300,6 +301,12 @@ export function forestPlan(seed) {
     pts.push([MOUTH.x, MOUTH.y], [MOUTH.x, MOUTH.y + 1.5]);
     F.outflow = course(pts, T.stream.hw1, MOUTH.hw);
   }
+  // the courses swell into slow pools and pinch into runs: their width wanders along them (held at both ends: the spring, the lake's
+  // mouths, the river's head)
+  for (const [C, sd] of [[F.stream, 78], [F.outflow, 79]]) for (let i = 0; i < C.n; i++) {
+    const end = smooth(Math.min(C.len[i], C.total - C.len[i]) / 3);
+    C.hw[i] *= 1 + (vnoise(C.len[i] * .16, 5.3, sd) - .5) * 2 * T.stream.wander * end;
+  }
   // WET: a 1 m mask over the box, 1 within 1.6 m of any water (the painter's water pass skips the rest)
   { const A = F.stream.box, B = F.outflow.box, x0 = Math.floor(Math.min(A[0], B[0], L.x - L.rx - 2)), y0 = Math.floor(Math.min(A[1], B[1], L.y - L.ry - 2));
     const w = Math.ceil(Math.max(A[2], B[2], L.x + L.rx + 2)) - x0 + 1, h = Math.ceil(Math.max(A[3], B[3], L.y + L.ry + 2)) - y0 + 1, d = new Uint8Array(w * h);
@@ -310,7 +317,7 @@ export function forestPlan(seed) {
   { const A = F.stream.box, B = F.outflow.box; F.box = [Math.min(A[0], B[0], L.x - L.rx - 1.5), Math.min(A[1], B[1], L.y - L.ry - 1.5), Math.max(A[2], B[2], L.x + L.rx + 1.5), Math.max(A[3], B[3], L.y + L.ry + 1.5)]; }
   // the nearer of the two watercourses (out as course().at's; true in its water)
   F.at = (x, y, out) => {
-    const a = F.stream.at(x, y, out); if (a) return true;
+    const a = F.stream.at(x, y, out); if (a) { out.k = 0; return true; }
     const d = out.d - out.hw, b = F.outflow.at(x, y, _q);
     if (_q.d - _q.hw < d) { out.d = _q.d; out.a = _q.a; out.l = _q.l; out.hw = _q.hw; out.i = _q.i; out.k = 1; return b; }
     out.k = 0; return false;
@@ -729,21 +736,42 @@ export function lay(F, G) {
     F.cuts.push({type: 'channel', pts: keep.map(k => [C.px[k], C.py[k]]), bed: keep.map(k => F.inLake(C.px[k], C.py[k], .4) ? 9 : C.bed[k]), hw: keep.map(k => C.hw[k] + .06), bank: T.bank});
   }
   F.cuts.push({type: 'basin', x: F.spring.x, y: F.spring.y, rx: F.spring.r + .08, ry: F.spring.r + .08, h: F.stream.bed[0] - .07, rim: .45});
+  // RIFFLES (C.rif, 0..1 a point): where the bed drops fast the water runs white; a steep stretch breaks into steps by a noise along
+  // it, a riffle then a POOL (C.pool: steep but calm, deeper; on the gentle stretches a noise digs the odd slow hole too). STONES (F.stones: {x, y, r} m) stand in the riffles, now and then in
+  // the runs: painted dry (paint), the water's foam rings them (world.js: waterbed's dry). Their own generator, from the seed
+  const R = TUNE.stream.riffle, RS = rng(mix(F.seed, 43)); F.stones = [];
+  [F.stream, F.outflow].forEach((C, c) => {
+    const [s0, s1] = R.slope[c], rif = C.rif = new Float32Array(C.n), pool = C.pool = new Float32Array(C.n);
+    for (let i = 0; i < C.n; i++) {
+      const a = Math.max(0, i - 6), b = Math.min(C.n - 1, i + 6), sl = smooth(((C.bed[a] - C.bed[b]) / Math.max(.1, C.len[b] - C.len[a]) - s0) / (s1 - s0));
+      const st = smooth((vnoise(C.len[i] * .45, 2.3 + c, 79) - R.steps) / .15), off = F.inLake(C.px[i], C.py[i], .3) ? 0 : 1;
+      const slow = (1 - sl) * smooth((vnoise(C.len[i] * .2, 6.1 + c, 80) - .5) / .18);   // (a gentle stretch has its deep holes too)
+      rif[i] = sl * st * off; pool[i] = Math.max(sl * (1 - st), slow) * off;
+    }
+    for (let i = 4; i < C.n - 4; i += 3) {
+      if (RS() > R.stones[0] + (R.stones[1] - R.stones[0]) * rif[i] || F.inLake(C.px[i], C.py[i], .5) || Math.hypot(C.px[i] - F.spring.x, C.py[i] - F.spring.y) < F.spring.r + .4) continue;
+      const dx = C.px[i + 1] - C.px[i - 1], dy = C.py[i + 1] - C.py[i - 1], l = Math.hypot(dx, dy) || 1, u = (RS() * 2 - 1) * .6 * C.hw[i];
+      const r = Math.min(C.hw[i] * .45, R.r[0] + RS() * (R.r[1] - R.r[0]) * (1 + rif[i])), x = C.px[i] - dy / l * u, y = C.py[i] + dx / l * u;
+      if (F.stones.some(q => Math.hypot(q.x - x, q.y - y) < q.r + r + .12)) continue;
+      F.stones.push({x: +x.toFixed(3), y: +y.toFixed(3), r: +r.toFixed(3)});
+    }
+  });
 }
 
 // ---- THE WATER for world.js waterSample (kinds 6 the stream, 7 the lake, 8 its outflow): as brook.js sample. a: m across (+ left of
 // the flow; the lake: m south of its middle), s: the pattern's travel (.55 x m along a course; the lake: a slow drift east), speed,
 // hold (the spring's rings stay as painted). False off it
-const K_S = .55, _w = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0};
+const K_S = .55, _w = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0}, _d = {d: 0, a: 0, l: 0, hw: 0, i: 0, k: 0};
 export function sample(F, x, y, out) {
   if (F.inLake(x, y)) {
     const L = F.lake; out.kind = 7; out.a = y - L.y; out.hw = L.ry; out.edge = F.lakeEdge(x, y); out.s = (x - L.x) * .3; out.speed = 0; out.hold = 0;   // (speed 0: still water, gfx.js wStill)
     return true;
   }
   const B = F.box; if (x < B[0] || x > B[2] || y < B[1] || y > B[3] || !F.at(x, y, _w)) return false;
-  const out8 = _w.k === 1;
+  const out8 = _w.k === 1, C = out8 ? F.outflow : F.stream, rf = C.rif ? C.rif[_w.i] : 0;
   out.kind = out8 ? 8 : 6; out.a = _w.a; out.hw = _w.hw; out.edge = _w.hw - _w.d; out.s = _w.l * K_S + (out8 ? 300 : 0);
   out.speed = out8 ? .85 + .3 * smooth((_w.l - F.outflow.total + 6) / 6) : _w.l < 1.2 ? .45 : .75 + .25 * vnoise(_w.l * .2, 3.1, 41);
+  out.speed += (1.85 - out.speed) * Math.sqrt(rf);   // (a riffle runs white: gfx.js wTexel's white water from 1.3)
   out.hold = !out8 && Math.hypot(x - F.spring.x, y - F.spring.y) < F.spring.r ? 1 : 0;
   return true;
 }
@@ -756,6 +784,7 @@ export function depth(F, o, x, y) {
   }
   else {
     d = .05 + .22 * smooth(o.edge / Math.max(.08, o.hw)) + (vnoise(x * 3, y * 3, 34) - .5) * .08;
+    if (F.at(x, y, _d)) { const C = _d.k === 1 ? F.outflow : F.stream; if (C.rif) d = d * (1 - .5 * C.rif[_d.i]) + .5 * C.pool[_d.i] * smooth(o.edge / Math.max(.08, o.hw)); }   // (a riffle runs shallow over its stones, the pool below it is deep)
     const rs = Math.hypot(x - F.spring.x, y - F.spring.y) / F.spring.r; if (o.kind === 6 && rs < 1) d = Math.max(d, .2 + .6 * smooth((1 - rs) / .7));
   }
   return clamp(d, 0, 1);
@@ -819,6 +848,8 @@ export function paint(F, K, S, T) {
     const r = r0 + (1.02 - r0) * (.35 + .3 * hsh(k, 6, 9)), sz = .6 + hsh(k, 7, 11) * .6;
     T.boulder(K, L.x + cx * L.rx * r - X0, L.y + cy * L.ry * r - Y0, 4 * sz + 1.5, 2.8 * sz + 1, S.rock, k * 31 + 7, S.moss);
   }
+  // the stones standing in the streams (lay's F.stones): dry, so the water flows round them and its foam rings them
+  for (const s of F.stones || []) { const rx = s.r * PPM, h = hsh(s.x * 16 | 0, s.y * 16 | 0, 7); T.boulder(K, s.x - X0, s.y + s.r * .6 - Y0, rx, rx * .72, S.rock, h * 997 | 0, h < .25 ? S.moss : null); }   // (washed bare: a quarter keep a cap of moss)
   // the spring: a ring of mossy stones round where it wells up, open downstream
   const C = F.stream, dx = C.px[Math.min(C.n - 1, 8)] - C.px[0], dy = C.py[Math.min(C.n - 1, 8)] - C.py[0], a0 = Math.atan2(dy, dx);
   for (let k = 0; k < 7; k++) {

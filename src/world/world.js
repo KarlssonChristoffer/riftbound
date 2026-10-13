@@ -736,7 +736,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       if (!T.canvas) continue;
       const tex = texOf(T.canvas, true); tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.needsUpdate = true;
       const wb = [Math.max(box[0], T.cx0), Math.max(box[1], T.cz0), Math.min(box[2], T.cx0 + T.canvas.width / PPM), Math.min(box[3], T.cz0 + T.canvas.height / PPM)];
-      const water = WT && wb[0] < wb[2] && wb[1] < wb[3] ? bakeWater(biome, WT, {WPX: T.canvas.width, HPX: T.canvas.height, PPM, px: T.px, cliffZ, X0: T.cx0, Y0: T.cz0, box: wb, depth: FD, dry: null}) : null;
+      const water = WT && wb[0] < wb[2] && wb[1] < wb[3] ? bakeWater(biome, WT, {WPX: T.canvas.width, HPX: T.canvas.height, PPM, px: T.px, cliffZ, X0: T.cx0, Y0: T.cz0, box: wb, depth: FD, dry: FOREST.stones || null}) : null;   // (dry: the stones standing in its streams, world/forest.js lay: foam rings them)
       const tg = gridGeo(T.x0, T.z0, T.x1, T.z1, S), m = G.surface(tg, {tex, planar: true, world: new THREE.Vector2(T.canvas.width / PPM, T.canvas.height / PPM), origin: new THREE.Vector2(T.cx0, T.cz0),
         type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9, ...(water ? {water, bed: water.userData.bed} : {})}, false);
       disposers.push(() => { m.dispose(); tex.dispose(); if (water) { water.dispose(); water.userData.bed?.tex.dispose(); } });
