@@ -12,11 +12,11 @@
 // BUDGET: a few compares a step, an ease a frame. No allocation per step or frame.
 import {smooth, clamp} from '../core/mathx.js';
 
-const DARK0 = 1.5;     // m down the slot (in the woods) where the world above starts to go dark
+const DARK0 = 4.5;     // m down the slot (in the woods) where the world above starts to go dark
 const DARK_W = 1;      // how dark it is at the warp: the woods round him are gone by then, so the step into the cave changes nothing round him
-const DARK_LEAD = .8;  // m before the warp where it is all dark (the ease catches up by the step)
+const DARK_LEAD = .3;  // m before the warp where it is all dark (the ease catches up by the step)
 const LANTERN_R = 2;   // x the lantern's reach down there
-const EASE = 5;        // 1/s
+const EASE = 10;       // 1/s
 const NOWARP = new Set(['rope', 'climb', 'mantle']);   // (a move that places him itself: the warp waits until it ends)
 
 export const order = {};

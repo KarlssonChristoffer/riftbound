@@ -13,6 +13,7 @@ const BINS = 8;
 const SHOW = .3;       // a stretch shows while its way into the open . the way to the camera > SHOW (the ones facing it; side-on ones stand
                        // edge-on between him and the camera in a passage that runs toward it, and hide the floor)
 const SLOT_IN = 2;     // m past the warp he still counts as in the slot (its side walls all show)
+const PORTAL_R = 9;    // m round the slot copy's foot: the cave drawn a second time under the woods' overhang (seen through the mouth)
 const FLOOR_C = .5;    // m: the floor's grid
 const FLOOR_PAST = .9; // m: the floor runs this far past the open (under the walls' feet)
 
@@ -24,7 +25,16 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
   const vid = new Int32Array((nxs + 1) * (nys + 1)).fill(-1), pos = [], uv = [], idx = [];
   const W = nxs * FLOOR_C, Hh = nys * FLOOR_C;
   const v = (i, j) => { const q = j * (nxs + 1) + i; if (vid[q] < 0) { vid[q] = pos.length / 3; const x = g.x0 + i * FLOOR_C, z = g.y0 + j * FLOOR_C; pos.push(x, at(H, i, j), z); uv.push((x - g.x0) / W, (z - g.y0) / Hh); } return vid[q]; };
-  for (let j = 0; j < nys; j++) for (let i = 0; i < nxs; i++) if (near(i, j)) { const a = v(i, j), b = v(i + 1, j), c = v(i, j + 1), d = v(i + 1, j + 1); idx.push(a, c, b, b, c, d); }
+  // the PORTAL: the cave just in past the mouth's brow drawn a second time, under the woods' overhang (moved back by OFF), so you see
+  // into the cave from outside: the woods' ground hides it everywhere but through the mouth (its face under the brow isn't drawn:
+  // biomes.js forestRuins)
+  const cm = C.copy, off = C.off, SQ = [0, 0, 0], fx = cm.x + cm.ux * cm.len, fy = cm.y + cm.uy * cm.len;
+  const inPortal = (x, y) => C.slotAt(x, y, SQ)[2] === 2 ? SQ[0] > cm.brow + .05 : Math.hypot(x - fx, y - fy) < PORTAL_R;
+  const idxP = [];
+  for (let j = 0; j < nys; j++) for (let i = 0; i < nxs; i++) if (near(i, j)) {
+    const a = v(i, j), b = v(i + 1, j), c = v(i, j + 1), d = v(i + 1, j + 1); idx.push(a, c, b, b, c, d);
+    if (inPortal(g.x0 + (i + .5) * FLOOR_C, g.y0 + (j + .5) * FLOOR_C)) idxP.push(a, c, b, b, c, d);
+  }
   const floor = new THREE.BufferGeometry(); floor.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); floor.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   floor.setIndex(idx); floor.computeVertexNormals();
   // its painted ground (a margin of a metre round the grid's box, so the painter's neighbour reads see the same ground at the edges)
@@ -36,10 +46,17 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
   const tex = texOf(cv, true); tex.needsUpdate = true;
   const fm = G.surface(floor, {tex, planar: true, world: new THREE.Vector2(WPX / PPM, HPX / PPM), origin: new THREE.Vector2(X0, Y0), type: 1, obj: 0, decals: true}, true);
   disposers.push(() => { fm.dispose(); floor.dispose(); tex.dispose(); });
+  if (idxP.length) {
+    const pp = new Float32Array(pos.length); for (let i = 0; i < pos.length; i += 3) { pp[i] = pos[i] - off[0]; pp[i + 1] = pos[i + 1]; pp[i + 2] = pos[i + 2] - off[1]; }
+    const fp = new THREE.BufferGeometry(); fp.setAttribute('position', new THREE.BufferAttribute(pp, 3)); fp.setAttribute('uv', floor.getAttribute('uv'));
+    fp.setIndex(idxP); fp.computeVertexNormals();
+    const pm = G.surface(fp, {tex, planar: true, world: new THREE.Vector2(WPX / PPM, HPX / PPM), origin: new THREE.Vector2(X0 - off[0], Y0 - off[1]), type: 1, obj: 0, decals: false}, true);
+    disposers.push(() => { pm.dispose(); fp.dispose(); });
+  }
 
   // ---- the WALLS: each loop cut into stretches by the way they face (a normal averaged over ~2 m, so a rough wall doesn't flicker
   // between bins), the stretches of one bin in one mesh
-  const runs = Array.from({length: 2 * BINS}, () => []), SQ = [0, 0, 0];   // (runs[BINS + b]: the slot copy's, facing b)
+  const runs = Array.from({length: 2 * BINS}, () => []);   // (runs[BINS + b]: the slot copy's, facing b)
   const top = (x, z) => Math.max(field.H(x + .55, z), field.H(x - .55, z), field.H(x, z + .55), field.H(x, z - .55));
   const foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
   let seed = 211;
@@ -69,17 +86,22 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
     if (cur) runs[b].push(cur);
   }
   const o = {fam, rockB: null, cover: null, ladders: []};
-  const meshes = [];
+  const meshes = [], portal = [];
+  const topP = (x, z) => top(x + off[0], z + off[1]), footP = (x, z) => foot(x + off[0], z + off[1]);
+  const build = rs => { const geo = rs.length ? cliffGeometry(rs, o) : null; if (!geo) return null; const m = G.mesh(geo, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); geo.dispose(); }); return m; };
   for (let b = 0; b < 2 * BINS; b++) {
-    if (!runs[b].length) { meshes.push(null); continue; }
-    const rs = runs[b].map(pts => {
+    const rs = [], rp = [];
+    for (const pts of runs[b]) {
       let lo = 1e9; for (const [x, z] of pts) lo = Math.min(lo, foot(x, z));
-      return {pts, top, bot: foot, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: seed++};
-    });
-    const geo = cliffGeometry(rs, o);
-    if (!geo) { meshes.push(null); continue; }
-    const m = G.mesh(geo, 1, new THREE.Matrix4(), {static: true}); meshes.push(m);
-    disposers.push(() => { m.dispose(); geo.dispose(); });
+      const sd = seed++;
+      rs.push({pts, top, bot: foot, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: sd});
+      // (its stretches in the portal, moved back into the woods: the same rock, the same seed)
+      let cur = [];
+      const flush = () => { if (cur.length > 1) rp.push({pts: cur, top: topP, bot: footP, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: sd}); cur = []; };
+      for (const [x, z] of pts) { if (inPortal(x, z)) cur.push([x - off[0], z - off[1]]); else flush(); }
+      flush();
+    }
+    meshes.push(build(rs)); portal.push(build(rp));
   }
   const dir = Array.from({length: BINS}, (_, b) => [Math.cos(b * 2 * Math.PI / BINS), Math.sin(b * 2 * Math.PI / BINS)]);
   let yaw0 = NaN, slot0 = null;
@@ -91,7 +113,11 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
       const slot = !!p && C.slotAt(p.x, p.y, SQ)[2] === 2 && SQ[0] < C.copy.warp + SLOT_IN;
       if (yaw === yaw0 && slot === slot0) return; yaw0 = yaw; slot0 = slot;
       const cx = Math.sin(yaw), cz = Math.cos(yaw);
-      for (let b = 0; b < 2 * BINS; b++) if (meshes[b]) { const f = b % BINS; meshes[b].gm.visible = (b >= BINS && slot) || dir[f][0] * cx + dir[f][1] * cz > SHOW; }
+      for (let b = 0; b < 2 * BINS; b++) {
+        const f = b % BINS, faces = dir[f][0] * cx + dir[f][1] * cz > SHOW;
+        if (meshes[b]) meshes[b].gm.visible = (b >= BINS && slot) || faces;
+        if (portal[b]) portal[b].gm.visible = b >= BINS || faces;   // (the portal's slot walls stand under the overhang: always)
+      }
     },
   };
 }
