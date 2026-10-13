@@ -95,7 +95,7 @@ export function createLoop(E) {
     if (hovIt && hovIt !== hi) hovIt.hover = 0;   // (only the aimed item's pulse is ever on: no write per item per frame)
     if (hi) hi.hover = .16 + .08 * Math.sin(performance.now() / 110);
     hovIt = hi;
-    perf.begin('world.update', 'view'); stage.world.update(G.cine ? G.view.yaw : cv.yaw); perf.end('world.update');   // (the props' angles as drawn: a cinema camera's heading)
+    perf.begin('world.update', 'view'); stage.world.update(G.cine ? G.view.yaw : cv.yaw, player); perf.end('world.update');   // (the props' angles as drawn: a cinema camera's heading)
     // the season's leaves (env.leafRamp: changes a few times per season; a rebuilt world starts from the biome's own ramp)
     const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || stage.world !== leafWorld)) { stage.world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = stage.world; }
     proj.draw(host);

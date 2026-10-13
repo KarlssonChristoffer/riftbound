@@ -12,6 +12,7 @@ import {cliffGeometry} from './cliffs3d.js';
 const BINS = 8;
 const SHOW = .3;       // a stretch shows while its way into the open . the way to the camera > SHOW (the ones facing it; side-on ones stand
                        // edge-on between him and the camera in a passage that runs toward it, and hide the floor)
+const SLOT_IN = 2;     // m past the warp he still counts as in the slot (its side walls all show)
 const FLOOR_C = .5;    // m: the floor's grid
 const FLOOR_PAST = .9; // m: the floor runs this far past the open (under the walls' feet)
 
@@ -38,7 +39,7 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
 
   // ---- the WALLS: each loop cut into stretches by the way they face (a normal averaged over ~2 m, so a rough wall doesn't flicker
   // between bins), the stretches of one bin in one mesh
-  const runs = Array.from({length: BINS + 1}, () => []), SQ = [0, 0, 0];   // (runs[BINS]: the stretches that always show)
+  const runs = Array.from({length: 2 * BINS}, () => []), SQ = [0, 0, 0];   // (runs[BINS + b]: the slot copy's, facing b)
   const top = (x, z) => Math.max(field.H(x + .55, z), field.H(x - .55, z), field.H(x, z + .55), field.H(x, z - .55));
   const foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
   let seed = 211;
@@ -52,8 +53,9 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
       const a = Math.atan2(ny, nx); return ((Math.round(a / (2 * Math.PI / BINS)) % BINS) + BINS) % BINS;
     };
     const bins = []; for (let i = 0; i < n; i++) bins.push(binOf(i));
-    // (the slot's copy: its side walls always show, as the woods' slot's do, so nothing round him changes at the step in)
-    for (let i = 0; i < n; i++) { const a = L[i], b = L[i + 1]; C.slotAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, SQ); if (SQ[2] === 2 && SQ[0] > -.3 && SQ[0] < C.copy.len + .3 && Math.abs(SQ[1]) > C.copy.w / 2 - .4) bins[i] = BINS; }
+    // (the slot copy's side walls: a set of their own, shown whole while he is in the slot, as the woods' slot's are, so nothing
+    // round him changes at the step in; out in the cave they follow the camera like the rest)
+    for (let i = 0; i < n; i++) { const a = L[i], b = L[i + 1]; C.slotAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, SQ); if (SQ[2] === 2 && SQ[0] > -.3 && SQ[0] < C.copy.len + .3 && Math.abs(SQ[1]) > C.copy.w / 2 - .4) bins[i] += BINS; }
     // (lone segments of another bin go with their neighbours: no stretch shorter than two segments)
     for (let i = 0; i < n; i++) { const p = bins[(i - 1 + n) % n], nx = bins[(i + 1) % n]; if (bins[i] !== p && p === nx) bins[i] = p; }
     // start a closed loop where its bin changes (a stretch doesn't wrap round the seam)
@@ -68,7 +70,7 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
   }
   const o = {fam, rockB: null, cover: null, ladders: []};
   const meshes = [];
-  for (let b = 0; b <= BINS; b++) {
+  for (let b = 0; b < 2 * BINS; b++) {
     if (!runs[b].length) { meshes.push(null); continue; }
     const rs = runs[b].map(pts => {
       let lo = 1e9; for (const [x, z] of pts) lo = Math.min(lo, foot(x, z));
@@ -80,14 +82,16 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
     disposers.push(() => { m.dispose(); geo.dispose(); });
   }
   const dir = Array.from({length: BINS}, (_, b) => [Math.cos(b * 2 * Math.PI / BINS), Math.sin(b * 2 * Math.PI / BINS)]);
-  let yaw0 = NaN;
+  let yaw0 = NaN, slot0 = null;
   return {
     plan: C,
-    // the camera turned: the stretches facing away from it go (toward the camera, world axes: (sin yaw, cos yaw))
-    update(yaw) {
-      if (yaw === yaw0) return; yaw0 = yaw;
+    // the camera turned: the stretches facing away from it go (toward the camera, world axes: (sin yaw, cos yaw)); p (world x, y):
+    // the player, in the slot copy (up to SLOT_IN m past the warp) its side walls all show
+    update(yaw, p) {
+      const slot = !!p && C.slotAt(p.x, p.y, SQ)[2] === 2 && SQ[0] < C.copy.warp + SLOT_IN;
+      if (yaw === yaw0 && slot === slot0) return; yaw0 = yaw; slot0 = slot;
       const cx = Math.sin(yaw), cz = Math.cos(yaw);
-      for (let b = 0; b < BINS; b++) if (meshes[b]) meshes[b].gm.visible = dir[b][0] * cx + dir[b][1] * cz > SHOW;
+      for (let b = 0; b < 2 * BINS; b++) if (meshes[b]) { const f = b % BINS; meshes[b].gm.visible = (b >= BINS && slot) || dir[f][0] * cx + dir[f][1] * cz > SHOW; }
     },
   };
 }

@@ -1185,9 +1185,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       CV[k] = x1 > -CHUNK_M && x0 < VW + CHUNK_M && y1 > -CHUNK_M && y0 < VH + CHUNK_M ? 2 : x1 > -CHUNK_SM && x0 < VW + CHUNK_SM && y1 > -CHUNK_SM && y0 < VH + CHUNK_SM ? 1 : 0;
     }
   }
-  function update(yaw) {
+  function update(yaw, pl) {
     if (litterDirty) bakeNow();
-    cave?.update(yaw);
+    cave?.update(yaw, pl);   // (pl: the player, world x / y: the cave's slot walls)
     clearArray(lights); for (const l of groundL) lights.push(l);
     const k0 = -Math.round(yaw / step);
     if (CV) chunksOnScreen();
