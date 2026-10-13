@@ -1088,16 +1088,21 @@ float sunShadow(vec3 P, vec3 N, float bias) {
 // 1 when something solid stands between S and the light: march the height map (about one texel, 7 cm, per step across
 // the ground, so a shadow edge cast over a long way stays a clean line), stopping 0.25 m short of the light, so a flame
 // on a wall top or in a bracket isn't blocked by its own mount. A wall stops a torch behind it.
-float ptBlock(vec3 S, vec3 L) {
+// A rough rock face (a cave wall, a cliff) sits under its own ledges in a map seen from above: the samples that start
+// under the point's own roof are skipped (for up to lead metres across, then they count), so the face isn't striped by
+// itself while a wall between it and the light still stops it.
+float ptBlock(vec3 S, vec3 L, float lead) {
   vec3 d = L - S; float len = length(d), end = len - .25;
   if (end < .15) return 0.;
   float f = end / len, n = min(128., max(ceil(length(d.xz) * f / .07), ceil(end / .3)));
   vec3 a = (uHPV * vec4(S, 1.)).xyz * .5 + .5, b = (uHPV * vec4(S + d * f, 1.)).xyz * .5 + .5;
+  float lt = lead / max(length(d.xz) * f, 1e-3); bool under = lead > 0.;
   for (int k = 1; k <= 128; k++) {
     float t = float(k) / n; if (t > 1.) break;
     vec3 c = mix(a, b, t);
     if (c.x < 0. || c.y < 0. || c.x > 1. || c.y > 1.) continue;
-    if (c.z - uHBias > texture(tH, c.xy).r) return 1.;
+    if (c.z - uHBias > texture(tH, c.xy).r) { if (!under || t > lt) return 1.; }
+    else under = false;
   }
   return 0.;
 }
@@ -1284,7 +1289,7 @@ void main() {
     if (shaped && uLC[i].w < .5) shape = clamp(((dot(N, normalize(lp - P)) + .25) / 1.25) / .55, 0., 1.8);
     vec3 li = uLC[i].rgb * f * shape;
     // blocked by a wall / prop between (the character as one object, from its chest, like the sun shadow)
-    if (uPtShadow > 0. && max(li.r, max(li.g, li.b)) > .004) li *= 1. - uPtShadow * ptBlock(type == 4 ? uPlayer : P + N * .1, lp);
+    if (uPtShadow > 0. && max(li.r, max(li.g, li.b)) > .004) li *= 1. - uPtShadow * ptBlock(type == 4 ? uPlayer : P + N * .1, lp, type == 4 ? 0. : .9 * (1. - abs(N.y)));   // (lead: a steep face's own ledges)
     pts += li;
   }
   vec3 e = amb, L = e + pts;
