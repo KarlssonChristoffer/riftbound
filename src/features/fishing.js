@@ -487,7 +487,11 @@ export async function create(host) {
     text(q, label, x, y0 + H - 3 * u, u, on || tell ? '#ff9a7a' : '#efe6cf', 'center');
   }
   function drawCard(q, u) {
-    const c = CATCHES[I.id], R2 = RARITY[c.rarity], cw = q.canvas.width, W = 132 * u, H = 34 * u;
+    const c = CATCHES[I.id], R2 = RARITY[c.rarity], cw = q.canvas.width, H = 34 * u;
+    const kg = I.kg < 1 ? `${Math.max(1, Math.round(I.kg * 1000))} g` : `${I.kg} kg`;
+    const t1 = c.name + (I.n > 1 ? ' x2' : ''), t2 = c.find ? `${R2?.name || ''} find` : `${R2?.name || ''} · ${I.cm} cm · ${kg}`, tag = I.first ? 'NEW!' : I.record ? 'RECORD!' : '';
+    q.font = fontOK ? `${10 * u}px RiftPixel` : `${7 * u}px ui-monospace, monospace`;
+    const W = Math.max(132 * u, Math.ceil((Math.max(q.measureText(t1).width + (tag ? q.measureText(tag).width + 8 * u : 0), q.measureText(t2).width) + 42 * u) / u) * u);
     const k = clamp((3.4 - V.card) / .15, 0, 1), fade = clamp(V.card / .4, 0, 1);
     const x0 = Math.round((cw - W) / 2 / u) * u, y0 = Math.round((q.canvas.height * .16 - (1 - k) * 20 * u) / u) * u;
     q.save(); q.setTransform(1, 0, 0, 1, 0, 0); q.globalAlpha = fade; q.imageSmoothingEnabled = false;
@@ -495,10 +499,10 @@ export async function create(host) {
     q.fillStyle = '#15100c'; q.fillRect(x0 + 4 * u, y0 + 4 * u, 26 * u, 26 * u);
     q.drawImage(iconCanvas(I.id), x0 + 4 * u - u, y0 + 4 * u - u, 28 * u, 28 * u);
     const tx = x0 + 34 * u;
-    text(q, c.name + (I.n > 1 ? ' x2' : ''), tx, y0 + 13 * u, u, R2?.col || '#efe6cf');
-    text(q, c.find ? `${R2?.name || ''} find` : `${R2?.name || ''} · ${I.cm} cm · ${I.kg} kg`, tx, y0 + 22 * u, u, '#a39478');
+    text(q, t1, tx, y0 + 13 * u, u, R2?.col || '#efe6cf');
+    text(q, t2, tx, y0 + 22 * u, u, '#a39478');
     text(q, `+${I.xp} xp`, tx, y0 + 31 * u, u, '#7ec8e3');
-    if (I.first || I.record) text(q, I.first ? 'NEW!' : 'RECORD!', x0 + W - 5 * u, y0 + 13 * u, u, '#ffe08a', 'right');
+    if (tag) text(q, tag, x0 + W - 5 * u, y0 + 13 * u, u, '#ffe08a', 'right');
     q.restore();
   }
   return F;
