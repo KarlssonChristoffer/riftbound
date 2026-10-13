@@ -907,9 +907,7 @@ function forestRuins(q, ctx) {
         continue;
       }
       if (!(a < hw + .05 && s > -.05 && s < CM.brow)) continue;   // (past the brow: the overhang's own ground, as the woods')
-      const f = Math.min(1, Math.max(0, (s - CM.brow + 1.2) / 1.2)), h = hsh(x, y, 69);   // (its last metre goes into the dark under the brow, dithered: past the
-      // warp, caves.js, so the floor he walks on doesn't change at the step into the cave)
-      if (h < f * f * 1.15) G.c(x, y, BLACK); else if (h < f * 1.4) G.p(x, y, S.rock, 3); else caveFloor(G, S, x, y, mx, my, Math.max(a - hw, -s));
+      caveFloor(G, S, x, y, mx, my, Math.max(a - hw, -s));   // (on to the brow: the cave's own floor runs on under it, cave3d.js's portal)
     }
   }
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
