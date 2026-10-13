@@ -20,6 +20,7 @@
 //   AU.setGunSfx(s) / AU.gunSfx / AU.gunSfxList  // the gun sounds' western-movie flavor (events.js GUN_SFX: hollywood | gritty),
 //                                              //   remembered in localStorage; ?gunsfx= overrides it at load
 //   ctx = {PPM, VW, layout, ...}               // only PPM / VW (panning by screen x) and layout.elev are read
+//                                              //   ctx.space (optional): src/audio/acoustics.js, the world's acoustics (rooms, echoes, occlusion)
 //
 // Events used: step {big 0|1} / land {big 2 sprint plant, 3 big drop} / jump / splash {small} (player.js, arena.html);
 // hit {player?} / break {kind} / explode {r} / loot {n} / coin / open / trap / respawn (combat.js). Derived here from
@@ -46,6 +47,7 @@ import {createBakery} from '../../audio/runtime/bakery.js';
 import {createDirector} from '../../audio/runtime/director.js';
 import {EVENTS, AMBIENCE, SOURCES, SPATIAL, groundCase, GUN_SFX, GUN_SFX_DEF, otherGunSfx} from '../../audio/runtime/events.js';
 import {flags} from '../core/flags.js';
+import {SPACE_REVERBS} from './acoustics.js';   // THE SPACE: the rooms' reverbs (ctx.space: src/audio/acoustics.js)
 import {clamp} from '../core/mathx.js';
 import {viewRandom} from '../core/rng.js';
 
@@ -127,6 +129,12 @@ const DESERT_REVERBS = {
   desert: {rt: .55, pre: .01, lp0: 8000, lp1: 2200, hp: 160, er: 4, erSpan: .08, erGain: .3, width: 1, wet: -3},
   canyon: {rt: 1.9, pre: .045, lp0: 6000, lp1: 1400, hp: 140, er: 6, erSpan: .32, erGain: .7, width: 1, wet: 0},
 };
+// THE SPACE (ctx.space, src/audio/acoustics.js; docs/AUDIO.md phase 5): where the host gives one, the loud sounds below come back
+// off the world's faces (k: how loud: a blast gets more taps, louder), every positional sound is heard through what stands
+// between it and the listener (quieter, darker behind a wall or the mesa), and the room round the listener picks the reverb
+const ECHO = {gunshot: 1, foeShot: 1, coachShot: 1.15, explode: 1.3, bellsRing: .85, bellsToll: .7};
+// (the shots play their dry cases where the space has rooms: the room gives them their tail and echoes; audio/runtime/events.js shotGL)
+const DRY_SHOT = new Set(['gunshot', 'foeShot', 'coachShot']);
 const CANYON = {in: 23.6, out: 22.8, rev: [.14, .38]};   // the player's y (m) where the canyon's echo comes in / goes (its rim ~27.7); the synth's reverb level out / in
 const DESERT_STEP = {sand: {surf: 'sand', ground: 'gravel', semi: -4, lpf: 2400, gainDb: -2}, pan: {surf: 'pan', ground: 'gravel', semi: -1, lpf: 3400, gainDb: -6},
   stone: {surf: 'stone', ground: 'stone'}, rock: {surf: 'stone', ground: 'stone'}};
@@ -440,6 +448,23 @@ const SFX = {
   bellsPlate(E, o) { SFX.bulletHit(E, {...o, mat: 'metal'}); },
   bellsWhine(E, o) { const k = offK(o); if (!k) return; const v = E.voice({...o, g: (o.g ?? 1) * (o.bell ? .55 : 1) * k}, 'bellsWhine', .45, {cd: .02}); if (!v) return;
     E.O(v, .01, {f: 1900, f2: 800, sw: .32, a: .004, d: .12, g: .045}); E.N(v, .01, {type: 'bandpass', f: 1700, f2: 700, sw: .3, q: 4, a: .01, d: .1, g: .05}); },
+  // the fists (fallbacks for the forge's 'punch' recipe while it bakes / ?forge=0): the old body thud, a short swish, a tick
+  punch(E, o) { if (o.kind === 'straw' || o.kind === 'thing') SFX.hit(E, {...o, mat: o.kind === 'straw' ? 'straw' : o.mat}); else SFX.hit(E, {...o, mat: 'body', g: (o.g ?? 1) * (.5 + .5 * (o.power ?? .5)) * (o.counter || o.ko ? 1.25 : 1)}); },
+  punchBlock(E, o) { SFX.kick(E, {...o, mat: 'wood', g: (o.g ?? 1) * .6}); },
+  whiff(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .45}, 'whiff', .2, {cd: .03}); if (!v) return; E.N(v, 0, {b: E.PK, type: 'bandpass', f: 600, f2: 1300, sw: .04, q: 1, a: .02, d: .07, g: .25}); },
+  fistCue(E, o) { if (o.phase !== 'counter') { SFX.whiff(E, {...o, g: (o.g ?? 1) * (o.phase === 'throw' ? 1.3 : .7)}); return; }
+    const v = E.voice({...o, g: (o.g ?? 1) * .35}, 'fistCue', .12, {cd: .05}); if (v) { E.N(v, 0, {type: 'bandpass', f: 1100, q: 2, d: .015, g: .3}); E.N(v, .02, {type: 'bandpass', f: 900, q: 2, d: .015, g: .25}); } },
+  fistGrab(E, o) { SFX.whiff(E, o); if (o.ok) SFX.hit(E, {...o, mat: 'body', g: (o.g ?? 1) * .4}); },
+  foeWind(E, o) { const k = offK(o); if (k) SFX.whiff(E, {...o, g: (o.g ?? 1) * (o.n === 2 ? .9 : .5) * k}); },
+  foePunch(E, o) { if (o.phase === 'hit') SFX.hit(E, {...o, mat: 'body', g: (o.g ?? 1) * (o.n === 2 ? .8 : .5)}); else if (o.phase === 'block') SFX.punchBlock(E, o); else SFX.whiff(E, o); },
+  // woodcutting (fallbacks for the forge's 'woodcut' recipe while it bakes / ?forge=0): the bank stand-ins they replaced
+  chop(E, o) { if (o.k > 0) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * 1.2}); SFX.kick(E, {...o, mat: 'wood', g: (o.g ?? 1) * .7}); } else SFX.hit(E, {...o, mat: 'clay', g: (o.g ?? 1) * .8}); },   // (k 0: a glance)
+  treeCrack(E, o) { SFX.brk(E, {...o, kind: 'crate'}); },
+  treeCrash(E, o) { SFX.foeFall(E, {...o, heavy: true, g: (o.g ?? 1) * 1.4}); SFX.rustle(E, o); },
+  treeLogs(E, o) { SFX.propDrop(E, {...o, mat: 'wood'}); },
+  logPick(E, o) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * .35}); },
+  axeSwing(E, o) { SFX.jump(E, {...o, g: (o.g ?? 1) * .45}); },
+  campLog(E, o) { SFX.kick(E, {...o, mat: 'wood', g: (o.g ?? 1) * .6}); },   // (a soft wooden thump)
   // the bruiser's coach gun (fallbacks for the forge's 'coachgun' recipe while it bakes / ?forge=0), screen-bound like it
   coachShot(E, o) {   // deeper and longer than the revolver's: a broad bark, a low sweep, a long dark tail
     const k = offK(o); if (!k) return;
@@ -866,7 +891,7 @@ export function createAudio(ctx, host = {}) {
   const q = flags;
   const disabled = !AC || !!q.get('sheet') || q.get('audio') === '0';
   let E = null, muted = false, bed = null, bedId = null, bedMuted = false, creak = null, roll = null, prevState = 'idle', prevK = 0, climbT = 0, musicOn = true;
-  let nZones = 0, nTraps = 0, canyonOn = false, revBiome = null;
+  let nZones = 0, nTraps = 0, canyonOn = false, revBiome = null, revDb = 0;
   const callSt = {};   // desertCalls' timers
   // the desert's ground under a foot (DESERT_STEP: the synth's surface + the forge's footstep case), else o as it is
   const grounded = (biome, x, y, o) => { if (biome !== 'desert') return o; const g = DESERT_STEP[ctx.ground?.(x, y)]; if (g) Object.assign(o, g); return o; };
@@ -895,7 +920,7 @@ export function createAudio(ctx, host = {}) {
   const forgeOff = q.get('forge') === '0';
   if (!disabled && !forgeOff) {
     try {
-      const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac, {reverbs: {...REVERBS, ...DESERT_REVERBS}}), B = createBakery(ac);
+      const ac = new AC({latencyHint: 'interactive'}), EN = createEngine(ac, {reverbs: {...REVERBS, ...DESERT_REVERBS, ...SPACE_REVERBS}}), B = createBakery(ac);
       const D = createDirector(EN, B, {EVENTS: {...EVENTS, ...TRICK_EVENTS, ...BELL_EVENTS}, AMBIENCE: {...AMBIENCE, desert: DESERT_AMB}, SOURCES: {...SOURCES, waterfall: WATERFALL, brook: BROOK_SND}});
       try { EN.prepareReverbs?.(); } catch (e) {}
       D.prefetch({biome: 'ruins', skip: otherGunSfx(gunsfx)});   // (only the playing gun flavor's banks)
@@ -973,9 +998,20 @@ export function createAudio(ctx, host = {}) {
     const off = Math.max(0, (Math.abs(dx) - VW / 2) / PPM, (Math.abs(dy) - VH / 2) / PPMY);
     return {pan: clamp(dx / (VW / 2) * .7, -.8, .8), d: Math.hypot(x - L.x, y - L.y), off: +off.toFixed(2)};
   }
+  const OCC = {db: 0, lpf: 0}, panOf = (x, y) => at(x, y).pan;
   function fire(name, x, y, o = {}) {
     const px = x ?? L.x, py = y ?? L.y, pos = at(px, py);
-    if (RT) { try { if (RT.D.post(name, {...pos, dist: pos.d, x: px, y: py, gunsfx, ...o})) return; } catch (e) { console.warn('audio: forge', name, e); } }
+    if (RT) {
+      const prm = {...pos, dist: pos.d, x: px, y: py, gunsfx, ...o}, sp = ctx.space;
+      if (sp) {   // THE SPACE: heard through what's between, and the echoes of a loud one
+        if (pos.d > 2.5 && sp.occlude(px, py, OCC).db) { prm.gainDb = (prm.gainDb || 0) + OCC.db; prm.lpf = Math.min(prm.lpf ?? 2e4, OCC.lpf); }
+        if (sp.room.reverb) {   // (a biome with rooms: elsewhere the shots keep the place baked into them)
+          const k = ECHO[name]; if (k) { const n = sp.taps(px, py, k, panOf); if (n) { prm.taps = sp.T; prm.tapN = n; } }
+          if (DRY_SHOT.has(name)) prm.dry = true;
+        }
+      }
+      try { if (RT.D.post(name, prm)) return; } catch (e) { console.warn('audio: forge', name, e); }
+    }
     try { SFX[name](E, {...pos, ...o}); } catch (e) { console.warn('audio:', name, e); }   // legacy synth (not baked yet / ?forge=0)
   }
   // the ground a bullet ended in: the desert's painter (stone and rock hard, sand and hardpan dull); elsewhere rock where it is
@@ -1056,9 +1092,15 @@ export function createAudio(ctx, host = {}) {
     if (pl.biome !== revBiome) { revBiome = pl.biome; canyonOn = false; }
     if (pl.biome === 'desert') {
       const near = pl.y > (canyonOn ? CANYON.out : CANYON.in);
-      if (near !== canyonOn) { canyonOn = near; E.revOut.gain.setTargetAtTime(CANYON.rev[near ? 1 : 0], t, .8); try { RT?.EN.setReverb?.(near ? 'canyon' : 'desert', 1.5); } catch (e) {} }
+      if (near !== canyonOn) { canyonOn = near; E.revOut.gain.setTargetAtTime(CANYON.rev[near ? 1 : 0], t, .8); try { if (!ctx.space?.room.reverb) RT?.EN.setReverb?.(near ? 'canyon' : 'desert', 1.5); } catch (e) {} }
       desertCalls(E, callSt, pl.time || 'day', t);
     }
+    // ---- the space (ctx.space): the room's reverb and its return (rain and snow take some), where the biome has rooms
+    const R = ctx.space?.room;
+    if (RT && R?.reverb) {
+      if (RT.EN.reverb !== R.reverb) { try { RT.EN.setReverb(R.reverb, 1.2); } catch (e) {} }
+      if (Math.abs(R.wetDb - revDb) > .25) { revDb = R.wetDb; RT.EN.setBusDb('reverb', revDb, .6); }
+    } else if (RT && revDb) { revDb = 0; RT.EN.setBusDb('reverb', 0, .6); }
     // ---- player state transitions ----
     const st = pl.state, landed = st === 'land' && prevState !== 'land';
     const bigDrop = events.some(e => e.type === 'player.land' && e.big === 3), speed = Math.hypot(pl.vx || 0, pl.vy || 0);
@@ -1077,7 +1119,7 @@ export function createAudio(ctx, host = {}) {
     // ---- events ----
     for (const e of events) {
       switch (e.type) {
-        case 'player.step': if (!landed) { fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(speed / 6, .25, 1), g: .55 + clamp(speed / 7, 0, .45)})); if (pl.biome === 'ruins' && brookWet(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, g: .45}); } break;   // (wading the brook: a splash too)
+        case 'player.step': if (!landed) { const v = e.pace ?? speed; fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(v / 6, .25, 1), g: .55 + clamp(v / 7, 0, .45)})); if (pl.biome === 'ruins' && brookWet(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, g: .45}); } break;   // (wading the brook: a splash too)
         case 'prop.land': fire('propDrop', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;   // a prop dropped off the plateau (combat/props.js)
         case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: 1.3, g: 1})); break;   // sprint plant
         case 'player.jump': fire('jump', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); break;
@@ -1148,6 +1190,17 @@ export function createAudio(ctx, host = {}) {
         case 'equip.break': fire('brk', e.x, e.y, {kind: e.gadget === 'scarecrow' ? 'dummy' : 'pot'}); break;
         case 'equip.latch': fire('stuck', e.x, e.y, {surf: e.who ? surf : 'stone'}); break;
         case 'equip.pick': fire(e.bought ? 'open' : 'loot', e.x, e.y, {n: 2}); break;
+        // WOODCUTTING (features/woodcut.js; the forge's 'woodcut' recipe: events.js chop .. campLog, docs/GATHERING.md step 5; while it bakes
+        // or with ?forge=0, SFX chop .. campLog play the old bank stand-ins). The axe's whoosh only on a whiff: player.chop comes at the
+        // blow (there is no swing-start event), so a whoosh there would follow the bite, and on a miss double tool.whiff's
+        case 'tree.chop': fire('chop', e.x, e.y, {k: e.k}); break;   // (k 0: a glance off wood too hard for the axe; else how deep, k >= .85 the last bites)
+        case 'tree.fell': fire('treeCrack', e.x, e.y, {scale: e.scale}); break;   // the hinge splits
+        case 'tree.land': fire('treeCrash', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, r: e.r})); break;   // the crown crashes down
+        case 'tree.logs': fire('treeLogs', e.x, e.y, {surf, n: e.n}); break;
+        case 'tool.hit': fire('hit', e.x, e.y, {mat: e.kind === 'body' ? 'body' : MAT[e.kind] || 'wood', g: 1}); break;
+        case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); break;   // (the swing's whoosh)
+        case 'pack.add': if (e.id === 'log') fire('logPick', e.x, e.y); break;
+        case 'fire.addWood': fire('campLog', e.x, e.y); break;   // a log on a campfire (features/campfires.js, lights.js)
         // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge
         // recipes of its own yet): the swish of a turn and the throw on the cloth swish, the cinch a soft thump, the yank
         // a heave, a yanked body's landing the gunmen's fall thud, the rope straining a short creak (the bow's)
@@ -1157,6 +1210,8 @@ export function createAudio(ctx, host = {}) {
         case 'lasso.yank': fire('jump', e.x, e.y, {surf, g: 1}); if (!e.ok) fire('hit', e.x, e.y, {mat: 'body', g: .6}); break;
         case 'lasso.slam': fire('foeFall', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, heavy: e.who?.kind === 'brute' || e.who?.foe === 'bruiser'})); break;
         case 'lasso.slip': fire('rustle', e.x, e.y, {surf, g: .4}); break;
+        case 'lasso.cinch': fire('jump', e.x, e.y, {surf, g: .9}); break;   // (STRENGTH: the snare's snap down the rope)
+        case 'lasso.snare': fire('hit', e.x, e.y, {mat: 'straw', g: .7}); fire('rustle', e.x, e.y, {surf, g: .6}); break;   // (the loop cinched round its legs)
         case 'lasso.swing': fire('jump', e.x, e.y, {surf, g: .9}); break;
         case 'lasso.bump': fire('hit', e.x, e.y, {mat: 'body', g: .8}); break;
         case 'combat.bowl': fire('hit', e.x, e.y, {mat: 'body', g: .7}); break;
@@ -1184,6 +1239,18 @@ export function createAudio(ctx, host = {}) {
         case 'trick.reset': fire('trickReset', e.x, e.y); break;
         case 'trick.clear': fire('trickClear', L.x, L.y); break;
         case 'bullet.ricochet': if (e.defl) fire('bellsWhine', e.x, e.y, {bell: e.defl === 'bell'}); else fire('trickRicochet', e.x, e.y, {mat: e.mat}); break;
+        // FISTS (features/fists.js, sim/player/fists.js, features/foes/brawler.js; docs/exp/fists.md): the forge's punch recipe
+        // (events.js punch .. foePunch): a blow at its contact by its move; a guard a forearm thock; a prop shoved the boot's kick;
+        // the big ones (haymaker, body, roundhouse) whoosh at their throw, the small ones whiff only at nothing
+        case 'fist.hit': if (e.kind === 'block') fire('punchBlock', e.x, e.y, {power: e.power}); else if (e.kind === 'prop') fire('kick', e.x, e.y, {mat: MAT[e.who?.kind] || 'wood'});
+          else fire('punch', e.x, e.y, {kind: e.kind, mat: MAT[e.who?.kind] || 'wood', mv: e.mv, power: e.power, counter: !!e.counter, ko: !!e.ko}); break;
+        case 'fist.whiff': if (e.mv !== 'hay' && e.mv !== 'body' && e.mv !== 'round') fire('whiff', e.x, e.y, {mv: e.mv, power: e.power}); break;
+        case 'fist.grab': fire('fistGrab', e.x, e.y, {ok: !!e.ok}); break;
+        case 'player.fist': if (e.phase !== 'throw' || e.mv === 'hay' || e.mv === 'body' || e.mv === 'round') fire('fistCue', e.x, e.y, {phase: e.phase, mv: e.mv, k: e.k});
+          else if (e.mv === 'toss') fire('fistCue', e.x, e.y, {phase: 'throw', mv: 'hay', k: .5}); break;   // (the hip toss: the haymaker's whoosh)
+        case 'player.shove': fire('punchBlock', e.x, e.y, {power: .3}); break;   // (the clinch's shove: a padded thock)
+        case 'foe.fwind': fire('foeWind', e.x, e.y, {n: e.n}); break;
+        case 'foe.punch': fire('foePunch', e.x, e.y, {n: e.n, phase: e.phase}); break;
         // the bells and plates (features/bells.js): a bell's note (its clapper's later strikes: the view's tolls), a plate's
         // ping (a glance off either whines: bullet.ricochet above), an arrow's glance
         case 'bells.ring': fire('bellsRing', e.x, e.y, {note: e.note, k: e.k}); break;

@@ -2,7 +2,7 @@
 
 Status: 2026-10-12. Eight slots (head, body, back, hands, legs, feet, main hand, off hand), 56 pieces to try on: the first
 slice's 15 and a second batch of 41 (hats, armour, clothes and robes, gloves, weapons, shields and things held), the
-character drawn in what he wears, weight and armor as game effects, a gear panel on Tab, the wardrobe screen on Shift+Tab
+character drawn in what he wears, weight and armor as game effects, a gear panel (the menu), the wardrobe screen on Shift+Tab
 (dev), and the set synced in co-op (the server checks it, everyone sees it). No inventory yet: every piece is there to try
 on, as in a wardrobe. The design talk behind it is the "Items and Equipment (WIP)" notes doc.
 
@@ -19,7 +19,8 @@ your lantern (the staff's reaches further). Each piece's "soon" says what it wil
 
 ## Try it
 
-Tab opens the gear panel (left of the screen). Click a piece to wear it, "own" to take that slot off (the character's own
+The menu's Gear row opens the gear panel (left of the screen; Tab is the pack's now, so Tab opens it only with
+`?pack=0`). Click a piece to wear it, "own" to take that slot off (the character's own
 clothes). Point at a piece to read what it is, what it does now and what it will do later ("not in the game yet": the
 systems it needs, like cold or fire, aren't there yet). The bottom line is the set's weight, armor and speed.
 The set is remembered on this machine. `?gear=wool_cap,mail_shirt` wears a set from the URL (tests); `?gear=none` none.

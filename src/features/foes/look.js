@@ -77,6 +77,7 @@ import {createRagdolls} from '../../view/ragdoll.js';
 import {createRigMesh} from '../../render/rigmesh.js';
 import {liveModel, createLiveBody} from '../../view/livebody.js';
 import {pieceOf, drawPiece} from '../../view/loosepiece.js';   // a gunman's hat or gun lying loose (docs/exp/brawl.md)
+import {createBrawlerLook} from './brawlerlook.js';   // the unarmed ones boxing (docs/exp/fists.md)
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180, OUT = '../concepts/sprites/out/';
 const NEED = ['idle.0', 'walk.0', 'run.0', 'gun_draw.0', 'gun_aim', 'gun_fire.0', 'gun_reload.0'];
@@ -265,6 +266,7 @@ export function createLook(host, sim) {
   const SC = [0, 0, 0], SM = [0, 0, 0];
   let yaw = 0, z = 1;
   const faceOf = (set, w) => { const n = set.ND; return ((Math.round((w - yaw) / (TAU / n)) % n) + n) % n; };   // world angle -> the atlas's facing at this yaw
+  const BL = createBrawlerLook(host, faceOf);   // FISTS: a boxing gunman's poses, the haymaker's telegraph
   const worldOf = (set, f) => f * TAU / set.ND + yaw;
   // the barrel's screen angle in pose `frame` at facing f vs the line from its muzzle to the target (both on screen)
   function aimErr(set, frame, f, ox, oy, tx, ty) {
@@ -498,7 +500,7 @@ export function createLook(host, sim) {
   const SEGI = new Map();   // set -> [the hat's segment, the gun's]
   function dropMask(set, g, v) {
     let I = SEGI.get(set); if (!I) { const S2 = set.live.J.segs; SEGI.set(set, I = [S2.findIndex(s => s.bone === 'HatHold0'), S2.findIndex(s => s.bone === 'GunHold0')]); }
-    const k = (g.hat ? 0 : 1) | (g.gunIn ? 0 : 2);
+    const k = (g.hat ? 0 : 1) | (g.gunIn && !g.fist?.bare ? 0 : 2);   // (FISTS: the bruiser's coach gun hidden while he boxes)
     if (!k) { v.drop = null; v.dropK = 0; return; }
     if (k !== v.dropK || !v.drop) {
       v.drop ??= new Uint8Array(set.live.J.segs.length); v.drop.fill(0);
@@ -608,6 +610,7 @@ export function createLook(host, sim) {
     const p = g.p, act = g.act, G2 = g.T.gun;
     v.dox = v.doy = v.dl = v.de = 0;
     if (g.down) return downPose(set, g, v);
+    const fp = g.fist ? BL.pose(set, g, v, dt, t) : null; if (fp) return fp;   // (a fist fight: features/foes/brawlerlook.js)
     G.toScreenInto(p.x, p.z, p.y, SC); const ox = SC[0], oy = SC[1];
     G.toScreenInto(g.tx, g.th, g.ty, SM); const tx = SM[0], ty = SM[1];
     const moving = g.speed > .15;
@@ -717,6 +720,7 @@ export function createLook(host, sim) {
         if (set.live) { if (!THR.has(p)) liveDraw(set, g, v, wob, nd, t); }   // (thrown: his ragdoll draws him, BRAWL)
         else put(set, v.pose, v.f, p.x + v.nx * nd + v.dox, p.y + v.ny * nd + v.doy, (p.z || 0) + (p.h || 0), 1, Math.min(1, (p.flash || 0) * H.flash), wob, v.dl, v.de);
         if (g.act === 'aim' && g.locked) glint(set, g, v);
+        if (g.fist) BL.mark(set, g);
       }
       if (VS.size > sim.gang.length) VS.forEach(sweep);
       const C = TUNE.corpse;

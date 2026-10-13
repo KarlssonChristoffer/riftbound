@@ -48,7 +48,7 @@ export const heightOf = p => topOfProp(p) ?? HEIGHT[p.kind] ?? 1.2;
 // length (+ LIM m); deeper, it stays (the player's unstick walks him out: sim/player/adapter.js). free (phase 4: a body in the air,
 // which came down into something low from above, or was put in it): it's pushed out of what it overlaps first, however deep
 const EPS = 1e-4, SUB = .1, PASSES = 4, LIM = .02, G_R = .12, ROUND = .5, SLIP = .8, TOP_EPS = .05;
-const JOINED = new Set(['fieldwall', 'towerwall', 'parapet', 'menhir_part']), LINK = 1.25, PUSHED = new Set(['crate', 'barrel', 'barrel_x']);
+const JOINED = new Set(['fieldwall', 'towerwall', 'parapet', 'menhir_part', 'rootplate', 'windlog']), LINK = 1.25, PUSHED = new Set(['crate', 'barrel', 'barrel_x']);
 const WALK = {tree: .6};
 const radOf = p => p.r * (WALK[p.kind] ?? 1);   // (a round prop's radius to a body)
 export const walkR = radOf;   // (the Shift+G overlay draws what a body walks against)

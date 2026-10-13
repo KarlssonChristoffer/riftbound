@@ -48,12 +48,15 @@ import {cliffGeometry} from './cliffs3d.js';
 import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
-import {TOWER_PLAN, FOREST} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
+import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
+import {TOWER_PLAN, FOREST, HUT} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
 import {sample as forestSample, depth as forestDepth} from './forest.js';
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
 import {bridgeGeometry} from './bridge3d.js';
+import {PAINTS, paintRamp} from '../content/paints.js';   // the recipes' own colours (content/recipes.js): families appended to FAMS
+import {growDecor} from './decor3d.js';   // the forest floor's small things (world/forest.js F.decor): stumps, logs, mushrooms, blueberries
 import {propModel} from './props3d.js';   // the true-3D props: the dummy and the crystal as live meshes (?props2d=1: their cards)
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
@@ -92,11 +95,14 @@ const EMIT = {rune: {rift: ['ffe0fa', 'ff8ae8', 'c85ad8', '8a4ad8']}, crack: {em
 export const FAMS = ['wood', 'metal', 'clay', 'stone', 'rock', 'rope', 'red', 'haz', 'gold', 'void', 'rune', 'crack', 'cover', 'bark', 'leaf', 'char', 'ash', 'ember', 'birch', 'aspen', 'berry', 'berryOrange', 'berryGreen', 'berryCream',
   // (the true-3D props, world/props3d.js and the features' 3D pieces: gem = a crystal's facets (the biome's style.gem), flame = the warm
   // glow of a flame or a lantern's glass, shroom = the biome's own glow (the mushrooms' caps), bone = bleached bone, wax, linen; GLOW3
-  // below. They light themselves only where a mesh says so: gfx.js mesh.setGlow. NB the composite keeps a family in 5 bits (E.w =
-  // part x 32 + family): at most 32 families)
+  // below. They light themselves only where a mesh says so: gfx.js mesh.setGlow. NB the composite keeps a family in 5 bits and E.w's
+  // sign (gfx.js: part x 32 + family, negative past 31): at most 64 families)
   'gem', 'flame', 'shroom', 'bone',
   // (cactus: the desert's saguaros and cactus bushes, trees3d.js / flora3d.js: the true-3D pivot's flora)
-  'cactus'];
+  'cactus',
+  // (the paints: content/paints.js, the recipes' colours, world/recipe3d.js; last, so every family above keeps its index)
+  ...Object.keys(PAINTS)];
+if (FAMS.length > 64) console.warn(`world: ${FAMS.length} families, the composite keeps 64 (content/paints.js)`);
 // the true-3D props' families per biome, [hi, base, shade, outline] (gem: the biome's style.gem; shroom: a glow colour, ramped)
 const GLOW3 = {
   flame: {ruins: ['fff4d0', 'ffd070', 'e09838', '7a4a1c'], ember: ['ffe8b0', 'ffa848', 'd8682a', '6e2a12'], frost: ['fff6d8', 'ffd890', 'd8a050', '7a5428'],
@@ -115,6 +121,7 @@ function palette(biome, style) {
   P.birch = sr('birch') || P.stone; P.aspen = sr('aspen') || P.bark; P.berry = sr('berry') || P.red;   // (ruins' STYLES has them; the other biomes grow no such trees)
   P.berryOrange = sr('berryOrange') || P.gold; P.berryGreen = sr('berryGreen') || P.leaf; P.berryCream = sr('berryCream') || P.stone;
   P.cactus = sr('cactus') || P.leaf;   // (the desert's STYLE.cactus)
+  for (const k in PAINTS) P[k] = ramp6(paintRamp(k, biome).map(h => h.replace('#', '')));   // (content/paints.js)
   const w = P.wood; P.void = [...Array(3).fill(mix(w[4], [0, 0, 0], .3)), ...Array(3).fill(mix(w[4], [0, 0, 0], .45))];
   P.cover = B.cover ? ramp6(B.cover) : P.stone;
   P.char = ramp6(['3a3330', '26211f', '161312', '0c0a0a']); P.ash = ramp6(['8e8982', '75716b', '5e5a55', '403d3a']);
@@ -883,6 +890,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       // the clefts (layout.js CLEFTS): rock up their sides and round their chambers, facing in (a slot through the mesa's cliff)
       CLEFTS.forEach((c, j) => terrRuns.push({pts: cleftWall(c), top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)),
         bot: () => 0, minBot: -.05, base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 131 + j}));
+      // the forest's canyon (world/forest.js: a cut drawn wider than walked, as a cleft): rock up both its walls and round its head, its
+      // foot the floor (rising inward)
+      if (FOREST?.canyon) {
+        const W = FOREST.canyon.wall, foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
+        let lo = 1e9; for (const [x, z] of W) lo = Math.min(lo, foot(x, z));
+        terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: lo - .05,
+          base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 151});
+      }
       // the creek's last step (layout.js CASCADES): a low rock rim along the pool's north edge, under the lip (the fall's sheet in its gap)
       if (CASCADES.length) {
         const F = CASCADES.at(-1), y = POOL.clip - .03;
@@ -956,6 +971,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // scaled per plant from its position; its autumn (plantOf) as the card's. ?flora=cards: the painted cards (an A/B)
   const flora = FLORA ? createFlora(G) : null;
   if (flora) { flora.setRamps(bladeRamps(biome.id, biome.style)); disposers.push(() => flora.dispose()); }
+  // the forest floor's small things (world/forest.js F.decor, world/decor3d.js: recipes drawn instanced, placed once; ?decor=0: none)
+  if (flora && FOREST?.decor && flags.get('decor') !== '0') growDecor(flora, FOREST.decor, elev, biome.id, () => nextId++);
   const FLORA_KINDS = {bush: 1, fern: 1, tuft: 1, reed: 1}, TAU = Math.PI * 2;
   function floraOf(it, p) {
     if (!flora || !FLORA_KINDS[p.kind]) return null;
@@ -1015,6 +1032,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const r = watchtowerRun(TOWER_PLAN, wo, TF ? TF.H : () => 0);
     for (const p of props) if (p.kind === 'watchtower') own(p, r.geo, r.top - (p.z || 0)); else if (p.kind === 'towerwall') own(p, null, colTop(TOWER_PLAN, p.x, p.y, p.z || 0));
   }
+  // the hut's roof (world/hut.js, layout.js HUT): its slabs on the 'hutroof' prop (no collider: he walks under it)
+  if (HUT) { const r = hutRoof(HUT, wo); for (const p of props) if (p.kind === 'hutroof') own(p, r.geo, r.top - (p.z || 0)); }
   // (a rigid 3D tree, trees3d.js shape.rigid: the saguaros, spires, shards: a static mesh like any prop, no sway)
   const swayOf = it => !!it.pose && !it.pose.rigid;
   const liveOf = (it, geo, x, h, z) => { const m = G.mesh(geo, it.obj, placeOf(it, x, h, z, new THREE.Matrix4()), {sway: swayOf(it), static: !swayOf(it), autumn: it.pose?.autumn}); if (swayOf(it)) m.sm.layers.disable(1); if (it.pm) pmLive(it, m); return m; };
@@ -1275,9 +1294,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     glb: state => glbGeometry(loader, state),                   // Promise<geometry | null> (debris chunks, ...)
     // an extra live mesh owned by a feature (debris chunks): dispose it when done; a rebuild (biome switch) disposes the rest.
     // It doesn't block point lights unless o.occlude (tumbling chunks next to a blast threw black spikes everywhere).
-    // o.static: it never moves (its sun shadow goes in the cached static map, gfx mesh {static})
+    // o.static: it never moves (its sun shadow goes in the cached static map, gfx mesh {static}). o.sway + o.autumn: a tree's
+    // own geometry with its leaves (features/woodcut.js: a felled tree falling): the crown's flutter and autumn ramps as a
+    // standing tree's (gfx mesh {sway, autumn}; its seed is its matrix's place, so made at the tree's own it matches it)
     mesh: (geo, matrix, o = {}) => {
-      const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4(), {static: !!o.static}), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
+      const m = G.mesh(geo, nextId++, matrix || new THREE.Matrix4(), {static: !!o.static && !o.sway, sway: !!o.sway, autumn: o.autumn}), d = m.dispose; extra.add(m); m.dispose = () => { extra.delete(m); d(); };
       if (!o.occlude) m.sm.layers.disable(1);
       if (o.shadow === false) m.sm.layers.disableAll();   // (casts nothing: a flame, a lily pad flat on the water)
       return m;

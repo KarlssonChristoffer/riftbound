@@ -1,8 +1,9 @@
 // WEATHER (render3d, view): the world clock's weather and seasons made visible. It reads sim/env.js (host.env) and writes
 // only render inputs and its own particles; the clock itself never waits on it. OWNER: the trees / wind-feel session.
 //   rain     streaks (short 1 px world lines in two tones, slanted by the wind), as many as env.sky.rain asks; each drop
-//            lands as a splash on the ground or a ring on the stream. A weather FRONT on its way (sim/env.js): it rains
-//            (snows) only where its storm is (env.skyAt), as much of the view as that covers (FRONT below)
+//            lands as a splash on the ground or a ring on the stream. A change of weather on its way (sim/env.js
+//            TRANSITIONS): it rains (snows) only where it falls (env.skyAt: behind a front's edge, under a breaking deck,
+//            not in its gaps), as much as falls over the view (FRONT below); a drizzle's drops are finer and slower
 //   snow     flakes (1 px points, a few 2 px near ones) drifting with the wind, where the biome has no snow of its own
 //            (atmos.js keeps the frost lands' snow and scales it by the weather)
 //   storm    lightning (env.sky.storm): the scene lit for an instant in two or three pulses (gfx setFlash, strongest at
@@ -62,10 +63,16 @@ export async function create(host) {
   const Q2 = [0, 0];
   // FRONT: with a front on screen, how much of the view each falls on (the mean over a 4 x 4 grid of ground points: the pool's
   // size) and the most it falls anywhere there; a drop is placed where it falls (a few tries: a point is kept with the odds
-  // channel there / the most). Without a front: the sky's own (no extra random draws: the same drops as before)
+  // channel there / the most; none kept: it waits out of the view and tries again next frame). A breaking deck: the view's
+  // mean (env.light) and the deck's own (env.under). Nothing changing: the sky's own (no extra random draws: the same drops)
   const FRT = {on: false, rain: 0, snow: 0, rainMax: 0, snowMax: 0};
   function frontCover(E) {
-    FRT.on = !!(E.front && E.front.on && E.skyAt); if (!FRT.on) return;
+    const dk = !!(E.deck && E.deck.mode && E.skyAt && !(E.front && E.front.on));
+    FRT.on = !!((E.front && E.front.on && E.skyAt) || dk); if (!FRT.on) return;
+    if (dk) {   // (a breakup, a front's settling: the deck's gaps; its mean is the view's)
+      FRT.rain = E.light.rain; FRT.snow = E.light.snow; FRT.rainMax = Math.max(E.open.rain, E.under.rain); FRT.snowMax = Math.max(E.open.snow, E.under.snow);
+      return;
+    }
     let r = 0, n = 0, rm = 0, nm = 0;
     for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
       const ox = ((i + .5) / 2 - 1) * V.hw, oy = (-1 + (j + .5) / 4 * 2.6) * V.hh, x = V.cx + V.RX * ox + V.FX * oy, y = V.cy + V.RY * ox + V.FY * oy;
@@ -76,9 +83,15 @@ export async function create(host) {
   function placeUnder(o, c, most) {
     const E = host.env;
     for (let k = 0; k < 16; k++) { placeX(o); if (R() * most <= E.skyAt(o[0], o[1], c)) return; }
+    o[0] = V.cx + 1e4; o[1] = V.cy;   // (nowhere it falls: out of the view, placed again next frame)
   }
   const place = (o, c) => { if (FRT.on) placeUnder(o, c, c === 'rain' ? FRT.rainMax : FRT.snowMax); else placeX(o); };
-  function spawnRain(i, fresh) { place(Q2, 'rain'); rX[i] = Q2[0]; rY[i] = Q2[1]; rH[i] = host.elev(Q2[0], Q2[1]) + (fresh ? rr(0, TUNE.rain.top) : rr(TUNE.rain.top * .8, TUNE.rain.top)); rV[i] = rr(...TUNE.rain.v); }
+  let fine = 1;   // the rain's weight (1 a downpour .. 0 a drizzle: finer, slower drops)
+  function spawnRain(i, fresh) {
+    place(Q2, 'rain'); rX[i] = Q2[0]; rY[i] = Q2[1];
+    const g = Q2[0] > V.cx + 1e3 ? 0 : host.elev(Q2[0], Q2[1]);   // (one placed out of the view: no ground lookup there)
+    rH[i] = g + (fresh ? rr(0, TUNE.rain.top) : rr(TUNE.rain.top * .8, TUNE.rain.top)); rV[i] = rr(...TUNE.rain.v) * (.55 + .45 * fine);
+  }
   function spawnSnow(i, fresh) { place(Q2, 'snow'); sX[i] = Q2[0]; sY[i] = Q2[1]; sH[i] = host.elev(Q2[0], Q2[1]) + (fresh ? rr(0, TUNE.snow.top) : rr(TUNE.snow.top * .8, TUNE.snow.top)); sV[i] = rr(...TUNE.snow.v); sP[i] = R() * TAU; }
   function splash(x, y, ring) {
     if (pn >= PN) return;
@@ -128,8 +141,10 @@ export async function create(host) {
     view();
     const S = E.sky, area = Math.min(1.6, V.hw * V.hh / 70);   // a zoomed-in view needs fewer drops
     frontCover(E);
-    // rain: the pool grows / shrinks toward what the sky asks for (a front: the share of the view it rains on)
-    const wantR = Math.round(TUNE.rain.max * clamp(FRT.on ? FRT.rain : S.rain, 0, 1) * area * (F.fx ? 1 : 0));
+    // rain: the pool grows / shrinks toward what the sky asks for (a front: the share of the view it rains on). Capped at the
+    // pool's size: a wide view's area (up to 1.6) asks for more, and a drop past the arrays' end was NaN (G.line / G.point)
+    const wantR = Math.min(RN, Math.round(TUNE.rain.max * clamp(FRT.on ? FRT.rain : S.rain, 0, 1) * area * (F.fx ? 1 : 0)));
+    fine = clamp(((FRT.on ? FRT.rainMax : S.rain) - .15) / .6, 0, 1);
     while (rn < wantR) spawnRain(rn++, true);
     if (rn > wantR) rn = Math.max(wantR, rn - Math.ceil(dt * 400));   // stop gradually (no hole in the air)
     const wv = w?.at ? w.at(V.cx, V.cy, WV) : CALM, wx = wv.x * 1.3, wy = wv.y * 1.3;
@@ -140,7 +155,7 @@ export async function create(host) {
       else if (out(rX[i], rY[i])) spawnRain(i, false);
     }
     // snow (not in the frost lands: atmos.js snows there)
-    const wantS = host.biome.id === 'frost' ? 0 : Math.round(TUNE.snow.max * clamp(FRT.on ? FRT.snow : S.snow, 0, 1) * area * (F.fx ? 1 : 0));
+    const wantS = host.biome.id === 'frost' ? 0 : Math.min(SN, Math.round(TUNE.snow.max * clamp(FRT.on ? FRT.snow : S.snow, 0, 1) * area * (F.fx ? 1 : 0)));
     while (sn < wantS) spawnSnow(sn++, true);
     if (sn > wantS) sn = Math.max(wantS, sn - Math.ceil(dt * 200));
     for (let i = 0; i < sn; i++) {
@@ -178,7 +193,7 @@ export async function create(host) {
     light.intensity = bolt.t >= 0 ? TUNE.bolt.light.intensity * (1 - bolt.t / TUNE.bolt.life) : 0;
     if (!F.fx) return;
     // rain: a short streak along the drop's motion (the wind slants it), two tones
-    const wv = host.wind?.at ? host.wind.at(V.cx, V.cy, WV) : CALM, L = TUNE.rain.len, sx = -wv.x * 1.3 / 9.5 * L * 2, sy = -wv.y * 1.3 / 9.5 * L * 2;
+    const wv = host.wind?.at ? host.wind.at(V.cx, V.cy, WV) : CALM, L = TUNE.rain.len * (.5 + .5 * fine), sx = -wv.x * 1.3 / 9.5 * L * 2, sy = -wv.y * 1.3 / 9.5 * L * 2;
     for (let i = 0; i < rn; i++) host.line(rX[i], rY[i], rH[i], rX[i] + sx, rY[i] + sy, rH[i] + L, CR[i & 1]);
     for (let i = 0; i < sn; i++) host.point(sX[i], sY[i], sH[i], CS[i & 1], i % 8 === 0 ? P2 : P1);
     for (let i = 0; i < pn; i++) {

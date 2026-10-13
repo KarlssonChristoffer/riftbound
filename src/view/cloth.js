@@ -100,6 +100,11 @@ export const CLOTH_MATERIALS = {
   // a leg may push it out past its drape (the run's back kick lifts the heel to the knee: carried all the way, the
   // tails rode up on the heels and stood out flat behind him; past this the heel slips through)
   Duster: {weight: 2, bend: .9, damping: .985, flutter: .2, wave: 1, retain: [140, 18], bendBoth: true, hull: .05, boot: .1, legPad: .03, edge: 2, carry: .2},
+  // the outlaw's serape poncho, below its rigid yoke: two sheets (front, back) open at the sides. Wool, but held only
+  // lightly to its drape: the skirt is short (~20 cm under the yoke), and with the cloak's numbers it moved by a pixel
+  // (it read as rigid); this way the hem trails a run, swings out on a stop and flares on a turn
+  PonchoFront: {weight: 1.3, bend: .9, damping: .985, flutter: .3, wave: 1, retain: [24, 3], bendBoth: true},
+  PonchoBack: {weight: 1.3, bend: .9, damping: .985, flutter: .3, wave: 1, retain: [24, 3], bendBoth: true},
 };
 
 const CAP = 12;   // floats per body capsule in ClothRig.capF
@@ -111,6 +116,17 @@ export class ClothRig {
   constructor(idx) {
     this.idx = idx;
     this.cloths = (idx.sim?.cloths || []).map(c => this.#makeCloth(c));
+    // the palettes a cloth pixel can take (draw's fam buffer indexes them): each cloth's own first (its index = its
+    // cloth's), then its STRIPES' (a def's bands [first cell row, last, family, bias, colours]: rowPal / rowBias per cell row)
+    this.pal = this.cloths.map(C => C.colours);
+    for (const C of this.cloths) {
+      if (!C.def.bands) continue;
+      C.rowPal = new Int8Array(C.rows - 1).fill(this.cloths.indexOf(C)); C.rowBias = new Float64Array(C.rows - 1).fill(C.bias);
+      for (const [r0, r1, , bias, colours] of C.def.bands) {
+        const pi = this.pal.push(colours.map(hex)) - 1;
+        for (let r = r0; r <= r1 && r < C.rows - 1; r++) { C.rowPal[r] = pi; C.rowBias[r] = bias ?? C.bias; }
+      }
+    }
     if (!this.cloths.length) return;   // a set with its cloth baked into the sprites
     // the legs (a hull cloth wraps them): 1 thigh, 2 shin (its capsule ends at the ankle: the boot goes on past it)
     this.legs = Uint8Array.from(idx.sim.capsule_names || [], n => /UpLeg$/.test(n) ? 1 : /Leg$/.test(n) ? 2 : 0);
@@ -431,12 +447,13 @@ export class ClothRig {
         const n0 = u1 * s2 - u2 * s1, n1 = u2 * s0 - u0 * s2, n2 = u0 * s1 - u1 * s0, l = hypot3(n0, n1, n2) || 1;
         VN[i * 3] = (n0 * R[0] + n1 * R[1] + n2 * R[2]) / l; VN[i * 3 + 1] = (n0 * U[0] + n1 * U[1] + n2 * U[2]) / l; VN[i * 3 + 2] = (n0 * off[0] + n1 * off[1] + n2 * off[2]) / l;
       }
+      let pc = ci, pb = C.bias;   // the cell row's palette and bias (a striped cloth's rows: rowPal, rowBias)
       const tri = (i0, i1, i2) => {
         const a0 = S[i0 * 3], a1 = S[i0 * 3 + 1], a2 = S[i0 * 3 + 2], b0 = S[i1 * 3], b1 = S[i1 * 3 + 1], b2 = S[i1 * 3 + 2], c0 = S[i2 * 3], c1 = S[i2 * 3 + 1], c2 = S[i2 * 3 + 2];
         const p0 = P[i0], p1 = P[i1], p2 = P[i2];
         const e0 = p1[0] - p0[0], e1 = p1[1] - p0[1], e2 = p1[2] - p0[2], f0 = p2[0] - p0[0], f1 = p2[1] - p0[1], f2 = p2[2] - p0[2];
         const m0 = e1 * f2 - e2 * f1, m1 = e2 * f0 - e0 * f2, m2 = e0 * f1 - e1 * f0;
-        const sg = m0 * off[0] + m1 * off[1] + m2 * off[2] < 0 ? -1 : 1, bias = C.bias - (sg < 0 ? .22 : 0);   // the lining: seen from inside, darker
+        const sg = m0 * off[0] + m1 * off[1] + m2 * off[2] < 0 ? -1 : 1, bias = pb - (sg < 0 ? .22 : 0);   // the lining: seen from inside, darker
         const A = i0 * 3, Bn = i1 * 3, Cn = i2 * 3;
         const x0 = Math.max(-MX, Math.floor(Math.min(a0, b0, c0))), x1 = Math.min(FW + MX - 1, Math.ceil(Math.max(a0, b0, c0)));
         const y0 = Math.max(-MY, Math.floor(Math.min(a1, b1, c1))), y1 = Math.min(FH + MY - 1, Math.ceil(Math.max(a1, b1, c1)));
@@ -452,12 +469,13 @@ export class ClothRig {
           if (z < zb[j]) {
             const nx = (u * VN[A] + v * VN[Bn] + w * VN[Cn]) * sg, ny = (u * VN[A + 1] + v * VN[Bn + 1] + w * VN[Cn + 1]) * sg, nz = (u * VN[A + 2] + v * VN[Bn + 2] + w * VN[Cn + 2]) * sg;
             const hl = hypot3(nx, ny, nz) || 1, lam = (nx * LIGHT[0] - ny * LIGHT[1] + nz * LIGHT[2]) / hl + bias;
-            zb[j] = z; tone[j] = lam > HI ? 0 : lam > LO ? 1 : 2; fam[j] = ci;
+            zb[j] = z; tone[j] = lam > HI ? 0 : lam > LO ? 1 : 2; fam[j] = pc;
             if (NV) { NV[j * 3] = nx / hl; NV[j * 3 + 1] = ny / hl; NV[j * 3 + 2] = nz / hl; }
           }
         }
       };
       for (let r = 0; r + 1 < C.rows; r++) for (let k = 0; k + 1 < C.cols; k++) {
+        if (C.rowPal) { pc = C.rowPal[r]; pb = C.rowBias[r]; }
         const i = r * C.cols + k;
         tri(i, i + 1, i + C.cols + 1); tri(i, i + C.cols + 1, i + C.cols);
       }
@@ -504,7 +522,7 @@ export class ClothRig {
         if (bd < 255 && bd < oz[j] - eps) continue;
       }
       cover[j] = 1;
-      const col = this.cloths[fam[j]].colours[out[j]];
+      const col = this.pal[fam[j]][out[j]];
       D[j * 4] = col[0]; D[j * 4 + 1] = col[1]; D[j * 4 + 2] = col[2]; D[j * 4 + 3] = 255;
       if (ND) { ND[j * 4] = (NV[j * 3] * .5 + .5) * 255 + .5; ND[j * 4 + 1] = (NV[j * 3 + 1] * .5 + .5) * 255 + .5; ND[j * 4 + 2] = (NV[j * 3 + 2] * .5 + .5) * 255 + .5; ND[j * 4 + 3] = 255; }
     }

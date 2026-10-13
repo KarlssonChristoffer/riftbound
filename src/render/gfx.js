@@ -7,7 +7,8 @@
 //                 A  rgb albedo, a = (type * 4 + tone) / 255
 //                 N  xyz world normal, w = object id (whole numbers; a wall line shares one id: no outline at joints;
 //                    -1 = particles (points), which never count as hiding the player in the x-ray)
-//                 E  rgb emissive, w = part * 32 + family (meshes: seams between parts of the same family)
+//                 E  rgb emissive, w = part * 32 + family (meshes: seams between parts of the same family); families 32..63 (world.js FAMS: the paints)
+//                 as -(part * 32 + family - 32) - 1: the sign carries the sixth bit, so the first 32 pack as they always did
 //               types: 0 empty, 1 ground (tone 1 = WATER: the composite lights it as water; tone 2 = fallen leaves), 2 ramp mesh (live 3D prop), 3 billboard (painted sprite;
 //                      tone 2 = a plant with its own autumn colours: the composite's season matrix skips tone 2 on types 1 and 3), 4 character,
 //                      5 textured surface (cliff faces), 6 line (arrows), 7 lit card (a prop pre-rendered at 16 angles)
@@ -25,7 +26,10 @@ import {cssRGBA} from '../core/color.js';
 import {createGLStats} from './glstats.js';
 import {createLitterSim} from './litter.js';
 import {createGodrays} from './godrays.js';
-import {CLOUD_GLSL} from './clouds.js';
+import {createMistVol} from './mistvol.js';
+import {createAir} from './air.js';
+import {CLOUD_GLSL, CLOUD_EXTRA} from './clouds.js';
+import {CUT, cutU} from './cut.js';
 
 export const DEG = Math.PI / 180;
 // a uniform-shaped holder whose value is only ever a number (a card's sway: written every frame). Its own class keeps
@@ -62,10 +66,10 @@ vec3 sway() {
 const gl = v => Number.isInteger(v) ? v + '.' : String(v);   // a number as a GLSL float
 const gl3 = a => `vec3(${a.map(gl).join(', ')})`;
 const SPRAY_VS = `
-in vec4 aSpray; uniform vec2 uSeed;
+in vec4 aSpray; uniform vec2 uSeed; uniform mat4 uSprayM; uniform float uSprayFix;   // (uSprayFix 1: the clumps' places from uSprayM, the tree as it stood: a felled one falling keeps its colours, mesh.setSprayFrame)
 float sprayM(mat4 mm) {
   if (aSpray.w < 0.) return ${gl(AUTUMN_MID)};
-  mat3 M = mat3(mm);
+  mat3 M = mat3(uSprayFix > .5 ? uSprayM : mm);
   vec3 ew = M * (aSpray.xyz * 1.25) / length(M[0]);
   float t1 = fract(sin(dot(uSeed, vec2(12.9898, 78.233))) * 43758.5453), t2 = fract(t1 * 91.7 + .37);   // per tree: where it stands
   float k = clamp(.5 + ${gl(AU.expo)} * dot(ew, ${gl3(AU.sun)}) + ${gl(AU.rnd)} * (fract(aSpray.w + t2) - .5) + ${gl(AU.tree)} * (t1 - .5), 0., 1.);
@@ -89,13 +93,18 @@ void main() {
   fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed; fM = sprayM(modelMatrix);
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
-const MESH_FS = HEAD + OUTS + `
+// THE CUTAWAY (features/cutaway.js -> G.setCut; ?cut=0 off): what stands between the camera and the player is not drawn round him, so
+// he and what lies behind him show (render/cut.js CUT: the test; the ground and the meshes here, the plants and the grass in their own
+// files), and the composite fills what it leaves empty with a dark cap (COMP_FS). The shadow passes don't cut (the gorge stays in its
+// rim's shade)
+const MESH_FS = HEAD + OUTS + CUT + `
 in vec3 vN; in vec3 vW; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in float fM;
 uniform sampler2D uRamps; uniform vec3 uLArt; uniform float uObj, uFlash; uniform vec2 uSeed;
 uniform vec3 uAut[12];    // leaves only: the species' autumn ramps, stage 1..4 x tone 0..2 (trees3d.js B.autumn); uAutOn 0 = none
 uniform float uAutOn;
 uniform vec4 uRip;        // leaves only: (k x, k z, phase, amount) of a light wave rolling along the wind (0 = still)
 uniform float uLeafK;     // leaves only: how full the crowns are this season (1 = full)
+uniform mat4 uSprayM; uniform float uSprayFix;   // leaves only: the frame the tree stood in (a felled one falling: mesh.setSprayFrame)
 uniform vec3 uCover;      // x: amount (0 = none), y: up threshold, z: cover family
 uniform vec2 uEmitFam;    // families that glow in this biome (-1 = none)
 uniform vec4 uBurn;       // burning wood (mesh.burn): char, ember glow, time (s), ash; 0 = untouched
@@ -130,6 +139,7 @@ void main() {
   // two-sided), in the shade tone: leaves deeper in the crown. Only where both sides lost their leaves does it open
   // onto what's behind (a thinned crown used to show the ground through every gap). Bark, and a full crown, never show
   // their inside
+  if (cutAway(vW)) discard;   // (the cutaway, CUT)
   bool inner = !gl_FrontFacing;
   if (inner && (fFixed > -1.5 || uLeafK >= .999)) discard;
   if (fFixed < -1.5 && leafGone(vPL, fM)) discard;   // (the sprays that turned further go first: LEAF_GONE)
@@ -173,7 +183,8 @@ void main() {
   // withering of a nearly bare crown): whole steps, nothing at autumn 0. (The composite keeps this colour and darkens it for
   // outlines: COMP_FS, soft family)
   if (fFixed < -1.5 && uAutOn > .5 && uAutumn > 0.) {
-    float v = uAutumn * (fM + ${gl(AU.noise)} * (jn - .5) * 2. + ${gl(AU.face)} * dot(n, ${gl3(AU.sun)})
+    vec3 nf = uSprayFix > .5 ? normalize(mat3(uSprayM) * vNL) * (inner ? -1. : 1.) : n;   // (its facing as it stood)
+    float v = uAutumn * (fM + ${gl(AU.noise)} * (jn - .5) * 2. + ${gl(AU.face)} * dot(nf, ${gl3(AU.sun)})
       + ${gl(AU.wither[2])} * (1. - smoothstep(${gl(AU.wither[0])}, ${gl(AU.wither[1])}, uLeafK)));   // (what hangs on a nearly bare crown has withered: brown)
     int st = v < ${gl(AU.cuts[0])} ? 0 : v < ${gl(AU.cuts[1])} ? 1 : v < ${gl(AU.cuts[2])} ? 2 : v < ${gl(AU.cuts[3])} ? 3 : 4;
     if (st > 0) alb = uAut[(st - 1) * 3 + tone];
@@ -202,7 +213,7 @@ void main() {
   o1 = vec4(n, uObj);
   // a family this mesh lights itself (the true-3D props: a crystal, a candle's flame, a lantern's glass, a mushroom's cap)
   float gk = abs(fam - uGlowF.x) < .5 ? uGlowK.x : abs(fam - uGlowF.y) < .5 ? uGlowK.y : abs(fam - uGlowF.z) < .5 ? uGlowK.z : abs(fam - uGlowF.w) < .5 ? uGlowK.w : 0.;
-  o2 = vec4((glow ? alb : vec3(0.)) + alb * gk + vec3(uFlash) + em, fPart * 32. + fam);
+  o2 = vec4((glow ? alb : vec3(0.)) + alb * gk + vec3(uFlash) + em, fam < 31.5 ? fPart * 32. + fam : -(fPart * 32. + fam - 32.) - 1.);
 }`;
 
 // THE MOVING WATER (SURF_FS). world.js bakes the water texture uWater (its layout is documented there: state, base tone, speed,
@@ -339,7 +350,7 @@ void main() {
   vN = mat3(modelMatrix) * normal; vW = w.xyz;
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
-const SURF_FS = HEAD + OUTS + `
+const SURF_FS = HEAD + OUTS + CUT + `
 in vec2 vUv; in vec3 vN; in vec3 vW;
 uniform sampler2D uTex, uEm; uniform vec2 uTexSize; uniform float uSmooth, uHasEm, uType, uObj;
 // steep ground (the ravine wall): a cliff texture (rock strata, the waterfall) by world x (z on east / west faces) and
@@ -385,6 +396,7 @@ void main() {
   vec2 uvS = (s + clamp((t - s) / d, -.5, .5)) / uTexSize;            // smooth-pixel: sharp, blended only across texel seams
   // the triangle's own plane (the grid's smooth normals blend a 0.25 m cliff cell into its flat neighbours)
   vec3 fn = normalize(cross(dFdx(vW), dFdy(vW))); if (dot(fn, vN) < 0.) fn = -fn;
+  if (cutAway(vW)) discard;   // (the cutaway: after the derivatives)
   if (uHasCliff > .5 && abs(fn.y) < .45 && vW.y < uCliffTop) {
     vec3 n = fn;
     float along = abs(n.z) >= abs(n.x) ? vW.x : vW.z;
@@ -470,8 +482,9 @@ void main() {
   gl_Position.z -= uBias * gl_Position.w;
 #endif
 }`;
-const CARD_FS = HEAD + OUTS + `
+const CARD_FS = HEAD + OUTS + CUT + `
 in vec2 vUv; in vec2 vC; in vec2 vSp;
+uniform vec3 uAnchor;   // (CARD_VS's: the cutaway takes a card by its foot)
 uniform sampler2D uTex, uNrm, uEm; uniform vec4 uNrmRect, uRect; uniform vec2 uSize;
 uniform float uHasNrm, uHasEm, uType, uObj, uCamYaw, uFlash, uHasBend, uSway;
 uniform sampler2D uMetal; uniform float uHasMetal;   // the shiny-armour mask (R: 255 steel, 128 gold), aligned with uTex
@@ -510,6 +523,7 @@ vec3 plantTurn(vec3 col, int tn, vec2 sp) {   // sp: the pixel in the sprite (y 
   return uPPal[(r2 > .8 ? 16 : 0) + (stage - 1) * 4 + tn];
 }
 void main() {
+  if (uType != 4. && cutAway(uAnchor + vec3(0., .05, 0.))) discard;   // (the cutaway, render/cut.js: not the characters)
   vec2 C = vC, uv = vUv;
   if (uHasBend > .5) {   // each row shifts by whole pixels: stiff trunks, a crown moving as a block
     float f = clamp(1. - vSp.y / uSize.y, 0., 1.) * 7.; int i = int(floor(f)); float t = f - float(i);
@@ -552,7 +566,7 @@ const BCARD_VS = HEAD + `
 in vec3 position; in vec4 iA; in vec4 iS; in vec4 iO; in vec4 iB0; in vec4 iB1; in vec4 iM; in vec4 iP;
 uniform mat4 viewMatrix, projectionMatrix;
 uniform float uFaceYaw, uCamYaw, uShadow; uniform vec2 uPx, uSnap;   // uShadow 1: the sun card (no bias, no row bend)
-out vec2 vUv; out vec2 vC; out vec2 vSp;
+out vec2 vUv; out vec2 vC; out vec2 vSp; flat out vec3 vAnc;
 flat out vec2 vSize; flat out vec4 vB0; flat out vec4 vB1; flat out vec4 vMisc; flat out vec4 vPlant;   // vMisc: sway, bends, flash, obj
 void main() {
   vec2 c = position.xy;
@@ -562,7 +576,7 @@ void main() {
   float S = uHasBend > .5 ? ceil(abs(uSway)) : 0., sxp = c.x * (uSize.x + 2. * S) - S;
   float px = sxp - uPivot.x + uOff.x + (uHasBend > .5 ? 0. : uSway * c.y), py = uPivot.y - (1. - c.y) * uSize.y + uOff.y;
   vec3 w = iA.xyz + right * (px / uPx.x) + vec3(0., py / uPx.y, 0.);
-  vC = vec2(c.x, 1. - c.y); vSp = vec2(sxp, (1. - c.y) * uSize.y);
+  vC = vec2(c.x, 1. - c.y); vSp = vec2(sxp, (1. - c.y) * uSize.y); vAnc = iA.xyz;
   vUv = vC;
   vSize = uSize; vB0 = iB0; vB1 = iB1; vMisc = vec4(uSway, uHasBend, iM.x, iM.y); vPlant = vec4(iM.z, iM.w, iP.x, iP.y);
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
@@ -579,8 +593,8 @@ void main() {
   gl_Position.z -= uBias * gl_Position.w;
 #endif
 }`;
-const BCARD_FS = HEAD + OUTS + `
-in vec2 vUv; in vec2 vC; in vec2 vSp;
+const BCARD_FS = HEAD + OUTS + CUT + `
+in vec2 vUv; in vec2 vC; in vec2 vSp; flat in vec3 vAnc;
 flat in vec2 vSize; flat in vec4 vB0; flat in vec4 vB1; flat in vec4 vMisc; flat in vec4 vPlant;
 uniform sampler2D uTex, uEm, uPal; uniform float uHasEm, uType, uCamYaw, uAutumn;
 float bend(int i) { return i < 4 ? vB0[i] : vB1[i - 4]; }
@@ -610,6 +624,7 @@ vec3 plantTurn(vec3 col, int tn, vec2 sp) {   // (CARD_FS plantTurn)
   return pal(4 + (r2 > .8 ? 16 : 0) + (stage - 1) * 4 + tn);
 }
 void main() {
+  if (cutAway(vAnc + vec3(0., .05, 0.))) discard;   // (the cutaway, render/cut.js: a card goes by its foot)
   vec2 C = vC, uv = vUv;
   if (vMisc.y > .5) {   // each row shifts by whole pixels (CARD_FS)
     float f = clamp(1. - vSp.y / vSize.y, 0., 1.) * 7.; int i = int(floor(f)); float t = f - float(i);
@@ -664,10 +679,10 @@ const BATCH_VS = HEAD + `
 in vec3 position; in vec4 iAnchor; in vec4 iRect; in vec4 iSize; in vec4 iMisc;
 uniform mat4 viewMatrix, projectionMatrix;
 uniform float uFaceYaw, uCamYaw, uBias, uPy, uSun; uniform vec2 uPx, uSnap;
-out vec2 vUv; out vec2 vC; flat out vec4 vMisc;
+out vec2 vUv; out vec2 vC; flat out vec4 vMisc; flat out vec3 vAnc;
 const float LIE_H = .18;
 void main() {
-  vec2 c = position.xy;
+  vec2 c = position.xy; vAnc = iAnchor.xyz;
   vec3 right = vec3(cos(uFaceYaw), 0., -sin(uFaceYaw));
   if (dot(right, vec3(cos(uCamYaw), 0., -sin(uCamYaw))) < 0.) right = -right;   // shadow cards: never mirrored (CARD_VS)
   float px = c.x * iSize.x - iSize.z + iMisc.z * c.y, py = iSize.w - (1. - c.y) * iSize.y, lie = iAnchor.w;
@@ -696,10 +711,11 @@ void main() {
 }`;
 const BAYER = `float bayer(ivec2 p) { int i = (p.x & 3) + (p.y & 3) * 4;
   const float B[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.); return (B[i] + .5) / 16.; }\n`;
-const BATCH_FS = HEAD + OUTS + BAYER + `
-in vec2 vUv; in vec2 vC; flat in vec4 vMisc;
+const BATCH_FS = HEAD + OUTS + BAYER + CUT + `
+in vec2 vUv; in vec2 vC; flat in vec4 vMisc; flat in vec3 vAnc;
 uniform sampler2D uTex, uEm, uNrm; uniform float uHasEm, uHasNrm, uType, uCamYaw;
 void main() {
+  if (cutAway(vAnc + vec3(0., .05, 0.))) discard;   // (the cutaway, render/cut.js)
   vec4 c = texture(uTex, vUv), e = uHasEm > .5 ? texture(uEm, vUv) : vec4(0.);
   if (c.a < .5 && e.a < .5) discard;
   if (vMisc.x < .999 && vMisc.x <= bayer(ivec2(gl_FragCoord.xy))) discard;   // alpha as an ordered dither (pixel art)
@@ -720,9 +736,9 @@ void main() { if (texture(uTex, vUv).a < .5) discard; if (vMisc.x < .999 && vMis
 const POINT_VS = HEAD + `
 in vec3 position; in vec4 color; in vec2 aMisc;   // color.a = emissive; aMisc = size px, alpha
 uniform mat4 viewMatrix, projectionMatrix; uniform vec2 uSnap; uniform float uPtK;   // uPtK: the cinema camera's k (gfx.js setCine)
-out vec4 vCol; flat out float vAlpha;
+out vec4 vCol; flat out float vAlpha; flat out vec3 vP;
 void main() {
-  vCol = color; vAlpha = aMisc.y;
+  vCol = color; vAlpha = aMisc.y; vP = position;
   vec4 p = projectionMatrix * viewMatrix * vec4(position, 1.);
 #ifdef CINE
   float pw = p.w; p.xyz /= pw;   // (the cinema camera's perspective: gfx.js setCine)
@@ -744,6 +760,14 @@ void main() {
 const POINT_FS = HEAD + OUTS + BAYER + `
 in vec4 vCol; flat in float vAlpha;
 void main() {
+  if (vAlpha < .999 && vAlpha <= bayer(ivec2(gl_FragCoord.xy))) discard;
+  o0 = vec4(vCol.rgb, float(3 * 4) / 255.); o1 = vec4(0., 1., 0., -1.); o2 = vec4(vCol.rgb * vCol.a, 0.);   // obj -1: a particle
+}`;
+// the world's points (G.point) go with the cutaway too (render/cut.js; render/flames.js draws its own through POINT_FS)
+const POINT_CUT_FS = HEAD + OUTS + BAYER + CUT + `
+in vec4 vCol; flat in float vAlpha; flat in vec3 vP;
+void main() {
+  if (cutAway(vP)) discard;
   if (vAlpha < .999 && vAlpha <= bayer(ivec2(gl_FragCoord.xy))) discard;
   o0 = vec4(vCol.rgb, float(3 * 4) / 255.); o1 = vec4(0., 1., 0., -1.); o2 = vec4(vCol.rgb * vCol.a, 0.);   // obj -1: a particle
 }`;
@@ -844,7 +868,7 @@ void main() {
 const NL = 32;
 const MIST_N = 20;   // the mist's stretches (COMP_FS MIST, G.setMist): the water's, the West Downs' hollows and their brook (features/mist.js)
 const COMP_VS = HEAD + `in vec3 position; void main() { gl_Position = vec4(position.xy, 0., 1.); }`;
-const COMP_FS = HEAD + `
+const COMP_FS = HEAD + CUT + `
 uniform sampler2D tA, tN, tE, tD, tS, tX, uRamps;
 uniform mat4 uInvPV, uLightPV;
 uniform sampler2D tSS; uniform mat4 uLightPVS; uniform float uSBias, uSOn;   // the static sun shadow (world-wide, cached): matrix, bias scale, on
@@ -872,6 +896,19 @@ uniform vec3 uPlayer;   // the player's chest (receives sun shadow as one object
 uniform float uPlayerSun;   // how far toward the sun (m) his one shadow test looks: .5; the live hero (view/livehero.js) more, past his own 3D body
 // shiny armour: toward the viewer (the sprite camera, 20 deg pitch, turned with the yaw), the sun's glint colour / strength
 uniform vec3 uView, uSunC; uniform float uSunStr;
+// TWO LIGHTS (render/lighting.js; ?wxlight=0 the old one): while the weather changes over the view there is a second light, the
+// UNDER light (under the cloud deck: a front's storm side, the cloud that remains as a deck breaks), beside the one above (the OPEN
+// light, where the sun gets through). A pixel takes the two mixed by the clouds' under share where the sun's ray to it meets the
+// ground (underAt below; render/clouds.js cloudAt().y): the ambient, the sun's colour, shaping and glints, its shadows' strength and
+// coloured shade, the crests, the emitters' floor, the character's fill (all his pixels by the ground at his feet), the fog's veil,
+// the mist's colour; the cloud shadows go under the deck (the deck itself is the shade there). uLt2: x on (off: none of it, the old
+// path bit for bit), y the under share where there is no cloud field (no clouds this frame, the cinema camera: the view's mean),
+// z the old storm fake (?wxlight=0: frD, a front's storm side drawn darker than the one light), w the under light's emitter floor
+uniform vec4 uLt2, uFog2, uShade2T;
+uniform vec4 uSun2;   // the under light's sun shaping (as uSunK), shadow opacity (uShadowA), glint strength (uSunStr), crest rim (uCrest.y)
+uniform vec3 uAmb2, uSunC2, uFill2, uShade2L, uShade2H;
+uniform vec4 uMistC2;   // the under light's mist colour (features/mist.js)
+uniform mat4 uPVf;      // this frame's projection: a world point -> its view px
 // the water (SURF_FS marks it: type 1 + tone 1): its clock (s), (lanterns' reflections, sun sparkles) strength, (ground texels, view px) per metre
 uniform float uWPhase; uniform vec4 uWRefl; uniform vec2 uWPx;
 float q3(float v) { return v < .12 ? 0. : v < .4 ? .35 : v < .75 ? .7 : 1.; }   // crisp glint steps
@@ -930,7 +967,7 @@ uniform vec4 uMistW;   // the rise over water (m), its reach over the bank (m), 
 uniform vec4 uMistD;   // the drift (m: added to the noise's ground point), the aerial term (far haze toward the mist), the view's half depth (m)
 uniform vec4 uMistO;   // the world origin's screen pixel (GL), the view's centre on the ground (x, z)
 uniform vec4 uMistQ;   // levels, the dithered edge's half width (px), the dither's cell (px: a world texel), the water stretches in use
-uniform vec4 uMistK;   // the medium's density 0..1 (the air: fog weather 1, a clear noon ~0), the highest the mist can reach (m), the far haze's share
+uniform vec4 uMistK;   // the medium's density 0..1 (the air: fog weather 1, a clear noon ~0), the highest the mist can reach (m), the far haze's share, how much a shadow on the ground dims the mist over it
 uniform vec4 uMistS[${MIST_N}]; uniform vec4 uMistH[${MIST_N}];   // the water's stretches: (x0, z0, x1, z1); (half width, its water's height, 0, 0)
 float mistTop(vec2 g) {
   vec2 q = g * uMistW.w + uMistD.xy;
@@ -959,15 +996,16 @@ float mistV(vec2 g, float y) {
   float w = 1. - exp(-uMist.z * t), nb = vnC(g * .42 + uMistD.xy * 2.5 + vec2(17.3, 4.1));
   return w * (uMistQ.x + .4) + w * w * (smoothstep(.3, .7, nb) - .5) * 1.4;
 }
-// shade: the sun shadow on the point (0..1 x its opacity); ny: its normal's y (ground-like above .5, else a face, a card, a figure)
-vec3 mistOver(vec3 col, vec3 P, vec3 pts, float shade, float ny) {
+// shade: the sun shadow on the point (0..1 x its opacity); ny: its normal's y (ground-like above .5, else a face, a card, a figure);
+// fog, mistC: the pixel's (uFog, uMistC.rgb; with two lights mixed: TWO LIGHTS)
+vec3 mistOver(vec3 col, vec3 P, vec3 pts, float shade, float ny, vec4 fog, vec3 mistC) {
   // the far haze: lighting's fog (uFog, x uMistK.z), by how far behind the view's centre the pixel's GROUND lies (0 at the view's bottom
   // edge, 1 at its top: the old screen gradient on the ground; a tree takes the haze of the ground it stands on, not of its screen row)
   vec2 back = -normalize(uView.xz);
   float far = clamp(dot(P.xz - uMistO.zw, back) / (2. * uMistD.w) + .5, 0., 1.);
-  col += uFog.rgb * uFog.a * (.4 + 1.2 * far) * uMistK.z;
+  col += fog.rgb * fog.a * (.4 + 1.2 * far) * uMistK.z;
   // (the lamps round it light it, and the lightning; where a shadow falls on the ground the mist over it lies in it too, dimmer)
-  vec3 mc = uMistC.rgb * (1. - .35 * shade) + pts * uMistC.a + uFlashC * .8;
+  vec3 mc = mistC * (1. - uMistK.w * shade) + pts * uMistC.a + uFlashC * .8;
   col = mix(col, mc, uMistD.z * far);
   if (P.y >= uMistK.y) return col;
   float v = mistV(P.xz, P.y); if (v < .5) return col;
@@ -1063,6 +1101,27 @@ float ptBlock(vec3 S, vec3 L) {
   }
   return 0.;
 }
+// TWO LIGHTS (above): the under share at world point X: the clouds' where the sun's ray to X meets their map's plane (h 0; its slant
+// capped near the shadows' 1.7 m a metre), so a prop, a tree and the ground beside it agree; the view's mean without a cloud field
+float underAt(vec3 X) {
+#ifdef CINE
+  return uLt2.y;
+#else
+  if (uCl.x < .5) return uLt2.y;
+  vec3 G = X - vec3(uSunDir.x, 0., uSunDir.z) * (X.y / max(uSunDir.y, .5));
+  vec4 c = uPVf * vec4(G, 1.);
+  return cloudAt(ivec2(floor((c.xy / c.w * .5 + .5) * uRes)), G).y;
+#endif
+}
+#if defined(CL_SUN) && !defined(CINE)
+#define CL_SUNP
+// (render/clouds.js CLOUD_SUN) the clouds where the sun's ray to X meets their plane, as underAt finds it: level, under, through
+vec3 cloudSunAt(vec3 X) {
+  vec3 G = X - vec3(uSunDir.x, 0., uSunDir.z) * (X.y / max(uSunDir.y, .5));
+  vec4 c = uPVf * vec4(G, 1.);
+  return cloudAt(ivec2(floor((c.xy / c.w * .5 + .5) * uRes)), G);
+}
+#endif
 void main() {
   ivec2 ip0 = ivec2(gl_FragCoord.xy), ip = ip0;
   if (uLayD > .5) { vec4 dd = lay(tDistort, ip0); dd.rgb /= max(dd.a, 1e-3); if (dd.a > .5) ip = clamp(ip0 + ivec2(128 - int(dd.r * 255. + .5), int(dd.g * 255. + .5) - 128), ivec2(0), ivec2(uRes) - 1); }
@@ -1081,7 +1140,18 @@ void main() {
 #ifdef CINE
   if (type == 0) { oc = vec4(clamp(skyAt(normalize(worldAt(ip0, 1.) - uCamP)), 0., 1.), 1.); return; }   // (no screen layers: see render)
 #else
-  if (type == 0) { oc = vec4(clamp(post(uBg, ip0), 0., 1.), 1.); return; }
+  if (type == 0) {
+    if (uCut.w > 0.) {   // the cutaway's CAP (render/cut.js): what it opened onto nothing is the ground's inside
+      if (uCutM.y > 0.) {   // (the well: the cut earth, flat at the slice where this pixel's ray crosses it inside the well, banded like strata, a light lip at its rim)
+        vec3 a = worldAt(ip0, 0.), b = worldAt(ip0, 1.); float t = (uCutB.w - a.y) / (b.y - a.y);
+        if (t > 0. && t < 1.) { vec3 h = mix(a, b, t); float d = cutWell(h.xz);
+          if (d > 0.) { vec3 c = mix(vec3(.3, .23, .17), uShadowC, .25); float band = fract(dot(h.xz - uCutP.xy, uCutP.zw) * .9 + vnC(h.xz * .7) * .6);
+            c *= band < .5 ? .82 : .7; if (d < .22) c = mix(vec3(.45, .4, .3), uShadowC, .2);
+            oc = vec4(clamp(post(c, ip0), 0., 1.), 1.); return; } }
+      } else if (cutIn(vec2(ip0) + .5) > 0.) { oc = vec4(mix(vec3(.13, .11, .1), uShadowC, .3) * .8, 1.); return; }
+    }
+    oc = vec4(clamp(post(uBg, ip0), 0., 1.), 1.); return;
+  }
 #endif
   float d0 = texelFetch(tD, ip, 0).r;
   vec4 N0 = texelFetch(tN, ip, 0), E0 = texelFetch(tE, ip, 0);
@@ -1090,7 +1160,7 @@ void main() {
   // ---- the pixelizer's rules, live, on ramp meshes: silhouette outline (selective), seams, occlusion lines, crests
   float rim = 0.;   // a crest (it catches the sun below)
   if (type == 2 && uOutline > .5) {
-    float n0 = nearOf(d0), obj = N0.w, pk = E0.w, fam = mod(pk, 32.), part = floor(pk / 32. + .001);
+    float n0 = nearOf(d0), obj = N0.w, pk = E0.w, pu = pk < 0. ? -pk - 1. : pk, fam = mod(pu, 32.) + (pk < 0. ? 32. : 0.), part = floor(pu / 32. + .001);
     bool outLit = false, outDark = false, line = false, seam = false, edge = false, crest = false, soft = abs(fam - uSoftFam) < .5;
     // soft (the leaves): no seams and no dark occlusion lines between its own parts; where a clump stands in front of
     // another, the one behind only steps one tone darker along the edge (the painted blob's shaded rim). Dark lines in a
@@ -1103,7 +1173,7 @@ void main() {
       if (tq != 2 || abs(oq - obj) > .5) {
         if (tq == 0 || nq < n0 + .12) { if (k <= 1) outLit = true; else outDark = true; }   // my edge against what lies behind
       } else {
-        float pq = texelFetch(tE, q, 0).w, famq = mod(pq, 32.), partq = floor(pq / 32. + .001);
+        float pq = texelFetch(tE, q, 0).w, pv = pq < 0. ? -pq - 1. : pq, famq = mod(pv, 32.) + (pq < 0. ? 32. : 0.), partq = floor(pv / 32. + .001);
         if (nq > n0 + .12) { if (!soft || abs(famq - fam) > .5) line = true; else edge = true; }   // my own front edge hides me here
         else if (!soft && k >= 2 && abs(partq - part) > .5 && abs(famq - fam) < .5) seam = true;   // plank meets plank
         // (a face that looks up, over its own face below turned toward the view: the crest along the top of a block, a wall, a cap;
@@ -1134,11 +1204,34 @@ void main() {
     }
   }
   if (uLay.y > .5) { vec4 g = lay(tPre, ip); alb = alb * (1. - g.a) + g.rgb; }
-  float frD = 0.;   // a weather front's storm side: how much darker than the view's light it is here (render/clouds.js)
+  // ---- TWO LIGHTS (above): this pixel's share of the under light (0 while one light shows) and the light's numbers mixed by it
+#ifdef CL_SUNP
+  vec3 clS = uCl.x > .5 ? cloudSunAt(type == 4 ? uPlayer - vec3(0., .9, 0.) : P) : vec3(0., uLt2.y, 1.);   // (one look-up for both)
+  float wu = uLt2.x > .5 ? clS.y : 0.;
+#else
+  float wu = uLt2.x > .5 ? underAt(type == 4 ? uPlayer - vec3(0., .9, 0.) : P) : 0.;   // (the character as one: the ground at his feet)
+#endif
+  vec3 amb = uAmb, sunC = uSunC, fill = uFill, shT = uShadeT.rgb, shL = uShadeL, shH = uShadeH, mistC = uMistC.rgb; vec4 fog = uFog;
+  float sunK = uSunK, shA = uShadowA, sunStr = uSunStr, crestY = uCrest.y, emin = uEmin;
+  if (wu > 0.) {
+    amb = mix(uAmb, uAmb2, wu); sunC = mix(uSunC, uSunC2, wu); fill = mix(uFill, uFill2, wu); mistC = mix(uMistC.rgb, uMistC2.rgb, wu);
+    fog = vec4(mix(uFog.rgb * uFog.a, uFog2.rgb * uFog2.a, wu), 1.);   // (the veil is added: mixed as rgb x a)
+    shT = mix(uShadeT.rgb, uShade2T.rgb, wu); shL = mix(uShadeL, uShade2L, wu); shH = mix(uShadeH, uShade2H, wu);
+    sunK = mix(uSunK, uSun2.x, wu); shA = mix(uShadowA, uSun2.y, wu); sunStr = mix(uSunStr, uSun2.z, wu); crestY = mix(uCrest.y, uSun2.w, wu); emin = mix(uEmin, uLt2.w, wu);
+  }
+  float frD = 0., clB = 0.;   // ?wxlight=0 (uLt2.z): a weather front's storm side, how much darker than the one light it is here (render/clouds.js); clB: the sun a cloud takes here (CL_SUNP)
   if (uCl.x > .5) {   // cloud shadows: the level map fixed to the ground plane (h 0), drifting with the wind, two hard levels
+#ifdef CL_SUNP
+    vec3 cl = clS;
+#else
     vec3 cl = cloudAt(ip, P);
-    frD = cl.y;   // (the storm: greyer and darker, as its own light would draw it: no cloud shadows, no sun shadows, the sun barely shapes things)
-    alb = mix(alb, uClC, (cl.x > 1.5 ? uCl.z : cl.x > .5 ? uCl.y : 0.) * (1. - frD));
+#endif
+    if (uLt2.z > .5) frD = cl.y * (1. - uFrK.x);   // (the old storm: greyer and darker, as its own light would draw it: no cloud shadows, no sun shadows, the sun barely shapes things)
+#ifdef CL_SUNP
+    clB = cloudBlock(cl) * (1. - frD - wu);   // (merged with the cast shadow below)
+#else
+    alb = mix(alb, uClC, cloudBlock(cl) * (1. - frD - wu));   // (under the deck: none, it is the shade)
+#endif
     if (frD > 0.) alb = mix(alb, vec3(dot(alb, vec3(.3, .55, .15))) * uFrC.rgb, uFrK.z * frD) * (1. - uFrK.w * frD);
   }
 
@@ -1170,10 +1263,15 @@ void main() {
     }
   }
   sh *= 1. - frD;
+#ifdef CL_SUNP
+  // a cloud's shadow: the sun left is (1 - cast) x (1 - cloud), on whatever the sun could reach (a face turned away is shade already)
+  if (clB > 0. && !faceAway && !(type == 2 && dot(N, uSunDir) < .08)) { sh = 1. - (1. - sh) * (1. - clB); sunStr *= 1. - clB; }
+#endif
   // (the coloured shade keeps the hue of what the shadow falls on, turned toward the mood's shadow hue; ?shade=0 the old tint)
   // (on the water mostly darker: a shadow there hides the sky it mirrors, it doesn't turn it a brighter blue)
-  if (uShadeT.w > .5) { vec3 t = water ? mix(vec3(dot(uShadeT.rgb, vec3(.3, .55, .15))), uShadeT.rgb, .3) : uShadeT.rgb; alb = alb * mix(vec3(1.), t, sh) + uShadeL * sh; }
-  else alb = mix(alb, uShadowC, sh * uShadowA);
+  // (the maps are drawn while the OPEN light casts sun shadows, uShadowA above; under the deck shA and the shade fade them as its light does)
+  if (uShadeT.w > .5) { vec3 t = water ? mix(vec3(dot(shT, vec3(.3, .55, .15))), shT, .3) : shT; alb = alb * mix(vec3(1.), t, sh) + shL * sh; }
+  else alb = mix(alb, uShadowC, sh * shA);
 
   // ---- light: ambient + pools (falloff (1 - t^2)^2, vertical distance weighted .25), the arena's soft knee
   vec3 pts = vec3(0.);
@@ -1189,7 +1287,7 @@ void main() {
     if (uPtShadow > 0. && max(li.r, max(li.g, li.b)) > .004) li *= 1. - uPtShadow * ptBlock(type == 4 ? uPlayer : P + N * .1, lp);
     pts += li;
   }
-  vec3 e = uAmb, L = e + pts;
+  vec3 e = amb, L = e + pts;
   float m = max(L.r, max(L.g, L.b)), K = min(.97, max(.72, max(e.r, max(e.g, e.b))));
   if (m > K) {
     float y = (m - K) / (1. - K) * .5, m2 = K + (1. - K) * y / (1. + y);
@@ -1199,20 +1297,20 @@ void main() {
   }
   // ---- form: the sun / moon shapes meshes and the character (wrapped N.L), snapped to 3 bands
   if (type == 2 || type == 4 || type == 7) {
-    float w = (dot(N, uSunDir) + .35) / 1.35, s = 1. + uSunK * (1. - uFrS.x * frD) * (w - .55) * 1.5;
+    float w = (dot(N, uSunDir) + .35) / 1.35, s = 1. + sunK * (1. - uFrS.x * frD) * (w - .55) * 1.5;
     if (uBanded > .5) s = s < .93 ? (type == 4 ? .84 : .92) : s > 1.07 ? 1.15 : 1.;
     else if (type != 4) s = max(s, .9);
     L *= s;
-    if (s < .93 && type != 4) L *= uShadeH;   // a prop's side turned from the sun takes the shade's hue (1: none)
+    if (s < .93 && type != 4) L *= shH;   // a prop's side turned from the sun takes the shade's hue (1: none)
   }
-  if (faceAway) L *= (uShadowA > 0. ? .62 : .8) * uShadeH;
-  if (type == 4) { alb = mix(alb, clamp(alb * uGrade, 0., 1.), uGradeK); L += min(uFill, L * .25); }
+  if (faceAway) L *= (shA > 0. ? .62 : .8) * shH;
+  if (type == 4) { alb = mix(alb, clamp(alb * uGrade, 0., 1.), uGradeK); L += min(fill, L * .25); }
   vec3 col = alb * L;
-  if (rim > 0. && dot(N, uSunDir) > .1) col += alb * uSunC * uCrest.y * (1. - sh);   // the crest in the sun: its rim of sunlight
+  if (rim > 0. && dot(N, uSunDir) > .1) col += alb * sunC * crestY * (1. - sh);   // the crest in the sun: its rim of sunlight
   col += alb * uFlashC;   // lightning: the whole scene lit for an instant (features/weather.js)
   vec3 emit = E0.rgb + rfE;
   if (uLayE > .5) emit += lay(tEmitL, ip).rgb;
-  col += emit * max(vec3(1.) - L, vec3(uEmin)) * 1.15;                   // emitters add back what the light took away
+  col += emit * max(vec3(1.) - L, vec3(emin)) * 1.15;                   // emitters add back what the light took away
   // ---- light on the water. Lanterns, mushrooms and wisps shine in it as thin shimmering vertical streaks and the sun twinkles on
   // it; all in view pixels and 12 steps a second, so it moves in whole pixels. A light h above the water is mirrored h below it
   // ON SCREEN (the oblique projection: heights count cos 20 px a metre, ground depth sin 55, as depth.js mirrors sprites), so the
@@ -1227,7 +1325,7 @@ void main() {
 #else
     if (uWRefl.x > 0.) {
 #endif
-      float night = clamp((1. - dot(uAmb, vec3(.3, .55, .15))) * 1.6, .2, 1.);
+      float night = clamp((1. - dot(amb, vec3(.3, .55, .15))) * 1.6, .2, 1.);
       for (int i = 0; i < ${NL}; i++) {
         if (i >= uNL) break; if (uLC[i].w > .5) continue;
         float h = uLP[i].y - P.y; if (h < .05) continue;
@@ -1242,9 +1340,9 @@ void main() {
       }
       wl *= uWRefl.x * .8;
     }
-    if (uWRefl.y > 0. && uSunStr > 0.) {   // sparse twinkling texels, thicker where the sun mirrors toward the camera
+    if (uWRefl.y > 0. && sunStr > 0.) {   // sparse twinkling texels, thicker where the sun mirrors toward the camera
       float spec = .35 + .65 * smoothstep(.5, 1., normalize(uSunDir + uView).y);
-      if (hC(floor(P.xz * uWPx.x) + vec2(7.3, mod(floor(uWPhase * 10.), 89.)) * 1.7) > 1. - .0016 * uWRefl.y * spec) wl += uSunC * min(1., uSunStr) * .55;
+      if (hC(floor(P.xz * uWPx.x) + vec2(7.3, mod(floor(uWPhase * 10.), 89.)) * 1.7) > 1. - .0016 * uWRefl.y * spec) wl += sunC * min(1., sunStr) * .55;
     }
     col += wl;
   }
@@ -1259,11 +1357,11 @@ void main() {
       float nh = max(0., dot(N, normalize(normalize(d) + V))), st = k * k * 1.8;
       acc += (q3(pow(nh, 30.) * st) * .9 + pow(nh, 6.) * st * .12) * uLC[i].rgb * tint;
     }
-    if (uSunStr > 0.) { float nh = max(0., dot(N, normalize(uSunDir + V))); acc += (q3(pow(nh, 40.) * uSunStr) * .9 + pow(nh, 6.) * uSunStr * .12) * uSunC * tint; }
-    vec3 R = reflect(-V, N), sky = uAmb * vec3(.55, .6, .72), env;
+    if (sunStr > 0.) { float nh = max(0., dot(N, normalize(uSunDir + V))); acc += (q3(pow(nh, 40.) * sunStr) * .9 + pow(nh, 6.) * sunStr * .12) * sunC * tint; }
+    vec3 R = reflect(-V, N), sky = amb * vec3(.55, .6, .72), env;
     if (R.y > .25) env = sky;
     else {   // the lit ground ~1.5 m along the reflected ray: the ambient + the pools there
-      vec2 hz = R.xz; float hl = length(hz); vec3 G2 = vec3(P.x, 0., P.z) + vec3(hz.x, 0., hz.y) / max(hl, 1e-3) * 1.5 * min(1., hl), gl = uAmb;
+      vec2 hz = R.xz; float hl = length(hz); vec3 G2 = vec3(P.x, 0., P.z) + vec3(hz.x, 0., hz.y) / max(hl, 1e-3) * 1.5 * min(1., hl), gl = amb;
       for (int i = 0; i < ${NL}; i++) {
         if (i >= uNL) break;
         vec3 dv = G2 - uLP[i].xyz; float r = uLP[i].w, dh = dv.y; dv.y = 0.; float t2 = (dot(dv, dv) + .0625 * dh * dh) / (r * r); if (t2 >= 1.) continue;
@@ -1283,12 +1381,12 @@ void main() {
   {   // the cinema camera: the water mirrors the sky (more at a grazing look), the haze and the air by distance
     vec3 v = P - uCamP; float dist = length(v); v /= dist;
     if (water) col = mix(col, skyAt(reflect(v, vec3(0., 1., 0.))), .12 + .55 * pow(1. - clamp(-v.y, 0., 1.), 5.));
-    col += uFog.rgb * uFog.a * clamp(dist / 22., .3, 1.6);
+    col += fog.rgb * fog.a * clamp(dist / 22., .3, 1.6);
     col = mix(col, airAt(v), 1. - exp(-dist * uCine.w));
   }
 #else
-  if (uMist.x > .5) col = mistOver(col, P, pts, sh * uShadowA, N.y);      // the world's mist + the far haze by depth (MIST above)
-  else col += uFog.rgb * uFog.a * (.4 + 1.2 * gl_FragCoord.y / uRes.y);  // haze, stronger toward the far (top) edge (?mist=0)
+  if (uMist.x > .5) col = mistOver(col, P, pts, sh * shA, N.y, fog, mistC);   // the world's mist + the far haze by depth (MIST above)
+  else col += fog.rgb * fog.a * (.4 + 1.2 * gl_FragCoord.y / uRes.y);  // haze, stronger toward the far (top) edge (?mist=0)
 #endif
   // x-ray (the arena's look): where something hides the player, a dim fill with a light 1 px rim. Not where a particle
   // (obj -1) is in front: a dust mote or raindrop over him would otherwise be a lone rim pixel, a bright speck
@@ -1328,7 +1426,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
 
   // point-light occlusion: the solid 3D things (live meshes, the plateau; not cards) seen from straight above, as depth.
   // Covers the world (its bounds) + 2 m. Re-rendered only when one of them moved, appeared or vanished.
-  const HM = {x0: world.x0 - 2, z0: world.y0 - 2, w: world.x1 - world.x0 + 4, d: world.y1 - world.y0 + 4, ppm: 16, top: 20, far: 30};
+  const HM = {x0: world.x0 - 2, z0: world.y0 - 2, w: world.x1 - world.x0 + 4, d: world.y1 - world.y0 + 4, ppm: 16, top: world.top ?? 20, far: (world.top ?? 20) + 10};   // (top: the world's highest ground + some (layout.WORLD: the forest's mountain))
   const hmap = new THREE.WebGLRenderTarget(HM.w * HM.ppm, HM.d * HM.ppm, {minFilter: near, magFilter: near, depthBuffer: true,
     depthTexture: new THREE.DepthTexture(HM.w * HM.ppm, HM.d * HM.ppm, THREE.UnsignedIntType)});
   const hCam = new THREE.OrthographicCamera(-HM.w / 2, HM.w / 2, HM.d / 2, -HM.d / 2, 0, HM.far);
@@ -1409,7 +1507,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // shared uniforms (one object, referenced by every material that needs it)
   const U = {
     camYaw: {value: 0}, sunYaw: {value: 0}, px: {value: new THREE.Vector2(PPM, PPMH)},
-    lArt: {value: new THREE.Vector3(-.55, .775, .314).normalize()},   // the pixelizer's top-left light, world-fixed
+    lArt: {value: new THREE.Vector3(-.55, .775, .314).normalize()},   // the props' tone light: the sun (setSun, ONE_SUN); ?onesun=0 the pixelizer's top-left light, world-fixed
     ramps: {value: null}, cover: {value: new THREE.Vector3(0, .86, 0)}, emitFam: {value: new THREE.Vector2(-1, -1)},
     smooth: {value: 0},
     leaf: {value: new THREE.Vector4(.15, .55, .2, flags.get('leafcells') !== '0' ? 1 : 0)},   // the leaf clusters (MESH_FS uLeaf): cell m, top light, crescent width, on
@@ -1425,6 +1523,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     wBed: {value: null}, wBedOn: {value: 0}, wBedR: {value: new THREE.Vector4(0, 0, 1, 1)}, wCut: {value: new THREE.Vector4(.13, .33, .6, 2)},
     wOp: {value: new THREE.Vector4(1, 1, 1, 1)}, wTone: {value: new THREE.Vector4(1, 1, 2, 2)}, wLook: {value: new THREE.Vector4(.86, 0, 0, 0)},
     wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
+    cut: {value: new THREE.Vector4()}, cutB: {value: new THREE.Vector4()}, cutM: {value: new THREE.Vector4()}, cutP: {value: new THREE.Vector4()},   // the cutaway (render/cut.js; setCut, cutFrame in render())
   };
   const raw = (vs, fs, uniforms, extra = {}) => {
     const m = new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
@@ -1492,14 +1591,14 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     }
     return v;
   };
-  const meshMat = (obj, seed, sw = null, aut = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
+  const meshMat = (obj, seed, sw = null, aut = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {...cutU(U), uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
     uGlowF: {value: new THREE.Vector4(-1, -1, -1, -1)}, uGlowK: {value: new THREE.Vector4()},
-    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time} : {})},
+    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uSprayM: {value: new THREE.Matrix4()}, uSprayFix: {value: 0}} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
   // bed: a surface's OWN water bed ({tex, rect} | null: world/waterbed.js; the West Downs' brook on their canvas), not setWaterLook's (omitted: that one)
   const surfMat = ({tex, em = null, planar, world, origin = null, type = 1, obj = 0, cliff = null, cliffOff = 0, water = null, bed, litter = null, decals = false, cliffTop = 1e9}) => raw(SURF_VS, SURF_FS, {
-    uCliffTop: {value: cliffTop},
+    uCliffTop: {value: cliffTop}, ...cutU(U),
     uDecal: U.decalT, uHasDecal: {value: decals ? 1 : 0}, uDecalOn: U.decalOn, uDecalRect: U.decalRect, uDecalPx: U.decalPx,
     uLit: litter?.u || {value: null}, uLitPal: {value: litter?.pal || null}, uHasLit: {value: litter ? 1 : 0}, uLitK: U.litK, uLive: litter?.live || {value: 0}, uLitCap: litter?.cap || {value: 1},
     uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uTexSize: {value: new THREE.Vector2(tex.image.width, tex.image.height)},
@@ -1561,7 +1660,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   function card(o) {
     if (o.batch && CARD_BATCH && (o.type ?? 3) === 3 && !o.nrm && !o.xray && !o.rect) return bcard(o);   // a world card: in a batch (below)
     const u = cardUniforms(o), geo = cardGeo();
-    const g = raw(CARD_VS, CARD_FS, {...u, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
+    const g = raw(CARD_VS, CARD_FS, {...u, ...cutU(U), uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uNrm: {value: o.nrm || null}, uHasNrm: {value: o.nrm ? 1 : 0},
       uNrmRect: {value: o.nrmRect || new THREE.Vector4(0, 0, 1, 1)}, uEm: {value: o.em || null}, uHasEm: {value: o.em ? 1 : 0},
       uType: {value: o.type ?? 3}, uObj: {value: o.obj ?? 0}, uFlash: {value: 0}, uBend: {value: new Float32Array(8).fill(1)},
       uMetal: {value: null}, uHasMetal: {value: 0}, ...plantU(o.plant)}, {side: THREE.DoubleSide});
@@ -1632,7 +1731,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     const cap = 32, geo = new THREE.InstancedBufferGeometry();
     geo.setAttribute('position', QUAD.getAttribute('position'));   // (never dispose it with the quad's attribute on: shared GL buffer)
     const ib = bBuffer(geo, new Float32Array(cap * BC_STRIDE));
-    const uni = {uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uType: {value: 3}, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP,
+    const uni = {...cutU(U), uTex: {value: tex}, uEm: {value: em}, uHasEm: {value: em ? 1 : 0}, uType: {value: 3}, uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uSnap: SNAP,
       uShadow: {value: 0}, uAutumn: U.autumn, uPal: palU};
     const gm = new THREE.Mesh(geo, raw(BCARD_VS, BCARD_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gm.matrixAutoUpdate = false; gScene.add(gm);
     let sm = null;
@@ -1691,7 +1790,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
     const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
-      uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
+      uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed, uSprayM: gm.material.uniforms.uSprayM, uSprayFix: gm.material.uniforms.uSprayFix}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
@@ -1722,6 +1821,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
       // the leaves' own dance (art px, x along the screen / y toward the camera) and the light rolling through them:
       // (kx, kz: rad per m along the wind, phase, amount of tone bias)
       setFlutter(x, y) { sw?.flut.value.set(x, y); },
+      // a swaying mesh's leaves coloured as if it stood at matrix m (null: as it stands now): a felled tree's copy falling
+      // (features/woodcut.js) keeps the autumn colours its clumps had standing
+      setSprayFrame(m) { const u = gm.material.uniforms; if (!u.uSprayFix) return; if (m) { u.uSprayM.value.copy(m); u.uSprayFix.value = 1; } else u.uSprayFix.value = 0; },
       setRipple(kx, kz, ph, amp) { gm.material.uniforms.uRip.value.set(kx, kz, ph, amp); },
       set flash(k) { gm.material.uniforms.uFlash.value = k; },
       dispose() { gScene.remove(gm); sm.parent?.remove(sm); gm.material.dispose(); if (lean) sm.material.dispose(); hDirty = true; if (S) { movers.delete(S); staticSoon(0); } }};
@@ -1767,7 +1869,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   for (const a of [pPos, pCol, pMisc]) a.setUsage(THREE.DynamicDrawUsage);
   pointGeo.setAttribute('position', pPos); pointGeo.setAttribute('color', pCol); pointGeo.setAttribute('aMisc', pMisc);
   const PTK = {value: 1};   // (the cinema camera's k: points keep their size in screen px)
-  const pointObj = new THREE.Points(pointGeo, raw(POINT_VS, POINT_FS, {uSnap: SNAP, uPtK: PTK})); pointObj.frustumCulled = false; pointObj.matrixAutoUpdate = false; gScene.add(pointObj);
+  const pointObj = new THREE.Points(pointGeo, raw(POINT_VS, POINT_CUT_FS, {uSnap: SNAP, uPtK: PTK, ...cutU(U)})); pointObj.frustumCulled = false; pointObj.matrixAutoUpdate = false; gScene.add(pointObj);
   let nPoints = 0;
   const NOOPT = {};
   function point(x, y, z, c, o = NOOPT) {
@@ -1788,7 +1890,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     const cap = 64, geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', QUAD.getAttribute('position'));
     const A = {iAnchor: 4, iRect: 4, iSize: 4, iMisc: 4}, attrs = {};
     for (const [k, n] of Object.entries(A)) { attrs[k] = new THREE.InstancedBufferAttribute(new Float32Array(cap * n), n); attrs[k].setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, attrs[k]); }
-    const uni = {uTex: {value: null}, uEm: {value: null}, uNrm: {value: null}, uHasEm: {value: 0}, uHasNrm: {value: 0}, uType: {value: o.type ?? 3},
+    const uni = {...cutU(U), uTex: {value: null}, uEm: {value: null}, uNrm: {value: null}, uHasEm: {value: 0}, uHasNrm: {value: 0}, uType: {value: o.type ?? 3},
       uFaceYaw: U.camYaw, uCamYaw: U.camYaw, uPx: U.px, uPy: PY_U, uSun: SUN_OFF, uSnap: SNAP, uBias: {value: .00125}};
     const gm = new THREE.Mesh(geo, raw(BATCH_VS, BATCH_FS, uni, {side: THREE.DoubleSide})); gm.frustumCulled = false; gm.matrixAutoUpdate = false; gScene.add(gm);
     let sm = null;
@@ -2029,7 +2131,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // ---- composite
   const compU = {
     tA: {value: gbuf.textures[0]}, tN: {value: gbuf.textures[1]}, tE: {value: gbuf.textures[2]}, tD: {value: gbuf.depthTexture},
-    tS: {value: shadow.depthTexture}, tX: {value: xray.texture}, uRamps: U.ramps,
+    tS: {value: shadow.depthTexture}, tX: {value: xray.texture}, uRamps: U.ramps, ...cutU(U),
     uInvPV: {value: new THREE.Matrix4()}, uLightPV: {value: new THREE.Matrix4()},
     uRes: {value: new THREE.Vector2(VW, VH)}, uR: {value: R_DEPTH},
     uBg: {value: new THREE.Vector3(.1, .12, .11)}, uAmb: {value: new THREE.Vector3(1, 1, 1)}, uSunDir: {value: new THREE.Vector3(0, 1, 0)},
@@ -2054,11 +2156,16 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uCl: {value: new THREE.Vector4()}, uClM: {value: new THREE.Vector4()}, uClO: {value: new THREE.Vector4()}, uClC: {value: new THREE.Vector3()},
     uClT: {value: new THREE.Vector4()}, uFr: {value: new THREE.Vector4()}, uFrB: {value: new THREE.Vector4()}, uFrK: {value: new THREE.Vector4()},
     uFrC: {value: new THREE.Vector4()}, uFrS: {value: new THREE.Vector4()}, uFrQ: {value: new THREE.Vector4()},
+    ...Object.fromEntries(CLOUD_EXTRA.map(k => [k, {value: new THREE.Vector4()}])),   // (render/clouds.js: the cloud field, the deck)
     uHz: {value: new THREE.Vector4()}, uHzM: {value: new THREE.Vector4()}, uHzO: {value: new THREE.Vector4()},
     uAo: {value: new THREE.Vector4()},
     uMist: {value: new THREE.Vector4()}, uMistC: {value: new THREE.Vector4()}, uMistW: {value: new THREE.Vector4()}, uMistD: {value: new THREE.Vector4(0, 0, 0, 1)},   // features/mist.js (G.setMist)
     uMistO: {value: new THREE.Vector4()}, uMistQ: {value: new THREE.Vector4(3, .7, 1, 0)}, uMistK: {value: new THREE.Vector4()},
     uMistS: {value: Array.from({length: MIST_N}, () => new THREE.Vector4())}, uMistH: {value: Array.from({length: MIST_N}, () => new THREE.Vector4())},
+    // TWO LIGHTS (render/lighting.js: the UNDER light's set; COMP_FS mixes it with the one above by the clouds' under share)
+    uLt2: {value: new THREE.Vector4()}, uAmb2: {value: new THREE.Vector3(1, 1, 1)}, uSunC2: {value: new THREE.Vector3(1, 1, 1)}, uFill2: {value: new THREE.Vector3()},
+    uFog2: {value: new THREE.Vector4()}, uSun2: {value: new THREE.Vector4()}, uShade2T: {value: new THREE.Vector4(1, 1, 1, 0)}, uShade2L: {value: new THREE.Vector3()},
+    uShade2H: {value: new THREE.Vector3(1, 1, 1)}, uMistC2: {value: new THREE.Vector4()}, uPVf: {value: new THREE.Matrix4()},
     uCine: CINE, uCamP: {value: new THREE.Vector3()}, uSunP: {value: new THREE.Vector4(0, 1, 0, 1)},   // the cinema camera (setCine)
     uSkyZ: {value: new THREE.Vector3()}, uSkyH: {value: new THREE.Vector3()}, uSunCol: {value: new THREE.Vector3()},
   };
@@ -2068,6 +2175,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const dummyCam = new THREE.Camera();
   // GOD RAYS (render/godrays.js): sunbeams marched through the sun's shadow maps, added to the pixel image right after the composite
   const rays = createGodrays({THREE, renderer, raw, tri, cam: dummyCam, compU});   // (not drawn under the cinema camera: they march the oblique view's parallel rays)
+  // THE MIST AS A VOLUME (render/mistvol.js): marched along the view rays right after the composite, before the god rays (features/mist.js: G.setMistVol, G.mistField)
+  const mvol = createMistVol({THREE, renderer, raw, tri, cam: dummyCam, compU, NL});
+  // THE AIR (render/air.js): the moving-air field round the view (G.air: features/airfx.js splats into it, the mist and the smoke read it)
+  const air = createAir({THREE, renderer, raw, tri, cam: dummyCam, compU});
 
   // ---- CONTACT SHADOWS (features/contact.js, every frame it shows them): the arena's contact AO stamps, drawn by the GPU
   // into the x-ray target's G channel (AO_VS / AO_FS) and laid on the ground by the composite (uAo: the mood's shadow colour
@@ -2390,10 +2501,17 @@ void main() {
   // map with the static one: a map turned a hair every frame rasterised every edge a hair differently every frame, so the
   // tree shadows shimmered and the god rays (render/godrays.js, marched through both maps) boiled. A step moves a long
   // shadow's tip a few cm (an art px at most); the shading keeps the smooth dir
+  // ONE SUN (?onesun=0: the old fixed art light): the props' tones (MESH_FS uLArt: hi / base / shade) are lit by this same sun,
+  // stepped with the shadows (and on its own when only its elevation moves, the shadows' being capped), so a face toned as lit is
+  // never one whose shadow falls toward the view. The fixed art light came from the front-left (WSW, 51 deg) while the clock's
+  // sun crosses the north: walls toned lit, their shadows cast at the camera
+  const ONE_SUN = flags.get('onesun') !== '0', _ld = new THREE.Vector3();
   const _sl = new THREE.Vector3(), _sr = new THREE.Vector3(), _su = new THREE.Vector3();
   function setSun(dir, sdir = dir) {
     compU.uSunDir.value.copy(dir); sunNow.copy(sdir).normalize();
-    if (!(sunNow.dot(sCast) >= Math.cos(SUN_STEP))) sCast.copy(sunNow);   // (the first call: sCast is 0)
+    const step = !(sunNow.dot(sCast) >= Math.cos(SUN_STEP));
+    if (step) sCast.copy(sunNow);   // (the first call: sCast is 0)
+    if (ONE_SUN && (step || !(_ld.copy(dir).normalize().dot(U.lArt.value) >= Math.cos(SUN_STEP)))) U.lArt.value.copy(dir).normalize();
     U.sunYaw.value = Math.atan2(dir.x, dir.z);   // cards turned so their face points at the sun (normal = (sin, 0, cos))
     const T = view.T, texel = 2 * SHADOW_E / SM;
     sunCam.position.copy(T).addScaledVector(sCast, 100); sunCam.lookAt(T); sunCam.updateMatrixWorld(true);
@@ -2467,12 +2585,13 @@ void main() {
       lap('shadow', renderer.info.render.calls);
     } else PS.shadow = 0;
     if (hDirty && compU.uPtShadow.value > 0) {
-      renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sStatic, hCam); renderer.render(sScene, hCam); hDirty = false;
+      renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sStatic, hCam); if (air.grab()) renderer.setRenderTarget(hmap); renderer.render(sScene, hCam); hDirty = false;   // (air.grab: the static things' tops, render/air.js)
       for (const H of moved) H.hm.copy(H.sm.matrix);
       lap('hmap', renderer.info.render.calls);
     } else { PS.hmap = 0; tp = performance.now(); }
     moved.clear();
     for (const m of gExtra) m.visible = m.userData.frame === frameNo;
+    cutFrame();
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
     const calls = renderer.info.render.calls;
     lap('gbuf', calls);
@@ -2481,12 +2600,13 @@ void main() {
     if (aoFrame !== frameNo || cine) aoN = 0;                                                                         // shadows: the cinema camera)
     compU.uAo.value.w = aoN ? compU.uAo.value.w : 0;
     if (aoN) { aoGeo.instanceCount = aoN; setRange(aoBuf, 0, aoN * 8); renderer.render(aoScene, dummyCam); }
-    compU.uInvPV.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).invert();
+    compU.uPVf.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); compU.uInvPV.value.copy(compU.uPVf.value).invert();   // (uPVf: a world point's view px, COMP_FS TWO LIGHTS)
     if (msFrame !== frameNo) { compU.uMist.value.x = 0; mist.on = false; } else mistAnchors();
+    air.tick(t0, still, view.T.x, view.T.z);   // (render/air.js: its fixed steps due, before the composite and the mist read it)
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
     let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
     if (DS > 1 || DZ !== 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
-      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam); if (!cine) rays.draw();
+      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); }
       if (hN) {
         const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
         fxPxM();
@@ -2499,7 +2619,7 @@ void main() {
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
         renderer.render(fxScene, sub.x || sub.y || DZ !== 1 ? hdCamNow() : camera);   // (slid and magnified as the blit did the image: setSubpixel, setDisplay)
       }
-    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) rays.draw(); }
+    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); } }
     if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)
     if (post) post.run(renderer);
     lap('post');
@@ -2556,12 +2676,16 @@ void main() {
     const t = compU.tTop.value; t.dispose(); t.image = {data: d, width: W, height: H}; t.needsUpdate = true;
     compU.uTopH.value.set(top.hzW, top.hzH, top.clH, 0); top.dirty = false;
   }
-  let clFrame = -1, clVer = -1, hzFrame = -1, hzVer = -1;
+  let clFrame = -1, clVer = -1, hzFrame = -1, hzVer = -1, clGap = 1;
+  // the open sky's sun shadow restored where the clouds' patches take their share (render/clouds.js CLOUD_SUN; render/lighting.js
+  // reads it after the features' frames: 1 on a frame without clouds)
+  const cloudGap = () => clFrame === frameNo ? clGap : 1;
   function setClouds(o) {
-    clFrame = frameNo; const C = compU;
+    clFrame = frameNo; const C = compU; clGap = o.gap || 1;
     if (o.ver !== clVer) { clVer = o.ver; top.cl = o.lv; top.clW = o.TW; top.clH = o.lv.length / o.TW; topUpload(); }
-    C.uCl.value.set(1, o.a1, o.a2, 0); C.uClC.value.set(o.col[0], o.col[1], o.col[2]);
+    C.uCl.value.set(1, o.a1, o.a2, o.g || 0); C.uClC.value.set(o.col[0], o.col[1], o.col[2]);   // (.w: render/clouds.js CLOUD_VIEW, the view's share)
     C.uClM.value.set(o.m[0], o.m[1], o.m[2], o.m[3]); C.uClO.value.set(o.e, o.f, o.TW, o.TH); C.uClT.value.set(o.T[0], o.T[1], o.T[2], o.T[3]); C.uFrQ.value.set(o.Q[0], o.Q[1], o.Q[2], o.Q[3]);
+    if (o.u) for (const k of CLOUD_EXTRA) C[k].value.fromArray(o.u[k]);   // (render/clouds.js's field and deck: depth.js fills o.u)
     const f = o.front;
     if (!f) { C.uFr.value.w = 0; C.uFrS.value.x = 0; return; }
     C.uFr.value.set(f.dir[0], f.dir[1], f.s, 1); C.uFrB.value.set(f.band[0], f.band[1], f.bend[0], f.bend[1]);
@@ -2581,7 +2705,9 @@ void main() {
   }
   // THE MIST (features/mist.js, every frame it shows it; COMP_FS MIST): {top (m), sigma (1 / m), alpha, col: [r, g, b] 0..1, light,
   // water (m), reach (m), amp (m), freq (1 / m), drift: [x, z] (m), aerial, far, levels, dither (px), medium 0..1, max (m), segs (Float32Array,
-  // 8 numbers a stretch of water: x0, z0, x1, z1, half width, its water's height, 0, 0), n (stretches), ver (bump when segs changed)}.
+  // 8 numbers a stretch of water: x0, z0, x1, z1, half width, its water's height, 0, 0), n (stretches), ver (bump when segs changed),
+  // shade (how much a shadow on the ground dims the mist over it: .35 if left out), col2 (the under light's colour while two lights show:
+  // render/lighting.js TWO LIGHTS; COMP_FS mixes the two by the under share)}.
   // A frame without a call: no mist (the old screen haze). G.mist: what shows now, read-only ({on, medium, top, max}: the medium's
   // density for light through the air; in COMP_FS, mistAt(P))
   let msFrame = -1, msVer = -1;
@@ -2589,8 +2715,9 @@ void main() {
   function setMist(o) {
     msFrame = frameNo; const C = compU;
     C.uMist.value.set(1, o.top, o.sigma, o.alpha); C.uMistC.value.set(o.col[0], o.col[1], o.col[2], o.light);
+    const c2 = o.col2 || o.col; C.uMistC2.value.set(c2[0], c2[1], c2[2], o.light);   // (the under light's: TWO LIGHTS; without one, the one colour)
     C.uMistW.value.set(o.water, o.reach, o.amp, o.freq); C.uMistD.value.x = o.drift[0]; C.uMistD.value.y = o.drift[1]; C.uMistD.value.z = o.aerial;
-    C.uMistQ.value.x = o.levels; C.uMistQ.value.y = o.dither; C.uMistQ.value.w = Math.min(MIST_N, o.n); C.uMistK.value.set(o.medium, o.max, o.far ?? 1, 0);
+    C.uMistQ.value.x = o.levels; C.uMistQ.value.y = o.dither; C.uMistQ.value.w = Math.min(MIST_N, o.n); C.uMistK.value.set(o.medium, o.max, o.far ?? 1, o.shade ?? .35);
     if (o.ver !== msVer) {
       msVer = o.ver; const s = o.segs;
       for (let i = 0; i < MIST_N; i++) { const j = i * 8; if (i < o.n) { C.uMistS.value[i].set(s[j], s[j + 1], s[j + 2], s[j + 3]); C.uMistH.value[i].set(s[j + 4], s[j + 5], 0, 0); } else C.uMistH.value[i].set(0, -1e3, 0, 0); }
@@ -2606,6 +2733,25 @@ void main() {
     C.uMistQ.value.z = Math.max(1, Math.floor(z + .01)); C.uMistD.value.w = VH / 2 / (PPMY * z);
   }
   // (sun: how far toward the sun his shadow test looks, .5 m; a live 3D body would shade its own test point: view/livehero.js)
+  // THE CUTAWAY (CUT; features/cutaway.js): where he stands (m: x east, f his feet's height, z south), how open the cut is (0..1), its
+  // radius round his body and his height (m), band: the radius (m) of a well round him instead (render/cut.js; 0: the capsule),
+  // nx, nz: the way (level, world x / z) toward the side the well cuts away (0, 0: toward the camera).
+  // Put on the screen at the draw (cutFrame: the view may still move after the call)
+  const cutS = {x: 0, f: 0, z: 0, open: 0, r: 2, h: 1.8, band: 0, nx: 0, nz: 0}, cutP = new THREE.Vector3(), WELL_ACROSS = 5.5;   // (m: the well's half width across its way)
+  function setCut(x, f, z, open, r = 2, h = 1.8, band = 0, nx = 0, nz = 0) { cutS.x = x; cutS.f = f; cutS.z = z; cutS.open = open; cutS.r = r; cutS.h = h; cutS.band = band; cutS.nx = nx; cutS.nz = nz; }
+  function cutFrame() {
+    const C = U.cut.value, B = U.cutB.value;
+    if (cine || cutS.open <= 0) { C.w = 0; return; }
+    cutP.set(cutS.x, cutS.f, cutS.z).project(camera); const fx = (cutP.x * .5 + .5) * VW, fy = (cutP.y * .5 + .5) * VH;
+    cutP.set(cutS.x, cutS.f + cutS.h, cutS.z).project(camera); const hy = (cutP.y * .5 + .5) * VH;
+    cutP.set(cutS.x, cutS.f + cutS.h / 2, cutS.z).project(camera);   // (his depth at his middle, less ~.6 m toward the camera: 1 m there is .5 / R_DEPTH)
+    C.set(fx, fy, cutP.z * .5 + .5 - .3 / R_DEPTH, Math.min(1, cutS.open));
+    B.set(Math.max(0, hy - fy), cutS.r * PPM * view.zoom, 3, cutS.f + .45);
+    if (cutS.band > 0) U.cutM.value.set(Math.min(WELL_ACROSS, cutS.band), cutS.band, 1.2, 0);   // (the well: across m, out m, its rim m)
+    else U.cutM.value.set(0, 0, 1, 0);   // (the capsule)
+    const nl = Math.hypot(cutS.nx, cutS.nz);   // (the well's upright plane through him: facing the side that hides him, else the camera)
+    if (nl > 1e-3) U.cutP.value.set(cutS.x, cutS.z, cutS.nx / nl, cutS.nz / nl); else U.cutP.value.set(cutS.x, cutS.z, Math.sin(view.yaw), Math.cos(view.yaw));
+  }
   const setPlayer = (x, h, z, sun = .5) => { compU.uPlayer.value.set(x, h, z); compU.uPlayerSun.value = sun; U.wFoot.value.set(x, h - .9, z, 1); };   // (h: his chest, .9 m over his feet: the water rings them when he wades)
   // the water's clock runs at `speed` times normal (1 = the river as tuned; brief D's rain quickens it): a multiplier on the rate it
   // advances at, so changing it never makes the pattern jump
@@ -2625,7 +2771,7 @@ void main() {
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub,
-    godrays: rays, setRays: rays.set,   // (render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setWater, setWaterLook, litterSim, setReflect, setClouds, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
 }

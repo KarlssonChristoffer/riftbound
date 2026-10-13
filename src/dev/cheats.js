@@ -9,7 +9,8 @@
 //   game.hurt x 0 (god: game/stats.js)        combat.cd.<slot> x 0 (combat/core.js)    player.speed x (player.js)
 //   weapon.endless (sim/player/gun.js)        sim.speed x (core/loop.js)               foes.raids x 0 (features/foes/sim.js)
 // and the damage you deal is combat's hit mod (combat/core.js hitMod). They hold in DEV MODE only: when it goes off (a
-// run without ?dev=1) the notes go, and they come back with it. Remembered on this machine ('rb.cheats').
+// run without ?dev=1) the notes go, and they come back with it. Remembered on this machine ('rb.cheats'); the panel itself
+// starts closed every time (no admin panel shows until asked for).
 // Enemies it spawns: the run's (game/enemies.js spawnEnemy: brute, elite, champion; they hunt you, and in the sandbox
 // they make it a fight: game/game.js stakes) and the gunmen (features/foes.js: its sim's spawnAt / spawnGang, only where
 // it is on: the desert sandbox).
@@ -61,6 +62,7 @@ export function createCheats({host, cam, canvas}) {
   const P = host.player, mouse = host.mouse, R = mulberry32((Date.now() % 2147483646) + 1);
   const C = {...DEF};
   try { Object.assign(C, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch (e) {}
+  C.open = false;   // (closed at the start: F2 opens it)
   for (const k in OPT) if (!OPT[k].includes(C[k])) C[k] = DEF[k];
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(C)); } catch (e) {} };
   const game = () => host.feature('game'), core = () => host.feature('combat')?.core, foes = () => host.feature('foes');

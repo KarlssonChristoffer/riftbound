@@ -20,6 +20,7 @@
 // BUDGET: CPU: commit() uploads only groups whose instances changed (~16 floats a plant); the per-plant lean is world.js's. GPU: one
 //   instanced draw per shape + its shadow.
 import * as THREE from 'three';
+import {CUT, cutU} from './cut.js';   // the cutaway (a plant goes by its root's height)
 
 const HEAD = `precision highp float; precision highp int;\n`;
 const OUTS = `layout(location = 0) out vec4 o0;\nlayout(location = 1) out vec4 o1;\nlayout(location = 2) out vec4 o2;\n`;
@@ -67,17 +68,17 @@ int stageOf(float kind, float delay, float r1, float e) {
 // ---------------------------------------------------------------- the mesh plants
 const MESH_VS = HEAD + INST + `
 in vec3 position; in vec3 normal; in float aPart; in float aFam; in float aBias; in float aFixed; in float aFlex; in float aPhase;
-out vec3 vN; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed; flat out vec4 fS; flat out vec4 fA; flat out float fSeed; flat out float fYaw;
+flat out vec3 fR; out vec3 vN; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed; flat out vec4 fS; flat out vec4 fA; flat out float fSeed; flat out float fYaw;
 void main() {
   if (iS.w < .5) { gl_Position = vec4(2., 2., 2., 1.); return; }   // (hidden: off the clip volume)
-  fYaw = iT.w;
+  fYaw = iT.w; fR = iT.xyz;
   vec3 w = iT.xyz + turn(position * iS.x) + swayOf(aFlex, aPhase);
   vN = turn(normal); vNL = normal; vPL = position;
   fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed; fS = iS; fA = iA; fSeed = iL.w;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
 }`;
-const MESH_FS = HEAD + OUTS + NOISE + AUTUMN + `
-in vec3 vN; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in vec4 fS; flat in vec4 fA; flat in float fSeed; flat in float fYaw;
+const MESH_FS = HEAD + OUTS + NOISE + AUTUMN + CUT + `
+flat in vec3 fR; in vec3 vN; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in vec4 fS; flat in vec4 fA; flat in float fSeed; flat in float fYaw;
 uniform sampler2D uRamps; uniform vec3 uLArt; uniform vec3 uCover; uniform vec2 uEmitFam; uniform float uLeafK; uniform vec4 uLeaf;
 vec3 h33(vec3 p) { p = fract(p * vec3(.1031, .103, .0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx); }
 float leafCell(vec3 P, out vec3 rel) {   // (gfx.js MESH_FS)
@@ -97,6 +98,7 @@ vec3 patchOf(vec3 P) {   // the nearest of a 3D lattice's jittered points: its c
   return best;
 }
 void main() {
+  if (cutAway(fR + vec3(0., .05, 0.))) discard;   // (the cutaway: render/cut.js)
   bool leaf = fFixed < -1.5, inner = !gl_FrontFacing;
   if (inner && (!leaf || uLeafK >= .999)) discard;
   vec2 sd = vec2(fSeed * 37.1, fSeed * 11.3);
@@ -131,7 +133,7 @@ void main() {
   bool glow = abs(fam - uEmitFam.x) < .5 || abs(fam - uEmitFam.y) < .5;
   o0 = vec4(alb, float(2 * 4 + tone) / 255.);
   o1 = vec4(n, fS.y);
-  o2 = vec4((glow ? alb : vec3(0.)) + vec3(fS.z), fPart * 32. + fam);
+  o2 = vec4((glow ? alb : vec3(0.)) + vec3(fS.z), fam < 31.5 ? fPart * 32. + fam : -(fPart * 32. + fam - 32.) - 1.);   // (gfx.js: the sign carries a family past 31)
 }`;
 // its sun shadow: the same leaned pose, minus the leaves the season took
 const SHADOW_VS = HEAD + INST + `
@@ -152,10 +154,10 @@ const BLADE_VS = HEAD + INST + `
 in vec3 position;   // x: side (-.5 / .5), y: f 0 .. 1 along the run
 in vec3 aR; in vec3 aM; in vec3 aT; in vec4 aB; in vec4 aC;   // root, ctrl, tip (m, the plant's frame); (t0, t1, width px, colour); (flex u0, power, plant height, phase)
 uniform vec2 uRes; uniform float uZoom; uniform vec3 uRamp[16];
-out float vF; out float vSide; out float vT; flat out vec3 vC0; flat out vec3 vC1; flat out vec3 vC2; flat out ivec3 vTn; flat out vec4 vX; flat out vec4 vA;
+flat out vec3 vR; out float vF; out float vSide; out float vT; flat out vec3 vC0; flat out vec3 vC1; flat out vec3 vC2; flat out ivec3 vTn; flat out vec4 vX; flat out vec4 vA;
 void main() {
   if (iS.w < .5) { gl_Position = vec4(2., 2., 2., 1.); return; }
-  float t = mix(aB.x, aB.y, position.y), k = 1. - t;
+  vR = iT.xyz; float t = mix(aB.x, aB.y, position.y), k = 1. - t;
   vec3 bl = aR * k * k + aM * 2. * k * t + aT * t * t;   // the curve at t
   vec3 root = iT.xyz + turn(aR * iS.x), pw = iT.xyz + turn(bl * iS.x);
   float u = clamp(bl.y / aC.z, 0., 1.), fw = u < aC.x ? 0. : pow((u - aC.x) / max(.01, 1. - aC.x), aC.y);
@@ -185,10 +187,11 @@ void main() {
   vC0 = uRamp[rp + vTn.x]; vC1 = uRamp[rp + vTn.y]; vC2 = uRamp[rp + vTn.z];
   vX = vec4(float(sc), iS.y, iS.z, aC.w); vA = iA;
 }`;
-const BLADE_FS = HEAD + OUTS + AUTUMN + `
-in float vF; in float vSide; in float vT; flat in vec3 vC0; flat in vec3 vC1; flat in vec3 vC2; flat in ivec3 vTn; flat in vec4 vX; flat in vec4 vA;
+const BLADE_FS = HEAD + OUTS + AUTUMN + CUT + `
+flat in vec3 vR; in float vF; in float vSide; in float vT; flat in vec3 vC0; flat in vec3 vC1; flat in vec3 vC2; flat in ivec3 vTn; flat in vec4 vX; flat in vec4 vA;
 float hh(float a, float b) { return fract(sin(a * 127.1 + b * 311.7) * 43758.5453); }
 void main() {
+  if (cutAway(vR + vec3(0., .05, 0.))) discard;   // (the cutaway: render/cut.js)
   int sc = int(vX.x + .5), tn;
   vec3 c;
   if (sc == 1) { int k = vSide < -.2 ? 0 : vSide > .2 ? 2 : 1; if (vF < .12) k = 2; c = k == 0 ? vC0 : k == 2 ? vC2 : vC1; tn = k == 0 ? vTn.x : k == 2 ? vTn.z : vTn.y; }   // a head: lit left, its foot in shade
@@ -223,24 +226,28 @@ export function createFlora(G) {
   }
   const ramps = {value: Array.from({length: 16}, () => new THREE.Vector3())};
   const res = {value: new THREE.Vector2(G.VW, G.VH)}, zoom = {value: 1};
-  const meshU = {uRamps: U.ramps, uLArt: U.lArt, uCover: U.cover, uEmitFam: U.emitFam, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uPal: palU,
+  const meshU = {...cutU(U), uRamps: U.ramps, uLArt: U.lArt, uCover: U.cover, uEmitFam: U.emitFam, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uPal: palU,
     uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time};
   const meshMat = raw(MESH_VS, MESH_FS, meshU, {side: THREE.DoubleSide});
   const shadowMat = raw(SHADOW_VS, SHADOW_FS, {uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uLeafK: U.leafK}, {side: THREE.DoubleSide});
-  const bladeMat = raw(BLADE_VS, BLADE_FS, {uRes: res, uZoom: zoom, uRamp: ramps, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uAutumn: U.autumn, uPal: palU}, {side: THREE.DoubleSide});
+  const bladeMat = raw(BLADE_VS, BLADE_FS, {...cutU(U), uRes: res, uZoom: zoom, uRamp: ramps, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uAutumn: U.autumn, uPal: palU}, {side: THREE.DoubleSide});
 
   const groups = [];
-  // a shape's group: its base geometry's attributes + the instance buffer; kind 'mesh' | 'blade'; o.casts: a shadow draw too
+  // a shape's group: its base geometry's attributes + the instance buffer; kind 'mesh' | 'blade'; o.casts: a shadow draw too; o.cull:
+  // frustum culled as a whole (a sphere round its instances, o.pad m past their roots: the shape's reach; for groups that never sway
+  // and sit together, world/decor3d.js's per-cell groups; worked out on change in commit)
   function shape(key, geo, kind, o = {}) {
     let g = groups.find(q => q.key === key && q.kind === kind); if (g) return g;
     const ig = new THREE.InstancedBufferGeometry();
     for (const [name, a] of Object.entries(geo.attributes)) ig.setAttribute(name, a);
     if (geo.index) ig.setIndex(geo.index);
     const cap = 16, data = new Float32Array(cap * STRIDE);
-    g = {key, kind, geo: ig, cap, data, ib: null, n: 0, dirty: true, items: [], gm: null, sm: null};
+    g = {key, kind, geo: ig, cap, data, ib: null, n: 0, dirty: true, items: [], gm: null, sm: null, pad: o.cull ? o.pad || 1 : 0};
+    if (g.pad) ig.boundingSphere = new THREE.Sphere();
     bind(g);
     g.gm = new THREE.Mesh(ig, kind === 'mesh' ? meshMat : bladeMat); g.gm.frustumCulled = false; g.gm.matrixAutoUpdate = false; G.gScene.add(g.gm);
     if (kind === 'mesh' && o.casts) { g.sm = new THREE.Mesh(ig, shadowMat); g.sm.frustumCulled = false; g.sm.matrixAutoUpdate = false; G.sScene.add(g.sm); }
+    if (g.pad) { g.gm.frustumCulled = true; if (g.sm) g.sm.frustumCulled = true; }
     ig.instanceCount = 0; g.gm.visible = false; if (g.sm) g.sm.visible = false;
     groups.push(g); return g;
   }
@@ -276,9 +283,14 @@ export function createFlora(G) {
     res.value.set(G.VW, G.VH); zoom.value = G.view.zoom || 1;
     for (const g of groups) {
       g.geo.instanceCount = g.n; g.gm.visible = g.n > 0; if (g.sm) g.sm.visible = g.n > 0;
-      if (g.dirty && g.n) { const r = g.ib.updateRanges; while (r.length) r.pop(); g.range.count = g.n * STRIDE; r.push(g.range); g.ib.needsUpdate = true; }   // (one kept range object: gfx.js setRange)
+      if (g.dirty && g.n) { const r = g.ib.updateRanges; while (r.length) r.pop(); g.range.count = g.n * STRIDE; r.push(g.range); g.ib.needsUpdate = true; if (g.pad) bound(g); }   // (one kept range object: gfx.js setRange)
       g.dirty = false;
     }
+  }
+  function bound(g) {   // (o.cull: the sphere round its instances' roots, + pad x the largest scale)
+    const D = g.data; let x0 = 1e9, y0 = 1e9, z0 = 1e9, x1 = -1e9, y1 = -1e9, z1 = -1e9, sc = 0;
+    for (let i = 0; i < g.n; i++) { const o = i * STRIDE; x0 = Math.min(x0, D[o]); x1 = Math.max(x1, D[o]); y0 = Math.min(y0, D[o + 1]); y1 = Math.max(y1, D[o + 1]); z0 = Math.min(z0, D[o + 2]); z1 = Math.max(z1, D[o + 2]); sc = Math.max(sc, D[o + 4]); }
+    const S = g.geo.boundingSphere; S.center.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); S.radius = Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2 + g.pad * sc;
   }
   function dispose() {
     for (const g of groups) {   // (the shape's own attributes and index belong to its cached geometry: only the instance buffer goes)

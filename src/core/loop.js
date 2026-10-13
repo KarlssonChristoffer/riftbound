@@ -137,7 +137,7 @@ export function createLoop(E) {
     if (now - hudT > 250) { hudT = now; hud(); }
     requestAnimationFrame(frame);
   }
-  const hud = () => drawHud({host, opt, stage, env, hero, cv, features, G, fps, proj, PL});   // dev/devtools.js
+  const hud = () => drawHud({host, opt, stage, env, hero, cv, features, G, fps, proj, PL, perf});   // dev/devtools.js
   return {
     start: () => requestAnimationFrame(frame),
     hitstop: sec => { freeze = Math.max(freeze, sec); },   // host.hitstop: the sim holds (F.always features run on)

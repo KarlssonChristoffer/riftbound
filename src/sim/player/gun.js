@@ -67,7 +67,7 @@ const TWX = ['ob', 'ub', 'cx'], TWX_DEG = [-161, 163, 83], TWX_REAR = [true, tru
 const RELOAD_STAND = {up: 0, eject: 1, fetch: 3, close: 5};   // gun_reload frames (load: 2 / 4 by the round)
 
 export function createGun(PL, I) {
-  const {P, A, H, has, ev, dirOf, vecOf, turnToward, moveBy, moveInput, cursorAim, puff, stepTraverse, angDiff, SPEED, BUSY,
+  const {P, A, H, has, ev, dirOf, vecOf, turnToward, moveBy, moveInput, cursorAim, puff, stepTraverse, angDiff, SPEED, SPEED0, strideK, BUSY,
     AIM_TURN_RATE, TURN_RATE, AIM_H} = I;
   const {keys, mouse, cam} = H, T = H.ctx;
   const rng = mulberry32(0x6a09e667);   // the spread (a fixed seed: the sim replays; no Math.random)
@@ -253,14 +253,14 @@ export function createGun(PL, I) {
 
   // ---------------------------------------------------------------- legs on the move (aiming / reloading)
   function legs(dt, mx, my, back, run) {   // speed toward the target, stride along the legs -> the gait frame
-    const C = run ? A.CLIP.run : A.CLIP.walk, M = TUNE.moveSpeed;
-    const target = run ? (back ? M.back : keys.has('shift') ? M.sprint : M.run) : (back ? M.walkBack : SPEED.walk);
+    const C = run ? A.CLIP.run : A.CLIP.walk, M = TUNE.moveSpeed, R = SPEED.run / SPEED0.run;   // (R: the build's pace, player.js)
+    const target = run ? (back ? M.back : keys.has('shift') ? M.sprint : M.run) * R : (back ? M.walkBack * SPEED.walk / SPEED0.walk : SPEED.walk);
     let speed = Math.hypot(P.vx, P.vy);
     speed = speed < target ? Math.min(target, speed + 25 * dt) : Math.max(target, speed - 30 * dt);
     P.vx = mx * speed; P.vy = my * speed;
     const d = moveBy(P.vx * dt, P.vy * dt), fa = P.face * TAU / A.ND;
     const along = (mx * Math.sin(fa) + my * Math.cos(fa)) / (Math.hypot(mx, my) || 1);
-    P.ph = ((P.ph + along * d / C.stride) % 1 + 1) % 1;
+    P.ph = ((P.ph + along * d / (C.stride * strideK(run ? 'run' : 'walk', speed))) % 1 + 1) % 1;   // (the stride follows his real speed: player.js GAIT)
     const at = P.ph * C.stride; let f = 0; while (f < C.frames - 1 && at >= C.cum[f + 1]) f++;
     return f;
   }

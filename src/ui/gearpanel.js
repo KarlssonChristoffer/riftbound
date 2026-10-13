@@ -1,4 +1,4 @@
-// GEAR PANEL: what you wear (features/gear.js; Tab). A slot a row (head, body, back, legs, feet), each with its pieces and
+// GEAR PANEL: what you wear (features/gear.js; the menu, or Tab with ?pack=0). A slot a row (head, body, back, legs, feet), each with its pieces and
 // "own" (the character's own clothes: the slot empty); a click wears a piece or takes it off. Under them the piece under
 // the cursor (or the last one worn): what it is, its weight and armor, what it does now, and what it will do once the game
 // has the system it needs (marked "not in the game yet"). At the bottom the set's numbers: weight, armor, speed. In co-op a
@@ -40,7 +40,7 @@ export function createGearPanel({S, choose, online}) {
     const style = document.createElement('style'); style.textContent = CSS; document.head.appendChild(style);
     root = document.createElement('div'); root.id = 'gear'; root.className = 'hidden';
     root.addEventListener('mousedown', e => e.preventDefault());   // no focus: Space / Enter stay the game's
-    const head = document.createElement('header'); head.innerHTML = '<b>GEAR</b><span><small>Tab</small> <button title="close">×</button></span>';
+    const head = document.createElement('header'); head.innerHTML = '<b>GEAR</b><span><button title="close">×</button></span>';
     head.querySelector('button').onclick = () => toggle(false);
     root.appendChild(head);
     for (const slot of SLOTS) {

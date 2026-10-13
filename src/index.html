@@ -9,13 +9,32 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 12px/1.45 ui-monospace, Consolas, monospace; overflow: hidden; }
   #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
   #screen { image-rendering: pixelated; display: block; background: #000; cursor: crosshair; }
-  #hud { position: fixed; left: 10px; top: 10px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; max-width: 460px; pointer-events: none; }
+  /* F1 (dev mode): THE DEBUG HUD top left (dev/devtools.js drawHud) and THE KEY HELP bottom right (dev/keyhelp.js) */
+  #hud, #help { position: fixed; box-sizing: border-box; max-height: calc(100vh - 20px); overflow: hidden; padding: 9px 12px; pointer-events: none;
+    background: rgba(12, 14, 13, .84); border: 1px solid var(--line); border-radius: 8px; font: 12px/1.4 "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  #hud { left: 10px; top: 10px; width: 400px; max-width: calc(100vw - 20px); }   /* (clear of the key help, also when F2's panel pushes it left) */
   #hud b { color: var(--key); font-weight: 600; }
-  #hud .row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #hud .dim { color: var(--dim); }
-  #help { position: fixed; right: 10px; bottom: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; pointer-events: none; }
-  #help td { padding: 0 8px 0 0; vertical-align: top; }
-  #help td:first-child { color: var(--key); white-space: nowrap; }
+  #hud .hd-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+  #hud .hd-top b { font-size: 14px; color: #fff; }
+  #hud .hd-top span { padding: 0 7px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--line); border-radius: 8px; }
+  #hud .hd-top em { margin-left: auto; font-style: normal; font-weight: 600; color: var(--key); }
+  #hud .hd-row { display: grid; grid-template-columns: 62px 1fr; gap: 8px; }
+  #hud .hd-row > i { font-style: normal; font-size: 10px; line-height: 17px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  #hud .hd-sys { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 11px; color: #cdc6b4; }
+  #help { right: 10px; bottom: 10px; width: min(980px, calc(100vw - 430px)); }
+  #help .kh-cols { columns: 4 210px; column-gap: 20px; }
+  #help section { break-inside: avoid; margin-bottom: 8px; }
+  #help h5 { margin: 0 0 2px; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+  #help .kh-row { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 8px; padding: 1px 0; }
+  #help .kh-row.off { opacity: .32; }
+  #help .kh-k { white-space: nowrap; }
+  #help .kh-s { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--key); }
+  #help kbd { display: inline-block; min-width: 1.2em; padding: 0 4px; font: 600 10.5px/15px "Segoe UI", system-ui, sans-serif; text-align: center; color: #fff;
+    background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .26); border-bottom-width: 2px; border-radius: 4px; }
+  #help kbd + kbd { margin-left: 2px; }
+  #help s { padding: 0 2px; text-decoration: none; color: var(--dim); }
+  #help .kh-foot { padding-top: 6px; border-top: 1px solid var(--line); font-size: 11px; color: var(--dim); }
+  #help .kh-foot b { font-weight: 600; color: var(--key); }
   #load { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: var(--bg); font-size: 14px; }
   /* the menu (ui/menu.js): plain white text, centred over the living world, which is blurred (drag it to look around) */
   /* (one 1fr cell: the menu is never taller than the screen, so a long tab scrolls in .m-body instead of running off it) */
@@ -54,6 +73,10 @@
   .m-val { display: flex; align-items: center; white-space: nowrap; }
   .m-val i { padding: 0 6px; font-style: normal; opacity: .45; }
   .m-val i:hover { opacity: 1; }
+  /* a value's box (ui/menu.js fit): every value it can take in one grid cell, only the current one shown: as wide as the widest */
+  .m-v { display: inline-grid; justify-items: center; font-variant-numeric: tabular-nums; }
+  .m-v > span { grid-area: 1 / 1; visibility: hidden; }
+  .m-v > .on { visibility: visible; }
   .m-keys > div { display: grid; grid-template-columns: 120px 1fr; gap: 10px; padding: 3px 10px; font-size: 14px; }
   .m-keys > div > span:first-child { opacity: .55; }
   .m-note { margin: 14px 10px 0; font-size: 12px; opacity: .45; }
@@ -88,32 +111,8 @@
 </head>
 <body>
 <div id="wrap"><canvas id="screen"></canvas></div>
-<div id="hud"></div>
-<div id="help">
-  <table>
-    <tr><td>WASD</td><td>move (camera-relative) · Shift sprint · Q walk · C crouch</td></tr>
-    <tr><td>Mouse</td><td>aim · hold LMB draw, release shoot · RMB multishot · Space roll / leap</td></tr>
-    <tr><td>1–4 · E · F</td><td>abilities · open / climb · use the gadget (?equip=1)</td></tr>
-    <tr><td>Revolver</td><td>LMB draw / shoot · RMB fan the hammer · R reload · V pistol whip (gunslinger) · Y tip the hat (?set=gunslinger | outlaw)</td></tr>
-    <tr><td>Gunmen</td><td>desert sandbox (?biome=desert): gangs ride in on their own · 0 a gang now · Shift+0 one · E on the wanted board: a bounty · ?foes=0 off</td></tr>
-    <tr><td>Z / X</td><td>rotate camera · or drag with the middle mouse button · Home: reset</td></tr>
-    <tr><td>Wheel</td><td>zoom in / out (smooth, pixel-perfect levels)</td></tr>
-    <tr><td>5–9</td><td>wind · wildlife · depth · camera feel · light sources</td></tr>
-    <tr><td>B · Shift+B</td><td>wind strength: auto · calm · breeze · brisk · gale · wind lines: hd · pixel · off</td></tr>
-    <tr><td>T · N · L · K</td><td>time of day · biome · lantern · air particles + ground fog</td></tr>
-    <tr><td>O · M · U · P</td><td>loadout (cloth cloak, the cowboys) · mute · music · props A/B (Shift+P: trees)</td></tr>
-    <tr><td>J · I</td><td>HD bow · shiny armour</td></tr>
-    <tr><td>Shift+V</td><td>gun smoke: pixel · hybrid · strands · soft (?smoke=)</td></tr>
-    <tr><td>Shift+1–6</td><td>rotation steps · ground texture · outlines · props A/B · bands · shadows</td></tr>
-    <tr><td>G · Shift+G</td><td>debug views · colliders</td></tr>
-    <tr><td>. · Shift+.</td><td>an elite with the next affix · its champion (?affixes=1; more in the menu's Sandbox tab)</td></tr>
-    <tr><td>Esc · H</td><td>menu · hide this help</td></tr>
-    <tr><td>Tab · Shift+Tab</td><td>gear: what you wear (hats, coats, boots ...) · the wardrobe screen (dev): clothes, paint, piece tuner, stats, items, outfits</td></tr>
-    <tr><td>F2 · F3</td><td>cheat panel · frame profiler: ms per system against the budget</td></tr>
-    <tr><td>F4 · F8</td><td>photo mode · gun feel panel</td></tr>
-    <tr><td>` / §</td><td>dev mode on / off (these keys, the debug HUD) · ?mode=run | sandbox</td></tr>
-  </table>
-</div>
+<div id="hud" class="hidden"></div>
+<div id="help" class="hidden"></div>   <!-- the key help: dev/keyhelp.js builds it -->
 <div id="pause" class="hidden"></div>
 <div id="load">Loading…</div>
 <script type="module" src="main.js"></script>

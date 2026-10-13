@@ -7,7 +7,7 @@
 # Slots (one garment each): torso, legs, feet, outer, cloak, neck, back, head, hands.
 # Cloth (cloaks, scarf tails) hangs on garment-owned bone chains driven by the cloth solver below.
 # Use from a loadout file:  exec(open(r'D:\Game\tools\blender\wardrobe.py').read()); LOADOUT = [...]
-import bpy, bmesh, math
+import bpy, bmesh, math, os
 from mathutils import Matrix, Vector
 
 exec(open(r'D:\Game\tools\blender\skeleton.py', encoding='utf-8').read())
@@ -297,12 +297,15 @@ SIM_CAPSULES = [    # (bone, from head/tail, to head/tail, radius m, x offset m)
     ('Head', 'head', ('Head', 'tail'), .12, 0)]
 
 
-def sim_cloth(name, fam, bias, bone, grid, pin_rows, part_names):
-    """Register a runtime cloth: grid = rows of rest points (armature space) from the pinned edge downward."""
+def sim_cloth(name, fam, bias, bone, grid, pin_rows, part_names, bands=None):
+    """Register a runtime cloth: grid = rows of rest points (armature space) from the pinned edge downward.
+    bands = [(first cell row, last cell row, family, bias)]: stripes (a cell row lies between grid rows r and r + 1)
+    drawn in another family than `fam` (view/cloth.js, view/livehero.js)."""
     arm = bpy.data.objects[ROOT]
     inv = arm.data.bones[bone].matrix_local.inverted()
     SIM.append(dict(name=name, fam=fam, bias=bias, bone=bone, pin_rows=pin_rows,
-                    grid=[[[round(c, 5) for c in inv @ Vector(p)] for p in row] for row in grid]))
+                    grid=[[[round(c, 5) for c in inv @ Vector(p)] for p in row] for row in grid],
+                    **({'bands': [list(b) for b in bands]} if bands else {})))
     for ob in bpy.data.collections[COL].objects:
         if ob.name.split('.')[0] in part_names:
             ob.hide_render = True
@@ -319,7 +322,9 @@ def sim_rest():
     import sys
     sys.path.insert(0, r'D:\Game\concepts\sprites')
     import palette_harm
-    return {'cloths': [dict(c, colours=palette_harm.hex4(c['fam'], fams[c['fam']]) if c['fam'] in fams else None) for c in SIM],
+    hex4 = lambda f: palette_harm.hex4(f, fams[f]) if f in fams else None
+    return {'cloths': [dict(c, colours=hex4(c['fam']),
+                            **({'bands': [b + [hex4(b[2])] for b in c['bands']]} if c.get('bands') else {})) for c in SIM],
             'capsule_names': [c[0] for c in SIM_CAPSULES]}
 
 
@@ -505,10 +510,13 @@ def _travel_cloak():
          pixel={'HairCap': ['hair', 'hair', {'bias': .05}], 'HairFringe': ['hair', 'hair', {}], 'HairLock': ['hair', 'hair', {}],
                 'HairNape': ['hair', 'hair', {}]})
 def _hair_mop():
-    """A brown mop: cap leaves the forehead free, a swept saw-tooth fringe, pointed side locks, nape tufts."""
+    """A brown mop: cap leaves the forehead free, a swept saw-tooth fringe, pointed side locks, nape tufts below the cap."""
     P, s, J, z = _ctx()
     c, hh = z('head'), z('top') - z('head')
-    rows = [(.30, .075, .195, .16), (.45, .04, .21, .205), (.60, .012, .218, .228), (.78, .006, .205, .215),
+    # the two lowest rings wrap the back of the skull down to the jaw line (their fronts sit inside the head): without
+    # them the back of the head was bare skin under the cap, read as a face from behind
+    rows = [(.10, .085, .135, .065), (.18, .085, .17, .10), (.30, .075, .195, .16), (.45, .04, .21, .205),
+            (.60, .012, .218, .228), (.78, .006, .205, .215),
             (.93, .01, .145, .155), (1.03, .01, .06, .06)]
     loft('HairCap', 'Head', [(0, yc * s, c + f * hh) for f, yc, rx, ry in rows], [(rx * s, ry * s) for f, yc, rx, ry in rows], p=2.3)
     # fringe: a band across the forehead, swept down toward the character's right, every other ring drops a point
@@ -526,7 +534,7 @@ def _hair_mop():
                                         (sx * .19 * s, -.07 * s, c + .3 * hh)],
              [(.035 * s, .05 * s), (.032 * s, .045 * s), (.004 * s, .004 * s)], n=4, p=2.0)
     for i, x in enumerate((-.1, 0, .1)):
-        loft(f'HairNape.{i}', 'Head', [(x * s, .15 * s, c + .38 * hh), (x * 1.1 * s, .17 * s, c + .24 * hh), (x * 1.2 * s, .165 * s, c + .15 * hh)],
+        loft(f'HairNape.{i}', 'Head', [(x * s, .14 * s, c + .16 * hh), (x * 1.1 * s, .145 * s, c + .08 * hh), (x * 1.2 * s, .12 * s, c + .02 * hh)],
              [(.05 * s, .03 * s), (.035 * s, .022 * s), (.004 * s, .004 * s)], n=4, p=2.0)
 
 
@@ -588,7 +596,25 @@ def dress(loadout):
     return used
 
 
+# SMOOTH SHADING (opt-in, an A/B for the pixel look): every part's normals smoothed across edges flatter than SMOOTH_DEG
+# (55 smooths the 8-sided rings, 45 deg apart, and keeps caps, brims, hems and the 6- and 4-sided parts sharp), so the
+# pixelizer's tones follow the round form instead of banding facet by facet. 0 = flat facets (as built). A loadout may set
+# SMOOTH_DEG; the environment's SMOOTH_DEG overrides it.
+SMOOTH_DEG = 0.0
+
+
+def smooth_shading(deg):
+    for ob in bpy.data.collections[COL].objects:
+        if ob.type == 'MESH':
+            for f in ob.data.polygons:
+                f.use_smooth = True
+            ob.data.set_sharp_from_angle(angle=math.radians(deg))
+
+
 def build():
     _build_body_only()
     dress(LOADOUT)
+    deg = float(os.environ.get('SMOOTH_DEG') or SMOOTH_DEG)
+    if deg > 0:
+        smooth_shading(deg)
     return sorted(o.name for o in bpy.data.collections[COL].objects if not o.hide_render)

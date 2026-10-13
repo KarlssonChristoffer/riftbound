@@ -116,6 +116,33 @@ def _sheet(name, bone, rows, thick, cols=7):
     return _bind(name, bm, bone)
 
 
+def _capelet(name, bone, rows, thick, cols=13, p=2.6):
+    """A cape round the shoulders, open at the front: rows = [(z, yc, hw, d, deg)] from the top down, each a half
+    superellipse (power p) from the back (+Y, at yc + d) round the sides (x = +-hw at yc) to `deg` deg from the back
+    on either side (past 90: forward of the shoulders)."""
+    se = lambda v: math.copysign(abs(v) ** (2 / p), v)
+    bm = bmesh.new()
+    outer, inner = [], []
+    for zz, yc, hw, d, deg in rows:
+        o, i = [], []
+        for j in range(cols):
+            a = math.radians(deg) * (-1 + 2 * j / (cols - 1))
+            sx, cy = se(math.sin(a)), se(math.cos(a))
+            o.append(bm.verts.new((sx * (hw + thick / 2), yc + cy * (d + thick / 2), zz)))
+            i.append(bm.verts.new((sx * (hw - thick / 2), yc + cy * (d - thick / 2), zz)))
+        outer.append(o); inner.append(i)
+    for r in range(len(rows) - 1):
+        for j in range(cols - 1):
+            bm.faces.new((outer[r][j], outer[r][j + 1], outer[r + 1][j + 1], outer[r + 1][j]))
+            bm.faces.new((inner[r][j + 1], inner[r][j], inner[r + 1][j], inner[r + 1][j + 1]))
+        for j in (0, cols - 1):
+            bm.faces.new((outer[r][j], outer[r + 1][j], inner[r + 1][j], inner[r][j]))
+    for r in (0, len(rows) - 1):
+        for j in range(cols - 1):
+            bm.faces.new((outer[r][j], inner[r][j], inner[r][j + 1], outer[r][j + 1]))
+    return _bind(name, bm, bone)
+
+
 def _sheet_grid(rows, cols=7):
     """The mid-surface points of a _sheet (runtime cloth grid)."""
     return [[c + Vector((u * hw[0 if u >= 0 else 1], -wrap[0 if u >= 0 else 1] * u * u, 0))
@@ -210,10 +237,11 @@ def _wool_vest():
 
 
 # ---------------------------------------------------------------- duster (gunslinger) ---------------------------------
-@garment('duster', 'cloak', ['human_small'], soft=['Duster'], hides=['ShirtSleeveUp', 'ShirtSleeveLo'],
+@garment('duster', 'cloak', ['human_small'], soft=['Duster', 'DusterCape'], hides=['ShirtSleeveUp', 'ShirtSleeveLo'],
          pixel={'Duster': ['duster', 'oilskin', {'bias': -.06}], 'DusterCape': ['cape', 'oilskin', {'bias': .04}],
                 'DusterCollar': ['collar', 'oilskin', {}],
-                'DusterSleeveUp': ['dsleeve', 'oilskin', {}], 'DusterSleeveLo': ['dsleeve', 'oilskin', {}]})
+                'DusterSleeveUp': ['dsleeve', 'oilskin', {}], 'DusterSleeveLo': ['dsleeve', 'oilskin', {}],
+                'DusterLapel': ['lapel', 'oilskin', {'bias': .12}]})
 def _duster():
     """The gunslinger's long coat: to mid-calf, open down the front, its RIGHT front swept back behind the holster
     (the gun hand is free), a short shoulder cape, a turned-up collar, full sleeves. The long panel hangs on a 4-bone
@@ -238,16 +266,39 @@ def _duster():
         sim_cloth('Duster', 'oilskin', -.06, 'Spine2', _sheet_grid(rows), 2, {'Duster'})
     else:
         CLOTH_CHAINS.append(dict(bones=bones, lift=.8, side=.8, flutter=.7, turn=.9))
-    # shoulder cape: a short open sheet round the shoulders, its edges reaching the front of the chest
+    # shoulder cape: a short capelet resting ON the shoulders (over the sleeves' caps, ~1.25 m), open at the front, its
+    # edges ending at the front of each shoulder. (It was a parabolic sheet that sank into the sleeves and left its two
+    # front corners standing out in front of the arms as flat wings.)
     n = z('neck')
-    cape = [(Vector((0, .1 * s, n - .005 * s)), (.17 * s, .17 * s), (.2 * s, .2 * s)),
-            (Vector((0, .16 * s, n - .08 * s)), (.29 * s, .29 * s), (.33 * s, .33 * s)),
-            (Vector((0, .2 * s, n - .2 * s)), (.34 * s, .34 * s), (.4 * s, .4 * s))]
-    _sheet('DusterCape', 'Spine2', cape, .014 * s)
+    # (soft: cloth, out of the ground snap: lying on his back it must not lift him)
+    _capelet('DusterCape', 'Spine2', [(n + .05 * s, .03 * s, .18 * s, .165 * s, 150), (n + .045 * s, .02 * s, .27 * s, .18 * s, 130),
+                                      (n, .02 * s, .335 * s, .19 * s, 118), (n - .18 * s, .02 * s, .375 * s, .2 * s, 112)],
+             .014 * s)
     loft('DusterCollar', 'Spine2', [(0, .03 * s, n - .03 * s), (0, .04 * s, n + .06 * s)],
          [(.17 * s, .15 * s), (.15 * s, .14 * s)], p=2.4)     # turned up round the back of the neck
     for sd in 'LR':
         _sleeve('DusterSleeve', sd, J, s, .032 * s, upper=(0, 1), lower=(0, .98), cuff=.012 * s)
+    # lapels: the open front folded back, from the collar down and out over the chest (lit a tone lighter than the coat,
+    # so the coat reads apart from the dark vest under it from the front). Each point sits 1 cm proud of what is under it.
+    from mathutils.bvhtree import BVHTree
+    under = [o for o in bpy.data.collections[COL].objects if o.type == 'MESH' and not o.name.startswith('Duster')
+             and o.name.split('.')[0] not in ('BandanaFlap', 'BandanaWrap')]
+    vs, fs = [], []
+    for o in under:
+        k = len(vs)
+        vs += [v.co.copy() for v in o.data.vertices]
+        fs += [tuple(i + k for i in pl.vertices) for pl in o.data.polygons]
+    chest = BVHTree.FromPolygons(vs, fs)
+
+    def proud(x, zz, out=.01):
+        hit = chest.ray_cast(Vector((x, -1, zz)), Vector((0, 1, 0)))[0]
+        return hit - Vector((0, out * s, 0)) if hit else Vector((x, -.16 * s, zz))
+    for sd, sx in (('L', 1), ('R', -1)):
+        pts = [proud(sx * x * s, n - dz * s, .016) for x, dz in ((.095, .005), (.115, .07), (.14, .14), (.162, .2))]
+        for i in range(1, len(pts) - 1):        # (no kinks where the vest's sections step)
+            pts[i].y = min(pts[i].y, (pts[i - 1].y + pts[i + 1].y) / 2)
+        loft(f'DusterLapel.{sd}', 'Spine2', pts, [(.04 * s, .006 * s), (.036 * s, .006 * s), (.026 * s, .006 * s), (.008 * s, .005 * s)],
+             side=(1, 0, 0), n=4, p=2.0)
 
 
 # ---------------------------------------------------------------- poncho + bandolier (outlaw) ---------------------------
@@ -255,31 +306,85 @@ PONCHO = []   # the poncho's profile (z, yc, rx, ry), for the bandolier lying on
 PONCHO_P = 3.0   # its section's superellipse power (flat front and back)
 
 
-@garment('serape_poncho', 'cloak', ['human_small'],
+@garment('serape_poncho', 'cloak', ['human_small'], hides=['ShirtSleeveUp'],
          pixel={'Poncho': ['poncho', 'serape', {}], 'PonchoStripe': ['stripe', 'linen', {}],
-                'PonchoBand': ['band', 'vest', {}], 'PonchoGreen': ['band', 'green', {}]})
+                'PonchoYoke': ['poncho', 'serape', {}],
+                'PonchoBand': ['band', 'vest', {}], 'PonchoGreen': ['band', 'green', {}],
+                'PonchoSleeveUp': ['sleeve', 'linen', {}]})
 def _serape_poncho():
     """A wool poncho hanging from the shoulders to the hips: wide across (the upper arms under it, the forearms out at
     its sides) but flat front and back (cloth hangs close to the body; a deep section reads as a barrel), the hem
     dipping at the front and back centres. Serape stripes: cream across the chest; dark, green and cream near the hem
-    (each >= 1 px tall at the 20 deg camera)."""
+    (each >= 1 px tall at the 20 deg camera).
+    With SIM_CLOTH (the game's runtime cloth): a rigid YOKE over the shoulders (to below the cream stripe: it keeps the
+    shoulders' fit) and the rest as two cloth sheets, front and back, open at the sides (where the forearms come out):
+    pinned under the yoke's hem, the hem stripes as the cloth's bands (view/cloth.js CLOTH_MATERIALS PonchoFront /
+    PonchoBack), colliding with the forearms too. Without it (CLOTH_BAKED=1: review stills) the whole poncho is rigid.)"""
     P, s, J, z = _ctx()
     n = z('neck')
-    rows = [(n + .005 * s, .005 * s, .095 * s, .09 * s), (n - .035 * s, 0, .2 * s, .15 * s), (n - .075 * s, 0, .3 * s, .168 * s),
-            (n - .2 * s, 0, .33 * s, .172 * s), (n - .32 * s, 0, .34 * s, .175 * s), (n - .4 * s, 0, .345 * s, .178 * s)]
+    # (the shoulder rows sit on the arms' shoulder caps: the poncho rests on the shoulders, so nothing pokes up through it)
+    rows = [(n + .005 * s, .005 * s, .1 * s, .095 * s), (n, 0, .2 * s, .15 * s), (n - .04 * s, 0, .3 * s, .168 * s),
+            (n - .1 * s, 0, .325 * s, .171 * s), (n - .2 * s, 0, .33 * s, .172 * s), (n - .32 * s, 0, .34 * s, .175 * s),
+            (n - .4 * s, 0, .345 * s, .178 * s)]
     PONCHO[:] = rows
     def dip(ob):   # the hem's front and back centres hang lower
         for v in ob.data.vertices:
             if v.co.z < n - .1 * s:
                 v.co.z -= .06 * s * max(0.0, 1 - abs(v.co.x) / (.3 * s)) ** 1.5
-    ob = loft('Poncho', 'Spine2', [(0, yc, zz) for zz, yc, rx, ry in rows], [(rx, ry) for zz, yc, rx, ry in rows], n=12, p=PONCHO_P)
-    dip(ob)
-    for name, zz, h in (('PonchoStripe', n - .13 * s, .035 * s), ('PonchoBand', n - .3 * s, .03 * s),
-                        ('PonchoGreen', n - .338 * s, .03 * s), ('PonchoStripe', n - .372 * s, .03 * s)):
+    if SIM_CLOTH:
+        _poncho_cloth(rows, dip)
+    else:
+        ob = loft('Poncho', 'Spine2', [(0, yc, zz) for zz, yc, rx, ry in rows], [(rx, ry) for zz, yc, rx, ry in rows], n=12, p=PONCHO_P)
+        dip(ob)
+    stripes = (('PonchoStripe', n - .13 * s, .035 * s),) + ((('PonchoBand', n - .3 * s, .03 * s), ('PonchoGreen', n - .338 * s, .03 * s),
+                                                             ('PonchoStripe', n - .372 * s, .03 * s)) if not SIM_CLOTH else ())
+    for name, zz, h in stripes:
         yc, rx, ry = _ring_at(rows, zz)
         ob = loft(name, 'Spine2', [(0, yc, zz + h / 2), (0, yc, zz - h / 2)], [(rx + .006 * s, ry + .006 * s)] * 2, n=12, p=PONCHO_P)
         if zz < n - .1 * s:
             dip(ob)
+    # the shirt's upper sleeves start 5 cm above the shoulder joint (a deltoid cap) and poked up through the poncho's
+    # shoulders as cream blocks: under it they start AT the joint with a slim cap (the rest as the shirt's)
+    t = .012 * s
+    for sd, m in (('L', 'Left'), ('R', 'Right')):
+        sh, el = J['shoulder' + sd], J['elbow' + sd]
+        d = (el - sh).normalized()
+        loft(f'PonchoSleeveUp.{sd}', f'{m}Arm', [sh + d * .01 * s, sh + d * .05 * s, sh + (el - sh) * .55, el + d * .03 * s],
+             _grow([(.045 * s, .05 * s), (.07 * s, .072 * s), (.055 * s, .058 * s), (.045 * s, .047 * s)], t), side=(0, -1, 0))
+
+
+# the cloth's rows, m below the neck (x s): one pinned under the yoke's hem, then only the stripes' edges (the hem ends on
+# the cream stripe: the red edge under it was < 1 px). 5 x 7 a sheet: cloth.sim ~ the duster's (8 rows cost 0.45 ms)
+PONCHO_SKIRT = [-.2, -.285, -.315, -.353, -.387]
+PONCHO_BANDS = [(1, 1, 'vest', 0.0), (2, 2, 'green', 0.0), (3, 3, 'linen', 0.0)]   # its hem stripes (cell rows)
+PONCHO_COLS, PONCHO_PIN = 7, 1
+
+
+def _poncho_cloth(rows, dip):
+    """The SIM_CLOTH poncho: the yoke (rigid, to YOKE below the neck) and the skirt's two cloth sheets."""
+    P, s, J, z = _ctx()
+    n = z('neck')
+    yoke = n - .215 * s
+    yc, rx, ry = _ring_at(rows, yoke)
+    yr = [r for r in rows if r[0] > yoke] + [(yoke, yc, rx, ry)]
+    ob = loft('PonchoYoke', 'Spine2', [(0, c, zz) for zz, c, a, b in yr], [(a, b) for zz, c, a, b in yr], n=12, p=PONCHO_P)
+    dip(ob)
+    se = lambda v: math.copysign(abs(v) ** (2 / PONCHO_P), v)
+    drop = lambda x, zz: .06 * s * max(0.0, 1 - abs(x) / (.3 * s)) ** 1.5 if zz < n - .1 * s else 0.0   # (dip's)
+    for name, side in (('PonchoFront', -1), ('PonchoBack', 1)):
+        grid = []
+        for i, dz in enumerate(PONCHO_SKIRT):
+            zz = n + dz * s
+            yc, rx, ry = _ring_at(rows, zz)
+            off = -.008 * s if i < PONCHO_PIN else 0.0   # the pinned row inside the yoke's hem, the rest on the profile
+            row = []
+            for j in range(PONCHO_COLS):
+                a = math.radians(84) * (-1 + 2 * j / (PONCHO_COLS - 1))   # from his right side round the front (back) to his left
+                x = (rx + off) * se(math.sin(a))
+                row.append(Vector((x, yc + side * (ry + off) * se(math.cos(a)), zz - drop(x, zz))))
+            grid.append(row)
+        sim_cloth(name, 'serape', 0.0, 'Spine2', grid, PONCHO_PIN, set(), bands=PONCHO_BANDS)
+    SIM_CAPSULES.extend([('LeftForeArm', 'head', ('LeftForeArm', 'tail'), .055, 0), ('RightForeArm', 'head', ('RightForeArm', 'tail'), .055, 0)])
 
 
 @garment('bandolier', 'back', ['human_small'],
@@ -375,6 +480,9 @@ def _cowboy_boots():
 
 # ---------------------------------------------------------------- gun belt + holster ---------------------------------
 HOLSTER = {}   # rest-space holster frame for the revolver: grip point, barrel axis, top
+# The revolvers are drawn bigger than life: at ~3.3 cm a pixel a real one is a sliver (its barrel half a pixel thick).
+# GUN_LEN scales lengths along the barrel, GUN_GIRTH the sections and heights across it (and the holster with them).
+GUN_LEN, GUN_GIRTH = 1.3, 1.45
 
 
 @garment('gun_belt', 'belt', ['human_small'], soft=['Holster'],
@@ -398,8 +506,9 @@ def _gun_belt():
     Fh = Vector((0, -.15, -1)).normalized()                    # muzzle down, canted a little forward
     Uh = Vector((0, -1, .15)).normalized()                     # the top faces forward
     HOLSTER.update(g=g, F=Fh, U=Uh)
-    loft('Holster', 'RightUpLeg', [g + Uh * .03 * s - Fh * .005 * s, g + Uh * .035 * s + Fh * .07 * s, g + Uh * .04 * s + Fh * .25 * s],
-         [(.026 * s, .04 * s), (.024 * s, .03 * s), (.018 * s, .02 * s)], side=Fh.cross(Uh), n=6, p=2.2)
+    L, T = GUN_LEN * s, GUN_GIRTH * s
+    loft('Holster', 'RightUpLeg', [g + Uh * .03 * T - Fh * .005 * L, g + Uh * .035 * T + Fh * .07 * L, g + Uh * .04 * T + Fh * .25 * L],
+         [(.026 * T, .04 * T), (.024 * T, .03 * T), (.018 * T, .02 * T)], side=Fh.cross(Uh), n=6, p=2.2)
     tz = g.z - .2 * s                                           # the tie-down thong round the thigh, under the holster
     c = hp + (kn - hp) * ((hp.z - tz) / (hp.z - kn.z))
     loft('HolsterTie', 'RightUpLeg', [(c.x, c.y, tz - .006 * s), (c.x, c.y, tz + .006 * s)], [(.098 * s, .1 * s)] * 2, p=2.2)
@@ -419,18 +528,19 @@ def _revolver(barrel, bore, bore_n, cyl, rod, frame=1.0):
     g, F, U = _hand_frame('R')
     S = F.cross(U)
     GUN.update(g=g, F=F, U=U)
+    L, T = GUN_LEN * s, GUN_GIRTH * s
+    at = lambda u, f: g + U * u * T + F * f * L          # u up (toward the top), f forward (along the barrel) of the grip point
+    r = lambda a, b: (a * T, b * T)
     hold = add_chain('GunHold', 'RightHand', [g, g + F * .05 * s])[0]
-    loft('GunGrip', hold, [g + U * .015 * s - F * .012 * s, g - U * .045 * s - F * .028 * s, g - U * .085 * s - F * .042 * s],
-         [(.013 * s, .018 * s), (.014 * s, .019 * s), (.014 * s, .017 * s)], side=S, n=6, p=2.2)
-    loft('GunFrame', hold, [g + U * .028 * s - F * .045 * s, g + U * .03 * s - F * .01 * s, g + U * .028 * s + F * .055 * s],
-         [(.011 * frame * s, .016 * frame * s), (.012 * frame * s, .02 * frame * s), (.01 * frame * s, .014 * frame * s)],
+    loft('GunGrip', hold, [at(.015, -.012), at(-.045, -.028), at(-.085, -.042)], [r(.013, .018), r(.014, .019), r(.014, .017)],
          side=S, n=6, p=2.2)
-    loft('GunGuard', hold, [g + U * .004 * s + F * .002 * s, g - U * .022 * s + F * .012 * s, g - U * .016 * s + F * .038 * s],
-         [(.006 * s, .007 * s)] * 3, side=S, n=4, p=2.0)
-    loft('GunCylinder', hold, [g + U * .032 * s, g + U * .032 * s + F * cyl * s], [(.02 * s, .02 * s)] * 2, side=S, n=6, p=2.0)
-    b0, mz = g + U * .04 * s + F * (cyl - .003) * s, g + U * .04 * s + F * (cyl + barrel) * s
-    loft('GunBarrel', hold, [b0, mz], [(bore * s, bore * s)] * 2, side=S, n=bore_n, p=2.0)
-    loft('GunRod', hold, [b0 - U * .018 * s, b0 - U * .018 * s + F * barrel * rod * s], [(.006 * s, .006 * s)] * 2, side=S, n=4, p=2.0)
+    loft('GunFrame', hold, [at(.028, -.045), at(.03, -.01), at(.028, .055)],
+         [r(.011 * frame, .016 * frame), r(.012 * frame, .02 * frame), r(.01 * frame, .014 * frame)], side=S, n=6, p=2.2)
+    loft('GunGuard', hold, [at(.004, .002), at(-.022, .012), at(-.016, .038)], [r(.006, .007)] * 3, side=S, n=4, p=2.0)
+    loft('GunCylinder', hold, [at(.032, 0), at(.032, cyl)], [r(.02, .02)] * 2, side=S, n=6, p=2.0)
+    b0, mz = at(.04, cyl - .003), at(.04, cyl + barrel)
+    loft('GunBarrel', hold, [b0, mz], [r(bore, bore)] * 2, side=S, n=bore_n, p=2.0)
+    loft('GunRod', hold, [b0 - U * .018 * T, b0 - U * .018 * T + F * barrel * rod * L], [r(.006, .006)] * 2, side=S, n=4, p=2.0)
     add_chain('GunMuzzle', hold, [mz, mz + F * .02 * s])     # marker: exported as 2D points per frame
 
 
@@ -539,7 +649,7 @@ def _gun_hold(pose_name):
         if key in LEFT_TO_GUN:
             F, U = R @ GUN['F'], R @ GUN['U']
             f, u, sd = LEFT_TO_GUN[key]
-            hammer = fist + U * .05 - F * .03
+            hammer = fist + U * .05 * GUN_GIRTH - F * .03 * GUN_LEN
             bpy.context.view_layer.update()
             _reach('Left', hammer + (F * f + U * u + F.cross(U) * sd) * PROP['height'] / 1.8)
     elif 'g' in HOLSTER:
@@ -825,8 +935,8 @@ POSES['gun_blow'] = _gpose(10, _arm(x=-30, fx=-120, sz=0, z=30), {'Neck': [('Z',
 POSES['gun_blow_b'] = _gpose(10, _arm(x=-30, fx=-120, sz=0, z=30), {'Neck': [('Z', -6), ('X', 10)], 'Head': [('Z', -4), ('X', 10)]},
                              legs=_RL_LEGS)
 GUN_SPIN.update({'gun_blow_up': 35, 'gun_blow': 65, 'gun_blow_b': 65})
-REACH['gun_blow'] = [_head_point('Right', -.02, -.27, -.36)]     # the muzzle just in front of the lips
-REACH['gun_blow_b'] = [_head_point('Right', -.02, -.26, -.38)]
+REACH['gun_blow'] = [_head_point('Right', -.065, -.238, -.515)]   # the muzzle just in front of the lips (solved for the
+REACH['gun_blow_b'] = [_head_point('Right', -.075, -.228, -.527)]  # GUN_LEN / GUN_GIRTH gun: same muzzle spot as life-size)
 ANIMS['gun_blow'] = _clip(['gun_aim', 'gun_blow_up', 'gun_blow', 'gun_blow_b', 'gun_draw_hip'], [.5, 1, 1.5, 2, 3, 3.5, 4], 12,
                           play=[0, 1, 2, 3, 4, 3, 4, 3, 5, 6], ms=[70, 90, 90, 160, 110, 90, 110, 140, 80, 90],
                           marks={'puff0': 3, 'puff1': 4})
@@ -963,7 +1073,29 @@ def _hair_tache():
          side=(0, 0, 1), n=6, p=2.0)
 
 
-@garment('bandit_mask', 'neck', ['human_small'],
+@garment('hair_bandido', 'head', ['human_small'], hides=['HairNape'],
+         pixel={**GARMENTS['hair_mop']['pixel'], 'HairBack': ['hair', 'hair', {}], 'Moustache': ['tache', 'hair', {'bias': -.15}]})
+def _hair_bandido():
+    """The outlaw's: the mop grown long at the back and sides, down to the collar (it shows under the sombrero's brim
+    from behind and beside), and a thick moustache whose ends droop past the corners of the mouth toward the jaw
+    (heavier than the sheriff's horseshoe, so the two read apart at 1x)."""
+    _hair_mop()
+    P, s, J, z = _ctx()
+    c, hh = z('head'), z('top') - z('head')
+    loft('HairBack', 'Head', [(0, .1 * s, c + .3 * hh), (0, .11 * s, c + .1 * hh), (0, .1 * s, c - .04 * hh), (0, .09 * s, c - .1 * hh)],
+         [(.19 * s, .1 * s), (.18 * s, .085 * s), (.16 * s, .07 * s), (.13 * s, .055 * s)], n=8, p=2.4)
+    from mathutils.bvhtree import BVHTree
+    hd = bpy.data.objects['Head'].data
+    face = BVHTree.FromPolygons([v.co.copy() for v in hd.vertices], [tuple(p.vertices) for p in hd.polygons])
+
+    def on_face(x, f, out):   # `out` m in front of the face at x (m), height f of the head: the moustache hugs the jaw
+        hit = face.ray_cast(Vector((x * s, -1, c + f * hh)), Vector((0, 1, 0)))[0]
+        return hit - Vector((0, out * s, 0)) if hit else Vector((x * s, -.2 * s, c + f * hh))
+    pts = [(-.1, .07), (-.098, .13), (-.06, .2), (0, .222), (.06, .2), (.098, .13), (.1, .07)]
+    loft('Moustache', 'Head', [on_face(x, f, .012) for x, f in pts], [(.028 * s, .018 * s)] * len(pts), side=(0, 0, 1), n=6, p=2.0)
+
+
+@garment('bandit_mask', 'neck', ['human_small'], hides=['HairNape'],     # (the mask's back covers the nape tufts)
          pixel={'Mask': ['mask', 'mask', {}], 'MaskPoint': ['mask', 'mask', {'bias': -.06}],
                 'MaskKnot': ['mask', 'mask', {'bias': -.1}]})
 def _bandit_mask():
@@ -3343,3 +3475,1582 @@ LIVE_AT.update({'cx_dr_dip': [('Right', None, (-.12, -.5, .32))], 'cx_dr_sip': [
 ANIMS['cx_drink'] = _clip(['idle_in', 'cx_dr_kneel', 'cx_dr_dip', 'cx_dr_sip'], [0, .5, 1, 1.5, 2, 2.5, 3], 8,
                           play=[0, 1, 2, 3, 4, 5, 6, 6, 5, 3, 2], ms=[100, 120, 300, 150, 700, 150, 900, 400, 150, 150, 1600],
                           marks={'loop': 3, 'dip': 4})
+
+
+# ================================================================ the lasso, live (the live hero only) ================
+# The rope work redone for the LIVE cowboys (view/livehero.js; docs/exp/lasso.md), made for the live models only and
+# exported with ragdoll_export.py --clips (LASSO_LIVE: tools/blender/live_export.mjs --add). The atlas's lasso poses above
+# (lasso_spin, lws_ / lrs_, lasso_throw, lasso_haul_*, ...) keep serving the sprites. The game reads these names and marks.
+# Every key holds the revolver in its holster and the coil plumb in the left fist (LASSO_KEYS), the hat on the head.
+#   ls_spin       the standing spin (loop): the right wrist round LS_SPIN (a circle carried by the chest) beside the head,
+#                 just under the brim's edge (the outlaw's sombrero is ~1 m across: an arm up over the head would go through
+#                 it, and over its edge is out of reach), the fist out along the spoke, the wrist rolling over behind; the
+#                 chest turning with the hand (+-6 deg), the weight shifting under it; the coil hand before the left hip
+#   ls_throw      the overhand throw: the last turn swung back (the chest turned away, the weight on the back foot), the
+#                 step (the left foot forward, the hips opening while the chest stays back), the whip (the elbow leading,
+#                 the chest squaring), the release (the arm out at the target, the right shoulder through, on the front
+#                 foot, the right heel up: mark `release`), the follow-through (the left hand feeding rope), the settle
+#   ls_throw_up   the same at a high anchor: the release arm up at ~45 deg, up on the front foot's toes, looking up
+#   ls_take       the rope goes taut: the right fist back to the chest, the left hand grabbing the rope out front, a step
+#                 back, into ls_hold
+#   ls_hold       the taut hold (loop, a breath): the right fist forward at chest height, the left at the hip, leaning back
+#   ls_strain     a hard strain (loop, a tremble): leaning far back on a braced front leg, both arms out on the rope
+#   ls_dragged    pulled in by something stronger (loop): leaning back hard, the front foot skidding on its heel, the
+#                 back foot hopping up to catch up (the game slides him)
+#   ls_jerk       the catch jolt: yanked forward (the arms out, a stumble step), catching himself: into ls_dragged
+#   ls_haul_walk  ls_hold's upper body over the walk's legs (the walk's ground data: BRAWL_GAIT)
+#   ls_yank       the two-handed heave: a dip, the heave back past the right hip (mark `pull`), back into ls_hold
+#   ls_snare      tying a heavy target's legs: the rope lifted high, snapped down in a crouch (mark `cinch`), a tug, the
+#                 right hand lets go (mark `free`), standing into the idle with the coil
+# The kit (a key's hands and feet are put on points after its spec, in this order): LS_FEET plants the feet (two-bone IK
+# on the legs, the knee over the toes; the hips sink as far as the stance needs), LS_AT puts a fist or a wrist on a point
+# (BRAWL_AT's rules: bone None = his frame, the height over the ground the pose snaps to; '.' = his frame before the
+# snap; a bone's name carries a rest-space point; an elbow's way given or the spec's bend), LS_HAND turns a hand (fingers
+# F, palm P), then the revolver goes back in its holster and the coil is hung plumb again; a clip's in-betweens get the
+# revolver and the coil put back too (pose() below). No arm goes into a hat's brim, both feet stand on the ground (or one
+# is lifted on purpose: a step, a hop). Sheets and checks: tmp/lasso-live/.
+LASSO_LIVE = ('ls_spin', 'ls_throw', 'ls_throw_up', 'ls_take', 'ls_hold', 'ls_strain', 'ls_dragged', 'ls_jerk',
+              'ls_haul_walk', 'ls_yank', 'ls_snare')
+LS_AT = {}      # pose key -> [(side, bone | None | '.', (x, y, z) m at 1.8 m, 'fist' | 'wrist'[, pole])]; pole: the
+                # elbow's way from the shoulder (x, y, z in his frame; else the spec's bend)
+LS_HAND = {}    # pose key -> {side: (F, P)}: the fingers along F, the palm facing P (his frame)
+LS_FEET = {}    # pose key -> {'L' / 'R': (x, y, yaw, pitch[, lift]), 'drop': m}: each ankle over (x, y) m, the foot turned
+                # yaw deg (+ toward his left) and pitched (+ toe down about the ball: the heel up; - toe up about the heel),
+                # lifted off the ground `lift` m; the hips sunk at least `drop` m (more when a foot is out of reach)
+LS_SPIN = ((-.45, -.12, 1.55), .12)   # the spin's wrist circle: centre (rest space, carried by Spine2), radius (m at 1.8 m);
+                                    # key i of ls_spin at th = -90 + 45 i deg (_spin_point's angle: 0 his left of the centre)
+
+
+def _ls_ik(lower, target):
+    """Two-bone IK baked into the pose (as _reach): the tail of `lower` (a ForeArm or a Leg) onto `target`."""
+    arm = bpy.data.objects[ROOT]
+    lo = arm.pose.bones[lower]
+    up = lo.parent
+    emp = bpy.data.objects.new('_reach', None)
+    bpy.context.scene.collection.objects.link(emp)
+    emp.location = arm.matrix_world @ target
+    c = lo.constraints.new('IK')
+    c.target, c.chain_count = emp, 2
+    bpy.context.view_layer.update()
+    mu, ml = up.matrix.copy(), lo.matrix.copy()
+    lo.constraints.remove(c)
+    bpy.data.objects.remove(emp)
+    bpy.context.view_layer.update()
+    up.matrix = mu
+    bpy.context.view_layer.update()
+    lo.matrix = ml
+    bpy.context.view_layer.update()
+
+
+def _ls_ik_pole(lower, target, pole):
+    """Two-bone IK with the elbow (knee) on the side of `pole` (a direction in his frame from the joint): each bone
+    swung the least way onto its new line (its twist kept), the reach clamped short of straight."""
+    arm = bpy.data.objects[ROOT]
+    lo = arm.pose.bones[lower]
+    up = lo.parent
+    a, b = arm.data.bones[up.name].length, arm.data.bones[lower].length
+    S = up.head.copy()
+    d = target - S
+    L = max(abs(a - b) + 1e-3, min(d.length, (a + b) * .999))
+    dn = d.normalized()
+    n = Vector(pole) - dn * Vector(pole).dot(dn)
+    n = n.normalized() if n.length > 1e-6 else (up.tail - S - dn * (up.tail - S).dot(dn)).normalized()
+    x = (a * a - b * b + L * L) / (2 * L)
+    E = S + dn * x + n * math.sqrt(max(a * a - x * x, 0.0))
+    for pb, p0, p1 in ((up, S, E), (lo, E, S + dn * L)):
+        h = pb.head.copy()
+        R = (pb.tail - h).normalized().rotation_difference((p1 - p0).normalized()).to_matrix().to_4x4()
+        pb.matrix = Matrix.Translation(p0) @ R @ Matrix.Translation(-h) @ pb.matrix
+        bpy.context.view_layer.update()
+
+
+def _ls_feet(spec):
+    """LS_FEET: the feet planted (or lifted) where the spec says, the knees turned over the toes; returns the drop (m)."""
+    arm = bpy.data.objects[ROOT]
+    pbs, bones = arm.pose.bones, arm.data.bones
+    k = PROP['height'] / 1.8
+    J = landmarks()
+    plan = {}
+    for s, side in (('L', 'Left'), ('R', 'Right')):
+        if s not in spec:
+            continue
+        x, y, yaw, pitch = spec[s][:4]
+        lift = spec[s][4] if len(spec[s]) > 4 else 0.0
+        an, ba = J['ankle' + s], J['ball' + s]
+        A0 = Vector((x * k, y * k, an.z + lift * k))
+        Rz = Matrix.Rotation(math.radians(yaw), 3, 'Z')
+        ball = A0 + Rz @ (ba - an)
+        heel = A0 + Rz @ Vector((0, .05 * k, -an.z + .01 * k))
+        Rp = Matrix.Rotation(math.radians(pitch), 3, Rz @ Vector((1, 0, 0)))
+        piv = ball if pitch >= 0 else heel
+        plan[side] = (piv + Rp @ (A0 - piv), Rz, Rp, pitch, yaw)
+    drop = spec.get('drop', 0.0) * k
+    for side, (A, Rz, Rp, pitch, yaw) in plan.items():
+        hip = pbs[side + 'UpLeg'].head
+        L = (bones[side + 'UpLeg'].length + bones[side + 'Leg'].length) * .975
+        h = (A - hip).xy.length
+        drop = max(drop, hip.z - math.sqrt(max(L * L - h * h, 0.0)) - A.z)
+    for side, (A, Rz, Rp, pitch, yaw) in plan.items():
+        # the knee over the toes: the thigh turned about the vertical through the hip so the bend faces the foot's way
+        up, lo = pbs[side + 'UpLeg'], pbs[side + 'Leg']
+        bend = (lo.head - (up.head + lo.tail) * .5).xy
+        if bend.length > 1e-4:
+            d = math.radians(yaw) - math.atan2(bend.x, -bend.y)
+            d = (d + math.pi) % (2 * math.pi) - math.pi
+            h = up.head.copy()
+            up.matrix = Matrix.Translation(h) @ Matrix.Rotation(d, 4, 'Z') @ Matrix.Translation(-h) @ up.matrix
+            bpy.context.view_layer.update()
+        _ls_ik(side + 'Leg', A + Vector((0, 0, drop)))
+        ft, to = pbs[side + 'Foot'], pbs[side + 'ToeBase']
+        ft.matrix = Matrix.Translation(lo.tail) @ (Rp @ Rz @ bones[side + 'Foot'].matrix_local.to_3x3()).to_4x4()
+        bpy.context.view_layer.update()
+        to.matrix = Matrix.Translation(ft.tail) @ ((Rz if pitch >= 0 else Rp @ Rz) @ bones[side + 'ToeBase'].matrix_local.to_3x3()).to_4x4()
+        bpy.context.view_layer.update()
+    return drop
+
+
+def _ls_turn_hand(side, F, P):
+    """The hand turned so its fingers point along F and its palm faces P (his frame), at its wrist."""
+    arm = bpy.data.objects[ROOT]
+    hd, Mr = arm.pose.bones[side + 'Hand'], arm.data.bones[side + 'Hand'].matrix_local.to_3x3()
+    f0 = (Mr @ Vector((0, 1, 0))).normalized()
+    u0 = Vector((0, -1, 0))
+    u0 = (u0 - f0 * u0.dot(f0)).normalized()
+    F = Vector(F).normalized()
+    P = Vector(P)
+    P = (P - F * P.dot(F)).normalized()
+    U = F.cross(P) if side == 'Right' else P.cross(F)           # (the thumb side: the palm is U x F right, F x U left)
+    hd.matrix = Matrix.Translation(hd.head) @ (_frame_rot(f0, u0, F, U) @ Mr).to_4x4()
+    bpy.context.view_layer.update()
+
+
+def _ls_hold(pose_name):
+    """HOLD hook (last): a live lasso key's feet (LS_FEET), hands (LS_AT, LS_HAND), then the revolver back in its holster
+    and the coil hung plumb from the left fist again."""
+    key = _key(pose_name)
+    feet, at, turn = LS_FEET.get(key), LS_AT.get(key, ()), LS_HAND.get(key, {})
+    if not (feet or at or turn):
+        return
+    arm = bpy.data.objects[ROOT]
+    pbs = arm.pose.bones
+    k = PROP['height'] / 1.8
+    if feet:
+        _ls_feet(feet)
+    g = _bw_ground() if any(e[1] is None for e in at) else 0.0
+    for _ in range(2):   # (a fist's point is set back along the hand, whose direction the reach changes: twice)
+        for side, bone, p, mode, *pole in at:
+            t = (Vector(p) * k + Vector((0, 0, g)) if bone is None else Vector(p) * k if bone == '.' else
+                 _carried(bone, Vector(p) * k))
+            if side in turn:
+                _ls_turn_hand(side, *turn[side])
+            hd = pbs[side + 'Hand']
+            t = t - (hd.tail - hd.head) * {'wrist': 0.0, 'fist': .5}[mode]
+            if pole:
+                _ls_ik_pole(side + 'ForeArm', t, pole[0])
+            else:
+                _ls_ik(side + 'ForeArm', t)
+    for side, (F, P) in turn.items():
+        _ls_turn_hand(side, F, P)
+    _holster_now()
+    _lasso_hold(pose_name, hat=False)
+
+
+_pose_lslive = pose
+
+
+def pose(name):
+    """The pose() above; a live lasso clip's in-between gets its revolver put back in the holster and its coil hung plumb
+    (the blend carried both on the hands)."""
+    zmin = _pose_lslive(name)
+    clip, _, i = name.partition('.')
+    if i and clip in LASSO_LIVE:
+        _holster_now()
+        _lasso_hold(name, hat=False)
+    return zmin
+
+
+_build_lslive = build
+
+
+def build():
+    """The builds above, then the live lasso keys' hook after every other."""
+    names = _build_lslive()
+    if _ls_hold not in HOLD_HOOKS:
+        HOLD_HOOKS.append(_ls_hold)
+    return names
+
+
+def _ls_legs(lt=-6, rt=-6, ls=18, rs=18):
+    """The legs pre-bent (thighs X- forward, shins X+): the knees' way for LS_FEET's IK."""
+    return {'LeftUpLeg': [('X', lt)], 'LeftLeg': [('X', ls)], 'RightUpLeg': [('X', rt)], 'RightLeg': [('X', rs)]}
+
+
+def _ls_trunk(tilt=0.0, turn=0.0, roll=0.0, spine=0.0, s1=0.0, s2=0.0, cturn=(0.0, 0.0, 0.0), neck=(0.0, 0.0, 0.0),
+              head=(0.0, 0.0, 0.0)):
+    """The pelvis (tilt X + forward, turn Z + to his left, roll Y + his top to his left), the back (bends X + forward;
+    cturn: Spine, Spine1, Spine2 turns Z), the neck and the head (X + down, Z + to his left, Y + tilted to his left)."""
+    out = {'Hips': [('Z', turn), ('X', tilt), ('Y', roll)],
+           'Spine': [('Z', cturn[0]), ('X', spine)], 'Spine1': [('Z', cturn[1]), ('X', s1)], 'Spine2': [('Z', cturn[2]), ('X', s2)],
+           'Neck': [('Z', neck[1]), ('X', neck[0]), ('Y', neck[2])], 'Head': [('Z', head[1]), ('X', head[0]), ('Y', head[2])]}
+    return {b: [r for r in v if r[1]] for b, v in out.items()}
+
+
+# the arms' specs under the IK (their elbow planes and twists; the keys of one move share one, so the in-betweens blend
+# cleanly): the right arm up at the side (the spin, the wind-up), out forward (the release), in (the hold); the left arm
+_LS_ARM_UP = {'RightShoulder': [('Y', 26)], 'RightArm': [('Y', 80), ('X', -6)], 'RightForeArm': [('Y', 66)]}
+_LS_ARM_OUT = {'RightShoulder': [('Z', -12)], 'RightArm': [('Y', -36), ('X', -80)], 'RightForeArm': [('X', -10)]}
+_LS_ARM_IN = {'RightShoulder': [('Z', -8)], 'RightArm': [('Y', -40), ('X', -50)], 'RightForeArm': [('X', -40)]}
+_LS_LEFT_COIL = {'LeftShoulder': [('Z', -4)], 'LeftArm': [('Y', 32)], 'LeftForeArm': [('X', -44)], 'LeftHand': [('Y', 6)]}
+_LS_LEFT_OUT = {'LeftShoulder': [('Z', -8)], 'LeftArm': [('Y', 30), ('X', -40)], 'LeftForeArm': [('X', -30)]}
+_LS_LEFT_HIP = {'LeftShoulder': [('Z', 4)], 'LeftArm': [('Y', 34), ('X', 10)], 'LeftForeArm': [('X', -40)]}
+_LS_LEFT_AT = lambda p: ('Left', None, p, 'fist')
+_LS_RIGHT_AT = lambda p, pole=None: ('Right', None, p, 'fist') + ((pole,) if pole else ())
+
+# ---- the spin: 8 keys round the circle (the hand: front, his left, behind, his right); the chest turns with the hand
+# (+-6 deg), the hips shift under it, the head forward and a little up, tilted away from the rope arm
+for _i in range(8):
+    _th = math.radians(-90 + 45 * _i)
+    _c, _s = math.cos(_th), math.sin(_th)
+    _k = f'ls_sp_{_i}'
+    POSES[_k] = _merge(_ls_legs(-6, -4, 16, 14),
+                       _ls_trunk(turn=-6 - 1.5 * _s, roll=1.5 * _c, spine=-2, s1=-1, cturn=(-2.5 * _s, -2 * _s, 0),
+                                 neck=(-6, 5 * _s, 5), head=(-3, 0, 2)),
+                       _LS_ARM_UP, _LS_LEFT_COIL, {'_root': (.012 * _c, 0)})
+    LS_FEET[_k] = {'L': (.13, -.1, 8, 0), 'R': (-.13, .05, -12, 0), 'drop': .03}
+    _cx, _cy, _cz = LS_SPIN[0]
+    LS_AT[_k] = [('Right', 'Spine2', (_cx + LS_SPIN[1] * _c, _cy + LS_SPIN[1] * _s, _cz), 'wrist'),
+                 _LS_LEFT_AT((.19, -.2, .88))]
+    # the hand: the fingers out along the circle's radius (the spoke), the palm down in front turning over behind
+    _ph = math.radians(70 * (1 - math.cos(_th + math.pi / 2)))
+    _F = (_c, _s, .25)
+    _down, _out = Vector((0, 0, -1)), Vector((-_s, _c, 0))       # (palm down; palm turned to the way the hand goes)
+    LS_HAND[_k] = {'Right': (_F, tuple(_down * math.cos(_ph) + _out * math.sin(_ph)))}
+ANIMS['ls_spin'] = _clip([f'ls_sp_{i}' for i in range(8)], list(range(8)), 16, loop=True)
+
+# ---- the throw: coil (the last turn swung back) -> step -> whip -> release -> follow-through -> settle
+POSES['ls_th_coil'] = _merge(_ls_legs(-4, -10, 20, 24),
+                             _ls_trunk(turn=-20, spine=0, s1=0, cturn=(-6, -4, 0), neck=(-4, 18, 2), head=(-2, 10, 0)),
+                             _LS_ARM_UP, _LS_LEFT_COIL, {'_root': (-.02, .04)})
+LS_FEET['ls_th_coil'] = {'L': (.12, -.13, 10, 18, .02), 'R': (-.13, .04, -15, 0), 'drop': .04}
+LS_AT['ls_th_coil'] = [_LS_RIGHT_AT((-.5, .18, 1.44), (-1, -.5, -.2)), _LS_LEFT_AT((.12, -.25, .95))]
+POSES['ls_th_step'] = _merge(_ls_legs(-14, 0, 20, 22),
+                             _ls_trunk(turn=-12, spine=0, s1=0, cturn=(-10, -6, 0), neck=(-4, 18, 0), head=(-2, 8, 0)),
+                             _LS_ARM_UP, _LS_LEFT_COIL, {'_root': (-.01, -.02)})
+LS_FEET['ls_th_step'] = {'L': (.1, -.36, 8, -6), 'R': (-.13, .04, -15, 0), 'drop': .05}
+LS_AT['ls_th_step'] = [_LS_RIGHT_AT((-.5, .13, 1.46), (-1, -.6, -.2)), _LS_LEFT_AT((.13, -.24, .96))]
+POSES['ls_th_whip'] = _merge(_ls_legs(-14, 4, 20, 20),
+                             _ls_trunk(turn=4, tilt=2, spine=3, s1=1, cturn=(2, 2, 0), neck=(-8, -4, 0), head=(-2, -2, 0)),
+                             _LS_ARM_UP, _LS_LEFT_COIL, {'_root': (0, -.07)})
+LS_FEET['ls_th_whip'] = {'L': (.1, -.36, 8, 0), 'R': (-.13, .04, -15, 18), 'drop': .06}
+LS_AT['ls_th_whip'] = [_LS_RIGHT_AT((-.37, -.1, 1.46), (-.4, -1, -.3)), _LS_LEFT_AT((.14, -.26, .98))]
+POSES['ls_th_release'] = _merge(_ls_legs(-14, 6, 20, 20),
+                                _ls_trunk(turn=12, tilt=4, spine=6, s1=3, cturn=(2, 2, 0), neck=(-10, -10, 0), head=(-2, -4, 0)),
+                                _LS_ARM_OUT, _LS_LEFT_OUT, {'_root': (.02, -.12)})
+LS_FEET['ls_th_release'] = {'L': (.1, -.36, 8, 0), 'R': (-.13, .04, -15, 34), 'drop': .07}
+LS_AT['ls_th_release'] = [_LS_RIGHT_AT((-.1, -.62, 1.5), (-.3, 0, -1)), _LS_LEFT_AT((.12, -.32, 1.0))]
+LS_HAND['ls_th_release'] = {'Right': ((.02, -1, .05), (0, 0, -1))}
+POSES['ls_th_follow'] = _merge(_ls_legs(-14, 6, 20, 20),
+                               _ls_trunk(turn=14, tilt=5, spine=7, s1=3, cturn=(3, 2, 0), neck=(-10, -12, 0), head=(-2, -4, 0)),
+                               _LS_ARM_OUT, _LS_LEFT_OUT, {'_root': (.03, -.15)})
+LS_FEET['ls_th_follow'] = {'L': (.1, -.36, 8, 0), 'R': (-.13, .04, -15, 38), 'drop': .08}
+LS_AT['ls_th_follow'] = [_LS_RIGHT_AT((-.05, -.8, 1.26), (-.5, 0, -1)), _LS_LEFT_AT((.06, -.48, 1.12))]
+POSES['ls_th_settle'] = _merge(_ls_legs(-10, 0, 20, 20),
+                               _ls_trunk(turn=8, tilt=1, spine=2, s1=1, cturn=(1, 1, 0), neck=(-2, -6, 0), head=(0, -2, 0)),
+                               _LS_ARM_IN, _LS_LEFT_HIP, {'_root': (.01, -.09)})
+LS_FEET['ls_th_settle'] = {'L': (.12, -.34, 8, 0), 'R': (-.14, .04, -18, 0), 'drop': .05}
+LS_AT['ls_th_settle'] = [_LS_RIGHT_AT((-.1, -.4, 1.2), (-1, .3, -1)), _LS_LEFT_AT((.12, -.14, .95))]
+_TH_TW, _TH_MS = [0, .5, 1, 1.5, 2, 3, 3.5, 4, 4.5, 5], [90, 50, 45, 40, 35, 60, 60, 80, 90, 150]
+ANIMS['ls_throw'] = _clip(['ls_th_coil', 'ls_th_step', 'ls_th_whip', 'ls_th_release', 'ls_th_follow', 'ls_th_settle'],
+                          _TH_TW, 14, ms=_TH_MS, marks={'release': 5})
+
+# ---- the throw up at a high anchor: the same, the arm released up at ~45 deg, up on the front foot's toes, looking up
+POSES['ls_tu_step'] = _merge(POSES['ls_th_step'], {'Neck': [('X', -8)], 'Head': [('X', -4)]})
+LS_FEET['ls_tu_step'], LS_AT['ls_tu_step'] = LS_FEET['ls_th_step'], LS_AT['ls_th_step']
+POSES['ls_tu_whip'] = _merge(_ls_legs(-14, 4, 20, 20),
+                             _ls_trunk(turn=4, tilt=0, spine=0, s1=0, cturn=(2, 2, 0), neck=(-16, -4, 0), head=(-8, -2, 0)),
+                             _LS_ARM_UP, _LS_LEFT_COIL, {'_root': (0, -.07)})
+LS_FEET['ls_tu_whip'] = {'L': (.1, -.36, 8, 10), 'R': (-.13, .04, -15, 22), 'drop': .04}
+LS_AT['ls_tu_whip'] = [_LS_RIGHT_AT((-.36, -.1, 1.52), (-.4, -1, -.3)), _LS_LEFT_AT((.14, -.26, .98))]
+POSES['ls_tu_release'] = _merge(_ls_legs(-14, 6, 20, 20),
+                                _ls_trunk(turn=12, tilt=0, spine=-2, s1=-2, cturn=(2, 2, 0), neck=(-22, -10, 0), head=(-10, -4, 0)),
+                                {'RightShoulder': [('Z', -6), ('Y', 30)], 'RightArm': [('Y', -10), ('X', -120)], 'RightForeArm': [('X', -10)]},
+                                _LS_LEFT_OUT, {'_root': (.02, -.12)})
+LS_FEET['ls_tu_release'] = {'L': (.1, -.36, 8, 26), 'R': (-.13, .04, -15, 40), 'drop': .02}
+LS_AT['ls_tu_release'] = [_LS_RIGHT_AT((-.14, -.46, 1.78), (-.6, .2, -1)), _LS_LEFT_AT((.12, -.32, 1.02))]
+LS_HAND['ls_tu_release'] = {'Right': ((.02, -.7, .7), (0, -.7, -.7))}
+POSES['ls_tu_follow'] = _merge(_ls_legs(-14, 6, 20, 20),
+                               _ls_trunk(turn=14, tilt=2, spine=0, s1=0, cturn=(3, 2, 0), neck=(-18, -12, 0), head=(-8, -4, 0)),
+                               {'RightShoulder': [('Z', -8), ('Y', 10)], 'RightArm': [('Y', -20), ('X', -110)], 'RightForeArm': [('X', -10)]},
+                               _LS_LEFT_OUT, {'_root': (.03, -.14)})
+LS_FEET['ls_tu_follow'] = {'L': (.1, -.36, 8, 14), 'R': (-.13, .04, -15, 36), 'drop': .04}
+LS_AT['ls_tu_follow'] = [_LS_RIGHT_AT((-.08, -.54, 1.58), (-.6, 0, -1)), _LS_LEFT_AT((.06, -.46, 1.2))]
+POSES['ls_tu_settle'] = _merge(POSES['ls_th_settle'], {'Neck': [('X', -8)]})
+LS_FEET['ls_tu_settle'] = LS_FEET['ls_th_settle']
+LS_AT['ls_tu_settle'] = [_LS_RIGHT_AT((-.1, -.42, 1.3), (-1, .3, -1)), _LS_LEFT_AT((.12, -.14, .95))]
+ANIMS['ls_throw_up'] = _clip(['ls_th_coil', 'ls_tu_step', 'ls_tu_whip', 'ls_tu_release', 'ls_tu_follow', 'ls_tu_settle'],
+                             _TH_TW, 14, ms=_TH_MS, marks={'release': 5})
+
+# ---- the hold: the right fist forward at chest height, the left at the hip (the rope between them along the facing),
+# leaning back on a wide stance, the right foot back; a breath (loop)
+_HOLD_UP = lambda sp=0.0: _ls_trunk(turn=-14, tilt=-4, spine=-4 + sp, s1=-2, cturn=(6, 4, 2), neck=(6, 4, 0), head=(2, 2, 0))
+POSES['ls_hold_a'] = _merge(_ls_legs(-10, 4, 24, 24), _HOLD_UP(), _LS_ARM_IN, _LS_LEFT_HIP, {'_root': (0, .02)})
+POSES['ls_hold_b'] = _merge(_ls_legs(-10, 4, 24, 24), _HOLD_UP(-1.5), {'Spine2': [('X', -2)]}, _LS_ARM_IN, _LS_LEFT_HIP,
+                            {'_root': (0, .025)})
+LS_FEET['ls_hold_a'] = {'L': (.14, -.2, 8, 0), 'R': (-.15, .2, -24, 0), 'drop': .06}
+LS_FEET['ls_hold_b'] = {'L': (.14, -.2, 8, 0), 'R': (-.15, .2, -24, 0), 'drop': .07}
+LS_AT['ls_hold_a'] = [_LS_RIGHT_AT((-.06, -.36, 1.05)), _LS_LEFT_AT((.2, .02, .85))]
+LS_AT['ls_hold_b'] = [_LS_RIGHT_AT((-.06, -.355, 1.04)), _LS_LEFT_AT((.2, .025, .845))]
+ANIMS['ls_hold'] = _clip(['ls_hold_a', 'ls_hold_b'], [0, 1], 3, loop=True)
+
+# ---- the take: from the throw's settle, the right fist snapped back to the chest, the left hand grabbing the rope out
+# front, a short step back with the right foot, into the hold
+POSES['ls_tk_snap'] = _merge(_ls_legs(-10, 4, 24, 24),
+                             _ls_trunk(turn=-6, tilt=-4, spine=-4, s1=-2, cturn=(4, 2, 0), neck=(6, 2, 0), head=(2, 0, 0)),
+                             _LS_ARM_IN, _LS_LEFT_OUT, {'_root': (0, .02)})
+LS_FEET['ls_tk_snap'] = {'L': (.13, -.26, 8, 0), 'R': (-.15, .16, -20, 10, .03), 'drop': .06}
+LS_AT['ls_tk_snap'] = [_LS_RIGHT_AT((-.06, -.2, 1.12)), _LS_LEFT_AT((.04, -.42, 1.02))]
+ANIMS['ls_take'] = _clip(['ls_th_settle', 'ls_tk_snap', 'ls_hold_a'], [0, .5, 1, 1.5, 2], 14, ms=[50, 50, 60, 60, 80])
+
+# ---- the strain: leaning far back (~25 deg), the left leg braced straight forward on its heel, the right bent behind,
+# both arms out on the rope, the head forward; a tremble between the keys (the arms tugged, the lean +-3)
+for _i, (_d, _l) in enumerate(((0, 0), (.03, 2.5), (-.01, -1), (.02, 3))):
+    _k = f'ls_st_{_i}'
+    POSES[_k] = _merge(_ls_legs(-30, 10, 10, 50),
+                       _ls_trunk(turn=-10, tilt=-15 - _l * .5, spine=-10 - _l * .5, s1=-5, cturn=(4, 3, 2), neck=(22, 4, 0), head=(8, 0, 0)),
+                       _LS_ARM_OUT, _LS_LEFT_OUT, {'_root': (0, .08)})
+    LS_FEET[_k] = {'L': (.12, -.32, 10, -16), 'R': (-.14, .22, -22, 0), 'drop': .14}
+    LS_AT[_k] = [_LS_RIGHT_AT((-.04, -.44 + _d, 1.0)), _LS_LEFT_AT((.08, -.22 + _d, .92))]
+ANIMS['ls_strain'] = _clip([f'ls_st_{i}' for i in range(4)], [0, 1, 2, 3], 10, loop=True)
+
+# ---- dragged in: leaning back hard (~30 deg), the hips over the front foot; the left foot skids on its heel (toe up)
+# while the right hops up behind it to catch up; both arms straight out on the rope
+_DR = [  # (the left foot, the right foot (LS_FEET's), the hips forward of the pivot, more lean)
+    ((.12, -.24, 10, -20), (-.14, .26, -20, 20), .0, 0),
+    ((.12, -.22, 10, -22), (-.14, .08, -16, 10, .08), .02, 2),
+    ((.12, -.2, 10, -14), (-.14, -.06, -14, -6), .0, -1),
+    ((.12, -.3, 10, -18, .05), (-.14, .02, -14, 16), -.02, 1)]
+for _i, (_lf, _rf, _ry, _l) in enumerate(_DR):
+    _k = f'ls_dr_{_i}'
+    POSES[_k] = _merge(_ls_legs(-24, -10 if _i != 1 else -40, 14, 40 if _i != 1 else 70),
+                       _ls_trunk(turn=-8, tilt=-19 - _l, spine=-9, s1=-5, cturn=(3, 2, 2), neck=(20, 2, 0), head=(8, 0, 0)),
+                       _LS_ARM_OUT, _LS_LEFT_OUT, {'_root': (0, _ry - .1)})
+    LS_FEET[_k] = {'L': _lf, 'R': _rf, 'drop': .12}
+    LS_AT[_k] = [_LS_RIGHT_AT((-.04, -.58, 1.15)), _LS_LEFT_AT((.06, -.4, 1.05))]
+ANIMS['ls_dragged'] = _clip([f'ls_dr_{i}' for i in range(4)], [0, 1, 2, 3], 8, loop=True)
+
+# ---- the jerk: from the settle, yanked forward (the arms out straight, the chest thrown forward ~20 deg, the left foot
+# off the ground), the stumble step (the left foot down ahead), catching himself back into ls_dragged
+POSES['ls_jk_yank'] = _merge(_ls_legs(-30, 4, 30, 20),
+                             _ls_trunk(turn=2, tilt=8, spine=10, s1=4, cturn=(0, 0, 0), neck=(-12, 0, 0), head=(-4, 0, 0)),
+                             _LS_ARM_OUT, _LS_LEFT_OUT, {'_root': (0, -.14)})
+LS_FEET['ls_jk_yank'] = {'L': (.12, -.42, 8, 10, .07), 'R': (-.14, .05, -18, 30), 'drop': .06}
+LS_AT['ls_jk_yank'] = [_LS_RIGHT_AT((-.04, -.7, 1.1)), _LS_LEFT_AT((.06, -.54, 1.02))]
+POSES['ls_jk_stumble'] = _merge(_ls_legs(-30, 6, 30, 20),
+                                _ls_trunk(turn=-2, tilt=2, spine=2, s1=1, cturn=(0, 0, 0), neck=(-2, 0, 0), head=(0, 0, 0)),
+                                _LS_ARM_OUT, _LS_LEFT_OUT, {'_root': (0, -.16)})
+LS_FEET['ls_jk_stumble'] = {'L': (.12, -.5, 10, -10), 'R': (-.14, .05, -18, 26), 'drop': .12}
+LS_AT['ls_jk_stumble'] = [_LS_RIGHT_AT((-.04, -.66, 1.12)), _LS_LEFT_AT((.06, -.48, 1.04))]
+ANIMS['ls_jerk'] = _clip(['ls_th_settle', 'ls_jk_yank', 'ls_jk_stumble', 'ls_dr_0'], [0, 1, 2, 2.5, 3], 14,
+                         ms=[40, 80, 80, 70, 80])
+
+# ---- hauling on the move: ls_hold's upper body over the walk's legs (the walk's ground data: BRAWL_GAIT)
+_LS_HOLD_UP = {k: list(v) for k, v in POSES['ls_hold_a'].items() if k not in LEG_BONES and not k.startswith('_')}
+_LS_HOLD_UP['Spine'] = [('Z', -8)] + _LS_HOLD_UP.get('Spine', []) + [('X', -4)]   # (the pelvis's turn and tilt, carried
+                                                                                  # by the back)
+for _i in range(8):
+    POSES[f'ls_hw_{_i}'] = _on_legs(_i, _LS_HOLD_UP, 'walk')
+    LS_AT[f'ls_hw_{_i}'] = [('Right', 'Spine2', (-.06, -.4, 1.06), 'fist'), ('Left', 'Spine2', (.2, -.02, .86), 'fist')]
+ANIMS['ls_haul_walk'] = dict(_clip([f'ls_hw_{i}' for i in range(8)], list(range(8)), 10, loop=True), locomotion=True)
+BRAWL_GAIT['ls_haul_walk'] = 'walk'
+
+# ---- the yank: from the hold a quick dip, the heave (the right foot back, hips and chest turned to his right ~25 deg,
+# both hands pulled back past the right hip, leaning back ~20 deg), held, easing back into the hold
+POSES['ls_yk_dip'] = _merge(_ls_legs(-14, 0, 34, 34), _HOLD_UP(4), _LS_ARM_IN, _LS_LEFT_OUT, {'_root': (0, 0)})
+LS_FEET['ls_yk_dip'] = {'L': (.14, -.2, 8, 0), 'R': (-.15, .2, -24, 0), 'drop': .12}
+LS_AT['ls_yk_dip'] = [_LS_RIGHT_AT((-.05, -.42, .98)), _LS_LEFT_AT((.1, -.22, .92))]
+_YK_ARMS = {'RightShoulder': [('Z', 6)], 'RightArm': [('Y', -36), ('X', 30)], 'RightForeArm': [('X', -30)],
+            'LeftShoulder': [('Z', -10)], 'LeftArm': [('Y', 20), ('X', -30), ('Z', -30)], 'LeftForeArm': [('X', -50)]}
+POSES['ls_yk_heave'] = _merge(_ls_legs(-24, 10, 20, 30),
+                              _ls_trunk(turn=-26, tilt=-10, spine=-8, s1=-4, cturn=(-4, -3, 0), neck=(10, 20, 0), head=(4, 10, 0)),
+                              _YK_ARMS, {'_root': (-.02, .1)})
+LS_FEET['ls_yk_heave'] = {'L': (.14, -.2, 8, -8), 'R': (-.16, .34, -30, 0), 'drop': .1}
+LS_AT['ls_yk_heave'] = [_LS_RIGHT_AT((-.3, .15, .95)), _LS_LEFT_AT((-.05, -.1, 1.0))]
+POSES['ls_yk_hold'] = _merge(_ls_legs(-24, 10, 20, 30),
+                             _ls_trunk(turn=-24, tilt=-9, spine=-7, s1=-4, cturn=(-3, -2, 0), neck=(10, 18, 0), head=(4, 9, 0)),
+                             _YK_ARMS, {'_root': (-.02, .1)})
+LS_FEET['ls_yk_hold'] = LS_FEET['ls_yk_heave']
+LS_AT['ls_yk_hold'] = [_LS_RIGHT_AT((-.28, .12, .97)), _LS_LEFT_AT((-.04, -.12, 1.01))]
+ANIMS['ls_yank'] = _clip(['ls_hold_a', 'ls_yk_dip', 'ls_yk_heave', 'ls_yk_hold', 'ls_hold_a'], [.5, 1, 2, 3, 3.5, 4], 14,
+                         ms=[30, 40, 90, 110, 70, 80], marks={'pull': 2})
+
+# ---- the snare: the rope lifted high in both hands, snapped down in a crouch (the hands at the knees: `cinch`), a tug
+# back, the right hand letting go (`free`), standing up into the idle with the coil still in the left fist
+POSES['ls_sn_lift'] = _merge(_ls_legs(-8, 4, 20, 20),
+                             _ls_trunk(turn=-8, tilt=-2, spine=-4, s1=-2, cturn=(4, 2, 0), neck=(-4, 2, 0), head=(-2, 0, 0)),
+                             {'RightShoulder': [('Z', -10), ('Y', 10)], 'RightArm': [('Y', -20), ('X', -100)], 'RightForeArm': [('X', -20)],
+                              'LeftShoulder': [('Z', -10), ('Y', -10)], 'LeftArm': [('Y', 20), ('X', -100)], 'LeftForeArm': [('X', -20)]},
+                             {'_root': (0, .02)})
+LS_FEET['ls_sn_lift'] = {'L': (.14, -.22, 8, 0), 'R': (-.15, .16, -20, 0), 'drop': .04}
+LS_AT['ls_sn_lift'] = [_LS_RIGHT_AT((-.05, -.4, 1.45)), _LS_LEFT_AT((.06, -.3, 1.38))]
+POSES['ls_sn_snap'] = _merge(_ls_legs(-60, -40, 80, 80),
+                             _ls_trunk(turn=-6, tilt=14, spine=16, s1=6, cturn=(2, 2, 0), neck=(-20, 0, 0), head=(-6, 0, 0)),
+                             {'RightShoulder': [('Z', -10)], 'RightArm': [('Y', -36), ('X', -60)], 'RightForeArm': [('X', -14)],
+                              'LeftShoulder': [('Z', -10)], 'LeftArm': [('Y', 30), ('X', -60)], 'LeftForeArm': [('X', -14)]},
+                             {'_root': (0, .06)})
+LS_FEET['ls_sn_snap'] = {'L': (.15, -.22, 10, 0), 'R': (-.15, .16, -20, 0), 'drop': .26}
+LS_AT['ls_sn_snap'] = [_LS_RIGHT_AT((-.04, -.42, .55)), _LS_LEFT_AT((.08, -.34, .6))]
+POSES['ls_sn_tug'] = _merge(_ls_legs(-40, -20, 60, 60),
+                            _ls_trunk(turn=-10, tilt=-2, spine=-4, s1=-2, cturn=(2, 2, 0), neck=(6, 0, 0), head=(2, 0, 0)),
+                            _LS_ARM_IN, _LS_LEFT_HIP, {'_root': (0, .08)})
+LS_FEET['ls_sn_tug'] = {'L': (.15, -.22, 10, 0), 'R': (-.15, .16, -20, 0), 'drop': .16}
+LS_AT['ls_sn_tug'] = [_LS_RIGHT_AT((-.06, -.3, .82)), _LS_LEFT_AT((.18, -.04, .8))]
+POSES['ls_sn_free'] = _merge(_ls_legs(-14, -6, 30, 30),
+                             _ls_trunk(turn=-6, tilt=0, spine=0, s1=0, cturn=(2, 2, 0), neck=(4, 0, 0), head=(0, 0, 0)),
+                             {'RightShoulder': [('Z', 4)], 'RightArm': [('Y', -40), ('X', 6)], 'RightForeArm': [('X', -30)]},
+                             _LS_LEFT_HIP, {'_root': (0, .04)})
+LS_FEET['ls_sn_free'] = {'L': (.14, -.16, 8, 0), 'R': (-.14, .1, -14, 0), 'drop': .06}
+LS_AT['ls_sn_free'] = [_LS_LEFT_AT((.2, -.1, .86))]
+POSES['ls_sn_idle'] = dict(POSES['idle_in'])          # (the ready idle with the coil in the left fist: a lasso key)
+ANIMS['ls_snare'] = _clip(['ls_hold_a', 'ls_sn_lift', 'ls_sn_snap', 'ls_sn_tug', 'ls_sn_free', 'ls_sn_idle'],
+                          [.5, 1, 2, 3, 4, 4.5, 5], 14, ms=[50, 80, 70, 110, 90, 70, 80], marks={'cinch': 2, 'free': 4})
+LASSO_KEYS.update(k for k in POSES if k.startswith(('ls_sp_', 'ls_th_', 'ls_tu_', 'ls_tk_', 'ls_hold_', 'ls_st_', 'ls_dr_',
+                                                    'ls_jk_', 'ls_hw_', 'ls_yk_', 'ls_sn_')))
+
+
+# ================================================================ fists (the cowboy, live only: docs/exp/fists.md) =====
+# The cowboy's unarmed fight (FISTS_LIVE: the gunslinger's live model, the outlaw's later), made for the live model only
+# and exported with ragdoll_export.py --clips (tools/blender/live_export.mjs --add). The game (view/livehero.js
+# fistsMotion) time-warps each clip by the sim (src/content/fists.js MOVES: the timing truth): its `hit` mark shown at the
+# contact, its last frame at the move's end; `ms` here follows the MOVES table (previews). Frame 0 of a quick move is its
+# WIND (shown, held, while the button is held), the throw starts at frame 1; a heavy (fs_body, fs_hay) trembles on frames
+# loop / loop+1 while it charges, `throw` = the first frame after the release; a loop's marks.loop = 0. Every punch and
+# the clinch's exits end on fs_guard.0 exactly (strings flow); the clinch's own moves start and end on fs_clinch.0. The
+# revolver stays holstered (no key starts with gun_), the hat stays on.
+# The stance is orthodox: the left foot forward, the hips bladed ~32 deg to his right, the head square to the target, the
+# fists up at the chin forward of the brim; the left hand jabs and hooks from the front, the right crosses from the back.
+# A right-hand move is authored on its own (a mirrored clip would swap the feet mid-string), the slips and the side steps
+# too; only the clinch's short punches mirror their hands.
+# The kit (FS_AT, a HOLD hook after every other): per key the planted feet (the ball of the foot on a ground spot, its yaw
+# + toward his left, the heel lifted about the ball; the leg solved onto it, the knee over the toes), free legs (the ankle
+# on a point, the knee toward a pole, the foot turned), and the fists (the knuckles on a point, the elbow bent toward a
+# pole: an elbow down for the guard, out for a hook), all in his frame AFTER the ground snap (he faces -Y, +X his left; z
+# over the ground; the origin is his middle = the sim's position; '_root' moves the pelvis over the planted feet: the
+# weight shifts). `drop`: how far the knees lower him. The contact: the knuckles on the target's face at the move's
+# dist - .12 m ahead and FS_FACE m up (a man's nose: the head is a third of this body's height, so 1.46 m, not the doc's
+# 1.55: the eyes are at 1.51), body blows at FS_BELLY. Sheets and probes: tmp/fists/cowboy/.
+#   fs_guard     4, loop: up on the balls of the feet, settling into the knees, a sway of the shoulders
+#   fs_step_*    4 each, loop: the guard shuffling forward / back / to his left / to his right (lead foot then trail foot:
+#                the foot on the side he goes first), a cycle = .9 m
+#   fs_block     3: the forearms up before the face take it (pushed back, chin tucked), held, back to the guard
+#   fs_jab       5: wind, extend, contact (hit 2), retract, guard;  fs_jab2: 4: wind, contact (hit 1), retract, guard
+#   fs_cross     5: wind (the right hip back), the turn, contact (hit 2: the right heel up, the left fist home), retract, guard
+#   fs_hook_l/r  5: wind (the elbow out), the arc, contact (hit 2: across the cheek), follow-through, guard
+#   fs_upper_r/l 6: dip, drive, contact (hit 2: under the chin, up on the toes), follow-through up, settle, guard
+#   fs_body      8: dip left, loaded, tremble a/b (loop 2), drive (throw 4), contact (hit 5: the liver), recover, guard
+#   fs_hay       9: load a, load b (cocked behind the ear), tremble a/b (loop 2), the swing (throw 4), contact (hit 5),
+#                over-extended, recover, guard
+#   fs_head      5: wind (head back, hands to his shoulders), drive, contact (hit 2: the forehead), recoil, guard
+#   fs_round     6: wind, chamber (the right knee across), contact (hit 2: the shin at the ribs), follow, foot down, guard
+#   fs_grab      4: wind, reach, grip (hit 2: both fists on the collar), into the clinch (= fs_clinch.0)
+#   fs_clinch    2, loop: both fists on his collar, elbows down, leaning in; a breath
+#   fs_cl_l/r    4: a hand lets go, a short uppercut (hit 1), back onto the collar
+#   fs_knee      5: pulling him down, the right knee up (hit 2: his belly), down, the clinch
+#   fs_cl_head   5: head back, driving in, the forehead (hit 2), recoil, the clinch
+#   fs_toss      6: the hips turned in under his, loading him on the right hip, over, release (hit 3), follow, guard
+#   fs_shove     4: the palms at his chest (hit 1), extended, recover, guard
+#   fs_slip_l/r  4: from the guard a dip and weave to his left / right (the head .35 m off the line), the lowest point,
+#                coming up, guard;  fs_slip_b: 4: a lean back and a step back, guard
+FISTS_LIVE = ('fs_guard', 'fs_step_f', 'fs_step_b', 'fs_step_l', 'fs_step_r', 'fs_block', 'fs_jab', 'fs_jab2', 'fs_cross',
+              'fs_hook_l', 'fs_hook_r', 'fs_upper_r', 'fs_upper_l', 'fs_body', 'fs_hay', 'fs_head', 'fs_round', 'fs_grab',
+              'fs_clinch', 'fs_cl_l', 'fs_cl_r', 'fs_knee', 'fs_cl_head', 'fs_toss', 'fs_shove', 'fs_slip_l', 'fs_slip_r',
+              'fs_slip_b')
+FS_AT = {}        # pose key -> {'drop': m, 'feet': {side: ('plant', bx, by, yaw, heel[, lift]) | ('free', (x, y, z), pole[, foot])},
+                  #              'fists': {side: ((x, y, z) the knuckles, pole)}} (side 'Left' | 'Right'; m at 1.8 m)
+FS_FACE, FS_BELLY = 1.46, 1.1
+_FS_SOLE = []
+
+
+def _fs_sole():
+    """The boot sole's lowest point at rest (m, armature space): the ground under a flat foot whose ball is at rest height."""
+    if not _FS_SOLE:
+        lo = 1e9
+        for ob in bpy.data.collections[COL].objects:
+            if ob.type == 'MESH' and not ob.hide_render and ob.name.split('.')[0] not in SOFT_PARTS and len(ob.data.vertices) \
+                    and {g.name for g in ob.vertex_groups} & {'LeftFoot', 'LeftToeBase'}:
+                lo = min(lo, min(v.co.z for v in ob.data.vertices))
+        _FS_SOLE.append(lo)
+    return _FS_SOLE[0]
+
+
+def _fs_two(up, lo, target, pole, end=None):
+    """Two connected bones (up -> lo) turned so the tail of `end` (lo, or a bone rigid on it: the hand) is on `target`
+    (armature space), the joint between them bent toward `pole` (a direction); returns how far it was out of reach (m)."""
+    pbs = bpy.data.objects[ROOT].pose.bones
+    a, b, e = pbs[up], pbs[lo], pbs[end or lo]
+    L1, L2 = a.length, (e.tail - b.head).length
+    S = a.head.copy()
+    d = target - S
+    n = d.length
+    m = min(max(n, abs(L1 - L2) + 1e-4), L1 + L2 - 1e-4)
+    dn = d.normalized()
+    p = pole - dn * pole.dot(dn)
+    if p.length < 1e-6:
+        p = Vector((0, 0, -1)) + dn * dn.z
+    p.normalize()
+    x = (L1 * L1 - L2 * L2 + m * m) / (2 * m)
+    E = S + dn * x + p * math.sqrt(max(0.0, L1 * L1 - x * x))
+    for pb, aim in ((a, E), (b, S + dn * m)):
+        h = pb.head.copy()
+        q = ((pb.tail if pb is a else e.tail) - h).rotation_difference(aim - h)
+        pb.matrix = Matrix.Translation(h) @ q.to_matrix().to_4x4() @ Matrix.Translation(-h) @ pb.matrix
+        bpy.context.view_layer.update()
+    return max(0.0, n - m)
+
+
+def _fs_foot_rot(side, R, Rt):
+    """The foot (R) and its toe (Rt) turned from their rest orientation (world rotations), each at its posed joint."""
+    arm = bpy.data.objects[ROOT]
+    for bn, M in ((side + 'Foot', R), (side + 'ToeBase', Rt)):
+        pb = arm.pose.bones[bn]
+        pb.matrix = Matrix.Translation(pb.head.copy()) @ (M @ arm.data.bones[bn].matrix_local.to_3x3()).to_4x4()
+        bpy.context.view_layer.update()
+
+
+def _fs_plant(side, f, drop):
+    """A planted foot: the ball of the foot on (bx, by) on the ground (pre-snap: the ball `drop` m over its rest height),
+    turned `yaw` deg (+ toward his left), the heel lifted `heel` deg about the ball, the toe flat (`lift` m: the ball off
+    the ground, a foot in the air mid-step); the knee over the toes."""
+    bx, by, yaw, heel, lift = (tuple(f) + (0, 0, 0))[:5]
+    k = PROP['height'] / 1.8
+    J, sd = landmarks(), side[0]
+    Rz = Matrix.Rotation(math.radians(yaw), 3, 'Z')
+    R = Rz @ Matrix.Rotation(math.radians(heel), 3, 'X')
+    B = Vector((bx * k, by * k, drop + J['ball' + sd].z + lift * k))
+    short = _fs_two(side + 'UpLeg', side + 'Leg', B + R @ (J['ankle' + sd] - J['ball' + sd]),
+                    Rz @ Vector((0, -1, 0)) + Vector((.3 if sd == 'L' else -.3, 0, 0)))
+    _fs_foot_rot(side, R, Rz)
+    return short
+
+
+def _fs_free(side, f, g):
+    """A free leg: the ankle on (x, y, z) (post-snap), the knee bent toward `pole`, the foot turned by `foot` (world
+    rotations [(axis, deg)] from its rest: toe down = X-) or as the shin carries it."""
+    k = PROP['height'] / 1.8
+    short = _fs_two(side + 'UpLeg', side + 'Leg', Vector(f[0]) * k + Vector((0, 0, g)), Vector(f[1]))
+    if len(f) > 2 and f[2] is not None:
+        R = Matrix.Identity(3)
+        for ax, deg in f[2]:
+            R = Matrix.Rotation(math.radians(deg), 3, ax) @ R
+        _fs_foot_rot(side, R, R)
+    return short
+
+
+def _fs_hold(pose_name):
+    """HOLD hook (last): a fists key's feet, legs and fists onto their spots (FS_AT), then the revolver back in its holster
+    on the posed thigh."""
+    S = FS_AT.get(_key(pose_name))
+    if not S:
+        return
+    pbs = bpy.data.objects[ROOT].pose.bones
+    k = PROP['height'] / 1.8
+    drop = S.get('drop', 0.0) * k
+    g = drop + _fs_sole()
+    short = {}
+    for side, f in S.get('feet', {}).items():
+        short[side + 'Leg'] = _fs_plant(side, f[1:], drop) if f[0] == 'plant' else _fs_free(side, f[1:], g)
+    for side, (p, pole) in S.get('fists', {}).items():   # (the knuckles: the hand's tail, the hand rigid on the forearm)
+        short[side + 'Arm'] = _fs_two(side + 'Arm', side + 'ForeArm', Vector(p) * k + Vector((0, 0, g)), Vector(pole),
+                                      side + 'Hand')
+    for n, s in short.items():
+        if s > .01:
+            print('FISTS out of reach', pose_name, n, round(s, 3))
+    _bw_regun(pose_name)
+
+
+_pose_fists = pose
+
+
+def pose(name):
+    """The pose() above; a fists clip's in-between (a blend of finished keys) gets its holstered revolver put back."""
+    zmin = _pose_fists(name)
+    clip, _, i = name.partition('.')
+    if i and clip in FISTS_LIVE:
+        _bw_regun(name)
+    return zmin
+
+
+_build_fists = build
+
+
+def build():
+    """The builds above, then the fists keys' hook after every other."""
+    names = _build_fists()
+    if _fs_hold not in HOLD_HOOKS:
+        HOLD_HOOKS.append(_fs_hold)
+    return names
+
+
+_FS_ARMS = {'LeftArm': [('Y', 30), ('X', -30)], 'LeftForeArm': [('X', -70)],      # (the arms' start before the solve: bent
+            'RightArm': [('Y', -30), ('X', -30)], 'RightForeArm': [('X', -70)]}   # forward, so every key's roll is alike)
+
+
+def _fs_key(name, hips=(0, 0, 0), turn=(0, 0, 0, 0, 0), lean=(0, 0, 0, 0, 0), bend=(0, 0, 0, 0, 0), sh=((0, 0), (0, 0)),
+            root=None, drop=.08, feet=None, fists=None, extra=None):
+    """A fists key. hips: (turn Z + toward his left, tip X + forward, roll Y + his left side down); turn / lean / bend: Z / X /
+    Y for (Spine, Spine1, Spine2, Neck, Head), about world axes (each after its parent: a turn then a lean toward the
+    target); sh: the shoulders' (raise, forward) deg, (left, right); root: (dx, dy) the pelvis over the feet; then FS_AT."""
+    spec = {'Hips': [('Z', hips[0]), ('X', hips[1]), ('Y', hips[2])]}
+    for b, z, x, y in zip(('Spine', 'Spine1', 'Spine2', 'Neck', 'Head'), turn, lean, bend):
+        spec[b] = [('Z', z), ('X', x), ('Y', y)]
+    (lr, lf), (rr, rf) = sh
+    spec['LeftShoulder'] = [('Y', -lr), ('Z', -lf)]
+    spec['RightShoulder'] = [('Y', rr), ('Z', rf)]
+    spec.update({b: list(v) for b, v in _FS_ARMS.items()})
+    if root:
+        spec['_root'] = tuple(root)
+    POSES[name] = _merge(spec, extra) if extra else spec
+    FS_AT[name] = {'drop': drop, 'feet': dict(feet or {}), 'fists': dict(fists or {})}
+    return name
+
+
+def _fs_clip(keys, tween, ms, loop=False, marks=None):
+    return _clip(keys, tween, 12, loop=loop, play=None, ms=ms, marks=marks)
+
+
+# ---- the stance: the feet (ball spots, yaw, heel) and the fists' home
+_FS_L = ('plant', .13, -.28, -18, 4)     # the front foot, pointing a little to his right
+_FS_R = ('plant', -.13, .17, -50, 14)    # the back foot turned out, up on its ball
+_P_GL, _P_GR = (.6, .3, -1), (-.6, .3, -1)   # guard elbows: down, a little out and back
+_FS_GD = dict(hips=(-32, 4, 0), turn=(4, 4, 2, 12, 10), lean=(5, 4, 2, 0, -2), sh=((6, 8), (6, 6)))
+_fs_key('fs_gd_up', drop=.05, feet={'Left': _FS_L, 'Right': _FS_R},
+        fists={'Left': ((.07, -.50, 1.27), _P_GL), 'Right': ((-.11, -.41, 1.25), _P_GR)}, **_FS_GD)
+_fs_key('fs_gd_down', drop=.10, feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (8,)},
+        fists={'Left': ((.07, -.49, 1.22), _P_GL), 'Right': ((-.11, -.40, 1.20), _P_GR)},
+        **{**_FS_GD, 'hips': (-34, 5, 0), 'turn': (4, 4, 2, 13, 11)})
+ANIMS['fs_guard'] = _fs_clip(['fs_gd_up', 'fs_gd_down'], [0, .5, 1, 1.5], [150, 150, 150, 150], loop=True, marks={'loop': 0})
+_GD = 'fs_gd_up'
+
+# ---- the jab: the left fist cocks back a little with the weight onto the front foot, then shoots out along the line with
+# the chest turning right and the left shoulder up to the chin; the right fist stays home
+_fs_key('fs_jb_wind', drop=.11, hips=(-29, 5, 0), turn=(4, 4, 2, 11, 8), lean=(5, 4, 2, 0, -2), sh=((3, 3), (6, 6)),
+        root=(0, -.02), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (16,)},
+        fists={'Left': ((.10, -.42, 1.19), (.7, .2, -1)), 'Right': ((-.11, -.40, 1.22), _P_GR)})
+_fs_key('fs_jb_ext', drop=.07, hips=(-38, 6, 0), turn=(-1, -1, 0, 20, 18), lean=(6, 4, 2, 0, -3), sh=((12, 12), (6, 6)),
+        root=(0, -.04), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (20,)},
+        fists={'Left': ((.05, -.62, 1.36), (.5, .1, -1)), 'Right': ((-.10, -.37, 1.24), _P_GR)})
+_fs_key('fs_jb_hit', drop=.04, hips=(-42, 6, 0), turn=(-2, -2, -1, 22, 21), lean=(6, 4, 2, 0, -4), sh=((16, 16), (4, 8)),
+        root=(0, -.06), feet={'Left': ('plant', .13, -.31, -20, 0), 'Right': _FS_R[:4] + (26,)},
+        fists={'Left': ((.02, -.73, FS_FACE), (.4, .2, -1)), 'Right': ((-.09, -.36, 1.27), _P_GR)})
+_fs_key('fs_jb_back', drop=.07, hips=(-36, 5, 0), turn=(1, 1, 1, 17, 15), lean=(5, 4, 2, 0, -3), sh=((10, 10), (6, 6)),
+        root=(0, -.03), feet={'Left': ('plant', .13, -.30, -19, 0), 'Right': _FS_R[:4] + (20,)},
+        fists={'Left': ((.06, -.58, 1.33), (.6, .2, -1)), 'Right': ((-.10, -.39, 1.25), _P_GR)})
+ANIMS['fs_jab'] = _fs_clip(['fs_jb_wind', 'fs_jb_ext', 'fs_jb_hit', 'fs_jb_back', _GD], [0, 1, 2, 3, 4], [50, 60, 70, 55, 55],
+                           marks={'hit': 2})
+# the double: from the retracted jab, no wind back (frame 0 = the retract), straight out again
+ANIMS['fs_jab2'] = _fs_clip(['fs_jb_back', 'fs_jb_hit', _GD], [0, 1, 1.5, 2], [40, 50, 85, 85], marks={'hit': 1})
+
+# ---- the cross: the right hip back (the weight on the back foot), then the hips and shoulders turn in hard, the right
+# heel up and turned out, the right arm straight down the line; the left fist comes home to the chin
+_fs_key('fs_cr_wind', drop=.10, hips=(-38, 4, 0), turn=(2, 2, 1, 15, 13), lean=(4, 3, 2, 0, -2), sh=((6, 8), (8, 2)),
+        root=(0, .02), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (10,)},
+        fists={'Left': ((.07, -.48, 1.23), _P_GL), 'Right': ((-.13, -.33, 1.21), (-.7, .4, -1))})
+_fs_key('fs_cr_turn', drop=.07, hips=(-12, 5, 0), turn=(4, 3, 2, 2, 1), lean=(5, 4, 2, 0, -3), sh=((4, 0), (10, 12)),
+        root=(0, -.03), feet={'Left': _FS_L[:4] + (0,), 'Right': ('plant', -.13, .17, -40, 28)},
+        fists={'Left': ((.10, -.40, 1.25), _P_GL), 'Right': ((-.07, -.58, 1.35), (-.6, .1, -1))})
+_fs_key('fs_cr_hit', drop=.04, hips=(14, 6, 0), turn=(8, 6, 4, -14, -14), lean=(6, 4, 2, 0, -4), sh=((2, 0), (16, 16)),
+        root=(0, -.07), feet={'Left': ('plant', .13, -.30, -16, 0), 'Right': ('plant', -.12, .17, -25, 40)},
+        fists={'Left': ((.10, -.36, 1.27), (.7, .2, -1)), 'Right': ((-.02, -.76, FS_FACE), (-.4, .2, -1))})
+_fs_key('fs_cr_back', drop=.07, hips=(0, 5, 0), turn=(5, 4, 3, -6, -6), lean=(5, 4, 2, 0, -3), sh=((4, 4), (10, 10)),
+        root=(0, -.04), feet={'Left': ('plant', .13, -.29, -17, 0), 'Right': ('plant', -.13, .17, -34, 30)},
+        fists={'Left': ((.09, -.40, 1.26), _P_GL), 'Right': ((-.06, -.60, 1.36), (-.6, .2, -1))})
+ANIMS['fs_cross'] = _fs_clip(['fs_cr_wind', 'fs_cr_turn', 'fs_cr_hit', 'fs_cr_back', _GD], [0, 1, 2, 3, 4], [70, 80, 80, 80, 80],
+                             marks={'hit': 2})
+
+# ---- the hooks: the lead (left) hook loads onto the left leg with the elbow out, then the hips and shoulders whip round to
+# his right over the pivoting front foot, the arm bent square at shoulder height; the fist crosses in front of the target's
+# cheek and carries on a little past the line. The rear (right) hook: the same off the back foot, the hips turning in.
+_P_HL, _P_HR = (1, .3, .5), (-1, .3, .5)     # hook elbows: out to the side and up (the arm square, level)
+_fs_key('fs_hl_wind', drop=.12, hips=(-24, 4, 0), turn=(2, 2, 2, 8, 10), lean=(4, 3, 2, 0, -2), bend=(5, 4, 1, -4, -4),
+        sh=((2, 6), (6, 6)), root=(.04, -.03), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (18,)},
+        fists={'Left': ((.33, -.36, 1.22), (1, .5, -.2)), 'Right': ((-.10, -.38, 1.24), _P_GR)})
+_fs_key('fs_hl_arc', drop=.08, hips=(-46, 5, 0), turn=(-6, -6, -4, 30, 30), lean=(5, 4, 2, 0, -3), bend=(2, 1, 0, -2, -2),
+        sh=((10, 10), (4, 6)), root=(.02, -.04), feet={'Left': ('plant', .13, -.28, -40, 10), 'Right': _FS_R[:4] + (20,)},
+        fists={'Left': ((.40, -.56, 1.40), _P_HL), 'Right': ((-.10, -.36, 1.26), _P_GR)})
+_fs_key('fs_hl_hit', drop=.06, hips=(-56, 5, 0), turn=(-8, -7, -5, 38, 36), lean=(6, 4, 2, 0, -3), bend=(-2, -2, 0, 2, 2),
+        sh=((12, 14), (4, 6)), root=(0, -.05), feet={'Left': ('plant', .13, -.28, -62, 18), 'Right': _FS_R[:4] + (24,)},
+        fists={'Left': ((.06, -.62, FS_FACE), _P_HL), 'Right': ((-.09, -.34, 1.27), _P_GR)})
+_fs_key('fs_hl_follow', drop=.07, hips=(-62, 5, 0), turn=(-10, -8, -6, 40, 38), lean=(6, 4, 2, 0, -3), bend=(-3, -2, 0, 2, 2),
+        sh=((10, 14), (4, 6)), root=(-.01, -.04), feet={'Left': ('plant', .13, -.28, -66, 18), 'Right': _FS_R[:4] + (24,)},
+        fists={'Left': ((-.14, -.52, 1.40), (.8, .4, .5)), 'Right': ((-.09, -.34, 1.27), _P_GR)})
+ANIMS['fs_hook_l'] = _fs_clip(['fs_hl_wind', 'fs_hl_arc', 'fs_hl_hit', 'fs_hl_follow', _GD], [0, 1, 2, 3, 4], [80, 90, 90, 90, 90],
+                              marks={'hit': 2})
+_fs_key('fs_hr_wind', drop=.12, hips=(-40, 4, 0), turn=(0, 0, 0, 20, 18), lean=(4, 3, 2, 0, -2), bend=(-5, -4, -1, 4, 4),
+        sh=((6, 8), (4, -2)), root=(-.04, .02), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (8,)},
+        fists={'Left': ((.08, -.47, 1.25), _P_GL), 'Right': ((-.34, -.28, 1.22), (-1, .5, -.2))})
+_fs_key('fs_hr_arc', drop=.08, hips=(-6, 5, 0), turn=(6, 6, 4, -6, -6), lean=(5, 4, 2, 0, -3), bend=(-2, -1, 0, 2, 2),
+        sh=((4, 4), (10, 10)), root=(-.02, -.03), feet={'Left': _FS_L[:4] + (0,), 'Right': ('plant', -.13, .17, -36, 28)},
+        fists={'Left': ((.10, -.40, 1.26), _P_GL), 'Right': ((-.41, -.53, 1.40), _P_HR)})
+_fs_key('fs_hr_hit', drop=.05, hips=(18, 5, 0), turn=(8, 8, 6, -18, -18), lean=(6, 4, 2, 0, -3), bend=(2, 2, 0, -2, -2),
+        sh=((4, 4), (12, 14)), root=(-.02, -.06), feet={'Left': ('plant', .13, -.29, -14, 0), 'Right': ('plant', -.12, .17, -24, 38)},
+        fists={'Left': ((.10, -.36, 1.27), _P_GL), 'Right': ((-.06, -.62, FS_FACE), _P_HR)})
+_fs_key('fs_hr_follow', drop=.06, hips=(24, 5, 0), turn=(10, 9, 6, -22, -20), lean=(6, 4, 2, 0, -3), bend=(3, 2, 0, -2, -2),
+        sh=((4, 4), (10, 14)), root=(-.01, -.05), feet={'Left': ('plant', .13, -.29, -12, 0), 'Right': ('plant', -.12, .17, -20, 40)},
+        fists={'Left': ((.10, -.36, 1.27), _P_GL), 'Right': ((.14, -.52, 1.40), (-.8, .4, .5))})
+ANIMS['fs_hook_r'] = _fs_clip(['fs_hr_wind', 'fs_hr_arc', 'fs_hr_hit', 'fs_hr_follow', _GD], [0, 1, 2, 3, 4], [80, 90, 90, 90, 90],
+                              marks={'hit': 2})
+
+# ---- the uppercuts: a dip into the knees with the punching shoulder dropped and the fist low by the ribs, the legs drive
+# up and the hips turn, the fist rises under the chin (the forearm upright, the elbow under it) with the body up onto the
+# toes, carries on up past the face (over the brim: it reads from behind too), settles back down into the guard
+_P_UP = (0, .4, -1)    # the elbow under the fist
+_fs_key('fs_ur_dip', drop=.18, hips=(-36, 7, 0), turn=(0, 0, 0, 18, 18), lean=(6, 4, 2, 0, -2), bend=(-7, -5, -2, 6, 6),
+        sh=((4, 6), (-8, 2)), root=(-.02, 0), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (8,)},
+        fists={'Left': ((.08, -.46, 1.20), _P_GL), 'Right': ((-.17, -.34, 1.00), (-.5, .4, -1))})
+_fs_key('fs_ur_drive', drop=.10, hips=(-6, 6, 0), turn=(4, 4, 3, -2, -3), lean=(5, 3, 2, 0, -2), bend=(-2, -1, 0, 2, 2),
+        sh=((4, 4), (2, 8)), root=(-.01, -.03), feet={'Left': _FS_L[:4] + (0,), 'Right': ('plant', -.13, .17, -38, 30)},
+        fists={'Left': ((.10, -.40, 1.24), _P_GL), 'Right': ((-.10, -.50, 1.14), (-.2, .4, -1))})
+_fs_key('fs_ur_hit', drop=.01, hips=(22, 4, 0), turn=(8, 6, 4, -20, -18), lean=(2, 0, -1, 2, -2), bend=(2, 1, 0, -2, -2),
+        sh=((4, 4), (12, 12)), root=(0, -.05), feet={'Left': ('plant', .13, -.29, -14, 14), 'Right': ('plant', -.12, .17, -24, 40)},
+        fists={'Left': ((.10, -.36, 1.30), _P_GL), 'Right': ((-.03, -.58, 1.38), _P_UP)})
+_fs_key('fs_ur_follow', drop=0, hips=(26, 2, 0), turn=(8, 6, 4, -22, -18), lean=(0, -2, -3, 2, -6), bend=(3, 2, 0, -2, -2),
+        sh=((4, 4), (16, 10)), root=(0, -.04), feet={'Left': ('plant', .13, -.29, -14, 16), 'Right': ('plant', -.12, .17, -24, 42)},
+        fists={'Left': ((.10, -.36, 1.30), _P_GL), 'Right': ((-.05, -.50, 1.64), (-.4, .3, -1))})
+_fs_key('fs_ur_settle', drop=.09, hips=(-12, 5, 0), turn=(4, 4, 2, 2, 2), lean=(5, 4, 2, 0, -3), sh=((6, 6), (8, 6)),
+        root=(0, -.02), feet={'Left': _FS_L[:4] + (0,), 'Right': ('plant', -.13, .17, -40, 24)},
+        fists={'Left': ((.08, -.44, 1.26), _P_GL), 'Right': ((-.10, -.44, 1.34), _P_GR)})
+ANIMS['fs_upper_r'] = _fs_clip(['fs_ur_dip', 'fs_ur_drive', 'fs_ur_hit', 'fs_ur_follow', 'fs_ur_settle', _GD], [0, 1, 2, 3, 4, 5],
+                               [90, 100, 90, 100, 95, 95], marks={'hit': 2})
+_fs_key('fs_ul_dip', drop=.17, hips=(-18, 7, 0), turn=(4, 3, 2, 4, 5), lean=(6, 4, 2, 0, -2), bend=(7, 5, 2, -6, -6),
+        sh=((-8, 0), (6, 6)), root=(.03, -.02), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (14,)},
+        fists={'Left': ((.19, -.40, 1.00), (.5, .4, -1)), 'Right': ((-.11, -.38, 1.20), _P_GR)})
+_fs_key('fs_ul_drive', drop=.09, hips=(-36, 6, 0), turn=(-2, -2, -1, 20, 21), lean=(5, 3, 2, 0, -2), bend=(2, 1, 0, -2, -2),
+        sh=((2, 8), (6, 6)), root=(.01, -.03), feet={'Left': ('plant', .13, -.28, -30, 6), 'Right': _FS_R[:4] + (18,)},
+        fists={'Left': ((.11, -.52, 1.14), (.2, .4, -1)), 'Right': ((-.10, -.36, 1.25), _P_GR)})
+_fs_key('fs_ul_hit', drop=.01, hips=(-50, 4, 0), turn=(-8, -6, -4, 36, 32), lean=(2, 0, -1, 2, -2), bend=(-2, -1, 0, 2, 2),
+        sh=((12, 12), (4, 6)), root=(0, -.05), feet={'Left': ('plant', .13, -.28, -48, 20), 'Right': _FS_R[:4] + (26,)},
+        fists={'Left': ((.03, -.58, 1.38), _P_UP), 'Right': ((-.09, -.34, 1.28), _P_GR)})
+_fs_key('fs_ul_follow', drop=0, hips=(-54, 2, 0), turn=(-8, -6, -4, 38, 34), lean=(0, -2, -3, 2, -6), bend=(-3, -2, 0, 2, 2),
+        sh=((16, 10), (4, 6)), root=(0, -.04), feet={'Left': ('plant', .13, -.28, -50, 22), 'Right': _FS_R[:4] + (28,)},
+        fists={'Left': ((.05, -.50, 1.64), (.4, .3, -1)), 'Right': ((-.09, -.34, 1.28), _P_GR)})
+_fs_key('fs_ul_settle', drop=.09, hips=(-38, 5, 0), turn=(2, 2, 1, 16, 16), lean=(5, 4, 2, 0, -3), sh=((8, 6), (6, 6)),
+        root=(0, -.02), feet={'Left': ('plant', .13, -.28, -26, 4), 'Right': _FS_R[:4] + (16,)},
+        fists={'Left': ((.09, -.46, 1.34), _P_GL), 'Right': ((-.11, -.40, 1.25), _P_GR)})
+ANIMS['fs_upper_l'] = _fs_clip(['fs_ul_dip', 'fs_ul_drive', 'fs_ul_hit', 'fs_ul_follow', 'fs_ul_settle', _GD], [0, 1, 2, 3, 4, 5],
+                               [90, 100, 90, 100, 95, 95], marks={'hit': 2})
+
+# ---- the body blow (the left heavy): a level change down to the left (the left shoulder dropped, the weight over the
+# left leg), the left fist loaded low and back by the hip, trembling while it charges; then the hips snap round to his
+# right and the fist digs up into the target's right side (his liver) at belt height, the elbow out; up into the guard
+_fs_key('fs_bd_dip', drop=.15, hips=(-26, 8, 0), turn=(2, 2, 2, 10, 10), lean=(7, 5, 3, -2, -4), bend=(8, 6, 2, -6, -6),
+        sh=((-6, 2), (6, 6)), root=(.05, -.02), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (16,)},
+        fists={'Left': ((.23, -.38, 1.08), (.8, .4, -1)), 'Right': ((-.10, -.37, 1.20), _P_GR)})
+_fs_key('fs_bd_load', drop=.19, hips=(-14, 9, 0), turn=(4, 4, 2, 2, 2), lean=(8, 6, 3, -2, -4), bend=(10, 7, 2, -8, -8),
+        sh=((-10, -4), (6, 6)), root=(.08, -.01), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (14,)},
+        fists={'Left': ((.30, -.22, .97), (.6, .5, -1)), 'Right': ((-.08, -.36, 1.17), _P_GR)})
+_fs_key('fs_bd_hold_a', drop=.20, hips=(-13, 9, 0), turn=(4, 4, 2, 2, 2), lean=(8, 6, 3, -2, -4), bend=(11, 8, 2, -9, -9),
+        sh=((-11, -4), (7, 6)), root=(.085, -.01), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (14,)},
+        fists={'Left': ((.31, -.20, .96), (.6, .5, -1)), 'Right': ((-.08, -.36, 1.16), _P_GR)})
+_fs_key('fs_bd_hold_b', drop=.185, hips=(-16, 9, 0), turn=(3, 3, 2, 3, 3), lean=(8, 6, 3, -2, -4), bend=(9, 7, 2, -7, -7),
+        sh=((-9, -3), (6, 6)), root=(.075, -.015), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (15,)},
+        fists={'Left': ((.29, -.23, .98), (.6, .5, -1)), 'Right': ((-.09, -.37, 1.18), _P_GR)})
+_fs_key('fs_bd_drive', drop=.16, hips=(-44, 8, 0), turn=(-4, -4, -2, 26, 26), lean=(7, 5, 3, -2, -4), bend=(5, 4, 1, -4, -4),
+        sh=((-2, 6), (6, 6)), root=(.05, -.05), feet={'Left': ('plant', .13, -.28, -40, 10), 'Right': _FS_R[:4] + (22,)},
+        fists={'Left': ((.27, -.52, 1.02), (1, .3, -.3)), 'Right': ((-.09, -.36, 1.19), _P_GR)})
+_fs_key('fs_bd_hit', drop=.14, hips=(-60, 8, 0), turn=(-8, -7, -5, 40, 38), lean=(7, 5, 3, -2, -4), bend=(2, 2, 0, -2, -2),
+        sh=((4, 12), (6, 6)), root=(.02, -.07), feet={'Left': ('plant', .13, -.28, -62, 18), 'Right': _FS_R[:4] + (26,)},
+        fists={'Left': ((.08, -.66, FS_BELLY), (1, .2, -.1)), 'Right': ((-.09, -.34, 1.20), _P_GR)})
+_fs_key('fs_bd_recover', drop=.10, hips=(-44, 6, 0), turn=(-2, -2, -1, 24, 24), lean=(5, 4, 2, 0, -3), bend=(1, 1, 0, -1, -1),
+        sh=((6, 8), (6, 6)), root=(.01, -.04), feet={'Left': ('plant', .13, -.28, -40, 10), 'Right': _FS_R[:4] + (20,)},
+        fists={'Left': ((.18, -.52, 1.22), (1, .3, -.5)), 'Right': ((-.10, -.38, 1.23), _P_GR)})
+ANIMS['fs_body'] = _fs_clip(['fs_bd_dip', 'fs_bd_load', 'fs_bd_hold_a', 'fs_bd_hold_b', 'fs_bd_drive', 'fs_bd_hit', 'fs_bd_recover', _GD],
+                            list(range(8)), [70, 100, 80, 80, 90, 110, 110, 110], marks={'loop': 2, 'throw': 4, 'hit': 5})
+
+# ---- the haymaker (the right heavy): the hips turn away and the right fist winds up behind the right ear, the left arm
+# out ahead for balance, trembling while it charges; then a wide overhand arc (the elbow out, the fist over the top) down
+# onto the target's face with everything behind it, carrying on past (over-extended, turned past the line), back up
+_fs_key('fs_hy_load_a', drop=.10, hips=(-52, 2, 0), turn=(-4, -3, -2, 30, 29), lean=(2, 1, 0, 0, -3), bend=(-4, -3, 0, 3, 3),
+        sh=((2, 6), (10, -8)), root=(-.02, .04), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (4,)},
+        fists={'Left': ((.20, -.55, 1.30), (.6, .2, -1)), 'Right': ((-.27, -.04, 1.42), (-.7, .6, -.4))})
+_fs_key('fs_hy_load_b', drop=.12, hips=(-62, 1, 0), turn=(-5, -4, -3, 36, 36), lean=(1, 0, -1, 0, -3), bend=(-6, -4, 0, 5, 5),
+        sh=((0, 8), (14, -12)), root=(-.03, .06), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (0,)},
+        fists={'Left': ((.29, -.52, 1.27), (.8, 0, -.6)), 'Right': ((-.25, .08, 1.50), (-.6, .8, .2))})
+_fs_key('fs_hy_hold_a', drop=.125, hips=(-63, 1, 0), turn=(-5, -4, -3, 37, 36), lean=(1, 0, -1, 0, -3), bend=(-7, -5, 0, 6, 6),
+        sh=((0, 8), (15, -12)), root=(-.035, .06), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (0,)},
+        fists={'Left': ((.30, -.53, 1.26), (.8, 0, -.6)), 'Right': ((-.26, .10, 1.51), (-.6, .8, .2))})
+_fs_key('fs_hy_hold_b', drop=.115, hips=(-60, 1, 0), turn=(-5, -4, -3, 35, 35), lean=(1, 0, -1, 0, -3), bend=(-5, -4, 0, 4, 4),
+        sh=((0, 8), (13, -11)), root=(-.025, .055), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (2,)},
+        fists={'Left': ((.28, -.51, 1.28), (.8, 0, -.6)), 'Right': ((-.24, .06, 1.49), (-.6, .8, .2))})
+_fs_key('fs_hy_swing', drop=.08, hips=(-10, 5, 0), turn=(4, 4, 2, 0, 0), lean=(5, 4, 2, 0, -3), bend=(2, 2, 0, -2, -2),
+        sh=((4, 0), (16, 8)), root=(-.01, -.02), feet={'Left': _FS_L[:4] + (0,), 'Right': ('plant', -.13, .17, -38, 26)},
+        fists={'Left': ((.18, -.38, 1.20), _P_GL), 'Right': ((-.32, -.42, 1.62), (-1, .3, .3))})
+_fs_key('fs_hy_hit', drop=.06, hips=(24, 8, 0), turn=(8, 7, 5, -22, -22), lean=(8, 6, 4, 0, -4), bend=(4, 3, 1, -4, -4),
+        sh=((2, 0), (14, 16)), root=(0, -.09), feet={'Left': ('plant', .13, -.30, -14, 0), 'Right': ('plant', -.12, .17, -18, 44)},
+        fists={'Left': ((.10, -.30, 1.18), _P_GL), 'Right': ((-.02, -.78, FS_FACE), (-.8, .3, .4))})
+_fs_key('fs_hy_over', drop=.09, hips=(36, 10, 0), turn=(10, 9, 6, -30, -28), lean=(10, 8, 5, 0, -6), bend=(6, 4, 1, -5, -5),
+        sh=((0, 0), (10, 18)), root=(.02, -.09), feet={'Left': ('plant', .13, -.30, -12, 0), 'Right': ('plant', -.12, .17, -14, 46)},
+        fists={'Left': ((.12, -.28, 1.15), _P_GL), 'Right': ((.20, -.64, 1.16), (-.6, .2, .3))})
+_fs_key('fs_hy_recover', drop=.10, hips=(0, 6, 0), turn=(4, 4, 2, -5, -5), lean=(6, 4, 2, 0, -3), sh=((4, 4), (8, 8)),
+        root=(0, -.04), feet={'Left': ('plant', .13, -.29, -16, 0), 'Right': ('plant', -.13, .17, -34, 26)},
+        fists={'Left': ((.08, -.44, 1.24), _P_GL), 'Right': ((-.12, -.46, 1.28), _P_GR)})
+ANIMS['fs_hay'] = _fs_clip(['fs_hy_load_a', 'fs_hy_load_b', 'fs_hy_hold_a', 'fs_hy_hold_b', 'fs_hy_swing', 'fs_hy_hit', 'fs_hy_over',
+                            'fs_hy_recover', _GD], list(range(9)), [80, 120, 80, 80, 130, 120, 110, 100, 100],
+                           marks={'loop': 2, 'throw': 4, 'hit': 5})
+
+# ---- the headbutt: the head and chest pulled back, both hands reaching for his shoulders; the hands pull him in as the
+# head and chest drive forward, the forehead (the brim tilted down) into his face; the recoil, the guard
+_fs_key('fs_hd_wind', drop=.08, hips=(-28, 0, 0), turn=(3, 3, 2, 10, 10), lean=(-6, -6, -4, 0, -8), sh=((8, 10), (8, 10)),
+        root=(0, .04), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (8,)},
+        fists={'Left': ((.20, -.44, 1.31), (.8, .2, -1)), 'Right': ((-.18, -.42, 1.31), (-.8, .2, -1))})
+_fs_key('fs_hd_drive', drop=.08, hips=(-24, 5, 0), turn=(3, 3, 2, 8, 8), lean=(4, 3, 2, 2, 2), sh=((6, 12), (6, 12)),
+        root=(0, -.02), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (18,)},
+        fists={'Left': ((.24, -.46, 1.20), (.8, .2, -1)), 'Right': ((-.22, -.44, 1.20), (-.8, .2, -1))})
+_fs_key('fs_hd_hit', drop=.06, hips=(-22, 6, 0), turn=(3, 3, 2, 7, 7), lean=(5, 3, 2, 2, 4), sh=((4, 14), (4, 14)),
+        root=(0, -.02), feet={'Left': ('plant', .13, -.30, -18, 0), 'Right': _FS_R[:4] + (28,)},
+        fists={'Left': ((.23, -.40, 1.16), (.8, .3, -1)), 'Right': ((-.21, -.38, 1.16), (-.8, .3, -1))})
+_fs_key('fs_hd_recoil', drop=.09, hips=(-28, 2, 0), turn=(3, 3, 2, 10, 10), lean=(0, 0, 0, -4, -6), sh=((6, 6), (6, 6)),
+        root=(0, .01), feet={'Left': ('plant', .13, -.29, -18, 0), 'Right': _FS_R[:4] + (16,)},
+        fists={'Left': ((.14, -.47, 1.28), _P_GL), 'Right': ((-.13, -.43, 1.26), _P_GR)})
+ANIMS['fs_head'] = _fs_clip(['fs_hd_wind', 'fs_hd_drive', 'fs_hd_hit', 'fs_hd_recoil', _GD], [0, 1, 2, 3, 4], [60, 100, 110, 110, 100],
+                            marks={'hit': 2})
+
+# ---- the roundhouse (V in a string): the weight onto the left foot with a skip in, the arms up; the right knee chambered
+# up and across as the left foot pivots; the hips turn over and the body leans away as the right leg whips round, the
+# shin across the target's ribs; the leg carries on across, is pulled back in and set down behind; the guard
+_fs_key('fs_rd_wind', drop=.10, hips=(-20, 3, 0), turn=(4, 3, 2, 6, 5), lean=(4, 3, 2, 0, -3), sh=((8, 6), (8, 6)),
+        root=(.05, -.08), feet={'Left': ('plant', .12, -.36, -36, 0), 'Right': ('plant', -.13, .17, -50, 30)},
+        fists={'Left': ((.10, -.44, 1.34), _P_GL), 'Right': ((-.10, -.38, 1.32), _P_GR)})
+_fs_key('fs_rd_chamber', drop=.05, hips=(36, -6, 8), turn=(6, 4, 2, -24, -24), lean=(-4, -3, -2, 4, 2), bend=(4, 3, 2, -4, -4),
+        sh=((6, 6), (2, -6)), root=(.10, -.20), feet={'Left': ('plant', .10, -.38, -90, 0),
+                                                     'Right': ('free', (-.36, -.42, .80), (0, -1, .6), [('X', -40), ('Z', 40)])},
+        fists={'Left': ((.18, -.40, 1.30), (.8, .2, -1)), 'Right': ((-.24, -.12, 1.08), (-.6, .4, -1))})
+_fs_key('fs_rd_hit', drop=.04, hips=(72, -10, 14), turn=(6, 4, 2, -42, -40), lean=(-8, -6, -4, 6, 4), bend=(8, 6, 4, -8, -8),
+        sh=((6, 4), (0, -10)), root=(.10, -.26), feet={'Left': ('plant', .10, -.38, -130, 0),
+                                                      'Right': ('free', (.10, -.88, 1.10), (-.3, 0, 1), [('X', -55), ('Z', 85)])},
+        fists={'Left': ((.24, -.36, 1.28), (.8, .2, -1)), 'Right': ((-.30, .02, 1.02), (-.6, .4, -1))})
+_fs_key('fs_rd_follow', drop=.05, hips=(92, -6, 10), turn=(6, 4, 2, -52, -50), lean=(-6, -4, -3, 6, 4), bend=(6, 4, 3, -6, -6),
+        sh=((6, 4), (2, -6)), root=(.10, -.24), feet={'Left': ('plant', .10, -.38, -140, 0),
+                                                     'Right': ('free', (.40, -.62, .78), (-.6, -.4, 1), [('X', -50), ('Z', 110)])},
+        fists={'Left': ((.22, -.30, 1.28), (.8, .2, -1)), 'Right': ((-.22, -.06, 1.10), (-.6, .4, -1))})
+_fs_key('fs_rd_down', drop=.09, hips=(10, 4, 0), turn=(4, 3, 2, -8, -8), lean=(3, 2, 1, 0, -3), sh=((6, 6), (6, 6)),
+        root=(.04, -.10), feet={'Left': ('plant', .11, -.34, -50, 0),
+                                'Right': ('free', (-.18, .10, .16), (0, -1, .3), [('X', -10), ('Z', -30)])},
+        fists={'Left': ((.10, -.44, 1.30), _P_GL), 'Right': ((-.12, -.38, 1.28), _P_GR)})
+ANIMS['fs_round'] = _fs_clip(['fs_rd_wind', 'fs_rd_chamber', 'fs_rd_hit', 'fs_rd_follow', 'fs_rd_down', _GD], [0, 1, 2, 3, 4, 5],
+                             [40, 170, 90, 80, 80, 80], marks={'hit': 2})
+
+# ---- footwork: a step-drag shuffle in the guard, 4 frames a cycle (.9 m: the game plays it by the distance moved). The
+# foot on the side he goes steps first (forward: the left; back: the right; to his left: the left; to his right: the
+# right), the other is dragged after it, the feet never cross; each foot travels `e` against his middle per half cycle
+# (the stance narrows to a drag and widens to a step: e < the .45 m a half cycle covers, the rest is the sim's glide), a
+# bounce on the frames a foot is in the air, a lean into the way he goes
+def _fs_shuffle(clip, lead, t, e, ms, lean=0, bend=0):
+    trail = 'Right' if lead == 'Left' else 'Left'
+    base = {'Left': _FS_L[1:3] + (-18, 2), 'Right': _FS_R[1:3] + (-50, 12)}
+    keys = []
+    for i, (ol, ot, up) in enumerate(((-.5, .5, None), (0, 0, lead), (.5, -.5, None), (0, 0, trail))):
+        feet = {}
+        for side, o in ((lead, ol), (trail, ot)):
+            bx, by, yaw, heel = base[side]
+            lift, h = (.05, heel + 14) if up == side else (0, heel + (16 if (i == 0 and side == lead) or (i == 2 and side == trail) else 0))
+            feet[side] = ('plant', bx + t[0] * o * e, by + t[1] * o * e, yaw, h, lift)
+        bob = (0, .02, -.01, .02)[i]
+        k = _fs_key(f'{clip}_{i}', drop=(.09, .05, .10, .05)[i], hips=(-32, 4, 0), turn=(4, 4, 2, 12, 10),
+                    lean=(5 + lean, 4, 2, 0, -2), bend=(bend, bend * .6, 0, -bend, 0), sh=((6, 8), (6, 6)),
+                    root=(t[0] * .02, t[1] * .02), feet=feet,
+                    fists={'Left': ((.07 + t[0] * .01, -.50, 1.25 + bob), _P_GL), 'Right': ((-.11 + t[0] * .01, -.41, 1.23 + bob), _P_GR)})
+        keys.append(k)
+    ANIMS[clip] = _fs_clip(keys, [0, 1, 2, 3], [ms] * 4, loop=True, marks={'loop': 0})
+
+
+_fs_shuffle('fs_step_f', 'Left', (0, -1), .30, 78, lean=3)
+_fs_shuffle('fs_step_b', 'Right', (0, 1), .28, 102, lean=-3)
+_fs_shuffle('fs_step_l', 'Left', (1, 0), .22, 90, bend=3)
+_fs_shuffle('fs_step_r', 'Right', (-1, 0), .22, 90, bend=-3)
+
+# ---- the block (the passive guard takes a punch): the forearms up before the face, the chin tucked behind them, pushed
+# back half a step (the front foot slides back), held, back to the guard
+_P_BL, _P_BR = (.3, -.2, -1), (-.3, -.2, -1)   # the elbows down in front of the chest
+_fs_key('fs_bk_hit', drop=.12, hips=(-30, 2, 0), turn=(4, 4, 2, 11, 9), lean=(2, 2, 2, 6, 6), sh=((10, 10), (10, 10)),
+        root=(0, .09), feet={'Left': ('plant', .13, -.20, -18, 0), 'Right': ('plant', -.13, .21, -50, 6)},
+        fists={'Left': ((.07, -.36, 1.44), _P_BL), 'Right': ((-.09, -.33, 1.42), _P_BR)})
+_fs_key('fs_bk_hold', drop=.11, hips=(-31, 3, 0), turn=(4, 4, 2, 11, 10), lean=(3, 3, 2, 5, 4), sh=((9, 9), (9, 9)),
+        root=(0, .07), feet={'Left': ('plant', .13, -.20, -18, 0), 'Right': ('plant', -.13, .21, -50, 8)},
+        fists={'Left': ((.07, -.38, 1.42), _P_BL), 'Right': ((-.09, -.35, 1.40), _P_BR)})
+ANIMS['fs_block'] = _fs_clip(['fs_bk_hit', 'fs_bk_hold', _GD], [0, 1, 2], [70, 80, 70])
+
+# ---- the slips (Space in the stance; the sim moves him .8 m the way he holds): from the guard a dip into the knees and
+# a weave of the head and shoulders off the line (~.35 m to the side at the lowest), the guard kept up by the face, back
+# up into the guard. Back: a lean back with the feet drawn back, the head out of reach
+_fs_key('fs_sll_dip', drop=.14, hips=(-28, 6, 5), turn=(4, 4, 2, 10, 8), lean=(6, 4, 2, 0, -2), bend=(8, 6, 3, -6, -6),
+        sh=((6, 8), (6, 6)), root=(.06, -.02), feet={'Left': ('plant', .16, -.28, -18, 0), 'Right': ('plant', -.11, .17, -50, 18)},
+        fists={'Left': ((.13, -.46, 1.15), _P_GL), 'Right': ((-.04, -.38, 1.13), _P_GR)})
+_fs_key('fs_sll_low', drop=.22, hips=(-26, 8, 9), turn=(4, 4, 2, 9, 7), lean=(8, 5, 2, 0, -2), bend=(14, 10, 5, -10, -10),
+        sh=((6, 8), (6, 6)), root=(.12, -.03), feet={'Left': ('plant', .18, -.28, -18, 0), 'Right': ('plant', -.10, .17, -50, 20)},
+        fists={'Left': ((.20, -.44, 1.04), _P_GL), 'Right': ((.02, -.36, 1.02), _P_GR)})
+_fs_key('fs_sll_up', drop=.12, hips=(-30, 5, 3), turn=(4, 4, 2, 11, 9), lean=(5, 4, 2, 0, -2), bend=(5, 4, 2, -4, -4),
+        sh=((6, 8), (6, 6)), root=(.05, -.01), feet={'Left': ('plant', .15, -.28, -18, 0), 'Right': ('plant', -.12, .17, -50, 16)},
+        fists={'Left': ((.11, -.48, 1.18), _P_GL), 'Right': ((-.06, -.40, 1.16), _P_GR)})
+ANIMS['fs_slip_l'] = _fs_clip(['fs_sll_dip', 'fs_sll_low', 'fs_sll_up', _GD], [0, 1, 2, 3], [80, 80, 80, 80])
+_fs_key('fs_slr_dip', drop=.14, hips=(-36, 6, -5), turn=(4, 4, 2, 14, 12), lean=(6, 4, 2, 0, -2), bend=(-8, -6, -3, 6, 6),
+        sh=((6, 8), (6, 6)), root=(-.06, -.02), feet={'Left': ('plant', .11, -.28, -18, 0), 'Right': ('plant', -.15, .17, -50, 14)},
+        fists={'Left': ((.02, -.48, 1.14), _P_GL), 'Right': ((-.15, -.39, 1.15), _P_GR)})
+_fs_key('fs_slr_low', drop=.22, hips=(-38, 8, -9), turn=(4, 4, 2, 15, 13), lean=(8, 5, 2, 0, -2), bend=(-14, -10, -5, 10, 10),
+        sh=((6, 8), (6, 6)), root=(-.12, -.02), feet={'Left': ('plant', .10, -.28, -18, 0), 'Right': ('plant', -.16, .17, -50, 12)},
+        fists={'Left': ((-.03, -.46, 1.02), _P_GL), 'Right': ((-.21, -.37, 1.03), _P_GR)})
+_fs_key('fs_slr_up', drop=.12, hips=(-34, 5, -3), turn=(4, 4, 2, 13, 11), lean=(5, 4, 2, 0, -2), bend=(-5, -4, -2, 4, 4),
+        sh=((6, 8), (6, 6)), root=(-.05, -.01), feet={'Left': ('plant', .12, -.28, -18, 0), 'Right': ('plant', -.14, .17, -50, 14)},
+        fists={'Left': ((.03, -.49, 1.18), _P_GL), 'Right': ((-.14, -.40, 1.17), _P_GR)})
+ANIMS['fs_slip_r'] = _fs_clip(['fs_slr_dip', 'fs_slr_low', 'fs_slr_up', _GD], [0, 1, 2, 3], [80, 80, 80, 80])
+_fs_key('fs_slb_a', drop=.08, hips=(-30, -2, 0), turn=(4, 4, 2, 12, 10), lean=(-6, -5, -3, 2, 0), sh=((8, 8), (8, 8)),
+        root=(0, .06), feet={'Left': ('plant', .13, -.22, -18, 4), 'Right': _FS_R[:4] + (8,)},
+        fists={'Left': ((.07, -.40, 1.30), _P_GL), 'Right': ((-.10, -.34, 1.28), _P_GR)})
+_fs_key('fs_slb_b', drop=.10, hips=(-30, -6, 0), turn=(4, 4, 2, 12, 10), lean=(-10, -8, -5, 4, 2), sh=((10, 8), (10, 8)),
+        root=(0, .14), feet={'Left': ('plant', .13, -.14, -18, 12), 'Right': ('plant', -.13, .25, -50, 4)},
+        fists={'Left': ((.07, -.30, 1.31), _P_GL), 'Right': ((-.10, -.25, 1.29), _P_GR)})
+_fs_key('fs_slb_c', drop=.09, hips=(-31, 1, 0), turn=(4, 4, 2, 12, 10), lean=(1, 1, 0, 0, -1), sh=((7, 8), (7, 7)),
+        root=(0, .06), feet={'Left': ('plant', .13, -.22, -18, 4), 'Right': ('plant', -.13, .21, -50, 10)},
+        fists={'Left': ((.07, -.46, 1.28), _P_GL), 'Right': ((-.11, -.38, 1.26), _P_GR)})
+ANIMS['fs_slip_b'] = _fs_clip(['fs_slb_a', 'fs_slb_b', 'fs_slb_c', _GD], [0, 1, 2, 3], [80, 80, 80, 80])
+
+# ---- the clinch (E at a foe in reach; he's held .52 m before him): squared up, both fists on his collar, the elbows down,
+# leaning in. The grab reaches both hands for the collar from the guard; the clinch's moves start and end on its first
+# key; the toss and the shove end in the guard. The stance is square (the feet side by side), so the short punches mirror.
+def _fs_mirror(src, dst):
+    """A fists key on the other side: the spec mirrored (skeleton.py mirrored()), '_root', the feet and the fists swapped
+    and turned over (x, yaw, the poles)."""
+    sp = mirrored(POSES[src])
+    if '_root' in sp:
+        sp['_root'] = (-sp['_root'][0], sp['_root'][1])
+    POSES[dst] = sp
+    other = {'Left': 'Right', 'Right': 'Left'}
+    S = FS_AT[src]
+    feet = {}
+    for side, f in S['feet'].items():
+        if f[0] == 'plant':
+            feet[other[side]] = ('plant', -f[1], f[2], -f[3]) + tuple(f[4:])
+        else:
+            feet[other[side]] = ('free', (-f[1][0],) + tuple(f[1][1:]), (-f[2][0],) + tuple(f[2][1:])) + \
+                ((([(a, d if a == 'X' else -d) for a, d in f[3]],) if len(f) > 3 and f[3] is not None else ()))
+    fists = {other[side]: ((-p[0], p[1], p[2]), (-q[0], q[1], q[2])) for side, (p, q) in S['fists'].items()}
+    FS_AT[dst] = {'drop': S['drop'], 'feet': feet, 'fists': fists}
+    return dst
+
+
+_CL_FEET = {'Left': ('plant', .15, -.10, 10, 6), 'Right': ('plant', -.15, -.10, -10, 6)}   # square, toes a little out
+_P_CL, _P_CR = (.5, .4, -1), (-.5, .4, -1)    # the elbows down and in
+_FS_CL = dict(hips=(0, 5, 0), turn=(0, 0, 0, -8, -6), lean=(2, 1, 0, -2, -4), bend=(2, 2, 0, 4, 4), sh=((6, 6), (6, 6)),
+              root=(0, .01))   # (the head tipped to his left, beside the held man's: at .52 m two heads this big overlap)
+_fs_key('fs_cl_a', drop=.09, feet=_CL_FEET, fists={'Left': ((.07, -.40, 1.28), _P_CL), 'Right': ((-.07, -.40, 1.28), _P_CR)}, **_FS_CL)
+_fs_key('fs_cl_b', drop=.11, feet=_CL_FEET, fists={'Left': ((.07, -.40, 1.26), _P_CL), 'Right': ((-.07, -.40, 1.26), _P_CR)},
+        **{**_FS_CL, 'lean': (3, 2, 1, -3, -4), 'sh': ((4, 6), (4, 6))})
+ANIMS['fs_clinch'] = _fs_clip(['fs_cl_a', 'fs_cl_b'], [0, 1], [450, 450], loop=True, marks={'loop': 0})
+_CL = 'fs_cl_a'
+
+# the grab: a small crouch with the hands drawn in, both hands shooting out to his collar (1.35 m, ~.45 m ahead), the
+# fists close on it pulling in, settled into the clinch
+_fs_key('fs_gb_wind', drop=.11, hips=(-28, 5, 0), turn=(4, 4, 2, 10, 8), lean=(6, 4, 2, 0, -2), sh=((4, 6), (4, 6)),
+        root=(0, .01), feet={'Left': _FS_L[:4] + (0,), 'Right': _FS_R[:4] + (14,)},
+        fists={'Left': ((.13, -.40, 1.19), (.7, .3, -1)), 'Right': ((-.13, -.35, 1.17), (-.7, .3, -1))})
+_fs_key('fs_gb_reach', drop=.08, hips=(-14, 7, 0), turn=(2, 2, 1, 5, 4), lean=(8, 5, 3, -2, -3), sh=((8, 14), (8, 14)),
+        root=(0, -.06), feet={'Left': ('plant', .14, -.24, -6, 0), 'Right': ('plant', -.14, .06, -30, 16)},
+        fists={'Left': ((.11, -.52, 1.31), (.6, .2, -1)), 'Right': ((-.11, -.52, 1.31), (-.6, .2, -1))})
+_fs_key('fs_gb_grip', drop=.09, hips=(-6, 8, 0), turn=(1, 1, 0, 2, 2), lean=(6, 4, 2, -3, -4), sh=((6, 10), (6, 10)),
+        root=(0, -.06), feet={'Left': ('plant', .15, -.16, 4, 4), 'Right': ('plant', -.15, -.04, -18, 10)},
+        fists={'Left': ((.07, -.45, 1.29), _P_CL), 'Right': ((-.07, -.45, 1.29), _P_CR)})
+ANIMS['fs_grab'] = _fs_clip(['fs_gb_wind', 'fs_gb_reach', 'fs_gb_grip', _CL], [0, 1, 2, 3], [20, 120, 110, 110], marks={'hit': 2})
+
+# the short punches: a hand lets go and drops (the body dips and turns that way), a short uppercut into the held man's
+# face (~.38 m ahead, 1.5 m: the forearm upright, inside, the other fist still on the collar), back onto the collar
+_fs_key('fs_cll_wind', drop=.15, hips=(14, 8, 0), turn=(4, 3, 1, -9, -9), lean=(6, 4, 2, -4, -4), bend=(7, 5, 2, -5, -5),
+        sh=((-8, -2), (6, 6)), root=(.03, -.04), feet=_CL_FEET,
+        fists={'Left': ((.17, -.24, 1.02), (.7, .5, -1)), 'Right': ((-.07, -.41, 1.27), _P_CR)})
+_fs_key('fs_cll_hit', drop=.04, hips=(-20, 5, 0), turn=(-4, -3, -1, 14, 13), lean=(2, 0, -1, -2, -4), bend=(-3, -2, 0, 3, 3),
+        sh=((14, 10), (6, 6)), root=(0, -.05), feet={'Left': ('plant', .15, -.10, 0, 16), 'Right': _CL_FEET['Right']},
+        fists={'Left': ((.03, -.38, 1.52), _P_UP), 'Right': ((-.07, -.40, 1.25), _P_CR)})
+_fs_key('fs_cll_back', drop=.09, hips=(-4, 7, 0), turn=(-1, -1, 0, 3, 3), lean=(5, 3, 1, -4, -4), sh=((8, 7), (6, 6)),
+        root=(0, -.04), feet=_CL_FEET, fists={'Left': ((.06, -.39, 1.37), _P_CL), 'Right': ((-.07, -.40, 1.27), _P_CR)})
+ANIMS['fs_cl_l'] = _fs_clip(['fs_cll_wind', 'fs_cll_hit', 'fs_cll_back', _CL], [0, 1, 2, 3], [20, 70, 95, 95], marks={'hit': 1})
+for _k in ('fs_cll_wind', 'fs_cll_hit', 'fs_cll_back'):
+    _fs_mirror(_k, _k.replace('fs_cll', 'fs_clr'))
+ANIMS['fs_cl_r'] = _fs_clip(['fs_clr_wind', 'fs_clr_hit', 'fs_clr_back', _CL], [0, 1, 2, 3], [20, 70, 95, 95], marks={'hit': 1})
+
+# the knee: both hands haul his collar down, the weight onto the left leg, the right knee driven up into his belly
+# (~.35 m ahead, 1.0 m), the foot set back down, the clinch
+_fs_key('fs_kn_pull', drop=.11, hips=(4, -2, -3), turn=(0, 0, 0, -2, -2), lean=(-4, -3, -1, 0, -3), sh=((-2, 2), (-2, 2)),
+        root=(.03, .01), feet={'Left': _CL_FEET['Left'], 'Right': ('plant', -.15, -.08, -10, 24)},
+        fists={'Left': ((.08, -.33, 1.12), _P_CL), 'Right': ((-.08, -.33, 1.12), _P_CR)})
+_fs_key('fs_kn_up', drop=.06, hips=(6, -6, -4), turn=(0, 0, 0, -3, -3), lean=(4, 3, 1, -3, -3), sh=((0, 2), (0, 2)),
+        root=(.03, -.07), feet={'Left': _CL_FEET['Left'], 'Right': ('free', (-.10, -.12, .44), (0, -.6, .8), [('X', -30)])},
+        fists={'Left': ((.07, -.36, 1.14), _P_CL), 'Right': ((-.07, -.36, 1.14), _P_CR)})
+_fs_key('fs_kn_hit', drop=.01, hips=(6, -12, -4), turn=(0, 0, 0, -3, -3), lean=(10, 7, 3, -4, -4), sh=((-2, 0), (-2, 0)),
+        root=(.03, -.10), feet={'Left': ('plant', .15, -.10, 10, 20), 'Right': ('free', (-.07, -.25, .70), (0, -.3, 1), [('X', -45)])},
+        fists={'Left': ((.07, -.34, 1.08), _P_CL), 'Right': ((-.07, -.34, 1.08), _P_CR)})
+_fs_key('fs_kn_down', drop=.08, hips=(4, 2, -2), turn=(0, 0, 0, -1, -1), lean=(5, 3, 1, -4, -4), sh=((4, 4), (4, 4)),
+        root=(.02, -.05), feet={'Left': _CL_FEET['Left'], 'Right': ('free', (-.14, -.02, .18), (0, -1, .4), [('X', -10)])},
+        fists={'Left': ((.07, -.38, 1.28), _P_CL), 'Right': ((-.07, -.38, 1.28), _P_CR)})
+ANIMS['fs_knee'] = _fs_clip(['fs_kn_pull', 'fs_kn_up', 'fs_kn_hit', 'fs_kn_down', _CL], [0, 1, 2, 3, 4], [20, 120, 80, 80, 80],
+                            marks={'hit': 2})
+
+# the clinch headbutt: the head and chest back (the fists pulling the collar), then the forehead into his face, the
+# recoil, the clinch
+_fs_key('fs_ch_back', drop=.09, hips=(0, -2, 0), turn=(0, 0, 0, 0, 0), lean=(-5, -5, -3, 0, -8), sh=((6, 2), (6, 2)),
+        root=(0, .05), feet=_CL_FEET, fists={'Left': ((.07, -.38, 1.26), _P_CL), 'Right': ((-.07, -.38, 1.26), _P_CR)})
+_fs_key('fs_ch_drive', drop=.09, hips=(0, 5, 0), turn=(0, 0, 0, 0, 0), lean=(3, 2, 1, 0, 2), sh=((4, 6), (4, 6)),
+        root=(0, .02), feet=_CL_FEET, fists={'Left': ((.07, -.36, 1.23), _P_CL), 'Right': ((-.07, -.36, 1.23), _P_CR)})
+_fs_key('fs_ch_hit', drop=.08, hips=(0, 6, 0), turn=(0, 0, 0, 0, 0), lean=(4, 3, 2, 1, 5), sh=((2, 8), (2, 8)),
+        root=(0, .02), feet={'Left': ('plant', .15, -.12, 10, 10), 'Right': ('plant', -.15, -.12, -10, 10)},
+        fists={'Left': ((.07, -.33, 1.21), _P_CL), 'Right': ((-.07, -.33, 1.21), _P_CR)})
+_fs_key('fs_ch_recoil', drop=.10, hips=(0, 2, 0), turn=(0, 0, 0, 0, 0), lean=(0, 0, 0, -3, -7), sh=((6, 4), (6, 4)),
+        root=(0, -.01), feet=_CL_FEET, fists={'Left': ((.07, -.39, 1.27), _P_CL), 'Right': ((-.07, -.39, 1.27), _P_CR)})
+ANIMS['fs_cl_head'] = _fs_clip(['fs_ch_back', 'fs_ch_drive', 'fs_ch_hit', 'fs_ch_recoil', _CL], [0, 1, 2, 3, 4],
+                               [30, 110, 100, 100, 110], marks={'hit': 2})
+
+# the hip toss: a quarter turn to his right with the hips stepped in under the held man's (his left hip loads him: the
+# side the turn puts there), bent over to load him onto the hip and back, both arms sweeping him across to the right and
+# down (the release), the follow-through, back to the guard
+_fs_key('fs_ts_in', drop=.14, hips=(-40, 8, 0), turn=(-4, -3, -2, 20, 16), lean=(6, 4, 2, -2, -4), sh=((6, 8), (6, 8)),
+        root=(.06, -.12), feet={'Left': ('plant', .16, -.18, -20, 4), 'Right': ('plant', -.04, -.04, -60, 20)},
+        fists={'Left': ((.12, -.40, 1.32), _P_CL), 'Right': ((-.02, -.42, 1.28), _P_CR)})
+_fs_key('fs_ts_load', drop=.20, hips=(-88, 4, -12), turn=(-6, -4, -2, 40, 30), lean=(4, 2, 1, -6, -6), bend=(-14, -8, -4, 6, 6), sh=((8, 10), (6, 8)),
+        root=(.10, -.20), feet={'Left': ('plant', .14, -.34, -88, 4), 'Right': ('plant', .10, -.02, -96, 8)},
+        fists={'Left': ((.20, -.34, 1.28), (.6, .5, -1)), 'Right': ((.02, -.50, 1.14), (-.4, .2, -1))})
+_fs_key('fs_ts_over', drop=.16, hips=(-104, 6, -18), turn=(-8, -6, -3, 44, 36), lean=(4, 3, 1, -8, -8), bend=(-22, -12, -6, 8, 8), sh=((10, 10), (8, 8)),
+        root=(.10, -.20), feet={'Left': ('plant', .14, -.34, -92, 6), 'Right': ('plant', .10, -.02, -100, 12)},
+        fists={'Left': ((-.04, -.42, 1.14), (.6, .3, -1)), 'Right': ((-.24, -.40, 1.00), (-.4, .3, -1))})
+_fs_key('fs_ts_release', drop=.13, hips=(-116, 6, -22), turn=(-8, -6, -3, 46, 40), lean=(5, 3, 2, -10, -10), bend=(-26, -14, -8, 10, 10), sh=((12, 12), (8, 10)),
+        root=(.08, -.18), feet={'Left': ('plant', .14, -.34, -96, 10), 'Right': ('plant', .10, -.02, -104, 14)},
+        fists={'Left': ((-.30, -.46, .96), (.6, .3, -1)), 'Right': ((-.44, -.26, .88), (-.3, .3, -1))})
+_fs_key('fs_ts_follow', drop=.10, hips=(-100, 4, -12), turn=(-6, -4, -2, 40, 34), lean=(3, 2, 1, -6, -6), bend=(-14, -8, -4, 6, 6), sh=((6, 8), (6, 8)),
+        root=(.06, -.14), feet={'Left': ('plant', .14, -.34, -90, 4), 'Right': ('plant', .08, -.02, -96, 10)},
+        fists={'Left': ((-.14, -.48, 1.12), (.6, .3, -1)), 'Right': ((-.30, -.32, 1.06), (-.4, .3, -1))})
+ANIMS['fs_toss'] = _fs_clip(['fs_ts_in', 'fs_ts_load', 'fs_ts_over', 'fs_ts_release', 'fs_ts_follow', _GD], [0, 1, 2, 3, 4, 5],
+                            [20, 120, 140, 100, 100, 90], marks={'hit': 3})
+
+# the shove: the palms drawn in to the chest (a crouch), driven out at his chest with the weight behind them (extended),
+# back up, the guard
+_fs_key('fs_sv_load', drop=.13, hips=(-6, 4, 0), turn=(1, 1, 0, 2, 2), lean=(2, 1, 0, -2, -3), sh=((2, -4), (2, -4)),
+        root=(0, .02), feet=_CL_FEET, fists={'Left': ((.12, -.30, 1.24), (.8, .4, -1)), 'Right': ((-.12, -.30, 1.24), (-.8, .4, -1))})
+_fs_key('fs_sv_hit', drop=.06, hips=(-10, 10, 0), turn=(1, 1, 0, 3, 3), lean=(10, 6, 3, -4, -6), sh=((6, 16), (6, 16)),
+        root=(0, -.10), feet={'Left': ('plant', .15, -.20, 4, 4), 'Right': ('plant', -.15, .04, -24, 30)},
+        fists={'Left': ((.13, -.62, 1.30), (.6, .2, -1)), 'Right': ((-.13, -.62, 1.30), (-.6, .2, -1))})
+_fs_key('fs_sv_back', drop=.08, hips=(-22, 6, 0), turn=(3, 3, 1, 8, 7), lean=(6, 4, 2, -1, -3), sh=((6, 8), (6, 8)),
+        root=(0, -.05), feet={'Left': ('plant', .14, -.25, -10, 2), 'Right': ('plant', -.14, .10, -40, 18)},
+        fists={'Left': ((.10, -.50, 1.28), _P_GL), 'Right': ((-.11, -.46, 1.27), _P_GR)})
+ANIMS['fs_shove'] = _fs_clip(['fs_sv_load', 'fs_sv_hit', 'fs_sv_back', _GD], [0, 1, 2, 3], [20, 100, 110, 110], marks={'hit': 1})
+
+
+# ================================================================ fists (the gunmen, live only: docs/exp/fists.md) ====
+# The unarmed gunmen's fist fight (features/foes/brawler.js plays these by the sim's state: content/fists.js FOE / REACT),
+# made for the live models only and exported with ragdoll_export.py --clips into pivot3d_chars/<type> (keeping the brawl
+# clips: --clips fx_pickup,fx_hat_on,fx_stagger,fx_sting,fx_limp,<these>). The revolver stays in its holster in every key
+# (no key here starts with gun_); the bruiser's coach gun hangs from his right fist as built (the game hides it while he
+# boxes). He faces -Y, +X is his left, 1.8 m; the pivot (his middle, the sim's spot) is under the Hips: no key moves it.
+# Read from the game camera (orthographic, 55 deg down, ~30 px a metre, the wide brims hide what's right before the face):
+# the guard's fists sit at the chin but well forward of the brim's edge, the telegraphs are whole-body (a turn away, the
+# elbow out, the weight back), the hits big (the head snapped so the brim tips, the body folded).
+#   fx_guard    a brawler's guard: low and wide, left foot forward, shoulders hunched, the fists up forward of the brim,
+#               the head down; a heavy bob (loop 0)
+#   fx_gstep    the guard shuffling forward: the lead foot steps, the trail foot drags up, never crossing; the ground data
+#               measured from the soles (locomotion: stride ~.44 m a cycle); played backwards to back off (loop 0)
+#   fx_jab      the left: the telegraph (the left fist cocked back by the ear, the shoulder dropped and pulled back, the
+#               elbow out behind, crouched: wind 0), held, extend, contact (the arm straight up at the target's face: hit
+#               3), retract, guard
+#   fx_hay      the right haymaker: wound up (the right fist cocked behind the head, the body turned away, the left arm out:
+#               wind 0), held tighter, the swing (a wide arc), contact (hit 3), overextended, recover, guard
+#   fx_block    the forearms up before the face take it, pushed back, hold, guard
+#   fx_gbreak   the guard knocked open: the arms flung wide, a stumble back, recover, guard
+#   fx_hit_jab  the head snapped back (the chin up, the brim tipping up), held, guard
+#   fx_hit_l    the head and shoulders turned hard to his left (struck on the right cheek), a stagger step left, guard
+#   fx_hit_r    the same to his right
+#   fx_hit_gut  folded over the belly (both hands in, the knees bent, the head down), held, straightening, guard
+#   fx_daze     the arms low, the head lolling, swaying, a stumble step (loop 0)
+#   fx_held     grabbed by the collar: his hands on the player's forearms, leaning back (loop 0)
+#   fx_taunt    "come on": the chin up, the right hand beckons twice, back to the guard
+# The kit: _fxf_legs places the feet (ankles on ground points in his frame, the pelvis at a height: a two-bone solve in the
+# leg's plane), so planted feet stay put from key to key; the fists go on points through BRAWL_AT (None: height over the
+# ground), the elbows turned toward points after (FXF_POLE), the hat knocked askew on the head (FXF_HAT). Keys are
+# fx_fs_*; helpers _fxf_* (the cowboy's fists section has its own). Review sheets: tmp/fists/foes/sheets.
+FISTS_FOES = ('fx_guard', 'fx_gstep', 'fx_jab', 'fx_hay', 'fx_block', 'fx_gbreak', 'fx_hit_jab', 'fx_hit_l', 'fx_hit_r',
+              'fx_hit_gut', 'fx_daze', 'fx_held', 'fx_taunt')
+_FXF_L1, _FXF_L2 = math.hypot(.005, .342), math.hypot(.015, .297)                     # thigh, shin (m at 1.8: skeleton.py)
+_FXF_T0, _FXF_S0 = math.degrees(math.atan2(.005, .342)), math.degrees(math.atan2(.015, .297))   # their rest leans (fwd, back)
+FXF_HAT = {}   # key -> (tip, roll): the hat knocked on the head (deg: tipped back, its front brim up; rolled to his left, its
+              # left brim down), about the back / the low side of its band (_fxf_hat)
+
+
+def _fxf_hat(pose_name):
+    """HOLD hook: a fists key's hat knocked askew on the head (FXF_HAT); other keys untouched."""
+    v = FXF_HAT.get(_key(pose_name))
+    arm = bpy.data.objects[ROOT]
+    pbs, bones = arm.pose.bones, arm.data.bones
+    if not v or 'HatHold0' not in pbs:
+        return
+    J, k = landmarks(), PROP['height'] / 1.8
+    zb = J['head'].z + .69 * (J['top'].z - J['head'].z)             # the band's height (the brim's root)
+    R3 = pbs['Head'].matrix.to_3x3() @ bones['Head'].matrix_local.to_3x3().inverted()
+    hb = pbs['HatHold0']
+    for deg, piv, ax in ((-v[0], Vector((0, .2, zb / k)), Vector((1, 0, 0))),
+                         (v[1], Vector((math.copysign(.2, v[1] or 1), .012, zb / k)), Vector((0, 1, 0)))):
+        if deg:
+            p = _carried('Head', piv * k)
+            hb.matrix = (Matrix.Translation(p) @ Matrix.Rotation(math.radians(deg), 4, (R3 @ ax).normalized()) @
+                         Matrix.Translation(-p) @ hb.matrix)
+            bpy.context.view_layer.update()
+
+
+FXF_POLE = {}  # key -> [(side, (x, y, z))]: that elbow turned toward the point (his frame, z over the ground) about the
+              # shoulder-wrist line after the fists' IK (which keeps the plane the spec gives), then the fists set again
+
+
+def _fxf_after(pose_name):
+    """HOLD hook (after _bw_hold): a fists key's elbows turned toward their poles (FXF_POLE) and the fists put back on
+    their points, then the hat (FXF_HAT)."""
+    key = _key(pose_name)
+    if FXF_POLE.get(key):
+        pbs, k, g = bpy.data.objects[ROOT].pose.bones, PROP['height'] / 1.8, _bw_ground()
+        for side, p in FXF_POLE[key]:
+            up, fa = pbs[side + 'Arm'], pbs[side + 'ForeArm']
+            sh = up.head.copy()
+            ax = (fa.tail - sh).normalized()
+            a, b = fa.head - sh, Vector(p) * k + Vector((0, 0, g)) - sh
+            a, b = a - ax * a.dot(ax), b - ax * b.dot(ax)
+            if a.length > 1e-4 and b.length > 1e-4:
+                ang = a.angle(b) * (1 if a.cross(b).dot(ax) > 0 else -1)
+                up.matrix = Matrix.Translation(sh) @ Matrix.Rotation(ang, 4, ax) @ Matrix.Translation(-sh) @ up.matrix
+                bpy.context.view_layer.update()
+        _bw_hold(pose_name)
+    _fxf_hat(pose_name)
+
+
+def _fxf_hip(sx, blade, tilt):
+    """The hip joint (m from the Hips head; sx 1 left, -1 right) under the pelvis turned `blade` (+ his left), tipped
+    `tilt` (+ forward)."""
+    x, y, z = sx * .095, 0.0, -.04
+    b, h = math.radians(blade), math.radians(tilt)
+    x, y = x * math.cos(b) - y * math.sin(b), x * math.sin(b) + y * math.cos(b)
+    return x, y * math.cos(h) - z * math.sin(h), y * math.sin(h) + z * math.cos(h)
+
+
+def _fxf_leg(sx, P, blade, tilt, foot):
+    """One leg for _fxf_legs: foot = (x, y, pitch, yaw, lift): the ankle over the ground point (x, y) (his frame, y back),
+    pitched (+ toe down: the heel up, on the toe; - toe up, on the heel), yawed (+ his left, from the pelvis' turn), lifted
+    (m, off the ground). Returns the thigh / shin world angles (_bw_legs' signs), the leg plane's roll, pitch, yaw."""
+    x, y, pitch, yaw, lift = (tuple(foot) + (0, 0, 0))[:5]
+    hx, hy, hz = _fxf_hip(sx, blade, tilt)
+    hz += P
+    p = math.radians(pitch)
+    # (heel up: the foot pivots on its boot toe, ~.16 m ahead of the ankle; toe up: on the back of the heel, .08 behind)
+    az = (.16 * math.sin(p) + .081 * math.cos(p) if p >= 0 else .081 * math.cos(p) - .08 * math.sin(p)) + lift
+    dx, dy, dz = x - hx, y - hy, az - hz
+    a = math.atan(dx / dz)                                    # the leg's plane rolled about the forward axis
+    down, fwd = -dx * math.sin(a) - dz * math.cos(a), -dy
+    D = min(math.hypot(fwd, down), .999 * (_FXF_L1 + _FXF_L2))
+    phi = math.atan2(fwd, down)
+    al = math.acos(max(-1, min(1, (_FXF_L1 ** 2 + D * D - _FXF_L2 ** 2) / (2 * _FXF_L1 * D))))
+    be = math.acos(max(-1, min(1, (_FXF_L2 ** 2 + D * D - _FXF_L1 ** 2) / (2 * _FXF_L2 * D))))
+    th, sh = math.degrees(phi + al), math.degrees(phi - be)   # forward angles of the thigh and the shin
+    return -(th - _FXF_T0), -(sh + _FXF_S0), math.degrees(a), pitch, yaw
+
+
+def _fxf_legs(P, blade, tilt, L, R):
+    """The pelvis (its Hips head P m over the ground, turned `blade`, tipped `tilt`) and both legs onto their feet (L, R:
+    _fxf_leg's foot tuples). World-axis composition: the thigh Rx(t) in the rolled plane, the shin likewise, the foot flat
+    (pitched) and yawed after."""
+    out = {'Hips': [('Z', blade), ('X', tilt)]}
+    for sx, nm, foot in ((1, 'Left', L), (-1, 'Right', R)):
+        t, s, a, f, yaw = _fxf_leg(sx, P, blade, tilt, foot)
+        out[nm + 'UpLeg'] = [('X', t - tilt), ('Y', a)]
+        out[nm + 'Leg'] = [('Y', -a), ('X', s - t), ('Y', a)]
+        out[nm + 'Foot'] = [('Y', -a), ('X', f - s)] + ([('Z', yaw)] if yaw else [])
+    return out
+
+
+def _fxf_spine(lean=(0, 0, 0), turn=(0, 0, 0), side=(0, 0, 0), neck=(0, 0, 0), head=(0, 0, 0)):
+    """The back: lean (Spine, Spine1, Spine2: + forward), turn (+ his left), side (+ bent to his left); neck / head: (X
+    + down, Z + his left, Y + rolled to his left). Each bone: turn, then side, then lean."""
+    out = {}
+    for b, l, t, s in zip(('Spine', 'Spine1', 'Spine2'), lean, turn, side):
+        out[b] = [r for r in (('Z', t), ('Y', s), ('X', l)) if r[1]]
+    for b, (x, z, y) in (('Neck', neck), ('Head', head)):
+        out[b] = [r for r in (('Z', z), ('Y', y), ('X', x)) if r[1]]
+    return out
+
+
+def _fxf_arms(l=(40, -50, 0, -110), r=(-40, -45, 0, -120), lsh=(0, 0), rsh=(0, 0)):
+    """Rough arm specs giving the elbows their plane before the fists' IK (BRAWL_AT): (Y lower, X forward, Z turn,
+    forearm bend) per arm (the right's Y is mirrored: - lowers it); lsh / rsh: the collarbone (Y: - raises the left,
+    + raises the right; Z: - forward for the left, + for the right)."""
+    out = {}
+    for nm, (y, x, z, fx), (sy, sz) in (('Left', l, lsh), ('Right', r, rsh)):
+        out[nm + 'Shoulder'] = [q for q in (('Y', sy), ('Z', sz)) if q[1]]
+        out[nm + 'Arm'] = [q for q in (('Y', y), ('X', x), ('Z', z)) if q[1]]
+        out[nm + 'ForeArm'] = [('X', fx)]
+        out[nm + 'Hand'] = []
+    return out
+
+
+def _fxf_key(name, P, blade, tilt, L, R, spine, arms, fists, extra=None):
+    """A key: legs (_fxf_legs), back (_fxf_spine kwargs), arms (_fxf_arms kwargs), the fists' points [(side, bone, xyz,
+    mode)] (BRAWL_AT; a bare (x, y, z) = height over the ground, 'fist'), extra rotations merged after."""
+    spec = _merge(_fxf_legs(P, blade, tilt, L, R), _fxf_spine(**spine), _fxf_arms(**arms), extra or {})
+    POSES[name] = spec
+    BRAWL_AT[name] = [(f[0], None, f[1], 'fist') if len(f) == 2 else tuple(f) for f in fists]
+    return spec
+
+
+def _fxk(name, P, blade, tilt, L, R, sp, ar, fl, fr, extra=None, hat=None, pole=None):
+    """_fxf_key with the two fists: each (x, y, z) over the ground, or a whole BRAWL_AT entry after the side; hat: FXF_HAT;
+    pole: (left elbow point | None, right elbow point | None) for FXF_POLE."""
+    pt = lambda f: (f,) if not isinstance(f[0], str) else tuple(f)
+    if hat:
+        FXF_HAT[name] = hat
+    if pole:
+        FXF_POLE[name] = [(sd, q) for sd, q in zip(('Left', 'Right'), pole) if q]
+    return _fxf_key(name, P, blade, tilt, L, R, sp, ar, [('Left',) + pt(fl), ('Right',) + pt(fr)], extra)
+
+
+def _fxsp(base, **kw):
+    return dict(base, **kw)
+
+
+# ---- the guard: low and wide, left foot forward (the pelvis turned 24 deg right, the chest squarer), the knees bent, the
+# shoulders hunched, the head forward and down; the left fist forward at the chin, the right a little back and higher,
+# the elbows down and out. The bob: down (the knees give), back up with a roll of the shoulders, up on the back toes
+_FXG_L, _FXG_R = (.13, -.24, 0, 12), (-.15, .22, 8, -18)
+_FXG_SP = dict(lean=(6, 5, 3), turn=(6, 5, 4), neck=(-12, 5, 0), head=(5, 4, 0))
+_FXG_ARM = dict(l=(30, -40, 16, -115), r=(-30, -36, -16, -125), lsh=(-12, -8), rsh=(12, 8))
+_FXG_POLE = ((.30, -.16, .98), (-.34, -.10, .98))
+_FXG_FL, _FXG_FR = (.08, -.44, 1.24), (-.14, -.32, 1.28)
+_fxk('fx_fs_guard_a', .69, -24, 6, _FXG_L, _FXG_R, _FXG_SP, _FXG_ARM, _FXG_FL, _FXG_FR, pole=_FXG_POLE)
+_fxk('fx_fs_guard_b', .655, -24, 8, _FXG_L, (-.15, .22, 10, -18), _fxsp(_FXG_SP, lean=(7, 6, 4)), _FXG_ARM, (.09, -.43, 1.19),
+     (-.14, -.31, 1.235), pole=_FXG_POLE)
+_fxk('fx_fs_guard_c', .685, -22, 6, _FXG_L, _FXG_R, _fxsp(_FXG_SP, side=(-2, -1, 0)), _FXG_ARM, (.07, -.46, 1.235), (-.13, -.33, 1.275),
+     pole=_FXG_POLE)
+_fxk('fx_fs_guard_d', .705, -25, 5, _FXG_L, (-.15, .22, 18, -18), _fxsp(_FXG_SP, lean=(5, 5, 3)), _FXG_ARM, (.08, -.43, 1.27),
+     (-.145, -.31, 1.305), pole=_FXG_POLE)
+ANIMS['fx_guard'] = _clip(['fx_fs_guard_a', 'fx_fs_guard_b', 'fx_fs_guard_c', 'fx_fs_guard_d'], [0, 1, 2, 3], 7, loop=True,
+                          ms=[150, 170, 150, 150], marks={'loop': 0})
+
+# ---- the shuffle: the lead foot lifts, steps, lands .22 ahead; the trail foot drags up behind it, never crossing. The
+# pivot moves .11 m a frame (stride .44): a planted foot (flat) slides back that much from key to key; the stance opens
+# .24 -> .68 and closes. (The game plays it backwards to back off.)
+_FXGS = [(.70, (.13, -.13, 0, 12, .004), (-.15, .11, 0, -18)), (.69, (.13, -.29, 8, 12, .09), (-.15, .22, 0, -18)),
+       (.67, (.13, -.35, 0, 12), (-.15, .33, 0, -18, .004)), (.685, (.13, -.24, 0, 12), (-.15, .20, 8, -18, .09))]
+for _fxi, (_fxP, _fxl, _fxr) in enumerate(_FXGS):
+    _fxd = _fxP - .69
+    _fxk(f'fx_fs_gstep_{_fxi}', _fxP, -24, 6 + (2 if _fxi == 2 else 0), _fxl, _fxr, _FXG_SP, _FXG_ARM,
+         (_FXG_FL[0], _FXG_FL[1], _FXG_FL[2] + _fxd), (_FXG_FR[0], _FXG_FR[1], _FXG_FR[2] + _fxd), pole=_FXG_POLE)
+ANIMS['fx_gstep'] = dict(_clip([f'fx_fs_gstep_{i}' for i in range(4)], [0, 1, 2, 3], 12, loop=True, marks={'loop': 0}),
+                         locomotion=True)
+
+# ---- the jab (the left). The telegraph: crouched lower and coiled, the left shoulder dropped and pulled back (the chest
+# turned to his left), the left fist cocked back up beside the ear with the elbow out behind, the head down; held, wound a
+# little more. The extend: turning in, the lead foot stepping. The contact: up on the back toes, leaning 35 deg, the chest
+# turned 48 deg right, the left shoulder up to the chin, the arm straight up toward the target's face (.85 m, 1.5 m)
+_FXJ_ARM = lambda l, lsh: dict(l=l, r=(-30, -36, -16, -125), lsh=lsh, rsh=(12, 8))
+_fxk('fx_fs_jab_wind', .655, -14, 8, (.13, -.24, -4, 12), (-.15, .22, 0, -18),
+     dict(lean=(4, 3, 2), turn=(10, 10, 8), neck=(-14, -8, 0), head=(8, -6, 0)),
+     _FXJ_ARM((-40, 0, 50, -140), (10, 14)), (.25, .04, 1.30), (-.11, -.32, 1.26), pole=((.44, .18, 1.10), _FXG_POLE[1]))
+_fxk('fx_fs_jab_hold', .65, -12, 9, (.13, -.24, -6, 12), (-.15, .22, 0, -18),
+     dict(lean=(5, 3, 2), turn=(12, 12, 9), neck=(-16, -10, 0), head=(8, -8, 0)),
+     _FXJ_ARM((-42, 0, 56, -145), (12, 16)), (.26, .08, 1.31), (-.10, -.32, 1.26), pole=((.46, .22, 1.10), _FXG_POLE[1]))
+_fxk('fx_fs_jab_ext', .69, -30, 10, (.13, -.28, 0, 12), (-.15, .24, 16, -18),
+     dict(lean=(9, 6, 4), turn=(-2, -2, -2), neck=(-18, 14, 0), head=(2, 10, 0)),
+     _FXJ_ARM((20, -60, 0, -60), (-10, -12)), (.10, -.58, 1.40), (-.10, -.31, 1.30), pole=((.30, -.30, 1.05), _FXG_POLE[1]))
+_fxk('fx_fs_jab_hit', .71, -40, 14, (.13, -.27, 0, 12), (-.15, .25, 40, -18),
+     dict(lean=(11, 6, 4), turn=(-3, -3, -2), neck=(-28, 26, 0), head=(-6, 20, 0)),
+     _FXJ_ARM((10, -80, 0, -10), (-34, -30)), (.04, -.85, 1.50), (-.08, -.31, 1.30), pole=(None, _FXG_POLE[1]))
+_fxk('fx_fs_jab_back', .69, -30, 9, (.13, -.28, 0, 12), (-.15, .23, 14, -18),
+     dict(lean=(7, 5, 3), turn=(2, 2, 2), neck=(-14, 8, 0), head=(4, 6, 0)),
+     _FXJ_ARM((20, -60, 0, -70), (-10, -10)), (.09, -.58, 1.32), (-.12, -.32, 1.28), pole=((.30, -.30, 1.0), _FXG_POLE[1]))
+ANIMS['fx_jab'] = _clip(['fx_fs_jab_wind', 'fx_fs_jab_hold', 'fx_fs_jab_ext', 'fx_fs_jab_hit', 'fx_fs_jab_back', 'fx_fs_guard_a'],
+                        [0, 1, 2, 3, 4, 5], 12, ms=[110, 190, 70, 70, 140, 140], marks={'wind': 0, 'hit': 3})
+
+# ---- the haymaker (the right). Wound up: the chest turned 70 deg away to his right, leaning back, the weight on the back
+# foot (the lead toe up), the right fist cocked behind the head and out past the brim (from above it shows beside the
+# hat), the elbow up and out, the left fist low ahead, the head turned back to the target over the left shoulder; held,
+# wound tighter. The swing: unwinding, the fist out wide in an arc at head height; the contact: the chest turned 38 deg
+# left, leaning 40, up on the back toes, the right arm across to the face (.9 m, 1.5 m); overextended past it, down to his
+# left; recovering; the guard
+_fxk('fx_fs_hay_wind', .685, -42, -6, (.13, -.24, -14, 12), (-.15, .22, 0, -18),
+     dict(lean=(-3, -2, -2), turn=(-12, -9, -7), neck=(-2, 36, 0), head=(6, 26, 0)),
+     dict(l=(10, -70, 10, -30), r=(90, 10, -40, -70), lsh=(-6, -10), rsh=(28, -14)), (.24, -.46, 1.10), (-.46, .22, 1.48),
+     pole=((.34, -.20, 1.0), (-.54, -.02, 1.30)))
+_fxk('fx_fs_hay_hold', .68, -44, -8, (.13, -.24, -16, 12), (-.15, .22, 0, -18),
+     dict(lean=(-4, -3, -2), turn=(-14, -11, -8), neck=(-2, 40, 0), head=(6, 28, 0)),
+     dict(l=(10, -72, 10, -28), r=(94, 14, -40, -66), lsh=(-6, -12), rsh=(30, -16)), (.25, -.48, 1.10), (-.47, .25, 1.50),
+     pole=((.34, -.20, 1.0), (-.56, .0, 1.32)))
+_fxk('fx_fs_hay_swing', .67, -10, 6, (.13, -.26, 0, 12), (-.15, .23, 18, -18),
+     dict(lean=(5, 4, 2), turn=(6, 6, 4), neck=(-12, -2, 0), head=(4, -2, 0)),
+     dict(l=(30, -30, 20, -120), r=(70, -40, 0, -60), lsh=(4, 10), rsh=(12, 8)), (.18, -.12, 1.15), (-.55, -.30, 1.55),
+     pole=((.30, -.05, .95), (-.45, -.05, 1.45)))
+_fxk('fx_fs_hay_hit', .685, 10, 14, (.13, -.27, 0, 12), (-.15, .24, 40, 10),
+     dict(lean=(12, 8, 5), turn=(10, 10, 8), neck=(-30, -18, 0), head=(-6, -14, 0)),
+     dict(l=(30, -40, 20, -120), r=(10, -80, 0, -15), lsh=(4, 10), rsh=(30, 30)), (.14, -.18, 1.16), (-.02, -.90, 1.50),
+     pole=((.30, -.05, .95), None))
+_fxk('fx_fs_hay_over', .665, 25, 18, (.13, -.26, 0, 12), (-.15, .24, 50, 14),
+     dict(lean=(12, 9, 6), turn=(12, 10, 8), neck=(-14, -20, 0), head=(6, -14, 0)),
+     dict(l=(30, -20, 20, -100), r=(-10, -80, 20, -20), lsh=(6, 10), rsh=(6, 24)), (.20, -.10, .98), (.35, -.62, 1.10))
+_fxk('fx_fs_hay_rec', .69, -10, 8, (.13, -.26, 0, 12), (-.15, .23, 14, -18),
+     dict(lean=(6, 5, 3), turn=(6, 4, 4), neck=(-10, 0, 0), head=(4, 0, 0)), _FXG_ARM, (.12, -.38, 1.18), (-.10, -.32, 1.20),
+     pole=_FXG_POLE)
+ANIMS['fx_hay'] = _clip(['fx_fs_hay_wind', 'fx_fs_hay_hold', 'fx_fs_hay_swing', 'fx_fs_hay_hit', 'fx_fs_hay_over', 'fx_fs_hay_rec',
+                         'fx_fs_guard_a'], [0, 1, 2, 3, 4, 5, 6], 12, ms=[200, 420, 120, 70, 160, 160, 170], marks={'wind': 0, 'hit': 3})
+
+# ---- the block: both forearms up before the face (a shell, the elbows down in front, the chin tucked behind them),
+# pushed back onto the back foot (the lead toe up); held; the guard
+_FXB_ARM = dict(l=(40, -60, -10, -140), r=(-40, -60, 10, -140), lsh=(-8, -10), rsh=(8, 10))
+_FXB_POLE = ((.14, -.24, 1.0), (-.16, -.24, 1.0))
+_fxk('fx_fs_blk_hit', .665, -24, -8, (.13, -.24, -18, 12), (-.15, .22, 0, -18),
+     dict(lean=(-10, -6, -4), turn=(6, 5, 4), neck=(10, 5, 0), head=(12, 4, 0)), _FXB_ARM, (.08, -.38, 1.42), (-.10, -.36, 1.44),
+     hat=(4, 0), pole=_FXB_POLE)
+_fxk('fx_fs_blk_hold', .675, -24, -2, (.13, -.24, -8, 12), (-.15, .22, 0, -18),
+     dict(lean=(-5, -3, -2), turn=(6, 5, 4), neck=(4, 5, 0), head=(8, 4, 0)), _FXB_ARM, (.08, -.39, 1.40), (-.10, -.37, 1.42),
+     pole=_FXB_POLE)
+ANIMS['fx_block'] = _clip(['fx_fs_blk_hit', 'fx_fs_blk_hold', 'fx_fs_guard_a'], [0, 1, 2], 12, ms=[50, 100, 120])
+
+# ---- the guard broken: the arms flung wide, the chest and head thrown back (the hat tipped up), a stumble (the back foot
+# steps back, the lead toe up); the arms coming back in; the guard
+_fxk('fx_fs_gb_open', .69, -20, -8, (.13, -.20, -16, 12), (-.17, .40, 0, -18),
+     dict(lean=(-8, -6, -4), turn=(6, 5, 4), neck=(-10, 0, 0), head=(-6, 0, 0)),
+     dict(l=(-30, -10, 40, -40), r=(30, -10, -40, -40), lsh=(-10, 12), rsh=(10, -12)), (.55, -.12, 1.30), (-.55, -.05, 1.24),
+     hat=(10, 0))
+_fxk('fx_fs_gb_rec', .67, -22, 4, (.13, -.22, 0, 12), (-.15, .30, 6, -18),
+     dict(lean=(2, 1, 0), turn=(6, 5, 4), neck=(-6, 4, 0), head=(4, 4, 0)), _FXG_ARM, (.30, -.32, 1.15), (-.32, -.25, 1.12),
+     pole=((.40, -.05, .95), (-.42, -.02, .95)))
+ANIMS['fx_gbreak'] = _clip(['fx_fs_gb_open', 'fx_fs_gb_rec', 'fx_fs_guard_a'], [0, 1, 2], 12, ms=[60, 200, 180])
+
+# ---- hit in the face: the head snapped back (the chin up, the hat knocked up off the brow), the chest back, the fists
+# flung apart, the lead toe up; held, coming back; the guard
+_fxk('fx_fs_hj_snap', .68, -24, -6, (.13, -.24, -12, 12), _FXG_R,
+     dict(lean=(-6, -5, -4), turn=(6, 5, 4), neck=(-16, 5, 0), head=(-14, 4, 0)),
+     dict(_FXG_ARM, l=(20, -20, 30, -60), r=(-20, -20, -30, -60)), (.26, -.20, 1.02), (-.28, -.14, 1.04), hat=(12, 0),
+     pole=((.36, -.02, .95), (-.38, .02, .95)))
+_fxk('fx_fs_hj_hold', .68, -24, -1, (.13, -.24, -4, 12), _FXG_R,
+     dict(lean=(-4, -3, -2), turn=(6, 5, 4), neck=(-8, 5, 0), head=(-4, 4, 0)), _FXG_ARM, (.12, -.36, 1.15), (-.16, -.28, 1.19),
+     hat=(6, 0), pole=_FXG_POLE)
+ANIMS['fx_hit_jab'] = _clip(['fx_fs_hj_snap', 'fx_fs_hj_hold', 'fx_fs_guard_a'], [0, 1, 2], 12, ms=[50, 110, 120])
+
+
+# ---- hit on the cheek: the head and shoulders wrenched round to his left (fx_hit_l: struck on the right cheek) or right,
+# the back bent that way, the hat knocked askew that way, a stagger step out with that foot, the far fist flung across;
+# held on the new foot; the guard
+def _fxf_hit_side(name, sg):
+    foot = (.30, -.20, 0, 24) if sg > 0 else (-.32, .16, 0, -34)
+    L, R = (foot, (-.13, .20, 14, -18)) if sg > 0 else ((.13, -.24, 0, 12), foot)
+    _fxk(f'fx_fs_{name}_snap', .665, -24 + 10 * sg, 4, L, R,
+         dict(lean=(2, 2, 2), turn=(6 + 14 * sg, 5 + 12 * sg, 4 + 10 * sg), side=(6 * sg, 5 * sg, 3 * sg),
+              neck=(-6, 5 + 28 * sg, 16 * sg), head=(-4, 4 + 20 * sg, 12 * sg)), _FXG_ARM,
+         (.36, -.16, 1.00) if sg > 0 else (.02, -.32, 1.08), (-.02, -.30, 1.08) if sg > 0 else (-.36, -.10, 1.00),
+         hat=(4, 12 * sg), pole=((.40, -.02, .92), (-.30, -.02, .92)) if sg > 0 else ((.30, -.02, .92), (-.40, -.02, .92)))
+    _fxk(f'fx_fs_{name}_hold', .68, -24 + 5 * sg, 5, L, R,
+         dict(lean=(4, 3, 2), turn=(6 + 5 * sg, 5 + 5 * sg, 4 + 4 * sg), side=(3 * sg, 2 * sg, 0),
+              neck=(-8, 5 + 14 * sg, 8 * sg), head=(2, 4 + 10 * sg, 5 * sg)), _FXG_ARM, (.14, -.36, 1.15), (-.11, -.30, 1.18),
+         hat=(2, 6 * sg), pole=_FXG_POLE)
+    ANIMS[f'fx_{name}'] = _clip([f'fx_fs_{name}_snap', f'fx_fs_{name}_hold', 'fx_fs_guard_a'], [0, 1, 2], 12, ms=[50, 140, 150])
+
+
+_fxf_hit_side('hit_l', 1)
+_fxf_hit_side('hit_r', -1)
+
+# ---- hit in the gut: folded over it (the pelvis tipped, the back rounded, the head down), both hands clutching the
+# belly with the elbows out, the knees bent; held, deeper; straightening, the fists coming up; the guard
+_FXGUT_L, _FXGUT_R = ('Spine', (.06, -.17, .92), 'fist'), ('Spine', (-.07, -.16, .88), 'fist')
+_FXGUT_ARM = dict(l=(30, -40, -20, -110), r=(-30, -40, 20, -110), lsh=(-6, -10), rsh=(6, 10))
+_FXGUT_POLE = ((.30, .0, .95), (-.30, .0, .92))
+_fxk('fx_fs_hg_fold', .60, -18, 8, (.12, -.16, 0, 12), (-.15, .26, 6, -18),
+     dict(lean=(2, 14, 16), turn=(6, 5, 4), neck=(14, 4, 0), head=(16, 4, 0)), _FXGUT_ARM, _FXGUT_L, _FXGUT_R, pole=_FXGUT_POLE)
+_fxk('fx_fs_hg_hold', .59, -18, 10, (.12, -.16, 0, 12), (-.15, .26, 6, -18),
+     dict(lean=(3, 15, 18), turn=(6, 5, 4), neck=(16, 4, 0), head=(18, 4, 0)), _FXGUT_ARM, _FXGUT_L, _FXGUT_R, pole=_FXGUT_POLE)
+_fxk('fx_fs_hg_up', .66, -22, 8, (.13, -.22, 0, 12), (-.15, .23, 6, -18),
+     dict(lean=(6, 4, 3), turn=(6, 5, 4), neck=(-6, 4, 0), head=(6, 4, 0)), _FXG_ARM, (.12, -.34, 1.08), (-.12, -.28, 1.12),
+     pole=_FXG_POLE)
+ANIMS['fx_hit_gut'] = _clip(['fx_fs_hg_fold', 'fx_fs_hg_hold', 'fx_fs_hg_up', 'fx_fs_guard_a'], [0, 1, 2, 3], 12, ms=[50, 260, 140, 100])
+
+# ---- dazed: the stance narrow and square, the arms hanging, the hat askew, the upper body swaying side to side over the
+# feet, the head lolling, the knees buckling; a stumble step forward with the right foot and back (loop)
+_FXDZ_L, _FXDZ_R = (.12, -.12, 0, 6), (-.13, .12, 0, -10)
+_FXDZ_ARM = dict(l=(36, 10, 0, -30), r=(-36, 10, 0, -30))
+_FXDZ = [(.70, _FXDZ_R, (5, 4, 2), (4, 6, 8), (6, 4, 6), (.24, -.12, .86), (-.18, -.14, .84)),
+       (.68, _FXDZ_R, (3, 2, 1), (10, 3, 4), (8, 2, 3), (.20, -.16, .80), (-.17, -.16, .80)),
+       (.685, (-.20, -.04, 0, -14), (-2, -2, -1), (6, -3, -4), (6, -2, -3), (.19, -.15, .82), (-.21, -.13, .84)),
+       (.695, (-.20, -.04, 0, -14), (-5, -4, -2), (4, -6, -8), (6, -4, -6), (.18, -.14, .84), (-.24, -.12, .86)),
+       (.68, (-.16, .06, 10, -12, .04), (-3, -2, -1), (10, -3, -4), (8, -2, -3), (.17, -.16, .80), (-.20, -.16, .80)),
+       (.69, _FXDZ_R, (1, 1, 0), (8, 3, 4), (8, 2, 3), (.20, -.15, .82), (-.18, -.15, .82))]
+for _fxi, (_fxP, _fxr, _fxsd, _fxnk, _fxhd, _fxfl, _fxfr) in enumerate(_FXDZ):
+    _fxk(f'fx_fs_dz_{_fxi}', _fxP, -10, 6, _FXDZ_L, _fxr, dict(lean=(6, 4, 2), side=_fxsd, neck=_fxnk, head=_fxhd), _FXDZ_ARM, _fxfl, _fxfr,
+         hat=(6, 9))
+ANIMS['fx_daze'] = _clip([f'fx_fs_dz_{i}' for i in range(6)], list(range(6)), 6, loop=True, ms=[180, 160, 150, 180, 160, 150],
+                         marks={'loop': 0})
+
+# ---- held by the collar: leaning back on his heels, his fists on the player's forearms before his chest (the player's
+# fists on his collar, .52 m apart: TUNE.clinch.d), the elbows down and out, the head turned away; a struggle (loop)
+_FXHELD_ARM = dict(l=(30, -50, 10, -90), r=(-30, -50, -10, -90))
+_FXHELD_POLE = ((.30, -.02, .98), (-.30, -.02, .98))
+_fxk('fx_fs_held_a', .71, -10, -10, (.12, -.16, -10, 6), (-.13, .18, 0, -10),
+     dict(lean=(-8, -5, -3), turn=(4, 2, 2), neck=(8, 0, 0), head=(-4, 8, 0)), _FXHELD_ARM, (.12, -.26, 1.18), (-.12, -.25, 1.20),
+     pole=_FXHELD_POLE)
+_fxk('fx_fs_held_b', .705, -10, -11, (.12, -.16, -12, 6), (-.13, .18, 0, -10),
+     dict(lean=(-10, -6, -3), turn=(2, 2, 2), neck=(10, -4, 0), head=(-2, -8, 0)), _FXHELD_ARM, (.13, -.22, 1.16), (-.11, -.23, 1.15),
+     pole=_FXHELD_POLE)
+ANIMS['fx_held'] = _clip(['fx_fs_held_a', 'fx_fs_held_b'], [0, 1], 4, loop=True, ms=[300, 300], marks={'loop': 0})
+
+# ---- the taunt: standing taller, the chin up and the hat tipped back off the face, the left fist kept up; the right hand
+# out ahead and beckoning back to his chest, twice; the chin back down, the guard
+_FXTT_SP = dict(lean=(-4, -3, -2), turn=(6, 5, 4), neck=(-14, 5, 0), head=(-8, 4, 0))
+_FXTT_ARM = dict(l=(30, -40, 16, -115), r=(-20, -60, -10, -40), lsh=(-12, -8), rsh=(6, 6))
+_FXTT_CURL = dict(_FXTT_ARM, r=(-30, -40, -10, -130))
+_FXTT_POLE = (_FXG_POLE[0], (-.34, -.14, 1.0))
+_fxk('fx_fs_tt_out', .72, -24, 2, _FXG_L, _FXG_R, _FXTT_SP, _FXTT_ARM, (.08, -.42, 1.24), (-.20, -.56, 1.10), hat=(8, 0), pole=_FXTT_POLE)
+_fxk('fx_fs_tt_curl', .72, -24, 2, _FXG_L, _FXG_R, _fxsp(_FXTT_SP, neck=(-16, 5, 0)), _FXTT_CURL, (.08, -.42, 1.24), (-.16, -.22, 1.40),
+     hat=(8, 0), pole=_FXTT_POLE)
+_fxk('fx_fs_tt_out2', .72, -24, 2, _FXG_L, _FXG_R, _FXTT_SP, _FXTT_ARM, (.08, -.42, 1.24), (-.20, -.54, 1.12), hat=(8, 0), pole=_FXTT_POLE)
+_fxk('fx_fs_tt_curl2', .72, -24, 2, _FXG_L, _FXG_R, _fxsp(_FXTT_SP, neck=(-16, 5, 0)), _FXTT_CURL, (.08, -.42, 1.24), (-.16, -.21, 1.42),
+     hat=(8, 0), pole=_FXTT_POLE)
+_fxk('fx_fs_tt_back', .70, -24, 4, _FXG_L, _FXG_R, _fxsp(_FXG_SP, neck=(-10, 5, 0)), _FXG_ARM, (.08, -.43, 1.24), (-.14, -.33, 1.25),
+     hat=(3, 0), pole=_FXG_POLE)
+ANIMS['fx_taunt'] = _clip(['fx_fs_tt_out', 'fx_fs_tt_curl', 'fx_fs_tt_out2', 'fx_fs_tt_curl2', 'fx_fs_tt_back', 'fx_fs_guard_a'],
+                          list(range(6)), 8, ms=[200, 130, 110, 130, 180, 160])
+
+
+# ---- the gunmen's in-betweens keep the holstered revolver (the blend carried it on the moving hand)
+_pose_fists_foes = pose
+
+
+def pose(name):
+    """The pose() above; a fists clip's frame gets its revolver put back in the holster (_bw_regun)."""
+    zmin = _pose_fists_foes(name)
+    clip, _, i = name.partition('.')
+    if i and clip in FISTS_FOES:
+        _bw_regun(name)
+    return zmin
+
+
+_build_fists_foes = build
+
+
+def build():
+    """The builds above, then the fists keys' elbow and hat hook (_fxf_after) after every other."""
+    names = _build_fists_foes()
+    if _fxf_after not in HOLD_HOOKS:
+        HOLD_HOOKS.append(_fxf_after)
+    return names
+
+# ================================================================ the rope wall (the live hero only: docs/exp/ropeclimb.md) =====
+# The controllable rope climb (sim/player/ropewall.js) and the ladder (sim/player/ladder.js), live. Keys posed in the wall's frame:
+# he faces -Y with the face in front of him at his soles (Hips X- leans him back AND swings the legs forward by as much), the
+# wrists on the rope (LIVE_AT, fitted with the props in tmp/ropeclimb/tools/ropeposes.py: the approved pose sheet, 2026-10-08).
+# The view puts the soles on the face, turns him to it and plays a clip by the climb's technique and how far he moved
+# (view/livehero.js ROPEWALL). Exported with --clips RW_LIVE (tools/blender/live_export.mjs --add).
+#   rw_stand / rw_up     the wall-walk: the lean back; hand over hand, a boot up the face by turns (by distance climbed)
+#   rw_side / rw_side_r  the side-step along the face (the tension traverse), toward his left / right
+#   rw_bound             pushed off the face, legs straightening, back onto it; rw_run the running pendulum (a stride by turns)
+#   rw_rest              sat back on the rope, the boots on a ledge; rw_top over the lip (then the climb's knee and stand)
+#   rope_lock            the foot lock on a free rope: knees up, the boots pinching it; the stand-up of the inchworm
+#   hand_line            up a slope on the rope, upright; ladder_up / ladder_slide the ladder (hands and boots on the rungs)
+RW_LIVE = ('rw_stand', 'rw_up', 'rw_side', 'rw_side_r', 'rw_bound', 'rw_run', 'rw_rest', 'rope_lock', 'rw_top', 'hand_line', 'ladder_up',
+           'ladder_slide')
+POSES['rwk_stand'] = {'Hips': [('X', -40)], 'LeftUpLeg': [('X', -52), ('Y', -9)], 'LeftLeg': [('X', 18)], 'LeftFoot': [('X', -20)], 'RightUpLeg': [('X', -48), ('Y', 9)], 'RightLeg': [('X', 22)], 'RightFoot': [('X', -18)], 'Spine': [('X', 6)], 'Spine1': [('X', 4)], 'Neck': [('X', -10)], 'Head': [('X', -6)]}
+LIVE_AT['rwk_stand'] = [('Left', None, (0.0, -0.162, 1.34)), ('Right', None, (-0.22, -0.12, 0.82))]
+POSES['rwk_step'] = {'Hips': [('X', -36)], 'LeftUpLeg': [('X', -86), ('Y', -8)], 'LeftLeg': [('X', 64)], 'LeftFoot': [('X', -10)], 'RightUpLeg': [('X', -46), ('Y', 9)], 'RightLeg': [('X', 16)], 'RightFoot': [('X', -18)], 'Spine': [('X', 12)], 'Spine1': [('X', 6)], 'Neck': [('X', -18)], 'Head': [('X', -10)]}
+LIVE_AT['rwk_step'] = [('Left', None, (0.0, -0.219, 1.373)), ('Right', None, (-0.22, -0.12, 0.82))]
+POSES['rwk_side'] = {'Hips': [('X', -34), ('Y', 12)], 'LeftUpLeg': [('X', -58), ('Y', -22)], 'LeftLeg': [('X', 30)], 'LeftFoot': [('X', -16)], 'RightUpLeg': [('X', -50), ('Y', 2)], 'RightLeg': [('X', 22)], 'RightFoot': [('X', -16)], 'Spine': [('X', 10), ('Y', -6)], 'Spine1': [('X', 4)], 'Neck': [('X', -6), ('Z', 24)], 'Head': [('Z', 12)]}
+LIVE_AT['rwk_side'] = [('Left', None, (-0.162, -0.214, 1.369)), ('Right', None, (-0.22, -0.12, 0.82))]
+POSES['rwk_bound'] = {'Hips': [('X', -30)], 'LeftUpLeg': [('X', -50), ('Y', -8)], 'LeftLeg': [('X', 4)], 'LeftFoot': [('X', -26)], 'RightUpLeg': [('X', -44), ('Y', 8)], 'RightLeg': [('X', 4)], 'RightFoot': [('X', -24)], 'Spine': [('X', 4)], 'Neck': [('X', 14)], 'Head': [('X', 10)]}
+LIVE_AT['rwk_bound'] = [('Left', None, (0.0, -0.291, 1.364)), ('Right', None, (-0.22, -0.12, 0.82))]
+POSES['rwk_run'] = {'Hips': [('X', -32), ('Y', 30)], 'LeftUpLeg': [('X', -100), ('Y', -34)], 'LeftLeg': [('X', 96)], 'LeftFoot': [('X', -6)], 'RightUpLeg': [('X', -18), ('Y', 26)], 'RightLeg': [('X', 4)], 'RightFoot': [('X', -24)], 'Spine': [('X', 12), ('Y', -10)], 'Spine1': [('Y', -6)], 'Neck': [('Z', 34), ('X', -4)], 'Head': [('Z', 14)]}
+LIVE_AT['rwk_run'] = [('Left', None, (-0.21, -0.2, 1.356)), ('Right', None, (-0.22, -0.12, 0.82))]
+POSES['rwk_rest'] = {'Hips': [('X', -32)], 'LeftUpLeg': [('X', -78), ('Y', -12)], 'LeftLeg': [('X', 124)], 'LeftFoot': [('X', -24)], 'RightUpLeg': [('X', -70), ('Y', 10)], 'RightLeg': [('X', 118)], 'RightFoot': [('X', -20)], 'Spine': [('X', 18)], 'Spine1': [('X', 8)], 'Neck': [('X', -12), ('Z', -18)]}
+LIVE_AT['rwk_rest'] = [('Left', None, (0.0, -0.243, 1.393)), ('Right', None, (-0.22, -0.12, 0.82))]
+POSES['rwk_lock'] = {'LeftUpLeg': [('X', -58), ('Y', 4)], 'LeftLeg': [('X', 74)], 'LeftFoot': [('X', 12)], 'RightUpLeg': [('X', -50), ('Y', -4)], 'RightLeg': [('X', 70)], 'RightFoot': [('X', 14)], 'Spine': [('X', 6)], 'Neck': [('X', -16)], 'Head': [('X', -10)]}
+LIVE_AT['rwk_lock'] = [('Left', None, (0.03, -0.237, 1.738)), ('Right', None, (-0.03, -0.237, 1.488))]
+POSES['rwk_top'] = {'Hips': [('X', 34)], 'LeftUpLeg': [('X', -118)], 'LeftLeg': [('X', 110)], 'LeftFoot': [('X', -10)], 'RightUpLeg': [('X', 30)], 'RightLeg': [('X', 18)], 'RightFoot': [('X', 16)], 'Spine': [('X', 16)], 'Spine1': [('X', 8)], 'Neck': [('X', -30)], 'Head': [('X', -10)]}
+LIVE_AT['rwk_top'] = [('Left', None, (0.2, -0.475, 0.806)), ('Right', None, (-0.22, -0.425, 0.806))]
+POSES['rwk_line'] = {'LeftUpLeg': [('X', -58)], 'LeftLeg': [('X', 64)], 'LeftFoot': [('X', -24)], 'RightUpLeg': [('X', 10)], 'RightLeg': [('X', 26)], 'RightFoot': [('X', 6)], 'Spine': [('X', 18)], 'Spine1': [('X', 6)], 'Neck': [('X', -18)]}
+LIVE_AT['rwk_line'] = [('Left', None, (-0.1, -0.552, 1.114)), ('Right', None, (-0.12, -0.332, 0.844))]
+POSES['rwk_ladder'] = {'LeftUpLeg': [('X', -70)], 'LeftLeg': [('X', 96)], 'LeftFoot': [('X', -6)], 'RightUpLeg': [('X', -10)], 'RightLeg': [('X', 24)], 'RightFoot': [('X', 4)], 'Spine': [('X', 6)], 'Neck': [('X', -14)], 'Head': [('X', -6)]}
+LIVE_AT['rwk_ladder'] = [('Left', None, (0.2, -0.413, 2.365)), ('Right', None, (-0.2, -0.413, 2.965))]
+POSES['rwk_slide'] = {'LeftUpLeg': [('X', -30), ('Y', -14)], 'LeftLeg': [('X', 40)], 'LeftFoot': [('X', -10)], 'RightUpLeg': [('X', -24), ('Y', 14)], 'RightLeg': [('X', 34)], 'RightFoot': [('X', -8)], 'Spine': [('X', 10)], 'Neck': [('X', 14)], 'Head': [('X', 10)]}
+LIVE_AT['rwk_slide'] = [('Left', None, (0.25, -0.361, 1.085)), ('Right', None, (-0.25, -0.361, 1.085))]
+POSES['rwk_step_r'] = mirrored(POSES['rwk_step'])
+LIVE_AT['rwk_step_r'] = [('Right', None, (-0.0, -0.219, 1.373)), ('Left', None, (0.22, -0.12, 0.82))]
+POSES['rwk_side_r'] = mirrored(POSES['rwk_side'])
+LIVE_AT['rwk_side_r'] = [('Right', None, (0.162, -0.214, 1.369)), ('Left', None, (0.22, -0.12, 0.82))]
+POSES['rwk_run_r'] = mirrored(POSES['rwk_run'])
+LIVE_AT['rwk_run_r'] = [('Right', None, (0.21, -0.2, 1.356)), ('Left', None, (0.22, -0.12, 0.82))]
+POSES['rwk_line_r'] = {'Spine': [('X', 18)], 'Spine1': [('X', 6)], 'Neck': [('X', -18)], 'RightUpLeg': [('X', -58)], 'RightLeg': [('X', 64)], 'RightFoot': [('X', -24)], 'LeftUpLeg': [('X', 10)], 'LeftLeg': [('X', 26)], 'LeftFoot': [('X', 6)]}
+LIVE_AT['rwk_line_r'] = [('Left', None, (-0.1, -0.552, 1.114)), ('Right', None, (-0.12, -0.332, 0.844))]
+POSES['rwk_ladder_r'] = mirrored(POSES['rwk_ladder'])
+LIVE_AT['rwk_ladder_r'] = [('Right', None, (-0.2, -0.413, 2.365)), ('Left', None, (0.2, -0.413, 2.965))]
+POSES['rwk_lock_up'] = _merge(_mv_legs(-10, 12, 4, -8, 10, 6), {'Spine': [('X', 2)], 'Neck': [('X', -18)], 'Head': [('X', -10)]})
+LIVE_AT['rwk_lock_up'] = [('Left', None, (0.03, -0.237, 2.038)), ('Right', None, (-0.03, -0.237, 1.788))]
+ANIMS['rw_stand'] = _clip(['rwk_stand'], [0], 2, loop=True)
+ANIMS['rw_up'] = _clip(['rwk_step', 'rwk_stand', 'rwk_step_r', 'rwk_stand'], [0, .5, 1, 1.5, 2, 2.5, 3, 3.5], 8, loop=True)
+ANIMS['rw_side'] = _clip(['rwk_side', 'rwk_stand'], [0, .5, 1, 1.5], 6, loop=True)
+ANIMS['rw_side_r'] = _clip(['rwk_side_r', 'rwk_stand'], [0, .5, 1, 1.5], 6, loop=True)
+ANIMS['rw_bound'] = _clip(['rwk_stand', 'rwk_bound', 'rwk_stand'], [0, .5, 1, 1.5, 2], 8)
+ANIMS['rw_run'] = _clip(['rwk_run', 'rwk_run_r'], [0, .5, 1, 1.5], 8, loop=True)
+ANIMS['rw_rest'] = _clip(['rwk_rest'], [0], 2, loop=True)
+ANIMS['rope_lock'] = _clip(['rwk_lock', 'rwk_lock_up'], [0, .5, 1, 1.5], 6, loop=True)
+ANIMS['rw_top'] = _clip(['rwk_top', 'mv_cl_knee', 'mv_cl_stand'], [0, .5, 1, 1.5, 2], 10)
+ANIMS['hand_line'] = _clip(['rwk_line', 'rwk_line_r'], [0, .5, 1, 1.5], 6, loop=True)
+ANIMS['ladder_up'] = _clip(['rwk_ladder', 'rwk_ladder_r'], [0, .5, 1, 1.5], 6, loop=True)
+ANIMS['ladder_slide'] = _clip(['rwk_slide'], [0], 2, loop=True)
+
+_pose_rw = pose
+
+
+def pose(name):
+    """The pose() above; a rope wall clip's in-between gets its holstered revolver put back (the blend carried it on the hand)."""
+    clip, _, i = name.partition('.')
+    zmin = _pose_rw(name)
+    if i and clip in RW_LIVE:
+        _bw_regun(name)
+    return zmin
+
+# ================================================================ tools (the live hero only: docs/GATHERING.md) ===========
+# A tool swung in both hands (sim/player/tool.js; features/woodcut.js). The tool itself is not in the model: the game draws it
+# as a runtime mesh on the right fist (view/heldtool.js HOLDS.swing): its haft runs out of the grip (RopeHand0) along
+# A = U cos(TL_CANT) + F sin(TL_CANT) (F the hand's way, U the thumb: _hand_frame), the head TL_HEAD m up it, the bit toward
+# B = F cos - U sin. So each key here gives the right fist's point, the haft's way D and the bit's way B (his frame), turns the
+# right hand so its A is D and its B is B (LS_HAND), and closes the left fist on the haft TL_LEFT m above the right (the left
+# thumb up the haft, its knuckles to the bit). Right hand at the knob, left above: the swing comes from over his left
+# shoulder, down and across to his right, into a trunk ahead of him at waist height (the sim stands him ~.7 m from its
+# middle). Every frame is a key (the game plays them stepped): no in-between lets the hands slip off the haft.
+#   tl_chop    ready (both hands on, the axe across him) -> wind (up over the left shoulder) -> swing -> hit (mark `hit`:
+#              the head in the wood) -> pull (wrenched out) -> ready. ms timing; the game warps it onto TUNE.swing (hit .26 s
+#              of .62 s: content/woodcut.js), so only the proportions matter
+TL_LIVE = ('tl_chop',)
+TL_CANT, TL_LEFT, TL_HEAD = 42.0, .30, .56   # (view/heldtool.js HOLDS.swing.cant; the left hand's place on the haft; the head's)
+
+
+def _tl_key(name, trunk, feet, R, D, S, pole_r=(-1, .3, -1), pole_l=(1, .3, -1), arms=None):
+    """A two-handed tool key: `trunk` (_ls_trunk's), `feet` (LS_FEET's), the right fist at R (his frame, m at 1.8 over the
+    ground), the haft along D, the bit turned to the way S the head moves (made square to D); the elbows toward the poles."""
+    D = Vector(D).normalized()
+    B = Vector(S) - D * Vector(S).dot(D)
+    B = B.normalized() if B.length > 1e-6 else Vector((0, -1, 0))
+    c, s = math.cos(math.radians(TL_CANT)), math.sin(math.radians(TL_CANT))
+    F, U = D * s + B * c, D * c - B * s                         # (the right hand's own axes that put A on D, B on B)
+    POSES[name] = _merge(_ls_legs(-8, -4, 22, 20), trunk, arms or {
+        'RightShoulder': [('Z', -8)], 'RightArm': [('Y', -30), ('X', -60)], 'RightForeArm': [('X', -40)],
+        'LeftShoulder': [('Z', -8)], 'LeftArm': [('Y', 30), ('X', -60)], 'LeftForeArm': [('X', -40)]})
+    LS_FEET[name] = feet
+    L = Vector(R) + D * TL_LEFT
+    LS_AT[name] = [('Right', None, tuple(R), 'fist', pole_r), ('Left', None, tuple(L), 'fist', pole_l)]
+    LS_HAND[name] = {'Right': (tuple(F), tuple(U.cross(F))), 'Left': (tuple(B), tuple(B.cross(D)))}
+
+
+_TL_STANCE = lambda drop=.05, heel=0: {'L': (.17, -.1, 12, 0), 'R': (-.17, .13, -20, heel), 'drop': drop}
+_tl_key('tl_ch_ready', _ls_trunk(turn=-4, tilt=4, spine=4, s1=2, neck=(8, 2, 0), head=(4, 0, 0)), _TL_STANCE(.05),
+        (-.1, -.24, .95), (.35, -.45, .82), (0, -1, 0))
+_tl_key('tl_ch_wind', _ls_trunk(turn=22, tilt=-2, spine=-4, s1=-2, cturn=(8, 6, 4), neck=(4, -20, 0), head=(2, -8, 0)),
+        _TL_STANCE(.04, 14), (.17, -.02, 1.42), (.35, .7, .62), (-.3, -.6, -.6), pole_r=(-.4, .2, -.4), pole_l=(1, .6, -.2))
+_tl_key('tl_ch_swing', _ls_trunk(turn=4, tilt=7, spine=8, s1=2, cturn=(1, 1, 0), neck=(8, -4, 0), head=(4, -2, 0)),
+        _TL_STANCE(.09, 14), (.03, -.32, 1.18), (.18, -.66, .73), (-.4, -.6, -.7))
+_tl_key('tl_ch_hit', _ls_trunk(turn=-16, tilt=10, spine=12, s1=4, cturn=(-6, -4, -2), neck=(12, 12, 0), head=(6, 4, 0)),
+        _TL_STANCE(.12, 22), (-.12, -.18, 1.0), (.2, -.75, -.05), (-1, -.2, -.3))
+_tl_key('tl_ch_pull', _ls_trunk(turn=-10, tilt=6, spine=8, s1=2, cturn=(-3, -2, 0), neck=(10, 8, 0), head=(4, 2, 0)),
+        _TL_STANCE(.08, 10), (-.14, -.12, .98), (.3, -.72, .22), (.2, -.6, -.6))
+ANIMS['tl_chop'] = _clip(['tl_ch_ready', 'tl_ch_wind', 'tl_ch_swing', 'tl_ch_hit', 'tl_ch_pull', 'tl_ch_ready'], [0, 1, 2, 3, 4, 5], 12,
+                         ms=[60, 130, 50, 110, 120, 150], marks={'hit': 3})

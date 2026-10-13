@@ -1,7 +1,8 @@
 // GEAR (docs/GEAR.md): what the player wears. A piece goes in one of five slots (head, body, back, legs, feet:
 // content/gear.js), changes how he looks (the live body is drawn dressed: view/dress.js through host.dressPlayer) and what
 // he can do: its weight past a free allowance slows him, its armor takes a share off the damage he takes, and a piece may
-// bring a modifier of its own (the miner's lamp cap lights his lantern). Tab opens the gear panel (ui/gearpanel.js).
+// bring a modifier of its own (the miner's lamp cap lights his lantern). The menu opens the gear panel (ui/gearpanel.js;
+// Tab too when the pack is off, ?pack=0: features/pack.js has Tab and comes first).
 // No inventory yet: every piece is there to try on (the sandbox's wardrobe).
 // MULTIPLAYER: the set is the server's to say. Offline it is worn at once; in co-op it is asked of the server (features/
 // coop.js wear) and worn when the server's answer comes back (coop.gear), the same moment the others see it.
@@ -71,8 +72,8 @@ export async function create(host) {
       if (S.ver !== shown || overV !== shownO) { const [ps, key] = look(); host.dressPlayer?.(ps, key); }
       shown = S.ver; shownW = S.waiting; shownO = overV; panel.sync();
     },
-    onKey(k, e) { if (k !== 'tab' || e?.shiftKey) return false; panel.toggle(); return true; },   // (Shift+Tab: the dev wardrobe)
-    menu: () => [{label: `Gear: ${S.worn.length ? S.worn.map(id => gearById(id).name).join(', ') : 'your own clothes'} (Tab: the gear panel)`, run: () => panel.toggle(true)}],
+    onKey(k, e) { if (k !== 'tab' || e?.shiftKey) return false; panel.toggle(); return true; },   // (with ?pack=0; Shift+Tab: the dev wardrobe)
+    menu: () => [{label: `Gear: ${S.worn.length ? S.worn.map(id => gearById(id).name).join(', ') : 'your own clothes'} (the gear panel)`, run: () => panel.toggle(true)}],
     hud: () => `gear ${S.key || 'none'} · ${S.stats.kg.toFixed(1)} kg · armor ${Math.round(S.stats.armor * 100)}% · speed x${S.stats.speed.toFixed(2)}${S.waiting ? ' · waiting for the server' : ''}`,
   };
   return F;

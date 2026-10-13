@@ -11,6 +11,9 @@
 //            hot clear day, none at night or in rain. F.swirl(x, y, out): its whirl at a point (tumbleweed.js catches it)
 //   kicked   the player's steps, landings, jumps and rolls throw a few grains on sand (hardpan: a faint puff; paving, rock:
 //            nothing). (The footprints are atmos.js's; the jump / landing puffs atmos draws in the desert's DUST colours)
+// THE AIR (G.air, view/airdrift.js, AIRK.dust): the fine dust, the puffs and the kicked grains take the moving air too (a
+// velocity of their own relaxed toward G.air.velAt: a blast or a shot blows the dust about); the skipping drift grains,
+// heavy and wind-driven, don't. ?air=0: none of it.
 // The ground comes from the biome's own painter (world/desert.js B.groundAt). Grains are 1 px lit points / world lines
 // (depth-tested: walls hide them), sizes follow the zoom; the art rules of atmos.js (no AA, palette tones, dither = alpha).
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle, swirl, puff (grains where something lands), info.
@@ -23,6 +26,7 @@ import {flags} from '../core/flags.js';
 import {clamp, hypot2, smooth} from '../core/mathx.js';
 import {rgbOf} from '../core/color.js';
 import {TERRAIN_ON, onGround, steep} from '../world/layout.js';   // walkable terrain: devils go over hills, not up cliffs
+import {AIRK, createDrift} from '../view/airdrift.js';
 
 const TAU = Math.PI * 2, R = Math.random, rr = (a, b) => a + R() * (b - a);
 // ---------------------------------------------------------------- tunables
@@ -49,14 +53,15 @@ export async function create(host) {
   // ---- the grains: structure of arrays (no objects per grain)
   const N = TUNE.cap, X = new Float32Array(N), Y = new Float32Array(N), H = new Float32Array(N), VX = new Float32Array(N), VY = new Float32Array(N), VH = new Float32Array(N),
     T0 = new Float32Array(N), LF = new Float32Array(N), FL = new Float32Array(N), K = new Uint8Array(N), TN = new Uint8Array(N);   // FL: the ground under it; K: 0 drift, 1 fine, 2 kicked, 3 puff
+  const AX = new Float32Array(N), AY = new Float32Array(N), AD = createDrift(host), AKD = AIRK.dust, AIR4 = new Float32Array(4);   // its share of the moving air (m/s); this step's k by kind
   let n = 0;
   function add(k, x, y, h, vx, vy, vh, life, floor) {
     if (n >= N) return -1;
-    const i = n++; K[i] = k; X[i] = x; Y[i] = y; H[i] = h; VX[i] = vx; VY[i] = vy; VH[i] = vh; T0[i] = 0; LF[i] = life; FL[i] = floor; TN[i] = R() * 3 | 0; return i;
+    const i = n++; K[i] = k; X[i] = x; Y[i] = y; H[i] = h; VX[i] = vx; VY[i] = vy; VH[i] = vh; T0[i] = 0; LF[i] = life; FL[i] = floor; TN[i] = R() * 3 | 0; AX[i] = AY[i] = 0; return i;
   }
   function kill(i) {   // swap-remove
     const j = --n; if (i === j) return;
-    X[i] = X[j]; Y[i] = Y[j]; H[i] = H[j]; VX[i] = VX[j]; VY[i] = VY[j]; VH[i] = VH[j]; T0[i] = T0[j]; LF[i] = LF[j]; FL[i] = FL[j]; K[i] = K[j]; TN[i] = TN[j];
+    X[i] = X[j]; Y[i] = Y[j]; H[i] = H[j]; VX[i] = VX[j]; VY[i] = VY[j]; VH[i] = VH[j]; T0[i] = T0[j]; LF[i] = LF[j]; FL[i] = FL[j]; K[i] = K[j]; TN[i] = TN[j]; AX[i] = AX[j]; AY[i] = AY[j];
   }
   // ---- the devils: a fixed pool, each with its particles (a: angle round the axis, u: height 0..1, rk: radius factor, sp: spin factor)
   const D = TUNE.devil, devils = [];
@@ -133,17 +138,20 @@ export async function create(host) {
   // ================================================================ grains: hop along, bounce, settle
   function grains(dt, lv) {
     const g = TUNE.drift.g, gk = TUNE.kick.g;
+    const air = AD.begin(dt, AKD.gain);   // the moving air (G.air): k by kind (the drift grains: none)
+    if (air) { AIR4[0] = AKD.grain > 0 ? AD.a(AKD.grain) : 0; AIR4[1] = AD.a(AKD.fine); AIR4[2] = AD.a(AKD.kicked); AIR4[3] = AD.a(AKD.puff); }
     for (let i = n - 1; i >= 0; i--) {
       T0[i] += dt; if (T0[i] > LF[i]) { kill(i); continue; }
       const k = K[i];
+      if (air && AIR4[k] > 0) { AD.relax(X[i], Y[i], H[i], AX[i], AY[i], AIR4[k]); AX[i] = AD.x; AY[i] = AD.y; }
       if (k === 1 || k === 3) {   // fine dust / a puff: drag toward the wind, a slow rise, no fall to speak of
         if (k === 1) { host.wind.at(X[i], Y[i], WA); VX[i] += (WA.x * 1.6 - VX[i]) * Math.min(1, dt * 1.2); VY[i] += (WA.y * 1.6 - VY[i]) * Math.min(1, dt * 1.2); }
         else { VX[i] *= Math.max(0, 1 - dt * 3); VY[i] *= Math.max(0, 1 - dt * 3); }
         VH[i] *= Math.max(0, 1 - dt * 1.5);
-        X[i] += VX[i] * dt; Y[i] += VY[i] * dt; H[i] += VH[i] * dt; continue;
+        X[i] += (VX[i] + AX[i]) * dt; Y[i] += (VY[i] + AY[i]) * dt; H[i] += VH[i] * dt; continue;
       }
       VH[i] -= (k === 2 ? gk : g) * dt;
-      X[i] += VX[i] * dt; Y[i] += VY[i] * dt; H[i] += VH[i] * dt;
+      X[i] += (VX[i] + AX[i]) * dt; Y[i] += (VY[i] + AY[i]) * dt; H[i] += VH[i] * dt;
       if (H[i] <= FL[i]) {   // down: a drift grain skips on (its flight is most of its life), a kicked one settles
         if (k === 0 && T0[i] < LF[i] * .75 && VH[i] < -.3) { H[i] = FL[i]; VH[i] = -VH[i] * rr(.45, .7); VX[i] *= .82; VY[i] *= .82; }
         else { kill(i); continue; }

@@ -85,10 +85,22 @@ export async function create(host) {
     q2.lineWidth = lw; q2.strokeStyle = 'rgba(10,8,12,.9)'; q2.strokeText(txt, PV[0] * sc, PV[1] * sc); q2.fillStyle = '#e0c084'; q2.fillText(txt, PV[0] * sc, PV[1] * sc);
   }
   // the lasso's hints (HD, the first few times in a session): what F does while you hold something / hang on a rope
-  const HINT = {hold: 'tap F: yank  ·  hold F: swing it round', swing: 'hold F: climb  ·  let go of F / Space: drop'};
-  let hintPh = '', hintN = {hold: 0, swing: 0}, hintT = 0;
+  // (by what it holds: STRENGTH, features/equip/lasso.js: an even one only trips, a strong one is a tug of war)
+  const HINT = {hold: 'tap F: yank  ·  hold F: swing it round', holdE: 'it fights back  ·  tap F: trip it',
+    holdS: 'it pulls you in!  ·  tap F in its slack: trip  ·  roll: let go', swing: 'hold F: climb  ·  let go of F / Space: drop',
+    // the aim's class over what the loop goes for while it spins (the longer it spins, the harder it pulls)
+    light: 'yank', even: 'trip', heavy: 'snare', strong: 'pulls you'};
+  const CLS_HEX = {light: '#ffe08a', even: '#ffb04a', heavy: '#8cc8ff', strong: '#ff5a3c'};
+  let hintPh = '', hintN = {hold: 0, holdE: 0, holdS: 0, swing: 0}, hintT = 0;
+  // the aim's class over the enemy the loop goes for (spinning): what the throw would do to it
+  function lassoAimLabel(q2, sc) {
+    const L = sim.lasso.L, A = L.aim; if (L.phase !== 'spin' || A.kind !== 'enemy' || !A.who || !A.ok || !A.cls) return;
+    const p = A.who; host.G.toScreenInto(p.x, (p.z || 0) + (p.h || 0) + (p.hitH ?? 1.6) + .75, p.y, PV);
+    const c = hintCanvas(A.cls, sc, CLS_HEX[A.cls]);
+    q2.globalAlpha = .95; q2.drawImage(c, Math.round(PV[0] * sc - c.width / 2), Math.round(PV[1] * sc - c.height)); q2.globalAlpha = 1;
+  }
   function lassoHint(q2, sc) {
-    const ph = sim.lasso.L.phase, k = ph === 'hold' || ph === 'swing' ? ph : '';
+    const ph = sim.lasso.L.phase, cl = sim.lasso.L.cls, k = ph === 'hold' ? (cl === 'strong' ? 'holdS' : cl === 'even' ? 'holdE' : 'hold') : ph === 'swing' ? ph : '';
     if (k !== hintPh) { if (k) hintN[k]++; hintPh = k; hintT = performance.now(); }
     if (!k || hintN[k] > 3 || (k === 'hold' && sim.lasso.L.kind === 'prop')) return;
     const a = Math.min(1, (performance.now() - hintT) / 250); if (a <= 0) return;
@@ -97,13 +109,13 @@ export async function create(host) {
     q2.globalAlpha = a * .9; q2.drawImage(c, Math.round(PV[0] * sc - c.width / 2), Math.round(PV[1] * sc - c.height)); q2.globalAlpha = 1;
   }
   const hintC = {}, hintS = {};   // the hint's text, painted once per scale (no text drawn per frame)
-  function hintCanvas(k, sc) {
+  function hintCanvas(k, sc, col = '#e0c084') {
     let c = hintC[k]; if (c && hintS[k] === sc) return c; hintS[k] = sc;
     const u = Math.max(.8, sc / 2.4), font = `600 ${Math.round(10 * u)}px "Segoe UI", system-ui, sans-serif`, w0 = Math.max(2, 2.4 * u);
     c ??= hintC[k] = document.createElement('canvas'); let q = c.getContext('2d'); q.font = font;
     c.width = Math.ceil(q.measureText(HINT[k]).width + w0 * 2 + 4); c.height = Math.round(10 * u * 1.5) + 4;
     q = c.getContext('2d'); q.font = font; q.textAlign = 'center'; q.textBaseline = 'middle'; q.lineJoin = 'round';
-    q.lineWidth = w0; q.strokeStyle = 'rgba(10,8,12,.9)'; q.strokeText(HINT[k], c.width / 2, c.height / 2); q.fillStyle = '#e0c084'; q.fillText(HINT[k], c.width / 2, c.height / 2);
+    q.lineWidth = w0; q.strokeStyle = 'rgba(10,8,12,.9)'; q.strokeText(HINT[k], c.width / 2, c.height / 2); q.fillStyle = col; q.fillText(HINT[k], c.width / 2, c.height / 2);
     return c;
   }
   function labels(q2, sc) {
@@ -129,7 +141,7 @@ export async function create(host) {
     hd(q2, sc) {
       const t0 = now();
       // (the labels hang on the world: slid with the pixel image, G.hdShift, the sub-pixel camera; the slot stays put)
-      if (!host.hudOff && (game()?.mode === 'run' || game()?.mode === 'sandbox')) { slot.draw(q2, host.hudScale, sim.S); q2.save(); host.G.hdShift?.(q2, sc); labels(q2, sc); previewLabel(q2, sc); lassoHint(q2, sc); q2.restore(); }
+      if (!host.hudOff && (game()?.mode === 'run' || game()?.mode === 'sandbox')) { slot.draw(q2, host.hudScale, sim.S); q2.save(); host.G.hdShift?.(q2, sc); labels(q2, sc); previewLabel(q2, sc); lassoHint(q2, sc); lassoAimLabel(q2, sc); q2.restore(); }
       const ms = tU + tF + now() - t0; tU = 0; F.ms = F.ms * .95 + ms * .05;
     },
     onKey(k, e) {

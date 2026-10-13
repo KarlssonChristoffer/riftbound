@@ -13,7 +13,7 @@
 import {createMenu} from './menu.js';
 import {SNAP_NAME} from '../render/camera.js';
 import {SAMPLING, DEBUG} from '../render/options.js';
-import {SEASONS, WEATHER} from '../sim/env.js';
+import {SEASONS, WEATHER, PARTS} from '../sim/env.js';
 import {check as checkEvents} from '../core/events.js';
 import {LOADOUTS} from '../view/hero.js';
 const $ = s => document.querySelector(s);
@@ -61,6 +61,9 @@ const LOW_OFF = ['windlines', 'wildlife', 'depth', 'grass', 'litter', 'dust', 't
 const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'sprint'], [['Q'], 'walk'], [['C'], 'crouch'], [['Space'], 'roll · leap'],
   [['LMB'], 'hold to draw, release to shoot'], [['RMB'], 'multishot'], [['1', '2', '3', '4'], 'abilities'], [['E'], 'open · talk · climb'], [['F'], 'use the gadget (when you carry one)'],
   [['LMB'], 'revolver: draw · shoot'], [['RMB'], 'revolver: fan the hammer'], [['R'], 'revolver: reload'], [['V'], 'revolver: pistol whip'], [['Y'], 'tip the hat'],
+  [['2', '1'], 'fists up / the gun again (the gunslinger)'], [['LMB', 'RMB'], 'fists: left / right hand (alternate: a combo; hold: a heavy; both: headbutt)'],
+  [['E'], 'fists: grab a foe (again: toss)'], [['Space'], 'fists: slip a punch (then counter)'],
+  [['LMB', 'E'], 'on a tree: chop it (an axe in the bag; hold to keep chopping)'], [['Tab'], 'the pack: bag, pouch, skills, build'],
   [['Z', 'X'], 'turn the camera (or drag with the middle button)'], [['Home'], 'reset the camera'], [['Wheel'], 'zoom in / out'],
   [['M'], 'mute'], [['U'], 'music on / off'], [['F4'], 'photo mode'], [['Esc'], 'this menu']];
 
@@ -110,16 +113,16 @@ export function createPause(E) {
     out.push({tab: 'controls', group: 'Camera', label: 'Camera turning', id: 'snap', keep: 'snap', ...pick(SNAP_NAME, () => SNAP_NAME[cv.snapMode], v => { cv.snapMode = SNAP_NAME.indexOf(v); })},
       {tab: 'controls', group: 'Keys', keys: KEYS});
     // Dev: the character, the world's dials, the renderer's A/B (each with its dev key)
-    dv('Character', {label: 'Loadout', key: 'O', value: () => hero.loadName, run: d => hero.switchLoadout(hero.loadI + d)});
+    dv('Character', {label: 'Loadout', key: 'O', value: () => hero.loadName, sizes: () => LOADOUTS.map(l => l[0]), run: d => hero.switchLoadout(hero.loadI + d)});
     dv('Character', {label: 'Bow', key: 'J', ...pick(['pixel art', 'HD overlay'], () => opt.hdBow ? 'HD overlay' : 'pixel art', v => { opt.hdBow = v === 'HD overlay'; })});
     dv('Character', {label: 'Shiny armour', key: 'I', ...onOff(() => hero.armor.on, v => { if (hero.armor.on !== v) hero.toggleArmour(); })});
     dv('Character', {label: 'Lantern', key: 'L', ...onOff(() => opt.lantern, v => { opt.lantern = v; })});
-    dv('World', {label: 'Biome', key: 'N', value: () => stage.biome.name, run: d => setBiome(stage.biomeI + d)});
-    dv('World', {label: 'Time', key: 'T', value: () => `${env.clock()} ${env.part}`, run: () => env.nextPart()});
-    dv('World', {label: 'Season', value: () => env.seasonLock || `auto (${env.season})`, run: d => cyc(['auto', ...SEASONS], env.seasonLock || 'auto', d, env.setSeason)});
-    dv('World', {label: 'Weather', value: () => env.weatherLock || `auto (${env.weather})`,
+    dv('World', {label: 'Biome', key: 'N', value: () => stage.biome.name, sizes: () => host.BIOMES.map(b => b.name), run: d => setBiome(stage.biomeI + d)});
+    dv('World', {label: 'Time', key: 'T', value: () => `${env.clock()} ${env.part}`, sizes: () => PARTS.map(p => '00:00 ' + p), run: () => env.nextPart()});
+    dv('World', {label: 'Season', value: () => env.seasonLock || `auto (${env.season})`, sizes: () => SEASONS.flatMap(s => [s, `auto (${s})`]), run: d => cyc(['auto', ...SEASONS], env.seasonLock || 'auto', d, env.setSeason)});
+    dv('World', {label: 'Weather', value: () => env.weatherLock || `auto (${env.weather})`, sizes: () => Object.keys(WEATHER).flatMap(w => [w, `auto (${w})`]),
       run: d => cyc(['auto', ...Object.keys(WEATHER).filter(w => !WEATHER[w].precip || env.TUNE.precip)], env.weatherLock || 'auto', d, env.setWeather)});
-    dv('World', {label: 'Day length', value: () => env.frozen ? 'stopped' : `${env.TUNE.dayMinutes} min`, run: d => cyc([20, 5, 60, 0], env.frozen ? 0 : env.TUNE.dayMinutes, d, env.setDayMinutes)});
+    dv('World', {label: 'Day length', value: () => env.frozen ? 'stopped' : `${env.TUNE.dayMinutes} min`, sizes: () => ['stopped', '20 min', '5 min', '60 min'], run: d => cyc([20, 5, 60, 0], env.frozen ? 0 : env.TUNE.dayMinutes, d, env.setDayMinutes)});
     dv('Renderer', {label: 'Ground texture', key: 'Shift+2', ...pick(SAMPLING, () => opt.sampling, v => { opt.sampling = v; })});
     dv('Renderer', {label: 'Prop outlines', key: 'Shift+3', ...onOff(() => opt.outline, v => { opt.outline = v; })});
     dv('Renderer', {label: 'Props', key: 'P', ...pick(['live 3D', '16-angle sprites'], () => stage.propMode === 'live' ? 'live 3D' : '16-angle sprites', v => { stage.propMode = v === 'live 3D' ? 'live' : 'yaw'; })});
@@ -139,7 +142,7 @@ export function createPause(E) {
     if (A) out.push({tab: 'audio', group: 'Sound', label: 'Music', key: 'U', ...onOff(() => A.musicOn, v => { if (A.musicOn !== v) A.toggleMusic(); })});
     out.push({tab: 'graphics', group: 'Effects', label: 'Screen shake', id: 'shake', keep: true, ...onOff(() => opt.shake, v => { opt.shake = v; })});
     dv('Tools', {label: 'Frame profiler', key: 'F3', ...onOff(() => perf.on, v => { if (perf.on !== v) perf.toggle(); })});
-    dv('Tools', {label: 'Key help panel', key: 'H', ...onOff(() => opt.help, v => { opt.help = v; })});
+    dv('Tools', {label: 'Key help + debug HUD', key: 'F1', ...onOff(() => opt.help, v => { opt.help = v; })});
     dv('Tools', {label: 'Dev mode', key: '`', ...onOff(() => host.dev, v => { host.dev = v; })});
     return out;
   }
