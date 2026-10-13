@@ -457,7 +457,10 @@ export async function create(host) {
         q.fillStyle = '#ffe08a'; q.fillText('!', bx, by); q.restore();
       }
       if (S.phase === 'wait' && !S.r) text(q, '...', x, y, u, '#a39478', 'center');
-      if (S.phase === 'fight') drawGauge(q, x, y, u);
+      if (S.phase === 'fight') {   // the gauge under his feet (over his head it hides the line and the fish)
+        const f = G.toScreen(P.x, P.z - .2, P.y);
+        drawGauge(q, x, Math.round(f[1] * sc) + 26 * u, u);
+      }
     }
     // the catch card (top middle): the icon, the name in its rarity's colour, size and weight, NEW / RECORD
     if (V.card > 0 && I.id) drawCard(q, u);
