@@ -721,7 +721,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // (over the cave's PORTAL, world/caves.js C.inPortal: the overhang casts nothing, sunk under the cave's floor, so daylight and the
   // lantern reach the cave's first stretch under it, as they do in the band past the step)
   const CVP = CAVE && TERRAIN_ON ? CAVE : null, cvM = CVP?.mouth, cvF = CVP && [cvM.x + cvM.ux * cvM.len, cvM.y + cvM.uy * cvM.len];
-  const overPortal = (x, z) => CVP && Math.abs(x - cvF[0]) < 9.5 && Math.abs(z - cvF[1]) < 9.5 && CVP.inPortal(x + CVP.off[0], z + CVP.off[1], CVP.copy.brow - .3) && CVP.inside(x + CVP.off[0], z + CVP.off[1]) < .3;
+  const overPortal = (x, z) => CVP && Math.abs(x - cvF[0]) < CVP.portalR + .5 && Math.abs(z - cvF[1]) < CVP.portalR + .5 && CVP.inPortal(x + CVP.off[0], z + CVP.off[1], CVP.copy.brow - .3) && CVP.inside(x + CVP.off[0], z + CVP.off[1]) < .3;
   const caster = geo => { const g = geo.clone(), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, overPortal(p.getX(i), p.getZ(i)) ? CVP.floor(p.getX(i) + CVP.off[0], p.getZ(i) + CVP.off[1]) - 1 : p.getY(i) - CAST_SINK); p.needsUpdate = true;
     const s = G.surface(g, {tex: gTex, planar: true, world: world2, type: 1, obj: 0}, true); s.gm.visible = false; disposers.push(() => { s.dispose(); g.dispose(); }); };
   if (TERRAIN_ON) caster(gGeo);
@@ -904,19 +904,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: lo - .05,
           base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 151});
       }
-      // the cave's MOUTH (world/caves.js): rock up both sides of its slot and across its far end, facing in, and the BROW: a face
-      // hanging from the ground over the slot where it goes in under it (the drawn ground runs on over the rest: the overhang)
-      if (CAVE) {
-        const M = CAVE.mouth, hw = M.w / 2, at = (s, q) => [M.x + M.ux * s - M.uy * q, M.y + M.uy * s + M.ux * q];
-        const foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
-        // (each side up to the brow only: past it the sides and the far end are under the overhang, in the dark, and their tops stood
-        // up through the ground over it)
-        for (const [k, W] of [[0, [at(0, -hw), at(M.brow * .5, -hw), at(M.brow, -hw)]], [1, [at(M.brow, hw), at(M.brow * .5, hw), at(0, hw)]]])
-          terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: M.g0 - M.depth - .05,
-            base: 0, relief: .9, talus: false, lip, seed: 171 + k * 6});
-        const B = [at(M.brow, -hw - .1), at(M.brow, hw + .1)], gB = (x, z) => tH(x + M.ux * .3, z + M.uy * .3);
-        terrRuns.push({pts: B, top: gB, bot: (x, z) => gB(x, z) - .6, minBot: M.g0 - .9, base: 0, relief: .15, talus: false, lip, seed: 173, dark: () => -.2});   // (a short even lip: deeper and rougher it hung down in curtains)
-      }
+      // (the cave's MOUTH has no rock of its own here: its slot's walls are the copy's in the band, drawn here too: world/cave3d.js's
+      // portal, so the slot he walks down is the same one before and after the step)
       // the creek's last step (layout.js CASCADES): a low rock rim along the pool's north edge, under the lip (the fall's sheet in its gap)
       if (CASCADES.length) {
         const F = CASCADES.at(-1), y = POOL.clip - .03;

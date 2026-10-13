@@ -895,19 +895,16 @@ function forestRuins(q, ctx) {
   }
   meadowLip(K, S);
   paintForestWater(FO, K, S, {hsh, vn, hex, boulder});   // its stream, lake and outflow (world/forest.js)
-  // the cave's mouth (world/caves.js): its slot's floor is the cave's (caveFloor), cut down out of the grass
+  // the cave's mouth (world/caves.js): its slot isn't drawn here (alpha 0: the ground shader drops it), nor the overhang's steep face
+  // over the slot's far end: world/cave3d.js draws the slot's copy and the cave on under the woods (its portal) in their place.
+  // A rock rim on the overhang's edge
   const CM = FO.cave?.mouth;
   if (CM) {
     const [bx0, by0, bx1, by1] = FO.cave.slot.reach, hw = CM.w / 2, i0 = Math.max(0, Math.floor((bx0 - X0) * PPM)), i1 = Math.min(WPX - 1, Math.ceil((bx1 - X0) * PPM));
     for (let y = Math.max(0, Math.floor((by0 - Y0) * PPM)); y <= Math.min(HPX - 1, Math.ceil((by1 - Y0) * PPM)); y++) for (let x = i0; x <= i1; x++) {
       const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM, dx = mx - CM.x, dy = my - CM.y, s = dx * CM.ux + dy * CM.uy, a = Math.abs(-dx * CM.uy + dy * CM.ux);
-      if (a < hw + .4 && s > CM.brow - .45 && s < CM.brow + .4) {   // the overhang's front (the drawn ground's step up at the brow, seen
-        if (s < CM.brow + .18) G.c(x, y, 0); else G.p(x, y, S.rock, hsh(x, y, 70) < .3 ? 2 : 3);   // edge-on): not drawn (the cave shows through
-        // under it, world/cave3d.js's portal), its rock lip
-        continue;
-      }
-      if (!(a < hw + .05 && s > -.05 && s < CM.brow)) continue;   // (past the brow: the overhang's own ground, as the woods')
-      caveFloor(G, S, x, y, mx, my, Math.max(a - hw, -s));   // (on to the brow: the cave's own floor runs on under it, cave3d.js's portal)
+      if ((a < hw + .05 && s > -.1 && s < CM.brow + .18) || (a < hw + .4 && s > CM.brow - .45 && s < CM.brow + .18)) G.c(x, y, 0);
+      else if (a < hw + .4 && s > CM.brow - .45 && s < CM.brow + .4) G.p(x, y, S.rock, hsh(x, y, 70) < .3 ? 2 : 3);
     }
   }
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);

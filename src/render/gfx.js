@@ -1524,6 +1524,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     wOp: {value: new THREE.Vector4(1, 1, 1, 1)}, wTone: {value: new THREE.Vector4(1, 1, 2, 2)}, wLook: {value: new THREE.Vector4(.86, 0, 0, 0)},
     wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
     cut: {value: new THREE.Vector4()}, cutB: {value: new THREE.Vector4()}, cutM: {value: new THREE.Vector4()}, cutP: {value: new THREE.Vector4()},   // the cutaway (render/cut.js; setCut, cutFrame in render())
+    sinkP: {value: new THREE.Vector4()},   // the cave's sink (render/cut.js SINK; setSink)
   };
   const raw = (vs, fs, uniforms, extra = {}) => {
     const m = new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
@@ -1788,7 +1789,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // B.autumn, [s1..s4] x ['#hi', '#base', '#shade']): its leaves turn, spray by spray, with U.autumn (core/autumn.js)
   function mesh(geom, obj, matrix, o = {}) {
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
-    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
+    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); if (o.keep) gm.material.uniforms.uSinkKeep = {value: 1}; gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
       uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed, uSprayM: gm.material.uniforms.uSprayM, uSprayFix: gm.material.uniforms.uSprayFix}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1);
@@ -1844,7 +1845,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   }
   const M3 = [0, 1, 2, 4, 5, 6, 8, 9, 10];
   function surface(geom, opts, castShadow = true) {
-    const gm = new THREE.Mesh(geom, surfMat(opts)); gScene.add(gm);
+    const gm = new THREE.Mesh(geom, surfMat(opts)); if (opts.keep) gm.material.uniforms.uSinkKeep = {value: 1}; gScene.add(gm);
     let sm = null;
     if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); if (STATIC_SHADOW) { sm.layers.enable(2); sm.layers.disable(0); } (STATIC_SHADOW ? sStatic : sScene).add(sm); hDirty = true; staticSoon(0); }
     return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sm.parent?.remove(sm); hDirty = true; staticSoon(0); } gm.material.dispose(); }};
@@ -2353,14 +2354,9 @@ void main() {
   const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}, uVgP: {value: 0}}, vgScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
   vgScene.matrixAutoUpdate = false;
-  // FADE (features/caves.js: the step into the cave and back out): fade(a) on a frame lays black over it at a (0..1) after the vignette,
-  // that frame only (frame-tagged as the vignette is)
-  const FADE_FS = HEAD + `uniform float uA; out vec4 oc; void main() { oc = vec4(0., 0., 0., uA); }`;
-  const fdU = {uA: {value: 0}}, fdScene = new THREE.Scene();
-  { const m = new THREE.Mesh(tri, raw(COMP_VS, FADE_FS, fdU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; fdScene.add(m); }
-  fdScene.matrixAutoUpdate = false;
-  let fdFrame = -1;
-  const fade = a => { fdU.uA.value = Math.min(1, Math.max(0, a)); fdFrame = a > 0 ? frameNo : -1; };
+  // SINK (render/cut.js; features/caves.js): the surface crumbling away round him as he goes down into the cave. setSink(null): off;
+  // setSink(x, z, reach) (his world x, z; m), each frame it shows. A mesh / surface made with {keep: true} never sinks (the cave's)
+  function setSink(x, z, reach) { if (reach === null) U.sinkP.value.w = 0; else U.sinkP.value.set(x, z, reach, 1); }
   let vgFrame = -1;
   // {va, ha (0 = no haze), v: [r, g, b], h: [r, g, b] (0..255)}: shown on the next render (atmos.js sets it from F.hd, after this one)
   function setVignette(o) {
@@ -2629,7 +2625,6 @@ void main() {
       }
     } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); } }
     if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)
-    if (fdFrame === frameNo) renderer.render(fdScene, dummyCam);   // (the fade, above)
     if (post) post.run(renderer);
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
@@ -2779,7 +2774,7 @@ void main() {
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
-    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, fade,
+    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};

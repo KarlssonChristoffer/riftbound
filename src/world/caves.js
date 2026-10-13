@@ -37,7 +37,7 @@ export const TUNE = {
   crystals: [5, 9],
 };
 const CELL = .25;  // the grid (world/terrain.js CELL: the field's own lattice, so the field reads it exactly)
-const PORTAL = {r: 9};   // m round the slot copy's foot: the cave seen from the woods through the mouth (C.inPortal)
+const PORTAL = {r: 16};  // m round the slot copy's foot: the cave drawn under the woods too (C.inPortal; as far as the view reaches from the step)
 const DRAWN_IN = .35;   // m: the woods' slot is drawn this much wider than walked (layout.js CLEFT_IN's way)
 
 const mix = (seed, a, b = 0) => (hash3(seed | 0, a, b) * 4294967296) | 0;
@@ -205,11 +205,13 @@ export function cavePlan(seed, m, rect, height = null) {
     out[2] = 0; return out;
   };
   C.inBand = (x, y) => x >= B.x0 && x <= B.x1 && y >= B.y0 && y <= B.y1;
-  // the PORTAL (band coords): the cave just in past the brow, within PORTAL.r of the copy's foot or down the copy's slot past `from`
-  // (default: the brow). world/cave3d.js draws it a second time under the woods' overhang (moved back by OFF), so you see into the
-  // cave through the mouth; world.js keeps the woods' ground over it out of the shadows' and the lights' casters (light falls in)
+  // the PORTAL (band coords): the copy's slot (past `from` m down it: default all of it) and the cave within PORTAL.r of its foot.
+  // world/cave3d.js draws it a second time in the woods (moved back by OFF): the slot you walk down there IS the copy's, and the cave
+  // lies under the woods' overhang, so nothing round him changes at the step (features/caves.js sinks the surface away round it);
+  // world.js keeps the woods' ground over it out of the shadows' and the lights' casters (light falls in)
+  C.portalR = PORTAL.r;
   const fx = cm.x + cm.ux * cm.len, fy = cm.y + cm.uy * cm.len, PQ = [0, 0, 0];
-  C.inPortal = (x, y, from = cm.brow + .05) => C.slotAt(x, y, PQ)[2] === 2 ? PQ[0] > from : Math.hypot(x - fx, y - fy) < PORTAL.r;
+  C.inPortal = (x, y, from = -1) => C.slotAt(x, y, PQ)[2] === 2 ? PQ[0] > from : Math.hypot(x - fx, y - fy) < PORTAL.r;
   C.walls = contour(C.grid);
   // PROPS: crystals at the walls' feet in some rooms (they light the dark), loose rock in the passages
   C.props = [];

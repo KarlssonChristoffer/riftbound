@@ -102,7 +102,7 @@ export function createLighting({G, host, features, opt}) {
   function apply(PX, PY, t) {
     const env = host.env, world = host.world, P = host.P, player = host.player, VH = host.VH, zoom = host.zoom, PPM = host.PPM;
     caves ??= features.find(f => f.name === 'caves') || false;
-    const ug = caves ? caves.under : 0, sunK = 1 - ug;   // (UNDERGROUND above)
+    const ug = caves ? caves.under : 0, sunK = (1 - ug) * (1 - ug);   // (UNDERGROUND above: the sun goes first, before the sky)
     const biome = host.biome.id, time = env.bucket, U = G.compU, sides = env.lightSides ? env.lightSides() : null, two = !!(sides && sides.two) && ug < .01;
     // the clock's blended mood: the open light's while two lights show, else the one (env.light's)
     const m = two ? env.moodFor(biome, sides.open, MO ||= env.blankMood()) : env.mood(biome), mv = two ? env.mood(biome) : m;
