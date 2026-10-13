@@ -36,6 +36,7 @@ import {flags} from '../core/flags.js';
 import {trackK, PROPS as WEST_PROPS, FOUNDATIONS, WALL_D} from './westland.js';   // the West Downs' ground (westRuins)
 import {paint as paintBrook} from './brook.js';   // (and their brook)
 import {paint as paintForestWater} from './forest.js';   // the seeded forest's stream, lake and outflow (forestRuins)
+import {slotFrame, slotHead, slotBrow} from './caves.js';   // the cave mouth's slot, in its own frame (forestRuins)
 
 // ============================================================ pixel toolkit
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -897,14 +898,15 @@ function forestRuins(q, ctx) {
   paintForestWater(FO, K, S, {hsh, vn, hex, boulder});   // its stream, lake and outflow (world/forest.js)
   // the cave's mouth (world/caves.js): its slot isn't drawn here (alpha 0: the ground shader drops it), nor the overhang's steep face
   // over the slot's far end: world/cave3d.js draws the slot's copy and the cave on under the woods (its portal) in their place.
-  // A rock rim on the overhang's edge
+  // A rock rim on the overhang's edge (an arch over the slot: caves.js slotBrow); the slot's shape is caves.js's (slotFrame: it wanders)
   const CM = FO.cave?.mouth;
   if (CM) {
-    const [bx0, by0, bx1, by1] = FO.cave.slot.reach, hw = CM.w / 2, i0 = Math.max(0, Math.floor((bx0 - X0) * PPM)), i1 = Math.min(WPX - 1, Math.ceil((bx1 - X0) * PPM));
+    const [bx0, by0, bx1, by1] = FO.cave.slot.reach, hw = CM.w / 2, i0 = Math.max(0, Math.floor((bx0 - X0) * PPM)), i1 = Math.min(WPX - 1, Math.ceil((bx1 - X0) * PPM)), SQ = [0, 0];
     for (let y = Math.max(0, Math.floor((by0 - Y0) * PPM)); y <= Math.min(HPX - 1, Math.ceil((by1 - Y0) * PPM)); y++) for (let x = i0; x <= i1; x++) {
-      const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM, dx = mx - CM.x, dy = my - CM.y, s = dx * CM.ux + dy * CM.uy, a = Math.abs(-dx * CM.uy + dy * CM.ux);
-      if ((a < hw + .05 && s > -.1 && s < CM.brow + .18) || (a < hw + .4 && s > CM.brow - .45 && s < CM.brow + .18)) G.c(x, y, 0);
-      else if (a < hw + .4 && s > CM.brow - .45 && s < CM.brow + .4) G.p(x, y, S.rock, hsh(x, y, 70) < .3 ? 2 : 3);
+      slotFrame(CM, X0 + (x + .5) / PPM, Y0 + (y + .5) / PPM, SQ);
+      const s = SQ[0], a = Math.abs(SQ[1]), sb = slotBrow(CM, Math.min(a, hw)) + .18;
+      if ((a < hw + .05 && s > slotHead(CM, a) - .1 && s < sb) || (a < hw + .4 && s > sb - .63 && s < sb)) G.c(x, y, 0);
+      else if (a < hw + .4 && s > sb - .63 && s < sb + .22) G.p(x, y, S.rock, hsh(x, y, 70) < .3 ? 2 : 3);
     }
   }
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);

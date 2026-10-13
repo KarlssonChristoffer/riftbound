@@ -7,7 +7,8 @@
 //           update(yaw) picks them when the camera turns; the whole wall's shadow casters stay, so the lantern still stops at them).
 //           Nothing is drawn over the rock: above the walls is the dark
 // OWNS: its meshes, its floor's texture.  READS: the cave's plan, the field (elev).
-//   const cave = buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, disposers}); cave.update(yaw) (each frame: a turn)
+//   const cave = buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, disposers, cover}); cave.update(yaw) (each frame: a turn)
+//   (cover: the ground cover's family, hung over the slot's rim: a gully in the woods, its grass over the edge; null none)
 import {cliffGeometry} from './cliffs3d.js';
 
 const BINS = 8;
@@ -19,7 +20,7 @@ const FLOOR_PAST = .9; // m: the floor runs this far past the open (under the wa
 const LOW = .35;       // m: a hidden stretch's edge, over its foot (ankle high)
 const HEAD = .8;       // m: down the slot from its head, no edge (the woods' ground runs on into it)
 
-export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, disposers}) {
+export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, disposers, cover = null}) {
   const g = C.grid, D = g.D, H = g.H, k = Math.round(FLOOR_C / g.cell), nxs = Math.floor((g.nx - 1) / k), nys = Math.floor((g.ny - 1) / k);
   // ---- the FLOOR: the grid's cells near the open, its floor heights (the field's own values there)
   const at = (A, i, j) => A[Math.min(g.ny - 1, j * k) * g.nx + Math.min(g.nx - 1, i * k)];
@@ -73,7 +74,7 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
     const bins = []; for (let i = 0; i < n; i++) bins.push(binOf(i));
     // (the slot copy's side walls: a set of their own, shown whole while he is in the slot, as the woods' slot's are, so nothing
     // round him changes at the step in; out in the cave they follow the camera like the rest)
-    for (let i = 0; i < n; i++) { const a = L[i], b = L[i + 1]; C.slotAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, SQ); if (SQ[2] === 2 && SQ[0] > -.3 && SQ[0] < C.copy.len + .3 && Math.abs(SQ[1]) > C.copy.w / 2 - .4) bins[i] += BINS; }
+    for (let i = 0; i < n; i++) { const a = L[i], b = L[i + 1]; C.slotAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, SQ); if (SQ[2] === 2 && SQ[0] > C.slotSides && SQ[0] < C.copy.len + .3 && Math.abs(SQ[1]) > C.copy.w / 2 - .4) bins[i] += BINS; }   // (past its rounded head: that turns to face up the slot, and goes as the others do)
     // (lone segments of another bin go with their neighbours: no stretch shorter than two segments)
     for (let i = 0; i < n; i++) { const p = bins[(i - 1 + n) % n], nx = bins[(i + 1) % n]; if (bins[i] !== p && p === nx) bins[i] = p; }
     // start a closed loop where its bin changes (a stretch doesn't wrap round the seam)
@@ -86,26 +87,27 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
     }
     if (cur) runs[b].push(cur);
   }
-  const o = {fam, rockB: null, cover: null, ladders: []};
+  const o = {fam, rockB: null, cover, ladders: []};
   const meshes = [], portal = [], low = [], lowP = [];
   const topP = (x, z) => top(x + off[0], z + off[1]), footP = (x, z) => foot(x + off[0], z + off[1]);
-  const topL = (x, z) => foot(x, z) + LOW, topLP = (x, z) => footP(x, z) + LOW;
+  const topL = (x, z) => Math.min(top(x, z), foot(x, z) + LOW), topLP = (x, z) => Math.min(topP(x, z), footP(x, z) + LOW);   // (never over the whole wall: the slot's head is shallow)
   const build = rs => { const geo = rs.length ? cliffGeometry(rs, o) : null; if (!geo) return null; const m = G.mesh(geo, 1, new THREE.Matrix4(), {static: true, keep: true}); disposers.push(() => { m.dispose(); geo.dispose(); }); return m; };   // (keep: the surface's sink never takes the cave, render/cut.js)
   for (let b = 0; b < 2 * BINS; b++) {
     const rs = [], rp = [], rl = [], rlp = [];
+    const rel = b >= BINS ? 1.2 : .5, lip = b >= BINS && cover !== null;   // (the slot's sides: rougher rock, the woods' grass over their rim)
     let nl = 0;
     for (const pts of runs[b]) {
       let lo = 1e9; for (const [x, z] of pts) lo = Math.min(lo, foot(x, z));
       const sd = seed++;
-      rs.push({pts, top, bot: foot, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: sd});
+      rs.push({pts, top, bot: foot, minBot: lo - .05, base: 0, relief: rel, massive: b >= BINS, talus: true, lip, dark: () => -.12, seed: sd});
       // (the edge: not across the slot's head, where the woods' ground runs on into it; in pieces round it)
       let cl = [];
-      const flushL = () => { if (cl.length > 1) rl.push({pts: cl, top: topL, bot: foot, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: sd}); cl = []; };
+      const flushL = () => { if (cl.length > 1) rl.push({pts: cl, top: topL, bot: foot, minBot: lo - .05, base: 0, relief: rel, massive: b >= BINS, talus: true, lip, dark: () => -.12, seed: sd}); cl = []; };
       for (const q of pts) { if (C.slotAt(q[0], q[1], SQ)[2] === 2 && SQ[0] < HEAD) flushL(); else cl.push(q); }
       flushL();
       // (its stretches in the portal, moved back into the woods: the same rock, the same seed)
       let cur = [];
-      const flush = () => { if (cur.length > 1) rp.push({pts: cur, top: topP, bot: footP, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: sd}); cur = []; };
+      const flush = () => { if (cur.length > 1) rp.push({pts: cur, top: topP, bot: footP, minBot: lo - .05, base: 0, relief: rel, massive: b >= BINS, talus: true, lip, dark: () => -.12, seed: sd}); cur = []; };
       for (const [x, z] of pts) { if (inPortal(x, z)) cur.push([x - off[0], z - off[1]]); else flush(); }
       flush();
       for (const r of rl.slice(nl)) {   // (and its edge's)

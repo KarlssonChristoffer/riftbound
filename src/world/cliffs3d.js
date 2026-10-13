@@ -25,7 +25,8 @@
 //          skip(x, z) -> true where there is no rock (a waterfall over the edge), keep(x, z) -> the most the rock may stand out
 //          there (m) or null (a waterfall's sheet, a ladder), talus: stones at the foot, avoid(x, z) -> true where no stone
 //          may lie (props, water), lip: the cover hangs over the cap, dark(y) -> extra tone bias by height (a deep ravine
-//          shades toward its floor), seed}
+//          shades toward its floor), massive: rock in thick, wavy, broken beds (MASSIVE: a gully's weathered
+//          bedrock, not a quarried face), seed}
 //   o = {fam(name) -> family index (world.js FAMS), rockB: a second family for alternate layers (the desert's bands) or null,
 //        cover: the lip's family or null, ladders: [{x, z, h, y0, nx, nz}] (foot centre, top height, the foot's height (0), the outward normal),
 //        bridges: layout.js BRIDGES, stairs: [{pts: [a, b], w, h0, h1, n}] (a stepped ramp's line, width, heights, treads)}
@@ -36,6 +37,7 @@ import {mulberry32} from '../core/rng.js';
 
 const LAYER = [.3, .6], DEPTH = .6, EXT = .12, CAP_SINK = .005, CAP_SLOPE = .08;
 const JOINT_HARD = [1.1, 3.2], JOINT_SOFT = [.45, 1.3], FACET = [.25, .5], EXAG = 1.8;
+const MASSIVE = {layer: [.55, 1.25], amp: [.14, .3], joint: [.5, 1.6], slant: .9};   // (run.massive: thick beds, waving, broken often, joints aslant)
 
 // the geometry being built: flat-shaded polygons, each turned to face along a hint direction (or away from a centre)
 export function sink() {   // (walls3d.js builds its stones with it too)
@@ -147,9 +149,9 @@ export function cliffGeometry(runs, o) {
     // the layers, top down, to below the deepest foot; their bedding lines (bnd[j](s): the top of layer j) wander along the face
     const layers = [];
     for (let y = top, i = 0; i < 60; i++) {
-      const th = (i === 0 ? .25 + R() * .15 : LAYER[0] + R() * (LAYER[1] - LAYER[0])), hard = i === 0 || R() < .38;
+      const LY = run.massive ? MASSIVE.layer : LAYER, th = (i === 0 ? .25 + R() * .15 : LY[0] + R() * (LY[1] - LY[0])), hard = i === 0 || R() < .38;
       const off = i === 0 ? .02 + R() * .07 : hard ? -.01 + R() * .09 : -.07 - R() * .14;
-      layers.push({yt: y, i, hard, off, f: famB !== null && i > 0 && R() < .45 ? famB : famRock, wave: R() * 100, amp: .04 + R() * .06});
+      layers.push({yt: y, i, hard, off, f: famB !== null && i > 0 && R() < .45 ? famB : famRock, wave: R() * 100, amp: run.massive ? MASSIVE.amp[0] + R() * (MASSIVE.amp[1] - MASSIVE.amp[0]) : .04 + R() * .06});
       y -= th;
       if (y < run.minBot) { layers.push({yt: y, i: i + 1, end: true, wave: R() * 100, amp: .03}); break; }
     }
@@ -163,8 +165,8 @@ export function cliffGeometry(runs, o) {
       // the joints: [s at the bottom, s at the top] (they slant); upright at the zones' edges
       const J = [];
       for (let s = S0 - R() * 1.2; s < S1;) {
-        const w = Ly.hard ? JOINT_HARD[0] + R() * (JOINT_HARD[1] - JOINT_HARD[0]) : JOINT_SOFT[0] + R() * (JOINT_SOFT[1] - JOINT_SOFT[0]);
-        if (s > S0) J.push([s, s + (R() - .5) * .3]);
+        const JW = run.massive ? MASSIVE.joint : Ly.hard ? JOINT_HARD : JOINT_SOFT, w = JW[0] + R() * (JW[1] - JW[0]);
+        if (s > S0) J.push([s, s + (R() - .5) * (run.massive ? MASSIVE.slant : .3)]);
         s += w;
       }
       for (const c of cuts) { for (let k = J.length - 1; k >= 0; k--) if (Math.abs(J[k][0] - c) < .2 || Math.abs(J[k][1] - c) < .2) J.splice(k, 1); J.push([c, c]); }

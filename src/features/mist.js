@@ -291,7 +291,7 @@ export async function create(host) {
     const R = host.PPM, f = O.freq;
     O.drift[0] = -Math.round(dx * R) / R * f; O.drift[1] = -Math.round(dz * R) / R * f;
     caves ??= host.feature('caves') || false;
-    const open = caves ? 1 - caves.under : 1;   // (underground, features/caves.js: no mist in the cave)
+    const open = caves ? (1 - caves.under) * (1 - caves.sinkK) : 1;   // (underground, features/caves.js: no mist in the cave; none hanging over the surface the sink took)
     if (open < 1) { O.alpha *= open; O.water *= open; O.far *= open; O.aerial *= open; F.medium = O.medium *= open; }
     if (VOL) {   // the volume: its numbers, the drift in the noise's units (whole world texels), the wind's way; the old sheet's veil off
       computeVol(dt, sd);

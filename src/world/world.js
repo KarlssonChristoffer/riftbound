@@ -902,7 +902,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         const W = FOREST.canyon.wall, foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
         let lo = 1e9; for (const [x, z] of W) lo = Math.min(lo, foot(x, z));
         terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: lo - .05,
-          base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 151});
+          base: 0, relief: 1.2, massive: true, talus: true, avoid: avoidT, lip, seed: 151});   // (massive: weathered bedrock, cliffs3d.js)
       }
       // (the cave's MOUTH has no rock of its own here: its slot's walls are the copy's in the band, drawn here too: world/cave3d.js's
       // portal, so the slot he walks down is the same one before and after the step)
@@ -916,7 +916,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const tg = terrRuns.length ? cliffGeometry(terrRuns, {...o, ladders: [], bridges: BRIDGES.filter(b => !b.stone), stairs}) : null;   // (+ the footbridges, the stone steps; the brook's stone bridge and stones: below)
       if (tg) { const m = G.mesh(tg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); tg.dispose(); }); }
     }
-    if (CAVE && TERRAIN_ON) cave = buildCave({G, THREE, C: CAVE, biome, PPM, fam: famOf, texOf, elev, field: TF, disposers});   // the cave below (cave3d.js)
+    if (CAVE && TERRAIN_ON) cave = buildCave({G, THREE, C: CAVE, biome, PPM, fam: famOf, texOf, elev, field: TF, disposers, cover: lip ? o.cover : null});   // the cave below (cave3d.js)
     const pg = cliffGeometry(plateauRuns, o);
     if (pg) { const m = G.mesh(pg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); pg.dispose(); }); }
     // the ravine: along its edge line (the ground's own steep cells draw only the waterfall: the cliff texture's alpha, above),

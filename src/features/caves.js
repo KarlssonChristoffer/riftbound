@@ -12,7 +12,7 @@
 //          their own way: cave3d.js cuts the ones in front of him down to an edge; the well's cut and cap would open over the sunk dark)
 // MULTIPLAYER: the cave is everyone's (grown from the session's seed); each player's warp is his own move (co-op sends where he is:
 //   the others see him walk down the slot and on in the cave), the dark is each player's own view
-// OWNS: its mods' notes, F.under, F.down, F.sinking.  READS: host.world.cave, host.player, host.P (his state).  EMITS: player.warp.
+// OWNS: its mods' notes, F.under, F.down, F.sinking, F.sinkK.  READS: host.world.cave, host.player, host.P (his state).  EMITS: player.warp.
 // BUDGET: a few compares a step, an ease a frame. No allocation per step or frame.
 import {smooth, clamp} from '../core/mathx.js';
 
@@ -27,7 +27,7 @@ const NOWARP = new Set(['rope', 'climb', 'mantle']);   // (a move that places hi
 
 export const order = {};
 export async function create(host) {
-  const F = {name: 'caves', label: 'Caves', on: true, under: 0, down: false, sinking: false, get debug() { return `under ${F.under.toFixed(2)}${F.down ? ' · down' : ''}`; }};
+  const F = {name: 'caves', label: 'Caves', on: true, under: 0, down: false, sinking: false, sinkK: 0, get debug() { return `under ${F.under.toFixed(2)}${F.down ? ' · down' : ''}`; }};
   const C = () => host.world.cave;
   const SQ = [0, 0, 0];
   let target = 0, jumped = false;
@@ -61,13 +61,13 @@ export async function create(host) {
     const G = host.G; if (!G?.setSink) return;
     const p = host.player; if (c) c.slotAt(p.x, p.y, SQ);
     F.sinking = !!c && (c.inBand(p.x, p.y) || (SQ[2] === 1 && SQ[0] >= SINK0));
-    if (c && c.inBand(p.x, p.y)) { G.setSink(p.x, p.y, -1e3, c.band); return; }   // (in the cave: nothing past its band, as at the step)
-    if (!F.sinking) { G.setSink(0, 0, null); return; }
+    if (c && c.inBand(p.x, p.y)) { F.sinkK = 1; G.setSink(p.x, p.y, -1e3, c.band); return; }   // (in the cave: nothing past its band, as at the step)
+    if (!F.sinking) { F.sinkK = 0; G.setSink(0, 0, null); return; }
     // (gone by warp - hyst: where a step back up out of the cave lands him, so coming up looks as going down did)
-    const k = clamp((SQ[0] - SINK0) / (c.mouth.warp - c.mouth.hyst - SINK0), 0, 1);
+    const k = F.sinkK = clamp((SQ[0] - SINK0) / (c.mouth.warp - c.mouth.hyst - SINK0), 0, 1);   // (sinkK: how far gone; features/mist.js thins with it)
     const r0 = Math.hypot(host.VW / host.PPM, host.VH / host.PPMY) / 2 + SINK_PAST;   // (the view's half-diagonal on the ground: VW / VH are what shows, any zoom)
     G.setSink(p.x, p.y, r0 * (1 - k) - 6 * k, c.band);
   };
-  F.biomeChanged = () => { target = 0; F.under = 0; F.sinking = false; host.G?.setSink?.(0, 0, null); if (F.down) { F.down = false; host.mods.clear('caves'); } };
+  F.biomeChanged = () => { target = 0; F.under = 0; F.sinking = false; F.sinkK = 0; host.G?.setSink?.(0, 0, null); if (F.down) { F.down = false; host.mods.clear('caves'); } };
   return F;
 }

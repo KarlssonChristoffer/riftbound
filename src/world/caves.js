@@ -72,13 +72,35 @@ export function placeMouth(seed, {height, room, home}) {
   }
   if (!best) return null;
   const {x, y, ux, uy} = best;
-  return {x: +x.toFixed(2), y: +y.toFixed(2), ux: +ux.toFixed(4), uy: +uy.toFixed(4), len: M.len, w: M.w, depth: M.depth, g0: +best.g.toFixed(3), warp: M.warp, hyst: M.hyst, brow: M.brow};
+  return {x: +x.toFixed(2), y: +y.toFixed(2), ux: +ux.toFixed(4), uy: +uy.toFixed(4), len: M.len, w: M.w, depth: M.depth, g0: +best.g.toFixed(3), warp: M.warp, hyst: M.hyst, brow: M.brow, ns: mix(seed >>> 0, 11) & 0xffff};
 }
-// the slot in its own frame: s along it from its head (0 .. len), q across (+ to the right of the way in)
-function slotSQ(m, x, y, out) { const dx = x - m.x, dy = y - m.y; out[0] = dx * m.ux + dy * m.uy; out[1] = -dx * m.uy + dy * m.ux; return out; }
+// the slot's NATURAL shape: a gully, not a cut. Its line wanders (bend m either way), it starts narrow and rounded at its head (a dip in
+// the ground that deepens and opens over `head` m), it swells and pinches along its length (wide: x its width), and its two sides are
+// ragged each on their own (rag m). All in the slot's own frame (s along, q across, noise seeded by the mouth's ns), so the woods'
+// slot and its copy in the band are the same shape to the mm. Near the foot it straightens and settles to its plain width (into the
+// cave's entry passage). round: m its head's rounding reaches down the slot at the sides
+const SLOT = {bend: 1.1, head: 3, headW: .45, wide: .22, rag: .3, round: 1.6, arch: .8, bank: 2.2, bankK: .45};
+// its BANKS: the woods' ground sags toward its rim (bankK of the slot's depth there at the rim, none bank m out), so the rock shows only
+// in its lower part, under grassy slopes; none toward the brow (the overhang stays whole). d: m out from the slot (slotD)
+const slotSag = (m, s, d) => (m.g0 - slotFloor(m, clamp(s, 0, m.len))) * SLOT.bankK * (1 - smooth(clamp(d / SLOT.bank, 0, 1))) * (1 - smooth(clamp((s - m.brow + 1.5) / 1.5, 0, 1)));
+// the slot in its own frame: s along it from its head (0 .. len), q across (+ to the right of the way in), measured from its wandering
+// line and scaled by its width there (|q| = w / 2 on its sides, everywhere)
+export function slotFrame(m, x, y, out) {
+  const dx = x - m.x, dy = y - m.y, s = dx * m.ux + dy * m.uy, q = -dx * m.uy + dy * m.ux, ns = m.ns || 0;
+  const tail = smooth(clamp((m.len - s) / 3, 0, 1));
+  const c = (vnoise(s * .16, .5, ns) - .5) * 2 * SLOT.bend * tail, side = q >= c ? 1 : -1;
+  const open = SLOT.headW + (1 - SLOT.headW) * smooth(clamp(s / SLOT.head, 0, 1));
+  const hw = m.w / 2 * open * (1 + (vnoise(s * .3, 3.5, ns) - .5) * 2 * SLOT.wide * tail) + (vnoise(s * .7, 5.5 + side * 2, ns) - .5) * 2 * SLOT.rag * (.4 + .6 * tail);
+  out[0] = s; out[1] = (q - c) / Math.max(.3, hw) * (m.w / 2); return out;
+}
+const slotSQ = slotFrame;
+// where the slot begins at q across (its head rounded: further down at the sides)
+export const slotHead = (m, q) => SLOT.round * Math.min(1.5, (q / (m.w / 2)) ** 2);
+// the woods' overhang's edge at q across (an arch: it reaches back furthest over the middle)
+export const slotBrow = (m, q) => m.brow + SLOT.arch * (1 - Math.min(1, (q / (m.w / 2)) ** 2));
 const slotFloor = (m, s) => m.g0 - m.depth * clamp(s / m.len, 0, 1);
-// m outside the slot's box (< 0 inside it: the most it can move before it leaves)
-const slotD = (m, s, q) => Math.max(Math.abs(q) - m.w / 2, -s, s - m.len);
+// m outside the slot (< 0 inside it: about the most it can move before it leaves)
+const slotD = (m, s, q) => Math.max(Math.abs(q) - m.w / 2, slotHead(m, q) - s, s - m.len);
 
 // ---- the CAVE: the band, the network, its ground, its walls
 export function cavePlan(seed, m, rect, height = null) {
@@ -179,7 +201,9 @@ export function cavePlan(seed, m, rect, height = null) {
     const bySlot = inSlot || (sd < .6 && tmp[0] < cm.len);
     D[j * nx + i] = inSlot ? Math.min(sd, d) : Math.min(sd, dr);
     Hf[j * nx + i] = bySlot ? slotFloor(cm, tmp[0]) : net;
-    Hr[j * nx + i] = bySlot ? Math.max(height ? height(x, y - oy) : cm.g0, slotFloor(cm, tmp[0]) + .4) : Hf[j * nx + i] + T.wall;   // (by the slot: the woods' ground over it)
+    const byBank = !bySlot && sd < SLOT.bank && tmp[0] < cm.brow;   // (its banks: the woods' sagging ground, as the woods' slot has: caves.js C.slot)
+    Hr[j * nx + i] = bySlot ? Math.max((height ? height(x, y - oy) : cm.g0) - slotSag(cm, tmp[0], Math.max(0, sd)), slotFloor(cm, tmp[0]) + .4)
+      : byBank ? Math.max((height ? height(x, y - oy) : cm.g0) - slotSag(cm, tmp[0], sd), Hf[j * nx + i] + .4) : Hf[j * nx + i] + T.wall;   // (by the slot: the woods' ground over it)
   }
   const at = (G, x, y) => { const i = Math.round((x - gx0) / CELL), j = Math.round((y - gy0) / CELL); return i < 0 || j < 0 || i >= nx || j >= ny ? null : G[j * nx + i]; };
   const lerp = (G, x, y) => {   // (bilinear: the floor's painter and the walls' outline agree on a line, not a .25 m staircase)
@@ -196,8 +220,9 @@ export function cavePlan(seed, m, rect, height = null) {
   C.shape = {type: 'cave', mode: 'set', reach: [B.x0 - .01, B.y0 - .01, B.x1 + .01, B.y1 + .01], fn: (x, y) => { const d = at(D, x, y); if (d === null) return rockTop; return d < 0 ? at(Hf, x, y) : at(Hr, x, y); }};
   // the woods' SLOT (world/terrain.js 'cave', cut: it only lowers), drawn uncut past the brow: the overhang
   const sb = slotBox(m);
-  C.slot = {type: 'cave', mode: 'cut', reach: sb, pts: [[sb[0], sb[1]], [sb[2], sb[3]]], fn: (x, y) => { slotSQ(m, x, y, tmp); return slotD(m, tmp[0], tmp[1]) <= 0 ? slotFloor(m, tmp[0]) : NaN; },
-    drawn: {fn: (x, y) => { slotSQ(m, x, y, tmp); return Math.abs(tmp[1]) <= m.w / 2 + DRAWN_IN && tmp[0] >= 0 && tmp[0] < m.brow ? slotFloor(m, tmp[0]) : NaN; }}};   // (drawn wider than walked: its ground falls away behind the rock, world.js, as a cleft's)
+  const bankAt = (x, y, d) => d < SLOT.bank && tmp[0] < m.brow && height ? height(x, y) - slotSag(m, tmp[0], Math.max(0, d)) : NaN;   // (tmp: its s, set by the caller)
+  C.slot = {type: 'cave', mode: 'cut', reach: sb, pts: [[sb[0], sb[1]], [sb[2], sb[3]]], fn: (x, y) => { slotSQ(m, x, y, tmp); const d = slotD(m, tmp[0], tmp[1]); return d <= 0 ? slotFloor(m, tmp[0]) : bankAt(x, y, d); },
+    drawn: {fn: (x, y) => { slotSQ(m, x, y, tmp); return Math.abs(tmp[1]) <= m.w / 2 + DRAWN_IN && tmp[0] >= slotHead(m, tmp[1]) - DRAWN_IN && tmp[0] < m.brow ? slotFloor(m, tmp[0]) : bankAt(x, y, slotD(m, tmp[0], tmp[1])); }}};   // (drawn wider than walked: its ground falls away behind the rock, world.js, as a cleft's)
   // where you cross: s = warp along the slot, either copy (features/caves.js)
   C.slotAt = (x, y, out) => {   // out = [s, q, which: 0 none / 1 the woods' / 2 the band's]
     slotSQ(m, x, y, out); if (slotD(m, out[0], out[1]) < .6) { out[2] = 1; return out; }
@@ -210,11 +235,20 @@ export function cavePlan(seed, m, rect, height = null) {
   // lies under the woods' overhang, so nothing round him changes at the step (features/caves.js sinks the surface away round it);
   // world.js keeps the woods' ground over it out of the shadows' and the lights' casters (light falls in)
   C.portalR = PORTAL.r;
+  C.slotSides = SLOT.round + .4;   // (m down the slot: past its head's rounding, its two sides (world/cave3d.js shows them whole in it))
   const fx = cm.x + cm.ux * cm.len, fy = cm.y + cm.uy * cm.len, PQ = [0, 0, 0];
   C.inPortal = (x, y, from = -1) => C.slotAt(x, y, PQ)[2] === 2 ? PQ[0] > from : Math.hypot(x - fx, y - fy) < PORTAL.r;
   C.walls = contour(C.grid);
   // PROPS: crystals at the walls' feet in some rooms (they light the dark), loose rock in the passages
   C.props = [];
+  // the RIM: boulders on the slot's banks and round its head, in the woods (world/forest.js lays them as its own rocks): [x, y, big, variant]
+  const Rr = mulberry32(mix(seed, 12)), RQ = [0, 0]; C.rim = [];
+  for (let t = 0; t < 200 && C.rim.length < 9; t++) {
+    const x = sb[0] + Rr() * (sb[2] - sb[0]), y = sb[1] + Rr() * (sb[3] - sb[1]), big = Rr() < .45, v = Rr() * 3 | 0;
+    slotSQ(m, x, y, RQ); const d = slotD(m, RQ[0], RQ[1]);
+    if (d < (big ? 1 : .35) || d > SLOT.bank || RQ[0] > m.brow - .8 || C.rim.some(r => Math.hypot(r[0] - x, r[1] - y) < (big || r[2] ? 1.8 : 1))) continue;
+    C.rim.push([+x.toFixed(2), +y.toFixed(2), big, v]);
+  }
   const Rp = mulberry32(mix(seed, 10)), wantC = T.crystals[0] + Math.floor(Rp() * (T.crystals[1] - T.crystals[0] + 1)), rooms = nodes.filter((n, k) => k > 0 && n.room);
   for (let t = 0, got = 0; t < 200 && got < wantC && rooms.length; t++) {
     const n = rooms[Math.floor(Rp() * rooms.length)], a = Rp() * Math.PI * 2;
@@ -242,7 +276,7 @@ function wobbly(A, Bn, ia, ib, hw, R) {
 // a gentle unevenness in a chamber's floor (m, -.08 .. .14)
 const bumps = (x, y, S) => (vnoise(x * .5, y * .5, S + 5) - .4) * .22;
 function slotBox(m) {
-  const P = [[m.x, m.y], [m.x + m.ux * m.len, m.y + m.uy * m.len]], hw = m.w / 2 + .3;
+  const P = [[m.x - m.ux * SLOT.bank, m.y - m.uy * SLOT.bank], [m.x + m.ux * m.len, m.y + m.uy * m.len]], hw = m.w / 2 * (1 + SLOT.wide) + SLOT.bend + SLOT.rag + SLOT.bank + .5;   // (its widest, wandered furthest, and its banks)
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   for (const [x, y] of P) for (const s of [-1, 1]) { const px = x - m.uy * hw * s, py = y + m.ux * hw * s; x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px); y1 = Math.max(y1, py); }
   return [x0 - .3, y0 - .3, x1 + .3, y1 + .3];

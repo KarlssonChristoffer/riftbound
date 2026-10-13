@@ -62,7 +62,7 @@ export const TUNE = {
   ice: {spread: .9},
   mountain: {h: [11.5, 13], r: [31, 34], stoss: 1.1, lee: .95, wob: .1, lump: .08, calm: .5, crags: [5, 8], cragL: [6, 13], cragD: [5, 8.5], tors: [1, 3], torN: [3, 5], treeline: .6},
   upland: {h: [7, 8.5], slope: 28},
-  canyon: {side: 22, head: 9, wander: 5, hw: [1.7, 2.7], rise: [.6, 1.4], ridge: [5.5, 6.5], rim: 2, fall: 18, in: [14, 40]},
+  canyon: {side: 22, head: 9, wander: 5, hw: [1.7, 2.7], rise: [.6, 1.4], ridge: [5.5, 6.5], rim: 2, fall: 18, in: [14, 40], flare: 1.1, flareL: 14, rag: .45, fallen: 12, mouthBank: 2.8, wallFrom: 1.1},
   clearing: {r: 7, off: 4.5},
   esker: {h: [2.2, 2.8], crest: 1.2, w: 8.5, len: [36, 64], taper: .26},
   outcrop: {n: [3, 6], len: [3.5, 7], wid: [2.4, 4.2], rise: [1.1, 2.3]},
@@ -175,7 +175,7 @@ export function forestPlan(seed) {
     const xc = west ? RECT.x1 - CY.side : RECT.x0 + CY.side, y0 = uFoot + 3, y1 = RECT.y0 + CY.head, ph = Rm() * 6, ctl = [];
     for (let i = 0; i <= 6; i++) { const f = i / 6; ctl.push([xc + Math.sin(f * 3.4 + ph) * CY.wander * (.4 + .6 * f) + (Rm() - .5) * 2, y0 + (y1 - y0) * f]); }
     const C = course(ctl, 0, 0), pts = [], hw = [], bed = [], at = [], b0 = reliefH(...ctl[0]) + .25, rise = CY.rise[0] + Rm() * (CY.rise[1] - CY.rise[0]), rr = CY.ridge[0] + Rm() * (CY.ridge[1] - CY.ridge[0]);
-    for (let i = 0; i < C.n; i += 25) { const t = C.len[i] / C.total; pts.push([+C.px[i].toFixed(2), +C.py[i].toFixed(2)]); at.push(C.len[i]); hw.push(+(CY.hw[0] + (CY.hw[1] - CY.hw[0]) * vnoise(t * 5, 3.3, S + 21)).toFixed(2)); bed.push(+(b0 + rise * smooth(t)).toFixed(3)); }
+    for (let i = 0; i < C.n; i += 25) { const t = C.len[i] / C.total; pts.push([+C.px[i].toFixed(2), +C.py[i].toFixed(2)]); at.push(C.len[i]); hw.push(+((CY.hw[0] + (CY.hw[1] - CY.hw[0]) * vnoise(t * 5, 3.3, S + 21)) * (1 + CY.flare * (1 - smooth(Math.min(1, C.len[i] / CY.flareL)))) + (vnoise(C.len[i] * .35, 9.1, S + 23) - .5) * 2 * CY.rag).toFixed(2)); bed.push(+(b0 + rise * smooth(t)).toFixed(3)); }   // (its mouth flares open; its sides pinch and swell: a gorge, not a cut)
     return {pts, hw, bed, at, rise, rr, box: boxOf(pts, Math.max(...hw) + CY.rim + CY.fall)};
   })();
   const _cn = [0, 0, 0];   // (the nearest point of the canyon's line: m to it, its segment, the fraction along that)
@@ -216,21 +216,23 @@ export function forestPlan(seed) {
   }
   // the CANYON's cut: walls straight down (no bank: rock up them, world.js)
   {
-    const {pts, hw, bed} = cy, cut = {type: 'channel', pts, bed, hw, bank: .06, drawn: {hw: hw.map(v => +(v + CANYON_IN).toFixed(2))}};
+    // (its mouth: grassy banks sloping in (mouthBank m wide), steepening to a straight drop by flareL m in, where the rock begins)
+    const {pts, hw, bed} = cy, bank = cy.at.map(a => +(.06 + CY.mouthBank * (1 - smooth(Math.min(1, a / CY.flareL)))).toFixed(2));
+    const cut = {type: 'channel', pts, bed, hw, bank, drawn: {hw: hw.map((v, i) => +(v + CANYON_IN * (bank[i] < .2 ? 1 : 0)).toFixed(2))}};
     // its wall as one line (cliffs3d.js's way: the floor on its right): up its west side, round the head, down its east side
     const side = sg => pts.map((p, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [p[0] + (b[1] - a[1]) / l * sg * hw[i], p[1] - (b[0] - a[0]) / l * sg * hw[i]]; });
     // (from where it is a wall: at the mouth the ground outside is no higher than the floor, and a run of rock there stands loose)
-    const from = sg => { const L = side(sg); let i = 0; while (i < L.length - 2) { const [x, y] = L[i], q = L[i + 1], l = Math.hypot(q[0] - x, q[1] - y) || 1, ox = sg * (q[1] - y) / l, oy = -sg * (q[0] - x) / l; if (ground(x + ox, y + oy) - bed[i] > .3) break; i++; } return L.slice(Math.max(0, i - 1)); };
+    const from = sg => { const L = side(sg); let i = 0; while (i < L.length - 2) { const [x, y] = L[i], q = L[i + 1], l = Math.hypot(q[0] - x, q[1] - y) || 1, ox = sg * (q[1] - y) / l, oy = -sg * (q[0] - x) / l; if (bank[i] < .3 && ground(x + ox, y + oy) - bed[i] > CY.wallFrom) break; i++; } return L.slice(Math.max(0, i - 1)); };
     const Wl = from(1), El = from(-1), c = pts.at(-1), r = hw.at(-1), ang = q => Math.atan2(q[1] - c[1], q[0] - c[0]);
     let a0 = ang(Wl.at(-1)), a1 = ang(El.at(-1)); while (a1 <= a0) a1 += 2 * Math.PI;
     const ring = []; for (let k = 1; k < 12; k++) { const a = a0 + (a1 - a0) * k / 12; ring.push([c[0] + Math.cos(a) * r, c[1] + Math.sin(a) * r]); }
-    F.canyon = {pts, hw, bed, cut, wall: [...Wl, ...ring, ...El.reverse()].map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]), depth: +(uh + cy.rr - cy.rise).toFixed(2)};
+    F.canyon = {pts, hw, bed, bank, cut, wall: [...Wl, ...ring, ...El.reverse()].map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]), depth: +(uh + cy.rr - cy.rise).toFixed(2)};
   }
-  const canyonH = (x, y, h) => {   // the canyon's cut as terrain.js makes it (bank .06: a straight drop), for F.height
-    const [bd, bi, bt] = cyNear(x, y), c = F.canyon, w = c.hw[bi] + (c.hw[bi + 1] - c.hw[bi]) * bt, b = c.bed[bi] + (c.bed[bi + 1] - c.bed[bi]) * bt;
-    return bd < w + .06 && h > b ? b + (h - b) * smooth(Math.max(0, bd - w) / .06) : h;
+  const canyonH = (x, y, h) => {   // the canyon's cut as terrain.js makes it (its bank: a straight drop past the mouth), for F.height
+    const [bd, bi, bt] = cyNear(x, y), c = F.canyon, w = c.hw[bi] + (c.hw[bi + 1] - c.hw[bi]) * bt, b = c.bed[bi] + (c.bed[bi + 1] - c.bed[bi]) * bt, k = c.bank[bi] + (c.bank[bi + 1] - c.bank[bi]) * bt;
+    return bd < w + k && h > b ? b + (h - b) * smooth(Math.max(0, bd - w) / k) : h;
   };
-  const canyonBox = boxOf(F.canyon.pts, Math.max(...F.canyon.hw) + .1);
+  const canyonBox = boxOf(F.canyon.pts, Math.max(...F.canyon.hw) + Math.max(...F.canyon.bank) + .05);
   F.mountain = {x: +fx.toFixed(2), y: +fy.toFixed(2), h: 0, r: +fr.toFixed(2), rise: +fH.toFixed(2)};
   const bare = (x, y) => fellH(x, y) > fH * MT.treeline;   // (no trees on the fell's top)
   // how far up the fell / the upland a point is (0 .. 1): the painter's bands (biomes.js: heath and lichen up the fell, drier grass on
@@ -397,6 +399,23 @@ export function forestPlan(seed) {
   for (const t of F.tors) for (const [x, y, v] of t.rocks) {
     const ci = F.chunks.findIndex(([a2, b2]) => a2 === Math.floor(x / CHUNK) && b2 === Math.floor(y / CHUNK)); if (ci < 0) continue;
     F.props.push(['rock_big', x, y, {r: .75, variant: v, chunk: ci}]);
+  }
+  // the canyon's fallen rock: boulders and stones along its floor by the walls and strewn out of its mouth on the banks (its own
+  // generator: the rest of the forest comes out the same)
+  {
+    const Rf = rng(mix(seed, 31)), c = F.canyon, P = c.pts, L = cy.at.at(-1);
+    for (let t = 0, got = 0; t < 120 && got < CY.fallen; t++) {
+      const sA = Math.pow(Rf(), 1.6) * L, i = Math.max(0, cy.at.findIndex(a => a > sA) - 1), a = P[i], b = P[Math.min(P.length - 1, i + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const big = Rf() < .4, sg = Rf() < .5 ? -1 : 1, mouthOut = sA < CY.flareL * .6 && Rf() < .35, d = mouthOut ? c.hw[i] + .6 + Rf() * 2 : c.hw[i] - (big ? 1 : .45) - Rf() * .5;
+      const x = +(a[0] + (b[1] - a[1]) / l * sg * d).toFixed(2), y = +(a[1] - (b[0] - a[0]) / l * sg * d).toFixed(2), v = Rf() * 3 | 0;
+      const ci = F.chunks.findIndex(([a2, b2]) => a2 === Math.floor(x / CHUNK) && b2 === Math.floor(y / CHUNK)); if (ci < 0) continue;
+      F.props.push([big ? 'rock_big' : 'rock', x, y, {r: big ? .75 : 0, variant: v, chunk: ci}]); got++;
+    }
+  }
+  // the cave mouth's rim rocks (world/caves.js C.rim: on its banks; each in the chunk it lies in)
+  if (F.cave) for (const [x, y, big, v] of F.cave.rim) {
+    const ci = F.chunks.findIndex(([a2, b2]) => a2 === Math.floor(x / CHUNK) && b2 === Math.floor(y / CHUNK)); if (ci < 0) continue;
+    F.props.push([big ? 'rock_big' : 'rock', x, y, {r: big ? .75 : 0, variant: v, chunk: ci}]);
   }
   // the boulder field's rocks (a global feature: their own generator; each in the chunk it lies in)
   if (BF) {
