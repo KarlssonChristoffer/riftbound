@@ -14,6 +14,9 @@
 //   season's leaf ramp version.
 // READS: E (main.js; E.dev: the colliders overlay + the debug HUD), the modifiers' note 'sim.speed'.  BUDGET: core/perf.js (F3).
 //   const loop = createLoop(E); loop.start() / hitstop(sec) / run(n, dt) (tests: n steps + draws without rAF) / hud()
+//   / hold(screen | null): a SCREEN of its own (dev/wardrobe.js's studio) takes the frame: screen.frame(dt, t) instead of the
+//   game's step and draw (the game stands still and isn't drawn: its canvas keeps its last image), screen.key(k, e) the keys
+//   (core/input.js); null gives the frame back
 import {ROT_SPEED} from '../render/camera.js';
 import {check as checkEvents} from './events.js';
 import {drawPrompt} from '../ui/prompt.js';
@@ -23,7 +26,7 @@ export function createLoop(E) {
   const {G, cv, pa, P, PL, player, keys, mouse, cam, events, features, host, env, proj, hero, stage, perf, opt, lighting, hq, hdc, input, pause, game, photo} = E;
   const {drawZones, drawHud} = E.dev;
   const promptCtx = {host, pa, features, G};   // ui/prompt.js
-  let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null, freeze = 0;
+  let last = performance.now(), fps = 60, hudT = 0, lastDt = 1 / 60, leafVer = -1, leafWorld = null, freeze = 0, screen = null;
   let views = E.flags.get('views') !== '0';   // ?views=0: the sim alone (tools/test/simview.mjs: it must come out the same)
   const BENCH = E.flags.get('bench') === '1';   // (the bench reads the counts: render/glstats.js -> perf.counts)
   const SIM_DT = 1 / 60, MAX_STEPS = 4;
@@ -128,7 +131,8 @@ export function createLoop(E) {
   }
   function frame(now) {
     const dt = Math.max(0, Math.min(.05, (now - last) / 1000)); last = now; lastDt = dt;
-    perf.frameStart(); step(dt); draw(now / 1000); perf.frameEnd();
+    if (screen) screen.frame(dt, now / 1000);   // (a screen of its own: the game holds)
+    else { perf.frameStart(); step(dt); draw(now / 1000); perf.frameEnd(); }
     fps = fps * .95 + (dt > 0 ? 1 / dt : 60) * .05;
     if (now - hudT > 250) { hudT = now; hud(); }
     requestAnimationFrame(frame);
@@ -137,7 +141,8 @@ export function createLoop(E) {
   return {
     start: () => requestAnimationFrame(frame),
     hitstop: sec => { freeze = Math.max(freeze, sec); },   // host.hitstop: the sim holds (F.always features run on)
-    run(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { lastDt = dt; step(dt); draw(performance.now() / 1000); } },
+    run(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { if (screen) { screen.frame(dt, performance.now() / 1000); continue; } lastDt = dt; step(dt); draw(performance.now() / 1000); } },
+    hold(s) { screen = s || null; }, get screen() { return screen; },
     // one more draw of the same moment, no step and no time passing (photo mode's export renders the frame again at its size)
     redraw() { const d = lastDt; lastDt = 0; try { draw(lastT); } finally { lastDt = d; } },
     hud,

@@ -7,6 +7,7 @@
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
 //   const room = createRoom({seed, trees, log}); room.connect(conn); room.stop()
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, encode, decode, num, str} from '../src/net/protocol.js';
+import {cleanSet} from '../src/content/gear.js';
 
 export function createRoom({seed, trees = null, log = () => {}, maxPlayers = 8}) {
   const peers = new Map();   // id -> peer (after its hello)
@@ -14,7 +15,7 @@ export function createRoom({seed, trees = null, log = () => {}, maxPlayers = 8})
   const t0 = Date.now(), now = () => Date.now() - t0;
   let nextId = 1;
 
-  const pub = p => ({id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, phi: p.phi, s: p.s, pose: p.pose, rig: p.rig, w: p.w, wn: p.wn, ls: p.ls});
+  const pub = p => ({id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, phi: p.phi, s: p.s, pose: p.pose, rig: p.rig, w: p.w, wn: p.wn, ls: p.ls, g: p.gear});
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
 
@@ -22,7 +23,7 @@ export function createRoom({seed, trees = null, log = () => {}, maxPlayers = 8})
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
-    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null,
+    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9,
       fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0};
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub)}));
     peers.set(id, p);
@@ -66,6 +67,19 @@ export function createRoom({seed, trees = null, log = () => {}, maxPlayers = 8})
     log(`  ${p.name} felled ${id}`);
   }
 
+  // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:
+  // content/gear.js cleanSet) and tells everyone, the wearer too. (No inventory yet: any known piece may be worn.)
+  function wear(p, m) {
+    const t = now(), mine = () => p.conn.send(encode({k: 'gear', id: p.id, g: p.gear}));   // (every ask gets an answer)
+    if (t - p.gearT < 100) return mine();   // (a flood: refused, the set stays)
+    p.gearT = t;
+    const g = cleanSet(m.g);
+    if (g.join(',') === p.gear.join(',')) return mine();
+    p.gear = g;
+    all({k: 'gear', id: p.id, g});
+    log(`  ${p.name} wears ${g.join(', ') || 'their own clothes'}`);
+  }
+
   function connect(conn) {
     let p = null;
     conn.onmessage = text => {
@@ -73,6 +87,7 @@ export function createRoom({seed, trees = null, log = () => {}, maxPlayers = 8})
       if (!p) { if (m.k === 'hello') p = hello(conn, m); return; }
       if (m.k === 'st') state(p, m);
       else if (m.k === 'act') act(p, m);
+      else if (m.k === 'gear') wear(p, m);
       else if (m.k === 'ping') conn.send(encode({k: 'pong', c: num(m.c), t: now()}));
     };
     conn.onclose = () => {
