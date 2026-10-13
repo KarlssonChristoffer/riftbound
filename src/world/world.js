@@ -60,6 +60,7 @@ import {growDecor} from './decor3d.js';   // the forest floor's small things (wo
 import {propModel} from './props3d.js';   // the true-3D props: the dummy and the crystal as live meshes (?props2d=1: their cards)
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
+import {blendSeam, SEAM} from './seams.js';   // the painters' seams (the forest's edge, the downs' edge): blended over a band
 import {flags} from '../core/flags.js';
 
 export const WATER_H = -.18;
@@ -549,6 +550,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const gc = document.createElement('canvas'); gc.width = WPX; gc.height = HPX;
   const gq = gc.getContext('2d', {willReadFrequently: true});
   biome.paintGround(gq, ctxT);
+  // THE SEAMS (world/seams.js): the Proving Grounds' ground turns into the forest's over its north band and into the West Downs' over its
+  // west band, instead of meeting them on a straight line (each painter its own noise and light)
+  const forestPaint = FOREST && biome.paintForest ? (q, c) => biome.paintForest(q, {PPM, ground: groundDrawn(), forest: FOREST, layout, ...c}) : null;
+  const westPaint = WEST_ON && biome.paintWest ? (q, c) => biome.paintWest(q, {PPM, ground: TERRAIN_ON ? groundDrawn() : null, layout, ...c}) : null;
+  if (forestPaint) blendSeam(gq, {X0: GROUNDS.x0, Y0: GROUNDS.y0, PPM}, {x0: GROUNDS.x0, y0: GROUNDS.y0, x1: GROUNDS.x1, y1: GROUNDS.y0 + SEAM.band, depth: (x, y) => (y - GROUNDS.y0) / SEAM.band}, forestPaint, biome.style);
+  if (westPaint) blendSeam(gq, {X0: GROUNDS.x0, Y0: GROUNDS.y0, PPM}, {x0: GROUNDS.x0, y0: GROUNDS.y0, x1: GROUNDS.x0 + SEAM.band, y1: GROUNDS.y1, depth: (x, y) => (x - GROUNDS.x0) / SEAM.band}, westPaint, biome.style);
   const groundEmit = biome.groundEmit, groundLights = (biome.groundLights || []).slice();
   const gTex = texOf(gc, true), eTex = groundEmit ? texOf(groundEmit, true) : null;
   // past the painted ground's edges (the patch's SKIRT) the texture MIRRORS: a camera turned to face an edge over the border's raised banks
@@ -617,6 +624,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const wpx = Math.ceil((WD.x1 - WD.x0) * PPM), hpx = Math.ceil((WD.y1 - WD.y0) * PPM);
     westCanvas = document.createElement('canvas'); westCanvas.width = wpx; westCanvas.height = hpx;
     biome.paintWest(westCanvas.getContext('2d', {willReadFrequently: true}), {PPM, WPX: wpx, HPX: hpx, X0: WD.x0, Y0: WD.y0, ground: TERRAIN_ON ? groundDrawn() : null, layout});
+    if (forestPaint) blendSeam(westCanvas.getContext('2d', {willReadFrequently: true}), {X0: WD.x0, Y0: WD.y0, PPM}, {x0: WD.x0, y0: GROUNDS.y0, x1: WD.x1, y1: GROUNDS.y0 + SEAM.band, depth: (x, y) => (y - GROUNDS.y0) / SEAM.band}, forestPaint, biome.style);   // (its forest edge: the seams, above)
     wdTex = texOf(westCanvas, true); wdTex.wrapS = wdTex.wrapT = THREE.MirroredRepeatWrapping; wdTex.needsUpdate = true;
     if (BROOK) westPx = westCanvas.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, wpx, hpx).data;   // (the brook's water: its fall's colour, its moving texture)
   }

@@ -42,6 +42,11 @@ no forest).
   (its density, its flowers, the downs' tall and ankle grass), so the meadow does not stop on a line where the forest begins. ~390k
   blades with the default seed (the meadows ~165k), drawn in 12 m chunks the view culls; built once at load (~1.5 s more in a
   software-GL headless Chrome). `?grass=0` grows none.
+- **Seams** (2026-10-13, world/seams.js, called by world.js after each painter): the Proving Grounds' and the West Downs' painted ground
+  turn into the forest's over a 6 m band south of y 0 (and the Proving Grounds' into the downs' over 6 m east of x 0): the other
+  painter paints the band too, and its texels replace the near side's in clumps, all of them at the seam, none at the band's ragged
+  far edge. Only soft ground swaps (grass, earth, moss, banks, heath), so paths, water and stones keep their own edges. The mesa's
+  north drop (2.4 m, along y ~0.6) is terrain, not paint, and still runs nearly straight.
 
 ## Landforms: the home woods (2026-10-12)
 
