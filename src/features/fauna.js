@@ -42,7 +42,7 @@ export const TUNE = {
   // NOTICING (the ground animals): suspicion builds while someone is within alert (x their loudness), the faster the closer; much
   // slower while its head is down grazing (down) or it is bedded (bed), slower while they keep still; it fades all the time (fade /s).
   // look: it lifts its head and watches; alert: it stops and stares (keep still and it settles again: you're a stump); bolt: it's off
-  sus: {gain: 1, down: .1, bed: .5, still: .2, fade: .35, look: .3, alert: .55, bolt: 1},
+  sus: {gain: 1, down: .2, bed: .5, still: .2, fade: .35, look: .3, alert: .55, bolt: 1},
   touch: 1.5,             // m: an animal that hasn't noticed you, this near: E touches it (it leaps and bolts)
   elk: 1.8,               // the uncanny forest's elk at night (features/uncanny.js) counts as someone this loud: everything gives it room
   watcher: 18,            // m: animals this near the watcher (features/watcher.js) stop and stare at it while it is up

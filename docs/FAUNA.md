@@ -26,7 +26,7 @@ and leave (for the night, at dawn) while they are off the screen, so nothing pop
 ## Sneaking up, touching
 
 The deer, fox, hares and capercaillie don't react the instant you are in range: they grow suspicious. Inside their alert distance
-suspicion builds, faster the closer and the louder you are, ten times slower while a deer has its head down grazing, slower while
+suspicion builds, faster the closer and the louder you are, five times slower while a deer has its head down grazing, slower while
 you keep still, and it fades all the time. The tells: it stops, lifts its head and watches you (keep still and it settles again:
 you're a stump); then it stands and stares; then it bolts. So: creep (Q) while its head is down, freeze when it comes up. Running at
 one is no stalk: it goes at once. Get within 1.5 m of one that hasn't noticed you and E touches it (an "E  touch" prompt shows over
