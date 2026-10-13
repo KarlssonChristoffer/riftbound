@@ -22,6 +22,12 @@ export const PAINTS = {
   sawn:        {all: ['#e6c892', '#cca870', '#a08050', '#5c462a']},                                                       // a fresh cut: stump tops, log ends
   eye:         {all: ['#fbfaf4', '#e8e4d8', '#bcb6a8', '#5a5650']},                                                       // the white of an eye
   pupil:       {all: ['#3a3040', '#241c2a', '#16101a', '#08060a']},
+  // the forest's animals (features/fauna.js, docs/FAUNA.md); white fur and the deer's antlers use mushwhite and sawn
+  roe:         {all: ['#c08a5a', '#9a6a40', '#70492c', '#3c2618']},                                                       // a roe deer's summer red-brown
+  russet:      {all: ['#ec9a4a', '#cc6e2c', '#94481e', '#4e2410']},                                                       // a fox, a red squirrel
+  harefur:     {all: ['#b8a084', '#957e64', '#6e5c4a', '#3c3229']},                                                       // a mountain hare's summer grey-brown
+  furdark:     {all: ['#5a4a40', '#3c302a', '#28201c', '#140f0d']},                                                       // dark legs, ear tips, noses, hooves
+  plumage:     {all: ['#464a5a', '#2c2e38', '#1e1f27', '#0e0e12']},                                                       // a raven, a capercaillie cock: near black, a blue sheen
 };
 // a paint's ramp in a biome: ['#hi', '#base', '#shade', '#dark']
 export const paintRamp = (name, biome) => { const p = PAINTS[name]; return p && (p[biome] || p.all); };
