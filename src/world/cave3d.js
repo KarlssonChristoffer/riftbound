@@ -2,8 +2,9 @@
 //   floor   one ground patch over the open (and a little past it, under the walls' feet), on the field's own floor heights, painted
 //           by the biome (biome.paintCave(q, ctx): ctx = {PPM, WPX, HPX, X0, Y0, cave}); a biome without a painter: plain rock
 //   walls   world/cliffs3d.js rock along the open's outline (caves.js C.walls), split by the way each stretch faces into the open
-//           (BINS directions). The stretches that face away from the camera stand between it and the floor: they aren't drawn
-//           (update(yaw) picks them when the camera turns; their shadow casters stay, so the lantern still stops at them).
+//           (BINS directions). The stretches that face away from the camera stand between it and the floor: they're drawn cut
+//           down to an ankle-high edge (LOW: the same rock, so the floor's rim reads as rock, not as a drop into the dark;
+//           update(yaw) picks them when the camera turns; the whole wall's shadow casters stay, so the lantern still stops at them).
 //           Nothing is drawn over the rock: above the walls is the dark
 // OWNS: its meshes, its floor's texture.  READS: the cave's plan, the field (elev).
 //   const cave = buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, disposers}); cave.update(yaw) (each frame: a turn)
@@ -15,6 +16,8 @@ const SHOW = .3;       // a stretch shows while its way into the open . the way 
 const SLOT_IN = 2;     // m past the warp he still counts as in the slot (its side walls all show)
 const FLOOR_C = .5;    // m: the floor's grid
 const FLOOR_PAST = .9; // m: the floor runs this far past the open (under the walls' feet)
+const LOW = .35;       // m: a hidden stretch's edge, over its foot (ankle high)
+const HEAD = .8;       // m: down the slot from its head, no edge (the woods' ground runs on into it)
 
 export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, disposers}) {
   const g = C.grid, D = g.D, H = g.H, k = Math.round(FLOOR_C / g.cell), nxs = Math.floor((g.nx - 1) / k), nys = Math.floor((g.ny - 1) / k);
@@ -84,22 +87,35 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
     if (cur) runs[b].push(cur);
   }
   const o = {fam, rockB: null, cover: null, ladders: []};
-  const meshes = [], portal = [];
+  const meshes = [], portal = [], low = [], lowP = [];
   const topP = (x, z) => top(x + off[0], z + off[1]), footP = (x, z) => foot(x + off[0], z + off[1]);
+  const topL = (x, z) => foot(x, z) + LOW, topLP = (x, z) => footP(x, z) + LOW;
   const build = rs => { const geo = rs.length ? cliffGeometry(rs, o) : null; if (!geo) return null; const m = G.mesh(geo, 1, new THREE.Matrix4(), {static: true, keep: true}); disposers.push(() => { m.dispose(); geo.dispose(); }); return m; };   // (keep: the surface's sink never takes the cave, render/cut.js)
   for (let b = 0; b < 2 * BINS; b++) {
-    const rs = [], rp = [];
+    const rs = [], rp = [], rl = [], rlp = [];
+    let nl = 0;
     for (const pts of runs[b]) {
       let lo = 1e9; for (const [x, z] of pts) lo = Math.min(lo, foot(x, z));
       const sd = seed++;
       rs.push({pts, top, bot: foot, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: sd});
+      // (the edge: not across the slot's head, where the woods' ground runs on into it; in pieces round it)
+      let cl = [];
+      const flushL = () => { if (cl.length > 1) rl.push({pts: cl, top: topL, bot: foot, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: sd}); cl = []; };
+      for (const q of pts) { if (C.slotAt(q[0], q[1], SQ)[2] === 2 && SQ[0] < HEAD) flushL(); else cl.push(q); }
+      flushL();
       // (its stretches in the portal, moved back into the woods: the same rock, the same seed)
       let cur = [];
       const flush = () => { if (cur.length > 1) rp.push({pts: cur, top: topP, bot: footP, minBot: lo - .05, base: 0, relief: .5, talus: true, lip: false, dark: () => -.12, seed: sd}); cur = []; };
       for (const [x, z] of pts) { if (inPortal(x, z)) cur.push([x - off[0], z - off[1]]); else flush(); }
       flush();
+      for (const r of rl.slice(nl)) {   // (and its edge's)
+        const flushL2 = () => { if (cur.length > 1) rlp.push({...r, pts: cur, top: topLP, bot: footP}); cur = []; };
+        for (const [x, z] of r.pts) { if (inPortal(x, z)) cur.push([x - off[0], z - off[1]]); else flushL2(); }
+        flushL2();
+      }
+      nl = rl.length;
     }
-    meshes.push(build(rs)); portal.push(build(rp));
+    meshes.push(build(rs)); portal.push(build(rp)); low.push(build(rl)); lowP.push(b >= BINS ? null : build(rlp));   // (the woods' slot's walls always show whole)
   }
   const dir = Array.from({length: BINS}, (_, b) => [Math.cos(b * 2 * Math.PI / BINS), Math.sin(b * 2 * Math.PI / BINS)]);
   let yaw0 = NaN, slot0 = null;
@@ -113,8 +129,11 @@ export function buildCave({G, THREE, C, biome, PPM, fam, texOf, elev, field, dis
       const cx = Math.sin(yaw), cz = Math.cos(yaw);
       for (let b = 0; b < 2 * BINS; b++) {
         const f = b % BINS, faces = dir[f][0] * cx + dir[f][1] * cz > SHOW;
-        if (meshes[b]) meshes[b].gm.visible = (b >= BINS && slot) || faces;
-        if (portal[b]) portal[b].gm.visible = b >= BINS || faces;   // (the woods' slot's walls: always)
+        const whole = (b >= BINS && slot) || faces, wholeP = b >= BINS || faces;   // (the woods' slot's walls: always)
+        if (meshes[b]) meshes[b].gm.visible = whole;
+        if (low[b]) low[b].gm.visible = !whole;
+        if (portal[b]) portal[b].gm.visible = wholeP;
+        if (lowP[b]) lowP[b].gm.visible = !wholeP;
       }
     },
   };
