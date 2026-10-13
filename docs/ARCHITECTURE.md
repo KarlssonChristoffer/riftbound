@@ -290,6 +290,8 @@ src/
                          surface, holes), blood (pixel blood from bullet hits; Graphics > Effects > Blood)
   game/                  game.js, run.js, enemies.js, items.js, stats.js, save.js
   ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js, cylinder.js (a gun's ammo)
+                         gearpanel.js (Tab: what you wear), gearicons.js (a pixel icon a piece), geartip.js (the card over a
+                         piece, Shift: more), pixelfont.js + pixelframe.js (the pixel-art UI's font and frames)
   audio/                 audio.js, music.js
   content/               moods.js (MOODS, TIMES, CHAR), weapons.js (the bow's numbers, the revolvers: view/hero.js LOADOUTS name one each)
   dev/                   devtools.js (colliders, debug HUD, tree lineup), devkeys.js (dev keys, renderer A/B),
@@ -298,7 +300,7 @@ src/
                          wardrobe.js (the wardrobe screen, Shift+Tab in dev mode: the game held by loop.hold; clothes, test
                          paint, a piece tuner, stats as 'wardrobe' notes, items, saved outfits; docs/GEAR.md), studio.js (its
                          scene: a renderer of its own, a copy of the character who turns on the stage), stage.js (the stage +
-                         backdrop), pixelfont.js (its pixel font)
+                         backdrop)
   vendor/three/          three.js 0.170.0
 ```
 

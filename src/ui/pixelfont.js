@@ -1,7 +1,7 @@
 // PIXEL FONT: a small bitmap font (5 x 7 capitals, a 5-row x-height, 2-row descenders, proportional) drawn here glyph by
 // glyph and built into a TrueType font in code (each lit pixel row a run of squares), registered with the page as
 // 'RiftPixel' (document.fonts). Set its size to 10 x U css px and every font pixel is U px: crisp pixel text in the DOM
-// (dev/wardrobe.js). Characters it lacks fall back to the next font in the stack.
+// (dev/wardrobe.js, ui/gearpanel.js, ui/geartip.js). Characters it lacks fall back to the next font in the stack.
 // API: loadPixelFont() -> Promise<FontFace | null> (made once).  BUDGET: ~1 ms once (a few KB of font).
 const NAME = 'RiftPixel', PX = 100, ASC = 8, DESC = 2;   // a font pixel = 100 units, the em = 10 rows (8 above the baseline)
 

@@ -21,7 +21,7 @@
 // The clothes chosen show on the studio's copy at once and are worn in the game from the step after you go back
 // (features/gear.js choose: co-op asks the server then). Paint and tuned pieces are the look only (no weight, no armor,
 // nothing sent in co-op): on the studio's copy, and on him in the game (features/gear.js preview). The look and the notes
-// hold in DEV MODE only, like the cheat panel's. The UI is pixel art (dev/pixelfont.js, frames painted in code).
+// hold in DEV MODE only, like the cheat panel's. The UI is pixel art (ui/pixelfont.js, ui/pixelframe.js).
 // Remembered on this machine ('rb.wardrobe').
 // It is a FEATURE the boot puts at the end of the list (main.js; dev/: nothing in the game imports it). F.on is the screen
 // open. While it's open the game holds, so what the UI asks for (items, augments) is done at once; while it's shut, its
@@ -37,7 +37,10 @@ import {LOADOUTS, SET_NAMES} from '../view/hero.js';
 import {tint} from '../view/rigkit.js';
 import {STAGES, STAGE_SW, BACKS as SETS} from './stage.js';
 import {createStudio} from './studio.js';
-import {loadPixelFont} from './pixelfont.js';
+import {loadPixelFont} from '../ui/pixelfont.js';
+import {FRAMES, DK, uiUnit} from '../ui/pixelframe.js';
+import {gearIcon, slotIcon} from '../ui/gearicons.js';
+import {gearTip} from '../ui/geartip.js';
 
 const STORE = 'rb.wardrobe', DEG = Math.PI / 180;
 // the stats tab: each a note on the owner's stat (mul: x the value, 1 = as authored; add: + the value, 0 = none)
@@ -109,8 +112,9 @@ const CSS = `
 #wardrobe .wd-slot small { display: block; font-size: inherit; color: var(--dim); text-transform: uppercase; }
 #wardrobe .wd-slot span.n { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #wardrobe .wd-slot.own span.n { color: var(--dim); }
-#wardrobe .wd-ico { flex: 0 0 auto; width: calc(20 * var(--u)); height: calc(20 * var(--u)); display: grid; place-items: center; }
-#wardrobe .wd-ico img { width: calc(12 * var(--u)); height: calc(12 * var(--u)); image-rendering: pixelated; }
+#wardrobe .wd-ico { flex: 0 0 auto; width: calc(24 * var(--u)); height: calc(24 * var(--u)); display: grid; place-items: center; }
+#wardrobe .wd-ico img { width: calc(20 * var(--u)); height: calc(20 * var(--u)); image-rendering: pixelated; }
+#wardrobe .wd-ico img.g { width: calc(18 * var(--u)); height: calc(18 * var(--u)); }
 #wardrobe .wd-off { padding: 0 calc(2 * var(--u)); color: var(--dim); }
 #wardrobe .wd-off:hover { color: #ff8a6a; }
 #wardrobe .wd-sw { flex: 0 0 auto; width: calc(16 * var(--u)); height: calc(16 * var(--u)); display: flex; flex-direction: column; border: var(--u) solid var(--dark); }
@@ -128,16 +132,11 @@ const CSS = `
 /* right: the tab */
 #wardrobe .wd-right { right: calc(4 * var(--u)); top: calc(30 * var(--u)); bottom: calc(4 * var(--u)); width: calc(172 * var(--u)); padding: calc(3 * var(--u)) calc(4 * var(--u));
   overflow: hidden auto; scrollbar-width: thin; scrollbar-color: #7a5f3e #15100c; }
-#wardrobe .wd-cards { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: calc(2 * var(--u)); }
-#wardrobe .wd-card { display: flex; flex-direction: column; padding: var(--u); }
-#wardrobe .wd-card .wd-band { display: flex; height: calc(8 * var(--u)); border: var(--u) solid var(--dark); }
-#wardrobe .wd-card .wd-ct { padding: calc(2 * var(--u)) var(--u) var(--u); }
-#wardrobe .wd-card .wd-ct span { display: block; }
-#wardrobe .wd-card .wd-ct small { display: block; font-size: inherit; color: var(--dim); }
-#wardrobe .wd-card .wd-badge { float: right; font-style: normal; color: var(--key); }
-#wardrobe .wd-info { margin-top: calc(4 * var(--u)); padding: calc(3 * var(--u)) calc(4 * var(--u)); min-height: calc(50 * var(--u)); }
-#wardrobe .wd-info b { font-weight: 400; color: var(--key); }
-#wardrobe .wd-info .wd-soon { color: var(--dim); }
+#wardrobe .wd-icons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(2 * var(--u)); }
+#wardrobe .wd-it { position: relative; display: grid; place-items: center; padding: calc(2 * var(--u)) 0; }
+#wardrobe .wd-it .wd-iw { display: block; padding: var(--u); line-height: 0; }
+#wardrobe .wd-it img { width: calc(36 * var(--u)); height: calc(36 * var(--u)); image-rendering: pixelated; }
+#wardrobe .wd-it .wd-gem { position: absolute; right: calc(2 * var(--u)); top: calc(2 * var(--u)); width: calc(4 * var(--u)); height: calc(4 * var(--u)); border: var(--u) solid var(--dark); }
 #wardrobe .wd-zones { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: calc(2 * var(--u)); }
 #wardrobe .wd-zone { display: flex; align-items: center; gap: calc(3 * var(--u)); padding: var(--u) calc(2 * var(--u)); }
 #wardrobe .wd-zone i { width: calc(7 * var(--u)); height: calc(7 * var(--u)); border: var(--u) solid var(--dark); }
@@ -187,49 +186,6 @@ const CSS = `
   border: calc(3 * var(--u)) solid transparent; border-image: var(--f-panel) 3 fill / calc(3 * var(--u)); opacity: 0; }
 #wardrobe .wd-msg.on { opacity: 1; }
 body.wd :is(#gear, #hud, #help, #hd, #cheats, #gunfeel) { visibility: hidden; }`;
-
-// the frames: a 9-slice pixel-art image (rings from the outside in: [top-left, bottom-right], then the fill), its outer corner
-// pixels cut (a pixel-rounded corner). Painted once, as data URLs the CSS stretches by whole U px (image-rendering: pixelated)
-function frame9(rings, fill) {
-  const n = rings.length, N = 2 * n + 1, c = document.createElement('canvas'); c.width = c.height = N;
-  const q = c.getContext('2d');
-  q.fillStyle = fill; q.fillRect(n, n, 1, 1);
-  rings.forEach(([tl, br], k) => {
-    const a = k, b = N - 1 - k, L = b - a + 1;
-    q.fillStyle = tl; q.fillRect(a, a, L, 1); q.fillRect(a, a, 1, L);
-    q.fillStyle = br; q.fillRect(a, b, L, 1); q.fillRect(b, a, 1, L);
-  });
-  for (const [x, y] of [[0, 0], [N - 1, 0], [0, N - 1], [N - 1, N - 1]]) q.clearRect(x, y, 1, 1);
-  return `url(${c.toDataURL()})`;
-}
-const DK = '#0c0907';
-const FRAMES = {
-  panel: () => frame9([[DK, DK], ['#7a5f3e', '#2e2218'], ['#3a2c1e', '#241b13']], '#1e1812'),
-  btn: () => frame9([[DK, DK], ['#8a6c47', '#3a2b1d']], '#45341f'),
-  hot: () => frame9([[DK, DK], ['#b08c5c', '#4a3826']], '#58432a'),
-  down: () => frame9([[DK, DK], ['#2a1f15', '#8a6c47']], '#3a2c1e'),
-  on: () => frame9([[DK, DK], ['#ffe08a', '#a3762a']], '#6e5222'),
-  card: () => frame9([[DK, DK], ['#5e4a32', '#2a1f15']], '#2a2018'),
-  well: () => frame9([[DK, DK], ['#140f0b', '#4e3d2a']], '#15100c'),
-};
-// the slots' pixel icons (9 x 9): a hat, a shirt, a cape, trousers, a boot
-const ICONS = {
-  head: ['.........', '...###...', '..#####..', '..#####..', '..#####..', '#########', '.#######.', '.........', '.........'],
-  body: ['..##.##..', '.#######.', '#########', '##.###.##', '#..###..#', '...###...', '...###...', '...###...', '.........'],
-  back: ['..#####..', '.##...##.', '.#######.', '.#######.', '#########', '#########', '#########', '#.#.#.#.#', '.........'],
-  legs: ['.#######.', '.#######.', '.###.###.', '.##...##.', '.##...##.', '.##...##.', '.##...##.', '.##...##.', '.........'],
-  feet: ['..###....', '..###....', '..###....', '..###....', '..######.', '.#######.', '.########', '.########', '.........'],
-  hands: ['..#.#.#..', '..#.#.#..', '.#######.', '.#######.', '.######..', '..#####..', '..#####..', '..#####..', '.........'],
-  main: ['.......##', '......###', '.....###.', '....###..', '.#.###...', '..###....', '..##.....', '.#..#....', '#........'],
-  off: ['.#######.', '#########', '#########', '#########', '.#######.', '.#######.', '..#####..', '...###...', '....#....'],
-};
-const icoCache = new Map();
-function iconOf(slot, col) {   // a data URL: the icon in col, with a one-pixel dark shadow down-right
-  const key = slot + col; let u = icoCache.get(key); if (u) return u;
-  const c = document.createElement('canvas'); c.width = c.height = 10; const q = c.getContext('2d'), rows = ICONS[slot];
-  for (const [dx, f] of [[1, DK], [0, col]]) { q.fillStyle = f; rows.forEach((r, y) => { for (let x = 0; x < 9; x++) if (r[x] === '#') q.fillRect(x + dx, y + dx, 1, 1); }); }
-  u = c.toDataURL(); icoCache.set(key, u); return u;
-}
 
 const fmtN = v => String(+v.toFixed(3)).replace(/^(-?)0\./, '$1.');
 const copy = o => JSON.parse(JSON.stringify(o));
@@ -358,11 +314,12 @@ export function createWardrobe({host, hero, live, engine}) {
 
   // ---------------------------------------------------------------- the DOM: the screen round the scene
   const style = document.createElement('style'); style.textContent = CSS; document.head.appendChild(style);
+  const tip = gearTip();   // (ui/geartip.js: the card over a piece)
   const root = document.createElement('div'); root.id = 'wardrobe'; root.className = 'hidden'; document.body.appendChild(root);
-  loadPixelFont();   // (dev/pixelfont.js: 'RiftPixel', made once; the fallback font shows until it's in)
+  loadPixelFont();   // (ui/pixelfont.js: 'RiftPixel', made once; the fallback font shows until it's in)
   for (const [k, f] of Object.entries(FRAMES)) root.style.setProperty('--f-' + k, f());
   // U: css px a UI pixel, by the window's height (2 at 1080, 3 at 1440, 4 at 2160): every edge, gap and font pixel a whole U
-  const unit = () => { const u = Math.max(2, Math.min(5, Math.round(innerHeight / 480))); root.style.setProperty('--u', u + 'px'); return u; };
+  const unit = () => { const u = uiUnit(); root.style.setProperty('--u', u + 'px'); return u; };
   // no focus but the form fields' (Space / Enter stay the game's); a key in a text field is the field's, any other blurs it
   root.addEventListener('mousedown', e => { if (!/^(INPUT|SELECT|OPTION)$/.test(e.target.tagName)) e.preventDefault(); });
   root.addEventListener('keydown', e => {
@@ -408,10 +365,11 @@ export function createWardrobe({host, hero, live, engine}) {
       el('small', '', tx, SLOT_NAMES[slot]); const n = el('span', 'n', tx);
       const off = btn('wd-off', b, '×', e => { e.stopPropagation(); wearIn(slot, ''); sound('back'); }, 'take it off (his own clothes)');
       b.onclick = () => { C.slot = slot; C.tab = 'outfit'; save(); sound('click'); tab(); sync(); };
+      tip.attach(b, {piece: () => gearById(inSlot(slot)), slot, set: wearing});
       let shown = null;
       rows.push(() => {
         const id = inSlot(slot), g = gearById(id);
-        if (id !== shown) { shown = id; ico.src = iconOf(slot, g ? colorsOf(g)[0] : '#8a7c64'); }
+        if (id !== shown) { shown = id; const u = g && gearIcon(g); ico.src = u || slotIcon(slot, g ? colorsOf(g)[0] : '#8a7c64'); ico.className = u ? 'g' : ''; }
         put(n, 'textContent', g ? g.name : 'his own'); put(n.style, 'color', g ? RARITY[g.rarity]?.col ?? '' : ''); b.classList.toggle('own', !g); b.classList.toggle('on', C.tab === 'outfit' && C.slot === slot);
         put(off.style, 'visibility', g ? '' : 'hidden');
       });
@@ -470,7 +428,7 @@ export function createWardrobe({host, hero, live, engine}) {
 
   // ---------------------------------------------------------------- the right pane: the tab
   function tab() {
-    rows.length = tabRows; right.textContent = '';
+    rows.length = tabRows; right.textContent = ''; tip.hide();
     ({outfit: tOutfit, paint: tPaint, tuner: tTuner, stats: tStats, items: tItems, saved: tSaved})[C.tab]();
     right.scrollTop = 0;
     sync();
@@ -488,39 +446,20 @@ export function createWardrobe({host, hero, live, engine}) {
   }
   const btnRow = (parent, list) => { const r = el('div', 'wd-row2', parent); for (const [t, go, title] of list) btn('wd-btn', r, t, go, title); return r; };
 
-  // OUTFIT: the slot's pieces as cards, the one under the pointer in detail
-  let infoId = null;
+  // OUTFIT: the slot's pieces as icons (ui/gearicons.js), the one under the pointer in a card that follows it (ui/geartip.js:
+  // Shift for more); a click wears it
   function tOutfit() {
     head(right, SLOT_NAMES[C.slot]);
-    const cards = el('div', 'wd-cards', right), info = el('div', 'wd-info wd-well', right);
-    const show = id => {
-      const g = gearById(id);
-      if (!g) { info.innerHTML = `<b>His own</b><br><span class="wd-dim">The ${SLOT_NAMES[C.slot].toLowerCase()} as the model was made: no weight, no armor.</span>`; return; }
-      const does = [];
-      if (g.armor) does.push(`takes ${pct(g.armor)} off the damage you take`);
-      for (const m of g.mods || []) {
-        if (m.stat === 'light.lantern') does.push('your lantern is always lit');
-        else if (m.stat === 'light.lanternR') does.push(m.mul >= 1 ? `its light reaches ${pct(m.mul - 1)} further` : `a smaller light`);
-        else if (m.stat === 'player.speed') does.push(`you move ${pct(m.mul - 1)} faster`);
-        else if (m.stat === 'weapon.melee') does.push(`your blow (V) hits x${m.mul}`);
-      }
-      const R = RARITY[g.rarity];
-      info.innerHTML = `<b style="color:${R?.col ?? ''}">${esc(g.name)}</b><br><span class="wd-dim">${R?.name ?? ''} ${(KINDS[g.kind] || '').toLowerCase()}</span><br>${esc(g.desc)}<br><span class="wd-key">${g.weight} kg</span>${g.armor ? ` · <span class="wd-key">armor ${pct(g.armor)}</span>` : ''}` +
-        (does.length ? `<br>Now: ${esc(does.join('; '))}.` : '') + (g.soon ? `<br><span class="wd-soon">Later: ${esc(g.soon)} (not in the game yet)</span>` : '');
-    };
+    const tiles = el('div', 'wd-icons', right);
     for (const g of [null, ...GEAR.filter(x => x.slot === C.slot)]) {
-      const id = g?.id ?? '', b = el('button', 'wd-card', cards), band = el('span', 'wd-band', b), ct = el('span', 'wd-ct', b);
-      stripes(colorsOf(g), band);
-      const badge = el('em', 'wd-badge', ct, 'worn'), nm = el('span', '', ct, g ? g.name : 'His own'), R = g && RARITY[g.rarity];
-      if (R) { nm.style.color = R.col; band.style.borderColor = R.col; }
-      if (g) el('small', 'wd-kind', ct, `${R?.name ?? ''} ${(KINDS[g.kind] || '').toLowerCase()}`);
-      el('small', '', ct, g ? `${g.weight} kg${g.armor ? ` · armor ${pct(g.armor)}` : ''}` : 'no weight');
-      b.onclick = () => { wearIn(C.slot, id); infoId = id; show(id); sound('confirm'); sync(); };
-      b.onmouseenter = () => show(id);
-      b.onmouseleave = () => show(infoId ?? inSlot(C.slot));
-      rows.push(() => { const on = inSlot(C.slot) === id; b.classList.toggle('on', on); put(badge.style, 'display', on ? '' : 'none'); });
+      const id = g?.id ?? '', b = el('button', 'wd-card wd-it', tiles), w = el('span', 'wd-iw wd-well', b), img = el('img', '', w);
+      img.src = g ? gearIcon(g) || slotIcon(C.slot, colorsOf(g)[0]) : slotIcon(C.slot, '#6b5e50');
+      if (g) el('i', 'wd-gem', b).style.background = RARITY[g.rarity]?.col ?? '';
+      b.onclick = () => { wearIn(C.slot, id); sound('confirm'); sync(); };
+      tip.attach(b, {piece: () => g, slot: C.slot, set: wearing});
+      rows.push(() => b.classList.toggle('on', inSlot(C.slot) === id));
     }
-    infoId = inSlot(C.slot); show(infoId);
+    el('div', 'wd-note', right, 'Point at a piece for what it is; hold Shift for more. A click wears it.');
   }
 
   // PAINT: a zone, then a colour from the palette
@@ -759,7 +698,7 @@ export function createWardrobe({host, hero, live, engine}) {
   function close() {
     if (!F.on) return;
     const E = engine();
-    E.loop.hold(null); studio.show(false); F.on = false;
+    E.loop.hold(null); studio.show(false); F.on = false; tip.hide();
     root.classList.add('hidden'); document.body.classList.remove('wd');
     host.feature('audio')?.duck?.(false);
     lookDirty = true; lookT = 0; save(); sound('back');   // (the set chosen is worn from the next step: features/gear.js)

@@ -19,9 +19,10 @@ your lantern (the staff's reaches further). Each piece's "soon" says what it wil
 
 ## Try it
 
-Tab opens the pack (features/pack.js: bag, pouch, skills) and the gear panel beside it; with `?pack=0` Tab opens the gear panel alone. Click a piece to wear it, "own" to take that slot off (the character's own
-clothes). Point at a piece to read what it is, what it does now and what it will do later ("not in the game yet": the
-systems it needs, like cold or fire, aren't there yet). The bottom line is the set's weight, armor and speed.
+Tab opens the pack (features/pack.js: bag, pouch, skills) and the gear panel beside it; with `?pack=0` Tab opens the gear panel alone. Each slot is a row of pixel icons; click one to wear it, the first ("own") to take that slot off (the character's own
+clothes). Point at a piece for a card with what it is, what it does now and what it will do later ("not in the game yet":
+the systems it needs, like cold or fire, aren't there yet); hold Shift for more (materials, modifier notes, what wearing it
+does to your set). The bottom line is the set's weight, armor and speed.
 The set is remembered on this machine. `?gear=wool_cap,mail_shirt` wears a set from the URL (tests); `?gear=none` none.
 In the menu's Sandbox tab, "Gear: ..." opens the panel too.
 
@@ -34,6 +35,8 @@ same whatever he wears; the effects still apply.
  content/gear.js        the pieces, slots, materials, zones and rules (pure data: the browser and the server read it)
  features/gear.js       the set: chosen (want) and in effect (worn); its modifier notes; asks the server in co-op
  ui/gearpanel.js        the panel (DOM, Tab)
+ ui/gearicons.js        a pixel icon of every piece (drawn in code from shapes in its materials)
+ ui/geartip.js          the card over a piece (the panel's and the wardrobe's; Shift: more)
  view/dress.js          a model + the pieces worn -> the model to draw (paint, hide, add shapes, the cloth panel's colour)
  view/livehero.js       body.wear(pieces, key): the dressed corners into the rig (render/rigmesh.js restyle)
  features/coop/look.js  the other players dressed in the sets the server says they wear
@@ -85,17 +88,20 @@ HE turns on the stage; the camera and the set never move. Drag him to turn him, 
 zooms (whole display scales), R frames him again, Space spins him, arrows / A / D turn him a step, H hides the UI, Tab the
 next tab, P saves a PNG of the scene, Esc (or Shift+Tab) back to the game, which goes on from the frame it held.
 
-The UI is pixel art like the game: its own pixel font (`dev/pixelfont.js`: 5 x 7 glyphs built into a TrueType font in code,
-'RiftPixel'), 9-slice pixel frames painted in code (wood and brass), pixel slot icons, every edge a whole UI pixel (U css
+The UI is pixel art like the game: its own pixel font (`ui/pixelfont.js`: 5 x 7 glyphs built into a TrueType font in code,
+'RiftPixel'), 9-slice pixel frames painted in code (`ui/pixelframe.js`: wood and brass), a pixel icon of every piece
+(`ui/gearicons.js`: 16 x 16, drawn in code from a few shapes in the piece's own materials, shaded and outlined like the game's
+art), a card that follows the pointer over a piece (`ui/geartip.js`: what it is, weight, armor, what it does now and later;
+hold SHIFT for its materials, modifier notes, what it changes on the model and what wearing it does to your set), every edge a whole UI pixel (U css
 px: 2 at 1080, 3 at 1440, 4 at 2160). It stands round the scene: the TOP bar (the title, the loadout, the tabs, the keys, back to the game), EQUIPMENT on the
-left (a card a slot with what he wears there, its colours as a swatch, x takes it off; Random, Undress; the set's weight,
+left (a card a slot with the icon of what he wears there, x takes it off; Random, Undress; the set's weight,
 armor and speed as bars), the tab on the right, and the SCENE bar at the bottom (backdrop and stage swatches, the light:
 now, dawn, day, dusk, night as the clock's preview; his pose: the live hero's emotes; turn 45 degrees, spin, frame, photo).
 The camera frames him in the middle of what the panes leave, at the zoom where he is about half its height. The tabs:
 
-- **Outfit.** The chosen slot's pieces as cards (their colours, weight, armor; a click wears it: through
-  `features/gear.js choose`, shown at once, worn when you go back to the game; in co-op the server is asked then), the piece
-  under the pointer in detail (what it does now, what it will do later).
+- **Outfit.** The chosen slot's pieces as icons, a rarity gem in the corner (a click wears it: through
+  `features/gear.js choose`, shown at once, worn when you go back to the game; in co-op the server is asked then); the piece
+  under the pointer in the card (Shift: more).
 - **Paint.** The model's zones and the duster tail; a palette (every material, a picked colour, off) painted on the chosen one.
 - **Tuner.** Pick a piece with shapes, pick a shape, and move, turn and size it on sliders (drawn as you drag, a dress at
   most every 50 ms). "Copy code" puts the piece's `add` list on the clipboard as content/gear.js lines (and in the console):
