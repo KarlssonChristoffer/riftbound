@@ -443,6 +443,11 @@ uniform float uCliffTop;   // steep ground only below this height takes the clif
 // its field: the wind has moved the leaves about, R already holds how much has fallen, G is the palette itself. uLitCap: never denser
 precision highp sampler2D;
 uniform sampler2D uLit, uLitPal; uniform float uHasLit, uLive, uLitCap; uniform vec4 uLitK;
+// RAIN PUDDLES (G.setPuddles / setPuddleLook: features/puddles.js): where the ground can hold a puddle, baked once per world (uPud: R
+// 0..1 how readily, over uPudR: its first metre x, z and 1 / its size in m), filled to uPudK.x (the ground's wetness: they grow in
+// the rain, shrink as it dries); a puddle shows the sky's colour (uPudSky) over the dark ground under it, a rim of wet mud round it,
+// and the rain rings it. Per ground texel (its world texel: fixed to the world, crisp edges). uPudK.w 0: none (dry: no cost)
+uniform sampler2D uPud; uniform vec4 uPudR, uPudK; uniform vec3 uPudSky;
 // GROUND DECALS on walkable terrain (G.setGroundDecals: features/flow.js's ground layer): marks in world px (x PPM, z PPMY) read at
 // the fragment's own world position, so they lie on a slope as on flat ground (without terrain flow draws them through a plane)
 uniform sampler2D uDecal; uniform float uHasDecal, uDecalOn; uniform vec4 uDecalRect; uniform vec2 uDecalPx;
@@ -505,6 +510,14 @@ void main() {
       }
       if (uWBedOn > .5 && rc >= 128) c.rgb = wFoam(c.rgb, ti, int(wBed(ti).a * 255. + .5) & 7);   // (contact foam: WATER_FS)
       if (rc >= 192) { bool sw = (rc & 15) == 0 && uWS.w >= 0.; if (uWS2.x + (sw ? uWS2.y : 0.) > .01) c.rgb = wDrops(c.rgb, ti, sw); }   // (rain rings on all water; a fish on still water)
+    }
+  }
+  if (uPudK.w > .5 && uType < 1.5 && wfl < .5) {   // a rain puddle (above)
+    ivec2 pt = ivec2(floor(t)); vec2 m = (vec2(pt + wOrg()) + .5) * uWorld / uTexSize, pu = (m - uPudR.xy) * uPudR.zw;
+    if (all(greaterThan(pu, vec2(0.))) && all(lessThan(pu, vec2(1.)))) {
+      float k = texture(uPud, pu).r + (wvn(m * 3.1, 1e4) - .5) * .08 - (1. - .5 * uPudK.x);
+      if (k > .03) { c.rgb = mix(c.rgb * .3, uPudSky * .8, .3 + .35 * smoothstep(.03, .14, k)); wfl = 1.; if (uWS2.x > .01) c.rgb = wDrops(c.rgb, pt, false); }   // (water: the composite mirrors in it)
+      else if (k > 0.) c.rgb *= .62;   // the wet mud round it
     }
   }
   // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
@@ -1602,6 +1615,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
     // still water (setWaterLook's still, setWater's still: features/stillwater.js): see WATER_FS wStill
     wS: {value: new THREE.Vector4(1, 0, 0, -1)}, wS2: {value: new THREE.Vector4()}, wSRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())}, wSTint: {value: new THREE.Vector4(1, 1, 1, .25)},
+    // rain puddles (setPuddles, setPuddleLook: features/puddles.js): see SURF_FS
+    pud: {value: null}, pudR: {value: new THREE.Vector4(0, 0, 1, 1)}, pudK: {value: new THREE.Vector4()}, pudSky: {value: new THREE.Vector3(.5, .55, .6)},
     cut: {value: new THREE.Vector4()}, cutB: {value: new THREE.Vector4()}, cutM: {value: new THREE.Vector4()}, cutP: {value: new THREE.Vector4()},   // the cutaway (render/cut.js; setCut, cutFrame in render())
   };
   const raw = (vs, fs, uniforms, extra = {}) => {
@@ -1687,7 +1702,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp,
     uWBed: bed === undefined ? U.wBed : {value: bed?.tex || null}, uWBedOn: bed === undefined ? U.wBedOn : {value: bed ? 1 : 0},
     uWBedR: bed === undefined ? U.wBedR : {value: new THREE.Vector4(...(bed?.rect || [0, 0, 1, 1]))}, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot,
-    uWS: U.wS, uWS2: U.wS2, uWSRamp: U.wSRamp, uWSTint: U.wSTint}, {side: THREE.FrontSide});
+    uWS: U.wS, uWS2: U.wS2, uWSRamp: U.wSRamp, uWSTint: U.wSTint, uPud: U.pud, uPudR: U.pudR, uPudK: U.pudK, uPudSky: U.pudSky}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
   // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test
@@ -2099,6 +2114,20 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   function setGroundDecals(img, x0 = 0, y0 = 0, pxX = 1, pxY = 1) {
     gDecal = img; U.decalOn.value = img ? 1 : 0;
     if (img) { U.decalRect.value.set(x0, y0, img.width, img.height); U.decalPx.value.set(pxX, pxY); U.decalT.value = imgTex(img); } else U.decalT.value = null;
+  }
+  // RAIN PUDDLES (SURF_FS; features/puddles.js): setPuddles({data: Uint8Array w x h (0..255: how readily the ground holds a puddle),
+  // w, h, x0, z0, wm, hm (its box in m)} | null), once per world; setPuddleLook(fill 0..1, sky [r, g, b] 0..1) every view (fill 0: off)
+  let pudTex = null;
+  function setPuddles(P) {
+    if (pudTex) { pudTex.dispose(); pudTex = null; }
+    U.pud.value = null; U.pudK.value.w = 0; if (!P) return;
+    pudTex = new THREE.DataTexture(P.data, P.w, P.h, THREE.RedFormat, THREE.UnsignedByteType);
+    pudTex.minFilter = pudTex.magFilter = THREE.LinearFilter; pudTex.generateMipmaps = false; pudTex.unpackAlignment = 1; pudTex.needsUpdate = true;
+    U.pud.value = pudTex; U.pudR.value.set(P.x0, P.z0, 1 / P.wm, 1 / P.hm);
+  }
+  function setPuddleLook(fill, sky) {
+    U.pudK.value.x = fill; U.pudK.value.w = pudTex && fill > .01 ? 1 : 0;
+    if (sky) U.pudSky.value.set(sky[0], sky[1], sky[2]);
   }
   // an image or canvas drawn by a GPU context: its texture, made (and uploaded) once; unused for 600 frames, it is let go
   const imgT = new WeakMap(), imgLive = new Set();
@@ -2861,6 +2890,6 @@ void main() {
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setPuddles, setPuddleLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
 }
