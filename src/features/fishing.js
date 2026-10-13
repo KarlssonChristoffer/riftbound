@@ -212,8 +212,8 @@ export async function create(host) {
     }
   }
   const V = {bob: 0, dip: 0, under: 0, fx: 0, fy: 0, dart: 0, dartV: 0, leapT: -1, lx: 0, ly: 0, flash: 0, bang: 0, card: 0, peer: null, peerT: 0};
-  const COL = {rod: '#c4bc7c', line: '#e8e4d8', red: '#d83a2a', white: '#f4f0e6', ring: '#d8ecf0', drop: '#e8f6fa', shade: '#14262a', glow: '#b8c8f0'};
-  const P1 = {size: 1}, P2 = {size: 2}, P2A = {size: 2, alpha: .55}, P1A = {size: 1, alpha: .6}, P2E = {size: 2, emit: true};
+  const COL = {rod: '#c4bc7c', line: '#e8e4d8', red: '#d83a2a', white: '#f4f0e6', ring: '#d8ecf0', drop: '#e8f6fa', shade: '#0e1c20', glow: '#b8c8f0'};
+  const P1 = {size: 1}, P2 = {size: 2}, P2A = {size: 2, alpha: .55}, P1A = {size: 1, alpha: .6}, P2E = {size: 2, emit: true}, P3A = {size: 3, alpha: .75};
   // the fish's leap sprite: its icon with an outline (content/fishing.js catchIcon), a canvas each, made once
   const SPR = {};
   function spriteOf(id) {
@@ -388,7 +388,7 @@ export async function create(host) {
         // the fish under the water: a dark shape the size of it, along the line
         if (S.phase === 'fight') {
           const len = clamp(S.r.cm / 100, .15, 1), P = host.player, dx = V.fx - P.x, dy = V.fy - P.y, l = Math.hypot(dx, dy) || 1, h = host.elev(V.fx, V.fy) + .01;
-          for (let i = 0; i < 5; i++) { const u = (i / 4 - .5) * len; host.point(V.fx + dx / l * u, V.fy + dy / l * u, h, COL.shade, P2A); }
+          for (let i = 0; i < 7; i++) { const u = (i / 6 - .5) * len, w = i > 0 && i < 6 ? P3A : P2A; host.point(V.fx + dx / l * u, V.fy + dy / l * u, h, COL.shade, w); }
         }
       }
       // the leap: the fish out of the water to him (its sprite on an arc), flipping as it goes
