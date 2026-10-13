@@ -81,7 +81,11 @@ night sky, open sky, plain dark / grey; built in code with view/rigkit.js, drawn
 a COPY of the character: his live model (the export the live hero draws) on a body and rig of its own (view/livebody.js,
 render/rigmesh.js), dressed as the wardrobe shows him (view/dress.js), his idle or one of his clips playing, the
 gunslinger's duster tail run as the live hero runs it (a ClothRig on the sprite path's cloth, fed from the drawn pose).
-HE turns on the stage; the camera and the set never move. Drag him to turn him, right-drag to move the view, the wheel
+Backdrops can also be DIORAMAS (`dev/diorama.js`: forest, mountains, desert): a "3D" scene of flat pixel-art cut-outs at
+depths (sky, far mountains or mesas, hills, a treeline, the near ground, leaves framing the front), painted in code once
+per theme and drawn as lit sprites, so the studio light tints them; the depth shows by parallax (each layer shifted by its
+own share of the pointer's place, a slow drift and the view's move: the camera is orthographic, so the shift is the
+layers' own), clouds drift, the framing sways a pixel, stars glow at night. HE turns on the stage; the camera and the set never move. Drag him to turn him, right-drag to move the view, the wheel
 zooms (whole display scales), R frames him again, Space spins him, arrows / A / D turn him a step, H hides the UI, Tab the
 next tab, P saves a PNG of the scene, Esc (or Shift+Tab) back to the game, which goes on from the frame it held.
 

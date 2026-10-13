@@ -37,6 +37,7 @@ import {LOADOUTS, SET_NAMES} from '../view/hero.js';
 import {tint} from '../view/rigkit.js';
 import {STAGES, STAGE_SW, BACKS as SETS} from './stage.js';
 import {createStudio} from './studio.js';
+import {THEMES as DIORAMAS} from './diorama.js';
 import {loadPixelFont} from './pixelfont.js';
 
 const STORE = 'rb.wardrobe', DEG = Math.PI / 180;
@@ -60,7 +61,7 @@ const SIZE = {box: ['size.0', 'size.1', 'size.2'], ball: ['r.0', 'r.1', 'r.2'], 
 const TABS = [['outfit', 'Outfit'], ['scene', 'Scene'], ['paint', 'Paint'], ['tuner', 'Tuner'], ['stats', 'Stats'], ['items', 'Items'], ['saved', 'Saved']];
 const TAB_IDS = TABS.map(t => t[0]);
 const LIGHTS = ['day', 'dawn', 'dusk', 'night'];   // (dev/studio.js LIGHTS)
-const BACKS = Object.keys(SETS);   // (dev/stage.js)
+const BACKS = [...Object.keys(DIORAMAS), ...Object.keys(SETS)];   // (the layered dioramas: dev/diorama.js; the sets' backdrops: dev/stage.js)
 const DEF = {tab: 'outfit', slot: 'head', zone: 'coat', spin: false, back: 'curtain', stage: 'stone', light: 'day', paint: {}, cloth: '', custom: '#5a8f6a',
   tune: {}, stats: {}, piece: '', shape: 0, outfits: []};
 const OWN = '#6b5e50';   // the swatch of "his own clothes"
@@ -483,7 +484,7 @@ export function createWardrobe({host, hero, live, engine}) {
         rows.push(() => b.classList.toggle('on', get() === k));
       }
     };
-    cells('Backdrop', BACKS, () => C.back, k => { C.back = k; backdrop(); }, k => SETS[k].sw);
+    cells('Backdrop', BACKS, () => C.back, k => { C.back = k; backdrop(); }, k => DIORAMAS[k] ? `linear-gradient(${DIORAMAS[k].sw[0]} 55%, ${DIORAMAS[k].sw[1]} 55%)` : SETS[k].sw);
     cells('Stage', STAGES, () => C.stage, k => { C.stage = k; backdrop(); }, k => STAGE_SW[k]);
     head(right, 'Light');
     const lt = el('div', 'wd-pick', right);
