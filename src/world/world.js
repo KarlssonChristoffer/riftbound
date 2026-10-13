@@ -340,7 +340,7 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = n
     if (p < 0) continue;                                        // painted over: not (moving) water
     const ring = o.edge * PPM < 7 ? Math.max(1, Math.ceil(o.edge * PPM)) : 0;
     let state = 3, tone = p;
-    if (T.hold.includes(p) || (p === T.streak && ring <= T.bank) || (o.hold && p === 0)) state = 2;
+    if (T.hold.includes(p) || (p === T.streak && ring > 0 && ring <= T.bank) || (o.hold && p === 0)) state = 2;
     else if (p === T.streak) tone = Math.abs(o.a) < T.deepFrac * o.hw ? T.deep : T.shallow;
     let s13 = Math.round(o.s * PPM * 8); if (s13 < 0 || s13 > 8191) s13 = (s13 % 6144 + 6144) % 6144;   // (out of the 13 bits: wrapped by 768 texels, the pattern's period along: gfx.js wlay)
     data[k] = state << 6 | (state === 3 && o.lake > 0 ? 3 << 4 | Math.max(1, Math.round((1 - o.lake) * 15)) : tone << 4 | (Math.round(Math.min(1.875, o.speed) * 8) & 15));   // (a mouth: tone 3, never moving in ruins' tones, marks it; gfx.js wSpd)
