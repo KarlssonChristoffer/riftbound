@@ -34,6 +34,7 @@ const CLAIM = {
     'Weather (K)': {tab: 'dev', group: 'Nature', label: 'Air particles + ground fog', key: 'K'}},   // (not the weather: World > Weather)
   cinema: {'': {tab: 'controls', group: 'Camera', label: 'Cinematic camera when idle', id: 'cinema', keep: 'cinema'}},
   blood: {'': gfx('Effects', 'Blood', 'blood', 'blood')},   // (features/blood.js: on by default; ?blood=0)
+  uncanny: {'': {tab: 'game', group: 'World', label: 'Uncanny forest', id: 'uncanny', keep: 'uncanny'}},   // (features/uncanny.js: off by default; ?uncanny=1)
   audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
     'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'},
     'Gun sounds': {tab: 'audio', group: 'Sound', label: 'Gun sounds'}},   // (the western-movie flavor: features/audio.js, remembered there)

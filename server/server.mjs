@@ -1,7 +1,7 @@
 // THE CO-OP SERVER (docs/MULTIPLAYER.md): one process that serves the game's files and hosts the room.
-//   node server/server.mjs [--port 8320] [--seed 1234] [--host 0.0.0.0] [--assets D:/Game] [--hour 9] [--daymin 20] [--nshift 1] [--quiet]
+//   node server/server.mjs [--port 8320] [--seed 1234] [--host 0.0.0.0] [--assets D:/Game] [--hour 9] [--daymin 20] [--uncanny] [--nshift 1] [--quiet]
 //   --hour: the world's clock at the start (in-game hours since the start: 9 the first morning, 22 its night); --daymin: real
-//   minutes per in-game day (0 stops the clock); --nshift: how strong the night shift is (docs/UNCANNY.md; 0 = none)
+//   minutes per in-game day (0 stops the clock); --uncanny: the uncanny forest on (docs/UNCANNY.md; off without it); --nshift: how strong the night shift is (docs/UNCANNY.md; 0 = none)
 // then open http://localhost:8320/src/?mp=1 in two (or more) windows: everyone who opens it joins the same world.
 //   GET  /mp/session   {v, seed, players}: the world's seed, read by the page BEFORE it builds the world (core/session.js)
 //   WS   /mp           the room (room.mjs): join, state, acts, snapshots
@@ -21,7 +21,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (name, d) => { const i = process.argv.indexOf('--' + name); return i > 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d; };
 const port = +arg('port', process.env.PORT || PORT), host = arg('host', '0.0.0.0');
 const seed = (+arg('seed', process.env.RIFT_SEED ?? NaN) >>> 0) || (Math.random() * 4294967296 >>> 0) || 1;
-const assets = arg('assets', null), quiet = process.argv.includes('--quiet');
+const assets = arg('assets', null), quiet = process.argv.includes('--quiet'), uncanny = process.argv.includes('--uncanny');
 const hour = +arg('hour', CLOCK.hour), daymin = +arg('daymin', CLOCK.daymin), nshift = +arg('nshift', 1);
 const log = quiet ? () => {} : (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -31,8 +31,8 @@ let trees = null, unc = null;
 try {
   const [W, Un] = await Promise.all([import('../src/world/forest.js'), import('../src/world/uncanny.js')]);
   const F = W.forestPlan(seed); trees = F.trees; log(`forest ${seed}: ${trees.size} trees`);
-  unc = Un.uncannyPlan(F, {shift: isFinite(nshift) ? nshift : 1});
-  log(`uncanny forest: heron ${unc.heron ? 'yes' : 'no'}, stones ${unc.stones ? 'yes' : 'no'}, marks ${unc.marks.length}, elk ${unc.elk ? 'yes' : 'no'} · clock ${hour} h, ${daymin} min a day`);
+  if (uncanny) unc = Un.uncannyPlan(F, {shift: isFinite(nshift) ? nshift : 1});
+  if (unc) log(`uncanny forest: heron ${unc.heron ? 'yes' : 'no'}, stones ${unc.stones ? 'yes' : 'no'}, marks ${unc.marks.length}, elk ${unc.elk ? 'yes' : 'no'} · clock ${hour} h, ${daymin} min a day`);
 }
 catch (e) { log('forest: not loaded (acts are not checked against the trees, no uncanny forest):', e.message); }
 

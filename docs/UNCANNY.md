@@ -10,6 +10,10 @@ server runs it too), `src/sim/uncanny.js` (the rules: the secrets' states and th
 `src/features/uncanny/look.js` (the view). Assets: recipes `heron`, `heron_head`, `elk_body`, `elk_leg`, `elk_neck`,
 `glowring`, `ringstones` (content/recipes.js) with their paints (content/paints.js); keepsakes in content/items.js.
 
+**Off by default** (Christoffer, 2026-10-13): Esc > Game > World > Uncanny forest switches all of it on or off (remembered on
+this machine; `?uncanny=1` / `?uncanny=0` win over that). In co-op the server decides with `--uncanny` (the walkers move
+colliders, so everyone in a world has it or no one does); without it the server runs no secrets and no elk.
+
 ## What is in it
 
 **The night shift.** At dusk a handful of trees and boulders walk 1.6 to 3.4 m (about 25 trees and boulders over the whole
@@ -59,14 +63,14 @@ Private to each player: the heron's gaze (it watches you, like the Watcher), the
 
 | what | URL | in the game |
 |---|---|---|
-| off / dev markers (a line from you to each place and creature, the walkers' paths, the HUD) | `?uncanny=0` / `?uncanny=dev` | Dev > World > Uncanny forest (on / off) |
+| on / off / on with dev markers (a line from you to each place and creature, the walkers' paths, the HUD) | `?uncanny=1` / `?uncanny=0` / `?uncanny=dev` (co-op: the server's `--uncanny`) | Game > World > Uncanny forest (off by default, remembered) |
 | night shift strength (how many walk, how far) | `?nshift=1` (0 none, 2 twice as many, a little further; co-op: the server's `--nshift`) | Dev > World > Night shift strength |
 | how often the elk hunts | `?nelk=1` (0 never, 2 twice as often) | Dev > World > Night elk hunts |
 | how far odd things show (the ring's light, the marks by lantern) | `?nnotice=1` | Dev > World > Odd things notice distance |
 | night length (all of the day, really) | `?daymin=20` (real minutes a day; co-op: the server's `--daymin`) | |
 | jump to night | `?time=night` (co-op: asks the server) | Sandbox > Places: Uncanny: dusk / night / dawn |
 
-Sandbox > Places also has: go to the heron, the stones, the first mark, the elk's patch; a pretend friend in the heron's ring
+While it is on, Sandbox > Places also has: go to the heron, the stones, the first mark, the elk's patch; a pretend friend in the heron's ring
 (to open it alone); wake every secret (offline).
 
 ## Defaults I picked (the brief left these open or empty)

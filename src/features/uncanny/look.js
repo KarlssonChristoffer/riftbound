@@ -60,7 +60,8 @@ export function createUncannyLook(host, F) {
   }
   const all = () => [heron, head, ring, stones, elk?.body, elk?.neck, ...(elk?.legs || []), ...shadows];
   function drop() { made = false; heron = head = ring = stones = elk = null; shadows = []; }   // (disposed by the world's rebuild)
-  function hide() { for (const m of all()) if (m && m.gm.visible) m.setVisible(false); }
+  let hidden = false;   // (switched off: everything hidden; the meshes view() doesn't show every frame come back on the next)
+  function hide() { hidden = true; for (const m of all()) if (m && m.gm.visible) m.setVisible(false); }
 
   // ---------------------------------------------------------------- the marks (pale, pixel; drawn once) and the dropped things' icons
   const canvas = (w, h, draw) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const q = c.getContext('2d'); draw(q); return c; };
@@ -95,6 +96,7 @@ export function createUncannyLook(host, F) {
   let nIn = 0;
   const view = dt => {
     make();
+    if (hidden) { hidden = false; for (const m of [stones, elk?.body, elk?.neck, ...(elk?.legs || [])]) m?.setVisible(true); }
     const P = host.player, k = nightK(env.t);
     // the heron: its head on you (the short way each time, so walking round it turns it all the way round); it sinks at dusk
     if (U.heron) {

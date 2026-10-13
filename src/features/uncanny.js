@@ -23,7 +23,9 @@
 //   'uncanny', its saved part of the pack (pack.store('uncanny')). READS: host.env (the clock), host.player, host.lantern,
 //   host.layout.forest, host.entities, coop (mail, act, the elk's snapshots). EMITS: uncanny.hum, uncanny.slide, uncanny.knock.
 // BUDGET: update ~.02 ms (the walkers only while they slide; the elk's brain; a few distances); view / frame: a dozen matrices.
-// Switches: ?uncanny=0 | dev (markers), ?nshift, ?nelk, ?nnotice (core/flags.js); ?time=night, ?daymin (sim/env.js).
+// ON / OFF: off by default. Esc > Game > World > Uncanny forest switches it (remembered on this machine; ?uncanny=1 / 0 / dev
+// override that). In co-op the server decides (its --uncanny): the walkers move colliders, so everyone has it or no one does.
+// Switches: ?uncanny=1 | 0 | dev (on, with markers), ?nshift, ?nelk, ?nnotice (core/flags.js); ?time=night, ?daymin (sim/env.js).
 import {flags} from '../core/flags.js';
 import {mulberry32, simSeed} from '../core/rng.js';
 import {ITEMS} from '../content/items.js';
@@ -54,7 +56,7 @@ export async function create(host) {
   const R = mulberry32(simSeed());   // (the sim's own draws: the elk's, what you drop)
   const env = host.env, pack = () => host.feature('pack'), coop = () => host.feature('coop');
   const online = () => !!coop()?.online;
-  const F = {name: 'uncanny', label: 'Uncanny forest', on: true, U, TUNE, dev: MODE === 'dev',
+  const F = {name: 'uncanny', label: 'Uncanny forest', on: MODE === '1' || MODE === 'dev', U, TUNE, dev: MODE === 'dev',
     k: 0, night: 0, st: null, me: 0, flash: {heron: 0, stones: 0, marks: 0}, elk: {x: 0, y: 0, phi: 0, mode: 'day', tid: -1, ok: false},
     dropped: [], lit: false, inStones: false, stillT: 0, ringFriend: false, walkers: null};
 
@@ -132,8 +134,10 @@ export async function create(host) {
   let lastX = NaN, lastY = NaN, lantern = 0, wasOnline = false;
   if (host.mods) { const f = () => { lantern = host.mods.value('light.lantern', 0); }; host.mods.watch(f); f(); }
   F.update = (dt) => {
+    const on = online();
+    if (on && F.on !== !!coop().net.unc) F.toggle(true);   // (co-op: the server's world has it or it doesn't)
     if (!F.on || !env) return;
-    const t = env.t, P = host.player, on = online();
+    const t = env.t, P = host.player;
     F.k = nightK(t); F.night = nightNo(t);
     shift(t);
     const v = isNaN(lastX) ? 0 : Math.hypot(P.x - lastX, P.y - lastY) / dt; lastX = P.x; lastY = P.y;
@@ -177,7 +181,8 @@ export async function create(host) {
   F.frame = f => { if (F.on) look.frame(f); };
   F.lights = () => look.lights();
   F.biomeChanged = () => look.drop();
-  F.toggle = () => {
+  F.toggle = server => {
+    if (online() && !server) return F.on;   // (co-op: the server's --uncanny decides)
     F.on = !F.on;
     if (!F.on) { look.hide(); host.mods?.clear('uncanny'); F.inStones = false; for (let j = 0; j < cur.length; j++) if (curK[j] > 0) put(curP[j], cur[j].x0, cur[j].y0, true); curN = null; cur = []; }
     return F.on;
@@ -195,7 +200,7 @@ export async function create(host) {
   ];
   const go = (x, y) => host.teleport(x, y + 2.5);
   const time = part => { if (online()) coop().act('time', part); else env.setPart(part); };
-  F.menu = () => [
+  F.menu = () => !F.on ? [] : [
     {label: 'Uncanny: dusk', run: () => time('dusk')}, {label: 'Uncanny: night', run: () => time('night')}, {label: 'Uncanny: dawn', run: () => time('dawn')},
     ...(U.heron ? [{label: 'Uncanny: go to the heron', run: () => go(U.heron.x, U.heron.y)}] : []),
     ...(U.stones ? [{label: 'Uncanny: go to the quiet stones', run: () => go(U.stones.x, U.stones.y)}] : []),

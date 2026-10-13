@@ -59,7 +59,8 @@ In the menu's Sandbox tab, "Co-op: fell the nearest forest tree (test)" asks the
   (put right when it drifts more than a game minute; not saved as the page's own). It also owns the forest's secrets (their
   states and who opened them: `sec`, all of them in the welcome) and the night elk (in every snapshot as `c`; its knocks as
   `ev`). Clients ask with `act secret` (a secret whose condition holds for them) and, for tests, `act time` (`?time=night`
-  asks it). Which trees walk at night needs nothing sent: it comes from the seed and the clock.
+  asks it). Which trees walk at night needs nothing sent: it comes from the seed and the clock. The uncanny forest is off unless the server
+  runs with `--uncanny` (the welcome's `unc` is then set and every client turns it on; without it, null and off).
 - **Sim vs view.** Shared-world changes and fixes are applied in the feature's `update` (a sim step); the others' bodies are view.
   Without `?mp` the feature is an empty shell: the game, golden, smoke and simview are unchanged.
 
