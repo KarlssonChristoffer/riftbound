@@ -26,6 +26,7 @@
 //                               wheel's zoom doesn't change, so the HUD keeps its size)
 //   F.camera?(dt) -> {x, y}     camera feel: an offset in view px (spring, lean, kick)
 //   F.onKey?(k, e) -> bool      consume a key (k = e.key lower-case)
+//   F.lmb?(down) -> bool        take LMB before the player does (core/input.js): true on the press takes it and its let-go
 //   F.onArrowHit?(a, prop) -> 'stop' | 'pierce'   F.onArrowStuck?(a)   F.ability?(slot) -> bool   F.interact?(prop) -> bool
 //   F.aimTarget?() -> {x, y, h, target} | null    F.hud?() -> string   F.settings?() -> [{label, get, set, options?}]
 //   F.biomeChanged?()           after a world rebuild (N); F.dispose?()

@@ -12,6 +12,9 @@
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
 //            dawn | day | dusk | night: dev, the world's clock to the next such hour)
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
+//   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl}   a cast fell on water (docs/FISHING.md): n = his cast count, w = lake |
+//            stream | river, deep = m from the shore, lvl = his Fishing level; the server rolls what bites. {a: 'land', n}: he
+//            landed it (told to everyone); {a: 'lost', n}: it got away
 //   ping     {c}                                         c = the client's clock (ms), echoed
 // server -> client
 //   welcome  {v, id, name, color, seed, t, world, peers, clock, unc}   world = {id: state} (what's been done to the world so far),
@@ -30,6 +33,9 @@
 //   deny     {a, id, why}                                an act refused
 //   gear     {id, g}                                     what a player wears now (to everyone, the wearer too: his set as
 //                                                        the server took it; docs/GEAR.md)
+//   fish     {a: 'bite', n, id, cm, kg, wait, nibbles, two}   to the caster: what bites cast n (content/fishing.js roll), when
+//            (wait s, the nibbles' s before it), two = a double catch. {a: 'caught', id, name, c, cm, kg, two}: to everyone,
+//            player id landed catch c
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
 //   pong     {c, t}                                      t = the server's clock (ms)
 export const VERSION = 2;

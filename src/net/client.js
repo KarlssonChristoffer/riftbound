@@ -57,7 +57,7 @@ export function createNetClient({transport, name = ''}) {
         break;
       }
       case 'world': C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;
-      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': queue.push(m); break;
+      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': queue.push(m); break;
       case 'gear': {
         if (!Array.isArray(m.g)) break;
         if (m.id === C.id) { queue.push(m); break; }   // (yours: a sim message, features/gear.js wears it at a step)
@@ -91,6 +91,7 @@ export function createNetClient({transport, name = ''}) {
   C.sendState = o => transport.send(encode({k: 'st', ...o}));
   C.act = (a, id) => transport.send(encode({k: 'act', a, id}));
   C.wear = g => transport.send(encode({k: 'gear', g}));
+  C.fish = o => transport.send(encode({...o, k: 'fish'}));   // (features/fishing.js: a cast, a landed fish, a lost one)
   C.pingNow = () => transport.send(encode({k: 'ping', c: performance.now()}));
   C.serverNow = () => performance.now() + (offset || 0);
   C.drain = out => { while (queue.length) out.push(queue.shift()); return out; };

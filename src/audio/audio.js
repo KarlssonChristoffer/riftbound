@@ -49,6 +49,7 @@ import {EVENTS, AMBIENCE, SOURCES, SPATIAL, groundCase, GUN_SFX, GUN_SFX_DEF, ot
 import {flags} from '../core/flags.js';
 import {SPACE_REVERBS} from './acoustics.js';   // THE SPACE: the rooms' reverbs (ctx.space: src/audio/acoustics.js)
 import {clamp} from '../core/mathx.js';
+import {RARITY_TIER} from '../content/fishing.js';
 import {viewRandom} from '../core/rng.js';
 
 const R = Math.random, RR = (a, b) => a + R() * (b - a), J = p => 1 + (R() * 2 - 1) * p;
@@ -465,6 +466,49 @@ const SFX = {
   logPick(E, o) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * .35}); },
   axeSwing(E, o) { SFX.jump(E, {...o, g: (o.g ?? 1) * .45}); },
   campLog(E, o) { SFX.kick(E, {...o, mat: 'wood', g: (o.g ?? 1) * .6}); },   // (a soft wooden thump)
+  // FISHING (features/fishing.js): the cast's swish and the reel's zing, the bobber's plop, a nibble's plip, the bite's plunk,
+  // the reel's clicks, the drag's buzz, the line's snap, the catch's jingle (brighter and longer the rarer it is)
+  fishCast(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * (.6 + .5 * (o.k ?? .5))}, 'fishCast', .6, {cd: .2}); if (!v) return;
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f: 500, f2: 1800, sw: .16, q: 1.2, a: .03, d: .14, g: .3});
+    for (let i = 0; i < 7; i++) E.N(v, .08 + i * .045, {type: 'bandpass', f: 3200 - i * 140, q: 6, a: .001, d: .02, g: .09});   // (the line off the reel)
+    if (o.perfect) E.O(v, .12, {f: 1568, f2: 2093, sw: .1, a: .004, d: .25, g: .04});
+  },
+  fishPlop(E, o) {
+    const v = E.voice(o, 'fishPlop', .4, {cd: .08}); if (!v) return;
+    E.O(v, 0, {f: 520, f2: 180, sw: .07, a: .002, d: .09, g: .22}); E.N(v, .005, {type: 'bandpass', f: 1900, q: 1.4, a: .002, d: .1, g: .18});
+  },
+  fishNibble(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * .7}, 'fishNibble', .2, {cd: .05}); if (!v) return;
+    E.O(v, 0, {f: 900, f2: 420, sw: .04, a: .001, d: .05, g: .12});
+  },
+  fishBite(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * 1.2}, 'fishBite', .7, {pri: 2, cd: .2}); if (!v) return;
+    E.O(v, 0, {f: 300, f2: 90, sw: .12, a: .002, d: .16, g: .38}); E.N(v, .01, {type: 'lowpass', f: 2600, f2: 800, sw: .3, a: .005, d: .32, g: .3});
+    E.O(v, .02, {f: 1320, a: .002, d: .12, g: .035});   // (a little bell on the tip)
+  },
+  fishHook(E, o) {
+    const v = E.voice(o, 'fishHook', .5, {pri: 2, cd: .2}); if (!v) return;
+    E.N(v, 0, {b: E.PK, type: 'bandpass', f: 900, f2: 2400, sw: .06, q: 1.5, a: .005, d: .08, g: .35}); E.O(v, 0, {f: 140, f2: 70, d: .1, g: .3});
+  },
+  fishReel(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * .55, jit: .02}, 'fishReel', .05, {cd: .06}); if (!v) return;
+    E.N(v, 0, {type: 'bandpass', f: 4200, q: 4, a: .001, d: .012, g: .3}); E.O(v, 0, {w: 'square', f: 1900, a: .001, d: .01, g: .015});
+  },
+  fishDrag(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * .6}, 'fishDrag', .14, {cd: .09}); if (!v) return;
+    for (let i = 0; i < 4; i++) E.N(v, i * .025, {type: 'bandpass', f: 2800, q: 5, a: .001, d: .015, g: .25});
+  },
+  fishSnap(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * 1.1}, 'fishSnap', .6, {pri: 2, cd: .3}); if (!v) return;
+    E.N(v, 0, {type: 'highpass', f: 3000, a: .001, d: .03, g: .4}); E.O(v, 0, {w: 'triangle', f: 1100, f2: 240, sw: .35, a: .001, d: .4, g: .1});
+  },
+  fishCatch(E, o) {   // o.tier 0 common .. 4 mythic
+    const k = Math.max(0, Math.min(4, o.tier | 0)), v = E.voice({...o, g: (o.g ?? 1) * 1.4, jit: .005}, 'fishCatch', .9 + k * .2, {pri: 2, cd: .3}); if (!v) return;
+    const notes = [1047, 1319, 1568, 2093, 2637, 3136].slice(0, 2 + k);
+    notes.forEach((f, i) => { E.O(v, i * .07, {f, a: .003, d: .28 + k * .05, g: .045}); E.O(v, i * .07, {f: f * 2, a: .002, d: .1, g: .012}); });
+    if (k >= 3) E.O(v, notes.length * .07, {f: 523, a: .02, d: .9, g: .04});
+  },
   // the bruiser's coach gun (fallbacks for the forge's 'coachgun' recipe while it bakes / ?forge=0), screen-bound like it
   coachShot(E, o) {   // deeper and longer than the revolver's: a broad bark, a low sweep, a long dark tail
     const k = offK(o); if (!k) return;
@@ -1201,6 +1245,23 @@ export function createAudio(ctx, host = {}) {
         case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); break;   // (the swing's whoosh)
         case 'pack.add': if (e.id === 'log') fire('logPick', e.x, e.y); break;
         case 'fire.addWood': fire('campLog', e.x, e.y); break;   // a log on a campfire (features/campfires.js, lights.js)
+        // FISHING (features/fishing.js, docs/FISHING.md)
+        case 'fish.cast': fire('fishCast', e.x, e.y, {k: e.k, perfect: e.perfect}); break;
+        case 'fish.plop': fire('fishPlop', e.x, e.y); break;
+        case 'fish.snag': fire('rustle', e.x, e.y, {surf, g: .4}); break;
+        case 'fish.nibble': fire('fishNibble', e.x, e.y); break;
+        case 'fish.bite': fire('fishBite', e.x, e.y); break;
+        case 'fish.early': case 'fish.slip': fire('fishNibble', e.x, e.y, {g: .6}); break;
+        case 'fish.hook': fire('fishHook', e.x, e.y); fire('splash', e.x, e.y, {surf, small: true}); break;
+        case 'fish.tell': fire('fishNibble', e.x, e.y, {g: .9}); break;
+        case 'fish.surge': fire('splash', e.x, e.y, {surf, small: true, g: 1.3}); break;
+        case 'fish.reel': fire('fishReel', e.x, e.y); break;
+        case 'fish.drag': fire('fishDrag', e.x, e.y); break;
+        case 'fish.snap': fire('fishSnap', e.x, e.y); break;
+        case 'fish.escape': fire('splash', e.x, e.y, {surf, small: true}); break;
+        case 'fish.leap': fire('splash', e.x, e.y, {surf, g: .7}); break;
+        case 'fish.catch': fire('fishCatch', e.x, e.y, {tier: RARITY_TIER[e.rarity] ?? 0}); break;
+        case 'fish.away': fire('fishPlop', e.x, e.y, {g: .5}); break;
         // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge
         // recipes of its own yet): the swish of a turn and the throw on the cloth swish, the cinch a soft thump, the yank
         // a heave, a yanked body's landing the gunmen's fall thud, the rope straining a short creak (the bow's)
