@@ -86,8 +86,9 @@ export async function create(host) {
       if (dirtyT >= 0 && (dirtyT += dt) > SAVE_AFTER) write();
     },
     frame() { panel?.frame(); },
-    onKey(k) {
-      if (!ON || k !== 'tab' || host.lock) return false;
+    get open() { return !!panel?.open; },   // the panel is up (features/gear.js shows its panel beside it)
+    onKey(k, e) {
+      if (!ON || k !== 'tab' || e?.shiftKey || host.lock) return false;   // (Shift+Tab: dev/wardrobe.js)
       panel.toggle(); return true;
     },
     menu() { return ON ? [{label: 'New world (clear the pack and the felled trees)', run: () => queue.push({name: 'New world', run: () => F.reset()})}] : []; },

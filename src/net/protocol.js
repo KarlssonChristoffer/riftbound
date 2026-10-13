@@ -9,14 +9,17 @@
 //            rig = the live model he wears (gunslinger | outlaw | ''), w = the drawn pose's bones (encodePose) when it changed
 //            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport
 //   act      {a, id}                                      ask the server to change the shared world (a: 'fell' a forest tree)
+//   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   ping     {c}                                         c = the client's clock (ms), echoed
 // server -> client
 //   welcome  {v, id, name, color, seed, t, world, peers}  world = {id: state} (what's been done to the world so far), peers = [peer]
-//   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn}
+//   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn, g (the gear worn)}
 //   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0], ...]}   every tick; w only when it changed since the last snap
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
 //   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it
 //   deny     {a, id, why}                                an act refused
+//   gear     {id, g}                                     what a player wears now (to everyone, the wearer too: his set as
+//                                                        the server took it; docs/GEAR.md)
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
 //   pong     {c, t}                                      t = the server's clock (ms)
 export const VERSION = 1;

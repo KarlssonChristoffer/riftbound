@@ -47,7 +47,7 @@ function sections({host, opt, stage, env, hero, cv, perf}) {
       ['F', 'hold + release: zip line · up a ledge · pull a wall top down', null, lasso]]],
     ['Woodcutting', [   // (features/woodcut.js, pack.js, campfires.js: docs/GATHERING.md; a live cowboy in the sandbox)
       ['LMB / hold E', 'on a tree: chop it (an axe in the bag; the logs come to you)', () => host.PL?.tool?.on ? 'axe out' : '', wood],
-      ['Tab', 'the pack: bag, pouch, skills, build', null, () => on('pack')],
+      ['Tab', 'the pack: bag, pouch, skills, build · and your gear beside it', null, () => on('pack')],
       ['E', 'by your campfire: add a log', null, () => on('campfires') && sandbox()]]],
     ['Camera', [
       ['Z / X', 'turn', () => SNAP_NAME[cv.snapMode]], ['MMB', 'drag to turn'], ['Home', 'reset the camera'],
@@ -55,7 +55,7 @@ function sections({host, opt, stage, env, hero, cv, perf}) {
     ['Panels', [
       ['Esc', 'menu · Dev tab: every switch'], ['F1', 'this help + the debug HUD'],
       ['F2', 'cheats', () => onOff(on('cheats'))], ['F3', 'frame profiler', () => onOff(perf.on)], ['F4', 'photo mode'],
-      ['F7', 'move feel (Shift: A/B)', () => onOff(on('movefeel'))], ['F8', 'gun feel', () => onOff(on('gunfeel'))], ['M', 'sound', () => on('audio') ? 'on' : 'muted'],
+      ['F7', 'move feel (Shift: A/B)', () => onOff(on('movefeel'))], ['F8', 'gun feel', () => onOff(on('gunfeel'))], ['Tab', 'gear: what you wear', null, () => !on('pack')], ['Shift+Tab', 'the wardrobe: clothes, paint, stats, items, outfits', () => onOff(on('wardrobe'))], ['M', 'sound', () => on('audio') ? 'on' : 'muted'],
       ['U', 'music', () => onOff(f('audio')?.AU.musicOn)], ['`', 'dev mode']]],
     ['World', [
       ['T', 'time of day', () => `${env.clock()} ${env.part}`], ['N', 'biome (Shift: back)', () => stage.biome.name],
