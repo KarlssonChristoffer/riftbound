@@ -57,8 +57,8 @@ export function createFaunaLook(host, TUNE) {
     const sp = a.sp, R = FAUNA_RIG[sp], s = a.S.s, run = a.v > (sp === 'roe' ? 3 : 2.6), lie = a.lie, t = a.ph;
     // a bound: the deer sails, the fox lopes
     const bound = run ? Math.abs(Math.sin(t * Math.PI)) * (sp === 'roe' ? .32 : .1) : 0, rock = run ? Math.sin(t * TAU) * (sp === 'roe' ? .16 : .08) : 0;
-    const sink = lie * (sp === 'roe' ? .44 : .2);
-    put(r.body, body(a, bound - sink, rock + (a.pitch < -.5 && !run ? -.06 : 0), s));
+    const sink = lie * (sp === 'roe' ? .44 : .2), leap = a.leap > 0 ? Math.sin(a.leap / .45 * Math.PI) * (sp === 'roe' ? .6 : .3) : 0;   // (startled: a leap straight up)
+    put(r.body, body(a, bound - sink + leap, rock + (a.pitch < -.5 && !run ? -.06 : 0), s));
     const g = run ? GAITS.gallop : sp === 'fox' && a.v > .9 ? GAITS.trot : GAITS.walk, amp = run ? .75 : Math.min(.45, a.v * .5);
     for (let i = 0; i < 4; i++) {
       const front = i < 2, sw = Math.sin(t * TAU + g[i]) * amp;
@@ -69,11 +69,11 @@ export function createFaunaLook(host, TUNE) {
     put(r.head, part(R.neck, a.turn, hp - (run ? .25 : 0) + (lie > .5 && sp === 'roe' ? .1 : 0)));
   }
   function hare(a, r) {
-    const s = a.S.s, hop = a.v > .15 ? Math.abs(Math.sin(a.ph * Math.PI)) : 0, k = a.v > 3 ? 1 : .35;
-    const sx = 1 + hop * .3 * k, sy = 1 - hop * .12 * k + (a.st === 'alert' ? .12 : 0);
-    body(a, hop * .3 * k, a.st === 'alert' ? .25 : hop * .15 * k - (a.st === 'graze' ? .08 : 0), s, sx, sy);
+    const s = a.S.s, hop = a.v > .15 ? Math.abs(Math.sin(a.ph * Math.PI)) : 0, k = a.v > 3 ? 1 : .35, up = a.st === 'alert' || a.st === 'stare';
+    const sx = 1 + hop * .3 * k, sy = 1 - hop * .12 * k + (up ? .12 : 0), leap = a.leap > 0 ? Math.sin(a.leap / .45 * Math.PI) * .35 : 0;
+    body(a, hop * .3 * k + leap, up ? .25 : hop * .15 * k - (a.st === 'graze' ? .08 : 0), s, sx, sy);
     put(r.body, B);
-    put(r.head, part(FAUNA_RIG.hare.neck, a.turn, a.pitch * .7 + (a.st === 'alert' ? -.2 : 0)));
+    put(r.head, part(FAUNA_RIG.hare.neck, a.turn, a.pitch * .7 + (up ? -.2 : 0)));
   }
   function squirrel(a, r) {
     const s = a.S.s, tail = Math.sin(performance.now() * .03) * .5 * a.tail;

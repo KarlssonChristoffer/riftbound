@@ -7,16 +7,21 @@
 // capercaillie bursts up out of the heather, the ravens lift off calling and circle. A gunshot empties the woods round you.
 // WHERE they live is the plan's (world/fauna.js: a pure function of the forest's seed). WHAT they do is this file's; how they look
 // is look.js (their parts are recipes: content/recipes.js, posed every frame).
+// YOU AND THEM: they grow suspicious rather than bolt on the spot (TUNE.sus: creep while a deer's head is down, freeze when it comes
+// up); one that hasn't noticed you, within reach: E touches it (F.onKey, the prompt F.hd). The uncanny forest's elk hunting at night
+// scares them like someone very loud; the watcher, while up, has every animal near it staring at it; and the strange (a herd that
+// turns as one to stare at you; the odd hare that sits ahead of you wherever you go) is theirs too. All of it each player's own.
 // MULTIPLAYER: presentation only, like the arena's wildlife: no entity, no collider, nothing the sim reads, nothing sent. Every
 // player has the same animals in the same places (the seed), and each player's own client runs them reacting to EVERY player it
 // knows of (co-op's peers too), so a friend sprinting through a glade scatters the deer on your screen as well. Moment to moment
 // they can differ a little between screens; if animals ever matter to play (hunting, taming), they move to the server.
-// FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle, menu, dbg(). ?fauna=0 starts it off.
+// FEATURE CONTRACT (main.js): create(host) -> F: view, frame, hd, onKey, biomeChanged, toggle, menu, dbg(). ?fauna=0 starts it off.
 // OWNS: its animals' state, their meshes (look.js). READS: world/layout.js FOREST (the plan), host.player, host.world.cave (keeps out of its mouth), co-op's peers
 //   (host.feature('coop').net), host.env (hour, season, snow), host.elev / inStream, world.js steep, host.entities.near (what
-//   stands where), host.events (gunshots, hits, breaks: they scare).
+//   stands where), host.events (gunshots, hits, breaks: they scare), the uncanny forest's F.elk, the watcher's F.state, the game's
+//   ui (a toast for a touch).
 // EMITS (core/events.js; the audio feature plays them): wildlife.wings (a raven taking off), wildlife.birds_scatter (a capercaillie's burst), wildlife.caw (the ravens),
-//   wildlife.critter_dash (a bolt through the undergrowth), wildlife.howl {kind: 'fox', call: 'yips'} (the fox at night).
+//   wildlife.critter_dash (a bolt through the undergrowth), wildlife.howl {kind: 'fox', call: 'yips'} (the fox at night), {kind: 'fox', call: 'bark'} (a roe's alarm bark).
 // BUDGET: the view ~.05 ms for ~30 animals (only those within SIM_R m of the player think; the rest wait where they are); the
 //   frame: a few matrices for each animal on screen. No allocation a frame.
 import {flags} from '../core/flags.js';
@@ -33,7 +38,16 @@ import {createFaunaLook} from './fauna/look.js';
 export const TUNE = {
   SIM_R: 55,              // m from the player: animals further off wait as they are
   DRAW_R: 38,             // m: drawn within this of the player (and on screen)
-  noise: {still: .55, walk: 1, run: 1.45, sprint: 2, jump: 1.6},   // x the distances by how the person moves
+  noise: {still: .3, creep: .5, walk: 1, run: 1.45, sprint: 2, jump: 1.6},   // x the distances by how the person moves (creep: walking, Q held)
+  // NOTICING (the ground animals): suspicion builds while someone is within alert (x their loudness), the faster the closer; much
+  // slower while its head is down grazing (down) or it is bedded (bed), slower while they keep still; it fades all the time (fade /s).
+  // look: it lifts its head and watches; alert: it stops and stares (keep still and it settles again: you're a stump); bolt: it's off
+  sus: {gain: 1, down: .1, bed: .5, still: .2, fade: .35, look: .3, alert: .55, bolt: 1},
+  touch: 1.5,             // m: an animal that hasn't noticed you, this near: E touches it (it leaps and bolts)
+  elk: 1.8,               // the uncanny forest's elk at night (features/uncanny.js) counts as someone this loud: everything gives it room
+  watcher: 18,            // m: animals this near the watcher (features/watcher.js) stop and stare at it while it is up
+  odd: {stare: .12, hare: 4},   // the strange: a herd's chance a minute (at dusk, dawn) of all turning as one to stare at you from
+                                // far; the odd hare's visits a night (it sits ahead of you, watching, wherever you go)
   shot: 38, hit: 14,      // m a gunshot / a hit or a break scares everything within
   roe: {alert: 22, flee: 12.5, rest: .55, run: 7, walk: .8, turn: 4.5, away: [24, 34], out: [[3.5, 10], [16, 23.5]], s: 1.05},
   fox: {alert: 15, flee: 7.5, rest: .45, run: 6, walk: 1.5, turn: 5, away: [18, 26], out: [[16.5, 24], [0, 8.5]], s: 1},
@@ -82,7 +96,7 @@ export async function create(host) {
     const R = mulberry32(d.seed), S = TUNE[d.sp], G = PLAN.groups[d.group];
     return {d, sp: d.sp, S, G, R, x: d.x, y: d.y, z: 0, h: 0, hd: R() * TAU, v: 0, st: 'idle', t: R() * 4, tx: d.x, ty: d.y,
       ph: R() * 10, gait: 0, pitch: 0, turn: 0, gp: 0, gt: 0, lie: 0, lieTo: 0, fx: 0, fy: 0, out: true, gone: false,
-      tree: null, ta: 0, th: 0, flap: 0, vz: 0, tail: 0, blocked: 0, alarm: -1, seen: false};
+      tree: null, ta: 0, th: 0, flap: 0, vz: 0, tail: 0, blocked: 0, alarm: -1, seen: false, sus: 0, leap: 0, sx: 0, sy: 0, odd: false};
   });
   F.animals = ANIM;
   const byGroup = new Map(); for (const a of ANIM) { let l = byGroup.get(a.G); if (!l) byGroup.set(a.G, l = []); l.push(a); }
@@ -92,12 +106,15 @@ export async function create(host) {
   // ---------------------------------------------------------------- people: where they are and how loud (the player and co-op's peers)
   const PEOPLE = []; for (let i = 0; i < 8; i++) PEOPLE.push({x: 0, y: 0, k: 1, on: false, px: NaN, py: NaN});
   const PS = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};
-  let nPeople = 0;
+  let nPeople = 0, nReal = 0;   // (nReal: the people; past them, the elk when it hunts)
+  // the uncanny forest's elk (its view of it: features/uncanny.js F.elk), when that is on; at night it is a hunter
+  const NIGHT_ELK = new Set(['roam', 'stalk', 'lunge', 'stare', 'back']);
+  const elk = () => { const U = host.feature('uncanny'); return U?.on && U.elk?.ok ? U.elk : null; };
   function gatherPeople(dt) {
     const P = host.player, N = TUNE.noise, q = PEOPLE[0];
     const sp = Math.hypot(P.vx || 0, P.vy || 0), st = P.state;
     q.x = P.x; q.y = P.y; q.on = true;
-    q.k = st === 'roll' || st === 'leap' || st === 'knock' ? N.jump : sp < .3 ? N.still : P.gait === 'sprint' || sp > 5.2 ? N.sprint : P.gait === 'run' || sp > 2.4 ? N.run : N.walk;
+    q.k = st === 'roll' || st === 'leap' || st === 'knock' ? N.jump : sp < .3 ? N.still : P.gait === 'sprint' || sp > 5.2 ? N.sprint : P.gait === 'run' || sp > 2.4 ? N.run : sp < 1.8 ? N.creep : N.walk;
     nPeople = 1;
     const C = host.feature('coop')?.net;
     if (C && C.peers) for (const peer of C.peers.values()) {
@@ -105,17 +122,19 @@ export async function create(host) {
       const o = C.sample(peer, PS); if (!o) continue;
       const r = PEOPLE[nPeople++], v = Number.isNaN(r.px) || dt <= 0 ? 0 : Math.hypot(o.x - r.px, o.y - r.py) / dt;
       r.px = r.x = o.x; r.py = r.y = o.y; r.on = true;
-      r.k = v > 30 ? N.walk : v < .3 ? N.still : v > 5.2 ? N.sprint : v > 2.4 ? N.run : N.walk;   // (v > 30: a teleport)
+      r.k = v > 30 ? N.walk : v < .3 ? N.still : v > 5.2 ? N.sprint : v > 2.4 ? N.run : v < 1.8 ? N.creep : N.walk;   // (v > 30: a teleport)
     }
+    nReal = nPeople;
+    const E = elk(); if (E && NIGHT_ELK.has(E.mode) && nPeople < PEOPLE.length) { const r = PEOPLE[nPeople++]; r.x = E.x; r.y = E.y; r.k = TUNE.elk; r.on = true; r.px = r.py = NaN; }
   }
   // the nearest person, scaled by how loud: TH.d = distance / loudness (compare with the species' alert / flee), TH.x / y where
-  const TH = {d: 1e9, x: 0, y: 0, raw: 1e9};
+  const TH = {d: 1e9, x: 0, y: 0, raw: 1e9, k: 1};
   function threat(a) {
     TH.d = 1e9; TH.raw = 1e9;
     for (let i = 0; i < nPeople; i++) {
       const q = PEOPLE[i]; if (!q.on) continue;
       const d = Math.hypot(q.x - a.x, q.y - a.y), e = d / q.k;
-      if (e < TH.d) { TH.d = e; TH.x = q.x; TH.y = q.y; TH.raw = d; }
+      if (e < TH.d) { TH.d = e; TH.x = q.x; TH.y = q.y; TH.raw = d; TH.k = q.k; }
     }
     return TH;
   }
@@ -185,13 +204,18 @@ export async function create(host) {
     const S = a.S, T = threat(a), bang = bangAt(a), out = outNow(S, hr);
     a.ph += a.v * dt * (a.sp === 'hare' ? 2.2 : a.sp === 'fox' ? 2.4 : a.sp === 'capercaillie' ? 4 : 1.35);
     if (a.alarm > 0 && (a.alarm -= dt) <= 0) { a.alarm = -1; if (a.st !== 'flee') bolt(a, a.fx, a.fy, rr(...S.away, a.R) * .8); }
-    const rest = a.st === 'rest', k = rest ? S.rest : 1;
-    if (a.st !== 'flee') {
-      if (bang || T.d < S.flee * k) {
+    const rest = a.st === 'rest', k = rest ? S.rest : 1, N = TUNE.noise, SU = TUNE.sus;
+    if (a.leap > 0) a.leap = Math.max(0, a.leap - dt);
+    if (a.st !== 'flee' && !a.odd) {
+      // noticing: suspicion builds near someone (the closer and the louder, the faster; slow while its head is down or it is
+      // bedded, slower while they keep still) and fades all the time. Someone running at it, or a bang: no waiting
+      const view = rest ? SU.bed : a.pitch < -.6 ? SU.down : 1, mv = T.k > N.still ? 1 : SU.still;
+      a.sus = clamp(a.sus + ((T.d < S.alert * k ? SU.gain * (S.alert * k / Math.max(T.d, .4) - 1) * view * mv : 0) - SU.fade) * dt, 0, 1.2);
+      if (bang || a.sus >= SU.bolt || (T.k >= N.run && T.d < S.flee * k)) {
         const fx = bang ? bang.x : T.x, fy = bang ? bang.y : T.y;
         if (a.sp === 'capercaillie') { flush(a, fx, fy); return; }
-        if (bolt(a, fx, fy, a.S.away ? rr(...a.S.away, a.R) : 14)) { alarmGroup(a); return; }
-      } else if (T.d < S.alert * k && a.st !== 'alert') { a.st = 'alert'; a.t = rr(2, 5, a.R); a.v = 0; lookAt(a, T.x, T.y); if (rest) a.lieTo = a.sp === 'roe' ? .35 : 1; }
+        if (bolt(a, fx, fy, a.S.away ? rr(...a.S.away, a.R) : 14)) { alarmGroup(a); if (a.sp === 'roe' && a.R() < .6) emit('wildlife.howl', a, {kind: 'fox', call: 'bark'}); return; }   // (a roe's alarm bark: a dog-like bark, the fox's will do)
+      } else if (a.sus >= SU.alert && a.st !== 'alert') { a.st = 'alert'; a.t = rr(2, 5, a.R); a.v = 0; lookAt(a, T.x, T.y); if (rest) a.lieTo = a.sp === 'roe' ? .35 : 1; }
     }
     switch (a.st) {
       case 'flee': {
@@ -207,7 +231,7 @@ export async function create(host) {
       }
       case 'alert': {
         a.v *= Math.max(0, 1 - dt * 6);
-        if (T.d < S.alert * k * 1.1) { lookAt(a, T.x, T.y); a.t = Math.max(a.t, 1); }
+        if (a.sus > TUNE.sus.look) { lookAt(a, T.x, T.y); a.t = Math.max(a.t, 1); }   // (it settles once you've kept still a while)
         if ((a.t -= dt) < 0) { a.gp = 0; a.gt = 0; idle(a, out); }
         break;
       }
@@ -228,12 +252,27 @@ export async function create(host) {
         if ((a.t -= dt) < 0) idle(a, out);
         break;
       }
+      case 'stare': {   // turned to look at something (the watcher; you, from far: the strange), every one of them as one: no ease
+        a.v = 0; a.lieTo = Math.min(a.lieTo, .35);
+        const dd = wrap(Math.atan2(a.sy - a.y, a.sx - a.x) - a.hd);
+        if (Math.abs(dd) > 1.1) a.hd = wrap(a.hd + Math.sign(dd) * Math.min(Math.abs(dd) - 1.1, S.turn * .5 * dt));
+        a.gt = a.turn = clamp(wrap(Math.atan2(a.sy - a.y, a.sx - a.x) - a.hd), -1.3, 1.3); a.gp = a.pitch = .35;
+        if ((a.t -= dt) < 0) { a.gp = 0; a.gt = 0; idle(a, out); }
+        break;
+      }
       default: {   // idle: stands, looks round
         a.v *= Math.max(0, 1 - dt * 5); a.gp = .15;
         if ((a.t -= dt) < 0) { a.gt = (a.R() - .5) * 1.6; next(a, out); }
       }
     }
+    // the tell: something is up. It stops, lifts its head and watches (a bedded one only lifts its head)
+    if (a.sus >= TUNE.sus.look && (a.st === 'walk' || a.st === 'graze' || a.st === 'idle' || a.st === 'rest')) {
+      if (a.st !== 'rest' && a.st !== 'idle') idle(a, out);
+      if (a.st === 'idle') a.t = Math.max(a.t, .6);
+      lookAt(a, T.x, T.y);
+    }
   }
+  function stareAt(a, x, y, t) { a.st = 'stare'; a.sx = x; a.sy = y; a.t = t; a.v = 0; }
   function idle(a, out) { a.st = 'idle'; a.t = rr(1, 3, a.R); a.out = out; }
   // what next, when idle: by the clock, home, cover, the den
   function next(a, out) {
@@ -375,7 +414,85 @@ export async function create(host) {
     }
   }
 
+  // ---------------------------------------------------------------- what else they notice
+  const GROUND = new Set(['roe', 'fox', 'hare', 'capercaillie']);
+  const calm = a => a.st === 'idle' || a.st === 'graze' || a.st === 'walk' || a.st === 'rest' || a.st === 'alert';
+  // the watcher (features/watcher.js, each player's own): while it is up, the animals near it stop and stare at it, all of them
+  function watcherStares() {
+    const W = host.feature('watcher'), w = W?.on && W.state;
+    if (!w || (w.phase !== 'rise' && w.phase !== 'watch')) return;
+    for (const a of ANIM) {
+      if (a.gone || a.odd || !GROUND.has(a.sp) || a.h > 0 || Math.hypot(a.x - w.x, a.y - w.y) > TUNE.watcher) continue;
+      if (a.st === 'stare' && a.sx === w.x && a.sy === w.y) a.t = Math.max(a.t, .4);
+      else if (calm(a)) stareAt(a, w.x, w.y, .4);
+    }
+  }
+  // the strange: now and then at dusk or dawn a whole herd, far off, turns as one and stares at you; a few seconds, then back to it
+  function herdStares(hr) {
+    if (!((hr > 16 && hr < 23.5) || (hr > 3.5 && hr < 7))) return;
+    const P = host.player;
+    for (const [G, L] of byGroup) {
+      if (G.sp !== 'roe') continue;
+      const d = Math.hypot(L[0].x - P.x, L[0].y - P.y);
+      if (d < 24 || d > 46 || Math.random() > TUNE.odd.stare / 60) continue;
+      let ok = true; for (const b of L) if (b.gone || !(b.st === 'graze' || b.st === 'idle' || b.st === 'walk')) ok = false;
+      if (!ok) continue;
+      const t = 4 + Math.random() * 3; for (const b of L) stareAt(b, P.x, P.y, t);
+    }
+  }
+  // the odd hare (one in each forest): some nights it is never where it was. Out of sight it is ahead of you again, sitting by
+  // your way, watching you come; a few times a night, then it goes home
+  const ODD = ANIM.find(a => a.sp === 'hare' && !a.d.fell) || null;
+  let oddN = 0, oddCD = 0;
+  function oddHare(dt, hr) {
+    const a = ODD; if (!a) return;
+    const P = host.player, night = hr >= 21.5 || hr < 4;
+    if (!night || oddN >= TUNE.odd.hare) {
+      if (!night) oddN = 0;
+      if (a.odd && !look.seen(a)) { a.odd = false; a.x = a.d.x; a.y = a.d.y; idle(a, true); }   // (home, unseen)
+      return;
+    }
+    if (a.odd) { a.sx = P.x; a.sy = P.y; if (a.st === 'stare') a.t = 1; else a.odd = false; }   // (touched: an ordinary hare again)
+    if ((oddCD -= dt) > 0 || look.seen(a) || (a.odd && Math.hypot(a.x - P.x, a.y - P.y) < 12)) return;
+    const vx = P.vx || 0, vy = P.vy || 0, sp = Math.hypot(vx, vy); if (sp < 1) return;
+    const R = a.R, d = rr(16, 22, R), j = rr(-4, 4, R), x = P.x + (vx * d - vy * j) / sp, y = P.y + (vy * d + vx * j) / sp;
+    if (!free(x, y) || host.G.onScreen(x, elev(x, y) + .3, y, 0)) { oddCD = .5; return; }   // (just past the edge of the view)
+    a.x = x; a.y = y; a.h = 0; a.v = 0; a.gone = false; a.lie = a.lieTo = 0; a.sus = 0; a.odd = true;
+    a.hd = Math.atan2(P.y - y, P.x - x); stareAt(a, P.x, P.y, 1);
+    oddN++; oddCD = rr(8, 20, R);
+  }
+  // touching one: an animal that hasn't noticed you, within reach: E (the prompt over it, F.hd)
+  let touchA = null;
+  const touched = {};
+  const NAMES = {roe: 'roe deer', fox: 'fox', hare: 'hare', capercaillie: 'capercaillie'};
+  function findTouch() {
+    touchA = null; if (host.lock || !F.on) return;
+    const P = host.player; let bd = TUNE.touch;
+    for (const a of ANIM) {
+      if (a.gone || a.h > 0 || !GROUND.has(a.sp) || a.st === 'flee' || a.st === 'flush' || a.st === 'fly' || a.st === 'land' || a.sus >= TUNE.sus.alert) continue;
+      const d = Math.hypot(a.x - P.x, a.y - P.y); if (d < bd) { bd = d; touchA = a; }
+    }
+  }
+  function touch(a) {
+    const P = host.player; a.leap = .45; a.sus = 1.2; a.odd = false;
+    if (a.sp === 'capercaillie') flush(a, P.x, P.y);
+    else { bolt(a, P.x, P.y, (a.S.away ? rr(...a.S.away, a.R) : 14) * 1.2); alarmGroup(a); if (a.sp === 'roe') emit('wildlife.howl', a, {kind: 'fox', call: 'bark'}); }
+    const n = touched[a.sp] = (touched[a.sp] || 0) + 1;
+    game()?.ui?.toast(`You touched a ${NAMES[a.sp]}`, n === 1 ? 'It never heard you coming' : `${n} so far`, '#cfe3a0');
+    touchA = null;
+  }
+  F.onKey = k => { if (k !== 'e' || !touchA || !F.on || host.lock) return false; touch(touchA); return true; };
+  F.hd = (q, sc) => {   // the "E  touch" prompt over it (as ui/prompt.js draws the props')
+    const a = touchA; if (!a || !F.on || host.lock) return;
+    const dpr = devicePixelRatio || 1, [sx, sy] = host.G.toScreen(a.x, a.z + (a.sp === 'roe' ? 1.4 : .9), a.y), txt = 'E  touch';
+    q.font = `${Math.round(11 * dpr)}px ui-monospace, Consolas, monospace`; q.textAlign = 'center';
+    const w = q.measureText(txt).width + 12 * dpr;
+    q.fillStyle = 'rgba(14,16,15,.8)'; q.fillRect(sx * sc - w / 2, sy * sc - 16 * dpr, w, 18 * dpr);
+    q.fillStyle = '#cfe3a0'; q.fillText(txt, sx * sc, sy * sc - 3 * dpr);
+  };
+
   // ---------------------------------------------------------------- the view step
+  let oddAcc = 0;
   let acc = 0;
   F.view = (dt, evs) => {
     const t0 = performance.now();
@@ -400,6 +517,9 @@ export async function create(host) {
       if (a.h === 0 || a.sp === 'squirrel') a.z = elev(a.x, a.y);
       else a.z += (elev(a.x, a.y) - a.z) * Math.min(1, dt * 4);
     }
+    watcherStares(); oddHare(dt, hr);
+    if ((oddAcc += dt) >= 1) { oddAcc -= 1; herdStares(hr); }
+    findTouch();
     F.count = n;
     acc = performance.now() - t0;
   };
@@ -417,7 +537,15 @@ export async function create(host) {
     const P = host.player; let b = null, bd = 1e9;
     for (const a of ANIM) if (a.sp === sp) { const d = Math.hypot(a.x - P.x, a.y - P.y); if (d < bd) { bd = d; b = a; } }
     if (b) { const s = spot(b, b.x, b.y + 9, 3) || {x: b.x, y: b.y + 9}; host.teleport(s.x, s.y); }
-  }}));
-  F.dbg = () => ({count: F.count, ms: +F.ms.toFixed(3), hour: +hour().toFixed(2), animals: ANIM.map(a => `${a.d.id} ${a.st}${a.gone ? ' (gone)' : ''} ${a.x.toFixed(1)},${a.y.toFixed(1)}${a.h ? ' h' + a.h.toFixed(1) : ''}`)});
+  }})).concat([
+    {label: 'Animals: the nearest herd turns and stares', run: () => {
+      const P = host.player; let bL = null, bd = 1e9;
+      for (const [G, L] of byGroup) if (G.sp === 'roe') { const d = Math.hypot(L[0].x - P.x, L[0].y - P.y); if (d < bd) { bd = d; bL = L; } }
+      if (bL) for (const b of bL) if (!b.gone) stareAt(b, P.x, P.y, 6);
+    }},
+    {label: 'Animals: the odd hare comes (at night)', run: () => { oddN = 0; oddCD = 0; }},
+  ]);
+  F.dbg = () => ({count: F.count, ms: +F.ms.toFixed(3), hour: +hour().toFixed(2), touch: touchA?.d.id ?? null, touched: {...touched}, odd: ODD ? {id: ODD.d.id, on: ODD.odd, visits: oddN} : null,
+    animals: ANIM.map(a => `${a.d.id} ${a.st}${a.gone ? ' (gone)' : ''} ${a.x.toFixed(1)},${a.y.toFixed(1)}${a.h ? ' h' + a.h.toFixed(1) : ''}${a.sus > .01 ? ' sus' + a.sus.toFixed(2) : ''}`)});
   return F;
 }
