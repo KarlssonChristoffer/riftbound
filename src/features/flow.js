@@ -279,6 +279,13 @@ export async function create(host) {
     tick(t0);
     return {x: C.outX - TX, y: C.outY - TY};
   }
+  // he was moved by (dx, dy) world m as he was (features/caves.js, host.warp): the mirrored ease, the spring and its output go
+  // along, so the view doesn't swing after him (the spring's state is in the view frame's px, the mirror in world m)
+  function warpCam(dx, dy) {
+    const yaw = host.yaw, cy = Math.cos(yaw), sy = Math.sin(yaw), ax = (dx * cy - dy * sy) * PPM, ay = (dx * sy + dy * cy) * PPMY;
+    Tm.x += dx; Tm.z += dy; if (C.lw) { C.lw[0] += dx; C.lw[1] += dy; }
+    C.x += ax; C.y += ay; C.outX += ax; C.outY += ay;
+  }
   function kick(ux, uy, px) { const v = punchV(px); C.pvx -= ux * v; C.pvy -= uy * v; }   // camera goes AGAINST (ux, uy)
   function gunKick(wx, wy, px) {   // a shot's way on the ground (world, unit) -> the view frame's px direction, then the kick
     const v = toVF(wx, wy), vx = v[0] * PPM, vy = v[1] * PPMY, l = Math.hypot(vx, vy);
@@ -690,6 +697,7 @@ export async function create(host) {
       else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * GK * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
       else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, (e.broke || e.crit ? K.hitKickBig : K.hitKick) * GK);
       else if (e.type === 'fist.hit') gunKick(-e.dx, -e.dy, e.kick * .8);   // a fist landing (features/fists.js): the view jolts along the blow
+      else if (e.type === 'player.warp') warpCam(e.dx, e.dy);   // moved as he was (features/caves.js): the spring goes along
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }
