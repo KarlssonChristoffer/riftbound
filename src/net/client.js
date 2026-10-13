@@ -4,7 +4,8 @@
 // features/coop.js connects it to the world.
 //   const C = createNetClient({transport, name}); C.peers (Map id -> peer); C.sendState(o); C.act(a, id);
 //   C.sample(peer, now, out) -> out {x, y, z, phi, s, pose, ls}; C.drain() -> the queued sim messages (world / fix / deny /
-//   clock / sec / ev); C.elk: the night elk's snapshots (a ring like a peer's: C.sample(C.elk, out) -> s = its mode's index,
+//   clock / sec / ev / gear: your own set as the server took it); C.wear(ids) asks for a set; a peer's q.gear (ids) / q.gv
+//   (its version); C.elk: the night elk's snapshots (a ring like a peer's: C.sample(C.elk, out) -> s = its mode's index,
 //   pose = its quarry's id); C.serverNow() -> the server's clock (ms) now
 // OWNS: the connection's state, the peers' snapshot rings, the clock offset. READS: the transport.
 import {VERSION, INTERP_MS, encode, decode} from './protocol.js';
@@ -24,7 +25,7 @@ export function createNetClient({transport, name = ''}) {
     Z: new Float32Array(RING), F: new Float32Array(RING), S: new Array(RING).fill('idle'), P: new Array(RING).fill('idle.0'), W: new Array(RING).fill(null), L: new Array(RING).fill(null), w: null, wv: 0});
   function peer(p) {
     let q = C.peers.get(p.id);
-    if (!q) { q = ring(p.id, p.name, p.color, p.wn || null, p.rig || ''); C.peers.set(p.id, q); C.joined.push(q); }
+    if (!q) { q = ring(p.id, p.name, p.color, p.wn || null, p.rig || ''); q.gear = Array.isArray(p.g) ? p.g : []; q.gv = 0; C.peers.set(p.id, q); C.joined.push(q); }
     return q;
   }
   C.elk = ring(-1);
@@ -57,6 +58,12 @@ export function createNetClient({transport, name = ''}) {
       }
       case 'world': C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;
       case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': queue.push(m); break;
+      case 'gear': {
+        if (!Array.isArray(m.g)) break;
+        if (m.id === C.id) { queue.push(m); break; }   // (yours: a sim message, features/gear.js wears it at a step)
+        const q = C.peers.get(m.id); if (q) { q.gear = m.g; q.gv++; }
+        break;
+      }
       case 'pong': C.ping = performance.now() - m.c; break;
     }
   };
@@ -83,6 +90,7 @@ export function createNetClient({transport, name = ''}) {
   };
   C.sendState = o => transport.send(encode({k: 'st', ...o}));
   C.act = (a, id) => transport.send(encode({k: 'act', a, id}));
+  C.wear = g => transport.send(encode({k: 'gear', g}));
   C.pingNow = () => transport.send(encode({k: 'ping', c: performance.now()}));
   C.serverNow = () => performance.now() + (offset || 0);
   C.drain = out => { while (queue.length) out.push(queue.shift()); return out; };

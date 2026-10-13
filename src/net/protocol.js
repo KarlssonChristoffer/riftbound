@@ -11,12 +11,13 @@
 //   act      {a, id}                                      ask the server to change the shared world: a 'fell' (id: a forest tree),
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
 //            dawn | day | dusk | night: dev, the world's clock to the next such hour)
+//   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   ping     {c}                                         c = the client's clock (ms), echoed
 // server -> client
 //   welcome  {v, id, name, color, seed, t, world, peers, clock, unc}   world = {id: state} (what's been done to the world so far),
 //            peers = [peer], clock (below), unc = {sec: {id: {s, by, n}}, shift} (the uncanny forest: its secrets' states, the
-//            night shift's strength: docs/UNCANNY.md)
-//   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn}
+//            night shift's strength: docs/UNCANNY.md; null when the server runs without it)
+//   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn, g (the gear worn)}
 //   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0], ...], c?}   every tick; w only when it changed since the last snap;
 //            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
@@ -27,6 +28,8 @@
 //            who opened it (ids), n = on which night
 //   ev       {a: 'knock', id, vx, vy}                    the night elk knocked player id down (vx, vy m/s): they drop something
 //   deny     {a, id, why}                                an act refused
+//   gear     {id, g}                                     what a player wears now (to everyone, the wearer too: his set as
+//                                                        the server took it; docs/GEAR.md)
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
 //   pong     {c, t}                                      t = the server's clock (ms)
 export const VERSION = 2;

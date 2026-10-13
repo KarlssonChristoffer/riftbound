@@ -290,11 +290,17 @@ src/
                          surface, holes), blood (pixel blood from bullet hits; Graphics > Effects > Blood)
   game/                  game.js, run.js, enemies.js, items.js, stats.js, save.js
   ui/                    pause.js (paused, the menu's items), menu.js, hud.js, screens.js, prompt.js, cylinder.js (a gun's ammo)
+                         gearpanel.js (Tab: what you wear), gearicons.js (a pixel icon a piece), geartip.js (the card over a
+                         piece, Shift: more), pixelfont.js + pixelframe.js (the pixel-art UI's font and frames)
   audio/                 audio.js, music.js
   content/               moods.js (MOODS, TIMES, CHAR), weapons.js (the bow's numbers, the revolvers: view/hero.js LOADOUTS name one each)
   dev/                   devtools.js (colliders, debug HUD, tree lineup), devkeys.js (dev keys, renderer A/B),
                          owncheck.js (the ownership table + ?owncheck=1), cheats.js (the cheat panel, F2 in dev mode:
-                         god mode, spawns, kill all, raids, game speed; its cheats are 'cheats' notes in host.mods)
+                         god mode, spawns, kill all, raids, game speed; its cheats are 'cheats' notes in host.mods),
+                         wardrobe.js (the wardrobe screen, Shift+Tab in dev mode: the game held by loop.hold; clothes, test
+                         paint, a piece tuner, stats as 'wardrobe' notes, items, saved outfits; docs/GEAR.md), studio.js (its
+                         scene: a renderer of its own, a copy of the character who turns on the stage), stage.js (the stage +
+                         backdrop)
   vendor/three/          three.js 0.170.0
 ```
 
@@ -326,6 +332,11 @@ dependencies: the co-op server and its room, docs/MULTIPLAYER.md) and `src/net/`
 transport, the client). `core/session.js` settles which world a page plays in (a co-op server's seed, `?seed`) before the world
 is built; `world/forest.js` grows the seeded forest from it (docs/FOREST.md); `features/coop.js` (+ `coop/look.js`) is the game's
 side of a room.
+
+**Gear (2026-10-12).** `content/gear.js` (pure data, also read by the server), `features/gear.js` (the set worn, its `'gear'`
+notes in `host.mods`), `ui/gearpanel.js` (Tab), `view/dress.js` (a live model dressed: painted, hidden and added parts) and
+`render/rigmesh.js restyle` (a model's triangles swapped, its bodies kept). The look reaches the live hero through
+`host.dressPlayer`. docs/GEAR.md.
 
 ### 2.4 A system, concretely
 

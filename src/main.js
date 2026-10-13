@@ -78,6 +78,7 @@ import {createCheats} from './dev/cheats.js';   // the cheat panel (F2): a dev f
 import {createGunFeel} from './dev/gunfeel.js';   // the gun feel panel (F8): live sliders as modifier notes, a dev feature too
 import {createWxPanel} from './dev/wxpanel.js';   // the weather panel (F9): a change of the weather and the god rays' envelope, read out (wx-D)
 import {createMoveFeel} from './dev/movefeel.js';   // the move feel panel (F7): run / sprint speed, get going / stopping, the strides, as modifier notes
+import {createWardrobe} from './dev/wardrobe.js';   // the dev wardrobe (Shift+Tab): the character's clothes, paint, stats, items, outfits
 import {loadFeatures} from './core/features.js';
 import {createInput} from './core/input.js';
 import {createLoop} from './core/loop.js';
@@ -222,6 +223,9 @@ const host = {
   // his DRAWN live pose (view/livehero.js DRAWN: body-space bones in BN order, 7 a bone; phi his facing; n counts the frames drawn;
   // rig the live model's name), or null when he isn't drawn live: co-op sends it to the others (features/coop.js). One reused object
   playerPose: () => { const d = live?.on ? live.drawn : null; if (!d?.w) return null; PPOSE.w = d.w; PPOSE.phi = d.phi; PPOSE.n = d.n; PPOSE.BN = live.BN; PPOSE.rig = hero.loadName; return PPOSE; },
+  // GEAR (features/gear.js, docs/GEAR.md): draw him in these pieces (content/gear.js entries, SLOTS order; key: their setKey).
+  // The live body only (a sprite loadout looks the same); on a change of set, never per frame
+  dressPlayer: (pieces, key) => live?.dress(pieces, key),
 };
 const PPOSE = {w: null, phi: 0, n: 0, BN: null, rig: ''};
 
@@ -237,6 +241,7 @@ features.push(createCheats({host, cam, canvas}));
 features.push(createGunFeel({host}));   // (dev/gunfeel.js: F8 in dev mode)
 features.push(createWxPanel({host}));   // (dev/wxpanel.js: F9 in dev mode; wx-D)
 features.push(createMoveFeel({host, atlas: hero.atlas}));   // (dev/movefeel.js: F7 in dev mode)
+features.push(createWardrobe({host, hero, live, engine: () => E}));   // (dev/wardrobe.js: Shift+Tab in dev mode; a screen of its own: loop.hold)
 if (Q.get('lab')) features.push(await import('./dev/assetlab.js').then(m => m.createLab({host})));   // the asset lab (?lab=1: dev/assetlab.js)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame

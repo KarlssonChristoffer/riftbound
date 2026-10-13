@@ -12,6 +12,8 @@
 //                drifts more than a game minute) and isn't saved as the page's own while borrowed. A ?time= asks the server
 //   the uncanny  the forest's secrets and the night elk are the server's too (docs/UNCANNY.md): their messages (sec, ev) are
 //                handed on in F.mail for features/uncanny.js (refilled each step: it reads them in its own update, after this)
+//   gear         what each player wears is the server's to say (docs/GEAR.md): features/gear.js asks (wear(ids)), the
+//                server checks the set and tells everyone; yours comes back here (F.gear: {ver, ids}), the others' look.js dresses
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
@@ -51,6 +53,7 @@ export async function create(host) {
     const p = treeOf(id); if (!p) return;
     host.world.removeItem?.(p); host.entities.remove(p);
   }
+  const gear = {ver: 0, ids: null};   // your set as the server last took it (features/gear.js wears it)
   let note = '', noteT = 0;
   const BYS = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};   // (where the one who felled a tree is: its fall's way)
   const say = (t, s = 4) => { note = t; noteT = s; };
@@ -98,7 +101,9 @@ export async function create(host) {
   }
 
   const F = {
-    name: 'coop', label: 'Co-op', on: true, net: C, look, act, get online() { return C.status === 'online'; },
+    name: 'coop', label: 'Co-op', on: true, net: C, look, act, gear,
+    get online() { return C.status === 'online'; },
+    wear(ids) { if (C.status !== 'online') return false; C.wear(ids); return true; },   // (features/gear.js: ask for a set)
     mail, clockNow,
     update(dt) {
       mail.length = 0;
@@ -118,6 +123,7 @@ export async function create(host) {
         else if (m.k === 'sec' || m.k === 'ev') mail.push(m);
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
+        else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
       }
       msgs.length = 0;
       for (const q of C.joined) say(`${q.name} joined`); C.joined.length = 0;
