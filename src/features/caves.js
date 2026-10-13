@@ -14,6 +14,7 @@ import {smooth, clamp} from '../core/mathx.js';
 
 const DARK0 = 1.5;     // m down the slot (in the woods) where the world above starts to go dark
 const DARK_W = 1;      // how dark it is at the warp: the woods round him are gone by then, so the step into the cave changes nothing round him
+const DARK_LEAD = .8;  // m before the warp where it is all dark (the ease catches up by the step)
 const LANTERN_R = 2;   // x the lantern's reach down there
 const EASE = 5;        // 1/s
 const NOWARP = new Set(['rope', 'climb', 'mantle']);   // (a move that places him itself: the warp waits until it ends)
@@ -34,7 +35,7 @@ export async function create(host) {
     }
     c.slotAt(p.x, p.y, SQ);
     const inBand = c.inBand(p.x, p.y);
-    target = SQ[2] === 1 ? DARK_W * smooth(clamp((SQ[0] - DARK0) / (M.warp - DARK0), 0, 1)) : inBand ? 1 : 0;
+    target = SQ[2] === 1 ? DARK_W * smooth(clamp((SQ[0] - DARK0) / (M.warp - DARK_LEAD - DARK0), 0, 1)) : inBand ? 1 : 0;
     const down = inBand || (SQ[2] === 1 && SQ[0] > DARK0 + 1);
     if (down !== F.down) {
       F.down = down;

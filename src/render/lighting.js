@@ -28,7 +28,9 @@ const HALO_A = .16, HALO_R = .3, LANTERN = {fwd: .22, side: .3, h: .95, c: [1, .
 // UNDERGROUND (features/caves.js F.under 0..1: how far the world above has gone dark round him): the mood turns toward the cave's:
 // a faint cold ambient, no sun, no sun shadows, no fog's colour, a black background, a small lift round him (he stays readable);
 // the lights (his lantern, the crystals) do the rest
-const CAVE = {amb: [.055, .055, .07], lift: [.05, .045, .04], fill: .25};
+const CAVE = {amb: [.012, .012, .016], lift: [.05, .045, .04], fill: .25, glow: [.07, .068, .078], glowR: 7};   // (glow: a wide faint pool round him
+// instead of an ambient: the cave's floor past the lantern shows its shapes, while the woods above, metres over him and away,
+// go black, so the step into the cave changes nothing round him)
 const mixInto = (a, b, k, o) => { o[0] = a[0] + (b[0] - a[0]) * k; o[1] = a[1] + (b[1] - a[1]) * k; o[2] = a[2] + (b[2] - a[2]) * k; return o; };
 function flick(l, t) {
   const f = l.flicker || 0; if (!f) return 1;
@@ -142,6 +144,7 @@ export function createLighting({G, host, features, opt}) {
     nL = 0;
     const lift = ug > 0 ? mixInto(m.lift, CAVE.lift, ug, LIFT) : m.lift;
     if (lift[0] + lift[1] + lift[2] > 0) putL(PX, P.z + .9, PY, lift, 1.7, 1, true);
+    if (ug > 0) putL(PX, P.z + 1.2, PY, CAVE.glow, CAVE.glowR, ug, true);   // (UNDERGROUND: the cave's glow)
     if ((opt.lantern || lanternMod > 0) && !host.playerHidden) {   // (photo mode may hide him: his lantern goes with him)
       const a = player.faceAngle, fx = Math.sin(a), fy = Math.cos(a), fk2 = flick(LANTERN, t);
       putL(PX + fx * LANTERN.fwd - fy * LANTERN.side, P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side, LANTERN.c, LANTERN.r * lanternR * (1 + (fk2 - 1) * .15), fk2, false);
