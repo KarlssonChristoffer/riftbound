@@ -1,5 +1,5 @@
-// WADING (view): feet in the water. A step in a rain puddle or in the forest's shallow water (the lake's shelf, the streams,
-// the outflow) throws up a splash and leaves a ring spreading on the surface; how big goes with how fast he moves:
+// WADING (view): feet in the water. A step in a rain puddle, in the forest's shallow water (the lake's shelf, the streams,
+// the outflow) or in the arena's rill and outflow throws up a splash and leaves a ring spreading on the surface; how big goes with how fast he moves:
 //   step     a few drops at a walk, a spray at a run, more at a sprint; thrown ahead and to the sides of the stride
 //   plant    a sprint's plant or a landing: a wider splash and a bigger ring
 //   roll     a burst where the roll goes in, then a sheet of spray off the body all the way through (and a ring trail)
@@ -65,7 +65,8 @@ export async function create(host) {
   let PUD = null;
   F.wet = (x, y) => {
     if (!F.on) return 0;
-    if (waterSample(x, y, WS).kind >= 6 && WS.kind <= 8) return host.inStream(x, y) ? 0 : 1;   // (the forest's water; swimming is the sim's splash)
+    const k = waterSample(x, y, WS).kind;
+    if ((k >= 6 && k <= 8) || k === 2 || k === 3) return host.inStream(x, y) ? 0 : 1;   // (the forest's water, the arena's rill and outflow; the river and the deep are swimming: the sim's splash)
     PUD = PUD || host.feature?.('puddles') || null;
     return PUD?.depth ? PUD.depth(x, y) : 0;
   };
