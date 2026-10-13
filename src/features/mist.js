@@ -295,7 +295,10 @@ export async function create(host) {
     if (open < 1) { O.alpha *= open; O.water *= open; O.far *= open; O.aerial *= open; F.medium = O.medium *= open; }
     if (VOL) {   // the volume: its numbers, the drift in the noise's units (whole world texels), the wind's way; the old sheet's veil off
       computeVol(dt, sd);
-      if (open < 1) { OV.film *= open; OV.fill *= open; OV.water *= open; if (OV.under) { OU.film *= open; OU.fill *= open; OU.water *= open; } F.medium = O.medium *= open; }
+      if (open < 1) {   // (its amounts, and its light: it is lit by the sky's mood, not the cave's)
+        OV.film *= open; OV.fill *= open; OV.water *= open; if (OV.under) { OU.film *= open; OU.fill *= open; OU.water *= open; } F.medium = O.medium *= open;
+        for (let j = 0; j < 3; j++) { OV.shade[j] *= open; OV.sun[j] *= open; if (OV.under) { OU.shade[j] *= open; OU.sun[j] *= open; } }
+      }
       // (the drift in whole world texels, into the noise's frame: along the wisps / stretch, across them)
       const V = TUNE.vol, wl = Math.hypot(V.wisp[0], V.wisp[1]) || 1, wx = V.wisp[0] / wl, wz = V.wisp[1] / wl, ex = Math.round(dx * R) / R, ez = Math.round(dz * R) / R;
       OV.wind[0] = wx; OV.wind[1] = wz;
