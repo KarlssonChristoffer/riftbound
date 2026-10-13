@@ -902,7 +902,7 @@ function forestRuins(q, ctx) {
     for (let y = Math.max(0, Math.floor((by0 - Y0) * PPM)); y <= Math.min(HPX - 1, Math.ceil((by1 - Y0) * PPM)); y++) for (let x = i0; x <= i1; x++) {
       const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM, dx = mx - CM.x, dy = my - CM.y, s = dx * CM.ux + dy * CM.uy, a = Math.abs(-dx * CM.uy + dy * CM.ux);
       if (a < hw + .4 && s > CM.brow - .45 && s < CM.brow + .4) {   // the overhang's front (the drawn ground's step up at the brow, seen
-        if (s < CM.brow + .05) G.c(x, y, 0); else G.p(x, y, S.rock, hsh(x, y, 70) < .3 ? 2 : 3);   // edge-on): not drawn (the cave shows through
+        if (s < CM.brow + .18) G.c(x, y, 0); else G.p(x, y, S.rock, hsh(x, y, 70) < .3 ? 2 : 3);   // edge-on): not drawn (the cave shows through
         // under it, world/cave3d.js's portal), its rock lip
         continue;
       }

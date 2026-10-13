@@ -915,7 +915,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
           terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: M.g0 - M.depth - .05,
             base: 0, relief: .9, talus: false, lip, seed: 171 + k * 6});
         const B = [at(M.brow, -hw - .1), at(M.brow, hw + .1)], gB = (x, z) => tH(x + M.ux * .3, z + M.uy * .3);
-        terrRuns.push({pts: B, top: gB, bot: (x, z) => gB(x, z) - 1.3, minBot: M.g0 - 1.6, base: 0, relief: .9, talus: false, lip, seed: 173, dark: () => -.2});
+        terrRuns.push({pts: B, top: gB, bot: (x, z) => gB(x, z) - .6, minBot: M.g0 - .9, base: 0, relief: .15, talus: false, lip, seed: 173, dark: () => -.2});   // (a short even lip: deeper and rougher it hung down in curtains)
       }
       // the creek's last step (layout.js CASCADES): a low rock rim along the pool's north edge, under the lip (the fall's sheet in its gap)
       if (CASCADES.length) {
