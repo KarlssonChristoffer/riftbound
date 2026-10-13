@@ -1,4 +1,4 @@
-// DIORAMA: the wardrobe studio's layered backdrop (dev/studio.js): a "3D" scene behind him made of flat pixel-art cut-outs
+// DIORAMA: the wardrobe studio's layered backdrop (themes: a puppet show, forest, mountains, desert) (dev/studio.js): a "3D" scene behind him made of flat pixel-art cut-outs
 // at different distances, like a theatre set or a pop-up book: the sky, far mountains, hills, a treeline, the near ground,
 // and a framing layer in front of him. Each layer is a picture painted here in code once (a theme's palette, value-noise
 // ridges, pines, crowns, mesas, clouds, grass, a seeded generator: the same picture every time) and drawn as a lit sprite
@@ -163,10 +163,106 @@ function framing(rng, W, H, col, light) {
   return L;
 }
 
+// ---------------------------------------------------------------- the puppet show's painters: flat cardboard, thick outlines,
+// strings and sticks, a painted cloth behind (an obviously fake stage)
+// a cut-out: the mask's pixels in fill (a light edge along the top-left), a dark outline round it
+function cutout(q, W, H, inside, fill, outline, light) {
+  const M = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (inside(x, y)) M[y * W + x] = 1;
+  const at = (x, y) => x >= 0 && y >= 0 && x < W && y < H && M[y * W + x];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!M[y * W + x]) { if (at(x - 1, y) || at(x + 1, y) || at(x, y - 1) || at(x, y + 1)) { q.fillStyle = css(outline); px(q, x, y); } continue; }
+    q.fillStyle = css(light && (!at(x - 1, y) || !at(x, y - 1)) ? light : fill); px(q, x, y);
+  }
+}
+function backcloth(rng, W, H, a, b, seam) {   // a painted sky: brush bands, cloth seams, a few drips
+  const L = canvas(W, H), q = L.q;
+  let y = 0; while (y < H) { const h = 5 + rng() * 10 | 0; q.fillStyle = css(rng() < .5 ? a : b); px(q, 0, y, W, h); y += h; }
+  q.fillStyle = css(b);
+  for (let i = 0; i < W / 18; i++) { const x = rng() * W | 0, yy = rng() * H | 0; px(q, x, yy, 1 + (rng() * 2 | 0), 3 + rng() * 9 | 0); }
+  q.fillStyle = css(seam); for (let x = 60 + (rng() * 40 | 0); x < W; x += 110 + (rng() * 30 | 0)) px(q, x, 0, 1, H);
+  return L;
+}
+function sunStick(rng, W, H, sun, rays, outline, stick) {   // a cardboard sun held up on a stick from above
+  const L = canvas(W, H), q = L.q, cx = W * .66 | 0, cy = H - 26, r = 15;
+  q.fillStyle = css(stick); px(q, cx - 1, 0, 3, cy - r);
+  cutout(q, W, H, (x, y) => {
+    const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+    return d < r || (d < r + 8 && Math.cos(a * 8) > .55);
+  }, sun, outline, rays);
+  q.fillStyle = css(outline); px(q, cx - 5, cy - 3, 2, 2); px(q, cx + 3, cy - 3, 2, 2); px(q, cx - 4, cy + 4, 8, 1);   // a painted face
+  return L;
+}
+function cloudStrings(rng, W, H, fill, outline, light, string) {   // cardboard clouds hanging on strings
+  const L = canvas(W, H), q = L.q, list = [];
+  for (let i = 0; i < 5; i++) list.push({x: W * (.12 + i * .19 + (rng() - .5) * .06), y: H - 18 - rng() * 30, w: 22 + rng() * 14});
+  q.fillStyle = css(string);
+  for (const c of list) { px(q, c.x - c.w * .5 | 0, 0, 1, c.y - 8); px(q, c.x + c.w * .5 | 0, 0, 1, c.y - 8); }
+  cutout(q, W, H, (x, y) => list.some(c => {
+    const dx = (x - c.x) / c.w, dy = (y - c.y) / (c.w * .45);
+    return (dx * dx + dy * dy < 1 && y < c.y + c.w * .25) || Math.hypot(x - c.x + c.w * .35, y - c.y + 4) < c.w * .4 || Math.hypot(x - c.x - c.w * .3, y - c.y + 2) < c.w * .35;
+  }), fill, outline, light);
+  return L;
+}
+function hillCutouts(rng, W, H, fill, outline, light, brace) {   // flat green hills, wooden braces showing at their feet
+  const L = canvas(W, H), q = L.q, hills = [];
+  for (let x = -40; x < W + 40; x += 60 + rng() * 60) hills.push({x, w: 50 + rng() * 60, h: 14 + rng() * 22});
+  q.fillStyle = css(brace);
+  for (const h of hills) { px(q, h.x + h.w * .2 | 0, H - 10, 2, 10); for (let k = 0; k < 9; k++) px(q, (h.x + h.w * .2 + k) | 0, H - 1 - k, 1, 1); }
+  cutout(q, W, H, (x, y) => hills.some(h => { const dx = (x - h.x) / h.w; return dx * dx < 1 && y > H - 6 - h.h * Math.sqrt(1 - dx * dx) && y < H - 4; }), fill, outline, light);
+  return L;
+}
+function lollipops(rng, W, H, crown, outline, light, trunk, base) {   // lollipop trees on little wooden stands
+  const L = canvas(W, H), q = L.q, trees = [];
+  for (let x = 10 + rng() * 30; x < W; x += 50 + rng() * 70) trees.push({x, r: 9 + rng() * 6, h: 14 + rng() * 12});
+  for (const t of trees) {
+    q.fillStyle = css(base); px(q, t.x - 7, H - 5, 14, 5); q.fillStyle = css(outline); px(q, t.x - 7, H - 6, 14, 1);
+  }
+  cutout(q, W, H, (x, y) => trees.some(t => (Math.abs(x - t.x) < 2 && y > H - 6 - t.h && y < H - 5)), trunk, outline, null);
+  cutout(q, W, H, (x, y) => trees.some(t => Math.hypot(x - t.x, y - (H - 6 - t.h - t.r * .6)) < t.r), crown, outline, light);
+  return L;
+}
+function boards(rng, W, H, a, b, line) {   // the stage floor: planks, their seams
+  const L = canvas(W, H), q = L.q, top = 16;
+  for (let y = top; y < H; y += 7) { q.fillStyle = css(((y / 7) | 0) & 1 ? a : b); px(q, 0, y, W, 7); q.fillStyle = css(line); px(q, 0, y, W, 1);
+    for (let x = (rng() * 60) | 0; x < W; x += 50 + (rng() * 50 | 0)) px(q, x, y, 1, 7); }
+  q.fillStyle = css(line); px(q, 0, top - 1, W, 2);
+  return L;
+}
+function proscenium(rng, W, H, red, redDk, gold, goldDk, bulb) {   // the theatre's frame: curtains at the sides, a valance, footlights
+  const L = canvas(W, H), q = L.q, e0 = Math.round(W * .19), e1 = Math.round(W * .81), cw = Math.round(W * .085);
+  for (const side of [0, 1]) for (let c = 0; c < cw; c++) {   // the curtains, gathered: folds and a tie-back
+    const x = side ? e1 - 1 - c : e0 + c, fold = ((c / 6) | 0) & 1;
+    q.fillStyle = css(fold ? redDk : red); px(q, x, 0, 1, H);
+  }
+  for (const side of [0, 1]) { q.fillStyle = css(gold); px(q, side ? e1 - cw : e0 + cw - 6, H * .55 | 0, 6, 4); }   // the tie-backs
+  const vh = 22;   // the valance: a gold-trimmed red pelmet with scallops
+  q.fillStyle = css(red); px(q, e0, 0, e1 - e0, vh);
+  for (let x = e0; x < e1; x++) { const k = ((x - e0) % 20) / 20, d = Math.round(Math.sin(k * Math.PI) * 6); q.fillStyle = css(red); px(q, x, vh, 1, d); q.fillStyle = css(gold); px(q, x, vh + d, 1, 2); }
+  q.fillStyle = css(gold); px(q, e0, 3, e1 - e0, 2); q.fillStyle = css(goldDk); px(q, e0, 5, e1 - e0, 1);
+  q.fillStyle = css(goldDk); px(q, e0, H - 9, e1 - e0, 9);   // the stage's lip, its footlights
+  for (let x = e0 + 10; x < e1 - 6; x += 16) { q.fillStyle = css(bulb); px(q, x, H - 13, 4, 4); q.fillStyle = css(gold); px(q, x - 1, H - 10, 6, 2); }
+  return L;
+}
+
 // ---------------------------------------------------------------- the themes: layers back to front
 // a layer: {paint(rng, W, H) -> picture, w, h (art px; w: share of the view's width), par (parallax share), y (its bottom's
 // screen offset from his feet, art px: + below), depth (m north of him: the depth buffer's order), drift (px/s), sway}
 export const THEMES = {
+  'puppet show': {sky: ['#7eb6e8', '#a9d2f2'], sw: ['#c43b2f', '#7eb6e8'],   // (an obviously fake stage: cardboard on sticks and strings)
+    layers: P => [
+      {name: 'backcloth', par: .04, y: 30, depth: 70, paint: (r, W, H) => backcloth(r, W, H, P.sky, P.sky2, P.seam), h: 'tall'},
+      {name: 'sun', par: .08, y: -6, depth: 55, bob: 2, paint: (r, W, H) => sunStick(r, W, H, P.sun, P.sunLt, P.ink, P.stick), h: 170},
+      {name: 'clouds', par: .12, y: -22, depth: 50, sway: 2, paint: (r, W, H) => cloudStrings(r, W, H, P.cloud, P.ink, P.cloudLt, P.string), h: 170},
+      {name: 'hills', par: .25, y: 10, depth: 35, paint: (r, W, H) => hillCutouts(r, W, H, P.hill, P.ink, P.hillLt, P.wood), h: 80},
+      {name: 'trees', par: .45, y: 16, depth: 24, bob: 1, paint: (r, W, H) => lollipops(r, W, H, P.crown, P.ink, P.crownLt, P.trunk, P.wood), h: 80},
+      {name: 'floor', par: .9, y: 142, depth: 6, paint: (r, W, H) => boards(r, W, H, P.board, P.board2, P.boardLn), h: 170},
+      {name: 'stage', par: 1.15, y: 0, depth: -3, front: true, paint: (r, W, H) => proscenium(r, W, H, P.red, P.redDk, P.gold, P.goldDk, P.bulb), h: 'view'},
+    ],
+    pal: {sky: '#7eb6e8', sky2: '#8cc0ee', seam: '#6aa2d6', sun: '#ffd84a', sunLt: '#fff0a0', ink: '#2b1d14', stick: '#6b4a2b',
+      cloud: '#f2f0ea', cloudLt: '#ffffff', string: '#e8e0cc', hill: '#5fae4a', hillLt: '#86cc62', wood: '#8a6a42', crown: '#3f9a46',
+      crownLt: '#6cc25a', trunk: '#8a5a32', board: '#b07a46', board2: '#9c6a3c', boardLn: '#5e3c20', red: '#c43b2f', redDk: '#8f2623',
+      gold: '#e8b84a', goldDk: '#8a6420', bulb: '#fff3b0'}},
   'forest': {sky: ['#7fb3e6', '#e3f0f6'], sw: ['#7fb3e6', '#3f6b3e'],
     layers: P => [
       {name: 'clouds', par: .04, y: -150, depth: 60, drift: 2, paint: (r, W, H) => clouds(r, W, H, P.cloud, P.cloudHi, 7), h: 70},
@@ -213,7 +309,7 @@ export function createDiorama(G) {
     for (const [k, v] of Object.entries(T.pal)) P[k] = hex(v);
     const W = Math.ceil(VW * 1.6);   // (room for the parallax both ways)
     made = T.layers(P).map(L => {
-      const h = L.h === 'view' ? VH : L.h, pic = L.paint(rng, W, h);
+      const h = L.h === 'view' ? VH : L.h === 'tall' ? Math.ceil(VH * 1.5) : L.h, pic = L.paint(rng, W, h);
       return {...L, pic: pic.c, W, H: h};
     });
     skyPic = sky(W, Math.ceil(VH * 1.5), hex(T.sky[0]), hex(T.sky[1])).c;
@@ -242,6 +338,7 @@ export function createDiorama(G) {
         let ox = -Math.round(cam.x * L.par), oy = -Math.round(cam.y * L.par * .5);
         if (L.drift) ox = ((Math.round(ox + t * L.drift) % (L.W - VW) + (L.W - VW)) % (L.W - VW)) - (L.W - VW) / 2;
         if (L.sway) ox += Math.round(Math.sin(t * .9) * L.sway);
+        if (L.bob) oy += Math.round(Math.sin(t * 1.3 + L.depth) * L.bob);   // (held up by a hand off stage: it bobs)
         const sy = L.front ? Math.round(VH / 2) + oy : feet.y + L.y + oy;
         put(L.pic, L.W, L.H, (L.front ? 0 : feet.x) + ox, sy, L.depth);
       }
