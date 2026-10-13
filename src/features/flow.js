@@ -279,7 +279,7 @@ export async function create(host) {
     tick(t0);
     return {x: C.outX - TX, y: C.outY - TY};
   }
-  // he was moved by (dx, dy) world m as he was (features/caves.js, host.warp): the mirrored ease, the spring and its output go
+  // F.shift: he was moved by (dx, dy) world m as he was (features/caves.js, host.warp), right then: the mirrored ease, the spring and its output go
   // along, so the view doesn't swing after him (the spring's state is in the view frame's px, the mirror in world m)
   function warpCam(dx, dy) {
     const yaw = host.yaw, cy = Math.cos(yaw), sy = Math.sin(yaw), ax = (dx * cy - dy * sy) * PPM, ay = (dx * sy + dy * cy) * PPMY;
@@ -697,7 +697,6 @@ export async function create(host) {
       else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * GK * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
       else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, (e.broke || e.crit ? K.hitKickBig : K.hitKick) * GK);
       else if (e.type === 'fist.hit') gunKick(-e.dx, -e.dy, e.kick * .8);   // a fist landing (features/fists.js): the view jolts along the blow
-      else if (e.type === 'player.warp') warpCam(e.dx, e.dy);   // moved as he was (features/caves.js): the spring goes along
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }
@@ -815,7 +814,7 @@ export async function create(host) {
     },
     biomeChanged() { levels.clear(); setBiome(host.biome.id); level(0); },   // (a rebuilt world: new ground texture; the ground layer made now, behind the loading screen)
     resize(w, h) { VW = w; VH = h; if (EC) { EC.width = w; EC.height = h; ecq.imageSmoothingEnabled = false; } },   // the view changed size (main.js fit)
-    view: update, camera, frame, lights, stamp,   // (not ambient: its streaks / tracks follow the player's frozen speed)
+    view: update, camera, shift: warpCam, frame, lights, stamp,   // (not ambient: its streaks / tracks follow the player's frozen speed)
     hud: () => '',
     // debugging / tests
     C, Tm, count: () => ({decals: decals.length, particles: ps.length, embers: gEmb.length, ghosts: GH.list.length, dirty: dirty.length, levels: levels.size}),

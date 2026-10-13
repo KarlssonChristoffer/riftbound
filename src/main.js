@@ -25,6 +25,8 @@
 //                               place world-pinned things by it; size screen-fixed HUD by host.hudScale, which the
 //                               wheel's zoom doesn't change, so the HUD keeps its size)
 //   F.camera?(dt) -> {x, y}     camera feel: an offset in view px (spring, lean, kick)
+//   F.shift?(dx, dy)            the player was moved as he was by (dx, dy) world m (host.warp: the cave's step in), right then:
+//                               move any eased state that follows him (a camera spring) along, so nothing swings after him
 //   F.onKey?(k, e) -> bool      consume a key (k = e.key lower-case)
 //   F.onArrowHit?(a, prop) -> 'stop' | 'pierce'   F.onArrowStuck?(a)   F.ability?(slot) -> bool   F.interact?(prop) -> bool
 //   F.aimTarget?() -> {x, y, h, target} | null    F.hud?() -> string   F.settings?() -> [{label, get, set, options?}]
@@ -208,7 +210,7 @@ const host = {
   get biomeI() { return stage.biomeI; }, get timeI() { return TIMES.indexOf(env.bucket); },
   setBiome: i => setBiome(i), setTime: i => env.setPart(TIMES[i]), setYaw: a => setYaw(a),
   teleport: (x, y) => pa.teleport(x, y),   // put the player at world (x, y), standing, and snap the camera there
-  warp: (dx, dy) => pa.shift(dx, dy),      // move the player by (dx, dy) world m as he is (moving, mid-jump), the camera with him (features/caves.js)
+  warp: (dx, dy) => { pa.shift(dx, dy); for (const f of features) f.shift?.(dx, dy); },   // move the player by (dx, dy) world m as he is (moving, mid-jump), the camera and the features' eased state with him (features/caves.js)
   // the Ranger as drawn this frame (sprite + runtime cloak + pixel bow, and its normals), for afterimages / reflections.
   // img / nrm are live canvases (redrawn every frame before F.frame runs): copy them if you keep a past frame. Their
   // size is img.width / img.height; h is the player's height above the ground (metres), like every host h.
