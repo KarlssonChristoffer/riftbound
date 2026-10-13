@@ -21,7 +21,7 @@ const LANTERN_AT = 4;  // m down the slot where his lantern comes on
 const LANTERN_R = 2;   // x the lantern's reach down there
 const EASE = 10;       // 1/s
 const SINK0 = .5;      // m down the woods' slot where the surface starts to sink away
-const SINK_REACH = 17; // m round him that still stands when it starts (about the view's edge); it closes in evenly as he walks
+const SINK_PAST = 5;   // m past the view's farthest corner where it starts (any screen shape: ultra-wide too); it closes in evenly as he walks
 const NOWARP = new Set(['rope', 'climb', 'mantle']);   // (a move that places him itself: the warp waits until it ends)
 
 export const order = {};
@@ -63,7 +63,8 @@ export async function create(host) {
     if (!c || SQ[2] !== 1 || SQ[0] < SINK0) { G.setSink(0, 0, null); return; }
     // (gone by warp - hyst: where a step back up out of the cave lands him, so coming up looks as going down did)
     const k = clamp((SQ[0] - SINK0) / (c.mouth.warp - c.mouth.hyst - SINK0), 0, 1);
-    G.setSink(p.x, p.y, SINK_REACH * (1 - k) - 6 * k, c.band);
+    const r0 = Math.hypot(host.VW / host.PPM, host.VH / host.PPMY) / 2 + SINK_PAST;   // (the view's half-diagonal on the ground: VW / VH are what shows, any zoom)
+    G.setSink(p.x, p.y, r0 * (1 - k) - 6 * k, c.band);
   };
   F.biomeChanged = () => { target = 0; F.under = 0; host.G?.setSink?.(0, 0, null); if (F.down) { F.down = false; host.mods.clear('caves'); } };
   return F;
