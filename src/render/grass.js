@@ -24,7 +24,7 @@
 //   setCalm: 1 the blades in the ground's own tone with light tips (a calm sward), 0 each blade a tone lighter (features/grass.js)
 //   a, b: Float32Array(n * 4) per blade: a = (root X, root Y (ground height), root Z, height m), b = (ramp * 4 + tone,
 //   phase 0..1, flower colour 0 none / 1..4, rest lean: whole part = its size in 32nds of the height, fraction = its angle / 2 pi);
-//   ramps: 4 x [highlight, tone 0 .. 3] as [r, g, b] 0..1
+//   ramps: up to 8 x [highlight, tone 0 .. 3] as [r, g, b] 0..1 (the meadows use 4, the forest's floor 4 more: features/grass.js)
 // THE CINEMA CAMERA (gfx.js setCine): a variant of the blades' shader divides by w (a perspective) and clips blades behind it.
 // OWNS: its mesh (in G.gScene), the blade buffers, the trample targets. READS: G.camera, G.view.zoom, G.VW / VH, G.U.time.
 // BUDGET: CPU: in features/grass.js's frame (~0.04 ms). GPU: one instanced draw (~50k blades x 8 vertices) + one 384 x 192
@@ -73,7 +73,7 @@ uniform vec4 uK;   // (lean per m/s of wind, flutter at rest, flutter per unit o
 uniform vec2 uSheen;   // the wind's lean (blade heights) where the sheen starts / is full
 uniform vec4 uPush[${MAX_PUSH}]; uniform int uNP;   // (x, z, radius, strength in blade heights)
 uniform sampler2D uTr; uniform vec4 uTrBox; uniform float uTrOn;
-uniform vec3 uRamp[20];   // per ramp: [highlight, tone 0 .. 3] (light -> dark)
+uniform vec3 uRamp[40];   // per ramp (up to 8): [highlight, tone 0 .. 3] (light -> dark)
 flat out vec3 vR; out float vT; out float vSide; flat out vec3 vC0; flat out vec3 vC1; flat out vec3 vC2; flat out float vHp; flat out float vFl;
 void main() {
   vec3 root = iA.xyz; float h = iA.w * uSnowK, t = position.y, ph = iB.y; vR = root;
@@ -211,17 +211,17 @@ export function createGrass(G, TB = TBOX) {
     uK: {value: new THREE.Vector4(.32, .05, .16, .92)}, uSheen: {value: new THREE.Vector2(.17, .42)},
     uPush: {value: push}, uNP: {value: 0},
     uTr: {value: rts[0].texture}, uTrBox: {value: new THREE.Vector4(TB.x0, TB.z0, 1 / TB.w, 1 / TB.d)}, uTrOn: {value: 1},
-    uRamp: {value: Array.from({length: 20}, () => new THREE.Vector3())},
+    uRamp: {value: Array.from({length: 40}, () => new THREE.Vector3())},
     uFlower: {value: Array.from({length: 4}, () => new THREE.Vector3())},
     uWG: {value: v4s(2)}, uWF: {value: v4s(MAX_FRONTS * 4)}, ...cutU(G.U),
   };
   const mat = G.cineMat(raw(BLADE_VS, BLADE_FS, U, {side: THREE.DoubleSide}));   // (its cinema variant: gfx.js setCine)
   const meshes = []; let count = 0, visible = true;
 
-  // blades: (a, b, n), ramps (4 x [highlight, tone 0 .. 3]) as documented above; flowers: [r, g, b] x 4
+  // blades: (a, b, n), ramps (up to 8 x [highlight, tone 0 .. 3]) as documented above; flowers: [r, g, b] x 4
   function setBlades(a, b, n, ramps, flowers) {
     drop();
-    for (let r = 0; r < 4; r++) for (let t = 0; t < 5; t++) U.uRamp.value[r * 5 + t].set(...(ramps[r]?.[t] || [0, 0, 0]));
+    for (let r = 0; r < 8; r++) for (let t = 0; t < 5; t++) U.uRamp.value[r * 5 + t].set(...(ramps[r]?.[t] || [0, 0, 0]));
     for (let i = 0; i < 4; i++) U.uFlower.value[i].set(...(flowers[i] || [1, 1, 1]));
     if (!n) return;
     // the chunks: each blade by its root's CHUNK m square (from the blades' own corner), its instances copied into its chunk's buffers

@@ -1241,6 +1241,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   litterDirty = true;   // (the first bake: the trees are all here)
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
     setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, floraCount, flora, haveGlb, groundCanvas: gc, westCanvas, trees3d,
+    forestTiles,   // (read only) the forest's painted tiles: {x0, z0, x1, z1 (m), canvas (null: the stand-in), cx0, cz0 (the canvas's world origin)} (features/grass.js grows on them)
     itemOf: p => byProp.get(p) || null,
     // a forest prop whose chunk is off the view this frame (the last update's: world/forest.js chunks): per-frame passes over the items
     // skip it (features/contact.js)
