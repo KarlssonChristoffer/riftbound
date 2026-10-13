@@ -438,7 +438,7 @@ export function createEquipSim(host) {
   }
   function stepHook(dt) {
     const H = hook, G = GADGETS.grapple; H.t += dt; H.lx = H.x; H.ly = H.y; H.lh = H.h;
-    if (host.lock || P.state === 'climb' || P.state === 'splash') { H.phase = 'back'; }
+    if (host.lock || P.state === 'climb' || P.state === 'splash' || P.state === 'swim') { H.phase = 'back'; }
     if (H.phase === 'fly') {
       if (H.who && !H.who.broken) { H.ax = H.who.x; H.ay = H.who.y; H.ah = (H.who.z || 0) + (H.who.h || 0) + .9; }
       const dx = H.ax - H.x, dy = H.ay - H.y, dh = H.ah - H.h, d = Math.sqrt(dx * dx + dy * dy + dh * dh), step = G.speed * dt;

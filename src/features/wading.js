@@ -4,14 +4,17 @@
 //   plant    a sprint's plant or a landing: a wider splash and a bigger ring
 //   roll     a burst where the roll goes in, then a sheet of spray off the body all the way through (and a ring trail)
 //   jump     a kick of drops where he leaves the water
+//   swim     in deep water (the sim's SWIM): a burst where he goes in (bigger falling in), the arms' drops and a small ring each
+//            stroke (player.stroke, by turns left and right, ahead of him), a big one for a kick, a slow ring treading water, a wake
+//            of rings left behind while he swims, a splash where he wades out
 // A puddle splashes less than a stream (its depth: puddles.js F.depth, how full it is), and some of its drops are mud.
 // F.wet(x, y): how much water a foot meets there now (0 dry, a puddle's depth 0..1, the shallow water 1; swimming water,
-// host.inStream, is the player sim's own splash): features/audio.js asks it for the splashing steps.
+// host.inStream, is swum: the sim's SWIM, its events below): features/audio.js asks it for the splashing steps.
 // VIEW ONLY: nothing here is read by the sim. Math.random for the drops (presentation).
 // The drops are lit points (G.point: depth-tested, sized by the zoom), the rings points round a circle on the surface.
 //
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, wet, biomeChanged, toggle, ms. ?wading=0: none.
-// OWNS: its drops (a structure-of-arrays pool) and rings (a fixed pool). READS: host.player (x, y, vx, vy, state), host.elev,
+// OWNS: its drops (a structure-of-arrays pool) and rings (a fixed pool). READS: host.player (x, y, z, vx, vy, state), host.elev,
 // host.inStream, world.js waterSample (the forest's water), host.feature('puddles').depth, host.time, host.G (point, onScreen).
 // EMITS: nothing. BUDGET: view < .02 ms, frame < .05 ms with a roll's spray up; nothing while dry; no allocation per frame.
 import {flags} from '../core/flags.js';
@@ -29,6 +32,7 @@ const TUNE = {
   jump: 1.3,                    // x for a jump out of the water
   roll: {burst: 34, rate: 120, side: [1.2, 2.8], up: [1.3, 2.8], every: .1},   // drops where it goes in; a s while rolling (fanned off both sides); a ring every this many s
   ring: {r: [.32, .65], life: .65, pts: 26, roll: 1.3},   // m it spreads to (walk .. sprint), s, points round it, x for a roll's entry
+  swim: {stroke: .45, kick: 1.3, fall: 2.4, wade: 1, out: .7, arm: [.28, .22], wake: .32, wakeR: [.5, .8], wakeLife: 1.1, tread: [.45, 1.2], pace: [.3, 2.2]},   // x a step's drops: a stroke, a kick, falling in, wading in, out; the arm's splash ahead / to the side (m); a wake ring every this many s, its size (slow .. fast) and life; treading water's ring (m, s); the pace a stroke grows over (m/s)
   puddle: .65,                  // a full puddle's splash against the shallow water's (and the rest as its depth says)
   mud: .3,                      // share of a puddle's drops that are mud
   g: 9,                         // m/s^2
@@ -38,7 +42,7 @@ const TUNE = {
 const MUD = ['#5c4a36', '#463828'].map(rgbOf);
 // the drops' tones by the time of day (the puddles' sky colours, a white glint): bright -> dim
 const TONES = {}; for (const k in PUD_COL) TONES[k] = [PUD_COL[k].glint, PUD_COL[k].hi, PUD_COL[k].in].map(rgbOf);
-const RINGS = 10;
+const RINGS = 14;
 
 export const order = {after: ['puddles']};
 export async function create(host) {
@@ -72,11 +76,11 @@ export async function create(host) {
   };
 
   // the player, read once a view step (host.player's getters turn his view frame into the world's on every read)
-  const PL = {ok: false, x: 0, y: 0, vx: 0, vy: 0, state: ''};
-  function readPlayer() { const p = host.player; PL.ok = !!p; if (!p) return; PL.x = p.x; PL.y = p.y; PL.vx = p.vx || 0; PL.vy = p.vy || 0; PL.state = p.state; }
+  const PL = {ok: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, state: ''};
+  function readPlayer() { const p = host.player; PL.ok = !!p; if (!p) return; PL.x = p.x; PL.y = p.y; PL.z = p.z; PL.vx = p.vx || 0; PL.vy = p.vy || 0; PL.state = p.state; }
   // a splash at a foot: m x a step's drops (k: 0 walk .. 1 sprint), w: the water there (a puddle's depth .. 1)
-  function splash(x, y, w, k, m, ringK) {
-    const S = TUNE.step, puddle = w < 1, s = puddle ? TUNE.puddle * (.5 + .5 * w) : 1, z = host.elev(x, y);
+  function splash(x, y, w, k, m, ringK, z = host.elev(x, y)) {   // (z: the surface; swimming, the deep water's, under its banks)
+    const S = TUNE.step, puddle = w < 1, s = puddle ? TUNE.puddle * (.5 + .5 * w) : 1;
     const sp = Math.hypot(PL.vx, PL.vy), ux = sp > .2 ? PL.vx / sp : 0, uy = sp > .2 ? PL.vy / sp : 0;
     const cnt = Math.round((S.n[0] + (S.n[1] - S.n[0]) * k) * m * s), side = S.side[0] + (S.side[1] - S.side[0]) * k, ahead = S.ahead[0] + (S.ahead[1] - S.ahead[0]) * k;
     for (let i = 0; i < cnt; i++) {
@@ -86,10 +90,22 @@ export async function create(host) {
     const Rg = TUNE.ring; ring(x, y, z + .01, (Rg.r[0] + (Rg.r[1] - Rg.r[0]) * k) * ringK * (.6 + .4 * s), Rg.life * Math.sqrt(ringK));
   }
   const paceK = v => clamp((v - TUNE.pace[0]) / (TUNE.pace[1] - TUNE.pace[0]), 0, 1);
-  let lastState = '', rollAcc = 0, ringT = 0, T = 0, live = 0;
+  let lastState = '', rollAcc = 0, ringT = 0, T = 0, live = 0, arm = 1, wakeT = 0;
   function onEvents(evs, dt) {
     if (evs) for (let i = 0; i < evs.length; i++) {
-      const e = evs[i], t = e.type;
+      const e = evs[i], t = e.type, Sw = TUNE.swim;
+      if (t === 'player.stroke') {   // swimming: an arm's splash ahead of him (by turns), or treading water's slow ring
+        if (e.tread) { ring(e.x, e.y, e.z + .01, Sw.tread[0], Sw.tread[1]); continue; }
+        const sp = Math.hypot(e.vx || 0, e.vy || 0), ux = sp > .1 ? e.vx / sp : 0, uy = sp > .1 ? e.vy / sp : 0, k = clamp((e.pace - Sw.pace[0]) / (Sw.pace[1] - Sw.pace[0]), 0, 1);
+        arm = -arm; const ax = e.x + ux * Sw.arm[0] - uy * arm * Sw.arm[1], ay = e.y + uy * Sw.arm[0] + ux * arm * Sw.arm[1];
+        splash(ax, ay, 1, k, e.big ? Sw.kick : Sw.stroke, e.big ? 1.3 : .8, e.z);
+        continue;
+      }
+      if (t === 'player.splash' && (e.swim || e.out)) {   // into deep water (falling in: a burst) / wading out of it
+        const z = e.out ? host.elev(e.x, e.y) : PL.z;
+        splash(e.x, e.y, 1, e.small ? .5 : 1, e.out ? Sw.out : e.small ? Sw.wade : Sw.fall, e.small ? 1.1 : 1.8, z);
+        continue;
+      }
       if (t !== 'player.step' && t !== 'player.land' && t !== 'player.jump') continue;
       const w = F.wet(e.x, e.y); if (w <= .02) continue;
       const k = paceK(e.pace ?? Math.hypot(PL.vx, PL.vy));
@@ -99,6 +115,10 @@ export async function create(host) {
     }
     // the roll (no event: the player's state): a burst where it goes in, then spray off the body while it's in the water
     if (!PL.ok) return;
+    if (PL.state === 'swim') {   // the wake: rings left behind him as he swims (none treading water: its own, above)
+      const sp = Math.hypot(PL.vx, PL.vy), Sw = TUNE.swim;
+      if (sp > Sw.pace[0] && (wakeT -= dt) <= 0) { const k = clamp(sp / Sw.pace[1], 0, 1); wakeT = Sw.wake * (1.3 - .5 * k); ring(PL.x, PL.y, PL.z + .01, Sw.wakeR[0] + (Sw.wakeR[1] - Sw.wakeR[0]) * k, Sw.wakeLife); }
+    } else wakeT = 0;
     if (PL.state === 'roll') {
       const w = F.wet(PL.x, PL.y), Rl = TUNE.roll;
       if (w > .02) {

@@ -1126,6 +1126,7 @@ export function createAudio(ctx, host = {}) {
         case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, water: wadeAt(e.x, e.y), k: 1.3, g: 1})); break;   // sprint plant
         case 'player.jump': fire('jump', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); if (wadeAt(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, gainDb: -5}); break;
         case 'player.splash': case 'arrow.splash': case 'prop.splash': case 'wildlife.splash': fire('splash', e.x, e.y, {surf, small: !!e.small}); break;
+        case 'player.stroke': fire('splash', e.x, e.y, {surf, small: true, g: e.big ? .9 : e.tread ? .22 : .32 + .25 * clamp(e.pace / 2, 0, 1), gainDb: e.big ? -4 : e.tread ? -16 : -10}); break;   // swimming: a stroke, a kick, treading water
         // the revolver (sim/player/gun.js): its own sounds; its bullets aren't arrows (no bow shot, no stuck thud)
         case 'player.shoot': fire('gunshot', e.x, e.y, {gun: e.gun, fan: !!e.fan}); break;
         case 'player.dryfire': fire('gunDry', e.x, e.y); break;

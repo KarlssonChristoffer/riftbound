@@ -1322,6 +1322,6 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     // which way a view saw a prop struck (features/wind.js, from combat.hit): a props3d.js model that rocks when hit (the dummy)
     // rocks that way. Arena axes; kept per prop until the next
     push(p, dx, dy) { const l = Math.hypot(dx, dy); if (!(l > 1e-6)) return; let d = PUSH.get(p); if (!d) PUSH.set(p, d = [0, 0]); d[0] = dx / l; d[1] = dy / l; },
-    waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
+    waterH: WATER_H, cliffZ, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
 export {WORLD, GROUNDS, WEST_ON, WEST, WEST_LAND, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, MESA, CLIMBS, CASCADES, mesaAt};
