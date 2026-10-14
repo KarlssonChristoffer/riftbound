@@ -1,8 +1,9 @@
 # Fishing
 
-Status: 2026-10-13, the first playable slice (draft PR). A rod in the main hand, a quick cast / bite / reel minigame at the
+Status: 2026-10-14. The first slice (2026-10-13, PR #15): a rod in the main hand, a quick cast / bite / reel minigame at the
 forest lake, the streams and the river, 16 fish and 5 odd finds across the five rarities, 12 pieces of fishing gear with
-fishing stats, a Fishing skill, catch records, and the catch rolled by the server in co-op. The ideas around it (what fishing
+fishing stats, a Fishing skill, catch records, and the catch rolled by the server in co-op. The second layer (2026-10-14):
+fishing spots on the water, cut bait, meals cooked at a campfire, the angler's set and the fish journal. The ideas around it (what fishing
 could connect to, builds, cooking, the weird stuff) live in the "Fishing (WIP)" notes doc, not here: this file says what the
 game does now.
 
@@ -25,12 +26,57 @@ or the river. With the cursor on water within reach a prompt says `LMB cast`.
 
 A press while it waits brings the line in. Walking off (1.6 m), a roll, or taking the rod off ends it.
 
+## Fishing spots
+
+A few spots on the water around him: rings spreading and bubbles wheeling over one place, now and then a fish breaking the
+surface. The prompt says `spot!` with the cursor on one. A cast that falls within 1.8 m of a spot bites sooner (the wait
+x 0.45) and rarer (+0.2 luck), and a catch from it spends it (for you). Spots move every 75 s: the water is cut in 7 m
+cells, each holds a spot in a slot with 24% odds, at a hashed place at least 0.8 m from the bank (`SPOT`, `spotAt`). They
+fade in and out over 4 s at the slot's ends. The slot clock is the sim's offline and the server's online, with the world's
+seed, so friends see the same spots; the server checks a cast's "on a spot" against the same hash (`spotNear`).
+
+## Bait
+
+Tab (the pack), **Bait**: `Cut bait x4` cuts one roach, bleak or minnow into four baits. While you have bait, one goes on
+the hook every cast that lands on water (the prompt shows how many are left). Cut bait makes predators bite more: pike,
+zander and burbot x3, eel x2.5, trout and salmon x2, perch x1.3 (`BAITS`).
+
+## Meals
+
+Tab, **Cook**, standing within 2.5 m of a burning campfire (a fire with fuel, features/campfires.js `burningNear`). A meal is
+eaten at once and its buff lasts its time; one meal at a time (a new one replaces it). The time left shows bottom left and
+in the journal, and is saved. Each need is paid with the kind you have most of.
+
+| meal | needs | lasts | does |
+|---|---|---|---|
+| Fish on a stick | 2 small fish (perch, roach, bleak, minnow) | 4 min | move 6% faster, reel 10% faster |
+| Angler's soup | 3 fish (any non-masterwork) | 5 min | bites 20% sooner, fishing luck +5% |
+| Trout in birch bark | 1 brown trout or grayling | 5 min | more time to strike (+0.2 s), cast 15% further, move 4% faster |
+| Pike stew | 1 pike + 1 small fish | 5 min | take 10% less harm, chop 15% harder, line 15% stronger |
+| Smoked eel | 1 eel | 7 min | lantern reaches 30% further, night waits much shorter, luck +5% |
+| Salmon on a plank | 1 salmon or arctic char | 7 min | fishing luck +12%, 6% chance of two fish, move 5% faster |
+
+The buff is modifier notes under the source `fishing.meal` (`MEALS`); their owners read them (player.speed: the player,
+game.hurt: game/stats.js, woodcut.power: woodcut, light.lanternR: the lantern). In co-op the cast tells the server the meal's
+id and it adds the same notes to the roll.
+
+## The angler's set
+
+Four or more fishing pieces worn at once (any slots): fishing luck +8%, a 5% chance of two fish, +0.15 s to strike (`ANGLER`,
+source `fishing.set`). A toast says so when the fourth goes on. The server counts the pieces from the set you wear.
+
+## The fish journal
+
+Tab, **Fish**: all 21 catches in a grid. The ones you have caught show their icon, count and (on hover) your record; the
+ones you haven't are dark silhouettes, and hovering one gives a hint of where and when it bites (`hintOf`: "the lake;
+at night, deep water"). Under it: how many kinds you have found, the angler's set (pieces worn) and the meal eaten.
+
 ## What bites (content/fishing.js)
 
 `roll(rng, o)` picks the catch: the rarity's base weight (common 60, fine 26, rare 10, masterwork 3.4, mythic 0.6),
 pushed toward the rare ones by **luck** (each rarity tier x (1 + luck)), then each catch's own taste: the water (lake /
 stream / river, from world.js `waterSample`), the part of the day (`when`), rain, and how far from the shore the bobber
-lies (the deep ones, char and zander, want 3 m+). 8% of rolls (+ find) are **finds** instead of fish (an old boot,
+lies (the deep ones, char and zander, want 3 m+), a fishing spot, and the bait on the hook. 8% of rolls (+ find) are **finds** instead of fish (an old boot,
 driftwood, a rusty key, a note in a bottle, a silver ring). Size is skewed small; weight follows length cubed. The wait is
 3.5 - 10 s x lure (night fishing gear cuts it at night), with 0 - 3 nibbles before the bite.
 
@@ -79,16 +125,22 @@ fishing.
   answer in 2.5 s (an older server) the client rolls it itself.
 - **The fight is the client's.** A landed catch is told to the server (`land`), which tells everyone (`caught`): the others
   get a toast "Anna caught a Pike, 54 cm".
-- Not yet: others seeing your line, bobber and fish; shared fishing spots; the server checking the pouch.
+- **Spots, bait, meals and the set** go into the server's roll too: the cast says `spot`, `bait` and `meal`; the server
+  checks the spot against its own clock and the hash, and counts the set from what you wear.
+- Not yet: others seeing your line, bobber and fish; the server checking the pouch (bait and meals are the client's word,
+  like the Fishing level).
 
 ## Code
 
-- `src/content/fishing.js`: the waters, `TUNE`, the stats, the catches (with their pixel icons), `roll`. Pure data, read by
-  the client and the server.
+- `src/content/fishing.js`: the waters, `TUNE`, the stats, the catches (with their pixel icons), `roll`, `SPOT` / `spotAt` /
+  `spotNear`, `BAITS`, `MEALS`, `ANGLER`, `castNotes`, `hintOf`. Pure data, read by the client and the server.
 - `src/features/fishing.js`: the feature. Sim: the phases, the roll, the fight, the catch (pack, XP, records in
   `pack.store('fishing')`). View: rings and spray, the bobber, the fish under the water, the rod and line, the leap. HD:
   the prompt, the meter, "!", the fight gauge, the catch card. It claims LMB through `F.lmb` (core/input.js) while it can
-  cast or is fishing.
+  cast or is fishing. Also the spots (found when he crosses a cell or the slot turns), the Cook and Bait recipes and the
+  journal (pack.recipe, pack.section), the meal's clock and the set's notes.
+- Small additive hooks elsewhere: `pack.section` and recipe groups (features/pack.js, ui/packpanel.js), `burningNear`
+  (features/campfires.js), the bait item (content/items.js), the sizzle (audio/audio.js `fishCook`).
 - `src/content/gear.js` (the 12 pieces), `src/ui/gearicons.js` (their icons), `src/ui/geartip.js` (fishing words),
   `src/content/items.js` (each catch is a pouch item), `src/content/skills.js` (the Fishing skill).
 - `server/room.mjs` (the roll), `src/net/client.js` / `src/features/coop.js` (the messages), `src/net/protocol.js`.

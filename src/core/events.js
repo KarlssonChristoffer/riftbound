@@ -127,6 +127,9 @@ export const EVENTS = {
   'fish.leap':          ['features/fishing.js', 'x, y, id (reeled in: it leaps out of the water to him)', 'fishing (view), audio'],
   'fish.catch':         ['features/fishing.js', 'x, y, id, cm, kg, n (2: a double), first, record, rarity (it is in the pouch)', 'fishing (view), audio'],
   'fish.away':          ['features/fishing.js', 'x, y (the line comes in empty)', 'audio'],
+  'fish.spot':          ['features/fishing.js', 'x, y (the cast fell on a fishing spot: it bites sooner and rarer)', 'audio'],
+  'fish.bait':          ['features/fishing.js', 'x, y, id (bait cut from a small fish at the pack panel)', 'audio'],
+  'fish.cook':          ['features/fishing.js', 'x, y, id (a meal cooked by a campfire and eaten: its buff starts)', 'audio'],
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
