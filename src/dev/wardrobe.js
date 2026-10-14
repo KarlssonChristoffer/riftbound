@@ -31,7 +31,7 @@
 //   E: loop.hold, pause, keys), content/gear.js, game/items.js.
 // BUDGET: shut and nothing on: nothing. Open: the game holds; the studio's small scene a frame; a few text writes 4 times a
 //   second; a slider drag: one dress at most every 50 ms (2-25 ms each, view/dress.js).
-import {SLOTS, SLOT_NAMES, KINDS, RARITY, GEAR, MATERIALS, ZONES, RULES, gearById, cleanSet, setStats} from '../content/gear.js';
+import {SLOTS, SLOT_NAMES, KINDS, RARITY, GEAR, MATERIALS, ZONES, RULES, CAPE_OFF, gearById, cleanSet, setStats, withCape} from '../content/gear.js';
 import {ITEMS, AUGMENTS, TIER} from '../game/items.js';
 import {LOADOUTS, SET_NAMES} from '../view/hero.js';
 import {tint} from '../view/rigkit.js';
@@ -273,6 +273,8 @@ export function createWardrobe({host, hero, live, engine}) {
   const wearing = () => gear()?.S.want || [];
   const inSlot = slot => wearing().find(id => gearById(id).slot === slot) || '';
   const wearIn = (slot, id) => wear([...wearing().filter(w => gearById(w).slot !== slot), ...(id ? [id] : [])]);
+  const capeOn = () => !wearing().includes(CAPE_OFF);
+  const setCape = on => wear(withCape(wearing(), on));   // (his own cape and coat tail: content/gear.js SWITCHES)
   function setLoadout(i) { const n = LOADOUTS.length; hero.switchLoadout(((i % n) + n) % n); lookChanged(); }
   function giveItem(id, d) {
     const st = stats(), it = ITEMS.find(x => x.id === id); if (!st || !it) return;
@@ -283,6 +285,7 @@ export function createWardrobe({host, hero, live, engine}) {
   function randomOutfit() {   // (the UI's own pick: Math.random is fine here, it's the UI, not the sim)
     const ids = [];
     for (const s of SLOTS) { const ps = GEAR.filter(g => g.slot === s); const i = Math.floor(Math.random() * (ps.length + 1)); if (i < ps.length) ids.push(ps[i].id); }
+    if (!capeOn()) ids.push(CAPE_OFF);   // (the cape stays as switched)
     wear(ids); say(ids.length ? ids.map(id => gearById(id).name).join(', ') : 'his own clothes');
   }
 
@@ -374,7 +377,7 @@ export function createWardrobe({host, hero, live, engine}) {
       rows.push(() => {
         const id = inSlot(slot), g = gearById(id);
         if (id !== shown) { shown = id; const u = g && gearIcon(g); ico.src = u || slotIcon(slot, g ? colorsOf(g)[0] : '#8a7c64'); ico.className = u ? 'g' : ''; }
-        put(n, 'textContent', g ? g.name : 'his own'); put(n.style, 'color', g ? RARITY[g.rarity]?.col ?? '' : ''); b.classList.toggle('own', !g); b.classList.toggle('on', C.tab === 'outfit' && C.slot === slot);
+        put(n, 'textContent', g ? g.name : slot === 'back' && !capeOn() ? 'no cape' : 'his own'); put(n.style, 'color', g ? RARITY[g.rarity]?.col ?? '' : ''); b.classList.toggle('own', !g); b.classList.toggle('on', C.tab === 'outfit' && C.slot === slot);
         put(off.style, 'visibility', g ? '' : 'hidden');
       });
     }
@@ -468,6 +471,10 @@ export function createWardrobe({host, hero, live, engine}) {
       b.onclick = () => { wearIn(C.slot, id); sound('confirm'); sync(); };
       tip.attach(b, {piece: () => g, slot: C.slot, set: wearing});
       rows.push(() => b.classList.toggle('on', inSlot(C.slot) === id));
+    }
+    if (C.slot === 'back') {   // the cape switch: his own cape and coat tail (a cloak worn brings a cape of its own)
+      const r = el('div', 'wd-row2', right), b = btn('wd-btn', r, '', () => { setCape(!capeOn()); sound('click'); }, 'his own cape and coat tail, on or off (any character; saved with the outfit)');
+      rows.push(() => put(b, 'textContent', capeOn() ? 'Cape: on' : 'Cape: off'));
     }
     el('div', 'wd-note', right, 'Point at a piece for what it is; hold Shift for more. A click wears it.');
   }

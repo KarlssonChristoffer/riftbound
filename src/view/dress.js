@@ -9,6 +9,8 @@
 //           pixelizer draws lines between them and the body
 //   cloth   what the runtime cloth panel (the gunslinger's duster tail, view/livehero.js) should do: null (as it is), 'off',
 //           or a family to draw it in
+//   under   a switch's look (content/gear.js SWITCHES: the cape off) goes last and gives way: its hide skips parts a piece
+//           paints, its cloth 'off' applies only when no piece said what the cloth does (a cloak worn keeps the cape)
 // The result goes to render/rigmesh.js restyle (the body keeps its slot and history). Made only when the set changes.
 // OWNS: nothing (a pure builder). READS: content/gear.js, three.js geometries (at build only).
 // BUDGET: ~2-6 ms a call (a copy of the model's ~10k corners + a few hundred new ones); never per frame.
@@ -56,13 +58,18 @@ export function dress(J, bin, pieces) {
   const partOf = name => { let i = parts.indexOf(name); if (i < 0) { parts.push(name); i = parts.length - 1; } return i + 1; };   // (1-based: 0 is none)
   const zoneParts = z => (Z[z] || []).map(p => J.parts.indexOf(p) + 1).filter(i => i > 0);
   const paint = new Map(), hide = new Set(), adds = [];
-  let cloth = null;
+  let cloth = null, said = false;
   for (const g of pieces) {
-    const L = g.look || {};
+    const L = g.look || {}; if (L.under) continue;
     for (const [z, m] of Object.entries(L.paint || {})) for (const i of zoneParts(z)) paint.set(i, famOf(m));
     for (const z of L.hide || []) for (const i of zoneParts(z)) hide.add(i);
-    if (L.cloth) cloth = L.cloth === 'off' ? 'off' : fams[famOf(L.cloth)];
+    if (L.cloth) { cloth = L.cloth === 'off' ? 'off' : fams[famOf(L.cloth)]; said = true; }
     for (const a of L.add || []) adds.push(a);
+  }
+  for (const g of pieces) {   // the switches: what nothing worn covers
+    const L = g.look || {}; if (!L.under) continue;
+    for (const z of L.hide || []) for (const i of zoneParts(z)) if (!paint.has(i)) hide.add(i);
+    if (L.cloth === 'off' && !said) cloth = 'off';
   }
   // the new pieces' corners, in their bones' frames
   const extra = [];

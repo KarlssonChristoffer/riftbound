@@ -11,10 +11,15 @@
 //   GEAR       the pieces. Each: id, name, slot, kind, rarity, weight (kg), armor (share of damage taken off), desc, look, and
 //              optionally mods (more modifier notes: host.mods) and soon (what it will do once the game has the system: weather,
 //              fire, sword swings, spells)
+//   SWITCHES   not pieces: a way his own clothes can be worn (cape_off: the character's own cape and tail not drawn). In a set
+//              like a piece (an id, after the slots' pieces: cleanSet), so co-op, the remembered set, the wardrobe's saved
+//              outfits and ?gear= carry it; no weight, no armor, in none of the slots' rows (the Back slot has its switch)
 //   look       how it changes the character (view/dress.js):
 //                paint {zone: material}   the zone's parts in that material
 //                hide [zone]              the zone's parts not drawn
 //                cloth material | 'off'   the duster's runtime cloth panel (the gunslinger's long coat tail) recoloured / gone
+//                under true               a switch's look: its hide and cloth give way to any piece's paint and cloth (a
+//                                         cloak worn brings the cape back), so it only takes off what nothing else wears
 //                add [piece]              new shapes riding a bone: {on: bone, part, mat, shape, at: [x, y, z], rot?: [deg x, y, z],
 //                                         + the shape's size} in BODY SPACE AT REST (metres: x his left, y his back, z up, the feet
 //                                         at the origin; the gunslinger's head is z 1.28 .. 1.8, his hat's band at 1.65).
@@ -82,13 +87,13 @@ export const MATERIALS = {
 // a live model's zones: its json's meta.loadout -> zone -> the parts (model.json parts) it is made of
 export const ZONES = {
   'gunslinger.py': {
-    hat: ['hat', 'brim', 'hatband'], coat: ['cape', 'collar', 'lapel.L', 'lapel.R', 'dsleeve.L', 'dsleeve.R'], collar: ['cape', 'collar'],
+    hat: ['hat', 'brim', 'hatband'], coat: ['cape', 'collar', 'lapel.L', 'lapel.R', 'dsleeve.L', 'dsleeve.R'], collar: ['cape', 'collar'], cape: ['cape'],
     lapels: ['lapel.L', 'lapel.R'], sleeves: ['dsleeve.L', 'dsleeve.R'], vest: ['vest'], shirt: ['shirt'], neck: ['bandana'],
     trousers: ['trousers', 'trousers.L', 'trousers.R'], legs: ['trousers.L', 'trousers.R'], boots: ['boot.L', 'boot.R'], spurs: ['spur.L', 'spur.R'],
     hands: ['hand.L', 'hand.R'], hair: ['hair', 'hair.L', 'hair.R', 'hair.0', 'hair.1', 'hair.2'],
   },
   'outlaw.py': {
-    hat: ['hat', 'brim', 'hatband', 'band'], coat: ['poncho', 'stripe', 'stripe.001', 'sleeve.L', 'sleeve.R'], collar: ['poncho', 'stripe', 'stripe.001'],
+    hat: ['hat', 'brim', 'hatband', 'band'], coat: ['poncho', 'stripe', 'stripe.001', 'sleeve.L', 'sleeve.R'], collar: ['poncho', 'stripe', 'stripe.001'], cape: [],
     lapels: [], sleeves: ['sleeve.L', 'sleeve.R'], vest: [], shirt: ['shirt'], neck: ['bandana'],
     trousers: ['trousers', 'trousers.L', 'trousers.R', 'seam.L', 'seam.R'], legs: ['trousers.L', 'trousers.R', 'seam.L', 'seam.R'], boots: ['boot.L', 'boot.R'], spurs: ['spur.L', 'spur.R'],
     hands: ['hand.L', 'hand.R'], hair: ['hair', 'hair.L', 'hair.R'],
@@ -526,16 +531,28 @@ export const GEAR = [
       {on: 'LeftHand', part: 'net.hoop', mat: 'netting', shape: 'disc', r: .15, len: .012, at: [.95, 0, .44], rot: [90, 0, 0], o: {sides: 10}},
     ]}},
 ];
-export const GEAR_BY_ID = Object.fromEntries(GEAR.map(g => [g.id, g]));
+// the switches (2026-10-14): his own cape off. Its slot is its own (one of each switch in a set), after SLOTS'
+export const SWITCHES = [
+  {id: 'cape_off', name: 'No cape', slot: 'cape', kind: 'clothing', rarity: 'common', weight: 0, armor: 0, desc: 'His own cape and coat tail left off.',
+    look: {hide: ['cape'], cloth: 'off', under: true}},
+];
+export const CAPE_OFF = 'cape_off';
+export const GEAR_BY_ID = Object.fromEntries([...GEAR, ...SWITCHES].map(g => [g.id, g]));
 export const gearById = id => GEAR_BY_ID[id] || null;
+const ORDER = [...SLOTS, ...SWITCHES.map(g => g.slot)];
 
 // a set as asked for (ids, any order, maybe junk) -> the set it can be: known ids, at most one a slot (the later wins), in
-// SLOTS order. The co-op server keeps only what this returns (server/room.mjs), the game too (features/gear.js)
+// SLOTS order, then the switches. The co-op server keeps only what this returns (server/room.mjs), the game too (features/gear.js)
 export function cleanSet(ids) {
   const by = {};
   if (Array.isArray(ids)) for (const id of ids) { const g = typeof id === 'string' ? GEAR_BY_ID[id] : null; if (g) by[g.slot] = g.id; }
-  return SLOTS.map(s => by[s]).filter(Boolean);
+  return ORDER.map(s => by[s]).filter(Boolean);
 }
+// is his own cape drawn with these pieces on (content/gear.js entries)? Off when the switch is on and no piece brings a
+// cloth of its own (a cloak). The sprite loadouts' runtime cloak follows this (view/hero.js); the live models go by view/dress.js
+export const capeShown = pieces => !pieces.some(g => g?.id === CAPE_OFF) || pieces.some(g => g && !g.look?.under && g.look?.cloth && g.look.cloth !== 'off');
+// a set with the cape switched on (true) or off
+export const withCape = (ids, on) => cleanSet(on ? ids.filter(id => id !== CAPE_OFF) : [...ids, CAPE_OFF]);
 // a set's numbers: total weight (kg), armor (share, capped), the speed share its weight leaves you
 export function setStats(ids) {
   let kg = 0, armor = 0;

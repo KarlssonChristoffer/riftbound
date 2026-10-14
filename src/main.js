@@ -58,6 +58,7 @@ import {WORLD, elev, inStream} from './world/world.js';
 import {BIOMES} from './world/biomes.js';
 import {MOODS, TIMES} from './content/moods.js';   // the lighting tables (forked from the arena's lighting.js)
 import {createHero, loadLoadout, SET_NAMES} from './view/hero.js';   // the Ranger's card: loadouts, the composite, cloak, hair, armour, HD bow
+import {capeShown} from './content/gear.js';   // (the sprite cloak and the gear's cape switch: dressPlayer)
 import {BUSY} from './sim/player/player.js';
 import {createPlayerHost} from './sim/player/adapter.js';
 import {createGame} from './game/game.js';
@@ -228,8 +229,9 @@ const host = {
   // rig the live model's name), or null when he isn't drawn live: co-op sends it to the others (features/coop.js). One reused object
   playerPose: () => { const d = live?.on ? live.drawn : null; if (!d?.w) return null; PPOSE.w = d.w; PPOSE.phi = d.phi; PPOSE.n = d.n; PPOSE.BN = live.BN; PPOSE.rig = hero.loadName; return PPOSE; },
   // GEAR (features/gear.js, docs/GEAR.md): draw him in these pieces (content/gear.js entries, SLOTS order; key: their setKey).
-  // The live body only (a sprite loadout looks the same); on a change of set, never per frame
-  dressPlayer: (pieces, key) => live?.dress(pieces, key),
+  // The live body; a sprite loadout looks the same but for its runtime cloak (his own cape switched off: content/gear.js
+  // capeShown). On a change of set, never per frame
+  dressPlayer: (pieces, key) => { hero.setCape(capeShown(pieces)); live?.dress(pieces, key); },
 };
 const PPOSE = {w: null, phi: 0, n: 0, BN: null, rig: ''};
 

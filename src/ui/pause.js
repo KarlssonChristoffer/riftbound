@@ -105,6 +105,9 @@ export function createPause(E) {
     // the character: the Ranger (bow), the gunslinger (Peacemaker), the outlaw (Brass Navy): view/hero.js LOADOUTS
     out.push({tab: 'game', group: 'Character', label: 'Play as', ...pick(Object.keys(CHARS), () => charOf(hero.loadName), v => {
       const i = LOADOUTS.findIndex(l => l[0] === CHARS[v]); if (i >= 0 && i !== hero.loadI) hero.switchLoadout(i); })});
+    // his own cape and coat tail, on any character (features/gear.js cape: a switch in the set, so co-op sees it too)
+    const G = feat('gear');
+    if (G?.cape) out.push({tab: 'game', group: 'Character', label: 'Cape', ...onOff(() => !G.capeOff, v => { if (G.capeOff === v) G.cape(v); })});
     // Graphics, Controls: the host's own
     // (fullscreen keeps Escape for the menu: keyboard lock, where the browser has it; holding Esc still leaves fullscreen)
     out.push({tab: 'graphics', group: 'Display', label: 'Fullscreen', ...onOff(() => !!document.fullscreenElement, v => {

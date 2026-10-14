@@ -1,11 +1,12 @@
 // GEAR PANEL: what you wear (features/gear.js; Tab, beside the pack). A slot a row (head, body, back, hands, legs, feet, main
 // hand, off hand), each with its pieces as pixel icons (ui/gearicons.js) after "own" (the character's own clothes: the slot
-// empty); a click wears a piece or takes it off. The piece under the pointer shows in a card that follows it (ui/geartip.js:
+// empty); a click wears a piece or takes it off. The Back row's header has the cape switch (his own cape and coat tail on / off:
+// content/gear.js SWITCHES). The piece under the pointer shows in a card that follows it (ui/geartip.js:
 // what it is, its weight and armor, what it does; Shift for more). At the bottom the set's numbers: weight, armor, speed. In
 // co-op a choice waits for the server ("waiting for the server"). Pixel art like the game (ui/pixelfont.js, ui/pixelframe.js).
 // OWNS: the panel (#gear + its style). READS: the feature's S (want, worn, stats, waiting), content/gear.js.
 // BUDGET: closed: nothing. Open: DOM writes on a change of set (no per-frame work).
-import {SLOTS, SLOT_NAMES, GEAR, RULES, RARITY, gearById, setStats} from '../content/gear.js';
+import {SLOTS, SLOT_NAMES, GEAR, RULES, RARITY, CAPE_OFF, gearById, setStats, withCape} from '../content/gear.js';
 import {gearIcon, slotIcon} from './gearicons.js';
 import {gearTip} from './geartip.js';
 import {FRAMES, uiUnit} from './pixelframe.js';
@@ -36,6 +37,11 @@ body:has(#pause:not(.hidden)) #gear { visibility: hidden; }
 #gear .g-it img { width: calc(18 * var(--u)); height: calc(18 * var(--u)); image-rendering: pixelated; }
 #gear .g-it.own img { opacity: .8; }
 #gear .g-it i { position: absolute; right: var(--u); top: var(--u); width: calc(3 * var(--u)); height: calc(3 * var(--u)); outline: var(--u) solid #0c0907; }
+#gear h5:has(.g-sw) { display: flex; justify-content: space-between; align-items: center; }
+#gear .g-sw { font: inherit; text-transform: none; color: var(--dim); cursor: pointer; background: none; padding: 0 calc(3 * var(--u));
+  border: calc(2 * var(--u)) solid transparent; border-image: var(--g-card) 2 fill / calc(2 * var(--u)); }
+#gear .g-sw:hover { border-image-source: var(--g-hot); color: var(--ink); }
+#gear .g-sw.on { color: var(--key); }
 #gear .g-sum { margin-top: calc(5 * var(--u)); padding-top: calc(3 * var(--u)); border-top: var(--u) solid #4a3826; }
 #gear .g-num { color: var(--key); }
 #gear .g-dim { color: var(--dim); }
@@ -43,7 +49,7 @@ body:has(#pause:not(.hidden)) #gear { visibility: hidden; }
 
 // opts: {S (the feature's state), choose(ids), online() (co-op: a choice waits for the server)}
 export function createGearPanel({S, choose, online}) {
-  let root = null, sum = null;
+  let root = null, sum = null, sw = null;
   const btns = [];   // {b, id (or null: own), slot}
   const pct = v => Math.round(v * 100) + '%';
   function build() {
@@ -58,6 +64,10 @@ export function createGearPanel({S, choose, online}) {
     const tip = gearTip();
     for (const slot of SLOTS) {
       const h = document.createElement('h5'); h.textContent = SLOT_NAMES[slot]; root.appendChild(h);
+      if (slot === 'back') {   // the cape switch: his own cape and coat tail (a cloak worn here brings a cape of its own)
+        sw = document.createElement('button'); sw.className = 'g-sw'; sw.title = 'his own cape and coat tail, on or off';
+        sw.onclick = () => { choose(withCape(S.want, S.want.includes(CAPE_OFF))); sync(); }; h.appendChild(sw);
+      }
       const row = document.createElement('div'); row.className = 'g-row'; root.appendChild(row);
       for (const g of [null, ...GEAR.filter(x => x.slot === slot)]) {
         const b = document.createElement('button'); b.className = 'g-it' + (g ? '' : ' own');
@@ -78,6 +88,9 @@ export function createGearPanel({S, choose, online}) {
       const want = id ? S.want.includes(id) : !S.want.some(w => gearById(w).slot === slot);
       b.classList.toggle('on', worn); b.classList.toggle('want', want && !worn);
     }
+    const capeOn = !S.want.includes(CAPE_OFF);
+    if (sw.textContent !== (capeOn ? 'Cape: on' : 'Cape: off')) sw.textContent = capeOn ? 'Cape: on' : 'Cape: off';
+    sw.classList.toggle('on', capeOn);
     const st = S.stats, w = setStats(S.want), wait = online() && S.waiting;
     sum.innerHTML = `<span class="g-num">${st.kg.toFixed(1)} kg</span> <span class="g-dim">(${RULES.FREE_KG} kg free)</span><br>` +
       `<span class="g-num">armor ${pct(st.armor)}</span> · <span class="g-num">speed ${pct(st.speed)}</span>` +
