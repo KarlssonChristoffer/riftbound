@@ -12,7 +12,7 @@
 //   const room = createRoom({seed, trees, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
-import {CATCHES, WATERS, roll, statsOf} from '../src/content/fishing.js';
+import {CATCHES, WATERS, BAITS, MEALS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {mulberry32} from '../src/core/rng.js';
@@ -114,9 +114,10 @@ export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, d
     log(`  ${p.name} wears ${g.join(', ') || 'their own clothes'}`);
   }
 
-  // FISHING (docs/FISHING.md): a cast that fell on water asks what bites ({a: 'cast', n, x, y, w, deep, rain, perfect, lvl}); the
-  // server rolls it (content/fishing.js roll: the same rules the game runs offline) from the set he wears (its fish.* notes),
-  // his Fishing level (as the client says it: the save is his) and the clock's part of the day, and answers him alone
+  // FISHING (docs/FISHING.md): a cast that fell on water asks what bites ({a: 'cast', n, x, y, w, deep, rain, perfect, lvl,
+  // spot, bait, meal}); the server rolls it (content/fishing.js roll: the same rules the game runs offline) from the set he
+  // wears (its fish.* notes and the angler's set), his Fishing level, his bait and his meal (as the client says them: the
+  // save is his), a fishing spot (checked against the spots' hash on its own clock) and the clock's part of the day, and answers him alone
   // ({a: 'bite', n, id, cm, kg, wait, nibbles, two}). The fight is the client's; a landed one ({a: 'land', n}) is told to
   // everyone ({a: 'caught', id: who, name, c: the catch, cm, kg, two}); a lost one ({a: 'lost', n}) forgets the roll.
   const fishRng = mulberry32((seed ^ 0xf15f) >>> 0), FISH_REACH = 20, FISH_WATERS = new Set(Object.values(WATERS));
@@ -130,10 +131,13 @@ export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, d
       p.fishT = t;
       const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = [];
       for (const id of p.gear) for (const q of GEAR_BY_ID[id]?.mods || []) notes.push(q);
-      for (const q of SKILLS.fishing.per) notes.push(q.mul !== undefined ? {stat: q.stat, mul: 1 + q.mul * (lvl - 1)} : {stat: q.stat, add: (q.add || 0) * (lvl - 1)});
+      const pieces = p.gear.filter(id => GEAR_BY_ID[id]?.kind === 'fishing').length, meal = str(m.meal, 24), bait = str(m.bait, 24);
+      notes.push(...castNotes({lvl, pieces, meal: MEALS[meal] ? meal : '', per: SKILLS.fishing.per}));
+      const spot = !!m.spot && spotNear(x, y, Math.floor(t / 1000 / SPOT.slot), seed | 0);
       const st = statsOf(notes), rain = !!m.rain;
       const r = roll(fishRng, {water: w, part: partOf(clock()), rain, deep: Math.max(0, Math.min(40, num(m.deep, 0))), luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0),
-        find: st['fish.find'], size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: !!m.perfect});
+        find: st['fish.find'], size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: !!m.perfect,
+        spot, bait: BAITS[bait] ? bait : ''});
       r.two = fishRng() < st['fish.double'];
       p.fishN = n; p.fishR = r;
       p.conn.send(encode({k: 'fish', a: 'bite', n, ...r}));
