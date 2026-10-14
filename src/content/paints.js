@@ -31,6 +31,12 @@ export const PAINTS = {
   elkleg:      {all: ['#c8bca8', '#a49882', '#7a705e', '#423c32']},                                                       // its pale lower legs
   antler:      {all: ['#e8dcc0', '#c8b894', '#9a8a68', '#544a36']},
   paleglow:    {all: ['#f6f8e6', '#dfe6cc', '#b4c0a4', '#6a7462']},                                                       // the night ring's mushroom caps (they glow: mesh.setGlow)
+  // the forest's animals (features/fauna.js, docs/FAUNA.md); white fur and the deer's antlers use mushwhite and sawn
+  roe:         {all: ['#c08a5a', '#9a6a40', '#70492c', '#3c2618']},                                                       // a roe deer's summer red-brown
+  russet:      {all: ['#ec9a4a', '#cc6e2c', '#94481e', '#4e2410']},                                                       // a fox, a red squirrel
+  harefur:     {all: ['#b8a084', '#957e64', '#6e5c4a', '#3c3229']},                                                       // a mountain hare's summer grey-brown
+  furdark:     {all: ['#5a4a40', '#3c302a', '#28201c', '#140f0d']},                                                       // dark legs, ear tips, noses, hooves
+  plumage:     {all: ['#464a5a', '#2c2e38', '#1e1f27', '#0e0e12']},                                                       // a raven, a capercaillie cock: near black, a blue sheen
 };
 // a paint's ramp in a biome: ['#hi', '#base', '#shade', '#dark']
 export const paintRamp = (name, biome) => { const p = PAINTS[name]; return p && (p[biome] || p.all); };

@@ -427,3 +427,190 @@ export const RECIPES = {
     },
   },
 };
+
+// ---------------------------------------------------------------- THE FOREST'S ANIMALS (features/fauna.js, docs/FAUNA.md)
+// Each animal is a few parts the feature poses every frame (a body, a head on its neck, legs, wings, a tail), so each part is
+// its own recipe (lab: false) with its origin at its PIVOT; the whole animal in its rest pose is the lab's (roe, fox ...).
+// The frame: the animal faces +x (east), y up, its left side +z; the body's origin is the ground under its middle (a bird's:
+// the body's centre). FAUNA_RIG says where each part's pivot sits on the body (and a leg's length), for the feature.
+export const FAUNA_RIG = {
+  roe: {neck: [.34, .86, 0], legs: [[.26, .66, .075], [.26, .66, -.075], [-.3, .7, .075], [-.3, .7, -.075]], h: 1.05},
+  fox: {neck: [.24, .4, 0], legs: [[.17, .3, .06], [.17, .3, -.06], [-.18, .31, .06], [-.18, .31, -.06]], h: .55},
+  hare: {neck: [.12, .27, 0], h: .55},
+  squirrel: {tail: [-.13, .16, 0], h: .45},
+  raven: {wing: [.02, .03, .06], stand: .14, h: .3},
+  capercaillie: {wing: [.04, .05, .1], stand: .2, h: .45},
+};
+const leg = (b, fam, len, r0, r1, hoof) => {   // a leg hanging from its pivot (0, 0, 0) to the ground (0, -len, 0): thigh, shank, foot
+  b.tube(fam, [0, .02, 0], [-.012, -len * .5, 0], r0, (r0 + r1) / 2, {sides: 6, part: 1});
+  b.tube(fam, [-.012, -len * .5, 0], [0, -len + .02, 0], (r0 + r1) / 2 * .9, r1, {sides: 6, part: 1});
+  if (hoof) b.box(hoof, [.01, -len + .02, 0], [r1 * 2.4, .04, r1 * 2], [0, 0, 0]);
+};
+const PARTS = {
+  roe_body(b, p) {
+    b.ball('roe', [0, .74, 0], [.42, .2, .15], {detail: 2, part: 1});
+    b.ball('roe', [.26, .76, 0], [.2, .22, .15], {detail: 1, part: 1});   // (the chest, deeper than the belly)
+    b.ball('roe', [-.28, .78, 0], [.18, .19, .15], {detail: 1, part: 1});   // (the haunch)
+    b.ball(p.winter ? 'harefur' : 'roe', [0, .62, 0], [.3, .08, .12], {detail: 1, bias: .15});   // (a paler belly)
+    b.ball('mushwhite', [-.44, .78, 0], [.05, .13, .12], {detail: 1});   // the white rump patch: what you see bounding away
+  },
+  roe_head(b, p) {
+    b.tube('roe', [-.02, -.02, 0], [.15, .38, 0], .085, .055, {sides: 7, part: 1});   // the neck
+    b.ball('roe', [.2, .42, 0], [.11, .075, .07], {detail: 1, part: 1});
+    b.ball('roe', [.31, .39, 0], [.07, .05, .045], {detail: 1, part: 1});   // the muzzle
+    b.ball('furdark', [.37, .385, 0], .026, {detail: 0});
+    b.ball('mushwhite', [.33, .36, 0], [.035, .02, .04], {detail: 0});   // (the pale chin)
+    for (const z of [.055, -.055]) {
+      b.ball('pupil', [.24, .44, z], .016, {detail: 0});
+      b.cone('roe', [.16, .46, z * .9], [.1, .58, z * 1.6], .04, {sides: 5});   // the big ears
+    }
+    if (p.buck) for (const z of [.032, -.032]) {   // short antlers, a tine forward
+      b.tube('sawn', [.17, .48, z], [.15, .64, z * 1.4], .014, .01, {sides: 5});
+      b.tube('sawn', [.155, .57, z * 1.3], [.2, .62, z * 1.3], .009, .007, {sides: 4});
+    }
+  },
+  roe_leg(b, p) { leg(b, 'roe', p.len, .045, .02, 'furdark'); },
+  fox_body(b) {
+    b.ball('russet', [0, .33, 0], [.27, .115, .1], {detail: 2, part: 1});
+    b.ball('russet', [.17, .34, 0], [.12, .12, .1], {detail: 1, part: 1});
+    b.ball('mushwhite', [.22, .3, 0], [.08, .09, .08], {detail: 1});   // the white chest
+    b.tube('russet', [-.22, .36, 0], [-.48, .29, 0], .05, .085, {sides: 7, part: 2});   // the brush, thick at its end
+    b.tube('russet', [-.48, .29, 0], [-.62, .22, 0], .085, .07, {sides: 7, part: 2});
+    b.ball('mushwhite', [-.66, .2, 0], [.06, .055, .06], {detail: 1});   // its white tip
+  },
+  fox_head(b) {
+    b.tube('russet', [-.03, -.03, 0], [.07, .08, 0], .065, .055, {sides: 7, part: 1});
+    b.ball('russet', [.11, .1, 0], [.085, .07, .075], {detail: 1, part: 1});
+    b.cone('russet', [.15, .085, 0], [.29, .065, 0], .04, {sides: 6, part: 1});   // the snout
+    b.ball('furdark', [.29, .066, 0], .018, {detail: 0});
+    b.ball('mushwhite', [.14, .06, 0], [.07, .035, .07], {detail: 1});   // white cheeks and chin
+    for (const z of [.045, -.045]) {
+      b.ball('pupil', [.18, .11, z * .9], .012, {detail: 0});
+      b.cone('russet', [.09, .15, z], [.07, .25, z * 1.3], .034, {sides: 4});
+      b.cone('furdark', [.075, .22, z * 1.25], [.07, .26, z * 1.32], .016, {sides: 4});
+    }
+  },
+  fox_leg(b, p) { leg(b, 'furdark', p.len, .028, .018, null); },
+  hare_body(b, p) {
+    const fur = p.winter ? 'mushwhite' : 'harefur';
+    b.ball(fur, [-.03, .18, 0], [.2, .14, .12], {detail: 2, part: 1});
+    for (const z of [.075, -.075]) {
+      b.ball(fur, [-.1, .13, z], [.13, .11, .05], {detail: 1, part: 1});   // the haunches
+      b.box(fur, [-.04, .02, z * 1.05], [.18, .035, .05], [0, 0, 0], {part: 1});   // the long hind feet
+      b.tube(fur, [.12, .16, z * .55], [.14, .01, z * .55], .024, .02, {sides: 5, part: 1});   // the front legs
+    }
+    b.ball('mushwhite', [-.22, .2, 0], .045, {detail: 0});   // the scut
+  },
+  hare_head(b, p) {
+    const fur = p.winter ? 'mushwhite' : 'harefur';
+    b.ball(fur, [.05, .04, 0], [.085, .07, .065], {detail: 1, part: 1});
+    b.ball(fur, [.12, .02, 0], [.045, .04, .04], {detail: 0, part: 1});
+    for (const z of [.028, -.028]) {
+      b.ball('pupil', [.09, .06, z * 2], .014, {detail: 0});
+      b.tube(fur, [.03, .09, z], [-.04, .26, z * 1.5], .024, .02, {sides: 5});   // the long ears
+      b.cone('furdark', [-.035, .245, z * 1.5], [-.045, .28, z * 1.55], .02, {sides: 4});   // their black tips (summer and winter)
+    }
+  },
+  squirrel_body(b) {
+    b.at([0, 0, 0], 0, 1.5, () => {   // (drawn 1.5x: at life size it would be two pixels)
+      b.ball('russet', [0, .08, 0], [.09, .06, .05], {detail: 1, part: 1});
+      b.ball('mushwhite', [.03, .065, 0], [.06, .035, .04], {detail: 0});   // the white belly
+      b.ball('russet', [.09, .1, 0], [.045, .042, .04], {detail: 1, part: 1});
+      b.ball('pupil', [.115, .11, .03], .01, {detail: 0}); b.ball('pupil', [.115, .11, -.03], .01, {detail: 0});
+      for (const z of [.02, -.02]) b.cone('russet', [.08, .135, z], [.075, .175, z * 1.3], .014, {sides: 4});   // the ear tufts
+      for (const z of [.035, -.035]) b.box('russet', [-.01, .02, z], [.09, .03, .02], [0, 0, 0]);   // the haunches and feet
+      b.box('russet', [.06, .02, 0], [.025, .03, .05], [0, 0, 0]);
+    });
+  },
+  squirrel_tail(b) {   // a big bushy curl from its pivot (the rump) up over the back
+    b.at([0, 0, 0], 0, 1.5, () => {
+      const pts = [[0, 0], [-.04, .05], [-.05, .11], [-.03, .16], [.01, .18]];
+      for (let i = 1; i < pts.length; i++) b.tube('russet', [pts[i - 1][0], pts[i - 1][1], 0], [pts[i][0], pts[i][1], 0], .02 + i * .006, .024 + i * .006, {sides: 6, part: 1});
+      b.ball('russet', [.015, .18, 0], .034, {detail: 0, part: 1});
+    });
+  },
+  raven_body(b) {
+    b.ball('plumage', [0, 0, 0], [.19, .075, .075], {detail: 1, part: 1});
+    b.ball('plumage', [.19, .045, 0], .058, {detail: 1, part: 1});
+    b.cone('furdark', [.22, .04, 0], [.33, .025, 0], .026, {sides: 5});   // the heavy bill
+    b.box('plumage', [-.25, -.005, 0], [.18, .018, .1], [0, 0, 4]);         // the wedge tail
+    b.ball('pupil', [.22, .06, .04], .01, {detail: 0}); b.ball('pupil', [.22, .06, -.04], .01, {detail: 0});
+    for (const z of [.03, -.03]) b.tube('furdark', [.02, -.05, z], [.03, -.14, z], .012, .01, {sides: 4});
+  },
+  raven_wing(b, p) {   // from its shoulder (0, 0, 0) out along +z: the arm, the hand, the fingered tip (brown: a capercaillie hen's)
+    const s = p.span, f = p.brown ? 'roe' : 'plumage';
+    b.box(f, [-.03, 0, s * .22], [.17, .02, s * .45], [0, 0, 0], {part: 1});
+    b.box(f, [-.07, 0, s * .66], [.14, .016, s * .45], [0, 8, 0], {part: 1});
+    for (let i = 0; i < 4; i++) b.box(f, [-.12 + i * .03, 0, s * .93], [.025, .012, s * .14], [0, 10 - i * 6, 0], {part: 1});
+  },
+  capercaillie_body(b, p) {
+    const hen = p.hen, fam = hen ? 'roe' : 'plumage', s = hen ? .8 : 1;
+    b.at([0, 0, 0], 0, s, () => {
+      b.ball(fam, [0, 0, 0], [.26, .13, .12], {detail: 1, part: 1});
+      b.ball(hen ? 'russet' : 'lingonleaf', [.15, -.01, 0], [.12, .1, .1], {detail: 1});   // the breast: a cock's green sheen, a hen's rust
+      b.ball(fam, [.27, .14, 0], .075, {detail: 1, part: 1});
+      b.tube(fam, [.17, .05, 0], [.26, .12, 0], .07, .06, {sides: 6, part: 1});
+      b.cone('mushwhite', [.31, .13, 0], [.39, .1, 0], .032, {sides: 5});   // the pale hooked bill
+      if (!hen) { b.ball('furdark', [.3, .07, 0], [.04, .05, .035], {detail: 0}); for (const z of [.05, -.05]) b.box('agaric', [.29, .17, z], [.05, .02, .012], [0, 0, 0]); }   // the beard, the red brows
+      b.ball('pupil', [.3, .15, .055], .011, {detail: 0}); b.ball('pupil', [.3, .15, -.055], .011, {detail: 0});
+      if (hen) b.box(fam, [-.33, .01, 0], [.24, .03, .16], [0, 0, 6]);   // the tail, folded
+      else {   // a cock's tail half fanned and cocked up (the lek's display: his silhouette), white spots at the feathers' ends, a white shoulder
+        for (let i = 0; i < 7; i++) {   // the feathers fan out from the rump in an upright half circle behind him
+          const a = (i / 6 - .5) * 1.9, L = .3, e = [-.24 - L * .35, .05 + Math.cos(a) * L, Math.sin(a) * L];
+          b.tube(fam, [-.22, .04, 0], e, .022, .04, {sides: 4, part: 3});
+          b.ball('mushwhite', e, .02, {detail: 0});
+        }
+        b.ball('mushwhite', [-.2, -.06, 0], [.06, .03, .06], {detail: 0});   // white under the tail
+        for (const z of [.11, -.11]) b.ball('mushwhite', [.1, .06, z], .025, {detail: 0});
+      }
+      for (const z of [.045, -.045]) b.tube('furdark', [.02, -.1, z], [.03, -.2, z], .018, .014, {sides: 4});
+    });
+  },
+};
+Object.assign(RECIPES, {
+  roe_body: {lab: false, about: 'A roe deer: its body', params: {winter: [0, 0, 1]}, build: (b, p) => PARTS.roe_body(b, p)},
+  roe_head: {lab: false, about: 'A roe deer: its neck and head (antlers on a buck)', params: {buck: [0, 0, 1]}, build: (b, p) => PARTS.roe_head(b, p)},
+  roe_leg: {lab: false, about: 'A roe deer: a leg', params: {len: [.68, .3, 1]}, build: (b, p) => PARTS.roe_leg(b, p)},
+  fox_body: {lab: false, about: 'A fox: body and brush', params: {}, build: b => PARTS.fox_body(b)},
+  fox_head: {lab: false, about: 'A fox: its head', params: {}, build: b => PARTS.fox_head(b)},
+  fox_leg: {lab: false, about: 'A fox: a leg', params: {len: [.3, .2, .5]}, build: (b, p) => PARTS.fox_leg(b, p)},
+  hare_body: {lab: false, about: 'A mountain hare: its body', params: {winter: [0, 0, 1]}, build: (b, p) => PARTS.hare_body(b, p)},
+  hare_head: {lab: false, about: 'A mountain hare: its head and ears', params: {winter: [0, 0, 1]}, build: (b, p) => PARTS.hare_head(b, p)},
+  squirrel_body: {lab: false, about: 'A red squirrel', params: {}, build: b => PARTS.squirrel_body(b)},
+  squirrel_tail: {lab: false, about: "A red squirrel's tail", params: {}, build: b => PARTS.squirrel_tail(b)},
+  raven_body: {lab: false, about: 'A raven: body, head, bill, tail', params: {}, build: b => PARTS.raven_body(b)},
+  raven_wing: {lab: false, about: 'A raven or capercaillie wing', params: {span: [.5, .3, .8], brown: [0, 0, 1]}, build: (b, p) => PARTS.raven_wing(b, p)},
+  capercaillie_body: {lab: false, about: 'A capercaillie: a cock (black, a green breast, red brows) or a hen (brown)', params: {hen: [0, 0, 1]}, build: (b, p) => PARTS.capercaillie_body(b, p)},
+  // the whole animals in their rest pose, for the asset lab (?mode=sandbox&lab=roe)
+  roe: {about: 'A roe deer (rådjur), a buck or a doe', likes: {ground: 'forest edge, glades', shade: .3, cluster: [2, 3]}, params: {buck: [1, 0, 1], winter: [0, 0, 1]},
+    build(b, p) { const R = FAUNA_RIG.roe; PARTS.roe_body(b, p); b.at(R.neck, 0, 1, () => PARTS.roe_head(b, p)); for (const l of R.legs) b.at(l, 0, 1, () => PARTS.roe_leg(b, {len: l[1]})); }},
+  fox: {about: 'A red fox (räv)', likes: {ground: 'forest, a den under rock', shade: .5, cluster: [1, 1]}, params: {},
+    build(b) { const R = FAUNA_RIG.fox; PARTS.fox_body(b); b.at(R.neck, 0, 1, () => PARTS.fox_head(b)); for (const l of R.legs) b.at(l, 0, 1, () => PARTS.fox_leg(b, {len: l[1]})); }},
+  hare: {about: 'A mountain hare (skogshare), white in winter', likes: {ground: 'open ground with some cover, the fell', shade: .1, cluster: [1, 1]}, params: {winter: [0, 0, 1]},
+    build(b, p) { PARTS.hare_body(b, p); b.at(FAUNA_RIG.hare.neck, 0, 1, () => PARTS.hare_head(b, p)); }},
+  squirrel: {about: 'A red squirrel (ekorre)', likes: {ground: 'pine woods, on the trunks', shade: .6, cluster: [1, 1]}, params: {},
+    build(b) { PARTS.squirrel_body(b); b.at(FAUNA_RIG.squirrel.tail, 0, 1, () => PARTS.squirrel_tail(b)); }},
+  raven: {about: 'A raven (korp)', likes: {ground: 'high rock, the fell', shade: 0, cluster: [2, 2]}, params: {},
+    build(b) { const R = FAUNA_RIG.raven; b.at([0, R.stand, 0], 0, 1, () => { PARTS.raven_body(b); for (const s of [1, -1]) b.at([R.wing[0], R.wing[1], R.wing[2] * s], s > 0 ? 0 : 180, 1, () => b.at([0, 0, 0], 0, 1, () => PARTS.raven_wing(b, {span: .14}))); }); }},
+  // the birds in the crowns (features/fauna/crowns.js): one mesh each, wings spread (in flight they beat by the mesh's span)
+  finch: {about: 'A chaffinch (bofink), wings spread: the small birds that burst out of a crown', likes: {ground: 'forest, in the crowns', shade: .3, cluster: [3, 7]}, params: {},
+    build(b) { b.at([0, 0, 0], 0, 2, () => {
+      b.ball('harefur', [0, 0, 0], [.07, .035, .035], {detail: 1, part: 1});
+      b.ball('russet', [.03, -.008, 0], [.045, .03, .03], {detail: 0});   // the rosy breast
+      b.ball('stone', [.07, .02, 0], .03, {detail: 1, part: 1});          // the blue-grey crown
+      b.cone('furdark', [.095, .018, 0], [.12, .016, 0], .01, {sides: 4});
+      b.box('harefur', [-.085, .004, 0], [.06, .008, .03], [0, 0, 4]);
+      for (const z of [1, -1]) { b.box('furdark', [-.005, .012, z * .07], [.06, .008, .1], [0, 0, 0], {part: 2}); b.box('mushwhite', [.005, .016, z * .05], [.02, .006, .05], [0, 0, 0]); }   // the white wing bars
+    }); }},
+  woodpigeon: {about: 'A wood pigeon (ringduva), wings spread: the loud clatter out of a crown', likes: {ground: 'forest, in the crowns', shade: .3, cluster: [1, 2]}, params: {},
+    build(b) { b.at([0, 0, 0], 0, 1.2, () => {
+      b.ball('stone', [0, 0, 0], [.16, .07, .07], {detail: 1, part: 1});
+      b.ball('stone', [.15, .04, 0], .045, {detail: 1, part: 1});
+      for (const z of [.035, -.035]) b.ball('mushwhite', [.12, .03, z], .014, {detail: 0});   // the white neck patches
+      b.cone('agaric', [.19, .035, 0], [.22, .03, 0], .012, {sides: 4});
+      b.box('stone', [-.2, 0, 0], [.14, .012, .08], [0, 0, 3]);
+      for (const z of [1, -1]) { b.box('stone', [-.01, .01, z * .15], [.12, .012, .22], [0, 0, 0], {part: 2}); b.box('mushwhite', [.02, .016, z * .1], [.025, .008, .08], [0, 0, 0]); b.box('furdark', [-.03, .012, z * .27], [.09, .01, .06], [0, 0, 0]); }
+    }); }},
+  capercaillie: {about: 'A capercaillie (tjäder): a cock or a hen', likes: {ground: 'old pine woods, the floor', shade: .6, cluster: [1, 1]}, params: {hen: [0, 0, 1]},
+    build(b, p) { b.at([0, FAUNA_RIG.capercaillie.stand * (p.hen ? .8 : 1), 0], 0, 1, () => PARTS.capercaillie_body(b, p)); }},
+});
