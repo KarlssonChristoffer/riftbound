@@ -365,7 +365,7 @@ export async function create(host) {
   const V = {bob: 0, dip: 0, under: 0, fx: 0, fy: 0, dart: 0, dartV: 0, leapT: -1, lx: 0, ly: 0, flash: 0, bang: 0, card: 0, peer: null, peerT: 0};
   const COL = {rod: '#c4bc7c', line: '#e8e4d8', red: '#d83a2a', white: '#f4f0e6', ring: '#d8ecf0', drop: '#e8f6fa', shade: '#0e1c20', glow: '#b8c8f0'};
   const P1 = {size: 1}, P2 = {size: 2}, P2A = {size: 2, alpha: .55}, P1A = {size: 1, alpha: .6}, P2E = {size: 2, emit: true}, P3A = {size: 3, alpha: .75};
-  const PSP = {size: 1, alpha: .8};   // (the spots' bubbles: alpha follows the slot's fade in and out)
+  const PSP = {size: 2, alpha: .9};   // (the spots' bubbles: alpha follows the slot's fade in and out)
   // how present the spots are now (0..1): they fade in at the slot's start and out at its end (SPOT.fade s)
   const spotFade = () => { const t = clockNow() % SPOT.slot; return clamp(Math.min(t, SPOT.slot - t) / SPOT.fade, 0, 1); };
   // the fish's leap sprite: its icon with an outline (content/fishing.js catchIcon), a canvas each, made once
@@ -523,8 +523,8 @@ export async function create(host) {
       const fade = spotFade();
       for (let i = 0; i < SPK.n; i++) {
         const sp = SP[i]; if (spent.has(sp.key)) continue;
-        if (VR() < dt * 1.1 * fade) ring(sp.x + (VR() - .5) * .8, sp.y + (VR() - .5) * .8, 0);
-        if (VR() < dt * .05 * fade) { spray(sp.x, sp.y, 5, 1.1); ring(sp.x, sp.y, 1); }
+        if (VR() < dt * 2.2 * fade) ring(sp.x + (VR() - .5) * .8, sp.y + (VR() - .5) * .8, VR() < .3 ? 1 : 0);
+        if (VR() < dt * .12 * fade) { spray(sp.x, sp.y, 7, 1.3); ring(sp.x, sp.y, 1); }
       }
       pose(dt);
     },
@@ -539,14 +539,14 @@ export async function create(host) {
       // the spots' bubbles: a few points wheeling slowly over each, popping in and out
       const fade = spotFade();
       if (fade > 0 && SPK.n) {
-        PSP.alpha = .8 * fade; const t = performance.now() / 1000;
+        PSP.alpha = .9 * fade; const t = performance.now() / 1000;
         for (let i = 0; i < SPK.n; i++) {
           const sp = SP[i]; if (spent.has(sp.key)) continue;
           const h = host.elev(sp.x, sp.y) + .03, k0 = (sp.key % 97) * .37;
-          for (let j = 0; j < 4; j++) {
+          for (let j = 0; j < 6; j++) {
             const ph = t * (.5 + .13 * j) + k0 + j * 1.7; if (Math.sin(ph * 3.1 + j) < -.2) continue;   // (a bubble pops, another comes)
             const r = .15 + .35 * ((j * .29 + k0) % 1);
-            host.point(sp.x + Math.cos(ph) * r, sp.y + Math.sin(ph) * r * .8, h, COL.ring, PSP);
+            host.point(sp.x + Math.cos(ph) * r, sp.y + Math.sin(ph) * r * .8, h, COL.white, PSP);
           }
         }
       }
