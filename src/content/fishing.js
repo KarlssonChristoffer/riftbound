@@ -1,5 +1,5 @@
-// FISHING (data; docs/FISHING.md): what bites where, how it fights, what fishing gear does. Pure data and pure functions, no
-// imports: the browser (features/fishing.js, content/items.js, ui/geartip.js) and the co-op server (server/room.mjs: it rolls
+// FISHING (data; docs/FISHING.md): what bites where, how it fights, what fishing gear does. Pure data and pure functions (one
+// import: core/mathx.js hash3, pure too): the browser (features/fishing.js, content/items.js, ui/geartip.js) and the co-op server (server/room.mjs: it rolls
 // the catch) read this one file.
 //   WATERS   world.js waterSample's kinds -> the water they are to a fish: 'lake' (the forest's lake), 'stream' (the forest
 //            stream, the plateau's rill, the West Downs' brook), 'river' (the Proving Grounds' river, its pool, the lake's outflow)
@@ -13,7 +13,15 @@
 //            each does and how it reads in the gear card (statWords)
 //   TUNE     the cast, the wait, the hook, the fight: features/fishing.js reads these
 //   roll(rng, o) -> {id, cm, kg, wait, nibbles}   the catch for a cast (o: water, part, rain, deep, luck, find, size, lure,
-//            perfect): the game offline and the server in co-op draw the same way
+//            perfect, spot, bait): the game offline and the server in co-op draw the same way
+//   SPOT     fishing spots: rises and bubbles on the water (features/fishing.js finds them; a cast into one bites sooner, rarer)
+//            spotAt(a, b, slot, seed, out) (the cell's spot), spotNear(x, y, slot, seed) (the server's check of a cast's word)
+//   BAITS    what goes on the hook (cut from small fish at the pack panel; one a cast while you have it): prey weights
+//   MEALS    fish cooked and eaten at a burning campfire: a buff for a while (notes in host.mods, source 'fishing.meal')
+//   ANGLER   the fishing set: ANGLER.n fishing pieces worn at once give its notes (source 'fishing.set')
+//   castNotes(o) -> notes   the notes a cast is rolled with besides the gear's: the skill's, the set's, the meal's (the server
+//            builds the same from what it knows; the client has them in host.mods)
+import {hash3} from '../core/mathx.js';
 export const WATERS = {1: 'river', 2: 'stream', 3: 'river', 4: 'stream', 5: 'stream', 6: 'stream', 7: 'lake', 8: 'river'};
 export const WATER_NAMES = {lake: 'the lake', stream: 'the stream', river: 'the river'};
 export const DEEP = 3;   // m from the shore: the lake's deep water (char, zander; the forest lake is small: its middle is ~3-5 m out)
@@ -215,15 +223,17 @@ export const catchIcon = id => ICONS[id] ??= CATCHES[id].rows ? {rows: CATCHES[i
 // ---------------------------------------------------------------- the roll: what bites, when, how big
 // rng: () -> [0, 1) (the caller's own seeded generator). o: {water ('lake' | 'stream' | 'river'), part (env.part), rain (bool),
 // deep (m from the shore), luck, find (chances added), size (mul), lure (mul on the wait), night (share off the wait at night),
-// perfect (bool: a perfect cast)} -> {id, cm, kg, wait (s), nibbles: [s ...] (before wait)}
+// perfect (bool: a perfect cast), spot (bool: cast on a fishing spot: SPOT), bait (a BAITS id: its prey bite more)}
+// -> {id, cm, kg, wait (s), nibbles: [s ...] (before wait)}
 export function roll(rng, o) {
-  const luck = (o.luck || 0) + (o.perfect ? TUNE.cast.luck : 0);
+  const luck = (o.luck || 0) + (o.perfect ? TUNE.cast.luck : 0) + (o.spot ? SPOT.luck : 0), prey = o.bait ? BAITS[o.bait]?.prey : null;
   const isFind = rng() < TUNE.find + (o.find || 0);
   let total = 0; const pick = [];
   for (const id of CATCH_IDS) {
     const c = CATCHES[id]; if (!!c.find !== isFind || !c.where.includes(o.water)) continue;
     let w = (RARITY_W[c.rarity] || 1) * Math.pow(1 + Math.max(0, luck), RARITY_TIER[c.rarity] || 0) * (c.when[o.part] ?? 1);
     if (o.rain && c.rain) w *= c.rain;
+    if (prey && prey[id]) w *= prey[id];
     if (c.deep && (o.deep || 0) < DEEP) w /= c.deep * 2;   // (a deep-water fish near the shore: rarely)
     if (w > 0) { pick.push(id, w); total += w; }
   }
@@ -233,9 +243,76 @@ export function roll(rng, o) {
   const cm = Math.round(Math.min(c.cm[1] * 1.15, (c.cm[0] + (c.cm[1] - c.cm[0]) * u * u) * (o.size || 1)) * 10) / 10;
   const kg = Math.round(c.kg * (cm / 10) ** 3 * 100) / 100;
   const nightK = o.part === 'night' ? 1 - Math.min(.8, o.night || 0) : 1;
-  const wait = (TUNE.wait[0] + (TUNE.wait[1] - TUNE.wait[0]) * rng()) * (o.lure || 1) * nightK;
+  const wait = (TUNE.wait[0] + (TUNE.wait[1] - TUNE.wait[0]) * rng()) * (o.lure || 1) * nightK * (o.spot ? SPOT.lure : 1);
   const n = Math.floor(TUNE.nibble[0] + (TUNE.nibble[1] + 1 - TUNE.nibble[0]) * rng()), nibbles = [];
   for (let i = 0; i < n; i++) nibbles.push(Math.round(wait * (.25 + .65 * rng()) * 100) / 100);
   nibbles.sort((a, b) => a - b);
   return {id, cm, kg, wait: Math.round(wait * 100) / 100, nibbles};
+}
+
+// ---------------------------------------------------------------- fishing spots, bait, meals, the angler's set
+// SPOTS: the water is cut in cells of `cell` m; in each slot of `slot` s a cell holds a spot with chance `p`, at a hashed
+// place in it (it must be water `edge` m from the bank). Casting within `r` m of one: the wait x lure, + luck. One catch
+// from a spot spends it (for you). The slot clock is the world's (co-op: the server's), so friends see the same spots.
+export const SPOT = {cell: 7, slot: 75, p: .24, r: 1.8, edge: .8, lure: .45, luck: .2, fade: 4};
+// the spot cell (a, b) holds in slot `slot` of world `seed` -> writes {x, y} (world m) to out and returns true, or false: none.
+// The hash only (the client also asks the water: SPOT.edge from the bank); the server checks a cast's word with it.
+export function spotAt(a, b, slot, seed, out) {
+  if (hash3(a, b, (slot ^ seed) | 0) >= SPOT.p) return false;
+  out.x = (a + .15 + .7 * hash3(b, a, slot + 7)) * SPOT.cell; out.y = (b + .15 + .7 * hash3(a + 31, b, slot + 13)) * SPOT.cell;
+  return true;
+}
+// is there a spot within SPOT.r (+ slack) of (x, y) in this slot or the one before (the server's check of a cast's word)
+const SQ = {x: 0, y: 0};
+export function spotNear(x, y, slot, seed, slack = .5) {
+  const a0 = Math.floor(x / SPOT.cell), b0 = Math.floor(y / SPOT.cell), r = SPOT.r + slack;
+  for (let s = slot - 1; s <= slot; s++) for (let a = a0 - 1; a <= a0 + 1; a++) for (let b = b0 - 1; b <= b0 + 1; b++)
+    if (spotAt(a, b, s, seed, SQ) && Math.hypot(SQ.x - x, SQ.y - y) <= r) return true;
+  return false;
+}
+
+export const COMMON_FISH = ['perch', 'roach', 'bleak', 'minnow'];
+// BAITS: id -> {name, from (catches it is cut from), n (baits per fish), prey (weight x by catch), desc}
+export const BAITS = {
+  cut_bait: {name: 'Cut bait', from: ['roach', 'bleak', 'minnow'], n: 4,
+    prey: {pike: 3, zander: 3, burbot: 3, eel: 2.5, trout: 2, salmon: 2, perch: 1.3},
+    desc: 'Strips of small fish. Predators can\'t resist it: pike, zander, burbot, eel.',
+    icon: ['............', '............', '..aa........', '.abba.......', '.abbbaa.....', '..abbbbaa...', '...aabbbbaa.', '.....aabbbba', '.......aabba', '.........aa.', '............', '............'],
+    pal: {a: '#5a3a3a', b: '#d89a8a'}},
+};
+// MEALS: cooked at a burning campfire (the pack panel's Cook list), eaten at once: a buff for `dur` s. One meal at a time.
+//   need: [{ids, n}] (n of ONE of ids: the one you have most of), notes (host.mods), say (what it does, in words)
+const ANY_FISH = ['perch', 'roach', 'bleak', 'minnow', 'pike', 'trout', 'bream', 'tench', 'zander', 'grayling', 'char', 'burbot'];
+export const MEALS = {
+  fish_stick: {name: 'Fish on a stick', need: [{ids: COMMON_FISH, n: 2}], dur: 240,
+    notes: [{stat: 'player.speed', mul: 1.06}, {stat: 'fish.reel', mul: 1.1}], say: 'move 6% faster, reel 10% faster'},
+  fish_soup: {name: 'Angler\'s soup', need: [{ids: ANY_FISH, n: 3}], dur: 300,
+    notes: [{stat: 'fish.lure', mul: .8}, {stat: 'fish.luck', add: .05}], say: 'bites 20% sooner, fishing luck +5%'},
+  trout_bark: {name: 'Trout in birch bark', need: [{ids: ['trout', 'grayling'], n: 1}], dur: 300,
+    notes: [{stat: 'fish.hook', add: .2}, {stat: 'fish.cast', mul: 1.15}, {stat: 'player.speed', mul: 1.04}], say: 'more time to strike, cast 15% further, move 4% faster'},
+  pike_stew: {name: 'Pike stew', need: [{ids: ['pike'], n: 1}, {ids: COMMON_FISH, n: 1}], dur: 300,
+    notes: [{stat: 'game.hurt', mul: .9}, {stat: 'woodcut.power', mul: 1.15}, {stat: 'fish.line', mul: 1.15}], say: 'take 10% less harm, chop 15% harder, a stronger line'},
+  smoked_eel: {name: 'Smoked eel', need: [{ids: ['eel'], n: 1}], dur: 420,
+    notes: [{stat: 'light.lanternR', mul: 1.3}, {stat: 'fish.night', add: .3}, {stat: 'fish.luck', add: .05}], say: 'your lantern reaches 30% further, night bites much sooner, luck +5%'},
+  salmon_plank: {name: 'Salmon on a plank', need: [{ids: ['salmon', 'char'], n: 1}], dur: 420,
+    notes: [{stat: 'fish.luck', add: .12}, {stat: 'fish.double', add: .06}, {stat: 'player.speed', mul: 1.05}], say: 'fishing luck +12%, a 6% chance of two fish, move 5% faster'},
+};
+// the angler's set: ANGLER.n or more fishing pieces worn (any slots) -> its notes
+export const ANGLER = {n: 4, name: 'Angler\'s set', notes: [{stat: 'fish.luck', add: .08}, {stat: 'fish.double', add: .05}, {stat: 'fish.hook', add: .15}],
+  say: 'fishing luck +8%, a 5% chance of two fish, more time to strike'};
+// the notes a cast is rolled with besides the gear's own (the server: it knows the set and the level; the meal is the client's word)
+export function castNotes({lvl = 1, pieces = 0, meal = '', per = []}) {
+  const out = [];
+  for (const q of per) out.push(q.mul !== undefined ? {stat: q.stat, mul: 1 + q.mul * (lvl - 1)} : {stat: q.stat, add: (q.add || 0) * (lvl - 1)});
+  if (pieces >= ANGLER.n) out.push(...ANGLER.notes);
+  if (MEALS[meal]) out.push(...MEALS[meal].notes);
+  return out;
+}
+// where and when a catch bites, in a few words (the journal's hint for one not caught yet)
+export function hintOf(id) {
+  const c = CATCHES[id]; if (!c) return '';
+  const w = c.where.map(x => x === 'lake' ? 'the lake' : x === 'river' ? 'rivers' : 'streams').join(', ');
+  const top = Object.entries(c.when).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const when = top.length === 4 && top[3][1] >= top[0][1] * .8 ? 'any time' : ({dawn: 'at dawn', day: 'by day', dusk: 'at dusk', night: 'at night'})[top[0][0]];
+  return `${w}; ${when}${c.rain > 1 ? ', in the rain' : ''}${c.deep ? ', deep water' : ''}`;
 }

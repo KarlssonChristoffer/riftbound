@@ -6,7 +6,9 @@
 //   pack.give(id, n, at?) -> how many didn't fit (at {x, y, h}: a float there) / pack.take(id, n) -> bool / pack.count(id) /
 //   pack.has(id, n) / pack.best(job) -> the bag's best tool for a job | null / pack.gain(skill, n, at?) -> the new level | 0 /
 //   pack.level(skill) / pack.store(name) -> that system's saved object (it writes its own; then pack.dirty()) /
-//   pack.recipe(r) (a build the panel offers: {id, name, cost: {id: n}, can() -> '' | why not, run()}) / pack.held(slot)
+//   pack.recipe(r) (a build the panel offers: {id, name, cost: {id: n}, can() -> '' | why not, run(), group?: the panel's
+//   heading, 'Build' when absent}) / pack.section(s) (a part of the panel another system draws: {id, title, ver() -> number
+//   (redrawn when it changes), html(esc, icon) -> string}: features/fishing.js's catch journal) / pack.held(slot)
 //   (the bag slot whose tool is in hand: the panel marks it; -1 none)
 // OWNS: the inventory, the skills, the world save, the panel, the modifier source 'skills'.
 // READS: content/items.js, content/skills.js, the game's HUD (toasts, floats). EMITS: pack.add, skill.level.
@@ -26,7 +28,7 @@ export async function create(host) {
   const inv = createInventory(ITEMS, {slots: 8});
   const skills = createSkills(SKILLS, CURVE, host.mods);
   let stores = {}, dirtyT = -1, held = -1;
-  const recipes = [];
+  const recipes = [], sections = [];
   const game = () => host.feature('game');
   const ui = () => game()?.ui || null;
 
@@ -41,7 +43,7 @@ export async function create(host) {
   if (ON) { load(); addEventListener('pagehide', () => { if (dirtyT >= 0) write(); }); }
 
   const queue = [];   // the panel's clicks (and the menu's): carried out in the sim step
-  const panel = ON ? createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, held: () => held, ask: r => queue.push(r)}) : null;
+  const panel = ON ? createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held: () => held, ask: r => queue.push(r)}) : null;
   const label = (id, n) => (n > 1 ? `+${n} ` : '+') + (ITEMS[id]?.name || id);
 
   const F = {
@@ -74,6 +76,7 @@ export async function create(host) {
     store(name) { return stores[name] ??= {}; },
     dirty() { dirtyT = Math.max(dirtyT, 0); },
     recipe(r) { if (!recipes.some(q => q.id === r.id)) recipes.push(r); },
+    section(s) { if (!sections.some(q => q.id === s.id)) sections.push(s); },
     held(slot) { held = slot; },
     get open() { return !!panel?.open; },
     // a fresh world (the Sandbox menu): the save cleared, the start kit back; each system's store is emptied (they see it
