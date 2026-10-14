@@ -1689,7 +1689,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     lineupDraw();
     perf?.end('live.pose');
     const t1 = performance.now();
-    rig.noXray = !!app.PL.brawl?.carrying;   // (BRAWL: what he carries is in front of him: no x-ray outline of him through it)
+    rig.noXray = !!app.PL.brawl?.carrying || sinkPx > 6;   // (BRAWL: what he carries is in front of him: no x-ray outline of him through it; in the water, swimming: the water hides his body, not an outline of it)
     perf?.begin('live.rig', 'render'); rig.render(); perf?.end('live.rig');
     G.setPlayer(DRAWN.x, P.z + .9, DRAWN.z, PLAYER_SUN);   // (his one sun-shadow test, past his own 3D body: it cast onto the point and flickered; where he is drawn: IDLES' spot)
     stats.ms = stats.ms * .95 + (t1 - t0) * .05; stats.msRender = stats.msRender * .95 + (performance.now() - t1) * .05;

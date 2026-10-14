@@ -14,6 +14,8 @@
 //                handed on in F.mail for features/uncanny.js (refilled each step: it reads them in its own update, after this)
 //   gear         what each player wears is the server's to say (docs/GEAR.md): features/gear.js asks (wear(ids)), the
 //                server checks the set and tells everyone; yours comes back here (F.gear: {ver, ids}), the others' look.js dresses
+//   fishing      the server rolls each cast's catch (docs/FISHING.md): features/fishing.js asks (fish(o)); its answer and the
+//                others' catches (fish) are handed on in F.mail
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
@@ -66,7 +68,7 @@ export async function create(host) {
     if (C.status !== 'online' || now - sendT < 1000 / TICK_HZ) return;
     sendT = now;
     const P = host.player, pp = host.playerPose?.() || null;
-    ST.x = +P.x.toFixed(3); ST.y = +P.y.toFixed(3); ST.z = +P.z.toFixed(3);
+    ST.x = +P.x.toFixed(3); ST.y = +P.y.toFixed(3); ST.z = +(P.z - P.sink * 22 / host.PPMH).toFixed(3);   // (in the water, swimming: as sunk as the views draw him, 22 px per 1)
     ST.phi = +((pp ? pp.phi : P.faceAngle) % WH).toFixed(3); ST.s = P.state; ST.pose = P.frame || 'idle.0';
     ST.rig = pp ? pp.rig : ''; ST.w = ST.wn = ST.ls = ST.tp = undefined;
     if (ST.rig !== lastRig) { lastRig = ST.rig; lastN = -1; sentW = null; if (pp) ST.wn = pp.BN; }
@@ -104,6 +106,7 @@ export async function create(host) {
     name: 'coop', label: 'Co-op', on: true, net: C, look, act, gear,
     get online() { return C.status === 'online'; },
     wear(ids) { if (C.status !== 'online') return false; C.wear(ids); return true; },   // (features/gear.js: ask for a set)
+    fish(o) { if (C.status !== 'online') return false; C.fish(o); return true; },       // (features/fishing.js: the server rolls the catch)
     mail, clockNow,
     update(dt) {
       mail.length = 0;
@@ -120,7 +123,7 @@ export async function create(host) {
           const want = flags.get('time');   // (dev: a ?time= asks the server's clock for it, once)
           if (want && !askedTime) { askedTime = true; C.act('time', want); }
         }
-        else if (m.k === 'sec' || m.k === 'ev') mail.push(m);
+        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish') mail.push(m);
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }

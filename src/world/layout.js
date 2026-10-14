@@ -62,7 +62,11 @@ const WX0 = WEST_ON ? WEST.x0 : 0;
 // THE FOREST (world/forest.js, docs/FOREST.md): grown from a seed north of everything (y -64..0, the world's width); on with a seed
 // (core/session.js: ?seed=N, ?forest=1, a co-op server's) and walkable terrain. It takes the world's north edge out to its own
 export const FOREST = TERRAIN_ON && SESSION.seed !== null ? forestPlan(SESSION.seed) : null;
-export const WORLD = FOREST ? {x0: Math.min(WX0, FOREST_RECT.x0), y0: FOREST_RECT.y0, x1: GX1, y1: 30, WM: GX1 - Math.min(WX0, FOREST_RECT.x0), HM: 30 - FOREST_RECT.y0, past: 12, top: Math.max(20, Math.ceil(FOREST.mountain.h) + 4)}
+// THE CAVE (world/caves.js, docs/CAVES.md): the forest's cave, its passages in a band of their own north of it; the world reaches out
+// over the band (the camera, the grid, the field go there), the forest's own edges stay where they were (FOREST_RECT)
+export const CAVE = FOREST?.cave || null;
+const NY0 = CAVE ? CAVE.band.y0 : FOREST_RECT.y0;
+export const WORLD = FOREST ? {x0: Math.min(WX0, FOREST_RECT.x0), y0: NY0, x1: GX1, y1: 30, WM: GX1 - Math.min(WX0, FOREST_RECT.x0), HM: 30 - NY0, past: 12, top: Math.max(20, Math.ceil(FOREST.mountain.h) + 4)}
   : BIG ? {x0: Math.min(-40, WX0), y0: -60, x1: 122, y1: 30, WM: 122 - Math.min(-40, WX0), HM: 90, past: 12} : {x0: WX0, y0: 0, x1: GX1, y1: 30, WM: GX1 - WX0, HM: 30, past: 12};
 export {WEST_ON, WEST, WEST_LAND};
 export const GROUNDS = {x0: 0, y0: 0, x1: GX1, y1: 30};
@@ -81,8 +85,10 @@ const DOWNS = WEST_ON ? {x0: WEST.x0 + 1.4, y0: .6, x1: PLAY.x0 - 2.5, y1: 26.4}
 const inDowns = (x, y, m) => !!DOWNS && x > DOWNS.x0 + m && x < DOWNS.x1 && y > DOWNS.y0 + m && y < DOWNS.y1 - m;
 //   the FOREST: from its border banks to the strip north of the arena's wall (FOREST_S: meeting the gates' aprons, the downs, the trail)
 const FOREST_S = 3.2;
-const inForest = (x, y, m) => !!FOREST && x > WORLD.x0 + 1.4 + m && x < WORLD.x1 - 1 - m && y > WORLD.y0 + 1.4 + m && y < FOREST_S - m;
-export const walkable = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1) || inDowns(x, y, 0) || inForest(x, y, 0);
+const inForest = (x, y, m) => !!FOREST && x > WORLD.x0 + 1.4 + m && x < WORLD.x1 - 1 - m && y > FOREST_RECT.y0 + 1.4 + m && y < FOREST_S - m;
+//   the CAVE's band (its rock walls are steep: the walkers keep to its open)
+const inCave = (x, y) => !!CAVE && CAVE.inBand(x, y);
+export const walkable = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1) || inDowns(x, y, 0) || inForest(x, y, 0) || inCave(x, y);
 export const roamable = (x, y) => (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35) || (x > TRAIL.x0 + .5 && x < TRAIL.x1 - .5 && y > TRAIL.y0 + .5 && y < TRAIL.y1 - .4)
   || inDowns(x, y, .5) || (!!DOWNS && x >= DOWNS.x1 - .1 && x < PLAY.x0 + .4 && Math.abs(y - (PLAY.y0 + PLAY.y1) / 2) < 1.3)   // (the downs and the west gate between them and the arena)
   || inForest(x, y, .5);
@@ -103,7 +109,7 @@ export const STREAM = {
 };
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
 export const inStream = (x, y) => {
-  if (FOREST !== null && y < 0) return FOREST.inLake(x, y);   // (the forest's lake: deep water, world/forest.js)
+  if (FOREST !== null && y < 0) return FOREST.inDeep(x, y);   // (the forest's lake past the shelf you wade: deep water, world/forest.js)
   if (y < STREAM.y0 || y > STREAM.y1) return false;
   if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y) || inBrookPool(x, y);   // (the plateau's pool is deep water too; so is the brook's, brook.js)
   return !STREAM.stones.some(s => Math.hypot(x - s.x, (y - s.y) * 1.3) < s.r);   // stones are dry footing
@@ -247,7 +253,7 @@ export const CLIMBS = (TERRAIN_ON ? [{x: 51.5, y: 11.2, nx: 0, ny: 1, w: 1.2, h0
   : BOX.climbs.map(c => ({x: c.x, y: BOX.y1, nx: 0, ny: 1, w: c.w, h0: 0, h1: BOX.h, reach: .45}))).map(c => ({...c, yaw: Math.atan2(c.nx, c.ny)}));
 // THE PROVING GROUNDS' TERRAIN (step 4). rock: true = its steep edges are 3D rock (world.js: cliffs3d.js runs along a terrace's
 // edges, a ramp's sides); the rest are grass banks. Kept clear of the yard's props and the frontier's pads
-const W_ = WORLD;
+const W_ = FOREST ? {...WORLD, y0: FOREST_RECT.y0} : WORLD;   // (the borders' banks frame the forest; the cave's band lies past them)
 export const TERRAIN = !TERRAIN_ON ? [] : [
   // the meadows' low roll (the mask holds it flat round the arena, the water, the climbs, the ravine's rim and the pads)
   {type: 'swell', amp: .28, k: .16, seed: 5},
@@ -321,9 +327,10 @@ export function groundDrawn() {
   // terrace's outline, along a cut's edges (most of the box is the same: the mesa's top, the open ground)
   const S = sampler(TERRAIN.map(s => s.drawn ? {...s, ...s.drawn} : s), terrainMask), c = F.cell, seg = [0, 0, 0, 0];
   const lineD = (x, y, P, closed) => { let d = 1e9; for (let i = 0, n = P.length; i < (closed ? n : n - 1); i++) { const [ax, ay] = P[i], [bx, by] = P[(i + 1) % n], vx = bx - ax, vy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1))); d = Math.min(d, Math.hypot(x - ax - vx * t, y - ay - vy * t)); } return d; };
-  const box = own.map(s => { const m = s.type === 'terrace' ? CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6 : s.type === 'channel' ? Math.max(...s.drawn.hw) + s.bank + .5 : 0; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of s.pts || [[s.x - s.drawn.rx - s.rim, s.y - s.drawn.ry - s.rim], [s.x + s.drawn.rx + s.rim, s.y + s.drawn.ry + s.rim]]) { x0 = Math.min(x0, x - m); y0 = Math.min(y0, y - m); x1 = Math.max(x1, x + m); y1 = Math.max(y1, y + m); } return [x0 - .5, y0 - .5, x1 + .5, y1 + .5]; });   // (each shape's reach: most lattice points are near none)
+  const box = own.map(s => { const m = s.type === 'cave' ? 0 : s.type === 'terrace' ? CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6 : s.type === 'channel' ? Math.max(...s.drawn.hw) + Math.max(...[].concat(s.bank)) + .5 : 0; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of s.pts || [[s.x - s.drawn.rx - s.rim, s.y - s.drawn.ry - s.rim], [s.x + s.drawn.rx + s.rim, s.y + s.drawn.ry + s.rim]]) { x0 = Math.min(x0, x - m); y0 = Math.min(y0, y - m); x1 = Math.max(x1, x + m); y1 = Math.max(y1, y + m); } return [x0 - .5, y0 - .5, x1 + .5, y1 + .5]; });   // (each shape's reach: most lattice points are near none)
   const near = (s, k, x, y) => x < box[k][0] || y < box[k][1] || x > box[k][2] || y > box[k][3] ? false : s.type === 'terrace' ? lineD(x, y, s.pts, true) < CLIFF_IN + Math.max(...s.banks.filter(b => b <= CLIFF_BANK), .12) + .6
-    : s.type === 'channel' ? lineD(x, y, s.pts, false) < Math.max(...s.drawn.hw) + s.bank + .5
+    : s.type === 'channel' ? lineD(x, y, s.pts, false) < Math.max(...s.drawn.hw) + Math.max(...[].concat(s.bank)) + .5
+    : s.type === 'cave' ? true   // (a cave's mouth: its box, above)
     : Math.hypot((x - s.x) / (s.drawn.rx + s.rim + .5), (y - s.y) / (s.drawn.ry + s.rim + .5)) < 1;
   let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
   for (const s of own) for (const [x, y] of s.pts || [[s.x - s.rx, s.y - s.ry], [s.x + s.rx, s.y + s.ry]]) { bx0 = Math.min(bx0, x); by0 = Math.min(by0, y); bx1 = Math.max(bx1, x); by1 = Math.max(by1, y); }

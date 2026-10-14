@@ -465,7 +465,7 @@ export function createCore(host) {
     const vh = A.c.target || Math.abs(A.c.h - h0) > .5 ? clamp((A.c.h - h0) / t + .45 * t, -12, 8) : 0;   // same ballistics as shoot()
     host.spawnArrow({x: P.x + fx * .35, y: P.y + fy * .35, h: h0, vx: fx * v, vy: fy * v, vh, life: 1.6, ...o});
   }
-  const BUSYISH = new Set(['roll', 'leap', 'fall', 'land', 'climb', 'splash', 'knock', 'hold']);
+  const BUSYISH = new Set(['roll', 'leap', 'fall', 'land', 'climb', 'splash', 'swim', 'knock', 'hold']);
   function pose(frame, sec, A) {
     if (BUSYISH.has(P.state)) return;
     // face the shot: the player's facing lives in the camera's frame (host.P), so turn the world direction into it

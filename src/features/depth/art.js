@@ -29,7 +29,7 @@ const SHAFT = {
 };
 // water: the reflection's tint (the water's dark tone) and the faint sky glint band (additive before the light)
 const WATER = {
-  ruins: {tint: '#33556a', sky: {day: [18, 24, 26], dusk: [26, 16, 8], night: [4, 6, 12]}},
+  ruins: {tint: '#33556a', lake: '#1f323c', sky: {day: [18, 24, 26], dusk: [26, 16, 8], night: [4, 6, 12]}},
   frost: {tint: '#1e3654', sky: {day: [16, 22, 30], dusk: [22, 14, 16], night: [4, 6, 12]}},
 };
 // ruins puddles (metres; rx, ry): outside the movement ring, near the pillars, a lane dummy, a brazier, a torch

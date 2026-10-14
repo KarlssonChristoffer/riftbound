@@ -279,6 +279,13 @@ export async function create(host) {
     tick(t0);
     return {x: C.outX - TX, y: C.outY - TY};
   }
+  // F.shift: he was moved by (dx, dy) world m as he was (features/caves.js, host.warp), right then: the mirrored ease, the spring and its output go
+  // along, so the view doesn't swing after him (the spring's state is in the view frame's px, the mirror in world m)
+  function warpCam(dx, dy) {
+    const yaw = host.yaw, cy = Math.cos(yaw), sy = Math.sin(yaw), ax = (dx * cy - dy * sy) * PPM, ay = (dx * sy + dy * cy) * PPMY;
+    Tm.x += dx; Tm.z += dy; if (C.lw) { C.lw[0] += dx; C.lw[1] += dy; }
+    C.x += ax; C.y += ay; C.outX += ax; C.outY += ay;
+  }
   function kick(ux, uy, px) { const v = punchV(px); C.pvx -= ux * v; C.pvy -= uy * v; }   // camera goes AGAINST (ux, uy)
   function gunKick(wx, wy, px) {   // a shot's way on the ground (world, unit) -> the view frame's px direction, then the kick
     const v = toVF(wx, wy), vx = v[0] * PPM, vy = v[1] * PPMY, l = Math.hypot(vx, vy);
@@ -685,7 +692,7 @@ export async function create(host) {
         const [x, y] = side(e); crescent(x, y, dirX, dirY, {tone: 1});
       } else if (e.type === 'player.jump') {   // take-off: a faint crescent behind the push
         const L = P.leap; if (L) { const [ldx, ldy] = toW(L.dx, L.dy); crescent(e.x - ldx * .12, e.y - ldy * .12, -ldx, -ldy, {tone: 2}); }
-      } else if (e.type === 'player.splash' && !e.small && P.state === 'splash') { splashT = simT; wetFrom = -99; }   // HIS splash
+      } else if (e.type === 'player.splash' && ((!e.small && P.state === 'splash') || P.state === 'swim')) { splashT = simT; wetFrom = -99; }   // HIS splash (or into the water to swim)
       else if (e.type === 'combat.explode') scorch(e.x, e.y, e.r || 2);
       else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * GK * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
       else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, (e.broke || e.crit ? K.hitKickBig : K.hitKick) * GK);
@@ -695,7 +702,7 @@ export async function create(host) {
       }
     }
     if (dip) C.pvy += punchV(dip);
-    if (splashT > -99 && P.state !== 'splash' && prevState === 'splash') wetFrom = simT;   // back on the bank: dripping
+    if (splashT > -99 && P.state !== 'splash' && P.state !== 'swim' && (prevState === 'splash' || prevState === 'swim')) wetFrom = simT;   // back on the bank: dripping
     // ---- direction of travel (after the events: a turn plant wants the momentum from before the turn) ----
     if (P.state === 'roll' && P.rollDir) { [dirX, dirY] = toW(P.rollDir[0], P.rollDir[1]); }
     else if (speed > .3) { dirX = P.vx / speed; dirY = P.vy / speed; }
@@ -710,7 +717,7 @@ export async function create(host) {
       if (breathT <= 0) { breathe(P); breathT = heat > 0 ? TUNE.breath.fast * rr(.85, 1.15) : rr(TUNE.breath.every[0], TUNE.breath.every[1]); }
     }
     const wetAge = simT - wetFrom;
-    if (wetAge < TUNE.wet.drips && P.state !== 'splash') {   // dripping: often at first, then now and then
+    if (wetAge < TUNE.wet.drips && P.state !== 'splash' && P.state !== 'swim') {   // dripping: often at first, then now and then
       const D = DRIP[biome] || DRIP.ruins;
       for (dripAcc += (.6 + 14 * (1 - wetAge / TUNE.wet.drips) ** 1.4) * dt; dripAcc >= 1; dripAcc--)
         ps.push({k: 2, x: P.x + (R() - .5) * .34, y: P.y + .03 + (R() - .5) * .08, h: P.z + rr(.3, 1.3), vx: P.vx * .5, vy: P.vy * .5, vh: rr(-.3, 0), t: 0, life: 2, pal: D.pal, emit: D.emit});
@@ -807,7 +814,7 @@ export async function create(host) {
     },
     biomeChanged() { levels.clear(); setBiome(host.biome.id); level(0); },   // (a rebuilt world: new ground texture; the ground layer made now, behind the loading screen)
     resize(w, h) { VW = w; VH = h; if (EC) { EC.width = w; EC.height = h; ecq.imageSmoothingEnabled = false; } },   // the view changed size (main.js fit)
-    view: update, camera, frame, lights, stamp,   // (not ambient: its streaks / tracks follow the player's frozen speed)
+    view: update, camera, shift: warpCam, frame, lights, stamp,   // (not ambient: its streaks / tracks follow the player's frozen speed)
     hud: () => '',
     // debugging / tests
     C, Tm, count: () => ({decals: decals.length, particles: ps.length, embers: gEmb.length, ghosts: GH.list.length, dirty: dirty.length, levels: levels.size}),

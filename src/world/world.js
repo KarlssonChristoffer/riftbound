@@ -25,6 +25,8 @@
 //                         the narrows run faster, with none of the shear a plain y - v t piles up
 //              out.speed  relative speed here (1 = the body's base; the stream runs a little faster mid-channel). 0 = still
 //              out.hold   1 = by a stone: the painted foam stays as painted
+//              out.lake   0..1 (only where a course meets still water, world/forest.js THE MOUTHS; the bake zeroes it first): the
+//                         still look's share, the moving water fading into it
 //            The rill (kind 2, layout.js RILL): a = metres across it (+ to the left of the flow), s = 0.55 x its length from the spring, the
 //            pace rising toward the lip; hold = the spring's basin, the narrow riffles and the lip's foam, where the painted bright streaks
 //            stay put. The pool and its outflow (kind 3, south of the plateau's face, beyond the river's east bank): one body flowing west
@@ -49,8 +51,9 @@ import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
 import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
-import {TOWER_PLAN, FOREST, HUT} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
-import {sample as forestSample, depth as forestDepth} from './forest.js';
+import {TOWER_PLAN, FOREST, HUT, CAVE} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
+import {sample as forestSample, depth as forestDepth, joinRiver, COURSE_KS, courseSpeed, courseDepth, RECT as FOREST_RECT} from './forest.js';
+import {buildCave} from './cave3d.js';   // the forest's cave: its floor and walls in the band north of the forest (docs/CAVES.md)
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
@@ -60,6 +63,7 @@ import {growDecor} from './decor3d.js';   // the forest floor's small things (wo
 import {propModel} from './props3d.js';   // the true-3D props: the dummy and the crystal as live meshes (?props2d=1: their cards)
 import {rgbOf, hexRaw255 as hexrgb, hex255, hex01} from '../core/color.js';
 import {vnoise, smooth, hypot2, clearArray} from '../core/mathx.js';
+import {blendSeam, SEAM} from './seams.js';   // the painters' seams (the forest's edge, the downs' edge): blended over a band
 import {flags} from '../core/flags.js';
 
 export const WATER_H = -.18;
@@ -230,12 +234,18 @@ export const vaultTop = p => p.kind === 'fieldwall' ? TOPS.get(p) ?? null : brea
 // ---------------------------------------------------------------- water: the sampler
 export const FALL_ALPHA = 252;   // a cliff / face texel with this alpha is falling water (SURF_FS streams it); 250 = a glowing fall (lava)
 const W_REF = 2.9, S_Y0 = -1, S_DY = .05;   // the stream's reference width (its normal 2.9 m) and the travel table's grid
-let S_TAB = null;
+let S_TAB = null, A_TAB = null;
 function travelTab() {   // S(y) = integral of w(y') / W_REF dy' from y = -1, every 5 cm: built once (the stream never changes shape)
-  const n = Math.round((31 - S_Y0) / S_DY) + 2, t = new Float32Array(n);
-  for (let i = 1; i < n; i++) t[i] = t[i - 1] + STREAM.w(S_Y0 + (i - .5) * S_DY) / W_REF * S_DY;
+  const n = Math.round((31 - S_Y0) / S_DY) + 2, t = new Float32Array(n), A = A_TAB = new Float32Array(n);
+  for (let i = 1; i < n; i++) { const y = S_Y0 + (i - .5) * S_DY; t[i] = t[i - 1] + STREAM.w(y) / W_REF * S_DY; A[i] = A[i - 1] + Math.hypot(S_DY, STREAM.cx(y + S_DY / 2) - STREAM.cx(y - S_DY / 2)); }
   return S_TAB = t;
 }
+// THE RIVER DRAWN THE FOREST'S WAY (the ruins: RIVER_COURSE, set by buildWorld per biome): its pattern travels along it as the forest's
+// streams' do (world/forest.js COURSE_KS x the m along its course, arcAt), at their slow wandering speed (courseSpeed) and over their
+// depth (courseDepth, waterbed.js); the other biomes keep the river's own (travel: by its width, faster mid-channel, waterbed.js's)
+let RIVER_COURSE = false;
+const arcAt = y => { if (!S_TAB) travelTab(); const f = (y - S_Y0) / S_DY, i = Math.min(A_TAB.length - 2, f | 0); return A_TAB[i] + (A_TAB[i + 1] - A_TAB[i]) * (f - i); };
+const riverS = y => RIVER_COURSE ? arcAt(y) * COURSE_KS : travel(y);   // (the pool's outflow joins it: kind 3)
 // waterSample(x, y, out): is (x, y) water and what does the water there do? Fills out (see the header); no allocation.
 // Stones are dry footing (their painted body, out.kind 0); the water round them is flagged out.hold
 const _rs = {d: 0, a: 0, l: 0, hw: 0}, _os = {d: 0, a: 0, l: 0, hw: 0}, _lw = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0}, RILL_K = .55, RILL_LEN = RILL.len[RILL.len.length - 1];
@@ -263,8 +273,8 @@ export function waterSample(x, y, out) {
     const u = a - hw, v = Math.min(1, u / 3);   // u = metres east of the river's bank
     out.kind = 3; out.a = y - outAxisY(x); out.hw = inP ? Math.max(.55, inO ? _os.hw : 0) : _os.hw;
     out.edge = inP ? poolEdge(x, y) : _os.hw - _os.d; if (inP && inO && _os.hw - _os.d > out.edge) out.edge = _os.hw - _os.d;
-    out.s = travel(y) - ease(u);
-    out.speed = Math.max(.2, 1 - .8 * v * v * (3 - 2 * v));   // the river's pace at the bank, a slow churn in the pool
+    out.s = riverS(y) - ease(u) * (RIVER_COURSE ? COURSE_KS : 1);
+    out.speed = Math.max(.2, 1 - .8 * v * v * (3 - 2 * v)) * (RIVER_COURSE ? courseSpeed(arcAt(y)) : 1);   // the river's pace at the bank, a slow churn in the pool
     out.hold = Math.hypot(x - FALL.foot.x, (y - FALL.foot.y) * 1.25) < .6 ? 1 : 0;   // the foam where the fall lands stays as painted
     return out;
   }
@@ -276,8 +286,8 @@ export function waterSample(x, y, out) {
     if ((dx / (s.r + .22)) ** 2 + ((dy - .05) / (s.r / 1.3 + .25)) ** 2 < 1) hold = 1;             // its foam ring and a hair more
   }
   out.kind = 1; out.a = a; out.hw = hw; out.edge = hw - Math.abs(a); out.hold = hold;
-  out.s = travel(y);
-  out.speed = 1 + .3 * (1 - (a / hw) ** 2);
+  out.s = riverS(y);
+  out.speed = RIVER_COURSE ? courseSpeed(arcAt(y)) : 1 + .3 * (1 - (a / hw) ** 2);
   if (a > 0 && y > 11 && y < 13.4 && outflowAt(x, y, _os) && _os.hw - _os.d > out.edge) out.edge = _os.hw - _os.d;   // (the outflow's mouth: no bank here)
   return out;
 }
@@ -293,8 +303,12 @@ export function waterSample(x, y, out) {
 //   across / along   the pattern's cell size in texels (thin streaks stretched along the flow); along is a divisor of 768
 //   hi / lo   the light / dark share of the surface (the pattern's thresholds: lower = more)     lap  the lapping line's tone (-1 = none)
 //   refl      how much the lanterns, mushrooms and wisps shine in it      spark  sun sparkles
+//   still     STILL water's own look (waterSample's speed 0: the forest's lake; gfx.js WATER_FS wStill): ramp, its four tones (the crests'
+//             sheen, the shelf's calm, the open water's calm with the sky in it, a paw of wind ruffling it darker), tint, its bed seen
+//             through it (peaty water: warm), hue, how much of the bed's own colour shows. None: no still water
 export const WATER_TUNE = {
-  ruins: {ramp: S => S.water.h, hold: [3], bank: 2, streak: 0, deep: 2, shallow: 1, deepFrac: .45, range: [0, 2], rate: 9, across: 2.5, along: 12, hi: .8, lo: .76, lap: 0, refl: 1, spark: 1},
+  ruins: {ramp: S => S.water.h, hold: [3], bank: 2, streak: 0, deep: 2, shallow: 1, deepFrac: .45, range: [0, 2], rate: 9, across: 2.5, along: 12, hi: .8, lo: .76, lap: 0, refl: 1, spark: 1,
+    still: {ramp: ['#86a6ac', '#4b6b74', '#314a55', '#1f2f39'], tint: '#d2b07a', hue: .55}},
   // lava: the crust's three colours drift slowly; the glowing seams (lava-coloured, in the emissive layer) stay put. (The first two
   // colours are literals in biomes.js groundEmber, not exposed by the style: keep them in step)
   ember: {ramp: S => ['#5a1a10', '#3a1410', S.crust], hold: [0], bank: 2, streak: -1, deep: 2, shallow: 2, deepFrac: 0, range: [1, 2], rate: 2.5, across: 5, along: 24, hi: .82, lo: .8, lap: -1, refl: 0, spark: 0},
@@ -308,29 +322,30 @@ export const WATER_TUNE = {
 //                      stays as painted (the bank's shadow, the bright edge line, foam round a stone); 3 water that MOVES
 //                      (state >= 2 is "water": SURF_FS writes tone 1 into the G-buffer and the composite lights it as water)
 //      bits 5-4 the base tone, 0 light .. 3 dark (which of the ramp's colours the pattern starts from)
-//      bits 3-0 the flow speed here in 1/8ths of the biome's rate (waterSample's speed)
+//      bits 3-0 the flow speed here in 1/8ths of the biome's rate (waterSample's speed). A MOUTH texel (waterSample's lake > 0: moving
+//                 water turning into still) has tone 3 and here its moving share in 1/15ths (gfx.js wSpd; tone 3 never moves in ruins)
 //   G  bits 7-5 ring: texels from the bank (1 = the first texel .. 7; 0 = further in);  bits 4-0 = travel bits 12-8
 //   B  travel bits 7-0: the travel coordinate s in 1/8 texel (13 bits: up to 1023 texels)
 //   A  across the flow, signed texels from the axis in 1/2 texel, + 128 (clamped: +-63.5 texels, 2.08 m at PPM 30.5)
 // X0 / Y0: the canvas's world origin (the West Downs' own: 0, 0 is the Proving Grounds'); box: [x0, y0, x1, y1] m, the part to bake (the rest dry)
 function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = null, depth = brookDepth, dry = undefined}) {
-  const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
-  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth, dry: dry !== undefined ? dry : X0 || Y0 ? BROOK?.dry : null});   // (depth / dry: the forest's own)   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
+  const ramp = T.ramp(biome.style).map(hex255), N = WPX * HPX, data = new Uint8Array(N * 4), o = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0, lake: 0};
+  const bed = waterBed(biome, {WPX, HPX, PPM, cliffZ, X0, Y0, depth, river: RIVER_COURSE ? courseDepth : null, dry: dry !== undefined ? dry : X0 || Y0 ? BROOK?.dry : null});   // (depth / dry: the forest's own)   // (world/waterbed.js: the depth, the bed and the contact foam under the water; null = none)
   const toneOf = k => { for (let t = 0; t < ramp.length; t++) if (px[k] === ramp[t][0] && px[k + 1] === ramp[t][1] && px[k + 2] === ramp[t][2]) return t; return -1; };
   const bx0 = box ? Math.max(0, Math.floor((box[0] - X0) * PPM)) : 0, by0 = box ? Math.max(0, Math.floor((box[1] - Y0) * PPM)) : 0;
   const bx1 = box ? Math.min(WPX, Math.ceil((box[2] - X0) * PPM)) : WPX, by1 = box ? Math.min(HPX, Math.ceil((box[3] - Y0) * PPM)) : HPX;
   for (let y = by0; y < by1; y++) for (let x = bx0; x < bx1; x++) {
     const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM;
-    waterSample(mx, my, o);
+    o.lake = 0; waterSample(mx, my, o);
     if (!o.kind || my >= cliffZ(mx)) continue;                  // (the ravine takes the stream over its edge: below it is the waterfall's pool)
     const i = y * WPX + x, k = i * 4, p = toneOf(i * 4);
     if (p < 0) continue;                                        // painted over: not (moving) water
     const ring = o.edge * PPM < 7 ? Math.max(1, Math.ceil(o.edge * PPM)) : 0;
     let state = 3, tone = p;
-    if (T.hold.includes(p) || (p === T.streak && ring <= T.bank) || (o.hold && p === 0)) state = 2;
+    if (T.hold.includes(p) || (p === T.streak && ring > 0 && ring <= T.bank) || (o.hold && p === 0)) state = 2;
     else if (p === T.streak) tone = Math.abs(o.a) < T.deepFrac * o.hw ? T.deep : T.shallow;
-    const s13 = Math.min(8191, Math.round(o.s * PPM * 8));
-    data[k] = state << 6 | tone << 4 | (Math.round(Math.min(1.875, o.speed) * 8) & 15);
+    let s13 = Math.round(o.s * PPM * 8); if (s13 < 0 || s13 > 8191) s13 = (s13 % 6144 + 6144) % 6144;   // (out of the 13 bits: wrapped by 768 texels, the pattern's period along: gfx.js wlay)
+    data[k] = state << 6 | (state === 3 && o.lake > 0 ? 3 << 4 | Math.max(1, Math.round((1 - o.lake) * 15)) : tone << 4 | (Math.round(Math.min(1.875, o.speed) * 8) & 15));   // (a mouth: tone 3, never moving in ruins' tones, marks it; gfx.js wSpd)
     data[k + 1] = ring << 5 | s13 >> 8; data[k + 2] = s13 & 255;
     data[k + 3] = Math.max(0, Math.min(255, Math.round(o.a * PPM * 2) + 128));
     if (bed) bed.add(x, y, o);
@@ -549,6 +564,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const gc = document.createElement('canvas'); gc.width = WPX; gc.height = HPX;
   const gq = gc.getContext('2d', {willReadFrequently: true});
   biome.paintGround(gq, ctxT);
+  // THE SEAMS (world/seams.js): the Proving Grounds' ground turns into the forest's over its north band and into the West Downs' over its
+  // west band, instead of meeting them on a straight line (each painter its own noise and light)
+  const forestPaint = FOREST && biome.paintForest ? (q, c) => biome.paintForest(q, {PPM, ground: groundDrawn(), forest: FOREST, layout, ...c}) : null;
+  const westPaint = WEST_ON && biome.paintWest ? (q, c) => biome.paintWest(q, {PPM, ground: TERRAIN_ON ? groundDrawn() : null, layout, ...c}) : null;
+  if (forestPaint) blendSeam(gq, {X0: GROUNDS.x0, Y0: GROUNDS.y0, PPM}, {x0: GROUNDS.x0, y0: GROUNDS.y0, x1: GROUNDS.x1, y1: GROUNDS.y0 + SEAM.band, depth: (x, y) => (y - GROUNDS.y0) / SEAM.band}, forestPaint, biome.style);
+  if (westPaint) blendSeam(gq, {X0: GROUNDS.x0, Y0: GROUNDS.y0, PPM}, {x0: GROUNDS.x0, y0: GROUNDS.y0, x1: GROUNDS.x0 + SEAM.band, y1: GROUNDS.y1, depth: (x, y) => (x - GROUNDS.x0) / SEAM.band}, westPaint, biome.style);
   const groundEmit = biome.groundEmit, groundLights = (biome.groundLights || []).slice();
   const gTex = texOf(gc, true), eTex = groundEmit ? texOf(groundEmit, true) : null;
   // past the painted ground's edges (the patch's SKIRT) the texture MIRRORS: a camera turned to face an edge over the border's raised banks
@@ -582,7 +603,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   };
   // walkable terrain (layout.js; ?terrain=0: none): the field's height under every vertex (it is held flat at the water, the ravine's rim)
   const TF = TERRAIN_ON ? terrainField() : null, tH = TF ? groundDrawn() : () => 0;   // (the drawn ground: the mesa's falls away behind its rock)
-  const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) || inBrookPool(x, z, POOL_GROW) || (FOREST !== null && FOREST.inLake(x, z, POOL_GROW)) ? WATER_H : 0) + tH(x, z);   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
+  const hAt = (x, z) => z >= cliffZ(x) ? DROP : (inStream(x, z) || inPool(x, z, .01, POOL_GROW) || inBrookPool(x, z, POOL_GROW) ? WATER_H : 0) + tH(x, z);   // (the forest's lake: its basin's floor is already its water's surface, world/forest.js)   // (the pool's vertices, those ON the plateau's south face too, are lowered: the face goes down to the water)
   // a patch's grid, s m cells, from (rx0, rz0) to (rx1, rz1). It follows the edge exactly: the last bank vertex of each column
   // moves onto the edge line and the next one to just past it at the ravine's depth, so the wall is one smooth face (a plain
   // 0.25 m grid made it a staircase). Neighbouring patches share their border vertices (one lattice, one edge line per column)
@@ -617,6 +638,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const wpx = Math.ceil((WD.x1 - WD.x0) * PPM), hpx = Math.ceil((WD.y1 - WD.y0) * PPM);
     westCanvas = document.createElement('canvas'); westCanvas.width = wpx; westCanvas.height = hpx;
     biome.paintWest(westCanvas.getContext('2d', {willReadFrequently: true}), {PPM, WPX: wpx, HPX: hpx, X0: WD.x0, Y0: WD.y0, ground: TERRAIN_ON ? groundDrawn() : null, layout});
+    if (forestPaint) blendSeam(westCanvas.getContext('2d', {willReadFrequently: true}), {X0: WD.x0, Y0: WD.y0, PPM}, {x0: WD.x0, y0: GROUNDS.y0, x1: WD.x1, y1: GROUNDS.y0 + SEAM.band, depth: (x, y) => (y - GROUNDS.y0) / SEAM.band}, forestPaint, biome.style);   // (its forest edge: the seams, above)
     wdTex = texOf(westCanvas, true); wdTex.wrapS = wdTex.wrapT = THREE.MirroredRepeatWrapping; wdTex.needsUpdate = true;
     if (BROOK) westPx = westCanvas.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, wpx, hpx).data;   // (the brook's water: its fall's colour, its moving texture)
   }
@@ -626,8 +648,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // seam), its own patch, culled on its own; a tile with water gets its water texture (its stream, lake, outflow: bakeWater over the
   // tile's part of the water's box). A biome without a painter: the open land's stand-in. Chunk-friendly: a tile needs only its place
   const FT = 32, FM = 1, forestTiles = [];
+  let cave = null;   // the forest's cave (cave3d.js: built with the cliffs, below)
   if (FOREST) {
-    const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = WORLD.y0 - RG, fz1 = GROUNDS.y0;
+    const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = FOREST_RECT.y0 - RG, fz1 = GROUNDS.y0;   // (the forest's own north edge: the cave's band past it draws itself, cave3d.js)
     const ctxF = {PPM, ground: groundDrawn(), forest: FOREST, layout};
     for (let z0 = fz0; z0 < fz1 - 1e-6; z0 += FT) for (let x0 = fx0; x0 < fx1 - 1e-6; x0 += FT) {
       const x1 = Math.min(fx1, x0 + FT), z1 = Math.min(fz1, z0 + FT), T = {x0, z0, x1, z1, canvas: null, px: null, cx0: x0 - FM, cz0: z0 - FM};
@@ -702,12 +725,15 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   }
   const cTex = texOf(cliff); cTex.wrapS = cTex.wrapT = THREE.RepeatWrapping; cTex.needsUpdate = true;
   // the moving water: the baked texture (rebuilt, and the old one disposed, with the world) + the biome's look for the shader
+  RIVER_COURSE = biome.id === 'ruins';
+  if (FOREST !== null) joinRiver(FOREST, riverS(0), RIVER_COURSE ? COURSE_KS * Math.hypot(1, (STREAM.cx(.05) - STREAM.cx(-.05)) / .1) : STREAM.w(0) / W_REF, RIVER_COURSE ? courseSpeed(arcAt(0)) : 1.15);   // (the forest's outflow runs into the river at y = 0: world/forest.js THE RIVER'S HEAD)
   const WT = WATER_TUNE[biome.id], wTex = WT ? bakeWater(biome, WT, {WPX, HPX, PPM, px, cliffZ}) : null;
   if (wTex) disposers.push(() => { wTex.dispose(); wTex.userData.bed?.tex.dispose(); });
   // the West Downs' brook (world/brook.js): its own moving water on their canvas, baked over its box only, with its own bed (gfx.js surface bed)
   const wdWater = WT && westPx ? bakeWater(biome, WT, {WPX: westCanvas.width, HPX: westCanvas.height, PPM, px: westPx, cliffZ, X0: WD.x0, Y0: WD.y0, box: BROOK.box}) : null;
   if (wdWater) disposers.push(() => { wdWater.dispose(); wdWater.userData.bed?.tex.dispose(); });
-  G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark, bed: wTex.userData.bed} : null);
+  G.setWaterLook(WT ? {ramp: WT.ramp(biome.style).map(h => rgbOf(h)), rate: WT.rate, across: WT.across, along: WT.along, hi: WT.hi, lo: WT.lo, range: WT.range, lap: WT.lap, refl: WT.refl, spark: WT.spark, bed: wTex.userData.bed,
+    still: WT.still && FOREST ? {ramp: WT.still.ramp.map(h => rgbOf(h)), tint: rgbOf(WT.still.tint), hue: WT.still.hue} : null} : null);   // (still water: only the forest's lake has any)
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
   const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
   if (lit) { lit.sim = G.litterSim(lit); disposers.push(lit.dispose); }   // (the living layer: render/litter.js, driven by features/litter.js)
@@ -716,7 +742,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // CAST_SINK m, goes into the cached sun shadow and the point lights' height map: a hill throws its shadow over what lies
   // behind it at a low sun, flat ground never reaches the ground it stands for
   const CAST_SINK = .15;
-  const caster = geo => { const g = geo.clone(), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) - CAST_SINK); p.needsUpdate = true;
+  // (over the cave's PORTAL, world/caves.js C.inPortal: the overhang casts nothing, sunk under the cave's floor, so daylight and the
+  // lantern reach the cave's first stretch under it, as they do in the band past the step)
+  const CVP = CAVE && TERRAIN_ON ? CAVE : null, cvM = CVP?.mouth, cvF = CVP && [cvM.x + cvM.ux * cvM.len, cvM.y + cvM.uy * cvM.len];
+  const overPortal = (x, z) => CVP && Math.abs(x - cvF[0]) < CVP.portalR + .5 && Math.abs(z - cvF[1]) < CVP.portalR + .5 && CVP.inPortal(x + CVP.off[0], z + CVP.off[1], CVP.copy.brow - .3) && CVP.inside(x + CVP.off[0], z + CVP.off[1]) < .3;
+  const caster = geo => { const g = geo.clone(), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, overPortal(p.getX(i), p.getZ(i)) ? CVP.floor(p.getX(i) + CVP.off[0], p.getZ(i) + CVP.off[1]) - 1 : p.getY(i) - CAST_SINK); p.needsUpdate = true;
     const s = G.surface(g, {tex: gTex, planar: true, world: world2, type: 1, obj: 0}, true); s.gm.visible = false; disposers.push(() => { s.dispose(); g.dispose(); }); };
   if (TERRAIN_ON) caster(gGeo);
   if (WD) {   // the West Downs' patch (above)
@@ -731,7 +761,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       if (!T.canvas) continue;
       const tex = texOf(T.canvas, true); tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.needsUpdate = true;
       const wb = [Math.max(box[0], T.cx0), Math.max(box[1], T.cz0), Math.min(box[2], T.cx0 + T.canvas.width / PPM), Math.min(box[3], T.cz0 + T.canvas.height / PPM)];
-      const water = WT && wb[0] < wb[2] && wb[1] < wb[3] ? bakeWater(biome, WT, {WPX: T.canvas.width, HPX: T.canvas.height, PPM, px: T.px, cliffZ, X0: T.cx0, Y0: T.cz0, box: wb, depth: FD, dry: null}) : null;
+      const water = WT && wb[0] < wb[2] && wb[1] < wb[3] ? bakeWater(biome, WT, {WPX: T.canvas.width, HPX: T.canvas.height, PPM, px: T.px, cliffZ, X0: T.cx0, Y0: T.cz0, box: wb, depth: FD, dry: FOREST.stones || null}) : null;   // (dry: the stones standing in its streams, world/forest.js lay: foam rings them)
       const tg = gridGeo(T.x0, T.z0, T.x1, T.z1, S), m = G.surface(tg, {tex, planar: true, world: new THREE.Vector2(T.canvas.width / PPM, T.canvas.height / PPM), origin: new THREE.Vector2(T.cx0, T.cz0),
         type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9, ...(water ? {water, bed: water.userData.bed} : {})}, false);
       disposers.push(() => { m.dispose(); tex.dispose(); if (water) { water.dispose(); water.userData.bed?.tex.dispose(); } });
@@ -896,8 +926,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         const W = FOREST.canyon.wall, foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
         let lo = 1e9; for (const [x, z] of W) lo = Math.min(lo, foot(x, z));
         terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: lo - .05,
-          base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 151});
+          base: 0, relief: 1.2, massive: true, talus: true, avoid: avoidT, lip, seed: 151});   // (massive: weathered bedrock, cliffs3d.js)
       }
+      // (the cave's MOUTH has no rock of its own here: its slot's walls are the copy's in the band, drawn here too: world/cave3d.js's
+      // portal, so the slot he walks down is the same one before and after the step)
       // the creek's last step (layout.js CASCADES): a low rock rim along the pool's north edge, under the lip (the fall's sheet in its gap)
       if (CASCADES.length) {
         const F = CASCADES.at(-1), y = POOL.clip - .03;
@@ -908,6 +940,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const tg = terrRuns.length ? cliffGeometry(terrRuns, {...o, ladders: [], bridges: BRIDGES.filter(b => !b.stone), stairs}) : null;   // (+ the footbridges, the stone steps; the brook's stone bridge and stones: below)
       if (tg) { const m = G.mesh(tg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); tg.dispose(); }); }
     }
+    if (CAVE && TERRAIN_ON) cave = buildCave({G, THREE, C: CAVE, biome, PPM, fam: famOf, texOf, elev, field: TF, disposers, cover: lip ? o.cover : null});   // the cave below (cave3d.js)
     const pg = cliffGeometry(plateauRuns, o);
     if (pg) { const m = G.mesh(pg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); pg.dispose(); }); }
     // the ravine: along its edge line (the ground's own steep cells draw only the waterfall: the cliff texture's alpha, above),
@@ -1169,8 +1202,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       CV[k] = x1 > -CHUNK_M && x0 < VW + CHUNK_M && y1 > -CHUNK_M && y0 < VH + CHUNK_M ? 2 : x1 > -CHUNK_SM && x0 < VW + CHUNK_SM && y1 > -CHUNK_SM && y0 < VH + CHUNK_SM ? 1 : 0;
     }
   }
-  function update(yaw) {
+  function update(yaw, pl) {
     if (litterDirty) bakeNow();
+    cave?.update(yaw, pl);   // (pl: the player, world x / y: the cave's slot walls)
     clearArray(lights); for (const l of groundL) lights.push(l);
     const k0 = -Math.round(yaw / step);
     if (CV) chunksOnScreen();
@@ -1241,6 +1275,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   litterDirty = true;   // (the first bake: the trees are all here)
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
     setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, floraCount, flora, haveGlb, groundCanvas: gc, westCanvas, trees3d,
+    cave: CAVE,   // the forest's cave's plan (world/caves.js; null: none): features/caves.js
+    forestTiles,   // (read only) the forest's painted tiles: {x0, z0, x1, z1 (m), canvas (null: the stand-in), cx0, cz0 (the canvas's world origin)} (features/grass.js grows on them)
     itemOf: p => byProp.get(p) || null,
     // a forest prop whose chunk is off the view this frame (the last update's: world/forest.js chunks): per-frame passes over the items
     // skip it (features/contact.js)
@@ -1306,6 +1342,6 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     // which way a view saw a prop struck (features/wind.js, from combat.hit): a props3d.js model that rocks when hit (the dummy)
     // rocks that way. Arena axes; kept per prop until the next
     push(p, dx, dy) { const l = Math.hypot(dx, dy); if (!(l > 1e-6)) return; let d = PUSH.get(p); if (!d) PUSH.set(p, d = [0, 0]); d[0] = dx / l; d[1] = dy / l; },
-    waterH: WATER_H, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
+    waterH: WATER_H, cliffZ, biome, ctxO, dispose() { disposers.forEach(f => f()); [...extra].forEach(m => m.dispose()); }};
 }
 export {WORLD, GROUNDS, WEST_ON, WEST, WEST_LAND, PLAY, TRAIL, walkable, roamable, navArea, elev, inStream, PLATEAUS, SPRING, RILL, FALL, POOL, OUTFLOW, inPool, poolEdge, rillAt, inRill, outflowAt, inOutflow, steep, TERRAIN_ON, terrainField, onGround, sameLevel, MESA, CLIMBS, CASCADES, mesaAt};

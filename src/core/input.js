@@ -11,7 +11,7 @@ import {BUSY} from '../sim/player/player.js';
 
 export function createInput(E) {
   const {canvas, keys, mouse, cv, host, features, events, PL, P, pa, perf, applyOpts, setYaw} = E, {DEV_KEYS, abKey, devKey} = E.dev;
-  let dragging = false, dragX = 0, dragYaw = 0;
+  let dragging = false, dragX = 0, dragYaw = 0, lmbF = false;   // (lmbF: a feature took this LMB press)
   const claimed = k => { for (const f of features) if (f.claims?.(k)) return true; return false; };
   addEventListener('keydown', e => {
     const k = e.key.toLowerCase(), pause = E.pause;
@@ -61,11 +61,12 @@ export function createInput(E) {
   });
   canvas.addEventListener('mousedown', e => {
     if (E.pause.paused || host.lock || E.photo?.open) return;
-    if (e.button === 0) { PL.press(); mouse.down = true; }
+    // (a feature can claim LMB first: F.lmb(true) -> true takes this press and its let-go; features/fishing.js casts with it)
+    if (e.button === 0) { if (features.some(f => f.lmb?.(true))) lmbF = true; else { PL.press(); mouse.down = true; } }
     if (e.button === 1) { e.preventDefault(); dragging = true; dragX = e.clientX; }
     if (e.button === 2 && !PL.pressR?.() && !BUSY.has(P.state)) features.some(f => f.ability?.('rmb'));   // (the fists up: the right hand, sim/player/fists.js)
   });
-  addEventListener('mouseup', e => { if (e.button === 0) { if (!E.pause.paused && !E.photo?.open) PL.release(); mouse.down = false; } if (e.button === 1) dragging = false; if (e.button === 2) PL.releaseR?.(); });
+  addEventListener('mouseup', e => { if (e.button === 0) { if (lmbF) { lmbF = false; features.some(f => f.lmb?.(false)); } else if (!E.pause.paused && !E.photo?.open) PL.release(); mouse.down = false; } if (e.button === 1) dragging = false; if (e.button === 2) PL.releaseR?.(); });
   canvas.addEventListener('wheel', e => { e.preventDefault(); cv.onWheel(e); }, {passive: false});
   return {
     get dragging() { return dragging; },

@@ -43,7 +43,8 @@ export async function create(host) {
   let spaceVer = -1, spaceT = 0;
   // steps: the footsteps' gain, the 'audio.steps' note (host.mods: the uncanny forest's quiet stones hush them), read on change
   let steps = 1; if (host.mods) { const f = () => { steps = host.mods.value('audio.steps', 1); }; host.mods.watch(f); f(); }
-  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }, ground: (x, y) => host.biome?.groundAt?.(x, y) ?? null, propAt, space, get steps() { return steps; }};
+  const ctx = {PPM: host.PPM, get VW() { return host.VW; }, get layout() { return host.layout; }, ground: (x, y) => host.biome?.groundAt?.(x, y) ?? null, propAt, space, get steps() { return steps; },
+    wade: (x, y) => host.feature('wading')?.wet?.(x, y) || 0};   // (a foot in a puddle or the shallows: the steps splash)
   const screenX = (x, y) => host.toView(x, y, 0)[0];
   const AU = createAudio(ctx, {arrows: () => host.arrows, props: () => host.props, combat: () => host.feature('combat'), wind: () => host.wind});
   const listener = {};

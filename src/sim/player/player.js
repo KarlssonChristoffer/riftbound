@@ -17,6 +17,7 @@
 //   onShoot(arrow)                    host adds {x, y, h, vx, vy, vh, life, dmg, kind} to its arrows
 // H — optional:
 //   elev(x, y) -> ground height (m); inStream(x, y) -> water you can leap over; plateaus [{x0, y0, x1, y1, h}] (the cursor's levels);
+//   water(x, y) -> [surface height, current x, current y (m/s, this frame)] where deep water (inStream) can be swum, else null (SWIM)
 //   climbs [{x, y, w, h0, h1, reach}]: where a face can be climbed, in this frame (the face to the north: its foot's middle, width, the
 //   ground at its foot and the top, how far in the mantle goes; out of reach (x 1e9) unless the camera faces it: sim/player/adapter.js)
 //   aimTarget() -> {x, y, h, target} | null   (snap the aim to something under the cursor)
@@ -25,7 +26,7 @@
 //            then draws nothing
 //   nearInteract(P) -> prop | null; onInteract(prop) -> bool   (E on chests etc.)
 //   dust(fx, fy, side, big)            a foot contact at world px (fx, fy); big 0 step, 1 turn push, 2 plant / land
-//   events []                          pushes {type: 'player.step'|'player.land'|'player.jump'|'player.splash', x, y, ...} (core/events.js)
+//   events []                          pushes {type: 'player.step'|'player.land'|'player.jump'|'player.splash'|'player.stroke', x, y, ...} (core/events.js)
 //   shake(px, sec)
 //   gun(PL, internals) -> a revolver (sim/player/gun.js createGun): while the loadout's weapon is a gun it gets LMB and the frame
 //   canLaunch() -> bool               a blast may THROW him (sim/player/launch.js: PL.launch; false: the skid, PL.knock)
@@ -74,7 +75,7 @@ const AIM_TURN_RATE = 1200;
 const STANCE_HOLD = .25;  // s: a moving-aim stance (running forward / backing up) can't flip back sooner (no flip-flop)
 // states in which the player is taken over by a move (no aiming, rolling or new actions); 'rope': hanging from a lasso
 // (sim/player/lasso.js, the equipment experiment's)
-export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'hold', 'knock', 'rope', ...THROWN, ...BRAWLS, ...FISTS, ...TOOLS]);
+export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'swim', 'hold', 'knock', 'rope', ...THROWN, ...BRAWLS, ...FISTS, ...TOOLS]);
 // The dodge (Space). The roll clip is a FORWARD roll, so a roll never reverses:
 // - running into a roll more than leadMin deg off the way he faces: he plants and turns first (the run's turn frames,
 //   lead s each, untouchable from the plant)
@@ -117,6 +118,17 @@ export const JUMP = {step: .55, knee: .9, hop: .62, tuck: .98, long: 2.8, reach:
 // instead) he loses his footing and slides down it, `g` m/s^2 at a 45 deg bank, `fric` 1/s, steering a little (`steer` m/s^2),
 // until the ground eases under `off`. H.grad(x, y, out) -> out = [gx, gy (this frame), slope]
 const SLIDE = {on: .8, off: .45, cliff: 2.6, g: 9, fric: 1.6, steer: 4, max: 7};
+// SWIM (H.water): deep water that can be swum (not lava, not the rift's crack, not a fall's lip: the host says) is swum instead of a
+// splash back to the bank. Walking or rolling in, a fall, a blast's throw or a leap that comes up short (no lip in reach to catch)
+// puts him in it: 'swim' (BUSY: no aiming, rolling or actions). Head and shoulders out: P.sink `sink` (the views lower him 22 px per
+// 1: ~.77 m), bobbing `bob` at `bobHz`, settling at `settle` 1/s; a fall goes `dunk` deeper first and comes up. WASD swims at `speed`
+// m/s x the build's pace (SPEED.run's share; Shift: `fast`), getting there at `acc` m/s^2, gliding to a stop at `drag` 1/s, turning
+// at `turn` deg/s; a river's current carries him on top (H.water's). Space: a kick, `kick` m/s more the way he swims, every `kickCd`
+// s. Where deep water ends he wades out (onto the shelf, a bank no higher than STEP_UP over the surface; a drop beyond, over a
+// fall's edge, holds him back), rising out of it over `rise` s. The arms: the walk's frames, a cycle every `stroke` m; a
+// 'player.stroke' each half cycle (treading water, below `still` m/s: every `tread` s): the rings, the drops, the sound
+export const SWIM = {sink: 1.6, dunk: .7, bob: .05, bobHz: .8, settle: 5, speed: 1.4, fast: 2.1, acc: 2.6, drag: 1.4, turn: 540,
+  kick: 1.3, kickCd: .7, stroke: 2.2, still: .25, tread: 1.2, rise: .4, bigIn: 2.5};
 const _grad = [0, 0, 0];
 const angDiff = (a, b) => Math.abs(((a - b) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
 
@@ -481,6 +493,7 @@ export function createPlayer(H) {
     return false;
   }
   function splash(backTo) {
+    if (water(P.x, P.y)) { startSwim(true); return; }   // (water to swim in: SWIM)
     P.state = 'splash'; P.t = 0; P.z = 0; P.back = backTo;
     ev({type: 'player.splash', x: P.x, y: P.y}); H.shake?.(1, .12);
   }
@@ -496,6 +509,56 @@ export function createPlayer(H) {
       if (!inStream(x, y)) { const x2 = x - ux * .3, y2 = y - uy * .3; return H.blocked(x2, y2, elev(x2, y2), true) ? [x, y] : [x2, y2]; }
     }
     return [bx, by];
+  }
+  // SWIM: WV = H.water's answer, copied (the host reuses its array)
+  const WV = [0, 0, 0];
+  function water(x, y) { const w = H.water?.(x, y); if (!w) return false; WV[0] = w[0]; WV[1] = w[1]; WV[2] = w[2]; return true; }
+  function startSwim(fell) {   // (WV: the water there)
+    const sp = Math.hypot(P.vx, P.vy), k = fell ? .35 : .7;
+    P.state = 'swim'; P.t = 0; P.z = WV[0]; P.vz = 0; P.leap = null; P.vault = null; P.aimRoll = false; P.queuedShot = false; P.rollV0 = 0; P.turn = null; P.skid = 0;
+    P.svx = P.vx * k; P.svy = P.vy * k; P.swimPh = 0; P.kickT = 0; P.strokeT = 0;
+    if (fell) P.sink = SWIM.sink + SWIM.dunk;   // (under for a moment, then up)
+    ev({type: 'player.splash', x: P.x, y: P.y, small: !fell && sp < SWIM.bigIn, swim: true}); if (fell) H.shake?.(1, .12);
+  }
+  function outOfWater() {   // onto the shelf or the bank: on his feet, walking on (the sink eases off in step)
+    P.z = elev(P.x, P.y); P.state = 'idle'; P.t = 0; P.prevF = -1; P.svx = P.svy = 0; P.curSpeed = P.lastSpeed = Math.hypot(P.vx, P.vy);
+    ev({type: 'player.splash', x: P.x, y: P.y, small: true, out: true});
+  }
+  function swimStep(dt) {
+    if (!water(P.x, P.y)) { outOfWater(); return; }   // (the water went from under him: a crate sunk to a stepping stone)
+    const [mx, my] = moveInput(), top = (keys.has('shift') ? SWIM.fast : SWIM.speed) * SPEED.run / SPEED0.run;
+    if (mx || my) {
+      const dx = mx * top - P.svx, dy = my * top - P.svy, d = Math.hypot(dx, dy), a = SWIM.acc * dt;
+      if (d > a) { P.svx += dx / d * a; P.svy += dy / d * a; } else { P.svx += dx; P.svy += dy; }
+      P.want = dirOf(mx, my);
+    } else { const k = Math.exp(-SWIM.drag * dt); P.svx *= k; P.svy *= k; }
+    turnToward(P.want ?? P.face, dt, SWIM.turn);
+    if (P.kickT > 0) P.kickT -= dt;
+    P.vx = P.svx + WV[1]; P.vy = P.svy + WV[2];
+    const x0 = P.x, y0 = P.y, z0 = WV[0];
+    moveBy(P.vx * dt, P.vy * dt, true);   // (air: the water is no wall; a bank more than STEP_UP over him is)
+    if (!inStream(P.x, P.y)) {
+      if (elev(P.x, P.y) >= z0 - STEP_UP) { outOfWater(); return; }
+      P.x = x0; P.y = y0; P.svx = P.svy = P.vx = P.vy = 0;   // (a drop beyond: over a fall's edge. Held back)
+    } else if (!water(P.x, P.y)) { P.x = x0; P.y = y0; P.svx = P.svy = P.vx = P.vy = 0; }   // (not to be swum: a fall's lip)
+    water(P.x, P.y); P.z = WV[0];
+    const want = SWIM.sink + SWIM.bob * Math.sin(P.t * SWIM.bobHz * 2 * Math.PI);
+    P.sink = (P.sink || 0) + (want - (P.sink || 0)) * Math.min(1, dt * SWIM.settle);
+    const sv = Math.hypot(P.svx, P.svy), W = A.CLIP.walk; P.gait = 'walk'; P.curSpeed = sv;
+    if (sv > SWIM.still) {   // the arms: the walk's cycle by the distance swum
+      const ph0 = P.swimPh; P.swimPh = (ph0 + sv * dt / SWIM.stroke) % 1; P.strokeT = 0;
+      P.frame = W && has('walk.0') ? `walk.${Math.floor(P.swimPh * W.frames) % W.frames}` : 'idle.0';
+      if ((ph0 < .5) !== (P.swimPh < .5)) ev({type: 'player.stroke', x: P.x, y: P.y, z: P.z, pace: sv, vx: P.svx, vy: P.svy});
+    } else {   // treading water
+      P.frame = 'idle.0';
+      if ((P.strokeT += dt) > SWIM.tread) { P.strokeT = 0; ev({type: 'player.stroke', x: P.x, y: P.y, z: P.z, pace: sv, tread: true}); }
+    }
+  }
+  function swimKick() {
+    if (P.kickT > 0) return;
+    const [mx, my] = moveInput(), [fx, fy] = mx || my ? [mx, my] : vecOf(P.face);
+    P.svx += fx * SWIM.kick; P.svy += fy * SWIM.kick; P.kickT = SWIM.kickCd; P.want = dirOf(fx, fy);
+    ev({type: 'player.stroke', x: P.x, y: P.y, z: P.z, pace: Math.hypot(P.svx, P.svy), vx: P.svx, vy: P.svy, big: true});
   }
   function climbSpot() {   // a climb spot within reach: from below (up) or from the top (down)
     for (const c of climbs) {
@@ -515,6 +578,8 @@ export function createPlayer(H) {
   }
   function stepTraverse(dt) {   // returns true when it handled this frame
     if (thrown.step(dt)) return true;   // thrown by a blast (sim/player/launch.js)
+    if (!BUSY.has(P.state) && inStream(P.x, P.y) && water(P.x, P.y)) startSwim(false);   // walked or rolled into deep water (SWIM)
+    if (P.state === 'swim') { swimStep(dt); return true; }
     // walked or rolled off a ledge: fall (any edge; climbing UP needs a climb spot)
     if (!BUSY.has(P.state) && P.z > elev(P.x, P.y) + .05) startFall();
     if (H.grad && !BUSY.has(P.state) && !dodging() && H.grad(P.x, P.y, _grad)[2] > SLIDE.on && _grad[2] < SLIDE.cliff) {   // (a bank: still steep half a metre on down it, not a small step)
@@ -718,6 +783,7 @@ export function createPlayer(H) {
     const {SP, CLIP} = A, WALK = CLIP.walk, RUN = CLIP.run, ND = A.ND;
     const [mx, my] = moveInput();
     P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt); thrown.tick(dt);
+    if (P.sink && P.state !== 'swim' && P.state !== 'splash') P.sink = Math.max(0, P.sink - dt * SWIM.sink / SWIM.rise);   // (out of the water: rising out of it)
     if (ropewall && ropewall.step(dt, mx, my)) return;   // on a rope against a face (sim/player/ropewall.js; nothing while he isn't)
     if (fists && fists.step(dt, mx, my)) return;   // the fists up: the guard, a punch, a slip, a clinch (sim/player/fists.js; nothing while they're down)
     if (brawl && brawl.step(dt, mx, my)) return;   // a boot, a barge, a lift, a throw (sim/player/brawl.js; nothing while it's idle)
@@ -944,7 +1010,7 @@ export function createPlayer(H) {
   }
 
   // ---------------- input (the host maps its keys / buttons to these) ----------------
-  function onSpace() { if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
+  function onSpace() { if (P.state === 'swim') { swimKick(); return; } if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
   function press() {   // LMB down: draw (kept through a roll)

@@ -43,7 +43,7 @@ const CLAIM = {
 // DEV CATEGORIES: the Dev tab shows one group at a time (a button each); a feature's toggle and its unclaimed settings go
 // in its group here (a feature not listed: Other)
 const DEV_GROUP = {
-  wind: 'Nature', windlines: 'Nature', litter: 'Nature', grass: 'Nature', riverside: 'Nature', wildlife: 'Nature', atmos: 'Nature',
+  wind: 'Nature', windlines: 'Nature', litter: 'Nature', grass: 'Nature', riverside: 'Nature', wildlife: 'Nature', fauna: 'Nature', atmos: 'Nature',
   weather: 'Nature', dust: 'Nature', tumbleweed: 'Nature', mist: 'Nature', airfx: 'Nature',
   lights: 'Effects', flow: 'Effects', contact: 'Effects', gunfx: 'Effects', depth: 'Effects', blood: 'Effects',
   foes: 'World', anomaly: 'World', uncanny: 'World',
@@ -55,10 +55,10 @@ const DEV_GROUP = {
 // camera) stay in Game; every other feature's are test actions for the sandbox: the Sandbox tab, one page per group here
 // (a feature not listed: Other)
 const GAME_ROWS = ['cinema', 'wardrobe', 'game'];   // (in this order, after Resume and Photo mode: back to title stays last; the wardrobe: dev mode)
-const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places', uncanny: 'Places'};
+const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places', uncanny: 'Places', fauna: 'Animals'};
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
-const LOW_OFF = ['windlines', 'wildlife', 'depth', 'grass', 'litter', 'dust', 'tumbleweed', 'mist', 'airfx'];
+const LOW_OFF = ['windlines', 'wildlife', 'fauna', 'depth', 'grass', 'litter', 'dust', 'tumbleweed', 'mist', 'airfx'];
 const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'sprint'], [['Q'], 'walk'], [['C'], 'crouch'], [['Space'], 'roll · leap'],
   [['LMB'], 'hold to draw, release to shoot'], [['RMB'], 'multishot'], [['1', '2', '3', '4'], 'abilities'], [['E'], 'open · talk · climb'], [['F'], 'use the gadget (when you carry one)'],
   [['LMB'], 'revolver: draw · shoot'], [['RMB'], 'revolver: fan the hammer'], [['R'], 'revolver: reload'], [['V'], 'revolver: pistol whip'], [['Y'], 'tip the hat'],

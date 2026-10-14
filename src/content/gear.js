@@ -25,7 +25,7 @@
 // FREE_KG slows you, armor takes a share off the damage you take.
 export const SLOTS = ['head', 'body', 'back', 'hands', 'legs', 'feet', 'main', 'off'];
 export const SLOT_NAMES = {head: 'Head', body: 'Body', back: 'Back', hands: 'Hands', legs: 'Legs', feet: 'Feet', main: 'Main hand', off: 'Off hand'};
-export const KINDS = {clothing: 'Clothing', armor: 'Armour', robe: 'Robe', weapon: 'Weapon', tool: 'Tool', charm: 'Charm'};
+export const KINDS = {clothing: 'Clothing', armor: 'Armour', robe: 'Robe', weapon: 'Weapon', tool: 'Tool', charm: 'Charm', fishing: 'Fishing'};
 export const RARITY = {common: {name: 'Common', col: '#c9c2b2'}, fine: {name: 'Fine', col: '#7ad07a'}, rare: {name: 'Rare', col: '#5aa8ff'},
   masterwork: {name: 'Masterwork', col: '#c27bff'}, mythic: {name: 'Mythic', col: '#ffb84a'}};
 
@@ -67,6 +67,16 @@ export const MATERIALS = {
   ermine:     ['#ffffff', '#ece9e2', '#c8c3b7', '#3a3832'],
   gem_blue:   ['#e6faff', '#8fd8ff', '#4aa3e8', '#1f4f8a'],
   flame:      ['#fff6c8', '#ffd56a', '#ff9a3a', '#a33a12'],
+  // fishing gear (2026-10-13, docs/FISHING.md)
+  cane:       ['#f2e0a8', '#d6b66c', '#a8873e', '#56431c'],
+  willow:     ['#c4bc7c', '#98904e', '#6c6632', '#36331a'],
+  cork:       ['#e2b688', '#bf9060', '#8f6442', '#4a3222'],
+  canvas:     ['#d8d0a4', '#b4aa78', '#868052', '#45412a'],
+  oilskin:    ['#f6dc6a', '#d8b434', '#9e7e1e', '#4e3e0e'],
+  rubber:     ['#7e8e60', '#5c6c44', '#3e4a2e', '#1e2616'],
+  felt:       ['#9c9890', '#76726a', '#545049', '#2a2824'],
+  netting:    ['#c8c0a8', '#948c74', '#6a6452', '#36332a'],
+  rosin:      ['#f2f6ff', '#b8c8f0', '#7486c8', '#2e3870'],
 };
 
 // a live model's zones: its json's meta.loadout -> zone -> the parts (model.json parts) it is made of
@@ -427,6 +437,93 @@ export const GEAR = [
       {on: 'LeftHand', part: 'book', mat: 'leather_dk', shape: 'box', size: [.04, .15, .19], at: [.65, 0, .74], rot: [0, 135, 0]},
       {on: 'LeftHand', part: 'book.pages', mat: 'linen', shape: 'box', size: [.032, .14, .175], at: [.645, .005, .745], rot: [0, 135, 0]},
       {on: 'LeftHand', part: 'book.clasp', mat: 'gold', shape: 'box', size: [.05, .03, .03], at: [.66, -.08, .73], rot: [0, 135, 0], o: {fixed: 1}},
+    ]}},
+  // ================================================================ fishing gear (2026-10-13, docs/FISHING.md): a rod in the main
+  // hand is what fishing takes (features/fishing.js); every piece's fishing stats are notes 'fish.*' (content/fishing.js STATS).
+  // A rod rides on the back while he walks (drawn in his hands as pixel lines while he fishes: the cast, the line, the bend)
+  // ---- main hand: rods (on the back: the spear's lean, a little higher; the butt by the left hip, the tip over the right shoulder)
+  {id: 'willow_rod', name: 'Willow switch', slot: 'main', kind: 'fishing', rarity: 'common', weight: .4, armor: 0, desc: 'A peeled willow switch, a horsehair line and a bent hook. It\'s a start.',
+    fish: {tip: '#c4bc7c'}, mods: [{stat: 'fish.cast', mul: .85}],
+    look: {add: [
+      {on: 'Spine2', part: 'rod.butt', mat: 'willow', shape: 'tube', r0: .016, r1: .012, len: .95, at: [.191, .2, .594], rot: [0, -16, 0], o: {sides: 5}},
+      {on: 'Spine2', part: 'rod.tip', mat: 'willow', shape: 'tube', r0: .011, r1: .006, len: .95, at: [-.071, .2, 1.506], rot: [0, -16, 0], o: {sides: 5}},
+    ]}},
+  {id: 'cane_rod', name: 'Split-cane rod', slot: 'main', kind: 'fishing', rarity: 'fine', weight: .6, armor: 0, desc: 'Six strips of cane glued into one, a cork grip and a brass reel that clicks.',
+    fish: {tip: '#d6b66c'}, mods: [{stat: 'fish.cast', mul: 1.15}, {stat: 'fish.reel', mul: 1.15}],
+    look: {add: [
+      {on: 'Spine2', part: 'rod.butt', mat: 'cane', shape: 'tube', r0: .016, r1: .012, len: .95, at: [.191, .2, .594], rot: [0, -16, 0], o: {sides: 6}},
+      {on: 'Spine2', part: 'rod.tip', mat: 'cane', shape: 'tube', r0: .011, r1: .006, len: .95, at: [-.071, .2, 1.506], rot: [0, -16, 0], o: {sides: 5}},
+      {on: 'Spine2', part: 'rod.grip', mat: 'cork', shape: 'tube', r0: .024, r1: .022, len: .24, at: [.275, .2, .3], rot: [0, -16, 0], o: {sides: 6}},
+      {on: 'Spine2', part: 'rod.reel', mat: 'brass', shape: 'tube', r0: .045, r1: .045, len: .045, at: [.231, .245, .454], rot: [0, -16, 0], o: {sides: 8}},
+    ]}},
+  {id: 'pike_rod', name: 'Pike rod', slot: 'main', kind: 'fishing', rarity: 'rare', weight: 1.1, armor: 0, desc: 'A stout dark rod and a steel leader: big teeth don\'t bite through it.',
+    fish: {tip: '#7a7f88'}, mods: [{stat: 'fish.line', mul: 1.5}, {stat: 'fish.size', mul: 1.15}, {stat: 'fish.luck', add: .05}],
+    look: {add: [
+      {on: 'Spine2', part: 'rod.butt', mat: 'black_iron', shape: 'tube', r0: .02, r1: .016, len: .9, at: [.185, .2, .62], rot: [0, -16, 0], o: {sides: 6}},
+      {on: 'Spine2', part: 'rod.tip', mat: 'leather_dk', shape: 'tube', r0: .015, r1: .009, len: .9, at: [-.063, .2, 1.485], rot: [0, -16, 0], o: {sides: 5}},
+      {on: 'Spine2', part: 'rod.grip', mat: 'cork', shape: 'tube', r0: .027, r1: .025, len: .26, at: [.275, .2, .3], rot: [0, -16, 0], o: {sides: 6}},
+      {on: 'Spine2', part: 'rod.reel', mat: 'black_iron', shape: 'tube', r0: .055, r1: .055, len: .055, at: [.231, .25, .454], rot: [0, -16, 0], o: {sides: 8}},
+    ]}},
+  {id: 'fly_rod', name: 'Ash fly rod', slot: 'main', kind: 'fishing', rarity: 'rare', weight: .5, armor: 0, desc: 'Long and whippy, a silk line and a feathered fly. Fish rise to it before it lands.',
+    fish: {tip: '#e2bc84', line: '#f0e6c8'}, mods: [{stat: 'fish.lure', mul: .7}, {stat: 'fish.hook', add: .25}, {stat: 'fish.cast', mul: 1.25}],
+    look: {add: [
+      {on: 'Spine2', part: 'rod.butt', mat: 'oak', shape: 'tube', r0: .014, r1: .01, len: 1.05, at: [.205, .2, .546], rot: [0, -16, 0], o: {sides: 5}},
+      {on: 'Spine2', part: 'rod.tip', mat: 'oak', shape: 'tube', r0: .009, r1: .004, len: 1.05, at: [-.085, .2, 1.555], rot: [0, -16, 0], o: {sides: 5}},
+      {on: 'Spine2', part: 'rod.grip', mat: 'cork', shape: 'tube', r0: .022, r1: .02, len: .2, at: [.29, .2, .25], rot: [0, -16, 0], o: {sides: 6}},
+      {on: 'Spine2', part: 'rod.fly', mat: 'red_cloth', shape: 'ball', r: .03, at: [.27, .17, .36]},
+    ]}},
+  {id: 'nacken_bow', name: 'Näcken\'s bow', slot: 'main', kind: 'fishing', rarity: 'mythic', weight: .3, armor: 0, desc: 'A fiddle bow strung with water that never drips. Fish come up to hear it. At night, so does something else.',
+    fish: {tip: '#b8c8f0', line: '#cfe0ff', glow: true}, mods: [{stat: 'fish.night', add: .6}, {stat: 'fish.luck', add: .25}, {stat: 'fish.lure', mul: .8}],
+    soon: 'Näcken may come to ask for it back',
+    look: {add: [
+      {on: 'Spine2', part: 'rod.butt', mat: 'leather_dk', shape: 'tube', r0: .014, r1: .011, len: .95, at: [.191, .2, .594], rot: [0, -16, 0], o: {sides: 5}},
+      {on: 'Spine2', part: 'rod.tip', mat: 'leather_dk', shape: 'tube', r0: .011, r1: .007, len: .95, at: [-.071, .2, 1.506], rot: [0, -16, 0], o: {sides: 5}},
+      {on: 'Spine2', part: 'rod.hair', mat: 'rosin', shape: 'tube', r0: .006, r1: .006, len: 1.7, at: [.07, .225, 1.04], rot: [0, -16, 0], o: {sides: 4, fixed: 0}},
+      {on: 'Spine2', part: 'rod.frog', mat: 'gold', shape: 'box', size: [.04, .03, .07], at: [.31, .215, .2], rot: [0, -16, 0], o: {fixed: 1}},
+    ]}},
+  // ---- the rest of an angler
+  {id: 'bucket_hat', name: 'Fly-tier\'s hat', slot: 'head', kind: 'fishing', rarity: 'fine', weight: .2, armor: 0, desc: 'A soft canvas hat, flies hooked all round its band.',
+    mods: [{stat: 'fish.lure', mul: .85}, {stat: 'fish.luck', add: .03}],
+    look: {hide: ['hat'], add: [
+      {on: 'HatHold0', part: 'bucket.brim', mat: 'canvas', shape: 'tube', r0: .31, r1: .22, len: .07, at: [0, .01, 1.64], o: {sides: 12}},
+      {on: 'HatHold0', part: 'bucket.crown', mat: 'canvas', shape: 'tube', r0: .2, r1: .17, len: .14, at: [0, .01, 1.74], o: {sides: 10}},
+      {on: 'HatHold0', part: 'bucket.top', mat: 'canvas', shape: 'disc', r: .17, len: .02, at: [0, .01, 1.815], o: {sides: 10}},
+      {on: 'HatHold0', part: 'bucket.fly0', mat: 'red_cloth', shape: 'ball', r: .025, at: [.12, -.15, 1.71]},
+      {on: 'HatHold0', part: 'bucket.fly1', mat: 'feather', shape: 'ball', r: .022, at: [-.14, -.12, 1.72]},
+      {on: 'HatHold0', part: 'bucket.fly2', mat: 'green_cloth', shape: 'ball', r: .022, at: [.19, .02, 1.71]},
+    ]}},
+  {id: 'souwester', name: 'Sou\'wester', slot: 'head', kind: 'fishing', rarity: 'fine', weight: .3, armor: 0, desc: 'A yellow oilskin rain hat, the brim long at the back. Rain is when they bite.',
+    mods: [{stat: 'fish.rain', add: .2}, {stat: 'fish.luck', add: .02}],
+    look: {hide: ['hat'], add: [
+      {on: 'HatHold0', part: 'sw.crown', mat: 'oilskin', shape: 'ball', r: [.22, .23, .17], at: [0, .012, 1.68], o: {sides: 10}},
+      {on: 'HatHold0', part: 'sw.brim', mat: 'oilskin', shape: 'disc', r: .3, len: .022, at: [0, .06, 1.62], rot: [-8, 0, 0], o: {sides: 12}},
+    ]}},
+  {id: 'angler_vest', name: 'Angler\'s vest', slot: 'body', kind: 'fishing', rarity: 'fine', weight: .8, armor: .01, desc: 'A canvas vest that is mostly pockets, a spare hook in every one.',
+    mods: [{stat: 'fish.double', add: .08}, {stat: 'fish.find', add: .04}, {stat: 'fish.hook', add: .15}],
+    look: {paint: {vest: 'canvas'}, add: [
+      {on: 'Spine2', part: 'vest.p0', mat: 'canvas', shape: 'box', size: [.08, .03, .07], at: [.09, -.17, 1.12]},
+      {on: 'Spine2', part: 'vest.p1', mat: 'canvas', shape: 'box', size: [.08, .03, .07], at: [-.09, -.17, 1.12]},
+      {on: 'Spine', part: 'vest.p2', mat: 'canvas', shape: 'box', size: [.09, .03, .08], at: [.1, -.16, .98]},
+      {on: 'Spine', part: 'vest.p3', mat: 'canvas', shape: 'box', size: [.09, .03, .08], at: [-.1, -.16, .98]},
+    ]}},
+  {id: 'waders', name: 'Waders', slot: 'legs', kind: 'fishing', rarity: 'rare', weight: 3, armor: .02, desc: 'Rubber waders to the chest. You stand firm and pull hard.',
+    mods: [{stat: 'fish.reel', mul: 1.15}, {stat: 'fish.line', mul: 1.2}], soon: 'wade out into deeper water',
+    look: {paint: {trousers: 'rubber', boots: 'rubber'}, hide: ['spurs'], add: [
+      {on: 'Spine', part: 'waders.bib', mat: 'rubber', shape: 'box', size: [.3, .04, .2], at: [0, -.15, .98]},
+      {on: 'Spine2', part: 'waders.strap0', mat: 'leather_dk', shape: 'box', size: [.03, .32, .02], at: [.1, 0, 1.24]},
+      {on: 'Spine2', part: 'waders.strap1', mat: 'leather_dk', shape: 'box', size: [.03, .32, .02], at: [-.1, 0, 1.24]},
+    ]}},
+  {id: 'felt_boots', name: 'Felt-soled boots', slot: 'feet', kind: 'fishing', rarity: 'fine', weight: 1.2, armor: .01, desc: 'Boots with felt soles that grip wet stone. You feel every tug.',
+    mods: [{stat: 'fish.hook', add: .2}, {stat: 'fish.line', mul: 1.1}],
+    look: {paint: {boots: 'felt'}, hide: ['spurs']}},
+  {id: 'angler_mitts', name: 'Angler\'s mitts', slot: 'hands', kind: 'fishing', rarity: 'common', weight: .1, armor: 0, desc: 'Wool mitts with the fingertips out: you feel the faintest nibble.',
+    mods: [{stat: 'fish.hook', add: .25}],
+    look: {paint: {hands: 'wool_grey'}}},
+  {id: 'landing_net', name: 'Landing net', slot: 'off', kind: 'fishing', rarity: 'fine', weight: .9, armor: 0, desc: 'A hoop of netting on a short handle: the last stretch of a fight lands itself.',
+    mods: [{stat: 'fish.net', add: .2}],
+    look: {add: [
+      {on: 'LeftHand', part: 'net.handle', mat: 'oak', shape: 'tube', r0: .016, r1: .016, len: .36, at: [.688, 0, .702], rot: [0, 135, 0], o: {sides: 5}},
+      {on: 'LeftHand', part: 'net.hoop', mat: 'netting', shape: 'disc', r: .15, len: .012, at: [.95, 0, .44], rot: [90, 0, 0], o: {sides: 10}},
     ]}},
 ];
 export const GEAR_BY_ID = Object.fromEntries(GEAR.map(g => [g.id, g]));

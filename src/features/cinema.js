@@ -90,7 +90,9 @@ export async function create(host) {
   let state = 'off', fadeK = 0, barK = 0, phase = '', tStart = 0, pending = false, cuts = 0, lastKinds = ['', ''], newsT = -1e9;
 
   const game = () => host.feature('game');
-  const allowed = () => F.on && !host.paused && !host.lock && !host.photoOpen && game()?.mode === 'sandbox' && (HOLD || host.P.state === 'idle');   // (photo mode: its own camera)
+  let caves = null;   // (features/caves.js: not underground, its sky would show past the cave's walls)
+  const allowed = () => F.on && !host.paused && !host.lock && !host.photoOpen && game()?.mode === 'sandbox' && (HOLD || host.P.state === 'idle')   // (photo mode: its own camera)
+    && !((caves ??= host.feature('caves') || false) && caves.under > .05);
   const feet = o => { const p = host.player; o.x = p.x; o.y = p.y; o.h = host.P.z || 0; return o; };
   const ground = (x, y) => host.elev(x, y) || 0;
   // the frame's size at magnification m (m across, m high, at the subject): the game's view / m

@@ -129,6 +129,7 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
   const T = new THREE.Vector3(), Ts = new THREE.Vector3();
   let camInit = false;
   cv.snap = () => { camInit = false; };   // jump to the player next frame (a teleport)
+  cv.shift = (dx, dy) => { T.x += dx; T.z += dy; Ts.x += dx; Ts.z += dy; };   // he was moved as he was (world m, adapter.js shift): the view goes along, eased as it was
   // ox, oy: px offset (feel, shake) applied in the view; then the visible GROUND stays inside the world (the arena
   // clamps its camera to the world the same way: no void past the edge), then the target snaps to the pixel lattice
   // (V: the target to place, T or the free one, FR; ga: how far the clamp gives way, m)

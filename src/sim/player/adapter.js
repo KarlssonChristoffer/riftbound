@@ -16,8 +16,10 @@ import {createTool} from './tool.js';   // a tool in hand (player.js H.tool; fea
 import {createFists} from './fists.js';   // the live cowboys' fists (player.js H.fists; features/fists.js uses it)
 import {createRopeWall} from './ropewall.js';   // the rope wall: the lasso's rope-up hands him to it (player.js H.ropewall)
 import {TUNE as ROPEWALL} from '../../content/ropewall.js';   // (its camera: side-on to the face)
-import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON, vaultTop} from '../../world/world.js';
+import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON, vaultTop, WATER_H} from '../../world/world.js';
+import {STREAM, FOREST} from '../../world/layout.js';   // (SWIM: the river's line for its current; the forest's lake)
 import {createCollide} from '../../world/collide.js';   // the world's solids (docs/COLLISION.md)
+import {clamp} from '../../core/mathx.js';
 
 const R_BODY = .25, H_BODY = 1.6;   // (his body: radius, height from his feet)
 // THE STONE WALLS' BREACHES (world/walls3d.js, world.js vaultTop): rubble no higher than STEP_OVER over his feet is stepped over (it
@@ -34,6 +36,12 @@ const STEP_OVER = .3, VAULT_OVER = 1.25, WALLK = new Set(['wall_n', 'wall_s', 'w
 // ?collide=old: off
 const UN = {max: 1.5, speed: 4, note: .5, drop: .5};
 const UN_ACT = new Set(['land', 'hold', 'knock', 'chop']);
+// SWIMMING (player.js SWIM, H.water): deep water (inStream) is swum where it is water: not the ember's lava or the rift's crack
+// (NO_SWIM, by the biome; the forest's lake is water in any), and not within LIP m of a fall's lip (world.cliffZ: the ravine's
+// edge, where the river goes over). Its surface lies WATER_H under the ground there (world.js lowers the ground mesh by it). The
+// river carries him downstream along its line (layout.js STREAM), CUR.v m/s mid-channel, CUR.edge of that at the banks, easing to
+// nothing over the last CUR.ease m before the lip (an eddy above the fall: he is never swept over); the pools and the lake don't
+const NO_SWIM = new Set(['ember', 'rift']), LIP = .6, CUR = {v: .55, edge: .3, ease: 3};
 
 export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam, events, features, world: worldOf, ents, biome, opt: optOf, proj, flags, mods, canLaunch = null}) {
   const toView = cv.toView, toWorld = cv.toWorld;
@@ -52,8 +60,24 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   const PB = {r: R_BODY,
     counts: (p, z) => !p.broken && !p.gone && C.column(p, z, z + H_BODY),
     through: (p, z) => rubble(p, z),
-    ground: (x, y, z, air) => !walkable(x, y) || (!air && inStream(x, y)) || elev(x, y) > z + .3 || (!air && steep(x, y) && elev(x, y) > z + .01),
+    ground: (x, y, z, air) => !walkable(x, y) || (!air && inStream(x, y) && !swimmable(x, y)) || elev(x, y) > z + .3 || (!air && steep(x, y) && elev(x, y) > z + .01),
     floor: elev};   // (steep: no walking up a cliff or a ramp's side, not even in small steps)
+  // SWIMMING: can deep water at world (x, y) be swum (NO_SWIM, LIP)? waterAt: H.water (view frame in and out) -> WV | null
+  const lipAt = x => worldOf()?.cliffZ?.(x) ?? Infinity;
+  function swimmable(x, y) { return (FOREST !== null && y < 0) || (!NO_SWIM.has(biome().id) && y < lipAt(x) - LIP); }
+  const WV = [0, 0, 0];
+  function waterAt(vx, vy) {
+    const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw), x = vx * c + vy * s, y = -vx * s + vy * c;   // (viewxf's turn, inline)
+    if (!inStream(x, y) || !swimmable(x, y)) return null;
+    WV[0] = elev(x, y) + WATER_H; WV[1] = WV[2] = 0;
+    const hw = STREAM.w(y) / 2, a = (x - STREAM.cx(y)) / hw;
+    if (!(FOREST !== null && y < 0) && y >= STREAM.y0 && y <= STREAM.y1 && Math.abs(a) <= 1) {   // the river: downstream (+y) along its line
+      const dx = (STREAM.cx(y + .05) - STREAM.cx(y - .05)) / .1, l = Math.hypot(dx, 1);
+      const v = CUR.v * (1 - (1 - CUR.edge) * a * a) * clamp((lipAt(x) - LIP - y) / CUR.ease, 0, 1) / l, wx = dx * v, wy = v;
+      WV[1] = wx * c - wy * s; WV[2] = wx * s + wy * c;
+    }
+    return WV;
+  }
   function blocked(x, y, z, air) { return OLD ? blockedOld(x, y, z, air) : C.overlap(PB, x, y, z, air); }
   // MOVE AND SLIDE (world/collide.js move) for player.js's moveBy and the flight (launch.js): view frame in and out -> HM {x, y,
   // hit, nx, ny (the way out of what stopped him)}. Nothing met: exactly (x + dx, y + dy). slip: round lone small things. In the air
@@ -69,7 +93,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   }
   function blockedOld(x, y, z, air) {
     if (!walkable(x, y)) return true;
-    if (!air && inStream(x, y)) return true;
+    if (!air && inStream(x, y) && !swimmable(x, y)) return true;
     if (elev(x, y) > z + .3) return true;
     if (!air && steep(x, y) && elev(x, y) > z + .01) return true;   // walkable terrain: no walking up a cliff or a ramp's side (not even in small steps)
     for (const p of ents().near(x, y, R_BODY, nearB)) if (!p.broken && !p.gone && Math.abs((p.z || 0) - z) < 1 && (p.rect ? x > p.rect[0] - R_BODY && x < p.rect[2] + R_BODY && y > p.rect[1] - R_BODY && y < p.rect[3] + R_BODY
@@ -182,6 +206,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
     grad: TERRAIN_ON ? gradV : null,   // walkable terrain's slope (player.js SLIDE)
     inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
+    water: waterAt,   // (SWIMMING, above)
     pixelBow: () => !optOf().hdBow,   // J: the bowstring + nocked / flying arrows at art pixels (default) or the HD overlay
     onShoot: a => { const [x, y] = toWorld(a.x, a.y), [vx, vy] = toWorld(a.vx, a.vy); proj.spawn({...a, x, y, vx, vy}); },
     aimTarget: () => { const t = hoverTarget(); if (!t) return null; const v = toView(t.x, t.y); return {x: v[0], y: v[1], h: t.h, target: t.target}; },
@@ -220,6 +245,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     [P.x, P.y] = rot(P.x, P.y); [P.vx, P.vy] = rot(P.vx, P.vy);
     if (P.rollDir) P.rollDir = rot(...P.rollDir);
     if (P.back) P.back = rot(...P.back);
+    if (P.svx || P.svy) [P.svx, P.svy] = rot(P.svx, P.svy);   // (swimming: his own way through the water)
     if (P.leap) { [P.leap.x0, P.leap.y0] = rot(P.leap.x0, P.leap.y0); [P.leap.dx, P.leap.dy] = rot(P.leap.dx, P.leap.dy); }
     if (P.vault) { [P.vault.x0, P.vault.y0] = rot(P.vault.x0, P.vault.y0); [P.vault.dx, P.vault.dy] = rot(P.vault.dx, P.vault.dy); }
     // (the lasso's swing keeps its state in the world and writes P from it every step: nothing of it to turn)
@@ -327,6 +353,18 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     Object.assign(P, {x: vx, y: vy, z: elev(x, y), vx: 0, vy: 0, state: 'idle', t: 0, sink: 0, leap: null, hold: null});
     cv.snap(); snap();
   }
+  // SHIFT him by (dx, dy) world metres as he is: moving, mid-stride, mid-jump (features/caves.js: from the cave's mouth in the woods
+  // to its copy over the cave, the same ground at the same height); the camera, the draw's last place and the unstick's last free
+  // spot go with him, so nothing on screen jumps but the world round him
+  function shift(dx, dy) {
+    const [a, b] = toView(dx, dy); P.x += a; P.y += b;
+    if (P.leap) { P.leap.x0 += a; P.leap.y0 += b; }
+    if (P.vault) { P.vault.x0 += a; P.vault.y0 += b; }
+    if (l0 === l0) { l0 += dx; l1 += dy; }
+    if (US.sx === US.sx) { US.sx += dx; US.sy += dy; }
+    if (US.tx === US.tx) { US.tx += dx; US.ty += dy; }
+    cv.shift(dx, dy);
+  }
   // DRAWING BETWEEN SIM STEPS (core/loop.js, the fixed step): snap() at each step's start notes where he was, in the
   // WORLD (a camera turn between steps doesn't move him there); lerpBegin(alpha) puts P alpha of the way to where he is
   // now, in the current view frame, for the draw; lerpEnd() puts the true P back
@@ -339,7 +377,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     const [vx, vy] = toView(l0 + (x - l0) * k, l1 + (y - l1) * k); P.x = vx; P.y = vy; P.z = l2 + (z - l2) * k;
   }
   function lerpEnd() { if (!lerping) return; P.x = c0; P.y = c1; P.z = c2; lerping = false; }
-  return {PL, P, player, blocked, syncPlateaus, turnFrame, hold, release, toWorldEvent, hoverTarget, nearProp, climbSpotW, climbAssist, stepAssist, teleport, snap, lerpBegin, lerpEnd,
+  return {PL, P, player, blocked, syncPlateaus, turnFrame, hold, release, toWorldEvent, hoverTarget, nearProp, climbSpotW, climbAssist, stepAssist, teleport, shift, snap, lerpBegin, lerpEnd,
     unstick, get unstuck() { return US.n; },   // (the loop: after each player step; the tools: how often it got him out)
     tick() { hoverKey++; }, get assist() { return A.assist; }, set assist(v) { A.assist = v; },
     // (views) the part of a facing step the camera has turned since P.face last moved with it (turnFrame's remainder):

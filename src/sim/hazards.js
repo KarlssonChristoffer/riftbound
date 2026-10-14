@@ -34,7 +34,7 @@
 
 import {TERRAIN_ON} from '../world/layout.js';
 import {throwOf} from './player/launch.js';   // a blast's throw (by how close he stood)
-const AIR = new Set(['leap', 'fall', 'climb', 'splash']);
+const AIR = new Set(['leap', 'fall', 'climb', 'splash', 'swim']);   // (swim: in the water, out of a ground zone's reach)
 const BODY = .25;   // the player's body radius (sim/player/adapter.js R_BODY): a zone reaches him at its edge
 
 export function createHazards(host, {name = 'hazards', cap = 64} = {}) {

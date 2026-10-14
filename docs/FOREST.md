@@ -7,7 +7,8 @@ no forest).
 ## What it is
 
 - **Where.** x -48..72 (the world's width: under the West Downs, the Proving Grounds and the mesa), y -160..0: 120 x 160 m (y -64..0
-  until the high country), more than the rest of the world together. The world grows north to it (`WORLD.y0` = -160); the old north bank, the West Downs' north
+  until the high country), more than the rest of the world together. The world grows north to it (`WORLD.y0` = -160, and on over its
+  cave's band to -242: docs/CAVES.md); the old north bank, the West Downs' north
   bank and the highland behind the mesa give way to it; a bank of its own frames its north and west edges. You walk in from the
   strip north of the arena (its north gate), from the West Downs and from the trail.
 - **Ground.** Rolling relief (value noise, up to ~3.2 m, faded flat over its southern 12 m so it meets the Proving Grounds level,
@@ -15,8 +16,11 @@ no forest).
   below on top. A 'field' terrain shape (world/terrain.js) carries the relief: `elev`, `steep`, the
   ground mesh, the shadows and everything standing on it follow the one height field as before.
 - **Water.** A LAKE in the lowest hollow the seed's candidates find (deep: falling in is a respawn), a STREAM from a spring on the
-  high ground in the north down to it, wandering downhill, and an OUTFLOW from the lake down to the Proving Grounds' river where it
-  comes out of the north edge (x 40): the water runs on through the map. The streams are shallow and wadeable. Beds are cut into
+  high ground in the north down to it, and an OUTFLOW from the lake down to the Proving Grounds' river where it comes out of the
+  north edge (x 40): the water runs on through the map. Both take the land's way (a least-cost route that keeps to the low ground
+  and goes round hills; the outflow's valley, `F.way`, is routed first and the relief held low along it) and MEANDER where the
+  ground is gentle (a sine-generated curve with a Kinoshita skew, bends growing and calming reach by reach; a wobble where it is
+  steep). A bend runs deep under its outside bank (a dark cut bank) and leaves a gravel bar on its inside. The streams are shallow and wadeable. Beds are cut into
   the ground (never rising downstream); the water is painted and moves like the brook's (world.js bakeWater, waterbed.js).
 - **Growth**, per 16 m chunk, from the seed and the chunk's own coordinates: TREES on a jittered 3.2 m lattice, thick or thin by a
   density field (thickets and clearings), conifers (the frost biome's pines) on the higher ground and in drifts of their own, oaks,
@@ -32,6 +36,21 @@ no forest).
   trunks, roots round each trunk, twigs; the streams and the lake with banks, a damp lush band, the spring in a ring of stones.
   Other biomes have no forest painter: their own trees on the open land's stand-in ground (the lake is then invisible deep water,
   as the brook's pool is there).
+- **Ground cover** (2026-10-13, features/grass.js buildForest, `TUNE.forest`): the forest floor grows its own blades over the painted
+  tiles (`world.forestTiles`), read from the texel each grows on: grass in TUSSOCKS in the clearings (no even lawn) and the upland's
+  drier grass, a tone lighter than the ground so they show on the calm sward; short haircap tufts on the moss; short heath with
+  heather (pink, violet) up the fell; a gorge floor's cool grass; wavy hair-grass in patches on the bare earth under the crowns
+  (lush, light against the dark earth). Woodland flowers in patches: white (wood anemone, chickweed wintergreen) most, twinflower
+  pink in the moss, cow-wheat yellow, a violet now and then; the season's bloom as the meadow's. The first 9 m north of the
+  Proving Grounds and the West Downs (a ragged line) BLEND: a share of the tufts falling off with depth keeps the meadow's rules
+  (its density, its flowers, the downs' tall and ankle grass), so the meadow does not stop on a line where the forest begins. ~390k
+  blades with the default seed (the meadows ~165k), drawn in 12 m chunks the view culls; built once at load (~1.5 s more in a
+  software-GL headless Chrome). `?grass=0` grows none.
+- **Seams** (2026-10-13, world/seams.js, called by world.js after each painter): the Proving Grounds' and the West Downs' painted ground
+  turn into the forest's over a 6 m band south of y 0 (and the Proving Grounds' into the downs' over 6 m east of x 0): the other
+  painter paints the band too, and its texels replace the near side's in clumps, all of them at the seam, none at the band's ragged
+  far edge. Only soft ground swaps (grass, earth, moss, banks, heath), so paths, water and stones keep their own edges. The mesa's
+  north drop (2.4 m, along y ~0.6) is terrain, not paint, and still runs nearly straight.
 
 ## Landforms: the home woods (2026-10-12)
 
@@ -135,6 +154,11 @@ Cost: seed 1337 places ~330 things (75 stumps, 22 logs, 10 windthrows, 29 agaric
 (flora's `o.cull`): ~20 draws in a forest view, none outside it. Each recipe is grown in 3 variants (its params tied to
 the variant: a patch of 3, 4 or 5 shrubs), turned and scaled per instance. Placed once at the world's build: no per-frame work.
 
+## The cave (2026-10-12)
+
+Every forest has a cave: its mouth a slot cut down into level ground in the home woods, its chambers and passages in a band of
+their own north of the forest. Growth keeps off the mouth and the ground in front of it. docs/CAVES.md.
+
 ## Chunk-friendly
 
 Everything is a pure function of the seed and the place (no Math.random, no DOM: node runs `forest.js` too, and the server checks
@@ -163,7 +187,7 @@ global features and would become per-region features then.
 
 - Instance the trees (one draw per species shape): the swaying trees cast into the per-frame sun shadow one draw each, which is
   most of what the forest costs on screen.
-- Grass blades in the clearings (features/grass.js has the West Downs' builder), fallen leaves on the forest floor (litter covers
+- Fallen leaves on the forest floor (litter covers
   the Proving Grounds' canvas only), mist over the lake at dawn, fish and frogs, birds perching in the forest's trees.
 - Paths: a trail from the arena's north gate to the lake.
 - The other biomes' forest painters (frost: snow under pines; ember: ash), if the forest stays in them.
