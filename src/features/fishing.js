@@ -366,6 +366,7 @@ export async function create(host) {
   const COL = {rod: '#c4bc7c', line: '#e8e4d8', red: '#d83a2a', white: '#f4f0e6', ring: '#d8ecf0', drop: '#e8f6fa', shade: '#0e1c20', glow: '#b8c8f0'};
   const P1 = {size: 1}, P2 = {size: 2}, P2A = {size: 2, alpha: .55}, P1A = {size: 1, alpha: .6}, P2E = {size: 2, emit: true}, P3A = {size: 3, alpha: .75};
   const PSP = {size: 2, alpha: .9};   // (the spots' bubbles: alpha follows the slot's fade in and out)
+  const PRL = []; for (let i = 1; i <= 8; i++) PRL.push({size: 1, alpha: i / 8});   // (the spots' ripples: alpha in 8 steps)
   // how present the spots are now (0..1): they fade in at the slot's start and out at its end (SPOT.fade s)
   const spotFade = () => { const t = clockNow() % SPOT.slot; return clamp(Math.min(t, SPOT.slot - t) / SPOT.fade, 0, 1); };
   // the fish's leap sprite: its icon with an outline (content/fishing.js catchIcon), a canvas each, made once
@@ -543,6 +544,11 @@ export async function create(host) {
         for (let i = 0; i < SPK.n; i++) {
           const sp = SP[i]; if (spent.has(sp.key)) continue;
           const h = host.elev(sp.x, sp.y) + .03, k0 = (sp.key % 97) * .37;
+          for (let w = 0; w < 2; w++) {   // two ripples always spreading out from it, one after the other
+            const k = (t * .45 + k0 + w * .5) % 1, rad = .2 + k * 1.1, a = Math.round(.85 * (1 - k) * fade * 8);
+            if (a < 1) continue;
+            for (let i = 0; i < 18; i++) { const an = i / 18 * Math.PI * 2; host.point(sp.x + Math.cos(an) * rad, sp.y + Math.sin(an) * rad * .8, h - .01, COL.ring, PRL[a - 1]); }
+          }
           for (let j = 0; j < 6; j++) {
             const ph = t * (.5 + .13 * j) + k0 + j * 1.7; if (Math.sin(ph * 3.1 + j) < -.2) continue;   // (a bubble pops, another comes)
             const r = .15 + .35 * ((j * .29 + k0) % 1);
