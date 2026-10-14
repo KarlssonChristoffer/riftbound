@@ -6,11 +6,14 @@
 // out TICK_HZ times a second.
 // It also owns THE CLOCK (in-game hours: everyone's day and night are the server's; clients follow it) and THE UNCANNY FOREST
 // (docs/UNCANNY.md): the secrets' states and who opened them, and the night elk (sim/uncanny.js: the same rules the game runs
-// offline), from the forest's uncanny plan (world/uncanny.js) when the server gives one.
+// offline), from the forest's uncanny plan (world/uncanny.js) when the server gives one. And FISHING's rolls (docs/FISHING.md):
+// what bites a cast, how big, when, from the set the player wears and the clock; a landed fish is told to everyone.
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
 //   const room = createRoom({seed, trees, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
-import {cleanSet} from '../src/content/gear.js';
+import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
+import {CATCHES, WATERS, roll, statsOf} from '../src/content/fishing.js';
+import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {mulberry32} from '../src/core/rng.js';
 
@@ -40,7 +43,7 @@ export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, d
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
-    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9,
+    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
       fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0};
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
       clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null}));
@@ -111,6 +114,37 @@ export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, d
     log(`  ${p.name} wears ${g.join(', ') || 'their own clothes'}`);
   }
 
+  // FISHING (docs/FISHING.md): a cast that fell on water asks what bites ({a: 'cast', n, x, y, w, deep, rain, perfect, lvl}); the
+  // server rolls it (content/fishing.js roll: the same rules the game runs offline) from the set he wears (its fish.* notes),
+  // his Fishing level (as the client says it: the save is his) and the clock's part of the day, and answers him alone
+  // ({a: 'bite', n, id, cm, kg, wait, nibbles, two}). The fight is the client's; a landed one ({a: 'land', n}) is told to
+  // everyone ({a: 'caught', id: who, name, c: the catch, cm, kg, two}); a lost one ({a: 'lost', n}) forgets the roll.
+  const fishRng = mulberry32((seed ^ 0xf15f) >>> 0), FISH_REACH = 20, FISH_WATERS = new Set(Object.values(WATERS));
+  const partOf = h => { h = ((h % 24) + 24) % 24; return h < 5.6 || h >= 20.3 ? 'night' : h < 7.2 ? 'dawn' : h < 18 ? 'day' : 'dusk'; };
+  function fish(p, m) {
+    const a = str(m.a, 8), n = num(m.n, -1), t = now();
+    if (a === 'cast') {
+      if (t - p.fishT < 500) return;   // (a flood: dropped; the client rolls it itself after a wait)
+      const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
+      if (!FISH_WATERS.has(w) || !(Math.hypot(x - p.x, y - p.y) < FISH_REACH)) return;
+      p.fishT = t;
+      const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = [];
+      for (const id of p.gear) for (const q of GEAR_BY_ID[id]?.mods || []) notes.push(q);
+      for (const q of SKILLS.fishing.per) notes.push(q.mul !== undefined ? {stat: q.stat, mul: 1 + q.mul * (lvl - 1)} : {stat: q.stat, add: (q.add || 0) * (lvl - 1)});
+      const st = statsOf(notes), rain = !!m.rain;
+      const r = roll(fishRng, {water: w, part: partOf(clock()), rain, deep: Math.max(0, Math.min(40, num(m.deep, 0))), luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0),
+        find: st['fish.find'], size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: !!m.perfect});
+      r.two = fishRng() < st['fish.double'];
+      p.fishN = n; p.fishR = r;
+      p.conn.send(encode({k: 'fish', a: 'bite', n, ...r}));
+    } else if (a === 'land') {
+      const r = p.fishR; if (!r || n !== p.fishN) return;
+      p.fishR = null;
+      all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: r.two});
+      log(`  ${p.name} caught a ${CATCHES[r.id].name}${CATCHES[r.id].find ? '' : ` (${r.cm} cm)`}`);
+    } else if (a === 'lost' && n === p.fishN) p.fishR = null;
+  }
+
   function connect(conn) {
     let p = null;
     conn.onmessage = text => {
@@ -119,6 +153,7 @@ export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, d
       if (m.k === 'st') state(p, m);
       else if (m.k === 'act') act(p, m);
       else if (m.k === 'gear') wear(p, m);
+      else if (m.k === 'fish') fish(p, m);
       else if (m.k === 'ping') conn.send(encode({k: 'pong', c: num(m.c), t: now()}));
     };
     conn.onclose = () => {

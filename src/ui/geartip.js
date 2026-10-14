@@ -10,6 +10,7 @@ import {SLOT_NAMES, KINDS, RARITY, MATERIALS, RULES, gearById, setStats} from '.
 import {FRAMES, uiUnit} from './pixelframe.js';
 import {loadPixelFont} from './pixelfont.js';
 import {gearIcon, slotIcon} from './gearicons.js';
+import {statWords} from '../content/fishing.js';
 
 const CSS = `
 #geartip { --u: 2px; position: fixed; left: 0; top: 0; z-index: 40; pointer-events: none; width: calc(128 * var(--u)); padding: calc(3 * var(--u)) calc(4 * var(--u));
@@ -44,7 +45,9 @@ export function doesOf(g) {
     else if (m.stat === 'light.lanternR') out.push(m.mul >= 1 ? `its light reaches ${pct(m.mul - 1)} further` : 'a smaller light');
     else if (m.stat === 'player.speed') out.push(`you move ${pct(m.mul - 1)} faster`);
     else if (m.stat === 'weapon.melee') out.push(`your blow (V) hits x${m.mul}`);
+    else { const w = statWords(m); if (w) out.push(w); }   // (fishing: content/fishing.js)
   }
+  if (g.slot === 'main' && g.kind === 'fishing') out.unshift('LMB on water: cast');
   return out;
 }
 // a modifier note as written: stat x mul / + add

@@ -109,6 +109,24 @@ export const EVENTS = {
   'equip.pick':         ['features/equip/sim.js', 'x, y, gadget, bought (you take a gadget: a pickup, or a stage cache for gold)', 'equip (view), audio'],
   // gear (features/gear.js, docs/GEAR.md): what the player wears changed (offline at once; in co-op when the server took it)
   'gear.wear':          ['features/gear.js',      'x, y, ids (the set worn now, content/gear.js SLOTS order), kg, armor, speed (its numbers: setStats)', '(none yet)'],
+  // fishing (features/fishing.js, docs/FISHING.md): the cast, the wait, the bite, the fight, the catch
+  'fish.cast':          ['features/fishing.js', 'x, y (him), tx, ty (where the bobber goes), perfect (let go at the top of the meter), k (the charge 0..1)', 'audio'],
+  'fish.plop':          ['features/fishing.js', 'x, y (the bobber lands on water)', 'fishing (view), audio'],
+  'fish.snag':          ['features/fishing.js', 'x, y (the cast fell on land: it comes back in)', 'audio'],
+  'fish.nibble':        ['features/fishing.js', 'x, y (a nibble dips the bobber: no strike yet)', 'fishing (view), audio'],
+  'fish.bite':          ['features/fishing.js', 'x, y (the bobber goes under: the hook window opens)', 'fishing (view), audio'],
+  'fish.early':         ['features/fishing.js', 'x, y (struck at a nibble: the fish is spooked, the wait grows)', 'audio'],
+  'fish.slip':          ['features/fishing.js', 'x, y (the hook window passed: it took the bait and let go)', 'audio'],
+  'fish.hook':          ['features/fishing.js', 'x, y, id (struck in time: the fight starts)', 'fishing (view), audio'],
+  'fish.tell':          ['features/fishing.js', 'x, y (the fish turns: a surge is coming)', 'fishing (view), audio'],
+  'fish.surge':         ['features/fishing.js', 'x, y (the fish thrashes: reeling now strains the line hard)', 'fishing (view), audio'],
+  'fish.reel':          ['features/fishing.js', 'x, y (a click of the reel while LMB is held)', 'audio'],
+  'fish.drag':          ['features/fishing.js', 'x, y (the fish takes line during a surge)', 'audio'],
+  'fish.snap':          ['features/fishing.js', 'x, y (the strain reached full: the line broke)', 'fishing (view), audio'],
+  'fish.escape':        ['features/fishing.js', 'x, y (the fish swam off: at the end of the line too long, or he walked off)', 'fishing (view), audio'],
+  'fish.leap':          ['features/fishing.js', 'x, y, id (reeled in: it leaps out of the water to him)', 'fishing (view), audio'],
+  'fish.catch':         ['features/fishing.js', 'x, y, id, cm, kg, n (2: a double), first, record, rarity (it is in the pouch)', 'fishing (view), audio'],
+  'fish.away':          ['features/fishing.js', 'x, y (the line comes in empty)', 'audio'],
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],

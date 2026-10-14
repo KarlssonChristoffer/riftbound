@@ -117,6 +117,7 @@ export const FLAG_DOCS = {
   bells: '1 | 0: bells and ricochet plates in the sandbox (features/bells.js, an experiment: steel plates bullets always glance off, hanging bells that ring, scattered round the Proving Grounds; off by default; the Game tab row and the Dev toggle remember on); docs/exp/bells.md',
   pack: '0: no pack (features/pack.js: the persistent world\'s bag, pouch and skills, their save, the Tab panel; docs/GATHERING.md)',
   woodcut: '0: no woodcutting (features/woodcut.js: 3 takes the axe out, LMB chops; trees fall, logs, stumps that grow back; the sandbox\'s ruins biome, a live loadout)',
+  fishing: '0: no fishing (features/fishing.js, docs/FISHING.md: a rod in the main hand, LMB on water casts; the bite, the reel, the catch; the sandbox\'s ruins biome)',
   campfires: '0: no campfires to build (features/campfires.js: the pack panel builds one from logs, E adds a log; the sandbox ruins biome)',
   uncanny: '1: the uncanny forest on (it is off by default; Esc > Game > World switches it, remembered), 0: off (features/uncanny.js, docs/UNCANNY.md: the night shift, the heron, the night elk, the secrets); dev: its places and creatures marked (pixel markers, a line from you to each, the HUD says what each is doing)',
   nshift: 'the night shift\'s strength (docs/UNCANNY.md): 1 default; 0 no tree or boulder walks; 2 twice as many walk, a little further. Co-op: the server\'s --nshift decides',

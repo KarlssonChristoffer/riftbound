@@ -1,10 +1,13 @@
-// ITEMS: everything the player can carry in the persistent world (docs/GATHERING.md). Pure data, imports nothing.
+// ITEMS: everything the player can carry in the persistent world (docs/GATHERING.md). Pure data; it imports only other content
+// (the catches: content/fishing.js, docs/FISHING.md).
 //   kind     'material': it goes in the POUCH (no limit, no slots) | 'tool' | 'food' | 'gear': it takes a BAG slot
 //   stack    (bag kinds) how many share one slot
 //   tool     {job, tier, power}: what it works ('chop'), how good a tool it is (a tree asks for a tier: content/woodcut.js),
 //            how much one blow does (before the skill's notes)
 //   icon     a 12 x 12 pixel picture: rows of palette letters ('.' clear); the outline is added round it when it's drawn
 //            (ui/packpanel.js), so only the fills are written here
+//   pal      (optional) the icon's own palette letters, over PAL's (the fish: content/fishing.js draws each its own colours)
+import {CATCHES, CATCH_IDS, catchIcon} from './fishing.js';
 // The run's perks (game/items.js: Risk of Rain stacking, augments) are something else: they live for one run only.
 export const PAL = {
   b: '#7a5232', l: '#9c6e44', d: '#56381f', e: '#dcbc84', r: '#a8824e',   // bark, its light and dark, end grain, a ring
@@ -35,6 +38,11 @@ export const ITEMS = {
     icon: ['.....ee.....', '....eddb....', '....ebbe....', '.....rr.....', '..lbbbbbbl..', '....bbbb....', '....bddb....', '....rbbr....',
       '....bbbb....', '...bb..bb...', '...b....b...', '..dd....dd..']},
 };
+// THE CATCHES (content/fishing.js): every fish and find is a material: it goes in the pouch
+for (const id of CATCH_IDS) {
+  const c = CATCHES[id], ic = catchIcon(id);
+  ITEMS[id] = {name: c.name, kind: 'material', col: c.find ? '#c8bca0' : '#a8d0e0', desc: c.desc, icon: ic.rows, pal: ic.pal, catch: true};
+}
 
 // the kit a new world starts with (the bag: tools, food; the pouch: materials)
 export const START_KIT = [['axe', 1]];

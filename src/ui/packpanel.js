@@ -39,13 +39,14 @@ const CSS = `
 #pack .p-build small { color: var(--dim); }`;
 
 const OUTLINE = '#1a120c';
-// an icon (12 x 12 rows of palette letters) -> a 14 x 14 data URL: its fills, then an outline in every clear pixel next to one
-function iconURL(rows) {
+// an icon (12 x 12 rows of palette letters; pal: its own letters over PAL's) -> a 14 x 14 data URL: its fills, then an outline in
+// every clear pixel next to one
+function iconURL(rows, pal = null) {
   const n = 14, c = document.createElement('canvas'); c.width = c.height = n;
   const q = c.getContext('2d'), filled = (x, y) => y >= 0 && y < rows.length && x >= 0 && x < rows[y].length && rows[y][x] !== '.';
   for (let y = -1; y <= rows.length; y++) for (let x = -1; x <= 12; x++) {
     const ch = filled(x, y) ? rows[y][x] : null;
-    if (ch) { q.fillStyle = PAL[ch] || '#f0f'; q.fillRect(x + 1, y + 1, 1, 1); }
+    if (ch) { q.fillStyle = pal?.[ch] || PAL[ch] || '#f0f'; q.fillRect(x + 1, y + 1, 1, 1); }
     else if (filled(x - 1, y) || filled(x + 1, y) || filled(x, y - 1) || filled(x, y + 1)) { q.fillStyle = OUTLINE; q.fillRect(x + 1, y + 1, 1, 1); }
   }
   return c.toDataURL();
@@ -55,7 +56,7 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, held
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const el = document.createElement('div'); el.id = 'pack'; el.className = 'hidden'; document.body.appendChild(el);
   const ICON = {};
-  const icon = id => ICON[id] ??= ITEMS[id]?.icon ? iconURL(ITEMS[id].icon) : '';
+  const icon = id => ICON[id] ??= ITEMS[id]?.icon ? iconURL(ITEMS[id].icon, ITEMS[id].pal) : '';
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
   let open = false, kInv = -1, kSk = -1, kHeld = -2, kN = -1, kT = 0;
   const costText = c => Object.entries(c).map(([id, n]) => `${n} ${ITEMS[id]?.name || id}`).join(', ');

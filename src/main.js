@@ -28,6 +28,7 @@
 //   F.shift?(dx, dy)            the player was moved as he was by (dx, dy) world m (host.warp: the cave's step in), right then:
 //                               move any eased state that follows him (a camera spring) along, so nothing swings after him
 //   F.onKey?(k, e) -> bool      consume a key (k = e.key lower-case)
+//   F.lmb?(down) -> bool        take LMB before the player does (core/input.js): true on the press takes it and its let-go
 //   F.onArrowHit?(a, prop) -> 'stop' | 'pierce'   F.onArrowStuck?(a)   F.ability?(slot) -> bool   F.interact?(prop) -> bool
 //   F.aimTarget?() -> {x, y, h, target} | null    F.hud?() -> string   F.settings?() -> [{label, get, set, options?}]
 //   F.biomeChanged?()           after a world rebuild (N); F.dispose?()
