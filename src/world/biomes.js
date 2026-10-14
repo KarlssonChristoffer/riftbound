@@ -36,6 +36,7 @@ import {flags} from '../core/flags.js';
 import {trackK, PROPS as WEST_PROPS, FOUNDATIONS, WALL_D} from './westland.js';   // the West Downs' ground (westRuins)
 import {paint as paintBrook} from './brook.js';   // (and their brook)
 import {paint as paintForestWater} from './forest.js';   // the seeded forest's stream, lake and outflow (forestRuins)
+import {slotFrame, slotHead, slotBrow} from './caves.js';   // the cave mouth's slot, in its own frame (forestRuins)
 
 // ============================================================ pixel toolkit
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
@@ -895,9 +896,47 @@ function forestRuins(q, ctx) {
   }
   meadowLip(K, S);
   paintForestWater(FO, K, S, {hsh, vn, hex, boulder});   // its stream, lake and outflow (world/forest.js)
+  // the cave's mouth (world/caves.js): its slot isn't drawn here (alpha 0: the ground shader drops it), nor the overhang's steep face
+  // over the slot's far end: world/cave3d.js draws the slot's copy and the cave on under the woods (its portal) in their place.
+  // A rock rim on the overhang's edge (an arch over the slot: caves.js slotBrow); the slot's shape is caves.js's (slotFrame: it wanders)
+  const CM = FO.cave?.mouth;
+  if (CM) {
+    const [bx0, by0, bx1, by1] = FO.cave.slot.reach, hw = CM.w / 2, i0 = Math.max(0, Math.floor((bx0 - X0) * PPM)), i1 = Math.min(WPX - 1, Math.ceil((bx1 - X0) * PPM)), SQ = [0, 0];
+    for (let y = Math.max(0, Math.floor((by0 - Y0) * PPM)); y <= Math.min(HPX - 1, Math.ceil((by1 - Y0) * PPM)); y++) for (let x = i0; x <= i1; x++) {
+      slotFrame(CM, X0 + (x + .5) / PPM, Y0 + (y + .5) / PPM, SQ);
+      const s = SQ[0], a = Math.abs(SQ[1]), sb = slotBrow(CM, Math.min(a, hw)) + .18;
+      if ((a < hw + .05 && s > slotHead(CM, a) - .1 && s < sb) || (a < hw + .4 && s > sb - .63 && s < sb)) G.c(x, y, 0);
+      else if (a < hw + .4 && s > sb - .63 && s < sb + .22) G.p(x, y, S.rock, hsh(x, y, 70) < .3 ? 2 : 3);
+    }
+  }
   q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
 }
 const FOREST_GROUND = {ruins: forestRuins};
+const BLACK = hex('#000000');
+// THE CAVE's floor (world/caves.js, world/cave3d.js): packed earth and grit in the dark, bare rock showing through in sheets, darker
+// and stonier toward the walls (d: m from the wall, < 0 in the open), loose stones; ctx.cave its plan, X0 / Y0 the canvas's origin
+function caveFloor(G, S, x, y, mx, my, d) {
+  if (d > .06) { if (d < .4 && hsh(x, y, 68) < 1.2 - d * 3) G.p(x, y, S.rock, 3); else G.c(x, y, BLACK); return; }   // (under the rock: its foot, darkest rock
+  // thinning out, then black, so the floor ends on the walls' line where a wall isn't drawn)
+  const n = fbm(mx * .32, my * .32, 61), w = d > -.3 ? 2 : d > -.75 ? 1 : 0, h = hsh(x, y, 62);
+  if (n + (vn(mx * 2.2, my * 2.2, 63) - .5) * .12 > .6 - w * .04) { G.p(x, y, S.rock, Math.min(3, (n > .7 ? 1 : 2) + (w > 1 ? 1 : 0))); return; }   // rock through the floor
+  if (h < .05 + w * .05) { G.p(x, y, S.rock, 1 + (hsh(x, y, 64) * 3 | 0)); return; }   // grit
+  const e = fbm(mx * 2.1, my * 2.1, 65) + (hsh(x, y, 67) - .5) * .08;   // (packed earth: fine mottling, two tones, the darkest only at the walls)
+  G.p(x, y, S.earth, Math.min(3, (e > .5 ? 1 : 2) + (w > 1 ? 1 : 0)));
+}
+function caveRuins(q, ctx) {
+  const S = STYLES.ruins, {PPM, WPX, HPX, X0, Y0, cave: C} = ctx, G = new Pix(WPX, HPX);
+  for (let y = 0; y < HPX; y++) { const my = Y0 + (y + .5) / PPM; for (let x = 0; x < WPX; x++) { const mx = X0 + (x + .5) / PPM; caveFloor(G, S, x, y, mx, my, C.inside(mx, my)); } }
+  // loose stones, more of them near the walls
+  for (let k = 0, n = Math.round(WPX * HPX / (PPM * PPM) * .5); k < n; k++) {
+    const mx = X0 + hsh(k, 1, 66) * WPX / PPM, my = Y0 + hsh(k, 2, 66) * HPX / PPM, d = C.inside(mx, my);
+    if (d > -.15 || (d < -1.2 && hsh(k, 3, 66) < .7)) continue;
+    const r = (.05 + hsh(k, 4, 66) * .1) * PPM;
+    G.blob((mx - X0) * PPM, (my - Y0) * PPM, r * 1.2, r, S.rock, {s: k, edge: .4});
+  }
+  q.putImageData(new ImageData(new Uint8ClampedArray(G.d.buffer), WPX, HPX), 0, 0);
+}
+const CAVE_GROUND = {ruins: caveRuins};
 
 // ---------------------------------------------------------------- RUINS ground
 function cliffRuins(K) { return mx => K.HM - 2.2 + (vn(mx * .3, .5, 91) - .5) * 1.3; }
@@ -2400,6 +2439,8 @@ function makeBiome(id) {
     paintWest: WEST_GROUND[id] ? (q, ctx) => WEST_GROUND[id](q, ctx, B) : null,
     // the seeded forest's ground (world/forest.js), a tile at a time (ctx.X0 / Y0: the tile's world origin); null: a stand-in
     paintForest: FOREST_GROUND[id] ? (q, ctx) => FOREST_GROUND[id](q, ctx, B) : null,
+    // the forest's cave's floor (world/cave3d.js; ctx.cave: its plan, world/caves.js); null: a plain stand-in
+    paintCave: CAVE_GROUND[id] ? (q, ctx) => CAVE_GROUND[id](q, ctx, B) : null,
     sprite(p, ctx) {
       // fast path: this prop's sprite at the current ground projection and state (breakable stage, open, facing)
       const sig = (p.stage | 0) * 4 + (p.opened ? 2 : 0) + (p.kind === 'brute' && faceLeft(p) ? 1 : 0) + (p.sconce ? 64 : 0) + (p.unlit ? 128 : 0) + (p.model ? 256 : 0) + (p.fx ? 512 : 0), hit = memo.get(p);

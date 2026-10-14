@@ -20,6 +20,7 @@ export const EVENTS = {
   'player.splash':      ['sim/player/player.js',  'x, y, small? (his legs in the water: a leap that came up short caught the far bank)', 'atmos, flow, wildlife, audio'],
   'player.stroke':      ['sim/player/player.js',  'x, y, z (the water\'s surface), pace (m/s through the water), vx?, vy? (his way), big? (a kick: Space), tread? (treading water) (swimming: each half stroke)', 'wading, audio'],
   'player.roll':        ['(reserved: not emitted yet)', 'x, y', 'atmos (frost puff)'],
+  'player.warp':        ['features/caves.js',     'x, y (where he is now), dx, dy (how far he was moved: the cave\'s mouth in the woods <-> its copy over the cave), down (true: into the cave)', '(none yet)'],
   // thrown by a blast (sim/player/launch.js, a live loadout): flying, into a wall, down, up
   'player.launch':      ['sim/player/launch.js',  'x, y, vx, vy (m/s along the ground), up (m/s)', '(none yet: view/herorag.js follows P.state)'],
   'player.slam':        ['sim/player/launch.js',  'x, y, vx, vy (his speed into what stopped him), speed (m/s)', 'combat (hitstop, grit), audio'],

@@ -51,8 +51,9 @@ import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
 import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
-import {TOWER_PLAN, FOREST, HUT} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one)
-import {sample as forestSample, depth as forestDepth, joinRiver, COURSE_KS, courseSpeed, courseDepth} from './forest.js';
+import {TOWER_PLAN, FOREST, HUT, CAVE} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
+import {sample as forestSample, depth as forestDepth, joinRiver, COURSE_KS, courseSpeed, courseDepth, RECT as FOREST_RECT} from './forest.js';
+import {buildCave} from './cave3d.js';   // the forest's cave: its floor and walls in the band north of the forest (docs/CAVES.md)
 import {stepsOf} from './terrain.js';
 import {waterBed} from './waterbed.js';
 import {BROOK, sample as brookSample, depth as brookDepth, fallOff as brookFallOff, inBrookPool} from './brook.js';   // the West Downs' brook
@@ -639,8 +640,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // seam), its own patch, culled on its own; a tile with water gets its water texture (its stream, lake, outflow: bakeWater over the
   // tile's part of the water's box). A biome without a painter: the open land's stand-in. Chunk-friendly: a tile needs only its place
   const FT = 32, FM = 1, forestTiles = [];
+  let cave = null;   // the forest's cave (cave3d.js: built with the cliffs, below)
   if (FOREST) {
-    const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = WORLD.y0 - RG, fz1 = GROUNDS.y0;
+    const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = FOREST_RECT.y0 - RG, fz1 = GROUNDS.y0;   // (the forest's own north edge: the cave's band past it draws itself, cave3d.js)
     const ctxF = {PPM, ground: groundDrawn(), forest: FOREST, layout};
     for (let z0 = fz0; z0 < fz1 - 1e-6; z0 += FT) for (let x0 = fx0; x0 < fx1 - 1e-6; x0 += FT) {
       const x1 = Math.min(fx1, x0 + FT), z1 = Math.min(fz1, z0 + FT), T = {x0, z0, x1, z1, canvas: null, px: null, cx0: x0 - FM, cz0: z0 - FM};
@@ -732,7 +734,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // CAST_SINK m, goes into the cached sun shadow and the point lights' height map: a hill throws its shadow over what lies
   // behind it at a low sun, flat ground never reaches the ground it stands for
   const CAST_SINK = .15;
-  const caster = geo => { const g = geo.clone(), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) - CAST_SINK); p.needsUpdate = true;
+  // (over the cave's PORTAL, world/caves.js C.inPortal: the overhang casts nothing, sunk under the cave's floor, so daylight and the
+  // lantern reach the cave's first stretch under it, as they do in the band past the step)
+  const CVP = CAVE && TERRAIN_ON ? CAVE : null, cvM = CVP?.mouth, cvF = CVP && [cvM.x + cvM.ux * cvM.len, cvM.y + cvM.uy * cvM.len];
+  const overPortal = (x, z) => CVP && Math.abs(x - cvF[0]) < CVP.portalR + .5 && Math.abs(z - cvF[1]) < CVP.portalR + .5 && CVP.inPortal(x + CVP.off[0], z + CVP.off[1], CVP.copy.brow - .3) && CVP.inside(x + CVP.off[0], z + CVP.off[1]) < .3;
+  const caster = geo => { const g = geo.clone(), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, overPortal(p.getX(i), p.getZ(i)) ? CVP.floor(p.getX(i) + CVP.off[0], p.getZ(i) + CVP.off[1]) - 1 : p.getY(i) - CAST_SINK); p.needsUpdate = true;
     const s = G.surface(g, {tex: gTex, planar: true, world: world2, type: 1, obj: 0}, true); s.gm.visible = false; disposers.push(() => { s.dispose(); g.dispose(); }); };
   if (TERRAIN_ON) caster(gGeo);
   if (WD) {   // the West Downs' patch (above)
@@ -912,8 +918,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         const W = FOREST.canyon.wall, foot = (x, z) => Math.min(elev(x + .35, z), elev(x - .35, z), elev(x, z + .35), elev(x, z - .35));
         let lo = 1e9; for (const [x, z] of W) lo = Math.min(lo, foot(x, z));
         terrRuns.push({pts: W, top: (x, z) => Math.max(TF.H(x + .55, z), TF.H(x - .55, z), TF.H(x, z + .55), TF.H(x, z - .55)), bot: foot, minBot: lo - .05,
-          base: 0, relief: .9, talus: true, avoid: avoidT, lip, seed: 151});
+          base: 0, relief: 1.2, massive: true, talus: true, avoid: avoidT, lip, seed: 151});   // (massive: weathered bedrock, cliffs3d.js)
       }
+      // (the cave's MOUTH has no rock of its own here: its slot's walls are the copy's in the band, drawn here too: world/cave3d.js's
+      // portal, so the slot he walks down is the same one before and after the step)
       // the creek's last step (layout.js CASCADES): a low rock rim along the pool's north edge, under the lip (the fall's sheet in its gap)
       if (CASCADES.length) {
         const F = CASCADES.at(-1), y = POOL.clip - .03;
@@ -924,6 +932,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const tg = terrRuns.length ? cliffGeometry(terrRuns, {...o, ladders: [], bridges: BRIDGES.filter(b => !b.stone), stairs}) : null;   // (+ the footbridges, the stone steps; the brook's stone bridge and stones: below)
       if (tg) { const m = G.mesh(tg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); tg.dispose(); }); }
     }
+    if (CAVE && TERRAIN_ON) cave = buildCave({G, THREE, C: CAVE, biome, PPM, fam: famOf, texOf, elev, field: TF, disposers, cover: lip ? o.cover : null});   // the cave below (cave3d.js)
     const pg = cliffGeometry(plateauRuns, o);
     if (pg) { const m = G.mesh(pg, 1, new THREE.Matrix4(), {static: true}); disposers.push(() => { m.dispose(); pg.dispose(); }); }
     // the ravine: along its edge line (the ground's own steep cells draw only the waterfall: the cliff texture's alpha, above),
@@ -1185,8 +1194,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       CV[k] = x1 > -CHUNK_M && x0 < VW + CHUNK_M && y1 > -CHUNK_M && y0 < VH + CHUNK_M ? 2 : x1 > -CHUNK_SM && x0 < VW + CHUNK_SM && y1 > -CHUNK_SM && y0 < VH + CHUNK_SM ? 1 : 0;
     }
   }
-  function update(yaw) {
+  function update(yaw, pl) {
     if (litterDirty) bakeNow();
+    cave?.update(yaw, pl);   // (pl: the player, world x / y: the cave's slot walls)
     clearArray(lights); for (const l of groundL) lights.push(l);
     const k0 = -Math.round(yaw / step);
     if (CV) chunksOnScreen();
@@ -1257,6 +1267,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   litterDirty = true;   // (the first bake: the trees are all here)
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
     setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, floraCount, flora, haveGlb, groundCanvas: gc, westCanvas, trees3d,
+    cave: CAVE,   // the forest's cave's plan (world/caves.js; null: none): features/caves.js
     itemOf: p => byProp.get(p) || null,
     // a forest prop whose chunk is off the view this frame (the last update's: world/forest.js chunks): per-frame passes over the items
     // skip it (features/contact.js)

@@ -48,7 +48,7 @@ export async function create(host) {
   const RN = TUNE.rain.max, rX = new Float32Array(RN), rY = new Float32Array(RN), rH = new Float32Array(RN), rV = new Float32Array(RN); let rn = 0;
   const SN = TUNE.snow.max, sX = new Float32Array(SN), sY = new Float32Array(SN), sH = new Float32Array(SN), sV = new Float32Array(SN), sP = new Float32Array(SN); let sn = 0;
   const PN = TUNE.splash.max, pX = new Float32Array(PN), pY = new Float32Array(PN), pH = new Float32Array(PN), pT = new Float32Array(PN), pK = new Uint8Array(PN); let pn = 0;
-  let T = 0, drops = 0;
+  let T = 0, drops = 0, caves = null, open = 1;   // open: 1 - how far underground he is (features/caves.js: no weather in the cave)
   const WV = {x: 0, y: 0, g: 0}, CALM = {x: 0, y: 0, g: 0};   // the wind at the view (wind.at fills WV: no allocation)
   const V = {RX: 1, RY: 0, FX: 0, FY: 1, cx: 0, cy: 0, hw: 8, hh: 6};
   function view() {   // the view's ground centre / half extents (view-frame m) and the screen's axes on the ground
@@ -132,14 +132,15 @@ export async function create(host) {
       for (let i = 0; i < 9; i++) MX[i] = a[i] + (b[i] - a[i]) * k;
       G.setSeason(MX);
     }
-    GR.tinted = E.tinted; GR.snow = E.snowCover; GR.wet = E.wet; GR.leafK = E.leafK; GR.autumn = E.autumn || 0; G.setGround(GR);
+    GR.tinted = E.tinted; GR.snow = E.snowCover * open; GR.wet = E.wet * open; GR.leafK = E.leafK; GR.autumn = E.autumn || 0; G.setGround(GR);
   }
 
   F.view = dt => {   // (the weather's state is the world clock's, sim/env.js: this is how it looks)
     const t0 = performance.now(), E = host.env, w = host.wind; T += dt;
     if (!E) return;
     view();
-    const S = E.sky, area = Math.min(1.6, V.hw * V.hh / 70);   // a zoomed-in view needs fewer drops
+    caves ??= host.feature('caves') || false; open = caves ? 1 - caves.under : 1;
+    const S = E.sky, area = Math.min(1.6, V.hw * V.hh / 70) * open;   // a zoomed-in view needs fewer drops (underground: none)
     frontCover(E);
     // rain: the pool grows / shrinks toward what the sky asks for (a front: the share of the view it rains on). Capped at the
     // pool's size: a wide view's area (up to 1.6) asks for more, and a drop past the arrays' end was NaN (G.line / G.point)
@@ -170,7 +171,7 @@ export async function create(host) {
       if (pT[i] > (pK[i] ? TUNE.splash.ring : TUNE.splash.life)) { pn--; pX[i] = pX[pn]; pY[i] = pY[pn]; pH[i] = pH[pn]; pT[i] = pT[pn]; pK[i] = pK[pn]; }
     }
     // storms
-    if (S.storm > .35 && F.fx) { if ((nextStrike -= dt * S.storm) <= 0) { nextStrike = rr(...TUNE.bolt.every); strike(w); } }
+    if (S.storm > .35 && F.fx && open > .5) { if ((nextStrike -= dt * S.storm) <= 0) { nextStrike = rr(...TUNE.bolt.every); strike(w); } }
     else nextStrike = Math.max(nextStrike, 2);
     if (flashT >= 0) flashT += dt;
     if (bolt.t >= 0) { bolt.t += dt; if (bolt.t > TUNE.bolt.life) bolt.t = -1; }
@@ -189,7 +190,7 @@ export async function create(host) {
       if (i >= PULSES.length - 1) flashT = -1; else { const [t0, a0] = PULSES[i], [t1, a1] = PULSES[i + 1]; fk = (a0 + (a1 - a0) * (flashT - t0) / (t1 - t0)) * flashK; }
     }
     const M = host.mood, lum = M ? M.amb[0] * .3 + M.amb[1] * .55 + M.amb[2] * .15 : 1, fs = TUNE.flash.day + (TUNE.flash.night - TUNE.flash.day) * clamp(1 - lum, 0, 1);
-    G.setFlash(TUNE.flash.c[0] * fk * fs, TUNE.flash.c[1] * fk * fs, TUNE.flash.c[2] * fk * fs);
+    fk *= open; G.setFlash(TUNE.flash.c[0] * fk * fs, TUNE.flash.c[1] * fk * fs, TUNE.flash.c[2] * fk * fs);
     light.intensity = bolt.t >= 0 ? TUNE.bolt.light.intensity * (1 - bolt.t / TUNE.bolt.life) : 0;
     if (!F.fx) return;
     // rain: a short streak along the drop's motion (the wind slants it), two tones

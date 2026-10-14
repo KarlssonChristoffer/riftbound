@@ -279,6 +279,13 @@ export async function create(host) {
     tick(t0);
     return {x: C.outX - TX, y: C.outY - TY};
   }
+  // F.shift: he was moved by (dx, dy) world m as he was (features/caves.js, host.warp), right then: the mirrored ease, the spring and its output go
+  // along, so the view doesn't swing after him (the spring's state is in the view frame's px, the mirror in world m)
+  function warpCam(dx, dy) {
+    const yaw = host.yaw, cy = Math.cos(yaw), sy = Math.sin(yaw), ax = (dx * cy - dy * sy) * PPM, ay = (dx * sy + dy * cy) * PPMY;
+    Tm.x += dx; Tm.z += dy; if (C.lw) { C.lw[0] += dx; C.lw[1] += dy; }
+    C.x += ax; C.y += ay; C.outX += ax; C.outY += ay;
+  }
   function kick(ux, uy, px) { const v = punchV(px); C.pvx -= ux * v; C.pvy -= uy * v; }   // camera goes AGAINST (ux, uy)
   function gunKick(wx, wy, px) {   // a shot's way on the ground (world, unit) -> the view frame's px direction, then the kick
     const v = toVF(wx, wy), vx = v[0] * PPM, vy = v[1] * PPMY, l = Math.hypot(vx, vy);
@@ -807,7 +814,7 @@ export async function create(host) {
     },
     biomeChanged() { levels.clear(); setBiome(host.biome.id); level(0); },   // (a rebuilt world: new ground texture; the ground layer made now, behind the loading screen)
     resize(w, h) { VW = w; VH = h; if (EC) { EC.width = w; EC.height = h; ecq.imageSmoothingEnabled = false; } },   // the view changed size (main.js fit)
-    view: update, camera, frame, lights, stamp,   // (not ambient: its streaks / tracks follow the player's frozen speed)
+    view: update, camera, shift: warpCam, frame, lights, stamp,   // (not ambient: its streaks / tracks follow the player's frozen speed)
     hud: () => '',
     // debugging / tests
     C, Tm, count: () => ({decals: decals.length, particles: ps.length, embers: gEmb.length, ghosts: GH.list.length, dirty: dirty.length, levels: levels.size}),

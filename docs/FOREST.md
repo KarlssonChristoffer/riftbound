@@ -7,7 +7,8 @@ no forest).
 ## What it is
 
 - **Where.** x -48..72 (the world's width: under the West Downs, the Proving Grounds and the mesa), y -160..0: 120 x 160 m (y -64..0
-  until the high country), more than the rest of the world together. The world grows north to it (`WORLD.y0` = -160); the old north bank, the West Downs' north
+  until the high country), more than the rest of the world together. The world grows north to it (`WORLD.y0` = -160, and on over its
+  cave's band to -242: docs/CAVES.md); the old north bank, the West Downs' north
   bank and the highland behind the mesa give way to it; a bank of its own frames its north and west edges. You walk in from the
   strip north of the arena (its north gate), from the West Downs and from the trail.
 - **Ground.** Rolling relief (value noise, up to ~3.2 m, faded flat over its southern 12 m so it meets the Proving Grounds level,
@@ -137,6 +138,11 @@ Cost: seed 1337 places ~330 things (75 stumps, 22 logs, 10 windthrows, 29 agaric
 ~280k triangles, 22 variants (only stumps, logs and windthrows cast shadows). Grouped by 32 m cells, each group culled as a whole
 (flora's `o.cull`): ~20 draws in a forest view, none outside it. Each recipe is grown in 3 variants (its params tied to
 the variant: a patch of 3, 4 or 5 shrubs), turned and scaled per instance. Placed once at the world's build: no per-frame work.
+
+## The cave (2026-10-12)
+
+Every forest has a cave: its mouth a slot cut down into level ground in the home woods, its chambers and passages in a band of
+their own north of the forest. Growth keeps off the mouth and the ground in front of it. docs/CAVES.md.
 
 ## Chunk-friendly
 

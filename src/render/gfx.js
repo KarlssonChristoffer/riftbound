@@ -1184,16 +1184,21 @@ float sunShadow(vec3 P, vec3 N, float bias) {
 // 1 when something solid stands between S and the light: march the height map (about one texel, 7 cm, per step across
 // the ground, so a shadow edge cast over a long way stays a clean line), stopping 0.25 m short of the light, so a flame
 // on a wall top or in a bracket isn't blocked by its own mount. A wall stops a torch behind it.
-float ptBlock(vec3 S, vec3 L) {
+// A rough rock face (a cave wall, a cliff) sits under its own ledges in a map seen from above: the samples that start
+// under the point's own roof are skipped (for up to lead metres across, then they count), so the face isn't striped by
+// itself while a wall between it and the light still stops it.
+float ptBlock(vec3 S, vec3 L, float lead) {
   vec3 d = L - S; float len = length(d), end = len - .25;
   if (end < .15) return 0.;
   float f = end / len, n = min(128., max(ceil(length(d.xz) * f / .07), ceil(end / .3)));
   vec3 a = (uHPV * vec4(S, 1.)).xyz * .5 + .5, b = (uHPV * vec4(S + d * f, 1.)).xyz * .5 + .5;
+  float lt = lead / max(length(d.xz) * f, 1e-3); bool under = lead > 0.;
   for (int k = 1; k <= 128; k++) {
     float t = float(k) / n; if (t > 1.) break;
     vec3 c = mix(a, b, t);
     if (c.x < 0. || c.y < 0. || c.x > 1. || c.y > 1.) continue;
-    if (c.z - uHBias > texture(tH, c.xy).r) return 1.;
+    if (c.z - uHBias > texture(tH, c.xy).r) { if (!under || t > lt) return 1.; }
+    else under = false;
   }
   return 0.;
 }
@@ -1380,7 +1385,7 @@ void main() {
     if (shaped && uLC[i].w < .5) shape = clamp(((dot(N, normalize(lp - P)) + .25) / 1.25) / .55, 0., 1.8);
     vec3 li = uLC[i].rgb * f * shape;
     // blocked by a wall / prop between (the character as one object, from its chest, like the sun shadow)
-    if (uPtShadow > 0. && max(li.r, max(li.g, li.b)) > .004) li *= 1. - uPtShadow * ptBlock(type == 4 ? uPlayer : P + N * .1, lp);
+    if (uPtShadow > 0. && max(li.r, max(li.g, li.b)) > .004) li *= 1. - uPtShadow * ptBlock(type == 4 ? uPlayer : P + N * .1, lp, type == 4 ? 0. : .9 * (1. - abs(N.y)));   // (lead: a steep face's own ledges)
     pts += li;
   }
   vec3 e = amb, L = e + pts;
@@ -1625,6 +1630,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     // rain puddles (setPuddles, setPuddleLook: features/puddles.js): see SURF_FS
     pud: {value: null}, pudR: {value: new THREE.Vector4(0, 0, 1, 1)}, pudK: {value: new THREE.Vector4()}, pudSky: {value: new THREE.Vector3(.5, .55, .6)},
     cut: {value: new THREE.Vector4()}, cutB: {value: new THREE.Vector4()}, cutM: {value: new THREE.Vector4()}, cutP: {value: new THREE.Vector4()},   // the cutaway (render/cut.js; setCut, cutFrame in render())
+    sinkP: {value: new THREE.Vector4()}, sinkK: {value: new THREE.Vector4()},   // the cave's sink (render/cut.js SINK; setSink)
   };
   const raw = (vs, fs, uniforms, extra = {}) => {
     const m = new THREE.RawShaderMaterial({vertexShader: vs, fragmentShader: fs, uniforms, glslVersion: THREE.GLSL3, ...extra});
@@ -1890,7 +1896,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   // B.autumn, [s1..s4] x ['#hi', '#base', '#shade']): its leaves turn, spray by spray, with U.autumn (core/autumn.js)
   function mesh(geom, obj, matrix, o = {}) {
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
-    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
+    const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); if (o.keep) gm.material.uniforms.uSinkKeep.value = 1; gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
       uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed, uSprayM: gm.material.uniforms.uSprayM, uSprayFix: gm.material.uniforms.uSprayFix}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1);
@@ -1946,7 +1952,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   }
   const M3 = [0, 1, 2, 4, 5, 6, 8, 9, 10];
   function surface(geom, opts, castShadow = true) {
-    const gm = new THREE.Mesh(geom, surfMat(opts)); gScene.add(gm);
+    const gm = new THREE.Mesh(geom, surfMat(opts)); if (opts.keep) gm.material.uniforms.uSinkKeep.value = 1; gScene.add(gm);
     let sm = null;
     if (castShadow) { sm = new THREE.Mesh(geom, shadowMeshMat); sm.layers.enable(1); if (STATIC_SHADOW) { sm.layers.enable(2); sm.layers.disable(0); } (STATIC_SHADOW ? sStatic : sScene).add(sm); hDirty = true; staticSoon(0); }
     return {gm, sm, dispose() { gScene.remove(gm); if (sm) { sm.parent?.remove(sm); hDirty = true; staticSoon(0); } gm.material.dispose(); }};
@@ -2469,6 +2475,10 @@ void main() {
   const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}, uVgP: {value: 0}}, vgScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
   vgScene.matrixAutoUpdate = false;
+  // SINK (render/cut.js; features/caves.js): the surface crumbling away round him as he goes down into the cave. setSink(null): off;
+  // setSink(x, z, reach, box) (his world x, z; m; box {x0, y0, x1, y1}: kept), each frame it shows. A mesh / surface made with
+  // {keep: true} never sinks (the cave's)
+  function setSink(x, z, reach, box) { if (reach === null) { U.sinkP.value.w = 0; return; } U.sinkP.value.set(x, z, reach, 1); U.sinkK.value.set(box.x0, box.y0, box.x1, box.y1); }
   let vgFrame = -1;
   // {va, ha (0 = no haze), v: [r, g, b], h: [r, g, b] (0..255)}: shown on the next render (atmos.js sets it from F.hd, after this one)
   function setVignette(o) {
@@ -2930,7 +2940,7 @@ void main() {
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
-    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub,
+    fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setPuddles, setPuddleLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
