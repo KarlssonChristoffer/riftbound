@@ -755,6 +755,7 @@ export async function create(host) {
     const z = V.z, fp = footprint(0, FPA), fb = footprint(TUNE.refl.bed, FPB), S = host.layout.stream;
     const streamIn = WA.mask && Math.max(fp.x1, fb.x1) > WA.x0 && Math.min(fp.x0, fb.x0) < WA.x1 && Math.min(fp.y0, fb.y0) < WA.yEnd;
     const BK = biome === 'ruins' ? host.layout.brook : null, brookIn = !!BK && fp.x1 > BK.box[0] && fp.x0 < BK.box[2] && fp.y1 > BK.box[1] && Math.min(fp.y0, fb.y0) < BK.box[3];   // (the West Downs' brook mirrors too: world/brook.js)
+    const FW = biome === 'ruins' ? host.layout.forest?.box : null, forestIn = !!FW && Math.max(fp.x1, fb.x1) > FW[0] && Math.min(fp.x0, fb.x0) < FW[2] && Math.max(fp.y1, fb.y1) > FW[1] - 3 && Math.min(fp.y0, fb.y0) < FW[3];   // (the forest's lake and streams: world/forest.js; its trees mirror in them)
     // puddles on the floor first (their colours follow the sky; re-rasterised when the yaw / zoom / time changes)
     const tn = timeName(), pk = Math.round(V.yaw / (.5 * DEG)) + '|' + tn, vis = [];
     for (const u of WA.puddles) {
@@ -764,7 +765,7 @@ export async function create(host) {
       u.X = Math.round(sx - u.W0 * z / 2) - u.mx * z; u.Y = Math.round(sy - u.H0 * z / 2) - u.my * z;
       vis.push(u);
     }
-    if (!streamIn && !brookIn && !vis.length) return;
+    if (!streamIn && !brookIn && !vis.length && !forestIn) return;
     const g = host.glayer('ground');   // (the GPU draws them: G.glayer)
     g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over';
     if (vis.length) {   // (at the puddles' own alpha: gfx.js COMP_FS reads it as "a puddle here" and mirrors what stands over it)
@@ -779,7 +780,7 @@ export async function create(host) {
     // the water's albedo before the light, flames glowing in it at glowDim), but every prop, card, tree and the Ranger, as
     // they stand in 3D; the props near the water were mirrored here as painted sprites, ~5% of the frame's JS
     if (!TUNE.refl.on) return;
-    const R = RFL, t = WATER[biome]?.tint || '#33556a', c = rgb(t);
+    const R = RFL, t = (forestIn && !streamIn && WATER[biome]?.lake) || WATER[biome]?.tint || '#33556a', c = rgb(t);   // (the forest's lake: darker water, a darker mirror)
     R.tint[0] = c[0] / 255; R.tint[1] = c[1] / 255; R.tint[2] = c[2] / 255;
     R.tintK = TUNE.refl.tint; R.alpha = TUNE.refl.alpha; R.glow = 1 - TUNE.refl.glowDim; R.S = Math.abs(V.hy); R.ripple = TUNE.refl.ripple;
     R.gust = gustNow(); R.t = T; R.oy = V.oy; R.zoom = z; R.reach = Math.min(512, Math.ceil(2 * (TUNE.refl.height - TUNE.refl.bed) * R.S));

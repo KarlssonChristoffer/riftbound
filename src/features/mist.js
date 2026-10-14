@@ -24,7 +24,7 @@
 // as its dark slate rain haze, in a sun gap as the sun's. One light: as before (env.sky's amounts, host.mood's colour), bit for bit.
 // SHOW ONLY: nothing here changes how the game plays. ?mist=0 starts off (the old screen-space haze: an A/B); F.toggle().
 // OWNS: its TUNE, the drift, the water's stretches (rebuilt when the world is). READS: host.env (hour, sky, lightSides, moodFor), host.mood, host.biome,
-// host.layout (stream, pool, outflow, rill, brook), host.world (waterH), host.elev, host.wind (at), host.G (view, setMist).
+// host.layout (stream, pool, outflow, rill, brook, the forest's lake), host.world (waterH), host.elev, host.wind (at), host.G (view, setMist).
 // WRITES: G.setMist, every frame it shows (gfx.js owns the uniforms; lighting.js keeps uFog).
 // THE MEDIUM: F.medium (0..1, this frame) and G.mist.medium: how thick the air is overall, for light through it (god rays); in
 // COMP_FS, mistAt(P) is the local density (the medium, more inside the mist). F.at(x, y, h) -> the mist's veil there on the CPU
@@ -164,7 +164,7 @@ export async function create(host) {
       }
     };
     pass(H, A, 1, 0, true); pass(A, B, 0, 1, true); pass(B, A, 1, 0, false); pass(A, B, 0, 1, false);
-    const data = new Float32Array(n * 4);
+    const data = new Float32Array(n * 4), FL = host.layout?.forest, FLk = FL?.lake, fwh = FLk ? FLk.bed + (host.world?.waterH ?? -.18) : 0;
     for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
       const k = j * w + i, x = x0 + i * res, y = z0 + j * res;
       let near = 0, wh = -9;   // the nearest water stretch (the West Downs' hollow stretches left out: they are pools now)
@@ -174,7 +174,14 @@ export async function create(host) {
         const t = clamp((px * bx + pz * bz) / Math.max(bx * bx + bz * bz, 1e-4), 0, 1), d = Math.hypot(px - bx * t, pz - bz * t) - SEG[q + 4];
         const f = 1 - smooth(clamp(d / V.reach, 0, 1)); if (f > near) { near = f; wh = SEG[q + 5]; }
       }
-      data[k * 4] = H[k]; data[k * 4 + 1] = Math.max(0, B[k] - H[k]); data[k * 4 + 2] = near; data[k * 4 + 3] = wh;
+      let hol = Math.max(0, B[k] - H[k]);
+      // the forest's lake (world/forest.js): water, not a hollow (its basin would hold a veil over it all day); the mist rises off it by
+      // the clock as it does off the stream, over its bays (lakeEdge: m to its shore, + in the water) and V.reach of its strand
+      if (FLk && Math.abs(x - FLk.x) < FLk.rx + V.reach + 1 && Math.abs(y - FLk.y) < FLk.ry + V.reach + 1) {
+        const e = FL.lakeEdge(x, y), f = 1 - smooth(clamp(-e / V.reach, 0, 1));
+        if (e > 0) hol = 0; if (f > near) { near = f; wh = fwh; }
+      }
+      data[k * 4] = H[k]; data[k * 4 + 1] = hol; data[k * 4 + 2] = near; data[k * 4 + 3] = wh;
     }
     G.mistField({x0, z0, w, h, res, data});
   }

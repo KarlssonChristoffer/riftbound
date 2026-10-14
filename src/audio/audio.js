@@ -311,7 +311,8 @@ function surface(E, v, dt, surf, k = .6) {
 const offK = o => { const S = SPATIAL.combat, off = Math.max(0, +o.off || 0); return off > S.cullOff ? 0 : Math.pow(10, -S.fadeDbPerM * off / 20); };
 const SFX = {
   // ---------------- player ----------------
-  step(E, o) {   // o.surf, o.k weight (walk .25 .. sprint 1, plant 1.3)
+  step(E, o) {   // o.surf, o.k weight (walk .25 .. sprint 1, plant 1.3); o.water: a foot in a puddle / the shallows (a splash instead)
+    if (o.water) { SFX.splash(E, {...o, small: true, g: (o.g ?? 1) * (.35 + .3 * (o.k ?? .6))}); return; }
     const v = E.voice({...o, g: (o.g ?? 1) * .75}, 'step', .2, {cd: .06}); if (!v) return;
     const k = o.k ?? .6;
     E.O(v, 0, {f: 95, f2: 52, sw: .04, a: .002, d: .05 + k * .02, g: .2 + .12 * k});
@@ -894,6 +895,7 @@ export function createAudio(ctx, host = {}) {
   let nZones = 0, nTraps = 0, canyonOn = false, revBiome = null, revDb = 0;
   const callSt = {};   // desertCalls' timers
   // the desert's ground under a foot (DESERT_STEP: the synth's surface + the forge's footstep case), else o as it is
+  const wadeAt = (x, y) => (ctx.wade?.(x, y) || 0) > .05;   // a foot in a puddle or the forest's shallows (features/wading.js F.wet)
   const grounded = (biome, x, y, o) => { if (biome !== 'desert') return o; const g = DESERT_STEP[ctx.ground?.(x, y)]; if (g) Object.assign(o, g); return o; };
   // settings (pause menu > Sound): slider values 0..1, mapped to gain as v² (perceptually even steps)
   const VOL = {master: 1, music: 1, sfx: 1, amb: 1}, MODES = {adaptive: null, explore: .3, combat: .85};
@@ -1105,7 +1107,7 @@ export function createAudio(ctx, host = {}) {
     const st = pl.state, landed = st === 'land' && prevState !== 'land';
     const bigDrop = events.some(e => e.type === 'player.land' && e.big === 3), speed = Math.hypot(pl.vx || 0, pl.vy || 0);
     if (landed) fire('land', pl.x, pl.y, grounded(pl.biome, pl.x, pl.y, {surf, big: bigDrop ? 1 : 0}));
-    if (st === 'roll' && prevState !== 'roll') fire('roll', pl.x, pl.y, grounded(pl.biome, pl.x, pl.y, {surf}));
+    if (st === 'roll' && prevState !== 'roll') { fire('roll', pl.x, pl.y, grounded(pl.biome, pl.x, pl.y, {surf})); if (wadeAt(pl.x, pl.y)) fire('splash', pl.x, pl.y, {surf, gainDb: -7}); }   // (rolling into water: a body's splash, a little down)
     if (st === 'climb') { climbT -= dt; if (climbT <= 0) { fire('climb', pl.x, pl.y, {surf}); climbT = RR(.26, .34); } }
     else if (prevState === 'climb') { fire('climb', pl.x, pl.y, {surf, big: 1}); climbT = 0; }
     // the draw creak: while the string is held back
@@ -1119,11 +1121,12 @@ export function createAudio(ctx, host = {}) {
     // ---- events ----
     for (const e of events) {
       switch (e.type) {
-        case 'player.step': if (!landed && (ctx.steps ?? 1) > .02) { const v = e.pace ?? speed; fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: e.big ? .9 : clamp(v / 6, .25, 1), g: (.55 + clamp(v / 7, 0, .45)) * (ctx.steps ?? 1)})); if (pl.biome === 'ruins' && brookWet(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, g: .45}); } break;   // (wading the brook: a splash too)
+        case 'player.step': if (!landed && (ctx.steps ?? 1) > .02) { const v = e.pace ?? speed, w = wadeAt(e.x, e.y); fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, water: w, k: e.big ? .9 : clamp(v / 6, .25, 1), g: (.55 + clamp(v / 7, 0, .45)) * (ctx.steps ?? 1)})); if (w && v > 3.5) fire('splash', e.x, e.y, {surf, small: true, g: .5, gainDb: -10}); if (pl.biome === 'ruins' && brookWet(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, g: .45}); } break;   // (wading the brook: a splash too)
         case 'prop.land': fire('propDrop', e.x, e.y, {mat: MAT[e.kind] || 'wood', surf}); break;   // a prop dropped off the plateau (combat/props.js)
-        case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, k: 1.3, g: 1})); break;   // sprint plant
-        case 'player.jump': fire('jump', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); break;
+        case 'player.land': if (!landed && e.big === 2) fire('step', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, water: wadeAt(e.x, e.y), k: 1.3, g: 1})); break;   // sprint plant
+        case 'player.jump': fire('jump', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf})); if (wadeAt(e.x, e.y)) fire('splash', e.x, e.y, {surf, small: true, gainDb: -5}); break;
         case 'player.splash': case 'arrow.splash': case 'prop.splash': case 'wildlife.splash': fire('splash', e.x, e.y, {surf, small: !!e.small}); break;
+        case 'player.stroke': fire('splash', e.x, e.y, {surf, small: true, g: e.big ? .9 : e.tread ? .22 : .32 + .25 * clamp(e.pace / 2, 0, 1), gainDb: e.big ? -4 : e.tread ? -16 : -10}); break;   // swimming: a stroke, a kick, treading water
         // the revolver (sim/player/gun.js): its own sounds; its bullets aren't arrows (no bow shot, no stuck thud)
         case 'player.shoot': fire('gunshot', e.x, e.y, {gun: e.gun, fan: !!e.fan}); break;
         case 'player.dryfire': fire('gunDry', e.x, e.y); break;

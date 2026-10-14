@@ -15,8 +15,11 @@ no forest).
   below on top. A 'field' terrain shape (world/terrain.js) carries the relief: `elev`, `steep`, the
   ground mesh, the shadows and everything standing on it follow the one height field as before.
 - **Water.** A LAKE in the lowest hollow the seed's candidates find (deep: falling in is a respawn), a STREAM from a spring on the
-  high ground in the north down to it, wandering downhill, and an OUTFLOW from the lake down to the Proving Grounds' river where it
-  comes out of the north edge (x 40): the water runs on through the map. The streams are shallow and wadeable. Beds are cut into
+  high ground in the north down to it, and an OUTFLOW from the lake down to the Proving Grounds' river where it comes out of the
+  north edge (x 40): the water runs on through the map. Both take the land's way (a least-cost route that keeps to the low ground
+  and goes round hills; the outflow's valley, `F.way`, is routed first and the relief held low along it) and MEANDER where the
+  ground is gentle (a sine-generated curve with a Kinoshita skew, bends growing and calming reach by reach; a wobble where it is
+  steep). A bend runs deep under its outside bank (a dark cut bank) and leaves a gravel bar on its inside. The streams are shallow and wadeable. Beds are cut into
   the ground (never rising downstream); the water is painted and moves like the brook's (world.js bakeWater, waterbed.js).
 - **Growth**, per 16 m chunk, from the seed and the chunk's own coordinates: TREES on a jittered 3.2 m lattice, thick or thin by a
   density field (thickets and clearings), conifers (the frost biome's pines) on the higher ground and in drifts of their own, oaks,

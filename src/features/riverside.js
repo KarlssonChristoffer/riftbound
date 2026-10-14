@@ -12,7 +12,8 @@
 //   willows   'tree' props, variant 3 (trees3d.js: speciesOf 'willow'; the painted card is the trees3d=0 fallback and what the
 //             water mirrors): crowns overhanging the water, their curtains hanging to ~0.3 m above the ground
 //   pads      lily pads: NOT entities, this file's own list. 8-9 groups of 2-5 on the calm stretches (not the narrows, the
-//             stepping stones or the ravine's lip). Each lies flat on the water (host.world.waterH), drifting a pixel and turning
+//             stepping stones or the ravine's lip); in the forest's lake (world/forest.js) beds of them over its shallow shelf and the
+//             drop-off, a few in flower, each lying on the lake's own surface (q.b). Each lies flat on the water (host.world.waterH), drifting a pixel and turning
 //             slowly in the current, bobbing a hair. In spring and summer two carry a flower (host.env.season). F.pads() -> the
 //             live list for dragonflies / frogs. TRUE 3D (the pivot; ?props2d=1: the old camera-facing ellipse cards, the notch
 //             and veins picked per yaw from a packed atlas): every pad a flat disc in the moss-green family with its notch cut
@@ -52,6 +53,7 @@ const TUNE = {
   pads: {
     groups: 9, north: 5, size: [.15, .2, .27],   // 5 groups north of the narrows (in the default view), the rest south
     drift: [.034, .05], turn: .35, bob: .006, flowers: 2,
+    lake: {beds: 5, n: [4, 9], spread: 1.1, bloom: .22},   // the forest's lake: beds of pads, pads a bed, m across a bed (radius), the share in flower
   },
 };
 const NOTCHES = 16;   // the pad atlas: notch angles per size
@@ -180,6 +182,23 @@ export async function create(host) {
       if (g.n) GROUPS.push(g);
     }
     for (let k = 0, got = 0; got < P0.flowers && k < 60 && PADS.length; k++) { const q = PADS[R() * PADS.length | 0]; if (!q.flower && q.size > 0) { q.flower = true; q.fi = got % 2; got++; } }
+    // the forest's lake (its own generator, from its seed): beds of pads where the shelf drops off (.5 .. 2.6 m out from the shore),
+    // on the lake's own surface (its bed raised by the water's height, as its basin's floor), clear of the stream's and the outflow's mouths
+    const FO = host.layout.forest;
+    if (FO?.lake) {
+      const L = FO.lake, RL = mulberry32(TUNE.seed + 202 + (FO.seed & 0xffff)), b = L.bed + WATER_H(), mouthD = (x, y) => Math.min(hypot(x - FO.stream.px[FO.stream.n - 1], y - FO.stream.py[FO.stream.n - 1]), hypot(x - FO.outflow.px[0], y - FO.outflow.py[0]));
+      for (let g = 0, tries = 0; g < P0.lake.beds && tries < 80; tries++) {
+        const a = RL() * TAU, cx = L.x + Math.cos(a) * L.rx * .8, cy = L.y + Math.sin(a) * L.ry * .8, e = FO.lakeEdge(cx, cy);
+        if (e < .6 || e > 2.6 || mouthD(cx, cy) < 3) continue;
+        const n = P0.lake.n[0] + (RL() * (P0.lake.n[1] - P0.lake.n[0] + 1) | 0); let got = 0;
+        for (let k = 0; k < n * 4 && got < n; k++) {
+          const size = RL() < .3 ? 2 : RL() < .6 ? 1 : 0, r = P0.size[size], aa = RL() * TAU, d = k === 0 ? 0 : Math.sqrt(RL()) * P0.lake.spread, x = cx + Math.cos(aa) * d, y = cy + Math.sin(aa) * d * .8;
+          if (FO.lakeEdge(x, y) < r + .35 || PADS.some(q => hypot(q.x0 - x, q.y0 - y) < q.r + r + .05)) continue;
+          PADS.push({x0: x, y0: y, x, y, h: 0, b, r, size, ang0: RL() * TAU, ang: 0, ph: RL() * TAU, w: .5 + RL() * .5, flower: RL() < P0.lake.bloom && size > 0, fi: RL() < .7 ? 0 : 1, notch: 0}); got++;
+        }
+        if (got) g++;
+      }
+    }
     // and a few on the brook's pool (its own generator), one in flower
     if (BK) for (let k = 0, t = 0; k < 5 && t < 80; t++) {
       const size = k === 0 ? 2 : RB() < .5 ? 1 : 0, r = P0.size[size], a = RB() * TAU, d = Math.sqrt(RB()), x = BK.pool.x + Math.cos(a) * BK.pool.rx * d, y = BK.pool.y + Math.sin(a) * BK.pool.ry * d;
@@ -257,13 +276,14 @@ export async function create(host) {
     A('position', pos, 3).setUsage(THREE.DynamicDrawUsage); A('normal', nrm, 3).setUsage(THREE.DynamicDrawUsage); A('aPart', part, 1); A('aFam', fam, 1); A('aBias', bias, 1); A('aFixed', fix, 1);
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const q of PADS) { x0 = Math.min(x0, q.x0); x1 = Math.max(x1, q.x0); y0 = Math.min(y0, q.y0); y1 = Math.max(y1, q.y0); }
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3((x0 + x1) / 2, WATER_H(), (y0 + y1) / 2), Math.hypot(x1 - x0, y1 - y0) / 2 + 1);   // (all the pads, the drift in it)
-    geo.boundingBox = new THREE.Box3(new THREE.Vector3(x0 - 1, WATER_H() - .5, y0 - 1), new THREE.Vector3(x1 + 1, WATER_H() + .5, y1 + 1));
+    let h0 = 1e9, h1 = -1e9; for (const q of PADS) { const b = q.b ?? WATER_H(); h0 = Math.min(h0, b); h1 = Math.max(h1, b); }
+    geo.boundingBox = new THREE.Box3(new THREE.Vector3(x0 - 1, h0 - .5, y0 - 1), new THREE.Vector3(x1 + 1, h1 + .5, y1 + 1));
     return {mesh: host.world.mesh(geo, null, {shadow: false}), geo, ranges, L0: Float32Array.from(pos), N0: Float32Array.from(nrm)};
   }
   function place3(bloom) {   // every pad turned and placed (its lily folded away out of season)
     const P = pad3.geo.attributes.position.array, N = pad3.geo.attributes.normal.array, L0 = pad3.L0, N0 = pad3.N0, wh = WATER_H() + .006;
     for (let i = 0; i < PADS.length; i++) {
-      const q = PADS[i], rg = pad3.ranges[i], s = rg[0], n = rg[1], f = rg[2], c = Math.cos(q.ang), sn = Math.sin(q.ang), py = wh + q.h, end = f >= 0 && !bloom ? f : s + n;
+      const q = PADS[i], rg = pad3.ranges[i], s = rg[0], n = rg[1], f = rg[2], c = Math.cos(q.ang), sn = Math.sin(q.ang), py = (q.b !== undefined ? q.b + .006 : wh) + q.h, end = f >= 0 && !bloom ? f : s + n;
       for (let v = s, j = s * 3; v < end; v++, j += 3) {
         const x = L0[j], z = L0[j + 2], nx = N0[j], nz = N0[j + 2];
         P[j] = q.x + x * c + z * sn; P[j + 1] = py + L0[j + 1]; P[j + 2] = q.y - x * sn + z * c;
@@ -295,7 +315,8 @@ export async function create(host) {
       if (!pad3) return;
       pad3.mesh.setVisible(padsOn && F.on); if (!padsOn) return;
       const sea = host.env?.season, bloom = sea === 'spring' || sea === 'summer', t = host.G.view.T;
-      if (bloom !== pad3Bloom || (Math.floor(T * PAD3.hz) !== pad3T && Math.abs(t.x - S.cx(t.z)) < 22)) { pad3Bloom = bloom; pad3T = Math.floor(T * PAD3.hz); place3(bloom); }
+      const LK = host.layout.forest?.lake, nearLake = !!LK && Math.abs(t.x - LK.x) < LK.rx + 22 && Math.abs(t.z - LK.y) < LK.ry + 16;
+      if (bloom !== pad3Bloom || (Math.floor(T * PAD3.hz) !== pad3T && (Math.abs(t.x - S.cx(t.z)) < 22 || nearLake))) { pad3Bloom = bloom; pad3T = Math.floor(T * PAD3.hz); place3(bloom); }
       return;
     }
     if (!padsOn) return;

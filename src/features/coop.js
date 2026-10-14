@@ -66,7 +66,7 @@ export async function create(host) {
     if (C.status !== 'online' || now - sendT < 1000 / TICK_HZ) return;
     sendT = now;
     const P = host.player, pp = host.playerPose?.() || null;
-    ST.x = +P.x.toFixed(3); ST.y = +P.y.toFixed(3); ST.z = +P.z.toFixed(3);
+    ST.x = +P.x.toFixed(3); ST.y = +P.y.toFixed(3); ST.z = +(P.z - P.sink * 22 / host.PPMH).toFixed(3);   // (in the water, swimming: as sunk as the views draw him, 22 px per 1)
     ST.phi = +((pp ? pp.phi : P.faceAngle) % WH).toFixed(3); ST.s = P.state; ST.pose = P.frame || 'idle.0';
     ST.rig = pp ? pp.rig : ''; ST.w = ST.wn = ST.ls = ST.tp = undefined;
     if (ST.rig !== lastRig) { lastRig = ST.rig; lastN = -1; sentW = null; if (pp) ST.wn = pp.BN; }
