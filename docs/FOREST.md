@@ -36,6 +36,21 @@ no forest).
   trunks, roots round each trunk, twigs; the streams and the lake with banks, a damp lush band, the spring in a ring of stones.
   Other biomes have no forest painter: their own trees on the open land's stand-in ground (the lake is then invisible deep water,
   as the brook's pool is there).
+- **Ground cover** (2026-10-13, features/grass.js buildForest, `TUNE.forest`): the forest floor grows its own blades over the painted
+  tiles (`world.forestTiles`), read from the texel each grows on: grass in TUSSOCKS in the clearings (no even lawn) and the upland's
+  drier grass, a tone lighter than the ground so they show on the calm sward; short haircap tufts on the moss; short heath with
+  heather (pink, violet) up the fell; a gorge floor's cool grass; wavy hair-grass in patches on the bare earth under the crowns
+  (lush, light against the dark earth). Woodland flowers in patches: white (wood anemone, chickweed wintergreen) most, twinflower
+  pink in the moss, cow-wheat yellow, a violet now and then; the season's bloom as the meadow's. The first 9 m north of the
+  Proving Grounds and the West Downs (a ragged line) BLEND: a share of the tufts falling off with depth keeps the meadow's rules
+  (its density, its flowers, the downs' tall and ankle grass), so the meadow does not stop on a line where the forest begins. ~390k
+  blades with the default seed (the meadows ~165k), drawn in 12 m chunks the view culls; built once at load (~1.5 s more in a
+  software-GL headless Chrome). `?grass=0` grows none.
+- **Seams** (2026-10-13, world/seams.js, called by world.js after each painter): the Proving Grounds' and the West Downs' painted ground
+  turn into the forest's over a 6 m band south of y 0 (and the Proving Grounds' into the downs' over 6 m east of x 0): the other
+  painter paints the band too, and its texels replace the near side's in clumps, all of them at the seam, none at the band's ragged
+  far edge. Only soft ground swaps (grass, earth, moss, banks, heath), so paths, water and stones keep their own edges. The mesa's
+  north drop (2.4 m, along y ~0.6) is terrain, not paint, and still runs nearly straight.
 
 ## Landforms: the home woods (2026-10-12)
 
@@ -172,7 +187,7 @@ global features and would become per-region features then.
 
 - Instance the trees (one draw per species shape): the swaying trees cast into the per-frame sun shadow one draw each, which is
   most of what the forest costs on screen.
-- Grass blades in the clearings (features/grass.js has the West Downs' builder), fallen leaves on the forest floor (litter covers
+- Fallen leaves on the forest floor (litter covers
   the Proving Grounds' canvas only), mist over the lake at dawn, fish and frogs, birds perching in the forest's trees.
 - Paths: a trail from the arena's north gate to the lake.
 - The other biomes' forest painters (frost: snow under pines; ember: ash), if the forest stays in them.

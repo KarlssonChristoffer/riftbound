@@ -11,14 +11,20 @@
 //             the pushers (the player, brutes, a rolling barrel: blades part round them and lie flattened where they went,
 //             recovering in ~10-20 s; a brute's landing flattens a ring) and blasts (combat.explode: a flattened disc)
 //   snow      lying snow shortens the grass (env.snowCover); the composite snows on it like on the ground
+//   forest    the seeded forest's floor (world/forest.js; its painted tiles: world.forestTiles) grows its OWN cover: grass in
+//             tussocks in the clearings and the upland, haircap tufts on the moss, short heath (heather in flower) up the fell, wavy hair-grass
+//             in patches on the bare earth under the crowns, and woodland flowers (wood anemone and chickweed wintergreen white,
+//             twinflower pink in the moss, cow-wheat yellow, a wood violet now and then). Its first EDGE m (a ragged line) blend from
+//             the meadow's sward into it, tuft by tuft, so the meadow does not stop on a line where the forest begins
 // ?grass=0 grows nothing. Detail low turns it off (ui/pause.js LOW_OFF).
 //
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle, ms.
 // OWNS: the blades (render/grass.js), its per-walker scratch (a WeakMap). READS: host.world.groundCanvas, host.biome (style
 // ramps, hole), host.elev / inStream / layout.inPool, world.js steep, host.wind (gpu), host.env (year, snowCover), host.player / P, the
-// registry (a live query: brutes, barrels). EMITS: nothing.
+// registry (a live query: brutes, barrels), world.forestTiles + layout.js FOREST (decorClear). EMITS: nothing.
 // BUDGET: view ~0, frame ~0.04 ms (F3, measured 2026-10-02: the uniforms, the pushers, the trample pass submitted); the build
-// ~40 ms at a world rebuild (~50k blades in the ruins); the GPU cost is in render/grass.js.
+// ~40 ms at a world rebuild (~50k blades in the ruins; with the forest ~550k in all, the forest's floor ~390k of them: ~1.5 s
+// more in headless software GL, not yet timed on a real GPU machine); the GPU cost is in render/grass.js (12 m chunks the view culls).
 import {flags} from '../core/flags.js';
 import {mulberry32} from '../core/rng.js';
 import {vnoise} from '../core/mathx.js';
@@ -27,6 +33,7 @@ import {steep, WORLD, WEST_ON, WEST_LAND as WEST} from '../world/world.js';   //
 import {zone as westZone, oldWallD, WALL_D} from '../world/westland.js';
 import {stoneSward} from '../world/stonecircle.js';   // the standing stones: no blade in a stone, the ring's floor cropped short
 import {clear as brookClear} from '../world/brook.js';
+import {FOREST} from '../world/layout.js';   // the seeded forest's plan (its windthrows' bare holes: decorClear)
 
 // ---------------------------------------------------------------- tunables
 const TUNE = {
@@ -52,10 +59,26 @@ const TUNE = {
   // [radius m, live push (blade heights at the centre)]; trample: how flat the grass lies where they went (0..1)
   push: {player: [.5, 1.25], brute: [.62, 1.25], barrel: [.38, 1]},
   trample: {walk: .38, run: .65, roll: .95, land: .85, brute: .5, barrel: .55, blast: 1, blastR: 1.35},
-  max: 300000,
+  max: 700000,   // (the meadows ~165k, the forest's floor ~390k with the default seed)
   // THE WEST DOWNS (world/westland.js zone()): TALL drifts, knee high, in the 'lush' ramp (lighter, yellower blades than the ground,
   // in its light): tufts per m2, height range (m), blades a tuft; ANKLE high grass (the track's verges, round the oaks, the hilltops)
   west: {seed: 61, tall: {d: 24, h: [.42, .82], n: [4, 7], r: .06, fan: [.12, .42]}, ankle: {d: 36, h: [.05, .12]}},
+  // THE FOREST's floor (world.forestTiles): its own ramps (blade ramps 4 .. 6, after the meadow's four), tufts per m2 where thickest
+  // and height range (m) on each painted ramp; its grass grows in TUSSOCKS (clump: a noise k per m, nothing below lo, full at hi: no
+  // even lawn); 'earth' is the bare floor under the crowns: wavy hair-grass in patches (hair: the same kind of noise), drawn in the
+  // lush ramp a tone down (light against the dark earth), wispier tufts; the moss carries short haircap tufts. Flowers in patches
+  // (k, lo .. hi as the meadow's), up to p of the tufts, their colours weighted [white, yellow, violet, pink] per ground: the floor
+  // (anemone, wintergreen, cow-wheat, violet, twinflower), the moss (twinflower), the heath (heather), the upland. edge: the band (m)
+  // south of y 0 that blends from the meadow, its line ragged by jag m
+  forest: {seed: 89, edge: 9, jag: 5,
+    ramps: {grass: {d: 18, h: [.14, .34]}, damp: {d: 16, h: [.18, .38]}, lush: {d: 18, h: [.2, .4]}, moss: {d: 7, h: [.06, .12]},
+      hgrass: {d: 14, h: [.12, .28]}, heath: {d: 14, h: [.05, .12]}, dgrass: {d: 12, h: [.12, .3]}, earth: {d: 10, h: [.2, .42]}},
+    clump: {k: .7, lo: .42, hi: .66, grass: ['grass', 'hgrass']},
+    own: ['hgrass', 'heath', 'dgrass'],
+    hair: {k: .28, lo: .3, hi: .62, tuft: {single: .45, n: [2, 4], r: .03, fan: [.2, .5]}},
+    flowers: {k: .5, lo: .52, hi: .76, p: .5,
+      floor: [.5, .14, .08, .28], moss: [.3, .04, .06, .6], heath: [0, 0, .45, .55], upland: [.3, .4, .2, .1]},
+  },
 };
 // the cool palette (the default; ?palette=old, world/biomes.js): the wildflowers mostly a bright lavender, a few more of them (the references)
 if (flags.get('palette') !== 'old') Object.assign(TUNE.flowers, {p: .4, lo: .56, cols: ['#e6e0d2', '#e8c650', '#c49cf2', '#e898bc'], w: [.22, .16, .46, .16]});
@@ -120,7 +143,9 @@ export async function create(host) {
       }
     }
     n = buildWest(A, B, n, look, names, pick);
-    grass.setBlades(A, B, n, ramps, Fl.cols.map(h => rgb(h).map(v => v / 255)));
+    n = buildForest(A, B, n, names, pick);
+    const own = TUNE.forest.own.map(nm => { const c = S[nm]?.h.map(h => rgb(h).map(v => v / 255)); return c ? [c[0].map((v, i) => Math.min(1, v + (v - c[1][i]) * TUNE.highlight)), ...c] : null; });
+    grass.setBlades(A, B, n, [...ramps, ...own], Fl.cols.map(h => rgb(h).map(v => v / 255)));
     F._.built = {n, ms: +(performance.now() - t0).toFixed(1)};
     return n;
   }
@@ -134,8 +159,10 @@ export async function create(host) {
     const W = wc.width, H = wc.height, ppm = W / (WEST.x1 - WEST.x0), px = wc.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, W, H).data;
     const code = (x, y) => { const tx = Math.floor((x - WEST.x0) * ppm), ty = Math.floor((y - WEST.y0) * ppm); if (tx < 0 || ty < 0 || tx >= W || ty >= H) return undefined; const k = (ty * W + tx) * 4; return look.get(px[k] << 16 | px[k + 1] << 8 | px[k + 2]); };
     const T = TUNE.west, R = mulberry32(T.seed), c = TUNE.grid, dMax = 1 / (c * c), hole = host.biome.hole, Tf = TUNE.tuft, Fl = TUNE.flowers, LUSH = names.indexOf('lush');
+    const fNorth = !!host.world.forestTiles?.some(t => t.canvas);
     for (let gy = 0; gy < (WEST.y1 - WEST.y0) / c && n < TUNE.max - 8; gy++) for (let gx = 0; gx < (WEST.x1 - WEST.x0) / c && n < TUNE.max - 8; gx++) {
       const x = WEST.x0 + (gx + R()) * c, y = WEST.y0 + (gy + R()) * c, r1 = R(), r2 = R(), r3 = R(), r4 = R(), r5 = R();
+      if (fNorth && y < 0) continue;   // (north of the grounds the forest's ground is drawn, not the downs': buildForest grows there)
       const cd = code(x, y); if (cd === undefined) continue;
       if (hole?.(x, y) || steep(x, y) || oldWallD(x, y) < WALL_D / 2 + .04 || brookClear(x, y)) continue;   // (none inside an old wall's stones, in the brook or under its bridge)
       const ri = cd >> 2, Rm = TUNE.ramps[names[ri]], h0 = host.elev(x, y), Z = westZone(x, y, h0, ZN);
@@ -164,6 +191,85 @@ export async function create(host) {
         n++;
       }
     }
+    return n;
+  }
+  // ---- THE FOREST's floor (world.forestTiles: forestRuins' tiles, each with its canvas and FM m margin), after the downs' (its own
+  // generator). Each tile's own square (not its margin) on the meadow's jittered grid; a texel's colour says which ramp (or the bare
+  // earth) the cell stands on. In the EDGE band the meadow's rules hold for a share (1 - t) of the tufts (the West Downs' tall and
+  // ankle grass too, west of the grounds), so the sward thins and changes into the forest's over metres
+  function buildForest(A, B, n, names, pick) {
+    const tiles = host.world.forestTiles; if (!tiles?.some(t => t.canvas)) return n;
+    const S = host.biome.style, T = TUNE.forest, FR = T.ramps, Fl = TUNE.flowers, FF = T.flowers, Tf = TUNE.tuft, TW = TUNE.west;
+    const fnames = [...names, ...T.own], EARTH = 7;   // codes: ramp * 4 + tone; ramp 7 = the bare earth (its hair-grass drawn in the lush ramp)
+    const lookF = new Map();
+    fnames.forEach((nm, ri) => S[nm]?.h.forEach((h, t) => { const [r, g, b] = rgb(h); if (!lookF.has(r << 16 | g << 8 | b)) lookF.set(r << 16 | g << 8 | b, ri * 4 + t); }));
+    S.earth.h.forEach((h, t) => { const [r, g, b] = rgb(h); if (t < 3 && !lookF.has(r << 16 | g << 8 | b)) lookF.set(r << 16 | g << 8 | b, EARTH * 4 + t); });   // (tone 3: the roots' ring, a windthrow's hole: none)
+    const rules = fnames.map(nm => FR[nm]), wsum = w => w.reduce((a, b) => a + b, 0);
+    const pickW = (u, w) => { u *= wsum(w); let f = 1; while (f < 4 && (u -= w[f - 1]) > 0) f++; return f; };
+    const FC = new Int32Array(8);   // blades per ramp (F._.forest: the dev's count)
+    const R = mulberry32(T.seed), c = TUNE.grid, dMax = 1 / (c * c), hole = host.biome.hole, clear = flags.get('decor') !== '0' ? FOREST?.decorClear || [] : [];
+    const CLUMPED = fnames.map(nm => T.clump.grass.includes(nm));
+    const GRASS = names.indexOf('grass'), MOSS = names.indexOf('moss'), LUSH = names.indexOf('lush'), HEATH = fnames.indexOf('heath'), HG = fnames.indexOf('hgrass');
+    for (const tl of tiles) {
+      if (!tl.canvas) continue;
+      const W = tl.canvas.width, H = tl.canvas.height, ppm = W / (tl.x1 - tl.x0 + 2 * (tl.x0 - tl.cx0)), px = tl.canvas.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, W, H).data;
+      const code = (x, y) => { const tx = Math.floor((x - tl.cx0) * ppm), ty = Math.floor((y - tl.cz0) * ppm); if (tx < 0 || ty < 0 || tx >= W || ty >= H) return undefined; const k = (ty * W + tx) * 4; return lookF.get(px[k] << 16 | px[k + 1] << 8 | px[k + 2]); };
+      const NX = Math.round((tl.x1 - tl.x0) / c), NZ = Math.round((tl.z1 - tl.z0) / c);
+      for (let gy = 0; gy < NZ && n < TUNE.max - 8; gy++) for (let gx = 0; gx < NX && n < TUNE.max - 8; gx++) {
+        const x = tl.x0 + (gx + R()) * c, y = tl.z0 + (gy + R()) * c, r1 = R();
+        if (x >= tl.x1 || y >= tl.z1) continue;
+        const cd = code(x, y); if (cd === undefined) continue;
+        const ri = cd >> 2, tn = cd & 3, earth = ri === EARTH;
+        // the band: t 0 at the meadow's edge (y 0) .. 1 EDGE m in, its line ragged
+        const t = Math.min(1, Math.max(0, (-y + (vnoise(x * .23, y * .23, 97) - .5) * T.jag) / T.edge)), meadow = ri < 4 && !earth && R() >= t * t * (3 - 2 * t);
+        let Rm = meadow ? TUNE.ramps[names[ri]] : rules[ri] || FR.earth;
+        let dHere = Rm.d;
+        if (earth) {   // wavy hair-grass: in patches (light gaps), none outside them
+          const pe = (vnoise(x * T.hair.k, y * T.hair.k, 98) - T.hair.lo) / (T.hair.hi - T.hair.lo);
+          if (pe <= 0) continue; dHere *= Math.min(1, pe);
+        } else if (!meadow && CLUMPED[ri]) {   // the forest's grass in tussocks
+          const pc = (vnoise(x * T.clump.k, y * T.clump.k, 96) - T.clump.lo) / (T.clump.hi - T.clump.lo);
+          if (pc <= 0) continue; dHere *= Math.min(1, pc);
+        }
+        if (r1 * dMax > dHere) continue;   // (cheap first: the thinning below only lowers it)
+        const thin = TUNE.thin.lo + (1 - TUNE.thin.lo) * vnoise(x * TUNE.thin.k, y * TUNE.thin.k, 41);
+        if (r1 * dMax > dHere * thin) continue;
+        if (hole?.(x, y) || host.inStream(x, y) || steep(x, y)) continue;
+        let bare = false; for (const [cx, cy, r] of clear) if ((x - cx) ** 2 + (y - cy) ** 2 < r * r) { bare = true; break; }
+        if (bare) continue;
+        const r2 = R(), r3 = R(), r4 = R(), r5 = R(), h0 = host.elev(x, y);
+        // the West Downs' drifts carry on into the band (west of the grounds), as buildWest grows them
+        let kind = 0;
+        if (meadow && WEST_ON && x < WEST.x1) { const Z = westZone(x, y, h0, ZN); kind = r3 < Z.tall ? 2 : r3 < Z.tall + Z.ankle ? 1 : 0; }
+        const tallK = TUNE.clump.lo + (TUNE.clump.hi - TUNE.clump.lo) * vnoise(x * TUNE.clump.k, y * TUNE.clump.k, 42);
+        const h = kind === 2 ? (TW.tall.h[0] + (TW.tall.h[1] - TW.tall.h[0]) * r2) * (.82 + .18 * tallK) : kind === 1 ? TW.ankle.h[0] + (TW.ankle.h[1] - TW.ankle.h[0]) * r2 : (Rm.h[0] + (Rm.h[1] - Rm.h[0]) * r2) * tallK;
+        // (the forest's own tufts a tone LIGHTER than the ground they stand on: the calm sward draws a blade in its ground's tone, which
+        // on the forest's open floor reads as nothing; a tussock should show)
+        const lift = !meadow && !earth ? 1 : 0;
+        const bc0 = earth ? (LUSH >= 0 ? LUSH : GRASS) * 4 + Math.min(3, tn + 1) : kind === 2 && LUSH >= 0 ? LUSH * 4 + Math.min(2, tn) : cd - Math.min(lift, tn);
+        // a flower: the meadow's in the band, the forest's own beyond it (by what the ground is)
+        let fl = 0;
+        if (meadow) {
+          if (kind !== 1 && ri === GRASS) { const pf = Math.min(1, Math.max(0, (vnoise(x * Fl.k, y * Fl.k, 43) - Fl.lo) / (Fl.hi - Fl.lo))); if (r4 < pf * Fl.p) fl = R() < Fl.other ? pick(R()) : pick(vnoise(x * Fl.k * .5 + 7, y * Fl.k * .5, 44)); }
+        } else {
+          const w = ri === HEATH ? FF.heath : ri === MOSS ? FF.moss : ri === HG ? FF.upland : ri === LUSH ? null : FF.floor;
+          if (w) { const pf = Math.min(1, Math.max(0, (vnoise(x * FF.k, y * FF.k, 45) - FF.lo) / (FF.hi - FF.lo))); if (r4 < pf * FF.p) fl = pickW(vnoise(x * FF.k * .5 + 3, y * FF.k * .5, 46) * .8 + R() * .2, w); }
+        }
+        const tf = earth ? T.hair.tuft : Tf, rT = kind === 2 ? TW.tall.r : tf.r, fan = kind === 2 ? TW.tall.fan : tf.fan;
+        const k = kind === 2 ? TW.tall.n[0] + Math.floor(R() * (TW.tall.n[1] - TW.tall.n[0] + 1)) : r5 < tf.single ? 1 : tf.n[0] + Math.floor(R() * (tf.n[1] - tf.n[0] + 1)), a0 = R() * Math.PI * 2;
+        for (let i = 0; i < k && n < TUNE.max; i++) {
+          const a = a0 + i * Math.PI * 2 / k + (R() - .5) * .9, rr = k === 1 ? 0 : rT * (.3 + .7 * R());
+          const bx = x + Math.cos(a) * rr, by = y + Math.sin(a) * rr;
+          let bc = bc0; if (k > 1 && kind !== 2 && !earth) { const c2 = code(bx, by); if (c2 !== undefined && c2 >> 2 !== EARTH) bc = c2 - Math.min(lift, c2 & 3); }
+          const lean = k === 1 ? Tf.lone[0] + (Tf.lone[1] - Tf.lone[0]) * R() : fan[0] + (fan[1] - fan[0]) * R(), la = k === 1 ? R() : ((a / (Math.PI * 2)) % 1 + 1) % 1;
+          const o = n * 4;
+          A[o] = bx; A[o + 1] = host.elev(bx, by); A[o + 2] = by; A[o + 3] = h * (k === 1 ? 1 : .72 + .28 * R());
+          B[o] = bc; B[o + 1] = R(); B[o + 2] = i === 0 ? fl : 0; B[o + 3] = Math.floor(Math.min(.9, lean) * 32) + Math.min(.999, la);
+          n++; FC[ri]++;
+        }
+      }
+    }
+    F._.forest = {n: FC.reduce((a, b) => a + b, 0), by: Object.fromEntries([...fnames, 'earth'].map((nm, i) => [nm, FC[i]]))};
     return n;
   }
   build();
