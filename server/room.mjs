@@ -12,7 +12,8 @@
 //   const room = createRoom({seed, trees, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
-import {CATCHES, WATERS, BAITS, MEALS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
+import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
+import {mealNotes} from '../src/content/meals.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {mulberry32} from '../src/core/rng.js';
@@ -132,7 +133,7 @@ export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, d
       const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = [];
       for (const id of p.gear) for (const q of GEAR_BY_ID[id]?.mods || []) notes.push(q);
       const pieces = p.gear.filter(id => GEAR_BY_ID[id]?.kind === 'fishing').length, meal = str(m.meal, 24), bait = str(m.bait, 24);
-      notes.push(...castNotes({lvl, pieces, meal: MEALS[meal] ? meal : '', per: SKILLS.fishing.per}));
+      notes.push(...castNotes({lvl, pieces, meal: mealNotes(meal), per: SKILLS.fishing.per}));
       const spot = !!m.spot && spotNear(x, y, Math.floor(t / 1000 / SPOT.slot), seed | 0);
       const st = statsOf(notes), rain = !!m.rain;
       const r = roll(fishRng, {water: w, part: partOf(clock()), rain, deep: Math.max(0, Math.min(40, num(m.deep, 0))), luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0),

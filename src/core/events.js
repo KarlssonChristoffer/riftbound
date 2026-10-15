@@ -129,7 +129,6 @@ export const EVENTS = {
   'fish.away':          ['features/fishing.js', 'x, y (the line comes in empty)', 'audio'],
   'fish.spot':          ['features/fishing.js', 'x, y (the cast fell on a fishing spot: it bites sooner and rarer)', 'audio'],
   'fish.bait':          ['features/fishing.js', 'x, y, id (bait cut from a small fish at the pack panel)', 'audio'],
-  'fish.cook':          ['features/fishing.js', 'x, y, id (a meal cooked by a campfire and eaten: its buff starts)', 'audio'],
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
@@ -206,6 +205,7 @@ export const EVENTS = {
   'pack.add':           ['features/pack.js',      'x, y, id (content/items.js), n: things went into the pouch or the bag', 'audio'],
   'pack.reset':         ['features/pack.js',      '(none): a new world (the Sandbox menu): the pack and every system\'s saved part cleared', 'woodcut'],
   'skill.level':        ['features/pack.js',      'x, y (the player), skill (content/skills.js), level: a skill reached a new level', 'audio'],
+  'meal.cook':          ['features/meals.js',     'x, y, id (content/meals.js): a meal cooked by a campfire and eaten: its buff starts', 'audio'],
   // woodcutting (sim/player/tool.js the swing, features/woodcut.js what it meets); who = the tree prop
   'player.chop':        ['sim/player/tool.js',    'x, y, z, vx, vy (unit: the blow\'s way), tool (content/items.js): a tool\'s swing lands', 'woodcut'],
   'tree.chop':          ['features/woodcut.js',   'x, y, h (the bite), who, k (0 a glance off wood too hard for the axe, else 0..1: how hard it shakes), left (blows), dx, dy (unit: him to the trunk)', 'wind (the crown shudders, leaves), woodcut (view: chips), audio'],
