@@ -9,12 +9,15 @@
 //           pixelizer draws lines between them and the body
 //   cloth   what the runtime cloth panel (the gunslinger's duster tail, view/livehero.js) should do: null (as it is), 'off',
 //           or a family to draw it in
+// Before the pieces' own looks, each slot that holds a piece takes off his own garment there (content/gear.js BASE: the hat,
+// the duster, the cape and tail, trousers, boots): its zones hidden or filled (a fill '@zone' is the colour the model's own
+// zone has: shirt sleeves, bare feet). A piece's paint wins over its slot's rule; a piece's hide wins over any paint.
 // The result goes to render/rigmesh.js restyle (the body keeps its slot and history). Made only when the set changes.
 // OWNS: nothing (a pure builder). READS: content/gear.js, three.js geometries (at build only).
 // BUDGET: ~2-6 ms a call (a copy of the model's ~10k corners + a few hundred new ones); never per frame.
 import * as THREE from 'three';
 import {ramp6} from './rigkit.js';
-import {MATERIALS, ZONES} from '../content/gear.js';
+import {MATERIALS, ZONES, BASE, SLOTS} from '../content/gear.js';
 
 const DEG = Math.PI / 180, STRIDE = 20;
 const V = new THREE.Vector3(), N = new THREE.Vector3(), M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), S = new THREE.Vector3(), T = new THREE.Vector3();
@@ -55,15 +58,32 @@ export function dress(J, bin, pieces) {
   const parts = J.parts.slice();
   const partOf = name => { let i = parts.indexOf(name); if (i < 0) { parts.push(name); i = parts.length - 1; } return i + 1; };   // (1-based: 0 is none)
   const zoneParts = z => (Z[z] || []).map(p => J.parts.indexOf(p) + 1).filter(i => i > 0);
-  const paint = new Map(), hide = new Set(), adds = [];
+  const paint = new Map(), hide = new Set(), adds = [], u8in = new Uint8Array(bin);
   let cloth = null;
+  const famOfZone = z => {   // the family the model's own zone is drawn in (its first triangle's), or -1
+    const ps = new Set(zoneParts(z));
+    for (let c = 0; c < J.meta.corners; c += 3) if (ps.has(u8in[c * STRIDE + 17])) return u8in[c * STRIDE + 18];
+    return -1;
+  };
+  // his own clothes off where a piece is worn in the slot (BASE)
+  const B = BASE[J.meta.loadout] || {}, baseHide = new Set();
+  for (const g of pieces) {
+    const R = SLOTS.includes(g.slot) && B[g.slot]; if (!R) continue;
+    for (const z of R.hide || []) for (const i of zoneParts(z)) baseHide.add(i);
+    for (const [z, m] of Object.entries(R.fill || {})) {
+      const f = m[0] === '@' ? famOfZone(m.slice(1)) : famOf(m); if (f < 0) continue;
+      for (const i of zoneParts(z)) paint.set(i, f);
+    }
+    if (R.cloth) cloth = R.cloth;
+  }
   for (const g of pieces) {
     const L = g.look || {};
-    for (const [z, m] of Object.entries(L.paint || {})) for (const i of zoneParts(z)) paint.set(i, famOf(m));
+    for (const [z, m] of Object.entries(L.paint || {})) for (const i of zoneParts(z)) { paint.set(i, famOf(m)); baseHide.delete(i); }
     for (const z of L.hide || []) for (const i of zoneParts(z)) hide.add(i);
     if (L.cloth) cloth = L.cloth === 'off' ? 'off' : fams[famOf(L.cloth)];
     for (const a of L.add || []) adds.push(a);
   }
+  for (const i of baseHide) hide.add(i);
   // the new pieces' corners, in their bones' frames
   const extra = [];
   for (const a of adds) {

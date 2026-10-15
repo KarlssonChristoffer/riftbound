@@ -7,7 +7,8 @@
 //   material in the icon's mats), and optionally t (a fixed tone 0..3: unshaded), clip [x, y, w, h] (only there), on (only
 //   over the cells of that earlier shape: a band, a trim), tex ('check' | 'rows' | 'cols': a weave in the shade tone).
 // API: gearIcon(g) -> data URL (null: no drawing for it: slotIcon is the fallback); slotIcon(slot, col) -> data URL (the slot's
-//   silhouette, 10 x 10, for "his own"). READS: content/gear.js MATERIALS. OWNS: its cache. BUDGET: ~0.2 ms an icon, once.
+//   silhouette, 10 x 10, for "his own"); a bare piece (content/gear.js: No hat, No coat ...) is the slot's silhouette as a faint
+//   outline, struck through (bareIcon). READS: content/gear.js MATERIALS. OWNS: its cache. BUDGET: ~0.2 ms an icon, once.
 import {MATERIALS} from '../content/gear.js';
 
 const N = 16, INK = '#100b08';
@@ -161,7 +162,7 @@ const cache = new Map();
 export function gearIcon(g) {
   if (!g) return null;
   let u = cache.get(g.id);
-  if (u === undefined) { const def = ICON[g.id]; u = def ? draw(def) : null; cache.set(g.id, u); }
+  if (u === undefined) { const def = ICON[g.id]; u = g.bare ? bareIcon(g.slot) : def ? draw(def) : null; cache.set(g.id, u); }
   return u;
 }
 
@@ -182,5 +183,14 @@ export function slotIcon(slot, col) {   // a data URL: the silhouette in col, wi
   const c = document.createElement('canvas'); c.width = c.height = 10; const q = c.getContext('2d'), rows = SLOT_ICONS[slot] || SLOT_ICONS.body;
   for (const [d, f] of [[1, INK], [0, col]]) { q.fillStyle = f; rows.forEach((r, y) => { for (let x = 0; x < 9; x++) if (r[x] === '#') q.fillRect(x + d, y + d, 1, 1); }); }
   u = c.toDataURL(); slotCache.set(key, u); return u;
+}
+// a bare piece: the slot's silhouette as an outline (only its edge cells) in a faint tone, a stroke across it (his garment off)
+export function bareIcon(slot) {
+  const c = document.createElement('canvas'); c.width = c.height = 10; const q = c.getContext('2d'), rows = SLOT_ICONS[slot] || SLOT_ICONS.body;
+  const on = (x, y) => rows[y]?.[x] === '#';
+  q.fillStyle = '#6b5e50';
+  for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) if (on(x, y) && !(on(x - 1, y) && on(x + 1, y) && on(x, y - 1) && on(x, y + 1))) q.fillRect(x, y, 1, 1);
+  for (const [d, f] of [[1, INK], [0, '#c4573f']]) { q.fillStyle = f; for (let i = 0; i < 9; i++) q.fillRect(i + d, 8 - i + d, 1, 1); }
+  return c.toDataURL();
 }
 export const hasIcon = id => !!ICON[id];
