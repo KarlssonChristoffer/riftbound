@@ -415,7 +415,7 @@ export async function create(host) {
   // sparks and grit off a blow (back toward him, brighter on a rhythm blow), dust when a vein breaks open
   const SP = [];
   function sparks(e) {
-    const K = VEINS[e.kind], col = e.kind === 'crystal' ? ['#fbf0ff', '#c890ff'] : K?.col || ['#b8b2a6', '#8c867a'];
+    const K = VEINS[e.kind], col = e.kind === 'crystal' ? ['#eaffd8', '#8aff6a'] : K?.col || ['#b8b2a6', '#8c867a'];
     const n = e.k === 0 ? 4 : (e.rhythm ? 16 : 9);
     for (let i = 0; i < n && SP.length < 200; i++) {
       const a = Math.atan2(-e.dy, -e.dx) + (VR() - .5) * 2.2, v = 1 + VR() * 2.6, spark = i < (e.k === 0 ? 4 : e.rhythm ? 7 : 3);

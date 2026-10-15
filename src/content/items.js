@@ -61,8 +61,8 @@ export const ITEMS = {
     pal: {p: '#5c6070', q: '#363a46', s: '#a8b4c8', o: '#8a4a30'},
     icon: ['............', '............', '....pppq....', '...psppqq...', '..ppppsqqq..', '.ppopppqqq..', '.ppppsqqoqq.', '..pspqqqqq..',
       '...qqqqqq...', '............', '............', '............']},
-  glow_shard: {name: 'Glow Shard', kind: 'material', col: '#c890ff', desc: 'a sliver of cave crystal; it still glows a little in the dark',
-    pal: {a: '#fbf0ff', b: '#c890ff', c: '#6a3ac0'},
+  glow_shard: {name: 'Glow Shard', kind: 'material', col: '#9ad878', desc: 'a sliver of cave crystal; it still glows a little in the dark',
+    pal: {a: '#eaffd8', b: '#9ad878', c: '#58a060'},
     icon: ['............', '......a.....', '.....ab.....', '.....abc....', '....aabc....', '....abbc....', '...aabbcc...', '...abbbcc...',
       '....bbcc....', '.....bc.....', '............', '............']},
   // KEEPSAKES (the uncanny forest: features/uncanny.js, docs/UNCANNY.md): odd things the forest's secrets leave you. They do
