@@ -203,7 +203,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     move: OLD ? null : moveV,   // (move and slide; ?collide=old: player.js's per-axis moves)
     wallOver: (x, y, dx, dy, z) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallOver(X, Z, ux, uz, z); },   // (a rotation: d is the same in his frame)
     wallSlant: (x, y, dx, dy, near) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallSlant(X, Z, ux, uz, near); },
-    elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
+    elev: (x, y) => { const a = cv.yaw, c = Math.cos(a), s = Math.sin(a); return elev(x * c + y * s, -x * s + y * c); },   // (render/viewxf.js toWorld's sums, without its array: the cursor's ground search calls this a dozen times a frame)
     grad: TERRAIN_ON ? gradV : null,   // walkable terrain's slope (player.js SLIDE)
     inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
     water: waterAt,   // (SWIMMING, above)

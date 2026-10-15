@@ -25,7 +25,7 @@
 // FREE_KG slows you, armor takes a share off the damage you take.
 export const SLOTS = ['head', 'body', 'back', 'hands', 'legs', 'feet', 'main', 'off'];
 export const SLOT_NAMES = {head: 'Head', body: 'Body', back: 'Back', hands: 'Hands', legs: 'Legs', feet: 'Feet', main: 'Main hand', off: 'Off hand'};
-export const KINDS = {clothing: 'Clothing', armor: 'Armour', robe: 'Robe', weapon: 'Weapon', tool: 'Tool', charm: 'Charm', fishing: 'Fishing'};
+export const KINDS = {clothing: 'Clothing', armor: 'Armour', robe: 'Robe', weapon: 'Weapon', tool: 'Tool', charm: 'Charm', fishing: 'Fishing', foraging: 'Foraging', mining: 'Mining'};
 export const RARITY = {common: {name: 'Common', col: '#c9c2b2'}, fine: {name: 'Fine', col: '#7ad07a'}, rare: {name: 'Rare', col: '#5aa8ff'},
   masterwork: {name: 'Masterwork', col: '#c27bff'}, mythic: {name: 'Mythic', col: '#ffb84a'}};
 
@@ -524,6 +524,23 @@ export const GEAR = [
     look: {add: [
       {on: 'LeftHand', part: 'net.handle', mat: 'oak', shape: 'tube', r0: .016, r1: .016, len: .36, at: [.688, 0, .702], rot: [0, 135, 0], o: {sides: 5}},
       {on: 'LeftHand', part: 'net.hoop', mat: 'netting', shape: 'disc', r: .15, len: .012, at: [.95, 0, .44], rot: [90, 0, 0], o: {sides: 10}},
+    ]}},
+  // ================================================================ foraging gear (2026-10-15, docs/FORAGING.md): its notes are
+  // 'forage.*' (content/forage.js statWords; features/forage.js and the co-op server read them)
+  {id: 'berry_comb', name: 'Berry comb', slot: 'off', kind: 'foraging', rarity: 'fine', weight: .3, armor: 0, desc: 'A birch scoop with a comb of tines along its lip. It strips a shrub as you walk by.',
+    mods: [{stat: 'forage.comb', add: 1}],
+    look: {add: [
+      {on: 'LeftHand', part: 'comb.grip', mat: 'oak', shape: 'tube', r0: .014, r1: .014, len: .12, at: [.66, 0, .73], rot: [0, 135, 0], o: {sides: 5}},
+      {on: 'LeftHand', part: 'comb.scoop', mat: 'birchbark', shape: 'box', size: [.12, .1, .08], at: [.74, 0, .64], rot: [0, 45, 0]},
+      {on: 'LeftHand', part: 'comb.tines', mat: 'steel', shape: 'box', size: [.12, .1, .015], at: [.78, 0, .69], rot: [0, 45, 0]},
+    ]}},
+  // ---- mining (features/mining.js, docs/MINING.md): an old miner's cap, its lantern reaching further down there
+  {id: 'miner_cap', name: 'Miner\'s cap', slot: 'head', kind: 'mining', rarity: 'fine', weight: .5, armor: .02, desc: 'A stiff leather cap with a tin reflector on the front. It knows the way down.',
+    mods: [{stat: 'light.lanternR', mul: 1.3}, {stat: 'mine.extra', add: .05}],
+    look: {hide: ['hat'], add: [
+      {on: 'HatHold0', part: 'minercap', mat: 'leather_dk', shape: 'ball', r: [.236, .244, .2], at: [0, .012, 1.66], o: {sides: 10}},
+      {on: 'HatHold0', part: 'minercap.brim', mat: 'leather_dk', shape: 'box', size: [.36, .1, .018], at: [0, .22, 1.6], rot: [10, 0, 0]},
+      {on: 'HatHold0', part: 'minercap.tin', mat: 'steel', shape: 'disc', r: .07, len: .012, at: [0, -.24, 1.71], rot: [90, 0, 0], o: {sides: 8}},
     ]}},
 ];
 export const GEAR_BY_ID = Object.fromEntries(GEAR.map(g => [g.id, g]));

@@ -245,8 +245,10 @@ export const RECIPES = {
   blueberry: {
     about: 'A patch of blueberry shrubs: knee-high green twigs, small leaves, dark blue berries in late summer',
     likes: {ground: 'forest', shade: .5, near: 'pine', cluster: [1, 3]},
-    params: {n: [7, 3, 14], spread: [.5, .25, .9], berries: [.6, 0, 1]},
+    // picked 1: the same shrub with its berries gone (features/forage.js): every draw made as before, the berries skipped
+    params: {n: [7, 3, 14], spread: [.5, .25, .9], berries: [.6, 0, 1], picked: [0, 0, 1]},
     build(b, p, r) {
+      const berry = (at, rad) => p.picked ? b.skip() : b.ball('blueberry', at, rad, {detail: 0, bias: .1});
       for (let i = 0; i < p.n; i++) {
         const a = r.range(0, Math.PI * 2), d = Math.sqrt(r()) * p.spread, x = Math.cos(a) * d, z = Math.sin(a) * d * .8, h = r.range(.18, .32);
         const twigs = r.int(2, 4);
@@ -256,8 +258,8 @@ export const RECIPES = {
           b.ball('leaf', tip, [r.range(.05, .075), r.range(.035, .05), r.range(.05, .075)], {detail: 0, lump: .2, bias: r.range(-.05, .1)});
           const mid = [x + (tip[0] - x) * .55 + r.range(-.04, .04), tip[1] * .55, z + (tip[2] - z) * .55];
           b.ball('leaf', mid, [.045, .03, .045], {detail: 0, lump: .2, bias: -.1});
-          if (r.chance(p.berries)) b.ball('blueberry', [tip[0] + r.range(-.03, .03), tip[1] + .01, tip[2] + .045], .03, {detail: 0, bias: .1});
-          if (r.chance(p.berries * .7)) b.ball('blueberry', [mid[0] + .03, mid[1] + .01, mid[2] + .04], .026, {detail: 0, bias: .1});
+          if (r.chance(p.berries)) berry([tip[0] + r.range(-.03, .03), tip[1] + .01, tip[2] + .045], .03);
+          if (r.chance(p.berries * .7)) berry([mid[0] + .03, mid[1] + .01, mid[2] + .04], .026);
         }
       }
     },
@@ -266,7 +268,7 @@ export const RECIPES = {
   lingonberry: {
     about: 'A patch of lingonberry: ankle-high evergreen sprigs, small glossy dark leaves, clusters of bright red berries',
     likes: {ground: 'forest', shade: .25, near: 'pine on dry thin soil, rock, the esker', cluster: [1, 4]},
-    params: {n: [9, 4, 16], spread: [.45, .2, .8], berries: [.7, 0, 1]},
+    params: {n: [9, 4, 16], spread: [.45, .2, .8], berries: [.7, 0, 1], picked: [0, 0, 1]},   // (picked: as the blueberry's)
     build(b, p, r) {
       for (let i = 0; i < p.n; i++) {
         const a = r.range(0, Math.PI * 2), d = Math.sqrt(r()) * p.spread, x = Math.cos(a) * d, z = Math.sin(a) * d * .8, h = r.range(.08, .15);
@@ -277,7 +279,10 @@ export const RECIPES = {
           b.ball('lingonleaf', q, [r.range(.035, .05), r.range(.022, .032), r.range(.035, .05)], {detail: 0, lump: .15, bias: k === 2 ? .12 : -.05});
         }
         if (r.chance(p.berries)) {   // a nodding cluster of berries at the tip
-          for (let k = r.int(2, 4); k > 0; k--) b.ball('lingon', [tip[0] + r.range(-.03, .03), tip[1] - r.range(0, .03), tip[2] + .03 + r.range(-.015, .02)], r.range(.018, .024), {detail: 0, bias: .15});
+          for (let k = r.int(2, 4); k > 0; k--) {
+            const at = [tip[0] + r.range(-.03, .03), tip[1] - r.range(0, .03), tip[2] + .03 + r.range(-.015, .02)], rad = r.range(.018, .024);
+            if (p.picked) b.skip(); else b.ball('lingon', at, rad, {detail: 0, bias: .15});
+          }
         }
       }
     },

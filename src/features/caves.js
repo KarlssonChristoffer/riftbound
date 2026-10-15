@@ -3,6 +3,10 @@
 //          its copy over the cave (host.warp: as he is, moving or mid-jump, the camera with him: the same ground at the same height,
 //          so only the world round him changes), and back past warp - hyst m in the copy. DOWN (in the
 //          cave's band, or deep in the woods' slot) lights his lantern, a little wider (host.mods 'light.lantern' / 'light.lanternR')
+//          THE LANTERN down there is his to put out: L puts it out and lights it again (the key is this feature's while he is down;
+//          up in the woods it is the lantern switch as before). The soot things put it out too (F.snuff(): features/cavelife.js);
+//          then it lights again by itself after content/cavelife.js LANTERN.relight s, at once by a cave crystal or in a lamp's or
+//          a burning fire's light. Out, it is out whatever lights it elsewhere (a lit lantern from his gear): 'light.lanternOut'
 //   VIEW   frame: F.under 0..1, how far the world above has gone dark round him: one curve along the slot, the same in both copies
 //          (0 near its head, 1 past its foot in the cave; render/lighting.js turns the mood toward the cave's dark by it), so the step
 //          changes no light. And the SINK: down the slot the surface crumbles away round him, the far first (host.G.setSink: render/
@@ -12,9 +16,13 @@
 //          their own way: cave3d.js cuts the ones in front of him down to an edge; the well's cut and cap would open over the sunk dark)
 // MULTIPLAYER: the cave is everyone's (grown from the session's seed); each player's warp is his own move (co-op sends where he is:
 //   the others see him walk down the slot and on in the cave), the dark is each player's own view
-// OWNS: its mods' notes, F.under, F.down, F.sinking, F.sinkK.  READS: host.world.cave, host.player, host.P (his state).  EMITS: player.warp.
+// OWNS: its mods' notes, F.under, F.down, F.sinking, F.sinkK, the lantern's state down there (F.lit, F.off, its relight time).
+// READS: host.world.cave, host.player, host.P (his state), host.entities (near: a crystal), builds (shineNear).
+// EMITS: player.warp, lantern.toggle, lantern.snuff, lantern.relight.
+// API: F.lit (his lantern burns down there), F.snuff() -> true when it put it out.
 // BUDGET: a few compares a step, an ease a frame. No allocation per step or frame.
 import {smooth, clamp} from '../core/mathx.js';
+import {LANTERN} from '../content/cavelife.js';
 
 const DARK0 = 2;       // m down the slot where the light starts to go (either copy)
 const DARK1 = 4;       // m past the warp (in the cave's copy) where it is all dark
@@ -27,11 +35,28 @@ const NOWARP = new Set(['rope', 'climb', 'mantle']);   // (a move that places hi
 
 export const order = {};
 export async function create(host) {
-  const F = {name: 'caves', label: 'Caves', on: true, under: 0, down: false, sinking: false, sinkK: 0, get debug() { return `under ${F.under.toFixed(2)}${F.down ? ' · down' : ''}`; }};
+  const F = {name: 'caves', label: 'Caves', on: true, under: 0, down: false, sinking: false, sinkK: 0, get debug() { return `under ${F.under.toFixed(2)}${F.down ? ' · down' : ''}${F.down && !F.lit ? ' · dark' : ''}`; }};
   const C = () => host.world.cave;
-  const SQ = [0, 0, 0];
-  let target = 0, jumped = false;
-  F.update = () => {
+  const SQ = [0, 0, 0], NEAR = [];
+  const LIT = [{stat: 'light.lantern', add: 1}, {stat: 'light.lanternR', mul: LANTERN_R}], OUT = [{stat: 'light.lanternOut', add: 1}];
+  let target = 0, jumped = false, off = false, snuffT = 0, pressL = false, notes = 0;   // (notes: 0 none, 1 lit, 2 out)
+  Object.defineProperties(F, {lit: {get: () => F.down && !off && snuffT <= 0}, off: {get: () => off}});
+  F.snuff = () => {
+    if (!F.lit) return false;
+    snuffT = LANTERN.relight; const p = host.player; host.events.push({type: 'lantern.snuff', x: p.x, y: p.y});
+    return true;
+  };
+  F.onKey = k => { if (k !== 'l' || !F.down || host.lock) return false; pressL = true; return true; };   // (down there: the lantern's key is ours)
+  const shineNear = (x, y) => { const B = host.feature('builds'); if (B?.shineNear?.(x, y, 4)) return true; for (const q of host.entities.near(x, y, LANTERN.crystal, NEAR)) if (q.kind === 'crystal' && !q.broken) return true; return false; };
+  function lantern(dt) {   // (after F.down is known: the key, the relight, its notes)
+    const p = host.player;
+    if (!F.down) { off = false; snuffT = 0; pressL = false; }
+    if (pressL) { pressL = false; if (off || snuffT > 0) { off = false; snuffT = 0; } else off = true; host.events.push({type: 'lantern.toggle', x: p.x, y: p.y, on: !off}); }
+    if (snuffT > 0 && ((snuffT -= dt) <= 0 || shineNear(p.x, p.y))) { snuffT = 0; if (!off) host.events.push({type: 'lantern.relight', x: p.x, y: p.y}); }
+    const want = !F.down ? 0 : F.lit ? 1 : 2;
+    if (want !== notes) { notes = want; if (want) host.mods.set('caves', want === 1 ? LIT : OUT); else host.mods.clear('caves'); }
+  }
+  F.update = dt => {
     const c = C(); if (!c) { target = 0; return; }
     const M = c.mouth, p = host.player, x = p.x, y = p.y;
     c.slotAt(x, y, SQ);
@@ -42,12 +67,8 @@ export async function create(host) {
     c.slotAt(p.x, p.y, SQ);
     const inBand = c.inBand(p.x, p.y);
     target = SQ[2] ? smooth(clamp((SQ[0] - DARK0) / (M.warp + DARK1 - DARK0), 0, 1)) : inBand ? 1 : 0;
-    const down = inBand || (SQ[2] === 1 && SQ[0] > LANTERN_AT);
-    if (down !== F.down) {
-      F.down = down;
-      if (down) host.mods.set('caves', [{stat: 'light.lantern', add: 1}, {stat: 'light.lanternR', mul: LANTERN_R}]);
-      else host.mods.clear('caves');
-    }
+    F.down = inBand || (SQ[2] === 1 && SQ[0] > LANTERN_AT);
+    lantern(dt || 1 / 60);
   };
   function warp(dx, dy, down) {
     host.warp(dx, dy); jumped = true;
@@ -68,6 +89,6 @@ export async function create(host) {
     const r0 = Math.hypot(host.VW / host.PPM, host.VH / host.PPMY) / 2 + SINK_PAST;   // (the view's half-diagonal on the ground: VW / VH are what shows, any zoom)
     G.setSink(p.x, p.y, r0 * (1 - k) - 6 * k, c.band);
   };
-  F.biomeChanged = () => { target = 0; F.under = 0; F.sinking = false; F.sinkK = 0; host.G?.setSink?.(0, 0, null); if (F.down) { F.down = false; host.mods.clear('caves'); } };
+  F.biomeChanged = () => { target = 0; F.under = 0; F.sinking = false; F.sinkK = 0; host.G?.setSink?.(0, 0, null); F.down = false; off = false; snuffT = 0; if (notes) { notes = 0; host.mods.clear('caves'); } };
   return F;
 }

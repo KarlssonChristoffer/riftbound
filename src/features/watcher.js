@@ -14,7 +14,8 @@
 //             after TUNE.life s, or the player far off or it off screen for TUNE.lost s: a slow sink
 // MULTIPLAYER: private to each player, by design. It is presentation only (no entity, no collider, nothing the sim reads)
 // and nothing is synced: each player has their own watcher, which only they see. "It's watching YOU."
-// FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle, menu; F.summon() (the menu, tests), F.state.
+// FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle, menu; F.summon() (the menu, tests), F.state,
+//   F.stare(s) (features/trip.js: out at once, openly staring, for s seconds).
 // OWNS: its three meshes (body, eye, pupil), its dirt specks. READS: host.player, host.entities.near (trees), host.elev,
 // host.inStream, host.blocked, host.toView, host.time, G.onScreen, the game's mode.
 // BUDGET: nothing while it is away (a countdown); while out, a few matrices and ~20 points a frame. No allocation per frame.
@@ -91,8 +92,8 @@ export async function create(host) {
       const tr = t.r || .3, side = R() < .5 ? -1 : 1, k = side * (tr + rr(.28, .4)), back = rr(.15, .35);
       const x = t.x + W.rx * k + W.fx * back, y = t.y + W.ry * k + W.fy * back;
       const d = Math.hypot(x - P.x, y - P.y); if (d < TUNE.dist[0] || d > TUNE.dist[1]) continue;
-      if (host.inStream(x, y) || host.blocked(x, y, 0)) continue;
       const gz = host.elev(x, y);
+      if (host.inStream(x, y) || host.blocked(x, y, gz)) continue;   // (at the ground's height: at 0 every upland spot was 'blocked')
       if (!G.onScreen(x, gz + .5, y, -TUNE.edge)) continue;   // (well inside the view ...)
       let crowd = 0; for (const q of host.entities.near(x, y, TUNE.crowd, NEAR2)) if (q !== t && isTree(q)) crowd++;
       if (!force && crowd + dark < TUNE.trees) continue;
@@ -123,6 +124,10 @@ export async function create(host) {
     W.wait = often ? rr(...TUNE.often) : rr(...TUNE.every) * k;
   }
   F.summon = () => come(true);
+  // STARE (features/trip.js: the fly agaric broth): for s seconds it comes out at once (any trunk will do) and openly stares: it
+  // doesn't duck back when he comes close or rushes it, and it stays; after, it goes as ever
+  let stareT = 0;
+  F.stare = s => { stareT = Math.max(stareT, s); if (W.phase === 'away') W.wait = Math.min(W.wait, .3); };
   // ---------------------------------------------------------------- dirt: a few specks thrown up (view)
   const DIRT = [], DN = 24, DCOL = [[.36, .27, .19], [.24, .18, .13], [.46, .38, .27]], DOPT = [{size: 1}, {size: 2}];
   for (let i = 0; i < DN; i++) DIRT.push({t: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, c: 0, o: 0});
@@ -139,11 +144,12 @@ export async function create(host) {
       const g = host.elev(q.x, q.y); if (q.z < g) { q.z = g; q.vz = 0; q.vx *= .5; q.vy *= .5; }
     }
     const P = host.player;
+    if (stareT > 0) stareT -= dt;
     if (W.phase === 'away') {
       const g = game(); if (g && g.mode === 'title') return;
       if (host.lock) return;
       if ((W.wait -= dt) > 0) return;
-      if (!come()) W.wait = TUNE.retry;
+      if (!come(stareT > 0)) W.wait = stareT > 0 ? 1 : TUNE.retry;
       return;
     }
     const dx = P.x - W.x, dy = P.y - W.y, d = Math.hypot(dx, dy), close = (W.d0 - d) / dt; W.d0 = d;
@@ -151,7 +157,8 @@ export async function create(host) {
     if (W.phase === 'rise' || W.phase === 'watch') {
       W.life -= dt;
       W.off = G.onScreen(W.x, W.gz + .4, W.y, 0) ? 0 : W.off + dt;
-      if (d < TUNE.flee || (close > TUNE.rush && d < TUNE.rushR)) {
+      if (stareT > 0) { W.life = Math.max(W.life, 3); W.off = Math.min(W.off, TUNE.lost * .5); }   // (staring: it stays, and won't be chased off)
+      else if (d < TUNE.flee || (close > TUNE.rush && d < TUNE.rushR)) {
         W.phase = 'yank'; W.sq = -.45; for (let i = 0; i < 14; i++) speck(1);
       } else if (W.life < 0 || d > TUNE.far || W.off > TUNE.lost) W.phase = 'sink';
     }

@@ -4,6 +4,8 @@
 //   const inv = createInventory(ITEMS, {slots})
 //   inv.add(id, n) -> how many did NOT fit (0: all in) / inv.take(id, n) -> true (all taken) | false (not enough: none taken)
 //   inv.count(id) / inv.has(id, n) / inv.best(job) -> the bag's best tool for a job ({id, def, slot}) | null
+//   inv.payOf(need) -> {id: n}: a recipe's need ([{ids, n}]: n of ONE of ids) paid with the kind there is most of; inv.short(cost)
+//   -> true when the pouch / bag can't pay it
 //   inv.pouch (Map, read only) / inv.bag (the slots, read only: null | {id, n}) / inv.ver (bumps on every change: caches)
 //   inv.toJSON() -> {pouch, bag} / inv.load(o) (a save: unknown ids are dropped)
 // OWNS: the pouch, the bag. READS: the item table. No allocation per call but a new slot's record.
@@ -50,8 +52,18 @@ export function createInventory(ITEMS, {slots = 8} = {}) {
     }
     return b;
   }
+  function payOf(need) {
+    const o = {};
+    for (const q of need) {
+      let b = q.ids[0], bn = -1;
+      for (const id of q.ids) { const c = count(id) - (o[id] || 0); if (c > bn) { bn = c; b = id; } }
+      o[b] = (o[b] || 0) + q.n;
+    }
+    return o;
+  }
+  const short = o => { for (const k in o) if (count(k) < o[k]) return true; return false; };
   return {
-    pouch, bag, add, take, count, has: (id, n = 1) => count(id) >= n, best,
+    pouch, bag, add, take, count, has: (id, n = 1) => count(id) >= n, best, payOf, short,
     get ver() { return ver; },
     toJSON: () => ({pouch: Object.fromEntries(pouch), bag: bag.map(s => s && {id: s.id, n: s.n})}),
     load(o) {

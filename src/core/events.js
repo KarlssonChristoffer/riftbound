@@ -129,7 +129,6 @@ export const EVENTS = {
   'fish.away':          ['features/fishing.js', 'x, y (the line comes in empty)', 'audio'],
   'fish.spot':          ['features/fishing.js', 'x, y (the cast fell on a fishing spot: it bites sooner and rarer)', 'audio'],
   'fish.bait':          ['features/fishing.js', 'x, y, id (bait cut from a small fish at the pack panel)', 'audio'],
-  'fish.cook':          ['features/fishing.js', 'x, y, id (a meal cooked by a campfire and eaten: its buff starts)', 'audio'],
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
@@ -206,6 +205,28 @@ export const EVENTS = {
   'pack.add':           ['features/pack.js',      'x, y, id (content/items.js), n: things went into the pouch or the bag', 'audio'],
   'pack.reset':         ['features/pack.js',      '(none): a new world (the Sandbox menu): the pack and every system\'s saved part cleared', 'woodcut'],
   'skill.level':        ['features/pack.js',      'x, y (the player), skill (content/skills.js), level: a skill reached a new level', 'audio'],
+  'meal.cook':          ['features/meals.js',     'x, y, id (content/meals.js): a meal cooked by a campfire and eaten: its buff starts', 'audio'],
+  // foraging (features/forage.js, docs/FORAGING.md): a patch is the forest floor's (world/forest.js F.decor index i)
+  'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],
+  'forage.grow':        ['features/forage.js',    'x, y, i, kind: a picked patch has grown back', '(none yet)'],
+  // mining (features/mining.js, docs/MINING.md): a vein is the cave's (world/caves.js C.veins index i)
+  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow)', 'mining (view: sparks, grit), audio'],
+  'mine.spent':         ['features/mining.js',    'x, y, i, kind, n (his chunks; 0: a friend\'s blow spent it): the vein breaks open', 'mining (view: dust), audio'],
+  'mine.chunk':         ['features/mining.js',    'x, y, item: a chunk picked up off the floor', 'audio'],
+  'mine.grow':          ['features/mining.js',    'x, y, i, kind: a spent vein has come back', '(none yet)'],
+  'mine.take':          ['features/mining.js',    'x, y: he took the old pick from the miner\'s camp', 'audio'],
+  'mine.open':          ['features/mining.js',    'x, y (its mouth), i (the vein), cx, cy (the room): a hollow wall caved in; its sealed room is open (his cache on its floor)', 'audio, cavelife (view: dust)'],
+  // the living dark (features/caves.js, features/cavelife.js, docs/CAVELIFE.md)
+  'lantern.toggle':     ['features/caves.js',     'x, y, on: L put his lantern out or lit it again, down in the cave', 'audio'],
+  'lantern.snuff':      ['features/caves.js',     'x, y: the soot things put his lantern out', 'audio'],
+  'lantern.relight':    ['features/caves.js',     'x, y: his lantern lit again after a snuff (by itself, or by a crystal, a lamp, a fire)', 'audio'],
+  'critter.wake':       ['features/cavelife.js',  'x, y, i: a rock-thing unrolled and trots off (view)', 'audio'],
+  // building (features/builds.js, docs/BUILDING.md): a build's id is 'o' + n offline, the server's 'b' + n online
+  'build.add':          ['features/builds.js',    'x, y, id, kind (content/builds.js), mine: a build went down (his, or online a friend\'s)', 'audio'],
+  'build.remove':       ['features/builds.js',    'x, y, id, kind: a build was taken back', '(none yet)'],
+  // the fly agaric broth (features/trip.js)
+  'trip.start':         ['features/trip.js',      'x, y, t (s): he drank the fly agaric broth', '(none yet)'],
+  'trip.end':           ['features/trip.js',      'x, y: the trip has worn off', '(none yet)'],
   // woodcutting (sim/player/tool.js the swing, features/woodcut.js what it meets); who = the tree prop
   'player.chop':        ['sim/player/tool.js',    'x, y, z, vx, vy (unit: the blow\'s way), tool (content/items.js): a tool\'s swing lands', 'woodcut'],
   'tree.chop':          ['features/woodcut.js',   'x, y, h (the bite), who, k (0 a glance off wood too hard for the axe, else 0..1: how hard it shakes), left (blows), dx, dy (unit: him to the trunk)', 'wind (the crown shudders, leaves), woodcut (view: chips), audio'],

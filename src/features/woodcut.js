@@ -432,7 +432,7 @@ export async function create(host) {
       const t = T(); if (t && !aimSet) { t.aimBy(aimPoint); t.wantBy(wantTool); aimSet = true; }   // (the swing asks as it starts: inside the player's step)
       if (byE && t && !host.keys.has('e')) { byE = false; t.release(); }   // (E let go)
       if (lock && !t?.S.held) lock = null;   // (LMB / E up: the trunk let go)
-      const slot = t?.S.on ? pack()?.best('chop')?.slot ?? -1 : -1; if (slot !== heldSlot) { heldSlot = slot; pack()?.held(slot); }   // (the pack panel marks the axe in hand)
+      const slot = t?.S.on && t.S.job === 'chop' ? pack()?.best('chop')?.slot ?? -1 : -1; if (slot !== heldSlot) { heldSlot = slot; if (slot >= 0 || !t?.S.on) pack()?.held(slot); }   // (the pack panel marks the axe in hand; another tool's job marks its own: features/mining.js)
       stepFalls(dt); stepLogs(dt); regrow(dt);
     },
     view(dt, evs) {
