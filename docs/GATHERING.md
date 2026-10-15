@@ -60,7 +60,7 @@ crafting at a bench.
 | `sim/player/tool.js` | the tool in hand: state `chop` (busy), `player.chop` at the blow; the feature aims it as it starts (`aimBy`) |
 | `features/woodcut.js` | key 3, the blow (a bite, a glance, a foe or dummy in the way), felling, stumps, logs, regrowth, the falls (view) |
 | `view/heldtool.js` | the axe as a runtime mesh on the right hand (`rig.attach`): a carry hold, a swing hold |
-| `features/campfires.js` | Build > Campfire (4 logs), E adds a log, embers, saved; flames through lights.js `F.flame` |
+| `features/campfires.js` | Build > Campfire (4 logs), E adds a log, embers, saved; flames through lights.js `F.flame` (placed and saved through `features/builds.js` since the cook-and-build slice: `docs/BUILDING.md`) |
 
 Hooks in other areas' files, all small and additive: `player.js` / `adapter.js` (the tool module, like brawl's),
 `livehero.js` (the held tool, `toolMotion`, `toolHide`), `wind.js` (`flexOf` skips hidden props, `tree.chop` shakes a

@@ -18,6 +18,7 @@ import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '
 import {mealNotes} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
+import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {mulberry32} from '../src/core/rng.js';
@@ -94,6 +95,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, regr
     }
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
+    if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -160,6 +162,36 @@ export function createRoom({seed, trees = null, decor = null, veins = null, regr
     }
     world.set(id, {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});
     all({k: 'world', id, s: 'spent', by: p.id, got});
+  }
+  // BUILDING (docs/BUILDING.md): a build put down ({a: 'build', id: its kind (content/builds.js), x, y}: within reach of him,
+  // clear of the other builds, no more of the kind standing than its `most` for him) gets an id here ('b' + n) and is told to
+  // everyone ({k: 'world', id, s: 'built', kind, x, y, by, fuel, t0}); a fire's fuel burns on this server's clock (s: t0), a log
+  // on it ({a: 'stoke', id}) is told the same way (s: 'stoked', fuel, t0, by); one's own lamp taken back ({a: 'unbuild', id}):
+  // s 'gone'. Builds stay for the room's life; a late joiner gets them in the welcome. The pouch is the client's (it pays when
+  // it hears its build stands)
+  let nextB = 1;
+  const secs = () => now() / 1000;
+  function build(p, a, m, id, t, deny) {
+    if (a === 'build') {
+      const def = BUILDS[id], x = num(m.x, NaN), y = num(m.y, NaN); if (!def || !isFinite(x) || !isFinite(y)) return deny('no such build');
+      if (Math.hypot(x - p.x, y - p.y) > BUILD.reach) return deny('too far');
+      let mine = 0;
+      for (const [, e] of world) if (e.s === 'built') { if (e.kind === id && e.by === p.id) mine++; if (Math.hypot(e.x - x, e.y - y) < BUILD.apart + def.r + (BUILDS[e.kind]?.r || 0)) return deny('no room'); }
+      if (mine >= def.most) return deny('too many');
+      const bid = 'b' + nextB++, s = {s: 'built', kind: id, x: +x.toFixed(2), y: +y.toFixed(2), by: p.id, t, fuel: def.fire ? def.fire.start * def.fire.log : 0, t0: +secs().toFixed(3)};
+      world.set(bid, s); all({k: 'world', id: bid, ...s}); return;
+    }
+    const e = world.get(id); if (!e || e.s !== 'built') return deny('no such build');
+    const def = BUILDS[e.kind];
+    if (Math.hypot(e.x - p.x, e.y - p.y) > BUILD.reach) return deny('too far');
+    if (a === 'stoke') {
+      if (!def.fire) return deny('not a fire');
+      const left = fuelAt(e, secs()); if (left >= (def.fire.max - .5) * def.fire.log) return deny('full');
+      e.fuel = +stokeFuel(left, def).toFixed(2); e.t0 = +secs().toFixed(3);
+      all({k: 'world', id, s: 'stoked', fuel: e.fuel, t0: e.t0, by: p.id}); return;
+    }
+    if (!def.lamp?.takeBack || e.by !== p.id) return deny('not yours');
+    world.delete(id); all({k: 'world', id, s: 'gone', by: p.id});
   }
   let growT = 0;
   function regrowTick(dt) {   // once a second: the picked patches and spent veins whose time has come grow back, for everyone

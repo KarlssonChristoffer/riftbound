@@ -20,6 +20,8 @@
 //                server's word on a patch (world: picked, grown) is handed on in F.mail
 //   mining       the server keeps the veins' blows left and the spent veins (docs/MINING.md): features/mining.js sends each blow
 //                (act('mine', id, {pow, lvl, tier})); its word on a vein (world: struck, spent, grown) is handed on in F.mail
+//   building     the server keeps what players put down (docs/BUILDING.md): features/builds.js asks (act('build', kind, {x, y}),
+//                'stoke', 'unbuild'); its word (world: built, stoked, gone) is handed on in F.mail
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
@@ -96,10 +98,12 @@ export async function create(host) {
   // for a secret (p: its id) when its condition holds; 'time' (p: dawn | day | dusk | night) sets the server's clock (dev)
   // features/forage.js asks for a patch ('pick', p: its id 'd' + decor index, o: {lvl}: his Foraging level); features/mining.js
   // sends a blow on a vein ('mine', p: 'v' + its index in the cave's plan, o: {pow, lvl, tier})
+  // features/builds.js puts a build down ('build', p: its kind, o: {x, y}), adds a log to a fire ('stoke', p: the build's id) and
+  // takes its own lamp back ('unbuild', p: the id)
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }
@@ -130,7 +134,7 @@ export async function create(host) {
           const want = flags.get('time');   // (dev: a ?time= asks the server's clock for it, once)
           if (want && !askedTime) { askedTime = true; C.act('time', want); }
         }
-        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js)
+        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
