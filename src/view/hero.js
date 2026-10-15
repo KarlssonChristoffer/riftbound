@@ -172,7 +172,7 @@ export function createHero({G, set, loadI, ctxO, app}) {
   // the cloak in the wind: the wind feature's cloth numbers (or a calm breeze), then the sim (120 Hz substeps).
   // clothPos: the Ranger's motion in the view frame, without the camera's turns (moveCloth, each sim step)
   const clothPos = [0, 0];
-  let cape = true;   // the cloak drawn (features/gear.js: his own cape switched off: setCape(false); still stepped, not drawn)
+  let cape = true;   // the cloak drawn (a piece in the gear's back slot replaces it: setCape(false); still stepped, not drawn)
   const moveCloth = (dx, dy) => { clothPos[0] += dx; clothPos[1] += dy; };
   function stepCloth(dt, perf, sim = true) {   // (sim false: the wind only, the live hero runs his own cloth)
     if (!rig.active) return;
@@ -249,7 +249,7 @@ export function createHero({G, set, loadI, ctxO, app}) {
     const sa = bytesOf(armor.albedo(fr, sp.img)), sn = sp.nrm ? bytesOf(sp.nrm) : null, fc = faceCol();   // (armor: metal repainted)
     if (sa) A.blit(sa.u32, sa.w, fc * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx);
     if (sn) N.blit(sn.u32, sn.w, fc * FW, 0, FW, FH - sinkPx, CX, CY + sinkPx);
-    if (rig.active && cape && sp.depth && !sinkPx) rig.draw(A, CX, CY, depthOf(sp.depth), fc, N);   // (cape: the gear's switch, setCape)
+    if (rig.active && cape && sp.depth && !sinkPx) rig.draw(A, CX, CY, depthOf(sp.depth), fc, N);   // (cape: setCape, from the gear)
     if (!sinkPx) hairWind(fr);
     if (!sinkPx && !opt.hdBow && weapon.kind === 'bow') PL.drawPixelBow(A, CX, CY, fc);   // (a gun loadout has no string / nocked arrow)
     drawMetal(fr, sinkPx);

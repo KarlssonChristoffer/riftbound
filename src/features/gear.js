@@ -6,16 +6,13 @@
 // MULTIPLAYER: the set is the server's to say. Offline it is worn at once; in co-op it is asked of the server (features/
 // coop.js wear) and worn when the server's answer comes back (coop.gear), the same moment the others see it.
 // SIM vs VIEW: the set worn and its modifier notes change in update (a step); the look follows in view, on a change only.
-// THE CAPE: cape(on) switches his own cape and coat tail on or off (content/gear.js SWITCHES: an id in the set like a piece, so
-// it is chosen, remembered, sent and worn the same way); the gear panel's Back row, the wardrobe's Back slot and the menu's
-// Game tab (Character: Cape) have the switch.
 // DEV PREVIEW (dev/wardrobe.js): preview({swap, extra, key}) draws the set with some pieces swapped for edited copies and
 // extra look-only pieces after them (zone paints, a piece being tuned); the look only: no notes, nothing sent. null: off.
 // OWNS: the set (want: chosen; worn: in effect), the 'gear' modifier notes, the panel. READS: flags ('gear'),
 //   localStorage ('rb.gear': the set last chosen here), the co-op feature (online, wear, gear), the pack's panel (open: Tab opens
 //   the pack, and the gear panel beside it; with no pack, Tab is the gear panel's).
 // EMITS: gear.wear.  BUDGET: update ~0 (two compares a step); view: a dress on a change (2-25 ms, rare); panel: DOM, on change.
-import {gearById, cleanSet, setStats, setKey, withCape, CAPE_OFF} from '../content/gear.js';
+import {gearById, cleanSet, setStats, setKey} from '../content/gear.js';
 import {flags} from '../core/flags.js';
 import {createGearPanel} from '../ui/gearpanel.js';
 
@@ -59,7 +56,6 @@ export async function create(host) {
     name: 'gear', label: 'Gear', on: true, S, panel,
     choose, wear: id => { const g = gearById(id); if (g) choose([...S.want.filter(w => gearById(w).slot !== g.slot), id]); },
     takeOff: slot => choose(S.want.filter(w => gearById(w).slot !== slot)),
-    cape: on => choose(withCape(S.want, on)), get capeOff() { return S.want.includes(CAPE_OFF); },
     update() {
       const c = coop();
       if (c) {

@@ -23,13 +23,15 @@ Tab opens the pack (features/pack.js: bag, pouch, skills) and the gear panel bes
 clothes). Point at a piece for a card with what it is, what it does now and what it will do later ("not in the game yet":
 the systems it needs, like cold or fire, aren't there yet); hold Shift for more (materials, modifier notes, what wearing it
 does to your set). The bottom line is the set's weight, armor and speed.
-**The cape (2026-10-14).** His own cape and coat tail can be switched off on any character: the Back row's "Cape: on / off"
-in the gear panel, the Back slot in the wardrobe's Outfit tab, or the menu's Game tab (Character: Cape). It is a switch, not a
-piece (`SWITCHES` in content/gear.js: `cape_off`): an id in the set like a piece, so it is remembered, saved with a wardrobe
-outfit, in `?gear=` links and sent in co-op like the rest; no weight, no armor. On a live model it hides the `cape` zone and the
-runtime cloth tail (view/dress.js `under`: it gives way to a piece's own paint and cloth, so a cloak worn on the back still
-shows); a quiver or a pack goes on the bare back. On the Ranger it stops drawing the runtime cloak (view/hero.js setCape;
-content/gear.js capeShown); a cloak baked into a sprite (ranger basic) stays.
+**His own clothes are replaced (2026-10-15).** A piece in a slot REPLACES the character's own garment there instead of being
+drawn over it (`BASE` in content/gear.js, per live model; view/dress.js applies the slot's rule first, the piece's look over it):
+head: his hat; body: the duster (collar and lapels gone, the coat sleeves become shirt sleeves where the piece leaves them);
+back: the cape and its coat tail (a cloak brings its own; a quiver or pack sits on the bare back); legs: his trousers (long
+johns where the piece leaves them); feet: his boots and spurs (bare feet). Each of those slots also has a BARE piece, first in
+its row after "his own" (a faint outline, struck through): No hat, No coat, No cape, Long johns, Barefoot: his garment off and
+nothing in its place. They are pieces like the rest (no weight, no armor), so they're remembered, saved with a wardrobe outfit,
+in `?gear=` links and sent in co-op. The Ranger's runtime cloak goes when the back slot holds anything but a cloak
+(view/hero.js setCape; content/gear.js capeShown); a cloak baked into a sprite (ranger basic) stays.
 The set is remembered on this machine. `?gear=wool_cap,mail_shirt` wears a set from the URL (tests); `?gear=none` none.
 In the menu's Sandbox tab, "Gear: ..." opens the panel too.
 

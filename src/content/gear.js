@@ -11,15 +11,16 @@
 //   GEAR       the pieces. Each: id, name, slot, kind, rarity, weight (kg), armor (share of damage taken off), desc, look, and
 //              optionally mods (more modifier notes: host.mods) and soon (what it will do once the game has the system: weather,
 //              fire, sword swings, spells)
-//   SWITCHES   not pieces: a way his own clothes can be worn (cape_off: the character's own cape and tail not drawn). In a set
-//              like a piece (an id, after the slots' pieces: cleanSet), so co-op, the remembered set, the wardrobe's saved
-//              outfits and ?gear= carry it; no weight, no armor, in none of the slots' rows (the Back slot has its switch)
+//   BASE       a live model's own clothes by slot (his hat, the duster, the cape and coat tail, trousers, boots), per model:
+//              a piece in a slot REPLACES his own garment there (view/dress.js: the slot's rule first, the piece's own look
+//              over it). {hide [zone], fill {zone: material | '@zone'}, cloth 'off'}: the zones not drawn, the zones drawn in
+//              another material ('@shirt': the colour the model's own shirt has, so bare arms get shirt sleeves), the tail off
+//   bare       a piece that is nothing (No hat, No coat, No cape, Long johns, Barefoot): his own garment off and nothing in its
+//              place (only the slot's BASE rule). A piece like the others: chosen, remembered, sent in co-op, in ?gear= links
 //   look       how it changes the character (view/dress.js):
 //                paint {zone: material}   the zone's parts in that material
 //                hide [zone]              the zone's parts not drawn
 //                cloth material | 'off'   the duster's runtime cloth panel (the gunslinger's long coat tail) recoloured / gone
-//                under true               a switch's look: its hide and cloth give way to any piece's paint and cloth (a
-//                                         cloak worn brings the cape back), so it only takes off what nothing else wears
 //                add [piece]              new shapes riding a bone: {on: bone, part, mat, shape, at: [x, y, z], rot?: [deg x, y, z],
 //                                         + the shape's size} in BODY SPACE AT REST (metres: x his left, y his back, z up, the feet
 //                                         at the origin; the gunslinger's head is z 1.28 .. 1.8, his hat's band at 1.65).
@@ -87,20 +88,45 @@ export const MATERIALS = {
 // a live model's zones: its json's meta.loadout -> zone -> the parts (model.json parts) it is made of
 export const ZONES = {
   'gunslinger.py': {
-    hat: ['hat', 'brim', 'hatband'], coat: ['cape', 'collar', 'lapel.L', 'lapel.R', 'dsleeve.L', 'dsleeve.R'], collar: ['cape', 'collar'], cape: ['cape'],
+    hat: ['hat', 'brim', 'hatband'], coat: ['cape', 'collar', 'lapel.L', 'lapel.R', 'dsleeve.L', 'dsleeve.R'], collar: ['cape', 'collar'], cape: ['cape'], coatcollar: ['collar'],
     lapels: ['lapel.L', 'lapel.R'], sleeves: ['dsleeve.L', 'dsleeve.R'], vest: ['vest'], shirt: ['shirt'], neck: ['bandana'],
     trousers: ['trousers', 'trousers.L', 'trousers.R'], legs: ['trousers.L', 'trousers.R'], boots: ['boot.L', 'boot.R'], spurs: ['spur.L', 'spur.R'],
     hands: ['hand.L', 'hand.R'], hair: ['hair', 'hair.L', 'hair.R', 'hair.0', 'hair.1', 'hair.2'],
   },
   'outlaw.py': {
-    hat: ['hat', 'brim', 'hatband', 'band'], coat: ['poncho', 'stripe', 'stripe.001', 'sleeve.L', 'sleeve.R'], collar: ['poncho', 'stripe', 'stripe.001'], cape: [],
+    hat: ['hat', 'brim', 'hatband', 'band'], coat: ['poncho', 'stripe', 'stripe.001', 'sleeve.L', 'sleeve.R'], collar: ['poncho', 'stripe', 'stripe.001'], cape: [], poncho: ['poncho', 'stripe', 'stripe.001'],
     lapels: [], sleeves: ['sleeve.L', 'sleeve.R'], vest: [], shirt: ['shirt'], neck: ['bandana'],
     trousers: ['trousers', 'trousers.L', 'trousers.R', 'seam.L', 'seam.R'], legs: ['trousers.L', 'trousers.R', 'seam.L', 'seam.R'], boots: ['boot.L', 'boot.R'], spurs: ['spur.L', 'spur.R'],
     hands: ['hand.L', 'hand.R'], hair: ['hair', 'hair.L', 'hair.R'],
   },
 };
 
+// his own clothes, slot by slot (2026-10-15): what a piece in the slot (or the slot's bare piece) does to them first
+export const BASE = {
+  'gunslinger.py': {
+    head: {hide: ['hat']},                                          // his hat
+    body: {hide: ['coatcollar', 'lapels'], fill: {sleeves: '@shirt'}},   // the duster (its sleeves become shirt sleeves)
+    back: {hide: ['cape'], cloth: 'off'},                           // the duster's cape and its tail (the runtime cloth)
+    legs: {fill: {trousers: 'linen'}},                              // his trousers (long johns under them)
+    feet: {hide: ['spurs'], fill: {boots: '@hands'}},               // his boots and spurs (bare feet)
+  },
+  'outlaw.py': {
+    head: {hide: ['hat']},
+    body: {hide: ['poncho'], fill: {sleeves: '@shirt'}},
+    back: {cloth: 'off'},
+    legs: {fill: {trousers: 'linen'}},
+    feet: {hide: ['spurs'], fill: {boots: '@hands'}},
+  },
+};
+
+const bare = (id, name, slot, desc) => ({id, name, slot, kind: 'clothing', rarity: 'common', weight: 0, armor: 0, desc, bare: true, look: {}});
 export const GEAR = [
+  // ---- bare: his own garment in the slot off, nothing in its place (BASE). First in each slot's row, after "his own"
+  bare('no_hat', 'No hat', 'head', 'His own hat left off.'),
+  bare('no_coat', 'No coat', 'body', 'His own coat left off: the shirt and vest under it.'),
+  bare('cape_off', 'No cape', 'back', 'His own cape and coat tail left off.'),
+  bare('long_johns', 'Long johns', 'legs', 'His own trousers left off.'),
+  bare('barefoot', 'Barefoot', 'feet', 'His own boots and spurs left off.'),
   // ---- head (shapes on HatHold0: they tip with the hat, and fall off with it)
   {id: 'wool_cap', name: 'Wool cap', slot: 'head', kind: 'clothing', rarity: 'common', weight: .2, armor: 0, desc: 'A knitted cap with a bobble.',
     soon: 'keeps your head warm in the cold',
@@ -141,7 +167,7 @@ export const GEAR = [
   // ---- body
   {id: 'wool_sweater', name: 'Wool sweater', slot: 'body', kind: 'clothing', rarity: 'common', weight: 1.5, armor: .02, desc: 'A thick knitted sweater instead of the duster.',
     soon: 'warm in the cold; catches fire fast; heavy when soaked',
-    look: {paint: {vest: 'wool_cream', shirt: 'wool_cream', sleeves: 'wool_cream'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'wool_cream', shirt: 'wool_cream', sleeves: 'wool_cream'}, add: [
       {on: 'Spine2', part: 'sweater.neck', mat: 'wool_cream', shape: 'tube', r0: .1, r1: .085, len: .07, at: [0, .0, 1.235], o: {sides: 10}},
     ]}},
   {id: 'mail_shirt', name: 'Mail shirt', slot: 'body', kind: 'armor', rarity: 'fine', weight: 9, armor: .18, desc: 'Iron rings under the duster. Stops cuts and arrows; you sink in water.',
@@ -251,22 +277,22 @@ export const GEAR = [
     ]}},
   // ---- body
   {id: 'leather_jerkin', name: 'Leather jerkin', slot: 'body', kind: 'armor', rarity: 'common', weight: 3, armor: .05, desc: 'A sleeveless leather coat over the shirt.',
-    look: {paint: {vest: 'leather', sleeves: 'linen'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'leather', sleeves: 'linen'}, add: [
       {on: 'Hips', part: 'jerkin.belt', mat: 'leather_dk', shape: 'tube', r0: .215, r1: .215, len: .05, at: [0, 0, .82], o: {sides: 10}},
     ]}},
   {id: 'gambeson', name: 'Gambeson', slot: 'body', kind: 'armor', rarity: 'common', weight: 3, armor: .06, desc: 'A quilted linen coat, padded thick.',
     soon: 'warm in the cold',
-    look: {paint: {vest: 'linen', shirt: 'linen', sleeves: 'linen'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'linen', shirt: 'linen', sleeves: 'linen'}, add: [
       {on: 'Hips', part: 'gamb.skirt', mat: 'linen', shape: 'tube', r0: .25, r1: .22, len: .2, at: [0, 0, .7], o: {sides: 10}},
     ]}},
   {id: 'chain_hauberk', name: 'Chain hauberk', slot: 'body', kind: 'armor', rarity: 'fine', weight: 10, armor: .2, desc: 'A long coat of mail, sleeves and skirt.',
     soon: 'draws lightning; you sink in water',
-    look: {paint: {vest: 'mail', shirt: 'mail', sleeves: 'mail'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'mail', shirt: 'mail', sleeves: 'mail'}, add: [
       {on: 'Hips', part: 'hauberk.skirt', mat: 'mail', shape: 'tube', r0: .27, r1: .23, len: .3, at: [0, 0, .62], o: {sides: 12}},
     ]}},
   {id: 'plate_cuirass', name: 'Plate cuirass', slot: 'body', kind: 'armor', rarity: 'rare', weight: 14, armor: .28, desc: 'A steel breastplate, pauldrons and a skirt of lames.',
     soon: 'loud: everything hears you coming',
-    look: {paint: {vest: 'steel', shirt: 'black_iron', sleeves: 'black_iron'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'steel', shirt: 'black_iron', sleeves: 'black_iron'}, add: [
       {on: 'Spine2', part: 'plate.chest', mat: 'steel', shape: 'box', size: [.38, .07, .32], at: [0, -.125, 1.06]},
       {on: 'Spine2', part: 'plate.pL', mat: 'steel', shape: 'ball', r: [.11, .12, .09], at: [.21, 0, 1.2], o: {sides: 8}},
       {on: 'Spine2', part: 'plate.pR', mat: 'steel', shape: 'ball', r: [.11, .12, .09], at: [-.21, 0, 1.2], o: {sides: 8}},
@@ -274,28 +300,28 @@ export const GEAR = [
     ]}},
   {id: 'mage_robe', name: 'Mage\'s robe', slot: 'body', kind: 'robe', rarity: 'rare', weight: 1.5, armor: 0, desc: 'A long blue robe with a gold sash, down to the boots.',
     soon: 'spells are stronger; catches fire',
-    look: {paint: {vest: 'velvet_blue', shirt: 'velvet_blue', sleeves: 'velvet_blue', trousers: 'velvet_blue'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'velvet_blue', shirt: 'velvet_blue', sleeves: 'velvet_blue', trousers: 'velvet_blue'}, add: [
       {on: 'Hips', part: 'robe.skirt', mat: 'velvet_blue', shape: 'tube', r0: .32, r1: .22, len: .72, at: [0, 0, .42], o: {sides: 12}},
       {on: 'Hips', part: 'robe.sash', mat: 'gold', shape: 'tube', r0: .225, r1: .222, len: .045, at: [0, 0, .79], o: {sides: 12}},
       {on: 'Hips', part: 'robe.hem', mat: 'gold', shape: 'tube', r0: .325, r1: .322, len: .035, at: [0, 0, .08], o: {sides: 12}},
     ]}},
   {id: 'monk_robe', name: 'Monk\'s robe', slot: 'body', kind: 'robe', rarity: 'common', weight: 1.2, armor: 0, desc: 'A plain brown robe and a rope belt.',
     soon: 'calm: wild animals let you near',
-    look: {paint: {vest: 'robe_brown', shirt: 'robe_brown', sleeves: 'robe_brown', trousers: 'robe_brown'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'robe_brown', shirt: 'robe_brown', sleeves: 'robe_brown', trousers: 'robe_brown'}, add: [
       {on: 'Hips', part: 'monk.skirt', mat: 'robe_brown', shape: 'tube', r0: .3, r1: .22, len: .7, at: [0, 0, .43], o: {sides: 12}},
       {on: 'Hips', part: 'monk.rope', mat: 'wool_cream', shape: 'tube', r0: .228, r1: .226, len: .03, at: [0, 0, .8], o: {sides: 12}},
       {on: 'Hips', part: 'monk.knot', mat: 'wool_cream', shape: 'box', size: [.03, .03, .2], at: [.08, -.21, .68]},
     ]}},
   {id: 'noble_doublet', name: 'Noble\'s doublet', slot: 'body', kind: 'clothing', rarity: 'masterwork', weight: 1, armor: .01, desc: 'Red velvet with gold buttons.',
     soon: 'nobles talk to you',
-    look: {paint: {vest: 'velvet_red', sleeves: 'velvet_red', shirt: 'linen'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'velvet_red', sleeves: 'velvet_red', shirt: 'linen'}, add: [
       {on: 'Spine2', part: 'doublet.b0', mat: 'gold', shape: 'ball', r: .018, at: [0, -.155, 1.15], o: {fixed: 1}},
       {on: 'Spine2', part: 'doublet.b1', mat: 'gold', shape: 'ball', r: .018, at: [0, -.16, 1.07], o: {fixed: 1}},
       {on: 'Spine2', part: 'doublet.b2', mat: 'gold', shape: 'ball', r: .018, at: [0, -.155, .99], o: {fixed: 1}},
       {on: 'Hips', part: 'doublet.belt', mat: 'leather_dk', shape: 'tube', r0: .215, r1: .215, len: .045, at: [0, 0, .82], o: {sides: 10}},
     ]}},
   {id: 'tunic', name: 'Tunic', slot: 'body', kind: 'clothing', rarity: 'common', weight: .6, armor: 0, desc: 'A green linen tunic and a belt.',
-    look: {paint: {vest: 'green_cloth', shirt: 'green_cloth', sleeves: 'green_cloth'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'green_cloth', shirt: 'green_cloth', sleeves: 'green_cloth'}, add: [
       {on: 'Hips', part: 'tunic.skirt', mat: 'green_cloth', shape: 'tube', r0: .24, r1: .22, len: .16, at: [0, 0, .72], o: {sides: 10}},
       {on: 'Hips', part: 'tunic.belt', mat: 'leather_dk', shape: 'tube', r0: .222, r1: .222, len: .04, at: [0, 0, .81], o: {sides: 10}},
     ]}},
@@ -531,28 +557,19 @@ export const GEAR = [
       {on: 'LeftHand', part: 'net.hoop', mat: 'netting', shape: 'disc', r: .15, len: .012, at: [.95, 0, .44], rot: [90, 0, 0], o: {sides: 10}},
     ]}},
 ];
-// the switches (2026-10-14): his own cape off. Its slot is its own (one of each switch in a set), after SLOTS'
-export const SWITCHES = [
-  {id: 'cape_off', name: 'No cape', slot: 'cape', kind: 'clothing', rarity: 'common', weight: 0, armor: 0, desc: 'His own cape and coat tail left off.',
-    look: {hide: ['cape'], cloth: 'off', under: true}},
-];
-export const CAPE_OFF = 'cape_off';
-export const GEAR_BY_ID = Object.fromEntries([...GEAR, ...SWITCHES].map(g => [g.id, g]));
+export const GEAR_BY_ID = Object.fromEntries(GEAR.map(g => [g.id, g]));
 export const gearById = id => GEAR_BY_ID[id] || null;
-const ORDER = [...SLOTS, ...SWITCHES.map(g => g.slot)];
 
 // a set as asked for (ids, any order, maybe junk) -> the set it can be: known ids, at most one a slot (the later wins), in
-// SLOTS order, then the switches. The co-op server keeps only what this returns (server/room.mjs), the game too (features/gear.js)
+// SLOTS order. The co-op server keeps only what this returns (server/room.mjs), the game too (features/gear.js)
 export function cleanSet(ids) {
   const by = {};
   if (Array.isArray(ids)) for (const id of ids) { const g = typeof id === 'string' ? GEAR_BY_ID[id] : null; if (g) by[g.slot] = g.id; }
-  return ORDER.map(s => by[s]).filter(Boolean);
+  return SLOTS.map(s => by[s]).filter(Boolean);
 }
-// is his own cape drawn with these pieces on (content/gear.js entries)? Off when the switch is on and no piece brings a
-// cloth of its own (a cloak). The sprite loadouts' runtime cloak follows this (view/hero.js); the live models go by view/dress.js
-export const capeShown = pieces => !pieces.some(g => g?.id === CAPE_OFF) || pieces.some(g => g && !g.look?.under && g.look?.cloth && g.look.cloth !== 'off');
-// a set with the cape switched on (true) or off
-export const withCape = (ids, on) => cleanSet(on ? ids.filter(id => id !== CAPE_OFF) : [...ids, CAPE_OFF]);
+// is his own cape drawn with these pieces on (content/gear.js entries)? Not when the back slot holds a piece (BASE: it replaces
+// the cape), unless that piece is a cloak (a cloth of its own). The sprite loadouts' runtime cloak follows this (view/hero.js)
+export const capeShown = pieces => { const b = pieces.find(g => g?.slot === 'back'); return !b || !!(b.look?.cloth && b.look.cloth !== 'off'); };
 // a set's numbers: total weight (kg), armor (share, capped), the speed share its weight leaves you
 export function setStats(ids) {
   let kg = 0, armor = 0;
