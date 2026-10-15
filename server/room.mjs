@@ -9,9 +9,13 @@
 // offline), from the forest's uncanny plan (world/uncanny.js) when the server gives one. And FISHING's rolls (docs/FISHING.md):
 // what bites a cast, how big, when, from the set the player wears and the clock; a landed fish is told to everyone. And the
 // FORAGED PATCHES (docs/FORAGING.md): which of the forest floor's plants are picked, a pick's yield, their growing back. And the
-// cave's VEINS (docs/MINING.md): the blows left on each, who struck it, each striker's chunks when it breaks, its coming back.
+// cave's VEINS (docs/MINING.md): the blows left on each, who struck it, each striker's chunks when it breaks, its coming back
+// (a hollow wall's plug never comes back). And the cave's SOOT THINGS (docs/CAVELIFE.md: sim/cavelife.js, the same rules the game
+// runs offline): they go for the lit lanterns (each player's state says whether theirs burns: lt), keep out of the lamps' and
+// burning fires' light (the builds), and put a lantern out (an event to everyone: {k: 'ev', a: 'snuff', id}); their places go
+// out in the snapshots (sn: [x, y, h, mode] each).
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
-//   const room = createRoom({seed, trees, decor, veins, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
+//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
 import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
@@ -21,11 +25,12 @@ import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/cont
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
+import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -40,6 +45,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, regr
   const elk = unc ? createStalker(unc, mulberry32(seed ^ 0x5e1c)) : null;
   const secState = () => secrets ? Object.fromEntries(Object.entries(secrets.st).map(([id, q]) => [id, {s: q.s, by: q.by, n: q.n}])) : {};
   const where = [], tpos = [0, 0];   // (the placed players for the rules: [{id, x, y}], reused)
+  // THE CAVE'S SOOT THINGS (none without the cave's plan)
+  const soot = cave ? createSoot(cave, mulberry32((seed ^ 0x5007) >>> 0), snuffers) : null, shine = [], snRow = [];
 
   const pub = p => ({id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, phi: p.phi, s: p.s, pose: p.pose, rig: p.rig, w: p.w, wn: p.wn, ls: p.ls, g: p.gear});
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
@@ -50,7 +57,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, regr
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
-      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0};
+      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false};
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
       clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null}));
     peers.set(id, p);
@@ -74,6 +81,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, regr
     if (rig !== p.rig) { p.rig = rig; if (!rig) { p.w = null; p.wn = null; } }
     if (typeof m.w === 'string' && m.w.length < 2048) { p.w = m.w; p.wNew = true; }
     p.ls = Array.isArray(m.ls) && m.ls.length === 5 ? m.ls.map((v, i) => i ? Math.round(num(v) * 100) / 100 : str(v, 8)) : null;
+    p.lit = m.lt === 1;   // (his lantern burns in the cave: sim/cavelife.js reads p.lit)
     p.fresh = true;
   }
 
@@ -160,7 +168,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, regr
       for (const g of pq.gear) for (const n of GEAR_BY_ID[g]?.mods || []) notes.push(n);
       got[q] = mineYield(mineRng, kind, mineStats(notes));
     }
-    world.set(id, {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});
+    world.set(id, V.hollow ? {s: 'spent', by: p.id, t} : {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});   // (a hollow wall: open for good)
     all({k: 'world', id, s: 'spent', by: p.id, got});
   }
   // BUILDING (docs/BUILDING.md): a build put down ({a: 'build', id: its kind (content/builds.js), x, y}: within reach of him,
@@ -280,17 +288,25 @@ export function createRoom({seed, trees = null, decor = null, veins = null, regr
       for (const ch of secrets.tick(DT, h, where)) { all({k: 'sec', ...ch}); if (ch.s === 'triggered') log(`  the secret ${ch.id} opened for ${ch.by.join(', ')}`); }
       if (elk) { for (const e of elk.step(DT, h, where)) { all({k: 'ev', ...e}); log(`  the night elk knocked #${e.id} down`); } c = elk.row(); }
     }
+    let sn = null;
+    if (soot && soot.things.length) {   // the soot things: the placed players, the lamps and the burning fires (the builds that shine)
+      if (!unc) { where.length = 0; for (const p of peers.values()) if (p.placed) where.push(p); }
+      shine.length = 0; const sec = secs();
+      for (const e of world.values()) if (e.s === 'built' && (BUILDS[e.kind]?.lamp || (BUILDS[e.kind]?.fire && fuelAt(e, sec) > 0))) shine.push(e);
+      for (const e of soot.step(DT, where, shine)) all({k: 'ev', ...e});
+      sn = soot.rows(snRow);
+    }
     const rows = [];
     for (const p of peers.values()) {
       if (!p.placed) continue;
-      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0]);
+      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lit ? 1 : 0]);
       p.wNew = false;
     }
-    if (rows.length) all(c ? {k: 'snap', t: now(), p: rows, c} : {k: 'snap', t: now(), p: rows});
+    if (rows.length) { const m = {k: 'snap', t: now(), p: rows}; if (c) m.c = c; if (sn) m.sn = sn; all(m); }
   }, 1000 / TICK_HZ);
 
   return {
-    connect, get size() { return peers.size; }, world, seed, clock, secrets, elk,
+    connect, get size() { return peers.size; }, world, seed, clock, secrets, elk, soot,
     stop() { clearInterval(timer); for (const p of peers.values()) p.conn.close(1001, 'server stopping'); },
   };
 }

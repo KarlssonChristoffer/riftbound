@@ -31,6 +31,8 @@ x 35.6, y -20.6). Esc > Sandbox > Gathering > "Mining: to the miner's camp" jump
 - **Miner's cap** (head: Tab > gear, or Shift+Tab in the wardrobe): the lantern reaches 30% farther, and a 5% chance of one
   more chunk from a vein. Fried chanterelles (`docs/FORAGING.md`) make the pick bite 15% harder.
 - The dark does no harm, surface rock can't be mined, and the night ore does nothing yet.
+- **Night veins** (show only in the dark) and **hollow walls** (a sealed room behind rubble) came with the living dark:
+  `docs/CAVELIFE.md`.
 
 Dev: Esc > Sandbox > Gathering: marks on the veins (dots: gold, red while spent, grey when too hard for your pick; or
 `?gathermarks=1`), every vein back (offline), the old pick back at the camp, to the miner's camp. `?mining=0` turns mining

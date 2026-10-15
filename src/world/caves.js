@@ -38,6 +38,10 @@ export const TUNE = {
   // the veins (features/mining.js): how many, the least south part of a wall's way into the open (it faces the camera), m apart,
   // iron past this share of the cave's depth (graph distance), the chances there of iron and (anywhere) of copper; stone the rest
   veins: {n: [14, 22], face: .45, apart: 2.2, ironFrom: .5, iron: .4, copper: .3},
+  // the living dark (features/cavelife.js, docs/CAVELIFE.md): night veins (how many, from this share of the cave's depth), hollow
+  // walls (how many; the neck through the wall and its half width, the sealed room's radius, m kept from every vein), the soot
+  // things' roosts (how many, from this share of the depth), the rock-things' spots in the passages
+  dark: {night: [1, 2], nightFrom: .5, hollows: [1, 2], neck: .9, neckW: .72, room: [1.05, 1.4], hollowApart: 3.2, soot: [2, 4], sootFrom: .6, critters: [6, 10]},
 };
 const CELL = .25;  // the grid (world/terrain.js CELL: the field's own lattice, so the field reads it exactly)
 const PORTAL = {r: 22};  // m round the slot copy's foot: the cave drawn under the woods too (C.inPortal; as far as the view reaches from the step)
@@ -267,6 +271,7 @@ export function cavePlan(seed, m, rect, height = null) {
     C.props.push(['rock', +x.toFixed(2), +y.toFixed(2), {r: 0, variant: Rp() * 3 | 0}]); got++;
   }
   minePlan(C, seed);
+  darkPlan(C, seed, rough);
   return C;
 }
 // ---- MINING (content/mining.js, features/mining.js, docs/MINING.md): the old miner's CAMP in the entry chamber or the next room
@@ -275,7 +280,8 @@ export function cavePlan(seed, m, rect, height = null) {
 // world/cave3d.js keeps those walls whole), off the slot, apart from the others, the crystals and the camp; iron only in the far
 // half of the cave (graph distance from the entry along the passages)
 //   C.camp = {x, y, nx, ny (unit: from the wall into the room), wx, wy (the wall point: the pick driven into it), room (node index)}
-//   C.veins = [{x, y, nx, ny, kind, deep (0 the entry .. 1 the farthest)}], x, y on the open's edge
+//   C.veins = [{x, y, nx, ny, kind, deep (0 the entry .. 1 the farthest)}], x, y on the open's edge; C.depth: each node's share of
+//   the cave's depth (0 the entry .. 1 the farthest; darkPlan below)
 function minePlan(C, seed) {
   const T = TUNE.veins, nodes = C.nodes, edges = C.edges;
   // graph distance from the entry chamber (node 0) along the passages
@@ -286,6 +292,7 @@ function minePlan(C, seed) {
     if (gd[e.a] + L < gd[e.b]) gd[e.b] = gd[e.a] + L; if (gd[e.b] + L < gd[e.a]) gd[e.a] = gd[e.b] + L;
   }
   const far = Math.max(1, ...gd.filter(Number.isFinite));
+  C.depth = gd.map(g => Number.isFinite(g) ? +(g / far).toFixed(3) : 1);
   const deepAt = (x, y) => { let best = 0, bd = 1e9; for (let k = 0; k < nodes.length; k++) { const d = Math.hypot(nodes[k].x - x, nodes[k].y - y); if (d < bd) { bd = d; best = k; } } return Number.isFinite(gd[best]) ? gd[best] / far : 1; };
   const SQ = [0, 0, 0], offSlot = (x, y) => C.slotAt(x, y, SQ)[2] === 0 && C.inside(x, y) < 0;
   // the wall's points with their way into the open (the loops run with the open on their right: (-ty, tx)), averaged over ~1.4 m
@@ -323,6 +330,94 @@ function minePlan(C, seed) {
     if (C.camp && Math.hypot(C.camp.wx - x, C.camp.wy - y) < 2.5) continue;
     const deep = deepAt(x, y), kind = deep > T.ironFrom && k < T.iron ? 'iron' : k < T.copper + (deep > T.ironFrom ? T.iron : 0) ? 'copper' : 'stone';
     C.veins.push({x: +x.toFixed(2), y: +y.toFixed(2), nx: +p[2].toFixed(3), ny: +p[3].toFixed(3), kind, deep: +deep.toFixed(2)});
+  }
+}
+// ---- THE LIVING DARK (content/cavelife.js, features/cavelife.js, docs/CAVELIFE.md), after the veins, each from a generator of its
+// own, so nothing placed before moves:
+//   NIGHT VEINS  1-2 more veins (kind 'night') in the far half, placed as the veins are and after them in C.veins (the veins'
+//                indices stay): they show only in the dark (features/mining.js)
+//   HOLLOW WALLS 1-2 small sealed rooms carved into the rock behind a chamber's wall that faces the camera, a short neck through
+//                the wall stopped with rubble: the neck's mouth is a vein of kind 'hollow' (after the night veins in C.veins), the
+//                room C.hollows [{x, y, nx, ny (the mouth, its way into the chamber), cx, cy, r (the room), vein (its index)}].
+//                Carved into the grid before anything reads it (the walls are traced again round them, far from every vein)
+//   SOOT ROOSTS  C.soot [{x, y, h (the floor there)}]: where the soot things live, in the rooms of the last part of the cave
+//   ROCK-THINGS  C.critters [{x, y, v}]: their spots by the passages' walls, among the loose rocks (v: the rock card they ape)
+function darkPlan(C, seed, rough) {
+  const T = TUNE.dark, VT = TUNE.veins, nodes = C.nodes, depth = C.depth || nodes.map(() => 0), G = C.grid;
+  const SQ = [0, 0, 0], offSlot = (x, y) => C.slotAt(x, y, SQ)[2] === 0 && C.inside(x, y) < 0;
+  const nearNode = (x, y) => { let best = 0, bd = 1e9; for (let k = 0; k < nodes.length; k++) { const d = Math.hypot(nodes[k].x - x, nodes[k].y - y); if (d < bd) { bd = d; best = k; } } return best; };
+  const pts = [];   // (the walls' points and their way into the open, as minePlan's)
+  for (const L of C.walls) {
+    const n = L.length - 1; if (n < 8) continue;
+    for (let i = 0; i < n; i++) { const a = L[(i - 2 + n) % n], b = L[(i + 2) % n], tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty) || 1; pts.push([L[i][0], L[i][1], -ty / l, tx / l]); }
+  }
+  const cands = pts.filter(p => p[3] > VT.face);
+  const roomFor = (x, y, nx, ny) => !offSlot(x + nx * .5, y + ny * .5) || C.inside(x + nx * .5, y + ny * .5) > -.3;   // (true: no room in front of it)
+  const near = (x, y, r) => C.veins.some(v => Math.hypot(v.x - x, v.y - y) < r);
+  const nearProp = (x, y, r) => C.props.some(q => Math.hypot(q[1] - x, q[2] - y) < r);
+  const byCamp = (x, y, r) => C.camp && Math.hypot(C.camp.wx - x, C.camp.wy - y) < r;
+  const add = (p, kind) => { const k = nearNode(p[0], p[1]); C.veins.push({x: +p[0].toFixed(2), y: +p[1].toFixed(2), nx: +p[2].toFixed(3), ny: +p[3].toFixed(3), kind, deep: depth[k]}); return C.veins.length - 1; };
+  // NIGHT VEINS
+  const Rn = mulberry32(mix(seed, 22)), wantN = T.night[0] + Math.floor(Rn() * (T.night[1] - T.night[0] + 1));
+  for (let t = 0, got = 0; t < 400 && got < wantN && cands.length; t++) {
+    const p = cands[Math.floor(Rn() * cands.length)];
+    if (depth[nearNode(p[0], p[1])] < T.nightFrom || roomFor(p[0], p[1], p[2], p[3]) || near(p[0], p[1], VT.apart + .8) || nearProp(p[0], p[1], 1.2) || byCamp(p[0], p[1], 2.5)) continue;
+    add(p, 'night'); got++;
+  }
+  // HOLLOW WALLS: a mouth on a chamber's wall, the neck straight into the rock, the room past it; all of it inside the grid and
+  // rock all round (most of a metre from any open), so it opens nowhere else
+  const Rh = mulberry32(mix(seed, 23)), wantH = T.hollows[0] + Math.floor(Rh() * (T.hollows[1] - T.hollows[0] + 1));
+  const inGrid = (x, y, m) => x - m > G.x0 + G.cell && y - m > G.y0 + G.cell && x + m < G.x0 + (G.nx - 2) * G.cell && y + m < G.y0 + (G.ny - 2) * G.cell;
+  C.hollows = [];
+  for (let t = 0; t < 500 && C.hollows.length < wantH && cands.length; t++) {
+    const p = cands[Math.floor(Rh() * cands.length)], [x, y, nx, ny] = p, k = nearNode(x, y), r = T.room[0] + Rh() * (T.room[1] - T.room[0]);
+    if (!k || !nodes[k].room || roomFor(x, y, nx, ny) || near(x, y, T.hollowApart) || nearProp(x, y, 2) || byCamp(x, y, 3)) continue;
+    if (C.hollows.some(h => Math.hypot(h.x - x, h.y - y) < 6)) continue;
+    const cx = x - nx * (T.neck + r), cy = y - ny * (T.neck + r);
+    if (!inGrid(cx, cy, r + 1)) continue;
+    let solid = true;
+    for (let a = 0; a < 16 && solid; a++) for (const q of [0, r * .6, r, r + .9]) {
+      const sx = cx + Math.cos(a / 16 * Math.PI * 2) * q, sy = cy + Math.sin(a / 16 * Math.PI * 2) * q;
+      if (Math.hypot(sx - x, sy - y) < 1.2) continue;   // (by the mouth: the chamber is meant to be there)
+      if (C.inside(sx, sy) < .7) { solid = false; break; }
+    }
+    if (!solid) continue;
+    carve(x, y, nx, ny, cx, cy, r);
+    const i = add(p, 'hollow');
+    C.hollows.push({x: +x.toFixed(2), y: +y.toFixed(2), nx: +nx.toFixed(3), ny: +ny.toFixed(3), cx: +cx.toFixed(2), cy: +cy.toFixed(2), r: +r.toFixed(2), vein: i});
+  }
+  if (C.hollows.length) C.walls = contour(G);
+  function carve(x, y, nx, ny, cx, cy, r) {   // the room and its neck into the distance grid; their floor level with the chamber's at the mouth
+    const D = G.D, Hf = G.H, Hr = G.top, cell = G.cell, h0 = C.floor(x + nx * .4, y + ny * .4), ax = x + nx * .3, ay = y + ny * .3;
+    const lo = (v, o) => Math.max(0, Math.floor((v - o) / cell)), m = r + 1;
+    const i0 = lo(Math.min(cx - m, x - 1.5), G.x0), j0 = lo(Math.min(cy - m, y - 1.5), G.y0);
+    const i1 = Math.min(G.nx - 1, Math.ceil((Math.max(cx + m, x + 1.5) - G.x0) / cell)), j1 = Math.min(G.ny - 1, Math.ceil((Math.max(cy + m, y + 1.5) - G.y0) / cell));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const X = G.x0 + i * cell, Y = G.y0 + j * cell, kk = j * G.nx + i;
+      const d = Math.min(Math.hypot(X - cx, Y - cy) - r, segD(X, Y, ax, ay, cx, cy) - T.neckW) + rough(X, Y) * .45;
+      if (d < 1.2 && D[kk] > 0) { Hf[kk] = h0; Hr[kk] = h0 + TUNE.wall; }
+      if (d < D[kk]) D[kk] = d;
+    }
+  }
+  // SOOT ROOSTS: in the rooms past T.sootFrom of the depth (the farthest room when none is), at a room's middle
+  const Rs = mulberry32(mix(seed, 24)), deepRooms = nodes.map((n, k) => k).filter(k => k && nodes[k].room && depth[k] >= T.sootFrom);
+  if (!deepRooms.length) { let f = -1; for (let k = 1; k < nodes.length; k++) if (nodes[k].room && (f < 0 || depth[k] > depth[f])) f = k; if (f > 0) deepRooms.push(f); }
+  const wantS = T.soot[0] + Math.floor(Rs() * (T.soot[1] - T.soot[0] + 1));
+  C.soot = [];
+  for (let t = 0; t < 60 && C.soot.length < wantS && deepRooms.length; t++) {
+    const n = nodes[deepRooms[Math.floor(Rs() * deepRooms.length)]], a = Rs() * Math.PI * 2, q = Rs() * n.r * .45, x = n.x + Math.cos(a) * q, y = n.y + Math.sin(a) * q;
+    if (C.inside(x, y) > -1) continue;
+    C.soot.push({x: +x.toFixed(2), y: +y.toFixed(2), h: +C.floor(x, y).toFixed(2)});
+  }
+  // ROCK-THINGS: by the passages' walls, as the loose rocks lie, apart from them, the veins and each other
+  const Rk = mulberry32(mix(seed, 25)), edges = C.edges, wantK = T.critters[0] + Math.floor(Rk() * (T.critters[1] - T.critters[0] + 1));
+  C.critters = [];
+  for (let t = 0; t < 200 && C.critters.length < wantK && edges.length > 1; t++) {
+    const e = edges[1 + Math.floor(Rk() * (edges.length - 1))], k = Math.floor(Rk() * (e.pts.length - 1)), f = Rk(), side = Rk() < .5 ? -1 : 1, v = Rk() * 3 | 0;
+    const [ax, ay] = e.pts[k], [qx, qy] = e.pts[k + 1], l = Math.hypot(qx - ax, qy - ay) || 1;
+    const x = ax + (qx - ax) * f + (ay - qy) / l * side * (e.hw - .35), y = ay + (qy - ay) * f + (qx - ax) / l * side * (e.hw - .35);
+    if (C.inside(x, y) > -.25 || nearProp(x, y, 1.2) || near(x, y, 1.5) || C.critters.some(c => Math.hypot(c.x - x, c.y - y) < 3)) continue;
+    C.critters.push({x: +x.toFixed(2), y: +y.toFixed(2), v});
   }
 }
 // a passage from node A to node B (indices ia, ib): its line wandering off the straight a little (a point every ~1.5 m), its floor

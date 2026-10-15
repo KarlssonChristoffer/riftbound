@@ -65,6 +65,19 @@ export const ITEMS = {
     pal: {a: '#eaffd8', b: '#9ad878', c: '#58a060'},
     icon: ['............', '......a.....', '.....ab.....', '.....abc....', '....aabc....', '....abbc....', '...aabbcc...', '...abbbcc...',
       '....bbcc....', '.....bc.....', '............', '............']},
+  night_ore: {name: 'Night Ore', kind: 'material', col: '#7c88c8', desc: 'black rock full of tiny lights, like a piece of the night sky. It shows only in the dark',
+    pal: {p: '#2a2c3a', q: '#16161e', s: '#e8f0ff', t: '#8a9ce0'},
+    icon: ['............', '............', '....pppq....', '...psppqq...', '..ppptpqsq..', '.pspppqqqq..', '.ppptpqsqqq.', '..ppqsqqtq..',
+      '...qqqqqq...', '............', '............', '............']},
+  // KEEPSAKES of the cave's sealed rooms (features/mining.js: a hollow wall's cache): they do nothing yet
+  tally_stick: {name: 'Tally Stick', kind: 'material', col: '#c8a878', desc: 'a stick cut with rows of notches. Someone was counting something, down here, for a long time',
+    pal: {w: '#c8a878', d: '#7a5c3a', n: '#3a2a1a'},
+    icon: ['..........ww', '.........wwd', '........wnd.', '.......wwd..', '......wnd...', '.....wwd....', '....wnd.....', '...wwd......',
+      '..wnd.......', '.wwd........', 'wwd.........', 'dd..........']},
+  big_tooth: {name: 'Big Tooth', kind: 'material', col: '#e8dcc0', desc: 'a tooth as long as your hand. Nothing you have seen in the woods has teeth like this',
+    pal: {w: '#f2ead6', b: '#c8b894', d: '#7a6c52'},
+    icon: ['............', '...wwwwbb...', '..wwwwwbbd..', '..wwwwwbbd..', '...wwwbbd...', '...wwwbbd...', '....wwbd....', '....wwbd....',
+      '.....wbd....', '.....wd.....', '......d.....', '............']},
   // KEEPSAKES (the uncanny forest: features/uncanny.js, docs/UNCANNY.md): odd things the forest's secrets leave you. They do
   // nothing yet; they sit in the pouch
   heron_feather: {name: 'Heron Feather', kind: 'material', col: '#d6dade', desc: 'a long grey feather; it was warm when you picked it up',

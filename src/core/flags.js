@@ -125,6 +125,8 @@ export const FLAG_DOCS = {
   rhythm: '0: no rhythm blows (sim/player/tool.js: a fresh press timed to a swing\'s end lands the next blow harder; content/mining.js TUNE.rhythm)',
   campfires: '0: no campfires to build (features/campfires.js: the pack panel builds one from logs, E adds a log; the sandbox ruins biome)',
   builds: '0: nothing to build (features/builds.js, docs/BUILDING.md: the pack panel\'s Build list: campfire, Stone Fire Ring, Crystal Lamp; campfires=0 too)',
+  cavelife: '0: no cave life (features/cavelife.js, docs/CAVELIFE.md: the rock-things and the soot things; the lantern key, night veins and hollow walls stay)',
+  snuffers: 'n: how many soot things live in the cave offline (docs/CAVELIFE.md; its roosts\' count, 2-4, by default; 0 none; co-op: the server\'s --snuffers)',
   trip: 's: how long the fly agaric broth\'s trip lasts (features/trip.js, docs/BUILDING.md; 90 by default)',
   uncanny: '1: the uncanny forest on (it is off by default; Esc > Game > World switches it, remembered), 0: off (features/uncanny.js, docs/UNCANNY.md: the night shift, the heron, the night elk, the secrets); dev: its places and creatures marked (pixel markers, a line from you to each, the HUD says what each is doing)',
   nshift: 'the night shift\'s strength (docs/UNCANNY.md): 1 default; 0 no tree or boulder walks; 2 twice as many walk, a little further. Co-op: the server\'s --nshift decides',

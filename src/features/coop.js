@@ -68,7 +68,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- sending: 20 times a second, after the frame's steps
   let sendT = 0, lastN = -1, lastRig = '', lastX = NaN, lastY = NaN, packed = null, sentW = null, pinged = 0;
-  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined};
+  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0};
   const LS = ['', 0, 0, 0, 0];
   function send(now) {
     if (C.status !== 'online' || now - sendT < 1000 / TICK_HZ) return;
@@ -82,6 +82,7 @@ export async function create(host) {
       lastN = pp.n; packed = packPose(pp.w, pp.BN.length, packed);
       if (!sentW || !same(packed, sentW)) { sentW = (sentW && sentW.length === packed.length) ? sentW : new Int16Array(packed.length); sentW.set(packed); ST.w = b64(packed); }
     }
+    ST.lt = host.feature('caves')?.lit ? 1 : 0;   // (his lantern burns in the cave: the server's soot things go for it, friends' night veins hide)
     if (Math.hypot(ST.x - lastX, ST.y - lastY) > 4) ST.tp = 1;   // (a respawn, a teleport: the server lets that one through)
     lastX = ST.x; lastY = ST.y;
     const L = host.feature('equip')?.sim?.lasso?.L, ph = L?.phase;
@@ -119,6 +120,11 @@ export async function create(host) {
     wear(ids) { if (C.status !== 'online') return false; C.wear(ids); return true; },   // (features/gear.js: ask for a set)
     fish(o) { if (C.status !== 'online') return false; C.fish(o); return true; },       // (features/fishing.js: the server rolls the catch)
     mail, clockNow,
+    // a friend's lit lantern in the cave within r m of (x, y) (their latest snapshot: features/mining.js's night veins hide from it)
+    litNear(x, y, r) {
+      for (const q of C.peers.values()) { if (!q.lt || !q.n) continue; const i = (q.head - 1 + q.X.length) % q.X.length; if (Math.hypot(q.X[i] - x, q.Y[i] - y) < r) return true; }
+      return false;
+    },
     update(dt) {
       mail.length = 0;
       if ((clkCheck -= dt) <= 0) { clkCheck = 2; follow(false); }

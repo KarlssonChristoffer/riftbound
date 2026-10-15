@@ -13,7 +13,9 @@
 // READS: content/builds.js, pack (the pouch, the store), coop (online, act, mail, net), host.entities (near: room), host.elev,
 //   host.blocked, host.inStream. EMITS: build.add, build.remove.
 // API: F.list (id -> build {id, kind, def, x, y, z, by, fuel, t0, p}), F.now() (the fires' clock, s), F.fire(b) -> {fuel, ember}
-//   (s left), F.stoke(b) -> '' | why not (a log on a fire), F.mine(b), F.ver (changes with the list).
+//   (s left), F.stoke(b) -> '' | why not (a log on a fire), F.mine(b), F.ver (changes with the list). F.shining(out) -> out [{x, y}]:
+//   where a lamp stands or a fire burns now (the cave's soot things keep away, a night vein hides: features/cavelife.js, mining.js);
+//   F.shineNear(x, y, r): one within r m
 // BUDGET: sim: the mail (a few messages), a save every 5 s while a fire burns. View: a mesh per build made once; the lamps'
 //   lights (a record each, reused).
 import * as THREE from 'three';
@@ -195,12 +197,18 @@ export async function create(host) {
     b.mesh = host.world.mesh(geoOfKind(b.kind), M4([b.x, b.z, b.y], [0, (b.x * 7.3 + b.y * 3.1) % 6.28, 0]), {static: true});
   }
   // the lamps' lights (records reused: the pool grows with the lamps standing, never per frame)
-  const LOUT = [], LREC = [], FO = {fuel: 0, ember: 0};
+  const LOUT = [], LREC = [], FO = {fuel: 0, ember: 0}, SH = [];
 
   const F = {
     name: 'builds', label: 'Building', on: ON,
     list, now, get ver() { return ver; },
     fire(b) { const t = now(); FO.fuel = fuelAt(b, t); FO.ember = b.def.fire ? emberAt(b, t, b.def) : 0; return FO; },   // (one object, reused: read it at once)
+    shining(out) {   // (the records are this feature's, reused; a build is a lamp or a fire with fuel)
+      let n = 0; const t = now();
+      for (const b of list.values()) if (b.def.lamp || (b.def.fire && fuelAt(b, t) > 0)) { const o = SH[n] ??= {x: 0, y: 0}; o.x = b.x; o.y = b.y; out[n++] = o; }
+      out.length = n; return out;
+    },
+    shineNear(x, y, r) { const t = now(); for (const b of list.values()) if ((b.def.lamp || (b.def.fire && fuelAt(b, t) > 0)) && Math.hypot(b.x - x, b.y - y) < r) return true; return false; },
     stoke, mine: b => b.by === me(),
     check: kind => { const d = BUILDS[kind]; return d && spot(d) ? '' : why; },   // (tests: '' = it can go down ahead of him)
     update(dt, evs) {

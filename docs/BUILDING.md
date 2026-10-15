@@ -90,6 +90,6 @@ Flags: `?builds=0` turns the build path off (and the campfires with it), `?campf
 
 - The Stone Fire Ring's numbers are this slice's own (the brief named it without numbers): a better campfire for the cave.
 - The trip's "sounds a little lower" is left out: sound work is parked.
-- The trip's "private sightings" (night veins glowing in lantern light, the rock-things' legs) come with the creatures and
-  night veins in the next slice; the trip's `tripping` flag is the hook they'll read.
+- The trip's "private sightings" (night veins glowing in lantern light, the rock-things' legs) came with the living dark
+  (`docs/CAVELIFE.md`): they read the trip's `tripping`.
 - Season is ignored, the dark does no harm, night ore does nothing yet (the brief's defaults, unchanged).

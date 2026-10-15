@@ -9,6 +9,13 @@
 // walking over them picks them up; a spent vein is a dark scar until it comes back in the same spot (content/mining.js days,
 // the world clock; ?regrow= a factor). The cave's CRYSTALS (C.props 'crystal') break under the pick into Glow Shards (combat's
 // break: core.damage). Mining XP for each bite and each vein spent.
+// THE LIVING DARK (docs/CAVELIFE.md): NIGHT VEINS (kind 'night', 1-2 in the far half) show only in the dark: while no lit lantern
+// (his or a friend's), lamp or burning fire is within content/mining.js TUNE.night.dark m of one (or while he trips on the fly
+// agaric broth: features/trip.js), its specks glowing like a night sky; hidden, the pick can't find it. HOLLOW WALLS (kind 'hollow':
+// world/caves.js C.hollows) are a rubble plug in a chamber's wall with a sealed room carved behind it (a lid of dark over the room,
+// a collider in the neck, until it opens): a blow on it knocks hollow (mine.hit hollow: the audio), its last blow caves it in
+// (mine.open) for everyone for good, and each player there gets the room's cache (TUNE.cache and a keepsake) on its floor. The
+// tells (the lantern's flame leaning toward it, dust trickling down it) are features/cavelife.js's.
 // CO-OP (features/coop.js, server/room.mjs, docs/MULTIPLAYER.md): the server owns the veins' blows left and the spent ones. A blow
 // is sent (coop.act('mine', 'v' + i, {pow, lvl, tier})); the server's word comes back in coop.mail: struck (the blows left, for
 // everyone's cracks), spent (got: each striker's chunks: everyone who struck it gets his own full share), grown. A late joiner
@@ -18,7 +25,8 @@
 //   chunk meshes, the sparks. Sets the tool's want / aim for the job 'mine'.
 // READS: host.world.cave (veins, camp, floor), host.PL.tool, host.entities (near: crystals), host.mods ('mine.*'), host.env.t,
 //   pack (the pick, the pouch, XP, the store), coop (online, act, mail, net.id), combat's core (a crystal's damage).
-// EMITS: mine.hit, mine.spent, mine.chunk, mine.grow, mine.take, tool.whiff.
+// EMITS: mine.hit, mine.spent, mine.chunk, mine.grow, mine.take, mine.open, tool.whiff.
+// API (besides tests'): F.shown(i) (a night vein shows now), F.isSpent(i)
 // BUDGET: sim: a grid lookup (veins by 4 m cell) a blow or a press; the chunks (a handful) a step; the regrowth once a second
 //   over the spent set. View: a vein's mesh made again only when its stage changes; the camp's once; chunks' matrices while they
 //   move; the veins shown or hidden when the camera turns (a dot product each).
@@ -29,6 +37,7 @@ import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
 import {mulberry32, simRandom, viewRandom} from '../core/rng.js';
 import {geoOf, M4, box, along} from '../world/kit3d.js';
+import {FAMS} from '../world/world.js';
 import {hdUnit, hdPrompt} from '../ui/hdpixel.js';
 
 const ON = flags.get('mining') !== '0';
@@ -36,6 +45,7 @@ const REGROW = (v => v > 0 ? v : 1)(parseFloat(flags.get('regrow')));
 const CELL = 4, VEIN_R = .4, DEG = Math.PI / 180;   // m a grid cell; m: a vein's half width along its wall (a press, a blow)
 const SHOW = .3;   // a vein shows while its way into the open . the way to the camera > SHOW (world/cave3d.js's walls: the same rule)
 const key = (i, j) => (i + 4096) * 8192 + j + 4096;
+const NEVER = 1e9;   // (a hollow wall's 'comes back' hour: never)
 
 // ORDER (core/features.js): after woodcutting (its LMB on a trunk asks first; neither takes the other's), before the fists, brawl
 // and the gun (LMB, RMB and R are the tool's while it's out). Like foraging it reads co-op's mail a step after it came
@@ -53,10 +63,14 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- the cave's veins, by grid cell
   let C = null, V = [];
+  const NIGHT = [], HID = new Uint8Array(64);   // the night veins' indices; 1: a vein the pick can't find now (a night vein in the light)
   const cells = new Map();   // key(cell) -> [vein index]
   function index() {
     const c = host.world?.cave || null; if (c === C) return;
     C = c; V = c?.veins || []; cells.clear(); left.clear(); spent.clear(); restored = false; ver++;
+    NIGHT.length = 0; for (let i = 0; i < V.length; i++) if (V[i].kind === 'night') NIGHT.push(i);
+    HID.fill(0); for (const i of NIGHT) HID[i] = 1;   // (a night vein starts hidden until the dark is checked)
+    plugsOut(); lids.clear();
     for (const g of GEO.values()) g.dispose(); GEO.clear();   // (another cave: its veins' shapes are other ones)
     for (let i = 0; i < V.length; i++) { const k = key(Math.floor(V[i].x / CELL), Math.floor(V[i].y / CELL)); let L = cells.get(k); if (!L) cells.set(k, L = []); L.push(i); }
   }
@@ -69,7 +83,7 @@ export async function create(host) {
     for (let j = cy - r; j <= cy + r; j++) for (let i = cx - r; i <= cx + r; i++) {
       const L = cells.get(key(i, j)); if (!L) continue;
       for (let k = 0; k < L.length; k++) {
-        const n = L[k], v = V[n]; if (spent.has(n)) continue;
+        const n = L[k], v = V[n]; if (spent.has(n) || HID[n]) continue;
         const dx = v.x - x, dy = v.y - y, d0 = Math.hypot(dx, dy), d = d0 - VEIN_R;
         if (d > reach || d >= bd) continue;
         if ((fx || fy) && d > .3 && (dx * fx + dy * fy) / (d0 || 1) < .3) continue;
@@ -91,7 +105,7 @@ export async function create(host) {
     for (let j = cy - 1; j <= cy + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
       const L = cells.get(key(i, j)); if (!L) continue;
       for (let q = 0; q < L.length; q++) {
-        const n = L[q], v = V[n]; if (spent.has(n) || Math.hypot(v.x - P.x, v.y - P.y) > LOCK_M) continue;
+        const n = L[q], v = V[n]; if (spent.has(n) || HID[n] || Math.hypot(v.x - P.x, v.y - P.y) > LOCK_M) continue;
         const z = floorAt(v); if (Math.abs(z - P.z) > 1.2) continue;
         const vx = v.x * c - v.y * s, vy = v.x * s + v.y * c, h = hg + (vy - gv.y) * k, dx = Math.abs(vx - gv.x);   // (the line's height over its row)
         if (dx > VEIN_R + .15 || h < z - .2 || h > z + 1.7) continue;
@@ -129,13 +143,14 @@ export async function create(host) {
   const chunks = [];         // {x, y, h, vx, vy, vh, t, rest, item, yaw, spin, dead}
   let ver = 0, clockT = 0, growT = 0, was = false, wasOnline = false, restored = false, aimSet = false, byE = false, heldSlot = -1, noteT = -9;
   let lockI = -1, lockC = null;   // the vein / crystal a held press is on
-  let marks = flags.get('gathermarks') === '1';
+  let marks = flags.get('gathermarks') === '1', hopT = 0, hopN = 0;
 
   function restore() {   // the saved spent veins (offline): this cave's, else none
     restored = true; spent.clear(); left.clear(); ver++;
     const s = store(); if (!s || !C) return;
     if (s.seed !== C.seed) { s.seed = C.seed; s.s = {}; pack()?.dirty(); return; }
     for (const k in s.s || {}) { const i = +k; if (V[i]) spent.set(i, s.s[k]); }
+    for (const i of spent.keys()) plugOut(i);
   }
   function save(i, at) {
     if (online()) return;
@@ -148,16 +163,49 @@ export async function create(host) {
   // where the pick meets it: its face, waist high
   const HIT = {x: 0, y: 0, h: 0};
   function hitAt(v) { HIT.x = v.x + v.nx * .1; HIT.y = v.y + v.ny * .1; HIT.h = floorAt(v) + .8; return HIT; }
-  function spend(i, n, mine) {
-    const v = V[i], K = VEINS[v.kind], at = (host.env?.t ?? 0) + regrowHours(REGROW);
-    left.delete(i); spent.set(i, online() ? 1 : at); save(i, at); ver++;
+  function spend(i, n, mine, late) {
+    const v = V[i], K = VEINS[v.kind], at = K.hollow ? NEVER : (host.env?.t ?? 0) + regrowHours(REGROW);
+    left.delete(i); spent.set(i, online() ? (K.hollow ? NEVER : 1) : at); save(i, at); ver++;
     if (lockI === i) lockI = -1;
     if (n > 0) spawn(v.x + v.nx * .35, v.y + v.ny * .35, floorAt(v) + .7, v.nx, v.ny, K.item, n);
     if (mine) pack()?.gain('mining', K.xp * 4, {x: v.x, y: v.y, h: floorAt(v) + 1.8});
     host.events.push({type: 'mine.spent', x: v.x, y: v.y, i, kind: v.kind, n});
+    if (K.hollow) { plugOut(i); if (!late) open(i); }
+  }
+  // a hollow wall caved in: the sealed room behind it, its cache on the floor (each player there his own: chunks are his)
+  function open(i) {
+    const h = C.hollows?.find(q => q.vein === i); if (!h) return;
+    const z = host.elev(h.cx, h.cy) + .5, k = C.hollows.indexOf(h);
+    for (const item in TUNE.cache) spawn(h.cx, h.cy, z, h.nx, h.ny, item, TUNE.cache[item]);
+    spawn(h.cx, h.cy, z, h.nx, h.ny, TUNE.keep[k % TUNE.keep.length], 1);
+    host.events.push({type: 'mine.open', x: h.x, y: h.y, i, cx: h.cx, cy: h.cy});
+    host.shake(3, .3);
+  }
+  // the plugs' colliders (a hollow wall not yet open: its neck is stopped)
+  const plugs = new Map();   // vein -> entity
+  function plugsIn() {
+    if (!C?.hollows) return;
+    for (const h of C.hollows) if (!spent.has(h.vein) && !plugs.has(h.vein)) {
+      const e = {kind: 'hollowplug', x: h.x - h.nx * .45, y: h.y - h.ny * .45, z: host.elev(h.x + h.nx * .4, h.y + h.ny * .4), r: .8};
+      host.entities.add(e); plugs.set(h.vein, e);
+    }
+  }
+  function plugOut(i) { const e = plugs.get(i); if (e) { host.entities.remove(e); plugs.delete(i); } }
+  function plugsOut() { for (const e of plugs.values()) host.entities.remove(e); plugs.clear(); }
+  // the night veins in the light: hidden (the pick can't find them) unless it's dark round them or he trips
+  const peerLit = (x, y, r) => coop()?.litNear?.(x, y, r) || false;
+  function dark() {
+    if (!NIGHT.length) return;
+    const P = host.player, cv = host.feature('caves'), B = host.feature('builds'), trip = !!host.feature('trip')?.tripping, R0 = TUNE.night.dark;
+    for (const i of NIGHT) {
+      const v = V[i], lit = (cv?.lit && Math.hypot(P.x - v.x, P.y - v.y) < R0) || B?.shineNear?.(v.x, v.y, R0) || peerLit(v.x, v.y, R0);
+      const h = trip || !lit ? 0 : 1;
+      if (h !== HID[i]) { HID[i] = h; hidVer++; if (h && lockI === i) lockI = -1; }
+    }
   }
   function grow(i) {
     spent.delete(i); left.delete(i); save(i); ver++;
+    if (VEINS[V[i].kind].hollow && active()) plugsIn();
     host.events.push({type: 'mine.grow', x: V[i].x, y: V[i].y, i, kind: V[i].kind});
   }
 
@@ -166,14 +214,14 @@ export async function create(host) {
     if (e.job !== 'mine') return;
     const tool = ITEMS[e.tool]?.tool; if (!tool) return;
     // the locked vein takes the blow anywhere within reach + assist of its face (he faces it); else the nearest in the blow's arc
-    let i = lockI >= 0 && !spent.has(lockI) && Math.hypot(V[lockI].x - e.x, V[lockI].y - e.y) - VEIN_R <= W.reach + W.assist ? lockI : -1;
+    let i = lockI >= 0 && !spent.has(lockI) && !HID[lockI] && Math.hypot(V[lockI].x - e.x, V[lockI].y - e.y) - VEIN_R <= W.reach + W.assist ? lockI : -1;
     if (i < 0) {
       const c0 = Math.cos(W.arc / 2 * DEG); let bd = 9;
       const cx = Math.floor(e.x / CELL), cy = Math.floor(e.y / CELL);
       for (let j = cy - 1; j <= cy + 1; j++) for (let q = cx - 1; q <= cx + 1; q++) {
         const L = cells.get(key(q, j)); if (!L) continue;
         for (const n of L) {
-          if (spent.has(n)) continue;
+          if (spent.has(n) || HID[n]) continue;
           const v = V[n], dx = v.x - e.x, dy = v.y - e.y, d = Math.hypot(dx, dy) || 1e-6;
           if (d - VEIN_R > W.reach || Math.abs(floorAt(v) - e.z) > 1.2 || ((dx * e.vx + dy * e.vy) / d < c0 && d > VEIN_R + .2)) continue;
           if (d < bd) { bd = d; i = n; }
@@ -204,7 +252,7 @@ export async function create(host) {
       if (l > 1e-6) { left.set(i, l); ver++; }
       else spend(i, mineYield(R, v.kind, {extra: host.mods.value('mine.extra', 0)}), true);
     }
-    host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: Math.min(3, stageOf(i)), rhythm, dx: ux, dy: uy});
+    host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: Math.min(3, stageOf(i)), rhythm, dx: ux, dy: uy, hollow: !!K.hollow});
     host.hitstop(rhythm ? .07 : .045); host.shake(rhythm ? 2.2 : 1.5, .08);
   }
   // a cave crystal under the pick: combat breaks it (its own shards fly), TUNE.crystal.blows blows; the Glow Shards drop at its foot
@@ -308,10 +356,10 @@ export async function create(host) {
     const i = +m.id.slice(1); if (!V[i]) return;
     if (m.s === 'struck') {
       if (!spent.has(i)) { left.set(i, Math.max(.001, +m.left || .001)); ver++; }
-      if (!m.late && m.by !== coop().net?.id) { const a = hitAt(V[i]); host.events.push({type: 'mine.hit', x: a.x, y: a.y, h: a.h, i, kind: V[i].kind, k: stageOf(i), rhythm: false, dx: 0, dy: -1, other: true}); }
+      if (!m.late && m.by !== coop().net?.id) { const a = hitAt(V[i]); host.events.push({type: 'mine.hit', x: a.x, y: a.y, h: a.h, i, kind: V[i].kind, k: stageOf(i), rhythm: false, dx: 0, dy: -1, other: true, hollow: !!VEINS[V[i].kind].hollow}); }
     } else if (m.s === 'spent') {
       if (spent.has(i)) return;
-      if (m.late) { left.delete(i); spent.set(i, 1); ver++; return; }
+      if (m.late) { left.delete(i); spent.set(i, 1); plugOut(i); ver++; return; }
       const n = (m.got && m.got[coop().net?.id]) | 0;
       spend(i, n, n > 0);
     } else if (m.s === 'grown' && spent.has(i)) grow(i);
@@ -321,11 +369,12 @@ export async function create(host) {
   // A vein's shape in its own frame: x along the wall, y up from the floor, z out of the rock into the open. Lumps of ore half
   // out of the rock (their places drawn from the vein's own generator: every client draws the same vein), cracks across them
   // as its blows run out (stages 1-3: some lumps gone), a dark scar and rubble when it's spent (4)
-  const ORE = {stone: ['quartz', 'stone', 'quartz'], copper: ['copper', 'rust', 'copper', 'rock'], iron: ['ironore', 'ironore', 'rust']};
+  const ORE = {stone: ['quartz', 'stone', 'quartz'], copper: ['copper', 'rust', 'copper', 'rock'], iron: ['ironore', 'ironore', 'rust'], night: ['plumage', 'plumage', 'rock']};
   const GEO = new Map();   // i * 8 + stage -> geometry
   function veinGeo(i, st) {
     const k = i * 8 + st; let g = GEO.get(k); if (g) return g;
     const v = V[i], Q = mulberry32(((C?.seed ?? 0) ^ (i * 2654435761)) >>> 0), fams = ORE[v.kind] || ORE.stone, parts = [];
+    if (v.kind === 'hollow') { g = geoOf(plugParts(Q, st)); GEO.set(k, g); return g; }
     // the seam: a slanting streak up the wall (its ends a, b), the lumps along it
     const a0 = (Q() - .5) * .3, sl = Q() < .5 ? -1 : 1, ax = -.42 * sl + a0, ay = .3 + Q() * .15, bx = .42 * sl + a0, by = 1.15 + Q() * .3;
     const seam = (t, j) => [ax + (bx - ax) * t + (Q() - .5) * j, ay + (by - ay) * t + (Q() - .5) * j];
@@ -339,6 +388,10 @@ export async function create(host) {
         if ((r * 7 + i) % n < gone) continue;   // (stages: lumps knocked out along the seam)
         parts.push(box(f, [s, s * (.7 + Q() * .5), s], [x, y, z], rot, {bias: f === 'rock' ? 0 : .1}));
       }
+      if (v.kind === 'night') for (let r = 0; r < 26 - gone * 4; r++) {   // the night sky in it: specks that light themselves (paleglow)
+        const [x, y] = seam(Q(), .5), s = .025 + Q() * .03;
+        parts.push(box('paleglow', [s, s, s], [x, y, .17 + Q() * .04], [Q(), Q(), Q()], {fixed: 0}));
+      }
       for (let r = 0; r < st; r++) {   // the cracks: dark strokes across the seam
         const [x, y] = seam(.2 + Q() * .6, .1), a = Math.atan2(by - ay, bx - ax) + Math.PI / 2 + (Q() - .5) * .8;
         parts.push(box('crack', [.45 + Q() * .2, .03, .05], [x, y, .13], [0, 0, a]));
@@ -346,13 +399,49 @@ export async function create(host) {
     }
     g = geoOf(parts); GEO.set(k, g); return g;
   }
+  // a hollow wall's plug: rubble stacked into the neck (x across it, up to the wall's height), cracking as its blows run out;
+  // caved in (4): a heap of it on the floor, spilling out of the neck into the chamber
+  function plugParts(Q, st) {
+    const parts = [], H = C?.wall || 3.4;
+    if (st === 4) {
+      for (let r = 0; r < 22; r++) { const s = .08 + Q() * .14; parts.push(box(r % 3 ? 'rock' : 'stone', [s * 1.3, s * .7, s], [(Q() - .5) * 1.8, s * .3, -.6 + Q() * 1.4], [Q(), Q() * 3, Q()])); }
+      return parts;
+    }
+    const gone = st === 3 ? 7 : st === 2 ? 3 : st === 1 ? 1 : 0;
+    for (let y = 0, r = 0; y < H; r++) {
+      const s = .32 + Q() * .2;
+      for (let x = -1.05; x < 1.05; r++) {
+        const w = .35 + Q() * .25;
+        if (!(y < 1.5 && (r * 5 + 3) % 17 < gone)) parts.push(box(Q() < .7 ? 'rock' : 'stone', [w, s, .5 + Q() * .3], [x + w / 2, y + s / 2, -.35 - Q() * .25], [(Q() - .5) * .3, (Q() - .5) * .3, (Q() - .5) * .4]));
+        x += w * .9;
+      }
+      y += s * .85;
+    }
+    for (let r = 0; r < st * 2; r++) parts.push(box('crack', [.5 + Q() * .3, .035, .05], [(Q() - .5) * 1.2, .3 + Q() * 1.2, -.08], [0, 0, (Q() - .5) * 2]));
+    return parts;
+  }
+  // the LID over a sealed room: a block of the dark filling it from the floor to over the walls' tops, until it opens (the camera
+  // looks down over the chamber's wall into the room behind it: a lid at the walls' height alone would leave its floor showing)
+  const lids = new Map();   // vein -> mesh
+  function syncLids() {
+    if (!C?.hollows || !host.world?.mesh) return;
+    for (const h of C.hollows) {
+      const open = spent.has(h.vein); let m = lids.get(h.vein);
+      if (!m && !open) {
+        const R = h.r + .9, L = Math.hypot(h.cx - h.x, h.cy - h.y) + R - .6, H = (C.wall || 3.4) + .4;
+        const geo = geoOf([box('char', [2 * R, H + .1, L], [0, H / 2 - .1, -L / 2 - .6], [0, 0, 0], {fixed: 0})]);
+        m = host.world.mesh(geo, veinMatrix(V[h.vein], MX), {static: true}); lids.set(h.vein, m);
+      }
+      if (m) m.setVisible(!open);
+    }
+  }
   const MV = new Map();   // vein -> {m, st, show}
   const MX = new THREE.Matrix4(), BX = new THREE.Vector3(), BY = new THREE.Vector3(0, 1, 0), BZ = new THREE.Vector3();
   function veinMatrix(v, out) {   // its frame: x along the wall (right-handed with up and out), at the wall's foot
     BZ.set(v.nx, 0, v.ny); BX.set(v.ny, 0, -v.nx);
     return out.makeBasis(BX, BY, BZ).setPosition(v.x, floorAt(v), v.y);
   }
-  let seenVer = -1, yaw0 = NaN;
+  let seenVer = -1, yaw0 = NaN, hidVer = 0, hidSeen = -1;
   function syncVeins() {
     if (!C || !host.world?.mesh || !active()) return;   // (the cave's veins are the forest's: not in another biome's world)
     if (ver !== seenVer) {
@@ -364,10 +453,13 @@ export async function create(host) {
       }
     }
     const yaw = host.yaw ?? 0;
-    if (yaw !== yaw0) {   // the walls facing away from the camera are cut low (world/cave3d.js): their veins go with them
-      yaw0 = yaw; const cx = Math.sin(yaw), cz = Math.cos(yaw);
-      for (const [i, o] of MV) { const s = V[i].nx * cx + V[i].ny * cz > SHOW; if (s !== o.show) { o.show = s; o.m.setVisible(s); } }
+    if (yaw !== yaw0 || hidVer !== hidSeen) {   // the walls facing away from the camera are cut low (world/cave3d.js): their veins go with them
+      yaw0 = yaw; hidSeen = hidVer; const cx = Math.sin(yaw), cz = Math.cos(yaw);
+      for (const [i, o] of MV) { const s = V[i].nx * cx + V[i].ny * cz > SHOW && !HID[i]; if (s !== o.show) { o.show = s; o.m.setVisible(s); } }
     }
+    // the night veins' specks: a slow twinkle (the paleglow family lights itself on their meshes alone)
+    const gf = FAMS.indexOf('paleglow');
+    for (const i of NIGHT) { const o = MV.get(i); if (o?.show && !spent.has(i)) o.m.setGlow(0, gf, 1.1 + .5 * Math.sin(clockT * 2.3 + i * 1.7)); }
   }
   // the camp: the crate (its lid fallen in), the candle stub on it, the heap of chipped stone, the pick driven into the wall
   let campM = null, pickM = null, campGeo = null, pickGeo = null;
@@ -401,6 +493,10 @@ export async function create(host) {
   const CHG = {};
   const chunkGeo = item => CHG[item] ??= geoOf(item === 'glow_shard'
     ? [box('gem', [.05, .14, .05], [0, .07, 0], [.2, 0, .3]), box('gem', [.04, .09, .04], [.04, .045, .02], [-.3, 0, -.2])]
+    : item === 'tally_stick' ? [{...along([-.16, .03, 0], [.16, .03, .02], .018, .016, 5), fam: 'deadwood'}, ...[-.1, -.05, 0, .05, .1].map(x => box('char', [.012, .04, .04], [x, .035, .006]))]
+    : item === 'big_tooth' ? [{...along([0, .02, -.06], [0, .05, .08], .035, .012, 6), fam: 'eye'}, box('antler', [.06, .04, .05], [0, .02, -.07])]
+    : item === 'night_ore' ? [box('plumage', [.13, .1, .12], [0, .05, 0], [.3, .5, .2]), box('rock', [.08, .07, .08], [.05, .07, .03], [.6, .2, .4]),
+      box('paleglow', [.025, .025, .025], [-.03, .1, .05], [.4, .2, 0]), box('paleglow', [.02, .02, .02], [.04, .09, -.05], [.1, .7, 0])]
     : [box(item === 'copper_ore' ? 'copper' : item === 'iron_ore' ? 'ironore' : 'stone', [.13, .1, .12], [0, .05, 0], [.3, .5, .2]),
       box(item === 'copper_ore' ? 'rust' : 'rock', [.08, .07, .08], [.05, .07, .03], [.6, .2, .4])]);
   const chunkMesh = new Map(), QY = new THREE.Quaternion(), V3 = new THREE.Vector3(), SC = new THREE.Vector3(1, 1, 1), UPV = new THREE.Vector3(0, 1, 0);
@@ -408,7 +504,7 @@ export async function create(host) {
     for (const [L, m] of chunkMesh) if (L.dead || !chunks.includes(L)) { m.dispose(); chunkMesh.delete(L); }
     for (let i = 0; i < chunks.length; i++) {
       const L = chunks[i]; let m = chunkMesh.get(L);
-      if (!m) { m = host.world.mesh(chunkGeo(L.item), new THREE.Matrix4()); chunkMesh.set(L, m); }
+      if (!m) { m = host.world.mesh(chunkGeo(L.item), new THREE.Matrix4()); chunkMesh.set(L, m); if (L.item === 'night_ore') m.setGlow(0, FAMS.indexOf('paleglow'), 1.2); }
       m.setMatrix(MX.compose(V3.set(L.x, L.h, L.y), QY.setFromAxisAngle(UPV, L.yaw), SC));
     }
   }
@@ -432,23 +528,24 @@ export async function create(host) {
 
   const F = {
     name: 'mining', label: 'Mining', on: ON,
-    get left() { return left; }, get spent() { return spent; }, get chunks() { return chunks; }, get veins() { return V; },   // (tests, dev)
+    get left() { return left; }, get spent() { return spent; }, get chunks() { return chunks; }, get veins() { return V; }, get lids() { return lids; },   // (tests, dev)
     veinNear, veinAhead, aimPoint,
     update(dt, evs) {
       clockT += dt;
       if (!ON) return;
       index();
       const on = active();
-      if (on !== was) { was = on; ver++; if (on) campIn(); else { campOut(); for (const L of chunks) L.dead = true; chunks.length = 0; lockI = -1; lockC = null; } }
+      if (on !== was) { was = on; ver++; if (on) campIn(); else { campOut(); plugsOut(); for (const L of chunks) L.dead = true; chunks.length = 0; lockI = -1; lockC = null; } }
       if (!on) return;
       const ol = online();
-      if (ol !== wasOnline || !restored) { wasOnline = ol; if (ol) { restored = true; spent.clear(); left.clear(); ver++; } else restore(); }   // (online: the server's word comes in its welcome)
+      if (ol !== wasOnline || !restored) { wasOnline = ol; if (ol) { restored = true; spent.clear(); left.clear(); ver++; } else restore(); plugsOut(); }   // (online: the server's word comes in its welcome)
       for (let i = 0; i < evs.length; i++) {
         const e = evs[i];
         if (e.type === 'player.chop') blow(e);
         else if (e.type === 'pack.reset') { if (!ol) { spent.clear(); left.clear(); ver++; } campOut(); campIn(); }
       }
       const c = coop(); if (ol && c.mail) for (let k = 0; k < c.mail.length; k++) mail(c.mail[k]);
+      plugsIn(); dark();
       const t = T(); if (t && !aimSet) { t.aimBy(aimPoint, 'mine'); t.wantBy(wantTool, 'mine'); aimSet = true; }
       if (byE && t && !host.keys.has('e')) { byE = false; t.release(); }
       if ((lockI >= 0 || lockC) && !t?.S.held) { lockI = -1; lockC = null; }
@@ -467,7 +564,7 @@ export async function create(host) {
         if (e.type === 'mine.hit') sparks(e);
         else if (e.type === 'mine.spent') { dust(e.x + V[e.i].nx * .3, e.y + V[e.i].ny * .3, floorAt(V[e.i]) + .2, 16); host.shake(2, .15); }
       }
-      syncVeins(); if (active()) syncCamp(); else if (pickM) pickM.setVisible(false);
+      syncVeins(); if (active()) { syncCamp(); syncLids(); } else { if (pickM) pickM.setVisible(false); for (const m of lids.values()) m.setVisible(false); }
       syncChunks();
       for (let i = SP.length - 1; i >= 0; i--) {
         const c = SP[i]; c.t += dt; if (c.t > c.life) { SP.splice(i, 1); continue; }
@@ -479,7 +576,7 @@ export async function create(host) {
       for (let i = 0; i < SP.length; i++) { const c = SP[i]; host.point(c.x, c.y, c.h, c.col); }
       if (!marks || !active()) return;   // ?gathermarks=1: a dot over each vein (red: spent, grey: too hard for his pick)
       const P = host.player, b = pack()?.best('mine');
-      for (let i = 0; i < V.length; i++) { const v = V[i]; if (Math.abs(v.x - P.x) > 16 || Math.abs(v.y - P.y) > 12) continue; host.point(v.x + v.nx * .1, v.y + v.ny * .1, floorAt(v) + 1.7, spent.has(i) ? '#e2644d' : (b?.def.tool.tier || 1) < VEINS[v.kind].tier ? '#9a9a9a' : '#e8c060'); }
+      for (let i = 0; i < V.length; i++) { const v = V[i]; if (Math.abs(v.x - P.x) > 16 || Math.abs(v.y - P.y) > 12) continue; host.point(v.x + v.nx * .1, v.y + v.ny * .1, floorAt(v) + 1.7, spent.has(i) ? '#e2644d' : (b?.def.tool.tier || 1) < VEINS[v.kind].tier ? '#9a9a9a' : v.kind === 'night' ? (HID[i] ? '#6a5aa0' : '#c8d0ff') : v.kind === 'hollow' ? '#c09a6a' : '#e8c060'); }
     },
     onKey(k) {
       const t = T(); if (!t || k !== 'e' || !active() || host.lock || host.PL.nearInteract?.() || host.BUSY.has(host.player.state)) return false;   // (the camp's pick, a chest, a fire: E is theirs)
@@ -507,11 +604,15 @@ export async function create(host) {
         {label: 'Mining: every vein back (offline)', run: () => { if (!online()) for (const i of [...spent.keys()]) grow(i); }},
         {label: 'Mining: the old pick back at the camp', run: () => { const s = store(); if (s) { s.took = 0; pack()?.dirty(); } campOut(); if (active()) campIn(); ver++; }},
         {label: 'Mining: to the miner\'s camp', run: () => { if (C?.camp) host.teleport(C.camp.x + C.camp.nx * .6, C.camp.y + C.camp.ny * .6); }},
+        {label: 'Mining: open the hollow walls (offline)', run: () => { if (!online()) for (const h of C?.hollows || []) if (!spent.has(h.vein)) spend(h.vein, 0, false); }},
+        {label: 'Mining: to a hollow wall', run: () => { const h = C?.hollows?.[hopT++ % (C.hollows.length || 1)]; if (h) host.teleport(h.x + h.nx * 1.2, h.y + h.ny * 1.2); }},
+        {label: 'Mining: to a night vein', run: () => { const i = NIGHT[hopN++ % (NIGHT.length || 1)]; if (i !== undefined) host.teleport(V[i].x + V[i].nx * 1.2, V[i].y + V[i].ny * 1.2); }},
       ];
     },
-    hud: () => active() ? `mining veins ${V.length} · spent ${spent.size} · struck ${left.size} · chunks ${chunks.length}${T()?.S.job === 'mine' ? ' · pick out' : ''}` : '',
+    hud: () => active() ? `mining veins ${V.length} · spent ${spent.size} · struck ${left.size} · chunks ${chunks.length}${NIGHT.length ? ' · night ' + NIGHT.map(i => HID[i] ? 'hid' : 'shows').join(' ') : ''}${T()?.S.job === 'mine' ? ' · pick out' : ''}` : '',
+    shown: i => !HID[i], isSpent: i => spent.has(i),
     biomeChanged() {   // (the rebuild disposed the world's meshes: ours are made again)
-      MV.clear(); campM = pickM = null; chunkMesh.clear(); seenVer = -1; yaw0 = NaN;
+      MV.clear(); campM = pickM = null; chunkMesh.clear(); lids.clear(); seenVer = -1; yaw0 = NaN;
     },
   };
   return F;

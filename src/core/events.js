@@ -210,11 +210,17 @@ export const EVENTS = {
   'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],
   'forage.grow':        ['features/forage.js',    'x, y, i, kind: a picked patch has grown back', '(none yet)'],
   // mining (features/mining.js, docs/MINING.md): a vein is the cave's (world/caves.js C.veins index i)
-  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it)', 'mining (view: sparks, grit), audio'],
+  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow)', 'mining (view: sparks, grit), audio'],
   'mine.spent':         ['features/mining.js',    'x, y, i, kind, n (his chunks; 0: a friend\'s blow spent it): the vein breaks open', 'mining (view: dust), audio'],
   'mine.chunk':         ['features/mining.js',    'x, y, item: a chunk picked up off the floor', 'audio'],
   'mine.grow':          ['features/mining.js',    'x, y, i, kind: a spent vein has come back', '(none yet)'],
   'mine.take':          ['features/mining.js',    'x, y: he took the old pick from the miner\'s camp', 'audio'],
+  'mine.open':          ['features/mining.js',    'x, y (its mouth), i (the vein), cx, cy (the room): a hollow wall caved in; its sealed room is open (his cache on its floor)', 'audio, cavelife (view: dust)'],
+  // the living dark (features/caves.js, features/cavelife.js, docs/CAVELIFE.md)
+  'lantern.toggle':     ['features/caves.js',     'x, y, on: L put his lantern out or lit it again, down in the cave', 'audio'],
+  'lantern.snuff':      ['features/caves.js',     'x, y: the soot things put his lantern out', 'audio'],
+  'lantern.relight':    ['features/caves.js',     'x, y: his lantern lit again after a snuff (by itself, or by a crystal, a lamp, a fire)', 'audio'],
+  'critter.wake':       ['features/cavelife.js',  'x, y, i: a rock-thing unrolled and trots off (view)', 'audio'],
   // building (features/builds.js, docs/BUILDING.md): a build's id is 'o' + n offline, the server's 'b' + n online
   'build.add':          ['features/builds.js',    'x, y, id, kind (content/builds.js), mine: a build went down (his, or online a friend\'s)', 'audio'],
   'build.remove':       ['features/builds.js',    'x, y, id, kind: a build was taken back', '(none yet)'],
