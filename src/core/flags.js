@@ -125,6 +125,7 @@ export const FLAG_DOCS = {
   rhythm: '0: no rhythm blows (sim/player/tool.js: a fresh press timed to a swing\'s end lands the next blow harder; content/mining.js TUNE.rhythm)',
   campfires: '0: no campfires to build (features/campfires.js: the pack panel builds one from logs, E adds a log; the sandbox ruins biome)',
   builds: '0: nothing to build (features/builds.js, docs/BUILDING.md: the pack panel\'s Build list: campfire, Stone Fire Ring, Crystal Lamp; campfires=0 too)',
+  trip: 's: how long the fly agaric broth\'s trip lasts (features/trip.js, docs/BUILDING.md; 90 by default)',
   uncanny: '1: the uncanny forest on (it is off by default; Esc > Game > World switches it, remembered), 0: off (features/uncanny.js, docs/UNCANNY.md: the night shift, the heron, the night elk, the secrets); dev: its places and creatures marked (pixel markers, a line from you to each, the HUD says what each is doing)',
   nshift: 'the night shift\'s strength (docs/UNCANNY.md): 1 default; 0 no tree or boulder walks; 2 twice as many walk, a little further. Co-op: the server\'s --nshift decides',
   nelk: 'how often the night elk hunts (docs/UNCANNY.md): 1 default; 2 twice as often (half the rest after a knock); 0 never (it walks its way and grows wrong, that is all). Offline only: the co-op server runs its own',

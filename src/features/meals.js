@@ -4,6 +4,7 @@
 // (source 'meal'), read by their owners (player.speed: the player; fish.*: fishing; woodcut.power: woodcutting ...). One meal at
 // a time: a new one replaces it. Its time left is saved (pack.store('meals')) and counts down in the sim; the chip at the
 // bottom left (HD, the pixel UI) shows the meal and its time while the pack's panel is shut (the panel's Fish part says it).
+// A meal with trip: true (the fly agaric broth) is drunk, not eaten: features/trip.js starts (the meal eaten stays).
 // Only in the persistent world (the sandbox's ruins biome). The meals were fishing's until the foraging slice (2026-10-15):
 // a world saved before that has its meal under pack.store('fishing').meal; it is taken from there once.
 // OWNS: the meal eaten and its time, its saved part, the modifier source 'meal', the recipe group Cook, the chip.
@@ -47,16 +48,19 @@ export async function create(host) {
     const M = MEALS[m];
     RECIPES.push({id: 'meal.' + m, name: M.name, group: 'Cook',
       get cost() { return costOf(M.need); },
-      desc: `${M.say}, for ${Math.round(M.dur / 60)} min. Needs ${needWords(M.need)}, cooked by a burning campfire.`,
+      desc: `${M.say}${M.trip ? '' : `, for ${Math.round(M.dur / 60)} min`}. Needs ${needWords(M.need)}, cooked by a burning campfire.`,
       can() {
         if (!active()) return 'only in the open world';
+        if (M.trip && !host.feature('trip')?.on) return 'not now';
         if (short(costOf(M.need))) return `needs ${needWords(M.need)}`;
         return fireNear() ? '' : 'cook it by a burning campfire';
       },
       run() {
         const c = costOf(M.need); if (short(c)) return;
         for (const k in c) pack().take(k, c[k]);
-        const had = id, P = host.player; eat(m, M.dur);
+        const P = host.player;
+        if (M.trip) { host.feature('trip')?.start(M.dur); host.events.push({type: 'meal.cook', x: P.x, y: P.y, id: m}); return; }   // (a trip: the meal eaten stays)
+        const had = id; eat(m, M.dur);
         host.events.push({type: 'meal.cook', x: P.x, y: P.y, id: m});
         ui()?.toast(M.name, M.say + (had && had !== m ? ` (instead of the ${MEALS[had].name.toLowerCase()})` : ''), '#ffb060');
       }});

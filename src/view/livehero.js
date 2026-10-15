@@ -1389,6 +1389,17 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     o = SHOULDER_R * 7; axisAngle(0, 1, 0, a * DEG, R4); turnTree(w, SHOULDER_R, R4, w[o + 4], w[o + 5], w[o + 6]);
     if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) w[g0 + i] = GSAVE[i];
   }
+  // ---- THE TRIP (features/trip.js: the fly agaric broth, its F.k 0..1): a slow drunken sway through the chest and the head while
+  // it lasts. Friends see it as well: they are sent the drawn pose's bones (features/coop.js)
+  let tripT = 0, TRIP = null;
+  function wobble(w, dt) {
+    TRIP ??= app.feat('trip'); const k = TRIP?.k || 0;
+    if (k <= .01 || SPINE < 0) { tripT = 0; return; }
+    tripT += dt; const o = SPINE * 7, n = NECK * 7;
+    axisAngle(0, 1, 0, Math.sin(tripT * 1.3) * 6 * k * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);   // (rolled about his front)
+    axisAngle(1, 0, 0, Math.sin(tripT * .8 + 1) * 3 * k * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);
+    if (NECK >= 0) { axisAngle(0, 1, 0, Math.sin(tripT * 1.7 + 2) * 7 * k * DEG, R4); turnTree(w, NECK, R4, w[n + 4], w[n + 5], w[n + 6]); }
+  }
   function weather(w, P, dt, sample, free) {
     const X = SEN && SEN.S.wx, on = !!(K.wx && free && X && WX_ON.has(P.state) && HEAD >= 0), slow = Math.hypot(P.vx || 0, P.vy || 0) < 2.3 && P.state !== 'land';
     // the hat: held through a gust, let go a while after it has eased
@@ -1624,7 +1635,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // rope), a hit's flinch always
     SEN ??= app.feat('senses');
     const free = proc && !aiming && emS < 0 && K.demo !== 'swing' && idK !== 'fidget' && !lsBusy();   // (a fidget has the head itself; the rope work its own)
-    mlean(Wt, P, dt, phi - yaw, yaw, free && flowOn, sample); look(Wt, P, dt, sample, free); weather(Wt, P, dt, sample, free); flinch(Wt, P, dt, aiming);
+    mlean(Wt, P, dt, phi - yaw, yaw, free && flowOn, sample); look(Wt, P, dt, sample, free); weather(Wt, P, dt, sample, free); wobble(Wt, dt); flinch(Wt, P, dt, aiming);
     stats.look = lkK > 0 ? (SEN?.S.look.kind || '') : ''; stats.flinch = flT < flDur ? flT / flDur : -1;   // (dev)
     // 6) the demos
     ropeN = 0;

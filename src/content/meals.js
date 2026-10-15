@@ -3,7 +3,7 @@
 // Pure data: the browser (features/meals.js) and the co-op server (server/room.mjs: a cast is rolled with the meal's fish.* notes)
 // read this one file.
 //   need     [{ids, n}]: n of ONE of ids (the one you have most of) for each entry
-//   notes    host.mods notes while it lasts; say: what it does, in words; dur: s
+//   notes    host.mods notes while it lasts; say: what it does, in words; dur: s; trip: drunk, not eaten (features/trip.js)
 import {COMMON_FISH} from './fishing.js';
 
 const ANY_FISH = ['perch', 'roach', 'bleak', 'minnow', 'pike', 'trout', 'bream', 'tench', 'zander', 'grayling', 'char', 'burbot'];
@@ -27,6 +27,10 @@ export const MEALS = {
     notes: [{stat: 'player.speed', mul: 1.08}], say: 'move 8% faster'},
   fish_lingon: {name: 'Fish with lingon', need: [{ids: COMMON_FISH, n: 1}, {ids: ['lingonberries'], n: 3}], dur: 360,
     notes: [{stat: 'fish.luck', add: .08}, {stat: 'fish.lure', mul: .85}], say: 'fishing luck +8%, bites 15% sooner'},
+  // the fly agaric's (features/trip.js, docs/BUILDING.md): not a buff but a TRIP (trip: true): drunk, it doesn't replace the meal
+  // eaten; for dur s the world's colours drift and it sways, the watcher comes out and stares (only he sees it; friends see him sway)
+  fly_broth: {name: 'Fly agaric broth', need: [{ids: ['fly_agaric'], n: 1}, {ids: ['blueberries', 'lingonberries'], n: 2}], dur: 90, trip: true,
+    notes: [], say: 'the world breathes for a while. Don\'t. (Or do.)'},
 };
 // a meal's notes (none for an unknown id: the server takes the client's word for which meal it ate)
 export const mealNotes = id => MEALS[id]?.notes || [];
