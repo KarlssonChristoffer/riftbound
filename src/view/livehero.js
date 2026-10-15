@@ -923,7 +923,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     const T = app.PL.tool; toolSwing = false; toolUp = '';
     if (!T || !T.S.on || P.state !== 'chop' || !TOOL_CLIP) return null;
     const C = CL[TOOL_CLIP], Tm = timing(TOOL_CLIP); if (!Tm) return null;
-    const hitF = fsStep(Tm, C.marks?.[TOOL_MARK[TOOL_CLIP]] ?? Math.floor(C.frames / 2)), ah = Tm.at[hitF], ae = Tm.at[Tm.n] - 1e-4, W = WOOD.swing;
+    const hitF = fsStep(Tm, C.marks?.[TOOL_MARK[TOOL_CLIP]] ?? Math.floor(C.frames / 2)), ah = Tm.at[hitF], ae = Tm.at[Tm.n] - 1e-4, W = T.swing || WOOD.swing;   // (the tool's own swing: the axe's, the pick's)
     const ct = T.S.t < W.hit ? ah * (T.S.t / W.hit) : ah + (ae - ah) * Math.min(1, (T.S.t - W.hit) / Math.max(.01, W.dur - W.hit));
     const ft = frameAt(Tm, ct), fr = nm(TOOL_CLIP + '.', ft < 0 ? C.frames - 1 : ft); toolSwing = TOOL_CLIP !== 'tl_chop';
     if (Math.hypot(P.vx, P.vy) > .3) { const legs = toolLegs(P, T); if (legs && poseOf(legs)) { toolUp = fr; return legs; } }   // (on the move: the swing over his steps)

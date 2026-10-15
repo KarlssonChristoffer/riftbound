@@ -464,6 +464,17 @@ const SFX = {
   treeCrack(E, o) { SFX.brk(E, {...o, kind: 'crate'}); },
   treeCrash(E, o) { SFX.foeFall(E, {...o, heavy: true, g: (o.g ?? 1) * 1.4}); SFX.rustle(E, o); },
   treeLogs(E, o) { SFX.propDrop(E, {...o, mat: 'wood'}); },
+  // MINING (features/mining.js, docs/MINING.md): the pick's blow RINGS (two inharmonic partials over a stony crack and a thud;
+  // a rhythm blow rings higher and louder); rock too hard for the pick: a dull clang (k 0); a crystal: glass
+  mineHit(E, o) {
+    if (o.kind === 'crystal') { SFX.hit(E, {...o, mat: 'glass', g: (o.g ?? 1) * 1.1}); SFX.hit(E, {...o, mat: 'clay', g: (o.g ?? 1) * .5}); return; }
+    const v = E.voice({...o, g: (o.g ?? 1) * (o.rhythm ? 1.25 : 1)}, 'hit', .5, {pri: 2, cd: .03}); if (!v) return;
+    const {N, O} = E, up = o.rhythm ? 1.19 : 1;
+    if (o.k === 0) { O(v, 0, {f: 520, a: .001, d: .12, g: .1}); O(v, 0, {f: 170, f2: 110, d: .08, g: .3}); N(v, 0, {type: 'bandpass', f: 1200, q: 2, d: .05, g: .3}); return; }
+    O(v, 0, {f: 1870 * up, a: .001, d: .3, g: .07}); O(v, 0, {f: 2790 * up, a: .001, d: .18, g: .045});
+    N(v, 0, {type: 'bandpass', f: 2600, q: 1.5, d: .045, g: .4}); N(v, .01, {type: 'lowpass', f: 900, a: .004, d: .12, g: .22});
+    O(v, 0, {f: 140, f2: 90, d: .06, g: .25});
+  },
   logPick(E, o) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * .35}); },
   axeSwing(E, o) { SFX.jump(E, {...o, g: (o.g ?? 1) * .45}); },
   campLog(E, o) { SFX.kick(E, {...o, mat: 'wood', g: (o.g ?? 1) * .6}); },   // (a soft wooden thump)
@@ -1252,6 +1263,10 @@ export function createAudio(ctx, host = {}) {
         case 'tree.logs': fire('treeLogs', e.x, e.y, {surf, n: e.n}); break;
         case 'tool.hit': fire('hit', e.x, e.y, {mat: e.kind === 'body' ? 'body' : MAT[e.kind] || 'wood', g: 1}); break;
         case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); break;   // (the swing's whoosh)
+        case 'mine.hit': fire('mineHit', e.x, e.y, {k: e.k, kind: e.kind, rhythm: e.rhythm, g: e.other ? .7 : 1}); break;   // (features/mining.js: a blow on a vein or a crystal)
+        case 'mine.spent': fire('treeLogs', e.x, e.y, {surf: 'stone'}); fire('kick', e.x, e.y, {mat: 'clay', surf: 'stone'}); break;   // (stand-ins: the vein breaks open)
+        case 'mine.chunk': fire('hit', e.x, e.y, {mat: 'clay', g: .35}); break;   // (stand-in: a chunk into the pouch)
+        case 'mine.take': fire('kick', e.x, e.y, {mat: 'wood', g: .5}); break;   // (stand-in: the old pick pulled from the wall)
         case 'pack.add': if (e.id === 'log') fire('logPick', e.x, e.y); break;
         case 'fire.addWood': fire('campLog', e.x, e.y); break;   // a log on a campfire (features/campfires.js, lights.js)
         // FISHING (features/fishing.js, docs/FISHING.md)

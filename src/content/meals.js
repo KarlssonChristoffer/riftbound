@@ -20,7 +20,7 @@ export const MEALS = {
     notes: [{stat: 'light.lanternR', mul: 1.3}, {stat: 'fish.night', add: .3}, {stat: 'fish.luck', add: .05}], say: 'your lantern reaches 30% further, night bites much sooner, luck +5%'},
   salmon_plank: {name: 'Salmon on a plank', need: [{ids: ['salmon', 'char'], n: 1}], dur: 420,
     notes: [{stat: 'fish.luck', add: .12}, {stat: 'fish.double', add: .06}, {stat: 'player.speed', mul: 1.05}], say: 'fishing luck +12%, a 6% chance of two fish, move 5% faster'},
-  // the forest floor's (features/forage.js, docs/FORAGING.md). mine.power: the pick's (features/mining.js: the next slice)
+  // the forest floor's (features/forage.js, docs/FORAGING.md). mine.power: the pick's (features/mining.js, docs/MINING.md)
   fried_chanterelles: {name: 'Fried chanterelles', need: [{ids: ['chanterelles'], n: 3}], dur: 360,
     notes: [{stat: 'mine.power', mul: 1.15}, {stat: 'woodcut.power', mul: 1.1}], say: 'mine 15% harder, chop 10% harder'},
   blueberry_soup: {name: 'Blueberry soup', need: [{ids: ['blueberries'], n: 5}], dur: 360,

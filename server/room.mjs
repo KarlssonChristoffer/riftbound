@@ -8,21 +8,23 @@
 // (docs/UNCANNY.md): the secrets' states and who opened them, and the night elk (sim/uncanny.js: the same rules the game runs
 // offline), from the forest's uncanny plan (world/uncanny.js) when the server gives one. And FISHING's rolls (docs/FISHING.md):
 // what bites a cast, how big, when, from the set the player wears and the clock; a landed fish is told to everyone. And the
-// FORAGED PATCHES (docs/FORAGING.md): which of the forest floor's plants are picked, a pick's yield, their growing back.
+// FORAGED PATCHES (docs/FORAGING.md): which of the forest floor's plants are picked, a pick's yield, their growing back. And the
+// cave's VEINS (docs/MINING.md): the blows left on each, who struck it, each striker's chunks when it breaks, its coming back.
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
-//   const room = createRoom({seed, trees, decor, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
+//   const room = createRoom({seed, trees, decor, veins, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
 import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
 import {mealNotes} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
+import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {mulberry32} from '../src/core/rng.js';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -91,6 +93,7 @@ export function createRoom({seed, trees = null, decor = null, regrow = 1, unc = 
       all(clockMsg()); log(`  ${p.name} set the clock to ${id}`); return;
     }
     if (a === 'pick') return pick(p, m, id, t, deny);
+    if (a === 'mine') return mine(p, m, id, t, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -124,8 +127,42 @@ export function createRoom({seed, trees = null, decor = null, regrow = 1, unc = 
     world.set(id, s);
     all({k: 'world', id, s: s.s, by: p.id, n});
   }
+  // MINING (docs/MINING.md): a blow on a vein ({a: 'mine', id: 'v' + the cave plan's vein index, pow: what the blow takes off
+  // (his pick, his meal, his level and a rhythm blow: content/mining.js blowPower, as the client says it, held to 0.25 .. 3),
+  // lvl: his Mining level, tier: his pick's). The vein must be one of the plan's (without one, the client's kind), not spent,
+  // in reach, and soft enough for the pick. Its blows left go down for everyone ({k: 'world', id, s: 'struck', left, by}); the
+  // blow that empties it SPENDS it: every player who struck it gets their own roll of chunks (their gear and level), told to
+  // everyone in one message ({s: 'spent', got: {id: n}}); it comes back on the clock (the tick: s 'grown')
+  const mineRng = mulberry32((seed ^ 0x313e5) >>> 0);
+  function mine(p, m, id, t, deny) {
+    const cur = world.get(id); if (cur?.s === 'spent') return deny('spent');
+    let kind = str(m.kind, 16);
+    if (veins) {
+      const v = /^v\d+$/.test(id) ? veins[+id.slice(1)] : null; if (!v) return deny('no such vein');
+      if (Math.hypot(v.x - p.x, v.y - p.y) > REACH) return deny('too far');
+      kind = v.kind;
+    } else if (!VEINS[kind] || !/^v\d+$/.test(id)) return deny('no such vein');
+    const V = VEINS[kind]; if ((num(m.tier, 1) | 0) < V.tier) return deny('too hard');
+    const pow = Math.max(.25, Math.min(3, num(m.pow, 1)));
+    p.mineLvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0));   // (his level for the others' last blows too)
+    const by = cur?.by ? [...cur.by] : []; if (!by.includes(p.id)) by.push(p.id);
+    const left = Math.max(0, (cur?.left ?? V.blows) - pow);
+    if (left > 1e-6) {
+      const s = {s: 'struck', left: +left.toFixed(3), by, t};
+      world.set(id, s); all({k: 'world', id, s: 'struck', left: s.left, by: p.id}); return;
+    }
+    const got = {};
+    for (const q of by) {
+      const pq = peers.get(q); if (!pq) continue;
+      const lvl = pq.mineLvl || 1, notes = levelNotes(SKILLS.mining.per, lvl);
+      for (const g of pq.gear) for (const n of GEAR_BY_ID[g]?.mods || []) notes.push(n);
+      got[q] = mineYield(mineRng, kind, mineStats(notes));
+    }
+    world.set(id, {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});
+    all({k: 'world', id, s: 'spent', by: p.id, got});
+  }
   let growT = 0;
-  function regrowTick(dt) {   // once a second: the picked patches whose time has come grow back, for everyone
+  function regrowTick(dt) {   // once a second: the picked patches and spent veins whose time has come grow back, for everyone
     if ((growT += dt) < 1) return;
     growT = 0; const h = clock();
     for (const [id, s] of world) if (s.at !== undefined && h >= s.at) { world.delete(id); all({k: 'world', id, s: 'grown'}); }

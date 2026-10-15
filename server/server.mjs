@@ -27,18 +27,18 @@ const hour = +arg('hour', CLOCK.hour), daymin = +arg('daymin', CLOCK.daymin), ns
 const log = quiet ? () => {} : (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 // the forest's trees (src/world/forest.js, the same generator the clients run): the room checks a felled tree exists and is in reach;
-// its small things (F.decor: the patches a pick asks for, docs/FORAGING.md); and its uncanny plan (world/uncanny.js): the room runs
+// its small things (F.decor: the patches a pick asks for, docs/FORAGING.md); its cave's veins (docs/MINING.md); and its uncanny plan (world/uncanny.js): the room runs
 // the secrets and the night elk from it
-let trees = null, decor = null, unc = null;
+let trees = null, decor = null, veins = null, unc = null;
 try {
   const [W, Un] = await Promise.all([import('../src/world/forest.js'), import('../src/world/uncanny.js')]);
-  const F = W.forestPlan(seed); trees = F.trees; decor = F.decor; log(`forest ${seed}: ${trees.size} trees`);
+  const F = W.forestPlan(seed); trees = F.trees; decor = F.decor; veins = F.cave?.veins || null; log(`forest ${seed}: ${trees.size} trees, ${veins?.length ?? 0} veins`);
   if (uncanny) unc = Un.uncannyPlan(F, {shift: isFinite(nshift) ? nshift : 1});
   if (unc) log(`uncanny forest: heron ${unc.heron ? 'yes' : 'no'}, stones ${unc.stones ? 'yes' : 'no'}, marks ${unc.marks.length}, elk ${unc.elk ? 'yes' : 'no'} · clock ${hour} h, ${daymin} min a day`);
 }
 catch (e) { log('forest: not loaded (acts are not checked against the trees, no uncanny forest):', e.message); }
 
-const room = createRoom({seed, trees, decor, regrow: regrow > 0 ? regrow : 1, unc, hour: isFinite(hour) ? hour : CLOCK.hour, daymin: isFinite(daymin) ? daymin : CLOCK.daymin, log});
+const room = createRoom({seed, trees, decor, veins, regrow: regrow > 0 ? regrow : 1, unc, hour: isFinite(hour) ? hour : CLOCK.hour, daymin: isFinite(daymin) ? daymin : CLOCK.daymin, log});
 const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.glb': 'model/gltf-binary',
   '.bin': 'application/octet-stream', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8'};

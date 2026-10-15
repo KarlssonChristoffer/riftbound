@@ -209,6 +209,12 @@ export const EVENTS = {
   // foraging (features/forage.js, docs/FORAGING.md): a patch is the forest floor's (world/forest.js F.decor index i)
   'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],
   'forage.grow':        ['features/forage.js',    'x, y, i, kind: a picked patch has grown back', '(none yet)'],
+  // mining (features/mining.js, docs/MINING.md): a vein is the cave's (world/caves.js C.veins index i)
+  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it)', 'mining (view: sparks, grit), audio'],
+  'mine.spent':         ['features/mining.js',    'x, y, i, kind, n (his chunks; 0: a friend\'s blow spent it): the vein breaks open', 'mining (view: dust), audio'],
+  'mine.chunk':         ['features/mining.js',    'x, y, item: a chunk picked up off the floor', 'audio'],
+  'mine.grow':          ['features/mining.js',    'x, y, i, kind: a spent vein has come back', '(none yet)'],
+  'mine.take':          ['features/mining.js',    'x, y: he took the old pick from the miner\'s camp', 'audio'],
   // woodcutting (sim/player/tool.js the swing, features/woodcut.js what it meets); who = the tree prop
   'player.chop':        ['sim/player/tool.js',    'x, y, z, vx, vy (unit: the blow\'s way), tool (content/items.js): a tool\'s swing lands', 'woodcut'],
   'tree.chop':          ['features/woodcut.js',   'x, y, h (the bite), who, k (0 a glance off wood too hard for the axe, else 0..1: how hard it shakes), left (blows), dx, dy (unit: him to the trunk)', 'wind (the crown shudders, leaves), woodcut (view: chips), audio'],

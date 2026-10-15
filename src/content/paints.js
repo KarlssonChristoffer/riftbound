@@ -37,6 +37,11 @@ export const PAINTS = {
   harefur:     {all: ['#b8a084', '#957e64', '#6e5c4a', '#3c3229']},                                                       // a mountain hare's summer grey-brown
   furdark:     {all: ['#5a4a40', '#3c302a', '#28201c', '#140f0d']},                                                       // dark legs, ear tips, noses, hooves
   plumage:     {all: ['#464a5a', '#2c2e38', '#1e1f27', '#0e0e12']},                                                       // a raven, a capercaillie cock: near black, a blue sheen
+  // the cave's veins (features/mining.js, docs/MINING.md)
+  copper:      {all: ['#8ae0bc', '#4cb48e', '#2a7c62', '#143e32']},                                                       // copper's green bloom in the rock
+  rust:        {all: ['#e89a5a', '#c06a34', '#86441e', '#44200e']},                                                       // rust and copper's red streaks; the old pick's head
+  ironore:     {all: ['#9aa6bc', '#687288', '#444a5c', '#22252e']},                                                       // iron's dark seams, a blue-grey sheen
+  quartz:      {all: ['#f4f2ea', '#d2cec2', '#a29c8e', '#5e5a50']},                                                       // the pale streak a stone vein shows in the cave wall
 };
 // a paint's ramp in a biome: ['#hi', '#base', '#shade', '#dark']
 export const paintRamp = (name, biome) => { const p = PAINTS[name]; return p && (p[biome] || p.all); };

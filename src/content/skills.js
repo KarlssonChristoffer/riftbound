@@ -13,6 +13,8 @@ export const SKILLS = {
   fishing: {name: 'Fishing', col: '#7ec8e3', per: [{stat: 'fish.luck', add: .01}, {stat: 'fish.reel', mul: .02}]},
   // foraging (features/forage.js; a pick's XP is its plant's: content/forage.js PLANTS xp): a chance of one more a level
   foraging: {name: 'Foraging', col: '#c8a0e0', per: [{stat: 'forage.extra', add: .02}]},
+  // mining (features/mining.js; a blow's XP is its vein's: content/mining.js VEINS xp): a harder blow and a chance of one more chunk
+  mining: {name: 'Mining', col: '#d8a868', per: [{stat: 'mine.power', mul: .03}, {stat: 'mine.extra', add: .01}]},
 };
 
 // how much XP an action gives (the systems that give it read these)

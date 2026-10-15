@@ -40,7 +40,7 @@ export function createNetClient({transport, name = ''}) {
     switch (m.k) {
       case 'welcome':
         Object.assign(C, {status: 'online', id: m.id, name: m.name, color: m.color, seed: m.seed});
-        for (const [id, s] of Object.entries(m.world || {})) { C.world.set(id, s); queue.push({k: 'world', id, s: s.s, by: s.by, late: true}); }
+        for (const [id, s] of Object.entries(m.world || {})) { C.world.set(id, s); queue.push({...s, k: 'world', id, s: s.s, by: s.by, late: true}); }   // (its own fields too: a struck vein's blows left)
         for (const p of m.peers || []) { const q = peer(p); if (p.x !== undefined) push(q, m.t, p.x, p.y, p.z, p.phi, p.s, p.pose, p.rig, p.w, p.ls); }
         offset = m.t - performance.now();
         if (m.clock) queue.push({k: 'clock', t: m.clock.t, h: m.clock.h, rate: m.clock.rate});
@@ -56,7 +56,7 @@ export function createNetClient({transport, name = ''}) {
         if (m.c) push(C.elk, m.t, m.c[0], m.c[1], 0, m.c[2], m.c[3], m.c[4], '', null, null);
         break;
       }
-      case 'world': if (m.s === 'grown') C.world.delete(m.id); else C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;   // (grown: a patch back, features/forage.js)
+      case 'world': if (m.s === 'grown') C.world.delete(m.id); else C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;   // (grown: a patch or a vein back, features/forage.js, mining.js)
       case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': queue.push(m); break;
       case 'gear': {
         if (!Array.isArray(m.g)) break;

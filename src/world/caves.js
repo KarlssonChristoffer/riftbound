@@ -35,6 +35,9 @@ export const TUNE = {
   wall: 3.4,       // m: the rock stands this much over the floor at the walls (what the camera sees of them)
   rough: .55,      // m: how far the walls wander in and out of the plan's line
   crystals: [5, 9],
+  // the veins (features/mining.js): how many, the least south part of a wall's way into the open (it faces the camera), m apart,
+  // iron past this share of the cave's depth (graph distance), the chances there of iron and (anywhere) of copper; stone the rest
+  veins: {n: [14, 22], face: .45, apart: 2.2, ironFrom: .5, iron: .4, copper: .3},
 };
 const CELL = .25;  // the grid (world/terrain.js CELL: the field's own lattice, so the field reads it exactly)
 const PORTAL = {r: 22};  // m round the slot copy's foot: the cave drawn under the woods too (C.inPortal; as far as the view reaches from the step)
@@ -263,7 +266,64 @@ export function cavePlan(seed, m, rect, height = null) {
     if (inside(x, y) > -.25 || C.props.some(p => Math.hypot(p[1] - x, p[2] - y) < 1.2)) continue;
     C.props.push(['rock', +x.toFixed(2), +y.toFixed(2), {r: 0, variant: Rp() * 3 | 0}]); got++;
   }
+  minePlan(C, seed);
   return C;
+}
+// ---- MINING (content/mining.js, features/mining.js, docs/MINING.md): the old miner's CAMP in the entry chamber or the next room
+// along, and the VEINS: marked spots at the walls' feet, each from generators of their own (the layout above, crystals and all,
+// never moves for them). A vein lies on a wall that faces the camera at the default yaw (its way into the open has a south part:
+// world/cave3d.js keeps those walls whole), off the slot, apart from the others, the crystals and the camp; iron only in the far
+// half of the cave (graph distance from the entry along the passages)
+//   C.camp = {x, y, nx, ny (unit: from the wall into the room), wx, wy (the wall point: the pick driven into it), room (node index)}
+//   C.veins = [{x, y, nx, ny, kind, deep (0 the entry .. 1 the farthest)}], x, y on the open's edge
+function minePlan(C, seed) {
+  const T = TUNE.veins, nodes = C.nodes, edges = C.edges;
+  // graph distance from the entry chamber (node 0) along the passages
+  const gd = nodes.map((n, k) => k ? Infinity : 0);
+  for (let pass = 0; pass < nodes.length; pass++) for (const e of edges) {
+    if (e.a < 0) continue;
+    const L = Math.hypot(nodes[e.a].x - nodes[e.b].x, nodes[e.a].y - nodes[e.b].y);
+    if (gd[e.a] + L < gd[e.b]) gd[e.b] = gd[e.a] + L; if (gd[e.b] + L < gd[e.a]) gd[e.a] = gd[e.b] + L;
+  }
+  const far = Math.max(1, ...gd.filter(Number.isFinite));
+  const deepAt = (x, y) => { let best = 0, bd = 1e9; for (let k = 0; k < nodes.length; k++) { const d = Math.hypot(nodes[k].x - x, nodes[k].y - y); if (d < bd) { bd = d; best = k; } } return Number.isFinite(gd[best]) ? gd[best] / far : 1; };
+  const SQ = [0, 0, 0], offSlot = (x, y) => C.slotAt(x, y, SQ)[2] === 0 && C.inside(x, y) < 0;
+  // the wall's points with their way into the open (the loops run with the open on their right: (-ty, tx)), averaged over ~1.4 m
+  const pts = [];
+  for (const L of C.walls) {
+    const n = L.length - 1; if (n < 8) continue;
+    for (let i = 0; i < n; i++) {
+      const a = L[(i - 2 + n) % n], b = L[(i + 2) % n], tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty) || 1;
+      pts.push([L[i][0], L[i][1], -ty / l, tx / l]);
+    }
+  }
+  // the CAMP: the entry chamber or the next room along (by graph distance), at its wall on the far side from the slot
+  const Rc = mulberry32(mix(seed, 21)), rooms = nodes.map((n, k) => k).filter(k => nodes[k].room && Number.isFinite(gd[k])).sort((a, b) => gd[a] - gd[b]);
+  const ri = rooms[Math.min(rooms.length - 1, Rc() < .5 ? 0 : 1)];
+  C.camp = null;
+  if (ri !== undefined) {
+    const n = nodes[ri], back = Math.atan2(n.y - C.copy.y, n.x - C.copy.x);   // (away from the slot's head)
+    let best = null, bs = -1e9;
+    for (const p of pts) {
+      const d = Math.hypot(p[0] - n.x, p[1] - n.y); if (d > n.r * 1.5 + .8 || p[3] < .35) continue;
+      const x = p[0] + p[2] * .9, y = p[1] + p[3] * .9; if (!offSlot(x, y) || C.inside(x, y) > -.6) continue;
+      const s = Math.cos(Math.atan2(p[1] - n.y, p[0] - n.x) - back) + p[3] + Rc() * .6;
+      if (s > bs) { bs = s; best = p; }
+    }
+    if (best) C.camp = {x: +(best[0] + best[2] * .9).toFixed(2), y: +(best[1] + best[3] * .9).toFixed(2), nx: +best[2].toFixed(3), ny: +best[3].toFixed(3), wx: best[0], wy: best[1], room: ri};
+  }
+  // the VEINS
+  const Rv = mulberry32(mix(seed, 20)), want = T.n[0] + Math.floor(Rv() * (T.n[1] - T.n[0] + 1));
+  C.veins = [];
+  const cands = pts.filter(p => p[3] > T.face);
+  for (let t = 0; t < 600 && C.veins.length < want && cands.length; t++) {
+    const p = cands[Math.floor(Rv() * cands.length)], x = p[0], y = p[1], k = Rv();
+    if (!offSlot(x + p[2] * .5, y + p[3] * .5) || C.inside(x + p[2] * .5, y + p[3] * .5) > -.3) continue;
+    if (C.veins.some(v => Math.hypot(v.x - x, v.y - y) < T.apart) || C.props.some(q => Math.hypot(q[1] - x, q[2] - y) < 1.2)) continue;
+    if (C.camp && Math.hypot(C.camp.wx - x, C.camp.wy - y) < 2.5) continue;
+    const deep = deepAt(x, y), kind = deep > T.ironFrom && k < T.iron ? 'iron' : k < T.copper + (deep > T.ironFrom ? T.iron : 0) ? 'copper' : 'stone';
+    C.veins.push({x: +x.toFixed(2), y: +y.toFixed(2), nx: +p[2].toFixed(3), ny: +p[3].toFixed(3), kind, deep: +deep.toFixed(2)});
+  }
 }
 // a passage from node A to node B (indices ia, ib): its line wandering off the straight a little (a point every ~1.5 m), its floor
 // falling evenly from A's to B's

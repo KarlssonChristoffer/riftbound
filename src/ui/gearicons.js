@@ -116,6 +116,7 @@ const ICON = {
     {px: [[4, 4], [6, 3], [8, 3], [10, 4]], m: 1}]},
   landing_net: {mats: ['oak', 'netting'], s: [{l: [1.5, 15, 7, 9.5, 1.8], m: 0}, {e: [10, 6, 5.5, 5.5], m: 1, tex: 'check'}, {e: [10, 6, 4.3, 4.3], m: 1, t: 3, on: 1}, {e: [10, 6, 4.3, 4.3], m: 1, tex: 'check', on: 2}]},
   // foraging gear (docs/FORAGING.md): the berry comb, its tines up
+  miner_cap: {mats: ['leather_dk', 'steel'], s: [dome(0, 11), {r: [1, 10, 14, 2], m: 0}, {e: [8, 7, 3, 3], m: 1}]},
   berry_comb: {mats: ['birchbark', 'steel', 'oak'], s: [{l: [12, 11, 15, 14.5, 2], m: 2}, {r: [2, 6, 11, 8], m: 0, tex: 'rows'}, {r: [2, 13, 11, 1], m: 0, t: 2},
     {px: [[2, 4], [2, 5], [4, 3], [4, 4], [4, 5], [6, 4], [6, 5], [8, 3], [8, 4], [8, 5], [10, 4], [10, 5], [12, 4], [12, 5]], m: 1}]},
 };
