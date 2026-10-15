@@ -92,8 +92,8 @@ export async function create(host) {
       const tr = t.r || .3, side = R() < .5 ? -1 : 1, k = side * (tr + rr(.28, .4)), back = rr(.15, .35);
       const x = t.x + W.rx * k + W.fx * back, y = t.y + W.ry * k + W.fy * back;
       const d = Math.hypot(x - P.x, y - P.y); if (d < TUNE.dist[0] || d > TUNE.dist[1]) continue;
-      if (host.inStream(x, y) || host.blocked(x, y, 0)) continue;
       const gz = host.elev(x, y);
+      if (host.inStream(x, y) || host.blocked(x, y, gz)) continue;   // (at the ground's height: at 0 every upland spot was 'blocked')
       if (!G.onScreen(x, gz + .5, y, -TUNE.edge)) continue;   // (well inside the view ...)
       let crowd = 0; for (const q of host.entities.near(x, y, TUNE.crowd, NEAR2)) if (q !== t && isTree(q)) crowd++;
       if (!force && crowd + dark < TUNE.trees) continue;
