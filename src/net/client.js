@@ -2,7 +2,7 @@
 // (net/protocol.js) over any transport (net/transport.js), keeps the other players' snapshots, and answers "where was peer X
 // at time t" for the view, a little in the past (INTERP_MS) so it can interpolate between two snapshots. No game imports:
 // features/coop.js connects it to the world.
-//   const C = createNetClient({transport, name}); C.peers (Map id -> peer); C.sendState(o); C.act(a, id);
+//   const C = createNetClient({transport, name}); C.peers (Map id -> peer); C.sendState(o); C.act(a, id, o?);
 //   C.sample(peer, now, out) -> out {x, y, z, phi, s, pose, ls}; C.drain() -> the queued sim messages (world / fix / deny /
 //   clock / sec / ev / gear: your own set as the server took it); C.wear(ids) asks for a set; a peer's q.gear (ids) / q.gv
 //   (its version); C.elk: the night elk's snapshots (a ring like a peer's: C.sample(C.elk, out) -> s = its mode's index,
@@ -56,7 +56,7 @@ export function createNetClient({transport, name = ''}) {
         if (m.c) push(C.elk, m.t, m.c[0], m.c[1], 0, m.c[2], m.c[3], m.c[4], '', null, null);
         break;
       }
-      case 'world': C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;
+      case 'world': if (m.s === 'grown') C.world.delete(m.id); else C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;   // (grown: a patch back, features/forage.js)
       case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': queue.push(m); break;
       case 'gear': {
         if (!Array.isArray(m.g)) break;
@@ -89,7 +89,7 @@ export function createNetClient({transport, name = ''}) {
     return out;
   };
   C.sendState = o => transport.send(encode({k: 'st', ...o}));
-  C.act = (a, id) => transport.send(encode({k: 'act', a, id}));
+  C.act = (a, id, o) => transport.send(encode({...o, k: 'act', a, id}));   // (o: the act's own fields: a pick's lvl)
   C.wear = g => transport.send(encode({k: 'gear', g}));
   C.fish = o => transport.send(encode({...o, k: 'fish'}));   // (features/fishing.js: a cast, a landed fish, a lost one)
   C.pingNow = () => transport.send(encode({k: 'ping', c: performance.now()}));

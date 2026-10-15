@@ -11,6 +11,8 @@ export const SKILLS = {
   woodcutting: {name: 'Woodcutting', col: '#b8d080', per: [{stat: 'woodcut.power', mul: .03}, {stat: 'woodcut.extra', add: .01}]},
   // fishing (features/fishing.js; a catch's XP is its own: content/fishing.js CATCHES xp): a little luck and a steadier reel a level
   fishing: {name: 'Fishing', col: '#7ec8e3', per: [{stat: 'fish.luck', add: .01}, {stat: 'fish.reel', mul: .02}]},
+  // foraging (features/forage.js; a pick's XP is its plant's: content/forage.js PLANTS xp): a chance of one more a level
+  foraging: {name: 'Foraging', col: '#c8a0e0', per: [{stat: 'forage.extra', add: .02}]},
 };
 
 // how much XP an action gives (the systems that give it read these)

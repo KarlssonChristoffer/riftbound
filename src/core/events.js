@@ -206,6 +206,9 @@ export const EVENTS = {
   'pack.reset':         ['features/pack.js',      '(none): a new world (the Sandbox menu): the pack and every system\'s saved part cleared', 'woodcut'],
   'skill.level':        ['features/pack.js',      'x, y (the player), skill (content/skills.js), level: a skill reached a new level', 'audio'],
   'meal.cook':          ['features/meals.js',     'x, y, id (content/meals.js): a meal cooked by a campfire and eaten: its buff starts', 'audio'],
+  // foraging (features/forage.js, docs/FORAGING.md): a patch is the forest floor's (world/forest.js F.decor index i)
+  'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],
+  'forage.grow':        ['features/forage.js',    'x, y, i, kind: a picked patch has grown back', '(none yet)'],
   // woodcutting (sim/player/tool.js the swing, features/woodcut.js what it meets); who = the tree prop
   'player.chop':        ['sim/player/tool.js',    'x, y, z, vx, vy (unit: the blow\'s way), tool (content/items.js): a tool\'s swing lands', 'woodcut'],
   'tree.chop':          ['features/woodcut.js',   'x, y, h (the bite), who, k (0 a glance off wood too hard for the axe, else 0..1: how hard it shakes), left (blows), dx, dy (unit: him to the trunk)', 'wind (the crown shudders, leaves), woodcut (view: chips), audio'],

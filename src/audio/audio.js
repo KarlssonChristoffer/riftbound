@@ -1274,6 +1274,7 @@ export function createAudio(ctx, host = {}) {
         case 'fish.spot': fire('plop', e.x, e.y, {surf, fish: 1, g: .6}); break;
         case 'fish.bait': fire('chop', e.x, e.y, {k: 0, g: .5}); break;
         case 'meal.cook': fire('fishCook', e.x, e.y); break;   // (features/meals.js: any meal by a campfire)
+        case 'forage.pick': fire('rustle', e.x, e.y, {surf, g: .3, semi: 5}); fire('hit', e.x, e.y, {mat: 'straw', g: .2}); break;   // (stand-ins: a soft pluck in the leaves)
         // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge
         // recipes of its own yet): the swish of a turn and the throw on the cloth swish, the cinch a soft thump, the yank
         // a heave, a yanked body's landing the gunmen's fall thud, the rope straining a short creak (the bow's)

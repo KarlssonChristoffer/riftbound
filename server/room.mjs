@@ -7,22 +7,24 @@
 // It also owns THE CLOCK (in-game hours: everyone's day and night are the server's; clients follow it) and THE UNCANNY FOREST
 // (docs/UNCANNY.md): the secrets' states and who opened them, and the night elk (sim/uncanny.js: the same rules the game runs
 // offline), from the forest's uncanny plan (world/uncanny.js) when the server gives one. And FISHING's rolls (docs/FISHING.md):
-// what bites a cast, how big, when, from the set the player wears and the clock; a landed fish is told to everyone.
+// what bites a cast, how big, when, from the set the player wears and the clock; a landed fish is told to everyone. And the
+// FORAGED PATCHES (docs/FORAGING.md): which of the forest floor's plants are picked, a pick's yield, their growing back.
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
-//   const room = createRoom({seed, trees, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
+//   const room = createRoom({seed, trees, decor, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
 import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
 import {mealNotes} from '../src/content/meals.js';
+import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {mulberry32} from '../src/core/rng.js';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
   const peers = new Map();   // id -> peer (after its hello)
-  const world = new Map();   // id -> {s, by, t}: the shared world's changes
+  const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
   let nextId = 1;
   // THE CLOCK: h0 hours at server time c0, going on at rate hours per ms
@@ -88,6 +90,7 @@ export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, d
       const h = clock(), d0 = Math.floor(h / 24) * 24; h0 = d0 + ph + (ph < h - d0 ? 24 : 0); c0 = now();
       all(clockMsg()); log(`  ${p.name} set the clock to ${id}`); return;
     }
+    if (a === 'pick') return pick(p, m, id, t, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -100,6 +103,32 @@ export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, d
     world.set(id, s);
     all({k: 'world', id, s: s.s, by: p.id});
     log(`  ${p.name} felled ${id}`);
+  }
+
+  // FORAGING (docs/FORAGING.md): a pick ({a: 'pick', id: 'd' + the forest decor's index, lvl: his Foraging level, as the client
+  // says it: the save is his). The patch must be a plant of the plan (without one, the client's word for the kind), not picked,
+  // in reach. The yield is rolled here (content/forage.js: the same rules the game runs offline) from his gear's forage.* notes
+  // and his level, and told to everyone ({k: 'world', id, s: 'picked', by, n}); it grows back on the clock (the tick: s 'grown')
+  const pickRng = mulberry32((seed ^ 0xf0a6e) >>> 0);
+  function pick(p, m, id, t, deny) {
+    if (world.has(id)) return deny('picked');
+    let kind = str(m.kind, 16);
+    if (decor) {
+      const e = /^d\d+$/.test(id) ? decor[+id.slice(1)] : null; if (!e || !PLANTS[e[0]]) return deny('no such patch');
+      if (Math.hypot(e[1] - p.x, e[2] - p.y) > REACH) return deny('too far');
+      kind = e[0];
+    } else if (!PLANTS[kind] || !/^d\d+$/.test(id)) return deny('no such patch');
+    const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = levelNotes(SKILLS.foraging.per, lvl);
+    for (const g of p.gear) for (const q of GEAR_BY_ID[g]?.mods || []) notes.push(q);
+    const n = pickYield(pickRng, kind, pickStats(notes)), s = {s: 'picked', by: p.id, t, at: clock() + regrowHours(kind, regrow)};
+    world.set(id, s);
+    all({k: 'world', id, s: s.s, by: p.id, n});
+  }
+  let growT = 0;
+  function regrowTick(dt) {   // once a second: the picked patches whose time has come grow back, for everyone
+    if ((growT += dt) < 1) return;
+    growT = 0; const h = clock();
+    for (const [id, s] of world) if (s.at !== undefined && h >= s.at) { world.delete(id); all({k: 'world', id, s: 'grown'}); }
   }
 
   // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:
@@ -173,6 +202,7 @@ export function createRoom({seed, trees = null, unc = null, hour = CLOCK.hour, d
   const DT = 1 / TICK_HZ;
   const timer = setInterval(() => {
     if (!peers.size) return;
+    regrowTick(DT);
     // the uncanny forest: the secrets' clocks and the heron's ring, the night elk (the placed players only)
     let c = 0;
     if (unc) {
