@@ -6,6 +6,7 @@
 // (pack.store('camp')); at most TUNE.most stand. Only in the persistent world (the sandbox, the ruins biome).
 // OWNS: the fires (their props: kind 'pitfire', and fuel), their meshes, their light records, their saved part.
 // READS: pack (logs, the store, recipes), host.entities (near: room), lights (F.flame). EMITS: fire.addWood, fire.crackle.
+// API: burningNear(x, y, r) (features/fishing.js cooks at a burning fire).
 // BUDGET: sim: a few multiplies a fire a step. View: a flame and a light a burning fire a frame.
 import * as THREE from 'three';
 import {flags} from '../core/flags.js';
@@ -138,6 +139,8 @@ export async function create(host) {
     },
     hud: () => active() && fires.length ? 'campfires ' + fires.map(f => f.fuel > 0 ? Math.round(f.fuel) + 's' : f.ember > 0 ? 'embers' : 'cold').join(' ') : '',
     biomeChanged() { for (const f of fires) f.mesh = null; },
+    // a fire burning within r m of (x, y)? (features/fishing.js: cooking needs one)
+    burningNear(x, y, r) { for (const f of fires) if (f.fuel > 0 && Math.hypot(f.p.x - x, f.p.y - y) <= r) return true; return false; },
   };
   return F;
 }

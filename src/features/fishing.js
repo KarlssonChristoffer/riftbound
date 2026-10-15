@@ -17,27 +17,40 @@
 //   Sim: the phase, the cast, the roll, the nibbles, the fight (progress, strain, surges), the catch (pack, XP, records).
 //   View: the rod and line in his hands (pixel lines), the bobber, rings and spray, the fish under the water and its leap;
 //   the HD layer: the prompt, the charge meter, the "!", the fight gauge, the catch card.
+// FISHING SPOTS (content/fishing.js SPOT): rises and bubbles on the water, a few in reach, moving every SPOT.slot s on the
+// world's clock (co-op: the server's, so friends see the same ones); a cast into one bites sooner and rarer, and a catch from
+// it spends it (for you). BAIT (BAITS): cut from small fish at the pack panel; one goes on the hook a cast while you have it.
+// MEALS: cooked at a burning campfire (the pack panel's Cook list) and eaten at once: a buff for a while (host.mods source
+// 'fishing.meal', one meal at a time, saved). THE ANGLER'S SET: ANGLER.n fishing pieces worn (source 'fishing.set'). THE
+// JOURNAL: the pack panel's Fish part (pack.section): every catch with its count and record, the ones not caught yet as
+// silhouettes with a hint of where and when.
 // Only in the sandbox's ruins biome (the persistent world: the Proving Grounds, the West Downs, the forest). ?fishing=0 off.
-// OWNS: the fishing state, its saved part (pack.store('fishing'): counts and records), its particles. Claims LMB (F.lmb) while
+// OWNS: the fishing state, its saved part (pack.store('fishing'): counts, records, the meal), its particles, the modifier
+//   sources 'fishing.meal' and 'fishing.set', the recipes Cook and Bait, the journal section. Claims LMB (F.lmb) while
 //   it can cast or is fishing.
-// READS: gear (the rod worn), host.mods ('fish.*'), world.js waterSample, host.env (part, sky.rain), pack, coop (mail, fish).
+// READS: gear (the rod worn, the set), host.mods ('fish.*'), world.js waterSample, host.env (part, sky.rain), pack, coop (mail,
+//   fish, the server's clock), campfires (burningNear: where it cooks), SESSION.seed (the spots).
 // EMITS: fish.cast, fish.plop, fish.snag, fish.nibble, fish.bite, fish.early, fish.slip, fish.hook, fish.tell, fish.surge,
-//   fish.reel, fish.drag, fish.snap, fish.escape, fish.leap, fish.catch, fish.away.
+//   fish.reel, fish.drag, fish.snap, fish.escape, fish.leap, fish.catch, fish.away, fish.spot, fish.bait, fish.cook.
 // BUDGET: sim: a few multiplies a step while fishing (nothing otherwise but a compare). View: a rod, a line (~16 lines), a few
 //   dozen points; HD: a gauge (rects + pixel text) while fishing; the prompt: one waterSample a frame while a rod is worn.
-import {TUNE, CATCHES, WATERS, roll, catchIcon, isFish} from '../content/fishing.js';
+//   Spots: found again only when he crosses a 7 m cell or the slot turns (~a dozen hashes and waterSamples), a few points each.
+import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, BAITS, MEALS, ANGLER, COMMON_FISH, roll, catchIcon, isFish, spotAt, hintOf} from '../content/fishing.js';
 import {gearById, RARITY} from '../content/gear.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
+import {SESSION} from '../core/session.js';
 import {mulberry32, simSeed, viewRandom} from '../core/rng.js';
 import {waterSample} from '../world/world.js';
 import {loadPixelFont} from '../ui/pixelfont.js';
+import {iconURL} from '../ui/packpanel.js';
 
 const ON = flags.get('fishing') !== '0';
 const TUNE_NET = {ask: 2.5};   // s to wait for the server's roll before rolling here
 const THROW = 'lasso_throw.5', HAUL = 'lasso_haul_0';   // (the poses he casts and hauls in: a lasso's throw and haul)
 const STATS = ['fish.luck', 'fish.lure', 'fish.reel', 'fish.line', 'fish.cast', 'fish.hook', 'fish.double', 'fish.find', 'fish.size', 'fish.net', 'fish.night', 'fish.rain'];
 const BASE = {'fish.lure': 1, 'fish.reel': 1, 'fish.line': 1, 'fish.cast': 1, 'fish.size': 1};
+const COOK_R = 2.5;   // m from a burning campfire to cook
 
 // ORDER (core/features.js): after co-op (the server's roll arrives in its update), the gear (the rod worn, its notes this step)
 // and the pack (where a catch goes)
@@ -56,6 +69,32 @@ export async function create(host) {
   const stats = () => { const m = host.mods; if (m.ver !== stV) { stV = m.ver; for (const k of STATS) ST[k] = m.value(k, BASE[k] ?? 0); } return ST; };
   const reach = () => TUNE.cast.max * stats()['fish.cast'];
 
+  // ---------------------------------------------------------------- fishing spots (content/fishing.js SPOT, spotAt)
+  // the spots in reach of him: found again when he crosses a cell or the slot turns; a spent one (a catch from it) is gone for
+  // him till the next slot. The slot clock: the sim's offline, the server's online (the same spots for everyone).
+  const NSP = 40, SP = [], SPQ = {x: 0, y: 0}, SPK = {cx: 1e9, cy: 1e9, slot: -1, n: 0}, spent = new Set();
+  const WS2 = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
+  for (let i = 0; i < NSP; i++) SP.push({x: 0, y: 0, key: 0});
+  const clockNow = () => { const c = coop(); return c ? c.net.serverNow() / 1000 : S.clock; };
+  function findSpots() {
+    const P = host.player, cx = Math.floor(P.x / SPOT.cell), cy = Math.floor(P.y / SPOT.cell), slot = Math.floor(clockNow() / SPOT.slot);
+    if (cx === SPK.cx && cy === SPK.cy && slot === SPK.slot) return;
+    if (slot !== SPK.slot) spent.clear();
+    SPK.cx = cx; SPK.cy = cy; SPK.slot = slot;
+    const r = Math.ceil((TUNE.cast.max * 1.6 + 3) / SPOT.cell), seed = (SESSION.seed ?? 0) | 0; let n = 0;
+    for (let a = cx - r; a <= cx + r; a++) for (let b = cy - r; b <= cy + r; b++) {
+      if (n >= NSP || !spotAt(a, b, slot, seed, SPQ)) continue;
+      waterSample(SPQ.x, SPQ.y, WS2); if (!WATERS[WS2.kind] || (WS2.edge || 0) < SPOT.edge) continue;
+      const s = SP[n++]; s.x = SPQ.x; s.y = SPQ.y; s.key = (a & 0xffff) * 65536 + (b & 0xffff);
+    }
+    SPK.n = n;
+  }
+  // the live spot within SPOT.r of (x, y) -> the spot | null
+  function liveSpot(x, y) {
+    for (let i = 0; i < SPK.n; i++) { const s = SP[i]; if (!spent.has(s.key) && Math.hypot(s.x - x, s.y - y) <= SPOT.r) return s; }
+    return null;
+  }
+
   // ---------------------------------------------------------------- the cursor on the water (world), as the sim reads it
   const CW = {x: 0, y: 0, d: 0, ok: false}, WS = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
   function cursorWater() {
@@ -66,6 +105,7 @@ export async function create(host) {
     waterSample(CW.x, CW.y, WS); CW.ok = !!WATERS[WS.kind];
     return CW;
   }
+  const baitLeft = () => { const pk = pack(); let n = 0; if (pk) for (const id in BAITS) n += pk.count(id); return n; };
   const free = () => { const P = host.player; return !host.lock && !host.paused && !host.BUSY.has(P.state) && P.state !== 'draw' && !host.PL.tool?.S.mode; };
   // can a press start a cast here: a rod, the cursor on water in reach (+ a little: it falls short of what's further), nothing
   // hostile under the cursor
@@ -87,6 +127,9 @@ export async function create(host) {
     win: 0,                                // the hook window (s)
     dist: 1, strain: 0, surge: '', sT: 0, nextS: 0, goneT: 0, clickT: 0, dragT: 0,   // the fight
     note: '',                              // a word for the gauge (view): 'let go!' etc.
+    clock: 0,                              // s of sim (the spots' slot clock offline)
+    spot: -1, bait: '',                    // this cast: the spot it fell in (its key), the bait on the hook
+    meal: '', mealT: 0,                    // the meal eaten (a MEALS id), s of it left
   };
   const I = {id: '', cm: 0, kg: 0, n: 0, first: false, record: false, xp: 0, t: 0};   // the last catch (the card)
   const ev = (type, o) => { o.type = type; host.events.push(o); };
@@ -113,14 +156,19 @@ export async function create(host) {
     if (!S.water) { ev('fish.snag', at(S.tx, S.ty)); say('missed the water'); reelIn(); return; }
     S.deep = Math.max(0, WS.edge || 0);
     ev('fish.plop', at(S.tx, S.ty));
+    const sp = liveSpot(S.tx, S.ty); S.spot = sp ? sp.key : -1;
+    if (sp) { ev('fish.spot', at(S.tx, S.ty)); say('a fishing spot!', '#9ad07a'); }
+    S.bait = ''; const pk = pack();
+    if (pk) for (const id in BAITS) if (pk.count(id) > 0 && pk.take(id, 1)) { S.bait = id; break; }
     S.phase = 'wait'; S.t = 0; S.nib = 0; S.lastNib = -9; S.r = null; S.askT = 0;
     const c = coop(), st = stats(), rain = (host.env?.sky?.rain ?? 0) > .3;
-    if (c) { S.local = false; c.fish({a: 'cast', n: S.n, x: +S.tx.toFixed(2), y: +S.ty.toFixed(2), w: S.water, deep: +S.deep.toFixed(2), rain, perfect: S.perfect, lvl: pack()?.level('fishing') || 1}); }
+    if (c) { S.local = false; c.fish({a: 'cast', n: S.n, x: +S.tx.toFixed(2), y: +S.ty.toFixed(2), w: S.water, deep: +S.deep.toFixed(2), rain, perfect: S.perfect, lvl: pack()?.level('fishing') || 1,
+      spot: S.spot >= 0, bait: S.bait, meal: S.meal}); }
     else { S.local = true; S.r = rollHere(st, rain); }
   }
   function rollHere(st, rain) {
     const r = roll(R, {water: S.water, part: host.env?.part || 'day', rain, deep: S.deep, luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0), find: st['fish.find'],
-      size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: S.perfect});
+      size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: S.perfect, spot: S.spot >= 0, bait: S.bait});
     r.two = R() < st['fish.double'];
     return r;
   }
@@ -184,6 +232,109 @@ export async function create(host) {
     Object.assign(I, {id: r.id, cm: r.cm, kg: r.kg, n, first, record, xp, t: 0});
     ev('fish.catch', {x: P.x, y: P.y, id: r.id, cm: r.cm, kg: r.kg, n, first, record, rarity: c.rarity});
     if (!S.local) coop()?.fish({a: 'land', n: S.n});
+    if (S.spot >= 0) { spent.add(S.spot); S.spot = -1; }
+    jV++;
+  }
+
+  // ---------------------------------------------------------------- meals (content/fishing.js MEALS): cooked at a burning
+  // campfire, eaten at once; one at a time (a new one replaces it); its notes in host.mods, its time left in the store
+  function eat(id, t) {
+    S.meal = id; S.mealT = t; host.mods.set('fishing.meal', MEALS[id].notes);
+    const s = store(); if (s) { s.meal = {id, t: Math.round(t)}; pack()?.dirty(); }
+  }
+  function unEat() {
+    S.meal = ''; S.mealT = 0; host.mods.clear('fishing.meal');
+    const s = store(); if (s?.meal) { delete s.meal; pack()?.dirty(); }
+  }
+  // what a recipe costs from the pouch: each need paid with the kind he has most of ({ids, n}[] -> {id: n})
+  function costOf(need) {
+    const o = {}, pk = pack();
+    for (const q of need) {
+      let best = q.ids[0], bn = -1;
+      for (const id of q.ids) { const c = (pk?.count(id) || 0) - (o[id] || 0); if (c > bn) { bn = c; best = id; } }
+      o[best] = (o[best] || 0) + q.n;
+    }
+    return o;
+  }
+  const short = (o) => { for (const k in o) if ((pack()?.count(k) || 0) < o[k]) return true; return false; };
+  const kinds = ids => ids === COMMON_FISH ? 'small fish' : ids.length > 4 ? 'fish' : ids.map(id => CATCHES[id].name).join(' or ');
+  const needWords = need => need.map(q => `${q.n} ${kinds(q.ids)}`).join(' + ');
+  const fireNear = () => { const P = host.player; return !!host.feature('campfires')?.burningNear?.(P.x, P.y, COOK_R); };
+  const RECIPES = [];
+  for (const id in MEALS) {
+    const M = MEALS[id];
+    RECIPES.push({id: 'meal.' + id, name: M.name, group: 'Cook',
+      get cost() { return costOf(M.need); },
+      desc: `${M.say}, for ${Math.round(M.dur / 60)} min. Needs ${needWords(M.need)}, cooked by a burning campfire.`,
+      can() {
+        if (!active()) return 'only in the open world';
+        if (short(costOf(M.need))) return `needs ${needWords(M.need)}`;
+        return fireNear() ? '' : 'cook it by a burning campfire';
+      },
+      run() {
+        const c = costOf(M.need); if (short(c)) return;
+        for (const k in c) pack().take(k, c[k]);
+        const had = S.meal, P = host.player; eat(id, M.dur);
+        ev('fish.cook', {x: P.x, y: P.y, id});
+        ui()?.toast(M.name, M.say + (had && had !== id ? ` (instead of the ${MEALS[had].name.toLowerCase()})` : ''), '#ffb060');
+      }});
+  }
+  for (const id in BAITS) {
+    const B = BAITS[id], need = [{ids: B.from, n: 1}];
+    RECIPES.push({id: 'bait.' + id, name: `${B.name} x${B.n}`, group: 'Bait',
+      get cost() { return costOf(need); },
+      desc: `${B.desc} Cut from one ${kinds(B.from)}; one goes on the hook each cast while you have it.`,
+      can: () => short(costOf(need)) ? `needs a ${B.from.map(f => CATCHES[f].name).join(', ')}` : '',
+      run() {
+        const c = costOf(need); if (short(c)) return;
+        for (const k in c) pack().take(k, c[k]);
+        const P = host.player; pack().give(id, B.n, {x: P.x, y: P.y, h: P.z + 1.6});
+        ev('fish.bait', {x: P.x, y: P.y, id});
+      }});
+  }
+
+  // ---------------------------------------------------------------- the journal: the pack panel's Fish part
+  let jV = 0, setN = 0, setV = -1;
+  const SIL = {};
+  function silhouette(id) {   // a catch not caught yet: its shape in one dark colour
+    if (SIL[id]) return SIL[id];
+    const {rows} = catchIcon(id), pal = {}; for (const r of rows) for (const ch of r) pal[ch] = '#6a5d4e';
+    return SIL[id] = iconURL(rows, pal);
+  }
+  const JOURNAL = {id: 'fish', title: 'Fish',
+    ver: () => jV * 4096 + setN * 512 + (S.meal ? Math.ceil(S.mealT / 60) : 0),
+    html(esc, icon) {
+      const s = store() || {n: {}, best: {}}; let h = '<div class="p-bag p-grid7">', got = 0, all = 0;
+      for (const id of CATCH_IDS) {
+        const c = CATCHES[id], n = s.n[id] || 0, rar = RARITY[c.rarity]?.name || c.rarity;
+        if (n) {
+          got++; all += n; const b = s.best[id];
+          h += `<div class="p-slot" title="${esc(c.name)} (${esc(rar)}): ${n} caught${b ? `, best ${b} cm` : ''}. ${esc(c.desc)}"><img src="${icon(id)}" alt="">${n > 1 ? `<em>${n > 99 ? '99+' : n}</em>` : ''}</div>`;
+        } else h += `<div class="p-slot p-dim" title="??? (${esc(rar)}): ${esc(hintOf(id))}"><img src="${silhouette(id)}" alt=""></div>`;
+      }
+      h += `</div><div class="p-note">${got} / ${CATCH_IDS.length} kinds found · ${all} caught</div>`;
+      h += `<div class="p-note">${esc(ANGLER.name)}: ${setN} / ${ANGLER.n} fishing pieces worn${setN >= ANGLER.n ? ` (${esc(ANGLER.say)})` : ''}</div>`;
+      if (S.meal) h += `<div class="p-note">Eaten: ${esc(MEALS[S.meal].name)}, ${Math.ceil(S.mealT / 60)} min left (${esc(MEALS[S.meal].say)})</div>`;
+      return h;
+    }};
+  let offered = false, restored = false, saveT = 0;
+  // each step, fishing or not: the recipes and the journal offered to the pack (once: it is made after this feature), the
+  // angler's set (on a change of the set worn), the meal's clock (and its saved part, every 5 s)
+  function keep(dt) {
+    const pk = pack();
+    if (!offered && pk) { offered = true; for (const r of RECIPES) pk.recipe(r); pk.section(JOURNAL); }
+    if (!restored && pk) { restored = true; const m = store()?.meal; if (m && MEALS[m.id] && m.t > 0) eat(m.id, m.t); }
+    const g = host.feature('gear');
+    if (g && g.S.ver !== setV) {
+      setV = g.S.ver; let n = 0; for (const id of g.S.worn) if (gearById(id)?.kind === 'fishing') n++;
+      const was = setN >= ANGLER.n; setN = n;
+      if (n >= ANGLER.n && !was) { host.mods.set('fishing.set', ANGLER.notes); ui()?.toast(ANGLER.name, ANGLER.say, '#7ec8e3'); }
+      else if (n < ANGLER.n && was) host.mods.clear('fishing.set');
+    }
+    if (S.meal) {
+      if ((S.mealT -= dt) <= 0) { const M = MEALS[S.meal]; unEat(); ui()?.toast(M.name, 'has worn off', '#a39478'); }
+      else if ((saveT += dt) > 5) { saveT = 0; const s = store(); if (s?.meal) { s.meal.t = Math.round(S.mealT); pack()?.dirty(); } }
+    }
   }
   // a press (LMB down, claimed) and a let-go, in the step
   function press() {
@@ -199,7 +350,7 @@ export async function create(host) {
   function letGo() { if (S.phase === 'charge') cast(); }
 
   // ---------------------------------------------------------------- the view's state
-  const RINGS = [], DROPS = [], NR = 24, ND = 120;   // water rings {x, y, h, r, t, life, big}; spray {x, y, h, vx, vy, vh, t, life, c}
+  const RINGS = [], DROPS = [], NR = 40, ND = 120;   // water rings {x, y, h, r, t, life, big}; spray {x, y, h, vx, vy, vh, t, life, c}
   for (let i = 0; i < NR; i++) RINGS.push({x: 0, y: 0, h: 0, r: 0, t: 0, life: 0, big: 0, on: false});
   for (let i = 0; i < ND; i++) DROPS.push({x: 0, y: 0, h: 0, vx: 0, vy: 0, vh: 0, t: 0, life: 0, on: false});
   function ring(x, y, big = 0) { for (const r of RINGS) if (!r.on) { r.on = true; r.x = x; r.y = y; r.h = host.elev(x, y) + .02; r.t = 0; r.life = big ? 1.4 : .9; r.big = big; return; } }
@@ -214,6 +365,10 @@ export async function create(host) {
   const V = {bob: 0, dip: 0, under: 0, fx: 0, fy: 0, dart: 0, dartV: 0, leapT: -1, lx: 0, ly: 0, flash: 0, bang: 0, card: 0, peer: null, peerT: 0};
   const COL = {rod: '#c4bc7c', line: '#e8e4d8', red: '#d83a2a', white: '#f4f0e6', ring: '#d8ecf0', drop: '#e8f6fa', shade: '#0e1c20', glow: '#b8c8f0'};
   const P1 = {size: 1}, P2 = {size: 2}, P2A = {size: 2, alpha: .55}, P1A = {size: 1, alpha: .6}, P2E = {size: 2, emit: true}, P3A = {size: 3, alpha: .75};
+  const PSP = {size: 2, alpha: .9};   // (the spots' bubbles: alpha follows the slot's fade in and out)
+  const PRL = []; for (let i = 1; i <= 8; i++) PRL.push({size: 1, alpha: i / 8});   // (the spots' ripples: alpha in 8 steps)
+  // how present the spots are now (0..1): they fade in at the slot's start and out at its end (SPOT.fade s)
+  const spotFade = () => { const t = clockNow() % SPOT.slot; return clamp(Math.min(t, SPOT.slot - t) / SPOT.fade, 0, 1); };
   // the fish's leap sprite: its icon with an outline (content/fishing.js catchIcon), a canvas each, made once
   const SPR = {};
   function spriteOf(id) {
@@ -279,6 +434,8 @@ export async function create(host) {
     },
     update(dt, evs) {
       const ph0 = S.phase;
+      if (!ON) return;
+      S.clock += dt; keep(dt);
       if (!active()) { if (ph0) { S.phase = ''; S.r = null; } S.presses = S.ups = 0; S.held = false; return; }
       // the server's word (co-op): the roll for our cast, others' catches
       const c = coop();
@@ -293,6 +450,7 @@ export async function create(host) {
         if (S.presses > 0) { S.presses--; press(); }
         if (S.ups > 0 && S.presses === 0) { S.ups--; letGo(); }
       }
+      findSpots();
       if (!S.phase) return;
       S.t += dt;
       const P = host.player;
@@ -362,6 +520,13 @@ export async function create(host) {
         if ((d.t += dt) > d.life) { d.on = false; continue; }
         d.vh -= 9 * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.h += d.vh * dt;
       }
+      // the spots: a ring now and then, a fish breaking the surface once in a while
+      const fade = spotFade();
+      for (let i = 0; i < SPK.n; i++) {
+        const sp = SP[i]; if (spent.has(sp.key)) continue;
+        if (VR() < dt * 2.2 * fade) ring(sp.x + (VR() - .5) * .8, sp.y + (VR() - .5) * .8, VR() < .3 ? 1 : 0);
+        if (VR() < dt * .12 * fade) { spray(sp.x, sp.y, 7, 1.3); ring(sp.x, sp.y, 1); }
+      }
       pose(dt);
     },
     frame() {
@@ -372,6 +537,25 @@ export async function create(host) {
         for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; host.point(r.x + Math.cos(a) * rad, r.y + Math.sin(a) * rad * .8, r.h, COL.ring, o); }
       }
       for (const d of DROPS) if (d.on) host.point(d.x, d.y, d.h, COL.drop, P1);
+      // the spots' bubbles: a few points wheeling slowly over each, popping in and out
+      const fade = spotFade();
+      if (fade > 0 && SPK.n) {
+        PSP.alpha = .9 * fade; const t = performance.now() / 1000;
+        for (let i = 0; i < SPK.n; i++) {
+          const sp = SP[i]; if (spent.has(sp.key)) continue;
+          const h = host.elev(sp.x, sp.y) + .03, k0 = (sp.key % 97) * .37;
+          for (let w = 0; w < 2; w++) {   // two ripples always spreading out from it, one after the other
+            const k = (t * .45 + k0 + w * .5) % 1, rad = .2 + k * 1.1, a = Math.round(.85 * (1 - k) * fade * 8);
+            if (a < 1) continue;
+            for (let i = 0; i < 18; i++) { const an = i / 18 * Math.PI * 2; host.point(sp.x + Math.cos(an) * rad, sp.y + Math.sin(an) * rad * .8, h - .01, COL.ring, PRL[a - 1]); }
+          }
+          for (let j = 0; j < 6; j++) {
+            const ph = t * (.5 + .13 * j) + k0 + j * 1.7; if (Math.sin(ph * 3.1 + j) < -.2) continue;   // (a bubble pops, another comes)
+            const r = .15 + .35 * ((j * .29 + k0) % 1);
+            host.point(sp.x + Math.cos(ph) * r, sp.y + Math.sin(ph) * r * .8, h, COL.white, PSP);
+          }
+        }
+      }
       if (RD.show) {
         const g = rod(), rc = g?.fish?.tip || COL.rod, lc = g?.fish?.line || COL.line, glow = !!g?.fish?.glow;
         // the rod: a gentle curve from his hand (a little behind it) to the tip, bent toward the line by the strain
@@ -400,11 +584,13 @@ export async function create(host) {
     },
     // the HD layer: the prompt, the charge meter, the "!", the fight gauge, the catch card
     hd(q, sc) { drawHD(q, sc); },
-    hud: () => active() ? `fishing ${S.phase || (rod() ? 'rod ready' : 'no rod')}${S.r ? ' ' + S.r.id + ' ' + S.r.cm + 'cm' : ''}${S.phase === 'fight' ? ` dist ${S.dist.toFixed(2)} strain ${S.strain.toFixed(2)} ${S.surge}` : ''}` : '',
+    hud: () => active() ? `fishing ${S.phase || (rod() ? 'rod ready' : 'no rod')} · ${SPK.n} spots${S.meal ? ' · ' + S.meal + ' ' + Math.ceil(S.mealT) + 's' : ''}${setN >= ANGLER.n ? ' · set' : ''}${S.r ? ' ' + S.r.id + ' ' + S.r.cm + 'cm' : ''}${S.phase === 'fight' ? ` dist ${S.dist.toFixed(2)} strain ${S.strain.toFixed(2)} ${S.surge}` : ''}` : '',
     // (tests) the catch log: {n: {id: count}, best: {id: cm}}
     get log() { return store(); },
     // (tests) the rod and line as drawn this frame (world): hand, tip, bobber
     get drawn() { return RD; },
+    // (tests) the spots in reach now ({x, y, key} the first n), whether a spot is spent
+    spots: () => SP.slice(0, SPK.n).filter(sp => !spent.has(sp.key)),
   };
 
   // ---------------------------------------------------------------- the HD layer (pixel art: whole UI pixels, the pixel font)
@@ -431,11 +617,12 @@ export async function create(host) {
       const w = cursorWater();
       if (w.ok && w.d <= reach() + 3 && w.d >= 1) {
         const s = G.toScreen(w.x, host.elev(w.x, w.y) + .5, w.y), x = Math.round(s[0] * sc), y = Math.round(s[1] * sc);
-        const label = w.d > reach() ? 'LMB  cast (too far)' : 'LMB  cast';
+        const far = w.d > reach(), good = !far && !!liveSpot(w.x, w.y), bait = baitLeft();
+        const label = far ? 'LMB  cast (too far)' : `LMB  cast${good ? ' · spot!' : ''}${bait ? ` · bait ${bait}` : ''}`;
         q.font = fontOK ? `${10 * u}px RiftPixel` : `${7 * u}px monospace`;
         const tw = Math.ceil(q.measureText(label).width / u) * u + 8 * u;
         frame9(q, x - tw / 2, y - 14 * u, tw, 13 * u, u);
-        text(q, label, x, y - 4 * u, u, w.d > reach() ? '#e8a070' : '#f2d27a', 'center');
+        text(q, label, x, y - 4 * u, u, far ? '#e8a070' : good ? '#9ad07a' : '#f2d27a', 'center');
       }
     }
     if (S.phase) {
@@ -464,6 +651,17 @@ export async function create(host) {
     }
     // the catch card (top middle): the icon, the name in its rarity's colour, size and weight, NEW / RECORD
     if (V.card > 0 && I.id) drawCard(q, u);
+    if (S.meal && !pack()?.open) drawMeal(q, u);   // (the pack's panel shows it too, over that corner)
+    q.restore();
+  }
+  // the meal eaten (bottom left): its name and the time it has left
+  function drawMeal(q, u) {
+    const M = MEALS[S.meal], left = Math.max(0, Math.ceil(S.mealT)), t = `${M.name}  ${(left / 60) | 0}:${String(left % 60).padStart(2, '0')}`;
+    q.save(); q.setTransform(1, 0, 0, 1, 0, 0); q.imageSmoothingEnabled = false;
+    q.font = fontOK ? `${10 * u}px RiftPixel` : `${7 * u}px ui-monospace, monospace`;
+    const W = Math.ceil(q.measureText(t).width / u) * u + 10 * u, H = 13 * u, x0 = 6 * u, y0 = q.canvas.height - H - 6 * u;
+    frame9(q, x0, y0, W, H, u);
+    text(q, t, x0 + 5 * u, y0 + 10 * u, u, left < 30 && ((performance.now() / 300) | 0) % 2 ? '#a39478' : '#ffb060');
     q.restore();
   }
   function drawGauge(q, x, y, u) {

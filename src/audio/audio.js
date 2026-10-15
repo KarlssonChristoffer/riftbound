@@ -467,6 +467,12 @@ const SFX = {
   logPick(E, o) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * .35}); },
   axeSwing(E, o) { SFX.jump(E, {...o, g: (o.g ?? 1) * .45}); },
   campLog(E, o) { SFX.kick(E, {...o, mat: 'wood', g: (o.g ?? 1) * .6}); },   // (a soft wooden thump)
+  fishCook(E, o) {   // fish on the fire (features/fishing.js): a sizzle with crackles over a soft thump
+    const v = E.voice(o, 'fishCook', 1.4, {cd: .5}); if (!v) return;
+    E.N(v, 0, {type: 'highpass', f: 2600, a: .06, d: 1.1, g: .1});
+    for (let i = 0; i < 9; i++) E.N(v, .05 + i * .13 + (i % 3) * .03, {type: 'bandpass', f: 1800 + (i * 530) % 2400, q: 4, a: .001, d: .015, g: .12});
+    SFX.campLog(E, {...o, g: (o.g ?? 1) * .5});
+  },
   // FISHING (features/fishing.js): the cast's swish and the reel's zing, the bobber's plop, a nibble's plip, the bite's plunk,
   // the reel's clicks, the drag's buzz, the line's snap, the catch's jingle (brighter and longer the rarer it is)
   fishCast(E, o) {
@@ -1265,6 +1271,9 @@ export function createAudio(ctx, host = {}) {
         case 'fish.leap': fire('splash', e.x, e.y, {surf, g: .7}); break;
         case 'fish.catch': fire('fishCatch', e.x, e.y, {tier: RARITY_TIER[e.rarity] ?? 0}); break;
         case 'fish.away': fire('fishPlop', e.x, e.y, {g: .5}); break;
+        case 'fish.spot': fire('plop', e.x, e.y, {surf, fish: 1, g: .6}); break;
+        case 'fish.bait': fire('chop', e.x, e.y, {k: 0, g: .5}); break;
+        case 'fish.cook': fire('fishCook', e.x, e.y); break;
         // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge
         // recipes of its own yet): the swish of a turn and the throw on the cloth swish, the cinch a soft thump, the yank
         // a heave, a yanked body's landing the gunmen's fall thud, the rope straining a short creak (the bow's)
