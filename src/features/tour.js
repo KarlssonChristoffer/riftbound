@@ -19,7 +19,7 @@ import {LOAD_ORDER} from '../core/features.js';
 import {STOPS, LAST} from '../content/tour.js';
 import {WEATHER} from '../sim/wxclock.js';
 import {gearById} from '../content/gear.js';
-import {hdUnit, hdFrame, hdText, hdFont} from '../ui/hdpixel.js';
+import {hdUnit, hdFrame, hdText, hdFont, hdFontOK} from '../ui/hdpixel.js';
 
 const FLAG = flags.get('tour');
 const SAVE = 'riftbound.tour', DAY_MIN = 60, POLL = .25;
@@ -122,7 +122,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- the card (HD layer): laid out on change
   let dirty = 1, lines = [], cardW = 0, cardH = 0;
-  const laid = [0, 0, 0];
+  const laid = [0, 0, 0, 0];
   // lay out the card's lines (each {s, col, x, gap}) for a width of W display px at UI pixel u
   function layout(q, u, W) {
     const s = cur(), out = [], inner = W - 16 * u;
@@ -188,8 +188,9 @@ export async function create(host) {
     hd(q) {
       if (!on || host.hudOff || host.paused || host.photoOpen) return;
       const u = hdUnit(), cw = q.canvas.width, W = Math.min(200 * u, Math.max(120 * u, Math.round(cw * .34 / u) * u));
-      if (dirty !== laid[0] || u !== laid[1] || W !== laid[2]) {
-        laid[0] = dirty; laid[1] = u; laid[2] = W; lines = layout(q, u, W);
+      const fk = hdFontOK() ? 1 : 0;   // (laid out again once the pixel font is in: its glyphs are wider than the fallback's)
+      if (dirty !== laid[0] || u !== laid[1] || W !== laid[2] || fk !== laid[3]) {
+        laid[0] = dirty; laid[1] = u; laid[2] = W; laid[3] = fk; lines = layout(q, u, W);
         q.font = hdFont(u); let w = 0; for (const l of lines) w = Math.max(w, l.x + q.measureText(l.s).width);
         cardW = hidden ? Math.ceil(w / u) * u + 16 * u : W; cardH = 8 * u; for (const l of lines) cardH += 12 * u + l.gap;
         cardH += 2 * u;
