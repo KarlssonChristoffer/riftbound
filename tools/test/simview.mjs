@@ -81,6 +81,13 @@ const SCENARIOS = [
     R.host.teleport(U.stones.x, U.stones.y); await frames(360);
     F.ringFriend = true; R.host.teleport(U.heron.x, U.heron.y); await frames(200); F.ringFriend = false;
     R.env.setHour(6.2); await frames(120);`, [240, 30]],
+  // the forest (seed 1337) without the uncanny: walking and sprinting through the home woods (fauna, birds), wading the lake's
+  // shelf, the cave's first chamber. Keyboard and world-space only: all rates
+  ['forest', 'mode=sandbox&seed=1337&at=12,-22&daymin=0&hour=11&weather=fair&flow=0', `
+    await frames(30);
+    R.keys.add('w'); await frames(90); R.keys.delete('w'); R.keys.add('shift'); R.keys.add('a'); await frames(90); R.keys.clear(); await frames(30);
+    R.host.teleport(-3.7, -29); await frames(20); R.keys.add('w'); await frames(120); R.keys.clear(); await frames(60);
+    R.host.teleport(34.4, -212.75); await frames(30); R.keys.add('d'); await frames(90); R.keys.clear(); await frames(120);`, [240, 30]],
 ].filter(s => !ONLY || ONLY.split(',').includes(s[0]));
 
 const DIGEST = `(() => { const R = window.__r3d, core = R.host.feature('combat')?.core, g = R.game, f5 = v => typeof v === 'number' ? +v.toFixed(5) : v;
