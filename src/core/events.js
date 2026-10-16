@@ -301,6 +301,14 @@ export const EVENTS = {
   'tool.hit':           ['features/woodcut.js',   'x, y, who, kind (body | a prop kind): a tool\'s swing meets a foe or a dummy', 'audio'],
   'tool.whiff':         ['features/woodcut.js',   'x, y: a tool\'s swing at nothing (features/mining.js too: ring, the ringing pick rings on)', 'audio'],
   'bells.toll':         ['features/bells/view.js (a view: nothing in the sim listens)', 'x, y, h, k (0..1), note, who (the bell): its clapper strikes it again as it swings', 'audio (its note, softer)'],
+  // weapon attachments and runes (features/mods/sim.js, docs/MODS.md)
+  'mods.find':          ['features/mods/sim.js',  'x, y, id (the part), first (the first of its kind): a part went into the kit', 'mods (view: the toast, a glint)'],
+  'mods.fit':           ['features/mods/sim.js',  'wid (the weapon), slot (rune | tip | grip), id (the part, \'\' taken out)', '(none yet)'],
+  'mods.react':         ['features/mods/sim.js',  'x, y, id (content/mods.js REACT: steam | flashover | swampgas | blight | shatterbolt | unravel)', '(none yet)'],
+  'mods.freeze':        ['features/mods/sim.js',  'x, y, who: a rime-chilled target froze', '(none yet)'],
+  'mods.shatter':       ['features/mods/sim.js',  'x, y, who: a frozen target was hit (or fell) and shattered', '(none yet)'],
+  'mods.arc':           ['features/mods/sim.js',  'x, y, x1, y1: a storm hit jumped from one target to the next', '(none yet)'],
+  'mods.swap':          ['features/mods/sim.js',  'x, y (where he is now), dx, dy: a far hollow kill swapped him into its place', '(none yet)'],
 };
 
 const warned = new Set();
