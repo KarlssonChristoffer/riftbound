@@ -148,13 +148,13 @@ console.log(`room: seed ${SEED}, ${F.trees.size} trees, ${F.decor?.length ?? 0} 
 // its made things are kept with the record
 {
   const P = createPlayers();
-  const r = P.of(KEY_A); r.made.set(1, {u: 1});
+  const r = P.of(KEY_A); r.made[1] = {u: 1};
   const {rec, fresh} = P.join(KEY_A, {woodcutting: needXP(4)});
   ok(rec === r && fresh && levelOf(rec.xp.woodcutting) === 4, 'of() then join(): the same record, XP imported once');
   ok(!P.join(KEY_A, {woodcutting: needXP(8)}).fresh && levelOf(rec.xp.woodcutting) === 4, 'a second join imports nothing');
   const j = P.toJSON()[KEY_A];
   const back = createPlayers({load: JSON.parse(JSON.stringify(P.toJSON()))}).get(KEY_A);
-  ok(j && j.made[1]?.u === 1 && !('imp' in j) && back?.made.get(1)?.u === 1 && P.of('') === null, 'made saved and loaded with the record; of() needs a key');
+  ok(j && j.made[1]?.u === 1 && !('imp' in j) && back?.made[1]?.u === 1 && P.of('') === null, 'made saved and loaded with the record; of() needs a key');
 }
 
 // 4. a test server's switches: --movelvl goes out with the record (ml); --dev takes the Sandbox's Skills rows, a plain server refuses
