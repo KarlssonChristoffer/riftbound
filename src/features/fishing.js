@@ -20,11 +20,6 @@
 // FISHING SPOTS (content/fishing.js SPOT): rises and bubbles on the water, a few in reach, moving every SPOT.slot s on the
 // world's clock (co-op: the server's, so friends see the same ones); a cast into one bites sooner and rarer, and a catch from
 // it spends it (for you). BAIT (BAITS): cut from small fish at the pack panel; one goes on the hook a cast while you have it.
-// FISH CALLED TO A POINT (content/fishing.js COME, comeAt; briefs' depth-shared: the one drawing of fish under the water): other
-// features ask for them near a point (F.come(key, x, y, k, n), every view while they should show) and never draw their own.
-// THE GRAB (F.grab(x, y, water)): a jab into the shallows by hand (the Heron Feather: features/keepsakes.js), rolled like a cast
-// with HERON's limits (content/keepsakes.js heronRoll; co-op: the server's fish {a: 'grab'}), landed at once: the card, the
-// journal, the records, HERON.xp of a cast's Fishing XP.
 // MEALS: fish cooked at a burning campfire (features/meals.js owns them: the Cook list, the buff, its timer chip; a cast tells the
 // server the meal eaten). THE ANGLER'S SET: ANGLER.n fishing pieces worn (source 'fishing.set'). THE
 // JOURNAL: the pack panel's Fish part (pack.section): every catch with its count and record, the ones not caught yet as
@@ -36,12 +31,12 @@
 // READS: gear (the rod worn, the set), host.mods ('fish.*'), world.js waterSample, host.env (part, sky.rain), pack, coop (mail,
 //   fish, the server's clock), meals (the meal eaten: a cast's word to the server), SESSION.seed (the spots).
 // EMITS: fish.cast, fish.plop, fish.snag, fish.nibble, fish.bite, fish.early, fish.slip, fish.hook, fish.tell, fish.surge,
-//   fish.reel, fish.drag, fish.snap, fish.escape, fish.leap, fish.catch, fish.away, fish.spot, fish.bait, fish.jab, fish.miss.
+//   fish.reel, fish.drag, fish.snap, fish.escape, fish.leap, fish.catch, fish.away, fish.spot, fish.bait.
 // BUDGET: sim: a few multiplies a step while fishing (nothing otherwise but a compare). View: a rod, a line (~16 lines), a few
 //   dozen points; HD: a gauge (rects + pixel text) while fishing; the prompt: one waterSample a frame while a rod is worn.
 //   Spots: found again only when he crosses a 7 m cell or the slot turns (~a dozen hashes and waterSamples), a few points each.
-import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, BAITS, ANGLER, COMMON_FISH, COME, roll, catchIcon, isFish, spotAt, hintOf, comeAt} from '../content/fishing.js';
-import {HERON, heronRoll} from '../content/keepsakes.js';
+import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, BAITS, ANGLER, COMMON_FISH, roll, catchIcon, isFish, spotAt, hintOf} from '../content/fishing.js';
+import {HERON, COME, heronRoll, comeAt} from '../content/keepsakes.js';   // (the Heron Feather's jab and its called fish: below)
 import {gearById, RARITY} from '../content/gear.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
@@ -244,19 +239,22 @@ export async function create(host) {
     jV++;
   }
 
-  // ---------------------------------------------------------------- the grab: a jab into the shallows by hand (F.grab)
+  // ---------------------------------------------------------------- THE JAB (docs/KEEPSAKES.md: the Heron Feather)
+  // F.jab(x, y, water): a jab into the shallows by hand (features/keepsakes.js asks), rolled like a cast with HERON's limits
+  // (content/keepsakes.js heronRoll; co-op: the server's fish {a: 'jab'} -> {a: 'jabbed'}), landed at once: the card, the
+  // journal, the records, HERON.xp of a cast's Fishing XP. Emits fish.jab (the splash), fish.miss (nothing).
   const GR = {n: 0, wait: -1, x: 0, y: 0, w: ''};   // the last jab: its number (co-op: the server's answer names it), s waited for it (-1: none)
   const lvlNow = () => pack()?.level('fishing') || 1;
-  function grab(x, y, water) {
+  function jab(x, y, water) {
     if (!ON || !active() || GR.wait >= 0 || S.phase || !WATER_SET.has(water)) return false;
     GR.n++; GR.x = x; GR.y = y; GR.w = water;
     ev('fish.jab', at(x, y));
     const c = coop();
-    if (c) { GR.wait = 0; c.fish({a: 'grab', n: GR.n, x: +x.toFixed(2), y: +y.toFixed(2), w: water, lvl: lvlNow()}); }
-    else grabbed(heronRoll(R, {water, part: host.env?.part || 'day', lvl: lvlNow()}));
+    if (c) { GR.wait = 0; c.fish({a: 'jab', n: GR.n, x: +x.toFixed(2), y: +y.toFixed(2), w: water, lvl: lvlNow()}); }
+    else jabbed(heronRoll(R, {water, part: host.env?.part || 'day', lvl: lvlNow()}));
     return true;
   }
-  function grabbed(r) {   // what the jab came up with: a fish (landed at once) or nothing
+  function jabbed(r) {   // what the jab came up with: a fish (landed at once) or nothing
     GR.wait = -1;
     if (!r) { ev('fish.miss', at(GR.x, GR.y)); return; }
     credit(r, 1, HERON.xp);
@@ -271,7 +269,9 @@ export async function create(host) {
     return w && !host.inStream(x, y) ? w : '';
   }
 
-  // ---------------------------------------------------------------- fish shadows (F.come: other features' asks)
+  // ---------------------------------------------------------------- FISH CALLED TO A POINT (F.come: other features' asks; the
+  // Heron Feather's ring, content/keepsakes.js COME, comeAt; briefs' depth-shared: fishing draws all fish under the water, others
+  // ask and never draw their own). Asked every view while they should show.
   // an ask: key (the asker's own: 'heron:me', 'heron:<peer id>'), the point they circle, k (0: gone, 1: at the point; between:
   // that far up from the drop-off), n of them, seed (the key's hash: everyone draws the same), t (the view clock it was asked at)
   const ASKS = []; for (let i = 0; i < 4; i++) ASKS.push({key: '', x: 0, y: 0, k: 0, n: 0, seed: 0, t: -9, spot: {x: 0, y: 0, r0: HERON.ring[0], r1: HERON.ring[1]}, wet: new Uint8Array(COME.max), wx: new Float32Array(COME.max), wy: new Float32Array(COME.max)});
@@ -449,8 +449,8 @@ export async function create(host) {
         if (m.k !== 'fish') continue;
         if (m.a === 'bite' && m.n === S.n && S.phase === 'wait' && !S.r && typeof m.id === 'string' && CATCHES[m.id]) {
           S.r = {id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0, wait: +m.wait || 4, nibbles: Array.isArray(m.nibbles) ? m.nibbles.map(Number) : [], two: !!m.two};
-        } else if (m.a === 'grabbed' && m.n === GR.n && GR.wait >= 0) {
-          grabbed(typeof m.id === 'string' && CATCHES[m.id] ? {id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0} : null);
+        } else if (m.a === 'jabbed' && m.n === GR.n && GR.wait >= 0) {
+          jabbed(typeof m.id === 'string' && CATCHES[m.id] ? {id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0} : null);
         } else if (m.a === 'caught' && m.id !== c.net.id && CATCHES[m.c]) { V.peer = m; V.peerT = 0; ui()?.toast(`${m.name || 'A friend'} caught a ${CATCHES[m.c].name}`, isFish(m.c) ? `${m.cm} cm` : '', RARITY[CATCHES[m.c].rarity]?.col); }
       }
       // presses since the last step, in order: a press, then (maybe) its let-go
@@ -458,7 +458,7 @@ export async function create(host) {
         if (S.presses > 0) { S.presses--; press(); }
         if (S.ups > 0 && S.presses === 0) { S.ups--; letGo(); }
       }
-      if (GR.wait >= 0 && (GR.wait += dt) > TUNE_NET.ask) grabbed(heronRoll(R, {water: GR.w, part: host.env?.part || 'day', lvl: lvlNow()}));   // (no answer: an old server)
+      if (GR.wait >= 0 && (GR.wait += dt) > TUNE_NET.ask) jabbed(heronRoll(R, {water: GR.w, part: host.env?.part || 'day', lvl: lvlNow()}));   // (no answer: an old server)
       findSpots();
       if (!S.phase) return;
       S.t += dt;
@@ -541,7 +541,6 @@ export async function create(host) {
       pose(dt);
     },
     frame() {
-      drawShadows();
       // rings and spray
       for (const r of RINGS) {
         if (!r.on) continue;
@@ -593,13 +592,14 @@ export async function create(host) {
         const h = host.elev(V.lx, V.ly) + (P.z + 1.6 - host.elev(V.lx, V.ly)) * k + 1.6 * 4 * k * (1 - k);
         host.sprite({img: spriteOf(S.r.id), x, y, h, flip: ((V.leapT * 10) | 0) % 2 === 1});
       }
+      drawCalled();   // (the fish called to a point: F.come)
     },
     // the HD layer: the prompt, the charge meter, the "!", the fight gauge, the catch card
     hd(q, sc) { drawHD(q, sc); },
-    // other features' asks (FISH CALLED TO A POINT, THE GRAB above): come(key, x, y, k, n) -> false when all 4 asks are taken;
-    // grab(x, y, water) (a sim step) -> false when it can't (off, fishing, a jab still out); shallow(x, y) -> water name | ''
-    come, grab, shallow,
-    get grabbing() { return GR.wait >= 0; },
+    // other features' asks (FISH CALLED TO A POINT, THE JAB above): come(key, x, y, k, n) -> false when all 4 asks are taken;
+    // jab(x, y, water) (a sim step) -> false when it can't (off, fishing, a jab still out); shallow(x, y) -> water name | ''
+    come, jab, shallow,
+    get jabbing() { return GR.wait >= 0; },
     hud: () => active() ? `fishing ${S.phase || (rod() ? 'rod ready' : 'no rod')} · ${SPK.n} spots${setN >= ANGLER.n ? ' · set' : ''}${S.r ? ' ' + S.r.id + ' ' + S.r.cm + 'cm' : ''}${S.phase === 'fight' ? ` dist ${S.dist.toFixed(2)} strain ${S.strain.toFixed(2)} ${S.surge}` : ''}` : '',
     // (tests) the catch log: {n: {id: count}, best: {id: cm}}
     get log() { return store(); },
@@ -614,7 +614,7 @@ export async function create(host) {
   // moved .4 m), only within COME.near m of him, COME.max at most
   const SO = {x: 0, y: 0, a: 0, len: 0};
   const SH3 = [], SH2 = []; for (let i = 1; i <= 4; i++) { SH3.push({size: 3, alpha: .75 * i / 4}); SH2.push({size: 2, alpha: .55 * i / 4}); }
-  function drawShadows() {
+  function drawCalled() {
     const t = viewNow(), P = host.player; let left = COME.max;
     for (const A of ASKS) {
       if (!A.key || t - A.t > ASK_LAPSE || A.k <= .02 || left <= 0) continue;

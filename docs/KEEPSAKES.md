@@ -9,7 +9,7 @@ rules, pure), and the owners of the rules they bend (below). `?keepsakes=0` turn
 
 | Keepsake | Where it comes from | What it does worn | The catch | Who applies it |
 |---|---|---|---|---|
-| Heron Feather | the heron's ring (uncanny) | stand still 3 s in shallow water: fish shadows rise round your feet; E jabs for a fish of that water | no bait, no spot, no finds, nothing past rare; a jab or a step scatters them for 12 s | `features/keepsakes.js`, `features/fishing.js` (come, grab), server `fish {a: 'grab'}` |
+| Heron Feather | the heron's ring (uncanny) | stand still 3 s in shallow water: fish shadows rise round your feet; E jabs for a fish of that water | no bait, no spot, no finds, nothing past rare; a jab or a step scatters them for 12 s | `features/keepsakes.js`, `features/fishing.js` (come, jab), server `fish {a: 'jab'}` |
 | Warm Stone | the quiet stones (uncanny) | a snuffed lantern relights in 1 s, not 4 | (weather: cold and lake ice, hooks `STONE.cold`, `STONE.melt`) | `features/caves.js` (`cave.relight`) |
 | Big Tooth | a hollow wall in the cave | the soot things break off 5 m from you; rock-things flee from 6 m | the forest animals take you as 1.8x as loud | `sim/cavelife.js` (shun), `features/cavelife.js`, `features/fauna.js` (`fauna.loud`) |
 | Tally Stick | a hollow wall in the cave | it counts (spoiler below); at 10 it is the Full Tally Stick | | `features/keepsakes.js` |

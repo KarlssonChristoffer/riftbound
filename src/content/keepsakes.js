@@ -1,6 +1,6 @@
 // KEEPSAKES (data; docs/KEEPSAKES.md): the odd things the forest's and the cave's secrets leave you, and the one rule each
-// bends while you wear it in a charm slot (content/gear.js slot 'charm', SLOT_CAP 2). Pure data and pure functions (one import:
-// content/fishing.js roll, pure too): the browser
+// bends while you wear it in a charm slot (content/gear.js slot 'charm', SLOT_CAP 2). Pure data and pure functions (imports:
+// content/fishing.js roll, core/mathx.js hash3, pure too): the browser
 // (features/keepsakes.js, features/cavelife.js, features/caves.js, features/fauna.js, features/fishing.js, features/watcher.js)
 // and the co-op server (server/room.mjs: the soot things read who wears the tooth or the full tally; the heron's jab is rolled
 // there) read this one file. What a keepsake does is never written in the game's text (no stat line, no toast): you find out.
@@ -13,6 +13,8 @@
 //                  features/caves.js), watcher.every (x the watcher's wait between visits: features/watcher.js)
 //   HERON          the Heron Feather: stand still in shallow water and fish shadows rise round your feet; E jabs for one
 //                  heronRoll(rng, {water, part, lvl}) -> a catch {id, cm, kg} | null (a miss): the game offline, the server online
+//   COME           the fish the feather calls, as features/fishing.js draws them (its come(); the one drawing of fish under the
+//                  water): comeAt(spot, slot, seed, t, out) -> where one circles the spot at t
 //   STONE          the Warm Stone: the lantern relights at once after a snuff (cold and ice: the weather brief's hooks)
 //   TOOTH          the Big Tooth: the soot things break off, the rock-things flee early, the forest animals take you as loud
 //   TALLY          the Tally Stick: its notches (the rule: docs/KEEPSAKES.md, under its spoiler heading)
@@ -20,7 +22,8 @@
 //   FIDDLE         the Fiddle String: what its card says changes; what it does is the lure
 //   SHELF          the Keepsake Shelf's places and what happens round it
 // The numbers are in metres, seconds, m/s; degrees only where marked (turned at use).
-import {roll, RARITY_TIER} from './fishing.js';
+import {roll, RARITY_TIER, CATCHES} from './fishing.js';
+import {hash3} from '../core/mathx.js';
 
 export const KEEPSAKE_IDS = ['heron_feather', 'warm_stone', 'bark_doll', 'tally_stick', 'full_tally_stick', 'big_tooth', 'fiddle_string'];
 export const isKeepsake = id => KEEPSAKE_IDS.includes(id);
@@ -57,8 +60,24 @@ export const HERON = {
 export function heronRoll(rng, o) {
   const hit = Math.min(HERON.max, HERON.odds + HERON.perLevel * Math.max(0, (o.lvl || 1) - 1));
   if (rng() >= hit) return null;
-  const r = roll(rng, {water: o.water, part: o.part || 'day', noFind: true, most: RARITY_TIER[HERON.rarest]});
-  return {id: r.id, cm: r.cm, kg: r.kg};
+  for (let k = 0; k < 8; k++) {   // (as a cast rolls it, with no find; anything rarer than HERON.rarest is rolled again)
+    const r = roll(rng, {water: o.water, part: o.part || 'day', find: -1});
+    if ((RARITY_TIER[CATCHES[r.id].rarity] || 0) <= RARITY_TIER[HERON.rarest]) return {id: r.id, cm: r.cm, kg: r.kg};
+  }
+  return null;
+}
+// COME: fish shadows circling a point (features/fishing.js come(key, x, y, k): the feather's ring); `max` drawn at once, each len
+// m long, circling at speed rad/s (varied); `near`: within this many m of the player they are drawn; `drop`: m out they rise from
+export const COME = {max: 10, len: [.22, .36], speed: [.5, 1.1], near: 25, drop: 4};
+// shadow `slot` of a spot {x, y, r0, r1} (seed: the spot's own) at t s -> out {x, y, a (its heading, rad), len}: on its own circle
+// between r0 and r1, at its own pace and way round, wavering a little (pure: every client draws the same from the same spot)
+export function comeAt(spot, slot, seed, t, out) {
+  const h1 = hash3(seed | 0, slot, 11), h2 = hash3(seed | 0, slot, 29), h3 = hash3(seed | 0, slot, 47);
+  const r = spot.r0 + (spot.r1 - spot.r0) * h1, dir = h2 < .5 ? -1 : 1, w = (COME.speed[0] + (COME.speed[1] - COME.speed[0]) * h3) * dir;
+  const a = h2 * 6.2832 + t * w, wob = Math.sin(t * 1.7 + slot * 2.1) * .12;
+  out.x = spot.x + Math.cos(a) * (r + wob); out.y = spot.y + Math.sin(a) * (r + wob);
+  out.a = a + dir * 1.5708; out.len = COME.len[0] + (COME.len[1] - COME.len[0]) * h1;
+  return out;
 }
 export const STONE = {
   relight: .25,                // x the lantern's relight after a snuff (content/cavelife.js LANTERN.relight: 4 s -> 1 s)

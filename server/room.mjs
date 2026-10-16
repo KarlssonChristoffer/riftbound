@@ -277,9 +277,9 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   // save is his), a fishing spot (checked against the spots' hash on its own clock) and the clock's part of the day, and answers him alone
   // ({a: 'bite', n, id, cm, kg, wait, nibbles, two}). The fight is the client's; a landed one ({a: 'land', n}) is told to
   // everyone ({a: 'caught', id: who, name, c: the catch, cm, kg, two}); a lost one ({a: 'lost', n}) forgets the roll.
-  // A grab ({a: 'grab', n, x, y, w, lvl}: the Heron Feather's jab into the shallows by hand, docs/KEEPSAKES.md) from one who
+  // A jab ({a: 'jab', n, x, y, w, lvl}: the Heron Feather's jab into the shallows by hand, docs/KEEPSAKES.md) from one who
   // wears the feather, at his feet: rolled at once with HERON's limits (content/keepsakes.js heronRoll), answered
-  // ({a: 'grabbed', n, id, cm, kg}, id '' for nothing) and a fish told to everyone like a landed one.
+  // ({a: 'jabbed', n, id, cm, kg}, id '' for nothing) and a fish told to everyone like a landed one.
   const fishRng = mulberry32((seed ^ 0xf15f) >>> 0), FISH_REACH = 20, FISH_WATERS = new Set(Object.values(WATERS));
   const partOf = h => { h = ((h % 24) + 24) % 24; return h < 5.6 || h >= 20.3 ? 'night' : h < 7.2 ? 'dawn' : h < 18 ? 'day' : 'dusk'; };
   function fish(p, m) {
@@ -307,13 +307,13 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: r.two});
       log(`  ${p.name} caught a ${CATCHES[r.id].name}${CATCHES[r.id].find ? '' : ` (${r.cm} cm)`}`);
     } else if (a === 'lost' && n === p.fishN) p.fishR = null;
-    else if (a === 'grab') {
-      if (t - (p.grabT || 0) < 600 || !p.gear.includes('heron_feather')) return;   // (a flood, or no feather: dropped; the client rolls it after a wait)
+    else if (a === 'jab') {
+      if (t - (p.jabT || 0) < 600 || !p.gear.includes('heron_feather')) return;   // (a flood, or no feather: dropped; the client rolls it after a wait)
       const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
       if (!FISH_WATERS.has(w) || !(Math.hypot(x - p.x, y - p.y) < HERON.reach + 1.5)) return;
-      p.grabT = t;
+      p.jabT = t;
       const r = heronRoll(fishRng, {water: w, part: partOf(clock()), lvl: Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0))});
-      p.conn.send(encode({k: 'fish', a: 'grabbed', n, id: r ? r.id : '', cm: r ? r.cm : 0, kg: r ? r.kg : 0}));
+      p.conn.send(encode({k: 'fish', a: 'jabbed', n, id: r ? r.id : '', cm: r ? r.cm : 0, kg: r ? r.kg : 0}));
       if (r) { all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: false}); log(`  ${p.name} grabbed a ${CATCHES[r.id].name} (${r.cm} cm)`); }
     }
   }

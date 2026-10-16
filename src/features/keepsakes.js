@@ -6,7 +6,7 @@
 //               the animals (fauna.loud, fauna.lure), the cave (cave.shun, cave.kin, cave.relight), the watcher (watcher.every)
 //   THE HERON FEATHER  stand still (HERON.still s, slower than HERON.speed) in the shallows (fishing.shallow: the lake's shelf,
 //               the stream outside its deep pools) and fish shadows rise round your feet (fishing.come: fishing draws them);
-//               E jabs (fishing.grab: rolled like a cast with HERON's limits, the server's online). A jab, hit or miss, or a
+//               E jabs (fishing.jab: rolled like a cast with HERON's limits, the server's online). A jab, hit or miss, or a
 //               step scatters them for HERON.back s. A friend's feather: their shadows on your screen too (view only)
 //   THE TALLY STICK  it counts (the rule: docs/KEEPSAKES.md, under its spoiler heading); each count a notch on its icon
 //               (packpanel iconHook) and a dry scratch; at TALLY.full it is the Full Tally Stick (worn in its place)
@@ -27,7 +27,7 @@
 //   its shadows' rise and the jab are the sim's; how far up the shadows are drawn (eased) and a friend's are the view's.
 // OWNS: the modifier source 'keepsakes', F.worn (the keepsakes in your set now), the heron's state (HS), its save
 //   (pack.store('keepsakes'): tally), packpanel's iconHook.of (the tally's notches). READS: gear (S.worn,
-//   S.ver), pack (give: the dev row), fishing (shallow, come, grab, fishing), coop (peers: their gear, where they are), flags
+//   S.ver), pack (give: the dev row), fishing (shallow, come, jab, fishing), coop (peers: their gear, where they are), flags
 //   ('keepsakes'), host.player, host.PL (hold, useE, nearInteract).
 // EMITS: keep.notch (the jab: fishing's fish.jab / fish.catch / fish.miss). BUDGET: update: a compare a step (the set's
 //   version); with the feather worn one waterSample a step (fishing.shallow); view: one ask a frame per feather near you.
@@ -75,7 +75,7 @@ export async function create(host) {
     if (HS.away > 0) HS.away = Math.max(0, HS.away - dt);
     if (HS.jab) {   // E: the jab (he stoops to the water), hit or miss they scatter
       HS.jab = false;
-      if (ready() && free() && Fi.grab(P.x, P.y, HS.w)) { host.PL.hold('crouch', .35); scatter(); return; }
+      if (ready() && free() && Fi.jab(P.x, P.y, HS.w)) { host.PL.hold('crouch', .35); scatter(); return; }
     }
     if (P.state === 'hold') return;   // (stooped: neither still nor a step)
     if (!HS.w || Math.hypot(P.vx || 0, P.vy || 0) >= HERON.speed || host.BUSY.has(P.state)) { scatter(); return; }
