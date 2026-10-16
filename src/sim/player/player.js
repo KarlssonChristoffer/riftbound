@@ -1015,6 +1015,7 @@ export function createPlayer(H) {
   function onSpace() { if (P.state === 'swim') { swimKick(); return; } if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
+  function useE() { P.eUsed = true; }   // a feature took this E press (features/forage.js picks while it's held): holding it doesn't wave
   function press() {   // LMB down: draw (kept through a roll)
     if (tool?.press()) return;   // a tool in hand: LMB swings it (sim/player/tool.js)
     if (fists?.press('L')) return;   // the fists up: the left hand (sim/player/fists.js)
@@ -1243,6 +1244,6 @@ export function createPlayer(H) {
   const faceShot = (dx, dy) => { P.face = P.want = dirOf(dx, dy); P.twang = 0; };
   const flicker = sec => { P.blink = sec; };
   const regrid = (n0, n1) => { P.face = Math.round(P.face * n1 / n0) % n1; P.want = P.face; };
-  return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, tryVault, canVault, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, faceShot, flicker, regrid,
+  return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, tryVault, canVault, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, useE, faceShot, flicker, regrid,
     press, release, pressR, releaseR, hold, knock, launch: thrown.start, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
 }

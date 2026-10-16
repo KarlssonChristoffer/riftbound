@@ -1011,7 +1011,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const flora = FLORA ? createFlora(G) : null;
   if (flora) { flora.setRamps(bladeRamps(biome.id, biome.style)); disposers.push(() => flora.dispose()); }
   // the forest floor's small things (world/forest.js F.decor, world/decor3d.js: recipes drawn instanced, placed once; ?decor=0: none)
-  if (flora && FOREST?.decor && flags.get('decor') !== '0') growDecor(flora, FOREST.decor, elev, biome.id, () => nextId++);
+  const DECOR = flora && FOREST?.decor && flags.get('decor') !== '0' ? growDecor(flora, FOREST.decor, elev, biome.id, () => nextId++) : null;
   const FLORA_KINDS = {bush: 1, fern: 1, tuft: 1, reed: 1}, TAU = Math.PI * 2;
   function floraOf(it, p) {
     if (!flora || !FLORA_KINDS[p.kind]) return null;
@@ -1282,6 +1282,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
     setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, floraCount, flora, haveGlb, groundCanvas: gc, westCanvas, trees3d,
     cave: CAVE,   // the forest's cave's plan (world/caves.js; null: none): features/caves.js
+    decor: DECOR,   // the forest floor's small things as drawn (world/decor3d.js: setPicked; null: none): features/forage.js
     forestTiles,   // (read only) the forest's painted tiles: {x0, z0, x1, z1 (m), canvas (null: the stand-in), cx0, cz0 (the canvas's world origin)} (features/grass.js grows on them)
     itemOf: p => byProp.get(p) || null,
     // a forest prop whose chunk is off the view this frame (the last update's: world/forest.js chunks): per-frame passes over the items

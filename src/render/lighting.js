@@ -70,9 +70,10 @@ export function createLighting({G, host, features, opt}) {
   // (wx-D: the envelope's: sunView the sun's share of the view, broken how broken the sky is (undefined: godrays.js estimates
   // it from env.front), t the frame's clock, env for its front and a preview)
   // the lantern by a run rule (features/omens.js, an eclipse): 'light.lantern' > 0 lights it whatever the switch says,
-  // 'light.lanternR' scales its reach; read when the notes change
-  let lanternMod = 0, lanternR = 1;
-  if (host.mods) { const f = () => { lanternMod = host.mods.value('light.lantern', 0); lanternR = host.mods.value('light.lanternR', 1); }; host.mods.watch(f); f(); }
+  // 'light.lanternR' scales its reach, 'light.lanternOut' > 0 puts it out whatever lights it (the cave's dark: features/caves.js);
+  // read when the notes change. Its flame leans toward a hollow wall: features/cavelife.js F.lean (m, world x / y)
+  let lanternMod = 0, lanternR = 1, lanternOut = 0, lean = undefined;
+  if (host.mods) { const f = () => { lanternMod = host.mods.value('light.lantern', 0); lanternR = host.mods.value('light.lanternR', 1); lanternOut = host.mods.value('light.lanternOut', 0); }; host.mods.watch(f); f(); }
   function putL(x, y, z, c, r, gain, flat, halo = true) { const o = LOUT[nL] ??= {}; nL++; o.x = x; o.y = y; o.z = z; o.c = c; o.r = r; o.gain = gain; o.flat = flat; o.halo = halo; }
   // the coloured shade's uniforms (SHADE): T the shadow's multiply (rgb, w on), L its lift, H the hue alone (luminance 1)
   const HUE = [0, 0, 0];
@@ -145,9 +146,10 @@ export function createLighting({G, host, features, opt}) {
     const lift = ug > 0 ? mixInto(m.lift, CAVE.lift, ug, LIFT) : m.lift;
     if (lift[0] + lift[1] + lift[2] > 0) putL(PX, P.z + .9, PY, lift, 1.7, 1, true);
     if (ug > 0) putL(PX, P.z + CAVE.glowH, PY, CAVE.glow, CAVE.glowR, ug, false);   // (UNDERGROUND: the cave's glow)
-    if ((opt.lantern || lanternMod > 0) && !host.playerHidden) {   // (photo mode may hide him: his lantern goes with him)
+    if ((opt.lantern || lanternMod > 0) && lanternOut <= 0 && !host.playerHidden) {   // (photo mode may hide him: his lantern goes with him)
       const a = player.faceAngle, fx = Math.sin(a), fy = Math.cos(a), fk2 = flick(LANTERN, t);
-      putL(PX + fx * LANTERN.fwd - fy * LANTERN.side, P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side, LANTERN.c, LANTERN.r * lanternR * (1 + CAVE.lanternR * ug) * (1 + (fk2 - 1) * .15), fk2 * (1 + CAVE.lantern * ug), false);
+      if (lean === undefined && features.length) lean = features.find(f => f.name === 'cavelife')?.lean || null;
+      putL(PX + fx * LANTERN.fwd - fy * LANTERN.side + (lean ? lean.x : 0), P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side + (lean ? lean.y : 0), LANTERN.c, LANTERN.r * lanternR * (1 + CAVE.lanternR * ug) * (1 + (fk2 - 1) * .15), fk2 * (1 + CAVE.lantern * ug), false);
     }
     let nc = 0, nf = 0;
     const cand = l => { const d = hypot2(l.x - PX, l.z - PY); if (d < 24 + l.r) { const w = CW[nc] ??= {l: null, d: 0}; w.l = l; w.d = d; CAND[nc++] = w; } };

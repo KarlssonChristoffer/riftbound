@@ -19,6 +19,9 @@ const ASH = ['#e2bc84', '#bd9358', '#8a6638', '#3c2a16'], STEEL = ['#f4f6f8', '#
 // the tools a fist can hold: metres along the haft, across it toward the bit (b), through it (the side)
 const TOOLS = {
   axe: {haft: {len: .71, w: .032}, head: {len: .095, eye: .034, bit: .17, flare: .14, thick: .036, poll: .04}},
+  // the miner's pick (docs/MINING.md): a head of two points across the haft, the long one toward the bit (b), both bent a
+  // little back toward the grip (droop m along the haft)
+  pick: {haft: {len: .72, w: .034}, head: {pick: true, len: .07, eye: .03, bit: .22, back: .15, droop: .05, thick: .032}},
 };
 // a hold: where the haft runs (from: metres along it from the grip; it is TOOLS' len long, away from the head) and where the
 // head's middle is; swing: the haft's way in the hand (cant deg from U toward F); carry: the hang's forward lean (deg)
@@ -63,6 +66,18 @@ export function createHeldTool(rig, model, J, ramp6) {
       at(a1, B0, -t1), at(a1, B1, -t1), at(a1, B1, t1), at(a1, B0, t1)];
     const h = T.haft, w = h.w / 2, E = T.head, tip = Hd.head > Hd.from ? Hd.from + h.len : Hd.from - h.len;   // (the knob's end: away from the head)
     hexa(box(Math.min(Hd.from, tip), Math.max(Hd.from, tip), -w, w, w * .9, -w * .85, w * .85, w * .8), 0, .05);   // the haft
+    if (E.pick) {   // the pick's head: the eye block, then a point each way, tapering and bent back toward the grip
+      const m = Hd.head, l = E.len / 2, t = E.thick / 2, dr = (Hd.head > Hd.from ? -1 : 1) * E.droop;
+      hexa(box(m - l, m + l, -E.eye, E.eye, t), 1, .05);
+      for (const [b0, b1] of [[E.eye, E.bit], [-E.eye, -E.back]]) {
+        const bm = (b0 + b1) * .55, am = m + dr * .35;
+        hexa([at(m - l, b0, -t), at(m + l, b0, -t), at(m + l, b0, t), at(m - l, b0, t),
+          at(am - l * .6, bm, -t * .7), at(am + l * .6, bm, -t * .7), at(am + l * .6, bm, t * .7), at(am - l * .6, bm, t * .7)], 1, 0);
+        hexa([at(am - l * .6, bm, -t * .7), at(am + l * .6, bm, -t * .7), at(am + l * .6, bm, t * .7), at(am - l * .6, bm, t * .7),
+          at(m + dr - l * .12, b1, -t * .15), at(m + dr + l * .12, b1, -t * .15), at(m + dr + l * .12, b1, t * .15), at(m + dr - l * .12, b1, t * .15)], 2, .12);
+      }
+      return SHAPES[key] = {P: Float32Array.from(P), N: Float32Array.from(N), FAM, BIAS, n: Math.min(MAX, P.length / 3)};
+    }
     const a0 = Hd.head - E.len / 2, a1 = Hd.head + E.len / 2, t = E.thick / 2, fl = E.flare / 2, cb = E.bit - .02, m = Hd.head;
     hexa(box(a0, a1, -E.poll, E.eye, t), 1, .05);                                  // the eye round the haft and the poll behind it
     hexa([at(a0, E.eye, -t), at(a1, E.eye, -t), at(a1, E.eye, t), at(a0, E.eye, t),   // the cheek: flaring along the haft, thinning

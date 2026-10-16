@@ -17,9 +17,8 @@
 //   SPOT     fishing spots: rises and bubbles on the water (features/fishing.js finds them; a cast into one bites sooner, rarer)
 //            spotAt(a, b, slot, seed, out) (the cell's spot), spotNear(x, y, slot, seed) (the server's check of a cast's word)
 //   BAITS    what goes on the hook (cut from small fish at the pack panel; one a cast while you have it): prey weights
-//   MEALS    fish cooked and eaten at a burning campfire: a buff for a while (notes in host.mods, source 'fishing.meal')
 //   ANGLER   the fishing set: ANGLER.n fishing pieces worn at once give its notes (source 'fishing.set')
-//   castNotes(o) -> notes   the notes a cast is rolled with besides the gear's: the skill's, the set's, the meal's (the server
+//   castNotes(o) -> notes   the notes a cast is rolled with besides the gear's: the skill's, the set's, the meal's (content/meals.js; the server
 //            builds the same from what it knows; the client has them in host.mods)
 import {hash3} from '../core/mathx.js';
 export const WATERS = {1: 'river', 2: 'stream', 3: 'river', 4: 'stream', 5: 'stream', 6: 'stream', 7: 'lake', 8: 'river'};
@@ -250,7 +249,7 @@ export function roll(rng, o) {
   return {id, cm, kg, wait: Math.round(wait * 100) / 100, nibbles};
 }
 
-// ---------------------------------------------------------------- fishing spots, bait, meals, the angler's set
+// ---------------------------------------------------------------- fishing spots, bait, the angler's set
 // SPOTS: the water is cut in cells of `cell` m; in each slot of `slot` s a cell holds a spot with chance `p`, at a hashed
 // place in it (it must be water `edge` m from the bank). Casting within `r` m of one: the wait x lure, + luck. One catch
 // from a spot spends it (for you). The slot clock is the world's (co-op: the server's), so friends see the same spots.
@@ -280,32 +279,16 @@ export const BAITS = {
     icon: ['............', '............', '..aa........', '.abba.......', '.abbbaa.....', '..abbbbaa...', '...aabbbbaa.', '.....aabbbba', '.......aabba', '.........aa.', '............', '............'],
     pal: {a: '#5a3a3a', b: '#d89a8a'}},
 };
-// MEALS: cooked at a burning campfire (the pack panel's Cook list), eaten at once: a buff for `dur` s. One meal at a time.
-//   need: [{ids, n}] (n of ONE of ids: the one you have most of), notes (host.mods), say (what it does, in words)
-const ANY_FISH = ['perch', 'roach', 'bleak', 'minnow', 'pike', 'trout', 'bream', 'tench', 'zander', 'grayling', 'char', 'burbot'];
-export const MEALS = {
-  fish_stick: {name: 'Fish on a stick', need: [{ids: COMMON_FISH, n: 2}], dur: 240,
-    notes: [{stat: 'player.speed', mul: 1.06}, {stat: 'fish.reel', mul: 1.1}], say: 'move 6% faster, reel 10% faster'},
-  fish_soup: {name: 'Angler\'s soup', need: [{ids: ANY_FISH, n: 3}], dur: 300,
-    notes: [{stat: 'fish.lure', mul: .8}, {stat: 'fish.luck', add: .05}], say: 'bites 20% sooner, fishing luck +5%'},
-  trout_bark: {name: 'Trout in birch bark', need: [{ids: ['trout', 'grayling'], n: 1}], dur: 300,
-    notes: [{stat: 'fish.hook', add: .2}, {stat: 'fish.cast', mul: 1.15}, {stat: 'player.speed', mul: 1.04}], say: 'more time to strike, cast 15% further, move 4% faster'},
-  pike_stew: {name: 'Pike stew', need: [{ids: ['pike'], n: 1}, {ids: COMMON_FISH, n: 1}], dur: 300,
-    notes: [{stat: 'game.hurt', mul: .9}, {stat: 'woodcut.power', mul: 1.15}, {stat: 'fish.line', mul: 1.15}], say: 'take 10% less harm, chop 15% harder, a stronger line'},
-  smoked_eel: {name: 'Smoked eel', need: [{ids: ['eel'], n: 1}], dur: 420,
-    notes: [{stat: 'light.lanternR', mul: 1.3}, {stat: 'fish.night', add: .3}, {stat: 'fish.luck', add: .05}], say: 'your lantern reaches 30% further, night bites much sooner, luck +5%'},
-  salmon_plank: {name: 'Salmon on a plank', need: [{ids: ['salmon', 'char'], n: 1}], dur: 420,
-    notes: [{stat: 'fish.luck', add: .12}, {stat: 'fish.double', add: .06}, {stat: 'player.speed', mul: 1.05}], say: 'fishing luck +12%, a 6% chance of two fish, move 5% faster'},
-};
 // the angler's set: ANGLER.n or more fishing pieces worn (any slots) -> its notes
 export const ANGLER = {n: 4, name: 'Angler\'s set', notes: [{stat: 'fish.luck', add: .08}, {stat: 'fish.double', add: .05}, {stat: 'fish.hook', add: .15}],
   say: 'fishing luck +8%, a 5% chance of two fish, more time to strike'};
-// the notes a cast is rolled with besides the gear's own (the server: it knows the set and the level; the meal is the client's word)
-export function castNotes({lvl = 1, pieces = 0, meal = '', per = []}) {
+// the notes a cast is rolled with besides the gear's own (the server: it knows the set and the level; the meal is the client's word:
+// its notes, content/meals.js mealNotes)
+export function castNotes({lvl = 1, pieces = 0, meal = [], per = []}) {
   const out = [];
   for (const q of per) out.push(q.mul !== undefined ? {stat: q.stat, mul: 1 + q.mul * (lvl - 1)} : {stat: q.stat, add: (q.add || 0) * (lvl - 1)});
   if (pieces >= ANGLER.n) out.push(...ANGLER.notes);
-  if (MEALS[meal]) out.push(...MEALS[meal].notes);
+  out.push(...meal);
   return out;
 }
 // where and when a catch bites, in a few words (the journal's hint for one not caught yet)

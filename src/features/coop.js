@@ -16,6 +16,12 @@
 //                server checks the set and tells everyone; yours comes back here (F.gear: {ver, ids}), the others' look.js dresses
 //   fishing      the server rolls each cast's catch (docs/FISHING.md): features/fishing.js asks (fish(o)); its answer and the
 //                others' catches (fish) are handed on in F.mail
+//   foraging     the server keeps the picked patches (docs/FORAGING.md): features/forage.js asks (act('pick', id, {lvl})); the
+//                server's word on a patch (world: picked, grown) is handed on in F.mail
+//   mining       the server keeps the veins' blows left and the spent veins (docs/MINING.md): features/mining.js sends each blow
+//                (act('mine', id, {pow, lvl, tier})); its word on a vein (world: struck, spent, grown) is handed on in F.mail
+//   building     the server keeps what players put down (docs/BUILDING.md): features/builds.js asks (act('build', kind, {x, y}),
+//                'stoke', 'unbuild'); its word (world: built, stoked, gone) is handed on in F.mail
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
@@ -62,7 +68,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- sending: 20 times a second, after the frame's steps
   let sendT = 0, lastN = -1, lastRig = '', lastX = NaN, lastY = NaN, packed = null, sentW = null, pinged = 0;
-  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined};
+  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0};
   const LS = ['', 0, 0, 0, 0];
   function send(now) {
     if (C.status !== 'online' || now - sendT < 1000 / TICK_HZ) return;
@@ -76,6 +82,7 @@ export async function create(host) {
       lastN = pp.n; packed = packPose(pp.w, pp.BN.length, packed);
       if (!sentW || !same(packed, sentW)) { sentW = (sentW && sentW.length === packed.length) ? sentW : new Int16Array(packed.length); sentW.set(packed); ST.w = b64(packed); }
     }
+    ST.lt = host.feature('caves')?.lit ? 1 : 0;   // (his lantern burns in the cave: the server's soot things go for it, friends' night veins hide)
     if (Math.hypot(ST.x - lastX, ST.y - lastY) > 4) ST.tp = 1;   // (a respawn, a teleport: the server lets that one through)
     lastX = ST.x; lastY = ST.y;
     const L = host.feature('equip')?.sim?.lasso?.L, ph = L?.phase;
@@ -90,9 +97,14 @@ export async function create(host) {
 
   // the woodcutting slice (and the test row below) asks for a tree to come down: true when asked. features/uncanny.js asks
   // for a secret (p: its id) when its condition holds; 'time' (p: dawn | day | dusk | night) sets the server's clock (dev)
-  function act(a, p) {
+  // features/forage.js asks for a patch ('pick', p: its id 'd' + decor index, o: {lvl}: his Foraging level); features/mining.js
+  // sends a blow on a vein ('mine', p: 'v' + its index in the cave's plan, o: {pow, lvl, tier})
+  // features/builds.js puts a build down ('build', p: its kind, o: {x, y}), adds a log to a fire ('stoke', p: the build's id) and
+  // takes its own lamp back ('unbuild', p: the id)
+  function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }
@@ -108,6 +120,11 @@ export async function create(host) {
     wear(ids) { if (C.status !== 'online') return false; C.wear(ids); return true; },   // (features/gear.js: ask for a set)
     fish(o) { if (C.status !== 'online') return false; C.fish(o); return true; },       // (features/fishing.js: the server rolls the catch)
     mail, clockNow,
+    // a friend's lit lantern in the cave within r m of (x, y) (their latest snapshot: features/mining.js's night veins hide from it)
+    litNear(x, y, r) {
+      for (const q of C.peers.values()) { if (!q.lt || !q.n) continue; const i = (q.head - 1 + q.X.length) % q.X.length; if (Math.hypot(q.X[i] - x, q.Y[i] - y) < r) return true; }
+      return false;
+    },
     update(dt) {
       mail.length = 0;
       if ((clkCheck -= dt) <= 0) { clkCheck = 2; follow(false); }
@@ -123,7 +140,7 @@ export async function create(host) {
           const want = flags.get('time');   // (dev: a ?time= asks the server's clock for it, once)
           if (want && !askedTime) { askedTime = true; C.act('time', want); }
         }
-        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish') mail.push(m);
+        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }

@@ -5,6 +5,7 @@
 //   const pack = host.feature('pack')
 //   pack.give(id, n, at?) -> how many didn't fit (at {x, y, h}: a float there) / pack.take(id, n) -> bool / pack.count(id) /
 //   pack.has(id, n) / pack.best(job) -> the bag's best tool for a job | null / pack.gain(skill, n, at?) -> the new level | 0 /
+//   pack.payOf(need) -> {id: n} (a recipe's need [{ids, n}] paid with the kinds there are most of) / pack.short(cost) -> bool /
 //   pack.level(skill) / pack.store(name) -> that system's saved object (it writes its own; then pack.dirty()) /
 //   pack.recipe(r) (a build the panel offers: {id, name, cost: {id: n}, can() -> '' | why not, run(), group?: the panel's
 //   heading, 'Build' when absent}) / pack.section(s) (a part of the panel another system draws: {id, title, ver() -> number
@@ -61,6 +62,7 @@ export async function create(host) {
     },
     take(id, n = 1) { if (!ON || !inv.take(id, n)) return false; dirtyT = Math.max(dirtyT, 0); return true; },
     count: id => inv.count(id), has: (id, n = 1) => inv.has(id, n), best: job => ON ? inv.best(job) : null,
+    payOf: need => inv.payOf(need), short: cost => !ON || inv.short(cost),
     gain(id, n, at = null) {
       if (!ON) return 0;
       const L = skills.gain(id, n); dirtyT = Math.max(dirtyT, 0);

@@ -464,7 +464,33 @@ const SFX = {
   treeCrack(E, o) { SFX.brk(E, {...o, kind: 'crate'}); },
   treeCrash(E, o) { SFX.foeFall(E, {...o, heavy: true, g: (o.g ?? 1) * 1.4}); SFX.rustle(E, o); },
   treeLogs(E, o) { SFX.propDrop(E, {...o, mat: 'wood'}); },
+  // MINING (features/mining.js, docs/MINING.md): the pick's blow RINGS (two inharmonic partials over a stony crack and a thud;
+  // a rhythm blow rings higher and louder); rock too hard for the pick: a dull clang (k 0); a crystal: glass
+  mineHit(E, o) {
+    if (o.kind === 'crystal') { SFX.hit(E, {...o, mat: 'glass', g: (o.g ?? 1) * 1.1}); SFX.hit(E, {...o, mat: 'clay', g: (o.g ?? 1) * .5}); return; }
+    const v = E.voice({...o, g: (o.g ?? 1) * (o.rhythm ? 1.25 : 1)}, 'hit', .5, {pri: 2, cd: .03}); if (!v) return;
+    const {N, O} = E, up = o.rhythm ? 1.19 : 1;
+    if (o.k === 0) { O(v, 0, {f: 520, a: .001, d: .12, g: .1}); O(v, 0, {f: 170, f2: 110, d: .08, g: .3}); N(v, 0, {type: 'bandpass', f: 1200, q: 2, d: .05, g: .3}); return; }
+    if (o.hollow) {   // a hollow wall (docs/CAVELIFE.md): a woody, boomy knock that rings on in the room behind it, little of the pick's ring
+      O(v, 0, {f: 196, f2: 172, a: .002, d: .42, g: .3}); O(v, .004, {f: 311, a: .002, d: .26, g: .09}); N(v, 0, {type: 'bandpass', f: 420, q: 3, a: .002, d: .3, g: .35});
+      N(v, 0, {type: 'bandpass', f: 2200, q: 1.5, d: .03, g: .18}); O(v, .11, {f: 190, a: .01, d: .3, g: .06}); return;
+    }
+    O(v, 0, {f: 1870 * up, a: .001, d: .3, g: .07}); O(v, 0, {f: 2790 * up, a: .001, d: .18, g: .045});
+    N(v, 0, {type: 'bandpass', f: 2600, q: 1.5, d: .045, g: .4}); N(v, .01, {type: 'lowpass', f: 900, a: .004, d: .12, g: .22});
+    O(v, 0, {f: 140, f2: 90, d: .06, g: .25});
+  },
   logPick(E, o) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * .35}); },
+  // THE LIVING DARK (features/caves.js, features/cavelife.js, docs/CAVELIFE.md): the lantern's shutter, a snuff (a breath and a
+  // flutter of wings), it lighting again; a hollow wall caving in (stand-ins: a heavy fall and stones)
+  lanternClick(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .5}, 'lanternClick', .1, {cd: .05}); if (!v) return; E.N(v, 0, {type: 'bandpass', f: 3800, q: 3, d: .01, g: .4}); E.O(v, 0, {w: 'square', f: 1400, d: .012, g: .02}); },
+  lanternSnuff(E, o) {
+    const v = E.voice(o, 'lanternSnuff', .6, {pri: 2, cd: .3}); if (!v) return;
+    E.N(v, 0, {type: 'bandpass', f: 1600, f2: 500, sw: .2, q: 1, a: .02, d: .22, g: .3});
+    for (let i = 0; i < 8; i++) E.N(v, .05 + i * .045, {type: 'bandpass', f: 700 + (i % 3) * 180, q: 2, a: .004, d: .02, g: .12});   // (the wings)
+  },
+  lanternLight(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .6}, 'lanternLight', .4, {cd: .2}); if (!v) return; E.N(v, 0, {type: 'lowpass', f: 600, f2: 1800, sw: .15, a: .04, d: .2, g: .25}); },
+  critter(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .5}, 'critter', .5, {cd: .3}); if (!v) return; for (let i = 0; i < 7; i++) E.N(v, i * .05 + (i % 2) * .015, {type: 'bandpass', f: 3000 + (i % 3) * 600, q: 6, a: .001, d: .012, g: .15}); },   // (a skitter of many small feet on stone)
+  hollowOpen(E, o) { SFX.foeFall(E, {...o, heavy: true, g: (o.g ?? 1) * 1.2}); SFX.treeLogs(E, {...o, surf: 'stone'}); },
   axeSwing(E, o) { SFX.jump(E, {...o, g: (o.g ?? 1) * .45}); },
   campLog(E, o) { SFX.kick(E, {...o, mat: 'wood', g: (o.g ?? 1) * .6}); },   // (a soft wooden thump)
   fishCook(E, o) {   // fish on the fire (features/fishing.js): a sizzle with crackles over a soft thump
@@ -1252,6 +1278,15 @@ export function createAudio(ctx, host = {}) {
         case 'tree.logs': fire('treeLogs', e.x, e.y, {surf, n: e.n}); break;
         case 'tool.hit': fire('hit', e.x, e.y, {mat: e.kind === 'body' ? 'body' : MAT[e.kind] || 'wood', g: 1}); break;
         case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); break;   // (the swing's whoosh)
+        case 'mine.hit': fire('mineHit', e.x, e.y, {k: e.k, kind: e.kind, rhythm: e.rhythm, hollow: e.hollow, g: e.other ? .7 : 1}); break;   // (features/mining.js: a blow on a vein or a crystal; hollow: a hollow wall's knock)
+        case 'mine.open': fire('hollowOpen', e.x, e.y); break;   // (a hollow wall caves in)
+        case 'lantern.toggle': fire('lanternClick', e.x, e.y); break;   // (features/caves.js: L in the cave)
+        case 'lantern.snuff': fire('lanternSnuff', e.x, e.y); break;   // (the soot things put it out)
+        case 'lantern.relight': fire('lanternLight', e.x, e.y); break;
+        case 'critter.wake': fire('critter', e.x, e.y); break;   // (features/cavelife.js: a rock-thing unrolls and trots off)
+        case 'mine.spent': fire('treeLogs', e.x, e.y, {surf: 'stone'}); fire('kick', e.x, e.y, {mat: 'clay', surf: 'stone'}); break;   // (stand-ins: the vein breaks open)
+        case 'mine.chunk': fire('hit', e.x, e.y, {mat: 'clay', g: .35}); break;   // (stand-in: a chunk into the pouch)
+        case 'mine.take': fire('kick', e.x, e.y, {mat: 'wood', g: .5}); break;   // (stand-in: the old pick pulled from the wall)
         case 'pack.add': if (e.id === 'log') fire('logPick', e.x, e.y); break;
         case 'fire.addWood': fire('campLog', e.x, e.y); break;   // a log on a campfire (features/campfires.js, lights.js)
         // FISHING (features/fishing.js, docs/FISHING.md)
@@ -1273,7 +1308,8 @@ export function createAudio(ctx, host = {}) {
         case 'fish.away': fire('fishPlop', e.x, e.y, {g: .5}); break;
         case 'fish.spot': fire('plop', e.x, e.y, {surf, fish: 1, g: .6}); break;
         case 'fish.bait': fire('chop', e.x, e.y, {k: 0, g: .5}); break;
-        case 'fish.cook': fire('fishCook', e.x, e.y); break;
+        case 'meal.cook': fire('fishCook', e.x, e.y); break;   // (features/meals.js: any meal by a campfire)
+        case 'forage.pick': fire('rustle', e.x, e.y, {surf, g: .3, semi: 5}); fire('hit', e.x, e.y, {mat: 'straw', g: .2}); break;   // (stand-ins: a soft pluck in the leaves)
         // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge
         // recipes of its own yet): the swish of a turn and the throw on the cloth swish, the cinch a soft thump, the yank
         // a heave, a yanked body's landing the gunmen's fall thud, the rope straining a short creak (the bow's)
