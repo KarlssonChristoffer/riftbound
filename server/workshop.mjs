@@ -4,15 +4,25 @@
 // the tool did into it ('fell' and 'mine' carry the tool's uid: room.mjs calls count) and sends the counts back to its owner at
 // most every FLUSH s ({k: 'rec', u, counts, marks}). A player's records are kept by the browser's key (server/players.mjs): a
 // hello brings the save's copy (at most MAX_RECS, unknown items dropped; the server's own win), the welcome gives them back.
-//   const ws = createWorkshop({world, peers, all, log, clock, players}); ws.ACTS (the acts it takes); ws.hello(p, m) -> the
-//   records for the welcome; ws.act(p, a, m, id, deny); ws.count(p, u, ks); ws.tick(dt) (each server tick)
-// OWNS: the made records' minting and counting. READS: content/workshop.js, the room's world (the anvils: builds of kind anvil).
-import {SMITH, HAND, WOODS, REACH, MAX_RECS, cleanRec, mintRec, countOn} from '../src/content/workshop.js';
-import {encode, str} from '../src/net/protocol.js';
+// And THE FURNACES: a Clay Furnace is a build (room.mjs act 'build': content/builds.js furnace); its heat, charge, bellows and the
+// bars on its stone ride on its world entry (heat, ch {ore, by, prog}, bel, bars [{n, bar, by}]: a late joiner has them in the
+// welcome). 'load' {id, ore} puts a charge in (the ore is the client's: it pays when it hears 'loaded'), 'pump' {id, pow} (1, or
+// 1.5 on a rhythm press; at most one a player a furnace per .8 x PUMP.every s) heats it, 'fit' {id} fits a bellows, 'take' {id,
+// n} gives the loader his bar. STEPS times a second the furnaces holding heat or a charge are stepped (the same rules the game
+// runs offline: content/workshop.js heatStep) and {k: 'smith', id, s: 'heat', heat, prog} goes out on a change of .05 or more
+// (fuel, t0 with it when white heat ate its wood); a charge done: {s: 'smelted', n, bar, by}.
+//   const ws = createWorkshop({world, peers, all, log, clock, secs, players, heat, smelt}); ws.ACTS (the acts it takes);
+//   ws.hello(p, m) -> the records for the welcome; ws.act(p, a, m, id, deny); ws.count(p, u, ks); ws.tick(dt) (each server tick)
+// OWNS: the made records' minting and counting, the furnaces' state on their entries. READS: content/workshop.js,
+//   content/builds.js (a fire's fuel), the room's world (the furnaces and anvils: builds of their kinds).
+import {SMITH, HAND, WOODS, REACH, MAX_RECS, HEAT, PUMP, CHARGES, BELLOWS, heatStep, pumpAdd, cleanRec, mintRec, countOn} from '../src/content/workshop.js';
+import {fuelAt} from '../src/content/builds.js';
+import {encode, num, str} from '../src/net/protocol.js';
 
 const FLUSH = 2;   // s between a record's count and its owner hearing it
+const STEPS = 4;   // the furnaces' steps a second
 
-export function createWorkshop({world, peers, all, log = () => {}, clock, players}) {
+export function createWorkshop({world, peers, all, log = () => {}, clock, secs = () => Date.now() / 1000, players, heat = 1, smelt = 1}) {
   const send = (p, m) => p.conn.send(encode(m));
   const day = () => Math.floor(clock() / 24) + 1;
   let nextU = 1, flushT = 0;
@@ -48,15 +58,79 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, player
     send(p, {k: 'made', rec, ...(dev ? {dev: 1} : {})});
     log(`  ${p.name} made a ${rec.item}${haft ? ' (' + WOODS[haft].name + ' haft)' : ''}`);
   }
+  // THE FURNACES
+  const furnace = (id, p, deny) => {
+    const e = world.get(id); if (!e || e.s !== 'built' || e.kind !== 'furnace') { deny('no such furnace'); return null; }
+    if (Math.hypot(e.x - p.x, e.y - p.y) > REACH.server) { deny('too far'); return null; }
+    e.heat ??= 0; e.bars ??= []; e.bn ??= 0; return e;
+  };
+  const sent = new Map();   // furnace id -> {h, p, fuelT} last told
+  const pumpT = new Map();  // player id + furnace id -> when he last pumped it (s)
+  function tell(id, e) {
+    const o = sent.get(id) || {h: -1, p: -1}; o.h = e.heat; o.p = e.ch?.prog ?? -1; sent.set(id, o);
+    const m = {k: 'smith', id, s: 'heat', heat: +e.heat.toFixed(3), prog: e.ch ? +e.ch.prog.toFixed(3) : 0};
+    if (e.burnt) { m.fuel = e.fuel; m.t0 = e.t0; e.burnt = false; }
+    all(m);
+  }
+  function furnaceAct(p, a, m, id, deny) {
+    const e = furnace(id, p, deny); if (!e) return;
+    if (a === 'load') {
+      const ore = str(m.ore, 12), C = CHARGES[ore]; if (!C) return deny('no such ore');
+      if (e.ch) return deny('full');
+      e.ch = {ore, by: p.id, prog: 0};
+      all({k: 'smith', id, s: 'loaded', ore, by: p.id}); log(`  ${p.name} loaded ${ore} into ${id}`); return;
+    }
+    if (a === 'fit') {
+      if (e.bel) return deny('fitted');
+      e.bel = true; all({k: 'smith', id, s: 'fit', by: p.id}); return;
+    }
+    if (a === 'pump') {
+      const t = secs(), k = p.id + ':' + id; if (t - (pumpT.get(k) ?? -9) < PUMP.every * .8) return;   // (too quick: dropped)
+      pumpT.set(k, t);
+      if (!(fuelAt(e, t) > 0)) return deny('cold');
+      const rhythm = num(m.pow, 1) > 1;
+      e.heat = Math.min(1, e.heat + Math.min(PUMP.most, pumpAdd(!!e.bel, rhythm) * heat));
+      others(p, {k: 'smith', id, s: 'pumped', by: p.id, rhythm: rhythm ? 1 : 0}); tell(id, e); return;
+    }
+    if (a === 'take') {
+      const n = num(m.n, -1), i = e.bars.findIndex(b => b.n === n); if (i < 0) return deny('gone');
+      if (e.bars[i].by !== p.id) return deny('not yours');
+      e.bars.splice(i, 1); all({k: 'smith', id, s: 'taken', n, by: p.id});
+    }
+  }
+  let stepT = 0;
+  function stepFurnaces(dt) {
+    const t = secs();
+    for (const [id, e] of world) {
+      if (e.s !== 'built' || e.kind !== 'furnace') continue;
+      const lit = fuelAt(e, t) > 0; if (!lit && !(e.heat > 0) && !e.ch) continue;
+      e.heat = heatStep(e.heat || 0, dt, lit);
+      if (lit && e.heat > HEAT.white) { e.fuel = +Math.max(0, e.fuel - dt).toFixed(2); e.burnt = true; }   // (white heat: twice the wood)
+      if (e.ch) {
+        const C = CHARGES[e.ch.ore];
+        if (e.heat >= C.heat) e.ch.prog = Math.min(1, e.ch.prog + dt / (C.t * smelt));
+        if (e.ch.prog >= 1) {
+          e.bars ??= []; e.bn = (e.bn || 0) + 1; e.bars.push({n: e.bn, bar: C.bar, by: e.ch.by});
+          all({k: 'smith', id, s: 'smelted', n: e.bn, bar: C.bar, by: e.ch.by}); e.ch = null; tell(id, e); continue;
+        }
+      }
+      const o = sent.get(id);
+      if (!o || Math.abs(o.h - e.heat) >= .05 || (e.ch && Math.abs(o.p - e.ch.prog) >= .05) || (e.heat === 0 && o.h > 0)) tell(id, e);
+    }
+  }
+  const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
+
   function act(p, a, m, id, deny) {
     if (a === 'make') return make(p, m, id, deny);
+    if (a === 'load' || a === 'pump' || a === 'fit' || a === 'take') return furnaceAct(p, a, m, id, deny);
     return deny('unknown act');
   }
   function tick(dt) {
+    if ((stepT += dt) >= 1 / STEPS) { stepFurnaces(stepT); stepT = 0; }
     if ((flushT += dt) < FLUSH || !dirty.size) return;
     flushT = 0;
     for (const [r, key] of dirty) for (const q of peers.values()) if (q.rec?.key === key) send(q, {k: 'rec', u: r.u, counts: r.counts, marks: r.marks});
     dirty.clear();
   }
-  return {ACTS: new Set(['make']), hello, act, count, tick};
+  return {ACTS: new Set(['make', 'load', 'pump', 'fit', 'take']), hello, act, count, tick};
 }

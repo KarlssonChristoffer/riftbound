@@ -10,6 +10,9 @@
 //   lamp     a steady light (features/builds.js): color, radius (m), intensity; takeBack: E by your own one takes it down and
 //            gives its cost back
 //   cave     it can go down in the cave too (every build can stand anywhere in the persistent world; this one is made for it)
+//   smelt    a furnace (features/workshop.js, content/workshop.js): a fire build whose fire is inside it (features/campfires.js
+//            draws no flame or light for it: the workshop draws its mouth's glow); its heat, charge and bellows are the workshop's
+//   anvil    an anvil (features/workshop.js): things are hammered on it
 export const BUILDS = {
   campfire: {name: 'Campfire', cost: {wood: 4}, most: 3, r: .45, room: .9, prop: 'pitfire',
     desc: 'a ring of stones round a teepee of logs; E by it adds a log. Cook by a burning one.',
@@ -20,6 +23,12 @@ export const BUILDS = {
   crystal_lamp: {name: 'Crystal Lamp', cost: {glow_shard: 3, copper_ore: 2, wood: 1}, most: 8, r: .28, room: .6, prop: 'crystallamp', cave: true,
     desc: 'Glow Shards set in copper on a little cairn of stone: a cold, steady light that never goes out. E by your own takes it back.',
     lamp: {color: '#b8f0a4', radius: 6, intensity: 1.5, takeBack: true}},
+  // THE WORKSHOP (features/workshop.js, docs/WORKSHOP.md): a clay furnace smelts ore into bars, a stone anvil makes them things
+  furnace: {name: 'Clay Furnace', cost: {stone: 12, wood: 2}, most: 2, r: .5, room: 1, prop: 'furnace', cave: true, smelt: true,
+    desc: 'a squat dome of clay on a stone footing, a mouth at the bottom and a chimney: E feeds it a log, LMB pumps it; Tab by it loads ore.',
+    fire: {start: 2, log: 60, max: 6, embers: 60, light: 0}},
+  anvil: {name: 'Stone Anvil', cost: {stone: 8, log: 1}, most: 2, r: .42, room: .8, prop: 'anvil', cave: true, anvil: true,
+    desc: 'a flat block of hard stone on an oak stump: Tab by it lays a bar on it, LMB hammers.'},
 };
 export const BUILD_IDS = Object.keys(BUILDS);
 // placing: ahead of him (within E's reach from where he stands); the server's reach check; how close two builds may stand

@@ -28,10 +28,10 @@ export async function create(host) {
   function sync() {
     const B = builds(); if (!B || B.ver === seen) return fires;
     seen = B.ver; fires.length = 0;
-    for (const b of B.list.values()) if (b.def.fire) fires.push(b);
+    for (const b of B.list.values()) if (b.def.fire && !b.def.smelt) fires.push(b);   // (a furnace's fire is inside it: features/workshop.js draws its glow)
     return fires;
   }
-  const fireOf = p => p.build ? builds()?.list.get(p.build) : null;
+  const fireOf = p => p.build ? builds()?.list.get(p.build) : null;   // (a furnace too: E feeds it a log like any fire)
 
   const F = {
     name: 'campfires', label: 'Campfires', on: ON,

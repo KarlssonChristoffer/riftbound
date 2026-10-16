@@ -150,7 +150,9 @@ export async function create(host) {
   // ---------------------------------------------------------------- the meshes (a build's frame: its foot at x, z, y)
   const GEO = {};
   const geoOfKind = kind => GEO[kind] ??= (MAKE[kind] || MAKE.campfire)();
+  const SHAPES = {};   // kind -> another feature's mesh maker (F.shape: the workshop's furnace and anvil)
   const MAKE = {
+    __proto__: SHAPES,
     campfire() {   // a ring of stones round a teepee of logs on an ash bed (features/campfires.js draws the flames)
       const L = [];
       for (let i = 0; i < 9; i++) {
@@ -210,6 +212,10 @@ export async function create(host) {
     },
     shineNear(x, y, r) { const t = now(); for (const b of list.values()) if ((b.def.lamp || (b.def.fire && fuelAt(b, t) > 0)) && Math.hypot(b.x - x, b.y - y) < r) return true; return false; },
     stoke, mine: b => b.by === me(),
+    // another feature's builds: its mesh (shape(kind, make): make() -> a geometry in the build's frame, made once); a fire's fuel
+    // set from outside its stoking (refuel(id, fuel, t0): a furnace at white heat eats its wood twice as fast, features/workshop.js)
+    shape(kind, make) { SHAPES[kind] ??= make; },
+    refuel(id, fuel, t0) { const b = list.get(id); if (!b?.def.fire) return; b.fuel = Math.max(0, fuel); b.t0 = t0; },
     check: kind => { const d = BUILDS[kind]; return d && spot(d) ? '' : why; },   // (tests: '' = it can go down ahead of him)
     update(dt, evs) {
       T += dt;

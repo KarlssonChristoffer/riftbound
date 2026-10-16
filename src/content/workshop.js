@@ -30,7 +30,7 @@ export const HEAT = {rest: .45, white: .9, fall: .35, cold: .12};
 export const PUMP = {pipe: .05, bellows: .10, rhythm: 1.5, every: .6, most: .16};
 export const CHARGES = {
   copper: {ore: 'copper_ore', n: 2, bar: 'copper_bar', t: 15, heat: .45, name: 'copper'},
-  iron:   {ore: 'iron_ore',   n: 3, bar: 'iron_bar',   t: 20, heat: .8,  name: 'iron'},
+  iron:   {ore: 'iron_ore',   n: 3, bar: 'iron_bar',   t: 20, heat: .86, name: 'iron'},   // (.86: one blowpipe alone, even every pump in rhythm, tops out ~.85)
 };
 export const BELLOWS = {cost: {copper_bar: 2, wood: 1}};
 export const SMITH = {
@@ -76,9 +76,11 @@ export function words(h, ore) {
   if (h < .08) return 'cold';
   if (h < .3) return 'warm, dull red';
   if (h < HEAT.rest - .02) return 'dull red';
-  if (h < .62) return c?.ore === 'iron_ore' ? 'red: the iron sits hard in it' : 'red: the copper runs';
-  if (h < .8) return c?.ore === 'iron_ore' ? 'orange: the iron is soft and red, not yet' : 'bright orange';
-  if (h < HEAT.white) return c?.ore === 'iron_ore' ? 'yellow: the iron gives' : 'yellow';
+  const iron = c?.ore === 'iron_ore';
+  if (h < .62) return iron ? 'red: the iron sits hard in it' : c ? 'red: the copper runs' : 'red';
+  if (h < .78) return iron ? 'orange: the iron is soft and red, not yet' : 'bright orange';
+  if (h < CHARGES.iron.heat) return iron ? 'yellow: the iron is nearly giving' : 'yellow';
+  if (h < HEAT.white) return iron ? 'yellow-white: the iron gives' : 'yellow-white';
   return 'white: it roars';
 }
 // what a recipe of the anvil costs with its haft and inlay: {id: n} (the haft's log one more)

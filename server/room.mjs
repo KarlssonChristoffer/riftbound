@@ -16,7 +16,7 @@
 // out in the snapshots (sn: [x, y, h, mode] each). And THE WORKSHOP (docs/WORKSHOP.md: server/workshop.mjs): every made thing's
 // record (kept by the browser's key: server/players.mjs), counted from the 'fell' and 'mine' acts that carry its uid.
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
-//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
+//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log, workshop: {heat, smelt, wardrobe}}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
 import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
@@ -33,7 +33,7 @@ import {createWorkshop} from './workshop.mjs';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, workshop = {}}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -55,7 +55,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
   // THE WORKSHOP: the made things' records (by the browser's key), the furnaces (server/workshop.mjs)
-  const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, players});
+  const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players, heat: workshop.heat, smelt: workshop.smelt});
 
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }

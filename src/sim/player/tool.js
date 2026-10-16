@@ -24,14 +24,17 @@
 import {TUNE} from '../../content/woodcut.js';
 import {SWING as MINE, TUNE as MINING} from '../../content/mining.js';
 import {ITEMS} from '../../content/items.js';
+import {SWING as SMITHING} from '../../content/workshop.js';
 import {flags} from '../../core/flags.js';
 
 export const STATES = ['chop'];   // (player.js puts them in BUSY)
 const FB = ['lunge', 'reach_up'];
 const FOOT = .6;   // m a footwork cycle (two steps), as the fists' (the view's step clips by P.ph)
-const SWINGS = {chop: TUNE.swing, mine: MINE};   // a job's swing (its footwork: W.move)
+const SWINGS = {chop: TUNE.swing, mine: MINE, pump: SMITHING.pump, smith: SMITHING.smith};   // a job's swing (its footwork: W.move)
 const RHYTHM = flags.get('rhythm') === '0' ? -1 : MINING.rhythm;   // s either side of a swing's end ('rhythm=0': off)
-const jobOf = id => ITEMS[id]?.tool?.job || 'chop';
+// a tool's job (content/items.js); a job without a bag item is its own id (the workshop's: 'pump' the furnace's blowpipe, 'smith'
+// the anvil's hammer: features/workshop.js wantBy answers with the job)
+const jobOf = id => ITEMS[id]?.tool?.job || (SWINGS[id] ? id : 'chop');
 
 export function createTool(PL, I) {
   const {P, H, has, ev, dirOf, vecOf, moveBy, turnToward, BUSY} = I;

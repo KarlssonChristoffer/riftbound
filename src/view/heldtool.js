@@ -22,6 +22,10 @@ const TOOLS = {
   // the miner's pick (docs/MINING.md): a head of two points across the haft, the long one toward the bit (b), both bent a
   // little back toward the grip (droop m along the haft)
   pick: {haft: {len: .72, w: .034}, head: {pick: true, len: .07, eye: .03, bit: .22, back: .15, droop: .05, thick: .032}},
+  // the workshop's (features/workshop.js: the jobs without a bag item): the furnace's birch blowpipe (a long tube, a wooden
+  // nozzle) and the smith's hammer (a short haft, a square iron head): a BLOCK head, back and bit either side of the haft
+  pump: {haft: {len: .86, w: .026}, head: {block: true, len: .05, bit: .022, back: .022, thick: .036, fam: 0}},
+  smith: {haft: {len: .4, w: .03}, head: {block: true, len: .075, bit: .055, back: .065, thick: .062}},
 };
 // a hold: where the haft runs (from: metres along it from the grip; it is TOOLS' len long, away from the head) and where the
 // head's middle is; swing: the haft's way in the hand (cant deg from U toward F); carry: the hang's forward lean (deg)
@@ -66,6 +70,10 @@ export function createHeldTool(rig, model, J, ramp6) {
       at(a1, B0, -t1), at(a1, B1, -t1), at(a1, B1, t1), at(a1, B0, t1)];
     const h = T.haft, w = h.w / 2, E = T.head, tip = Hd.head > Hd.from ? Hd.from + h.len : Hd.from - h.len;   // (the knob's end: away from the head)
     hexa(box(Math.min(Hd.from, tip), Math.max(Hd.from, tip), -w, w, w * .9, -w * .85, w * .85, w * .8), 0, .05);   // the haft
+    if (E.block) {   // a block head (the hammer, the pipe's nozzle): one box round the haft's end
+      hexa(box(Hd.head - E.len / 2, Hd.head + E.len / 2, -E.back, E.bit, E.thick / 2), E.fam ?? 1, .05);
+      return SHAPES[key] = {P: Float32Array.from(P), N: Float32Array.from(N), FAM, BIAS, n: Math.min(MAX, P.length / 3)};
+    }
     if (E.pick) {   // the pick's head: the eye block, then a point each way, tapering and bent back toward the grip
       const m = Hd.head, l = E.len / 2, t = E.thick / 2, dr = (Hd.head > Hd.from ? -1 : 1) * E.droop;
       hexa(box(m - l, m + l, -E.eye, E.eye, t), 1, .05);
