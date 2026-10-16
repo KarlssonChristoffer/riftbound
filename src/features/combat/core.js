@@ -28,6 +28,10 @@ export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const SQ = 1;   // the arena's y squash for 2D distances (1.6); round in 3D
 
+const LOUT = [], LREC = [];
+function lrec(out, x, y, h, color, radius, intensity, flicker, id) {
+  const o = LREC[out.length] ??= {}; o.x = x; o.y = y; o.h = h; o.color = color; o.radius = radius; o.intensity = intensity; o.flicker = flicker; o.id = id; out.push(o);
+}
 export function createCore(host) {
   const P = host.player, events = host.events, ents = host.entities;
   const R = simRandom('combat'), RR = (a, b) => a + R() * (b - a);   // the SIM's draws (core/rng.js: its own generator, a seed of this session's)
@@ -786,11 +790,11 @@ export function createCore(host) {
       }
       for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) > rings[i].life) rings.splice(i, 1);
     },
-    lights() {
-      const out = [];
-      for (const L of lts) { const k = L.t / L.life; out.push({x: L.x, y: L.y, h: L.h, color: L.color, radius: L.radius * (1 - k * .3), intensity: L.i0 * (1 - k) ** 1.5, flicker: L.flicker, id: L.id}); }
+    lights() {   // (kept records, read at once by render/lighting.js: no garbage a frame)
+      const out = LOUT; out.length = 0;
+      for (const L of lts) { const k = L.t / L.life; lrec(out, L.x, L.y, L.h, L.color, L.radius * (1 - k * .3), L.i0 * (1 - k) ** 1.5, L.flicker, L.id); }
       let n = 0;
-      for (const a of host.arrows) if (a.explode && !a.stuck && n < 2) out.push({x: a.x, y: a.y, h: a.h, color: '#ff9a40', radius: 1.6, intensity: .9, flicker: .5, id: 7190 + n++});
+      for (const a of host.arrows) if (a.explode && !a.stuck && n < 2) lrec(out, a.x, a.y, a.h, '#ff9a40', 1.6, .9, .5, 7190 + n++);
       return out;
     },
   };
