@@ -263,5 +263,19 @@ console.log(`room: seed ${SEED}, ${F.trees.size} trees, ${F.decor?.length ?? 0} 
   room.stop();
 }
 
+// 9. the world's switches (protocol.js WORLD_FLAGS): a join that builds another collision world is turned away with a reason;
+// the same switches join; an empty room takes the next one's
+{
+  const room = makeRoom(createPlayers({SKILLS}));
+  const hi = (key, wf) => { const c = fakeConn(key.slice(0, 4)); room.connect(c); c.say({k: 'hello', v: VERSION, name: c.name, key, wf}); return c; };
+  const a = hi(KEY_A, 'west=0'), b = hi(KEY_B, ''), c = hi('c'.repeat(32), 'west=0');
+  ok(b.last('deny')?.a === 'join' && /west=0/.test(b.last('deny').why) && b.closed && !b.last('welcome'), 'other switches: turned away, told which', JSON.stringify(b.last('deny')));
+  ok(c.last('welcome') && !c.last('deny'), 'the same switches: in');
+  a.close(); c.close();
+  const d = hi('d'.repeat(32), 'terrain=0');
+  ok(d.last('welcome'), 'an empty room takes the next one\'s switches');
+  room.stop();
+}
+
 console.log(`room: ${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);
