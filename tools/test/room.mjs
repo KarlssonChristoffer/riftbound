@@ -144,6 +144,18 @@ console.log(`room: seed ${SEED}, ${F.trees.size} trees, ${F.decor?.length ?? 0} 
   void a;
 }
 
+// 3b. one store for every system (depth-shared): a record the workshop made first with of() still takes the hello's XP once;
+// its made things stay in memory (never in toJSON)
+{
+  const P = createPlayers();
+  const r = P.of(KEY_A); r.made.set(1, {u: 1});
+  const {rec, fresh} = P.join(KEY_A, {woodcutting: needXP(4)});
+  ok(rec === r && fresh && levelOf(rec.xp.woodcutting) === 4, 'of() then join(): the same record, XP imported once');
+  ok(!P.join(KEY_A, {woodcutting: needXP(8)}).fresh && levelOf(rec.xp.woodcutting) === 4, 'a second join imports nothing');
+  const j = P.toJSON()[KEY_A];
+  ok(j && !('made' in j) && !('imp' in j) && P.of('') === null, 'toJSON leaves made out; of() needs a key');
+}
+
 // 4. a test server's switches: --movelvl goes out with the record (ml); --dev takes the Sandbox's Skills rows, a plain server refuses
 {
   const P = createPlayers({SKILLS}), plain = makeRoom(P), devr = makeRoom(createPlayers({SKILLS}), {dev: true, movelvl: 5});

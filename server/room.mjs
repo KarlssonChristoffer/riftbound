@@ -88,7 +88,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
-    const {rec} = PL.join(KEY_RE.test(m.key) ? m.key : 'anon' + id, m.xp);   // (no key: a record for this connection alone)
+    const {rec} = PL.join(KEY_RE.test(m.key) ? m.key : '#' + id, m.xp);   // (no key: a record for this connection alone; the workshop's fallback too)
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
       fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, rec, biteT: -1e9, crystals: new Set(), chain: {id: '', n: 0, t: -1e9}, walkM: 0, caveS: 0};
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
