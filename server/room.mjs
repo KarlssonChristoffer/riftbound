@@ -58,6 +58,7 @@ import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
 import {createWorkshop} from './workshop.mjs';
 
+const B64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;   // (a pose's base64: state())
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
 export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, plan = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, workshop = {}, fauna = null, thief = '',
@@ -111,7 +112,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
     const {rec} = PL.join(KEY_RE.test(m.key) ? m.key : '#' + id, m.xp);   // (no key: a record for this connection alone; the workshop's fallback too)
-    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null, an: null,
+    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null, an: null, sc: '',
       fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, lt: 0, md: '', rec, biteT: -1e9, crystals: new Set(), chain: {id: '', n: 0, t: -1e9}, walkM: 0, caveS: 0};
     const made = ws.hello(p, m);   // (his records: the server's, the hello's copy filling in)
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
@@ -143,12 +144,13 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const rig = str(m.rig, 16);
     if (Array.isArray(m.wn) && m.wn.length <= 64) { p.wn = m.wn.map(b => str(b, 32)); others(p, {k: 'wn', id: p.id, wn: p.wn}); }
     if (rig !== p.rig) { p.rig = rig; if (!rig) { p.w = null; p.wn = null; } }
-    if (typeof m.w === 'string' && m.w.length < 2048) { p.w = m.w; p.wNew = true; }
+    if (typeof m.w === 'string' && m.w.length < 2048 && B64.test(m.w)) { p.w = m.w; p.wNew = true; }   // (the cloth's pose: base64 or nothing, passed on to everyone)
     p.ls = Array.isArray(m.ls) && m.ls.length === 5 ? m.ls.map((v, i) => i ? Math.round(num(v) * 100) / 100 : str(v, 8)) : null;
     p.lt = m.lt === 1 || m.lt === 2 ? m.lt : 0; p.lit = p.lt > 0;   // (his lantern burns in the cave, 2: a burnt eel's shining eyes: sim/cavelife.js reads p.lit)
     p.md = str(m.md, 24);   // (the meal in him: content/meals.js codeOf; friends see its mood, the fishing grab checks it)
     p.bd = num(m.bd, 0) & 0x7ff;   // (his body's look: content/body.js packBody, passed on in the snapshots)
     p.an = animals.an(m.an, p);   // (the animal on his rope: server/animals.mjs checks it's his claim)
+    p.sc = str(m.sc, 32);   // (his scene: the snapshots go to the players in the same one; '' an old client's)
     p.fresh = true;
   }
 
@@ -615,6 +617,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
 
   // THE TICK: everyone's latest state to everyone (a client skips its own row); a pose goes out only when it changed
   const DT = 1 / TICK_HZ;
+  const rowSc = new Map(), scenes = new Set();   // (the tick's rows' scenes, by row index)
   let anT = 0;
   const timer = setInterval(() => {
     if (!peers.size) return;
@@ -638,13 +641,25 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       for (const e of soot.step(DT, where, shine)) all({k: 'ev', ...e});
       sn = soot.rows(snRow);
     }
+    // (by scene: a player in a run isn't drawn in the forest, nor the other way; each scene's rows encoded once)
     const rows = [];
     for (const p of peers.values()) {
       if (!p.placed) continue;
+      rowSc.set(rows.length, p.sc || '');
       rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lt || 0, p.md || '', p.bd | 0, p.an || 0]);
       p.wNew = false;
     }
-    if (rows.length) { const m = {k: 'snap', t: now(), p: rows}; if (c) m.c = c; if (sn) m.sn = sn; all(m); }
+    if (rows.length) {
+      const m = {k: 'snap', t: now(), p: rows}; if (c) m.c = c; if (sn) m.sn = sn;
+      scenes.clear(); for (const q of peers.values()) scenes.add(q.sc || '');
+      let one = scenes.size === 1; for (const v of rowSc.values()) if (!scenes.has(v)) one = false;   // (everyone in one scene: as before)
+      if (one) all(m);
+      else for (const sc of scenes) {
+        m.p = rows.filter((r, i) => rowSc.get(i) === sc); if (!m.p.length) continue;
+        const t = encode(m); for (const q of peers.values()) if ((q.sc || '') === sc) q.conn.send(t);
+      }
+    }
+    rowSc.clear();
   }, 1000 / TICK_HZ);
 
   return {

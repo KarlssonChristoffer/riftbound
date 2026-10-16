@@ -80,11 +80,17 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- sending: 20 times a second, after the frame's steps
   let sendT = 0, lastN = -1, lastRig = '', lastX = NaN, lastY = NaN, packed = null, sentW = null, pinged = 0;
-  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0, md: '', bd: 0, an: undefined};
+  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0, md: '', bd: 0, an: undefined, sc: ''};
+  // his scene (the game's mode + the biome: the forest, a run's level): the server sends each scene's players to that scene only
+  let scMode = null, scBiome = null;
+  function scene() {
+    const mode = host.feature('game')?.mode || '', biome = host.biome?.id || '';
+    if (mode !== scMode || biome !== scBiome) { scMode = mode; scBiome = biome; ST.sc = mode + ':' + biome; }
+  }
   const LS = ['', 0, 0, 0, 0];
   function send(now) {
     if (C.status !== 'online' || now - sendT < 1000 / TICK_HZ) return;
-    sendT = now;
+    sendT = now; scene();
     const P = host.player, pp = host.playerPose?.() || null;
     ST.x = +P.x.toFixed(3); ST.y = +P.y.toFixed(3); ST.z = +(P.z - P.sink * 22 / host.PPMH).toFixed(3);   // (in the water, swimming: as sunk as the views draw him, 22 px per 1)
     ST.phi = +((pp ? pp.phi : P.faceAngle) % WH).toFixed(3); ST.s = P.state; ST.pose = P.frame || 'idle.0';
