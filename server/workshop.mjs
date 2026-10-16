@@ -34,18 +34,20 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
   let nextU = 1, flushT = 0;
   const dirty = new Map();   // record -> its owner's key (counted since the last flush)
 
-  // a player's records: the server's by key; the hello's copy fills in the ones it doesn't have
+  // a player's records (p.rec: server/players.mjs, joined by room.mjs from the hello's key): the server's; the hello's copy
+  // fills in the ones it doesn't have
   function hello(p, m) {
-    p.rec = players.of(str(m.key, 48)) || players.of('#' + p.id);
+    const M = p.rec.made ??= {};
     const list = Array.isArray(m.made) ? m.made.slice(0, MAX_RECS) : [];
-    for (const o of list) { const r = cleanRec(o); if (r && !p.rec.made.has(r.u)) p.rec.made.set(r.u, r); }
-    return [...p.rec.made.values()];
+    for (const o of list) { const r = cleanRec(o); if (r && !M[r.u]) M[r.u] = r; }
+    if (list.length) players?.changed?.();
+    return Object.values(M);
   }
   // what the tool in hand did (room.mjs: a felled tree ['fell'] or ['fell', 'oldoak'], a broken vein ['veins'] or ['veins', 'iron'])
   function count(p, u, ks) {
-    const r = typeof u === 'string' && u ? p?.rec?.made.get(u) : null; if (!r) return;
+    const r = typeof u === 'string' && u && p?.rec?.made ? p.rec.made[u] : null; if (!r) return;
     for (const k of ks) countOn(r, k, day());
-    dirty.set(r, p.rec.key);
+    dirty.set(r, p.rec.key); players?.changed?.();
   }
   // MAKING: a thing off the anvil ({a: 'make', id: the anvil's build id, r: content/workshop.js SMITH, haft: a log id, inlay: 1})
   // or by hand (r: HAND; id ''); dev: 1 skips the anvil (the Sandbox menu's test tool). The pouch is the client's: it pays when
@@ -60,7 +62,7 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
     const haft = S?.haft ? str(m.haft, 16) : ''; if (S?.haft && !WOODS[haft]) return deny('no haft');
     const u = 's' + Date.now().toString(36) + (nextU++).toString(36);
     const rec = mintRec(u, S ? S.item || S.gear : Hd.gear, p.name, day(), haft, !!S?.haft && m.inlay === 1, !!Hd);
-    p.rec.made.set(u, rec);
+    (p.rec.made ??= {})[u] = rec; players?.changed?.();
     send(p, {k: 'made', rec, ...(dev ? {dev: 1} : {})});
     log(`  ${p.name} made a ${rec.item}${haft ? ' (' + WOODS[haft].name + ' haft)' : ''}`);
   }
@@ -160,7 +162,7 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
   // CLOTHES: what a player may wear (room.mjs wear): a free piece, one his records are of, or anything with --wardrobe
   function owns(p, id) {
     if (wardrobe || freePiece(GEAR_BY_ID[id])) return true;
-    if (p?.rec) for (const r of p.rec.made.values()) if (r.item === id) return true;
+    if (p?.rec?.made) for (const u in p.rec.made) if (p.rec.made[u].item === id) return true;
     return false;
   }
   return {ACTS: new Set(['make', 'load', 'pump', 'fit', 'take']), hello, act, count, tick, owns, cracked: id => world.get('k' + String(id).slice(1))?.s === 'cracked'};

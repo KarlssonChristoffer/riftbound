@@ -24,7 +24,7 @@
 //                'stoke', 'unbuild'); its word (world: built, stoked, gone) is handed on in F.mail
 //   workshop     the server keeps the furnaces' charges and heat and every made thing's record (docs/WORKSHOP.md):
 //                features/workshop.js asks (act 'load', 'pump', 'fit', 'make', 'take'); its word (smith, made, rec) is handed on
-//                in F.mail. The hello carries this browser's KEY (localStorage rb.key: the server keeps a player's records by it,
+//                in F.mail. The hello carries this browser's KEY (game/playerkey.js: the server keeps a player's records by it,
 //                server/players.mjs) and the workshop's records. F.tag(a, fn): a feature adds its fields to an act (fn(p) -> {}:
 //                the workshop puts the tool's record on a 'fell' and a 'mine')
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
@@ -40,13 +40,14 @@ import {TICK_HZ, packPose} from '../net/protocol.js';
 import {wsTransport} from '../net/transport.js';
 import {createNetClient, b64} from '../net/client.js';
 import {createPeerLook} from './coop/look.js';
+import {playerKey} from '../game/playerkey.js';
 
 // ORDER (core/features.js): after the equipment (the lasso's phase this step) and the combat (a felled tree's world is settled)
 export const order = {after: ['equip', 'combat']};
 export async function create(host) {
   if (!SESSION.mp) return SESSION.error ? offline(host) : {name: 'coop', on: false, online: false, act: () => false, tag() {}};
   let name = flags.get('name') || ''; try { name ||= localStorage.getItem('rb.coop.name') || ''; } catch {}
-  let key = ''; try { key = localStorage.getItem('rb.key') || ''; if (!key) { key = Math.random().toString(36).slice(2, 12) + Date.now().toString(36); localStorage.setItem('rb.key', key); } } catch {}
+  const key = playerKey();
   const C = createNetClient({transport: wsTransport(SESSION.ws), name, hello: () => ({key, made: host.feature('workshop')?.records?.() || []})});
   const look = createPeerLook(host, C);
   const msgs = [], mail = [], WH = Math.PI * 2;
