@@ -243,5 +243,39 @@ console.log(`room: seed ${SEED}, ${F.trees.size} trees, ${F.decor?.length ?? 0} 
   room.stop();
 }
 
+// 8. scenes and poses (the cleanup's co-op fixes): a snapshot carries only your scene's players (a friend in a run isn't drawn
+// in your forest), an old client without a scene sees everyone as before, a pose that isn't base64 isn't passed on
+{
+  const room = makeRoom(createPlayers({SKILLS}));
+  const st = (c, sc, x, w) => c.say({k: 'st', x, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: 'r', tp: 1, sc, w});
+  const a = join(room, KEY_A), b = join(room, KEY_B), c = join(room, 'c'.repeat(32));
+  const ida = a.last('welcome').id, idb = b.last('welcome').id;
+  st(a, 'sandbox:ruins', 1); st(b, 'run:crypt', 2); st(c, 'sandbox:ruins', 3);
+  a.clear(); b.clear(); c.clear(); await nap(160);
+  const rowsOf = q => (q.last('snap')?.p || []).map(r => r[0]);
+  ok(!rowsOf(a).includes(idb) && rowsOf(a).includes(ida), 'the forest\'s snapshot leaves the run\'s player out', JSON.stringify(rowsOf(a)));
+  ok(rowsOf(b).includes(idb) && !rowsOf(b).includes(ida), 'the run\'s snapshot has only the run', JSON.stringify(rowsOf(b)));
+  st(b, 'sandbox:ruins', 2); a.clear(); await nap(160);
+  ok(rowsOf(a).includes(idb), 'back in the forest: drawn again', JSON.stringify(rowsOf(a)));
+  st(a, 'sandbox:ruins', 1, 'not base64!'); st(a, 'sandbox:ruins', 1, 'AQACAAMA'); b.clear(); await nap(160);
+  const wa = b.all('snap').map(m => m.p.find(r => r[0] === ida)?.[8]).filter(Boolean);   // (a pose goes out once, as it changes)
+  ok(wa.length === 1 && wa[0] === 'AQACAAMA', 'a base64 pose passes, a broken one doesn\'t', JSON.stringify(wa));
+  room.stop();
+}
+
+// 9. the world's switches (protocol.js WORLD_FLAGS): a join that builds another collision world is turned away with a reason;
+// the same switches join; an empty room takes the next one's
+{
+  const room = makeRoom(createPlayers({SKILLS}));
+  const hi = (key, wf) => { const c = fakeConn(key.slice(0, 4)); room.connect(c); c.say({k: 'hello', v: VERSION, name: c.name, key, wf}); return c; };
+  const a = hi(KEY_A, 'west=0'), b = hi(KEY_B, ''), c = hi('c'.repeat(32), 'west=0');
+  ok(b.last('deny')?.a === 'join' && /west=0/.test(b.last('deny').why) && b.closed && !b.last('welcome'), 'other switches: turned away, told which', JSON.stringify(b.last('deny')));
+  ok(c.last('welcome') && !c.last('deny'), 'the same switches: in');
+  a.close(); c.close();
+  const d = hi('d'.repeat(32), 'terrain=0');
+  ok(d.last('welcome'), 'an empty room takes the next one\'s switches');
+  room.stop();
+}
+
 console.log(`room: ${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

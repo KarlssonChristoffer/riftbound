@@ -15,6 +15,8 @@
 import {VERSION, INTERP_MS, encode, decode} from './protocol.js';
 
 const RING = 32;   // snapshots kept per peer (1.6 s at 20 Hz)
+const STALE_MS = 3000;   // a player with no snapshot for this long isn't drawn (another scene: the server sends only your scene's
+                         // rows; a frozen connection, before the server drops it)
 
 export function createNetClient({transport, name = '', hello = null}) {
   const C = {
@@ -34,7 +36,7 @@ export function createNetClient({transport, name = '', hello = null}) {
   }
   C.elk = ring(-1); C.soot = [];
   function push(q, t, x, y, z, phi, s, pose, rig, w, ls) {
-    if (w) { let a = B64.get(w); if (!a) { a = unb64(w); if (B64.size > 64) B64.clear(); B64.set(w, a); } q.w = a; q.wv++; }
+    if (w) { let a = B64.get(w); if (!a) { a = unb64(w); if (B64.size > 64) B64.clear(); if (a) B64.set(w, a); } if (a) { q.w = a; q.wv++; } }
     const i = q.head; q.head = (q.head + 1) % RING; q.n = Math.min(RING, q.n + 1);
     q.T[i] = t; q.X[i] = x; q.Y[i] = y; q.Z[i] = z; q.F[i] = phi; q.S[i] = s; q.P[i] = pose; q.W[i] = q.w; q.L[i] = ls || null;
     if (rig !== q.rig) q.rig = rig;
@@ -84,6 +86,7 @@ export function createNetClient({transport, name = '', hello = null}) {
   C.sample = (q, out) => {
     if (!q.n) return null;
     const t = performance.now() + offset - INTERP_MS;
+    if (q.id > 0 && t - q.T[(q.head - 1 + RING) % RING] > STALE_MS) return null;
     let a = -1, b = -1;   // a: the newest snapshot at or before t, b: the one after it
     for (let k = 0; k < q.n; k++) { const i = (q.head - 1 - k + RING) % RING; if (q.T[i] <= t) { a = i; break; } b = i; }
     if (a < 0) a = b;     // (all newer than t: the oldest)
@@ -109,4 +112,5 @@ export function createNetClient({transport, name = '', hello = null}) {
 
 // base64 <-> Int16Array (the pose's bones: protocol.js packPose)
 export function b64(a) { const u = new Uint8Array(a.buffer, a.byteOffset, a.byteLength); let s = ''; for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); }
-export function unb64(s) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Int16Array(u.buffer, 0, u.length >> 1); }
+// a pose's base64 -> Int16Array | null (not base64: an old or a broken server's; the row goes on without it)
+export function unb64(s) { let b; try { b = atob(s); } catch { return null; } const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Int16Array(u.buffer, 0, u.length >> 1); }
