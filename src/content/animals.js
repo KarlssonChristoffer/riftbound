@@ -54,7 +54,12 @@ export const LEK = {
   song: [6, 9], deaf: 2.5, pause: [4, 8],   // s a song, its last s he hears nothing (suspicion doesn't build), s between songs
   feathers: [1, 2], close: 3, bonus: 2,     // feathers after a display morning; m: the first to get this close gets bonus more
   moult: 2,           // summer: a feather every this many days where a cock spends his day
+  lie: 3,             // in-game days a feather lies before the forest takes it
+  wary: .7,           // x his alert / flee distances while he sings (lost in his song)
+  hear: 45,           // m: his song carries this far (the clicks, the pop, the grinding phrase)
 };
+// a find picked up: the toast and how many (the lek's bonus goes straight into the bag)
+export const FINDS = {roe_antler: 1, caper_feather: 1, reach: 1.4, draw: 32};   // m to pick one up; m they're drawn within
 
 // ---------------------------------------------------------------- THE THIEVING FOX AND ITS DEN (sim/foxden.js, features/foxden.js)
 export const THEFT = {

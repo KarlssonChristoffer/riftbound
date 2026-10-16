@@ -618,4 +618,25 @@ Object.assign(RECIPES, {
     }); }},
   capercaillie: {about: 'A capercaillie (tjäder): a cock or a hen', likes: {ground: 'old pine woods, the floor', shade: .6, cluster: [1, 1]}, params: {hen: [0, 0, 1]},
     build(b, p) { b.at([0, FAUNA_RIG.capercaillie.stand * (p.hen ? .8 : 1), 0], 0, 1, () => PARTS.capercaillie_body(b, p)); }},
+  // FINDS WITHOUT KILLING (features/animalfinds.js, living-animals.md): what the forest drops, lying on the floor
+  roe_antler: {about: 'A shed roe deer antler lying in the needles: a knobbly burr, a short beam, three tines', likes: {ground: 'a roe bed in thick cover, late autumn to spring', shade: .6, cluster: [1, 2]}, params: {},
+    build(b, p, r) {
+      const lean = r.range(-8, 8);
+      b.at([0, .02, 0], lean, 1.25, () => {
+        b.ball('antler', [-.1, .02, 0], [.03, .028, .032], {detail: 1, lump: .6, bias: -.1});   // the burr (the rose) where it came off
+        b.tube('antler', [-.1, .02, 0], [.04, .035, .01], .016, .012, {sides: 5, part: 1});   // the beam, lying
+        b.tube('antler', [.04, .035, .01], [.12, .05, -.005], .012, .007, {sides: 4, part: 1});
+        b.tube('antler', [-.02, .028, .005], [.02, .075, .03], .009, .005, {sides: 4, part: 1});   // a tine forward, one back, the tip
+        b.tube('antler', [.06, .04, .008], [.09, .05, .06], .008, .005, {sides: 4, part: 1});
+      });
+    }},
+  caper_feather: {about: "A capercaillie cock's tail feather lying on the floor: long, near black, a white spot at its end", likes: {ground: 'the lek in the old pines, at dawn', shade: .6, cluster: [1, 2]}, params: {},
+    build(b, p, r) {
+      b.at([0, .012, 0], r.range(-10, 10), 1.2, () => {
+        b.box('plumage', [0, 0, 0], [.26, .008, .055], [0, 0, 0], {part: 1});   // the vane
+        b.box('plumage', [.13, 0, 0], [.03, .008, .045], [0, 0, 0], {part: 1, bias: .1});
+        b.ball('mushwhite', [.13, .004, 0], [.022, .006, .022], {detail: 0});   // the white spot at its end
+        b.tube('deadwood', [-.17, .004, 0], [.15, .006, 0], .005, .003, {sides: 3});   // the quill
+      });
+    }},
 });

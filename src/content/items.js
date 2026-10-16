@@ -99,6 +99,15 @@ export const ITEMS = {
     pal: {a: '#f2f0ea', m: '#cfcbc0', z: '#9c968a'},
     icon: ['............', '............', '.....a......', '...aaam.a...', '..aaammaam..', '.aaammmmmma.', '.aammmzmmma.', '..ammzzmmz..',
       '...mmzzmz...', '....z..z....', '............', '............']},
+  // FINDS WITHOUT KILLING (features/animalfinds.js, living-animals.md): what the forest drops
+  roe_antler: {name: 'Shed Antler', kind: 'material', col: '#e0d2b0', desc: "a roe buck's antler, shed in the winter woods where the herd beds",
+    pal: {a: '#efe4c8', m: '#c8b894', z: '#8a7a5a'},
+    icon: ['............', '.......a....', '...a...am...', '...am..am...', '....am.am...', '.....amam..a', '......amm.am', '......ammam.', '.....zmmmm..',
+      '....zzmz....', '....zz......', '............']},
+  caper_feather: {name: 'Capercaillie Feather', kind: 'material', col: '#8a90a8', desc: "a long tail feather from a capercaillie cock's fan, left where he sang",
+    pal: {a: '#f2f0ea', m: '#3c4050', z: '#1a1c24'},
+    icon: ['............', '.........aa.', '........maa.', '.......mmm..', '......mmzm..', '.....mmzm...', '....mmzm....', '...mmzm.....', '..mmzm......',
+      '..mzm.......', '.z..........', 'z...........']},
 };
 // THE CATCHES (content/fishing.js): every fish and find is a material: it goes in the pouch
 for (const id of CATCH_IDS) {

@@ -5,8 +5,10 @@
 //                 joiner gets the open claims after its welcome. The holder's client runs the animal (its state message's an)
 //   calm          a roe calmed by a player until an hour of the clock: the world map (id 'calm:' + animal + ':' + player), so the
 //                 welcome carries it; gone from the map once its hour has passed
-//   find          a find without killing (a tuft of hare fur 'fur:' + hare + ':' + day; the antlers and feathers: the next slice):
-//                 first finder; the world map ('found'), gone for everyone
+//   find          a find without killing: a tuft of hare fur 'fur:' + hare + ':' + day, a shed antler 'antler:' + buck + ':' + year
+//                 + ':' + n, a feather 'feather:' + cock + ':' + day + ':' + n (or m: the moult's), the lek's bonus 'lek:' + cock + ':'
+//                 + day (world/fauna.js antlersOf / feathersOf; features/animalfinds.js): first finder; the world map ('found'),
+//                 gone for everyone
 // The animals' ids are the plan's (world/fauna.js: 'roe3', 'hare12'); the server doesn't run the animals, so it checks the shape of
 // what it's told, not where the animal is.
 //   const A = createAnimals({world, all, send, log, now, clock}); A.act(p, a, m, id, deny) -> true when it was one of its acts;
@@ -16,7 +18,7 @@ import {num, str} from '../src/net/protocol.js';
 
 export const ANIMAL_ACTS = new Set(['rope', 'free', 'calm', 'find']);
 const ID = /^(roe|fox|hare)\d{1,3}$/;
-const FIND = /^fur:(hare\d{1,3}):\d{1,6}$/;
+const FIND = /^(fur:hare\d{1,3}:\d{1,6}|antler:roe\d{1,3}:-?\d{1,4}:\d|feather:capercaillie\d{1,3}:\d{1,6}:(\d|m)|lek:capercaillie\d{1,3}:\d{1,6})$/;
 const HOW = new Set(['bolt', 'walk', 'calm']);
 
 export function createAnimals({world, all, send, log, now, clock}) {

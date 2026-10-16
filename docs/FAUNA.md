@@ -105,11 +105,32 @@ With friends it's a solo verb: the server gives the animal to the first who rope
 it and sends where it is (the others see the deer drag you); a calm and a tuft of fur are the server's too
 (`server/animals.mjs`). `?livefauna=0`: the Lasso doesn't catch animals.
 
+## Finds
+
+Nothing is killed for them: the forest drops them (`features/animalfinds.js`; where and when is a pure function of the seed and
+the clock in `world/fauna.js` `antlersOf` / `feathersOf`, so every player has the same ones and nothing is sent).
+
+- **Shed antlers.** Each roe buck drops two in late autumn and early winter (the last 40 % of autumn, the first 40 % of winter),
+  each on its own seeded hour, within 8 m of his herd's bed in the thick wood. They lie till the end of the next spring.
+  About three bucks a forest: six antlers a year. `?shed=now`: this year's lie now, whatever the season.
+- **The lek.** On spring mornings (03:30-07:00) each capercaillie cock (every forest has at least one) walks to his spot and
+  sings, tail fanned, neck up, wings drooped: clicks coming faster, a pop, then a grinding phrase. During the grind's last
+  2.5 s he hears nothing (no suspicion builds, you can walk); when it stops, freeze. He's less wary while he sings (x .7).
+  Get within 3 m and he bursts up; the first to do it gets two feathers straight into the bag. One or two feathers lie
+  where he sang once he's been put up or the lek's hours are over, for 3 days.
+- **The moult.** In summer a cock drops a feather every second day where he spends his day.
+- **Hare fur.** A caught hare in its moult (spring, autumn) leaves a tuft in your hands (The Lasso, above).
+
+E within 1.4 m picks one up (a Shed Antler or a Capercaillie Feather, materials in the pouch). With friends the first finder
+has it and it's gone for everyone (the server's `find`); a late joiner gets the picked ones in the welcome. Offline the
+picked ones are saved (`pack.store('animalfinds')`).
+
 ## Sounds
 
 They reuse the arena wildlife's events, so the audio feature already plays them: `wildlife.wings` (a raven lifting off),
 `wildlife.birds_scatter` (a capercaillie's burst), `wildlife.caw` (the ravens), `wildlife.critter_dash` (a bolt through the
-undergrowth), `wildlife.howl` with kind `fox`, call `yips` (the fox at night). No deer bark or woodpecker yet.
+undergrowth), `wildlife.howl` with kind `fox`, call `yips` (the fox at night). The lek's song is `wildlife.lek` (call `click`,
+`pop`, `grind`), played on stand-ins for now (a wooden knock, a plop, a soft scrape). No deer bark or woodpecker yet.
 
 ## Switches and knobs
 
@@ -126,6 +147,7 @@ undergrowth), `wildlife.howl` with kind `fox`, call `yips` (the fox at night). N
 | state, for a test | `__r3d.host.feature('fauna').dbg()` (each animal's suspicion, what you can touch, the odd hare, today's trails) |
 | the Lasso on animals | `ROPE`, `FUR` in `src/content/animals.js` (the hare's daze / carry, the fox's slip, the roe's speeds, tiring, steer, lean, brush, stand, calm); the weights in `WEIGHT.animal` (`src/content/lasso.js`); `?livefauna=0` off; menu > Sandbox > Animals: go to the nearest hare / roe deer |
 | tracks | `?tracks=0` none; `?mud=1` or menu > Sandbox > Tracks: the ground wet now; menu > Sandbox > Animals: lay this morning's trails / go to the nearest roe bed |
+| finds | `SHED`, `LEK`, `FINDS` in `src/content/animals.js` (the shed window, antlers a buck, how far from the bed, how long they lie; the lek's hours, song, deaf phrase, pauses, feathers, the bonus, the moult, how wary he is); `?shed=now`; menu > Sandbox > Animals: start the lek; Finds: go to the nearest shed antler / feather, drop a pair of antlers here; the look: recipes `roe_antler`, `caper_feather` |
 | mud and trails | `MUD`, `TRAIL` in `src/content/animals.js` (wetness, patch size, softness, deep, wash; trail lengths, hours, print spacing, the most prints); the mud's colour and life: `SURF.mud` in `src/content/prints.js` |
 
 ## Not yet
