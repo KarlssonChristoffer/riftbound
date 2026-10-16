@@ -3,20 +3,20 @@
 // campfire burning within COOK_R m (features/campfires.js burningNear) and is cooked on a stick over the flames (features/cooking.js:
 // pulled raw, done, just right or burnt; ?cook=0: done at once). Eaten, it is a MOOD for its time (content/meals.js notesOf / durOf:
 // its mood notes, + its hidden numbers when done or just right, the burnt twist's alone when burnt): notes in host.mods (source
-// 'meal'), read by their owners (mine.ring: mining; light.nightEye: lighting; prints.glow: prints; fish.come: fishing; player.*: the
-// player; fauna.loud: fauna ...). One meal at a time: a new one replaces it. Its time left is saved (pack.store('meals')) and counts
+// 'meal'), read by their owners (mine.ring: mining; light.nightEye: lighting; fish.come: fishing; player.*: the player; fauna.loud:
+// fauna; prints.glow: this file's view, stamped into features/prints.js ...). One meal at a time: a new one replaces it. Its time left is saved (pack.store('meals')) and counts
 // down in the sim; the chip at the bottom left (HD, the pixel UI) shows the meal and its time while the pack's panel is shut.
 // A meal with trip: true (the fly agaric broth) is drunk, not eaten: features/trip.js starts (the meal eaten stays; burnt: the still).
 // ?moods=0: today's numbers (the old notes, dur and Cook words), cooked at once.
 // FRIENDS (features/coop.js): the meal's CODE (content/meals.js codeOf: 'smoked_eel!') goes out with his state ('md'); every client
-// draws what shows of everyone's mood (this file's view: burnt eel's eye shine, a smoked-out trail, the pike's heavy dust; the glowing
-// prints are features/prints.js's, the fish at a friend's legs features/fishing.js's).
+// draws what shows of everyone's mood (this file's view: burnt eel's eye shine, a smoked-out trail, the pike's heavy dust, the glowing
+// prints (stamped into features/prints.js on a surface of this file's, LOOK.glow); the fish at a friend's legs are features/fishing.js's).
 // Only in the persistent world (the sandbox's ruins biome). The meals were fishing's until the foraging slice (2026-10-15):
 // a world saved before that has its meal under pack.store('fishing').meal; it is taken from there once.
 // OWNS: the meal eaten, its quality and time, its saved part, the modifier source 'meal', the recipe group Cook, the chip, the mood
-//   puffs (view: dust, smoke) and eye shine.
+//   puffs (view: dust, smoke), eye shine and the prints' surface 'blueberry'.
 // READS: content/meals.js, content/items.js (names), pack (the pouch, the store, close), campfires (burningNear), cooking (start),
-//   trip (start), coop (the peers' codes), host.mods ('prints.glow' no; 'player.turn' no: only its own code).
+//   trip (start), coop (the peers' codes), host.mods ('prints.glow'), prints (surface, stamp), host.inStream, wading (wet).
 // EMITS: meal.cook. API: F.id (the meal eaten, '' none), F.q (its quality), F.code (what friends are told), F.eyes (burnt eel: his
 //   eyes shine; the soot things take them for a lantern: features/cavelife.js, coop's lt), F.left (s), F.ver() (changes as the
 //   panel's words would), F.note(esc) -> the panel's line about it ('' none), F.eat(id, q?, t?) (cooking, tests, dev),
@@ -34,7 +34,10 @@ const MOODS = flags.get('moods') !== '0';
 const LEN = (v => v > 0 ? v : 1)(parseFloat(flags.get('moodlen')));   // a factor on every mood's length
 const COOK_R = 2.5;   // m from a burning campfire to cook
 // the moods' looks: the eye shine (m: up, apart, ahead of his middle), the smoke trail (s between puffs, life, rise m/s), the pike's dust
-const LOOK = {eyes: {h: 1.52, apart: .05, fwd: .12, col: '#7cff9a'}, smoke: {every: .14, life: 2.6, rise: .35, col: '#8e8a84'}, dust: {n: 7, col: ['#9a8a6a', '#7a6c52']}, max: 160};
+// the blueberry soup's prints: a surface of features/prints.js (col, life s, emit: they glow, fade: the last half fades out), a foot
+// off the line (side m), a friend's every stride m
+const LOOK = {eyes: {h: 1.52, apart: .05, fwd: .12, col: '#7cff9a'}, smoke: {every: .14, life: 2.6, rise: .35, col: '#8e8a84'}, dust: {n: 7, col: ['#9a8a6a', '#7a6c52']}, max: 160,
+  glow: {surf: 'blueberry', def: {col: '#b070ff', life: 60, emit: true, fade: .5}, side: .09, stride: .72}};
 
 // ORDER (core/features.js): after the pack (its store); the Cook recipes go to it before fishing's Bait (the panel's group order)
 export const order = {after: ['pack'], before: ['fishing']};
@@ -125,6 +128,30 @@ export async function create(host) {
     host.point(cx + fy * L.apart, cy - fx * L.apart, h, L.col, EYE); host.point(cx - fy * L.apart, cy + fx * L.apart, h, L.col, EYE);
   }
   const EYE = {emit: true, size: 1}, PUFF = {size: 1, alpha: 1};
+  // BLUE FINGERS (blueberry soup: the 'prints.glow' note): a purple print that glows at every step (features/prints.js, the surface
+  // LOOK.glow); burnt (< 0) the toes point back where he came from. Friends' from their codes: a print every stride they walk
+  let glow = 0; if (host.mods) { const f = () => { glow = host.mods.value('prints.glow', 0); }; host.mods.watch(f); f(); }
+  let prints = null, dirX = 0, dirY = 1;
+  const G = LOOK.glow, walked = new Map();   // a friend's id -> {x, y, acc, foot}
+  const printer = () => { if (prints === null) { prints = host.feature('prints') || false; prints?.surface?.(G.surf, G.def); } return prints; };
+  const dry = (x, y) => !host.inStream?.(x, y) && !(host.feature('wading')?.wet?.(x, y) > .5);
+  function glowStep(e, P) {
+    const pr = printer(); if (!pr) return;
+    const side = e.foot === 'R' ? -1 : 1, x = e.x + dirY * side * G.side, y = e.y - dirX * side * G.side, s = glow > 0 ? 1 : -1;
+    if (dry(x, y)) pr.stamp(x, y, e.z ?? P.z, dirX * s, dirY * s, 'boot', G.surf);
+  }
+  function glowFriend(p) {
+    const pr = printer(); if (!pr) return;
+    let w = walked.get(p.id); if (!w) walked.set(p.id, w = {x: PS.x, y: PS.y, acc: 0, foot: 0});
+    const d = Math.hypot(PS.x - w.x, PS.y - w.y);
+    if (d > 4) { w.x = PS.x; w.y = PS.y; w.acc = 0; return; }   // (a teleport: no line of prints across it)
+    w.acc += d;
+    if (w.acc >= G.stride && d > 1e-4) {
+      const ux = (PS.x - w.x) / d, uy = (PS.y - w.y) / d, side = (w.foot ^= 1) ? 1 : -1, s = PC.q === 'burnt' ? -1 : 1, x = PS.x + uy * side * G.side, y = PS.y - ux * side * G.side;
+      w.acc = 0; if (dry(x, y)) pr.stamp(x, y, PS.z, ux * s, uy * s, 'boot', G.surf);
+    }
+    w.x = PS.x; w.y = PS.y;
+  }
 
   const F = {
     name: 'meals', label: 'Meals', on: ON,
@@ -146,13 +173,19 @@ export async function create(host) {
     view(dt, evs) {
       if (!MOODS || !active()) return;
       const P = host.player, heavy = id === 'pike_stew' && q !== 'burnt';
+      const sp = Math.hypot(P.vx || 0, P.vy || 0); if (sp > .3) { dirX = P.vx / sp; dirY = P.vy / sp; }
+      if (glow && evs) for (const e of evs) if (e.type === 'player.step' || e.type === 'player.land') glowStep(e, P);
       if (heavy && evs) for (const e of evs) if (e.type === 'player.step' || e.type === 'player.land') {
         const z = e.z ?? P.z;
         for (let i = 0; i < LOOK.dust.n; i++) { const a = Math.random() * 6.283, v = .5 + Math.random() * .9; puff(e.x, e.y, z + .04, Math.cos(a) * v, Math.sin(a) * v * .7, .3 + Math.random() * .6, .5 + Math.random() * .3, LOOK.dust.col[i & 1], 1, 1); }
       }
       if (smokedOf(code) && !host.playerHidden) smokeFrom(0, P.x, P.y, P.z, dt);
       const L = peers(), C = host.feature('coop')?.net;
-      if (L && C) for (const p of L.values()) if (p.md && smokedOf(p.md) && C.sample(p, PS)) smokeFrom(p.id, PS.x, PS.y, PS.z, dt);
+      if (L && C) for (const p of L.values()) {
+        if (!p.md || !C.sample(p, PS)) continue;
+        if (smokedOf(p.md)) smokeFrom(p.id, PS.x, PS.y, PS.z, dt);
+        if (parseCode(p.md, PC).id === 'blueberry_soup') glowFriend(p);
+      }
       for (const p of PF) {
         if (!p.on) continue;
         if ((p.t += dt) >= p.life) { p.on = false; continue; }

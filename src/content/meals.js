@@ -106,11 +106,20 @@ export function parseCode(code, out = PARSED) {
 }
 // a meal's notes from its code (none for an unknown id: the server takes the client's word for which meal it ate)
 export const mealNotes = code => { const c = parseCode(code, {id: '', q: 'done'}); return c.id ? notesOf(c.id, c.q) : []; };
-// how loud animals take someone who ate this (features/fauna.js: a peer's 'fauna.loud' from their code; 1: as anyone)
+// how loud animals take someone who ate this (features/fauna.js: a peer's 'fauna.loud' from their code; 1: as anyone). Kept per
+// code (a handful of codes ever: asked every step, no allocation after the first)
+const LOUD = new Map(), SMOKE = new Map();
 export function loudOf(code) {
-  const c = parseCode(code, {id: '', q: 'done'}); let k = 1;
+  let k = LOUD.get(code); if (k !== undefined) return k;
+  const c = parseCode(code, {id: '', q: 'done'}); k = 1;
   if (c.id) for (const n of notesOf(c.id, c.q)) if (n.stat === 'fauna.loud' && n.mul !== undefined) k *= n.mul;
+  if (LOUD.size < 256) LOUD.set(code, k);
   return k;
 }
 // is the code a burnt fishing meal (smoked out: the smoke trail, features/meals.js)
-export const smokedOf = code => { const c = parseCode(code, {id: '', q: 'done'}); return c.q === 'burnt' && MEALS[c.id]?.burnt === SMOKED; };
+export function smokedOf(code) {
+  let k = SMOKE.get(code); if (k !== undefined) return k;
+  const c = parseCode(code, {id: '', q: 'done'}); k = c.q === 'burnt' && MEALS[c.id]?.burnt === SMOKED;
+  if (SMOKE.size < 256) SMOKE.set(code, k);
+  return k;
+}

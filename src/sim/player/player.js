@@ -69,6 +69,7 @@ export function strideK(g, v) {
   return GAIT.stride[g] * (r === 1 ? 1 : Math.pow(r, ADAPT));
 }
 const TURN_RATE = 900;  // deg/s: locomotion (walking / standing turns)
+const HEAVY_TURN = 600;  // deg/s: the way he goes swings round at this x the 'player.turn' note when it's under 1 (else it snaps to the input)
 // Aiming turns FAST (180 deg in 0.15 s): aiming must feel immediate. (Tried 450 deg/s with the draw held until facing
 // the target: it looked smoother but the user found it slow and clumsy to aim.)
 const AIM_TURN_RATE = 1200;
@@ -183,11 +184,13 @@ export function createPlayer(H) {
   const ev = e => { if (H.events) H.events.push(e); };
   // the run speeds follow the modifiers (an item's +speed): recomputed when the notes change, never written from outside
   // (a gait's own speed note first, 'player.speed.run', then the whole body's), and so do the rates and the strides (GAIT, above)
+  let TURNK = 1, KNOCKK = 1;   // ('player.turn': how fast he turns, his way and his facing; 'player.knock': how far a knock moves him)
   const applySpeed = () => {
     const M = H.mods;
     for (const k of Object.keys(SPEED0)) SPEED[k] = M.value('player.speed', M.value('player.speed.' + k, SPEED0[k]));
     for (const k of ['start', 'sprintUp']) ACC[k] = M.value('player.accel', ACC0[k]);
     for (const k of ['sprintDown', 'stop', 'skid']) ACC[k] = M.value('player.decel', ACC0[k]);
+    TURNK = M.value('player.turn', 1); KNOCKK = M.value('player.knock', 1);   // (the pike stew: heavy, x.4 / x.4; burnt, light as ash: x1.8 / x2)
     for (const k of ['walk', 'run', 'sprint']) GAIT.stride[k] = M.value('player.stride.' + k, STRIDE0[k]);
     GAIT.stride.drive = GAIT.stride.sprint;
     const same = SPEED.run === SPEED0.run && SPEED.sprint === SPEED0.sprint;   // (as authored: the literal speeds)
@@ -934,7 +937,10 @@ export function createPlayer(H) {
         else if (speed > 2.3) startTurn(nd);   // running: rendered plant/push frames carry the body into the new way
         else P.want = nd;                 // walking / standing: turn toward it at the turn rate
       }
-      dir = [mx, my];
+      if (TURNK < 1 && speed > .5) {   // heavy: his way swings round toward the input at a limited rate instead of snapping
+        const cur = Math.atan2(P.vx, P.vy), want = Math.atan2(mx, my), d = Math.atan2(Math.sin(want - cur), Math.cos(want - cur)), step = HEAVY_TURN * TURNK * Math.PI / 180 * dt;
+        const a = Math.abs(d) <= step ? want : cur + Math.sign(d) * step; dir = [Math.sin(a), Math.cos(a)];
+      } else dir = [mx, my];
       P.skid = 0;
       if (speed < target) speed = Math.min(target, speed + (speed < SPEED.run ? ACC.start : ACC.sprintUp) * dt);  // run fast, sprint builds
       else speed = Math.max(target, speed - (speed > SPEED.run ? ACC.sprintDown : ACC.stop) * dt);                 // ease out of a sprint
@@ -944,7 +950,7 @@ export function createPlayer(H) {
     }
     P.lastSpeed = P.curSpeed ?? speed; P.curSpeed = speed;
     P.vx = dir[0] * speed; P.vy = dir[1] * speed;
-    if (!P.turn && P.want !== undefined && P.want !== P.face && (speed <= 2.3 || P.fromAim)) turnToward(P.want, dt, P.fromAim ? AIM_TURN_RATE : TURN_RATE);
+    if (!P.turn && P.want !== undefined && P.want !== P.face && (speed <= 2.3 || P.fromAim)) turnToward(P.want, dt, P.fromAim ? AIM_TURN_RATE : TURN_RATE * TURNK);
     if (P.fromAim && P.want === P.face) P.fromAim = false;
     if (P.turn) {
       // turn frames: time-based, the plant frame bites into the speed (weight changing direction), then push off
@@ -1034,7 +1040,7 @@ export function createPlayer(H) {
   // RMB (core/input.js): the right hand while the fists are up -> true: taken (else RMB is an ability's)
   const pressR = () => !!fists?.press('R'), releaseR = () => !!fists?.release('R');
   function hold(frame, sec) { if (BUSY.has(P.state) || dodging()) return; P.hold = {frame: A.SP[frame] ? frame : 'release.0', sec}; P.state = 'hold'; P.t = 0; }
-  function knock(vx, vy) { if (P.state === 'climb' || THROWN.includes(P.state)) return; P.vx = vx; P.vy = vy; P.state = 'knock'; P.t = 0; }   // (thrown: a skid doesn't cut the flight short)
+  function knock(vx, vy) { if (P.state === 'climb' || THROWN.includes(P.state)) return; P.vx = vx * KNOCKK; P.vy = vy * KNOCKK; P.state = 'knock'; P.t = 0; }   // (thrown: a skid doesn't cut the flight short)
 
   // ---------------- HD bow layer (display resolution, over the pixel art) ----------------
   // The bowstring is left out of the pixel sprite; its tip -> nock -> tip path and per-sample visibility (hidden where

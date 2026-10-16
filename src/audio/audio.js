@@ -480,6 +480,21 @@ const SFX = {
     O(v, 0, {f: 140, f2: 90, d: .06, g: .25});
   },
   logPick(E, o) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * .35}); },
+  // THE RINGING PICK (features/mining.js, content/mining.js RING; the chanterelles' mood): the blow rings on, a thin long tone over
+  // the hit, and each vein answers in its own voice, quieter the further it is (o.k 1 near .. .15 far): stone a dull tok, copper a
+  // bright ting, iron a deep bell, a night vein a two-note chord, a hollow wall a hollow knock
+  mineRing(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .6}, 'mineRing', 1.2, {cd: .05}); if (!v) return; E.O(v, 0, {f: 2350, a: .002, d: 1.1, g: .035}); E.O(v, 0, {f: 3525, a: .002, d: .7, g: .015}); },
+  mineEcho(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * (.35 + .65 * (o.k ?? 1)), wet: .7}, 'mineEcho', .9); if (!v) return;
+    const {O, N} = E;
+    switch (o.kind) {
+      case 'copper': O(v, 0, {f: 2637, a: .001, d: .45, g: .07}); O(v, 0, {f: 3951, a: .001, d: .25, g: .03}); break;
+      case 'iron': O(v, 0, {f: 392, a: .003, d: .9, g: .12}); O(v, 0, {f: 988, a: .003, d: .5, g: .04}); break;
+      case 'night': O(v, 0, {f: 1319, a: .004, d: .7, g: .05}); O(v, .09, {f: 1760, a: .004, d: .7, g: .05}); break;
+      case 'hollow': O(v, 0, {f: 196, f2: 172, a: .002, d: .35, g: .2}); N(v, 0, {type: 'bandpass', f: 420, q: 3, a: .002, d: .25, g: .25}); break;
+      default: O(v, 0, {f: 600, f2: 420, a: .001, d: .09, g: .15}); N(v, 0, {type: 'bandpass', f: 900, q: 2, d: .04, g: .25});
+    }
+  },
   // THE LIVING DARK (features/caves.js, features/cavelife.js, docs/CAVELIFE.md): the lantern's shutter, a snuff (a breath and a
   // flutter of wings), it lighting again; a hollow wall caving in (stand-ins: a heavy fall and stones)
   lanternClick(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .5}, 'lanternClick', .1, {cd: .05}); if (!v) return; E.N(v, 0, {type: 'bandpass', f: 3800, q: 3, d: .01, g: .4}); E.O(v, 0, {w: 'square', f: 1400, d: .012, g: .02}); },
@@ -1277,9 +1292,10 @@ export function createAudio(ctx, host = {}) {
         case 'tree.land': fire('treeCrash', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, r: e.r})); break;   // the crown crashes down
         case 'tree.logs': fire('treeLogs', e.x, e.y, {surf, n: e.n}); break;
         case 'tool.hit': fire('hit', e.x, e.y, {mat: e.kind === 'body' ? 'body' : MAT[e.kind] || 'wood', g: 1}); break;
-        case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); break;   // (the swing's whoosh)
-        case 'mine.hit': fire('mineHit', e.x, e.y, {k: e.k, kind: e.kind, rhythm: e.rhythm, hollow: e.hollow, g: e.other ? .7 : 1}); break;   // (features/mining.js: a blow on a vein or a crystal; hollow: a hollow wall's knock)
+        case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); if (e.ring) fire('mineRing', e.x, e.y); break;   // (the swing's whoosh; the ringing pick rings on a whiff too)
+        case 'mine.hit': fire('mineHit', e.x, e.y, {k: e.k, kind: e.kind, rhythm: e.rhythm, hollow: e.hollow, g: e.other ? .7 : 1}); if (e.ring) fire('mineRing', e.x, e.y); break;   // (features/mining.js: a blow on a vein or a crystal; hollow: a hollow wall's knock)
         case 'mine.open': fire('hollowOpen', e.x, e.y); break;   // (a hollow wall caves in)
+        case 'mine.echo': fire('mineEcho', e.x, e.y, {kind: e.kind, k: e.k}); break;   // (a vein answers the ringing pick: from where it is, or burnt, the mirrored point)
         case 'lantern.toggle': fire('lanternClick', e.x, e.y); break;   // (features/caves.js: L in the cave)
         case 'lantern.snuff': fire('lanternSnuff', e.x, e.y); break;   // (the soot things put it out)
         case 'lantern.relight': fire('lanternLight', e.x, e.y); break;
@@ -1308,6 +1324,8 @@ export function createAudio(ctx, host = {}) {
         case 'fish.away': fire('fishPlop', e.x, e.y, {g: .5}); break;
         case 'fish.spot': fire('plop', e.x, e.y, {surf, fish: 1, g: .6}); break;
         case 'fish.bait': fire('chop', e.x, e.y, {k: 0, g: .5}); break;
+        case 'fish.gather': fire('plop', e.x, e.y, {surf, fish: 1, g: .5}); break;   // (the lingon's fish come: a soft rise nearby)
+        case 'fish.grab': fire('splash', e.x, e.y, {surf, small: true, g: e.ok ? 1 : .7}); break;   // (a hand into the water)
         case 'meal.cook': fire('fishCook', e.x, e.y); break;   // (features/meals.js: any meal by a campfire)
         case 'forage.pick': fire('rustle', e.x, e.y, {surf, g: .3, semi: 5}); fire('hit', e.x, e.y, {mat: 'straw', g: .2}); break;   // (stand-ins: a soft pluck in the leaves)
         // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge

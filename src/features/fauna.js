@@ -19,7 +19,7 @@
 // OWNS: its animals' state, their meshes (look.js). READS: world/layout.js FOREST (the plan), host.player, host.world.cave (keeps out of its mouth), co-op's peers
 //   (host.feature('coop').net), host.env (hour, season, snow), host.elev / inStream, world.js steep, host.entities.near (what
 //   stands where), host.events (gunshots, hits, breaks: they scare), the uncanny forest's F.elk, the watcher's F.state, the game's
-//   ui (a toast for a touch).
+//   ui (a toast for a touch), host.mods ('fauna.loud': how loud they take him) and a friend's meal code (content/meals.js loudOf).
 // EMITS (core/events.js; the audio feature plays them): wildlife.wings (a raven taking off), wildlife.birds_scatter (a capercaillie's burst), wildlife.caw (the ravens),
 //   wildlife.critter_dash (a bolt through the undergrowth), wildlife.howl {kind: 'fox', call: 'yips'} (the fox at night), {kind: 'fox', call: 'bark'} (a roe's alarm bark).
 // BUDGET: the view ~.05 ms for ~30 animals (only those within SIM_R m of the player think; the rest wait where they are); the
@@ -32,6 +32,7 @@ import {steep} from '../world/world.js';
 import {faunaPlan} from '../world/fauna.js';
 import {createFaunaLook} from './fauna/look.js';
 import {createCrownBirds} from './fauna/crowns.js';
+import {loudOf} from '../content/meals.js';
 
 // ---------------------------------------------------------------- tunables
 // alert / flee: m from a person (walking) at which it stops to watch / bolts; rest: x those while it is bedded (it sits tight);
@@ -114,11 +115,15 @@ export async function create(host) {
   // the uncanny forest's elk (its view of it: features/uncanny.js F.elk), when that is on; at night it is a hunter
   const NIGHT_ELK = new Set(['roam', 'stalk', 'lunge', 'stare', 'back']);
   const elk = () => { const U = host.feature('uncanny'); return U?.on && U.elk?.ok ? U.elk : null; };
+  // how loud the animals take him: the 'fauna.loud' note (x; briefs/depth-shared.md: the one per-person scaling: a burnt fish dish's
+  // smoke, the ash-pike's light feet), read again when the notes change
+  let loud = 1;
+  if (host.mods) { const f = () => { loud = host.mods.value('fauna.loud', 1); }; host.mods.watch(f); f(); }
   function gatherPeople(dt) {
     const P = host.player, N = TUNE.noise, q = PEOPLE[0];
     const sp = Math.hypot(P.vx || 0, P.vy || 0), st = P.state;
     q.x = P.x; q.y = P.y; q.on = true;
-    q.k = st === 'roll' || st === 'leap' || st === 'knock' ? N.jump : sp < .3 ? N.still : P.gait === 'sprint' || sp > 5.2 ? N.sprint : P.gait === 'run' || sp > 2.4 ? N.run : sp < 1.8 ? N.creep : N.walk;
+    q.k = (st === 'roll' || st === 'leap' || st === 'knock' ? N.jump : sp < .3 ? N.still : P.gait === 'sprint' || sp > 5.2 ? N.sprint : P.gait === 'run' || sp > 2.4 ? N.run : sp < 1.8 ? N.creep : N.walk) * loud;
     nPeople = 1;
     const C = host.feature('coop')?.net;
     if (C && C.peers) for (const peer of C.peers.values()) {
@@ -126,7 +131,7 @@ export async function create(host) {
       const o = C.sample(peer, PS); if (!o) continue;
       const r = PEOPLE[nPeople++], v = Number.isNaN(r.px) || dt <= 0 ? 0 : Math.hypot(o.x - r.px, o.y - r.py) / dt;
       r.px = r.x = o.x; r.py = r.y = o.y; r.on = true;
-      r.k = v > 30 ? N.walk : v < .3 ? N.still : v > 5.2 ? N.sprint : v > 2.4 ? N.run : v < 1.8 ? N.creep : N.walk;   // (v > 30: a teleport)
+      r.k = (v > 30 ? N.walk : v < .3 ? N.still : v > 5.2 ? N.sprint : v > 2.4 ? N.run : v < 1.8 ? N.creep : N.walk) * (peer.md ? loudOf(peer.md) : 1);   // (v > 30: a teleport; a friend's meal: content/meals.js loudOf)
     }
     nReal = nPeople;
     const E = elk(); if (E && NIGHT_ELK.has(E.mode) && nPeople < PEOPLE.length) { const r = PEOPLE[nPeople++]; r.x = E.x; r.y = E.y; r.k = TUNE.elk; r.on = true; r.px = r.py = NaN; }

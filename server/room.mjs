@@ -18,8 +18,8 @@
 //   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
-import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
-import {mealNotes} from '../src/content/meals.js';
+import {CATCHES, WATERS, BAITS, SPOT, COME, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
+import {mealNotes, parseCode, codeOf} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
@@ -57,7 +57,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
-      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false};
+      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, lt: 0, md: ''};
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
       clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null}));
     peers.set(id, p);
@@ -81,7 +81,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (rig !== p.rig) { p.rig = rig; if (!rig) { p.w = null; p.wn = null; } }
     if (typeof m.w === 'string' && m.w.length < 2048) { p.w = m.w; p.wNew = true; }
     p.ls = Array.isArray(m.ls) && m.ls.length === 5 ? m.ls.map((v, i) => i ? Math.round(num(v) * 100) / 100 : str(v, 8)) : null;
-    p.lit = m.lt === 1;   // (his lantern burns in the cave: sim/cavelife.js reads p.lit)
+    p.lt = m.lt === 1 || m.lt === 2 ? m.lt : 0; p.lit = p.lt > 0;   // (his lantern burns in the cave, 2: a burnt eel's shining eyes: sim/cavelife.js reads p.lit)
+    p.md = str(m.md, 24);   // (the meal in him: content/meals.js codeOf; friends see its mood, the fishing grab checks it)
     p.fresh = true;
   }
 
@@ -229,6 +230,19 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   // everyone ({a: 'caught', id: who, name, c: the catch, cm, kg, two}); a lost one ({a: 'lost', n}) forgets the roll.
   const fishRng = mulberry32((seed ^ 0xf15f) >>> 0), FISH_REACH = 20, FISH_WATERS = new Set(Object.values(WATERS));
   const partOf = h => { h = ((h % 24) + 24) % 24; return h < 5.6 || h >= 20.3 ? 'night' : h < 7.2 ? 'dawn' : h < 18 ? 'day' : 'dusk'; };
+  // the fish.* stats a cast or a grab is rolled with: the set he wears, his level, the angler's set, his meal (his word: the save is his)
+  function fishStats(p, m) {
+    const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = [];
+    for (const id of p.gear) for (const q of GEAR_BY_ID[id]?.mods || []) notes.push(q);
+    const pieces = p.gear.filter(id => GEAR_BY_ID[id]?.kind === 'fishing').length;
+    notes.push(...castNotes({lvl, pieces, meal: mealNotes(str(m.meal, 24)), per: SKILLS.fishing.per}));
+    return statsOf(notes);
+  }
+  // FISH COME TO YOU (content/fishing.js COME): the lingon in him (not burnt: p.md, his state's word), or a friend with it burnt within
+  // COME.friend (their fish come to him)
+  const PC = {id: '', q: 'done'}, LINGON_BURNT = codeOf('fish_lingon', 'burnt');
+  const lingonIn = p => parseCode(p.md, PC).id === 'fish_lingon' && PC.q !== 'burnt';
+  function burntLingonNear(p) { for (const q of peers.values()) if (q !== p && q.md === LINGON_BURNT && Math.hypot(q.x - p.x, q.y - p.y) <= COME.friend) return true; return false; }
   function fish(p, m) {
     const a = str(m.a, 8), n = num(m.n, -1), t = now();
     if (a === 'cast') {
@@ -236,12 +250,10 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
       if (!FISH_WATERS.has(w) || !(Math.hypot(x - p.x, y - p.y) < FISH_REACH)) return;
       p.fishT = t;
-      const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = [];
-      for (const id of p.gear) for (const q of GEAR_BY_ID[id]?.mods || []) notes.push(q);
-      const pieces = p.gear.filter(id => GEAR_BY_ID[id]?.kind === 'fishing').length, meal = str(m.meal, 24), bait = str(m.bait, 24);
-      notes.push(...castNotes({lvl, pieces, meal: mealNotes(meal), per: SKILLS.fishing.per}));
-      const spot = !!m.spot && spotNear(x, y, Math.floor(t / 1000 / SPOT.slot), seed | 0);
-      const st = statsOf(notes), rain = !!m.rain;
+      const bait = str(m.bait, 24);
+      // a spot: the spots' hash on its clock, or the lingon's fish round his legs (a cast within COME.rod of him)
+      const spot = !!m.spot && (spotNear(x, y, Math.floor(t / 1000 / SPOT.slot), seed | 0) || (lingonIn(p) && Math.hypot(x - p.x, y - p.y) <= COME.rod + .5));
+      const st = fishStats(p, m), rain = !!m.rain;
       const r = roll(fishRng, {water: w, part: partOf(clock()), rain, deep: Math.max(0, Math.min(40, num(m.deep, 0))), luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0),
         find: st['fish.find'], size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: !!m.perfect,
         spot, bait: BAITS[bait] ? bait : ''});
@@ -254,6 +266,17 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: r.two});
       log(`  ${p.name} caught a ${CATCHES[r.id].name}${CATCHES[r.id].find ? '' : ` (${r.cm} cm)`}`);
     } else if (a === 'lost' && n === p.fishN) p.fishR = null;
+    else if (a === 'grab') {   // {a: 'grab', n, x, y, w, lvl, rain, meal}: a fish grabbed by hand where he stands (common and fine only)
+      if (t - p.fishT < 500) return;
+      const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
+      if (!FISH_WATERS.has(w) || !(Math.hypot(x - p.x, y - p.y) < COME.reach) || !(lingonIn(p) || burntLingonNear(p))) return;
+      p.fishT = t;
+      const st = fishStats(p, m), rain = !!m.rain;
+      const r = roll(fishRng, {water: w, part: partOf(clock()), rain, deep: 0, luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0), size: st['fish.size'], lure: 1, hand: true});
+      p.conn.send(encode({k: 'fish', a: 'grabbed', n, ...r}));
+      all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: false});
+      log(`  ${p.name} grabbed a ${CATCHES[r.id].name} (${r.cm} cm) by hand`);
+    }
   }
 
   function connect(conn) {
@@ -299,7 +322,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const rows = [];
     for (const p of peers.values()) {
       if (!p.placed) continue;
-      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lit ? 1 : 0]);
+      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lt || 0, p.md || '']);
       p.wNew = false;
     }
     if (rows.length) { const m = {k: 'snap', t: now(), p: rows}; if (c) m.c = c; if (sn) m.sn = sn; all(m); }

@@ -22,7 +22,10 @@
 // it spends it (for you). BAIT (BAITS): cut from small fish at the pack panel; one goes on the hook a cast while you have it.
 // FISH SHADOWS (content/fishing.js SHADOW, shadowAt; briefs/depth-shared.md: the one drawing of fish under the water): the nearest
 // SHADOW.n fish round him, each a dark shape on a slow loop round its home, the same for everyone (the seed and the clock). Others
-// ask F.shadowsNear(x, y, r, out); they never draw their own.
+// ask F.shadowsNear(x, y, r, out); they never draw their own. FISH COME TO YOU (COME; content/meals.js fish_lingon's 'fish.come'
+// note > 0): stand still in shallow water and a few come and circle your shins; E grabs the one flashing past your feet (a hand
+// catch: roll's o.hand; co-op: the server's 'grab'). Burnt (< 0): the shadows flee you, and a friend in water within COME.friend
+// of you gets your school. A friend with the dish has a few circling their legs too (view only).
 // MEALS: fish cooked at a burning campfire (features/meals.js owns them: the Cook list, the buff, its timer chip; a cast tells the
 // server the meal eaten). THE ANGLER'S SET: ANGLER.n fishing pieces worn (source 'fishing.set'). THE
 // JOURNAL: the pack panel's Fish part (pack.section): every catch with its count and record, the ones not caught yet as
@@ -34,12 +37,14 @@
 // READS: gear (the rod worn, the set), host.mods ('fish.*'), world.js waterSample, host.env (part, sky.rain), pack, coop (mail,
 //   fish, the server's clock), meals (the meal eaten: a cast's word to the server), SESSION.seed (the spots).
 // EMITS: fish.cast, fish.plop, fish.snag, fish.nibble, fish.bite, fish.early, fish.slip, fish.hook, fish.tell, fish.surge,
-//   fish.reel, fish.drag, fish.snap, fish.escape, fish.leap, fish.catch, fish.away, fish.spot, fish.bait.
+//   fish.reel, fish.drag, fish.snap, fish.escape, fish.leap, fish.catch, fish.away, fish.spot, fish.bait, fish.gather, fish.grab.
 // BUDGET: sim: a few multiplies a step while fishing (nothing otherwise but a compare). View: a rod, a line (~16 lines), a few
 //   dozen points; HD: a gauge (rects + pixel text) while fishing; the prompt: one waterSample a frame while a rod is worn.
 //   Spots: found again only when he crosses a 7 m cell or the slot turns (~a dozen hashes and waterSamples), a few points each.
-//   Shadows: found again when he crosses a 5 m cell or the slot turns (~120 hashes, a few dozen waterSamples); 8 x 5 points a frame.
-import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, SHADOW, BAITS, ANGLER, COMMON_FISH, roll, catchIcon, isFish, spotAt, shadowAt, hintOf} from '../content/fishing.js';
+//   Shadows: found again when he crosses a 5 m cell or the slot turns (~120 hashes, a few dozen waterSamples); 8 x 5 points a
+//   frame. The school (lingon): a few multiplies a step while it's there, 6 x 5 points.
+import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, SHADOW, COME, BAITS, ANGLER, COMMON_FISH, roll, catchIcon, isFish, spotAt, shadowAt, hintOf} from '../content/fishing.js';
+import {codeOf, parseCode} from '../content/meals.js';
 import {gearById, RARITY} from '../content/gear.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
@@ -103,7 +108,7 @@ export async function create(host) {
   // crosses a cell or the slot turns; where each swims now is shadowAt's (the clock: the same for everyone). View only.
   const NSH = SHADOW.n, SH = [], SHQ = {x: 0, y: 0, a: 0, len: 0, hx: 0, hy: 0, rad: 0}, SHK = {cx: 1e9, cy: 1e9, slot: -1, n: 0};
   const WS3 = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
-  for (let i = 0; i < NSH; i++) SH.push({a: 0, b: 0, d: 0, x: 0, y: 0, ang: 0, len: .2, vis: true});
+  for (let i = 0; i < NSH; i++) SH.push({a: 0, b: 0, d: 0, x: 0, y: 0, ang: 0, len: .2, ox: 0, oy: 0, vis: true});
   function findShadows() {
     const P = host.player, cx = Math.floor(P.x / SHADOW.cell), cy = Math.floor(P.y / SHADOW.cell), slot = Math.floor(clockNow() / SHADOW.slot);
     if (cx === SHK.cx && cy === SHK.cy && slot === SHK.slot) return;
@@ -113,15 +118,25 @@ export async function create(host) {
       if (!shadowAt(a, b, slot, seed, 0, SHQ)) continue;
       const d = Math.hypot(SHQ.hx - P.x, SHQ.hy - P.y); if (d > SHADOW.r || (n === NSH && d >= SH[n - 1].d)) continue;
       waterSample(SHQ.hx, SHQ.hy, WS3); if (!WATERS[WS3.kind] || (WS3.edge || 0) < SHADOW.edge + SHQ.rad) continue;
-      let j = n < NSH ? n++ : NSH - 1; const s = SH[j]; s.a = a; s.b = b; s.d = d; s.vis = true;
+      let j = n < NSH ? n++ : NSH - 1; const s = SH[j]; s.a = a; s.b = b; s.d = d; s.ox = s.oy = 0; s.vis = true;
       while (j > 0 && SH[j - 1].d > SH[j].d) { const t = SH[j - 1]; SH[j - 1] = SH[j]; SH[j] = t; j--; }   // (kept nearest first)
     }
     SHK.n = n;
   }
   const shadowFade = () => { const t = clockNow() % SHADOW.slot; return clamp(Math.min(t, SHADOW.slot - t) / SHADOW.fade, 0, 1); };
-  function moveShadows() {   // where each swims now
-    const t = clockNow(), seed = (SESSION.seed ?? 0) | 0;
-    for (let i = 0; i < SHK.n; i++) { const s = SH[i]; shadowAt(s.a, s.b, SHK.slot, seed, t, SHQ); s.x = SHQ.x; s.y = SHQ.y; s.ang = SHQ.a; s.len = SHQ.len; }
+  // where each swims now; with the burnt dish in him and his feet in the water they dart off to COME.flee m from him
+  function moveShadows(dt) {
+    const t = clockNow(), seed = (SESSION.seed ?? 0) | 0, P = host.player, flee = come < 0 && shallow(P.x, P.y);
+    for (let i = 0; i < SHK.n; i++) {
+      const s = SH[i]; shadowAt(s.a, s.b, SHK.slot, seed, t, SHQ);
+      let tx = 0, ty = 0;
+      if (flee) { const dx = SHQ.x - P.x, dy = SHQ.y - P.y, d = Math.hypot(dx, dy); if (d < COME.flee && d > .01) { const k = (COME.flee - d) / d; tx = dx * k; ty = dy * k; } }
+      const e = 1 - Math.exp(-(flee ? 6 : 1.5) * dt); s.ox += (tx - s.ox) * e; s.oy += (ty - s.oy) * e;
+      s.x = SHQ.x + s.ox; s.y = SHQ.y + s.oy; s.len = SHQ.len;
+      const off = Math.abs(s.ox) + Math.abs(s.oy) > .3;
+      s.ang = off ? Math.atan2(s.oy, s.ox) : SHQ.a;
+      s.vis = !off || !!WATERS[waterSample(s.x, s.y, WS3).kind];   // (driven off: not onto the bank)
+    }
   }
 
   // ---------------------------------------------------------------- the cursor on the water (world), as the sim reads it
@@ -157,7 +172,7 @@ export async function create(host) {
     dist: 1, strain: 0, surge: '', sT: 0, nextS: 0, goneT: 0, clickT: 0, dragT: 0,   // the fight
     note: '',                              // a word for the gauge (view): 'let go!' etc.
     clock: 0,                              // s of sim (the spots' slot clock offline)
-    spot: -1, bait: '',                    // this cast: the spot it fell in (its key), the bait on the hook
+    spot: -1, near: false, bait: '',       // this cast: the spot it fell in (its key), near him with the lingon in him (COME.rod), the bait
   };
   const I = {id: '', cm: 0, kg: 0, n: 0, first: false, record: false, xp: 0, t: 0};   // the last catch (the card)
   const ev = (type, o) => { o.type = type; host.events.push(o); };
@@ -185,18 +200,19 @@ export async function create(host) {
     S.deep = Math.max(0, WS.edge || 0);
     ev('fish.plop', at(S.tx, S.ty));
     const sp = liveSpot(S.tx, S.ty); S.spot = sp ? sp.key : -1;
-    if (sp) { ev('fish.spot', at(S.tx, S.ty)); say('a fishing spot!', '#9ad07a'); }
+    S.near = !sp && come > 0 && Math.hypot(S.tx - host.player.x, S.ty - host.player.y) <= COME.rod;   // (the lingon's fish round his legs: a spot of their own)
+    if (sp || S.near) { ev('fish.spot', at(S.tx, S.ty)); say('a fishing spot!', '#9ad07a'); }
     S.bait = ''; const pk = pack();
     if (pk) for (const id in BAITS) if (pk.count(id) > 0 && pk.take(id, 1)) { S.bait = id; break; }
     S.phase = 'wait'; S.t = 0; S.nib = 0; S.lastNib = -9; S.r = null; S.askT = 0;
     const c = coop(), st = stats(), rain = (host.env?.sky?.rain ?? 0) > .3;
     if (c) { S.local = false; c.fish({a: 'cast', n: S.n, x: +S.tx.toFixed(2), y: +S.ty.toFixed(2), w: S.water, deep: +S.deep.toFixed(2), rain, perfect: S.perfect, lvl: pack()?.level('fishing') || 1,
-      spot: S.spot >= 0, bait: S.bait, meal: host.feature('meals')?.code || ''}); }   // (the meal's code: content/meals.js, a burnt one has no numbers)
+      spot: S.spot >= 0 || S.near, bait: S.bait, meal: host.feature('meals')?.code || ''}); }   // (the meal's code: content/meals.js, a burnt one has no numbers)
     else { S.local = true; S.r = rollHere(st, rain); }
   }
   function rollHere(st, rain) {
     const r = roll(R, {water: S.water, part: host.env?.part || 'day', rain, deep: S.deep, luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0), find: st['fish.find'],
-      size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: S.perfect, spot: S.spot >= 0, bait: S.bait});
+      size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: S.perfect, spot: S.spot >= 0 || S.near, bait: S.bait});
     r.two = R() < st['fish.double'];
     return r;
   }
@@ -250,17 +266,17 @@ export async function create(host) {
     S.phase = 'land'; S.t = 0; S.held = false;
     host.hitstop?.(.06); host.shake?.(2, .12);
   }
-  function give() {   // the fish in the pouch, the XP, the records
-    const r = S.r, c = CATCHES[r.id], n = r.two && !c.find ? 2 : 1, P = host.player, s = store();
+  function give(r = S.r, hand = false) {   // the fish in the pouch, the XP, the records (hand: grabbed, no rod: COME)
+    const c = CATCHES[r.id], n = r.two && !c.find ? 2 : 1, P = host.player, s = store();
     const first = !!s && !s.n[r.id], record = !!s && !c.find && r.cm > (s.best[r.id] || 0) && !first;
     if (s) { s.n[r.id] = (s.n[r.id] || 0) + n; if (!c.find && r.cm > (s.best[r.id] || 0)) s.best[r.id] = r.cm; pack()?.dirty(); }
     pack()?.give(r.id, n);
-    const xp = Math.round(c.xp * (first ? 2 : 1) * (S.perfect ? 1.2 : 1));
+    const xp = Math.round(c.xp * (first ? 2 : 1) * (S.perfect && !hand ? 1.2 : 1));
     pack()?.gain('fishing', xp, {x: P.x, y: P.y, h: P.z + 2.2});
     Object.assign(I, {id: r.id, cm: r.cm, kg: r.kg, n, first, record, xp, t: 0});
     ev('fish.catch', {x: P.x, y: P.y, id: r.id, cm: r.cm, kg: r.kg, n, first, record, rarity: c.rarity});
-    if (!S.local) coop()?.fish({a: 'land', n: S.n});
-    if (S.spot >= 0) { spent.add(S.spot); S.spot = -1; }
+    if (!hand && !S.local) coop()?.fish({a: 'land', n: S.n});
+    if (!hand && S.spot >= 0) { spent.add(S.spot); S.spot = -1; }
     jV++;
   }
 
@@ -334,6 +350,76 @@ export async function create(host) {
   }
   function letGo() { if (S.phase === 'charge') cast(); }
 
+  // ---------------------------------------------------------------- fish come to you (content/fishing.js COME; the 'fish.come' note)
+  // the sim: standing still in shallow water with the lingon in him (or a friend's burnt one near) a while, a school gathers
+  // ('come': sliding in, then 'circle'); now and then one turns past his feet and flashes ('flash': its index, flashT s left): E then
+  // grabs it, E otherwise misses (they scatter: 'leave', and none come for COME.scatter s). Walking off, fishing, leaving the
+  // water: they swim off. The view draws them where the sim says (SF: angle round him, ring radius, angular speed, from how far)
+  const SC = {phase: '', t: 0, still: 0, scatter: 0, x: 0, y: 0, n: 0, next: 0, flash: -1, flashT: 0, press: 0, wait: -1, askT: 0, grabs: 0};
+  const SF = []; for (let i = 0; i < COME.n[1]; i++) SF.push({a: 0, r: 1, w: 1, d0: 10, len: .2});
+  const LINGON_BURNT = codeOf('fish_lingon', 'burnt'), PS = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null}, MC = {id: '', q: 'done'};
+  let come = 0, comeV = -1;
+  // shallow water under (x, y): the lake's, a stream's, a river's edge, not the swimming water
+  const shallow = (x, y) => !!WATERS[waterSample(x, y, WS3).kind] && !host.inStream?.(x, y);
+  function burntFriendNear(P) {   // a friend with the burnt dish in them within COME.friend: their fish come to me
+    const C = host.feature('coop')?.net; if (!C?.peers) return false;
+    for (const p of C.peers.values()) if (p.md === LINGON_BURNT && C.sample(p, PS) && Math.hypot(PS.x - P.x, PS.y - P.y) <= COME.friend) return true;
+    return false;
+  }
+  const turn = () => COME.turn[0] + (COME.turn[1] - COME.turn[0]) * R();
+  function gather(P) {
+    SC.phase = 'come'; SC.t = 0; SC.still = 0; SC.x = P.x; SC.y = P.y; SC.flash = -1;
+    SC.n = COME.n[0] + Math.floor(R() * (COME.n[1] - COME.n[0] + 1));
+    const dir = R() < .5 ? -1 : 1;
+    for (let i = 0; i < SC.n; i++) {
+      const f = SF[i]; f.a = R() * Math.PI * 2; f.r = COME.ring[0] + (COME.ring[1] - COME.ring[0]) * R();
+      f.w = dir * (.35 + .3 * R()) / f.r; f.d0 = COME.from[0] + (COME.from[1] - COME.from[0]) * R(); f.len = .14 + .1 * R();
+    }
+    ev('fish.gather', {x: P.x, y: P.y, n: SC.n});
+  }
+  function leave() { if (SC.phase && SC.phase !== 'leave') { SC.phase = 'leave'; SC.t = 0; SC.flash = -1; } SC.still = 0; }
+  function rollHand() {
+    const st = stats(), P = host.player, rain = (host.env?.sky?.rain ?? 0) > .3;
+    return roll(R, {water: WATERS[waterSample(P.x, P.y, WS3).kind] || 'lake', part: host.env?.part || 'day', rain, deep: 0, luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0),
+      size: st['fish.size'], lure: 1, hand: true});
+  }
+  function handCatch(r) { r.two = false; give(r, true); }
+  function grab() {   // E while they circle: the one flashing past his feet, or a miss
+    const P = host.player;
+    if (SC.flash < 0) { ev('fish.grab', {x: P.x, y: P.y, ok: false}); say('missed!'); SC.scatter = COME.scatter; leave(); return; }
+    const f = SF[SC.flash], x = SC.x + Math.cos(f.a) * f.r * .4, y = SC.y + Math.sin(f.a) * f.r * .4;
+    SF[SC.flash] = SF[SC.n - 1]; SF[SC.n - 1] = f; SC.n--; SC.flash = -1; SC.next = turn();   // (swapped out of the school: no allocation)
+    ev('fish.grab', {x, y, ok: true});
+    const c = coop();
+    if (c) { SC.wait = ++SC.grabs; SC.askT = 0; c.fish({a: 'grab', n: SC.wait, x: +P.x.toFixed(2), y: +P.y.toFixed(2), w: WATERS[waterSample(P.x, P.y, WS3).kind] || '',
+      lvl: pack()?.level('fishing') || 1, rain: (host.env?.sky?.rain ?? 0) > .3, meal: host.feature('meals')?.code || ''}); }
+    else handCatch(rollHand());
+    if (!SC.n) leave();
+  }
+  function school(dt) {
+    const m = host.mods; if (m.ver !== comeV) { comeV = m.ver; come = m.value('fish.come', 0); }
+    if (SC.scatter > 0) SC.scatter -= dt;
+    if (SC.wait >= 0 && (SC.askT += dt) > TUNE_NET.ask) { SC.wait = -1; handCatch(rollHand()); }   // (no word from the server: an old one)
+    while (SC.press > 0) { SC.press--; if (SC.phase === 'circle') grab(); }
+    const P = host.player, sp = Math.hypot(P.vx || 0, P.vy || 0);
+    const lure = come > 0 || (come === 0 && burntFriendNear(P));
+    const here = lure && !S.phase && free() && sp < COME.slow && shallow(P.x, P.y);
+    if (SC.phase === 'leave') { if ((SC.t += dt) > 1.2) SC.phase = ''; }
+    else if (SC.phase) {
+      if (!here) leave();
+      else {
+        SC.t += dt; SC.x = P.x; SC.y = P.y;
+        if (SC.phase === 'come' && SC.t >= COME.arrive) { SC.phase = 'circle'; SC.next = turn(); }
+        for (let i = 0; i < SC.n; i++) SF[i].a += SF[i].w * dt;
+        if (SC.phase === 'circle') {
+          if (SC.flash >= 0 && (SC.flashT -= dt) <= 0) SC.flash = -1;
+          if (SC.flash < 0 && SC.n > 0 && (SC.next -= dt) <= 0) { SC.flash = Math.floor(R() * SC.n); SC.flashT = COME.flash; SC.next = turn(); }
+        }
+      }
+    }
+    if (!SC.phase) { if (here && SC.scatter <= 0) { if ((SC.still += dt) >= COME.still) gather(P); } else SC.still = 0; }
+  }
+
   // ---------------------------------------------------------------- the view's state
   const RINGS = [], DROPS = [], NR = 40, ND = 120;   // water rings {x, y, h, r, t, life, big}; spray {x, y, h, vx, vy, vh, t, life, c}
   for (let i = 0; i < NR; i++) RINGS.push({x: 0, y: 0, h: 0, r: 0, t: 0, life: 0, big: 0, on: false});
@@ -348,7 +434,7 @@ export async function create(host) {
     }
   }
   const V = {bob: 0, dip: 0, under: 0, fx: 0, fy: 0, dart: 0, dartV: 0, leapT: -1, lx: 0, ly: 0, flash: 0, bang: 0, card: 0, peer: null, peerT: 0};
-  const COL = {rod: '#c4bc7c', line: '#e8e4d8', red: '#d83a2a', white: '#f4f0e6', ring: '#d8ecf0', drop: '#e8f6fa', shade: '#0e1c20', glow: '#b8c8f0'};
+  const COL = {rod: '#c4bc7c', line: '#e8e4d8', red: '#d83a2a', white: '#f4f0e6', ring: '#d8ecf0', drop: '#e8f6fa', shade: '#0e1c20', glow: '#b8c8f0', silver: '#e8f0f6'};
   const P1 = {size: 1}, P2 = {size: 2}, P2A = {size: 2, alpha: .55}, P1A = {size: 1, alpha: .6}, P2E = {size: 2, emit: true}, P3A = {size: 3, alpha: .75};
   const PSP = {size: 2, alpha: .9};   // (the spots' bubbles: alpha follows the slot's fade in and out)
   const PRL = []; for (let i = 1; i <= 8; i++) PRL.push({size: 1, alpha: i / 8});   // (the spots' ripples: alpha in 8 steps)
@@ -407,25 +493,47 @@ export async function create(host) {
     }
   }
 
-  // the fish under the water: dark shapes (five points along its way, the tail wagging)
-  const PSH = [{size: 1, alpha: .5}, {size: 2, alpha: .42}];
+  // the fish under the water: dark shapes (five points along its way, the tail wagging); the lingon's school, its flash silver
+  const PSH = [{size: 1, alpha: .5}, {size: 2, alpha: .42}], PSC = [{size: 1, alpha: .6}, {size: 2, alpha: .5}], PSV = [{size: 1, alpha: .95, emit: true}, {size: 2, alpha: .95, emit: true}];
   function fishShape(x, y, ang, len, wig, o) {
-    const h = host.elev(x, y) + .012, cx = Math.cos(ang), cy = Math.sin(ang);
+    const h = host.elev(x, y) + .012, cx = Math.cos(ang), cy = Math.sin(ang), c = o === PSV ? COL.silver : COL.shade;
     for (let k = 0; k < 5; k++) {
       const u = (k / 4 - .5) * len, tw = k === 0 ? wig : 0;
-      host.point(x + cx * u - cy * tw, y + cy * u + cx * tw, h, COL.shade, o[k === 0 || k === 4 ? 0 : 1]);
+      host.point(x + cx * u - cy * tw, y + cy * u + cx * tw, h, c, o[k === 0 || k === 4 ? 0 : 1]);
     }
   }
   function drawFish() {
     if (!active()) return;
-    const t = performance.now() / 1000, fade = shadowFade(); if (fade <= 0) return;
-    PSH[0].alpha = .5 * fade; PSH[1].alpha = .42 * fade;
-    for (let i = 0; i < SHK.n; i++) { const s = SH[i]; if (s.vis) fishShape(s.x, s.y, s.ang, s.len, Math.sin(t * 6 + i * 2.1) * .03, PSH); }
+    const t = performance.now() / 1000, fade = shadowFade();
+    if (fade > 0) {
+      PSH[0].alpha = .5 * fade; PSH[1].alpha = .42 * fade;
+      for (let i = 0; i < SHK.n; i++) { const s = SH[i]; if (s.vis) fishShape(s.x, s.y, s.ang, s.len, Math.sin(t * 6 + i * 2.1) * .03, PSH); }
+    }
+    if (SC.phase) for (let i = 0; i < SC.n; i++) {
+      const f = SF[i], fl = i === SC.flash; let r = f.r, ang = f.a + Math.sign(f.w) * Math.PI / 2;
+      if (SC.phase === 'come') { const k = clamp(SC.t / COME.arrive, 0, 1); r = f.d0 + (f.r - f.d0) * (1 - (1 - k) * (1 - k)); if (k < 1) ang = f.a + Math.PI; }
+      else if (SC.phase === 'leave') { r = f.r + SC.t * 7; ang = f.a; }
+      if (fl) r *= 1 - .6 * Math.sin(Math.PI * clamp(1 - SC.flashT / COME.flash, 0, 1));   // (it turns in past his feet)
+      const x = SC.x + Math.cos(f.a) * r, y = SC.y + Math.sin(f.a) * r;
+      if (SC.phase !== 'circle' && !WATERS[waterSample(x, y, WS3).kind]) continue;   // (coming in or going: not over the bank)
+      fishShape(x, y, ang, f.len, Math.sin(t * 9 + i * 1.7) * .035, fl ? PSV : PSC);
+    }
+    // a friend with the dish in them, in the water: a few at their legs too (view only: their own client has the real school)
+    const Cn = host.feature('coop')?.net;
+    if (Cn?.peers) for (const p of Cn.peers.values()) {
+      if (!p.md) continue; parseCode(p.md, MC); if (MC.id !== 'fish_lingon' || MC.q === 'burnt' || !Cn.sample(p, PS) || !shallow(PS.x, PS.y)) continue;
+      for (let i = 0; i < 4; i++) { const a = t * .6 + i * 1.571 + (p.id | 0), r = .7 + .25 * Math.sin(i * 2.3 + t * .3); fishShape(PS.x + Math.cos(a) * r, PS.y + Math.sin(a) * r, a + Math.PI / 2, .18, Math.sin(t * 9 + i) * .03, PSC); }
+    }
   }
 
   const F = {
     name: 'fishing', label: 'Fishing', on: ON, S,
     get fishing() { return S.phase !== ''; },
+    // E: grab the fish flashing past his feet (the lingon's school, while it circles)
+    onKey(k) {
+      if (k !== 'e' || SC.phase !== 'circle' || !active() || host.lock) return false;
+      SC.press++; return true;
+    },
     // other features' question (briefs/depth-shared.md: fishing draws the fish): the shadows within r m of (x, y) now -> how many;
     // out: your array of {x, y, ang, len} objects, filled from 0 (no more than out.length)
     shadowsNear(x, y, r, out) {
@@ -433,6 +541,8 @@ export async function create(host) {
       for (let i = 0; i < SHK.n && k < out.length; i++) { const s = SH[i]; if (s.vis && Math.hypot(s.x - x, s.y - y) <= r) { const o = out[k++]; o.x = s.x; o.y = s.y; o.ang = s.ang; o.len = s.len; } }
       return k;
     },
+    // (tests) the lingon's school: phase, how many, the one flashing
+    get school() { return SC; },
     // LMB (core/input.js, before the player's own): down -> true when it's the rod's (then its let-go comes here too)
     lmb(down) {
       if (!down) { if (!S.held && S.phase !== 'charge') return false; S.held = false; S.ups++; return true; }
@@ -443,13 +553,15 @@ export async function create(host) {
       const ph0 = S.phase;
       if (!ON) return;
       S.clock += dt; keep(dt);
-      if (!active()) { if (ph0) { S.phase = ''; S.r = null; } S.presses = S.ups = 0; S.held = false; return; }
+      if (!active()) { if (ph0) { S.phase = ''; S.r = null; } S.presses = S.ups = 0; S.held = false; SC.phase = ''; SC.press = 0; return; }
       // the server's word (co-op): the roll for our cast, others' catches
       const c = coop();
       if (c) for (const m of c.mail) {
         if (m.k !== 'fish') continue;
         if (m.a === 'bite' && m.n === S.n && S.phase === 'wait' && !S.r && typeof m.id === 'string' && CATCHES[m.id]) {
           S.r = {id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0, wait: +m.wait || 4, nibbles: Array.isArray(m.nibbles) ? m.nibbles.map(Number) : [], two: !!m.two};
+        } else if (m.a === 'grabbed' && m.n === SC.wait && typeof m.id === 'string' && CATCHES[m.id]) {
+          SC.wait = -1; handCatch({id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0});
         } else if (m.a === 'caught' && m.id !== c.net.id && CATCHES[m.c]) { V.peer = m; V.peerT = 0; ui()?.toast(`${m.name || 'A friend'} caught a ${CATCHES[m.c].name}`, isFish(m.c) ? `${m.cm} cm` : '', RARITY[CATCHES[m.c].rarity]?.col); }
       }
       // presses since the last step, in order: a press, then (maybe) its let-go
@@ -458,6 +570,7 @@ export async function create(host) {
         if (S.ups > 0 && S.presses === 0) { S.ups--; letGo(); }
       }
       findSpots();
+      school(dt);
       if (!S.phase) return;
       S.t += dt;
       const P = host.player;
@@ -535,7 +648,7 @@ export async function create(host) {
         if (VR() < dt * .12 * fade) { spray(sp.x, sp.y, 7, 1.3); ring(sp.x, sp.y, 1); }
       }
       pose(dt);
-      if (active()) { findShadows(); moveShadows(); } else { SHK.n = 0; SHK.slot = -1; }
+      if (active()) { findShadows(); moveShadows(dt); } else { SHK.n = 0; SHK.slot = -1; }
     },
     frame() {
       drawFish();
@@ -593,7 +706,7 @@ export async function create(host) {
     },
     // the HD layer: the prompt, the charge meter, the "!", the fight gauge, the catch card
     hd(q, sc) { drawHD(q, sc); },
-    hud: () => active() ? `fishing ${S.phase || (rod() ? 'rod ready' : 'no rod')} · ${SPK.n} spots${setN >= ANGLER.n ? ' · set' : ''}${S.r ? ' ' + S.r.id + ' ' + S.r.cm + 'cm' : ''}${S.phase === 'fight' ? ` dist ${S.dist.toFixed(2)} strain ${S.strain.toFixed(2)} ${S.surge}` : ''} · ${SHK.n} shadows` : '',
+    hud: () => active() ? `fishing ${S.phase || (rod() ? 'rod ready' : 'no rod')} · ${SPK.n} spots${setN >= ANGLER.n ? ' · set' : ''}${S.r ? ' ' + S.r.id + ' ' + S.r.cm + 'cm' : ''}${S.phase === 'fight' ? ` dist ${S.dist.toFixed(2)} strain ${S.strain.toFixed(2)} ${S.surge}` : ''} · ${SHK.n} shadows${SC.phase ? ` · school ${SC.phase} ${SC.n}` : ''}` : '',
     // (tests) the catch log: {n: {id: count}, best: {id: cm}}
     get log() { return store(); },
     // (tests) the rod and line as drawn this frame (world): hand, tip, bobber

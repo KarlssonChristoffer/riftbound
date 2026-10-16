@@ -16,7 +16,8 @@
 //            perfect, spot, bait): the game offline and the server in co-op draw the same way
 //   SPOT     fishing spots: rises and bubbles on the water (features/fishing.js finds them; a cast into one bites sooner, rarer)
 //            spotAt(a, b, slot, seed, out) (the cell's spot), spotNear(x, y, slot, seed) (the server's check of a cast's word)
-//   SHADOW   the fish you can see under the water: shadowAt(a, b, slot, seed, t, out) (pure: the same fish for everyone)
+//   SHADOW   the fish you can see under the water: shadowAt(a, b, slot, seed, t, out) (pure: the same fish for everyone); COME: the
+//            lingon's fish that come to your legs (a hand grab: roll's o.hand)
 //   BAITS    what goes on the hook (cut from small fish at the pack panel; one a cast while you have it): prey weights
 //   ANGLER   the fishing set: ANGLER.n fishing pieces worn at once give its notes (source 'fishing.set')
 //   castNotes(o) -> notes   the notes a cast is rolled with besides the gear's: the skill's, the set's, the meal's (content/meals.js; the server
@@ -223,14 +224,16 @@ export const catchIcon = id => ICONS[id] ??= CATCHES[id].rows ? {rows: CATCHES[i
 // ---------------------------------------------------------------- the roll: what bites, when, how big
 // rng: () -> [0, 1) (the caller's own seeded generator). o: {water ('lake' | 'stream' | 'river'), part (env.part), rain (bool),
 // deep (m from the shore), luck, find (chances added), size (mul), lure (mul on the wait), night (share off the wait at night),
-// perfect (bool: a perfect cast), spot (bool: cast on a fishing spot: SPOT), bait (a BAITS id: its prey bite more)}
+// perfect (bool: a perfect cast), spot (bool: cast on a fishing spot: SPOT), bait (a BAITS id: its prey bite more), hand (a fish
+// grabbed by hand: COME; no finds, common and fine fish only)}
 // -> {id, cm, kg, wait (s), nibbles: [s ...] (before wait)}
 export function roll(rng, o) {
   const luck = (o.luck || 0) + (o.perfect ? TUNE.cast.luck : 0) + (o.spot ? SPOT.luck : 0), prey = o.bait ? BAITS[o.bait]?.prey : null;
-  const isFind = rng() < TUNE.find + (o.find || 0);
+  const isFind = !o.hand && rng() < TUNE.find + (o.find || 0);
   let total = 0; const pick = [];
   for (const id of CATCH_IDS) {
     const c = CATCHES[id]; if (!!c.find !== isFind || !c.where.includes(o.water)) continue;
+    if (o.hand && (RARITY_TIER[c.rarity] || 0) > 1) continue;   // (a fish grabbed by hand in the shallows: common and fine ones only)
     let w = (RARITY_W[c.rarity] || 1) * Math.pow(1 + Math.max(0, luck), RARITY_TIER[c.rarity] || 0) * (c.when[o.part] ?? 1);
     if (o.rain && c.rain) w *= c.rain;
     if (prey && prey[id]) w *= prey[id];
@@ -290,6 +293,13 @@ export function shadowAt(a, b, slot, seed, t, out) {
   out.hx = hx; out.hy = hy; out.rad = rad;
   return true;
 }
+
+// FISH COME TO YOU (content/meals.js fish_lingon: the 'fish.come' note; features/fishing.js): stand still (under `slow` m/s) in shallow
+// water `still` s and n fish slide in from `from` m out over `arrive` s and circle your shins at `ring` m; when one turns past your
+// feet it flashes silver for `flash` s (one every `turn` s): E then grabs it, no rod (a hand catch: roll's hand: common and fine only).
+// A miss scatters them for `scatter` s. With a rod, a cast within `rod` m of you counts as a fishing spot. Burnt ('fish.come' < 0): they
+// flee you and gather round the nearest other player standing in water within `friend` m. The server takes a grab within `reach` m.
+export const COME = {slow: .3, still: 2, n: [3, 6], from: [8, 12], arrive: 4, ring: [.6, 1.2], flash: .25, turn: [1.1, 2.1], scatter: 5, rod: 4, friend: 15, reach: 1.5, flee: 7};
 
 export const COMMON_FISH = ['perch', 'roach', 'bleak', 'minnow'];
 // BAITS: id -> {name, from (catches it is cut from), n (baits per fish), prey (weight x by catch), desc}

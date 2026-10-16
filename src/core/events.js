@@ -129,6 +129,8 @@ export const EVENTS = {
   'fish.away':          ['features/fishing.js', 'x, y (the line comes in empty)', 'audio'],
   'fish.spot':          ['features/fishing.js', 'x, y (the cast fell on a fishing spot: it bites sooner and rarer)', 'audio'],
   'fish.bait':          ['features/fishing.js', 'x, y, id (bait cut from a small fish at the pack panel)', 'audio'],
+  'fish.gather':        ['features/fishing.js', 'x, y (him), n: the lingon\'s fish come to his legs (content/fishing.js COME)', 'audio'],
+  'fish.grab':          ['features/fishing.js', 'x, y, ok (false: a miss, they scatter): a hand into the water for the fish flashing past his feet', 'audio'],
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
@@ -210,11 +212,12 @@ export const EVENTS = {
   'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],
   'forage.grow':        ['features/forage.js',    'x, y, i, kind: a picked patch has grown back', '(none yet)'],
   // mining (features/mining.js, docs/MINING.md): a vein is the cave's (world/caves.js C.veins index i)
-  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow)', 'mining (view: sparks, grit), audio'],
+  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow), ring (the ringing pick: it rings on)', 'mining (view: sparks, grit), audio'],
   'mine.spent':         ['features/mining.js',    'x, y, i, kind, n (his chunks; 0: a friend\'s blow spent it): the vein breaks open', 'mining (view: dust), audio'],
   'mine.chunk':         ['features/mining.js',    'x, y, item: a chunk picked up off the floor', 'audio'],
   'mine.grow':          ['features/mining.js',    'x, y, i, kind: a spent vein has come back', '(none yet)'],
   'mine.take':          ['features/mining.js',    'x, y: he took the old pick from the miner\'s camp', 'audio'],
+  'mine.echo':          ['features/mining.js',    'x, y, h (where the answer comes from: the vein, or burnt, the point mirrored through him), kind (its vein\'s), d (m from the blow), k (1 near .. .15 far): a vein answers the ringing pick (content/mining.js RING)', 'mining (view: grit), audio'],
   'mine.open':          ['features/mining.js',    'x, y (its mouth), i (the vein), cx, cy (the room): a hollow wall caved in; its sealed room is open (his cache on its floor)', 'audio, cavelife (view: dust)'],
   // the living dark (features/caves.js, features/cavelife.js, docs/CAVELIFE.md)
   'lantern.toggle':     ['features/caves.js',     'x, y, on: L put his lantern out or lit it again, down in the cave', 'audio'],
@@ -235,7 +238,7 @@ export const EVENTS = {
   'tree.logs':          ['features/woodcut.js',   'x, y, who, n: the fallen trunk breaks into n logs', 'woodcut (view: dust), audio'],
   'tree.grow':          ['features/woodcut.js',   'x, y, who: a stump has grown back into its tree', '(none yet)'],
   'tool.hit':           ['features/woodcut.js',   'x, y, who, kind (body | a prop kind): a tool\'s swing meets a foe or a dummy', 'audio'],
-  'tool.whiff':         ['features/woodcut.js',   'x, y: a tool\'s swing at nothing', 'audio'],
+  'tool.whiff':         ['features/woodcut.js',   'x, y: a tool\'s swing at nothing (features/mining.js too: ring, the ringing pick rings on)', 'audio'],
   'bells.toll':         ['features/bells/view.js (a view: nothing in the sim listens)', 'x, y, h, k (0..1), note, who (the bell): its clapper strikes it again as it swings', 'audio (its note, softer)'],
 };
 
