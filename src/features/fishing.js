@@ -20,12 +20,10 @@
 // FISHING SPOTS (content/fishing.js SPOT): rises and bubbles on the water, a few in reach, moving every SPOT.slot s on the
 // world's clock (co-op: the server's, so friends see the same ones); a cast into one bites sooner and rarer, and a catch from
 // it spends it (for you). BAIT (BAITS): cut from small fish at the pack panel; one goes on the hook a cast while you have it.
-// FISH SHADOWS (content/fishing.js SHADOW, shadowAt; briefs/depth-shared.md: the one drawing of fish under the water): the nearest
-// SHADOW.n fish round him, each a dark shape on a slow loop round its home, the same for everyone (the seed and the clock). Others
-// ask F.shadowsNear(x, y, r, out); they never draw their own. FISH COME TO YOU (COME; content/meals.js fish_lingon's 'fish.come'
-// note > 0): stand still in shallow water and a few come and circle your shins; E grabs the one flashing past your feet (a hand
-// catch: roll's o.hand; co-op: the server's 'grab'). Burnt (< 0): the shadows flee you, and a friend in water within COME.friend
-// of you gets your school. A friend with the dish has a few circling their legs too (view only).
+// FISH COME TO YOU (COME; content/meals.js fish_lingon's 'fish.come' note > 0): stand still in shallow water and a few come and
+// circle your shins; E grabs the one flashing past your feet (a hand catch: roll's o.hand; co-op: the server's 'grab'). Burnt
+// (< 0): the fish shadows flee you (F.shadowsFlee: the skill-verbs build's shadows, briefs/depth-shared.md: one drawing), and a
+// friend in water within COME.friend of you gets your school. A friend with the dish has a few circling their legs too (view only).
 // MEALS: fish cooked at a burning campfire (features/meals.js owns them: the Cook list, the buff, its timer chip; a cast tells the
 // server the meal eaten). THE ANGLER'S SET: ANGLER.n fishing pieces worn (source 'fishing.set'). THE
 // JOURNAL: the pack panel's Fish part (pack.section): every catch with its count and record, the ones not caught yet as
@@ -43,7 +41,7 @@
 //   Spots: found again only when he crosses a 7 m cell or the slot turns (~a dozen hashes and waterSamples), a few points each.
 //   Shadows: found again when he crosses a 5 m cell or the slot turns (~120 hashes, a few dozen waterSamples); 8 x 5 points a
 //   frame. The school (lingon): a few multiplies a step while it's there, 6 x 5 points.
-import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, SHADOW, COME, BAITS, ANGLER, COMMON_FISH, roll, catchIcon, isFish, spotAt, shadowAt, hintOf} from '../content/fishing.js';
+import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, COME, BAITS, ANGLER, COMMON_FISH, roll, catchIcon, isFish, spotAt, hintOf} from '../content/fishing.js';
 import {codeOf, parseCode} from '../content/meals.js';
 import {gearById, RARITY} from '../content/gear.js';
 import {flags} from '../core/flags.js';
@@ -103,41 +101,7 @@ export async function create(host) {
     return null;
   }
 
-  // ---------------------------------------------------------------- the fish under the water (content/fishing.js SHADOW, shadowAt)
-  // the nearest SHADOW.n cells round him holding a fish this slot (its home in water far enough from the bank), found again when he
-  // crosses a cell or the slot turns; where each swims now is shadowAt's (the clock: the same for everyone). View only.
-  const NSH = SHADOW.n, SH = [], SHQ = {x: 0, y: 0, a: 0, len: 0, hx: 0, hy: 0, rad: 0}, SHK = {cx: 1e9, cy: 1e9, slot: -1, n: 0};
   const WS3 = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
-  for (let i = 0; i < NSH; i++) SH.push({a: 0, b: 0, d: 0, x: 0, y: 0, ang: 0, len: .2, ox: 0, oy: 0, vis: true});
-  function findShadows() {
-    const P = host.player, cx = Math.floor(P.x / SHADOW.cell), cy = Math.floor(P.y / SHADOW.cell), slot = Math.floor(clockNow() / SHADOW.slot);
-    if (cx === SHK.cx && cy === SHK.cy && slot === SHK.slot) return;
-    SHK.cx = cx; SHK.cy = cy; SHK.slot = slot;
-    const r = Math.ceil(SHADOW.r / SHADOW.cell), seed = (SESSION.seed ?? 0) | 0; let n = 0;
-    for (let a = cx - r; a <= cx + r; a++) for (let b = cy - r; b <= cy + r; b++) {
-      if (!shadowAt(a, b, slot, seed, 0, SHQ)) continue;
-      const d = Math.hypot(SHQ.hx - P.x, SHQ.hy - P.y); if (d > SHADOW.r || (n === NSH && d >= SH[n - 1].d)) continue;
-      waterSample(SHQ.hx, SHQ.hy, WS3); if (!WATERS[WS3.kind] || (WS3.edge || 0) < SHADOW.edge + SHQ.rad) continue;
-      let j = n < NSH ? n++ : NSH - 1; const s = SH[j]; s.a = a; s.b = b; s.d = d; s.ox = s.oy = 0; s.vis = true;
-      while (j > 0 && SH[j - 1].d > SH[j].d) { const t = SH[j - 1]; SH[j - 1] = SH[j]; SH[j] = t; j--; }   // (kept nearest first)
-    }
-    SHK.n = n;
-  }
-  const shadowFade = () => { const t = clockNow() % SHADOW.slot; return clamp(Math.min(t, SHADOW.slot - t) / SHADOW.fade, 0, 1); };
-  // where each swims now; with the burnt dish in him and his feet in the water they dart off to COME.flee m from him
-  function moveShadows(dt) {
-    const t = clockNow(), seed = (SESSION.seed ?? 0) | 0, P = host.player, flee = come < 0 && shallow(P.x, P.y);
-    for (let i = 0; i < SHK.n; i++) {
-      const s = SH[i]; shadowAt(s.a, s.b, SHK.slot, seed, t, SHQ);
-      let tx = 0, ty = 0;
-      if (flee) { const dx = SHQ.x - P.x, dy = SHQ.y - P.y, d = Math.hypot(dx, dy); if (d < COME.flee && d > .01) { const k = (COME.flee - d) / d; tx = dx * k; ty = dy * k; } }
-      const e = 1 - Math.exp(-(flee ? 6 : 1.5) * dt); s.ox += (tx - s.ox) * e; s.oy += (ty - s.oy) * e;
-      s.x = SHQ.x + s.ox; s.y = SHQ.y + s.oy; s.len = SHQ.len;
-      const off = Math.abs(s.ox) + Math.abs(s.oy) > .3;
-      s.ang = off ? Math.atan2(s.oy, s.ox) : SHQ.a;
-      s.vis = !off || !!WATERS[waterSample(s.x, s.y, WS3).kind];   // (driven off: not onto the bank)
-    }
-  }
 
   // ---------------------------------------------------------------- the cursor on the water (world), as the sim reads it
   const CW = {x: 0, y: 0, d: 0, ok: false}, WS = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
@@ -493,8 +457,8 @@ export async function create(host) {
     }
   }
 
-  // the fish under the water: dark shapes (five points along its way, the tail wagging); the lingon's school, its flash silver
-  const PSH = [{size: 1, alpha: .5}, {size: 2, alpha: .42}], PSC = [{size: 1, alpha: .6}, {size: 2, alpha: .5}], PSV = [{size: 1, alpha: .95, emit: true}, {size: 2, alpha: .95, emit: true}];
+  // the lingon's school: dark shapes (five points along its way, the tail wagging), its flash silver
+  const PSC = [{size: 1, alpha: .6}, {size: 2, alpha: .5}], PSV = [{size: 1, alpha: .95, emit: true}, {size: 2, alpha: .95, emit: true}];
   function fishShape(x, y, ang, len, wig, o) {
     const h = host.elev(x, y) + .012, cx = Math.cos(ang), cy = Math.sin(ang), c = o === PSV ? COL.silver : COL.shade;
     for (let k = 0; k < 5; k++) {
@@ -504,11 +468,7 @@ export async function create(host) {
   }
   function drawFish() {
     if (!active()) return;
-    const t = performance.now() / 1000, fade = shadowFade();
-    if (fade > 0) {
-      PSH[0].alpha = .5 * fade; PSH[1].alpha = .42 * fade;
-      for (let i = 0; i < SHK.n; i++) { const s = SH[i]; if (s.vis) fishShape(s.x, s.y, s.ang, s.len, Math.sin(t * 6 + i * 2.1) * .03, PSH); }
-    }
+    const t = performance.now() / 1000;
     if (SC.phase) for (let i = 0; i < SC.n; i++) {
       const f = SF[i], fl = i === SC.flash; let r = f.r, ang = f.a + Math.sign(f.w) * Math.PI / 2;
       if (SC.phase === 'come') { const k = clamp(SC.t / COME.arrive, 0, 1); r = f.d0 + (f.r - f.d0) * (1 - (1 - k) * (1 - k)); if (k < 1) ang = f.a + Math.PI; }
@@ -533,13 +493,6 @@ export async function create(host) {
     onKey(k) {
       if (k !== 'e' || SC.phase !== 'circle' || !active() || host.lock) return false;
       SC.press++; return true;
-    },
-    // other features' question (briefs/depth-shared.md: fishing draws the fish): the shadows within r m of (x, y) now -> how many;
-    // out: your array of {x, y, ang, len} objects, filled from 0 (no more than out.length)
-    shadowsNear(x, y, r, out) {
-      let k = 0;
-      for (let i = 0; i < SHK.n && k < out.length; i++) { const s = SH[i]; if (s.vis && Math.hypot(s.x - x, s.y - y) <= r) { const o = out[k++]; o.x = s.x; o.y = s.y; o.ang = s.ang; o.len = s.len; } }
-      return k;
     },
     // (tests) the lingon's school: phase, how many, the one flashing
     get school() { return SC; },
@@ -648,7 +601,7 @@ export async function create(host) {
         if (VR() < dt * .12 * fade) { spray(sp.x, sp.y, 7, 1.3); ring(sp.x, sp.y, 1); }
       }
       pose(dt);
-      if (active()) { findShadows(); moveShadows(dt); } else { SHK.n = 0; SHK.slot = -1; }
+      if (active() && come < 0 && shallow(host.player.x, host.player.y)) F.shadowsFlee?.(host.player.x, host.player.y, COME.flee);   // (burnt lingon: the shadows dart off)
     },
     frame() {
       drawFish();
@@ -706,7 +659,7 @@ export async function create(host) {
     },
     // the HD layer: the prompt, the charge meter, the "!", the fight gauge, the catch card
     hd(q, sc) { drawHD(q, sc); },
-    hud: () => active() ? `fishing ${S.phase || (rod() ? 'rod ready' : 'no rod')} · ${SPK.n} spots${setN >= ANGLER.n ? ' · set' : ''}${S.r ? ' ' + S.r.id + ' ' + S.r.cm + 'cm' : ''}${S.phase === 'fight' ? ` dist ${S.dist.toFixed(2)} strain ${S.strain.toFixed(2)} ${S.surge}` : ''} · ${SHK.n} shadows${SC.phase ? ` · school ${SC.phase} ${SC.n}` : ''}` : '',
+    hud: () => active() ? `fishing ${S.phase || (rod() ? 'rod ready' : 'no rod')} · ${SPK.n} spots${setN >= ANGLER.n ? ' · set' : ''}${S.r ? ' ' + S.r.id + ' ' + S.r.cm + 'cm' : ''}${S.phase === 'fight' ? ` dist ${S.dist.toFixed(2)} strain ${S.strain.toFixed(2)} ${S.surge}` : ''}${SC.phase ? ` · school ${SC.phase} ${SC.n}` : ''}` : '',
     // (tests) the catch log: {n: {id: count}, best: {id: cm}}
     get log() { return store(); },
     // (tests) the rod and line as drawn this frame (world): hand, tip, bobber

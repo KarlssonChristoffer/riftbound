@@ -133,8 +133,8 @@ fishing.
   checks the spot against its own clock and the hash, and counts the set from what you wear.
 - **A hand grab** (the lingon's fish: docs/COOKING.md) asks the server (`grab`); it checks the meal codes and rolls a common
   or fine fish (`roll`'s `hand`).
-- **Fish shadows** (`SHADOW`, `shadowAt`): the fish you can see under the water are the same for everyone (the seed and
-  the clock); other features ask `features/fishing.js` `shadowsNear`.
+- **Fish shadows** come from the skill-verbs build (PR #27, docs/SKILLS.md); burnt lingon makes them dart away from you
+  (`shadowsFlee`).
 - Not yet: others seeing your line, bobber and fish; the server checking the pouch (bait and meals are the client's word,
   like the Fishing level).
 

@@ -73,7 +73,7 @@ One meal at a time (a new one replaces it; the broth's trip stacks on top). Ever
 | Fried chanterelles | **The ringing pick.** Every pick blow rings, and each unspent vein within 14 m answers from where it is, 40 ms a metre later, quieter further off: stone a dull tok, copper a ting, iron a bell, a night vein a two-note chord, a hollow wall a hollow knock. A little grit sifts where it answers. | The answers come from the point mirrored through you: to find the copper, walk away from the ting. |
 | Smoked eel | **Eel eyes.** In the dark you see: a cold green-grey wash on the ground out to about 11 m, the colours a little colder. A lit lantern or a burning fire within 5 m (yours or a friend's) fades it out in 1.5 s; it comes back 3 s after. The night veins still show. | Eel eyes, and your eyes shine: two green dots friends see. The cave's soot things go for you as if your lantern burned. |
 | Blueberry soup | **Blue fingers.** Every step leaves a purple print that glows in the dark and fades over 60 s. Friends see them. | The prints point backwards. |
-| Fish with lingon | **Fish come to you.** Stand still in shallow water for 2 s: 3-6 fish slide in from 8-12 m over 4 s and circle your shins. When one turns past your feet it flashes silver for 250 ms: **E** grabs it (common and fine fish only). A miss scatters them for 5 s. With a rod, a cast within 4 m of you counts as a fishing spot. | The fish flee you, and gather round a friend standing in water within 15 m, who can grab them. |
+| Fish with lingon | **Fish come to you.** Stand still in shallow water for 2 s: 3-6 fish slide in from 8-12 m over 4 s and circle your shins. When one turns past your feet it flashes silver for 250 ms: **E** grabs it (common and fine fish only). A miss scatters them for 5 s. With a rod, a cast within 4 m of you counts as a fishing spot. | The fish shadows dart away from you (once the skill-verbs build's shadows are in), and the school gathers round a friend standing in water within 15 m, who can grab them. |
 | Pike stew | **Heavy as a pike.** You walk a little slower, start and stop slowly, turn in an arc instead of snapping round; the wind and the river push you much less, a knock moves you less; heavy footfalls and dust. | **Light as ash.** You turn and start fast, the wind and the river take you, knocks throw you, your steps are silent and animals notice you later. |
 | Fly agaric broth | The trip, as before. | **The still.** The colours drain toward grey, nothing sways, every animal within 40 m stops and stares at you, no Watcher. |
 | Fish on a stick, Angler's soup, Trout in birch bark, Salmon on a plank | Their old numbers (no mood of their own yet). | **Smoked out:** a thin smoke trail follows you and animals notice you from twice as far. |
@@ -98,7 +98,6 @@ One meal at a time (a new one replaces it; the broth's trip stacks on top). Ever
 | eel sight: darkness, reach, colour, fade | dark > .55, 11 m, out 1.5 s, back 3 s | `render/lighting.js` EEL |
 | blue fingers: colour, life | #b070ff, 60 s | `features/meals.js` LOOK.glow |
 | lingon: still time, fish, distances, flash, scatter | 2 s, 3-6, 8-12 m, 250 ms, 5 s | `content/fishing.js` COME |
-| the fish shadows under the water | 8 within 25 m | `content/fishing.js` SHADOW |
 | pike / ash numbers | walk x.9, start/stop x.5, turn x.4, wind x.25, river x.3, knock x.4 / turn x1.8, start/stop x1.6, wind x2, river x2, knock x2, noticed x.6 | `content/meals.js` HEAVY, ASH |
 | how fast a heavy turn swings round | 600 deg/s x the turn note | `sim/player/player.js` HEAVY_TURN |
 | the still: grey, the stare reach | 40 m | `features/trip.js` STILL, `features/fauna.js` TUNE.still |
@@ -135,7 +134,7 @@ Esc > Sandbox:
 - The pack panel's hooks (`ui/packpanel.js`): a recipe's `shown()` (the Cook list's unknown dishes) and a section's `click()`
   (the Cook journal's Try stick).
 - Each mood's owner: `features/mining.js` (mine.ring), `render/lighting.js` (light.nightEye), `features/fishing.js`
-  (fish.come; the shadows), `sim/player/player.js` + `adapter.js` (player.turn, player.knock, player.current),
+  (fish.come; burnt, it calls the skill-verbs build's F.shadowsFlee), `sim/player/player.js` + `adapter.js` (player.turn, player.knock, player.current),
   `features/fauna.js` (fauna.loud), `features/trip.js` (the still), `features/prints.js` (the prints, the weather build's).
 
 Not yet: moods for the four other fishing meals (ideas in the brief).
