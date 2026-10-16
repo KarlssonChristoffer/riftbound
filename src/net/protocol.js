@@ -20,7 +20,8 @@
 //            dawn | day | dusk | night: dev, the world's clock to the next such hour), 'ignite' (id: a tree he touched a burning
 //            brand to: ?firestart=1, docs/WEATHER.md), 'wood' (id: a struck tree whose splinter of thunderwood he took), 'hole' ({x, y, b}: a hole
 //            in the lake ice: a pick's or an axe's last blow, b 1: he went through; docs/WINTER.md), 'dig' (id: 'w' + the
-//            night: he dug at the night's find where the true wisp stopped, docs/MIRE.md). The workshop's (docs/WORKSHOP.md):
+//            night: he dug at the night's find where the true wisp stopped, docs/MIRE.md), 'cloud' (id: 'x' + the wrong
+//            weather's event, w: ask | pass | lose, to: a friend's id; the following cloud, docs/WEATHER.md). The workshop's (docs/WORKSHOP.md):
 //            'make' {id: the anvil's build id ('' by hand), r: the recipe (content/workshop.js SMITH / HAND), haft, inlay, dev?};
 //            a 'fell' and a 'mine' carry u (the tool's record) and a 'fell' old (1: an old oak) for the counts. The animals
 //            (server/animals.mjs): 'rope' (id: the plan's animal id: claim it, first wins), 'free' {x, y, how}, 'calm' {at: the
