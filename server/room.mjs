@@ -16,6 +16,8 @@
 // out in the snapshots (sn: [x, y, h, mode] each). And THE WORKSHOP (docs/WORKSHOP.md: server/workshop.mjs): every made thing's
 // record (kept by the browser's key: server/players.mjs), counted from the 'fell' and 'mine' acts that carry its uid; the
 // furnaces' heat and charges; fire-setting (an iron vein cracked by a fire burning by it: 'k' + its index in the world).
+// out in the snapshots (sn: [x, y, h, mode] each). And the forest's ANIMALS where someone touches them (server/animals.mjs: a claim
+// on the one on someone's rope, a calmed roe, a find), the held one's place in its holder's snapshot row (an).
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
 //   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log, workshop: {heat, smelt, wardrobe}}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
@@ -32,6 +34,7 @@ import {TUNE as ICE} from '../src/content/ice.js';
 import {createLake, thickAt, refreezeAt} from '../src/sim/ice.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
+import {createAnimals} from './animals.mjs';
 import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
 import {createPlayers} from './players.mjs';
@@ -62,18 +65,20 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
   // THE WORKSHOP: the made things' records (by the browser's key), the furnaces (server/workshop.mjs)
   const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players, veins, heat: workshop.heat, smelt: workshop.smelt, wardrobe: !!workshop.wardrobe});
+  const animals = createAnimals({world, all, send: (p, m) => p.conn.send(encode(m)), log: (...a) => log(...a), now, clock});
 
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
-    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
+    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null, an: null,
       fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, lt: 0, md: ''};
     const made = ws.hello(p, m);   // (his records: the server's, the hello's copy filling in)
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
       clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null, made}));
     peers.set(id, p);
     others(p, {k: 'join', p: pub(p)});
+    animals.joined(p);
     log(`+ ${p.name} (#${id}) from ${conn.ip} · ${peers.size} in the room`);
     return p;
   }
@@ -96,6 +101,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     p.lt = m.lt === 1 || m.lt === 2 ? m.lt : 0; p.lit = p.lt > 0;   // (his lantern burns in the cave, 2: a burnt eel's shining eyes: sim/cavelife.js reads p.lit)
     p.md = str(m.md, 24);   // (the meal in him: content/meals.js codeOf; friends see its mood, the fishing grab checks it)
     p.bd = num(m.bd, 0) & 0x7ff;   // (his body's look: content/body.js packBody, passed on in the snapshots)
+    p.an = animals.an(m.an, p);   // (the animal on his rope: server/animals.mjs checks it's his claim)
     p.fresh = true;
   }
 
@@ -115,6 +121,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const h = clock(), d0 = Math.floor(h / 24) * 24; h0 = d0 + ph + (ph < h - d0 ? 24 : 0); c0 = now();
       all(clockMsg()); log(`  ${p.name} set the clock to ${id}`); return;
     }
+    if (animals.act(p, a, m, id, deny)) return;   // rope, free, calm, find (server/animals.mjs)
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
     if (a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon') return build(p, a, m, id, t, deny);
@@ -429,7 +436,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     };
     conn.onclose = () => {
       if (!p) return;
-      peers.delete(p.id); others(p, {k: 'leave', id: p.id});
+      peers.delete(p.id); others(p, {k: 'leave', id: p.id}); animals.left(p);
       log(`- ${p.name} (#${p.id}) · ${peers.size} in the room`);
       p = null;
     };
@@ -437,11 +444,13 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
 
   // THE TICK: everyone's latest state to everyone (a client skips its own row); a pose goes out only when it changed
   const DT = 1 / TICK_HZ;
+  let anT = 0;
   const timer = setInterval(() => {
     if (!peers.size) return;
     regrowTick(DT);
     thunderTick(DT);
     ws.tick(DT);
+    if ((anT += DT) >= 1) { anT = 0; animals.tick(); }   // (lapsed claims, past calms)
     // the uncanny forest: the secrets' clocks and the heron's ring, the night elk (the placed players only)
     let c = 0;
     if (unc) {
@@ -461,7 +470,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const rows = [];
     for (const p of peers.values()) {
       if (!p.placed) continue;
-      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lt || 0, p.md || '', p.bd | 0]);
+      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lt || 0, p.md || '', p.bd | 0, p.an || 0]);
       p.wNew = false;
     }
     if (rows.length) { const m = {k: 'snap', t: now(), p: rows}; if (c) m.c = c; if (sn) m.sn = sn; all(m); }

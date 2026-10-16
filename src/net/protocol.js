@@ -12,14 +12,17 @@
 //            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport,
 //            lt = 1 his lantern burns in the cave (2: a burnt eel's shining eyes, only the soot things take it), md = the meal in him
 //            (content/meals.js codeOf: 'fish_lingon', 'pike_stew!' burnt, 'smoked_eel~' underdone; '' none), bd = his body's look
-//            (content/body.js packBody: wet, cold, sunk, knocked down)
+//            (content/body.js packBody: wet, cold, sunk, knocked down), an = the animal on his rope [id, x, y, heading, mode] or
+//            absent (features/rope.js; the server keeps it only while it's his claim: server/animals.mjs)
 //   act      {a, id}                                      ask the server to change the shared world: a 'fell' (id: a forest tree),
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
 //            dawn | day | dusk | night: dev, the world's clock to the next such hour), 'ignite' (id: a tree he touched a burning
 //            brand to: ?firestart=1, docs/WEATHER.md), 'wood' (id: a struck tree whose splinter of thunderwood he took), 'hole' ({x, y, b}: a hole
 //            in the lake ice: a pick's or an axe's last blow, b 1: he went through; docs/WINTER.md). The workshop's (docs/WORKSHOP.md):
 //            'make' {id: the anvil's build id ('' by hand), r: the recipe (content/workshop.js SMITH / HAND), haft, inlay, dev?};
-//            a 'fell' and a 'mine' carry u (the tool's record) and a 'fell' old (1: an old oak) for the counts
+//            a 'fell' and a 'mine' carry u (the tool's record) and a 'fell' old (1: an old oak) for the counts. The animals
+//            (server/animals.mjs): 'rope' (id: the plan's animal id: claim it, first wins), 'free' {x, y, how}, 'calm' {at: the
+//            hour} (a roe), 'find' (id: 'fur:' + hare + ':' + day)
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
@@ -34,7 +37,7 @@
 //            peers = [peer], clock (below), unc = {sec: {id: {s, by, n}}, shift} (the uncanny forest: its secrets' states, the
 //            night shift's strength: docs/UNCANNY.md; null when the server runs without it), made = his records (server/workshop.mjs)
 //   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn, g (the gear worn)}
-//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0, lt, md, bd], ...], c?}   every tick; w only when it changed since the last snap;
+//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0, lt, md, bd, an|0], ...], c?}   every tick; w only when it changed since the last snap;
 //            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
 //   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it. A tree the
@@ -47,7 +50,8 @@
 //            in-game hours since the start (sim/env.js E.t), going on at rate hours per ms (0: stopped). In welcome too
 //   sec      {id, s, by, n}                              a secret's state changed (sleeping / awake / triggered / spent), by =
 //            who opened it (ids), n = on which night
-//   ev       {a: 'knock', id, vx, vy}                    the night elk knocked player id down (vx, vy m/s): they drop something
+//   ev       {a: 'knock', id, vx, vy}                    the night elk knocked player id down (vx, vy m/s): they drop something;
+//            {a: 'rope', id, by} / {a: 'free', id, by, x, y, how}: animal id is on player by's rope / let go there (server/animals.mjs)
 //   deny     {a, id, why}                                an act refused
 //   gear     {id, g}                                     what a player wears now (to everyone, the wearer too: his set as
 //                                                        the server took it; docs/GEAR.md)

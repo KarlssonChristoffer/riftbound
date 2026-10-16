@@ -129,6 +129,16 @@ export const ITEMS = {
     tool: {job: 'chop', tier: 2, power: 1.25},
     icon: ['.........ss.', '.......iiis.', '....wiiiiis.', '....hiiiiis.', '...wh.kiiis.', '...wh....ss.',
       '..wh........', '..wh........', '.wh.........', '.wh.........', 'wh..........', 'wh..........']},
+  // THE ANIMALS FOR REAL (features/rope.js, docs/FAUNA.md "The Lasso"): the bag Lasso (F: spin, let go: throw) and what the
+  // forest's animals leave you without anything dying
+  lasso: {name: 'Lasso', kind: 'tool', stack: 1, col: '#c8a876', desc: 'a coil of hemp rope with a running loop; hold F to spin it, let go to throw',
+    tool: {job: 'rope', tier: 1, power: 1}, pal: {a: '#c8a876', m: '#9a7c50', z: '#6a5234'},
+    icon: ['............', '....aaaa....', '..aammmmaa..', '.am......ma.', '.a..aaaa..m.', 'am.am..ma.mz', 'am.a....a.mz', '.a.am..ma.z.',
+      '.am.aaaa.mz.', '..amm..mmz..', '...zzaazz.m.', '..........mz']},
+  hare_fur: {name: 'Hare Fur', kind: 'material', col: '#e4e2dc', desc: 'a soft tuft of hare fur, shed in its moult; it came off in your hands',
+    pal: {a: '#f2f0ea', m: '#cfcbc0', z: '#9c968a'},
+    icon: ['............', '............', '.....a......', '...aaam.a...', '..aaammaam..', '.aaammmmmma.', '.aammmzmmma.', '..ammzzmmz..',
+      '...mmzzmz...', '....z..z....', '............', '............']},
 };
 // THE CATCHES (content/fishing.js): every fish and find is a material: it goes in the pouch
 for (const id of CATCH_IDS) {
@@ -139,7 +149,7 @@ for (const id of CATCH_IDS) {
 for (const id in BAITS) { const b = BAITS[id]; ITEMS[id] = {name: b.name, kind: 'material', col: '#d89a8a', desc: b.desc, icon: b.icon, pal: b.pal, bait: true}; }
 
 // the kit a new world starts with (the bag: tools, food; the pouch: materials)
-export const START_KIT = [['axe', 1]];
+export const START_KIT = [['axe', 1], ['lasso', 1]];   // (the Lasso: old saves get one once, features/rope.js)
 
 export const itemDef = id => ITEMS[id] || null;
 // the logs (every species': a cost of 'wood' takes any of them)

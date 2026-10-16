@@ -85,6 +85,8 @@ export const FLAG_DOCS = {
   riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', grass: '0: no grass (features/grass.js)', wildlife: '0: no wildlife', wildfight: '0: wildlife ignores fights (no flush, no scavengers at kills, no coyotes / fox / wolves at night; features/wildlife/fightlife.js; menu > Dev > Fight reactions)', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   fauna:     '0: no forest animals (features/fauna.js: roe deer, fox, hares, squirrels, ravens, capercaillie; docs/FAUNA.md)',
+  livefauna: '0: the forest animals as looks only, as before the "for real" brief (the bag Lasso doesn\'t catch them; the tracks still: ?tracks=0); docs/FAUNA.md',
+  mud:       '1: the forest\'s ground counts as wet now and doesn\'t dry (features/mud.js: everything that walks leaves prints in the soft patches; today\'s morning trails are laid)',
   watcher:   '0: no watcher (features/watcher.js: the one-eyed toadstool that peeks at you from behind trees); often: every few seconds (testing)',
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
   livefoes: '0: the desert gunmen drawn from their 16-facing sprite atlases instead of LIVE (their Blender models through render/rigmesh.js with every atlas pose and clip: view/livebody.js, features/foes/look.js; the aim twists procedural)',
