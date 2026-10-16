@@ -1149,7 +1149,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // hooks for features: card(it, sp) -> {sway (px at the top), em (a live emit canvas, re-uploaded every frame)} | null
   //   mesh(it) -> {x, y (the lean at the top, metres, arena axes), shake (art px along the screen's x), flut (art px: the
   //   leaf clumps' own dance), wx, wy (the wind's direction, arena axes), ph (rad), wave (tone bias)} | null: 3D trees
-  const hooks = {card: null, mesh: null};
+  //   near(x, y, r, out) -> out: the registry's "what's here" (host.entities.near, set by world/stage.js): treeHit's candidates
+  const hooks = {card: null, mesh: null, near: null};
+  const NEAR = [], TREE = {x: 0, y: 0, z: 0, pose: null};   // (treeHit's scratch)
   const M = new THREE.Matrix4();
   // a 3D tree's lean on screen: art px (x right, y toward the camera), held until it moves TREE_HYST px (no 1 px flicker
   // at a threshold, like the cards' hysteresis); the shader rounds it per vertex by the baked weights. The leaves dance on
@@ -1320,10 +1322,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     // an arrow's step (arena coords) against the 3D trees' trunks and big limbs -> {x, y, h, prop} where it sticks | null.
     // A 3D tree stops arrows only there (its round collider is for walking; the crown lets arrows through)
+    // Its candidates: the props near the step's end, from the registry's grid (4.25 m reaches the 3 m box's corners), not
+    // a walk over every item a step
     treeHit(x0, y0, h0, x1, y1, h1) {
-      for (const it of items) {
-        const p = it.p; if (!it.pose || !it.live || p.gone || Math.abs(p.x - x1) > 3 || Math.abs(p.y - y1) > 3) continue;
-        const q = boneHit({x: p.x, y: p.y, z: p.z || 0, pose: it.pose}, x0, y0, h0, x1, y1, h1); if (q) { q.prop = p; return q; }
+      const near = hooks.near?.(x1, y1, 4.25, NEAR) || props;
+      for (const p of near) {
+        const it = byProp.get(p); if (!it || !it.pose || !it.live || p.gone || Math.abs(p.x - x1) > 3 || Math.abs(p.y - y1) > 3) continue;
+        TREE.x = p.x; TREE.y = p.y; TREE.z = p.z || 0; TREE.pose = it.pose;
+        const q = boneHit(TREE, x0, y0, h0, x1, y1, h1); if (q) { q.prop = p; return q; }
       }
       return null;
     },
