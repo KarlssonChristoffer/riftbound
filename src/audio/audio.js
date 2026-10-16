@@ -936,6 +936,9 @@ function makeBed(E, id, t0) {
   return {
     out,
     update(env, t) {
+      // (30 times a second, not every frame: its params glide on .15-.6 s time constants, so it sounds the same, and every set is
+      // a native call into the audio thread's timeline: ~3% of the main thread at a high frame rate)
+      if (t >= st.last && t - st.last < 1 / 30) return;
       const dt = clamp(t - st.last, 0, .5); st.last = t; st.lfo += dt;
       if (typeof env.gust === 'number') st.gT = clamp(env.gust, 0, 1);          // the arena's wind (wind.js): hear what you see
       else if (t > st.gNext) { st.gT = R() ** 1.3; st.gNext = t + RR(2, 6); }   // no wind module: gusts are a slow random walk

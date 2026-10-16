@@ -55,7 +55,6 @@ import {mulberry32, simSeed, viewRandom, nameHash} from '../core/rng.js';
 import {waterSample} from '../world/world.js';
 import {hdUnit as U, hdFrame as frame9, hdText as text, hdFontOK, INK} from '../ui/hdpixel.js';
 import {iconURL} from '../ui/packpanel.js';
-import {HERON, CALL, heronRoll, callAt} from '../content/keepsakes.js';   // (the Heron Feather's jab and its called fish: below)
 
 const ON = flags.get('fishing') !== '0';
 const TUNE_NET = {ask: 2.5};   // s to wait for the server's roll before rolling here

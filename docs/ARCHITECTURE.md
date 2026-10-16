@@ -301,6 +301,8 @@ src/
                          paint, a piece tuner, stats as 'wardrobe' notes, items, saved outfits; docs/GEAR.md), studio.js (its
                          scene: a renderer of its own, a copy of the character who turns on the stage), stage.js (the stage +
                          backdrop)
+                         devmenu.js (the dev menu, F10 in dev mode: a page per feature with its on / off, settings, F.menu
+                         test actions and F.dev rows, in sections, with search and pins; docs/DEVMENU.md)
   vendor/three/          three.js 0.170.0
 ```
 
