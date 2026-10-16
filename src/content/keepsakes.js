@@ -13,8 +13,8 @@
 //                  features/caves.js), watcher.every (x the watcher's wait between visits: features/watcher.js)
 //   HERON          the Heron Feather: stand still in shallow water and fish shadows rise round your feet; E jabs for one
 //                  heronRoll(rng, {water, part, lvl}) -> a catch {id, cm, kg} | null (a miss): the game offline, the server online
-//   COME           the fish the feather calls, as features/fishing.js draws them (its come(); the one drawing of fish under the
-//                  water): comeAt(spot, slot, seed, t, out) -> where one circles the spot at t
+//   CALL           the fish the feather calls, as features/fishing.js draws them (its callFish(); the one drawing of fish under the
+//                  water): callAt(spot, slot, seed, t, out) -> where one circles the spot at t
 //   STONE          the Warm Stone: the lantern relights at once after a snuff (cold and ice: the weather brief's hooks)
 //   TOOTH          the Big Tooth: the soot things break off, the rock-things flee early, the forest animals take you as loud
 //   TALLY          the Tally Stick: its notches (the rule: docs/KEEPSAKES.md, under its spoiler heading)
@@ -53,7 +53,6 @@ export const HERON = {
   back: 12,                    // s after a scatter (a jab, hit or miss, or a step) before they come again
   reach: 1.6,                  // m: a shadow this near your feet is within a jab
   rarest: 'rare',              // a jab never comes up with anything rarer (no bait, no spot, no finds)
-  xp: .5,                      // x a cast's Fishing XP for a heron's catch
   stream: .25,                 // m: the stream counts as shallows where it is no wider than its usual (not its deep pools)
 };
 // the heron's jab: a fish of that water (as a cast rolls it: no bait, no spot, no finds, nothing rarer than HERON.rarest) or nothing
@@ -66,17 +65,17 @@ export function heronRoll(rng, o) {
   }
   return null;
 }
-// COME: fish shadows circling a point (features/fishing.js come(key, x, y, k): the feather's ring); `max` drawn at once, each len
+// CALL: fish shadows circling a point (features/fishing.js callFish(key, x, y, k): the feather's ring); `max` drawn at once, each len
 // m long, circling at speed rad/s (varied); `near`: within this many m of the player they are drawn; `drop`: m out they rise from
-export const COME = {max: 10, len: [.22, .36], speed: [.5, 1.1], near: 25, drop: 4};
+export const CALL = {max: 10, len: [.22, .36], speed: [.5, 1.1], near: 25, drop: 4};
 // shadow `slot` of a spot {x, y, r0, r1} (seed: the spot's own) at t s -> out {x, y, a (its heading, rad), len}: on its own circle
 // between r0 and r1, at its own pace and way round, wavering a little (pure: every client draws the same from the same spot)
-export function comeAt(spot, slot, seed, t, out) {
+export function callAt(spot, slot, seed, t, out) {
   const h1 = hash3(seed | 0, slot, 11), h2 = hash3(seed | 0, slot, 29), h3 = hash3(seed | 0, slot, 47);
-  const r = spot.r0 + (spot.r1 - spot.r0) * h1, dir = h2 < .5 ? -1 : 1, w = (COME.speed[0] + (COME.speed[1] - COME.speed[0]) * h3) * dir;
+  const r = spot.r0 + (spot.r1 - spot.r0) * h1, dir = h2 < .5 ? -1 : 1, w = (CALL.speed[0] + (CALL.speed[1] - CALL.speed[0]) * h3) * dir;
   const a = h2 * 6.2832 + t * w, wob = Math.sin(t * 1.7 + slot * 2.1) * .12;
   out.x = spot.x + Math.cos(a) * (r + wob); out.y = spot.y + Math.sin(a) * (r + wob);
-  out.a = a + dir * 1.5708; out.len = COME.len[0] + (COME.len[1] - COME.len[0]) * h1;
+  out.a = a + dir * 1.5708; out.len = CALL.len[0] + (CALL.len[1] - CALL.len[0]) * h1;
   return out;
 }
 export const STONE = {

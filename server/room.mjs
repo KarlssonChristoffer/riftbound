@@ -364,9 +364,9 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const i = e.on.findIndex(o => o[0] === item && o[1] === p.id); if (i < 0) return deny('not yours');
     e.on.splice(i, 1); tell();
   }
-  let dawnN = null;
+  let dawnN = null;   // (plan: createRoom's forest plan, also set by room.usePlan: the dolls' open ground and the spring)
   const DT_LIST = [];
-  const DOLL_O = {U: unc, C: cave, spring: plan?.spring || null, spent: id => { const s = secrets?.st[id]?.s; return s === 'spent' || s === 'triggered'; }, opened: i => world.get('v' + (cave?.hollows?.[i]?.vein ?? -1))?.s === 'spent', extra: null};
+  const DOLL_O = {U: unc, C: cave, spring: null, spent: id => { const s = secrets?.st[id]?.s; return s === 'spent' || s === 'triggered'; }, opened: i => world.get('v' + (cave?.hollows?.[i]?.vein ?? -1))?.s === 'spent', extra: null};
   const okAt = (x, y) => openGround(plan, cave, x, y);
   function dawnTick() {   // a new dawn (06:00 on the clock): the shelves' dolls may walk
     const n = Math.floor((clock() - 6) / 24);
@@ -539,6 +539,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   }
   function fish(p, m) {
     const a = str(m.a, 8), n = num(m.n, -1), t = now();
+    if (a === 'jab') return jab(p, m, n, t);   // (below)
     if (a === 'cast') {
       if (t - p.fishT < 500) return;   // (a flood: dropped; the client rolls it itself after a wait)
       const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
@@ -579,15 +580,17 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       p.conn.send(encode({k: 'fish', a: 'grabbed', n, ...r}));
       all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: false});
       log(`  ${p.name} grabbed a ${CATCHES[r.id].name} (${r.cm} cm) by hand`);
-    } else if (a === 'jab') {
-      if (t - (p.jabT || 0) < 600 || !p.gear.includes('heron_feather')) return;   // (a flood, or no feather: dropped; the client rolls it after a wait)
-      const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
-      if (!FISH_WATERS.has(w) || !(Math.hypot(x - p.x, y - p.y) < HERON.reach + 1.5)) return;
-      p.jabT = t;
-      const r = heronRoll(fishRng, {water: w, part: partOf(clock()), lvl: lvlOf(p, 'fishing')});
-      p.conn.send(encode({k: 'fish', a: 'jabbed', n, id: r ? r.id : '', cm: r ? r.cm : 0, kg: r ? r.kg : 0}));
-      if (r) { all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: false}); log(`  ${p.name} grabbed a ${CATCHES[r.id].name} (${r.cm} cm)`); }
     }
+  }
+
+  function jab(p, m, n, t) {
+    if (t - (p.jabT || 0) < 600 || !p.gear.includes('heron_feather')) return;   // (a flood, or no feather: dropped; the client rolls it after a wait)
+    const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
+    if (!FISH_WATERS.has(w) || !(Math.hypot(x - p.x, y - p.y) < HERON.reach + 1.5)) return;
+    p.jabT = t;
+    const r = heronRoll(fishRng, {water: w, part: partOf(clock()), lvl: lvlOf(p, 'fishing')});
+    p.conn.send(encode({k: 'fish', a: 'jabbed', n, id: r ? r.id : '', cm: r ? r.cm : 0, kg: r ? r.kg : 0}));
+    if (r) { all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: false}); log(`  ${p.name} jabbed a ${CATCHES[r.id].name} (${r.cm} cm)`); }
   }
 
   function connect(conn) {
@@ -647,5 +650,6 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   return {
     connect, get size() { return peers.size; }, world, seed, clock, secrets, elk, soot, players: PL,
     stop() { clearInterval(timer); for (const p of peers.values()) p.conn.close(1001, 'server stopping'); },
+    usePlan(F) { plan = F || null; DOLL_O.spring = plan?.spring || null; },   // (the keepsakes' shelves: docs/KEEPSAKES.md)
   };
 }

@@ -75,6 +75,7 @@
 //   made     {rec, dev?}                                 to the maker: the record of a thing he made (the client pays when it hears it)
 //   rec      {u, counts, marks}                          to its owner: what his tool has done since (at most every 2 s)
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
+//   fish     {a: 'jabbed', n, id, cm, kg}                to the jabber: what jab n came up with (id '': nothing)
 //   pong     {c, t}                                      t = the server's clock (ms)
 export const VERSION = 3;   // (3: the player key, server-owned XP: docs/SKILLS.md)
 export const TICK_HZ = 20;          // the server's snapshot rate; a client sends its state at the same rate

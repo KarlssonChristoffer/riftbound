@@ -4,8 +4,8 @@
 // Nothing says which: no stat line, no toast; the rule shows itself the moment it happens.
 //   THE NOTES   a worn keepsake's modifier notes (content/keepsakes.js NOTES, source 'keepsakes'), applied by their owners:
 //               the animals (fauna.loud, fauna.lure), the cave (cave.shun, cave.kin, cave.relight), the watcher (watcher.every)
-//   THE HERON FEATHER  stand still (HERON.still s, slower than HERON.speed) in the shallows (fishing.shallow: the lake's shelf,
-//               the stream outside its deep pools) and fish shadows rise round your feet (fishing.come: fishing draws them);
+//   THE HERON FEATHER  stand still (HERON.still s, slower than HERON.speed) in the shallows (fishing.shallows: the lake's shelf,
+//               the stream outside its deep pools) and fish shadows rise round your feet (fishing.callFish: fishing draws them);
 //               E jabs (fishing.jab: rolled like a cast with HERON's limits, the server's online). A jab, hit or miss, or a
 //               step scatters them for HERON.back s. A friend's feather: their shadows on your screen too (view only)
 //   THE TALLY STICK  it counts (the rule: docs/KEEPSAKES.md, under its spoiler heading); each count a notch on its icon
@@ -27,10 +27,10 @@
 //   its shadows' rise and the jab are the sim's; how far up the shadows are drawn (eased) and a friend's are the view's.
 // OWNS: the modifier source 'keepsakes', F.worn (the keepsakes in your set now), the heron's state (HS), its save
 //   (pack.store('keepsakes'): tally), packpanel's iconHook.of (the tally's notches). READS: gear (S.worn,
-//   S.ver), pack (give: the dev row), fishing (shallow, come, jab, fishing), coop (peers: their gear, where they are), flags
+//   S.ver), pack (give: the dev row), fishing (shallows, callFish, jab, fishing), coop (peers: their gear, where they are), flags
 //   ('keepsakes'), host.player, host.PL (hold, useE, nearInteract).
 // EMITS: keep.notch (the jab: fishing's fish.jab / fish.catch / fish.miss). BUDGET: update: a compare a step (the set's
-//   version); with the feather worn one waterSample a step (fishing.shallow); view: one ask a frame per feather near you.
+//   version); with the feather worn one waterSample a step (fishing.shallows); view: one ask a frame per feather near you.
 import {flags} from '../core/flags.js';
 import * as THREE from 'three';
 import {KEEPSAKE_IDS, NOTES, HERON, STONE, TALLY, DOLL, SHELF, isKeepsake} from '../content/keepsakes.js';
@@ -71,7 +71,7 @@ export async function create(host) {
   function scatter() { if (HS.k > 0) HS.away = HERON.back; HS.k = 0; HS.still = 0; }
   function heron(dt) {
     const P = host.player, Fi = fishing();
-    HS.w = ON && F.worn.has('heron_feather') && Fi && !Fi.fishing && P.state !== 'hold' ? Fi.shallow(P.x, P.y) : '';
+    HS.w = ON && F.worn.has('heron_feather') && Fi && !Fi.fishing && P.state !== 'hold' ? Fi.shallows(P.x, P.y) : '';
     if (HS.away > 0) HS.away = Math.max(0, HS.away - dt);
     if (HS.jab) {   // E: the jab (he stoops to the water), hit or miss they scatter
       HS.jab = false;
@@ -255,10 +255,10 @@ export async function create(host) {
   F.view = (dt, evs) => {
     stoneView(dt, evs);
     shelvesView(dt);
-    const Fi = fishing(); if (!Fi?.come) return;
+    const Fi = fishing(); if (!Fi?.callFish) return;
     const P = host.player;
     VK.me = ease(VK.me, HS.w ? HS.k : 0, dt);
-    if (VK.me > 0) Fi.come('heron:me', P.x, P.y, VK.me, HERON.n[0] + (HERON.n[1] - HERON.n[0]) * VK.me | 0);
+    if (VK.me > 0) Fi.callFish('heron:me', P.x, P.y, VK.me, HERON.n[0] + (HERON.n[1] - HERON.n[0]) * VK.me | 0);
     const C = host.feature('coop')?.net;
     if (!ON || !C?.peers?.size || dt <= 0) return;
     for (const peer of C.peers.values()) {
@@ -267,11 +267,11 @@ export async function create(host) {
       const o = C.sample(peer, PSM); if (!o) continue;
       if (!q) { q = {px: o.x, py: o.y, still: 0, k: 0, away: 0, key: 'heron:' + peer.id}; PEERS.set(peer.id, q); }
       const v = Math.hypot(o.x - q.px, o.y - q.py) / dt; q.px = o.x; q.py = o.y;
-      const w = Fi.shallow(o.x, o.y), go = !w || v >= HERON.speed || o.s === 'hold';
+      const w = Fi.shallows(o.x, o.y), go = !w || v >= HERON.speed || o.s === 'hold';
       if (q.away > 0) q.away -= dt;
       if (go) { if (q.k > .3) q.away = HERON.back; q.still = 0; q.k = ease(q.k, 0, dt); }
       else if ((q.still += dt) >= HERON.still && q.away <= 0) q.k = Math.min(1, q.k + dt / HERON.rise);
-      if (q.k > 0) Fi.come(q.key, o.x, o.y, q.k, HERON.n[0] + (HERON.n[1] - HERON.n[0]) * q.k | 0);
+      if (q.k > 0) Fi.callFish(q.key, o.x, o.y, q.k, HERON.n[0] + (HERON.n[1] - HERON.n[0]) * q.k | 0);
     }
   };
   // ---------------------------------------------------------------- the Warm Stone's look: snuffed, the wick glows red a moment,

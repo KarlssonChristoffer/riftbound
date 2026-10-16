@@ -75,6 +75,7 @@ const room = createRoom({seed, trees, decor, veins, cave, forest, plan, strikes:
 const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.glb': 'model/gltf-binary',
   '.bin': 'application/octet-stream', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8'};
+room.usePlan(plan);   // (the keepsakes' shelves: the dolls' open ground, docs/KEEPSAKES.md)
 
 async function file(root, rel) {
   const p = path.resolve(root, '.' + rel);
