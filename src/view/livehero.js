@@ -1541,7 +1541,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     const q = TAU / K.face; return yaw + Math.round((wf - yaw) / q) * q;
   }
   const SPRO = {img: null, nrm: null, px: 0, py: 0, x: 0, y: 0, h: 0, frame: '', face: 0};
-  function compose(PX, PY, perf) {
+  function compose(PX, PY, perf, noBody = false) {   // noBody: all of it but his body put (first person: features/chasecam.js)
     const t0 = performance.now(), P = app.P, yaw = app.yaw, dt = lastT < 0 ? 0 : Math.min(.05, Math.max(0, (t0 - lastT) / 1000));
     perf?.begin('live.pose', 'char');
     hero.card.setVisible(false);
@@ -1681,7 +1681,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     stats.smears += K.smear || fsSmear() ? smear(show) : (prevOk = false, 0);   // (FISTS: a punch's snap smears, from its wind to just past its contact)
     const blinkOff = P.blink && Math.floor(P.blink * 12) % 2;
     PR.x = AX; PR.y = AY; PR.z = AZ; PR.sx = PX; PR.sy = P.z; PR.sz = PY; PR.snap = K.snap ? 1 : 0; PR.alpha = 1;
-    if (!blinkOff) rig.put(model, 0, MATS, PR);
+    if (!blinkOff && !noBody) rig.put(model, 0, MATS, PR);
     for (let i = 0; i < ropeN - 1; i++) {   // the rope (the demos): pixel lines in the world
       toWorld(ROPE[i * 3], ROPE[i * 3 + 1], ROPE[i * 3 + 2], WP, 0); const x0 = WP[0], y0 = WP[1], z0 = WP[2];
       toWorld(ROPE[i * 3 + 3], ROPE[i * 3 + 4], ROPE[i * 3 + 5], WP, 0); G.line(x0, y0, z0, WP[0], WP[1], WP[2], ROPE_C);
@@ -1797,7 +1797,7 @@ export async function createLiveHero(o) {
     get model() { return cur()?.model; }, get J() { return cur()?.J; }, get BN() { return cur()?.BN; }, poseOf: n => cur()?.poseOf(n),
     setLineup(items) { cur()?.setLineup(items); },
     snapshot: () => cur().snapshot(), restore: S => cur().restore(S),
-    compose: (PX, PY, perf) => cur().compose(PX, PY, perf), sprite: () => cur().sprite(),
+    compose: (PX, PY, perf, noBody) => cur().compose(PX, PY, perf, noBody), sprite: () => cur().sprite(),
     get bytes() { return rig?.bytes ?? 0; },
     get atlas() { return hero.atlas; },
     load,   // (dev / tests: a loadout's body now)

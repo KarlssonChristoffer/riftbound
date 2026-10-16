@@ -195,7 +195,7 @@ const host = {
   hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); },
   launch: (vx, vy, vz) => { const [a, b] = toView(vx, vy); return PL.launch(a, b, vz); },   // thrown (sim/player/launch.js): false -> knock him instead
   play: (frame, sec) => PL.hold(frame, sec),
-  aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target}; },
+  aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target, ray: c.ray}; },
   toView: (x, y, h = 0) => { const s = G.toScreen(x, h, y); return [s[0], s[1]]; },         // world -> view px (rotated)
   sprite,                                                                              // {img, x, y, h, px, py, ...}
   point: (x, y, h, c, o) => G.point(x, h, y, rgbOf(c), o),

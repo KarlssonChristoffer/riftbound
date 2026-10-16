@@ -209,7 +209,10 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     water: waterAt,   // (SWIMMING, above)
     pixelBow: () => !optOf().hdBow,   // J: the bowstring + nocked / flying arrows at art pixels (default) or the HD overlay
     onShoot: a => { const [x, y] = toWorld(a.x, a.y), [vx, vy] = toWorld(a.vx, a.vy); proj.spawn({...a, x, y, vx, vy}); },
-    aimTarget: () => { const t = hoverTarget(); if (!t) return null; const v = toView(t.x, t.y); return {x: v[0], y: v[1], h: t.h, target: t.target}; },
+    aimTarget: () => { const t = hoverTarget(); if (!t) return null; const v = toView(t.x, t.y); return {x: v[0], y: v[1], h: t.h, target: t.target, ray: t.ray}; },
+    // first person (features/chasecam.js): the ground the look meets (player.js cursorGround) and his facing held on the look
+    aimGround: () => { for (const f of features) { const g = f.aimGround?.(); if (g) { const v = toView(g.x, g.y); return {x: v[0], y: v[1]}; } } return null; },
+    faceAhead: () => { for (const f of features) if (f.faceAhead?.()) return true; return false; },
     autoFire: () => { for (const f of features) if (f.autoFire?.()) return true; return false; },   // (an aim mode that shoots for you: features/aim.js)
     nearInteract: () => nearProp(),
     onInteract: p => features.some(f => f.interact?.(p)),
@@ -297,6 +300,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     return best && {x: best.x, y: best.y, h: bh, target: best};
   }
   function nearProp() {
+    for (const f of features) { const p = f.lookProp?.(); if (p && !p.opened && Math.abs((p.z || 0) - P.z) < .5) return p; }   // (first person: what he looks at, features/chasecam.js)
     let best = null, bd = 1.3; const px = player.x, py = player.y;
     for (const p of ents().near(px, py, bd, nearI)) if (p.interact && !p.opened && Math.abs((p.z || 0) - P.z) < .5) { const d = Math.hypot(p.x - px, p.y - py); if (d < bd) { bd = d; best = p; } }
     return best;

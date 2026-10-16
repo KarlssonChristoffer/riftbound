@@ -66,6 +66,7 @@ const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'spr
   [['E'], 'fists: grab a foe (again: toss)'], [['Space'], 'fists: slip a punch (then counter)'],
   [['LMB', 'E'], 'on a tree: chop it (an axe in the bag; hold to keep chopping)'], [['Tab'], 'the pack: bag, pouch, skills, build'],
   [['Z', 'X'], 'turn the camera (or drag with the middle button)'], [['Home'], 'reset the camera'], [['Wheel'], 'zoom in / out'],
+  [['F6'], 'camera: top-down / third person / first person (click to look around)'],
   [['M'], 'mute'], [['U'], 'music on / off'], [['F4'], 'photo mode'], [['Esc'], 'this menu']];
 
 const CHARS = {Ranger: 'ranger + cloth sim', Gunslinger: 'gunslinger', Outlaw: 'outlaw'};   // the menu's names -> LOADOUTS names

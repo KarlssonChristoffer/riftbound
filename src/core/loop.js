@@ -34,6 +34,8 @@ export function createLoop(E) {
   // the 'sim.speed' note x host.timeScale (the cheat panel's game speed: dev/cheats.js), read when the notes change
   let simSpeed = 1; if (host.mods) { const f = () => { simSpeed = host.mods.value('sim.speed', 1); }; host.mods.watch(f); f(); }
   let hovIt = null;         // the world item with the hover pulse on (the aimed target)
+  let views3 = null;        // the camera views (features/chasecam.js): first person hides his body (hidesBody); the cursor at its crosshair (cursor)
+  const bodyHidden = () => !!(views3 ??= E.feat('chasecam'))?.hidesBody;
   const frameEvs = [];      // every event of this frame's sim steps, for the views
   // ONE fixed sim step
   function simStep(dt) {
@@ -89,10 +91,14 @@ export function createLoop(E) {
     const PX = player.x, PY = player.y;
     cv.follow(lastDt, PX, PY, P, cam);   // the camera eases after him (render/camera.js)
     input.remap?.();   // (the cursor on the image as the sub-pixel camera slid it this frame: what the next steps aim at)
+    (views3 ??= E.feat('chasecam'))?.cursor?.();   // (a camera view's: its crosshair, before the hover and his arm read it)
     if (!views) return;   // (the camera follows without views too: it's the frame the cursor is read in, the sim's input)
     // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js); or,
     // with ?live=1 and the live hero on, his live 3D body (view/livehero.js)
-    const ph = photo && photo.open, sinkPx = ph && photo.hidePlayer ? photo.noPlayer() : E.live?.on ? E.live.compose(PX, PY, perf) : hero.compose(PX, PY, perf);
+    // (first person: his pose is still worked out, the view's and co-op's, but his body isn't drawn)
+    const ph = photo && photo.open, nob = !ph && bodyHidden();
+    const sinkPx = ph && photo.hidePlayer ? photo.noPlayer() : E.live?.on ? E.live.compose(PX, PY, perf, nob) : hero.compose(PX, PY, perf);
+    if (nob) hero.card.setVisible(false);
     // props, hover pulse on the aimed target
     const hov = P.state === 'draw' ? pa.hoverTarget()?.target : null, hi = hov ? stage.world.itemOf(hov) : null;
     if (hovIt && hovIt !== hi) hovIt.hover = 0;   // (only the aimed item's pulse is ever on: no write per item per frame)
@@ -118,12 +124,14 @@ export function createLoop(E) {
     // HD overlay
     const dpr = devicePixelRatio || 1, sc = cv.scale * dpr;
     hq.setTransform(1, 0, 0, 1, 0, 0); hq.clearRect(0, 0, hdc.width, hdc.height);
-    // (hudOff: the title; a cinema camera (features/cinema.js) shows only the overlays that draw for it: f.cineHd)
-    for (const f of features) if (f.on !== false && f.hd && (G.cine ? f.cineHd : !host.hudOff || f === game)) { hq.save(); f.hd(hq, sc); hq.restore(); }
-    if (!G.cine) {
+    // (hudOff: the title; a cinema camera (features/cinema.js) shows only the overlays that draw for it: f.cineHd, unless
+    // it asks for the HUD: the camera views', features/chasecam.js)
+    const withHud = !G.cine || G.cine.hud;
+    for (const f of features) if (f.on !== false && f.hd && (withHud ? !host.hudOff || f === game || (G.cine && f.cineHd) : f.cineHd)) { hq.save(); f.hd(hq, sc); hq.restore(); }
+    if (withHud) {
       // (the HD bow and the prompt hang on the world: slid with the pixel image, G.hdShift; the features' hd() do their own)
       hq.save(); G.hdShift?.(hq, sc);
-      if (opt.hdBow && !sinkPx) hero.drawHDBow(hq, sc);
+      if (opt.hdBow && !sinkPx && !G.cine) hero.drawHDBow(hq, sc);
       drawPrompt(hq, sc, promptCtx);
       hq.restore();
     }
