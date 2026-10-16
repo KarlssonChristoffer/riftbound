@@ -37,10 +37,11 @@
 //                               (a hidden window keeps the last view: render/camera.js)
 //   F.arrow?(a)                 every arrow as it is spawned (scale its damage, tag it, spawn extras with a.extra)
 //   F.prompt?(prop) -> text | {text, color}   the "E ..." prompt over a prop you can interact with
-//   F.menu?() -> [{label, run}] rows in the menu's Sandbox tab, or its Game tab (ui/pause.js GAME_ROWS, SANDBOX_GROUP)
+//   F.menu?() -> [{label, run}] test actions on its page in the dev menu, or the Esc menu's Game tab (ui/pause.js GAME_ROWS)
+//   F.dev?: {group, rows()}     its section and its own rows in the dev menu (dev/devmenu.js, F10; docs/DEVMENU.md)
 // THE MENU (Escape, ui/pause.js + ui/menu.js): pauses the game but not the world: while host.paused only the AMBIENT
-// features update (nature, see stepPaused), behind a blur. A feature's toggle / settings land in its Dev tab unless
-// CLAIM gives them to a player tab (Graphics, Audio).
+// features update (nature, see stepPaused), behind a blur. A feature's toggle / settings are on its page in the dev menu,
+// and also in a player tab (Graphics, Audio, Controls) when CLAIM gives them one.
 // THE ORDER of the features (updates and every hook chain) is what each declares: `export const order` (core/features.js).
 // THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
 // dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
