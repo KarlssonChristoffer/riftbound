@@ -3,7 +3,8 @@
 // changed (the inventory's, the skills' versions, the held slot, the recipes' affordability); hidden under the pause menu,
 // in photo mode and behind the title. The items' pixel icons (content/items.js: fills only) are drawn once each with an
 // outline round them, as data URLs at 1 px per pixel, scaled up crisp by the CSS.
-//   const panel = createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held, ask}); panel.toggle() / .open / .frame()
+//   const panel = createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held, ask, pick, tips}); panel.toggle() / .open / .frame()
+//   (pick(slot): a bag slot clicked, its tool is the one its job swings; tips: the cards over a made thing's slot, pack.slotTip)
 //   (sections: other systems' parts of the panel, drawn after the skills: pack.section; recipes under their group's heading)
 //   iconURL(rows, pal) -> a data URL (exported: features/fishing.js draws its journal's unknown catches as silhouettes)
 // OWNS: the panel's element and its open state. READS: the inventory, the skills, the recipes (pack.recipe). Clicks: ask(r)
@@ -58,7 +59,7 @@ export function iconURL(rows, pal = null) {
   return c.toDataURL();
 }
 
-export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask}) {
+export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask, pick = null, tips = []}) {
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const el = document.createElement('div'); el.id = 'pack'; el.className = 'hidden'; document.body.appendChild(el);
   const ICON = {};
@@ -73,7 +74,7 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     let h = '<header><b>PACK</b><small>Tab</small></header><h5>Bag</h5><div class="p-bag">';
     inv.bag.forEach((s, i) => {
       const d = s && ITEMS[s.id];
-      h += `<div class="p-slot${i === held() ? ' held' : ''}"${d ? ` title="${esc(d.name)}: ${esc(d.desc)}"` : ''}>`;
+      h += `<div class="p-slot${i === held() ? ' held' : ''}" data-i="${i}"${d && !(s.u && tips.length) ? ` title="${esc(d.name)}: ${esc(d.desc)}"` : ''}>`;   // (a made thing: its card instead, ui/madetip.js)
       if (d) h += `<img src="${icon(s.id)}" alt="">${s.n > 1 ? `<em>${s.n}</em>` : ''}`;
       h += '</div>';
     });
@@ -95,14 +96,23 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     el.innerHTML = h;
   }
   el.addEventListener('click', e => {
+    const sl = e.target.closest('.p-slot'); if (sl && pick) { pick(+sl.dataset.i); return; }   // (that tool swings for its job)
     const b = e.target.closest('.p-build'); if (!b) return;
     const r = recipes[+b.dataset.r]; if (r) ask(r);
   });
+  // a made thing's card (the slot under the pointer: tips[k].show(slot, e)); the panel's rebuilds don't lose it (by slot number)
+  let tipAt = -1;
+  el.addEventListener('mousemove', e => {
+    const sl = e.target.closest('.p-slot'), i = sl ? +sl.dataset.i : -1, s = i >= 0 ? inv.bag[i] : null;
+    const at = s?.u ? i : -1;
+    if (at !== tipAt) { tipAt = at; for (const t of tips) at >= 0 ? t.show(at, e) : t.hide(); } else if (at >= 0) for (const t of tips) t.move(e);
+  });
+  el.addEventListener('mouseleave', () => { if (tipAt >= 0) { tipAt = -1; for (const t of tips) t.hide(); } });
   el.addEventListener('mousedown', e => e.stopPropagation());   // (a click on the panel isn't a shot)
 
   return {
     get open() { return open; },
-    toggle() { open = !open; kInv = -1; el.classList.toggle('hidden', !open); },
+    toggle() { open = !open; kInv = -1; el.classList.toggle('hidden', !open); if (!open && tipAt >= 0) { tipAt = -1; for (const t of tips) t.hide(); } },
     // each frame while open: rebuilt when the bag, the pouch, the skills, the held slot or the recipes changed, and twice a
     // second while there are recipes (whether one can be built here: room, a fire nearby)
     frame() {

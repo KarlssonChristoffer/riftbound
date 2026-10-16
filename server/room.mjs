@@ -13,7 +13,8 @@
 // (a hollow wall's plug never comes back). And the cave's SOOT THINGS (docs/CAVELIFE.md: sim/cavelife.js, the same rules the game
 // runs offline): they go for the lit lanterns (each player's state says whether theirs burns: lt), keep out of the lamps' and
 // burning fires' light (the builds), and put a lantern out (an event to everyone: {k: 'ev', a: 'snuff', id}); their places go
-// out in the snapshots (sn: [x, y, h, mode] each).
+// out in the snapshots (sn: [x, y, h, mode] each). And THE WORKSHOP (docs/WORKSHOP.md: server/workshop.mjs): every made thing's
+// record (kept by the browser's key: server/players.mjs), counted from the 'fell' and 'mine' acts that carry its uid.
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
 //   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
@@ -27,6 +28,8 @@ import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
+import {createPlayers} from './players.mjs';
+import {createWorkshop} from './workshop.mjs';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
@@ -51,6 +54,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const pub = p => ({id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, phi: p.phi, s: p.s, pose: p.pose, rig: p.rig, w: p.w, wn: p.wn, ls: p.ls, g: p.gear});
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
+  // THE WORKSHOP: the made things' records (by the browser's key), the furnaces (server/workshop.mjs)
+  const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, players});
 
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
@@ -58,8 +63,9 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
       fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false};
+    const made = ws.hello(p, m);   // (his records: the server's, the hello's copy filling in)
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
-      clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null}));
+      clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null, made}));
     peers.set(id, p);
     others(p, {k: 'join', p: pub(p)});
     log(`+ ${p.name} (#${id}) from ${conn.ip} · ${peers.size} in the room`);
@@ -104,6 +110,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
     if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
+    if (ws.ACTS.has(a)) return ws.act(p, a, m, id, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -115,6 +122,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const s = {s: 'felled', by: p.id, t};
     world.set(id, s);
     all({k: 'world', id, s: s.s, by: p.id});
+    ws.count(p, m.u, m.old === 1 ? ['fell', 'oldoak'] : ['fell']);   // (the axe's record: u; old: an old oak)
     log(`  ${p.name} felled ${id}`);
   }
 
@@ -156,9 +164,10 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const pow = Math.max(.25, Math.min(3, num(m.pow, 1)));
     p.mineLvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0));   // (his level for the others' last blows too)
     const by = cur?.by ? [...cur.by] : []; if (!by.includes(p.id)) by.push(p.id);
+    const us = {...cur?.us}; if (typeof m.u === 'string' && m.u) us[p.id] = str(m.u, 24);   // (each striker's pick's record: the workshop counts the vein into it)
     const left = Math.max(0, (cur?.left ?? V.blows) - pow);
     if (left > 1e-6) {
-      const s = {s: 'struck', left: +left.toFixed(3), by, t};
+      const s = {s: 'struck', left: +left.toFixed(3), by, t, us};
       world.set(id, s); all({k: 'world', id, s: 'struck', left: s.left, by: p.id}); return;
     }
     const got = {};
@@ -167,6 +176,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const lvl = pq.mineLvl || 1, notes = levelNotes(SKILLS.mining.per, lvl);
       for (const g of pq.gear) for (const n of GEAR_BY_ID[g]?.mods || []) notes.push(n);
       got[q] = mineYield(mineRng, kind, mineStats(notes));
+      ws.count(pq, us[q], kind === 'iron' ? ['veins', 'iron'] : ['veins']);
     }
     world.set(id, V.hollow ? {s: 'spent', by: p.id, t} : {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});   // (a hollow wall: open for good)
     all({k: 'world', id, s: 'spent', by: p.id, got});
@@ -280,6 +290,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const timer = setInterval(() => {
     if (!peers.size) return;
     regrowTick(DT);
+    ws.tick(DT);
     // the uncanny forest: the secrets' clocks and the heron's ring, the night elk (the placed players only)
     let c = 0;
     if (unc) {
