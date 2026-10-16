@@ -246,12 +246,12 @@ export function createDevMenu({host, engine}) {
     if (e.t === 'title') return `<h5>${esc(e.page.title)} <em>${esc(e.page.section)}</em></h5>`;
     if (e.t === 'head') {
       const p = e.page, n = p.rows.length;
-      return `<div class="dm-r dm-h" data-r="${i}"><span class="dm-pin"></span><span class="dm-l">${e.open ? '-' : '+'} ${esc(p.title)}${e.open ? '' : ` <s>${n}</s>`}${p.on?.key ? `<kbd>${esc(p.on.key)}</kbd>` : ''}</span>` +
+      return `<div class="dm-r dm-h" data-r="${i}"><span class="dm-pin"></span><span class="dm-l">${e.open ? '-' : '+'} ${esc(p.title)}${e.open ? '' : ` <s>${n}</s>`}${p.on?.key ? `<kbd>[${esc(p.on.key)}]</kbd>` : ''}</span>` +
         (p.on ? `<span class="dm-v${isOn(p.on) ? ' on' : ''}" data-on><b>${isOn(p.on) ? 'On' : 'Off'}</b></span>` : '') + `</div>`;
     }
     const r = e.row, pin = S.pins.includes((e.base || r).pin);
     return `<div class="dm-r${e.sub ? ' sub' : ''}" data-r="${i}"><span class="dm-pin${pin ? ' on' : ''}" data-pin title="pin">*</span>` +
-      `<span class="dm-l">${e.from && r.page.on !== r ? `<em>${esc(r.page.title)}:</em> ` : ''}${esc(r.label)}${r.key ? `<kbd>${esc(r.key)}</kbd>` : ''}</span>${valHtml(r)}</div>`;
+      `<span class="dm-l">${e.from && r.page.on !== r ? `<em>${esc(r.page.title)}:</em> ` : ''}${esc(r.label)}${r.key ? `<kbd>[${esc(r.key)}]</kbd>` : ''}</span>${valHtml(r)}</div>`;
   }
   const sigOf = list => list.map(e => e.t === 'row' ? `${e.row.pin}|${e.row.label}|${e.row.kind}|${e.row.key || ''}` : e.t === 'head' ? `h${e.page.id}${e.open}${e.page.rows.length}` : e.t + (e.text || e.page?.id)).join('\n');
 
