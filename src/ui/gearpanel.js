@@ -3,6 +3,7 @@
 // empty); a click wears a piece or takes it off. The piece under the pointer shows in a card that follows it (ui/geartip.js:
 // what it is, its weight and armor, what it does; Shift for more). At the bottom the set's numbers: weight, armor, speed. In
 // co-op a choice waits for the server ("waiting for the server"). Pixel art like the game (ui/pixelfont.js, ui/pixelframe.js).
+// Only the pieces you own show (opts.owns: features/gear.js; a piece made shows at the next sync), a piece worn always.
 // OWNS: the panel (#gear + its style). READS: the feature's S (want, worn, stats, waiting), content/gear.js.
 // BUDGET: closed: nothing. Open: DOM writes on a change of set (no per-frame work).
 import {SLOTS, SLOT_NAMES, GEAR, RULES, RARITY, gearById, setStats} from '../content/gear.js';
@@ -35,14 +36,15 @@ body:has(#pause:not(.hidden)) #gear { visibility: hidden; }
 #gear .g-it.want { border-image-source: var(--g-hot); }
 #gear .g-it img { width: calc(18 * var(--u)); height: calc(18 * var(--u)); image-rendering: pixelated; }
 #gear .g-it.own img { opacity: .8; }
+#gear .g-it.no { display: none; }
 #gear .g-it i { position: absolute; right: var(--u); top: var(--u); width: calc(3 * var(--u)); height: calc(3 * var(--u)); outline: var(--u) solid #0c0907; }
 #gear .g-sum { margin-top: calc(5 * var(--u)); padding-top: calc(3 * var(--u)); border-top: var(--u) solid #4a3826; }
 #gear .g-num { color: var(--key); }
 #gear .g-dim { color: var(--dim); }
 #gear .g-wait { color: var(--key); }`;
 
-// opts: {S (the feature's state), choose(ids), online() (co-op: a choice waits for the server)}
-export function createGearPanel({S, choose, online}) {
+// opts: {S (the feature's state), choose(ids), online() (co-op: a choice waits for the server), owns(id) (shown; default all)}
+export function createGearPanel({S, choose, online, owns = () => true}) {
   let root = null, sum = null;
   const btns = [];   // {b, id (or null: own), slot}
   const pct = v => Math.round(v * 100) + '%';
@@ -76,7 +78,7 @@ export function createGearPanel({S, choose, online}) {
     for (const {b, id, slot} of btns) {
       const worn = id ? S.worn.includes(id) : !S.worn.some(w => gearById(w).slot === slot);
       const want = id ? S.want.includes(id) : !S.want.some(w => gearById(w).slot === slot);
-      b.classList.toggle('on', worn); b.classList.toggle('want', want && !worn);
+      b.classList.toggle('on', worn); b.classList.toggle('want', want && !worn); b.classList.toggle('no', !!id && !worn && !want && !owns(id));
     }
     const st = S.stats, w = setStats(S.want), wait = online() && S.waiting;
     sum.innerHTML = `<span class="g-num">${st.kg.toFixed(1)} kg</span> <span class="g-dim">(${RULES.FREE_KG} kg free)</span><br>` +

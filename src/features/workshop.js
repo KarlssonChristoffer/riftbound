@@ -24,6 +24,9 @@
 //            counted into its record: a felled tree (an old oak too), a broken vein (an iron one too); offline here from
 //            tree.fell / mine.spent, online by the server from the uid on the 'fell' / 'mine' act (coop.tag), its counts
 //            coming back as {k: 'rec'}. Hovering a made thing's bag slot shows its card (ui/madetip.js: pack.slotTip)
+//   CLOTHES  a made piece of gear (the anvil's Kettle helm and Iron-shod boots; by hand from Tab > Make: content/workshop.js HAND)
+//            takes no bag slot: its record makes it OWNED (owns(id); ownVer bumps when the list changes) and features/gear.js
+//            shows it in the gear panel to wear. One is enough: a piece you own isn't made again
 // CO-OP: the furnaces are the server's (server/workshop.mjs): their state rides on the build's world entry (the welcome) and
 //   changes come as {k: 'smith', id, s: heat | loaded | fit | smelted | taken, ...}; between them this side steps the same rules
 //   (the glow eases, the charge cooks) and the server's word puts it right. Loading, fitting and taking a bar are asked
@@ -89,6 +92,7 @@ export async function create(host) {
   function receive(r, pay, at = null) {
     if (pay) for (const [k, n] of Object.entries(costOf(r))) pack()?.take(k, n);
     if (ITEMS[r.item]?.made) pack()?.giveMade(r.item, r.u, at || {x: host.player.x, y: host.player.y, h: 1.8});
+    else if (gearById(r.item)) ui()?.toast(gearById(r.item).name, 'yours now: Tab, the gear panel, to wear it', '#f2c95c');
     host.events.push({type: 'smith.make', x: host.player.x, y: host.player.y, item: r.item, u: r.u, hand: !!r.hand});
   }
   const costOf = r => r.hand ? HAND[r.item]?.cost || {} : smithCost(r.item, r.haft, r.inlay) || {};
@@ -107,6 +111,16 @@ export async function create(host) {
     const b = pack()?.best(job), r = recOf(b?.u); if (!r) return;
     let ch = false; for (const k of ks) ch = countOn(r, k, day()) || ch;
     if (ch) { pack()?.dirty(); ver++; }
+  }
+  // the clothes he owns: the gear his records are of (made again when the records changed)
+  const OWNED = new Set();
+  let ownSeen = -1, ownKey = '', ownVer = 0;
+  function owned() {
+    if (ownSeen === ver) return OWNED;
+    ownSeen = ver; OWNED.clear();
+    const s = store(); if (s) for (const u in s.made) { const it = s.made[u].item; if (gearById(it)) OWNED.add(it); }
+    const k = [...OWNED].sort().join(','); if (k !== ownKey) { ownKey = k; ownVer++; }
+    return OWNED;
   }
   const oldOak = (species, scale) => !!TREES[species]?.old && scale >= TREES[species].old;
 
@@ -193,6 +207,7 @@ export async function create(host) {
   function lay(b) {
     const S = SMITH[sel.r]; if (!S) return;
     if (work) return say(b, 'something is on an anvil already: hammer it');
+    if (S.gear && owned().has(S.gear)) return say(b, 'you have one already');
     if (S.haft && !(pack()?.count(sel.haft) > 0)) return say(b, 'choose a haft');
     const c = smithCost(sel.r, sel.haft, sel.inlay && S.haft);
     if (!has(c)) return say(b, 'needs ' + costWords(c));
@@ -370,10 +385,10 @@ export async function create(host) {
     const inlay = !!(S.haft && sel.inlay), c = smithCost(sel.r, sel.haft, inlay);
     return {kind: 'anvil',
       work: work && work.id === b.id ? {name: SMITH[work.r].name + (work.haft ? `, ${WOODS[work.haft].name} haft` : '') + (work.inlay ? ', shard inlay' : ''), n: Math.min(work.n, HAMMER.counts), of: HAMMER.counts} : null,
-      recipes: Object.entries(SMITH).map(([v, R]) => { const rc = smithCost(v, R.haft ? sel.haft : '', R.haft && sel.inlay); return {v, name: R.name, icon: iconOf(R.item || R.gear), cost: costWords(rc), ok: has(rc), sel: v === sel.r}; }),
+      recipes: Object.entries(SMITH).map(([v, R]) => { const rc = smithCost(v, R.haft ? sel.haft : '', R.haft && sel.inlay), own = !!R.gear && owned().has(R.gear); return {v, name: R.name, icon: iconOf(R.item || R.gear), cost: own ? 'you have one' : costWords(rc), ok: !own && has(rc), sel: v === sel.r}; }),
       hafts: hafts && hafts.map(v => ({v, name: WOODS[v].name, trait: WOODS[v].trait || '', icon: iconOf(v), n: pack().count(v), sel: v === sel.haft})),
       inlay: S.haft ? {cost: costWords(INLAY.cost), ok: has(INLAY.cost), on: sel.inlay} : null,
-      go: work ? {ok: false, why: 'something is on it: LMB hammers'} : S.haft && !sel.haft ? {ok: false, why: 'no logs for a haft'} : has(c) ? {ok: true} : {ok: false, why: 'needs ' + costWords(c)}};
+      go: work ? {ok: false, why: 'something is on it: LMB hammers'} : S.gear && owned().has(S.gear) ? {ok: false, why: 'you have one already'} : S.haft && !sel.haft ? {ok: false, why: 'no logs for a haft'} : has(c) ? {ok: true} : {ok: false, why: 'needs ' + costWords(c)}};
   }
   let panelKey = NaN;
   function panelFrame() {
@@ -496,18 +511,28 @@ export async function create(host) {
     const c = coop();
     c?.tag?.('fell', p => { const ps = host.itemOf?.(p)?.pose; return {u: pk.best('chop')?.u || '', old: ps && oldOak(ps.species, ps.scale || 1) ? 1 : 0}; });
     c?.tag?.('mine', () => ({u: pk.best('mine')?.u || ''}));
+    for (const [id, R] of Object.entries(HAND)) {   // made by hand: Tab > Make (clothes: owned, not carried)
+      pk.recipe({id: 'make.' + id, group: 'Make', name: R.name, cost: R.cost, desc: gearById(R.gear)?.desc || '',
+        can: () => owned().has(R.gear) ? 'you have one' : pack()?.short(R.cost) ? 'needs ' + costWords(R.cost) : '', run: () => make(id)});
+    }
   }
   function wireTool(t) { setTool(t); t.swingBy?.((id, job) => WOODS[heldRec(id)?.haft]?.swing || 1); }
 
   const F = {
     name: 'workshop', label: 'Workshop', on: ON,
     get ver() { return ver; }, get work() { return work; }, furnaces: FURN,
+    // the clothes (features/gear.js): owns(id) a made piece he has; ownVer bumps when that list changes; ready: the save is there
+    owns: id => owned().has(id), get ownVer() { owned(); return ownVer; }, get ready() { return !!store(); },
     recOf, make, furn, lookOf, get torch() { return !!torch; }, cracked: i => CRACK.has(i), load: (id, ore) => { const b = builds()?.list.get(id); if (b?.def.smelt) load(b, ore); }, fit: id => { const b = builds()?.list.get(id); if (b?.def.smelt) fit(b); },
     pump: (id, rhythm = false) => { const b = builds()?.list.get(id); if (b?.def.smelt) pump(b, rhythm); },
     lay: (id, r, haft = '', inlay = false) => { const b = builds()?.list.get(id); if (!b?.def.anvil) return; Object.assign(sel, {r, haft, inlay}); lay(b); },
     hammer: (id, rhythm = false) => { const b = builds()?.list.get(id); if (b?.def.anvil) hammer(b, rhythm); },   // (tests, dev)
     // the records the hello carries (features/coop.js: the save's copy; the newest MAX_RECS)
-    records() { const s = store(); return s ? Object.values(s.made).slice(-MAX_RECS) : []; },
+    records() {   // (his clothes' records first: they are what he owns)
+      const s = store(); if (!s) return [];
+      const all = Object.values(s.made), G = all.filter(r => gearById(r.item));
+      return [...G, ...all.filter(r => !gearById(r.item)).slice(-(MAX_RECS - G.length))].slice(0, MAX_RECS);
+    },
     update(dt, evs) {
       T0 += dt;
       if (!ON || !pack()) return;

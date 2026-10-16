@@ -56,7 +56,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
   // THE WORKSHOP: the made things' records (by the browser's key), the furnaces (server/workshop.mjs)
-  const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players, veins, heat: workshop.heat, smelt: workshop.smelt});
+  const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players, veins, heat: workshop.heat, smelt: workshop.smelt, wardrobe: !!workshop.wardrobe});
 
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
@@ -221,12 +221,13 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   }
 
   // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:
-  // content/gear.js cleanSet) and tells everyone, the wearer too. (No inventory yet: any known piece may be worn.)
+  // content/gear.js cleanSet) and tells everyone, the wearer too. Only what he owns (server/workshop.mjs owns: the free kinds,
+  // his made clothes; anything with --wardrobe)
   function wear(p, m) {
     const t = now(), mine = () => p.conn.send(encode({k: 'gear', id: p.id, g: p.gear}));   // (every ask gets an answer)
     if (t - p.gearT < 100) return mine();   // (a flood: refused, the set stays)
     p.gearT = t;
-    const g = cleanSet(m.g);
+    const g = cleanSet(m.g).filter(id => ws.owns(p, id));
     if (g.join(',') === p.gear.join(',')) return mine();
     p.gear = g;
     all({k: 'gear', id: p.id, g});

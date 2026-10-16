@@ -123,8 +123,8 @@ export function countOn(rec, k, day) {
 }
 // the maker's line: "Forged by Ann on day 4, of cave iron and home-woods birch."
 export function makerLine(rec) {
-  const who = rec.maker ? `by ${rec.maker}` : 'by your hand', G = GEAR_BY_ID[rec.item];
-  if (rec.hand) return `Made ${who} on day ${rec.day}${G ? ', of birch bark and pine' : ''}.`;
+  const who = rec.maker ? `by ${rec.maker}` : 'by your hand';
+  if (rec.hand) { const c = Object.keys(HAND[rec.item]?.cost || {}).map(k => k === 'pine_log' ? 'pine' : k === 'birch_log' ? 'birch bark' : ITEMS[k]?.name.toLowerCase() || k); return `Made ${who} on day ${rec.day}${c.length ? ', of ' + c.join(' and ') : ''}.`; }
   const of = ['cave iron'];
   if (rec.haft) of.push(`home-woods ${WOODS[rec.haft].name}`);
   if (rec.inlay) of.push('glow shards');

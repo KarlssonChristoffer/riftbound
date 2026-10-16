@@ -16,17 +16,19 @@
 // tick closes it again, s 'grown'); room.mjs mine() asks cracked(id): one tier less, one chunk more.
 //   const ws = createWorkshop({world, peers, all, log, clock, secs, players, heat, smelt}); ws.ACTS (the acts it takes);
 //   ws.hello(p, m) -> the records for the welcome; ws.act(p, a, m, id, deny); ws.count(p, u, ks); ws.tick(dt) (each server tick);
-//   ws.cracked('v' + i) -> bool
+//   ws.cracked('v' + i) -> bool; ws.owns(p, gearId) -> bool (the wear check, room.mjs: the free kinds, the clothes his records
+//   are of; every piece with wardrobe: --wardrobe)
 // OWNS: the made records' minting and counting, the furnaces' state on their entries. READS: content/workshop.js,
 //   content/builds.js (a fire's fuel), the room's world (the furnaces and anvils: builds of their kinds).
 import {SMITH, HAND, WOODS, REACH, MAX_RECS, HEAT, PUMP, CHARGES, FIRESET, heatStep, pumpAdd, cleanRec, mintRec, countOn} from '../src/content/workshop.js';
 import {BUILDS, fuelAt} from '../src/content/builds.js';
 import {encode, num, str} from '../src/net/protocol.js';
+import {GEAR_BY_ID, freePiece} from '../src/content/gear.js';
 
 const FLUSH = 2;   // s between a record's count and its owner hearing it
 const STEPS = 4;   // the furnaces' steps a second
 
-export function createWorkshop({world, peers, all, log = () => {}, clock, secs = () => Date.now() / 1000, players, veins = null, heat = 1, smelt = 1}) {
+export function createWorkshop({world, peers, all, log = () => {}, clock, secs = () => Date.now() / 1000, players, veins = null, heat = 1, smelt = 1, wardrobe = false}) {
   const send = (p, m) => p.conn.send(encode(m));
   const day = () => Math.floor(clock() / 24) + 1;
   let nextU = 1, flushT = 0;
@@ -155,5 +157,11 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
     for (const [r, key] of dirty) for (const q of peers.values()) if (q.rec?.key === key) send(q, {k: 'rec', u: r.u, counts: r.counts, marks: r.marks});
     dirty.clear();
   }
-  return {ACTS: new Set(['make', 'load', 'pump', 'fit', 'take']), hello, act, count, tick, cracked: id => world.get('k' + String(id).slice(1))?.s === 'cracked'};
+  // CLOTHES: what a player may wear (room.mjs wear): a free piece, one his records are of, or anything with --wardrobe
+  function owns(p, id) {
+    if (wardrobe || freePiece(GEAR_BY_ID[id])) return true;
+    if (p?.rec) for (const r of p.rec.made.values()) if (r.item === id) return true;
+    return false;
+  }
+  return {ACTS: new Set(['make', 'load', 'pump', 'fit', 'take']), hello, act, count, tick, owns, cracked: id => world.get('k' + String(id).slice(1))?.s === 'cracked'};
 }
