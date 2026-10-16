@@ -124,6 +124,7 @@ export async function create(host) {
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
     if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon' || a === 'ignite' || a === 'wood' || a === 'hole' || a === 'load' || a === 'pump' || a === 'fit' || a === 'make' || a === 'take') { if (typeof p !== 'string') return false; C.act(a, p, tagged(a, p, o)); return true; }
     if (a === 'rope' || a === 'free' || a === 'calm' || a === 'find') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/rope.js)
+    if (a === 'leave' || a === 'take' || a === 'den' || a === 'drop') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/foxden.js)
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid, tagged('fell', p, o)); return true;
   }
@@ -163,7 +164,7 @@ export async function create(host) {
         }
         else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world' || m.k === 'bolt' || m.k === 'snow' || m.k === 'smith' || m.k === 'made' || m.k === 'rec') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
-        else if (m.k === 'deny') { say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`); if (m.a === 'pot' || m.a === 'rope') mail.push(m); }   // (a pot refused: features/builds.js gives its food back; a rope: features/rope.js, someone had it first)
+        else if (m.k === 'deny') { say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`); if (m.a === 'pot' || m.a === 'rope' || m.a === 'find' || m.a === 'leave') mail.push(m); }   // (a pot refused: features/builds.js gives its food back; features/rope.js, features/animalfinds.js: someone had it first)
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
       }
       msgs.length = 0;

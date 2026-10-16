@@ -1,7 +1,7 @@
 // FAUNA (plan): where the forest's animals live, grown from the forest's own plan (world/forest.js) and its seed. Pure: no
 // Math.random, no DOM, no game state, so every player (and a server, one day) gets the same herds in the same glades from the
 // same seed without anything being sent. What they DO from moment to moment is the view's (features/fauna.js).
-//   const A = faunaPlan(F)   A.animals: [{id, sp, x, y, home: {x, y, r}, group, seed, ...}]   A.groups: [{sp, x, y, r, cover?, den?}]
+//   const A = faunaPlan(F)   A.animals: [{id, sp, x, y, home: {x, y, r}, group, seed, ...}]   A.groups: [{sp, x, y, r, cover?, den?, rock?}]
 // THE CAST (docs/FAUNA.md; Småland woods and the fell above them):
 //   roe        roe deer in twos and threes at the forest's edges: a glade's rim, the open ground beside thick trees; a bed in
 //              the thick of the trees near by (cover)
@@ -12,10 +12,14 @@
 //   capercaillie  the big grouse on the floor of the old pine woods
 // THE MORNING TRAILS (trailOf, below; docs/FAUNA.md "Tracks"): after a wet night, the way each herd walked to its bed, each fox round
 // to its den, each hare to its form, as lines of places and hours: the same on every client from the seed and the day.
-// OWNS: nothing at run time (plain data, cached per seed). READS: world/forest.js (RECT, HOME), core/mathx.js, content/animals.js (TRAIL).
+// THE FINDS (antlersOf, feathersOf, below; docs/FAUNA.md "Finds"): each buck's shed antlers, each cock's feathers after a lek morning
+// and in his summer moult, as places and hours: the same on every client from the seed and the clock.
+// OWNS: nothing at run time (plain data, cached per seed). READS: world/forest.js (RECT, HOME), core/mathx.js, content/animals.js
+//   (TRAIL, SHED, LEK), sim/env.js (SEASONS: the year's order).
 import {hash3} from '../core/mathx.js';
 import {RECT, HOME} from './forest.js';
-import {TRAIL} from '../content/animals.js';
+import {TRAIL, SHED, LEK} from '../content/animals.js';
+import {SEASONS} from '../sim/env.js';
 
 export const FAUNA_TUNE = {
   roe: {groups: [3, 4], high: 1, n: [2, 3], r: 9, apart: 26},     // herds in the home woods (+ high in the high country), deer a herd, roam r (m)
@@ -96,11 +100,11 @@ export function faunaPlan(F) {
     let s = null;
     for (let k = 0; k < 12 && !s && dens.length; k++) {
       const d = dens[ri(0, dens.length - 1)], a = R() * Math.PI * 2, x = d.x + Math.cos(a) * (d.r + 1.2), y = d.y + Math.sin(a) * (d.r + 1.2);
-      if (ok(x, y, .2) && !settle(x, y, 12) && far(groups.filter(q => q.sp === 'fox'), x, y, 30)) s = {x, y};
+      if (ok(x, y, .2) && !settle(x, y, 12) && far(groups.filter(q => q.sp === 'fox'), x, y, 30)) s = {x, y, rock: d};
     }
     s ||= best(40, HOME, (x, y) => settle(x, y, 14) ? -1e9 : around(x, y, 6).n + R());
     if (!s) continue;
-    const G = {sp: 'fox', x: +s.x.toFixed(2), y: +s.y.toFixed(2), r: T.fox.r, den: {x: +s.x.toFixed(2), y: +s.y.toFixed(2)}};
+    const G = {sp: 'fox', x: +s.x.toFixed(2), y: +s.y.toFixed(2), r: T.fox.r, den: {x: +s.x.toFixed(2), y: +s.y.toFixed(2)}, rock: s.rock ? {x: s.rock.x, y: s.rock.y, r: s.rock.r} : null};   // (rock: the one the den is under: sim/foxden.js its mouth)
     groups.push(G); add('fox', G, s.x, s.y);
   }
   // HARES: open ground with a little cover (bushes, tufts), a few on the fell's bare top
@@ -145,6 +149,8 @@ export function faunaPlan(F) {
     if (!s) continue;
     const G = {sp: 'capercaillie', x: s.x, y: s.y, r: T.capercaillie.r}; groups.push(G); caps.push(G); add('capercaillie', G, s.x, s.y, {hen: R() < .4});
   }
+  // (at least one cock a world, for the lek: hen drawn as before, then the first one overridden, so no other animal moves)
+  const cocks = animals.filter(q => q.sp === 'capercaillie'); if (cocks.length && cocks.every(q => q.hen)) cocks[0].hen = false;
   A = {groups, animals, around: (x, y, r, out) => around(x, y, r, out)};
   plans.set(F, A);
   return A;
@@ -218,4 +224,45 @@ export function trailAt(T, l, h, out) {
   const a = i * 3, b = a + 3, k = (h - P[a + 2]) / ((P[b + 2] - P[a + 2]) || 1);
   out.x = P[a] + (P[b] - P[a]) * k; out.y = P[a + 1] + (P[b + 1] - P[a + 1]) * k; out.hd = Math.atan2(P[b + 1] - P[a + 1], P[b] - P[a]);
   return true;
+}
+
+// ---------------------------------------------------------------- THE FINDS (features/animalfinds.js; content/animals.js SHED, LEK)
+// Pure functions of the plan, the animal and the clock (sd: sim/env.js TUNE.seasonDays, a season's days); each generator its own
+// mix of the animal's seed, never the plan's R. A find: {id, kind (an item id), x, y, yaw, t0, t1}: it lies from in-game hour t0
+// until t1. ok(x, y) -> bool: may one lie here (the caller's ground test; a few seeded tries, then the spot as it is).
+//   antlersOf(A, a, Y, sd, ok, out)   a buck's SHED.per antlers of year Y (0, 1, ...; -1: the winter before the world began), each
+//        on its own seeded hour in the shed window, within SHED.r m of his herd's bed, lying till the end of the next spring
+//   feathersOf(A, a, day, season, ok, out)   a cock's of that day: after a lek morning (LEK.season) LEK.feathers where he sang,
+//        from the lek's end; in the summer's moult one every LEK.moult days where he spends his day; LEK.lie days each
+//   seasonOfDay(day, sd)   the season that day's morning is in (by the clock alone)
+export const seasonOfDay = (day, sd) => SEASONS[Math.floor((((day + .25) / sd) % 4 + 4) % 4)];
+const TAU = Math.PI * 2;
+function layAt(R, cx, cy, r, ok) {
+  let x = cx, y = cy;
+  for (let k = 0; k < 6; k++) { const a = R() * TAU, d = Math.sqrt(R()) * r; x = cx + Math.cos(a) * d; y = cy + Math.sin(a) * d; if (!ok || ok(x, y)) break; }
+  return [+x.toFixed(2), +y.toFixed(2)];
+}
+export function antlersOf(A, a, Y, sd, ok, out = []) {
+  if (a.sp !== 'roe' || !a.buck) return out;
+  const G = A.groups[a.group], bed = G.cover || G, W = SHED.window, sH = sd * 24, yH = sH * 4;
+  const lo = (SEASONS.indexOf(W[0][0]) + W[0][1]) * sH, hi = (SEASONS.indexOf(W[W.length - 1][0]) + W[W.length - 1][2]) * sH;
+  const t1 = (Y + 1) * yH + (SEASONS.indexOf(SHED.last[0]) + SHED.last[1]) * sH;
+  const R = rngOf(mix(a.seed, 7300, Y));
+  for (let i = 0; i < SHED.per; i++) {
+    const t0 = Y * yH + lo + R() * (hi - lo), [x, y] = layAt(R, bed.x, bed.y, SHED.r, ok);
+    out.push({id: `antler:${a.id}:${Y}:${i}`, kind: 'roe_antler', x, y, yaw: R() * TAU, t0, t1});
+  }
+  return out;
+}
+export function feathersOf(A, a, day, season, ok, out = []) {
+  if (a.sp !== 'capercaillie' || a.hen) return out;
+  const G = A.groups[a.group];
+  if (season === LEK.season) {
+    const R = rngOf(mix(a.seed, 7400, day)), n = LEK.feathers[0] + Math.floor(R() * (LEK.feathers[1] - LEK.feathers[0] + 1)), t0 = day * 24 + LEK.hours[1];
+    for (let i = 0; i < n; i++) { const [x, y] = layAt(R, G.x, G.y, 1.2, ok); out.push({id: `feather:${a.id}:${day}:${i}`, kind: 'caper_feather', x, y, yaw: R() * TAU, t0, t1: t0 + LEK.lie * 24}); }
+  } else if (season === 'summer' && ((day % LEK.moult) + LEK.moult) % LEK.moult === 0) {
+    const R = rngOf(mix(a.seed, 7500, day)), t0 = day * 24 + 10, [x, y] = layAt(R, G.x, G.y, G.r * .7, ok);
+    out.push({id: `feather:${a.id}:${day}:m`, kind: 'caper_feather', x, y, yaw: R() * TAU, t0, t1: t0 + LEK.lie * 24});
+  }
+  return out;
 }

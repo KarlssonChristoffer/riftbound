@@ -42,7 +42,7 @@ import {createWorkshop} from './workshop.mjs';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, workshop = {}}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, workshop = {}, fauna = null, thief = ''}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -65,7 +65,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
   // THE WORKSHOP: the made things' records (by the browser's key), the furnaces (server/workshop.mjs)
   const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players, veins, heat: workshop.heat, smelt: workshop.smelt, wardrobe: !!workshop.wardrobe});
-  const animals = createAnimals({world, all, send: (p, m) => p.conn.send(encode(m)), log: (...a) => log(...a), now, clock});
+  const animals = createAnimals({world, all, send: (p, m) => p.conn.send(encode(m)), log: (...a) => log(...a), now, clock, plan: fauna, thief, players: () => peers.values(),
+    fires: () => { const sec = now() / 1000, out = []; for (const e of world.values()) if (e.s === 'built' && BUILDS[e.kind]?.fire && fuelAt(e, sec) > 0) out.push(e); return out; }});   // (the fox: server/animals.mjs, sim/foxden.js)
 
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }

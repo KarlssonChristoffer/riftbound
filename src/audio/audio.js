@@ -1300,6 +1300,9 @@ export function createAudio(ctx, host = {}) {
         case 'wildlife.frog_jump': fire('plop', e.x, e.y, {surf, frog: 1}); break;
         case 'wildlife.critter_dash': fire('rustle', e.x, e.y, {surf}); break;
         case 'wildlife.howl': fire('howl', e.x, e.y, {kind: e.kind, call: e.call}); break;   // (features/wildlife/coyotes.js: a coyote / fox / wolf at night)
+        // the capercaillie's song at the lek (features/fauna.js; living-animals.md): stand-ins on the closest recipes there are, a wooden
+        // knock for the clicks, a plop for the cork pop, a soft scrape for the grinding phrase
+        case 'wildlife.lek': if (e.call === 'click') fire('hit', e.x, e.y, {mat: 'wood', g: .3}); else if (e.call === 'pop') fire('plop', e.x, e.y, {surf, g: .6}); else fire('scrape', e.x, e.y, {surf, g: .4}); break;
         case 'tumbleweed.bounce': fire('rustle', e.x, e.y, {surf, g: .35 + .45 * (e.k || 0), gainDb: -6 + 4 * (e.k || 0), semi: -3}); break;   // dry twigs on the ground
         // the equipment experiment (features/equip/sim.js): its gadgets on the closest recipes there are
         case 'equip.throw': fire('jump', e.x, e.y, {surf, g: .6}); break;   // (a cloth swish: the arm swinging)
