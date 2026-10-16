@@ -1,6 +1,7 @@
 // GEAR PANEL: what you wear (features/gear.js; Tab, beside the pack). A slot a row (head, body, back, hands, legs, feet, main
 // hand, off hand), each with its pieces as pixel icons (ui/gearicons.js) after "own" (the character's own clothes: the slot
-// empty); a click wears a piece or takes it off. The piece under the pointer shows in a card that follows it (ui/geartip.js:
+// empty), then the slot's bare piece where he has a garment of his own there (No hat, No coat ...: content/gear.js BASE, a
+// piece replaces his own garment); a click wears a piece or takes it off. The piece under the pointer shows in a card that follows it (ui/geartip.js:
 // what it is, its weight and armor, what it does; Shift for more). At the bottom the set's numbers: weight, armor, speed. In
 // co-op a choice waits for the server ("waiting for the server"). Pixel art like the game (ui/pixelfont.js, ui/pixelframe.js).
 // OWNS: the panel (#gear + its style). READS: the feature's S (want, worn, stats, waiting), content/gear.js.
@@ -62,7 +63,7 @@ export function createGearPanel({S, choose, online}) {
       for (const g of [null, ...GEAR.filter(x => x.slot === slot)]) {
         const b = document.createElement('button'); b.className = 'g-it' + (g ? '' : ' own');
         const img = document.createElement('img'); img.src = g ? gearIcon(g) || slotIcon(slot, '#efe6cf') : slotIcon(slot, '#6b5e50'); b.appendChild(img);
-        if (g && RARITY[g.rarity]) { const i = document.createElement('i'); i.style.background = RARITY[g.rarity].col; b.appendChild(i); }   // (its rarity's colour)
+        if (g && !g.bare && RARITY[g.rarity]) { const i = document.createElement('i'); i.style.background = RARITY[g.rarity].col; b.appendChild(i); }   // (its rarity's colour)
         b.onclick = () => { const rest = S.want.filter(w => gearById(w).slot !== slot); choose(g ? [...rest, g.id] : rest); sync(); };
         tip.attach(b, {piece: () => g, slot, set: () => S.want});
         row.appendChild(b); btns.push({b, id: g?.id ?? null, slot});
