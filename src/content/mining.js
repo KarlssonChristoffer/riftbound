@@ -25,6 +25,10 @@ export const VEINS = {
   hollow: {item: 'stone',      blows: 6, n: [2, 3], tier: 1, xp: 4, col: ['#a89a80', '#8a7c66'], hollow: true},
 };
 export const SWING = {...WOOD.swing, dur: .7, hit: .3, keep: .45};
+// THE RINGING PICK (content/meals.js fried_chanterelles: the 'mine.ring' note; features/mining.js): every blow rings and each unspent
+// vein within r m answers from where it is (burnt: from the point mirrored through him), ms s a metre later, quieter with distance
+// (audio/audio.js mineEcho: its tone by kind). max: echoes in flight at once
+export const RING = {r: 14, ms: .04, max: 24};
 export const TUNE = {
   rhythm: .15, rhythmMul: 1.5,
   days: 3, day: 24,

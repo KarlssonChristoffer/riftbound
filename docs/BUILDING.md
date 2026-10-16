@@ -57,13 +57,16 @@ over once.
 
 ## With friends (co-op)
 
-The server keeps the builds (`server/room.mjs`, acts `'build'`, `'stoke'`, `'unbuild'`):
+The server keeps the builds (`server/room.mjs`, acts `'build'`, `'stoke'`, `'unbuild'`, and a fire's shared pot: `'pot'`,
+`'spoon'`, docs/COOKING.md):
 
 - **build** `{id: kind, x, y}`: within 4 m of the player, at least 0.4 m from every other build, no more of the kind
   standing for that player than its `most`. It gets an id (`'b' + n`) and is told to everyone with its fuel and the
   server's time. The builder's pouch pays when it hears its build stands (the pouch is the client's, as everywhere).
 - **stoke** `{id}`: anyone may add a log to any fire that isn't full; everyone's fire takes it, the stoker's pouch pays.
 - **unbuild** `{id}`: only your own lamp; it's gone for everyone and your makings come back.
+- **pot** `{id: the fire, dish, q}` / **spoon** `{id}`: a shared pot on a burning fire with none, four spoons, one a player
+  (docs/COOKING.md).
 - Builds stay for the room's life; a late joiner gets them all in the welcome.
 - The trip sends nothing: it is private. Friends see the wobble because they see your body.
 

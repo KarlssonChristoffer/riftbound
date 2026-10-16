@@ -25,13 +25,15 @@
 //   chunk meshes, the sparks. Sets the tool's want / aim for the job 'mine'.
 // READS: host.world.cave (veins, camp, floor), host.PL.tool, host.entities (near: crystals), host.mods ('mine.*'), host.env.t,
 //   pack (the pick, the pouch, XP, the store), coop (online, act, mail, net.id), combat's core (a crystal's damage).
-// EMITS: mine.hit, mine.spent, mine.chunk, mine.grow, mine.take, mine.open, tool.whiff.
+// THE RINGING PICK (content/mining.js RING; the 'mine.ring' note: content/meals.js fried_chanterelles): every blow rings (mine.hit /
+// tool.whiff ring: true) and the unspent veins round it answer (mine.echo), from the mirrored point when the note is < 0 (burnt).
+// EMITS: mine.hit, mine.spent, mine.chunk, mine.grow, mine.take, mine.open, mine.echo, tool.whiff.
 // API (besides tests'): F.shown(i) (a night vein shows now), F.isSpent(i)
 // BUDGET: sim: a grid lookup (veins by 4 m cell) a blow or a press; the chunks (a handful) a step; the regrowth once a second
 //   over the spent set. View: a vein's mesh made again only when its stage changes; the camp's once; chunks' matrices while they
 //   move; the veins shown or hidden when the camera turns (a dot product each).
 import * as THREE from 'three';
-import {VEINS, SWING as W, TUNE, blowPower, mineYield, regrowHours} from '../content/mining.js';
+import {VEINS, SWING as W, TUNE, RING, blowPower, mineYield, regrowHours} from '../content/mining.js';
 import {ITEMS} from '../content/items.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
@@ -209,10 +211,36 @@ export async function create(host) {
     host.events.push({type: 'mine.grow', x: V[i].x, y: V[i].y, i, kind: V[i].kind});
   }
 
+  // ---------------------------------------------------------------- the ringing pick (RING; the 'mine.ring' note)
+  // a blow at (x, y) rings: each unspent vein within RING.r m answers (hidden night veins too: the rock knows they're there) from
+  // where it is, or (burnt, ring < 0) from the point mirrored through him; RING.ms s a metre later (the sim's clock: EQ, in flight)
+  const EQ = []; for (let i = 0; i < RING.max; i++) EQ.push({on: false, t: 0, x: 0, y: 0, h: 0, kind: '', d: 0});
+  let ring = 0;
+  if (host.mods) { const f = () => { ring = host.mods.value('mine.ring', 0); }; host.mods.watch(f); f(); }
+  function rings(x, y) {
+    if (!ring || !V.length) return;
+    const P = host.player, cx = Math.floor(x / CELL), cy = Math.floor(y / CELL), r = Math.ceil(RING.r / CELL);
+    for (let j = cy - r; j <= cy + r; j++) for (let q = cx - r; q <= cx + r; q++) {
+      const L = cells.get(key(q, j)); if (!L) continue;
+      for (const n of L) {
+        if (spent.has(n)) continue;
+        const v = V[n], d = Math.hypot(v.x - x, v.y - y); if (d > RING.r) continue;
+        let o = null; for (const e of EQ) if (!e.on) { o = e; break; } if (!o) return;
+        const a = hitAt(v);
+        o.on = true; o.t = clockT + d * RING.ms; o.kind = v.kind; o.d = d; o.h = a.h;
+        o.x = ring > 0 ? a.x : 2 * P.x - a.x; o.y = ring > 0 ? a.y : 2 * P.y - a.y;
+      }
+    }
+  }
+  function echoes() {   // the answers due now
+    for (const o of EQ) if (o.on && clockT >= o.t) { o.on = false; host.events.push({type: 'mine.echo', x: o.x, y: o.y, h: o.h, kind: o.kind, d: o.d, k: Math.max(.15, 1 - o.d / RING.r)}); }
+  }
+
   // ---------------------------------------------------------------- the blow (player.chop of the job 'mine', world coordinates)
   function blow(e) {
     if (e.job !== 'mine') return;
     const tool = ITEMS[e.tool]?.tool; if (!tool) return;
+    rings(e.x, e.y);
     // the locked vein takes the blow anywhere within reach + assist of its face (he faces it); else the nearest in the blow's arc
     let i = lockI >= 0 && !spent.has(lockI) && !HID[lockI] && Math.hypot(V[lockI].x - e.x, V[lockI].y - e.y) - VEIN_R <= W.reach + W.assist ? lockI : -1;
     if (i < 0) {
@@ -231,13 +259,13 @@ export async function create(host) {
     if (i >= 0) { strike(i, e, tool); return; }
     const cr = lockC && !lockC.broken && Math.hypot(lockC.x - e.x, lockC.y - e.y) - .4 <= W.reach + W.assist ? lockC : crystalNear(e.x, e.y, e.z, W.reach, e.vx, e.vy);
     if (cr) { crystal(cr, e); return; }
-    host.events.push({type: 'tool.whiff', x: e.x + e.vx * .8, y: e.y + e.vy * .8});
+    host.events.push({type: 'tool.whiff', x: e.x + e.vx * .8, y: e.y + e.vy * .8, ring: ring !== 0});
   }
   function strike(i, e, tool) {
     const v = V[i], K = VEINS[v.kind], P = host.player, d = Math.hypot(v.x - P.x, v.y - P.y) || 1, ux = (v.x - P.x) / d, uy = (v.y - P.y) / d;
     const at = hitAt(v);
     if ((tool.tier || 1) < K.tier) {   // GEAR GATES: iron wants a better pick than the old one
-      host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: 0, rhythm: false, dx: ux, dy: uy});
+      host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: 0, rhythm: false, dx: ux, dy: uy, ring: ring !== 0});
       if (clockT - noteT > 2.5) { noteT = clockT; ui()?.float(at.x, at.y, at.h + .7, 'needs a better pick', '#e8a070'); }
       host.hitstop(.03); host.shake(1, .06); return;
     }
@@ -252,14 +280,14 @@ export async function create(host) {
       if (l > 1e-6) { left.set(i, l); ver++; }
       else spend(i, mineYield(R, v.kind, {extra: host.mods.value('mine.extra', 0)}), true);
     }
-    host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: Math.min(3, stageOf(i)), rhythm, dx: ux, dy: uy, hollow: !!K.hollow});
+    host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: Math.min(3, stageOf(i)), rhythm, dx: ux, dy: uy, hollow: !!K.hollow, ring: ring !== 0});
     host.hitstop(rhythm ? .07 : .045); host.shake(rhythm ? 2.2 : 1.5, .08);
   }
   // a cave crystal under the pick: combat breaks it (its own shards fly), TUNE.crystal.blows blows; the Glow Shards drop at its foot
   function crystal(p, e) {
     const cr = core(); if (!cr) return;
     const P = host.player, d = Math.hypot(p.x - P.x, p.y - P.y) || 1, ux = (p.x - P.x) / d, uy = (p.y - P.y) / d;
-    host.events.push({type: 'mine.hit', x: p.x - ux * .3, y: p.y - uy * .3, h: (p.z || 0) + .6, i: -1, kind: 'crystal', k: 1, rhythm: !!e.rhythm, dx: ux, dy: uy});
+    host.events.push({type: 'mine.hit', x: p.x - ux * .3, y: p.y - uy * .3, h: (p.z || 0) + .6, i: -1, kind: 'crystal', k: 1, rhythm: !!e.rhythm, dx: ux, dy: uy, ring: ring !== 0});
     const broke = cr.damage(p, Math.ceil((p.maxHp || 40) / TUNE.crystal.blows) + 1, {canCrit: false, dir: [ux * 2, uy * 2], by: 'melee', ux, uy, quiet: true});
     host.hitstop(.04); host.shake(1.5, .08);
     if (!broke) return;
@@ -551,7 +579,7 @@ export async function create(host) {
       if ((lockI >= 0 || lockC) && !t?.S.held) { lockI = -1; lockC = null; }
       const slot = t?.S.on && t.S.job === 'mine' ? pack()?.best('mine')?.slot ?? -1 : -1;
       if (slot !== heldSlot) { heldSlot = slot; if (slot >= 0 || !t?.S.on) pack()?.held(slot); }   // (the pack panel marks the pick in hand)
-      stepChunks(dt);
+      stepChunks(dt); echoes();
       if ((growT += dt) >= 1) {   // regrowth (offline: the world clock; the server's in co-op), once a second
         growT = 0;
         if (!ol && spent.size) { const h = host.env?.t ?? 0; for (const [i, at] of spent) if (h >= at) grow(i); }
@@ -562,6 +590,7 @@ export async function create(host) {
       for (let i = 0; i < evs.length; i++) {
         const e = evs[i];
         if (e.type === 'mine.hit') sparks(e);
+        else if (e.type === 'mine.echo') dust(e.x, e.y, e.h + .4, 1 + Math.round(e.k * 3));   // (a little grit sifts where the rock answers)
         else if (e.type === 'mine.spent') { dust(e.x + V[e.i].nx * .3, e.y + V[e.i].ny * .3, floorAt(V[e.i]) + .2, 16); host.shake(2, .15); }
       }
       syncVeins(); if (active()) { syncCamp(); syncLids(); } else { if (pickM) pickM.setVisible(false); for (const m of lids.values()) m.setVisible(false); }

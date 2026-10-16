@@ -129,6 +129,8 @@ export const EVENTS = {
   'fish.away':          ['features/fishing.js', 'x, y (the line comes in empty)', 'audio'],
   'fish.spot':          ['features/fishing.js', 'x, y (the cast fell on a fishing spot: it bites sooner and rarer)', 'audio'],
   'fish.bait':          ['features/fishing.js', 'x, y, id (bait cut from a small fish at the pack panel)', 'audio'],
+  'fish.gather':        ['features/fishing.js', 'x, y (him), n: the lingon\'s fish come to his legs (content/fishing.js COME)', 'audio'],
+  'fish.grab':          ['features/fishing.js', 'x, y, ok (false: a miss, they scatter): a hand into the water for the fish flashing past his feet', 'audio'],
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
@@ -205,16 +207,25 @@ export const EVENTS = {
   'pack.add':           ['features/pack.js',      'x, y, id (content/items.js), n: things went into the pouch or the bag', 'audio'],
   'pack.reset':         ['features/pack.js',      '(none): a new world (the Sandbox menu): the pack and every system\'s saved part cleared', 'woodcut'],
   'skill.level':        ['features/pack.js',      'x, y (the player), skill (content/skills.js), level: a skill reached a new level', 'audio'],
-  'meal.cook':          ['features/meals.js',     'x, y, id (content/meals.js): a meal cooked by a campfire and eaten: its buff starts', 'audio'],
+  'cook.start':         ['features/cooking.js',   'x, y (the fire), id (the dish): it goes on the stick over the flames', 'audio'],
+  'cook.sizzle':        ['features/cooking.js',   'x, y, k (s on the stick / its cook.t: the sizzle climbs with it)', 'audio'],
+  'cook.flare':         ['features/cooking.js',   'x, y, id: the just-right moment (fat drips, the fire flares)', 'campfires (view: the flare), audio'],
+  'cook.pull':          ['features/cooking.js',   'x, y, id, q (raw | done | right | burnt): pulled out of the fire (meals eats it: meal.cook)', 'audio'],
+  'cook.drop':          ['features/cooking.js',   'x, y, id: left on too long, it fell into the fire', 'audio'],
+  'meal.cook':          ['features/meals.js',     'x, y, id (content/meals.js), q (raw | done | right | burnt: features/cooking.js\'s stick): a meal cooked by a campfire and eaten: its mood starts', 'audio'],
+  'pot.set':            ['features/builds.js',    'x, y (the fire), id (its build), dish, q, mine: a shared pot went on a fire (four spoons)', 'audio'],
+  'pot.spoon':          ['features/builds.js',    'x, y (the fire), id, mine: someone took a spoon from its pot (mine: he eats it: features/meals.js spoon)', 'audio'],
+  'meal.hic':           ['features/meals.js',     'x, y: a hiccup (something odd eaten off the Try stick; view/livehero.js hops on its own count, meals F.hicN)', 'audio'],
   // foraging (features/forage.js, docs/FORAGING.md): a patch is the forest floor's (world/forest.js F.decor index i)
   'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],
   'forage.grow':        ['features/forage.js',    'x, y, i, kind: a picked patch has grown back', '(none yet)'],
   // mining (features/mining.js, docs/MINING.md): a vein is the cave's (world/caves.js C.veins index i)
-  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow)', 'mining (view: sparks, grit), audio'],
+  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow), ring (the ringing pick: it rings on)', 'mining (view: sparks, grit), audio'],
   'mine.spent':         ['features/mining.js',    'x, y, i, kind, n (his chunks; 0: a friend\'s blow spent it): the vein breaks open', 'mining (view: dust), audio'],
   'mine.chunk':         ['features/mining.js',    'x, y, item: a chunk picked up off the floor', 'audio'],
   'mine.grow':          ['features/mining.js',    'x, y, i, kind: a spent vein has come back', '(none yet)'],
   'mine.take':          ['features/mining.js',    'x, y: he took the old pick from the miner\'s camp', 'audio'],
+  'mine.echo':          ['features/mining.js',    'x, y, h (where the answer comes from: the vein, or burnt, the point mirrored through him), kind (its vein\'s), d (m from the blow), k (1 near .. .15 far): a vein answers the ringing pick (content/mining.js RING)', 'mining (view: grit), audio'],
   'mine.open':          ['features/mining.js',    'x, y (its mouth), i (the vein), cx, cy (the room): a hollow wall caved in; its sealed room is open (his cache on its floor)', 'audio, cavelife (view: dust)'],
   // the living dark (features/caves.js, features/cavelife.js, docs/CAVELIFE.md)
   'lantern.toggle':     ['features/caves.js',     'x, y, on: L put his lantern out or lit it again, down in the cave', 'audio'],
@@ -225,7 +236,7 @@ export const EVENTS = {
   'build.add':          ['features/builds.js',    'x, y, id, kind (content/builds.js), mine: a build went down (his, or online a friend\'s)', 'audio'],
   'build.remove':       ['features/builds.js',    'x, y, id, kind: a build was taken back', '(none yet)'],
   // the fly agaric broth (features/trip.js)
-  'trip.start':         ['features/trip.js',      'x, y, t (s): he drank the fly agaric broth', '(none yet)'],
+  'trip.start':         ['features/trip.js',      'x, y, t (s), still (the burnt broth: the world holds its breath): he drank the fly agaric broth', '(none yet)'],
   'trip.end':           ['features/trip.js',      'x, y: the trip has worn off', '(none yet)'],
   // woodcutting (sim/player/tool.js the swing, features/woodcut.js what it meets); who = the tree prop
   'player.chop':        ['sim/player/tool.js',    'x, y, z, vx, vy (unit: the blow\'s way), tool (content/items.js): a tool\'s swing lands', 'woodcut'],
@@ -235,7 +246,7 @@ export const EVENTS = {
   'tree.logs':          ['features/woodcut.js',   'x, y, who, n: the fallen trunk breaks into n logs', 'woodcut (view: dust), audio'],
   'tree.grow':          ['features/woodcut.js',   'x, y, who: a stump has grown back into its tree', '(none yet)'],
   'tool.hit':           ['features/woodcut.js',   'x, y, who, kind (body | a prop kind): a tool\'s swing meets a foe or a dummy', 'audio'],
-  'tool.whiff':         ['features/woodcut.js',   'x, y: a tool\'s swing at nothing', 'audio'],
+  'tool.whiff':         ['features/woodcut.js',   'x, y: a tool\'s swing at nothing (features/mining.js too: ring, the ringing pick rings on)', 'audio'],
   'bells.toll':         ['features/bells/view.js (a view: nothing in the sim listens)', 'x, y, h, k (0..1), note, who (the bell): its clapper strikes it again as it swings', 'audio (its note, softer)'],
 };
 

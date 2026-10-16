@@ -68,7 +68,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- sending: 20 times a second, after the frame's steps
   let sendT = 0, lastN = -1, lastRig = '', lastX = NaN, lastY = NaN, packed = null, sentW = null, pinged = 0;
-  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0};
+  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0, md: ''};
   const LS = ['', 0, 0, 0, 0];
   function send(now) {
     if (C.status !== 'online' || now - sendT < 1000 / TICK_HZ) return;
@@ -82,7 +82,9 @@ export async function create(host) {
       lastN = pp.n; packed = packPose(pp.w, pp.BN.length, packed);
       if (!sentW || !same(packed, sentW)) { sentW = (sentW && sentW.length === packed.length) ? sentW : new Int16Array(packed.length); sentW.set(packed); ST.w = b64(packed); }
     }
-    ST.lt = host.feature('caves')?.lit ? 1 : 0;   // (his lantern burns in the cave: the server's soot things go for it, friends' night veins hide)
+    const cv = host.feature('caves'), ml = host.feature('meals');
+    ST.lt = cv?.lit ? 1 : ml?.eyes && cv?.down ? 2 : 0;   // (his lantern burns in the cave: the server's soot things go for it, friends' night veins hide; 2: a burnt eel's eyes, only the soot things)
+    ST.md = ml?.code || '';   // (the meal in him: friends see its mood, content/meals.js)
     if (Math.hypot(ST.x - lastX, ST.y - lastY) > 4) ST.tp = 1;   // (a respawn, a teleport: the server lets that one through)
     lastX = ST.x; lastY = ST.y;
     const L = host.feature('equip')?.sim?.lasso?.L, ph = L?.phase;
@@ -100,11 +102,12 @@ export async function create(host) {
   // features/forage.js asks for a patch ('pick', p: its id 'd' + decor index, o: {lvl}: his Foraging level); features/mining.js
   // sends a blow on a vein ('mine', p: 'v' + its index in the cave's plan, o: {pow, lvl, tier})
   // features/builds.js puts a build down ('build', p: its kind, o: {x, y}), adds a log to a fire ('stoke', p: the build's id) and
-  // takes its own lamp back ('unbuild', p: the id)
+  // takes its own lamp back ('unbuild', p: the id), puts a shared pot on a fire ('pot', p: the fire's id, o: {dish, q}) and takes
+  // a spoon from it ('spoon', p: the fire's id)
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }
@@ -142,7 +145,7 @@ export async function create(host) {
         }
         else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
-        else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
+        else if (m.k === 'deny') { say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`); if (m.a === 'pot') mail.push(m); }   // (a pot refused: features/builds.js gives its food back)
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
       }
       msgs.length = 0;
