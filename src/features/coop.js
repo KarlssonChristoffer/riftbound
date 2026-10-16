@@ -127,12 +127,13 @@ export async function create(host) {
   // takes a struck tree's thunderwood ('wood', p: its fid); features/workshop.js loads a furnace, pumps it, fits a bellows, takes a bar
   // ('load', 'pump', 'fit', 'take', p: the furnace's build id) and makes a thing ('make', p: the anvil's id). features/pack.js: the title
   // he wears ('title', p: its id, '' none) and a --dev server's Skills rows ('dev', p: next | reset | titles | notitles); docs/SKILLS.md
+  // features/wrongwx.js asks about the following cloud ('cloud', p: 'x' + the event, o: {w: ask | pass | lose, to})
   const tags = {};   // act -> [fn(p) -> its extra fields] (F.tag)
   const tagged = (a, p, o) => { const T = tags[a]; if (!T) return o; o = {...o}; for (const f of T) Object.assign(o, f(p)); return o; };
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon' || a === 'ignite' || a === 'wood' || a === 'hole' || a === 'load' || a === 'pump' || a === 'fit' || a === 'make' || a === 'take' || a === 'crystal' || a === 'title' || a === 'dev' || a === 'dig') { if (typeof p !== 'string') return false; C.act(a, p, tagged(a, p, o)); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon' || a === 'ignite' || a === 'wood' || a === 'hole' || a === 'load' || a === 'pump' || a === 'fit' || a === 'make' || a === 'take' || a === 'crystal' || a === 'title' || a === 'dev' || a === 'dig' || a === 'cloud') { if (typeof p !== 'string') return false; C.act(a, p, tagged(a, p, o)); return true; }
     if (a === 'rope' || a === 'free' || a === 'calm' || a === 'find') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/rope.js)
     if (a === 'leave' || a === 'take' || a === 'den' || a === 'drop') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/foxden.js)
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;

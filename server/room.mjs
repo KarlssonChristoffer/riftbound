@@ -52,6 +52,8 @@ import {dollTargets, nearestOf, openGround, dollWalk, underground} from '../src/
 import {nameHash} from '../src/core/rng.js';
 import {TUNE as MIRE} from '../src/content/mire.js';
 import {nightOf, createWisps} from '../src/sim/mire.js';
+import {eventAt as wrongAt} from '../src/sim/wrongwx.js';
+import {TUNE as WRONG} from '../src/content/wrongwx.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createAnimals} from './animals.mjs';
 import {createSoot} from '../src/sim/cavelife.js';
@@ -199,6 +201,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (ws.ACTS.has(a)) return ws.act(p, a, m, id, deny);
     if (a === 'shelve' || a === 'unshelve' || a === 'fetch') return shelf(p, a, m, id, deny);
     if (a === 'dig') return mireDig(p, id, deny);
+    if (a === 'cloud') return cloudAct(p, m, id, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     let tr = null, dx = 0, dy = 0;
@@ -482,6 +485,37 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (n >= ICE.hole.max) { let o = null, oa = Infinity; for (const [id, e] of world) if (id[0] === 'i' && e.at < oa) { oa = e.at; o = id; } world.delete(o); all({k: 'world', id: o, s: 'grown'}); }
     const id = 'i' + (++holeN), e = {s: 'hole', x: +x.toFixed(2), y: +y.toFixed(2), r: m.b ? ICE.hole.breakR : ICE.hole.r, at: +refreezeAt(clock(), WXT.seasonDays).toFixed(3)};
     world.set(id, e); all({k: 'world', id, ...e, by: p.id}); log(`  ${p.name} ${m.b ? 'went through the ice' : 'cut a hole in the ice'} (${id})`);
+  }
+
+  // WRONG WEATHER (sim/wrongwx.js, content/wrongwx.js, docs/WEATHER.md): when and where is the seed's (every client works it out);
+  // only whom the following cloud follows is the server's: 'x' + n in the world {s: 'cloud', who (0: lost), at (its end: the
+  // tick clears it)}. Act 'cloud': w 'ask' (the cloud of event n began on his clock: the first ask picks a placed player at random;
+  // a later one gets the pick back), 'pass' (to: a friend within reach of him, he being its pick), 'lose' (he sheltered it off).
+  // Ids 'x' 9000 and up are the sandbox menu's (dev: no check against the schedule)
+  const wrR = mulberry32((seed ^ 0x3c1d) >>> 0);
+  function cloudAct(p, m, id, deny) {
+    if (!/^x\d{1,6}$/.test(id)) return deny('bad id');
+    const n = +id.slice(1), w = str(m.w, 8), e = world.get(id);
+    if (w === 'ask') {
+      if (e) { p.conn.send(encode({k: 'world', id, ...e})); return; }
+      let at = clock() + WRONG.cloud.dur;
+      if (n < 9000) {
+        const h = clock(), ev = wrongAt(seed >>> 0, h, WXT.seasonDays, null) || wrongAt(seed >>> 0, h, WXT.seasonDays, null, true);
+        if (!ev || ev.n !== n || ev.kind !== 'cloud') return deny('no cloud');
+        at = ev.t1;
+      }
+      const pl = [...peers.values()].filter(q => q.placed), q = pl[Math.floor(wrR() * pl.length)] || p;
+      const s = {s: 'cloud', who: q.id, at: +at.toFixed(3)};
+      world.set(id, s); all({k: 'world', id, ...s}); log(`  a cloud follows ${q.name} (${id})`); return;
+    }
+    if (!e || e.s !== 'cloud' || e.who !== p.id) return deny('not yours');
+    if (w === 'lose') { e.who = 0; all({k: 'world', id, ...e}); return; }
+    if (w === 'pass') {
+      const q = peers.get(+m.to) || peers.get(m.to);
+      if (!q || !q.placed || Math.hypot(q.x - p.x, q.y - p.y) > WRONG.cloud.pass + 1) return deny('too far');
+      e.who = q.id; all({k: 'world', id, ...e}); log(`  ${p.name} passed the cloud to ${q.name}`); return;
+    }
+    deny('no such');
   }
 
   // THE MIRE (docs/MIRE.md): a dig at the night's find ({a: 'dig', id: 'w' + the night}). The night must be tonight's (or,
