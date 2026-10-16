@@ -32,6 +32,7 @@ export const FLAG_DOCS = {
   hut:       '0: no stone hut in the forest\'s lakeside clearing (world/hut.js, layout.js HUT: a roofed place to try the cutaway)',
   cut:       '0: no cutaway (features/cutaway.js: the ground, rock and walls between the camera and the player cut away round him, and a roof over him)',
   decor:     '0: no small things on the forest floor (world/decor3d.js: stumps, fallen logs, mushrooms, blueberries from content/recipes.js)',
+  floor3d:   '0: the forest floor\'s stones, pebbles and twigs painted flat as before, instead of lying on it in 3D (world/floor3d.js: pebbles on the floor, the strand and the gravel bars, the stream stones, the banks\' loose stones, the spring\'s ring, twigs and sticks)',
   // ---- the player
   set:       'basic | sim | body | gunslinger | outlaw: the loadout (baked cloak / runtime cloth / bare body; the cowboys with their revolvers)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
