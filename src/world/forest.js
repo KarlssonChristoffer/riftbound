@@ -80,7 +80,8 @@ export const TUNE = {
   stream: {hw0: .3, hw1: .55, step: .6, depth: .1, bank: 1.25, wander: .3,   // (wander: the width swells and pinches by up to this share along it)
     meander: [{amp: 1.25, len: 9.5, flat: [.03, .13]}, {amp: 1.2, len: 15, flat: [.02, .08]}],   // (the stream's, the outflow's: MEANDERS below; amp rad, len m a swing, flat: the bed's fall per m from full .. none)
     approach: 7, bend: 2.4,   // (approach: the outflow's last m come straight down into the river's head; bend: a bend's curvature (1/m) x this = 1, its full lean: deeper outside, a gravel bar inside)
-    riffle: {slope: [[.06, .22], [.012, .05]], steps: .4, stones: [.06, .5], r: [.13, .28]}},   // (riffles: the bed's slope from calm to all white, the stream's then the outflow's; steps: how much of a steep stretch runs white (a noise's cut: the rest are its pools); stones: odds a stone stands at a point, in a run .. a riffle; r: its radius, m)
+    riffle: {slope: [[.06, .22], [.012, .05]], steps: .4, stones: [.06, .5], r: [.13, .28]},   // (riffles: the bed's slope from calm to all white, the stream's then the outflow's; steps: how much of a steep stretch runs white (a noise's cut: the rest are its pools); stones: odds a stone stands at a point, in a run .. a riffle; r: its radius, m)
+    loose: {bank: .004, wet: .0025, r: [.035, .1]}},   // (loose stones (world/floor3d.js, laid in 3D only): odds per texel on a bank's lip, in the shallows by it; their radius m)
   trees: {cell: 3.2, jitter: .36, base: .12, dense: .78, slope: .5, water: 1.4, edge: 2.2, south: 4},
   under: {cell: 1.6, jitter: .4, p: .2},
   rocks: {big: 3, small: 3},
@@ -1023,6 +1024,14 @@ export function paint(F, K, S, T) {
   const box = F.box, xa = Math.max(0, Math.floor((box[0] - X0) * PPM)), xb = Math.min(WPX - 1, Math.ceil((box[2] - X0) * PPM));
   const ya = Math.max(0, Math.floor((box[1] - Y0) * PPM)), yb = Math.min(HPX - 1, Math.ceil((box[3] - Y0) * PPM));
   const M = F.wet;
+  // STONES IN 3D (world/floor3d.js): with a sink in the painter's kit, a pebble or stone goes there and only its damp seat is painted
+  // (a stream stone's: the rock's darkest tone, a little inside its footprint); without one they're stamped flat as before. The banks
+  // and the shallows get a few loose stones of their own then (TUNE.stream.loose)
+  const SK = K.floor3d || null, LO = TUNE.stream.loose;
+  const seat = (cx, cy, rx, ry, R, tn) => {
+    for (let y = Math.floor((cy - ry - Y0) * PPM); y <= Math.ceil((cy + ry - Y0) * PPM); y++) for (let x = Math.floor((cx - rx - X0) * PPM); x <= Math.ceil((cx + rx - X0) * PPM); x++)
+      if (((X0 + (x + .5) / PPM - cx) / rx) ** 2 + ((Y0 + (y + .5) / PPM - cy) / ry) ** 2 < 1) G.p(x, y, R, tn);
+  };
   for (let x = xa; x <= xb; x++) for (let y = ya; y <= yb; y++) {
     const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM;
     if (!M.d[(Math.floor(my) - M.y0) * M.w + Math.floor(mx) - M.x0]) continue;   // (far from any water: most of the box)
@@ -1032,11 +1041,12 @@ export function paint(F, K, S, T) {
     if (!inS && e > 1.2) continue;
     if (lake && e >= 0 && F.strand(mx, my)) {   // the STRAND: the basin's floor the water left, at its height: wet sand at the water, then sand,
       const g = n2(x / 6, y / 5, 81), pe = hsh(x, y, 82);   // gravel in drifts, pebbles; moss creeping in from the land side
+      if (SK && pe < .014) SK.add(mx + .5 / PPM, my + .5 / PPM, (1.4 + hsh(x, y, 87) * 1.2) / PPM, (.9 + hsh(x, y, 88) * .8) / PPM, 0);   // (a pebble in 3D, the gravel goes on under it; the smaller ones stay painted)
       const out = (Math.hypot((mx - L.x) / L.rx, (my - L.y) / L.ry) - 1) * Math.min(L.rx, L.ry);   // m inside the ellipse's rim (< 0)
       if (e < .05) G.p(x, y, S.earth, 3);
       else if (e < .16) G.p(x, y, S.earth, hsh(x, y, 83) < .6 ? 2 : 1);
       else if (out > -.35 + n2(x / 3, y / 3, 84) * .3 && hsh(x, y, 85) < .7) G.p(x, y, S.moss, hsh(x, y, 86) < .5 ? 2 : 1);
-      else if (pe < .035) { G.p(x, y, S.rock, 0); G.p(x + 1, y, S.rock, 1); G.p(x, y + 1, S.rock, 2); G.p(x + 1, y + 1, S.rock, 3); }   // a pebble, lit from the up-left
+      else if (pe < .035 && !(SK && pe < .014)) { G.p(x, y, S.rock, 0); G.p(x + 1, y, S.rock, 1); G.p(x, y + 1, S.rock, 2); G.p(x + 1, y + 1, S.rock, 3); }   // a pebble, lit from the up-left
       else if (g > .55) G.p(x, y, S.floor, pe < .45 ? 1 : pe < .8 ? 2 : 3);
       else G.p(x, y, S.inlay, g < .3 && pe < .5 ? 1 : 2);
       continue;
@@ -1047,11 +1057,15 @@ export function paint(F, K, S, T) {
     const bo = !lake && o.hw > 0 ? bendOut(o.k === 1 ? F.outflow : F.stream, o.i, o.a, o.hw) : 0;   // (a bend: its bar inside, its cut bank outside)
     if (e >= 0 && bo < -.2 && e < .75 * -bo - .1 + n2(x / 3, y / 2, 74) * .2) {   // the POINT BAR on a bend's inside: gravel and sand the water left, pebbles
       const pe = hsh(x, y, 75);
+      if (SK && pe < .02 && e >= .04) SK.add(mx + .5 / PPM, my + .5 / PPM, (1.4 + hsh(x, y, 77) * 1.4) / PPM, (.9 + hsh(x, y, 78) * .9) / PPM, 0);   // (in 3D, the gravel goes on under it; the smaller ones stay painted)
       if (e < .04) G.p(x, y, S.earth, 2);
-      else if (pe < .05) { G.p(x, y, S.rock, 0); G.p(x + 1, y, S.rock, 1); G.p(x, y + 1, S.rock, 2); G.p(x + 1, y + 1, S.rock, 3); }
+      else if (pe < .05 && !(SK && pe < .02)) { G.p(x, y, S.rock, 0); G.p(x + 1, y, S.rock, 1); G.p(x, y + 1, S.rock, 2); G.p(x + 1, y + 1, S.rock, 3); }
       else if (n2(x / 5, y / 4, 76) > .5) G.p(x, y, S.floor, pe < .5 ? 1 : 2);
       else G.p(x, y, S.inlay, pe < .4 ? 1 : 2);
       continue;
+    }
+    if (SK && e > (lake ? 0 : -.08) && e < .16 && hsh(x, y, 79) < (e < 0 ? LO.wet : LO.bank)) {   // a loose stone on the bank's lip or in the shallows by it
+      const r = LO.r[0] + (LO.r[1] - LO.r[0]) * hsh(x, y, 80) ** 2; SK.add(mx, my, r, r * (.65 + hsh(x, y, 81) * .3), 1);
     }
     if (e >= 0) {   // the banks: an earth lip (wider and darker under a bend's cut outside bank), damp ground, then the lusher band
       if (e < .05 + (bo > .2 ? .1 * bo : 0)) G.p(x, y, S.earth, 3);
@@ -1078,14 +1092,21 @@ export function paint(F, K, S, T) {
     let r0 = 0; for (let r = .5; r <= 1.02; r += .01) if (F.strand(L.x + cx * L.rx * r, L.y + cy * L.ry * r)) { r0 = r; break; }
     if (!r0 || (1.02 - r0) * Math.min(L.rx, L.ry) < .7) continue;   // (the strand too narrow here)
     const r = r0 + (1.02 - r0) * (.35 + .3 * hsh(k, 6, 9)), sz = .6 + hsh(k, 7, 11) * .6;
-    T.boulder(K, L.x + cx * L.rx * r - X0, L.y + cy * L.ry * r - Y0, 4 * sz + 1.5, 2.8 * sz + 1, S.rock, k * 31 + 7, S.moss);
+    const bx = L.x + cx * L.rx * r, by = L.y + cy * L.ry * r, brx = 4 * sz + 1.5, bry = 2.8 * sz + 1;
+    if (SK) { SK.add(bx, by - bry / PPM, brx / PPM, bry / PPM, 2); seat(bx, by - bry / PPM, brx * .8 / PPM, bry * .8 / PPM, S.earth, 3); }
+    else T.boulder(K, bx - X0, by - Y0, brx, bry, S.rock, k * 31 + 7, S.moss);
   }
   // the stones standing in the streams (lay's F.stones): dry, so the water flows round them and its foam rings them
-  for (const s of F.stones || []) { const rx = s.r * PPM, h = hsh(s.x * 16 | 0, s.y * 16 | 0, 7); T.boulder(K, s.x - X0, s.y + s.r * .6 - Y0, rx, rx * .72, S.rock, h * 997 | 0, h < .25 ? S.moss : null); }   // (washed bare: a quarter keep a cap of moss)
+  for (const s of F.stones || []) {
+    if (SK) { SK.add(s.x, s.y, s.r, s.r / 1.3, 1); seat(s.x, s.y, s.r, s.r / 1.3, S.rock, 3); continue; }   // (all its dry spot (hypot(dx, dy * 1.3) < r: world.js forestSample), so the foam rings it as it did the painted one)
+    const rx = s.r * PPM, h = hsh(s.x * 16 | 0, s.y * 16 | 0, 7); T.boulder(K, s.x - X0, s.y + s.r * .6 - Y0, rx, rx * .72, S.rock, h * 997 | 0, h < .25 ? S.moss : null);   // (washed bare: a quarter keep a cap of moss)
+  }
   // the spring: a ring of mossy stones round where it wells up, open downstream
   const C = F.stream, dx = C.px[Math.min(C.n - 1, 8)] - C.px[0], dy = C.py[Math.min(C.n - 1, 8)] - C.py[0], a0 = Math.atan2(dy, dx);
   for (let k = 0; k < 7; k++) {
     const a = a0 + .7 + k * (Math.PI * 2 - 1.4) / 6, sz = .8 + hsh(k, 3, F.seed & 255) * .25;
-    T.boulder(K, F.spring.x + Math.cos(a) * .52 - X0, F.spring.y + Math.sin(a) * .47 - Y0, 4.5 * sz + 1.5, 3 * sz + 1, S.rock, k * 17 + 3, S.moss);
+    const bx = F.spring.x + Math.cos(a) * .52, by = F.spring.y + Math.sin(a) * .47, brx = 4.5 * sz + 1.5, bry = 3 * sz + 1;
+    if (SK) { SK.add(bx, by - bry / PPM, brx / PPM, bry / PPM, 2); seat(bx, by - bry / PPM, brx * .8 / PPM, bry * .8 / PPM, S.earth, 3); }
+    else T.boulder(K, bx - X0, by - Y0, brx, bry, S.rock, k * 17 + 3, S.moss);
   }
 }

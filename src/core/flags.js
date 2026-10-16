@@ -32,6 +32,7 @@ export const FLAG_DOCS = {
   hut:       '0: no stone hut in the forest\'s lakeside clearing (world/hut.js, layout.js HUT: a roofed place to try the cutaway)',
   cut:       '0: no cutaway (features/cutaway.js: the ground, rock and walls between the camera and the player cut away round him, and a roof over him)',
   decor:     '0: no small things on the forest floor (world/decor3d.js: stumps, fallen logs, mushrooms, blueberries from content/recipes.js)',
+  floor3d:   '0: the forest floor\'s stones, pebbles and twigs painted flat as before, instead of lying on it in 3D (world/floor3d.js: pebbles on the floor, the strand and the gravel bars, the stream stones, the banks\' loose stones, the spring\'s ring, twigs and sticks)',
   // ---- the player
   set:       'basic | sim | body | gunslinger | outlaw: the loadout (baked cloak / runtime cloth / bare body; the cowboys with their revolvers)',
   bow:       'hd: the bow drawn on the HD overlay instead of in pixels',
@@ -77,7 +78,7 @@ export const FLAG_DOCS = {
   preserve:  '1: keep the WebGL drawing buffer between frames (a capture that reads the canvas outside the frame that drew it)',
   cinema:    '0: never the cinematic camera (features/cinema.js); now: start it at once and keep it through input (captures, tests)',
   cineidle:  's of no input before the cinematic camera starts (features/cinema.js TUNE.idle: 45)',
-  cam:       '3p: start in the third person chase camera (features/chasecam.js; F6 or the menu toggles it)',
+  cam:       '3p | 1p: start in the third person chase camera / first person (features/chasecam.js; F6 goes round the views, or the menu)',
   // ---- features (0 turns one off)
   wind: '0: no wind', windlevel: 'calm | breeze | brisk | gale: lock the wind strength', windlines: '0 | hd | pixel: the wind lines',
   litter: '0: the fallen leaves stay as baked (no wind moves them, none are lifted); also the low detail tier',

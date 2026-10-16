@@ -63,6 +63,7 @@ await run('climb at an angle (E: the camera eases round to face the wall, climbs
   ${key('e').replace(/`/g, '\`')} R.step(240); window.__climb = {z: R.P.z, yaw: R.yaw, state: R.P.state}; });`, 1500);
 console.log('     after the climb:', JSON.stringify(await ev('window.__climb')));
 await run('camera turn (X)', 'window.__r3d.keys.add("x");' + step(40) + 'window.__r3d.keys.delete("x");' + step(5));
+await run('camera views (F6: third person, first person, back)', Array(3).fill(key('F6') + step(15)).join('') + `if (window.__r3d.G.cine) throw new Error('F6 x3 left a camera view on');`);
 await size(2560, 1080); await run('ultrawide resize', 'window.dispatchEvent(new Event("resize"));' + step(20));
 await size(1920, 1080); await run('back to 16:9', 'window.dispatchEvent(new Event("resize"));' + step(20));
 await run('wheel zoom in + out', `document.querySelector('#screen').dispatchEvent(new WheelEvent('wheel', {deltaY: -100, bubbles: true, cancelable: true}));` + step(60) +
