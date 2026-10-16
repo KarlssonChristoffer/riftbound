@@ -1,10 +1,10 @@
 // PLAYTEST BOOT CHECK: load a running server's page in headless Chrome for a few seconds and list exceptions and console
 // errors. The playtest server's only check before Christoffer plays it (speed over verification).
-//   node tools/playtest/boot.mjs [--url http://localhost:8340/src/?mp=1] [--secs 20]
+//   node tools/playtest/boot.mjs [--url http://localhost:8340/src/?mp=1] [--secs 40]
 import {launch} from '../lib/chrome.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
-const URL_ = arg('url', 'http://localhost:8340/src/?mp=1'), SECS = +arg('secs', 20), DBG = 9361;
+const URL_ = arg('url', 'http://localhost:8340/src/?mp=1'), SECS = +arg('secs', 40), DBG = 9361;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const chrome = launch('playtest', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist',
   '--window-size=1475,706', `--remote-debugging-port=${DBG}`, 'about:blank']);
