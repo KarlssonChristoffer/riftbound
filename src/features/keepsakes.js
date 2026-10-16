@@ -8,18 +8,23 @@
 //               the stream outside its deep pools) and fish shadows rise round your feet (fishing.come: fishing draws them);
 //               E jabs (fishing.grab: rolled like a cast with HERON's limits, the server's online). A jab, hit or miss, or a
 //               step scatters them for HERON.back s. A friend's feather: their shadows on your screen too (view only)
+//   THE TALLY STICK  it counts (the rule: docs/KEEPSAKES.md, under its spoiler heading); each count a notch on its icon
+//               (packpanel iconHook) and a dry scratch; at TALLY.full it is the Full Tally Stick (worn in its place)
 // MULTIPLAYER: what you wear is in your gear set, which is the server's to say (features/gear.js, server/room.mjs wear): everyone
 //   sees the charms on you, and the server and your friends' clients read your set for the rules that touch them (the soot
 //   things: server/room.mjs; the animals: features/fauna.js reads a peer's q.gear).
 // SIM vs VIEW: the worn set and its notes change in update (a step), on a change of the gear's set only. The heron's stillness,
 //   its shadows' rise and the jab are the sim's; how far up the shadows are drawn (eased) and a friend's are the view's.
-// OWNS: the modifier source 'keepsakes', F.worn (the keepsakes in your set now), the heron's state (HS). READS: gear (S.worn,
+// OWNS: the modifier source 'keepsakes', F.worn (the keepsakes in your set now), the heron's state (HS), its save
+//   (pack.store('keepsakes'): tally), packpanel's iconHook.of (the tally's notches). READS: gear (S.worn,
 //   S.ver), pack (give: the dev row), fishing (shallow, come, grab, fishing), coop (peers: their gear, where they are), flags
 //   ('keepsakes'), host.player, host.PL (hold, useE, nearInteract).
-// EMITS: nothing of its own (the jab: fishing's fish.jab / fish.catch / fish.miss). BUDGET: update: a compare a step (the set's
+// EMITS: keep.notch (the jab: fishing's fish.jab / fish.catch / fish.miss). BUDGET: update: a compare a step (the set's
 //   version); with the feather worn one waterSample a step (fishing.shallow); view: one ask a frame per feather near you.
 import {flags} from '../core/flags.js';
-import {KEEPSAKE_IDS, NOTES, HERON, STONE, isKeepsake} from '../content/keepsakes.js';
+import {KEEPSAKE_IDS, NOTES, HERON, STONE, TALLY, isKeepsake} from '../content/keepsakes.js';
+import {ITEMS} from '../content/items.js';
+import {iconHook} from '../ui/packpanel.js';
 import {viewRandom} from '../core/rng.js';
 import {hdUnit, hdPrompt} from '../ui/hdpixel.js';
 
@@ -61,6 +66,34 @@ export async function create(host) {
     if ((HS.still += dt) >= HERON.still && HS.away <= 0) HS.k = Math.min(1, HS.k + dt / HERON.rise);
   }
 
+  // ---------------------------------------------------------------- the Tally Stick
+  const store = () => { const s = pack()?.store('keepsakes'); if (s) s.tally ??= 0; return s; };
+  let dayWas = null, devTally = flags.get('tally');
+  function tally() {
+    const pk = pack(), s = store(); if (!pk || !s) return;
+    if (devTally && isFinite(+devTally)) { s.tally = Math.max(0, +devTally | 0); devTally = null; pk.dirty(); iconHook.ver++; }
+    const day = host.env?.day;
+    const turned = dayWas !== null && day > dayWas; dayWas = day ?? null;
+    if (turned && ON && F.worn.has('tally_stick') && host.feature('caves')?.down) {   // (the rule: docs/KEEPSAKES.md, spoiler)
+      s.tally++; pk.dirty(); iconHook.ver++;
+      const P = host.player; host.events.push({type: 'keep.notch', x: P.x, y: P.y, n: s.tally});
+    }
+    if (s.tally >= TALLY.full && pk.count('tally_stick') > 0) {   // full: the stick is the Full Tally Stick now, worn in its place
+      const G = gear(), worn = F.worn.has('tally_stick');
+      pk.take('tally_stick', 1); pk.give('full_tally_stick', 1); s.tally = 0; pk.dirty(); iconHook.ver++;
+      if (worn && G) G.choose([...G.S.want.filter(id => id !== 'tally_stick'), 'full_tally_stick']);
+    }
+  }
+  // the tally's look in the pouch: its notches cut pale (row r, column 11 - r for the r-th), cached per count
+  const TALLY_ICONS = [];
+  function tallyIcon(n) {
+    if (TALLY_ICONS[n]) return TALLY_ICONS[n];
+    const d = ITEMS.tally_stick, icon = d.icon.map(r => r.split(''));
+    for (let r = 1; r <= Math.min(n, TALLY.full); r++) icon[r][11 - r] = 'c';
+    return TALLY_ICONS[n] = {icon: icon.map(r => r.join('')), pal: {...d.pal, c: TALLY.cut}, key: 'tally' + n};
+  }
+  iconHook.of = id => { if (id !== 'tally_stick') return null; const n = store()?.tally || 0; return n ? tallyIcon(n) : null; };
+
   F.update = dt => {
     const G = gear(), v = G?.S?.ver ?? 0;
     if (v !== gearV) {   // (the set changed: which keepsakes are worn now, their notes)
@@ -69,6 +102,7 @@ export async function create(host) {
       F.ver++; setNotes();
     }
     heron(dt);
+    tally();
   };
   F.onKey = k => {
     if (k !== 'e' || !ready() || !free()) return false;
@@ -135,6 +169,6 @@ export async function create(host) {
   F.menu = () => game()?.mode !== 'sandbox' ? [] : [
     {label: 'Keepsakes: give all (one of each in the pouch)', run: () => { const pk = pack(); if (pk) for (const id of KEEPSAKE_IDS) if (!pk.count(id)) pk.give(id, 1); }},
   ];
-  F.hud = () => F.worn.size ? `keepsakes worn ${[...F.worn].join(', ')}${ON ? '' : ' (rules off)'}${HS.w ? ` · heron ${HS.w} still ${HS.still.toFixed(1)} k ${HS.k.toFixed(2)}${HS.away > 0 ? ' away ' + HS.away.toFixed(0) : ''}` : ''}` : '';
+  F.hud = () => F.worn.size ? `keepsakes worn ${[...F.worn].join(', ')}${ON ? '' : ' (rules off)'} · tally ${store()?.tally ?? '-'}${HS.w ? ` · heron ${HS.w} still ${HS.still.toFixed(1)} k ${HS.k.toFixed(2)}${HS.away > 0 ? ' away ' + HS.away.toFixed(0) : ''}` : ''}` : '';
   return F;
 }

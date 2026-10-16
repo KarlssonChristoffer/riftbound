@@ -132,6 +132,7 @@ export const FLAG_DOCS = {
   nshift: 'the night shift\'s strength (docs/UNCANNY.md): 1 default; 0 no tree or boulder walks; 2 twice as many walk, a little further. Co-op: the server\'s --nshift decides',
   nelk: 'how often the night elk hunts (docs/UNCANNY.md): 1 default; 2 twice as often (half the rest after a knock); 0 never (it walks its way and grows wrong, that is all). Offline only: the co-op server runs its own',
   nnotice: 'how far the forest\'s odd things show (docs/UNCANNY.md: the night ring\'s glow and light, the pale marks by lantern light): x1 default',
+  tally: 'n (dev): the Tally Stick starts with n notches (features/keepsakes.js; 10 or more: it fills at the next step)',
   keepsakes: '0: the keepsakes\' rules off (features/keepsakes.js, docs/KEEPSAKES.md: what a worn charm bends); the keepsakes stay in the pouch and can be worn',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools

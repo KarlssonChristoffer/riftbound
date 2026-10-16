@@ -1284,6 +1284,7 @@ export function createAudio(ctx, host = {}) {
         case 'lantern.snuff': fire('lanternSnuff', e.x, e.y); break;   // (the soot things put it out)
         case 'lantern.relight': fire('lanternLight', e.x, e.y); break;
         case 'critter.wake': fire('critter', e.x, e.y); break;
+        case 'keep.notch': fire('scrape', e.x, e.y, {g: .5}); break;   // (the Tally Stick: a dry scratch)
         case 'soot.flinch': fire('wings', e.x, e.y, {n: 1, g: .7}); break;   // (a soot thing breaking off: the Big Tooth)   // (features/cavelife.js: a rock-thing unrolls and trots off)
         case 'mine.spent': fire('treeLogs', e.x, e.y, {surf: 'stone'}); fire('kick', e.x, e.y, {mat: 'clay', surf: 'stone'}); break;   // (stand-ins: the vein breaks open)
         case 'mine.chunk': fire('hit', e.x, e.y, {mat: 'clay', g: .35}); break;   // (stand-in: a chunk into the pouch)
