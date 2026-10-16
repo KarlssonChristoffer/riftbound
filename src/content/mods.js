@@ -30,6 +30,8 @@ export const ELEM = {
     void: {up: 6, stun: .5, night: 1.5, fog: 1.3, warp: 3, pull: {r: 3.5, d: 1.6}}},
 };
 export const ELEM_IDS = ['fire', 'frost', 'storm', 'rot', 'void'];
+// with the shared hit model (features/hits.js) in the game: the share of a blow that becomes the rune's type (hits' `extra`)
+export const HITS_SHARE = .3;
 
 // REACTIONS: an incoming type meeting a status already on the target (features/mods/sim.js react()). mul: x this hit's damage;
 // boom: an explosion there (combat core explode: r m, dmg); the rest each its own rule (the sim's comments)
@@ -138,7 +140,9 @@ export const fits = (id, kind) => !!PARTS[id]?.fits.includes(kindOf(kind));
 export const descOf = id => PARTS[id]?.desc ?? (PARTS[id]?.elem ? ELEM[PARTS[id].elem].says[0].toUpperCase() + ELEM[PARTS[id].elem].says.slice(1) + '.' : '');
 
 // WHAT YOU SET OUT WITH (a fresh kit) and what a fresh kit has fitted on each weapon
-export const START = {own: ['ember_rune', 'split_choke', 'long_barrel', 'hair_trigger'], fit: {peacemaker: {rune: 'ember_rune'}, brass_navy: {rune: 'ember_rune'}, bow: {rune: 'ember_rune'}}};
+// own: how many of each (a part fitted on one weapon is out of the kit: four Ember Runes, three on the guns and the bow, one free
+// for a blade or a staff)
+export const START = {own: {ember_rune: 4, split_choke: 1, long_barrel: 1, hair_trigger: 1}, fit: {peacemaker: {rune: 'ember_rune'}, brass_navy: {rune: 'ember_rune'}, bow: {rune: 'ember_rune'}}};
 
 // FINDS (features/mods/sim.js listens for the events): event -> [{id (part), p (chance; first: the first time it happens, p 1)}].
 // A found part drops where it happened (a glowing stone or piece on the ground: walk over it) unless `hand` (straight into the kit)

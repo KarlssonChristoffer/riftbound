@@ -46,7 +46,8 @@ export async function create(host) {
   sim.setDirty(() => pack()?.dirty?.());
   const look = createModsLook(host, sim);
   if (Q === 'all') for (const id of PART_IDS) if (!sim.S.own[id]) sim.S.own[id] = 1;
-  const weaponId = () => wfn ? wfn() : host.weapon?.id || '';
+  // the weapon in hand: whoever handed one over (setWeapon), else the melee feature's blade or staff, else the gun or bow
+  const weaponId = () => wfn ? wfn() : host.feature('melee')?.weapon?.() || host.weapon?.id || '';
   let wfn = null;
   sim.setWeapon(() => weaponId());
 
@@ -123,6 +124,7 @@ export async function create(host) {
     update(dt, evs) {
       if (!ON) return;
       if (!coreHooked) { const c = host.feature('combat')?.core; if (c?.hitMod) { c.hitMod(sim.hitMod, true); coreHooked = true; } }
+      sim.setHits(host.feature('hits'));
       if (saveObj !== (pack()?.store?.('mods') ?? mem)) sim.load();
       for (const e of evs) if (e.type === 'pack.reset') sim.load();
       notes();
@@ -159,7 +161,7 @@ export async function create(host) {
         {label: 'Weapon mods: a fresh kit', run: () => { const o = saved(); for (const k in o) delete o[k]; sim.load(); pack()?.dirty?.(); }},
       ];
     },
-    dispose() { host.mods.clear('mods'); panel.hide(); },
+    dispose() { host.mods.clear('mods'); sim.setHits(null); panel.hide(); },
   };
   return F;
 }
