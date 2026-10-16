@@ -56,6 +56,8 @@ export async function create(host) {
   // the panel's choice: a piece into its slot (or the slot emptied); worn next step (online: once the server took it)
   function choose(ids) { S.want = owned(cleanSet(ids)); S.wantV++; remember(S.want); }
   const panel = createGearPanel({S, choose, online: () => !!coop(), owns, has: id => (pack()?.count?.(id) || 0) > 0});
+  // the player's window (features/panels.js): what you wear is the Pack tab's left column, beside the bag
+  host.feature('panels')?.part({id: 'gear', tab: 'pack', col: 0, order: 10, mount: el => panel.mount(el), onShow: () => panel.toggle(true), onHide: () => panel.toggle(false)});
   let shown = -1, shownW = false, over = null, overV = 0, shownO = 0, packWas = false, ownSeen = -1, shownP = -1;
   // the pieces to draw: the set worn, a piece swapped for its preview copy, then the preview's own (a later paint wins)
   function look() {
@@ -92,9 +94,9 @@ export async function create(host) {
       shown = S.ver; shownW = S.waiting; shownO = overV; panel.sync();
     },
     // the panel goes with the pack's (Tab: what you carry and what you wear), a compare a frame
-    frame() { const p = host.feature('pack'), o = !!p?.open; if (o !== packWas) { packWas = o; panel.toggle(o); } },
-    onKey(k, e) { if (k !== 'tab' || e?.shiftKey) return false; panel.toggle(); return true; },   // (no pack: Tab is this panel's; Shift+Tab: the dev wardrobe)
-    menu: () => [{label: `Gear: ${S.worn.length ? S.worn.map(id => gearById(id).name).join(', ') : 'your own clothes'} (Tab)`, run: () => panel.toggle(true)}],
+    frame() { if (panel.mounted) return; const p = host.feature('pack'), o = !!p?.open; if (o !== packWas) { packWas = o; panel.toggle(o); } },   // (in the window: its tab shows it)
+    onKey(k, e) { if (k !== 'tab' || e?.shiftKey || panel.mounted) return false; panel.toggle(); return true; },   // (no pack: Tab is this panel's; Shift+Tab: the dev wardrobe)
+    menu: () => [{label: `Gear: ${S.worn.length ? S.worn.map(id => gearById(id).name).join(', ') : 'your own clothes'} (Tab)`, run: () => { const P = host.feature('panels'); if (panel.mounted && P) P.open('pack'); else panel.toggle(true); }}],
     hud: () => `gear ${S.key || 'none'} · ${S.stats.kg.toFixed(1)} kg · armor ${Math.round(S.stats.armor * 100)}% · speed x${S.stats.speed.toFixed(2)}${S.waiting ? ' · waiting for the server' : ''}`,
   };
   return F;
