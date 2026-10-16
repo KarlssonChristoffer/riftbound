@@ -28,6 +28,7 @@ export const FLAG_DOCS = {
   mp:        '1: join the co-op server that served this page (node server/server.mjs; open the page it prints in two windows); host:port or ws://host:port: that server. Its seed decides the forest (core/session.js, features/coop.js)',
   name:      'co-op: the name the others see over your head (else the server gives one: Player N)',
   seed:      'the forest north of the Proving Grounds, grown from this seed (world/forest.js; offline: in co-op the server sends its own)',
+  xprate:    'a factor on every skill XP grant offline (docs/SKILLS.md: content/skills.js RATE); raw: RATE ignored (the tables\' own XP). In co-op the server\'s --xprate',
   forest:    '1: the forest with the default seed (world/forest.js); 0: no forest even in co-op',
   hut:       '0: no stone hut in the forest\'s lakeside clearing (world/hut.js, layout.js HUT: a roofed place to try the cutaway)',
   cut:       '0: no cutaway (features/cutaway.js: the ground, rock and walls between the camera and the player cut away round him, and a roof over him)',

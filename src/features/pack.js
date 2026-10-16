@@ -11,11 +11,14 @@
 //   heading, 'Build' when absent}) / pack.section(s) (a part of the panel another system draws: {id, title, ver() -> number
 //   (redrawn when it changes), html(esc, icon) -> string}: features/fishing.js's catch journal) / pack.held(slot)
 //   (the bag slot whose tool is in hand: the panel marks it; -1 none)
+// SKILLS' XP (docs/SKILLS.md): offline a gain is x its skill's RATE (content/skills.js; ?xprate= a factor, raw: RATE ignored). In
+// co-op the server owns it: gain() adds nothing (the server grants XP on the acts it sees and tells this player: coop.mail
+// 'skills'), the pack takes its levels from the server's word and keeps it in the save (offline play goes on from it).
 // OWNS: the inventory, the skills, the world save, the panel, the modifier source 'skills'.
 // READS: content/items.js, content/skills.js, the game's HUD (toasts, floats). EMITS: pack.add, skill.level.
 // BUDGET: sim; nothing per step but a save timer; the panel rebuilds only when what it shows changed.
 import {ITEMS, START_KIT} from '../content/items.js';
-import {SKILLS, CURVE} from '../content/skills.js';
+import {SKILLS, CURVE, rateOf} from '../content/skills.js';
 import {createInventory} from '../game/inventory.js';
 import {createSkills} from '../game/skills.js';
 import {loadWorld, saveWorld, clearWorld} from '../game/save.js';
@@ -24,6 +27,7 @@ import {flags} from '../core/flags.js';
 
 const ON = flags.get('pack') !== '0';
 const SAVE_AFTER = 2;   // s after a change before the save is written (a string of pickups: one write)
+const XPRATE = (v => v === 'raw' ? 'raw' : +v > 0 ? +v : 1)(flags.get('xprate'));
 
 export async function create(host) {
   const inv = createInventory(ITEMS, {slots: 8});
@@ -46,6 +50,21 @@ export async function create(host) {
   const queue = [];   // the panel's clicks (and the menu's): carried out in the sim step
   const panel = ON ? createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held: () => held, ask: r => queue.push(r)}) : null;
   const label = (id, n) => (n > 1 ? `+${n} ` : '+') + (ITEMS[id]?.name || id);
+  const coop = () => host.feature('coop');
+  const online = () => !!coop()?.online;
+  const xpText = n => `+${Math.max(1, Math.round(n))} xp`;
+  function leveled(id, L) {
+    const S = SKILLS[id];
+    ui()?.toast(`${S.name} ${L}`, 'level up', S.col);
+    host.events.push({type: 'skill.level', skill: id, level: L, x: host.player.x, y: host.player.y});
+  }
+  // co-op: the server's word on his XP ({k: 'skills', xp: {id: n}, d?: {id: n}: this grant's, the float over his head)
+  function serverSkills(m) {
+    if (!m.xp || typeof m.xp !== 'object') return;
+    for (const id in m.xp) { const L = skills.set(id, +m.xp[id]); if (L) leveled(id, L); }
+    dirtyT = Math.max(dirtyT, 0);
+    if (m.d) for (const id in m.d) if (+m.d[id] > 0) { const P = host.player; ui()?.float(P.x, P.y, P.z + 2.2, xpText(+m.d[id]), '#c8d8a0'); }
+  }
 
   const F = {
     name: 'pack', label: 'Pack', on: ON,
@@ -64,14 +83,11 @@ export async function create(host) {
     count: id => inv.count(id), has: (id, n = 1) => inv.has(id, n), best: job => ON ? inv.best(job) : null,
     payOf: need => inv.payOf(need), short: cost => !ON || inv.short(cost),
     gain(id, n, at = null) {
-      if (!ON) return 0;
+      if (!ON || online()) return 0;   // (co-op: the server grants it)
+      n *= rateOf(id, XPRATE);
       const L = skills.gain(id, n); dirtyT = Math.max(dirtyT, 0);
-      if (at && n > 0) ui()?.float(at.x, at.y, (at.h ?? 1.6) + .35, `+${n} xp`, '#c8d8a0');
-      if (L) {
-        const S = SKILLS[id];
-        ui()?.toast(`${S.name} ${L}`, 'level up', S.col);
-        host.events.push({type: 'skill.level', skill: id, level: L, x: host.player.x, y: host.player.y});
-      }
+      if (at && n > 0) ui()?.float(at.x, at.y, (at.h ?? 1.6) + .35, xpText(n), '#c8d8a0');
+      if (L) leveled(id, L);
       return L;
     },
     level: id => skills.level(id),
@@ -88,6 +104,7 @@ export async function create(host) {
     update(dt) {
       if (!ON) return;
       while (queue.length) { const r = queue.shift(); const why = r.can?.() || ''; if (why) ui()?.toast(r.name, why, '#e8a070'); else r.run(); }
+      const c = coop(); if (c?.online && c.mail) for (let k = 0; k < c.mail.length; k++) if (c.mail[k].k === 'skills') serverSkills(c.mail[k]);
       if (dirtyT >= 0 && (dirtyT += dt) > SAVE_AFTER) write();
     },
     frame() { panel?.frame(); },

@@ -23,7 +23,7 @@
 // BUDGET: sim: a near() query a blow (and one a step while a swing waits for its aim); the logs (a handful) a step; the
 //   regrowth check once a second over the felled set. View: a falling tree's matrix a frame; logs' matrices while they move.
 import * as THREE from 'three';
-import {TUNE, TREES} from '../content/woodcut.js';
+import {TUNE, TREES, treeStats} from '../content/woodcut.js';
 import {ITEMS} from '../content/items.js';
 import {XP} from '../content/skills.js';
 import {flags} from '../core/flags.js';
@@ -68,9 +68,8 @@ export async function create(host) {
     const def = TREES[ps.species];
     if (!def) I = null;
     else {
-      const b = ps.bones || [], s = ps.scale || 1, cut = b.length > 1 && b[1][4] > .2 && b[1][4] < .9 ? b[1][4] : .4;
-      I = {species: ps.species, def, s, cut, tr: (b[1] ? b[1][6] : .2) * s, hp: Math.max(2, Math.round(def.hp * s ** 1.5)),
-        tier: def.tier + (def.old && s >= def.old ? 1 : 0), logs: Math.max(1, Math.round(def.logs * s)), it, pose: ps};
+      const b = ps.bones || [], s = ps.scale || 1, cut = b.length > 1 && b[1][4] > .2 && b[1][4] < .9 ? b[1][4] : .4, ts = treeStats(ps.species, s);
+      I = {species: ps.species, def, s, cut, tr: (b[1] ? b[1][6] : .2) * s, hp: ts.hp, tier: ts.tier, logs: ts.logs, it, pose: ps};
     }
     INFO.set(it, I); return I;
   }
@@ -240,15 +239,17 @@ export async function create(host) {
     }
     if (xp) pack()?.gain('woodcutting', Math.round(XP.fell * I.def.xp * I.s), {x: p.x, y: p.y, h: (p.z || 0) + 2.6});
   }
-  // CO-OP: the server says a shared tree fell (features/coop.js, in its update: a sim step). by: who felled it (here: his XP); late: it
-  // was felled before we joined (a stump, no fall). It falls away from the one who felled it if we see him, else away from us.
-  // -> false when it isn't a tree the axe knows (coop removes it then)
-  function fellShared(p, mine, late, fx, fy) {
+  // CO-OP: the server says a shared tree fell (features/coop.js, in its update: a sim step). by: who felled it; late: it was felled
+  // before we joined (a stump, no fall). It falls the server's way (wx, wy: away from the feller as the server saw him, the same on
+  // every client); an old server's word without one: away from the one who felled it if we see him, else away from us. The XP is
+  // the server's (its skills message). -> false when it isn't a tree the axe knows (coop removes it then)
+  function fellShared(p, mine, late, fx, fy, wx, wy) {
     if (felled.has(p)) return true;
     const I = infoOf(p); if (!I) return false;
     asked.delete(p); hp.delete(p);
+    if (wx !== undefined && Math.hypot(wx, wy) > .5) { fell(p, I, wx, wy, false, !late); return true; }
     const P = host.player, ox = fx ?? P.x, oy = fy ?? P.y, d = Math.hypot(p.x - ox, p.y - oy) || 1;
-    fell(p, I, (p.x - ox) / d, (p.y - oy) / d, mine && !late, !late);
+    fell(p, I, (p.x - ox) / d, (p.y - oy) / d, false, !late);
     return true;
   }
   const crownMid = I => { const C = I.pose.crown; return C ? ((C.y0 + C.y1) / 2) * I.s : 3 * I.s; };

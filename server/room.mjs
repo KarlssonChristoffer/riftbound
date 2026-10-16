@@ -14,8 +14,13 @@
 // runs offline): they go for the lit lanterns (each player's state says whether theirs burns: lt), keep out of the lamps' and
 // burning fires' light (the builds), and put a lantern out (an event to everyone: {k: 'ev', a: 'snuff', id}); their places go
 // out in the snapshots (sn: [x, y, h, mode] each).
+// And every player's SKILLS (docs/SKILLS.md): a player is known by the random key his browser sends in its hello (server/players.mjs
+// keeps the records); the room grants XP itself on the acts it already sees (a fell, a pick, a blow on a vein, a landed fish, a
+// broken crystal: each x content/skills.js RATE x --xprate) and tells that player alone ({k: 'skills', xp, d}); the levels it
+// checks (a pick's yield, a vein's chunks, a cast's roll) are its record's, never the client's word.
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
-//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
+//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log, players, xprate, importCap}); room.connect(conn);
+//   room.stop(); room.clock() -> hours; room.players (the records)
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
 import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
@@ -23,14 +28,17 @@ import {mealNotes} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
-import {SKILLS, CURVE} from '../src/content/skills.js';
+import {SKILLS, IMPORT_CAP, levelOf, fellXP, rateOf} from '../src/content/skills.js';
+import {TUNE as MINE} from '../src/content/mining.js';
+import {createPlayers, KEY_RE} from './players.mjs';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8,
+  players = null, xprate = 1, importCap = IMPORT_CAP}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -51,16 +59,25 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const pub = p => ({id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, phi: p.phi, s: p.s, pose: p.pose, rig: p.rig, w: p.w, wn: p.wn, ls: p.ls, g: p.gear});
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
+  // SKILLS (docs/SKILLS.md): XP granted here (x the skill's RATE x --xprate), told to that player alone; his levels are his record's
+  const PL = players || createPlayers({SKILLS, importCap});
+  const lvlOf = (p, id) => levelOf(p.rec.xp[id] || 0);
+  function grant(p, id, n) {
+    const g = Math.round(n * rateOf(id, xprate) * 1000) / 1000; if (!(g > 0)) return;
+    p.conn.send(encode({k: 'skills', xp: {[id]: PL.grant(p.rec, id, g)}, d: {[id]: g}}));
+  }
 
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
+    const {rec} = PL.join(KEY_RE.test(m.key) ? m.key : 'anon' + id, m.xp);   // (no key: a record for this connection alone)
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
-      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false};
+      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, rec, biteT: -1e9, crystals: new Set()};
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
       clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null}));
     peers.set(id, p);
+    p.conn.send(encode({k: 'skills', xp: rec.xp}));   // (his record: the client takes its levels from it)
     others(p, {k: 'join', p: pub(p)});
     log(`+ ${p.name} (#${id}) from ${conn.ip} · ${peers.size} in the room`);
     return p;
@@ -103,20 +120,25 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     }
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
+    if (a === 'crystal') return crystal(p, id, deny);
     if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
+    let tr = null, dx = 0, dy = 0;
     if (trees) {
-      const tr = trees.get(id); if (!tr) return deny('no such tree');
+      tr = trees.get(id); if (!tr) return deny('no such tree');
       let tx = tr[0], ty = tr[1];
       const i = unc?.fidIndex.get(id); if (i !== undefined) { unc.posOf(i, clock(), tpos); tx = tpos[0]; ty = tpos[1]; }   // (it may have walked tonight)
-      if (Math.hypot(tx - p.x, ty - p.y) > REACH) return deny('too far');
+      const d = Math.hypot(tx - p.x, ty - p.y); if (d > REACH) return deny('too far');
+      if (d > .01) { dx = +((tx - p.x) / d).toFixed(3); dy = +((ty - p.y) / d).toFixed(3); }   // (the fall's way: away from the feller, as the server saw him)
     }
     const s = {s: 'felled', by: p.id, t};
     world.set(id, s);
-    all({k: 'world', id, s: s.s, by: p.id});
+    all(dx || dy ? {k: 'world', id, s: s.s, by: p.id, dx, dy} : {k: 'world', id, s: s.s, by: p.id});
+    if (tr?.[2]) grant(p, 'woodcutting', fellXP(tr[2], tr[3] || 1));   // (the whole tree's XP to the feller: its bites, the fell, the logs)
     log(`  ${p.name} felled ${id}`);
   }
+
 
   // FORAGING (docs/FORAGING.md): a pick ({a: 'pick', id: 'd' + the forest decor's index, lvl: his Foraging level, as the client
   // says it: the save is his). The patch must be a plant of the plan (without one, the client's word for the kind), not picked,
@@ -131,11 +153,12 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       if (Math.hypot(e[1] - p.x, e[2] - p.y) > REACH) return deny('too far');
       kind = e[0];
     } else if (!PLANTS[kind] || !/^d\d+$/.test(id)) return deny('no such patch');
-    const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = levelNotes(SKILLS.foraging.per, lvl);
+    const lvl = lvlOf(p, 'foraging'), notes = levelNotes(SKILLS.foraging.per, lvl);
     for (const g of p.gear) for (const q of GEAR_BY_ID[g]?.mods || []) notes.push(q);
     const n = pickYield(pickRng, kind, pickStats(notes)), s = {s: 'picked', by: p.id, t, at: clock() + regrowHours(kind, regrow)};
     world.set(id, s);
     all({k: 'world', id, s: s.s, by: p.id, n});
+    grant(p, 'foraging', PLANTS[kind].xp);
   }
   // MINING (docs/MINING.md): a blow on a vein ({a: 'mine', id: 'v' + the cave plan's vein index, pow: what the blow takes off
   // (his pick, his meal, his level and a rhythm blow: content/mining.js blowPower, as the client says it, held to 0.25 .. 3),
@@ -154,9 +177,9 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     } else if (!VEINS[kind] || !/^v\d+$/.test(id)) return deny('no such vein');
     const V = VEINS[kind]; if ((num(m.tier, 1) | 0) < V.tier) return deny('too hard');
     const pow = Math.max(.25, Math.min(3, num(m.pow, 1)));
-    p.mineLvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0));   // (his level for the others' last blows too)
     const by = cur?.by ? [...cur.by] : []; if (!by.includes(p.id)) by.push(p.id);
     const left = Math.max(0, (cur?.left ?? V.blows) - pow);
+    grant(p, 'mining', V.xp);   // (a blow that bites: his)
     if (left > 1e-6) {
       const s = {s: 'struck', left: +left.toFixed(3), by, t};
       world.set(id, s); all({k: 'world', id, s: 'struck', left: s.left, by: p.id}); return;
@@ -164,12 +187,23 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const got = {};
     for (const q of by) {
       const pq = peers.get(q); if (!pq) continue;
-      const lvl = pq.mineLvl || 1, notes = levelNotes(SKILLS.mining.per, lvl);
+      const notes = levelNotes(SKILLS.mining.per, lvlOf(pq, 'mining'));
       for (const g of pq.gear) for (const n of GEAR_BY_ID[g]?.mods || []) notes.push(n);
       got[q] = mineYield(mineRng, kind, mineStats(notes));
+      grant(pq, 'mining', V.xp * 4);   // (the spent vein: every striker's)
     }
     world.set(id, V.hollow ? {s: 'spent', by: p.id, t} : {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});   // (a hollow wall: open for good)
     all({k: 'world', id, s: 'spent', by: p.id, got});
+  }
+  // A CAVE CRYSTAL broken under the pick ({a: 'crystal', id: 'c' + its index in the cave plan's props}): the crystals are each
+  // player's own (combat breaks them in his world); the room checks it's one of the plan's, in reach and not already his, and
+  // grants its Mining XP (content/mining.js TUNE.crystal.xp)
+  function crystal(p, id, deny) {
+    const i = /^c\d+$/.test(id) ? +id.slice(1) : -1, c = cave?.props?.[i];
+    if (cave && (!c || c[0] !== 'crystal')) return deny('no such crystal');
+    if (c && Math.hypot(c[1] - p.x, c[2] - p.y) > REACH) return deny('too far');
+    if (p.crystals.has(i)) return deny('broken');
+    p.crystals.add(i); grant(p, 'mining', MINE.crystal.xp);
   }
   // BUILDING (docs/BUILDING.md): a build put down ({a: 'build', id: its kind (content/builds.js), x, y}: within reach of him,
   // clear of the other builds, no more of the kind standing than its `most` for him) gets an id here ('b' + n) and is told to
@@ -236,7 +270,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
       if (!FISH_WATERS.has(w) || !(Math.hypot(x - p.x, y - p.y) < FISH_REACH)) return;
       p.fishT = t;
-      const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = [];
+      const lvl = lvlOf(p, 'fishing'), notes = [];
       for (const id of p.gear) for (const q of GEAR_BY_ID[id]?.mods || []) notes.push(q);
       const pieces = p.gear.filter(id => GEAR_BY_ID[id]?.kind === 'fishing').length, meal = str(m.meal, 24), bait = str(m.bait, 24);
       notes.push(...castNotes({lvl, pieces, meal: mealNotes(meal), per: SKILLS.fishing.per}));
@@ -246,12 +280,15 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
         find: st['fish.find'], size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: !!m.perfect,
         spot, bait: BAITS[bait] ? bait : ''});
       r.two = fishRng() < st['fish.double'];
-      p.fishN = n; p.fishR = r;
+      p.fishN = n; p.fishR = r; p.fishPerfect = !!m.perfect; p.biteT = t;
       p.conn.send(encode({k: 'fish', a: 'bite', n, ...r}));
     } else if (a === 'land') {
       const r = p.fishR; if (!r || n !== p.fishN) return;
+      if (t - p.biteT < 1500) return;   // (sooner than any fish can be fought in: refused, the roll kept)
       p.fishR = null;
       all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: r.two});
+      const first = !p.rec.caught[r.id]; p.rec.caught[r.id] = (p.rec.caught[r.id] || 0) + (r.two && !CATCHES[r.id].find ? 2 : 1);
+      grant(p, 'fishing', Math.round(CATCHES[r.id].xp * (first ? 2 : 1) * (p.fishPerfect ? 1.2 : 1)));   // (features/fishing.js give: the same sum)
       log(`  ${p.name} caught a ${CATCHES[r.id].name}${CATCHES[r.id].find ? '' : ` (${r.cm} cm)`}`);
     } else if (a === 'lost' && n === p.fishN) p.fishR = null;
   }
@@ -306,7 +343,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   }, 1000 / TICK_HZ);
 
   return {
-    connect, get size() { return peers.size; }, world, seed, clock, secrets, elk, soot,
+    connect, get size() { return peers.size; }, world, seed, clock, secrets, elk, soot, players: PL,
     stop() { clearInterval(timer); for (const p of peers.values()) p.conn.close(1001, 'server stopping'); },
   };
 }

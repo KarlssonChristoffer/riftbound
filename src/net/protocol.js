@@ -3,14 +3,17 @@
 // Messages are JSON objects {k: kind, ...}. The transport under them (net/transport.js: a WebSocket today) only carries text.
 //
 // client -> server
-//   hello    {v, name}                                   the first message; the server answers with welcome
+//   hello    {v, name, key, xp}                          the first message; the server answers with welcome. key = the browser's
+//            random player key (32 hex: features/pack.js), xp = his skills' XP as his own save has it {id: n} (read only on a
+//            key the room hasn't seen, capped: server/players.mjs)
 //   st       {x, y, z, phi, s, pose, rig, w?, wn?, ls?, tp?}   the local player 20 times a second: world metres (x east, y south,
 //            z up), facing phi (rad, the arena's atan2(x, y)), s = his state (idle, move, roll, ...), pose = the frame drawn,
 //            rig = the live model he wears (gunslinger | outlaw | ''), w = the drawn pose's bones (encodePose) when it changed
 //            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport
 //   act      {a, id}                                      ask the server to change the shared world: a 'fell' (id: a forest tree),
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
-//            dawn | day | dusk | night: dev, the world's clock to the next such hour)
+//            dawn | day | dusk | night: dev, the world's clock to the next such hour), 'crystal' (id: 'c' + a cave crystal's index in
+//            the cave plan's props: broken under his pick, its Mining XP)
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
@@ -25,7 +28,10 @@
 //   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0], ...], c?}   every tick; w only when it changed since the last snap;
 //            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
-//   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it
+//   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it; a fell's dx, dy:
+//            the way it falls (unit: away from the feller as the server saw him)
+//   skills   {xp: {id: n}, d?: {id: n}}                  to one player: his XP as the server keeps it (all of it after the welcome,
+//            then each skill a grant raised; d = what this grant gave: the "+n xp")
 //   clock    {t, h, rate}                                the world's clock (the server owns it): at server time t (ms) it was h
 //            in-game hours since the start (sim/env.js E.t), going on at rate hours per ms (0: stopped). In welcome too
 //   sec      {id, s, by, n}                              a secret's state changed (sleeping / awake / triggered / spent), by =
@@ -39,7 +45,7 @@
 //            player id landed catch c
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
 //   pong     {c, t}                                      t = the server's clock (ms)
-export const VERSION = 2;
+export const VERSION = 3;   // (3: the player key, server-owned XP: docs/SKILLS.md)
 export const TICK_HZ = 20;          // the server's snapshot rate; a client sends its state at the same rate
 export const INTERP_MS = 110;       // remote players are drawn this far behind the newest snapshot (two ticks and a little)
 export const PATH = '/mp';          // the WebSocket's path on the server, and the HTTP session endpoint (PATH + '/session')

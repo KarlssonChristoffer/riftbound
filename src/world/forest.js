@@ -49,7 +49,7 @@
 //             a stable id (fid: 't<cx>.<cy>.<n>'), the handle co-op and the woodcutting use for it
 // Uses existing kinds only (tree / bush / fern / tuft / reed / rock / rock_big): the art is the ruins' (trees3d.js, flora3d.js, the kit).
 // OWNS: nothing at run time (plain data). READS: core/mathx.js.
-//   const F = forestPlan(seed)   F.shapes, F.props, F.lake, F.stream, F.inLake, F.lakeEdge, F.at, F.height, F.trees (Map fid -> [x, y])
+//   const F = forestPlan(seed)   F.shapes, F.props, F.lake, F.stream, F.inLake, F.lakeEdge, F.at, F.height, F.trees (Map fid -> [x, y, species, scale])
 //   F.lay(sampler)               the stream's bed from the ground it is cut into (layout.js, once): F.stream.bed, its channel in F.cuts
 //   sample(F, x, y, out) / depth(o, x, y) / paint(F, K, S, T)    the water for world.js, waterbed.js, biomes.js
 import {vnoise, smooth, clamp, hash3} from '../core/mathx.js';
@@ -795,7 +795,7 @@ function grow(F, cx, cy, S, slope, K) {
     else { let a = pick; species = DECID.find(([, w]) => (a -= w) < 0)?.[0] || 'oak'; }
     const fid = `t${cx}.${cy}.${trees.length}`, s = (species === 'pine' ? .95 + sc * .4 : species === 'dead' ? .8 + sc * .3 : .85 + sc * .35) * (1 - Math.max(0, fk - .2) * .6);
     const p = ['tree', +x.toFixed(2), +y.toFixed(2), {species, fid, scale: +s.toFixed(2), r: .45, variant: v * 3 | 0, chunk: ci}];
-    trees.push(p); out.push(p); F.trees.set(fid, [p[1], p[2]]);
+    trees.push(p); out.push(p); F.trees.set(fid, [p[1], p[2], species, p[3].scale]);   // (species, scale: the co-op server prices a fell, content/skills.js fellXP)
   }
   // UNDERGROWTH: under and round the trees bushes and ferns, tufts in the open, reeds where the water meets the bank
   const uc = T.under.cell, nu = Math.round(CHUNK / uc);

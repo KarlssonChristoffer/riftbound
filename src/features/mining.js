@@ -19,7 +19,8 @@
 // CO-OP (features/coop.js, server/room.mjs, docs/MULTIPLAYER.md): the server owns the veins' blows left and the spent ones. A blow
 // is sent (coop.act('mine', 'v' + i, {pow, lvl, tier})); the server's word comes back in coop.mail: struck (the blows left, for
 // everyone's cracks), spent (got: each striker's chunks: everyone who struck it gets his own full share), grown. A late joiner
-// gets them in the welcome. The camp's pick is each player's own (his save), crystals and chunks are his own.
+// gets them in the welcome. The camp's pick is each player's own (his save), crystals and chunks are his own (a crystal broken
+// asks the server for its XP: coop.act('crystal', 'c' + its index in the cave's props); all Mining XP is the server's online).
 // Only in the sandbox on the ruins biome (the persistent world) with the forest's cave. ?mining=0 off; ?gathermarks=1 dev dots.
 // OWNS: the veins' blows left and spent set (offline) and their saved part, the chunks, the camp's entities, the vein / camp /
 //   chunk meshes, the sparks. Sets the tool's want / aim for the job 'mine'.
@@ -267,6 +268,7 @@ export async function create(host) {
     const S = TUNE.crystal.shards, n = S[0] + Math.floor(R() * (S[1] - S[0] + 1));
     spawn(p.x - ux * .3, p.y - uy * .3, (p.z || 0) + .6, -ux, -uy, 'glow_shard', n);
     pack()?.gain('mining', TUNE.crystal.xp, {x: p.x, y: p.y, h: (p.z || 0) + 1.8});
+    if (online()) { const k = C?.props?.findIndex(q => q[0] === 'crystal' && Math.abs(q[1] - p.x) < .01 && Math.abs(q[2] - p.y) < .01) ?? -1; if (k >= 0) coop().act('crystal', 'c' + k); }   // (co-op: its XP is the server's; once a crystal broke)
   }
 
   // ---------------------------------------------------------------- chunks: out of the rock, rolling to his feet, picked up

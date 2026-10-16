@@ -29,3 +29,10 @@ export const TREES = {
   rowan: {hp: 4, tier: 1, logs: 2, xp: .8},
   pine: {hp: 5, tier: 1, logs: 3, xp: .9},   // (the seeded forest's conifers: world/forest.js)
 };
+
+// a tree of `species` at scale s -> {hp (blows at power 1), logs, tier} | null: features/woodcut.js (a tree as the axe sees it)
+// and the co-op server (a fell's XP: content/skills.js fellXP) read the same numbers
+export function treeStats(species, s = 1) {
+  const def = TREES[species]; if (!def) return null;
+  return {hp: Math.max(2, Math.round(def.hp * s ** 1.5)), logs: Math.max(1, Math.round(def.logs * s)), tier: def.tier + (def.old && s >= def.old ? 1 : 0)};
+}
