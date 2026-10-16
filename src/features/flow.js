@@ -697,6 +697,7 @@ export async function create(host) {
       else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * GK * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
       else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, (e.broke || e.crit ? K.hitKickBig : K.hitKick) * GK);
       else if (e.type === 'fist.hit') gunKick(-e.dx, -e.dy, e.kick * .8);   // a fist landing (features/fists.js): the view jolts along the blow
+      else if (e.type === 'melee.hit') gunKick(-e.dx, -e.dy, e.kick * .8);   // a blade landing (features/melee.js): the same jolt
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }
