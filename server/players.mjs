@@ -7,15 +7,15 @@
 // on the server's disk unless server.mjs is given --data <dir> (an opt-in dev switch): then it loads the records from
 // <dir>/players.json at start and writes them there `delay` s after a change (onChange).
 // Kept small and plain so the coming server world store (the cleanup plan's step 2) can take it over whole: a record is
-// plain JSON (but `made`), the store's state is toJSON() / load(o).
+// plain JSON, the store's state is toJSON() / load(o).
 // One module for every system that keeps something per player: each keeps its own part of the record (skill-verbs: xp, n,
-// titles, title, caught; the workshop, server/workshop.mjs: made, uid -> record, in memory only, never in toJSON).
+// titles, title, caught; the workshop, server/workshop.mjs: made). The workshop touches only rec.made and calls changed().
 //   const P = createPlayers({SKILLS, importCap, load, onChange} = {}); P.of(key) -> the record (made the first time a key is
 //   seen; null for no key); P.join(key, xp) -> {rec, fresh} (of(key), and the first time, the hello's XP imported, capped);
 //   P.get(key); P.grant(rec, skill, n) -> its new total; P.set(rec, skill, n) (a dev server's --dev); P.count(rec, name, n) ->
 //   the counter's new total; P.changed(); P.toJSON() (the keyed records: a key-less connection's is dropped with it); P.size
 //   a record: {key, xp: {skill: n}, n: {counter: n}, titles: [id], title: id | '', caught: {fish id: n}, t: ms of its last
-//   change, made: Map (the workshop's), imp: its XP imported yet}
+//   change, made: {uid: made-thing record} (the workshop's), imp: its XP imported yet (not saved)}
 //   The key: game/playerkey.js (localStorage rb.player.key, 32 hex), the hello's `key`; KEY_RE tells a real one
 import {needXP, SKILLS as ALL_SKILLS} from '../src/content/skills.js';
 
@@ -23,7 +23,7 @@ export const KEY_RE = /^[0-9a-f]{32}$/;
 
 export function createPlayers({SKILLS = ALL_SKILLS, importCap = 10, load = null, onChange = () => {}} = {}) {
   const recs = new Map();
-  const blank = key => ({key, xp: Object.fromEntries(Object.keys(SKILLS).map(id => [id, 0])), n: {}, titles: [], title: '', caught: {}, t: Date.now(), made: new Map(), imp: false});
+  const blank = key => ({key, xp: Object.fromEntries(Object.keys(SKILLS).map(id => [id, 0])), n: {}, titles: [], title: '', caught: {}, t: Date.now(), made: {}, imp: false});
   const changed = () => onChange();
   function clean(o, key) {   // a loaded record: only the known fields, numbers as numbers
     const r = blank(key);
@@ -32,6 +32,7 @@ export function createPlayers({SKILLS = ALL_SKILLS, importCap = 10, load = null,
     if (Array.isArray(o?.titles)) r.titles = o.titles.filter(t => typeof t === 'string' && t.length < 24).slice(0, 64);
     r.title = typeof o?.title === 'string' && r.titles.includes(o.title) ? o.title : '';
     for (const k in o?.caught || {}) if (k.length < 24) r.caught[k] = Math.max(0, +o.caught[k] | 0);
+    if (o?.made && typeof o.made === 'object') r.made = o.made;   // (the workshop's records: as written by this server's --data)
     r.t = +o?.t || Date.now(); r.imp = true;
     return r;
   }
@@ -68,6 +69,6 @@ export function createPlayers({SKILLS = ALL_SKILLS, importCap = 10, load = null,
       return rec.n[name];
     },
     changed,
-    toJSON() { const o = {}; for (const [k, r] of recs) if (KEY_RE.test(k)) { const {made, imp, ...keep} = r; o[k] = keep; } return o; },
+    toJSON() { const o = {}; for (const [k, r] of recs) if (KEY_RE.test(k)) { const {imp, ...keep} = r; o[k] = keep; } return o; },
   };
 }
