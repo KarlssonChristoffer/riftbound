@@ -16,6 +16,7 @@
 //            perfect, spot, bait): the game offline and the server in co-op draw the same way
 //   SPOT     fishing spots: rises and bubbles on the water (features/fishing.js finds them; a cast into one bites sooner, rarer)
 //            spotAt(a, b, slot, seed, out) (the cell's spot), spotNear(x, y, slot, seed) (the server's check of a cast's word)
+//   SHADOW   the fish you can see under the water: shadowAt(a, b, slot, seed, t, out) (pure: the same fish for everyone)
 //   BAITS    what goes on the hook (cut from small fish at the pack panel; one a cast while you have it): prey weights
 //   ANGLER   the fishing set: ANGLER.n fishing pieces worn at once give its notes (source 'fishing.set')
 //   castNotes(o) -> notes   the notes a cast is rolled with besides the gear's: the skill's, the set's, the meal's (content/meals.js; the server
@@ -268,6 +269,26 @@ export function spotNear(x, y, slot, seed, slack = .5) {
   for (let s = slot - 1; s <= slot; s++) for (let a = a0 - 1; a <= a0 + 1; a++) for (let b = b0 - 1; b <= b0 + 1; b++)
     if (spotAt(a, b, s, seed, SQ) && Math.hypot(SQ.x - x, SQ.y - y) <= r) return true;
   return false;
+}
+
+// SHADOWS: the fish you can see under the water (features/fishing.js's view draws them; briefs/depth-shared.md: the one drawing, other
+// features ask fishing for them: F.shadowsNear). The water is cut in cells of `cell` m; in each slot of `slot` s a cell holds a
+// shadow with chance `p`, swimming a slow loop round a hashed home in it: a pure function of the world's seed and the clock, so
+// friends see the same fish. At most `n` are drawn round a player, within `r` m.
+//   edge [m] the home's water at least this + the loop's radius from the bank; loop [m] the loop's radius, speed [m/s], len [m] how
+//   long a fish looks; fade [s] in and out at the slot's turn
+export const SHADOW = {cell: 5, slot: 40, p: .55, n: 8, r: 25, edge: .4, fade: 3, loop: [.5, 1.4], speed: [.2, .55], len: [.16, .34]};
+// the shadow of cell (a, b) in slot `slot` of world `seed` at clock t (s) -> writes {x, y, a (heading, rad, world: 0 = +x), len} to
+// out and returns true, or false: none there (the hash only; the caller asks the water for its home: SHADOW.edge)
+export function shadowAt(a, b, slot, seed, t, out) {
+  if (hash3(a + 911, b - 37, (slot ^ seed) | 0) >= SHADOW.p) return false;
+  const hx = (a + .2 + .6 * hash3(b, a + 5, slot + 3)) * SHADOW.cell, hy = (b + .2 + .6 * hash3(a + 17, b, slot + 11)) * SHADOW.cell;
+  const u = hash3(a, b + 23, slot + 29), L = SHADOW.loop, S = SHADOW.speed, rad = L[0] + (L[1] - L[0]) * u, sp = S[0] + (S[1] - S[0]) * hash3(b + 3, a, slot + 41);
+  const dir = hash3(a + 7, b + 7, slot) < .5 ? -1 : 1, ph = hash3(b, b + a, slot + 53) * 6.283 + dir * sp / rad * t, wob = .25 * Math.sin(t * .7 + u * 9);
+  out.x = hx + Math.cos(ph) * rad * (1 + wob * .3); out.y = hy + Math.sin(ph) * rad;
+  out.a = ph + dir * Math.PI / 2; out.len = SHADOW.len[0] + (SHADOW.len[1] - SHADOW.len[0]) * hash3(a + 2, b + 9, slot + 61);
+  out.hx = hx; out.hy = hy; out.rad = rad;
+  return true;
 }
 
 export const COMMON_FISH = ['perch', 'roach', 'bleak', 'minnow'];
