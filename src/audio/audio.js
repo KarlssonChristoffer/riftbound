@@ -491,6 +491,22 @@ const SFX = {
   lanternLight(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .6}, 'lanternLight', .4, {cd: .2}); if (!v) return; E.N(v, 0, {type: 'lowpass', f: 600, f2: 1800, sw: .15, a: .04, d: .2, g: .25}); },
   critter(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .5}, 'critter', .5, {cd: .3}); if (!v) return; for (let i = 0; i < 7; i++) E.N(v, i * .05 + (i % 2) * .015, {type: 'bandpass', f: 3000 + (i % 3) * 600, q: 6, a: .001, d: .012, g: .15}); },   // (a skitter of many small feet on stone)
   hollowOpen(E, o) { SFX.foeFall(E, {...o, heavy: true, g: (o.g ?? 1) * 1.2}); SFX.treeLogs(E, {...o, surf: 'stone'}); },
+  // THE WORKSHOP (features/workshop.js, docs/WORKSHOP.md), stand-ins: a pump's whoosh and the fire's roar answering it (brighter
+  // as the heat climbs), the hammer's ring on the anvil (higher on a rhythm blow), a bar's hiss onto the stone, ore into the mouth
+  smithPump(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * .8}, 'smithPump', .7, {cd: .15}); if (!v) return;
+    const h = o.heat ?? .5;
+    E.N(v, 0, {type: 'bandpass', f: 500, f2: 1400, sw: .18, q: .9, a: .04, d: .25, g: .32});
+    E.N(v, .08, {type: 'lowpass', f: 220 + 500 * h, a: .05, d: .45, g: .28 + .2 * h});
+  },
+  smithRing(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * (o.rhythm ? 1.15 : 1)}, 'smithRing', 1.1, {pri: 2, cd: .04}); if (!v) return;
+    const up = o.rhythm ? 1.12 : 1;
+    E.O(v, 0, {f: 2180 * up, a: .001, d: .9, g: .07}); E.O(v, 0, {f: 3340 * up, a: .001, d: .55, g: .045}); E.O(v, 0, {f: 1210 * up, a: .001, d: .6, g: .05});
+    E.N(v, 0, {type: 'bandpass', f: 3000, q: 1.2, d: .03, g: .4}); E.O(v, 0, {f: 160, f2: 90, d: .07, g: .3});
+  },
+  smithHiss(E, o) { const v = E.voice(o, 'smithHiss', 1.3, {cd: .4}); if (!v) return; E.N(v, 0, {type: 'highpass', f: 3200, a: .02, d: 1.1, g: .14}); SFX.hit(E, {...o, mat: 'glass', g: (o.g ?? 1) * .2}); },
+  smithLoad(E, o) { SFX.kick(E, {...o, mat: 'clay', surf: 'stone', g: (o.g ?? 1) * .6}); SFX.campLog(E, {...o, g: (o.g ?? 1) * .4}); },
   axeSwing(E, o) { SFX.jump(E, {...o, g: (o.g ?? 1) * .45}); },
   campLog(E, o) { SFX.kick(E, {...o, mat: 'wood', g: (o.g ?? 1) * .6}); },   // (a soft wooden thump)
   fishCook(E, o) {   // fish on the fire (features/fishing.js): a sizzle with crackles over a soft thump
@@ -1287,8 +1303,13 @@ export function createAudio(ctx, host = {}) {
         case 'mine.spent': fire('treeLogs', e.x, e.y, {surf: 'stone'}); fire('kick', e.x, e.y, {mat: 'clay', surf: 'stone'}); break;   // (stand-ins: the vein breaks open)
         case 'mine.chunk': fire('hit', e.x, e.y, {mat: 'clay', g: .35}); break;   // (stand-in: a chunk into the pouch)
         case 'mine.take': fire('kick', e.x, e.y, {mat: 'wood', g: .5}); break;   // (stand-in: the old pick pulled from the wall)
-        case 'pack.add': if (e.id === 'log') fire('logPick', e.x, e.y); break;
+        case 'pack.add': if (e.id === 'log' || e.id === 'deadwood' || e.id.endsWith('_log')) fire('logPick', e.x, e.y); break;   // (any species' log: content/items.js wood)
         case 'fire.addWood': fire('campLog', e.x, e.y); break;   // a log on a campfire (features/campfires.js, lights.js)
+        // THE WORKSHOP (features/workshop.js, docs/WORKSHOP.md): stand-ins
+        case 'smith.pump': fire('smithPump', e.x, e.y, {heat: e.heat, g: e.mine ? 1 : .7}); break;
+        case 'smith.strike': fire('smithRing', e.x, e.y, {rhythm: e.rhythm}); break;
+        case 'smith.smelt': fire('smithHiss', e.x, e.y); break;
+        case 'smith.load': fire('smithLoad', e.x, e.y); break;
         // FISHING (features/fishing.js, docs/FISHING.md)
         case 'fish.cast': fire('fishCast', e.x, e.y, {k: e.k, perfect: e.perfect}); break;
         case 'fish.plop': fire('fishPlop', e.x, e.y); break;

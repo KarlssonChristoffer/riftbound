@@ -17,11 +17,15 @@ export const PAL = {
   p: '#cfcabe', q: '#9a968a', u: '#f2c87a',                                // a smooth pale stone, its shade, a warmth inside it
 };
 
+// a log's picture (every species' log: its palette over the bark letters b l d, the end grain e r)
+const LOG_ICON = ['............', '............', '............', '............',
+  '..lllllllee.', '.lbbbbbbbeee', '.bbdbbbdbere', '.bbbbdbbbeee', '..dddddddee.',
+  '............', '............', '............'];
+//   wood     a log of a tree species (content/woodcut.js TREES log): a cost that says 'wood' takes any of them (game/inventory.js),
+//            fires burn any of them; the workshop's hafts are made of them (content/workshop.js WOODS, docs/WORKSHOP.md)
+//   made     a thing made at the workshop (content/workshop.js): its bag slot carries the uid of its record (maker, history)
 export const ITEMS = {
-  log: {name: 'Oak Log', kind: 'material', col: '#c8a070', desc: 'a length of oak: burns, builds',
-    icon: ['............', '............', '............', '............',
-      '..lllllllee.', '.lbbbbbbbeee', '.bbdbbbdbere', '.bbbbdbbbeee', '..dddddddee.',
-      '............', '............', '............']},
+  log: {name: 'Oak Log', kind: 'material', col: '#c8a070', desc: 'a length of oak: burns, builds', wood: true, icon: LOG_ICON},
   axe: {name: 'Felling Axe', kind: 'tool', stack: 1, col: '#d8dee4', desc: 'fells a tree; the better the axe, the harder the wood',
     tool: {job: 'chop', tier: 1, power: 1},
     icon: ['..........s.', '........iis.', '.....wiiiis.', '.....hiiiis.', '....wh..kis.', '....wh....s.',
@@ -89,6 +93,36 @@ export const ITEMS = {
   bark_doll: {name: 'Bark Doll', kind: 'material', col: '#c8a070', desc: 'a little figure of bark and twine, left in the hollow under the roots',
     icon: ['.....ee.....', '....eddb....', '....ebbe....', '.....rr.....', '..lbbbbbbl..', '....bbbb....', '....bddb....', '....rbbr....',
       '....bbbb....', '...bb..bb...', '...b....b...', '..dd....dd..']},
+  // THE WORKSHOP (features/workshop.js, content/workshop.js, docs/WORKSHOP.md): each tree species' log (oak keeps the id 'log': saves
+  // and costs stay valid), the bars a furnace smelts, and the tier-2 tools an anvil makes (each one a record: who made it, of what)
+  birch_log: {name: 'Birch Log', kind: 'material', col: '#f0ece0', desc: 'white birch, quick to split; a haft of it swings quick', wood: true, icon: LOG_ICON,
+    pal: {b: '#e8e4d8', l: '#f8f6ee', d: '#3a3632', e: '#ecd8b0', r: '#c8a878'}},
+  pine_log: {name: 'Pine Log', kind: 'material', col: '#d08a5a', desc: 'red-barked pine, sticky with resin; a haft of it can be lit', wood: true, icon: LOG_ICON,
+    pal: {b: '#8a4e2e', l: '#b06a3e', d: '#5a301c', e: '#f0d29a', r: '#c09050'}},
+  aspen_log: {name: 'Aspen Log', kind: 'material', col: '#c0c8a8', desc: 'grey-green aspen, light and soft', wood: true, icon: LOG_ICON,
+    pal: {b: '#a8b098', l: '#c8d0b8', d: '#6a7260', e: '#ece0c0', r: '#c0aa84'}},
+  willow_log: {name: 'Willow Log', kind: 'material', col: '#a89880', desc: 'furrowed willow from the water\'s edge', wood: true, icon: LOG_ICON,
+    pal: {b: '#7a6a58', l: '#9a8a74', d: '#4e4234', e: '#e4cca0', r: '#b49470'}},
+  rowan_log: {name: 'Rowan Log', kind: 'material', col: '#b0aea6', desc: 'smooth grey rowan, tough for its size', wood: true, icon: LOG_ICON,
+    pal: {b: '#8a8a86', l: '#aaa9a2', d: '#5a5a56', e: '#e8cfa4', r: '#b89670'}},
+  deadwood: {name: 'Deadwood', kind: 'material', col: '#b8b0a2', desc: 'a dry grey length of a dead tree; it burns fast', wood: true, icon: LOG_ICON,
+    pal: {b: '#9a9284', l: '#b8b0a2', d: '#6a6258', e: '#c8bca8', r: '#9a8e78'}},
+  copper_bar: {name: 'Copper Bar', kind: 'material', col: '#e0a060', desc: 'a short green-gold bar of copper, still smelling of the fire',
+    pal: {c: '#f0c070', C: '#c07a3a', o: '#7a4a22', g: '#7ac4a0'},
+    icon: ['............', '............', '............', '............', '...ccccccc..', '..cccccccCC.', '.CCgCCCCCCo.', '.CCCCCCgCoo.',
+      '..oooooooo..', '............', '............', '............']},
+  iron_bar: {name: 'Iron Bar', kind: 'material', col: '#a8b0bc', desc: 'a dark bar of bloom iron, hammered square',
+    pal: {c: '#a8b0bc', C: '#6c7480', o: '#3a3e46', g: '#c8d0dc'},
+    icon: ['............', '............', '............', '............', '...ggccccc..', '..cccccccCC.', '.CCCCCCCCCo.', '.CCCCCCCCoo.',
+      '..oooooooo..', '............', '............', '............']},
+  iron_pick: {name: 'Iron Pick', kind: 'tool', stack: 1, made: true, col: '#d8dee4', desc: 'a miner\'s pick with a forged iron head: it bites iron',
+    tool: {job: 'mine', tier: 2, power: 1.25},
+    icon: ['............', '..kiiiiik...', '.kiissiiiik.', 'k.....wh..ik', '......wh...k', '.....wh.....', '.....wh.....', '....wh......',
+      '....wh......', '...wh.......', '...wh.......', '..wh........']},
+  iron_axe: {name: 'Iron Axe', kind: 'tool', stack: 1, made: true, col: '#d8dee4', desc: 'a forged iron axe: it fells the old oaks',
+    tool: {job: 'chop', tier: 2, power: 1.25},
+    icon: ['.........ss.', '.......iiis.', '....wiiiiis.', '....hiiiiis.', '...wh.kiiis.', '...wh....ss.',
+      '..wh........', '..wh........', '.wh.........', '.wh.........', 'wh..........', 'wh..........']},
 };
 // THE CATCHES (content/fishing.js): every fish and find is a material: it goes in the pouch
 for (const id of CATCH_IDS) {
@@ -102,4 +136,6 @@ for (const id in BAITS) { const b = BAITS[id]; ITEMS[id] = {name: b.name, kind: 
 export const START_KIT = [['axe', 1]];
 
 export const itemDef = id => ITEMS[id] || null;
+// the logs (every species': a cost of 'wood' takes any of them)
+export const WOOD_IDS = Object.keys(ITEMS).filter(id => ITEMS[id].wood);
 export const inPouch = id => ITEMS[id]?.kind === 'material';

@@ -13,9 +13,11 @@
 // (a hollow wall's plug never comes back). And the cave's SOOT THINGS (docs/CAVELIFE.md: sim/cavelife.js, the same rules the game
 // runs offline): they go for the lit lanterns (each player's state says whether theirs burns: lt), keep out of the lamps' and
 // burning fires' light (the builds), and put a lantern out (an event to everyone: {k: 'ev', a: 'snuff', id}); their places go
-// out in the snapshots (sn: [x, y, h, mode] each).
+// out in the snapshots (sn: [x, y, h, mode] each). And THE WORKSHOP (docs/WORKSHOP.md: server/workshop.mjs): every made thing's
+// record (kept by the browser's key: server/players.mjs), counted from the 'fell' and 'mine' acts that carry its uid; the
+// furnaces' heat and charges; fire-setting (an iron vein cracked by a fire burning by it: 'k' + its index in the world).
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
-//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
+//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log, workshop: {heat, smelt, wardrobe}}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
 import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
@@ -27,10 +29,12 @@ import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
+import {createPlayers, KEY_RE} from './players.mjs';
+import {createWorkshop} from './workshop.mjs';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, workshop = {}}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -51,6 +55,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const pub = p => ({id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, phi: p.phi, s: p.s, pose: p.pose, rig: p.rig, w: p.w, wn: p.wn, ls: p.ls, g: p.gear});
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
+  // THE WORKSHOP: the made things' records (by the browser's key), the furnaces (server/workshop.mjs)
+  const PL = createPlayers({SKILLS}), ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players: PL, veins, heat: workshop.heat, smelt: workshop.smelt, wardrobe: !!workshop.wardrobe});
 
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
@@ -58,8 +64,10 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
       fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false};
+    p.rec ??= PL.join(KEY_RE.test(m.key) ? m.key : '#' + id, m.xp).rec;   // (his record by the hello's player key: server/players.mjs, shared with the skills)
+    const made = ws.hello(p, m);   // (his records: the server's, the hello's copy filling in)
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
-      clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null}));
+      clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null, made}));
     peers.set(id, p);
     others(p, {k: 'join', p: pub(p)});
     log(`+ ${p.name} (#${id}) from ${conn.ip} · ${peers.size} in the room`);
@@ -104,6 +112,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
     if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
+    if (ws.ACTS.has(a)) return ws.act(p, a, m, id, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -115,6 +124,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const s = {s: 'felled', by: p.id, t};
     world.set(id, s);
     all({k: 'world', id, s: s.s, by: p.id});
+    ws.count(p, m.u, m.old === 1 ? ['fell', 'oldoak'] : ['fell']);   // (the axe's record: u; old: an old oak)
     log(`  ${p.name} felled ${id}`);
   }
 
@@ -152,13 +162,15 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       if (Math.hypot(v.x - p.x, v.y - p.y) > REACH) return deny('too far');
       kind = v.kind;
     } else if (!VEINS[kind] || !/^v\d+$/.test(id)) return deny('no such vein');
-    const V = VEINS[kind]; if ((num(m.tier, 1) | 0) < V.tier) return deny('too hard');
+    const crack = ws.cracked(id) ? 1 : 0;   // (fire-setting: a cracked vein asks one tier less, gives one chunk more: server/workshop.mjs)
+    const V = VEINS[kind]; if ((num(m.tier, 1) | 0) + crack < V.tier) return deny('too hard');
     const pow = Math.max(.25, Math.min(3, num(m.pow, 1)));
     p.mineLvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0));   // (his level for the others' last blows too)
     const by = cur?.by ? [...cur.by] : []; if (!by.includes(p.id)) by.push(p.id);
+    const us = {...cur?.us}; if (typeof m.u === 'string' && m.u) us[p.id] = str(m.u, 24);   // (each striker's pick's record: the workshop counts the vein into it)
     const left = Math.max(0, (cur?.left ?? V.blows) - pow);
     if (left > 1e-6) {
-      const s = {s: 'struck', left: +left.toFixed(3), by, t};
+      const s = {s: 'struck', left: +left.toFixed(3), by, t, us};
       world.set(id, s); all({k: 'world', id, s: 'struck', left: s.left, by: p.id}); return;
     }
     const got = {};
@@ -166,7 +178,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const pq = peers.get(q); if (!pq) continue;
       const lvl = pq.mineLvl || 1, notes = levelNotes(SKILLS.mining.per, lvl);
       for (const g of pq.gear) for (const n of GEAR_BY_ID[g]?.mods || []) notes.push(n);
-      got[q] = mineYield(mineRng, kind, mineStats(notes));
+      got[q] = mineYield(mineRng, kind, mineStats(notes)) + crack;
+      ws.count(pq, us[q], kind === 'iron' ? ['veins', 'iron'] : ['veins']);
     }
     world.set(id, V.hollow ? {s: 'spent', by: p.id, t} : {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});   // (a hollow wall: open for good)
     all({k: 'world', id, s: 'spent', by: p.id, got});
@@ -209,12 +222,13 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   }
 
   // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:
-  // content/gear.js cleanSet) and tells everyone, the wearer too. (No inventory yet: any known piece may be worn.)
+  // content/gear.js cleanSet) and tells everyone, the wearer too. Only what he owns (server/workshop.mjs owns: the free kinds,
+  // his made clothes; anything with --wardrobe)
   function wear(p, m) {
     const t = now(), mine = () => p.conn.send(encode({k: 'gear', id: p.id, g: p.gear}));   // (every ask gets an answer)
     if (t - p.gearT < 100) return mine();   // (a flood: refused, the set stays)
     p.gearT = t;
-    const g = cleanSet(m.g);
+    const g = cleanSet(m.g).filter(id => ws.owns(p, id));
     if (g.join(',') === p.gear.join(',')) return mine();
     p.gear = g;
     all({k: 'gear', id: p.id, g});
@@ -280,6 +294,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const timer = setInterval(() => {
     if (!peers.size) return;
     regrowTick(DT);
+    ws.tick(DT);
     // the uncanny forest: the secrets' clocks and the heron's ring, the night elk (the placed players only)
     let c = 0;
     if (unc) {

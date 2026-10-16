@@ -118,8 +118,7 @@ export async function create(host) {
   function unapply() {
     for (const p of [...felled.keys()]) grow(p, true);
     falls.length = 0; hp.clear();
-    let n = 0; for (const L of logs) if (!L.dead) { L.dead = true; n++; } logs.length = 0;
-    if (n) pack()?.give('log', n);
+    for (const L of logs) if (!L.dead) { L.dead = true; pack()?.give(L.item, 1); } logs.length = 0;
     const t = T(); if (t?.on) { t.put(); pack()?.held(-1); heldSlot = -1; }
   }
   function reset() {   // a new world (pack.reset): every tree back, no logs
@@ -270,7 +269,7 @@ export async function create(host) {
       let x = f.p.x + f.dx * d - f.dy * side, y = f.p.y + f.dy * d + f.dx * side;
       if (host.blocked?.(x, y, host.elev(x, y))) { x = f.p.x + f.dx * .7; y = f.p.y + f.dy * .7; }   // (into a wall: by the stump)
       logs.push({x, y, h: host.elev(x, y) + .3 + R() * .3, vx: (R() - .5) * 1.2, vy: (R() - .5) * 1.2, vh: 1.6 + R() * 1.4, t: 0, rest: false,
-        yaw: Math.atan2(f.dy, f.dx) + (R() - .5) * .9, spin: (R() - .5) * 9, dead: false});
+        yaw: Math.atan2(f.dy, f.dx) + (R() - .5) * .9, spin: (R() - .5) * 9, dead: false, item: f.I.def.log || 'log', bark: f.I.def.bark || 'bark'});   // (its species' log: the workshop's woods)
     }
     const L = crownMid(f.I) * .5;
     host.events.push({type: 'tree.logs', x: f.p.x + f.dx * L, y: f.p.y + f.dy * L, who: f.p, n});
@@ -288,7 +287,7 @@ export async function create(host) {
       const dx = P.x - L.x, dy = P.y - L.y, d = Math.hypot(dx, dy);
       if (d < G.pick && Math.abs(P.z - L.h) < 1.2) {
         L.dead = true; logs.splice(i, 1);
-        pack()?.give('log', 1, {x: P.x, y: P.y, h: P.z + 1.8}); pack()?.gain('woodcutting', XP.gather);
+        pack()?.give(L.item, 1, {x: P.x, y: P.y, h: P.z + 1.8}); pack()?.gain('woodcutting', XP.gather);
       } else if (d < G.magnet && Math.abs(P.z - L.h) < 1.5) {   // drawn in to him, faster as it nears
         const v = Math.min(d, G.speed * dt * (1 + (G.magnet - d) / G.magnet));
         L.x += dx / d * v; L.y += dy / d * v; if (L.rest) L.h = host.elev(L.x, L.y);
@@ -335,8 +334,8 @@ export async function create(host) {
   const M = new THREE.Matrix4(), MR = new THREE.Matrix4(), MT = new THREE.Matrix4(), V3 = new THREE.Vector3(), SC = new THREE.Vector3(), Q = new THREE.Quaternion(), QY = new THREE.Quaternion(), UPV = new THREE.Vector3(0, 1, 0), ZV = new THREE.Vector3(0, 0, 1);
   const treeMatrix = (p, I, out) => out.makeRotationY(I.pose.yaw).scale(SC.setScalar(I.s)).setPosition(p.x, p.z || 0, p.y);   // (world.js placeOf)
   const VF = [];   // the falls drawn: {p, I, f (the sim's record), m, M0, axis, hinge, th1, gone}
-  const stumpMesh = new Map(), logMesh = new Map();
-  let logGeo = null, seenVer = -1;
+  const stumpMesh = new Map(), logMesh = new Map(), logGeos = {};
+  let seenVer = -1;
   function startFall(f) {
     const p = f.p, I = f.I, e = {vx: f.dx, vy: f.dy};
     const M0 = treeMatrix(p, I, new THREE.Matrix4());
@@ -371,13 +370,13 @@ export async function create(host) {
   }
   function syncLogs() {
     if (!logs.length && !logMesh.size) return;   // (nothing on the ground: no iterators a frame)
-    logGeo ??= geoOf([{...along([0, -.27, 0], [0, .27, 0], .072, .066, 7), fam: 'bark'},
+    const logGeo = bark => logGeos[bark] ??= geoOf([{...along([0, -.27, 0], [0, .27, 0], .072, .066, 7), fam: bark},   // (in its species' bark)
       {g: new THREE.CylinderGeometry(.064, .066, .01, 7), m: new THREE.Matrix4().makeTranslation(0, -.272, 0), fam: 'rope', fixed: 1},
       {g: new THREE.CylinderGeometry(.058, .06, .01, 7), m: new THREE.Matrix4().makeTranslation(0, .272, 0), fam: 'rope', fixed: 1}]);
     for (const [L, m] of logMesh) if (L.dead) { m.dispose(); logMesh.delete(L); }
     for (let i = 0; i < logs.length; i++) {
       const L = logs[i]; let m = logMesh.get(L);
-      if (!m) { m = host.world.mesh(logGeo, new THREE.Matrix4()); logMesh.set(L, m); }
+      if (!m) { m = host.world.mesh(logGeo(L.bark || 'bark'), new THREE.Matrix4()); logMesh.set(L, m); }
       const roll = L.t * L.spin;
       QY.setFromAxisAngle(UPV, -L.yaw); Q.setFromAxisAngle(ZV, Math.PI / 2 + roll * .1); QY.multiply(Q);
       m.setMatrix(M.compose(V3.set(L.x, L.h + .07, L.y), QY, SC.setScalar(1)));   // (setMatrix returns at once when it didn't move)
