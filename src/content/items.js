@@ -107,6 +107,20 @@ export const ITEMS = {
     pal: {a: '#f0a030', l: '#ffd070', d: '#a85a10', t: '#6a4a2a'},
     icon: ['............', '...t....t...', '..t......t..', '.al......al.', '.ad......ad.', '..t......t..', '..al....al..', '..ad....ad..',
       '...tt..tt...', '....alal....', '....adad....', '............']},
+  // WHAT WRONG WEATHER LEAVES (features/wrongwx.js; docs/WEATHER.md "Wrong weather"): one of each where the weather ended. They do
+  // nothing yet
+  unmelting_hail: {name: 'Unmelting Hail', kind: 'material', col: '#d8ecf8', desc: 'a handful of hailstones from the cloud that followed you. They stay cold in your hand and never melt',
+    pal: {w: '#f4fbff', b: '#a8d0ec', d: '#6890b0'},
+    icon: ['............', '............', '...ww.......', '..wbbd...ww.', '..wbbd..wbbd', '...dd...wbbd', '.....ww..dd.', '....wbbd....',
+      '....wbbd....', '.....dd.....', '............', '............']},
+  carved_figure: {name: 'Carved Figure', kind: 'material', col: '#7a6a58', desc: 'a little figure of dark wood, no face, standing very straight. It was where the closest one stood when the light came back',
+    pal: {w: '#6a5a48', d: '#3a3028', l: '#8a7a64'},
+    icon: ['............', '.....ll.....', '....lwwd....', '....wwwd....', '.....wd.....', '....lwwd....', '...lwwwwd...', '....wwwd....',
+      '....wwwd....', '....wddd....', '....w..d....', '...dd..dd...']},
+  old_mitten: {name: 'Old Mitten', kind: 'material', col: '#a84a3a', desc: 'a hand-knitted mitten, red, frozen stiff, lying where the footprints stopped. Only the one',
+    pal: {r: '#a84a3a', d: '#6a2a20', w: '#e8e0d0'},
+    icon: ['............', '....rrr.....', '...rrrrr....', '...rrrrr.rr.', '...rrrrrrrr.', '...rrrrrrrd.', '...rrrrrrd..', '...rrrrrd...',
+      '...rrrrrd...', '...wwwwww...', '...wdwdwd...', '............']},
   // KEEPSAKES of the cave's sealed rooms (features/mining.js: a hollow wall's cache). Worn in a charm slot each bends a rule
   // (content/keepsakes.js, docs/KEEPSAKES.md); a tally stick's notches redraw its icon (features/keepsakes.js iconOf)
   tally_stick: {name: 'Tally Stick', kind: 'material', col: '#c8a878', desc: 'a stick cut with rows of notches. Someone was counting something, down here, for a long time',

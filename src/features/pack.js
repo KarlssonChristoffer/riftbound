@@ -35,13 +35,16 @@ import {SKILLS, CURVE, TITLES, rateOf, needXP, movesHad, nextMoveLvl, hasMove, t
 import {isFish} from '../content/fishing.js';
 import {createInventory} from '../game/inventory.js';
 import {createSkills} from '../game/skills.js';
-import {loadWorld, saveWorld, clearWorld} from '../game/save.js';
+import {loadWorld, saveWorld, clearWorld, stashWorld} from '../game/save.js';
 import {createPackPanel} from '../ui/packpanel.js';
 import {createSkillToasts} from '../ui/skilltoast.js';
 import {hdUnit} from '../ui/hdpixel.js';
 import {flags} from '../core/flags.js';
 
 const ON = flags.get('pack') !== '0';
+// THE SAVE'S VERSION: change the saved shape -> bump SAVE_V and add MIGRATE[old](o) -> o at old + 1 (a save is never just
+// dropped: one with no way forward is stashed aside, game/save.js stashWorld, before a new world is written)
+const SAVE_V = 1, MIGRATE = {};
 const SAVE_AFTER = 2;   // s after a change before the save is written (a string of pickups: one write)
 const XPRATE = (v => v === 'raw' ? 'raw' : +v > 0 ? +v : 1)(flags.get('xprate'));
 const MOVES_ON = flags.get('moves') !== '0';
@@ -56,13 +59,15 @@ export async function create(host) {
   const ui = () => game()?.ui || null;
 
   function load() {
-    const o = flags.get('fresh') === '1' ? null : loadWorld();
-    if (o && o.v === 1) { inv.load(o.inv); skills.load(o.skills); stores = o.stores && typeof o.stores === 'object' ? o.stores : {}; return; }
+    let o = flags.get('fresh') === '1' ? null : loadWorld();
+    while (o && o.v < SAVE_V && MIGRATE[o.v]) o = MIGRATE[o.v](o);
+    if (o && o.v === SAVE_V) { inv.load(o.inv); skills.load(o.skills); stores = o.stores && typeof o.stores === 'object' ? o.stores : {}; return; }
+    if (o) { stashWorld(o); console.warn('pack: a save of version', o.v, 'this game can\'t read: kept as riftbound3d.world.v1.unread'); }
     inv.load(null); skills.load(null); stores = {};
     for (const [id, n] of START_KIT) inv.add(id, n);
     dirtyT = 0;   // (a new world: written at once)
   }
-  const write = () => { dirtyT = -1; saveWorld({v: 1, inv: inv.toJSON(), skills: skills.toJSON(), stores}); };
+  const write = () => { dirtyT = -1; saveWorld({v: SAVE_V, inv: inv.toJSON(), skills: skills.toJSON(), stores}); };
   if (ON) { load(); addEventListener('pagehide', () => { if (dirtyT >= 0) write(); }); }
 
   const queue = [];   // the panel's clicks (and the menu's): carried out in the sim step
