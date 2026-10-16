@@ -69,6 +69,12 @@ export const ITEMS = {
     pal: {p: '#2a2c3a', q: '#16161e', s: '#e8f0ff', t: '#8a9ce0'},
     icon: ['............', '............', '....pppq....', '...psppqq...', '..ppptpqsq..', '.pspppqqqq..', '.ppptpqsqqq.', '..ppqsqqtq..',
       '...qqqqqq...', '............', '............', '............']},
+  // THUNDERWOOD (features/thunder.js, docs/WEATHER.md): a splinter at the foot of a tree the lightning struck. A keepsake: folklore says
+  // it keeps the house from the next bolt. It does nothing yet
+  thunderwood: {name: 'Thunderwood', kind: 'material', col: '#d8c8a0', desc: 'a pale splinter split out of a struck pine, scorched black down one edge. They say it keeps the house safe from lightning',
+    pal: {w: '#e4d4aa', d: '#a08a5c', n: '#2a221c', c: '#5a4a3a'},
+    icon: ['..........n.', '.........nw.', '........nwd.', '.......nwwd.', '......cwwd..', '.....nwwd...', '....nwwd....', '...cwwd.....',
+      '..nwwd......', '.nwd........', '.nd.........', '............']},
   // KEEPSAKES of the cave's sealed rooms (features/mining.js: a hollow wall's cache): they do nothing yet
   tally_stick: {name: 'Tally Stick', kind: 'material', col: '#c8a878', desc: 'a stick cut with rows of notches. Someone was counting something, down here, for a long time',
     pal: {w: '#c8a878', d: '#7a5c3a', n: '#3a2a1a'},

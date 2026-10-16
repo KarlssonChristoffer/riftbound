@@ -77,6 +77,12 @@ export const EVENTS = {
   'fire.logFall':       ['features/lights.js',    'x, y', '(none yet)'],
   'fire.addWood':       ['features/lights.js',    'x, y', '(none yet)'],
   'fire.doused':        ['features/builds.js',    'x, y, id: the rain put an open fire out (docs/WEATHER.md; online: the server\'s word)', 'campfires (a hiss of steam)'],
+  // natural lightning (features/thunder.js, docs/WEATHER.md; online the server aims and strikes: these come from its word). A build
+  // that wants the charge (a lightning rod) listens to thunder.strike and adds its kind to content/thunder.js STRIKE
+  'thunder.mark':       ['features/thunder.js',   'x, y, h, kind (tree | tor | ground | player), id (the tree\'s fid, the player\'s id), tele (s to the strike)', 'thunder (view)'],
+  'thunder.strike':     ['features/thunder.js',   'x, y, h, kind, id (what it hit), k (how strong 0..1: 1 at the heart), you (it hit you)', 'thunder (view), audio'],
+  'tree.burn':          ['features/thunder.js',   'x, y, id (a tree caught: a strike, a neighbour, a brand)', 'thunder (view)'],
+  'tree.charred':       ['features/thunder.js',   'x, y, id (it burnt out: black till the spring)', '(none yet)'],
   'garden.talk':        ['features/garden.js',    'x, y (the merchant)', '(none yet)'],
   'wildlife.birds_scatter': ['features/wildlife.js, features/fauna.js', 'x, y, n', 'wildlife, audio'],
   'wildlife.wings':     ['features/wildlife.js, features/fauna.js',  'x, y', 'audio'],

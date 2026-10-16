@@ -133,6 +133,10 @@ export const FLAG_DOCS = {
   nelk: 'how often the night elk hunts (docs/UNCANNY.md): 1 default; 2 twice as often (half the rest after a knock); 0 never (it walks its way and grows wrong, that is all). Offline only: the co-op server runs its own',
   nnotice: 'how far the forest\'s odd things show (docs/UNCANNY.md: the night ring\'s glow and light, the pale marks by lantern light): x1 default',
   wx2: '0: the weather is show only, as before the weather-you-feel slice (docs/WEATHER.md: no wet or cold, no shelter, no wind push, no fires put out by rain)',
+  thunder: '0: no natural lightning (the storm flashes as before; docs/WEATHER.md)',
+  strikes: 'a factor on how often natural lightning comes down in a storm (docs/WEATHER.md: 1)',
+  treefire: '0: a tree the lightning strikes doesn\'t burn (it chars at once)',
+  firestart: '1: you can carry a burning brand from a campfire and set a tree alight (experimental; also Esc > Sandbox)',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',

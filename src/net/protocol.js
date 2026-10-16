@@ -11,7 +11,8 @@
 //            lantern burns in the cave, bd = his body's look (content/body.js packBody: wet, cold, sunk, knocked down)
 //   act      {a, id}                                      ask the server to change the shared world: a 'fell' (id: a forest tree),
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
-//            dawn | day | dusk | night: dev, the world's clock to the next such hour)
+//            dawn | day | dusk | night: dev, the world's clock to the next such hour), 'ignite' (id: a tree he touched a burning
+//            brand to: ?firestart=1, docs/WEATHER.md), 'wood' (id: a struck tree whose splinter of thunderwood he took)
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
@@ -26,7 +27,12 @@
 //   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0, lt, bd], ...], c?}   every tick; w only when it changed since the last snap;
 //            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
-//   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it
+//   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it. A tree the
+//            lightning struck: id 'z' + its fid, s 'burning' {t0, t1 (s of the server's clock), tw} | 'charred' {at (the hour it's whole
+//            again: the next spring), tw (1: a splinter of thunderwood at its foot)} | 'grown'
+//   bolt     {a: 'mark', n, kind, id, x, y, h, tele}     natural lightning (docs/WEATHER.md; the server aims it in a storm): bolt n will
+//            strike (x, y) at height h in tele s (kind: tree | tor | ground | player, id: the tree's fid or the player's id).
+//            {a: 'strike', n, kind, id, x, y, h}: it struck (a player under it hurts himself: where he stands now)
 //   clock    {t, h, rate}                                the world's clock (the server owns it): at server time t (ms) it was h
 //            in-game hours since the start (sim/env.js E.t), going on at rate hours per ms (0: stopped). In welcome too
 //   sec      {id, s, by, n}                              a secret's state changed (sleeping / awake / triggered / spent), by =

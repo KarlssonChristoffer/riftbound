@@ -107,7 +107,8 @@ export async function create(host) {
     setNotes();
   };
   F.biomeChanged = () => reset();
-  F.bits = () => packBody(F.wet, F.cold);
+  let thunder = null;
+  F.bits = () => packBody(F.wet, F.cold) | ((thunder ??= host.feature('thunder') || false)?.bits?.() ?? 0);   // (knocked flat, smouldering: features/thunder.js)
   const PL = {wet: 0, cold: 0, sunk: 0, down: false, smoulder: false};
   F.lookOf = (q, out = PL) => unpackBody(q?.bd | 0, out);
 

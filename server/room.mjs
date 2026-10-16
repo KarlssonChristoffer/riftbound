@@ -24,6 +24,8 @@ import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/cont
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
 import {WEATHER, createSchedule, TUNE as WXT} from '../src/sim/wxclock.js';
+import {TUNE as TH, STRIKE, ironOf} from '../src/content/thunder.js';
+import {createThunder, nextSpring} from '../src/sim/thunder.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
@@ -31,7 +33,7 @@ import {mulberry32} from '../src/core/rng.js';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -106,6 +108,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
     if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
+    if (a === 'ignite' || a === 'wood') return thunderAct(p, a, id, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -210,7 +213,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   function regrowTick(dt) {   // once a second: the picked patches and spent veins whose time has come grow back, for everyone
     if ((growT += dt) < 1) return;
     growT = 0; const h = clock();
-    for (const [id, s] of world) if (s.at !== undefined && h >= s.at) { world.delete(id); all({k: 'world', id, s: 'grown'}); }
+    for (const [id, s] of world) if (s.at !== undefined && h >= s.at) { world.delete(id); if (id[0] === 'z') thunder?.charred.delete(id.slice(1)); all({k: 'world', id, s: 'grown'}); }   // (z: a charred tree whole again in the spring)
     // the rain on the open fires (each burning one's wet seconds; one out: 'doused', everyone's fire goes out with it)
     const rain = (weatherNow().rain ?? 0) >= BUILD.douse.rain, sec = secs();
     for (const [id, e] of world) {
@@ -219,6 +222,66 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       e.wetT = rain ? (e.wetT || 0) + 1 : Math.max(0, (e.wetT || 0) - 1);
       if (e.wetT >= BUILD.douse.s) { e.wetT = 0; e.fuel = 0; e.t0 = +sec.toFixed(3); all({k: 'world', id, s: 'doused', t0: e.t0, by: 0}); log(`  the rain put out ${id}`); }
     }
+  }
+
+  // THUNDER (sim/thunder.js, content/thunder.js, docs/WEATHER.md): natural lightning and the trees it sets alight. The server owns it
+  // online: while the clock's spell is a storm it aims a bolt now and then near a placed player (in turn), marks what it picked
+  // ({k: 'bolt', a: 'mark'}: everyone sees the warning), and TH.tele s later strikes it ({k: 'bolt', a: 'strike'}: everyone draws
+  // it; a player under it is hurt by his own client, by where he stands then: he can get off the spot). The trees' fires are its
+  // too: 'z' + fid in the world: {s: 'burning', t0, t1} (s of its clock), then {s: 'charred', at: the next spring's hour, tw: 1 while
+  // a splinter of thunderwood lies at its foot}. Acts: 'ignite' (a brand from a campfire: ?firestart=1), 'wood' (the splinter taken)
+  const thunder = forest ? createThunder(forest) : null, thR = mulberry32((seed ^ 0x7d3a) >>> 0), marks = [], tPl = [], AIM = {};
+  let boltT = TH.every[1], boltN = 0, fireT = 0;
+  const wetNow = () => (weatherNow().rain ?? 0) > .1 || (WEATHER[sky.at('ruins', clock() - 1, WXT.seasonDays).w]?.rain ?? 0) > .1 ? 1 : 0;   // (rained this hour or the last: the ground's wet)
+  function burn(fid, by) {
+    const b = thunder.burning.get(fid), e = {s: 'burning', t0: +b.at.toFixed(2), t1: +b.t1.toFixed(2), tw: world.get('z' + fid)?.tw | 0};
+    world.set('z' + fid, e); all({k: 'world', id: 'z' + fid, ...e, by});
+  }
+  function charred(fid) {
+    const e = {s: 'charred', at: +nextSpring(clock(), WXT.seasonDays).toFixed(3), tw: world.get('z' + fid)?.tw | 0};
+    world.set('z' + fid, e); all({k: 'world', id: 'z' + fid, ...e});
+  }
+  function strike(m, sec) {
+    const S = STRIKE[m.kind] || STRIKE.ground;
+    if (m.kind === 'tree') {   // the tree: it catches (a splinter of thunderwood at its foot, now and then), or straight to charred
+      world.set('z' + m.id, {s: 'struck', tw: thR() < (S.wood || 0) ? 1 : 0});
+      if (S.burn && treefire && thunder.ignite(m.id, sec, thR)) burn(m.id, 0);
+      else { thunder.charred.add(m.id); charred(m.id); }
+    }
+    all({k: 'bolt', a: 'strike', n: m.n, kind: m.kind, id: m.id, x: m.x, y: m.y, h: m.h});
+    log(`  lightning struck ${m.kind} ${m.id}`);
+  }
+  function thunderTick(dt) {
+    if (!thunder) return;
+    const sec = secs(), W = weatherNow();
+    if ((W.storm ?? 0) >= TH.storm) {
+      if ((boltT -= dt * strikes) <= 0) {
+        boltT = TH.every[0] + thR() * (TH.every[1] - TH.every[0]);
+        tPl.length = 0; let open = 0;
+        for (const p of peers.values()) if (p.placed) { const safe = !!cave?.inBand?.(p.x, p.y); tPl.push({id: p.id, x: p.x, y: p.y, z: p.z, iron: ironOf(p.gear, GEAR_BY_ID), safe}); if (!safe) open++; }
+        let k = open ? thR() * open | 0 : -1;
+        for (const c of tPl) if (!c.safe && k-- === 0) {   // (a bolt somewhere round this one)
+          const a = thR() * Math.PI * 2, d = Math.sqrt(thR()) * TH.reach, t = thunder.aim(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d, tPl, thR, AIM);
+          if (t) { const mk = {n: ++boltN, kind: t.kind, id: t.kind === 'player' ? +t.id : t.id, x: +t.x.toFixed(2), y: +t.y.toFixed(2), h: +t.h.toFixed(2), at: sec + TH.tele}; marks.push(mk); all({k: 'bolt', a: 'mark', n: mk.n, kind: mk.kind, id: mk.id, x: mk.x, y: mk.y, h: mk.h, tele: TH.tele}); }
+          break;
+        }
+      }
+    } else boltT = Math.max(boltT, 2);
+    for (let i = marks.length - 1; i >= 0; i--) if (sec >= marks[i].at) { const m = marks[i]; marks.splice(i, 1); strike(m, sec); }
+    if ((fireT += dt) >= TH.fire.tick) { fireT = 0; thunder.tick(sec, W.rain ?? 0, wetNow(), thR, fid => burn(fid, 0), charred); }
+  }
+  function thunderAct(p, a, id, deny) {
+    if (!thunder) return deny('no forest');
+    const t = thunder.tree(id); if (!t) return deny('no such tree');
+    if (Math.hypot(t.x - p.x, t.y - p.y) > TH.brand.reach + 1.5) return deny('too far');
+    if (a === 'ignite') {   // a brand from a campfire (?firestart=1 on his page): it catches unless the ground is wet
+      if (world.get('z' + id)?.s === 'charred') return deny('charred');
+      if (wetNow()) return deny('too wet');
+      if (!thunder.ignite(id, secs(), thR)) return deny('it won\'t catch');
+      burn(id, p.id); log(`  ${p.name} set ${id} alight`); return;
+    }
+    const e = world.get('z' + id); if (!e?.tw) return deny('none');   // 'wood': the splinter at a struck tree's foot
+    e.tw = 0; all({k: 'world', id: 'z' + id, ...e, by: p.id});
   }
 
   // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:
@@ -293,6 +356,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const timer = setInterval(() => {
     if (!peers.size) return;
     regrowTick(DT);
+    thunderTick(DT);
     // the uncanny forest: the secrets' clocks and the heron's ring, the night elk (the placed players only)
     let c = 0;
     if (unc) {

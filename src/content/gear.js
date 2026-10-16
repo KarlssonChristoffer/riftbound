@@ -112,7 +112,7 @@ export const GEAR = [
       {on: 'HatHold0', part: 'straw.band', mat: 'red_cloth', shape: 'tube', r0: .193, r1: .19, len: .035, at: [0, .01, 1.695], o: {sides: 10}},
     ]}},
   {id: 'kettle_helm', name: 'Kettle helm', slot: 'head', kind: 'armor', rarity: 'fine', weight: 3, armor: .08, desc: 'An iron dome with a narrow brim. Heavy, and it rings when hit.',
-    soon: 'a lightning rod in thunderstorms',
+    mods: [{stat: 'thunder.iron', add: 1}],
     look: {hide: ['hat'], add: [
       {on: 'HatHold0', part: 'helm', mat: 'iron', shape: 'ball', r: [.225, .235, .17], at: [0, .01, 1.7], o: {sides: 10}},
       {on: 'HatHold0', part: 'helm.brim', mat: 'iron', shape: 'disc', r: .3, len: .022, at: [0, .01, 1.64], o: {sides: 12}},
@@ -135,12 +135,12 @@ export const GEAR = [
     ]}},
   // ---- body
   {id: 'wool_sweater', name: 'Wool sweater', slot: 'body', kind: 'clothing', rarity: 'common', weight: 1.5, armor: .02, desc: 'A thick knitted sweater instead of the duster.',
-    mods: [{stat: 'body.chill', mul: .75}, {stat: 'body.wetHeavy', add: 1}], soon: 'catches fire fast',
+    mods: [{stat: 'body.chill', mul: .75}, {stat: 'body.wetHeavy', add: 1}, {stat: 'thunder.smoulder', add: 1}],
     look: {paint: {vest: 'wool_cream', shirt: 'wool_cream', sleeves: 'wool_cream'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
       {on: 'Spine2', part: 'sweater.neck', mat: 'wool_cream', shape: 'tube', r0: .1, r1: .085, len: .07, at: [0, .0, 1.235], o: {sides: 10}},
     ]}},
   {id: 'mail_shirt', name: 'Mail shirt', slot: 'body', kind: 'armor', rarity: 'fine', weight: 9, armor: .18, desc: 'Iron rings under the duster. Stops cuts and arrows; you sink in water.',
-    soon: 'draws lightning in thunderstorms',
+    mods: [{stat: 'thunder.iron', add: 1}],
     look: {paint: {vest: 'mail', shirt: 'mail'}}},
   {id: 'smith_apron', name: 'Smith\'s apron', slot: 'body', kind: 'tool', rarity: 'common', weight: 2, armor: .05, desc: 'Thick leather down the front.',
     soon: 'fireproof: stand in a friend\'s fire',

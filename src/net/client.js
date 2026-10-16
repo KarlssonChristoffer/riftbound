@@ -60,7 +60,7 @@ export function createNetClient({transport, name = ''}) {
         break;
       }
       case 'world': if (m.s === 'grown') C.world.delete(m.id); else C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;   // (grown: a patch or a vein back, features/forage.js, mining.js)
-      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': queue.push(m); break;
+      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': case 'bolt': queue.push(m); break;   // (bolt: natural lightning, features/thunder.js)
       case 'gear': {
         if (!Array.isArray(m.g)) break;
         if (m.id === C.id) { queue.push(m); break; }   // (yours: a sim message, features/gear.js wears it at a step)

@@ -1,10 +1,12 @@
 # Weather
 
-Status: 2026-10-16, part 1 of the "Weather, winter and the mire" brief
+Status: 2026-10-16, parts 1 and 2 of the "Weather, winter and the mire" brief
 (`/mnt/project-files/briefs/weather-winter-mire.md`). The weather is no longer only a show: rain soaks you, the cold gets
 into you, trees and the hut keep it off, the wind pushes you on the open fell, rain puts an open fire out, and the wool
-and fur pieces do what their tooltips said they would "soon". This file says what the game does now; the direction lives
-in the brief.
+and fur pieces do what their tooltips said they would "soon". In a storm lightning comes down for real: it picks the
+tallest lone tree, a tor or you out on the fell, warns for a second and a half, and strikes; a struck tree burns, may pass
+it to a neighbour, and stands charred till the spring. This file says what the game does now; the direction lives in the
+brief.
 
 ## Try it
 
@@ -29,6 +31,32 @@ Never a number or a bar: it shows on him (drips, steam, breath) and at the scree
 `wet · cold · shelter · wind` for testing. Esc > Sandbox > Body: soak me, chill me, dry and warm. `?wx2=0` turns all of
 this off (the weather is a show only, as before).
 
+## Thunder and fire
+
+- **A bolt about every 10-20 s while the storm is over you,** somewhere within 80 m (`?strikes=4` for more). It takes
+  what draws it most within 9 m of where it was aimed: a tree by its height and how lone it stands (a tall lone pine
+  most), a tor or crag top, a player (much more on the fell, x3 with the kettle helm or the mail shirt), else the bare
+  ground. About one bolt in ten lands within 25 m of you (one every two or three minutes).
+- **The warning:** 1.5 s of blue crackle at what it picked (round your head when it's you; a blue glint on your iron).
+  Get off the spot. A direct hit (within 1.4 m) hurts 34 and knocks you flat (thrown when your loadout can be; the
+  sprites skid), a graze (within 3.2 m) 10. Out of a fight it never takes you below 1 hp and the healing waits 12 s.
+  Struck in the wool sweater, it smoulders: 3 s of smoke puffs. Never in the cave or the hut.
+- **A struck tree catches:** its bark chars up from the foot, the crown goes in clumps, flames, smoke, a glow. It burns
+  60-120 s (the rain burns it out three times faster), may pass it to a tree within 4 m on the same ground (25% over its
+  life when dry, 5% wet; never across water or a step of rock), at most 8 at once. Then it stands black and bare till
+  the next spring. Three in ten leave a splinter of **thunderwood** at their foot: walk over it to take it (a keepsake,
+  it does nothing yet).
+- **Players start fires** (experimental, off): `?firestart=1` or Esc > Sandbox > "players start fires". E at a burning
+  campfire takes a burning brand (a second E adds a log as before); walk it into a tree and the tree catches, unless the
+  ground is wet. The brand burns out in 45 s, or in the water.
+
+Esc > Sandbox > Thunder: a bolt at the nearest tall tree, a bolt on me, set the nearest tree alight, the brand switch, the
+charred trees whole again. `?thunder=0` no natural lightning (the storm's flashes as before), `?treefire=0` struck trees char
+at once. The thunder is in `features/thunder.js` (this client), its rules in `sim/thunder.js` (shared with the server), the
+knobs and **what a strike does to each kind of thing** in `content/thunder.js` STRIKE. Every strike is a
+`thunder.strike` event (`core/events.js`: where, what, how strong): a future build (a lightning rod, something that stores
+the charge) adds its own kind to STRIKE and listens to that event; the thunder code doesn't change.
+
 ## How it works
 
 - **The weather comes from the seed and the clock** (`sim/wxclock.js`, pure). Spell n lasts 2 to 6 in-game hours and is
@@ -51,6 +79,13 @@ this off (the weather is a show only, as before).
 - **Fires** (`features/builds.js` `douse`): each burning, non-rainproof build counts its seconds in rain at or over
   `TUNE.douse.rain`; at `douse.s` its fuel goes to 0 and `fire.doused` is emitted (`features/campfires.js` hisses).
 
+- **Thunder** (`sim/thunder.js`): the forest plan's trees and outcrops go in a grid of 8 m cells once; `aim()` looks at
+  the cells round the aim point and does a weighted pick in one pass. The fires tick once a second. Offline the rules run
+  in `features/thunder.js` on its own clock and seeded generator; the charred trees are saved (`pack.store('thunder')`).
+  The look: the tree's own mesh (`mesh.burn`: char, glowing cracks, ash; the leaves and berries go by `leafBurnt` in
+  `render/gfx.js`, the shadow pass too), `lights.flame` for its flames, the bolt is `features/weather.js` `boltAt` (the near
+  bolts are thunder's now; weather keeps the far flashes).
+
 ## With friends (co-op)
 
 The weather is the same for everyone without a message: the seed and the server's clock. A body's look rides in the
@@ -60,6 +95,13 @@ it reads the same schedule (`server/room.mjs` regrowTick) and puts an open fire 
 everyone (`{k: 'world', s: 'doused'}`). The server sees the spell, not the fronts' edges or the forest's crowns: a fire
 under a big pine still goes out online. Offline, it's the rain where the fire stands.
 
+The server owns the lightning and the trees' fires (`server/room.mjs` thunderTick, the same `sim/thunder.js`). While its
+clock's spell is a storm it aims a bolt now and then round a placed player (in turn), tells everyone the mark
+(`{k: 'bolt', a: 'mark'}`) and 1.5 s later the strike (`a: 'strike'`). Each client hurts only itself, by where it stands
+when the strike comes, so you can still get off the spot. A struck tree is `'z' + fid` in the world (`burning` with its
+times, then `charred` till the next spring's hour, with `tw` while its splinter lies there); acts `'ignite'` (a brand)
+and `'wood'` (the splinter). Knocked flat and smouldering ride in the body bits. `--strikes` and `--treefire 0` like the
+page's switches. The server doesn't see the hut (only the cave is safe online).
 
 ## Knobs
 
@@ -79,8 +121,16 @@ under a big pine still goes out online. Offline, it's the rain where the fire st
 | fire doused | rain >= .5 for 10 s | `content/builds.js` TUNE `douse`; `rainproof` per build |
 | gear | hood soak x.3; wool cap / trousers chill x.85, sweater x.75 (+heavy), fur cloak x.7 | `content/gear.js` mods |
 | arrows drift in the wind | 6 m/s^2 at the gale's push (half the gale omen's) | `content/body.js` TUNE `wind.proj` |
+| bolts: how often, how far, storm needed | every 10-20 s, within 80 m, storm >= .5 | `content/thunder.js` TUNE `every`, `reach`, `storm`; `?strikes=` |
+| what draws it | tree 5 (x (height / 14 m)^2 x loneness), tor 3, player on the fell 4 (lower .5), ground 1.2, iron x3; within 9 m | `content/thunder.js` TUNE `weight`, `pick`, `tall`, `lone` |
+| warning / hit / graze | 1.5 s / 1.4 m: 34 hp, flat / 3.2 m: 10 hp; never below 1 hp out of a fight | `content/thunder.js` TUNE `tele`, `r`, `near`, `hurt`, `throw` |
+| a tree's fire | 60-120 s, rain x3 faster; spread 4 m, 25% dry / 5% wet; at most 8 | `content/thunder.js` TUNE `fire` |
+| thunderwood | 30% a struck tree | `content/thunder.js` STRIKE `tree.wood` |
+| the brand | 45 s | `content/thunder.js` TUNE `brand` |
 
 ## Not in yet
 
 Aim sway in the wind (there is no aim sway system to feed), a shivering idle and a darker wet sprite (the sprites are
-baked atlases), the server knowing which fires stand under trees.
+baked atlases), the server knowing which fires stand under trees or who's in the hut, the struck tree splitting down the
+middle (it chars and loses its crown instead), the brand lighting dry grass (trees only), hair standing up (the crackle
+round the head stands in for it).

@@ -81,7 +81,10 @@ const NO_SPRAY_VS = `float sprayM(mat4 mm) { return ${gl(AUTUMN_MID)}; }\n`;
 // SHADOW_SWAY_FS both use it (vn3, uLeafK, uSeed above it), so the shadow drops exactly the leaves the camera loses
 const LEAF_GONE = `
 uniform float uAutumn;
-bool leafGone(vec3 pl, float m) { return uLeafK < .999 && vn3(pl * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) + ${gl(AU.drop)} * uAutumn * (m - ${gl(AUTUMN_MID)}) > uLeafK * 1.1 - .05; }`;
+bool leafGone(vec3 pl, float m) { return uLeafK < .999 && vn3(pl * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) + ${gl(AU.drop)} * uAutumn * (m - ${gl(AUTUMN_MID)}) > uLeafK * 1.1 - .05; }
+// a burning tree (mesh.burn, features/thunder.js): its leaves go in clumps as the char climbs (uBurn.x), all gone at a charred 1,
+// the camera's pass and the shadow's alike (MESH_FS declares uBurn itself; SHADOW_SWAY_FS above this)
+bool leafBurnt(vec3 pl) { return vn3(pl * 2.2 + vec3(uSeed.x, 4.1, uSeed.y)) * .8 + .1 < uBurn.x * 1.15 - .1; }`;
 const meshVS = sway => HEAD + (sway ? SWAY + SPRAY_VS : 'vec3 sway() { return vec3(0.); }\n' + NO_SPRAY_VS) + `
 in vec3 position; in vec3 normal; in float aPart; in float aFam; in float aBias; in float aFixed;
 uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
@@ -143,6 +146,7 @@ void main() {
   bool inner = !gl_FrontFacing;
   if (inner && (fFixed > -1.5 || uLeafK >= .999)) discard;
   if (fFixed < -1.5 && leafGone(vPL, fM)) discard;   // (the sprays that turned further go first: LEAF_GONE)
+  if (uBurn.x > 0. && fFixed < -1.1 && leafBurnt(vPL)) discard;   // (a burning tree's crown goes as it chars, the berries with it: LEAF_BURNT)
   vec3 n = normalize(vN); if (inner) n = -n;
   float fam = fFam, jn = .5;   // jn: the leaves' 3D noise (below), which the autumn stage borrows
   // a ripening berry (aFixed -1.25: the rowan's bunches, trees3d.js; toned by the light like bark, never thinned): the part's own family is the ripe scarlet
@@ -881,13 +885,13 @@ out vec3 vPL; flat out float fFixed; flat out float fM;
 void main() { vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway(); vPL = position; fFixed = aFixed; fM = sprayM(modelMatrix); gl_Position = projectionMatrix * viewMatrix * w; }`;
 const SHADOW_FS = HEAD + ONE_OUT + `void main() { o0 = vec4(1.); }`;
 const SHADOW_SWAY_FS = HEAD + ONE_OUT + `
-in vec3 vPL; flat in float fFixed; flat in float fM; uniform float uLeafK; uniform vec2 uSeed;
+in vec3 vPL; flat in float fFixed; flat in float fM; uniform float uLeafK; uniform vec2 uSeed; uniform vec4 uBurn;
 float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
 ` + LEAF_GONE + `
-void main() { if (fFixed < -1.5 && leafGone(vPL, fM)) discard; o0 = vec4(1.); }`;
+void main() { if (fFixed < -1.5 && leafGone(vPL, fM)) discard; if (uBurn.x > 0. && fFixed < -1.1 && leafBurnt(vPL)) discard; o0 = vec4(1.); }`;
 const SHADOW_CARD_FS = HEAD + ONE_OUT + `
 in vec2 vUv; in vec2 vC; uniform sampler2D uTex;
 void main() { if (texture(uTex, vUv).a < .5) discard; o0 = vec4(1.); }`;
@@ -1898,7 +1902,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
     const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); if (o.keep) gm.material.uniforms.uSinkKeep.value = 1; gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
-      uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed, uSprayM: gm.material.uniforms.uSprayM, uSprayFix: gm.material.uniforms.uSprayFix}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
+      uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed, uSprayM: gm.material.uniforms.uSprayM, uSprayFix: gm.material.uniforms.uSprayFix, uBurn: gm.material.uniforms.uBurn}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
