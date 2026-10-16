@@ -54,7 +54,8 @@
 //   sample(F, x, y, out) / depth(o, x, y) / paint(F, K, S, T)    the water for world.js, waterbed.js, biomes.js
 import {vnoise, smooth, clamp, hash3} from '../core/mathx.js';
 import {placeMouth, cavePlan} from './caves.js';   // the woods' cave: its mouth here, its passages in the band north of the forest
-import {RECIPES} from '../content/recipes.js';   // (the windthrow's bare earth: its ground(p); pure data, no imports)
+import {RECIPES} from '../content/recipes.js';
+import {placeMire} from './mire.js';     // the upland's bog (its own stage, docs/MIRE.md)   // (the windthrow's bare earth: its ground(p); pure data, no imports)
 
 export const CHUNK = 16;
 export const RECT = {x0: -48, y0: -160, x1: 72, y1: 0};
@@ -282,19 +283,26 @@ export function forestPlan(seed) {
     hills.push({type: 'hill', x: +x.toFixed(2), y: +y.toFixed(2), rx: +r.toFixed(2), ry: +(r * (.88 + R() * .17)).toFixed(2), h: +h.toFixed(2), rot: +(R() * Math.PI).toFixed(3)}); i++;
   }
   const hillH = (x, y) => { let h = 0; for (const s of hills) { const c = Math.cos(s.rot), n = Math.sin(s.rot), dx = x - s.x, dy = y - s.y, u = (dx * c + dy * n) / s.rx, v = (-dx * n + dy * c) / s.ry, d = u * u + v * v; if (d < 1) h += s.h * .5 * (1 + Math.cos(Math.PI * Math.sqrt(d))); } return h; };
+  // ---- THE MIRE (world/mire.js, docs/MIRE.md): a bog in the flattest low hollow on the upland's top, away from the fell and the
+  // canyon (its own generator, mix(seed, 51): nothing placed before or after it moves; only the growth keeps out of it)
+  const MI = F.mire = placeMire(mix(seed, 51), {ground, high: (x, y) => fellH(x, y) + ridgeH(x, y), rect: RECT, top: uFoot - UP.slope * .85, avoid: () => false,
+    canyonD: (x, y) => { const B = cy.box; if (x < B[0] || y < B[1] || x > B[2] || y > B[3]) return 1e9; const [d, i, t] = cyNear(x, y); return d - cy.hw[i] - (cy.hw[i + 1] - cy.hw[i]) * t; }});
+  const mireIn = (x, y, m) => !!MI && MI.inside(x, y, m);
   // the ground as this plan sees it (relief + hills, the lake's hollow): placement's slope and height tests. The drawn and walked
   // ground is layout.js's field of these shapes (with its own low swell): within a few cm of this
   // (the rock comes later, away from the water: placed after the watercourses, which walk the ground without it)
   F.height = (x, y) => {
     let h = reliefH(x, y) + highH(x, y) + hillH(x, y) + eskerH(x, y); const d = lakeD(x, y);
     if (d < 1) h = Math.min(h, L.bed); else { const k = (d - 1) * Math.min(L.rx, L.ry) / L.rim; if (k < 1) h = L.bed + (h - L.bed) * smooth(k); }
+    if (MI && h > MI.h) { const u = (x - MI.x) / MI.rx, v = (y - MI.y) / MI.ry, r = Math.hypot(u, v), k = r <= 1 ? 0 : (r - 1) * r / Math.hypot(u / MI.rx, v / MI.ry) / MI.rim; if (k < 1) h = MI.h + (h - MI.h) * smooth(k); }   // (its basin: terrain.js's)
     for (let i = 0; i < rock.length; i++) { const v = terraceH(rock[i], x, y); if (v > h) h = v; }
     if (x > canyonBox[0] && y > canyonBox[1] && x < canyonBox[2] && y < canyonBox[3]) h = canyonH(x, y, h);
     return h;
   };
   const slope = (x, y) => { const e = .5; return Math.hypot(F.height(x + e, y) - F.height(x - e, y), F.height(x, y + e) - F.height(x, y - e)) / (2 * e); };
   F.shapes.push({type: 'field', reach: [RECT.x0 - 30, RECT.y0 - 30, RECT.x1 + 30, RECT.y1], fn: (x, y) => reliefH(x, y) + highH(x, y) + eskerH(x, y)}, ...hills, F.canyon.cut,
-    {type: 'basin', x: L.x, y: L.y, rx: L.rx + .3, ry: L.ry + .3, h: L.bed + WATER_H, rim: L.rim});   // (its floor at the water's surface: the strand and the shelf are walked at it)
+    {type: 'basin', x: L.x, y: L.y, rx: L.rx + .3, ry: L.ry + .3, h: L.bed + WATER_H, rim: L.rim});
+  if (MI) F.shapes.push(MI.shape);   // (its floor at the water's surface: the strand and the shelf are walked at it)
 
   // the ground's fall per m along a line, u m along it (MEANDERS: how gentle it runs there)
   const slopeOn = pts => { const Ls = [0]; for (let i = 1; i < pts.length; i++) Ls.push(Ls[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
@@ -467,7 +475,7 @@ export function forestPlan(seed) {
   F.chunks = [];
   const canyonD = (x, y) => { const B = cy.box; if (x < B[0] || y < B[1] || x > B[2] || y > B[3]) return 1e9; const [d, i, t] = cyNear(x, y); return d - cy.hw[i] - (cy.hw[i + 1] - cy.hw[i]) * t; };   // (m out from its walls)
   const mouth = cy.pts[0], canyonClear = (x, y) => canyonD(x, y) < 1.8 || Math.hypot(x - mouth[0], y - mouth[1]) < 9;   // (no tree in the slot or crowding its mouth: it hid the floor and the way in)
-  const keepOut = {clearD, crestD, inRock: (x, y, m) => inRock(x, y, m) || caveNear(x, y, m), eskerH, boulders: BF, bare, fellK: F.fellK, canyonClear};
+  const keepOut = {clearD, crestD, inRock: (x, y, m) => inRock(x, y, m) || caveNear(x, y, m), eskerH, boulders: BF, bare, fellK: F.fellK, canyonClear, mire: mireIn};
   { let top = 0; for (let y = fy - fr * MT.stoss; y < fy + fr; y += 1) for (let x = fx - fr * 1.2; x < fx + fr * 1.2; x += 1) top = Math.max(top, F.height(x, y)); F.mountain.h = +top.toFixed(2); }
   for (let cy = C0y; cy < C1y; cy++) for (let cx = C0x; cx < C1x; cx++) { F.chunks.push([cx, cy]); grow(F, cx, cy, S, slope, keepOut); }
   // the fell's tors (each rock in the chunk it lies in)
@@ -502,7 +510,21 @@ export function forestPlan(seed) {
       at.push([x, y, big]); F.props.push([big ? 'rock_big' : 'rock', +x.toFixed(2), +y.toFixed(2), {r: big ? .75 : 0, variant: v, chunk: ci}]);
     }
   }
+  // the mire's own growth (world/mire.js): dwarf pines on the hummocks (forest trees: felled as any), cotton grass (tufts)
+  if (MI) {
+    const chunkOf = (x, y) => F.chunks.findIndex(([a2, b2]) => a2 === Math.floor(x / CHUNK) && b2 === Math.floor(y / CHUNK));
+    MI.pines.forEach(([x, y, s], k) => { const ci = chunkOf(x, y); if (ci < 0) return; const [cx, cy] = F.chunks[ci], fid = `t${cx}.${cy}.m${k}`, p = ['tree', x, y, {species: 'pine', fid, scale: s, r: .3, variant: k % 3, chunk: ci, mire: 1}]; F.props.push(p); F.trees.set(fid, [x, y]); });
+    for (const [x, y, v] of MI.tufts) { const ci = chunkOf(x, y); if (ci >= 0) F.props.push(['tuft', x, y, {r: 0, variant: v * 3 | 0, chunk: ci}]); }
+  }
   decorate(F, slope, keepOut);
+  // the mire's patches (forage: content/forage.js), after all the rest of the decor (the others' indices, their ids, stay)
+  if (MI) {
+    const chunkOf = (x, y) => F.chunks.findIndex(([a2, b2]) => a2 === Math.floor(x / CHUNK) && b2 === Math.floor(y / CHUNK));
+    for (const [name, list, sc] of [['cloudberry', MI.berries, 1.3], ['bog_iron', MI.iron, 1]]) for (const [x, y, r] of list) {
+      const ci = chunkOf(x, y); if (ci < 0) continue;
+      F.decor.push([name, x, y, {v: Math.floor(r * TUNE.decor.variants), yaw: +(r * 6.283).toFixed(3), s: sc, params: null, chunk: ci}]);
+    }
+  }
   plans.set(seed, F);
   return F;
 }
@@ -538,7 +560,7 @@ function decorate(F, slope, K) {
   };
   const inField = (x, y) => K.boulders !== null && Math.hypot(x - K.boulders.x, y - K.boulders.y) < K.boulders.r + 1;
   const ok = (x, y, m) => x > RECT.x0 + 1.5 && x < RECT.x1 - 1.5 && y > RECT.y0 + 1.5 && y < RECT.y1 - TUNE.trees.south && waterD(F, x, y) > m &&
-    !K.inRock(x, y, .3) && !inField(x, y) && K.crestD(x, y) > .5 && slope(x, y) < .45;
+    !K.inRock(x, y, .3) && !inField(x, y) && K.crestD(x, y) > .5 && slope(x, y) < .45 && !K.mire(x, y, .5);
   const placed = [], room = (x, y, r) => placed.every(([px, py, pr]) => Math.hypot(px - x, py - y) > r + pr);
   const chunkOf = (x, y) => F.chunks.findIndex(([a, b]) => a === Math.floor(x / CHUNK) && b === Math.floor(y / CHUNK));
   const put = (name, x, y, r, R, params, ci) => {   // (params: an object, or v => one: each variant its own, so a recipe stays a few shapes)
@@ -785,7 +807,7 @@ function grow(F, cx, cy, S, slope, K) {
   const tc = T.trees.cell, nt = Math.round(CHUNK / tc), trees = [];
   for (let j = 0; j < nt; j++) for (let i = 0; i < nt; i++) {
     const x = x0 + (i + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, y = y0 + (j + .5 + (R() - .5) * 2 * T.trees.jitter) * tc, roll = R(), pick = R(), sc = R(), v = R();
-    if (!inside(x, y, T.trees.edge) || K.clearD(x, y) < 0 || K.crestD(x, y) < .6 || K.inRock(x, y, .8) || inField(x, y, .5) || K.canyonClear(x, y)) continue;   // (the clearing, the esker's path, a block, the boulders, the canyon)
+    if (!inside(x, y, T.trees.edge) || K.mire(x, y, 1) || K.clearD(x, y) < 0 || K.crestD(x, y) < .6 || K.inRock(x, y, .8) || inField(x, y, .5) || K.canyonClear(x, y)) continue;   // (the clearing, the esker's path, a block, the boulders, the canyon)
     const wd = waterD(F, x, y); if (wd < T.trees.water || slope(x, y) > T.trees.slope || K.bare(x, y)) continue;   // (none on the fell's top)
     const fk = K.fellK(x, y);   // (up the fell: thinner, stunted mountain birch, a pine now and then)
     if (roll > (T.trees.base + T.trees.dense * dens(x, y)) * (1 - fk * 1.1)) continue;
@@ -802,7 +824,7 @@ function grow(F, cx, cy, S, slope, K) {
   const uc = T.under.cell, nu = Math.round(CHUNK / uc);
   for (let j = 0; j < nu; j++) for (let i = 0; i < nu; i++) {
     const x = x0 + (i + .5 + (R() - .5) * 2 * T.under.jitter) * uc, y = y0 + (j + .5 + (R() - .5) * 2 * T.under.jitter) * uc, roll = R(), pick = R(), v = R() * 3 | 0;
-    if (!inside(x, y, 1.2) || K.inRock(x, y, .2) || inField(x, y, 0)) continue;
+    if (!inside(x, y, 1.2) || K.inRock(x, y, .2) || inField(x, y, 0) || K.mire(x, y, 0)) continue;
     const wd = waterD(F, x, y);
     if (wd > -.05 && wd < .55) { if (roll < .75) out.push(['reed', +x.toFixed(2), +y.toFixed(2), {r: 0, variant: v, chunk: ci}]); continue; }
     if (wd < .7 || slope(x, y) > .6) continue;
@@ -816,7 +838,7 @@ function grow(F, cx, cy, S, slope, K) {
   // ROCKS: a boulder or two on the slopes (solid), stones about
   for (let k = 0; k < T.rocks.big + T.rocks.small; k++) {
     const big = k < T.rocks.big, x = x0 + R() * CHUNK, y = y0 + R() * CHUNK, roll = R(), v = R() * 3 | 0;
-    if (!inside(x, y, 2) || waterD(F, x, y) < (big ? 1.6 : .4) || K.clearD(x, y) < 1 || K.inRock(x, y, .5)) continue;
+    if (!inside(x, y, 2) || K.mire(x, y, .5) || waterD(F, x, y) < (big ? 1.6 : .4) || K.clearD(x, y) < 1 || K.inRock(x, y, .5)) continue;
     if (big ? roll > .25 + slope(x, y) * 1.2 : roll > .55) continue;
     if (trees.some(t => Math.hypot(t[1] - x, t[2] - y) < (big ? 1.6 : .8))) continue;
     out.push([big ? 'rock_big' : 'rock', +x.toFixed(2), +y.toFixed(2), {r: big ? .75 : 0, variant: v, chunk: ci}]);

@@ -156,6 +156,8 @@ export const FLAG_DOCS = {
   treefire: '0: a tree the lightning strikes doesn\'t burn (it chars at once)',
   firestart: '1: you can carry a burning brand from a campfire and set a tree alight (experimental; also Esc > Sandbox)',
   ice: '1: the forest lake frozen now (mid-winter\'s ice), 0: never frozen (features/ice.js; docs/WINTER.md)',
+  mire: '0: the upland mire\'s rules and look off (features/mire.js; the hollow stays: the plan\'s; docs/MIRE.md)',
+  wisps: 'often: the mire\'s wisps every night and all day (features/mire.js; docs/MIRE.md)',
   tracks: '0: no footprints or tracks in the forest (features/prints.js; docs/WINTER.md)',
   dollwalk: 'always (dev): a shelf\'s Bark Doll walks every dawn (offline; features/keepsakes.js, content/keepsakes.js DOLL.walk)',
   tally: 'n (dev): the Tally Stick starts with n notches (features/keepsakes.js; 10 or more: it fills at the next step)',

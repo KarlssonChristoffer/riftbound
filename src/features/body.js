@@ -10,7 +10,7 @@
 // OWNS: wet, cold, shelter (0..1), its modifier source 'body', its particles. READS: host.player, host.env (skyAt, sky, season, part,
 //   sunView, leafK), host.wind (dir), host.entities (near: the trees), world/layout.js HUT, world.js waterSample, caves (down),
 //   campfires (burningNear), meals (id), coop (peers' bd), host.mods (the gear's body.* notes). EMITS: nothing.
-// API: F.chill(k) (cold + k at once: out of the ice, features/ice.js), F.wet, F.cold, F.shelter (0..1), F.bits() (the look for co-op's state: packBody), F.lookOf(peer, out) (a friend's), F.soaked.
+// API: F.chill(k) (cold + k at once: out of the ice, features/ice.js), F.soak(k) (wet + k at once: a mire pool, features/mire.js), F.wet, F.cold, F.shelter (0..1), F.bits() (the look for co-op's state: packBody), F.lookOf(peer, out) (a friend's), F.soaked.
 // BUDGET: sim ~.01 ms a step (a near() of 3 m, a few reads); view < .03 ms (64 drips, 48 puffs).
 import {TUNE, crownCover, windPush, soakRate, chillRate, packBody, unpackBody} from '../content/body.js';
 import {SPEED0} from '../sim/player/player.js';
@@ -112,6 +112,7 @@ export async function create(host) {
   const PL = {wet: 0, cold: 0, sunk: 0, down: false, smoulder: false};
   F.lookOf = (q, out = PL) => unpackBody(q?.bd | 0, out);
   F.chill = k => { if (k > 0) F.cold = Math.min(1, F.cold + k); };
+  F.soak = k => { if (k > 0) F.wet = Math.min(1, F.wet + k); };   // (features/mire.js: a pool soaks him)
 
   // ---------------------------------------------------------------- VIEW: drips, steam, breath (his and his friends'), frost
   const DN = 96, dX = new Float32Array(DN), dY = new Float32Array(DN), dH = new Float32Array(DN), dV = new Float32Array(DN); let dn = 0;

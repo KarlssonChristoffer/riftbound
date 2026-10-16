@@ -35,7 +35,8 @@ import {speciesOf} from './trees3d.js';   // which tree a prop is (the painted c
 import {flags} from '../core/flags.js';
 import {trackK, PROPS as WEST_PROPS, FOUNDATIONS, WALL_D} from './westland.js';   // the West Downs' ground (westRuins)
 import {paint as paintBrook} from './brook.js';   // (and their brook)
-import {paint as paintForestWater} from './forest.js';   // the seeded forest's stream, lake and outflow (forestRuins)
+import {paint as paintForestWater} from './forest.js';
+import {paintMire} from './mire.js';   // the upland's bog (docs/MIRE.md)   // the seeded forest's stream, lake and outflow (forestRuins)
 import {slotFrame, slotHead, slotBrow} from './caves.js';   // the cave mouth's slot, in its own frame (forestRuins)
 
 // ============================================================ pixel toolkit
@@ -904,6 +905,7 @@ function forestRuins(q, ctx) {
       }
   }
   meadowLip(K, S);
+  if (FO.mire) paintMire(FO.mire, K, S, {hsh, vn, hex, ramp});   // the mire's mosses, its boardwalk, the bog body (world/mire.js)
   paintForestWater(FO, K, S, {hsh, vn, hex, boulder});   // its stream, lake and outflow (world/forest.js)
   // the cave's mouth (world/caves.js): its slot isn't drawn here (alpha 0: the ground shader drops it), nor the overhang's steep face
   // over the slot's far end: world/cave3d.js draws the slot's copy and the cave on under the woods (its portal) in their place.
