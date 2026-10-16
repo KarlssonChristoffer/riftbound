@@ -129,7 +129,7 @@ export const GEAR = [
   bare('barefoot', 'Barefoot', 'feet', 'His own boots and spurs left off.'),
   // ---- head (shapes on HatHold0: they tip with the hat, and fall off with it)
   {id: 'wool_cap', name: 'Wool cap', slot: 'head', kind: 'clothing', rarity: 'common', weight: .2, armor: 0, desc: 'A knitted cap with a bobble.',
-    soon: 'keeps your head warm in the cold',
+    mods: [{stat: 'body.chill', mul: .85}],
     look: {hide: ['hat'], add: [
       {on: 'HatHold0', part: 'cap', mat: 'wool_blue', shape: 'ball', r: [.232, .24, .2], at: [0, .012, 1.66], o: {sides: 10}},
       {on: 'HatHold0', part: 'cap.fold', mat: 'wool_cream', shape: 'tube', r0: .238, r1: .232, len: .075, at: [0, .012, 1.6], o: {sides: 10}},
@@ -143,7 +143,7 @@ export const GEAR = [
       {on: 'HatHold0', part: 'straw.band', mat: 'red_cloth', shape: 'tube', r0: .193, r1: .19, len: .035, at: [0, .01, 1.695], o: {sides: 10}},
     ]}},
   {id: 'kettle_helm', name: 'Kettle helm', slot: 'head', kind: 'armor', rarity: 'fine', weight: 3, armor: .08, desc: 'An iron dome with a narrow brim. Heavy, and it rings when hit.',
-    soon: 'a lightning rod in thunderstorms',
+    mods: [{stat: 'thunder.iron', add: 1}],
     look: {hide: ['hat'], add: [
       {on: 'HatHold0', part: 'helm', mat: 'iron', shape: 'ball', r: [.225, .235, .17], at: [0, .01, 1.7], o: {sides: 10}},
       {on: 'HatHold0', part: 'helm.brim', mat: 'iron', shape: 'disc', r: .3, len: .022, at: [0, .01, 1.64], o: {sides: 12}},
@@ -166,12 +166,12 @@ export const GEAR = [
     ]}},
   // ---- body
   {id: 'wool_sweater', name: 'Wool sweater', slot: 'body', kind: 'clothing', rarity: 'common', weight: 1.5, armor: .02, desc: 'A thick knitted sweater instead of the duster.',
-    soon: 'warm in the cold; catches fire fast; heavy when soaked',
+    mods: [{stat: 'body.chill', mul: .75}, {stat: 'body.wetHeavy', add: 1}, {stat: 'thunder.smoulder', add: 1}],
     look: {paint: {vest: 'wool_cream', shirt: 'wool_cream', sleeves: 'wool_cream'}, add: [
       {on: 'Spine2', part: 'sweater.neck', mat: 'wool_cream', shape: 'tube', r0: .1, r1: .085, len: .07, at: [0, .0, 1.235], o: {sides: 10}},
     ]}},
   {id: 'mail_shirt', name: 'Mail shirt', slot: 'body', kind: 'armor', rarity: 'fine', weight: 9, armor: .18, desc: 'Iron rings under the duster. Stops cuts and arrows; you sink in water.',
-    soon: 'draws lightning in thunderstorms',
+    mods: [{stat: 'thunder.iron', add: 1}],
     look: {paint: {vest: 'mail', shirt: 'mail'}}},
   {id: 'smith_apron', name: 'Smith\'s apron', slot: 'body', kind: 'tool', rarity: 'common', weight: 2, armor: .05, desc: 'Thick leather down the front.',
     soon: 'fireproof: stand in a friend\'s fire',
@@ -181,7 +181,7 @@ export const GEAR = [
     ]}},
   // ---- back
   {id: 'fur_cloak', name: 'Wolf-fur cloak', slot: 'back', kind: 'clothing', rarity: 'fine', weight: 3, armor: .04, desc: 'The duster\'s cape and tail in grey fur.',
-    soon: 'warm in the cold',
+    mods: [{stat: 'body.chill', mul: .7}],
     look: {paint: {collar: 'fur'}, cloth: 'fur'}},
   {id: 'bark_pack', name: 'Birch-bark pack', slot: 'back', kind: 'tool', rarity: 'common', weight: 1, armor: 0, desc: 'A woven birch-bark backpack (a näverkont).',
     soon: 'carry more home',
@@ -193,14 +193,14 @@ export const GEAR = [
     ]}},
   // ---- legs
   {id: 'wool_trousers', name: 'Wool trousers', slot: 'legs', kind: 'clothing', rarity: 'common', weight: 1, armor: .01, desc: 'Grey wool breeches.',
-    soon: 'warm in the cold',
+    mods: [{stat: 'body.chill', mul: .85}],
     look: {paint: {trousers: 'wool_grey'}}},
   {id: 'leather_chaps', name: 'Leather chaps', slot: 'legs', kind: 'armor', rarity: 'common', weight: 2, armor: .04, desc: 'Tan leather over both legs.',
     soon: 'thorns and brambles don\'t slow you',
     look: {paint: {legs: 'hide_tan'}}},
   // ---- feet
   {id: 'moose_boots', name: 'Moose-hide boots', slot: 'feet', kind: 'clothing', rarity: 'fine', weight: 1.5, armor: .01, desc: 'Soft, warm boots. Loud on stone.',
-    soon: 'bogs and snow don\'t slow you',
+    mods: [{stat: 'soft.slow', mul: 0}],
     look: {paint: {boots: 'hide_tan'}, hide: ['spurs']}},
   {id: 'bark_shoes', name: 'Birch-bark shoes', slot: 'feet', kind: 'clothing', rarity: 'fine', weight: .3, armor: 0, desc: 'Woven bark shoes (näverskor). Light on your feet.',
     mods: [{stat: 'player.speed', mul: 1.04}],
@@ -225,7 +225,7 @@ export const GEAR = [
       {on: 'HatHold0', part: 'wiz.star', mat: 'gold', shape: 'ball', r: .035, at: [0, -.13, 1.82], o: {fixed: 0}},
     ]}},
   {id: 'hood', name: 'Travelling hood', slot: 'head', kind: 'clothing', rarity: 'common', weight: .4, armor: .01, desc: 'A grey wool hood, the point down your back.',
-    soon: 'rain doesn\'t soak you',
+    mods: [{stat: 'body.soak', mul: .3}],
     look: {hide: ['hat', 'hair'], add: [
       {on: 'HatHold0', part: 'hood', mat: 'wool_grey', shape: 'ball', r: [.245, .25, .245], at: [0, .07, 1.61], o: {sides: 10}},
       {on: 'HatHold0', part: 'hood.tip', mat: 'wool_grey', shape: 'cone', r: .1, len: .22, at: [0, .32, 1.56], rot: [-135, 0, 0], o: {sides: 7}},

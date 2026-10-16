@@ -13,7 +13,7 @@
 //            each does and how it reads in the gear card (statWords)
 //   TUNE     the cast, the wait, the hook, the fight: features/fishing.js reads these
 //   roll(rng, o) -> {id, cm, kg, wait, nibbles}   the catch for a cast (o: water, part, rain, deep, luck, find, size, lure,
-//            perfect, spot, bait): the game offline and the server in co-op draw the same way
+//            perfect, spot, bait, season: 'winter' takes WINTER's weights): the game offline and the server in co-op draw the same way
 //   SPOT     fishing spots: rises and bubbles on the water (features/fishing.js finds them; a cast into one bites sooner, rarer)
 //            spotAt(a, b, slot, seed, out) (the cell's spot), spotNear(x, y, slot, seed) (the server's check of a cast's word)
 //   COME     the lingon's fish that come to your legs (a hand grab: roll's o.hand)
@@ -28,6 +28,13 @@ export const DEEP = 3;   // m from the shore: the lake's deep water (char, zande
 export const RARITY_W = {common: 60, fine: 26, rare: 10, masterwork: 3.4, mythic: .6};   // the base odds by rarity (before luck)
 export const RARITY_TIER = {common: 0, fine: 1, rare: 2, masterwork: 3, mythic: 4};
 
+// WINTER (docs/WINTER.md): through the ice (env.season 'winter', o.season) the lake's fish bite as in the cold: a weight x per
+// catch (a number, or by part of the day: {night: 2}, the rest 1)
+export const WINTER = {perch: 1.3, burbot: {night: 2}, char: 1.5, pike: 1.2, bream: .3, tench: .3};
+// THE JIG (features/fishing.js, at a hole in the ice): small lifts of the rod in a slow rhythm; only while it jigs does the wait run.
+// A lift sooner than fast s after the last spooks it (+ spook s); each good lift (fast .. slow s after the last) keeps it working
+// for keep s. The bite is struck as usual (the strike: an up-stroke)
+export const JIG = {fast: .55, slow: 1.9, keep: 1.4, spook: 1.2, reach: 2.2};
 export const TUNE = {
   cast: {min: 2.5, max: 9, period: 1.5, perfect: .93, luck: .15, fly: .55, arc: 1.4},   // m; a charge's up-and-down (s); the
                                                                                        // perfect top; its luck; the bobber's flight (s), its arc (m)
@@ -237,6 +244,7 @@ export function roll(rng, o) {
     if (o.rain && c.rain) w *= c.rain;
     if (prey && prey[id]) w *= prey[id];
     if (c.deep && (o.deep || 0) < DEEP) w /= c.deep * 2;   // (a deep-water fish near the shore: rarely)
+    if (o.season === 'winter' && WINTER[id]) { const k = WINTER[id]; w *= typeof k === 'number' ? k : (k[o.part] ?? 1); }   // (through the ice)
     if (w > 0) { pick.push(id, w); total += w; }
   }
   let id = pick[0] || 'old_boot';

@@ -52,7 +52,7 @@ import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the W
 import {floorSink, floorGeometry} from './floor3d.js';   // the forest floor's stones, pebbles and twigs in 3D (its tiles, below)
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
 import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
-import {TOWER_PLAN, FOREST, HUT, CAVE} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
+import {TOWER_PLAN, FOREST, HUT, CAVE, ICE} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
 import {sample as forestSample, depth as forestDepth, joinRiver, COURSE_KS, courseSpeed, courseDepth, RECT as FOREST_RECT} from './forest.js';
 import {buildCave} from './cave3d.js';   // the forest's cave: its floor and walls in the band north of the forest (docs/CAVES.md)
 import {stepsOf} from './terrain.js';
@@ -257,6 +257,12 @@ const travel = y => { const tab = S_TAB || travelTab(), f = (y - S_Y0) / S_DY, i
 const OUT_U0 = .3, OUT_W = .6, ease = u => u <= OUT_U0 ? 0 : u < OUT_U0 + OUT_W ? (u - OUT_U0) ** 2 / (2 * OUT_W) : u - OUT_U0 - OUT_W / 2;
 const outAxisY = x => { const P = OUTFLOW.pts, f = Math.max(0, Math.min(P.length - 1.001, (OUTFLOW.x0 - x) / OUTFLOW.dx)), i = f | 0; return P[i][1] + (P[i + 1][1] - P[i][1]) * (f - i); };
 export function waterSample(x, y, out) {
+  waterRaw(x, y, out);
+  if (out.kind && ICE.solid !== null && y < 0 && ICE.solid(x, y)) out.kind = 0;   // (the lake frozen where it holds him: no water for wading, fishing, a body's wet: features/ice.js)
+  return out;
+}
+// the water as painted (the bakes: the ice is the shader's, over the water)
+function waterRaw(x, y, out) {
   out.kind = 0;
   if (FOREST !== null && y < 0) { forestSample(FOREST, x, y, out); return out; }   // (the forest's stream, lake and outflow: kinds 6, 7, 8, world/forest.js)
   if (x < 0) { brookSample(x, y, out); return out; }   // (west of the Proving Grounds: the West Downs' brook, kinds 4 and 5: world/brook.js)
@@ -338,7 +344,7 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = n
   const bx1 = box ? Math.min(WPX, Math.ceil((box[2] - X0) * PPM)) : WPX, by1 = box ? Math.min(HPX, Math.ceil((box[3] - Y0) * PPM)) : HPX;
   for (let y = by0; y < by1; y++) for (let x = bx0; x < bx1; x++) {
     const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM;
-    o.lake = 0; waterSample(mx, my, o);
+    o.lake = 0; waterRaw(mx, my, o);
     if (!o.kind || my >= cliffZ(mx)) continue;                  // (the ravine takes the stream over its edge: below it is the waterfall's pool)
     const i = y * WPX + x, k = i * 4, p = toneOf(i * 4);
     if (p < 0) continue;                                        // painted over: not (moving) water
@@ -1142,7 +1148,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const paths = layout.marks.filter(m => m.type === 'path'), fc = lit.cell;
     for (const q of PLATEAUS) for (const r of [[q.x0 - fc, q.y0 - fc, q.x1 + fc, q.y0], [q.x0 - fc, q.y1, q.x1 + fc, q.y1 + fc], [q.x0 - fc, q.y0, q.x0, q.y1], [q.x1, q.y0, q.x1 + fc, q.y1]]) blocks.push(r);   // the plateau's foot (and its lip): a wall of one cell
     if (!lit.sinkDone) bakeSink(lit, {WPX, HPX, PPM, wdata: wTex?.image.data, cliffZ});
-    bakeLitter(lit, trees, {WPX, HPX, PPM, walls, paths, blocks, discs, dry: (x, y) => { if (y >= cliffZ(x)) return false; waterSample(x, y, _lw); return !_lw.kind; }});
+    bakeLitter(lit, trees, {WPX, HPX, PPM, walls, paths, blocks, discs, dry: (x, y) => { if (y >= cliffZ(x)) return false; waterRaw(x, y, _lw); return !_lw.kind; }});
   }
   function setState(it, st) {
     it.st = st;

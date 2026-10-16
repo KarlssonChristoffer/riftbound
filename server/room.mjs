@@ -23,6 +23,11 @@ import {mealNotes, parseCode, codeOf, MEALS, QUALITIES} from '../src/content/mea
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, POT, fuelAt, stokeFuel, potOpen} from '../src/content/builds.js';
+import {WEATHER, createSchedule, seasonAt, TUNE as WXT} from '../src/sim/wxclock.js';
+import {TUNE as TH, STRIKE, ironOf} from '../src/content/thunder.js';
+import {createThunder, nextSpring} from '../src/sim/thunder.js';
+import {TUNE as ICE} from '../src/content/ice.js';
+import {createLake, thickAt, refreezeAt} from '../src/sim/ice.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
@@ -30,7 +35,7 @@ import {mulberry32} from '../src/core/rng.js';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -83,6 +88,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     p.ls = Array.isArray(m.ls) && m.ls.length === 5 ? m.ls.map((v, i) => i ? Math.round(num(v) * 100) / 100 : str(v, 8)) : null;
     p.lt = m.lt === 1 || m.lt === 2 ? m.lt : 0; p.lit = p.lt > 0;   // (his lantern burns in the cave, 2: a burnt eel's shining eyes: sim/cavelife.js reads p.lit)
     p.md = str(m.md, 24);   // (the meal in him: content/meals.js codeOf; friends see its mood, the fishing grab checks it)
+    p.bd = num(m.bd, 0) & 0x7ff;   // (his body's look: content/body.js packBody, passed on in the snapshots)
     p.fresh = true;
   }
 
@@ -105,6 +111,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
     if (a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon') return build(p, a, m, id, t, deny);
+    if (a === 'ignite' || a === 'wood') return thunderAct(p, a, id, deny);
+    if (a === 'hole') return iceHole(p, m, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -222,13 +230,100 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (!def.lamp?.takeBack || e.by !== p.id) return deny('not yours');
     world.delete(id); all({k: 'world', id, s: 'gone', by: p.id});
   }
+  // THE WEATHER (sim/wxclock.js, docs/WEATHER.md): the same spells every client computes from the seed and this clock (the forest's
+  // ruins climate). The server doesn't send it; it reads it for what it owns: a fire in heavy rain goes out (BUILD.douse)
+  const sky = createSchedule(seed >>> 0 | 0), weatherNow = () => WEATHER[sky.at('ruins', clock(), WXT.seasonDays).w] || WEATHER.fair;
   let growT = 0;
   function regrowTick(dt) {   // once a second: the picked patches and spent veins whose time has come grow back, for everyone
     if ((growT += dt) < 1) return;
     growT = 0; const h = clock();
-    for (const [id, s] of world) if (s.at !== undefined && h >= s.at) { world.delete(id); all({k: 'world', id, s: 'grown'}); }
+    for (const [id, s] of world) if (s.at !== undefined && h >= s.at) { world.delete(id); if (id[0] === 'z') thunder?.charred.delete(id.slice(1)); all({k: 'world', id, s: 'grown'}); }   // (z: a charred tree whole again in the spring)
+    // the rain on the open fires (each burning one's wet seconds; one out: 'doused', everyone's fire goes out with it)
     const sec = secs();   // (pots: gone when their fire is cold or their time is up)
     for (const [id, s] of world) if (s.pot && !potOpen(s, sec, BUILDS[s.kind])) { delete s.pot; all({k: 'world', id, s: 'potgone'}); }
+    const rain = (weatherNow().rain ?? 0) >= BUILD.douse.rain;
+    for (const [id, e] of world) {
+      if (e.s !== 'built') continue;
+      const f = BUILDS[e.kind]?.fire; if (!f || f.rainproof || fuelAt(e, sec) <= 0 || cave?.inBand?.(e.x, e.y)) { e.wetT = 0; continue; }
+      e.wetT = rain ? (e.wetT || 0) + 1 : Math.max(0, (e.wetT || 0) - 1);
+      if (e.wetT >= BUILD.douse.s) { e.wetT = 0; e.fuel = 0; e.t0 = +sec.toFixed(3); all({k: 'world', id, s: 'doused', t0: e.t0, by: 0}); log(`  the rain put out ${id}`); }
+    }
+  }
+
+  // THUNDER (sim/thunder.js, content/thunder.js, docs/WEATHER.md): natural lightning and the trees it sets alight. The server owns it
+  // online: while the clock's spell is a storm it aims a bolt now and then near a placed player (in turn), marks what it picked
+  // ({k: 'bolt', a: 'mark'}: everyone sees the warning), and TH.tele s later strikes it ({k: 'bolt', a: 'strike'}: everyone draws
+  // it; a player under it is hurt by his own client, by where he stands then: he can get off the spot). The trees' fires are its
+  // too: 'z' + fid in the world: {s: 'burning', t0, t1} (s of its clock), then {s: 'charred', at: the next spring's hour, tw: 1 while
+  // a splinter of thunderwood lies at its foot}. Acts: 'ignite' (a brand from a campfire: ?firestart=1), 'wood' (the splinter taken)
+  const thunder = forest ? createThunder(forest) : null, thR = mulberry32((seed ^ 0x7d3a) >>> 0), marks = [], tPl = [], AIM = {};
+  let boltT = TH.every[1], boltN = 0, fireT = 0;
+  const wetNow = () => (weatherNow().rain ?? 0) > .1 || (WEATHER[sky.at('ruins', clock() - 1, WXT.seasonDays).w]?.rain ?? 0) > .1 ? 1 : 0;   // (rained this hour or the last: the ground's wet)
+  function burn(fid, by) {
+    const b = thunder.burning.get(fid), e = {s: 'burning', t0: +b.at.toFixed(2), t1: +b.t1.toFixed(2), tw: world.get('z' + fid)?.tw | 0};
+    world.set('z' + fid, e); all({k: 'world', id: 'z' + fid, ...e, by});
+  }
+  function charred(fid) {
+    const e = {s: 'charred', at: +nextSpring(clock(), WXT.seasonDays).toFixed(3), tw: world.get('z' + fid)?.tw | 0};
+    world.set('z' + fid, e); all({k: 'world', id: 'z' + fid, ...e});
+  }
+  function strike(m, sec) {
+    const S = STRIKE[m.kind] || STRIKE.ground;
+    if (m.kind === 'tree') {   // the tree: it catches (a splinter of thunderwood at its foot, now and then), or straight to charred
+      world.set('z' + m.id, {s: 'struck', tw: thR() < (S.wood || 0) ? 1 : 0});
+      if (S.burn && treefire && thunder.ignite(m.id, sec, thR)) burn(m.id, 0);
+      else { thunder.charred.add(m.id); charred(m.id); }
+    }
+    all({k: 'bolt', a: 'strike', n: m.n, kind: m.kind, id: m.id, x: m.x, y: m.y, h: m.h});
+    log(`  lightning struck ${m.kind} ${m.id}`);
+  }
+  function thunderTick(dt) {
+    if (!thunder) return;
+    const sec = secs(), W = weatherNow();
+    if ((W.storm ?? 0) >= TH.storm) {
+      if ((boltT -= dt * strikes) <= 0) {
+        boltT = TH.every[0] + thR() * (TH.every[1] - TH.every[0]);
+        tPl.length = 0; let open = 0;
+        for (const p of peers.values()) if (p.placed) { const safe = !!cave?.inBand?.(p.x, p.y); tPl.push({id: p.id, x: p.x, y: p.y, z: p.z, iron: ironOf(p.gear, GEAR_BY_ID), safe}); if (!safe) open++; }
+        let k = open ? thR() * open | 0 : -1;
+        for (const c of tPl) if (!c.safe && k-- === 0) {   // (a bolt somewhere round this one)
+          const a = thR() * Math.PI * 2, d = Math.sqrt(thR()) * TH.reach, t = thunder.aim(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d, tPl, thR, AIM);
+          if (t) { const mk = {n: ++boltN, kind: t.kind, id: t.kind === 'player' ? +t.id : t.id, x: +t.x.toFixed(2), y: +t.y.toFixed(2), h: +t.h.toFixed(2), at: sec + TH.tele}; marks.push(mk); all({k: 'bolt', a: 'mark', n: mk.n, kind: mk.kind, id: mk.id, x: mk.x, y: mk.y, h: mk.h, tele: TH.tele}); }
+          break;
+        }
+      }
+    } else boltT = Math.max(boltT, 2);
+    for (let i = marks.length - 1; i >= 0; i--) if (sec >= marks[i].at) { const m = marks[i]; marks.splice(i, 1); strike(m, sec); }
+    if ((fireT += dt) >= TH.fire.tick) { fireT = 0; thunder.tick(sec, W.rain ?? 0, wetNow(), thR, fid => burn(fid, 0), charred); }
+  }
+  function thunderAct(p, a, id, deny) {
+    if (!thunder) return deny('no forest');
+    const t = thunder.tree(id); if (!t) return deny('no such tree');
+    if (Math.hypot(t.x - p.x, t.y - p.y) > TH.brand.reach + 1.5) return deny('too far');
+    if (a === 'ignite') {   // a brand from a campfire (?firestart=1 on his page): it catches unless the ground is wet
+      if (world.get('z' + id)?.s === 'charred') return deny('charred');
+      if (wetNow()) return deny('too wet');
+      if (!thunder.ignite(id, secs(), thR)) return deny('it won\'t catch');
+      burn(id, p.id); log(`  ${p.name} set ${id} alight`); return;
+    }
+    const e = world.get('z' + id); if (!e?.tw) return deny('none');   // 'wood': the splinter at a struck tree's foot
+    e.tw = 0; all({k: 'world', id: 'z' + id, ...e, by: p.id});
+  }
+
+  // THE LAKE ICE (sim/ice.js, content/ice.js, docs/WINTER.md): its thickness is the clock's (no state); the holes in it are the
+  // server's: 'i' + n in the world {s: 'hole', x, y, r, at: the hour it's frozen over} (regrowTick lets them go: 'grown'). Act
+  // 'hole' {x, y, b}: a pick's or an axe's last blow (b 0), or a player going through (b 1: a wider one)
+  const lake = forest ? createLake(forest) : null; let holeN = 0;
+  function iceHole(p, m, deny) {
+    if (!lake) return deny('no lake');
+    const x = num(m.x, NaN), y = num(m.y, NaN); if (!Number.isFinite(x) || !Number.isFinite(y)) return deny('where');
+    if (!lake.inLake(x, y)) return deny('not on the lake');
+    if (Math.hypot(x - p.x, y - p.y) > REACH) return deny('too far');
+    if (lake.localAt(x, y, thickAt(clock(), WXT.seasonDays)) < ICE.crack) return deny('no ice');
+    let n = 0; for (const id of world.keys()) if (id[0] === 'i') n++;
+    if (n >= ICE.hole.max) { let o = null, oa = Infinity; for (const [id, e] of world) if (id[0] === 'i' && e.at < oa) { oa = e.at; o = id; } world.delete(o); all({k: 'world', id: o, s: 'grown'}); }
+    const id = 'i' + (++holeN), e = {s: 'hole', x: +x.toFixed(2), y: +y.toFixed(2), r: m.b ? ICE.hole.breakR : ICE.hole.r, at: +refreezeAt(clock(), WXT.seasonDays).toFixed(3)};
+    world.set(id, e); all({k: 'world', id, ...e, by: p.id}); log(`  ${p.name} ${m.b ? 'went through the ice' : 'cut a hole in the ice'} (${id})`);
   }
 
   // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:
@@ -265,6 +360,12 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const PC = {id: '', q: 'done'}, LINGON_BURNT = codeOf('fish_lingon', 'burnt');
   const lingonIn = p => parseCode(p.md, PC).id === 'fish_lingon' && PC.q !== 'burnt';
   function burntLingonNear(p) { for (const q of peers.values()) if (q !== p && q.md === LINGON_BURNT && Math.hypot(q.x - p.x, q.y - p.y) <= COME.friend) return true; return false; }
+  // a snowball hit someone (docs/WINTER.md): the thrower's word, passed on to everyone else (gentle: nothing to check but the numbers)
+  function snowball(p, m) {
+    const id = num(m.id, -1); if (!peers.has(id)) return;
+    const c = v => Math.max(-6, Math.min(6, num(v)));
+    others(p, {k: 'snow', by: p.id, id, vx: c(m.vx), vy: c(m.vy), hat: m.hat ? 1 : 0});
+  }
   function fish(p, m) {
     const a = str(m.a, 8), n = num(m.n, -1), t = now();
     if (a === 'cast') {
@@ -278,7 +379,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const st = fishStats(p, m), rain = !!m.rain;
       const r = roll(fishRng, {water: w, part: partOf(clock()), rain, deep: Math.max(0, Math.min(40, num(m.deep, 0))), luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0),
         find: st['fish.find'], size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: !!m.perfect,
-        spot, bait: BAITS[bait] ? bait : ''});
+        spot, bait: BAITS[bait] ? bait : '', season: seasonAt(clock(), WXT.seasonDays)});
       r.two = fishRng() < st['fish.double'];
       p.fishN = n; p.fishR = r;
       p.conn.send(encode({k: 'fish', a: 'bite', n, ...r}));
@@ -310,6 +411,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       else if (m.k === 'act') act(p, m);
       else if (m.k === 'gear') wear(p, m);
       else if (m.k === 'fish') fish(p, m);
+      else if (m.k === 'snow') snowball(p, m);
       else if (m.k === 'ping') conn.send(encode({k: 'pong', c: num(m.c), t: now()}));
     };
     conn.onclose = () => {
@@ -325,6 +427,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const timer = setInterval(() => {
     if (!peers.size) return;
     regrowTick(DT);
+    thunderTick(DT);
     // the uncanny forest: the secrets' clocks and the heron's ring, the night elk (the placed players only)
     let c = 0;
     if (unc) {
@@ -344,7 +447,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const rows = [];
     for (const p of peers.values()) {
       if (!p.placed) continue;
-      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lt || 0, p.md || '']);
+      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lt || 0, p.md || '', p.bd | 0]);
       p.wNew = false;
     }
     if (rows.length) { const m = {k: 'snap', t: now(), p: rows}; if (c) m.c = c; if (sn) m.sn = sn; all(m); }

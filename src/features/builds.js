@@ -26,10 +26,12 @@ import {BUILDS, TUNE, POT, fuelAt, emberAt, stokeFuel, potOpen} from '../content
 import {ITEMS} from '../content/items.js';
 import {flags} from '../core/flags.js';
 import {propTop} from '../world/world.js';
+import {CAVE} from '../world/layout.js';   // (the cave's band: no rain on a fire down there)
 import {setMaterials} from '../content/materials.js';
 import {geoOf, M4, along} from '../world/kit3d.js';
 
 const ON = flags.get('builds') !== '0' && flags.get('campfires') !== '0';
+const WX0 = flags.get('wx2') === '0';   // (the weather show only: rain puts no fire out)
 propTop({pitfire: .3, firering: .25, crystallamp: .75});
 setMaterials({pitfire: 'stone', firering: 'stone', crystallamp: 'stone'});
 
@@ -102,6 +104,7 @@ export async function create(host) {
       return spot(def) ? '' : why;
     },
     run() {
+      if (def.fire && host.feature('body')?.soaked) { ui()?.toast(def.name, 'too wet to light a fire', '#9fc0e0'); return; }   // (soaked: features/body.js)
       const s = spot(def); if (!s) return;
       if (online()) { coop().act('build', kind, {x: +s.x.toFixed(2), y: +s.y.toFixed(2)}); return; }   // (paid when the server says it stands)
       for (const k in def.cost) if (!pack().take(k, def.cost[k])) return;
@@ -161,6 +164,18 @@ export async function create(host) {
     host.events.push({type: 'pot.spoon', x: b.x, y: b.y, id: b.id, mine});
     if (mine) host.feature('meals')?.spoon(b.pot.dish, b.pot.q);
   }
+
+  // RAIN (docs/WEATHER.md): an open fire in heavy rain for TUNE.douse.s goes out (offline: here, by the rain where it stands; online:
+  // the server's, by its clock's spell). A rainproof one (the Stone Fire Ring) burns on; none goes out in the cave
+  function douse(dt) {
+    const env = host.env, D = TUNE.douse; if (!env?.skyAt || WX0) return;
+    for (const b of list.values()) {
+      const f = b.def.fire; if (!f || f.rainproof || fuelAt(b, T) <= 0) { b.wetT = 0; continue; }
+      const r = CAVE?.inBand?.(b.x, b.y) ? 0 : env.skyAt(b.x, b.y, 'rain');
+      b.wetT = r >= D.rain ? (b.wetT || 0) + dt : Math.max(0, (b.wetT || 0) - dt);
+      if (b.wetT >= D.s) { b.wetT = 0; b.fuel = 0; b.t0 = T; ver++; host.events.push({type: 'fire.doused', x: b.x, y: b.y, id: b.id}); save(); }
+    }
+  }
   // co-op: the server's word on a build
   function mail(m) {
     if (m.k === 'deny' && m.a === 'pot' && pend?.id === m.id) { for (const k in pend.cost) pack()?.give(k, pend.cost[k]); pend = null; return; }
@@ -185,6 +200,10 @@ export async function create(host) {
       b.fuel = +m.fuel || 0; b.t0 = +m.t0 || 0; ver++;
       if (mine) pack()?.take('log', 1);
       if (!m.late) host.events.push({type: 'fire.addWood', x: b.x, y: b.y});
+    } else if (m.s === 'doused') {   // (the rain put it out: the server's clock rained on it, docs/WEATHER.md)
+      const b = list.get(m.id); if (!b) return;
+      b.fuel = 0; b.t0 = +m.t0 || 0; ver++;
+      if (!m.late) host.events.push({type: 'fire.doused', x: b.x, y: b.y, id: b.id});
     } else if (m.s === 'gone') {
       const b = list.get(m.id); if (!b) return;
       if (mine && b.def.lamp?.takeBack) for (const k in b.def.cost) pack()?.give(k, b.def.cost[k], {x: b.x, y: b.y, h: 1.2});
@@ -272,6 +291,7 @@ export async function create(host) {
       for (let k = 0; k < evs.length; k++) if (evs[k].type === 'pack.reset' && !ol) clear();
       const c = coop(); if (ol && c.mail) for (let k = 0; k < c.mail.length; k++) mail(c.mail[k]);
       if (!ol && (potT += dt) > 1) { potT = 0; for (const b of list.values()) if (b.pot && !potOpen(b, T, b.def)) b.pot = null; }   // (offline: a pot's end)
+      if (!ol) douse(dt);
       if (!ol && (saveT += dt) > 5) { saveT = 0; for (const b of list.values()) if (b.def.fire && fuelAt(b, T) > 0) { save(); break; } }
     },
     interact(p) {

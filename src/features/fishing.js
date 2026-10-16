@@ -39,9 +39,7 @@
 // BUDGET: sim: a few multiplies a step while fishing (nothing otherwise but a compare). View: a rod, a line (~16 lines), a few
 //   dozen points; HD: a gauge (rects + pixel text) while fishing; the prompt: one waterSample a frame while a rod is worn.
 //   Spots: found again only when he crosses a 7 m cell or the slot turns (~a dozen hashes and waterSamples), a few points each.
-//   Shadows: found again when he crosses a 5 m cell or the slot turns (~120 hashes, a few dozen waterSamples); 8 x 5 points a
-//   frame. The school (lingon): a few multiplies a step while it's there, 6 x 5 points.
-import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, COME, BAITS, ANGLER, COMMON_FISH, roll, catchIcon, isFish, spotAt, hintOf} from '../content/fishing.js';
+import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, COME, BAITS, ANGLER, COMMON_FISH, JIG, roll, catchIcon, isFish, spotAt, hintOf} from '../content/fishing.js';
 import {codeOf, parseCode} from '../content/meals.js';
 import {gearById, RARITY} from '../content/gear.js';
 import {flags} from '../core/flags.js';
@@ -117,8 +115,11 @@ export async function create(host) {
   const free = () => { const P = host.player; return !host.lock && !host.paused && !host.BUSY.has(P.state) && P.state !== 'draw' && !host.PL.tool?.S.mode; };
   // can a press start a cast here: a rod, the cursor on water in reach (+ a little: it falls short of what's further), nothing
   // hostile under the cursor
+  // a hole in the lake ice within JIG.reach m of him (features/ice.js): the line goes down it and he jigs
+  function holeNear() { const ice = host.feature('ice'), P = host.player; if (!ice?.holes?.size) return null; for (const h of ice.holes.values()) if (h.id !== 'pending' && Math.hypot(h.x - P.x, h.y - P.y) < JIG.reach + h.r) return h; return null; }
   function canCast() {
     if (!active() || !rod() || !free()) return false;
+    if (holeNear()) return !host.aim?.()?.target;
     const w = cursorWater(); if (!w.ok || w.d > reach() + 3 || w.d < 1) return false;
     return !host.aim?.()?.target;
   }
@@ -137,6 +138,7 @@ export async function create(host) {
     note: '',                              // a word for the gauge (view): 'let go!' etc.
     clock: 0,                              // s of sim (the spots' slot clock offline)
     spot: -1, near: false, bait: '',       // this cast: the spot it fell in (its key), near him with the lingon in him (COME.rod), the bait
+    jig: false, jigLast: -9, jigK: 0,      // down a hole in the ice: jigging; the last lift (S.t); s it keeps working
   };
   const I = {id: '', cm: 0, kg: 0, n: 0, first: false, record: false, xp: 0, t: 0};   // the last catch (the card)
   const ev = (type, o) => { o.type = type; host.events.push(o); };
@@ -176,7 +178,7 @@ export async function create(host) {
   }
   function rollHere(st, rain) {
     const r = roll(R, {water: S.water, part: host.env?.part || 'day', rain, deep: S.deep, luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0), find: st['fish.find'],
-      size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: S.perfect, spot: S.spot >= 0 || S.near, bait: S.bait});
+      size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: S.perfect, spot: S.spot >= 0 || S.near, bait: S.bait, season: host.env?.season});
     r.two = R() < st['fish.double'];
     return r;
   }
@@ -304,7 +306,8 @@ export async function create(host) {
   // a press (LMB down, claimed) and a let-go, in the step
   function press() {
     const ph = S.phase;
-    if (ph === '') { if (canCast()) begin(); return; }
+    if (ph === '') { if (!canCast()) return; const h = holeNear(); if (h) jigDown(h); else begin(); return; }
+    if (ph === 'wait' && S.jig) { jigLift(); return; }
     if (ph === 'wait') {
       if (S.r && S.t - S.lastNib < .45) { S.r.wait += TUNE.spook; S.lastNib = -9; ev('fish.early', at(S.tx, S.ty)); say('too early!'); return; }
       reelIn(); return;
@@ -313,6 +316,21 @@ export async function create(host) {
     if (ph === 'fly') return;
   }
   function letGo() { if (S.phase === 'charge') cast(); }
+  // THE JIG (content/fishing.js JIG): through a hole in the ice the line goes straight down (no cast); the wait runs only while
+  // he lifts the rod in a slow rhythm (S.jigK: s of jigging left); a lift too soon spooks it
+  function jigDown(h) {
+    const P = host.player;
+    S.jig = true; S.jigLast = -9; S.jigK = 0; S.ox = P.x; S.oy = P.y; S.tx = h.x; S.ty = h.y; S.n++;
+    const dx = h.x - P.x, dy = h.y - P.y, c = Math.cos(host.yaw), s2 = Math.sin(host.yaw); if (dx * dx + dy * dy > .01) host.PL.faceShot?.(dx * c - dy * s2, dx * s2 + dy * c);
+    ev('fish.cast', {x: P.x, y: P.y, tx: S.tx, ty: S.ty, perfect: false, k: 0, jig: true});
+    splashDown();
+  }
+  function jigLift() {
+    const since = S.t - S.jigLast; S.jigLast = S.t;
+    if (since < JIG.fast) { if (S.r) S.r.wait += JIG.spook; S.jigK = 0; say('too fast!'); ev('fish.early', at(S.tx, S.ty)); return; }
+    S.jigK = since <= JIG.slow ? JIG.keep : JIG.keep * .5;
+    ev('fish.jig', at(S.tx, S.ty));
+  }
 
   // ---------------------------------------------------------------- fish come to you (content/fishing.js COME; the 'fish.come' note)
   // the sim: standing still in shallow water with the lingon in him (or a friend's burnt one near) a while, a school gathers
@@ -539,6 +557,7 @@ export async function create(host) {
         case 'fly': if (S.t >= TUNE.cast.fly) splashDown(); break;
         case 'wait': {
           if (!S.r) { if ((S.askT += dt) > TUNE_NET.ask) { S.local = true; S.r = rollHere(stats(), (host.env?.sky?.rain ?? 0) > .3); S.t = 0; } else { S.t = 0; break; } }
+          if (S.jig) { if (S.jigK > 0) S.jigK -= dt; else { S.t -= dt; break; } }   // (jigging: the wait runs only while he works the rod)
           const nb = S.r.nibbles;
           while (S.nib < nb.length && S.t >= nb[S.nib]) { S.nib++; S.lastNib = S.t; ev('fish.nibble', at(S.tx, S.ty)); }
           if (S.t >= S.r.wait) { S.phase = 'bite'; S.t = 0; S.win = TUNE.hook + stats()['fish.hook']; ev('fish.bite', at(S.tx, S.ty)); }
@@ -553,8 +572,8 @@ export async function create(host) {
           if (P.state !== 'hold') host.play?.(HAUL, .5);   // (he braces and hauls while the fight lasts)
           fight(dt); break;
         }
-        case 'land': if (S.t >= .7) { give(); S.phase = ''; S.r = null; } break;
-        case 'reel': if (S.t >= .45) { S.phase = ''; S.r = null; } break;
+        case 'land': if (S.t >= .7) { give(); S.phase = ''; S.r = null; S.jig = false; } break;
+        case 'reel': if (S.t >= .45) { S.phase = ''; S.r = null; S.jig = false; } break;
       }
     },
     view(dt, evs) {
@@ -563,6 +582,7 @@ export async function create(host) {
         switch (e.type) {
           case 'fish.plop': ring(e.x, e.y, 0); spray(e.x, e.y, 5, .9); V.bob = .12; break;
           case 'fish.nibble': V.dip = .08; ring(e.x, e.y, 0); break;
+          case 'fish.jig': V.dip = -.14; break;   // (a lift of the rod: the line comes up a little)
           case 'fish.bite': V.under = 1; V.bang = 1; ring(e.x, e.y, 1); spray(e.x, e.y, 9, 1.4); break;
           case 'fish.hook': V.fx = S.tx; V.fy = S.ty; V.dart = 0; V.dartV = 0; spray(e.x, e.y, 10, 1.6); ring(e.x, e.y, 1); break;
           case 'fish.surge': spray(e.x, e.y, 14, 2); ring(e.x, e.y, 1); break;

@@ -38,6 +38,8 @@ export function createTool(PL, I) {
   let W = SWINGS.chop, M = W.move;   // (the tool in hand's swing: take())
   const S = {on: false, id: '', job: '', mode: '', t: 0, done: false, tx: 0, ty: 0, dx: 0, dy: 1, want: false, held: false, n: 0, stepDir: 'f', ph0: 0,
     keep: 0, far: 0, closing: false, closeT: 0, idleT: 0, rhythm: false, sinceEnd: 9};
+  let RK = 1;   // the rhythm window's share ('tool.rhythm' notes: the cold narrows it, features/body.js)
+  if (H.mods) { const f = () => { RK = H.mods.value('tool.rhythm', 1); }; H.mods.watch(f); f(); }
   const aimFns = {};    // job -> the feature's: where a swing goes, asked as it starts -> {x, y} world
   const wantFns = [];   // [job, fn]: the features': is this press the tool's -> the tool's id (content/items.js) | ''
   let c = 1, s = 0;
@@ -84,7 +86,7 @@ export function createTool(PL, I) {
   }
   function put() { S.on = false; S.id = ''; S.job = ''; S.want = false; S.held = false; S.idleT = 0; if (S.mode && P.state === S.mode) end(); S.mode = ''; }
   // a fresh press: in rhythm when it comes within RHYTHM s of the swing's end (before it: the swing under way is near its end)
-  function beat() { S.rhythm = RHYTHM > 0 && (S.mode ? !S.closing && S.t >= W.dur - RHYTHM : S.sinceEnd <= RHYTHM); }
+  function beat() { const r = RHYTHM * RK; S.rhythm = RHYTHM > 0 && (S.mode ? !S.closing && S.t >= W.dur - r : S.sinceEnd <= r); }
   // stepping while he swings, turned to the target all the while: a KEEP target circled at its distance (the keys' sideways
   // part round it, the distance sprung back to keep), else any way the keys say, at the footwork's speeds -> his distance
   function footwork(dt, mx, my) {

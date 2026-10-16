@@ -4,7 +4,8 @@
 // fire DOES: each log burns its def.fire.log s, E adds one from the pouch (up to def.fire.max: builds.stoke, the server's for
 // everyone online), when the wood is gone it glows as embers for def.fire.embers s, then it is cold. The flames are lights.js's
 // (F.flame, as the gadgets' fire pools borrow them), the light its own. Two kinds burn: the campfire and the Stone Fire Ring.
-// OWNS: the fires' light records. READS: builds (the list, fire(), stoke()), pack (logs), lights (F.flame).
+// RAIN puts an open campfire out (features/builds.js decides it: docs/WEATHER.md); its fire.doused event hisses up a cloud of steam here.
+// OWNS: the fires' light records, the doused fires' steam. READS: builds (the list, fire(), stoke()), pack (logs), lights (F.flame).
 // A fire with a shared pot on it (features/builds.js b.pot) draws it (F.drawPot) and its E is a spoon first (builds.spoon).
 // API: burningNear(x, y, r) (features/meals.js cooks at a burning fire), burningAt(x, y, r) -> the nearest burning one | null
 //   (features/cooking.js: its stick), F.fires (the burning kinds' builds, live). A cook.flare (the stick's just-right moment) makes
@@ -45,6 +46,7 @@ export async function create(host) {
   const POT3 = {size: 3}, POT2 = {size: 2}, STP = {size: 2, alpha: .4};
   const STEAM = Array.from({length: 24}, () => ({on: false, x: 0, y: 0, h: 0, t: 0}));
   const steam = (x, y, h) => { for (const s of STEAM) if (!s.on) { s.on = true; s.x = x + (Math.random() - .5) * .12; s.y = y + (Math.random() - .5) * .12; s.h = h; s.t = 0; return; } };
+  const HISS = Array.from({length: 4}, () => ({x: 0, y: 0, h: 0, t: 9})), HISSC = [.8, .82, .84];   // (a doused fire's steam: x, y, its ground, s since)
 
   const F = {
     name: 'campfires', label: 'Campfires', on: ON,
@@ -63,8 +65,16 @@ export async function create(host) {
       const n = pack()?.count('log') || 0;
       return {text: n ? `E  add a log (${n})` : 'no logs in the pouch', color: n ? '#ffb060' : '#e8a070'};
     },
-    frame() {
+    view(dt, evs) {   // (the steam off a fire the rain put out: a few seconds of it)
+      for (const h of HISS) h.t += dt;
+      for (let k = 0; k < evs.length; k++) { const e = evs[k]; if (e.type !== 'fire.doused') continue; let o = HISS[0]; for (const h of HISS) if (h.t > o.t) o = h; o.x = e.x; o.y = e.y; o.h = host.elev(e.x, e.y); o.t = 0; }
+    },
+    frame(f) {
       if (!active()) return;
+      for (const h of HISS) if (h.t < 4) for (let i = 0; i < 5; i++) {   // (rising, spreading, thinning: a pure function of its time)
+        const u = ((h.t * .7 + i * .2) % 1), a = .25 * (1 - u) * (1 - h.t / 4);
+        host.G.fx(h.x + Math.sin(i * 2.4 + h.t) * .15 * u, h.h + .2 + u * 1.4, h.y + Math.cos(i * 1.7) * .1 * u, .1 + u * .3, HISSC, a, 'blend');
+      }
       const L = host.feature('lights'), flames = L?.on !== false && L?.flame ? L : null, B = builds(); if (!flames || !B) return;
       for (const b of sync()) {
         const f = B.fire(b), D = b.def.fire, k = clamp(f.fuel / (D.log * 2.2), 0, 1.1), big = b.kind === 'fire_ring' ? 1.25 : 1;

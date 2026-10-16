@@ -196,7 +196,10 @@ export function createPlayer(H) {
     const same = SPEED.run === SPEED0.run && SPEED.sprint === SPEED0.sprint;   // (as authored: the literal speeds)
     const at = v => same ? v : SPEED.run + (SPEED.sprint - SPEED.run) * (v - SPEED0.run) / (SPEED0.sprint - SPEED0.run);
     GAIT.sprint = at(GAIT0.sprint); GAIT.drive = at(GAIT0.drive); GAIT.skid = at(GAIT0.skid);
+    sinkTo = Math.max(0, M.value('player.sink', 0));   // (what he stands in sinks him: lying snow, the mire; features/winter.js, mire.js)
+    stuck = M.value('player.stuck', 0) > 0;   // (held fast: through the ice, deep in the mire; no walking, no roll: features/ice.js, mire.js pull him out)
   };
+  let sinkTo = 0, stuck = false;
   if (H.mods) { H.mods.watch(applySpeed); applySpeed(); }
 
   // ---------------- facing ----------------
@@ -255,6 +258,7 @@ export function createPlayer(H) {
   }
   const cursorGround = () => { const a = H.aimGround?.(); if (a) return a; if (H.terrain) { const g = pickGround(0); if (g) return {x: g.x, y: g.y}; } return {x: (mouse.x + cam.x) / T.PPM, y: (mouse.y + cam.y) / T.PPMY}; };
   function moveInput() {
+    if (stuck) return [0, 0];
     const dx = (keys.has('d') || keys.has('arrowright')) - (keys.has('a') || keys.has('arrowleft'));
     const dy = (keys.has('s') || keys.has('arrowdown')) - (keys.has('w') || keys.has('arrowup'));
     const l = Math.hypot(dx, dy); return l ? [dx / l, dy / l] : [0, 0];
@@ -535,6 +539,7 @@ export function createPlayer(H) {
       if (d > a) { P.svx += dx / d * a; P.svy += dy / d * a; } else { P.svx += dx; P.svy += dy; }
       P.want = dirOf(mx, my);
     } else { const k = Math.exp(-SWIM.drag * dt); P.svx *= k; P.svy *= k; }
+    if (stuck) { P.svx = P.svy = 0; }   // (held in a hole in the ice: he treads water where he is)
     turnToward(P.want ?? P.face, dt, SWIM.turn);
     if (P.kickT > 0) P.kickT -= dt;
     P.vx = P.svx + WV[1]; P.vy = P.svy + WV[2];
@@ -786,7 +791,9 @@ export function createPlayer(H) {
     const {SP, CLIP} = A, WALK = CLIP.walk, RUN = CLIP.run, ND = A.ND;
     const [mx, my] = moveInput();
     P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt); thrown.tick(dt);
-    if (P.sink && P.state !== 'swim' && P.state !== 'splash') P.sink = Math.max(0, P.sink - dt * SWIM.sink / SWIM.rise);   // (out of the water: rising out of it)
+    if ((P.sink || sinkTo) && P.state !== 'swim' && P.state !== 'splash') {   // (out of the water: rising out of it, to what he stands in: 'player.sink')
+      if (P.sink > sinkTo) P.sink = Math.max(sinkTo, P.sink - dt * SWIM.sink / SWIM.rise); else P.sink = Math.min(sinkTo, (P.sink || 0) + dt * SWIM.sink / SWIM.rise);
+    }
     if (ropewall && ropewall.step(dt, mx, my)) return;   // on a rope against a face (sim/player/ropewall.js; nothing while he isn't)
     if (fists && fists.step(dt, mx, my)) return;   // the fists up: the guard, a punch, a slip, a clinch (sim/player/fists.js; nothing while they're down)
     if (brawl && brawl.step(dt, mx, my)) return;   // a boot, a barge, a lift, a throw (sim/player/brawl.js; nothing while it's idle)
@@ -1018,7 +1025,7 @@ export function createPlayer(H) {
   }
 
   // ---------------- input (the host maps its keys / buttons to these) ----------------
-  function onSpace() { if (P.state === 'swim') { swimKick(); return; } if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
+  function onSpace() { if (stuck) return; if (P.state === 'swim') { swimKick(); return; } if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
   function useE() { P.eUsed = true; }   // a feature took this E press (features/forage.js picks while it's held): holding it doesn't wave
