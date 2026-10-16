@@ -1648,6 +1648,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   function tex(img, {linear = false, dynamic = false} = {}) {
     let t = texCache.get(img);
     if (!t || t.__lin !== linear) {
+      t?.dispose();   // (the same image asked for with the other filtering: the old texture's GPU copy goes)
       t = img instanceof HTMLCanvasElement ? new THREE.CanvasTexture(img) : new THREE.Texture(img);
       t.flipY = false; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace; t.premultiplyAlpha = false;
       t.minFilter = t.magFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
