@@ -469,7 +469,7 @@ const SFX = {
   mineHit(E, o) {
     if (o.kind === 'crystal') { SFX.hit(E, {...o, mat: 'glass', g: (o.g ?? 1) * 1.1}); SFX.hit(E, {...o, mat: 'clay', g: (o.g ?? 1) * .5}); return; }
     const v = E.voice({...o, g: (o.g ?? 1) * (o.rhythm ? 1.25 : 1)}, 'hit', .5, {pri: 2, cd: .03}); if (!v) return;
-    const {N, O} = E, up = o.rhythm ? 1.19 : 1;
+    const {N, O} = E, up = (o.rhythm ? 1.19 : 1) * (1 + .06 * Math.max(0, (o.chain || 1) - 1));   // (the chain: the ping rises a blow)
     if (o.k === 0) { O(v, 0, {f: 520, a: .001, d: .12, g: .1}); O(v, 0, {f: 170, f2: 110, d: .08, g: .3}); N(v, 0, {type: 'bandpass', f: 1200, q: 2, d: .05, g: .3}); return; }
     if (o.hollow) {   // a hollow wall (docs/CAVELIFE.md): a woody, boomy knock that rings on in the room behind it, little of the pick's ring
       O(v, 0, {f: 196, f2: 172, a: .002, d: .42, g: .3}); O(v, .004, {f: 311, a: .002, d: .26, g: .09}); N(v, 0, {type: 'bandpass', f: 420, q: 3, a: .002, d: .3, g: .35});
@@ -585,6 +585,14 @@ const SFX = {
     const notes = [1047, 1319, 1568, 2093, 2637, 3136].slice(0, 2 + k);
     notes.forEach((f, i) => { E.O(v, i * .07, {f, a: .003, d: .28 + k * .05, g: .045}); E.O(v, i * .07, {f: f * 2, a: .002, d: .1, g: .012}); });
     if (k >= 3) E.O(v, notes.length * .07, {f: 523, a: .02, d: .9, g: .04});
+  },
+  // SKILLS (features/pack.js, docs/SKILLS.md): a level, two soft rising notes; a move, a third held one above them (o.move);
+  // a title, a low warm one under them (o.title). Quiet: it lands while you work
+  skillUp(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * .9, jit: .004}, 'skillUp', 1.2, {pri: 2, cd: .4}); if (!v) return;
+    E.O(v, 0, {f: 784, a: .004, d: .22, g: .04}); E.O(v, .09, {f: 1175, a: .004, d: .3, g: .04});
+    if (o.move) { E.O(v, .2, {f: 1568, a: .01, d: .7, g: .045}); E.O(v, .2, {f: 3136, a: .004, d: .18, g: .01}); }
+    if (o.title) E.O(v, .05, {f: 392, a: .03, d: .9, g: .045});
   },
   // the bruiser's coach gun (fallbacks for the forge's 'coachgun' recipe while it bakes / ?forge=0), screen-bound like it
   coachShot(E, o) {   // deeper and longer than the revolver's: a broad bark, a low sweep, a long dark tail
@@ -1325,7 +1333,7 @@ export function createAudio(ctx, host = {}) {
         case 'tree.logs': fire('treeLogs', e.x, e.y, {surf, n: e.n}); break;
         case 'tool.hit': fire('hit', e.x, e.y, {mat: e.kind === 'body' ? 'body' : MAT[e.kind] || 'wood', g: 1}); break;
         case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); if (e.ring) fire('mineRing', e.x, e.y); break;   // (the swing's whoosh; the ringing pick rings on a whiff too)
-        case 'mine.hit': fire('mineHit', e.x, e.y, {k: e.k, kind: e.kind, rhythm: e.rhythm, hollow: e.hollow, g: e.other ? .7 : 1}); if (e.ring) fire('mineRing', e.x, e.y); break;   // (features/mining.js: a blow on a vein or a crystal; hollow: a hollow wall's knock)
+        case 'mine.hit': fire('mineHit', e.x, e.y, {k: e.k, kind: e.kind, rhythm: e.rhythm, hollow: e.hollow, chain: e.chain, g: e.other ? .7 : 1}); if (e.ring) fire('mineRing', e.x, e.y); break;   // (features/mining.js: a blow on a vein or a crystal; hollow: a hollow wall's knock)
         case 'mine.open': fire('hollowOpen', e.x, e.y); break;   // (a hollow wall caves in)
         case 'mine.echo': fire('mineEcho', e.x, e.y, {kind: e.kind, k: e.k}); break;   // (a vein answers the ringing pick: from where it is, or burnt, the mirrored point)
         case 'lantern.toggle': fire('lanternClick', e.x, e.y); break;   // (features/caves.js: L in the cave)
@@ -1336,6 +1344,8 @@ export function createAudio(ctx, host = {}) {
         case 'mine.chunk': fire('hit', e.x, e.y, {mat: 'clay', g: .35}); break;   // (stand-in: a chunk into the pouch)
         case 'mine.take': fire('kick', e.x, e.y, {mat: 'wood', g: .5}); break;   // (stand-in: the old pick pulled from the wall)
         case 'pack.add': if (e.id === 'log' || e.id === 'deadwood' || e.id.endsWith('_log')) fire('logPick', e.x, e.y); break;   // (any species' log: content/items.js wood)
+        case 'skill.level': fire('skillUp', e.x, e.y, {move: !!e.move}); break;   // (features/pack.js: a skill's new level; a move it gave: the third note)
+        case 'title.earned': fire('skillUp', e.x, e.y, {title: true}); break;
         case 'fire.addWood': fire('campLog', e.x, e.y); break;   // a log on a campfire (features/campfires.js, lights.js)
         // THE WORKSHOP (features/workshop.js, docs/WORKSHOP.md): stand-ins
         case 'smith.pump': fire('smithPump', e.x, e.y, {heat: e.heat, g: e.mine ? 1 : .7}); break;

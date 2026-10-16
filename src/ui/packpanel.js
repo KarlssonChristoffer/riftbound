@@ -6,7 +6,10 @@
 // (ui/pixelfont.js, ui/pixelframe.js; a UI pixel by the window's height), centred, never taller than the window: it scrolls.
 //   const panel = createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held, ask, pick, tips}); panel.toggle() / .open / .frame()
 //   (pick(slot): a bag slot clicked, its tool is the one its job swings; tips: the cards over a made thing's slot, pack.slotTip)
-//   (sections: other systems' parts of the panel, drawn after the skills: pack.section; recipes under their group's heading)
+//   (sections: other systems' parts of the panel, drawn after the skills: pack.section; recipes under their group's heading;
+//   moves(id) -> {had: [{name, line}], next: level}: the moves under a skill's bar (content/skills.js MOVES), movesVer() when
+//   they change without the skills changing: the pretend level, the titles); titles() -> {worn, had: [id], names: {id: {name}}}:
+//   the row under the header (a click wears the next one he has, then none: wear(id)))
 //   iconURL(rows, pal) -> a data URL (exported: features/fishing.js draws its journal's unknown catches as silhouettes)
 // OWNS: the panel's element and its open state. READS: the inventory, the skills, the recipes (pack.recipe). Clicks: ask(r)
 // (pack carries a recipe out in the sim step).
@@ -53,7 +56,15 @@ const CSS = `
 #pack .p-grid7 .p-slot img { width: calc(14 * var(--u)); height: calc(14 * var(--u)); }
 #pack .p-grid7 .p-slot em { right: 0; bottom: 0; }
 #pack .p-slot.p-dim img { opacity: .7; }
-#pack .p-note { color: var(--dim); margin-top: calc(2 * var(--u)); }`;
+#pack .p-note { color: var(--dim); margin-top: calc(2 * var(--u)); }
+#pack .p-skill .p-move { display: block; margin-top: 3px; font: 10px/11px RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; letter-spacing: 0; }
+#pack .p-skill .p-move b { font-weight: normal; }
+#pack .p-skill .p-move small { display: block; color: #a89c84; }
+#pack .p-skill .p-move.p-next { color: var(--dim); }
+#pack .p-title { display: block; width: 100%; margin: 4px 0 0; padding: 2px 0; text-align: left; background: none; border: 0; cursor: pointer;
+  font: 10px/11px RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; color: #f2d27a; }
+#pack .p-title small { color: var(--dim); }
+#pack .p-title:hover small { color: var(--ink); }`;
 
 const OUTLINE = '#1a120c';
 // an icon (12 x 12 rows of palette letters; pal: its own letters over PAL's) -> a 14 x 14 data URL: its fills, then an outline in
@@ -71,7 +82,7 @@ export function iconCanvas(rows, pal = null) {
   return c;
 }
 
-export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask, pick = null, tips = [], put = null}) {
+export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask, pick = null, tips = [], put = null, moves = null, movesVer = () => 0, titles = null, wear = () => {}}) {
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const el = document.createElement('div'); el.id = 'pack'; el.className = 'hidden'; document.body.appendChild(el);
   for (const k of ['panel', 'well', 'on', 'btn', 'hot', 'card']) el.style.setProperty('--p-' + k, FRAMES[k]());
@@ -80,14 +91,17 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
   const icon = id => ICON[id] ??= ITEMS[id]?.icon ? iconURL(ITEMS[id].icon, ITEMS[id].pal) : '';
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
   let putId = null;   // (right-click on a pouch row: its "Put down" button shows under it; put(id): features/foxden.js)
-  let open = false, kInv = -1, kSk = -1, kHeld = -2, kN = -1, kT = 0, kSec = -1;
+  let open = false, kInv = -1, kSk = -1, kHeld = -2, kN = -1, kT = 0, kSec = -1, kMv = -1;
   const secVer = () => { let v = 0; for (const s of sections) v = (v * 31 + s.ver()) | 0; return v; };
   const costText = c => Object.entries(c).map(([id, n]) => `${n} ${ITEMS[id]?.name || id}`).join(', ');
   const shown = r => !r.shown || r.shown();
   const afford = r => Object.entries(r.cost || {}).every(([id, n]) => inv.count(id) >= n) && !(r.can?.());
 
   function build() {
-    let h = '<header><b>PACK</b><small>Tab</small></header><h5>Bag</h5><div class="p-bag">';
+    let h = '<header><b>PACK</b><small>Tab</small></header>';
+    const ti = titles?.();
+    if (ti?.had.length) h += `<button class="p-title" title="the title the others see under your name: click for the next">${ti.worn ? esc(ti.names[ti.worn].name) : '<small>no title</small>'} <small>&gt;</small></button>`;
+    h += '<h5>Bag</h5><div class="p-bag">';
     inv.bag.forEach((s, i) => {
       const d = s && ITEMS[s.id];
       h += `<div class="p-slot${i === held() ? ' held' : ''}" data-i="${i}"${d && !(s.u && tips.length) ? ` title="${esc(d.name)}: ${esc(d.desc)}"` : ''}>`;   // (a made thing: its card instead, ui/madetip.js)
@@ -104,7 +118,11 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     for (const id in SKILLS) {
       const S = SKILLS[id], L = skills.level(id), x = skills.xp(id), sp = skills.span(id), k = sp.next > sp.at ? (x - sp.at) / (sp.next - sp.at) : 1;
       h += `<div class="p-skill"><div><span>${esc(S.name)}</span><small>Lv ${L} · ${Math.floor(x)}${sp.next > sp.at ? ' / ' + sp.next : ''} xp</small></div>`;
-      h += `<div class="p-bar"><i style="width:${(k * 100).toFixed(1)}%;background:${S.col}"></i></div></div>`;
+      h += `<div class="p-bar"><i style="width:${(k * 100).toFixed(1)}%;background:${S.col}"></i></div>`;
+      // (the moves had: the name in the skill's colour and its one plain sentence; then the next one's level, a question mark)
+      const M = moves?.(id);
+      if (M) { for (const m of M.had) h += `<div class="p-move"><b style="color:${S.col}">${esc(m.name)}</b><small>${esc(m.line)}</small></div>`; if (M.next) h += `<div class="p-move p-next">Lv ${M.next} ?</div>`; }
+      h += '</div>';
     }
     for (const s of sections) h += `<h5>${esc(s.title)}</h5>` + s.html(esc, icon);
     // (the recipes under their group's heading, in the order the groups came: Build, Cook, Bait ...; a recipe whose shown()
@@ -120,6 +138,10 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     e.preventDefault(); putId = putId === row.dataset.id ? null : row.dataset.id; build();
   });
   el.addEventListener('click', e => {
+    if (e.target.closest('.p-title')) {   // (the next title he has, after the last none, then the first again)
+      const ti = titles?.(); if (!ti) return;
+      const L = [...ti.had, ''], i = L.indexOf(ti.worn); wear(L[(i + 1) % L.length]); return;
+    }
     // a section's own buttons (data-sec: its id; the rest of the element's data- is the section's): its click(data, ask)
     const sb = e.target.closest('[data-sec]');
     if (sb) { const s = sections.find(q => q.id === sb.dataset.sec); s?.click?.(sb.dataset, ask); return; }
@@ -150,8 +172,9 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
       if (hide) return;
       const now = performance.now(), h = held();
       const sv = secVer();
-      if (inv.ver !== kInv || skills.ver !== kSk || h !== kHeld || recipes.length !== kN || sv !== kSec || (recipes.length && now - kT > 500)) {
-        kInv = inv.ver; kSk = skills.ver; kHeld = h; kN = recipes.length; kSec = sv; kT = now; build();
+      const mv = movesVer();
+      if (inv.ver !== kInv || skills.ver !== kSk || h !== kHeld || recipes.length !== kN || sv !== kSec || mv !== kMv || (recipes.length && now - kT > 500)) {
+        kInv = inv.ver; kSk = skills.ver; kHeld = h; kN = recipes.length; kSec = sv; kMv = mv; kT = now; build();
       }
     },
   };

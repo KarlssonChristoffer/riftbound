@@ -2,10 +2,10 @@
 // (net/protocol.js) over any transport (net/transport.js), keeps the other players' snapshots, and answers "where was peer X
 // at time t" for the view, a little in the past (INTERP_MS) so it can interpolate between two snapshots. No game imports:
 // features/coop.js connects it to the world.
-//   const C = createNetClient({transport, name, hello?}) (hello() -> more fields for the hello: features/coop.js's key and the
+//   const C = createNetClient({transport, name, hello?}) (hello() -> more fields for the hello: the player key, his XP, the
 //   workshop's records); C.peers (Map id -> peer); C.sendState(o); C.act(a, id, o?);
 //   C.sample(peer, now, out) -> out {x, y, z, phi, s, pose, ls}; C.drain() -> the queued sim messages (world / fix / deny /
-//   clock / sec / ev / gear: your own set as the server took it; smith / made / rec: the workshop's, features/workshop.js); C.wear(ids) asks for a set; a peer's q.gear (ids) / q.gv
+//   clock / sec / ev / gear: your own set as the server took it; smith / made / rec: the workshop's, features/workshop.js; skills: your XP as the server keeps it); C.wear(ids) asks for a set; a peer's q.title (the title he wears, content/skills.js TITLES), q.gear (ids) / q.gv
 //   (its version); C.elk: the night elk's snapshots (a ring like a peer's: C.sample(C.elk, out) -> s = its mode's index,
 //   pose = its quarry's id); C.soot: the cave's soot things' rings (C.sample(C.soot[k], out): z its height, s its mode's index);
 //   a peer's q.lt: their lantern burns in the cave (the latest snapshot; 2, a burnt eel's eyes, is not a light); q.md: the meal in
@@ -29,7 +29,7 @@ export function createNetClient({transport, name = '', hello = null}) {
     Z: new Float32Array(RING), F: new Float32Array(RING), S: new Array(RING).fill('idle'), P: new Array(RING).fill('idle.0'), W: new Array(RING).fill(null), L: new Array(RING).fill(null), w: null, wv: 0});
   function peer(p) {
     let q = C.peers.get(p.id);
-    if (!q) { q = ring(p.id, p.name, p.color, p.wn || null, p.rig || ''); q.gear = Array.isArray(p.g) ? p.g : []; q.gv = 0; C.peers.set(p.id, q); C.joined.push(q); }
+    if (!q) { q = ring(p.id, p.name, p.color, p.wn || null, p.rig || ''); q.gear = Array.isArray(p.g) ? p.g : []; q.gv = 0; q.title = typeof p.t === 'string' ? p.t : ''; C.peers.set(p.id, q); C.joined.push(q); }
     return q;
   }
   C.elk = ring(-1); C.soot = [];
@@ -55,6 +55,7 @@ export function createNetClient({transport, name = '', hello = null}) {
       case 'join': peer(m.p); break;
       case 'leave': { const q = C.peers.get(m.id); if (q) { C.peers.delete(m.id); C.left.push(q); } break; }
       case 'wn': { const q = C.peers.get(m.id); if (q) { q.wn = m.wn; q.wv++; } break; }
+      case 'ptitle': { const q = C.peers.get(m.id); if (q) q.title = typeof m.t === 'string' ? m.t : ''; break; }   // (a friend's worn title: docs/SKILLS.md)
       case 'snap': {
         const o = m.t - performance.now(); if (!(o >= offset)) offset = o; else offset += (o - offset) * .002;   // (drifts up slowly: a late spike doesn't stick)
         for (const r of m.p) { if (r[0] === C.id) continue; const q = C.peers.get(r[0]); if (q) { push(q, m.t, r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8] || null, r[9] || null); q.lt = r[10] === 1; q.md = typeof r[11] === 'string' ? r[11] : ''; q.bd = r[12] | 0; q.an = Array.isArray(r[13]) ? r[13] : null; } }
@@ -63,7 +64,7 @@ export function createNetClient({transport, name = '', hello = null}) {
         break;
       }
       case 'world': if (m.s === 'grown') C.world.delete(m.id); else C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;   // (grown: a patch or a vein back, features/forage.js, mining.js)
-      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': case 'bolt': case 'snow': case 'smith': case 'made': case 'rec': queue.push(m); break;   // (bolt: natural lightning, features/thunder.js; snow: a snowball hit someone, features/winter.js)
+      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': case 'bolt': case 'snow': case 'smith': case 'made': case 'rec': case 'skills': queue.push(m); break;   // (bolt: natural lightning, features/thunder.js; snow: a snowball hit someone, features/winter.js)
       case 'gear': {
         if (!Array.isArray(m.g)) break;
         if (m.id === C.id) { queue.push(m); break; }   // (yours: a sim message, features/gear.js wears it at a step)

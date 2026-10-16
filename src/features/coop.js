@@ -24,12 +24,14 @@
 //                'stoke', 'unbuild'); its word (world: built, stoked, gone) is handed on in F.mail
 //   workshop     the server keeps the furnaces' charges and heat and every made thing's record (docs/WORKSHOP.md):
 //                features/workshop.js asks (act 'load', 'pump', 'fit', 'make', 'take'); its word (smith, made, rec) is handed on
-//                in F.mail. The hello carries this browser's KEY (localStorage rb.key: the server keeps a player's records by it,
-//                server/players.mjs) and the workshop's records. F.tag(a, fn): a feature adds its fields to an act (fn(p) -> {}:
+//                in F.mail. The hello carries the workshop's records (the key: skills below). F.tag(a, fn): a feature adds its fields to an act (fn(p) -> {}:
 //                the workshop puts the tool's record on a 'fell' and a 'mine')
 //   animals      the bag Lasso on the forest's animals (docs/FAUNA.md "The Lasso"): features/rope.js claims the animal on its
 //                rope (act('rope', id), 'free'), calms a roe ('calm') and takes a find ('find'); the animal on your rope goes
 //                in the state message (an), the server's word (ev: rope, free; world: calm, found; a deny of a rope) in F.mail
+//   skills       the server owns each player's XP (docs/SKILLS.md): the hello carries this browser's player key (game/playerkey.js)
+//                and the pack's XP (read by the server only for a key it hasn't seen); its word on your XP (skills) is handed on in
+//                F.mail for features/pack.js; a cave crystal broken under the pick asks for its XP (act('crystal', 'c' + i))
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
@@ -43,14 +45,14 @@ import {TICK_HZ, packPose} from '../net/protocol.js';
 import {wsTransport} from '../net/transport.js';
 import {createNetClient, b64} from '../net/client.js';
 import {createPeerLook} from './coop/look.js';
+import {playerKey} from '../game/playerkey.js';
 
 // ORDER (core/features.js): after the equipment (the lasso's phase this step) and the combat (a felled tree's world is settled)
 export const order = {after: ['equip', 'combat']};
 export async function create(host) {
   if (!SESSION.mp) return SESSION.error ? offline(host) : {name: 'coop', on: false, online: false, act: () => false, tag() {}};
   let name = flags.get('name') || ''; try { name ||= localStorage.getItem('rb.coop.name') || ''; } catch {}
-  let key = ''; try { key = localStorage.getItem('rb.key') || ''; if (!key) { key = Math.random().toString(36).slice(2, 12) + Date.now().toString(36); localStorage.setItem('rb.key', key); } } catch {}
-  const C = createNetClient({transport: wsTransport(SESSION.ws), name, hello: () => ({key, made: host.feature('workshop')?.records?.() || []})});
+  const C = createNetClient({transport: wsTransport(SESSION.ws), name, hello: () => ({key: playerKey(), xp: host.feature('pack')?.skills?.toJSON() || {}, made: host.feature('workshop')?.records?.() || []})});
   const look = createPeerLook(host, C);
   const msgs = [], mail = [], WH = Math.PI * 2;
   // THE CLOCK: the server's last word {t: its ms, h, rate}; the page's env follows it
@@ -116,13 +118,14 @@ export async function create(host) {
   // takes its own lamp back ('unbuild', p: the id), puts a shared pot on a fire ('pot', p: the fire's id, o: {dish, q}) and takes
   // a spoon from it ('spoon', p: the fire's id); features/thunder.js sets a tree alight with a brand ('ignite', p: its fid) and
   // takes a struck tree's thunderwood ('wood', p: its fid); features/workshop.js loads a furnace, pumps it, fits a bellows, takes a bar
-  // ('load', 'pump', 'fit', 'take', p: the furnace's build id) and makes a thing ('make', p: the anvil's id)
+  // ('load', 'pump', 'fit', 'take', p: the furnace's build id) and makes a thing ('make', p: the anvil's id). features/pack.js: the title
+  // he wears ('title', p: its id, '' none) and a --dev server's Skills rows ('dev', p: next | reset | titles | notitles); docs/SKILLS.md
   const tags = {};   // act -> [fn(p) -> its extra fields] (F.tag)
   const tagged = (a, p, o) => { const T = tags[a]; if (!T) return o; o = {...o}; for (const f of T) Object.assign(o, f(p)); return o; };
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon' || a === 'ignite' || a === 'wood' || a === 'hole' || a === 'load' || a === 'pump' || a === 'fit' || a === 'make' || a === 'take') { if (typeof p !== 'string') return false; C.act(a, p, tagged(a, p, o)); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon' || a === 'ignite' || a === 'wood' || a === 'hole' || a === 'load' || a === 'pump' || a === 'fit' || a === 'make' || a === 'take' || a === 'crystal' || a === 'title' || a === 'dev') { if (typeof p !== 'string') return false; C.act(a, p, tagged(a, p, o)); return true; }
     if (a === 'rope' || a === 'free' || a === 'calm' || a === 'find') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/rope.js)
     if (a === 'leave' || a === 'take' || a === 'den' || a === 'drop') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/foxden.js)
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
@@ -154,7 +157,8 @@ export async function create(host) {
       for (const m of msgs) {
         if (m.k === 'world' && m.s === 'felled') {   // the woodcutting fells it (its fall, stump, logs), else it just goes
           const p = treeOf(m.id), by = C.peers.get(m.by), o = by ? C.sample(by, BYS) : null;
-          if (!p || !host.feature('woodcut')?.fellShared?.(p, m.by === C.id, !!m.late, o?.x, o?.y)) fell(m.id);
+          const way = typeof m.dx === 'number' && typeof m.dy === 'number' ? m : null;   // (the server's word on the fall's way: the same on every client)
+          if (!p || !host.feature('woodcut')?.fellShared?.(p, m.by === C.id, !!m.late, o?.x, o?.y, way?.dx, way?.dy)) fell(m.id);
         }
         else if (m.k === 'clock') {
           clk.t = m.t; clk.h = m.h; clk.rate = m.rate;
@@ -162,7 +166,7 @@ export async function create(host) {
           const want = flags.get('time');   // (dev: a ?time= asks the server's clock for it, once)
           if (want && !askedTime) { askedTime = true; C.act('time', want); }
         }
-        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world' || m.k === 'bolt' || m.k === 'snow' || m.k === 'smith' || m.k === 'made' || m.k === 'rec') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
+        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world' || m.k === 'bolt' || m.k === 'snow' || m.k === 'smith' || m.k === 'made' || m.k === 'rec' || m.k === 'skills') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') { say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`); if (m.a === 'pot' || m.a === 'rope' || m.a === 'find' || m.a === 'leave') mail.push(m); }   // (a pot refused: features/builds.js gives its food back; features/rope.js, features/animalfinds.js: someone had it first)
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }

@@ -36,7 +36,7 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
 
   // a player's records: the server's by key; the hello's copy fills in the ones it doesn't have
   function hello(p, m) {
-    p.rec = players.of(str(m.key, 48)) || players.of('#' + p.id);
+    p.rec ||= players.of(str(m.key, 48)) || players.of('#' + p.id);   // (the room's record when it already joined him: server/players.mjs)
     const list = Array.isArray(m.made) ? m.made.slice(0, MAX_RECS) : [];
     for (const o of list) { const r = cleanRec(o); if (r && !p.rec.made.has(r.u)) p.rec.made.set(r.u, r); }
     return [...p.rec.made.values()];

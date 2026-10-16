@@ -3,8 +3,9 @@
 // Messages are JSON objects {k: kind, ...}. The transport under them (net/transport.js: a WebSocket today) only carries text.
 //
 // client -> server
-//   hello    {v, name, key?, made?}                      the first message; the server answers with welcome. key = this browser's
-//            random key (features/coop.js: the server keeps a player's records by it, server/players.mjs), made = the save's
+//   hello    {v, name, key, xp, made?}                   the first message; the server answers with welcome. key = the browser's
+//            random player key (32 hex: game/playerkey.js; the server keeps a player's records by it, server/players.mjs), xp = his
+//            skills' XP as his own save has it {id: n} (read only on a key the room hasn't seen, capped), made = the save's
 //            copy of his made things' records (features/workshop.js: at most 64; the server's own win)
 //   st       {x, y, z, phi, s, pose, rig, w?, wn?, ls?, tp?, lt, md, bd}   the local player 20 times a second: world metres (x east, y south,
 //            z up), facing phi (rad, the arena's atan2(x, y)), s = his state (idle, move, roll, ...), pose = the frame drawn,
@@ -22,7 +23,10 @@
 //            'make' {id: the anvil's build id ('' by hand), r: the recipe (content/workshop.js SMITH / HAND), haft, inlay, dev?};
 //            a 'fell' and a 'mine' carry u (the tool's record) and a 'fell' old (1: an old oak) for the counts. The animals
 //            (server/animals.mjs): 'rope' (id: the plan's animal id: claim it, first wins), 'free' {x, y, how}, 'calm' {at: the
-//            hour} (a roe), 'find' (id: 'fur:' + hare + ':' + day)
+//            hour} (a roe), 'find' (id: 'fur:' + hare + ':' + day). The skills'
+//            (docs/SKILLS.md): 'crystal' (id: 'c' + a cave crystal's index in
+//            the cave plan's props: broken under his pick, its Mining XP), 'mine' (rh: 1 a rhythm blow: the chain, docs/SKILLS.md),
+//            'title' (id: a title of his to wear, '' none), 'dev' (id: next | reset | titles | notitles: a --dev server's Skills rows)
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
@@ -36,16 +40,21 @@
 //   welcome  {v, id, name, color, seed, t, world, peers, clock, unc, made}   world = {id: state} (what's been done to the world so far),
 //            peers = [peer], clock (below), unc = {sec: {id: {s, by, n}}, shift} (the uncanny forest: its secrets' states, the
 //            night shift's strength: docs/UNCANNY.md; null when the server runs without it), made = his records (server/workshop.mjs)
-//   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn, g (the gear worn)}
+//   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn, g (the gear worn), t (his title)}
+//   ptitle   {id, t}                                     the title a peer wears now ('' none; content/skills.js TITLES)
 //   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0, lt, md, bd, an|0], ...], c?}   every tick; w only when it changed since the last snap;
 //            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
-//   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it. A tree the
+//   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it; a fell's dx, dy:
+//            the way it falls (unit: away from the feller as the server saw him). A tree the
 //            lightning struck: id 'z' + its fid, s 'burning' {t0, t1 (s of the server's clock), tw} | 'charred' {at (the hour it's whole
 //            again: the next spring), tw (1: a splinter of thunderwood at its foot)} | 'grown'. A hole in the lake ice: id 'i' + n, s 'hole' {x, y, r, at (the hour it's frozen over)}
 //   bolt     {a: 'mark', n, kind, id, x, y, h, tele}     natural lightning (docs/WEATHER.md; the server aims it in a storm): bolt n will
 //            strike (x, y) at height h in tele s (kind: tree | tor | ground | player, id: the tree's fid or the player's id).
 //            {a: 'strike', n, kind, id, x, y, h}: it struck (a player under it hurts himself: where he stands now)
+//   skills   {xp: {id: n}, d?: {id: n}, ml?, ti?}        to one player: his XP as the server keeps it (all of it after the welcome,
+//            then each skill a grant raised; d = what this grant gave: the "+n xp"); ml = the server's --movelvl; ti = his titles
+//            {titles: [id], title (worn), got: [id] (just earned)}
 //   clock    {t, h, rate}                                the world's clock (the server owns it): at server time t (ms) it was h
 //            in-game hours since the start (sim/env.js E.t), going on at rate hours per ms (0: stopped). In welcome too
 //   sec      {id, s, by, n}                              a secret's state changed (sleeping / awake / triggered / spent), by =
@@ -56,14 +65,14 @@
 //   gear     {id, g}                                     what a player wears now (to everyone, the wearer too: his set as
 //                                                        the server took it; docs/GEAR.md)
 //   fish     {a: 'bite', n, id, cm, kg, wait, nibbles, two}   to the caster: what bites cast n (content/fishing.js roll), when
-//            (wait s, the nibbles' s before it), two = a double catch. {a: 'caught', id, name, c, cm, kg, two}: to everyone,
+//            (wait s, the nibbles' s before it), two = a double catch, sh = nose | spook (a cast at a fish shadow: Fishing 5). {a: 'caught', id, name, c, cm, kg, two}: to everyone,
 //            player id landed catch c
 //   snow     {by, id, vx, vy, hat}                       player by's snowball hit player id (to everyone but the thrower)
 //   made     {rec, dev?}                                 to the maker: the record of a thing he made (the client pays when it hears it)
 //   rec      {u, counts, marks}                          to its owner: what his tool has done since (at most every 2 s)
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
 //   pong     {c, t}                                      t = the server's clock (ms)
-export const VERSION = 2;
+export const VERSION = 3;   // (3: the player key, server-owned XP: docs/SKILLS.md)
 export const TICK_HZ = 20;          // the server's snapshot rate; a client sends its state at the same rate
 export const INTERP_MS = 110;       // remote players are drawn this far behind the newest snapshot (two ticks and a little)
 export const PATH = '/mp';          // the WebSocket's path on the server, and the HTTP session endpoint (PATH + '/session')

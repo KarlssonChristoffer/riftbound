@@ -18,11 +18,22 @@
 // furnaces' heat and charges; fire-setting (an iron vein cracked by a fire burning by it: 'k' + its index in the world).
 // out in the snapshots (sn: [x, y, h, mode] each). And the forest's ANIMALS where someone touches them (server/animals.mjs: a claim
 // on the one on someone's rope, a calmed roe, a find), the held one's place in its holder's snapshot row (an).
+// And every player's SKILLS (docs/SKILLS.md): a player is known by the random key his browser sends in its hello (server/players.mjs
+// keeps the records); the room grants XP itself on the acts it already sees (a fell, a pick, a blow on a vein, a landed fish, a
+// broken crystal: each x content/skills.js RATE x --xprate) and tells that player alone ({k: 'skills', xp, d}); the levels it
+// checks (a pick's yield, a vein's chunks, a cast's roll) are its record's, never the client's word.
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
-//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log, workshop: {heat, smelt, wardrobe}}); room.connect(conn); room.stop(); room.clock() -> hours
+// The moves (content/skills.js MOVES) that change the sim are checked against the record's levels too (moveLvl: at least
+// --movelvl, a test server's pretend level; it goes out in the skills message as ml). A --dev server takes the Sandbox's
+// Skills rows (act 'dev': next | reset) for the asker's own record. TITLES (content/skills.js): the room counts (the cave's
+// seconds and the metres walked from the accepted moves, trees felled, blueberries picked, fish landed between dusk and dawn,
+// veins spent) and grants them (the skills message's ti: {titles, title, got}); the worn one goes out with the player (pub t,
+// {k: 'ptitle', id, t} when it changes); {a: 'title', id} wears one he has ('' none).
+//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log, players, xprate, importCap, movelvl, dev}); room.connect(conn);
+//   room.stop(); room.clock() -> hours; room.players (the records)
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
-import {CATCHES, WATERS, BAITS, SPOT, COME, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
+import {CATCHES, WATERS, BAITS, SPOT, COME, TUNE as FISH, roll, statsOf, castNotes, spotNear, shadowVerdict} from '../src/content/fishing.js';
 import {mealNotes, parseCode, codeOf, MEALS, QUALITIES} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
@@ -32,17 +43,19 @@ import {TUNE as TH, STRIKE, ironOf} from '../src/content/thunder.js';
 import {createThunder, nextSpring} from '../src/sim/thunder.js';
 import {TUNE as ICE} from '../src/content/ice.js';
 import {createLake, thickAt, refreezeAt} from '../src/sim/ice.js';
-import {SKILLS, CURVE} from '../src/content/skills.js';
+import {SKILLS, CURVE, IMPORT_CAP, TITLES, levelOf, fellXP, rateOf, hasMove, nextMoveLvl, needXP, titlesEarned, inCave} from '../src/content/skills.js';
+import {TUNE as MINE, chainSkipped} from '../src/content/mining.js';
+import {createPlayers, KEY_RE} from './players.mjs';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createAnimals} from './animals.mjs';
 import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
-import {createPlayers} from './players.mjs';
 import {createWorkshop} from './workshop.mjs';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, workshop = {}, fauna = null, thief = ''}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, workshop = {}, fauna = null, thief = '',
+  players = null, xprate = 1, importCap = IMPORT_CAP, movelvl = 0, dev = false}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -60,11 +73,30 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   // THE CAVE'S SOOT THINGS (none without the cave's plan)
   const soot = cave ? createSoot(cave, mulberry32((seed ^ 0x5007) >>> 0), snuffers) : null, shine = [], snRow = [];
 
-  const pub = p => ({id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, phi: p.phi, s: p.s, pose: p.pose, rig: p.rig, w: p.w, wn: p.wn, ls: p.ls, g: p.gear});
+  const pub = p => ({id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, phi: p.phi, s: p.s, pose: p.pose, rig: p.rig, w: p.w, wn: p.wn, ls: p.ls, g: p.gear, t: p.rec?.title || ''});
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
+  // SKILLS (docs/SKILLS.md): XP granted here (x the skill's RATE x --xprate), told to that player alone; his levels are his record's
+  const PL = players || createPlayers({SKILLS, importCap});
+  const lvlOf = (p, id) => levelOf(p.rec.xp[id] || 0);
+  const ML = Math.max(0, movelvl | 0), mvl = {}, SHV = {x: 0, y: 0, sx: 0, sy: 0, hx: 0, hy: 0, cls: '', len: 0};
+  const moveOK = (p, move) => { for (const id in SKILLS) mvl[id] = Math.max(lvlOf(p, id), ML); return hasMove(mvl, move); };   // (a move the sim checks: the chain, the nose cast)
+  function grant(p, id, n) {
+    const g = Math.round(n * rateOf(id, xprate) * 1000) / 1000; if (!(g > 0)) return;
+    p.conn.send(encode({k: 'skills', xp: {[id]: PL.grant(p.rec, id, g)}, d: {[id]: g}}));
+  }
+
+  // TITLES: a counter of his record up by n; a title it earns is his (and worn: the newest), told to him and his title to the others
+  const tiMsg = (p, got = []) => ({k: 'skills', xp: {}, ti: {titles: p.rec.titles, title: p.rec.title, got}});
+  function count(p, name, n) {
+    const got = titlesEarned(name, PL.count(p.rec, name, n), p.rec.titles); if (!got.length) return;
+    for (const id of got) { p.rec.titles.push(id); p.rec.title = id; }
+    PL.changed(); p.conn.send(encode(tiMsg(p, got))); others(p, {k: 'ptitle', id: p.id, t: p.rec.title});
+    log(`  ${p.name} is ${got.map(id => TITLES[id].name).join(', ')}`);
+  }
+
   // THE WORKSHOP: the made things' records (by the browser's key), the furnaces (server/workshop.mjs)
-  const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players, veins, heat: workshop.heat, smelt: workshop.smelt, wardrobe: !!workshop.wardrobe});
+  const ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players: PL, veins, heat: workshop.heat, smelt: workshop.smelt, wardrobe: !!workshop.wardrobe});
   const animals = createAnimals({world, all, send: (p, m) => p.conn.send(encode(m)), log: (...a) => log(...a), now, clock, plan: fauna, thief, players: () => peers.values(),
     fires: () => { const sec = now() / 1000, out = []; for (const e of world.values()) if (e.s === 'built' && BUILDS[e.kind]?.fire && fuelAt(e, sec) > 0) out.push(e); return out; }});   // (the fox: server/animals.mjs, sim/foxden.js)
 
@@ -72,12 +104,14 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
+    const {rec} = PL.join(KEY_RE.test(m.key) ? m.key : '#' + id, m.xp);   // (no key: a record for this connection alone; the workshop's fallback too)
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null, an: null,
-      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, lt: 0, md: ''};
+      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, lt: 0, md: '', rec, biteT: -1e9, crystals: new Set(), chain: {id: '', n: 0, t: -1e9}, walkM: 0, caveS: 0};
     const made = ws.hello(p, m);   // (his records: the server's, the hello's copy filling in)
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
       clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null, made}));
     peers.set(id, p);
+    p.conn.send(encode({k: 'skills', xp: rec.xp, ml: ML, ti: {titles: rec.titles, title: rec.title, got: []}}));   // (his record: the client takes its levels from it; ml: --movelvl)
     others(p, {k: 'join', p: pub(p)});
     animals.joined(p);
     log(`+ ${p.name} (#${id}) from ${conn.ip} · ${peers.size} in the room`);
@@ -91,7 +125,13 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const dt = Math.min(1, Math.max(1 / TICK_HZ, (t - p.lastT) / 1000)), d = Math.hypot(x - p.x, y - p.y);
     if (p.placed && !m.tp && d > MOVE.maxSpeed * dt + MOVE.slack) {
       if (t - p.fixT > 400) { p.fixT = t; p.conn.send(encode({k: 'fix', x: p.x, y: p.y, z: p.z})); log(`  ${p.name}: a move of ${d.toFixed(1)} m in ${(dt * 1000) | 0} ms refused`); }
-    } else { p.x = x; p.y = y; p.z = z; p.placed = true; }
+    } else {
+      // (the titles' walking and cave clocks: the accepted moves, gathered and counted every few metres / seconds)
+      if (p.placed && !m.tp) { p.walkM += Math.min(d, MOVE.maxSpeed); if (cave && inCave(cave, x, y)) p.caveS += dt; }
+      if (p.walkM >= 5) { count(p, 'walked', Math.round(p.walkM * 100) / 100); p.walkM = 0; }
+      if (p.caveS >= 5) { count(p, 'cave', Math.round(p.caveS * 100) / 100); p.caveS = 0; }
+      p.x = x; p.y = y; p.z = z; p.placed = true;
+    }
     p.lastT = t;
     p.phi = num(m.phi, p.phi); p.s = str(m.s, 16) || p.s; p.pose = str(m.pose, 32) || p.pose;
     const rig = str(m.rig, 16);
@@ -122,27 +162,46 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const h = clock(), d0 = Math.floor(h / 24) * 24; h0 = d0 + ph + (ph < h - d0 ? 24 : 0); c0 = now();
       all(clockMsg()); log(`  ${p.name} set the clock to ${id}`); return;
     }
-    if (animals.act(p, a, m, id, deny)) return;   // rope, free, calm, find (server/animals.mjs)
+    if (!(a === 'take' && id[0] === 'b') && animals.act(p, a, m, id, deny)) return;   // rope, free, calm, find, the fox's (server/animals.mjs; a 'take' of a build 'b' id is the workshop's bar)
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
+    if (a === 'crystal') return crystal(p, id, deny);
+    if (a === 'title') {   // the title he wears: one of his, or none ('')
+      if (id && !p.rec.titles.includes(id)) return deny('not yours');
+      p.rec.title = id; PL.changed(); p.conn.send(encode(tiMsg(p))); others(p, {k: 'ptitle', id: p.id, t: id}); return;
+    }
+    if (a === 'dev') {   // dev (--dev): the Sandbox's Skills rows on his own record (every skill to its next move's level | back to 0)
+      if (!dev) return deny('not a dev server (--dev)');
+      if (id === 'titles') { for (const tid in TITLES) { const T = TITLES[tid]; count(p, T.n, Math.max(0, T.at - (p.rec.n[T.n] || 0))); } return; }   // (every title earned)
+      if (id === 'notitles') { p.rec.titles.length = 0; p.rec.title = ''; p.rec.n = {}; PL.changed(); p.conn.send(encode(tiMsg(p))); others(p, {k: 'ptitle', id: p.id, t: ''}); return; }
+      for (const sk in SKILLS) {
+        if (id === 'reset') PL.set(p.rec, sk, 0);
+        else if (id === 'next') { const n = nextMoveLvl(sk, lvlOf(p, sk)); if (n) PL.set(p.rec, sk, needXP(n)); }
+      }
+      p.conn.send(encode({k: 'skills', xp: p.rec.xp, ml: ML})); log(`  ${p.name}: dev skills ${id}`); return;
+    }
     if (a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon') return build(p, a, m, id, t, deny);
     if (a === 'ignite' || a === 'wood') return thunderAct(p, a, id, deny);
     if (a === 'hole') return iceHole(p, m, deny);
     if (ws.ACTS.has(a)) return ws.act(p, a, m, id, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
+    let tr = null, dx = 0, dy = 0;
     if (trees) {
-      const tr = trees.get(id); if (!tr) return deny('no such tree');
+      tr = trees.get(id); if (!tr) return deny('no such tree');
       let tx = tr[0], ty = tr[1];
       const i = unc?.fidIndex.get(id); if (i !== undefined) { unc.posOf(i, clock(), tpos); tx = tpos[0]; ty = tpos[1]; }   // (it may have walked tonight)
-      if (Math.hypot(tx - p.x, ty - p.y) > REACH) return deny('too far');
+      const d = Math.hypot(tx - p.x, ty - p.y); if (d > REACH) return deny('too far');
+      if (d > .01) { dx = +((tx - p.x) / d).toFixed(3); dy = +((ty - p.y) / d).toFixed(3); }   // (the fall's way: away from the feller, as the server saw him)
     }
     const s = {s: 'felled', by: p.id, t};
     world.set(id, s);
-    all({k: 'world', id, s: s.s, by: p.id});
+    all(dx || dy ? {k: 'world', id, s: s.s, by: p.id, dx, dy} : {k: 'world', id, s: s.s, by: p.id});
     ws.count(p, m.u, m.old === 1 ? ['fell', 'oldoak'] : ['fell']);   // (the axe's record: u; old: an old oak)
+    if (tr?.[2]) { grant(p, 'woodcutting', fellXP(tr[2], tr[3] || 1)); count(p, 'trees', 1); }   // (the whole tree's XP to the feller: its bites, the fell, the logs)
     log(`  ${p.name} felled ${id}`);
   }
+
 
   // FORAGING (docs/FORAGING.md): a pick ({a: 'pick', id: 'd' + the forest decor's index, lvl: his Foraging level, as the client
   // says it: the save is his). The patch must be a plant of the plan (without one, the client's word for the kind), not picked,
@@ -157,11 +216,13 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       if (Math.hypot(e[1] - p.x, e[2] - p.y) > REACH) return deny('too far');
       kind = e[0];
     } else if (!PLANTS[kind] || !/^d\d+$/.test(id)) return deny('no such patch');
-    const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = levelNotes(SKILLS.foraging.per, lvl);
+    const lvl = lvlOf(p, 'foraging'), notes = levelNotes(SKILLS.foraging.per, lvl);
     for (const g of p.gear) for (const q of GEAR_BY_ID[g]?.mods || []) notes.push(q);
     const n = pickYield(pickRng, kind, pickStats(notes)), s = {s: 'picked', by: p.id, t, at: clock() + regrowHours(kind, regrow)};
     world.set(id, s);
     all({k: 'world', id, s: s.s, by: p.id, n});
+    grant(p, 'foraging', PLANTS[kind].xp);
+    if (kind === 'blueberry' && n > 0) count(p, 'berries', n);
   }
   // MINING (docs/MINING.md): a blow on a vein ({a: 'mine', id: 'v' + the cave plan's vein index, pow: what the blow takes off
   // (his pick, his meal, his level and a rhythm blow: content/mining.js blowPower, as the client says it, held to 0.25 .. 3),
@@ -181,10 +242,16 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const crack = ws.cracked(id) ? 1 : 0;   // (fire-setting: a cracked vein asks one tier less, gives one chunk more: server/workshop.mjs)
     const V = VEINS[kind]; if ((num(m.tier, 1) | 0) + crack < V.tier) return deny('too hard');
     const pow = Math.max(.25, Math.min(3, num(m.pow, 1)));
-    p.mineLvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0));   // (his level for the others' last blows too)
     const by = cur?.by ? [...cur.by] : []; if (!by.includes(p.id)) by.push(p.id);
     const us = {...cur?.us}; if (typeof m.u === 'string' && m.u) us[p.id] = str(m.u, 24);   // (each striker's pick's record: the workshop counts the vein into it)
-    const left = Math.max(0, (cur?.left ?? V.blows) - pow);
+    let left = Math.max(0, (cur?.left ?? V.blows) - pow);
+    grant(p, 'mining', V.xp);   // (a blow that bites: his)
+    // THE CHAIN (Mining 5, docs/SKILLS.md): his rhythm blows in a row on this vein, each within TUNE.chain.gap of the last (counted
+    // here: the client's count is never asked); the n-th, with the move, cracks it at once (the XP of the blows it skipped)
+    const C = MINE.chain, ch = p.chain, dt = (t - ch.t) / 1000;
+    ch.n = m.rh === 1 && ch.id === id && dt >= C.gap[0] && dt <= C.gap[1] ? ch.n + 1 : m.rh === 1 ? 1 : 0; ch.id = id; ch.t = t;
+    let chain = false;
+    if (ch.n >= C.n && moveOK(p, 'chain')) { ch.n = 0; if (left > 1e-6) { grant(p, 'mining', V.xp * chainSkipped(left, pow)); left = 0; chain = true; } }
     if (left > 1e-6) {
       const s = {s: 'struck', left: +left.toFixed(3), by, t, us};
       world.set(id, s); all({k: 'world', id, s: 'struck', left: s.left, by: p.id}); return;
@@ -192,13 +259,24 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const got = {};
     for (const q of by) {
       const pq = peers.get(q); if (!pq) continue;
-      const lvl = pq.mineLvl || 1, notes = levelNotes(SKILLS.mining.per, lvl);
+      const notes = levelNotes(SKILLS.mining.per, lvlOf(pq, 'mining'));
       for (const g of pq.gear) for (const n of GEAR_BY_ID[g]?.mods || []) notes.push(n);
       got[q] = mineYield(mineRng, kind, mineStats(notes)) + crack;
       ws.count(pq, us[q], kind === 'iron' ? ['veins', 'iron'] : ['veins']);
+      grant(pq, 'mining', V.xp * 4); count(pq, 'veins', 1);   // (the spent vein: every striker's)
     }
     world.set(id, V.hollow ? {s: 'spent', by: p.id, t} : {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});   // (a hollow wall: open for good)
-    all({k: 'world', id, s: 'spent', by: p.id, got});
+    all({k: 'world', id, s: 'spent', by: p.id, got, ...(chain ? {chain: 1} : {})});
+  }
+  // A CAVE CRYSTAL broken under the pick ({a: 'crystal', id: 'c' + its index in the cave plan's props}): the crystals are each
+  // player's own (combat breaks them in his world); the room checks it's one of the plan's, in reach and not already his, and
+  // grants its Mining XP (content/mining.js TUNE.crystal.xp)
+  function crystal(p, id, deny) {
+    const i = /^c\d+$/.test(id) ? +id.slice(1) : -1, c = cave?.props?.[i];
+    if (cave && (!c || c[0] !== 'crystal')) return deny('no such crystal');
+    if (c && Math.hypot(c[1] - p.x, c[2] - p.y) > REACH) return deny('too far');
+    if (p.crystals.has(i)) return deny('broken');
+    p.crystals.add(i); grant(p, 'mining', MINE.crystal.xp);
   }
   // BUILDING (docs/BUILDING.md): a build put down ({a: 'build', id: its kind (content/builds.js), x, y}: within reach of him,
   // clear of the other builds, no more of the kind standing than its `most` for him) gets an id here ('b' + n) and is told to
@@ -370,7 +448,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const partOf = h => { h = ((h % 24) + 24) % 24; return h < 5.6 || h >= 20.3 ? 'night' : h < 7.2 ? 'dawn' : h < 18 ? 'day' : 'dusk'; };
   // the fish.* stats a cast or a grab is rolled with: the set he wears, his level, the angler's set, his meal (his word: the save is his)
   function fishStats(p, m) {
-    const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = [];
+    const lvl = lvlOf(p, 'fishing'), notes = [];   // (his record's level, never the client's word)
     for (const id of p.gear) for (const q of GEAR_BY_ID[id]?.mods || []) notes.push(q);
     const pieces = p.gear.filter(id => GEAR_BY_ID[id]?.kind === 'fishing').length;
     notes.push(...castNotes({lvl, pieces, meal: mealNotes(str(m.meal, 24)), per: SKILLS.fishing.per}));
@@ -397,18 +475,27 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const bait = str(m.bait, 24);
       // a spot: the spots' hash on its clock, or the lingon's fish round his legs (a cast within COME.rod of him)
       const spot = !!m.spot && (spotNear(x, y, Math.floor(t / 1000 / SPOT.slot), seed | 0) || (lingonIn(p) && Math.hypot(x - p.x, y - p.y) <= COME.rod + .5));
+      // SHADOWS (Fishing 5, docs/SKILLS.md): the bobber at a shadow's nose (computed here from the seed and this clock, a little
+      // latency back) is a quick bite of its class; on it, the fish bolts and the wait grows. Only with the move
+      const ts = t / 1000, sv = moveOK(p, 'shadows') ? shadowVerdict(x, y, Math.floor(ts / SPOT.slot), seed | 0, [ts, ts - .25, ts - .5], SHV) : '';
       const st = fishStats(p, m), rain = !!m.rain;
       const r = roll(fishRng, {water: w, part: partOf(clock()), rain, deep: Math.max(0, Math.min(40, num(m.deep, 0))), luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0),
         find: st['fish.find'], size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: !!m.perfect,
-        spot, bait: BAITS[bait] ? bait : '', season: seasonAt(clock(), WXT.seasonDays)});
+        spot, bait: BAITS[bait] ? bait : '', season: seasonAt(clock(), WXT.seasonDays), cls: sv === 'nose' ? SHV.cls : '', quick: sv === 'nose'});
+      if (sv === 'spook') r.wait = Math.round((r.wait + FISH.spook) * 100) / 100;
+      if (sv) r.sh = sv;   // (the client's view: it saw the same, or close)
       r.two = fishRng() < st['fish.double'];
-      p.fishN = n; p.fishR = r;
+      p.fishN = n; p.fishR = r; p.fishPerfect = !!m.perfect; p.biteT = t;
       p.conn.send(encode({k: 'fish', a: 'bite', n, ...r}));
     } else if (a === 'land') {
       const r = p.fishR; if (!r || n !== p.fishN) return;
+      if (t - p.biteT < 1500) return;   // (sooner than any fish can be fought in: refused, the roll kept)
       p.fishR = null;
       all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: r.two});
+      const first = !p.rec.caught[r.id]; p.rec.caught[r.id] = (p.rec.caught[r.id] || 0) + (r.two && !CATCHES[r.id].find ? 2 : 1);
+      grant(p, 'fishing', Math.round(CATCHES[r.id].xp * (first ? 2 : 1) * (p.fishPerfect ? 1.2 : 1)));   // (features/fishing.js give: the same sum)
       log(`  ${p.name} caught a ${CATCHES[r.id].name}${CATCHES[r.id].find ? '' : ` (${r.cm} cm)`}`);
+      if (!CATCHES[r.id].find && partOf(clock()) !== 'day') count(p, 'night_fish', r.two ? 2 : 1);
     } else if (a === 'lost' && n === p.fishN) p.fishR = null;
     else if (a === 'grab') {   // {a: 'grab', n, x, y, w, lvl, rain, meal}: a fish grabbed by hand where he stands (common and fine only)
       if (t - p.fishT < 500) return;
@@ -478,7 +565,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   }, 1000 / TICK_HZ);
 
   return {
-    connect, get size() { return peers.size; }, world, seed, clock, secrets, elk, soot,
+    connect, get size() { return peers.size; }, world, seed, clock, secrets, elk, soot, players: PL,
     stop() { clearInterval(timer); for (const p of peers.values()) p.conn.close(1001, 'server stopping'); },
   };
 }

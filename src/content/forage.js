@@ -16,7 +16,11 @@ export const PLANTS = {
   chanterelles: {item: 'chanterelles',  n: [2, 4], days: 3, r: .3,  rain: true,  xp: 5},
   fly_agaric:   {item: 'fly_agaric',    n: [1, 1], days: 1, r: .3,  xp: 4},
 };
-export const TUNE = {reach: .9, walk: .6, crouch: .5, pluck: .22, day: 24};
+export const TUNE = {reach: .9, walk: .6, crouch: .5, pluck: .22, day: 24,
+  // GLIMMER (Foraging 5, docs/SKILLS.md; view only): crouched (C) and still for `still` s, a wave goes out from him at `speed` m/s
+  // to `reach` m; each unpicked patch it passes shows `specks` dew specks winking for `t` s; the next wave `cool` s after one
+  // ends; at night they're `night` as bright
+  glimmer: {still: 1.2, reach: 12, speed: 6, specks: [3, 5], t: 4, cool: 3, night: .5}};
 
 export function pickYield(R, kind, st) {
   const P = PLANTS[kind]; if (!P) return 0;
