@@ -169,7 +169,7 @@ export const GEAR = [
     look: {paint: {legs: 'hide_tan'}}},
   // ---- feet
   {id: 'moose_boots', name: 'Moose-hide boots', slot: 'feet', kind: 'clothing', rarity: 'fine', weight: 1.5, armor: .01, desc: 'Soft, warm boots. Loud on stone.',
-    soon: 'bogs and snow don\'t slow you',
+    mods: [{stat: 'soft.slow', mul: 0}],
     look: {paint: {boots: 'hide_tan'}, hide: ['spurs']}},
   {id: 'bark_shoes', name: 'Birch-bark shoes', slot: 'feet', kind: 'clothing', rarity: 'fine', weight: .3, armor: 0, desc: 'Woven bark shoes (näverskor). Light on your feet.',
     mods: [{stat: 'player.speed', mul: 1.04}],

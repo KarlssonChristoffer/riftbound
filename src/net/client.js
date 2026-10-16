@@ -60,7 +60,7 @@ export function createNetClient({transport, name = ''}) {
         break;
       }
       case 'world': if (m.s === 'grown') C.world.delete(m.id); else C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;   // (grown: a patch or a vein back, features/forage.js, mining.js)
-      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': case 'bolt': queue.push(m); break;   // (bolt: natural lightning, features/thunder.js)
+      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': case 'bolt': case 'snow': queue.push(m); break;   // (bolt: natural lightning, features/thunder.js; snow: a snowball hit someone, features/winter.js)
       case 'gear': {
         if (!Array.isArray(m.g)) break;
         if (m.id === C.id) { queue.push(m); break; }   // (yours: a sim message, features/gear.js wears it at a step)
@@ -95,6 +95,7 @@ export function createNetClient({transport, name = ''}) {
   C.act = (a, id, o) => transport.send(encode({...o, k: 'act', a, id}));   // (o: the act's own fields: a pick's lvl)
   C.wear = g => transport.send(encode({k: 'gear', g}));
   C.fish = o => transport.send(encode({...o, k: 'fish'}));   // (features/fishing.js: a cast, a landed fish, a lost one)
+  C.snow = o => transport.send(encode({...o, k: 'snow'}));   // (features/winter.js: his snowball hit a friend)
   C.pingNow = () => transport.send(encode({k: 'ping', c: performance.now()}));
   C.serverNow = () => performance.now() + (offset || 0);
   C.drain = out => { while (queue.length) out.push(queue.shift()); return out; };

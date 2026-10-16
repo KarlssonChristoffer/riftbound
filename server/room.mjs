@@ -23,9 +23,11 @@ import {mealNotes} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
-import {WEATHER, createSchedule, TUNE as WXT} from '../src/sim/wxclock.js';
+import {WEATHER, createSchedule, seasonAt, TUNE as WXT} from '../src/sim/wxclock.js';
 import {TUNE as TH, STRIKE, ironOf} from '../src/content/thunder.js';
 import {createThunder, nextSpring} from '../src/sim/thunder.js';
+import {TUNE as ICE} from '../src/content/ice.js';
+import {createLake, thickAt, refreezeAt} from '../src/sim/ice.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
@@ -109,6 +111,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (a === 'mine') return mine(p, m, id, t, deny);
     if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
     if (a === 'ignite' || a === 'wood') return thunderAct(p, a, id, deny);
+    if (a === 'hole') return iceHole(p, m, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -284,6 +287,22 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     e.tw = 0; all({k: 'world', id: 'z' + id, ...e, by: p.id});
   }
 
+  // THE LAKE ICE (sim/ice.js, content/ice.js, docs/WINTER.md): its thickness is the clock's (no state); the holes in it are the
+  // server's: 'i' + n in the world {s: 'hole', x, y, r, at: the hour it's frozen over} (regrowTick lets them go: 'grown'). Act
+  // 'hole' {x, y, b}: a pick's or an axe's last blow (b 0), or a player going through (b 1: a wider one)
+  const lake = forest ? createLake(forest) : null; let holeN = 0;
+  function iceHole(p, m, deny) {
+    if (!lake) return deny('no lake');
+    const x = num(m.x, NaN), y = num(m.y, NaN); if (!Number.isFinite(x) || !Number.isFinite(y)) return deny('where');
+    if (!lake.inLake(x, y)) return deny('not on the lake');
+    if (Math.hypot(x - p.x, y - p.y) > REACH) return deny('too far');
+    if (lake.localAt(x, y, thickAt(clock(), WXT.seasonDays)) < ICE.crack) return deny('no ice');
+    let n = 0; for (const id of world.keys()) if (id[0] === 'i') n++;
+    if (n >= ICE.hole.max) { let o = null, oa = Infinity; for (const [id, e] of world) if (id[0] === 'i' && e.at < oa) { oa = e.at; o = id; } world.delete(o); all({k: 'world', id: o, s: 'grown'}); }
+    const id = 'i' + (++holeN), e = {s: 'hole', x: +x.toFixed(2), y: +y.toFixed(2), r: m.b ? ICE.hole.breakR : ICE.hole.r, at: +refreezeAt(clock(), WXT.seasonDays).toFixed(3)};
+    world.set(id, e); all({k: 'world', id, ...e, by: p.id}); log(`  ${p.name} ${m.b ? 'went through the ice' : 'cut a hole in the ice'} (${id})`);
+  }
+
   // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:
   // content/gear.js cleanSet) and tells everyone, the wearer too. (No inventory yet: any known piece may be worn.)
   function wear(p, m) {
@@ -305,6 +324,12 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   // everyone ({a: 'caught', id: who, name, c: the catch, cm, kg, two}); a lost one ({a: 'lost', n}) forgets the roll.
   const fishRng = mulberry32((seed ^ 0xf15f) >>> 0), FISH_REACH = 20, FISH_WATERS = new Set(Object.values(WATERS));
   const partOf = h => { h = ((h % 24) + 24) % 24; return h < 5.6 || h >= 20.3 ? 'night' : h < 7.2 ? 'dawn' : h < 18 ? 'day' : 'dusk'; };
+  // a snowball hit someone (docs/WINTER.md): the thrower's word, passed on to everyone else (gentle: nothing to check but the numbers)
+  function snowball(p, m) {
+    const id = num(m.id, -1); if (!peers.has(id)) return;
+    const c = v => Math.max(-6, Math.min(6, num(v)));
+    others(p, {k: 'snow', by: p.id, id, vx: c(m.vx), vy: c(m.vy), hat: m.hat ? 1 : 0});
+  }
   function fish(p, m) {
     const a = str(m.a, 8), n = num(m.n, -1), t = now();
     if (a === 'cast') {
@@ -320,7 +345,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const st = statsOf(notes), rain = !!m.rain;
       const r = roll(fishRng, {water: w, part: partOf(clock()), rain, deep: Math.max(0, Math.min(40, num(m.deep, 0))), luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0),
         find: st['fish.find'], size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: !!m.perfect,
-        spot, bait: BAITS[bait] ? bait : ''});
+        spot, bait: BAITS[bait] ? bait : '', season: seasonAt(clock(), WXT.seasonDays)});
       r.two = fishRng() < st['fish.double'];
       p.fishN = n; p.fishR = r;
       p.conn.send(encode({k: 'fish', a: 'bite', n, ...r}));
@@ -341,6 +366,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       else if (m.k === 'act') act(p, m);
       else if (m.k === 'gear') wear(p, m);
       else if (m.k === 'fish') fish(p, m);
+      else if (m.k === 'snow') snowball(p, m);
       else if (m.k === 'ping') conn.send(encode({k: 'pong', c: num(m.c), t: now()}));
     };
     conn.onclose = () => {

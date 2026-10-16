@@ -15,6 +15,7 @@ import {statWords as forageWords} from '../content/forage.js';
 import {statWords as mineWords} from '../content/mining.js';
 import {statWords as bodyWords} from '../content/body.js';
 import {statWords as thunderWords} from '../content/thunder.js';
+import {statWords as winterWords} from '../content/winter.js';
 
 const CSS = `
 #geartip { --u: 2px; position: fixed; left: 0; top: 0; z-index: 40; pointer-events: none; width: calc(128 * var(--u)); padding: calc(3 * var(--u)) calc(4 * var(--u));
@@ -49,7 +50,7 @@ export function doesOf(g) {
     else if (m.stat === 'light.lanternR') out.push(m.mul >= 1 ? `its light reaches ${pct(m.mul - 1)} further` : 'a smaller light');
     else if (m.stat === 'player.speed') out.push(`you move ${pct(m.mul - 1)} faster`);
     else if (m.stat === 'weapon.melee') out.push(`your blow (V) hits x${m.mul}`);
-    else { const w = statWords(m) || forageWords(m) || mineWords(m) || bodyWords(m) || thunderWords(m); if (w) out.push(w); }   // (fishing: content/fishing.js; foraging: content/forage.js; mining: content/mining.js)
+    else { const w = statWords(m) || forageWords(m) || mineWords(m) || bodyWords(m) || thunderWords(m) || winterWords(m); if (w) out.push(w); }   // (fishing: content/fishing.js; foraging: content/forage.js; mining: content/mining.js)
   }
   if (g.slot === 'main' && g.kind === 'fishing') out.unshift('LMB on water: cast');
   return out;

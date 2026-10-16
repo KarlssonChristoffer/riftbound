@@ -275,6 +275,44 @@ uniform vec4 uWS;      // the wind's direction x, z (unit, world), the ripples' 
 uniform vec4 uWS2;     // rain 0..1, fish 0..1, the gust now 0..1, the still clock (s)
 uniform vec3 uWSRamp[4]; uniform vec4 uWSTint;   // the lake's four tones (sheen, calm, body, deep); its bed seen through it (rgb, peaty water: the blues go first) and how much of the bed's hue shows (w)
 ivec2 wOrg() { return ivec2(floor(uOrigin * uTexSize / uWorld + .5)); }   // the surface's first texel in world texels
+// LAKE ICE (features/ice.js through G.setIce; docs/WINTER.md): the still water frozen. uIce: x how far out it has frozen (0..1: the
+// shelf first, the deep last, by the bed's depth band), y the snow lying on it, z how thick it looks (0 black ice .. 1 grey-white),
+// w on (> 0). uIceT: the thin spots (x, y m, r m, how grey); uIceH: the holes (x, y m, r m; r 0: none). Integer hashes in world
+// texels (no sin(): the same pixel on every GPU), so it holds still while the camera turns
+uniform vec4 uIce; uniform vec4 uIceT[3]; uniform vec4 uIceH[8];
+uint iceH(ivec2 p) { uint h = uint(p.x) * 1664525u ^ uint(p.y) * 22695477u; h ^= h >> 16; h *= 2246822519u; h ^= h >> 13; h *= 3266489917u; h ^= h >> 16; return h; }
+float iceH01(ivec2 p) { return float(iceH(p) & 16777215u) / 16777216.; }
+float iceVn(vec2 p) { vec2 f = fract(p); ivec2 i = ivec2(floor(p)); f = f * f * (3. - 2. * f);
+  return mix(mix(iceH01(i), iceH01(i + ivec2(1, 0)), f.x), mix(iceH01(i + ivec2(0, 1)), iceH01(i + ivec2(1, 1)), f.x), f.y); }
+vec2 wMetres(ivec2 ti) { return (vec2(ti) + .5) * uWorld / uTexSize + uOrigin; }
+// 1 ice, 0 open water (not frozen out here yet, a hole), -1 a hole's broken rim
+float wIced(ivec2 ti, int band) {
+  if (uIce.w <= 0.) return 0.;
+  vec2 m = wMetres(ti);
+  for (int i = 0; i < 8; i++) { vec4 h = uIceH[i]; if (h.z > 0.) { float d = distance(m, h.xy); if (d < h.z) return 0.; if (d < h.z + .07) return -1.; } }
+  return float(band) <= uIce.x * 4. - .001 ? 1. : 0.;
+}
+vec3 wIce(vec3 res, ivec2 ti, int band) {
+  float c = wIced(ti, band); if (c == 0.) return res;
+  if (c < 0.) return vec3(.82, .88, .94);
+  ivec2 p = ti + wOrg(); vec2 m = wMetres(ti);
+  // black ice: the water darkened and turned blue, the bed still showing; thicker, greyer
+  vec3 ice = mix(res * vec3(.5, .6, .72) + vec3(.03, .05, .08), vec3(.6, .67, .75), .45 * uIce.z);
+  for (int i = 0; i < 3; i++) { vec4 t = uIceT[i]; if (t.z > 0.) { float k = 1. - distance(m, t.xy) / t.z; if (k > 0.) ice = mix(ice, vec3(.44, .48, .52), clamp(k * 1.8, 0., 1.) * t.w); } }   // thin: grey and wet
+  // cracks: the borders of a jittered lattice, 20 texels a cell (some borders only)
+  ivec2 cell = ivec2(floor(vec2(p) / 20.)); float d1 = 1e9, d2 = 1e9; ivec2 c1 = cell, c2 = cell;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    ivec2 cc = cell + ivec2(i, j); vec2 q = (vec2(cc) + vec2(iceH01(cc), iceH01(cc + ivec2(91, 37)))) * 20.; float d = distance(vec2(p) + .5, q);
+    if (d < d1) { d2 = d1; c2 = c1; d1 = d; c1 = cc; } else if (d < d2) { d2 = d; c2 = cc; }
+  }
+  if (d2 - d1 < 1.1 && iceH01(c1 + c2 * 7) < .6) ice = mix(ice, vec3(.8, .86, .92), .65);
+  if (iceH01(p) < .005) ice = vec3(.86, .9, .95);   // air bubbles frozen in
+  if (uIce.y > 0.) {   // snow on it: drifts, thicker as more lies
+    float n = iceVn(vec2(p) / 22.) * .65 + iceVn(vec2(p) / 6. + 3.1) * .35;
+    if (n > 1. - uIce.y * 1.1) ice = n > 1.06 - uIce.y ? vec3(.89, .92, .96) : vec3(.76, .81, .88);
+  }
+  return ice;
+}
 vec3 wStill(ivec2 ti, int ring) {
   vec2 p = vec2(ti + wOrg()), dir = uWS.xy;
   float al = dot(p, dir), ac = dot(p, vec2(-dir.y, dir.x)), tr = floor(uWS.z), w = clamp(uWS.w + .35 * uWS2.z, 0., 1.), ck = uWS2.w;
@@ -303,6 +341,7 @@ vec3 wStill(ivec2 ti, int ring) {
     float op = t < t0 ? max(uWOp[band], uWLook.x) : uWOp[band];
     if (op < .999) { vec3 b = wBed(ti + ro).rgb; res = mix(mix(res * dot(b, vec3(.3, .55, .15)) / uWLook.z, b * uWSTint.rgb, uWSTint.w), res, op); }
   }
+  if (uIce.w > 0.) res = wIce(res, ti, band);   // (frozen: features/ice.js)
   return res;
 }
 // rain rings on all water and a fish now and then on still water (main, once per fragment: crisp under the smooth sampling; sw: still water)
@@ -519,7 +558,7 @@ void main() {
         c.rgb = mix(cN, cS, uSmooth);
       }
       if (uWBedOn > .5 && rc >= 128) c.rgb = wFoam(c.rgb, ti, int(wBed(ti).a * 255. + .5) & 7);   // (contact foam: WATER_FS)
-      if (rc >= 192) { bool sw = (rc & 15) == 0 && uWS.w >= 0.; if (uWS2.x + (sw ? uWS2.y : 0.) > .01) c.rgb = wDrops(c.rgb, ti, sw); }   // (rain rings on all water; a fish on still water)
+      if (rc >= 192) { bool sw = (rc & 15) == 0 && uWS.w >= 0.; if (uWS2.x + (sw ? uWS2.y : 0.) > .01 && !(sw && uIce.w > 0. && wIced(ti, uWBedOn > .5 ? wBand(wBed(ti)) : 3) != 0.)) c.rgb = wDrops(c.rgb, ti, sw); }   // (none on the ice)   // (rain rings on all water; a fish on still water)
     }
   }
   if (uPudK.w > .5 && uType < 1.5 && wfl < .5) {   // a rain puddle (above)
@@ -1630,6 +1669,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     wOp: {value: new THREE.Vector4(1, 1, 1, 1)}, wTone: {value: new THREE.Vector4(1, 1, 2, 2)}, wLook: {value: new THREE.Vector4(.86, 0, 0, 0)},
     wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
     // still water (setWaterLook's still, setWater's still: features/stillwater.js): see WATER_FS wStill
+    ice: {value: new THREE.Vector4()}, iceT: {value: Array.from({length: 3}, () => new THREE.Vector4())}, iceH: {value: Array.from({length: 8}, () => new THREE.Vector4())},   // (G.setIce)
     wS: {value: new THREE.Vector4(1, 0, 0, -1)}, wS2: {value: new THREE.Vector4()}, wSRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())}, wSTint: {value: new THREE.Vector4(1, 1, 1, .25)},
     // rain puddles (setPuddles, setPuddleLook: features/puddles.js): see SURF_FS
     pud: {value: null}, pudR: {value: new THREE.Vector4(0, 0, 1, 1)}, pudK: {value: new THREE.Vector4()}, pudSky: {value: new THREE.Vector3(.5, .55, .6)},
@@ -1719,7 +1759,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp,
     uWBed: bed === undefined ? U.wBed : {value: bed?.tex || null}, uWBedOn: bed === undefined ? U.wBedOn : {value: bed ? 1 : 0},
     uWBedR: bed === undefined ? U.wBedR : {value: new THREE.Vector4(...(bed?.rect || [0, 0, 1, 1]))}, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot,
-    uWS: U.wS, uWS2: U.wS2, uWSRamp: U.wSRamp, uWSTint: U.wSTint, uPud: U.pud, uPudR: U.pudR, uPudK: U.pudK, uPudSky: U.pudSky}, {side: THREE.FrontSide});
+    uWS: U.wS, uWS2: U.wS2, uWSRamp: U.wSRamp, uWSTint: U.wSTint, uIce: U.ice, uIceT: U.iceT, uIceH: U.iceH, uPud: U.pud, uPudR: U.pudR, uPudK: U.pudK, uPudSky: U.pudSky}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
   // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test
@@ -2948,6 +2988,14 @@ void main() {
     if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0);
     if (still) { U.wS2.value.set(still.rain, still.fish, still.gust, still.t); if (stillLook) U.wS.value.set(still.dir[0], still.dir[1], still.travel, still.wind); }   // (the rain rings all water; the rest is the still look's)
   };
+  // the lake's ice (features/ice.js, on a change): {cover 0..1 (how far out: the shelf first), snow 0..1, thick 0..1 (its look),
+  // thin: [[x, y, r, k] x <= 3] (m; k how grey), holes: [[x, y, r] x <= 8] (m)} | null (open water). WATER_FS wIce
+  const setIce = o => {
+    if (!o) { U.ice.value.w = 0; return; }
+    U.ice.value.set(o.cover, o.snow || 0, o.thick || 0, 1);
+    for (let i = 0; i < 3; i++) { const t = o.thin?.[i]; if (t) U.iceT.value[i].set(t[0], t[1], t[2], t[3] ?? 1); else U.iceT.value[i].set(0, 0, 0, 0); }
+    for (let i = 0; i < 8; i++) { const h = o.holes?.[i]; if (h) U.iceH.value[i].set(h[0], h[1], h[2], 1); else U.iceH.value[i].set(0, 0, 0, 0); }
+  };
   // the biome's water (world.js buildWorld, at every build, from WATER_TUNE): {ramp: [[r, g, b] 0..1] light -> dark (padded to 4), rate,
   // across, along, hi, lo, range: [lightest, darkest] tone, lap (tone | -1), refl, spark} | null = no moving water (the rift)
   function setWaterLook(L) {
@@ -2966,6 +3014,6 @@ void main() {
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setPuddles, setPuddleLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, setFrost, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setIce, setPuddles, setPuddleLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, setFrost, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
 }

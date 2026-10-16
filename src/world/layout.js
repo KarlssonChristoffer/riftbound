@@ -108,8 +108,10 @@ export const STREAM = {
   removeStone(o) { const i = STREAM.stones.indexOf(o); if (i >= 0) STREAM.stones.splice(i, 1); },
 };
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
+// the lake's ice (features/ice.js sets ICE.solid(x, y) -> true where the ice holds him; null: none): no water there for the sim
+export const ICE = {solid: null};
 export const inStream = (x, y) => {
-  if (FOREST !== null && y < 0) return FOREST.inDeep(x, y);   // (the forest's lake past the shelf you wade: deep water, world/forest.js)
+  if (FOREST !== null && y < 0) return FOREST.inDeep(x, y) && !(ICE.solid !== null && ICE.solid(x, y));   // (the forest's lake past the shelf you wade: deep water, world/forest.js; frozen: none)
   if (y < STREAM.y0 || y > STREAM.y1) return false;
   if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y) || inBrookPool(x, y);   // (the plateau's pool is deep water too; so is the brook's, brook.js)
   return !STREAM.stones.some(s => Math.hypot(x - s.x, (y - s.y) * 1.3) < s.r);   // stones are dry footing

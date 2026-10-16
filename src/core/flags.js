@@ -137,6 +137,7 @@ export const FLAG_DOCS = {
   strikes: 'a factor on how often natural lightning comes down in a storm (docs/WEATHER.md: 1)',
   treefire: '0: a tree the lightning strikes doesn\'t burn (it chars at once)',
   firestart: '1: you can carry a burning brand from a campfire and set a tree alight (experimental; also Esc > Sandbox)',
+  ice: '1: the forest lake frozen now (mid-winter\'s ice), 0: never frozen (features/ice.js; docs/WINTER.md)',
   tracks: '0: no footprints or tracks in the forest (features/prints.js; docs/WINTER.md)',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools

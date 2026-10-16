@@ -79,6 +79,13 @@ export const EVENTS = {
   'fire.doused':        ['features/builds.js',    'x, y, id: the rain put an open fire out (docs/WEATHER.md; online: the server\'s word)', 'campfires (a hiss of steam)'],
   // natural lightning (features/thunder.js, docs/WEATHER.md; online the server aims and strikes: these come from its word). A build
   // that wants the charge (a lightning rod) listens to thunder.strike and adds its kind to content/thunder.js STRIKE
+  'ice.crack':          ['features/ice.js',       'x, y, k (0..1: how near he is to going through): the thin ice cracks under him', 'audio (later)'],
+  'ice.break':          ['features/ice.js',       'x, y: he went through the ice', 'audio (later)'],
+  'ice.out':            ['features/ice.js',       'x, y: he climbed out of the ice', 'audio (later)'],
+  'ice.hole':           ['features/ice.js',       'x, y, broke (a hole opened: cut with a pick or an axe, or broken through)', 'audio (later)'],
+  'ice.sing':           ['features/ice.js',       'x, y (the lake): the ice sings on a cold clear night', 'audio (later)'],
+  'snow.throw':         ['features/winter.js',    'x, y, z (he threw a snowball)', 'audio (later)'],
+  'snow.hit':           ['features/winter.js',    'x, y, z, id (a snowball hit him; id: his)', 'audio (later)'],
   'thunder.mark':       ['features/thunder.js',   'x, y, h, kind (tree | tor | ground | player), id (the tree\'s fid, the player\'s id), tele (s to the strike)', 'thunder (view)'],
   'thunder.strike':     ['features/thunder.js',   'x, y, h, kind, id (what it hit), k (how strong 0..1: 1 at the heart), you (it hit you)', 'thunder (view), audio'],
   'tree.burn':          ['features/thunder.js',   'x, y, id (a tree caught: a strike, a neighbour, a brand)', 'thunder (view)'],
@@ -118,6 +125,7 @@ export const EVENTS = {
   'gear.wear':          ['features/gear.js',      'x, y, ids (the set worn now, content/gear.js SLOTS order), kg, armor, speed (its numbers: setStats)', '(none yet)'],
   // fishing (features/fishing.js, docs/FISHING.md): the cast, the wait, the bite, the fight, the catch
   'fish.cast':          ['features/fishing.js', 'x, y (him), tx, ty (where the bobber goes), perfect (let go at the top of the meter), k (the charge 0..1)', 'audio'],
+  'fish.jig':           ['features/fishing.js', 'x, y (the hole): a lift of the rod, jigging through the ice (docs/WINTER.md)', 'fishing (view)'],
   'fish.plop':          ['features/fishing.js', 'x, y (the bobber lands on water)', 'fishing (view), audio'],
   'fish.snag':          ['features/fishing.js', 'x, y (the cast fell on land: it comes back in)', 'audio'],
   'fish.nibble':        ['features/fishing.js', 'x, y (a nibble dips the bobber: no strike yet)', 'fishing (view), audio'],

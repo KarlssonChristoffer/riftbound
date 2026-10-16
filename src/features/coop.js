@@ -106,7 +106,7 @@ export async function create(host) {
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'ignite' || a === 'wood') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'ignite' || a === 'wood' || a === 'hole') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }
@@ -121,6 +121,7 @@ export async function create(host) {
     get online() { return C.status === 'online'; },
     wear(ids) { if (C.status !== 'online') return false; C.wear(ids); return true; },   // (features/gear.js: ask for a set)
     fish(o) { if (C.status !== 'online') return false; C.fish(o); return true; },       // (features/fishing.js: the server rolls the catch)
+    snow(o) { if (C.status !== 'online') return false; C.snow(o); return true; },       // (features/winter.js: his snowball hit a friend; the server tells everyone)
     mail, clockNow,
     // a friend's lit lantern in the cave within r m of (x, y) (their latest snapshot: features/mining.js's night veins hide from it)
     litNear(x, y, r) {
@@ -142,7 +143,7 @@ export async function create(host) {
           const want = flags.get('time');   // (dev: a ?time= asks the server's clock for it, once)
           if (want && !askedTime) { askedTime = true; C.act('time', want); }
         }
-        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world' || m.k === 'bolt') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
+        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world' || m.k === 'bolt' || m.k === 'snow') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
