@@ -8,18 +8,21 @@
 // CO-OP (features/coop.js, server/room.mjs, docs/MULTIPLAYER.md): the server's word comes in coop.mail ({k: 'world', id: 'b' + n,
 // s: built | stoked | gone, kind, x, y, by, fuel, t0}); a build is paid for when the server says it stands (by: him), a log when it
 // says it burns. The fires' clock online is the server's (C.serverNow), offline this feature's own (the sim's seconds).
-// OWNS: the builds (their entities: props of kind content/builds.js prop), their meshes, the lamps' light records, the saved part
+// THE SHARED POT: a fire's pot (b.pot: content/builds.js POT) is kept here, offline at once (not saved), online the server's
+// (act 'pot' / 'spoon'; world s pot | spoon | potgone). features/cooking.js puts it on (F.pot), features/campfires.js's E takes a
+// spoon (F.spoon) and draws it; the spoon is eaten through features/meals.js (spoon).
+// OWNS: the builds (their entities: props of kind content/builds.js prop), their meshes, the lamps' light records, the pots, the saved part
 //   (pack.store('builds'): {n, list: [{id, kind, x, y, fuel}]}), the recipes of the group Build.
 // READS: content/builds.js, pack (the pouch, the store), coop (online, act, mail, net), host.entities (near: room), host.elev,
-//   host.blocked, host.inStream. EMITS: build.add, build.remove.
+//   host.blocked, host.inStream. EMITS: build.add, build.remove, pot.set, pot.spoon.
 // API: F.list (id -> build {id, kind, def, x, y, z, by, fuel, t0, p}), F.now() (the fires' clock, s), F.fire(b) -> {fuel, ember}
 //   (s left), F.stoke(b) -> '' | why not (a log on a fire), F.mine(b), F.ver (changes with the list). F.shining(out) -> out [{x, y}]:
 //   where a lamp stands or a fire burns now (the cave's soot things keep away, a night vein hides: features/cavelife.js, mining.js);
-//   F.shineNear(x, y, r): one within r m
+//   F.shineNear(x, y, r): one within r m. F.pot(b, dish, q, cost) -> bool, F.spoon(b) -> '' | why not, F.hasPot(b), F.hadSpoon(b)
 // BUDGET: sim: the mail (a few messages), a save every 5 s while a fire burns. View: a mesh per build made once; the lamps'
 //   lights (a record each, reused).
 import * as THREE from 'three';
-import {BUILDS, TUNE, fuelAt, emberAt, stokeFuel} from '../content/builds.js';
+import {BUILDS, TUNE, POT, fuelAt, emberAt, stokeFuel, potOpen} from '../content/builds.js';
 import {ITEMS} from '../content/items.js';
 import {flags} from '../core/flags.js';
 import {propTop} from '../world/world.js';
@@ -126,13 +129,55 @@ export async function create(host) {
     for (const k in b.def.cost) pack()?.give(k, b.def.cost[k], {x: b.x, y: b.y, h: 1.2});
     drop(b.id); host.events.push({type: 'build.remove', x: b.x, y: b.y, id: b.id, kind: b.kind}); save();
   }
+  // ---------------------------------------------------------------- THE SHARED POT (content/builds.js POT) on a fire
+  // b.pot {dish, q, left, t0, took: [player ids], by}: offline this feature's (not saved: it lasts minutes), online the server's
+  // word. pend: a pot asked for online, its food given back if the server says no
+  let pend = null, potT = 0;
+  const hasPot = b => !!b?.def.fire && potOpen(b, now(), b.def);
+  const hadSpoon = b => !!b.pot?.took.includes(me());
+  const potOf = o => ({dish: String(o.dish), q: String(o.q), left: +o.left || 0, t0: +o.t0 || 0, took: Array.isArray(o.took) ? o.took.slice() : [], by: o.by});
+  // the slow game's end (features/cooking.js): the dish at its quality goes on the fire; cost: what was paid (online: back on a no)
+  function pot(b, dish, q, cost) {
+    if (!b?.def.fire || hasPot(b)) return false;
+    if (online()) { pend = {id: b.id, cost}; coop().act('pot', b.id, {dish, q}); return true; }
+    if (!(fuelAt(b, T) > 0)) return false;
+    b.pot = {dish, q, left: POT.spoons, t0: T, took: [], by: 0}; potSet(b, true);
+    return true;
+  }
+  function potSet(b, mine) {
+    host.events.push({type: 'pot.set', x: b.x, y: b.y, id: b.id, dish: b.pot.dish, q: b.pot.q, mine});
+    if (mine) ui()?.float(b.x, b.y, 1.6, 'a pot for four', '#ffb060');
+  }
+  // E by a fire with a pot: a spoon ('' taken or asked; else why not)
+  function spoon(b) {
+    if (!hasPot(b)) return 'no pot';
+    if (hadSpoon(b)) return 'you had yours';
+    if (online()) { coop().act('spoon', b.id); return ''; }
+    b.pot.took.push(0); b.pot.left--; spooned(b, true);
+    if (b.pot.left <= 0) b.pot = null;
+    return '';
+  }
+  function spooned(b, mine) {
+    host.events.push({type: 'pot.spoon', x: b.x, y: b.y, id: b.id, mine});
+    if (mine) host.feature('meals')?.spoon(b.pot.dish, b.pot.q);
+  }
   // co-op: the server's word on a build
   function mail(m) {
+    if (m.k === 'deny' && m.a === 'pot' && pend?.id === m.id) { for (const k in pend.cost) pack()?.give(k, pend.cost[k]); pend = null; return; }
     if (m.k !== 'world' || typeof m.id !== 'string' || m.id[0] !== 'b') return;
     const mine = m.by === me() && !m.late;
+    if (m.s === 'pot' || m.s === 'spoon' || m.s === 'potgone') {
+      const b = list.get(m.id); if (!b) return;
+      if (m.s === 'potgone') { b.pot = null; return; }
+      if (m.s === 'pot') { b.pot = potOf(m.pot || {}); if (mine) pend = null; potSet(b, mine); return; }
+      if (!b.pot) return;
+      b.pot.left = +m.left || 0; b.pot.took.push(m.by); spooned(b, mine);
+      return;
+    }
     if (m.s === 'built') {
       const def = BUILDS[m.kind]; if (!def) return;
       const b = add(m.id, m.kind, +m.x, +m.y, m.by, +m.fuel || 0, +m.t0 || 0); if (!b) return;
+      if (m.pot) b.pot = potOf(m.pot);   // (a late joiner: a pot on it)
       if (mine) for (const k in def.cost) pack()?.take(k, def.cost[k]);
       if (!m.late) placed(b, mine);
     } else if (m.s === 'stoked') {
@@ -210,6 +255,7 @@ export async function create(host) {
     },
     shineNear(x, y, r) { const t = now(); for (const b of list.values()) if ((b.def.lamp || (b.def.fire && fuelAt(b, t) > 0)) && Math.hypot(b.x - x, b.y - y) < r) return true; return false; },
     stoke, mine: b => b.by === me(),
+    pot, spoon, hasPot, hadSpoon,
     check: kind => { const d = BUILDS[kind]; return d && spot(d) ? '' : why; },   // (tests: '' = it can go down ahead of him)
     update(dt, evs) {
       T += dt;
@@ -225,6 +271,7 @@ export async function create(host) {
       if (!on) return;
       for (let k = 0; k < evs.length; k++) if (evs[k].type === 'pack.reset' && !ol) clear();
       const c = coop(); if (ol && c.mail) for (let k = 0; k < c.mail.length; k++) mail(c.mail[k]);
+      if (!ol && (potT += dt) > 1) { potT = 0; for (const b of list.values()) if (b.pot && !potOpen(b, T, b.def)) b.pot = null; }   // (offline: a pot's end)
       if (!ol && (saveT += dt) > 5) { saveT = 0; for (const b of list.values()) if (b.def.fire && fuelAt(b, T) > 0) { save(); break; } }
     },
     interact(p) {

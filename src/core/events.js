@@ -213,6 +213,8 @@ export const EVENTS = {
   'cook.pull':          ['features/cooking.js',   'x, y, id, q (raw | done | right | burnt): pulled out of the fire (meals eats it: meal.cook)', 'audio'],
   'cook.drop':          ['features/cooking.js',   'x, y, id: left on too long, it fell into the fire', 'audio'],
   'meal.cook':          ['features/meals.js',     'x, y, id (content/meals.js), q (raw | done | right | burnt: features/cooking.js\'s stick): a meal cooked by a campfire and eaten: its mood starts', 'audio'],
+  'pot.set':            ['features/builds.js',    'x, y (the fire), id (its build), dish, q, mine: a shared pot went on a fire (four spoons)', 'audio'],
+  'pot.spoon':          ['features/builds.js',    'x, y (the fire), id, mine: someone took a spoon from its pot (mine: he eats it: features/meals.js spoon)', 'audio'],
   'meal.hic':           ['features/meals.js',     'x, y: a hiccup (something odd eaten off the Try stick; view/livehero.js hops on its own count, meals F.hicN)', 'audio'],
   // foraging (features/forage.js, docs/FORAGING.md): a patch is the forest floor's (world/forest.js F.decor index i)
   'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],

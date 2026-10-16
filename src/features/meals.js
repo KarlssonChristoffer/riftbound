@@ -8,7 +8,9 @@
 // down in the sim; the chip at the bottom left (HD, the pixel UI) shows the meal and its time while the pack's panel is shut.
 // FOUND RECIPES: the Cook list shows only the dishes he knows (store().known: Fish on a stick in a new world); the rest are found on
 // the TRY STICK (the Cook journal section: up to 3 kinds of food, 6 in all, over the fire: what covers a dish's need with nothing
-// over is that dish, learned; anything else is something odd, 30 s of hiccups) or by eating from a friend's pot. The COOK JOURNAL
+// over is that dish, learned; anything else is something odd, 30 s of hiccups) or by eating from a friend's pot. THE SHARED POT:
+// the Cook list's first row switches to a pot for four (need x2, the slow game on a fire with no pot; features/builds.js keeps it,
+// E by the fire takes a spoon: features/campfires.js). The COOK JOURNAL
 // (pack.section 'cook') shows every dish: found ones with how often cooked and marks for just right and burnt, the rest as dark
 // shapes with their hint (content/meals.js).
 // A meal with trip: true (the fly agaric broth) is drunk, not eaten: features/trip.js starts (the meal eaten stays; burnt: the still).
@@ -25,7 +27,8 @@
 // EMITS: meal.cook, meal.hic. API: F.id (the meal eaten, '' none), F.q (its quality), F.code (what friends are told), F.eyes (burnt eel: his
 //   eyes shine; the soot things take them for a lantern: features/cavelife.js, coop's lt), F.left (s), F.ver() (changes as the
 //   panel's words would), F.note(esc) -> the panel's line about it ('' none), F.eat(id, q?, t?) (cooking, tests, dev),
-//   F.moods (on), F.cooked(id, q) (off the stick or a pot: learned, written in the journal, eaten), F.odd() (hiccups), F.hicN
+//   F.moods (on), F.cooked(id, q) (off the stick: learned, written in the journal, eaten), F.potDone(id, q) (a pot he cooked: the
+//   journal), F.spoon(id, q) (a spoon from any pot: learned, eaten: features/builds.js), F.odd() (hiccups), F.hicN
 //   (hiccups so far: view/livehero.js hops), F.knows(id).
 // BUDGET: sim: a compare a step (a save every 5 s while one lasts); view: a pooled puff or two a step while a mood shows (<= 160
 //   points), two points a shining pair of eyes; HD: one frame and a line of pixel text while one lasts.
@@ -36,6 +39,7 @@ import {flags} from '../core/flags.js';
 import {hdUnit, hdFont, hdFrame, hdText} from '../ui/hdpixel.js';
 import {iconURL} from '../ui/packpanel.js';
 import {mulberry32, simSeed} from '../core/rng.js';
+import {POT} from '../content/builds.js';
 
 const ON = flags.get('pack') !== '0';
 const MOODS = flags.get('moods') !== '0';
@@ -84,23 +88,34 @@ export async function create(host) {
     if (MOODS) ui()?.float(P.x, P.y, P.z + 2.1, nameOf(m, qq) + (qq === 'right' ? '!' : ''), qq === 'burnt' ? '#a8b0b8' : qq === 'raw' ? '#d8c890' : '#ffb060');
     else ui()?.toast(M.name, M.say + (had && had !== m ? ` (instead of the ${MEALS[had].name.toLowerCase()})` : ''), '#ffb060');
   }
-  const RECIPES = [];
+  // THE SHARED POT (content/builds.js POT): the Cook list's first row switches the dishes between the stick and a pot for four (the
+  // need x POT.mul, the slow game: features/cooking.js), on a burning fire within COOK_R m that has no pot on it
+  let potMode = false;
+  const builds = () => host.feature('builds');
+  const potFire = () => { const P = host.player, b = host.feature('campfires')?.burningAt?.(P.x, P.y, COOK_R); return b && !builds()?.hasPot?.(b) ? b : null; };
+  const RECIPES = [{id: 'meal.pot', group: 'Cook', shown: () => MOODS && !!cooking()?.game,
+    get name() { return potMode ? 'In a pot for four (click: on a stick)' : 'On a stick (click: in a pot for four)'; },
+    desc: `A pot takes twice the food and longer over the fire, then gives ${POT.spoons} spoons: one each, E by the fire.`,
+    can: () => '', run() { potMode = !potMode; }}];
   for (const m in MEALS) {
-    const M = MEALS[m];
-    RECIPES.push({id: 'meal.' + m, name: M.name, group: 'Cook', shown: () => knows(m),
-      get cost() { return costOf(M.need); },
+    const M = MEALS[m], NEED2 = M.need.map(q => ({ids: q.ids, n: q.n * POT.mul}));
+    const need = () => potMode && MOODS && cooking()?.game ? NEED2 : M.need;
+    RECIPES.push({id: 'meal.' + m, get name() { return potMode && MOODS && cooking()?.game ? M.name + ', a pot' : M.name; }, group: 'Cook', shown: () => knows(m),
+      get cost() { return costOf(need()); },
       desc: MOODS ? `${M.words}. Needs ${needWords(M.need)}, cooked over a burning campfire.`
         : `${M.say}${M.trip ? '' : `, for ${Math.round(M.dur / 60)} min`}. Needs ${needWords(M.need)}, cooked by a burning campfire.`,
       can() {
         if (!active()) return 'only in the open world';
         if (M.trip && !host.feature('trip')?.on) return 'not now';
         if (cooking()?.busy) return 'something is on the stick';
-        if (short(costOf(M.need))) return `needs ${needWords(M.need)}`;
+        if (short(costOf(need()))) return `needs ${needWords(need())}`;
+        if (need() === NEED2) return potFire() ? '' : fireNear() ? 'a pot is on that fire' : 'by a burning campfire';
         return fireNear() ? '' : 'cook it by a burning campfire';
       },
       run() {
-        const c = costOf(M.need); if (short(c)) return;
+        const c = costOf(need()); if (short(c)) return;
         const ck = cooking();
+        if (need() === NEED2) { const b = potFire(); if (b && ck.start(m, {pot: b, cost: c})) { for (const k in c) pack().take(k, c[k]); pack()?.close?.(); } return; }   // THE POT
         if (ck?.game) { if (ck.start(m)) { for (const k in c) pack().take(k, c[k]); pack()?.close?.(); } return; }   // THE STICK: paid when it goes over the fire
         for (const k in c) pack().take(k, c[k]);
         serve(m, 'done');
@@ -122,12 +137,19 @@ export async function create(host) {
     s.known[m] = 1; jV++; pack()?.dirty();
     ui()?.toast('A new dish', MEALS[m].name, '#ffb060');
   }
-  // a dish off the stick (or a pot's spoon): learned if new, written in the journal, eaten
+  // a dish off the stick: learned if new, written in the journal, eaten
   function cooked(m, qq) {
     const s = book();
     if (s) { learn(m); const L = s.log[m] ??= {n: 0}; L.n++; if (qq === 'burnt') L.b = 1; if (qq === 'right') L.r = 1; jV++; pack()?.dirty(); }
     serve(m, qq);
   }
+  // a pot he cooked (written in the journal; eaten by the spoon like everyone's), a spoon from any pot (learned, eaten)
+  function potDone(m, qq) {
+    const s = book(); if (!s) return;
+    learn(m); const L = s.log[m] ??= {n: 0}; L.n++; if (qq === 'burnt') L.b = 1; if (qq === 'right') L.r = 1; jV++; pack()?.dirty();
+  }
+  function spoon(m, qq) { if (!MEALS[m]) return; if (MOODS) learn(m); serve(m, QS.includes(qq) ? qq : 'done'); }
+  const QS = ['raw', 'done', 'right', 'burnt'];
   // THE TRY STICK: picks (the panel's clicks, carried out in the sim step) of up to TRY.kinds kinds, TRY.items in all
   const PICK = {};
   const pickKinds = () => { let k = 0; for (const i in PICK) k++; return k; };
@@ -273,6 +295,8 @@ export async function create(host) {
     ver: () => id ? Math.ceil(left / 60) * 4 + ['raw', 'done', 'right', 'burnt'].indexOf(q) : 0,
     note: esc => id ? `<div class="p-note">Eaten: ${esc(nameOf(id, q))}, ${Math.ceil(left / 60)} min left (${esc(MOODS ? MEALS[id].words : MEALS[id].say)})</div>` : '',
     cooked(m, qq = 'done') { if (MEALS[m]) cooked(m, qq); },
+    potDone(m, qq = 'done') { if (MEALS[m]) potDone(m, qq); },
+    spoon,
     odd,
     get hicN() { return hicN; }, get hic() { return hic > 0; },
     knows,

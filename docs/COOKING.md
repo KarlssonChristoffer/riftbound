@@ -1,6 +1,6 @@
 # Cooking: meals that change how you play
 
-Status: 2026-10-16, slices 0-3 of the brief "Mat som ändrar hur du spelar" (`/mnt/project-files/briefs/meals-that-play.md`).
+Status: 2026-10-16, slices 0-4 of the brief "Mat som ändrar hur du spelar" (`/mnt/project-files/briefs/meals-that-play.md`).
 This file says what the game does now. Ideas for later live in the brief and the notes doc, not here.
 
 ## The stick
@@ -42,12 +42,26 @@ A new world knows one dish, **Fish on a stick**; the Cook list shows only the di
   - If what's on the stick covers a dish's ingredients with nothing over, you cook that dish (all of it is used) and learn it.
   - Anything else is **something odd**: you eat it at once, one of each kind is used up, and you get 30 s of hiccups (a little
     hop and a gulp every 1.4-3.2 s; friends see the hop). Nothing else; the meal you have stays.
-- A dish eaten from a friend's pot is learned too (slice 4).
+- A dish eaten from a friend's pot is learned too.
 - A world saved before this knows Fish on a stick and the meal it had.
 
 **The Cook journal** shows every dish: the ones you know with how often you cooked them, a gold mark once you had it just right
 and a black mark once you burnt it; the rest as dark shapes, their hint when you point at them ("something golden from under the
 spruces, fried").
+
+## The shared pot
+
+The first row of the Cook list switches between **on a stick** and **in a pot for four**. In a pot a dish costs twice its
+ingredients, and it needs a burning campfire or Stone Fire Ring within 2.5 m that has no pot on it.
+
+- An iron pot hangs from a tripod over the flames and the same game runs, slower: 8 s to just right, done within +/- 0.6 s,
+  just right within +/- 0.2 s, and it falls in 5 s past its time. **E** takes it off.
+- Taken off, the pot stays on the fire, steaming, with **4 spoons**. Anyone (the cook too) takes one with **E** by the fire
+  ("E  a spoon of pike stew (3 left)"); one each. Each spoon is that dish at the pot's quality: a burnt pot is burnt for
+  everyone. A spoon of a dish you didn't know teaches it to you.
+- The pot is gone when the spoons run out, when the fire goes cold (no wood and no embers), or 10 min after it was done.
+- The cook's journal counts the pot as one dish cooked.
+- Alone, a pot only feeds you once: it's made for friends.
 
 ## The moods
 
@@ -76,6 +90,8 @@ One meal at a time (a new one replaces it; the broth's trip stacks on top). Ever
 | dishes known in a new world | Fish on a stick | `content/meals.js` KNOWN |
 | the Try stick: kinds, pieces, cook time, hiccups (s, every s) | 3, 6, 3 s, 30 s every 1.4-3.2 s | `content/meals.js` TRY |
 | the hiccup's hop and head jerk | 5 cm, .22 s, 9 deg | `view/livehero.js` HIC |
+| the pot: food x, cook time, done / just right windows, drop, spoons, reach, life | x2, 8 s, +/- 0.6 / 0.2 s, +5 s, 4, 2.5 m, 10 min | `content/builds.js` POT |
+| the pot's look: tripod, iron, steam | | `features/campfires.js` POTL |
 | the stick: fire reach, the food's colours, the sizzle | 2.5 m | `features/cooking.js` STICK |
 | the fire's flare | 0.7 s, flame x1.6, light x1.5 | `features/campfires.js` FLARE |
 | the ringing pick: reach, delay | 14 m, 40 ms a metre | `content/mining.js` RING |
@@ -102,7 +118,10 @@ Esc > Sandbox:
 - A burnt eel's shining eyes go to the server as `lt: 2`: the soot things take it for a lantern; night veins don't.
 - A hand grab asks the server (`fish` `grab`), which checks the meal codes (your lingon, or a friend's burnt one within
   15 m) and that you're standing where you say, then rolls the fish and tells everyone.
-- The stick is your own; nobody else sees it.
+- The stick is your own; nobody else sees it. So is the pot's slow game: friends see the pot once it's done.
+- The pot is the server's (acts `pot` and `spoon` on the fire's build, `server/room.mjs`): it checks the fire burns, that
+  there's no pot on it, a spoon each, and ends the pot when the fire is cold or its time is up. If the server says no to a
+  pot (someone was quicker), its food comes back. A late joiner sees the pot in the welcome.
 
 ## Code
 
@@ -110,11 +129,13 @@ Esc > Sandbox:
   parseCode / loudOf.
 - `src/features/meals.js`: the Cook list, eating a meal at a quality, the chip, what shows of a mood (dust, smoke, eye
   shine, the glowing prints).
-- `src/features/cooking.js`: the stick (also the Try stick's something odd).
+- `src/features/cooking.js`: the stick (also the Try stick's something odd and the pot's slow game).
+- The pot: `content/builds.js` (POT, potOpen), `features/builds.js` (keeps it on the fire: pot, spoon), `features/campfires.js`
+  (draws it, E takes a spoon), `server/room.mjs` (acts pot, spoon).
 - The pack panel's hooks (`ui/packpanel.js`): a recipe's `shown()` (the Cook list's unknown dishes) and a section's `click()`
   (the Cook journal's Try stick).
 - Each mood's owner: `features/mining.js` (mine.ring), `render/lighting.js` (light.nightEye), `features/fishing.js`
   (fish.come; the shadows), `sim/player/player.js` + `adapter.js` (player.turn, player.knock, player.current),
   `features/fauna.js` (fauna.loud), `features/trip.js` (the still), `features/prints.js` (the prints, the weather build's).
 
-Not yet (later slices): the shared pot, moods for the four other fishing meals.
+Not yet: moods for the four other fishing meals (ideas in the brief).

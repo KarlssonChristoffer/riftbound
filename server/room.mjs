@@ -19,10 +19,10 @@
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
 import {CATCHES, WATERS, BAITS, SPOT, COME, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
-import {mealNotes, parseCode, codeOf} from '../src/content/meals.js';
+import {mealNotes, parseCode, codeOf, MEALS, QUALITIES} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
-import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
+import {BUILDS, TUNE as BUILD, POT, fuelAt, stokeFuel, potOpen} from '../src/content/builds.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
@@ -104,7 +104,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     }
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
-    if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
+    if (a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon') return build(p, a, m, id, t, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -177,7 +177,11 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   // everyone ({k: 'world', id, s: 'built', kind, x, y, by, fuel, t0}); a fire's fuel burns on this server's clock (s: t0), a log
   // on it ({a: 'stoke', id}) is told the same way (s: 'stoked', fuel, t0, by); one's own lamp taken back ({a: 'unbuild', id}):
   // s 'gone'. Builds stay for the room's life; a late joiner gets them in the welcome. The pouch is the client's (it pays when
-  // it hears its build stands)
+  // it hears its build stands).
+  // THE SHARED POT (content/builds.js POT): its cook plays the slow game on his client and puts it on a burning fire with no pot
+  // ({a: 'pot', id: the fire, dish, q}: paid on his side when it went over; a deny gives it back): s 'pot' with the fire's pot
+  // {dish, q, left, t0, took}. A spoon ({a: 'spoon', id}): one a player while there are spoons: s 'spoon', by, left (the eater eats
+  // it). The pot goes (s 'potgone') with its last spoon, when its fire is cold or POT.life s after (the tick)
   let nextB = 1;
   const secs = () => now() / 1000;
   function build(p, a, m, id, t, deny) {
@@ -193,6 +197,22 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const e = world.get(id); if (!e || e.s !== 'built') return deny('no such build');
     const def = BUILDS[e.kind];
     if (Math.hypot(e.x - p.x, e.y - p.y) > BUILD.reach) return deny('too far');
+    if (a === 'pot') {
+      const dish = str(m.dish, 32), q = str(m.q, 8);
+      if (!def.fire || !(fuelAt(e, secs()) > 0)) return deny('not burning');
+      if (!MEALS[dish] || !QUALITIES.includes(q)) return deny('no such dish');
+      if (potOpen(e, secs(), def)) return deny('a pot is on it');
+      e.pot = {dish, q, left: POT.spoons, t0: +secs().toFixed(3), took: [], by: p.id};
+      all({k: 'world', id, s: 'pot', pot: e.pot, by: p.id}); log(`  ${p.name} put a pot of ${dish} (${q}) on ${id}`); return;
+    }
+    if (a === 'spoon') {
+      if (!potOpen(e, secs(), def)) return deny('no pot');
+      if (e.pot.took.includes(p.id)) return deny('had one');
+      e.pot.took.push(p.id); e.pot.left--;
+      all({k: 'world', id, s: 'spoon', by: p.id, left: e.pot.left});
+      if (e.pot.left <= 0) { delete e.pot; all({k: 'world', id, s: 'potgone'}); }
+      return;
+    }
     if (a === 'stoke') {
       if (!def.fire) return deny('not a fire');
       const left = fuelAt(e, secs()); if (left >= (def.fire.max - .5) * def.fire.log) return deny('full');
@@ -207,6 +227,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if ((growT += dt) < 1) return;
     growT = 0; const h = clock();
     for (const [id, s] of world) if (s.at !== undefined && h >= s.at) { world.delete(id); all({k: 'world', id, s: 'grown'}); }
+    const sec = secs();   // (pots: gone when their fire is cold or their time is up)
+    for (const [id, s] of world) if (s.pot && !potOpen(s, sec, BUILDS[s.kind])) { delete s.pot; all({k: 'world', id, s: 'potgone'}); }
   }
 
   // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:

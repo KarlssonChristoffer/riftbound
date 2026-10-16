@@ -1,6 +1,6 @@
 // BUILDS (data; docs/BUILDING.md): the things a player sets down in the persistent world from the pack panel's Build list. Pure
 // data and pure rules: the browser (features/builds.js: placing, the save, the lamps; features/campfires.js: the fires) and the
-// co-op server (server/room.mjs act 'build', 'stoke', 'unbuild') read this one file.
+// co-op server (server/room.mjs act 'build', 'stoke', 'unbuild', 'pot', 'spoon') read this one file.
 //   cost     {item: n} paid from the pouch (content/items.js)
 //   most     how many of it one player may have standing (a new one is refused past it)
 //   r        m: its collider; room: m kept clear round it when it goes down
@@ -30,3 +30,10 @@ export const fuelAt = (f, now) => Math.max(0, (f.fuel || 0) - Math.max(0, now - 
 export const emberAt = (f, now, def) => { const over = Math.max(0, now - (f.t0 || 0)) - (f.fuel || 0); return f.fuel > 0 && over > 0 ? Math.max(0, def.fire.embers - over) : 0; };
 // a log on a fire: its fuel now plus a log, held to max (s of fire)
 export const stokeFuel = (left, def) => Math.min(def.fire.max * def.fire.log, left + def.fire.log);
+// THE SHARED POT (docs/COOKING.md; features/cooking.js plays its slow game, features/builds.js keeps it on its fire, the server
+// online): a burning fire takes one pot. It costs a dish's need x `mul`; cooked over `t` s (done +/- `win`, just right +/- `right`,
+// it falls in `drop` s past t). It gives `spoons` spoons, one a player (E within `reach` m of the fire), each that dish at the pot's
+// quality. It's gone when the spoons run out, the fire goes cold (no fuel and no embers) or `life` s after it was done
+export const POT = {mul: 2, t: 8, win: .6, right: .2, drop: 5, spoons: 4, reach: 2.5, life: 600};
+// a fire's pot ({dish, q, left, t0, took: [player ids]}) still there at `now` (s, the fires' clock)? f: the fire's build
+export const potOpen = (f, now, def) => !!f.pot && f.pot.left > 0 && now - f.pot.t0 < POT.life && (fuelAt(f, now) > 0 || emberAt(f, now, def) > 0);

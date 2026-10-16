@@ -102,11 +102,12 @@ export async function create(host) {
   // features/forage.js asks for a patch ('pick', p: its id 'd' + decor index, o: {lvl}: his Foraging level); features/mining.js
   // sends a blow on a vein ('mine', p: 'v' + its index in the cave's plan, o: {pow, lvl, tier})
   // features/builds.js puts a build down ('build', p: its kind, o: {x, y}), adds a log to a fire ('stoke', p: the build's id) and
-  // takes its own lamp back ('unbuild', p: the id)
+  // takes its own lamp back ('unbuild', p: the id), puts a shared pot on a fire ('pot', p: the fire's id, o: {dish, q}) and takes
+  // a spoon from it ('spoon', p: the fire's id)
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }
@@ -144,7 +145,7 @@ export async function create(host) {
         }
         else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
-        else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
+        else if (m.k === 'deny') { say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`); if (m.a === 'pot') mail.push(m); }   // (a pot refused: features/builds.js gives its food back)
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
       }
       msgs.length = 0;
