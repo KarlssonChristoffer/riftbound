@@ -15,7 +15,7 @@
 //   P.get(key); P.grant(rec, skill, n) -> its new total; P.set(rec, skill, n) (a dev server's --dev); P.count(rec, name, n) ->
 //   the counter's new total; P.changed(); P.toJSON() (the keyed records: a key-less connection's is dropped with it); P.size
 //   a record: {key, xp: {skill: n}, n: {counter: n}, titles: [id], title: id | '', caught: {fish id: n}, t: ms of its last
-//   change, made: {uid: made-thing record} (the workshop's), imp: its XP imported yet (not saved)}
+//   change, made: Map uid -> made-thing record (the workshop's; saved as a plain object), imp: its XP imported yet (not saved)}
 //   The key: game/playerkey.js (localStorage rb.player.key, 32 hex), the hello's `key`; KEY_RE tells a real one
 import {CURVE, SKILLS as ALL_SKILLS} from '../src/content/skills.js';
 const needXP = L => Math.round(CURVE.k * Math.pow(L - 1, CURVE.p));   // (the workshop's copy: skill-verbs' content/skills.js exports it; take theirs on merge)
@@ -24,7 +24,7 @@ export const KEY_RE = /^[0-9a-f]{32}$/;
 
 export function createPlayers({SKILLS = ALL_SKILLS, importCap = 10, load = null, onChange = () => {}} = {}) {
   const recs = new Map();
-  const blank = key => ({key, xp: Object.fromEntries(Object.keys(SKILLS).map(id => [id, 0])), n: {}, titles: [], title: '', caught: {}, t: Date.now(), made: {}, imp: false});
+  const blank = key => ({key, xp: Object.fromEntries(Object.keys(SKILLS).map(id => [id, 0])), n: {}, titles: [], title: '', caught: {}, t: Date.now(), made: new Map(), imp: false});
   const changed = () => onChange();
   function clean(o, key) {   // a loaded record: only the known fields, numbers as numbers
     const r = blank(key);
@@ -33,7 +33,7 @@ export function createPlayers({SKILLS = ALL_SKILLS, importCap = 10, load = null,
     if (Array.isArray(o?.titles)) r.titles = o.titles.filter(t => typeof t === 'string' && t.length < 24).slice(0, 64);
     r.title = typeof o?.title === 'string' && r.titles.includes(o.title) ? o.title : '';
     for (const k in o?.caught || {}) if (k.length < 24) r.caught[k] = Math.max(0, +o.caught[k] | 0);
-    if (o?.made && typeof o.made === 'object') r.made = o.made;   // (the workshop's records: as written by this server's --data)
+    if (o?.made && typeof o.made === 'object') for (const u in o.made) r.made.set(isNaN(+u) ? u : +u, o.made[u]);   // (the workshop's records: as written by --data)
     r.t = +o?.t || Date.now(); r.imp = true;
     return r;
   }
@@ -70,6 +70,6 @@ export function createPlayers({SKILLS = ALL_SKILLS, importCap = 10, load = null,
       return rec.n[name];
     },
     changed,
-    toJSON() { const o = {}; for (const [k, r] of recs) if (KEY_RE.test(k)) { const {imp, ...keep} = r; o[k] = keep; } return o; },
+    toJSON() { const o = {}; for (const [k, r] of recs) if (KEY_RE.test(k)) { const {imp, made, ...keep} = r; o[k] = {...keep, made: Object.fromEntries(made)}; } return o; },
   };
 }

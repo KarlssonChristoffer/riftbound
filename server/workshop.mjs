@@ -39,13 +39,13 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
   function hello(p, m) {
     p.rec ??= players.of('#' + p.id);
     const M = p.rec.made, list = Array.isArray(m.made) ? m.made.slice(0, MAX_RECS) : [];
-    let n = 0; for (const o of list) { const r = cleanRec(o); if (r && !M[r.u]) { M[r.u] = r; n++; } }
+    let n = 0; for (const o of list) { const r = cleanRec(o); if (r && !M.has(r.u)) { M.set(r.u, r); n++; } }
     if (n) players.changed();
-    return Object.values(M);
+    return [...M.values()];
   }
   // what the tool in hand did (room.mjs: a felled tree ['fell'] or ['fell', 'oldoak'], a broken vein ['veins'] or ['veins', 'iron'])
   function count(p, u, ks) {
-    const r = typeof u === 'string' && u && p?.rec ? p.rec.made[u] : null; if (!r) return;
+    const r = typeof u === 'string' && u ? p?.rec?.made.get(u) : null; if (!r) return;
     for (const k of ks) countOn(r, k, day());
     dirty.set(r, p.rec.key); players.changed();
   }
@@ -62,7 +62,7 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
     const haft = S?.haft ? str(m.haft, 16) : ''; if (S?.haft && !WOODS[haft]) return deny('no haft');
     const u = 's' + Date.now().toString(36) + (nextU++).toString(36);
     const rec = mintRec(u, S ? S.item || S.gear : Hd.gear, p.name, day(), haft, !!S?.haft && m.inlay === 1, !!Hd);
-    p.rec.made[u] = rec; players.changed();
+    p.rec.made.set(u, rec); players.changed();
     send(p, {k: 'made', rec, ...(dev ? {dev: 1} : {})});
     log(`  ${p.name} made a ${rec.item}${haft ? ' (' + WOODS[haft].name + ' haft)' : ''}`);
   }
@@ -162,7 +162,7 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
   // CLOTHES: what a player may wear (room.mjs wear): a free piece, one his records are of, or anything with --wardrobe
   function owns(p, id) {
     if (wardrobe || freePiece(GEAR_BY_ID[id])) return true;
-    if (p?.rec) for (const u in p.rec.made) if (p.rec.made[u].item === id) return true;
+    if (p?.rec) for (const r of p.rec.made.values()) if (r.item === id) return true;
     return false;
   }
   return {ACTS: new Set(['make', 'load', 'pump', 'fit', 'take']), hello, act, count, tick, owns, cracked: id => world.get('k' + String(id).slice(1))?.s === 'cracked'};
