@@ -1119,13 +1119,13 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     if (geo) it.live = liveOf(it, geo, p.x, p.z || 0, p.y);
     else if (sp && (it.flora = floraOf(it, p))) it.sp = sp;   // (a 3D plant)
     else if (sp) { it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind), plant: plantOf(p)}); it.sp = sp; } else return null;
-    items.push(it); byProp.set(p, it); if (p.kind === 'tree') litterDirty = true; return it;
+    items.push(it); byProp.set(p, it); drawnDirty = true; if (p.kind === 'tree') litterDirty = true; return it;
   }
   // a prop that leaves the world for good (a killed enemy): its card / mesh go with it
   function removeItem(p) {
     const it = byProp.get(p); if (!it) return;
     it.live?.dispose(); it.card?.dispose(); it.yaw?.card?.dispose(); if (it.flora) for (const h of it.flora) flora.remove(h);
-    items.splice(items.indexOf(it), 1); byProp.delete(p); if (p.kind === 'tree') litterDirty = true;
+    items.splice(items.indexOf(it), 1); byProp.delete(p); drawnDirty = true; if (p.kind === 'tree') litterDirty = true;
   }
   // fallen leaves (LITTER): the trees as the bake wants them (a 3D tree's crown, rotated and scaled as it stands; a painted one's guess;
   // a dead tree none), and the bake itself. A tree that joined or left marks it dirty: update() bakes once before the next draw
@@ -1205,6 +1205,27 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // (a swaying tree casts into the per-frame sun shadow: its shadow is drawn while its chunk is within CHUNK_SM px of the view, a long
   // shadow's reach; further, its shadow mesh rests too: CV 2 = on screen, 1 = only its shadows near enough, 0 = neither)
   const CHUNK_UP = 9, CHUNK_M = 48, CHUNK_SM = 300, CV = FOREST ? new Uint8Array(FOREST.chunks.length) : null, CS = [0, 0, 0];
+  // DRAWN: the items update works (and contact.js stamps): every item but the forest's in a chunk off the view, in items' order. Made
+  // again only when a chunk's state or the items change (CV0: the chunks' states it was made for); the ones it leaves out are put
+  // to rest as it's made (their meshes out of the passes), so a frame's loop never visits the ~1700 off-screen forest items
+  const DRAWN = [], CV0 = CV ? new Uint8Array(CV.length).fill(255) : null;
+  let drawnDirty = true;
+  function makeDrawn() {
+    drawnDirty = false; clearArray(DRAWN);
+    for (const it of items) {
+      const p = it.p;
+      if (CV !== null && p.chunk !== undefined) {
+        const v = CV[p.chunk];
+        if (v < 2) {   // (off the view: its G-buffer mesh out; a swaying tree's shadow while it can reach the view)
+          const gm = it.live?.gm, sm = it.pose && !it.pose.rigid ? it.live?.sm : null, on = it.kvis !== false && v > 0;
+          if (sm && sm.visible !== on) sm.visible = on;
+          if (gm && gm.visible) gm.visible = false;
+          continue;
+        }
+      }
+      DRAWN.push(it);
+    }
+  }
   function chunksOnScreen() {
     const C = FOREST.chunk, VW = G.VW, VH = G.VH;
     for (let k = 0; k < CV.length; k++) {
@@ -1215,6 +1236,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         if (CS[0] < x0) x0 = CS[0]; if (CS[0] > x1) x1 = CS[0]; if (CS[1] < y0) y0 = CS[1]; if (CS[1] > y1) y1 = CS[1];
       }
       CV[k] = x1 > -CHUNK_M && x0 < VW + CHUNK_M && y1 > -CHUNK_M && y0 < VH + CHUNK_M ? 2 : x1 > -CHUNK_SM && x0 < VW + CHUNK_SM && y1 > -CHUNK_SM && y0 < VH + CHUNK_SM ? 1 : 0;
+      if (CV[k] !== CV0[k]) { CV0[k] = CV[k]; drawnDirty = true; }
     }
   }
   function update(yaw, pl) {
@@ -1223,13 +1245,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     clearArray(lights); for (const l of groundL) lights.push(l);
     const k0 = -Math.round(yaw / step);
     if (CV) chunksOnScreen();
-    for (const it of items) {
-      const p = it.p;
-      if (CV !== null && p.chunk !== undefined) {   // (a forest item: off screen it skips the rest, and its G-buffer mesh is taken out of the
-        const gm = it.live?.gm, sm = it.pose && !it.pose.rigid ? it.live?.sm : null;   // pass (three.js walks ~300 trees less a frame); a
-        const v = CV[p.chunk], show = it.kvis !== false;                                // swaying tree's shadow while it can reach the view
-        if (sm && sm.visible !== (show && v > 0)) sm.visible = show && v > 0;
-        if (v < 2) { if (gm && gm.visible) gm.visible = false; continue; }
+    if (drawnDirty) makeDrawn();
+    for (let i = 0; i < DRAWN.length; i++) {
+      const it = DRAWN[i], p = it.p;
+      if (CV !== null && p.chunk !== undefined) {   // (a forest item on the view (makeDrawn: the rest skip all this, their G-buffer mesh out of the
+        const gm = it.live?.gm, sm = it.pose && !it.pose.rigid ? it.live?.sm : null, show = it.kvis !== false;   // pass: three.js walks ~300 trees less a frame)
+        if (sm && sm.visible !== show) sm.visible = show;
         if (gm && !gm.visible && show) gm.visible = true;
       }
       const base = p.z || 0, z0 = base + (p.h || 0);
@@ -1297,6 +1318,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     // a forest prop whose chunk is off the view this frame (the last update's: world/forest.js chunks): per-frame passes over the items
     // skip it (features/contact.js)
     offView: p => CV !== null && p.chunk !== undefined && CV[p.chunk] < 2,
+    get drawn() { return DRAWN; },   // (read only) the items the last update worked: all but the forest's off the view (makeDrawn), in items' order
     // PULL a stone wall's broken top down (the lasso, docs/exp/brawl.md): the stretch round segment p's middle (w m along the run)
     // dh m lower, never under floor m, its stones fallen toward (px, py); the run is made again (walls3d.js pulls: every other
     // stone as it was) and the pieces that changed swap their geometry; their tops (topOfProp, vaultTop) follow -> false: not a

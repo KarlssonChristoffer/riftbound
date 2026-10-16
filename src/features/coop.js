@@ -42,7 +42,7 @@
 //   the look's.
 import {SESSION} from '../core/session.js';
 import {flags} from '../core/flags.js';
-import {TICK_HZ, packPose} from '../net/protocol.js';
+import {TICK_HZ, packPose, worldFlags} from '../net/protocol.js';
 import {wsTransport} from '../net/transport.js';
 import {createNetClient, b64} from '../net/client.js';
 import {createPeerLook} from './coop/look.js';
@@ -53,7 +53,7 @@ export const order = {after: ['equip', 'combat']};
 export async function create(host) {
   if (!SESSION.mp) return SESSION.error ? offline(host) : {name: 'coop', on: false, online: false, act: () => false, tag() {}};
   let name = flags.get('name') || ''; try { name ||= localStorage.getItem('rb.coop.name') || ''; } catch {}
-  const C = createNetClient({transport: wsTransport(SESSION.ws), name, hello: () => ({key: playerKey(), xp: host.feature('pack')?.skills?.toJSON() || {}, made: host.feature('workshop')?.records?.() || []})});
+  const C = createNetClient({transport: wsTransport(SESSION.ws), name, hello: () => ({wf: worldFlags(k => flags.get(k)), key: playerKey(), xp: host.feature('pack')?.skills?.toJSON() || {}, made: host.feature('workshop')?.records?.() || []})});
   const look = createPeerLook(host, C);
   const msgs = [], mail = [], WH = Math.PI * 2;
   // THE CLOCK: the server's last word {t: its ms, h, rate}; the page's env follows it
@@ -80,11 +80,19 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- sending: 20 times a second, after the frame's steps
   let sendT = 0, lastN = -1, lastRig = '', lastX = NaN, lastY = NaN, packed = null, sentW = null, pinged = 0;
-  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0, md: '', bd: 0, an: undefined};
+  let ngVer = -1, ng = false;   // (the Nightglass Lantern worn: 'light.nightglass', read again when the notes change)
+  const nightglass = () => { const m = host.mods; if (!m) return false; if (m.ver !== ngVer) { ngVer = m.ver; ng = m.value('light.nightglass', 0) > 0; } return ng; };
+  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0, md: '', bd: 0, an: undefined, sc: ''};
+  // his scene (the game's mode + the biome: the forest, a run's level): the server sends each scene's players to that scene only
+  let scMode = null, scBiome = null;
+  function scene() {
+    const mode = host.feature('game')?.mode || '', biome = host.biome?.id || '';
+    if (mode !== scMode || biome !== scBiome) { scMode = mode; scBiome = biome; ST.sc = mode + ':' + biome; }
+  }
   const LS = ['', 0, 0, 0, 0];
   function send(now) {
     if (C.status !== 'online' || now - sendT < 1000 / TICK_HZ) return;
-    sendT = now;
+    sendT = now; scene();
     const P = host.player, pp = host.playerPose?.() || null;
     ST.x = +P.x.toFixed(3); ST.y = +P.y.toFixed(3); ST.z = +(P.z - P.sink * 22 / host.PPMH).toFixed(3);   // (in the water, swimming: as sunk as the views draw him, 22 px per 1)
     ST.phi = +((pp ? pp.phi : P.faceAngle) % WH).toFixed(3); ST.s = P.state; ST.pose = P.frame || 'idle.0';
@@ -96,7 +104,7 @@ export async function create(host) {
     }
     ST.bd = host.feature('body')?.bits?.() ?? 0;   // (his body's look: wet, cold, sunk, knocked down; content/body.js packBody: friends see it, features/body.js)
     const cv = host.feature('caves'), ml = host.feature('meals');
-    ST.lt = cv?.lit || host.feature('workshop')?.torch ? 1 : ml?.eyes && cv?.down ? 2 : 0;   // (his lantern burns in the cave, or a lit pine haft: features/workshop.js; the server's soot things go for it, friends' night veins hide; 2: a burnt eel's eyes, only the soot things)
+    ST.lt = (cv?.lit && !nightglass()) || host.feature('workshop')?.torch ? 1 : ml?.eyes && cv?.down ? 2 : 0;   // (his lantern burns in the cave, or a lit pine haft: features/workshop.js; the server's soot things go for it, friends' night veins hide; 2: a burnt eel's eyes, only the soot things; a Nightglass Lantern's light is dark light, none of that: docs/ALMANAC.md)
     ST.md = ml?.code || '';   // (the meal in him: friends see its mood, content/meals.js)
     if (Math.hypot(ST.x - lastX, ST.y - lastY) > 4) ST.tp = 1;   // (a respawn, a teleport: the server lets that one through)
     lastX = ST.x; lastY = ST.y;
@@ -121,12 +129,13 @@ export async function create(host) {
   // takes a struck tree's thunderwood ('wood', p: its fid); features/workshop.js loads a furnace, pumps it, fits a bellows, takes a bar
   // ('load', 'pump', 'fit', 'take', p: the furnace's build id) and makes a thing ('make', p: the anvil's id). features/pack.js: the title
   // he wears ('title', p: its id, '' none) and a --dev server's Skills rows ('dev', p: next | reset | titles | notitles); docs/SKILLS.md
+  // features/wrongwx.js asks about the following cloud ('cloud', p: 'x' + the event, o: {w: ask | pass | lose, to})
   const tags = {};   // act -> [fn(p) -> its extra fields] (F.tag)
   const tagged = (a, p, o) => { const T = tags[a]; if (!T) return o; o = {...o}; for (const f of T) Object.assign(o, f(p)); return o; };
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon' || a === 'ignite' || a === 'wood' || a === 'hole' || a === 'load' || a === 'pump' || a === 'fit' || a === 'make' || a === 'take' || a === 'crystal' || a === 'title' || a === 'dev' || a === 'dig') { if (typeof p !== 'string') return false; C.act(a, p, tagged(a, p, o)); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'pot' || a === 'spoon' || a === 'ignite' || a === 'wood' || a === 'hole' || a === 'load' || a === 'pump' || a === 'fit' || a === 'make' || a === 'take' || a === 'crystal' || a === 'title' || a === 'dev' || a === 'dig' || a === 'cloud') { if (typeof p !== 'string') return false; C.act(a, p, tagged(a, p, o)); return true; }
     if (a === 'rope' || a === 'free' || a === 'calm' || a === 'find') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/rope.js)
     if (a === 'leave' || a === 'take' || a === 'den' || a === 'drop') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/foxden.js)
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;

@@ -30,7 +30,7 @@
 //   (x 0: no gang comes on its own; a request still does: the cheat panel's Raids, dev/cheats.js).
 // EMITS (pooled payloads, read in their step only: core/events.js): foe.draw / aim / shoot / reload / holster,
 //   bullet.impact, player.hit, player.hurt.
-import {mulberry32} from '../../core/rng.js';
+import {simRandom} from '../../core/rng.js';
 import {hypot2, hypot3, TAU} from '../../core/mathx.js';
 import {createNav} from '../../world/nav.js';
 import {PLAY, TRAIL, WORLD, elev, inStream, topOfProp, TERRAIN_ON} from '../../world/world.js';
@@ -48,7 +48,7 @@ const KINDS = Object.keys(TYPES);
 
 export function createFoesSim(host, {unarmed = false} = {}) {
   const ents = host.entities, P = host.player, events = host.events, A = TUNE.ai, SP = TUNE.spawn, U = unarmed ? SP.unarmed : null;
-  const R = mulberry32((Date.now() % 2147483646) + 1), RR = (a, b) => a + R() * (b - a);
+  const R = simRandom('foes'), RR = (a, b) => a + R() * (b - a);
   // the ground you can walk on (sim/player/adapter.js blocked: the fort's square and 3 m round it, the trail), minus the
   // canyon (the desert's hole south of its rim)
   const walkArea = (x, y) => ((x > PLAY.x0 - 2.6 && x < PLAY.x1 + 2.6 && y > PLAY.y0 - 2.6 && y < PLAY.y1 + 2.6)

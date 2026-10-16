@@ -17,7 +17,7 @@
 // then open http://localhost:8320/src/?mp=1 in two (or more) windows: everyone who opens it joins the same world.
 //   GET  /mp/session   {v, seed, players}: the world's seed, read by the page BEFORE it builds the world (core/session.js)
 //   WS   /mp           the room (room.mjs): join, state, acts, snapshots
-//   GET  anything else a file under the repo (no cache, like serve.py); --assets: a second root for files the repo doesn't
+//   GET  anything else a file under the repo's src/, concepts/, audio/, assets/ (no cache, like serve.py); --assets: a second root for files the repo doesn't
 //        have (the git-ignored renders in concepts/sprites/out and audio/forge/out when running from a git worktree)
 // No dependencies: node's http server + server/ws.mjs. The seed is random unless given (--seed or RIFT_SEED); it lives as long
 // as the process, so a restart is a new forest unless the seed is passed again.
@@ -77,7 +77,12 @@ const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
   '.bin': 'application/octet-stream', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8'};
 room.usePlan(plan);   // (the keepsakes' shelves: the dolls' open ground, docs/KEEPSAKES.md)
 
+// what it serves: the page's own folders only, never a dot-named one (.git, .env, .claude) nor the server's, the tools' or
+// tmp/ (a --data dir there holds the players' records)
+const SERVED = new Set(['src', 'concepts', 'audio', 'assets']);
+const servable = rel => { const seg = rel.split('/').filter(Boolean); return seg.length > 0 && SERVED.has(seg[0]) && !seg.some(x => x.startsWith('.')); };
 async function file(root, rel) {
+  if (!servable(rel)) return null;
   const p = path.resolve(root, '.' + rel);
   if (p !== root && !p.startsWith(root + path.sep)) return null;   // (no way out of the root)
   try { let s = await stat(p), q = p; if (s.isDirectory()) { q = path.join(p, 'index.html'); s = await stat(q); } return s.isFile() ? {data: await readFile(q), ext: path.extname(q).toLowerCase()} : null; }
@@ -85,8 +90,9 @@ async function file(root, rel) {
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x'), rel = decodeURIComponent(url.pathname);
-  const head = {'Cache-Control': 'no-store, must-revalidate', 'Access-Control-Allow-Origin': '*'};
-  if (rel === PATH + '/session') { res.writeHead(200, {...head, 'Content-Type': 'application/json'}); res.end(JSON.stringify({v: VERSION, seed, players: room.size})); return; }
+  const head = {'Cache-Control': 'no-store, must-revalidate'};
+  // (the session: a page served elsewhere may ask, so it alone is open to any origin)
+  if (rel === PATH + '/session') { res.writeHead(200, {...head, 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}); res.end(JSON.stringify({v: VERSION, seed, players: room.size})); return; }
   if (rel === '/') { res.writeHead(302, {Location: '/src/?mp=1'}); res.end(); return; }
   const f = await file(ROOT, rel) || (assets ? await file(path.resolve(assets), rel) : null);
   if (!f) { res.writeHead(404, head); res.end('not found'); return; }
