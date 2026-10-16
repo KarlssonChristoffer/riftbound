@@ -138,7 +138,7 @@ export const EVENTS = {
   'lasso.bump':         ['sim/player/lasso.js',   'x, y, z (a swing ran into a wall, a trunk, a cliff face)', 'equip (lasso), audio'],
   'lasso.cinch':        ['sim/player/lasso.js',   'x, y, z (the snare clip: the rope snapped down onto the legs of what he holds)', 'equip (lasso), audio'],
   'lasso.throw':        ['features/equip/lasso.js', 'x, y, h (the hand), at (enemy | prop | anchor | ground: what it goes for)', 'audio'],
-  'lasso.catch':        ['features/equip/lasso.js', 'x, y, h, what (enemy | prop | anchor), who (the body / prop, or the prop the anchor is on), cls (light | even | heavy | strong: its STRENGTH)', 'audio'],
+  'lasso.catch':        ['features/equip/lasso.js', 'x, y, h, what (enemy | prop | anchor | animal: the bag Lasso, features/rope.js), who (the body / prop, or the prop the anchor is on), cls (light | even | heavy | strong: its STRENGTH)', 'audio'],
   'lasso.miss':         ['features/equip/lasso.js', 'x, y, h (the loop lands on the ground)', 'audio'],
   'lasso.yank':         ['features/equip/lasso.js', 'x, y, who, ok (false: a strong one held against it), trip (it only tripped)', 'audio'],
   'lasso.slam':         ['features/equip/lasso.js', 'x, y, who (a yanked body comes down)', 'audio'],
@@ -155,6 +155,11 @@ export const EVENTS = {
   'rope.top':           ['sim/player/ropewall.js', 'x, y, z: up and over the lip onto the top', ''],
   'lasso.swish':        ['features/equip/lassolook.js (a view)', 'x, y (a turn of the loop overhead)', 'audio'],
   'lasso.creak':        ['features/equip/lassolook.js (a view)', 'x, y, k (the rope strains)', 'audio'],
+  // the forest's animals on the bag Lasso (features/rope.js, docs/FAUNA.md "The Lasso"): id = the animal's (world/fauna.js plan id)
+  'animal.lift':        ['features/rope.js',      'x, y, id (E: you pick the dazed hare up)', '(none yet)'],
+  'animal.brush':       ['features/rope.js',      'x, y, id (a dragged roe bursts through a bush or ferns: leaves fly)', 'rope (its view: the leaves)'],
+  'animal.tired':       ['features/rope.js',      'x, y, id (the dragged roe runs out of breath and stands)', '(none yet)'],
+  'animal.calm':        ['features/rope.js',      'x, y, id (E by the tired roe: the loop comes off, it lets you be for the day)', '(none yet)'],
   'combat.bowl':        ['features/combat/core.js, features/foes/sim.js', 'x, y, who, by (a flung or kicked body bowls another over: combat fling, a body thrown by sim/bodyfly.js)', 'audio'],
   // BRAWL (docs/exp/brawl.md): the live cowboys' boot, barge, lift and throw (sim/player/brawl.js: x, y in the view frame, turned by
   // the loop; features/brawl.js does what they do), bodies thrown by them (sim/bodyfly.js: combat's brutes, the gunmen), and the

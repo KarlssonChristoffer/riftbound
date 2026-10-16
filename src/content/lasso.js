@@ -100,7 +100,9 @@ export const HANDS = {grip: 'RopeHand0', upper: 'RopeHand1', fb: ['RightHand', '
 export const ROPE = ['#c8a876', '#9a7c50', '#6a5234'];
 // WEIGHT against your pull (TUNE.str): the yard's / a run's brute, an elite brute, a champion (boss), the desert's gunmen by
 // type (an elite type not listed: x `eliteK`), a movable prop
-export const WEIGHT = {brute: .65, elite: 1.7, boss: 3.4, gunman: {bandit: .7, bruiser: 1, sheriff: 1.3}, eliteK: 1.4, prop: .5};
+export const WEIGHT = {brute: .65, elite: 1.7, boss: 3.4, gunman: {bandit: .7, bruiser: 1, sheriff: 1.3}, eliteK: 1.4, prop: .5,
+  // the forest's animals (features/rope.js, the bag Lasso): a hare comes, a fox comes (and slips), a roe deer drags you
+  animal: {hare: .3, fox: .4, roe: 2.4}};
 // high things a loop drops over (their top, m): a prop of these kinds is an anchor (the 3D trees' limbs are too, and the
 // lasso's own: features/equip/anchors.js)
 export const ANCHOR_TOP = {gatepost: 2.85, tower: 3.9, pillar: 2.6, windmill: 4.9, water_tower: 4.1, signpost: 2.7};

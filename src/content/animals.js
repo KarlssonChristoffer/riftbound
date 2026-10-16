@@ -36,6 +36,7 @@ export const ROPE = {
     steer: 30,                      // deg A / D swing its line
     brush: .85,                     // x speed through bushes and ferns (a burst of leaves)
     stand: 6, calm: 1.5,            // s it stands blowing, head low; m: E within this calms it (for the rest of the in-game day)
+    snag: .9, knock: 5,             // m past the rope's give you're held back (a trunk, a rock): knocked flat at this m/s, the rope lost
   },
   peer: 20,          // Hz a held animal's place goes out in the holder's state message (an: [id, x, y, heading, mode])
 };

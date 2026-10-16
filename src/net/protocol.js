@@ -7,10 +7,14 @@
 //   st       {x, y, z, phi, s, pose, rig, w?, wn?, ls?, tp?}   the local player 20 times a second: world metres (x east, y south,
 //            z up), facing phi (rad, the arena's atan2(x, y)), s = his state (idle, move, roll, ...), pose = the frame drawn,
 //            rig = the live model he wears (gunslinger | outlaw | ''), w = the drawn pose's bones (encodePose) when it changed
-//            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport
+//            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport,
+//            an = the animal on his rope [id, x, y, heading, mode] or absent (features/rope.js; the server keeps it only while
+//            it's his claim: server/animals.mjs)
 //   act      {a, id}                                      ask the server to change the shared world: a 'fell' (id: a forest tree),
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
-//            dawn | day | dusk | night: dev, the world's clock to the next such hour)
+//            dawn | day | dusk | night: dev, the world's clock to the next such hour); the animals (server/animals.mjs):
+//            'rope' (id: the plan's animal id: claim it, first wins), 'free' {x, y, how}, 'calm' {at: the hour} (a roe), 'find'
+//            (id: 'fur:' + hare + ':' + day)
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
@@ -22,7 +26,7 @@
 //            peers = [peer], clock (below), unc = {sec: {id: {s, by, n}}, shift} (the uncanny forest: its secrets' states, the
 //            night shift's strength: docs/UNCANNY.md; null when the server runs without it)
 //   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn, g (the gear worn)}
-//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0], ...], c?}   every tick; w only when it changed since the last snap;
+//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0, lt, an|0], ...], c?}   every tick; w only when it changed since the last snap;
 //            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
 //   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it
@@ -30,7 +34,8 @@
 //            in-game hours since the start (sim/env.js E.t), going on at rate hours per ms (0: stopped). In welcome too
 //   sec      {id, s, by, n}                              a secret's state changed (sleeping / awake / triggered / spent), by =
 //            who opened it (ids), n = on which night
-//   ev       {a: 'knock', id, vx, vy}                    the night elk knocked player id down (vx, vy m/s): they drop something
+//   ev       {a: 'knock', id, vx, vy}                    the night elk knocked player id down (vx, vy m/s): they drop something;
+//            {a: 'rope', id, by} / {a: 'free', id, by, x, y, how}: animal id is on player by's rope / let go there (server/animals.mjs)
 //   deny     {a, id, why}                                an act refused
 //   gear     {id, g}                                     what a player wears now (to everyone, the wearer too: his set as
 //                                                        the server took it; docs/GEAR.md)

@@ -83,6 +83,28 @@ The prints themselves are `features/prints.js`'s (the one owner of footprints an
 features"): it walks you, your friends and the ground animals near you. `features/mud.js` adds the mud (its surfaces and the
 rule that says where a step goes into it, and the rain's and the drying's wear); `features/fauna.js` stamps the morning trails.
 
+## The Lasso
+
+A Lasso is in your bag (a new world's start kit has one; an old save gets one, once). Hold F to spin it (the longer, the harder
+it pulls), let go to throw it at what's under the cursor: an animal (a ring at its feet while you aim), a high limb to swing
+from, or the ground. It's the equipment experiment's lasso with its own rope (`features/rope.js` on `features/equip/lasso.js`).
+Never any harm: nothing on a rope is hurt.
+
+- **A hare** comes: it tumbles to your feet and lies dazed for 2 s. E lifts it; you carry it for up to 8 s, walking at 0.6 of
+  your speed; E puts it down (or it wriggles free) and it's off. In its moult (spring, autumn) a tuft of **Hare Fur** comes off
+  in your hands, once an in-game day for each hare.
+- **A fox** fights the rope and slips the loop after 1.5 s.
+- **A roe deer** bolts and drags you behind it on your heels. It runs at 5.5 m/s, slowing to 1.5 over its 8-12 s (a deer's own;
+  0.25 s less for each kg of gear past 4, never under 4 s). A / D swing its line up to 30 degrees, S leans back (0.8 m/s
+  slower, it tires 1.5 times as fast), bushes and ferns slow it (a burst of leaves), the lake, a wide stream and rock turn it
+  (a shallow stream it splashes through). Held back by a trunk or a rock, you're knocked flat (no damage) and the rope's gone.
+  F or Space lets go at any time. Tired, it stands blowing, head low, for 6 s: E within 1.5 m calms it, the loop comes off,
+  and for the rest of the in-game day it lets you walk past. The rest of the herd bolts when one is roped.
+
+With friends it's a solo verb: the server gives the animal to the first who ropes it (30 s at most), the holder's client runs
+it and sends where it is (the others see the deer drag you); a calm and a tuft of fur are the server's too
+(`server/animals.mjs`). `?livefauna=0`: the Lasso doesn't catch animals.
+
 ## Sounds
 
 They reuse the arena wildlife's events, so the audio feature already plays them: `wildlife.wings` (a raven lifting off),
@@ -102,6 +124,7 @@ undergrowth), `wildlife.howl` with kind `fox`, call `yips` (the fox at night). N
 | birds in the crowns | `TUNE.crown` in `src/features/fauna.js` (share of trees, reaches, how many at once, how long empty) |
 | try the strange | menu > Sandbox > Animals: the nearest herd turns and stares / the odd hare comes (at night) / startle the birds in the trees round you |
 | state, for a test | `__r3d.host.feature('fauna').dbg()` (each animal's suspicion, what you can touch, the odd hare, today's trails) |
+| the Lasso on animals | `ROPE`, `FUR` in `src/content/animals.js` (the hare's daze / carry, the fox's slip, the roe's speeds, tiring, steer, lean, brush, stand, calm); the weights in `WEIGHT.animal` (`src/content/lasso.js`); `?livefauna=0` off; menu > Sandbox > Animals: go to the nearest hare / roe deer |
 | tracks | `?tracks=0` none; `?mud=1` or menu > Sandbox > Tracks: the ground wet now; menu > Sandbox > Animals: lay this morning's trails / go to the nearest roe bed |
 | mud and trails | `MUD`, `TRAIL` in `src/content/animals.js` (wetness, patch size, softness, deep, wash; trail lengths, hours, print spacing, the most prints); the mud's colour and life: `SURF.mud` in `src/content/prints.js` |
 
@@ -110,6 +133,7 @@ undergrowth), `wildlife.howl` with kind `fox`, call `yips` (the fox at night). N
 - Small things: songbirds you can see sitting in the trees and singing, butterflies over the glades, dragonflies by the lake, a woodpecker drumming.
 - A deer's bark and a hare's thump as sounds of their own.
 - Droppings, a fox's den you can find (the snow's tracks: `docs/WINTER.md`).
-- Hunting (meat and hides) and a fox that comes to trust you if you leave it food: these need items and the server to own the
-  animal (like the elk), so they come later.
+- No hunting, ever (living-animals.md: nothing is killed). Taming (a roe calmed three days running that follows you, a fox fed
+  at its den that stops stealing from you) comes later.
+- Hopping a log while a roe drags you (Space lets go instead).
 - Ravens that follow the elk by day and circle over it.

@@ -104,7 +104,7 @@ export async function create(host) {
     return {d, sp: d.sp, S, G, R, x: d.x, y: d.y, z: 0, h: 0, hd: R() * TAU, v: 0, st: 'idle', t: R() * 4, tx: d.x, ty: d.y,
       ph: R() * 10, gait: 0, pitch: 0, turn: 0, gp: 0, gt: 0, lie: 0, lieTo: 0, fx: 0, fy: 0, out: true, gone: false,
       tree: null, ta: 0, th: 0, flap: 0, vz: 0, tail: 0, blocked: 0, alarm: -1, seen: false, sus: 0, leap: 0, sx: 0, sy: 0, odd: false,
-      li: 0};   // (li: its line in its group's morning trail)
+      li: 0, held: null, calm: -1};   // (li: its line in its group's morning trail; held: who has it on a rope (F.hold); calm: till this world hour it lets you be)
   });
   F.animals = ANIM;
   const byGroup = new Map(); for (const a of ANIM) { let l = byGroup.get(a.G); if (!l) byGroup.set(a.G, l = []); a.li = l.length; l.push(a); }
@@ -140,7 +140,7 @@ export async function create(host) {
   function threat(a) {
     TH.d = 1e9; TH.raw = 1e9;
     for (let i = 0; i < nPeople; i++) {
-      const q = PEOPLE[i]; if (!q.on) continue;
+      const q = PEOPLE[i]; if (!q.on || (i === 0 && a.calm > clockT())) continue;   // (calmed: it lets you walk past, for the day)
       const d = Math.hypot(q.x - a.x, q.y - a.y), e = d / q.k;
       if (e < TH.d) { TH.d = e; TH.x = q.x; TH.y = q.y; TH.raw = d; TH.k = q.k; }
     }
@@ -482,7 +482,7 @@ export async function create(host) {
     touchA = null; if (host.lock || !F.on) return;
     const P = host.player; let bd = TUNE.touch;
     for (const a of ANIM) {
-      if (a.gone || a.h > 0 || !GROUND.has(a.sp) || a.st === 'flee' || a.st === 'flush' || a.st === 'fly' || a.st === 'land' || a.sus >= TUNE.sus.alert) continue;
+      if (a.gone || a.held || a.h > 0 || !GROUND.has(a.sp) || a.st === 'flee' || a.st === 'flush' || a.st === 'fly' || a.st === 'land' || a.sus >= TUNE.sus.alert) continue;
       const d = Math.hypot(a.x - P.x, a.y - P.y); if (d < bd) { bd = d; touchA = a; }
     }
   }
@@ -503,6 +503,41 @@ export async function create(host) {
     q.fillStyle = 'rgba(14,16,15,.8)'; q.fillRect(sx * sc - w / 2, sy * sc - 16 * dpr, w, 18 * dpr);
     q.fillStyle = '#cfe3a0'; q.fillText(txt, sx * sc, sy * sc - 3 * dpr);
   };
+
+  // ---------------------------------------------------------------- ON A ROPE (features/rope.js; living-animals.md slice 2)
+  // While someone holds an animal on a rope (yours: rope.js runs it; a friend's: from their state message) it is where its holder's
+  // record says (H: {x, y, z, h, hd, v, mode}: rope | fly | daze | carry | tired), drawn in the pose that goes with it; let go, it
+  // goes on from there as it would (bolts, or walks off calm). Nothing here is sent: the holder's client says where it is
+  //   F.hold(id, H) -> the animal | null (one that's gone, flying or already held: none)   F.release(id, how, x?, y?)
+  //   how: 'bolt' (off away from you), 'calm' (it stands, then goes about its day), 'walk'; F.calm(id, untilHour): it lets you be
+  //   F.byId(id), F.ground(a): a ground animal that could be caught now (on its feet, not gone, not held)
+  const ById = new Map(ANIM.map(a => [a.d.id, a]));
+  F.byId = id => ById.get(id) || null;
+  F.ground = a => !!a && !a.gone && !a.held && a.h === 0 && (a.sp === 'roe' || a.sp === 'fox' || a.sp === 'hare');
+  F.hold = (id, H) => {
+    const a = ById.get(id); if (!a || a.gone || (a.held && a.held !== H) || a.h > .05) return null;
+    a.held = H; a.odd = false; a.lieTo = 0; a.alarm = -1;
+    if (a.sp === 'roe') { a.fx = host.player.x; a.fy = host.player.y; alarmGroup(a); }   // (the herd bolts with it)
+    return a;
+  };
+  F.release = (id, how = 'bolt', x, y) => {
+    const a = ById.get(id); if (!a || !a.held) return;
+    if (x !== undefined && Number.isFinite(x) && Number.isFinite(y)) { a.x = x; a.y = y; }
+    a.held = null; a.h = 0; a.z = elev(a.x, a.y); a.lieTo = 0; a.gp = 0; a.gt = 0;
+    const P = host.player;
+    if (how === 'bolt') { a.sus = 1.2; if (!bolt(a, P.x, P.y, (a.S.away ? rr(...a.S.away, a.R) : 14) * 1.2)) idle(a, true); else if (a.sp === 'roe') alarmGroup(a); }
+    else { a.sus = 0; a.v = 0; a.st = 'alert'; a.t = rr(3, 6, a.R); lookAt(a, P.x, P.y); }
+  };
+  F.calm = (id, until) => { const a = ById.get(id); if (a) a.calm = Math.max(a.calm, until); };
+  function heldPose(a, dt) {
+    const H = a.held;
+    a.x = H.x; a.y = H.y; a.hd = H.hd; a.v = H.v; a.h = H.h || 0; a.sus = H.mode === 'tired' ? .4 : 1;
+    a.ph += a.v * dt * (a.sp === 'hare' ? 2.2 : a.sp === 'fox' ? 2.4 : 1.35);
+    a.st = a.v > 2.5 ? 'flee' : a.v > .2 ? 'walk' : H.mode === 'daze' ? 'rest' : 'alert';
+    a.lieTo = H.mode === 'daze' ? 1 : 0;
+    a.gp = H.mode === 'tired' ? -.75 : H.mode === 'carry' ? -.3 : H.mode === 'rope' ? .25 : 0; a.gt = H.mode === 'rope' ? Math.sin(a.ph * 1.7) * .5 : 0;
+    if (a.h > 0) a.z = H.z;
+  }
 
   // ---------------------------------------------------------------- TRACKS (living-animals.md slice 1)
   // the live prints are features/prints.js's own (it walks the ground animals near you, read from F.animals; features/mud.js says
@@ -582,9 +617,11 @@ export async function create(host) {
     for (const a of ANIM) {
       if (Math.hypot(a.x - P.x, a.y - P.y) > TUNE.SIM_R) { a.seen = false; continue; }
       n++;
-      if (a.S.gone) stepGone(a, hr);
+      if (a.held) heldPose(a, dt);   // (on a rope: where its holder has it, features/rope.js)
+      else if (a.S.gone) stepGone(a, hr);
       if (a.gone) continue;
-      if (a.sp === 'raven') stepRaven(a, dt, hr);
+      if (a.held) { /* (its holder moves it) */ }
+      else if (a.sp === 'raven') stepRaven(a, dt, hr);
       else if (a.sp === 'squirrel') stepSquirrel(a, dt);
       else if (a.sp === 'capercaillie' && a.st !== 'flee' && (a.st === 'flush' || a.st === 'fly' || a.st === 'land')) {
         const d = stepFlyer(a, dt); if (a.st === 'fly' && d < 6) a.st = 'land';
@@ -592,7 +629,8 @@ export async function create(host) {
       } else stepGround(a, dt, hr);
       a.lie += (a.lieTo - a.lie) * Math.min(1, dt * 1.5);
       a.pitch += (a.gp - a.pitch) * Math.min(1, dt * 5); a.turn += (a.gt - a.turn) * Math.min(1, dt * 5);
-      if (a.h === 0 || a.sp === 'squirrel') a.z = elev(a.x, a.y);
+      if (a.held && a.h > 0) {}   // (carried: at its holder's height, heldPose)
+      else if (a.h === 0 || a.sp === 'squirrel') a.z = elev(a.x, a.y);
       else a.z += (elev(a.x, a.y) - a.z) * Math.min(1, dt * 4);
     }
     trails(hr); trailPrints();
