@@ -26,7 +26,7 @@ import {readFileSync, writeFileSync, existsSync} from 'node:fs';
 import {cpus} from 'node:os';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {launch} from '../lib/chrome.mjs';
+import {launch, PYTHON} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..'), BASE = join(ROOT, 'tools', 'perf', 'baseline.json');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; }, flag = k => process.argv.includes('--' + k);
@@ -66,7 +66,7 @@ async function cpuBusy(ms = 1500) {
   return 1 - (b.idle - a.idle) / Math.max(1, b.all - a.all);
 }
 const LOAD0 = await cpuBusy();
-const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
+const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
 // Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run left
 // behind). 'exit' also covers an uncaught error, Ctrl+C goes through quit
 const chrome = launch('bench', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit', '--enable-precise-memory-info',

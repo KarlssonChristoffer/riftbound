@@ -13,7 +13,7 @@ import {mkdirSync, writeFileSync, readFileSync, existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {launch} from '../lib/chrome.mjs';
+import {launch, PYTHON} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
@@ -64,7 +64,7 @@ const SCENARIOS = [
 ].filter(s => !ONLY || ONLY.split(',').includes(s[0]));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
+const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
 // Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run left
 // behind). 'exit' also covers an uncaught error, Ctrl+C goes through quit
 const chrome = launch('golden', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1920,1080',
