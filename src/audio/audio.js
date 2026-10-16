@@ -374,6 +374,13 @@ const SFX = {
     const v = E.voice(o, 'creakTick', .1); if (!v) return;
     E.O(v, 0, {w: 'sawtooth', f: 60, a: .01, d: .06, g: .08, type: 'bandpass', ff: 1100, q: 8});
   },
+  fiddle(E, o) {   // the Fiddle String (docs/KEEPSAKES.md): three slow bowed notes, falling, a little off (stand-in: band-passed saws)
+    const v = E.voice({...o, g: (o.g ?? 1) * .9, wet: .6}, 'fiddle', 3.2, {pri: 1, cd: 2}); if (!v) return;
+    [[659, 0], [587, .8], [523, 1.7]].forEach(([f, t], i) => {
+      E.O(v, t, {w: 'sawtooth', f: f * (1 + (R() - .5) * .012), f2: f * .985, sw: .7, a: .12, d: .75 + i * .25, g: .07, type: 'bandpass', ff: f * 2.2, q: 3});
+      E.O(v, t + .02, {w: 'sawtooth', f: f * 1.003, a: .15, d: .6 + i * .25, g: .035, type: 'bandpass', ff: f * 3, q: 4});
+    });
+  },
   // ---------------- the revolver (fallbacks for the forge's 'revolver' recipe while it bakes / ?forge=0) ----------------
   gunshot(E, o) {   // o.gun 'peacemaker' | 'brass_navy': crack + bark + thump + a dark, dry tail (nothing rings)
     const v = E.voice({...o, g: (o.g ?? 1) * 1.5}, 'gunshot', 1, {pri: 3, cd: .02}); if (!v) return;
@@ -1339,7 +1346,13 @@ export function createAudio(ctx, host = {}) {
         case 'lantern.toggle': fire('lanternClick', e.x, e.y); break;   // (features/caves.js: L in the cave)
         case 'lantern.snuff': fire('lanternSnuff', e.x, e.y); break;   // (the soot things put it out)
         case 'lantern.relight': fire('lanternLight', e.x, e.y); break;
-        case 'critter.wake': fire('critter', e.x, e.y); break;   // (features/cavelife.js: a rock-thing unrolls and trots off)
+        case 'critter.wake': fire('critter', e.x, e.y); break;
+        case 'keep.shelve': fire('propDrop', e.x, e.y, {mat: 'clay', g: .15}); break;
+        case 'keep.walk': fire('rustle', e.x, e.y, {g: .3}); break;
+        case 'keep.creak': fire('creakTick', e.x, e.y, {g: .8}); fire('creakTick', e.x, e.y, {g: .5}); break;   // (the worn Bark Doll)
+        case 'keep.fiddle': fire('fiddle', e.x, e.y); break;
+        case 'keep.notch': fire('scrape', e.x, e.y, {g: .5}); break;   // (the Tally Stick: a dry scratch)
+        case 'soot.flinch': fire('wings', e.x, e.y, {n: 1, g: .7}); break;   // (a soot thing breaking off: the Big Tooth)   // (features/cavelife.js: a rock-thing unrolls and trots off)
         case 'mine.spent': fire('treeLogs', e.x, e.y, {surf: 'stone'}); fire('kick', e.x, e.y, {mat: 'clay', surf: 'stone'}); break;   // (stand-ins: the vein breaks open)
         case 'mine.chunk': fire('hit', e.x, e.y, {mat: 'clay', g: .35}); break;   // (stand-in: a chunk into the pouch)
         case 'mine.take': fire('kick', e.x, e.y, {mat: 'wood', g: .5}); break;   // (stand-in: the old pick pulled from the wall)
@@ -1382,6 +1395,8 @@ export function createAudio(ctx, host = {}) {
         case 'meal.hic': fire('hiccup', e.x, e.y); break;
         case 'pot.set': fire('potSet', e.x, e.y); break;
         case 'pot.spoon': fire('potSpoon', e.x, e.y); break;   // (features/meals.js: any meal by a campfire)
+        case 'fish.jab': fire('splash', e.x, e.y, {surf, small: true, g: 1.1}); break;   // (the Heron Feather's jab)
+        case 'fish.miss': fire('fishPlop', e.x, e.y, {g: .4}); break;
         case 'forage.pick': fire('rustle', e.x, e.y, {surf, g: .3, semi: 5}); fire('hit', e.x, e.y, {mat: 'straw', g: .2}); break;   // (stand-ins: a soft pluck in the leaves)
         // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge
         // recipes of its own yet): the swish of a turn and the throw on the cloth swish, the cinch a soft thump, the yank

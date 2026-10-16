@@ -11,16 +11,20 @@
 //                flapping, with two pale eye glints while they hunt.
 //   THE TELLS    of a hollow wall not yet open (features/mining.js: C.hollows): within a few metres his lantern's flame leans
 //                toward it (F.lean: render/lighting.js moves the lantern's light by it) and now and then dust trickles down it.
+//   THE KEEPSAKES (docs/KEEPSAKES.md): the Big Tooth (mods 'cave.shun'): the soot things break off near its wearer (a flinch: a
+//                puff of soot), the rock-things wake at TOOTH.wake m and trot TOOTH.trot m; the Full Tally Stick ('cave.kin'): they
+//                never hunt its wearer and one or two may go with them a while (sim/cavelife.js ESCORT)
 // MULTIPLAYER: the soot things are the server's (one flock for everyone: they go for whichever of you is lit); the rock-things and
 //   the tells are each player's own view.
 // OWNS: the soot things offline (their state), the rock-things (view), F.lean, the dust, their meshes.
 // READS: host.world.cave, host.player, caves (lit, snuff), builds (shining), coop (online, net, mail), mining (isSpent), trip
-//   (tripping). EMITS: critter.wake.
+//   (tripping), host.mods ('cave.shun', 'cave.kin'). EMITS: critter.wake, soot.flinch.
 // BUDGET: sim: the soot rules (2-4 things, a few hypots each) a step offline. View: a matrix per rock-thing and soot thing within
 //   sight; the tells' distance checks (1-2 hollows). No allocation per step or frame.
 import * as THREE from 'three';
 import {SOOT, CRITTER} from '../content/cavelife.js';
 import {createSoot} from '../sim/cavelife.js';
+import {TOOTH} from '../content/keepsakes.js';
 import {flags} from '../core/flags.js';
 import {simRandom, viewRandom} from '../core/rng.js';
 import {geoOf, box, along} from '../world/kit3d.js';
@@ -39,7 +43,10 @@ export async function create(host) {
   const online = () => !!coop()?.online;
   const active = () => ON && !!C && host.biome?.id === 'ruins' && game()?.mode === 'sandbox';
   let C = null, S = null, marks = flags.get('gathermarks') === '1';
-  const ME = {id: 0, x: 0, y: 0, z: 0, lit: false}, PLS = [ME], SHINE = [];
+  const ME = {id: 0, x: 0, y: 0, z: 0, lit: false, shun: 0, kin: false}, PLS = [ME], SHINE = [];
+  const KS = {ver: -1, shun: false, kin: false};   // (the keepsakes' notes, read again when the mods change)
+  const keeps = () => { const m = host.mods; if (m.ver !== KS.ver) { KS.ver = m.ver; KS.shun = m.value('cave.shun', 0) > 0; KS.kin = m.value('cave.kin', 0) > 0; } return KS; };
+  const flinch = e => host.events.push({type: 'soot.flinch', x: e.x, y: e.y, h: e.h});
   const F = {name: 'cavelife', label: 'Cave life', on: ON, lean: {x: 0, y: 0}, get soot() { return S; }};   // (soot: tests)
 
   // ---------------------------------------------------------------- the plan's things (another cave: made again)
@@ -59,13 +66,17 @@ export async function create(host) {
     if (!active() || !S) return;
     const cv = caves(), c = coop();
     if (online()) {
-      if (c.mail) for (let k = 0; k < c.mail.length; k++) { const m = c.mail[k]; if (m.k === 'ev' && m.a === 'snuff' && m.id === c.net?.id) cv?.snuff?.(); }
+      if (c.mail) for (let k = 0; k < c.mail.length; k++) {
+        const m = c.mail[k]; if (m.k !== 'ev') continue;
+        if (m.a === 'snuff' && m.id === c.net?.id) cv?.snuff?.();
+        else if (m.a === 'flinch' && isFinite(m.x) && isFinite(m.y)) flinch(m);
+      }
       return;
     }
-    const P = host.player; ME.x = P.x; ME.y = P.y; ME.z = P.z; ME.lit = !!cv?.lit || !!host.feature('workshop')?.torch || (!!host.feature('meals')?.eyes && !!cv?.down);   // (a lit pine haft draws them like a lantern: features/workshop.js; a burnt eel's shining eyes too)
+    const P = host.player, ks = keeps(); ME.x = P.x; ME.y = P.y; ME.z = P.z; ME.lit = !!cv?.lit || !!host.feature('workshop')?.torch || (!!host.feature('meals')?.eyes && !!cv?.down); ME.shun = ks.shun ? TOOTH.shun : 0; ME.kin = ks.kin;   // (a lit pine haft draws them like a lantern: features/workshop.js; a burnt eel's shining eyes too)
     host.feature('builds')?.shining?.(SHINE);
     const ev = S.step(dt, PLS, SHINE);
-    for (let k = 0; k < ev.length; k++) if (ev[k].a === 'snuff' && ev[k].id === 0) cv?.snuff?.();
+    for (let k = 0; k < ev.length; k++) { if (ev[k].a === 'snuff' && ev[k].id === 0) cv?.snuff?.(); else if (ev[k].a === 'flinch') flinch(ev[k]); }
   };
 
   // ---------------------------------------------------------------- the view: shapes
@@ -95,22 +106,22 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- rock-things
   function stepCrit(k, dt, P, trip) {
-    const d = Math.hypot(P.x - k.x, P.y - k.y);
+    const d = Math.hypot(P.x - k.x, P.y - k.y), tooth = keeps().shun;   // (the Big Tooth: they wake far off and run far)
     k.rest = Math.max(0, k.rest - dt);
     if (k.mode === 0) {
-      k.near = d < CRITTER.wake && Math.abs(P.z - k.z) < 1.2 && !k.rest ? k.near + dt : 0;
-      if (k.near > .6 && pickSpot(k, P)) { k.mode = 1; k.t = 0; emit(k); }
+      k.near = d < (tooth ? TOOTH.wake : CRITTER.wake) && Math.abs(P.z - k.z) < 1.2 && !k.rest ? k.near + dt : 0;
+      if (k.near > (tooth ? .15 : .6) && pickSpot(k, P, tooth)) { k.mode = 1; k.t = 0; emit(k); }
     } else if (k.mode === 1) { if ((k.t += dt) > .35) { k.mode = 2; k.t = 0; } }
     else if (k.mode === 2) {
       k.t += dt; const dx = k.tx - k.x, dy = k.ty - k.y, l = Math.hypot(dx, dy), st = Math.min(l, CRITTER.speed * dt);
       if (l > .02) { k.x += dx / l * st; k.y += dy / l * st; k.yaw = Math.atan2(dx, dy); }
       k.leg = (k.leg + dt * 9) % 2;
-      if (l < .05 || k.t > 4) { k.mode = 3; k.t = 0; }
+      if (l < .05 || k.t > (tooth ? 7 : 4)) { k.mode = 3; k.t = 0; }
     } else if ((k.t += dt) > .35) { k.mode = 0; k.rest = CRITTER.rest; k.near = 0; }
     k.z = host.elev(k.x, k.y);
   }
-  function pickSpot(k, P) {   // away from him, on open floor a few metres off, not up or down a step
-    const a0 = Math.atan2(k.x - P.x, k.y - P.y), T = CRITTER.trot;
+  function pickSpot(k, P, tooth) {   // away from him, on open floor a few metres off, not up or down a step
+    const a0 = Math.atan2(k.x - P.x, k.y - P.y), T = tooth ? TOOTH.trot : CRITTER.trot;
     for (let n = 0; n < 8; n++) {
       const a = a0 + (VR() - .5) * (n < 4 ? 1.4 : 3.2), r = T[0] + VR() * (T[1] - T[0]), x = k.x + Math.sin(a) * r, y = k.y + Math.cos(a) * r;
       if (C.inside(x, y) > -.3 || C.inside((x + k.x) / 2, (y + k.y) / 2) > -.2 || Math.abs(host.elev(x, y) - k.z) > .5) continue;
@@ -147,6 +158,7 @@ export async function create(host) {
       const vx = x - o.px, vy = y - o.py; if (vx * vx + vy * vy > 1e-6) o.yaw = Math.atan2(vx, vy); o.px = x; o.py = y;
       const jx = Math.sin(o.t * 7.3) * .03, jy = Math.cos(o.t * 6.1) * .03, jh = Math.sin(o.t * 9.7) * .04;
       place(o.m, x + jx, h + jh, y + jy, o.yaw);
+      if (mode === 4 && VR() < dt * 1.5) dust(x, y, h, 1, '#141216', -.4);   // (an escort: soot shed now and then, no eyes)
       if (mode === 1 || mode === 2) {   // the hunt: two pale eye glints, a speck of soot shed now and then
         const ex = Math.cos(o.yaw) * .04, ey = -Math.sin(o.yaw) * .04, fx = Math.sin(o.yaw) * .11, fy = Math.cos(o.yaw) * .11;
         host.point(x + jx + fx + ex, y + jy + fy + ey, h + jh + .03, '#e6dcb4'); host.point(x + jx + fx - ex, y + jy + fy - ey, h + jh + .03, '#e6dcb4');
@@ -191,6 +203,7 @@ export async function create(host) {
     }
     if (S) drawSoot(dt, P);
     tells(dt, P);
+    for (let i = 0; i < evs.length; i++) if (evs[i].type === 'soot.flinch') { const e = evs[i]; dust(e.x, e.y, e.h, 14, '#141216', -.6); dust(e.x, e.y, e.h, 4, '#3a3036', .4); }
     for (let i = 0; i < evs.length; i++) if (evs[i].type === 'mine.open') { const e = evs[i]; for (let j = 0; j < 4; j++) dust(e.cx + (VR() - .5), e.cy + (VR() - .5), host.elev(e.cx, e.cy) + 1 + VR(), 8, '#a89a80', .3); }
     for (let i = DP.length - 1; i >= 0; i--) {
       const c = DP[i]; c.t += dt; if (c.t > c.life) { DP.splice(i, 1); continue; }
@@ -218,7 +231,7 @@ export async function create(host) {
   F.hud = () => {
     if (!active() || !S) return '';
     const ol = online(), n = ol ? coop()?.net?.soot?.length || 0 : S.things.length;
-    return `cavelife soot ${n}${ol ? ' (server)' : ' ' + S.things.map(t => 'rscb'[t.mode]).join('')} · rock-things ${crit.length} · lean ${Math.hypot(F.lean.x, F.lean.y).toFixed(2)}`;
+    return `cavelife soot ${n}${ol ? ' (server)' : ' ' + S.things.map(t => 'rscbe'[t.mode]).join('')} · rock-things ${crit.length} · lean ${Math.hypot(F.lean.x, F.lean.y).toFixed(2)}`;
   };
   F.biomeChanged = () => { for (const k of crit) { k.m = null; k.l = null; } for (const o of soot) if (o) o.m = null; };   // (the rebuild disposed the world's meshes)
   return F;

@@ -2,7 +2,8 @@
 // ui/gearpanel.js). It shows the piece's icon, name (in its rarity's colour), rarity, kind and slot, what it is, its weight
 // and armor, what it does now and what it will do later. Holding SHIFT shows more: its materials, every modifier note it
 // sets, what it changes on the model (zones painted or hidden, shapes added) and what wearing it does to the set worn now
-// (weight, armor, speed: before -> after).
+// (weight, armor, speed: before -> after). A KEEPSAKE (a charm: docs/KEEPSAKES.md) shows only what it is: its icon, name and
+// description (the Fiddle String's lie of the moment: ui/packpanel.js descOf), never a number or what it does, Shift or not.
 // API: gearTip() -> the one tip (made on first use): attach(el, {piece: () => g | null, slot, set: () => [ids]}) (null: "his
 //   own", the slot empty); hide(). doesOf(g) -> what it does now, as short lines (also the wardrobe's and the panel's).
 // OWNS: #geartip and its style. READS: content/gear.js. BUDGET: DOM writes when the piece or Shift changes; a move: 2 style writes.
@@ -10,6 +11,8 @@ import {SLOT_NAMES, KINDS, RARITY, MATERIALS, RULES, gearById, setStats} from '.
 import {FRAMES, uiUnit} from './pixelframe.js';
 import {loadPixelFont} from './pixelfont.js';
 import {gearIcon, slotIcon} from './gearicons.js';
+import {ITEMS} from '../content/items.js';
+import {iconURL, iconHook, descOf} from './packpanel.js';
 import {statWords} from '../content/fishing.js';
 import {statWords as forageWords} from '../content/forage.js';
 import {statWords as mineWords} from '../content/mining.js';
@@ -70,6 +73,12 @@ function createTip() {
 
   function html(c) {
     const g = c.piece();
+    if (!g && c.slot === 'charm') return `<div class="gt-top"><img src="${slotIcon('charm', '#8a7c64')}"><div><b>No charms</b><small>Charms</small></div></div>`;
+    if (g?.keepsake) {   // (what it is, never what it does)
+      const d = iconHook.of?.(g.id) || ITEMS[g.id], R = RARITY[g.rarity];
+      return `<div class="gt-top"><img src="${d?.icon ? iconURL(d.icon, d.pal) : slotIcon('charm', '#efe6cf')}"><div><b style="color:${R?.col ?? ''}">${esc(g.name)}</b>` +
+        `<small>${R?.name ?? ''} keepsake · Charms</small></div></div><div>${esc(descOf(ITEMS[g.id]) || g.desc)}</div>`;
+    }
     if (!g) {
       const name = SLOT_NAMES[c.slot] || 'Slot';
       return `<div class="gt-top"><img src="${slotIcon(c.slot, '#8a7c64')}"><div><b>His own</b><small>${name}</small></div></div>` +

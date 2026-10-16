@@ -33,6 +33,8 @@
 //            (the server checks it), bait / meal = the bait on the hook, the meal eaten (ids); the server rolls what bites. {a: 'land', n}: he
 //            landed it (told to everyone); {a: 'lost', n}: it got away. {a: 'grab', n, x, y, w}: a fish grabbed by hand (the
 //            lingon's school: content/fishing.js COME; the server checks the meal codes and answers {a: 'grabbed', n, id, cm, kg})
+//            {a: 'jab', n, x, y, w, lvl}: the Heron Feather's jab
+//            into the shallows at his feet (docs/KEEPSAKES.md; n = his jab count), rolled at once
 //   ping     {c}                                         c = the client's clock (ms), echoed
 //   snow     {id, vx, vy, hat}                            his snowball hit player id (the thrower decides: docs/WINTER.md), pushing
 //            them (vx, vy m/s), hat 1: their hat flies off
@@ -66,7 +68,7 @@
 //                                                        the server took it; docs/GEAR.md)
 //   fish     {a: 'bite', n, id, cm, kg, wait, nibbles, two}   to the caster: what bites cast n (content/fishing.js roll), when
 //            (wait s, the nibbles' s before it), two = a double catch, sh = nose | spook (a cast at a fish shadow: Fishing 5). {a: 'caught', id, name, c, cm, kg, two}: to everyone,
-//            player id landed catch c
+//            player id landed catch c. {a: 'jabbed', n, id, cm, kg}: to the jabber, what jab n came up with (id '': nothing)
 //   snow     {by, id, vx, vy, hat}                       player by's snowball hit player id (to everyone but the thrower)
 //   made     {rec, dev?}                                 to the maker: the record of a thing he made (the client pays when it hears it)
 //   rec      {u, counts, marks}                          to its owner: what his tool has done since (at most every 2 s)

@@ -59,10 +59,10 @@ let players = null, flushPlayers = () => {};
 // the forest's trees (src/world/forest.js, the same generator the clients run): the room checks a felled tree exists and is in reach;
 // its small things (F.decor: the patches a pick asks for, docs/FORAGING.md); its cave's veins (docs/MINING.md); and its uncanny plan (world/uncanny.js): the room runs
 // the secrets and the night elk from it
-let trees = null, decor = null, veins = null, cave = null, unc = null, forest = null, fauna = null;
+let trees = null, decor = null, veins = null, cave = null, unc = null, forest = null, fauna = null, plan = null;
 try {
   const [W, Un, Fa] = await Promise.all([import('../src/world/forest.js'), import('../src/world/uncanny.js'), import('../src/world/fauna.js')]);
-  const F = forest = W.forestPlan(seed); trees = F.trees; decor = F.decor; veins = F.cave?.veins || null; cave = F.cave || null; log(`forest ${seed}: ${trees.size} trees, ${veins?.length ?? 0} veins, ${cave?.soot?.length ?? 0} soot roosts, ${cave?.hollows?.length ?? 0} hollow walls`);
+  const F = forest = plan = W.forestPlan(seed); trees = F.trees; decor = F.decor; veins = F.cave?.veins || null; cave = F.cave || null; log(`forest ${seed}: ${trees.size} trees, ${veins?.length ?? 0} veins, ${cave?.soot?.length ?? 0} soot roosts, ${cave?.hollows?.length ?? 0} hollow walls`);
   if (uncanny) unc = Un.uncannyPlan(F, {shift: isFinite(nshift) ? nshift : 1});
   fauna = Fa.faunaPlan(F);   // (the fox's dens: server/animals.mjs, sim/foxden.js)
   if (unc) log(`uncanny forest: heron ${unc.heron ? 'yes' : 'no'}, stones ${unc.stones ? 'yes' : 'no'}, marks ${unc.marks.length}, elk ${unc.elk ? 'yes' : 'no'} · clock ${hour} h, ${daymin} min a day`);
@@ -70,7 +70,7 @@ try {
 catch (e) { log('forest: not loaded (acts are not checked against the trees, no uncanny forest):', e.message); }
 
 const workshop = {heat: +arg('heat', 1) > 0 ? +arg('heat', 1) : 1, smelt: +arg('smelt', 1) > 0 ? +arg('smelt', 1) : 1, wardrobe: process.argv.includes('--wardrobe')};
-const room = createRoom({seed, trees, decor, veins, cave, forest, strikes: strikes > 0 ? strikes : 1, treefire, snuffers: snuffers === null ? undefined : Math.max(0, +snuffers || 0), regrow: regrow > 0 ? regrow : 1, unc, hour: isFinite(hour) ? hour : CLOCK.hour, daymin: isFinite(daymin) ? daymin : CLOCK.daymin, log, workshop, fauna, thief,
+const room = createRoom({seed, trees, decor, veins, cave, forest, plan, strikes: strikes > 0 ? strikes : 1, treefire, snuffers: snuffers === null ? undefined : Math.max(0, +snuffers || 0), regrow: regrow > 0 ? regrow : 1, unc, hour: isFinite(hour) ? hour : CLOCK.hour, daymin: isFinite(daymin) ? daymin : CLOCK.daymin, log, workshop, fauna, thief,
   players, xprate: xprate === 'raw' || xprate > 0 ? xprate : 1, importCap, movelvl, dev});
 const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.glb': 'model/gltf-binary',

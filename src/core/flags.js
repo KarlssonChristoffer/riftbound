@@ -157,6 +157,9 @@ export const FLAG_DOCS = {
   firestart: '1: you can carry a burning brand from a campfire and set a tree alight (experimental; also Esc > Sandbox)',
   ice: '1: the forest lake frozen now (mid-winter\'s ice), 0: never frozen (features/ice.js; docs/WINTER.md)',
   tracks: '0: no footprints or tracks in the forest (features/prints.js; docs/WINTER.md)',
+  dollwalk: 'always (dev): a shelf\'s Bark Doll walks every dawn (offline; features/keepsakes.js, content/keepsakes.js DOLL.walk)',
+  tally: 'n (dev): the Tally Stick starts with n notches (features/keepsakes.js; 10 or more: it fills at the next step)',
+  keepsakes: '0: the keepsakes\' rules off (features/keepsakes.js, docs/KEEPSAKES.md: what a worn charm bends); the keepsakes stay in the pouch and can be worn',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',

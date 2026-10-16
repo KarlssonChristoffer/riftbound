@@ -17,6 +17,10 @@
 // they can differ a little between screens; if animals ever matter to play (hunting, taming), they move to the server.
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, hd, onKey, biomeChanged, toggle, menu, dbg(). ?fauna=0 starts it off.
 // OWNS: its animals' state, their meshes (look.js). READS: world/layout.js FOREST (the plan), host.player, host.world.cave (keeps out of its mouth), co-op's peers
+//   (and their gear: a keepsake's fauna.loud / fauna.lure), host.mods ('fauna.loud': x how loud the animals take him;
+//   'fauna.lure': the Fiddle String, docs/KEEPSAKES.md: ground animals that haven't bolted drift after him and trail at
+//   FIDDLE.follow m, FIDDLE.most at once; faced, they freeze and stare; running, they bolt; louder than he is, they stop at
+//   their alert distance and just stare)
 //   (host.feature('coop').net), host.env (hour, season, snow), host.elev / inStream, world.js steep, host.entities.near (what
 //   stands where), host.events (gunshots, hits, breaks: they scare), the uncanny forest's F.elk, the watcher's F.state, the game's
 //   ui (a toast for a touch), host.mods ('fauna.loud': how loud they take him) and a friend's meal code (content/meals.js loudOf),
@@ -37,6 +41,7 @@ import {SHAPES, TRACK} from '../content/prints.js';
 import {createFaunaLook} from './fauna/look.js';
 import {createCrownBirds} from './fauna/crowns.js';
 import {loudOf} from '../content/meals.js';
+import {noteOf, FIDDLE} from '../content/keepsakes.js';
 
 // ---------------------------------------------------------------- tunables
 // alert / flee: m from a person (walking) at which it stops to watch / bolts; rest: x those while it is bedded (it sits tight);
@@ -115,7 +120,8 @@ export async function create(host) {
   const wrap = a => a - Math.round(a / TAU) * TAU;
 
   // ---------------------------------------------------------------- people: where they are and how loud (the player and co-op's peers)
-  const PEOPLE = []; for (let i = 0; i < 8; i++) PEOPLE.push({x: 0, y: 0, k: 1, on: false, px: NaN, py: NaN});
+  const PEOPLE = []; for (let i = 0; i < 8; i++) PEOPLE.push({x: 0, y: 0, k: 1, on: false, px: NaN, py: NaN, lure: false, loud: 1, fa: NaN});
+  let nTrail = 0, trailWas = 0;   // (the Fiddle String's trailers: this frame's count, last frame's)
   const PS = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};
   let nPeople = 0, nReal = 0;   // (nReal: the people; past them, the elk when it hunts)
   // the uncanny forest's elk (its view of it: features/uncanny.js F.elk), when that is on; at night it is a hunter
@@ -130,6 +136,9 @@ export async function create(host) {
     const sp = Math.hypot(P.vx || 0, P.vy || 0), st = P.state;
     q.x = P.x; q.y = P.y; q.on = true;
     q.k = (st === 'roll' || st === 'leap' || st === 'knock' ? N.jump : sp < .3 ? N.still : P.gait === 'sprint' || sp > 5.2 ? N.sprint : P.gait === 'run' || sp > 2.4 ? N.run : sp < 1.8 ? N.creep : N.walk) * loud;
+    q.loud = loud;   // (x how loud the animals take him: the one note, briefs' depth-shared; the Big Tooth's, docs/KEEPSAKES.md)
+    q.lure = host.mods.value('fauna.lure', 0) > 0; q.fa = P.faceAngle ?? NaN;
+    trailWas = nTrail; nTrail = 0;
     nPeople = 1;
     const C = host.feature('coop')?.net;
     if (C && C.peers) for (const peer of C.peers.values()) {
@@ -137,10 +146,12 @@ export async function create(host) {
       const o = C.sample(peer, PS); if (!o) continue;
       const r = PEOPLE[nPeople++], v = Number.isNaN(r.px) || dt <= 0 ? 0 : Math.hypot(o.x - r.px, o.y - r.py) / dt;
       r.px = r.x = o.x; r.py = r.y = o.y; r.on = true;
-      r.k = (v > 30 ? N.walk : v < .3 ? N.still : v > 5.2 ? N.sprint : v > 2.4 ? N.run : v < 1.8 ? N.creep : N.walk) * (peer.md ? loudOf(peer.md) : 1);   // (v > 30: a teleport; a friend's meal: content/meals.js loudOf)
+      r.k = v > 30 ? N.walk : v < .3 ? N.still : v > 5.2 ? N.sprint : v > 2.4 ? N.run : v < 1.8 ? N.creep : N.walk;   // (v > 30: a teleport)
+      r.loud = noteOf(peer.gear, 'fauna.loud', 1) * (peer.md ? loudOf(peer.md) : 1); r.k *= r.loud;   // (a friend's: from the set they wear, and their meal: content/meals.js loudOf)
+      r.lure = noteOf(peer.gear, 'fauna.lure', 0) > 0; r.fa = NaN;
     }
     nReal = nPeople;
-    const E = elk(); if (E && NIGHT_ELK.has(E.mode) && nPeople < PEOPLE.length) { const r = PEOPLE[nPeople++]; r.x = E.x; r.y = E.y; r.k = TUNE.elk; r.on = true; r.px = r.py = NaN; }
+    const E = elk(); if (E && NIGHT_ELK.has(E.mode) && nPeople < PEOPLE.length) { const r = PEOPLE[nPeople++]; r.x = E.x; r.y = E.y; r.k = TUNE.elk; r.on = true; r.px = r.py = NaN; r.lure = false; }
   }
   // the nearest person, scaled by how loud: TH.d = distance / loudness (compare with the species' alert / flee), TH.x / y where
   const TH = {d: 1e9, x: 0, y: 0, raw: 1e9, k: 1};
@@ -163,6 +174,21 @@ export async function create(host) {
       if (!r || e.x === undefined) continue;
       const B = BANGS[bangI++ % BANGS.length]; B.x = e.x; B.y = e.y; B.r = r; B.t = .5;
     }
+  }
+  // the Fiddle String's pull: the person wearing it within FIDDLE.lure m (an animal already trailing keeps its place; a new one
+  // only while fewer than FIDDLE.most trail)
+  function lurer(a) {
+    if (!a.trail && Math.max(trailWas, nTrail) >= FIDDLE.most) return null;
+    for (let i = 0; i < nReal; i++) { const q = PEOPLE[i]; if (q.on && q.lure && Math.hypot(q.x - a.x, q.y - a.y) < FIDDLE.lure) return q; }
+    return null;
+  }
+  function trail(a, L, dt) {   // after him at its distance; faced (or he's loud): it freezes and stares
+    a.trail = true; nTrail++; a.sus = 0;
+    const d = Math.hypot(L.x - a.x, L.y - a.y), fol = L.loud > 1 ? a.S.alert * .8 : (a.fol ??= FIDDLE.follow[0] + (FIDDLE.follow[1] - FIDDLE.follow[0]) * a.R());
+    const faced = L.fa === L.fa && Math.abs(wrap(Math.atan2(a.x - L.x, a.y - L.y) - L.fa)) < FIDDLE.turn;
+    if (faced || (L.loud > 1 && d < fol + 1)) { if (a.st !== 'stare') stareAt(a, L.x, L.y, .8); else { a.sx = L.x; a.sy = L.y; a.t = Math.max(a.t, .3); } return; }
+    if (d > fol + 1) { const k = fol / d; go(a, L.x + (a.x - L.x) * k, L.y + (a.y - L.y) * k, a.S.walk * 1.8); a.t = 1.5; }
+    else if (a.st === 'walk') idle(a, true);
   }
   function bangAt(a) { for (const B of BANGS) if (B.t > 0 && Math.hypot(B.x - a.x, B.y - a.y) < B.r) return B; return null; }
 
@@ -223,7 +249,12 @@ export async function create(host) {
     if (a.st !== 'lek') a.sing = a.deaf = false;
     a.lek += ((a.st === 'lek' ? 1 : 0) - a.lek) * Math.min(1, dt * 3);
     if (a.leap > 0) a.leap = Math.max(0, a.leap - dt);
-    if (a.st !== 'flee' && !a.odd) {
+    const L = a.st !== 'flee' && a.st !== 'rest' && !a.odd ? lurer(a) : null;
+    if (L) {   // the Fiddle String: no suspicion, only running (or a bang) sends it off
+      if (bang || L.k >= N.run) { a.trail = false; if (a.sp === 'capercaillie') { flush(a, L.x, L.y); return; } if (bolt(a, bang ? bang.x : L.x, bang ? bang.y : L.y, a.S.away ? rr(...a.S.away, a.R) : 14)) { alarmGroup(a); return; } }
+      else trail(a, L, dt);
+    } else a.trail = false;
+    if (a.st !== 'flee' && !a.odd && !L) {
       // noticing: suspicion builds near someone (the closer and the louder, the faster; slow while its head is down or it is
       // bedded, slower while they keep still) and fades all the time. Someone running at it, or a bang: no waiting
       const view = a.deaf ? 0 : rest ? SU.bed : a.pitch < -.6 ? SU.down : 1, mv = T.k > N.still ? 1 : SU.still;   // (deaf: the lek song's last phrase)

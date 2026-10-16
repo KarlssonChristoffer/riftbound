@@ -46,11 +46,12 @@
 //   Spots: found again only when he crosses a 7 m cell or the slot turns (~a dozen hashes and waterSamples), a few points each.
 import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, COME, BAITS, ANGLER, COMMON_FISH, JIG, roll, catchIcon, isFish, spotAt, shadowAt, shadowVerdict, hintOf} from '../content/fishing.js';
 import {codeOf, parseCode} from '../content/meals.js';
+import {HERON, COME as KCOME, heronRoll, comeAt} from '../content/keepsakes.js';   // (the Heron Feather's jab and its called fish: below; KCOME: COME is the meals' lingon school)
 import {gearById, RARITY} from '../content/gear.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
 import {SESSION} from '../core/session.js';
-import {mulberry32, simSeed, viewRandom} from '../core/rng.js';
+import {mulberry32, simSeed, viewRandom, nameHash} from '../core/rng.js';
 import {waterSample} from '../world/world.js';
 import {hdUnit as U, hdFrame as frame9, hdText as text, hdFontOK, INK} from '../ui/hdpixel.js';
 import {iconURL} from '../ui/packpanel.js';
@@ -266,19 +267,69 @@ export async function create(host) {
     S.phase = 'land'; S.t = 0; S.held = false;
     host.hitstop?.(.06); host.shake?.(2, .12);
   }
-  function give(r = S.r, hand = false) {   // the fish in the pouch, the XP, the records (hand: grabbed, no rod: COME)
-    const c = CATCHES[r.id], n = r.two && !c.find ? 2 : 1, P = host.player, s = store();
-    const first = !!s && !s.n[r.id], record = !!s && !c.find && r.cm > (s.best[r.id] || 0) && !first;
-    if (s) { s.n[r.id] = (s.n[r.id] || 0) + n; if (!c.find && r.cm > (s.best[r.id] || 0)) s.best[r.id] = r.cm; pack()?.dirty(); }
-    pack()?.give(r.id, n);
-    const xp = Math.round(c.xp * (first ? 2 : 1) * (S.perfect && !hand ? 1.2 : 1));
-    pack()?.gain('fishing', xp, {x: P.x, y: P.y, h: P.z + 2.2});
-    Object.assign(I, {id: r.id, cm: r.cm, kg: r.kg, n, first, record, xp, t: 0});
-    ev('fish.catch', {x: P.x, y: P.y, id: r.id, cm: r.cm, kg: r.kg, n, first, record, rarity: c.rarity});
+  function give(r = S.r, hand = false) {   // the fish landed (hand: grabbed, no rod: COME)
+    credit(r, r.two && !CATCHES[r.id].find ? 2 : 1, S.perfect && !hand ? 1.2 : 1);
     if (!hand && !S.local) coop()?.fish({a: 'land', n: S.n});
     if (!hand && S.spot >= 0) { spent.add(S.spot); S.spot = -1; }
     if (!hand && S.shKey >= 0) { spent.add(S.shKey); S.shKey = -1; }   // (its shadow's spot: caught from)
+  }
+  function credit(r, n, k) {   // a catch in the pouch (n of it), the XP (x k), the records, the card
+    const c = CATCHES[r.id], P = host.player, s = store();
+    const first = !!s && !s.n[r.id], record = !!s && !c.find && r.cm > (s.best[r.id] || 0) && !first;
+    if (s) { s.n[r.id] = (s.n[r.id] || 0) + n; if (!c.find && r.cm > (s.best[r.id] || 0)) s.best[r.id] = r.cm; pack()?.dirty(); }
+    pack()?.give(r.id, n);
+    const xp = Math.round(c.xp * (first ? 2 : 1) * k);
+    pack()?.gain('fishing', xp, {x: P.x, y: P.y, h: P.z + 2.2});
+    Object.assign(I, {id: r.id, cm: r.cm, kg: r.kg, n, first, record, xp, t: 0});
+    ev('fish.catch', {x: P.x, y: P.y, id: r.id, cm: r.cm, kg: r.kg, n, first, record, rarity: c.rarity});
     jV++;
+  }
+
+  // ---------------------------------------------------------------- THE JAB (docs/KEEPSAKES.md: the Heron Feather)
+  // F.jab(x, y, water): a jab into the shallows by hand (features/keepsakes.js asks), rolled like a cast with HERON's limits
+  // (content/keepsakes.js heronRoll; co-op: the server's fish {a: 'jab'} -> {a: 'jabbed'}), landed at once: the card, the
+  // journal, the records, HERON.xp of a cast's Fishing XP. Emits fish.jab (the splash), fish.miss (nothing).
+  const GR = {n: 0, wait: -1, x: 0, y: 0, w: ''};   // the last jab: its number (co-op: the server's answer names it), s waited for it (-1: none)
+  const lvlNow = () => pack()?.level('fishing') || 1;
+  function jab(x, y, water) {
+    if (!ON || !active() || GR.wait >= 0 || S.phase || !WATER_SET.has(water)) return false;
+    GR.n++; GR.x = x; GR.y = y; GR.w = water;
+    ev('fish.jab', at(x, y));
+    const c = coop();
+    if (c) { GR.wait = 0; c.fish({a: 'jab', n: GR.n, x: +x.toFixed(2), y: +y.toFixed(2), w: water, lvl: lvlNow()}); }
+    else jabbed(heronRoll(R, {water, part: host.env?.part || 'day', lvl: lvlNow()}));
+    return true;
+  }
+  function jabbed(r) {   // what the jab came up with: a fish (landed at once) or nothing
+    GR.wait = -1;
+    if (!r) { ev('fish.miss', at(GR.x, GR.y)); return; }
+    credit(r, 1, HERON.xp);
+  }
+  const WATER_SET = new Set(Object.values(WATERS));
+  const WSH = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
+  // the shallows at (x, y) as fishing takes them: the water's name (lake | stream | river) where it's water and not deep
+  // (layout.js inStream: the lake past its shelf, the river, the pools), '' elsewhere or where fishing is off
+  function shallow(x, y) {
+    if (!ON || !active()) return '';
+    waterSample(x, y, WSH); const w = WATERS[WSH.kind];
+    return w && !host.inStream(x, y) ? w : '';
+  }
+
+  // ---------------------------------------------------------------- FISH CALLED TO A POINT (F.come: other features' asks; the
+  // Heron Feather's ring, content/keepsakes.js COME, comeAt; briefs' depth-shared: fishing draws all fish under the water, others
+  // ask and never draw their own). Asked every view while they should show.
+  // an ask: key (the asker's own: 'heron:me', 'heron:<peer id>'), the point they circle, k (0: gone, 1: at the point; between:
+  // that far up from the drop-off), n of them, seed (the key's hash: everyone draws the same), t (the view clock it was asked at)
+  const ASKS = []; for (let i = 0; i < 4; i++) ASKS.push({key: '', x: 0, y: 0, k: 0, n: 0, seed: 0, t: -9, spot: {x: 0, y: 0, r0: HERON.ring[0], r1: HERON.ring[1]}, wet: new Uint8Array(KCOME.max), wx: new Float32Array(KCOME.max), wy: new Float32Array(KCOME.max)});
+  const ASK_LAPSE = .3;   // s: an ask not renewed this long lapses
+  const viewNow = () => performance.now() / 1000;
+  function comeTo(key, x, y, k, n = 4) {   // (F.come; `come` is the lingon note below)
+    const t = viewNow(); let A = null;
+    for (const a of ASKS) if (a.key === key) { A = a; break; }
+    if (!A) for (const a of ASKS) if (!a.key || t - a.t > ASK_LAPSE) { A = a; A.key = key; A.seed = nameHash(key); A.wx.fill(1e9); break; }
+    if (!A) return false;
+    A.x = A.spot.x = x; A.y = A.spot.y = y; A.k = clamp(k, 0, 1); A.n = Math.min(n | 0, KCOME.max); A.t = t;
+    return true;
   }
 
   // what a recipe costs from the pouch: each need paid with the kind he has most of ({ids, n}[] -> {id: n}: game/inventory.js)
@@ -377,7 +428,7 @@ export async function create(host) {
   const LINGON_BURNT = codeOf('fish_lingon', 'burnt'), PS = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null}, MC = {id: '', q: 'done'};
   let come = 0, comeV = -1;
   // shallow water under (x, y): the lake's, a stream's, a river's edge, not the swimming water
-  const shallow = (x, y) => !!WATERS[waterSample(x, y, WS3).kind] && !host.inStream?.(x, y);
+  const wadeIn = (x, y) => !!WATERS[waterSample(x, y, WS3).kind] && !host.inStream?.(x, y);
   function burntFriendNear(P) {   // a friend with the burnt dish in them within COME.friend: their fish come to me
     const C = host.feature('coop')?.net; if (!C?.peers) return false;
     for (const p of C.peers.values()) if (p.md === LINGON_BURNT && C.sample(p, PS) && Math.hypot(PS.x - P.x, PS.y - P.y) <= COME.friend) return true;
@@ -420,7 +471,7 @@ export async function create(host) {
     while (SC.press > 0) { SC.press--; if (SC.phase === 'circle') grab(); }
     const P = host.player, sp = Math.hypot(P.vx || 0, P.vy || 0);
     const lure = come > 0 || (come === 0 && burntFriendNear(P));
-    const here = lure && !S.phase && free() && sp < COME.slow && shallow(P.x, P.y);
+    const here = lure && !S.phase && free() && sp < COME.slow && wadeIn(P.x, P.y);
     if (SC.phase === 'leave') { if ((SC.t += dt) > 1.2) SC.phase = ''; }
     else if (SC.phase) {
       if (!here) leave();
@@ -590,7 +641,7 @@ export async function create(host) {
     // a friend with the dish in them, in the water: a few at their legs too (view only: their own client has the real school)
     const Cn = host.feature('coop')?.net;
     if (Cn?.peers) for (const p of Cn.peers.values()) {
-      if (!p.md) continue; parseCode(p.md, MC); if (MC.id !== 'fish_lingon' || MC.q === 'burnt' || !Cn.sample(p, PS) || !shallow(PS.x, PS.y)) continue;
+      if (!p.md) continue; parseCode(p.md, MC); if (MC.id !== 'fish_lingon' || MC.q === 'burnt' || !Cn.sample(p, PS) || !wadeIn(PS.x, PS.y)) continue;
       for (let i = 0; i < 4; i++) { const a = t * .6 + i * 1.571 + (p.id | 0), r = .7 + .25 * Math.sin(i * 2.3 + t * .3); fishShape(PS.x + Math.cos(a) * r, PS.y + Math.sin(a) * r, a + Math.PI / 2, .18, Math.sin(t * 9 + i) * .03, PSC); }
     }
   }
@@ -624,6 +675,8 @@ export async function create(host) {
           S.r = {id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0, wait: +m.wait || 4, nibbles: Array.isArray(m.nibbles) ? m.nibbles.map(Number) : [], two: !!m.two};
         } else if (m.a === 'grabbed' && m.n === SC.wait && typeof m.id === 'string' && CATCHES[m.id]) {
           SC.wait = -1; handCatch({id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0});
+        } else if (m.a === 'jabbed' && m.n === GR.n && GR.wait >= 0) {
+          jabbed(typeof m.id === 'string' && CATCHES[m.id] ? {id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0} : null);
         } else if (m.a === 'caught' && m.id !== c.net.id && CATCHES[m.c]) { V.peer = m; V.peerT = 0; ui()?.toast(`${m.name || 'A friend'} caught a ${CATCHES[m.c].name}`, isFish(m.c) ? `${m.cm} cm` : '', RARITY[CATCHES[m.c].rarity]?.col); }
       }
       // presses since the last step, in order: a press, then (maybe) its let-go
@@ -631,6 +684,7 @@ export async function create(host) {
         if (S.presses > 0) { S.presses--; press(); }
         if (S.ups > 0 && S.presses === 0) { S.ups--; letGo(); }
       }
+      if (GR.wait >= 0 && (GR.wait += dt) > TUNE_NET.ask) jabbed(heronRoll(R, {water: GR.w, part: host.env?.part || 'day', lvl: lvlNow()}));   // (no answer: an old server)
       findSpots();
       school(dt);
       if (!S.phase) return;
@@ -683,6 +737,8 @@ export async function create(host) {
           case 'fish.snap': case 'fish.escape': spray(e.x, e.y, 8, 1.4); ring(e.x, e.y, 1); break;
           case 'fish.cast': V.flash = S.perfect ? .5 : 0; break;
           case 'fish.shadow': if (e.a === 'spook') { for (const b of BOLT) if (!b.on) { b.on = true; b.x = e.x; b.y = e.y; b.hx = e.hx; b.hy = e.hy; b.len = e.len; b.t = 0; break; } ring(e.x, e.y, 0); } break;
+          case 'fish.jab': spray(e.x, e.y, 12, 1.8); ring(e.x, e.y, 1); break;
+          case 'fish.miss': ring(e.x, e.y, 0); spray(e.x, e.y, 4, .9); break;
         }
       }
       // the bobber's life on the water
@@ -714,7 +770,7 @@ export async function create(host) {
       }
       shadowsView(dt);
       pose(dt);
-      if (active() && come < 0 && shallow(host.player.x, host.player.y)) F.shadowsFlee?.(host.player.x, host.player.y, COME.flee);   // (burnt lingon: the shadows dart off)
+      if (active() && come < 0 && wadeIn(host.player.x, host.player.y)) F.shadowsFlee?.(host.player.x, host.player.y, COME.flee);   // (burnt lingon: the shadows dart off)
     },
     frame() {
       // the shadows (Fishing 5): under the water, under the spots' rings and bubbles
@@ -775,9 +831,14 @@ export async function create(host) {
         const h = host.elev(V.lx, V.ly) + (P.z + 1.6 - host.elev(V.lx, V.ly)) * k + 1.6 * 4 * k * (1 - k);
         host.sprite({img: spriteOf(S.r.id), x, y, h, flip: ((V.leapT * 10) | 0) % 2 === 1});
       }
+      drawCalled();   // (the fish called to a point: F.come)
     },
     // the HD layer: the prompt, the charge meter, the "!", the fight gauge, the catch card
     hd(q, sc) { drawHD(q, sc); },
+    // other features' asks (FISH CALLED TO A POINT, THE JAB above): come(key, x, y, k, n) -> false when all 4 asks are taken;
+    // jab(x, y, water) (a sim step) -> false when it can't (off, fishing, a jab still out); shallow(x, y) -> water name | ''
+    come: comeTo, jab, shallow,
+    get jabbing() { return GR.wait >= 0; },
     hud: () => active() ? `fishing ${S.phase || (rod() ? 'rod ready' : 'no rod')} · ${SPK.n} spots${setN >= ANGLER.n ? ' · set' : ''}${S.r ? ' ' + S.r.id + ' ' + S.r.cm + 'cm' : ''}${S.phase === 'fight' ? ` dist ${S.dist.toFixed(2)} strain ${S.strain.toFixed(2)} ${S.surge}` : ''}${SC.phase ? ` · school ${SC.phase} ${SC.n}` : ''}` : '',
     // (tests) the catch log: {n: {id: count}, best: {id: cm}}
     get log() { return store(); },
@@ -791,6 +852,29 @@ export async function create(host) {
     // shadowsNear and the server's nose check keep the path
     shadowsFlee(x, y, r) { FL.on = true; FL.x = x; FL.y = y; FL.r = r; },
   };
+
+  // the shadows asked for (come): each a dark fish shape (like the fight's fish) circling its ask's point on its own
+  // comeAt circle, pushed out toward the drop-off by (1 - k) * KCOME.drop m; only on water (sampled again when it has
+  // moved .4 m), only within KCOME.near m of him, KCOME.max at most
+  const SO = {x: 0, y: 0, a: 0, len: 0};
+  const SH3 = [], SH2 = []; for (let i = 1; i <= 4; i++) { SH3.push({size: 3, alpha: .75 * i / 4}); SH2.push({size: 2, alpha: .55 * i / 4}); }
+  function drawCalled() {
+    const t = viewNow(), P = host.player; let left = KCOME.max;
+    for (const A of ASKS) {
+      if (!A.key || t - A.t > ASK_LAPSE || A.k <= .02 || left <= 0) continue;
+      if (Math.abs(A.x - P.x) > KCOME.near || Math.abs(A.y - P.y) > KCOME.near) continue;
+      const a = Math.max(1, Math.min(4, Math.ceil(A.k * 4))), out = (1 - A.k) * KCOME.drop;
+      for (let i = 0; i < A.n && left > 0; i++) {
+        const o = comeAt(A.spot, i, A.seed, t, SO), ux = o.x - A.x, uy = o.y - A.y, ul = Math.hypot(ux, uy) || 1;
+        const x = o.x + ux / ul * out, y = o.y + uy / ul * out;
+        if (Math.abs(x - A.wx[i]) + Math.abs(y - A.wy[i]) > .4) { A.wx[i] = x; A.wy[i] = y; waterSample(x, y, WSH); A.wet[i] = WSH.kind ? 1 : 0; }
+        if (!A.wet[i]) continue;
+        left--;
+        const h = host.elev(x, y) + .01, cx = Math.cos(o.a), cy = Math.sin(o.a);
+        for (let j = 0; j < 5; j++) { const u = (j / 4 - .5) * o.len; host.point(x + cx * u, y + cy * u, h, COL.shade, j > 0 && j < 4 ? SH3[a - 1] : SH2[a - 1]); }
+      }
+    }
+  }
 
   // ---------------------------------------------------------------- the HD layer (pixel art: whole UI pixels, the pixel font)
   const ICONC = {};

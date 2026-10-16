@@ -80,7 +80,8 @@ export const ITEMS = {
     pal: {w: '#e4d4aa', d: '#a08a5c', n: '#2a221c', c: '#5a4a3a'},
     icon: ['..........n.', '.........nw.', '........nwd.', '.......nwwd.', '......cwwd..', '.....nwwd...', '....nwwd....', '...cwwd.....',
       '..nwwd......', '.nwd........', '.nd.........', '............']},
-  // KEEPSAKES of the cave's sealed rooms (features/mining.js: a hollow wall's cache): they do nothing yet
+  // KEEPSAKES of the cave's sealed rooms (features/mining.js: a hollow wall's cache). Worn in a charm slot each bends a rule
+  // (content/keepsakes.js, docs/KEEPSAKES.md); a tally stick's notches redraw its icon (features/keepsakes.js iconOf)
   tally_stick: {name: 'Tally Stick', kind: 'material', col: '#c8a878', desc: 'a stick cut with rows of notches. Someone was counting something, down here, for a long time',
     pal: {w: '#c8a878', d: '#7a5c3a', n: '#3a2a1a'},
     icon: ['..........ww', '.........wwd', '........wnd.', '.......wwd..', '......wnd...', '.....wwd....', '....wnd.....', '...wwd......',
@@ -89,8 +90,12 @@ export const ITEMS = {
     pal: {w: '#f2ead6', b: '#c8b894', d: '#7a6c52'},
     icon: ['............', '...wwwwbb...', '..wwwwwbbd..', '..wwwwwbbd..', '...wwwbbd...', '...wwwbbd...', '....wwbd....', '....wwbd....',
       '.....wbd....', '.....wd.....', '......d.....', '............']},
-  // KEEPSAKES (the uncanny forest: features/uncanny.js, docs/UNCANNY.md): odd things the forest's secrets leave you. They do
-  // nothing yet; they sit in the pouch
+  full_tally_stick: {name: 'Full Tally Stick', kind: 'material', col: '#d8b888', desc: 'a stick cut with rows of notches, every one of them filled. It is warm, and it smells of soot',
+    pal: {w: '#a88a5e', d: '#4e3620', n: '#1e140a', c: '#f0dcb0'},
+    icon: ['..........ww', '.........wwc', '........wnc.', '.......wwc..', '......wnc...', '.....wwc....', '....wnc.....', '...wwc......',
+      '..wnc.......', '.wwc........', 'wwc.........', 'dd..........']},
+  // KEEPSAKES (the uncanny forest: features/uncanny.js, docs/UNCANNY.md): odd things the forest's secrets leave you. Worn in a
+  // charm slot each bends a rule (content/keepsakes.js, docs/KEEPSAKES.md)
   heron_feather: {name: 'Heron Feather', kind: 'material', col: '#d6dade', desc: 'a long grey feather; it was warm when you picked it up',
     icon: ['..........ff', '.........fgf', '........fgf.', '.......fgf..', '......fgnf..', '.....fgnf...', '....fgnf....', '...fgnf.....',
       '..fgf.......', '..ff........', '.k..........', 'k...........']},
@@ -163,6 +168,14 @@ export const ITEMS = {
     pal: {a: '#eef0f4', m: '#a8acb6', z: '#62666e'},
     icon: ['............', '............', '.....aam....', '....amzmm...', '....mmmzm...', '...amzmmzm..', '...mmmzmmm..', '...amzmmzm..', '...mmmmmmz..',
       '..azzzzzzzz.', '............', '............']},
+  // (the spring at dusk: sim/uncanny.js SECRETS.spring). Its card says one of `lies`, a new one each time the pack opens
+  // (ui/packpanel.js); what it does is none of them
+  fiddle_string: {name: 'Fiddle String', kind: 'material', col: '#e8dcb0', desc: 'a gut string from a fiddle, coiled',
+    pal: {s: '#e8dcb0', S: '#a8946a', p: '#5a3a22', P: '#8a5c34'},
+    icon: ['............', '.....pP.....', '....pPPp....', '.....pp.....', '.....ss.....', '....s..s....', '...s.SS.s...', '...s.S.Ss...',
+      '...s..SS.s..', '....s....s..', '.....ssss...', '............'],
+    lies: ['A fiddle string, wet though it\'s dry. Carry it and the fish will sing to you.', 'It hums when something hunts you.',
+      'Whoever carries it is never lost in the dark.', 'A string from a fiddle nobody owns. It wants to go back in the water.', 'It does nothing. Nothing at all.']},
 };
 // THE CATCHES (content/fishing.js): every fish and find is a material: it goes in the pouch
 for (const id of CATCH_IDS) {

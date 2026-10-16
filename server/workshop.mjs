@@ -159,7 +159,7 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
   }
   // CLOTHES: what a player may wear (room.mjs wear): a free piece, one his records are of, or anything with --wardrobe
   function owns(p, id) {
-    if (wardrobe || freePiece(GEAR_BY_ID[id])) return true;
+    if (wardrobe || freePiece(GEAR_BY_ID[id]) || GEAR_BY_ID[id]?.keepsake) return true;   // (a keepsake: a charm, the client's pouch decides: briefs' depth-shared)
     if (p?.rec) for (const r of p.rec.made.values()) if (r.item === id) return true;
     return false;
   }

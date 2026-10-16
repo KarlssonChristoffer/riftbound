@@ -9,6 +9,7 @@
 //            (s it glows after), light (m at full fire); rainproof: rain doesn't put it out (else TUNE.douse: docs/WEATHER.md)
 //   lamp     a steady light (features/builds.js): color, radius (m), intensity; takeBack: E by your own one takes it down and
 //            gives its cost back
+//   shelf    a Keepsake Shelf (features/keepsakes.js owns what stands on it, docs/KEEPSAKES.md): places (keepsakes it holds)
 //   cave     it can go down in the cave too (every build can stand anywhere in the persistent world; this one is made for it)
 //   smelt    a furnace (features/workshop.js, content/workshop.js): a fire build whose fire is inside it (features/campfires.js
 //            draws no flame or light for it: the workshop draws its mouth's glow); its heat, charge and bellows are the workshop's
@@ -29,6 +30,9 @@ export const BUILDS = {
     fire: {start: 2, log: 60, max: 6, embers: 60, light: 0}},
   anvil: {name: 'Stone Anvil', cost: {stone: 8, log: 1}, most: 2, r: .42, room: .8, prop: 'anvil', cave: true, anvil: true,
     desc: 'a flat block of hard stone on an oak stump: Tab by it lays a bar on it, LMB hammers.'},
+  keep_shelf: {name: 'Keepsake Shelf', cost: {wood: 3}, most: 1, r: .35, room: .7, prop: 'keepshelf',
+    desc: 'a plank of split log on two posts, for the odd things you find. E by it puts one on or takes yours back. Anyone may.',
+    shelf: {places: 5}},
 };
 export const BUILD_IDS = Object.keys(BUILDS);
 // placing: ahead of him (within E's reach from where he stands); the server's reach check; how close two builds may stand

@@ -148,6 +148,8 @@ export const EVENTS = {
   'fish.bait':          ['features/fishing.js', 'x, y, id (bait cut from a small fish at the pack panel)', 'audio'],
   'fish.gather':        ['features/fishing.js', 'x, y (him), n: the lingon\'s fish come to his legs (content/fishing.js COME)', 'audio'],
   'fish.grab':          ['features/fishing.js', 'x, y, ok (false: a miss, they scatter): a hand into the water for the fish flashing past his feet', 'audio'],
+  'fish.jab':           ['features/fishing.js', 'x, y (a jab into the shallows by hand: F.grab, the Heron Feather)', 'fishing (view), audio'],
+  'fish.miss':          ['features/fishing.js', 'x, y (the jab came up with nothing)', 'fishing (view), audio'],
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
@@ -259,6 +261,12 @@ export const EVENTS = {
   'lantern.snuff':      ['features/caves.js',     'x, y: the soot things put his lantern out', 'audio'],
   'lantern.relight':    ['features/caves.js',     'x, y: his lantern lit again after a snuff (by itself, or by a crystal, a lamp, a fire)', 'audio'],
   'critter.wake':       ['features/cavelife.js',  'x, y, i: a rock-thing unrolled and trots off (view)', 'audio'],
+  'keep.shelve':        ['features/keepsakes.js', 'x, y, id: a keepsake put on a Keepsake Shelf or taken back (the shelf\'s place)', 'audio'],
+  'keep.walk':          ['features/keepsakes.js', 'x, y: a shelf\'s Bark Doll walked off at dawn (the shelf\'s place)', 'audio'],
+  'keep.creak':         ['features/keepsakes.js', 'x, y: the worn Bark Doll creaks (a secret near)', 'audio'],
+  'keep.fiddle':        ['features/keepsakes.js', 'x, y: three fiddle notes (the Fiddle String: on a shelf at dusk, at the spring)', 'audio'],
+  'keep.notch':         ['features/keepsakes.js', 'x, y, n: the Tally Stick took a notch (n: how many it has now)', 'audio'],
+  'soot.flinch':        ['features/cavelife.js',  'x, y, h: a soot thing broke off from a Big Tooth\'s wearer (sim offline; the server\'s ev online)', 'cavelife (view), audio'],
   // building (features/builds.js, docs/BUILDING.md): a build's id is 'o' + n offline, the server's 'b' + n online
   'build.add':          ['features/builds.js',    'x, y, id, kind (content/builds.js), mine: a build went down (his, or online a friend\'s)', 'audio'],
   'build.remove':       ['features/builds.js',    'x, y, id, kind: a build was taken back', '(none yet)'],
