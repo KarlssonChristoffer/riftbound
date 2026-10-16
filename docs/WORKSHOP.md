@@ -85,7 +85,7 @@ haft), a test Iron Pick (pine haft, shard inlay), "the nearest furnace at white 
 
 The server is the authority (`server/workshop.mjs`, called from `server/room.mjs`):
 
-- **Records** are kept per player by a browser key (`localStorage rb.key`, sent in the hello with the save's copy of the
+- **Records** are kept per player by a browser key (`localStorage rb.player.key`, `src/game/playerkey.js`, shared with the skills in `server/players.mjs`; sent in the hello with the save's copy of the
   records, clothes first, at most 64). `make` mints a record and answers `{k: 'made', rec}`; the client pays its pouch when
   it hears it. The welcome gives every record back.
 - `fell` and `mine` carry the tool's uid; the server counts them into its record and sends `{k: 'rec', u, counts, marks}`

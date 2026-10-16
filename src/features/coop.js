@@ -24,7 +24,8 @@
 //                'stoke', 'unbuild'); its word (world: built, stoked, gone) is handed on in F.mail
 //   workshop     the server keeps the furnaces' charges and heat and every made thing's record (docs/WORKSHOP.md):
 //                features/workshop.js asks (act 'load', 'pump', 'fit', 'make', 'take'); its word (smith, made, rec) is handed on
-//                in F.mail. The hello carries the workshop's records (the key: skills below). F.tag(a, fn): a feature adds its fields to an act (fn(p) -> {}:
+//                in F.mail. The hello carries this browser's KEY (game/playerkey.js: the server keeps a player's records by it,
+//                server/players.mjs) and the workshop's records. F.tag(a, fn): a feature adds its fields to an act (fn(p) -> {}:
 //                the workshop puts the tool's record on a 'fell' and a 'mine')
 //   animals      the bag Lasso on the forest's animals (docs/FAUNA.md "The Lasso"): features/rope.js claims the animal on its
 //                rope (act('rope', id), 'free'), calms a roe ('calm') and takes a find ('find'); the animal on your rope goes
