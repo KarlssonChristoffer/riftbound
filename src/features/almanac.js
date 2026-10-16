@@ -270,6 +270,7 @@ export async function create(host) {
         if (l > 1e-3) { q.save(); host.G.hdShift?.(q, sc); card.arrow(q, ax * sc, ay * sc, ux / l, uy / l, u); q.restore(); }
       }
     },
+    dev: {group: 'Gathering'},   // (its menu rows: F10's dev menu, Gathering > Almanac)
     menu() {
       if (!ON || game()?.mode !== 'sandbox') return [];
       return [

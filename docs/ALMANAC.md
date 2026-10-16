@@ -48,7 +48,7 @@ own almanac in their own save. The party goal counts a friend's events too, whil
 ## Try it
 
 - `?chapter=3` starts at chapter III (1-6). `?almanac=0` turns it off.
-- Esc > Sandbox: rows to finish the chapter, finish Today, reset the almanac.
+- F10 (the dev menu) > Gathering > Almanac: rows to finish the chapter, finish Today, reset the almanac.
 - `node tools/test/almanac.mjs`: the data, Today's roll and the feature with a fake host.
 
 ## Files
