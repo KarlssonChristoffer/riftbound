@@ -35,6 +35,7 @@ export function createLoop(E) {
   let simSpeed = 1; if (host.mods) { const f = () => { simSpeed = host.mods.value('sim.speed', 1); }; host.mods.watch(f); f(); }
   let hovIt = null;         // the world item with the hover pulse on (the aimed target)
   const frameEvs = [];      // every event of this frame's sim steps, for the views
+  const FRAME = {dt: 0, t: 0};   // every feature's frame({dt, t}) gets this one (read it then, don't keep it)
   // ONE fixed sim step
   function simStep(dt) {
     stage.ents.sync(); pa.snap();   // the grid follows what moved; where everything was at the step's start (the draw)
@@ -103,7 +104,8 @@ export function createLoop(E) {
     const lr = env.leafRamp(); if (lr && (env.ver.leaf !== leafVer || stage.world !== leafWorld)) { stage.world.setFamily?.('leaf', lr); leafVer = env.ver.leaf; leafWorld = stage.world; }
     proj.draw(host);
     const fdt = ph && photo.still ? 0 : lastDt;   // (a still photo: nothing moves in the features' frames either)
-    for (const f of features) if (f.on !== false) f.frame?.({dt: fdt, t});
+    FRAME.dt = fdt; FRAME.t = t;
+    for (const f of features) if (f.on !== false) f.frame?.(FRAME);
     // the aim reticle (pixel cross at the cursor, front layer; drawn by the GPU: the layer's 2D canvas went up whole every
     // frame a gun was out for these 4 pixels' rects)
     if (P.state === 'draw' && !ph && !G.cine) {
