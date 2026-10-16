@@ -187,11 +187,11 @@ export async function create(host) {
     DO.extra = head && DO.C?.camp && !pack()?.store('mining')?.took ? DO.C.camp : null;
     return nearestOf(dollTargets(DO, x, y, TGT), x, y);
   }
-  let dawnN = null;
-  const dollAlways = () => flags.get('dollwalk') === 'always';
+  let dawnN = null, walkNow = false;
+  const dollAlways = () => walkNow || flags.get('dollwalk') === 'always';
   function dawn() {   // offline: a new dawn, the dolls may walk (the server's dawnTick, the same rules)
     const t = host.env?.t; if (t === undefined) return;
-    const n = Math.floor((t - 6) / 24); if (n === dawnN) return;
+    const n = Math.floor((t - 6) / 24) + (walkNow ? 1000 : 0); if (n === dawnN) return;
     const first = dawnN === null; dawnN = n; if (first || online()) return;
     const B = builds(), C = host.world?.cave || null, FP = host.layout?.forest || null;
     for (const [id, s] of SHV) {
@@ -205,6 +205,7 @@ export async function create(host) {
       s.walks++; setDoll(id, s, {x: w.x, y: w.y, by, n: s.walks}); shelvesV++;
       host.events.push({type: 'keep.walk', x: b.x, y: b.y, id: 'bark_doll'});
     }
+    if (walkNow) { walkNow = false; dawnN = Math.floor((t - 6) / 24); }
     saveShelves();
   }
   F.interact = p => {
@@ -381,6 +382,9 @@ export async function create(host) {
 
   F.menu = () => game()?.mode !== 'sandbox' ? [] : [
     {label: 'Keepsakes: give all (one of each in the pouch)', run: () => { const pk = pack(); if (pk) for (const id of KEEPSAKE_IDS) if (!pk.count(id)) pk.give(id, 1); }},
+    {label: 'Keepsakes: the Tally Stick +1 notch', run: () => { const s = store(); if (s) { s.tally++; pack()?.dirty(); iconHook.ver++; const P = host.player; host.events.push({type: 'keep.notch', x: P.x, y: P.y, n: s.tally}); } }},
+    {label: 'Keepsakes: the shelves\' dolls walk now (offline)', run: () => { if (!online()) walkNow = true; }},
+    {label: 'Keepsakes: to the spring (the Fiddle String, at dusk)', run: () => { const s = host.layout?.forest?.spring; if (s) host.teleport(s.x + 1.2, s.y + .4); }},
   ];
   F.biomeChanged = () => { for (const s of SHV.values()) if (s.dv) s.dv.body = s.dv.head = null; };   // (the rebuild disposed the world's meshes)
   F.hud = () => F.worn.size ? `keepsakes worn ${[...F.worn].join(', ')}${ON ? '' : ' (rules off)'} · tally ${store()?.tally ?? '-'}${HS.w ? ` · heron ${HS.w} still ${HS.still.toFixed(1)} k ${HS.k.toFixed(2)}${HS.away > 0 ? ' away ' + HS.away.toFixed(0) : ''}` : ''}` : '';
