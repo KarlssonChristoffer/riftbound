@@ -89,6 +89,10 @@ export const REACH = 4;
 // the world's clock when a server starts (in-game hours since the start; 9: the first morning) and real minutes per in-game day
 // (sim/env.js TUNE.dayMinutes; node server/server.mjs --hour / --daymin)
 export const CLOCK = {hour: 9, daymin: 20};
+// the URL switches that change the world's ground, walls and solid things (core/flags.js): everyone in a room must build the
+// same collision world, so the hello carries them (worldFlags) and the room turns away a join whose differ from the room's
+export const WORLD_FLAGS = ['forest', 'world', 'terrain', 'west', 'stones', 'tower', 'brook', 'walls', 'hut', 'decor'];
+export const worldFlags = get => WORLD_FLAGS.map(k => get(k)).map((v, i) => v === null || v === undefined ? '' : WORLD_FLAGS[i] + '=' + v).filter(Boolean).join('&');
 export const COLORS = ['#f0c060', '#7ec8e3', '#e98aa8', '#9ad07a', '#c9a0ff', '#ff9f5a', '#6fe0c0', '#e0e070'];
 
 export const encode = m => JSON.stringify(m);
