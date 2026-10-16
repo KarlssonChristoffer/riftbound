@@ -19,6 +19,8 @@
 // back, open.
 // OWNS: the #pause DOM, the open tab and group, focus, 'rb.settings', 'rb.menu'. READS: opts.items(), opts.title().
 // BUDGET: nothing per frame; the DOM is rebuilt only when something changes.
+import {styleMenu} from './menustyle.js';   // (its pixel look, over index.html's plain one)
+
 const TABS = [['game', 'Game'], ['graphics', 'Graphics'], ['audio', 'Audio'], ['controls', 'Controls']];
 const STORE = 'rb.settings', PAGES = 'rb.menu';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
@@ -28,6 +30,7 @@ const pct = (it, v) => Math.round((v - it.min) / ((it.max - it.min) || 1) * 100)
 export function createMenu({root, items, title = () => ['Paused', ''], groups = {}, paged = [], sound = () => {},
   changed = () => {}, resume = () => {}, look = () => {}, zoom = () => {}}) {
   root.innerHTML = `<div id="menu"></div><div class="m-hint">drag to look around · wheel to zoom · click to resume</div>`;
+  const sizeUI = styleMenu(root);
   const panel = root.querySelector('#menu');
   let open = false, tab = 'game', list = [], hov = '', drag = null, cats = [];
   let saved = {}; try { saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) {}
@@ -120,6 +123,7 @@ export function createMenu({root, items, title = () => ['Paused', ''], groups = 
   return {
     get open() { return open; },
     show() {
+      sizeUI();
       open = true; tab = 'game'; hov = ''; root.classList.remove('hidden'); draw(); sound('open');
       (panel.querySelector('.m-act.main') || panel.querySelector('.m-body [data-i]'))?.focus({preventScroll: true});
     },
