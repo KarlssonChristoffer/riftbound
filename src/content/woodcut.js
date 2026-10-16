@@ -8,7 +8,8 @@
 //           waits, given up after closeT s); its blow lands within reach + assist m of the bark, any way he faces. The axe
 //           comes out with the first press at a trunk and goes back stow s after the last swing
 //   tree    per species (trees3d.js): hp (blows at power 1 for a tree of scale 1; x scale ^ 1.5), tier (the axe it asks for;
-//           old: a tree this big or bigger asks for one tier more), logs (x scale, rounded; at least 1), xp (x the fell's XP)
+//           old: a tree this big or bigger asks for one tier more), logs (x scale, rounded; at least 1), xp (x the fell's XP),
+//           log (the item its logs are: content/items.js; oak's stays 'log'), bark (the family its logs on the ground are drawn in)
 //   regrow  in-game hours a stump stands before the tree is back (the world clock: sim/env.js, 20 real minutes a day), and
 //           only out of the player's way: farther than `far` m and off the screen
 //   log     a log on the ground: picked up within `pick` m, drawn in from `magnet` m after `delay` s
@@ -21,11 +22,11 @@ export const TUNE = {
 };
 
 export const TREES = {
-  oak: {hp: 6, tier: 1, old: 1.5, logs: 3, xp: 1},
-  dead: {hp: 4, tier: 1, logs: 2, xp: .7},
-  willow: {hp: 5, tier: 1, logs: 2, xp: .8},
-  birch: {hp: 4, tier: 1, logs: 2, xp: .8},
-  aspen: {hp: 4, tier: 1, logs: 2, xp: .8},
-  rowan: {hp: 4, tier: 1, logs: 2, xp: .8},
-  pine: {hp: 5, tier: 1, logs: 3, xp: .9},   // (the seeded forest's conifers: world/forest.js)
+  oak: {hp: 6, tier: 1, old: 1.5, logs: 3, xp: 1, log: 'log', bark: 'bark'},
+  dead: {hp: 4, tier: 1, logs: 2, xp: .7, log: 'deadwood', bark: 'deadwood'},
+  willow: {hp: 5, tier: 1, logs: 2, xp: .8, log: 'willow_log', bark: 'rotwood'},
+  birch: {hp: 4, tier: 1, logs: 2, xp: .8, log: 'birch_log', bark: 'birch'},
+  aspen: {hp: 4, tier: 1, logs: 2, xp: .8, log: 'aspen_log', bark: 'aspen'},
+  rowan: {hp: 4, tier: 1, logs: 2, xp: .8, log: 'rowan_log', bark: 'heron'},
+  pine: {hp: 5, tier: 1, logs: 3, xp: .9, log: 'pine_log', bark: 'rust'},   // (the seeded forest's conifers: world/forest.js)
 };

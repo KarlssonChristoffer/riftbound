@@ -115,9 +115,9 @@ export async function create(host) {
     const F0 = b.def.fire; if (!F0) return 'not a fire';
     const left = fuelAt(b, now());
     if (left >= (F0.max - .5) * F0.log) return 'it burns well';
-    if ((pack()?.count('log') || 0) < 1) return 'no logs in the pouch';
+    if ((pack()?.count('wood') || 0) < 1) return 'no logs in the pouch';   // (any species' log: game/inventory.js 'wood')
     if (online()) { coop().act('stoke', b.id); return ''; }
-    pack().take('log', 1); b.fuel = stokeFuel(left, b.def); b.t0 = T; ver++;
+    pack().take('wood', 1); b.fuel = stokeFuel(left, b.def); b.t0 = T; ver++;
     host.events.push({type: 'fire.addWood', x: b.x, y: b.y}); save();
     return '';
   }
@@ -138,7 +138,7 @@ export async function create(host) {
     } else if (m.s === 'stoked') {
       const b = list.get(m.id); if (!b) return;
       b.fuel = +m.fuel || 0; b.t0 = +m.t0 || 0; ver++;
-      if (mine) pack()?.take('log', 1);
+      if (mine) pack()?.take('wood', 1);
       if (!m.late) host.events.push({type: 'fire.addWood', x: b.x, y: b.y});
     } else if (m.s === 'gone') {
       const b = list.get(m.id); if (!b) return;

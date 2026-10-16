@@ -45,7 +45,7 @@ export async function create(host) {
     },
     prompt(p) {
       const b = fireOf(p); if (!b?.def.fire) return null;
-      const n = pack()?.count('log') || 0;
+      const n = pack()?.count('wood') || 0;   // (any log burns)
       return {text: n ? `E  add a log (${n})` : 'no logs in the pouch', color: n ? '#ffb060' : '#e8a070'};
     },
     frame() {

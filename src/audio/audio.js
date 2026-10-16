@@ -1287,7 +1287,7 @@ export function createAudio(ctx, host = {}) {
         case 'mine.spent': fire('treeLogs', e.x, e.y, {surf: 'stone'}); fire('kick', e.x, e.y, {mat: 'clay', surf: 'stone'}); break;   // (stand-ins: the vein breaks open)
         case 'mine.chunk': fire('hit', e.x, e.y, {mat: 'clay', g: .35}); break;   // (stand-in: a chunk into the pouch)
         case 'mine.take': fire('kick', e.x, e.y, {mat: 'wood', g: .5}); break;   // (stand-in: the old pick pulled from the wall)
-        case 'pack.add': if (e.id === 'log') fire('logPick', e.x, e.y); break;
+        case 'pack.add': if (e.id === 'log' || e.id === 'deadwood' || e.id.endsWith('_log')) fire('logPick', e.x, e.y); break;   // (any species' log: content/items.js wood)
         case 'fire.addWood': fire('campLog', e.x, e.y); break;   // a log on a campfire (features/campfires.js, lights.js)
         // FISHING (features/fishing.js, docs/FISHING.md)
         case 'fish.cast': fire('fishCast', e.x, e.y, {k: e.k, perfect: e.perfect}); break;
