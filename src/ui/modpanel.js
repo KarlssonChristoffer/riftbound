@@ -26,12 +26,12 @@ body:has(#pause:not(.hidden)) #modbench:not(.mounted) { visibility: hidden; }
 #modbench header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: calc(2 * var(--u)); }
 #modbench header b { font-weight: 400; color: var(--key); letter-spacing: var(--u); text-shadow: var(--u) var(--u) 0 #0c0907; }
 #modbench header button { border: 0; background: none; color: var(--dim); font: inherit; cursor: pointer; padding: 0; }
-#modbench .m-dim { color: var(--dim); }
+#modbench .mb-dim { color: var(--dim); }
 #modbench h5 { margin: calc(5 * var(--u)) 0 calc(2 * var(--u)); font: inherit; color: var(--dim); text-transform: uppercase; }
-#modbench .m-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(2 * var(--u)); margin-top: calc(3 * var(--u)); }
-#modbench .m-slots button { display: flex; flex-direction: column; align-items: center; gap: calc(1 * var(--u)); text-align: center; min-height: calc(44 * var(--u)); }
-#modbench .m-slots button small { color: var(--dim); font-size: inherit; }
-#modbench .m-slots .m-empty { width: calc(14 * var(--u)); height: calc(14 * var(--u)); border: calc(2 * var(--u)) solid transparent;
+#modbench .mb-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(2 * var(--u)); margin-top: calc(3 * var(--u)); }
+#modbench .mb-slots button { display: flex; flex-direction: column; align-items: center; gap: calc(1 * var(--u)); text-align: center; min-height: calc(44 * var(--u)); }
+#modbench .mb-slots button small { color: var(--dim); font-size: inherit; }
+#modbench .mb-slots .mb-empty { width: calc(14 * var(--u)); height: calc(14 * var(--u)); border: calc(2 * var(--u)) solid transparent;
   border-image: var(--m-well) 2 fill / calc(2 * var(--u)); }
 #modbench button { font: inherit; color: var(--ink); background: none; cursor: pointer; padding: calc(2 * var(--u)) calc(3 * var(--u)); text-align: left;
   border: calc(2 * var(--u)) solid transparent; border-image: var(--m-btn) 2 fill / calc(2 * var(--u)); }
@@ -39,37 +39,37 @@ body:has(#pause:not(.hidden)) #modbench:not(.mounted) { visibility: hidden; }
 #modbench button.on { border-image-source: var(--m-on); }
 #modbench button.no { color: var(--dim); cursor: default; }
 #modbench button.no:hover { border-image-source: var(--m-btn); }
-#modbench .m-list { display: flex; flex-direction: column; gap: calc(2 * var(--u)); }
-#modbench .m-list button { display: flex; gap: calc(4 * var(--u)); align-items: center; }
+#modbench .mb-list { display: flex; flex-direction: column; gap: calc(2 * var(--u)); }
+#modbench .mb-list button { display: flex; gap: calc(4 * var(--u)); align-items: center; }
 #modbench img { width: calc(14 * var(--u)); height: calc(14 * var(--u)); image-rendering: pixelated; flex: 0 0 auto; }
-#modbench .m-list small { display: block; color: var(--dim); font-size: inherit; }
-#modbench .m-desc { margin-top: calc(3 * var(--u)); min-height: calc(22 * var(--u)); }
-#modbench .m-riddle { color: var(--dim); margin-top: calc(1 * var(--u)); }
-#modbench .m-riddle::before { content: '? '; color: var(--key); }
-#modbench .m-react { margin-top: calc(1 * var(--u)); }
-#modbench .m-hint { margin-top: calc(5 * var(--u)); padding-top: calc(3 * var(--u)); border-top: var(--u) solid #4a3826; color: var(--dim); }`;
+#modbench .mb-list small { display: block; color: var(--dim); font-size: inherit; }
+#modbench .mb-desc { margin-top: calc(3 * var(--u)); min-height: calc(22 * var(--u)); }
+#modbench .mb-riddle { color: var(--dim); margin-top: calc(1 * var(--u)); }
+#modbench .mb-riddle::before { content: '? '; color: var(--key); }
+#modbench .mb-react { margin-top: calc(1 * var(--u)); }
+#modbench .mb-hint { margin-top: calc(5 * var(--u)); padding-top: calc(3 * var(--u)); border-top: var(--u) solid #4a3826; color: var(--dim); }`;
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 
 function html(m, mounted) {
   let h = `<header><b>WEAPON BENCH</b>${mounted ? '' : '<button data-a="close" data-v="">M</button>'}</header>`;
-  h += `<div>${esc(m.weapon.name)} <span class="m-dim">deals</span> <span style="color:${m.weapon.elem.col}">${esc(m.weapon.elem.name.toUpperCase())}</span></div>`;
-  h += '<div class="m-slots">';
+  h += `<div>${esc(m.weapon.name)} <span class="mb-dim">deals</span> <span style="color:${m.weapon.elem.col}">${esc(m.weapon.elem.name.toUpperCase())}</span></div>`;
+  h += '<div class="mb-slots">';
   for (const s of m.slots) {
     h += `<button class="${s.sel ? 'on' : ''}" data-a="slot" data-v="${s.slot}">`;
-    h += s.id ? `<img src="${s.icon}" alt="">` : '<span class="m-empty"></span>';
+    h += s.id ? `<img src="${s.icon}" alt="">` : '<span class="mb-empty"></span>';
     h += `<span style="${s.id ? `color:${s.col}` : ''}">${esc(s.id ? s.name : 'empty')}</span><small>${esc(s.label)}</small></button>`;
   }
-  h += `</div><div class="m-desc">${esc(m.desc)}</div>`;
+  h += `</div><div class="mb-desc">${esc(m.desc)}</div>`;
   const sel = m.slots.find(s => s.sel);
-  h += `<h5>${esc(sel ? sel.label : '')}: in your kit</h5><div class="m-list">`;
-  if (!m.parts.length) h += '<div class="m-dim">Nothing that fits here yet.</div>';
+  h += `<h5>${esc(sel ? sel.label : '')}: in your kit</h5><div class="mb-list">`;
+  if (!m.parts.length) h += '<div class="mb-dim">Nothing that fits here yet.</div>';
   for (const p of m.parts) h += `<button class="${p.on ? 'on' : ''}${p.ok || p.on ? '' : ' no'}" data-a="${p.on ? 'out' : 'fit'}" data-v="${p.on ? sel.slot : p.id}"><img src="${p.icon}" alt=""><span><span style="color:${p.col}">${esc(p.name)}</span><small>${esc(p.on ? 'fitted: click to take it out' : p.ok ? p.desc : p.why)}</small></span></button>`;
   h += '</div>';
-  if (m.riddles.length) { h += '<h5>Not found yet</h5>'; for (const r of m.riddles) h += `<div class="m-riddle">${esc(r)}</div>`; }
-  if (m.others.length) { h += '<h5>Your other weapons</h5>'; for (const o of m.others) h += `<div class="m-react">${esc(o.name)}: <span class="m-dim">${esc(o.line)}</span></div>`; }
-  if (m.reacts.length) { h += '<h5>When types meet</h5>'; for (const r of m.reacts) h += `<div class="m-react">${esc(r.name)}: <span class="m-dim">${esc(r.says)}</span></div>`; }
-  h += '<div class="m-hint">Fit what you like: it changes what each shot or blow does, not just how hard. Rain, snow, the bog and the night change the runes.</div>';
+  if (m.riddles.length) { h += '<h5>Not found yet</h5>'; for (const r of m.riddles) h += `<div class="mb-riddle">${esc(r)}</div>`; }
+  if (m.others.length) { h += '<h5>Your other weapons</h5>'; for (const o of m.others) h += `<div class="mb-react">${esc(o.name)}: <span class="mb-dim">${esc(o.line)}</span></div>`; }
+  if (m.reacts.length) { h += '<h5>When types meet</h5>'; for (const r of m.reacts) h += `<div class="mb-react">${esc(r.name)}: <span class="mb-dim">${esc(r.says)}</span></div>`; }
+  h += '<div class="mb-hint">Fit what you like: it changes what each shot or blow does, not just how hard. Rain, snow, the bog and the night change the runes.</div>';
   return h;
 }
 
