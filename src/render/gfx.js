@@ -229,6 +229,14 @@ uniform float uWPhase;               // the water clock, s: render() advances it
 uniform vec4 uWA, uWB;               // (rate texels/s, cell across, cell along, lapping tone | -1), (hi, lo, lightest tone, darkest tone)
 uniform vec3 uWRamp[4];              // the biome's four water tones, light -> dark
 float wh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// an INTEGER hash (0..1) of a world texel / cell p, a step of a clock t and a salt s. For anything keyed by world texels and a
+// running clock: wh's sin() needs small arguments, and GPUs reduce sin's argument in float32, so past ~1e5 it has only a few
+// bits left and the hash collapses into a handful of values, laid out in diagonal bands (the rain's pocks on the puddles and
+// the lake turned into striped patches as the still clock ran on, worst in a drizzle after a storm)
+float wih(ivec2 p, int t, uint s) {
+  uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u + uint(t) * 2246822519u + s * 3266489917u;
+  h = (h ^ (h >> 13)) * 1274126177u; return float((h ^ (h >> 16)) & 65535u) / 65536.;
+}
 float wvn(vec2 p, float per) {       // value noise whose y lattice repeats every per cells: the wrapped clock never pops
   vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   float y0 = mod(i.y, per), y1 = mod(i.y + 1., per);
@@ -285,7 +293,7 @@ vec3 wStill(ivec2 ti, int ring) {
     float e = min(1., k);
     r = wvn(vec2(ac / 4.5 + 1.3, (al - tr) / 2.25), 64.);   // fine ripples across the wind, at the wind's own pace
     if (r > 1. - .3 * e) t = t0 - 1; else if (r < .58 * e) t = t0 + 1;   // the crests catch the sky; the troughs (most of a paw, thinning to its edge) the dark
-    if (w > .6 && r > .9 && wh(floor(p / 2.) + floor(ck * 2.5) * .37) > 1.6 - w) t = -1;   // whitecaps, flickering on the crests
+    if (w > .6 && r > .9 && wih(ivec2(floor(p / 2.)), int(floor(ck * 2.5)), 1u) > 1.6 - w) t = -1;   // whitecaps, flickering on the crests
     ro = ivec2(r > .62 ? 1 : r < .38 ? -1 : 0, 0);   // (the bed wobbles a texel under the ripples)
   } else if (wvn(vec2(ac / 3. + 5.2, (al - tr * .25) / 16.), 128.) > .9 - .04 * (1. - w)) t -= 1;   // the calm's long glassy lines, lying along the wind
   // the shore laps: a dashed line creeping in and out over the first texels, a step every ~1.1 s (further and livelier in wind)
@@ -304,23 +312,23 @@ vec3 wStill(ivec2 ti, int ring) {
 // rain rings on all water and a fish now and then on still water (main, once per fragment: crisp under the smooth sampling; sw: still water)
 bool wStillAt(ivec2 ti) { int rc = int(texelFetch(uWater, clamp(ti, ivec2(0), ivec2(uTexSize) - 1), 0).r * 255. + .5); return rc >= 192 && (rc & 15) == 0; }
 vec3 wDrops(vec3 res, ivec2 ti, bool sw) {
-  ivec2 og = wOrg(); vec2 p = vec2(ti + og) + .5; float ck = uWS2.w; vec3 rl = sw ? uWSRamp[0] : uWRamp[0];   // (a ring: the water's lightest tone)
+  ivec2 og = wOrg(), pi = ti + og; vec2 p = vec2(pi) + .5; float ck = uWS2.w; vec3 rl = sw ? uWSRamp[0] : uWRamp[0];   // (a ring: the water's lightest tone)
   if (uWS2.x > .01) {   // RAIN: a cell of 8 x 8 texels may take a drop every ~.45 s at its own phase; the ring widens to 5 texels and fades;
     // between them the surface is pocked (a texel lit for 1/10 s here and there), so the rain reads over the whole lake, not only its rings
     vec2 c0 = floor(p / 8.);
     for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-      vec2 c = c0 + vec2(i, j); float ph = ck * 2.2 + wh(c + 17.1) * 7., n = floor(ph), a = ph - n;
-      if (wh(c * 1.31 + n * .173) > uWS2.x * .75) continue;
-      vec2 o = c * 8. + 1. + floor(vec2(wh(c + n * .71), wh(c.yx + n * .37 + 3.)) * 6.) + .5;
+      vec2 c = c0 + vec2(i, j); ivec2 ic = ivec2(c); float ph = ck * 2.2 + wih(ic, 0, 2u) * 7., n = floor(ph), a = ph - n; int ni = int(n);
+      if (wih(ic, ni, 3u) > uWS2.x * .75) continue;
+      vec2 o = c * 8. + 1. + floor(vec2(wih(ic, ni, 4u), wih(ic, ni, 5u)) * 6.) + .5;
       float d = length(p - o), rr = floor(a * 6.);
       if (rr < .5 ? d < .6 : abs(d - rr) < .5) res = mix(res, rl, rr < .5 ? .95 : .85 - a * .5);
     }
-    if (wh(p * .917 + floor(ck * 10.) * 1.37) < uWS2.x * .05) res = mix(res, rl, .6);
+    if (wih(pi, int(floor(ck * 10.)), 6u) < uWS2.x * .05) res = mix(res, rl, .6);
   }
   if (sw && uWS2.y > .01) {   // A FISH RISES: a cell of 40 texels may have one every ~9 s, over deep water: a splash, then two rings spreading 3 texels a second
-    vec2 c = floor(p / 40.); float ph = ck / 9. + wh(c + 5.3), n = floor(ph), a = (ph - n) * 9.;
-    if (a < 3.2 && wh(c * .77 + n * .29) < uWS2.y * .5) {
-      vec2 o = c * 40. + 10. + floor(vec2(wh(c + n), wh(c.yx + n + 1.)) * 20.) + .5; ivec2 oi = ivec2(o) - og;
+    vec2 c = floor(p / 40.); ivec2 ic = ivec2(c); float ph = ck / 9. + wih(ic, 0, 7u), n = floor(ph), a = (ph - n) * 9.; int ni = int(n);
+    if (a < 3.2 && wih(ic, ni, 8u) < uWS2.y * .5) {
+      vec2 o = c * 40. + 10. + floor(vec2(wih(ic, ni, 9u), wih(ic, ni, 10u)) * 20.) + .5; ivec2 oi = ivec2(o) - og;
       if (wStillAt(oi) && (uWBedOn < .5 || wBand(wBed(oi)) >= 2)) {
         float d = length(p - o), rr = floor(a * 3.);
         if (a < .3 && d < 1.3) res = uWFoam;
@@ -985,6 +993,12 @@ uniform float uSoftFam;   // a ramp family drawn without inner seams / occlusion
 // lying snow 0..1, wet ground 0..1, the lightning flash (rgb light added for an instant)
 uniform mat3 uSeasonM; uniform float uSeasonK, uSnow, uWet; uniform vec3 uFlashC;
 float hC(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// an integer hash (0..1) of a world texel p, a clock step t, a salt s: for world texels with a running clock (hC's sin() collapses
+// into diagonal bands on the GPU past arguments of ~1e5: the sun's glints on the water and the puddles came out in stripes)
+float hI(ivec2 p, int t, uint s) {
+  uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u + uint(t) * 2246822519u + s * 3266489917u;
+  h = (h ^ (h >> 13)) * 1274126177u; return float((h ^ (h >> 16)) & 65535u) / 65536.;
+}
 float vnC(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(hC(i), hC(i + vec2(1, 0)), f.x), mix(hC(i + vec2(0, 1)), hC(i + vec2(1, 1)), f.x), f.y); }
 uniform vec4 uFog;
@@ -1432,7 +1446,7 @@ void main() {
         float h = uLP[i].y - P.y; if (h < .05) continue;
         vec2 d = P.xz - uLP[i].xz; float r = uLP[i].w, t2 = (dot(d, d) + .0625 * h * h) / (r * r); if (t2 >= 1.) continue;
         float pool = (1. - t2) * (1. - t2);   // glints: single texels of the light's pool flick on and off on the water (the pool is lit by the light pass)
-        if (hC(floor(P.xz * uWPx.x) + vec2(float(i) * 5.3, wt) * 1.9 + 11.) > 1. - .006 * pool) wl += uLC[i].rgb * .5 * night;
+        if (hI(ivec2(floor(P.xz * uWPx.x)), int(wt), uint(i) + 1u) > 1. - .006 * pool) wl += uLC[i].rgb * .5 * night;
         float dx = dot(d, Rh) * pm, dd = (dot(d, Fh) * .81915 - h * .93969) * pm;   // px right of the mirror image, px below it
         float wob = floor(hC(vec2(gl_FragCoord.y * .37 + float(i) * 3.1, wt)) * 3.) - 1., len = 8. + 7. * h, al = dd < 0. ? 1. + dd / 3. : 1. - dd / len;
         if (abs(dx - wob) > 1.2 || al <= 0.) continue;
@@ -1443,7 +1457,7 @@ void main() {
     }
     if (uWRefl.y > 0. && sunStr > 0.) {   // sparse twinkling texels, thicker where the sun mirrors toward the camera
       float spec = .35 + .65 * smoothstep(.5, 1., normalize(uSunDir + uView).y);
-      if (hC(floor(P.xz * uWPx.x) + vec2(7.3, mod(floor(uWPhase * 10.), 89.)) * 1.7) > 1. - .0016 * uWRefl.y * spec) wl += sunC * min(1., sunStr) * .55;
+      if (hI(ivec2(floor(P.xz * uWPx.x)), int(mod(floor(uWPhase * 10.), 89.)), 99u) > 1. - .0016 * uWRefl.y * spec) wl += sunC * min(1., sunStr) * .55;
     }
     col += wl;
   }
