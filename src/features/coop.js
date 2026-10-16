@@ -104,11 +104,12 @@ export async function create(host) {
   // features/forage.js asks for a patch ('pick', p: its id 'd' + decor index, o: {lvl}: his Foraging level); features/mining.js
   // sends a blow on a vein ('mine', p: 'v' + its index in the cave's plan, o: {pow, lvl, tier})
   // features/builds.js puts a build down ('build', p: its kind, o: {x, y}), adds a log to a fire ('stoke', p: the build's id) and
-  // takes its own lamp back ('unbuild', p: the id)
+  // takes its own lamp back ('unbuild', p: the id). features/pack.js: the title he wears ('title', p: its id, '' none) and a
+  // --dev server's Skills rows ('dev', p: next | reset | titles | notitles); docs/SKILLS.md
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'crystal') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'crystal' || a === 'title' || a === 'dev') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }

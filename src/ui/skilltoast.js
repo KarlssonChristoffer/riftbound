@@ -6,7 +6,7 @@
 // OWNS: its queue (a few entries). BUDGET: a frame and two lines of text a toast while one shows; nothing otherwise.
 import {hdFrame, hdText, hdFont} from './hdpixel.js';
 
-const DUR = 4, MAX = 3, IN = .25, OUT = .6;
+const DUR = 4, MAX = 4, IN = .25, OUT = .6;
 
 export function createSkillToasts() {
   const Q = [];

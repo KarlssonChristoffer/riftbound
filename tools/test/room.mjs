@@ -6,7 +6,7 @@
 import {createRoom} from '../../server/room.mjs';
 import {createPlayers} from '../../server/players.mjs';
 import {forestPlan} from '../../src/world/forest.js';
-import {SKILLS, needXP, levelOf, fellXP, rateOf, IMPORT_CAP} from '../../src/content/skills.js';
+import {SKILLS, TITLES, needXP, levelOf, fellXP, rateOf, IMPORT_CAP} from '../../src/content/skills.js';
 import {VERSION, encode, decode} from '../../src/net/protocol.js';
 import {SPOT, SHADOW, shadowAt} from '../../src/content/fishing.js';
 
@@ -203,6 +203,31 @@ console.log(`room: seed ${SEED}, ${F.trees.size} trees, ${F.decor?.length ?? 0} 
     const low = await cast(needXP(4), 'nose');
     ok(low && !low.sh && low.wait >= 3.5, 'no shadows below Fishing 5', JSON.stringify(low));
   } else ok(false, 'a spot near the start');
+}
+
+// 7. titles: the room counts (walking from the accepted moves, a fell), grants (all six with --dev's row), the worn one goes to
+// the others (ptitle, and in a join), wearing one he hasn't is refused
+{
+  const P = createPlayers({SKILLS}), room = makeRoom(P, {dev: true});
+  const [fid, tr] = [...F.trees][0];
+  const a = join(room, KEY_A, {}, {x: tr[0] - 2, y: tr[1]}), b = join(room, KEY_B, {}, {x: tr[0] + 30, y: tr[1]});
+  a.say({k: 'act', a: 'fell', id: fid});
+  for (let k = 1; k <= 4; k++) { await nap(60); a.say({k: 'st', x: tr[0] - 2 - k * 2, y: tr[1], z: 0, phi: 0, s: 'run', pose: 'idle.0', rig: ''}); }
+  const rec = P.get(KEY_A);
+  ok(rec.n.walked >= 5 && rec.n.walked <= 8.5, 'the metres he walked (accepted moves)', JSON.stringify(rec.n));
+  ok(rec.n.trees === 1, 'a fell counted', JSON.stringify(rec.n));
+  a.say({k: 'act', a: 'title', id: 'mole'});
+  ok(a.last('deny')?.why === 'not yours', 'a title he hasn\'t: refused');
+  b.clear(); a.say({k: 'act', a: 'dev', id: 'titles'});
+  const ti = a.last('skills', m => m.ti)?.ti;
+  ok(ti && ti.titles.length === Object.keys(TITLES).length && TITLES[ti.title], 'dev: every title earned, the newest worn', JSON.stringify(ti));
+  ok(b.last('ptitle')?.t === ti?.title, 'the others see his title', JSON.stringify(b.last('ptitle')));
+  a.say({k: 'act', a: 'title', id: ''});
+  ok(b.last('ptitle')?.t === '' && rec.title === '', 'none worn');
+  a.say({k: 'act', a: 'title', id: 'owl'});
+  const c = join(room, 'c'.repeat(32));
+  ok(c.last('welcome')?.peers.find(q => q.id === a.last('welcome').id)?.t === 'owl', 'a late joiner sees his title in the welcome');
+  room.stop();
 }
 
 console.log(`room: ${passes} passed, ${fails} failed`);

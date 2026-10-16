@@ -6,7 +6,8 @@
 //   const panel = createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held, ask}); panel.toggle() / .open / .frame()
 //   (sections: other systems' parts of the panel, drawn after the skills: pack.section; recipes under their group's heading;
 //   moves(id) -> {had: [{name, line}], next: level}: the moves under a skill's bar (content/skills.js MOVES), movesVer() when
-//   they change without the skills changing: the pretend level)
+//   they change without the skills changing: the pretend level, the titles); titles() -> {worn, had: [id], names: {id: {name}}}:
+//   the row under the header (a click wears the next one he has, then none: wear(id)))
 //   iconURL(rows, pal) -> a data URL (exported: features/fishing.js draws its journal's unknown catches as silhouettes)
 // OWNS: the panel's element and its open state. READS: the inventory, the skills, the recipes (pack.recipe). Clicks: ask(r)
 // (pack carries a recipe out in the sim step).
@@ -45,10 +46,14 @@ const CSS = `
 #pack .p-grid7 .p-slot em { font-size: 9px; right: 2px; }
 #pack .p-slot.p-dim { background: rgba(0, 0, 0, .18); }
 #pack .p-note { color: var(--dim); font-size: 11px; margin-top: 3px; }
-#pack .p-move { margin-top: 3px; font: 10px/11px RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; letter-spacing: 0; }
-#pack .p-move b { font-weight: normal; }
-#pack .p-move small { display: block; color: #a89c84; }
-#pack .p-move.p-next { color: var(--dim); }`;
+#pack .p-skill .p-move { display: block; margin-top: 3px; font: 10px/11px RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; letter-spacing: 0; }
+#pack .p-skill .p-move b { font-weight: normal; }
+#pack .p-skill .p-move small { display: block; color: #a89c84; }
+#pack .p-skill .p-move.p-next { color: var(--dim); }
+#pack .p-title { display: block; width: 100%; margin: 4px 0 0; padding: 2px 0; text-align: left; background: none; border: 0; cursor: pointer;
+  font: 10px/11px RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; color: #f2d27a; }
+#pack .p-title small { color: var(--dim); }
+#pack .p-title:hover small { color: var(--ink); }`;
 
 const OUTLINE = '#1a120c';
 // an icon (12 x 12 rows of palette letters; pal: its own letters over PAL's) -> a 14 x 14 data URL: its fills, then an outline in
@@ -64,7 +69,7 @@ export function iconURL(rows, pal = null) {
   return c.toDataURL();
 }
 
-export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask, moves = null, movesVer = () => 0}) {
+export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask, moves = null, movesVer = () => 0, titles = null, wear = () => {}}) {
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const el = document.createElement('div'); el.id = 'pack'; el.className = 'hidden'; document.body.appendChild(el);
   const ICON = {};
@@ -76,7 +81,10 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
   const afford = r => Object.entries(r.cost || {}).every(([id, n]) => inv.count(id) >= n) && !(r.can?.());
 
   function build() {
-    let h = '<header><b>PACK</b><small>Tab</small></header><h5>Bag</h5><div class="p-bag">';
+    let h = '<header><b>PACK</b><small>Tab</small></header>';
+    const ti = titles?.();
+    if (ti?.had.length) h += `<button class="p-title" title="the title the others see under your name: click for the next">${ti.worn ? esc(ti.names[ti.worn].name) : '<small>no title</small>'} <small>&gt;</small></button>`;
+    h += '<h5>Bag</h5><div class="p-bag">';
     inv.bag.forEach((s, i) => {
       const d = s && ITEMS[s.id];
       h += `<div class="p-slot${i === held() ? ' held' : ''}"${d ? ` title="${esc(d.name)}: ${esc(d.desc)}"` : ''}>`;
@@ -105,6 +113,10 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     el.innerHTML = h;
   }
   el.addEventListener('click', e => {
+    if (e.target.closest('.p-title')) {   // (the next title he has, after the last none, then the first again)
+      const ti = titles?.(); if (!ti) return;
+      const L = [...ti.had, ''], i = L.indexOf(ti.worn); wear(L[(i + 1) % L.length]); return;
+    }
     const b = e.target.closest('.p-build'); if (!b) return;
     const r = recipes[+b.dataset.r]; if (r) ask(r);
   });

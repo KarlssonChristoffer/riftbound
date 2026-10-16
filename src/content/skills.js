@@ -87,6 +87,24 @@ export const MOVES = {
     {lvl: 30, id: 'deep_shadows', name: 'Deep shadows', line: 'At dawn and dusk the deep fish show mid-lake.', soon: true},
   ],
 };
+// TITLES (docs/SKILLS.md): earned by doing a thing a lot, one worn at a time (the newest, unless he picks another in the pack
+// panel; none hides it), shown under a co-op player's name. {name, n: the counter (what's counted, below), at: how much}.
+// The counters: cave (s in the cave: its plan's open floor), trees (felled), berries (blueberries picked, each one), night_fish
+// (fish landed between dusk and dawn), veins (spent: each who struck it), walked (m). Online the server counts and grants them
+// (server/room.mjs: on the acts it sees, the accepted moves); offline features/pack.js does from the events.
+export const TITLES = {
+  cave_rat: {name: 'the Cave Rat', n: 'cave', at: 45 * 60},
+  feller: {name: 'the Feller', n: 'trees', at: 300},
+  blueberry_mouth: {name: 'Blueberry Mouth', n: 'berries', at: 300},
+  owl: {name: 'the Owl', n: 'night_fish', at: 25},
+  mole: {name: 'the Mole', n: 'veins', at: 60},
+  wanderer: {name: 'the Wanderer', n: 'walked', at: 25000},
+};
+// the titles counter `n` now earns that `had` (ids) doesn't hold -> [id] (pure: the server's and the pack's)
+export function titlesEarned(name, total, had) { const out = []; for (const id in TITLES) { const T = TITLES[id]; if (T.n === name && total >= T.at && !had.includes(id)) out.push(id); } return out; }
+// is (x, y) in the cave (world/caves.js plan C: its band, its open floor)? (the Cave Rat's clock)
+export const inCave = (C, x, y) => !!C && x >= C.band.x0 && x <= C.band.x1 && y >= C.band.y0 && y <= C.band.y1 && C.inside(x, y) < 0;
+
 // id -> {skill, lvl, id, name, line, soon}
 export const MOVE_BY_ID = {};
 for (const sk in MOVES) for (const m of MOVES[sk]) MOVE_BY_ID[m.id] = {...m, skill: sk};
