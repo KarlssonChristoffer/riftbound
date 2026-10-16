@@ -250,7 +250,7 @@ export function createPlayer(H) {
     }
     return null;
   }
-  const cursorGround = () => { if (H.terrain) { const g = pickGround(0); if (g) return {x: g.x, y: g.y}; } return {x: (mouse.x + cam.x) / T.PPM, y: (mouse.y + cam.y) / T.PPMY}; };
+  const cursorGround = () => { const a = H.aimGround?.(); if (a) return a; if (H.terrain) { const g = pickGround(0); if (g) return {x: g.x, y: g.y}; } return {x: (mouse.x + cam.x) / T.PPM, y: (mouse.y + cam.y) / T.PPMY}; };
   function moveInput() {
     const dx = (keys.has('d') || keys.has('arrowright')) - (keys.has('a') || keys.has('arrowleft'));
     const dy = (keys.has('s') || keys.has('arrowdown')) - (keys.has('w') || keys.has('arrowup'));
@@ -308,7 +308,7 @@ export function createPlayer(H) {
     const fx = dx / l, fy = dy / l;   // launch from the bow, along the flight line (not the legs' facing)
     // flat at the same level; aimed down / up across levels or at a snapped target (plus the drop over the flight)
     const h0 = P.z + AIM_H, dist = Math.hypot(c.x - P.x, c.y - P.y) || 1;
-    const vh = c.target || Math.abs(c.h - h0) > .5 ? Math.max(W.vhMin, Math.min(W.vhMax, (c.h - h0) / (dist / v) + W.lift * dist / v)) : 0;
+    const vh = c.target || c.ray || Math.abs(c.h - h0) > .5 ? Math.max(W.vhMin, Math.min(W.vhMax, (c.h - h0) / (dist / v) + W.lift * dist / v)) : 0;
     const dmg = Math.round(W.dmg0 + Math.min(1, P.t * W.drawK) * W.dmgDraw);   // a full draw hits harder
     H.onShoot({x: P.x + fx * W.muzzle, y: P.y + fy * W.muzzle, h: h0, vx: fx * v, vy: fy * v, vh, life: W.life, dmg, kind: 'arrow'});
     P.twang = 0; PL.shots++; P.t = 0;
@@ -925,10 +925,12 @@ export function createPlayer(H) {
       P.frame = keys.has('c') ? 'crouch' : 'reach_up'; P.state = 'pose'; return;
     }
     // ---- locomotion: the direction snaps to the input (no gliding arc), only the speed ramps ----
+    // (first person, H.faceAhead: he faces the way the camera looks, up the screen, whichever way he walks: no turns)
+    const ahead = !!H.faceAhead?.(); if (ahead) { P.face = P.want = A.ND / 2; P.turn = null; P.fromAim = false; }
     const target = keys.has('q') ? SPEED.walk : keys.has('shift') ? SPEED.sprint : SPEED.run;
     let speed = Math.hypot(P.vx, P.vy), dir = speed > 1e-3 ? [P.vx / speed, P.vy / speed] : vecOf(P.face);
     if (mx || my) {
-      const nd = dirOf(mx, my);
+      const nd = ahead ? P.face : dirOf(mx, my);
       if (nd !== P.face) {  // (a new direction mid-turn starts a fresh turn from the current facing)
         if (P.fromAim) P.want = nd;       // coming out of an aiming stance: turn smoothly, no plant/push snap
         else if (speed > 2.3) startTurn(nd);   // running: rendered plant/push frames carry the body into the new way

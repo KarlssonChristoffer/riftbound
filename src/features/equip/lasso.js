@@ -147,13 +147,22 @@ export function createLassoSim(host, eq) {
 
   // ---------------------------------------------------------------- the aim (while spinning)
   const SA = [0, 0, 0], SB = [0, 0, 0];
+  // (the cursor and the screen it's on: the game's view; a camera view's own, its crosshair at the middle: features/chasecam.js)
+  const CUR = {x: 0, y: 0, z: 1, view: false};
+  function cursorOn(Gx) {
+    CUR.view = !!Gx.cine?.hud; CUR.z = CUR.view ? 1 : host.zoom;
+    CUR.x = CUR.view ? Gx.VW / 2 : host.VW / 2 + (host.mouse.x - host.VW / 2) * CUR.z; CUR.y = CUR.view ? Gx.VH / 2 : host.VH / 2 + (host.mouse.y - host.VH / 2) * CUR.z;
+    return CUR;
+  }
+  const onScreenAt = (Gx, x, h, y, out) => CUR.view ? Gx.toScreenInto(x, h, y, out) : Gx.gameToScreen(x, h, y, out);
   function pickAnchor(A) {   // the anchor point nearest the cursor on screen (within `pick` px), in reach
     const Gx = host.G; if (!Gx?.gameToScreen) return false;
-    const z = host.zoom, mx = host.VW / 2 + (host.mouse.x - host.VW / 2) * z, my = host.VH / 2 + (host.mouse.y - host.VH / 2) * z;
+    const {z, x: mx, y: my} = cursorOn(Gx);
     let best = -1, bd = TUNE.pick * z, bx = 0, by = 0, bh = 0;
     for (let i = 0; i < nSeg; i++) {
       const j = i * 7;
-      Gx.gameToScreen(SEG[j], SEG[j + 2], SEG[j + 1], SA); Gx.gameToScreen(SEG[j + 3], SEG[j + 5], SEG[j + 4], SB);
+      onScreenAt(Gx, SEG[j], SEG[j + 2], SEG[j + 1], SA); onScreenAt(Gx, SEG[j + 3], SEG[j + 5], SEG[j + 4], SB);
+      if (SA[0] < -9e4 || SB[0] < -9e4) continue;   // (behind a camera view)
       const ex = SB[0] - SA[0], ey = SB[1] - SA[1], l2 = ex * ex + ey * ey, t = l2 > 0 ? clamp(((mx - SA[0]) * ex + (my - SA[1]) * ey) / l2, 0, 1) : 0;
       const d = hypot2(SA[0] + ex * t - mx, SA[1] + ey * t - my);
       if (d >= bd) continue;
@@ -179,9 +188,10 @@ export function createLassoSim(host, eq) {
     gather(P.x, P.y, Math.max(R, ZIP.range));
     if (pickAnchor(A)) return A;
     if (pickWall(A)) return A;   // the top of a broken stretch of stone wall (STONES)
-    // the ground under the cursor (host.aim reads it at chest height: the ground is that much further up the screen)
+    // the ground under the cursor (host.aim reads it at chest height: the ground is that much further up the screen; a first
+    // person look's point is where it is: a.ray)
     let gx = a.x, gy = a.y;
-    if (!t) { const k = (a.h - host.elev(a.x, a.y)) * host.PPMH / host.PPMY; gx -= Math.sin(host.yaw) * k; gy -= Math.cos(host.yaw) * k; }
+    if (!t && !a.ray) { const k = (a.h - host.elev(a.x, a.y)) * host.PPMH / host.PPMY; gx -= Math.sin(host.yaw) * k; gy -= Math.cos(host.yaw) * k; }
     // a lit brazier there: the loop goes for it (pulled over)
     const br = brazierAt(gx, gy) || brazierAt(a.x, a.y);
     if (br) { A.kind = 'prop'; A.who = br; A.x = br.x; A.y = br.y; A.h = (br.z || 0) + .95; A.d = hypot2(br.x - P.x, br.y - P.y); A.ok = A.d <= R + .4; if (A.ok) return A; }
@@ -224,11 +234,11 @@ export function createLassoSim(host, eq) {
   }
   function pickWall(A) {   // a pullable top near the cursor on screen (within `pick` px), in reach
     const Gx = host.G; if (!Gx?.gameToScreen) return false;
-    const z = host.zoom, mx = host.VW / 2 + (host.mouse.x - host.VW / 2) * z, my = host.VH / 2 + (host.mouse.y - host.VH / 2) * z;
+    const {z, x: mx, y: my} = cursorOn(Gx);
     let best = null, bd = TUNE.pick * z, bh = 0;
     for (const p of ents.near(P.x, P.y, TUNE.range + 1, nearB)) {
       if (!pullable(p)) continue;
-      const h = (p.z || 0) + topOfProp(p); Gx.gameToScreen(p.x, h, p.y, SA);
+      const h = (p.z || 0) + topOfProp(p); onScreenAt(Gx, p.x, h, p.y, SA);
       const d = hypot2(SA[0] - mx, SA[1] - my); if (d >= bd || hypot3(p.x - HP[0], p.y - HP[1], h - HP[2]) > TUNE.range) continue;
       best = p; bd = d; bh = h;
     }
