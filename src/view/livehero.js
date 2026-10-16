@@ -1400,6 +1400,18 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     axisAngle(1, 0, 0, Math.sin(tripT * .8 + 1) * 3 * k * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);
     if (NECK >= 0) { axisAngle(0, 1, 0, Math.sin(tripT * 1.7 + 2) * 7 * k * DEG, R4); turnTree(w, NECK, R4, w[n + 4], w[n + 5], w[n + 6]); }
   }
+  // ---- HICCUPS (features/meals.js: something odd off the Try stick; its F.hicN counts them): each one a little hop of the whole
+  // body (m up, s) with the head jerking back. Friends see it too (the drawn pose's bones)
+  const HIC = {h: .05, dur: .22, head: 9};
+  let hicN = -1, hicT = HIC.dur, MEALS_F = null;
+  function hiccup(w, dt) {
+    MEALS_F ??= app.feat('meals'); const n = MEALS_F?.hicN ?? 0;
+    if (n !== hicN) { if (hicN >= 0) hicT = 0; hicN = n; }
+    if (hicT >= HIC.dur) return;
+    hicT += dt; const e = Math.sin(Math.PI * Math.min(1, hicT / HIC.dur));
+    if (NECK >= 0) { const o = NECK * 7; axisAngle(1, 0, 0, -HIC.head * e * DEG, R4); turnTree(w, NECK, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    for (let i = 6; i < w.length; i += 7) w[i] += HIC.h * e;
+  }
   function weather(w, P, dt, sample, free) {
     const X = SEN && SEN.S.wx, on = !!(K.wx && free && X && WX_ON.has(P.state) && HEAD >= 0), slow = Math.hypot(P.vx || 0, P.vy || 0) < 2.3 && P.state !== 'land';
     // the hat: held through a gust, let go a while after it has eased
@@ -1635,7 +1647,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // rope), a hit's flinch always
     SEN ??= app.feat('senses');
     const free = proc && !aiming && emS < 0 && K.demo !== 'swing' && idK !== 'fidget' && !lsBusy();   // (a fidget has the head itself; the rope work its own)
-    mlean(Wt, P, dt, phi - yaw, yaw, free && flowOn, sample); look(Wt, P, dt, sample, free); weather(Wt, P, dt, sample, free); wobble(Wt, dt); flinch(Wt, P, dt, aiming);
+    mlean(Wt, P, dt, phi - yaw, yaw, free && flowOn, sample); look(Wt, P, dt, sample, free); weather(Wt, P, dt, sample, free); wobble(Wt, dt); hiccup(Wt, dt); flinch(Wt, P, dt, aiming);
     stats.look = lkK > 0 ? (SEN?.S.look.kind || '') : ''; stats.flinch = flT < flDur ? flT / flDur : -1;   // (dev)
     // 6) the demos
     ropeN = 0;

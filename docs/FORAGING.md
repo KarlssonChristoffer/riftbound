@@ -21,10 +21,9 @@ shrubs with dark berries, lingonberries the low glossy sprigs with red clusters,
 - A picked berry patch keeps its green twigs, the berries gone. A picked mushroom is gone.
 - **Grows back** after its days on the world clock (a day is 20 real minutes): berries 2, chanterelles 3, fly agaric 1.
   Chanterelles also come back when rain starts. `?regrow=0.05` makes it 20 times quicker to test.
-- **Cook** at a burning campfire (Tab > Cook): fried chanterelles (3 chanterelles: chop 10% harder, and mine 15% harder
-  once mining is in), blueberry soup (5 blueberries: move 8% faster), fish with lingon (1 small fish, 3 lingonberries:
-  fishing luck +8%, bites 15% sooner). 6 minutes each, one meal at a time as before.
-- The fly agaric does nothing yet ("Don't eat this. (Or do.)"): its broth comes with the cooking slice.
+- **Cook** at a burning campfire (Tab > Cook), on a stick over the flames: fried chanterelles (3 chanterelles: the ringing
+  pick), blueberry soup (5 blueberries: glowing footprints), fish with lingon (1 small fish, 3 lingonberries: fish come to
+  your legs), the fly agaric broth (the trip). What each one does, raw, done, just right and burnt: docs/COOKING.md.
 
 Dev: Esc > Sandbox > Gathering: marks on the patches (green dots, red while picked; or `?gathermarks=1`), everything grows
 back (offline), a handful of each plant in the pouch. `?forage=0` turns foraging off.
@@ -62,7 +61,7 @@ offline only for now (the weather is each player's own).
 | XP a pick | 3 / 3 / 5 / 4 | PLANTS `xp` |
 | Foraging skill | +2% chance of one more a level | `content/skills.js` `forage.extra` |
 | berry comb | +1 on berry patches, no stop | `content/gear.js` `forage.comb` |
-| the new meals | 6 min | `content/meals.js` |
+| the meals' moods | 180 s done (raw 90, just right 240, burnt 120) | `content/meals.js` TUNE (docs/COOKING.md) |
 
 ## Files
 

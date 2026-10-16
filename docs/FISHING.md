@@ -43,9 +43,12 @@ zander and burbot x3, eel x2.5, trout and salmon x2, perch x1.3 (`BAITS`).
 
 ## Meals
 
-Tab, **Cook**, standing within 2.5 m of a burning campfire (a fire with fuel, features/campfires.js `burningNear`). A meal is
-eaten at once and its buff lasts its time; one meal at a time (a new one replaces it). The time left shows bottom left and
-in the journal, and is saved. Each need is paid with the kind you have most of.
+Tab, **Cook**, standing within 2.5 m of a burning campfire (a fire with fuel, features/campfires.js `burningNear`). Since
+2026-10-16 every dish is cooked on a stick over the flames and pulled raw, done, just right or burnt, and the smoked eel,
+the pike stew and the fish with lingon have moods instead of numbers you see: **docs/COOKING.md**. The four below without a
+mood keep their numbers (done or just right; raw: the numbers for half the time; burnt: a smoke trail, animals notice you
+from twice as far). One meal at a time (a new one replaces it). The time left shows bottom left and in the journal, and is
+saved. Each need is paid with the kind you have most of. The table is the old numbers (still under the moods when done):
 
 | meal | needs | lasts | does |
 |---|---|---|---|
@@ -128,6 +131,10 @@ fishing.
   get a toast "Anna caught a Pike, 54 cm".
 - **Spots, bait, meals and the set** go into the server's roll too: the cast says `spot`, `bait` and `meal`; the server
   checks the spot against its own clock and the hash, and counts the set from what you wear.
+- **A hand grab** (the lingon's fish: docs/COOKING.md) asks the server (`grab`); it checks the meal codes and rolls a common
+  or fine fish (`roll`'s `hand`).
+- **Fish shadows** come from the skill-verbs build (PR #27, docs/SKILLS.md); burnt lingon makes them dart away from you
+  (`shadowsFlee`).
 - Not yet: others seeing your line, bobber and fish; the server checking the pouch (bait and meals are the client's word,
   like the Fishing level).
 

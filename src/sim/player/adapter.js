@@ -50,8 +50,9 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   // a run rule's wind on the player (features/omens.js, a gale): host.mods 'player.windX' / 'player.windY' (world axes, the
   // share of speed gained moving along it: .25 = 25% faster with it, slower against it), turned into the view frame for
   // player.js's moveBy (H.wind: null without one)
-  let PWX = 0, PWY = 0; const PWV = [0, 0];
-  if (mods) { const f = () => { PWX = mods.value('player.windX', 0); PWY = mods.value('player.windY', 0); }; mods.watch(f); f(); }
+  // (and 'player.current': x on the river's pull while he swims, waterAt below: the pike stew's weight, the ash's lightness)
+  let PWX = 0, PWY = 0, PCUR = 1; const PWV = [0, 0];
+  if (mods) { const f = () => { PWX = mods.value('player.windX', 0); PWY = mods.value('player.windY', 0); PCUR = mods.value('player.current', 1); }; mods.watch(f); f(); }
   const windV = () => { if (!PWX && !PWY) return null; const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); PWV[0] = PWX * c - PWY * s; PWV[1] = PWX * s + PWY * c; return PWV; };
   // COLLISION in the world (round, so it doesn't change with the camera): world/collide.js with his body PB (its props: those whose
   // height his body is within, feet to head: collide.js column; rubble low enough stepped over; the ground: tested at his middle).
@@ -73,7 +74,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     const hw = STREAM.w(y) / 2, a = (x - STREAM.cx(y)) / hw;
     if (!(FOREST !== null && y < 0) && y >= STREAM.y0 && y <= STREAM.y1 && Math.abs(a) <= 1) {   // the river: downstream (+y) along its line
       const dx = (STREAM.cx(y + .05) - STREAM.cx(y - .05)) / .1, l = Math.hypot(dx, 1);
-      const v = CUR.v * (1 - (1 - CUR.edge) * a * a) * clamp((lipAt(x) - LIP - y) / CUR.ease, 0, 1) / l, wx = dx * v, wy = v;
+      const v = CUR.v * PCUR * (1 - (1 - CUR.edge) * a * a) * clamp((lipAt(x) - LIP - y) / CUR.ease, 0, 1) / l, wx = dx * v, wy = v;
       WV[1] = wx * c - wy * s; WV[2] = wx * s + wy * c;
     }
     return WV;

@@ -4,10 +4,12 @@
 //
 // client -> server
 //   hello    {v, name}                                   the first message; the server answers with welcome
-//   st       {x, y, z, phi, s, pose, rig, w?, wn?, ls?, tp?}   the local player 20 times a second: world metres (x east, y south,
+//   st       {x, y, z, phi, s, pose, rig, w?, wn?, ls?, tp?, lt, md}   the local player 20 times a second: world metres (x east, y south,
 //            z up), facing phi (rad, the arena's atan2(x, y)), s = his state (idle, move, roll, ...), pose = the frame drawn,
 //            rig = the live model he wears (gunslinger | outlaw | ''), w = the drawn pose's bones (encodePose) when it changed
-//            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport
+//            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport,
+//            lt = 1 his lantern burns in the cave (2: a burnt eel's shining eyes, only the soot things take it), md = the meal in him
+//            (content/meals.js codeOf: 'fish_lingon', 'pike_stew!' burnt, 'smoked_eel~' underdone; '' none)
 //   act      {a, id}                                      ask the server to change the shared world: a 'fell' (id: a forest tree),
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
 //            dawn | day | dusk | night: dev, the world's clock to the next such hour)
@@ -15,14 +17,15 @@
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
 //            (the server checks it), bait / meal = the bait on the hook, the meal eaten (ids); the server rolls what bites. {a: 'land', n}: he
-//            landed it (told to everyone); {a: 'lost', n}: it got away
+//            landed it (told to everyone); {a: 'lost', n}: it got away. {a: 'grab', n, x, y, w}: a fish grabbed by hand (the
+//            lingon's school: content/fishing.js COME; the server checks the meal codes and answers {a: 'grabbed', n, id, cm, kg})
 //   ping     {c}                                         c = the client's clock (ms), echoed
 // server -> client
 //   welcome  {v, id, name, color, seed, t, world, peers, clock, unc}   world = {id: state} (what's been done to the world so far),
 //            peers = [peer], clock (below), unc = {sec: {id: {s, by, n}}, shift} (the uncanny forest: its secrets' states, the
 //            night shift's strength: docs/UNCANNY.md; null when the server runs without it)
 //   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn, g (the gear worn)}
-//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0], ...], c?}   every tick; w only when it changed since the last snap;
+//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0, lt, md], ...], c?}   every tick; w only when it changed since the last snap;
 //            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
 //   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it

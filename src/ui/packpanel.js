@@ -79,6 +79,7 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
   let open = false, kInv = -1, kSk = -1, kHeld = -2, kN = -1, kT = 0, kSec = -1;
   const secVer = () => { let v = 0; for (const s of sections) v = (v * 31 + s.ver()) | 0; return v; };
   const costText = c => Object.entries(c).map(([id, n]) => `${n} ${ITEMS[id]?.name || id}`).join(', ');
+  const shown = r => !r.shown || r.shown();
   const afford = r => Object.entries(r.cost || {}).every(([id, n]) => inv.count(id) >= n) && !(r.can?.());
 
   function build() {
@@ -99,14 +100,18 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
       h += `<div class="p-bar"><i style="width:${(k * 100).toFixed(1)}%;background:${S.col}"></i></div></div>`;
     }
     for (const s of sections) h += `<h5>${esc(s.title)}</h5>` + s.html(esc, icon);
-    // (the recipes under their group's heading, in the order the groups came: Build, Cook, Bait ...)
-    for (const g of new Set(recipes.map(r => r.group || 'Build'))) {
+    // (the recipes under their group's heading, in the order the groups came: Build, Cook, Bait ...; a recipe whose shown()
+    // says no is left out: features/meals.js's dishes not found yet)
+    for (const g of new Set(recipes.filter(shown).map(r => r.group || 'Build'))) {
       h += `<h5>${esc(g)}</h5>`;
-      recipes.forEach((r, i) => { if ((r.group || 'Build') === g) h += `<button class="p-build${afford(r) ? '' : ' no'}" data-r="${i}"${r.desc ? ` title="${esc(r.desc)}"` : ''}><span>${esc(r.name)}</span><small>${esc(costText(r.cost || {}))}</small></button>`; });
+      recipes.forEach((r, i) => { if ((r.group || 'Build') === g && shown(r)) h += `<button class="p-build${afford(r) ? '' : ' no'}" data-r="${i}"${r.desc ? ` title="${esc(r.desc)}"` : ''}><span>${esc(r.name)}</span><small>${esc(costText(r.cost || {}))}</small></button>`; });
     }
     el.innerHTML = h;
   }
   el.addEventListener('click', e => {
+    // a section's own buttons (data-sec: its id; the rest of the element's data- is the section's): its click(data, ask)
+    const sb = e.target.closest('[data-sec]');
+    if (sb) { const s = sections.find(q => q.id === sb.dataset.sec); s?.click?.(sb.dataset, ask); return; }
     const b = e.target.closest('.p-build'); if (!b) return;
     const r = recipes[+b.dataset.r]; if (r) ask(r);
   });
