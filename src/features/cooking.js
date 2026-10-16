@@ -10,12 +10,13 @@
 //   Sim: the stick's clock, the pull, the drop, the quality. View: the stick, the food's colour, fat drips and smoke; HD: the prompt
 //   and (Esc > Sandbox) the timing bar.
 // OWNS: the stick (S), its particles, the timing bar switch. READS: content/meals.js (MEALS cook.t, TUNE), campfires (burningAt,
-//   the fire's fuel), meals (eat), host.PL (hold, unhold, faceShot, moveInput), host.events (player.hit / player.hurt).
+//   the fire's fuel), meals (cooked, odd), host.PL (hold, unhold, faceShot, moveInput), host.events (player.hit / player.hurt).
 // EMITS: cook.start, cook.sizzle, cook.flare, cook.pull, cook.drop.
-// API: F.game (the stick is on: meals asks before paying), F.busy (a dish is on it now), F.start(id) -> bool, F.S (tests).
+// API: F.game (the stick is on: meals asks before paying), F.busy (a dish is on it now), F.start(id, {odd, col}?) -> bool (odd: the
+//   Try stick's something odd, no dish), F.S (tests). Pulled out: meals.cooked(id, q) (learned, journal, eaten) or meals.odd().
 // BUDGET: sim: a few compares a step while cooking (nothing otherwise). View: a stick (3 lines), ~10 points of food, <= 40 drips
 //   and smoke; HD: one prompt (and the bar) while cooking.
-import {MEALS, TUNE} from '../content/meals.js';
+import {MEALS, TUNE, TRY} from '../content/meals.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
 import {hdUnit, hdPrompt, hdFrame} from '../ui/hdpixel.js';
@@ -35,19 +36,21 @@ export async function create(host) {
   const game = () => host.feature('game'), ui = () => game()?.ui || null;
   const fires = () => host.feature('campfires');
   const active = () => ON && host.biome?.id === 'ruins' && game()?.mode === 'sandbox';
-  const S = {on: false, id: '', t: 0, cookT: 3, fx: 0, fy: 0, fz: 0, presses: 0, sizT: 0, flared: false, bar: false};
+  const S = {on: false, id: '', odd: false, col: '', t: 0, cookT: 3, fx: 0, fy: 0, fz: 0, presses: 0, sizT: 0, flared: false, bar: false};
   const ev = (type, o) => { o.type = type; host.events.push(o); };
   let devI = 0;
 
   // the quality if pulled at s on the stick (content/meals.js TUNE: right inside done; raw before, burnt after)
   function qualityAt(t) { const d = t - S.cookT; return d < -WIN ? 'raw' : Math.abs(d) <= TUNE.right ? 'right' : d <= WIN ? 'done' : 'burnt'; }
-  function start(id) {
-    if (!ON || S.on || !MEALS[id] || !active()) return false;
+  // o.odd: the Try stick's something odd (id '': no dish; o.col its colour on the stick, TRY.t s)
+  function start(id, o) {
+    const odd = !!o?.odd;
+    if (!ON || S.on || (!odd && !MEALS[id]) || !active()) return false;
     const P = host.player, b = fires()?.burningAt?.(P.x, P.y, STICK.r); if (!b) return false;
     const c = Math.cos(host.yaw), s = Math.sin(host.yaw), dx = b.x - P.x, dy = b.y - P.y;
     if (dx * dx + dy * dy > .01) host.PL.faceShot?.(dx * c - dy * s, dx * s + dy * c);   // (his view frame)
     host.PL.hold?.(STICK.pose, STICK.hold); if (P.state !== 'hold') return false;   // (busy: rolling, climbing ... no stick)
-    Object.assign(S, {on: true, id, t: 0, cookT: MEALS[id].cook?.t || 3, fx: b.x, fy: b.y, fz: b.z || 0, presses: 0, sizT: 0, flared: false});
+    Object.assign(S, {on: true, id: odd ? '' : id, odd, col: odd ? o.col || TRY.col : '', t: 0, cookT: odd ? TRY.t : MEALS[id].cook?.t || 3, fx: b.x, fy: b.y, fz: b.z || 0, presses: 0, sizT: 0, flared: false});
     ev('cook.start', {x: b.x, y: b.y, id});
     return true;
   }
@@ -55,7 +58,7 @@ export async function create(host) {
     S.on = false; S.presses = 0; host.PL.unhold?.();
     if (!q) { ev('cook.drop', {x: S.fx, y: S.fy, id: S.id}); const P = host.player; ui()?.float(P.x, P.y, P.z + 2, 'it fell in the fire', '#a8b0b8'); return; }
     ev('cook.pull', {x: S.fx, y: S.fy, id: S.id, q});
-    host.feature('meals')?.eat(S.id, q);
+    const M = host.feature('meals'); if (S.odd) M?.odd(); else M?.cooked(S.id, q);
   }
 
   // ---------------------------------------------------------------- the view: the stick, the food, drips and smoke
@@ -71,10 +74,10 @@ export async function create(host) {
   const mixHex = (a, b, k) => { const p = parseInt(a.slice(1), 16), q = parseInt(b.slice(1), 16), m = (s) => Math.round(((p >> s) & 255) * (1 - k) + ((q >> s) & 255) * k);
     return '#' + ((1 << 24) | (m(16) << 16) | (m(8) << 8) | m(0)).toString(16).slice(1); };
   const LOOKS = new Map();   // dish id -> [raw, warm, golden, brown, black] (made once a dish)
-  function looksOf(id) {
-    let L = LOOKS.get(id); if (L) return L;
-    const c = MEALS[id].col || '#d8c0a0', K = STICK.look;
-    LOOKS.set(id, L = [c, mixHex(c, K.warm[0], K.warm[1]), mixHex(c, K.golden[0], K.golden[1]), mixHex(c, K.brown[0], K.brown[1]), mixHex(c, K.black[0], K.black[1])]);
+  function looksOf(id, col) {   // (col: something odd's, keyed by its colour)
+    const key = col || id; let L = LOOKS.get(key); if (L) return L;
+    const c = col || MEALS[id].col || '#d8c0a0', K = STICK.look;
+    LOOKS.set(key, L = [c, mixHex(c, K.warm[0], K.warm[1]), mixHex(c, K.golden[0], K.golden[1]), mixHex(c, K.brown[0], K.brown[1]), mixHex(c, K.black[0], K.black[1])]);
     return L;
   }
   function stage() { const d = S.t - S.cookT; return d < -1.2 ? 0 : d < -WIN ? 1 : d <= WIN ? 2 : d < WIN + 1.4 ? 3 : 4; }
@@ -119,7 +122,7 @@ export async function create(host) {
       host.line(HAND.x, HAND.y, HAND.h, mx, my, mh, STICK.stick); host.line(mx, my, mh, END.x, END.y, END.h, STICK.stick);
       const ux = END.x - mx, uy = END.y - my, l = Math.hypot(ux, uy) || 1;
       host.line(END.x, END.y, END.h, END.x + ux / l * .1, END.y + uy / l * .1, END.h - .02, STICK.tip);
-      const L = looksOf(S.id), c = L[stage()];
+      const L = looksOf(S.id, S.col), c = L[stage()];
       host.point(END.x, END.y, END.h, c, P2);
       host.point(END.x + ux / l * .05, END.y + uy / l * .05, END.h + .01, c, P2);
       host.point(END.x - ux / l * .05, END.y - uy / l * .05, END.h - .01, c, P1);

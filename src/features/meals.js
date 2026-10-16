@@ -6,6 +6,11 @@
 // 'meal'), read by their owners (mine.ring: mining; light.nightEye: lighting; fish.come: fishing; player.*: the player; fauna.loud:
 // fauna; prints.glow: this file's view, stamped into features/prints.js ...). One meal at a time: a new one replaces it. Its time left is saved (pack.store('meals')) and counts
 // down in the sim; the chip at the bottom left (HD, the pixel UI) shows the meal and its time while the pack's panel is shut.
+// FOUND RECIPES: the Cook list shows only the dishes he knows (store().known: Fish on a stick in a new world); the rest are found on
+// the TRY STICK (the Cook journal section: up to 3 kinds of food, 6 in all, over the fire: what covers a dish's need with nothing
+// over is that dish, learned; anything else is something odd, 30 s of hiccups) or by eating from a friend's pot. The COOK JOURNAL
+// (pack.section 'cook') shows every dish: found ones with how often cooked and marks for just right and burnt, the rest as dark
+// shapes with their hint (content/meals.js).
 // A meal with trip: true (the fly agaric broth) is drunk, not eaten: features/trip.js starts (the meal eaten stays; burnt: the still).
 // ?moods=0: today's numbers (the old notes, dur and Cook words), cooked at once.
 // FRIENDS (features/coop.js): the meal's CODE (content/meals.js codeOf: 'smoked_eel!') goes out with his state ('md'); every client
@@ -13,21 +18,24 @@
 // prints (stamped into features/prints.js on a surface of this file's, LOOK.glow); the fish at a friend's legs are features/fishing.js's).
 // Only in the persistent world (the sandbox's ruins biome). The meals were fishing's until the foraging slice (2026-10-15):
 // a world saved before that has its meal under pack.store('fishing').meal; it is taken from there once.
-// OWNS: the meal eaten, its quality and time, its saved part, the modifier source 'meal', the recipe group Cook, the chip, the mood
+// OWNS: the meal eaten, its quality and time, its saved part (meal, known, log), the Try stick's picks, the hiccups, the Cook journal, the modifier source 'meal', the recipe group Cook, the chip, the mood
 //   puffs (view: dust, smoke), eye shine and the prints' surface 'blueberry'.
 // READS: content/meals.js, content/items.js (names), pack (the pouch, the store, close), campfires (burningNear), cooking (start),
 //   trip (start), coop (the peers' codes), host.mods ('prints.glow'), prints (surface, stamp), host.inStream, wading (wet).
-// EMITS: meal.cook. API: F.id (the meal eaten, '' none), F.q (its quality), F.code (what friends are told), F.eyes (burnt eel: his
+// EMITS: meal.cook, meal.hic. API: F.id (the meal eaten, '' none), F.q (its quality), F.code (what friends are told), F.eyes (burnt eel: his
 //   eyes shine; the soot things take them for a lantern: features/cavelife.js, coop's lt), F.left (s), F.ver() (changes as the
 //   panel's words would), F.note(esc) -> the panel's line about it ('' none), F.eat(id, q?, t?) (cooking, tests, dev),
-//   F.moods (on), F.pay(id) -> the cost taken | null.
+//   F.moods (on), F.cooked(id, q) (off the stick or a pot: learned, written in the journal, eaten), F.odd() (hiccups), F.hicN
+//   (hiccups so far: view/livehero.js hops), F.knows(id).
 // BUDGET: sim: a compare a step (a save every 5 s while one lasts); view: a pooled puff or two a step while a mood shows (<= 160
 //   points), two points a shining pair of eyes; HD: one frame and a line of pixel text while one lasts.
-import {MEALS, notesOf, durOf, nameOf, codeOf, parseCode, smokedOf} from '../content/meals.js';
+import {MEALS, notesOf, durOf, nameOf, codeOf, parseCode, smokedOf, KNOWN, TRY, FOODS, matchOf} from '../content/meals.js';
 import {COMMON_FISH} from '../content/fishing.js';
 import {ITEMS} from '../content/items.js';
 import {flags} from '../core/flags.js';
 import {hdUnit, hdFont, hdFrame, hdText} from '../ui/hdpixel.js';
+import {iconURL} from '../ui/packpanel.js';
+import {mulberry32, simSeed} from '../core/rng.js';
 
 const ON = flags.get('pack') !== '0';
 const MOODS = flags.get('moods') !== '0';
@@ -79,7 +87,7 @@ export async function create(host) {
   const RECIPES = [];
   for (const m in MEALS) {
     const M = MEALS[m];
-    RECIPES.push({id: 'meal.' + m, name: M.name, group: 'Cook',
+    RECIPES.push({id: 'meal.' + m, name: M.name, group: 'Cook', shown: () => knows(m),
       get cost() { return costOf(M.need); },
       desc: MOODS ? `${M.words}. Needs ${needWords(M.need)}, cooked over a burning campfire.`
         : `${M.say}${M.trip ? '' : `, for ${Math.round(M.dur / 60)} min`}. Needs ${needWords(M.need)}, cooked by a burning campfire.`,
@@ -98,6 +106,111 @@ export async function create(host) {
         serve(m, 'done');
       }});
   }
+  // ---------------------------------------------------------------- found recipes, the Try stick, the Cook journal
+  // what he knows: store().known {id: 1} (a new world, or a save from before: KNOWN and the meal he has); ?moods=0: everything.
+  // What he has cooked: store().log {id: {n, b: burnt it once, r: had it just right once}}
+  let jV = 0;
+  function book() {
+    const s = store(); if (!s) return null;
+    if (!s.known) { s.known = {}; for (const k of KNOWN) s.known[k] = 1; if (MEALS[s.meal?.id]) s.known[s.meal.id] = 1; pack()?.dirty(); }
+    s.log ??= {};
+    return s;
+  }
+  const knows = m => !MOODS || !!book()?.known[m];
+  function learn(m) {
+    const s = book(); if (!s || s.known[m]) return;
+    s.known[m] = 1; jV++; pack()?.dirty();
+    ui()?.toast('A new dish', MEALS[m].name, '#ffb060');
+  }
+  // a dish off the stick (or a pot's spoon): learned if new, written in the journal, eaten
+  function cooked(m, qq) {
+    const s = book();
+    if (s) { learn(m); const L = s.log[m] ??= {n: 0}; L.n++; if (qq === 'burnt') L.b = 1; if (qq === 'right') L.r = 1; jV++; pack()?.dirty(); }
+    serve(m, qq);
+  }
+  // THE TRY STICK: picks (the panel's clicks, carried out in the sim step) of up to TRY.kinds kinds, TRY.items in all
+  const PICK = {};
+  const pickKinds = () => { let k = 0; for (const i in PICK) k++; return k; };
+  const pickItems = () => { let n = 0; for (const i in PICK) n += PICK[i]; return n; };
+  const have = i => pack()?.count(i) || 0;
+  function pickAdd(i) {
+    if (!FOODS.includes(i) || have(i) <= (PICK[i] || 0) || pickItems() >= TRY.items || (!PICK[i] && pickKinds() >= TRY.kinds)) return;
+    PICK[i] = (PICK[i] || 0) + 1; jV++;
+  }
+  function pickDel(i) { if (PICK[i] > 0) { if (!--PICK[i]) delete PICK[i]; jV++; } }
+  function pickClear() { for (const i in PICK) delete PICK[i]; jV++; }
+  const TRY_R = {name: 'Try it',
+    can() {
+      if (!active()) return 'only in the open world';
+      if (!pickItems()) return 'put some food on the stick first';
+      if (cooking()?.busy) return 'something is on the stick';
+      for (const i in PICK) if (have(i) < PICK[i]) return 'you don\'t have that much';
+      return !cooking()?.game || fireNear() ? '' : 'try it by a burning campfire';
+    },
+    // what covers a dish's need with nothing over is that dish (all of it paid); anything else is something odd (one of each kind)
+    run() {
+      const m = matchOf(PICK), ck = cooking(), cost = {}; let first = '';
+      for (const i in PICK) { cost[i] = m ? PICK[i] : 1; first ||= i; }
+      if (ck?.game && !ck.start(m, m ? undefined : {odd: true, col: ITEMS[first]?.col})) return;
+      for (const k in cost) pack().take(k, cost[k]);
+      pickClear(); pack()?.close?.();
+      if (!ck?.game) { if (m) cooked(m, 'done'); else odd(); }
+    }};
+  // something odd eaten: TRY.hic s of hiccups (a hop: view/livehero.js reads F.hicN; a sound: meal.hic); the meal he has stays
+  let hic = 0, hicT = 0, hicN = 0, hrng = null;
+  const HR = () => (hrng ??= mulberry32(simSeed()))();
+  function odd() { const P = host.player; hic = TRY.hic; hicT = .8; ui()?.float(P.x, P.y, P.z + 2.1, 'Something odd', '#c8c0a0'); }
+  // THE COOK JOURNAL (pack.section): every dish, found ones with how often cooked and a mark for just right (gold) and burnt
+  // (black); the rest as dark shapes with their hint. Then the Try stick: the food he has, what's on the stick, the button
+  const SHAPE = {fish_stick: 'stick', fish_lingon: 'stick', fish_soup: 'bowl', pike_stew: 'bowl', blueberry_soup: 'bowl', fly_broth: 'bowl',
+    trout_bark: 'plank', smoked_eel: 'plank', salmon_plank: 'plank', fried_chanterelles: 'pan'};
+  const SHAPES = {
+    stick: ['............', '..........w.', '.........w..', '.....fff....', '...ffdfff...', '..fffffdf...', '...fffff....', '....fw......', '...w........', '..w.........', '.w..........'],
+    bowl: ['............', '............', '............', '............', '..ffffffff..', '.rffdfffdfr.', '.wwwwwwwwww.', '..wwwwwwww..', '...wwwwww...', '....wwww....'],
+    plank: ['............', '............', '............', '............', '....ffff....', '..ffdffdff..', '.ffffffffff.', '..ffdffdff..', 'wwwwwwwwwwww', 'rrrrrrrrrrrr'],
+    pan: ['............', '............', '............', '............', '..f.fdf.f...', '.rffdffffr..', '.rrrrrrrrrww', '..rrrrrrr...']};
+  const DICON = {};   // a dish's icon (+ '?': its dark shape), made once
+  const shade = (c, k) => { const v = parseInt(c.slice(1), 16), m = sh => Math.round(((v >> sh) & 255) * k); return '#' + ((1 << 24) | (m(16) << 16) | (m(8) << 8) | m(0)).toString(16).slice(1); };
+  function dishIcon(m, dark) {
+    const key = dark ? m + '?' : m; if (DICON[key]) return DICON[key];
+    const c = MEALS[m].col || '#d8c0a0', pal = dark ? {f: '#6a5d4e', d: '#6a5d4e', w: '#6a5d4e', r: '#6a5d4e'} : {f: c, d: shade(c, .7), w: '#6a4a2e', r: '#8e6a44'};
+    return DICON[key] = iconURL(SHAPES[SHAPE[m] || 'bowl'], pal);
+  }
+  const MARK = (col, x) => `<i style="position:absolute;top:3px;left:${x}px;width:4px;height:4px;background:${col};box-shadow:0 0 0 1px #000"></i>`;
+  const JOURNAL = {id: 'cook', title: 'Cook journal',
+    ver: () => jV,
+    html(esc, icon) {
+      const s = book(); if (!s) return '';
+      let h = '<div class="p-bag p-grid7">', got = 0, all = 0;
+      for (const m in MEALS) {
+        const M = MEALS[m], L = s.log[m], n = L?.n || 0; all++;
+        if (!s.known[m]) { h += `<div class="p-slot p-dim" title="???: ${esc(M.hint)}"><img src="${dishIcon(m, true)}" alt=""></div>`; continue; }
+        got++;
+        h += `<div class="p-slot" title="${esc(M.name)}: ${esc(M.words)}. ${n ? `Cooked ${n} time${n > 1 ? 's' : ''}` : 'Not cooked yet'}${L?.r ? ', had it just right' : ''}${L?.b ? ', burnt it' : ''}.">`;
+        h += `<img src="${dishIcon(m)}" alt="">${L?.r ? MARK('#ffd860', 3) : ''}${L?.b ? MARK('#1a1410', L?.r ? 9 : 3) : ''}${n > 1 ? `<em>${n > 99 ? '99+' : n}</em>` : ''}</div>`;
+      }
+      h += `</div><div class="p-note">${got} / ${all} dishes found</div><div class="p-note">Try something on a stick:</div><div class="p-bag p-grid7">`;
+      let any = false;
+      for (const i of FOODS) {
+        const n = have(i) - (PICK[i] || 0); if (have(i) <= 0) continue; any = true;
+        h += `<div class="p-slot${n > 0 ? '' : ' p-dim'}" data-sec="cook" data-a="add" data-id="${i}" title="${esc(ITEMS[i]?.name || i)}: put one on" style="cursor:pointer"><img src="${icon(i)}" alt="">${n > 1 ? `<em>${n}</em>` : ''}</div>`;
+      }
+      h += '</div>';
+      if (!any) h += '<div class="p-none">no food to try</div>';
+      if (pickItems()) {
+        h += '<div class="p-bag p-grid7">';
+        for (const i in PICK) h += `<div class="p-slot held" data-sec="cook" data-a="del" data-id="${i}" title="${esc(ITEMS[i]?.name || i)}: take one off" style="cursor:pointer"><img src="${icon(i)}" alt="">${PICK[i] > 1 ? `<em>${PICK[i]}</em>` : ''}</div>`;
+        const why = TRY_R.can();
+        h += `</div><button class="p-build${why ? ' no' : ''}" data-sec="cook" data-a="try"${why ? ` title="${esc(why)}"` : ''}><span>Try it over the fire</span><small>${pickItems()} on the stick</small></button>`;
+      }
+      return h;
+    },
+    click(d, ask) {
+      if (d.a === 'try') ask(TRY_R);
+      else if (d.a === 'add') ask({name: 'Try', run: () => pickAdd(d.id)});
+      else if (d.a === 'del') ask({name: 'Try', run: () => pickDel(d.id)});
+    }};
+
   // the meal saved: this feature's store, else (a world saved before meals had their own) fishing's, moved here
   function restore() {
     let m = store()?.meal;
@@ -159,12 +272,23 @@ export async function create(host) {
     get eyes() { return MOODS && id === 'smoked_eel' && q === 'burnt'; },
     ver: () => id ? Math.ceil(left / 60) * 4 + ['raw', 'done', 'right', 'burnt'].indexOf(q) : 0,
     note: esc => id ? `<div class="p-note">Eaten: ${esc(nameOf(id, q))}, ${Math.ceil(left / 60)} min left (${esc(MOODS ? MEALS[id].words : MEALS[id].say)})</div>` : '',
+    cooked(m, qq = 'done') { if (MEALS[m]) cooked(m, qq); },
+    odd,
+    get hicN() { return hicN; }, get hic() { return hic > 0; },
+    knows,
     eat(m, qq, t) { if (MEALS[m]) { if (typeof qq === 'number') { t = qq; qq = 'done'; } if (t !== undefined && !MEALS[m].trip) eat(m, t, qq || 'done'); else serve(m, qq || 'done'); } },
     // each step: the recipes offered to the pack (once: it is made after this feature), the meal saved restored (once), its clock
     update(dt) {
       const pk = pack(); if (!ON || !pk) return;
-      if (!offered) { offered = true; for (const r of RECIPES) pk.recipe(r); }
+      if (!offered) { offered = true; for (const r of RECIPES) pk.recipe(r); if (MOODS) pk.section(JOURNAL); }
       if (!restored) { restored = true; restore(); }
+      if (hic > 0) {   // (hiccups: one every TRY.every s while they last)
+        hic -= dt;
+        if ((hicT -= dt) <= 0) {
+          hicT = TRY.every[0] + HR() * (TRY.every[1] - TRY.every[0]); hicN++;
+          const P = host.player; host.events.push({type: 'meal.hic', x: P.x, y: P.y}); ui()?.float(P.x, P.y, P.z + 1.9, 'hic', '#d8d0c0');
+        }
+      }
       if (!id) return;
       if ((left -= dt) <= 0) { const n = nameOf(id, q); unEat(); ui()?.toast(n, 'has worn off', '#a39478'); }
       else if ((saveT += dt) > 5) { saveT = 0; const s = store(); if (s?.meal) { s.meal.t = Math.round(left); pk.dirty(); } }

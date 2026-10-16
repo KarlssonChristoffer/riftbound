@@ -11,7 +11,8 @@
 //            dur: s (?moods=0); trip: drunk, not eaten (features/trip.js)
 //   mood     the verb's notes (each system owns its note: docs/COOKING.md has the table); words: the Cook list's one-line hint
 //   burnt    the twist's notes (the same sense, turned around; no hidden numbers); the four fishing meals share SMOKED
-//   short    for "Burnt eel"; col: the food's raw colour on the stick; cook.t: s over the flames to just right; hint: (slice 3)
+//   short    for "Burnt eel"; col: the food's raw colour on the stick; cook.t: s over the flames to just right; hint: the Cook
+//            journal's line for a dish not found yet
 // A meal's CODE (what friends are told: features/coop.js 'md'): its id, + '!' burnt, + '~' raw ('smoked_eel!').
 import {COMMON_FISH} from './fishing.js';
 
@@ -72,6 +73,28 @@ export const MEALS = {
 //   still    the burnt broth's held breath (s); trip: the broth's trip by quality (raw: half)
 export const TUNE = {dur: {raw: 90, done: 180, right: 240, burnt: 120}, win: .4, right: .12, drop: 5, still: 60, trip: {raw: 45, done: 90, right: 90}};
 export const QUALITIES = ['raw', 'done', 'right', 'burnt'];
+// FOUND RECIPES (features/meals.js; docs/COOKING.md): the dishes known in a new world (the rest are found by trying, or by eating
+// from a friend's pot). THE TRY STICK: up to `kinds` kinds of food, `items` in all, on a stick for `t` s; what covers a dish's need
+// with nothing over is that dish (learned); anything else is something odd: `hic` s of hiccups, one every `every` s (and one of each
+// kind tried is used up). `col`: the odd food's colour on the stick
+export const KNOWN = ['fish_stick'];
+export const TRY = {kinds: 3, items: 6, t: 3, hic: 30, every: [1.4, 3.2], col: '#a89870'};
+// every kind of food that goes into some dish (the Try stick's choice), in the order the dishes name them
+export const FOODS = [...new Set(Object.values(MEALS).flatMap(M => M.need.flatMap(q => q.ids)))];
+// the dish what's on a Try stick ({id: n}) makes: each part of its need n of ONE kind, nothing left over; '' none (something odd).
+// Small (3 kinds, <= 2 parts): called on a click, not per step
+export function matchOf(picks) {
+  const left = {}; let all = 0;
+  for (const k in picks) if (picks[k] > 0) { left[k] = picks[k]; all += picks[k]; }
+  for (const id in MEALS) { let n = 0; for (const q of MEALS[id].need) n += q.n; if (n === all && fits(MEALS[id].need, 0, left)) return id; }
+  return '';
+}
+function fits(need, i, left) {
+  if (i === need.length) { for (const k in left) if (left[k]) return false; return true; }
+  const q = need[i];
+  for (const k in left) if (left[k] >= q.n && q.ids.includes(k)) { left[k] -= q.n; const ok = fits(need, i + 1, left); left[k] += q.n; if (ok) return true; }
+  return false;
+}
 const SUFFIX = {raw: '~', done: '', right: '', burnt: '!'};
 
 // the notes a dish gives at a quality (moods: false: ?moods=0, the old numbers) -> a fresh array (set once, on eating)

@@ -8,8 +8,10 @@
 //   pack.payOf(need) -> {id: n} (a recipe's need [{ids, n}] paid with the kinds there are most of) / pack.short(cost) -> bool /
 //   pack.level(skill) / pack.store(name) -> that system's saved object (it writes its own; then pack.dirty()) /
 //   pack.recipe(r) (a build the panel offers: {id, name, cost: {id: n}, can() -> '' | why not, run(), group?: the panel's
-//   heading, 'Build' when absent}) / pack.section(s) (a part of the panel another system draws: {id, title, ver() -> number
-//   (redrawn when it changes), html(esc, icon) -> string}: features/fishing.js's catch journal) / pack.held(slot)
+//   heading, 'Build' when absent, shown?() -> false: left out for now}) / pack.section(s) (a part of the panel another system
+//   draws: {id, title, ver() -> number (redrawn when it changes), html(esc, icon) -> string, click?(data, ask): an element of its
+//   html with data-sec="<id>" clicked (data: its dataset; ask(r): r carried out in the sim step like a recipe)}: features/fishing.js's
+//   catch journal, features/meals.js's Cook journal) / pack.held(slot)
 //   (the bag slot whose tool is in hand: the panel marks it; -1 none)
 // OWNS: the inventory, the skills, the world save, the panel, the modifier source 'skills'.
 // READS: content/items.js, content/skills.js, the game's HUD (toasts, floats). EMITS: pack.add, skill.level.

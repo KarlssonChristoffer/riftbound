@@ -517,6 +517,7 @@ const SFX = {
     for (let i = 0; i < 3; i++) E.N(v, .04 + i * .1 + (i % 2) * .03, {type: 'bandpass', f: f + i * 400, q: 5, a: .001, d: .012, g: .1});
   },
   cookFlare(E, o) { const v = E.voice(o, 'cookFlare', .6, {cd: .3}); if (!v) return; E.N(v, 0, {type: 'lowpass', f: 500, f2: 1600, sw: .12, a: .02, d: .35, g: .35}); E.N(v, .05, {type: 'highpass', f: 3000, a: .01, d: .25, g: .12}); },
+  hiccup(E, o) { const v = E.voice(o, 'hiccup', .3, {cd: .2}); if (!v) return; E.O(v, 0, {f: 260, f2: 560, sw: .04, a: .004, d: .07, g: .22}); E.N(v, 0, {type: 'bandpass', f: 900, q: 2, a: .003, d: .05, g: .12}); },   // (something odd: a short gulp up)
   cookDrop(E, o) { const v = E.voice(o, 'cookDrop', .8, {cd: .3}); if (!v) return; E.N(v, 0, {type: 'bandpass', f: 1200, f2: 400, sw: .4, q: 1, a: .01, d: .6, g: .3}); E.O(v, 0, {f: 120, f2: 70, d: .12, g: .2}); },
   fishCook(E, o) {   // fish on the fire (features/fishing.js): a sizzle with crackles over a soft thump
     const v = E.voice(o, 'fishCook', 1.4, {cd: .5}); if (!v) return;
@@ -1341,7 +1342,8 @@ export function createAudio(ctx, host = {}) {
         case 'cook.sizzle': fire('cookSizzle', e.x, e.y, {k: e.k}); break;
         case 'cook.flare': fire('cookFlare', e.x, e.y); break;
         case 'cook.pull': fire('axeSwing', e.x, e.y, {surf, g: .5}); break;   // (a swish: out of the fire)
-        case 'cook.drop': fire('cookDrop', e.x, e.y); break;   // (features/meals.js: any meal by a campfire)
+        case 'cook.drop': fire('cookDrop', e.x, e.y); break;
+        case 'meal.hic': fire('hiccup', e.x, e.y); break;   // (features/meals.js: any meal by a campfire)
         case 'forage.pick': fire('rustle', e.x, e.y, {surf, g: .3, semi: 5}); fire('hit', e.x, e.y, {mat: 'straw', g: .2}); break;   // (stand-ins: a soft pluck in the leaves)
         // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge
         // recipes of its own yet): the swish of a turn and the throw on the cloth swish, the cinch a soft thump, the yank
