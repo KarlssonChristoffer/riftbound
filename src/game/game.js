@@ -166,7 +166,7 @@ export async function createGame(host) {
   // the sandbox find their way round walls on the game's nav (built for them on demand: SB.nav). Nothing changes in the
   // sandbox anywhere else.
   const SB = {down: -1, heal: 12, nav: false, calm: 12, wait: 0};   // (calm: s the healing waits after a world hurt, below)
-  const fightOn = foes => !!foes?.stakes || core.enemies.length > 0;
+  const fightOn = foes => !!foes?.stakes || core.enemies.length > 0 || !!host.feature('trolls')?.stakes;   // (a troll fighting you: features/trolls.js)
   function stakes(dt, evs) {
     const foes = host.feature('foes');
     if (SB.down >= 0) {

@@ -79,7 +79,7 @@ export async function create(host) {
     const fs = fsim(); CAND.length = 0;
     for (const p of host.entities.near(e.x, e.y, T.reach + 1, NEAR)) {
       if (p.broken || p.gone || hitSet.has(p) || p.held) continue;
-      const kind = creature(p) && (p.kind === 'gunman' || core()?.BS.has(p)) ? 'body' : movable(p) ? 'prop'
+      const kind = creature(p) && (p.kind === 'gunman' || p.kind === 'troll' || core()?.BS.has(p)) ? 'body' : movable(p) ? 'prop'
         : (p.hp > 0 || p.target) && (p.breakable || p.target) && !p.hunter && p.kind !== 'gunman' && !p.wall && !p.rect ? 'thing' : '';
       if (!kind) continue;
       const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1e-6, r = p.hitR ?? p.r ?? .3;
@@ -110,6 +110,7 @@ export async function create(host) {
       cr?.damage(p, T.dmg, {canCrit: false, dir: [ux * 3, uy * 3], by: 'melee', ux, uy});
       host.events.push({type: 'kick.hit', x: p.x, y: p.y, who: p, kind: 'body', barge: !!e.barge});
       if (p.broken) return;
+      if (p.kind === 'troll') { host.feature('trolls')?.shove(p, ux * T.out, uy * T.out, .5); return; }   // (features/trolls.js: its own push and stagger)
       if (!heft) { cr?.hold(p, TUNE.stagger); return; }   // (a champion: it only staggers)
       const o = 1 / heft, up = T.up / Math.sqrt(heft);
       if (p.kind === 'gunman') fs?.launch(p, ux * T.out * o, uy * T.out * o, up, {gunK: .35, hatK: .55});

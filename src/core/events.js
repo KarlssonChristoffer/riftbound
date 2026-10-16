@@ -297,6 +297,16 @@ export const EVENTS = {
   'tool.hit':           ['features/woodcut.js',   'x, y, who, kind (body | a prop kind): a tool\'s swing meets a foe or a dummy', 'audio'],
   'tool.whiff':         ['features/woodcut.js',   'x, y: a tool\'s swing at nothing (features/mining.js too: ring, the ringing pick rings on)', 'audio'],
   'bells.toll':         ['features/bells/view.js (a view: nothing in the sim listens)', 'x, y, h, k (0..1), note, who (the bell): its clapper strikes it again as it swings', 'audio (its note, softer)'],
+  // the forest's trolls (features/trolls/sim.js, docs/TROLLS.md); who: its entity (null while it has none), rec: its record, troll: big | small
+  'troll.wake':         ['features/trolls/sim.js', 'x, y, z, troll, who, rec (a stone cracks: dusk, a fog, a storm, the third knock)', 'trolls (a shake, the first toast)'],
+  'troll.stone':        ['features/trolls/sim.js', 'x, y, z, troll, who, rec (caught by the sun: stone now)', 'trolls (the first toast)'],
+  'troll.roar':         ['features/trolls/sim.js', 'x, y, z, troll, who, rec, dx, dy (its facing: it saw you, a fight starts)', 'trolls (a shake, the first toast)'],
+  'troll.swing':        ['features/trolls/sim.js', 'x, y (wind: where it stands; strike: where the blow lands), z, troll, who, rec, atk (slam | sweep | stomp | boulder | bite | cone), phase (wind | strike), dx, dy (its facing), r (strike: the blow\'s radius), heavy', '(none yet: sounds one day)'],
+  'troll.throw':        ['features/trolls/sim.js', 'x, y, z, troll, who, rec, atk (boulder | cone): it lets go', '(none yet)'],
+  'troll.land':         ['features/trolls/sim.js', 'x, y, z, troll, rec, atk (boulder | cone), r (a boulder\'s blow): a thrown thing comes down', 'trolls (a shake), trolls/look.js (dust)'],
+  'troll.step':         ['features/trolls/sim.js', 'x, y, z, troll, who, rec, big (1 walk, 2 run): a big troll\'s footfall', 'trolls (a shake near you), trolls/look.js (dust)'],
+  'troll.giggle':       ['features/trolls/sim.js', 'x, y, z, troll, who, rec (a small one: it bit and runs, it saw you, it laughs at your hurt)', 'trolls (the first toast)'],
+  'troll.grumble':      ['features/trolls/sim.js', 'x, y, z, troll, rec, big (the knocks so far): E knocked on its stone', 'trolls (a shake)'],
 };
 
 const warned = new Set();

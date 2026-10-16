@@ -107,6 +107,7 @@ export const FLAG_DOCS = {
   collide: 'old: the collision as it was (docs/COLLISION.md): no unstick, so once he is inside a collider (a fall, a move that sets his place, something moving into him) he stays there',
   brute3d: '0: the brutes (a run brute, elite, champion, the yard pair) as the biome painted card mirrored to their facing instead of the 3D figure built in code (features/brutes3d.js, view/brute3d.js); menu > Dev > Features > 3D brutes',
   merchant3d: '0: the light garden merchant as his painted card (front / back, mirrored) instead of the 3D figure built in code (view/merchant3d.js)',
+  trolls: '0: no trolls in the forest (features/trolls.js, docs/TROLLS.md); near: a big one and a pack of small ones near you a few s in (awake whatever the hour)',
   foes: '0: no gunmen in the desert sandbox (features/foes.js); unarmed: two at a time who never draw (targets to test on)', ragdoll: '0: the gunmen die by their death clips instead of as live 3D ragdolls (features/foes/look.js, view/ragdoll.js; ragdolls are the default)',
   blood: '0: no blood from bullet hits (features/blood.js; menu > Graphics > Effects > Blood)',
   smoke: 'pixel | hybrid | strands | soft: the gun smoke\'s look (features/gunfx/smoke.js; Shift+V cycles it in dev mode)',
