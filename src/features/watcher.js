@@ -121,7 +121,7 @@ export async function create(host) {
   function away() {
     W.phase = 'away'; hide();
     const k = host.time === 'night' ? TUNE.night : host.time === 'dusk' ? TUNE.dusk : 1;
-    W.wait = often ? rr(...TUNE.often) : rr(...TUNE.every) * k;
+    W.wait = (often ? rr(...TUNE.often) : rr(...TUNE.every) * k) * host.mods.value('watcher.every', 1);   // (x: the Fiddle String's note, docs/KEEPSAKES.md)
   }
   F.summon = () => come(true);
   // STARE (features/trip.js: the fly agaric broth): for s seconds it comes out at once (any trunk will do) and openly stares: it

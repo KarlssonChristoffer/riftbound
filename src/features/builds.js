@@ -27,8 +27,8 @@ import {setMaterials} from '../content/materials.js';
 import {geoOf, M4, along} from '../world/kit3d.js';
 
 const ON = flags.get('builds') !== '0' && flags.get('campfires') !== '0';
-propTop({pitfire: .3, firering: .25, crystallamp: .75});
-setMaterials({pitfire: 'stone', firering: 'stone', crystallamp: 'stone'});
+propTop({pitfire: .3, firering: .25, crystallamp: .75, keepshelf: .7});
+setMaterials({pitfire: 'stone', firering: 'stone', crystallamp: 'stone', keepshelf: 'wood'});
 
 // ORDER (core/features.js): before the campfires (they read the fires in the list) and the lights; it reads co-op's mail a step
 // after it came (coop is later in the order), like foraging and mining
@@ -179,6 +179,13 @@ export async function create(host) {
         const a = i / 3 * Math.PI + .2, c = Math.cos(a) * .3, s = Math.sin(a) * .3;
         L.push({...along([-c, .06 + i * .05, -s], [c, .06 + i * .05, s], .05, .045, 6), fam: 'bark'});
       }
+      return geoOf(L);
+    },
+    keep_shelf() {   // a Keepsake Shelf: a plank of split log on two posts (features/keepsakes.js puts what stands on it)
+      const L = [];
+      for (const x of [-.38, .38]) L.push({...along([x, 0, 0], [x, .64, 0], .05, .045, 6), fam: 'bark'});
+      L.push({g: new THREE.BoxGeometry(.98, .05, .26), m: M4([0, .64, 0]), fam: 'wood'});
+      L.push({g: new THREE.BoxGeometry(.9, .04, .2), m: M4([0, .2, 0]), fam: 'wood'});
       return geoOf(L);
     },
     crystal_lamp() {   // a little cairn of stone, a copper band round its top, three Glow Shards standing out of it

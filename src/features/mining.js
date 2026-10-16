@@ -177,7 +177,11 @@ export async function create(host) {
     const h = C.hollows?.find(q => q.vein === i); if (!h) return;
     const z = host.elev(h.cx, h.cy) + .5, k = C.hollows.indexOf(h);
     for (const item in TUNE.cache) spawn(h.cx, h.cy, z, h.nx, h.ny, item, TUNE.cache[item]);
-    spawn(h.cx, h.cy, z, h.nx, h.ny, TUNE.keep[k % TUNE.keep.length], 1);
+    // its keepsake (by the hollow's order); fewer hollows than keepsakes: they share them out (docs/KEEPSAKES.md: a cave with
+    // one hollow wall has both)
+    const K = TUNE.keep, nh = C.hollows.length;
+    if (k >= K.length) spawn(h.cx, h.cy, z, h.nx, h.ny, K[k % K.length], 1);
+    else for (let j = k; j < K.length; j += nh) spawn(h.cx, h.cy, z, h.nx, h.ny, K[j], 1);
     host.events.push({type: 'mine.open', x: h.x, y: h.y, i, cx: h.cx, cy: h.cy});
     host.shake(3, .3);
   }

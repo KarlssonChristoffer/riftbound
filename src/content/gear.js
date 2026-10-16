@@ -23,8 +23,10 @@
 //                                         fixed (a tone 0..3, unlit), outline (false)}
 // WEIGHT and ARMOR are the two numbers every piece has (game effects through host.mods: features/gear.js): weight past
 // FREE_KG slows you, armor takes a share off the damage you take.
-export const SLOTS = ['head', 'body', 'back', 'hands', 'legs', 'feet', 'main', 'off'];
-export const SLOT_NAMES = {head: 'Head', body: 'Body', back: 'Back', hands: 'Hands', legs: 'Legs', feet: 'Feet', main: 'Main hand', off: 'Off hand'};
+export const SLOTS = ['head', 'body', 'back', 'hands', 'legs', 'feet', 'main', 'off', 'charm'];
+export const SLOT_NAMES = {head: 'Head', body: 'Body', back: 'Back', hands: 'Hands', legs: 'Legs', feet: 'Feet', main: 'Main hand', off: 'Off hand', charm: 'Charms'};
+// how many pieces a slot takes (1 unless named): the charms are two keepsakes worn at once (content/keepsakes.js, docs/KEEPSAKES.md)
+export const SLOT_CAP = {charm: 2};
 export const KINDS = {clothing: 'Clothing', armor: 'Armour', robe: 'Robe', weapon: 'Weapon', tool: 'Tool', charm: 'Charm', fishing: 'Fishing', foraging: 'Foraging', mining: 'Mining'};
 export const RARITY = {common: {name: 'Common', col: '#c9c2b2'}, fine: {name: 'Fine', col: '#7ad07a'}, rare: {name: 'Rare', col: '#5aa8ff'},
   masterwork: {name: 'Masterwork', col: '#c27bff'}, mythic: {name: 'Mythic', col: '#ffb84a'}};
@@ -77,6 +79,9 @@ export const MATERIALS = {
   felt:       ['#9c9890', '#76726a', '#545049', '#2a2824'],
   netting:    ['#c8c0a8', '#948c74', '#6a6452', '#36332a'],
   rosin:      ['#f2f6ff', '#b8c8f0', '#7486c8', '#2e3870'],
+  // keepsakes (docs/KEEPSAKES.md)
+  warmstone:  ['#f6e6c0', '#d6c6a2', '#a49478', '#544a3a'],
+  gut:        ['#f2e8c4', '#d8c89c', '#a8946a', '#544a32'],
 };
 
 // a live model's zones: its json's meta.loadout -> zone -> the parts (model.json parts) it is made of
@@ -542,16 +547,57 @@ export const GEAR = [
       {on: 'HatHold0', part: 'minercap.brim', mat: 'leather_dk', shape: 'box', size: [.36, .1, .018], at: [0, .22, 1.6], rot: [10, 0, 0]},
       {on: 'HatHold0', part: 'minercap.tin', mat: 'steel', shape: 'disc', r: .07, len: .012, at: [0, -.24, 1.71], rot: [90, 0, 0], o: {sides: 8}},
     ]}},
+  // ---- charms: the keepsakes (content/keepsakes.js, docs/KEEPSAKES.md), worn two at a time while the pouch holds them (features/
+  // gear.js takes one off when the pouch loses it). The same id as the item; keepsake: true (their cards show what they are, never
+  // what they do: ui/geartip.js); weight 0, no armor, no mods (their rules are features/keepsakes.js's, source 'keepsakes')
+  {id: 'heron_feather', name: 'Heron Feather', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A long grey feather; it was warm when you picked it up.',
+    look: {add: [
+      {on: 'HatHold0', part: 'keep.feather', mat: 'feather', shape: 'box', size: [.018, .04, .27], at: [.19, .05, 1.79], rot: [-18, 0, -24]},
+      {on: 'HatHold0', part: 'keep.feather.tip', mat: 'felt', shape: 'box', size: [.02, .042, .05], at: [.245, .09, 1.91], rot: [-18, 0, -24]},
+    ]}},
+  {id: 'warm_stone', name: 'Warm Stone', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A smooth stone from the quiet ring; it stays warm in your hand.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.stone.cord', mat: 'leather_dk', shape: 'tube', r0: .01, r1: .01, len: .05, at: [.19, -.1, .83], o: {sides: 5}},
+      {on: 'Hips', part: 'keep.stone', mat: 'warmstone', shape: 'ball', r: [.045, .035, .05], at: [.2, -.11, .77], o: {sides: 8}},
+    ]}},
+  {id: 'bark_doll', name: 'Bark Doll', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A little figure of bark and twine, left in the hollow under the roots.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.doll', mat: 'oak', shape: 'box', size: [.06, .04, .11], at: [.13, .21, .78]},
+      {on: 'Hips', part: 'keep.doll.head', mat: 'birchbark', shape: 'ball', r: .035, at: [.13, .21, .865], o: {sides: 7}},
+    ]}},
+  {id: 'tally_stick', name: 'Tally Stick', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A stick cut with rows of notches. Someone was counting something, down here, for a long time.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.tally', mat: 'oak', shape: 'box', size: [.024, .024, .22], at: [-.215, -.03, .8], rot: [0, 8, 0]},
+    ]}},
+  {id: 'full_tally_stick', name: 'Full Tally Stick', slot: 'charm', kind: 'charm', rarity: 'mythic', weight: 0, armor: 0, keepsake: true, desc: 'A stick cut with rows of notches, every one of them filled. It is warm, and it smells of soot.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.tally', mat: 'leather_dk', shape: 'box', size: [.026, .026, .24], at: [-.215, -.03, .8], rot: [0, 8, 0]},
+    ]}},
+  {id: 'big_tooth', name: 'Big Tooth', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A tooth as long as your hand. Nothing you have seen in the woods has teeth like this.',
+    look: {add: [
+      {on: 'Spine2', part: 'keep.tooth.cord', mat: 'leather_dk', shape: 'tube', r0: .012, r1: .012, len: .07, at: [0, -.16, 1.19], o: {sides: 5}},
+      {on: 'Spine2', part: 'keep.tooth', mat: 'bone', shape: 'cone', r: .032, len: .12, at: [0, -.17, 1.07], rot: [180, 0, 0], o: {sides: 6}},
+    ]}},
+  {id: 'fiddle_string', name: 'Fiddle String', slot: 'charm', kind: 'charm', rarity: 'mythic', weight: 0, armor: 0, keepsake: true, desc: 'A gut string from a fiddle, coiled.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.fiddle', mat: 'gut', shape: 'tube', r0: .032, r1: .032, len: .008, at: [-.08, -.215, .79], rot: [90, 0, 0], o: {sides: 8}},
+      {on: 'Hips', part: 'keep.fiddle.peg', mat: 'leather_dk', shape: 'box', size: [.016, .016, .03], at: [-.08, -.222, .835]},
+    ]}},
 ];
 export const GEAR_BY_ID = Object.fromEntries(GEAR.map(g => [g.id, g]));
 export const gearById = id => GEAR_BY_ID[id] || null;
 
-// a set as asked for (ids, any order, maybe junk) -> the set it can be: known ids, at most one a slot (the later wins), in
-// SLOTS order. The co-op server keeps only what this returns (server/room.mjs), the game too (features/gear.js)
+// a set as asked for (ids, any order, maybe junk) -> the set it can be: known ids, at most one a slot (SLOT_CAP: the charms two,
+// no id twice; the later wins), in SLOTS order. The co-op server keeps only what this returns (server/room.mjs), the game too
+// (features/gear.js)
 export function cleanSet(ids) {
   const by = {};
-  if (Array.isArray(ids)) for (const id of ids) { const g = typeof id === 'string' ? GEAR_BY_ID[id] : null; if (g) by[g.slot] = g.id; }
-  return SLOTS.map(s => by[s]).filter(Boolean);
+  if (Array.isArray(ids)) for (const id of ids) {
+    const g = typeof id === 'string' ? GEAR_BY_ID[id] : null; if (!g) continue;
+    const l = by[g.slot] ??= [], i = l.indexOf(g.id); if (i >= 0) l.splice(i, 1);
+    l.push(g.id); if (l.length > (SLOT_CAP[g.slot] || 1)) l.shift();
+  }
+  return SLOTS.flatMap(s => by[s] || []);
 }
 // a set's numbers: total weight (kg), armor (share, capped), the speed share its weight leaves you
 export function setStats(ids) {

@@ -9,6 +9,7 @@
 //            (s it glows after), light (m at full fire)
 //   lamp     a steady light (features/builds.js): color, radius (m), intensity; takeBack: E by your own one takes it down and
 //            gives its cost back
+//   shelf    a Keepsake Shelf (features/keepsakes.js owns what stands on it, docs/KEEPSAKES.md): places (keepsakes it holds)
 //   cave     it can go down in the cave too (every build can stand anywhere in the persistent world; this one is made for it)
 export const BUILDS = {
   campfire: {name: 'Campfire', cost: {log: 4}, most: 3, r: .45, room: .9, prop: 'pitfire',
@@ -20,6 +21,9 @@ export const BUILDS = {
   crystal_lamp: {name: 'Crystal Lamp', cost: {glow_shard: 3, copper_ore: 2, log: 1}, most: 8, r: .28, room: .6, prop: 'crystallamp', cave: true,
     desc: 'Glow Shards set in copper on a little cairn of stone: a cold, steady light that never goes out. E by your own takes it back.',
     lamp: {color: '#b8f0a4', radius: 6, intensity: 1.5, takeBack: true}},
+  keep_shelf: {name: 'Keepsake Shelf', cost: {log: 3}, most: 1, r: .35, room: .7, prop: 'keepshelf',
+    desc: 'a plank of split log on two posts, for the odd things you find. E by it puts one on or takes yours back. Anyone may.',
+    shelf: {places: 5}},
 };
 export const BUILD_IDS = Object.keys(BUILDS);
 // placing: ahead of him (within E's reach from where he stands); the server's reach check; how close two builds may stand

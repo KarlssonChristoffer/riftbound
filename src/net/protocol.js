@@ -17,6 +17,8 @@
 //            (the server checks it), bait / meal = the bait on the hook, the meal eaten (ids); the server rolls what bites. {a: 'land', n}: he
 //            landed it (told to everyone); {a: 'lost', n}: it got away
 //   ping     {c}                                         c = the client's clock (ms), echoed
+//   fish     {a: 'jab', n, x, y, w, lvl}                  the Heron Feather's jab into the shallows at his feet (docs/KEEPSAKES.md;
+//            n = his jab count), rolled at once
 // server -> client
 //   welcome  {v, id, name, color, seed, t, world, peers, clock, unc}   world = {id: state} (what's been done to the world so far),
 //            peers = [peer], clock (below), unc = {sec: {id: {s, by, n}}, shift} (the uncanny forest: its secrets' states, the
@@ -38,6 +40,7 @@
 //            (wait s, the nibbles' s before it), two = a double catch. {a: 'caught', id, name, c, cm, kg, two}: to everyone,
 //            player id landed catch c
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
+//   fish     {a: 'jabbed', n, id, cm, kg}                to the jabber: what jab n came up with (id '': nothing)
 //   pong     {c, t}                                      t = the server's clock (ms)
 export const VERSION = 2;
 export const TICK_HZ = 20;          // the server's snapshot rate; a client sends its state at the same rate

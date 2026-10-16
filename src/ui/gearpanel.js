@@ -1,11 +1,16 @@
 // GEAR PANEL: what you wear (features/gear.js; Tab, beside the pack). A slot a row (head, body, back, hands, legs, feet, main
 // hand, off hand), each with its pieces as pixel icons (ui/gearicons.js) after "own" (the character's own clothes: the slot
-// empty); a click wears a piece or takes it off. The piece under the pointer shows in a card that follows it (ui/geartip.js:
+// empty); a click wears a piece or takes it off. The first row, CHARMS, holds two keepsakes (docs/KEEPSAKES.md): it offers
+// only the ones in your pouch (their own item icons: content/items.js, through features/keepsakes.js's icon when it has one);
+// a click puts one on beside the other (the older comes off past two) or takes it off. The piece under the pointer shows in a card that follows it (ui/geartip.js:
 // what it is, its weight and armor, what it does; Shift for more). At the bottom the set's numbers: weight, armor, speed. In
 // co-op a choice waits for the server ("waiting for the server"). Pixel art like the game (ui/pixelfont.js, ui/pixelframe.js).
-// OWNS: the panel (#gear + its style). READS: the feature's S (want, worn, stats, waiting), content/gear.js.
-// BUDGET: closed: nothing. Open: DOM writes on a change of set (no per-frame work).
-import {SLOTS, SLOT_NAMES, GEAR, RULES, RARITY, gearById, setStats} from '../content/gear.js';
+// OWNS: the panel (#gear + its style). READS: the feature's S (want, worn, stats, waiting), content/gear.js, content/items.js
+//   (the keepsakes' icons), has(id) (the pouch holds one).
+// BUDGET: closed: nothing. Open: DOM writes on a change of set or of the pouch (no per-frame work).
+import {SLOTS, SLOT_NAMES, SLOT_CAP, GEAR, RULES, RARITY, gearById, setStats} from '../content/gear.js';
+import {ITEMS} from '../content/items.js';
+import {iconURL, iconHook} from './packpanel.js';
 import {gearIcon, slotIcon} from './gearicons.js';
 import {gearTip} from './geartip.js';
 import {FRAMES, uiUnit} from './pixelframe.js';
@@ -34,6 +39,9 @@ body:has(#pause:not(.hidden)) #gear { visibility: hidden; }
 #gear .g-it.on { border-image-source: var(--g-on); }
 #gear .g-it.want { border-image-source: var(--g-hot); }
 #gear .g-it img { width: calc(18 * var(--u)); height: calc(18 * var(--u)); image-rendering: pixelated; }
+#gear .g-it.g-off { display: none; }
+#gear .g-none { color: var(--dim); }
+#gear .g-none.g-off { display: none; }
 #gear .g-it.own img { opacity: .8; }
 #gear .g-it i { position: absolute; right: var(--u); top: var(--u); width: calc(3 * var(--u)); height: calc(3 * var(--u)); outline: var(--u) solid #0c0907; }
 #gear .g-sum { margin-top: calc(5 * var(--u)); padding-top: calc(3 * var(--u)); border-top: var(--u) solid #4a3826; }
@@ -41,10 +49,18 @@ body:has(#pause:not(.hidden)) #gear { visibility: hidden; }
 #gear .g-dim { color: var(--dim); }
 #gear .g-wait { color: var(--key); }`;
 
-// opts: {S (the feature's state), choose(ids), online() (co-op: a choice waits for the server)}
-export function createGearPanel({S, choose, online}) {
-  let root = null, sum = null;
-  const btns = [];   // {b, id (or null: own), slot}
+// a keepsake's icon: its item's (redrawn when its look changes: the tally's notches, ui/packpanel.js iconHook)
+const KEEP_ICON = {};
+function keepIcon(id) {
+  const o = iconHook.of?.(id), key = o ? o.key : '';
+  const c = KEEP_ICON[id]; if (c && c.key === key) return c.url;
+  const d = o || ITEMS[id]; const url = d?.icon ? iconURL(d.icon, d.pal) : '';
+  KEEP_ICON[id] = {key, url}; return url;
+}
+// opts: {S (the feature's state), choose(ids), online() (co-op: a choice waits for the server), has(id) (the pouch holds one)}
+export function createGearPanel({S, choose, online, has = () => true}) {
+  let root = null, sum = null, none = null;
+  const btns = [];   // {b, id (or null: own), slot, img}
   const pct = v => Math.round(v * 100) + '%';
   function build() {
     const style = document.createElement('style'); style.textContent = CSS; document.head.appendChild(style);
@@ -56,28 +72,43 @@ export function createGearPanel({S, choose, online}) {
     head.querySelector('button').onclick = () => toggle(false);
     root.appendChild(head);
     const tip = gearTip();
-    for (const slot of SLOTS) {
+    for (const slot of ['charm', ...SLOTS.filter(s => s !== 'charm')]) {   // (the charms first: what you found, then what you wear)
       const h = document.createElement('h5'); h.textContent = SLOT_NAMES[slot]; root.appendChild(h);
       const row = document.createElement('div'); row.className = 'g-row'; root.appendChild(row);
+      const many = SLOT_CAP[slot] > 1;
       for (const g of [null, ...GEAR.filter(x => x.slot === slot)]) {
         const b = document.createElement('button'); b.className = 'g-it' + (g ? '' : ' own');
-        const img = document.createElement('img'); img.src = g ? gearIcon(g) || slotIcon(slot, '#efe6cf') : slotIcon(slot, '#6b5e50'); b.appendChild(img);
+        const img = document.createElement('img'); img.src = g ? (g.keepsake ? keepIcon(g.id) : gearIcon(g)) || slotIcon(slot, '#efe6cf') : slotIcon(slot, '#6b5e50'); b.appendChild(img);
         if (g && RARITY[g.rarity]) { const i = document.createElement('i'); i.style.background = RARITY[g.rarity].col; b.appendChild(i); }   // (its rarity's colour)
-        b.onclick = () => { const rest = S.want.filter(w => gearById(w).slot !== slot); choose(g ? [...rest, g.id] : rest); sync(); };
+        b.onclick = () => {
+          const rest = S.want.filter(w => gearById(w).slot !== slot);
+          if (!g) choose(rest);
+          else if (many) choose(S.want.includes(g.id) ? S.want.filter(w => w !== g.id) : [...S.want, g.id]);   // (a charm: on beside the other, or off)
+          else choose([...rest, g.id]);
+          sync();
+        };
         tip.attach(b, {piece: () => g, slot, set: () => S.want});
-        row.appendChild(b); btns.push({b, id: g?.id ?? null, slot});
+        row.appendChild(b); btns.push({b, id: g?.id ?? null, slot, img, keep: !!g?.keepsake});
       }
+      if (slot === 'charm') { none = document.createElement('div'); none.className = 'g-none'; none.textContent = 'nothing to wear here yet'; root.appendChild(none); }
     }
     sum = document.createElement('div'); sum.className = 'g-sum'; root.appendChild(sum);
     document.body.appendChild(root);
   }
   function sync() {
     if (!root || root.classList.contains('hidden')) return;
-    for (const {b, id, slot} of btns) {
+    let offered = 0;
+    for (const o of btns) {
+      const {b, id, slot} = o;
       const worn = id ? S.worn.includes(id) : !S.worn.some(w => gearById(w).slot === slot);
       const want = id ? S.want.includes(id) : !S.want.some(w => gearById(w).slot === slot);
       b.classList.toggle('on', worn); b.classList.toggle('want', want && !worn);
+      if (o.keep) {   // (a keepsake: offered only while the pouch holds it; its icon as it looks now)
+        const show = has(id) || worn; b.classList.toggle('g-off', !show); if (show) offered++;
+        const src = keepIcon(id); if (o.img.src !== src && src) o.img.src = src;
+      }
     }
+    if (none) none.classList.toggle('g-off', offered > 0);
     const st = S.stats, w = setStats(S.want), wait = online() && S.waiting;
     sum.innerHTML = `<span class="g-num">${st.kg.toFixed(1)} kg</span> <span class="g-dim">(${RULES.FREE_KG} kg free)</span><br>` +
       `<span class="g-num">armor ${pct(st.armor)}</span> · <span class="g-num">speed ${pct(st.speed)}</span>` +

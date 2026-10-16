@@ -6,6 +6,9 @@
 //   const panel = createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held, ask}); panel.toggle() / .open / .frame()
 //   (sections: other systems' parts of the panel, drawn after the skills: pack.section; recipes under their group's heading)
 //   iconURL(rows, pal) -> a data URL (exported: features/fishing.js draws its journal's unknown catches as silhouettes)
+//   iconHook.of(id) -> {icon, pal, key} | null: another system's look for an item now (features/keepsakes.js: the tally stick's
+//   notches; key changes when it does), iconHook.ver (bumped by it: the panel redraws). descOf(d) -> what an item's card says:
+//   its desc, or for one with `lies` (content/items.js: the Fiddle String) one of them, a new one each time the pack opens
 // OWNS: the panel's element and its open state. READS: the inventory, the skills, the recipes (pack.recipe). Clicks: ask(r)
 // (pack carries a recipe out in the sim step).
 import {PAL} from '../content/items.js';
@@ -45,6 +48,9 @@ const CSS = `
 #pack .p-note { color: var(--dim); font-size: 11px; margin-top: 3px; }`;
 
 const OUTLINE = '#1a120c';
+export const iconHook = {of: null, ver: 0};
+const LIES = {i: 0};
+export const descOf = d => d?.lies?.length ? d.lies[LIES.i % d.lies.length] : d?.desc ?? '';
 // an icon (12 x 12 rows of palette letters; pal: its own letters over PAL's) -> a 14 x 14 data URL: its fills, then an outline in
 // every clear pixel next to one
 export function iconURL(rows, pal = null) {
@@ -62,9 +68,13 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const el = document.createElement('div'); el.id = 'pack'; el.className = 'hidden'; document.body.appendChild(el);
   const ICON = {};
-  const icon = id => ICON[id] ??= ITEMS[id]?.icon ? iconURL(ITEMS[id].icon, ITEMS[id].pal) : '';
+  const icon = id => {
+    const o = iconHook.of?.(id);   // (another system's look for it now: cached by its key)
+    if (o) { const k = id + '|' + o.key; return ICON[k] ??= iconURL(o.icon, o.pal); }
+    return ICON[id] ??= ITEMS[id]?.icon ? iconURL(ITEMS[id].icon, ITEMS[id].pal) : '';
+  };
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-  let open = false, kInv = -1, kSk = -1, kHeld = -2, kN = -1, kT = 0, kSec = -1;
+  let open = false, kInv = -1, kSk = -1, kHeld = -2, kN = -1, kT = 0, kSec = -1, kIcon = -1;
   const secVer = () => { let v = 0; for (const s of sections) v = (v * 31 + s.ver()) | 0; return v; };
   const costText = c => Object.entries(c).map(([id, n]) => `${n} ${ITEMS[id]?.name || id}`).join(', ');
   const afford = r => Object.entries(r.cost || {}).every(([id, n]) => inv.count(id) >= n) && !(r.can?.());
@@ -73,13 +83,13 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     let h = '<header><b>PACK</b><small>Tab</small></header><h5>Bag</h5><div class="p-bag">';
     inv.bag.forEach((s, i) => {
       const d = s && ITEMS[s.id];
-      h += `<div class="p-slot${i === held() ? ' held' : ''}"${d ? ` title="${esc(d.name)}: ${esc(d.desc)}"` : ''}>`;
+      h += `<div class="p-slot${i === held() ? ' held' : ''}"${d ? ` title="${esc(d.name)}: ${esc(descOf(d))}"` : ''}>`;
       if (d) h += `<img src="${icon(s.id)}" alt="">${s.n > 1 ? `<em>${s.n}</em>` : ''}`;
       h += '</div>';
     });
     h += '</div><h5>Pouch</h5>';
     if (!inv.pouch.size) h += '<div class="p-none">nothing gathered yet</div>';
-    for (const [id, n] of inv.pouch) { const d = ITEMS[id]; h += `<div class="p-row" title="${esc(d.desc)}"><img src="${icon(id)}" alt=""><span>${esc(d.name)}</span><em>${n}</em></div>`; }
+    for (const [id, n] of inv.pouch) { const d = ITEMS[id]; h += `<div class="p-row" title="${esc(descOf(d))}"><img src="${icon(id)}" alt=""><span>${esc(d.name)}</span><em>${n}</em></div>`; }
     h += '<h5>Skills</h5>';
     for (const id in SKILLS) {
       const S = SKILLS[id], L = skills.level(id), x = skills.xp(id), sp = skills.span(id), k = sp.next > sp.at ? (x - sp.at) / (sp.next - sp.at) : 1;
@@ -102,7 +112,7 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
 
   return {
     get open() { return open; },
-    toggle() { open = !open; kInv = -1; el.classList.toggle('hidden', !open); },
+    toggle() { open = !open; kInv = -1; if (open) LIES.i = Math.floor(Math.random() * 1e6); el.classList.toggle('hidden', !open); },   // (a card that lies: another lie each opening)
     // each frame while open: rebuilt when the bag, the pouch, the skills, the held slot or the recipes changed, and twice a
     // second while there are recipes (whether one can be built here: room, a fire nearby)
     frame() {
@@ -112,8 +122,8 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
       if (hide) return;
       const now = performance.now(), h = held();
       const sv = secVer();
-      if (inv.ver !== kInv || skills.ver !== kSk || h !== kHeld || recipes.length !== kN || sv !== kSec || (recipes.length && now - kT > 500)) {
-        kInv = inv.ver; kSk = skills.ver; kHeld = h; kN = recipes.length; kSec = sv; kT = now; build();
+      if (inv.ver !== kInv || skills.ver !== kSk || h !== kHeld || recipes.length !== kN || sv !== kSec || iconHook.ver !== kIcon || (recipes.length && now - kT > 500)) {
+        kInv = inv.ver; kSk = skills.ver; kHeld = h; kN = recipes.length; kSec = sv; kIcon = iconHook.ver; kT = now; build();
       }
     },
   };
