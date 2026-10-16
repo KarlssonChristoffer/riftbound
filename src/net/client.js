@@ -2,9 +2,10 @@
 // (net/protocol.js) over any transport (net/transport.js), keeps the other players' snapshots, and answers "where was peer X
 // at time t" for the view, a little in the past (INTERP_MS) so it can interpolate between two snapshots. No game imports:
 // features/coop.js connects it to the world.
-//   const C = createNetClient({transport, name}); C.peers (Map id -> peer); C.sendState(o); C.act(a, id, o?);
+//   const C = createNetClient({transport, name, hello?}) (hello() -> more fields for the hello: features/coop.js's key and the
+//   workshop's records); C.peers (Map id -> peer); C.sendState(o); C.act(a, id, o?);
 //   C.sample(peer, now, out) -> out {x, y, z, phi, s, pose, ls}; C.drain() -> the queued sim messages (world / fix / deny /
-//   clock / sec / ev / gear: your own set as the server took it); C.wear(ids) asks for a set; a peer's q.gear (ids) / q.gv
+//   clock / sec / ev / gear: your own set as the server took it; smith / made / rec: the workshop's, features/workshop.js); C.wear(ids) asks for a set; a peer's q.gear (ids) / q.gv
 //   (its version); C.elk: the night elk's snapshots (a ring like a peer's: C.sample(C.elk, out) -> s = its mode's index,
 //   pose = its quarry's id); C.soot: the cave's soot things' rings (C.sample(C.soot[k], out): z its height, s its mode's index);
 //   a peer's q.lt: their lantern burns in the cave (the latest snapshot; 2, a burnt eel's eyes, is not a light); q.md: the meal in
@@ -14,7 +15,7 @@ import {VERSION, INTERP_MS, encode, decode} from './protocol.js';
 
 const RING = 32;   // snapshots kept per peer (1.6 s at 20 Hz)
 
-export function createNetClient({transport, name = ''}) {
+export function createNetClient({transport, name = '', hello = null}) {
   const C = {
     status: 'connecting', why: '', id: 0, name: '', color: '', seed: null, world: new Map(), peers: new Map(), unc: null,
     ping: 0, joined: [], left: [],
@@ -47,6 +48,7 @@ export function createNetClient({transport, name = ''}) {
         offset = m.t - performance.now();
         if (m.clock) queue.push({k: 'clock', t: m.clock.t, h: m.clock.h, rate: m.clock.rate});
         C.unc = m.unc || null;
+        for (const r of m.made || []) queue.push({k: 'made', rec: r, late: true});   // (your records as the server keeps them: features/workshop.js)
         for (const [id, s] of Object.entries(m.unc?.sec || {})) queue.push({k: 'sec', id, s: s.s, by: s.by, n: s.n, late: true});
         break;
       case 'join': peer(m.p); break;
@@ -60,7 +62,7 @@ export function createNetClient({transport, name = ''}) {
         break;
       }
       case 'world': if (m.s === 'grown') C.world.delete(m.id); else C.world.set(m.id, {s: m.s, by: m.by}); queue.push(m); break;   // (grown: a patch or a vein back, features/forage.js, mining.js)
-      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': case 'bolt': case 'snow': queue.push(m); break;   // (bolt: natural lightning, features/thunder.js; snow: a snowball hit someone, features/winter.js)
+      case 'fix': case 'deny': case 'clock': case 'sec': case 'ev': case 'fish': case 'bolt': case 'snow': case 'smith': case 'made': case 'rec': queue.push(m); break;   // (bolt: natural lightning, features/thunder.js; snow: a snowball hit someone, features/winter.js)
       case 'gear': {
         if (!Array.isArray(m.g)) break;
         if (m.id === C.id) { queue.push(m); break; }   // (yours: a sim message, features/gear.js wears it at a step)
@@ -71,7 +73,7 @@ export function createNetClient({transport, name = ''}) {
     }
   };
   transport.onmessage = onMsg;
-  transport.onopen = () => { transport.send(encode({k: 'hello', v: VERSION, name})); };
+  transport.onopen = () => { transport.send(encode({...(hello?.() || {}), k: 'hello', v: VERSION, name})); };
   transport.onclose = why => { C.status = 'offline'; C.why = why; };
   if (transport.open) transport.onopen();
 

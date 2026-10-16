@@ -250,6 +250,15 @@ export const EVENTS = {
   // building (features/builds.js, docs/BUILDING.md): a build's id is 'o' + n offline, the server's 'b' + n online
   'build.add':          ['features/builds.js',    'x, y, id, kind (content/builds.js), mine: a build went down (his, or online a friend\'s)', 'audio'],
   'build.remove':       ['features/builds.js',    'x, y, id, kind: a build was taken back', '(none yet)'],
+  // the workshop (features/workshop.js, docs/WORKSHOP.md): a furnace and an anvil are builds (their ids: builds.js's)
+  'smith.load':         ['features/workshop.js',  'x, y, id (the furnace), ore (copper | iron: content/workshop.js CHARGES), mine: a charge went in', 'audio'],
+  'smith.pump':         ['features/workshop.js',  'x, y, id, heat (0..1 after it), rhythm, mine: a pump of the blowpipe or the bellows', 'audio'],
+  'smith.smelt':        ['features/workshop.js',  'x, y, id, bar (content/items.js), mine (the loader is him): a bar slid out onto the stone', 'audio, (skill-verbs: a Smithing skill)'],
+  'smith.strike':       ['features/workshop.js',  'x, y, h, n (counts so far), of (counts to finish), rhythm: a hammer blow on the anvil', 'audio, workshop (view: sparks)'],
+  'smith.make':         ['features/workshop.js',  'x, y, item (content/items.js or content/gear.js), u (its record), hand (made by hand, no anvil): a made thing is his', 'audio, (skill-verbs: a Smithing skill)'],
+  'tool.lit':           ['features/workshop.js',  'x, y, u: his pine haft caught at a fire (a small torch)', 'audio'],
+  'tool.unlit':         ['features/workshop.js',  'x, y, u, why (out | rain): his pine haft went out', 'audio'],
+  'vein.crack':         ['features/workshop.js',  'x, y, i (the vein: world/caves.js C.veins), on (true: cracked by a fire; false: it closed again)', 'audio'],
   // the fly agaric broth (features/trip.js)
   'trip.start':         ['features/trip.js',      'x, y, t (s), still (the burnt broth: the world holds its breath): he drank the fly agaric broth', '(none yet)'],
   'trip.end':           ['features/trip.js',      'x, y: the trip has worn off', '(none yet)'],

@@ -576,6 +576,17 @@ export const GEAR = [
 ];
 export const GEAR_BY_ID = Object.fromEntries(GEAR.map(g => [g.id, g]));
 export const gearById = id => GEAR_BY_ID[id] || null;
+// WHERE A PIECE COMES FROM (the workshop, docs/WORKSHOP.md): you wear what you own. FREE_KINDS are always yours (a rod, a comb,
+// a miner's cap: their skills need them); a MADE piece is yours once you made one (its made-thing record: features/workshop.js
+// owns, server/workshop.mjs owns): 'anvil' off the Stone Anvil, 'hand' from Tab > Make (content/workshop.js SMITH / HAND). Every
+// other piece is the dev wardrobe's for now (Shift+Tab, ?allgear=1, the server's --wardrobe). A piece in a slot other than
+// BASE_SLOTS (a charm slot to come) is its own feature's to give: never hidden here.
+export const FREE_KINDS = ['fishing', 'foraging', 'mining'];
+export const MADE = {kettle_helm: 'anvil', iron_boots: 'anvil', bark_shoes: 'hand', bark_pack: 'hand', torch: 'hand'};
+for (const id in MADE) if (GEAR_BY_ID[id]) GEAR_BY_ID[id].made = MADE[id];   // (piece.made: 'anvil' | 'hand')
+const BASE_SLOTS = ['head', 'body', 'back', 'hands', 'legs', 'feet', 'main', 'off'];
+// a piece anyone may wear without owning it
+export const freePiece = g => !!g && (FREE_KINDS.includes(g.kind) || !BASE_SLOTS.includes(g.slot));
 
 // a set as asked for (ids, any order, maybe junk) -> the set it can be: known ids, at most one a slot (the later wins), in
 // SLOTS order. The co-op server keeps only what this returns (server/room.mjs), the game too (features/gear.js)

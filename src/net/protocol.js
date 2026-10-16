@@ -3,7 +3,9 @@
 // Messages are JSON objects {k: kind, ...}. The transport under them (net/transport.js: a WebSocket today) only carries text.
 //
 // client -> server
-//   hello    {v, name}                                   the first message; the server answers with welcome
+//   hello    {v, name, key?, made?}                      the first message; the server answers with welcome. key = this browser's
+//            random key (features/coop.js: the server keeps a player's records by it, server/players.mjs), made = the save's
+//            copy of his made things' records (features/workshop.js: at most 64; the server's own win)
 //   st       {x, y, z, phi, s, pose, rig, w?, wn?, ls?, tp?, lt, md, bd}   the local player 20 times a second: world metres (x east, y south,
 //            z up), facing phi (rad, the arena's atan2(x, y)), s = his state (idle, move, roll, ...), pose = the frame drawn,
 //            rig = the live model he wears (gunslinger | outlaw | ''), w = the drawn pose's bones (encodePose) when it changed
@@ -15,7 +17,9 @@
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
 //            dawn | day | dusk | night: dev, the world's clock to the next such hour), 'ignite' (id: a tree he touched a burning
 //            brand to: ?firestart=1, docs/WEATHER.md), 'wood' (id: a struck tree whose splinter of thunderwood he took), 'hole' ({x, y, b}: a hole
-//            in the lake ice: a pick's or an axe's last blow, b 1: he went through; docs/WINTER.md)
+//            in the lake ice: a pick's or an axe's last blow, b 1: he went through; docs/WINTER.md). The workshop's (docs/WORKSHOP.md):
+//            'make' {id: the anvil's build id ('' by hand), r: the recipe (content/workshop.js SMITH / HAND), haft, inlay, dev?};
+//            a 'fell' and a 'mine' carry u (the tool's record) and a 'fell' old (1: an old oak) for the counts
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
@@ -26,9 +30,9 @@
 //   snow     {id, vx, vy, hat}                            his snowball hit player id (the thrower decides: docs/WINTER.md), pushing
 //            them (vx, vy m/s), hat 1: their hat flies off
 // server -> client
-//   welcome  {v, id, name, color, seed, t, world, peers, clock, unc}   world = {id: state} (what's been done to the world so far),
+//   welcome  {v, id, name, color, seed, t, world, peers, clock, unc, made}   world = {id: state} (what's been done to the world so far),
 //            peers = [peer], clock (below), unc = {sec: {id: {s, by, n}}, shift} (the uncanny forest: its secrets' states, the
-//            night shift's strength: docs/UNCANNY.md; null when the server runs without it)
+//            night shift's strength: docs/UNCANNY.md; null when the server runs without it), made = his records (server/workshop.mjs)
 //   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn, g (the gear worn)}
 //   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0, lt, md, bd], ...], c?}   every tick; w only when it changed since the last snap;
 //            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
@@ -51,6 +55,8 @@
 //            (wait s, the nibbles' s before it), two = a double catch. {a: 'caught', id, name, c, cm, kg, two}: to everyone,
 //            player id landed catch c
 //   snow     {by, id, vx, vy, hat}                       player by's snowball hit player id (to everyone but the thrower)
+//   made     {rec, dev?}                                 to the maker: the record of a thing he made (the client pays when it hears it)
+//   rec      {u, counts, marks}                          to its owner: what his tool has done since (at most every 2 s)
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
 //   pong     {c, t}                                      t = the server's clock (ms)
 export const VERSION = 2;

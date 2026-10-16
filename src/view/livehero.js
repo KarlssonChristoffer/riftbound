@@ -1698,7 +1698,8 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     MW.ok = aim.ok; if (aim.ok) { toWorld(MUZ[0], MUZ[1], MUZ[2], WP, 0); MW.x = WP[0]; MW.y = WP[2]; MW.h = WP[1]; }
     screenOf(0, 0, 0, SC); SCR.x = SC[0]; SCR.y = SC[1]; G.toScreenInto(AX + 1, AY, AZ, SO); SCR.ppm = Math.abs(SO[0] - SC[0]) || SCR.ppm;
     flash(dt);
-    HELD.show(app.PL.tool?.S.on ? app.PL.tool.S.id : '', P.state === 'chop' ? 'swing' : 'carry', show, HELD_O);   // TOOL: the axe in his fist while it's out (hanging from it; gripped at the knob to swing)
+    const held = app.PL.tool?.S.on ? app.PL.tool.S.id : '';
+    HELD.show(held, P.state === 'chop' ? 'swing' : 'carry', show, HELD_O, held ? app.feat('workshop')?.lookOf?.(held) || '' : '');   // (a made tool's look: its haft's wood, its inlay: features/workshop.js)   // TOOL: the axe in his fist while it's out (hanging from it; gripped at the knob to swing)
     mats(show, toolSwing ? toolHide(A.hide) : A.hide);
     DRAWN.w = show; DRAWN.phi = phi; DRAWN.x = AX; DRAWN.h = AY; DRAWN.z = AZ; DRAWN.n++;
     stats.smears += K.smear || fsSmear() ? smear(show) : (prevOk = false, 0);   // (FISTS: a punch's snap smears, from its wind to just past its contact)

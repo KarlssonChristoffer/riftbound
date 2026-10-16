@@ -37,10 +37,10 @@ export async function create(host) {
   function sync() {
     const B = builds(); if (!B || B.ver === seen) return fires;
     seen = B.ver; fires.length = 0;
-    for (const b of B.list.values()) if (b.def.fire) fires.push(b);
+    for (const b of B.list.values()) if (b.def.fire && !b.def.smelt) fires.push(b);   // (a furnace's fire is inside it: features/workshop.js draws its glow)
     return fires;
   }
-  const fireOf = p => p.build ? builds()?.list.get(p.build) : null;
+  const fireOf = p => p.build ? builds()?.list.get(p.build) : null;   // (a furnace too: E feeds it a log like any fire)
   const flares = new Map();   // a build -> s of flare left (view)
   const flareK = b => { const s = flares.get(b); return s ? s / FLARE.s : 0; };
   const POT3 = {size: 3}, POT2 = {size: 2}, STP = {size: 2, alpha: .4};
@@ -62,7 +62,7 @@ export async function create(host) {
     prompt(p) {
       const b = fireOf(p); if (!b?.def.fire) return null;
       if (builds().hasPot?.(b) && !builds().hadSpoon(b)) return {text: `E  a spoon of ${nameOf(b.pot.dish, b.pot.q).toLowerCase()} (${b.pot.left} left)`, color: '#ffb060'};
-      const n = pack()?.count('log') || 0;
+      const n = pack()?.count('wood') || 0;   // (any log burns)
       return {text: n ? `E  add a log (${n})` : 'no logs in the pouch', color: n ? '#ffb060' : '#e8a070'};
     },
     view(dt, evs) {   // (the steam off a fire the rain put out: a few seconds of it)

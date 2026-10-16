@@ -77,6 +77,9 @@ export async function create(host) {
     for (let i = 0; i < V.length; i++) { const k = key(Math.floor(V[i].x / CELL), Math.floor(V[i].y / CELL)); let L = cells.get(k); if (!L) cells.set(k, L = []); L.push(i); }
   }
   const floorAt = v => host.elev(v.x + v.nx * .45, v.y + v.ny * .45);   // (the floor in front of it)
+  // FIRE-SETTING is the workshop's (features/workshop.js cracked(i): a fire burnt by the vein long enough): 1 cracked, else 0
+  const cracked = i => host.feature('workshop')?.cracked?.(i) ? 1 : 0;
+  const weakWords = i => V[i].kind === 'iron' && !cracked(i) ? 'too hard: fire would crack this' : 'needs a better pick';
   // the vein nearest (x, y) within `reach` m of its face (its middle, VEIN_R either side along the wall) that a blow could take
   // (not spent; on his level); fx, fy: his facing (unit) when it must be ahead of him (0, 0: any way) -> its index | -1
   function veinNear(x, y, z, reach, fx, fy) {
@@ -196,11 +199,12 @@ export async function create(host) {
   function plugsOut() { for (const e of plugs.values()) host.entities.remove(e); plugs.clear(); }
   // the night veins in the light: hidden (the pick can't find them) unless it's dark round them or he trips
   const peerLit = (x, y, r) => coop()?.litNear?.(x, y, r) || false;
+  const torch = () => !!host.feature('workshop')?.torch;
   function dark() {
     if (!NIGHT.length) return;
     const P = host.player, cv = host.feature('caves'), B = host.feature('builds'), trip = !!host.feature('trip')?.tripping, R0 = TUNE.night.dark;
     for (const i of NIGHT) {
-      const v = V[i], lit = (cv?.lit && Math.hypot(P.x - v.x, P.y - v.y) < R0) || B?.shineNear?.(v.x, v.y, R0) || peerLit(v.x, v.y, R0);
+      const v = V[i], lit = ((cv?.lit || torch()) && Math.hypot(P.x - v.x, P.y - v.y) < R0) || B?.shineNear?.(v.x, v.y, R0) || peerLit(v.x, v.y, R0);   // (a lit pine haft is a light: features/workshop.js torch)
       const h = trip || !lit ? 0 : 1;
       if (h !== HID[i]) { HID[i] = h; hidVer++; if (h && lockI === i) lockI = -1; }
     }
@@ -264,9 +268,10 @@ export async function create(host) {
   function strike(i, e, tool) {
     const v = V[i], K = VEINS[v.kind], P = host.player, d = Math.hypot(v.x - P.x, v.y - P.y) || 1, ux = (v.x - P.x) / d, uy = (v.y - P.y) / d;
     const at = hitAt(v);
-    if ((tool.tier || 1) < K.tier) {   // GEAR GATES: iron wants a better pick than the old one
+    const crack = cracked(i);   // (fire-setting, features/workshop.js: a cracked vein asks one tier less and gives one chunk more)
+    if ((tool.tier || 1) + crack < K.tier) {   // GEAR GATES: iron wants a better pick than the old one
       host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: 0, rhythm: false, dx: ux, dy: uy, ring: ring !== 0});
-      if (clockT - noteT > 2.5) { noteT = clockT; ui()?.float(at.x, at.y, at.h + .7, 'needs a better pick', '#e8a070'); }
+      if (clockT - noteT > 2.5) { noteT = clockT; ui()?.float(at.x, at.y, at.h + .7, weakWords(i), '#e8a070'); }
       host.hitstop(.03); host.shake(1, .06); return;
     }
     const rhythm = !!e.rhythm, pow = blowPower(tool, {power: host.mods.value('mine.power', 1)}, rhythm);
@@ -278,7 +283,7 @@ export async function create(host) {
     } else {
       const l = (left.get(i) ?? K.blows) - pow;
       if (l > 1e-6) { left.set(i, l); ver++; }
-      else spend(i, mineYield(R, v.kind, {extra: host.mods.value('mine.extra', 0)}), true);
+      else spend(i, mineYield(R, v.kind, {extra: host.mods.value('mine.extra', 0)}) + crack, true);
     }
     host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: Math.min(3, stageOf(i)), rhythm, dx: ux, dy: uy, hollow: !!K.hollow, ring: ring !== 0});
     host.hitstop(rhythm ? .07 : .045); host.shake(rhythm ? 2.2 : 1.5, .08);
@@ -620,8 +625,8 @@ export async function create(host) {
     hd(q, sc) {   // the prompt over the vein a press would dig (the pixel look: ui/hdpixel.js)
       const t = T(); if (!t || !active() || host.lock || host.hudOff || host.playerHidden || pack()?.open || host.PL.nearInteract?.() || host.BUSY.has(host.player.state) || t.S.mode) return;
       let i = veinUnderCursor(); if (i < 0) i = veinAhead(); if (i < 0) return;
-      const b = pack()?.best('mine'), weak = !b || (b.def.tool.tier || 1) < VEINS[V[i].kind].tier;
-      const text = !b ? 'needs a pick' : weak ? 'needs a better pick' : 'E mine', a = hitAt(V[i]), s = host.G.toScreen(a.x, a.h + .9, a.y);
+      const b = pack()?.best('mine'), weak = !b || (b.def.tool.tier || 1) + cracked(i) < VEINS[V[i].kind].tier;
+      const text = !b ? 'needs a pick' : weak ? weakWords(i) : 'E mine', a = hitAt(V[i]), s = host.G.toScreen(a.x, a.h + .9, a.y);
       q.save(); host.G.hdShift?.(q, sc); q.imageSmoothingEnabled = false;
       hdPrompt(q, text, s[0] * sc, s[1] * sc, hdUnit(), weak ? '#e8a070' : '#f2d27a');
       q.restore();

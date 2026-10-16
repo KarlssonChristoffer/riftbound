@@ -12,7 +12,10 @@
 //   draws: {id, title, ver() -> number (redrawn when it changes), html(esc, icon) -> string, click?(data, ask): an element of its
 //   html with data-sec="<id>" clicked (data: its dataset; ask(r): r carried out in the sim step like a recipe)}: features/fishing.js's
 //   catch journal, features/meals.js's Cook journal) / pack.held(slot)
-//   (the bag slot whose tool is in hand: the panel marks it; -1 none)
+//   (the bag slot whose tool is in hand: the panel marks it; -1 none) / pack.giveMade(id, u, at?) -> true when it went in (a made
+//   thing: a slot of its own carrying its record's uid: features/workshop.js) / pack.takeU(u) / pack.slotOf(u) / pack.prefer(slot)
+//   (that slot's tool swings for its job: a click on it in the panel) / pack.slotTip(t) ({show(slot, e), move(e), hide()}: the card
+//   over a made thing's slot, ui/madetip.js through features/workshop.js)
 // OWNS: the inventory, the skills, the world save, the panel, the modifier source 'skills'.
 // READS: content/items.js, content/skills.js, the game's HUD (toasts, floats). EMITS: pack.add, skill.level.
 // BUDGET: sim; nothing per step but a save timer; the panel rebuilds only when what it shows changed.
@@ -31,7 +34,7 @@ export async function create(host) {
   const inv = createInventory(ITEMS, {slots: 8});
   const skills = createSkills(SKILLS, CURVE, host.mods);
   let stores = {}, dirtyT = -1, held = -1;
-  const recipes = [], sections = [];
+  const recipes = [], sections = [], tips = [];
   const game = () => host.feature('game');
   const ui = () => game()?.ui || null;
 
@@ -46,7 +49,8 @@ export async function create(host) {
   if (ON) { load(); addEventListener('pagehide', () => { if (dirtyT >= 0) write(); }); }
 
   const queue = [];   // the panel's clicks (and the menu's): carried out in the sim step
-  const panel = ON ? createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held: () => held, ask: r => queue.push(r)}) : null;
+  const panel = ON ? createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held: () => held, ask: r => queue.push(r),
+    pick: i => queue.push({name: 'Bag', run: () => { const j = inv.prefer(i); if (j) dirtyT = Math.max(dirtyT, 0); }}), tips}) : null;
   const label = (id, n) => (n > 1 ? `+${n} ` : '+') + (ITEMS[id]?.name || id);
 
   const F = {
@@ -54,6 +58,7 @@ export async function create(host) {
     inv, skills,
     give(id, n = 1, at = null) {
       if (!ON) return n;
+      if (id === 'wood') id = 'log';   // (a 'wood' cost given back: Oak Logs)
       const left = inv.add(id, n), got = n - left;
       if (got > 0) {
         dirtyT = Math.max(dirtyT, 0); host.events.push({type: 'pack.add', id, n: got, x: at?.x ?? host.player.x, y: at?.y ?? host.player.y});
@@ -63,6 +68,16 @@ export async function create(host) {
       return left;
     },
     take(id, n = 1) { if (!ON || !inv.take(id, n)) return false; dirtyT = Math.max(dirtyT, 0); return true; },
+    giveMade(id, u, at = null) {
+      if (!ON || !u) return false;
+      if (inv.add(id, 1, u) > 0) { ui()?.toast('The bag is full', ITEMS[id]?.name || id, '#e8a070'); return false; }
+      dirtyT = Math.max(dirtyT, 0); host.events.push({type: 'pack.add', id, n: 1, x: at?.x ?? host.player.x, y: at?.y ?? host.player.y});
+      if (at) ui()?.float(at.x, at.y, at.h ?? 1.6, label(id, 1), ITEMS[id]?.col || '#f4efe4');
+      return true;
+    },
+    takeU(u) { if (!ON || !inv.takeU(u)) return false; dirtyT = Math.max(dirtyT, 0); return true; },
+    slotOf: u => inv.slotOf(u), prefer(slot) { const j = inv.prefer(slot); if (j) dirtyT = Math.max(dirtyT, 0); return j; },
+    slotTip(t) { if (!tips.includes(t)) tips.push(t); },
     count: id => inv.count(id), has: (id, n = 1) => inv.has(id, n), best: job => ON ? inv.best(job) : null,
     payOf: need => inv.payOf(need), short: cost => !ON || inv.short(cost),
     gain(id, n, at = null) {

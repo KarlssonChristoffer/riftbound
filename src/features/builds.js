@@ -121,9 +121,9 @@ export async function create(host) {
     const F0 = b.def.fire; if (!F0) return 'not a fire';
     const left = fuelAt(b, now());
     if (left >= (F0.max - .5) * F0.log) return 'it burns well';
-    if ((pack()?.count('log') || 0) < 1) return 'no logs in the pouch';
+    if ((pack()?.count('wood') || 0) < 1) return 'no logs in the pouch';   // (any species' log: game/inventory.js 'wood')
     if (online()) { coop().act('stoke', b.id); return ''; }
-    pack().take('log', 1); b.fuel = stokeFuel(left, b.def); b.t0 = T; ver++;
+    pack().take('wood', 1); b.fuel = stokeFuel(left, b.def); b.t0 = T; ver++;
     host.events.push({type: 'fire.addWood', x: b.x, y: b.y}); save();
     return '';
   }
@@ -198,7 +198,7 @@ export async function create(host) {
     } else if (m.s === 'stoked') {
       const b = list.get(m.id); if (!b) return;
       b.fuel = +m.fuel || 0; b.t0 = +m.t0 || 0; ver++;
-      if (mine) pack()?.take('log', 1);
+      if (mine) pack()?.take('wood', 1);
       if (!m.late) host.events.push({type: 'fire.addWood', x: b.x, y: b.y});
     } else if (m.s === 'doused') {   // (the rain put it out: the server's clock rained on it, docs/WEATHER.md)
       const b = list.get(m.id); if (!b) return;
@@ -214,7 +214,9 @@ export async function create(host) {
   // ---------------------------------------------------------------- the meshes (a build's frame: its foot at x, z, y)
   const GEO = {};
   const geoOfKind = kind => GEO[kind] ??= (MAKE[kind] || MAKE.campfire)();
+  const SHAPES = {};   // kind -> another feature's mesh maker (F.shape: the workshop's furnace and anvil)
   const MAKE = {
+    __proto__: SHAPES,
     campfire() {   // a ring of stones round a teepee of logs on an ash bed (features/campfires.js draws the flames)
       const L = [];
       for (let i = 0; i < 9; i++) {
@@ -275,6 +277,10 @@ export async function create(host) {
     shineNear(x, y, r) { const t = now(); for (const b of list.values()) if ((b.def.lamp || (b.def.fire && fuelAt(b, t) > 0)) && Math.hypot(b.x - x, b.y - y) < r) return true; return false; },
     stoke, mine: b => b.by === me(),
     pot, spoon, hasPot, hadSpoon,
+    // another feature's builds: its mesh (shape(kind, make): make() -> a geometry in the build's frame, made once); a fire's fuel
+    // set from outside its stoking (refuel(id, fuel, t0): a furnace at white heat eats its wood twice as fast, features/workshop.js)
+    shape(kind, make) { SHAPES[kind] ??= make; },
+    refuel(id, fuel, t0) { const b = list.get(id); if (!b?.def.fire) return; b.fuel = Math.max(0, fuel); b.t0 = t0; },
     check: kind => { const d = BUILDS[kind]; return d && spot(d) ? '' : why; },   // (tests: '' = it can go down ahead of him)
     update(dt, evs) {
       T += dt;
