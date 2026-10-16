@@ -25,6 +25,8 @@ import {flags} from '../core/flags.js';
 const GRADE = {ruins: [1.039, 1.029, .818], ember: [1.166, .958, .82], frost: [.896, 1.013, 1.161], rift: [1.056, .792, 1.649], desert: [1.09, 1.0, .84]};
 const BG = {ruins: [.10, .13, .11], ember: [.11, .06, .05], frost: [.10, .12, .17], rift: [.06, .04, .10], desert: [.15, .10, .07]};
 const HALO_A = .16, HALO_R = .3, LANTERN = {fwd: .22, side: .3, h: .95, c: [1, .76, .48], r: 4.2, k: 1, flicker: .2, id: -7};
+// the Nightglass Lantern's light ('light.nightglass' > 0: content/gear.js, docs/ALMANAC.md): cold violet, a little dimmer
+const NIGHTGLASS = {c: [.46, .46, 1], k: .85};
 // UNDERGROUND (features/caves.js F.under 0..1: how far the world above has gone dark round him): the mood turns toward the cave's:
 // a faint cold ambient, no sun, no sun shadows, no fog's colour, a black background, a small lift round him (he stays readable);
 // the lights (his lantern, the crystals) do the rest
@@ -77,8 +79,8 @@ export function createLighting({G, host, features, opt}) {
   // the lantern by a run rule (features/omens.js, an eclipse): 'light.lantern' > 0 lights it whatever the switch says,
   // 'light.lanternR' scales its reach, 'light.lanternOut' > 0 puts it out whatever lights it (the cave's dark: features/caves.js);
   // read when the notes change. Its flame leans toward a hollow wall: features/cavelife.js F.lean (m, world x / y)
-  let lanternMod = 0, lanternR = 1, lanternOut = 0, lean = undefined, nightEye = 0;
-  if (host.mods) { const f = () => { lanternMod = host.mods.value('light.lantern', 0); lanternR = host.mods.value('light.lanternR', 1); lanternOut = host.mods.value('light.lanternOut', 0); nightEye = host.mods.value('light.nightEye', 0); }; host.mods.watch(f); f(); }
+  let lanternMod = 0, lanternR = 1, lanternOut = 0, lean = undefined, nightEye = 0, nightglass = 0;
+  if (host.mods) { const f = () => { lanternMod = host.mods.value('light.lantern', 0); lanternR = host.mods.value('light.lanternR', 1); lanternOut = host.mods.value('light.lanternOut', 0); nightEye = host.mods.value('light.nightEye', 0); nightglass = host.mods.value('light.nightglass', 0); }; host.mods.watch(f); f(); }
   let eelK = 0, eelOff = 9, eelT = -1, fires = null, coop = null;   // (EEL: how much of it shows now; s since a light was near; the last frame's clock)
   const GR = [1, 1, 1];
   function putL(x, y, z, c, r, gain, flat, halo = true) { const o = LOUT[nL] ??= {}; nL++; o.x = x; o.y = y; o.z = z; o.c = c; o.r = r; o.gain = gain; o.flat = flat; o.halo = halo; }
@@ -167,7 +169,7 @@ export function createLighting({G, host, features, opt}) {
     if (lantern) {   // (photo mode may hide him: his lantern goes with him)
       const a = player.faceAngle, fx = Math.sin(a), fy = Math.cos(a), fk2 = flick(LANTERN, t);
       if (lean === undefined && features.length) lean = features.find(f => f.name === 'cavelife')?.lean || null;
-      putL(PX + fx * LANTERN.fwd - fy * LANTERN.side + (lean ? lean.x : 0), P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side + (lean ? lean.y : 0), LANTERN.c, LANTERN.r * lanternR * (1 + CAVE.lanternR * ug) * (1 + (fk2 - 1) * .15), fk2 * (1 + CAVE.lantern * ug), false);
+      putL(PX + fx * LANTERN.fwd - fy * LANTERN.side + (lean ? lean.x : 0), P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side + (lean ? lean.y : 0), nightglass > 0 ? NIGHTGLASS.c : LANTERN.c, LANTERN.r * lanternR * (1 + CAVE.lanternR * ug) * (1 + (fk2 - 1) * .15), fk2 * (1 + CAVE.lantern * ug) * (nightglass > 0 ? NIGHTGLASS.k : 1), false);
     }
     let nc = 0, nf = 0;
     const cand = l => { const d = hypot2(l.x - PX, l.z - PY); if (d < 24 + l.r) { const w = CW[nc] ??= {l: null, d: 0}; w.l = l; w.d = d; CAND[nc++] = w; } };

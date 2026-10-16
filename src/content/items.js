@@ -154,6 +154,12 @@ export const ITEMS = {
     pal: {c: '#a8b0bc', C: '#6c7480', o: '#3a3e46', g: '#c8d0dc'},
     icon: ['............', '............', '............', '............', '...ggccccc..', '..cccccccCC.', '.CCCCCCCCCo.', '.CCCCCCCCoo.',
       '..oooooooo..', '............', '............', '............']},
+  // NIGHTGLASS (the almanac's last chapter, docs/ALMANAC.md): night ore smelted white-hot (content/workshop.js CHARGES.night); the
+  // Nightglass Lantern is forged of it (content/gear.js nightglass_lantern)
+  nightglass: {name: 'Nightglass', kind: 'material', col: '#9aa4ff', desc: 'a pane of black glass full of tiny moving lights. Held up, it makes the room darker',
+    pal: {c: '#3a3c6a', C: '#1c1c34', o: '#0c0c18', g: '#e8f0ff', t: '#8a9ce0'},
+    icon: ['............', '............', '............', '...ccccccc..', '..cgcccctCC.', '.CcccCtcCCo.', '.CCtCCCCgCo.', '.CCCCgCCCoo.',
+      '..oooooooo..', '............', '............', '............']},
   iron_pick: {name: 'Iron Pick', kind: 'tool', stack: 1, made: true, col: '#d8dee4', desc: 'a miner\'s pick with a forged iron head: it bites iron',
     tool: {job: 'mine', tier: 2, power: 1.25},
     icon: ['............', '..kiiiiik...', '.kiissiiiik.', 'k.....wh..ik', '......wh...k', '.....wh.....', '.....wh.....', '....wh......',
