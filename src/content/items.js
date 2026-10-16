@@ -8,6 +8,7 @@
 //            (ui/packpanel.js), so only the fills are written here
 //   pal      (optional) the icon's own palette letters, over PAL's (the fish: content/fishing.js draws each its own colours)
 import {CATCHES, CATCH_IDS, catchIcon, BAITS} from './fishing.js';
+import {NAMED} from './animals.js';
 // The run's perks (game/items.js: Risk of Rain stacking, augments) are something else: they live for one run only.
 export const PAL = {
   b: '#7a5232', l: '#9c6e44', d: '#56381f', e: '#dcbc84', r: '#a8824e',   // bark, its light and dark, end grain, a ring
@@ -89,6 +90,39 @@ export const ITEMS = {
   bark_doll: {name: 'Bark Doll', kind: 'material', col: '#c8a070', desc: 'a little figure of bark and twine, left in the hollow under the roots',
     icon: ['.....ee.....', '....eddb....', '....ebbe....', '.....rr.....', '..lbbbbbbl..', '....bbbb....', '....bddb....', '....rbbr....',
       '....bbbb....', '...bb..bb...', '...b....b...', '..dd....dd..']},
+  // THE ANIMALS FOR REAL (features/rope.js, docs/FAUNA.md "The Lasso"): the bag Lasso (F: spin, let go: throw) and what the
+  // forest's animals leave you without anything dying
+  lasso: {name: 'Lasso', kind: 'tool', stack: 1, col: '#c8a876', desc: 'a coil of hemp rope with a running loop; hold F to spin it, let go to throw',
+    tool: {job: 'rope', tier: 1, power: 1}, pal: {a: '#c8a876', m: '#9a7c50', z: '#6a5234'},
+    icon: ['............', '....aaaa....', '..aammmmaa..', '.am......ma.', '.a..aaaa..m.', 'am.am..ma.mz', 'am.a....a.mz', '.a.am..ma.z.',
+      '.am.aaaa.mz.', '..amm..mmz..', '...zzaazz.m.', '..........mz']},
+  hare_fur: {name: 'Hare Fur', kind: 'material', col: '#e4e2dc', desc: 'a soft tuft of hare fur, shed in its moult; it came off in your hands',
+    pal: {a: '#f2f0ea', m: '#cfcbc0', z: '#9c968a'},
+    icon: ['............', '............', '.....a......', '...aaam.a...', '..aaammaam..', '.aaammmmmma.', '.aammmzmmma.', '..ammzzmmz..',
+      '...mmzzmz...', '....z..z....', '............', '............']},
+  // FINDS WITHOUT KILLING (features/animalfinds.js, living-animals.md): what the forest drops
+  roe_antler: {name: 'Shed Antler', kind: 'material', col: '#e0d2b0', desc: "a roe buck's antler, shed in the winter woods where the herd beds",
+    pal: {a: '#efe4c8', m: '#c8b894', z: '#8a7a5a'},
+    icon: ['............', '.......a....', '...a...am...', '...am..am...', '....am.am...', '.....amam..a', '......amm.am', '......ammam.', '.....zmmmm..',
+      '....zzmz....', '....zz......', '............']},
+  caper_feather: {name: 'Capercaillie Feather', kind: 'material', col: '#8a90a8', desc: "a long tail feather from a capercaillie cock's fan, left where he sang",
+    pal: {a: '#f2f0ea', m: '#3c4050', z: '#1a1c24'},
+    icon: ['............', '.........aa.', '........maa.', '.......mmm..', '......mmzm..', '.....mmzm...', '....mmzm....', '...mmzm.....', '..mmzm......',
+      '..mzm.......', '.z..........', 'z...........']},
+  // THE FOX'S DEN (features/foxden.js, living-animals.md): what the forest lost, kept under a rock (old boot, rusty key and silver
+  // ring are the fishing finds: content/fishing.js)
+  brass_button: {name: 'Brass Button', kind: 'material', col: '#e0b860', desc: 'a brass button off somebody\'s coat, dull and dented',
+    pal: {a: '#f4d27a', m: '#c89a3a', z: '#7a5a1e'},
+    icon: ['............', '............', '....aaam....', '...aammmm...', '..aamzmzmm..', '..ammmmmmz..', '..amzmzmmz..', '..ammmmmzz..', '...mmmmzz...',
+      '....mzzz....', '............', '............']},
+  lost_mitten: {name: 'Lost Mitten', kind: 'material', col: '#c86a5a', desc: 'a knitted mitten, one of a pair; the other is somewhere',
+    pal: {a: '#e88a72', m: '#b85444', z: '#6e2a24'},
+    icon: ['............', '....aam.....', '...aammm....', '...ammmm.a..', '...ammmmam..', '...ammmmmm..', '...ammmmmz..', '...ammmmz...', '...zzzzzz...',
+      '...azazaz...', '...zzzzzz...', '............']},
+  thimble: {name: 'Thimble', kind: 'material', col: '#c8ccd4', desc: 'a little silver thimble, pocked all over',
+    pal: {a: '#eef0f4', m: '#a8acb6', z: '#62666e'},
+    icon: ['............', '............', '.....aam....', '....amzmm...', '....mmmzm...', '...amzmmzm..', '...mmmzmmm..', '...amzmmzm..', '...mmmmmmz..',
+      '..azzzzzzzz.', '............', '............']},
 };
 // THE CATCHES (content/fishing.js): every fish and find is a material: it goes in the pouch
 for (const id of CATCH_IDS) {
@@ -99,7 +133,14 @@ for (const id of CATCH_IDS) {
 for (const id in BAITS) { const b = BAITS[id]; ITEMS[id] = {name: b.name, kind: 'material', col: '#d89a8a', desc: b.desc, icon: b.icon, pal: b.pal, bait: true}; }
 
 // the kit a new world starts with (the bag: tools, food; the pouch: materials)
-export const START_KIT = [['axe', 1]];
+export const START_KIT = [['axe', 1], ['lasso', 1]];   // (the Lasso: old saves get one once, features/rope.js)
 
 export const itemDef = id => ITEMS[id] || null;
 export const inPouch = id => ITEMS[id]?.kind === 'material';
+// the named things (content/animals.js NAMED): a den's thimble, ring or button scratched with the name of someone who never played
+// here; one item each (id base + '_' + the name's letters: thimble_marta), its own name and the base's look
+export const namedId = (base, name) => base + '_' + name.toLowerCase().normalize('NFD').replace(/[^a-z]/g, '');
+for (const base of NAMED.ids) for (const nm of NAMED.names) {
+  const b = ITEMS[base]; if (!b) continue;
+  ITEMS[namedId(base, nm)] = {...b, name: `${b.name} "${nm}"`, desc: `${b.desc}; scratched on it: ${nm}`, named: nm};
+}

@@ -22,6 +22,9 @@
 //                (act('mine', id, {pow, lvl, tier})); its word on a vein (world: struck, spent, grown) is handed on in F.mail
 //   building     the server keeps what players put down (docs/BUILDING.md): features/builds.js asks (act('build', kind, {x, y}),
 //                'stoke', 'unbuild'); its word (world: built, stoked, gone) is handed on in F.mail
+//   animals      the bag Lasso on the forest's animals (docs/FAUNA.md "The Lasso"): features/rope.js claims the animal on its
+//                rope (act('rope', id), 'free'), calms a roe ('calm') and takes a find ('find'); the animal on your rope goes
+//                in the state message (an), the server's word (ev: rope, free; world: calm, found; a deny of a rope) in F.mail
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
@@ -68,7 +71,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- sending: 20 times a second, after the frame's steps
   let sendT = 0, lastN = -1, lastRig = '', lastX = NaN, lastY = NaN, packed = null, sentW = null, pinged = 0;
-  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0};
+  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0, an: undefined};
   const LS = ['', 0, 0, 0, 0];
   function send(now) {
     if (C.status !== 'online' || now - sendT < 1000 / TICK_HZ) return;
@@ -85,7 +88,8 @@ export async function create(host) {
     ST.lt = host.feature('caves')?.lit ? 1 : 0;   // (his lantern burns in the cave: the server's soot things go for it, friends' night veins hide)
     if (Math.hypot(ST.x - lastX, ST.y - lastY) > 4) ST.tp = 1;   // (a respawn, a teleport: the server lets that one through)
     lastX = ST.x; lastY = ST.y;
-    const L = host.feature('equip')?.sim?.lasso?.L, ph = L?.phase;
+    const rope = host.feature('rope'), L = (rope?.lasso?.busy ? rope.lasso.L : null) || host.feature('equip')?.sim?.lasso?.L, ph = L?.phase;   // (the bag Lasso's or the equipment's)
+    ST.an = rope?.an?.();   // (the animal on your rope: features/rope.js)
     if (ph) {
       const sw = ph === 'swing' || ph === 'zip' || ph === 'ropeup', A = sw ? L.anchor : L.loop;
       LS[0] = ph; LS[1] = +A.x.toFixed(2); LS[2] = +A.y.toFixed(2); LS[3] = +A.h.toFixed(2); LS[4] = sw ? 0 : +(L.loop.r * (L.loop.open ?? 1)).toFixed(2); ST.ls = LS;
@@ -105,6 +109,8 @@ export async function create(host) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
     if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
+    if (a === 'rope' || a === 'free' || a === 'calm' || a === 'find') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/rope.js)
+    if (a === 'leave' || a === 'take' || a === 'den' || a === 'drop') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }   // (features/foxden.js)
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }
@@ -142,7 +148,7 @@ export async function create(host) {
         }
         else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
-        else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
+        else if (m.k === 'deny') { say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`); if (m.a === 'rope' || m.a === 'find' || m.a === 'leave') mail.push(m); }   // (features/rope.js, features/animalfinds.js: someone had it first)
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
       }
       msgs.length = 0;

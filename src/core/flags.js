@@ -84,6 +84,10 @@ export const FLAG_DOCS = {
   riverside: '0: no riverside plants (reeds, ferns, willows, lily pads)', grass: '0: no grass (features/grass.js)', wildlife: '0: no wildlife', wildfight: '0: wildlife ignores fights (no flush, no scavengers at kills, no coyotes / fox / wolves at night; features/wildlife/fightlife.js; menu > Dev > Fight reactions)', flow: '0: no flow (camera feel, trails, marks)', depth: '0: no depth cues', fg: '1: the depth foreground silhouettes',
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   fauna:     '0: no forest animals (features/fauna.js: roe deer, fox, hares, squirrels, ravens, capercaillie; docs/FAUNA.md)',
+  livefauna: '0: the forest animals as looks only, as before the "for real" brief (the bag Lasso doesn\'t catch them; the tracks still: ?tracks=0); docs/FAUNA.md',
+  thief:     'often: the fox comes for food put down within an in-game hour, day or night; 0: no theft, no den (features/foxden.js; docs/FAUNA.md "The thieving fox")',
+  shed:      'now: this year\'s shed antlers lie in the roe beds now, whatever the season (features/animalfinds.js; docs/FAUNA.md "Finds")',
+  mud:       '1: the forest\'s ground counts as wet now and doesn\'t dry (features/mud.js: everything that walks leaves prints in the soft patches; today\'s morning trails are laid)',
   watcher:   '0: no watcher (features/watcher.js: the one-eyed toadstool that peeks at you from behind trees); often: every few seconds (testing)',
   tumbleweed: '0: no tumbleweeds (the desert)', dust: '0: no blowing sand, dust devils or kicked-up dust (the desert)',
   livefoes: '0: the desert gunmen drawn from their 16-facing sprite atlases instead of LIVE (their Blender models through render/rigmesh.js with every atlas pose and clip: view/livebody.js, features/foes/look.js; the aim twists procedural)',
@@ -132,6 +136,7 @@ export const FLAG_DOCS = {
   nshift: 'the night shift\'s strength (docs/UNCANNY.md): 1 default; 0 no tree or boulder walks; 2 twice as many walk, a little further. Co-op: the server\'s --nshift decides',
   nelk: 'how often the night elk hunts (docs/UNCANNY.md): 1 default; 2 twice as often (half the rest after a knock); 0 never (it walks its way and grows wrong, that is all). Offline only: the co-op server runs its own',
   nnotice: 'how far the forest\'s odd things show (docs/UNCANNY.md: the night ring\'s glow and light, the pale marks by lantern light): x1 default',
+  tracks: '0: no footprints or tracks in the forest (features/prints.js; docs/WINTER.md)',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
