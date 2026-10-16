@@ -23,7 +23,8 @@
 // SHADOWS (Fishing 5: pack.move('shadows'), docs/SKILLS.md, content/fishing.js SHADOW): he sees the fish circling under each
 // spot (a dark shape: small, medium, large). The bobber just ahead of its nose draws it (a quick bite of its class); on it, the
 // fish bolts (the wait grows, it's gone for him till the slot turns). Online the server checks the same from the seed and its
-// clock. One drawing for every brief: other features ask F.shadowsNear(x, y, r, out) (the shadows there, whoever sees them).
+// clock. One drawing for every brief: other features ask F.shadowsNear(x, y, r, out) (the shadows there, whoever sees them);
+// F.shadowsFlee(x, y, r) makes the drawn ones dart away from a point (the meals brief's burnt lingon).
 // MEALS: fish cooked at a burning campfire (features/meals.js owns them: the Cook list, the buff, its timer chip; a cast tells the
 // server the meal eaten). THE ANGLER'S SET: ANGLER.n fishing pieces worn (source 'fishing.set'). THE
 // JOURNAL: the pack panel's Fish part (pack.section): every catch with its count and record, the ones not caught yet as
@@ -364,10 +365,31 @@ export async function create(host) {
   for (let i = 1; i <= 4; i++) PSH.push({size: 1, alpha: i * .15});
   let shN = 0;
   const SHT = {x: 0, y: 0, sx: 0, sy: 0, hx: 0, hy: 0, cls: '', len: 0};
+  // FLEE (the meals brief's burnt lingon, F.shadowsFlee): the shadows within r m of a point dart out to r m and ease back to
+  // their path once nobody asks. View only: an offset per spot (by its index in SP, reset when that slot holds another spot)
+  const FL = {on: false, x: 0, y: 0, r: 0, out: 6, back: 1.5}, FX = new Float32Array(NSP), FY = new Float32Array(NSP), FK = new Float64Array(NSP).fill(NaN);
+  const FW = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
+  const wet = (x, y) => (waterSample(x, y, FW), !!WATERS[FW.kind]);
+  function flee(i, s, d, dt) {
+    if (FK[i] !== s.key) { FK[i] = s.key; FX[i] = FY[i] = 0; }
+    let tx = 0, ty = 0;
+    if (FL.on) {
+      const dx = d.x - FL.x, dy = d.y - FL.y, l = Math.hypot(dx, dy);
+      if (l < FL.r) {   // (out along the line from the point to r m; shortened until it stays on the water, never onto the bank)
+        const ux = l > 1e-3 ? dx / l : 1, uy = l > 1e-3 ? dy / l : 0;
+        for (let k = 1; k >= .2; k -= .2) { const px = FL.x + ux * (l + (FL.r - l) * k), py = FL.y + uy * (l + (FL.r - l) * k); if (wet(px, py)) { tx = px - d.x; ty = py - d.y; break; } }
+      }
+    }
+    const fast = tx || ty, e = 1 - Math.exp(-(fast ? FL.out : FL.back) * dt), ox = FX[i], oy = FY[i];
+    FX[i] += (tx - ox) * e; FY[i] += (ty - oy) * e;
+    const vx = FX[i] - ox, vy = FY[i] - oy, v = Math.hypot(vx, vy);
+    d.x += FX[i]; d.y += FY[i];
+    if (fast && v > .5 * dt) { d.hx = vx / v; d.hy = vy / v; }   // (darting: it faces the way it goes)
+  }
   function shadowsView(dt) {
     shN = 0;
     for (const b of BOLT) if (b.on) { b.t += dt; b.x += b.hx * 4.5 * dt; b.y += b.hy * 4.5 * dt; if (b.t > .6) b.on = false; }
-    if (!active() || !pack()?.move('shadows')) return;
+    if (!active() || !pack()?.move('shadows')) { FL.on = false; return; }
     const P = host.player, t = clockNow(), fade = spotFade(); if (fade <= 0) return;
     for (let i = 0; i < SPK.n && shN < SHN; i++) {
       const s = SP[i]; if (spent.has(s.key) || spooked.has(s.key) || Math.hypot(s.x - P.x, s.y - P.y) > SHR) continue;
@@ -375,11 +397,13 @@ export async function create(host) {
       if (mine && (S.phase === 'fight' || S.phase === 'land')) continue;   // (it's the fish on the line now)
       if (!shadowAt(s.a, s.b, SPK.slot, seedOf(), t, SHT)) continue;
       const d = SHD[shN++]; d.x = SHT.x; d.y = SHT.y; d.hx = SHT.hx; d.hy = SHT.hy; d.len = SHT.len; d.a = fade; d.ph = (s.key % 89) * .7;
+      flee(i, s, d, dt);
       if (mine && (S.phase === 'wait' || S.phase === 'bite')) {   // (drawn to the bobber: it turns and swims in under it)
         const k = clamp(S.t / .7, 0, 1), dx = S.tx - d.x, dy = S.ty - d.y, l = Math.hypot(dx, dy) || 1;
         d.hx = dx / l; d.hy = dy / l; d.x += (S.tx - d.hx * d.len * .6 - d.x) * k; d.y += (S.ty - d.hy * d.len * .6 - d.y) * k;
       }
     }
+    FL.on = false;   // (asked again next frame, or they ease back)
   }
   function drawShadow(x, y, hx, hy, len, a, ph, t) {
     const o = PSH[Math.max(0, Math.min(3, Math.round(a * 4) - 1))], h = host.elev(x, y) + .005, step = .055, n = Math.max(3, Math.round(len / step));
@@ -622,6 +646,10 @@ export async function create(host) {
     // (tests) the spots in reach now ({x, y, key} the first n), whether a spot is spent
     spots: () => SP.slice(0, SPK.n).filter(sp => !spent.has(sp.key)),
     shadowsNear,   // (depth-shared: other features ask fishing for the fish shadows: keepsakes' Heron Feather)
+    // (the meals brief's burnt lingon) shadowsFlee(x, y, r): call every frame while it applies: the drawn shadows within r m
+    // of (x, y) dart out to r m (6/s), never onto the bank, and ease back to their path (1.5/s) once it isn't called. View only:
+    // shadowsNear and the server's nose check keep the path
+    shadowsFlee(x, y, r) { FL.on = true; FL.x = x; FL.y = y; FL.r = r; },
   };
 
   // ---------------------------------------------------------------- the HD layer (pixel art: whole UI pixels, the pixel font)
