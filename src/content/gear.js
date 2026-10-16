@@ -98,7 +98,7 @@ export const ZONES = {
 export const GEAR = [
   // ---- head (shapes on HatHold0: they tip with the hat, and fall off with it)
   {id: 'wool_cap', name: 'Wool cap', slot: 'head', kind: 'clothing', rarity: 'common', weight: .2, armor: 0, desc: 'A knitted cap with a bobble.',
-    soon: 'keeps your head warm in the cold',
+    mods: [{stat: 'body.chill', mul: .85}],
     look: {hide: ['hat'], add: [
       {on: 'HatHold0', part: 'cap', mat: 'wool_blue', shape: 'ball', r: [.232, .24, .2], at: [0, .012, 1.66], o: {sides: 10}},
       {on: 'HatHold0', part: 'cap.fold', mat: 'wool_cream', shape: 'tube', r0: .238, r1: .232, len: .075, at: [0, .012, 1.6], o: {sides: 10}},
@@ -135,7 +135,7 @@ export const GEAR = [
     ]}},
   // ---- body
   {id: 'wool_sweater', name: 'Wool sweater', slot: 'body', kind: 'clothing', rarity: 'common', weight: 1.5, armor: .02, desc: 'A thick knitted sweater instead of the duster.',
-    soon: 'warm in the cold; catches fire fast; heavy when soaked',
+    mods: [{stat: 'body.chill', mul: .75}, {stat: 'body.wetHeavy', add: 1}], soon: 'catches fire fast',
     look: {paint: {vest: 'wool_cream', shirt: 'wool_cream', sleeves: 'wool_cream'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
       {on: 'Spine2', part: 'sweater.neck', mat: 'wool_cream', shape: 'tube', r0: .1, r1: .085, len: .07, at: [0, .0, 1.235], o: {sides: 10}},
     ]}},
@@ -150,7 +150,7 @@ export const GEAR = [
     ]}},
   // ---- back
   {id: 'fur_cloak', name: 'Wolf-fur cloak', slot: 'back', kind: 'clothing', rarity: 'fine', weight: 3, armor: .04, desc: 'The duster\'s cape and tail in grey fur.',
-    soon: 'warm in the cold',
+    mods: [{stat: 'body.chill', mul: .7}],
     look: {paint: {collar: 'fur'}, cloth: 'fur'}},
   {id: 'bark_pack', name: 'Birch-bark pack', slot: 'back', kind: 'tool', rarity: 'common', weight: 1, armor: 0, desc: 'A woven birch-bark backpack (a näverkont).',
     soon: 'carry more home',
@@ -162,7 +162,7 @@ export const GEAR = [
     ]}},
   // ---- legs
   {id: 'wool_trousers', name: 'Wool trousers', slot: 'legs', kind: 'clothing', rarity: 'common', weight: 1, armor: .01, desc: 'Grey wool breeches.',
-    soon: 'warm in the cold',
+    mods: [{stat: 'body.chill', mul: .85}],
     look: {paint: {trousers: 'wool_grey'}}},
   {id: 'leather_chaps', name: 'Leather chaps', slot: 'legs', kind: 'armor', rarity: 'common', weight: 2, armor: .04, desc: 'Tan leather over both legs.',
     soon: 'thorns and brambles don\'t slow you',
@@ -194,7 +194,7 @@ export const GEAR = [
       {on: 'HatHold0', part: 'wiz.star', mat: 'gold', shape: 'ball', r: .035, at: [0, -.13, 1.82], o: {fixed: 0}},
     ]}},
   {id: 'hood', name: 'Travelling hood', slot: 'head', kind: 'clothing', rarity: 'common', weight: .4, armor: .01, desc: 'A grey wool hood, the point down your back.',
-    soon: 'rain doesn\'t soak you',
+    mods: [{stat: 'body.soak', mul: .3}],
     look: {hide: ['hat', 'hair'], add: [
       {on: 'HatHold0', part: 'hood', mat: 'wool_grey', shape: 'ball', r: [.245, .25, .245], at: [0, .07, 1.61], o: {sides: 10}},
       {on: 'HatHold0', part: 'hood.tip', mat: 'wool_grey', shape: 'cone', r: .1, len: .22, at: [0, .32, 1.56], rot: [-135, 0, 0], o: {sides: 7}},

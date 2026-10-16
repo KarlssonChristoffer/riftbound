@@ -68,7 +68,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- sending: 20 times a second, after the frame's steps
   let sendT = 0, lastN = -1, lastRig = '', lastX = NaN, lastY = NaN, packed = null, sentW = null, pinged = 0;
-  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0};
+  const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0, bd: 0};
   const LS = ['', 0, 0, 0, 0];
   function send(now) {
     if (C.status !== 'online' || now - sendT < 1000 / TICK_HZ) return;
@@ -82,6 +82,7 @@ export async function create(host) {
       lastN = pp.n; packed = packPose(pp.w, pp.BN.length, packed);
       if (!sentW || !same(packed, sentW)) { sentW = (sentW && sentW.length === packed.length) ? sentW : new Int16Array(packed.length); sentW.set(packed); ST.w = b64(packed); }
     }
+    ST.bd = host.feature('body')?.bits?.() ?? 0;   // (his body's look: wet, cold, sunk, knocked down; content/body.js packBody: friends see it, features/body.js)
     ST.lt = host.feature('caves')?.lit ? 1 : 0;   // (his lantern burns in the cave: the server's soot things go for it, friends' night veins hide)
     if (Math.hypot(ST.x - lastX, ST.y - lastY) > 4) ST.tp = 1;   // (a respawn, a teleport: the server lets that one through)
     lastX = ST.x; lastY = ST.y;

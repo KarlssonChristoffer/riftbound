@@ -23,6 +23,7 @@ import {mealNotes} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
+import {WEATHER, createSchedule, TUNE as WXT} from '../src/sim/wxclock.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
@@ -82,6 +83,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (typeof m.w === 'string' && m.w.length < 2048) { p.w = m.w; p.wNew = true; }
     p.ls = Array.isArray(m.ls) && m.ls.length === 5 ? m.ls.map((v, i) => i ? Math.round(num(v) * 100) / 100 : str(v, 8)) : null;
     p.lit = m.lt === 1;   // (his lantern burns in the cave: sim/cavelife.js reads p.lit)
+    p.bd = num(m.bd, 0) & 0x7ff;   // (his body's look: content/body.js packBody, passed on in the snapshots)
     p.fresh = true;
   }
 
@@ -201,11 +203,22 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (!def.lamp?.takeBack || e.by !== p.id) return deny('not yours');
     world.delete(id); all({k: 'world', id, s: 'gone', by: p.id});
   }
+  // THE WEATHER (sim/wxclock.js, docs/WEATHER.md): the same spells every client computes from the seed and this clock (the forest's
+  // ruins climate). The server doesn't send it; it reads it for what it owns: a fire in heavy rain goes out (BUILD.douse)
+  const sky = createSchedule(seed >>> 0 | 0), weatherNow = () => WEATHER[sky.at('ruins', clock(), WXT.seasonDays).w] || WEATHER.fair;
   let growT = 0;
   function regrowTick(dt) {   // once a second: the picked patches and spent veins whose time has come grow back, for everyone
     if ((growT += dt) < 1) return;
     growT = 0; const h = clock();
     for (const [id, s] of world) if (s.at !== undefined && h >= s.at) { world.delete(id); all({k: 'world', id, s: 'grown'}); }
+    // the rain on the open fires (each burning one's wet seconds; one out: 'doused', everyone's fire goes out with it)
+    const rain = (weatherNow().rain ?? 0) >= BUILD.douse.rain, sec = secs();
+    for (const [id, e] of world) {
+      if (e.s !== 'built') continue;
+      const f = BUILDS[e.kind]?.fire; if (!f || f.rainproof || fuelAt(e, sec) <= 0 || cave?.inBand?.(e.x, e.y)) { e.wetT = 0; continue; }
+      e.wetT = rain ? (e.wetT || 0) + 1 : Math.max(0, (e.wetT || 0) - 1);
+      if (e.wetT >= BUILD.douse.s) { e.wetT = 0; e.fuel = 0; e.t0 = +sec.toFixed(3); all({k: 'world', id, s: 'doused', t0: e.t0, by: 0}); log(`  the rain put out ${id}`); }
+    }
   }
 
   // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:
@@ -299,7 +312,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const rows = [];
     for (const p of peers.values()) {
       if (!p.placed) continue;
-      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lit ? 1 : 0]);
+      rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lit ? 1 : 0, p.bd | 0]);
       p.wNew = false;
     }
     if (rows.length) { const m = {k: 'snap', t: now(), p: rows}; if (c) m.c = c; if (sn) m.sn = sn; all(m); }

@@ -7,7 +7,8 @@
 //   clock / sec / ev / gear: your own set as the server took it); C.wear(ids) asks for a set; a peer's q.gear (ids) / q.gv
 //   (its version); C.elk: the night elk's snapshots (a ring like a peer's: C.sample(C.elk, out) -> s = its mode's index,
 //   pose = its quarry's id); C.soot: the cave's soot things' rings (C.sample(C.soot[k], out): z its height, s its mode's index);
-//   a peer's q.lt: their lantern burns in the cave (the latest snapshot); C.serverNow() -> the server's clock (ms) now
+//   a peer's q.lt: their lantern burns in the cave (the latest snapshot); q.bd: their body's look (content/body.js packBody);
+//   C.serverNow() -> the server's clock (ms) now
 // OWNS: the connection's state, the peers' snapshot rings, the clock offset. READS: the transport.
 import {VERSION, INTERP_MS, encode, decode} from './protocol.js';
 
@@ -53,7 +54,7 @@ export function createNetClient({transport, name = ''}) {
       case 'wn': { const q = C.peers.get(m.id); if (q) { q.wn = m.wn; q.wv++; } break; }
       case 'snap': {
         const o = m.t - performance.now(); if (!(o >= offset)) offset = o; else offset += (o - offset) * .002;   // (drifts up slowly: a late spike doesn't stick)
-        for (const r of m.p) { if (r[0] === C.id) continue; const q = C.peers.get(r[0]); if (q) { push(q, m.t, r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8] || null, r[9] || null); q.lt = r[10] === 1; } }
+        for (const r of m.p) { if (r[0] === C.id) continue; const q = C.peers.get(r[0]); if (q) { push(q, m.t, r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8] || null, r[9] || null); q.lt = r[10] === 1; q.bd = r[11] | 0; } }
         if (m.c) push(C.elk, m.t, m.c[0], m.c[1], 0, m.c[2], m.c[3], m.c[4], '', null, null);
         if (m.sn) for (let i = 0, k = 0; i + 3 < m.sn.length; i += 4, k++) push(C.soot[k] ??= ring(-2 - k), m.t, m.sn[i], m.sn[i + 1], m.sn[i + 2], 0, m.sn[i + 3], '', '', null, null);
         break;

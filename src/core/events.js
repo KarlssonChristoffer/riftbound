@@ -76,6 +76,7 @@ export const EVENTS = {
   'fire.crackle':       ['features/lights.js',    'x, y, big', '(none yet)'],
   'fire.logFall':       ['features/lights.js',    'x, y', '(none yet)'],
   'fire.addWood':       ['features/lights.js',    'x, y', '(none yet)'],
+  'fire.doused':        ['features/builds.js',    'x, y, id: the rain put an open fire out (docs/WEATHER.md; online: the server\'s word)', 'campfires (a hiss of steam)'],
   'garden.talk':        ['features/garden.js',    'x, y (the merchant)', '(none yet)'],
   'wildlife.birds_scatter': ['features/wildlife.js, features/fauna.js', 'x, y, n', 'wildlife, audio'],
   'wildlife.wings':     ['features/wildlife.js, features/fauna.js',  'x, y', 'audio'],

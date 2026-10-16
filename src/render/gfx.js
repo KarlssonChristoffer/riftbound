@@ -2475,6 +2475,25 @@ void main() {
   const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}, uVgP: {value: 0}}, vgScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
   vgScene.matrixAutoUpdate = false;
+  // ---- THE FROST (features/body.js, G.setFrost(k): the cold creeping in): pale crystals in from the screen's edges, in whole art
+  // pixels (display px / DS), its reach wobbling along the edge in 8 px blobs; k 0..1 how far it has come. Over everything, after
+  // the vignette; not drawn at 0
+  const FR_FS = HEAD + `uniform vec4 uFr; uniform float uFrD; out vec4 oc;
+float fh(vec2 c) { uvec2 u = uvec2(ivec2(c) + 4096); uint n = u.x * 1973u + u.y * 9277u; n = (n << 13u) ^ n; n = n * (n * n * 15731u + 789221u) + 1376312589u; return float(n & 0x7fffffffu) / 2147483647.; }
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, uFr.y + uFr.z - gl_FragCoord.y), c = floor(p / uFrD), S = uFr.xy / uFrD;
+  float e = min(min(c.x, c.y), min(S.x - c.x, S.y - c.y)) / min(S.x, S.y);
+  vec2 b = floor(c / 8.), t = fract(c / 8.); float lo = mix(mix(fh(b), fh(b + vec2(1, 0)), t.x), mix(fh(b + vec2(0, 1)), fh(b + 1.), t.x), t.y);
+  float reach = uFr.w * (.06 + .1 * lo), n = fh(c), f = reach - e + .025 * (n - .5) * uFr.w;
+  if (f <= 0.) discard;
+  float core = clamp(f / max(reach, 1e-3), 0., 1.);
+  oc = vec4(mix(vec3(.76, .85, .95), vec3(.96, .98, 1.), step(.82, n)), (.26 + .44 * core) * min(1., uFr.w * 1.6));
+}`;
+  const frU = {uFr: {value: new THREE.Vector4()}, uFrD: {value: 1}}, frScene = new THREE.Scene();
+  { const m = new THREE.Mesh(tri, raw(COMP_VS, FR_FS, frU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; frScene.add(m); }
+  frScene.matrixAutoUpdate = false;
+  let frostK = 0;
+  const setFrost = k => { frostK = k > 0 ? Math.min(1, k) : 0; };
   // SINK (render/cut.js; features/caves.js): the surface crumbling away round him as he goes down into the cave. setSink(null): off;
   // setSink(x, z, reach, box) (his world x, z; m; box {x0, y0, x1, y1}: kept), each frame it shows. A mesh / surface made with
   // {keep: true} never sinks (the cave's)
@@ -2782,6 +2801,7 @@ void main() {
       }
     } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); } }
     if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)
+    if (frostK > 0) { frU.uFr.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS, sub.pad * DS, frostK); frU.uFrD.value = DS; renderer.render(frScene, dummyCam); }   // the frost (setFrost), last
     if (post) post.run(renderer);
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
@@ -2942,6 +2962,6 @@ void main() {
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setPuddles, setPuddleLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setPuddles, setPuddleLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, setFrost, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
 }
