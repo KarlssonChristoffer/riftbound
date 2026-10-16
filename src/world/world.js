@@ -739,7 +739,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
   const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
   if (lit) { lit.sim = G.litterSim(lit); disposers.push(lit.dispose); }   // (the living layer: render/litter.js, driven by features/litter.js)
-  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, water: wTex, litter: lit, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false); disposers.push(() => ground.dispose());
+  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, water: wTex, litter: lit, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
+  disposers.push(() => { ground.dispose(); gGeo.dispose(); gTex.dispose(); eTex?.dispose(); cTex.dispose(); });   // (a rebuild makes new canvases: their textures go with the world)
   // walkable terrain's shadows: the drawn ground casts nothing (it would shadow itself: acne), so a SHADOW-ONLY copy of it, sunk
   // CAST_SINK m, goes into the cached sun shadow and the point lights' height map: a hill throws its shadow over what lies
   // behind it at a low sun, flat ground never reaches the ground it stands for
@@ -789,7 +790,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const c = top[k][0], i = (y * n + x) * 4; d[i] = c >> 16 & 255; d[i + 1] = c >> 8 & 255; d[i + 2] = c & 255; d[i + 3] = 255;
     }
     pq.putImageData(id, 0, 0);
-    const pTex = texOf(pc, true); pTex.wrapS = pTex.wrapT = THREE.RepeatWrapping; pTex.needsUpdate = true;
+    const pTex = texOf(pc, true); pTex.wrapS = pTex.wrapT = THREE.RepeatWrapping; pTex.needsUpdate = true; disposers.push(() => pTex.dispose());
     const size = new THREE.Vector2(OPEN_PATCH, OPEN_PATCH);
     // (the Proving Grounds alone (no open land): the tiles round them are past the world's edge, where the painted ground goes on
     // mirrored, as on the patch's skirt: no seam)
@@ -803,7 +804,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         : alone || ring ? {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}
         : {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
       if (TERRAIN_ON && s === S) caster(tg);   // (the fine tiles are where the ground varies)
-      disposers.push(() => m.dispose());
+      disposers.push(() => { m.dispose(); tg.dispose(); });
     }
   }
 
@@ -811,7 +812,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const FL = FALL_LOOK[biome.id];
   for (const q of PLATEAUS) {
     const top = new THREE.PlaneGeometry(q.x1 - q.x0, q.y1 - q.y0); top.rotateX(-Math.PI / 2); top.translate((q.x0 + q.x1) / 2, q.h, (q.y0 + q.y1) / 2);
-    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1, water: wTex, litter: lit}); disposers.push(() => t.dispose());   // (water on the plateau's top too: the rill moves; so do the leaves)
+    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1, water: wTex, litter: lit}); disposers.push(() => { t.dispose(); top.dispose(); });   // (water on the plateau's top too: the rill moves; so do the leaves)
     const faces = [   // [len, centre x, centre z, rotation y]
       [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y1, 0], [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y0, Math.PI],
       [q.y1 - q.y0, q.x1, (q.y0 + q.y1) / 2, Math.PI / 2], [q.y1 - q.y0, q.x0, (q.y0 + q.y1) / 2, -Math.PI / 2]];
@@ -824,7 +825,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const geo = new THREE.PlaneGeometry(len, hgt); geo.translate(0, q.h - hgt / 2, 0); geo.rotateY(ry); geo.translate(cx, 0, cz);
       const uvA = geo.attributes.uv; for (let i = 0; i < uvA.count; i++) uvA.setY(i, 1 - uvA.getY(i));   // canvas rows go down
       const tex = texOf(cvs, true);
-      const f = G.surface(geo, {tex, planar: false, type: 5, obj: 1}, !cliffs3d); disposers.push(() => f.dispose());   // (the sheet of water alone casts no shadow)
+      const f = G.surface(geo, {tex, planar: false, type: 5, obj: 1}, !cliffs3d); disposers.push(() => { f.dispose(); geo.dispose(); tex.dispose(); });   // (the sheet of water alone casts no shadow)
     });
   }
   // ---- the creek's cascades (terrain: layout.js CASCADES): at each step a sheet of falling water across the creek, facing downstream,
@@ -853,7 +854,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     }
     const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setIndex(idx);
-    const f = G.surface(geo, {tex: texOf(atlas, true), planar: false, type: 5, obj: 1}, false); disposers.push(() => f.dispose());
+    const aTex = texOf(atlas, true), f = G.surface(geo, {tex: aTex, planar: false, type: 5, obj: 1}, false); disposers.push(() => { f.dispose(); geo.dispose(); aTex.dispose(); });
   }
 
   // ---- the 3D cliffs (cliffs3d.js): the plateau's four faces and the ravine's wall as live rock. Runs travel with the outside
@@ -1155,7 +1156,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // hooks for features: card(it, sp) -> {sway (px at the top), em (a live emit canvas, re-uploaded every frame)} | null
   //   mesh(it) -> {x, y (the lean at the top, metres, arena axes), shake (art px along the screen's x), flut (art px: the
   //   leaf clumps' own dance), wx, wy (the wind's direction, arena axes), ph (rad), wave (tone bias)} | null: 3D trees
-  const hooks = {card: null, mesh: null};
+  //   near(x, y, r, out) -> out: the registry's "what's here" (host.entities.near, set by world/stage.js): treeHit's candidates
+  const hooks = {card: null, mesh: null, near: null};
+  const NEAR = [], TREE = {x: 0, y: 0, z: 0, pose: null};   // (treeHit's scratch)
   const M = new THREE.Matrix4();
   // a 3D tree's lean on screen: art px (x right, y toward the camera), held until it moves TREE_HYST px (no 1 px flicker
   // at a threshold, like the cards' hysteresis); the shader rounds it per vertex by the baked weights. The leaves dance on
@@ -1327,10 +1330,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     // an arrow's step (arena coords) against the 3D trees' trunks and big limbs -> {x, y, h, prop} where it sticks | null.
     // A 3D tree stops arrows only there (its round collider is for walking; the crown lets arrows through)
+    // Its candidates: the props near the step's end, from the registry's grid (4.25 m reaches the 3 m box's corners), not
+    // a walk over every item a step
     treeHit(x0, y0, h0, x1, y1, h1) {
-      for (const it of items) {
-        const p = it.p; if (!it.pose || !it.live || p.gone || Math.abs(p.x - x1) > 3 || Math.abs(p.y - y1) > 3) continue;
-        const q = boneHit({x: p.x, y: p.y, z: p.z || 0, pose: it.pose}, x0, y0, h0, x1, y1, h1); if (q) { q.prop = p; return q; }
+      const near = hooks.near?.(x1, y1, 4.25, NEAR) || props;
+      for (const p of near) {
+        const it = byProp.get(p); if (!it || !it.pose || !it.live || p.gone || Math.abs(p.x - x1) > 3 || Math.abs(p.y - y1) > 3) continue;
+        TREE.x = p.x; TREE.y = p.y; TREE.z = p.z || 0; TREE.pose = it.pose;
+        const q = boneHit(TREE, x0, y0, h0, x1, y1, h1); if (q) { q.prop = p; return q; }
       }
       return null;
     },

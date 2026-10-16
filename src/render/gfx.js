@@ -1530,6 +1530,10 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   renderer.setPixelRatio(1); renderer.setSize(VW, VH, false);
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the arena does its maths on sRGB numbers: so do we
   renderer.autoClear = false;
+  // the frame's draw calls: render() below zeroes the count once a frame (three.js zeroed it at each of a frame's ~10
+  // render calls, so the count was only the last pass's)
+  renderer.info.autoReset = false;
+  const drawsSoFar = () => renderer.info.render.calls;
 
   const near = THREE.NearestFilter;
   const gbuf = new THREE.WebGLRenderTarget(VW, VH, {count: 3, type: THREE.HalfFloatType, minFilter: near, magFilter: near, depthBuffer: true,
@@ -1658,6 +1662,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   function tex(img, {linear = false, dynamic = false} = {}) {
     let t = texCache.get(img);
     if (!t || t.__lin !== linear) {
+      t?.dispose();   // (the same image asked for with the other filtering: the old texture's GPU copy goes)
       t = img instanceof HTMLCanvasElement ? new THREE.CanvasTexture(img) : new THREE.Texture(img);
       t.flipY = false; t.generateMipmaps = false; t.colorSpace = THREE.NoColorSpace; t.premultiplyAlpha = false;
       t.minFilter = t.magFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
@@ -2723,8 +2728,9 @@ void main() {
     if (!hDirty && moved.size && movedEnough()) hDirty = true;
     renderer.setClearColor(0x000000, 0);
     // stats.pass: CPU ms + draw calls of each pass this frame (F3 shows them; the bench reads them)
-    const PS = stats.pass; let tp = performance.now();
-    const lap = (k, calls) => { const t = performance.now(); PS[k] = t - tp; tp = t; if (calls !== undefined) PS[k + 'N'] = calls; };
+    const PS = stats.pass; let tp = performance.now(), cN = drawsSoFar();
+    const lap = (k, calls) => { const t = performance.now(); PS[k] = t - tp; tp = t; if (calls !== undefined) { PS[k + 'N'] = calls - cN; cN = calls; } };
+    const d0 = cN;
     lap('prep');
     for (const t of ups) renderer.initTexture(t);
     uploadData();
@@ -2753,23 +2759,22 @@ void main() {
         for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); sScene.remove(S.sm); sStatic.add(S.sm); movers.delete(S); }
         sDir.copy(sCast); fitStatic(sDir); sDue = Infinity;
         renderer.setRenderTarget(shadowS); renderer.clear(true, true, false); renderer.render(sStatic, sunCamS); renderer.render(sScene, sunCamS);   // (sScene: a layer-2 caster added from outside)
-        lap('shadowS', renderer.info.render.calls);
+        lap('shadowS', drawsSoFar());
         rays.restatic();   // (render/godrays.js: its min map of the static shadow follows)
       }
       renderer.setRenderTarget(shadow); renderer.clear(true, true, false); renderer.render(sScene, sunCam);
-      lap('shadow', renderer.info.render.calls);
+      lap('shadow', drawsSoFar());
     } else PS.shadow = 0;
     if (hDirty && compU.uPtShadow.value > 0) {
       renderer.setRenderTarget(hmap); renderer.clear(true, true, false); renderer.render(sStatic, hCam); if (air.grab()) renderer.setRenderTarget(hmap); renderer.render(sScene, hCam); hDirty = false;   // (air.grab: the static things' tops, render/air.js)
       for (const H of moved) H.hm.copy(H.sm.matrix);
-      lap('hmap', renderer.info.render.calls);
+      lap('hmap', drawsSoFar());
     } else { PS.hmap = 0; tp = performance.now(); }
     moved.clear();
     for (const m of gExtra) m.visible = m.userData.frame === frameNo;
     cutFrame();
     renderer.setRenderTarget(gbuf); renderer.clear(true, true, false); renderer.render(gScene, camera);
-    const calls = renderer.info.render.calls;
-    lap('gbuf', calls);
+    lap('gbuf', drawsSoFar());
     for (const m of xExtra) m.visible = m.userData.frame === frameNo;
     renderer.setRenderTarget(xray); renderer.clear(true, false, false); if (!cine) renderer.render(xScene, camera);   // (no x-ray, no contact
     if (aoFrame !== frameNo || cine) aoN = 0;                                                                         // shadows: the cinema camera)
@@ -2799,7 +2804,7 @@ void main() {
     if (post) post.run(renderer);
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
-    stats.calls = calls; stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
+    stats.calls = drawsSoFar() - d0; renderer.info.reset(); stats.ms = stats.ms * .9 + (performance.now() - t0) * .1;
     resetBatches(); for (const L of layerList) { L.used = L.gUsed = false; clearArray(L.runs); } lbN = 0; frameNo++;
   }
 

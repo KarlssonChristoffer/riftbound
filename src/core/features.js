@@ -1,5 +1,6 @@
 // FEATURES: loading the feature modules (features/<name>.js, the contract in main.js) into the shared list, in order.
-// A missing feature file is skipped, so features can land one at a time; one that throws in create() is left out.
+// A feature that fails to load (its file or one of its imports missing, a syntax error) or throws in create() is left
+// out with a warning naming it, so the rest still runs.
 // THE ORDER: each module declares its own constraints, `export const order = {after: [...], before: [...]}` (the
 // features whose work this step it reads / that must see something first), with the reason in a line above it.
 // The list is sorted by those (a topological sort); LOAD_ORDER only breaks ties between features that don't depend on
@@ -10,7 +11,7 @@ export const LOAD_ORDER = ['wind', 'windlines', 'litter', 'weather', 'mist', 'ca
 
 export async function loadFeatures(features, host) {
   const mods = await Promise.all(LOAD_ORDER.map(name => import(`../features/${name}.js`).then(m => ({name, m}), e => {
-    if (!/Failed to fetch|Importing a module script failed|404|error loading/i.test(String(e))) console.warn('feature', name, e); return null; })));
+    console.warn('feature', name, 'failed to load:', e); return null; })));
   const orders = new Map();
   for (const x of mods) {
     if (!x) continue;

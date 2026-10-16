@@ -19,7 +19,7 @@ import {spawn, spawnSync} from 'node:child_process';
 import {rmSync, existsSync} from 'node:fs';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {launch} from '../lib/chrome.mjs';
+import {launch, PYTHON} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
@@ -45,7 +45,7 @@ function side(s) {
 const A = side(arg('a')), B = side(arg('b', 'src/'));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore', cwd: ROOT});
+const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore', cwd: ROOT});
 const chrome = launch('ab', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit',
   '--enable-precise-memory-info', `--window-size=${W},${H}`, `--remote-debugging-port=${DBG}`, 'about:blank']);   // (its profile: tools/lib/chrome.mjs)
 let stopped = false;
