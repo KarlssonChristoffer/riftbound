@@ -55,7 +55,7 @@ const DEV_GROUP = {
 // camera) stay in Game; every other feature's are test actions for the sandbox: the Sandbox tab, one page per group here
 // (a feature not listed: Other)
 const GAME_ROWS = ['cinema', 'wardrobe', 'game'];   // (in this order, after Resume and Photo mode: back to title stays last; the wardrobe: dev mode)
-const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places', uncanny: 'Places', fauna: 'Animals', forage: 'Gathering', mining: 'Gathering', pack: 'Skills', keepsakes: 'Keepsakes'};
+const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places', uncanny: 'Places', fauna: 'Animals', forage: 'Gathering', mining: 'Gathering', pack: 'Skills', keepsakes: 'Keepsakes', tour: 'Tour'};
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
 const LOW_OFF = ['windlines', 'wildlife', 'fauna', 'depth', 'grass', 'litter', 'dust', 'tumbleweed', 'mist', 'airfx'];
@@ -151,7 +151,7 @@ export function createPause(E) {
   const menu = createMenu({
     root: $('#pause'), items: menuItems, dev: () => host.dev, sound: host.uiSound, changed: E.applyOpts,
     title: () => E.game.mode === 'title' ? ['Settings', ''] : ['Paused', E.game.mode === 'run' && E.game.run ? `Run · stage ${E.game.run.stage + 1}` : E.game.mode === 'sandbox' ? 'Proving Grounds' : ''],
-    groups: {sandbox: ['Elites', 'Gadgets', 'Shrines', 'Omens', 'Places', 'Other'], graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys'],
+    groups: {sandbox: ['Tour', 'Elites', 'Gadgets', 'Shrines', 'Omens', 'Places', 'Other'], graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys'],
       dev: ['Character', 'World', 'Nature', 'Effects', 'Renderer', 'Experiments', 'Tools', 'Other']},
     paged: ['sandbox', 'dev'],
     resume: snd => toggle(false, snd),
