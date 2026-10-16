@@ -19,7 +19,10 @@
 // OWNS: the chop counts, the felled set and its saved part, the stump props, the logs, their meshes, the falls, the chips.
 // READS: host.PL.tool, host.entities (query 'woodcut.tree', near), host.itemOf (a tree's model: species, scale, bones, crown),
 //   host.env.t (the world clock), pack (the tool, XP, the pouch), combat's core (a blow that meets a foe or a dummy).
-// EMITS: tree.chop, tree.fell, tree.land, tree.logs, tree.grow, tool.hit, tool.whiff.
+// THE HIT (docs/SKILLS.md, content/woodcut.js TUNE.hit): a tree that comes down on something hits it (at tree.land: hitPath). In
+// co-op each client tests its own player, foes and props (the fall's way is the server's, so it lands the same everywhere).
+// EMITS: tree.chop (also by: 'fall', a standing tree the fall hit), tree.fell, tree.land, tree.hit, tree.logs, tree.grow,
+// tool.hit, tool.whiff.
 // BUDGET: sim: a near() query a blow (and one a step while a swing waits for its aim); the logs (a handful) a step; the
 //   regrowth check once a second over the felled set. View: a falling tree's matrix a frame; logs' matrices while they move.
 import * as THREE from 'three';
@@ -33,7 +36,7 @@ import {propTop, FAMS} from '../world/world.js';
 import {setMaterials} from '../content/materials.js';
 import {geoOf, along} from '../world/kit3d.js';
 
-const ON = flags.get('woodcut') !== '0';
+const ON = flags.get('woodcut') !== '0', HURT = flags.get('treehurt') !== '0', HIT = TUNE.hit;
 const W = TUNE.swing, DEG = Math.PI / 180;
 const LAND_T = 1.5, LOGS_T = 2.6;   // s after the fell: the crown hits the ground, the trunk breaks into logs (the view's fall keeps to them)
 propTop({stump: TUNE.stump.h});
@@ -253,12 +256,72 @@ export async function create(host) {
     return true;
   }
   const crownMid = I => { const C = I.pose.crown; return C ? ((C.y0 + C.y1) / 2) * I.s : 3 * I.s; };
+  // THE FALL'S PATH (the hit; the fall line's specks: docs/SKILLS.md) of tree p falling (dx, dy) -> PATH: the trunk's strip from
+  // a (m out from the trunk's middle) to b along the way, the crown's circle round (cx, cy), radius cr. One object, reused
+  const PATH = {x: 0, y: 0, dx: 0, dy: 0, a: 0, b: 0, cx: 0, cy: 0, cr: 0};
+  function pathOf(p, I, dx, dy) {
+    const C = I.pose.crown, m = crownMid(I);
+    PATH.x = p.x; PATH.y = p.y; PATH.dx = dx; PATH.dy = dy; PATH.a = I.tr + .15; PATH.b = Math.max(PATH.a, (C?.y0 ?? 2) * I.s);
+    PATH.cx = p.x + dx * m; PATH.cy = p.y + dy * m; PATH.cr = (C?.r || 1.3) * I.s * HIT.crown;
+    return PATH;
+  }
+  // is a thing of radius r at (x, y) in the path? -> 0: no; else the unit way out of it (sideways off the trunk, out of the
+  // crown's middle) in OUT
+  const OUT = {x: 0, y: 0};
+  function inPath(P, x, y, r) {
+    const ox = x - P.x, oy = y - P.y, t = ox * P.dx + oy * P.dy, s = oy * P.dx - ox * P.dy;
+    if (t >= P.a - r && t <= P.b && Math.abs(s) <= HIT.line / 2 + r) { const k = s < 0 ? -1 : 1; OUT.x = -P.dy * k; OUT.y = P.dx * k; return 1; }
+    const cx = x - P.cx, cy = y - P.cy, d = Math.hypot(cx, cy);
+    if (d <= P.cr + r) { if (d > .05) { OUT.x = cx / d; OUT.y = cy / d; } else { const k = s < 0 ? -1 : 1; OUT.x = -P.dy * k; OUT.y = P.dx * k; } return 1; }
+    return 0;
+  }
+  // at tree.land: what the fall came down on, each hit once (a near() query round the path's middle)
+  function hitPath(f) {
+    const P = pathOf(f.p, f.I, f.dx, f.dy), z0 = f.p.z || 0, cr = core();
+    const mx = (P.x + P.dx * P.a + P.cx) / 2, my = (P.y + P.dy * P.a + P.cy) / 2, R0 = Math.hypot(P.cx - mx, P.cy - my) + P.cr + 1;
+    const pl = host.player;
+    if (Math.abs(pl.z - z0) < HIT.h && inPath(P, pl.x, pl.y, .3)) hitPlayer(f, OUT.x, OUT.y);
+    for (const q of host.entities.near(mx, my, R0, NEAR)) {
+      if (q === f.p || q.gone || q.broken || q.held || q.tree === f.p || Math.abs((q.z || 0) - z0) > HIT.h) continue;
+      if (q.kind === 'tree') {   // a standing tree: it shudders and loses a blow (never the last)
+        const I = !q.outside && !felled.has(q) && infoOf(q); if (!I || !inPath(P, q.x, q.y, I.tr)) continue;
+        const left0 = hp.get(q) ?? I.hp, left = Math.max(Math.min(left0, 1), left0 - 1); hp.set(q, left);
+        host.events.push({type: 'tree.chop', x: q.x, y: q.y, h: (q.z || 0) + 1, who: q, k: .7, left, dx: f.dx, dy: f.dy, by: 'fall'});
+        host.events.push({type: 'tree.hit', x: q.x, y: q.y, who: f.p, kind: 'tree', dmg: 1, vx: f.dx, vy: f.dy});
+        continue;
+      }
+      if (!cr) continue;
+      const body = !!(q.hunter || q.sparring) && !q.retired && (q.kind === 'gunman' || !!cr.BS?.has(q));
+      const crate = !body && (q.kind === 'crate' || q.kind === 'barrel') && q.hp > 0;
+      const dummy = !body && !crate && !!q.target;
+      if ((!body && !crate && !dummy) || !inPath(P, q.x, q.y, q.hitR ?? q.r ?? .3)) continue;
+      const ux = OUT.x, uy = OUT.y;
+      if (crate) cr.breakProp(q, {dir: [ux * 3, uy * 3]});
+      else {
+        const dmg = Math.round(HIT.foe * f.I.s);
+        cr.damage(q, dmg, {canCrit: false, dir: [ux * 3, uy * 3], by: 'tree', ux, uy});
+        if (body && !q.broken) (cr.BS?.has(q) ? cr : host.feature('foes')?.sim)?.shift?.(q, ux * HIT.shove, uy * HIT.shove);
+      }
+      host.events.push({type: 'tree.hit', x: q.x, y: q.y, who: f.p, kind: crate ? q.kind : 'foe', dmg: crate ? 0 : Math.round(HIT.foe * f.I.s), vx: f.dx, vy: f.dy});
+    }
+  }
+  // the player under it: thrown sideways out of its way (a sprite loadout: the skid), hurt a little, never killed
+  function hitPlayer(f, ux, uy) {
+    if (!host.launch?.(ux * HIT.out, uy * HIT.out, HIT.up)) host.knock?.(ux * HIT.out * 1.6, uy * HIT.out * 1.6);
+    let dmg = 0;
+    const S = game()?.stats?.S;
+    if (HURT && S) { dmg = Math.max(1, Math.round(S.maxHp * HIT.hurt)); dmg = Math.min(dmg, Math.max(0, Math.ceil(S.hp) - 1)); }
+    const pl = host.player;
+    if (dmg > 0) host.events.push({type: 'player.hurt', dmg, by: 'tree', x: pl.x, y: pl.y});
+    host.events.push({type: 'tree.hit', x: pl.x, y: pl.y, who: f.p, kind: 'player', dmg, vx: f.dx, vy: f.dy});
+  }
   function stepFalls(dt) {
     for (let i = falls.length - 1; i >= 0; i--) {
       const f = falls[i]; f.t += dt;
       if (!f.landed && f.t >= LAND_T) {
         f.landed = true; const L = crownMid(f.I);
         host.events.push({type: 'tree.land', x: f.p.x + f.dx * L, y: f.p.y + f.dy * L, who: f.p, r: (f.I.pose.crown?.r || 1.3) * f.I.s});
+        hitPath(f);
       }
       if (f.t >= LOGS_T) { spawnLogs(f); falls.splice(i, 1); }
     }

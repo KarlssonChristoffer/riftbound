@@ -542,6 +542,14 @@ const SFX = {
     notes.forEach((f, i) => { E.O(v, i * .07, {f, a: .003, d: .28 + k * .05, g: .045}); E.O(v, i * .07, {f: f * 2, a: .002, d: .1, g: .012}); });
     if (k >= 3) E.O(v, notes.length * .07, {f: 523, a: .02, d: .9, g: .04});
   },
+  // SKILLS (features/pack.js, docs/SKILLS.md): a level, two soft rising notes; a move, a third held one above them (o.move);
+  // a title, a low warm one under them (o.title). Quiet: it lands while you work
+  skillUp(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * .9, jit: .004}, 'skillUp', 1.2, {pri: 2, cd: .4}); if (!v) return;
+    E.O(v, 0, {f: 784, a: .004, d: .22, g: .04}); E.O(v, .09, {f: 1175, a: .004, d: .3, g: .04});
+    if (o.move) { E.O(v, .2, {f: 1568, a: .01, d: .7, g: .045}); E.O(v, .2, {f: 3136, a: .004, d: .18, g: .01}); }
+    if (o.title) E.O(v, .05, {f: 392, a: .03, d: .9, g: .045});
+  },
   // the bruiser's coach gun (fallbacks for the forge's 'coachgun' recipe while it bakes / ?forge=0), screen-bound like it
   coachShot(E, o) {   // deeper and longer than the revolver's: a broad bark, a low sweep, a long dark tail
     const k = offK(o); if (!k) return;
@@ -1288,6 +1296,8 @@ export function createAudio(ctx, host = {}) {
         case 'mine.chunk': fire('hit', e.x, e.y, {mat: 'clay', g: .35}); break;   // (stand-in: a chunk into the pouch)
         case 'mine.take': fire('kick', e.x, e.y, {mat: 'wood', g: .5}); break;   // (stand-in: the old pick pulled from the wall)
         case 'pack.add': if (e.id === 'log') fire('logPick', e.x, e.y); break;
+        case 'skill.level': fire('skillUp', e.x, e.y, {move: !!e.move}); break;   // (features/pack.js: a skill's new level; a move it gave: the third note)
+        case 'title.earned': fire('skillUp', e.x, e.y, {title: true}); break;
         case 'fire.addWood': fire('campLog', e.x, e.y); break;   // a log on a campfire (features/campfires.js, lights.js)
         // FISHING (features/fishing.js, docs/FISHING.md)
         case 'fish.cast': fire('fishCast', e.x, e.y, {k: e.k, perfect: e.perfect}); break;

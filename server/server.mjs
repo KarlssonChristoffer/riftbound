@@ -1,13 +1,15 @@
 // THE CO-OP SERVER (docs/MULTIPLAYER.md): one process that serves the game's files and hosts the room.
 //   node server/server.mjs [--port 8320] [--seed 1234] [--host 0.0.0.0] [--assets D:/Game] [--hour 9] [--daymin 20] [--uncanny] [--nshift 1] [--regrow 1] [--snuffers n]
-//     [--xprate 1] [--importcap 10] [--data dir] [--quiet]
+//     [--xprate 1] [--importcap 10] [--data dir] [--movelvl 0] [--dev] [--quiet]
 //   --hour: the world's clock at the start (in-game hours since the start: 9 the first morning, 22 its night); --daymin: real
 //   minutes per in-game day (0 stops the clock); --uncanny: the uncanny forest on (docs/UNCANNY.md; off without it); --nshift: how strong the night shift is (docs/UNCANNY.md; 0 = none)
 //   --regrow: a factor on how long picked patches take to grow back (docs/FORAGING.md; 0.05 to test)
 //   --snuffers: how many soot things live in the cave (docs/CAVELIFE.md; its roosts' count by default, 0 none)
 //   --xprate: a factor on every XP grant (docs/SKILLS.md; 'raw': content/skills.js RATE ignored); --importcap: the level a first join
 //   may bring from the browser's own save (10); --data: keep the players' records (server/players.mjs) in <dir>/players.json
-//   across restarts (an opt-in dev switch: off, nothing is written to disk)
+//   across restarts (an opt-in dev switch: off, nothing is written to disk); --movelvl N: every player counts as at least level N
+//   for the skills' moves (a test server); --dev: the Sandbox's Skills rows work on this server (every skill to its next move's
+//   level, back to level 1: the asker's own record)
 // then open http://localhost:8320/src/?mp=1 in two (or more) windows: everyone who opens it joins the same world.
 //   GET  /mp/session   {v, seed, players}: the world's seed, read by the page BEFORE it builds the world (core/session.js)
 //   WS   /mp           the room (room.mjs): join, state, acts, snapshots
@@ -34,6 +36,7 @@ const assets = arg('assets', null), quiet = process.argv.includes('--quiet'), un
 const hour = +arg('hour', CLOCK.hour), daymin = +arg('daymin', CLOCK.daymin), nshift = +arg('nshift', 1), regrow = +arg('regrow', 1), snuffers = arg('snuffers', null);
 const log = quiet ? () => {} : (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const xprate = arg('xprate', '1') === 'raw' ? 'raw' : +arg('xprate', 1), importCap = +arg('importcap', IMPORT_CAP), data = arg('data', null);
+const movelvl = Math.max(0, +arg('movelvl', 0) | 0), dev = process.argv.includes('--dev');
 
 // THE PLAYERS' RECORDS (server/players.mjs): in memory; with --data also in <dir>/players.json, read now and written 5 s after a change
 let players = null, flushPlayers = () => {};
@@ -60,7 +63,7 @@ try {
 catch (e) { log('forest: not loaded (acts are not checked against the trees, no uncanny forest):', e.message); }
 
 const room = createRoom({seed, trees, decor, veins, cave, snuffers: snuffers === null ? undefined : Math.max(0, +snuffers || 0), regrow: regrow > 0 ? regrow : 1, unc, hour: isFinite(hour) ? hour : CLOCK.hour, daymin: isFinite(daymin) ? daymin : CLOCK.daymin, log,
-  players, xprate: xprate === 'raw' || xprate > 0 ? xprate : 1, importCap});
+  players, xprate: xprate === 'raw' || xprate > 0 ? xprate : 1, importCap, movelvl, dev});
 const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.glb': 'model/gltf-binary',
   '.bin': 'application/octet-stream', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8'};

@@ -52,3 +52,47 @@ export function fellXP(species, s = 1) {
   const st = treeStats(species, s); if (!st) return 0;
   return st.hp * XP.chop + Math.round(XP.fell * TREES[species].xp * s) + st.logs * XP.gather;
 }
+
+// THE MOVES (docs/SKILLS.md): every few levels a skill gives a MOVE, something you see and do differently, instead of a bigger
+// number. {lvl, id, name (the toast's and the panel's), line (the panel's one plain sentence), soon (not built yet: never shown,
+// never toasted)}. The features ask pack.move(id) (features/pack.js: ?movelvl=N pretends every skill is at least N, ?moves=0
+// none); the co-op server checks the moves that change the sim against its own record (hasMove)
+export const MOVES = {
+  woodcutting: [
+    {lvl: 5, id: 'fall_line', name: 'The fall line', line: 'When the next bite will fell it, the ground trembles where it will land.'},
+    {lvl: 10, id: 'steer_fall', name: 'Steer the fall', line: 'The felling blow turns the fall toward where you point.', soon: true},
+    {lvl: 15, id: 'domino', name: 'Domino', line: 'A tree that lands on one you have bitten half through takes it down too.', soon: true},
+    {lvl: 20, id: 'bridge', name: 'Bridge', line: 'A pine felled across the stream stays whole: walk it.', soon: true},
+    {lvl: 30, id: 'crown_shake', name: 'Crown shake', line: 'A crown shakes out cones, an old nest, now and then something kept.', soon: true},
+  ],
+  mining: [
+    {lvl: 5, id: 'chain', name: 'The chain', line: 'Three rhythm blows in a row on one vein crack it open at once.'},
+    {lvl: 10, id: 'rings', name: 'Rings in the rock', line: 'Each blow rings through the floor; a hollow wall rings back.', soon: true},
+    {lvl: 15, id: 'spark_light', name: 'Spark light', line: 'A chain lights the dark round you for a moment.', soon: true},
+    {lvl: 20, id: 'run_seam', name: 'Run the seam', line: 'A chain cracks a vein of the same kind beside it too.', soon: true},
+    {lvl: 30, id: 'deep_ear', name: 'Deep ear', line: 'The rings reach far, and the roosts answer.', soon: true},
+  ],
+  foraging: [
+    {lvl: 5, id: 'glimmer', name: 'Glimmer', line: 'Crouch and keep still: what is left to pick catches the light.'},
+    {lvl: 10, id: 'odd_ones', name: 'The odd ones', line: 'You know the look-alikes when you see them.', soon: true},
+    {lvl: 15, id: 'nose', name: 'The nose', line: 'You turn your head toward chanterelles before you see them.', soon: true},
+    {lvl: 20, id: 'true_colours', name: 'True colours', line: 'On the fly agaric, what is really there holds still.', soon: true},
+    {lvl: 30, id: 'tend', name: 'Tend', line: 'Hold E on a picked patch and it grows back in half the time.', soon: true},
+  ],
+  fishing: [
+    {lvl: 5, id: 'shadows', name: 'Shadows', line: 'You see the fish under a spot. Drop the bobber just ahead of its nose.'},
+    {lvl: 10, id: 'read_surge', name: 'Read the surge', line: 'You see a fish turn before it thrashes.', soon: true},
+    {lvl: 15, id: 'leaper', name: 'Lasso the leaper', line: 'A big fish in the air can be roped.', soon: true},
+    {lvl: 20, id: 'next_rise', name: 'The next rise', line: 'You see where the spots will rise next.', soon: true},
+    {lvl: 30, id: 'deep_shadows', name: 'Deep shadows', line: 'At dawn and dusk the deep fish show mid-lake.', soon: true},
+  ],
+};
+// id -> {skill, lvl, id, name, line, soon}
+export const MOVE_BY_ID = {};
+for (const sk in MOVES) for (const m of MOVES[sk]) MOVE_BY_ID[m.id] = {...m, skill: sk};
+// does someone at these levels ({skill: level}) have move `id` (a built one)? (pure: the client's pack.move, the server's checks)
+export function hasMove(levels, id) { const m = MOVE_BY_ID[id]; return !!m && !m.soon && (levels[m.skill] || 0) >= m.lvl; }
+// the built moves a skill gives at level L: just reached (the toast's: the one whose lvl is L) / all had / the next one's level
+export const moveAt = (skill, L) => (MOVES[skill] || []).find(m => !m.soon && m.lvl === L) || null;
+export const movesHad = (skill, L) => (MOVES[skill] || []).filter(m => !m.soon && m.lvl <= L);
+export const nextMoveLvl = (skill, L) => (MOVES[skill] || []).find(m => !m.soon && m.lvl > L)?.lvl || 0;

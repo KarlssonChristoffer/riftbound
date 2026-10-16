@@ -18,6 +18,13 @@ export const TUNE = {
   regrow: {hours: 36, far: 14},
   log: {pick: .55, magnet: 2.4, delay: .6, speed: 7},
   stump: {h: .42, r: .3},   // m: what's left standing, and its collider
+  // THE TREE'S HIT (docs/SKILLS.md): at tree.land everything in the fall's path is hit once. The path: the trunk's strip (line m
+  // wide, from the stump to the crown's foot) and the crown's circle (its radius x crown) round its middle. A foe or a dummy:
+  // foe x the tree's scale damage (combat's) and shoved shove m aside; the player: thrown sideways (out, up m/s: host.launch;
+  // the flight and launch.js's lie make the ~1.2 s on the ground; a sprite loadout skids instead) and hurt hurt x his max
+  // health, at least 1 and never the last of it (?treehurt=0: not hurt); a standing tree shudders and loses one blow (never
+  // felled by it); a crate or a barrel breaks
+  hit: {line: .35, crown: .8, foe: 30, shove: 1.5, out: 4.2, up: 3.4, hurt: .15, h: 2.2},
 };
 
 export const TREES = {

@@ -19,7 +19,10 @@
 // broken crystal: each x content/skills.js RATE x --xprate) and tells that player alone ({k: 'skills', xp, d}); the levels it
 // checks (a pick's yield, a vein's chunks, a cast's roll) are its record's, never the client's word.
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
-//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log, players, xprate, importCap}); room.connect(conn);
+// The moves (content/skills.js MOVES) that change the sim are checked against the record's levels too (moveLvl: at least
+// --movelvl, a test server's pretend level; it goes out in the skills message as ml). A --dev server takes the Sandbox's
+// Skills rows (act 'dev': next | reset) for the asker's own record.
+//   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log, players, xprate, importCap, movelvl, dev}); room.connect(conn);
 //   room.stop(); room.clock() -> hours; room.players (the records)
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
@@ -28,7 +31,7 @@ import {mealNotes} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
-import {SKILLS, IMPORT_CAP, levelOf, fellXP, rateOf} from '../src/content/skills.js';
+import {SKILLS, IMPORT_CAP, levelOf, fellXP, rateOf, hasMove, nextMoveLvl, needXP} from '../src/content/skills.js';
 import {TUNE as MINE} from '../src/content/mining.js';
 import {createPlayers, KEY_RE} from './players.mjs';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
@@ -38,7 +41,7 @@ import {mulberry32} from '../src/core/rng.js';
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
 export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8,
-  players = null, xprate = 1, importCap = IMPORT_CAP}) {
+  players = null, xprate = 1, importCap = IMPORT_CAP, movelvl = 0, dev = false}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -62,6 +65,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   // SKILLS (docs/SKILLS.md): XP granted here (x the skill's RATE x --xprate), told to that player alone; his levels are his record's
   const PL = players || createPlayers({SKILLS, importCap});
   const lvlOf = (p, id) => levelOf(p.rec.xp[id] || 0);
+  const ML = Math.max(0, movelvl | 0), mvl = {};
+  const moveOK = (p, move) => { for (const id in SKILLS) mvl[id] = Math.max(lvlOf(p, id), ML); return hasMove(mvl, move); };   // (a move the sim checks: the chain, the nose cast)
   function grant(p, id, n) {
     const g = Math.round(n * rateOf(id, xprate) * 1000) / 1000; if (!(g > 0)) return;
     p.conn.send(encode({k: 'skills', xp: {[id]: PL.grant(p.rec, id, g)}, d: {[id]: g}}));
@@ -77,7 +82,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
       clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null}));
     peers.set(id, p);
-    p.conn.send(encode({k: 'skills', xp: rec.xp}));   // (his record: the client takes its levels from it)
+    p.conn.send(encode({k: 'skills', xp: rec.xp, ml: ML}));   // (his record: the client takes its levels from it; ml: --movelvl)
     others(p, {k: 'join', p: pub(p)});
     log(`+ ${p.name} (#${id}) from ${conn.ip} · ${peers.size} in the room`);
     return p;
@@ -121,6 +126,14 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
     if (a === 'crystal') return crystal(p, id, deny);
+    if (a === 'dev') {   // dev (--dev): the Sandbox's Skills rows on his own record (every skill to its next move's level | back to 0)
+      if (!dev) return deny('not a dev server (--dev)');
+      for (const sk in SKILLS) {
+        if (id === 'reset') PL.set(p.rec, sk, 0);
+        else if (id === 'next') { const n = nextMoveLvl(sk, lvlOf(p, sk)); if (n) PL.set(p.rec, sk, needXP(n)); }
+      }
+      p.conn.send(encode({k: 'skills', xp: p.rec.xp, ml: ML})); log(`  ${p.name}: dev skills ${id}`); return;
+    }
     if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');

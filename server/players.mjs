@@ -9,7 +9,8 @@
 // Kept small and plain so the coming server world store (the cleanup plan's step 2) can take it over whole: a record is
 // plain JSON, the store's state is toJSON() / load(o).
 //   const P = createPlayers({SKILLS, importCap, load, onChange}); P.join(key, xp) -> {rec, fresh}; P.get(key); P.grant(rec,
-//   skill, n) -> its new total; P.count(rec, name, n) -> the counter's new total; P.changed(); P.toJSON(); P.size
+//   skill, n) -> its new total; P.set(rec, skill, n) (a dev server's --dev); P.count(rec, name, n) -> the counter's new total;
+//   P.changed(); P.toJSON() (the keyed records: a key-less connection's is dropped with it); P.size
 //   a record: {key, xp: {skill: n}, n: {counter: n}, titles: [id], title: id | '', caught: {fish id: n}, t: ms of its last change}
 import {needXP} from '../src/content/skills.js';
 
@@ -49,12 +50,13 @@ export function createPlayers({SKILLS, importCap = 10, load = null, onChange = (
       rec.xp[id] = Math.round((rec.xp[id] + n) * 1000) / 1000; rec.t = Date.now(); changed();
       return rec.xp[id];
     },
+    set(rec, id, n) { if (!rec || !(id in rec.xp)) return 0; rec.xp[id] = Math.max(0, +n || 0); rec.t = Date.now(); changed(); return rec.xp[id]; },
     count(rec, name, n = 1) {
       if (!rec) return 0;
       rec.n[name] = Math.round(((rec.n[name] || 0) + n) * 1000) / 1000; rec.t = Date.now(); changed();
       return rec.n[name];
     },
     changed,
-    toJSON() { const o = {}; for (const [k, r] of recs) o[k] = r; return o; },
+    toJSON() { const o = {}; for (const [k, r] of recs) if (KEY_RE.test(k)) o[k] = r; return o; },
   };
 }

@@ -143,5 +143,18 @@ console.log(`room: seed ${SEED}, ${F.trees.size} trees, ${F.decor?.length ?? 0} 
   void a;
 }
 
+// 4. a test server's switches: --movelvl goes out with the record (ml); --dev takes the Sandbox's Skills rows, a plain server refuses
+{
+  const P = createPlayers({SKILLS}), plain = makeRoom(P), devr = makeRoom(createPlayers({SKILLS}), {dev: true, movelvl: 5});
+  const a = join(plain, KEY_A); a.say({k: 'act', a: 'dev', id: 'next'});
+  ok(a.last('deny')?.why?.startsWith('not a dev server'), 'a plain server refuses the dev rows');
+  const b = join(devr, KEY_B); ok(b.all('skills')[0]?.ml === 5, '--movelvl goes out as ml');
+  b.say({k: 'act', a: 'dev', id: 'next'});
+  ok(b.last('skills')?.xp.mining === needXP(5) && b.last('skills')?.xp.fishing === needXP(5), 'dev next: every skill to its next move\'s level', JSON.stringify(b.last('skills')));
+  b.say({k: 'act', a: 'dev', id: 'reset'});
+  ok(b.last('skills')?.xp.mining === 0, 'dev reset: back to 0');
+  plain.stop(); devr.stop();
+}
+
 console.log(`room: ${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

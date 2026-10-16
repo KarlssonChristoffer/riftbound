@@ -148,7 +148,7 @@ export async function create(host) {
   function gatherBangs(evs, dt) {
     for (const B of BANGS) if (B.t > 0) B.t -= dt;
     for (const e of evs || []) {
-      const r = e.type === 'player.shoot' || e.type === 'foe.shoot' ? TUNE.shot : e.type === 'arrow.hit' || e.type === 'prop.break' || e.type === 'combat.explode' || e.type === 'player.hit' ? TUNE.hit : 0;
+      const r = e.type === 'player.shoot' || e.type === 'foe.shoot' ? TUNE.shot : e.type === 'arrow.hit' || e.type === 'prop.break' || e.type === 'combat.explode' || e.type === 'player.hit' || e.type === 'tree.land' || e.type === 'tree.hit' ? TUNE.hit : 0;   // (a tree coming down: docs/SKILLS.md)
       if (!r || e.x === undefined) continue;
       const B = BANGS[bangI++ % BANGS.length]; B.x = e.x; B.y = e.y; B.r = r; B.t = .5;
     }
