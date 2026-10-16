@@ -52,12 +52,15 @@ import {dollTargets, nearestOf, openGround, dollWalk, underground} from '../src/
 import {nameHash} from '../src/core/rng.js';
 import {TUNE as MIRE} from '../src/content/mire.js';
 import {nightOf, createWisps} from '../src/sim/mire.js';
+import {eventAt as wrongAt} from '../src/sim/wrongwx.js';
+import {TUNE as WRONG} from '../src/content/wrongwx.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createAnimals} from './animals.mjs';
 import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
 import {createWorkshop} from './workshop.mjs';
 
+const B64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;   // (a pose's base64: state())
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
 export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, plan = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, workshop = {}, fauna = null, thief = '',
@@ -111,7 +114,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
     const {rec} = PL.join(KEY_RE.test(m.key) ? m.key : '#' + id, m.xp);   // (no key: a record for this connection alone; the workshop's fallback too)
-    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null, an: null,
+    const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null, an: null, sc: '',
       fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, lt: 0, md: '', rec, biteT: -1e9, crystals: new Set(), chain: {id: '', n: 0, t: -1e9}, walkM: 0, caveS: 0};
     const made = ws.hello(p, m);   // (his records: the server's, the hello's copy filling in)
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
@@ -143,12 +146,13 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const rig = str(m.rig, 16);
     if (Array.isArray(m.wn) && m.wn.length <= 64) { p.wn = m.wn.map(b => str(b, 32)); others(p, {k: 'wn', id: p.id, wn: p.wn}); }
     if (rig !== p.rig) { p.rig = rig; if (!rig) { p.w = null; p.wn = null; } }
-    if (typeof m.w === 'string' && m.w.length < 2048) { p.w = m.w; p.wNew = true; }
+    if (typeof m.w === 'string' && m.w.length < 2048 && B64.test(m.w)) { p.w = m.w; p.wNew = true; }   // (the cloth's pose: base64 or nothing, passed on to everyone)
     p.ls = Array.isArray(m.ls) && m.ls.length === 5 ? m.ls.map((v, i) => i ? Math.round(num(v) * 100) / 100 : str(v, 8)) : null;
     p.lt = m.lt === 1 || m.lt === 2 ? m.lt : 0; p.lit = p.lt > 0;   // (his lantern burns in the cave, 2: a burnt eel's shining eyes: sim/cavelife.js reads p.lit)
     p.md = str(m.md, 24);   // (the meal in him: content/meals.js codeOf; friends see its mood, the fishing grab checks it)
     p.bd = num(m.bd, 0) & 0x7ff;   // (his body's look: content/body.js packBody, passed on in the snapshots)
     p.an = animals.an(m.an, p);   // (the animal on his rope: server/animals.mjs checks it's his claim)
+    p.sc = str(m.sc, 32);   // (his scene: the snapshots go to the players in the same one; '' an old client's)
     p.fresh = true;
   }
 
@@ -192,6 +196,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (ws.ACTS.has(a)) return ws.act(p, a, m, id, deny);
     if (a === 'shelve' || a === 'unshelve' || a === 'fetch') return shelf(p, a, m, id, deny);
     if (a === 'dig') return mireDig(p, id, deny);
+    if (a === 'cloud') return cloudAct(p, m, id, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     let tr = null, dx = 0, dy = 0;
@@ -477,6 +482,37 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     world.set(id, e); all({k: 'world', id, ...e, by: p.id}); log(`  ${p.name} ${m.b ? 'went through the ice' : 'cut a hole in the ice'} (${id})`);
   }
 
+  // WRONG WEATHER (sim/wrongwx.js, content/wrongwx.js, docs/WEATHER.md): when and where is the seed's (every client works it out);
+  // only whom the following cloud follows is the server's: 'x' + n in the world {s: 'cloud', who (0: lost), at (its end: the
+  // tick clears it)}. Act 'cloud': w 'ask' (the cloud of event n began on his clock: the first ask picks a placed player at random;
+  // a later one gets the pick back), 'pass' (to: a friend within reach of him, he being its pick), 'lose' (he sheltered it off).
+  // Ids 'x' 9000 and up are the sandbox menu's (dev: no check against the schedule)
+  const wrR = mulberry32((seed ^ 0x3c1d) >>> 0);
+  function cloudAct(p, m, id, deny) {
+    if (!/^x\d{1,6}$/.test(id)) return deny('bad id');
+    const n = +id.slice(1), w = str(m.w, 8), e = world.get(id);
+    if (w === 'ask') {
+      if (e) { p.conn.send(encode({k: 'world', id, ...e})); return; }
+      let at = clock() + WRONG.cloud.dur;
+      if (n < 9000) {
+        const h = clock(), ev = wrongAt(seed >>> 0, h, WXT.seasonDays, null) || wrongAt(seed >>> 0, h, WXT.seasonDays, null, true);
+        if (!ev || ev.n !== n || ev.kind !== 'cloud') return deny('no cloud');
+        at = ev.t1;
+      }
+      const pl = [...peers.values()].filter(q => q.placed), q = pl[Math.floor(wrR() * pl.length)] || p;
+      const s = {s: 'cloud', who: q.id, at: +at.toFixed(3)};
+      world.set(id, s); all({k: 'world', id, ...s}); log(`  a cloud follows ${q.name} (${id})`); return;
+    }
+    if (!e || e.s !== 'cloud' || e.who !== p.id) return deny('not yours');
+    if (w === 'lose') { e.who = 0; all({k: 'world', id, ...e}); return; }
+    if (w === 'pass') {
+      const q = peers.get(+m.to) || peers.get(m.to);
+      if (!q || !q.placed || Math.hypot(q.x - p.x, q.y - p.y) > WRONG.cloud.pass + 1) return deny('too far');
+      e.who = q.id; all({k: 'world', id, ...e}); log(`  ${p.name} passed the cloud to ${q.name}`); return;
+    }
+    deny('no such');
+  }
+
   // THE MIRE (docs/MIRE.md): a dig at the night's find ({a: 'dig', id: 'w' + the night}). The night must be tonight's (or,
   // for ?wisps=often, today's), the digger within reach of where its true wisp stopped (sim/mire.js: the seed's, nothing kept but
   // who dug), once a night each; everyone is told ({k: 'world', id, s: 'dug', by}) and the digger takes the find
@@ -615,6 +651,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
 
   // THE TICK: everyone's latest state to everyone (a client skips its own row); a pose goes out only when it changed
   const DT = 1 / TICK_HZ;
+  const rowSc = new Map(), scenes = new Set();   // (the tick's rows' scenes, by row index)
   let anT = 0;
   const timer = setInterval(() => {
     if (!peers.size) return;
@@ -638,13 +675,25 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       for (const e of soot.step(DT, where, shine)) all({k: 'ev', ...e});
       sn = soot.rows(snRow);
     }
+    // (by scene: a player in a run isn't drawn in the forest, nor the other way; each scene's rows encoded once)
     const rows = [];
     for (const p of peers.values()) {
       if (!p.placed) continue;
+      rowSc.set(rows.length, p.sc || '');
       rows.push([p.id, +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3), +p.phi.toFixed(3), p.s, p.pose, p.rig, p.wNew ? p.w : 0, p.ls || 0, p.lt || 0, p.md || '', p.bd | 0, p.an || 0]);
       p.wNew = false;
     }
-    if (rows.length) { const m = {k: 'snap', t: now(), p: rows}; if (c) m.c = c; if (sn) m.sn = sn; all(m); }
+    if (rows.length) {
+      const m = {k: 'snap', t: now(), p: rows}; if (c) m.c = c; if (sn) m.sn = sn;
+      scenes.clear(); for (const q of peers.values()) scenes.add(q.sc || '');
+      let one = scenes.size === 1; for (const v of rowSc.values()) if (!scenes.has(v)) one = false;   // (everyone in one scene: as before)
+      if (one) all(m);
+      else for (const sc of scenes) {
+        m.p = rows.filter((r, i) => rowSc.get(i) === sc); if (!m.p.length) continue;
+        const t = encode(m); for (const q of peers.values()) if ((q.sc || '') === sc) q.conn.send(t);
+      }
+    }
+    rowSc.clear();
   }, 1000 / TICK_HZ);
 
   return {

@@ -128,9 +128,33 @@ page's switches. The server doesn't see the hut (only the cave is safe online).
 | thunderwood | 30% a struck tree | `content/thunder.js` STRIKE `tree.wood` |
 | the brand | 45 s | `content/thunder.js` TUNE `brand` |
 
+## Wrong weather
+
+Part 5 of the brief. About one in-game day in three (never the first), between 9 and 17 o'clock, one weather breaks a rule.
+When, which and where are the seed's and the clock's (`sim/wrongwx.js`): every player gets the same. Each leaves one thing where
+it ended; E takes it, once an event. `&wrongwx=often` one every 2 in-game hours, each kind in turn; `&wrongwx=0` none. Esc >
+Sandbox > Wrong weather: start each now, take me to it.
+
+- **Upward rain.** A column 12-18 m across over the lake where the rain falls up. Inside it you stay dry (rain doesn't wet
+  you) and light (x1.2 speed). Six fish lift out of the water and hang in the air, 1-2.6 m up; E within 1.3 m grabs one (a lake
+  catch, one luck step up). 1.2 in-game hours.
+- **The cloud.** A small low cloud picks one player (online: the server picks, at random among those in the world) and rains on
+  them only: wet and cold build fast. Under the hut's roof, in the cave or under a thick crown for 20 s and it loses you
+  (it drifts off); walk into a friend and it's theirs. When it rains itself out (6 in-game hours) it leaves Unmelting Hail where it is.
+- **The still storm.** Heavy rain, no thunder. Every 6-11 s a flash, and the world freezes for .45 s (the picture holds; the
+  game runs on). In the frozen frame 3-5 tall dark figures stand round you, 14 m off at first, closer each flash (3.5 m by the
+  ninth). When it ends a Carved Figure lies where the closest one stood at the last flash. 1.5 in-game hours.
+- **Footprints from nobody.** Winter only (with snow lying). Fresh boot prints walk from the lake's south shore toward the
+  forest's edge at a walk (1.1 m/s), made as you watch. Step on them and they stop. Follow them to the end (30-60 m: they stop short at the forest's edge) and there's
+  an Old Mitten. 3 in-game hours.
+
+Online, the cloud's pick is the server's (act `cloud`: ask / pass / lose; world `'x' + n`); everything else each machine works
+out by itself, and the finds are each player's own. Knobs: `content/wrongwx.js` TUNE.
+
 ## Not in yet
 
 Aim sway in the wind (there is no aim sway system to feed), a shivering idle and a darker wet sprite (the sprites are
 baked atlases), the server knowing which fires stand under trees or who's in the hut, the struck tree splitting down the
 middle (it chars and loses its crown instead), the brand lighting dry grass (trees only), hair standing up (the crackle
-round the head stands in for it).
+round the head stands in for it). Wrong weather: the figures are dark pixel shapes, not sprites; the upward rain's
+fish are each player's own to grab; no sounds yet (the events are there).

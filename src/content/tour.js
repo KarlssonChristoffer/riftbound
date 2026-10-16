@@ -8,7 +8,7 @@
 //   title     a few words
 //   where     one line: where you are and what's set
 //   world     {hour (0-24), weather (sim/wxclock.js WEATHER: clear, fair, rain, storm, snow, fog, windy, gale, ...),
-//             wet (0..1: the ground's), season (spring | summer | autumn | winter)}: applied offline (co-op: the server's
+//             wet (0..1: the ground's), snow (0..1: its snow cover; out of winter none), season (spring | summer | autumn | winter)}: applied offline (co-op: the server's
 //             clock and weather stand). Left out: a summer's fair day, the clock where it is
 //   view      '' top-down | '3p' third person | '1p' first person (left out: the camera as you have it)
 //   uncanny   true: the uncanny forest on while you're at this stop (off again when you leave)
@@ -250,7 +250,7 @@ export const STOPS = [
   // ---------------------------------------------------------------- winter
   {id: 'winternight', section: 'Winter', title: 'A winter night',
     where: 'The clearing on a clear winter night. Logs in the pouch',
-    world: {hour: 22, weather: 'clear', season: 'winter'}, setup: T => { where(T, clearing); T.row('body', 'Body: dry and warm'); T.give('log', 8); },
+    world: {hour: 22, weather: 'clear', season: 'winter', snow: .6}, setup: T => { where(T, clearing); T.row('body', 'Body: dry and warm'); T.give('log', 8); },
     tasks: [
       {text: 'Get cold: slower, no sprint, frost creeps in at the edges', check: T => (T.mem.cold ||= T.body('cold') > .5)},
       {text: 'Your breath shows in the cold'},
@@ -268,7 +268,7 @@ export const STOPS = [
     ]},
   {id: 'ice', section: 'Winter', title: 'The frozen lake',
     where: 'The lake\'s shore, the ice thick enough to walk. The pick and axe in the bag',
-    world: {hour: 12, weather: 'clear', season: 'winter'}, setup: T => { T.give('pick', 1); T.row('ice', 'Ice: take me to the lake'); },
+    world: {hour: 12, weather: 'clear', season: 'winter', snow: .4}, setup: T => { T.give('pick', 1); T.row('ice', 'Ice: take me to the lake'); },
     tasks: [
       {text: 'Walk out on the ice', check: T => !!T.feat('ice')?.onIce},
       {text: 'Find a thin spot (where the stream comes in, over the deep): it cracks', ev: 'ice.crack'},

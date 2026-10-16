@@ -74,7 +74,7 @@ function sections({host, opt, stage, env, hero, cv, perf}) {
     ['Spawn', [
       ['.', 'an elite with the next affix', null, () => on('affixes')], ['Shift+.', 'its champion', null, () => on('affixes')],
       ['0', 'a gang of gunmen (desert)', null, desert], ['Shift+0', 'one gunman', null, desert],
-      ['E', 'wanted board: take a bounty', null, desert], ['Esc', 'Sandbox tab: elites, shrines, omens', null, sandbox]]],
+      ['E', 'wanted board: take a bounty', null, desert], ['F10', 'dev menu: every test action and toggle', null, sandbox]]],
     ...(flags.get('live') === '1' ? [['Live hero', [
       ['Shift+7', 'sprite / live body'], ['Shift+8', 'motion preset'], ['Shift+9', 'demo · emote'],
       ['Shift+Alt+7', 'new movement A/B'], ['Shift+Alt+8', 'procedural layers A/B'], ['Shift+Alt+9', 'combat style A/B'], ['Shift+Alt+0', 'reactions A/B']]]] : []),

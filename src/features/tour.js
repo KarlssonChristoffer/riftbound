@@ -44,9 +44,12 @@ export async function create(host) {
   const allDone = s => s.tasks.every((t, k) => !counted(t) || isDone(s, k));
 
   // a feature's Sandbox row by the start of its label (run as if clicked)
+  // (its F.menu rows, else its F.dev rows: there the 'Feature: ' prefix may be gone, docs/DEVMENU.md)
   function rowOf(name, prefix) {
-    const rows = host.feature(name)?.menu?.() || [];
-    for (const r of rows) if (r.label.startsWith(prefix)) return r;
+    const f = host.feature(name); if (!f) return null;
+    for (const r of f.menu?.() || []) if (r.label.startsWith(prefix)) return r;
+    const bare = prefix.replace(/^[^:]+:\s*/, '');
+    for (const r of f.dev?.rows?.() || []) if (r.run && (r.label.startsWith(prefix) || r.label.startsWith(bare))) return r;
     return null;
   }
   // T: what a stop's setup / leave / check sees (content/tour.js)
@@ -78,7 +81,7 @@ export async function create(host) {
     E.setSeason(w.season || 'summer');
     if (w.hour != null) E.setHour(w.hour);
     const wx = w.weather || 'fair';
-    E.settle(wx, w.wet ?? (WEATHER[wx]?.precip ? null : 0));   // (at once, the ground with it: rain wets it, snow covers it, fair dries it)
+    E.settle(wx, w.wet ?? (WEATHER[wx]?.precip ? null : 0), w.snow ?? (w.season === 'winter' ? null : 0));   // (at once, the ground with it: rain wets it, snow covers it, fair dries it; no snow out of winter)
   }
   function release() {
     const E = host.env; if (!E || online() || !clock0) return;
@@ -115,8 +118,7 @@ export async function create(host) {
     if (!cheered && allDone(s)) { cheered = true; host.uiSound?.('confirm'); } else host.uiSound?.('click');
   }
 
-  if (FLAG) { build(); const at = FLAG === 'restart' ? 0 : find(FLAG) >= 0 ? find(FLAG) : Math.max(0, find(savedAt)); if (FLAG === 'restart') prog = {}; pending = at; }
-  else pending = -1;
+  let boot = FLAG;   // (?tour: started on the first step, once every feature is there to bring its stops)
 
   // ---------------------------------------------------------------- the card (HD layer): laid out on change
   let dirty = 1, lines = [], cardW = 0, cardH = 0;
@@ -155,6 +157,10 @@ export async function create(host) {
     name: 'tour', label: 'Playtest tour', on: true,
     get running() { return on; }, get stop() { return cur()?.id || null; },
     update(dt, evs) {
+      if (boot && game()?.mode && game().mode !== 'title') {
+        build(); if (boot === 'restart') prog = {};
+        pending = boot === 'restart' ? 0 : find(boot) >= 0 ? find(boot) : Math.max(0, find(savedAt)); boot = null;
+      }
       if (pending >= 0 && game()?.mode && game().mode !== 'title') { const i = pending; pending = -1; enter(i); }
       const s = cur(); if (!s) return;
       for (let j = 0; j < evs.length; j++) {
@@ -193,21 +199,24 @@ export async function create(host) {
       let ly = y + 6 * u;
       for (const l of lines) { ly += 12 * u + l.gap; hdText(q, l.s, x + 8 * u + l.x, ly - 2 * u, u, l.col); }
     },
+    // the Esc menu's Game tab (ui/pause.js GAME_ROWS): start it, step it, end it
     menu() {
-      const rows = [];
       if (!on) {
-        rows.push({label: 'Tour: start the playtest tour' + (savedAt && find(savedAt) > 0 ? ` (from ${list[find(savedAt)]?.title || 'where you were'})` : ''), run: () => { build(); start(Math.max(0, find(savedAt))); }});
-        rows.push({label: 'Tour: start from the first stop (forget what\'s ticked)', run: () => { prog = {}; start(0); }});
-      } else {
-        rows.push({label: 'Tour: the next stop (PgDn)', run: () => { pending = Math.min(list.length - 1, idx + 1); }});
-        rows.push({label: 'Tour: back a stop (PgUp)', run: () => { pending = Math.max(0, idx - 1); }});
-        rows.push({label: `Tour: ${hidden ? 'show' : 'hide'} the card (H)`, run: () => { hidden = !hidden; dirty++; }});
-        rows.push({label: 'Tour: end it (the world\'s own weather and clock back)', run: end});
+        const at = find(savedAt);
+        return [{label: 'Playtest tour: start' + (at > 0 ? ` (from ${list[at].title})` : ''), run: () => start(Math.max(0, at))},
+          ...(at > 0 ? [{label: 'Playtest tour: start from the first stop', run: () => { prog = {}; start(0); }}] : [])];
       }
-      if (list === STOPS) build();
-      list.forEach((s, i) => rows.push({label: `Tour ${i + 1}: ${s.section || ''} · ${s.title}${allDone(s) && s.tasks.some(counted) ? '  (done)' : ''}${on && i === idx ? '  <' : ''}`, run: () => start(i)}));
-      return rows;
+      return [{label: 'Playtest tour: the next stop (PgDn)', run: () => { pending = Math.min(list.length - 1, idx + 1); }},
+        {label: 'Playtest tour: back a stop (PgUp)', run: () => { pending = Math.max(0, idx - 1); }},
+        {label: `Playtest tour: ${hidden ? 'show' : 'hide'} the card (H)`, run: () => { hidden = !hidden; dirty++; }},
+        {label: 'Playtest tour: end it (the world\'s own weather and clock back)', run: end}];
     },
+    // the dev menu (F10, docs/DEVMENU.md): the same, and a jump to any stop
+    dev: {group: 'Panels', rows() {
+      const rows = F.menu();
+      for (let i = 0; i < list.length; i++) { const s = list[i]; rows.push({label: `${i + 1}. ${s.section || ''}: ${s.title}${s.tasks.some(counted) && allDone(s) ? ' (done)' : ''}${on && i === idx ? ' <' : ''}`, run: () => start(i)}); }
+      return rows;
+    }},
     hud: () => on ? `tour: ${idx + 1}/${list.length} ${cur()?.id}${pending >= 0 ? ' (going to ' + pending + ')' : ''}` : '',
   };
   return F;
