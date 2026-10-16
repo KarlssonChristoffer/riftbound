@@ -497,6 +497,11 @@ uniform sampler2D uLit, uLitPal; uniform float uHasLit, uLive, uLitCap; uniform 
 // the rain, shrink as it dries); a puddle shows the sky's colour (uPudSky) over the dark ground under it, a rim of wet mud round it,
 // and the rain rings it. Per ground texel (its world texel: fixed to the world, crisp edges). uPudK.w 0: none (dry: no cost)
 uniform sampler2D uPud; uniform vec4 uPudR, uPudK; uniform vec3 uPudSky;
+// THE MIRE (G.setMire / setMireLook: features/mire.js, world/mire.js): its grid (uMire: R the pool field, G the soft field, B the
+// outline; over uMireR: its first metre x, z and 1 / its size), uMireK: x the flood 0..1 (the pools grow to -.6 x it of the field),
+// y frozen (1: grey ice, no sheen), z the soft threshold, w on; uMirePl: his x, z, the time, the quake (0..1: the soft ground rings
+// round him as he walks). Pools: dark peat water the composite mirrors in (tone 1), rain rings; soft ground darker and wet
+uniform sampler2D uMire; uniform vec4 uMireR, uMireK, uMirePl;
 // GROUND DECALS on walkable terrain (G.setGroundDecals: features/flow.js's ground layer): marks in world px (x PPM, z PPMY) read at
 // the fragment's own world position, so they lie on a slope as on flat ground (without terrain flow draws them through a plane)
 uniform sampler2D uDecal; uniform float uHasDecal, uDecalOn; uniform vec4 uDecalRect; uniform vec2 uDecalPx;
@@ -567,6 +572,25 @@ void main() {
       float k = texture(uPud, pu).r + (wvn(m * 3.1, 1e4) - .5) * .08 - (1. - .5 * uPudK.x);
       if (k > .03) { c.rgb = mix(c.rgb * .3, uPudSky * .8, .3 + .35 * smoothstep(.03, .14, k)); wfl = 1.; if (uWS2.x > .01) c.rgb = wDrops(c.rgb, pt, false); }   // (water: the composite mirrors in it)
       else if (k > 0.) c.rgb *= .62;   // the wet mud round it
+    }
+  }
+  if (uMireK.w > .5 && uType < 1.5 && wfl < .5) {   // the mire (above)
+    ivec2 pt = ivec2(floor(t)); vec2 m = (vec2(pt + wOrg()) + .5) * uWorld / uTexSize, mu = (m - uMireR.xy) * uMireR.zw;
+    if (all(greaterThan(mu, vec2(0.))) && all(lessThan(mu, vec2(1.)))) {
+      vec4 g = texture(uMire, mu);
+      if (g.b > .02) {
+        float q = g.r * 1.7 - .7 + (wvn(m * 2.3, 2e4) - .5) * .05, lev = -.6 * uMireK.x;
+        if (q > lev) {
+          if (uMireK.y > .5) c.rgb = mix(vec3(.58, .64, .68), vec3(.8, .86, .9), wvn(m * .9, 2e4 + 3.)) * (wvn(m * 3.7, 2e4 + 7.) > .86 ? .82 : 1.);   // frozen: grey ice, a crack's shade
+          else { c.rgb = mix(vec3(.075, .062, .048), uPudSky * .5, .16 + .14 * smoothstep(lev + .4, lev, q)); wfl = 1.; if (uWS2.x > .01) c.rgb = wDrops(c.rgb, pt, false); }   // dark peat water (mirrored), lighter in its shallow edge
+        }
+        else if (uMireK.y < .5 && q > lev - .07) c.rgb *= .55;   // the wet peat at its edge
+        else if (uMireK.y < .5 && g.g > uMireK.z) {   // soft ground: darker, and it quakes round him
+          c.rgb *= .84;
+          float dq = length(m - uMirePl.xy);
+          if (uMirePl.w > 0. && dq < 3.2) c.rgb *= 1. + uMirePl.w * .07 * sin(dq * 8. - uMirePl.z * 9.) * (1. - dq / 3.2);
+        }
+      }
     }
   }
   // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
@@ -1673,6 +1697,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     wS: {value: new THREE.Vector4(1, 0, 0, -1)}, wS2: {value: new THREE.Vector4()}, wSRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())}, wSTint: {value: new THREE.Vector4(1, 1, 1, .25)},
     // rain puddles (setPuddles, setPuddleLook: features/puddles.js): see SURF_FS
     pud: {value: null}, pudR: {value: new THREE.Vector4(0, 0, 1, 1)}, pudK: {value: new THREE.Vector4()}, pudSky: {value: new THREE.Vector3(.5, .55, .6)},
+    mire: {value: null}, mireR: {value: new THREE.Vector4(0, 0, 1, 1)}, mireK: {value: new THREE.Vector4()}, mirePl: {value: new THREE.Vector4()},   // the mire (setMire, setMireLook: features/mire.js)
     cut: {value: new THREE.Vector4()}, cutB: {value: new THREE.Vector4()}, cutM: {value: new THREE.Vector4()}, cutP: {value: new THREE.Vector4()},   // the cutaway (render/cut.js; setCut, cutFrame in render())
     sinkP: {value: new THREE.Vector4()}, sinkK: {value: new THREE.Vector4()},   // the cave's sink (render/cut.js SINK; setSink)
   };
@@ -1759,7 +1784,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp,
     uWBed: bed === undefined ? U.wBed : {value: bed?.tex || null}, uWBedOn: bed === undefined ? U.wBedOn : {value: bed ? 1 : 0},
     uWBedR: bed === undefined ? U.wBedR : {value: new THREE.Vector4(...(bed?.rect || [0, 0, 1, 1]))}, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot,
-    uWS: U.wS, uWS2: U.wS2, uWSRamp: U.wSRamp, uWSTint: U.wSTint, uIce: U.ice, uIceT: U.iceT, uIceH: U.iceH, uPud: U.pud, uPudR: U.pudR, uPudK: U.pudK, uPudSky: U.pudSky}, {side: THREE.FrontSide});
+    uWS: U.wS, uWS2: U.wS2, uWSRamp: U.wSRamp, uWSTint: U.wSTint, uIce: U.ice, uIceT: U.iceT, uIceH: U.iceH, uPud: U.pud, uPudR: U.pudR, uPudK: U.pudK, uPudSky: U.pudSky, uMire: U.mire, uMireR: U.mireR, uMireK: U.mireK, uMirePl: U.mirePl}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
   // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test
@@ -2181,6 +2206,20 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     pudTex = new THREE.DataTexture(P.data, P.w, P.h, THREE.RedFormat, THREE.UnsignedByteType);
     pudTex.minFilter = pudTex.magFilter = THREE.LinearFilter; pudTex.generateMipmaps = false; pudTex.unpackAlignment = 1; pudTex.needsUpdate = true;
     U.pud.value = pudTex; U.pudR.value.set(P.x0, P.z0, 1 / P.wm, 1 / P.hm);
+  }
+  // THE MIRE (SURF_FS; features/mire.js): setMire({data: RGBA8 w x h (world/mire.js M.grid), w, h, x0, z0, n (cells per m)} | null)
+  // once per world; setMireLook(flood, frozen, soft, px, pz, t, quake) when they change (soft: the soft field's threshold)
+  let mireTex = null;
+  function setMire(P) {
+    if (mireTex) { mireTex.dispose(); mireTex = null; }
+    U.mire.value = null; U.mireK.value.w = 0; if (!P) return;
+    mireTex = new THREE.DataTexture(P.data, P.w, P.h, THREE.RGBAFormat, THREE.UnsignedByteType);
+    mireTex.minFilter = mireTex.magFilter = THREE.LinearFilter; mireTex.generateMipmaps = false; mireTex.needsUpdate = true;
+    U.mire.value = mireTex; U.mireR.value.set(P.x0, P.z0, P.n / P.w, P.n / P.h); U.mireK.value.w = 1;
+  }
+  function setMireLook(flood, frozen, soft, px, pz, t, quake) {
+    if (!mireTex) return;
+    U.mireK.value.set(flood, frozen, soft, 1); U.mirePl.value.set(px, pz, t, quake);
   }
   function setPuddleLook(fill, sky) {
     U.pudK.value.x = fill; U.pudK.value.w = pudTex && fill > .01 ? 1 : 0;
@@ -3014,6 +3053,6 @@ void main() {
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setIce, setPuddles, setPuddleLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, setFrost, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setIce, setPuddles, setPuddleLook, setMire, setMireLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, setFrost, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
 }

@@ -45,7 +45,7 @@ export async function create(host) {
   const cells = new Map();   // key(cell) -> [decor index]
   function index() {
     const FP = host.layout?.forest || null; if (FP === plan) return;
-    plan = FP; D = FP?.decor || null; cells.clear(); picked.clear(); restored = false; ver++;
+    plan = FP; D = FP?.decor || null; cells.clear(); picked.clear(); off.clear(); offSeason = ''; restored = false; ver++;
     if (!D) return;
     for (let i = 0; i < D.length; i++) {
       if (!PLANTS[D[i][0]]) continue;
@@ -61,7 +61,7 @@ export async function create(host) {
     for (let j = cy - r; j <= cy + r; j++) for (let i = cx - r; i <= cx + r; i++) {
       const L = cells.get(key(i, j)); if (!L) continue;
       for (let k = 0; k < L.length; k++) {
-        const n = L[k]; if (picked.has(n) || asked.has(n)) continue;
+        const n = L[k]; if (picked.has(n) || asked.has(n) || off.has(n)) continue;
         const dx = D[n][1] - x, dy = D[n][2] - y, d0 = Math.hypot(dx, dy), d = d0 - radius(n);
         if (d > reach || d >= bd) continue;
         if ((fx || fy) && d > .25 && (dx * fx + dy * fy) / (d0 || 1) < .25) continue;
@@ -90,6 +90,7 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- the sim's state
   const picked = new Map();   // decor index -> the world hour it grows back (co-op: 1, the server keeps the clock)
+  const off = new Set(); let offSeason = '';   // patches out of their season (PLANTS season: the cloudberries outside summer): picked-looking, not pickable
   const asked = new Map();    // co-op: a patch whose pick was asked of the server -> when (clockT): asked again after 3 s
   const S = {i: -1, t: 0};    // the pick under way: its patch, s into it
   let ver = 0, clockT = 0, growT = 0, wasOn = false, wasOnline = false, restored = false, rainWas = false, byE = false, wantI = -1, lmbI = -1;
@@ -113,7 +114,7 @@ export async function create(host) {
   function got(i, n) {
     const P = PLANTS[D[i][0]], at = {x: D[i][1], y: D[i][2], h: host.elev(D[i][1], D[i][2]) + .5};
     if (n > 0) pack()?.give(P.item, n, at);
-    pack()?.gain('foraging', P.xp, at);
+    pack()?.gain(P.skill || 'foraging', P.xp, at);
     evAt('forage.pick', i, n, true);
   }
   function setPicked(i, at) { picked.set(i, at); save(i, at); ver++; }
@@ -155,8 +156,9 @@ export async function create(host) {
     if (DC !== shownOn) { shownOn = DC; shown.clear(); shownVer = -1; }   // (a rebuilt world: nothing picked on it yet)
     if (!DC || ver === shownVer) return;
     shownVer = ver;
-    for (const i of shown) if (!picked.has(i)) { DC.setPicked(i, false); shown.delete(i); }
+    for (const i of shown) if (!picked.has(i) && !off.has(i)) { DC.setPicked(i, false); shown.delete(i); }
     for (const i of picked.keys()) if (!shown.has(i)) { DC.setPicked(i, true); shown.add(i); }
+    for (const i of off) if (!shown.has(i)) { DC.setPicked(i, true); shown.add(i); }
   }
 
   const F = {
@@ -180,13 +182,14 @@ export async function create(host) {
       if (S.i < 0 && free()) {
         const P = host.player;
         let i = wantI >= 0 ? wantI : lmbI >= 0 ? lmbI : byE ? patchNear(P.x, P.y, P.z, TUNE.walk, 0, 0) : -1;
-        if (i >= 0 && (picked.has(i) || asked.has(i))) i = -1;
+        if (i >= 0 && (picked.has(i) || asked.has(i) || off.has(i))) i = -1;
         if (i >= 0) start(i);
       }
       wantI = lmbI = -1;
       // regrowth (offline: the world clock; the server grows them in co-op), once a second
       if ((growT += dt) >= 1) {
         growT = 0;
+        const sn = host.env?.season || ''; if (sn !== offSeason) { offSeason = sn; off.clear(); if (D) for (let i = 0; i < D.length; i++) { const q = PLANTS[D[i][0]]; if (q?.season && q.season !== sn) off.add(i); } ver++; }
         const rain = (host.env?.sky?.rain ?? 0) > RAIN, rained = rain && !rainWas; rainWas = rain;
         if (!ol && picked.size) { const t = host.env?.t ?? 0; for (const [i, at] of picked) if (t >= at || (rained && PLANTS[D[i][0]].rain)) grow(i); }
       }

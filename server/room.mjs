@@ -28,6 +28,8 @@ import {TUNE as TH, STRIKE, ironOf} from '../src/content/thunder.js';
 import {createThunder, nextSpring} from '../src/sim/thunder.js';
 import {TUNE as ICE} from '../src/content/ice.js';
 import {createLake, thickAt, refreezeAt} from '../src/sim/ice.js';
+import {TUNE as MIRE} from '../src/content/mire.js';
+import {nightOf, createWisps} from '../src/sim/mire.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
@@ -112,6 +114,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
     if (a === 'ignite' || a === 'wood') return thunderAct(p, a, id, deny);
     if (a === 'hole') return iceHole(p, m, deny);
+    if (a === 'dig') return mireDig(p, id, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -138,6 +141,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const e = /^d\d+$/.test(id) ? decor[+id.slice(1)] : null; if (!e || !PLANTS[e[0]]) return deny('no such patch');
       if (Math.hypot(e[1] - p.x, e[2] - p.y) > REACH) return deny('too far');
       kind = e[0];
+      if (PLANTS[kind].season && seasonAt(clock(), WXT.seasonDays) !== PLANTS[kind].season) return deny('not in season');   // (the cloudberries: summer)
     } else if (!PLANTS[kind] || !/^d\d+$/.test(id)) return deny('no such patch');
     const lvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0)), notes = levelNotes(SKILLS.foraging.per, lvl);
     for (const g of p.gear) for (const q of GEAR_BY_ID[g]?.mods || []) notes.push(q);
@@ -301,6 +305,21 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     if (n >= ICE.hole.max) { let o = null, oa = Infinity; for (const [id, e] of world) if (id[0] === 'i' && e.at < oa) { oa = e.at; o = id; } world.delete(o); all({k: 'world', id: o, s: 'grown'}); }
     const id = 'i' + (++holeN), e = {s: 'hole', x: +x.toFixed(2), y: +y.toFixed(2), r: m.b ? ICE.hole.breakR : ICE.hole.r, at: +refreezeAt(clock(), WXT.seasonDays).toFixed(3)};
     world.set(id, e); all({k: 'world', id, ...e, by: p.id}); log(`  ${p.name} ${m.b ? 'went through the ice' : 'cut a hole in the ice'} (${id})`);
+  }
+
+  // THE MIRE (docs/MIRE.md): a dig at the night's find ({a: 'dig', id: 'w' + the night}). The night must be tonight's (or,
+  // for ?wisps=often, today's), the digger within reach of where its true wisp stopped (sim/mire.js: the seed's, nothing kept but
+  // who dug), once a night each; everyone is told ({k: 'world', id, s: 'dug', by}) and the digger takes the find
+  const wisps = forest?.mire ? createWisps(seed >>> 0, forest.mire) : null, dugBy = new Set();
+  function mireDig(p, id, deny) {
+    if (!wisps) return deny('no mire');
+    const n = /^w\d+$/.test(id) ? +id.slice(1) : -1, h = clock();
+    if (n < 0 || (n !== nightOf(h) && n !== nightOf(h, true))) return deny('not tonight');
+    const N = wisps.night(n), k = n + ':' + p.name;
+    if (Math.hypot(N.find[0] - p.x, N.find[1] - p.y) > MIRE.wisps.reach + 1) return deny('too far');
+    if (dugBy.has(k)) return deny('dug');
+    dugBy.add(k); if (dugBy.size > 512) dugBy.clear();
+    all({k: 'world', id, s: 'dug', by: p.id}); log(`  ${p.name} dug up the mire's find (${N.kind}, night ${n})`);
   }
 
   // GEAR (docs/GEAR.md): what a player wears is the server's to say. It takes the set (known pieces, one a slot:

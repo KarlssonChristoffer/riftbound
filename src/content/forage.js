@@ -3,7 +3,9 @@
 // co-op server, the plan is a pure function of the seed). Pure data and pure functions: the browser (features/forage.js) and
 // the co-op server (server/room.mjs: it rolls a pick's yield and keeps the picked patches) read this one file.
 //   PLANTS    recipe -> item (content/items.js), n [min, max] a pick, days (in-game) until it grows back, r (m round its root
-//             at scale 1: the patch's size; x its decor scale s), berry (the berry comb's), rain (back at the next rain too), xp
+//             at scale 1: the patch's size; x its decor scale s), berry (the berry comb's), rain (back at the next rain too), xp,
+//             season (only then: out of it the patch looks picked and can't be), skill (whose XP: foraging unless named). The
+//             mire's two (world/mire.js, docs/MIRE.md) come last in the decor: cloudberries (summer), bog iron (Mining's)
 //   TUNE      reach (m past the patch's edge E and LMB pick from), walk (m: held E picks a patch he passes this close), crouch (s
 //             he crouches a pick), pluck (s into the crouch: the pick lands), day (hours an in-game day)
 //   pickYield(R, kind, st) -> n: a roll of the plant's n, + 1 at st.extra's chance (Foraging), + st.comb on berries
@@ -15,6 +17,8 @@ export const PLANTS = {
   lingonberry:  {item: 'lingonberries', n: [4, 7], days: 2, r: .5,  berry: true, xp: 3},
   chanterelles: {item: 'chanterelles',  n: [2, 4], days: 3, r: .3,  rain: true,  xp: 5},
   fly_agaric:   {item: 'fly_agaric',    n: [1, 1], days: 1, r: .3,  xp: 4},
+  cloudberry:   {item: 'cloudberries',  n: [2, 4], days: 2, r: .45, berry: true, xp: 4, season: 'summer'},
+  bog_iron:     {item: 'bog_iron',      n: [1, 2], days: 3, r: .3,  xp: 5, skill: 'mining'},
 };
 export const TUNE = {reach: .9, walk: .6, crouch: .5, pluck: .22, day: 24};
 

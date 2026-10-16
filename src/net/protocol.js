@@ -13,7 +13,8 @@
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
 //            dawn | day | dusk | night: dev, the world's clock to the next such hour), 'ignite' (id: a tree he touched a burning
 //            brand to: ?firestart=1, docs/WEATHER.md), 'wood' (id: a struck tree whose splinter of thunderwood he took), 'hole' ({x, y, b}: a hole
-//            in the lake ice: a pick's or an axe's last blow, b 1: he went through; docs/WINTER.md)
+//            in the lake ice: a pick's or an axe's last blow, b 1: he went through; docs/WINTER.md), 'dig' (id: 'w' + the night: he dug at the
+//            night's find where the true wisp stopped, docs/MIRE.md)
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
@@ -32,7 +33,8 @@
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
 //   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it. A tree the
 //            lightning struck: id 'z' + its fid, s 'burning' {t0, t1 (s of the server's clock), tw} | 'charred' {at (the hour it's whole
-//            again: the next spring), tw (1: a splinter of thunderwood at its foot)} | 'grown'. A hole in the lake ice: id 'i' + n, s 'hole' {x, y, r, at (the hour it's frozen over)}
+//            again: the next spring), tw (1: a splinter of thunderwood at its foot)} | 'grown'. A hole in the lake ice: id 'i' + n, s 'hole' {x, y, r, at (the hour it's frozen over)}.
+//            A dig at the mire's find: id 'w' + the night, s 'dug', by (the digger gets the night's find: content/mire.js findOf; not kept)
 //   bolt     {a: 'mark', n, kind, id, x, y, h, tele}     natural lightning (docs/WEATHER.md; the server aims it in a storm): bolt n will
 //            strike (x, y) at height h in tele s (kind: tree | tor | ground | player, id: the tree's fid or the player's id).
 //            {a: 'strike', n, kind, id, x, y, h}: it struck (a player under it hurts himself: where he stands now)

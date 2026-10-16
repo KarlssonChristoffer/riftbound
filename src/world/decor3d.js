@@ -19,7 +19,7 @@ const CASTS = {stump: true, log: true, windthrow: true};
 // the windthrow's solids (forest.js F.decorSolid, layout.js): how high they stop arrows, a body (world.js PROP_TOP)
 const TOPS = {rootplate: 1.5, windlog: .9};   // (the plate sits half in the ground it tore from)
 // how a picked one looks (features/forage.js): 'bare' its variant with picked: 1 (the twigs, no berries), 'gone' not drawn
-const PICKED = {blueberry: 'bare', lingonberry: 'bare', chanterelles: 'gone', fly_agaric: 'gone'};
+const PICKED = {blueberry: 'bare', lingonberry: 'bare', chanterelles: 'gone', fly_agaric: 'gone', cloudberry: 'bare', bog_iron: 'gone'};
 const CELL = 32;   // (m: 16 -> ~25 draws in a view, 32 -> ~21, 48 -> ~20 but spheres round half the forest's depth)
 const shapes = new Map();   // key -> geometry with flora's attributes (shares the recipe's cached ones), its .pad = its reach (m)
 
