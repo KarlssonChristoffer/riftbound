@@ -42,7 +42,7 @@
 //   the look's.
 import {SESSION} from '../core/session.js';
 import {flags} from '../core/flags.js';
-import {TICK_HZ, packPose} from '../net/protocol.js';
+import {TICK_HZ, packPose, worldFlags} from '../net/protocol.js';
 import {wsTransport} from '../net/transport.js';
 import {createNetClient, b64} from '../net/client.js';
 import {createPeerLook} from './coop/look.js';
@@ -53,7 +53,7 @@ export const order = {after: ['equip', 'combat']};
 export async function create(host) {
   if (!SESSION.mp) return SESSION.error ? offline(host) : {name: 'coop', on: false, online: false, act: () => false, tag() {}};
   let name = flags.get('name') || ''; try { name ||= localStorage.getItem('rb.coop.name') || ''; } catch {}
-  const C = createNetClient({transport: wsTransport(SESSION.ws), name, hello: () => ({key: playerKey(), xp: host.feature('pack')?.skills?.toJSON() || {}, made: host.feature('workshop')?.records?.() || []})});
+  const C = createNetClient({transport: wsTransport(SESSION.ws), name, hello: () => ({wf: worldFlags(k => flags.get(k)), key: playerKey(), xp: host.feature('pack')?.skills?.toJSON() || {}, made: host.feature('workshop')?.records?.() || []})});
   const look = createPeerLook(host, C);
   const msgs = [], mail = [], WH = Math.PI * 2;
   // THE CLOCK: the server's last word {t: its ms, h, rate}; the page's env follows it

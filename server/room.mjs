@@ -109,9 +109,14 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const animals = createAnimals({world, all, send: (p, m) => p.conn.send(encode(m)), log: (...a) => log(...a), now, clock, plan: fauna, thief, players: () => peers.values(),
     fires: () => { const sec = now() / 1000, out = []; for (const e of world.values()) if (e.s === 'built' && BUILDS[e.kind]?.fire && fuelAt(e, sec) > 0) out.push(e); return out; }});   // (the fox: server/animals.mjs, sim/foxden.js)
 
+  let roomWf = '';   // (the room's world switches: hello)
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
     if (num(m.v) !== VERSION) { conn.send(encode({k: 'deny', a: 'join', why: 'version ' + VERSION})); conn.close(1002, 'version'); return null; }
+    // the world's switches (protocol.js WORLD_FLAGS): the first in an empty room sets them; a join that builds another world is turned away
+    const wf = str(m.wf, 200);
+    if (!peers.size) roomWf = wf;
+    else if (wf !== roomWf) { conn.send(encode({k: 'deny', a: 'join', why: `this world is built with ${roomWf ? '?' + roomWf : 'no switches'}, yours with ${wf ? '?' + wf : 'none'}: open the same address`})); conn.close(1008, 'world flags'); return null; }
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
     const {rec} = PL.join(KEY_RE.test(m.key) ? m.key : '#' + id, m.xp);   // (no key: a record for this connection alone; the workshop's fallback too)
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null, an: null, sc: '',
