@@ -92,6 +92,7 @@ export async function create(host) {
     },
     frame() { panel?.frame(); },
     get open() { return !!panel?.open; },   // the panel is up (features/gear.js shows its panel beside it)
+    close() { if (panel?.open) panel.toggle(); },   // (features/meals.js: a dish goes on the stick, the panel goes)
     onKey(k, e) {
       if (!ON || k !== 'tab' || e?.shiftKey || host.lock) return false;   // (Shift+Tab: dev/wardrobe.js)
       panel.toggle(); return true;

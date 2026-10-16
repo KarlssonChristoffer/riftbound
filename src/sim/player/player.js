@@ -1040,6 +1040,7 @@ export function createPlayer(H) {
   // RMB (core/input.js): the right hand while the fists are up -> true: taken (else RMB is an ability's)
   const pressR = () => !!fists?.press('R'), releaseR = () => !!fists?.release('R');
   function hold(frame, sec) { if (BUSY.has(P.state) || dodging()) return; P.hold = {frame: A.SP[frame] ? frame : 'release.0', sec}; P.state = 'hold'; P.t = 0; }
+  function unhold() { if (P.state === 'hold') { P.state = 'idle'; P.t = 0; } }   // (a held pose let go early: features/cooking.js's stick pulled out)
   function knock(vx, vy) { if (P.state === 'climb' || THROWN.includes(P.state)) return; P.vx = vx * KNOCKK; P.vy = vy * KNOCKK; P.state = 'knock'; P.t = 0; }   // (thrown: a skid doesn't cut the flight short)
 
   // ---------------- HD bow layer (display resolution, over the pixel art) ----------------
@@ -1249,5 +1250,5 @@ export function createPlayer(H) {
   const flicker = sec => { P.blink = sec; };
   const regrid = (n0, n1) => { P.face = Math.round(P.face * n1 / n0) % n1; P.want = P.face; };
   return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, tryVault, canVault, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, useE, faceShot, flicker, regrid,
-    press, release, pressR, releaseR, hold, knock, launch: thrown.start, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
+    press, release, pressR, releaseR, hold, unhold, knock, launch: thrown.start, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
 }

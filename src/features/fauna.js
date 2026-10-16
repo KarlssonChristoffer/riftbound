@@ -48,6 +48,7 @@ export const TUNE = {
   touch: 1.5,             // m: an animal that hasn't noticed you, this near: E touches it (it leaps and bolts)
   elk: 1.8,               // the uncanny forest's elk at night (features/uncanny.js) counts as someone this loud: everything gives it room
   watcher: 18,            // m: animals this near the watcher (features/watcher.js) stop and stare at it while it is up
+  still: 40,              // m: animals this near him stop and stare at him while the still lasts (features/trip.js: the burnt broth)
   // the birds in the crowns (fauna/crowns.js): the share of trees holding some (by day: hours), the chopped tree's own share; m a
   // shot / a chop / a tree falling / a break / a blast reaches; at most this many crowns empty at one noise; s a tree stays empty
   crown: {chance: .1, own: .5, hours: [4.5, 21.5], shot: 30, chop: 12, fell: 20, brk: 8, blast: 25, max: 2, cd: 240, pigeon: .25},
@@ -437,6 +438,15 @@ export async function create(host) {
       else if (calm(a)) stareAt(a, w.x, w.y, .4);
     }
   }
+  // the still (features/trip.js F.still: the burnt fly agaric broth): every animal within TUNE.still m stops and stares at him
+  function stillStares() {
+    if (!host.feature('trip')?.still) return;
+    const P = host.player;
+    for (const a of ANIM) {
+      if (a.gone || a.odd || a.h > 0 || Math.hypot(a.x - P.x, a.y - P.y) > TUNE.still) continue;
+      if (a.st === 'stare' && a.sx === P.x && a.sy === P.y) a.t = Math.max(a.t, .4); else stareAt(a, P.x, P.y, .4);
+    }
+  }
   // the strange: now and then at dusk or dawn a whole herd, far off, turns as one and stares at you; a few seconds, then back to it
   function herdStares(hr) {
     if (!((hr > 16 && hr < 23.5) || (hr > 3.5 && hr < 7))) return;
@@ -531,7 +541,7 @@ export async function create(host) {
       else a.z += (elev(a.x, a.y) - a.z) * Math.min(1, dt * 4);
     }
     crowns.events(evs); crowns.step(dt);
-    watcherStares(); oddHare(dt, hr);
+    watcherStares(); stillStares(); oddHare(dt, hr);
     if ((oddAcc += dt) >= 1) { oddAcc -= 1; herdStares(hr); }
     findTouch();
     F.count = n;

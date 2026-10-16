@@ -5,13 +5,16 @@
 // everyone online), when the wood is gone it glows as embers for def.fire.embers s, then it is cold. The flames are lights.js's
 // (F.flame, as the gadgets' fire pools borrow them), the light its own. Two kinds burn: the campfire and the Stone Fire Ring.
 // OWNS: the fires' light records. READS: builds (the list, fire(), stoke()), pack (logs), lights (F.flame).
-// API: burningNear(x, y, r) (features/meals.js cooks at a burning fire), F.fires (the burning kinds' builds, live).
+// API: burningNear(x, y, r) (features/meals.js cooks at a burning fire), burningAt(x, y, r) -> the nearest burning one | null
+//   (features/cooking.js: its stick), F.fires (the burning kinds' builds, live). A cook.flare (the stick's just-right moment) makes
+//   the fire under it flare up for FLARE.s s (view).
 // BUDGET: sim: nothing. View: a flame and a light a burning fire a frame.
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
 
 const ON = flags.get('campfires') !== '0';
 const MOST = 32;   // fire light records kept (the nearest first is lighting's; past this they are dropped)
+const FLARE = {s: .7, size: .6, light: .5};   // a flare (cook.flare): s long, x(1 + this) on the flame's size and the light
 
 // ORDER (core/features.js): after the builds (its list), before lights (its flames are drawn through lights.js F.flame within the frame)
 export const order = {after: ['builds'], before: ['lights']};
@@ -32,6 +35,8 @@ export async function create(host) {
     return fires;
   }
   const fireOf = p => p.build ? builds()?.list.get(p.build) : null;
+  const flares = new Map();   // a build -> s of flare left (view)
+  const flareK = b => { const s = flares.get(b); return s ? s / FLARE.s : 0; };
 
   const F = {
     name: 'campfires', label: 'Campfires', on: ON,
@@ -53,7 +58,8 @@ export async function create(host) {
       const L = host.feature('lights'), flames = L?.on !== false && L?.flame ? L : null, B = builds(); if (!flames || !B) return;
       for (const b of sync()) {
         const f = B.fire(b), D = b.def.fire, k = clamp(f.fuel / (D.log * 2.2), 0, 1.1), big = b.kind === 'fire_ring' ? 1.25 : 1;
-        if (f.fuel > 0) flames.flame(b.p, 'camp', '#ffa040', b.x, b.y + .01, b.z + .1, big, .88 * (.3 + .7 * k), .42 + .58 * k);
+        const fl = 1 + FLARE.size * flareK(b);
+        if (f.fuel > 0) flames.flame(b.p, 'camp', '#ffa040', b.x, b.y + .01, b.z + .1, big * fl, .88 * (.3 + .7 * k), (.42 + .58 * k) * fl);
       }
     },
     lights() {   // (the records reused: one per fire, no allocation a frame)
@@ -65,7 +71,7 @@ export async function create(host) {
         const f = B.fire(b), D = b.def.fire, k = clamp(f.fuel / (D.log * 2.2), 0, 1.1), e = f.fuel > 0 ? 0 : f.ember / D.embers, r = LREC[i];
         if (f.fuel <= 0 && e <= 0) continue;
         r.x = b.x; r.y = b.y; r.id = 9810 + i; i++;
-        if (f.fuel > 0) { r.h = b.z + .3 + .45 * Math.min(1, k); r.color = '#ffa048'; r.radius = D.light * (.6 + .4 * k); r.intensity = 1.25 * (.28 + .72 * k); r.flicker = .55; }
+        if (f.fuel > 0) { const fl = 1 + FLARE.light * flareK(b); r.h = b.z + .3 + .45 * Math.min(1, k); r.color = '#ffa048'; r.radius = D.light * (.6 + .4 * k) * fl; r.intensity = 1.25 * (.28 + .72 * k) * fl; r.flicker = .55; }
         else { r.h = b.z + .15; r.color = '#ff5a20'; r.radius = 2.2; r.intensity = .5 * e; r.flicker = .25; }
         LOUT.push(r);
       }
@@ -74,6 +80,11 @@ export async function create(host) {
     hud: () => { const B = builds(); return active() && B && sync().length ? 'campfires ' + fires.map(b => { const f = B.fire(b); return f.fuel > 0 ? Math.round(f.fuel) + 's' : f.ember > 0 ? 'embers' : 'cold'; }).join(' ') : ''; },
     // a fire burning within r m of (x, y)? (features/meals.js: cooking needs one)
     burningNear(x, y, r) { const B = builds(); if (!B) return false; for (const b of sync()) if (Math.hypot(b.x - x, b.y - y) <= r && B.fire(b).fuel > 0) return true; return false; },
+    burningAt(x, y, r) { const B = builds(); if (!B) return null; let best = null, bd = r; for (const b of sync()) { const d = Math.hypot(b.x - x, b.y - y); if (d <= bd && B.fire(b).fuel > 0) { bd = d; best = b; } } return best; },
+    view(dt, evs) {   // the flares: a cook.flare makes the fire under it flare up, then it settles
+      if (evs) for (const e of evs) if (e.type === 'cook.flare') { const b = F.burningAt(e.x, e.y, 1); if (b) flares.set(b, FLARE.s); }
+      for (const [b, s] of flares) { if (s - dt <= 0) flares.delete(b); else flares.set(b, s - dt); }
+    },
   };
   return F;
 }

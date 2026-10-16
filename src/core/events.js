@@ -207,6 +207,11 @@ export const EVENTS = {
   'pack.add':           ['features/pack.js',      'x, y, id (content/items.js), n: things went into the pouch or the bag', 'audio'],
   'pack.reset':         ['features/pack.js',      '(none): a new world (the Sandbox menu): the pack and every system\'s saved part cleared', 'woodcut'],
   'skill.level':        ['features/pack.js',      'x, y (the player), skill (content/skills.js), level: a skill reached a new level', 'audio'],
+  'cook.start':         ['features/cooking.js',   'x, y (the fire), id (the dish): it goes on the stick over the flames', 'audio'],
+  'cook.sizzle':        ['features/cooking.js',   'x, y, k (s on the stick / its cook.t: the sizzle climbs with it)', 'audio'],
+  'cook.flare':         ['features/cooking.js',   'x, y, id: the just-right moment (fat drips, the fire flares)', 'campfires (view: the flare), audio'],
+  'cook.pull':          ['features/cooking.js',   'x, y, id, q (raw | done | right | burnt): pulled out of the fire (meals eats it: meal.cook)', 'audio'],
+  'cook.drop':          ['features/cooking.js',   'x, y, id: left on too long, it fell into the fire', 'audio'],
   'meal.cook':          ['features/meals.js',     'x, y, id (content/meals.js), q (raw | done | right | burnt: features/cooking.js\'s stick): a meal cooked by a campfire and eaten: its mood starts', 'audio'],
   // foraging (features/forage.js, docs/FORAGING.md): a patch is the forest floor's (world/forest.js F.decor index i)
   'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],
@@ -228,7 +233,7 @@ export const EVENTS = {
   'build.add':          ['features/builds.js',    'x, y, id, kind (content/builds.js), mine: a build went down (his, or online a friend\'s)', 'audio'],
   'build.remove':       ['features/builds.js',    'x, y, id, kind: a build was taken back', '(none yet)'],
   // the fly agaric broth (features/trip.js)
-  'trip.start':         ['features/trip.js',      'x, y, t (s): he drank the fly agaric broth', '(none yet)'],
+  'trip.start':         ['features/trip.js',      'x, y, t (s), still (the burnt broth: the world holds its breath): he drank the fly agaric broth', '(none yet)'],
   'trip.end':           ['features/trip.js',      'x, y: the trip has worn off', '(none yet)'],
   // woodcutting (sim/player/tool.js the swing, features/woodcut.js what it meets); who = the tree prop
   'player.chop':        ['sim/player/tool.js',    'x, y, z, vx, vy (unit: the blow\'s way), tool (content/items.js): a tool\'s swing lands', 'woodcut'],
