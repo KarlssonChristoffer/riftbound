@@ -462,7 +462,7 @@ export function createCore(host) {
   }
   function fire(A, off, v, o) {
     const ang = Math.atan2(A.dx, A.dy) + off, fx = Math.sin(ang), fy = Math.cos(ang), h0 = P.z + 1.25, t = A.d / v;
-    const vh = A.c.target || Math.abs(A.c.h - h0) > .5 ? clamp((A.c.h - h0) / t + .45 * t, -12, 8) : 0;   // same ballistics as shoot()
+    const vh = A.c.target || A.c.ray || Math.abs(A.c.h - h0) > .5 ? clamp((A.c.h - h0) / t + .45 * t, -12, 8) : 0;   // same ballistics as shoot()
     host.spawnArrow({x: P.x + fx * .35, y: P.y + fy * .35, h: h0, vx: fx * v, vy: fy * v, vh, life: 1.6, ...o});
   }
   const BUSYISH = new Set(['roll', 'leap', 'fall', 'land', 'climb', 'splash', 'swim', 'knock', 'hold']);

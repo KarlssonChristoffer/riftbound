@@ -63,6 +63,12 @@ await run('climb at an angle (E: the camera eases round to face the wall, climbs
   ${key('e').replace(/`/g, '\`')} R.step(240); window.__climb = {z: R.P.z, yaw: R.yaw, state: R.P.state}; });`, 1500);
 console.log('     after the climb:', JSON.stringify(await ev('window.__climb')));
 await run('camera turn (X)', 'window.__r3d.keys.add("x");' + step(40) + 'window.__r3d.keys.delete("x");' + step(5));
+await run('first person play (the look aims, he faces it, a shot, E, back)', `const R = window.__r3d, c = R.host.feature('chasecam'); c.setView('1p'); ` + step(10) +
+  `c.setLook(-25); ` + step(4) + `const a = R.host.aim(); if (!a.ray) throw new Error('first person: the aim is not the look');
+  if (c.look.ground && Math.abs(Math.hypot(a.x - R.host.player.x, a.y - R.host.player.y) - c.look.t * Math.cos(25 * Math.PI / 180)) > .6) throw new Error('first person: the aim is not where the look meets the ground');
+  R.keys.add('d'); ` + step(20) + `R.keys.delete('d'); const f = ((R.host.player.faceAngle - R.yaw) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  if (Math.abs(f - Math.PI) > .05) throw new Error('first person: strafing turned him (' + f.toFixed(2) + ')');
+  R.host.PL.press(); ` + step(30) + `R.host.PL.release(); ` + step(20) + key('e') + step(10) + `c.setView(''); ` + step(5) + `if (R.G.cine) throw new Error('first person left on');`);
 await run('camera views (F6: third person, first person, back)', Array(3).fill(key('F6') + step(15)).join('') + `if (window.__r3d.G.cine) throw new Error('F6 x3 left a camera view on');`);
 await size(2560, 1080); await run('ultrawide resize', 'window.dispatchEvent(new Event("resize"));' + step(20));
 await size(1920, 1080); await run('back to 16:9', 'window.dispatchEvent(new Event("resize"));' + step(20));

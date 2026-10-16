@@ -131,9 +131,10 @@ export function createEquipSim(host) {
   function target(G, A) {
     const a = host.aim();
     // the ground under the cursor: host.aim reads the cursor as a point at chest height (the bow's aim) unless it is over a
-    // target; the ground there is that much further up the screen (along the camera's view, away from it)
+    // target; the ground there is that much further up the screen (along the camera's view, away from it). A first person look's
+    // point (a.ray, features/chasecam.js) is where it is
     let gx = a.x, gy = a.y;
-    if (!a.target) { const k = (a.h - host.elev(a.x, a.y)) * host.PPMH / host.PPMY; gx -= Math.sin(host.yaw) * k; gy -= Math.cos(host.yaw) * k; }
+    if (!a.target && !a.ray) { const k = (a.h - host.elev(a.x, a.y)) * host.PPMH / host.PPMY; gx -= Math.sin(host.yaw) * k; gy -= Math.cos(host.yaw) * k; }
     let dx = gx - P.x, dy = gy - P.y, d = hypot2(dx, dy);
     if (d < .05) { const f = P.faceAngle; dx = Math.sin(f); dy = Math.cos(f); d = 1; } else { dx /= d; dy /= d; }
     d = clamp(d, THROW.minD, G.range);

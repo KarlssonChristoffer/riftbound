@@ -34,7 +34,7 @@ export function createLoop(E) {
   // the 'sim.speed' note x host.timeScale (the cheat panel's game speed: dev/cheats.js), read when the notes change
   let simSpeed = 1; if (host.mods) { const f = () => { simSpeed = host.mods.value('sim.speed', 1); }; host.mods.watch(f); f(); }
   let hovIt = null;         // the world item with the hover pulse on (the aimed target)
-  let views3 = null;        // the camera views (features/chasecam.js): first person hides his body (hidesBody)
+  let views3 = null;        // the camera views (features/chasecam.js): first person hides his body (hidesBody); the cursor at its crosshair (cursor)
   const bodyHidden = () => !!(views3 ??= E.feat('chasecam'))?.hidesBody;
   const frameEvs = [];      // every event of this frame's sim steps, for the views
   // ONE fixed sim step
@@ -91,6 +91,7 @@ export function createLoop(E) {
     const PX = player.x, PY = player.y;
     cv.follow(lastDt, PX, PY, P, cam);   // the camera eases after him (render/camera.js)
     input.remap?.();   // (the cursor on the image as the sub-pixel camera slid it this frame: what the next steps aim at)
+    (views3 ??= E.feat('chasecam'))?.cursor?.();   // (a camera view's: its crosshair, before the hover and his arm read it)
     if (!views) return;   // (the camera follows without views too: it's the frame the cursor is read in, the sim's input)
     // the Ranger: sprite (+ runtime cloak) + pixel bow, albedo and normals, sinking when he falls in (view/hero.js); or,
     // with ?live=1 and the live hero on, his live 3D body (view/livehero.js)
