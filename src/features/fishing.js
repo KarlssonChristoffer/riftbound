@@ -161,7 +161,7 @@ export async function create(host) {
     S.phase = 'wait'; S.t = 0; S.nib = 0; S.lastNib = -9; S.r = null; S.askT = 0;
     const c = coop(), st = stats(), rain = (host.env?.sky?.rain ?? 0) > .3;
     if (c) { S.local = false; c.fish({a: 'cast', n: S.n, x: +S.tx.toFixed(2), y: +S.ty.toFixed(2), w: S.water, deep: +S.deep.toFixed(2), rain, perfect: S.perfect, lvl: pack()?.level('fishing') || 1,
-      spot: S.spot >= 0, bait: S.bait, meal: host.feature('meals')?.id || ''}); }
+      spot: S.spot >= 0, bait: S.bait, meal: host.feature('meals')?.code || ''}); }   // (the meal's code: content/meals.js, a burnt one has no numbers)
     else { S.local = true; S.r = rollHere(st, rain); }
   }
   function rollHere(st, rain) {
