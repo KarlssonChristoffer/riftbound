@@ -233,13 +233,13 @@ export async function create(host) {
     }
     hp.delete(p); fell(p, I, ux, uy);
   }
-  function fell(p, I, ux, uy, xp = true, fall = true) {
+  function fell(p, I, ux, uy, xp = true, fall = true, mine = true) {
     const at = (host.env?.t ?? 0) + TUNE.regrow.hours;
     fellNow(p, I, at);
     const s = store(); if (s) { s.felled[keyOf(p)] = at; pack()?.dirty(); }
     if (fall) {
       falls.push({p, I, t: 0, dx: ux, dy: uy, landed: false});
-      host.events.push({type: 'tree.fell', x: p.x, y: p.y, who: p, vx: ux, vy: uy, species: I.species, scale: I.s});
+      host.events.push({type: 'tree.fell', x: p.x, y: p.y, who: p, vx: ux, vy: uy, species: I.species, scale: I.s, mine});
     }
     if (xp) pack()?.gain('woodcutting', Math.round(XP.fell * I.def.xp * I.s), {x: p.x, y: p.y, h: (p.z || 0) + 2.6});
   }
@@ -251,9 +251,9 @@ export async function create(host) {
     if (felled.has(p)) return true;
     const I = infoOf(p); if (!I) return false;
     asked.delete(p); hp.delete(p);
-    if (wx !== undefined && Math.hypot(wx, wy) > .5) { fell(p, I, wx, wy, false, !late); return true; }
+    if (wx !== undefined && Math.hypot(wx, wy) > .5) { fell(p, I, wx, wy, false, !late, mine); return true; }
     const P = host.player, ox = fx ?? P.x, oy = fy ?? P.y, d = Math.hypot(p.x - ox, p.y - oy) || 1;
-    fell(p, I, (p.x - ox) / d, (p.y - oy) / d, false, !late);
+    fell(p, I, (p.x - ox) / d, (p.y - oy) / d, false, !late, mine);
     return true;
   }
   const crownMid = I => { const C = I.pose.crown; return C ? ((C.y0 + C.y1) / 2) * I.s : 3 * I.s; };
