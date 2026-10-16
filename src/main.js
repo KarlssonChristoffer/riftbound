@@ -82,6 +82,7 @@ import {createGunFeel} from './dev/gunfeel.js';   // the gun feel panel (F8): li
 import {createWxPanel} from './dev/wxpanel.js';   // the weather panel (F9): a change of the weather and the god rays' envelope, read out (wx-D)
 import {createMoveFeel} from './dev/movefeel.js';   // the move feel panel (F7): run / sprint speed, get going / stopping, the strides, as modifier notes
 import {createWardrobe} from './dev/wardrobe.js';   // the dev wardrobe (Shift+Tab): the character's clothes, paint, stats, items, outfits
+import {createDevMenu} from './dev/devmenu.js';   // the dev menu (F10): every feature's toggles, settings and test actions, a page each
 import {loadFeatures} from './core/features.js';
 import {createInput} from './core/input.js';
 import {createLoop} from './core/loop.js';
@@ -247,6 +248,7 @@ features.push(createWxPanel({host}));   // (dev/wxpanel.js: F9 in dev mode; wx-D
 features.push(createMoveFeel({host, atlas: hero.atlas}));   // (dev/movefeel.js: F7 in dev mode)
 features.push(createWardrobe({host, hero, live, engine: () => E}));   // (dev/wardrobe.js: Shift+Tab in dev mode; a screen of its own: loop.hold)
 if (Q.get('lab')) features.push(await import('./dev/assetlab.js').then(m => m.createLab({host})));   // the asset lab (?lab=1: dev/assetlab.js)
+features.push(createDevMenu({host, engine: () => E}));   // (dev/devmenu.js: F10 in dev mode; last, it lists the others)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;
