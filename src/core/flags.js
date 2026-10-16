@@ -137,6 +137,7 @@ export const FLAG_DOCS = {
   nshift: 'the night shift\'s strength (docs/UNCANNY.md): 1 default; 0 no tree or boulder walks; 2 twice as many walk, a little further. Co-op: the server\'s --nshift decides',
   nelk: 'how often the night elk hunts (docs/UNCANNY.md): 1 default; 2 twice as often (half the rest after a knock); 0 never (it walks its way and grows wrong, that is all). Offline only: the co-op server runs its own',
   nnotice: 'how far the forest\'s odd things show (docs/UNCANNY.md: the night ring\'s glow and light, the pale marks by lantern light): x1 default',
+  tracks: '0: no footprints or tracks in the forest (features/prints.js; docs/WINTER.md)',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
