@@ -2796,7 +2796,12 @@ void main() {
   let post = null;
   const setPost = p => { post = p || null; };
   const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
+  // HOLD (features/wrongwx.js: the still storm's flash freezes the world): hold(ms) keeps the last drawn image on the screen
+  // that long (a view pause: the sim runs on); the frame's batches are dropped as a drawn frame's are
+  let holdUntil = 0;
+  function hold(ms) { holdUntil = performance.now() + ms; }
   function render() {
+    if (holdUntil > 0 && performance.now() < holdUntil) { resetBatches(); for (const L of layerList) { L.used = L.gUsed = false; clearArray(L.runs); } lbN = 0; frameNo++; return; }
     const t0 = performance.now(), still = post !== null && post.still;
     if (gDecal) U.decalT.value = imgTex(gDecal);   // (a GPU context's image: used this frame, so it isn't let go)
     if (rflFrame !== frameNo) compU.uRf.value.x = 0;   // (the reflections, clouds and haze show only on frames depth.js set them)
@@ -3053,6 +3058,6 @@ void main() {
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setIce, setPuddles, setPuddleLook, setMire, setMireLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, setFrost, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setIce, setPuddles, setPuddleLook, setMire, setMireLook, hold, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, setFrost, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
 }

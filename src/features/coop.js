@@ -102,11 +102,12 @@ export async function create(host) {
   // sends a blow on a vein ('mine', p: 'v' + its index in the cave's plan, o: {pow, lvl, tier})
   // features/builds.js puts a build down ('build', p: its kind, o: {x, y}), adds a log to a fire ('stoke', p: the build's id) and
   // takes its own lamp back ('unbuild', p: the id); features/thunder.js sets a tree alight with a brand ('ignite', p: its fid) and
-  // takes a struck tree's thunderwood ('wood', p: its fid)
+  // takes a struck tree's thunderwood ('wood', p: its fid); features/wrongwx.js asks about the following cloud ('cloud', p: 'x' +
+  // the event, o: {w: ask | pass | lose, to})
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'ignite' || a === 'wood' || a === 'hole' || a === 'dig') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'ignite' || a === 'wood' || a === 'hole' || a === 'dig' || a === 'cloud') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }

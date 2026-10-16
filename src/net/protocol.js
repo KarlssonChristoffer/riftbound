@@ -14,7 +14,8 @@
 //            dawn | day | dusk | night: dev, the world's clock to the next such hour), 'ignite' (id: a tree he touched a burning
 //            brand to: ?firestart=1, docs/WEATHER.md), 'wood' (id: a struck tree whose splinter of thunderwood he took), 'hole' ({x, y, b}: a hole
 //            in the lake ice: a pick's or an axe's last blow, b 1: he went through; docs/WINTER.md), 'dig' (id: 'w' + the night: he dug at the
-//            night's find where the true wisp stopped, docs/MIRE.md)
+//            night's find where the true wisp stopped, docs/MIRE.md), 'cloud' (id: 'x' + the wrong weather's
+//            event, w: ask | pass | lose, to: a friend's id; the following cloud, docs/WEATHER.md)
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot

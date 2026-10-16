@@ -140,6 +140,7 @@ export const FLAG_DOCS = {
   ice: '1: the forest lake frozen now (mid-winter\'s ice), 0: never frozen (features/ice.js; docs/WINTER.md)',
   mire: '0: the upland mire\'s rules and look off (features/mire.js; the hollow stays: the plan\'s; docs/MIRE.md)',
   wisps: 'often: the mire\'s wisps every night and all day (features/mire.js; docs/MIRE.md)',
+  wrongwx: 'often: a wrong weather every 2 in-game hours, each kind in turn; 0: none (features/wrongwx.js; docs/WEATHER.md)',
   tracks: '0: no footprints or tracks in the forest (features/prints.js; docs/WINTER.md)',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools
