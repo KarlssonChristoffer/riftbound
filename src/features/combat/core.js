@@ -17,7 +17,7 @@
 // Everything else (tuning T, ability table AB, palettes, timings, RNG and its seed) is the arena's.
 
 import {roamable, TERRAIN_ON, steep} from '../../world/world.js';
-import {parkMiller} from '../../core/rng.js';
+import {simRandom, viewRandom} from '../../core/rng.js';
 import {throwOf} from '../../sim/player/launch.js';   // a blast's throw (by how close he stood)
 import {flight, throwBody, stepFlight, feetOf} from '../../sim/bodyfly.js';   // a kicked brute's flight (launch below: docs/exp/brawl.md)
 import {TUNE as BRAWL} from '../../content/brawl.js';
@@ -30,8 +30,8 @@ const SQ = 1;   // the arena's y squash for 2D distances (1.6); round in 3D
 
 export function createCore(host) {
   const P = host.player, events = host.events, ents = host.entities;
-  const R = parkMiller(90210), RR = (a, b) => a + R() * (b - a);   // the SIM's draws (core/rng.js: the arena's generator and seed)
-  const V = parkMiller(31337), VR = (a, b) => a + V() * (b - a);     // presentation's (debris, sparks, number jitter): never the sim's
+  const R = simRandom('combat'), RR = (a, b) => a + R() * (b - a);   // the SIM's draws (core/rng.js: its own generator, a seed of this session's)
+  const V = viewRandom('combat'), VR = (a, b) => a + V() * (b - a);     // presentation's (debris, sparks, number jitter): never the sim's
 
   // ---------------- tuning (the arena's C.T) ----------------
   const T = {
