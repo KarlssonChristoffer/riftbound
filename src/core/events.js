@@ -34,7 +34,7 @@ export const EVENTS = {
   'player.holster':     ['sim/player/gun.js',     'x, y, z, gun (the twirl ends in the holster)', 'audio'],
   'player.melee':       ['sim/player/gun.js',     'x, y, z, vx, vy (unit: the way of the blow), reach (m), arc (deg), dmg, push, gun (the pistol whip lands its blow)', 'gun (lands it through combat: combat.hit by melee)'],
   'player.hit':         ['features/combat/core.js, features/foes/sim.js, sim/hazards.js', 'x, y, vx, vy, player: true (a brute landed on him; a gunman\'s bullet hit him; a hazard went off on him)', 'atmos, wildlife, audio, music'],
-  'player.hurt':        ['features/combat/core.js, features/foes/sim.js, sim/hazards.js, sim/player/launch.js', 'dmg, by (\'slam\': thrown into a wall | the brute | \'blast\' | the gunman | the enemy a hazard or a drain is from), x, y', 'game, battlemusic, affixes (an affix\'s blow: Glacial chills, Vampiric heals), fists (the guard up)'],
+  'player.hurt':        ['features/combat/core.js, features/foes/sim.js, sim/hazards.js, sim/player/launch.js, features/woodcut.js', 'dmg, by (\'slam\': thrown into a wall | the brute | \'blast\' | the gunman | the enemy a hazard or a drain is from | \'tree\': a falling tree), x, y', 'game, battlemusic, affixes (an affix\'s blow: Glacial chills, Vampiric heals), fists (the guard up)'],
   // the desert sandbox's stakes (game/game.js, while features/foes.js says a fight is on)
   'player.down':        ['game/game.js',          'x, y (your health ran out in the desert sandbox: the gang stops shooting)', 'foes'],
   'player.respawn':     ['game/game.js',          'x, y (up again at the fort: the gunmen are gone, the next gang comes later)', 'foes'],
@@ -125,6 +125,7 @@ export const EVENTS = {
   'fish.snap':          ['features/fishing.js', 'x, y (the strain reached full: the line broke)', 'fishing (view), audio'],
   'fish.escape':        ['features/fishing.js', 'x, y (the fish swam off: at the end of the line too long, or he walked off)', 'fishing (view), audio'],
   'fish.leap':          ['features/fishing.js', 'x, y, id (reeled in: it leaps out of the water to him)', 'fishing (view), audio'],
+  'fish.shadow':        ['features/fishing.js',   'x, y (the shadow), a (nose: it comes for the bobber | spook: it bolts), hx, hy (unit: its heading), len (m), cls (content/fishing.js SHADOW): a cast at a fish shadow (Fishing 5, docs/SKILLS.md)', 'fishing (view: it swims in / bolts)'],
   'fish.catch':         ['features/fishing.js', 'x, y, id, cm, kg, n (2: a double), first, record, rarity (it is in the pouch)', 'fishing (view), audio'],
   'fish.away':          ['features/fishing.js', 'x, y (the line comes in empty)', 'audio'],
   'fish.spot':          ['features/fishing.js', 'x, y (the cast fell on a fishing spot: it bites sooner and rarer)', 'audio'],
@@ -204,13 +205,15 @@ export const EVENTS = {
   // the persistent world (docs/GATHERING.md): what the player carries and learns (features/pack.js)
   'pack.add':           ['features/pack.js',      'x, y, id (content/items.js), n: things went into the pouch or the bag', 'audio'],
   'pack.reset':         ['features/pack.js',      '(none): a new world (the Sandbox menu): the pack and every system\'s saved part cleared', 'woodcut'],
-  'skill.level':        ['features/pack.js',      'x, y (the player), skill (content/skills.js), level: a skill reached a new level', 'audio'],
+  'skill.level':        ['features/pack.js',      'x, y (the player), skill (content/skills.js), level, move (the MOVES id it gave, else \'\'): a skill reached a new level', 'audio'],
+  'skill.move':         ['features/pack.js',      'x, y (the player), skill, level, move (content/skills.js MOVES id): a level gave a new move (docs/SKILLS.md)', '(none yet: audio plays it with skill.level)'],
+  'title.earned':       ['features/pack.js',      'x, y (the player), id (content/skills.js TITLES): a title earned (docs/SKILLS.md)', 'audio'],
   'meal.cook':          ['features/meals.js',     'x, y, id (content/meals.js): a meal cooked by a campfire and eaten: its buff starts', 'audio'],
   // foraging (features/forage.js, docs/FORAGING.md): a patch is the forest floor's (world/forest.js F.decor index i)
   'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],
   'forage.grow':        ['features/forage.js',    'x, y, i, kind: a picked patch has grown back', '(none yet)'],
   // mining (features/mining.js, docs/MINING.md): a vein is the cave's (world/caves.js C.veins index i)
-  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow)', 'mining (view: sparks, grit), audio'],
+  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow), chain (Mining 5: the rhythm blows in a row, 0 without the move), crack (the chain cracked it)', 'mining (view: sparks, grit), audio'],
   'mine.spent':         ['features/mining.js',    'x, y, i, kind, n (his chunks; 0: a friend\'s blow spent it): the vein breaks open', 'mining (view: dust), audio'],
   'mine.chunk':         ['features/mining.js',    'x, y, item: a chunk picked up off the floor', 'audio'],
   'mine.grow':          ['features/mining.js',    'x, y, i, kind: a spent vein has come back', '(none yet)'],
@@ -232,6 +235,7 @@ export const EVENTS = {
   'tree.chop':          ['features/woodcut.js',   'x, y, h (the bite), who, k (0 a glance off wood too hard for the axe, else 0..1: how hard it shakes), left (blows), dx, dy (unit: him to the trunk)', 'wind (the crown shudders, leaves), woodcut (view: chips), audio'],
   'tree.fell':          ['features/woodcut.js',   'x, y, who, vx, vy (unit: the way it falls), species, scale: the last bite; it starts to fall', 'audio'],
   'tree.land':          ['features/woodcut.js',   'x, y (where the crown comes down), who, r (the crown\'s radius)', 'woodcut (view: leaves, dust, the shake), audio'],
+  'tree.hit':           ['features/woodcut.js',   'x, y (what it hit), who (the tree), kind (player | foe | tree | crate | barrel), dmg, vx, vy (unit: the fall\'s way): a falling tree came down on something (docs/SKILLS.md: the tree\'s hit)', 'fauna (the birds go), audio'],
   'tree.logs':          ['features/woodcut.js',   'x, y, who, n: the fallen trunk breaks into n logs', 'woodcut (view: dust), audio'],
   'tree.grow':          ['features/woodcut.js',   'x, y, who: a stump has grown back into its tree', '(none yet)'],
   'tool.hit':           ['features/woodcut.js',   'x, y, who, kind (body | a prop kind): a tool\'s swing meets a foe or a dummy', 'audio'],

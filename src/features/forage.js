@@ -15,12 +15,14 @@
 // OWNS: the picked set and its saved part, the pick under way, the grid of patches, the decor's picked look (through its API).
 // READS: host.layout.forest (decor, seed), host.world.decor (setPicked), host.env (t, sky.rain), host.mods ('forage.*'), pack,
 //   coop (online, act, mail, net.id), host.PL (hold, faceShot, cursorGround, useE, nearInteract, tool).
+// GLIMMER (Foraging 5: pack.move('glimmer'), docs/SKILLS.md; view only): crouched (hold C) and still a moment, a wave goes out
+// from him and each unpicked patch it passes shows a few dew specks winking, then fading (content/forage.js TUNE.glimmer).
 // EMITS: forage.pick, forage.grow.
 // BUDGET: sim: a grid lookup (9 cells of 4 m) a step while E is held; the regrowth check once a second over the picked set.
 //   View: the decor's look only when the picked set changed; HD: one grid lookup and a prompt a frame near a patch.
 import {PLANTS, TUNE, pickYield, regrowHours} from '../content/forage.js';
 import {flags} from '../core/flags.js';
-import {simRandom} from '../core/rng.js';
+import {simRandom, viewRandom} from '../core/rng.js';
 import {hdUnit, hdPrompt} from '../ui/hdpixel.js';
 
 const ON = flags.get('forage') !== '0';
@@ -159,6 +161,69 @@ export async function create(host) {
     for (const i of picked.keys()) if (!shown.has(i)) { DC.setPicked(i, true); shown.add(i); }
   }
 
+  // ---------------------------------------------------------------- GLIMMER (the view: its own state, viewRandom)
+  const GL = TUNE.glimmer, VR = viewRandom('forage'), GMAX = 48, SPK = 5;
+  const G = {still: 0, cool: 0, r: -1, x: 0, y: 0, z: 0, t: 0};   // (r: the wave's radius; -1 none)
+  const GI = new Int32Array(GMAX), GT = new Float32Array(GMAX), GN = new Uint8Array(GMAX);   // a glinting patch: its index, its age, its specks
+  const GX = new Float32Array(GMAX * SPK), GY = new Float32Array(GMAX * SPK), GH = new Float32Array(GMAX * SPK), GP = new Float32Array(GMAX * SPK);
+  let gn = 0;
+  const GA = [{alpha: .25}, {alpha: .5}, {alpha: .75}, {}], GA_E = [{alpha: .25, emit: true}, {alpha: .5, emit: true}, {alpha: .75, emit: true}, {emit: true}];
+  const DEW = ['#f4fbff', '#d6ecff', '#fffbe8'];
+  function glint(n) {   // a patch the wave passed: its dew specks, on the plant
+    for (let k = 0; k < gn; k++) if (GI[k] === n) return;
+    if (gn >= GMAX) return;
+    const k = gn++, c = PLANTS[D[n][0]], r = radius(n) * .8, g = host.elev(D[n][1], D[n][2]), top = c.berry ? .22 : .1;
+    GI[k] = n; GT[k] = 0; GN[k] = GL.specks[0] + Math.floor(VR() * (GL.specks[1] - GL.specks[0] + 1));
+    for (let s = 0; s < GN[k]; s++) {
+      const a = VR() * Math.PI * 2, d = Math.sqrt(VR()) * r, j = k * SPK + s;
+      GX[j] = D[n][1] + Math.cos(a) * d; GY[j] = D[n][2] + Math.sin(a) * d; GH[j] = g + .05 + VR() * top; GP[j] = VR() * 6.3;
+    }
+  }
+  function glimmerView(dt) {
+    if (!active()) { gn = 0; G.r = -1; G.still = 0; return; }
+    for (let k = gn - 1; k >= 0; k--) if ((GT[k] += dt) > GL.t || picked.has(GI[k])) {   // (an old one, or picked: gone)
+      gn--; GI[k] = GI[gn]; GT[k] = GT[gn]; GN[k] = GN[gn];
+      for (let s = 0; s < SPK; s++) { const a = k * SPK + s, b = gn * SPK + s; GX[a] = GX[b]; GY[a] = GY[b]; GH[a] = GH[b]; GP[a] = GP[b]; }
+    }
+    G.cool -= dt;
+    const P = host.player, still = P.state === 'pose' && P.frame === 'crouch' && !!pack()?.move('glimmer');
+    G.still = still ? G.still + dt : 0;
+    if (G.r < 0 && G.still >= GL.still && G.cool <= 0) { G.r = 0; G.x = P.x; G.y = P.y; G.z = P.z; G.t = 0; }
+    if (G.r < 0) return;
+    const r0 = G.r; G.r += GL.speed * dt; G.t += dt;
+    const cx = Math.floor(G.x / CELL), cy = Math.floor(G.y / CELL), cr = Math.ceil(GL.reach / CELL) + 1;
+    for (let j = cy - cr; j <= cy + cr; j++) for (let i = cx - cr; i <= cx + cr; i++) {
+      const L = cells.get(key(i, j)); if (!L) continue;
+      for (let k = 0; k < L.length; k++) {
+        const n = L[k]; if (picked.has(n)) continue;
+        const d = Math.hypot(D[n][1] - G.x, D[n][2] - G.y);
+        if (d > r0 && d <= G.r && d <= GL.reach && Math.abs(host.elev(D[n][1], D[n][2]) - G.z) < 2.5) glint(n);
+      }
+    }
+    if (G.r >= GL.reach) { G.r = -1; G.cool = GL.cool; }
+  }
+  function glimmerFrame() {
+    if (!gn && G.r < 0) return;
+    const dim = host.env?.part === 'night' ? GL.night : 1, t = clockV;
+    for (let k = 0; k < gn; k++) {
+      const age = GT[k], f = Math.min(1, age / .25) * Math.min(1, (GL.t - age) / 1.5) * dim;   // (in fast, out slowly)
+      for (let s = 0; s < GN[k]; s++) {
+        const j = k * SPK + s, w = .5 + .5 * Math.sin(t * 7 + GP[j]), a = f * (.35 + .65 * w * w);   // (each winks on its own)
+        if (a < .12) continue;
+        host.point(GX[j], GY[j], GH[j], DEW[s % DEW.length], (w > .85 && dim === 1 ? GA_E : GA)[Math.min(3, Math.floor(a * 3.99))]);
+      }
+    }
+    if (G.r > 0) {   // (the wave itself: a faint, broken ring of light on the ground)
+      const n = 28, a = (1 - G.r / GL.reach) * .5 * dim; if (a < .12) return;
+      for (let i = 0; i < n; i++) {
+        const ang = i / n * Math.PI * 2 + G.r * .15; if (Math.sin(ang * 5 + t * 3) < 0) continue;
+        const x = G.x + Math.cos(ang) * G.r, y = G.y + Math.sin(ang) * G.r;
+        host.point(x, y, host.elev(x, y) + .04, DEW[1], GA[Math.min(3, Math.floor(a * 3.99))]);
+      }
+    }
+  }
+  let clockV = 0;
+
   const F = {
     name: 'forage', label: 'Foraging', on: ON,
     get picked() { return picked; }, patchNear, ahead,   // (tests, dev)
@@ -191,7 +256,7 @@ export async function create(host) {
         if (!ol && picked.size) { const t = host.env?.t ?? 0; for (const [i, at] of picked) if (t >= at || (rained && PLANTS[D[i][0]].rain)) grow(i); }
       }
     },
-    view() { if (ON) look(); },
+    view(dt) { if (!ON) return; look(); clockV += dt; glimmerView(dt); },
     // E: the patch ahead; none ahead but patches round him (WALK_ZONE m) and no tree ahead (that E is the axe's): held E walks on
     // picking what he passes (it doesn't wave: host.PL.useE)
     onKey(k) {
@@ -205,7 +270,8 @@ export async function create(host) {
       const i = underCursor(); if (i < 0) return false;
       lmbI = i; return true;
     },
-    frame() {   // ?gathermarks=1: a dot over each patch within 14 m (red: picked)
+    frame() {   // the glimmer; ?gathermarks=1: a dot over each patch within 14 m (red: picked)
+      if (ON) glimmerFrame();
       if (!marks || !active()) return;
       const P = host.player, cx = Math.floor(P.x / CELL), cy = Math.floor(P.y / CELL);
       for (let j = cy - 4; j <= cy + 4; j++) for (let i = cx - 4; i <= cx + 4; i++) {

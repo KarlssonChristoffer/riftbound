@@ -222,14 +222,17 @@ export const catchIcon = id => ICONS[id] ??= CATCHES[id].rows ? {rows: CATCHES[i
 // ---------------------------------------------------------------- the roll: what bites, when, how big
 // rng: () -> [0, 1) (the caller's own seeded generator). o: {water ('lake' | 'stream' | 'river'), part (env.part), rain (bool),
 // deep (m from the shore), luck, find (chances added), size (mul), lure (mul on the wait), night (share off the wait at night),
-// perfect (bool: a perfect cast), spot (bool: cast on a fishing spot: SPOT), bait (a BAITS id: its prey bite more)}
+// perfect (bool: a perfect cast), spot (bool: cast on a fishing spot: SPOT), bait (a BAITS id: its prey bite more), cls (a
+// SHADOW class: a cast at a shadow's nose: a fish of its rarities, no find, unless the water has none of them), quick (the
+// shadow's bite: SHADOW.bite s, no nibbles)}
 // -> {id, cm, kg, wait (s), nibbles: [s ...] (before wait)}
 export function roll(rng, o) {
   const luck = (o.luck || 0) + (o.perfect ? TUNE.cast.luck : 0) + (o.spot ? SPOT.luck : 0), prey = o.bait ? BAITS[o.bait]?.prey : null;
-  const isFind = rng() < TUNE.find + (o.find || 0);
+  const cls = SHADOW.cls[o.cls] || null;
+  const isFind = rng() < TUNE.find + (o.find || 0) && !cls;
   let total = 0; const pick = [];
-  for (const id of CATCH_IDS) {
-    const c = CATCHES[id]; if (!!c.find !== isFind || !c.where.includes(o.water)) continue;
+  for (let pass = cls ? 0 : 1; pass < 2 && !total; pass++) for (const id of CATCH_IDS) {   // (pass 0: the shadow's class only)
+    const c = CATCHES[id]; if (!!c.find !== isFind || !c.where.includes(o.water) || (!pass && !cls.rar.includes(c.rarity))) continue;
     let w = (RARITY_W[c.rarity] || 1) * Math.pow(1 + Math.max(0, luck), RARITY_TIER[c.rarity] || 0) * (c.when[o.part] ?? 1);
     if (o.rain && c.rain) w *= c.rain;
     if (prey && prey[id]) w *= prey[id];
@@ -242,8 +245,8 @@ export function roll(rng, o) {
   const cm = Math.round(Math.min(c.cm[1] * 1.15, (c.cm[0] + (c.cm[1] - c.cm[0]) * u * u) * (o.size || 1)) * 10) / 10;
   const kg = Math.round(c.kg * (cm / 10) ** 3 * 100) / 100;
   const nightK = o.part === 'night' ? 1 - Math.min(.8, o.night || 0) : 1;
-  const wait = (TUNE.wait[0] + (TUNE.wait[1] - TUNE.wait[0]) * rng()) * (o.lure || 1) * nightK * (o.spot ? SPOT.lure : 1);
-  const n = Math.floor(TUNE.nibble[0] + (TUNE.nibble[1] + 1 - TUNE.nibble[0]) * rng()), nibbles = [];
+  const u2 = rng(), wait = o.quick ? SHADOW.bite[0] + (SHADOW.bite[1] - SHADOW.bite[0]) * u2 : (TUNE.wait[0] + (TUNE.wait[1] - TUNE.wait[0]) * u2) * (o.lure || 1) * nightK * (o.spot ? SPOT.lure : 1);
+  const n = o.quick ? (rng(), 0) : Math.floor(TUNE.nibble[0] + (TUNE.nibble[1] + 1 - TUNE.nibble[0]) * rng()), nibbles = [];
   for (let i = 0; i < n; i++) nibbles.push(Math.round(wait * (.25 + .65 * rng()) * 100) / 100);
   nibbles.sort((a, b) => a - b);
   return {id, cm, kg, wait: Math.round(wait * 100) / 100, nibbles};
@@ -268,6 +271,49 @@ export function spotNear(x, y, slot, seed, slack = .5) {
   for (let s = slot - 1; s <= slot; s++) for (let a = a0 - 1; a <= a0 + 1; a++) for (let b = b0 - 1; b <= b0 + 1; b++)
     if (spotAt(a, b, s, seed, SQ) && Math.hypot(SQ.x - x, SQ.y - y) <= r) return true;
   return false;
+}
+
+// SHADOWS (Fishing 5, docs/SKILLS.md; one drawing for every brief: features/fishing.js draws them, other features ask it,
+// shadowsNear): each live spot has one fish circling under it, all from the spot's hash, so every client and the server see the
+// same one at the same clock. cls: its class (w: the share of spots, len: m long, rar: the rarities a cast at its nose
+// rolls from); orbit: m round the spot (under SPOT.edge: it stays over the water), speed: m/s along it; a bobber landing within
+// `nose` m of its head and `cone` deg of its heading draws it (a quick bite: `bite` s, no nibbles); within `spook` m of its
+// body it bolts (the wait + TUNE.spook) and is gone for you till the slot turns
+export const SHADOW = {
+  cls: {small: {w: 60, len: .25, rar: ['common']}, medium: {w: 30, len: .5, rar: ['fine']}, large: {w: 10, len: .9, rar: ['rare', 'masterwork', 'mythic']}},
+  orbit: [.35, .7], speed: [.22, .45], nose: 1.2, cone: 70, spook: .4, bite: [.8, 2],
+};
+const SH_CLS = Object.keys(SHADOW.cls), SH_W = SH_CLS.reduce((s, k) => s + SHADOW.cls[k].w, 0);
+// the shadow under spot cell (a, b) in slot `slot` of world `seed` at clock t (s: the slot clock's) -> writes {x, y (its middle),
+// hx, hy (unit: its heading), cls, len, sx, sy (the spot)} to out and returns true, or false: no spot there. Pure (the server's too)
+export function shadowAt(a, b, slot, seed, t, out) {
+  if (!spotAt(a, b, slot, seed, out)) return false;
+  out.sx = out.x; out.sy = out.y;
+  const h = k => hash3(a * 3 + k, b * 5 - k, (slot * 7 + seed + k) | 0);
+  let u = h(1) * SH_W, cls = SH_CLS[0]; for (const k of SH_CLS) { u -= SHADOW.cls[k].w; if (u <= 0) { cls = k; break; } }
+  const r = SHADOW.orbit[0] + (SHADOW.orbit[1] - SHADOW.orbit[0]) * h(2), v = SHADOW.speed[0] + (SHADOW.speed[1] - SHADOW.speed[0]) * h(3);
+  const dir = h(4) < .5 ? -1 : 1, th = h(5) * Math.PI * 2 + dir * v / r * t;
+  out.x = out.sx + Math.cos(th) * r; out.y = out.sy + Math.sin(th) * r;
+  out.hx = -Math.sin(th) * dir; out.hy = Math.cos(th) * dir; out.cls = cls; out.len = SHADOW.cls[cls].len;
+  return true;
+}
+// a bobber at (x, y) and the shadow `s` (shadowAt's out) -> 'nose' (just ahead of it: it bites) | 'spook' (on it: it bolts) | ''
+export function shadowCast(s, x, y, slack = 0) {
+  const nx = s.x + s.hx * s.len / 2, ny = s.y + s.hy * s.len / 2, dx = x - nx, dy = y - ny, d = Math.hypot(dx, dy);
+  if (Math.hypot(x - s.x, y - s.y) <= SHADOW.spook + s.len / 2) return 'spook';
+  if (d <= SHADOW.nose + slack && (dx * s.hx + dy * s.hy) / (d || 1) >= Math.cos(SHADOW.cone / 2 * Math.PI / 180)) return 'nose';
+  return '';
+}
+// the server's check of a cast at (x, y): the shadows of the spots round it (this slot and the one before) at each of the clock
+// times ts (s: a little latency's worth back) -> the first verdict that isn't '' ('nose' | 'spook'), with its class in out.cls
+const SHQ = {x: 0, y: 0, sx: 0, sy: 0, hx: 0, hy: 0, cls: '', len: 0};
+export function shadowVerdict(x, y, slot, seed, ts, out = SHQ) {
+  const a0 = Math.floor(x / SPOT.cell), b0 = Math.floor(y / SPOT.cell);
+  for (const t of ts) for (let s = slot - 1; s <= slot; s++) for (let a = a0 - 1; a <= a0 + 1; a++) for (let b = b0 - 1; b <= b0 + 1; b++) {
+    if (!shadowAt(a, b, s, seed, t, out)) continue;
+    const v = shadowCast(out, x, y, .25); if (v) return v;
+  }
+  return '';
 }
 
 export const COMMON_FISH = ['perch', 'roach', 'bleak', 'minnow'];

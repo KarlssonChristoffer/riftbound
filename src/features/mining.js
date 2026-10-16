@@ -19,19 +19,23 @@
 // CO-OP (features/coop.js, server/room.mjs, docs/MULTIPLAYER.md): the server owns the veins' blows left and the spent ones. A blow
 // is sent (coop.act('mine', 'v' + i, {pow, lvl, tier})); the server's word comes back in coop.mail: struck (the blows left, for
 // everyone's cracks), spent (got: each striker's chunks: everyone who struck it gets his own full share), grown. A late joiner
-// gets them in the welcome. The camp's pick is each player's own (his save), crystals and chunks are his own.
+// gets them in the welcome. The camp's pick is each player's own (his save), crystals and chunks are his own (a crystal broken
+// asks the server for its XP: coop.act('crystal', 'c' + its index in the cave's props); all Mining XP is the server's online).
 // Only in the sandbox on the ruins biome (the persistent world) with the forest's cave. ?mining=0 off; ?gathermarks=1 dev dots.
 // OWNS: the veins' blows left and spent set (offline) and their saved part, the chunks, the camp's entities, the vein / camp /
 //   chunk meshes, the sparks. Sets the tool's want / aim for the job 'mine'.
 // READS: host.world.cave (veins, camp, floor), host.PL.tool, host.entities (near: crystals), host.mods ('mine.*'), host.env.t,
 //   pack (the pick, the pouch, XP, the store), coop (online, act, mail, net.id), combat's core (a crystal's damage).
 // EMITS: mine.hit, mine.spent, mine.chunk, mine.grow, mine.take, mine.open, tool.whiff.
+// THE CHAIN (Mining 5: pack.move('chain'), docs/SKILLS.md, content/mining.js TUNE.chain): rhythm blows in a row on one vein
+// count up (the sparks grow, the ping rises: mine.hit chain); the TUNE.chain.n-th cracks it at once. A plain blow, another vein
+// or too long a gap starts again. Online the server counts them itself (the blow says rh) and cracks it.
 // API (besides tests'): F.shown(i) (a night vein shows now), F.isSpent(i)
 // BUDGET: sim: a grid lookup (veins by 4 m cell) a blow or a press; the chunks (a handful) a step; the regrowth once a second
 //   over the spent set. View: a vein's mesh made again only when its stage changes; the camp's once; chunks' matrices while they
 //   move; the veins shown or hidden when the camera turns (a dot product each).
 import * as THREE from 'three';
-import {VEINS, SWING as W, TUNE, blowPower, mineYield, regrowHours} from '../content/mining.js';
+import {VEINS, SWING as W, TUNE, blowPower, mineYield, regrowHours, chainSkipped} from '../content/mining.js';
 import {ITEMS} from '../content/items.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
@@ -143,6 +147,7 @@ export async function create(host) {
   const chunks = [];         // {x, y, h, vx, vy, vh, t, rest, item, yaw, spin, dead}
   let ver = 0, clockT = 0, growT = 0, was = false, wasOnline = false, restored = false, aimSet = false, byE = false, heldSlot = -1, noteT = -9;
   let lockI = -1, lockC = null;   // the vein / crystal a held press is on
+  let chainI = -1, chainN = 0, chainT = -9;   // the chain: the vein, the rhythm blows on it in a row, when the last landed (clockT)
   let marks = flags.get('gathermarks') === '1', hopT = 0, hopN = 0;
 
   function restore() {   // the saved spent veins (offline): this cave's, else none
@@ -242,17 +247,24 @@ export async function create(host) {
       host.hitstop(.03); host.shake(1, .06); return;
     }
     const rhythm = !!e.rhythm, pow = blowPower(tool, {power: host.mods.value('mine.power', 1)}, rhythm);
+    const CH = TUNE.chain, gap = clockT - chainT, can = !!pack()?.move('chain');
+    chainN = rhythm && i === chainI && gap >= CH.gap[0] - .1 && gap <= CH.gap[1] ? chainN + 1 : rhythm ? 1 : 0; chainI = i; chainT = clockT;
+    const chain = can ? chainN : 0, crack = chain >= CH.n;
+    if (crack) chainN = 0;
     pack()?.gain('mining', K.xp);
     const c = coop();
     if (c?.online) {   // CO-OP: the server takes the blow (its word: struck / spent, in mail); the crack shows at once
-      c.act('mine', 'v' + i, {pow: +pow.toFixed(3), lvl: pack()?.level('mining') || 1, tier: tool.tier || 1, kind: v.kind});
+      c.act('mine', 'v' + i, {pow: +pow.toFixed(3), lvl: pack()?.level('mining') || 1, tier: tool.tier || 1, kind: v.kind, rh: rhythm ? 1 : 0});
       left.set(i, Math.max(.001, (left.get(i) ?? K.blows) - pow)); ver++;
     } else {
       const l = (left.get(i) ?? K.blows) - pow;
-      if (l > 1e-6) { left.set(i, l); ver++; }
-      else spend(i, mineYield(R, v.kind, {extra: host.mods.value('mine.extra', 0)}), true);
+      if (l > 1e-6 && !crack) { left.set(i, l); ver++; }
+      else {
+        if (crack) pack()?.gain('mining', K.xp * chainSkipped(l, pow));   // (the chain: the blows it skipped)
+        spend(i, mineYield(R, v.kind, {extra: host.mods.value('mine.extra', 0)}), true);
+      }
     }
-    host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: Math.min(3, stageOf(i)), rhythm, dx: ux, dy: uy, hollow: !!K.hollow});
+    host.events.push({type: 'mine.hit', x: at.x, y: at.y, h: at.h, i, kind: v.kind, k: Math.min(3, stageOf(i)), rhythm, dx: ux, dy: uy, hollow: !!K.hollow, chain, crack});
     host.hitstop(rhythm ? .07 : .045); host.shake(rhythm ? 2.2 : 1.5, .08);
   }
   // a cave crystal under the pick: combat breaks it (its own shards fly), TUNE.crystal.blows blows; the Glow Shards drop at its foot
@@ -267,6 +279,7 @@ export async function create(host) {
     const S = TUNE.crystal.shards, n = S[0] + Math.floor(R() * (S[1] - S[0] + 1));
     spawn(p.x - ux * .3, p.y - uy * .3, (p.z || 0) + .6, -ux, -uy, 'glow_shard', n);
     pack()?.gain('mining', TUNE.crystal.xp, {x: p.x, y: p.y, h: (p.z || 0) + 1.8});
+    if (online()) { const k = C?.props?.findIndex(q => q[0] === 'crystal' && Math.abs(q[1] - p.x) < .01 && Math.abs(q[2] - p.y) < .01) ?? -1; if (k >= 0) coop().act('crystal', 'c' + k); }   // (co-op: its XP is the server's; once a crystal broke)
   }
 
   // ---------------------------------------------------------------- chunks: out of the rock, rolling to his feet, picked up
@@ -512,7 +525,7 @@ export async function create(host) {
   const SP = [];
   function sparks(e) {
     const K = VEINS[e.kind], col = e.kind === 'crystal' ? ['#eaffd8', '#8aff6a'] : K?.col || ['#b8b2a6', '#8c867a'];
-    const n = e.k === 0 ? 4 : (e.rhythm ? 16 : 9);
+    const n = (e.k === 0 ? 4 : (e.rhythm ? 16 : 9)) + (e.chain || 0) * 6 + (e.crack ? 14 : 0);   // (the chain: more each blow)
     for (let i = 0; i < n && SP.length < 200; i++) {
       const a = Math.atan2(-e.dy, -e.dx) + (VR() - .5) * 2.2, v = 1 + VR() * 2.6, spark = i < (e.k === 0 ? 4 : e.rhythm ? 7 : 3);
       SP.push({x: e.x, y: e.y, h: e.h + (VR() - .5) * .3, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vh: .6 + VR() * 2, t: 0, life: spark ? .18 + VR() * .2 : .45 + VR() * .4,

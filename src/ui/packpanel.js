@@ -4,7 +4,10 @@
 // in photo mode and behind the title. The items' pixel icons (content/items.js: fills only) are drawn once each with an
 // outline round them, as data URLs at 1 px per pixel, scaled up crisp by the CSS.
 //   const panel = createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held, ask}); panel.toggle() / .open / .frame()
-//   (sections: other systems' parts of the panel, drawn after the skills: pack.section; recipes under their group's heading)
+//   (sections: other systems' parts of the panel, drawn after the skills: pack.section; recipes under their group's heading;
+//   moves(id) -> {had: [{name, line}], next: level}: the moves under a skill's bar (content/skills.js MOVES), movesVer() when
+//   they change without the skills changing: the pretend level, the titles); titles() -> {worn, had: [id], names: {id: {name}}}:
+//   the row under the header (a click wears the next one he has, then none: wear(id)))
 //   iconURL(rows, pal) -> a data URL (exported: features/fishing.js draws its journal's unknown catches as silhouettes)
 // OWNS: the panel's element and its open state. READS: the inventory, the skills, the recipes (pack.recipe). Clicks: ask(r)
 // (pack carries a recipe out in the sim step).
@@ -42,7 +45,15 @@ const CSS = `
 #pack .p-bag.p-grid7 { grid-template-columns: repeat(7, 1fr); gap: 3px; }
 #pack .p-grid7 .p-slot em { font-size: 9px; right: 2px; }
 #pack .p-slot.p-dim { background: rgba(0, 0, 0, .18); }
-#pack .p-note { color: var(--dim); font-size: 11px; margin-top: 3px; }`;
+#pack .p-note { color: var(--dim); font-size: 11px; margin-top: 3px; }
+#pack .p-skill .p-move { display: block; margin-top: 3px; font: 10px/11px RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; letter-spacing: 0; }
+#pack .p-skill .p-move b { font-weight: normal; }
+#pack .p-skill .p-move small { display: block; color: #a89c84; }
+#pack .p-skill .p-move.p-next { color: var(--dim); }
+#pack .p-title { display: block; width: 100%; margin: 4px 0 0; padding: 2px 0; text-align: left; background: none; border: 0; cursor: pointer;
+  font: 10px/11px RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; color: #f2d27a; }
+#pack .p-title small { color: var(--dim); }
+#pack .p-title:hover small { color: var(--ink); }`;
 
 const OUTLINE = '#1a120c';
 // an icon (12 x 12 rows of palette letters; pal: its own letters over PAL's) -> a 14 x 14 data URL: its fills, then an outline in
@@ -58,19 +69,22 @@ export function iconURL(rows, pal = null) {
   return c.toDataURL();
 }
 
-export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask}) {
+export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask, moves = null, movesVer = () => 0, titles = null, wear = () => {}}) {
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const el = document.createElement('div'); el.id = 'pack'; el.className = 'hidden'; document.body.appendChild(el);
   const ICON = {};
   const icon = id => ICON[id] ??= ITEMS[id]?.icon ? iconURL(ITEMS[id].icon, ITEMS[id].pal) : '';
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-  let open = false, kInv = -1, kSk = -1, kHeld = -2, kN = -1, kT = 0, kSec = -1;
+  let open = false, kInv = -1, kSk = -1, kHeld = -2, kN = -1, kT = 0, kSec = -1, kMv = -1;
   const secVer = () => { let v = 0; for (const s of sections) v = (v * 31 + s.ver()) | 0; return v; };
   const costText = c => Object.entries(c).map(([id, n]) => `${n} ${ITEMS[id]?.name || id}`).join(', ');
   const afford = r => Object.entries(r.cost || {}).every(([id, n]) => inv.count(id) >= n) && !(r.can?.());
 
   function build() {
-    let h = '<header><b>PACK</b><small>Tab</small></header><h5>Bag</h5><div class="p-bag">';
+    let h = '<header><b>PACK</b><small>Tab</small></header>';
+    const ti = titles?.();
+    if (ti?.had.length) h += `<button class="p-title" title="the title the others see under your name: click for the next">${ti.worn ? esc(ti.names[ti.worn].name) : '<small>no title</small>'} <small>&gt;</small></button>`;
+    h += '<h5>Bag</h5><div class="p-bag">';
     inv.bag.forEach((s, i) => {
       const d = s && ITEMS[s.id];
       h += `<div class="p-slot${i === held() ? ' held' : ''}"${d ? ` title="${esc(d.name)}: ${esc(d.desc)}"` : ''}>`;
@@ -84,7 +98,11 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     for (const id in SKILLS) {
       const S = SKILLS[id], L = skills.level(id), x = skills.xp(id), sp = skills.span(id), k = sp.next > sp.at ? (x - sp.at) / (sp.next - sp.at) : 1;
       h += `<div class="p-skill"><div><span>${esc(S.name)}</span><small>Lv ${L} · ${Math.floor(x)}${sp.next > sp.at ? ' / ' + sp.next : ''} xp</small></div>`;
-      h += `<div class="p-bar"><i style="width:${(k * 100).toFixed(1)}%;background:${S.col}"></i></div></div>`;
+      h += `<div class="p-bar"><i style="width:${(k * 100).toFixed(1)}%;background:${S.col}"></i></div>`;
+      // (the moves had: the name in the skill's colour and its one plain sentence; then the next one's level, a question mark)
+      const M = moves?.(id);
+      if (M) { for (const m of M.had) h += `<div class="p-move"><b style="color:${S.col}">${esc(m.name)}</b><small>${esc(m.line)}</small></div>`; if (M.next) h += `<div class="p-move p-next">Lv ${M.next} ?</div>`; }
+      h += '</div>';
     }
     for (const s of sections) h += `<h5>${esc(s.title)}</h5>` + s.html(esc, icon);
     // (the recipes under their group's heading, in the order the groups came: Build, Cook, Bait ...)
@@ -95,6 +113,10 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     el.innerHTML = h;
   }
   el.addEventListener('click', e => {
+    if (e.target.closest('.p-title')) {   // (the next title he has, after the last none, then the first again)
+      const ti = titles?.(); if (!ti) return;
+      const L = [...ti.had, ''], i = L.indexOf(ti.worn); wear(L[(i + 1) % L.length]); return;
+    }
     const b = e.target.closest('.p-build'); if (!b) return;
     const r = recipes[+b.dataset.r]; if (r) ask(r);
   });
@@ -112,8 +134,9 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
       if (hide) return;
       const now = performance.now(), h = held();
       const sv = secVer();
-      if (inv.ver !== kInv || skills.ver !== kSk || h !== kHeld || recipes.length !== kN || sv !== kSec || (recipes.length && now - kT > 500)) {
-        kInv = inv.ver; kSk = skills.ver; kHeld = h; kN = recipes.length; kSec = sv; kT = now; build();
+      const mv = movesVer();
+      if (inv.ver !== kInv || skills.ver !== kSk || h !== kHeld || recipes.length !== kN || sv !== kSec || mv !== kMv || (recipes.length && now - kT > 500)) {
+        kInv = inv.ver; kSk = skills.ver; kHeld = h; kN = recipes.length; kSec = sv; kMv = mv; kT = now; build();
       }
     },
   };

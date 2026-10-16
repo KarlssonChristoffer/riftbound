@@ -20,6 +20,11 @@
 // FISHING SPOTS (content/fishing.js SPOT): rises and bubbles on the water, a few in reach, moving every SPOT.slot s on the
 // world's clock (co-op: the server's, so friends see the same ones); a cast into one bites sooner and rarer, and a catch from
 // it spends it (for you). BAIT (BAITS): cut from small fish at the pack panel; one goes on the hook a cast while you have it.
+// SHADOWS (Fishing 5: pack.move('shadows'), docs/SKILLS.md, content/fishing.js SHADOW): he sees the fish circling under each
+// spot (a dark shape: small, medium, large). The bobber just ahead of its nose draws it (a quick bite of its class); on it, the
+// fish bolts (the wait grows, it's gone for him till the slot turns). Online the server checks the same from the seed and its
+// clock. One drawing for every brief: other features ask F.shadowsNear(x, y, r, out) (the shadows there, whoever sees them);
+// F.shadowsFlee(x, y, r) makes the drawn ones dart away from a point (the meals brief's burnt lingon).
 // MEALS: fish cooked at a burning campfire (features/meals.js owns them: the Cook list, the buff, its timer chip; a cast tells the
 // server the meal eaten). THE ANGLER'S SET: ANGLER.n fishing pieces worn (source 'fishing.set'). THE
 // JOURNAL: the pack panel's Fish part (pack.section): every catch with its count and record, the ones not caught yet as
@@ -31,11 +36,11 @@
 // READS: gear (the rod worn, the set), host.mods ('fish.*'), world.js waterSample, host.env (part, sky.rain), pack, coop (mail,
 //   fish, the server's clock), meals (the meal eaten: a cast's word to the server), SESSION.seed (the spots).
 // EMITS: fish.cast, fish.plop, fish.snag, fish.nibble, fish.bite, fish.early, fish.slip, fish.hook, fish.tell, fish.surge,
-//   fish.reel, fish.drag, fish.snap, fish.escape, fish.leap, fish.catch, fish.away, fish.spot, fish.bait.
+//   fish.reel, fish.drag, fish.snap, fish.escape, fish.leap, fish.catch, fish.away, fish.spot, fish.bait, fish.shadow.
 // BUDGET: sim: a few multiplies a step while fishing (nothing otherwise but a compare). View: a rod, a line (~16 lines), a few
 //   dozen points; HD: a gauge (rects + pixel text) while fishing; the prompt: one waterSample a frame while a rod is worn.
 //   Spots: found again only when he crosses a 7 m cell or the slot turns (~a dozen hashes and waterSamples), a few points each.
-import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, BAITS, ANGLER, COMMON_FISH, roll, catchIcon, isFish, spotAt, hintOf} from '../content/fishing.js';
+import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, BAITS, ANGLER, COMMON_FISH, roll, catchIcon, isFish, spotAt, shadowAt, shadowVerdict, hintOf} from '../content/fishing.js';
 import {gearById, RARITY} from '../content/gear.js';
 import {flags} from '../core/flags.js';
 import {clamp} from '../core/mathx.js';
@@ -71,20 +76,20 @@ export async function create(host) {
   // ---------------------------------------------------------------- fishing spots (content/fishing.js SPOT, spotAt)
   // the spots in reach of him: found again when he crosses a cell or the slot turns; a spent one (a catch from it) is gone for
   // him till the next slot. The slot clock: the sim's offline, the server's online (the same spots for everyone).
-  const NSP = 40, SP = [], SPQ = {x: 0, y: 0}, SPK = {cx: 1e9, cy: 1e9, slot: -1, n: 0}, spent = new Set();
+  const NSP = 40, SP = [], SPQ = {x: 0, y: 0}, SPK = {cx: 1e9, cy: 1e9, slot: -1, n: 0}, spent = new Set(), spooked = new Set();
   const WS2 = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
-  for (let i = 0; i < NSP; i++) SP.push({x: 0, y: 0, key: 0});
+  for (let i = 0; i < NSP; i++) SP.push({x: 0, y: 0, key: 0, a: 0, b: 0});
   const clockNow = () => { const c = coop(); return c ? c.net.serverNow() / 1000 : S.clock; };
   function findSpots() {
     const P = host.player, cx = Math.floor(P.x / SPOT.cell), cy = Math.floor(P.y / SPOT.cell), slot = Math.floor(clockNow() / SPOT.slot);
     if (cx === SPK.cx && cy === SPK.cy && slot === SPK.slot) return;
-    if (slot !== SPK.slot) spent.clear();
+    if (slot !== SPK.slot) { spent.clear(); spooked.clear(); }
     SPK.cx = cx; SPK.cy = cy; SPK.slot = slot;
     const r = Math.ceil((TUNE.cast.max * 1.6 + 3) / SPOT.cell), seed = (SESSION.seed ?? 0) | 0; let n = 0;
     for (let a = cx - r; a <= cx + r; a++) for (let b = cy - r; b <= cy + r; b++) {
       if (n >= NSP || !spotAt(a, b, slot, seed, SPQ)) continue;
       waterSample(SPQ.x, SPQ.y, WS2); if (!WATERS[WS2.kind] || (WS2.edge || 0) < SPOT.edge) continue;
-      const s = SP[n++]; s.x = SPQ.x; s.y = SPQ.y; s.key = (a & 0xffff) * 65536 + (b & 0xffff);
+      const s = SP[n++]; s.x = SPQ.x; s.y = SPQ.y; s.key = (a & 0xffff) * 65536 + (b & 0xffff); s.a = a; s.b = b;
     }
     SPK.n = n;
   }
@@ -92,6 +97,23 @@ export async function create(host) {
   function liveSpot(x, y) {
     for (let i = 0; i < SPK.n; i++) { const s = SP[i]; if (!spent.has(s.key) && Math.hypot(s.x - x, s.y - y) <= SPOT.r) return s; }
     return null;
+  }
+
+  // the spot in reach at (x, y) exactly (a shadow's spot) -> its key | -1
+  function spotKey(x, y) { for (let i = 0; i < SPK.n; i++) { const s = SP[i]; if (Math.abs(s.x - x) < 1e-6 && Math.abs(s.y - y) < 1e-6) return s.key; } return -1; }
+  const seedOf = () => (SESSION.seed ?? 0) | 0;
+  // the live shadows within r m of (x, y) at the clock now (the API: whoever sees them; a spent or spooked one is gone for him)
+  // -> out (filled with {x, y, hx, hy, len, cls, key} from a pool), its length
+  const SHP = [], SHQ = {x: 0, y: 0, sx: 0, sy: 0, hx: 0, hy: 0, cls: '', len: 0};
+  function shadowsNear(x, y, r, out) {
+    out.length = 0; const t = clockNow();
+    for (let i = 0; i < SPK.n; i++) {
+      const s = SP[i]; if (spent.has(s.key) || spooked.has(s.key) || Math.hypot(s.x - x, s.y - y) > r + 1) continue;
+      if (!shadowAt(s.a, s.b, SPK.slot, seedOf(), t, SHQ)) continue;
+      const o = SHP[out.length] ??= {x: 0, y: 0, hx: 0, hy: 0, len: 0, cls: '', key: 0};
+      o.x = SHQ.x; o.y = SHQ.y; o.hx = SHQ.hx; o.hy = SHQ.hy; o.len = SHQ.len; o.cls = SHQ.cls; o.key = s.key; out.push(o);
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------- the cursor on the water (world), as the sim reads it
@@ -128,6 +150,7 @@ export async function create(host) {
     note: '',                              // a word for the gauge (view): 'let go!' etc.
     clock: 0,                              // s of sim (the spots' slot clock offline)
     spot: -1, bait: '',                    // this cast: the spot it fell in (its key), the bait on the hook
+    sh: '', shKey: -1, shCls: '',          // this cast and a shadow (Fishing 5): 'nose' | 'spook' | ''; its spot; its class
   };
   const I = {id: '', cm: 0, kg: 0, n: 0, first: false, record: false, xp: 0, t: 0};   // the last catch (the card)
   const ev = (type, o) => { o.type = type; host.events.push(o); };
@@ -156,6 +179,16 @@ export async function create(host) {
     ev('fish.plop', at(S.tx, S.ty));
     const sp = liveSpot(S.tx, S.ty); S.spot = sp ? sp.key : -1;
     if (sp) { ev('fish.spot', at(S.tx, S.ty)); say('a fishing spot!', '#9ad07a'); }
+    // a shadow (Fishing 5): at its nose it comes for the bobber, on it it bolts
+    S.sh = ''; S.shKey = -1; S.shCls = '';
+    if (pack()?.move('shadows')) {
+      const tn = clockNow(), v = shadowVerdict(S.tx, S.ty, Math.floor(tn / SPOT.slot), seedOf(), [tn], SHQ), k = v ? spotKey(SHQ.sx, SHQ.sy) : -1;
+      if (k >= 0 && !spent.has(k) && !spooked.has(k)) {
+        S.sh = v; S.shKey = k; S.shCls = SHQ.cls;
+        if (v === 'spook') spooked.add(k);
+        ev('fish.shadow', {x: SHQ.x, y: SHQ.y, a: v, hx: SHQ.hx, hy: SHQ.hy, len: SHQ.len, cls: SHQ.cls});
+      }
+    }
     S.bait = ''; const pk = pack();
     if (pk) for (const id in BAITS) if (pk.count(id) > 0 && pk.take(id, 1)) { S.bait = id; break; }
     S.phase = 'wait'; S.t = 0; S.nib = 0; S.lastNib = -9; S.r = null; S.askT = 0;
@@ -166,7 +199,9 @@ export async function create(host) {
   }
   function rollHere(st, rain) {
     const r = roll(R, {water: S.water, part: host.env?.part || 'day', rain, deep: S.deep, luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0), find: st['fish.find'],
-      size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: S.perfect, spot: S.spot >= 0, bait: S.bait});
+      size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: S.perfect, spot: S.spot >= 0, bait: S.bait,
+      cls: S.sh === 'nose' ? S.shCls : '', quick: S.sh === 'nose'});
+    if (S.sh === 'spook') r.wait += TUNE.spook;
     r.two = R() < st['fish.double'];
     return r;
   }
@@ -231,6 +266,7 @@ export async function create(host) {
     ev('fish.catch', {x: P.x, y: P.y, id: r.id, cm: r.cm, kg: r.kg, n, first, record, rarity: c.rarity});
     if (!S.local) coop()?.fish({a: 'land', n: S.n});
     if (S.spot >= 0) { spent.add(S.spot); S.spot = -1; }
+    if (S.shKey >= 0) { spent.add(S.shKey); S.shKey = -1; }   // (its shadow's spot: caught from)
     jV++;
   }
 
@@ -322,6 +358,62 @@ export async function create(host) {
   const P1 = {size: 1}, P2 = {size: 2}, P2A = {size: 2, alpha: .55}, P1A = {size: 1, alpha: .6}, P2E = {size: 2, emit: true}, P3A = {size: 3, alpha: .75};
   const PSP = {size: 2, alpha: .9};   // (the spots' bubbles: alpha follows the slot's fade in and out)
   const PRL = []; for (let i = 1; i <= 8; i++) PRL.push({size: 1, alpha: i / 8});   // (the spots' ripples: alpha in 8 steps)
+  // THE SHADOWS as drawn (Fishing 5): the live ones near him this frame, the bolting ones (spooked), their alpha steps
+  const SHN = 12, SHD = [], BOLT = [], SHR = 25, PSH = [];
+  for (let i = 0; i < SHN; i++) SHD.push({x: 0, y: 0, hx: 0, hy: 0, len: 0, a: 0, ph: 0});
+  for (let i = 0; i < 4; i++) BOLT.push({on: false, x: 0, y: 0, hx: 0, hy: 0, len: 0, t: 0});
+  for (let i = 1; i <= 4; i++) PSH.push({size: 1, alpha: i * .15});
+  let shN = 0;
+  const SHT = {x: 0, y: 0, sx: 0, sy: 0, hx: 0, hy: 0, cls: '', len: 0};
+  // FLEE (the meals brief's burnt lingon, F.shadowsFlee): the shadows within r m of a point dart out to r m and ease back to
+  // their path once nobody asks. View only: an offset per spot (by its index in SP, reset when that slot holds another spot)
+  const FL = {on: false, x: 0, y: 0, r: 0, out: 6, back: 1.5}, FX = new Float32Array(NSP), FY = new Float32Array(NSP), FK = new Float64Array(NSP).fill(NaN);
+  const FW = {kind: 0, a: 0, hw: 0, edge: 0, s: 0, speed: 1, hold: 0};
+  const wet = (x, y) => (waterSample(x, y, FW), !!WATERS[FW.kind]);
+  function flee(i, s, d, dt) {
+    if (FK[i] !== s.key) { FK[i] = s.key; FX[i] = FY[i] = 0; }
+    let tx = 0, ty = 0;
+    if (FL.on) {
+      const dx = d.x - FL.x, dy = d.y - FL.y, l = Math.hypot(dx, dy);
+      if (l < FL.r) {   // (out along the line from the point to r m; shortened until it stays on the water, never onto the bank)
+        const ux = l > 1e-3 ? dx / l : 1, uy = l > 1e-3 ? dy / l : 0;
+        for (let k = 1; k >= .2; k -= .2) { const px = FL.x + ux * (l + (FL.r - l) * k), py = FL.y + uy * (l + (FL.r - l) * k); if (wet(px, py)) { tx = px - d.x; ty = py - d.y; break; } }
+      }
+    }
+    const fast = tx || ty, e = 1 - Math.exp(-(fast ? FL.out : FL.back) * dt), ox = FX[i], oy = FY[i];
+    FX[i] += (tx - ox) * e; FY[i] += (ty - oy) * e;
+    const vx = FX[i] - ox, vy = FY[i] - oy, v = Math.hypot(vx, vy);
+    d.x += FX[i]; d.y += FY[i];
+    if (fast && v > .5 * dt) { d.hx = vx / v; d.hy = vy / v; }   // (darting: it faces the way it goes)
+  }
+  function shadowsView(dt) {
+    shN = 0;
+    for (const b of BOLT) if (b.on) { b.t += dt; b.x += b.hx * 4.5 * dt; b.y += b.hy * 4.5 * dt; if (b.t > .6) b.on = false; }
+    if (!active() || !pack()?.move('shadows')) { FL.on = false; return; }
+    const P = host.player, t = clockNow(), fade = spotFade(); if (fade <= 0) return;
+    for (let i = 0; i < SPK.n && shN < SHN; i++) {
+      const s = SP[i]; if (spent.has(s.key) || spooked.has(s.key) || Math.hypot(s.x - P.x, s.y - P.y) > SHR) continue;
+      const mine = s.key === S.shKey && S.sh === 'nose';
+      if (mine && (S.phase === 'fight' || S.phase === 'land')) continue;   // (it's the fish on the line now)
+      if (!shadowAt(s.a, s.b, SPK.slot, seedOf(), t, SHT)) continue;
+      const d = SHD[shN++]; d.x = SHT.x; d.y = SHT.y; d.hx = SHT.hx; d.hy = SHT.hy; d.len = SHT.len; d.a = fade; d.ph = (s.key % 89) * .7;
+      flee(i, s, d, dt);
+      if (mine && (S.phase === 'wait' || S.phase === 'bite')) {   // (drawn to the bobber: it turns and swims in under it)
+        const k = clamp(S.t / .7, 0, 1), dx = S.tx - d.x, dy = S.ty - d.y, l = Math.hypot(dx, dy) || 1;
+        d.hx = dx / l; d.hy = dy / l; d.x += (S.tx - d.hx * d.len * .6 - d.x) * k; d.y += (S.ty - d.hy * d.len * .6 - d.y) * k;
+      }
+    }
+    FL.on = false;   // (asked again next frame, or they ease back)
+  }
+  function drawShadow(x, y, hx, hy, len, a, ph, t) {
+    const o = PSH[Math.max(0, Math.min(3, Math.round(a * 4) - 1))], h = host.elev(x, y) + .005, step = .055, n = Math.max(3, Math.round(len / step));
+    for (let i = 0; i <= n; i++) {
+      const u = i / n, along = (u - .5) * len, w = len * .17 * Math.sin(Math.PI * Math.min(1, u * 1.15)), m = Math.max(0, Math.round(w / step));
+      const wig = Math.sin(t * 9 + ph - u * 4) * .045 * (1 - u) * len;   // (the tail swings, the head holds its way)
+      const cx = x + hx * along - hy * wig, cy = y + hy * along + hx * wig;
+      for (let j = -m; j <= m; j++) host.point(cx - hy * j * step, cy + hx * j * step, h, COL.shade, o);
+    }
+  }
   // how present the spots are now (0..1): they fade in at the slot's start and out at its end (SPOT.fade s)
   const spotFade = () => { const t = clockNow() % SPOT.slot; return clamp(Math.min(t, SPOT.slot - t) / SPOT.fade, 0, 1); };
   // the fish's leap sprite: its icon with an outline (content/fishing.js catchIcon), a canvas each, made once
@@ -452,6 +544,7 @@ export async function create(host) {
           case 'fish.catch': V.card = 3.4; V.leapT = -1; break;
           case 'fish.snap': case 'fish.escape': spray(e.x, e.y, 8, 1.4); ring(e.x, e.y, 1); break;
           case 'fish.cast': V.flash = S.perfect ? .5 : 0; break;
+          case 'fish.shadow': if (e.a === 'spook') { for (const b of BOLT) if (!b.on) { b.on = true; b.x = e.x; b.y = e.y; b.hx = e.hx; b.hy = e.hy; b.len = e.len; b.t = 0; break; } ring(e.x, e.y, 0); } break;
         }
       }
       // the bobber's life on the water
@@ -481,9 +574,16 @@ export async function create(host) {
         if (VR() < dt * 2.2 * fade) ring(sp.x + (VR() - .5) * .8, sp.y + (VR() - .5) * .8, VR() < .3 ? 1 : 0);
         if (VR() < dt * .12 * fade) { spray(sp.x, sp.y, 7, 1.3); ring(sp.x, sp.y, 1); }
       }
+      shadowsView(dt);
       pose(dt);
     },
     frame() {
+      // the shadows (Fishing 5): under the water, under the spots' rings and bubbles
+      if (shN || BOLT[0].on || BOLT[1].on || BOLT[2].on || BOLT[3].on) {
+        const t = performance.now() / 1000;
+        for (let i = 0; i < shN; i++) { const d = SHD[i]; drawShadow(d.x, d.y, d.hx, d.hy, d.len, d.a, d.ph, t); }
+        for (const b of BOLT) if (b.on) drawShadow(b.x, b.y, b.hx, b.hy, b.len, 1 - b.t / .6, 0, t * 3);
+      }
       // rings and spray
       for (const r of RINGS) {
         if (!r.on) continue;
@@ -545,6 +645,11 @@ export async function create(host) {
     get drawn() { return RD; },
     // (tests) the spots in reach now ({x, y, key} the first n), whether a spot is spent
     spots: () => SP.slice(0, SPK.n).filter(sp => !spent.has(sp.key)),
+    shadowsNear,   // (depth-shared: other features ask fishing for the fish shadows: keepsakes' Heron Feather)
+    // (the meals brief's burnt lingon) shadowsFlee(x, y, r): call every frame while it applies: the drawn shadows within r m
+    // of (x, y) dart out to r m (6/s), never onto the bank, and ease back to their path (1.5/s) once it isn't called. View only:
+    // shadowsNear and the server's nose check keep the path
+    shadowsFlee(x, y, r) { FL.on = true; FL.x = x; FL.y = y; FL.r = r; },
   };
 
   // ---------------------------------------------------------------- the HD layer (pixel art: whole UI pixels, the pixel font)

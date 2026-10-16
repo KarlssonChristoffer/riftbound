@@ -22,6 +22,9 @@
 //                (act('mine', id, {pow, lvl, tier})); its word on a vein (world: struck, spent, grown) is handed on in F.mail
 //   building     the server keeps what players put down (docs/BUILDING.md): features/builds.js asks (act('build', kind, {x, y}),
 //                'stoke', 'unbuild'); its word (world: built, stoked, gone) is handed on in F.mail
+//   skills       the server owns each player's XP (docs/SKILLS.md): the hello carries this browser's player key (game/playerkey.js)
+//                and the pack's XP (read by the server only for a key it hasn't seen); its word on your XP (skills) is handed on in
+//                F.mail for features/pack.js; a cave crystal broken under the pick asks for its XP (act('crystal', 'c' + i))
 // SIM vs VIEW: the shared world's changes (a felled tree, a fix) are applied in update, at a step, in the order the server sent
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
@@ -35,13 +38,14 @@ import {TICK_HZ, packPose} from '../net/protocol.js';
 import {wsTransport} from '../net/transport.js';
 import {createNetClient, b64} from '../net/client.js';
 import {createPeerLook} from './coop/look.js';
+import {playerKey} from '../game/playerkey.js';
 
 // ORDER (core/features.js): after the equipment (the lasso's phase this step) and the combat (a felled tree's world is settled)
 export const order = {after: ['equip', 'combat']};
 export async function create(host) {
   if (!SESSION.mp) return SESSION.error ? offline(host) : {name: 'coop', on: false, online: false, act: () => false};
   let name = flags.get('name') || ''; try { name ||= localStorage.getItem('rb.coop.name') || ''; } catch {}
-  const C = createNetClient({transport: wsTransport(SESSION.ws), name});
+  const C = createNetClient({transport: wsTransport(SESSION.ws), name, hello: () => ({key: playerKey(), xp: host.feature('pack')?.skills?.toJSON() || {}})});
   const look = createPeerLook(host, C);
   const msgs = [], mail = [], WH = Math.PI * 2;
   // THE CLOCK: the server's last word {t: its ms, h, rate}; the page's env follows it
@@ -100,11 +104,12 @@ export async function create(host) {
   // features/forage.js asks for a patch ('pick', p: its id 'd' + decor index, o: {lvl}: his Foraging level); features/mining.js
   // sends a blow on a vein ('mine', p: 'v' + its index in the cave's plan, o: {pow, lvl, tier})
   // features/builds.js puts a build down ('build', p: its kind, o: {x, y}), adds a log to a fire ('stoke', p: the build's id) and
-  // takes its own lamp back ('unbuild', p: the id)
+  // takes its own lamp back ('unbuild', p: the id). features/pack.js: the title he wears ('title', p: its id, '' none) and a
+  // --dev server's Skills rows ('dev', p: next | reset | titles | notitles); docs/SKILLS.md
   function act(a, p, o) {
     if (C.status !== 'online') return false;
     if (a === 'secret' || a === 'time') { if (typeof p !== 'string') return false; C.act(a, p); return true; }
-    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
+    if (a === 'pick' || a === 'mine' || a === 'build' || a === 'stoke' || a === 'unbuild' || a === 'crystal' || a === 'title' || a === 'dev') { if (typeof p !== 'string') return false; C.act(a, p, o); return true; }
     if (a !== 'fell' || !p || typeof p.fid !== 'string') return false;
     C.act('fell', p.fid); return true;
   }
@@ -132,7 +137,8 @@ export async function create(host) {
       for (const m of msgs) {
         if (m.k === 'world' && m.s === 'felled') {   // the woodcutting fells it (its fall, stump, logs), else it just goes
           const p = treeOf(m.id), by = C.peers.get(m.by), o = by ? C.sample(by, BYS) : null;
-          if (!p || !host.feature('woodcut')?.fellShared?.(p, m.by === C.id, !!m.late, o?.x, o?.y)) fell(m.id);
+          const way = typeof m.dx === 'number' && typeof m.dy === 'number' ? m : null;   // (the server's word on the fall's way: the same on every client)
+          if (!p || !host.feature('woodcut')?.fellShared?.(p, m.by === C.id, !!m.late, o?.x, o?.y, way?.dx, way?.dy)) fell(m.id);
         }
         else if (m.k === 'clock') {
           clk.t = m.t; clk.h = m.h; clk.rate = m.rate;
@@ -140,7 +146,7 @@ export async function create(host) {
           const want = flags.get('time');   // (dev: a ?time= asks the server's clock for it, once)
           if (want && !askedTime) { askedTime = true; C.act('time', want); }
         }
-        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
+        else if (m.k === 'sec' || m.k === 'ev' || m.k === 'fish' || m.k === 'world' || m.k === 'skills') mail.push(m);   // (world: a patch picked or grown back, features/forage.js; a vein struck, spent or back, features/mining.js; a build put down, stoked or gone, features/builds.js)
         else if (m.k === 'fix') { host.teleport(m.x, m.y); say('the server put you back (moving too fast)'); }
         else if (m.k === 'deny') say(`the server said no: ${m.a} ${m.id || ''} (${m.why})`);
         else if (m.k === 'gear') { gear.ids = m.g; gear.ver++; }
