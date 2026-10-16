@@ -371,7 +371,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
 
   return {
     connect, get size() { return peers.size; }, world, seed, clock, secrets, elk, soot,
-    usePlan(F) { plan = F || null; DOLL_O.spring = plan?.spring || null; },   // (the keepsakes' shelves: docs/KEEPSAKES.md)
     stop() { clearInterval(timer); for (const p of peers.values()) p.conn.close(1001, 'server stopping'); },
+    usePlan(F) { plan = F || null; DOLL_O.spring = plan?.spring || null; },   // (the keepsakes' shelves: docs/KEEPSAKES.md)
   };
 }

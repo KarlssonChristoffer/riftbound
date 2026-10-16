@@ -31,12 +31,12 @@
 import {flags} from '../core/flags.js';
 import {clamp, TAU} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
+import {noteOf, FIDDLE} from '../content/keepsakes.js';
 import {FOREST} from '../world/layout.js';
 import {steep} from '../world/world.js';
 import {faunaPlan} from '../world/fauna.js';
 import {createFaunaLook} from './fauna/look.js';
 import {createCrownBirds} from './fauna/crowns.js';
-import {noteOf, FIDDLE} from '../content/keepsakes.js';
 
 // ---------------------------------------------------------------- tunables
 // alert / flee: m from a person (walking) at which it stops to watch / bolts; rest: x those while it is bedded (it sits tight);

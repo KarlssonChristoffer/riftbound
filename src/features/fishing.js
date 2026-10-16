@@ -221,7 +221,7 @@ export async function create(host) {
     S.phase = 'land'; S.t = 0; S.held = false;
     host.hitstop?.(.06); host.shake?.(2, .12);
   }
-  function give(r = S.r, hand = false) {   // the fish in the pouch, the XP, the records (hand: grabbed, no rod: CALL)
+  function give(r = S.r, hand = false) {   // the fish in the pouch, the XP, the records (hand: grabbed, no rod: COME)
     const c = CATCHES[r.id], n = r.two && !c.find ? 2 : 1, P = host.player, s = store();
     const first = !!s && !s.n[r.id], record = !!s && !c.find && r.cm > (s.best[r.id] || 0) && !first;
     if (s) { s.n[r.id] = (s.n[r.id] || 0) + n; if (!c.find && r.cm > (s.best[r.id] || 0)) s.best[r.id] = r.cm; pack()?.dirty(); }
@@ -445,9 +445,9 @@ export async function create(host) {
         if (m.k !== 'fish') continue;
         if (m.a === 'bite' && m.n === S.n && S.phase === 'wait' && !S.r && typeof m.id === 'string' && CATCHES[m.id]) {
           S.r = {id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0, wait: +m.wait || 4, nibbles: Array.isArray(m.nibbles) ? m.nibbles.map(Number) : [], two: !!m.two};
-        } else if (m.a === 'jabbed' && m.n === GR.n && GR.wait >= 0) {
-          jabbed(typeof m.id === 'string' && CATCHES[m.id] ? {id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0} : null);
         } else if (m.a === 'caught' && m.id !== c.net.id && CATCHES[m.c]) { V.peer = m; V.peerT = 0; ui()?.toast(`${m.name || 'A friend'} caught a ${CATCHES[m.c].name}`, isFish(m.c) ? `${m.cm} cm` : '', RARITY[CATCHES[m.c].rarity]?.col); }
+        if (m.a === 'jabbed' && m.n === GR.n && GR.wait >= 0)   // (the Heron Feather's jab: THE JAB)
+          jabbed(typeof m.id === 'string' && CATCHES[m.id] ? {id: m.id, cm: +m.cm || CATCHES[m.id].cm[0], kg: +m.kg || 0} : null);
       }
       // presses since the last step, in order: a press, then (maybe) its let-go
       while (S.presses > 0 || S.ups > 0) {
@@ -498,13 +498,13 @@ export async function create(host) {
           case 'fish.bite': V.under = 1; V.bang = 1; ring(e.x, e.y, 1); spray(e.x, e.y, 9, 1.4); break;
           case 'fish.hook': V.fx = S.tx; V.fy = S.ty; V.dart = 0; V.dartV = 0; spray(e.x, e.y, 10, 1.6); ring(e.x, e.y, 1); break;
           case 'fish.surge': spray(e.x, e.y, 14, 2); ring(e.x, e.y, 1); break;
+          case 'fish.jab': spray(e.x, e.y, 12, 1.8); ring(e.x, e.y, 1); break;
+          case 'fish.miss': ring(e.x, e.y, 0); spray(e.x, e.y, 4, .9); break;
           case 'fish.tell': ring(e.x, e.y, 0); spray(e.x, e.y, 3, .8); break;
           case 'fish.leap': V.leapT = 0; V.lx = e.x; V.ly = e.y; spray(e.x, e.y, 20, 2.4); ring(e.x, e.y, 1); ring(e.x, e.y, 0); break;
           case 'fish.catch': V.card = 3.4; V.leapT = -1; break;
           case 'fish.snap': case 'fish.escape': spray(e.x, e.y, 8, 1.4); ring(e.x, e.y, 1); break;
           case 'fish.cast': V.flash = S.perfect ? .5 : 0; break;
-          case 'fish.jab': spray(e.x, e.y, 12, 1.8); ring(e.x, e.y, 1); break;
-          case 'fish.miss': ring(e.x, e.y, 0); spray(e.x, e.y, 4, .9); break;
         }
       }
       // the bobber's life on the water
@@ -590,12 +590,12 @@ export async function create(host) {
       }
       drawCalled();   // (the fish called to a point: F.callFish)
     },
-    // the HD layer: the prompt, the charge meter, the "!", the fight gauge, the catch card
-    hd(q, sc) { drawHD(q, sc); },
     // other features' asks (FISH CALLED TO A POINT, THE JAB above): callFish(key, x, y, k, n) -> false when all 4 asks are taken;
     // jab(x, y, water) (a sim step) -> false when it can't (off, fishing, a jab still out); shallows(x, y) -> water name | ''
     callFish, jab, shallows,
     get jabbing() { return GR.wait >= 0; },
+    // the HD layer: the prompt, the charge meter, the "!", the fight gauge, the catch card
+    hd(q, sc) { drawHD(q, sc); },
     hud: () => active() ? `fishing ${S.phase || (rod() ? 'rod ready' : 'no rod')} · ${SPK.n} spots${setN >= ANGLER.n ? ' · set' : ''}${S.r ? ' ' + S.r.id + ' ' + S.r.cm + 'cm' : ''}${S.phase === 'fight' ? ` dist ${S.dist.toFixed(2)} strain ${S.strain.toFixed(2)} ${S.surge}` : ''}` : '',
     // (tests) the catch log: {n: {id: count}, best: {id: cm}}
     get log() { return store(); },

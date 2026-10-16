@@ -129,8 +129,6 @@ export const EVENTS = {
   'fish.away':          ['features/fishing.js', 'x, y (the line comes in empty)', 'audio'],
   'fish.spot':          ['features/fishing.js', 'x, y (the cast fell on a fishing spot: it bites sooner and rarer)', 'audio'],
   'fish.bait':          ['features/fishing.js', 'x, y, id (bait cut from a small fish at the pack panel)', 'audio'],
-  'fish.jab':           ['features/fishing.js', 'x, y (a jab into the shallows by hand: F.grab, the Heron Feather)', 'fishing (view), audio'],
-  'fish.miss':          ['features/fishing.js', 'x, y (the jab came up with nothing)', 'fishing (view), audio'],
   // the lasso (the equipment experiment's gun gadget): the cowboy's side (sim/player/lasso.js: x, y in the view frame, turned
   // by the loop), the loop's (features/equip/lasso.js), the look's (features/equip/lassolook.js: a view, nothing in the sim listens)
   'lasso.loose':        ['sim/player/lasso.js',   'x, y, z (the throw clip release mark: the loop leaves the hand)', 'equip (lasso)'],
@@ -228,6 +226,8 @@ export const EVENTS = {
   'keep.creak':         ['features/keepsakes.js', 'x, y: the worn Bark Doll creaks (a secret near)', 'audio'],
   'keep.fiddle':        ['features/keepsakes.js', 'x, y: three fiddle notes (the Fiddle String: on a shelf at dusk, at the spring)', 'audio'],
   'keep.notch':         ['features/keepsakes.js', 'x, y, n: the Tally Stick took a notch (n: how many it has now)', 'audio'],
+  'fish.jab':           ['features/fishing.js', 'x, y (a jab into the shallows by hand: F.grab, the Heron Feather)', 'fishing (view), audio'],
+  'fish.miss':          ['features/fishing.js', 'x, y (the jab came up with nothing)', 'fishing (view), audio'],
   'soot.flinch':        ['features/cavelife.js',  'x, y, h: a soot thing broke off from a Big Tooth\'s wearer (sim offline; the server\'s ev online)', 'cavelife (view), audio'],
   // building (features/builds.js, docs/BUILDING.md): a build's id is 'o' + n offline, the server's 'b' + n online
   'build.add':          ['features/builds.js',    'x, y, id, kind (content/builds.js), mine: a build went down (his, or online a friend\'s)', 'audio'],

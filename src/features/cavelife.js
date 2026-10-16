@@ -73,8 +73,9 @@ export async function create(host) {
       }
       return;
     }
-    const P = host.player, ks = keeps(); ME.x = P.x; ME.y = P.y; ME.z = P.z; ME.lit = !!cv?.lit; ME.shun = ks.shun ? TOOTH.shun : 0; ME.kin = ks.kin;
+    const P = host.player; ME.x = P.x; ME.y = P.y; ME.z = P.z; ME.lit = !!cv?.lit;
     host.feature('builds')?.shining?.(SHINE);
+    const ks = keeps(); ME.shun = ks.shun ? TOOTH.shun : 0; ME.kin = ks.kin;   // (the keepsakes: the Big Tooth, the Full Tally Stick)
     const ev = S.step(dt, PLS, SHINE);
     for (let k = 0; k < ev.length; k++) { if (ev[k].a === 'snuff' && ev[k].id === 0) cv?.snuff?.(); else if (ev[k].a === 'flinch') flinch(ev[k]); }
   };
