@@ -19,7 +19,8 @@
 // OWNS: its animals' state, their meshes (look.js). READS: world/layout.js FOREST (the plan), host.player, host.world.cave (keeps out of its mouth), co-op's peers
 //   (host.feature('coop').net), host.env (hour, season, snow), host.elev / inStream, world.js steep, host.entities.near (what
 //   stands where), host.events (gunshots, hits, breaks: they scare), the uncanny forest's F.elk, the watcher's F.state, the game's
-//   ui (a toast for a touch).
+//   ui (a toast for a touch), mud (where the ground takes a print), prints (stamp: the morning trails; the live prints are prints.js's
+//   own, read from F.animals).
 // EMITS (core/events.js; the audio feature plays them): wildlife.wings (a raven taking off), wildlife.birds_scatter (a capercaillie's burst), wildlife.caw (the ravens),
 //   wildlife.critter_dash (a bolt through the undergrowth), wildlife.howl {kind: 'fox', call: 'yips'} (the fox at night), {kind: 'fox', call: 'bark'} (a roe's alarm bark).
 // BUDGET: the view ~.05 ms for ~30 animals (only those within SIM_R m of the player think; the rest wait where they are); the
@@ -29,7 +30,9 @@ import {clamp, TAU} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
 import {FOREST} from '../world/layout.js';
 import {steep} from '../world/world.js';
-import {faunaPlan} from '../world/fauna.js';
+import {faunaPlan, trailOf, trailAt} from '../world/fauna.js';
+import {TRAIL, MUD} from '../content/animals.js';
+import {SHAPES, TRACK} from '../content/prints.js';
 import {createFaunaLook} from './fauna/look.js';
 import {createCrownBirds} from './fauna/crowns.js';
 
@@ -100,10 +103,11 @@ export async function create(host) {
     const R = mulberry32(d.seed), S = TUNE[d.sp], G = PLAN.groups[d.group];
     return {d, sp: d.sp, S, G, R, x: d.x, y: d.y, z: 0, h: 0, hd: R() * TAU, v: 0, st: 'idle', t: R() * 4, tx: d.x, ty: d.y,
       ph: R() * 10, gait: 0, pitch: 0, turn: 0, gp: 0, gt: 0, lie: 0, lieTo: 0, fx: 0, fy: 0, out: true, gone: false,
-      tree: null, ta: 0, th: 0, flap: 0, vz: 0, tail: 0, blocked: 0, alarm: -1, seen: false, sus: 0, leap: 0, sx: 0, sy: 0, odd: false};
+      tree: null, ta: 0, th: 0, flap: 0, vz: 0, tail: 0, blocked: 0, alarm: -1, seen: false, sus: 0, leap: 0, sx: 0, sy: 0, odd: false,
+      li: 0};   // (li: its line in its group's morning trail)
   });
   F.animals = ANIM;
-  const byGroup = new Map(); for (const a of ANIM) { let l = byGroup.get(a.G); if (!l) byGroup.set(a.G, l = []); l.push(a); }
+  const byGroup = new Map(); for (const a of ANIM) { let l = byGroup.get(a.G); if (!l) byGroup.set(a.G, l = []); a.li = l.length; l.push(a); }
   const rr = (a, b, R) => a + (b - a) * R();
   const wrap = a => a - Math.round(a / TAU) * TAU;
 
@@ -281,6 +285,7 @@ export async function create(host) {
   // what next, when idle: by the clock, home, cover, the den
   function next(a, out) {
     const S = a.S, G = a.G, R = a.R, far = Math.hypot(a.x - G.x, a.y - G.y);
+    if (onTrail(a)) return;
     if (!out && a.sp !== 'capercaillie') {   // time to rest: the roe to cover, the fox to its den, the hare where it is
       const bed = a.sp === 'roe' ? G.cover : a.sp === 'fox' ? G.den : null;
       if (bed && Math.hypot(a.x - bed.x, a.y - bed.y) > 2.5) { const s = spot(a, bed.x, bed.y, 2.5); if (s) { go(a, s.x, s.y, S.walk); return; } }
@@ -499,6 +504,71 @@ export async function create(host) {
     q.fillStyle = '#cfe3a0'; q.fillText(txt, sx * sc, sy * sc - 3 * dpr);
   };
 
+  // ---------------------------------------------------------------- TRACKS (living-animals.md slice 1)
+  // the live prints are features/prints.js's own (it walks the ground animals near you, read from F.animals; features/mud.js says
+  // where the ground takes them). Here: the morning trails, stamped on the same print system
+  const prints = () => host.feature('prints'), mud = () => host.feature('mud');
+  // THE MORNING TRAILS (world/fauna.js trailOf): after a wet night (the ground wet when the day is first seen at TRAIL.at or
+  // later; ?mud=1), each herd's, fox's and hare's way in. A line's prints go down as its hours come (a cursor a line: what is
+  // already walked when the day is first seen, at once), where the mud takes them; within TRAIL.near of you the animal walks
+  // its line itself and prints.js stamps its feet. The same lines on every client (the seed and the day); each client's own prints
+  const TRAILS = new Map();   // group index -> today's trail (while it's a trail day)
+  const TD = {day: -1, decided: false, on: false, k: 1, n: 0};
+  const CUR = new Map();   // a line (world/fauna.js's, read only) -> {s: m along it stamped so far, side: the next foot}
+  function trails(hr) {
+    const E = host.env; if (!E || !F.on) return;
+    if (E.day !== TD.day) { TD.day = E.day; TD.decided = false; TD.on = false; TRAILS.clear(); CUR.clear(); }
+    if (TD.decided || hr < TRAIL.at) return;
+    TD.decided = true;
+    if (prints()?.stamp && mud()?.wet()) lay(E.day);
+  }
+  function lay(day) {
+    if (!prints()?.stamp) return 0;
+    TD.day = day; TD.decided = true; TD.on = true; TD.n = 0; TRAILS.clear(); CUR.clear();
+    // how far apart: the trails' own steps, wider when all of them together would pass TRAIL.max prints
+    let want = 0;
+    for (let g = 0; g < PLAN.groups.length; g++) {
+      const T = trailOf(FOREST, g, day); if (!T) continue;
+      TRAILS.set(g, T);
+      for (const L of T.lines) { want += L.n / TRAIL[T.sp].step; CUR.set(L, {s: 0, side: 1}); }
+    }
+    TD.k = Math.max(1, want / TRAIL.max);
+    trailPrints(true);
+    return TD.n;
+  }
+  // each line's prints up to the clock's hour (all = the first laying: near you too, those are already walked)
+  function trailPrints(all = false) {
+    if (!TD.on || !TRAILS.size) return;
+    const Pr = prints(), M = mud(); if (!Pr?.stamp || !M) return;
+    const t = clockT(), P = host.player, near = TRAIL.near;
+    for (const T of TRAILS.values()) {
+      const step = TRAIL[T.sp].step * TD.k, shape = TRACK[T.sp], S = SHAPES[shape];
+      for (const L of T.lines) {
+        const Q = L.pts, c = CUR.get(L);
+        for (; c.s < L.n - 1; c.s += step) {
+          const i = Math.floor(c.s), f = c.s - i, a = i * 3, b = a + 3, h = Q[a + 2] + (Q[b + 2] - Q[a + 2]) * f;
+          if (h > t) break;
+          const x = Q[a] + (Q[b] - Q[a]) * f, y = Q[a + 1] + (Q[b + 1] - Q[a + 1]) * f;
+          if (!all && Math.abs(x - P.x) < near && Math.abs(y - P.y) < near) continue;   // (the animal itself is walking it here)
+          const ux = Q[b] - Q[a], uy = Q[b + 1] - Q[a + 1], l = Math.hypot(ux, uy) || 1, side = S.pair ? (c.side = -c.side) * S.side : 0;
+          const px = x + uy / l * side, py = y - ux / l * side, su = M.at(px, py); if (!su) continue;
+          Pr.stamp(px, py, elev(px, py), ux, uy, shape, su); TD.n++;
+        }
+      }
+    }
+  }
+  // an animal of a group with a trail today, in the trail's hours, keeps to its line: off the screen it is where its line has got
+  // to, on it it walks there (from where it stands; it notices you as ever on the way)
+  const TP = {x: 0, y: 0, hd: 0};
+  function onTrail(a) {
+    if (!TD.on || a.odd) return false;
+    const T = TRAILS.get(a.d.group); if (!T) return false;
+    if (!trailAt(T, Math.min(a.li, T.lines.length - 1), clockT() + .02, TP)) return false;
+    if (!look.seen(a) && Math.hypot(TP.x - a.x, TP.y - a.y) > 6 && free(TP.x, TP.y)) { a.x = TP.x; a.y = TP.y; a.hd = TP.hd; idle(a, true); return true; }
+    go(a, TP.x, TP.y, a.S.walk); return true;
+  }
+  const clockT = () => host.env?.t ?? 0;   // (the world clock's hours since the start: the trails' hours are on it)
+
   // ---------------------------------------------------------------- the view step
   let oddAcc = 0;
   let acc = 0;
@@ -525,6 +595,7 @@ export async function create(host) {
       if (a.h === 0 || a.sp === 'squirrel') a.z = elev(a.x, a.y);
       else a.z += (elev(a.x, a.y) - a.z) * Math.min(1, dt * 4);
     }
+    trails(hr); trailPrints();
     crowns.events(evs); crowns.step(dt);
     watcherStares(); oddHare(dt, hr);
     if ((oddAcc += dt) >= 1) { oddAcc -= 1; herdStares(hr); }
@@ -554,9 +625,12 @@ export async function create(host) {
     }},
     {label: 'Animals: the odd hare comes (at night)', run: () => { oddN = 0; oddCD = 0; }},
     {label: 'Animals: startle the birds in the trees round you', run: () => { const P = host.player; crowns.noise(P.x, P.y, 25); }},
+    {label: 'Animals: lay this morning\'s trails (and the ground wet)', run: () => { mud()?.wetNow(true); const n = lay(host.env?.day ?? 0); game()?.ui?.toast('Morning trails', `${n} prints so far, ${TRAILS.size} trails`, '#cfe3a0'); }},
+    {label: 'Animals: go to the nearest roe bed', run: () => { const P = host.player; let b = null, bd = 1e9; for (const G of PLAN.groups) if (G.cover) { const d = Math.hypot(G.cover.x - P.x, G.cover.y - P.y); if (d < bd) { bd = d; b = G.cover; } } if (b) host.teleport(b.x, b.y + 6); }},
   ]);
   F.crowns = crowns;
-  F.dbg = () => ({count: F.count, ms: +F.ms.toFixed(3), hour: +hour().toFixed(2), touch: touchA?.d.id ?? null, crownBirds: crowns.flying, touched: {...touched}, odd: ODD ? {id: ODD.d.id, on: ODD.odd, visits: oddN} : null,
+  F.trails = TRAILS; F.layTrails = lay;
+  F.dbg = () => ({count: F.count, trailDay: TD.on ? TD.day : null, trails: TRAILS.size, trailPrints: TD.n, ms: +F.ms.toFixed(3), hour: +hour().toFixed(2), touch: touchA?.d.id ?? null, crownBirds: crowns.flying, touched: {...touched}, odd: ODD ? {id: ODD.d.id, on: ODD.odd, visits: oddN} : null,
     animals: ANIM.map(a => `${a.d.id} ${a.st}${a.gone ? ' (gone)' : ''} ${a.x.toFixed(1)},${a.y.toFixed(1)}${a.h ? ' h' + a.h.toFixed(1) : ''}${a.sus > .01 ? ' sus' + a.sus.toFixed(2) : ''}`)});
   return F;
 }

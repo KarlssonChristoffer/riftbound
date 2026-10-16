@@ -10,9 +10,12 @@
 //   squirrel   red squirrels in the pine stands, each with a home tree (fid) and the trees round it
 //   raven      a pair round the high country's rock (the fell's tors, the crags), wandering over the woods
 //   capercaillie  the big grouse on the floor of the old pine woods
-// OWNS: nothing at run time (plain data, cached per seed). READS: world/forest.js (RECT, HOME), core/mathx.js.
+// THE MORNING TRAILS (trailOf, below; docs/FAUNA.md "Tracks"): after a wet night, the way each herd walked to its bed, each fox round
+// to its den, each hare to its form, as lines of places and hours: the same on every client from the seed and the day.
+// OWNS: nothing at run time (plain data, cached per seed). READS: world/forest.js (RECT, HOME), core/mathx.js, content/animals.js (TRAIL).
 import {hash3} from '../core/mathx.js';
 import {RECT, HOME} from './forest.js';
+import {TRAIL} from '../content/animals.js';
 
 export const FAUNA_TUNE = {
   roe: {groups: [3, 4], high: 1, n: [2, 3], r: 9, apart: 26},     // herds in the home woods (+ high in the high country), deer a herd, roam r (m)
@@ -145,4 +148,74 @@ export function faunaPlan(F) {
   A = {groups, animals, around: (x, y, r, out) => around(x, y, r, out)};
   plans.set(F, A);
   return A;
+}
+
+// THE MORNING TRAIL of group g (an index in faunaPlan(F).groups) on in-game day `day` (sim/env.js E.day): the roe herd's walk in
+// to its bed, one line a deer, side by side and crossing; the fox's round in to its den; the hare's loop to its form. Each line:
+// pts = [x, y, hour (of the world clock, E.t), ...] a metre apart, from TRAIL.from to the line's end hour. Its own generator
+// (mix(seed, 7300 + g, day)): the plan's R is never touched, so no animal moves. null: a group that leaves no trail (or no room).
+// A line keeps to ground an animal walks: in the forest's rect, out of the lake, a wide stream, the rock and the clearing.
+//   trailOf(F, g, day) -> {sp, g, lines: [{pts: Float32Array, n}]} | null      (cached: the last few asked)
+const trails = new Map();
+export function trailOf(F, g, day) {
+  const A = faunaPlan(F); if (!A) return null;
+  const G = A.groups[g]; if (!G || !TRAIL[G.sp]) return null;
+  const key = F.seed + ':' + g + ':' + day; let T = trails.get(key); if (T !== undefined) return T;
+  if (trails.size > 64) trails.clear();
+  const C = TRAIL[G.sp], R = rngOf(mix(F.seed, 7300 + g, day)), rr = (a, b) => a + R() * (b - a);
+  const end = G.sp === 'roe' ? G.cover : G.sp === 'fox' ? G.den : {x: G.x, y: G.y};
+  const o = {};
+  const bad = (x, y) => x < RECT.x0 + 3 || x > RECT.x1 - 3 || y < RECT.y0 + 3 || y > RECT.y1 - 4 || F.inLake(x, y, 1) || (F.at(x, y, o), o.d < o.hw - .2 && o.hw > 1.6)   // (a brook they splash over; not a river)
+    || F.outcrops.some(q => Math.hypot(q.x - x, q.y - y) < q.r + .5) || (F.clearing && Math.hypot(F.clearing.x - x, F.clearing.y - y) < F.clearing.r + 2);
+  // the way: from a start len m out, walked toward the end with a wandering heading (a fox's round swings wide), turned off bad ground
+  const len = rr(...C.len), a0 = R() * Math.PI * 2;
+  const way = [];
+  let x = end.x + Math.cos(a0) * len * (G.sp === 'fox' ? .55 : .8), y = end.y + Math.sin(a0) * len * (G.sp === 'fox' ? .55 : .8);
+  for (let k = 0; k < 12 && bad(x, y); k++) { const a = R() * Math.PI * 2; x = end.x + Math.cos(a) * len * .7; y = end.y + Math.sin(a) * len * .7; }
+  if (bad(x, y)) { trails.set(key, null); return null; }
+  const swing = G.sp === 'fox' ? 1.1 : G.sp === 'hare' ? .9 : .55, ph = R() * 10;
+  let hd = Math.atan2(end.y - y, end.x - x) + (R() - .5) * swing * 2, walked = 0;
+  way.push(x, y);
+  for (let i = 0; i < 400; i++) {
+    const d = Math.hypot(end.x - x, end.y - y); if (d < 1) break;
+    const left = Math.max(0, len - walked), want = Math.atan2(end.y - y, end.x - x);
+    // late in the walk it heads in; early it wanders (a fox's round, a herd browsing its way)
+    const pull = left < d * 1.1 ? 1 : clamp01(1 - left / len) * .6 + .15;
+    let dd = want - hd; dd -= Math.round(dd / (Math.PI * 2)) * Math.PI * 2;
+    hd += dd * pull * .5 + Math.sin(ph + walked * .21) * swing * .18 + (R() - .5) * swing * .2;
+    let nx = x + Math.cos(hd), ny = y + Math.sin(hd);
+    const near = d < 4;   // (its last few metres: the bed / den / form itself may be by water or rock)
+    for (let k = 0; k < 10 && !near && bad(nx, ny); k++) { hd += (k & 1 ? -1 : 1) * (k + 1) * .4; nx = x + Math.cos(hd); ny = y + Math.sin(hd); }
+    if (!near && bad(nx, ny)) break;
+    x = nx; y = ny; walked++; way.push(x, y);
+  }
+  const n = way.length / 2;
+  if (n < 6) { trails.set(key, null); return null; }
+  // the lines: a roe herd one a deer (side by side, the gap wandering, each a few minutes apart); a fox, a hare one
+  const deer = G.sp === 'roe' ? A.animals.filter(q => q.group === g).length || 1 : 1, lines = [];
+  const t0 = day * 24 + TRAIL.from, t1 = day * 24 + C.end;
+  for (let l = 0; l < deer; l++) {
+    const pts = new Float32Array(n * 3), gap = l ? rr(...C.gap) * (l & 1 ? 1 : -1) * Math.ceil(l / 2) : 0, lag = l * rr(.05, .12), wph = R() * 6;
+    const s0 = t0 + rr(0, .4) + lag, s1 = t1 - rr(0, .3) + lag * .3;
+    for (let i = 0; i < n; i++) {
+      const j = Math.min(n - 1, i + 1), k = Math.max(0, i - 1), tx = way[j * 2] - way[k * 2], ty = way[j * 2 + 1] - way[k * 2 + 1], tl = Math.hypot(tx, ty) || 1;
+      const tail = Math.min(1, (n - 1 - i) / 6), off = gap * (.6 + .4 * Math.sin(wph + i * .17)) * tail;   // (the lines meet at the bed)
+      pts[i * 3] = way[i * 2] - ty / tl * off; pts[i * 3 + 1] = way[i * 2 + 1] + tx / tl * off;
+      pts[i * 3 + 2] = s0 + (s1 - s0) * (i / (n - 1));
+    }
+    lines.push({pts, n});
+  }
+  T = {sp: G.sp, g, day, lines};
+  trails.set(key, T);
+  return T;
+}
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+// where line `l` of a trail is at world hour h ({x, y, hd} into out; false before it starts or after it ends)
+export function trailAt(T, l, h, out) {
+  const L = T?.lines[l]; if (!L) return false;
+  const P = L.pts, n = L.n; if (h < P[2] || h > P[(n - 1) * 3 + 2]) return false;
+  let i = Math.floor((h - P[2]) / (P[(n - 1) * 3 + 2] - P[2]) * (n - 1)); i = Math.max(0, Math.min(n - 2, i));
+  const a = i * 3, b = a + 3, k = (h - P[a + 2]) / ((P[b + 2] - P[a + 2]) || 1);
+  out.x = P[a] + (P[b] - P[a]) * k; out.y = P[a + 1] + (P[b + 1] - P[a + 1]) * k; out.hd = Math.atan2(P[b + 1] - P[a + 1], P[b] - P[a]);
+  return true;
 }
