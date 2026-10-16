@@ -19,7 +19,8 @@
 // EMITS: nothing of its own (the jab: fishing's fish.jab / fish.catch / fish.miss). BUDGET: update: a compare a step (the set's
 //   version); with the feather worn one waterSample a step (fishing.shallow); view: one ask a frame per feather near you.
 import {flags} from '../core/flags.js';
-import {KEEPSAKE_IDS, NOTES, HERON, isKeepsake} from '../content/keepsakes.js';
+import {KEEPSAKE_IDS, NOTES, HERON, STONE, isKeepsake} from '../content/keepsakes.js';
+import {viewRandom} from '../core/rng.js';
 import {hdUnit, hdPrompt} from '../ui/hdpixel.js';
 
 const ON = flags.get('keepsakes') !== '0';
@@ -78,7 +79,8 @@ export async function create(host) {
   // feather: his stillness in the shallows judged here from where he's drawn (no word from the server: it's only a look)
   const VK = {me: 0}, PEERS = new Map(), PSM = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};
   const ease = (v, to, dt) => to > v ? Math.min(to, v + dt * 1.5) : Math.max(to, v - dt * 3);
-  F.view = dt => {
+  F.view = (dt, evs) => {
+    stoneView(dt, evs);
     const Fi = fishing(); if (!Fi?.come) return;
     const P = host.player;
     VK.me = ease(VK.me, HS.w ? HS.k : 0, dt);
@@ -98,6 +100,29 @@ export async function create(host) {
       if (q.k > 0) Fi.come(q.key, o.x, o.y, q.k, HERON.n[0] + (HERON.n[1] - HERON.n[0]) * q.k | 0);
     }
   };
+  // ---------------------------------------------------------------- the Warm Stone's look: snuffed, the wick glows red a moment,
+  // then catches in a puff of sparks (the relight itself is features/caves.js's: x the 'cave.relight' note)
+  const VR = viewRandom('keepsakes'), SPARK = [];   // {x, y, h, vx, vy, vh, t, life}
+  let glowT = 0;
+  const PG = {size: 2, emit: true}, PS = {size: 1, emit: true};
+  function stoneView(dt, evs) {
+    const P = host.player;
+    for (let i = 0; i < evs.length; i++) {
+      const e = evs[i];
+      if (e.type === 'lantern.snuff' && F.worn.has('warm_stone')) glowT = STONE.glow;
+      else if (e.type === 'lantern.relight' && F.worn.has('warm_stone')) {
+        glowT = 0;
+        for (let k = 0; k < 10 && SPARK.length < 24; k++) SPARK.push({x: P.x, y: P.y, h: P.z + 1.15, vx: (VR() - .5) * 1.2, vy: (VR() - .5) * 1.2, vh: .6 + VR() * 1.2, t: 0, life: .3 + VR() * .4});
+      }
+    }
+    if (glowT > 0) glowT -= dt;
+    for (let i = SPARK.length - 1; i >= 0; i--) { const s = SPARK[i]; if ((s.t += dt) > s.life) { SPARK.splice(i, 1); continue; } s.vh -= 4 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.h += s.vh * dt; }
+  }
+  F.frame = () => {
+    if (glowT > 0) { const P = host.player; host.point(P.x, P.y, P.z + 1.15, (glowT * 9 | 0) % 2 ? '#d8401c' : '#a82a14', PG); }
+    for (let i = 0; i < SPARK.length; i++) { const s = SPARK[i]; host.point(s.x, s.y, s.h, s.t < s.life * .5 ? '#ffd27a' : '#e86a2a', PS); }
+  };
+
   // the HD layer: "E jab" over him while the shadows are up
   F.hd = (q, sc) => {
     if (!ready() || host.hudOff || host.playerHidden || pack()?.open || !free()) return;

@@ -24,6 +24,13 @@ import {roll, RARITY_TIER} from './fishing.js';
 
 export const KEEPSAKE_IDS = ['heron_feather', 'warm_stone', 'bark_doll', 'tally_stick', 'full_tally_stick', 'big_tooth', 'fiddle_string'];
 export const isKeepsake = id => KEEPSAKE_IDS.includes(id);
+// a stat's value from the keepsakes in a set of worn ids alone (a friend's set: their loudness to the animals, features/fauna.js;
+// who the soot things shun, server/room.mjs): base, + adds, x muls (host.mods' order)
+export function noteOf(ids, stat, base) {
+  let add = 0, mul = 1;
+  for (const id of ids || []) for (const n of NOTES[id] || []) if (n.stat === stat) { if (n.add) add += n.add; if (n.mul) mul *= n.mul; }
+  return (base + add) * mul;
+}
 
 export const NOTES = {
   heron_feather: [],   // (its rule is features/keepsakes.js's own: stillness in the shallows)

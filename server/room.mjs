@@ -12,7 +12,8 @@
 // cave's VEINS (docs/MINING.md): the blows left on each, who struck it, each striker's chunks when it breaks, its coming back
 // (a hollow wall's plug never comes back). And the cave's SOOT THINGS (docs/CAVELIFE.md: sim/cavelife.js, the same rules the game
 // runs offline): they go for the lit lanterns (each player's state says whether theirs burns: lt), keep out of the lamps' and
-// burning fires' light (the builds), and put a lantern out (an event to everyone: {k: 'ev', a: 'snuff', id}); their places go
+// burning fires' light (the builds), and put a lantern out (an event to everyone: {k: 'ev', a: 'snuff', id}; one breaking off
+// from a Big Tooth's wearer: {k: 'ev', a: 'flinch', i, x, y, h}); their places go
 // out in the snapshots (sn: [x, y, h, mode] each).
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
 //   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log}); room.connect(conn); room.stop(); room.clock() -> hours
@@ -24,7 +25,7 @@ import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/cont
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
-import {HERON, heronRoll} from '../src/content/keepsakes.js';
+import {HERON, TOOTH, heronRoll, noteOf} from '../src/content/keepsakes.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
@@ -218,6 +219,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const g = cleanSet(m.g);
     if (g.join(',') === p.gear.join(',')) return mine();
     p.gear = g;
+    p.shun = noteOf(g, 'cave.shun', 0) > 0 ? TOOTH.shun : 0; p.kin = noteOf(g, 'cave.kin', 0) > 0;   // (the keepsakes' rules for the soot things: sim/cavelife.js)
     all({k: 'gear', id: p.id, g});
     log(`  ${p.name} wears ${g.join(', ') || 'their own clothes'}`);
   }

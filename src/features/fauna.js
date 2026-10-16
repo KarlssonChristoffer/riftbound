@@ -17,6 +17,7 @@
 // they can differ a little between screens; if animals ever matter to play (hunting, taming), they move to the server.
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, hd, onKey, biomeChanged, toggle, menu, dbg(). ?fauna=0 starts it off.
 // OWNS: its animals' state, their meshes (look.js). READS: world/layout.js FOREST (the plan), host.player, host.world.cave (keeps out of its mouth), co-op's peers
+//   (and their gear: a keepsake's fauna.loud), host.mods ('fauna.loud': x how loud the animals take him)
 //   (host.feature('coop').net), host.env (hour, season, snow), host.elev / inStream, world.js steep, host.entities.near (what
 //   stands where), host.events (gunshots, hits, breaks: they scare), the uncanny forest's F.elk, the watcher's F.state, the game's
 //   ui (a toast for a touch).
@@ -32,6 +33,7 @@ import {steep} from '../world/world.js';
 import {faunaPlan} from '../world/fauna.js';
 import {createFaunaLook} from './fauna/look.js';
 import {createCrownBirds} from './fauna/crowns.js';
+import {noteOf} from '../content/keepsakes.js';
 
 // ---------------------------------------------------------------- tunables
 // alert / flee: m from a person (walking) at which it stops to watch / bolts; rest: x those while it is bedded (it sits tight);
@@ -119,6 +121,7 @@ export async function create(host) {
     const sp = Math.hypot(P.vx || 0, P.vy || 0), st = P.state;
     q.x = P.x; q.y = P.y; q.on = true;
     q.k = st === 'roll' || st === 'leap' || st === 'knock' ? N.jump : sp < .3 ? N.still : P.gait === 'sprint' || sp > 5.2 ? N.sprint : P.gait === 'run' || sp > 2.4 ? N.run : sp < 1.8 ? N.creep : N.walk;
+    q.k *= host.mods.value('fauna.loud', 1);   // (x how loud the animals take him: the one note, briefs' depth-shared; the Big Tooth's, docs/KEEPSAKES.md)
     nPeople = 1;
     const C = host.feature('coop')?.net;
     if (C && C.peers) for (const peer of C.peers.values()) {
@@ -127,6 +130,7 @@ export async function create(host) {
       const r = PEOPLE[nPeople++], v = Number.isNaN(r.px) || dt <= 0 ? 0 : Math.hypot(o.x - r.px, o.y - r.py) / dt;
       r.px = r.x = o.x; r.py = r.y = o.y; r.on = true;
       r.k = v > 30 ? N.walk : v < .3 ? N.still : v > 5.2 ? N.sprint : v > 2.4 ? N.run : v < 1.8 ? N.creep : N.walk;   // (v > 30: a teleport)
+      r.k *= noteOf(peer.gear, 'fauna.loud', 1);   // (a friend's: from the set they wear)
     }
     nReal = nPeople;
     const E = elk(); if (E && NIGHT_ELK.has(E.mode) && nPeople < PEOPLE.length) { const r = PEOPLE[nPeople++]; r.x = E.x; r.y = E.y; r.k = TUNE.elk; r.on = true; r.px = r.py = NaN; }

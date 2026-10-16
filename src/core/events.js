@@ -223,6 +223,7 @@ export const EVENTS = {
   'lantern.snuff':      ['features/caves.js',     'x, y: the soot things put his lantern out', 'audio'],
   'lantern.relight':    ['features/caves.js',     'x, y: his lantern lit again after a snuff (by itself, or by a crystal, a lamp, a fire)', 'audio'],
   'critter.wake':       ['features/cavelife.js',  'x, y, i: a rock-thing unrolled and trots off (view)', 'audio'],
+  'soot.flinch':        ['features/cavelife.js',  'x, y, h: a soot thing broke off from a Big Tooth\'s wearer (sim offline; the server\'s ev online)', 'cavelife (view), audio'],
   // building (features/builds.js, docs/BUILDING.md): a build's id is 'o' + n offline, the server's 'b' + n online
   'build.add':          ['features/builds.js',    'x, y, id, kind (content/builds.js), mine: a build went down (his, or online a friend\'s)', 'audio'],
   'build.remove':       ['features/builds.js',    'x, y, id, kind: a build was taken back', '(none yet)'],

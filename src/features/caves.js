@@ -43,7 +43,7 @@ export async function create(host) {
   Object.defineProperties(F, {lit: {get: () => F.down && !off && snuffT <= 0}, off: {get: () => off}});
   F.snuff = () => {
     if (!F.lit) return false;
-    snuffT = LANTERN.relight; const p = host.player; host.events.push({type: 'lantern.snuff', x: p.x, y: p.y});
+    snuffT = LANTERN.relight * host.mods.value('cave.relight', 1); const p = host.player;   // (x: the Warm Stone, docs/KEEPSAKES.md) host.events.push({type: 'lantern.snuff', x: p.x, y: p.y});
     return true;
   };
   F.onKey = k => { if (k !== 'l' || !F.down || host.lock) return false; pressL = true; return true; };   // (down there: the lantern's key is ours)
