@@ -64,7 +64,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
       fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false};
-    p.rec ??= PL.join(KEY_RE.test(m.key) ? m.key : 'anon' + id, m.xp).rec;   // (his record by the hello's player key: server/players.mjs, shared with the skills)
+    p.rec ??= PL.join(KEY_RE.test(m.key) ? m.key : '#' + id, m.xp).rec;   // (his record by the hello's player key: server/players.mjs, shared with the skills)
     const made = ws.hello(p, m);   // (his records: the server's, the hello's copy filling in)
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
       clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null, made}));
