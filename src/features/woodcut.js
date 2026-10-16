@@ -81,12 +81,13 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- the sim's state
   const hp = new Map();       // tree -> blows left (a fresh tree has none: its full count)
+  const ownFell = new Set();  // the forest's (shared) trees felled offline (by him, or from the private save): going online stands them up
   const asked = new Map();    // co-op: a shared tree whose fell was asked of the server -> when (clockT): asked again after 3 s (a refusal)
   const shared = p => typeof p.fid === 'string' && !!host.feature('coop')?.online;
   const felled = new Map();   // tree -> {key, at (env.t it grows back), stump (its prop)}
   const falls = [];           // {p, I, t, dx, dy (the way it falls), landed}
   const logs = [];            // {x, y, h, vx, vy, vh, t, rest, yaw, spin, dead}
-  let was = false, tick = 0, appliedN = -1, ver = 0, noteT = -9, clockT = 0, aimSet = false, byE = false, heldSlot = -1;
+  let was = false, wasNet = false, tick = 0, appliedN = -1, ver = 0, noteT = -9, clockT = 0, aimSet = false, byE = false, heldSlot = -1;
   // a press (LMB) is the axe's when the cursor is on a trunk within the lock's reach, nothing hostile is under the cursor, the gun
   // isn't drawn and there's an axe in the bag -> its id | '' (the gun's then). Called from the input, between steps
   function wantTool() {
@@ -107,7 +108,7 @@ export async function create(host) {
   }
   function grow(p, quiet = false) {
     const f = felled.get(p); if (!f) return;
-    host.entities.remove(f.stump); host.entities.hide(p, false); felled.delete(p); hp.delete(p); ver++;
+    host.entities.remove(f.stump); host.entities.hide(p, false); felled.delete(p); hp.delete(p); ownFell.delete(p); ver++;
     const s = store(); if (s && !quiet) { delete s.felled[f.key]; pack()?.dirty(); }
     if (!quiet) host.events.push({type: 'tree.grow', x: p.x, y: p.y, who: p});
   }
@@ -115,7 +116,7 @@ export async function create(host) {
   function apply() {
     const s = store(); appliedN = trees.length; if (!s) return;
     const byKey = new Map(); for (const p of trees) byKey.set(keyOf(p), p);
-    for (const k in s.felled) { const p = byKey.get(k), I = p && infoOf(p); if (I) fellNow(p, I, s.felled[k]); }
+    for (const k in s.felled) { const p = byKey.get(k), I = p && infoOf(p); if (I && !shared(p)) { fellNow(p, I, s.felled[k]); if (typeof p.fid === 'string') ownFell.add(p); } }   // (online, the forest's trees are the server's)
   }
   // leaving it (another biome, a run, the title): the trees stand again (the save keeps them felled); logs on the ground go in
   // the pouch, a fall in progress ends
@@ -233,12 +234,14 @@ export async function create(host) {
     }
     hp.delete(p); fell(p, I, ux, uy);
   }
-  function fell(p, I, ux, uy, xp = true, fall = true) {
+  // mine: this client felled it (its logs drop here; a shared tree's for the one who felled it). A shared tree's fell is the
+  // server's: it stays out of the private save (else its stump came along into single player)
+  function fell(p, I, ux, uy, xp = true, fall = true, mine = true) {
     const at = (host.env?.t ?? 0) + TUNE.regrow.hours;
     fellNow(p, I, at);
-    const s = store(); if (s) { s.felled[keyOf(p)] = at; pack()?.dirty(); }
+    const s = store(); if (!shared(p)) { if (s) { s.felled[keyOf(p)] = at; pack()?.dirty(); } if (typeof p.fid === 'string') ownFell.add(p); }
     if (fall) {
-      falls.push({p, I, t: 0, dx: ux, dy: uy, landed: false});
+      falls.push({p, I, t: 0, dx: ux, dy: uy, landed: false, mine});
       host.events.push({type: 'tree.fell', x: p.x, y: p.y, who: p, vx: ux, vy: uy, species: I.species, scale: I.s});
     }
     if (xp) pack()?.gain('woodcutting', Math.round(XP.fell * I.def.xp * I.s), {x: p.x, y: p.y, h: (p.z || 0) + 2.6});
@@ -248,12 +251,12 @@ export async function create(host) {
   // every client); an old server's word without one: away from the one who felled it if we see him, else away from us. The XP is
   // the server's (its skills message). -> false when it isn't a tree the axe knows (coop removes it then)
   function fellShared(p, mine, late, fx, fy, wx, wy) {
-    if (felled.has(p)) return true;
+    if (felled.has(p)) { ownFell.delete(p); return true; }   // (felled here already: the server's now)
     const I = infoOf(p); if (!I) return false;
     asked.delete(p); hp.delete(p);
-    if (wx !== undefined && Math.hypot(wx, wy) > .5) { fell(p, I, wx, wy, false, !late); return true; }
+    if (wx !== undefined && Math.hypot(wx, wy) > .5) { fell(p, I, wx, wy, false, !late, mine); return true; }
     const P = host.player, ox = fx ?? P.x, oy = fy ?? P.y, d = Math.hypot(p.x - ox, p.y - oy) || 1;
-    fell(p, I, (p.x - ox) / d, (p.y - oy) / d, false, !late);
+    fell(p, I, (p.x - ox) / d, (p.y - oy) / d, false, !late, mine);
     return true;
   }
   const crownMid = I => { const C = I.pose.crown; return C ? ((C.y0 + C.y1) / 2) * I.s : 3 * I.s; };
@@ -363,10 +366,12 @@ export async function create(host) {
       if (f.t >= LOGS_T) { spawnLogs(f); falls.splice(i, 1); }
     }
   }
-  function spawnLogs(f) {   // along the fallen trunk, popped up a little: they settle, then come to him
+  // along the fallen trunk, popped up a little: they settle, then come to him. Only where it was felled (f.mine): in co-op the
+  // others see the trunk break (the event) but the logs are the feller's, not one set per client
+  function spawnLogs(f) {
     const extra = host.mods?.value('woodcut.extra', 0) ?? 0, n = f.I.logs + (R() < extra ? 1 : 0);
     const len = Math.max(1.2, (f.I.pose.crown?.y0 || 2) * f.I.s * 1.05);
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < n && f.mine !== false; i++) {
       const k = (i + .5) / n, d = .6 + k * len, side = (R() - .5) * .5;
       let x = f.p.x + f.dx * d - f.dy * side, y = f.p.y + f.dy * d + f.dx * side;
       if (host.blocked?.(x, y, host.elev(x, y))) { x = f.p.x + f.dx * .7; y = f.p.y + f.dy * .7; }   // (into a wall: by the stump)
@@ -525,6 +530,10 @@ export async function create(host) {
       const on = active();
       if (on !== was) { was = on; if (on) apply(); else unapply(); }
       if (!on) return;
+      // going online: the forest's trees felled here and not (yet) by the server's word stand again (its 'felled' list, late
+      // ones included, fells the rest: before or after this, fellShared takes them over)
+      const net = !!host.feature('coop')?.online;
+      if (net !== wasNet) { wasNet = net; if (net) for (const p of [...ownFell]) if (!falls.some(q => q.p === p)) grow(p, true); }
       for (let i = 0; i < evs.length; i++) {
         const e = evs[i];
         if (e.type === 'player.chop') blow(e);
