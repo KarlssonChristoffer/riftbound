@@ -14,7 +14,8 @@
 // runs offline): they go for the lit lanterns (each player's state says whether theirs burns: lt), keep out of the lamps' and
 // burning fires' light (the builds), and put a lantern out (an event to everyone: {k: 'ev', a: 'snuff', id}); their places go
 // out in the snapshots (sn: [x, y, h, mode] each). And THE WORKSHOP (docs/WORKSHOP.md: server/workshop.mjs): every made thing's
-// record (kept by the browser's key: server/players.mjs), counted from the 'fell' and 'mine' acts that carry its uid.
+// record (kept by the browser's key: server/players.mjs), counted from the 'fell' and 'mine' acts that carry its uid; the
+// furnaces' heat and charges; fire-setting (an iron vein cracked by a fire burning by it: 'k' + its index in the world).
 // Transport-free: a connection is {send(text), close(), onmessage, onclose} (ws.mjs, or any other transport with that shape).
 //   const room = createRoom({seed, trees, decor, veins, cave, regrow, unc, hour, daymin, log, workshop: {heat, smelt, wardrobe}}); room.connect(conn); room.stop(); room.clock() -> hours
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
@@ -55,7 +56,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
   // THE WORKSHOP: the made things' records (by the browser's key), the furnaces (server/workshop.mjs)
-  const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players, heat: workshop.heat, smelt: workshop.smelt});
+  const players = createPlayers(), ws = createWorkshop({world, peers, all, log, clock, secs: () => now() / 1000, players, veins, heat: workshop.heat, smelt: workshop.smelt});
 
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }
@@ -160,7 +161,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       if (Math.hypot(v.x - p.x, v.y - p.y) > REACH) return deny('too far');
       kind = v.kind;
     } else if (!VEINS[kind] || !/^v\d+$/.test(id)) return deny('no such vein');
-    const V = VEINS[kind]; if ((num(m.tier, 1) | 0) < V.tier) return deny('too hard');
+    const crack = ws.cracked(id) ? 1 : 0;   // (fire-setting: a cracked vein asks one tier less, gives one chunk more: server/workshop.mjs)
+    const V = VEINS[kind]; if ((num(m.tier, 1) | 0) + crack < V.tier) return deny('too hard');
     const pow = Math.max(.25, Math.min(3, num(m.pow, 1)));
     p.mineLvl = Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0));   // (his level for the others' last blows too)
     const by = cur?.by ? [...cur.by] : []; if (!by.includes(p.id)) by.push(p.id);
@@ -175,7 +177,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const pq = peers.get(q); if (!pq) continue;
       const lvl = pq.mineLvl || 1, notes = levelNotes(SKILLS.mining.per, lvl);
       for (const g of pq.gear) for (const n of GEAR_BY_ID[g]?.mods || []) notes.push(n);
-      got[q] = mineYield(mineRng, kind, mineStats(notes));
+      got[q] = mineYield(mineRng, kind, mineStats(notes)) + crack;
       ws.count(pq, us[q], kind === 'iron' ? ['veins', 'iron'] : ['veins']);
     }
     world.set(id, V.hollow ? {s: 'spent', by: p.id, t} : {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});   // (a hollow wall: open for good)

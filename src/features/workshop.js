@@ -8,6 +8,15 @@
 //   ANVIL    a Stone Anvil is a build; Tab by it (the workshop panel beside the pack's) lays a piece on it: a recipe
 //            (content/workshop.js SMITH), a haft from the logs he carries, a glow-shard inlay. LMB on it hammers (the job
 //            'smith'): HAMMER.counts counts finish it (a blow in rhythm counts two) and it is made
+//   TOOLS    a made tool is its item (content/items.js: tier, power) plus its haft (content/workshop.js WOODS): the tool's
+//            swing time is the haft's (sim/player/tool.js swingBy), its blow's power a modifier note while it's out (source
+//            'held': woodcut.power / mine.power); a pine haft held at a burning fire (E, a second) catches and burns WOODS
+//            pine_log.lit s as a small torch (a light, and a lantern to the cave: features/cavelife.js, mining.js, coop's lt;
+//            the rain outside puts it out, so do the soot things); a glow-shard inlay lights the rock pale green at each blow
+//            (a flash, not a lantern). view/heldtool.js draws its haft's wood and its inlay (lookOf)
+//   FIRE     fire-setting (content/workshop.js FIRESET): a fire build burning within r m of an iron vein for t s cracks it for
+//            hours in-game hours: features/mining.js asks cracked(i) (one tier less, one chunk more, "fire would crack this");
+//            its seams glow. Online the server's (a world entry 'k' + i)
 //   RECORDS  every made thing has one: {u, item, maker, day, haft, inlay, hand, counts, marks} (content/workshop.js). A made
 //            tool sits in the bag in a slot of its own carrying its uid (game/inventory.js: pack.giveMade). Offline they are
 //            minted here; online the server mints them (act 'make' -> {k: 'made', rec}: the pouch pays when it hears it) and
@@ -24,7 +33,7 @@
 //   builds.shape), the bars on the stone, the mouths' glow and light. READS: builds (the list, fire, now, refuel), pack (the
 //   pouch, the bag, the store, open), coop (online, act, mail, tag, net), host.env (the day), the tool (wantBy / aimBy for the
 //   jobs pump and smith), content/woodcut.js TREES (an old oak).
-// EMITS: smith.load, smith.pump, smith.smelt, smith.strike, smith.make.
+// EMITS: smith.load, smith.pump, smith.smelt, smith.strike, smith.make, tool.lit, tool.unlit, vein.crack.
 // BUDGET: sim: the furnaces standing (a few multiplies each), the events of a step (a few kinds), the mail. View: a flame and a
 //   light per hot furnace, a glow write when its heat moved, sparks after a blow; the panel only while it is up (rebuilt on a
 //   change of a numeric key).
@@ -32,7 +41,7 @@ import * as THREE from 'three';
 import {ITEMS, WOOD_IDS} from '../content/items.js';
 import {gearById} from '../content/gear.js';
 import {TREES} from '../content/woodcut.js';
-import {HEAT, PUMP, CHARGES, BELLOWS, SMITH, HAND, HAMMER, WOODS, INLAY, REACH, SWING, MAX_RECS, heatStep, pumpAdd, words, smithCost,
+import {HEAT, PUMP, CHARGES, BELLOWS, SMITH, HAND, HAMMER, WOODS, INLAY, REACH, SWING, FIRESET, MAX_RECS, heatStep, pumpAdd, words, smithCost,
   cleanRec, mintRec, countOn} from '../content/workshop.js';
 import {propTop, FAMS} from '../world/world.js';
 import {setMaterials} from '../content/materials.js';
@@ -230,6 +239,95 @@ export async function create(host) {
     else if (e.job === 'smith' && b.def.anvil) hammer(b, !!e.rhythm, e);
   }
 
+  // ---------------------------------------------------------------- the tool in hand: its haft (swing, power), its look
+  const jobOfId = id => ITEMS[id]?.tool?.job || '';
+  const heldRec = id => { const j = jobOfId(id); if (!j) return null; const b = pack()?.best(j); return b && b.id === id ? recOf(b.u) : null; };
+  const LOOK = new Map();   // u -> 'haft:inlay' (made once a record)
+  function lookOf(id) { const r = heldRec(id); if (!r) return ''; let k = LOOK.get(r.u); if (k === undefined) { k = r.haft + ':' + (r.inlay ? 1 : 0); LOOK.set(r.u, k); } return k; }
+  const NOTES = {};   // a haft with power -> its notes per job (made once)
+  for (const w in WOODS) if (WOODS[w].power) NOTES[w] = {chop: [{stat: 'woodcut.power', mul: WOODS[w].power}], mine: [{stat: 'mine.power', mul: WOODS[w].power}]};
+  let heldNotes = null;
+  function heldMods() {   // the 'held' source: the tool out's haft's power (dropped when it goes away)
+    const t = T(), id = t?.S.on ? t.S.id : '', r = id ? heldRec(id) : null, n = r && NOTES[r.haft] ? NOTES[r.haft][jobOfId(id)] || null : null;
+    if (n === heldNotes) return;
+    heldNotes = n; if (n) host.mods.set('held', n); else host.mods.clear('held');
+  }
+  // THE PINE HAFT: E held a second by a burning fire (a campfire, a ring, a furnace) lights the pine-hafted tool (the one in hand,
+  // else the first in the bag)
+  let torch = null, holdT = 0;   // {u, t: s left}
+  function pineRec() {
+    const t = T(), id = t?.S.on ? t.S.id : '', r0 = id ? heldRec(id) : null; if (r0?.haft === 'pine_log') return r0;
+    for (const sl of pack().inv.bag) { const r = sl?.u ? recOf(sl.u) : null; if (r?.haft === 'pine_log') return r; }
+    return null;
+  }
+  function fireNear() {
+    const P = host.player; if (host.feature('campfires')?.burningNear?.(P.x, P.y, 1.8)) return true;
+    for (const b of FURNS) if (burning(b) && Math.hypot(b.x - P.x, b.y - P.y) - b.def.r < 1.4) return true;
+    return false;
+  }
+  function torchStep(dt, evs) {
+    const P = host.player, W = WOODS.pine_log;
+    if (torch) {
+      torch.t -= dt;
+      let why = torch.t <= 0 || pack().slotOf(torch.u) < 0 ? 'out' : (host.env?.sky?.rain || 0) > .3 && !host.feature('caves')?.down ? 'rain' : '';
+      for (let k = 0; k < evs.length; k++) if (evs[k].type === 'lantern.snuff') why = 'out';   // (the soot things put it out too)
+      if (why) {
+        host.events.push({type: 'tool.unlit', x: P.x, y: P.y, u: torch.u, why}); torch = null;
+        ui()?.float(P.x, P.y, P.z + 2, why === 'rain' ? 'the rain put the resin out' : 'the resin has burnt out', '#e8a070');
+      }
+      return;
+    }
+    if (host.keys?.has('e') && !host.lock && fireNear()) {
+      const r = pineRec(); if (!r) { holdT = 0; return; }
+      if ((holdT += dt) < W.hold) return;
+      holdT = 0; torch = {u: r.u, t: W.lit};
+      host.events.push({type: 'tool.lit', x: P.x, y: P.y, u: r.u});
+      ui()?.toast('The resin catches', `the pine haft burns like a torch for ${Math.round(W.lit / 60)} minutes`, '#ffb060');
+    } else holdT = 0;
+  }
+
+  // ---------------------------------------------------------------- fire-setting (the iron veins: features/mining.js asks cracked(i))
+  const CRACK = new Map();   // vein -> the world hour it closes again (online: until the server says it has)
+  const heatV = new Map();   // vein -> s a fire has burnt by it (offline; online the server counts)
+  let IRON = [], ironOf = null, crackT = 0, crackOn = false;
+  const veinsNow = () => host.feature('mining')?.veins || null;
+  const crackKey = V => V.length + ':' + (V[0] ? V[0].x.toFixed(1) + ',' + V[0].y.toFixed(1) : '');   // (this cave's: another seed, another plan)
+  function ironVeins() { const V = veinsNow(); if (V && V !== ironOf) { ironOf = V; IRON = []; V.forEach((v, i) => { if (v.kind === 'iron') IRON.push(i); }); } return IRON; }
+  function crackSave() {
+    const s = store(), V = veinsNow(); if (!s || !V || online()) return;
+    s.crk = {key: crackKey(V), v: Object.fromEntries(CRACK)}; pack()?.dirty();
+  }
+  function crackRestore() {
+    CRACK.clear(); heatV.clear(); crackOn = true;
+    const s = store(), V = veinsNow(); if (!s?.crk || !V || s.crk.key !== crackKey(V)) return;
+    for (const k in s.crk.v) if (V[+k]) CRACK.set(+k, +s.crk.v[k]);
+  }
+  function crackSet(i, at, quiet = false) {
+    const V = veinsNow(), v = V?.[i]; if (!v) return;
+    const was = CRACK.has(i); CRACK.set(i, at); if (was || quiet) return;
+    host.events.push({type: 'vein.crack', x: v.x, y: v.y, i, on: true});
+    if (Math.hypot(v.x - host.player.x, v.y - host.player.y) < 12) ui()?.float(v.x, v.y, floorOf(v) + 1.4, 'the rock cracks in the heat', '#ff9a50');
+  }
+  function crackOff(i) { const v = veinsNow()?.[i]; if (!CRACK.delete(i) || !v) return; host.events.push({type: 'vein.crack', x: v.x, y: v.y, i, on: false}); }
+  const floorOf = v => host.elev(v.x + v.nx * .45, v.y + v.ny * .45);
+  function crackTick() {   // offline, once a second: a burning fire by an iron vein; a crack closing on the clock
+    const B = builds(); if (!B) return;
+    const h = host.env?.t ?? 0; let ch = false;
+    for (const [i, at] of CRACK) if (h >= at) { crackOff(i); ch = true; }
+    for (const i of ironVeins()) {
+      if (CRACK.has(i)) continue;
+      const v = ironOf[i]; let near = false;
+      for (const b of B.list.values()) if (b.def.fire && Math.hypot(b.x - v.x, b.y - v.y) < FIRESET.r && burning(b)) { near = true; break; }
+      if (!near) { heatV.delete(i); continue; }
+      const t = (heatV.get(i) || 0) + 1; heatV.set(i, t);
+      if (t >= FIRESET.t) { heatV.delete(i); crackSet(i, h + FIRESET.hours); ch = true; }
+    }
+    if (ch) crackSave();
+  }
+  // the inlay's flash (a blow of a tool with glow shards in its head: the rock lit pale green)
+  const FLASH = {x: 0, y: 0, h: 0, t: 99};
+  const inlaid = job => !!recOf(pack()?.best(job)?.u)?.inlay;
+
   // ---------------------------------------------------------------- the panel (Tab by a furnace or an anvil)
   const queue = [];
   const panel = ON ? createWorkshopPanel({ask: (a, v) => queue.push([a, v])}) : null;
@@ -305,6 +403,10 @@ export async function create(host) {
       const c = cleanRec({...r, counts: m.counts, marks: m.marks}); if (!c) return;
       r.counts = c.counts; r.marks = c.marks; pack()?.dirty(); ver++;
     } else if (m.k === 'world' && m.s === 'built' && m.kind === 'furnace') fromServer(furn(m.id), m);
+    else if (m.k === 'world' && typeof m.id === 'string' && m.id[0] === 'k') {   // fire-setting: a vein cracked ('k' + i) or closed again
+      const i = +m.id.slice(1); if (!(i >= 0)) return;
+      if (m.s === 'cracked') crackSet(i, +m.at || 1, !!m.late); else if (m.s === 'grown') crackOff(i);
+    }
     else if (m.k === 'smith') {
       const b = builds()?.list.get(m.id); if (!b?.def.smelt) return;
       const f = furn(m.id), mine = m.by === me();
@@ -384,7 +486,7 @@ export async function create(host) {
       SP.push({x: e.x, y: e.y, h: e.h, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vh: 1 + VR() * 2.2, t: 0, life: .15 + VR() * .25, col: VR() < .5 ? '#fff4c8' : '#ffb040'});
     }
   }
-  const LOUT = [], LREC = [];
+  const LOUT = [], LREC = [], TORCH = {};   // (TORCH: the pine haft's flame's key)
 
   let wired = false, was = false, wasOnline = false, saveT = 0;
   function wire() {   // once the pack and co-op are there: the card over a made thing's slot, the uid on an act
@@ -395,11 +497,12 @@ export async function create(host) {
     c?.tag?.('fell', p => { const ps = host.itemOf?.(p)?.pose; return {u: pk.best('chop')?.u || '', old: ps && oldOak(ps.species, ps.scale || 1) ? 1 : 0}; });
     c?.tag?.('mine', () => ({u: pk.best('mine')?.u || ''}));
   }
+  function wireTool(t) { setTool(t); t.swingBy?.((id, job) => WOODS[heldRec(id)?.haft]?.swing || 1); }
 
   const F = {
     name: 'workshop', label: 'Workshop', on: ON,
     get ver() { return ver; }, get work() { return work; }, furnaces: FURN,
-    recOf, make, furn, load: (id, ore) => { const b = builds()?.list.get(id); if (b?.def.smelt) load(b, ore); }, fit: id => { const b = builds()?.list.get(id); if (b?.def.smelt) fit(b); },
+    recOf, make, furn, lookOf, get torch() { return !!torch; }, cracked: i => CRACK.has(i), load: (id, ore) => { const b = builds()?.list.get(id); if (b?.def.smelt) load(b, ore); }, fit: id => { const b = builds()?.list.get(id); if (b?.def.smelt) fit(b); },
     pump: (id, rhythm = false) => { const b = builds()?.list.get(id); if (b?.def.smelt) pump(b, rhythm); },
     lay: (id, r, haft = '', inlay = false) => { const b = builds()?.list.get(id); if (!b?.def.anvil) return; Object.assign(sel, {r, haft, inlay}); lay(b); },
     hammer: (id, rhythm = false) => { const b = builds()?.list.get(id); if (b?.def.anvil) hammer(b, rhythm); },   // (tests, dev)
@@ -410,14 +513,18 @@ export async function create(host) {
       if (!ON || !pack()) return;
       if (!wired) wire();
       const B = builds(); if (B && !shaped) { shaped = true; B.shape('furnace', SHAPE.furnace); B.shape('anvil', SHAPE.anvil); }
-      const t = T(); if (t && !toolSet) setTool(t);
+      const t = T(); if (t && !toolSet) wireTool(t);
       const ol = online(), on = active();
       if (!ol) for (let k = 0; k < evs.length; k++) {
         const e = evs[k];
         if (e.type === 'tree.fell') counted('chop', oldOak(e.species, e.scale) ? ['fell', 'oldoak'] : ['fell']);
         else if (e.type === 'mine.spent' && e.n > 0) counted('mine', e.kind === 'iron' ? ['veins', 'iron'] : ['veins']);
       }
-      if (on !== was || ol !== wasOnline) { if (was && !wasOnline) saveFurn(); clearFurn(); work = null; was = on; wasOnline = ol; seen = -1; }
+      if (on !== was || ol !== wasOnline) {
+        if (was && !wasOnline) { saveFurn(); crackSave(); }
+        clearFurn(); work = null; was = on; wasOnline = ol; seen = -1; CRACK.clear(); heatV.clear(); crackOn = false;
+      }
+      if (on && !ol && !crackOn && veinsNow()) crackRestore();   // (offline: the save's cracks, once the cave's veins are there)
       const c = coop(); if (ol && c.mail) for (let k = 0; k < c.mail.length; k++) mail(c.mail[k]);
       if (!on || !B) return;
       sync();
@@ -428,6 +535,8 @@ export async function create(host) {
       }
       while (queue.length) { const [a, v] = queue.shift(); ask(a, v); }
       if (work && !B.list.has(work.id)) work = null;
+      heldMods(); torchStep(dt, evs);
+      if (!ol && crackOn && (crackT += dt) >= 1) { crackT = 0; crackTick(); }
       // the furnaces: the heat falls back to the fire's (or to cold), a charge cooks, a bar out; his bars taken by walking over them
       const P = host.player; let hot = false;
       for (const b of FURNS) {
@@ -450,7 +559,12 @@ export async function create(host) {
     },
     view(dt, evs) {
       if (!ON) return;
-      for (let i = 0; i < evs.length; i++) if (evs[i].type === 'smith.strike') sparks(evs[i]);
+      for (let i = 0; i < evs.length; i++) {
+        const e = evs[i];
+        if (e.type === 'smith.strike') sparks(e);
+        else if ((e.type === 'mine.hit' && !e.other && e.i >= 0 && inlaid('mine')) || (e.type === 'tree.chop' && inlaid('chop'))) { FLASH.x = e.x; FLASH.y = e.y; FLASH.h = e.h; FLASH.t = 0; }
+      }
+      FLASH.t += dt;
       for (let i = SP.length - 1; i >= 0; i--) {
         const c = SP[i]; c.t += dt; if (c.t > c.life) { SP.splice(i, 1); continue; }
         c.vh -= 9 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.h += c.vh * dt;
@@ -462,7 +576,13 @@ export async function create(host) {
       if (!active()) { workM?.setVisible?.(false); return; }
       meshes();
       for (let i = 0; i < SP.length; i++) { const c = SP[i]; host.point(c.x, c.y, c.h, c.col); }
+      if (CRACK.size) for (const i of CRACK.keys()) {   // a cracked vein's seams: embers glowing in them
+        const v = ironOf?.[i]; if (!v || Math.abs(v.x - host.player.x) > 16 || Math.abs(v.y - host.player.y) > 12) continue;
+        const z = floorOf(v);
+        for (let k = 0; k < 5; k++) { const a = (k - 2) * .14, f = .5 + .5 * Math.sin(T0 * 3.1 + k * 1.7 + i); host.point(v.x + v.nx * .12 - v.ny * a, v.y + v.ny * .12 + v.nx * a, z + .45 + (k % 3) * .22, f > .6 ? '#ffb060' : '#c84a1c'); }
+      }
       const L = host.feature('lights'), flames = L?.on !== false && L?.flame ? L : null; if (!flames) return;
+      if (torch) { const P = host.player, a = P.faceAngle; flames.flame(TORCH, 'camp', WOODS.pine_log.light.color, P.x + Math.sin(a) * .3 + Math.cos(a) * .18, P.y + Math.cos(a) * .3 - Math.sin(a) * .18, P.z + 1.35, .45, .3, .5); }
       for (const b of FURNS) {
         if (!burning(b)) continue;
         const f = furn(b.id); glowRGB(f.heat, RGB);
@@ -477,6 +597,22 @@ export async function create(host) {
         glowRGB(Math.max(.2, f.heat), RGB);
         const r = LREC[i] ??= {x: 0, y: 0, h: 0, color: '', radius: 0, intensity: 0, flicker: 0, id: 0};
         r.x = mouthX(b); r.y = mouthY(b); r.h = (b.z || 0) + .35; r.color = hex(RGB); r.radius = 2.5 + 3.5 * f.heat; r.intensity = .45 + 1.2 * f.heat; r.flicker = .3; r.id = 9930 + i;
+        LOUT.push(r); i++;
+      }
+      const rec = () => LREC[i] ??= {x: 0, y: 0, h: 0, color: '', radius: 0, intensity: 0, flicker: 0, id: 0};
+      if (torch) {   // the pine haft burning in his hand
+        const P = host.player, a = P.faceAngle, Lt = WOODS.pine_log.light, r = rec();
+        r.x = P.x + Math.sin(a) * .3; r.y = P.y + Math.cos(a) * .3; r.h = P.z + 1.4; r.color = Lt.color; r.radius = Lt.radius; r.intensity = Lt.intensity; r.flicker = .5; r.id = 9950;
+        LOUT.push(r); i++;
+      }
+      if (FLASH.t < INLAY.full + INLAY.fade) {   // the inlay's flash: full, then fading
+        const r = rec(), k = FLASH.t < INLAY.full ? 1 : 1 - (FLASH.t - INLAY.full) / INLAY.fade;
+        r.x = FLASH.x; r.y = FLASH.y; r.h = FLASH.h; r.color = INLAY.color; r.radius = INLAY.radius; r.intensity = INLAY.intensity * k * k; r.flicker = 0; r.id = 9951;
+        LOUT.push(r); i++;
+      }
+      if (CRACK.size) for (const v0 of CRACK.keys()) {   // a cracked vein's seams
+        const v = ironOf?.[v0]; if (!v || Math.hypot(v.x - host.player.x, v.y - host.player.y) > 20) continue;
+        const r = rec(); r.x = v.x + v.nx * .2; r.y = v.y + v.ny * .2; r.h = floorOf(v) + .7; r.color = '#ff7a30'; r.radius = 1.8; r.intensity = .55; r.flicker = .45; r.id = 9960 + v0;
         LOUT.push(r); i++;
       }
       return LOUT;
@@ -503,6 +639,8 @@ export async function create(host) {
         {label: 'Workshop: the nearest furnace at white heat', run: () => { const b = furnNear(); if (b) { furn(b.id).heat = 1; ver++; } }},
         {label: 'Workshop: the nearest furnace\'s charge done', run: () => { const b = furnNear(), f = b && furn(b.id); if (f?.ch && !online()) { f.ch.prog = 1; } }},
         {label: 'Workshop: a test Iron Axe with a birch haft (made by you, now)', run: () => make('iron_axe', 'birch_log', false, '', true)},
+        {label: 'Workshop: a test Iron Pick, pine haft and shard inlay', run: () => make('iron_pick', 'pine_log', true, '', true)},
+        {label: 'Workshop: crack the nearest iron vein (as a fire would)', run: () => { if (online()) return; const P = host.player; let bi = -1, bd = 30; for (const i of ironVeins()) { const d = Math.hypot(ironOf[i].x - P.x, ironOf[i].y - P.y); if (d < bd) { bd = d; bi = i; } } if (bi >= 0) { crackSet(bi, (host.env?.t ?? 0) + FIRESET.hours); crackSave(); } }},
       ];
     },
     hud: () => { const s = store(); if (!ON || !s) return ''; let h = `workshop ${Object.keys(s.made).length} made`; for (const [id, f] of FURN) h += ` · ${id} heat ${f.heat.toFixed(2)}${f.ch ? ' ' + f.ch.ore + ' ' + Math.round(f.ch.prog * 100) + '%' : ''}${f.bel ? ' bellows' : ''}`; return h; },

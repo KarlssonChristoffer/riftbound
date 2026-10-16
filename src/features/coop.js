@@ -88,7 +88,7 @@ export async function create(host) {
       lastN = pp.n; packed = packPose(pp.w, pp.BN.length, packed);
       if (!sentW || !same(packed, sentW)) { sentW = (sentW && sentW.length === packed.length) ? sentW : new Int16Array(packed.length); sentW.set(packed); ST.w = b64(packed); }
     }
-    ST.lt = host.feature('caves')?.lit ? 1 : 0;   // (his lantern burns in the cave: the server's soot things go for it, friends' night veins hide)
+    ST.lt = host.feature('caves')?.lit || host.feature('workshop')?.torch ? 1 : 0;   // (a lit pine haft too: features/workshop.js)   // (his lantern burns in the cave: the server's soot things go for it, friends' night veins hide)
     if (Math.hypot(ST.x - lastX, ST.y - lastY) > 4) ST.tp = 1;   // (a respawn, a teleport: the server lets that one through)
     lastX = ST.x; lastY = ST.y;
     const L = host.feature('equip')?.sim?.lasso?.L, ph = L?.phase;

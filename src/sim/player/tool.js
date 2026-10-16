@@ -42,6 +42,13 @@ export function createTool(PL, I) {
   const S = {on: false, id: '', job: '', mode: '', t: 0, done: false, tx: 0, ty: 0, dx: 0, dy: 1, want: false, held: false, n: 0, stepDir: 'f', ph0: 0,
     keep: 0, far: 0, closing: false, closeT: 0, idleT: 0, rhythm: false, sinceEnd: 9};
   const aimFns = {};    // job -> the feature's: where a swing goes, asked as it starts -> {x, y} world
+  let swingFn = null;   // the tool's own swing time: fn(id, job) -> a factor (features/workshop.js: its haft's), asked as it's taken and as each swing starts
+  const SCALED = new Map();   // job + factor -> that job's swing with its times scaled (made once each)
+  const swingOf = (job, id) => {
+    const base = SWINGS[job] || SWINGS.chop, k = swingFn ? swingFn(id, job) || 1 : 1; if (k === 1) return base;
+    const key = job + ':' + k; let w = SCALED.get(key); if (!w) { w = {...base, dur: base.dur * k, hit: base.hit * k}; SCALED.set(key, w); }
+    return w;
+  };
   const wantFns = [];   // [job, fn]: the features': is this press the tool's -> the tool's id (content/items.js) | ''
   let c = 1, s = 0;
   const yaw = () => { const a = H.yaw ? H.yaw() : 0; c = Math.cos(a); s = Math.sin(a); };
@@ -83,7 +90,7 @@ export function createTool(PL, I) {
   function take(id) {
     if (S.on && S.id === id) return;
     if (S.mode && P.state === S.mode) end();   // (another tool: its swing ends)
-    S.on = true; S.id = id; S.job = jobOf(id); W = SWINGS[S.job] || SWINGS.chop; M = W.move; S.idleT = 0; S.mode = ''; PL.gun?.stow?.(); PL.fists?.select(false);
+    S.on = true; S.id = id; S.job = jobOf(id); W = swingOf(S.job, id); M = W.move; S.idleT = 0; S.mode = ''; PL.gun?.stow?.(); PL.fists?.select(false);
   }
   function put() { S.on = false; S.id = ''; S.job = ''; S.want = false; S.held = false; S.idleT = 0; if (S.mode && P.state === S.mode) end(); S.mode = ''; }
   // a fresh press: in rhythm when it comes within RHYTHM s of the swing's end (before it: the swing under way is near its end)
@@ -112,6 +119,7 @@ export function createTool(PL, I) {
     return fl;
   }
   function start() {
+    W = swingOf(S.job, S.id); M = W.move;   // (the tool in hand may have changed to another of the same kind: the bag's choice)
     const q = aimFns[S.job]?.(); if (q) { S.tx = q.x; S.ty = q.y; S.keep = q.keep || 0; S.far = q.far || 0; }
     yaw(); const v = toV(S.tx, S.ty), dx = v[0] - P.x, dy = v[1] - P.y;
     S.closing = S.far > 0 && Math.hypot(dx, dy) > S.far; S.closeT = 0;   // (out of reach: walked in first)
@@ -136,6 +144,8 @@ export function createTool(PL, I) {
     // where a job's swing goes: fn() -> a world point {x, y, keep?, far?} (keep: the distance he holds from it, far: beyond it he
     // walks in first; 0 / none: a free point), asked as each swing starts (features/woodcut.js: the trunk under the cursor)
     aimBy(fn, job = 'chop') { aimFns[job] = fn; },
+    // the tool's own swing time: fn(id, job) -> a factor on the job's swing times (1: as authored; a birch haft .85, an oak 1.15)
+    swingBy(fn) { swingFn = fn; },
     // LMB (player.js press / release): true = taken (the tool is out)
     press() {
       if (PL.brawl?.carrying) return false;

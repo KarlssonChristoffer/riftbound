@@ -62,7 +62,7 @@ export async function create(host) {
       if (c.mail) for (let k = 0; k < c.mail.length; k++) { const m = c.mail[k]; if (m.k === 'ev' && m.a === 'snuff' && m.id === c.net?.id) cv?.snuff?.(); }
       return;
     }
-    const P = host.player; ME.x = P.x; ME.y = P.y; ME.z = P.z; ME.lit = !!cv?.lit;
+    const P = host.player; ME.x = P.x; ME.y = P.y; ME.z = P.z; ME.lit = !!cv?.lit || !!host.feature('workshop')?.torch;   // (a lit pine haft draws them like a lantern: features/workshop.js)
     host.feature('builds')?.shining?.(SHINE);
     const ev = S.step(dt, PLS, SHINE);
     for (let k = 0; k < ev.length; k++) if (ev[k].a === 'snuff' && ev[k].id === 0) cv?.snuff?.();

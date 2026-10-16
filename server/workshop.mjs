@@ -11,18 +11,22 @@
 // n} gives the loader his bar. STEPS times a second the furnaces holding heat or a charge are stepped (the same rules the game
 // runs offline: content/workshop.js heatStep) and {k: 'smith', id, s: 'heat', heat, prog} goes out on a change of .05 or more
 // (fuel, t0 with it when white heat ate its wood); a charge done: {s: 'smelted', n, bar, by}.
+// And FIRE-SETTING: once a second, an iron vein (the cave's plan: veins) with a burning fire build within FIRESET.r m for
+// FIRESET.t s is cracked for FIRESET.hours in-game hours: a world entry 'k' + its index ({s: 'cracked', at}: the room's regrow
+// tick closes it again, s 'grown'); room.mjs mine() asks cracked(id): one tier less, one chunk more.
 //   const ws = createWorkshop({world, peers, all, log, clock, secs, players, heat, smelt}); ws.ACTS (the acts it takes);
-//   ws.hello(p, m) -> the records for the welcome; ws.act(p, a, m, id, deny); ws.count(p, u, ks); ws.tick(dt) (each server tick)
+//   ws.hello(p, m) -> the records for the welcome; ws.act(p, a, m, id, deny); ws.count(p, u, ks); ws.tick(dt) (each server tick);
+//   ws.cracked('v' + i) -> bool
 // OWNS: the made records' minting and counting, the furnaces' state on their entries. READS: content/workshop.js,
 //   content/builds.js (a fire's fuel), the room's world (the furnaces and anvils: builds of their kinds).
-import {SMITH, HAND, WOODS, REACH, MAX_RECS, HEAT, PUMP, CHARGES, BELLOWS, heatStep, pumpAdd, cleanRec, mintRec, countOn} from '../src/content/workshop.js';
-import {fuelAt} from '../src/content/builds.js';
+import {SMITH, HAND, WOODS, REACH, MAX_RECS, HEAT, PUMP, CHARGES, FIRESET, heatStep, pumpAdd, cleanRec, mintRec, countOn} from '../src/content/workshop.js';
+import {BUILDS, fuelAt} from '../src/content/builds.js';
 import {encode, num, str} from '../src/net/protocol.js';
 
 const FLUSH = 2;   // s between a record's count and its owner hearing it
 const STEPS = 4;   // the furnaces' steps a second
 
-export function createWorkshop({world, peers, all, log = () => {}, clock, secs = () => Date.now() / 1000, players, heat = 1, smelt = 1}) {
+export function createWorkshop({world, peers, all, log = () => {}, clock, secs = () => Date.now() / 1000, players, veins = null, heat = 1, smelt = 1}) {
   const send = (p, m) => p.conn.send(encode(m));
   const day = () => Math.floor(clock() / 24) + 1;
   let nextU = 1, flushT = 0;
@@ -120,6 +124,24 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
   }
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
 
+  // FIRE-SETTING (the iron veins only: the others are soft enough already)
+  const IRON = (veins || []).map((v, i) => v.kind === 'iron' ? i : -1).filter(i => i >= 0);
+  const heatT = new Map(), fires = [];   // vein -> s a fire has burnt by it; the burning fire builds (refilled each check)
+  let crackT = 0;
+  function crackTick() {
+    const t = secs(); fires.length = 0;
+    for (const e of world.values()) if (e.s === 'built' && BUILDS[e.kind]?.fire && fuelAt(e, t) > 0) fires.push(e);
+    for (const i of IRON) {
+      const v = veins[i], id = 'k' + i; if (world.get(id)?.s === 'cracked') continue;
+      let near = false; for (const e of fires) if (Math.hypot(e.x - v.x, e.y - v.y) < FIRESET.r) { near = true; break; }
+      if (!near) { heatT.delete(i); continue; }
+      const s = (heatT.get(i) || 0) + 1; heatT.set(i, s);
+      if (s < FIRESET.t) continue;
+      heatT.delete(i); const at = +(clock() + FIRESET.hours).toFixed(4);
+      world.set(id, {s: 'cracked', at}); all({k: 'world', id, s: 'cracked', at}); log(`  the iron vein ${i} cracked in the fire`);
+    }
+  }
+
   function act(p, a, m, id, deny) {
     if (a === 'make') return make(p, m, id, deny);
     if (a === 'load' || a === 'pump' || a === 'fit' || a === 'take') return furnaceAct(p, a, m, id, deny);
@@ -127,10 +149,11 @@ export function createWorkshop({world, peers, all, log = () => {}, clock, secs =
   }
   function tick(dt) {
     if ((stepT += dt) >= 1 / STEPS) { stepFurnaces(stepT); stepT = 0; }
+    if (IRON.length && (crackT += dt) >= 1) { crackT = 0; crackTick(); }
     if ((flushT += dt) < FLUSH || !dirty.size) return;
     flushT = 0;
     for (const [r, key] of dirty) for (const q of peers.values()) if (q.rec?.key === key) send(q, {k: 'rec', u: r.u, counts: r.counts, marks: r.marks});
     dirty.clear();
   }
-  return {ACTS: new Set(['make', 'load', 'pump', 'fit', 'take']), hello, act, count, tick};
+  return {ACTS: new Set(['make', 'load', 'pump', 'fit', 'take']), hello, act, count, tick, cracked: id => world.get('k' + String(id).slice(1))?.s === 'cracked'};
 }
