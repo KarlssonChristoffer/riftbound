@@ -49,6 +49,7 @@ import {createFlora} from '../render/flora.js';
 import {cliffGeometry} from './cliffs3d.js';
 import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
+import {floorSink, floorGeometry} from './floor3d.js';   // the forest floor's stones, pebbles and twigs in 3D (its tiles, below)
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
 import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
 import {TOWER_PLAN, FOREST, HUT, CAVE} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
@@ -68,6 +69,7 @@ import {flags} from '../core/flags.js';
 
 export const WATER_H = -.18;
 const FLORA = flags.get('flora') !== 'cards';   // the low plants as 3D shapes drawn instanced (world/flora3d.js, render/flora.js); cards: the painted cards   // the stream bed sits this much below the ground (features: world.waterH)
+const FLOOR3D = flags.get('floor3d') !== '0';   // the forest floor's stones, pebbles and twigs in 3D (world/floor3d.js); 0: painted flat
 const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
 
 // ---------------------------------------------------------------- the pixelizer's palettes (props_pixelize.py BIOMES)
@@ -653,11 +655,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = FOREST_RECT.y0 - RG, fz1 = GROUNDS.y0;   // (the forest's own north edge: the cave's band past it draws itself, cave3d.js)
     const ctxF = {PPM, ground: groundDrawn(), forest: FOREST, layout};
     for (let z0 = fz0; z0 < fz1 - 1e-6; z0 += FT) for (let x0 = fx0; x0 < fx1 - 1e-6; x0 += FT) {
-      const x1 = Math.min(fx1, x0 + FT), z1 = Math.min(fz1, z0 + FT), T = {x0, z0, x1, z1, canvas: null, px: null, cx0: x0 - FM, cz0: z0 - FM};
+      const x1 = Math.min(fx1, x0 + FT), z1 = Math.min(fz1, z0 + FT), T = {x0, z0, x1, z1, canvas: null, px: null, cx0: x0 - FM, cz0: z0 - FM, floor: FLOOR3D ? floorSink(x0, z0, x1, z1) : null};
       if (biome.paintForest) {
         const w = Math.ceil((x1 - x0 + 2 * FM) * PPM), h = Math.ceil((z1 - z0 + 2 * FM) * PPM), c = document.createElement('canvas'); c.width = w; c.height = h;
         const q = c.getContext('2d', {willReadFrequently: true});
-        biome.paintForest(q, {...ctxF, WPX: w, HPX: h, X0: T.cx0, Y0: T.cz0});
+        biome.paintForest(q, {...ctxF, WPX: w, HPX: h, X0: T.cx0, Y0: T.cz0, floor3d: T.floor});   // (floor3d: what it lays on the ground in 3D: stones, pebbles, twigs)
         T.canvas = c; T.px = q.getImageData(0, 0, w, h).data;
       }
       forestTiles.push(T);
@@ -767,6 +769,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       disposers.push(() => { m.dispose(); tex.dispose(); if (water) { water.dispose(); water.userData.bed?.tex.dispose(); } });
       if (TERRAIN_ON) caster(tg);
       T.px = null;   // (only the water bake read them)
+      // its floor's small things in 3D (world/floor3d.js): one static mesh, culled with the tile
+      const sg = T.floor && floorGeometry(T.floor, {fam: k => FAMS.indexOf(k), ground: tH});
+      if (sg) { const sm = G.mesh(sg, 0, new THREE.Matrix4(), {static: true}); disposers.push(() => { sm.dispose(); sg.dispose(); }); }
+      T.floor = null;
     }
   }
   // the open land: a stand-in texture until the world plan's step 3 paints the land itself. Plain ground in the biome's own colours:
