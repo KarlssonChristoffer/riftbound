@@ -7,8 +7,8 @@ damage... runes or fire bullets"). Code: `src/features/mods.js` (the feature), `
 ## Try it
 
 `?mode=sandbox&forest=1&seed=1337`. Play the Gunslinger or the Outlaw (Esc > Character) for the revolvers, the Ranger for the bow.
-Esc > Sandbox > Other: **Weapon mods: every part in the kit**, then **a pack of brutes to try them on**. **M** opens the weapon
-bench. `?mods=all` starts with every part; `?mods=0` turns it all off.
+F10 (the dev menu) > Combat: **Weapon mods: every part in the kit**, then **a pack of brutes to try them on**. **N** opens the
+weapon bench (a tab of the game's window when that's in the game, else its own box). `?mods=all` starts with every part; `?mods=0` turns it all off.
 
 ## Slots
 
