@@ -13,7 +13,9 @@ export function drawPrompt(hq, sc, {host, pa, features, G}) {
   else if (!BUSY.has(P.state) && pa.climbSpotW()) { at = [player.x, player.y, P.z + 2]; txt = pa.climbSpotW().dir < 0 ? 'E  climb down' : 'E  climb'; }
   else { const v = pa.PL.canVault?.(); if (v) { at = [player.x, player.y, P.z + 2]; txt = v === 'over' ? 'Space  vault over' : 'Space  climb up'; } }   // (a low ledge ahead: walkable terrain; a breach in a stone wall)
   if (!at) return;
-  const [sx, sy] = G.toScreen(at[0], at[2], at[1]);
+  let [sx, sy] = G.toScreen(at[0], at[2], at[1]);
+  // (a camera view, features/chasecam.js: a spot out of sight, over his own head in first person, puts it under the crosshair)
+  if (G.cine && !(sx > 0 && sx < G.VW && sy > 0 && sy < G.VH)) { sx = G.VW / 2; sy = G.VH * .64; }
   hq.font = `${Math.round(11 * (devicePixelRatio || 1))}px ui-monospace, Consolas, monospace`; hq.textAlign = 'center';
   const w = hq.measureText(txt).width + 12 * (devicePixelRatio || 1);
   hq.fillStyle = 'rgba(14,16,15,.8)'; hq.fillRect(sx * sc - w / 2, sy * sc - 16 * (devicePixelRatio || 1), w, 18 * (devicePixelRatio || 1));
