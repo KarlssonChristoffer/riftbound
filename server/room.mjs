@@ -25,16 +25,16 @@ import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/cont
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
 import {SKILLS, CURVE} from '../src/content/skills.js';
-import {HERON, TOOTH, DOLL, heronRoll, noteOf, isKeepsake} from '../src/content/keepsakes.js';
-import {dollTargets, nearestOf, openGround, dollWalk, underground} from '../src/sim/keepsakes.js';
-import {nameHash} from '../src/core/rng.js';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
 import {mulberry32} from '../src/core/rng.js';
+import {HERON, TOOTH, DOLL, heronRoll, noteOf, isKeepsake} from '../src/content/keepsakes.js';
+import {dollTargets, nearestOf, openGround, dollWalk, underground} from '../src/sim/keepsakes.js';
+import {nameHash} from '../src/core/rng.js';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, plan = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -105,10 +105,10 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const h = clock(), d0 = Math.floor(h / 24) * 24; h0 = d0 + ph + (ph < h - d0 ? 24 : 0); c0 = now();
       all(clockMsg()); log(`  ${p.name} set the clock to ${id}`); return;
     }
+    if (a === 'shelve' || a === 'unshelve' || a === 'fetch') return shelf(p, a, m, id, deny);   // (docs/KEEPSAKES.md)
     if (a === 'pick') return pick(p, m, id, t, deny);
     if (a === 'mine') return mine(p, m, id, t, deny);
     if (a === 'build' || a === 'stoke' || a === 'unbuild') return build(p, a, m, id, t, deny);
-    if (a === 'shelve' || a === 'unshelve' || a === 'fetch') return shelf(p, a, m, id, deny);
     if (a !== 'fell') return deny('unknown act');
     if (world.has(id)) return deny('gone');
     if (trees) {
@@ -230,9 +230,9 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const i = e.on.findIndex(o => o[0] === item && o[1] === p.id); if (i < 0) return deny('not yours');
     e.on.splice(i, 1); tell();
   }
-  let dawnN = null;
+  let dawnN = null, plan = null;   // (plan: the forest's, room.usePlan: the dolls' open ground and the spring)
   const DT_LIST = [];
-  const DOLL_O = {U: unc, C: cave, spring: plan?.spring || null, spent: id => { const s = secrets?.st[id]?.s; return s === 'spent' || s === 'triggered'; }, opened: i => world.get('v' + (cave?.hollows?.[i]?.vein ?? -1))?.s === 'spent', extra: null};
+  const DOLL_O = {U: unc, C: cave, spring: null, spent: id => { const s = secrets?.st[id]?.s; return s === 'spent' || s === 'triggered'; }, opened: i => world.get('v' + (cave?.hollows?.[i]?.vein ?? -1))?.s === 'spent', extra: null};
   const okAt = (x, y) => openGround(plan, cave, x, y);
   function dawnTick() {   // a new dawn (06:00 on the clock): the shelves' dolls may walk
     const n = Math.floor((clock() - 6) / 24);
@@ -284,6 +284,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const partOf = h => { h = ((h % 24) + 24) % 24; return h < 5.6 || h >= 20.3 ? 'night' : h < 7.2 ? 'dawn' : h < 18 ? 'day' : 'dusk'; };
   function fish(p, m) {
     const a = str(m.a, 8), n = num(m.n, -1), t = now();
+    if (a === 'jab') return jab(p, m, n, t);   // (below)
     if (a === 'cast') {
       if (t - p.fishT < 500) return;   // (a flood: dropped; the client rolls it itself after a wait)
       const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
@@ -307,15 +308,16 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: r.two});
       log(`  ${p.name} caught a ${CATCHES[r.id].name}${CATCHES[r.id].find ? '' : ` (${r.cm} cm)`}`);
     } else if (a === 'lost' && n === p.fishN) p.fishR = null;
-    else if (a === 'jab') {
-      if (t - (p.jabT || 0) < 600 || !p.gear.includes('heron_feather')) return;   // (a flood, or no feather: dropped; the client rolls it after a wait)
-      const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
-      if (!FISH_WATERS.has(w) || !(Math.hypot(x - p.x, y - p.y) < HERON.reach + 1.5)) return;
-      p.jabT = t;
-      const r = heronRoll(fishRng, {water: w, part: partOf(clock()), lvl: Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0))});
-      p.conn.send(encode({k: 'fish', a: 'jabbed', n, id: r ? r.id : '', cm: r ? r.cm : 0, kg: r ? r.kg : 0}));
-      if (r) { all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: false}); log(`  ${p.name} grabbed a ${CATCHES[r.id].name} (${r.cm} cm)`); }
-    }
+  }
+
+  function jab(p, m, n, t) {
+    if (t - (p.jabT || 0) < 600 || !p.gear.includes('heron_feather')) return;   // (a flood, or no feather: dropped; the client rolls it after a wait)
+    const x = num(m.x, NaN), y = num(m.y, NaN), w = str(m.w, 8);
+    if (!FISH_WATERS.has(w) || !(Math.hypot(x - p.x, y - p.y) < HERON.reach + 1.5)) return;
+    p.jabT = t;
+    const r = heronRoll(fishRng, {water: w, part: partOf(clock()), lvl: Math.max(1, Math.min(CURVE.max, num(m.lvl, 1) | 0))});
+    p.conn.send(encode({k: 'fish', a: 'jabbed', n, id: r ? r.id : '', cm: r ? r.cm : 0, kg: r ? r.kg : 0}));
+    if (r) { all({k: 'fish', a: 'caught', id: p.id, name: p.name, c: r.id, cm: r.cm, kg: r.kg, two: false}); log(`  ${p.name} jabbed a ${CATCHES[r.id].name} (${r.cm} cm)`); }
   }
 
   function connect(conn) {
@@ -369,6 +371,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
 
   return {
     connect, get size() { return peers.size; }, world, seed, clock, secrets, elk, soot,
+    usePlan(F) { plan = F || null; DOLL_O.spring = plan?.spring || null; },   // (the keepsakes' shelves: docs/KEEPSAKES.md)
     stop() { clearInterval(timer); for (const p of peers.values()) p.conn.close(1001, 'server stopping'); },
   };
 }
