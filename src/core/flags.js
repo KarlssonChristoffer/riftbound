@@ -85,6 +85,7 @@ export const FLAG_DOCS = {
   contact: '0: no contact shadows', hd: '0: no HD atmosphere layer',
   fauna:     '0: no forest animals (features/fauna.js: roe deer, fox, hares, squirrels, ravens, capercaillie; docs/FAUNA.md)',
   livefauna: '0: the forest animals as looks only, as before the "for real" brief (the bag Lasso doesn\'t catch them; the tracks still: ?tracks=0); docs/FAUNA.md',
+  thief:     'often: the fox comes for food put down within an in-game hour, day or night; 0: no theft, no den (features/foxden.js; docs/FAUNA.md "The thieving fox")',
   shed:      'now: this year\'s shed antlers lie in the roe beds now, whatever the season (features/animalfinds.js; docs/FAUNA.md "Finds")',
   mud:       '1: the forest\'s ground counts as wet now and doesn\'t dry (features/mud.js: everything that walks leaves prints in the soft patches; today\'s morning trails are laid)',
   watcher:   '0: no watcher (features/watcher.js: the one-eyed toadstool that peeks at you from behind trees); often: every few seconds (testing)',

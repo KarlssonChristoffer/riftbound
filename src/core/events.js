@@ -161,6 +161,8 @@ export const EVENTS = {
   'animal.brush':       ['features/rope.js',      'x, y, id (a dragged roe bursts through a bush or ferns: leaves fly)', 'rope (its view: the leaves)'],
   'animal.tired':       ['features/rope.js',      'x, y, id (the dragged roe runs out of breath and stands)', '(none yet)'],
   'animal.calm':        ['features/rope.js',      'x, y, id (E by the tired roe: the loop comes off, it lets you be for the day)', '(none yet)'],
+  'animal.theft':       ['features/foxden.js',  'x, y, fox, kind (the food a fox came for: it trots in, takes it home to its den)', '(none yet)'],
+  'animal.den':         ['features/foxden.js',  'x, y, fox (E at a den mouth: you reach in)', '(none yet)'],
   'animal.find':        ['features/animalfinds.js', 'x, y, id, kind (an item id: a shed antler, a feather, the lek\'s bonus): picked up off the forest floor', '(none yet)'],
   'combat.bowl':        ['features/combat/core.js, features/foes/sim.js', 'x, y, who, by (a flung or kicked body bowls another over: combat fling, a body thrown by sim/bodyfly.js)', 'audio'],
   // BRAWL (docs/exp/brawl.md): the live cowboys' boot, barge, lift and throw (sim/player/brawl.js: x, y in the view frame, turned by

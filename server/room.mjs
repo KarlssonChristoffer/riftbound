@@ -32,7 +32,7 @@ import {mulberry32} from '../src/core/rng.js';
 
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8}) {
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, fauna = null, thief = ''}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
@@ -53,7 +53,8 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   const pub = p => ({id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, phi: p.phi, s: p.s, pose: p.pose, rig: p.rig, w: p.w, wn: p.wn, ls: p.ls, g: p.gear});
   const others = (p, m) => { const t = encode(m); for (const q of peers.values()) if (q !== p) q.conn.send(t); };
   const all = m => { const t = encode(m); for (const q of peers.values()) q.conn.send(t); };
-  const animals = createAnimals({world, all, send: (p, m) => p.conn.send(encode(m)), log: (...a) => log(...a), now, clock});
+  const animals = createAnimals({world, all, send: (p, m) => p.conn.send(encode(m)), log: (...a) => log(...a), now, clock, plan: fauna, thief, players: () => peers.values(),
+    fires: () => { const sec = now() / 1000, out = []; for (const e of world.values()) if (e.s === 'built' && BUILDS[e.kind]?.fire && fuelAt(e, sec) > 0) out.push(e); return out; }});   // (the fox: server/animals.mjs, sim/foxden.js)
 
   function hello(conn, m) {
     if (peers.size >= maxPlayers) { conn.send(encode({k: 'deny', a: 'join', why: 'full'})); conn.close(1013, 'full'); return null; }

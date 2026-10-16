@@ -630,6 +630,18 @@ Object.assign(RECIPES, {
         b.tube('antler', [.06, .04, .008], [.09, .05, .06], .008, .005, {sides: 4, part: 1});
       });
     }},
+  // THE FOX'S DEN (features/foxden.js): a dark hole under the rock (+x: in, toward the rock), a fan of fresh sand out of it, a chewed boot
+  den_mouth: {about: "A fox's den mouth under a rock: a dark hole, a fan of fresh sand, a chewed old boot", likes: {ground: 'under an outcrop or a block in the woods', shade: .5, cluster: [1, 1]}, params: {},
+    build(b, p, r) {
+      b.ball('pupil', [.1, .1, 0], [.26, .2, .3], {detail: 1, fixed: 0});   // the hole: its dark, unlit
+      b.ball('soil', [.05, .2, 0], [.3, .12, .36], {detail: 1, lump: .4, bias: -.1});   // the earth over it, up to the rock
+      for (let i = 0; i < 5; i++) b.ball('soil', [-.25 - r.range(0, .45), .02, r.range(-.35, .35)], [r.range(.14, .24), .04, r.range(.12, .2)], {detail: 0, lump: .5, bias: .15});   // the sand fan
+      b.at([-.75, 0, r.range(.3, .45)], r.range(20, 70), 1, () => {   // the chewed boot, on its side
+        b.box('furdark', [0, .06, 0], [.24, .1, .09], [8, 0, 0]);
+        b.box('furdark', [.09, .15, 0], [.08, .16, .08], [8, 0, 0]);
+        b.box('rotwood', [-.02, .015, 0], [.27, .03, .1], [8, 0, 0]);
+      });
+    }},
   caper_feather: {about: "A capercaillie cock's tail feather lying on the floor: long, near black, a white spot at its end", likes: {ground: 'the lek in the old pines, at dawn', shade: .6, cluster: [1, 2]}, params: {},
     build(b, p, r) {
       b.at([0, .012, 0], r.range(-10, 10), 1.2, () => {

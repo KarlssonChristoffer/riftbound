@@ -125,6 +125,24 @@ E within 1.4 m picks one up (a Shed Antler or a Capercaillie Feather, materials 
 has it and it's gone for everyone (the server's `find`); a late joiner gets the picked ones in the welcome. Offline the
 picked ones are saved (`pack.store('animalfinds')`).
 
+## The thieving fox
+
+Put a pouch item down (Tab, right-click it, "Put down"): it lies on the ground in front of you, drawn as its own little
+picture, until someone takes it up again (E). At most 6 each. Food left out (a fish, blueberries, lingonberries) gets a visit
+at a seeded hour of the night (22:00-04:00): the nearest den's fox trots in, takes it in its jaws and runs home on a wiggly
+line. A burning fire within 4 m (embers are fine) or someone moving within 8 m puts it off half an hour, three times a night.
+Lasso the fox on its way and it drops what it carries (still trotting in: it stays where it lay). `?thief=often`: within an
+in-game hour of going down, day or night; `?thief=0` no fox.
+
+Each fox's den is under its rock: a dark hole, a fan of fresh sand, a chewed boot. E there and you kneel and reach in for
+1.5 s, and get all of it: what was stolen ("Perch, Ann's") and its own finds, 2-3 at the start, +1 every 2 in-game days up to
+4 (an old boot, a rusty key, a silver ring, a brass button, a lost mitten, a thimble); one in ten is a thing scratched with the
+name of someone who has never been here.
+
+The rules are one file, `sim/foxden.js`, run by the co-op server for everyone (`server/animals.mjs`: acts `leave`, `take`,
+`den`, `drop`; the whole state to everyone on a change and to a late joiner) and by the game offline (`features/foxden.js`,
+saved). Every client plays the same run from the clock.
+
 ## Sounds
 
 They reuse the arena wildlife's events, so the audio feature already plays them: `wildlife.wings` (a raven lifting off),
@@ -148,13 +166,14 @@ undergrowth), `wildlife.howl` with kind `fox`, call `yips` (the fox at night). T
 | the Lasso on animals | `ROPE`, `FUR` in `src/content/animals.js` (the hare's daze / carry, the fox's slip, the roe's speeds, tiring, steer, lean, brush, stand, calm); the weights in `WEIGHT.animal` (`src/content/lasso.js`); `?livefauna=0` off; menu > Sandbox > Animals: go to the nearest hare / roe deer |
 | tracks | `?tracks=0` none; `?mud=1` or menu > Sandbox > Tracks: the ground wet now; menu > Sandbox > Animals: lay this morning's trails / go to the nearest roe bed |
 | finds | `SHED`, `LEK`, `FINDS` in `src/content/animals.js` (the shed window, antlers a buck, how far from the bed, how long they lie; the lek's hours, song, deaf phrase, pauses, feathers, the bonus, the moult, how wary he is); `?shed=now`; menu > Sandbox > Animals: start the lek; Finds: go to the nearest shed antler / feather, drop a pair of antlers here; the look: recipes `roe_antler`, `caper_feather` |
+| the fox and its den | `THEFT`, `GROUND`, `DEN`, `DEN_FINDS`, `NAMED` in `src/content/animals.js`; `?thief=often` / `?thief=0`; server `--thief often`; menu > Sandbox > Fox: go to the nearest den / send it now / open the nearest den / a perch in the bag; the den mouth: recipe `den_mouth` |
 | mud and trails | `MUD`, `TRAIL` in `src/content/animals.js` (wetness, patch size, softness, deep, wash; trail lengths, hours, print spacing, the most prints); the mud's colour and life: `SURF.mud` in `src/content/prints.js` |
 
 ## Not yet
 
 - Small things: songbirds you can see sitting in the trees and singing, butterflies over the glades, dragonflies by the lake, a woodpecker drumming.
 - A deer's bark and a hare's thump as sounds of their own.
-- Droppings, a fox's den you can find (the snow's tracks: `docs/WINTER.md`).
+- Droppings (the snow's tracks: `docs/WINTER.md`).
 - No hunting, ever (living-animals.md: nothing is killed). Taming (a roe calmed three days running that follows you, a fox fed
   at its den that stops stealing from you) comes later.
 - Hopping a log while a roe drags you (Space lets go instead).

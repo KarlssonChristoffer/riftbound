@@ -556,9 +556,9 @@ export async function create(host) {
   //   F.byId(id), F.ground(a): a ground animal that could be caught now (on its feet, not gone, not held)
   const ById = new Map(ANIM.map(a => [a.d.id, a]));
   F.byId = id => ById.get(id) || null;
-  F.ground = a => !!a && !a.gone && !a.held && a.h === 0 && (a.sp === 'roe' || a.sp === 'fox' || a.sp === 'hare');
+  F.ground = a => !!a && !a.gone && (!a.held || a.held.thief) && a.h === 0 && (a.sp === 'roe' || a.sp === 'fox' || a.sp === 'hare');   // (thief: a fox on its run, features/foxden.js: the lasso can still take it)
   F.hold = (id, H) => {
-    const a = ById.get(id); if (!a || a.gone || (a.held && a.held !== H) || a.h > .05) return null;
+    const a = ById.get(id); if (!a || a.gone || (a.held && a.held !== H && !a.held.thief) || a.h > .05) return null;
     a.held = H; a.odd = false; a.lieTo = 0; a.alarm = -1;
     if (a.sp === 'roe') { a.fx = host.player.x; a.fy = host.player.y; alarmGroup(a); }   // (the herd bolts with it)
     return a;
@@ -663,7 +663,7 @@ export async function create(host) {
     const P = host.player, hr = hour();
     let n = 0;
     for (const a of ANIM) {
-      if (Math.hypot(a.x - P.x, a.y - P.y) > TUNE.SIM_R) { a.seen = false; continue; }
+      if (Math.hypot((a.held ? a.held.x : a.x) - P.x, (a.held ? a.held.y : a.y) - P.y) > TUNE.SIM_R) { a.seen = false; continue; }   // (held: where its holder has it)
       n++;
       if (a.held) heldPose(a, dt);   // (on a rope: where its holder has it, features/rope.js)
       else if (a.S.gone) stepGone(a, hr);

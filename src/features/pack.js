@@ -44,7 +44,9 @@ export async function create(host) {
   if (ON) { load(); addEventListener('pagehide', () => { if (dirtyT >= 0) write(); }); }
 
   const queue = [];   // the panel's clicks (and the menu's): carried out in the sim step
-  const panel = ON ? createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held: () => held, ask: r => queue.push(r)}) : null;
+  const panel = ON ? createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held: () => held, ask: r => queue.push(r),
+    put: id => { if (putter) queue.push({name: 'Put down', run: () => putter(id)}); }}) : null;
+  let putter = null;   // (features/foxden.js: what "Put down" does: F.onPut)
   const label = (id, n) => (n > 1 ? `+${n} ` : '+') + (ITEMS[id]?.name || id);
 
   const F = {
@@ -80,6 +82,7 @@ export async function create(host) {
     recipe(r) { if (!recipes.some(q => q.id === r.id)) recipes.push(r); },
     section(s) { if (!sections.some(q => q.id === s.id)) sections.push(s); },
     held(slot) { held = slot; },
+    onPut(fn) { putter = fn; },   // (features/foxden.js: the pack panel's right-click "Put down" on a pouch row, carried out in the sim step)
     get open() { return !!panel?.open; },
     // a fresh world (the Sandbox menu): the save cleared, the start kit back; each system's store is emptied (they see it
     // empty on their next step and put the world back as they hold it: features/woodcut.js)

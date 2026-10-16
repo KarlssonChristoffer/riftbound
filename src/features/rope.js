@@ -105,6 +105,7 @@ export async function create(host) {
       return null;
     },
     caught(b) {
+      if (B.sp === 'fox') host.feature('foxden')?.lassoed?.(B.id, B.x, B.y);   // (a fox on its run drops what it carries: features/foxden.js)
       const Fa = fauna(); if (!Fa || !Fa.hold(B.id, B)) { B.on = false; B.mode = ''; return; }
       B.on = true; B.t = 0; B.v = 0; B.len = clamp(hypot2(B.x - P.x, B.y - P.y), 1.2, LT.hold.len);
       coop()?.act('rope', B.id);

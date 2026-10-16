@@ -47,7 +47,9 @@ const CSS = `
 const OUTLINE = '#1a120c';
 // an icon (12 x 12 rows of palette letters; pal: its own letters over PAL's) -> a 14 x 14 data URL: its fills, then an outline in
 // every clear pixel next to one
-export function iconURL(rows, pal = null) {
+export function iconURL(rows, pal = null) { return iconCanvas(rows, pal).toDataURL(); }
+// the same, as the canvas (features/foxden.js: an item put down on the ground is a card of it)
+export function iconCanvas(rows, pal = null) {
   const n = 14, c = document.createElement('canvas'); c.width = c.height = n;
   const q = c.getContext('2d'), filled = (x, y) => y >= 0 && y < rows.length && x >= 0 && x < rows[y].length && rows[y][x] !== '.';
   for (let y = -1; y <= rows.length; y++) for (let x = -1; x <= 12; x++) {
@@ -55,15 +57,16 @@ export function iconURL(rows, pal = null) {
     if (ch) { q.fillStyle = pal?.[ch] || PAL[ch] || '#f0f'; q.fillRect(x + 1, y + 1, 1, 1); }
     else if (filled(x - 1, y) || filled(x + 1, y) || filled(x, y - 1) || filled(x, y + 1)) { q.fillStyle = OUTLINE; q.fillRect(x + 1, y + 1, 1, 1); }
   }
-  return c.toDataURL();
+  return c;
 }
 
-export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask}) {
+export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask, put = null}) {
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const el = document.createElement('div'); el.id = 'pack'; el.className = 'hidden'; document.body.appendChild(el);
   const ICON = {};
   const icon = id => ICON[id] ??= ITEMS[id]?.icon ? iconURL(ITEMS[id].icon, ITEMS[id].pal) : '';
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+  let putId = null;   // (right-click on a pouch row: its "Put down" button shows under it; put(id): features/foxden.js)
   let open = false, kInv = -1, kSk = -1, kHeld = -2, kN = -1, kT = 0, kSec = -1;
   const secVer = () => { let v = 0; for (const s of sections) v = (v * 31 + s.ver()) | 0; return v; };
   const costText = c => Object.entries(c).map(([id, n]) => `${n} ${ITEMS[id]?.name || id}`).join(', ');
@@ -79,7 +82,10 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     });
     h += '</div><h5>Pouch</h5>';
     if (!inv.pouch.size) h += '<div class="p-none">nothing gathered yet</div>';
-    for (const [id, n] of inv.pouch) { const d = ITEMS[id]; h += `<div class="p-row" title="${esc(d.desc)}"><img src="${icon(id)}" alt=""><span>${esc(d.name)}</span><em>${n}</em></div>`; }
+    for (const [id, n] of inv.pouch) {
+      const d = ITEMS[id]; h += `<div class="p-row" data-id="${esc(id)}" title="${esc(d.desc)}"><img src="${icon(id)}" alt=""><span>${esc(d.name)}</span><em>${n}</em></div>`;
+      if (put && id === putId) h += `<button class="p-build" data-put="${esc(id)}"><span>Put down</span><small>on the ground here</small></button>`;
+    }
     h += '<h5>Skills</h5>';
     for (const id in SKILLS) {
       const S = SKILLS[id], L = skills.level(id), x = skills.xp(id), sp = skills.span(id), k = sp.next > sp.at ? (x - sp.at) / (sp.next - sp.at) : 1;
@@ -94,8 +100,13 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
     }
     el.innerHTML = h;
   }
+  el.addEventListener('contextmenu', e => {
+    const row = put && e.target.closest('.p-row'); if (!row) return;
+    e.preventDefault(); putId = putId === row.dataset.id ? null : row.dataset.id; build();
+  });
   el.addEventListener('click', e => {
     const b = e.target.closest('.p-build'); if (!b) return;
+    if (b.dataset.put) { put(b.dataset.put); putId = null; return; }
     const r = recipes[+b.dataset.r]; if (r) ask(r);
   });
   el.addEventListener('mousedown', e => e.stopPropagation());   // (a click on the panel isn't a shot)
