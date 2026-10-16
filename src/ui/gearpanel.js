@@ -13,13 +13,13 @@ import {loadPixelFont} from './pixelfont.js';
 
 const CSS = `
 #gear { --u: 2px; --ink: #efe6cf; --dim: #a39478; --key: #f2c95c;
-  position: fixed; left: 10px; top: 50%; transform: translateY(-50%); z-index: 15; width: calc(178 * var(--u)); max-height: calc(100vh - 120px); overflow: auto;
+  position: fixed; left: 10px; top: 50%; transform: translateY(-50%); z-index: 15; width: calc(178 * var(--u)); max-height: calc(100vh - 32px); overflow: auto;
   padding: calc(3 * var(--u)) calc(4 * var(--u)); color: var(--ink); user-select: none; scrollbar-width: thin; scrollbar-color: #7a5f3e #15100c;
   font: calc(10 * var(--u)) / calc(11 * var(--u)) RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; image-rendering: pixelated;
   border: calc(3 * var(--u)) solid transparent; border-image: var(--g-panel) 3 fill / calc(3 * var(--u)); box-sizing: border-box; }
 #gear * { box-sizing: border-box; }
 #gear.hidden { display: none; }
-body:has(#pack:not(.hidden)) #gear { left: 296px; }   /* (beside the pack's panel: features/pack.js, Tab) */
+body:has(#pack:not(.hidden)) #gear { left: calc(14px + 164 * var(--u)); }   /* (beside the pack's panel, ui/packpanel.js: 164 UI px wide) */
 body:has(#pause:not(.hidden)) #gear { visibility: hidden; }
 #gear header { display: flex; justify-content: space-between; align-items: baseline; }
 #gear header b { font-weight: 400; color: var(--key); letter-spacing: var(--u); text-shadow: var(--u) var(--u) 0 #0c0907; }

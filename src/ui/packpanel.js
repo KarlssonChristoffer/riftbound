@@ -2,47 +2,57 @@
 // the pouch pays for. A DOM panel (clicks land on it, not on the game's canvas: no shot), rebuilt only when what it shows
 // changed (the inventory's, the skills' versions, the held slot, the recipes' affordability); hidden under the pause menu,
 // in photo mode and behind the title. The items' pixel icons (content/items.js: fills only) are drawn once each with an
-// outline round them, as data URLs at 1 px per pixel, scaled up crisp by the CSS.
+// outline round them, as data URLs at 1 px per pixel, scaled up crisp by the CSS. Pixel art like the gear panel beside it
+// (ui/pixelfont.js, ui/pixelframe.js; a UI pixel by the window's height), centred, never taller than the window: it scrolls.
 //   const panel = createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held, ask}); panel.toggle() / .open / .frame()
 //   (sections: other systems' parts of the panel, drawn after the skills: pack.section; recipes under their group's heading)
 //   iconURL(rows, pal) -> a data URL (exported: features/fishing.js draws its journal's unknown catches as silhouettes)
 // OWNS: the panel's element and its open state. READS: the inventory, the skills, the recipes (pack.recipe). Clicks: ask(r)
 // (pack carries a recipe out in the sim step).
 import {PAL} from '../content/items.js';
+import {FRAMES, uiUnit} from './pixelframe.js';
+import {loadPixelFont} from './pixelfont.js';
 
 const CSS = `
-#pack { position: fixed; left: 14px; top: 50%; transform: translateY(-58%); z-index: 14; width: 248px; padding: 9px 10px 10px;
-  background: rgba(14, 16, 15, .92); border: 1px solid var(--line); border-radius: 6px; user-select: none;
-  font: 12px/1.45 "Segoe UI", system-ui, sans-serif; color: var(--ink); max-height: 94vh; overflow-y: auto; }
+#pack { --u: 2px; --ink: #efe6cf; --dim: #a39478; --key: #f2c95c;
+  position: fixed; left: 10px; top: 50%; transform: translateY(-50%); z-index: 14; width: calc(164 * var(--u)); max-height: calc(100vh - 32px); overflow: auto;
+  padding: calc(3 * var(--u)) calc(4 * var(--u)); color: var(--ink); user-select: none; scrollbar-width: thin; scrollbar-color: #7a5f3e #15100c;
+  font: calc(10 * var(--u)) / calc(11 * var(--u)) RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; image-rendering: pixelated;
+  border: calc(3 * var(--u)) solid transparent; border-image: var(--p-panel) 3 fill / calc(3 * var(--u)); box-sizing: border-box; }
+#pack * { box-sizing: border-box; }
 #pack.hidden, body:has(#pause:not(.hidden)) #pack { display: none; }
 #pack header { display: flex; justify-content: space-between; align-items: baseline; }
-#pack header b { color: var(--key); letter-spacing: .16em; font-size: 11px; }
-#pack header small { color: var(--dim); }
-#pack h5 { margin: 10px 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
-#pack .p-bag { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-#pack .p-slot { position: relative; aspect-ratio: 1; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); border-radius: 3px; }
-#pack .p-slot.held { border-color: var(--key); background: rgba(240, 192, 96, .12); }
-#pack .p-slot img { position: absolute; inset: 12%; width: 76%; height: 76%; image-rendering: pixelated; }
-#pack .p-slot em { position: absolute; right: 3px; bottom: 0; font-style: normal; font-weight: 600; font-size: 11px; text-shadow: 0 1px 0 #000; }
-#pack .p-row { display: flex; align-items: center; gap: 7px; padding: 1px 0; }
-#pack .p-row img { width: 24px; height: 24px; image-rendering: pixelated; }
+#pack header b { font-weight: 400; color: var(--key); letter-spacing: var(--u); text-shadow: var(--u) var(--u) 0 #0c0907; }
+#pack header small { color: var(--dim); font-size: inherit; }
+#pack h5 { margin: calc(4 * var(--u)) 0 calc(2 * var(--u)); font: inherit; color: var(--dim); text-transform: uppercase; }
+#pack .p-bag { display: grid; grid-template-columns: repeat(4, 1fr); gap: calc(2 * var(--u)); }
+#pack .p-slot { position: relative; display: grid; place-items: center; aspect-ratio: 1; line-height: 0;
+  border: calc(2 * var(--u)) solid transparent; border-image: var(--p-well) 2 fill / calc(2 * var(--u)); }
+#pack .p-slot.held { border-image-source: var(--p-on); }
+#pack .p-slot img { width: calc(28 * var(--u)); height: calc(28 * var(--u)); image-rendering: pixelated; }
+#pack .p-slot em { position: absolute; right: var(--u); bottom: var(--u); font-style: normal; line-height: 1; text-shadow: var(--u) var(--u) 0 #0c0907; }
+#pack .p-row { display: flex; align-items: center; gap: calc(3 * var(--u)); padding: 0 0 var(--u); }
+#pack .p-row img { width: calc(14 * var(--u)); height: calc(14 * var(--u)); image-rendering: pixelated; }
 #pack .p-row span { flex: 1; }
-#pack .p-row em { font-style: normal; font-weight: 600; font-variant-numeric: tabular-nums; }
-#pack .p-none { color: var(--dim); font-size: 11px; }
-#pack .p-skill { padding: 2px 0 3px; }
-#pack .p-skill div { display: flex; justify-content: space-between; }
-#pack .p-skill small { color: var(--dim); font-variant-numeric: tabular-nums; }
-#pack .p-bar { height: 4px; margin-top: 2px; background: rgba(255, 255, 255, .08); border-radius: 2px; overflow: hidden; }
+#pack .p-row em { font-style: normal; color: var(--key); }
+#pack .p-none { color: var(--dim); }
+#pack .p-skill { padding: 0 0 calc(2 * var(--u)); }
+#pack .p-skill div { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: calc(4 * var(--u)); }
+#pack .p-skill small { margin-left: auto; color: var(--dim); font-size: inherit; }
+#pack .p-bar { height: calc(4 * var(--u)); margin-top: var(--u); background: #15100c; border: var(--u) solid #0c0907; }
 #pack .p-bar i { display: block; height: 100%; }
-#pack .p-build { display: flex; justify-content: space-between; align-items: center; width: 100%; margin: 2px 0; padding: 3px 7px;
-  font: inherit; color: var(--ink); background: rgba(255, 255, 255, .05); border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
-#pack .p-build:hover:not(.no) { border-color: var(--key); }
-#pack .p-build.no { opacity: .45; cursor: default; }
-#pack .p-build small { color: var(--dim); }
-#pack .p-bag.p-grid7 { grid-template-columns: repeat(7, 1fr); gap: 3px; }
-#pack .p-grid7 .p-slot em { font-size: 9px; right: 2px; }
-#pack .p-slot.p-dim { background: rgba(0, 0, 0, .18); }
-#pack .p-note { color: var(--dim); font-size: 11px; margin-top: 3px; }`;
+#pack .p-build { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: calc(4 * var(--u)); width: 100%; margin: 0 0 var(--u);
+  padding: 0 calc(2 * var(--u)); font: inherit; color: var(--ink); text-align: left; cursor: pointer; background: none;
+  border: calc(2 * var(--u)) solid transparent; border-image: var(--p-btn) 2 fill / calc(2 * var(--u)); }
+#pack .p-build:hover:not(.no) { border-image-source: var(--p-hot); }
+#pack .p-build small { margin-left: auto; color: #cbb98f; font-size: inherit; }
+#pack .p-build.no { color: var(--dim); cursor: default; border-image-source: var(--p-card); }
+#pack .p-build.no small { color: #7d7058; }
+#pack .p-bag.p-grid7 { grid-template-columns: repeat(7, 1fr); gap: var(--u); }
+#pack .p-grid7 .p-slot img { width: calc(14 * var(--u)); height: calc(14 * var(--u)); }
+#pack .p-grid7 .p-slot em { right: 0; bottom: 0; }
+#pack .p-slot.p-dim img { opacity: .7; }
+#pack .p-note { color: var(--dim); margin-top: calc(2 * var(--u)); }`;
 
 const OUTLINE = '#1a120c';
 // an icon (12 x 12 rows of palette letters; pal: its own letters over PAL's) -> a 14 x 14 data URL: its fills, then an outline in
@@ -61,6 +71,8 @@ export function iconURL(rows, pal = null) {
 export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections = [], held, ask}) {
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const el = document.createElement('div'); el.id = 'pack'; el.className = 'hidden'; document.body.appendChild(el);
+  for (const k of ['panel', 'well', 'on', 'btn', 'hot', 'card']) el.style.setProperty('--p-' + k, FRAMES[k]());
+  loadPixelFont();
   const ICON = {};
   const icon = id => ICON[id] ??= ITEMS[id]?.icon ? iconURL(ITEMS[id].icon, ITEMS[id].pal) : '';
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
@@ -102,7 +114,7 @@ export function createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sect
 
   return {
     get open() { return open; },
-    toggle() { open = !open; kInv = -1; el.classList.toggle('hidden', !open); },
+    toggle() { open = !open; kInv = -1; el.classList.toggle('hidden', !open); if (open) el.style.setProperty('--u', uiUnit() + 'px'); },
     // each frame while open: rebuilt when the bag, the pouch, the skills, the held slot or the recipes changed, and twice a
     // second while there are recipes (whether one can be built here: room, a fire nearby)
     frame() {
