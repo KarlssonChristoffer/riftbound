@@ -80,6 +80,8 @@ export async function create(host) {
 
   // ---------------------------------------------------------------- sending: 20 times a second, after the frame's steps
   let sendT = 0, lastN = -1, lastRig = '', lastX = NaN, lastY = NaN, packed = null, sentW = null, pinged = 0;
+  let ngVer = -1, ng = false;   // (the Nightglass Lantern worn: 'light.nightglass', read again when the notes change)
+  const nightglass = () => { const m = host.mods; if (!m) return false; if (m.ver !== ngVer) { ngVer = m.ver; ng = m.value('light.nightglass', 0) > 0; } return ng; };
   const ST = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', rig: '', w: undefined, wn: undefined, ls: undefined, tp: undefined, lt: 0, md: '', bd: 0, an: undefined, sc: ''};
   // his scene (the game's mode + the biome: the forest, a run's level): the server sends each scene's players to that scene only
   let scMode = null, scBiome = null;
@@ -102,7 +104,7 @@ export async function create(host) {
     }
     ST.bd = host.feature('body')?.bits?.() ?? 0;   // (his body's look: wet, cold, sunk, knocked down; content/body.js packBody: friends see it, features/body.js)
     const cv = host.feature('caves'), ml = host.feature('meals');
-    ST.lt = cv?.lit || host.feature('workshop')?.torch ? 1 : ml?.eyes && cv?.down ? 2 : 0;   // (his lantern burns in the cave, or a lit pine haft: features/workshop.js; the server's soot things go for it, friends' night veins hide; 2: a burnt eel's eyes, only the soot things)
+    ST.lt = (cv?.lit && !nightglass()) || host.feature('workshop')?.torch ? 1 : ml?.eyes && cv?.down ? 2 : 0;   // (his lantern burns in the cave, or a lit pine haft: features/workshop.js; the server's soot things go for it, friends' night veins hide; 2: a burnt eel's eyes, only the soot things; a Nightglass Lantern's light is dark light, none of that: docs/ALMANAC.md)
     ST.md = ml?.code || '';   // (the meal in him: friends see its mood, content/meals.js)
     if (Math.hypot(ST.x - lastX, ST.y - lastY) > 4) ST.tp = 1;   // (a respawn, a teleport: the server lets that one through)
     lastX = ST.x; lastY = ST.y;

@@ -164,6 +164,8 @@ export const FLAG_DOCS = {
   tally: 'n (dev): the Tally Stick starts with n notches (features/keepsakes.js; 10 or more: it fills at the next step)',
   keepsakes: '0: the keepsakes\' rules off (features/keepsakes.js, docs/KEEPSAKES.md: what a worn charm bends); the keepsakes stay in the pouch and can be worn',
   mods: '0: weapon attachments and runes off (features/mods.js, docs/MODS.md); all: every part in the kit (a test start)',
+  almanac: '0: no almanac (features/almanac.js, docs/ALMANAC.md: the first loop\'s chapters, the card top left, the pointer, Today\'s three)',
+  chapter: 'n (dev): the almanac starts at chapter n (1-6; the ones before it count as done), once a page load (features/almanac.js)',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',

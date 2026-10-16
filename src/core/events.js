@@ -284,6 +284,7 @@ export const EVENTS = {
   'smith.smelt':        ['features/workshop.js',  'x, y, id, bar (content/items.js), mine (the loader is him): a bar slid out onto the stone', 'audio, (skill-verbs: a Smithing skill)'],
   'smith.strike':       ['features/workshop.js',  'x, y, h, n (counts so far), of (counts to finish), rhythm: a hammer blow on the anvil', 'audio, workshop (view: sparks)'],
   'smith.make':         ['features/workshop.js',  'x, y, item (content/items.js or content/gear.js), u (its record), hand (made by hand, no anvil): a made thing is his', 'audio, (skill-verbs: a Smithing skill)'],
+  'smith.fit':          ['features/workshop.js',  'x, y, id (the furnace), mine: a bellows was fitted to it', 'almanac'],
   'tool.lit':           ['features/workshop.js',  'x, y, u: his pine haft caught at a fire (a small torch)', 'audio'],
   'tool.unlit':         ['features/workshop.js',  'x, y, u, why (out | rain): his pine haft went out', 'audio'],
   'vein.crack':         ['features/workshop.js',  'x, y, i (the vein: world/caves.js C.veins), on (true: cracked by a fire; false: it closed again)', 'audio'],
@@ -293,13 +294,17 @@ export const EVENTS = {
   // woodcutting (sim/player/tool.js the swing, features/woodcut.js what it meets); who = the tree prop
   'player.chop':        ['sim/player/tool.js',    'x, y, z, vx, vy (unit: the blow\'s way), tool (content/items.js): a tool\'s swing lands', 'woodcut'],
   'tree.chop':          ['features/woodcut.js',   'x, y, h (the bite), who, k (0 a glance off wood too hard for the axe, else 0..1: how hard it shakes), left (blows), dx, dy (unit: him to the trunk)', 'wind (the crown shudders, leaves), woodcut (view: chips), audio'],
-  'tree.fell':          ['features/woodcut.js',   'x, y, who, vx, vy (unit: the way it falls), species, scale: the last bite; it starts to fall', 'audio'],
+  'tree.fell':          ['features/woodcut.js',   'x, y, who, vx, vy (unit: the way it falls), species, scale, mine (false: a friend felled it, co-op): the last bite; it starts to fall', 'audio, almanac'],
   'tree.land':          ['features/woodcut.js',   'x, y (where the crown comes down), who, r (the crown\'s radius)', 'woodcut (view: leaves, dust, the shake), audio'],
   'tree.hit':           ['features/woodcut.js',   'x, y (what it hit), who (the tree), kind (player | foe | tree | crate | barrel), dmg, vx, vy (unit: the fall\'s way): a falling tree came down on something (docs/SKILLS.md: the tree\'s hit)', 'fauna (the birds go), audio'],
   'tree.logs':          ['features/woodcut.js',   'x, y, who, n: the fallen trunk breaks into n logs', 'woodcut (view: dust), audio'],
   'tree.grow':          ['features/woodcut.js',   'x, y, who: a stump has grown back into its tree', '(none yet)'],
   'tool.hit':           ['features/woodcut.js',   'x, y, who, kind (body | a prop kind): a tool\'s swing meets a foe or a dummy', 'audio'],
   'tool.whiff':         ['features/woodcut.js',   'x, y: a tool\'s swing at nothing (features/mining.js too: ring, the ringing pick rings on)', 'audio'],
+  // the almanac (features/almanac.js, docs/ALMANAC.md): the first loop's chapters and Today's three
+  'almanac.goal':       ['features/almanac.js',   'x, y (him), ch (content/almanac.js CHAPTERS id), goal (its id), today: false: a goal of the chapter is met', '(almanac view: a click)'],
+  'almanac.chapter':    ['features/almanac.js',   'x, y, ch (the chapter done), next (the next one\'s id, \'\' none): its page is torn out, its gift given', '(almanac view: a chime)'],
+  'almanac.today':      ['features/almanac.js',   'x, y, i (0..2), goal (content/almanac.js TODAY id), all (the third of three: the bonus too): one of Today\'s three is done, its gift given', '(almanac view: a click)'],
   'bells.toll':         ['features/bells/view.js (a view: nothing in the sim listens)', 'x, y, h, k (0..1), note, who (the bell): its clapper strikes it again as it swings', 'audio (its note, softer)'],
   // weapon attachments and runes (features/mods/sim.js, docs/MODS.md)
   'mods.find':          ['features/mods/sim.js',  'x, y, id (the part), first (the first of its kind): a part went into the kit', 'mods (view: the toast, a glint)'],
