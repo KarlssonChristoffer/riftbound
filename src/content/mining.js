@@ -33,7 +33,12 @@ export const TUNE = {
   camp: 1.6,
   night: {dark: 6},
   cache: {copper_ore: 3, glow_shard: 3}, keep: ['tally_stick', 'big_tooth'],
+  // THE CHAIN (Mining 5, docs/SKILLS.md): n rhythm blows in a row on one vein crack it at once (all its blows left; the XP of the
+  // blows it skipped). gap: s each blow may come after the one before (the co-op server checks it; a swing is ~.7 s)
+  chain: {n: 3, gap: [.5, 1.4]},
 };
+// the blows a chain skips on a vein with `left` blows left after the chaining blow of power pow (its XP: that x the vein's xp)
+export const chainSkipped = (left, pow) => left > 1e-6 ? Math.ceil(left / Math.max(.25, pow) - 1e-6) : 0;
 
 export function blowPower(tool, st, rhythm) {
   return (tool?.power || 1) * (st.power || 1) * (rhythm ? TUNE.rhythmMul : 1);

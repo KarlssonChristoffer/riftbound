@@ -21,6 +21,8 @@
 //   host.env.t (the world clock), pack (the tool, XP, the pouch), combat's core (a blow that meets a foe or a dummy).
 // THE HIT (docs/SKILLS.md, content/woodcut.js TUNE.hit): a tree that comes down on something hits it (at tree.land: hitPath). In
 // co-op each client tests its own player, foes and props (the fall's way is the server's, so it lands the same everywhere).
+// THE FALL LINE (Woodcutting 5: pack.move('fall_line'); view only): while the next bite will fell the tree he's at, pixel specks
+// tremble on the ground along the fall's path (TUNE.line).
 // EMITS: tree.chop (also by: 'fall', a standing tree the fall hit), tree.fell, tree.land, tree.hit, tree.logs, tree.grow,
 // tool.hit, tool.whiff.
 // BUDGET: sim: a near() query a blow (and one a step while a swing waits for its aim); the logs (a handful) a step; the
@@ -305,6 +307,42 @@ export async function create(host) {
       host.events.push({type: 'tree.hit', x: q.x, y: q.y, who: f.p, kind: crate ? q.kind : 'foe', dmg: crate ? 0 : Math.round(HIT.foe * f.I.s), vx: f.dx, vy: f.dy});
     }
   }
+  // THE FALL LINE (view): the tree the next bite would fell (the axe out, at a tree: the locked one or the one in front of him,
+  // the bag's best axe able for its wood, the blows left within one bite) -> it | null
+  function lineTree() {
+    const t = T(); if (!t?.S.on || t.S.job !== 'chop' || !pack()?.move('fall_line')) return null;
+    const p = lock && !lock.gone ? lock : treeAhead(); if (!p || felled.has(p)) return null;
+    const I = infoOf(p), b = pack().best('chop'), tool = b?.def.tool; if (!I || !tool || (tool.tier ?? 0) < I.tier) return null;
+    const left = hp.get(p) ?? I.hp;
+    return left > 1e-6 && left - tool.power * (host.mods?.value('woodcut.power', 1) ?? 1) <= 1e-6 ? p : null;
+  }
+  const LN = TUNE.line, LNN = LN.along + LN.ring, LX = new Float32Array(LNN), LY = new Float32Array(LNN), LH = new Float32Array(LNN), LC = new Uint8Array(LNN);
+  const LALPHA = [{alpha: .25}, {alpha: .5}, {alpha: .75}, {}];
+  let lineA = 0, lineT = 0;
+  function layLine(p) {   // the specks' places on the ground: the way it would fall (away from him, as the fell sends it)
+    const I = infoOf(p), P = host.player, d = Math.hypot(p.x - P.x, p.y - P.y) || 1, W2 = pathOf(p, I, (p.x - P.x) / d, (p.y - P.y) / d);
+    const end = W2.b + Math.max(0, Math.hypot(W2.cx - W2.x, W2.cy - W2.y) - W2.b);   // (to the crown's middle)
+    for (let i = 0; i < LN.along; i++) {
+      const k = (i + .5) / LN.along, t = W2.a + (end - W2.a) * k, s = ((i * 7) % 5 - 2) / 2 * HIT.line * .5;   // (a little either side of the line)
+      LX[i] = W2.x + W2.dx * t - W2.dy * s; LY[i] = W2.y + W2.dy * t + W2.dx * s;
+    }
+    for (let i = 0; i < LN.ring; i++) { const a = i / LN.ring * Math.PI * 2; LX[LN.along + i] = W2.cx + Math.cos(a) * W2.cr; LY[LN.along + i] = W2.cy + Math.sin(a) * W2.cr; }
+    for (let i = 0; i < LNN; i++) { LH[i] = host.elev(LX[i], LY[i]) + .03; LC[i] = i % LN.col.length; }
+  }
+  function lineView(dt) {
+    const p = active() ? lineTree() : null;
+    if (p) layLine(p);
+    lineT += dt; lineA = clamp(lineA + (p ? dt * 5 : -dt * 3), 0, 1);
+  }
+  function lineFrame() {
+    if (lineA <= .02) return;
+    const o = LALPHA[Math.min(3, Math.floor(lineA * 3.99))], sh = LN.shake;
+    for (let i = 0; i < LNN; i++) {
+      const w = Math.sin(lineT * 31 + i * 2.3), v = Math.sin(lineT * 27 + i * 1.7);   // (each speck trembles on its own)
+      if (Math.sin(lineT * 9 + i * 4.1) < -.75) continue;   // (and winks now and then)
+      host.point(LX[i] + w * sh, LY[i] + v * sh, LH[i] + Math.abs(w) * sh, LN.col[LC[i]], o);
+    }
+  }
   // the player under it: thrown sideways out of its way (a sprite loadout: the skid), hurt a little, never killed
   function hitPlayer(f, ux, uy) {
     if (!host.launch?.(ux * HIT.out, uy * HIT.out, HIT.up)) host.knock?.(ux * HIT.out * 1.6, uy * HIT.out * 1.6);
@@ -515,14 +553,14 @@ export async function create(host) {
         if (!falls.includes(F2.f)) { F2.m.dispose(); VF.splice(i, 1); continue; }
         poseFall(F2, F2.f.t);
       }
-      syncStumps(); syncLogs();
+      syncStumps(); syncLogs(); lineView(dt);
       for (let i = CH.length - 1; i >= 0; i--) {
         const c = CH[i]; c.t += dt; if (c.t > c.life) { CH.splice(i, 1); continue; }
         c.vh -= c.g * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.h += c.vh * dt;
         const g = host.elev(c.x, c.y); if (c.h < g) { c.h = g; c.vx *= .3; c.vy *= .3; c.vh = 0; }
       }
     },
-    frame() { for (let i = 0; i < CH.length; i++) { const c = CH[i]; host.point(c.x, c.y, c.h, c.col); } },
+    frame() { for (let i = 0; i < CH.length; i++) { const c = CH[i]; host.point(c.x, c.y, c.h, c.col); } lineFrame(); },
     onKey(k) {
       const t = T(); if (!t) return false;
       if (k === 'e' && active() && !host.lock && !host.PL.nearInteract?.() && !host.BUSY.has(host.player.state) && treeAhead()) {   // (a chest, a sign, a fire: E is theirs)

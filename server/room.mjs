@@ -26,13 +26,13 @@
 //   room.stop(); room.clock() -> hours; room.players (the records)
 import {VERSION, TICK_HZ, MOVE, REACH, COLORS, CLOCK, encode, decode, num, str} from '../src/net/protocol.js';
 import {cleanSet, GEAR_BY_ID} from '../src/content/gear.js';
-import {CATCHES, WATERS, BAITS, SPOT, roll, statsOf, castNotes, spotNear} from '../src/content/fishing.js';
+import {CATCHES, WATERS, BAITS, SPOT, TUNE as FISH, roll, statsOf, castNotes, spotNear, shadowVerdict} from '../src/content/fishing.js';
 import {mealNotes} from '../src/content/meals.js';
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, fuelAt, stokeFuel} from '../src/content/builds.js';
 import {SKILLS, IMPORT_CAP, levelOf, fellXP, rateOf, hasMove, nextMoveLvl, needXP} from '../src/content/skills.js';
-import {TUNE as MINE} from '../src/content/mining.js';
+import {TUNE as MINE, chainSkipped} from '../src/content/mining.js';
 import {createPlayers, KEY_RE} from './players.mjs';
 import {createSecrets, createStalker} from '../src/sim/uncanny.js';
 import {createSoot} from '../src/sim/cavelife.js';
@@ -65,7 +65,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   // SKILLS (docs/SKILLS.md): XP granted here (x the skill's RATE x --xprate), told to that player alone; his levels are his record's
   const PL = players || createPlayers({SKILLS, importCap});
   const lvlOf = (p, id) => levelOf(p.rec.xp[id] || 0);
-  const ML = Math.max(0, movelvl | 0), mvl = {};
+  const ML = Math.max(0, movelvl | 0), mvl = {}, SHV = {x: 0, y: 0, sx: 0, sy: 0, hx: 0, hy: 0, cls: '', len: 0};
   const moveOK = (p, move) => { for (const id in SKILLS) mvl[id] = Math.max(lvlOf(p, id), ML); return hasMove(mvl, move); };   // (a move the sim checks: the chain, the nose cast)
   function grant(p, id, n) {
     const g = Math.round(n * rateOf(id, xprate) * 1000) / 1000; if (!(g > 0)) return;
@@ -78,7 +78,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const id = nextId++, used = new Set([...peers.values()].map(q => q.color)), color = COLORS.find(c => !used.has(c)) || COLORS[id % COLORS.length];
     const {rec} = PL.join(KEY_RE.test(m.key) ? m.key : 'anon' + id, m.xp);   // (no key: a record for this connection alone)
     const p = {conn, id, name: str(m.name, 20).replace(/[^\w .'-]/g, '') || 'Player ' + id, color, x: 0, y: 0, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', w: null, wn: null, ls: null, gear: [], gearT: -1e9, fishT: -1e9, fishN: -1, fishR: null,
-      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, rec, biteT: -1e9, crystals: new Set()};
+      fresh: false, wNew: false, lastT: 0, placed: false, fixT: -1e9, acts: 0, actT: 0, lit: false, rec, biteT: -1e9, crystals: new Set(), chain: {id: '', n: 0, t: -1e9}};
     conn.send(encode({k: 'welcome', v: VERSION, id, name: p.name, color, seed, t: now(), world: Object.fromEntries(world), peers: [...peers.values()].map(pub),
       clock: clockMsg(), unc: unc ? {sec: secState(), shift: unc.strength} : null}));
     peers.set(id, p);
@@ -191,8 +191,14 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
     const V = VEINS[kind]; if ((num(m.tier, 1) | 0) < V.tier) return deny('too hard');
     const pow = Math.max(.25, Math.min(3, num(m.pow, 1)));
     const by = cur?.by ? [...cur.by] : []; if (!by.includes(p.id)) by.push(p.id);
-    const left = Math.max(0, (cur?.left ?? V.blows) - pow);
+    let left = Math.max(0, (cur?.left ?? V.blows) - pow);
     grant(p, 'mining', V.xp);   // (a blow that bites: his)
+    // THE CHAIN (Mining 5, docs/SKILLS.md): his rhythm blows in a row on this vein, each within TUNE.chain.gap of the last (counted
+    // here: the client's count is never asked); the n-th, with the move, cracks it at once (the XP of the blows it skipped)
+    const C = MINE.chain, ch = p.chain, dt = (t - ch.t) / 1000;
+    ch.n = m.rh === 1 && ch.id === id && dt >= C.gap[0] && dt <= C.gap[1] ? ch.n + 1 : m.rh === 1 ? 1 : 0; ch.id = id; ch.t = t;
+    let chain = false;
+    if (ch.n >= C.n && moveOK(p, 'chain')) { ch.n = 0; if (left > 1e-6) { grant(p, 'mining', V.xp * chainSkipped(left, pow)); left = 0; chain = true; } }
     if (left > 1e-6) {
       const s = {s: 'struck', left: +left.toFixed(3), by, t};
       world.set(id, s); all({k: 'world', id, s: 'struck', left: s.left, by: p.id}); return;
@@ -206,7 +212,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       grant(pq, 'mining', V.xp * 4);   // (the spent vein: every striker's)
     }
     world.set(id, V.hollow ? {s: 'spent', by: p.id, t} : {s: 'spent', by: p.id, t, at: clock() + veinHours(regrow)});   // (a hollow wall: open for good)
-    all({k: 'world', id, s: 'spent', by: p.id, got});
+    all({k: 'world', id, s: 'spent', by: p.id, got, ...(chain ? {chain: 1} : {})});
   }
   // A CAVE CRYSTAL broken under the pick ({a: 'crystal', id: 'c' + its index in the cave plan's props}): the crystals are each
   // player's own (combat breaks them in his world); the room checks it's one of the plan's, in reach and not already his, and
@@ -288,10 +294,15 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
       const pieces = p.gear.filter(id => GEAR_BY_ID[id]?.kind === 'fishing').length, meal = str(m.meal, 24), bait = str(m.bait, 24);
       notes.push(...castNotes({lvl, pieces, meal: mealNotes(meal), per: SKILLS.fishing.per}));
       const spot = !!m.spot && spotNear(x, y, Math.floor(t / 1000 / SPOT.slot), seed | 0);
+      // SHADOWS (Fishing 5, docs/SKILLS.md): the bobber at a shadow's nose (computed here from the seed and this clock, a little
+      // latency back) is a quick bite of its class; on it, the fish bolts and the wait grows. Only with the move
+      const ts = t / 1000, sv = moveOK(p, 'shadows') ? shadowVerdict(x, y, Math.floor(ts / SPOT.slot), seed | 0, [ts, ts - .25, ts - .5], SHV) : '';
       const st = statsOf(notes), rain = !!m.rain;
       const r = roll(fishRng, {water: w, part: partOf(clock()), rain, deep: Math.max(0, Math.min(40, num(m.deep, 0))), luck: st['fish.luck'] + (rain ? st['fish.rain'] : 0),
         find: st['fish.find'], size: st['fish.size'], lure: st['fish.lure'], night: st['fish.night'], perfect: !!m.perfect,
-        spot, bait: BAITS[bait] ? bait : ''});
+        spot, bait: BAITS[bait] ? bait : '', cls: sv === 'nose' ? SHV.cls : '', quick: sv === 'nose'});
+      if (sv === 'spook') r.wait = Math.round((r.wait + FISH.spook) * 100) / 100;
+      if (sv) r.sh = sv;   // (the client's view: it saw the same, or close)
       r.two = fishRng() < st['fish.double'];
       p.fishN = n; p.fishR = r; p.fishPerfect = !!m.perfect; p.biteT = t;
       p.conn.send(encode({k: 'fish', a: 'bite', n, ...r}));

@@ -469,7 +469,7 @@ const SFX = {
   mineHit(E, o) {
     if (o.kind === 'crystal') { SFX.hit(E, {...o, mat: 'glass', g: (o.g ?? 1) * 1.1}); SFX.hit(E, {...o, mat: 'clay', g: (o.g ?? 1) * .5}); return; }
     const v = E.voice({...o, g: (o.g ?? 1) * (o.rhythm ? 1.25 : 1)}, 'hit', .5, {pri: 2, cd: .03}); if (!v) return;
-    const {N, O} = E, up = o.rhythm ? 1.19 : 1;
+    const {N, O} = E, up = (o.rhythm ? 1.19 : 1) * (1 + .06 * Math.max(0, (o.chain || 1) - 1));   // (the chain: the ping rises a blow)
     if (o.k === 0) { O(v, 0, {f: 520, a: .001, d: .12, g: .1}); O(v, 0, {f: 170, f2: 110, d: .08, g: .3}); N(v, 0, {type: 'bandpass', f: 1200, q: 2, d: .05, g: .3}); return; }
     if (o.hollow) {   // a hollow wall (docs/CAVELIFE.md): a woody, boomy knock that rings on in the room behind it, little of the pick's ring
       O(v, 0, {f: 196, f2: 172, a: .002, d: .42, g: .3}); O(v, .004, {f: 311, a: .002, d: .26, g: .09}); N(v, 0, {type: 'bandpass', f: 420, q: 3, a: .002, d: .3, g: .35});
@@ -1286,7 +1286,7 @@ export function createAudio(ctx, host = {}) {
         case 'tree.logs': fire('treeLogs', e.x, e.y, {surf, n: e.n}); break;
         case 'tool.hit': fire('hit', e.x, e.y, {mat: e.kind === 'body' ? 'body' : MAT[e.kind] || 'wood', g: 1}); break;
         case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); break;   // (the swing's whoosh)
-        case 'mine.hit': fire('mineHit', e.x, e.y, {k: e.k, kind: e.kind, rhythm: e.rhythm, hollow: e.hollow, g: e.other ? .7 : 1}); break;   // (features/mining.js: a blow on a vein or a crystal; hollow: a hollow wall's knock)
+        case 'mine.hit': fire('mineHit', e.x, e.y, {k: e.k, kind: e.kind, rhythm: e.rhythm, hollow: e.hollow, chain: e.chain, g: e.other ? .7 : 1}); break;   // (features/mining.js: a blow on a vein or a crystal; hollow: a hollow wall's knock)
         case 'mine.open': fire('hollowOpen', e.x, e.y); break;   // (a hollow wall caves in)
         case 'lantern.toggle': fire('lanternClick', e.x, e.y); break;   // (features/caves.js: L in the cave)
         case 'lantern.snuff': fire('lanternSnuff', e.x, e.y); break;   // (the soot things put it out)

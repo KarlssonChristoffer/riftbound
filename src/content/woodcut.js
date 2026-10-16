@@ -25,6 +25,9 @@ export const TUNE = {
   // health, at least 1 and never the last of it (?treehurt=0: not hurt); a standing tree shudders and loses one blow (never
   // felled by it); a crate or a barrel breaks
   hit: {line: .35, crown: .8, foe: 30, shove: 1.5, out: 4.2, up: 3.4, hurt: .15, h: 2.2},
+  // THE FALL LINE (Woodcutting 5, docs/SKILLS.md; view only): while the next bite will fell the tree, `along` specks tremble on
+  // the ground where the trunk will lie and `ring` round where the crown comes down; shake (m) how far they tremble, col theirs
+  line: {along: 24, ring: 10, shake: .035, col: ['#d8c9a8', '#b8a582', '#efe2c2']},
 };
 
 export const TREES = {

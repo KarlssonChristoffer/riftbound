@@ -125,6 +125,7 @@ export const EVENTS = {
   'fish.snap':          ['features/fishing.js', 'x, y (the strain reached full: the line broke)', 'fishing (view), audio'],
   'fish.escape':        ['features/fishing.js', 'x, y (the fish swam off: at the end of the line too long, or he walked off)', 'fishing (view), audio'],
   'fish.leap':          ['features/fishing.js', 'x, y, id (reeled in: it leaps out of the water to him)', 'fishing (view), audio'],
+  'fish.shadow':        ['features/fishing.js',   'x, y (the shadow), a (nose: it comes for the bobber | spook: it bolts), hx, hy (unit: its heading), len (m), cls (content/fishing.js SHADOW): a cast at a fish shadow (Fishing 5, docs/SKILLS.md)', 'fishing (view: it swims in / bolts)'],
   'fish.catch':         ['features/fishing.js', 'x, y, id, cm, kg, n (2: a double), first, record, rarity (it is in the pouch)', 'fishing (view), audio'],
   'fish.away':          ['features/fishing.js', 'x, y (the line comes in empty)', 'audio'],
   'fish.spot':          ['features/fishing.js', 'x, y (the cast fell on a fishing spot: it bites sooner and rarer)', 'audio'],
@@ -212,7 +213,7 @@ export const EVENTS = {
   'forage.pick':        ['features/forage.js',    'x, y, i, kind (content/forage.js PLANTS), n (0: someone else\'s pick), mine: a patch was picked (by him or, co-op, a friend)', 'audio'],
   'forage.grow':        ['features/forage.js',    'x, y, i, kind: a picked patch has grown back', '(none yet)'],
   // mining (features/mining.js, docs/MINING.md): a vein is the cave's (world/caves.js C.veins index i)
-  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow)', 'mining (view: sparks, grit), audio'],
+  'mine.hit':           ['features/mining.js',    'x, y, h (where the pick meets the rock), i (the vein; -1 a crystal), kind (stone | copper | iron | night | hollow | crystal), k (0 a glance off rock too hard for the pick, else the stage now 1..3), rhythm, dx, dy (unit: him to it), hollow (a hollow wall: it knocks hollow), chain (Mining 5: the rhythm blows in a row, 0 without the move), crack (the chain cracked it)', 'mining (view: sparks, grit), audio'],
   'mine.spent':         ['features/mining.js',    'x, y, i, kind, n (his chunks; 0: a friend\'s blow spent it): the vein breaks open', 'mining (view: dust), audio'],
   'mine.chunk':         ['features/mining.js',    'x, y, item: a chunk picked up off the floor', 'audio'],
   'mine.grow':          ['features/mining.js',    'x, y, i, kind: a spent vein has come back', '(none yet)'],

@@ -8,6 +8,7 @@ import {createPlayers} from '../../server/players.mjs';
 import {forestPlan} from '../../src/world/forest.js';
 import {SKILLS, needXP, levelOf, fellXP, rateOf, IMPORT_CAP} from '../../src/content/skills.js';
 import {VERSION, encode, decode} from '../../src/net/protocol.js';
+import {SPOT, SHADOW, shadowAt} from '../../src/content/fishing.js';
 
 const SEED = 1337;
 const F = forestPlan(SEED);
@@ -154,6 +155,54 @@ console.log(`room: seed ${SEED}, ${F.trees.size} trees, ${F.decor?.length ?? 0} 
   b.say({k: 'act', a: 'dev', id: 'reset'});
   ok(b.last('skills')?.xp.mining === 0, 'dev reset: back to 0');
   plain.stop(); devr.stop();
+}
+
+// 5. the chain (Mining 5): three rhythm blows in a row, each 0.5-1.4 s after the last, crack a vein at once; not without the
+// level, not too fast
+{
+  const vi = (F.cave?.veins || []).findIndex(v => v.kind === 'copper'), v = F.cave?.veins?.[vi];
+  if (v) {
+    const at = {k: 'st', x: v.x + v.nx, y: v.y + v.ny, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', tp: 1};
+    const blows = async (c, gap) => { for (let k = 0; k < 3; k++) { if (k) await nap(gap); c.say({k: 'act', a: 'mine', id: 'v' + vi, pow: 1, tier: 1, rh: 1}); } };
+    const r1 = makeRoom(createPlayers({SKILLS})), a = join(r1, KEY_A, {mining: needXP(5)}); a.say(at); a.clear();
+    await blows(a, 700);
+    const sp = a.last('world', m => m.id === 'v' + vi && m.s === 'spent');
+    ok(sp && sp.chain === 1, 'the chain: three rhythm blows crack a copper vein (5 blows) at once', JSON.stringify(a.last('world')));
+    ok(Math.abs(xpOf(a, 'mining') - (needXP(5) + (3 * 4 + 2 * 4 + 4 * 4) * rateOf('mining'))) < 1e-6, 'the chain: the XP of the blows it skipped', xpOf(a, 'mining'));
+    r1.stop();
+    const r2 = makeRoom(createPlayers({SKILLS})), b = join(r2, KEY_B, {mining: needXP(4)}); b.say(at); b.clear();
+    await blows(b, 700);
+    ok(!b.last('world', m => m.id === 'v' + vi && m.s === 'spent'), 'no chain below Mining 5');
+    r2.stop();
+    const r3 = makeRoom(createPlayers({SKILLS})), c = join(r3, KEY_A, {mining: needXP(5)}); c.say(at); c.clear();
+    await blows(c, 150);
+    ok(!c.last('world', m => m.id === 'v' + vi && m.s === 'spent'), 'no chain from blows too close together');
+    r3.stop();
+  } else ok(false, 'a copper vein in the plan');
+}
+
+// 6. the shadows (Fishing 5): a cast just ahead of a shadow's nose (the server's own shadow: the seed and its clock) is a quick
+// bite; on the shadow the wait grows; without the level neither
+{
+  const q = {x: 0, y: 0, sx: 0, sy: 0, hx: 0, hy: 0, cls: '', len: 0};
+  let a0 = 0, b0 = 0; for (let a = -20; a < 20 && !a0; a++) for (let b = -20; b < 20; b++) if (shadowAt(a, b, 0, SEED, 1, q)) { a0 = a; b0 = b; break; }
+  if (a0) {
+    const cast = async (xp, where) => {
+      const room = makeRoom(createPlayers({SKILLS})), t0 = Date.now(), c = join(room, KEY_A, {fishing: xp});
+      await nap(400); const ts = (Date.now() - t0) / 1000;
+      shadowAt(a0, b0, Math.floor(ts / SPOT.slot), SEED, ts, q);
+      const x = where === 'nose' ? q.x + q.hx * (q.len / 2 + .8) : q.x, y = where === 'nose' ? q.y + q.hy * (q.len / 2 + .8) : q.y;
+      c.say({k: 'st', x, y: y + 3, z: 0, phi: 0, s: 'idle', pose: 'idle.0', rig: '', tp: 1}); c.clear();
+      c.say({k: 'fish', a: 'cast', n: 1, x, y, w: 'lake', deep: 2});
+      room.stop(); return c.last('fish', m => m.a === 'bite');
+    };
+    const nose = await cast(needXP(5), 'nose');
+    ok(nose && nose.sh === 'nose' && nose.wait >= SHADOW.bite[0] && nose.wait <= SHADOW.bite[1] && !nose.nibbles.length, 'a cast at a shadow\'s nose: a quick bite', JSON.stringify(nose));
+    const spook = await cast(needXP(5), 'on');
+    ok(spook && spook.sh === 'spook' && spook.wait >= 3.5 + 2.5 - 1e-6, 'a cast on a shadow: it bolts, the wait grows', JSON.stringify(spook));
+    const low = await cast(needXP(4), 'nose');
+    ok(low && !low.sh && low.wait >= 3.5, 'no shadows below Fishing 5', JSON.stringify(low));
+  } else ok(false, 'a spot near the start');
 }
 
 console.log(`room: ${passes} passed, ${fails} failed`);
