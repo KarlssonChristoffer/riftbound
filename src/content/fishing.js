@@ -13,7 +13,10 @@
 //            each does and how it reads in the gear card (statWords)
 //   TUNE     the cast, the wait, the hook, the fight: features/fishing.js reads these
 //   roll(rng, o) -> {id, cm, kg, wait, nibbles}   the catch for a cast (o: water, part, rain, deep, luck, find, size, lure,
-//            perfect, spot, bait): the game offline and the server in co-op draw the same way
+//            perfect, spot, bait; most: the rarest tier it may be, noFind: a fish, never a find): the game offline and the
+//            server in co-op draw the same way
+//   SHADOW   fish shadows under the water (docs/KEEPSAKES.md, briefs' depth-shared: features/fishing.js draws them, the one drawing;
+//            other features ask it to: fishing.come): shadowAt(spot, slot, seed, t, out) -> where one circles a spot at t
 //   SPOT     fishing spots: rises and bubbles on the water (features/fishing.js finds them; a cast into one bites sooner, rarer)
 //            spotAt(a, b, slot, seed, out) (the cell's spot), spotNear(x, y, slot, seed) (the server's check of a cast's word)
 //   BAITS    what goes on the hook (cut from small fish at the pack panel; one a cast while you have it): prey weights
@@ -226,10 +229,10 @@ export const catchIcon = id => ICONS[id] ??= CATCHES[id].rows ? {rows: CATCHES[i
 // -> {id, cm, kg, wait (s), nibbles: [s ...] (before wait)}
 export function roll(rng, o) {
   const luck = (o.luck || 0) + (o.perfect ? TUNE.cast.luck : 0) + (o.spot ? SPOT.luck : 0), prey = o.bait ? BAITS[o.bait]?.prey : null;
-  const isFind = rng() < TUNE.find + (o.find || 0);
+  const isFind = !o.noFind && rng() < TUNE.find + (o.find || 0);
   let total = 0; const pick = [];
   for (const id of CATCH_IDS) {
-    const c = CATCHES[id]; if (!!c.find !== isFind || !c.where.includes(o.water)) continue;
+    const c = CATCHES[id]; if (!!c.find !== isFind || !c.where.includes(o.water) || (o.most !== undefined && (RARITY_TIER[c.rarity] || 0) > o.most)) continue;
     let w = (RARITY_W[c.rarity] || 1) * Math.pow(1 + Math.max(0, luck), RARITY_TIER[c.rarity] || 0) * (c.when[o.part] ?? 1);
     if (o.rain && c.rain) w *= c.rain;
     if (prey && prey[id]) w *= prey[id];
@@ -247,6 +250,21 @@ export function roll(rng, o) {
   for (let i = 0; i < n; i++) nibbles.push(Math.round(wait * (.25 + .65 * rng()) * 100) / 100);
   nibbles.sort((a, b) => a - b);
   return {id, cm, kg, wait: Math.round(wait * 100) / 100, nibbles};
+}
+
+// ---------------------------------------------------------------- fish shadows
+// SHADOW: dark fish shapes under the water, circling a point (a caller's: features/fishing.js come(key, x, y, k)); `max` drawn
+// at once, each len m long, circling at speed rad/s (varied), `near`: within this many m of the player they are drawn
+export const SHADOW = {max: 10, len: [.22, .36], speed: [.5, 1.1], near: 25, drop: 4};
+// shadow `slot` of a spot {x, y, r0, r1} (seed: the spot's own) at t s -> out {x, y, a (its heading, rad), len}: on its own circle
+// between r0 and r1, at its own pace and way round, wavering a little (pure: every client draws the same from the same spot)
+export function shadowAt(spot, slot, seed, t, out) {
+  const h1 = hash3(seed | 0, slot, 11), h2 = hash3(seed | 0, slot, 29), h3 = hash3(seed | 0, slot, 47);
+  const r = spot.r0 + (spot.r1 - spot.r0) * h1, dir = h2 < .5 ? -1 : 1, w = (SHADOW.speed[0] + (SHADOW.speed[1] - SHADOW.speed[0]) * h3) * dir;
+  const a = h2 * 6.2832 + t * w, wob = Math.sin(t * 1.7 + slot * 2.1) * .12;
+  out.x = spot.x + Math.cos(a) * (r + wob); out.y = spot.y + Math.sin(a) * (r + wob);
+  out.a = a + dir * 1.5708; out.len = SHADOW.len[0] + (SHADOW.len[1] - SHADOW.len[0]) * h1;
+  return out;
 }
 
 // ---------------------------------------------------------------- fishing spots, bait, the angler's set

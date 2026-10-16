@@ -15,7 +15,8 @@
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
 //            (the server checks it), bait / meal = the bait on the hook, the meal eaten (ids); the server rolls what bites. {a: 'land', n}: he
-//            landed it (told to everyone); {a: 'lost', n}: it got away
+//            landed it (told to everyone); {a: 'lost', n}: it got away. {a: 'grab', n, x, y, w, lvl}: the Heron Feather's jab
+//            into the shallows at his feet (docs/KEEPSAKES.md; n = his jab count), rolled at once
 //   ping     {c}                                         c = the client's clock (ms), echoed
 // server -> client
 //   welcome  {v, id, name, color, seed, t, world, peers, clock, unc}   world = {id: state} (what's been done to the world so far),
@@ -36,7 +37,7 @@
 //                                                        the server took it; docs/GEAR.md)
 //   fish     {a: 'bite', n, id, cm, kg, wait, nibbles, two}   to the caster: what bites cast n (content/fishing.js roll), when
 //            (wait s, the nibbles' s before it), two = a double catch. {a: 'caught', id, name, c, cm, kg, two}: to everyone,
-//            player id landed catch c
+//            player id landed catch c. {a: 'grabbed', n, id, cm, kg}: to the jabber, what jab n came up with (id '': nothing)
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
 //   pong     {c, t}                                      t = the server's clock (ms)
 export const VERSION = 2;

@@ -1,5 +1,6 @@
 // KEEPSAKES (data; docs/KEEPSAKES.md): the odd things the forest's and the cave's secrets leave you, and the one rule each
-// bends while you wear it in a charm slot (content/gear.js slot 'charm', SLOT_CAP 2). Pure data, no imports: the browser
+// bends while you wear it in a charm slot (content/gear.js slot 'charm', SLOT_CAP 2). Pure data and pure functions (one import:
+// content/fishing.js roll, pure too): the browser
 // (features/keepsakes.js, features/cavelife.js, features/caves.js, features/fauna.js, features/fishing.js, features/watcher.js)
 // and the co-op server (server/room.mjs: the soot things read who wears the tooth or the full tally; the heron's jab is rolled
 // there) read this one file. What a keepsake does is never written in the game's text (no stat line, no toast): you find out.
@@ -11,6 +12,7 @@
 //                  cave.kin (the soot things count you as one of theirs), cave.relight (x the lantern's relight after a snuff:
 //                  features/caves.js), watcher.every (x the watcher's wait between visits: features/watcher.js)
 //   HERON          the Heron Feather: stand still in shallow water and fish shadows rise round your feet; E jabs for one
+//                  heronRoll(rng, {water, part, lvl}) -> a catch {id, cm, kg} | null (a miss): the game offline, the server online
 //   STONE          the Warm Stone: the lantern relights at once after a snuff (cold and ice: the weather brief's hooks)
 //   TOOTH          the Big Tooth: the soot things break off, the rock-things flee early, the forest animals take you as loud
 //   TALLY          the Tally Stick: its notches (the rule: docs/KEEPSAKES.md, under its spoiler heading)
@@ -18,6 +20,8 @@
 //   FIDDLE         the Fiddle String: what its card says changes; what it does is the lure
 //   SHELF          the Keepsake Shelf's places and what happens round it
 // The numbers are in metres, seconds, m/s; degrees only where marked (turned at use).
+import {roll, RARITY_TIER} from './fishing.js';
+
 export const KEEPSAKE_IDS = ['heron_feather', 'warm_stone', 'bark_doll', 'tally_stick', 'full_tally_stick', 'big_tooth', 'fiddle_string'];
 export const isKeepsake = id => KEEPSAKE_IDS.includes(id);
 
@@ -42,6 +46,13 @@ export const HERON = {
   xp: .5,                      // x a cast's Fishing XP for a heron's catch
   stream: .25,                 // m: the stream counts as shallows where it is no wider than its usual (not its deep pools)
 };
+// the heron's jab: a fish of that water (as a cast rolls it: no bait, no spot, no finds, nothing rarer than HERON.rarest) or nothing
+export function heronRoll(rng, o) {
+  const hit = Math.min(HERON.max, HERON.odds + HERON.perLevel * Math.max(0, (o.lvl || 1) - 1));
+  if (rng() >= hit) return null;
+  const r = roll(rng, {water: o.water, part: o.part || 'day', noFind: true, most: RARITY_TIER[HERON.rarest]});
+  return {id: r.id, cm: r.cm, kg: r.kg};
+}
 export const STONE = {
   relight: .25,                // x the lantern's relight after a snuff (content/cavelife.js LANTERN.relight: 4 s -> 1 s)
   glow: 1,                     // s the wick glows red before it catches
