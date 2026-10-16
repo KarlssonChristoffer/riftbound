@@ -20,7 +20,7 @@
 // FISHING SPOTS (content/fishing.js SPOT): rises and bubbles on the water, a few in reach, moving every SPOT.slot s on the
 // world's clock (co-op: the server's, so friends see the same ones); a cast into one bites sooner and rarer, and a catch from
 // it spends it (for you). BAIT (BAITS): cut from small fish at the pack panel; one goes on the hook a cast while you have it.
-// FISH SHADOWS (content/fishing.js SHADOW, shadowAt; briefs' depth-shared: the one drawing of fish under the water): other
+// FISH CALLED TO A POINT (content/fishing.js COME, comeAt; briefs' depth-shared: the one drawing of fish under the water): other
 // features ask for them near a point (F.come(key, x, y, k, n), every view while they should show) and never draw their own.
 // THE GRAB (F.grab(x, y, water)): a jab into the shallows by hand (the Heron Feather: features/keepsakes.js), rolled like a cast
 // with HERON's limits (content/keepsakes.js heronRoll; co-op: the server's fish {a: 'grab'}), landed at once: the card, the
@@ -40,7 +40,7 @@
 // BUDGET: sim: a few multiplies a step while fishing (nothing otherwise but a compare). View: a rod, a line (~16 lines), a few
 //   dozen points; HD: a gauge (rects + pixel text) while fishing; the prompt: one waterSample a frame while a rod is worn.
 //   Spots: found again only when he crosses a 7 m cell or the slot turns (~a dozen hashes and waterSamples), a few points each.
-import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, BAITS, ANGLER, COMMON_FISH, SHADOW, roll, catchIcon, isFish, spotAt, hintOf, shadowAt} from '../content/fishing.js';
+import {TUNE, CATCHES, CATCH_IDS, WATERS, SPOT, BAITS, ANGLER, COMMON_FISH, COME, roll, catchIcon, isFish, spotAt, hintOf, comeAt} from '../content/fishing.js';
 import {HERON, heronRoll} from '../content/keepsakes.js';
 import {gearById, RARITY} from '../content/gear.js';
 import {flags} from '../core/flags.js';
@@ -274,7 +274,7 @@ export async function create(host) {
   // ---------------------------------------------------------------- fish shadows (F.come: other features' asks)
   // an ask: key (the asker's own: 'heron:me', 'heron:<peer id>'), the point they circle, k (0: gone, 1: at the point; between:
   // that far up from the drop-off), n of them, seed (the key's hash: everyone draws the same), t (the view clock it was asked at)
-  const ASKS = []; for (let i = 0; i < 4; i++) ASKS.push({key: '', x: 0, y: 0, k: 0, n: 0, seed: 0, t: -9, spot: {x: 0, y: 0, r0: HERON.ring[0], r1: HERON.ring[1]}, wet: new Uint8Array(SHADOW.max), wx: new Float32Array(SHADOW.max), wy: new Float32Array(SHADOW.max)});
+  const ASKS = []; for (let i = 0; i < 4; i++) ASKS.push({key: '', x: 0, y: 0, k: 0, n: 0, seed: 0, t: -9, spot: {x: 0, y: 0, r0: HERON.ring[0], r1: HERON.ring[1]}, wet: new Uint8Array(COME.max), wx: new Float32Array(COME.max), wy: new Float32Array(COME.max)});
   const ASK_LAPSE = .3;   // s: an ask not renewed this long lapses
   const viewNow = () => performance.now() / 1000;
   function come(key, x, y, k, n = 4) {
@@ -282,7 +282,7 @@ export async function create(host) {
     for (const a of ASKS) if (a.key === key) { A = a; break; }
     if (!A) for (const a of ASKS) if (!a.key || t - a.t > ASK_LAPSE) { A = a; A.key = key; A.seed = nameHash(key); A.wx.fill(1e9); break; }
     if (!A) return false;
-    A.x = A.spot.x = x; A.y = A.spot.y = y; A.k = clamp(k, 0, 1); A.n = Math.min(n | 0, SHADOW.max); A.t = t;
+    A.x = A.spot.x = x; A.y = A.spot.y = y; A.k = clamp(k, 0, 1); A.n = Math.min(n | 0, COME.max); A.t = t;
     return true;
   }
 
@@ -596,7 +596,7 @@ export async function create(host) {
     },
     // the HD layer: the prompt, the charge meter, the "!", the fight gauge, the catch card
     hd(q, sc) { drawHD(q, sc); },
-    // other features' asks (FISH SHADOWS, THE GRAB above): come(key, x, y, k, n) -> false when all 4 asks are taken;
+    // other features' asks (FISH CALLED TO A POINT, THE GRAB above): come(key, x, y, k, n) -> false when all 4 asks are taken;
     // grab(x, y, water) (a sim step) -> false when it can't (off, fishing, a jab still out); shallow(x, y) -> water name | ''
     come, grab, shallow,
     get grabbing() { return GR.wait >= 0; },
@@ -610,18 +610,18 @@ export async function create(host) {
   };
 
   // the shadows asked for (come): each a dark fish shape (like the fight's fish) circling its ask's point on its own
-  // shadowAt circle, pushed out toward the drop-off by (1 - k) * SHADOW.drop m; only on water (sampled again when it has
-  // moved .4 m), only within SHADOW.near m of him, SHADOW.max at most
+  // comeAt circle, pushed out toward the drop-off by (1 - k) * COME.drop m; only on water (sampled again when it has
+  // moved .4 m), only within COME.near m of him, COME.max at most
   const SO = {x: 0, y: 0, a: 0, len: 0};
   const SH3 = [], SH2 = []; for (let i = 1; i <= 4; i++) { SH3.push({size: 3, alpha: .75 * i / 4}); SH2.push({size: 2, alpha: .55 * i / 4}); }
   function drawShadows() {
-    const t = viewNow(), P = host.player; let left = SHADOW.max;
+    const t = viewNow(), P = host.player; let left = COME.max;
     for (const A of ASKS) {
       if (!A.key || t - A.t > ASK_LAPSE || A.k <= .02 || left <= 0) continue;
-      if (Math.abs(A.x - P.x) > SHADOW.near || Math.abs(A.y - P.y) > SHADOW.near) continue;
-      const a = Math.max(1, Math.min(4, Math.ceil(A.k * 4))), out = (1 - A.k) * SHADOW.drop;
+      if (Math.abs(A.x - P.x) > COME.near || Math.abs(A.y - P.y) > COME.near) continue;
+      const a = Math.max(1, Math.min(4, Math.ceil(A.k * 4))), out = (1 - A.k) * COME.drop;
       for (let i = 0; i < A.n && left > 0; i++) {
-        const o = shadowAt(A.spot, i, A.seed, t, SO), ux = o.x - A.x, uy = o.y - A.y, ul = Math.hypot(ux, uy) || 1;
+        const o = comeAt(A.spot, i, A.seed, t, SO), ux = o.x - A.x, uy = o.y - A.y, ul = Math.hypot(ux, uy) || 1;
         const x = o.x + ux / ul * out, y = o.y + uy / ul * out;
         if (Math.abs(x - A.wx[i]) + Math.abs(y - A.wy[i]) > .4) { A.wx[i] = x; A.wy[i] = y; waterSample(x, y, WSH); A.wet[i] = WSH.kind ? 1 : 0; }
         if (!A.wet[i]) continue;
