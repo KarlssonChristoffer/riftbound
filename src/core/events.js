@@ -226,6 +226,7 @@ export const EVENTS = {
   'hit.land':           ['features/hits.js',      'x, y, h, who, by, type2 (the damage type: content/damage.js), dmg, ko, crit, blocked, from (player | foe | world), weapon, extra ({type: dmg}), dx, dy, power: a hit through hits.deal landed', 'audio'],
   'hit.status':         ['features/hits.js',      'x, y, who, kind (burn | poison | chill | jolt | void): a status starts on a target', 'audio'],
   'hit.arc':            ['features/hits.js',      'x, y, h, x1, y1, h1, who: a jolt arcs to the next target', 'audio'],
+  'melee.swing':        ['features/melee.js',     'x, y, z, vx, vy (unit: the blow way), mv, weapon (\'\' thrown away; a shield id for a bash), n (the combo index), k (the charge): a swing lands its blow, hit or miss', 'mods (the caster crystal\'s bolt)'],
   'melee.hit':          ['features/melee.js',     'x, y, h, who, kind (body | dummy | thing | block), mv, weapon, power (0..1), ko, crit, dx, dy, kick (the camera px)', 'flow (the camera kick), audio'],
   'melee.whiff':        ['features/melee.js',     'x, y, h, mv, weapon, power: a swing at nothing', 'audio'],
   'melee.block':        ['features/melee.js',     'x, y, h, by (who), bullet, k (the share that went through): the guard took a blow', 'audio'],
