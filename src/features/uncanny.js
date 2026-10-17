@@ -29,6 +29,7 @@
 import {flags} from '../core/flags.js';
 import {mulberry32, simSeed} from '../core/rng.js';
 import {ITEMS} from '../content/items.js';
+import {KEEPSAKE_IDS} from '../content/keepsakes.js';
 import {uncannyPlan, nightK, nightNo, shiftK} from '../world/uncanny.js';
 import {createSecrets, createStalker, SECRETS, SECRET_IDS, SEC, MODES, placeOf} from '../sim/uncanny.js';
 import {createUncannyLook} from './uncanny/look.js';
@@ -46,7 +47,8 @@ export const TUNE = {
   up: 3.2,          // m/s the knock throws you up
   ask: 2,           // s between two asks of the server (co-op)
 };
-const KEEPS = SECRET_IDS.map(id => SECRETS[id].keep);
+// what the elk knocks loose first: a keepsake you aren't wearing, then one you are (it falls from your belt), docs/KEEPSAKES.md
+const KEEPS = KEEPSAKE_IDS;
 
 export const order = {after: ['coop', 'pack']};
 export async function create(host) {
@@ -58,7 +60,7 @@ export async function create(host) {
   const online = () => !!coop()?.online;
   const F = {name: 'uncanny', label: 'Uncanny forest', on: MODE === '1' || MODE === 'dev', U, TUNE, dev: MODE === 'dev',
     k: 0, night: 0, st: null, me: 0, flash: {heron: 0, stones: 0, marks: 0}, elk: {x: 0, y: 0, phi: 0, mode: 'day', tid: -1, ok: false},
-    dropped: [], lit: false, inStones: false, stillT: 0, ringFriend: false, walkers: null};
+    dropped: [], lit: false, inStones: false, stillT: 0, springT: 0, ringFriend: false, walkers: null};
 
   // ---------------------------------------------------------------- the walkers: the props tonight's shift moves
   // (by their place as the forest grew them: a tree's or a boulder's F.props entry; one key a prop, made as it joins)
@@ -104,7 +106,11 @@ export async function create(host) {
     if (c.s !== 'triggered' || late) { if (!online()) save(); return; }
     const w = placeOf(U, c.id); F.flash[c.id] = SEC.show;
     host.events.push({type: 'uncanny.hum', x: w.x, y: w.y, id: c.id});
-    if (c.by.includes(F.me)) pack()?.give?.(SECRETS[c.id].keep, 1, {x: host.player.x, y: host.player.y, h: 1.4});
+    if (c.id === 'spring') host.events.push({type: 'keep.fiddle', x: w.x, y: w.y});   // (three notes: features/keepsakes.js's sound)
+    if (c.by.includes(F.me)) {
+      if (c.id === 'spring') F.dropped.push({id: SECRETS.spring.keep, x: w.x + .5, y: w.y + .35, t: TUNE.pickWait});   // (it lies on the spring's stones)
+      else pack()?.give?.(SECRETS[c.id].keep, 1, {x: host.player.x, y: host.player.y, h: 1.4});
+    }
     if (!online()) save();
   }
   let askT = 0;
@@ -122,7 +128,8 @@ export async function create(host) {
     // it makes you drop something: a keepsake first, else something from the pouch
     const pk = pack(); let drop = null;
     if (pk?.count) {
-      for (const id of KEEPS) if (pk.count(id) > 0) { drop = id; break; }
+      const worn = host.feature('keepsakes')?.worn;
+      for (const pass of [0, 1]) { for (const id of KEEPS) if (pk.count(id) > 0 && !!worn?.has(id) === (pass === 1)) { drop = id; break; } if (drop) break; }
       if (!drop) { const have = []; for (const id in ITEMS) if (ITEMS[id].kind === 'material' && pk.count(id) > 0) have.push(id); if (have.length) drop = have[Math.floor(R() * have.length)]; }
       if (drop && pk.take(drop, 1)) F.dropped.push({id: drop, x: P.x + e.vx * .12, y: P.y + e.vy * .12, t: TUNE.pickWait}); else drop = null;
     }
@@ -165,6 +172,9 @@ export async function create(host) {
       F.stillT = F.st.stones.s === 'awake' && d < SECRETS.stones.r && !lit && v < TUNE.still ? F.stillT + dt : 0;
       if (F.stillT >= SECRETS.stones.hold) { F.stillT = 0; ask('stones', t); }
     }
+    // the spring at dusk: standing by it a while
+    const SP = U.spring;
+    if (SP) { F.springT = F.st.spring?.s === 'awake' && Math.hypot(P.x - SP.x, P.y - SP.y) < SECRETS.spring.r ? (F.springT || 0) + dt : 0; if (F.springT >= SECRETS.spring.hold) { F.springT = 0; ask('spring', t); } }
     // the marks' hollow: reached by lantern light at night
     const H = U.hollow;
     if (H && F.st.marks.s === 'awake' && lit && Math.hypot(P.x - H.x, P.y - H.y) < SECRETS.marks.r) ask('marks', t);

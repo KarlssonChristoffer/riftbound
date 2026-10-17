@@ -38,7 +38,8 @@ along). By then the woods round him are all but dark, and the copy's floor is th
 - `world/cave3d.js`: the floor (a ground patch, `biome.paintCave`: `biomes.js caveRuins`) and the walls (`cliffs3d.js`, eight
   facing bins, `update(yaw)` picks which show).
 - `world/world.js`: the slot's rock and brow, the cave's build, `world.cave`.
-- `features/caves.js`: the warp, F.under, the lantern (`host.mods` 'light.lantern' / 'light.lanternR'). Event `player.warp`.
+- `features/caves.js`: the warp, F.under, the lantern (`host.mods` 'light.lantern' / 'light.lanternR'; out down there:
+  'light.lanternOut'; L puts it out and lights it, the soot things snuff it: `docs/CAVELIFE.md`). Event `player.warp`.
 - `render/lighting.js`: the mood toward the cave's by F.under. `features/cutaway.js`, `weather.js`, `mist.js`: off underground.
 
 ## Multiplayer
@@ -50,5 +51,6 @@ breakable props like the arena's (not synced yet, like the rest of combat).
 ## Not yet
 
 - More than one cave; caves in the other places; deeper levels (a cave under the cave: the band can hold a second copy).
-- Things living down there; water, drips, sound (the acoustics see the walls already: the band is in the world).
+- Water, drips, ambient sound (the acoustics see the walls already: the band is in the world). Things living down there
+  came with `docs/CAVELIFE.md` (rock-things, soot things).
 - The mouth's look from above at other yaws (the brow faces south); a ladder or a rope down a shaft as another way in.

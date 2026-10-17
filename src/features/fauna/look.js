@@ -87,11 +87,12 @@ export function createFaunaLook(host, TUNE) {
   }
   function bird(a, r) {
     const R = FAUNA_RIG[a.sp], s = a.S.s * (a.sp === 'capercaillie' && a.d.hen ? .8 : 1), air = a.h > .05 || a.st === 'flush' || a.st === 'fly' || a.st === 'circle';
-    const pitch = air ? Math.max(-.4, Math.min(.5, a.vz * .12)) : a.pitch < -.5 ? -.55 : a.st === 'alert' ? .15 : 0;
+    const lek = air ? 0 : a.lek || 0, shiver = a.deaf ? Math.sin(performance.now() * .07) * .03 : 0;   // (the lek: puffed up, nose high, shivering in the grind)
+    const pitch = air ? Math.max(-.4, Math.min(.5, a.vz * .12)) : a.pitch < -.5 ? -.55 : a.st === 'alert' ? .15 : lek * .3 + shiver;
     const hop = !air && a.v > .2 ? Math.abs(Math.sin(a.ph * Math.PI)) * .04 : 0;
-    body(a, R.stand * s * (air ? .3 : 1) + hop, pitch, s);
+    body(a, R.stand * s * (air ? .3 : 1) + hop, pitch, s, 1 + lek * .06, 1 + lek * .12);
     put(r.body, B);
-    const fold = air ? 0 : -1.45, f = air ? (a.glide ? .12 : Math.sin(a.flap) * .85) : .1;
+    const fold = air ? 0 : -1.45 + lek * .3, f = air ? (a.glide ? .12 : Math.sin(a.flap) * .85) : .1 + lek * .35;   // (displaying: the wings drooped off his sides)
     const PL = PV[0], PR = PV[1];
     PL[0] = PR[0] = R.wing[0]; PL[1] = PR[1] = R.wing[1]; PL[2] = R.wing[2]; PR[2] = -R.wing[2];
     put(r.wings[0], part(PL, fold, 0, 1, -f));

@@ -8,7 +8,7 @@
 //   (id, grid cells, query membership: kept here, not on the entity), the queries' lists.  The entities' fields belong
 //   to the systems that use them (docs/ARCHITECTURE.md, the ownership table). Writes: x / y / z / h while drawn (the
 //   lerp, below) and, as an entity joins, x / y / z / h / r back unchanged (their storage: refNumbers).
-// BUDGET: sync() once per sim step: a position check per entity, re-bucketing only what left its padded box.
+// BUDGET: sync() once per sim step: a position check per entity (an array walk), re-bucketing only what left its padded box.
 //   const ents = createEntities(list, bounds)
 //   ents.list / ver (bumps on every join / leave) / add(p) / remove(p) / has(p)
 //   ents.hide(p, on = true): out of the world for now (p.gone: not drawn, hit or collided with; kept for a reset: a
@@ -31,6 +31,7 @@ import {clearArray} from '../core/mathx.js';
 export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
   const grid = createGrid({x0, y0, x1, y1, cell});
   const recs = new Map();   // entity -> {p, id, mask, stamp, grid cells}
+  const rl = [];            // the records in list order (the per-step scans walk this array: faster than the Map)
   const queries = [];       // {name, pred, join, list, bit}
   let nextId = 1, ver = 0;
   const recOf = p => recs.get(p);
@@ -51,8 +52,8 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
     // l*: at the step's start; c*: the true values while drawn (start as null: they keep the entity's number boxes, and
     // lerpEnd puts back the very box it took, no new one)
     const rec = {p, id: nextId++, mask: 0, stamp: 0, c0: 0, c1: 0, r0: 0, r1: 0, bx0: 0, by0: 0, bx1: 0, by1: 0,
-      lx: p.x, ly: p.y, lz: p.z, lh: p.h, cx: null, cy: null, cz: null, ch: null};
-    recs.set(p, rec); grid.insert(rec);
+      lx: p.x, ly: p.y, lz: p.z, lh: p.h, lr: p.r, lb: p.rect, cx: null, cy: null, cz: null, ch: null};
+    recs.set(p, rec); rl.push(rec); grid.insert(rec);
     for (const q of queries) if (q.pred(p)) { rec.mask |= q.bit; q.list.push(p); q.join?.(p); }
   }
   for (const p of list) join(p);
@@ -65,6 +66,7 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
     const rec = recs.get(p); if (!rec) return false;
     const i = list.indexOf(p); if (i >= 0) list.splice(i, 1);
     for (const q of queries) if (rec.mask & q.bit) { const k = q.list.indexOf(p); if (k >= 0) q.list.splice(k, 1); }
+    const j = rl.indexOf(rec); if (j >= 0) rl.splice(j, 1);
     grid.remove(rec); recs.delete(p); ver++; dropMovers();
     return true;
   }
@@ -95,13 +97,21 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
     return out;
   }
   function hide(p, on = true) { p.gone = !!on; }
-  const snap = rec => { const p = rec.p; rec.lx = p.x; rec.ly = p.y; rec.lz = p.z; rec.lh = p.h; };
+  const snap = rec => { const p = rec.p; rec.lx = p.x; rec.ly = p.y; rec.lz = p.z; rec.lh = p.h; rec.lr = p.r; rec.lb = p.rect; };
   function moved(p) { const rec = recs.get(p); if (!rec) return; if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } snap(rec); dropMovers(); }
   let stepNo = 0;
   function sync() {
+    // only what moved since the last step is re-checked and noted (most of the world stands still). A draw since then already
+    // found who that is (lerpBegin; nothing moves between a step and the next but through moved(), which drops that list): its
+    // list alone, else one walk over every record
+    if (movStep === stepNo) { for (let i = 0; i < nMov; i++) resync(movers[i]); }
+    else for (let i = 0; i < rl.length; i++) {
+      const rec = rl[i], p = rec.p;
+      if (p.x !== rec.lx || p.y !== rec.ly || p.z !== rec.lz || p.h !== rec.lh || p.r !== rec.lr || p.rect !== rec.lb) resync(rec);   // (r, rect: its box)
+    }
     stepNo++;
-    for (const rec of recs.values()) { if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } snap(rec); }
   }
+  function resync(rec) { if (!grid.fits(rec)) { grid.remove(rec); grid.insert(rec); } snap(rec); }
   // the records that moved in the last step (movStep: the step they are for; -1: work them out again) and the ones lerped
   // this draw (kept arrays, filled by index: no garbage a frame)
   const movers = [], lerped = [], mix = (a, b, k) => typeof a === 'number' && typeof b === 'number' ? a + (b - a) * k : b;
@@ -111,7 +121,7 @@ export function createEntities(list, {x0, y0, x1, y1, cell = 2}) {
     if (k >= 1) return;
     if (movStep !== stepNo) {   // the first draw since the step: who moved in it
       movStep = stepNo; nMov = 0;
-      for (const rec of recs.values()) { const p = rec.p; if (p.x !== rec.lx || p.y !== rec.ly || p.z !== rec.lz || p.h !== rec.lh) movers[nMov++] = rec; }
+      for (let i = 0; i < rl.length; i++) { const rec = rl[i], p = rec.p; if (p.x !== rec.lx || p.y !== rec.ly || p.z !== rec.lz || p.h !== rec.lh || p.r !== rec.lr || p.rect !== rec.lb) movers[nMov++] = rec; }
     }
     for (let i = 0; i < nMov; i++) {
       const rec = movers[i], p = rec.p, x = p.x, y = p.y, z = p.z, h = p.h;
