@@ -49,10 +49,12 @@ stones at (7, -21), (-29, -23), (48, -44) and (35, -125); burrows at (-13, -15),
   thrown things; fixed steps, its own seeded generator. `features/trolls/look.js` + `view/troll3d.js` the view: 3D bodies in
   code through `render/rigmesh.js`, the stone look, telegraph rings, ragdolls. `features/trolls.js` the feature.
 - A troll near you is an **entity** (`kind: 'troll'`, target + hunter + hp + coins): arrows, bullets, fists, the boot and any
-  melee weapon that goes through combat's `damage()` hurt it; combat breaks it (coins, enemy.kill). The sim reads
-  `combat.hit` for stagger and knockback (`dtype`/`dmgType`: `fire` makes the small ones run, `blunt` breaks poise faster).
+  melee weapon that goes through combat's `damage()` hurt it; combat breaks it (coins, enemy.kill). Melee weapons reach
+  it through the hits feature (`register('troll', ...)`: take -> core.damage, push -> shove, stun -> a reel); the damage type
+  (`fire` makes the small ones run, `blunt` breaks poise faster) comes from take's `hit.type` / `hit.extra`.
 - Other systems: `host.feature('trolls').shove(p, vx, vy, stun)`, `.stagger(p, s)`, `.isTroll(p)`. A guard: the sim asks
-  `host.feature('melee').guard(x, y, heavy, who)` -> `'parry' | 'block' | 'dodge' | null` if it exists, else the fists' guard.
+  the hits feature's `defend({kind, x, y, who, dmg})` -> `{out: 'hit' | 'block' | 'parry', k}` (a boulder is `kind: 'blast'`: no
+  parry, half a block) if it exists, else the fists' guard. A parry staggers a big one 1.4x its reel, whatever its poise.
 - Your hurts count while a troll is fighting you (`game/game.js` fightOn, one line). You fall: you wake at spawn, they go home.
 - **Multiplayer:** local to each client (co-op for enemies was declined). A server would own exactly the sim's state; the plan
   is already a pure function of the seed.

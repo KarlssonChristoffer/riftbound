@@ -23,8 +23,8 @@
 //           or a fire hit keeps it off (it won't come within TYPES.small.fire m). A pack near a big troll walking by may send one up
 //           onto its SHOULDER (ride): it throws cones from up there; a hit (or the big one reeling) knocks it off.
 // YOU and them: their blows go out as player.hit + player.hurt (game/game.js counts them while a troll is fighting you: F.stakes);
-// a guard turns a blow (the melee feature's guard(x, y, heavy, who) when there is one; else the fists' guard: a block halves
-// it, a slip dodges it and opens the counter). You fall: they lose interest (player.down), and after you wake they're back
+// a guard turns a blow (the hits feature's defend({kind, x, y, who, dmg}) -> parry / block (k: the share through) when there is
+// one; a boulder is a 'blast': no parry; else the fists' guard: a block halves it, a slip dodges it and opens the counter). You fall: they lose interest (player.down), and after you wake they're back
 // at home (player.respawn).
 // MULTIPLAYER: co-op sync for enemies was declined; each client runs its own trolls against its own player. A server would own
 // exactly this module's state (the records, the shots, the clock that wakes them; the plan is already a pure function of the seed).
@@ -32,7 +32,7 @@
 //   own collision body per troll (world/collide.js).
 // READS: host.player (x, y, z, state, untouchable, raw.blink), host.env (hour, sky), host.entities (near), host.elev / inStream,
 //   world.js (roamable, steep), the plan (world/trolls.js), the game's mode, campfires (lit ones near you), host.lantern,
-//   host.feature('melee').guard / host.PL.fists (a guard), combat.hit / prop.break / player.* events.
+//   host.feature('hits').defend / host.PL.fists (a guard), combat.hit / prop.break / player.* events.
 // EMITS (core/events.js): troll.wake, troll.stone, troll.roar, troll.swing {phase wind | strike}, troll.throw, troll.land,
 //   troll.step, troll.giggle, player.hit, player.hurt.
 import {simRandom} from '../../core/rng.js';
