@@ -30,6 +30,38 @@ Find it quickly: dev menu (F10) > Nature > Sky: "geese now", "geese land on the 
 read-out lists today's flights. `?sky=often`: a dozen geese flights a day, a lake flock twice a day, three murmurations
 (10:30, 15:00, 18:24), four drifters (one by day at 12:30), several shooting stars an hour at night. `?sky=0`: none.
 
+## Critters: small life underfoot (features/critters.js)
+
+The forest's small things, out where and when they would be. Everything is view only: the spots come from the world's seed
+(the same glades, banks, reeds, stones and dead trunks for everyone), how many are out from the shared clock and weather, and
+they react to everyone your game knows about (you, co-op friends, trolls).
+
+- **Butterflies.** By day in the sunny glades and the lakeside clearing, spring to autumn: brimstones and orange tips in spring,
+  blues, peacocks and whites in summer, a few peacocks and red admirals in autumn. Erratic loops, then a rest on the flowers,
+  wings opening and closing. None in rain or a strong wind. **Stand still for about 3 s** in a glade and one may come and sit on
+  your shoulder; it stays until you move.
+- **Frogs.** On the lake's and the streams' banks, spring to autumn; more at dusk and at night, and after rain. Come within a
+  few metres (run and it's further; creep and you get closer) and they leap into the water with a ripple ring. Wait, and two eyes
+  look up from the surface; when nobody is near they climb back. Mostly brown common frogs, a green one now and then, and in
+  spring the odd moor frog gone blue.
+- **Dragonflies.** Over the lake and the slow water on summer days (a few in late spring): hovering, darting in straight jerks,
+  perching on the reeds' tops. Blue skimmers, red darters, and metallic banded demoiselles by the reeds.
+- **Snails and slugs.** After rain (the ground wet), on the stones and along the esker's crest path: garden snails, yellow banded
+  snails, black and orange slugs, crawling slowly and leaving a faint shiny trail with a glint running along it. Step near and
+  they pull in.
+- **The woodpecker.** By day on some of the dead trunks, drumming in bursts, chips flying. Come close and it slips round
+  behind the trunk; step back and it comes out again.
+- **The odd ones.** On a rare day (about one in five) one glade has a pale butterfly with an eye on each wing, and the eyes
+  follow you; get within a metre and it closes its wings. If it lands on you, its eyes look out of the screen. And every warm
+  night the frogs sit round the stream's spring in a perfect ring, all facing the middle, their throats pulsing together;
+  step into the ring and they all leap into the spring at once.
+
+Find them: dev menu (F10) > Animals > Critters: go to the nearest frogs / butterflies / dragonflies / snails and slugs /
+woodpecker (each shows them whatever the season), make it after rain, the eye in the glade, the frogs' ring by the spring
+(night), back to the natural times. URL: `?critters=0` off, `?critters=eye` the eye butterfly every day, `?critters=all`
+every kind out whatever the time, season or weather. The lake and the clearing are the quickest places to start (summer, late
+morning); the spring is where the stream begins, up the slope west of the lake.
+
 ## The forest glows at night (features/glowlife.js)
 
 The night woods used to be nearly black. Now they have light of their own. All of it shows within ~40 m of you.

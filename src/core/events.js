@@ -307,6 +307,8 @@ export const EVENTS = {
   'happening.start':    ['features/happenings.js', 'x, y, kind (star | ring | vattar | rainbow), id: a happening began (or was first seen going on)', '(none yet: trolls, animals could react)'],
   'happening.end':      ['features/happenings.js', 'x, y, kind, id: its main part is over (the star\'s glow at dawn, the last vätte gone, the rainbow faded)', '(none yet)'],
   'happening.take':     ['features/happenings.js', 'x, y, kind, item (content/items.js, null for the ring\'s buff), gift? buff?: this player took his part of one', '(none yet)'],
+  'critters.plop':      ['features/critters.js (a view)', 'x, y: a forest frog leapt into the water (a ripple ring)', '(none yet: audio later)'],
+  'critters.drum':      ['features/critters.js (a view)', 'x, y, h, n (pecks): the woodpecker starts a burst on its dead trunk', '(none yet: audio later)'],
   'bells.toll':         ['features/bells/view.js (a view: nothing in the sim listens)', 'x, y, h, k (0..1), note, who (the bell): its clapper strikes it again as it swings', 'audio (its note, softer)'],
 };
 

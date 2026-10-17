@@ -1692,3 +1692,5 @@ export async function create(host) {
   Object.defineProperty(WL, '_', {get: () => ({flocks, birds, hoppers, lizards, frogs, fish, bugs, vultures, jellies, eyes, motes, spots, school, noise, fishJump, spotPos, takeOff, VB, SPR, eyeDbg})});
   return WL;
 }
+// the arena's critter art and palettes, read-only, for features/critters.js (the forest's butterflies, frogs, dragonflies reuse the frog and dragonfly frames)
+export {ART as WILD_ART, PAL as WILD_PAL};
