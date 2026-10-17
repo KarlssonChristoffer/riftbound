@@ -29,18 +29,19 @@ export function drawZones({G, host, world}) {
   ring(pl.x, pl.y, R_BODY, z, host.blocked(pl.x, pl.y, z, false) ? '#ff40ff' : '#ffe040');
 }
 
-// the debug HUD (dev mode, with the key help: F1, opt.help), top left: where you are and what the frame costs, then each
-// feature's own line (F.hud) under its name, wrapped, never cut; the features that are off. Beside it the key help
-// (dev/keyhelp.js). The loop calls this 4 times a second (core/loop.js hud)
+// the debug HUD (dev mode, F1, opt.help), top left: where you are and what the frame costs, then each feature's own line
+// (F.hud) under its name, wrapped, never cut; the features that are off. The key help (dev/keyhelp.js) is the dev
+// console's Keys tab (dev/devmenu.js; F1 too when there is no console). The loop calls this 4 times a second (core/loop.js hud)
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const pre = new Map();   // feature name -> the prefix its hud line starts with ('wind ...', 'affixes: ...'), dropped under its label
 const row = (k, v) => `<div class="hd-row"><i>${k}</i><span>${v}</span></div>`;
 export function drawHud(ctx) {
   const {host, opt, stage, env, hero, cv, features, G, fps, proj, PL} = ctx;
-  const on = host.dev && opt.help;
-  $('#hud').classList.toggle('hidden', !on); $('#help').classList.toggle('hidden', !on);
+  let con = null; for (const f of features) if (f.name === 'devmenu') { con = f; break; }
+  const on = host.dev && opt.help, keys = host.dev && (con ? con.keys : opt.help);   // (the key help: the dev console's Keys tab, dev/devmenu.js)
+  $('#hud').classList.toggle('hidden', !on); $('#help').classList.toggle('hidden', !keys);
+  if (keys) keyHelp(ctx);
   if (!on) return;
-  keyHelp(ctx);
   const b = stage.biome, deg = ((cv.yaw / DEG) % 360 + 360) % 360, s = G.stats, mode = host.feature('game')?.mode;
   const off = features.filter(f => f.on === false).map(f => f.name), sys = [];
   for (const f of features) {
