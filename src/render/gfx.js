@@ -81,7 +81,10 @@ const NO_SPRAY_VS = `float sprayM(mat4 mm) { return ${gl(AUTUMN_MID)}; }\n`;
 // SHADOW_SWAY_FS both use it (vn3, uLeafK, uSeed above it), so the shadow drops exactly the leaves the camera loses
 const LEAF_GONE = `
 uniform float uAutumn;
-bool leafGone(vec3 pl, float m) { return uLeafK < .999 && vn3(pl * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) + ${gl(AU.drop)} * uAutumn * (m - ${gl(AUTUMN_MID)}) > uLeafK * 1.1 - .05; }`;
+bool leafGone(vec3 pl, float m) { return uLeafK < .999 && vn3(pl * 5.5 + vec3(uSeed.y, 1.7, uSeed.x)) + ${gl(AU.drop)} * uAutumn * (m - ${gl(AUTUMN_MID)}) > uLeafK * 1.1 - .05; }
+// a burning tree (mesh.burn, features/thunder.js): its leaves go in clumps as the char climbs (uBurn.x), all gone at a charred 1,
+// the camera's pass and the shadow's alike (MESH_FS declares uBurn itself; SHADOW_SWAY_FS above this)
+bool leafBurnt(vec3 pl) { return vn3(pl * 2.2 + vec3(uSeed.x, 4.1, uSeed.y)) * .8 + .1 < uBurn.x * 1.15 - .1; }`;
 const meshVS = sway => HEAD + (sway ? SWAY + SPRAY_VS : 'vec3 sway() { return vec3(0.); }\n' + NO_SPRAY_VS) + `
 in vec3 position; in vec3 normal; in float aPart; in float aFam; in float aBias; in float aFixed;
 uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
@@ -143,6 +146,7 @@ void main() {
   bool inner = !gl_FrontFacing;
   if (inner && (fFixed > -1.5 || uLeafK >= .999)) discard;
   if (fFixed < -1.5 && leafGone(vPL, fM)) discard;   // (the sprays that turned further go first: LEAF_GONE)
+  if (uBurn.x > 0. && fFixed < -1.1 && leafBurnt(vPL)) discard;   // (a burning tree's crown goes as it chars, the berries with it: LEAF_BURNT)
   vec3 n = normalize(vN); if (inner) n = -n;
   float fam = fFam, jn = .5;   // jn: the leaves' 3D noise (below), which the autumn stage borrows
   // a ripening berry (aFixed -1.25: the rowan's bunches, trees3d.js; toned by the light like bark, never thinned): the part's own family is the ripe scarlet
@@ -271,6 +275,44 @@ uniform vec4 uWS;      // the wind's direction x, z (unit, world), the ripples' 
 uniform vec4 uWS2;     // rain 0..1, fish 0..1, the gust now 0..1, the still clock (s)
 uniform vec3 uWSRamp[4]; uniform vec4 uWSTint;   // the lake's four tones (sheen, calm, body, deep); its bed seen through it (rgb, peaty water: the blues go first) and how much of the bed's hue shows (w)
 ivec2 wOrg() { return ivec2(floor(uOrigin * uTexSize / uWorld + .5)); }   // the surface's first texel in world texels
+// LAKE ICE (features/ice.js through G.setIce; docs/WINTER.md): the still water frozen. uIce: x how far out it has frozen (0..1: the
+// shelf first, the deep last, by the bed's depth band), y the snow lying on it, z how thick it looks (0 black ice .. 1 grey-white),
+// w on (> 0). uIceT: the thin spots (x, y m, r m, how grey); uIceH: the holes (x, y m, r m; r 0: none). Integer hashes in world
+// texels (no sin(): the same pixel on every GPU), so it holds still while the camera turns
+uniform vec4 uIce; uniform vec4 uIceT[3]; uniform vec4 uIceH[8];
+uint iceH(ivec2 p) { uint h = uint(p.x) * 1664525u ^ uint(p.y) * 22695477u; h ^= h >> 16; h *= 2246822519u; h ^= h >> 13; h *= 3266489917u; h ^= h >> 16; return h; }
+float iceH01(ivec2 p) { return float(iceH(p) & 16777215u) / 16777216.; }
+float iceVn(vec2 p) { vec2 f = fract(p); ivec2 i = ivec2(floor(p)); f = f * f * (3. - 2. * f);
+  return mix(mix(iceH01(i), iceH01(i + ivec2(1, 0)), f.x), mix(iceH01(i + ivec2(0, 1)), iceH01(i + ivec2(1, 1)), f.x), f.y); }
+vec2 wMetres(ivec2 ti) { return (vec2(ti) + .5) * uWorld / uTexSize + uOrigin; }
+// 1 ice, 0 open water (not frozen out here yet, a hole), -1 a hole's broken rim
+float wIced(ivec2 ti, int band) {
+  if (uIce.w <= 0.) return 0.;
+  vec2 m = wMetres(ti);
+  for (int i = 0; i < 8; i++) { vec4 h = uIceH[i]; if (h.z > 0.) { float d = distance(m, h.xy); if (d < h.z) return 0.; if (d < h.z + .07) return -1.; } }
+  return float(band) <= uIce.x * 4. - .001 ? 1. : 0.;
+}
+vec3 wIce(vec3 res, ivec2 ti, int band) {
+  float c = wIced(ti, band); if (c == 0.) return res;
+  if (c < 0.) return vec3(.82, .88, .94);
+  ivec2 p = ti + wOrg(); vec2 m = wMetres(ti);
+  // black ice: the water darkened and turned blue, the bed still showing; thicker, greyer
+  vec3 ice = mix(res * vec3(.5, .6, .72) + vec3(.03, .05, .08), vec3(.6, .67, .75), .45 * uIce.z);
+  for (int i = 0; i < 3; i++) { vec4 t = uIceT[i]; if (t.z > 0.) { float k = 1. - distance(m, t.xy) / t.z; if (k > 0.) ice = mix(ice, vec3(.44, .48, .52), clamp(k * 1.8, 0., 1.) * t.w); } }   // thin: grey and wet
+  // cracks: the borders of a jittered lattice, 20 texels a cell (some borders only)
+  ivec2 cell = ivec2(floor(vec2(p) / 20.)); float d1 = 1e9, d2 = 1e9; ivec2 c1 = cell, c2 = cell;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    ivec2 cc = cell + ivec2(i, j); vec2 q = (vec2(cc) + vec2(iceH01(cc), iceH01(cc + ivec2(91, 37)))) * 20.; float d = distance(vec2(p) + .5, q);
+    if (d < d1) { d2 = d1; c2 = c1; d1 = d; c1 = cc; } else if (d < d2) { d2 = d; c2 = cc; }
+  }
+  if (d2 - d1 < 1.1 && iceH01(c1 + c2 * 7) < .6) ice = mix(ice, vec3(.8, .86, .92), .65);
+  if (iceH01(p) < .005) ice = vec3(.86, .9, .95);   // air bubbles frozen in
+  if (uIce.y > 0.) {   // snow on it: drifts, thicker as more lies
+    float n = iceVn(vec2(p) / 22.) * .65 + iceVn(vec2(p) / 6. + 3.1) * .35;
+    if (n > 1. - uIce.y * 1.1) ice = n > 1.06 - uIce.y ? vec3(.89, .92, .96) : vec3(.76, .81, .88);
+  }
+  return ice;
+}
 vec3 wStill(ivec2 ti, int ring) {
   vec2 p = vec2(ti + wOrg()), dir = uWS.xy;
   float al = dot(p, dir), ac = dot(p, vec2(-dir.y, dir.x)), tr = floor(uWS.z), w = clamp(uWS.w + .35 * uWS2.z, 0., 1.), ck = uWS2.w;
@@ -299,6 +341,7 @@ vec3 wStill(ivec2 ti, int ring) {
     float op = t < t0 ? max(uWOp[band], uWLook.x) : uWOp[band];
     if (op < .999) { vec3 b = wBed(ti + ro).rgb; res = mix(mix(res * dot(b, vec3(.3, .55, .15)) / uWLook.z, b * uWSTint.rgb, uWSTint.w), res, op); }
   }
+  if (uIce.w > 0.) res = wIce(res, ti, band);   // (frozen: features/ice.js)
   return res;
 }
 // rain rings on all water and a fish now and then on still water (main, once per fragment: crisp under the smooth sampling; sw: still water)
@@ -454,6 +497,11 @@ uniform sampler2D uLit, uLitPal; uniform float uHasLit, uLive, uLitCap; uniform 
 // the rain, shrink as it dries); a puddle shows the sky's colour (uPudSky) over the dark ground under it, a rim of wet mud round it,
 // and the rain rings it. Per ground texel (its world texel: fixed to the world, crisp edges). uPudK.w 0: none (dry: no cost)
 uniform sampler2D uPud; uniform vec4 uPudR, uPudK; uniform vec3 uPudSky;
+// THE MIRE (G.setMire / setMireLook: features/mire.js, world/mire.js): its grid (uMire: R the pool field, G the soft field, B the
+// outline; over uMireR: its first metre x, z and 1 / its size), uMireK: x the flood 0..1 (the pools grow to -.6 x it of the field),
+// y frozen (1: grey ice, no sheen), z the soft threshold, w on; uMirePl: his x, z, the time, the quake (0..1: the soft ground rings
+// round him as he walks). Pools: dark peat water the composite mirrors in (tone 1), rain rings; soft ground darker and wet
+uniform sampler2D uMire; uniform vec4 uMireR, uMireK, uMirePl;
 // GROUND DECALS on walkable terrain (G.setGroundDecals: features/flow.js's ground layer): marks in world px (x PPM, z PPMY) read at
 // the fragment's own world position, so they lie on a slope as on flat ground (without terrain flow draws them through a plane)
 uniform sampler2D uDecal; uniform float uHasDecal, uDecalOn; uniform vec4 uDecalRect; uniform vec2 uDecalPx;
@@ -515,7 +563,7 @@ void main() {
         c.rgb = mix(cN, cS, uSmooth);
       }
       if (uWBedOn > .5 && rc >= 128) c.rgb = wFoam(c.rgb, ti, int(wBed(ti).a * 255. + .5) & 7);   // (contact foam: WATER_FS)
-      if (rc >= 192) { bool sw = (rc & 15) == 0 && uWS.w >= 0.; if (uWS2.x + (sw ? uWS2.y : 0.) > .01) c.rgb = wDrops(c.rgb, ti, sw); }   // (rain rings on all water; a fish on still water)
+      if (rc >= 192) { bool sw = (rc & 15) == 0 && uWS.w >= 0.; if (uWS2.x + (sw ? uWS2.y : 0.) > .01 && !(sw && uIce.w > 0. && wIced(ti, uWBedOn > .5 ? wBand(wBed(ti)) : 3) != 0.)) c.rgb = wDrops(c.rgb, ti, sw); }   // (none on the ice)   // (rain rings on all water; a fish on still water)
     }
   }
   if (uPudK.w > .5 && uType < 1.5 && wfl < .5) {   // a rain puddle (above)
@@ -524,6 +572,25 @@ void main() {
       float k = texture(uPud, pu).r + (wvn(m * 3.1, 1e4) - .5) * .08 - (1. - .5 * uPudK.x);
       if (k > .03) { c.rgb = mix(c.rgb * .3, uPudSky * .8, .3 + .35 * smoothstep(.03, .14, k)); wfl = 1.; if (uWS2.x > .01) c.rgb = wDrops(c.rgb, pt, false); }   // (water: the composite mirrors in it)
       else if (k > 0.) c.rgb *= .62;   // the wet mud round it
+    }
+  }
+  if (uMireK.w > .5 && uType < 1.5 && wfl < .5) {   // the mire (above)
+    ivec2 pt = ivec2(floor(t)); vec2 m = (vec2(pt + wOrg()) + .5) * uWorld / uTexSize, mu = (m - uMireR.xy) * uMireR.zw;
+    if (all(greaterThan(mu, vec2(0.))) && all(lessThan(mu, vec2(1.)))) {
+      vec4 g = texture(uMire, mu);
+      if (g.b > .02) {
+        float q = g.r * 1.7 - .7 + (wvn(m * 2.3, 2e4) - .5) * .05, lev = -.6 * uMireK.x;
+        if (q > lev) {
+          if (uMireK.y > .5) c.rgb = mix(vec3(.58, .64, .68), vec3(.8, .86, .9), wvn(m * .9, 2e4 + 3.)) * (wvn(m * 3.7, 2e4 + 7.) > .86 ? .82 : 1.);   // frozen: grey ice, a crack's shade
+          else { c.rgb = mix(vec3(.075, .062, .048), uPudSky * .5, .16 + .14 * smoothstep(lev + .4, lev, q)); wfl = 1.; if (uWS2.x > .01) c.rgb = wDrops(c.rgb, pt, false); }   // dark peat water (mirrored), lighter in its shallow edge
+        }
+        else if (uMireK.y < .5 && q > lev - .07) c.rgb *= .55;   // the wet peat at its edge
+        else if (uMireK.y < .5 && g.g > uMireK.z) {   // soft ground: darker, and it quakes round him
+          c.rgb *= .84;
+          float dq = length(m - uMirePl.xy);
+          if (uMirePl.w > 0. && dq < 3.2) c.rgb *= 1. + uMirePl.w * .07 * sin(dq * 8. - uMirePl.z * 9.) * (1. - dq / 3.2);
+        }
+      }
     }
   }
   // fallen leaves (ground and the plateau's top: type 1, never on the water): drawn in their own colours, and marked (tone 2) so the
@@ -881,13 +948,13 @@ out vec3 vPL; flat out float fFixed; flat out float fM;
 void main() { vec4 w = modelMatrix * vec4(position, 1.); w.xyz += sway(); vPL = position; fFixed = aFixed; fM = sprayM(modelMatrix); gl_Position = projectionMatrix * viewMatrix * w; }`;
 const SHADOW_FS = HEAD + ONE_OUT + `void main() { o0 = vec4(1.); }`;
 const SHADOW_SWAY_FS = HEAD + ONE_OUT + `
-in vec3 vPL; flat in float fFixed; flat in float fM; uniform float uLeafK; uniform vec2 uSeed;
+in vec3 vPL; flat in float fFixed; flat in float fM; uniform float uLeafK; uniform vec2 uSeed; uniform vec4 uBurn;
 float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
 ` + LEAF_GONE + `
-void main() { if (fFixed < -1.5 && leafGone(vPL, fM)) discard; o0 = vec4(1.); }`;
+void main() { if (fFixed < -1.5 && leafGone(vPL, fM)) discard; if (uBurn.x > 0. && fFixed < -1.1 && leafBurnt(vPL)) discard; o0 = vec4(1.); }`;
 const SHADOW_CARD_FS = HEAD + ONE_OUT + `
 in vec2 vUv; in vec2 vC; uniform sampler2D uTex;
 void main() { if (texture(uTex, vUv).a < .5) discard; o0 = vec4(1.); }`;
@@ -1626,9 +1693,11 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     wOp: {value: new THREE.Vector4(1, 1, 1, 1)}, wTone: {value: new THREE.Vector4(1, 1, 2, 2)}, wLook: {value: new THREE.Vector4(.86, 0, 0, 0)},
     wTint: {value: new THREE.Vector3(1, 1, 1)}, wFoam: {value: new THREE.Vector3(1, 1, 1)}, wFoot: {value: new THREE.Vector4()},
     // still water (setWaterLook's still, setWater's still: features/stillwater.js): see WATER_FS wStill
+    ice: {value: new THREE.Vector4()}, iceT: {value: Array.from({length: 3}, () => new THREE.Vector4())}, iceH: {value: Array.from({length: 8}, () => new THREE.Vector4())},   // (G.setIce)
     wS: {value: new THREE.Vector4(1, 0, 0, -1)}, wS2: {value: new THREE.Vector4()}, wSRamp: {value: Array.from({length: 4}, () => new THREE.Vector3())}, wSTint: {value: new THREE.Vector4(1, 1, 1, .25)},
     // rain puddles (setPuddles, setPuddleLook: features/puddles.js): see SURF_FS
     pud: {value: null}, pudR: {value: new THREE.Vector4(0, 0, 1, 1)}, pudK: {value: new THREE.Vector4()}, pudSky: {value: new THREE.Vector3(.5, .55, .6)},
+    mire: {value: null}, mireR: {value: new THREE.Vector4(0, 0, 1, 1)}, mireK: {value: new THREE.Vector4()}, mirePl: {value: new THREE.Vector4()},   // the mire (setMire, setMireLook: features/mire.js)
     cut: {value: new THREE.Vector4()}, cutB: {value: new THREE.Vector4()}, cutM: {value: new THREE.Vector4()}, cutP: {value: new THREE.Vector4()},   // the cutaway (render/cut.js; setCut, cutFrame in render())
     sinkP: {value: new THREE.Vector4()}, sinkK: {value: new THREE.Vector4()},   // the cave's sink (render/cut.js SINK; setSink)
   };
@@ -1715,7 +1784,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uWater: {value: water}, uHasWater: {value: water ? 1 : 0}, uWPhase: U.wPhase, uWA: U.wA, uWB: U.wB, uWRamp: U.wRamp,
     uWBed: bed === undefined ? U.wBed : {value: bed?.tex || null}, uWBedOn: bed === undefined ? U.wBedOn : {value: bed ? 1 : 0},
     uWBedR: bed === undefined ? U.wBedR : {value: new THREE.Vector4(...(bed?.rect || [0, 0, 1, 1]))}, uWCut: U.wCut, uWOp: U.wOp, uWTone: U.wTone, uWLook: U.wLook, uWTint: U.wTint, uWFoam: U.wFoam, uWFoot: U.wFoot,
-    uWS: U.wS, uWS2: U.wS2, uWSRamp: U.wSRamp, uWSTint: U.wSTint, uPud: U.pud, uPudR: U.pudR, uPudK: U.pudK, uPudSky: U.pudSky}, {side: THREE.FrontSide});
+    uWS: U.wS, uWS2: U.wS2, uWSRamp: U.wSRamp, uWSTint: U.wSTint, uIce: U.ice, uIceT: U.iceT, uIceH: U.iceH, uPud: U.pud, uPudR: U.pudR, uPudK: U.pudK, uPudSky: U.pudSky, uMire: U.mire, uMireR: U.mireR, uMireK: U.mireK, uMirePl: U.mirePl}, {side: THREE.FrontSide});
   const SNAP = {value: new THREE.Vector2(VW, VH)}, NOSNAP = {value: new THREE.Vector2(0, 0)};
   // a plant's autumn (CARD_FS): {kind, seed, delay, ramp: [[r, g, b] x 4] (the card's own green ramp, light -> dark), pal: [[r, g, b] x 32]
   // (4 stages x 4 tones, then the second path's)}, or nothing: no plant, no cost beyond the uniform test
@@ -1898,7 +1967,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     const sw = o.sway ? {lean: {value: new THREE.Vector2()}, flut: {value: new THREE.Vector2()}} : null, lean = sw?.lean;
     const gm = new THREE.Mesh(geom, meshMat(obj, new THREE.Vector2(matrix.elements[12], matrix.elements[14]), sw, o.autumn)); if (o.keep) gm.material.uniforms.uSinkKeep.value = 1; gm.matrixAutoUpdate = false; gm.matrix.copy(matrix); gm.matrixWorldNeedsUpdate = true; gScene.add(gm);
     const sm = new THREE.Mesh(geom, sw ? raw(SHADOW_SWAY_VS, SHADOW_SWAY_FS, {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time,
-      uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed, uSprayM: gm.material.uniforms.uSprayM, uSprayFix: gm.material.uniforms.uSprayFix}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
+      uLeafK: U.leafK, uAutumn: U.autumn, uSeed: gm.material.uniforms.uSeed, uSprayM: gm.material.uniforms.uSprayM, uSprayFix: gm.material.uniforms.uSprayFix, uBurn: gm.material.uniforms.uBurn}, {side: THREE.DoubleSide}) : shadowMeshMat);   // (light through a crown only where both sides of a clump are bare)
     sm.matrixAutoUpdate = false; sm.matrix.copy(matrix); sm.matrixWorldNeedsUpdate = true; sm.layers.enable(1);
     hDirty = true;
     const caster = () => sm.layers.isEnabled(1);   // only a point-light caster dirties the height map (debris, burning logs move every frame)
@@ -2137,6 +2206,20 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     pudTex = new THREE.DataTexture(P.data, P.w, P.h, THREE.RedFormat, THREE.UnsignedByteType);
     pudTex.minFilter = pudTex.magFilter = THREE.LinearFilter; pudTex.generateMipmaps = false; pudTex.unpackAlignment = 1; pudTex.needsUpdate = true;
     U.pud.value = pudTex; U.pudR.value.set(P.x0, P.z0, 1 / P.wm, 1 / P.hm);
+  }
+  // THE MIRE (SURF_FS; features/mire.js): setMire({data: RGBA8 w x h (world/mire.js M.grid), w, h, x0, z0, n (cells per m)} | null)
+  // once per world; setMireLook(flood, frozen, soft, px, pz, t, quake) when they change (soft: the soft field's threshold)
+  let mireTex = null;
+  function setMire(P) {
+    if (mireTex) { mireTex.dispose(); mireTex = null; }
+    U.mire.value = null; U.mireK.value.w = 0; if (!P) return;
+    mireTex = new THREE.DataTexture(P.data, P.w, P.h, THREE.RGBAFormat, THREE.UnsignedByteType);
+    mireTex.minFilter = mireTex.magFilter = THREE.LinearFilter; mireTex.generateMipmaps = false; mireTex.needsUpdate = true;
+    U.mire.value = mireTex; U.mireR.value.set(P.x0, P.z0, P.n / P.w, P.n / P.h); U.mireK.value.w = 1;
+  }
+  function setMireLook(flood, frozen, soft, px, pz, t, quake) {
+    if (!mireTex) return;
+    U.mireK.value.set(flood, frozen, soft, 1); U.mirePl.value.set(px, pz, t, quake);
   }
   function setPuddleLook(fill, sky) {
     U.pudK.value.x = fill; U.pudK.value.w = pudTex && fill > .01 ? 1 : 0;
@@ -2475,6 +2558,25 @@ void main() {
   const vgU = {uVg: {value: new THREE.Vector4()}, uVgC: {value: new THREE.Vector3()}, uVhC: {value: new THREE.Vector3()}, uVgS: {value: new THREE.Vector2(1, 1)}, uVgP: {value: 0}}, vgScene = new THREE.Scene();
   { const m = new THREE.Mesh(tri, raw(COMP_VS, VG_FS, vgU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; vgScene.add(m); }
   vgScene.matrixAutoUpdate = false;
+  // ---- THE FROST (features/body.js, G.setFrost(k): the cold creeping in): pale crystals in from the screen's edges, in whole art
+  // pixels (display px / DS), its reach wobbling along the edge in 8 px blobs; k 0..1 how far it has come. Over everything, after
+  // the vignette; not drawn at 0
+  const FR_FS = HEAD + `uniform vec4 uFr; uniform float uFrD; out vec4 oc;
+float fh(vec2 c) { uvec2 u = uvec2(ivec2(c) + 4096); uint n = u.x * 1973u + u.y * 9277u; n = (n << 13u) ^ n; n = n * (n * n * 15731u + 789221u) + 1376312589u; return float(n & 0x7fffffffu) / 2147483647.; }
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, uFr.y + uFr.z - gl_FragCoord.y), c = floor(p / uFrD), S = uFr.xy / uFrD;
+  float e = min(min(c.x, c.y), min(S.x - c.x, S.y - c.y)) / min(S.x, S.y);
+  vec2 b = floor(c / 8.), t = fract(c / 8.); float lo = mix(mix(fh(b), fh(b + vec2(1, 0)), t.x), mix(fh(b + vec2(0, 1)), fh(b + 1.), t.x), t.y);
+  float reach = uFr.w * (.06 + .1 * lo), n = fh(c), f = reach - e + .025 * (n - .5) * uFr.w;
+  if (f <= 0.) discard;
+  float core = clamp(f / max(reach, 1e-3), 0., 1.);
+  oc = vec4(mix(vec3(.76, .85, .95), vec3(.96, .98, 1.), step(.82, n)), (.26 + .44 * core) * min(1., uFr.w * 1.6));
+}`;
+  const frU = {uFr: {value: new THREE.Vector4()}, uFrD: {value: 1}}, frScene = new THREE.Scene();
+  { const m = new THREE.Mesh(tri, raw(COMP_VS, FR_FS, frU, {depthTest: false, depthWrite: false, transparent: true, blending: THREE.NormalBlending})); m.frustumCulled = false; m.matrixAutoUpdate = false; frScene.add(m); }
+  frScene.matrixAutoUpdate = false;
+  let frostK = 0;
+  const setFrost = k => { frostK = k > 0 ? Math.min(1, k) : 0; };
   // SINK (render/cut.js; features/caves.js): the surface crumbling away round him as he goes down into the cave. setSink(null): off;
   // setSink(x, z, reach, box) (his world x, z; m; box {x0, y0, x1, y1}: kept), each frame it shows. A mesh / surface made with
   // {keep: true} never sinks (the cave's)
@@ -2694,7 +2796,12 @@ void main() {
   let post = null;
   const setPost = p => { post = p || null; };
   const stats = {ms: 0, calls: 0, sprites: 0, points: 0, lines: 0, pass: {}};
+  // HOLD (features/wrongwx.js: the still storm's flash freezes the world): hold(ms) keeps the last drawn image on the screen
+  // that long (a view pause: the sim runs on); the frame's batches are dropped as a drawn frame's are
+  let holdUntil = 0;
+  function hold(ms) { holdUntil = performance.now() + ms; }
   function render() {
+    if (holdUntil > 0 && performance.now() < holdUntil) { resetBatches(); for (const L of layerList) { L.used = L.gUsed = false; clearArray(L.runs); } lbN = 0; frameNo++; return; }
     const t0 = performance.now(), still = post !== null && post.still;
     if (gDecal) U.decalT.value = imgTex(gDecal);   // (a GPU context's image: used this frame, so it isn't let go)
     if (rflFrame !== frameNo) compU.uRf.value.x = 0;   // (the reflections, clouds and haze show only on frames depth.js set them)
@@ -2782,6 +2889,7 @@ void main() {
       }
     } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); } }
     if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)
+    if (frostK > 0) { frU.uFr.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS, sub.pad * DS, frostK); frU.uFrD.value = DS; renderer.render(frScene, dummyCam); }   // the frost (setFrost), last
     if (post) post.run(renderer);
     lap('post');
     stats.fx = fxN; stats.heat = hN; fxB.add.n = fxB.blend.n = fxB.heat.n = 0;
@@ -2924,6 +3032,14 @@ void main() {
     if (speed !== undefined) waterSpeed = Math.max(0, +speed || 0);
     if (still) { U.wS2.value.set(still.rain, still.fish, still.gust, still.t); if (stillLook) U.wS.value.set(still.dir[0], still.dir[1], still.travel, still.wind); }   // (the rain rings all water; the rest is the still look's)
   };
+  // the lake's ice (features/ice.js, on a change): {cover 0..1 (how far out: the shelf first), snow 0..1, thick 0..1 (its look),
+  // thin: [[x, y, r, k] x <= 3] (m; k how grey), holes: [[x, y, r] x <= 8] (m)} | null (open water). WATER_FS wIce
+  const setIce = o => {
+    if (!o) { U.ice.value.w = 0; return; }
+    U.ice.value.set(o.cover, o.snow || 0, o.thick || 0, 1);
+    for (let i = 0; i < 3; i++) { const t = o.thin?.[i]; if (t) U.iceT.value[i].set(t[0], t[1], t[2], t[3] ?? 1); else U.iceT.value[i].set(0, 0, 0, 0); }
+    for (let i = 0; i < 8; i++) { const h = o.holes?.[i]; if (h) U.iceH.value[i].set(h[0], h[1], h[2], 1); else U.iceH.value[i].set(0, 0, 0, 0); }
+  };
   // the biome's water (world.js buildWorld, at every build, from WATER_TUNE): {ramp: [[r, g, b] 0..1] light -> dark (padded to 4), rate,
   // across, along, hi, lo, range: [lightest, darkest] tone, lap (tone | -1), refl, spark} | null = no moving water (the rift)
   function setWaterLook(L) {
@@ -2942,6 +3058,6 @@ void main() {
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
-    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setPuddles, setPuddleLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
+    setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setIce, setPuddles, setPuddleLook, setMire, setMireLook, hold, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, setFrost, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
 }

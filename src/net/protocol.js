@@ -4,28 +4,41 @@
 //
 // client -> server
 //   hello    {v, name}                                   the first message; the server answers with welcome
-//   st       {x, y, z, phi, s, pose, rig, w?, wn?, ls?, tp?}   the local player 20 times a second: world metres (x east, y south,
+//   st       {x, y, z, phi, s, pose, rig, w?, wn?, ls?, tp?, lt, bd}   the local player 20 times a second: world metres (x east, y south,
 //            z up), facing phi (rad, the arena's atan2(x, y)), s = his state (idle, move, roll, ...), pose = the frame drawn,
 //            rig = the live model he wears (gunslinger | outlaw | ''), w = the drawn pose's bones (encodePose) when it changed
-//            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport
+//            (wn: its bone names, once per rig), ls = the lasso [phase, x, y, h, r] or absent, tp = a respawn / teleport, lt = his
+//            lantern burns in the cave, bd = his body's look (content/body.js packBody: wet, cold, sunk, knocked down)
 //   act      {a, id}                                      ask the server to change the shared world: a 'fell' (id: a forest tree),
 //            'secret' (id: one of the forest's secrets whose own condition holds for this player: sim/uncanny.js), 'time' (id:
-//            dawn | day | dusk | night: dev, the world's clock to the next such hour)
+//            dawn | day | dusk | night: dev, the world's clock to the next such hour), 'ignite' (id: a tree he touched a burning
+//            brand to: ?firestart=1, docs/WEATHER.md), 'wood' (id: a struck tree whose splinter of thunderwood he took), 'hole' ({x, y, b}: a hole
+//            in the lake ice: a pick's or an axe's last blow, b 1: he went through; docs/WINTER.md), 'dig' (id: 'w' + the night: he dug at the
+//            night's find where the true wisp stopped, docs/MIRE.md), 'cloud' (id: 'x' + the wrong weather's
+//            event, w: ask | pass | lose, to: a friend's id; the following cloud, docs/WEATHER.md)
 //   gear     {g: [id]}                                    what you want to wear (content/gear.js ids); the server checks it
 //   fish     {a: 'cast', n, x, y, w, deep, rain, perfect, lvl, spot, bait, meal}   a cast fell on water (docs/FISHING.md): n = his
 //            cast count, w = lake | stream | river, deep = m from the shore, lvl = his Fishing level, spot = on a fishing spot
 //            (the server checks it), bait / meal = the bait on the hook, the meal eaten (ids); the server rolls what bites. {a: 'land', n}: he
 //            landed it (told to everyone); {a: 'lost', n}: it got away
 //   ping     {c}                                         c = the client's clock (ms), echoed
+//   snow     {id, vx, vy, hat}                            his snowball hit player id (the thrower decides: docs/WINTER.md), pushing
+//            them (vx, vy m/s), hat 1: their hat flies off
 // server -> client
 //   welcome  {v, id, name, color, seed, t, world, peers, clock, unc}   world = {id: state} (what's been done to the world so far),
 //            peers = [peer], clock (below), unc = {sec: {id: {s, by, n}}, shift} (the uncanny forest: its secrets' states, the
 //            night shift's strength: docs/UNCANNY.md; null when the server runs without it)
 //   join     {p: peer}   leave {id}                      peer = {id, name, color, ...st's fields, wn, g (the gear worn)}
-//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0], ...], c?}   every tick; w only when it changed since the last snap;
+//   snap     {t, p: [[id, x, y, z, phi, s, pose, rig, w|0, ls|0, lt, bd], ...], c?}   every tick; w only when it changed since the last snap;
 //            c = the night elk [x, y, phi, mode, quarry id] (sim/uncanny.js createStalker: the server runs it)
 //   wn       {id, wn}                                    a peer's bone names (its rig changed)
-//   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it
+//   world    {id, s, by}                                 a change to the shared world (s: 'felled'), by = who did it. A tree the
+//            lightning struck: id 'z' + its fid, s 'burning' {t0, t1 (s of the server's clock), tw} | 'charred' {at (the hour it's whole
+//            again: the next spring), tw (1: a splinter of thunderwood at its foot)} | 'grown'. A hole in the lake ice: id 'i' + n, s 'hole' {x, y, r, at (the hour it's frozen over)}.
+//            A dig at the mire's find: id 'w' + the night, s 'dug', by (the digger gets the night's find: content/mire.js findOf; not kept)
+//   bolt     {a: 'mark', n, kind, id, x, y, h, tele}     natural lightning (docs/WEATHER.md; the server aims it in a storm): bolt n will
+//            strike (x, y) at height h in tele s (kind: tree | tor | ground | player, id: the tree's fid or the player's id).
+//            {a: 'strike', n, kind, id, x, y, h}: it struck (a player under it hurts himself: where he stands now)
 //   clock    {t, h, rate}                                the world's clock (the server owns it): at server time t (ms) it was h
 //            in-game hours since the start (sim/env.js E.t), going on at rate hours per ms (0: stopped). In welcome too
 //   sec      {id, s, by, n}                              a secret's state changed (sleeping / awake / triggered / spent), by =
@@ -37,6 +50,7 @@
 //   fish     {a: 'bite', n, id, cm, kg, wait, nibbles, two}   to the caster: what bites cast n (content/fishing.js roll), when
 //            (wait s, the nibbles' s before it), two = a double catch. {a: 'caught', id, name, c, cm, kg, two}: to everyone,
 //            player id landed catch c
+//   snow     {by, id, vx, vy, hat}                       player by's snowball hit player id (to everyone but the thrower)
 //   fix      {x, y, z}                                   the server didn't accept your position: you are here
 //   pong     {c, t}                                      t = the server's clock (ms)
 export const VERSION = 2;

@@ -17,6 +17,8 @@
 // shot's channel, a runner's wake) the mist near the ground is gone, refilling as the field refills it; its noise is carried
 // along the air's velocity (it swirls and streams round what pushes it); the field's SMOKE (a blast's dust) is mist too,
 // near the ground, a shade darker. mist.js hands the field over with the frame's numbers (o.air); without it nothing changes.
+// ROUND HIM (features/mist.js TUNE.vol.near): the mist low down thins in a few metres round the player, so the ground he stands
+// on and the tracks on it read in the thickest morning mist (higher up it stays: he still walks in it, it doesn't vanish).
 // THE LIGHT each step of mist scatters: its shade colour (the ambient, set by mist.js), the lamps round it, the lightning, and
 // the sun where the sun's shadow maps say the step is lit (so trees, walls and the tower cast shadow lanes through it; only
 // while the scene has sun shadows: the moon lights it evenly, sunLanes), strongest looking toward the sun (forward
@@ -65,6 +67,7 @@ uniform vec4 uV3;   // the most air marched (m up), steps, the light deep in the
 uniform vec4 uC0;   // the mist in shade (rgb: the ambient it scatters), the lamps' share
 uniform vec4 uC1;   // the sun it scatters (rgb, x glow), the most opacity
 uniform vec4 uQ;    // opacity levels, the seam (+- share of a level dithered), sunlit tones, the billows' contrast
+uniform vec4 uNear;   // ROUND HIM: his x, z (m), the clear's radius (m), how clear (0 none): the mist thins low down there
 uniform sampler2D tAir; uniform vec4 uAir, uAirK;   // the air: its state (vx, vz, clear, smoke), its rect (x0, z0, 1 / size), (on, the
                                                      // noise carried this many s of its velocity, the clear's reach up (m), smoke's density)
 uniform vec2 uWind; // the way the wisps lie on the ground (unit: fixed by mist.js, TUNE.vol.wisp)
@@ -111,6 +114,7 @@ float dens(vec3 X, vec4 f, out float k, out float dust) {
   k = exp(-V0.x * .55 * max(0., top - X.y));
   float d = max(film, max(pool, wat)) * mix(1., .25 + 1.5 * nf, uQ.w);
   d *= 1. - clamp(air.z, 0., 1.) * smoothstep(uAirK.z, uAirK.z * .4, h);   // (blown clear low down, less higher up)
+  if (uNear.w > 0.) d *= 1. - uNear.w * smoothstep(uNear.z, uNear.z * .45, length(X.xz - uNear.xy)) * smoothstep(3.4, 1.4, h);   // (round him: the ground and its tracks show)
   dust = air.w * uAirK.w * exp(-max(h, 0.) / 1.1) * (.55 + .9 * nf);   // (the field's smoke / dust, near the ground, billowing: its own tone)
   return d + dust;
 }
@@ -219,7 +223,7 @@ export function createMistVol({THREE, renderer, raw, tri, cam, compU, NL}) {
     tF: {value: tF}, tN: {value: tN}, uF: {value: new THREE.Vector4(0, 0, 1, 1)},
     uV0: {value: new THREE.Vector4()}, uV1: {value: new THREE.Vector4()}, uV2: {value: new THREE.Vector4(0, 0, 0, 1)}, uV3: {value: new THREE.Vector4(3, 12, 1, .5)},
     uC0: {value: new THREE.Vector4()}, uC1: {value: new THREE.Vector4()}, uLamp: {value: new THREE.Vector4(.55, .3, 1.6, .7)}, uGlow: {value: new THREE.Vector4(0, 0, 0, 0)},
-    tAir: {value: null}, uAir: {value: new THREE.Vector4(0, 0, 1, 1)}, uAirK: {value: new THREE.Vector4(0, .35, 2.2, 1.6)}, uQ: {value: new THREE.Vector4(4, .12, 2, .5)}, uWind: {value: new THREE.Vector2(1, 0)},
+    uNear: {value: new THREE.Vector4(0, 0, 1, 0)}, tAir: {value: null}, uAir: {value: new THREE.Vector4(0, 0, 1, 1)}, uAirK: {value: new THREE.Vector4(0, .35, 2.2, 1.6)}, uQ: {value: new THREE.Vector4(4, .12, 2, .5)}, uWind: {value: new THREE.Vector2(1, 0)},
     uLt2: compU.uLt2, uSun2: compU.uSun2, uPVf: compU.uPVf,   // (TWO LIGHTS: the composite's)
     uVu: {value: new THREE.Vector4()}, uC0u: {value: new THREE.Vector4()}, uC1u: {value: new THREE.Vector3()}, uTwo: {value: 0}};
   for (const k in compU) if (!U[k] && new RegExp('\\b' + k + '\\b').test(CLOUD_GLSL)) U[k] = compU[k];   // (the clouds' uniforms, whatever render/clouds.js names)
@@ -243,7 +247,7 @@ export function createMistVol({THREE, renderer, raw, tri, cam, compU, NL}) {
       hasField = true;
     },
     // every frame it shows: {sigma, film, filmH, fill, water, rise, scale, cover, drift: [x, z], churn, stretch, wind: [x, z],
-    // band, steps, g, shade: [r, g, b], lamp, sun: [r, g, b], amax, levels, seam, tones, billow, under: null | {film, fill, water, cover,
+    // band, steps, g, shade: [r, g, b], lamp, sun: [r, g, b], amax, levels, seam, tones, billow, near: null | [x, z, r, k], under: null | {film, fill, water, cover,
     // shade: [r, g, b], sun: [r, g, b], lamp} (TWO LIGHTS)}
     set(o) {
       U.uV0.value.set(o.sigma, o.film, o.filmH, o.fill); U.uV1.value.set(o.water, o.rise, o.scale, o.cover);
@@ -254,6 +258,7 @@ export function createMistVol({THREE, renderer, raw, tri, cam, compU, NL}) {
       const u = o.under; U.uTwo.value = u ? 1 : 0;   // (TWO LIGHTS: the under side's, while two lights show)
       if (u) { U.uVu.value.set(u.film, u.fill, u.water, u.cover); U.uC0u.value.set(u.shade[0], u.shade[1], u.shade[2], u.lamp); U.uC1u.value.set(u.sun[0], u.sun[1], u.sun[2]); }
       const wl = Math.hypot(o.wind[0], o.wind[1]); if (wl > 1e-4) U.uWind.value.set(o.wind[0] / wl, o.wind[1] / wl);
+      const nr = o.near; if (nr && nr[3] > 0) U.uNear.value.set(nr[0], nr[1], nr[2], nr[3]); else U.uNear.value.w = 0;   // (ROUND HIM)
       air = o.air && o.air.on ? o.air : null;
       if (air) U.uAirK.value.set(1, o.airCarry ?? .35, o.airReach ?? 2.2, o.airSmoke ?? 1.6);
       armed = true;

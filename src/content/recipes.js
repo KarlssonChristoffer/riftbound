@@ -288,6 +288,35 @@ export const RECIPES = {
     },
   },
 
+  // THE MIRE's (world/mire.js, docs/MIRE.md): picked as the berries are (features/forage.js)
+  cloudberry: {
+    about: 'A patch of cloudberry on a mire hummock: a few broad, lobed leaves on short stalks, one amber berry standing up on each stem',
+    likes: {ground: 'mire', shade: 0, near: 'the firm hummocks', cluster: [1, 3]},
+    params: {n: [5, 3, 9], spread: [.4, .2, .7], berries: [.8, 0, 1], picked: [0, 0, 1]},   // (picked: as the blueberry's; out of season too)
+    build(b, p, r) {
+      for (let i = 0; i < p.n; i++) {
+        const a = r.range(0, Math.PI * 2), d = Math.sqrt(r()) * p.spread, x = Math.cos(a) * d, z = Math.sin(a) * d * .8, h = r.range(.07, .13);
+        b.tube('leaf', [x, 0, z], [x, h, z], .008, .006, {sides: 3, bias: -.2});
+        for (let k = 0; k < 2; k++) {   // two broad leaves, lying open
+          const la = r.range(0, Math.PI * 2), q = [x + Math.cos(la) * .05, h * .8, z + Math.sin(la) * .05];
+          b.ball('leaf', q, [r.range(.06, .08), .015, r.range(.05, .07)], {detail: 0, lump: .25, bias: .05});
+        }
+        if (r.chance(p.berries)) { const at = [x + r.range(-.01, .01), h + .07, z], rad = r.range(.022, .03); b.tube('leaf', [x, h, z], at, .005, .004, {sides: 3}); if (p.picked) b.skip(); else b.ball('berryOrange', at, rad, {detail: 0, lump: .2, bias: .15}); }
+      }
+    },
+  },
+  bog_iron: {
+    about: 'Bog iron: a few rusty, pitted lumps half sunk in the peat at the edge of a mire pool',
+    likes: {ground: 'mire', shade: 0, near: 'the pools', cluster: [1, 2]},
+    params: {n: [4, 2, 6], picked: [0, 0, 1]},   // (picked: gone till they grow back)
+    build(b, p, r) {
+      for (let i = 0; i < p.n; i++) {
+        const a = r.range(0, Math.PI * 2), d = r.range(0, .18), q = [Math.cos(a) * d, -.01, Math.sin(a) * d * .8], s = r.range(.045, .08);
+        if (p.picked) b.skip(); else b.ball('bogiron', q, [s * 1.2, s * .7, s], {detail: 0, lump: .35, bias: r.range(-.1, .1)});
+      }
+    },
+  },
+
   watcher: {
     about: 'Weird: a pale toadstool with one eye under its cap, the kind that is always looking your way',
     likes: {ground: 'forest', shade: .8, cluster: [1, 1]},
