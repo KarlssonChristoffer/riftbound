@@ -3,7 +3,7 @@
 // a TIP how the shot flies (a fork, a sighted barrel, a moth lens, a bent bough, a heavy slug, a glancing lip, a prism, a
 // staff's caster crystal), a GRIP a trigger that bends a rule (a hair trigger, a kick, an echo, a weather vane, the last word).
 // Types meet on a target (fire on frozen: a steam burst; storm on burning: a flashover; ...: content/mods.js REACT), and the
-// weather, the ground and the hour change them. Parts turn up round the world (content/mods.js FINDS); N opens the weapon
+// weather, the ground and the hour change them. Parts turn up round the world (content/mods.js FINDS); Shift+M opens the weapon
 // bench (ui/modpanel.js) to fit them.
 //   mods/sim.js    the truth: the kit, the shots' tags, the hits, the statuses, the finds        content/mods.js   the numbers
 //   mods/look.js   the view: trails, statuses, arcs, bursts, the dropped parts, the toasts      ui/modpanel.js    the bench
@@ -66,7 +66,8 @@ export async function create(host) {
 
   // ---- the bench ----
   let sel = 'rune', open = false, mountEl = null;
-  // the game's tabbed window (features/panels.js) mounts the bench as its 'weapon' tab (N) when it's in the game; else our own box
+  // the game's tabbed window (features/panels.js) mounts the bench as its 'weapon' tab when it's in the game; else our own box.
+  // Shift+M either way (plain M is audio's mute, every other letter is taken)
   const panels = () => host.feature('panels');
   const shown = () => mountEl ? !!(panels()?.isOpen && panels().tabId === 'weapon') : open;
   const ICON = {}, icon = id => ICON[id] ??= iconURL(PARTS[id].icon, PARTS[id].pal);
@@ -98,7 +99,7 @@ export async function create(host) {
     if (shown()) panel.show(model(), mountEl);
   }});
   function setOpen(on) {
-    const W = panels(); if (W?.open && mountEl) { if (on) W.open('weapon'); else W.close(); return; }
+    const W = panels(); if (W?.open && mountEl) { if (on) W.open('weapon'); else if (shown()) W.close(); return; }
     open = on && ON; if (open) panel.show(model(), mountEl); else panel.hide();
   }
 
@@ -119,13 +120,13 @@ export async function create(host) {
     name: 'mods', label: 'Weapon mods', on: ON, sim, look,
     give: id => sim.give(id), fit: (wid, slot, id) => sim.fit(wid, sim.kindOfW(wid), slot, id), elemOf: wid => sim.elemOf(wid, false),
     setWeapon(fn) { wfn = fn; notesKey = ''; },
-    tab: {id: 'weapon', title: 'Weapon', key: 'n', mount(el) { mountEl = el; open = false; panel.show(model(), el); }, unmount() { mountEl = null; panel.hide(); },
+    tab: {id: 'weapon', title: 'Weapon', mount(el) { mountEl = el; open = false; panel.show(model(), el); }, unmount() { mountEl = null; panel.hide(); },
       refresh() { if (mountEl) panel.show(model(), mountEl); }},
     arrow(a) { if (ON) sim.shot(a); },
     onArrowHit(a, p) { if (ON) sim.onArrowHit(a, p); },
-    onKey(k) {
-      if (!ON || k !== 'n' || host.lock || panels()?.open) return false;   // (with the tabbed window, its own N opens the tab)
-      setOpen(!open); return true;
+    onKey(k, e) {
+      if (!ON || k !== 'm' || !e?.shiftKey || host.lock) return false;   // (onKey runs before audio's M toggle: plain M stays mute)
+      setOpen(!shown()); return true;
     },
     update(dt, evs) {
       if (!ON) return;
@@ -163,7 +164,7 @@ export async function create(host) {
         {label: 'Weapon mods: every part in the kit', run: () => { for (const id of PART_IDS) if (!sim.S.own[id]) sim.give(id); }},
         {label: 'Weapon mods: a pack of brutes to try them on', run: () => spawnPack(6, P.x - Math.sin(a) * 7, P.y - Math.cos(a) * 7)},
         {label: 'Weapon mods: drop a part you don\'t have at your feet', run: () => { const id = PART_IDS.find(k => !sim.S.own[k]); if (id) sim.drop(id, P.x + 1.2, P.y); }},
-        {label: 'Weapon mods: open the weapon bench (N)', run: () => setOpen(true)},
+        {label: 'Weapon mods: open the weapon bench (Shift+M)', run: () => setOpen(true)},
         {label: 'Weapon mods: a fresh kit', run: () => { const o = saved(); for (const k in o) delete o[k]; sim.load(); pack()?.dirty?.(); }},
       ];
     },
