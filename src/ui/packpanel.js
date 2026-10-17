@@ -237,20 +237,23 @@ export function createPackPanel({book, inv, skills, ITEMS, SKILLS, recipes, sect
 
   // ---- JOURNAL: the sections' titles, the picked one
   let selJ = '', selJV = 0;
+  // (the journal's pages in their sections' order: an optional `order`, lower first, else as they came: the almanac's 0 leads)
+  let sorted = [], sortedN = -1;
+  const pages = () => { if (sections.length !== sortedN) { sortedN = sections.length; sorted = sections.map((s, i) => [s, i]).sort((a, b) => (a[0].order ?? 50) - (b[0].order ?? 50) || a[1] - b[1]).map(x => x[0]); } return sorted; };
   const secVer = () => { let v = selJV; for (const s of sections) v = (v * 31 + s.ver()) | 0; return mix(v, sections.length, iconHook.ver); };
   book.part({id: 'journal.list', tab: 'journal', col: 0, order: 10,
     ver: () => mix(sections.length, selJV),
     html() {
-      if (!sections.length) return '<div class="b-none">nothing written yet</div>';
-      if (!sections.some(s => s.id === selJ)) selJ = sections[0].id;
-      return sections.map(s => `<button class="b-btn${s.id === selJ ? ' on' : ''}" data-j="${esc(s.id)}">${esc(s.title)}</button>`).join('');
+      const P = pages(); if (!P.length) return '<div class="b-none">nothing written yet</div>';
+      if (!P.some(s => s.id === selJ)) selJ = P[0].id;
+      return P.map(s => `<button class="b-btn${s.id === selJ ? ' on' : ''}" data-j="${esc(s.id)}">${esc(s.title)}</button>`).join('');
     },
     click(d) { if (d.j && d.j !== selJ) { selJ = d.j; selJV++; } },
   });
   book.part({id: 'journal.page', tab: 'journal', col: 1, order: 10,
     ver: secVer,
     html() {
-      const s = sections.find(q => q.id === selJ) || sections[0];
+      const s = sections.find(q => q.id === selJ) || pages()[0];
       return s ? `<h5>${esc(s.title)}</h5>` + s.html(esc, icon) : '<div class="b-none">Fish, cook and look around: what you find is written here.</div>';
     },
     click(d) {
