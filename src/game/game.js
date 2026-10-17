@@ -342,7 +342,7 @@ export async function createGame(host) {
   };
 
   // start: the title, or straight into a mode (a run starts on the first frame: the host is still booting now)
-  const m = Q.get('mode');
+  const m = Q.get('mode') || (Q.get('tour') ? 'sandbox' : null);   // (?tour: the playtest tour plays in the sandbox: features/tour.js)
   if (m === 'sandbox') toSandbox();
   else { toTitle(); if (m === 'run') { screens.hide(); boot = startRun; } }
   return F;

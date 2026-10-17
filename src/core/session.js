@@ -23,7 +23,7 @@ function urls(v) {
 
 const mp = flags.get('mp'), seedQ = flags.get('seed');
 if (seedQ !== null && Number.isFinite(+seedQ)) SESSION.seed = +seedQ >>> 0;
-else if (flags.get('forest') === '1') SESSION.seed = DEFAULT_SEED;
+else if (flags.get('forest') === '1' || flags.get('tour')) SESSION.seed = DEFAULT_SEED;   // (?tour: the playtest tour's forest, features/tour.js)
 if (mp !== null && mp !== '0') {
   const u = urls(mp);
   if (u) {

@@ -39,7 +39,7 @@ const CLAIM = {
 // THE FEATURES' ROWS (F.menu) the player sees, in the Game tab in this order (after Resume and Photo mode; back to title
 // stays last): the cinematic camera, the camera (F6), the way to the dev menu (dev mode), the game's own (start / abandon
 // a run, back to title). Every other feature's F.menu rows are test actions: the dev menu's (dev/devmenu.js)
-export const GAME_ROWS = ['cinema', 'chasecam', 'devmenu', 'game'];
+export const GAME_ROWS = ['cinema', 'chasecam', 'tour', 'devmenu', 'game'];   // (tour: the playtest tour's start / next / end, features/tour.js)
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
 const LOW_OFF = ['windlines', 'wildlife', 'fauna', 'depth', 'grass', 'litter', 'dust', 'tumbleweed', 'mist', 'airfx'];
