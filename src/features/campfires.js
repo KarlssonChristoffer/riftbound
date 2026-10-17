@@ -65,10 +65,6 @@ export async function create(host) {
       const n = pack()?.count('wood') || 0;   // (any log burns)
       return {text: n ? `E  add a log (${n})` : 'no logs in the pouch', color: n ? '#ffb060' : '#e8a070'};
     },
-    view(dt, evs) {   // (the steam off a fire the rain put out: a few seconds of it)
-      for (const h of HISS) h.t += dt;
-      for (let k = 0; k < evs.length; k++) { const e = evs[k]; if (e.type !== 'fire.doused') continue; let o = HISS[0]; for (const h of HISS) if (h.t > o.t) o = h; o.x = e.x; o.y = e.y; o.h = host.elev(e.x, e.y); o.t = 0; }
-    },
     frame(f) {
       if (!active()) return;
       for (const h of HISS) if (h.t < 4) for (let i = 0; i < 5; i++) {   // (rising, spreading, thinning: a pure function of its time)
@@ -104,6 +100,8 @@ export async function create(host) {
     burningNear(x, y, r) { const B = builds(); if (!B) return false; for (const b of sync()) if (Math.hypot(b.x - x, b.y - y) <= r && B.fire(b).fuel > 0) return true; return false; },
     burningAt(x, y, r) { const B = builds(); if (!B) return null; let best = null, bd = r; for (const b of sync()) { const d = Math.hypot(b.x - x, b.y - y); if (d <= bd && B.fire(b).fuel > 0) { bd = d; best = b; } } return best; },
     view(dt, evs) {   // the flares: a cook.flare makes the fire under it flare up, then it settles; the pots' steam
+      for (const h of HISS) h.t += dt;   // (the steam off a fire the rain put out: a few seconds of it)
+      if (evs) for (let k = 0; k < evs.length; k++) { const e = evs[k]; if (e.type !== 'fire.doused') continue; let o = HISS[0]; for (const h of HISS) if (h.t > o.t) o = h; o.x = e.x; o.y = e.y; o.h = host.elev(e.x, e.y); o.t = 0; }
       if (evs) for (const e of evs) if (e.type === 'cook.flare') { const b = F.burningAt(e.x, e.y, 1); if (b) flares.set(b, FLARE.s); }
       for (const [b, s] of flares) { if (s - dt <= 0) flares.delete(b); else flares.set(b, s - dt); }
       const B = builds(), S = POTL.steam;
