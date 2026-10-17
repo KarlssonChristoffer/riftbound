@@ -17,7 +17,7 @@ export function createInput(E) {
     const k = e.key.toLowerCase(), pause = E.pause;
     if (E.photo?.open && k !== 'f3') { E.photo.key(k, e); return; }   // photo mode has the keys, Escape too (ui/photo.js)
     if (E.loop?.screen) { E.loop.screen.key(k, e); return; }   // a screen of its own holds the game: its keys (core/loop.js hold)
-    if (k === 'escape') { if (!e.repeat) pause.toggle(); return; }
+    if (k === 'escape') { if (!e.repeat && (pause.paused || !features.some(f => f.escape?.()))) pause.toggle(); return; }   // (a feature's window shuts first: F.escape() -> true, features/panels.js)
     if (k === 'f3') { e.preventDefault(); if (!e.repeat) { perf.toggle(); pause.menu.refresh(); } return; }   // the frame profiler
     if (k === 'f4') { e.preventDefault(); if (!e.repeat) E.photo?.toggle(true); return; }   // photo mode (also from the menu)
     if (k === 'f1') e.preventDefault();   // (not the browser's help page: F1 is the key help, dev/devkeys.js)

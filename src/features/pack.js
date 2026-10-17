@@ -1,7 +1,8 @@
 // PACK: the persistent world's player (docs/GATHERING.md): what he carries (the material POUCH and the small BAG:
 // game/inventory.js), what he has learned (SKILLS: game/skills.js, levels as host.mods notes), and their save (game/save.js
 // loadWorld / saveWorld: a key of its own, kept across reloads). Other systems give and take through this feature's API and
-// keep their own part of the world in it (store(name): woodcut's felled trees). Tab opens the panel (ui/packpanel.js).
+// keep their own part of the world in it (store(name): woodcut's felled trees). Its panel is four tabs of the player's window
+// (ui/packpanel.js in features/panels.js's book: Pack, Skills, Craft, Journal; Tab / I opens it).
 //   const pack = host.feature('pack')
 //   pack.give(id, n, at?) -> how many didn't fit (at {x, y, h}: a float there) / pack.take(id, n) -> bool / pack.count(id) /
 //   pack.has(id, n) / pack.best(job) -> the bag's best tool for a job | null / pack.gain(skill, n, at?) -> the new level | 0 /
@@ -9,7 +10,7 @@
 //   pack.level(skill) / pack.store(name) -> that system's saved object (it writes its own; then pack.dirty()) /
 //   pack.recipe(r) (a build the panel offers: {id, name, cost: {id: n}, can() -> '' | why not, run(), group?: the panel's
 //   heading, 'Build' when absent, shown?() -> false: left out for now}) / pack.section(s) (a part of the panel another system
-//   draws: {id, title, ver() -> number (redrawn when it changes), html(esc, icon) -> string, click?(data, ask): an element of its
+//   draws: {id, title, order? (the Journal's page order, lower first), ver() -> number (redrawn when it changes), html(esc, icon) -> string, click?(data, ask): an element of its
 //   html with data-sec="<id>" clicked (data: its dataset; ask(r): r carried out in the sim step like a recipe)}: features/fishing.js's
 //   catch journal, features/meals.js's Cook journal) / pack.held(slot)
 //   (the bag slot whose tool is in hand: the panel marks it; -1 none) / pack.giveMade(id, u, at?) -> true when it went in (a made
@@ -77,7 +78,7 @@ export async function create(host) {
   let titleVer = 0;
   const T = () => { const s = stores.titles ??= {}; s.n ??= {}; s.titles ??= []; s.title ??= ''; return s; };   // (the titles' part of the save)
   const titleOf = () => ({worn: T().title, had: T().titles, names: TITLES});
-  const panel = ON ? createPackPanel({host, inv, skills, ITEMS, SKILLS, recipes, sections, held: () => held, ask: r => queue.push(r), moves: moveLines, movesVer: () => moveLvl * 7919 + titleVer,
+  const panel = ON ? createPackPanel({book: host.feature('panels'), inv, skills, ITEMS, SKILLS, recipes, sections, held: () => held, ask: r => queue.push(r), moves: moveLines, movesVer: () => moveLvl * 7919 + titleVer,
     titles: titleOf, wear: id => queue.push({name: 'Title', run: () => F.wear(id)}),
     pick: i => queue.push({name: 'Bag', run: () => { const j = inv.prefer(i); if (j) dirtyT = Math.max(dirtyT, 0); }}), tips,
     put: id => { if (putter) queue.push({name: 'Put down', run: () => putter(id)}); }}) : null;
@@ -93,6 +94,7 @@ export async function create(host) {
   function leveled(id, L, L0 = L - 1) {
     const S = SKILLS[id], P = host.player, got = MOVES_ON ? movesHad(id, L).filter(m => m.lvl > L0 && m.lvl > moveLvl) : [];
     toasts.push(`${S.name} ${L}`, got.length ? got[got.length - 1].name : '', S.col);
+    panel?.up?.();
     host.events.push({type: 'skill.level', skill: id, level: L, x: P.x, y: P.y, move: got.length ? got[got.length - 1].id : ''});
     for (const m of got) host.events.push({type: 'skill.move', skill: id, level: L, move: m.id, x: P.x, y: P.y});
   }
@@ -162,6 +164,7 @@ export async function create(host) {
       const left = inv.add(id, n), got = n - left;
       if (got > 0) {
         dirtyT = Math.max(dirtyT, 0); host.events.push({type: 'pack.add', id, n: got, x: at?.x ?? host.player.x, y: at?.y ?? host.player.y});
+        panel?.got?.(got);
         if (at) ui()?.float(at.x, at.y, at.h ?? 1.6, label(id, got), ITEMS[id]?.col || '#f4efe4');
       }
       if (left > 0) ui()?.toast('The bag is full', ITEMS[id]?.name || id, '#e8a070');
@@ -221,9 +224,9 @@ export async function create(host) {
     view(dt) { toasts.update(dt); },
     hd(q) { if (!host.hudOff && toasts.length) toasts.draw(q, q.canvas.width, q.canvas.height, hdUnit()); },
     get open() { return !!panel?.open; },   // the panel is up (features/gear.js shows its panel beside it)
-    close() { if (panel?.open) panel.toggle(); },   // (features/meals.js: a dish goes on the stick, the panel goes)
+    close() { panel?.close(); },   // (features/meals.js: a dish goes on the stick, the panel goes)
     onKey(k, e) {
-      if (!ON || k !== 'tab' || e?.shiftKey || host.lock) return false;   // (Shift+Tab: dev/wardrobe.js)
+      if (!ON || !panel || k !== 'tab' || e?.shiftKey || host.lock) return false;   // (Shift+Tab: dev/wardrobe.js; the window's own keys: features/panels.js, first)
       panel.toggle(); return true;
     },
     menu() {

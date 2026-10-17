@@ -395,6 +395,7 @@ export function createCore(host) {
     }
   }
 
+  const BATK = {kind: 'brute', x: 0, y: 0, who: null, dmg: 0};   // (landBrute's strike, as the melee guard is asked it)
   function landBrute(b, s) {
     const fl = s.hop?.fling;
     s.hop = null; b.h = 0; b.air = false; s.land = .12; b.squash = 1;
@@ -418,12 +419,19 @@ export function createCore(host) {
     puff(b.x, b.y, pz(b), 8, .5);
     const d = Math.hypot(P.x - b.x, P.y - b.y);
     if (s.mode === 'aggro' && d < (b.reach ?? T.bruteReach) && Math.abs(P.z - pz(b)) < .5 && !['climb', 'leap', 'fall', 'splash'].includes(P.state) && !C.immune?.()) {
-      const ux = d > .05 ? (P.x - b.x) / d : 0, uy = d > .05 ? (P.y - b.y) / d : 1, kn = b.knock ?? T.bruteKnock;
-      host.knock(ux * kn, uy * kn);
-      shake(3, .18); hitstop(.06); s.wait += .35;
-      events.push({type: 'player.hit', x: P.x, y: P.y, vx: ux * 5, vy: uy * 5, player: true});
-      events.push({type: 'player.hurt', dmg: (b.dmg ?? T.bruteDmg) * T.enemyDmg, by: b, x: P.x, y: P.y});
-      for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + VR(.6, 1.2), ux * VR(1, 3) + VR(-1, 1), uy * VR(1, 3), VR(0, 2), VR(.15, .3), GOLD, {emit: true, drag: 4});
+      const ux = d > .05 ? (P.x - b.x) / d : 0, uy = d > .05 ? (P.y - b.y) / d : 1;
+      // the melee guard (features/hits.js defend: features/melee.js answers): parried (the brute held: the defender's) or blocked
+      BATK.x = b.x; BATK.y = b.y; BATK.who = b; BATK.dmg = (b.dmg ?? T.bruteDmg) * T.enemyDmg;
+      const df = host.feature('hits')?.defend?.(BATK), dk = df && df.out !== 'hit' ? df.k : 1;
+      s.wait += .35;
+      if (dk > 0) {
+        const kn = (b.knock ?? T.bruteKnock) * (dk < 1 ? .4 : 1);
+        host.knock(ux * kn, uy * kn);
+        shake(3, .18); hitstop(.06);
+        events.push({type: 'player.hit', x: P.x, y: P.y, vx: ux * 5, vy: uy * 5, player: true});
+        events.push({type: 'player.hurt', dmg: Math.round((b.dmg ?? T.bruteDmg) * T.enemyDmg * dk), by: b, x: P.x, y: P.y});
+        for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + VR(.6, 1.2), ux * VR(1, 3) + VR(-1, 1), uy * VR(1, 3), VR(0, 2), VR(.15, .3), GOLD, {emit: true, drag: 4});
+      }
     } else if (d < 4) shake(1, .06);
     // stomping onto a trap sets it off
     for (const q of traps) if (q.t >= T.trapArm && !q.done && Math.hypot(q.x - b.x, q.y - b.y) < T.trapTrig) burstTrap(q);

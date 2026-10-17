@@ -13,7 +13,8 @@ import {createGun} from './gun.js';   // a gun loadout's revolver (player.js H.g
 import {createLasso} from './lasso.js';   // the equipment experiment's lasso in his hands (player.js H.lasso)
 import {createBrawl} from './brawl.js';   // the live cowboys' boot, barge, lift and throw (player.js H.brawl; features/brawl.js uses it)
 import {createTool} from './tool.js';   // a tool in hand (player.js H.tool; features/woodcut.js uses it)
-import {createFists} from './fists.js';   // the live cowboys' fists (player.js H.fists; features/fists.js uses it)
+import {createFists} from './fists.js';
+import {createMelee} from './melee.js';   // a weapon in hand (player.js H.melee; features/melee.js uses it)   // the live cowboys' fists (player.js H.fists; features/fists.js uses it)
 import {createRopeWall} from './ropewall.js';   // the rope wall: the lasso's rope-up hands him to it (player.js H.ropewall)
 import {TUNE as ROPEWALL} from '../../content/ropewall.js';   // (its camera: side-on to the face)
 import {walkable, elev, inStream, PLATEAUS, CLIMBS, steep, TERRAIN_ON, vaultTop, WATER_H} from '../../world/world.js';
@@ -197,6 +198,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     lasso: createLasso, yaw: () => cv.yaw,      // the lasso's hands (idle unless features/equip/lasso.js uses them); the camera's yaw (its swing is in the world)
     brawl: createBrawl,   // the boot, the barge, lifting and throwing (idle unless features/brawl.js asks: a live loadout)
     fists: createFists,   // unarmed fighting (idle unless features/fists.js raises the fists: a live loadout)
+    melee: createMelee,   // a weapon in hand (idle unless features/melee.js draws it)
     tool: createTool,   // a tool in hand (idle unless features/woodcut.js takes the axe out: a live loadout)
     ropewall: createRopeWall, ropewallOn: flags.get('ropewall') !== '0', ladderOld: flags.get('ladder') === 'old',   // the rope wall, the ladder
     ropeCam: yawN => ropeCam(yawN),   // (the rope wall's camera: below)

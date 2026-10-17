@@ -1,4 +1,5 @@
-// GEAR PANEL: what you wear (features/gear.js; Tab, beside the pack). A slot a row (head, body, back, hands, legs, feet, main
+// GEAR PANEL: what you wear (features/gear.js; the player's window's Pack tab, beside the bag: mount(el); or, with no window,
+// its own floating panel on Tab). A slot a row (head, body, back, hands, legs, feet, main
 // hand, off hand), each with its pieces as pixel icons (ui/gearicons.js) after "own" (the character's own clothes: the slot
 // empty), then the slot's bare piece where he has a garment of his own there (No hat, No coat ...: content/gear.js BASE, a
 // piece replaces his own garment); a click wears a piece or takes it off. The first row, CHARMS, holds two keepsakes
@@ -51,7 +52,10 @@ body:has(#pause:not(.hidden)) #gear { visibility: hidden; }
 #gear .g-sum { margin-top: calc(5 * var(--u)); padding-top: calc(3 * var(--u)); border-top: var(--u) solid #4a3826; }
 #gear .g-num { color: var(--key); }
 #gear .g-dim { color: var(--dim); }
-#gear .g-wait { color: var(--key); }`;
+#gear .g-wait { color: var(--key); }
+#gear.g-in { position: static; transform: none; width: auto; max-height: none; overflow: visible; padding: 0; border: 0; font: inherit; }
+#gear.g-in header { display: none; }
+#gear.g-in > h5:nth-of-type(1) { margin-top: 0; }`;
 
 // a keepsake's icon: its item's (redrawn when its look changes: the tally's notches, ui/packpanel.js iconHook)
 const KEEP_ICON = {};
@@ -67,9 +71,10 @@ export function createGearPanel({S, choose, online, owns = () => true, has = () 
   let root = null, sum = null, none = null;
   const btns = [];   // {b, id (or null: own), slot, img}
   const pct = v => Math.round(v * 100) + '%';
+  let into = null;   // (mounted in the player's window: features/panels.js, the Pack tab; else its own floating panel)
   function build() {
     const style = document.createElement('style'); style.textContent = CSS; document.head.appendChild(style);
-    root = document.createElement('div'); root.id = 'gear'; root.className = 'hidden';
+    root = document.createElement('div'); root.id = 'gear'; root.className = into ? 'hidden g-in' : 'hidden';
     for (const [k, v] of [['panel', FRAMES.panel()], ['card', FRAMES.card()], ['hot', FRAMES.hot()], ['on', FRAMES.on()]]) root.style.setProperty('--g-' + k, v);
     loadPixelFont();
     root.addEventListener('mousedown', e => e.preventDefault());   // no focus: Space / Enter stay the game's
@@ -98,7 +103,7 @@ export function createGearPanel({S, choose, online, owns = () => true, has = () 
       if (slot === 'charm') { none = document.createElement('div'); none.className = 'g-none'; none.textContent = 'nothing to wear here yet'; root.appendChild(none); }
     }
     sum = document.createElement('div'); sum.className = 'g-sum'; root.appendChild(sum);
-    document.body.appendChild(root);
+    (into || document.body).appendChild(root);
   }
   function sync() {
     if (!root || root.classList.contains('hidden')) return;
@@ -124,8 +129,11 @@ export function createGearPanel({S, choose, online, owns = () => true, has = () 
     if (!root) build();
     const on = v ?? root.classList.contains('hidden');
     root.classList.toggle('hidden', !on);
-    if (on) { root.style.setProperty('--u', uiUnit() + 'px'); sync(); } else gearTip().hide();
+    if (on) { if (!into) root.style.setProperty('--u', uiUnit() + 'px'); sync(); } else gearTip().hide();
     return on;
   }
-  return {toggle, sync, get open() { return !!root && !root.classList.contains('hidden'); }};
+  // in the player's window (its Pack tab's part): built into el, sized by the window's UI pixel; toggle(true / false) as the tab
+  // shows / hides
+  function mount(el) { into = el; if (!root) build(); else { root.classList.add('g-in'); root.style.removeProperty('--u'); el.appendChild(root); } }   // (built floating before: moved in)
+  return {toggle, sync, mount, get mounted() { return !!into; }, get open() { return !!root && !root.classList.contains('hidden'); }};
 }

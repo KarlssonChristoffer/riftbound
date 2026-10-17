@@ -50,6 +50,7 @@ export function doesOf(g) {
   if (g.armor) out.push(`takes ${pct(g.armor)} off the damage you take`);
   for (const m of g.mods || []) {
     if (m.stat === 'light.lantern') out.push('your lantern is always lit');
+    else if (m.stat === 'light.nightglass') out.push('its light is dark: what shows only in the dark stays shown in it');
     else if (m.stat === 'light.lanternR') out.push(m.mul >= 1 ? `its light reaches ${pct(m.mul - 1)} further` : 'a smaller light');
     else if (m.stat === 'player.speed') out.push(`you move ${pct(m.mul - 1)} faster`);
     else if (m.stat === 'weapon.melee') out.push(`your blow (V) hits x${m.mul}`);
