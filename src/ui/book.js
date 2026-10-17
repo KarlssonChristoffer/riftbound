@@ -94,9 +94,11 @@ const CSS = `
 const STORE = 'rb.book';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const byOrder = (a, b) => (a.order ?? 50) - (b.order ?? 50);
-// the innermost element with data-* between the target and the part's own element (the part's dataset itself excluded)
+// the innermost element with data-* between the target and the part's own element (the part's dataset itself excluded; a
+// tooltip's data-tip / data-tip-t alone doesn't count, but an element that also carries its own data, a recipe's data-r, does)
+const ownData = el => { if (!el.dataset) return false; for (const k in el.dataset) if (k !== 'tip' && k !== 'tipT') return true; return false; };
 function dataOf(t, stop) {
-  for (let el = t; el && el !== stop; el = el.parentElement) if (el.dataset && Object.keys(el.dataset).length && !el.dataset.tip) return el;
+  for (let el = t; el && el !== stop; el = el.parentElement) if (ownData(el)) return el;
   return null;
 }
 
@@ -246,7 +248,7 @@ export function createBook({sound = () => {}, icon = () => '', micro = true} = {
         const s = !p.shown || !!p.shown();
         if (s !== p.shownNow) { p.shownNow = s; p.el.classList.toggle('hidden', !s); if (s) p.v = NaN; }
         if (!s) continue;
-        if (p.html) { const v = p.ver ? p.ver() : 0; if (v !== p.v) { p.v = v; p.body.innerHTML = p.html(esc, icon); if (tipEl && !root.contains(tipEl)) hideTip(); } }
+        if (p.html) { const v = p.ver ? p.ver() : 0; if (v !== p.v) { p.v = v; const h = p.html(esc, icon); if (h !== p.h) { p.h = h; p.body.innerHTML = h; if (tipEl && !root.contains(tipEl)) hideTip(); } } }   // (the same text: the elements stay, so a click pressed on one still lands)
         p.frame?.();
       }
     },
