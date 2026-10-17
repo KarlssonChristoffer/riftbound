@@ -160,6 +160,7 @@ export const FLAG_DOCS = {
   wisps: 'often: the mire\'s wisps every night and all day (features/mire.js; docs/MIRE.md)',
   glow: '0: no night glow in the forest; always: glow all day and fireflies all year, for testing (features/glowlife.js: fireflies, foxfire, moonflowers, the elf ring; docs/WORLDLIFE.md)',
   happen: '0: no happenings; star | ring | vattar | rainbow: that one soon, near you; often: every kind every day, no weather conditions (features/happenings.js: the falling star, the witch\'s ring after rain, the vättar walking at dusk, the rainbow\'s foot; docs/WORLDLIFE.md)',
+  sky: '0: no life in the sky (features/skylife.js: geese, starlings, drifters, shooting stars); often: everything far more often (testing)',
   wrongwx: 'often: a wrong weather every 2 in-game hours, each kind in turn; 0: none (features/wrongwx.js; docs/WEATHER.md)',
   tracks: '0: no footprints or tracks in the forest (features/prints.js; docs/WINTER.md)',
   dollwalk: 'always (dev): a shelf\'s Bark Doll walks every dawn (offline; features/keepsakes.js, content/keepsakes.js DOLL.walk)',

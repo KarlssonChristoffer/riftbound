@@ -2,6 +2,34 @@
 
 What the night's builders added to the persistent world, one section each.
 
+## Life in the sky (features/skylife.js)
+
+Look up now and then, or rather look down: things high up show mostly as their shadows sliding over the ground, and as
+themselves far up the screen (the chase cam and first person, F6, look up at them).
+
+- **Geese.** V formations of 7-21 birds cross the whole map high up, wings beating, the V wobbling, the leader dropping back
+  and another taking the lead now and then. North in spring, south in autumn; a few flights a day, mostly in the morning
+  (about 05:30-09:00) and the evening (16:00-20:00). A stray flock in summer, rarely one in winter. Their shadows sweep
+  over the ground on a sunny day.
+- **Geese on the lake.** Some spring and autumn days (now and then in summer) a low flock comes down on the forest lake,
+  sits there for hours bobbing and feeding, and runs over the water and takes off when anyone comes within ~11 m.
+- **The murmuration.** Some summer and autumn dusks (~18:10-19:00) hundreds of starlings gather over the lake or the fell
+  as one folding, morphing cloud, swirl for a minute or so, then pour down into the reeds or the trees and are gone.
+  Sprint or jump under it and a wave runs through it.
+- **Drifters.** Some nights (about one in three; rarely two), and on foggy dawns, something enormous and slow drifts over
+  the forest: a bell of pale light trailing long glowing tendrils, or a manta-whale with two long threads. The ground under
+  it glows faintly, the light turns a little blue, and small motes drift up from the ground toward it. It never does
+  anything. "Something vast is passing over."
+- **Shooting stars.** On clear nights a streak now and then.
+
+Everyone in a co-op world sees the same flights at the same moment (they come from the world's seed and the shared clock).
+The lake's flock takes off for whoever comes near first.
+
+Find it quickly: dev menu (F10) > Nature > Sky: "geese now", "geese land on the lake now", "murmuration now (over you)",
+"a drifter now (the bell / the manta)", "a shooting star now", "go to the lake shore", "dusk now", "night now"; the page's
+read-out lists today's flights. `?sky=often`: a dozen geese flights a day, a lake flock twice a day, three murmurations
+(10:30, 15:00, 18:24), four drifters (one by day at 12:30), several shooting stars an hour at night. `?sky=0`: none.
+
 ## The forest glows at night (features/glowlife.js)
 
 The night woods used to be nearly black. Now they have light of their own. All of it shows within ~40 m of you.
