@@ -8,7 +8,7 @@
 //   dizzy.js    DIZZY: spin the camera round and round and the world spins on without you
 //   fishrain.js IT'S RAINING FISH: in a storm a fish now and then falls out of the clouds and flops about till you grab it
 // This file is their host-facing feature: it runs each part's update / view / frame / lights / hd, draws their pixel chips (the
-// HD layer, bottom left above the meal's chip: what's on and for how long), lists their rows in the menu's Sandbox tab (for the
+// HD layer, bottom left above the meal's chip: what's on and for how long), lists their rows on its dev menu page (F10 > Nature: for the
 // tour and for trying them at once) and gives them one context (C, below). Only in the persistent world (the sandbox's ruins with
 // the forest's plan). ?surprises=0: none of it; ?stars=now: the next clear night's first star falls a few s in.
 // OWNS: the parts' state; the modifier sources 'charged', 'stormrod', 'starfrenzy', 'dizzy'; the frame's CSS transform

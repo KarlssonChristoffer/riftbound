@@ -2,7 +2,7 @@
 
 Small rule-benders in the persistent forest, built overnight on 2026-10-16 as things to find while playing. All of them live in
 `src/features/surprises.js` (the feature) and `src/features/surprises/` (one part each), tuned in `src/content/surprises.js`.
-Every one is personal for now: your own body, sky, eyes and finds. Esc > Sandbox has a "Surprise: ..." row for each, so any of
+Every one is personal for now: your own body, sky, eyes and finds. the dev menu (F10 > Nature > Night surprises) has a "Surprise: ..." row for each, so any of
 them can be tried at once. `?surprises=0` turns all of them off; `?stars=now` makes the next clear night's first star fall a few
 seconds in.
 
