@@ -300,6 +300,10 @@ export const EVENTS = {
   'tree.grow':          ['features/woodcut.js',   'x, y, who: a stump has grown back into its tree', '(none yet)'],
   'tool.hit':           ['features/woodcut.js',   'x, y, who, kind (body | a prop kind): a tool\'s swing meets a foe or a dummy', 'audio'],
   'tool.whiff':         ['features/woodcut.js',   'x, y: a tool\'s swing at nothing (features/mining.js too: ring, the ringing pick rings on)', 'audio'],
+  // the forest's happenings (features/happenings.js; the schedule: sim/happenings.js, the same on every client from the seed and the clock)
+  'happening.start':    ['features/happenings.js', 'x, y, kind (star | ring | vattar | rainbow), id: a happening began (or was first seen going on)', '(none yet: trolls, animals could react)'],
+  'happening.end':      ['features/happenings.js', 'x, y, kind, id: its main part is over (the star\'s glow at dawn, the last vätte gone, the rainbow faded)', '(none yet)'],
+  'happening.take':     ['features/happenings.js', 'x, y, kind, item (content/items.js, null for the ring\'s buff), gift? buff?: this player took his part of one', '(none yet)'],
   'bells.toll':         ['features/bells/view.js (a view: nothing in the sim listens)', 'x, y, h, k (0..1), note, who (the bell): its clapper strikes it again as it swings', 'audio (its note, softer)'],
 };
 

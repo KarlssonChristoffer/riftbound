@@ -217,6 +217,16 @@ export const ITEMS = {
       '...s..SS.s..', '....s....s..', '.....ssss...', '............'],
     lies: ['A fiddle string, wet though it\'s dry. Carry it and the fish will sing to you.', 'It hums when something hunts you.',
       'Whoever carries it is never lost in the dark.', 'A string from a fiddle nobody owns. It wants to go back in the water.', 'It does nothing. Nothing at all.']},
+  // HAPPENINGS (features/happenings.js, content/happenings.js): what a fallen star and a rainbow's foot leave you. Keepsakes; they
+  // do nothing yet
+  star_shard: {name: 'Star Shard', kind: 'material', col: '#bcd8ff', desc: 'a sliver of a fallen star, dug out of its little crater. Still warm; held to your ear it hums',
+    pal: {w: '#e8f4ff', b: '#9cc8ff', W: '#ffffff', c: '#5a7ad8', y: '#fff2b0'},
+    icon: ['.....w......', '.....bw.....', '....wbbw....', '..y.bWbc....', '....bWWbc...', '...wbWWbc...', '..wbWWWWbc..', '...bbWWbc.y.',
+      '....bWbc....', '....bbc.....', '.....c......', '............']},
+  rainbow_scale: {name: 'Rainbow Scale', kind: 'material', col: '#f0c0ff', desc: 'a thin, curved scale that shows every colour as you turn it. It was lying where the rainbow touched the ground',
+    pal: {r: '#ff6a5a', o: '#ffa850', y: '#ffe070', g: '#70d860', b: '#60b0ff', v: '#9070e0', p: '#d070e0', w: '#ffffff'},
+    icon: ['............', '....wwww....', '...wrrooy...', '..wrrooyyg..', '..rrooyyggb.', '..rooyyggbb.', '..ooyyggbbv.', '...oyyggbv..',
+      '....yggbvp..', '.....gbvp...', '......bp....', '............']},
 };
 // THE CATCHES (content/fishing.js): every fish and find is a material: it goes in the pouch
 for (const id of CATCH_IDS) {

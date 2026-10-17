@@ -34,3 +34,29 @@ Find it quickly: dev menu (F10) > Nature > Glowlife has these rows:
 - an on / off switch, and a read-out of what is out now
 
 URL switches: `?glow=always` glows all day with fireflies all year (for a look by daylight), and `?glow=0` turns it off.
+
+## Happenings (features/happenings.js)
+
+Now and then something *happens* in the forest. Each in-game day gets none, one or two of these, worked out from the
+world's seed, the day and the weather, so in co-op your friends see the same thing at the same place and time. A toast
+tells you what started and roughly where ("A star fell: north-east of you, 40 m"). What you take from one is yours: each
+player takes their own, once.
+
+- **A falling star** (a clear night, now and then). A bright streak, a flash and a thump of light where it lands in the
+  woods. A small smoking crater with a pulsing star shard in it lights the trees round it, with sparks rising, until dawn.
+  Walk up and press **E** to take the **Star Shard**. At dawn the glow dies; the scorch stays until the next evening.
+- **A häxring (witch's ring)** (the morning after rain, not in winter). A ring of pale mushrooms, 3.5 m across, stands in a
+  glade all day. At night tiny lights dance in a circle over it. Step into the middle at night: the world goes dreamy for
+  a moment and you're **Light-footed** for 2 minutes (+20 % speed, motes trailing you). Once a night each.
+- **The vättar walk** (dusk, rare). A line of 5 to 9 knee-high hooded little people with tiny lanterns walks slowly from a
+  big boulder to the lake and into the water. They ignore you. Walk alongside them (within 4 m) for 20 seconds and the
+  last one stops, turns to you and leaves you a gift on the ground (berries, a button, a feather, a thimble with someone's
+  name on it). Press **E** to take it.
+- **A rainbow** (by day, when a rain spell clears). A banded arc stands over the trees. Run to its foot (the column of
+  coloured light): the colours pool on the ground round you and you find a **Rainbow Scale**.
+
+**Dev menu (F10) > World > Happenings:** start each one now, near you (the ring's lights dance at once, even by day); go
+to the current one (or the next one today); what's on today; forget what I took. The page also lists today's happenings.
+
+URL switches: `?happen=star` (or `ring`, `vattar`, `rainbow`) starts that one soon, near you. `?happen=often` gives every
+kind every day, whatever the weather. `?happen=0` turns happenings off.
