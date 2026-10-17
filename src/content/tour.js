@@ -377,7 +377,7 @@ export const STOPS = [
     where: 'Your stuff in one window with tabs. A few logs, stones and berries in the pack so the tabs aren\'t empty',
     world: {hour: 11}, setup: T => { where(T, clearing); T.give('log', 6); T.give('stone', 8); T.give('blueberries', 5); T.feat('panels')?.open?.('pack'); },
     tasks: [
-      {text: 'Tab opens it where you left it. I Pack, N Weapon, K Skills, B Craft, J Journal, H Map', check: T => { const o = T.feat('panels')?.isOpen; return !!(typeof o === 'function' ? o() : o); }},
+      {text: 'Tab opens it where you left it. I Pack, Shift+M Weapon, K Skills, B Craft, J Journal, H Map', check: T => { const o = T.feat('panels')?.isOpen; return !!(typeof o === 'function' ? o() : o); }},
       {text: 'Hover anything for its card; right-click a material to put it down; Esc closes'},
       {text: 'The Map (H): the fog lifts where you have walked'},
     ]},
