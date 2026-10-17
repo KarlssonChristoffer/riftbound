@@ -40,7 +40,7 @@ stones at (7, -21), (-29, -23), (48, -44) and (35, -125); burrows at (-13, -15),
 ## Dev
 
 - `?trolls=0` off; `?trolls=near` a big one and a pack near you 3 s in, awake whatever the hour. `&hour=21` for night.
-- Menu (sandbox): spawn trolls near you, go to the nearest stone or burrow.
+- Dev menu (F10 > Combat > Trolls): spawn trolls near you, go to the nearest stone or burrow.
 - `window.__r3d` / the feature: `host.feature('trolls').dbg()` lists every troll and its state.
 
 ## How it's built

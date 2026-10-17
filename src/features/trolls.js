@@ -8,7 +8,7 @@
 //   content/trolls.js   the numbers (TYPES, TUNE, PALETTE)
 // In the forest (the ruins biome with a forest seed), the sandbox only for their anger (on the title they mind their own business).
 // ?trolls=0 starts it off; ?trolls=near: a big one and a pack near you a few s after you arrive (awake whatever the hour: dev).
-// Menu (sandbox): spawn some near you, go to the nearest stone / burrow.
+// Dev menu (F10 > Combat > Trolls): spawn some near you, go to the nearest stone / burrow.
 // E on a troll stone: a knock (it grumbles). The third knock wakes it, grumpy, whatever the sun, for a while.
 // API: F.list (the records), F.isTroll(p), F.shove(p, vx, vy, stun) (other systems' pushes: m/s), F.stagger(p, s),
 //   F.spawnNear('big' | 'small' | 'pack', n?), F.stakes (a troll is fighting you: game/game.js counts your hurts), F.sim / F.look /
@@ -82,13 +82,15 @@ export async function create(host) {
     prompt(p) { return p?.kind === 'trollstone' ? {text: 'E  knock on the stone', color: '#c8d89a'} : null; },
     toggle() { F.on = !F.on; if (!F.on) { sim.update(0, NONE, false, false); look.clear(); } return F.on; },
     biomeChanged() { sim.update(0, NONE, false, false); look.clear(); },
-    menu: () => mode() !== 'sandbox' || !plan ? [] : [
-      {label: 'Trolls: a big one and a pack near you (awake)', run: () => sim.spawnNear('pack')},
-      {label: 'Trolls: a big one near you (awake)', run: () => sim.spawnNear('big')},
-      {label: 'Trolls: a pack of small ones near you', run: () => sim.spawnNear('small')},
-      {label: 'Trolls: go to the nearest troll stone', run: () => goNear(plan.stones)},
-      {label: 'Trolls: go to the nearest burrow', run: () => goNear(plan.burrows)},
-    ],
+    // the dev menu (F10, dev/devmenu.js): its Combat section
+    dev: {group: 'Combat', rows: () => !plan ? [] : [
+      {label: 'a big one and a pack near you (awake)', run: () => sim.spawnNear('pack')},
+      {label: 'a big one near you (awake)', run: () => sim.spawnNear('big')},
+      {label: 'a pack of small ones near you', run: () => sim.spawnNear('small')},
+      {label: 'go to the nearest troll stone', run: () => goNear(plan.stones)},
+      {label: 'go to the nearest burrow', run: () => goNear(plan.burrows)},
+      {label: 'awake / fighting', text: () => `${sim.alive} awake, ${sim.fighting} fighting, sun ${sim.S.sun.toFixed(2)}`},
+    ]},
     dbg: () => ({on: F.on, active: active(), sun: +sim.S.sun.toFixed(2), alive: sim.alive, fighting: sim.fighting, ms: +F.ms.toFixed(3),
       trolls: sim.list.map(r => `${r.id} ${r.st}${r.atk ? ':' + r.atk : ''}${r.foe ? ' FOE' : ''}${r.dead ? ' dead' : ''} ${r.x.toFixed(1)},${r.y.toFixed(1)} hp${r.p ? Math.round(r.p.hp) : '-'}`)}),
   };
