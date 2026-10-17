@@ -37,10 +37,11 @@
 //                               (a hidden window keeps the last view: render/camera.js)
 //   F.arrow?(a)                 every arrow as it is spawned (scale its damage, tag it, spawn extras with a.extra)
 //   F.prompt?(prop) -> text | {text, color}   the "E ..." prompt over a prop you can interact with
-//   F.menu?() -> [{label, run}] rows in the menu's Sandbox tab, or its Game tab (ui/pause.js GAME_ROWS, SANDBOX_GROUP)
+//   F.menu?() -> [{label, run}] test actions on its page in the dev menu, or the Esc menu's Game tab (ui/pause.js GAME_ROWS)
+//   F.dev?: {group, rows()}     its section and its own rows in the dev menu (dev/devmenu.js, F10; docs/DEVMENU.md)
 // THE MENU (Escape, ui/pause.js + ui/menu.js): pauses the game but not the world: while host.paused only the AMBIENT
-// features update (nature, see stepPaused), behind a blur. A feature's toggle / settings land in its Dev tab unless
-// CLAIM gives them to a player tab (Graphics, Audio).
+// features update (nature, see stepPaused), behind a blur. A feature's toggle / settings are on its page in the dev menu,
+// and also in a player tab (Graphics, Audio, Controls) when CLAIM gives them one.
 // THE ORDER of the features (updates and every hook chain) is what each declares: `export const order` (core/features.js).
 // THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
 // dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
@@ -82,6 +83,7 @@ import {createGunFeel} from './dev/gunfeel.js';   // the gun feel panel (F8): li
 import {createWxPanel} from './dev/wxpanel.js';   // the weather panel (F9): a change of the weather and the god rays' envelope, read out (wx-D)
 import {createMoveFeel} from './dev/movefeel.js';   // the move feel panel (F7): run / sprint speed, get going / stopping, the strides, as modifier notes
 import {createWardrobe} from './dev/wardrobe.js';   // the dev wardrobe (Shift+Tab): the character's clothes, paint, stats, items, outfits
+import {createDevMenu} from './dev/devmenu.js';   // the dev menu (F10): every feature's toggles, settings and test actions, a page each
 import {loadFeatures} from './core/features.js';
 import {createInput} from './core/input.js';
 import {createLoop} from './core/loop.js';
@@ -247,6 +249,7 @@ features.push(createWxPanel({host}));   // (dev/wxpanel.js: F9 in dev mode; wx-D
 features.push(createMoveFeel({host, atlas: hero.atlas}));   // (dev/movefeel.js: F7 in dev mode)
 features.push(createWardrobe({host, hero, live, engine: () => E}));   // (dev/wardrobe.js: Shift+Tab in dev mode; a screen of its own: loop.hold)
 if (Q.get('lab')) features.push(await import('./dev/assetlab.js').then(m => m.createLab({host})));   // the asset lab (?lab=1: dev/assetlab.js)
+features.push(createDevMenu({host, engine: () => E}));   // (dev/devmenu.js: F10 in dev mode; last, it lists the others)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;
