@@ -182,6 +182,8 @@ export async function create(host) {
         const e = FL.lakeEdge(x, y), f = 1 - smooth(clamp(-e / V.reach, 0, 1));
         if (e > 0) hol = 0; if (f > near) { near = f; wh = fwh; }
       }
+      // the upland's mire (world/mire.js): a bog breathes mist as the water does, thickest at dawn and dusk (docs/MIRE.md)
+      const MR = FL?.mire; if (MR && x > MR.box[0] && y > MR.box[1] && x < MR.box[2] && y < MR.box[3]) { const mk = MR.k(x, y); if (mk > near) { near = mk; wh = MR.h; } }
       data[k * 4] = H[k]; data[k * 4 + 1] = hol; data[k * 4 + 2] = near; data[k * 4 + 3] = wh;
     }
     G.mistField({x0, z0, w, h, res, data});

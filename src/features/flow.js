@@ -697,6 +697,7 @@ export async function create(host) {
       else if (e.type === 'player.shoot') gunKick(e.vx, e.vy, K.gunKick * GK * (e.gun === 'brass_navy' ? K.navyK : 1) * (e.fan ? K.fanK : 1));
       else if (e.type === 'combat.hit' && e.by === 'bullet' && (e.who?.hunter || e.who?.sparring || e.who?.target)) gunKick(e.dx, e.dy, (e.broke || e.crit ? K.hitKickBig : K.hitKick) * GK);
       else if (e.type === 'fist.hit') gunKick(-e.dx, -e.dy, e.kick * .8);   // a fist landing (features/fists.js): the view jolts along the blow
+      else if (e.type === 'melee.hit') gunKick(-e.dx, -e.dy, e.kick * .8);   // a blade landing (features/melee.js): the same jolt
       if ((e.type === 'player.step' || e.type === 'player.land') && P.state !== 'splash' && wetFrom > -99 && simT - wetFrom < TUNE.wet.prints) {   // (sprint footfalls are 'land')
         const age = simT - wetFrom, [x, y] = side(e); print(x, y, age < TUNE.wet.prints * .45 ? 0 : age < TUNE.wet.prints * .8 ? 1 : 2);
       }
@@ -786,15 +787,18 @@ export async function create(host) {
     tick(t0);
   }
 
+  const LOUT = [], LREC = [];   // (lights(): kept records, read at once by render/lighting.js)
   function lights() {
-    if (time === 'day') return [];
-    const A = host.arrows, L = TUNE.light, out = [], k = time === 'night' ? L.night : L.dusk;
-    for (let i = A.length - 1; i >= 0 && out.length < L.max; i--) {
+    LOUT.length = 0;
+    if (time === 'day') return LOUT;
+    const A = host.arrows, L = TUNE.light, k = time === 'night' ? L.night : L.dusk;
+    for (let i = A.length - 1; i >= 0 && LOUT.length < L.max; i--) {
       const a = A[i]; if (a.stuck || a.life <= -9) continue;
       let id = ids.get(a); if (id === undefined) { id = 7000 + (nextId++ % 1000); ids.set(a, id); }
-      out.push({x: a.x, y: a.y, h: a.h, color: ALIGHT[biome] || ALIGHT.ruins, radius: L.radius, intensity: k, flicker: 0, id});
+      const o = LREC[LOUT.length] ??= {};
+      o.x = a.x; o.y = a.y; o.h = a.h; o.color = ALIGHT[biome] || ALIGHT.ruins; o.radius = L.radius; o.intensity = k; o.flicker = 0; o.id = id; LOUT.push(o);
     }
-    return out;
+    return LOUT;
   }
 
   function reset() {
