@@ -73,7 +73,7 @@ export const WEAPONS = {
     look: {kind: 'fish', blade: .7, w: .13, steel: ['#e8fcff', '#a8d8e8', '#5a8aa8', '#1e3a52'], hilt: ['#d8f0f8', '#88b8c8', '#4a7890', '#1a3040']}},
   wobbler: {name: 'The Wobbler', cls: 'silly', hands: 1, len: .62, dmg: 1, type: 'blunt', reach: 1.35, arc: 120, cleave: 3, speed: 1.2, knock: 4, lift: 5,
     combo: ['slash_r', 'slash_r', 'overhead'], heavy: 'spin', throw: {v: 16, spin: 10, dmg: 1, bounce: 5}, guard: {block: .4, parry: .2},
-    smash: 1.4, slots: ['batteries'], trail: '#ff9ad8', note: 'does no damage at all. Sends them to the moon',
+    smash: 1.4, slots: ['batteries'], trail: '#ff9ad8', note: 'it barely tickles. Sends them to the moon (the landing hurts)',
     look: {kind: 'wobbler', blade: .5, w: .07, steel: ['#ffd8f0', '#ff9ad8', '#d85aa8', '#6a1e4a'], hilt: ['#ffd8f0', '#ff9ad8', '#d85aa8', '#6a1e4a']}},
   rift: {name: 'Rift Blade', cls: 'blade', hands: 1, len: .96, dmg: 7, type: 'slash', extra: {void: 6}, reach: 1.55, arc: 140, cleave: 3, speed: 1.05,
     combo: ['slash_r', 'rise', 'overhead'], heavy: 'cleave', throw: {v: 20, spin: 18, dmg: 1.6, stick: true, blink: true}, guard: {block: .5, parry: .2},
