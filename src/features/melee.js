@@ -513,7 +513,23 @@ export async function create(host) {
     },
     hud: () => { const m = M(); return m ? `melee ${m.on ? m.weapon + (m.shield ? '+' + m.shield : '') + ' ' + (m.mode || 'out') + (m.S.mv ? ' ' + m.S.mv + ' ' + m.S.ph : '') : 'away'} hits ${S.hits} whiffs ${S.whiffs} parries ${S.parries} blocks ${S.blocks}${TB.on ? ' blade ' + TB.st : ''}` : ''; },
     biomeChanged() { S.lockP = null; if (TB.on) caught(); },
+    // the dev menu's page (dev/devmenu.js, F10 > Combat): pick the weapon and the shield, call up a brute to practise on
+    dev: {group: 'Combat', rows: () => [
+      {label: 'Weapon', options: WEAPON_IDS, get: () => M()?.S.wid || '', set: v => F.equip(v)},
+      {label: 'Shield', options: SHIELD_IDS, get: () => M()?.S.sid || '', set: v => F.equip(undefined, v)},
+      {label: 'Call up a brute to fight', run: () => practice(1)},
+      {label: 'Call up three brutes', run: () => practice(3)},
+      {label: 'Counts', text: () => `hits ${S.hits}  whiffs ${S.whiffs}  parries ${S.parries}  blocks ${S.blocks}`},
+    ]},
   };
+  // brutes to practise on (the dev menu): a few metres ahead, hunting him (combat core's spawnBrute)
+  function practice(n) {
+    const c = core(), P = host.player; if (!c?.spawnBrute) return;
+    for (let i = 0; i < n; i++) {
+      const a = P.faceAngle + (i - (n - 1) / 2) * .6, x = P.x + Math.sin(a) * 5, y = P.y + Math.cos(a) * 5;
+      if (!host.blocked(x, y, host.elev(x, y))) c.spawnBrute({x, y, hp: 60, name: 'practice'});
+    }
+  }
   const LT = [], L0 = {x: 0, y: 0, h: 0, color: '#fff', radius: 2.6, intensity: .8, flicker: .1, id: 7300}, L1 = {x: 0, y: 0, h: 0, color: '#fff', radius: 2, intensity: .7, flicker: .1, id: 7301};
   const EM = {size: 1, emit: true}, LIT = {size: 1, emit: false};
   function draw() {
