@@ -19,6 +19,8 @@ import {MODELS} from '../../view/livehero.js';
 import {unpackPose} from '../../net/protocol.js';
 import {dress} from '../../view/dress.js';
 import {gearById, setKey} from '../../content/gear.js';
+import {TITLES} from '../../content/skills.js';
+import {hdUnit, hdText} from '../../ui/hdpixel.js';
 
 const SLOTS = 8;
 export function createPeerLook(host, C) {
@@ -134,6 +136,8 @@ export function createPeerLook(host, C) {
       const s = C.sample(q, S); if (!s) continue;
       const [sx, sy] = G.toScreen(s.x, s.z + 2.05, s.y);
       q2.strokeStyle = 'rgba(10,10,12,.85)'; q2.strokeText(q.name, sx * sc, sy * sc); q2.fillStyle = q.color || '#fff'; q2.fillText(q.name, sx * sc, sy * sc);
+      const t = q.title && TITLES[q.title]?.name;   // (his title under it, in the pixel font: docs/SKILLS.md)
+      if (t) { const u = hdUnit(); hdText(q2, t, Math.round(sx * sc), Math.round(sy * sc + 11 * u), u, '#e8dcc0', 'center'); q2.font = `600 ${Math.round(11 * dpr)}px "Segoe UI", system-ui, sans-serif`; q2.lineWidth = 3 * dpr; }
     }
     q2.restore();
   }

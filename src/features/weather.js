@@ -101,26 +101,30 @@ export async function create(host) {
   const bolt = {t: -1, x: 0, y: 0, pts: new Float32Array(3 * 16), n: 0, br: new Float32Array(3 * 6), bn: 0}, light = {x: 0, y: 0, h: 1.2, color: TUNE.bolt.light.color, radius: TUNE.bolt.light.radius, intensity: 0, flicker: 0, id: 9701};
   let nextStrike = 4, flashT = -1, flashK = 1, dark = 0;
   const PULSES = [[0, .9], [.05, .15], [.1, .75], [.17, .25], [.26, 0]];   // (s, amount): a flicker, not a fade
+  let real = false;   // (features/thunder.js strikes for real: the near bolts are its, here only the far flashes)
   function strike(w) {
     flashT = 0; flashK = rr(.6, 1); F.stats.bolts++;
     const P = host.player, aw = host.feature('audio')?.rainAudio;
     let dist = rr(250, 1400), pan = rr(-.8, .8);   // far: only the flash, thunder rolling in late
-    if (R() < TUNE.bolt.near) {
+    if (!real && R() < TUNE.bolt.near) {
       for (let k = 0; k < 6; k++) { placeX(Q2); if (Math.hypot(Q2[0] - P.x, Q2[1] - P.y) > TUNE.bolt.minD) break; }
-      bolt.x = Q2[0]; bolt.y = Q2[1]; bolt.t = 0;
-      const g = host.elev(bolt.x, bolt.y), n = 10 + (R() * 5 | 0); let x = bolt.x + rr(-1, 1), y = bolt.y + rr(-1, 1);
-      for (let i = 0; i < n; i++) {   // from 15 m down to the ground, zig-zagging, ending on the strike point
-        const f = i / (n - 1); if (i === n - 1) { x = bolt.x; y = bolt.y; }
-        bolt.pts[i * 3] = x; bolt.pts[i * 3 + 1] = y; bolt.pts[i * 3 + 2] = g + 15 * (1 - f);
-        x += rr(-.45, .45); y += rr(-.25, .25);
-      }
-      bolt.n = n;
-      const j = 2 + (R() * (n - 5) | 0), bx = bolt.pts[j * 3], by = bolt.pts[j * 3 + 1], bh = bolt.pts[j * 3 + 2];   // one fork
-      bolt.bn = 4; for (let i = 0; i < 4; i++) { bolt.br[i * 3] = bx + (i * rr(.2, .5)) * (R() < .5 ? -1 : 1); bolt.br[i * 3 + 1] = by + rr(-.2, .2) * i; bolt.br[i * 3 + 2] = bh - i * rr(.8, 1.4); }
-      light.x = bolt.x; light.y = bolt.y; light.h = g + 1.2;
+      boltTo(Q2[0], Q2[1], host.elev(Q2[0], Q2[1]));
       dist = Math.hypot(bolt.x - P.x, bolt.y - P.y) * 18; pan = clamp(((bolt.x - P.x) * V.RX + (bolt.y - P.y) * V.RY) / 8, -.9, .9);
     }
     aw?.thunder?.(dist, pan);
+  }
+  function boltTo(x0, y0, top) {   // the near bolt's zig-zag, from 15 m over the ground down to (x0, y0) at height top (its foot)
+    bolt.x = x0; bolt.y = y0; bolt.t = 0;
+    const g = host.elev(x0, y0), n = 10 + (R() * 5 | 0), h0 = Math.max(top, g); let x = x0 + rr(-1, 1), y = y0 + rr(-1, 1);
+    for (let i = 0; i < n; i++) {   // from 15 m down to the ground, zig-zagging, ending on the strike point
+      const f = i / (n - 1); if (i === n - 1) { x = x0; y = y0; }
+      bolt.pts[i * 3] = x; bolt.pts[i * 3 + 1] = y; bolt.pts[i * 3 + 2] = h0 + (g + 15 - h0 + Math.max(0, h0 - g) * .6) * (1 - f);
+      x += rr(-.45, .45); y += rr(-.25, .25);
+    }
+    bolt.n = n;
+    const j = 2 + (R() * (n - 5) | 0), bx = bolt.pts[j * 3], by = bolt.pts[j * 3 + 1], bh = bolt.pts[j * 3 + 2];   // one fork
+    bolt.bn = 4; for (let i = 0; i < 4; i++) { bolt.br[i * 3] = bx + (i * rr(.2, .5)) * (R() < .5 ? -1 : 1); bolt.br[i * 3 + 1] = by + rr(-.2, .2) * i; bolt.br[i * 3 + 2] = bh - i * rr(.8, 1.4); }
+    light.x = x0; light.y = y0; light.h = h0 + 1.2;
   }
   // ---- the season's look (env -> gfx): the colour matrix only on a change of season / blend step
   let seasonKey = -1; const GR = {tinted: false, snow: 0, wet: 0, leafK: 1, autumn: 0};   // (the renderer's setters: render/gfx.js)
@@ -217,6 +221,15 @@ export async function create(host) {
   // another system's lightning (features/omens/storm.js: a storm omen's strike): the scene flashes in a bolt's pulses, at
   // k (0..1, like a strike's own .6..1). The flash is this feature's (G.setFlash every frame): one writer
   F.flash = k => { flashT = 0; flashK = k; };
+  // natural lightning that strikes for real (features/thunder.js): F.real(on) gives it the near bolts (this keeps the far
+  // flashes); F.boltAt(x, y, h) brings one down on (x, y) to height h (a tree's top, a player's head): the bolt, the flash, the
+  // thunder by its distance (a crack on top of you, a rumble far off)
+  F.real = on => { real = !!on; };
+  F.boltAt = (x, y, h) => {
+    boltTo(x, y, h); flashT = 0; flashK = rr(.8, 1); F.stats.bolts++;
+    const P = host.player, d = Math.hypot(x - P.x, y - P.y);
+    host.feature('audio')?.rainAudio?.thunder?.(d * 18, clamp(((x - P.x) * V.RX + (y - P.y) * V.RY) / 8, -.9, .9));
+  };
   F.settings = () => [{label: 'Weather fx', options: ['on', 'off'], get: () => F.fx ? 'on' : 'off', set: v => { F.fx = v === 'on'; }}];
   F.hud = () => { const E = host.env; return E && (rn || sn || F.stats.bolts) ? `rain ${rn} · snow ${sn} · splash ${pn} · bolts ${F.stats.bolts}` : ''; };
   return F;

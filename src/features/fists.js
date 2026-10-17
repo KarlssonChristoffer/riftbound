@@ -42,7 +42,7 @@ export async function create(host) {
   function star(x, y, h, k, kind, dx, dy) { const f = FX[fxI]; fxI = (fxI + 1) % NFX; f.on = true; f.t = 0; f.life = kind === 1 ? .14 : .12 + .08 * k; f.x = x; f.y = y; f.h = h; f.k = k; f.kind = kind; f.dx = dx; f.dy = dy; }
 
   // ---------------------------------------------------------------- what's what
-  const isBody = p => !!p && (p.kind === 'gunman' || !!core()?.BS.has(p)) && !p.broken && !p.gone && !p.retired;
+  const isBody = p => !!p && (p.kind === 'gunman' || p.kind === 'troll' || !!core()?.BS.has(p)) && !p.broken && !p.gone && !p.retired;   // (a troll: features/trolls.js)
   const isDummy = p => !!p && p.target && !(p.hp > 0) && !p.hunter && p.kind !== 'gunman';
   const isThing = p => !!p && (p.hp > 0 || p.target) && (p.breakable || p.target) && !p.hunter && p.kind !== 'gunman' && !p.wall && !p.rect;
   const movable = q => !!q && MOVABLE.has(q.kind) && !q.wall && !q.broken && !q.gone && !q.sink && !q.float && !q.held;
