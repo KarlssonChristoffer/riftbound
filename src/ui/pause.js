@@ -4,16 +4,14 @@
 // birds fly, rain falls and fires flicker. The cloak still answers the wind. The camera drifts slowly (drag the
 // backdrop to look around) and eases back to where it was on resume. The audio feature ducks music + effects; the
 // ambience plays on. (flow isn't ambient: its streaks / tracks follow the player's frozen speed)
-// THE MAP: Game (resume, photo, the run, the character) · Sandbox (the Proving Grounds' test actions: features' F.menu
-// rows, paged by SANDBOX_GROUP) · Graphics / Audio / Controls (what a player sets: the host's own rows + CLAIM) · Dev (dev
-// mode: every other toggle and setting, paged by DEV_GROUP).
-// OWNS: paused, the pause drift (pauseYaw / pauseGoal / lookT), the menu and its items (Game / Sandbox / Graphics / Audio /
-// Controls / Dev tabs).  READS: E (the engine context, main.js).
+// THE MAP: Game (resume, photo, the run, the character, the GAME_ROWS features' rows) · Graphics / Audio / Controls (what a
+// player sets: the host's own rows + CLAIM). Every other feature's toggle, setting and test action is in the DEV MENU
+// (dev/devmenu.js, F10 in dev mode: a page per feature), not here.
+// OWNS: paused, the pause drift (pauseYaw / pauseGoal / lookT), the menu and its items (Game / Graphics / Audio / Controls
+// tabs).  READS: E (the engine context, main.js).
 //   const pause = createPause(E); pause.paused / toggle(force, snd) / stepPaused(dt) / pauseTurn(dt) / menu
 import {createMenu} from './menu.js';
 import {SNAP_NAME} from '../render/camera.js';
-import {SAMPLING, DEBUG} from '../render/options.js';
-import {SEASONS, WEATHER, PARTS} from '../sim/env.js';
 import {check as checkEvents} from '../core/events.js';
 import {LOADOUTS} from '../view/hero.js';
 const $ = s => document.querySelector(s);
@@ -21,8 +19,8 @@ const $ = s => document.querySelector(s);
 const NO_EVS = [], PAUSE_TURN = .035, LOOK_HOLD = 3000;   // drift rad/s (the title turns at .07); ms after a drag before it drifts again
 const onOff = (get, set) => ({options: ['on', 'off'], get: () => get() ? 'on' : 'off', set: v => set(v === 'on')});
 const pick = (options, get, set) => ({options, get, set});
-const cyc = (o, cur, d, set) => set(o[((o.indexOf(cur) + d) % o.length + o.length) % o.length]);
-// features' toggles / settings a player sees, by feature and setting label ('' = its on / off); the rest go to Dev.
+// features' toggles / settings a player sees, by feature and setting label ('' = its on / off); all of them (these too) are
+// on the feature's page in the dev menu (dev/devmenu.js).
 // id + keep: remembered on this machine (keep: the URL parameter that overrides it)
 const gfx = (group, label, id, keep = true) => ({tab: 'graphics', group, label, id, keep});
 const vol = label => ({tab: 'audio', group: 'Volume', label});
@@ -30,32 +28,18 @@ const CLAIM = {
   depth: {'': gfx('World', 'Clouds, light shafts & reflections', 'depth', 'depth'), 'Foreground silhouettes': gfx('World', 'Foreground foliage', 'fg')},
   weather: {'Weather fx': gfx('World', 'Rain, snow & lightning', 'rain')},
   lights: {'Heat ripple': gfx('Effects', 'Heat shimmer', 'heat')},
-  atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd'),
-    'Weather (K)': {tab: 'dev', group: 'Nature', label: 'Air particles + ground fog', key: 'K'}},   // (not the weather: World > Weather)
+  atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd')},
   cinema: {'': {tab: 'controls', group: 'Camera', label: 'Cinematic camera when idle', id: 'cinema', keep: 'cinema'}},
   aim: {Aim: {tab: 'controls', group: 'Aim', label: 'Aim help', id: 'aim', keep: 'aim'}},   // (features/aim.js: manual / soft / lock / auto)
   blood: {'': gfx('Effects', 'Blood', 'blood', 'blood')},   // (features/blood.js: on by default; ?blood=0)
   uncanny: {'': {tab: 'game', group: 'World', label: 'Uncanny forest', id: 'uncanny', keep: 'uncanny'}},   // (features/uncanny.js: off by default; ?uncanny=1)
   audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
-    'Music mode': {tab: 'dev', group: 'Tools', label: 'Music mode'},
     'Gun sounds': {tab: 'audio', group: 'Sound', label: 'Gun sounds'}},   // (the western-movie flavor: features/audio.js, remembered there)
 };
-// DEV CATEGORIES: the Dev tab shows one group at a time (a button each); a feature's toggle and its unclaimed settings go
-// in its group here (a feature not listed: Other)
-const DEV_GROUP = {
-  wind: 'Nature', windlines: 'Nature', litter: 'Nature', grass: 'Nature', riverside: 'Nature', wildlife: 'Nature', fauna: 'Nature', atmos: 'Nature',
-  weather: 'Nature', dust: 'Nature', tumbleweed: 'Nature', mist: 'Nature', airfx: 'Nature',
-  lights: 'Effects', flow: 'Effects', contact: 'Effects', gunfx: 'Effects', depth: 'Effects', blood: 'Effects',
-  foes: 'World', anomaly: 'World', uncanny: 'World',
-  brutes3d: 'Renderer',
-  affixes: 'Experiments', equip: 'Experiments', omens: 'Experiments', shrines: 'Experiments', trickshot: 'Experiments', bells: 'Experiments',
-  cheats: 'Tools', gunfeel: 'Tools', wardrobe: 'Tools',
-};
-// THE FEATURES' ROWS (F.menu): the game's own (start / abandon a run, back to title) and the player's views (the cinematic
-// camera) stay in Game; every other feature's are test actions for the sandbox: the Sandbox tab, one page per group here
-// (a feature not listed: Other)
-const GAME_ROWS = ['cinema', 'wardrobe', 'game'];   // (in this order, after Resume and Photo mode: back to title stays last; the wardrobe: dev mode)
-const SANDBOX_GROUP = {equip: 'Gadgets', affixes: 'Elites', shrines: 'Shrines', omens: 'Omens', trickshot: 'Places', bells: 'Places', anomaly: 'Places', uncanny: 'Places', fauna: 'Animals'};
+// THE FEATURES' ROWS (F.menu) the player sees, in the Game tab in this order (after Resume and Photo mode; back to title
+// stays last): the cinematic camera, the camera (F6), the way to the dev menu (dev mode), the game's own (start / abandon
+// a run, back to title). Every other feature's F.menu rows are test actions: the dev menu's (dev/devmenu.js)
+export const GAME_ROWS = ['cinema', 'chasecam', 'tour', 'devmenu', 'game'];   // (tour: the playtest tour's start / next / end, features/tour.js)
 // DETAIL (Graphics), the quality tier: low switches the costliest purely cosmetic layers off (their views: the sim never
 // reads a view, tools/test/simview.mjs, so gameplay can't change); high puts them back. ?detail=low starts low
 const LOW_OFF = ['windlines', 'wildlife', 'fauna', 'depth', 'grass', 'litter', 'dust', 'tumbleweed', 'mist', 'airfx'];
@@ -64,15 +48,16 @@ const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'spr
   [['LMB'], 'revolver: draw · shoot'], [['RMB'], 'revolver: fan the hammer'], [['R'], 'revolver: reload'], [['V'], 'revolver: pistol whip'], [['Y'], 'tip the hat'],
   [['2', '1'], 'fists up / the gun again (the gunslinger)'], [['LMB', 'RMB'], 'fists: left / right hand (alternate: a combo; hold: a heavy; both: headbutt)'],
   [['E'], 'fists: grab a foe (again: toss)'], [['Space'], 'fists: slip a punch (then counter)'],
-  [['LMB', 'E'], 'on a tree: chop it (an axe in the bag; hold to keep chopping)'], [['Tab'], 'the pack: bag, pouch, skills, build'],
+  [['LMB', 'E'], 'on a tree: chop it (an axe in the bag; hold to keep chopping)'], [['Tab'], 'your window: where you left it'], [['I'], 'pack: gear, bag, pouch'], [['K'], 'skills'], [['B'], 'craft'], [['J'], 'journal'], [['H'], 'map'],
   [['Z', 'X'], 'turn the camera (or drag with the middle button)'], [['Home'], 'reset the camera'], [['Wheel'], 'zoom in / out'],
+  [['F6'], 'camera: top-down / third person / first person (click to look around)'],
   [['M'], 'mute'], [['U'], 'music on / off'], [['F4'], 'photo mode'], [['Esc'], 'this menu']];
 
 const CHARS = {Ranger: 'ranger + cloth sim', Gunslinger: 'gunslinger', Outlaw: 'outlaw'};   // the menu's names -> LOADOUTS names
 const charOf = name => name === 'gunslinger' ? 'Gunslinger' : name === 'outlaw' ? 'Outlaw' : 'Ranger';
 
 export function createPause(E) {
-  const {cv, pa, hero, events, features, keys, feat, opt, stage, env, perf, host} = E;
+  const {cv, pa, hero, events, features, keys, feat, opt, host} = E;
   let paused = false, pauseYaw = 0, pauseGoal = 1, lookT = 0, detail = 'high';
   function setDetail(v) {
     detail = v;
@@ -94,14 +79,12 @@ export function createPause(E) {
     if (E.game.mode !== 'title' && !pa.assist && Math.abs(d) > .002) pa.assist = {back: pauseYaw, phase: 'back'};   // back to where you were looking
   }
   function menuItems() {
-    const game = E.game, setBiome = E.setBiome;
-    const out = [], dv = (group, it) => out.push({tab: 'dev', group, ...it}), A = feat('audio')?.AU;
+    const game = E.game;
+    const out = [], A = feat('audio')?.AU;
     // Game: resume, photo mode, the cinematic camera, then the game's own rows (start / abandon a run, back to title)
     if (game.mode !== 'title') out.push({tab: 'game', label: 'Resume', main: true, sound: 'back', run() {}});
     if (E.photo?.allowed) out.push({tab: 'game', label: 'Photo mode', run: () => E.photo.toggle(true)});   // (ui/photo.js; F4)
     for (const n of GAME_ROWS) for (const m of feat(n)?.menu?.() || []) out.push({tab: 'game', label: m.label, run: m.run});
-    // Sandbox: the other features' rows, a page per group (spawn an elite, place a shrine, force an omen, go to the range)
-    for (const f of features) if (f.menu && !GAME_ROWS.includes(f.name)) for (const m of f.menu() || []) out.push({tab: 'sandbox', group: SANDBOX_GROUP[f.name] || 'Other', label: m.label, run: m.run});
     // the character: the Ranger (bow), the gunslinger (Peacemaker), the outlaw (Brass Navy): view/hero.js LOADOUTS
     out.push({tab: 'game', group: 'Character', label: 'Play as', ...pick(Object.keys(CHARS), () => charOf(hero.loadName), v => {
       const i = LOADOUTS.findIndex(l => l[0] === CHARS[v]); if (i >= 0 && i !== hero.loadI) hero.switchLoadout(i); })});
@@ -113,46 +96,21 @@ export function createPause(E) {
     out.push({tab: 'graphics', group: 'World', label: 'Shadows', id: 'shadows', keep: true, ...onOff(() => opt.shadows, v => { opt.shadows = v; })});
     out.push({tab: 'controls', group: 'Camera', label: 'Camera turning', id: 'snap', keep: 'snap', ...pick(SNAP_NAME, () => SNAP_NAME[cv.snapMode], v => { cv.snapMode = SNAP_NAME.indexOf(v); })},
       {tab: 'controls', group: 'Keys', keys: KEYS});
-    // Dev: the character, the world's dials, the renderer's A/B (each with its dev key)
-    dv('Character', {label: 'Loadout', key: 'O', value: () => hero.loadName, sizes: () => LOADOUTS.map(l => l[0]), run: d => hero.switchLoadout(hero.loadI + d)});
-    dv('Character', {label: 'Bow', key: 'J', ...pick(['pixel art', 'HD overlay'], () => opt.hdBow ? 'HD overlay' : 'pixel art', v => { opt.hdBow = v === 'HD overlay'; })});
-    dv('Character', {label: 'Shiny armour', key: 'I', ...onOff(() => hero.armor.on, v => { if (hero.armor.on !== v) hero.toggleArmour(); })});
-    dv('Character', {label: 'Lantern', key: 'L', ...onOff(() => opt.lantern, v => { opt.lantern = v; })});
-    dv('World', {label: 'Biome', key: 'N', value: () => stage.biome.name, sizes: () => host.BIOMES.map(b => b.name), run: d => setBiome(stage.biomeI + d)});
-    dv('World', {label: 'Time', key: 'T', value: () => `${env.clock()} ${env.part}`, sizes: () => PARTS.map(p => '00:00 ' + p), run: () => env.nextPart()});
-    dv('World', {label: 'Season', value: () => env.seasonLock || `auto (${env.season})`, sizes: () => SEASONS.flatMap(s => [s, `auto (${s})`]), run: d => cyc(['auto', ...SEASONS], env.seasonLock || 'auto', d, env.setSeason)});
-    dv('World', {label: 'Weather', value: () => env.weatherLock || `auto (${env.weather})`, sizes: () => Object.keys(WEATHER).flatMap(w => [w, `auto (${w})`]),
-      run: d => cyc(['auto', ...Object.keys(WEATHER).filter(w => !WEATHER[w].precip || env.TUNE.precip)], env.weatherLock || 'auto', d, env.setWeather)});
-    dv('World', {label: 'Day length', value: () => env.frozen ? 'stopped' : `${env.TUNE.dayMinutes} min`, sizes: () => ['stopped', '20 min', '5 min', '60 min'], run: d => cyc([20, 5, 60, 0], env.frozen ? 0 : env.TUNE.dayMinutes, d, env.setDayMinutes)});
-    dv('Renderer', {label: 'Ground texture', key: 'Shift+2', ...pick(SAMPLING, () => opt.sampling, v => { opt.sampling = v; })});
-    dv('Renderer', {label: 'Prop outlines', key: 'Shift+3', ...onOff(() => opt.outline, v => { opt.outline = v; })});
-    dv('Renderer', {label: 'Props', key: 'P', ...pick(['live 3D', '16-angle sprites'], () => stage.propMode === 'live' ? 'live 3D' : '16-angle sprites', v => { stage.propMode = v === 'live 3D' ? 'live' : 'yaw'; })});
-    dv('Renderer', {label: 'Trees', key: 'Shift+P', ...pick(['3D (grown)', 'painted cards'], () => stage.trees3d ? '3D (grown)' : 'painted cards', v => { stage.trees3d = v === '3D (grown)'; })});
-    dv('Renderer', {label: 'Banded light', key: 'V', ...onOff(() => opt.banded, v => { opt.banded = v; })});
-    dv('Renderer', {label: 'Debug view', key: 'G', ...pick(DEBUG, () => DEBUG[opt.debug], v => { opt.debug = DEBUG.indexOf(v); })});
-    dv('Renderer', {label: 'Colliders', key: 'Shift+G', ...onOff(() => opt.zones, v => { opt.zones = v; })});
-    // the features' toggles and settings: Dev, in the feature's DEV_GROUP, unless CLAIMed for a player tab (a setting sits
-    // indented under its feature's toggle when both are in Dev)
+    // the features' toggles and settings a player sees (CLAIM); the rest are the dev menu's
     for (const f of features) {
-      if (!f.toggle && !f.settings) continue;
-      const claim = CLAIM[f.name] || {}, put = (k, it) => out.push(claim[k] ? {...it, key: undefined, sub: false, ...claim[k]} : {...it, tab: 'dev', group: DEV_GROUP[f.name] || 'Other'});
-      if (f.toggle) put('', {label: f.label || f.name, key: f.key?.toUpperCase(), ...onOff(() => f.on !== false, v => { if ((f.on !== false) !== v) f.toggle(); })});
-      const sub = !!f.toggle && !claim[''];
-      for (const s of f.settings?.() || []) put(s.label, s.options ? {label: s.label, sub, ...pick(s.options, s.get, s.set)} : {label: s.label, sub, min: s.min ?? 0, max: s.max ?? 1, step: s.step ?? .01, get: s.get, set: s.set});
+      const claim = CLAIM[f.name]; if (!claim || (!f.toggle && !f.settings)) continue;
+      const put = (k, it) => { if (claim[k]) out.push({...it, key: undefined, ...claim[k]}); };
+      if (f.toggle) put('', {label: f.label || f.name, ...onOff(() => f.on !== false, v => { if ((f.on !== false) !== v) f.toggle(); })});
+      for (const s of f.settings?.() || []) put(s.label, s.options ? {label: s.label, ...pick(s.options, s.get, s.set)} : {label: s.label, min: s.min ?? 0, max: s.max ?? 1, step: s.step ?? .01, get: s.get, set: s.set});
     }
     if (A) out.push({tab: 'audio', group: 'Sound', label: 'Music', key: 'U', ...onOff(() => A.musicOn, v => { if (A.musicOn !== v) A.toggleMusic(); })});
     out.push({tab: 'graphics', group: 'Effects', label: 'Screen shake', id: 'shake', keep: true, ...onOff(() => opt.shake, v => { opt.shake = v; })});
-    dv('Tools', {label: 'Frame profiler', key: 'F3', ...onOff(() => perf.on, v => { if (perf.on !== v) perf.toggle(); })});
-    dv('Tools', {label: 'Key help + debug HUD', key: 'F1', ...onOff(() => opt.help, v => { opt.help = v; })});
-    dv('Tools', {label: 'Dev mode', key: '`', ...onOff(() => host.dev, v => { host.dev = v; })});
     return out;
   }
   const menu = createMenu({
-    root: $('#pause'), items: menuItems, dev: () => host.dev, sound: host.uiSound, changed: E.applyOpts,
+    root: $('#pause'), items: menuItems, sound: host.uiSound, changed: E.applyOpts,
     title: () => E.game.mode === 'title' ? ['Settings', ''] : ['Paused', E.game.mode === 'run' && E.game.run ? `Run · stage ${E.game.run.stage + 1}` : E.game.mode === 'sandbox' ? 'Proving Grounds' : ''],
-    groups: {sandbox: ['Elites', 'Gadgets', 'Shrines', 'Omens', 'Places', 'Other'], graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys'],
-      dev: ['Character', 'World', 'Nature', 'Effects', 'Renderer', 'Experiments', 'Tools', 'Other']},
-    paged: ['sandbox', 'dev'],
+    groups: {graphics: ['Display', 'World', 'Effects'], audio: ['Sound', 'Volume'], controls: ['Camera', 'Keys']},
     resume: snd => toggle(false, snd),
     look: dx => { E.input.look(dx); lookT = performance.now(); },
     zoom: e => cv.onWheel(e),

@@ -42,7 +42,7 @@ export function createRainAudio(ac, dest, rnd = R) {
     s.connect(bp); bp.connect(lp1); lp1.connect(lp2); lp2.connect(g); g.connect(pan(side));
     return g;
   });
-  let dropAcc = 0, dripAcc = 0, alive = true;
+  let dropAcc = 0, dripAcc = 0, setAcc = 1, alive = true;   // (setAcc: the wash's level is set 30 times a second, not every frame)
   function grain(t, k) {   // one droplet: a short band of noise, quiet
     const s = ac.createBufferSource(); s.buffer = BU; s.playbackRate.value = .7 + R() * .6;
     const bp = biq('bandpass', 900 + R() * 1500, 1.6), g = ac.createGain(), p = pan(R() * 1.6 - .8), d = .004 + R() * .005, A = TUNE.drop * k * (.35 + R() * .65);
@@ -60,7 +60,7 @@ export function createRainAudio(ac, dest, rnd = R) {
     update(dt, s) {
       if (!alive) return;
       const rain = s ? clamp(s.rain || 0, 0, 1) : 0, t = ac.currentTime;
-      for (const g of wash) g.gain.setTargetAtTime(TUNE.wash * rain ** 1.2, t, TUNE.smooth);
+      if ((setAcc += dt) >= 1 / 30) { setAcc = 0; for (const g of wash) g.gain.setTargetAtTime(TUNE.wash * rain ** 1.2, t, TUNE.smooth); }
       dropAcc += dt * TUNE.drops * rain * rain; dripAcc += dt * TUNE.drip * rain;
       for (let i = 0; dropAcc >= 1 && i < 8; i++) { dropAcc -= 1; grain(t + .02 + R() * .03, .5 + rain * .5); }
       if (dropAcc > 8) dropAcc = 0;
