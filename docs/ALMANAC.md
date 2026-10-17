@@ -8,7 +8,7 @@ couldn't do at the start.
 ## What you see
 
 - **The card**, top left (sandbox worlds only): the chapter you're on, its goals with a tick box and a count, then
-  **Today**. J folds it to a small tab. Tab opens the pack; its Almanac section shows every chapter, the hints and the
+  **Today**. Shift+J folds it to a small tab (a plain J is the Journal once the tabbed player window lands). Tab opens the pack; its Almanac section shows every chapter, the hints and the
   pages torn out so far.
 - **The pointer**: a small gold chevron on a ring round the player, toward the first unfinished goal that has a place
   (the cave's mouth, then the camp, the nearest vein of the right kind). The distance shows beside that goal.
