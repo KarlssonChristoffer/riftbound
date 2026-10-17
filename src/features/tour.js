@@ -3,14 +3,14 @@
 // hour, the weather, the season and the camera, puts things in the pack, and lists a few things to do there. A task
 // that knows its event or state ticks itself; the stop's done when they all have.
 //   ?tour=1 starts it (from where you left it; ?tour=restart from the first stop; ?tour=<stop id> from that stop), in the
-//   sandbox with the forest (game/game.js, core/session.js). Esc > Sandbox > Tour: start it, jump to any stop, end it.
-//   Keys while it runs: PgDn the next stop, PgUp back, H hides / shows the card.
+//   sandbox with the forest (game/game.js, core/session.js). Esc > Game: start it, step it, end it; F10 > Panels > Playtest tour: jump to any stop.
+//   Keys while it runs: PgDn the next stop, PgUp back, End hides / shows the card.
 // The world's presets apply offline only: in co-op the server owns the clock and the weather (the card says so).
 // While it runs the day is 60 real minutes long (a dusk stays dusk while you play it); the end gives the world its own
 // clock, weather and season back.
 // OWNS: the tour's progress (which stop, the tasks done: localStorage 'riftbound.tour'), the card. Writes nothing of
 // another system's but through its API: host.teleport, env.setHour / setSeason / settle / setWeather / setDayMinutes,
-// pack.give, gear.wear, chasecam.setView, uncanny.toggle, and the features' own Sandbox rows (F.menu: run as if clicked).
+// pack.give, gear.wear, chasecam.setView, uncanny.toggle, and the features' own test rows (F.menu / F.dev: run as if clicked).
 // READS: the events (a task's ev), pack counts, gear worn, body wet / cold, chasecam's view, ice.onIce.
 // BUDGET: sim: the step's events against a stop's few tasks; a check poll 4 times a second. HD: a frame and ~15 lines of
 // pixel text; the lines are laid out again only when something on the card changes.
@@ -43,7 +43,7 @@ export async function create(host) {
   const counted = t => !!(t.ev || t.check);
   const allDone = s => s.tasks.every((t, k) => !counted(t) || isDone(s, k));
 
-  // a feature's Sandbox row by the start of its label (run as if clicked)
+  // a feature's test row by the start of its label (run as if clicked)
   // (its F.menu rows, else its F.dev rows: there the 'Feature: ' prefix may be gone, docs/DEVMENU.md)
   function rowOf(name, prefix) {
     const f = host.feature(name); if (!f) return null;
@@ -59,7 +59,7 @@ export async function create(host) {
     get player() { return host.player; }, get keys() { return host.keys; }, get env() { return host.env; },
     feat: n => host.feature(n),
     go: (x, y) => host.teleport(x, y),
-    row(name, prefix) { const r = rowOf(name, prefix); if (!r) { console.warn('tour: no Sandbox row', name, prefix); return false; } r.run(); return true; },
+    row(name, prefix) { const r = rowOf(name, prefix); if (!r) { console.warn('tour: no test row', name, prefix); return false; } r.run(); return true; },
     // a row that flips a setting ('... (off)' / '... (on)' / '...: on'): run it only if it isn't already as wanted
     toggle(name, prefix, want) { const r = rowOf(name, prefix); if (!r) return false; if (/(\(on\)|: on)\s*$/.test(r.label) !== want) r.run(); return true; },
     give(id, n = 1) { const pk = pack(); if (!pk) return; const have = pk.count(id) || 0; if (have < n) pk.give(id, n - have); },
@@ -92,7 +92,7 @@ export async function create(host) {
   function build() {
     const extra = [];
     for (const n of LOAD_ORDER) { const f = host.feature(n); if (!f?.tour || n === 'tour') continue; try { for (const s of f.tour() || []) extra.push({section: 'New tonight', ...s}); } catch (e) { console.warn('tour: stops of', n, e); } }
-    list = [...STOPS, ...extra, LAST];
+    list = [...STOPS.filter(s => !s.needs || host.feature(s.needs)), ...extra, LAST];   // (needs: a stop whose feature isn't in this build is left out)
   }
   const find = id => list.findIndex(s => s.id === id);
   function leave() {
@@ -137,7 +137,7 @@ export async function create(host) {
       }
       if (line) push(line, col, first ? 0 : x, first ? gap : 0);
     };
-    if (hidden) { push(`TOUR ${idx + 1}/${list.length}  ${s.title}  (H)`, COL.head); return out; }
+    if (hidden) { push(`TOUR ${idx + 1}/${list.length}  ${s.title}  (End)`, COL.head); return out; }
     push(`TOUR ${idx + 1}/${list.length}  ·  ${(s.section || '').toUpperCase()}`, COL.head);
     push(s.title, COL.title, 0, 2 * u);
     para(s.where, COL.where);
@@ -149,7 +149,7 @@ export async function create(host) {
       para(mark + t.text + tail, !c ? COL.look : d ? COL.done : COL.todo, ind, k === 0 ? 4 * u : 2 * u);
     });
     if (hasCounted && allDone(s)) para('All done! PgDn: the next stop', COL.done, 0, 4 * u);
-    else para(idx === list.length - 1 ? 'The last stop. Esc > Sandbox > Tour ends it' : 'PgDn next  ·  PgUp back  ·  H hide', COL.foot, 0, 4 * u);
+    else para(idx === list.length - 1 ? 'The last stop. Esc > Game: end the tour' : 'PgDn next  ·  PgUp back  ·  End hide', COL.foot, 0, 4 * u);
     return out;
   }
 
@@ -182,7 +182,7 @@ export async function create(host) {
     onKey(k, e) {
       if (!on || host.lock) return false;
       if (k === 'pagedown' || k === 'pageup') { e?.preventDefault?.(); const i = idx + (k === 'pagedown' ? 1 : -1); if (pending < 0 && i >= 0 && i < list.length) { pending = i; host.uiSound?.('click'); } return true; }
-      if (k === 'h' && !e?.shiftKey && !e?.ctrlKey) { hidden = !hidden; dirty++; return true; }
+      if (k === 'end') { e?.preventDefault?.(); hidden = !hidden; dirty++; return true; }   // (End: H, J, I, N, K, B are the GUI's tabs)
       return false;
     },
     hd(q) {
@@ -209,7 +209,7 @@ export async function create(host) {
       }
       return [{label: 'Playtest tour: the next stop (PgDn)', run: () => { pending = Math.min(list.length - 1, idx + 1); }},
         {label: 'Playtest tour: back a stop (PgUp)', run: () => { pending = Math.max(0, idx - 1); }},
-        {label: `Playtest tour: ${hidden ? 'show' : 'hide'} the card (H)`, run: () => { hidden = !hidden; dirty++; }},
+        {label: `Playtest tour: ${hidden ? 'show' : 'hide'} the card (End)`, run: () => { hidden = !hidden; dirty++; }},
         {label: 'Playtest tour: end it (the world\'s own weather and clock back)', run: end}];
     },
     // the dev menu (F10, docs/DEVMENU.md): the same, and a jump to any stop
