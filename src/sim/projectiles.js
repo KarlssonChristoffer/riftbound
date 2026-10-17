@@ -22,6 +22,8 @@
 // about the face's normal at the hit point (angle in = angle out), no random draw, slower and weaker by DEFLECT (a bullet's
 // penK x dmg: combat multiplies its hits by it), at most DEFLECT.max a shot (the next one stops it on the steel).
 // 'bullet.ricochet' (with defl: plate | bell, shot: the bullet) / 'arrow.deflect' say where.
+// STEER: a shot spawned with a steer(a, dt) (features/mods.js: a moth lens, a bent bough) has it called each step before it moves;
+// it may turn the shot's velocity (vx, vy, vh) and lengthen its life, nothing else.
 // WIND: a run rule may push what flies (features/omens.js, a gale): host.mods 'proj.windX' / 'proj.windY' (m/s^2, world x / y,
 // base 0) accelerate every arrow in flight; a bullet feels 'proj.windBullet' x of that (base 1). None: nothing changes.
 // OWNS: arrows (a bullet's pn / penK and its muzzle ox / oy / oh too; a shot's defl count), pops, dust, the hit count, the
@@ -105,6 +107,7 @@ export function createProjectiles({world: worldOf, ents: entsOf, features, event
     for (const a of arrows) {
       a.lx = a.x; a.ly = a.y; a.lh = a.h;
       if (a.stuck) { a.life -= dt; continue; }
+      if (a.steer) a.steer(a, dt);   // (a shot's own flight: features/mods.js's tips turn it; the steer's writes are its velocity only)
       if (a.kind === 'bullet') { stepBullet(a, dt, world, ents); continue; }
       if (WX || WY) { a.vx += WX * dt; a.vy += WY * dt; }
       a.x += a.vx * dt; a.y += a.vy * dt; a.h += a.vh * dt; a.vh -= .9 * dt; a.life -= dt;

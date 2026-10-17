@@ -17,7 +17,7 @@
 // OWNS: the weapons he has (all of them, for now), the thrown blade, the assist's lock, the parry's slow-down clock (the
 //   modifier source 'melee'), its view's trails / rings / sparks / toasts.
 // READS: host.PL.melee, host.player / aim / entities (near) / live, hits, combat (core: puff, part; phys: shove).
-// EMITS: melee.hit, melee.whiff, melee.block, melee.parry, melee.throw, melee.stick, melee.catch, melee.smash, melee.draw.
+// EMITS: melee.swing, melee.hit, melee.whiff, melee.block, melee.parry, melee.throw, melee.stick, melee.catch, melee.smash, melee.draw.
 // BUDGET: sim: one near() a blow, a few for the thrown blade a step (one while it lies), the lock at 10 Hz; view: <= a few
 //   hundred world pixels and lines.
 import {WEAPONS, WEAPON_IDS, SHIELDS, SHIELD_IDS, MOVES, TUNE} from '../content/melee.js';
@@ -80,6 +80,8 @@ export async function create(host) {
   function land(e) {
     const m = MOVES[e.mv]; if (!m) return;
     const mel = M(), w = W(e.wid || mel?.weapon), sh = e.sid ? SHIELDS[e.sid] : null, P = host.player;
+    // the swing as it lands its blow, whatever it meets (the attachments' caster crystal looses a bolt on it: features/mods)
+    host.events.push({type: 'melee.swing', x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, mv: e.mv, weapon: e.mv === 'bash' ? e.sid : e.wid || '', n: e.n || 0, k: e.k || 0});
     const bash = e.mv === 'bash';
     const reach = (bash ? 1.1 : (w.reach || 1.4) * reachK) * (m.reach || 1), arcD = bash ? 80 : Math.min(360, (w.arc || 120) * (m.arc || 1)), c0 = Math.cos(arcD / 2 * DEG);
     let n = 0;

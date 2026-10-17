@@ -29,7 +29,7 @@ export const MOVES = {
   // the throw (R): the blade leaves his hand at `hit`
   throw:    {clip: 'ls_throw',   fb: 'reach_up', wind: .06, hit: .16, dur: .36, reach: 0,   arc: 0,   dmg: 0,   step: 0,   sweep: [40, -30], cant: [20, 80], fin: true},
 };
-// THE WEAPONS. cls: blade | thrust | blunt | heavy | silly (how it's held and swung); hands 2: no shield (it rides on his back)
+// THE WEAPONS. cls: blade | thrust | blunt | heavy | staff | silly (how it's held and swung); hands 2: no shield (it rides on his back)
 //   len (m: the blade or the head's far end from the fist), dmg + type (+ extra: added parts by type, content/damage.js), reach (m from
 //   him to the farthest contact), arc (deg: the sweep's width at arc 1), cleave (bodies one swing meets at most), speed (x every move's
 //   pace), knock (x the moves'), combo (MOVES, in order; LMB's string), heavy (the move a held LMB charges), backstab (x the damage from
@@ -67,6 +67,10 @@ export const WEAPONS = {
     combo: ['cleave', 'rise', 'cleave'], heavy: 'cleave', throw: {v: 10, spin: 8, dmg: 2, stick: false}, guard: {block: .6, parry: .12},
     smash: 1.8, slots: ['rune', 'head', 'grip'], trail: '#c8ccd4', note: 'stuns; the air smash quakes the ground',
     look: {kind: 'hammer', haft: 1.0, head: .26, headW: .16, steel: ['#c8ccd4', '#8a8e98', '#5a5e68', '#34363c'], hilt: ['#a07a4e', '#7a5634', '#52381e', '#22160a']}},
+  staff: {name: 'Quarterstaff', cls: 'staff', hands: 2, len: 1.05, dmg: 7, type: 'blunt', reach: 1.75, arc: 140, cleave: 3, speed: 1.15, knock: 1.2,
+    combo: ['slash_r', 'rise', 'spin'], heavy: 'overhead', throw: {v: 14, spin: 12, dmg: 1.4, bounce: 1}, guard: {block: .55, parry: .24},
+    smash: 1.2, slots: ['rune', 'tip', 'grip'], trail: '#e8d8b8', note: 'long reach and a spin; a crystal in its head casts (attachments)',
+    look: {kind: 'staff', len: 1.75, w: .036, steel: ['#e2bc84', '#bd9358', '#8a6638', '#3c2a16'], hilt: ['#c8ccd4', '#8a8e98', '#5a5e68', '#34363c']}},
   pike: {name: 'Frozen Pike', cls: 'blunt', hands: 1, len: .82, dmg: 4, type: 'blunt', extra: {frost: 5}, reach: 1.45, arc: 120, cleave: 2, speed: 1.1,
     combo: ['slash_r', 'slash_r', 'overhead'], heavy: 'spin', throw: {v: 15, spin: 12, dmg: 1.5, bounce: 2}, guard: {block: .3, parry: .16},
     smash: 1, slots: ['bait'], trail: '#d8f8ff', note: 'a fish, frozen solid. It chills them',

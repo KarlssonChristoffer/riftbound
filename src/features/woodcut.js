@@ -242,7 +242,7 @@ export async function create(host) {
     const s = store(); if (!shared(p)) { if (s) { s.felled[keyOf(p)] = at; pack()?.dirty(); } if (typeof p.fid === 'string') ownFell.add(p); }
     if (fall) {
       falls.push({p, I, t: 0, dx: ux, dy: uy, landed: false, mine});
-      host.events.push({type: 'tree.fell', x: p.x, y: p.y, who: p, vx: ux, vy: uy, species: I.species, scale: I.s});
+      host.events.push({type: 'tree.fell', x: p.x, y: p.y, who: p, vx: ux, vy: uy, species: I.species, scale: I.s, mine});
     }
     if (xp) pack()?.gain('woodcutting', Math.round(XP.fell * I.def.xp * I.s), {x: p.x, y: p.y, h: (p.z || 0) + 2.6});
   }

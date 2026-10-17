@@ -615,7 +615,7 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
   E.setWeather = (w, ease = 0, how = '') => { E.weatherLock = WEATHER[w] ? w : null; if (!E.weatherLock) setSpell(spell().w); easeS = ease; cmdNext = ease <= 0 && how !== 'natural'; };   // (no lock: the clock's own spell again)
   // dev (the weather panel, probes): a settled weather at once: locked, every channel set (sky, light, open, under), no change on
   // its way (no front, no deck), the ground wet under rain / snowed under snow (wet: a wetness to set as well, 0..1)
-  E.settle = (w, wet = null) => {
+  E.settle = (w, wet = null, snow = null) => {   // (snow: the ground's snow cover 0..1 as well; features/tour.js)
     if (!WEATHER[w]) return;
     const W = WEATHER[w];
     E.weatherLock = w; if (E.weather !== w) { E.weather = w; E.ver.weather++; }
@@ -625,6 +625,7 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
     for (const c of CH) E.sky[c] = E.light[c] = E.open[c] = E.under[c] = W[c] ?? (c === 'wind' ? 1 : 0);
     if (W.rain) E.wet = 1; if (wet != null) E.wet = clamp(wet, 0, 1);
     if (W.snow && SEASONAL[biome()]) E.snowCover = 1;
+    if (snow != null) E.snowCover = SEASONAL[biome()] ? clamp(snow, 0, 1) : 0;
     E.windLevel = E.sky.wind;
     if (!OLD) derive(); else { E.sunView = 1 - .9 * E.light.cloud; E.broken = 0; }
   };

@@ -106,6 +106,11 @@ export function createHeldWeapon(rig, model, J, ramp6) {
       hexa(box(a1 - hw * 2, a1 + .02, -hd, hd, hw), S, .08);
       hexa(box(a1 - hw * 2.2, a1 + .04, -hd * .3, hd * .3, hw * 1.1), S, .15);   // (its banded middle)
       baseA = a1 - hw * 2; tipA = a1;
+    } else if (L.kind === 'staff') {   // the quarterstaff: one long haft through the fist, a ferrule at each end
+      const a0 = -L.len * .4, a1 = L.len * .6, r = (L.w || .036) / 2;
+      hexa(box(a0, a1, -r, r, r), S, .05);
+      for (const [p0, p1] of [[a0 - .01, a0 + .07], [a1 - .07, a1 + .01]]) hexa(box(p0, p1, -r * 1.25, r * 1.25, r * 1.25), Hh, .12);
+      baseA = 0; tipA = a1;
     } else if (L.kind === 'fish') {   // the frozen pike: held by the tail, a fat body, a pointed head
       const bl = L.blade || .7, bw = (L.w || .12) / 2, t = bw * .55;
       hexa(box(-.06, .02, -bw * 1.1, bw * 1.1, .006, -.012, .012, .012), Hh, .1);                 // the tail fin (in the fist)

@@ -180,6 +180,7 @@ export async function create(host) {
     if (online()) { coop().act('fit', b.id); return; }
     for (const k in BELLOWS.cost) pack().take(k, BELLOWS.cost[k]);
     f.bel = true; ver++; ui()?.toast('A bellows', 'fitted to the furnace', '#f2c95c'); saveFurn();
+    host.events.push({type: 'smith.fit', x: b.x, y: b.y, id: b.id, mine: true});   // (features/almanac.js counts it)
   }
   function pump(b, rhythm) {
     const f = furn(b.id);
@@ -427,7 +428,7 @@ export async function create(host) {
       const f = furn(m.id), mine = m.by === me();
       if (m.s === 'heat') { f.heat = +m.heat || 0; if (f.ch && m.prog !== undefined) f.ch.prog = +m.prog || 0; if (m.fuel !== undefined) builds().refuel(m.id, +m.fuel, +m.t0); }
       else if (m.s === 'loaded') { const C = CHARGES[m.ore]; if (!C) return; f.ch = {ore: m.ore, by: m.by, prog: 0}; if (mine) pack()?.take(C.ore, C.n); loaded(b, f, m.ore, mine); }
-      else if (m.s === 'fit') { f.bel = true; ver++; if (mine) { for (const k in BELLOWS.cost) pack()?.take(k, BELLOWS.cost[k]); ui()?.toast('A bellows', 'fitted to the furnace', '#f2c95c'); } }
+      else if (m.s === 'fit') { f.bel = true; ver++; if (mine) { for (const k in BELLOWS.cost) pack()?.take(k, BELLOWS.cost[k]); ui()?.toast('A bellows', 'fitted to the furnace', '#f2c95c'); } host.events.push({type: 'smith.fit', x: b.x, y: b.y, id: b.id, mine}); }
       else if (m.s === 'smelted') smelted(b, f, m.n, m.bar, m.by);
       else if (m.s === 'taken') {
         const k = f.bars.findIndex(x => x.n === m.n); if (k < 0) return;
@@ -462,7 +463,7 @@ export async function create(host) {
     },
   };
   let shaped = false;
-  const BAR = {copper_bar: null, iron_bar: null}, barGeo = id => BAR[id] ??= geoOf([{g: new THREE.BoxGeometry(.2, .05, .08), m: M4([0, .025, 0]), fam: id === 'copper_bar' ? 'copper' : 'ironore'}]);
+  const BAR = {copper_bar: null, iron_bar: null}, barGeo = id => BAR[id] ??= geoOf([{g: new THREE.BoxGeometry(.2, .05, .08), m: M4([0, .025, 0]), fam: id === 'copper_bar' ? 'copper' : id === 'nightglass' ? 'plumage' : 'ironore'}]);
   let mouthGeo = null, workGeo = null, workM = null;
   const MX = new THREE.Matrix4(), V3 = new THREE.Vector3(), QY = new THREE.Quaternion(), UPV = new THREE.Vector3(0, 1, 0), SC = new THREE.Vector3(1, 1, 1);
   const place = (m, x, h, y, yaw) => m.setMatrix(MX.compose(V3.set(x, h, y), QY.setFromAxisAngle(UPV, yaw), SC));
@@ -479,7 +480,7 @@ export async function create(host) {
         const B0 = f.bars[k]; if (B0.mesh) continue;
         B0.mesh = host.world.mesh(barGeo(B0.bar), new THREE.Matrix4());
         const x = barX(b, k % 3), y = barY(b, k % 3); place(B0.mesh, x, host.elev(x, y) + .01, y, yawOf(b) + .2);
-        B0.mesh.setGlow(0, FAMS.indexOf(B0.bar === 'copper_bar' ? 'copper' : 'ironore'), .8);
+        B0.mesh.setGlow(0, FAMS.indexOf(B0.bar === 'copper_bar' ? 'copper' : B0.bar === 'nightglass' ? 'paleglow' : 'ironore'), .8);
       }
       for (const B0 of f.bars) if (B0.mesh && B0.t > 4) { B0.mesh.setGlow(0, 0, 0); }   // (it has cooled)
     }
