@@ -13,11 +13,12 @@
 //   toast    what the toast says when it starts ({dir}: north-east / ... of you, {m}: how far)
 // The numbers are in-game hours unless named (an in-game hour is 50 real s at the default day: sim/env.js TUNE.dayMinutes).
 export const HAPPENINGS = {
-  star: {name: 'A falling star', chance: .45, hours: [21, 27.2], need: 'clear-night', spot: 'open', reward: 'star_shard', reach: 1.6,
+  star: {name: 'A great falling star', chance: .2,   // (rarer since the night surprises' own falling stars: this is the big one everyone sees, its crater lighting the trees all night)
+    hours: [21, 27.2], need: 'clear-night', spot: 'open', reward: 'star_shard', reach: 1.6,
     glowTo: 6.4,      // the hour of the next morning its glow dies (dawn); the scorch stays till scorchTo the day after
     scorchTo: 20,
     fall: 1.8,        // real s: the streak's fall
-    toast: ['A star fell', '{dir} of you, {m} m. Something glows in the woods'], col: '#bcd8ff'},
+    toast: ['A great star fell', '{dir} of you, {m} m. Something glows in the woods'], col: '#bcd8ff'},
   ring: {name: 'A witch\'s ring', chance: .75, hours: [5.6, 5.7], need: 'after-rain', spot: 'clearing', reach: .85,
     r: 1.75,          // m: the ring's radius (3.5 m across)
     lasts: 24,        // it stands till the next morning

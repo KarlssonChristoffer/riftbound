@@ -39,6 +39,7 @@
 //   F.prompt?(prop) -> text | {text, color}   the "E ..." prompt over a prop you can interact with
 //   F.menu?() -> [{label, run}] test actions on its page in the dev menu, or the Esc menu's Game tab (ui/pause.js GAME_ROWS)
 //   F.dev?: {group, rows()}     its section and its own rows in the dev menu (dev/devmenu.js, F10; docs/DEVMENU.md)
+//   F.tour?() -> [stop, ...]     its own stops in the playtest tour (content/tour.js has the shape; features/tour.js)
 // THE MENU (Escape, ui/pause.js + ui/menu.js): pauses the game but not the world: while host.paused only the AMBIENT
 // features update (nature, see stepPaused), behind a blur. A feature's toggle / settings are on its page in the dev menu,
 // and also in a player tab (Graphics, Audio, Controls) when CLAIM gives them one.
@@ -72,7 +73,7 @@ import {createProjectiles} from './sim/projectiles.js';
 import {flags} from './core/flags.js';
 import {SESSION} from './core/session.js';   // co-op: the server joined and its world seed, settled before the world is built
 import {createModifiers} from './core/modifiers.js';
-import {rgbOf} from './core/color.js';
+import {rgbOf, rgbCached} from './core/color.js';
 import {createCamera} from './render/camera.js';
 import {createStage} from './world/stage.js';
 import {createOptions} from './render/options.js';
@@ -200,8 +201,8 @@ const host = {
   aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target, ray: c.ray}; },
   toView: (x, y, h = 0) => { const s = G.toScreen(x, h, y); return [s[0], s[1]]; },         // world -> view px (rotated)
   sprite,                                                                              // {img, x, y, h, px, py, ...}
-  point: (x, y, h, c, o) => G.point(x, h, y, rgbOf(c), o),
-  line: (x0, y0, h0, x1, y1, h1, c, emit) => G.line(x0, h0, y0, x1, h1, y1, rgbOf(c), emit),
+  point: (x, y, h, c, o) => G.point(x, h, y, rgbCached(c), o),
+  line: (x0, y0, h0, x1, y1, h1, c, emit) => G.line(x0, h0, y0, x1, h1, y1, rgbCached(c), emit),
   layer: n => G.layer(n), glayer: n => G.glayer(n), rgb: rgbOf,
   get wind() { return feat('wind'); }, feature: feat,
   get hits() { return proj.hits; },
@@ -227,6 +228,9 @@ const host = {
   // the rope hands as DRAWN (live: the lasso's live clips and the spin's IK hand; docs/exp/lasso.md): world {x, y, h (RopeHand0), ux, uy, uh
   // (RopeHand1), spin, cx, cy, ch, r (the spin's circle)}, the last frame's, or null (the sprite: the sim's hand is the drawn one)
   playerRopeHand: () => live?.on ? live.ropeHand() : null,
+  // the melee blade as DRAWN (view/heldweapon.js on the live hand): world {x, y, h (its guard), tx, ty, th (its point)}; null
+  // on the sprite path (features/melee.js draws its stand-in line from the sim's facing then)
+  playerBlade: () => live?.on ? live.blade() : null,
   // his DRAWN live pose (view/livehero.js DRAWN: body-space bones in BN order, 7 a bone; phi his facing; n counts the frames drawn;
   // rig the live model's name), or null when he isn't drawn live: co-op sends it to the others (features/coop.js). One reused object
   playerPose: () => { const d = live?.on ? live.drawn : null; if (!d?.w) return null; PPOSE.w = d.w; PPOSE.phi = d.phi; PPOSE.n = d.n; PPOSE.BN = live.BN; PPOSE.rig = hero.loadName; return PPOSE; },

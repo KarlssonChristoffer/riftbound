@@ -88,6 +88,8 @@ export const MATERIALS = {
   // keepsakes (docs/KEEPSAKES.md)
   warmstone:  ['#f6e6c0', '#d6c6a2', '#a49478', '#544a3a'],
   gut:        ['#f2e8c4', '#d8c89c', '#a8946a', '#544a32'],
+  // the almanac's last chapter (docs/ALMANAC.md): black glass full of small lights
+  nightglass: ['#d8dcff', '#8a90e0', '#4a4c98', '#16163a'],
 };
 
 // a live model's zones: its json's meta.loadout -> zone -> the parts (model.json parts) it is made of
@@ -460,6 +462,17 @@ export const GEAR = [
       {on: 'LeftHand', part: 'lant.glass', mat: 'glass', shape: 'tube', r0: .05, r1: .05, len: .11, at: [.7, 0, .69], rot: [0, 135, 0], o: {sides: 6, fixed: 0}},
       {on: 'LeftHand', part: 'lant.base', mat: 'brass', shape: 'tube', r0: .058, r1: .058, len: .025, at: [.743, 0, .647], rot: [0, 135, 0], o: {sides: 6}},
     ]}},
+  // THE NIGHTGLASS LANTERN (the almanac's last chapter, docs/ALMANAC.md): made at the anvil of Nightglass. Its light is dark light:
+  // 'light.nightglass' > 0 tints the lantern cold violet (render/lighting.js), the night veins stay shown in it (features/mining.js),
+  // the soot things don't see it (features/cavelife.js, the co-op state's lt: features/coop.js)
+  {id: 'nightglass_lantern', name: 'Nightglass Lantern', slot: 'off', kind: 'tool', rarity: 'mythic', weight: 1, armor: 0, desc: 'A black iron lantern with a pane of Nightglass. It is lit, and the dark stays dark in it.',
+    mods: [{stat: 'light.lantern', add: 1}, {stat: 'light.nightglass', add: 1}],
+    look: {add: [
+      {on: 'LeftHand', part: 'nglant.ring', mat: 'black_iron', shape: 'tube', r0: .012, r1: .012, len: .07, at: [.625, 0, .765], rot: [0, 135, 0], o: {sides: 5}},
+      {on: 'LeftHand', part: 'nglant.cap', mat: 'black_iron', shape: 'cone', r: .06, len: .05, at: [.657, 0, .733], rot: [0, -45, 0], o: {sides: 6}},
+      {on: 'LeftHand', part: 'nglant.glass', mat: 'nightglass', shape: 'tube', r0: .05, r1: .05, len: .11, at: [.7, 0, .69], rot: [0, 135, 0], o: {sides: 6, fixed: 0}},
+      {on: 'LeftHand', part: 'nglant.base', mat: 'black_iron', shape: 'tube', r0: .058, r1: .058, len: .025, at: [.743, 0, .647], rot: [0, 135, 0], o: {sides: 6}},
+    ]}},
   {id: 'torch', name: 'Torch', slot: 'off', kind: 'tool', rarity: 'common', weight: .8, armor: 0, desc: 'A pitch torch, burning. Lights a small warm circle.',
     mods: [{stat: 'light.lantern', add: 1}, {stat: 'light.lanternR', mul: .8}], soon: 'set things alight',
     look: {add: [
@@ -623,7 +636,7 @@ export const gearById = id => GEAR_BY_ID[id] || null;
 // other piece is the dev wardrobe's for now (Shift+Tab, ?allgear=1, the server's --wardrobe). A piece in a slot other than
 // BASE_SLOTS (a charm slot to come) is its own feature's to give: never hidden here.
 export const FREE_KINDS = ['fishing', 'foraging', 'mining'];
-export const MADE = {kettle_helm: 'anvil', iron_boots: 'anvil', bark_shoes: 'hand', bark_pack: 'hand', torch: 'hand'};
+export const MADE = {kettle_helm: 'anvil', iron_boots: 'anvil', bark_shoes: 'hand', bark_pack: 'hand', torch: 'hand', nightglass_lantern: 'anvil'};
 for (const id in MADE) if (GEAR_BY_ID[id]) GEAR_BY_ID[id].made = MADE[id];   // (piece.made: 'anvil' | 'hand')
 const BASE_SLOTS = ['head', 'body', 'back', 'hands', 'legs', 'feet', 'main', 'off'];
 // a piece anyone may wear without owning it

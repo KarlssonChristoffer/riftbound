@@ -936,6 +936,9 @@ function makeBed(E, id, t0) {
   return {
     out,
     update(env, t) {
+      // (30 times a second, not every frame: its params glide on .15-.6 s time constants, so it sounds the same, and every set is
+      // a native call into the audio thread's timeline: ~3% of the main thread at a high frame rate)
+      if (t >= st.last && t - st.last < 1 / 30) return;
       const dt = clamp(t - st.last, 0, .5); st.last = t; st.lfo += dt;
       if (typeof env.gust === 'number') st.gT = clamp(env.gust, 0, 1);          // the arena's wind (wind.js): hear what you see
       else if (t > st.gNext) { st.gT = R() ** 1.3; st.gNext = t + RR(2, 6); }   // no wind module: gusts are a slow random walk
@@ -1448,6 +1451,22 @@ export function createAudio(ctx, host = {}) {
         case 'player.shove': fire('punchBlock', e.x, e.y, {power: .3}); break;   // (the clinch's shove: a padded thock)
         case 'foe.fwind': fire('foeWind', e.x, e.y, {n: e.n}); break;
         case 'foe.punch': fire('foePunch', e.x, e.y, {n: e.n, phase: e.phase}); break;
+        // MELEE (features/melee.js): the swing's whoosh at its start (player.bladecue), a blade into a body, the guard's thock, the
+        // parry's ring, the smash's thump, the thrown blade (stand-ins from the bank until the forge has blade recipes)
+        case 'player.bladecue': if (e.phase === 'charge') fire('fistCue', e.x, e.y, {phase: 'charge', mv: 'hay', k: 0});
+          else fire('whiff', e.x, e.y, {mv: 'hay', power: .6 + (e.k || 0) * .4, g: e.phase === 'smash' ? 1.4 : 1}); break;
+        case 'melee.hit': if (e.kind === 'block') fire('punchBlock', e.x, e.y, {power: e.power});
+          else if (e.kind === 'body') { fire('hit', e.x, e.y, {mat: 'body', g: .7 + e.power * .5}); fire('fleshHit', e.x, e.y, {crit: !!e.crit}); }
+          else fire('hit', e.x, e.y, {mat: MAT[e.who?.kind] || 'wood', g: 1}); break;
+        case 'melee.block': fire('punchBlock', e.x, e.y, {power: .8}); if (e.bullet) fire('bellsPlate', e.x, e.y, {k: .6}); break;
+        case 'melee.parry': fire('bellsPlate', e.x, e.y, {k: 1}); fire('punchBlock', e.x, e.y, {power: 1}); break;
+        case 'melee.smash': fire('kick', e.x, e.y, {mat: 'wood', g: 1.4}); fire('land', e.x, e.y, {surf, big: 1}); break;
+        case 'melee.draw': fire('bellsPlate', e.x, e.y, {k: .25, g: .5}); break;
+        case 'melee.throw': fire('whiff', e.x, e.y, {mv: 'hay', power: 1}); break;
+        case 'melee.stick': fire('stuck', e.x, e.y, {surf: e.into === 'ground' ? surf : e.into === 'body' ? 'body' : 'stone'}); break;
+        case 'melee.bounce': fire('stuck', e.x, e.y, {surf: 'stone'}); break;
+        case 'melee.catch': fire('punchBlock', e.x, e.y, {power: .3}); break;
+        case 'melee.blink': fire('bellsToll', e.x, e.y, {note: 2, k: .4}); break;
         // the bells and plates (features/bells.js): a bell's note (its clapper's later strikes: the view's tolls), a plate's
         // ping (a glance off either whines: bullet.ricochet above), an arrow's glance
         case 'bells.ring': fire('bellsRing', e.x, e.y, {note: e.note, k: e.k}); break;

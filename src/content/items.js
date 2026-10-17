@@ -84,11 +84,17 @@ export const ITEMS = {
     icon: ['............', '............', '....pppq....', '...psppqq...', '..ppptpqsq..', '.pspppqqqq..', '.ppptpqsqqq.', '..ppqsqqtq..',
       '...qqqqqq...', '............', '............', '............']},
   // THUNDERWOOD (features/thunder.js, docs/WEATHER.md): a splinter at the foot of a tree the lightning struck. A keepsake: folklore says
-  // it keeps the house from the next bolt. It does nothing yet
+  // it keeps the house from the next bolt. Carried, it does the opposite: the bolts come for you (features/surprises/charged.js)
   thunderwood: {name: 'Thunderwood', kind: 'material', col: '#d8c8a0', desc: 'a pale splinter split out of a struck pine, scorched black down one edge. They say it keeps the house safe from lightning',
     pal: {w: '#e4d4aa', d: '#a08a5c', n: '#2a221c', c: '#5a4a3a'},
     icon: ['..........n.', '.........nw.', '........nwd.', '.......nwwd.', '......cwwd..', '.....nwwd...', '....nwwd....', '...cwwd.....',
       '..nwwd......', '.nwd........', '.nd.........', '............']},
+  // STAR SHARD (features/surprises/stars.js): what a falling star leaves where it comes down on a clear night. Carried into the lake
+  // at night, the lake drinks it: the star frenzy
+  star_shard: {name: 'Star Shard', kind: 'material', col: '#cfe8ff', desc: 'a sliver of a fallen star, still warm. It hums louder when you face the lake',
+    pal: {w: '#ffffff', c: '#cfe8ff', b: '#7f9cd8', n: '#2a3460'},
+    icon: ['............', '.....nn.....', '.....cc.....', '....nwcn....', '.nnccwwccnn.', '..ncwwwwcn..', '...bcwwcb...', '...cwbbwc...',
+      '..ncb..bcn..', '..nb....bn..', '............', '............']},
   // WHAT THE BOG GIVES (features/mire.js: the true wisp's find, one kind a night; docs/MIRE.md). Things people sank in the mire
   // long ago; they do nothing yet
   bog_butter: {name: 'Bog Butter', kind: 'material', col: '#e8e0c0', desc: 'a little wooden keg packed with pale, waxy butter, sunk in the bog a very long time ago. It smells... fine?',
@@ -168,6 +174,12 @@ export const ITEMS = {
     pal: {c: '#a8b0bc', C: '#6c7480', o: '#3a3e46', g: '#c8d0dc'},
     icon: ['............', '............', '............', '............', '...ggccccc..', '..cccccccCC.', '.CCCCCCCCCo.', '.CCCCCCCCoo.',
       '..oooooooo..', '............', '............', '............']},
+  // NIGHTGLASS (the almanac's last chapter, docs/ALMANAC.md): night ore smelted white-hot (content/workshop.js CHARGES.night); the
+  // Nightglass Lantern is forged of it (content/gear.js nightglass_lantern)
+  nightglass: {name: 'Nightglass', kind: 'material', col: '#9aa4ff', desc: 'a pane of black glass full of tiny moving lights. Held up, it makes the room darker',
+    pal: {c: '#3a3c6a', C: '#1c1c34', o: '#0c0c18', g: '#e8f0ff', t: '#8a9ce0'},
+    icon: ['............', '............', '............', '...ccccccc..', '..cgcccctCC.', '.CcccCtcCCo.', '.CCtCCCCgCo.', '.CCCCgCCCoo.',
+      '..oooooooo..', '............', '............', '............']},
   iron_pick: {name: 'Iron Pick', kind: 'tool', stack: 1, made: true, col: '#d8dee4', desc: 'a miner\'s pick with a forged iron head: it bites iron',
     tool: {job: 'mine', tier: 2, power: 1.25},
     icon: ['............', '..kiiiiik...', '.kiissiiiik.', 'k.....wh..ik', '......wh...k', '.....wh.....', '.....wh.....', '....wh......',
@@ -217,12 +229,8 @@ export const ITEMS = {
       '...s..SS.s..', '....s....s..', '.....ssss...', '............'],
     lies: ['A fiddle string, wet though it\'s dry. Carry it and the fish will sing to you.', 'It hums when something hunts you.',
       'Whoever carries it is never lost in the dark.', 'A string from a fiddle nobody owns. It wants to go back in the water.', 'It does nothing. Nothing at all.']},
-  // HAPPENINGS (features/happenings.js, content/happenings.js): what a fallen star and a rainbow's foot leave you. Keepsakes; they
-  // do nothing yet
-  star_shard: {name: 'Star Shard', kind: 'material', col: '#bcd8ff', desc: 'a sliver of a fallen star, dug out of its little crater. Still warm; held to your ear it hums',
-    pal: {w: '#e8f4ff', b: '#9cc8ff', W: '#ffffff', c: '#5a7ad8', y: '#fff2b0'},
-    icon: ['.....w......', '.....bw.....', '....wbbw....', '..y.bWbc....', '....bWWbc...', '...wbWWbc...', '..wbWWWWbc..', '...bbWWbc.y.',
-      '....bWbc....', '....bbc.....', '.....c......', '............']},
+  // HAPPENINGS (features/happenings.js, content/happenings.js): what a rainbow's foot leaves you (the fallen star's shard is
+  // star_shard above, the night surprises'). A keepsake; it does nothing yet
   rainbow_scale: {name: 'Rainbow Scale', kind: 'material', col: '#f0c0ff', desc: 'a thin, curved scale that shows every colour as you turn it. It was lying where the rainbow touched the ground',
     pal: {r: '#ff6a5a', o: '#ffa850', y: '#ffe070', g: '#70d860', b: '#60b0ff', v: '#9070e0', p: '#d070e0', w: '#ffffff'},
     icon: ['............', '....wwww....', '...wrrooy...', '..wrrooyyg..', '..rrooyyggb.', '..rooyyggbb.', '..ooyyggbbv.', '...oyyggbv..',

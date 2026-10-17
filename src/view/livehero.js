@@ -70,6 +70,8 @@ import {TUNE as ROPEWALL, LADDER} from '../content/ropewall.js';   // ROPEWALL: 
 import {TUNE as FISTS_TUNE, MOVES as FISTS_MOVES} from '../content/fists.js';   // FISTS: the moves' times (the clips warped onto them)
 import {TUNE as WOOD} from '../content/woodcut.js';   // TOOL: the swing's times (its clip warped onto them)
 import {createHeldTool} from './heldtool.js';   // TOOL: the axe in his fist (a runtime mesh on the hand: docs/GATHERING.md)
+import {createHeldWeapon} from './heldweapon.js';   // MELEE: the sword in his fist, the shield on his arm (content/melee.js)
+import {MOVES as MELEE_MOVES, TUNE as MELEE_TUNE} from '../content/melee.js';   // MELEE: the moves' times (the clips warped onto them)
 import {ramp6} from './rigkit.js';
 import {dress as dressModel} from './dress.js';   // GEAR: the model as worn (docs/GEAR.md)
 
@@ -187,6 +189,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const [J, bin] = await Promise.all([fetch(base + 'model.json' + bust).then(r => r.json()), fetch(base + 'model.bin' + bust).then(r => r.arrayBuffer())]);
   const model = rig.addModel(J, bin);
   const HELD = createHeldTool(rig, model, J, ramp6);   // TOOL: what his right fist holds besides the gun (the axe)
+  const HELDW = createHeldWeapon(rig, model, J, ramp6);   // MELEE: a weapon in his right fist, a shield on his left arm
   const CL = J.clips || {};
   const HIDE = J.hide || {};   // pose -> pieces it hides (the lasso's coil packed away: the poses carry no scale)
   const EMOTES = (J.live || []).filter(c => CL[c] && !c.startsWith('cb_') && !c.startsWith('mv_') && !c.startsWith('ls_')), demos = [...DEMOS, ...EMOTES];   // (cb_*: combat, mv_*: MOTION, ls_*: LASSO)
@@ -858,7 +861,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   const MV_FRAMES = new Set(['land', 'fall', 'leap.0', 'leap.1', 'leap.2', 'leap.3', 'mantle.0', 'reach_up', 'crouch', 'lunge']);   // (the atlas's, while a move of ours ends)
   const mvAt = (clip, k) => nm(clip + '.', Math.max(0, Math.min(CL[clip].frames - 1, Math.floor(k * CL[clip].frames))));
   function motion(P, dt) {
-    const st = P.state, prev = mvPrev; mvPrev = st; toolUp = '';   // (TOOL: set again by toolMotion while he steps and swings)
+    const st = P.state, prev = mvPrev; mvPrev = st; toolUp = ''; mlHold = 'carry'; mlHide = false;   // (TOOL: set again by toolMotion while he steps and swings; MELEE: by meleeMotion)
     if (st !== prev) {
       if (st === 'fall') mvTop = P.z;
       if (st === 'land') { mvHard = prev === 'fall' && mvTop - P.z > MV.hard; mvT = 0; }
@@ -868,6 +871,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     if (!HAS_MV || !K.move) return null;
     const rw = ropeMotion(P); if (rw) return rw;   // ROPEWALL: the rope wall's and the ladder's live clips (docs/exp/ropeclimb.md)
     const tz = toolMotion(P); if (tz) return tz;   // TOOL: a tool's swing (docs/GATHERING.md)
+    const mz = meleeMotion(P); if (mz) return mz;   // MELEE: the swings, the guard, the jump and the smash (content/melee.js)
     const fz = fistsMotion(P); if (fz) return fz;   // FISTS: the guard, the punches, the slip, the clinch (docs/exp/fists.md)
     const bz = brawlMotion(P); if (bz) return bz;   // BRAWL: the boot, the barge, lifting, carrying, throwing (docs/exp/brawl.md)
     const lz = lassoMotion(P, dt); if (lz) return lz;   // LASSO: the rope work's live clips (docs/exp/lasso.md)
@@ -977,6 +981,66 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     const ct = S.t < m.hit ? a0 + (ah - a0) * (S.t / m.hit) : ah + (ae - ah) * Math.min(1, (S.t - m.hit) / Math.max(.01, m.dur - m.hit));
     const ft = frameAt(T, ct);
     return nm(c + '.', ft < 0 ? C.frames - 1 : ft);
+  }
+
+  // ---------------------------------------------------------------- MELEE (content/melee.js; K.move): a weapon's moves on the clips
+  // the body already has (no clip of its own yet): each MOVE names one (fs_* the fists', tl_chop the axe's, ls_throw the
+  // lasso's, mv_barge the brawl's), time-warped as the fists' are (its hit mark shows at the sim's blow); the weapon's cant in
+  // the fist turns over the swing (view/heldweapon.js), so a hook becomes a slash and a cross a thrust:
+  //   wind     the clip's first frame; a heavy's CHARGE: up to the frame before its hit, trembling once full
+  //   guard    a shield: fs_block's raised frame (fs_step_<f|b|l|r> walking); the blade alone: fs_guard; hiding: down on his knees
+  //   jump     mv_leap by the jump's speed; the SMASH's dive: tl_chop's raised frame, landing on its hit and on to its end
+  //   out      for TUNE.ready s after a move: fs_guard (his weapon up, ready); else his own walk and idle, the weapon hanging
+  // A model without a clip keeps the sim's stand-in. mlHide: the lasso's clip hides the coil and the gun it holds
+  let mlHide = false, mlCant = 30, mlHold = 'carry';
+  const mlMark = (C, T) => fsStep(T, C.marks?.hit ?? C.marks?.release ?? C.marks?.throw ?? Math.floor(C.frames / 2));
+  function mlWarp(c, t, hit, dur) {   // the clip at t of a swing whose blow is at hit, its end at dur: its frame
+    const C = CL[c], T = timing(c); if (!C || !T) return null;
+    const hf = mlMark(C, T), a0 = T.at[Math.min(fsStep(T, 1), hf)], ah = T.at[hf], ae = T.at[T.n] - 1e-4;
+    const ct = t < hit ? a0 + (ah - a0) * (t / Math.max(.01, hit)) : ah + (ae - ah) * Math.min(1, (t - hit) / Math.max(.01, dur - hit));
+    const ft = frameAt(T, ct); return nm(c + '.', ft < 0 ? C.frames - 1 : ft);
+  }
+  function meleeMotion(P) {
+    const M = app.PL.melee; mlHide = false; mlHold = 'carry'; if (!M || !M.S.on) return null;
+    const S = M.S, st = P.state, k = M.pace || 1;
+    if (st === 'blade') {
+      const m = MELEE_MOVES[S.mv], c = m && m.clip, C = c && CL[c]; mlHold = 'swing';
+      if (!m) return null;
+      const hit = m.hit / k, u = S.ph === 'swing' ? Math.min(1, S.t / Math.max(.01, hit)) : 0;
+      mlCant = m.cant[0] + (m.cant[1] - m.cant[0]) * u;
+      if (!C) return null;
+      mlHide = c.startsWith('ls_');
+      if (S.ph === 'wind') return nm(c + '.', 0);
+      if (S.ph === 'charge') {
+        const T = timing(c), hf = T ? Math.max(0, (T.play ? T.play[mlMark(C, T)] : mlMark(C, T)) - 1) : 0;
+        if (S.k < 1) return nm(c + '.', Math.min(hf, Math.floor(S.k * (hf + 1))));
+        return nm(c + '.', Math.max(0, hf - (Math.floor(t * 16) % 2)));   // (full: trembling)
+      }
+      return mlWarp(c, S.t, hit, m.dur / k);
+    }
+    if (st === 'mguard') {
+      mlHold = 'swing'; mlCant = M.shield ? 55 : 20;
+      if (S.hide) { mlCant = 80; return CL.mv_land_hard ? fsAt('mv_land_hard', .35) : null; }
+      if (Math.hypot(P.vx, P.vy) > .3) { const c = 'fs_step_' + (S.stepDir || 'f'); if (CL[c]) return nm(c + '.', Math.floor((P.ph || 0) * CL[c].frames) % CL[c].frames); }
+      if (M.shield && CL.fs_block) { const C = CL.fs_block, T = timing('fs_block'); return nm('fs_block.', T ? (T.play ? T.play[mlMark(C, T)] : mlMark(C, T)) : Math.floor(C.frames / 2)); }
+      return CL.fs_guard ? nm('fs_guard.', Math.floor(t * (CL.fs_guard.fps || 6)) % CL.fs_guard.frames) : null;
+    }
+    if (st === 'mair') {
+      mlHold = 'swing';
+      if (S.smash) { mlCant = 10; return CL.tl_chop ? nm('tl_chop.', 0) : CL.mv_fall ? nm('mv_fall.', 2) : null; }
+      mlCant = 40;
+      return CL.mv_leap ? mvAt('mv_leap', Math.max(.15, Math.min(.85, .3 + (1 - S.vz / MELEE_TUNE.jump.vz) * .3))) : null;
+    }
+    if (st === 'mland') {
+      mlHold = 'swing'; mlCant = 80;
+      const u = 1 - Math.max(0, S.landT) / MELEE_TUNE.smash.land;
+      return CL.tl_chop ? mlWarp('tl_chop', u, 0, 1) : CL.mv_land_hard ? fsAt('mv_land_hard', u) : null;
+    }
+    if (S.readyT < MELEE_TUNE.ready && S.held && (st === 'idle' || st === 'pose')) {
+      mlHold = 'swing'; mlCant = 30;
+      return CL.fs_guard ? nm('fs_guard.', Math.floor(t * (CL.fs_guard.fps || 6)) % CL.fs_guard.frames) : null;
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------- ROPEWALL (docs/exp/ropeclimb.md; K.move): the rope wall, the ladder
@@ -1135,6 +1199,14 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     const u = ROPE1 >= 0 ? ROPE1 : ROPE0; toWorld(show[u * 7 + 4], show[u * 7 + 5], show[u * 7 + 6], WP, 0); LH.ux = WP[0]; LH.uy = WP[2]; LH.uh = WP[1];
     LH.spin = lsSpin && SPINE2 >= 0;
     if (LH.spin) { carriedBy(show, SPINE2, LS.c[0], LS.c[1], LS.c[2], LV); toWorld(LV[0], LV[1], LV[2], WP, 0); LH.cx = WP[0]; LH.cy = WP[2]; LH.ch = WP[1]; }
+  }
+  // MELEE: the blade as drawn (host.playerBlade: the world: its guard x, y, h, its point tx, ty, th)
+  const BL = {ok: false, x: 0, y: 0, h: 0, tx: 0, ty: 0, th: 0}, BV = new Float64Array(3);
+  function bladeOut(show, on) {
+    BL.ok = on && HELDW.ok && HAND_R >= 0; if (!BL.ok) return;
+    const o = HAND_R * 7;
+    qrot(show, o, HELDW.base[0], HELDW.base[1], HELDW.base[2], BV, 0); toWorld(BV[0] + show[o + 4], BV[1] + show[o + 5], BV[2] + show[o + 6], WP, 0); BL.x = WP[0]; BL.y = WP[2]; BL.h = WP[1];
+    qrot(show, o, HELDW.tip[0], HELDW.tip[1], HELDW.tip[2], BV, 0); toWorld(BV[0] + show[o + 4], BV[1] + show[o + 5], BV[2] + show[o + 6], WP, 0); BL.tx = WP[0]; BL.ty = WP[2]; BL.th = WP[1];
   }
   const lsBusy = () => !!app.PL.lasso?.mode;
   function lsReset() { lsMode = ''; lsT = 0; lsPh = 0; lsSpin = false; LH.ok = false; }
@@ -1485,7 +1557,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   let idK = '', idClip = '', idT = 0, idCalm = 0, idSpotT = 0, idNext = 8, cxK = 0, cxOn = false, hipSit = NaN;
   const rnd = (a, b) => a + Math.random() * (b - a);
   function calmNow(P) {
-    if (!K.idle || P.state !== 'idle' || gunOut() || K.demo || !SEN || lsBusy()) return false;   // (LASSO: the rope work isn't idling)
+    if (!K.idle || P.state !== 'idle' || gunOut() || K.demo || !SEN || lsBusy() || app.PL.melee?.S.on) return false;   // (MELEE: a weapon out isn't idling)   // (LASSO: the rope work isn't idling)
     const S = SEN.S; if (S.aimedAt > 0 || S.hit.t < IDLE.calm || (S.look.on && LOOK.danger.has(S.look.kind))) return false;
     return hatK < .05 && shadeK < .05 && hugK < .05;
   }
@@ -1700,7 +1772,11 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     flash(dt);
     const held = app.PL.tool?.S.on ? app.PL.tool.S.id : '';
     HELD.show(held, P.state === 'chop' ? 'swing' : 'carry', show, HELD_O, held ? app.feat('workshop')?.lookOf?.(held) || '' : '');   // (a made tool's look: its haft's wood, its inlay: features/workshop.js)   // TOOL: the axe in his fist while it's out (hanging from it; gripped at the knob to swing)
-    mats(show, toolSwing ? toolHide(A.hide) : A.hide);
+    const mel = app.PL.melee, wOn = !!(mel?.S.on && mel.S.held);
+    HELDW.show(wOn ? mel.S.wid : '', mlHold, mlCant, show, HELD_O);   // MELEE: the weapon in his fist (its cant by the move), the shield on his arm
+    HELDW.shield(mel?.S.on ? mel.shield : '');
+    bladeOut(show, wOn);
+    mats(show, toolSwing || mlHide ? toolHide(A.hide) : A.hide);
     DRAWN.w = show; DRAWN.phi = phi; DRAWN.x = AX; DRAWN.h = AY; DRAWN.z = AZ; DRAWN.n++;
     stats.smears += K.smear || fsSmear() ? smear(show) : (prevOk = false, 0);   // (FISTS: a punch's snap smears, from its wind to just past its contact)
     const blinkOff = P.blink && Math.floor(P.blink * 12) % 2;
@@ -1759,6 +1835,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
       twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; tbHave = false; tbT = tbDur = 1; CLO.rig?.reset(); CLO.lx = NaN; feetK = 0; mvPrev = ''; mvAfter = 0; },
     muzzle: () => MW.ok ? MW : null,
     ropeHand: () => LH.ok ? LH : null,   // (LASSO: the drawn rope hands, the spin's circle: host.playerRopeHand)
+    blade: () => BL.ok ? BL : null,   // (MELEE: the drawn blade: host.playerBlade)
     setLineup(items) { lineup = items || []; },
     aim, drawn: DRAWN,
     // (dev: the shimmer meter draws several knob sets off ONE sim step, each from its own history)
@@ -1817,6 +1894,7 @@ export async function createLiveHero(o) {
     get stats() { return cur()?.stats ?? NOSTATS; }, get aim() { return cur()?.aim; }, get drawn() { return cur()?.drawn; },
     muzzle: () => on ? cur()?.muzzle() ?? null : null,   // (the drawn muzzle: host.playerMuzzle, the shot's flash)
     ropeHand: () => on ? cur()?.ropeHand() ?? null : null,   // (LASSO: the drawn rope hands: host.playerRopeHand)
+    blade: () => on ? cur()?.blade() ?? null : null,   // (MELEE: the drawn blade: host.playerBlade)
     get rag() { return cur()?.rag ?? null; },
     get model() { return cur()?.model; }, get J() { return cur()?.J; }, get BN() { return cur()?.BN; }, poseOf: n => cur()?.poseOf(n),
     setLineup(items) { cur()?.setLineup(items); },

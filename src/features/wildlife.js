@@ -1610,7 +1610,7 @@ export async function create(host) {
   });
 
   // =================================================================== the contract
-  const LI = [], PK = {x: 0, y: 0, z: 0, vx: 0, vy: 0, state: '', gait: ''};
+  const LI = [], LIR = [], PK = {x: 0, y: 0, z: 0, vx: 0, vy: 0, state: '', gait: ''};
   const inPool = a => a.pool, jumping = a => a.jump, frogBusy = a => a.jump || a.st !== 'sit';   // (made once, not a step)
   Object.assign(WL, {
     toggle() { WL.on = !WL.on; if (!WL.on) WL.ms = 0; return WL.on; },
@@ -1672,7 +1672,11 @@ export async function create(host) {
     lights() {
       LI.length = 0;
       if (!WL.on || need) return LI;
-      jellies.forEach((j, i) => { if (near(j.x, j.y)) LI.push({x: j.x, y: j.y, h: j.h, color: JELLY.light, radius: 1.5, intensity: .3 + (j.pulse < .3 ? .1 : 0), flicker: .08, id: 7700 + 40 + i}); });
+      for (let i = 0; i < jellies.length; i++) {   // (kept records: no garbage a frame)
+        const j = jellies[i]; if (!near(j.x, j.y)) continue;
+        const o = LIR[LI.length] ??= {};
+        o.x = j.x; o.y = j.y; o.h = j.h; o.color = JELLY.light; o.radius = 1.5; o.intensity = .3 + (j.pulse < .3 ? .1 : 0); o.flicker = .08; o.id = 7700 + 40 + i; LI.push(o);
+      }
       return LI;
     },
     dbg() {

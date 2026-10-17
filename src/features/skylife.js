@@ -568,7 +568,7 @@ export async function create(host) {
   function starsNow(t, cb) {
     const night = env.part === 'night', clear = (env.light?.cloud ?? 0) < .45 && (env.light?.fog ?? 0) < .4;
     const H = Math.floor(t), dur = TUNE.stars.dur / HSEC;
-    if (night && clear) {
+    if (night && clear && !host.feature('surprises')?.on) {   // (the night surprises' falling stars fill the sky when they're on: no second set of streaks)
       const n = OFTEN ? 7 : (hash3(SEED, H, 71) < .5 ? 1 : 0) + (hash3(SEED, H, 72) < .18 ? 1 : 0);
       for (let i = 0; i < n; i++) { const t0 = H + hash3(SEED, H, 80 + i) * (1 - dur); if (t >= t0 && t <= t0 + dur) { STAR.t0 = t0; STAR.r1 = hash3(SEED, H, 90 + i); STAR.r2 = hash3(SEED, H, 100 + i); STAR.r3 = hash3(SEED, H, 110 + i); cb(STAR, dur); } }
     }

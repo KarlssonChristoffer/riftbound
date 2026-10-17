@@ -17,7 +17,7 @@
 // Everything else (tuning T, ability table AB, palettes, timings, RNG and its seed) is the arena's.
 
 import {roamable, TERRAIN_ON, steep} from '../../world/world.js';
-import {parkMiller} from '../../core/rng.js';
+import {simRandom, viewRandom} from '../../core/rng.js';
 import {throwOf} from '../../sim/player/launch.js';   // a blast's throw (by how close he stood)
 import {flight, throwBody, stepFlight, feetOf} from '../../sim/bodyfly.js';   // a kicked brute's flight (launch below: docs/exp/brawl.md)
 import {TUNE as BRAWL} from '../../content/brawl.js';
@@ -28,10 +28,14 @@ export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const SQ = 1;   // the arena's y squash for 2D distances (1.6); round in 3D
 
+const LOUT = [], LREC = [];
+function lrec(out, x, y, h, color, radius, intensity, flicker, id) {
+  const o = LREC[out.length] ??= {}; o.x = x; o.y = y; o.h = h; o.color = color; o.radius = radius; o.intensity = intensity; o.flicker = flicker; o.id = id; out.push(o);
+}
 export function createCore(host) {
   const P = host.player, events = host.events, ents = host.entities;
-  const R = parkMiller(90210), RR = (a, b) => a + R() * (b - a);   // the SIM's draws (core/rng.js: the arena's generator and seed)
-  const V = parkMiller(31337), VR = (a, b) => a + V() * (b - a);     // presentation's (debris, sparks, number jitter): never the sim's
+  const R = simRandom('combat'), RR = (a, b) => a + R() * (b - a);   // the SIM's draws (core/rng.js: its own generator, a seed of this session's)
+  const V = viewRandom('combat'), VR = (a, b) => a + V() * (b - a);     // presentation's (debris, sparks, number jitter): never the sim's
 
   // ---------------- tuning (the arena's C.T) ----------------
   const T = {
@@ -391,6 +395,7 @@ export function createCore(host) {
     }
   }
 
+  const BATK = {kind: 'brute', x: 0, y: 0, who: null, dmg: 0};   // (landBrute's strike, as the melee guard is asked it)
   function landBrute(b, s) {
     const fl = s.hop?.fling;
     s.hop = null; b.h = 0; b.air = false; s.land = .12; b.squash = 1;
@@ -414,12 +419,19 @@ export function createCore(host) {
     puff(b.x, b.y, pz(b), 8, .5);
     const d = Math.hypot(P.x - b.x, P.y - b.y);
     if (s.mode === 'aggro' && d < (b.reach ?? T.bruteReach) && Math.abs(P.z - pz(b)) < .5 && !['climb', 'leap', 'fall', 'splash'].includes(P.state) && !C.immune?.()) {
-      const ux = d > .05 ? (P.x - b.x) / d : 0, uy = d > .05 ? (P.y - b.y) / d : 1, kn = b.knock ?? T.bruteKnock;
-      host.knock(ux * kn, uy * kn);
-      shake(3, .18); hitstop(.06); s.wait += .35;
-      events.push({type: 'player.hit', x: P.x, y: P.y, vx: ux * 5, vy: uy * 5, player: true});
-      events.push({type: 'player.hurt', dmg: (b.dmg ?? T.bruteDmg) * T.enemyDmg, by: b, x: P.x, y: P.y});
-      for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + VR(.6, 1.2), ux * VR(1, 3) + VR(-1, 1), uy * VR(1, 3), VR(0, 2), VR(.15, .3), GOLD, {emit: true, drag: 4});
+      const ux = d > .05 ? (P.x - b.x) / d : 0, uy = d > .05 ? (P.y - b.y) / d : 1;
+      // the melee guard (features/hits.js defend: features/melee.js answers): parried (the brute held: the defender's) or blocked
+      BATK.x = b.x; BATK.y = b.y; BATK.who = b; BATK.dmg = (b.dmg ?? T.bruteDmg) * T.enemyDmg;
+      const df = host.feature('hits')?.defend?.(BATK), dk = df && df.out !== 'hit' ? df.k : 1;
+      s.wait += .35;
+      if (dk > 0) {
+        const kn = (b.knock ?? T.bruteKnock) * (dk < 1 ? .4 : 1);
+        host.knock(ux * kn, uy * kn);
+        shake(3, .18); hitstop(.06);
+        events.push({type: 'player.hit', x: P.x, y: P.y, vx: ux * 5, vy: uy * 5, player: true});
+        events.push({type: 'player.hurt', dmg: Math.round((b.dmg ?? T.bruteDmg) * T.enemyDmg * dk), by: b, x: P.x, y: P.y});
+        for (let i = 0; i < 6; i++) part(P.x, P.y, P.z + VR(.6, 1.2), ux * VR(1, 3) + VR(-1, 1), uy * VR(1, 3), VR(0, 2), VR(.15, .3), GOLD, {emit: true, drag: 4});
+      }
     } else if (d < 4) shake(1, .06);
     // stomping onto a trap sets it off
     for (const q of traps) if (q.t >= T.trapArm && !q.done && Math.hypot(q.x - b.x, q.y - b.y) < T.trapTrig) burstTrap(q);
@@ -786,11 +798,11 @@ export function createCore(host) {
       }
       for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) > rings[i].life) rings.splice(i, 1);
     },
-    lights() {
-      const out = [];
-      for (const L of lts) { const k = L.t / L.life; out.push({x: L.x, y: L.y, h: L.h, color: L.color, radius: L.radius * (1 - k * .3), intensity: L.i0 * (1 - k) ** 1.5, flicker: L.flicker, id: L.id}); }
+    lights() {   // (kept records, read at once by render/lighting.js: no garbage a frame)
+      const out = LOUT; out.length = 0;
+      for (const L of lts) { const k = L.t / L.life; lrec(out, L.x, L.y, L.h, L.color, L.radius * (1 - k * .3), L.i0 * (1 - k) ** 1.5, L.flicker, L.id); }
       let n = 0;
-      for (const a of host.arrows) if (a.explode && !a.stuck && n < 2) out.push({x: a.x, y: a.y, h: a.h, color: '#ff9a40', radius: 1.6, intensity: .9, flicker: .5, id: 7190 + n++});
+      for (const a of host.arrows) if (a.explode && !a.stuck && n < 2) lrec(out, a.x, a.y, a.h, '#ff9a40', 1.6, .9, .5, 7190 + n++);
       return out;
     },
   };

@@ -42,7 +42,8 @@ import {clamp} from '../../core/mathx.js';
 import {createLaunch, STATES as THROWN} from './launch.js';   // thrown by a blast: flying, slammed, down, getting up
 import {STATES as BRAWLS} from './brawl.js';   // the live cowboys' boot, barge, lift, throw (sim/player/brawl.js: H.brawl)
 import {STATES as FISTS} from './fists.js';   // the live cowboys' fists: a move, a slip, a clinch (sim/player/fists.js: H.fists)
-import {STATES as TOOLS} from './tool.js';   // a tool in hand: the axe's swing (sim/player/tool.js: H.tool; docs/GATHERING.md)
+import {STATES as TOOLS} from './tool.js';
+import {STATES as MELEES} from './melee.js';   // a weapon in hand: swings, the jump, the smash (sim/player/melee.js: H.melee; content/melee.js)   // a tool in hand: the axe's swing (sim/player/tool.js: H.tool; docs/GATHERING.md)
 import {createLadder} from './ladder.js';   // the ladder under his control: up, down, stop, slide (?ladder=old: the climb below)
 export const AIM_H = 1.25;   // arrows fly at chest height
 // walkable terrain (docs/TERRAIN.md): a step up is taken in stride up to STEP_UP m (H.blocked stops anything higher), a step
@@ -76,7 +77,7 @@ const AIM_TURN_RATE = 1200;
 const STANCE_HOLD = .25;  // s: a moving-aim stance (running forward / backing up) can't flip back sooner (no flip-flop)
 // states in which the player is taken over by a move (no aiming, rolling or new actions); 'rope': hanging from a lasso
 // (sim/player/lasso.js, the equipment experiment's)
-export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'swim', 'hold', 'knock', 'rope', ...THROWN, ...BRAWLS, ...FISTS, ...TOOLS]);
+export const BUSY = new Set(['leap', 'fall', 'land', 'climb', 'vault', 'slide', 'splash', 'swim', 'hold', 'knock', 'rope', ...THROWN, ...BRAWLS, ...FISTS, ...TOOLS, ...MELEES]);
 // The dodge (Space). The roll clip is a FORWARD roll, so a roll never reverses:
 // - running into a roll more than leadMin deg off the way he faces: he plants and turns first (the run's turn frames,
 //   lead s each, untouchable from the plant)
@@ -795,6 +796,7 @@ export function createPlayer(H) {
       if (P.sink > sinkTo) P.sink = Math.max(sinkTo, P.sink - dt * SWIM.sink / SWIM.rise); else P.sink = Math.min(sinkTo, (P.sink || 0) + dt * SWIM.sink / SWIM.rise);
     }
     if (ropewall && ropewall.step(dt, mx, my)) return;   // on a rope against a face (sim/player/ropewall.js; nothing while he isn't)
+    if (melee && melee.step(dt, mx, my)) return;   // a weapon drawn: a swing, the guard, a jump, a smash (sim/player/melee.js; nothing while it's away or idle)
     if (fists && fists.step(dt, mx, my)) return;   // the fists up: the guard, a punch, a slip, a clinch (sim/player/fists.js; nothing while they're down)
     if (brawl && brawl.step(dt, mx, my)) return;   // a boot, a barge, a lift, a throw (sim/player/brawl.js; nothing while it's idle)
     if (tool && tool.step(dt, mx, my)) return;   // a tool's swing: the axe (sim/player/tool.js; nothing while it isn't swinging)
@@ -1025,11 +1027,12 @@ export function createPlayer(H) {
   }
 
   // ---------------- input (the host maps its keys / buttons to these) ----------------
-  function onSpace() { if (stuck) return; if (P.state === 'swim') { swimKick(); return; } if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
+  function onSpace() { if (stuck) return; if (P.state === 'swim') { swimKick(); return; } if (melee?.space()) return; if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
   function useE() { P.eUsed = true; }   // a feature took this E press (features/forage.js picks while it's held): holding it doesn't wave
   function press() {   // LMB down: draw (kept through a roll)
+    if (melee?.press()) return;   // a weapon drawn: LMB swings it (sim/player/melee.js)
     if (tool?.press()) return;   // a tool in hand: LMB swings it (sim/player/tool.js)
     if (fists?.press('L')) return;   // the fists up: the left hand (sim/player/fists.js)
     if (brawl?.press()) return;   // carrying something: LMB throws it (sim/player/brawl.js)
@@ -1042,12 +1045,13 @@ export function createPlayer(H) {
   }
   function release() {   // LMB up: shoot, or buffer the shot during an aimed roll / a backstep
     mouse.down = false;
+    if (melee?.release()) return;
     if (tool?.release()) return;
     if (fists?.release('L')) return;
     if (P.state === 'draw') shoot(); else if ((P.state === 'roll' && P.aimRoll) || P.state === 'backstep') P.queuedShot = true;
   }
   // RMB (core/input.js): the right hand while the fists are up -> true: taken (else RMB is an ability's)
-  const pressR = () => !!fists?.press('R'), releaseR = () => !!fists?.release('R');
+  const pressR = () => !!melee?.pressR() || !!fists?.press('R'), releaseR = () => !!melee?.releaseR() || !!fists?.release('R');
   function hold(frame, sec) { if (BUSY.has(P.state) || dodging()) return; P.hold = {frame: A.SP[frame] ? frame : 'release.0', sec}; P.state = 'hold'; P.t = 0; }
   function unhold() { if (P.state === 'hold') { P.state = 'idle'; P.t = 0; } }   // (a held pose let go early: features/cooking.js's stick pulled out)
   function knock(vx, vy) { if (P.state === 'climb' || THROWN.includes(P.state)) return; P.vx = vx * KNOCKK; P.vy = vy * KNOCKK; P.state = 'knock'; P.t = 0; }   // (thrown: a skid doesn't cut the flight short)
@@ -1246,6 +1250,8 @@ export function createPlayer(H) {
   PL.fists = fists;
   const tool = H.tool ? H.tool(PL, internals) : null;   // (a tool in hand, the axe: sim/player/tool.js)
   PL.tool = tool;
+  const melee = H.melee ? H.melee(PL, internals) : null;   // (a weapon in hand: sim/player/melee.js)
+  PL.melee = melee;
   const ropewall = H.ropewall ? H.ropewall(PL, internals) : null;   // (the rope wall: sim/player/ropewall.js; the lasso's rope-up hands him to it)
   PL.ropewall = ropewall;
   const thrown = createLaunch({...internals, elev, inStream, splash, dryBack});   // a blast's throw (sim/player/launch.js: PL.launch)
