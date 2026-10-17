@@ -682,5 +682,18 @@ export async function create(host) {
     },
   });
   F._ = {SITES, GLADES, CR, force, ATL, SPR, PEOPLE};
+  // the playtest tour's stops (features/tour.js gathers F.tour() into its "New tonight" part)
+  F.tour = () => [
+    {id: 'critters-day', title: 'Small life underfoot', where: 'A sunny glade, a summer day', world: {hour: 11, season: 'summer', weather: 'clear'},
+      setup: T => T.row('critters', 'Critters: go to the nearest butterflies'),
+      tasks: [{text: 'Stand still about 3 s: a butterfly lands on your shoulder. Walk and it flies off'},
+        {text: 'F10 > Animals > Critters > "go to the nearest frogs": walk at the bank and they leap in; wait for the eyes to peek up'},
+        {text: '"go to the nearest dragonflies", "the nearest woodpecker", then "make it after rain" and "the nearest snails"'},
+        {text: '"the eye in the glade": circle the pale butterfly. Its eyes follow you'}]},
+    {id: 'critters-ring', title: 'The frogs\' ring', where: 'The spring at night', world: {hour: 23, season: 'summer', weather: 'clear'},
+      setup: T => T.row('critters', 'Critters: the frogs\' ring'),
+      tasks: [{text: 'Nine frogs sit in a ring facing the middle, throats pulsing together'},
+        {text: 'Step into the ring', ev: 'critters.plop'}]},
+  ];
   return F;
 }

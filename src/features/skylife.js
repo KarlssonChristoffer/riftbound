@@ -668,5 +668,18 @@ export async function create(host) {
     const p = planOf(env.day), fmt = h => { const x = ((h % 24) + 24) % 24, hh = Math.floor(x), mm = Math.floor((x - hh) * 60); return `${hh < 10 ? '0' : ''}${hh}:${mm < 10 ? '0' : ''}${mm}`; };
     return p.length ? p.map(e => `${e.kind === 'murm' ? 'starlings' : e.kind === 'drift' ? 'drifter' : e.kind === 'lake' ? 'geese on the lake' : 'geese'} ${fmt(e.t0 - env.day * 24)}`).join(' · ') : 'nothing today';
   }
+  // the playtest tour's stops (features/tour.js gathers F.tour() into its "New tonight" part)
+  F.tour = () => [
+    {id: 'sky-geese', title: 'Geese over the lake', where: 'The lake shore on an autumn morning', world: {hour: 8, season: 'autumn', weather: 'fair'},
+      setup: T => { T.row('skylife', 'Sky: go to the lake shore'); T.row('skylife', 'Sky: geese now'); },
+      tasks: [{text: 'A V of geese crosses: watch the leader drop back. Their shadows slide over the ground'},
+        {text: 'F10 > Nature > Sky > "geese land on the lake now": wait for them, then walk to the water\'s edge to flush them'},
+        {text: 'F6 to first person and look up at the next flight'}]},
+    {id: 'sky-dusk', title: 'Starlings and drifters', where: 'Over the lake at dusk, then night', world: {hour: 18.4, season: 'summer', weather: 'clear'},
+      setup: T => { T.row('skylife', 'Sky: go to the lake shore'); T.row('skylife', 'Sky: murmuration now (over you)'); },
+      tasks: [{text: 'The murmuration folds over you: sprint or jump under it and a wave runs through it'},
+        {text: 'F10 > Sky > "night now", then "a drifter now (the bell)": something vast passes over, the light turns faintly blue'},
+        {text: 'Try "a drifter now (the manta)" too'}]},
+  ];
   return F;
 }

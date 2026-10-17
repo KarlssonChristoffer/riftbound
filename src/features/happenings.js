@@ -458,5 +458,23 @@ export async function create(host) {
   const GLOW_B = [.55, .7, 1], GLOW_G = [.7, 1, .55], GLOW_L = [1, .75, .35], SMOKE = [.32, .3, .3];
   const BANDF = [[1, .35, .3], [1, .6, .25], [1, .9, .35], [.45, .9, .4], [.35, .7, 1], [.45, .4, .9], [.75, .4, .9]];
   const SA = [0, 0, 0], SB = [0, 0, 0], gh0 = w => host.elev(w.x, w.y);
+  // the playtest tour's stops (features/tour.js gathers F.tour() into its "New tonight" part)
+  const tourAt = T => { const c = T.forest?.clearing; if (c) T.go(c.x, c.y + 1.5); };
+  F.tour = () => [
+    {id: 'happen-star', title: 'A great falling star', where: 'The clearing on a clear night', world: {hour: 22, season: 'summer', weather: 'clear'},
+      setup: T => { tourAt(T); T.row('happenings', 'Happenings: a falling star now'); },
+      tasks: [{text: 'Watch it come down and read the toast: which way, how far'},
+        {text: 'Walk to the glowing crater and take the Star Shard (E)', ev: 'happening.take', when: e => e.kind === 'star'}]},
+    {id: 'happen-ring', title: 'The witch\'s ring', where: 'A ring of mushrooms, at night', world: {hour: 22.5, season: 'summer', weather: 'clear'},
+      setup: T => { tourAt(T); T.row('happenings', 'Happenings: a fairy ring now'); },
+      tasks: [{text: 'Step into the middle of the dancing lights: you go Light-footed', ev: 'happening.take', when: e => e.kind === 'ring'}]},
+    {id: 'happen-vattar', title: 'The vättar walk', where: 'Dusk in the woods', world: {hour: 18.3, season: 'summer', weather: 'fair'},
+      setup: T => { tourAt(T); T.row('happenings', 'Happenings: the vättar walk now'); },
+      tasks: [{text: 'Find the little lantern-bearers and walk beside them (within 4 m) for 20 s'},
+        {text: 'The last one stops and leaves you a gift: take it (E)', ev: 'happening.take', when: e => e.kind === 'vattar'}]},
+    {id: 'happen-rainbow', title: 'The rainbow\'s foot', where: 'A day after rain', world: {hour: 12, season: 'summer', weather: 'fair', wet: .9},
+      setup: T => { tourAt(T); T.row('happenings', 'Happenings: a rainbow now'); },
+      tasks: [{text: 'Run to where the rainbow touches the ground for a Rainbow Scale', ev: 'happening.take', when: e => e.kind === 'rainbow'}]},
+  ];
   return F;
 }

@@ -488,5 +488,18 @@ export async function create(host) {
   F.state = () => ({on: F.on, active: active(), K: {...K}, flies: live.length, lantern: WBY.get('me')?.orb || 0, nearSwarms: NS.length, nearFox: NF.length, nearBlooms: NB.length, ring: !!PL.ring, ringNear, dancers, me: [+P.x.toFixed(1), +P.y.toFixed(1)],
     plan: {swarms: PL.swarms.length, fox: PL.fox.length, blooms: PL.blooms.length}});
   F.plan = PL;
+  // the playtest tour's stops (features/tour.js gathers F.tour() into its "New tonight" part)
+  F.tour = () => [
+    {id: 'glow-fireflies', title: 'Fireflies at the lake', where: 'A summer night on a firefly drift', world: {hour: 22.5, season: 'summer', weather: 'clear'},
+      setup: T => T.row('glowlife', 'Go to the nearest fireflies'),
+      tasks: [{text: 'Watch a drift: now and then the blinks fall into step and roll through it as a wave'},
+        {text: 'Stand still a few seconds: they gather round you like a lantern. Walk on and they scatter'},
+        {text: 'Sprint through a drift: they burst away'}]},
+    {id: 'glow-foxfire', title: 'Foxfire and the elf ring', where: 'Dead wood and the älvdans glade, a summer night', world: {hour: 23, season: 'summer', weather: 'clear', wet: .8},
+      setup: T => T.row('glowlife', 'Go to the nearest foxfire'),
+      tasks: [{text: 'Walk up to the glowing fungus: it dims, shy. Step back and it glows again'},
+        {text: 'F10 > Nature > Glowlife > "Go to the elf ring": stand inside the ring of caps and watch it breathe'},
+        {text: '"Go to the nearest night bloom": walk through the moonflowers for their pollen'}]},
+  ];
   return F;
 }
