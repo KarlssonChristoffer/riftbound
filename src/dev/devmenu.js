@@ -48,7 +48,6 @@ const SECTION_OF = {
   cooking: 'Gathering', meals: 'Gathering', workshop: 'Gathering', keepsakes: 'Gathering', skills: 'Gathering',
   equip: 'Combat', affixes: 'Combat', trickshot: 'Combat', bells: 'Combat', combat: 'Combat', gun: 'Combat', brawl: 'Combat',
   foes: 'Combat', shrines: 'Combat', omens: 'Combat', mods: 'Combat',
-  almanac: 'World',
   lights: 'Effects', flow: 'Effects', contact: 'Effects', gunfx: 'Effects', blood: 'Effects', depth: 'Effects',
   brutes3d: 'Renderer',
   audio: 'Sound', rainaudio: 'Sound', windaudio: 'Sound', battlemusic: 'Sound',
