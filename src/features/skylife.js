@@ -421,10 +421,20 @@ export async function create(host) {
     const R = mulberry32(0x57a1);
     for (let i = 0; i < MN; i++) {
       let a, b, c; do { a = R() * 2 - 1; b = R() * 2 - 1; c = R() * 2 - 1; } while (a * a + b * b + c * c > 1);
+      const k = .5 + .5 * Math.sqrt(a * a + b * b + c * c); a *= k; b *= k; c *= k;   // (a denser core: the flock reads as one dark mass, thinning at its edges)
       MU[i * 3] = a; MU[i * 3 + 1] = b; MU[i * 3 + 2] = c; MH1[i] = R(); MH2[i] = (a + 1) / 2 * .7 + R() * .3;
     }
   }
-  const DARK = [.07, .065, .08], DARK2 = [.12, .11, .12], PT1 = {size: 1, alpha: 1, emit: false}, PT2 = {size: 2, alpha: 1, emit: false};
+  // A STARLING: a 5 x 3 px bird seen from below / above, 3 wing frames (up 'v', level, down) x 2 tones (near-black, a dusky
+  // brown for the ones further in); each bird beats its wings on its own phase, now and then a short glide (frame 1), so the
+  // cloud flickers like a real flock instead of reading as loose specks (he asked "what are those black particles")
+  const BW = 5, BH = 3, BIRD = document.createElement('canvas'); BIRD.width = BW * 3; BIRD.height = BH * 2;
+  {
+    const FR = [['x...x', '.x.x.', '..x..'], ['.....', 'xxxxx', '..x..'], ['.....', '.xxx.', 'x.x.x']], TONE = ['#14111a', '#2a2420'];
+    const q = BIRD.getContext('2d');
+    for (let t = 0; t < 2; t++) { q.fillStyle = TONE[t]; for (let f = 0; f < 3; f++) for (let y = 0; y < BH; y++) for (let x = 0; x < BW; x++) if (FR[f][y][x] === 'x') q.fillRect(f * BW + x, t * BH + y, 1, 1); }
+  }
+  const BFLAP = [0, 1, 2, 1], BS = {img: BIRD, sx: 0, sy: 0, sw: BW, sh: BH, x: 0, y: 0, h: 0, px: 2.5, py: 1.5, flip: false, type: 3, alpha: 1};
   const WAVE = {t: -99, x: 0, y: 0, h: 0, e: null};
   let MC = null;   // the murmuration in the sky now (its centre this frame: for the flinch)
   const MCEN = {x: 0, y: 0, h: 0, e: null};
@@ -459,7 +469,8 @@ export async function create(host) {
         const q = m * m, rx = e.rx + a * 2.5, ry = e.ry + b * 2.5, rh = e.rh + Math.max(0, c) * 1.2;
         x += (rx - x) * q; y += (ry - y) * q; h += (rh - h) * q;
       }
-      G.point(x, h, y, i & 7 ? DARK : DARK2, sp && (i % 11 === 0) ? PT2 : PT1);
+      const fl = MH1[i] > .93 && Math.sin(T * .9 + i) > .3 ? 1 : BFLAP[Math.floor(T * 11 + i * .37) & 3];   // (wingbeats, a few gliding)
+      BS.sx = fl * BW; BS.sy = (i & 7) && !(sp && i % 11 === 0) ? 0 : BH; BS.x = x; BS.y = y; BS.h = h; host.sprite(BS);
     }
   }
   function flinch(x, y) {
