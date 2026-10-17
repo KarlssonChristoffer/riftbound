@@ -278,7 +278,7 @@ export function createModsSim(host, saved) {
   function hitMod(p, o, M) {
     if (o.by === 'mods') return;
     if (CUR.p === p) { M.dmg *= CUR.mul; CUR.p = null; return; }
-    if ((o.by === 'melee' || o.by === 'throw') && !H) {
+    if ((o.by === 'melee' || o.by === 'throw' || o.by === 'thrown') && !H) {
       const wid = o.weapon || weaponId(); if (!wid) return;
       const e = o.elem || elemOf(wid, true);
       if (e !== 'phys' || ST.has(p)) M.dmg *= hit(p, e, o.dmg ?? 10, {});
@@ -293,8 +293,10 @@ export function createModsSim(host, saved) {
   // ticks stop (hits ticks them). Shots keep their own path (F.arrow / onArrowHit) and are skipped here.
   let H = null;
   const HTYPE = {fire: 'fire', frost: 'frost', storm: 'shock', rot: 'venom', void: 'void'};
+  // the player's own blows (a swing, the air smash, the thrown blade, a shield bash); not the status ticks or a parried bullet
+  const BLOWS = new Set(['melee', 'smash', 'thrown', 'throw', 'bash']);
   function rider(h, target) {
-    if (!h || h.by === 'mods' || (h.from && TAGS.has(h.from))) return;
+    if (!h || !BLOWS.has(h.by) || (h.from && typeof h.from === 'object' && TAGS.has(h.from))) return;
     const wid = h.weapon || weaponId(); if (!wid) return;
     const e = elemOf(wid, true);
     if (e === 'phys' && !ST.has(target)) return;
