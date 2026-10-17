@@ -1,7 +1,15 @@
-// DEV MENU (F10 in dev mode; also Esc > Game > Dev menu): every test action, toggle and setting in one panel, a PAGE per
-// feature (its on / off, its settings, its test actions), the pages sorted into SECTIONS (Panels, Character, World,
-// Nature, Animals, Gathering, Combat, Effects, Renderer, Sound, Co-op, Other). The player's Esc menu keeps only what a
-// player sets (Game / Graphics / Audio / Controls: ui/pause.js); the old Sandbox and Dev tabs live here now.
+// DEV CONSOLE (F10 in dev mode; also Esc > Game > Dev console): ONE window at the right edge, full height, with a tab row
+// across the top (like Rust's admin menu), so the dev panels never pile up on each other:
+//   Menu      every test action, toggle and setting, a PAGE per feature (below)
+//   Cheats    the cheat panel (dev/cheats.js, F2)         Move   the move feel panel (dev/movefeel.js, F7)
+//   Gun       the gun feel panel (dev/gunfeel.js, F8)     Weather the weather panel (dev/wxpanel.js, F9)
+//   Keys      the key help (dev/keyhelp.js; F1 is the debug HUD alone now, top left)
+//   Wardrobe  opens the wardrobe screen (dev/wardrobe.js, Shift+Tab: a screen of its own)
+// The panels are DOCKED: their own elements move into the console once and their CSS position is overridden here; a
+// panel's feature stays the truth (F.on = its tab shows). Its own key opens the console on its tab, the key again closes
+// it; one docked panel is on at a time. MENU: a PAGE per feature (its on / off, its settings, its test actions), the pages
+// sorted into SECTIONS (Panels, Character, World, Nature, Animals, Gathering, Combat, Effects, Renderer, Sound, Co-op,
+// Other). The player's Esc menu keeps only what a player sets (Game / Graphics / Audio / Controls: ui/pause.js).
 // THE REGISTRY is the feature list: nothing to register by hand. Each feature's page is built from what it already has
 // (F.toggle + F.key, F.settings(), F.menu()) plus, if it wants, its own dev rows:
 //   F.dev = {group: 'Gathering',          the section (else SECTION_OF below, else Other)
@@ -21,10 +29,12 @@
 // click the name), PINNED rows above it all (the * at a row's left; remembered on this machine, 'rb.devmenu').
 // While the search box has the keys the game doesn't hear them (Esc clears it, then closes); click the world to play
 // with the menu open, F10 closes it. Pixel art like the game (ui/pixelfont.js, ui/pixelframe.js).
-// It is a FEATURE the boot adds after the other dev panels (main.js; dev/: nothing in the game imports it). F.on is the
-// panel showing. OWNS: #devm + its style, 'rb.devmenu' (section, folds, pins). READS: every feature's toggle / settings /
-// menu / dev, the engine (E: the character, the world's dials, the renderer's options).
-// BUDGET: closed: nothing. Open: the rows are read 4 times a second; the DOM is rebuilt only when the rows change.
+// It is a FEATURE the boot adds after the other dev panels (main.js; dev/: nothing in the game imports it). F.open is the
+// console showing, F.tab its tab, F.keys the key help's (dev/devtools.js drawHud reads it). OWNS: #devm + its style, the
+// docked panels' place on the page, 'rb.devmenu' (tab, section, folds, pins). READS: every feature's toggle / settings /
+// menu / dev, the docked panels' F.on, the engine (E: the character, the world's dials, the renderer's options).
+// BUDGET: closed: a few flag reads a frame (the docked panels' F.on). Open: the Menu's rows are read 4 times a second;
+// the DOM is rebuilt only when the rows change.
 import {FRAMES, uiUnit} from '../ui/pixelframe.js';
 import {loadPixelFont} from '../ui/pixelfont.js';
 import {GAME_ROWS} from '../ui/pause.js';
@@ -42,28 +52,55 @@ const SECTION_OF = {
   winter: 'World', thunder: 'World', prints: 'World', mud: 'World', trip: 'World', floor3d: 'World',
   wind: 'Nature', windlines: 'Nature', litter: 'Nature', weather: 'Nature', mist: 'Nature', garden: 'Nature', riverside: 'Nature',
   stillwater: 'Nature', puddles: 'Nature', wading: 'Nature', grass: 'Nature', atmos: 'Nature', dust: 'Nature', tumbleweed: 'Nature',
-  airfx: 'Nature', campfires: 'Nature', wrongwx: 'Nature', surprises: 'Nature',
-  wildlife: 'Animals', fauna: 'Animals', calls: 'Animals', cavelife: 'Animals', foxden: 'Animals', animalfinds: 'Animals',
+  airfx: 'Nature', campfires: 'Nature', wrongwx: 'Nature', surprises: 'Nature', happenings: 'Nature', glowlife: 'Nature', skylife: 'Nature',
+  wildlife: 'Animals', fauna: 'Animals', calls: 'Animals', cavelife: 'Animals', foxden: 'Animals', animalfinds: 'Animals', critters: 'Animals',
   woodcut: 'Gathering', fishing: 'Gathering', pack: 'Gathering', forage: 'Gathering', mining: 'Gathering', builds: 'Gathering',
-  cooking: 'Gathering', meals: 'Gathering', workshop: 'Gathering', keepsakes: 'Gathering', skills: 'Gathering',
+  cooking: 'Gathering', meals: 'Gathering', workshop: 'Gathering', keepsakes: 'Gathering', skills: 'Gathering', almanac: 'Gathering',
   equip: 'Combat', affixes: 'Combat', trickshot: 'Combat', bells: 'Combat', combat: 'Combat', gun: 'Combat', brawl: 'Combat',
-  foes: 'Combat', shrines: 'Combat', omens: 'Combat', mods: 'Combat',
+  foes: 'Combat', shrines: 'Combat', omens: 'Combat', mods: 'Combat', trolls: 'Combat', melee: 'Combat', hits: 'Combat',
   lights: 'Effects', flow: 'Effects', contact: 'Effects', gunfx: 'Effects', blood: 'Effects', depth: 'Effects',
   brutes3d: 'Renderer',
   audio: 'Sound', rainaudio: 'Sound', windaudio: 'Sound', battlemusic: 'Sound',
   coop: 'Co-op',
+  tour: 'Other', panels: 'Other',
 };
 const STORE = 'rb.devmenu', TICK = .25;
+// the console's tabs: Menu, the docked panels (feat: its feature; el: its element's id), the key help, the wardrobe
+const TABS = [{id: 'menu', title: 'Menu', key: 'F10'}, {id: 'cheats', title: 'Cheats', key: 'F2', feat: 'cheats', el: 'cheats'},
+  {id: 'move', title: 'Move', key: 'F7', feat: 'movefeel', el: 'movefeel'}, {id: 'gun', title: 'Gun', key: 'F8', feat: 'gunfeel', el: 'gunfeel'},
+  {id: 'weather', title: 'Weather', key: 'F9', feat: 'wxpanel', el: 'wxpanel'}, {id: 'keys', title: 'Keys', el: 'help'},
+  {id: 'wardrobe', title: 'Wardrobe', key: 'Shift+Tab', screen: 'wardrobe'}];
 const CSS = `
 #devm { --u: 2px; --ink: #efe6cf; --dim: #a39478; --key: #f2c95c; --mute: #6e604a;
-  position: fixed; right: 10px; top: 10px; z-index: 16; width: calc(200 * var(--u)); max-width: calc(100vw - 20px); max-height: calc(100vh - 20px);
+  position: fixed; right: 10px; top: 10px; bottom: 10px; z-index: 16; width: calc(232 * var(--u)); max-width: calc(100vw - 20px);
   display: flex; flex-direction: column; padding: var(--u) calc(2 * var(--u)); color: var(--ink); user-select: none;
   font: calc(10 * var(--u)) / calc(12 * var(--u)) RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; image-rendering: pixelated;
   border: calc(3 * var(--u)) solid transparent; border-image: var(--dm-panel) 3 fill / calc(3 * var(--u)); box-sizing: border-box; }
 #devm * { box-sizing: border-box; }
 #devm.hidden { display: none; }
-body:has(#pause:not(.hidden)) #devm { visibility: hidden; }
-body:has(#devm:not(.hidden)) #cheats { right: calc(200 * var(--dm-u, 2px) + 18px); }   /* (the cheat panel moves out from under it) */
+body:has(#pause:not(.hidden)) #devm, body:has(#book:not(.hidden)) #devm { visibility: hidden; }   /* (the player's window: ui/book.js) */
+#devm .dm-tabs { display: flex; flex-wrap: wrap; gap: var(--u); margin: calc(2 * var(--u)) 0 0; padding-bottom: calc(2 * var(--u)); border-bottom: var(--u) solid #4a3826; }
+#devm .dm-tab { padding: 0 calc(3 * var(--u)); font: inherit; color: var(--dim); background: none; cursor: pointer;
+  border: calc(2 * var(--u)) solid transparent; border-image: var(--dm-card) 2 fill / calc(2 * var(--u)); }
+#devm .dm-tab small { margin-left: calc(2 * var(--u)); font-size: inherit; color: var(--mute); }
+#devm .dm-tab:hover { border-image-source: var(--dm-hot); color: var(--ink); }
+#devm .dm-tab.on { border-image-source: var(--dm-on); color: #fff3c4; }
+#devm .dm-tab.on small { color: #c9a45a; }
+#devm .dm-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#devm .dm-slot { flex: 1; min-height: 0; overflow-y: auto; margin-top: calc(2 * var(--u)); scrollbar-width: thin; scrollbar-color: #7a5f3e #15100c; }
+#devm.t-menu .dm-slot, #devm:not(.t-menu) .dm-page { display: none; }
+/* a docked panel: in the console's flow, the console's frame and pixel font instead of its own */
+#devm .dm-slot > div { position: static !important; inset: auto !important; transform: none !important; width: auto !important; max-width: none !important;
+  max-height: none !important; margin: 0 !important; padding: 0 var(--u) !important; overflow: visible !important; z-index: auto !important;
+  background: none !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; pointer-events: auto !important; }
+#devm .dm-slot > div.hidden { display: none !important; }
+#devm .dm-slot > div, #devm .dm-slot > div * { font-family: RiftPixel, ui-monospace, Consolas, monospace !important; font-size: calc(10 * var(--u)) !important;
+  line-height: calc(12 * var(--u)) !important; font-weight: 400 !important; letter-spacing: normal !important; font-synthesis: none; }
+#devm .dm-slot > div > header { margin: 0 0 calc(2 * var(--u)) !important; padding: 0 !important; background: none !important; border: 0 !important; }
+#devm .dm-slot > div > header b { display: none; }   /* (the tab names it) */
+#devm .dm-slot #help .kh-cols { columns: 1 !important; }
+#devm .dm-slot #help kbd { min-width: 0; padding: 0 var(--u); line-height: inherit !important; border-radius: 0; }
+#devm .dm-slot button, #devm .dm-slot .c-btn, #devm .dm-slot .w-btn { border-radius: 0 !important; }
 #devm header { display: flex; justify-content: space-between; align-items: baseline; padding: 0 var(--u); }
 #devm header b { font-weight: 400; color: var(--key); letter-spacing: var(--u); text-shadow: var(--u) var(--u) 0 #0c0907; }
 #devm header small { color: var(--dim); font-size: inherit; }
@@ -202,12 +239,48 @@ export function createDevMenu({host, engine}) {
 
   // ---------------------------------------------------------------- the panel
   const root = document.createElement('div'); root.id = 'devm'; root.className = 'hidden';
-  root.innerHTML = `<header><b>DEV MENU</b><span><small>F10</small><button data-close title="Close (F10)">x</button></span></header>
-    <input class="dm-find" placeholder="search: fog, spawn, time ..." spellcheck="false" autocomplete="off"><nav></nav><div class="dm-body"></div><footer></footer>`;
+  root.innerHTML = `<header><b>DEV CONSOLE</b><span><small>F10</small><button data-close title="Close (F10)">x</button></span></header>
+    <div class="dm-tabs">${TABS.map(t => `<button class="dm-tab" data-tab="${t.id}">${t.title}${t.key && t.id !== 'menu' ? `<small>${t.key}</small>` : ''}</button>`).join('')}</div>
+    <div class="dm-page"><input class="dm-find" placeholder="search: fog, spawn, time ..." spellcheck="false" autocomplete="off"><nav></nav><div class="dm-body"></div><footer></footer></div>
+    <div class="dm-slot"></div>`;
   const style = document.createElement('style'); style.textContent = CSS; document.head.appendChild(style);
   document.body.appendChild(root);
   const find = root.querySelector('.dm-find'), nav = root.querySelector('nav'), body = root.querySelector('.dm-body'), foot = root.querySelector('footer');
-  let styled = false, vis = [], sig = '', sel = -1, tick = 0, msgT = 0;
+  const slot = root.querySelector('.dm-slot');
+  let styled = false, vis = [], sig = '', sel = -1, tick = 0, msgT = 0, open = false, tab = TABS.some(t => t.id === S.tab && !t.screen) ? S.tab : 'menu';
+  // the docked panels: their feature and element (found once; a panel this build lacks has no tab), their F.on last frame
+  const docks = TABS.filter(t => t.feat).map(t => ({...t, f: null, was: false}));
+  const featOf = n => { for (const f of engine()?.features || []) if (f.name === n) return f; return null; };
+  function dockAll() {
+    for (const d of docks) {
+      d.f ??= featOf(d.feat); found = true;
+      const el = document.getElementById(d.el); if (el && el.parentNode !== slot) slot.appendChild(el);
+    }
+    const kh = document.getElementById('help'); if (kh && kh.parentNode !== slot) slot.appendChild(kh);
+    for (const b of root.querySelectorAll('.dm-tab')) {
+      const t = TABS.find(x => x.id === b.dataset.tab), d = docks.find(x => x.id === t.id);
+      b.hidden = !!(d && !d.f) || (t.screen && !featOf(t.screen));
+    }
+  }
+  const isOnF = f => !!f && f.on !== false && !!f.on;
+  let found = false;
+  // set the tab: the docked panel of the old one off, the new one's on (their own toggles; was: so the watch doesn't react)
+  function setTab(id) {
+    const t = TABS.find(x => x.id === id); if (!t) return;
+    if (t.screen) { show(false); const w = featOf(t.screen); if (w && w.on !== true) w.toggle?.(); return; }
+    for (const d of docks) {
+      const want = d.id === id && open;
+      if (d.f && isOnF(d.f) !== want) d.f.toggle?.();
+      if (d.f) d.was = isOnF(d.f);
+    }
+    tab = id; S.tab = id; save();
+    root.className = (open ? '' : 'hidden ') + 't-' + (id === 'menu' ? 'menu' : 'dock');
+    for (const b of root.querySelectorAll('.dm-tab')) b.classList.toggle('on', b.dataset.tab === id);
+    engine()?.applyOpts?.();
+    if (id === 'menu' && open) { sync(true); find.focus({preventScroll: true}); find.select(); }
+    else if (document.activeElement === find) find.blur();
+    slot.scrollTop = 0;
+  }
 
   // what shows: the search's matches, else the pinned rows + the section's pages ({kind: 'head', page} entries fold)
   function layout(pages) {
@@ -321,9 +394,10 @@ export function createDevMenu({host, engine}) {
   }
   function setSec(s) { if (!SECTIONS.includes(s)) return; S.sec = s; find.value = ''; sel = -1; save(); sync(true); body.scrollTop = 0; }
 
-  root.addEventListener('mousedown', e => { if (e.target !== find) e.preventDefault(); });   // (clicks keep the search's focus)
+  root.addEventListener('mousedown', e => { if (tab === 'menu' && e.target !== find) e.preventDefault(); });   // (clicks keep the search's focus; a docked panel's sliders need theirs)
   root.addEventListener('click', e => {
     if (e.target.closest('[data-close]')) { show(false); return; }
+    const tb = e.target.closest('[data-tab]'); if (tb) { setTab(tb.dataset.tab); return; }
     const sb = e.target.closest('[data-sec]'); if (sb) { setSec(sb.dataset.sec); return; }
     const el = e.target.closest('[data-r]'); if (!el) return;
     const i = +el.dataset.r;
@@ -358,23 +432,36 @@ export function createDevMenu({host, engine}) {
     }
   });
 
-  function show(v) {
+  function show(v, to) {
     v = !!v && host.dev && game()?.mode !== 'title';
-    F.on = v; root.classList.toggle('hidden', !v);
-    if (!v) { if (document.activeElement === find) find.blur(); return; }
-    const u = uiUnit(); root.style.setProperty('--u', u + 'px'); document.documentElement.style.setProperty('--dm-u', u + 'px');
-    sync(true); tick = TICK;
-    find.focus({preventScroll: true}); find.select();
+    if (v && !styled) dockAll();
+    if (!v && !open) return;
+    open = v;
+    if (v) { const u = uiUnit(); root.style.setProperty('--u', u + 'px'); tick = TICK; }
+    setTab(to || tab);   // (closed: the docked panel goes off too)
+    if (!v && document.activeElement === find) find.blur();
   }
 
   const F = {
-    name: 'devmenu', label: 'Dev menu', on: false,
-    open: () => show(true),
-    onKey(k, e) { if (k !== 'f10') return false; e?.preventDefault(); show(!F.on); return true; },
+    name: 'devmenu', label: 'Dev console', on: true,   // (on: its frame watches the docked panels; F.open is the window)
+    get open() { return open; }, get tab() { return tab; },
+    get keys() { return open && tab === 'keys'; },   // (the key help shows: dev/devtools.js drawHud)
+    show: to => show(true, to),
+    onKey(k, e) { if (k !== 'f10') return false; e?.preventDefault(); show(!open); return true; },   // (it opens on the tab it had)
     // the player's Esc menu: a way here (ui/pause.js GAME_ROWS)
-    menu: () => host.dev && game()?.mode !== 'title' ? [{label: 'Dev menu (F10)', run: () => show(true)}] : [],
+    menu: () => host.dev && game()?.mode !== 'title' ? [{label: 'Dev console (F10)', run: () => show(true)}] : [],
     frame({dt}) {
-      if (!host.dev || game()?.mode === 'title') { show(false); return; }
+      if (!found) { found = true; for (const d of docks) { d.f = featOf(d.feat); d.was = isOnF(d.f); } }
+      if (!host.dev || game()?.mode === 'title') { if (open) show(false); return; }
+      // a docked panel switched by its own key (F2, F7, F8, F9) or a Menu row: on -> the console on its tab; off -> closed
+      for (const d of docks) {
+        if (!d.f) continue;
+        const on = isOnF(d.f); if (on === d.was) continue;
+        d.was = on;
+        if (on && !(open && tab === d.id)) show(true, d.id);
+        else if (!on && open && tab === d.id) show(false);
+      }
+      if (!open || tab !== 'menu') return;
       if (msgT > 0 && (msgT -= dt) <= 0) { foot.textContent = ''; foot.className = ''; }
       if ((tick -= dt) > 0) return;
       tick = TICK; sync();
