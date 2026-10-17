@@ -148,7 +148,7 @@ export async function create(host) {
   }
 
   const F = {
-    name: 'coop', label: 'Co-op', on: true, net: C, look, act, gear, key,
+    name: 'coop', label: 'Co-op', on: true, net: C, look, act, gear, get key() { return playerKey(); },
     tag(a, fn) { (tags[a] ??= []).push(fn); },
     get online() { return C.status === 'online'; },
     wear(ids) { if (C.status !== 'online') return false; C.wear(ids); return true; },   // (features/gear.js: ask for a set)
