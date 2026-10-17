@@ -1,12 +1,27 @@
-# The dev menu
+# The dev console
 
-**F10** in dev mode (also Esc > Game > Dev menu). Every test action, feature toggle, setting, renderer A/B and dev panel
-lives here, one page per feature, the pages sorted into sections. The player's Esc menu keeps only what a player sets:
-Game, Graphics, Audio, Controls. The old Sandbox and Dev tabs are gone.
+**F10** in dev mode (also Esc > Game > Dev console). One window at the right edge, full height, with a tab row across
+the top (like Rust's admin menu), so the dev panels never pile up on each other:
 
-Code: `src/dev/devmenu.js` (a dev feature the boot adds last, like the cheat panel).
+| tab | what | its own key |
+|---|---|---|
+| Menu | every test action, feature toggle, setting and renderer A/B: a page per feature (below) | F10 |
+| Cheats | the cheat panel (`dev/cheats.js`) | F2 |
+| Move | the move feel panel (`dev/movefeel.js`) | F7 |
+| Gun | the gun feel panel (`dev/gunfeel.js`) | F8 |
+| Weather | the weather panel (`dev/wxpanel.js`) | F9 |
+| Keys | the key help (`dev/keyhelp.js`) | |
+| Wardrobe | opens the wardrobe screen (`dev/wardrobe.js`) | Shift+Tab |
 
-## Using it
+A panel's own key opens the console on its tab, the same key closes it. F10 reopens the tab you had. F1 is the debug
+HUD alone (top left); the key help is the Keys tab. The player's Esc menu keeps only what a player sets: Game, Graphics,
+Audio, Controls. The player's window (`ui/book.js`, Tab) hides the console while it is open.
+
+Code: `src/dev/devmenu.js` (a dev feature the boot adds last). The panels are DOCKED: their elements move into the
+console once and their position and font are overridden there; each panel's feature stays the truth (its F.on = its tab
+shows), so a panel needs no change to live in the console. A new dev panel gets a tab by adding a line to `TABS`.
+
+## The Menu tab
 
 - **Search** has the keys as it opens: type a few letters (`fog`, `spawn`, `time`), Enter runs the highlighted row,
   arrows move, Left / Right change a value. Esc clears the search, a second Esc closes the menu.
