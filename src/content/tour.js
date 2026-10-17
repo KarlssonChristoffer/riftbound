@@ -42,7 +42,7 @@ export const STOPS = [
     where: 'The forest clearing by the lake, a summer morning',
     world: {hour: 9}, view: '', setup: T => where(T, clearing),
     tasks: [
-      {text: 'PgDn: the next stop, PgUp: back, H: hide this card. Esc > Game has the tour\'s rows; F10 > Panels > Playtest tour jumps to any stop'},
+      {text: 'PgDn: the next stop, PgUp: back, End: hide this card. Esc > Game has the tour\'s rows; F10 > Panels > Playtest tour jumps to any stop'},
       {text: 'Walk (WASD) and sprint (Shift)', check: T => T.sprinting()},
       {text: 'Leap with Space', ev: 'player.jump'},
       {text: 'Open the pack with Tab', check: T => !!T.feat('pack')?.open},

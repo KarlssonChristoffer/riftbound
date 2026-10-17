@@ -4,7 +4,7 @@
 // that knows its event or state ticks itself; the stop's done when they all have.
 //   ?tour=1 starts it (from where you left it; ?tour=restart from the first stop; ?tour=<stop id> from that stop), in the
 //   sandbox with the forest (game/game.js, core/session.js). Esc > Game: start it, step it, end it; F10 > Panels > Playtest tour: jump to any stop.
-//   Keys while it runs: PgDn the next stop, PgUp back, H hides / shows the card.
+//   Keys while it runs: PgDn the next stop, PgUp back, End hides / shows the card.
 // The world's presets apply offline only: in co-op the server owns the clock and the weather (the card says so).
 // While it runs the day is 60 real minutes long (a dusk stays dusk while you play it); the end gives the world its own
 // clock, weather and season back.
@@ -137,7 +137,7 @@ export async function create(host) {
       }
       if (line) push(line, col, first ? 0 : x, first ? gap : 0);
     };
-    if (hidden) { push(`TOUR ${idx + 1}/${list.length}  ${s.title}  (H)`, COL.head); return out; }
+    if (hidden) { push(`TOUR ${idx + 1}/${list.length}  ${s.title}  (End)`, COL.head); return out; }
     push(`TOUR ${idx + 1}/${list.length}  ·  ${(s.section || '').toUpperCase()}`, COL.head);
     push(s.title, COL.title, 0, 2 * u);
     para(s.where, COL.where);
@@ -149,7 +149,7 @@ export async function create(host) {
       para(mark + t.text + tail, !c ? COL.look : d ? COL.done : COL.todo, ind, k === 0 ? 4 * u : 2 * u);
     });
     if (hasCounted && allDone(s)) para('All done! PgDn: the next stop', COL.done, 0, 4 * u);
-    else para(idx === list.length - 1 ? 'The last stop. Esc > Game: end the tour' : 'PgDn next  ·  PgUp back  ·  H hide', COL.foot, 0, 4 * u);
+    else para(idx === list.length - 1 ? 'The last stop. Esc > Game: end the tour' : 'PgDn next  ·  PgUp back  ·  End hide', COL.foot, 0, 4 * u);
     return out;
   }
 
@@ -182,7 +182,7 @@ export async function create(host) {
     onKey(k, e) {
       if (!on || host.lock) return false;
       if (k === 'pagedown' || k === 'pageup') { e?.preventDefault?.(); const i = idx + (k === 'pagedown' ? 1 : -1); if (pending < 0 && i >= 0 && i < list.length) { pending = i; host.uiSound?.('click'); } return true; }
-      if (k === 'h' && !e?.shiftKey && !e?.ctrlKey) { hidden = !hidden; dirty++; return true; }
+      if (k === 'end') { e?.preventDefault?.(); hidden = !hidden; dirty++; return true; }   // (End: H, J, I, N, K, B are the GUI's tabs)
       return false;
     },
     hd(q) {
@@ -209,7 +209,7 @@ export async function create(host) {
       }
       return [{label: 'Playtest tour: the next stop (PgDn)', run: () => { pending = Math.min(list.length - 1, idx + 1); }},
         {label: 'Playtest tour: back a stop (PgUp)', run: () => { pending = Math.max(0, idx - 1); }},
-        {label: `Playtest tour: ${hidden ? 'show' : 'hide'} the card (H)`, run: () => { hidden = !hidden; dirty++; }},
+        {label: `Playtest tour: ${hidden ? 'show' : 'hide'} the card (End)`, run: () => { hidden = !hidden; dirty++; }},
         {label: 'Playtest tour: end it (the world\'s own weather and clock back)', run: end}];
     },
     // the dev menu (F10, docs/DEVMENU.md): the same, and a jump to any stop
