@@ -1,4 +1,4 @@
-// MOD PANEL: the weapon bench (features/mods.js; M, or a tab of the game's menus when they mount it). Pixel art like the workshop
+// MOD PANEL: the weapon bench (features/mods.js; Shift+M, or a tab of the game's menus when they mount it). Pixel art like the workshop
 // panel (ui/pixelframe.js, ui/pixelfont.js). The weapon in hand at the top with the type it deals now; its three slots (the
 // slot's name is the weapon's: a gun's Chamber / Barrel / Grip, a bow's Arrowhead / Fletching / Grip, a staff's Crystal / Head /
 // Wrap); the parts in the kit that fit the chosen slot (a click fits one, a click on the fitted one takes it out); the ones you
@@ -52,7 +52,7 @@ body:has(#pause:not(.hidden)) #modbench:not(.mounted) { visibility: hidden; }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 
 function html(m, mounted) {
-  let h = `<header><b>WEAPON BENCH</b>${mounted ? '' : '<button data-a="close" data-v="">M</button>'}</header>`;
+  let h = `<header><b>WEAPON BENCH</b>${mounted ? '' : '<button data-a="close" data-v="">x</button>'}</header>`;
   h += `<div>${esc(m.weapon.name)} <span class="mb-dim">deals</span> <span style="color:${m.weapon.elem.col}">${esc(m.weapon.elem.name.toUpperCase())}</span></div>`;
   h += '<div class="mb-slots">';
   for (const s of m.slots) {
