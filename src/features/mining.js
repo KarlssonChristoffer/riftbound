@@ -209,11 +209,13 @@ export async function create(host) {
   // the night veins in the light: hidden (the pick can't find them) unless it's dark round them or he trips
   const peerLit = (x, y, r) => coop()?.litNear?.(x, y, r) || false;
   const torch = () => !!host.feature('workshop')?.torch;
+  let ngVer = -1, ng = false;   // (the Nightglass Lantern: his light is dark light, docs/ALMANAC.md)
+  const nightglass = () => { const m = host.mods; if (m.ver !== ngVer) { ngVer = m.ver; ng = m.value('light.nightglass', 0) > 0; } return ng; };
   function dark() {
     if (!NIGHT.length) return;
     const P = host.player, cv = host.feature('caves'), B = host.feature('builds'), trip = !!host.feature('trip')?.tripping, R0 = TUNE.night.dark;
     for (const i of NIGHT) {
-      const v = V[i], lit = ((cv?.lit || torch()) && Math.hypot(P.x - v.x, P.y - v.y) < R0) || B?.shineNear?.(v.x, v.y, R0) || peerLit(v.x, v.y, R0);   // (a lit pine haft is a light: features/workshop.js torch)
+      const v = V[i], lit = (((cv?.lit && !nightglass()) || torch()) && Math.hypot(P.x - v.x, P.y - v.y) < R0) || B?.shineNear?.(v.x, v.y, R0) || peerLit(v.x, v.y, R0);   // (a lit pine haft is a light: features/workshop.js torch)
       const h = trip || !lit ? 0 : 1;
       if (h !== HID[i]) { HID[i] = h; hidVer++; if (h && lockI === i) lockI = -1; }
     }

@@ -11,6 +11,7 @@
 //             wet (0..1: the ground's), snow (0..1: its snow cover; out of winter none), season (spring | summer | autumn | winter)}: applied offline (co-op: the server's
 //             clock and weather stand). Left out: a summer's fair day, the clock where it is
 //   view      '' top-down | '3p' third person | '1p' first person (left out: the camera as you have it)
+//   needs     a feature's name: the stop is left out when that feature isn't loaded (a PR not in this build)
 //   uncanny   true: the uncanny forest on while you're at this stop (off again when you leave)
 //   setup(T)  put things in place (T: features/tour.js makeT: go, row, toggle, give, wear, feat, forest, cave, player)
 //   leave(T)  undo what only this stop wanted
@@ -41,7 +42,7 @@ export const STOPS = [
     where: 'The forest clearing by the lake, a summer morning',
     world: {hour: 9}, view: '', setup: T => where(T, clearing),
     tasks: [
-      {text: 'PgDn: the next stop, PgUp: back, H: hide this card. Esc > Sandbox > Tour jumps to any stop'},
+      {text: 'PgDn: the next stop, PgUp: back, H: hide this card. Esc > Game has the tour\'s rows; F10 > Panels > Playtest tour jumps to any stop'},
       {text: 'Walk (WASD) and sprint (Shift)', check: T => T.sprinting()},
       {text: 'Leap with Space', ev: 'player.jump'},
       {text: 'Open the pack with Tab', check: T => !!T.feat('pack')?.open},
@@ -98,13 +99,13 @@ export const STOPS = [
       {text: 'Cook\'s first row: a shared pot for four. Take a spoon (E)', ev: 'pot.spoon'},
     ]},
   {id: 'meals', section: 'Gathering', title: 'Meals that do things',
-    where: 'By your fire. Esc > Sandbox > Other > Mood (dev) serves any dish',
+    where: 'By your fire. F10 > Meals: Mood (dev) serves any dish',
     world: {hour: 18.5}, setup: T => { T.give('fly_agaric', 2); T.give('blueberries', 4); },
     tasks: [
       {text: 'A meal eaten (a dish you cooked, or Mood (dev): eat it just right)', ev: 'meal.cook'},
       {text: 'Ringing pick, Eel eyes, Blue fingers, Fish come to you, Heavy as a pike: each does its own thing'},
       {text: 'Burnt turns the effect round: try one burnt'},
-      {text: 'Fly agaric broth (1 fly agaric + 2 berries), or Sandbox > Trip: 90 s of colours. The Watcher stares', ev: 'trip.start'},
+      {text: 'Fly agaric broth (1 fly agaric + 2 berries), or F10 > Trip: 90 s of colours. The Watcher stares', ev: 'trip.start'},
     ]},
   {id: 'fishing', section: 'Gathering', title: 'Fishing',
     where: 'The lake\'s west strand, a willow switch in your hand',
@@ -173,7 +174,7 @@ export const STOPS = [
       {text: 'Hold F to spin, let go to throw', ev: 'lasso.throw'},
       {text: 'Catch an animal', ev: 'lasso.catch', when: is('what', 'animal')},
       {text: 'The hare lies dazed for 2 s: E lifts it', ev: 'animal.lift'},
-      {text: 'Rope a fox: it tears loose after 1.5 s (Sandbox > Animals: go to the nearest fox)'},
+      {text: 'Rope a fox: it tears loose after 1.5 s (F10 > Animals: go to the nearest fox)'},
     ]},
   {id: 'roe', section: 'Animals', title: 'Ride out a roe deer',
     where: 'Next to a roe deer',
@@ -188,16 +189,16 @@ export const STOPS = [
     world: {hour: 6.5, weather: 'fair', wet: 1}, setup: T => { where(T, clearing); T.row('fauna', 'Animals: lay this morning\'s trails'); },
     tasks: [
       {text: 'Find your own prints in the mud, and a deer\'s, a fox\'s, a hare\'s'},
-      {text: 'Follow a fresh trail to its end: a roe bed, a fox den or a hare\'s form (Sandbox > Animals: go to the nearest roe bed)'},
+      {text: 'Follow a fresh trail to its end: a roe bed, a fox den or a hare\'s form (F10 > Animals: go to the nearest roe bed)'},
       {text: 'At a den: E reaches in', ev: 'animal.den'},
-      {text: 'Pick up a shed antler or a feather (Sandbox > Finds)', ev: 'animal.find'},
+      {text: 'Pick up a shed antler or a feather (F10 > Finds)', ev: 'animal.find'},
     ]},
   {id: 'fox', section: 'Animals', title: 'The fox and your perch',
     where: 'The clearing with a perch in the bag. This fox steals often',
     world: {hour: 15}, setup: T => { where(T, clearing); T.row('foxden', 'Fox: a perch in the bag'); },
     tasks: [
       {text: 'Tab, right-click the perch, "Put down". Walk 10 m away'},
-      {text: 'The fox comes and carries it home (or Sandbox > Fox: send it now)', ev: 'animal.theft'},
+      {text: 'The fox comes and carries it home (or F10 > Fox: send it now)', ev: 'animal.theft'},
       {text: 'Lasso it on the way and it drops the perch', ev: 'lasso.catch', when: is('what', 'animal')},
     ]},
   {id: 'lek', section: 'Animals', title: 'The capercaillie\'s lek',
@@ -236,7 +237,7 @@ export const STOPS = [
       {text: 'See a bolt come down', ev: 'thunder.strike'},
       {text: 'A struck tree burns, and can spread to its neighbours', ev: 'tree.burn'},
       {text: 'Find a sliver of thunderwood at a struck tree\'s foot', check: T => T.has('thunderwood')},
-      {text: 'Get hit (Sandbox > Thunder: a bolt on me): knocked down, never below 1 hp', ev: 'thunder.strike', when: e => !!e.you},
+      {text: 'Get hit (F10 > Thunder: a bolt on me): knocked down, never below 1 hp', ev: 'thunder.strike', when: e => !!e.you},
     ]},
   {id: 'fog', section: 'Weather', title: 'Fog at dawn',
     where: 'The lake shore at dawn in thick fog',
@@ -263,7 +264,7 @@ export const STOPS = [
     tasks: [
       {text: 'You wade: slower, you sink in a little (elk-hide boots take that away)'},
       {text: 'Hold E on snow with empty hands: a snowball. LMB throws it', ev: 'snow.throw'},
-      {text: 'Get hit by one (Sandbox > Winter: a snowball at me)', ev: 'snow.hit'},
+      {text: 'Get hit by one (F10 > Winter: a snowball at me)', ev: 'snow.hit'},
       {text: 'Your tracks in the snow: deeper when you sprint. Falling snow fills them'},
     ]},
   {id: 'ice', section: 'Winter', title: 'The frozen lake',
@@ -285,8 +286,8 @@ export const STOPS = [
     tasks: [
       {text: 'Stand still on the soft moss: you sink', ev: 'mire.sink'},
       {text: 'Space pulls you free', ev: 'mire.free'},
-      {text: 'Find the bog body (Sandbox > Mire: to the bog body)'},
-      {text: 'Flood it (Sandbox > Mire: flood it): the boardwalk keeps you dry'},
+      {text: 'Find the bog body (F10 > Mire: to the bog body)'},
+      {text: 'Flood it (F10 > Mire: flood it): the boardwalk keeps you dry'},
     ]},
   {id: 'wisps', section: 'The mire', title: 'Will-o\'-the-wisps',
     where: 'The mire at dusk. Lights over the water',
@@ -294,7 +295,7 @@ export const STOPS = [
     tasks: [
       {text: 'Follow the true wisp to where it stops'},
       {text: 'Dig there (E): one of four old things', ev: 'mire.dig'},
-      {text: 'Stuck? Sandbox > Mire: to the night\'s find'},
+      {text: 'Stuck? F10 > Mire: to the night\'s find'},
     ]},
 
   // ---------------------------------------------------------------- keepsakes and the odd things
@@ -305,7 +306,7 @@ export const STOPS = [
       {text: 'Tab > GEAR > CHARMS: wear two at a time', check: T => T.charms() >= 2},
       {text: 'Heron Feather: stand still 3 s in shallow water. E jabs at the fish', ev: 'fish.jab'},
       {text: 'Build a Keepsake Shelf (3 logs) and put one on it (E)', ev: 'keep.shelve'},
-      {text: 'Tally Stick: Sandbox > Keepsakes +1 notch ten times', ev: 'keep.notch', n: 10},
+      {text: 'Tally Stick: F10 > Keepsakes: +1 notch ten times', ev: 'keep.notch', n: 10},
       {text: 'Hover a keepsake in the pack: some cards lie, differently each time'},
     ]},
   {id: 'uncanny', section: 'Keepsakes', title: 'The uncanny forest',
@@ -315,7 +316,7 @@ export const STOPS = [
       {text: 'Walk into the trees at dusk: some of them aren\'t where they were', ev: 'uncanny.slide'},
       {text: 'Find one of the forest\'s secrets (the heron, the stones, the marks)', ev: 'uncanny.hum'},
       {text: 'Light the lantern (L) at night and look behind you'},
-      {text: 'The Watcher (Sandbox > Summon the watcher)'},
+      {text: 'The Watcher (F10 > Summon the watcher)'},
     ]},
 
   // ---------------------------------------------------------------- gear
@@ -327,6 +328,50 @@ export const STOPS = [
       {text: 'No hat, No coat, No cape, Long johns, Barefoot: each takes just that off'},
       {text: 'The pack panel sits centred, fits the window, and is the same pixel style as the gear panel'},
       {text: 'The hood, wool cap, wool sweater and fur cape say what they do against wet and cold'},
+    ]},
+  // ---------------------------------------------------------------- new tonight (each only when its feature is in the build)
+  {id: 'mods', section: 'New tonight', title: 'Runes and attachments', needs: 'mods',
+    where: 'The clearing with every weapon part in the kit and a pack of brutes to try them on',
+    world: {hour: 14}, setup: T => { where(T, clearing); T.row('mods', 'Weapon mods: every part in the kit'); T.row('mods', 'Weapon mods: a pack of brutes'); },
+    tasks: [
+      {text: 'The Gunslinger suits it best: Esc > Game > Play as'},
+      {text: 'M opens the weapon bench: fit the Rime Rune', ev: 'mods.fit'},
+      {text: 'Hit a brute three times with it: it freezes', ev: 'mods.freeze'},
+      {text: 'Swap to the Ember Rune and hit the frozen one: a steam burst', ev: 'mods.react', when: is('id', 'steam')},
+      {text: 'The Storm Rune in a pack: the hits jump from one to the next', ev: 'mods.arc'},
+      {text: 'The Fork Choke with the Moth Lens; the Kick Grip (shoot behind you to dash)'},
+    ]},
+  {id: 'stormrune', section: 'New tonight', title: 'The Storm Rune in the rain', needs: 'mods',
+    where: 'The same clearing in heavy rain: the arcs reach further when it\'s wet',
+    world: {hour: 15, weather: 'rain', wet: 1}, setup: T => { where(T, clearing); T.row('mods', 'Weapon mods: a pack of brutes'); },
+    tasks: [
+      {text: 'Storm Rune on, into the pack: arcs between them', ev: 'mods.arc', n: 5},
+      {text: 'At night the Hollow Rune flings them higher; in the mire the Rot Rune'},
+    ]},
+  {id: 'trollstone', section: 'New tonight', title: 'The troll stone', needs: 'trolls',
+    where: 'A grey troll statue shielding its eyes, a few metres north of you, by day',
+    world: {hour: 12}, setup: T => T.go(9, -14),
+    tasks: [
+      {text: 'Press E on the stone three times'},
+      {text: 'It wakes up angry for 30 s, then the sun turns it back to stone'},
+      {text: 'Small trolls live in burrows; more stones stand around the forest'},
+    ]},
+  {id: 'trollnight', section: 'New tonight', title: 'Trolls at night', needs: 'trolls',
+    where: 'Night. A big troll and a pack of small ones, about 11 m away, awake',
+    world: {hour: 21}, setup: T => { where(T, clearing); const f = T.feat('trolls'); if (f?.spawnNear) f.spawnNear('pack'); else T.row('trolls', 'Trolls: a big one and a pack'); },
+    tasks: [
+      {text: 'Fight them: the big one swings slow and heavy, the small ones swarm'},
+      {text: 'Keep them busy till dawn and watch what the sun does'},
+    ]},
+  {id: 'almanac', section: 'New tonight', title: 'The almanac', needs: 'almanac',
+    where: 'The field book, top left: chapters of goals that lead you through the world',
+    world: {hour: 9}, setup: T => where(T, clearing),
+    tasks: [
+      {text: 'Read chapter I in the card at the top left. J folds it'},
+      {text: 'Meet one of the chapter\'s goals', ev: 'almanac.goal'},
+      {text: 'Finish the chapter: its page tears out and you get its gift', ev: 'almanac.chapter'},
+      {text: 'After chapter I, "Today" has three daily goals', ev: 'almanac.today'},
+      {text: 'Tab > pack: the Almanac section has every chapter and its hints'},
     ]},
 ];
 
