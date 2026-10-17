@@ -48,7 +48,7 @@ const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'spr
   [['LMB'], 'revolver: draw · shoot'], [['RMB'], 'revolver: fan the hammer'], [['R'], 'revolver: reload'], [['V'], 'revolver: pistol whip'], [['Y'], 'tip the hat'],
   [['2', '1'], 'fists up / the gun again (the gunslinger)'], [['LMB', 'RMB'], 'fists: left / right hand (alternate: a combo; hold: a heavy; both: headbutt)'],
   [['E'], 'fists: grab a foe (again: toss)'], [['Space'], 'fists: slip a punch (then counter)'],
-  [['LMB', 'E'], 'on a tree: chop it (an axe in the bag; hold to keep chopping)'], [['Tab'], 'the pack: bag, pouch, skills, build'],
+  [['LMB', 'E'], 'on a tree: chop it (an axe in the bag; hold to keep chopping)'], [['Tab'], 'your window: where you left it'], [['I'], 'pack: gear, bag, pouch'], [['K'], 'skills'], [['B'], 'craft'], [['J'], 'journal'], [['H'], 'map'],
   [['Z', 'X'], 'turn the camera (or drag with the middle button)'], [['Home'], 'reset the camera'], [['Wheel'], 'zoom in / out'],
   [['F6'], 'camera: top-down / third person / first person (click to look around)'],
   [['M'], 'mute'], [['U'], 'music on / off'], [['F4'], 'photo mode'], [['Esc'], 'this menu']];

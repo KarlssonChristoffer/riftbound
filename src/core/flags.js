@@ -126,6 +126,8 @@ export const FLAG_DOCS = {
   rico: '1: bullets glance off metal and stone at shallow angles everywhere (sim/projectiles.js RICO); 0: never, not even at the trick-shot range; absent: on while the range stands',
   anomaly: '0: no rift anomaly in the sandbox (features/anomaly.js: a tear in the air on open ground, VISUALS ONLY, a reminder of the gameplay to come; on by default; menu > Dev > Features; docs/exp/anomaly.md)',
   bells: '1 | 0: bells and ricochet plates in the sandbox (features/bells.js, an experiment: steel plates bullets always glance off, hanging bells that ring, scattered round the Proving Grounds; off by default; the Game tab row and the Dev toggle remember on); docs/exp/bells.md',
+  panels: '0: no player window (features/panels.js: the tabbed Pack / Skills / Craft / Journal / Map window on Tab, I, K, B, J, H; ui/book.js)',
+  microbar: '0: no row of tab buttons at the bottom right (features/panels.js: a click opens that tab of the player window)',
   pack: '0: no pack (features/pack.js: the persistent world\'s bag, pouch and skills, their save, the Tab panel; docs/GATHERING.md)',
   woodcut: '0: no woodcutting (features/woodcut.js: 3 takes the axe out, LMB chops; trees fall, logs, stumps that grow back; the sandbox\'s ruins biome, a live loadout)',
   fishing: '0: no fishing (features/fishing.js, docs/FISHING.md: a rod in the main hand, LMB on water casts; the bite, the reel, the catch; the sandbox\'s ruins biome)',
