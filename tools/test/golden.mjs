@@ -7,7 +7,7 @@
 //
 //   node tools/test/golden.mjs --save tmp/golden/base                       capture the reference (current code)
 //   node tools/test/golden.mjs --compare tmp/golden/base                    capture again and compare
-//   options: --path src/ (the page folder: src/, or concepts/render3d/ in commits before the move) --only day,run --port 8141
+//   options: --path src/ (the page folder: src/, or concepts/render3d/ in commits before the move) --only day,run --port 8141 --dbg 9351 (Chrome's debug port: a second run at once needs its own)
 import {spawn} from 'node:child_process';
 import {mkdirSync, writeFileSync, readFileSync, existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -19,7 +19,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
 const SAVE = arg('save'), CMP = arg('compare'), OUT = SAVE || join(ROOT, 'tmp', 'golden', 'last');
 const PAGE = arg('path', existsSync(join(ROOT, 'src', 'index.html')) ? 'src/' : 'concepts/render3d/').replace(/^\/|\/?$/g, '') + '/';
-const PORT = +arg('port', 8141), ONLY = arg('only', '');
+const DBG = +arg('dbg', 9351), PORT = +arg('port', 8141), ONLY = arg('only', '');
 if (!SAVE && !CMP) { console.log('usage: --save <dir> | --compare <dir>'); process.exit(2); }
 
 // in the page, before any script: seeded random, a virtual clock, no rAF loop
@@ -71,16 +71,18 @@ const SCENARIOS = [
 ].filter(s => !ONLY || ONLY.split(',').includes(s[0]));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// a port another run holds: refused (two runs on one debug port drive each other's tabs; on one page port, the other tree's page)
+for (const [p, f] of [[DBG, '--dbg'], [PORT, '--port']]) { try { await fetch(`http://127.0.0.1:${p}/`); console.log(`port ${p} is taken (another run?): pass ${f} <port>`); process.exit(2); } catch {} }
 const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
 // Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run left
 // behind). 'exit' also covers an uncaught error, Ctrl+C goes through quit
 const chrome = launch('golden', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1920,1080',
-  '--remote-debugging-port=9351', 'about:blank']);
+  '--remote-debugging-port=' + DBG, 'about:blank']);
 let stopped = false;
 const stop = () => { if (stopped) return; stopped = true; chrome.kill(); try { server.kill(); } catch {} };
 const quit = code => { stop(); process.exit(code); };
 process.on('exit', stop); process.on('SIGINT', () => quit(130));
-let tabs; for (let k = 0; k < 80; k++) { try { tabs = await (await fetch('http://127.0.0.1:9351/json')).json(); if (tabs.find(t => t.type === 'page')) break; } catch {} await sleep(250); }
+let tabs; for (let k = 0; k < 80; k++) { try { tabs = await (await fetch(`http://127.0.0.1:${DBG}/json`)).json(); if (tabs.find(t => t.type === 'page')) break; } catch {} await sleep(250); }
 const ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise(r => ws.onopen = r);
 let id = 0; const pend = {}, logs = [];
 ws.onmessage = e => { const m = JSON.parse(e.data); if (pend[m.id]) { pend[m.id](m); delete pend[m.id]; }

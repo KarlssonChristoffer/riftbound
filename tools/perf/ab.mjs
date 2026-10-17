@@ -108,5 +108,9 @@ if (cnt.A.length && cnt.B.length) {
   console.log('');
   for (const [f, label] of [['draws', 'draws'], ['uniforms', 'uniform calls'], ['texCanvas', 'canvas uploads'], ['texData', 'array uploads'], ['texKB', 'upload KB'], ['heapKB', 'heap KB/frame']])
     console.log(`  ${label.padEnd(18)} A ${cm('A', f).toFixed(1).padStart(7)}  B ${cm('B', f).toFixed(1).padStart(7)}`);
+  // (the same code on both sides can sit at different world states, e.g. zoomed out with wildlife moving: draws 279 vs 340 and
+  // G.render +30% with no change at all. A draw count that differs this much says the two pages don't show the same frame)
+  const da = cm('A', 'draws'), db = cm('B', 'draws');
+  if (da > 0 && Math.abs(db / da - 1) > .05) console.log(`\n  WARNING: draws differ by ${((db / da - 1) * 100).toFixed(0)}%: the pages may not be showing the same thing (a real change in what's drawn, or a different world state); read G.render with care`);
 }
 quit(0);

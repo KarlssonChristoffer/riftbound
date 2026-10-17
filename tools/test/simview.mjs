@@ -9,7 +9,7 @@
 // FRAME RATE (the fixed step, phase 4.3): the 'keys' scenario (keyboard and world-space input only: the cursor is read
 // through a camera that moves differently at another frame rate) also runs at 240 and 30 frames a second: the sim
 // must come out the same as at 60 (its inputs change on even sixtieths, where every rate has a frame).
-//   node tools/test/simview.mjs            options: --only sandbox,run --port 8142 --path src/ (the page folder, as golden.mjs)
+//   node tools/test/simview.mjs            options: --only sandbox,run --port 8142 --dbg 9352 --path src/ (the page folder, as golden.mjs)
 import {spawn} from 'node:child_process';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -17,7 +17,7 @@ import {launch, PYTHON} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
-const PORT = +arg('port', 8142), ONLY = arg('only', ''), PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, '') + '/';
+const DBG = +arg('dbg', 9352), PORT = +arg('port', 8142), ONLY = arg('only', ''), PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, '') + '/';
 const SHIM = `(() => {
   let s = 0x2545F491 | 0;
   Math.random = () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
@@ -103,16 +103,18 @@ const DIGEST = `(() => { const R = window.__r3d, core = R.host.feature('combat')
 })()`;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// a port another run holds: refused (two runs on one debug port drive each other's tabs; on one page port, the other tree's page)
+for (const [p, f] of [[DBG, '--dbg'], [PORT, '--port']]) { try { await fetch(`http://127.0.0.1:${p}/`); console.log(`port ${p} is taken (another run?): pass ${f} <port>`); process.exit(2); } catch {} }
 const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
 // Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run left
 // behind). 'exit' also covers an uncaught error, Ctrl+C goes through quit
 const chrome = launch('simview', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1920,1080',
-  '--remote-debugging-port=9352', 'about:blank']);
+  '--remote-debugging-port=' + DBG, 'about:blank']);
 let stopped = false;
 const stop = () => { if (stopped) return; stopped = true; chrome.kill(); try { server.kill(); } catch {} };
 const quit = code => { stop(); process.exit(code); };
 process.on('exit', stop); process.on('SIGINT', () => quit(130));
-let tabs; for (let k = 0; k < 80; k++) { try { tabs = await (await fetch('http://127.0.0.1:9352/json')).json(); if (tabs.find(t => t.type === 'page')) break; } catch {} await sleep(250); }
+let tabs; for (let k = 0; k < 80; k++) { try { tabs = await (await fetch(`http://127.0.0.1:${DBG}/json`)).json(); if (tabs.find(t => t.type === 'page')) break; } catch {} await sleep(250); }
 const ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise(r => ws.onopen = r);
 let id = 0; const pend = {}, logs = [];
 ws.onmessage = e => { const m = JSON.parse(e.data); if (pend[m.id]) { pend[m.id](m); delete pend[m.id]; }
