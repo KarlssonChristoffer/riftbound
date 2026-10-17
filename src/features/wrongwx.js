@@ -17,7 +17,7 @@
 //   pack (give, store), coop (online, act, mail, net), body (soak, chill, shelter, inHut), caves (down), weather (flash),
 //   prints (stamp, surfaceAt), content/fishing.js roll. EMITS: wrongwx.begin, wrongwx.end, wrongwx.flash, wrongwx.find
 // API: F.ev (the event under way or null), F.left (the thing left: {x, y, kind, n} or null)
-// BUDGET: sim ~.005 ms a step (a few distances); view: a column of streaks, a cloud of points, a few figures on a flash frame.
+// BUDGET: sim ~.005 ms a step (a few distances); view: a column of streaks, a cloud of lit puffs (render/puffs.js), a few figures on a flash frame.
 import {TUNE} from '../content/wrongwx.js';
 import {eventAt, makeEvent} from '../sim/wrongwx.js';
 import {roll} from '../content/fishing.js';
@@ -26,6 +26,7 @@ import {FOREST} from '../world/layout.js';
 import {flags} from '../core/flags.js';
 import {mulberry32} from '../core/rng.js';
 import {rgbOf} from '../core/color.js';
+import {createPuffs} from '../render/puffs.js';
 
 const FLAG = flags.get('wrongwx'), ON = flags.get('wx2') !== '0' && FLAG !== '0' && !!FOREST;
 const OFTEN = FLAG === 'often';
@@ -255,6 +256,12 @@ export async function create(host) {
   const UP = rgbOf('#cfe4f4'), UP2 = rgbOf('#8fb4d4'), FISH = rgbOf('#c8d0d8'), FISHD = rgbOf('#6a7a88'), CLD = [rgbOf('#9aa4b0'), rgbOf('#7a8490'), rgbOf('#b8c0ca')],
     RAIN = rgbOf('#a8c0d8'), FIG = rgbOf('#0a0a0e'), LEFT = rgbOf('#f4f8ff');
   const PT = {emit: false, size: 2, alpha: 1}, PE = {emit: true, size: 2, alpha: 1};
+  // THE CLOUD's look: puffs [dx, dy, dh (m from its middle), radius (m), tone] (2026-10-17: it was 26 loose 7 px points that read as
+  // dotted squares); tones 0..1 rgb: the belly, the body, the crown
+  const puffs = host.G?.extra ? createPuffs(host.G, 12) : null;
+  const CPUFF = [[0, 0, -.15, .8, 1], [-.6, .08, -.25, .66, 0], [.62, -.05, -.2, .68, 0], [-.3, -.12, .3, .66, 1], [.32, .12, .35, .62, 2],
+    [0, .2, .55, .55, 2], [-.95, -.04, .02, .48, 1], [.98, .08, .02, .5, 1], [.04, -.25, -.35, .6, 0]];
+  const CTINT = [[.42, .45, .52], [.58, .61, .67], [.76, .79, .84]];
   const pt = (x, y, h, c, size, alpha, emit) => { const o = emit ? PE : PT; o.size = size; o.alpha = alpha; host.point(x, y, h, c, o); };
   F.frame = f => {
     if (!live) return;
@@ -267,7 +274,11 @@ export async function create(host) {
     }
     if (cur.kind === 'cloud') {
       const h = elev(cl.x, cl.y) + CL.h;
-      for (let i = 0; i < 26; i++) { const a = i * 2.39996, q = Math.sqrt(i / 26) * 1.5, wob = Math.sin(t * .7 + i) * .08; pt(cl.x + Math.cos(a) * q + wob, cl.y + Math.sin(a) * q * .8, h + Math.cos(i * 1.7) * .25 + (1.5 - q) * .3, CLD[i % 3], 7, .85); }
+      if (puffs) {   // a lumpy grey cloud of lit pixel puffs (render/puffs.js), the dark belly low, the light crown on top, each lobe bobbing
+        const PPM = host.PPM || 16;
+        for (let i = 0; i < CPUFF.length; i++) { const c = CPUFF[i], b = Math.sin(t * .6 + i * 1.3) * .06; puffs.put(cl.x + c[0], cl.y + c[1], h + c[2] + b, c[3] * PPM, CTINT[c[4]], 0, 1, i % 8, 0, .5); }
+        puffs.frame();
+      } else for (let i = 0; i < 26; i++) { const a = i * 2.39996, q = Math.sqrt(i / 26) * 1.5, wob = Math.sin(t * .7 + i) * .08; pt(cl.x + Math.cos(a) * q + wob, cl.y + Math.sin(a) * q * .8, h + Math.cos(i * 1.7) * .25 + (1.5 - q) * .3, CLD[i % 3], 7, .85); }
       for (let i = 0; i < cn; i++) host.line(cX[i], cY[i], cH[i], cX[i], cY[i], cH[i] + .35, RAIN);
     }
     if (cur.kind === 'still' && ph === 2) for (const [x, y] of st.figs) {   // the figures: tall, thin, dark, still
