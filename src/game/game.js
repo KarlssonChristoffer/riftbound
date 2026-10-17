@@ -166,7 +166,7 @@ export async function createGame(host) {
   // the sandbox find their way round walls on the game's nav (built for them on demand: SB.nav). Nothing changes in the
   // sandbox anywhere else.
   const SB = {down: -1, heal: 12, nav: false, calm: 12, wait: 0};   // (calm: s the healing waits after a world hurt, below)
-  const fightOn = foes => !!foes?.stakes || core.enemies.length > 0;
+  const fightOn = foes => !!foes?.stakes || core.enemies.length > 0 || !!host.feature('trolls')?.stakes;   // (a troll fighting you: features/trolls.js)
   function stakes(dt, evs) {
     const foes = host.feature('foes');
     if (SB.down >= 0) {
@@ -342,7 +342,7 @@ export async function createGame(host) {
   };
 
   // start: the title, or straight into a mode (a run starts on the first frame: the host is still booting now)
-  const m = Q.get('mode');
+  const m = Q.get('mode') || (Q.get('tour') ? 'sandbox' : null);   // (?tour: the playtest tour plays in the sandbox: features/tour.js)
   if (m === 'sandbox') toSandbox();
   else { toTitle(); if (m === 'run') { screens.hide(); boot = startRun; } }
   return F;

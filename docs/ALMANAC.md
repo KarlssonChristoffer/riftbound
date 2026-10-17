@@ -8,7 +8,7 @@ couldn't do at the start.
 ## What you see
 
 - **The card**, top left (sandbox worlds only): the chapter you're on, its goals with a tick box and a count, then
-  **Today**. J folds it to a small tab. Tab opens the pack; its Almanac section shows every chapter, the hints and the
+  **Today**. Shift+J folds it to a small tab (a plain J is the Journal once the tabbed player window lands). Tab opens the pack; its Almanac section shows every chapter, the hints and the
   pages torn out so far.
 - **The pointer**: a small gold chevron on a ring round the player, toward the first unfinished goal that has a place
   (the cave's mouth, then the camp, the nearest vein of the right kind). The distance shows beside that goal.
@@ -48,7 +48,7 @@ own almanac in their own save. The party goal counts a friend's events too, whil
 ## Try it
 
 - `?chapter=3` starts at chapter III (1-6). `?almanac=0` turns it off.
-- Esc > Sandbox: rows to finish the chapter, finish Today, reset the almanac.
+- F10 (the dev menu) > Gathering > Almanac: rows to finish the chapter, finish Today, reset the almanac.
 - `node tools/test/almanac.mjs`: the data, Today's roll and the feature with a fake host.
 
 ## Files

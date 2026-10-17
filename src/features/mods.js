@@ -3,7 +3,7 @@
 // a TIP how the shot flies (a fork, a sighted barrel, a moth lens, a bent bough, a heavy slug, a glancing lip, a prism, a
 // staff's caster crystal), a GRIP a trigger that bends a rule (a hair trigger, a kick, an echo, a weather vane, the last word).
 // Types meet on a target (fire on frozen: a steam burst; storm on burning: a flashover; ...: content/mods.js REACT), and the
-// weather, the ground and the hour change them. Parts turn up round the world (content/mods.js FINDS); M opens the weapon
+// weather, the ground and the hour change them. Parts turn up round the world (content/mods.js FINDS); Shift+M opens the weapon
 // bench (ui/modpanel.js) to fit them.
 //   mods/sim.js    the truth: the kit, the shots' tags, the hits, the statuses, the finds        content/mods.js   the numbers
 //   mods/look.js   the view: trails, statuses, arcs, bursts, the dropped parts, the toasts      ui/modpanel.js    the bench
@@ -46,7 +46,8 @@ export async function create(host) {
   sim.setDirty(() => pack()?.dirty?.());
   const look = createModsLook(host, sim);
   if (Q === 'all') for (const id of PART_IDS) if (!sim.S.own[id]) sim.S.own[id] = 1;
-  const weaponId = () => wfn ? wfn() : host.weapon?.id || '';
+  // the weapon in hand: whoever handed one over (setWeapon), else the melee feature's blade or staff, else the gun or bow
+  const weaponId = () => wfn ? wfn() : host.feature('melee')?.weapon?.() || host.weapon?.id || '';
   let wfn = null;
   sim.setWeapon(() => weaponId());
 
@@ -65,6 +66,10 @@ export async function create(host) {
 
   // ---- the bench ----
   let sel = 'rune', open = false, mountEl = null;
+  // the game's tabbed window (features/panels.js) mounts the bench as its 'weapon' tab when it's in the game; else our own box.
+  // Shift+M either way (plain M is audio's mute, every other letter is taken)
+  const panels = () => host.feature('panels');
+  const shown = () => mountEl ? !!(panels()?.isOpen && panels().tabId === 'weapon') : open;
   const ICON = {}, icon = id => ICON[id] ??= iconURL(PARTS[id].icon, PARTS[id].pal);
   const wname = w => WEAPONS[w]?.name || KNOWN[w]?.name || w;
   const partCol = id => PARTS[id].elem ? ELEM[PARTS[id].elem].col : '#efe6cf';
@@ -91,9 +96,12 @@ export async function create(host) {
     else if (a === 'fit') sim.fit(wid, kind, sel, v);
     else if (a === 'out') sim.fit(wid, kind, v, '');
     host.uiSound?.(a === 'fit' ? 'confirm' : 'click');
-    if (open) panel.show(model(), mountEl);
+    if (shown()) panel.show(model(), mountEl);
   }});
-  function setOpen(on) { open = on && ON; if (open) panel.show(model(), mountEl); else panel.hide(); }
+  function setOpen(on) {
+    const W = panels(); if (W?.open && mountEl) { if (on) W.open('weapon'); else if (shown()) W.close(); return; }
+    open = on && ON; if (open) panel.show(model(), mountEl); else panel.hide();
+  }
 
   // a pack of hunting brutes round (x, y) (the sandbox's row: something to burn, freeze and shatter)
   function spawnPack(n, x, y) {
@@ -112,28 +120,29 @@ export async function create(host) {
     name: 'mods', label: 'Weapon mods', on: ON, sim, look,
     give: id => sim.give(id), fit: (wid, slot, id) => sim.fit(wid, sim.kindOfW(wid), slot, id), elemOf: wid => sim.elemOf(wid, false),
     setWeapon(fn) { wfn = fn; notesKey = ''; },
-    tab: {id: 'weapon', title: 'WEAPON', key: 'm', mount(el) { mountEl = el; open = true; panel.show(model(), el); }, unmount() { mountEl = null; open = false; panel.hide(); },
-      refresh() { if (open) panel.show(model(), mountEl); }},
+    tab: {id: 'weapon', title: 'Weapon', mount(el) { mountEl = el; open = false; panel.show(model(), el); }, unmount() { mountEl = null; panel.hide(); },
+      refresh() { if (mountEl) panel.show(model(), mountEl); }},
     arrow(a) { if (ON) sim.shot(a); },
     onArrowHit(a, p) { if (ON) sim.onArrowHit(a, p); },
-    onKey(k) {
-      if (!ON || k !== 'm' || host.lock) return false;
-      setOpen(!open); return true;
+    onKey(k, e) {
+      if (!ON || k !== 'm' || !e?.shiftKey || host.lock) return false;   // (onKey runs before audio's M toggle: plain M stays mute)
+      setOpen(!shown()); return true;
     },
     update(dt, evs) {
       if (!ON) return;
       if (!coreHooked) { const c = host.feature('combat')?.core; if (c?.hitMod) { c.hitMod(sim.hitMod, true); coreHooked = true; } }
+      sim.setHits(host.feature('hits'));
       if (saveObj !== (pack()?.store?.('mods') ?? mem)) sim.load();
       for (const e of evs) if (e.type === 'pack.reset') sim.load();
       notes();
       sim.step(dt, evs);
     },
     view(dt) { if (ON) look.view(dt); },
-    frame(f) { if (!ON) return; look.frame(f); if (open && !mountEl) panel.show(model()); },
+    frame(f) { if (!ON) return; look.frame(f); if (shown()) panel.show(model(), mountEl); },
     lights: () => ON ? look.lights() : [],
     // the type the weapon in hand deals now, in a small pixel chip bottom left (only once something is fitted)
     hd(q) {
-      if (!ON || host.hudOff || open) return;
+      if (!ON || host.hudOff || shown()) return;
       const wid = weaponId(), f = sim.fitOf(wid); if (!f || !SLOTS.some(s => f[s])) return;
       const E = ELEM[sim.elemOf(wid)], u = hdUnit(), H = q.canvas.height;
       const s = E.name.toUpperCase(), n = SLOTS.filter(k => f[k]).length;
@@ -155,11 +164,11 @@ export async function create(host) {
         {label: 'Weapon mods: every part in the kit', run: () => { for (const id of PART_IDS) if (!sim.S.own[id]) sim.give(id); }},
         {label: 'Weapon mods: a pack of brutes to try them on', run: () => spawnPack(6, P.x - Math.sin(a) * 7, P.y - Math.cos(a) * 7)},
         {label: 'Weapon mods: drop a part you don\'t have at your feet', run: () => { const id = PART_IDS.find(k => !sim.S.own[k]); if (id) sim.drop(id, P.x + 1.2, P.y); }},
-        {label: 'Weapon mods: open the weapon bench (M)', run: () => setOpen(true)},
+        {label: 'Weapon mods: open the weapon bench (Shift+M)', run: () => setOpen(true)},
         {label: 'Weapon mods: a fresh kit', run: () => { const o = saved(); for (const k in o) delete o[k]; sim.load(); pack()?.dirty?.(); }},
       ];
     },
-    dispose() { host.mods.clear('mods'); panel.hide(); },
+    dispose() { host.mods.clear('mods'); sim.setHits(null); panel.hide(); },
   };
   return F;
 }

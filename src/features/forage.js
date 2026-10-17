@@ -269,7 +269,7 @@ export async function create(host) {
       wantI = i; byE = true; host.PL.useE?.(); return true;
     },
     lmb(down) {   // (not with the gun drawn or a foe under the cursor: that press is the gun's)
-      if (!down || !active() || !free() || host.player.state === 'draw' || host.aim?.()?.target) return false;
+      if (!down || !active() || !free() || host.player.state === 'draw' || host.aim?.()?.target || host.PL?.melee?.on) return false;   // (a weapon out: the press is its swing)
       const i = underCursor(); if (i < 0) return false;
       lmbI = i; return true;
     },

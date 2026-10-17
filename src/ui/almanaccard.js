@@ -1,6 +1,6 @@
 // THE ALMANAC'S CARD (docs/ALMANAC.md): the chapter you're on, top left, in a pixel frame on the HD layer (ui/hdpixel.js):
 // its name, its goals (a box each: ticked when done, the count beside it), the pointer's distance on the goal it points for,
-// then Today's three. A chapter just done shows its name, "done" and its page for a while instead. Folded (J): a small tab.
+// then Today's three. A chapter just done shows its name, "done" and its page for a while instead. Folded (Shift+J): a small tab.
 // And the POINTER: a small pixel arrow on a ring round the player, toward what the first goal with a place asks for.
 //   const card = createAlmanacCard(); card.set(model) (a new model: laid out again on the next draw) / card.draw(q, u, W, H)
 //   card.arrow(q, x, y, dx, dy, u, col) (screen px: the player's point, the unit way)

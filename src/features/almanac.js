@@ -4,7 +4,7 @@
 // never an explanation) and gives its gift. From chapter II on, TODAY: three small things a world's day, rolled from the world's
 // seed and its day (the same for everyone in that world; online the third is the party's: friends' fells and picks count too),
 // a gift each and a bonus for all three.
-//   THE CARD    top left (ui/almanaccard.js): the chapter, its goals with their counts, Today. J folds it to a tab and back.
+//   THE CARD    top left (ui/almanaccard.js): the chapter, its goals with their counts, Today. Shift+J folds it to a tab and back.
 //   THE POINTER a small arrow round the player toward what the first unfinished goal with a place asks for (WHERE: the cave's
 //               mouth, the miner's camp, the nearest unspent vein of a kind), its distance on that goal's line.
 //   THE PANEL   Tab: a section with every chapter (done ones with their pages, the current one's goals with their hints, the
@@ -183,7 +183,7 @@ export async function create(host) {
   let farTxt = '', farD = -1;
   function model(s) {
     const c = chapter(s), fold = !!s.fold;
-    const M = {title: '', rows: [], today: null, page: null, fold, hot, key: 'J'};
+    const M = {title: '', rows: [], today: null, page: null, fold, hot, key: 'Shift+J'};
     if (pageT > 0 && pageOf) M.page = {title: pageOf.name, text: pageOf.page};
     else if (c) {
       M.title = c.name;
@@ -232,8 +232,8 @@ export async function create(host) {
     state: () => S(),
     html: () => sectionHTML(),
     claims: k => ON && k === 'j',
-    onKey(k) {
-      if (!ON || k !== 'j' || host.lock) return false;
+    onKey(k, e) {   // Shift+J folds the card (a plain J is the player window's Journal, where the almanac's page is)
+      if (!ON || k !== 'j' || !e?.shiftKey || host.lock) return false;
       queue.push(() => { const s = S(); if (s) { s.fold = !s.fold; pack().dirty(); ver++; } });
       return true;
     },
@@ -241,7 +241,7 @@ export async function create(host) {
       if (!ON) return;
       const s = S(); if (!s) return;
       applyStart(s);
-      if (!sectionAdded) { sectionAdded = true; pack().section({id: 'almanac', title: 'Almanac', ver: () => ver, html: esc => sectionHTML(esc)}); }
+      if (!sectionAdded) { sectionAdded = true; pack().section({id: 'almanac', title: 'Almanac', order: 0, ver: () => ver, html: esc => sectionHTML(esc)}); }   // (order 0: the Journal's first page)
       while (queue.length) queue.shift()();
       if (game()?.mode !== 'sandbox') return;
       todayRoll(s);
@@ -270,6 +270,7 @@ export async function create(host) {
         if (l > 1e-3) { q.save(); host.G.hdShift?.(q, sc); card.arrow(q, ax * sc, ay * sc, ux / l, uy / l, u); q.restore(); }
       }
     },
+    dev: {group: 'Gathering'},   // (its menu rows: F10's dev menu, Gathering > Almanac)
     menu() {
       if (!ON || game()?.mode !== 'sandbox') return [];
       return [

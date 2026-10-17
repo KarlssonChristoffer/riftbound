@@ -7,8 +7,8 @@ damage... runes or fire bullets"). Code: `src/features/mods.js` (the feature), `
 ## Try it
 
 `?mode=sandbox&forest=1&seed=1337`. Play the Gunslinger or the Outlaw (Esc > Character) for the revolvers, the Ranger for the bow.
-Esc > Sandbox > Other: **Weapon mods: every part in the kit**, then **a pack of brutes to try them on**. **M** opens the weapon
-bench. `?mods=all` starts with every part; `?mods=0` turns it all off.
+F10 (the dev menu) > Combat: **Weapon mods: every part in the kit**, then **a pack of brutes to try them on**. **Shift+M** opens the
+weapon bench (a tab of the game's window when that's in the game, else its own box). `?mods=all` starts with every part; `?mods=0` turns it all off.
 
 ## Slots
 
@@ -65,7 +65,7 @@ another rune, or a friend later.
 
 ## Where parts turn up
 
-You set out with the Ember Rune (fitted on every weapon), the Fork Choke, the Sighted Barrel and the Hair Trigger. The rest are
+You set out with four Ember Runes (fitted on the revolvers and the bow, one spare for a blade or a staff), the Fork Choke, the Sighted Barrel and the Hair Trigger. The rest are
 found, and the bench shows each one you haven't found as a riddle:
 
 | Part | Where |
@@ -96,6 +96,11 @@ A dropped part stands glowing over the ground where it turned up: walk over it. 
 - A hit (`F.onArrowHit`, ahead of combat; it returns nothing) runs the reaction and the status, and leaves the damage's factor for
   combat's own damage through its hit mod (`core.hitMod`). A melee blow (`by: 'melee'`, the pistol whip now; the melee weapons
   later) gets the weapon in hand's type in the same hit mod.
+- With the melee weapons' shared hit model in the game (`host.feature('hits')`, briefs/combat-shared.md) a blow goes through
+  its rider instead (`H.rider('mods', ...)`): the reaction and the status run here, 30% of the blow becomes the rune's type
+  (`hit.extra`: fire, frost, shock for Storm, venom for Rot, void), hits ticks the burns and the rot, and ours stop. The weapon in
+  hand is the melee feature's (`weapon()`); a `staff` class is a staff, the rest are blades. A Caster Crystal staff looses its
+  bolt on `melee.swing`, toward the aim.
 - Statuses tick their damage through combat's damage (`by: 'mods'`), freeze with `core.root`, throw with `core.launch`, pull with
   `core.shift`, explode with `core.explode`.
 - The gun in hand's tip and grip notes go to the modifier source `mods` (`weapon.spread`, `weapon.dmg`, `weapon.gap`,

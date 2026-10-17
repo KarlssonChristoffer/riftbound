@@ -25,7 +25,7 @@
 // EMITS: mods.find, mods.react, mods.freeze, mods.shatter, mods.arc, mods.swap (core/events.js).
 // BUDGET: sim: a WeakMap lookup per shot spawned and hit; per status a few multiplies a step; a near() query per storm hit, per
 //   moth shot every 6 steps; nothing at all while no part is fitted and nothing burns.
-import {ELEM, ELEM_IDS, REACT, PARTS, PART_IDS, KNOWN, START, FINDS, STREAK, CAVE_GROW, PICK, kindOf} from '../../content/mods.js';
+import {ELEM, ELEM_IDS, REACT, PARTS, PART_IDS, KNOWN, START, FINDS, STREAK, CAVE_GROW, PICK, HITS_SHARE, kindOf} from '../../content/mods.js';
 import {WEAPONS} from '../../content/weapons.js';
 import {simRandom} from '../../core/rng.js';
 import {hypot2, clamp} from '../../core/mathx.js';
@@ -45,7 +45,7 @@ export function createModsSim(host, saved) {
   // ---- the kit ----
   function load() {
     const o = saved();
-    if (!o.own) { o.own = {}; for (const id of START.own) o.own[id] = 1; o.fit = JSON.parse(JSON.stringify(START.fit)); o.seen = {}; }
+    if (!o.own) { o.own = {}; Object.assign(o.own, START.own); o.fit = JSON.parse(JSON.stringify(START.fit)); o.seen = {}; }
     S.own = o.own; S.fit = o.fit; S.seen = o.seen ??= {};
     for (const id in S.own) if (!PARTS[id]) delete S.own[id];   // (a part since renamed)
     S.ver++;
@@ -79,7 +79,9 @@ export function createModsSim(host, saved) {
   }
 
   // ---- what the weapon in hand is ----
-  const kindOfW = wid => WEAPONS[wid]?.kind || KNOWN[wid]?.kind || 'melee';
+  // a melee weapon of the melee feature (content/melee.js): a staff class is a staff, every other class a blade
+  const meleeW = wid => host.feature('melee')?.WEAPONS?.[wid];
+  const kindOfW = wid => WEAPONS[wid]?.kind || KNOWN[wid]?.kind || (meleeW(wid)?.cls === 'staff' ? 'staff' : 'melee');
   // the type a shot or blow of weapon wid deals now (advances the Prism's turn when `shot`)
   function elemOf(wid, shot = false) {
     const f = fitOf(wid); if (!f) return 'phys';
@@ -276,7 +278,7 @@ export function createModsSim(host, saved) {
   function hitMod(p, o, M) {
     if (o.by === 'mods') return;
     if (CUR.p === p) { M.dmg *= CUR.mul; CUR.p = null; return; }
-    if (o.by === 'melee' || o.by === 'throw') {
+    if ((o.by === 'melee' || o.by === 'throw' || o.by === 'thrown') && !H) {
       const wid = o.weapon || weaponId(); if (!wid) return;
       const e = o.elem || elemOf(wid, true);
       if (e !== 'phys' || ST.has(p)) M.dmg *= hit(p, e, o.dmg ?? 10, {});
@@ -284,6 +286,31 @@ export function createModsSim(host, saved) {
   }
   let weaponId = () => host.weapon?.id || '';
   const setWeapon = fn => { weaponId = fn; };
+
+  // ---- the shared hit model (features/hits.js, briefs/combat-shared.md), when it's in the game ----
+  // Its rider sees every player blow: the rune's reaction and status run here (ST, for the reactions), a share of the blow
+  // becomes the rune's type (hits' `extra`, so hits starts its own status and shows the colour), and our own burn / rot
+  // ticks stop (hits ticks them). Shots keep their own path (F.arrow / onArrowHit) and are skipped here.
+  let H = null;
+  const HTYPE = {fire: 'fire', frost: 'frost', storm: 'shock', rot: 'venom', void: 'void'};
+  // the player's own blows (a swing, the air smash, the thrown blade, a shield bash); not the status ticks or a parried bullet
+  const BLOWS = new Set(['melee', 'smash', 'thrown', 'throw', 'bash']);
+  function rider(h, target) {
+    if (!h || !BLOWS.has(h.by) || (h.from && typeof h.from === 'object' && TAGS.has(h.from))) return;
+    const wid = h.weapon || weaponId(); if (!wid) return;
+    const e = elemOf(wid, true);
+    if (e === 'phys' && !ST.has(target)) return;
+    const mul = hit(target, e, h.dmg ?? 10, {});
+    const part = e === 'phys' ? 0 : Math.max(1, Math.round((h.dmg ?? 10) * HITS_SHARE));
+    h.dmg = Math.max(0, (h.dmg ?? 10) - part) * mul;
+    if (part) { const t = HTYPE[e]; h.extra = h.extra || {}; h.extra[t] = (h.extra[t] || 0) + part * mul; }
+  }
+  function setHits(h) {
+    if (h === H) return;
+    H?.rider?.('mods', null);
+    H = h || null;
+    H?.rider?.('mods', rider);
+  }
 
   // ---- each step ----
   const near = (x, y, r, fn) => { for (const q of ents.near(x, y, r, nearB)) if (foe(q) && hypot2(q.x - x, q.y - y) < r) fn(q); };
@@ -293,7 +320,7 @@ export function createModsSim(host, saved) {
     for (const e of evs) {
       if (e.type === 'enemy.kill' || e.type === 'prop.break') fell(e.who, e.type === 'enemy.kill');
       const L = FINDS[e.type]; if (L) for (const f of L) maybeFind(f, e);
-      if (e.type === 'player.melee' || e.type === 'player.swing') castBolt(e);
+      if (e.type === 'player.melee' || e.type === 'player.swing' || e.type === 'melee.swing') castBolt(e);
     }
     // statuses
     for (const [p, s] of ST) {
@@ -301,12 +328,12 @@ export function createModsSim(host, saved) {
       if (s.burn > 0) {
         const B = ELEM.fire.burn, k = raining(p.x, p.y) ? B.rain : 1;
         s.burn -= dt * (k < 1 ? 2 : 1); s.bAcc += dt;
-        if (s.bAcc >= B.tick) { s.bAcc -= B.tick; C?.damage(p, Math.max(1, Math.round(B.dps * B.tick * k)), {quiet: true, by: 'mods', elem: 'fire'}); }
+        if (s.bAcc >= B.tick) { s.bAcc -= B.tick; if (!H) C?.damage(p, Math.max(1, Math.round(B.dps * B.tick * k)), {quiet: true, by: 'mods', elem: 'fire'}); }
       }
       if (s.rot > 0) {
         const T = ELEM.rot.rot, k = (host.feature('mire')?.depth || 0) > 0 ? T.mire : 1;
         s.rot -= dt / k; s.rAcc += dt;
-        if (s.rAcc >= T.tick) { s.rAcc -= T.tick; C?.damage(p, Math.max(1, Math.round(T.dps * s.rotN * T.tick * k)), {quiet: true, by: 'mods', elem: 'rot'}); }
+        if (s.rAcc >= T.tick) { s.rAcc -= T.tick; if (!H) C?.damage(p, Math.max(1, Math.round(T.dps * s.rotN * T.tick * k)), {quiet: true, by: 'mods', elem: 'rot'}); }
         if (s.rot <= 0) s.rotN = 0;
       }
       if (s.chill > 0 && (s.chillT -= dt) <= 0) s.chill = 0;
@@ -378,10 +405,13 @@ export function createModsSim(host, saved) {
   // the staff's crystal: each swing looses a bolt of its rune (a swing event: the melee weapons' own, or the pistol whip's)
   function castBolt(e) {
     const wid = e.weapon || e.gun || weaponId(); if (!wid || kindOfW(wid) !== 'staff' || fitOf(wid)?.tip !== 'caster_crystal') return;
-    const B = PARTS.caster_crystal.bolt, l = Math.hypot(e.vx, e.vy) || 1, ux = e.vx / l, uy = e.vy / l;
-    host.spawnArrow({x: e.x + ux * .6, y: e.y + uy * .6, h: (e.z || 0) + 1.1, vx: ux * B.speed, vy: uy * B.speed, vh: .45, life: B.life, dmg: B.dmg, kind: 'arrow', wid, bolt: true});
+    // the melee feature's swing names no place or way: the player's, toward the aim
+    let x = e.x, y = e.y, vx = e.vx, vy = e.vy;
+    if (x === undefined) { const P = host.player, A = host.aim?.(); if (!P) return; x = P.x; y = P.y; vx = (A?.x ?? P.x + 1) - P.x; vy = (A?.y ?? P.y) - P.y; }
+    const B = PARTS.caster_crystal.bolt, l = Math.hypot(vx, vy) || 1, ux = vx / l, uy = vy / l;
+    host.spawnArrow({x: x + ux * .6, y: y + uy * .6, h: (e.z || 0) + 1.1, vx: ux * B.speed, vy: uy * B.speed, vh: .45, life: B.life, dmg: B.dmg, kind: 'arrow', wid, bolt: true});
   }
 
   return {S, ST, drops, TAGS, echoes, load, give, fit, free, fitOf, elemOf, skyElem, kindOfW, shot, onArrowHit, hitMod, step, setWeapon, drop,
-    setDirty: fn => { dirty = fn; }, hit};
+    setDirty: fn => { dirty = fn; }, hit, setHits, rider};
 }
