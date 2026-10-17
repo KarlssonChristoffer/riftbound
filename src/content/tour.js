@@ -379,14 +379,14 @@ export const STOPS = [
     tasks: [
       {text: 'Walk three laps round the stones: the chip bottom left counts them'},
       {text: 'The third lap brings a bolt onto the altar, and a storm', ev: 'thunder.strike'},
-      {text: 'Stuck? F10 > Surprises: the rain dance, done'},
+      {text: 'Stuck? F10 > Nature > Night surprises: the rain dance, done'},
     ]},
   {id: 'fishrain', section: 'Night surprises', title: 'Raining fish, and charged', needs: 'surprises',
     where: 'Out in a thunderstorm',
     world: {hour: 15, weather: 'storm', wet: 1}, setup: T => { where(T, clearing); T.row('surprises', 'Surprise: rain fish on me'); },
     tasks: [
       {text: 'Fish fall out of the clouds and flop about: walk over them'},
-      {text: 'Stay out till a bolt hits you (or F10 > Surprises: get struck)', ev: 'thunder.strike', when: e => !!e.you},
+      {text: 'Stay out till a bolt hits you (or F10 > Nature > Night surprises: get struck)', ev: 'thunder.strike', when: e => !!e.you},
       {text: 'Storm-charged: sprint, jump and land for a thunderclap; wade in and fish float up'},
       {text: 'Carry a thunderwood splinter: the bolts come for you'},
     ]},
@@ -394,7 +394,7 @@ export const STOPS = [
     where: 'A clear night. One lands near you within about 15 s',
     world: {hour: 23, weather: 'clear'}, setup: T => where(T, clearing),
     tasks: [
-      {text: 'Watch the sky: a star falls nearby (or F10 > Surprises: a star falls near me)'},
+      {text: 'Watch the sky: a star falls nearby (or F10 > Nature > Night surprises: a star falls near me)'},
       {text: 'Walk over the shard to take it'},
       {text: 'Take it to the lake shore, wade in and fish: bites at once (the star frenzy)', ev: 'fish.bite'},
     ]},
