@@ -8,6 +8,10 @@ import {createHash} from 'node:crypto';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const MAX_MSG = 1 << 20;   // a message larger than 1 MB closes the connection (a client never sends one)
+// THE HEARTBEAT: a ping frame every BEAT_MS; a connection that sent nothing (not even the pong, which the browser answers
+// itself, a hidden tab too) for DEAD_MS is gone (wifi dropped, a laptop shut): closed, so the room says 'leave' and nobody is
+// left standing frozen in the others' worlds
+const BEAT_MS = 10000, DEAD_MS = 35000, PING = Buffer.alloc(0);
 
 export function attachWs(server, path, onConnection) {
   server.on('upgrade', (req, socket) => {
@@ -32,7 +36,7 @@ function frame(op, payload) {
 }
 
 function wrap(socket, req) {
-  let buf = Buffer.alloc(0), parts = [], partOp = 0, open = true;
+  let buf = Buffer.alloc(0), parts = [], partOp = 0, open = true, rx = Date.now();
   const conn = {
     ip: req.socket.remoteAddress, onmessage: null, onclose: null,
     get open() { return open; },
@@ -43,8 +47,14 @@ function wrap(socket, req) {
       socket.write(frame(8, p)); end();
     },
   };
-  function end() { if (!open) return; open = false; socket.end(); conn.onclose?.(); }
+  const beat = setInterval(() => {
+    if (!open) return;
+    if (Date.now() - rx > DEAD_MS) { socket.destroy(); end(); return; }
+    socket.write(frame(9, PING));
+  }, BEAT_MS);
+  function end() { if (!open) return; open = false; clearInterval(beat); socket.end(); conn.onclose?.(); }
   socket.on('data', d => {
+    rx = Date.now();
     buf = buf.length ? Buffer.concat([buf, d]) : d;
     for (;;) {
       if (buf.length < 2) return;

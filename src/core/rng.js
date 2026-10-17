@@ -13,6 +13,9 @@ export const simSeed = () => Math.floor(Math.random() * 4294967296);
 const VIEW_SEED = simSeed();
 export const nameHash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h | 0; };
 export const viewRandom = name => mulberry32(VIEW_SEED ^ nameHash(name));
+// a sim system's own generator from the same session seed (no draw of its own: golden's seeded Math.random isn't shifted, and
+// unlike a simSeed() drawn at its first use it doesn't depend on how many frames ran before it: simview's frame rates)
+export const simRandom = name => mulberry32(VIEW_SEED ^ nameHash('sim:' + name));
 export function mulberry32(seed) {
   let s = seed | 0;
   const R = () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };

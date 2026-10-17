@@ -26,7 +26,7 @@ import {readFileSync, writeFileSync, existsSync} from 'node:fs';
 import {cpus} from 'node:os';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {launch} from '../lib/chrome.mjs';
+import {launch, PYTHON} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..'), BASE = join(ROOT, 'tools', 'perf', 'baseline.json');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; }, flag = k => process.argv.includes('--' + k);
@@ -41,6 +41,7 @@ const SPAWN = `(() => { const R = window.__r3d, C = R.host.feature('combat').cor
   for (let i = 0; i < ${HORDE}; i++) { const r = 3.5 + (i % 4) * 1.6, a = i * 2.39996; C.spawnBrute({x: x + Math.cos(a) * r, y: y + Math.sin(a) * r * .7, hp: 1e6, dmg: 0, type: 'brute', name: 'Brute', coins: [0, 0]}); } })()`;
 // zoomed out as far as the wheel goes (render/camera.js: half the window's scale): the worst case for the view's cost
 const ZOOM_OUT = `(() => { window.__r3d.zoom = .5; })()`;
+const FOREST = 'mode=sandbox&seed=1337&weather=fair';
 const SCENARIOS = [
   {name: 'day',         q: 'mode=sandbox',                            note: 'ruins, day: sun shadows, 3D trees'},
   {name: 'night-fires', q: 'mode=sandbox&biome=ember&time=night',     note: 'ember, night: every fire and light'},
@@ -51,6 +52,14 @@ const SCENARIOS = [
   {name: 'snow',        q: 'mode=sandbox&weather=snow&season=winter', note: 'ruins, winter: snowfall, bare crowns'},
   {name: 'horde',       q: 'mode=sandbox', drive: SPAWN, whole: true, note: `ruins, day: ${HORDE} enemies round the player`},
   {name: 'zoomed-out',  q: 'mode=sandbox', drive: ZOOM_OUT,             note: 'ruins, day, zoomed all the way out: the most world on screen'},
+  // the forest (seed 1337: world/forest.js), the game's own world since 2026-10-11. Points: a clearing in the home woods, the
+  // lake's south shore (3 m off the water), a room in the cave (its first big chamber)
+  {name: 'forest',      q: `${FOREST}&at=12,-22&hour=11`,               note: 'forest, day: the home woods'},
+  {name: 'forest-walk', q: `${FOREST}&at=12,-22&hour=11`, drive: WALK, note: 'forest, day, walking a square'},
+  {name: 'forest-night', q: `${FOREST}&at=12,-22&time=night`,          note: 'forest, night: the lantern'},
+  {name: 'forest-zoomed-out', q: `${FOREST}&at=12,-22&hour=11`, drive: ZOOM_OUT, note: 'forest, day, zoomed all the way out'},
+  {name: 'lake',        q: `${FOREST}&at=-3.7,-28&hour=8`,              note: 'the lake at morning: water, mist'},
+  {name: 'cave',        q: `${FOREST}&at=34.4,-212.75&hour=11`,         note: 'the cave: its first chamber'},
 ].filter(s => !ONLY || ONLY.split(',').some(o => s.name.includes(o)));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -66,7 +75,7 @@ async function cpuBusy(ms = 1500) {
   return 1 - (b.idle - a.idle) / Math.max(1, b.all - a.all);
 }
 const LOAD0 = await cpuBusy();
-const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
+const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
 // Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run left
 // behind). 'exit' also covers an uncaught error, Ctrl+C goes through quit
 const chrome = launch('bench', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit', '--enable-precise-memory-info',

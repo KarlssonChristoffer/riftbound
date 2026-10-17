@@ -23,6 +23,15 @@ Tab opens the pack (features/pack.js: bag, pouch, skills) and the gear panel bes
 clothes). Point at a piece for a card with what it is, what it does now and what it will do later ("not in the game yet":
 the systems it needs, like cold or fire, aren't there yet); hold Shift for more (materials, modifier notes, what wearing it
 does to your set). The bottom line is the set's weight, armor and speed.
+**His own clothes are replaced (2026-10-15).** A piece in a slot REPLACES the character's own garment there instead of being
+drawn over it (`BASE` in content/gear.js, per live model; view/dress.js applies the slot's rule first, the piece's look over it):
+head: his hat; body: the duster (collar and lapels gone, the coat sleeves become shirt sleeves where the piece leaves them);
+back: the cape and its coat tail (a cloak brings its own; a quiver or pack sits on the bare back); legs: his trousers (long
+johns where the piece leaves them); feet: his boots and spurs (bare feet). Each of those slots also has a BARE piece, first in
+its row after "his own" (a faint outline, struck through): No hat, No coat, No cape, Long johns, Barefoot: his garment off and
+nothing in its place. They are pieces like the rest (no weight, no armor), so they're remembered, saved with a wardrobe outfit,
+in `?gear=` links and sent in co-op. The Ranger's runtime cloak goes when the back slot holds anything but a cloak
+(view/hero.js setCape; content/gear.js capeShown); a cloak baked into a sprite (ranger basic) stays.
 The set is remembered on this machine. `?gear=wool_cap,mail_shirt` wears a set from the URL (tests); `?gear=none` none.
 In the menu's Sandbox tab, "Gear: ..." opens the panel too.
 

@@ -374,6 +374,13 @@ const SFX = {
     const v = E.voice(o, 'creakTick', .1); if (!v) return;
     E.O(v, 0, {w: 'sawtooth', f: 60, a: .01, d: .06, g: .08, type: 'bandpass', ff: 1100, q: 8});
   },
+  fiddle(E, o) {   // the Fiddle String (docs/KEEPSAKES.md): three slow bowed notes, falling, a little off (stand-in: band-passed saws)
+    const v = E.voice({...o, g: (o.g ?? 1) * .9, wet: .6}, 'fiddle', 3.2, {pri: 1, cd: 2}); if (!v) return;
+    [[659, 0], [587, .8], [523, 1.7]].forEach(([f, t], i) => {
+      E.O(v, t, {w: 'sawtooth', f: f * (1 + (R() - .5) * .012), f2: f * .985, sw: .7, a: .12, d: .75 + i * .25, g: .07, type: 'bandpass', ff: f * 2.2, q: 3});
+      E.O(v, t + .02, {w: 'sawtooth', f: f * 1.003, a: .15, d: .6 + i * .25, g: .035, type: 'bandpass', ff: f * 3, q: 4});
+    });
+  },
   // ---------------- the revolver (fallbacks for the forge's 'revolver' recipe while it bakes / ?forge=0) ----------------
   gunshot(E, o) {   // o.gun 'peacemaker' | 'brass_navy': crack + bark + thump + a dark, dry tail (nothing rings)
     const v = E.voice({...o, g: (o.g ?? 1) * 1.5}, 'gunshot', 1, {pri: 3, cd: .02}); if (!v) return;
@@ -464,9 +471,79 @@ const SFX = {
   treeCrack(E, o) { SFX.brk(E, {...o, kind: 'crate'}); },
   treeCrash(E, o) { SFX.foeFall(E, {...o, heavy: true, g: (o.g ?? 1) * 1.4}); SFX.rustle(E, o); },
   treeLogs(E, o) { SFX.propDrop(E, {...o, mat: 'wood'}); },
+  // MINING (features/mining.js, docs/MINING.md): the pick's blow RINGS (two inharmonic partials over a stony crack and a thud;
+  // a rhythm blow rings higher and louder); rock too hard for the pick: a dull clang (k 0); a crystal: glass
+  mineHit(E, o) {
+    if (o.kind === 'crystal') { SFX.hit(E, {...o, mat: 'glass', g: (o.g ?? 1) * 1.1}); SFX.hit(E, {...o, mat: 'clay', g: (o.g ?? 1) * .5}); return; }
+    const v = E.voice({...o, g: (o.g ?? 1) * (o.rhythm ? 1.25 : 1)}, 'hit', .5, {pri: 2, cd: .03}); if (!v) return;
+    const {N, O} = E, up = (o.rhythm ? 1.19 : 1) * (1 + .06 * Math.max(0, (o.chain || 1) - 1));   // (the chain: the ping rises a blow)
+    if (o.k === 0) { O(v, 0, {f: 520, a: .001, d: .12, g: .1}); O(v, 0, {f: 170, f2: 110, d: .08, g: .3}); N(v, 0, {type: 'bandpass', f: 1200, q: 2, d: .05, g: .3}); return; }
+    if (o.hollow) {   // a hollow wall (docs/CAVELIFE.md): a woody, boomy knock that rings on in the room behind it, little of the pick's ring
+      O(v, 0, {f: 196, f2: 172, a: .002, d: .42, g: .3}); O(v, .004, {f: 311, a: .002, d: .26, g: .09}); N(v, 0, {type: 'bandpass', f: 420, q: 3, a: .002, d: .3, g: .35});
+      N(v, 0, {type: 'bandpass', f: 2200, q: 1.5, d: .03, g: .18}); O(v, .11, {f: 190, a: .01, d: .3, g: .06}); return;
+    }
+    O(v, 0, {f: 1870 * up, a: .001, d: .3, g: .07}); O(v, 0, {f: 2790 * up, a: .001, d: .18, g: .045});
+    N(v, 0, {type: 'bandpass', f: 2600, q: 1.5, d: .045, g: .4}); N(v, .01, {type: 'lowpass', f: 900, a: .004, d: .12, g: .22});
+    O(v, 0, {f: 140, f2: 90, d: .06, g: .25});
+  },
   logPick(E, o) { SFX.hit(E, {...o, mat: 'wood', g: (o.g ?? 1) * .35}); },
+  // THE RINGING PICK (features/mining.js, content/mining.js RING; the chanterelles' mood): the blow rings on, a thin long tone over
+  // the hit, and each vein answers in its own voice, quieter the further it is (o.k 1 near .. .15 far): stone a dull tok, copper a
+  // bright ting, iron a deep bell, a night vein a two-note chord, a hollow wall a hollow knock
+  mineRing(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .6}, 'mineRing', 1.2, {cd: .05}); if (!v) return; E.O(v, 0, {f: 2350, a: .002, d: 1.1, g: .035}); E.O(v, 0, {f: 3525, a: .002, d: .7, g: .015}); },
+  mineEcho(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * (.35 + .65 * (o.k ?? 1)), wet: .7}, 'mineEcho', .9); if (!v) return;
+    const {O, N} = E;
+    switch (o.kind) {
+      case 'copper': O(v, 0, {f: 2637, a: .001, d: .45, g: .07}); O(v, 0, {f: 3951, a: .001, d: .25, g: .03}); break;
+      case 'iron': O(v, 0, {f: 392, a: .003, d: .9, g: .12}); O(v, 0, {f: 988, a: .003, d: .5, g: .04}); break;
+      case 'night': O(v, 0, {f: 1319, a: .004, d: .7, g: .05}); O(v, .09, {f: 1760, a: .004, d: .7, g: .05}); break;
+      case 'hollow': O(v, 0, {f: 196, f2: 172, a: .002, d: .35, g: .2}); N(v, 0, {type: 'bandpass', f: 420, q: 3, a: .002, d: .25, g: .25}); break;
+      default: O(v, 0, {f: 600, f2: 420, a: .001, d: .09, g: .15}); N(v, 0, {type: 'bandpass', f: 900, q: 2, d: .04, g: .25});
+    }
+  },
+  // THE LIVING DARK (features/caves.js, features/cavelife.js, docs/CAVELIFE.md): the lantern's shutter, a snuff (a breath and a
+  // flutter of wings), it lighting again; a hollow wall caving in (stand-ins: a heavy fall and stones)
+  lanternClick(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .5}, 'lanternClick', .1, {cd: .05}); if (!v) return; E.N(v, 0, {type: 'bandpass', f: 3800, q: 3, d: .01, g: .4}); E.O(v, 0, {w: 'square', f: 1400, d: .012, g: .02}); },
+  lanternSnuff(E, o) {
+    const v = E.voice(o, 'lanternSnuff', .6, {pri: 2, cd: .3}); if (!v) return;
+    E.N(v, 0, {type: 'bandpass', f: 1600, f2: 500, sw: .2, q: 1, a: .02, d: .22, g: .3});
+    for (let i = 0; i < 8; i++) E.N(v, .05 + i * .045, {type: 'bandpass', f: 700 + (i % 3) * 180, q: 2, a: .004, d: .02, g: .12});   // (the wings)
+  },
+  lanternLight(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .6}, 'lanternLight', .4, {cd: .2}); if (!v) return; E.N(v, 0, {type: 'lowpass', f: 600, f2: 1800, sw: .15, a: .04, d: .2, g: .25}); },
+  critter(E, o) { const v = E.voice({...o, g: (o.g ?? 1) * .5}, 'critter', .5, {cd: .3}); if (!v) return; for (let i = 0; i < 7; i++) E.N(v, i * .05 + (i % 2) * .015, {type: 'bandpass', f: 3000 + (i % 3) * 600, q: 6, a: .001, d: .012, g: .15}); },   // (a skitter of many small feet on stone)
+  hollowOpen(E, o) { SFX.foeFall(E, {...o, heavy: true, g: (o.g ?? 1) * 1.2}); SFX.treeLogs(E, {...o, surf: 'stone'}); },
+  // THE WORKSHOP (features/workshop.js, docs/WORKSHOP.md), stand-ins: a pump's whoosh and the fire's roar answering it (brighter
+  // as the heat climbs), the hammer's ring on the anvil (higher on a rhythm blow), a bar's hiss onto the stone, ore into the mouth
+  smithPump(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * .8}, 'smithPump', .7, {cd: .15}); if (!v) return;
+    const h = o.heat ?? .5;
+    E.N(v, 0, {type: 'bandpass', f: 500, f2: 1400, sw: .18, q: .9, a: .04, d: .25, g: .32});
+    E.N(v, .08, {type: 'lowpass', f: 220 + 500 * h, a: .05, d: .45, g: .28 + .2 * h});
+  },
+  smithRing(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * (o.rhythm ? 1.15 : 1)}, 'smithRing', 1.1, {pri: 2, cd: .04}); if (!v) return;
+    const up = o.rhythm ? 1.12 : 1;
+    E.O(v, 0, {f: 2180 * up, a: .001, d: .9, g: .07}); E.O(v, 0, {f: 3340 * up, a: .001, d: .55, g: .045}); E.O(v, 0, {f: 1210 * up, a: .001, d: .6, g: .05});
+    E.N(v, 0, {type: 'bandpass', f: 3000, q: 1.2, d: .03, g: .4}); E.O(v, 0, {f: 160, f2: 90, d: .07, g: .3});
+  },
+  smithHiss(E, o) { const v = E.voice(o, 'smithHiss', 1.3, {cd: .4}); if (!v) return; E.N(v, 0, {type: 'highpass', f: 3200, a: .02, d: 1.1, g: .14}); SFX.hit(E, {...o, mat: 'glass', g: (o.g ?? 1) * .2}); },
+  smithLoad(E, o) { SFX.kick(E, {...o, mat: 'clay', surf: 'stone', g: (o.g ?? 1) * .6}); SFX.campLog(E, {...o, g: (o.g ?? 1) * .4}); },
   axeSwing(E, o) { SFX.jump(E, {...o, g: (o.g ?? 1) * .45}); },
   campLog(E, o) { SFX.kick(E, {...o, mat: 'wood', g: (o.g ?? 1) * .6}); },   // (a soft wooden thump)
+  // THE STICK (features/cooking.js): the sizzle climbs as it cooks (o.k: s on the stick / its cook time), the fat flares at the
+  // just-right moment, a soft hiss and a puff when it falls in
+  cookSizzle(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * .5}, 'cookSizzle', .45); if (!v) return;
+    const k = Math.min(1.6, o.k ?? 0), f = 1500 + 2200 * k;
+    E.N(v, 0, {type: 'highpass', f, a: .03, d: .32, g: .08 + .05 * k});
+    for (let i = 0; i < 3; i++) E.N(v, .04 + i * .1 + (i % 2) * .03, {type: 'bandpass', f: f + i * 400, q: 5, a: .001, d: .012, g: .1});
+  },
+  cookFlare(E, o) { const v = E.voice(o, 'cookFlare', .6, {cd: .3}); if (!v) return; E.N(v, 0, {type: 'lowpass', f: 500, f2: 1600, sw: .12, a: .02, d: .35, g: .35}); E.N(v, .05, {type: 'highpass', f: 3000, a: .01, d: .25, g: .12}); },
+  potSet(E, o) { const v = E.voice(o, 'potSet', .8, {cd: .3}); if (!v) return; E.O(v, 0, {f: 620, f2: 600, d: .5, g: .1}); E.O(v, 0, {f: 1480, d: .25, g: .05}); E.N(v, .02, {type: 'lowpass', f: 700, a: .05, d: .5, g: .12}); },   // (an iron pot hung: a dull clank, the broth settling)
+  potSpoon(E, o) { const v = E.voice(o, 'potSpoon', .4, {cd: .15}); if (!v) return; E.O(v, 0, {f: 2400, f2: 2200, d: .08, g: .06}); E.N(v, .03, {type: 'bandpass', f: 600, q: 1.5, a: .02, d: .15, g: .12}); },   // (a ladle: a clink and a slurp)
+  hiccup(E, o) { const v = E.voice(o, 'hiccup', .3, {cd: .2}); if (!v) return; E.O(v, 0, {f: 260, f2: 560, sw: .04, a: .004, d: .07, g: .22}); E.N(v, 0, {type: 'bandpass', f: 900, q: 2, a: .003, d: .05, g: .12}); },   // (something odd: a short gulp up)
+  cookDrop(E, o) { const v = E.voice(o, 'cookDrop', .8, {cd: .3}); if (!v) return; E.N(v, 0, {type: 'bandpass', f: 1200, f2: 400, sw: .4, q: 1, a: .01, d: .6, g: .3}); E.O(v, 0, {f: 120, f2: 70, d: .12, g: .2}); },
   fishCook(E, o) {   // fish on the fire (features/fishing.js): a sizzle with crackles over a soft thump
     const v = E.voice(o, 'fishCook', 1.4, {cd: .5}); if (!v) return;
     E.N(v, 0, {type: 'highpass', f: 2600, a: .06, d: 1.1, g: .1});
@@ -515,6 +592,14 @@ const SFX = {
     const notes = [1047, 1319, 1568, 2093, 2637, 3136].slice(0, 2 + k);
     notes.forEach((f, i) => { E.O(v, i * .07, {f, a: .003, d: .28 + k * .05, g: .045}); E.O(v, i * .07, {f: f * 2, a: .002, d: .1, g: .012}); });
     if (k >= 3) E.O(v, notes.length * .07, {f: 523, a: .02, d: .9, g: .04});
+  },
+  // SKILLS (features/pack.js, docs/SKILLS.md): a level, two soft rising notes; a move, a third held one above them (o.move);
+  // a title, a low warm one under them (o.title). Quiet: it lands while you work
+  skillUp(E, o) {
+    const v = E.voice({...o, g: (o.g ?? 1) * .9, jit: .004}, 'skillUp', 1.2, {pri: 2, cd: .4}); if (!v) return;
+    E.O(v, 0, {f: 784, a: .004, d: .22, g: .04}); E.O(v, .09, {f: 1175, a: .004, d: .3, g: .04});
+    if (o.move) { E.O(v, .2, {f: 1568, a: .01, d: .7, g: .045}); E.O(v, .2, {f: 3136, a: .004, d: .18, g: .01}); }
+    if (o.title) E.O(v, .05, {f: 392, a: .03, d: .9, g: .045});
   },
   // the bruiser's coach gun (fallbacks for the forge's 'coachgun' recipe while it bakes / ?forge=0), screen-bound like it
   coachShot(E, o) {   // deeper and longer than the revolver's: a broad bark, a low sweep, a long dark tail
@@ -851,6 +936,9 @@ function makeBed(E, id, t0) {
   return {
     out,
     update(env, t) {
+      // (30 times a second, not every frame: its params glide on .15-.6 s time constants, so it sounds the same, and every set is
+      // a native call into the audio thread's timeline: ~3% of the main thread at a high frame rate)
+      if (t >= st.last && t - st.last < 1 / 30) return;
       const dt = clamp(t - st.last, 0, .5); st.last = t; st.lfo += dt;
       if (typeof env.gust === 'number') st.gT = clamp(env.gust, 0, 1);          // the arena's wind (wind.js): hear what you see
       else if (t > st.gNext) { st.gT = R() ** 1.3; st.gNext = t + RR(2, 6); }   // no wind module: gusts are a slow random walk
@@ -1230,6 +1318,9 @@ export function createAudio(ctx, host = {}) {
         case 'wildlife.frog_jump': fire('plop', e.x, e.y, {surf, frog: 1}); break;
         case 'wildlife.critter_dash': fire('rustle', e.x, e.y, {surf}); break;
         case 'wildlife.howl': fire('howl', e.x, e.y, {kind: e.kind, call: e.call}); break;   // (features/wildlife/coyotes.js: a coyote / fox / wolf at night)
+        // the capercaillie's song at the lek (features/fauna.js; living-animals.md): stand-ins on the closest recipes there are, a wooden
+        // knock for the clicks, a plop for the cork pop, a soft scrape for the grinding phrase
+        case 'wildlife.lek': if (e.call === 'click') fire('hit', e.x, e.y, {mat: 'wood', g: .3}); else if (e.call === 'pop') fire('plop', e.x, e.y, {surf, g: .6}); else fire('scrape', e.x, e.y, {surf, g: .4}); break;
         case 'tumbleweed.bounce': fire('rustle', e.x, e.y, {surf, g: .35 + .45 * (e.k || 0), gainDb: -6 + 4 * (e.k || 0), semi: -3}); break;   // dry twigs on the ground
         // the equipment experiment (features/equip/sim.js): its gadgets on the closest recipes there are
         case 'equip.throw': fire('jump', e.x, e.y, {surf, g: .6}); break;   // (a cloth swish: the arm swinging)
@@ -1251,9 +1342,32 @@ export function createAudio(ctx, host = {}) {
         case 'tree.land': fire('treeCrash', e.x, e.y, grounded(pl.biome, e.x, e.y, {surf, r: e.r})); break;   // the crown crashes down
         case 'tree.logs': fire('treeLogs', e.x, e.y, {surf, n: e.n}); break;
         case 'tool.hit': fire('hit', e.x, e.y, {mat: e.kind === 'body' ? 'body' : MAT[e.kind] || 'wood', g: 1}); break;
-        case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); break;   // (the swing's whoosh)
-        case 'pack.add': if (e.id === 'log') fire('logPick', e.x, e.y); break;
+        case 'tool.whiff': fire('axeSwing', e.x, e.y, {surf}); if (e.ring) fire('mineRing', e.x, e.y); break;   // (the swing's whoosh; the ringing pick rings on a whiff too)
+        case 'mine.hit': fire('mineHit', e.x, e.y, {k: e.k, kind: e.kind, rhythm: e.rhythm, hollow: e.hollow, chain: e.chain, g: e.other ? .7 : 1}); if (e.ring) fire('mineRing', e.x, e.y); break;   // (features/mining.js: a blow on a vein or a crystal; hollow: a hollow wall's knock)
+        case 'mine.open': fire('hollowOpen', e.x, e.y); break;   // (a hollow wall caves in)
+        case 'mine.echo': fire('mineEcho', e.x, e.y, {kind: e.kind, k: e.k}); break;   // (a vein answers the ringing pick: from where it is, or burnt, the mirrored point)
+        case 'lantern.toggle': fire('lanternClick', e.x, e.y); break;   // (features/caves.js: L in the cave)
+        case 'lantern.snuff': fire('lanternSnuff', e.x, e.y); break;   // (the soot things put it out)
+        case 'lantern.relight': fire('lanternLight', e.x, e.y); break;
+        case 'critter.wake': fire('critter', e.x, e.y); break;
+        case 'keep.shelve': fire('propDrop', e.x, e.y, {mat: 'clay', g: .15}); break;
+        case 'keep.walk': fire('rustle', e.x, e.y, {g: .3}); break;
+        case 'keep.creak': fire('creakTick', e.x, e.y, {g: .8}); fire('creakTick', e.x, e.y, {g: .5}); break;   // (the worn Bark Doll)
+        case 'keep.fiddle': fire('fiddle', e.x, e.y); break;
+        case 'keep.notch': fire('scrape', e.x, e.y, {g: .5}); break;   // (the Tally Stick: a dry scratch)
+        case 'soot.flinch': fire('wings', e.x, e.y, {n: 1, g: .7}); break;   // (a soot thing breaking off: the Big Tooth)   // (features/cavelife.js: a rock-thing unrolls and trots off)
+        case 'mine.spent': fire('treeLogs', e.x, e.y, {surf: 'stone'}); fire('kick', e.x, e.y, {mat: 'clay', surf: 'stone'}); break;   // (stand-ins: the vein breaks open)
+        case 'mine.chunk': fire('hit', e.x, e.y, {mat: 'clay', g: .35}); break;   // (stand-in: a chunk into the pouch)
+        case 'mine.take': fire('kick', e.x, e.y, {mat: 'wood', g: .5}); break;   // (stand-in: the old pick pulled from the wall)
+        case 'pack.add': if (e.id === 'log' || e.id === 'deadwood' || e.id.endsWith('_log')) fire('logPick', e.x, e.y); break;   // (any species' log: content/items.js wood)
+        case 'skill.level': fire('skillUp', e.x, e.y, {move: !!e.move}); break;   // (features/pack.js: a skill's new level; a move it gave: the third note)
+        case 'title.earned': fire('skillUp', e.x, e.y, {title: true}); break;
         case 'fire.addWood': fire('campLog', e.x, e.y); break;   // a log on a campfire (features/campfires.js, lights.js)
+        // THE WORKSHOP (features/workshop.js, docs/WORKSHOP.md): stand-ins
+        case 'smith.pump': fire('smithPump', e.x, e.y, {heat: e.heat, g: e.mine ? 1 : .7}); break;
+        case 'smith.strike': fire('smithRing', e.x, e.y, {rhythm: e.rhythm}); break;
+        case 'smith.smelt': fire('smithHiss', e.x, e.y); break;
+        case 'smith.load': fire('smithLoad', e.x, e.y); break;
         // FISHING (features/fishing.js, docs/FISHING.md)
         case 'fish.cast': fire('fishCast', e.x, e.y, {k: e.k, perfect: e.perfect}); break;
         case 'fish.plop': fire('fishPlop', e.x, e.y); break;
@@ -1273,7 +1387,20 @@ export function createAudio(ctx, host = {}) {
         case 'fish.away': fire('fishPlop', e.x, e.y, {g: .5}); break;
         case 'fish.spot': fire('plop', e.x, e.y, {surf, fish: 1, g: .6}); break;
         case 'fish.bait': fire('chop', e.x, e.y, {k: 0, g: .5}); break;
-        case 'fish.cook': fire('fishCook', e.x, e.y); break;
+        case 'fish.gather': fire('plop', e.x, e.y, {surf, fish: 1, g: .5}); break;   // (the lingon's fish come: a soft rise nearby)
+        case 'fish.grab': fire('splash', e.x, e.y, {surf, small: true, g: e.ok ? 1 : .7}); break;   // (a hand into the water)
+        case 'meal.cook': fire('fishCook', e.x, e.y); break;
+        case 'cook.start': fire('kick', e.x, e.y, {mat: 'wood', g: .35}); break;   // (the stick goes over the fire)
+        case 'cook.sizzle': fire('cookSizzle', e.x, e.y, {k: e.k}); break;
+        case 'cook.flare': fire('cookFlare', e.x, e.y); break;
+        case 'cook.pull': fire('axeSwing', e.x, e.y, {surf, g: .5}); break;   // (a swish: out of the fire)
+        case 'cook.drop': fire('cookDrop', e.x, e.y); break;
+        case 'meal.hic': fire('hiccup', e.x, e.y); break;
+        case 'pot.set': fire('potSet', e.x, e.y); break;
+        case 'pot.spoon': fire('potSpoon', e.x, e.y); break;   // (features/meals.js: any meal by a campfire)
+        case 'fish.jab': fire('splash', e.x, e.y, {surf, small: true, g: 1.1}); break;   // (the Heron Feather's jab)
+        case 'fish.miss': fire('fishPlop', e.x, e.y, {g: .4}); break;
+        case 'forage.pick': fire('rustle', e.x, e.y, {surf, g: .3, semi: 5}); fire('hit', e.x, e.y, {mat: 'straw', g: .2}); break;   // (stand-ins: a soft pluck in the leaves)
         // the lasso (features/equip/lasso.js, its look, the player's side): on the closest recipes there are (no forge
         // recipes of its own yet): the swish of a turn and the throw on the cloth swish, the cinch a soft thump, the yank
         // a heave, a yanked body's landing the gunmen's fall thud, the rope straining a short creak (the bow's)

@@ -13,7 +13,7 @@ import {mkdirSync, writeFileSync, readFileSync, existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {launch} from '../lib/chrome.mjs';
+import {launch, PYTHON} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
@@ -61,10 +61,17 @@ const SCENARIOS = [
   ['storm', 'mode=sandbox&weather=storm&season=summer&daymin=0&hour=11', `await frames(90); await cap('rain');`],
   ['snow', 'mode=sandbox&weather=snow&season=winter&daymin=0&hour=11', `await frames(90); await cap('snow');`],
   ['run', 'mode=run&daymin=0&weather=fair', `await frames(60); await cap('arrive'); await frames(420); await cap('wave');`],
+  // the forest (seed 1337): a clearing in the home woods, walking, the lake's shore in the morning, the cave's first chamber, night
+  ['forest', 'mode=sandbox&seed=1337&at=12,-22&daymin=0&hour=11&weather=fair', `
+    await frames(60); await cap('forest');
+    R.keys.add('w'); await frames(40); R.keys.delete('w'); await frames(10); await cap('forest_walked');
+    R.env.setHour(8); R.host.teleport(-3.7, -28); await frames(60); await cap('lake');
+    R.env.setHour(11); R.host.teleport(34.4, -212.75); await frames(60); await cap('cave');
+    R.host.teleport(12, -22); R.env.setHour(23); await frames(60); await cap('forest_night');`],
 ].filter(s => !ONLY || ONLY.split(',').includes(s[0]));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
+const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
 // Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run left
 // behind). 'exit' also covers an uncaught error, Ctrl+C goes through quit
 const chrome = launch('golden', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1920,1080',

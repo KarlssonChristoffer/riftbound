@@ -49,9 +49,10 @@ import {createFlora} from '../render/flora.js';
 import {cliffGeometry} from './cliffs3d.js';
 import {wallRun, towerRun, postRun} from './walls3d.js';
 import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the West Downs' standing stones
+import {floorSink, floorGeometry} from './floor3d.js';   // the forest floor's stones, pebbles and twigs in 3D (its tiles, below)
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
 import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
-import {TOWER_PLAN, FOREST, HUT, CAVE} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
+import {TOWER_PLAN, FOREST, HUT, CAVE, ICE} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
 import {sample as forestSample, depth as forestDepth, joinRiver, COURSE_KS, courseSpeed, courseDepth, RECT as FOREST_RECT} from './forest.js';
 import {buildCave} from './cave3d.js';   // the forest's cave: its floor and walls in the band north of the forest (docs/CAVES.md)
 import {stepsOf} from './terrain.js';
@@ -68,6 +69,7 @@ import {flags} from '../core/flags.js';
 
 export const WATER_H = -.18;
 const FLORA = flags.get('flora') !== 'cards';   // the low plants as 3D shapes drawn instanced (world/flora3d.js, render/flora.js); cards: the painted cards   // the stream bed sits this much below the ground (features: world.waterH)
+const FLOOR3D = flags.get('floor3d') !== '0';   // the forest floor's stones, pebbles and twigs in 3D (world/floor3d.js); 0: painted flat
 const GLB = '../concepts/sprites/out/render3d/glb/', YAW = '../concepts/sprites/out/render3d/props_yaw/';
 
 // ---------------------------------------------------------------- the pixelizer's palettes (props_pixelize.py BIOMES)
@@ -255,6 +257,12 @@ const travel = y => { const tab = S_TAB || travelTab(), f = (y - S_Y0) / S_DY, i
 const OUT_U0 = .3, OUT_W = .6, ease = u => u <= OUT_U0 ? 0 : u < OUT_U0 + OUT_W ? (u - OUT_U0) ** 2 / (2 * OUT_W) : u - OUT_U0 - OUT_W / 2;
 const outAxisY = x => { const P = OUTFLOW.pts, f = Math.max(0, Math.min(P.length - 1.001, (OUTFLOW.x0 - x) / OUTFLOW.dx)), i = f | 0; return P[i][1] + (P[i + 1][1] - P[i][1]) * (f - i); };
 export function waterSample(x, y, out) {
+  waterRaw(x, y, out);
+  if (out.kind && ICE.solid !== null && y < 0 && ICE.solid(x, y)) out.kind = 0;   // (the lake frozen where it holds him: no water for wading, fishing, a body's wet: features/ice.js)
+  return out;
+}
+// the water as painted (the bakes: the ice is the shader's, over the water)
+function waterRaw(x, y, out) {
   out.kind = 0;
   if (FOREST !== null && y < 0) { forestSample(FOREST, x, y, out); return out; }   // (the forest's stream, lake and outflow: kinds 6, 7, 8, world/forest.js)
   if (x < 0) { brookSample(x, y, out); return out; }   // (west of the Proving Grounds: the West Downs' brook, kinds 4 and 5: world/brook.js)
@@ -336,7 +344,7 @@ function bakeWater(biome, T, {WPX, HPX, PPM, px, cliffZ, X0 = 0, Y0 = 0, box = n
   const bx1 = box ? Math.min(WPX, Math.ceil((box[2] - X0) * PPM)) : WPX, by1 = box ? Math.min(HPX, Math.ceil((box[3] - Y0) * PPM)) : HPX;
   for (let y = by0; y < by1; y++) for (let x = bx0; x < bx1; x++) {
     const mx = X0 + (x + .5) / PPM, my = Y0 + (y + .5) / PPM;
-    o.lake = 0; waterSample(mx, my, o);
+    o.lake = 0; waterRaw(mx, my, o);
     if (!o.kind || my >= cliffZ(mx)) continue;                  // (the ravine takes the stream over its edge: below it is the waterfall's pool)
     const i = y * WPX + x, k = i * 4, p = toneOf(i * 4);
     if (p < 0) continue;                                        // painted over: not (moving) water
@@ -653,11 +661,11 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = FOREST_RECT.y0 - RG, fz1 = GROUNDS.y0;   // (the forest's own north edge: the cave's band past it draws itself, cave3d.js)
     const ctxF = {PPM, ground: groundDrawn(), forest: FOREST, layout};
     for (let z0 = fz0; z0 < fz1 - 1e-6; z0 += FT) for (let x0 = fx0; x0 < fx1 - 1e-6; x0 += FT) {
-      const x1 = Math.min(fx1, x0 + FT), z1 = Math.min(fz1, z0 + FT), T = {x0, z0, x1, z1, canvas: null, px: null, cx0: x0 - FM, cz0: z0 - FM};
+      const x1 = Math.min(fx1, x0 + FT), z1 = Math.min(fz1, z0 + FT), T = {x0, z0, x1, z1, canvas: null, px: null, cx0: x0 - FM, cz0: z0 - FM, floor: FLOOR3D ? floorSink(x0, z0, x1, z1) : null};
       if (biome.paintForest) {
         const w = Math.ceil((x1 - x0 + 2 * FM) * PPM), h = Math.ceil((z1 - z0 + 2 * FM) * PPM), c = document.createElement('canvas'); c.width = w; c.height = h;
         const q = c.getContext('2d', {willReadFrequently: true});
-        biome.paintForest(q, {...ctxF, WPX: w, HPX: h, X0: T.cx0, Y0: T.cz0});
+        biome.paintForest(q, {...ctxF, WPX: w, HPX: h, X0: T.cx0, Y0: T.cz0, floor3d: T.floor});   // (floor3d: what it lays on the ground in 3D: stones, pebbles, twigs)
         T.canvas = c; T.px = q.getImageData(0, 0, w, h).data;
       }
       forestTiles.push(T);
@@ -737,7 +745,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // fallen leaves: the density map (empty until bakeLitter below); only where the biome turns with the seasons
   const lit = biome.id === 'ruins' ? makeLitter(WPX, HPX, PPM) : null;
   if (lit) { lit.sim = G.litterSim(lit); disposers.push(lit.dispose); }   // (the living layer: render/litter.js, driven by features/litter.js)
-  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, water: wTex, litter: lit, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false); disposers.push(() => ground.dispose());
+  const ground = G.surface(gGeo, {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, water: wTex, litter: lit, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
+  disposers.push(() => { ground.dispose(); gGeo.dispose(); gTex.dispose(); eTex?.dispose(); cTex.dispose(); });   // (a rebuild makes new canvases: their textures go with the world)
   // walkable terrain's shadows: the drawn ground casts nothing (it would shadow itself: acne), so a SHADOW-ONLY copy of it, sunk
   // CAST_SINK m, goes into the cached sun shadow and the point lights' height map: a hill throws its shadow over what lies
   // behind it at a low sun, flat ground never reaches the ground it stands for
@@ -767,6 +776,10 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       disposers.push(() => { m.dispose(); tex.dispose(); if (water) { water.dispose(); water.userData.bed?.tex.dispose(); } });
       if (TERRAIN_ON) caster(tg);
       T.px = null;   // (only the water bake read them)
+      // its floor's small things in 3D (world/floor3d.js): one static mesh, culled with the tile
+      const sg = T.floor && floorGeometry(T.floor, {fam: k => FAMS.indexOf(k), ground: tH});
+      if (sg) { const sm = G.mesh(sg, 0, new THREE.Matrix4(), {static: true}); disposers.push(() => { sm.dispose(); sg.dispose(); }); }
+      T.floor = null;
     }
   }
   // the open land: a stand-in texture until the world plan's step 3 paints the land itself. Plain ground in the biome's own colours:
@@ -783,7 +796,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const c = top[k][0], i = (y * n + x) * 4; d[i] = c >> 16 & 255; d[i + 1] = c >> 8 & 255; d[i + 2] = c & 255; d[i + 3] = 255;
     }
     pq.putImageData(id, 0, 0);
-    const pTex = texOf(pc, true); pTex.wrapS = pTex.wrapT = THREE.RepeatWrapping; pTex.needsUpdate = true;
+    const pTex = texOf(pc, true); pTex.wrapS = pTex.wrapT = THREE.RepeatWrapping; pTex.needsUpdate = true; disposers.push(() => pTex.dispose());
     const size = new THREE.Vector2(OPEN_PATCH, OPEN_PATCH);
     // (the Proving Grounds alone (no open land): the tiles round them are past the world's edge, where the painted ground goes on
     // mirrored, as on the patch's skirt: no seam)
@@ -797,7 +810,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         : alone || ring ? {tex: gTex, em: eTex, planar: true, world: world2, origin: origin2, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}
         : {tex: pTex, planar: true, world: size, type: 1, obj: 0, cliff: cTex, cliffOff, decals: TERRAIN_ON, cliffTop: TERRAIN_ON ? -.05 : 1e9}, false);
       if (TERRAIN_ON && s === S) caster(tg);   // (the fine tiles are where the ground varies)
-      disposers.push(() => m.dispose());
+      disposers.push(() => { m.dispose(); tg.dispose(); });
     }
   }
 
@@ -805,7 +818,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const FL = FALL_LOOK[biome.id];
   for (const q of PLATEAUS) {
     const top = new THREE.PlaneGeometry(q.x1 - q.x0, q.y1 - q.y0); top.rotateX(-Math.PI / 2); top.translate((q.x0 + q.x1) / 2, q.h, (q.y0 + q.y1) / 2);
-    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1, water: wTex, litter: lit}); disposers.push(() => t.dispose());   // (water on the plateau's top too: the rill moves; so do the leaves)
+    const t = G.surface(top, {tex: gTex, em: eTex, planar: true, world: world2, type: 1, obj: 1, water: wTex, litter: lit}); disposers.push(() => { t.dispose(); top.dispose(); });   // (water on the plateau's top too: the rill moves; so do the leaves)
     const faces = [   // [len, centre x, centre z, rotation y]
       [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y1, 0], [q.x1 - q.x0, (q.x0 + q.x1) / 2, q.y0, Math.PI],
       [q.y1 - q.y0, q.x1, (q.y0 + q.y1) / 2, Math.PI / 2], [q.y1 - q.y0, q.x0, (q.y0 + q.y1) / 2, -Math.PI / 2]];
@@ -818,7 +831,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
       const geo = new THREE.PlaneGeometry(len, hgt); geo.translate(0, q.h - hgt / 2, 0); geo.rotateY(ry); geo.translate(cx, 0, cz);
       const uvA = geo.attributes.uv; for (let i = 0; i < uvA.count; i++) uvA.setY(i, 1 - uvA.getY(i));   // canvas rows go down
       const tex = texOf(cvs, true);
-      const f = G.surface(geo, {tex, planar: false, type: 5, obj: 1}, !cliffs3d); disposers.push(() => f.dispose());   // (the sheet of water alone casts no shadow)
+      const f = G.surface(geo, {tex, planar: false, type: 5, obj: 1}, !cliffs3d); disposers.push(() => { f.dispose(); geo.dispose(); tex.dispose(); });   // (the sheet of water alone casts no shadow)
     });
   }
   // ---- the creek's cascades (terrain: layout.js CASCADES): at each step a sheet of falling water across the creek, facing downstream,
@@ -847,7 +860,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     }
     const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setIndex(idx);
-    const f = G.surface(geo, {tex: texOf(atlas, true), planar: false, type: 5, obj: 1}, false); disposers.push(() => f.dispose());
+    const aTex = texOf(atlas, true), f = G.surface(geo, {tex: aTex, planar: false, type: 5, obj: 1}, false); disposers.push(() => { f.dispose(); geo.dispose(); aTex.dispose(); });
   }
 
   // ---- the 3D cliffs (cliffs3d.js): the plateau's four faces and the ravine's wall as live rock. Runs travel with the outside
@@ -1005,7 +1018,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const flora = FLORA ? createFlora(G) : null;
   if (flora) { flora.setRamps(bladeRamps(biome.id, biome.style)); disposers.push(() => flora.dispose()); }
   // the forest floor's small things (world/forest.js F.decor, world/decor3d.js: recipes drawn instanced, placed once; ?decor=0: none)
-  if (flora && FOREST?.decor && flags.get('decor') !== '0') growDecor(flora, FOREST.decor, elev, biome.id, () => nextId++);
+  const DECOR = flora && FOREST?.decor && flags.get('decor') !== '0' ? growDecor(flora, FOREST.decor, elev, biome.id, () => nextId++) : null;
   const FLORA_KINDS = {bush: 1, fern: 1, tuft: 1, reed: 1}, TAU = Math.PI * 2;
   function floraOf(it, p) {
     if (!flora || !FLORA_KINDS[p.kind]) return null;
@@ -1106,13 +1119,13 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     if (geo) it.live = liveOf(it, geo, p.x, p.z || 0, p.y);
     else if (sp && (it.flora = floraOf(it, p))) it.sp = sp;   // (a 3D plant)
     else if (sp) { it.card = cardOf(sp, {obj, shadow: !SHADOWLESS.has(p.kind), plant: plantOf(p)}); it.sp = sp; } else return null;
-    items.push(it); byProp.set(p, it); if (p.kind === 'tree') litterDirty = true; return it;
+    items.push(it); byProp.set(p, it); drawnDirty = true; if (p.kind === 'tree') litterDirty = true; return it;
   }
   // a prop that leaves the world for good (a killed enemy): its card / mesh go with it
   function removeItem(p) {
     const it = byProp.get(p); if (!it) return;
     it.live?.dispose(); it.card?.dispose(); it.yaw?.card?.dispose(); if (it.flora) for (const h of it.flora) flora.remove(h);
-    items.splice(items.indexOf(it), 1); byProp.delete(p); if (p.kind === 'tree') litterDirty = true;
+    items.splice(items.indexOf(it), 1); byProp.delete(p); drawnDirty = true; if (p.kind === 'tree') litterDirty = true;
   }
   // fallen leaves (LITTER): the trees as the bake wants them (a 3D tree's crown, rotated and scaled as it stands; a painted one's guess;
   // a dead tree none), and the bake itself. A tree that joined or left marks it dirty: update() bakes once before the next draw
@@ -1135,7 +1148,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     const paths = layout.marks.filter(m => m.type === 'path'), fc = lit.cell;
     for (const q of PLATEAUS) for (const r of [[q.x0 - fc, q.y0 - fc, q.x1 + fc, q.y0], [q.x0 - fc, q.y1, q.x1 + fc, q.y1 + fc], [q.x0 - fc, q.y0, q.x0, q.y1], [q.x1, q.y0, q.x1 + fc, q.y1]]) blocks.push(r);   // the plateau's foot (and its lip): a wall of one cell
     if (!lit.sinkDone) bakeSink(lit, {WPX, HPX, PPM, wdata: wTex?.image.data, cliffZ});
-    bakeLitter(lit, trees, {WPX, HPX, PPM, walls, paths, blocks, discs, dry: (x, y) => { if (y >= cliffZ(x)) return false; waterSample(x, y, _lw); return !_lw.kind; }});
+    bakeLitter(lit, trees, {WPX, HPX, PPM, walls, paths, blocks, discs, dry: (x, y) => { if (y >= cliffZ(x)) return false; waterRaw(x, y, _lw); return !_lw.kind; }});
   }
   function setState(it, st) {
     it.st = st;
@@ -1149,7 +1162,9 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // hooks for features: card(it, sp) -> {sway (px at the top), em (a live emit canvas, re-uploaded every frame)} | null
   //   mesh(it) -> {x, y (the lean at the top, metres, arena axes), shake (art px along the screen's x), flut (art px: the
   //   leaf clumps' own dance), wx, wy (the wind's direction, arena axes), ph (rad), wave (tone bias)} | null: 3D trees
-  const hooks = {card: null, mesh: null};
+  //   near(x, y, r, out) -> out: the registry's "what's here" (host.entities.near, set by world/stage.js): treeHit's candidates
+  const hooks = {card: null, mesh: null, near: null};
+  const NEAR = [], TREE = {x: 0, y: 0, z: 0, pose: null};   // (treeHit's scratch)
   const M = new THREE.Matrix4();
   // a 3D tree's lean on screen: art px (x right, y toward the camera), held until it moves TREE_HYST px (no 1 px flicker
   // at a threshold, like the cards' hysteresis); the shader rounds it per vertex by the baked weights. The leaves dance on
@@ -1190,6 +1205,27 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   // (a swaying tree casts into the per-frame sun shadow: its shadow is drawn while its chunk is within CHUNK_SM px of the view, a long
   // shadow's reach; further, its shadow mesh rests too: CV 2 = on screen, 1 = only its shadows near enough, 0 = neither)
   const CHUNK_UP = 9, CHUNK_M = 48, CHUNK_SM = 300, CV = FOREST ? new Uint8Array(FOREST.chunks.length) : null, CS = [0, 0, 0];
+  // DRAWN: the items update works (and contact.js stamps): every item but the forest's in a chunk off the view, in items' order. Made
+  // again only when a chunk's state or the items change (CV0: the chunks' states it was made for); the ones it leaves out are put
+  // to rest as it's made (their meshes out of the passes), so a frame's loop never visits the ~1700 off-screen forest items
+  const DRAWN = [], CV0 = CV ? new Uint8Array(CV.length).fill(255) : null;
+  let drawnDirty = true;
+  function makeDrawn() {
+    drawnDirty = false; clearArray(DRAWN);
+    for (const it of items) {
+      const p = it.p;
+      if (CV !== null && p.chunk !== undefined) {
+        const v = CV[p.chunk];
+        if (v < 2) {   // (off the view: its G-buffer mesh out; a swaying tree's shadow while it can reach the view)
+          const gm = it.live?.gm, sm = it.pose && !it.pose.rigid ? it.live?.sm : null, on = it.kvis !== false && v > 0;
+          if (sm && sm.visible !== on) sm.visible = on;
+          if (gm && gm.visible) gm.visible = false;
+          continue;
+        }
+      }
+      DRAWN.push(it);
+    }
+  }
   function chunksOnScreen() {
     const C = FOREST.chunk, VW = G.VW, VH = G.VH;
     for (let k = 0; k < CV.length; k++) {
@@ -1200,6 +1236,7 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
         if (CS[0] < x0) x0 = CS[0]; if (CS[0] > x1) x1 = CS[0]; if (CS[1] < y0) y0 = CS[1]; if (CS[1] > y1) y1 = CS[1];
       }
       CV[k] = x1 > -CHUNK_M && x0 < VW + CHUNK_M && y1 > -CHUNK_M && y0 < VH + CHUNK_M ? 2 : x1 > -CHUNK_SM && x0 < VW + CHUNK_SM && y1 > -CHUNK_SM && y0 < VH + CHUNK_SM ? 1 : 0;
+      if (CV[k] !== CV0[k]) { CV0[k] = CV[k]; drawnDirty = true; }
     }
   }
   function update(yaw, pl) {
@@ -1208,13 +1245,12 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     clearArray(lights); for (const l of groundL) lights.push(l);
     const k0 = -Math.round(yaw / step);
     if (CV) chunksOnScreen();
-    for (const it of items) {
-      const p = it.p;
-      if (CV !== null && p.chunk !== undefined) {   // (a forest item: off screen it skips the rest, and its G-buffer mesh is taken out of the
-        const gm = it.live?.gm, sm = it.pose && !it.pose.rigid ? it.live?.sm : null;   // pass (three.js walks ~300 trees less a frame); a
-        const v = CV[p.chunk], show = it.kvis !== false;                                // swaying tree's shadow while it can reach the view
-        if (sm && sm.visible !== (show && v > 0)) sm.visible = show && v > 0;
-        if (v < 2) { if (gm && gm.visible) gm.visible = false; continue; }
+    if (drawnDirty) makeDrawn();
+    for (let i = 0; i < DRAWN.length; i++) {
+      const it = DRAWN[i], p = it.p;
+      if (CV !== null && p.chunk !== undefined) {   // (a forest item on the view (makeDrawn: the rest skip all this, their G-buffer mesh out of the
+        const gm = it.live?.gm, sm = it.pose && !it.pose.rigid ? it.live?.sm : null, show = it.kvis !== false;   // pass: three.js walks ~300 trees less a frame)
+        if (sm && sm.visible !== show) sm.visible = show;
         if (gm && !gm.visible && show) gm.visible = true;
       }
       const base = p.z || 0, z0 = base + (p.h || 0);
@@ -1276,11 +1312,13 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   return {layout, props, lights, items, litter: lit && lit.stats, leaves: lit, markLitter() { litterDirty = true; },   // markLitter: re-bake the fallen leaves (a tree's palette changed)
     setMode, update, hooks, addItem, removeItem, get mode() { return mode; }, yawCount, liveCount, cardCount, floraCount, flora, haveGlb, groundCanvas: gc, westCanvas, trees3d,
     cave: CAVE,   // the forest's cave's plan (world/caves.js; null: none): features/caves.js
+    decor: DECOR,   // the forest floor's small things as drawn (world/decor3d.js: setPicked; null: none): features/forage.js
     forestTiles,   // (read only) the forest's painted tiles: {x0, z0, x1, z1 (m), canvas (null: the stand-in), cx0, cz0 (the canvas's world origin)} (features/grass.js grows on them)
     itemOf: p => byProp.get(p) || null,
     // a forest prop whose chunk is off the view this frame (the last update's: world/forest.js chunks): per-frame passes over the items
     // skip it (features/contact.js)
     offView: p => CV !== null && p.chunk !== undefined && CV[p.chunk] < 2,
+    get drawn() { return DRAWN; },   // (read only) the items the last update worked: all but the forest's off the view (makeDrawn), in items' order
     // PULL a stone wall's broken top down (the lasso, docs/exp/brawl.md): the stretch round segment p's middle (w m along the run)
     // dh m lower, never under floor m, its stones fallen toward (px, py); the run is made again (walls3d.js pulls: every other
     // stone as it was) and the pieces that changed swap their geometry; their tops (topOfProp, vaultTop) follow -> false: not a
@@ -1320,10 +1358,14 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
     },
     // an arrow's step (arena coords) against the 3D trees' trunks and big limbs -> {x, y, h, prop} where it sticks | null.
     // A 3D tree stops arrows only there (its round collider is for walking; the crown lets arrows through)
+    // Its candidates: the props near the step's end, from the registry's grid (4.25 m reaches the 3 m box's corners), not
+    // a walk over every item a step
     treeHit(x0, y0, h0, x1, y1, h1) {
-      for (const it of items) {
-        const p = it.p; if (!it.pose || !it.live || p.gone || Math.abs(p.x - x1) > 3 || Math.abs(p.y - y1) > 3) continue;
-        const q = boneHit({x: p.x, y: p.y, z: p.z || 0, pose: it.pose}, x0, y0, h0, x1, y1, h1); if (q) { q.prop = p; return q; }
+      const near = hooks.near?.(x1, y1, 4.25, NEAR) || props;
+      for (const p of near) {
+        const it = byProp.get(p); if (!it || !it.pose || !it.live || p.gone || Math.abs(p.x - x1) > 3 || Math.abs(p.y - y1) > 3) continue;
+        TREE.x = p.x; TREE.y = p.y; TREE.z = p.z || 0; TREE.pose = it.pose;
+        const q = boneHit(TREE, x0, y0, h0, x1, y1, h1); if (q) { q.prop = p; return q; }
       }
       return null;
     },

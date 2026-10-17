@@ -21,7 +21,7 @@ import {createHud} from '../ui/hud.js';
 import {createScreens} from '../ui/screens.js';
 import {loadSave, recordRun} from './save.js';
 import {flags} from '../core/flags.js';
-import {parkMiller} from '../core/rng.js';
+import {simRandom} from '../core/rng.js';
 
 const Q = flags;
 const TAU = Math.PI * 2;
@@ -30,7 +30,7 @@ export async function createGame(host) {
   const combat = host.feature('combat');
   if (!combat) { console.warn('game: no combat feature, the game layer is off'); return {name: 'game', on: false}; }
   const core = combat.core, P = host.player;
-  const rng = parkMiller((Date.now() % 2147483646) + 1);   // (core/rng.js)
+  const rng = simRandom('game');   // (core/rng.js: the run's draws, a seed of this session's)
   const stats = createStats(host, core), nav = createNav(host), hud = createHud(host), screens = createScreens({sound: n => host.uiSound?.(n)});
   const save = loadSave();
   const DEV = Q.get('dev') === '1';
@@ -165,8 +165,8 @@ export async function createGame(host) {
   // they're gone, the hunters too) with your health back. Out of a fight you heal up quickly (SB.heal per s). Hunters in
   // the sandbox find their way round walls on the game's nav (built for them on demand: SB.nav). Nothing changes in the
   // sandbox anywhere else.
-  const SB = {down: -1, heal: 12, nav: false};
-  const fightOn = foes => !!foes?.stakes || core.enemies.length > 0;
+  const SB = {down: -1, heal: 12, nav: false, calm: 12, wait: 0};   // (calm: s the healing waits after a world hurt, below)
+  const fightOn = foes => !!foes?.stakes || core.enemies.length > 0 || !!host.feature('trolls')?.stakes;   // (a troll fighting you: features/trolls.js)
   function stakes(dt, evs) {
     const foes = host.feature('foes');
     if (SB.down >= 0) {
@@ -182,7 +182,13 @@ export async function createGame(host) {
     }
     stats.update(dt);
     if (core.enemies.length) { if (!SB.nav) { nav.build(); SB.nav = true; } nav.update(dt); }
-    if (!fightOn(foes)) { if (stats.S.hp < stats.S.maxHp) stats.heal(SB.heal * dt); return; }
+    // the world's own hurts (player.hurt with world: natural lightning, features/thunder.js) count out of a fight too, never
+    // below e.floor (no death to the weather), and the healing waits SB.calm s after one
+    if (!fightOn(foes)) for (const e of evs) if (e.type === 'player.hurt' && e.world) {
+      hurtFloat(stats.hurt(Math.min(e.dmg, Math.max(0, stats.S.hp - (e.floor ?? 1))))); host.PL.flicker(.9); SB.wait = SB.calm;
+    }
+    if (SB.wait > 0) SB.wait -= dt;
+    if (!fightOn(foes)) { if (stats.S.hp < stats.S.maxHp && !(SB.wait > 0)) stats.heal(SB.heal * dt); return; }
     for (const e of evs) if (e.type === 'player.hurt') {
       hurtFloat(stats.hurt(e.dmg)); host.PL.flicker(.9);
       if (stats.S.hp <= 0) {

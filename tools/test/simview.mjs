@@ -13,7 +13,7 @@
 import {spawn} from 'node:child_process';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {launch} from '../lib/chrome.mjs';
+import {launch, PYTHON} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
@@ -81,6 +81,13 @@ const SCENARIOS = [
     R.host.teleport(U.stones.x, U.stones.y); await frames(360);
     F.ringFriend = true; R.host.teleport(U.heron.x, U.heron.y); await frames(200); F.ringFriend = false;
     R.env.setHour(6.2); await frames(120);`, [240, 30]],
+  // the forest (seed 1337) without the uncanny: walking and sprinting through the home woods (fauna, birds), wading the lake's
+  // shelf, the cave's first chamber. Keyboard and world-space only: all rates
+  ['forest', 'mode=sandbox&seed=1337&at=12,-22&daymin=0&hour=11&weather=fair&flow=0', `
+    await frames(30);
+    R.keys.add('w'); await frames(90); R.keys.delete('w'); R.keys.add('shift'); R.keys.add('a'); await frames(90); R.keys.clear(); await frames(30);
+    R.host.teleport(-3.7, -29); await frames(20); R.keys.add('w'); await frames(120); R.keys.clear(); await frames(60);
+    R.host.teleport(34.4, -212.75); await frames(30); R.keys.add('d'); await frames(90); R.keys.clear(); await frames(120);`, [240, 30]],
 ].filter(s => !ONLY || ONLY.split(',').includes(s[0]));
 
 const DIGEST = `(() => { const R = window.__r3d, core = R.host.feature('combat')?.core, g = R.game, f5 = v => typeof v === 'number' ? +v.toFixed(5) : v;
@@ -96,7 +103,7 @@ const DIGEST = `(() => { const R = window.__r3d, core = R.host.feature('combat')
 })()`;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
+const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
 // Chrome's throwaway profile goes with it (tools/lib/chrome.mjs, whose next launch also sweeps any that a killed run left
 // behind). 'exit' also covers an uncaught error, Ctrl+C goes through quit
 const chrome = launch('simview', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1920,1080',

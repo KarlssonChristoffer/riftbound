@@ -17,21 +17,31 @@
 // they can differ a little between screens; if animals ever matter to play (hunting, taming), they move to the server.
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, hd, onKey, biomeChanged, toggle, menu, dbg(). ?fauna=0 starts it off.
 // OWNS: its animals' state, their meshes (look.js). READS: world/layout.js FOREST (the plan), host.player, host.world.cave (keeps out of its mouth), co-op's peers
+//   (and their gear: a keepsake's fauna.loud / fauna.lure), host.mods ('fauna.loud': x how loud the animals take him;
+//   'fauna.lure': the Fiddle String, docs/KEEPSAKES.md: ground animals that haven't bolted drift after him and trail at
+//   FIDDLE.follow m, FIDDLE.most at once; faced, they freeze and stare; running, they bolt; louder than he is, they stop at
+//   their alert distance and just stare)
 //   (host.feature('coop').net), host.env (hour, season, snow), host.elev / inStream, world.js steep, host.entities.near (what
 //   stands where), host.events (gunshots, hits, breaks: they scare), the uncanny forest's F.elk, the watcher's F.state, the game's
-//   ui (a toast for a touch).
+//   ui (a toast for a touch), host.mods ('fauna.loud': how loud they take him) and a friend's meal code (content/meals.js loudOf),
+//   mud (where the ground takes a print), prints (stamp: the morning trails; the live prints are prints.js's own, read from F.animals).
 // EMITS (core/events.js; the audio feature plays them): wildlife.wings (a raven taking off), wildlife.birds_scatter (a capercaillie's burst), wildlife.caw (the ravens),
 //   wildlife.critter_dash (a bolt through the undergrowth), wildlife.howl {kind: 'fox', call: 'yips'} (the fox at night), {kind: 'fox', call: 'bark'} (a roe's alarm bark).
+//   wildlife.lek {call: click | pop | grind, dur} (a capercaillie cock singing on a spring morning: THE LEK below).
 // BUDGET: the view ~.05 ms for ~30 animals (only those within SIM_R m of the player think; the rest wait where they are); the
 //   frame: a few matrices for each animal on screen. No allocation a frame.
 import {flags} from '../core/flags.js';
 import {clamp, TAU} from '../core/mathx.js';
 import {mulberry32} from '../core/rng.js';
+import {noteOf, FIDDLE} from '../content/keepsakes.js';
 import {FOREST} from '../world/layout.js';
 import {steep} from '../world/world.js';
-import {faunaPlan} from '../world/fauna.js';
+import {faunaPlan, trailOf, trailAt} from '../world/fauna.js';
+import {TRAIL, MUD, LEK} from '../content/animals.js';
+import {SHAPES, TRACK} from '../content/prints.js';
 import {createFaunaLook} from './fauna/look.js';
 import {createCrownBirds} from './fauna/crowns.js';
+import {loudOf} from '../content/meals.js';
 
 // ---------------------------------------------------------------- tunables
 // alert / flee: m from a person (walking) at which it stops to watch / bolts; rest: x those while it is bedded (it sits tight);
@@ -47,6 +57,7 @@ export const TUNE = {
   touch: 1.5,             // m: an animal that hasn't noticed you, this near: E touches it (it leaps and bolts)
   elk: 1.8,               // the uncanny forest's elk at night (features/uncanny.js) counts as someone this loud: everything gives it room
   watcher: 18,            // m: animals this near the watcher (features/watcher.js) stop and stare at it while it is up
+  still: 40,              // m: animals this near him stop and stare at him while the still lasts (features/trip.js: the burnt broth)
   // the birds in the crowns (fauna/crowns.js): the share of trees holding some (by day: hours), the chopped tree's own share; m a
   // shot / a chop / a tree falling / a break / a blast reaches; at most this many crowns empty at one noise; s a tree stays empty
   crown: {chance: .1, own: .5, hours: [4.5, 21.5], shot: 30, chop: 12, fell: 20, brk: 8, blast: 25, max: 2, cd: 240, pigeon: .25},
@@ -100,25 +111,34 @@ export async function create(host) {
     const R = mulberry32(d.seed), S = TUNE[d.sp], G = PLAN.groups[d.group];
     return {d, sp: d.sp, S, G, R, x: d.x, y: d.y, z: 0, h: 0, hd: R() * TAU, v: 0, st: 'idle', t: R() * 4, tx: d.x, ty: d.y,
       ph: R() * 10, gait: 0, pitch: 0, turn: 0, gp: 0, gt: 0, lie: 0, lieTo: 0, fx: 0, fy: 0, out: true, gone: false,
-      tree: null, ta: 0, th: 0, flap: 0, vz: 0, tail: 0, blocked: 0, alarm: -1, seen: false, sus: 0, leap: 0, sx: 0, sy: 0, odd: false};
+      tree: null, ta: 0, th: 0, flap: 0, vz: 0, tail: 0, blocked: 0, alarm: -1, seen: false, sus: 0, leap: 0, sx: 0, sy: 0, odd: false,
+      li: 0, held: null, calm: -1, lek: 0, sing: false, deaf: false, songL: 0, clk: 0, lekDone: -1};   // (li: its line in its group's morning trail; held: who has it on a rope (F.hold); calm: till this world hour it lets you be)
   });
   F.animals = ANIM;
-  const byGroup = new Map(); for (const a of ANIM) { let l = byGroup.get(a.G); if (!l) byGroup.set(a.G, l = []); l.push(a); }
+  const byGroup = new Map(); for (const a of ANIM) { let l = byGroup.get(a.G); if (!l) byGroup.set(a.G, l = []); a.li = l.length; l.push(a); }
   const rr = (a, b, R) => a + (b - a) * R();
   const wrap = a => a - Math.round(a / TAU) * TAU;
 
   // ---------------------------------------------------------------- people: where they are and how loud (the player and co-op's peers)
-  const PEOPLE = []; for (let i = 0; i < 8; i++) PEOPLE.push({x: 0, y: 0, k: 1, on: false, px: NaN, py: NaN});
+  const PEOPLE = []; for (let i = 0; i < 8; i++) PEOPLE.push({x: 0, y: 0, k: 1, on: false, px: NaN, py: NaN, lure: false, loud: 1, fa: NaN});
+  let nTrail = 0, trailWas = 0;   // (the Fiddle String's trailers: this frame's count, last frame's)
   const PS = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};
   let nPeople = 0, nReal = 0;   // (nReal: the people; past them, the elk when it hunts)
   // the uncanny forest's elk (its view of it: features/uncanny.js F.elk), when that is on; at night it is a hunter
   const NIGHT_ELK = new Set(['roam', 'stalk', 'lunge', 'stare', 'back']);
   const elk = () => { const U = host.feature('uncanny'); return U?.on && U.elk?.ok ? U.elk : null; };
+  // how loud the animals take him: the 'fauna.loud' note (x; briefs/depth-shared.md: the one per-person scaling: a burnt fish dish's
+  // smoke, the ash-pike's light feet), read again when the notes change
+  let loud = 1;
+  if (host.mods) { const f = () => { loud = host.mods.value('fauna.loud', 1); }; host.mods.watch(f); f(); }
   function gatherPeople(dt) {
     const P = host.player, N = TUNE.noise, q = PEOPLE[0];
     const sp = Math.hypot(P.vx || 0, P.vy || 0), st = P.state;
     q.x = P.x; q.y = P.y; q.on = true;
-    q.k = st === 'roll' || st === 'leap' || st === 'knock' ? N.jump : sp < .3 ? N.still : P.gait === 'sprint' || sp > 5.2 ? N.sprint : P.gait === 'run' || sp > 2.4 ? N.run : sp < 1.8 ? N.creep : N.walk;
+    q.k = (st === 'roll' || st === 'leap' || st === 'knock' ? N.jump : sp < .3 ? N.still : P.gait === 'sprint' || sp > 5.2 ? N.sprint : P.gait === 'run' || sp > 2.4 ? N.run : sp < 1.8 ? N.creep : N.walk) * loud;
+    q.loud = loud;   // (x how loud the animals take him: the one note, briefs' depth-shared; the Big Tooth's, docs/KEEPSAKES.md)
+    q.lure = host.mods.value('fauna.lure', 0) > 0; q.fa = P.faceAngle ?? NaN;
+    trailWas = nTrail; nTrail = 0;
     nPeople = 1;
     const C = host.feature('coop')?.net;
     if (C && C.peers) for (const peer of C.peers.values()) {
@@ -127,16 +147,18 @@ export async function create(host) {
       const r = PEOPLE[nPeople++], v = Number.isNaN(r.px) || dt <= 0 ? 0 : Math.hypot(o.x - r.px, o.y - r.py) / dt;
       r.px = r.x = o.x; r.py = r.y = o.y; r.on = true;
       r.k = v > 30 ? N.walk : v < .3 ? N.still : v > 5.2 ? N.sprint : v > 2.4 ? N.run : v < 1.8 ? N.creep : N.walk;   // (v > 30: a teleport)
+      r.loud = noteOf(peer.gear, 'fauna.loud', 1) * (peer.md ? loudOf(peer.md) : 1); r.k *= r.loud;   // (a friend's: from the set they wear, and their meal: content/meals.js loudOf)
+      r.lure = noteOf(peer.gear, 'fauna.lure', 0) > 0; r.fa = NaN;
     }
     nReal = nPeople;
-    const E = elk(); if (E && NIGHT_ELK.has(E.mode) && nPeople < PEOPLE.length) { const r = PEOPLE[nPeople++]; r.x = E.x; r.y = E.y; r.k = TUNE.elk; r.on = true; r.px = r.py = NaN; }
+    const E = elk(); if (E && NIGHT_ELK.has(E.mode) && nPeople < PEOPLE.length) { const r = PEOPLE[nPeople++]; r.x = E.x; r.y = E.y; r.k = TUNE.elk; r.on = true; r.px = r.py = NaN; r.lure = false; }
   }
   // the nearest person, scaled by how loud: TH.d = distance / loudness (compare with the species' alert / flee), TH.x / y where
   const TH = {d: 1e9, x: 0, y: 0, raw: 1e9, k: 1};
   function threat(a) {
     TH.d = 1e9; TH.raw = 1e9;
     for (let i = 0; i < nPeople; i++) {
-      const q = PEOPLE[i]; if (!q.on) continue;
+      const q = PEOPLE[i]; if (!q.on || (i === 0 && a.calm > clockT())) continue;   // (calmed: it lets you walk past, for the day)
       const d = Math.hypot(q.x - a.x, q.y - a.y), e = d / q.k;
       if (e < TH.d) { TH.d = e; TH.x = q.x; TH.y = q.y; TH.raw = d; TH.k = q.k; }
     }
@@ -148,10 +170,25 @@ export async function create(host) {
   function gatherBangs(evs, dt) {
     for (const B of BANGS) if (B.t > 0) B.t -= dt;
     for (const e of evs || []) {
-      const r = e.type === 'player.shoot' || e.type === 'foe.shoot' ? TUNE.shot : e.type === 'arrow.hit' || e.type === 'prop.break' || e.type === 'combat.explode' || e.type === 'player.hit' ? TUNE.hit : 0;
+      const r = e.type === 'player.shoot' || e.type === 'foe.shoot' ? TUNE.shot : e.type === 'arrow.hit' || e.type === 'prop.break' || e.type === 'combat.explode' || e.type === 'player.hit' || e.type === 'tree.land' || e.type === 'tree.hit' ? TUNE.hit : 0;   // (a tree coming down: docs/SKILLS.md)
       if (!r || e.x === undefined) continue;
       const B = BANGS[bangI++ % BANGS.length]; B.x = e.x; B.y = e.y; B.r = r; B.t = .5;
     }
+  }
+  // the Fiddle String's pull: the person wearing it within FIDDLE.lure m (an animal already trailing keeps its place; a new one
+  // only while fewer than FIDDLE.most trail)
+  function lurer(a) {
+    if (!a.trail && Math.max(trailWas, nTrail) >= FIDDLE.most) return null;
+    for (let i = 0; i < nReal; i++) { const q = PEOPLE[i]; if (q.on && q.lure && Math.hypot(q.x - a.x, q.y - a.y) < FIDDLE.lure) return q; }
+    return null;
+  }
+  function trail(a, L, dt) {   // after him at its distance; faced (or he's loud): it freezes and stares
+    a.trail = true; nTrail++; a.sus = 0;
+    const d = Math.hypot(L.x - a.x, L.y - a.y), fol = L.loud > 1 ? a.S.alert * .8 : (a.fol ??= FIDDLE.follow[0] + (FIDDLE.follow[1] - FIDDLE.follow[0]) * a.R());
+    const faced = L.fa === L.fa && Math.abs(wrap(Math.atan2(a.x - L.x, a.y - L.y) - L.fa)) < FIDDLE.turn;
+    if (faced || (L.loud > 1 && d < fol + 1)) { if (a.st !== 'stare') stareAt(a, L.x, L.y, .8); else { a.sx = L.x; a.sy = L.y; a.t = Math.max(a.t, .3); } return; }
+    if (d > fol + 1) { const k = fol / d; go(a, L.x + (a.x - L.x) * k, L.y + (a.y - L.y) * k, a.S.walk * 1.8); a.t = 1.5; }
+    else if (a.st === 'walk') idle(a, true);
   }
   function bangAt(a) { for (const B of BANGS) if (B.t > 0 && Math.hypot(B.x - a.x, B.y - a.y) < B.r) return B; return null; }
 
@@ -208,14 +245,21 @@ export async function create(host) {
     const S = a.S, T = threat(a), bang = bangAt(a), out = outNow(S, hr);
     a.ph += a.v * dt * (a.sp === 'hare' ? 2.2 : a.sp === 'fox' ? 2.4 : a.sp === 'capercaillie' ? 4 : 1.35);
     if (a.alarm > 0 && (a.alarm -= dt) <= 0) { a.alarm = -1; if (a.st !== 'flee') bolt(a, a.fx, a.fy, rr(...S.away, a.R) * .8); }
-    const rest = a.st === 'rest', k = rest ? S.rest : 1, N = TUNE.noise, SU = TUNE.sus;
+    const rest = a.st === 'rest', k = rest ? S.rest : a.st === 'lek' ? LEK.wary : 1, N = TUNE.noise, SU = TUNE.sus;
+    if (a.st !== 'lek') a.sing = a.deaf = false;
+    a.lek += ((a.st === 'lek' ? 1 : 0) - a.lek) * Math.min(1, dt * 3);
     if (a.leap > 0) a.leap = Math.max(0, a.leap - dt);
-    if (a.st !== 'flee' && !a.odd) {
+    const L = a.st !== 'flee' && a.st !== 'rest' && !a.odd ? lurer(a) : null;
+    if (L) {   // the Fiddle String: no suspicion, only running (or a bang) sends it off
+      if (bang || L.k >= N.run) { a.trail = false; if (a.sp === 'capercaillie') { flush(a, L.x, L.y); return; } if (bolt(a, bang ? bang.x : L.x, bang ? bang.y : L.y, a.S.away ? rr(...a.S.away, a.R) : 14)) { alarmGroup(a); return; } }
+      else trail(a, L, dt);
+    } else a.trail = false;
+    if (a.st !== 'flee' && !a.odd && !L) {
       // noticing: suspicion builds near someone (the closer and the louder, the faster; slow while its head is down or it is
       // bedded, slower while they keep still) and fades all the time. Someone running at it, or a bang: no waiting
-      const view = rest ? SU.bed : a.pitch < -.6 ? SU.down : 1, mv = T.k > N.still ? 1 : SU.still;
+      const view = a.deaf ? 0 : rest ? SU.bed : a.pitch < -.6 ? SU.down : 1, mv = T.k > N.still ? 1 : SU.still;   // (deaf: the lek song's last phrase)
       a.sus = clamp(a.sus + ((T.d < S.alert * k ? SU.gain * (S.alert * k / Math.max(T.d, .4) - 1) * view * mv : 0) - SU.fade) * dt, 0, 1.2);
-      if (bang || a.sus >= SU.bolt || (T.k >= N.run && T.d < S.flee * k)) {
+      if (bang || a.sus >= SU.bolt || (!a.deaf && T.k >= N.run && T.d < S.flee * k)) {
         const fx = bang ? bang.x : T.x, fy = bang ? bang.y : T.y;
         if (a.sp === 'capercaillie') { flush(a, fx, fy); return; }
         if (bolt(a, fx, fy, a.S.away ? rr(...a.S.away, a.R) : 14)) { alarmGroup(a); if (a.sp === 'roe' && a.R() < .6) emit('wildlife.howl', a, {kind: 'fox', call: 'bark'}); return; }   // (a roe's alarm bark: a dog-like bark, the fox's will do)
@@ -264,6 +308,20 @@ export async function create(host) {
         if ((a.t -= dt) < 0) { a.gp = 0; a.gt = 0; idle(a, out); }
         break;
       }
+      case 'lek': {   // displaying: tail fanned, neck up; a song (clicks, a pop, the grinding phrase he's deaf in), a pause, again
+        a.v = 0; a.gp = .45; a.gt = Math.sin(a.ph * .5) * .25; a.ph += dt * .3;
+        if (!lekNow(a, hr)) { a.lekDone = day(); idle(a, out); break; }
+        if ((a.t -= dt) < 0) { a.sing = !a.sing; a.t = a.songL = a.sing ? rr(...LEK.song, a.R) : rr(...LEK.pause, a.R); a.clk = 0; }
+        a.deaf = a.sing && a.t < LEK.deaf;
+        if (a.sing) song(a, dt);
+        // someone this close: he bursts up, done for the morning (you, first: the bonus, features/animalfinds.js F.lekClose)
+        for (let i = 0; i < nReal; i++) {
+          const q = PEOPLE[i]; if (!q.on || Math.hypot(q.x - a.x, q.y - a.y) >= LEK.close) continue;
+          if (i === 0 && CLOSE.length < 8) CLOSE.push(a.d.id + ':' + day());
+          flush(a, q.x, q.y); return;
+        }
+        break;
+      }
       default: {   // idle: stands, looks round
         a.v *= Math.max(0, 1 - dt * 5); a.gp = .15;
         if ((a.t -= dt) < 0) { a.gt = (a.R() - .5) * 1.6; next(a, out); }
@@ -281,6 +339,11 @@ export async function create(host) {
   // what next, when idle: by the clock, home, cover, the den
   function next(a, out) {
     const S = a.S, G = a.G, R = a.R, far = Math.hypot(a.x - G.x, a.y - G.y);
+    if (onTrail(a)) return;
+    if (lekNow(a, hour())) {   // a lek morning: to his spot, and sing
+      if (far > 1.2) { const s = spot(a, G.x, G.y, .8); if (s) { go(a, s.x, s.y, S.walk); return; } }
+      a.st = 'lek'; a.sing = false; a.t = rr(...LEK.pause, R) * .5; return;
+    }
     if (!out && a.sp !== 'capercaillie') {   // time to rest: the roe to cover, the fox to its den, the hare where it is
       const bed = a.sp === 'roe' ? G.cover : a.sp === 'fox' ? G.den : null;
       if (bed && Math.hypot(a.x - bed.x, a.y - bed.y) > 2.5) { const s = spot(a, bed.x, bed.y, 2.5); if (s) { go(a, s.x, s.y, S.walk); return; } }
@@ -299,11 +362,33 @@ export async function create(host) {
   }
   function go(a, x, y, v) { a.st = 'walk'; a.tx = x; a.ty = y; a.walk = v; a.t = 20; }
   const hour = () => host.env?.hour ?? 12;
+  const day = () => host.env?.day ?? 0;
+
+  // ---------------------------------------------------------------- THE LEK (living-animals.md "Finds without killing"; content/animals.js LEK)
+  // On spring mornings (LEK.hours) each cock sings at his spot (his home), tail fanned, neck up, less wary (LEK.wary). A song is
+  // LEK.song s: clicks coming faster, a pop, then the grinding phrase: its last LEK.deaf s he hears nothing (no suspicion builds,
+  // you can walk). Then LEK.pause s. Someone within LEK.close m and he bursts up: done for the morning. Sounds: wildlife.lek.
+  let lekUntil = -1;   // (dev, Esc > Sandbox: a lek morning now, whatever the season, until this world hour)
+  const FORCED = new Set();   // (the days the dev lek was on: their feathers are a lek morning's)
+  const CLOSE = [];    // 'cock:day' you got within LEK.close of first (features/animalfinds.js takes them: F.lekClose)
+  const lekNow = (a, hr) => a.sp === 'capercaillie' && !a.d.hen && a.lekDone !== day() &&
+    ((host.env?.season === LEK.season && hr >= LEK.hours[0] && hr < LEK.hours[1]) || clockT() < lekUntil);
+  function lekSound(a, call, extra) {
+    const P = host.player; if (!host.events || Math.hypot(P.x - a.x, P.y - a.y) > LEK.hear) return;
+    const e = {type: 'wildlife.lek', x: a.x, y: a.y, call}; if (extra) Object.assign(e, extra); host.events.push(e);
+  }
+  function song(a, dt) {
+    const into = a.songL - a.t, clicks = a.songL - LEK.deaf - .35;
+    if (into < clicks) { if ((a.clk -= dt) <= 0) { lekSound(a, 'click'); a.clk = .75 - .5 * into / clicks; } }   // (the clicks come faster)
+    else if (a.clk > -50) { lekSound(a, 'pop'); a.clk = -100; }
+    if (a.deaf && a.clk > -150) { lekSound(a, 'grind', {dur: LEK.deaf}); a.clk = -200; }
+  }
 
   // ---------------------------------------------------------------- the capercaillie: a burst up out of the floor, a long low glide
   function flush(a, fx, fy) {
     const s = spot(a, a.x, a.y, 34, fx, fy, 22) || spot(a, a.x, a.y, 20);
     if (!s) return;
+    if (lekNow(a, hour())) a.lekDone = day();   // (put up off his lek: done for the morning, his feathers lie from now)
     a.st = 'flush'; a.tx = s.x; a.ty = s.y; a.t = 6; a.vz = 3.2; a.hd = Math.atan2(s.y - a.y, s.x - a.x); a.v = 2;
     emit('wildlife.birds_scatter', a, {n: 5}); alarmGroup(a);
   }
@@ -409,7 +494,7 @@ export async function create(host) {
   const look = createFaunaLook(host, TUNE);
   const crowns = createCrownBirds(host, TUNE, (type, at, extra) => emit(type, at, extra));
   function stepGone(a, hr) {
-    const away = !outNow(a.S, hr) && !(a.st === 'flee' || a.st === 'fly' || a.st === 'flush' || a.st === 'climb');
+    const away = !outNow(a.S, hr) && !lekNow(a, hr) && !(a.st === 'flee' || a.st === 'fly' || a.st === 'flush' || a.st === 'climb');
     if (away === a.gone) return;
     if (look.seen(a)) return;   // (wait until it is off the screen)
     a.gone = away;
@@ -430,6 +515,15 @@ export async function create(host) {
       if (a.gone || a.odd || !GROUND.has(a.sp) || a.h > 0 || Math.hypot(a.x - w.x, a.y - w.y) > TUNE.watcher) continue;
       if (a.st === 'stare' && a.sx === w.x && a.sy === w.y) a.t = Math.max(a.t, .4);
       else if (calm(a)) stareAt(a, w.x, w.y, .4);
+    }
+  }
+  // the still (features/trip.js F.still: the burnt fly agaric broth): every animal within TUNE.still m stops and stares at him
+  function stillStares() {
+    if (!host.feature('trip')?.still) return;
+    const P = host.player;
+    for (const a of ANIM) {
+      if (a.gone || a.odd || a.h > 0 || Math.hypot(a.x - P.x, a.y - P.y) > TUNE.still) continue;
+      if (a.st === 'stare' && a.sx === P.x && a.sy === P.y) a.t = Math.max(a.t, .4); else stareAt(a, P.x, P.y, .4);
     }
   }
   // the strange: now and then at dusk or dawn a whole herd, far off, turns as one and stares at you; a few seconds, then back to it
@@ -477,7 +571,7 @@ export async function create(host) {
     touchA = null; if (host.lock || !F.on) return;
     const P = host.player; let bd = TUNE.touch;
     for (const a of ANIM) {
-      if (a.gone || a.h > 0 || !GROUND.has(a.sp) || a.st === 'flee' || a.st === 'flush' || a.st === 'fly' || a.st === 'land' || a.sus >= TUNE.sus.alert) continue;
+      if (a.gone || a.held || a.h > 0 || !GROUND.has(a.sp) || a.st === 'flee' || a.st === 'flush' || a.st === 'fly' || a.st === 'land' || a.sus >= TUNE.sus.alert) continue;
       const d = Math.hypot(a.x - P.x, a.y - P.y); if (d < bd) { bd = d; touchA = a; }
     }
   }
@@ -499,6 +593,111 @@ export async function create(host) {
     q.fillStyle = '#cfe3a0'; q.fillText(txt, sx * sc, sy * sc - 3 * dpr);
   };
 
+  // ---------------------------------------------------------------- ON A ROPE (features/rope.js; living-animals.md slice 2)
+  // While someone holds an animal on a rope (yours: rope.js runs it; a friend's: from their state message) it is where its holder's
+  // record says (H: {x, y, z, h, hd, v, mode}: rope | fly | daze | carry | tired), drawn in the pose that goes with it; let go, it
+  // goes on from there as it would (bolts, or walks off calm). Nothing here is sent: the holder's client says where it is
+  //   F.hold(id, H) -> the animal | null (one that's gone, flying or already held: none)   F.release(id, how, x?, y?)
+  //   how: 'bolt' (off away from you), 'calm' (it stands, then goes about its day), 'walk'; F.calm(id, untilHour): it lets you be
+  //   F.byId(id), F.ground(a): a ground animal that could be caught now (on its feet, not gone, not held)
+  const ById = new Map(ANIM.map(a => [a.d.id, a]));
+  F.byId = id => ById.get(id) || null;
+  F.ground = a => !!a && !a.gone && (!a.held || a.held.thief) && a.h === 0 && (a.sp === 'roe' || a.sp === 'fox' || a.sp === 'hare');   // (thief: a fox on its run, features/foxden.js: the lasso can still take it)
+  F.hold = (id, H) => {
+    const a = ById.get(id); if (!a || a.gone || (a.held && a.held !== H && !a.held.thief) || a.h > .05) return null;
+    a.held = H; a.odd = false; a.lieTo = 0; a.alarm = -1;
+    if (a.sp === 'roe') { a.fx = host.player.x; a.fy = host.player.y; alarmGroup(a); }   // (the herd bolts with it)
+    return a;
+  };
+  F.release = (id, how = 'bolt', x, y) => {
+    const a = ById.get(id); if (!a || !a.held) return;
+    if (x !== undefined && Number.isFinite(x) && Number.isFinite(y)) { a.x = x; a.y = y; }
+    a.held = null; a.h = 0; a.z = elev(a.x, a.y); a.lieTo = 0; a.gp = 0; a.gt = 0;
+    const P = host.player;
+    if (how === 'bolt') { a.sus = 1.2; if (!bolt(a, P.x, P.y, (a.S.away ? rr(...a.S.away, a.R) : 14) * 1.2)) idle(a, true); else if (a.sp === 'roe') alarmGroup(a); }
+    else { a.sus = 0; a.v = 0; a.st = 'alert'; a.t = rr(3, 6, a.R); lookAt(a, P.x, P.y); }
+  };
+  F.calm = (id, until) => { const a = ById.get(id); if (a) a.calm = Math.max(a.calm, until); };
+  // THE LEK's word for the finds (features/animalfinds.js): F.lekClose(out) moves the 'cock:day' you got close to first into out;
+  // F.lekOver(id, day): that cock's lek of that day is over (he was put up, or its hours are past); F.lekForced(day): the dev lek
+  F.lekClose = out => { for (const k of CLOSE) out.push(k); CLOSE.length = 0; return out; };
+  F.lekOver = (id, d) => d < day() || (d === day() && (ById.get(id)?.lekDone === d || (clockT() >= lekUntil && hour() >= LEK.hours[1])));
+  F.lekForced = d => FORCED.has(d);
+  function heldPose(a, dt) {
+    const H = a.held;
+    a.x = H.x; a.y = H.y; a.hd = H.hd; a.v = H.v; a.h = H.h || 0; a.sus = H.mode === 'tired' ? .4 : 1;
+    a.ph += a.v * dt * (a.sp === 'hare' ? 2.2 : a.sp === 'fox' ? 2.4 : 1.35);
+    a.st = a.v > 2.5 ? 'flee' : a.v > .2 ? 'walk' : H.mode === 'daze' ? 'rest' : 'alert';
+    a.lieTo = H.mode === 'daze' ? 1 : 0;
+    a.gp = H.mode === 'tired' ? -.75 : H.mode === 'carry' ? -.3 : H.mode === 'rope' ? .25 : 0; a.gt = H.mode === 'rope' ? Math.sin(a.ph * 1.7) * .5 : 0;
+    if (a.h > 0) a.z = H.z;
+  }
+
+  // ---------------------------------------------------------------- TRACKS (living-animals.md slice 1)
+  // the live prints are features/prints.js's own (it walks the ground animals near you, read from F.animals; features/mud.js says
+  // where the ground takes them). Here: the morning trails, stamped on the same print system
+  const prints = () => host.feature('prints'), mud = () => host.feature('mud');
+  // THE MORNING TRAILS (world/fauna.js trailOf): after a wet night (the ground wet when the day is first seen at TRAIL.at or
+  // later; ?mud=1), each herd's, fox's and hare's way in. A line's prints go down as its hours come (a cursor a line: what is
+  // already walked when the day is first seen, at once), where the mud takes them; within TRAIL.near of you the animal walks
+  // its line itself and prints.js stamps its feet. The same lines on every client (the seed and the day); each client's own prints
+  const TRAILS = new Map();   // group index -> today's trail (while it's a trail day)
+  const TD = {day: -1, decided: false, on: false, k: 1, n: 0};
+  const CUR = new Map();   // a line (world/fauna.js's, read only) -> {s: m along it stamped so far, side: the next foot}
+  function trails(hr) {
+    const E = host.env; if (!E || !F.on) return;
+    if (E.day !== TD.day) { TD.day = E.day; TD.decided = false; TD.on = false; TRAILS.clear(); CUR.clear(); }
+    if (TD.decided || hr < TRAIL.at) return;
+    TD.decided = true;
+    if (prints()?.stamp && mud()?.wet()) lay(E.day);
+  }
+  function lay(day) {
+    if (!prints()?.stamp) return 0;
+    TD.day = day; TD.decided = true; TD.on = true; TD.n = 0; TRAILS.clear(); CUR.clear();
+    // how far apart: the trails' own steps, wider when all of them together would pass TRAIL.max prints
+    let want = 0;
+    for (let g = 0; g < PLAN.groups.length; g++) {
+      const T = trailOf(FOREST, g, day); if (!T) continue;
+      TRAILS.set(g, T);
+      for (const L of T.lines) { want += L.n / TRAIL[T.sp].step; CUR.set(L, {s: 0, side: 1}); }
+    }
+    TD.k = Math.max(1, want / TRAIL.max);
+    trailPrints(true);
+    return TD.n;
+  }
+  // each line's prints up to the clock's hour (all = the first laying: near you too, those are already walked)
+  function trailPrints(all = false) {
+    if (!TD.on || !TRAILS.size) return;
+    const Pr = prints(), M = mud(); if (!Pr?.stamp || !M) return;
+    const t = clockT(), P = host.player, near = TRAIL.near;
+    for (const T of TRAILS.values()) {
+      const step = TRAIL[T.sp].step * TD.k, shape = TRACK[T.sp], S = SHAPES[shape];
+      for (const L of T.lines) {
+        const Q = L.pts, c = CUR.get(L);
+        for (; c.s < L.n - 1; c.s += step) {
+          const i = Math.floor(c.s), f = c.s - i, a = i * 3, b = a + 3, h = Q[a + 2] + (Q[b + 2] - Q[a + 2]) * f;
+          if (h > t) break;
+          const x = Q[a] + (Q[b] - Q[a]) * f, y = Q[a + 1] + (Q[b + 1] - Q[a + 1]) * f;
+          if (!all && Math.abs(x - P.x) < near && Math.abs(y - P.y) < near) continue;   // (the animal itself is walking it here)
+          const ux = Q[b] - Q[a], uy = Q[b + 1] - Q[a + 1], l = Math.hypot(ux, uy) || 1, side = S.pair ? (c.side = -c.side) * S.side : 0;
+          const px = x + uy / l * side, py = y - ux / l * side, su = M.at(px, py); if (!su) continue;
+          Pr.stamp(px, py, elev(px, py), ux, uy, shape, su); TD.n++;
+        }
+      }
+    }
+  }
+  // an animal of a group with a trail today, in the trail's hours, keeps to its line: off the screen it is where its line has got
+  // to, on it it walks there (from where it stands; it notices you as ever on the way)
+  const TP = {x: 0, y: 0, hd: 0};
+  function onTrail(a) {
+    if (!TD.on || a.odd) return false;
+    const T = TRAILS.get(a.d.group); if (!T) return false;
+    if (!trailAt(T, Math.min(a.li, T.lines.length - 1), clockT() + .02, TP)) return false;
+    if (!look.seen(a) && Math.hypot(TP.x - a.x, TP.y - a.y) > 6 && free(TP.x, TP.y)) { a.x = TP.x; a.y = TP.y; a.hd = TP.hd; idle(a, true); return true; }
+    go(a, TP.x, TP.y, a.S.walk); return true;
+  }
+  const clockT = () => host.env?.t ?? 0;   // (the world clock's hours since the start: the trails' hours are on it)
+
   // ---------------------------------------------------------------- the view step
   let oddAcc = 0;
   let acc = 0;
@@ -510,11 +709,13 @@ export async function create(host) {
     const P = host.player, hr = hour();
     let n = 0;
     for (const a of ANIM) {
-      if (Math.hypot(a.x - P.x, a.y - P.y) > TUNE.SIM_R) { a.seen = false; continue; }
+      if (Math.hypot((a.held ? a.held.x : a.x) - P.x, (a.held ? a.held.y : a.y) - P.y) > TUNE.SIM_R) { a.seen = false; continue; }   // (held: where its holder has it)
       n++;
-      if (a.S.gone) stepGone(a, hr);
+      if (a.held) heldPose(a, dt);   // (on a rope: where its holder has it, features/rope.js)
+      else if (a.S.gone) stepGone(a, hr);
       if (a.gone) continue;
-      if (a.sp === 'raven') stepRaven(a, dt, hr);
+      if (a.held) { /* (its holder moves it) */ }
+      else if (a.sp === 'raven') stepRaven(a, dt, hr);
       else if (a.sp === 'squirrel') stepSquirrel(a, dt);
       else if (a.sp === 'capercaillie' && a.st !== 'flee' && (a.st === 'flush' || a.st === 'fly' || a.st === 'land')) {
         const d = stepFlyer(a, dt); if (a.st === 'fly' && d < 6) a.st = 'land';
@@ -522,11 +723,13 @@ export async function create(host) {
       } else stepGround(a, dt, hr);
       a.lie += (a.lieTo - a.lie) * Math.min(1, dt * 1.5);
       a.pitch += (a.gp - a.pitch) * Math.min(1, dt * 5); a.turn += (a.gt - a.turn) * Math.min(1, dt * 5);
-      if (a.h === 0 || a.sp === 'squirrel') a.z = elev(a.x, a.y);
+      if (a.held && a.h > 0) {}   // (carried: at its holder's height, heldPose)
+      else if (a.h === 0 || a.sp === 'squirrel') a.z = elev(a.x, a.y);
       else a.z += (elev(a.x, a.y) - a.z) * Math.min(1, dt * 4);
     }
+    trails(hr); trailPrints();
     crowns.events(evs); crowns.step(dt);
-    watcherStares(); oddHare(dt, hr);
+    watcherStares(); stillStares(); oddHare(dt, hr);
     if ((oddAcc += dt) >= 1) { oddAcc -= 1; herdStares(hr); }
     findTouch();
     F.count = n;
@@ -554,9 +757,17 @@ export async function create(host) {
     }},
     {label: 'Animals: the odd hare comes (at night)', run: () => { oddN = 0; oddCD = 0; }},
     {label: 'Animals: startle the birds in the trees round you', run: () => { const P = host.player; crowns.noise(P.x, P.y, 25); }},
+    {label: 'Animals: lay this morning\'s trails (and the ground wet)', run: () => { mud()?.wetNow(true); const n = lay(host.env?.day ?? 0); game()?.ui?.toast('Morning trails', `${n} prints so far, ${TRAILS.size} trails`, '#cfe3a0'); }},
+    {label: 'Animals: start the lek (a spring morning now, an in-game hour; to the nearest cock)', run: () => {
+      lekUntil = clockT() + 1; FORCED.add(day());
+      const P = host.player; let b = null, bd = 1e9; for (const a of ANIM) if (a.sp === 'capercaillie' && !a.d.hen) { a.lekDone = -1; const d = Math.hypot(a.G.x - P.x, a.G.y - P.y); if (d < bd) { bd = d; b = a; } }
+      if (b) host.teleport(b.G.x, b.G.y + 14);
+    }},
+    {label: 'Animals: go to the nearest roe bed', run: () => { const P = host.player; let b = null, bd = 1e9; for (const G of PLAN.groups) if (G.cover) { const d = Math.hypot(G.cover.x - P.x, G.cover.y - P.y); if (d < bd) { bd = d; b = G.cover; } } if (b) host.teleport(b.x, b.y + 6); }},
   ]);
   F.crowns = crowns;
-  F.dbg = () => ({count: F.count, ms: +F.ms.toFixed(3), hour: +hour().toFixed(2), touch: touchA?.d.id ?? null, crownBirds: crowns.flying, touched: {...touched}, odd: ODD ? {id: ODD.d.id, on: ODD.odd, visits: oddN} : null,
+  F.trails = TRAILS; F.layTrails = lay;
+  F.dbg = () => ({count: F.count, trailDay: TD.on ? TD.day : null, trails: TRAILS.size, trailPrints: TD.n, ms: +F.ms.toFixed(3), hour: +hour().toFixed(2), touch: touchA?.d.id ?? null, crownBirds: crowns.flying, touched: {...touched}, odd: ODD ? {id: ODD.d.id, on: ODD.odd, visits: oddN} : null,
     animals: ANIM.map(a => `${a.d.id} ${a.st}${a.gone ? ' (gone)' : ''} ${a.x.toFixed(1)},${a.y.toFixed(1)}${a.h ? ' h' + a.h.toFixed(1) : ''}${a.sus > .01 ? ' sus' + a.sus.toFixed(2) : ''}`)});
   return F;
 }
