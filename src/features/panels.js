@@ -9,9 +9,10 @@
 //   P.open(id?) / P.close() / P.toggle(id?) / P.isOpen / P.tabId / P.icon(itemId) -> a data URL (the item's pixel icon)
 //   (the fields: ui/book.js's header. Clicks are DOM events between steps: a part queues what changes the sim and does it in its
 //   feature's update, as the pack's recipes do)
-// THE TABS (order): pack 10 (Tab / I), weapon 15 (N: features/mods.js's bench, adopted below), skills 20 (K), craft 30 (B),
+// THE TABS (order): pack 10 (Tab / I), weapon 15 (Shift+M, features/mods.js's bench, adopted below), skills 20 (K), craft 30 (B),
 // journal 40 (J), map 50 (H). Free for others: 25, 35 ...
-// KEYS: the letters are dev keys outside the sandbox (dev/devkeys.js DEV_KEYS: i j k b n); claims() hands them to play. In the
+// KEYS: the letters are dev keys outside the sandbox (dev/devkeys.js DEV_KEYS: i j k b); Shift+letter is left to others
+// (Shift+J the almanac's fold, Shift+M the weapon bench, Shift+Tab the wardrobe); claims() hands them to play. In the
 // sandbox (dev mode) they win over those dev toggles (the armour, the HD bow, the air particles: in the Esc menu's Dev tab).
 // OWNS: the book (ui/book.js), the map view (ui/mapview.js). READS: host.lock, host.hudOff.
 // EMITS: nothing.  BUDGET: shut: a compare a frame; open: ui/book.js's (the current tab's parts on change).
@@ -54,13 +55,13 @@ export async function create(host) {
     }});
 
   // OTHER FEATURES' TABS that offer one instead of calling P.tab (looked for once, on the first frame: every feature exists then).
-  // features/mods.js: F.tab {id, title, key, mount(el), unmount(), refresh()}, the weapon bench: here on N (its own M is mute's)
+  // features/mods.js: F.tab {id, title, mount(el), unmount(), refresh()}, the weapon bench (it opens the tab itself on Shift+M)
   let adopted = false;
   function adopt() {
     adopted = true;
     const T = host.feature('mods')?.tab;
     if (T?.mount && !book.has?.(T.id)) {
-      tab({id: T.id, title: 'Weapon', key: 'n', order: 15, hint: 'What is fitted to the weapon in your hand.'});
+      tab({id: T.id, title: T.title || 'Weapon', order: 15, hint: 'What is fitted to the weapon in your hand. Shift+M opens it.'});   // (its key is its own: Shift+M, features/mods.js)
       book.part({id: T.id + '.bench', tab: T.id, order: 10, mount: el => T.mount(el), onShow: () => T.refresh?.()});
     }
   }

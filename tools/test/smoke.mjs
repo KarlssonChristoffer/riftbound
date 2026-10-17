@@ -48,8 +48,8 @@ async function run(label, js, wait = 0) {
 if (!await load('mode=sandbox&windlevel=gale')) { console.log('the page did not load', logs.join('\n')); quit(2); }
 await sleep(2000);
 await run('frames', step(30));
-await run('armour on (I)', key('i') + step(30), 800);
-await run('HD bow (J) + a shot', key('j') + 'window.__r3d.PL.press();' + step(20) + 'window.__r3d.PL.release();' + step(20));
+await run('the player window (I, J, H; H again shuts it)', key('i') + step(5) + key('j') + step(5) + key('h') + step(5) + key('h') + step(30), 800);   // (features/panels.js: the old dev keys I / J are its tabs now)
+await run('a shot', 'window.__r3d.PL.press();' + step(20) + 'window.__r3d.PL.release();' + step(20));
 await run('lantern (L)', key('l') + step(10));
 await run('colliders (Shift+G)', key('g', {shiftKey: true}) + step(5));
 await run('debug views (G x7)', Array(7).fill(key('g') + step(2)).join(''));
