@@ -214,7 +214,7 @@ export function createBook({sound = () => {}, icon = () => '', micro = true} = {
     part(p) {
       if (parts.some(q => q.id === p.id)) return api;
       parts.push(p);
-      if (tabOf(p.tab)?.el) place(p);   // (its tab's page exists: in at once; else when it first shows)
+      if (tabOf(p.tab) && (tabOf(p.tab).el || p.mount)) place(p);   // (its tab's page exists, or it mounts its own DOM: in at once; else when it first shows)
       if (open && p.tab === cur) { p.sync?.(); p.onShow?.(); }
       return api;
     },
@@ -250,6 +250,7 @@ export function createBook({sound = () => {}, icon = () => '', micro = true} = {
         p.frame?.();
       }
     },
+    has: id => !!tabOf(id),
     redraw(id) { const p = parts.find(q => q.id === id); if (p) p.v = NaN; },
     esc,
   };

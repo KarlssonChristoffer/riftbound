@@ -94,7 +94,7 @@ export async function create(host) {
       shown = S.ver; shownW = S.waiting; shownO = overV; panel.sync();
     },
     // the panel goes with the pack's (Tab: what you carry and what you wear), a compare a frame
-    frame() { if (panel.mounted) return; const p = host.feature('pack'), o = !!p?.open; if (o !== packWas) { packWas = o; panel.toggle(o); } },   // (in the window: its tab shows it)
+    frame() { if (panel.mounted || host.feature('panels')?.on) return; const p = host.feature('pack'), o = !!p?.open; if (o !== packWas) { packWas = o; panel.toggle(o); } },   // (in the window: its tab shows it)
     onKey(k, e) { if (k !== 'tab' || e?.shiftKey || panel.mounted) return false; panel.toggle(); return true; },   // (no pack: Tab is this panel's; Shift+Tab: the dev wardrobe)
     menu: () => [{label: `Gear: ${S.worn.length ? S.worn.map(id => gearById(id).name).join(', ') : 'your own clothes'} (Tab)`, run: () => { const P = host.feature('panels'); if (panel.mounted && P) P.open('pack'); else panel.toggle(true); }}],
     hud: () => `gear ${S.key || 'none'} · ${S.stats.kg.toFixed(1)} kg · armor ${Math.round(S.stats.armor * 100)}% · speed x${S.stats.speed.toFixed(2)}${S.waiting ? ' · waiting for the server' : ''}`,
