@@ -41,7 +41,7 @@ const EEL = {dark: .55, soft: .12, r: 11, c: [.11, .19, .16], h: 1.4, near: 5, o
 const mixInto = (a, b, k, o) => { o[0] = a[0] + (b[0] - a[0]) * k; o[1] = a[1] + (b[1] - a[1]) * k; o[2] = a[2] + (b[2] - a[2]) * k; return o; };
 function flick(l, t) {
   const f = l.flicker || 0; if (!f) return 1;
-  const s = (l.id ?? 0) * 12.9898 % 6.283, n = .5 * Math.sin(t * 7.3 + s) + .3 * Math.sin(t * 12.7 + s * 2.3) + .2 * Math.sin(t * 23.1 + s * 3.7);
+  const s = (+l.id || 0) * 12.9898 % 6.283, n = .5 * Math.sin(t * 7.3 + s) + .3 * Math.sin(t * 12.7 + s * 2.3) + .2 * Math.sin(t * 23.1 + s * 3.7);
   return 1 - f * .22 * (1 + n);
 }
 // the arena's longest sun shadow (lighting.js SUN_LEN_MAX): 1.7 m per metre of height. A low dusk sun (10-14 deg) still
@@ -184,7 +184,7 @@ export function createLighting({G, host, features, opt}) {
     for (let i = 1; i < nc; i++) { const w = CAND[i]; let j = i - 1; while (j >= 0 && CAND[j].d > w.d) { CAND[j + 1] = CAND[j]; j--; } CAND[j + 1] = w; }
     // a flame's light wanders a few cm (l.jitter, else from its flicker), so the shadows round a fire dance with it
     for (let i = 0; i < nc && nL < 32; i++) {
-      const l = CAND[i].l, k = flick(l, t), j = l.jitter ?? (l.flicker || 0) * .035, s = (l.id ?? 0) * 7.13;
+      const l = CAND[i].l, k = flick(l, t), j = l.jitter ?? (l.flicker || 0) * .035, s = (+l.id || 0) * 7.13;
       const jx = j ? j * (Math.sin(t * 11.3 + s) + Math.sin(t * 17.9 + s * 1.7) * .6) / 1.6 : 0, jz = j ? j * (Math.sin(t * 13.1 + s * 2.1) + Math.sin(t * 7.7 + s * .9) * .6) / 1.6 : 0;
       putL(l.x + jx, l.y + Math.abs(jz) * .5, l.z + jz, l.c, l.r * (1 + (k - 1) * .15), l.k * k, false, l.halo !== false);
     }
