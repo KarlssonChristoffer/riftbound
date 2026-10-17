@@ -42,7 +42,7 @@ const SECTION_OF = {
   winter: 'World', thunder: 'World', prints: 'World', mud: 'World', trip: 'World', floor3d: 'World',
   wind: 'Nature', windlines: 'Nature', litter: 'Nature', weather: 'Nature', mist: 'Nature', garden: 'Nature', riverside: 'Nature',
   stillwater: 'Nature', puddles: 'Nature', wading: 'Nature', grass: 'Nature', atmos: 'Nature', dust: 'Nature', tumbleweed: 'Nature',
-  airfx: 'Nature', campfires: 'Nature', wrongwx: 'Nature',
+  airfx: 'Nature', campfires: 'Nature', wrongwx: 'Nature', surprises: 'Nature',
   wildlife: 'Animals', fauna: 'Animals', calls: 'Animals', cavelife: 'Animals', foxden: 'Animals', animalfinds: 'Animals',
   woodcut: 'Gathering', fishing: 'Gathering', pack: 'Gathering', forage: 'Gathering', mining: 'Gathering', builds: 'Gathering',
   cooking: 'Gathering', meals: 'Gathering', workshop: 'Gathering', keepsakes: 'Gathering', skills: 'Gathering',

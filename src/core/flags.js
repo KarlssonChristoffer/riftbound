@@ -25,6 +25,8 @@ export const FLAG_DOCS = {
   omens:     '1: stage omens in a run (features/omens.js: the weather, wind and light turned into a stage\'s rules); 0: off (the Dev toggle remembers it)',
   tour:      '1: the guided playtest tour (features/tour.js, content/tour.js; Esc > Sandbox > Tour): from where you left it; restart: from the first stop; a stop id (forage, storm, ice, ...): from there. Plays in the sandbox with the forest (seed 1337) unless the URL says otherwise',
   omen:      'storm | gale | bloodmoon | riftfog | eclipse | golden: that omen on every run stage (and in the sandbox from the start)',
+  surprises: '0: none of the night surprises (features/surprises.js: the rain dance, storm-charged, falling stars, the looking-lake, dizzy, the fish rain)',
+  stars:     'now: the first star of the next clear night falls a few s in (features/surprises/stars.js)',
   // ---- co-op and the forest (docs/MULTIPLAYER.md, docs/FOREST.md)
   mp:        '1: join the co-op server that served this page (node server/server.mjs; open the page it prints in two windows); host:port or ws://host:port: that server. Its seed decides the forest (core/session.js, features/coop.js)',
   name:      'co-op: the name the others see over your head (else the server gives one: Player N)',

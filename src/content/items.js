@@ -84,11 +84,17 @@ export const ITEMS = {
     icon: ['............', '............', '....pppq....', '...psppqq...', '..ppptpqsq..', '.pspppqqqq..', '.ppptpqsqqq.', '..ppqsqqtq..',
       '...qqqqqq...', '............', '............', '............']},
   // THUNDERWOOD (features/thunder.js, docs/WEATHER.md): a splinter at the foot of a tree the lightning struck. A keepsake: folklore says
-  // it keeps the house from the next bolt. It does nothing yet
+  // it keeps the house from the next bolt. Carried, it does the opposite: the bolts come for you (features/surprises/charged.js)
   thunderwood: {name: 'Thunderwood', kind: 'material', col: '#d8c8a0', desc: 'a pale splinter split out of a struck pine, scorched black down one edge. They say it keeps the house safe from lightning',
     pal: {w: '#e4d4aa', d: '#a08a5c', n: '#2a221c', c: '#5a4a3a'},
     icon: ['..........n.', '.........nw.', '........nwd.', '.......nwwd.', '......cwwd..', '.....nwwd...', '....nwwd....', '...cwwd.....',
       '..nwwd......', '.nwd........', '.nd.........', '............']},
+  // STAR SHARD (features/surprises/stars.js): what a falling star leaves where it comes down on a clear night. Carried into the lake
+  // at night, the lake drinks it: the star frenzy
+  star_shard: {name: 'Star Shard', kind: 'material', col: '#cfe8ff', desc: 'a sliver of a fallen star, still warm. It hums louder when you face the lake',
+    pal: {w: '#ffffff', c: '#cfe8ff', b: '#7f9cd8', n: '#2a3460'},
+    icon: ['............', '.....nn.....', '.....cc.....', '....nwcn....', '.nnccwwccnn.', '..ncwwwwcn..', '...bcwwcb...', '...cwbbwc...',
+      '..ncb..bcn..', '..nb....bn..', '............', '............']},
   // WHAT THE BOG GIVES (features/mire.js: the true wisp's find, one kind a night; docs/MIRE.md). Things people sank in the mire
   // long ago; they do nothing yet
   bog_butter: {name: 'Bog Butter', kind: 'material', col: '#e8e0c0', desc: 'a little wooden keg packed with pale, waxy butter, sunk in the bog a very long time ago. It smells... fine?',
