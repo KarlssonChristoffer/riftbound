@@ -1,5 +1,5 @@
 // PANELS: the player's window and its tabs (ui/book.js draws it), the one place a feature puts something the player opens and
-// looks at (dev and test tools don't go here: the Esc menu's Dev / Sandbox tabs and dev/ are theirs). Diablo-style: Tab opens
+// looks at (dev and test tools don't go here: the F10 dev menu, dev/devmenu.js, and dev/ are theirs). Diablo-style: Tab opens
 // the window where it was, a letter opens its tab (I pack, K skills, B craft, J journal, H map), the same letter again or Esc
 // shuts it. The pack (features/pack.js through ui/packpanel.js) fills Pack, Skills, Craft and Journal; the gear
 // (features/gear.js) puts what you wear in Pack beside the bag; the map is ui/mapview.js. Another feature adds its own:
@@ -13,7 +13,7 @@
 // journal 40 (J), map 50 (H). Free for others: 25, 35 ...
 // KEYS: the letters are dev keys outside the sandbox (dev/devkeys.js DEV_KEYS: i j k b); Shift+letter is left to others
 // (Shift+J the almanac's fold, Shift+M the weapon bench, Shift+Tab the wardrobe); claims() hands them to play. In the
-// sandbox (dev mode) they win over those dev toggles (the armour, the HD bow, the air particles: in the Esc menu's Dev tab).
+// sandbox (dev mode) they win over those dev toggles (the armour, the HD bow, the air particles: in the F10 dev menu).
 // OWNS: the book (ui/book.js), the map view (ui/mapview.js). READS: host.lock, host.hudOff.
 // EMITS: nothing.  BUDGET: shut: a compare a frame; open: ui/book.js's (the current tab's parts on change).
 import {createBook} from '../ui/book.js';

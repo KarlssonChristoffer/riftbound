@@ -48,7 +48,8 @@ async function run(label, js, wait = 0) {
 if (!await load('mode=sandbox&windlevel=gale')) { console.log('the page did not load', logs.join('\n')); quit(2); }
 await sleep(2000);
 await run('frames', step(30));
-await run('the player window (I, J, H; H again shuts it)', key('i') + step(5) + key('j') + step(5) + key('h') + step(5) + key('h') + step(30), 800);   // (features/panels.js: the old dev keys I / J are its tabs now)
+await run('the player window (I, J, H; H again shuts it)', `const P = window.__r3d.host.feature('panels'); ` + key('i') + step(5) + `if (P && !P.isOpen) throw new Error('I did not open the window'); ` + key('j') + step(5) + key('h') + step(5) + key('h') + step(5) +
+  `if (P?.isOpen) { P.close(); throw new Error('H again left the window open'); }` + step(25), 800);   // (features/panels.js: the old dev keys I / J are its tabs now)
 await run('a shot', 'window.__r3d.PL.press();' + step(20) + 'window.__r3d.PL.release();' + step(20));
 await run('lantern (L)', key('l') + step(10));
 await run('colliders (Shift+G)', key('g', {shiftKey: true}) + step(5));
