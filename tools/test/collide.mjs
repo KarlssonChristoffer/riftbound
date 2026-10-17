@@ -23,7 +23,7 @@ import {spawn} from 'node:child_process';
 import {join, dirname} from 'node:path';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {launch} from '../lib/chrome.mjs';
+import {launch, PYTHON} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
@@ -31,7 +31,7 @@ const PAGE = arg('path', 'src/').replace(/^\/|\/?$/g, '') + '/', PORT = +arg('po
 const Q = arg('q', 'set=gunslinger'), ONLY = (arg('only', '') || '').split(',').filter(Boolean), N = +arg('n', 4);
 const OUT = join(ROOT, arg('out', 'tmp/collide/last.json'));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
+const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore'});
 const chrome = launch('collide', ['--headless=new', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1280,720',
   `--remote-debugging-port=${DBG}`, 'about:blank']);
 let stopped = false;

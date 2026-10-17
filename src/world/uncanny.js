@@ -273,5 +273,6 @@ export function uncannyPlan(F, o = {}) {
     if (!hit) return null;
     NT[0] = bx; NT[1] = by; return NT;
   };
+  U.spring = F.spring ? {x: F.spring.x, y: F.spring.y} : null;   // (the spring: the Fiddle String's secret, sim/uncanny.js SECRETS.spring)
   return U;
 }

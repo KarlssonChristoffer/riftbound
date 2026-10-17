@@ -155,6 +155,14 @@ void main() {
     C0 = mix(uC0, uC0u, wu); C1.rgb = mix(uC1.rgb, uC1u, wu); SA = mix(uShadowA, uSun2.y, wu); SS = mix(uSunStr, uSun2.z, wu);
   }
   vec4 f0 = fieldAt(P.xz);
+  // UNDER the ground the field knows, there and a metre round (the cave under the woods' overhang, seen through its mouth: world/caves.js's
+  // portal): no mist (features/mist.js has none in the cave). Its march started metres under the ground and only its last steps came
+  // out into the air, how many by where the pixel lay: the cave's floor was striped. (A cliff's face is under the field's ground at
+  // its own texel, not at all four: one reaches its foot)
+  if (P.y < f0.r - 1.) {
+    float gm = min(min(fieldAt(P.xz + vec2(1., 0.)).r, fieldAt(P.xz - vec2(1., 0.)).r), min(fieldAt(P.xz + vec2(0., 1.)).r, fieldAt(P.xz - vec2(0., 1.)).r));
+    if (P.y < gm - 1.) discard;
+  }
   // how much air over P the mist can reach: the film's, the hollow's fill, the water's rise
   float top = max(f0.r + V0.z * 3.2, max(f0.g > .05 ? f0.r + f0.g * V0.w + .45 : -1e3, f0.b > .01 ? f0.a + V1.y * 1.8 : -1e3));
   float H = min(top - P.y, uV3.x);

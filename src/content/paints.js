@@ -13,6 +13,7 @@ export const PAINTS = {
   needles:     {all: ['#a47c52', '#84643f', '#62482f', '#38291c'], frost: ['#8a7a6a', '#6c5e52', '#504640', '#302a26']},   // spruce needle duff: ant hills, litter
   blueberry:   {all: ['#6478d8', '#4254ae', '#2e3880', '#1a1e48']},
   lingon:      {all: ['#f0605a', '#cc2e34', '#8c1a26', '#4a0e16']},                                                       // the lingonberry's berries
+  bogiron:     {all: ['#c88a5a', '#a0603a', '#6a3a22', '#3a2216']},                                                       // bog iron: rust
   lingonleaf:  {all: ['#7ea05a', '#4e7a3e', '#33572e', '#1a301c'], frost: ['#6a8a5a', '#46663e', '#30482e', '#18281a']},   // its evergreen leaves: darker, glossier than the biome's leaf
   lichen:      {all: ['#ccd4b4', '#acb898', '#889474', '#505a44']},                                                       // pale reindeer lichen, crust on rock
   deadwood:    {all: ['#a89e8e', '#898072', '#6a6258', '#3e3934']},                                                       // weathered grey wood, bark long gone
@@ -37,6 +38,11 @@ export const PAINTS = {
   harefur:     {all: ['#b8a084', '#957e64', '#6e5c4a', '#3c3229']},                                                       // a mountain hare's summer grey-brown
   furdark:     {all: ['#5a4a40', '#3c302a', '#28201c', '#140f0d']},                                                       // dark legs, ear tips, noses, hooves
   plumage:     {all: ['#464a5a', '#2c2e38', '#1e1f27', '#0e0e12']},                                                       // a raven, a capercaillie cock: near black, a blue sheen
+  // the cave's veins (features/mining.js, docs/MINING.md)
+  copper:      {all: ['#8ae0bc', '#4cb48e', '#2a7c62', '#143e32']},                                                       // copper's green bloom in the rock
+  rust:        {all: ['#e89a5a', '#c06a34', '#86441e', '#44200e']},                                                       // rust and copper's red streaks; the old pick's head
+  ironore:     {all: ['#9aa6bc', '#687288', '#444a5c', '#22252e']},                                                       // iron's dark seams, a blue-grey sheen
+  quartz:      {all: ['#f4f2ea', '#d2cec2', '#a29c8e', '#5e5a50']},                                                       // the pale streak a stone vein shows in the cave wall
 };
 // a paint's ramp in a biome: ['#hi', '#base', '#shade', '#dark']
 export const paintRamp = (name, biome) => { const p = PAINTS[name]; return p && (p[biome] || p.all); };

@@ -23,7 +23,7 @@
 //   frame's events. EMITS: nothing. BUDGET: ~0.02 ms a frame (a shot is planned every 6-11 s: ~0.1 ms then).
 import {flags} from '../core/flags.js';
 import {clamp, hypot2} from '../core/mathx.js';
-import {mulberry32} from '../core/rng.js';
+import {viewRandom} from '../core/rng.js';
 import {WORLD} from '../world/world.js';
 
 export const TUNE = {
@@ -61,7 +61,7 @@ export async function create(host) {
   const G = host.G, THREE = host.THREE, mode = flags.get('cinema'), HOLD = mode === 'now';
   const F = {name: 'cinema', label: 'Cinematic camera', ambient: true, on: mode !== '0', cineHd: true, TUNE, shots: 0, only: ''};   // only: tests, the one kind of shot to plan
   const idleS = +flags.get('cineidle') > 0 ? +flags.get('cineidle') : TUNE.idle;
-  const R = mulberry32((Date.now() ^ 0x5bd1e995) >>> 0), rr = (a, b) => a + R() * (b - a), sgn = () => R() < .5 ? -1 : 1;
+  const R = viewRandom('cinema'), rr = (a, b) => a + R() * (b - a), sgn = () => R() < .5 ? -1 : 1;
   const lerp = (a, b, t) => a + (b - a) * t, ease = t => t * t * (3 - 2 * t);
 
   // ---- the people at the keys: any key, click, wheel or mouse move (more than a nudge) is someone back
