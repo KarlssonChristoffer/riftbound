@@ -8,7 +8,7 @@
 //   dizzy.js    DIZZY: spin the camera round and round and the world spins on without you
 //   fishrain.js IT'S RAINING FISH: in a storm a fish now and then falls out of the clouds and flops about till you grab it
 // This file is their host-facing feature: it runs each part's update / view / frame / lights / hd, draws their pixel chips (the
-// HD layer, bottom left above the meal's chip: what's on and for how long), lists their rows on its dev menu page (F10 > Nature: for the
+// HD layer, bottom left above the meal's and the weapon type's chips: what's on and for how long), lists their rows on its dev menu page (F10 > Nature: for the
 // tour and for trying them at once) and gives them one context (C, below). Only in the persistent world (the sandbox's ruins with
 // the forest's plan). ?surprises=0: none of it; ?stars=now: the next clear night's first star falls a few s in.
 // OWNS: the parts' state; the modifier sources 'charged', 'stormrod', 'starfrenzy', 'dizzy'; the frame's CSS transform
@@ -87,13 +87,13 @@ export async function create(host) {
     hud: () => { CHIPS.length = 0; for (const p of parts) { const c = p.chip?.(); if (c) CHIPS.push(...[].concat(c)); } return CHIPS.map(c => c.text).join(' · '); },
     dispose() { for (const p of parts) p.dispose?.(); },
   };
-  // the chips: one pixel frame a line, bottom left, over the meal's (features/meals.js chip); while the world is mirrored they are
-  // drawn mirrored back, so they still read the right way round
+  // the chips: one pixel frame a line, bottom left, over the meal's (features/meals.js chip) and the weapon's damage type
+  // (features/mods.js, its frame 46 u up); while the world is mirrored they are drawn mirrored back, so they still read the right way round
   function chips(q, u) {
     CHIPS.length = 0;
     for (const p of parts) { const c = p.chip?.(); if (!c) continue; if (Array.isArray(c)) CHIPS.push(...c); else CHIPS.push(c); }
     if (!CHIPS.length || host.feature('pack')?.open) return;
-    const H = 13 * u, gap = 3 * u, base = q.canvas.height - 6 * u - (H + gap), blink = ((performance.now() / 300) | 0) % 2;
+    const H = 13 * u, gap = 3 * u, base = q.canvas.height - 46 * u, blink = ((performance.now() / 300) | 0) % 2;
     q.save();
     if (C.warp.mirrored) q.setTransform(-1, 0, 0, 1, q.canvas.width, 0); else q.setTransform(1, 0, 0, 1, 0, 0);
     q.imageSmoothingEnabled = false; q.font = hdFont(u);
