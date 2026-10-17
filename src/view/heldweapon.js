@@ -6,7 +6,10 @@
 //                  swing  the blade out of the fist along U cos(cant) + F sin(cant) (cant 0: straight up from a punching
 //                         fist, 90: along the punch), the edge toward F cos - U sin. The cant comes per frame from the move
 //                         (MOVES cant: its start -> its end over the swing); placed again when it changed a degree
-//                  carry  hanging point down from the fist (tilted forward), placed again when the hand turned (heldtool's way)
+//                  carry  held low and ready while he stands and walks: the blade forward out of the fist, `down` deg under
+//                         level, `out` deg off to his right (clear of his leg), its edge rolled `roll` deg from flat toward
+//                         the ground (CARRY by the look's kind, a look's own `carry` wins); set in his frame, so the arm's
+//                         swing carries it without the clip's wrist turning it; placed again when the hand turned
 //   the shield   on the forearm's outer side (the A-pose's back of the hand: his left, square to the bone), its face
 //                outward, its long way along the forearm; placed once a shield (the forearm carries it)
 // The shapes are made once per look in their own frame (a along the blade / the forearm, b toward the edge / across, t
@@ -21,6 +24,9 @@ import {WEAPONS, SHIELDS} from '../content/melee.js';
 
 const DEG = Math.PI / 180;
 const TURN = .9995;   // (carry: placed again once the hang's way in the hand moved more than ~1.8 deg)
+// the carry by the look's kind: deg under level (negative: up), deg out to his right, the edge's roll from flat
+const CARRY = {blade: {down: 32, out: 14, roll: 55}, saber: {down: 30, out: 14, roll: 55}, hammer: {down: 58, out: 10, roll: 80},
+  staff: {down: -62, out: 6, roll: 90}, fish: {down: 40, out: 16, roll: 20}, wobbler: {down: 28, out: 14, roll: 30}};
 
 export function createHeldWeapon(rig, model, J, ramp6) {
   const segOf = n => J.segs.findIndex(s => s.bone === n);
@@ -175,7 +181,15 @@ export function createHeldWeapon(rig, model, J, ramp6) {
   }
   const CUR = {s: null}, CURL = {s: null};
   const A = [0, 0, 0], Bv = [0, 0, 0], LA = [9, 9, 9], V = [0, 0, 0];
-  const cl = Math.cos(16 * DEG), sl = Math.sin(16 * DEG);
+  const CA = [0, 0, 0], CB = [0, 0, 0];
+  function carryOf(id) {   // the carry's blade way and edge way in his frame (Blender: front -Y, right -X, up +Z), per look
+    const L = WEAPONS[id].look, c = L.carry || CARRY[L.kind] || CARRY.blade, d = c.down * DEG, o = c.out * DEG, r = c.roll * DEG;
+    CA[0] = -Math.cos(d) * Math.sin(o); CA[1] = -Math.cos(d) * Math.cos(o); CA[2] = -Math.sin(d);
+    const fx = Math.cos(o), fy = -Math.sin(o);   // (flat: level, square to the blade)
+    let dx = -CA[0] * -CA[2], dy = -CA[1] * -CA[2], dz = -1 + CA[2] * CA[2];   // (his down, square to the blade)
+    const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
+    CB[0] = fx * Math.cos(r) + dx * Math.sin(r); CB[1] = fy * Math.cos(r) + dy * Math.sin(r); CB[2] = dz * Math.sin(r);
+  }
   function unrot(w, o, x, y, z, out) {   // conj(q) v q: the vector (x, y, z) of his frame in the bone's frame
     const qx = -w[o], qy = -w[o + 1], qz = -w[o + 2], qw = w[o + 3];
     const tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
@@ -192,20 +206,19 @@ export function createHeldWeapon(rig, model, J, ramp6) {
     SL = {A: Fa, B: Ba, o};
   }
 
-  let shown = '', held = '', cant0 = NaN, shownL = '';
+  let shown = '', held = '', cant0 = NaN, shownL = '', carried = '';
   const W = {
     ok: false, tip: [0, 0, 0], base: [0, 0, 0],
     show(id, hold = 'carry', cant = 30, w = null, o = 0) {
       if (!WEAPONS[id]) { if (shown) { shown = ''; held = ''; W.ok = false; D.update(0); } return; }
       const S = weaponShape(id);
       if (hold === 'carry' && w) {
-        unrot(w, o, 0, -sl, -cl, V);   // (down, leaning forward)
+        if (id !== carried) { carried = id; carryOf(id); }
+        unrot(w, o, CA[0], CA[1], CA[2], V);   // (forward and low, out to his right)
         if (id === shown && held === hold && V[0] * LA[0] + V[1] * LA[1] + V[2] * LA[2] > TURN) return;
         LA[0] = V[0]; LA[1] = V[1]; LA[2] = V[2];
         A[0] = V[0]; A[1] = V[1]; A[2] = V[2];
-        unrot(w, o, 0, -1, 0, Bv);   // (his front: the edge), square to the blade
-        const d = dot(Bv, A); Bv[0] -= A[0] * d; Bv[1] -= A[1] * d; Bv[2] -= A[2] * d;
-        const l = Math.hypot(Bv[0], Bv[1], Bv[2]) || 1; Bv[0] /= l; Bv[1] /= l; Bv[2] /= l;
+        unrot(w, o, CB[0], CB[1], CB[2], Bv);   // (the edge, square to the blade)
       } else {
         if (id === shown && held === hold && Math.abs(cant - cant0) < 1) return;
         cant0 = cant; LA[0] = 9;
