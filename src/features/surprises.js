@@ -54,8 +54,9 @@ export async function create(host) {
   };
   const parts = ON ? [createDance(C), createCharged(C), createStars(C), createLooking(C), createDizzy(C), createFishRain(C)] : [];
   const [, charged, , looking] = parts;
-  const LR = Array.from({length: 8}, () => ({x: 0, y: 0, h: 0, color: '#ffffff', radius: 1, intensity: 0, flicker: 0, id: ''}));
-  LR.forEach((r, i) => { r.id = 'surprise' + i; });
+  // (ids are numbers: render/lighting.js seeds a flickering light's wander from id x 7.13, so a string id made it NaN and every lit
+  // thing went black on the GPU)
+  const LR = Array.from({length: 8}, (_, i) => ({x: 0, y: 0, h: 0, color: '#ffffff', radius: 1, intensity: 0, flicker: 0, id: 9740 + i}));
   let li = 0;
   const nextLight = () => li < LR.length ? LR[li++] : null;
   const LOUT = [], CHIPS = [];
