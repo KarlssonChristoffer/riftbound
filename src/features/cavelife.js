@@ -44,8 +44,8 @@ export async function create(host) {
   const active = () => ON && !!C && host.biome?.id === 'ruins' && game()?.mode === 'sandbox';
   let C = null, S = null, marks = flags.get('gathermarks') === '1';
   const ME = {id: 0, x: 0, y: 0, z: 0, lit: false, shun: 0, kin: false}, PLS = [ME], SHINE = [];
-  const KS = {ver: -1, shun: false, kin: false};   // (the keepsakes' notes, read again when the mods change)
-  const keeps = () => { const m = host.mods; if (m.ver !== KS.ver) { KS.ver = m.ver; KS.shun = m.value('cave.shun', 0) > 0; KS.kin = m.value('cave.kin', 0) > 0; } return KS; };
+  const KS = {ver: -1, shun: false, kin: false, ng: false};   // (the keepsakes' notes, read again when the mods change)
+  const keeps = () => { const m = host.mods; if (m.ver !== KS.ver) { KS.ver = m.ver; KS.shun = m.value('cave.shun', 0) > 0; KS.kin = m.value('cave.kin', 0) > 0; KS.ng = m.value('light.nightglass', 0) > 0; } return KS; };   // (ng: the Nightglass Lantern, its light unseen: docs/ALMANAC.md)
   const flinch = e => host.events.push({type: 'soot.flinch', x: e.x, y: e.y, h: e.h});
   const F = {name: 'cavelife', label: 'Cave life', on: ON, lean: {x: 0, y: 0}, get soot() { return S; }};   // (soot: tests)
 
@@ -73,7 +73,7 @@ export async function create(host) {
       }
       return;
     }
-    const P = host.player; ME.x = P.x; ME.y = P.y; ME.z = P.z; ME.lit = !!cv?.lit || !!host.feature('workshop')?.torch || (!!host.feature('meals')?.eyes && !!cv?.down);   // (a lit pine haft draws them like a lantern: features/workshop.js; a burnt eel's shining eyes too)
+    const P = host.player; ME.x = P.x; ME.y = P.y; ME.z = P.z; ME.lit = (!!cv?.lit && !keeps().ng) || !!host.feature('workshop')?.torch || (!!host.feature('meals')?.eyes && !!cv?.down);   // (a lit pine haft draws them like a lantern: features/workshop.js; a burnt eel's shining eyes too)
     host.feature('builds')?.shining?.(SHINE);
     const ks = keeps(); ME.shun = ks.shun ? TOOTH.shun : 0; ME.kin = ks.kin;   // (the keepsakes: the Big Tooth, the Full Tally Stick)
     const ev = S.step(dt, PLS, SHINE);

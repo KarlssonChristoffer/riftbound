@@ -31,6 +31,8 @@ export const PUMP = {pipe: .05, bellows: .10, rhythm: 1.5, every: .6, most: .16}
 export const CHARGES = {
   copper: {ore: 'copper_ore', n: 2, bar: 'copper_bar', t: 15, heat: .45, name: 'copper'},
   iron:   {ore: 'iron_ore',   n: 3, bar: 'iron_bar',   t: 20, heat: .86, name: 'iron'},   // (.86: one blowpipe alone, even every pump in rhythm, tops out ~.85)
+  // (the almanac's last chapter, docs/ALMANAC.md: night ore melts only white; .92 is the bellows pumped steadily, or a blowpipe and a friend)
+  night:  {ore: 'night_ore',  n: 1, bar: 'nightglass', t: 25, heat: .92, name: 'night ore'},
 };
 export const BELLOWS = {cost: {copper_bar: 2, wood: 1}};
 export const SMITH = {
@@ -38,6 +40,7 @@ export const SMITH = {
   iron_axe:    {name: 'Iron Axe',        cost: {iron_bar: 1}, haft: true, item: 'iron_axe'},
   kettle_helm: {name: 'Kettle helm',     cost: {iron_bar: 2}, gear: 'kettle_helm'},
   iron_boots:  {name: 'Iron-shod boots', cost: {iron_bar: 1, wood: 1}, gear: 'iron_boots'},
+  nightglass_lantern: {name: 'Nightglass Lantern', cost: {nightglass: 1, iron_bar: 1, copper_bar: 1}, gear: 'nightglass_lantern'},   // (docs/ALMANAC.md)
 };
 export const INLAY = {cost: {glow_shard: 2, copper_bar: 1}, color: '#b8f0a4', radius: 3.5, intensity: 1.6, full: .3, fade: 2.5};
 export const HAND = {
@@ -77,6 +80,7 @@ export function words(h, ore) {
   if (h < .3) return 'warm, dull red';
   if (h < HEAT.rest - .02) return 'dull red';
   const iron = c?.ore === 'iron_ore';
+  if (c?.ore === 'night_ore' && h >= HEAT.rest - .02) return h < c.heat ? (h < .78 ? 'red: the night ore sits black in it' : 'yellow: the night ore sweats, not yet') : 'white: the night ore runs like ink';
   if (h < .62) return iron ? 'red: the iron sits hard in it' : c ? 'red: the copper runs' : 'red';
   if (h < .78) return iron ? 'orange: the iron is soft and red, not yet' : 'bright orange';
   if (h < CHARGES.iron.heat) return iron ? 'yellow: the iron is nearly giving' : 'yellow';
