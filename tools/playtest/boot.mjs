@@ -16,7 +16,7 @@ const ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl)
 let id = 0; const pend = {}, logs = [];
 ws.onmessage = e => { const m = JSON.parse(e.data); if (pend[m.id]) { pend[m.id](m); delete pend[m.id]; }
   else if (m.method === 'Runtime.exceptionThrown') logs.push('EXCEPTION ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text).slice(0, 500));
-  else if (m.method === 'Runtime.consoleAPICalled' && (m.params.type === 'error' || (m.params.type === 'warning' && /failed to load/.test(m.params.args.map(a => a.value ?? '').join(' '))))) logs.push('error ' + m.params.args.map(a => a.value ?? a.description).join(' ').slice(0, 300));
+  else if (m.method === 'Runtime.consoleAPICalled' && (m.params.type === 'error' || (m.params.type === 'warning' && /failed to load|^feature /.test(m.params.args.map(a => a.value ?? '').join(' '))))) logs.push('error ' + m.params.args.map(a => a.value ?? a.description).join(' ').slice(0, 300));
   else if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') logs.push('log ' + m.params.entry.text.slice(0, 200) + ' ' + (m.params.entry.url || '')); };
 const send = (method, params = {}) => new Promise(r => { const i = ++id; pend[i] = r; ws.send(JSON.stringify({id: i, method, params})); });
 await send('Runtime.enable'); await send('Log.enable');

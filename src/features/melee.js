@@ -359,7 +359,7 @@ export async function create(host) {
   const sabCol = () => { const L = WEAPONS.saber.colors; return L[S.saber % L.length]; };
 
   const F = {
-    name: 'melee', label: 'Melee', on: ON, S, TB, owned, toasts,
+    name: 'melee', label: 'Melee', on: ON, S, TB, toasts,
     weapon: () => { const m = M(); return m?.on ? m.weapon : ''; },
     shield: () => { const m = M(); return m?.on ? m.shield : ''; },
     owned: () => [...owned],

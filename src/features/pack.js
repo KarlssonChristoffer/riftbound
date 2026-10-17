@@ -208,7 +208,6 @@ export async function create(host) {
     section(s) { if (!sections.some(q => q.id === s.id)) sections.push(s); },
     held(slot) { held = slot; },
     onPut(fn) { putter = fn; },   // (features/foxden.js: the pack panel's right-click "Put down" on a pouch row, carried out in the sim step)
-    get open() { return !!panel?.open; },
     // a fresh world (the Sandbox menu): the save cleared, the start kit back; each system's store is emptied (they see it
     // empty on their next step and put the world back as they hold it: features/woodcut.js)
     reset() { clearWorld(); for (const k in stores) for (const f in stores[k]) delete stores[k][f]; inv.load(null); skills.load(null); for (const [id, n] of START_KIT) inv.add(id, n); dirtyT = 0; host.events.push({type: 'pack.reset'}); },
