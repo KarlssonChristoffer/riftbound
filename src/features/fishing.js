@@ -278,12 +278,10 @@ export async function create(host) {
     const first = !!s && !s.n[r.id], record = !!s && !c.find && r.cm > (s.best[r.id] || 0) && !first;
     if (s) { s.n[r.id] = (s.n[r.id] || 0) + n; if (!c.find && r.cm > (s.best[r.id] || 0)) s.best[r.id] = r.cm; pack()?.dirty(); }
     pack()?.give(r.id, n);
-    const xp = Math.round(c.xp * (first ? 2 : 1) * (S.perfect && !hand ? 1.2 : 1));
+    const xp = Math.round(c.xp * (first ? 2 : 1) * k);
     pack()?.gain('fishing', xp, {x: P.x, y: P.y, h: P.z + 2.2});
     Object.assign(I, {id: r.id, cm: r.cm, kg: r.kg, n, first, record, xp, t: 0});
     ev('fish.catch', {x: P.x, y: P.y, id: r.id, cm: r.cm, kg: r.kg, n, first, record, rarity: c.rarity});
-    if (!hand && !S.local) coop()?.fish({a: 'land', n: S.n});
-    if (!hand && S.spot >= 0) { spent.add(S.spot); S.spot = -1; }
     jV++;
   }
 
