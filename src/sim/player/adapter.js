@@ -50,8 +50,9 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
   // a run rule's wind on the player (features/omens.js, a gale): host.mods 'player.windX' / 'player.windY' (world axes, the
   // share of speed gained moving along it: .25 = 25% faster with it, slower against it), turned into the view frame for
   // player.js's moveBy (H.wind: null without one)
-  let PWX = 0, PWY = 0; const PWV = [0, 0];
-  if (mods) { const f = () => { PWX = mods.value('player.windX', 0); PWY = mods.value('player.windY', 0); }; mods.watch(f); f(); }
+  // (and 'player.current': x on the river's pull while he swims, waterAt below: the pike stew's weight, the ash's lightness)
+  let PWX = 0, PWY = 0, PCUR = 1; const PWV = [0, 0];
+  if (mods) { const f = () => { PWX = mods.value('player.windX', 0); PWY = mods.value('player.windY', 0); PCUR = mods.value('player.current', 1); }; mods.watch(f); f(); }
   const windV = () => { if (!PWX && !PWY) return null; const c = Math.cos(cv.yaw), s = Math.sin(cv.yaw); PWV[0] = PWX * c - PWY * s; PWV[1] = PWX * s + PWY * c; return PWV; };
   // COLLISION in the world (round, so it doesn't change with the camera): world/collide.js with his body PB (its props: those whose
   // height his body is within, feet to head: collide.js column; rubble low enough stepped over; the ground: tested at his middle).
@@ -73,7 +74,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     const hw = STREAM.w(y) / 2, a = (x - STREAM.cx(y)) / hw;
     if (!(FOREST !== null && y < 0) && y >= STREAM.y0 && y <= STREAM.y1 && Math.abs(a) <= 1) {   // the river: downstream (+y) along its line
       const dx = (STREAM.cx(y + .05) - STREAM.cx(y - .05)) / .1, l = Math.hypot(dx, 1);
-      const v = CUR.v * (1 - (1 - CUR.edge) * a * a) * clamp((lipAt(x) - LIP - y) / CUR.ease, 0, 1) / l, wx = dx * v, wy = v;
+      const v = CUR.v * PCUR * (1 - (1 - CUR.edge) * a * a) * clamp((lipAt(x) - LIP - y) / CUR.ease, 0, 1) / l, wx = dx * v, wy = v;
       WV[1] = wx * c - wy * s; WV[2] = wx * s + wy * c;
     }
     return WV;
@@ -203,13 +204,16 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     move: OLD ? null : moveV,   // (move and slide; ?collide=old: player.js's per-axis moves)
     wallOver: (x, y, dx, dy, z) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallOver(X, Z, ux, uz, z); },   // (a rotation: d is the same in his frame)
     wallSlant: (x, y, dx, dy, near) => { const [X, Z] = toWorld(x, y), [ux, uz] = toWorld(dx, dy); return wallSlant(X, Z, ux, uz, near); },
-    elev: (x, y) => { const [X, Z] = toWorld(x, y); return elev(X, Z); },
+    elev: (x, y) => { const a = cv.yaw, c = Math.cos(a), s = Math.sin(a); return elev(x * c + y * s, -x * s + y * c); },   // (render/viewxf.js toWorld's sums, without its array: the cursor's ground search calls this a dozen times a frame)
     grad: TERRAIN_ON ? gradV : null,   // walkable terrain's slope (player.js SLIDE)
     inStream: (x, y) => { const [X, Z] = toWorld(x, y); return inStream(X, Z); },
     water: waterAt,   // (SWIMMING, above)
     pixelBow: () => !optOf().hdBow,   // J: the bowstring + nocked / flying arrows at art pixels (default) or the HD overlay
     onShoot: a => { const [x, y] = toWorld(a.x, a.y), [vx, vy] = toWorld(a.vx, a.vy); proj.spawn({...a, x, y, vx, vy}); },
-    aimTarget: () => { const t = hoverTarget(); if (!t) return null; const v = toView(t.x, t.y); return {x: v[0], y: v[1], h: t.h, target: t.target}; },
+    aimTarget: () => { const t = hoverTarget(); if (!t) return null; const v = toView(t.x, t.y); return {x: v[0], y: v[1], h: t.h, target: t.target, ray: t.ray}; },
+    // first person (features/chasecam.js): the ground the look meets (player.js cursorGround) and his facing held on the look
+    aimGround: () => { for (const f of features) { const g = f.aimGround?.(); if (g) { const v = toView(g.x, g.y); return {x: v[0], y: v[1]}; } } return null; },
+    faceAhead: () => { for (const f of features) if (f.faceAhead?.()) return true; return false; },
     autoFire: () => { for (const f of features) if (f.autoFire?.()) return true; return false; },   // (an aim mode that shoots for you: features/aim.js)
     nearInteract: () => nearProp(),
     onInteract: p => features.some(f => f.interact?.(p)),
@@ -297,6 +301,7 @@ export function createPlayerHost({G, ctxO, PPM, PPMY, cv, hero, keys, mouse, cam
     return best && {x: best.x, y: best.y, h: bh, target: best};
   }
   function nearProp() {
+    for (const f of features) { const p = f.lookProp?.(); if (p && !p.opened && Math.abs((p.z || 0) - P.z) < .5) return p; }   // (first person: what he looks at, features/chasecam.js)
     let best = null, bd = 1.3; const px = player.x, py = player.y;
     for (const p of ents().near(px, py, bd, nearI)) if (p.interact && !p.opened && Math.abs((p.z || 0) - P.z) < .5) { const d = Math.hypot(p.x - px, p.y - py); if (d < bd) { bd = d; best = p; } }
     return best;

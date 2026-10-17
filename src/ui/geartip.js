@@ -2,7 +2,8 @@
 // ui/gearpanel.js). It shows the piece's icon, name (in its rarity's colour), rarity, kind and slot, what it is, its weight
 // and armor, what it does now and what it will do later. Holding SHIFT shows more: its materials, every modifier note it
 // sets, what it changes on the model (zones painted or hidden, shapes added) and what wearing it does to the set worn now
-// (weight, armor, speed: before -> after).
+// (weight, armor, speed: before -> after). A KEEPSAKE (a charm: docs/KEEPSAKES.md) shows only what it is: its icon, name and
+// description (the Fiddle String's lie of the moment: ui/packpanel.js descOf), never a number or what it does, Shift or not.
 // API: gearTip() -> the one tip (made on first use): attach(el, {piece: () => g | null, slot, set: () => [ids]}) (null: "his
 //   own", the slot empty); hide(). doesOf(g) -> what it does now, as short lines (also the wardrobe's and the panel's).
 // OWNS: #geartip and its style. READS: content/gear.js. BUDGET: DOM writes when the piece or Shift changes; a move: 2 style writes.
@@ -10,7 +11,14 @@ import {SLOT_NAMES, KINDS, RARITY, MATERIALS, RULES, gearById, setStats} from '.
 import {FRAMES, uiUnit} from './pixelframe.js';
 import {loadPixelFont} from './pixelfont.js';
 import {gearIcon, slotIcon} from './gearicons.js';
+import {ITEMS} from '../content/items.js';
+import {iconURL, iconHook, descOf} from './packpanel.js';
 import {statWords} from '../content/fishing.js';
+import {statWords as forageWords} from '../content/forage.js';
+import {statWords as mineWords} from '../content/mining.js';
+import {statWords as bodyWords} from '../content/body.js';
+import {statWords as thunderWords} from '../content/thunder.js';
+import {statWords as winterWords} from '../content/winter.js';
 
 const CSS = `
 #geartip { --u: 2px; position: fixed; left: 0; top: 0; z-index: 40; pointer-events: none; width: calc(128 * var(--u)); padding: calc(3 * var(--u)) calc(4 * var(--u));
@@ -42,10 +50,11 @@ export function doesOf(g) {
   if (g.armor) out.push(`takes ${pct(g.armor)} off the damage you take`);
   for (const m of g.mods || []) {
     if (m.stat === 'light.lantern') out.push('your lantern is always lit');
+    else if (m.stat === 'light.nightglass') out.push('its light is dark: what shows only in the dark stays shown in it');
     else if (m.stat === 'light.lanternR') out.push(m.mul >= 1 ? `its light reaches ${pct(m.mul - 1)} further` : 'a smaller light');
     else if (m.stat === 'player.speed') out.push(`you move ${pct(m.mul - 1)} faster`);
     else if (m.stat === 'weapon.melee') out.push(`your blow (V) hits x${m.mul}`);
-    else { const w = statWords(m); if (w) out.push(w); }   // (fishing: content/fishing.js)
+    else { const w = statWords(m) || forageWords(m) || mineWords(m) || bodyWords(m) || thunderWords(m) || winterWords(m); if (w) out.push(w); }   // (fishing: content/fishing.js; foraging: content/forage.js; mining: content/mining.js)
   }
   if (g.slot === 'main' && g.kind === 'fishing') out.unshift('LMB on water: cast');
   return out;
@@ -65,6 +74,12 @@ function createTip() {
 
   function html(c) {
     const g = c.piece();
+    if (!g && c.slot === 'charm') return `<div class="gt-top"><img src="${slotIcon('charm', '#8a7c64')}"><div><b>No charms</b><small>Charms</small></div></div>`;
+    if (g?.keepsake) {   // (what it is, never what it does)
+      const d = iconHook.of?.(g.id) || ITEMS[g.id], R = RARITY[g.rarity];
+      return `<div class="gt-top"><img src="${d?.icon ? iconURL(d.icon, d.pal) : slotIcon('charm', '#efe6cf')}"><div><b style="color:${R?.col ?? ''}">${esc(g.name)}</b>` +
+        `<small>${R?.name ?? ''} keepsake · Charms</small></div></div><div>${esc(descOf(ITEMS[g.id]) || g.desc)}</div>`;
+    }
     if (!g) {
       const name = SLOT_NAMES[c.slot] || 'Slot';
       return `<div class="gt-top"><img src="${slotIcon(c.slot, '#8a7c64')}"><div><b>His own</b><small>${name}</small></div></div>` +

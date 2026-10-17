@@ -37,10 +37,11 @@
 //                               (a hidden window keeps the last view: render/camera.js)
 //   F.arrow?(a)                 every arrow as it is spawned (scale its damage, tag it, spawn extras with a.extra)
 //   F.prompt?(prop) -> text | {text, color}   the "E ..." prompt over a prop you can interact with
-//   F.menu?() -> [{label, run}] rows in the menu's Sandbox tab, or its Game tab (ui/pause.js GAME_ROWS, SANDBOX_GROUP)
+//   F.menu?() -> [{label, run}] test actions on its page in the dev menu, or the Esc menu's Game tab (ui/pause.js GAME_ROWS)
+//   F.dev?: {group, rows()}     its section and its own rows in the dev menu (dev/devmenu.js, F10; docs/DEVMENU.md)
 // THE MENU (Escape, ui/pause.js + ui/menu.js): pauses the game but not the world: while host.paused only the AMBIENT
-// features update (nature, see stepPaused), behind a blur. A feature's toggle / settings land in its Dev tab unless
-// CLAIM gives them to a player tab (Graphics, Audio).
+// features update (nature, see stepPaused), behind a blur. A feature's toggle / settings are on its page in the dev menu,
+// and also in a player tab (Graphics, Audio, Controls) when CLAIM gives them one.
 // THE ORDER of the features (updates and every hook chain) is what each declares: `export const order` (core/features.js).
 // THE GAME (game/game.js) is the first feature: the run, enemies, items, HUD, title. It drives host.dev (the sandbox's
 // dev keys + debug HUD), host.lock (no player input: menus, death, travel), host.timeScale (slow motion / frozen),
@@ -58,6 +59,7 @@ import {WORLD, elev, inStream} from './world/world.js';
 import {BIOMES} from './world/biomes.js';
 import {MOODS, TIMES} from './content/moods.js';   // the lighting tables (forked from the arena's lighting.js)
 import {createHero, loadLoadout, SET_NAMES} from './view/hero.js';   // the Ranger's card: loadouts, the composite, cloak, hair, armour, HD bow
+import {capeShown} from './content/gear.js';   // (the sprite cloak, replaced by a piece in the back slot: dressPlayer)
 import {BUSY} from './sim/player/player.js';
 import {createPlayerHost} from './sim/player/adapter.js';
 import {createGame} from './game/game.js';
@@ -82,6 +84,7 @@ import {createGunFeel} from './dev/gunfeel.js';   // the gun feel panel (F8): li
 import {createWxPanel} from './dev/wxpanel.js';   // the weather panel (F9): a change of the weather and the god rays' envelope, read out (wx-D)
 import {createMoveFeel} from './dev/movefeel.js';   // the move feel panel (F7): run / sprint speed, get going / stopping, the strides, as modifier notes
 import {createWardrobe} from './dev/wardrobe.js';   // the dev wardrobe (Shift+Tab): the character's clothes, paint, stats, items, outfits
+import {createDevMenu} from './dev/devmenu.js';   // the dev menu (F10): every feature's toggles, settings and test actions, a page each
 import {loadFeatures} from './core/features.js';
 import {createInput} from './core/input.js';
 import {createLoop} from './core/loop.js';
@@ -119,7 +122,7 @@ cv.attach({G, canvas, hdc, features}); cv.fit(); addEventListener('resize', () =
 // host.time is its day / dusk / night bucket (dawn counts as dusk), host.mood its blended mood, host.setTime jumps it
 // THE STAGE (world/stage.js): the biome, the built world, the props' display mode, the trees
 const stage = createStage({G, ctxO, PPM, PPMH, features, flags: Q});
-const env = createEnv({moods: MOODS, biome: () => stage.biome.id, Q, focus: () => player});   // (focus: where the weather is felt: a front reaches the player; the world's x, y) (wx-B: was P, his view-frame state: wrong once the camera turned)
+const env = createEnv({moods: MOODS, biome: () => stage.biome.id, Q, focus: () => player, seed: SESSION.seed});   // (seed: the world's, the spells come from it and the clock: sim/wxclock.js)   // (focus: where the weather is felt: a front reaches the player; the world's x, y) (wx-B: was P, his view-frame state: wrong once the camera turned)
 // APP: the engine's own context for the modules split out of this file (view/hero.js, ...): live getters, so a module
 // reads the current yaw / zoom / player without this file passing them every call. (Features get `host`, below.)
 const app = {
@@ -194,7 +197,7 @@ const host = {
   hitstop: sec => loop.hitstop(sec), shake, knock: (vx, vy) => { const [a, b] = toView(vx, vy); PL.knock(a, b); },
   launch: (vx, vy, vz) => { const [a, b] = toView(vx, vy); return PL.launch(a, b, vz); },   // thrown (sim/player/launch.js): false -> knock him instead
   play: (frame, sec) => PL.hold(frame, sec),
-  aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target}; },
+  aim: () => { const c = PL.cursorAim(); const [x, y] = toWorld(c.x, c.y); return {x, y, h: c.h, target: c.target, ray: c.ray}; },
   toView: (x, y, h = 0) => { const s = G.toScreen(x, h, y); return [s[0], s[1]]; },         // world -> view px (rotated)
   sprite,                                                                              // {img, x, y, h, px, py, ...}
   point: (x, y, h, c, o) => G.point(x, h, y, rgbOf(c), o),
@@ -228,8 +231,9 @@ const host = {
   // rig the live model's name), or null when he isn't drawn live: co-op sends it to the others (features/coop.js). One reused object
   playerPose: () => { const d = live?.on ? live.drawn : null; if (!d?.w) return null; PPOSE.w = d.w; PPOSE.phi = d.phi; PPOSE.n = d.n; PPOSE.BN = live.BN; PPOSE.rig = hero.loadName; return PPOSE; },
   // GEAR (features/gear.js, docs/GEAR.md): draw him in these pieces (content/gear.js entries, SLOTS order; key: their setKey).
-  // The live body only (a sprite loadout looks the same); on a change of set, never per frame
-  dressPlayer: (pieces, key) => live?.dress(pieces, key),
+  // The live body; a sprite loadout looks the same but for its runtime cloak (gone with a piece in the back slot: content/gear.js
+  // capeShown). On a change of set, never per frame
+  dressPlayer: (pieces, key) => { hero.setCape(capeShown(pieces)); live?.dress(pieces, key); },
 };
 const PPOSE = {w: null, phi: 0, n: 0, BN: null, rig: ''};
 
@@ -247,6 +251,7 @@ features.push(createWxPanel({host}));   // (dev/wxpanel.js: F9 in dev mode; wx-D
 features.push(createMoveFeel({host, atlas: hero.atlas}));   // (dev/movefeel.js: F7 in dev mode)
 features.push(createWardrobe({host, hero, live, engine: () => E}));   // (dev/wardrobe.js: Shift+Tab in dev mode; a screen of its own: loop.hold)
 if (Q.get('lab')) features.push(await import('./dev/assetlab.js').then(m => m.createLab({host})));   // the asset lab (?lab=1: dev/assetlab.js)
+features.push(createDevMenu({host, engine: () => E}));   // (dev/devmenu.js: F10 in dev mode; last, it lists the others)
 const perf = createPerf({on: Q.get('perf') === '1'}); perf.instrument(features);
 // the wind sways painted foliage cards and gives braziers / torches a live flame
 stage.world.hooks.card = stage.cardHook;

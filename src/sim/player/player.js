@@ -69,6 +69,7 @@ export function strideK(g, v) {
   return GAIT.stride[g] * (r === 1 ? 1 : Math.pow(r, ADAPT));
 }
 const TURN_RATE = 900;  // deg/s: locomotion (walking / standing turns)
+const HEAVY_TURN = 600;  // deg/s: the way he goes swings round at this x the 'player.turn' note when it's under 1 (else it snaps to the input)
 // Aiming turns FAST (180 deg in 0.15 s): aiming must feel immediate. (Tried 450 deg/s with the draw held until facing
 // the target: it looked smoother but the user found it slow and clumsy to aim.)
 const AIM_TURN_RATE = 1200;
@@ -183,17 +184,22 @@ export function createPlayer(H) {
   const ev = e => { if (H.events) H.events.push(e); };
   // the run speeds follow the modifiers (an item's +speed): recomputed when the notes change, never written from outside
   // (a gait's own speed note first, 'player.speed.run', then the whole body's), and so do the rates and the strides (GAIT, above)
+  let TURNK = 1, KNOCKK = 1;   // ('player.turn': how fast he turns, his way and his facing; 'player.knock': how far a knock moves him)
   const applySpeed = () => {
     const M = H.mods;
     for (const k of Object.keys(SPEED0)) SPEED[k] = M.value('player.speed', M.value('player.speed.' + k, SPEED0[k]));
     for (const k of ['start', 'sprintUp']) ACC[k] = M.value('player.accel', ACC0[k]);
     for (const k of ['sprintDown', 'stop', 'skid']) ACC[k] = M.value('player.decel', ACC0[k]);
+    TURNK = M.value('player.turn', 1); KNOCKK = M.value('player.knock', 1);   // (the pike stew: heavy, x.4 / x.4; burnt, light as ash: x1.8 / x2)
     for (const k of ['walk', 'run', 'sprint']) GAIT.stride[k] = M.value('player.stride.' + k, STRIDE0[k]);
     GAIT.stride.drive = GAIT.stride.sprint;
     const same = SPEED.run === SPEED0.run && SPEED.sprint === SPEED0.sprint;   // (as authored: the literal speeds)
     const at = v => same ? v : SPEED.run + (SPEED.sprint - SPEED.run) * (v - SPEED0.run) / (SPEED0.sprint - SPEED0.run);
     GAIT.sprint = at(GAIT0.sprint); GAIT.drive = at(GAIT0.drive); GAIT.skid = at(GAIT0.skid);
+    sinkTo = Math.max(0, M.value('player.sink', 0));   // (what he stands in sinks him: lying snow, the mire; features/winter.js, mire.js)
+    stuck = M.value('player.stuck', 0) > 0;   // (held fast: through the ice, deep in the mire; no walking, no roll: features/ice.js, mire.js pull him out)
   };
+  let sinkTo = 0, stuck = false;
   if (H.mods) { H.mods.watch(applySpeed); applySpeed(); }
 
   // ---------------- facing ----------------
@@ -250,8 +256,9 @@ export function createPlayer(H) {
     }
     return null;
   }
-  const cursorGround = () => { if (H.terrain) { const g = pickGround(0); if (g) return {x: g.x, y: g.y}; } return {x: (mouse.x + cam.x) / T.PPM, y: (mouse.y + cam.y) / T.PPMY}; };
+  const cursorGround = () => { const a = H.aimGround?.(); if (a) return a; if (H.terrain) { const g = pickGround(0); if (g) return {x: g.x, y: g.y}; } return {x: (mouse.x + cam.x) / T.PPM, y: (mouse.y + cam.y) / T.PPMY}; };
   function moveInput() {
+    if (stuck) return [0, 0];
     const dx = (keys.has('d') || keys.has('arrowright')) - (keys.has('a') || keys.has('arrowleft'));
     const dy = (keys.has('s') || keys.has('arrowdown')) - (keys.has('w') || keys.has('arrowup'));
     const l = Math.hypot(dx, dy); return l ? [dx / l, dy / l] : [0, 0];
@@ -308,7 +315,7 @@ export function createPlayer(H) {
     const fx = dx / l, fy = dy / l;   // launch from the bow, along the flight line (not the legs' facing)
     // flat at the same level; aimed down / up across levels or at a snapped target (plus the drop over the flight)
     const h0 = P.z + AIM_H, dist = Math.hypot(c.x - P.x, c.y - P.y) || 1;
-    const vh = c.target || Math.abs(c.h - h0) > .5 ? Math.max(W.vhMin, Math.min(W.vhMax, (c.h - h0) / (dist / v) + W.lift * dist / v)) : 0;
+    const vh = c.target || c.ray || Math.abs(c.h - h0) > .5 ? Math.max(W.vhMin, Math.min(W.vhMax, (c.h - h0) / (dist / v) + W.lift * dist / v)) : 0;
     const dmg = Math.round(W.dmg0 + Math.min(1, P.t * W.drawK) * W.dmgDraw);   // a full draw hits harder
     H.onShoot({x: P.x + fx * W.muzzle, y: P.y + fy * W.muzzle, h: h0, vx: fx * v, vy: fy * v, vh, life: W.life, dmg, kind: 'arrow'});
     P.twang = 0; PL.shots++; P.t = 0;
@@ -532,6 +539,7 @@ export function createPlayer(H) {
       if (d > a) { P.svx += dx / d * a; P.svy += dy / d * a; } else { P.svx += dx; P.svy += dy; }
       P.want = dirOf(mx, my);
     } else { const k = Math.exp(-SWIM.drag * dt); P.svx *= k; P.svy *= k; }
+    if (stuck) { P.svx = P.svy = 0; }   // (held in a hole in the ice: he treads water where he is)
     turnToward(P.want ?? P.face, dt, SWIM.turn);
     if (P.kickT > 0) P.kickT -= dt;
     P.vx = P.svx + WV[1]; P.vy = P.svy + WV[2];
@@ -783,7 +791,9 @@ export function createPlayer(H) {
     const {SP, CLIP} = A, WALK = CLIP.walk, RUN = CLIP.run, ND = A.ND;
     const [mx, my] = moveInput();
     P.t += dt; P.twang = (P.twang ?? 9) + dt; if (P.blink) P.blink = Math.max(0, P.blink - dt); thrown.tick(dt);
-    if (P.sink && P.state !== 'swim' && P.state !== 'splash') P.sink = Math.max(0, P.sink - dt * SWIM.sink / SWIM.rise);   // (out of the water: rising out of it)
+    if ((P.sink || sinkTo) && P.state !== 'swim' && P.state !== 'splash') {   // (out of the water: rising out of it, to what he stands in: 'player.sink')
+      if (P.sink > sinkTo) P.sink = Math.max(sinkTo, P.sink - dt * SWIM.sink / SWIM.rise); else P.sink = Math.min(sinkTo, (P.sink || 0) + dt * SWIM.sink / SWIM.rise);
+    }
     if (ropewall && ropewall.step(dt, mx, my)) return;   // on a rope against a face (sim/player/ropewall.js; nothing while he isn't)
     if (fists && fists.step(dt, mx, my)) return;   // the fists up: the guard, a punch, a slip, a clinch (sim/player/fists.js; nothing while they're down)
     if (brawl && brawl.step(dt, mx, my)) return;   // a boot, a barge, a lift, a throw (sim/player/brawl.js; nothing while it's idle)
@@ -925,16 +935,21 @@ export function createPlayer(H) {
       P.frame = keys.has('c') ? 'crouch' : 'reach_up'; P.state = 'pose'; return;
     }
     // ---- locomotion: the direction snaps to the input (no gliding arc), only the speed ramps ----
+    // (first person, H.faceAhead: he faces the way the camera looks, up the screen, whichever way he walks: no turns)
+    const ahead = !!H.faceAhead?.(); if (ahead) { P.face = P.want = A.ND / 2; P.turn = null; P.fromAim = false; }
     const target = keys.has('q') ? SPEED.walk : keys.has('shift') ? SPEED.sprint : SPEED.run;
     let speed = Math.hypot(P.vx, P.vy), dir = speed > 1e-3 ? [P.vx / speed, P.vy / speed] : vecOf(P.face);
     if (mx || my) {
-      const nd = dirOf(mx, my);
+      const nd = ahead ? P.face : dirOf(mx, my);
       if (nd !== P.face) {  // (a new direction mid-turn starts a fresh turn from the current facing)
         if (P.fromAim) P.want = nd;       // coming out of an aiming stance: turn smoothly, no plant/push snap
         else if (speed > 2.3) startTurn(nd);   // running: rendered plant/push frames carry the body into the new way
         else P.want = nd;                 // walking / standing: turn toward it at the turn rate
       }
-      dir = [mx, my];
+      if (TURNK < 1 && speed > .5) {   // heavy: his way swings round toward the input at a limited rate instead of snapping
+        const cur = Math.atan2(P.vx, P.vy), want = Math.atan2(mx, my), d = Math.atan2(Math.sin(want - cur), Math.cos(want - cur)), step = HEAVY_TURN * TURNK * Math.PI / 180 * dt;
+        const a = Math.abs(d) <= step ? want : cur + Math.sign(d) * step; dir = [Math.sin(a), Math.cos(a)];
+      } else dir = [mx, my];
       P.skid = 0;
       if (speed < target) speed = Math.min(target, speed + (speed < SPEED.run ? ACC.start : ACC.sprintUp) * dt);  // run fast, sprint builds
       else speed = Math.max(target, speed - (speed > SPEED.run ? ACC.sprintDown : ACC.stop) * dt);                 // ease out of a sprint
@@ -944,7 +959,7 @@ export function createPlayer(H) {
     }
     P.lastSpeed = P.curSpeed ?? speed; P.curSpeed = speed;
     P.vx = dir[0] * speed; P.vy = dir[1] * speed;
-    if (!P.turn && P.want !== undefined && P.want !== P.face && (speed <= 2.3 || P.fromAim)) turnToward(P.want, dt, P.fromAim ? AIM_TURN_RATE : TURN_RATE);
+    if (!P.turn && P.want !== undefined && P.want !== P.face && (speed <= 2.3 || P.fromAim)) turnToward(P.want, dt, P.fromAim ? AIM_TURN_RATE : TURN_RATE * TURNK);
     if (P.fromAim && P.want === P.face) P.fromAim = false;
     if (P.turn) {
       // turn frames: time-based, the plant frame bites into the speed (weight changing direction), then push off
@@ -1010,9 +1025,10 @@ export function createPlayer(H) {
   }
 
   // ---------------- input (the host maps its keys / buttons to these) ----------------
-  function onSpace() { if (P.state === 'swim') { swimKick(); return; } if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
+  function onSpace() { if (stuck) return; if (P.state === 'swim') { swimKick(); return; } if (fists?.space()) return; if (thrown.onSpace() || dodging() || BUSY.has(P.state)) return; if (!tryLeap() && !tryVault()) startRoll(); }   // also while aiming
   function onInteractKey() { P.eUsed = interact(); return P.eUsed; }
   function onInteractUp() { P.eUsed = false; }
+  function useE() { P.eUsed = true; }   // a feature took this E press (features/forage.js picks while it's held): holding it doesn't wave
   function press() {   // LMB down: draw (kept through a roll)
     if (tool?.press()) return;   // a tool in hand: LMB swings it (sim/player/tool.js)
     if (fists?.press('L')) return;   // the fists up: the left hand (sim/player/fists.js)
@@ -1033,7 +1049,8 @@ export function createPlayer(H) {
   // RMB (core/input.js): the right hand while the fists are up -> true: taken (else RMB is an ability's)
   const pressR = () => !!fists?.press('R'), releaseR = () => !!fists?.release('R');
   function hold(frame, sec) { if (BUSY.has(P.state) || dodging()) return; P.hold = {frame: A.SP[frame] ? frame : 'release.0', sec}; P.state = 'hold'; P.t = 0; }
-  function knock(vx, vy) { if (P.state === 'climb' || THROWN.includes(P.state)) return; P.vx = vx; P.vy = vy; P.state = 'knock'; P.t = 0; }   // (thrown: a skid doesn't cut the flight short)
+  function unhold() { if (P.state === 'hold') { P.state = 'idle'; P.t = 0; } }   // (a held pose let go early: features/cooking.js's stick pulled out)
+  function knock(vx, vy) { if (P.state === 'climb' || THROWN.includes(P.state)) return; P.vx = vx * KNOCKK; P.vy = vy * KNOCKK; P.state = 'knock'; P.t = 0; }   // (thrown: a skid doesn't cut the flight short)
 
   // ---------------- HD bow layer (display resolution, over the pixel art) ----------------
   // The bowstring is left out of the pixel sprite; its tip -> nock -> tip path and per-sample visibility (hidden where
@@ -1241,6 +1258,6 @@ export function createPlayer(H) {
   const faceShot = (dx, dy) => { P.face = P.want = dirOf(dx, dy); P.twang = 0; };
   const flicker = sec => { P.blink = sec; };
   const regrid = (n0, n1) => { P.face = Math.round(P.face * n1 / n0) % n1; P.want = P.face; };
-  return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, tryVault, canVault, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, faceShot, flicker, regrid,
-    press, release, pressR, releaseR, hold, knock, launch: thrown.start, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
+  return Object.assign(PL, {step, startRoll, untouchable, shoot, tryLeap, leapPlan, tryVault, canVault, interact, climbSpot, nearInteract, onSpace, onInteractKey, onInteractUp, useE, faceShot, flicker, regrid,
+    press, release, pressR, releaseR, hold, unhold, knock, launch: thrown.start, moveInput, dirOf, vecOf, cursorAim, cursorGround, screenAim, drawTension, drawHD, drawPixelBow, drawPixelArrow, drawArrowHD, turnToward});
 }

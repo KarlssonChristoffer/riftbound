@@ -417,7 +417,8 @@ export function createBellsSim(host) {
   const AT = {x: 0, y: 0, h: 0, target: null}, S0 = [0, 0, 0], SX = [0, 0, 0], SY = [0, 0, 0], SH = [0, 0, 0];
   function aimTarget() {
     if (!active || !stands.length) return null;
-    const G = host.G, z = host.zoom || 1, mx = host.VW / 2 + (host.mouse.x - host.VW / 2) * z, my = host.VH / 2 + (host.mouse.y - host.VH / 2) * z;
+    const G = host.G, cam = G.cine?.hud, z = cam ? 1 : host.zoom || 1;   // (a camera view, features/chasecam.js: its crosshair, the middle of what it draws)
+    const mx = cam ? G.VW / 2 : host.VW / 2 + (host.mouse.x - host.VW / 2) * z, my = cam ? G.VH / 2 : host.VH / 2 + (host.mouse.y - host.VH / 2) * z;
     let best = null, near = -1e9, bm = 0, bh = 0, wx = 0, wy = 0;
     for (let i = 0; i < stands.length; i++) {
       const s = stands[i]; if (!s.up) continue;

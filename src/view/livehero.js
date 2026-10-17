@@ -923,7 +923,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     const T = app.PL.tool; toolSwing = false; toolUp = '';
     if (!T || !T.S.on || P.state !== 'chop' || !TOOL_CLIP) return null;
     const C = CL[TOOL_CLIP], Tm = timing(TOOL_CLIP); if (!Tm) return null;
-    const hitF = fsStep(Tm, C.marks?.[TOOL_MARK[TOOL_CLIP]] ?? Math.floor(C.frames / 2)), ah = Tm.at[hitF], ae = Tm.at[Tm.n] - 1e-4, W = WOOD.swing;
+    const hitF = fsStep(Tm, C.marks?.[TOOL_MARK[TOOL_CLIP]] ?? Math.floor(C.frames / 2)), ah = Tm.at[hitF], ae = Tm.at[Tm.n] - 1e-4, W = T.swing || WOOD.swing;   // (the tool's own swing: the axe's, the pick's)
     const ct = T.S.t < W.hit ? ah * (T.S.t / W.hit) : ah + (ae - ah) * Math.min(1, (T.S.t - W.hit) / Math.max(.01, W.dur - W.hit));
     const ft = frameAt(Tm, ct), fr = nm(TOOL_CLIP + '.', ft < 0 ? C.frames - 1 : ft); toolSwing = TOOL_CLIP !== 'tl_chop';
     if (Math.hypot(P.vx, P.vy) > .3) { const legs = toolLegs(P, T); if (legs && poseOf(legs)) { toolUp = fr; return legs; } }   // (on the move: the swing over his steps)
@@ -1389,6 +1389,29 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     o = SHOULDER_R * 7; axisAngle(0, 1, 0, a * DEG, R4); turnTree(w, SHOULDER_R, R4, w[o + 4], w[o + 5], w[o + 6]);
     if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) w[g0 + i] = GSAVE[i];
   }
+  // ---- THE TRIP (features/trip.js: the fly agaric broth, its F.k 0..1): a slow drunken sway through the chest and the head while
+  // it lasts. Friends see it as well: they are sent the drawn pose's bones (features/coop.js)
+  let tripT = 0, TRIP = null;
+  function wobble(w, dt) {
+    TRIP ??= app.feat('trip'); const k = TRIP?.k || 0;
+    if (k <= .01 || SPINE < 0) { tripT = 0; return; }
+    tripT += dt; const o = SPINE * 7, n = NECK * 7;
+    axisAngle(0, 1, 0, Math.sin(tripT * 1.3) * 6 * k * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);   // (rolled about his front)
+    axisAngle(1, 0, 0, Math.sin(tripT * .8 + 1) * 3 * k * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);
+    if (NECK >= 0) { axisAngle(0, 1, 0, Math.sin(tripT * 1.7 + 2) * 7 * k * DEG, R4); turnTree(w, NECK, R4, w[n + 4], w[n + 5], w[n + 6]); }
+  }
+  // ---- HICCUPS (features/meals.js: something odd off the Try stick; its F.hicN counts them): each one a little hop of the whole
+  // body (m up, s) with the head jerking back. Friends see it too (the drawn pose's bones)
+  const HIC = {h: .05, dur: .22, head: 9};
+  let hicN = -1, hicT = HIC.dur, MEALS_F = null;
+  function hiccup(w, dt) {
+    MEALS_F ??= app.feat('meals'); const n = MEALS_F?.hicN ?? 0;
+    if (n !== hicN) { if (hicN >= 0) hicT = 0; hicN = n; }
+    if (hicT >= HIC.dur) return;
+    hicT += dt; const e = Math.sin(Math.PI * Math.min(1, hicT / HIC.dur));
+    if (NECK >= 0) { const o = NECK * 7; axisAngle(1, 0, 0, -HIC.head * e * DEG, R4); turnTree(w, NECK, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    for (let i = 6; i < w.length; i += 7) w[i] += HIC.h * e;
+  }
   function weather(w, P, dt, sample, free) {
     const X = SEN && SEN.S.wx, on = !!(K.wx && free && X && WX_ON.has(P.state) && HEAD >= 0), slow = Math.hypot(P.vx || 0, P.vy || 0) < 2.3 && P.state !== 'land';
     // the hat: held through a gust, let go a while after it has eased
@@ -1541,7 +1564,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     const q = TAU / K.face; return yaw + Math.round((wf - yaw) / q) * q;
   }
   const SPRO = {img: null, nrm: null, px: 0, py: 0, x: 0, y: 0, h: 0, frame: '', face: 0};
-  function compose(PX, PY, perf) {
+  function compose(PX, PY, perf, noBody = false) {   // noBody: all of it but his body put (first person: features/chasecam.js)
     const t0 = performance.now(), P = app.P, yaw = app.yaw, dt = lastT < 0 ? 0 : Math.min(.05, Math.max(0, (t0 - lastT) / 1000));
     perf?.begin('live.pose', 'char');
     hero.card.setVisible(false);
@@ -1624,7 +1647,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // rope), a hit's flinch always
     SEN ??= app.feat('senses');
     const free = proc && !aiming && emS < 0 && K.demo !== 'swing' && idK !== 'fidget' && !lsBusy();   // (a fidget has the head itself; the rope work its own)
-    mlean(Wt, P, dt, phi - yaw, yaw, free && flowOn, sample); look(Wt, P, dt, sample, free); weather(Wt, P, dt, sample, free); flinch(Wt, P, dt, aiming);
+    mlean(Wt, P, dt, phi - yaw, yaw, free && flowOn, sample); look(Wt, P, dt, sample, free); weather(Wt, P, dt, sample, free); wobble(Wt, dt); hiccup(Wt, dt); flinch(Wt, P, dt, aiming);
     stats.look = lkK > 0 ? (SEN?.S.look.kind || '') : ''; stats.flinch = flT < flDur ? flT / flDur : -1;   // (dev)
     // 6) the demos
     ropeN = 0;
@@ -1675,13 +1698,14 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     MW.ok = aim.ok; if (aim.ok) { toWorld(MUZ[0], MUZ[1], MUZ[2], WP, 0); MW.x = WP[0]; MW.y = WP[2]; MW.h = WP[1]; }
     screenOf(0, 0, 0, SC); SCR.x = SC[0]; SCR.y = SC[1]; G.toScreenInto(AX + 1, AY, AZ, SO); SCR.ppm = Math.abs(SO[0] - SC[0]) || SCR.ppm;
     flash(dt);
-    HELD.show(app.PL.tool?.S.on ? app.PL.tool.S.id : '', P.state === 'chop' ? 'swing' : 'carry', show, HELD_O);   // TOOL: the axe in his fist while it's out (hanging from it; gripped at the knob to swing)
+    const held = app.PL.tool?.S.on ? app.PL.tool.S.id : '';
+    HELD.show(held, P.state === 'chop' ? 'swing' : 'carry', show, HELD_O, held ? app.feat('workshop')?.lookOf?.(held) || '' : '');   // (a made tool's look: its haft's wood, its inlay: features/workshop.js)   // TOOL: the axe in his fist while it's out (hanging from it; gripped at the knob to swing)
     mats(show, toolSwing ? toolHide(A.hide) : A.hide);
     DRAWN.w = show; DRAWN.phi = phi; DRAWN.x = AX; DRAWN.h = AY; DRAWN.z = AZ; DRAWN.n++;
     stats.smears += K.smear || fsSmear() ? smear(show) : (prevOk = false, 0);   // (FISTS: a punch's snap smears, from its wind to just past its contact)
     const blinkOff = P.blink && Math.floor(P.blink * 12) % 2;
     PR.x = AX; PR.y = AY; PR.z = AZ; PR.sx = PX; PR.sy = P.z; PR.sz = PY; PR.snap = K.snap ? 1 : 0; PR.alpha = 1;
-    if (!blinkOff) rig.put(model, 0, MATS, PR);
+    if (!blinkOff && !noBody) rig.put(model, 0, MATS, PR);
     for (let i = 0; i < ropeN - 1; i++) {   // the rope (the demos): pixel lines in the world
       toWorld(ROPE[i * 3], ROPE[i * 3 + 1], ROPE[i * 3 + 2], WP, 0); const x0 = WP[0], y0 = WP[1], z0 = WP[2];
       toWorld(ROPE[i * 3 + 3], ROPE[i * 3 + 4], ROPE[i * 3 + 5], WP, 0); G.line(x0, y0, z0, WP[0], WP[1], WP[2], ROPE_C);
@@ -1797,7 +1821,7 @@ export async function createLiveHero(o) {
     get model() { return cur()?.model; }, get J() { return cur()?.J; }, get BN() { return cur()?.BN; }, poseOf: n => cur()?.poseOf(n),
     setLineup(items) { cur()?.setLineup(items); },
     snapshot: () => cur().snapshot(), restore: S => cur().restore(S),
-    compose: (PX, PY, perf) => cur().compose(PX, PY, perf), sprite: () => cur().sprite(),
+    compose: (PX, PY, perf, noBody) => cur().compose(PX, PY, perf, noBody), sprite: () => cur().sprite(),
     get bytes() { return rig?.bytes ?? 0; },
     get atlas() { return hero.atlas; },
     load,   // (dev / tests: a loadout's body now)

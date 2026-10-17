@@ -373,7 +373,7 @@ export function createWardrobe({host, hero, live, engine}) {
       let shown = null;
       rows.push(() => {
         const id = inSlot(slot), g = gearById(id);
-        if (id !== shown) { shown = id; const u = g && gearIcon(g); ico.src = u || slotIcon(slot, g ? colorsOf(g)[0] : '#8a7c64'); ico.className = u ? 'g' : ''; }
+        if (id !== shown) { shown = id; const u = g && gearIcon(g); ico.src = u || slotIcon(slot, g ? colorsOf(g)[0] : '#8a7c64'); ico.className = u && !g.bare ? 'g' : ''; }
         put(n, 'textContent', g ? g.name : 'his own'); put(n.style, 'color', g ? RARITY[g.rarity]?.col ?? '' : ''); b.classList.toggle('own', !g); b.classList.toggle('on', C.tab === 'outfit' && C.slot === slot);
         put(off.style, 'visibility', g ? '' : 'hidden');
       });
@@ -464,7 +464,7 @@ export function createWardrobe({host, hero, live, engine}) {
     for (const g of [null, ...GEAR.filter(x => x.slot === C.slot)]) {
       const id = g?.id ?? '', b = el('button', 'wd-card wd-it', tiles), w = el('span', 'wd-iw wd-well', b), img = el('img', '', w);
       img.src = g ? gearIcon(g) || slotIcon(C.slot, colorsOf(g)[0]) : slotIcon(C.slot, '#6b5e50');
-      if (g) el('i', 'wd-gem', b).style.background = RARITY[g.rarity]?.col ?? '';
+      if (g && !g.bare) el('i', 'wd-gem', b).style.background = RARITY[g.rarity]?.col ?? '';
       b.onclick = () => { wearIn(C.slot, id); sound('confirm'); sync(); };
       tip.attach(b, {piece: () => g, slot: C.slot, set: wearing});
       rows.push(() => b.classList.toggle('on', inSlot(C.slot) === id));
