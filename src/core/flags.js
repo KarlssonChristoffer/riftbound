@@ -170,6 +170,7 @@ export const FLAG_DOCS = {
   mods: '0: weapon attachments and runes off (features/mods.js, docs/MODS.md); all: every part in the kit (a test start)',
   almanac: '0: no almanac (features/almanac.js, docs/ALMANAC.md: the first loop\'s chapters, the card top left, the pointer, Today\'s three)',
   chapter: 'n (dev): the almanac starts at chapter n (1-6; the ones before it count as done), once a page load (features/almanac.js)',
+  melee: '0: no swords and shields (features/melee.js: 3 draws a weapon, 4 a shield; docs in content/melee.js)',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools
   perf: '1: start with the frame profiler (F3) on', bench: '1: set by tools/perf/bench.mjs (weather pinned to fair)',
