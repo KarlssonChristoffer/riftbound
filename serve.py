@@ -8,6 +8,14 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
     def log_message(self, *a):
         pass
+    def translate_path(self, path):
+        # the art a clone doesn't have (concepts/sprites/out) falls back to the stand-ins in assets/standin/ (server/server.mjs does the same)
+        p = super().translate_path(path)
+        u = path.split('?')[0]
+        if not os.path.exists(p) and u.startswith('/concepts/sprites/out/'):
+            q = os.path.join(root, 'assets', 'standin', *u.lstrip('/').split('/'))
+            if os.path.exists(q): return q
+        return p
 
 port = int(sys.argv[1]) if len(sys.argv) > 1 else 8123
 root = os.path.dirname(os.path.abspath(__file__))

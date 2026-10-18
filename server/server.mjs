@@ -18,7 +18,8 @@
 //   GET  /mp/session   {v, seed, players}: the world's seed, read by the page BEFORE it builds the world (core/session.js)
 //   WS   /mp           the room (room.mjs): join, state, acts, snapshots
 //   GET  anything else a file under the repo's src/, concepts/, audio/, assets/ (no cache, like serve.py); --assets: a second root for files the repo doesn't
-//        have (the git-ignored renders in concepts/sprites/out and audio/forge/out when running from a git worktree)
+//        have (the git-ignored renders in concepts/sprites/out and audio/forge/out when running from a git worktree); then, for
+//        concepts/sprites/out, the stand-ins in assets/standin/
 // No dependencies: node's http server + server/ws.mjs. The seed is random unless given (--seed or RIFT_SEED); it lives as long
 // as the process, so a restart is a new forest unless the seed is passed again.
 import http from 'node:http';
@@ -88,13 +89,16 @@ async function file(root, rel) {
   try { let s = await stat(p), q = p; if (s.isDirectory()) { q = path.join(p, 'index.html'); s = await stat(q); } return s.isFile() ? {data: await readFile(q), ext: path.extname(q).toLowerCase()} : null; }
   catch { return null; }
 }
+// the art a clone doesn't have (concepts/sprites/out: on the dev PC, or from Git LFS) falls back to the stand-ins in assets/standin/
+// (plain blocks, tools: /mnt/project-files/tools/standin/gen_standins.py): a fresh clone or a ZIP download starts with them
+const ART = '/concepts/sprites/out/', STANDIN = path.join(ROOT, 'assets', 'standin');
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x'), rel = decodeURIComponent(url.pathname);
   const head = {'Cache-Control': 'no-store, must-revalidate'};
   // (the session: a page served elsewhere may ask, so it alone is open to any origin)
   if (rel === PATH + '/session') { res.writeHead(200, {...head, 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}); res.end(JSON.stringify({v: VERSION, seed, players: room.size})); return; }
   if (rel === '/') { res.writeHead(302, {Location: '/src/?mp=1'}); res.end(); return; }
-  const f = await file(ROOT, rel) || (assets ? await file(path.resolve(assets), rel) : null);
+  const f = await file(ROOT, rel) || (assets ? await file(path.resolve(assets), rel) : null) || (rel.startsWith(ART) ? await file(STANDIN, rel) : null);
   if (!f) { res.writeHead(404, head); res.end('not found'); return; }
   res.writeHead(200, {...head, 'Content-Type': TYPES[f.ext] || 'application/octet-stream'}); res.end(f.data);
 });
