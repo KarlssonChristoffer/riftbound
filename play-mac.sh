@@ -6,7 +6,7 @@
 #   From the game's folder: double-click play.command, or ./play-mac.sh. Arguments go to the server (default --seed 1337):
 #     ./play-mac.sh --seed 1234
 #   RIFTBOUND_DIR (~/riftbound) and RIFTBOUND_BRANCH pick where and which branch a fresh copy comes from.
-# Node comes from Homebrew when the Mac has it, otherwise the official build from nodejs.org into ~/.riftbound/node (no sudo).
+# Node: the Mac's own when it's 20 or newer, otherwise the official build from nodejs.org into ~/.riftbound/node (no sudo).
 # Close the Terminal window (or Ctrl+C) to stop the server.
 # Everything is in main() so bash has read the whole file before it runs (it arrives through a pipe with curl | bash).
 
@@ -15,7 +15,7 @@ main() {
   local REPO=KarlssonChristoffer/riftbound
   local BRANCH="${RIFTBOUND_BRANCH:-claude/project-thread-8lnhrc}"
   local DIR="${RIFTBOUND_DIR:-$HOME/riftbound}"
-  local PORT=8320 NODE_LINE=latest-v24.x
+  local PORT=8320
   local here=
   [ -n "${BASH_SOURCE[0]}" ] && here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"   # empty through a pipe
 
@@ -24,21 +24,22 @@ main() {
 
   [ "$(uname -s)" = Darwin ] || say "This is the Mac launcher, but this isn't a Mac: carrying on anyway."
 
-  # 1. Node
-  export PATH="$HOME/.riftbound/node/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-  if ! command -v node >/dev/null 2>&1; then
-    if command -v brew >/dev/null 2>&1; then
-      say "Installing Node with Homebrew"
-      brew install node
-    else
-      local arch; arch="$(uname -m)"; [ "$arch" = x86_64 ] && arch=x64
-      local base="https://nodejs.org/dist/$NODE_LINE" tgz
-      tgz="$(curl -fsSL "$base/SHASUMS256.txt" | awk '{print $2}' | grep "darwin-$arch.tar.gz$" | head -1)"
-      [ -n "$tgz" ] || fail "Couldn't find Node for this Mac. Install the LTS from https://nodejs.org and run this again."
-      say "Downloading Node (${tgz%.tar.gz}) into ~/.riftbound/node"
-      rm -rf "$HOME/.riftbound/node" && mkdir -p "$HOME/.riftbound/node"
-      curl -fL --progress-bar "$base/$tgz" | tar -xz -C "$HOME/.riftbound/node" --strip-components 1
-    fi
+  # 1. Node: one that's 20 or newer already on the Mac, else the official build from nodejs.org into ~/.riftbound/node. Never
+  # Homebrew: on an Intel Mac it has no ready-made Node and builds it (and llvm, rust...) from source for hours.
+  export PATH="$HOME/.riftbound/node/bin:$PATH:/usr/local/bin:/opt/homebrew/bin"
+  local major; major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  if [ "${major:-0}" -lt 20 ] 2>/dev/null || [ -z "$major" ]; then
+    local arch os line=latest-v24.x; arch="$(uname -m)"; [ "$arch" = x86_64 ] && arch=x64
+    os="$(sw_vers -productVersion 2>/dev/null || echo 99)"
+    # Node 24 wants macOS 13.5 or newer; Node 22 (also LTS) runs on macOS 11+
+    case "$os" in 1[1-2].*|13.[0-4]|13.[0-4].*) line=latest-v22.x ;; esac
+    local base="https://nodejs.org/dist/$line" tgz
+    tgz="$(curl -fsSL "$base/SHASUMS256.txt" | awk '{print $2}' | grep "darwin-$arch.tar.gz$" | head -1)"
+    [ -n "$tgz" ] || fail "Couldn't find Node for this Mac. Install the LTS from https://nodejs.org and run this again."
+    say "Downloading Node (${tgz%.tar.gz}) into ~/.riftbound/node: a minute, the first time only"
+    rm -rf "$HOME/.riftbound/node" && mkdir -p "$HOME/.riftbound/node"
+    curl -fL --progress-bar "$base/$tgz" | tar -xz -C "$HOME/.riftbound/node" --strip-components 1
+    hash -r
   fi
   command -v node >/dev/null 2>&1 || fail "Node still isn't there. Install the LTS from https://nodejs.org and run this again."
   say "Node $(node --version)"
