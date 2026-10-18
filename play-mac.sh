@@ -61,11 +61,13 @@ main() {
     # /usr/bin/git on a Mac without the developer tools only opens an install dialog: use it only when the tools are there
     if command -v git >/dev/null 2>&1 && { [ "$(command -v git)" != /usr/bin/git ] || xcode-select -p >/dev/null 2>&1; }; then
       say "Downloading the game into $DIR (a few hundred MB, the first time only)"
-      git clone --depth 1 --single-branch -b "$BRANCH" "https://github.com/$REPO.git" "$DIR"         || { say "No branch $BRANCH any more: taking main"; rm -rf "$DIR"; git clone --depth 1 "https://github.com/$REPO.git" "$DIR"; }
+      git clone --depth 1 --single-branch -b "$BRANCH" "https://github.com/$REPO.git" "$DIR" \
+        || { say "No branch $BRANCH any more: taking main"; rm -rf "$DIR"; git clone --depth 1 "https://github.com/$REPO.git" "$DIR"; }
     else
       say "Downloading the game into $DIR (a few hundred MB, no git needed)"
       mkdir -p "$DIR"
-      curl -fL --progress-bar "https://codeload.github.com/$REPO/tar.gz/refs/heads/$BRANCH" | tar -xz -C "$DIR" --strip-components 1         || curl -fL --progress-bar "https://codeload.github.com/$REPO/tar.gz/refs/heads/main" | tar -xz -C "$DIR" --strip-components 1
+      curl -fL --progress-bar "https://codeload.github.com/$REPO/tar.gz/refs/heads/$BRANCH" | tar -xz -C "$DIR" --strip-components 1 \
+        || curl -fL --progress-bar "https://codeload.github.com/$REPO/tar.gz/refs/heads/main" | tar -xz -C "$DIR" --strip-components 1
     fi
   fi
   cd "$DIR"
@@ -73,6 +75,8 @@ main() {
   xattr -dr com.apple.quarantine play-mac.sh play.command 2>/dev/null || true   # so a double-click is never blocked
 
   # 3. An old server still on the port (an earlier run): stop it so this one has the new code
+  local a prev=
+  for a in "$@"; do [ "$prev" = --port ] && PORT="$a"; prev="$a"; done
   local old; old="$(lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
   if [ -n "$old" ]; then
     if ps -o command= -p $old 2>/dev/null | grep -q 'server/server.mjs'; then
@@ -83,10 +87,10 @@ main() {
   fi
 
   # 4. The links
-  local ip iface port_arg=$PORT a prev=
-  for a in "$@"; do [ "$prev" = --port ] && port_arg="$a"; prev="$a"; done
+  local ip iface port_arg=$PORT
   iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
   ip="$( { [ -n "$iface" ] && ipconfig getifaddr "$iface"; } 2>/dev/null || ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+  ip="$(echo "$ip" | grep -Eo '^[0-9]+([.][0-9]+){3}$' | head -1 || true)"
   local me="http://localhost:$port_arg/src/?mp=1"
   echo
   say "You:              $me"
