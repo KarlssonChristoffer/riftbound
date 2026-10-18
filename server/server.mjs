@@ -91,14 +91,16 @@ async function file(root, rel) {
 }
 // the art a clone doesn't have (concepts/sprites/out: on the dev PC, or from Git LFS) falls back to the stand-ins in assets/standin/
 // (plain blocks, tools: /mnt/project-files/tools/standin/gen_standins.py): a fresh clone or a ZIP download starts with them
+// (an art file that is a Git LFS pointer, as in a ZIP made without the LFS objects, counts as missing)
 const ART = '/concepts/sprites/out/', STANDIN = path.join(ROOT, 'assets', 'standin');
+const lfsPointer = f => f && f.data.length < 300 && f.data.toString('latin1', 0, 24) === 'version https://git-lfs.', real = f => lfsPointer(f) ? null : f;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x'), rel = decodeURIComponent(url.pathname);
   const head = {'Cache-Control': 'no-store, must-revalidate'};
   // (the session: a page served elsewhere may ask, so it alone is open to any origin)
   if (rel === PATH + '/session') { res.writeHead(200, {...head, 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}); res.end(JSON.stringify({v: VERSION, seed, players: room.size})); return; }
   if (rel === '/') { res.writeHead(302, {Location: '/src/?mp=1'}); res.end(); return; }
-  const f = await file(ROOT, rel) || (assets ? await file(path.resolve(assets), rel) : null) || (rel.startsWith(ART) ? await file(STANDIN, rel) : null);
+  const f = real(await file(ROOT, rel)) || (assets ? real(await file(path.resolve(assets), rel)) : null) || (rel.startsWith(ART) ? await file(STANDIN, rel) : null);
   if (!f) { res.writeHead(404, head); res.end('not found'); return; }
   res.writeHead(200, {...head, 'Content-Type': TYPES[f.ext] || 'application/octet-stream'}); res.end(f.data);
 });
