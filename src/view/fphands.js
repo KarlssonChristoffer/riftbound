@@ -158,7 +158,7 @@ export function createHands(host) {
   const tint = tinter();
   // springs: down (0 shown .. 1 out of sight), the bob, the look's lag, a kick, the flash, the bow's raise, the string's snap
   const K = {down: 1, swayX: 0, swayY: 0, kick: 0, flash: 0, raise: 0, snap: 0, yaw: NaN, look: NaN, punchL: 0, punchR: 0, spin: 0, held: '', r: 255, g: 255, b: 255};
-  let caves = null, fishing = null;
+  let caves = null, fishing = null, deagle = null;
   function held() {
     const PL = host.PL, P = host.P;
     if (PL.lasso && PL.lasso.mode && PL.lasso.mode !== 'preview') return 'lasso';
@@ -204,8 +204,10 @@ export function createHands(host) {
         const G = S['gun' + k], rl = PL.gun?.reloading ? 1 : 0;
         K.raise += ((rl ? 1 : 0) - K.raise) * (1 - Math.exp(-dt * 10));
         const x = W - G.c.width + 4 + bx + K.kick * 5, y = H - G.c.height + 6 + by + K.kick * 3 - K.kick * K.kick * 6 + K.raise * 60;
-        put(G.c, x, y);
-        if (K.flash > 0) put(S.flash.c, x + G.mx - 11, y + G.my - 11 - 2, false);
+        if (!(deagle ??= host.feature('deagle') || false).fp) {   // (features/deagle.js draws its own 3D gun instead)
+          put(G.c, x, y);
+          if (K.flash > 0) put(S.flash.c, x + G.mx - 11, y + G.my - 11 - 2, false);
+        }
       } else if (K.held === 'bow') {
         // drawn: P.t into the draw; let go: the string snaps
         const drawn = P.state === 'draw' ? clamp(P.t * 1.6, 0, 1) : 0;

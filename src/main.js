@@ -98,7 +98,8 @@ const t00 = performance.now();
 // the loadout (view/hero.js LOADOUTS). Default: the runtime cloth (cloak + scarf tail answer the wind; ?set=basic = the baked cloak)
 // (?set=gunslinger | outlaw: the cowboys, a revolver each: content/weapons.js)
 // (co-op: the gunslinger, drawn live: the others see his drawn pose as it is, features/coop.js)
-const loadI = SET_NAMES.includes(Q.get('set')) ? SET_NAMES.indexOf(Q.get('set')) : SESSION.mp && SET_NAMES.includes('gunslinger') ? SET_NAMES.indexOf('gunslinger') : 1;
+// (the golden deagle, features/deagle.js: the gunslinger in every game, a run too; ?deagle=0 the Ranger again)
+const loadI = SET_NAMES.includes(Q.get('set')) ? SET_NAMES.indexOf(Q.get('set')) : (SESSION.mp || Q.get('deagle') !== '0') && SET_NAMES.includes('gunslinger') ? SET_NAMES.indexOf('gunslinger') : 1;
 $('#load').textContent = 'Loading the Ranger…';
 const TIMING = {}, mark = (k, t0) => { TIMING[k] = +((performance.now() - t0) / 1000).toFixed(2); };
 let tp = performance.now();
@@ -232,14 +233,15 @@ const host = {
   // on the sprite path (features/melee.js draws its stand-in line from the sim's facing then)
   playerBlade: () => live?.on ? live.blade() : null,
   // his DRAWN live pose (view/livehero.js DRAWN: body-space bones in BN order, 7 a bone; phi his facing; n counts the frames drawn;
-  // rig the live model's name), or null when he isn't drawn live: co-op sends it to the others (features/coop.js). One reused object
-  playerPose: () => { const d = live?.on ? live.drawn : null; if (!d?.w) return null; PPOSE.w = d.w; PPOSE.phi = d.phi; PPOSE.n = d.n; PPOSE.BN = live.BN; PPOSE.rig = hero.loadName; return PPOSE; },
+  // rig the live model's name; x, h, z his body's anchor in render axes, J the model's bones: features/deagle.js), or null when
+  // he isn't drawn live: co-op sends it to the others (features/coop.js). One reused object
+  playerPose: () => { const d = live?.on ? live.drawn : null; if (!d?.w) return null; PPOSE.w = d.w; PPOSE.phi = d.phi; PPOSE.n = d.n; PPOSE.BN = live.BN; PPOSE.rig = hero.loadName; PPOSE.x = d.x; PPOSE.h = d.h; PPOSE.z = d.z; PPOSE.J = live.J; return PPOSE; },
   // GEAR (features/gear.js, docs/GEAR.md): draw him in these pieces (content/gear.js entries, SLOTS order; key: their setKey).
   // The live body; a sprite loadout looks the same but for its runtime cloak (gone with a piece in the back slot: content/gear.js
   // capeShown). On a change of set, never per frame
   dressPlayer: (pieces, key) => { hero.setCape(capeShown(pieces)); live?.dress(pieces, key); },
 };
-const PPOSE = {w: null, phi: 0, n: 0, BN: null, rig: ''};
+const PPOSE = {w: null, phi: 0, n: 0, BN: null, rig: '', x: 0, h: 0, z: 0, J: null};
 
 // ---------------------------------------------------------------- features
 tp = performance.now();
