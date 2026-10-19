@@ -32,7 +32,7 @@ const FLASH = [1, .78, .42];
 const HIDE = new Set(['roll', 'climb', 'mantle', 'rope', 'swim', 'fall', 'knock', 'leap', 'vault', 'launched', 'floored', 'hold']);   // (view/fphands.js HIDE)
 
 export async function create(host) {
-  const F = {name: 'deagle', on: flags.get('deagle') !== '0', fp: false};
+  const F = {name: 'deagle', on: flags.get('deagle') !== '0', fp: false, inHand: false};   // inHand: drawn in his fist (view/livehero.js leaves the model's revolver out)
   if (!F.on) return F;
   const {G, THREE} = host;
   const root = new THREE.Group(); root.matrixAutoUpdate = false;
@@ -163,7 +163,9 @@ void dgHide() {
     if (!gun) return;
     F.fp = !!(cc ??= host.feature('chasecam') || false) && !!cc.hidesBody;
     FPU.value = F.fp ? 1 : 0;
-    if (F.fp ? inView(Math.min(f.dt || 0, .1)) : inHand()) show();
+    const drawn = F.fp ? inView(Math.min(f.dt || 0, .1)) : inHand();
+    F.inHand = drawn && !F.fp;
+    if (drawn) show();
   };
   return F;
 }

@@ -934,6 +934,10 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     return fr;
   }
   function toolHide(h) { for (let s = 0; s < TOOL_HIDE.length; s++) TOOL_HIDE[s] = (h && h[s]) || TOOL_HIDES[s] ? 1 : 0; return TOOL_HIDE; }
+  // the golden deagle (features/deagle.js) in his hand instead of the model's own revolver: its 'gun' pieces left out
+  const GUN_HIDE = new Uint8Array(J.segs.length), GUN_SEGS = J.segs.map(s => s.kind === 'gun');
+  let DGL = null;
+  function gunHide(h) { if (!(DGL ??= app.feat('deagle') || false).inHand) return h; for (let s = 0; s < GUN_HIDE.length; s++) GUN_HIDE[s] = (h && h[s]) || GUN_SEGS[s] ? 1 : 0; return GUN_HIDE; }
 
   // ---------------------------------------------------------------- FISTS (docs/exp/fists.md; K.move): the fs_* clips (western.py
   // FISTS_LIVE) by the sim's move, its phase and its time (sim/player/fists.js S; content/fists.js MOVES is the truth):
@@ -1776,7 +1780,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     HELDW.show(wOn ? mel.S.wid : '', mlHold, mlCant, show, HELD_O);   // MELEE: the weapon in his fist (its cant by the move), the shield on his arm
     HELDW.shield(mel?.S.on ? mel.shield : '');
     bladeOut(show, wOn);
-    mats(show, toolSwing || mlHide ? toolHide(A.hide) : A.hide);
+    mats(show, gunHide(toolSwing || mlHide ? toolHide(A.hide) : A.hide));
     DRAWN.w = show; DRAWN.phi = phi; DRAWN.x = AX; DRAWN.h = AY; DRAWN.z = AZ; DRAWN.n++;
     stats.smears += K.smear || fsSmear() ? smear(show) : (prevOk = false, 0);   // (FISTS: a punch's snap smears, from its wind to just past its contact)
     const blinkOff = P.blink && Math.floor(P.blink * 12) % 2;
