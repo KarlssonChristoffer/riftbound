@@ -13,7 +13,7 @@
 // env.light), as the features reading host.mood do.
 // OWNS: the light records (reused frame to frame). READS: host.env / biome / world / player / P / zoom / VH, features'
 //   lights(), opt.lantern, host.mods 'light.lantern' / 'light.lanternR' (a run rule lights the lantern: features/omens.js,
-//   an eclipse). BUDGET: ~0.05 ms (part of view).
+//   an eclipse), 'light.nightEye' (EEL below: smoked eel), campfires (burningNear), coop (litNear). BUDGET: ~0.05 ms (part of view).
 //   const lighting = createLighting({G, host, features, opt}); lighting.apply(PX, PY, t) once per frame before G.render
 import * as THREE from 'three';
 import {DEG} from './gfx.js';
@@ -25,16 +25,23 @@ import {flags} from '../core/flags.js';
 const GRADE = {ruins: [1.039, 1.029, .818], ember: [1.166, .958, .82], frost: [.896, 1.013, 1.161], rift: [1.056, .792, 1.649], desert: [1.09, 1.0, .84]};
 const BG = {ruins: [.10, .13, .11], ember: [.11, .06, .05], frost: [.10, .12, .17], rift: [.06, .04, .10], desert: [.15, .10, .07]};
 const HALO_A = .16, HALO_R = .3, LANTERN = {fwd: .22, side: .3, h: .95, c: [1, .76, .48], r: 4.2, k: 1, flicker: .2, id: -7};
+// the Nightglass Lantern's light ('light.nightglass' > 0: content/gear.js, docs/ALMANAC.md): cold violet, a little dimmer
+const NIGHTGLASS = {c: [.46, .46, 1], k: .85};
 // UNDERGROUND (features/caves.js F.under 0..1: how far the world above has gone dark round him): the mood turns toward the cave's:
 // a faint cold ambient, no sun, no sun shadows, no fog's colour, a black background, a small lift round him (he stays readable);
 // the lights (his lantern, the crystals) do the rest
 const CAVE = {amb: [.012, .012, .016], lift: [.05, .045, .04], fill: .25, glow: [.05, .049, .056], glowR: 7, glowH: 2, lantern: .5, lanternR: .25};   // (glow: a wide faint pool round him
 // instead of an ambient: the cave's floor past the lantern shows its shapes, while the woods above, metres over him and away,
 // go black, so the step into the cave changes nothing round him)
+// EEL SIGHT (content/meals.js smoked_eel: the 'light.nightEye' note): in the dark (dark over EEL.dark) a cold green-grey pool out to
+// EEL.r m round him (flat, like the lift: the ground's shapes show, nothing casts or glows) and the grade a little colder (cool);
+// a lit lantern or a burning fire within EEL.near m (his own, a friend's) fades it out over EEL.out s; it comes back (over EEL.in s)
+// EEL.back s after the light has gone. Not a light anything else sees (the night veins still show).
+const EEL = {dark: .55, soft: .12, r: 11, c: [.11, .19, .16], h: 1.4, near: 5, out: 1.5, back: 3, in: 1, cool: .3, grade: [.9, 1.0, 1.06]};
 const mixInto = (a, b, k, o) => { o[0] = a[0] + (b[0] - a[0]) * k; o[1] = a[1] + (b[1] - a[1]) * k; o[2] = a[2] + (b[2] - a[2]) * k; return o; };
 function flick(l, t) {
   const f = l.flicker || 0; if (!f) return 1;
-  const s = (l.id ?? 0) * 12.9898 % 6.283, n = .5 * Math.sin(t * 7.3 + s) + .3 * Math.sin(t * 12.7 + s * 2.3) + .2 * Math.sin(t * 23.1 + s * 3.7);
+  const s = (+l.id || 0) * 12.9898 % 6.283, n = .5 * Math.sin(t * 7.3 + s) + .3 * Math.sin(t * 12.7 + s * 2.3) + .2 * Math.sin(t * 23.1 + s * 3.7);
   return 1 - f * .22 * (1 + n);
 }
 // the arena's longest sun shadow (lighting.js SUN_LEN_MAX): 1.7 m per metre of height. A low dusk sun (10-14 deg) still
@@ -70,9 +77,12 @@ export function createLighting({G, host, features, opt}) {
   // (wx-D: the envelope's: sunView the sun's share of the view, broken how broken the sky is (undefined: godrays.js estimates
   // it from env.front), t the frame's clock, env for its front and a preview)
   // the lantern by a run rule (features/omens.js, an eclipse): 'light.lantern' > 0 lights it whatever the switch says,
-  // 'light.lanternR' scales its reach; read when the notes change
-  let lanternMod = 0, lanternR = 1;
-  if (host.mods) { const f = () => { lanternMod = host.mods.value('light.lantern', 0); lanternR = host.mods.value('light.lanternR', 1); }; host.mods.watch(f); f(); }
+  // 'light.lanternR' scales its reach, 'light.lanternOut' > 0 puts it out whatever lights it (the cave's dark: features/caves.js);
+  // read when the notes change. Its flame leans toward a hollow wall: features/cavelife.js F.lean (m, world x / y)
+  let lanternMod = 0, lanternR = 1, lanternOut = 0, lean = undefined, nightEye = 0, nightglass = 0;
+  if (host.mods) { const f = () => { lanternMod = host.mods.value('light.lantern', 0); lanternR = host.mods.value('light.lanternR', 1); lanternOut = host.mods.value('light.lanternOut', 0); nightEye = host.mods.value('light.nightEye', 0); nightglass = host.mods.value('light.nightglass', 0); }; host.mods.watch(f); f(); }
+  let eelK = 0, eelOff = 9, eelT = -1, fires = null, coop = null;   // (EEL: how much of it shows now; s since a light was near; the last frame's clock)
+  const GR = [1, 1, 1];
   function putL(x, y, z, c, r, gain, flat, halo = true) { const o = LOUT[nL] ??= {}; nL++; o.x = x; o.y = y; o.z = z; o.c = c; o.r = r; o.gain = gain; o.flat = flat; o.halo = halo; }
   // the coloured shade's uniforms (SHADE): T the shadow's multiply (rgb, w on), L its lift, H the hue alone (luminance 1)
   const HUE = [0, 0, 0];
@@ -123,7 +133,7 @@ export function createLighting({G, host, features, opt}) {
     shade(m.shadow.c, U.uShadowA.value, amb, U.uShadeT.value, U.uShadeL.value, U.uShadeH.value);
     U.uCrest.value.set(SHADE.crest ? 1 : 0, U.uShadowA.value > 0 ? crestRim(m.sun.el) : 0);
     const la = Math.max(.02, lum(m.amb)), fk = lum(m.fill || [0, 0, 0]) / la * CHAR.fillK * (1 + (CAVE.fill - 1) * ug);
-    U.uFill.value.set(amb[0] * fk, amb[1] * fk, amb[2] * fk); const gr = GRADE[biome]; U.uGrade.value.set(gr[0], gr[1], gr[2]); U.uGradeK.value = CHAR.gradeK[time] ?? 0;
+    U.uFill.value.set(amb[0] * fk, amb[1] * fk, amb[2] * fk); const gr = eelK > 0 ? mixInto(GRADE[biome], EEL.grade, eelK * EEL.cool, GR) : GRADE[biome]; U.uGrade.value.set(gr[0], gr[1], gr[2]); U.uGradeK.value = CHAR.gradeK[time] ?? 0;
     const dark = Math.max(0, 1 - lum(amb)), darkV = Math.max(0, 1 - lum(ug > 0 ? amb : mv.amb));   // (darkV: the view's mean, for the halos)
     U.uEmin.value = .1 + .2 * dark;
     const bg = BG[biome], bk = (.35 + .65 * lum(mv.amb)) * sunK; U.uBg.value.set(bg[0] * bk, bg[1] * bk, bg[2] * bk);
@@ -145,9 +155,21 @@ export function createLighting({G, host, features, opt}) {
     const lift = ug > 0 ? mixInto(m.lift, CAVE.lift, ug, LIFT) : m.lift;
     if (lift[0] + lift[1] + lift[2] > 0) putL(PX, P.z + .9, PY, lift, 1.7, 1, true);
     if (ug > 0) putL(PX, P.z + CAVE.glowH, PY, CAVE.glow, CAVE.glowR, ug, false);   // (UNDERGROUND: the cave's glow)
-    if ((opt.lantern || lanternMod > 0) && !host.playerHidden) {   // (photo mode may hide him: his lantern goes with him)
+    const lantern = (opt.lantern || lanternMod > 0) && lanternOut <= 0 && !host.playerHidden;
+    // EEL SIGHT (above): faded by his lantern, a burning fire or a friend's lantern near him; its pool before the lantern's
+    const edt = eelT < 0 ? 0 : Math.min(.1, Math.max(0, t - eelT)); eelT = t;
+    if (nightEye !== 0) {
+      fires ??= features.find(f => f.name === 'campfires') || false; coop ??= features.find(f => f.name === 'coop') || false;
+      const x = player.x, y = player.y, lit = lantern || !!fires?.burningNear?.(x, y, EEL.near) || !!coop?.litNear?.(x, y, EEL.near);
+      eelOff = lit ? 0 : eelOff + edt;
+      const want = eelOff >= EEL.back ? Math.min(1, Math.max(0, (dark - EEL.dark) / EEL.soft)) : 0;
+      eelK = eelK < want ? Math.min(want, eelK + edt / EEL.in) : Math.max(want, eelK - edt / EEL.out);
+    } else eelK = 0;
+    if (eelK > 0) putL(PX, P.z + EEL.h, PY, EEL.c, EEL.r, eelK, true);
+    if (lantern) {   // (photo mode may hide him: his lantern goes with him)
       const a = player.faceAngle, fx = Math.sin(a), fy = Math.cos(a), fk2 = flick(LANTERN, t);
-      putL(PX + fx * LANTERN.fwd - fy * LANTERN.side, P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side, LANTERN.c, LANTERN.r * lanternR * (1 + CAVE.lanternR * ug) * (1 + (fk2 - 1) * .15), fk2 * (1 + CAVE.lantern * ug), false);
+      if (lean === undefined && features.length) lean = features.find(f => f.name === 'cavelife')?.lean || null;
+      putL(PX + fx * LANTERN.fwd - fy * LANTERN.side + (lean ? lean.x : 0), P.z + LANTERN.h, PY + fy * LANTERN.fwd + fx * LANTERN.side + (lean ? lean.y : 0), nightglass > 0 ? NIGHTGLASS.c : LANTERN.c, LANTERN.r * lanternR * (1 + CAVE.lanternR * ug) * (1 + (fk2 - 1) * .15), fk2 * (1 + CAVE.lantern * ug) * (nightglass > 0 ? NIGHTGLASS.k : 1), false);
     }
     let nc = 0, nf = 0;
     const cand = l => { const d = hypot2(l.x - PX, l.z - PY); if (d < 24 + l.r) { const w = CW[nc] ??= {l: null, d: 0}; w.l = l; w.d = d; CAND[nc++] = w; } };
@@ -162,7 +184,7 @@ export function createLighting({G, host, features, opt}) {
     for (let i = 1; i < nc; i++) { const w = CAND[i]; let j = i - 1; while (j >= 0 && CAND[j].d > w.d) { CAND[j + 1] = CAND[j]; j--; } CAND[j + 1] = w; }
     // a flame's light wanders a few cm (l.jitter, else from its flicker), so the shadows round a fire dance with it
     for (let i = 0; i < nc && nL < 32; i++) {
-      const l = CAND[i].l, k = flick(l, t), j = l.jitter ?? (l.flicker || 0) * .035, s = (l.id ?? 0) * 7.13;
+      const l = CAND[i].l, k = flick(l, t), j = l.jitter ?? (l.flicker || 0) * .035, s = (+l.id || 0) * 7.13;
       const jx = j ? j * (Math.sin(t * 11.3 + s) + Math.sin(t * 17.9 + s * 1.7) * .6) / 1.6 : 0, jz = j ? j * (Math.sin(t * 13.1 + s * 2.1) + Math.sin(t * 7.7 + s * .9) * .6) / 1.6 : 0;
       putL(l.x + jx, l.y + Math.abs(jz) * .5, l.z + jz, l.c, l.r * (1 + (k - 1) * .15), l.k * k, false, l.halo !== false);
     }

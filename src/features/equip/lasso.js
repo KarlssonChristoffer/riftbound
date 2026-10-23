@@ -24,6 +24,9 @@
 //            foot below it (TUNE.ropeup): PL.lasso.ropeup: he climbs the rope up the face and over onto the top
 //   STONES   the top of a stone wall's broken stretch too high to vault (TUNE.pull): caught as a hold; a tap of F pulls its top
 //            course down toward you (world.pullWall: now it can be vaulted), the stones hurting whoever stands under them
+//   ANIMALS  (eq.beast: features/rope.js, the bag Lasso in the persistent world) a forest animal under the cursor is aimed at,
+//            followed in flight and caught like a body; held (phase 'hold', kind 'animal'), the hook steps it and says when it ends
+//            (the hare tumbles to your feet, the fox slips, the roe drags you). eq.can() says who may spin (else a gun loadout)
 // Fixed 1/60 s steps; every random draw from the equipment sim's generator (passed in); nothing read back from the view.
 // OWNS: L (the phase, the aim, the loop's flight, what's held, the anchor, the stunned list), the anchor segments' scratch.
 // READS: host.player / aim / mouse / G (gameToScreen: the cursor's anchors through the game's view, as the game's hover does) / entities (near) /
@@ -147,13 +150,22 @@ export function createLassoSim(host, eq) {
 
   // ---------------------------------------------------------------- the aim (while spinning)
   const SA = [0, 0, 0], SB = [0, 0, 0];
+  // (the cursor and the screen it's on: the game's view; a camera view's own, its crosshair at the middle: features/chasecam.js)
+  const CUR = {x: 0, y: 0, z: 1, view: false};
+  function cursorOn(Gx) {
+    CUR.view = !!Gx.cine?.hud; CUR.z = CUR.view ? 1 : host.zoom;
+    CUR.x = CUR.view ? Gx.VW / 2 : host.VW / 2 + (host.mouse.x - host.VW / 2) * CUR.z; CUR.y = CUR.view ? Gx.VH / 2 : host.VH / 2 + (host.mouse.y - host.VH / 2) * CUR.z;
+    return CUR;
+  }
+  const onScreenAt = (Gx, x, h, y, out) => CUR.view ? Gx.toScreenInto(x, h, y, out) : Gx.gameToScreen(x, h, y, out);
   function pickAnchor(A) {   // the anchor point nearest the cursor on screen (within `pick` px), in reach
     const Gx = host.G; if (!Gx?.gameToScreen) return false;
-    const z = host.zoom, mx = host.VW / 2 + (host.mouse.x - host.VW / 2) * z, my = host.VH / 2 + (host.mouse.y - host.VH / 2) * z;
+    const {z, x: mx, y: my} = cursorOn(Gx);
     let best = -1, bd = TUNE.pick * z, bx = 0, by = 0, bh = 0;
     for (let i = 0; i < nSeg; i++) {
       const j = i * 7;
-      Gx.gameToScreen(SEG[j], SEG[j + 2], SEG[j + 1], SA); Gx.gameToScreen(SEG[j + 3], SEG[j + 5], SEG[j + 4], SB);
+      onScreenAt(Gx, SEG[j], SEG[j + 2], SEG[j + 1], SA); onScreenAt(Gx, SEG[j + 3], SEG[j + 5], SEG[j + 4], SB);
+      if (SA[0] < -9e4 || SB[0] < -9e4) continue;   // (behind a camera view)
       const ex = SB[0] - SA[0], ey = SB[1] - SA[1], l2 = ex * ex + ey * ey, t = l2 > 0 ? clamp(((mx - SA[0]) * ex + (my - SA[1]) * ey) / l2, 0, 1) : 0;
       const d = hypot2(SA[0] + ex * t - mx, SA[1] + ey * t - my);
       if (d >= bd) continue;
@@ -176,12 +188,14 @@ export function createLassoSim(host, eq) {
       A.d = hypot2(t.x - P.x, t.y - P.y); A.ok = A.d <= R + (t.hitR ?? .3); A.cls = classOf(t, pullOf(lz().S.charge));
       if (A.ok) return A;
     }
+    if (eq.beast?.aim(a, A)) return A;   // (an animal near the cursor: features/rope.js)
     gather(P.x, P.y, Math.max(R, ZIP.range));
     if (pickAnchor(A)) return A;
     if (pickWall(A)) return A;   // the top of a broken stretch of stone wall (STONES)
-    // the ground under the cursor (host.aim reads it at chest height: the ground is that much further up the screen)
+    // the ground under the cursor (host.aim reads it at chest height: the ground is that much further up the screen; a first
+    // person look's point is where it is: a.ray)
     let gx = a.x, gy = a.y;
-    if (!t) { const k = (a.h - host.elev(a.x, a.y)) * host.PPMH / host.PPMY; gx -= Math.sin(host.yaw) * k; gy -= Math.cos(host.yaw) * k; }
+    if (!t && !a.ray) { const k = (a.h - host.elev(a.x, a.y)) * host.PPMH / host.PPMY; gx -= Math.sin(host.yaw) * k; gy -= Math.cos(host.yaw) * k; }
     // a lit brazier there: the loop goes for it (pulled over)
     const br = brazierAt(gx, gy) || brazierAt(a.x, a.y);
     if (br) { A.kind = 'prop'; A.who = br; A.x = br.x; A.y = br.y; A.h = (br.z || 0) + .95; A.d = hypot2(br.x - P.x, br.y - P.y); A.ok = A.d <= R + .4; if (A.ok) return A; }
@@ -224,11 +238,11 @@ export function createLassoSim(host, eq) {
   }
   function pickWall(A) {   // a pullable top near the cursor on screen (within `pick` px), in reach
     const Gx = host.G; if (!Gx?.gameToScreen) return false;
-    const z = host.zoom, mx = host.VW / 2 + (host.mouse.x - host.VW / 2) * z, my = host.VH / 2 + (host.mouse.y - host.VH / 2) * z;
+    const {z, x: mx, y: my} = cursorOn(Gx);
     let best = null, bd = TUNE.pick * z, bh = 0;
     for (const p of ents.near(P.x, P.y, TUNE.range + 1, nearB)) {
       if (!pullable(p)) continue;
-      const h = (p.z || 0) + topOfProp(p); Gx.gameToScreen(p.x, h, p.y, SA);
+      const h = (p.z || 0) + topOfProp(p); onScreenAt(Gx, p.x, h, p.y, SA);
       const d = hypot2(SA[0] - mx, SA[1] - my); if (d >= bd || hypot3(p.x - HP[0], p.y - HP[1], h - HP[2]) > TUNE.range) continue;
       best = p; bd = d; bh = h;
     }
@@ -280,7 +294,7 @@ export function createLassoSim(host, eq) {
     const O = L.loop, A = L.aim;
     lz().hand(false, HP);
     O.x = O.lx = O.x0 = HP[0]; O.y = O.ly = O.y0 = HP[1]; O.h = O.lh = O.h0 = HP[2];
-    O.who = A.kind === 'enemy' || A.kind === 'prop' ? A.who : null; O.kind = A.kind; O.wall = A.kind === 'wall' ? A.who : null;
+    O.who = A.kind === 'enemy' || A.kind === 'prop' || A.kind === 'animal' ? A.who : null; O.kind = A.kind; O.wall = A.kind === 'wall' ? A.who : null;
     O.tx = A.x; O.ty = A.y; O.th = A.kind === 'ground' ? A.h + .04 : A.h;
     const d = hypot3(O.tx - O.x0, O.ty - O.y0, O.th - O.h0), Th = TUNE.throw;
     O.T = clamp(Th.t0 + Th.tk * d, Th.t0, Th.tMax); O.arc = Th.arc * d / 10 + .15 + (A.kind === 'anchor' ? .5 : 0); O.t = 0; O.open = 1;
@@ -292,6 +306,7 @@ export function createLassoSim(host, eq) {
     const O = L.loop; O.t += dt; O.lx = O.x; O.ly = O.y; O.lh = O.h;
     if (O.who) {
       if (O.who.broken || O.who.gone) O.who = null;
+      else if (O.kind === 'animal') { eq.beast.track(O.who); O.tx = O.who.x; O.ty = O.who.y; O.th = O.who.z + O.who.h + O.who.hitH * .55; }
       else { O.tx = O.who.x; O.ty = O.who.y; O.th = creature(O.who) ? bodyMid(O.who) : (O.who.z || 0) + topOf(O.who) * .6; }
     }
     const k = Math.min(1, O.t / O.T), nx = O.x0 + (O.tx - O.x0) * k, ny = O.y0 + (O.ty - O.y0) * k, nh = O.h0 + (O.th - O.h0) * k + O.arc * 4 * k * (1 - k);
@@ -310,13 +325,14 @@ export function createLassoSim(host, eq) {
     if (k >= 1) {   // there: what it was thrown at, if it's still there
       if (O.kind === 'anchor') { catchAnchor(L.aim.x, L.aim.y, L.aim.h, L.aim.who); return; }
       if (O.kind === 'wall' && O.wall && !O.wall.gone) { catchWall(O.wall); return; }
-      if (O.who && hypot2(O.who.x - O.x, O.who.y - O.y) < (O.who.hitR ?? O.who.r ?? .4) + TUNE.throw.catchR + .2) { catchThing(O.who); return; }
+      if (O.who && hypot2(O.who.x - O.x, O.who.y - O.y) < (O.who.hitR ?? O.who.r ?? .4) + TUNE.throw.catchR + .2) { if (O.kind === 'animal') catchBeast(O.who); else catchThing(O.who); return; }
       O.h = host.elev(O.x, O.y) + .02; miss();
     }
   }
   // the loop's opening at (x, y, h): a body, a movable prop, an anchor (high enough). k: how far through its flight
   function catchAt(x, y, h, k) {
     const R = TUNE.throw.catchR;
+    if (k > .08 && eq.beast) { const b = eq.beast.at(x, y, h, R); if (b) { L.loop.x = x; L.loop.y = y; L.loop.h = h; catchBeast(b); return true; } }
     if (k > .08) for (const p of ents.near(x, y, R + .8, nearA)) {
       if (p.gone || p.broken) continue;
       const dd = hypot2(p.x - x, p.y - y);
@@ -370,6 +386,18 @@ export function createLassoSim(host, eq) {
     Z.haul(true, L.cls); Z.leash(p.x, p.y, L.len + T2.stretch);
     L.phase = 'hold'; L.t = 0; L.taut = false;
     host.shake(L.cls === 'strong' ? 2 : 1, L.cls === 'strong' ? .12 : .06);
+  }
+  // an animal caught (eq.beast: features/rope.js): held like a body, its class the hook's (the hare and the fox light, the roe
+  // strong: it runs and you're dragged); the hook steps it from here (update: 'hold')
+  function catchBeast(b) {
+    const Z = lz();
+    L.who = b; L.kind = 'animal'; L.boss = false; L.elite = false; L.cls = b.cls || 'light';
+    L.len = clamp(hypot2(b.x - P.x, b.y - P.y), 1.2, TUNE.hold.len); L.held = 0; L.fHeld = false; L.taut = false;
+    Z.haul(true, L.cls); Z.leash(b.x, b.y, L.len + TUNE.hold.stretch);
+    L.phase = 'hold'; L.t = 0;
+    events.push({type: 'lasso.catch', x: b.x, y: b.y, h: L.loop.h, what: 'animal', who: b, cls: L.cls});
+    host.shake(L.cls === 'strong' ? 2 : 1, .08);
+    eq.beast.caught(b, L);
   }
   // SNARE: the snap reaches the legs (lasso.cinch): rooted where it stands (combat's root / the gunmen's snare) for the snare's
   // time; the rope is let go (its end where he stood), the loop stays round its ankles
@@ -586,7 +614,7 @@ export function createLassoSim(host, eq) {
   }
 
   // ---------------------------------------------------------------- home again
-  function back() { L.phase = 'back'; L.t = 0; L.who = null; L.kind = ''; L.fHeld = false; }
+  function back() { if (L.kind === 'animal' && L.who) eq.beast?.lost(L.who); L.phase = 'back'; L.t = 0; L.who = null; L.kind = ''; L.fHeld = false; }
   function reel(dt) {
     const O = L.loop; lz().hand(false, HP); L.t += dt;
     O.lx = O.x; O.ly = O.y; O.lh = O.h;
@@ -602,6 +630,7 @@ export function createLassoSim(host, eq) {
   // drop everything (the feature off, a stage change, the gadget swapped): nothing left held, the hands free
   function clear() {
     const Z = lz(); if (L.phase && Z) Z.stop();
+    if (L.kind === 'animal' && L.who) eq.beast?.lost(L.who);
     L.phase = ''; L.who = null; L.kind = ''; L.stun.length = 0; L.fHeld = false; L.fPress = false; eq.S.aiming = false;
   }
 
@@ -626,7 +655,7 @@ export function createLassoSim(host, eq) {
     if (host.lock && (L.phase === 'spin' || L.phase === 'wind')) { Z.stop(); L.phase = ''; eq.S.aiming = false; return; }
     switch (L.phase) {
       case '':
-        if (press) { if (sl && sl.cd <= 0 && host.weapon?.kind === 'gun') startSpin(); else eq.S.deny = .3; }
+        if (press) { if (sl && sl.cd <= 0 && (eq.can ? eq.can() : host.weapon?.kind === 'gun')) startSpin(); else eq.S.deny = .3; }
         break;
       case 'spin':
         L.spinT += dt; L.t += dt; eq.S.aimT = L.spinT;
@@ -642,6 +671,7 @@ export function createLassoSim(host, eq) {
       case 'fly': stepLoop(dt); break;
       case 'lie': L.t += dt; if (L.t >= TUNE.miss.lie) back(); break;
       case 'hold':
+        if (L.kind === 'animal') { const why = eq.beast.hold(dt, press, up, L); if (why === 'back') back(); else if (why) slip(why); break; }   // (the hook steps it)
         if (press) { L.fHeld = true; L.fT = 0; }
         if (up && L.fHeld) { L.fHeld = false; startYank(); break; }
         stepHold(dt);

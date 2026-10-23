@@ -1,6 +1,32 @@
 # Generated or downloaded files: too big for git, regenerable or re-downloadable.
 # A one-time copy of each is in D:\Game-backup\2026-10-01\ (see the README there).
-concepts/sprites/out/
+concepts/sprites/out/*
+# ...except what the game loads (plain git, see docs/ASSETS.md "Getting the art"): each loadout's and gunman's
+# atlas as its index + packed sheets (not the ~1000 per-pose files they were packed from), the live models, the 3D props
+!concepts/sprites/out/outfits/
+concepts/sprites/out/outfits/*
+!concepts/sprites/out/outfits/ranger_basic/
+!concepts/sprites/out/outfits/ranger_sim/
+!concepts/sprites/out/outfits/gunslinger/
+!concepts/sprites/out/outfits/outlaw/
+!concepts/sprites/out/outfits/bandit/
+!concepts/sprites/out/outfits/sheriff/
+!concepts/sprites/out/outfits/bruiser/
+!concepts/sprites/out/skel/
+concepts/sprites/out/outfits/*/*
+concepts/sprites/out/skel/*
+!concepts/sprites/out/outfits/*/poses.json
+!concepts/sprites/out/outfits/*/overlays.json
+!concepts/sprites/out/outfits/*/packed/
+!concepts/sprites/out/skel/poses.json
+!concepts/sprites/out/skel/overlays.json
+!concepts/sprites/out/skel/packed/
+!concepts/sprites/out/live/
+!concepts/sprites/out/render3d/
+concepts/sprites/out/render3d/*
+!concepts/sprites/out/render3d/glb/
+!concepts/sprites/out/render3d/props_yaw/
+concepts/sprites/out/render3d/props_yaw/*/
 audio/forge/out/
 assets/src/*.zip
 assets/src/base/

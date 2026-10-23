@@ -19,11 +19,16 @@
 // OWNS: the chop counts, the felled set and its saved part, the stump props, the logs, their meshes, the falls, the chips.
 // READS: host.PL.tool, host.entities (query 'woodcut.tree', near), host.itemOf (a tree's model: species, scale, bones, crown),
 //   host.env.t (the world clock), pack (the tool, XP, the pouch), combat's core (a blow that meets a foe or a dummy).
-// EMITS: tree.chop, tree.fell, tree.land, tree.logs, tree.grow, tool.hit, tool.whiff.
+// THE HIT (docs/SKILLS.md, content/woodcut.js TUNE.hit): a tree that comes down on something hits it (at tree.land: hitPath). In
+// co-op each client tests its own player, foes and props (the fall's way is the server's, so it lands the same everywhere).
+// THE FALL LINE (Woodcutting 5: pack.move('fall_line'); view only): while the next bite will fell the tree he's at, pixel specks
+// tremble on the ground along the fall's path (TUNE.line).
+// EMITS: tree.chop (also by: 'fall', a standing tree the fall hit), tree.fell, tree.land, tree.hit, tree.logs, tree.grow,
+// tool.hit, tool.whiff.
 // BUDGET: sim: a near() query a blow (and one a step while a swing waits for its aim); the logs (a handful) a step; the
 //   regrowth check once a second over the felled set. View: a falling tree's matrix a frame; logs' matrices while they move.
 import * as THREE from 'three';
-import {TUNE, TREES} from '../content/woodcut.js';
+import {TUNE, TREES, treeStats} from '../content/woodcut.js';
 import {ITEMS} from '../content/items.js';
 import {XP} from '../content/skills.js';
 import {flags} from '../core/flags.js';
@@ -33,7 +38,7 @@ import {propTop, FAMS} from '../world/world.js';
 import {setMaterials} from '../content/materials.js';
 import {geoOf, along} from '../world/kit3d.js';
 
-const ON = flags.get('woodcut') !== '0';
+const ON = flags.get('woodcut') !== '0', HURT = flags.get('treehurt') !== '0', HIT = TUNE.hit;
 const W = TUNE.swing, DEG = Math.PI / 180;
 const LAND_T = 1.5, LOGS_T = 2.6;   // s after the fell: the crown hits the ground, the trunk breaks into logs (the view's fall keeps to them)
 propTop({stump: TUNE.stump.h});
@@ -68,21 +73,21 @@ export async function create(host) {
     const def = TREES[ps.species];
     if (!def) I = null;
     else {
-      const b = ps.bones || [], s = ps.scale || 1, cut = b.length > 1 && b[1][4] > .2 && b[1][4] < .9 ? b[1][4] : .4;
-      I = {species: ps.species, def, s, cut, tr: (b[1] ? b[1][6] : .2) * s, hp: Math.max(2, Math.round(def.hp * s ** 1.5)),
-        tier: def.tier + (def.old && s >= def.old ? 1 : 0), logs: Math.max(1, Math.round(def.logs * s)), it, pose: ps};
+      const b = ps.bones || [], s = ps.scale || 1, cut = b.length > 1 && b[1][4] > .2 && b[1][4] < .9 ? b[1][4] : .4, ts = treeStats(ps.species, s);
+      I = {species: ps.species, def, s, cut, tr: (b[1] ? b[1][6] : .2) * s, hp: ts.hp, tier: ts.tier, logs: ts.logs, it, pose: ps};
     }
     INFO.set(it, I); return I;
   }
 
   // ---------------------------------------------------------------- the sim's state
   const hp = new Map();       // tree -> blows left (a fresh tree has none: its full count)
+  const ownFell = new Set();  // the forest's (shared) trees felled offline (by him, or from the private save): going online stands them up
   const asked = new Map();    // co-op: a shared tree whose fell was asked of the server -> when (clockT): asked again after 3 s (a refusal)
   const shared = p => typeof p.fid === 'string' && !!host.feature('coop')?.online;
   const felled = new Map();   // tree -> {key, at (env.t it grows back), stump (its prop)}
   const falls = [];           // {p, I, t, dx, dy (the way it falls), landed}
   const logs = [];            // {x, y, h, vx, vy, vh, t, rest, yaw, spin, dead}
-  let was = false, tick = 0, appliedN = -1, ver = 0, noteT = -9, clockT = 0, aimSet = false, byE = false, heldSlot = -1;
+  let was = false, wasNet = false, tick = 0, appliedN = -1, ver = 0, noteT = -9, clockT = 0, aimSet = false, byE = false, heldSlot = -1;
   // a press (LMB) is the axe's when the cursor is on a trunk within the lock's reach, nothing hostile is under the cursor, the gun
   // isn't drawn and there's an axe in the bag -> its id | '' (the gun's then). Called from the input, between steps
   function wantTool() {
@@ -103,7 +108,7 @@ export async function create(host) {
   }
   function grow(p, quiet = false) {
     const f = felled.get(p); if (!f) return;
-    host.entities.remove(f.stump); host.entities.hide(p, false); felled.delete(p); hp.delete(p); ver++;
+    host.entities.remove(f.stump); host.entities.hide(p, false); felled.delete(p); hp.delete(p); ownFell.delete(p); ver++;
     const s = store(); if (s && !quiet) { delete s.felled[f.key]; pack()?.dirty(); }
     if (!quiet) host.events.push({type: 'tree.grow', x: p.x, y: p.y, who: p});
   }
@@ -111,15 +116,14 @@ export async function create(host) {
   function apply() {
     const s = store(); appliedN = trees.length; if (!s) return;
     const byKey = new Map(); for (const p of trees) byKey.set(keyOf(p), p);
-    for (const k in s.felled) { const p = byKey.get(k), I = p && infoOf(p); if (I) fellNow(p, I, s.felled[k]); }
+    for (const k in s.felled) { const p = byKey.get(k), I = p && infoOf(p); if (I && !shared(p)) { fellNow(p, I, s.felled[k]); if (typeof p.fid === 'string') ownFell.add(p); } }   // (online, the forest's trees are the server's)
   }
   // leaving it (another biome, a run, the title): the trees stand again (the save keeps them felled); logs on the ground go in
   // the pouch, a fall in progress ends
   function unapply() {
     for (const p of [...felled.keys()]) grow(p, true);
     falls.length = 0; hp.clear();
-    let n = 0; for (const L of logs) if (!L.dead) { L.dead = true; n++; } logs.length = 0;
-    if (n) pack()?.give('log', n);
+    for (const L of logs) if (!L.dead) { L.dead = true; pack()?.give(L.item, 1); } logs.length = 0;
     const t = T(); if (t?.on) { t.put(); pack()?.held(-1); heldSlot = -1; }
   }
   function reset() {   // a new world (pack.reset): every tree back, no logs
@@ -230,47 +234,149 @@ export async function create(host) {
     }
     hp.delete(p); fell(p, I, ux, uy);
   }
-  function fell(p, I, ux, uy, xp = true, fall = true) {
+  // mine: this client felled it (its logs drop here; a shared tree's for the one who felled it). A shared tree's fell is the
+  // server's: it stays out of the private save (else its stump came along into single player)
+  function fell(p, I, ux, uy, xp = true, fall = true, mine = true) {
     const at = (host.env?.t ?? 0) + TUNE.regrow.hours;
     fellNow(p, I, at);
-    const s = store(); if (s) { s.felled[keyOf(p)] = at; pack()?.dirty(); }
+    const s = store(); if (!shared(p)) { if (s) { s.felled[keyOf(p)] = at; pack()?.dirty(); } if (typeof p.fid === 'string') ownFell.add(p); }
     if (fall) {
-      falls.push({p, I, t: 0, dx: ux, dy: uy, landed: false});
-      host.events.push({type: 'tree.fell', x: p.x, y: p.y, who: p, vx: ux, vy: uy, species: I.species, scale: I.s});
+      falls.push({p, I, t: 0, dx: ux, dy: uy, landed: false, mine});
+      host.events.push({type: 'tree.fell', x: p.x, y: p.y, who: p, vx: ux, vy: uy, species: I.species, scale: I.s, mine});
     }
     if (xp) pack()?.gain('woodcutting', Math.round(XP.fell * I.def.xp * I.s), {x: p.x, y: p.y, h: (p.z || 0) + 2.6});
   }
-  // CO-OP: the server says a shared tree fell (features/coop.js, in its update: a sim step). by: who felled it (here: his XP); late: it
-  // was felled before we joined (a stump, no fall). It falls away from the one who felled it if we see him, else away from us.
-  // -> false when it isn't a tree the axe knows (coop removes it then)
-  function fellShared(p, mine, late, fx, fy) {
-    if (felled.has(p)) return true;
+  // CO-OP: the server says a shared tree fell (features/coop.js, in its update: a sim step). by: who felled it; late: it was felled
+  // before we joined (a stump, no fall). It falls the server's way (wx, wy: away from the feller as the server saw him, the same on
+  // every client); an old server's word without one: away from the one who felled it if we see him, else away from us. The XP is
+  // the server's (its skills message). -> false when it isn't a tree the axe knows (coop removes it then)
+  function fellShared(p, mine, late, fx, fy, wx, wy) {
+    if (felled.has(p)) { ownFell.delete(p); return true; }   // (felled here already: the server's now)
     const I = infoOf(p); if (!I) return false;
     asked.delete(p); hp.delete(p);
+    if (wx !== undefined && Math.hypot(wx, wy) > .5) { fell(p, I, wx, wy, false, !late, mine); return true; }
     const P = host.player, ox = fx ?? P.x, oy = fy ?? P.y, d = Math.hypot(p.x - ox, p.y - oy) || 1;
-    fell(p, I, (p.x - ox) / d, (p.y - oy) / d, mine && !late, !late);
+    fell(p, I, (p.x - ox) / d, (p.y - oy) / d, false, !late, mine);
     return true;
   }
   const crownMid = I => { const C = I.pose.crown; return C ? ((C.y0 + C.y1) / 2) * I.s : 3 * I.s; };
+  // THE FALL'S PATH (the hit; the fall line's specks: docs/SKILLS.md) of tree p falling (dx, dy) -> PATH: the trunk's strip from
+  // a (m out from the trunk's middle) to b along the way, the crown's circle round (cx, cy), radius cr. One object, reused
+  const PATH = {x: 0, y: 0, dx: 0, dy: 0, a: 0, b: 0, cx: 0, cy: 0, cr: 0};
+  function pathOf(p, I, dx, dy) {
+    const C = I.pose.crown, m = crownMid(I);
+    PATH.x = p.x; PATH.y = p.y; PATH.dx = dx; PATH.dy = dy; PATH.a = I.tr + .15; PATH.b = Math.max(PATH.a, (C?.y0 ?? 2) * I.s);
+    PATH.cx = p.x + dx * m; PATH.cy = p.y + dy * m; PATH.cr = (C?.r || 1.3) * I.s * HIT.crown;
+    return PATH;
+  }
+  // is a thing of radius r at (x, y) in the path? -> 0: no; else the unit way out of it (sideways off the trunk, out of the
+  // crown's middle) in OUT
+  const OUT = {x: 0, y: 0};
+  function inPath(P, x, y, r) {
+    const ox = x - P.x, oy = y - P.y, t = ox * P.dx + oy * P.dy, s = oy * P.dx - ox * P.dy;
+    if (t >= P.a - r && t <= P.b && Math.abs(s) <= HIT.line / 2 + r) { const k = s < 0 ? -1 : 1; OUT.x = -P.dy * k; OUT.y = P.dx * k; return 1; }
+    const cx = x - P.cx, cy = y - P.cy, d = Math.hypot(cx, cy);
+    if (d <= P.cr + r) { if (d > .05) { OUT.x = cx / d; OUT.y = cy / d; } else { const k = s < 0 ? -1 : 1; OUT.x = -P.dy * k; OUT.y = P.dx * k; } return 1; }
+    return 0;
+  }
+  // at tree.land: what the fall came down on, each hit once (a near() query round the path's middle)
+  function hitPath(f) {
+    const P = pathOf(f.p, f.I, f.dx, f.dy), z0 = f.p.z || 0, cr = core();
+    const mx = (P.x + P.dx * P.a + P.cx) / 2, my = (P.y + P.dy * P.a + P.cy) / 2, R0 = Math.hypot(P.cx - mx, P.cy - my) + P.cr + 1;
+    const pl = host.player;
+    if (Math.abs(pl.z - z0) < HIT.h && inPath(P, pl.x, pl.y, .3)) hitPlayer(f, OUT.x, OUT.y);
+    for (const q of host.entities.near(mx, my, R0, NEAR)) {
+      if (q === f.p || q.gone || q.broken || q.held || q.tree === f.p || Math.abs((q.z || 0) - z0) > HIT.h) continue;
+      if (q.kind === 'tree') {   // a standing tree: it shudders and loses a blow (never the last)
+        const I = !q.outside && !felled.has(q) && infoOf(q); if (!I || !inPath(P, q.x, q.y, I.tr)) continue;
+        const left0 = hp.get(q) ?? I.hp, left = Math.max(Math.min(left0, 1), left0 - 1); hp.set(q, left);
+        host.events.push({type: 'tree.chop', x: q.x, y: q.y, h: (q.z || 0) + 1, who: q, k: .7, left, dx: f.dx, dy: f.dy, by: 'fall'});
+        host.events.push({type: 'tree.hit', x: q.x, y: q.y, who: f.p, kind: 'tree', dmg: 1, vx: f.dx, vy: f.dy});
+        continue;
+      }
+      if (!cr) continue;
+      const body = !!(q.hunter || q.sparring) && !q.retired && (q.kind === 'gunman' || !!cr.BS?.has(q));
+      const crate = !body && (q.kind === 'crate' || q.kind === 'barrel') && q.hp > 0;
+      const dummy = !body && !crate && !!q.target;
+      if ((!body && !crate && !dummy) || !inPath(P, q.x, q.y, q.hitR ?? q.r ?? .3)) continue;
+      const ux = OUT.x, uy = OUT.y;
+      if (crate) cr.breakProp(q, {dir: [ux * 3, uy * 3]});
+      else {
+        const dmg = Math.round(HIT.foe * f.I.s);
+        cr.damage(q, dmg, {canCrit: false, dir: [ux * 3, uy * 3], by: 'tree', ux, uy});
+        if (body && !q.broken) (cr.BS?.has(q) ? cr : host.feature('foes')?.sim)?.shift?.(q, ux * HIT.shove, uy * HIT.shove);
+      }
+      host.events.push({type: 'tree.hit', x: q.x, y: q.y, who: f.p, kind: crate ? q.kind : 'foe', dmg: crate ? 0 : Math.round(HIT.foe * f.I.s), vx: f.dx, vy: f.dy});
+    }
+  }
+  // THE FALL LINE (view): the tree the next bite would fell (the axe out, at a tree: the locked one or the one in front of him,
+  // the bag's best axe able for its wood, the blows left within one bite) -> it | null
+  function lineTree() {
+    const t = T(); if (!t?.S.on || t.S.job !== 'chop' || !pack()?.move('fall_line')) return null;
+    const p = lock && !lock.gone ? lock : treeAhead(); if (!p || felled.has(p)) return null;
+    const I = infoOf(p), b = pack().best('chop'), tool = b?.def.tool; if (!I || !tool || (tool.tier ?? 0) < I.tier) return null;
+    const left = hp.get(p) ?? I.hp;
+    return left > 1e-6 && left - tool.power * (host.mods?.value('woodcut.power', 1) ?? 1) <= 1e-6 ? p : null;
+  }
+  const LN = TUNE.line, LNN = LN.along + LN.ring, LX = new Float32Array(LNN), LY = new Float32Array(LNN), LH = new Float32Array(LNN), LC = new Uint8Array(LNN);
+  const LALPHA = [{alpha: .25}, {alpha: .5}, {alpha: .75}, {}];
+  let lineA = 0, lineT = 0;
+  function layLine(p) {   // the specks' places on the ground: the way it would fall (away from him, as the fell sends it)
+    const I = infoOf(p), P = host.player, d = Math.hypot(p.x - P.x, p.y - P.y) || 1, W2 = pathOf(p, I, (p.x - P.x) / d, (p.y - P.y) / d);
+    const end = W2.b + Math.max(0, Math.hypot(W2.cx - W2.x, W2.cy - W2.y) - W2.b);   // (to the crown's middle)
+    for (let i = 0; i < LN.along; i++) {
+      const k = (i + .5) / LN.along, t = W2.a + (end - W2.a) * k, s = ((i * 7) % 5 - 2) / 2 * HIT.line * .5;   // (a little either side of the line)
+      LX[i] = W2.x + W2.dx * t - W2.dy * s; LY[i] = W2.y + W2.dy * t + W2.dx * s;
+    }
+    for (let i = 0; i < LN.ring; i++) { const a = i / LN.ring * Math.PI * 2; LX[LN.along + i] = W2.cx + Math.cos(a) * W2.cr; LY[LN.along + i] = W2.cy + Math.sin(a) * W2.cr; }
+    for (let i = 0; i < LNN; i++) { LH[i] = host.elev(LX[i], LY[i]) + .03; LC[i] = i % LN.col.length; }
+  }
+  function lineView(dt) {
+    const p = active() ? lineTree() : null;
+    if (p) layLine(p);
+    lineT += dt; lineA = clamp(lineA + (p ? dt * 5 : -dt * 3), 0, 1);
+  }
+  function lineFrame() {
+    if (lineA <= .02) return;
+    const o = LALPHA[Math.min(3, Math.floor(lineA * 3.99))], sh = LN.shake;
+    for (let i = 0; i < LNN; i++) {
+      const w = Math.sin(lineT * 31 + i * 2.3), v = Math.sin(lineT * 27 + i * 1.7);   // (each speck trembles on its own)
+      if (Math.sin(lineT * 9 + i * 4.1) < -.75) continue;   // (and winks now and then)
+      host.point(LX[i] + w * sh, LY[i] + v * sh, LH[i] + Math.abs(w) * sh, LN.col[LC[i]], o);
+    }
+  }
+  // the player under it: thrown sideways out of its way (a sprite loadout: the skid), hurt a little, never killed
+  function hitPlayer(f, ux, uy) {
+    if (!host.launch?.(ux * HIT.out, uy * HIT.out, HIT.up)) host.knock?.(ux * HIT.out * 1.6, uy * HIT.out * 1.6);
+    let dmg = 0;
+    const S = game()?.stats?.S;
+    if (HURT && S) { dmg = Math.max(1, Math.round(S.maxHp * HIT.hurt)); dmg = Math.min(dmg, Math.max(0, Math.ceil(S.hp) - 1)); }
+    const pl = host.player;
+    if (dmg > 0) host.events.push({type: 'player.hurt', dmg, by: 'tree', x: pl.x, y: pl.y});
+    host.events.push({type: 'tree.hit', x: pl.x, y: pl.y, who: f.p, kind: 'player', dmg, vx: f.dx, vy: f.dy});
+  }
   function stepFalls(dt) {
     for (let i = falls.length - 1; i >= 0; i--) {
       const f = falls[i]; f.t += dt;
       if (!f.landed && f.t >= LAND_T) {
         f.landed = true; const L = crownMid(f.I);
         host.events.push({type: 'tree.land', x: f.p.x + f.dx * L, y: f.p.y + f.dy * L, who: f.p, r: (f.I.pose.crown?.r || 1.3) * f.I.s});
+        hitPath(f);
       }
       if (f.t >= LOGS_T) { spawnLogs(f); falls.splice(i, 1); }
     }
   }
-  function spawnLogs(f) {   // along the fallen trunk, popped up a little: they settle, then come to him
+  // along the fallen trunk, popped up a little: they settle, then come to him. Only where it was felled (f.mine): in co-op the
+  // others see the trunk break (the event) but the logs are the feller's, not one set per client
+  function spawnLogs(f) {
     const extra = host.mods?.value('woodcut.extra', 0) ?? 0, n = f.I.logs + (R() < extra ? 1 : 0);
     const len = Math.max(1.2, (f.I.pose.crown?.y0 || 2) * f.I.s * 1.05);
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < n && f.mine !== false; i++) {
       const k = (i + .5) / n, d = .6 + k * len, side = (R() - .5) * .5;
       let x = f.p.x + f.dx * d - f.dy * side, y = f.p.y + f.dy * d + f.dx * side;
       if (host.blocked?.(x, y, host.elev(x, y))) { x = f.p.x + f.dx * .7; y = f.p.y + f.dy * .7; }   // (into a wall: by the stump)
       logs.push({x, y, h: host.elev(x, y) + .3 + R() * .3, vx: (R() - .5) * 1.2, vy: (R() - .5) * 1.2, vh: 1.6 + R() * 1.4, t: 0, rest: false,
-        yaw: Math.atan2(f.dy, f.dx) + (R() - .5) * .9, spin: (R() - .5) * 9, dead: false});
+        yaw: Math.atan2(f.dy, f.dx) + (R() - .5) * .9, spin: (R() - .5) * 9, dead: false, item: f.I.def.log || 'log', bark: f.I.def.bark || 'bark'});   // (its species' log: the workshop's woods)
     }
     const L = crownMid(f.I) * .5;
     host.events.push({type: 'tree.logs', x: f.p.x + f.dx * L, y: f.p.y + f.dy * L, who: f.p, n});
@@ -288,7 +394,7 @@ export async function create(host) {
       const dx = P.x - L.x, dy = P.y - L.y, d = Math.hypot(dx, dy);
       if (d < G.pick && Math.abs(P.z - L.h) < 1.2) {
         L.dead = true; logs.splice(i, 1);
-        pack()?.give('log', 1, {x: P.x, y: P.y, h: P.z + 1.8}); pack()?.gain('woodcutting', XP.gather);
+        pack()?.give(L.item, 1, {x: P.x, y: P.y, h: P.z + 1.8}); pack()?.gain('woodcutting', XP.gather);
       } else if (d < G.magnet && Math.abs(P.z - L.h) < 1.5) {   // drawn in to him, faster as it nears
         const v = Math.min(d, G.speed * dt * (1 + (G.magnet - d) / G.magnet));
         L.x += dx / d * v; L.y += dy / d * v; if (L.rest) L.h = host.elev(L.x, L.y);
@@ -335,8 +441,8 @@ export async function create(host) {
   const M = new THREE.Matrix4(), MR = new THREE.Matrix4(), MT = new THREE.Matrix4(), V3 = new THREE.Vector3(), SC = new THREE.Vector3(), Q = new THREE.Quaternion(), QY = new THREE.Quaternion(), UPV = new THREE.Vector3(0, 1, 0), ZV = new THREE.Vector3(0, 0, 1);
   const treeMatrix = (p, I, out) => out.makeRotationY(I.pose.yaw).scale(SC.setScalar(I.s)).setPosition(p.x, p.z || 0, p.y);   // (world.js placeOf)
   const VF = [];   // the falls drawn: {p, I, f (the sim's record), m, M0, axis, hinge, th1, gone}
-  const stumpMesh = new Map(), logMesh = new Map();
-  let logGeo = null, seenVer = -1;
+  const stumpMesh = new Map(), logMesh = new Map(), logGeos = {};
+  let seenVer = -1;
   function startFall(f) {
     const p = f.p, I = f.I, e = {vx: f.dx, vy: f.dy};
     const M0 = treeMatrix(p, I, new THREE.Matrix4());
@@ -371,13 +477,13 @@ export async function create(host) {
   }
   function syncLogs() {
     if (!logs.length && !logMesh.size) return;   // (nothing on the ground: no iterators a frame)
-    logGeo ??= geoOf([{...along([0, -.27, 0], [0, .27, 0], .072, .066, 7), fam: 'bark'},
+    const logGeo = bark => logGeos[bark] ??= geoOf([{...along([0, -.27, 0], [0, .27, 0], .072, .066, 7), fam: bark},   // (in its species' bark)
       {g: new THREE.CylinderGeometry(.064, .066, .01, 7), m: new THREE.Matrix4().makeTranslation(0, -.272, 0), fam: 'rope', fixed: 1},
       {g: new THREE.CylinderGeometry(.058, .06, .01, 7), m: new THREE.Matrix4().makeTranslation(0, .272, 0), fam: 'rope', fixed: 1}]);
     for (const [L, m] of logMesh) if (L.dead) { m.dispose(); logMesh.delete(L); }
     for (let i = 0; i < logs.length; i++) {
       const L = logs[i]; let m = logMesh.get(L);
-      if (!m) { m = host.world.mesh(logGeo, new THREE.Matrix4()); logMesh.set(L, m); }
+      if (!m) { m = host.world.mesh(logGeo(L.bark || 'bark'), new THREE.Matrix4()); logMesh.set(L, m); }
       const roll = L.t * L.spin;
       QY.setFromAxisAngle(UPV, -L.yaw); Q.setFromAxisAngle(ZV, Math.PI / 2 + roll * .1); QY.multiply(Q);
       m.setMatrix(M.compose(V3.set(L.x, L.h + .07, L.y), QY, SC.setScalar(1)));   // (setMatrix returns at once when it didn't move)
@@ -424,6 +530,10 @@ export async function create(host) {
       const on = active();
       if (on !== was) { was = on; if (on) apply(); else unapply(); }
       if (!on) return;
+      // going online: the forest's trees felled here and not (yet) by the server's word stand again (its 'felled' list, late
+      // ones included, fells the rest: before or after this, fellShared takes them over)
+      const net = !!host.feature('coop')?.online;
+      if (net !== wasNet) { wasNet = net; if (net) for (const p of [...ownFell]) if (!falls.some(q => q.p === p)) grow(p, true); }
       for (let i = 0; i < evs.length; i++) {
         const e = evs[i];
         if (e.type === 'player.chop') blow(e);
@@ -432,7 +542,7 @@ export async function create(host) {
       const t = T(); if (t && !aimSet) { t.aimBy(aimPoint); t.wantBy(wantTool); aimSet = true; }   // (the swing asks as it starts: inside the player's step)
       if (byE && t && !host.keys.has('e')) { byE = false; t.release(); }   // (E let go)
       if (lock && !t?.S.held) lock = null;   // (LMB / E up: the trunk let go)
-      const slot = t?.S.on ? pack()?.best('chop')?.slot ?? -1 : -1; if (slot !== heldSlot) { heldSlot = slot; pack()?.held(slot); }   // (the pack panel marks the axe in hand)
+      const slot = t?.S.on && t.S.job === 'chop' ? pack()?.best('chop')?.slot ?? -1 : -1; if (slot !== heldSlot) { heldSlot = slot; if (slot >= 0 || !t?.S.on) pack()?.held(slot); }   // (the pack panel marks the axe in hand; another tool's job marks its own: features/mining.js)
       stepFalls(dt); stepLogs(dt); regrow(dt);
     },
     view(dt, evs) {
@@ -451,14 +561,14 @@ export async function create(host) {
         if (!falls.includes(F2.f)) { F2.m.dispose(); VF.splice(i, 1); continue; }
         poseFall(F2, F2.f.t);
       }
-      syncStumps(); syncLogs();
+      syncStumps(); syncLogs(); lineView(dt);
       for (let i = CH.length - 1; i >= 0; i--) {
         const c = CH[i]; c.t += dt; if (c.t > c.life) { CH.splice(i, 1); continue; }
         c.vh -= c.g * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.h += c.vh * dt;
         const g = host.elev(c.x, c.y); if (c.h < g) { c.h = g; c.vx *= .3; c.vy *= .3; c.vh = 0; }
       }
     },
-    frame() { for (let i = 0; i < CH.length; i++) { const c = CH[i]; host.point(c.x, c.y, c.h, c.col); } },
+    frame() { for (let i = 0; i < CH.length; i++) { const c = CH[i]; host.point(c.x, c.y, c.h, c.col); } lineFrame(); },
     onKey(k) {
       const t = T(); if (!t) return false;
       if (k === 'e' && active() && !host.lock && !host.PL.nearInteract?.() && !host.BUSY.has(host.player.state) && treeAhead()) {   // (a chest, a sign, a fire: E is theirs)

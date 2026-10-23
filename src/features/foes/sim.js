@@ -30,7 +30,7 @@
 //   (x 0: no gang comes on its own; a request still does: the cheat panel's Raids, dev/cheats.js).
 // EMITS (pooled payloads, read in their step only: core/events.js): foe.draw / aim / shoot / reload / holster,
 //   bullet.impact, player.hit, player.hurt.
-import {mulberry32} from '../../core/rng.js';
+import {simRandom} from '../../core/rng.js';
 import {hypot2, hypot3, TAU} from '../../core/mathx.js';
 import {createNav} from '../../world/nav.js';
 import {PLAY, TRAIL, WORLD, elev, inStream, topOfProp, TERRAIN_ON} from '../../world/world.js';
@@ -48,7 +48,7 @@ const KINDS = Object.keys(TYPES);
 
 export function createFoesSim(host, {unarmed = false} = {}) {
   const ents = host.entities, P = host.player, events = host.events, A = TUNE.ai, SP = TUNE.spawn, U = unarmed ? SP.unarmed : null;
-  const R = mulberry32((Date.now() % 2147483646) + 1), RR = (a, b) => a + R() * (b - a);
+  const R = simRandom('foes'), RR = (a, b) => a + R() * (b - a);
   // the ground you can walk on (sim/player/adapter.js blocked: the fort's square and 3 m round it, the trail), minus the
   // canyon (the desert's hole south of its rim)
   const walkArea = (x, y) => ((x > PLAY.x0 - 2.6 && x < PLAY.x1 + 2.6 && y > PLAY.y0 - 2.6 && y < PLAY.y1 + 2.6)
@@ -345,6 +345,7 @@ export function createFoesSim(host, {unarmed = false} = {}) {
 
   // ---------------------------------------------------------------- bullets
   let hurt = 0, hurtBy = null, hurtX = 0, hurtY = 0;
+  const BATK = {kind: 'bullet', x: 0, y: 0, who: null, dmg: 0};
   function stepBullets(dt) {
     const sub = TUNE.bullets.sub, body = TUNE.body, pl = host.player;
     const dodge = pl.untouchable ?? (pl.state === 'roll'), open = !dodge && !((pl.raw?.blink || 0) > 0) && !S.down;
@@ -369,7 +370,12 @@ export function createFoesSim(host, {unarmed = false} = {}) {
       const l = hypot2(B.vx[i], B.vy[i]) || 1, e = emit('bullet.impact', ex, ey, eh);
       e.x0 = x0; e.y0 = y0; e.h0 = h0; e.surf = end; e.dx = B.vx[i] / l; e.dy = B.vy[i] / l; e.gun = TYPES[KINDS[B.kind[i]]].gun.sound; e.foe = KINDS[B.kind[i]];
       if (end === 'water') { const s = emit('arrow.splash', ex, ey, 0); s.small = true; }
-      if (end === 'player') { hurt += B.dmg[i]; hurtBy = B.who[i]; hurtX = e.dx; hurtY = e.dy; }
+      if (end === 'player') {   // the melee guard first (features/hits.js defend: features/melee.js): a shield that takes bullets, the saber
+        BATK.x = px - e.dx * 3; BATK.y = py - e.dy * 3; BATK.who = B.who[i]; BATK.dmg = B.dmg[i];
+        const df = host.feature('hits')?.defend?.(BATK), k = df && df.out !== 'hit' ? df.k : 1;
+        if (k < 1) e.surf = 'prop';
+        if (k > 0) { hurt += B.dmg[i] * k; hurtBy = B.who[i]; hurtX = e.dx; hurtY = e.dy; }
+      }
       const j = --B.n;   // swap-remove
       if (i !== j) {
         B.x[i] = B.x[j]; B.y[i] = B.y[j]; B.h[i] = B.h[j]; B.vx[i] = B.vx[j]; B.vy[i] = B.vy[j]; B.vh[i] = B.vh[j]; B.life[i] = B.life[j]; B.age[i] = B.age[j];
