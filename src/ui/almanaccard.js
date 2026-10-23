@@ -4,13 +4,14 @@
 // And the POINTER: a small pixel arrow on a ring round the player, toward what the first goal with a place asks for.
 //   const card = createAlmanacCard(); card.set(model) (a new model: laid out again on the next draw) / card.draw(q, u, W, H)
 //   card.arrow(q, x, y, dx, dy, u, col) (screen px: the player's point, the unit way)
-//   model = {title, rows: [{text, n, of, done, far?: '34 m'}], today: [{text, n, of, done}] | null, page: null | {title, text},
+//   model = {title, lead? (the story's line under it), rows: [{text, n, of, done, far?: '34 m'}], today: [{text, n, of, done}] | null,
+//            page: null | {title, text}, side: null | {text, dir} (the story's Lead: the next place to find, its way 'NE, a walk'),
 //            fold, hot (0..1: a flash on the frame), key ('J')}
 // OWNS: its laid-out lines (made again when the model or the size changes). BUDGET: a frame's worth of fillRect / fillText while
 // shown; measureText only on a new model.
 import {hdFrame, hdText, hdFont, INK} from './hdpixel.js';
 
-const GOLD = '#f2d27a', INKC = '#efe6cf', DIM = '#a39478', DONE = '#9ad878', FAR = '#cbb98f', TODAY = '#8ac8e8';
+const GOLD = '#f2d27a', INKC = '#efe6cf', DIM = '#a39478', DONE = '#9ad878', FAR = '#cbb98f', TODAY = '#8ac8e8', LEAD = '#c7a8d8', SAY = '#b9a98a';
 const W_TEXT = 128;   // UI px the card's text may run before it wraps (the page)
 
 export function createAlmanacCard() {
@@ -21,9 +22,9 @@ export function createAlmanacCard() {
     const meas = s => Math.ceil(q.measureText(s).width / u);
     const out = []; let w = 60;
     const line = (s, col, o = {}) => { out.push({s, col, ...o}); w = Math.max(w, (o.box !== undefined ? 9 : 0) + meas(s) + (o.right ? 6 + meas(o.right) : 0)); };
-    const wrap = (s, col) => {   // the page's words, wrapped at W_TEXT
+    const wrap = (s, col, wd = W_TEXT) => {   // the page's words, wrapped at W_TEXT
       let cur = '';
-      for (const word of s.split(' ')) { const t = cur ? cur + ' ' + word : word; if (meas(t) > W_TEXT && cur) { line(cur, col); cur = word; } else cur = t; }
+      for (const word of s.split(' ')) { const t = cur ? cur + ' ' + word : word; if (meas(t) > wd && cur) { line(cur, col); cur = word; } else cur = t; }
       if (cur) line(cur, col);
     };
     if (M.fold) { line(`Almanac  ${M.key}`, GOLD); return {lines: out, w: w + 8, h: out.length * 12 + 6}; }
@@ -31,12 +32,14 @@ export function createAlmanacCard() {
       line(M.page.title, GOLD); line('done', DONE); out.push({gap: 1}); wrap(M.page.text, INKC);
     } else {
       line(M.title, GOLD);
+      if (M.lead) wrap(M.lead, SAY, W_TEXT + 24);
       for (const r of M.rows) line(r.text, r.done ? DONE : INKC, {box: r.done ? 1 : 0, right: r.done ? '' : (r.of > 1 ? `${r.n}/${r.of}` : '') + (r.far ? (r.of > 1 ? '  ' : '') + r.far : ''), rcol: r.far ? FAR : DIM});
     }
     if (M.today) {
       out.push({gap: 1}); line('Today', TODAY);
       for (const r of M.today) line(r.text, r.done ? DONE : INKC, {box: r.done ? 1 : 0, right: r.done ? '' : r.of > 1 ? `${r.n}/${r.of}` : '', rcol: DIM});
     }
+    if (M.side && !M.page) { out.push({gap: 1}); line('Lead', LEAD, {right: M.side.dir, rcol: FAR}); wrap(M.side.text, INKC); }
     let h = 4; for (const l of out) h += l.gap ? 4 : 12;
     return {lines: out, w: w + 8, h: h + 2};
   }

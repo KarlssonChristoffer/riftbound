@@ -2,14 +2,16 @@
 // need each other (the forest -> the cave -> fire down there -> the furnace -> iron -> the dark itself), and "Today": three small
 // things a world's day, rolled from its seed and its day number (the same for every player in that world). Pure data and pure
 // rules (features/almanac.js counts them; nothing on the server: every count is of something the server already decided).
-//   CHAPTERS  [{id, name, goals: [GOAL], page (torn out when it's done: a hint, never an explanation), gift: {item: n}}]
+//   CHAPTERS  [{id, name, lead (Hilma's line under its name: why, in the story, features/story.js), goals: [GOAL], page (torn out
+//             when it's done: a hint, never an explanation), gift: {item: n}}]
 //   GOAL      {id, text, n (how many), on: the event type it counts (core/events.js), ok(e, C)?: this event counts,
 //             amt(e)?: how much it counts (1), state(C)?: a count read from the world (looked at every second instead of an event;
 //             it latches: once met it stays met), hint (the line the pack panel shows under it), where?: what the pointer points at
 //             (features/almanac.js WHERE: 'cave' the cave's mouth, 'camp' the miner's camp, 'vein' / 'copper' / 'iron' / 'night'
-//             the nearest unspent vein of that kind, 'hollow' nothing: it's a secret)}
+//             the nearest unspent vein of that kind, 'tear' the tear (features/story.js), 'hollow' nothing: it's a secret)}
 //   C         the feature's context: {cave(x, y) (in the cave), level(skill), levels (the highest), count(id), part ('day' |
-//             'dusk' | 'night' | 'dawn'), nightLit() (his Nightglass light is on beside a night vein that shows)}
+//             'dusk' | 'night' | 'dawn'), nightLit() (his Nightglass light is on beside a night vein that shows), found() (Hilma's places he
+//             has found, features/story.js), atTear() (by the tear at night with the Nightglass light)}
 //   TODAY     the pool Today's three are rolled from ({id, text, n, on, ok?, amt?, party?: online it is the party's: everyone's
 //             counts (the solo text without "Between you: ")}), gifts a goal (GIFTS) and for all three (BONUS)
 //   rollToday(seed, day, online) -> [3 TODAY entries] (deterministic; the third is a party goal online)
@@ -19,28 +21,28 @@ const berry = k => k === 'blueberry' || k === 'lingonberry';
 export const OLD_OAK = 1.5;   // (content/woodcut.js TREES.oak.old: no forest of today grows one, so no goal asks for one yet)
 
 export const CHAPTERS = [
-  {id: 'smoke', name: 'I. Smoke', goals: [
+  {id: 'smoke', name: 'I. Smoke', lead: 'Get warm before you get curious.', goals: [
     {id: 'fell', text: 'Fell 3 trees', n: 3, on: 'tree.fell', ok: e => e.mine !== false, hint: 'LMB on a trunk, or hold E facing one. The axe is in your bag.'},
     {id: 'berries', text: 'Pick 12 berries', n: 12, on: 'forage.pick', ok: e => e.mine && berry(e.kind), amt: e => e.n || 1, hint: 'E by a blueberry or lingonberry patch under the pines. Hold E and walk.'},
     {id: 'fire', text: 'Build a campfire', n: 1, on: 'build.add', ok: e => e.mine && e.kind === 'campfire', hint: 'B (Craft) > Build > Campfire (4 logs).'},
     {id: 'eat', text: 'Cook something and eat it', n: 1, on: 'meal.cook', hint: 'By a burning fire: J (Journal) > Cook journal, five blueberries on the Try stick, pull it out when it\'s golden.'},
   ], page: 'Where the pines thin out to the east, a slot runs down under the hill. Somebody left a pick down there, by a candle stub.',
     gift: {chanterelles: 3}},
-  {id: 'down', name: 'II. Down', goals: [
+  {id: 'down', name: 'II. Down', lead: 'Where the pines stop, the hill has a mouth. My pick is in there.', goals: [
     {id: 'down', text: 'Go down into the cave', n: 1, on: 'player.warp', ok: e => !!e.down, state: C => C.cave() ? 1 : 0, where: 'cave', hint: 'The slot in the hillside. Your lantern lights by itself down there.'},
     {id: 'pick', text: 'Take the old pick', n: 1, on: 'mine.take', state: C => C.count('pick') + C.count('iron_pick') > 0 ? 1 : 0, where: 'camp', hint: 'In the first room: a rotted crate, a candle stub, the pick driven into the wall. E.'},
     {id: 'veins', text: 'Break 3 veins', n: 3, on: 'mine.spent', ok: e => e.n > 0, where: 'vein', hint: 'Pale streaks at the walls\' feet. E or LMB; press again just as a swing ends and it bites harder.'},
     {id: 'copper', text: 'Carry 4 copper ore', n: 4, state: C => C.count('copper_ore'), where: 'copper', hint: 'Green and rust lumps in the walls.'},
   ], page: 'Fish bite where the water rings. A rod goes in your main hand (I, the gear column). Something just right comes off the stick the moment the fat drips.',
     gift: {stone: 4}},
-  {id: 'hearth', name: 'III. Hearth', goals: [
+  {id: 'hearth', name: 'III. Hearth', lead: 'Down there the dark listens. Bring fire, and stay a while.', goals: [
     {id: 'light', text: 'Set a fire ring or a lamp down in the cave', n: 1, on: 'build.add', ok: (e, C) => e.mine && (e.kind === 'fire_ring' || e.kind === 'crystal_lamp') && C.cave(e.x, e.y), hint: 'B (Craft) > Build: a Stone Fire Ring (6 stone, 2 logs) or a Crystal Lamp (3 glow shards, 2 copper ore, 1 log).'},
     {id: 'right', text: 'Cook something just right', n: 1, on: 'meal.cook', ok: e => e.q === 'right', hint: 'Pull it out of the fire the moment the fat drips and the fire flares.'},
     {id: 'fish', text: 'Land a fish', n: 1, on: 'fish.catch', ok: e => isFish(e.id), hint: 'A rod in your main hand, LMB on water: let go at the top of the meter, strike at the bite.'},
     {id: 'skill', text: 'Reach level 3 in any skill', n: 3, state: C => C.levels(), hint: 'Every skill grows by doing it.'},
   ], page: 'Iron sits too hard for an old pick. But rock that has had a fire burning beside it a while cracks along its seams.',
     gift: {copper_ore: 2}},
-  {id: 'bars', name: 'IV. Bars', goals: [
+  {id: 'bars', name: 'IV. Bars', lead: 'Rock remembers heat. Teach it to give up its metal.', goals: [
     {id: 'furnace', text: 'Build a clay furnace', n: 1, on: 'build.add', ok: e => e.mine && e.kind === 'furnace', hint: 'B (Craft) > Build > Clay Furnace (12 stone, 2 logs). E feeds it a log.'},
     {id: 'copper', text: 'Smelt a copper bar', n: 1, on: 'smith.smelt', ok: e => e.mine && e.bar === 'copper_bar', hint: 'I by the burning furnace: Load copper (2 ore). A fire alone gets it to red; that\'s enough.'},
     {id: 'bellows', text: 'Fit a bellows to a furnace', n: 1, on: 'smith.fit', ok: e => e.mine, hint: 'I by the furnace: Fit a bellows (2 copper bars, 1 log).'},
@@ -48,20 +50,25 @@ export const CHAPTERS = [
     {id: 'iron', text: 'Smelt an iron bar', n: 1, on: 'smith.smelt', ok: e => e.mine && e.bar === 'iron_bar', hint: 'Load iron (3 ore) and pump (LMB on the furnace, in rhythm) until it burns yellow-white. A friend pumping helps.'},
   ], page: 'An anvil is eight stones and an oak log. Birch hafts swing quick; oak lands heavy; pine can be lit.',
     gift: {log: 2}},
-  {id: 'iron', name: 'V. Iron', goals: [
+  {id: 'iron', name: 'V. Iron', lead: 'Iron opens walls. Some walls are hollow on purpose.', goals: [
     {id: 'anvil', text: 'Set down a stone anvil', n: 1, on: 'build.add', ok: e => e.mine && e.kind === 'anvil', hint: 'B (Craft) > Build > Stone Anvil (8 stone, 1 oak log).'},
     {id: 'tool', text: 'Forge an iron pick or an iron axe', n: 1, on: 'smith.make', ok: e => e.item === 'iron_pick' || e.item === 'iron_axe', hint: 'I by the anvil: pick it, a haft, lay it on, LMB hammers. A blow in rhythm counts two.'},
     {id: 'vein', text: 'Break an iron vein', n: 1, on: 'mine.spent', ok: e => e.n > 0 && e.kind === 'iron', where: 'iron', hint: 'The dark blue-grey ones, deep in the cave.'},
     {id: 'hollow', text: 'Break into a hollow wall', n: 1, on: 'mine.open', hint: 'Somewhere down there your lantern\'s flame leans toward the rock, and dust trickles down it.'},
   ], page: 'Some rock shows only in the dark: put your light out (L) deep in the cave and wait. What you dig there melts only white-hot.',
     gift: {glow_shard: 2}},
-  {id: 'night', name: 'VI. Nightglass', goals: [
+  {id: 'night', name: 'VI. Nightglass', lead: 'Some ore only shows when you stop looking. Make a light that does not look.', goals: [
     {id: 'ore', text: 'Dig night ore in the dark', n: 1, on: 'mine.spent', ok: e => e.n > 0 && e.kind === 'night', where: 'night', hint: 'Lantern out (L), far in the cave: it glimmers like a piece of the night sky.'},
     {id: 'glass', text: 'Smelt Nightglass', n: 1, on: 'smith.smelt', ok: e => e.mine && e.bar === 'nightglass', hint: 'Load night ore and pump it white: the bellows, every pump in rhythm, or a friend.'},
     {id: 'lantern', text: 'Forge the Nightglass Lantern', n: 1, on: 'smith.make', ok: e => e.item === 'nightglass_lantern', hint: 'At the anvil: Nightglass, an iron bar, a copper bar. Wear it in your off hand.'},
     {id: 'see', text: 'Carry its light to a night vein', n: 1, state: C => C.nightLit() ? 1 : 0, where: 'night', hint: 'Its light is dark: what hides in the dark stays shown in it.'},
-  ], page: 'You carry the night now. The soot things can\'t see it, and the dark keeps its secrets shown for you.',
+  ], page: 'You carry the night now. The soot things can\'t see it, and the dark keeps its secrets shown for you. Now go and show it to the tear.',
     gift: {}},
+  {id: 'tear', name: 'VII. The Tear', lead: 'It opened the night I went down. Find my places, then bring it the dark light and see what looks back.', goals: [
+    {id: 'places', text: 'Find 6 of Hilma\'s places', n: 6, state: C => C.found(), hint: 'The Lead line under the almanac: each place you find, the margins point at the next.'},
+    {id: 'tear', text: 'At night, bring the Nightglass light to the tear', n: 1, state: C => C.atTear() ? 1 : 0, where: 'tear', hint: 'The tear hangs over the open ground south of the forest, where you woke. The lantern in your off hand.'},
+  ], page: 'It looked back. Not at you: past you, at the hill. Somewhere far off a second one opened. The almanac has no more pages.',
+    gift: {night_ore: 2}},
 ];
 export const CHAPTER_IDS = CHAPTERS.map(c => c.id);
 

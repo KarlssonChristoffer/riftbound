@@ -14,6 +14,8 @@
 //   and the server's day, which the client's clock follows).
 // SIM vs VIEW: the counts, chapters, gifts and Today are the sim (update: from this step's events; no randomness at all: Today and
 //   its gifts are hashes of the seed and the day). The card's flashes, the pointer's place and the sounds are the view's.
+// THE STORY (features/story.js) puts words on the card: each chapter's lead (Hilma's line under its name) and the Lead line under
+//   Today (the next of her places to find); chapter VII counts her places (C.found) and the tear (C.atTear, WHERE 'tear').
 // OWNS: its save (pack.store('almanac'): {ch, g: {goal: count}, pages: [chapter ids], day, seed, t: [counts], tg: [gifted], tb, fold}),
 //   the card, the pointer. READS: pack (give, count, level, store), coop (online), the cave's plan (host.world.cave: its mouth,
 //   camp, veins), mining (isSpent, shown), caves (lit), host.env (day, part), host.mods ('light.nightglass'), SESSION.seed.
@@ -73,6 +75,8 @@ export async function create(host) {
       for (let i = 0; i < cc.veins.length; i++) { const v = cc.veins[i]; if (v.kind === 'night' && !mi.isSpent(i) && mi.shown(i) && Math.hypot(v.x - P.x, v.y - P.y) < 3.5) return true; }
       return false;
     },
+    found: () => host.feature('story')?.found || 0,
+    atTear: () => host.env?.part === 'night' && nightglass() && !!host.feature('story')?.near('tear', 5),
   };
 
   // ---------------------------------------------------------------- gifts (their pack.add events aren't counted)
@@ -159,6 +163,7 @@ export async function create(host) {
     return best;
   }
   function where(w) {
+    if (w === 'tear') return host.feature('story')?.place('tear') || null;   // (above ground, by the spawn)
     const cc = caveC(); if (!cc) return null;
     const down = C.cave();
     if (w === 'cave') return down ? null : cc.mouth;
@@ -180,15 +185,15 @@ export async function create(host) {
   }
 
   // ---------------------------------------------------------------- the card's model (made again on a change)
-  let farTxt = '', farD = -1;
+  let farTxt = '', farD = -1, storyVer = -1;
   function model(s) {
     const c = chapter(s), fold = !!s.fold;
-    const M = {title: '', rows: [], today: null, page: null, fold, hot, key: 'Shift+J'};
+    const st = host.feature('story'), M = {title: '', lead: '', rows: [], today: null, page: null, side: st?.side || null, fold, hot, key: 'Shift+J'};
     if (pageT > 0 && pageOf) M.page = {title: pageOf.name, text: pageOf.page};
     else if (c) {
-      M.title = c.name;
+      M.title = c.name; M.lead = st?.on ? c.lead || '' : '';
       for (const g of c.goals) M.rows.push({text: g.text, n: s.g[gkey(c, g)] || 0, of: g.n, done: isDone(s, c, g), far: AIM.on && AIM.goal === g.id ? farTxt : ''});
-    } else M.title = 'The almanac is full';
+    } else { M.title = 'The almanac is full'; M.lead = st?.on ? st.after : ''; }
     if (todayOn(s) && todayList.length) M.today = todayList.map((T, i) => ({text: T.party && !online() ? soloText(T) : T.text, n: s.t[i] || 0, of: T.n, done: !!s.tg[i]}));
     return M;
   }
@@ -202,7 +207,7 @@ export async function create(host) {
     CHAPTERS.forEach((c, i) => {
       if (i < s.ch) h += `<div class="p-move"><b style="color:#9ad878">${esc(c.name)}: done</b><small>${esc(c.page)}</small></div>`;
       else if (i === s.ch) {
-        h += `<div class="p-move"><b style="color:#f2d27a">${esc(c.name)}</b></div>`;
+        h += `<div class="p-move"><b style="color:#f2d27a">${esc(c.name)}</b>${c.lead ? `<small>"${esc(c.lead)}"</small>` : ''}</div>`;
         for (const g of c.goals) { const n = s.g[gkey(c, g)] || 0, d = n >= g.n; h += `<div class="p-move"><b style="color:${d ? '#9ad878' : '#efe6cf'}">${d ? 'x ' : '- '}${esc(g.text)}${!d && g.n > 1 ? ` ${n}/${g.n}` : ''}</b><small>${esc(g.hint || '')}</small></div>`; }
       } else h += `<div class="p-move p-next">${esc(c.name.split(' ')[0])} ...</div>`;
     });
@@ -254,6 +259,7 @@ export async function create(host) {
       if (!ON) return;
       if (hot > 0) hot = Math.max(0, hot - dt);
       if (pageT > 0) { pageT = Math.max(0, pageT - dt); if (pageT === 0) { pageOf = null; ver++; } }
+      const st = host.feature('story'); if (st && st.ver !== storyVer) { storyVer = st.ver; ver++; }   // (the story's Lead line on the card)
       if (AIM.on) { const d = Math.round(AIM.d); if (d !== farD) { farD = d; farTxt = d + ' m'; ver++; } } else if (farD !== -1) { farD = -1; farTxt = ''; ver++; }
       while (said.length) { const w = said.shift(); host.uiSound?.(w === 'chapter' ? 'confirm' : 'click'); }
     },

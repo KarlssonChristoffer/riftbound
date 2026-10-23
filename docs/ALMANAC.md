@@ -17,6 +17,9 @@ couldn't do at the start.
 
 ## The chapters
 
+Each chapter has a line from Hilma under its name on the card (`lead`, docs/STORY.md), and under Today the card shows the
+story's **Lead** line: the next of her places to find.
+
 | | Goals | Gift |
 |---|---|---|
 | I. Smoke | fell 3 trees, pick 12 berries, build a campfire, cook and eat | 3 chanterelles |
@@ -25,6 +28,7 @@ couldn't do at the start.
 | IV. Bars | clay furnace, copper bar, fit a bellows, crack an iron vein with fire, iron bar | 2 logs |
 | V. Iron | stone anvil, iron pick or axe, break an iron vein, break into a hollow wall | 2 glow shards |
 | VI. Nightglass | dig night ore in the dark, smelt Nightglass, forge the Nightglass Lantern, carry its light to a night vein | |
+| VII. The Tear | find 6 of Hilma's places, at night bring the Nightglass light to the tear | 2 night ore (and the tear's film, docs/STORY.md) |
 
 **Nightglass** is the end of the path and the new thing the path leads to. Night ore (the night veins that only show
 in the dark) smelts white-hot into Nightglass (`CHARGES.night`); Nightglass, an iron bar and a copper bar make the

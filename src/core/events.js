@@ -351,6 +351,9 @@ export const EVENTS = {
   'almanac.goal':       ['features/almanac.js',   'x, y (him), ch (content/almanac.js CHAPTERS id), goal (its id), today: false: a goal of the chapter is met', '(almanac view: a click)'],
   'almanac.chapter':    ['features/almanac.js',   'x, y, ch (the chapter done), next (the next one\'s id, \'\' none): its page is torn out, its gift given', '(almanac view: a chime)'],
   'almanac.today':      ['features/almanac.js',   'x, y, i (0..2), goal (content/almanac.js TODAY id), all (the third of three: the bonus too): one of Today\'s three is done, its gift given', '(almanac view: a click)'],
+  // the story (features/story.js, docs/STORY.md): the intro, Hilma's places, the beats
+  'story.found':        ['features/story.js',     'x, y, id (content/story.js PLACES id), n (how many he has found now): he came upon one of Hilma\'s places', 'almanac (VII counts them), (story view: the margin note)'],
+  'story.beat':         ['features/story.js',     'id (content/story.js BEATS id), done (false: skipped): a story film (the intro, the tear\'s) ended', '(none yet)'],
   'bells.toll':         ['features/bells/view.js (a view: nothing in the sim listens)', 'x, y, h, k (0..1), note, who (the bell): its clapper strikes it again as it swings', 'audio (its note, softer)'],
   // weapon attachments and runes (features/mods/sim.js, docs/MODS.md)
   'mods.find':          ['features/mods/sim.js',  'x, y, id (the part), first (the first of its kind): a part went into the kit', 'mods (view: the toast, a glint)'],

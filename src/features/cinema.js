@@ -14,6 +14,11 @@
 // from its own generator (core/rng.js mulberry32), never Math.random.
 // ?cinema=0 never starts it; ?cinema=now starts it at once and keeps it through input (captures, tests); ?cineidle=<s>
 // the wait (TUNE.idle). The menu's Game tab: "Cinematic camera" starts it when the menu closes.
+// SCRIPTED (features/story.js: the intro and the story's beats): F.play(shots, done) films the given shots in order instead of
+// the director's picks, through input and whatever ?cinema says (the story owns its own skip), a dip to black between them,
+// then fades out and calls done(true); F.next() cuts to the next one now; F.stop() ends it at once (done(false)); a pause or a
+// menu ends it the same way. A shot: {c: {x, y, h} | null (null: the player, followed), a (rad round c; null: the game's
+// heading), turn, d, p (deg), m, lh?, side?: [start, end?] as the director's orbits, dur (s)}. F.scriptI: the shot on now.
 // FEATURE CONTRACT (main.js): create(host) -> F: view (what happens: the events worth a look), camera (the shot's clock and
 // the pose, before the renderer takes its view), frame (the director: starts, cuts, fades), hd (the bars and fades; cineHd:
 // core/loop.js draws only such overlays while the cinema camera is on), menu, toggle, info, start / stop (tests).
@@ -88,10 +93,11 @@ export async function create(host) {
   const S = {kind: '', t: 0, dur: 8, follow: false, slide: false, c: {x: 0, y: 0, h: 0},
     a0: 0, a1: 0, d0: 30, d1: 30, p0: .7, p1: .7, lh0: 1, lh1: 1, m0: 1.3, m1: 1.3, side0: 0, side1: 0};
   let state = 'off', fadeK = 0, barK = 0, phase = '', tStart = 0, pending = false, cuts = 0, lastKinds = ['', ''], newsT = -1e9;
+  let script = null, scriptI = -1, scriptDone = null;   // (SCRIPTED: the shots, the one on now, who to tell at the end)
 
   const game = () => host.feature('game');
   let caves = null;   // (features/caves.js: not underground, its sky would show past the cave's walls)
-  const allowed = () => F.on && !host.paused && !host.lock && !host.photoOpen && game()?.mode === 'sandbox' && (HOLD || host.P.state === 'idle')   // (photo mode: its own camera)
+  const allowed = () => (F.on || script) && !host.paused && !host.lock && !host.photoOpen && game()?.mode === 'sandbox' && (HOLD || script || host.P.state === 'idle')   // (photo mode: its own camera)
     && !((caves ??= host.feature('caves') || false) && caves.under > .05);
   const feet = o => { const p = host.player; o.x = p.x; o.y = p.y; o.h = host.P.z || 0; return o; };
   const ground = (x, y) => host.elev(x, y) || 0;
@@ -193,7 +199,19 @@ export async function create(host) {
     else if (e.kind === 'fire' || e.kind === 'weed') go(2.5, {d: [22, 21], p: [36, 39], m: [1.5, 1.55], lh: [.3]}, .2, rr(6, 8));
     return true;
   }
+  // SCRIPTED: the next of the story's shots (null at the end)
+  function scripted() {
+    while (++scriptI < script.length) {
+      const o = script[scriptI], follow = !o.c, c = follow ? feet({x: 0, y: 0, h: 0}) : o.c, a = o.a ?? host.yaw;
+      const spec = {d: o.d, p: o.p, m: o.m, lh: o.lh, side: o.side};
+      let s = orbit('script', c, a, 6.28, o.turn || 0, spec, o.dur, follow);
+      if (!s) { loose = true; s = orbit('script', c, a, 6.28, o.turn || 0, spec, o.dur, follow); loose = false; }
+      if (s) return s;
+    }
+    return null;
+  }
   function plan(first, only = null) {
+    if (script) return scripted();
     const C = [], add = (w, kind, f) => { if (w > 0) C.push({w, kind, f}); };
     const me = feet({x: 0, y: 0, h: 0}), now = performance.now() / 1000;
     const sun = sunDirH(), lowSun = sun.el > -.03 && sun.el < .38 && host.env.part !== 'night', night = host.env.part === 'night';
@@ -289,8 +307,13 @@ export async function create(host) {
 
   // ---- on and off
   function start() { state = 'in'; phase = 'out'; fadeK = 0; tStart = performance.now(); cuts = 0; lastKinds[0] = lastKinds[1] = ''; CAM.px = TUNE.px; }
-  function stop() { if (state === 'off') return; state = 'off'; phase = ''; fadeK = barK = 0; G.setCine(null); }
+  function stop() {
+    const d = scriptDone, done = script && scriptI >= script.length; script = null; scriptDone = null; scriptI = -1; pending = false;
+    if (state !== 'off') { state = 'off'; phase = ''; fadeK = barK = 0; G.setCine(null); }
+    d?.(done);
+  }
   function cutTo(first) { sky(); if (begin(plan(first))) { pose(); return true; } return false; }
+  const lastShot = () => script && scriptI >= script.length - 1;
 
   Object.assign(F, {
     view(dt, evs) {
@@ -310,14 +333,14 @@ export async function create(host) {
         else if (F.on && (HOLD || (now - lastIn) / 1000 >= idleS) && allowed()) start();
         if (state === 'off') return;
       }
-      if ((!HOLD && lastIn > tStart) || !allowed()) { stop(); return; }   // someone is back (or the game needs its view)
+      if ((!HOLD && !script && lastIn > tStart) || !allowed()) { stop(); return; }   // someone is back (or the game needs its view)
       barK = Math.min(1, barK + dt / TUNE.fadeIn);
       if (state === 'in') {   // the game fades to black, the first shot fades in
-        if (phase === 'out') { fadeK = Math.min(1, fadeK + dt * 2 / TUNE.fadeIn); if (fadeK >= 1) { if (!cutTo(true)) { stop(); return; } G.setCine(CAM); phase = 'in'; } return; }
+        if (phase === 'out') { fadeK = Math.min(1, fadeK + dt * 2 / TUNE.fadeIn); if (fadeK >= 1) { if (!cutTo(true)) { if (script) scriptI = script.length; stop(); return; } G.setCine(CAM); phase = 'in'; } return; }
         fadeK = Math.max(0, fadeK - dt * 2 / TUNE.fadeIn); if (fadeK <= 0) { state = 'on'; phase = ''; }
       }
       // news worth a cut now (a bird landing, a flock going up), once the shot has run a little and isn't news itself
-      if (state === 'on' && phase === '' && cuts > 1 && S.t > TUNE.news && !NEWSY[S.kind] && now - newsT > TUNE.newsGap * 1000) {   // (never the opening shot)
+      if (state === 'on' && phase === '' && !script && cuts > 1 && S.t > TUNE.news && !NEWSY[S.kind] && now - newsT > TUNE.newsGap * 1000) {   // (never the opening shot)
         const ts = now / 1000;
         for (const e of NEWS) if (!e.used && (e.kind === 'bird' || e.kind === 'flock') && ts - e.t < 1.5) {
           sky(); const shot = plan(false, e); e.used = true;   // (tried once: a bird with no place for a camera stays unfilmed)
@@ -325,9 +348,10 @@ export async function create(host) {
         }
       }
       // the end of a shot: a cut, or every few cuts a dip to black
-      const dip = cuts % 3 === 0 || S.kind === 'wide';
-      if (state === 'on' && phase === '' && S.t >= S.dur - (dip ? TUNE.dip / 2 : 0)) { if (dip) phase = 'dipOut'; else if (!cutTo(false)) S.t = 0; }
-      if (phase === 'dipOut') { fadeK = Math.min(1, fadeK + dt * 2 / TUNE.dip); if (fadeK >= 1) { if (!cutTo(false)) S.t = 0; phase = 'dipIn'; } }
+      const dip = script || cuts % 3 === 0 || S.kind === 'wide';
+      if (state === 'on' && phase === '' && S.t >= S.dur - (dip ? TUNE.dip / 2 : 0)) { if (lastShot()) phase = 'end'; else if (dip) phase = 'dipOut'; else if (!cutTo(false)) S.t = 0; }
+      if (phase === 'end') { fadeK = Math.min(1, fadeK + dt * 2 / TUNE.fadeIn); if (fadeK >= 1) { scriptI = script ? script.length : scriptI; stop(); } return; }   // (SCRIPTED: its last shot fades out, the story fades the game back in)
+      if (phase === 'dipOut') { fadeK = Math.min(1, fadeK + dt * 2 / TUNE.dip); if (fadeK >= 1) { if (!cutTo(false)) { if (script) { scriptI = script.length; stop(); return; } S.t = 0; } phase = 'dipIn'; } }
       else if (phase === 'dipIn') { fadeK = Math.max(0, fadeK - dt * 2 / TUNE.dip); if (fadeK <= 0) phase = ''; }
     },
     // the shot's clock and the camera's pose: here, not in frame(), because this runs before the renderer takes its view
@@ -346,10 +370,13 @@ export async function create(host) {
       if (fadeK > 0) { q.globalAlpha = ease(fadeK); q.fillRect(0, 0, W, H); q.globalAlpha = 1; }
     },
     menu() { return F.on ? [{label: 'Cinematic camera', run: () => { pending = true; }}] : []; },
-    toggle() { F.on = !F.on; if (!F.on) { stop(); pending = false; } return F.on; },
+    toggle() { F.on = !F.on; if (!F.on && !script) { stop(); pending = false; } return F.on; },
     start() { pending = true; }, stop,
+    play(shots, done) { if (script) stop(); if (state !== 'off') { state = 'off'; phase = ''; fadeK = barK = 0; G.setCine(null); } script = shots; scriptI = -1; scriptDone = done; pending = true; },
+    next() { if (script && state === 'on' && phase === '') S.t = S.dur; },
     info() { let news = 0; for (const e of NEWS) if (e.t > -1e8) news++; return {state, phase, kind: S.kind, news, t: +S.t.toFixed(2), dur: +S.dur.toFixed(2), shots: F.shots, idle: +((performance.now() - lastIn) / 1000).toFixed(1),
       pos: [+CAM.pos.x.toFixed(2), +CAM.pos.y.toFixed(2), +CAM.pos.z.toFixed(2)], look: [+CAM.look.x.toFixed(2), +CAM.look.y.toFixed(2), +CAM.look.z.toFixed(2)], fov: +CAM.fov.toFixed(1), m: +lerp(S.m0, S.m1, ease(clamp(S.t / S.dur, 0, 1))).toFixed(2)}; },
   });
+  Object.defineProperties(F, {scriptI: {get: () => script ? scriptI : -1}, playing: {get: () => state !== 'off'}});   // (live: Object.assign would copy a getter's value once)
   return F;
 }

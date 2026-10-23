@@ -174,8 +174,10 @@ export const FLAG_DOCS = {
   tally: 'n (dev): the Tally Stick starts with n notches (features/keepsakes.js; 10 or more: it fills at the next step)',
   keepsakes: '0: the keepsakes\' rules off (features/keepsakes.js, docs/KEEPSAKES.md: what a worn charm bends); the keepsakes stay in the pouch and can be worn',
   mods: '0: weapon attachments and runes off (features/mods.js, docs/MODS.md); all: every part in the kit (a test start)',
+  story:   '0: no story (features/story.js, docs/STORY.md: the intro film, the chapters\' lead lines, Hilma\'s places to find, the tear\'s film)',
+  intro:   '1: play the intro film again on entering the sandbox (once a page load); 0: never play it',
   almanac: '0: no almanac (features/almanac.js, docs/ALMANAC.md: the first loop\'s chapters, the card top left, the pointer, Today\'s three)',
-  chapter: 'n (dev): the almanac starts at chapter n (1-6; the ones before it count as done), once a page load (features/almanac.js)',
+  chapter: 'n (dev): the almanac starts at chapter n (1-7; the ones before it count as done), once a page load (features/almanac.js)',
   melee: '0: no swords and shields (features/melee.js: 3 draws a weapon, 4 a shield; docs in content/melee.js)',
   fresh: '1: start the persistent world fresh (features/pack.js: the saved pack, skills and felled trees are ignored and written over)',
   // ---- tools
