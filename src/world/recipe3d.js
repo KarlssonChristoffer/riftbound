@@ -17,6 +17,7 @@
 //   b.disc(fam, at, r, h, o)          a flat cylinder standing on `at`
 //   b.at(pos, yaw, scale, fn)         fn() builds in a frame moved to pos, turned by yaw (deg) and scaled (a number): clusters, branches
 //   b.onDome(at, r, h, u, v) -> [x, y, z]   a point on a dome's surface (u round 0..1, v up 0..1): spots on a cap
+//   b.skip()                          a part left out (it keeps the later parts' numbers: a picked shrub drawn without its berries)
 // THE RANDOM r (seeded per recipe and seed, the same on every machine): r() 0..1, r.range(a, b), r.int(a, b), r.pick(list),
 //   r.sign(), r.chance(k)
 // OWNS: the geometry cache.  READS: world.js FAMS (at build time), core/rng.js, core/mathx.js.
@@ -98,6 +99,7 @@ function makeBuilder(seed) {
       try { fn(); } finally { stack.pop(); }
     },
     onDome(at, r, h, u, v) { const a = u * Math.PI * 2, e = v * Math.PI / 2; return [at[0] + r * Math.cos(e) * Math.cos(a), at[1] + h * Math.sin(e), at[2] + r * Math.cos(e) * Math.sin(a)]; },
+    skip() { partN++; },   // a part left out (a picked shrub's berries: content/recipes.js picked): the parts after it keep their numbers and lumps
   };
   return {b, parts};
 }

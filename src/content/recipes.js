@@ -245,8 +245,10 @@ export const RECIPES = {
   blueberry: {
     about: 'A patch of blueberry shrubs: knee-high green twigs, small leaves, dark blue berries in late summer',
     likes: {ground: 'forest', shade: .5, near: 'pine', cluster: [1, 3]},
-    params: {n: [7, 3, 14], spread: [.5, .25, .9], berries: [.6, 0, 1]},
+    // picked 1: the same shrub with its berries gone (features/forage.js): every draw made as before, the berries skipped
+    params: {n: [7, 3, 14], spread: [.5, .25, .9], berries: [.6, 0, 1], picked: [0, 0, 1]},
     build(b, p, r) {
+      const berry = (at, rad) => p.picked ? b.skip() : b.ball('blueberry', at, rad, {detail: 0, bias: .1});
       for (let i = 0; i < p.n; i++) {
         const a = r.range(0, Math.PI * 2), d = Math.sqrt(r()) * p.spread, x = Math.cos(a) * d, z = Math.sin(a) * d * .8, h = r.range(.18, .32);
         const twigs = r.int(2, 4);
@@ -256,8 +258,8 @@ export const RECIPES = {
           b.ball('leaf', tip, [r.range(.05, .075), r.range(.035, .05), r.range(.05, .075)], {detail: 0, lump: .2, bias: r.range(-.05, .1)});
           const mid = [x + (tip[0] - x) * .55 + r.range(-.04, .04), tip[1] * .55, z + (tip[2] - z) * .55];
           b.ball('leaf', mid, [.045, .03, .045], {detail: 0, lump: .2, bias: -.1});
-          if (r.chance(p.berries)) b.ball('blueberry', [tip[0] + r.range(-.03, .03), tip[1] + .01, tip[2] + .045], .03, {detail: 0, bias: .1});
-          if (r.chance(p.berries * .7)) b.ball('blueberry', [mid[0] + .03, mid[1] + .01, mid[2] + .04], .026, {detail: 0, bias: .1});
+          if (r.chance(p.berries)) berry([tip[0] + r.range(-.03, .03), tip[1] + .01, tip[2] + .045], .03);
+          if (r.chance(p.berries * .7)) berry([mid[0] + .03, mid[1] + .01, mid[2] + .04], .026);
         }
       }
     },
@@ -266,7 +268,7 @@ export const RECIPES = {
   lingonberry: {
     about: 'A patch of lingonberry: ankle-high evergreen sprigs, small glossy dark leaves, clusters of bright red berries',
     likes: {ground: 'forest', shade: .25, near: 'pine on dry thin soil, rock, the esker', cluster: [1, 4]},
-    params: {n: [9, 4, 16], spread: [.45, .2, .8], berries: [.7, 0, 1]},
+    params: {n: [9, 4, 16], spread: [.45, .2, .8], berries: [.7, 0, 1], picked: [0, 0, 1]},   // (picked: as the blueberry's)
     build(b, p, r) {
       for (let i = 0; i < p.n; i++) {
         const a = r.range(0, Math.PI * 2), d = Math.sqrt(r()) * p.spread, x = Math.cos(a) * d, z = Math.sin(a) * d * .8, h = r.range(.08, .15);
@@ -277,8 +279,40 @@ export const RECIPES = {
           b.ball('lingonleaf', q, [r.range(.035, .05), r.range(.022, .032), r.range(.035, .05)], {detail: 0, lump: .15, bias: k === 2 ? .12 : -.05});
         }
         if (r.chance(p.berries)) {   // a nodding cluster of berries at the tip
-          for (let k = r.int(2, 4); k > 0; k--) b.ball('lingon', [tip[0] + r.range(-.03, .03), tip[1] - r.range(0, .03), tip[2] + .03 + r.range(-.015, .02)], r.range(.018, .024), {detail: 0, bias: .15});
+          for (let k = r.int(2, 4); k > 0; k--) {
+            const at = [tip[0] + r.range(-.03, .03), tip[1] - r.range(0, .03), tip[2] + .03 + r.range(-.015, .02)], rad = r.range(.018, .024);
+            if (p.picked) b.skip(); else b.ball('lingon', at, rad, {detail: 0, bias: .15});
+          }
         }
+      }
+    },
+  },
+
+  // THE MIRE's (world/mire.js, docs/MIRE.md): picked as the berries are (features/forage.js)
+  cloudberry: {
+    about: 'A patch of cloudberry on a mire hummock: a few broad, lobed leaves on short stalks, one amber berry standing up on each stem',
+    likes: {ground: 'mire', shade: 0, near: 'the firm hummocks', cluster: [1, 3]},
+    params: {n: [5, 3, 9], spread: [.4, .2, .7], berries: [.8, 0, 1], picked: [0, 0, 1]},   // (picked: as the blueberry's; out of season too)
+    build(b, p, r) {
+      for (let i = 0; i < p.n; i++) {
+        const a = r.range(0, Math.PI * 2), d = Math.sqrt(r()) * p.spread, x = Math.cos(a) * d, z = Math.sin(a) * d * .8, h = r.range(.07, .13);
+        b.tube('leaf', [x, 0, z], [x, h, z], .008, .006, {sides: 3, bias: -.2});
+        for (let k = 0; k < 2; k++) {   // two broad leaves, lying open
+          const la = r.range(0, Math.PI * 2), q = [x + Math.cos(la) * .05, h * .8, z + Math.sin(la) * .05];
+          b.ball('leaf', q, [r.range(.06, .08), .015, r.range(.05, .07)], {detail: 0, lump: .25, bias: .05});
+        }
+        if (r.chance(p.berries)) { const at = [x + r.range(-.01, .01), h + .07, z], rad = r.range(.022, .03); b.tube('leaf', [x, h, z], at, .005, .004, {sides: 3}); if (p.picked) b.skip(); else b.ball('berryOrange', at, rad, {detail: 0, lump: .2, bias: .15}); }
+      }
+    },
+  },
+  bog_iron: {
+    about: 'Bog iron: a few rusty, pitted lumps half sunk in the peat at the edge of a mire pool',
+    likes: {ground: 'mire', shade: 0, near: 'the pools', cluster: [1, 2]},
+    params: {n: [4, 2, 6], picked: [0, 0, 1]},   // (picked: gone till they grow back)
+    build(b, p, r) {
+      for (let i = 0; i < p.n; i++) {
+        const a = r.range(0, Math.PI * 2), d = r.range(0, .18), q = [Math.cos(a) * d, -.01, Math.sin(a) * d * .8], s = r.range(.045, .08);
+        if (p.picked) b.skip(); else b.ball('bogiron', q, [s * 1.2, s * .7, s], {detail: 0, lump: .35, bias: r.range(-.1, .1)});
       }
     },
   },
@@ -613,4 +647,37 @@ Object.assign(RECIPES, {
     }); }},
   capercaillie: {about: 'A capercaillie (tjäder): a cock or a hen', likes: {ground: 'old pine woods, the floor', shade: .6, cluster: [1, 1]}, params: {hen: [0, 0, 1]},
     build(b, p) { b.at([0, FAUNA_RIG.capercaillie.stand * (p.hen ? .8 : 1), 0], 0, 1, () => PARTS.capercaillie_body(b, p)); }},
+  // FINDS WITHOUT KILLING (features/animalfinds.js, living-animals.md): what the forest drops, lying on the floor
+  roe_antler: {about: 'A shed roe deer antler lying in the needles: a knobbly burr, a short beam, three tines', likes: {ground: 'a roe bed in thick cover, late autumn to spring', shade: .6, cluster: [1, 2]}, params: {},
+    build(b, p, r) {
+      const lean = r.range(-8, 8);
+      b.at([0, .02, 0], lean, 1.25, () => {
+        b.ball('antler', [-.1, .02, 0], [.03, .028, .032], {detail: 1, lump: .6, bias: -.1});   // the burr (the rose) where it came off
+        b.tube('antler', [-.1, .02, 0], [.04, .035, .01], .016, .012, {sides: 5, part: 1});   // the beam, lying
+        b.tube('antler', [.04, .035, .01], [.12, .05, -.005], .012, .007, {sides: 4, part: 1});
+        b.tube('antler', [-.02, .028, .005], [.02, .075, .03], .009, .005, {sides: 4, part: 1});   // a tine forward, one back, the tip
+        b.tube('antler', [.06, .04, .008], [.09, .05, .06], .008, .005, {sides: 4, part: 1});
+      });
+    }},
+  // THE FOX'S DEN (features/foxden.js): a dark hole under the rock (+x: in, toward the rock), a fan of fresh sand out of it, a chewed boot
+  den_mouth: {about: "A fox's den mouth under a rock: a dark hole, a fan of fresh sand, a chewed old boot", likes: {ground: 'under an outcrop or a block in the woods', shade: .5, cluster: [1, 1]}, params: {},
+    build(b, p, r) {
+      b.ball('pupil', [.1, .1, 0], [.26, .2, .3], {detail: 1, fixed: 0});   // the hole: its dark, unlit
+      b.ball('soil', [.05, .2, 0], [.3, .12, .36], {detail: 1, lump: .4, bias: -.1});   // the earth over it, up to the rock
+      for (let i = 0; i < 5; i++) b.ball('soil', [-.25 - r.range(0, .45), .02, r.range(-.35, .35)], [r.range(.14, .24), .04, r.range(.12, .2)], {detail: 0, lump: .5, bias: .15});   // the sand fan
+      b.at([-.75, 0, r.range(.3, .45)], r.range(20, 70), 1, () => {   // the chewed boot, on its side
+        b.box('furdark', [0, .06, 0], [.24, .1, .09], [8, 0, 0]);
+        b.box('furdark', [.09, .15, 0], [.08, .16, .08], [8, 0, 0]);
+        b.box('rotwood', [-.02, .015, 0], [.27, .03, .1], [8, 0, 0]);
+      });
+    }},
+  caper_feather: {about: "A capercaillie cock's tail feather lying on the floor: long, near black, a white spot at its end", likes: {ground: 'the lek in the old pines, at dawn', shade: .6, cluster: [1, 2]}, params: {},
+    build(b, p, r) {
+      b.at([0, .012, 0], r.range(-10, 10), 1.2, () => {
+        b.box('plumage', [0, 0, 0], [.26, .008, .055], [0, 0, 0], {part: 1});   // the vane
+        b.box('plumage', [.13, 0, 0], [.03, .008, .045], [0, 0, 0], {part: 1, bias: .1});
+        b.ball('mushwhite', [.13, .004, 0], [.022, .006, .022], {detail: 0});   // the white spot at its end
+        b.tube('deadwood', [-.17, .004, 0], [.15, .006, 0], .005, .003, {sides: 3});   // the quill
+      });
+    }},
 });

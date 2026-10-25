@@ -43,9 +43,12 @@ zander and burbot x3, eel x2.5, trout and salmon x2, perch x1.3 (`BAITS`).
 
 ## Meals
 
-Tab, **Cook**, standing within 2.5 m of a burning campfire (a fire with fuel, features/campfires.js `burningNear`). A meal is
-eaten at once and its buff lasts its time; one meal at a time (a new one replaces it). The time left shows bottom left and
-in the journal, and is saved. Each need is paid with the kind you have most of.
+Tab, **Cook**, standing within 2.5 m of a burning campfire (a fire with fuel, features/campfires.js `burningNear`). Since
+2026-10-16 every dish is cooked on a stick over the flames and pulled raw, done, just right or burnt, and the smoked eel,
+the pike stew and the fish with lingon have moods instead of numbers you see: **docs/COOKING.md**. The four below without a
+mood keep their numbers (done or just right; raw: the numbers for half the time; burnt: a smoke trail, animals notice you
+from twice as far). One meal at a time (a new one replaces it). The time left shows bottom left and in the journal, and is
+saved. Each need is paid with the kind you have most of. The table is the old numbers (still under the moods when done):
 
 | meal | needs | lasts | does |
 |---|---|---|---|
@@ -56,9 +59,10 @@ in the journal, and is saved. Each need is paid with the kind you have most of.
 | Smoked eel | 1 eel | 7 min | lantern reaches 30% further, night waits much shorter, luck +5% |
 | Salmon on a plank | 1 salmon or arctic char | 7 min | fishing luck +12%, 6% chance of two fish, move 5% faster |
 
-The buff is modifier notes under the source `fishing.meal` (`MEALS`); their owners read them (player.speed: the player,
-game.hurt: game/stats.js, woodcut.power: woodcut, light.lanternR: the lantern). In co-op the cast tells the server the meal's
-id and it adds the same notes to the roll.
+The buff is modifier notes under the source `meal` (`content/meals.js` MEALS, `features/meals.js`: since the foraging slice,
+2026-10-15, the meals are their own feature, shared with the foraged ones: docs/FORAGING.md); their owners read them
+(player.speed: the player, game.hurt: game/stats.js, woodcut.power: woodcut, light.lanternR: the lantern). In co-op the cast
+tells the server the meal's id and it adds the same notes to the roll (`mealNotes`).
 
 ## The angler's set
 
@@ -127,18 +131,23 @@ fishing.
   get a toast "Anna caught a Pike, 54 cm".
 - **Spots, bait, meals and the set** go into the server's roll too: the cast says `spot`, `bait` and `meal`; the server
   checks the spot against its own clock and the hash, and counts the set from what you wear.
+- **A hand grab** (the lingon's fish: docs/COOKING.md) asks the server (`grab`); it checks the meal codes and rolls a common
+  or fine fish (`roll`'s `hand`).
+- **Fish shadows** come from the skill-verbs build (PR #27, docs/SKILLS.md); burnt lingon makes them dart away from you
+  (`shadowsFlee`).
 - Not yet: others seeing your line, bobber and fish; the server checking the pouch (bait and meals are the client's word,
   like the Fishing level).
 
 ## Code
 
 - `src/content/fishing.js`: the waters, `TUNE`, the stats, the catches (with their pixel icons), `roll`, `SPOT` / `spotAt` /
-  `spotNear`, `BAITS`, `MEALS`, `ANGLER`, `castNotes`, `hintOf`. Pure data, read by the client and the server.
+  `spotNear`, `BAITS`, `ANGLER`, `castNotes`, `hintOf`. Pure data, read by the client and the server. The meals:
+  `src/content/meals.js` and `src/features/meals.js` (the Cook list, the buff, its chip).
 - `src/features/fishing.js`: the feature. Sim: the phases, the roll, the fight, the catch (pack, XP, records in
   `pack.store('fishing')`). View: rings and spray, the bobber, the fish under the water, the rod and line, the leap. HD:
   the prompt, the meter, "!", the fight gauge, the catch card. It claims LMB through `F.lmb` (core/input.js) while it can
-  cast or is fishing. Also the spots (found when he crosses a cell or the slot turns), the Cook and Bait recipes and the
-  journal (pack.recipe, pack.section), the meal's clock and the set's notes.
+  cast or is fishing. Also the spots (found when he crosses a cell or the slot turns), the Bait recipes and the
+  journal (pack.recipe, pack.section) and the set's notes.
 - Small additive hooks elsewhere: `pack.section` and recipe groups (features/pack.js, ui/packpanel.js), `burningNear`
   (features/campfires.js), the bait item (content/items.js), the sizzle (audio/audio.js `fishCook`).
 - `src/content/gear.js` (the 12 pieces), `src/ui/gearicons.js` (their icons), `src/ui/geartip.js` (fishing words),
