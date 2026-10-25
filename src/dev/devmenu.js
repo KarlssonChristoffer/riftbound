@@ -75,7 +75,8 @@ const CSS = `
   position: fixed; right: 10px; top: 10px; bottom: 10px; z-index: 16; width: calc(232 * var(--u)); max-width: calc(100vw - 20px);
   display: flex; flex-direction: column; padding: var(--u) calc(2 * var(--u)); color: var(--ink); user-select: none;
   font: calc(10 * var(--u)) / calc(12 * var(--u)) RiftPixel, ui-monospace, Consolas, monospace; font-synthesis: none; image-rendering: pixelated;
-  border: calc(3 * var(--u)) solid transparent; border-image: var(--dm-panel) 3 fill / calc(3 * var(--u)); box-sizing: border-box; }
+  border: calc(3 * var(--u)) solid transparent; border-image: var(--dm-panel) 3 fill / calc(3 * var(--u)); box-sizing: border-box;
+  background: #1e1812 padding-box; }   /* (the frame's fill, solid underneath: never see-through over the world) */
 #devm * { box-sizing: border-box; }
 #devm.hidden { display: none; }
 body:has(#pause:not(.hidden)) #devm, body:has(#book:not(.hidden)) #devm { visibility: hidden; }   /* (the player's window: ui/book.js) */
@@ -328,11 +329,14 @@ export function createDevMenu({host, engine}) {
   }
   const sigOf = list => list.map(e => e.t === 'row' ? `${e.row.pin}|${e.row.label}|${e.row.kind}|${e.row.key || ''}` : e.t === 'head' ? `h${e.page.id}${e.open}${e.page.rows.length}` : e.t + (e.text || e.page?.id)).join('\n');
 
+  // the pixel font and frames, once, on first open (whatever tab it opens on: a docked tab never runs sync)
+  function dress() {
+    if (styled) return;
+    styled = true; loadPixelFont();
+    for (const [k, v] of [['panel', FRAMES.panel()], ['btn', FRAMES.btn()], ['hot', FRAMES.hot()], ['on', FRAMES.on()], ['well', FRAMES.well()], ['card', FRAMES.card()]]) root.style.setProperty('--dm-' + k, v);
+  }
   function sync(force) {
-    if (!styled) {
-      styled = true; loadPixelFont();
-      for (const [k, v] of [['panel', FRAMES.panel()], ['btn', FRAMES.btn()], ['hot', FRAMES.hot()], ['on', FRAMES.on()], ['well', FRAMES.well()], ['card', FRAMES.card()]]) root.style.setProperty('--dm-' + k, v);
-    }
+    dress();
     const pages = collect(), secs = SECTIONS.filter(s => pages.some(p => p.section === s));
     if (!secs.includes(S.sec) && secs.length) S.sec = secs[0];
     const navHtml = secs.map(s => `<button class="dm-sec${s === S.sec && !find.value.trim() ? ' on' : ''}" data-sec="${esc(s)}">${esc(s)}</button>`).join('');
@@ -434,7 +438,7 @@ export function createDevMenu({host, engine}) {
 
   function show(v, to) {
     v = !!v && host.dev && game()?.mode !== 'title';
-    if (v && !styled) dockAll();
+    if (v && !styled) { dockAll(); dress(); }
     if (!v && !open) return;
     open = v;
     if (v) { const u = uiUnit(); root.style.setProperty('--u', u + 'px'); tick = TICK; }
