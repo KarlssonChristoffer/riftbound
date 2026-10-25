@@ -610,7 +610,7 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
   // ---- dev controls
   const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};
   E.setHour = h => { hours = Math.floor(hours / 24) * 24 + ((h % 24) + 24) % 24; syncClock(); };
-  E.setPart = p => { if (PART_H[p] !== undefined) { const day0 = Math.floor(hours / 24) * 24, h = PART_H[p]; hours = day0 + h + (h < E.hour ? 24 : 0); syncClock(); } };
+  E.setPart = p => { if (PART_H[p] !== undefined && !E.askPart?.(p)) { const day0 = Math.floor(hours / 24) * 24, h = PART_H[p]; hours = day0 + h + (h < E.hour ? 24 : 0); syncClock(); } };
   E.nextPart = () => E.setPart(PARTS[(PARTS.indexOf(E.part) + 1) % 4]);
   E.setSeason = s => { E.seasonLock = SEASONS.includes(s) ? s : null; syncClock(); };
   // (ease: s, this spell's channels ease toward it faster or slower than TUNE.ease: an omen's storm rolls in over a few s.
@@ -637,6 +637,9 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
   // co-op (features/coop.js): the server owns the world's clock; the page follows it (setT: in-game hours since the start) and
   // doesn't keep a borrowed clock as its own (borrowed: save() skips it, so playing offline again goes on from where it was)
   E.borrowed = false;
+  // askPart(p) -> true: the clock's owner was asked for that part of the day (co-op: the server sets it and tells everyone), so
+  // setPart / nextPart (T, the dev menu) leave this page's clock alone: it would snap back at the next word from the server
+  E.askPart = null;
   // a jump of more than TUNE.replayJump hours (a welcome from a server whose world is elsewhere in its year): the ground's memory
   // replayed from the clock's own weather (replayGround), so a late joiner's snow and wet ground are everyone's
   E.setT = h => { if (isFinite(h)) { const far = Math.abs(h - hours) > TUNE.replayJump; hours = h; syncClock(); if (far) replayGround(h); } };

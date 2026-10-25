@@ -37,7 +37,7 @@
 // them; what the others look like is view (look.js). Sending reads the player and the drawn pose after the frame's steps.
 // OWNS: the connection (net/client.js), the send clock, the look. READS: host.player, host.playerPose (the drawn live pose),
 //   the equipment's lasso (features/equip/lasso.js L), host.entities (the forest's trees by their fid). WRITES: host.env's clock
-//   (setT, setDayMinutes, borrowed: its API for this).
+//   (setT, setDayMinutes, borrowed, askPart: its API for this).
 // EMITS: nothing. BUDGET: update ~0 (a queue); frame: a send 20 times a second (~.02 ms: a pose packed only when it changed),
 //   the look's.
 import {SESSION} from '../core/session.js';
@@ -60,6 +60,7 @@ export async function create(host) {
   const clk = {t: 0, h: NaN, rate: 0}, env = host.env;
   let clkCheck = 0, askedTime = false;
   const clockNow = () => clk.h + (C.serverNow() - clk.t) * clk.rate;
+  const askPart = p => { if (C.status !== 'online') return false; C.act('time', p); return true; };   // (env.setPart in co-op: the server's clock)
   function follow(force) {
     if (!env || !isFinite(clk.h)) return;
     const h = clockNow();
@@ -172,7 +173,7 @@ export async function create(host) {
         }
         else if (m.k === 'clock') {
           clk.t = m.t; clk.h = m.h; clk.rate = m.rate;
-          if (env) { env.borrowed = true; env.setDayMinutes(m.rate > 0 ? 24 / (m.rate * 60000) : 0); env.setKeep?.(m.season); follow(true); }   // (season: the one the server keeps the world in; none: its year turns)
+          if (env) { env.borrowed = true; env.askPart = askPart; env.setDayMinutes(m.rate > 0 ? 24 / (m.rate * 60000) : 0); env.setKeep?.(m.season); follow(true); }   // (season: the one the server keeps the world in; none: its year turns)
           const want = flags.get('time');   // (dev: a ?time= asks the server's clock for it, once)
           if (want && !askedTime) { askedTime = true; C.act('time', want); }
         }
