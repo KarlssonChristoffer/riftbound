@@ -9,7 +9,7 @@ export const FLAG_DOCS = {
   biome:     'ruins | ember | frost | rift: the starting biome',
   time:      'day | dusk | night: jump the world clock to that part of the day',
   hour:      'the world clock\'s starting hour (0-24)',
-  season:    'spring | summer | autumn | winter: lock the season',
+  season:    'spring | summer | autumn | winter: lock the season\'s look; turn: the year turns (offline; else the world stays in summer, sim/wxclock.js TUNE.keep)',
   weather:   'a sim/env.js WEATHER state (clear, fair, cloudy, ..., storm, snow) to lock; 0 = no weather particles (atmos)',
   daymin:    'real minutes per in-game day; 0 = the clock stands still',
   wxtrans:   '0: the old weather changes (sim/env.js FRONTS: every change a straight edge rolling in along the ground wind; the cloud shadows a 40 x 30 m tile, the cover in 1/16 steps) instead of the transitions (a front with precursors, a breaking deck, an ease; core/cloudfield.js)',

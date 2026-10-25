@@ -1,6 +1,7 @@
 // THE CO-OP SERVER (docs/MULTIPLAYER.md): one process that serves the game's files and hosts the room.
 //   node server/server.mjs [--port 8320] [--seed 1234] [--host 0.0.0.0] [--assets D:/Game] [--hour 9] [--daymin 20] [--uncanny] [--nshift 1] [--regrow 1] [--snuffers n] [--strikes 1] [--treefire 0] [--heat 1] [--smelt 1] [--wardrobe] [--thief often]
-//     [--xprate 1] [--importcap 10] [--data dir] [--movelvl 0] [--dev] [--quiet]
+//     [--xprate 1] [--importcap 10] [--data dir] [--movelvl 0] [--season summer] [--dev] [--quiet]
+//   --season: the season the world stays in (summer by default; spring / autumn / winter); turn: the year turns as it used to
 //   --hour: the world's clock at the start (in-game hours since the start: 9 the first morning, 22 its night); --daymin: real
 //   minutes per in-game day (0 stops the clock); --uncanny: the uncanny forest on (docs/UNCANNY.md; off without it); --nshift: how strong the night shift is (docs/UNCANNY.md; 0 = none)
 //   --regrow: a factor on how long picked patches take to grow back (docs/FORAGING.md; 0.05 to test)
@@ -32,6 +33,7 @@ import {createPlayers} from './players.mjs';
 import {SKILLS, IMPORT_CAP} from '../src/content/skills.js';
 import {readFileSync, writeFileSync, mkdirSync, renameSync} from 'node:fs';
 import {VERSION, PATH, PORT, CLOCK} from '../src/net/protocol.js';
+import {TUNE as WXT} from '../src/sim/wxclock.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (name, d) => { const i = process.argv.indexOf('--' + name); return i > 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d; };
@@ -41,6 +43,7 @@ const assets = arg('assets', null), quiet = process.argv.includes('--quiet'), un
 const thief = arg('thief', '');   // --thief often: the fox comes for food within an in-game hour of it going down (sim/foxden.js)
 const hour = +arg('hour', CLOCK.hour), daymin = +arg('daymin', CLOCK.daymin), nshift = +arg('nshift', 1), regrow = +arg('regrow', 1), snuffers = arg('snuffers', null);
 const strikes = +arg('strikes', 1), treefire = arg('treefire', '1') !== '0';
+const season = arg('season', WXT.keep), keepS = season === 'turn' ? null : season;   // --season summer (the default, sim/wxclock.js TUNE.keep) | spring | autumn | winter: the world stays in it; turn: the year turns
 const log = quiet ? () => {} : (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const xprate = arg('xprate', '1') === 'raw' ? 'raw' : +arg('xprate', 1), importCap = +arg('importcap', IMPORT_CAP), data = arg('data', null);
 const movelvl = Math.max(0, +arg('movelvl', 0) | 0), dev = process.argv.includes('--dev');
@@ -71,7 +74,7 @@ try {
 catch (e) { log('forest: not loaded (acts are not checked against the trees, no uncanny forest):', e.message); }
 
 const workshop = {heat: +arg('heat', 1) > 0 ? +arg('heat', 1) : 1, smelt: +arg('smelt', 1) > 0 ? +arg('smelt', 1) : 1, wardrobe: process.argv.includes('--wardrobe')};
-const room = createRoom({seed, trees, decor, veins, cave, forest, plan, strikes: strikes > 0 ? strikes : 1, treefire, snuffers: snuffers === null ? undefined : Math.max(0, +snuffers || 0), regrow: regrow > 0 ? regrow : 1, unc, hour: isFinite(hour) ? hour : CLOCK.hour, daymin: isFinite(daymin) ? daymin : CLOCK.daymin, log, workshop, fauna, thief,
+const room = createRoom({seed, trees, decor, veins, cave, forest, plan, strikes: strikes > 0 ? strikes : 1, treefire, snuffers: snuffers === null ? undefined : Math.max(0, +snuffers || 0), regrow: regrow > 0 ? regrow : 1, unc, hour: isFinite(hour) ? hour : CLOCK.hour, season: keepS, daymin: isFinite(daymin) ? daymin : CLOCK.daymin, log, workshop, fauna, thief,
   players, xprate: xprate === 'raw' || xprate > 0 ? xprate : 1, importCap, movelvl, dev});
 const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.glb': 'model/gltf-binary',

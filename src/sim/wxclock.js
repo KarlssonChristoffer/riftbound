@@ -43,9 +43,17 @@ export const CLIMATE = {
   desert: {none: {clear: 5, fair: 1.5, haze: 2, windy: 1.5, storm: .2}},   // world/desert.js: dry; now and then a summer storm
 };
 export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
-export const TUNE = {spell: [2, 6], seasonDays: 3};   // in-game hours a spell lasts; in-game days a season (sim/env.js TUNE.seasonDays starts from it)
+export const TUNE = {spell: [2, 6], seasonDays: 3,   // in-game hours a spell lasts; in-game days a season (sim/env.js TUNE.seasonDays starts from it)
+  keep: 'summer'};   // the season the world stays in (keepSeason: the clock skips the rest of the year); null: the year turns (?season=turn, --season turn)
 // the season an in-game hour falls in (seasonDays in-game days a season; hour 0 is the first morning of spring's day 0)
 export const seasonAt = (hours, seasonDays) => SEASONS[Math.floor(((hours / (seasonDays * 24)) % 4 + 4) % 4)];
+// the clock kept in one season: an hour outside it moves on a whole season at a time (the same time of day) until it's in it, so
+// the clock only ever goes forward and every machine that knows the kept season jumps alike
+export function keepSeason(hours, season, seasonDays) {
+  if (!SEASONS.includes(season)) return hours;
+  for (let i = 0; i < 4 && seasonAt(hours, seasonDays) !== season; i++) hours += seasonDays * 24;
+  return hours;
+}
 // the climate a biome draws from in a season (its own season's table, its one table, the ruins' as a fallback)
 export function climateOf(biome, season) { const C = CLIMATE[biome] || CLIMATE.ruins; return C[season] || C.none || Object.values(C)[0]; }
 // a weighted pick from a climate table with r in 0..1 (precip false: rain / snow / storm spells left out)
