@@ -12,7 +12,7 @@
 // or coming out; a shot kicks it up and back with a soft flash at the muzzle (G.fx), a reload tips it over and down, a
 // roll / climb / swim takes it down; it bobs with his steps and trails a turn of the look. Drawn over the scene (a weapon
 // model never goes into a wall); view/fphands.js leaves its pixel revolver out while F.fp.
-// ?deagle=0 leaves the hand empty.
+// Off by default (his own pixel revolver); ?deagle=1 turns it on.
 // OWNS: its mesh, its environment map, its first-person springs. READS: host.playerPose / P / PL (gun) / weapon / yaw,
 //   features/chasecam.js hidesBody, host.G (camera, view size, frame, cine, fxU, fx).
 // BUDGET: one draw (~24k triangles) a frame while it shows; nothing allocated per frame.
@@ -32,7 +32,7 @@ const FLASH = [1, .78, .42];
 const HIDE = new Set(['roll', 'climb', 'mantle', 'rope', 'swim', 'fall', 'knock', 'leap', 'vault', 'launched', 'floored', 'hold']);   // (view/fphands.js HIDE)
 
 export async function create(host) {
-  const F = {name: 'deagle', on: flags.get('deagle') !== '0', fp: false, inHand: false};   // inHand: drawn in his fist (view/livehero.js leaves the model's revolver out)
+  const F = {name: 'deagle', on: flags.get('deagle') === '1', fp: false, inHand: false};   // inHand: drawn in his fist (view/livehero.js leaves the model's revolver out)
   if (!F.on) return F;
   const {G, THREE} = host;
   const root = new THREE.Group(); root.matrixAutoUpdate = false;

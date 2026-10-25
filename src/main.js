@@ -98,8 +98,8 @@ const t00 = performance.now();
 // the loadout (view/hero.js LOADOUTS). Default: the runtime cloth (cloak + scarf tail answer the wind; ?set=basic = the baked cloak)
 // (?set=gunslinger | outlaw: the cowboys, a revolver each: content/weapons.js)
 // (co-op: the gunslinger, drawn live: the others see his drawn pose as it is, features/coop.js)
-// (the golden deagle, features/deagle.js: the gunslinger in every game, a run too; ?deagle=0 the Ranger again)
-const loadI = SET_NAMES.includes(Q.get('set')) ? SET_NAMES.indexOf(Q.get('set')) : (SESSION.mp || Q.get('deagle') !== '0') && SET_NAMES.includes('gunslinger') ? SET_NAMES.indexOf('gunslinger') : 1;
+// (the gunslinger in every game, a run too, with his own revolver; ?deagle=1 the golden deagle in his hand: features/deagle.js)
+const loadI = SET_NAMES.includes(Q.get('set')) ? SET_NAMES.indexOf(Q.get('set')) : SET_NAMES.includes('gunslinger') ? SET_NAMES.indexOf('gunslinger') : 1;
 $('#load').textContent = 'Loading the Ranger…';
 const TIMING = {}, mark = (k, t0) => { TIMING[k] = +((performance.now() - t0) / 1000).toFixed(2); };
 let tp = performance.now();

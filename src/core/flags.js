@@ -187,7 +187,7 @@ export const FLAG_DOCS = {
   views: '0: run the sim alone, no presentation step or drawing (tools/test/simview.mjs: the sim must come out the same)',
   owncheck: '1: record writes to entity fields by systems that do not own them (dev/owncheck.js; slow: for checks)',
   photo: '1: open straight into photo mode (ui/photo.js; F4 or the menu otherwise: tests)',
-  deagle: '0: the live hero\'s gun hand empty again (features/deagle.js: the golden Desert Eagle, drawn smooth over the pixels)',
+  deagle: '1: the golden Desert Eagle in the live hero\'s gun hand instead of his pixel revolver (features/deagle.js: drawn smooth over the pixels; off by default)',
 };
 const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
 const warned = new Set();
