@@ -172,7 +172,7 @@ export async function create(host) {
         }
         else if (m.k === 'clock') {
           clk.t = m.t; clk.h = m.h; clk.rate = m.rate;
-          if (env) { env.borrowed = true; env.setDayMinutes(m.rate > 0 ? 24 / (m.rate * 60000) : 0); follow(true); }
+          if (env) { env.borrowed = true; env.setDayMinutes(m.rate > 0 ? 24 / (m.rate * 60000) : 0); env.setKeep?.(m.season); follow(true); }   // (season: the one the server keeps the world in; none: its year turns)
           const want = flags.get('time');   // (dev: a ?time= asks the server's clock for it, once)
           if (want && !askedTime) { askedTime = true; C.act('time', want); }
         }

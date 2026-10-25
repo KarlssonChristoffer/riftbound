@@ -39,7 +39,7 @@ import {mealNotes, parseCode, codeOf, MEALS, QUALITIES} from '../src/content/mea
 import {PLANTS, pickYield, pickStats, levelNotes, regrowHours} from '../src/content/forage.js';
 import {VEINS, mineYield, mineStats, regrowHours as veinHours} from '../src/content/mining.js';
 import {BUILDS, TUNE as BUILD, POT, fuelAt, stokeFuel, potOpen} from '../src/content/builds.js';
-import {WEATHER, createSchedule, seasonAt, TUNE as WXT} from '../src/sim/wxclock.js';
+import {WEATHER, createSchedule, seasonAt, keepSeason, TUNE as WXT} from '../src/sim/wxclock.js';
 import {TUNE as TH, STRIKE, ironOf} from '../src/content/thunder.js';
 import {createThunder, nextSpring} from '../src/sim/thunder.js';
 import {TUNE as ICE} from '../src/content/ice.js';
@@ -63,17 +63,23 @@ import {createWorkshop} from './workshop.mjs';
 const B64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;   // (a pose's base64: state())
 const PART_H = {dawn: 6.4, day: 10, dusk: 19.2, night: 22};   // (sim/env.js setPart's hours)
 
-export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, plan = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, log = () => {}, maxPlayers = 8, workshop = {}, fauna = null, thief = '',
+export function createRoom({seed, trees = null, decor = null, veins = null, cave = null, forest = null, plan = null, strikes = 1, treefire = true, snuffers = undefined, regrow = 1, unc = null, hour = CLOCK.hour, daymin = CLOCK.daymin, season = WXT.keep, log = () => {}, maxPlayers = 8, workshop = {}, fauna = null, thief = '',
   players = null, xprate = 1, importCap = IMPORT_CAP, movelvl = 0, dev = false}) {
   const peers = new Map();   // id -> peer (after its hello)
   const world = new Map();   // id -> {s, by, t, at?}: the shared world's changes (at: the clock's hour a picked patch grows back)
   const t0 = Date.now(), now = () => Date.now() - t0;
   let nextId = 1;
   // THE CLOCK: h0 hours at server time c0, going on at rate hours per ms
-  let h0 = hour, c0 = 0;
+  // (season: the one the world stays in, sim/wxclock.js keepSeason: leaving it the clock moves on whole seasons; null: the year turns)
+  const keep = season || null;
+  let h0 = keep ? keepSeason(hour, keep, WXT.seasonDays) : hour, c0 = 0, kJump = false;
   const rate = daymin > 0 ? 24 / (daymin * 60000) : 0;
-  const clock = () => h0 + (now() - c0) * rate;
-  const clockMsg = () => ({k: 'clock', t: now(), h: +clock().toFixed(5), rate});
+  const clock = () => {
+    const h = h0 + (now() - c0) * rate; if (!keep) return h;
+    const k = keepSeason(h, keep, WXT.seasonDays); if (k !== h) { h0 = k; c0 = now(); kJump = true; }
+    return k;
+  };
+  const clockMsg = () => ({k: 'clock', t: now(), h: +clock().toFixed(5), rate, season: keep});
   // THE UNCANNY FOREST: its secrets and the night elk (none without a plan)
   const secrets = unc ? createSecrets(unc) : null;
   const elk = unc ? createStalker(unc, mulberry32(seed ^ 0x5e1c)) : null;
@@ -660,6 +666,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
   let anT = 0;
   const timer = setInterval(() => {
     if (!peers.size) return;
+    clock(); if (kJump) { kJump = false; all(clockMsg()); }   // (the kept season's jump: everyone's clock with it)
     regrowTick(DT); dawnTick();
     thunderTick(DT);
     ws.tick(DT);

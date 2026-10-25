@@ -81,7 +81,7 @@ import {flags} from '../core/flags.js';
 import {clamp, smooth, lerp} from '../core/mathx.js';
 import {hex01 as hex} from '../core/color.js';
 import {mulberry32, simSeed, simRandom} from '../core/rng.js';
-import {WEATHER, CLIMATE, createSchedule, TUNE as WXT} from './wxclock.js';   // the spells from the seed and the clock (shared with the co-op server)
+import {WEATHER, CLIMATE, createSchedule, keepSeason, TUNE as WXT} from './wxclock.js';   // the spells from the seed and the clock (shared with the co-op server)
 import {density, coverQ, wrapDrift, QUANT, FIELD_V2} from '../core/cloudfield.js';
 
 export const TUNE = {
@@ -186,7 +186,8 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
     open: {cloud: 0, rain: 0, snow: 0, fog: 0, storm: 0, wind: 1}, under: {cloud: 0, rain: 0, snow: 0, fog: 0, storm: 0, wind: 1},   // (TRANSITIONS)
     sunView: 1, broken: 0, trans: {kind: null, phase: '', k: 0, t: 0}, deck: {mode: 0, cover: 0, q: 1, rim: TUNE.trans.rim},
     year: 0, tinted: false, snowCover: 0, wet: 0, leafK: 1, leafFall: 0, autumn: 0,   // year 0..4 (spring .. winter); tinted = the biome's colours follow the season
-    ver: {part: 0, season: 0, weather: 0, leaf: 0}, frozen: false, seasonLock: null, weatherLock: null};
+    ver: {part: 0, season: 0, weather: 0, leaf: 0}, frozen: false, seasonLock: null, weatherLock: null,
+    keep: WXT.keep};   // keep: the season the world stays in (sim/wxclock.js keepSeason; a co-op server's word replaces it), null: the year turns
   let lastBiome = null, lastW = null, instant = false, cmdNext = false;   // (instant: the next change eases, no front; cmdNext: it was commanded)
   const OLD = Q.get('wxtrans') === '0';   // ?wxtrans=0: the old fronts (FRONTS below), no transitions
   let pv = null, truth = null;   // PREVIEW (below): what photo mode asks to see; the readings as they were before it
@@ -209,6 +210,8 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
   if (url.daymin !== null && isFinite(+url.daymin)) { if (+url.daymin <= 0) E.frozen = true; else TUNE.dayMinutes = +url.daymin; }
   if (url.hour !== null && isFinite(+url.hour)) hours = Math.floor(hours / 24) * 24 + clamp(+url.hour, 0, 23.99);
   if (SEASONS.includes(url.season)) E.seasonLock = url.season;
+  else if (url.season === 'turn') E.keep = null;
+  const kept = () => { const h = E.keep ? keepSeason(hours, E.keep, TUNE.seasonDays) : hours; if (h === hours) return false; hours = h; return true; };   // (true: it jumped)
   if (WEATHER[url.weather]) E.weatherLock = url.weather;
   else if (Q.has('bench')) E.weatherLock = 'fair';   // the perf bench compares runs: no random rain in its scenarios
   let saveT = 0;
@@ -224,12 +227,13 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
     const b = biome(), yr = pv && pv.year != null && SEASONAL[b] ? pv.year : null;   // (a preview's point of the year)
     const yearH = TUNE.seasonDays * 24, sf = yr !== null ? (yr % 4 + 4) % 4 : ((hours / yearH) % 4 + 4) % 4, si = Math.floor(sf), into = sf - si;
     let s = SEASONS[si], n = SEASONS[(si + 1) % 4], k = smooth((into - (1 - TUNE.seasonBlend)) / TUNE.seasonBlend);
-    if (E.seasonLock && yr === null) { s = n = E.seasonLock; k = 0; }
+    const lock = E.seasonLock || E.keep;
+    if (lock && yr === null) { s = n = lock; k = 0; }
     if (FIXED[b]) { s = n = FIXED[b]; k = 0; }
     if (s !== E.season) E.ver.season++;
     E.season = s; E.seasonNext = n; E.seasonK = k;
     E.seasonal = !!SEASONAL[b] || !!FIXED[b]; E.tinted = !!SEASONAL[b];
-    E.year = E.seasonLock && yr === null ? SEASONS.indexOf(E.seasonLock) + .5 : sf;
+    E.year = lock && yr === null ? SEASONS.indexOf(lock) + .5 : sf;
     let j = 0; while (j < LEAF_YEAR.length - 2 && E.year >= LEAF_YEAR[j + 1][0]) j++;
     const [y0, l0] = LEAF_YEAR[j], [y1, l1] = LEAF_YEAR[j + 1]; E.leafK = SEASONAL[b] ? lerp(l0, l1, smooth((E.year - y0) / (y1 - y0))) : 1;
     j = 0; while (j < LEAF_FALL.length - 2 && E.year >= LEAF_FALL[j + 1][0]) j++;
@@ -250,7 +254,7 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
     E.snowCover = 0; E.wet = 0;
     for (let t = Math.max(0, h - TUNE.replay); t < h; t += .25) {
       const w = E.weatherLock || spell(t).w, yr = ((t / (TUNE.seasonDays * 24)) % 4 + 4) % 4;
-      stepGround(Math.min(.25, h - t), WEATHER[w] || WEATHER.fair, E.seasonLock || SEASONS[Math.floor(yr)]);
+      stepGround(Math.min(.25, h - t), WEATHER[w] || WEATHER.fair, E.seasonLock || E.keep || SEASONS[Math.floor(yr)]);
     }
   }
   // ---- weather: the clock's spell for the biome (sim/wxclock.js), the channels eased toward it
@@ -513,7 +517,7 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
   }
   E.step = dt => {
     const dh = E.frozen ? 0 : dt / DAY() * 24;
-    hours += dh; syncClock(); stepWeather(dt, dh); stepGround(E.frozen ? dt / 50 : dh);   // (a stopped clock still lets the ground follow the weather)
+    hours += dh; if (!E.borrowed && kept()) replayGround(hours); syncClock(); stepWeather(dt, dh); stepGround(E.frozen ? dt / 50 : dh);   // (a stopped clock still lets the ground follow the weather)
     if ((saveT -= dt) <= 0) { saveT = 15; save(); }
   };
 
@@ -636,6 +640,7 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
   // a jump of more than TUNE.replayJump hours (a welcome from a server whose world is elsewhere in its year): the ground's memory
   // replayed from the clock's own weather (replayGround), so a late joiner's snow and wet ground are everyone's
   E.setT = h => { if (isFinite(h)) { const far = Math.abs(h - hours) > TUNE.replayJump; hours = h; syncClock(); if (far) replayGround(h); } };
+  E.setKeep = s => { E.keep = SEASONS.includes(s) ? s : null; if (!E.borrowed && kept()) replayGround(hours); syncClock(); };   // (co-op: the server's kept season; it keeps the clock)
   E.spellAt = h => spell(h);   // (the clock's spell at an in-game hour: tests, the wrong weather's scheduling)
   // ---- PREVIEW (ui/photo.js: photo mode, while the sim stands still): another hour, point of the year, weather or wind
   // shown through every reading above (hour, part, season, year, leafK, autumn, sky, windLevel, weather, the ground's snow
@@ -680,6 +685,7 @@ export function createEnv({moods, biome, Q = flags, focus = null, seed = null}) 
   E.clock = () => { const h = Math.floor(E.hour), m = Math.floor((E.hour - h) * 60); return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`; };
   E.label = () => `${E.clock()} ${E.part} · day ${E.day + 1}${E.seasonal ? ' · ' + E.season + (E.seasonK > .02 ? ' -> ' + E.seasonNext : '') : ''} · ${E.weather}`;
   if (url.time && PART_H[url.time] !== undefined) E.setPart(url.time);   // the old ?time=day|dusk|night
+  if (kept()) replayGround(hours);   // (a saved clock from a season the world no longer stays out of)
   syncClock(); lastBiome = biome();
   if (!E.weatherLock) E.weather = spell().w;   // (the clock's spell, settled: a page opens on the world's weather as it is)
   for (const c of CH) E.sky[c] = E.light[c] = E.open[c] = E.under[c] = (WEATHER[E.weather] || WEATHER.fair)[c] ?? (c === 'wind' ? 1 : 0);
