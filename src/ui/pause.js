@@ -32,6 +32,7 @@ const CLAIM = {
   cinema: {'': {tab: 'controls', group: 'Camera', label: 'Cinematic camera when idle', id: 'cinema', keep: 'cinema'}},
   aim: {Aim: {tab: 'controls', group: 'Aim', label: 'Aim help', id: 'aim', keep: 'aim'}},   // (features/aim.js: manual / soft / lock / auto)
   blood: {'': gfx('Effects', 'Blood', 'blood', 'blood')},   // (features/blood.js: on by default; ?blood=0)
+  hudboxes: {'': {tab: 'game', group: 'HUD', label: 'Info boxes (almanac, chips)', key: 'Shift+H'}},   // (features/hudboxes.js: remembers itself)
   uncanny: {'': {tab: 'game', group: 'World', label: 'Uncanny forest', id: 'uncanny', keep: 'uncanny'}},   // (features/uncanny.js: off by default; ?uncanny=1)
   audio: {'': {tab: 'audio', group: 'Sound', label: 'Sound', key: 'M'}, Volume: vol('Master'), Music: vol('Music'), Effects: vol('Effects'), Ambience: vol('Ambience'),
     'Gun sounds': {tab: 'audio', group: 'Sound', label: 'Gun sounds'}},   // (the western-movie flavor: features/audio.js, remembered there)
@@ -48,7 +49,7 @@ const KEYS = [[['W', 'A', 'S', 'D'], 'move (camera-relative)'], [['Shift'], 'spr
   [['LMB'], 'revolver: draw · shoot'], [['RMB'], 'revolver: fan the hammer'], [['R'], 'revolver: reload'], [['V'], 'revolver: pistol whip'], [['Y'], 'tip the hat'],
   [['2', '1'], 'fists up / the gun again (the gunslinger)'], [['LMB', 'RMB'], 'fists: left / right hand (alternate: a combo; hold: a heavy; both: headbutt)'],
   [['E'], 'fists: grab a foe (again: toss)'], [['Space'], 'fists: slip a punch (then counter)'],
-  [['LMB', 'E'], 'on a tree: chop it (an axe in the bag; hold to keep chopping)'], [['Tab'], 'your window: where you left it'], [['I'], 'pack: gear, bag, pouch'], [['K'], 'skills'], [['B'], 'craft'], [['J'], 'journal'], [['H'], 'map'],
+  [['LMB', 'E'], 'on a tree: chop it (an axe in the bag; hold to keep chopping)'], [['Tab'], 'your window: where you left it'], [['I'], 'pack: gear, bag, pouch'], [['K'], 'skills'], [['B'], 'craft'], [['J'], 'journal'], [['H'], 'map'], [['Shift', 'H'], 'hide / show the info boxes on the left'],
   [['Z', 'X'], 'turn the camera (or drag with the middle button)'], [['Home'], 'reset the camera'], [['Wheel'], 'zoom in / out'],
   [['F6'], 'camera: top-down / third person / first person (click to look around)'],
   [['M'], 'mute'], [['U'], 'music on / off'], [['F4'], 'photo mode'], [['Esc'], 'this menu']];

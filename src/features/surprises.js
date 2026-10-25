@@ -93,7 +93,7 @@ export async function create(host) {
   function chips(q, u) {
     CHIPS.length = 0;
     for (const p of parts) { const c = p.chip?.(); if (!c) continue; if (Array.isArray(c)) CHIPS.push(...c); else CHIPS.push(c); }
-    if (!CHIPS.length || host.feature('pack')?.open) return;
+    if (!CHIPS.length || host.feature('pack')?.open || host.feature('hudboxes')?.on === false) return;   // (Shift+H hides the boxes: features/hudboxes.js)
     const H = 13 * u, gap = 3 * u, base = q.canvas.height - 46 * u, blink = ((performance.now() / 300) | 0) % 2;
     q.save();
     if (C.warp.mirrored) q.setTransform(-1, 0, 0, 1, q.canvas.width, 0); else q.setTransform(1, 0, 0, 1, 0, 0);

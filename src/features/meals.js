@@ -348,7 +348,7 @@ export async function create(host) {
       const L = peers(), C = host.feature('coop')?.net;
       if (L && C) for (const p of L.values()) { if (!p.md) continue; parseCode(p.md, PC); if (PC.id === 'smoked_eel' && PC.q === 'burnt' && C.sample(p, PS)) eyesAt(PS.x, PS.y, PS.z, PS.phi); }
     },
-    hd(q2) { if (id && active() && !host.hudOff && !host.playerHidden && !pack()?.open) chip(q2); },   // (the pack's panel shows it too, over that corner)
+    hd(q2) { if (id && active() && !host.hudOff && host.feature('hudboxes')?.on !== false && !host.playerHidden && !pack()?.open) chip(q2); },   // (the pack's panel shows it too, over that corner)
     hud: () => id ? `meal ${code || id} ${Math.ceil(left)}s` : '',
     // DEV (Esc > Sandbox): any mood now, at any quality (the stick's timing bar is features/cooking.js's)
     menu() {

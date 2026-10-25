@@ -142,7 +142,7 @@ export async function create(host) {
     lights: () => ON ? look.lights() : [],
     // the type the weapon in hand deals now, in a small pixel chip bottom left (only once something is fitted)
     hd(q) {
-      if (!ON || host.hudOff || shown()) return;
+      if (!ON || host.hudOff || shown() || host.feature('hudboxes')?.on === false) return;   // (Shift+H: features/hudboxes.js)
       const wid = weaponId(), f = sim.fitOf(wid); if (!f || !SLOTS.some(s => f[s])) return;
       const E = ELEM[sim.elemOf(wid)], u = hdUnit(), H = q.canvas.height;
       const s = E.name.toUpperCase(), n = SLOTS.filter(k => f[k]).length;

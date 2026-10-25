@@ -197,7 +197,7 @@ export async function create(host) {
     if (todayOn(s) && todayList.length) M.today = todayList.map((T, i) => ({text: T.party && !online() ? soloText(T) : T.text, n: s.t[i] || 0, of: T.n, done: !!s.tg[i]}));
     return M;
   }
-  const shown = () => ON && !host.hudOff && !host.playerHidden && !host.lock && game()?.mode === 'sandbox' && !pack()?.open && !!S();
+  const shown = () => ON && !host.hudOff && host.feature('hudboxes')?.on !== false && !host.playerHidden && !host.lock && game()?.mode === 'sandbox' && !pack()?.open && !!S();
 
   // ---------------------------------------------------------------- the pack panel's section
   const esc0 = s => s;
