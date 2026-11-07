@@ -16,12 +16,16 @@
 //             in patches on the bare earth under the crowns, and woodland flowers (wood anemone and chickweed wintergreen white,
 //             twinflower pink in the moss, cow-wheat yellow, a wood violet now and then). Its first EDGE m (a ragged line) blend from
 //             the meadow's sward into it, tuft by tuft, so the meadow does not stop on a line where the forest begins
+//   tufts     the "living grass" layer: a share of the sward's tufts also stands up as a pixel-art sprite (render/grass.js
+//             TUFT_VS: world-space wind from two diverging noises on a stepped clock, fake perspective, accents, colour patches,
+//             hybrid toon); every player bends them (co-op peers too, through the net client's samples), sent at a low tick.
+//             F10 > Nature > Grass has its look live; ?tufts=0 none
 // ?grass=0 grows nothing. Detail low turns it off (ui/pause.js LOW_OFF).
 //
 // FEATURE CONTRACT (main.js): create(host) -> F: view, frame, biomeChanged, toggle, ms.
 // OWNS: the blades (render/grass.js), its per-walker scratch (a WeakMap). READS: host.world.groundCanvas, host.biome (style
-// ramps, hole), host.elev / inStream / layout.inPool, world.js steep, host.wind (gpu), host.env (year, snowCover), host.player / P, the
-// registry (a live query: brutes, barrels), world.forestTiles + layout.js FOREST (decorClear). EMITS: nothing.
+// ramps, hole), host.elev / inStream / layout.inPool, world.js steep, host.wind (gpu), host.env (year, snowCover), host.player / P, coop's
+// net client (the peers' samples), the registry (a live query: brutes, barrels), world.forestTiles + layout.js FOREST (decorClear). EMITS: nothing.
 // BUDGET: view ~0, frame ~0.04 ms (F3, measured 2026-10-02: the uniforms, the pushers, the trample pass submitted); the build
 // ~40 ms at a world rebuild (~50k blades in the ruins; with the forest ~550k in all, the forest's floor ~390k of them: ~1.5 s
 // more in headless software GL, not yet timed on a real GPU machine); the GPU cost is in render/grass.js (12 m chunks the view culls).
@@ -79,6 +83,13 @@ const TUNE = {
     flowers: {k: .5, lo: .52, hi: .76, p: .5,
       floor: [.5, .14, .08, .28], moss: [.3, .04, .06, .6], heath: [0, 0, .45, .55], upland: [.3, .4, .2, .1]},
   },
+  // THE TUFTS (render/grass.js TUFT_VS: pixel-art tufts of grass on billboards, the "living grass" layer; ?tufts=0 none): a share p of
+  // the sward's tufts (by the ground: meadow, the downs, the forest's grass, its bare earth) also stand up as a sprite (their own
+  // generator: the blades' layout stays as it was). The look (live, the dev menu): the wind's clock fps (0 smooth), the two noises'
+  // divergence (rad), lean at calm / per m/s (heights), the noise per m and its speed, the view sway (px), the max lean, the fake
+  // perspective, the pushers' radius x, accents / patches on, the density, the toon smoothing; tick: the pushers sent this often a s
+  tufts: {seed: 37, p: {meadow: .4, west: .38, forest: .32, earth: .08}, arena: .3, max: 300000, tick: 15,
+    look: {fps: 8, div: .5, calm: .3, perMs: .1, scale: .35, speed: 1.6, sway: .6, maxLean: .85, persp: .55, pushR: 1.5, accents: true, patches: true, density: 1, toon: .35, debug: false}},
 };
 // the cool palette (the default; ?palette=old, world/biomes.js): the wildflowers mostly a bright lavender, a few more of them (the references)
 if (flags.get('palette') !== 'old') Object.assign(TUNE.flowers, {p: .4, lo: .56, cols: ['#e6e0d2', '#e8c650', '#c49cf2', '#e898bc'], w: [.22, .16, .46, .16]});
@@ -93,6 +104,16 @@ export async function create(host) {
   F._.grass = grass;
   if (flags.get('palette') !== 'old') grass.setFlowerShape(1);   // (V heads with the cool palette's lavender: the references' flowers)
   grass.setCalm(flags.get('calm') !== '0');   // a calm sward: the blades in the ground's tone, light tips (render/grass.js setCalm)
+  const TT = TUNE.tufts, TUFTS = flags.get('tufts') !== '0';
+  let tuftsOn = TUFTS;
+  grass.setTuftLook({...TT.look, ppmh: host.PPMH});
+  // the tufts' builders' buffers and generator (per build): tuft(x, y, code, p) adds one with probability p
+  let TA = null, TBf = null, nt = 0, RT = null;
+  const tuft = (x, y, code, p) => {
+    if (RT() >= p || nt >= TT.max) return;
+    const o = nt * 4; TA[o] = x; TA[o + 1] = host.elev(x, y); TA[o + 2] = y; TA[o + 3] = .7;
+    TBf[o] = code; TBf[o + 1] = RT(); TBf[o + 2] = 0; TBf[o + 3] = 0; nt++;
+  };
   const WBUF = new Float32Array(8 + 16 * MAX_FRONTS), PBUF = new Float32Array(8 * MAX_PUSH), BL = new Float32Array(12);   // BL: this frame's blasts (x, y, r) x 4
   let nbl = 0;
   const walkers = host.entities.query('grass.walkers', p => p.kind === 'brute' || p.sparring || p.kind === 'barrel' || p.kind === 'barrel_x');
@@ -102,7 +123,8 @@ export async function create(host) {
   const rgb = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
   function build() {
     const S = host.biome.style, names = Object.keys(TUNE.ramps);
-    if (host.biome.id !== 'ruins' || !names.every(n => S[n]?.h)) { grass.setBlades(null, null, 0, [], []); return 0; }
+    if (host.biome.id !== 'ruins' || !names.every(n => S[n]?.h)) { grass.setBlades(null, null, 0, [], []); grass.setTufts(null, null, 0); return 0; }
+    nt = 0; RT = mulberry32(TT.seed); if (TUFTS && !TA) { TA = new Float32Array(TT.max * 4); TBf = new Float32Array(TT.max * 4); }
     const t0 = performance.now();
     // each ramp as [highlight, tone 0 .. 3] (0..1): the blades step up from the ground's tone, even on its lightest
     const ramps = names.map(n => { const c = S[n].h.map(h => rgb(h).map(v => v / 255)); return [c[0].map((v, i) => Math.min(1, v + (v - c[1][i]) * TUNE.highlight)), ...c]; });
@@ -123,6 +145,7 @@ export async function create(host) {
       if (r1 * dMax > Rm.d * thin) continue;
       if (hole?.(x, y) || host.inStream(x, y) || lay.inPool?.(x, y, .01, .45) || steep(x, y)) continue;   // (walkable terrain: none on a cliff's face)
       const inArena = x > PLAY.x0 && x < PLAY.x1 && y > PLAY.y0 && y < PLAY.y1;
+      if (TUFTS && ri < 3) tuft(x, y, cd, TT.p.meadow * (inArena ? TT.arena : 1));
       const tall = TUNE.clump.lo + (TUNE.clump.hi - TUNE.clump.lo) * vnoise(x * TUNE.clump.k, y * TUNE.clump.k, 42);
       const h = (Rm.h[0] + (Rm.h[1] - Rm.h[0]) * r2) * tall * (inArena ? TUNE.arena : 1);
       // a wildflower on this tuft? (meadow grass outside the walls, in a patch)
@@ -146,7 +169,8 @@ export async function create(host) {
     n = buildForest(A, B, n, names, pick);
     const own = TUNE.forest.own.map(nm => { const c = S[nm]?.h.map(h => rgb(h).map(v => v / 255)); return c ? [c[0].map((v, i) => Math.min(1, v + (v - c[1][i]) * TUNE.highlight)), ...c] : null; });
     grass.setBlades(A, B, n, [...ramps, ...own], Fl.cols.map(h => rgb(h).map(v => v / 255)));
-    F._.built = {n, ms: +(performance.now() - t0).toFixed(1)};
+    grass.setTufts(TA, TBf, TUFTS ? nt : 0); grass.setTuftsVisible(tuftsOn);
+    F._.built = {n, tufts: nt, ms: +(performance.now() - t0).toFixed(1)};
     return n;
   }
   // ---- the West Downs' sward (world/westland.js), after the Proving Grounds' (its own generator: theirs stays as it was): over the
@@ -174,6 +198,7 @@ export async function create(host) {
       const tallK = TUNE.clump.lo + (TUNE.clump.hi - TUNE.clump.lo) * vnoise(x * TUNE.clump.k, y * TUNE.clump.k, 42);
       const h = kind === 2 ? (T.tall.h[0] + (T.tall.h[1] - T.tall.h[0]) * r2) * (.82 + .18 * tallK) : kind === 1 ? T.ankle.h[0] + (T.ankle.h[1] - T.ankle.h[0]) * r2 : (Rm.h[0] + (Rm.h[1] - Rm.h[0]) * r2) * tallK;
       const bc0 = kind === 2 && LUSH >= 0 ? LUSH * 4 + Math.min(2, cd & 3) : cd;   // (tall: the lush ramp in the ground's light)
+      if (TUFTS && ri < 3) tuft(x, y, bc0, TT.p.west * (kind === 1 ? .5 : 1));
       let fl = 0;
       if (kind !== 1 && names[ri] === 'grass') {
         const pf = Math.min(1, Math.max(0, (vnoise(x * Fl.k, y * Fl.k, 43) - Fl.lo) / (Fl.hi - Fl.lo)));
@@ -247,6 +272,7 @@ export async function create(host) {
         // on the forest's open floor reads as nothing; a tussock should show)
         const lift = !meadow && !earth ? 1 : 0;
         const bc0 = earth ? (LUSH >= 0 ? LUSH : GRASS) * 4 + Math.min(3, tn + 1) : kind === 2 && LUSH >= 0 ? LUSH * 4 + Math.min(2, tn) : cd - Math.min(lift, tn);
+        if (TUFTS && ri !== MOSS && ri !== HEATH) tuft(x, y, earth || kind === 2 ? bc0 : cd, earth ? TT.p.earth : meadow ? TT.p.meadow : TT.p.forest);   // (in the ground's own tone: its dark pixels outline it)
         // a flower: the meadow's in the band, the forest's own beyond it (by what the ground is)
         let fl = 0;
         if (meadow) {
@@ -282,7 +308,8 @@ export async function create(host) {
   }
 
   // ---- the pushers, nearest the player first (up to MAX_PUSH): [x, z, r, live, dir x, dir z, trample, 0]
-  let np = 0, px0 = NaN, py0 = NaN, pvx = 0, pvy = 0;
+  let np = 0, px0 = NaN, py0 = NaN, pvx = 0, pvy = 0, tickT = 0;
+  const PS = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};   // (a peer's sample)
   function add(x, y, r, live, dx, dy, tr) {
     if (np >= MAX_PUSH) return;
     const o = np * 8; PBUF[o] = x; PBUF[o + 1] = y; PBUF[o + 2] = r; PBUF[o + 3] = live; PBUF[o + 4] = dx; PBUF[o + 5] = dy; PBUF[o + 6] = tr; PBUF[o + 7] = 0; np++;
@@ -297,6 +324,17 @@ export async function create(host) {
       const T = TUNE.trample, roll = P.state === 'roll' || P.state === 'backstep';
       const tr = roll ? T.roll : sp > 3.2 ? T.run : sp > .4 ? T.walk * Math.min(1, sp / 1.5) : 0;
       add(x, y, TUNE.push.player[0], TUNE.push.player[1], sp > .05 ? pvx / sp : 0, sp > .05 ? pvy / sp : 0, tr);
+    }
+    // the other players in co-op (their drawn, interpolated place: features/coop.js's net client), each as a pusher like the player
+    const co = host.feature?.('coop');
+    if (co?.online && co.net) for (const q of co.net.peers.values()) {
+      if (np >= MAX_PUSH) break;
+      const o = co.net.sample(q, PS); if (!o || Math.abs(o.x - x) > 14 || Math.abs(o.y - y) > 9) continue;
+      let L = last.get(q); if (!L) last.set(q, L = {x: o.x, y: o.y});
+      const vx = dt > 0 ? (o.x - L.x) / dt : 0, vy = dt > 0 ? (o.y - L.y) / dt : 0, v = Math.hypot(vx, vy); L.x = o.x; L.y = o.y;
+      if (o.z - host.elev(o.x, o.y) > .2 || v > 20) continue;
+      const T = TUNE.trample, tr = o.s === 'roll' ? T.roll : v > 3.2 ? T.run : v > .4 ? T.walk * Math.min(1, v / 1.5) : 0;
+      add(o.x, o.y, TUNE.push.player[0], TUNE.push.player[1], v > .05 ? vx / v : 0, v > .05 ? vy / v : 0, tr);
     }
     for (const p of walkers) {
       if (p.gone || p.broken || np >= MAX_PUSH || Math.abs(p.x - x) > 14 || Math.abs(p.y - y) > 9) continue;
@@ -322,6 +360,8 @@ export async function create(host) {
     const env = host.env;
     grass.setLook(1 - TUNE.snowShrink * Math.min(1, env?.snowCover || 0), env ? bloom(env.year || 0) : .6);
     pushers(dt); grass.setPushers(PBUF, np);
+    // the tufts get the pushers at a low tick (a hand-drawn step, a little faster than the wind's)
+    tickT += dt; if (tickT >= 1 / TT.tick || tickT > .5) { tickT = 0; grass.setTuftPushers(PBUF, tuftsOn ? np : 0); }
     for (let i = 0; i < nbl; i++) grass.blast(BL[i * 3], BL[i * 3 + 1], BL[i * 3 + 2], TUNE.trample.blast);
     nbl = 0;
     grass.step(dt);
@@ -329,7 +369,27 @@ export async function create(host) {
   };
   F.biomeChanged = () => { build(); px0 = NaN; };
   F.toggle = () => { F.on = !F.on; grass.setVisible(F.on); return F.on; };
-  F.hud = () => F.on && grass.count ? `grass ${grass.count} blades` : '';
+  F.hud = () => F.on && grass.count ? `grass ${grass.count} blades${grass.tuftCount ? ` · ${grass.tuftCount} tufts` : ''}` : '';
+  // ---- the dev menu (F10 > Nature > Grass): the tufts' look, live
+  const L = TT.look, look = o => { Object.assign(L, o); grass.setTuftLook(o); };
+  F.dev = {group: 'Nature', rows: () => !TUFTS ? [{label: 'Grass tufts', text: () => 'off (?tufts=0)'}] : [
+    {label: 'Grass tufts (living grass)', get: () => tuftsOn, set: v => { tuftsOn = !!v; grass.setTuftsVisible(tuftsOn); }},
+    {label: 'Tufts: density', min: 0, max: 1, step: .1, get: () => L.density, set: v => look({density: v})},
+    {label: 'Tufts: wind fps (0 = smooth)', options: [0, 4, 6, 8, 12, 24], get: () => L.fps, set: v => look({fps: +v})},
+    {label: 'Tufts: wind strength', min: 0, max: 1, step: .05, get: () => L.calm, set: v => look({calm: v})},
+    {label: 'Tufts: wind divergence (deg)', min: 0, max: 90, step: 5, get: () => Math.round(L.div * 180 / Math.PI), set: v => look({div: v * Math.PI / 180})},
+    {label: 'Tufts: wind patch size', min: .1, max: 1, step: .05, get: () => L.scale, set: v => look({scale: v})},
+    {label: 'Tufts: wind speed', min: 0, max: 5, step: .2, get: () => L.speed, set: v => look({speed: v})},
+    {label: 'Tufts: fake perspective', min: 0, max: 1.5, step: .05, get: () => L.persp, set: v => look({persp: v})},
+    {label: 'Tufts: sway in view', min: 0, max: 2, step: .1, get: () => L.sway, set: v => look({sway: v})},
+    {label: 'Tufts: push radius', min: .5, max: 3, step: .1, get: () => L.pushR, set: v => look({pushR: v})},
+    {label: 'Tufts: push tick (per s)', options: [6, 10, 15, 30, 60], get: () => TT.tick, set: v => { TT.tick = +v; }},
+    {label: 'Tufts: accents (tall, seed heads, flowers)', get: () => L.accents, set: v => look({accents: !!v})},
+    {label: 'Tufts: colour patches', get: () => L.patches, set: v => look({patches: !!v})},
+    {label: 'Tufts: toon smoothing (0 = hard)', min: 0, max: 1, step: .05, get: () => L.toon, set: v => look({toon: v})},
+    {label: 'Tufts: show the wind field', get: () => L.debug, set: v => look({debug: !!v})},
+    {label: 'Tufts placed', text: () => `${grass.tuftCount}`},
+  ]};
   F.dispose = () => grass.dispose();
   return F;
 }
