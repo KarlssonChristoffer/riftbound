@@ -70,7 +70,7 @@
 import {TAU, clamp, mod, mk, fit, hsh, vn, rng, rgb, css, PAL, SHAFT, WATER, PUDDLES, PUD_COL, KIT, SEED} from './depth/art.js';
 import {flags} from '../core/flags.js';
 import {coverQ, wrapDrift, PERIOD, FIELD_V2, fieldUniforms, density} from '../core/cloudfield.js';
-import {OLD_CLOUDS, CLOUD_SUN, CLOUD_VIEW, SOFT, QUANT_U} from '../render/clouds.js';
+import {OLD_CLOUDS, CLOUD_SUN, CLOUD_VIEW, CLOUDS2, BANDS, SOFT, QUANT_U} from '../render/clouds.js';
 
 const DEG = Math.PI / 180;
 // ============================================================ tunables (live: __r3d.features.find(f => f.name === 'depth').TUNE)
@@ -104,6 +104,40 @@ export async function create(host) {
   const F = {name: 'depth', label: 'Depth (foreground, clouds, shafts, reflections)', key: '7', ambient: true,  on: Q.get('depth') !== '0', ms: 0, TUNE, debug: ''};
   if (Q.get('fg') === '1') TUNE.fg.on = true;
   F.settings = () => [{label: 'Foreground silhouettes', options: ['off', 'on'], get: () => TUNE.fg.on ? 'on' : 'off', set: v => { TUNE.fg.on = v === 'on'; }}];
+  // the dev console's rows (dev/devmenu.js, F10 > Effects > Depth): the cloud shadows' bands (render/clouds.js CLOUDS2), the sun
+  // shafts (render/sunshafts.js) and the old shadow-map god rays (render/godrays.js); their TUNEs are live
+  const shT = () => host.G.shafts?.TUNE, raysT = () => host.G.godrays?.TUNE;
+  const num = (label, obj, key, min, max, step) => ({label, min, max, step, get: () => obj()?.[key] ?? 0, set: v => { const o = obj(); if (o) o[key] = v; }});
+  const arr = (label, obj, key, i, min, max, step) => ({label, min, max, step, get: () => obj()?.[key]?.[i] ?? 0, set: v => { const o = obj(); if (o) o[key][i] = v; }});
+  F.dev = {group: 'Effects', rows: () => [
+    {label: 'Sun shafts (new)', get: () => !!shT()?.on, set: v => { const t = shT(); if (t) t.on = v; }},
+    num('Sun shafts: strength', shT, 'k', 0, 3, .1),
+    {label: 'Sun shafts: lit air (off: flecks drawn out)', get: () => shT()?.mode !== 'fleck', set: v => { const t = shT(); if (t) t.mode = v ? 'air' : 'fleck'; }},
+    num('Sun shafts air: gain', shT, 'gain', .5, 12, .5),
+    num('Sun shafts air: steps', shT, 'steps', 4, 48, 2),
+    num('Sun shafts air: reach (m)', shT, 'reach', 4, 60, 1),
+    arr('Sun shafts air: crown gap (m)', shT, 'beam', 0, .3, 6, .1),
+    arr('Sun shafts air: cloud gap (m, 0 none)', shT, 'beam', 1, 0, 30, .5),
+    num('Sun shafts flecks: length (m)', shT, 'len', 1, 20, .5),
+    arr('Sun shafts flecks: shade all round (m)', shT, 'open', 0, .3, 4, .1),
+    arr('Sun shafts flecks: shade farther out (m)', shT, 'open', 1, .5, 8, .1),
+    num('Sun shafts: dust', shT, 'dust', 0, 1, .05),
+    num('Sun shafts: dust threshold', shT, 'dustAt', 0, 1, .05),
+    arr('Sun shafts: level 1 at', shT, 'lv', 0, .05, 1, .05),
+    num('Sun shafts: longest on screen (px)', shT, 'maxPx', 10, 200, 5),
+    num('Sun shafts: show (0 look, 1 sources, 2 smear)', shT, 'debug', 0, 2, 1),
+    {label: 'Sun shafts: strength now', text: () => (host.G.shafts?.strength ?? 0).toFixed(2) + (host.G.shafts?.live ? ' (drawn)' : ' (off this frame)')},
+    {label: 'Old god rays (October)', get: () => !!raysT()?.on, set: v => { const t = raysT(); if (t) t.on = v; }},
+    ...(CLOUDS2 ? [
+      {label: 'Cloud shadows: stepped bands on the ground', get: () => BANDS.on, set: v => { BANDS.on = v; }},
+      num('Cloud bands: steps', () => BANDS, 'n', 1, 6, 1),
+      num('Cloud bands: density a step', () => BANDS, 'span', .01, .2, .005),
+      num('Cloud bands: thin patches', () => BANDS, 'thin', 0, 1, .05),
+      num('Cloud bands: cloud size (x smaller)', () => BANDS, 'scale', .5, 6, .25),
+      num('Cloud bands: least cover (a clear day)', () => BANDS, 'cover', 0, .8, .05),
+      {label: 'Clouds: share of the sun taken', min: 0, max: 1, step: .05, get: () => BANDS.on ? BANDS.sun : TUNE.clouds.sun[0], set: v => { if (BANDS.on) BANDS.sun = v; else TUNE.clouds.sun[0] = v; }},
+    ] : []),
+  ]};
   let T = 0, biome = '', acc = 0;
   const hist = new Float32Array(60); let hN = 0;
   const WM = () => host.ctxO.WM, HM = () => host.ctxO.HM;
@@ -349,11 +383,12 @@ export async function create(host) {
   // edge (env.front) go to the shader as they are. The old composite's storm look (uFrK, uFrS) is the deck against the
   // view's mean light: it can only darken the deck, not brighten the gaps (render/lighting.js + gfx.js light each pixel
   // from env.open / env.under once they read cloudAt().y)
-  const DUMMY = new Uint8Array(1), OV = new Float64Array(6), OE = new Float64Array(6), OR = new Float64Array(6), RQ = (v, R) => Math.round(v * R) / R;
+  const DUMMY = new Uint8Array(1), OV = new Float64Array(6), OE = new Float64Array(6), OR = new Float64Array(6), OR2 = new Float64Array(6), RQ = (v, R) => Math.round(v * R) / R;
   const CLV = {rt: 0, st: -1, stRt: -1, init: false, g: 0, gInit: false};
   const coverOfN = c => c <= 0 ? 0 : c < .13 ? c / .13 * .1606 : Math.min(.78, .08 + .62 * c);   // (continuous: the old curve, from 0)
   const CLU = {uClD: [0, 0, 0, 0], uClW: [0, 0, 0, 0], uDk: [0, 0, 0, 0], uFrE: [0, 0, 0, 0], uClQa: QUANT_U[0], uClQb: QUANT_U[1], uClQc: QUANT_U[2],
-    uCfA: [0, 0, 0, 0], uCfB: [0, 0, 0, 0], uCfC: [0, 0, 0, 0], uCfD: [0, 0, 0, 0]};
+    uCfA: [0, 0, 0, 0], uCfB: [0, 0, 0, 0], uCfC: [0, 0, 0, 0], uCfD: [0, 0, 0, 0], uClB: [0, 3, .07, 0], uClB2: [1, 0, 0, 0], uCgA: [0, 0, 0, 0], uCgB: [0, 0, 0, 0], uCgC: [0, 0, 0, 0], uCgD: [0, 0, 0, 0]};   // (uClB: render/clouds.js CLOUDS2's bands)
+  const CG = {uCfA: CLU.uCgA, uCfB: CLU.uCgB, uCfC: CLU.uCgC, uCfD: CLU.uCgD};   // (fieldUniforms writes uCf*: the bands' set)
   function driftClouds(dt) {
     const AL = host.env?.aloft; if (!AL) return;
     CLV.rt += dt;
@@ -391,10 +426,13 @@ export async function create(host) {
     let a = M ? M.shadow.a : 0;
     if (O.cloud !== L.cloud) a = a / Math.max(.2, 1 - .8 * L.cloud) * (1 - .8 * O.cloud);   // (mood(): the shadow x (1 - .8 c); the open sky's)
     const s = Math.min(1.2, a / .46) * k, cO = coverOfN(O.cloud), deck = dk.mode > 0;
-    if (!deck && (s <= .01 || cO <= 0)) return false;
+    // (render/clouds.js CLOUDS2: the bands keep a fair-weather sky's cover at least, BANDS.cover, so the shapes show on a clear
+    // day too; the light's own cloud (the mood, the gaps' sun back below) stays the weather's)
+    const bands = CLOUDS2 && BANDS.on, cB = bands ? Math.max(cO, BANDS.cover) : cO;
+    if (!deck && (s <= .01 || cB <= 0)) return false;
     if (CLS.lv !== DUMMY) { CLS.lv = DUMMY; CLS.TW = 1; CLS.TH = 1; CLS.ver++; }   // (no tile: one texel for tTop's cloud rows)
     const cr = TUNE.clouds.core / TUNE.clouds.cover, cA = coverOfN(Math.max(O.cloud, TUNE.clouds.front.appr));
-    CLS.T[0] = coverQ(cO); CLS.T[1] = coverQ(cO * cr); CLS.T[2] = coverQ(cA); CLS.T[3] = coverQ(cA * cr);
+    CLS.T[0] = coverQ(cB); CLS.T[1] = coverQ(cB * cr); CLS.T[2] = coverQ(cA); CLS.T[3] = coverQ(cA * cr);
     const R = PPM, U = CLS.u = CLU;
     U.uClD[0] = RQ(OV[0], R); U.uClD[1] = RQ(OV[1], R); U.uClD[2] = RQ(OV[2], R); U.uClD[3] = RQ(OV[3], R);   // (whole texels: the shadows step, never shimmer)
     U.uClW[0] = RQ(OV[4], R); U.uClW[1] = RQ(OV[5], R); U.uClW[3] = R;
@@ -417,7 +455,12 @@ export async function create(host) {
     // (CLOUD_SUN: the levels take the sun; the mood dims the open sky's by its whole cloud (sim/env.js mood: shadow x (1 - .8 c)),
     // so the gaps get back the share the patches now carry: the view's mean sun stays the mood's. render/lighting.js applies it)
     CLS.gap = 1; CLS.g = CLOUD_VIEW ? CLV.g : 0;
-    if (CLOUD_SUN) { const S = TUNE.clouds.sun; CLS.a1 = S[1]; CLS.a2 = S[0]; CLS.gap = 1 / (1 - cO * (FIELD_V2 ? S[0] * TUNE.clouds.mean : (1 - cr) * S[1] + cr * S[0])); }
+    if (bands) {   // (the bands' own field, BANDS.scale times smaller: its drift scaled alike, so it moves as fast)
+      const k2 = Math.max(.25, BANDS.scale); OR2[0] = OR[0] * k2; OR2[1] = OR[1] * k2; OR2[2] = OR[2] * k2; U.uClB2[0] = k2;
+      fieldUniforms(OR2, CG);
+    }
+    U.uClB[0] = bands ? 1 : 0; U.uClB[1] = Math.max(1, Math.round(BANDS.n)); U.uClB[2] = Math.max(.005, BANDS.span); U.uClB[3] = BANDS.thin;
+    if (CLOUD_SUN) { const S = TUNE.clouds.sun, s0 = bands ? BANDS.sun : S[0]; CLS.a1 = S[1]; CLS.a2 = s0; CLS.gap = 1 / (1 - cO * (FIELD_V2 ? s0 * (bands ? BANDS.mean : TUNE.clouds.mean) : (1 - cr) * S[1] + cr * S[0])); }
     proj2(0, 0, 0, _pp); groundInv(R, CLS.m); CLS.e = _pp[0]; CLS.f = _pp[1];   // (the world's texel grid: the drift is the layers')
     host.G.setClouds(CLS);
     return true;
@@ -546,7 +589,7 @@ export async function create(host) {
   function drawShafts() {
     // (by day the real sunbeams of render/godrays.js take over where they are on: these painted ones stand at fixed spots and
     // ignore the shadows. At night, with no sun shadow map to march, the painted moonbeams of frost / rift stay)
-    if (!TUNE.shafts.on || (host.G?.godrays?.enabled && timeName() !== 'night')) return 0;
+    if (!TUNE.shafts.on || ((host.G?.godrays?.enabled || host.G?.shafts?.enabled) && timeName() !== 'night')) return 0;   // (render/sunshafts.js too)
     ensureShafts(); if (!SH.col) return 0;
     const z = V.z, reach = (TUNE.shafts.lenMax + 30) * z;
     let n = 0, q = null;

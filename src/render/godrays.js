@@ -89,7 +89,7 @@ import {flags} from '../core/flags.js';
 import {CLOUD_GLSL, CLOUD_EXTRA} from './clouds.js';   // (wx-B shim: CLOUD_EXTRA)
 
 export const TUNE = {
-  on: flags.get('godrays') !== '0',
+  on: flags.get('godrays') === '1',   // (off since 2026-11-07: render/sunshafts.js replaces it; ?godrays=1 for an A/B, live in F10)
   band: 6,          // m of air over each pixel's surface that the march covers
   dn: 1 / 12,       // m between the planes (a beam thinner than this across them breaks into strips: at 1/8 the thin beams read as rain)
   planes: 128,      // at most this many a pixel (the shader's loops: 32 runs of 4)

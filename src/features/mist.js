@@ -30,6 +30,7 @@
 // COMP_FS, mistAt(P) is the local density (the medium, more inside the mist). F.at(x, y, h) -> the mist's veil there on the CPU
 // (0..1, without the noise: a reading for other systems, not the drawn pixel). BUDGET: ~0.01 ms a frame (the shader: ~0.05 ms).
 import {flags} from '../core/flags.js';
+import {HAZE} from '../render/lighting.js';   // (THE FAR HAZE's switch: the dev row below)
 import {clamp, smooth, lerp} from '../core/mathx.js';
 import {WORLD, TERRAIN_ON, terrainField} from '../world/layout.js';   // (the field's bounds: the world's; its ground: the bare terrain)
 
@@ -114,8 +115,11 @@ export async function create(host) {
   const G = host.G;
   if (!G.setMist) return {name: 'mist', on: false};
   const VOL = flags.get('mist') !== 'flat' && !!G.setMistVol;   // the volume (render/mistvol.js); else the old flat sheet
-  const F = {name: 'mist', label: 'Mist (world fog)', ambient: true, on: flags.get('mist') !== '0', TUNE, medium: 0, ms: 0, vol: VOL,
-    toggle() { F.on = !F.on; }};
+  // OFF by default (the user, 2026-11-07: the morning mist as a toggle in the menu, Esc > Graphics > World, instead of always on);
+  // ?mist=1 (or flat) starts it on
+  const F = {name: 'mist', label: 'Morning mist', ambient: true, on: flags.get('mist') === '1' || flags.get('mist') === 'flat', TUNE, medium: 0, ms: 0, vol: VOL,
+    toggle() { F.on = !F.on; },
+    dev: {group: 'Nature', rows: () => [{label: 'Far haze (the weather\'s fog over the picture)', get: () => HAZE.on, set: v => { HAZE.on = v; }}]}};
   // ---- the water's stretches (segments with a half width and their water's height), rebuilt when the world is
   const SEG = new Float32Array(MAX_SEG * 8); let nSeg = 0, ver = 0, segWorld = null, segBiome = '', wdA = 0, wdB = 0;   // (wdA..wdB: the West Downs' hollows)
   function put(x0, z0, x1, z1, hw, h) { if (nSeg >= MAX_SEG) return; const j = nSeg++ * 8; SEG[j] = x0; SEG[j + 1] = z0; SEG[j + 2] = x1; SEG[j + 3] = z1; SEG[j + 4] = hw; SEG[j + 5] = h; }
