@@ -77,6 +77,7 @@ export const FLAG_DOCS = {
   calm:      '0: the grass blades each a tone lighter than the ground (a hairy meadow) instead of in its own tone with light tips (render/grass.js setCalm)',
   tufts:     '0: no grass tufts (the living grass: pixel-art tufts on billboards in the sward, world-space wind, bent by every player; render/grass.js TUFT_VS, F10 > Nature > Grass)',
   leafcells: '0: the crowns toned in soft blotches (a 3D noise) instead of small leaf clusters, each lit on top with a dark crescent under it (gfx.js MESH_FS uLeaf)',
+  cinepix:   '0: third / first person (and the cinematic camera) without the pixel look kept from the top-down view: the leaf clusters as big as the metres make them near the camera, the sky and the air as smooth gradients (render/pixlod.js, gfx.js COMP_FS bandQ; an A/B)',
   palette:   'old: the ruins in their first palette (khaki stone, olive grass) instead of the cool one (mauve-grey stone, yellow-green grass and leaves, lavender V flowers: world/biomes.js, world.js, sim/env.js LEAF, features/grass.js; an A/B)',
   crest:     '0: no light line along the top edges of blocks, walls and caps (gfx.js COMP_FS crest, render/lighting.js SHADE)',
   onesun:    '0: the props, walls and crowns toned by the old fixed art light (from the front-left, WSW) instead of the clock\'s sun that casts the shadows, and the old lighter shadows (gfx.js setSun U.lArt, render/lighting.js SHADE.dark; an A/B)',
