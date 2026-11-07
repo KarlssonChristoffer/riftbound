@@ -117,7 +117,7 @@ export async function create(host) {
     num('Sun shafts air: steps', shT, 'steps', 4, 48, 2),
     num('Sun shafts air: reach (m)', shT, 'reach', 4, 60, 1),
     arr('Sun shafts air: crown gap (m)', shT, 'beam', 0, .3, 6, .1),
-    arr('Sun shafts air: cloud gap (m)', shT, 'beam', 1, 1, 30, .5),
+    arr('Sun shafts air: cloud gap (m, 0 none)', shT, 'beam', 1, 0, 30, .5),
     num('Sun shafts flecks: length (m)', shT, 'len', 1, 20, .5),
     arr('Sun shafts flecks: shade all round (m)', shT, 'open', 0, .3, 4, .1),
     arr('Sun shafts flecks: shade farther out (m)', shT, 'open', 1, .5, 8, .1),
@@ -135,7 +135,7 @@ export async function create(host) {
       num('Cloud bands: thin patches', () => BANDS, 'thin', 0, 1, .05),
       num('Cloud bands: cloud size (x smaller)', () => BANDS, 'scale', .5, 6, .25),
       num('Cloud bands: least cover (a clear day)', () => BANDS, 'cover', 0, .8, .05),
-      {label: 'Clouds: share of the sun taken', min: 0, max: 1, step: .05, get: () => TUNE.clouds.sun[0], set: v => { TUNE.clouds.sun[0] = v; }},
+      {label: 'Clouds: share of the sun taken', min: 0, max: 1, step: .05, get: () => BANDS.on ? BANDS.sun : TUNE.clouds.sun[0], set: v => { if (BANDS.on) BANDS.sun = v; else TUNE.clouds.sun[0] = v; }},
     ] : []),
   ]};
   let T = 0, biome = '', acc = 0;
@@ -460,7 +460,7 @@ export async function create(host) {
       fieldUniforms(OR2, CG);
     }
     U.uClB[0] = bands ? 1 : 0; U.uClB[1] = Math.max(1, Math.round(BANDS.n)); U.uClB[2] = Math.max(.005, BANDS.span); U.uClB[3] = BANDS.thin;
-    if (CLOUD_SUN) { const S = TUNE.clouds.sun; CLS.a1 = S[1]; CLS.a2 = S[0]; CLS.gap = 1 / (1 - cO * (FIELD_V2 ? S[0] * (bands ? BANDS.mean : TUNE.clouds.mean) : (1 - cr) * S[1] + cr * S[0])); }
+    if (CLOUD_SUN) { const S = TUNE.clouds.sun, s0 = bands ? BANDS.sun : S[0]; CLS.a1 = S[1]; CLS.a2 = s0; CLS.gap = 1 / (1 - cO * (FIELD_V2 ? s0 * (bands ? BANDS.mean : TUNE.clouds.mean) : (1 - cr) * S[1] + cr * S[0])); }
     proj2(0, 0, 0, _pp); groundInv(R, CLS.m); CLS.e = _pp[0]; CLS.f = _pp[1];   // (the world's texel grid: the drift is the layers')
     host.G.setClouds(CLS);
     return true;
