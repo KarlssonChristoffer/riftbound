@@ -88,7 +88,7 @@ export const FLAG_DOCS = {
   cloudmap:  '1: the cloud shadows as soft-edged shapes drifting over the ground (render/clouds.js THE SHADOW) instead of the whole view dimming and brightening as a cloud passes over it (features/depth.js TUNE.clouds.view; the user, 2026-10-10: no edge sweeping across; an A/B)',
   cloudsun:  '0: the cloud shadows as the old tint laid over the colours, sampled at the ground behind each pixel on screen (gfx.js COMP_FS), instead of a cloud taking the sun away where the sun\'s ray to the point meets its shadow (the cast shadows merge into it, crests and glints go out; render/clouds.js CLOUD_SUN; an A/B)',
   clouds2:   '0: the cloud shadows as before (the whole view dimming as a cloud passes) instead of shapes fixed in the world rolling over the ground in stepped bands (render/clouds.js CLOUDS2)',
-  shafts:    '0: no sun shafts (render/sunshafts.js: sunlit openings drawn out toward the sun, the default since 2026-11-07)',
+  shafts:    '0: no sun shafts (render/sunshafts.js: lit air between shadows, marched along the view, the default since 2026-11-07); fleck: the first try instead (sun flecks on the ground drawn out toward the sun)',
   preserve:  '1: keep the WebGL drawing buffer between frames (a capture that reads the canvas outside the frame that drew it)',
   cinema:    '0: never the cinematic camera (features/cinema.js); now: start it at once and keep it through input (captures, tests)',
   cineidle:  's of no input before the cinematic camera starts (features/cinema.js TUNE.idle: 45)',
