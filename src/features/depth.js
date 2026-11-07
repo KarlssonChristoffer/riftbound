@@ -70,7 +70,7 @@
 import {TAU, clamp, mod, mk, fit, hsh, vn, rng, rgb, css, PAL, SHAFT, WATER, PUDDLES, PUD_COL, KIT, SEED} from './depth/art.js';
 import {flags} from '../core/flags.js';
 import {coverQ, wrapDrift, PERIOD, FIELD_V2, fieldUniforms, density} from '../core/cloudfield.js';
-import {OLD_CLOUDS, CLOUD_SUN, CLOUD_VIEW, SOFT, QUANT_U} from '../render/clouds.js';
+import {OLD_CLOUDS, CLOUD_SUN, CLOUD_VIEW, CLOUDS2, BANDS, SOFT, QUANT_U} from '../render/clouds.js';
 
 const DEG = Math.PI / 180;
 // ============================================================ tunables (live: __r3d.features.find(f => f.name === 'depth').TUNE)
@@ -104,6 +104,32 @@ export async function create(host) {
   const F = {name: 'depth', label: 'Depth (foreground, clouds, shafts, reflections)', key: '7', ambient: true,  on: Q.get('depth') !== '0', ms: 0, TUNE, debug: ''};
   if (Q.get('fg') === '1') TUNE.fg.on = true;
   F.settings = () => [{label: 'Foreground silhouettes', options: ['off', 'on'], get: () => TUNE.fg.on ? 'on' : 'off', set: v => { TUNE.fg.on = v === 'on'; }}];
+  // the dev console's rows (dev/devmenu.js, F10 > Effects > Depth): the cloud shadows' bands (render/clouds.js CLOUDS2), the god
+  // rays through the clouds (render/cloudbeams.js) and the shadow-map god rays (render/godrays.js); their TUNEs are live
+  const beamsT = () => host.G.cloudBeams?.TUNE, raysT = () => host.G.godrays?.TUNE;
+  const num = (label, obj, key, min, max, step) => ({label, min, max, step, get: () => obj()?.[key] ?? 0, set: v => { const o = obj(); if (o) o[key] = v; }});
+  F.dev = {group: 'Effects', rows: () => [
+    ...(CLOUDS2 ? [
+      {label: 'Cloud shadows: stepped bands on the ground', get: () => BANDS.on, set: v => { BANDS.on = v; }},
+      num('Cloud bands: steps', () => BANDS, 'n', 1, 6, 1),
+      num('Cloud bands: density a step', () => BANDS, 'span', .01, .2, .005),
+      num('Cloud bands: thin patches', () => BANDS, 'thin', 0, 1, .05),
+      {label: 'Clouds: share of the sun taken', min: 0, max: 1, step: .05, get: () => TUNE.clouds.sun[0], set: v => { TUNE.clouds.sun[0] = v; }},
+      {label: 'God rays through the clouds', get: () => !!beamsT()?.on, set: v => { const t = beamsT(); if (t) t.on = v; }},
+      num('Cloud beams: strength', beamsT, 'k', 0, 3, .1),
+      num('Cloud beams: gain', beamsT, 'gain', .2, 5, .1),
+      num('Cloud beams: steps', beamsT, 'steps', 4, 48, 2),
+      num('Cloud beams: air height (m)', beamsT, 'air', 2, 40, 1),
+      num('Cloud beams: ray length (m)', beamsT, 'len', 4, 80, 2),
+      num('Cloud beams: levels', beamsT, 'levels', 1, 3, 1),
+      num('Cloud beams: dither', beamsT, 'dither', 0, 1, .25),
+      num('Cloud beams: dust', beamsT, 'dust', 0, 1, .05),
+      num('Cloud beams: dust threshold', beamsT, 'dustAt', 0, 1, .05),
+      {label: 'Cloud beams: cut by tree / wall shadows', get: () => !!beamsT()?.shadows, set: v => { const t = beamsT(); if (t) t.shadows = v; }},
+      {label: 'Cloud beams: strength now', text: () => (host.G.cloudBeams?.strength ?? 0).toFixed(2) + (host.G.cloudBeams?.live ? ' (drawn)' : ' (off this frame)')},
+    ] : [{label: 'Cloud bands and cloud beams', text: () => 'off (?clouds2=0, ?cloudmap=1 or ?cloudfield=0)'}]),
+    {label: 'God rays through crowns and gaps', get: () => !!raysT()?.on, set: v => { const t = raysT(); if (t) t.on = v; }},
+  ]};
   let T = 0, biome = '', acc = 0;
   const hist = new Float32Array(60); let hN = 0;
   const WM = () => host.ctxO.WM, HM = () => host.ctxO.HM;
@@ -353,7 +379,7 @@ export async function create(host) {
   const CLV = {rt: 0, st: -1, stRt: -1, init: false, g: 0, gInit: false};
   const coverOfN = c => c <= 0 ? 0 : c < .13 ? c / .13 * .1606 : Math.min(.78, .08 + .62 * c);   // (continuous: the old curve, from 0)
   const CLU = {uClD: [0, 0, 0, 0], uClW: [0, 0, 0, 0], uDk: [0, 0, 0, 0], uFrE: [0, 0, 0, 0], uClQa: QUANT_U[0], uClQb: QUANT_U[1], uClQc: QUANT_U[2],
-    uCfA: [0, 0, 0, 0], uCfB: [0, 0, 0, 0], uCfC: [0, 0, 0, 0], uCfD: [0, 0, 0, 0]};
+    uCfA: [0, 0, 0, 0], uCfB: [0, 0, 0, 0], uCfC: [0, 0, 0, 0], uCfD: [0, 0, 0, 0], uClB: [0, 3, .07, 0]};   // (uClB: render/clouds.js CLOUDS2's bands)
   function driftClouds(dt) {
     const AL = host.env?.aloft; if (!AL) return;
     CLV.rt += dt;
@@ -417,7 +443,9 @@ export async function create(host) {
     // (CLOUD_SUN: the levels take the sun; the mood dims the open sky's by its whole cloud (sim/env.js mood: shadow x (1 - .8 c)),
     // so the gaps get back the share the patches now carry: the view's mean sun stays the mood's. render/lighting.js applies it)
     CLS.gap = 1; CLS.g = CLOUD_VIEW ? CLV.g : 0;
-    if (CLOUD_SUN) { const S = TUNE.clouds.sun; CLS.a1 = S[1]; CLS.a2 = S[0]; CLS.gap = 1 / (1 - cO * (FIELD_V2 ? S[0] * TUNE.clouds.mean : (1 - cr) * S[1] + cr * S[0])); }
+    const bands = CLOUDS2 && BANDS.on;   // (render/clouds.js CLOUDS2: the stepped bands on the ground, live)
+    U.uClB[0] = bands ? 1 : 0; U.uClB[1] = Math.max(1, Math.round(BANDS.n)); U.uClB[2] = Math.max(.005, BANDS.span); U.uClB[3] = BANDS.thin;
+    if (CLOUD_SUN) { const S = TUNE.clouds.sun; CLS.a1 = S[1]; CLS.a2 = S[0]; CLS.gap = 1 / (1 - cO * (FIELD_V2 ? S[0] * (bands ? BANDS.mean : TUNE.clouds.mean) : (1 - cr) * S[1] + cr * S[0])); }
     proj2(0, 0, 0, _pp); groundInv(R, CLS.m); CLS.e = _pp[0]; CLS.f = _pp[1];   // (the world's texel grid: the drift is the layers')
     host.G.setClouds(CLS);
     return true;
