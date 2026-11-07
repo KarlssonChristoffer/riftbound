@@ -53,6 +53,7 @@ export const CLOUD_VIEW = FIELD_V2 && flags.get('cloudmap') !== '1';
 // The god rays through the clouds (render/cloudbeams.js) read the same bands.
 export const CLOUDS2 = CLOUD_VIEW && flags.get('clouds2') !== '0';
 export const BANDS = {on: CLOUDS2, n: 3, span: .07, thin: .45,
+  cover: .4 /* the least cover the bands draw (features/depth.js): a clear day still has fair-weather clouds drifting over */,
   mean: .62 /* a cloud's mean share over its ground with these bands (features/depth.js: the gaps' sun back) */};
 // the uniforms past the old set (all vec4; gfx.js makes them and setClouds copies o.u[name] into them; godrays.js shares them)
 export const CLOUD_EXTRA = ['uClD', 'uClW', 'uDk', 'uFrE', 'uClQa', 'uClQb', 'uClQc', 'uCfA', 'uCfB', 'uCfC', 'uCfD', 'uClB'];   // (uCf*: the smooth field's offsets; uClB: CLOUDS2's bands)

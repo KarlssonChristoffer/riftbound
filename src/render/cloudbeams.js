@@ -36,7 +36,7 @@ export const TUNE = {
   air: 16,          // m over the player's feet: the top of the glowing air
   len: 32,          // m: the longest stretch of a ray marched (from its near end)
   levels: 3,        // hard levels of glow
-  amt: [.05, .1, .16],   // light added per level, x the sun's colour (warmed) x strength
+  amt: [.09, .18, .3],   // light added per level, x the sun's colour (warmed) x strength
   gain: 1.6,        // the glow: (the air's sun - the surface's) x this, 0..1
   dither: 1,        // 0: plain steps between the levels .. 1: a full 4 x 4 ordered dither across each step
   shadows: true,    // the sun shadow maps cut the beams (a crown, a wall)
@@ -44,7 +44,7 @@ export const TUNE = {
   dustCell: 7,      // m: the dust noise's cell
   dustAt: .55,      // the dust's threshold (high: dusty pockets here and there)
   dustDrift: [.35, .12],   // m/s the dust drifts (x, z)
-  k: 1,             // overall strength
+  k: 1.5,           // overall strength
   el: [12, 50, .35],   // the sun's elevation (deg): full below el[0], x el[2] above el[1]
   view: [.55, 1],   // looking away from the sun .. toward it
   mist: .8,         // x (1 + mist x fog)

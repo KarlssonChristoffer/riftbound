@@ -114,6 +114,7 @@ export async function create(host) {
       num('Cloud bands: steps', () => BANDS, 'n', 1, 6, 1),
       num('Cloud bands: density a step', () => BANDS, 'span', .01, .2, .005),
       num('Cloud bands: thin patches', () => BANDS, 'thin', 0, 1, .05),
+      num('Cloud bands: least cover (a clear day)', () => BANDS, 'cover', 0, .8, .05),
       {label: 'Clouds: share of the sun taken', min: 0, max: 1, step: .05, get: () => TUNE.clouds.sun[0], set: v => { TUNE.clouds.sun[0] = v; }},
       {label: 'God rays through the clouds', get: () => !!beamsT()?.on, set: v => { const t = beamsT(); if (t) t.on = v; }},
       num('Cloud beams: strength', beamsT, 'k', 0, 3, .1),
@@ -417,10 +418,13 @@ export async function create(host) {
     let a = M ? M.shadow.a : 0;
     if (O.cloud !== L.cloud) a = a / Math.max(.2, 1 - .8 * L.cloud) * (1 - .8 * O.cloud);   // (mood(): the shadow x (1 - .8 c); the open sky's)
     const s = Math.min(1.2, a / .46) * k, cO = coverOfN(O.cloud), deck = dk.mode > 0;
-    if (!deck && (s <= .01 || cO <= 0)) return false;
+    // (render/clouds.js CLOUDS2: the bands keep a fair-weather sky's cover at least, BANDS.cover, so the shapes show on a clear
+    // day too; the light's own cloud (the mood, the gaps' sun back below) stays the weather's)
+    const bands = CLOUDS2 && BANDS.on, cB = bands ? Math.max(cO, BANDS.cover) : cO;
+    if (!deck && (s <= .01 || cB <= 0)) return false;
     if (CLS.lv !== DUMMY) { CLS.lv = DUMMY; CLS.TW = 1; CLS.TH = 1; CLS.ver++; }   // (no tile: one texel for tTop's cloud rows)
     const cr = TUNE.clouds.core / TUNE.clouds.cover, cA = coverOfN(Math.max(O.cloud, TUNE.clouds.front.appr));
-    CLS.T[0] = coverQ(cO); CLS.T[1] = coverQ(cO * cr); CLS.T[2] = coverQ(cA); CLS.T[3] = coverQ(cA * cr);
+    CLS.T[0] = coverQ(cB); CLS.T[1] = coverQ(cB * cr); CLS.T[2] = coverQ(cA); CLS.T[3] = coverQ(cA * cr);
     const R = PPM, U = CLS.u = CLU;
     U.uClD[0] = RQ(OV[0], R); U.uClD[1] = RQ(OV[1], R); U.uClD[2] = RQ(OV[2], R); U.uClD[3] = RQ(OV[3], R);   // (whole texels: the shadows step, never shimmer)
     U.uClW[0] = RQ(OV[4], R); U.uClW[1] = RQ(OV[5], R); U.uClW[3] = R;
@@ -443,7 +447,6 @@ export async function create(host) {
     // (CLOUD_SUN: the levels take the sun; the mood dims the open sky's by its whole cloud (sim/env.js mood: shadow x (1 - .8 c)),
     // so the gaps get back the share the patches now carry: the view's mean sun stays the mood's. render/lighting.js applies it)
     CLS.gap = 1; CLS.g = CLOUD_VIEW ? CLV.g : 0;
-    const bands = CLOUDS2 && BANDS.on;   // (render/clouds.js CLOUDS2: the stepped bands on the ground, live)
     U.uClB[0] = bands ? 1 : 0; U.uClB[1] = Math.max(1, Math.round(BANDS.n)); U.uClB[2] = Math.max(.005, BANDS.span); U.uClB[3] = BANDS.thin;
     if (CLOUD_SUN) { const S = TUNE.clouds.sun; CLS.a1 = S[1]; CLS.a2 = S[0]; CLS.gap = 1 / (1 - cO * (FIELD_V2 ? S[0] * (bands ? BANDS.mean : TUNE.clouds.mean) : (1 - cr) * S[1] + cr * S[0])); }
     proj2(0, 0, 0, _pp); groundInv(R, CLS.m); CLS.e = _pp[0]; CLS.f = _pp[1];   // (the world's texel grid: the drift is the layers')
