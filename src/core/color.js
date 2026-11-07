@@ -1,6 +1,10 @@
 // COLOR: colour parsing, one copy each. Each takes '#rrggbb'; rgbOf / hexAny255 also take '#rgb' (and rgbOf passes
 // arrays through). Parse at load or cache: never per particle per frame.
 export const rgbOf = c => { if (Array.isArray(c)) return c; let s = String(c || '#fff').replace('#', ''); if (s.length === 3) s = s.replace(/./g, m => m + m); const n = parseInt(s, 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };   // -> [r, g, b] 0..1
+// rgbOf for a colour passed every frame (host.point / line: a feature's '#rrggbb' constant per particle): each string parsed
+// once, its array shared and frozen (read it, don't change it); arrays pass through
+const RGBC = new Map();
+export const rgbCached = c => { if (typeof c !== 'string') return rgbOf(c); let v = RGBC.get(c); if (!v) { if (RGBC.size > 256) RGBC.clear(); RGBC.set(c, v = Object.freeze(rgbOf(c))); } return v; };
 export const hex01 = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };   // '#rrggbb' -> 0..1
 export const hex255 = s => { const n = parseInt(s.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };   // '#rrggbb' -> 0..255
 export const hexAny255 = h => { let s = String(h).replace('#', ''); if (s.length === 3) s = s.replace(/./g, m => m + m); const n = parseInt(s, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };

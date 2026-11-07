@@ -11,7 +11,7 @@
 // SIM vs VIEW: aimTarget() and autoFire() are read by the player's step (sim/player/adapter.js -> player.js / gun.js): they
 // read the sim's foes and the cursor, deterministic; the lock is sim state (update). The ring is presentation (frame).
 // OWNS: the mode, the lock. READS: host.entities (the foes), host.player, host.mouse, the view (G.gameToScreen: what's on
-//   screen, as the adapter's hover does). BUDGET: a pass over the foes (a live query: a few) when the player aims.
+//   screen, as the adapter's hover does; a camera view's own screen and crosshair: G.toScreenInto, features/chasecam.js). BUDGET: a pass over the foes (a live query: a few) when the player aims.
 import {flags} from '../core/flags.js';
 
 const MODES = ['manual', 'soft', 'lock', 'auto'];
@@ -28,14 +28,20 @@ export function create(host) {
   const foes = host.entities.query('aim.foes', p => !!(p.hunter || p.sparring || p.kind === 'dummy'));
   const OUT = {x: 0, y: 0, h: 0, target: null}, SC = [0, 0, 0];
   const alive = p => !p.broken && !p.gone && (p.hp > 0 || p.target);
-  // a foe's chest on screen (view px at zoom 1, the cursor's frame) -> SC, or null off screen
+  // a foe's chest on screen (view px at zoom 1, the cursor's frame) -> SC, or null off screen. A camera view (features/chasecam.js:
+  // G.cine.hud): the screen it draws, the cursor its crosshair (the middle)
   function screen(p) {
-    const G = host.G, s = G.gameToScreen(p.x, (p.z || 0) + (p.hitH ?? 1.6) * TUNE.chest, p.y, SC), z = host.zoom || 1;
+    const G = host.G, h = (p.z || 0) + (p.hitH ?? 1.6) * TUNE.chest;
+    if (G.cine?.hud) { const s = G.toScreenInto(p.x, h, p.y, SC); return s[0] < 0 || s[1] < 0 || s[0] > G.VW || s[1] > G.VH ? null : s; }
+    const s = G.gameToScreen(p.x, h, p.y, SC), z = host.zoom || 1;
     const x = host.VW / 2 + (s[0] - host.VW / 2) / z, y = host.VH / 2 + (s[1] - host.VH / 2) / z;
     if (x < 0 || y < 0 || x > host.VW || y > host.VH) return null;
     SC[0] = x; SC[1] = y; return SC;
   }
-  const cursorD = p => { const s = screen(p); return s ? Math.hypot(s[0] - host.mouse.x, s[1] - host.mouse.y) : Infinity; };
+  const cursorD = p => {
+    const s = screen(p), G = host.G; if (!s) return Infinity;
+    return G.cine?.hud ? Math.hypot(s[0] - G.VW / 2, s[1] - G.VH / 2) : Math.hypot(s[0] - host.mouse.x, s[1] - host.mouse.y);
+  };
   function nearCursor(max) {
     let best = null, bd = max;
     for (const p of foes) { if (!alive(p)) continue; const d = cursorD(p); if (d < bd) { bd = d; best = p; } }

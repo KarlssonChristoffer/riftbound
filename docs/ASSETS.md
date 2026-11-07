@@ -2,6 +2,23 @@
 
 Status: 2026-10-12, first slice, plus natural stumps and the watcher. Work-in-progress notes on the wider idea: the "Painless assets: notes" doc in the project.
 
+## Getting the art
+
+The characters' atlases, the live models and the 3D props the game loads live in `concepts/sprites/out/` and are in git as
+plain files (since 2026-10-18; before that they were only on the dev PC, so a clone couldn't start the game; Git LFS was the
+plan, but the cloud sessions can't reach lfs.github.com). What of that folder is tracked is listed in `.gitignore` (each
+loadout's and gunman's `poses.json`, `overlays.json` and `packed/` sheets, `skel/`, `live/`, `render3d/glb/`,
+`render3d/props_yaw/*.*`; ~200 MB); everything else there (per-pose files, old renders, experiments) stays local.
+
+- **A clone or a ZIP download** has the art; `server/server.mjs` serves the block stand-ins in `assets/standin/` only for an art
+  file that is missing (or a Git LFS pointer).
+- **D:\Game, the first time** (it already has the files, untracked and ignored): `git pull`. Git replaces ignored files a pull
+  brings in, and these are the same files.
+- **New or re-exported art:** re-pack with `python tools/pack_atlas.py <folder>` and commit the changed files; each re-export
+  adds its full size to the history, so commit art in batches. A new loadout or gunman's outfit folder needs its line in
+  `.gitignore`.
+- Worktrees get the art like any checkout, so `server.mjs --assets D:/Game` is only needed for files that aren't tracked.
+
 ## The idea
 
 The renderer makes the look, not the model. Any rough low-poly shape whose parts carry a family (wood, rock, bark, leaf ...) is

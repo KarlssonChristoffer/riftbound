@@ -38,6 +38,9 @@ export function createBrawler(host, I) {
       bare: g.type === 'bruiser'};   // (bare: his coach gun has no holster: the view hides it while he boxes)
   }
   const fists = () => host.PL?.fists || null;
+  // the melee guard (features/hits.js defend: features/melee.js answers): a shield / a blade up meets his fist first
+  const ATK = {kind: 'fist', x: 0, y: 0, who: null, dmg: 0};
+  const defend = (p, dmg) => { ATK.x = p.x; ATK.y = p.y; ATK.who = p; ATK.dmg = dmg; return host.feature('hits')?.defend?.(ATK) || null; };
   const release = g => { if (BS.token === g) { BS.token = null; BS.gapT = RR(.25, .6); } };
   const faceTo = (g, ux, uy, dt, k = 1) => { const want = Math.atan2(ux, uy), da = wrap(want - g.face), st = A.turn * k * dt; g.face = wrap(g.face + (Math.abs(da) <= st ? da : Math.sign(da) * st)); g.aim = g.face; };
   const frontal = (g, ux, uy) => -(ux * Math.sin(g.face) + uy * Math.cos(g.face)) >= Math.cos(70 * DEG);   // (the blow's way meets his facing)
@@ -138,6 +141,12 @@ export function createBrawler(host, I) {
     if (d > W.reach + .05 || !facing || Math.abs((pl.z || 0) - (p.z || 0)) > .6) { e.phase = 'miss'; return; }
     if (pl.untouchable || (pl.raw?.blink || 0) > 0) { e.phase = 'slip'; return; }
     const dmg = W.dmg * T.dmg;
+    const df = defend(p, dmg);
+    if (df && df.out !== 'hit') {   // the melee guard: parried (he's dazed: the defender's) or blocked (a share through)
+      e.phase = 'block';
+      if (df.out === 'block' && df.k > 0) { const hu = emit('player.hurt', P.x, P.y, P.z); hu.dmg = Math.round(dmg * df.k); hu.by = p; }
+      return;
+    }
     if (fi?.guards(p.x, p.y) && f.kind === 'jab') {   // blocked: a share goes through, he's pushed back
       e.phase = 'block'; fi.blocked(ux, uy);
       const hu = emit('player.hurt', P.x, P.y, P.z); hu.dmg = Math.max(0, Math.round(dmg * FT.guard.jab)); hu.by = p;

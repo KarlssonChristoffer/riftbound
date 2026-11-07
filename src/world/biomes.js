@@ -35,7 +35,8 @@ import {speciesOf} from './trees3d.js';   // which tree a prop is (the painted c
 import {flags} from '../core/flags.js';
 import {trackK, PROPS as WEST_PROPS, FOUNDATIONS, WALL_D} from './westland.js';   // the West Downs' ground (westRuins)
 import {paint as paintBrook} from './brook.js';   // (and their brook)
-import {paint as paintForestWater} from './forest.js';   // the seeded forest's stream, lake and outflow (forestRuins)
+import {paint as paintForestWater} from './forest.js';
+import {paintMire} from './mire.js';   // the upland's bog (docs/MIRE.md)   // the seeded forest's stream, lake and outflow (forestRuins)
 import {slotFrame, slotHead, slotBrow} from './caves.js';   // the cave mouth's slot, in its own frame (forestRuins)
 
 // ============================================================ pixel toolkit
@@ -689,7 +690,12 @@ function dampPool(K, S) {
 // After the base fill (grass / earth, by material): blade strokes in the sward (lit tips and dark gaps, in patches), the bare
 // earth mottled (dusty and damp clusters ~.3 m) with specks, pebbles and lone sprouts. Only on the grass and earth ramps:
 // whatever is painted later (stones, paths, water, banks) goes over it
-function pebble(K, x, y, R, E) { K.G.p(x, y, R, 1); K.G.p(x + 1, y, R, hsh(x, y, 28) < .5 ? 0 : 1); K.G.p(x, y + 1, E, 3); K.G.p(x + 1, y + 1, E, 3); }
+// (a floor sink in the painter's ctx (world/floor3d.js, the forest's tiles): about half the pebbles stand there in 3D, a little bigger
+// (at 2 px a 3D pebble is all outline: a dark fleck from above); only their damp seat is painted)
+function pebble(K, x, y, R, E) {
+  if (K.floor3d && hsh(x, y, 32) < .55) { K.floor3d.add((K.ox || 0) + (x + 1) / K.PPM, (K.oy || 0) + (y + 1) / K.PPMY, (1.4 + hsh(x, y, 30)) / K.PPM, (.9 + hsh(x, y, 31) * .7) / K.PPM, 0); K.G.p(x, y + 1, E, 3); K.G.p(x + 1, y + 1, E, 3); return; }   // (the rest stay painted: the fine gravel)
+  K.G.p(x, y, R, 1); K.G.p(x + 1, y, R, hsh(x, y, 28) < .5 ? 0 : 1); K.G.p(x, y + 1, E, 3); K.G.p(x + 1, y + 1, E, 3);
+}
 function meadowDetail(K, S, r = null) {   // r: only this rect (m: {x0, y0, x1, y1}); K.ox / oy: the canvas' world origin (the West Downs': 0 elsewhere)
   const {G, WPX, HPX, PPM, PPMY} = K, gr = S.grass, ea = S.earth, GI = gr.id, EI = ea.id, m = G.m, t = G.t, ox = K.ox || 0, oy = K.oy || 0;
   const xa = r ? Math.max(0, Math.floor((r.x0 - ox) * PPM)) : 0, xb = r ? Math.min(WPX - 1, Math.ceil((r.x1 - ox) * PPM)) : WPX - 1;
@@ -868,7 +874,11 @@ function forestRuins(q, ctx) {
     if (m0 !== S.earth.id) return;
     const h = hsh(x, y, 83);
     if (h < .035 * Math.min(1, c)) G.c(x, y, LEAF[hsh(x, y, 84) * 4 | 0]);   // a fallen leaf
-    else if (h > .9965) { const L = 2 + (hsh(x, y, 85) * 3 | 0), dx = hsh(x, y, 86) < .5 ? 1 : -1; for (let k = 0; k < L; k++) G.p(x + k * dx, y + (k >> 1), S.wood, 3); }   // a twig
+    else if (h > .9965) {   // a twig (in 3D with a floor sink: world/floor3d.js; one in five a longer stick)
+      const L = 2 + (hsh(x, y, 85) * 3 | 0), dx = hsh(x, y, 86) < .5 ? 1 : -1;
+      if (K.floor3d) { const st = hsh(x, y, 87) < .2, r = hsh(x, y, 88); K.floor3d.add(mx, my, st ? .12 + r * .2 : L * .6 / PPM, st ? .018 + r * .012 : .014, 3); }
+      else for (let k = 0; k < L; k++) G.p(x + k * dx, y + (k >> 1), S.wood, 3);
+    }
   });
   // the trunks' feet: a ring of darker earth and roots, moss on the north side
   for (const [tx, ty, sc] of trunks) {
@@ -895,6 +905,7 @@ function forestRuins(q, ctx) {
       }
   }
   meadowLip(K, S);
+  if (FO.mire) paintMire(FO.mire, K, S, {hsh, vn, hex, ramp});   // the mire's mosses, its boardwalk, the bog body (world/mire.js)
   paintForestWater(FO, K, S, {hsh, vn, hex, boulder});   // its stream, lake and outflow (world/forest.js)
   // the cave's mouth (world/caves.js): its slot isn't drawn here (alpha 0: the ground shader drops it), nor the overhang's steep face
   // over the slot's far end: world/cave3d.js draws the slot's copy and the cave on under the woods (its portal) in their place.

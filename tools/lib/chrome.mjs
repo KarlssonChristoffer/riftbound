@@ -10,12 +10,32 @@
 //   import {launch} from '../lib/chrome.mjs';
 //   const chrome = launch('golden', ['--headless=new', '--remote-debugging-port=9351', 'about:blank']);
 //   ...   chrome.kill()   (Chrome and its profile: call it from the exit handler; safe to call twice)
+// OFF WINDOWS (a cloud session, a Linux CI box): CHROME is the first Chromium found (env CHROME first), the tools' GPU flag
+// --use-angle=d3d11 becomes ANGLE's software renderer (SwiftShader: no GPU there, so its timings are not the PC's; its
+// pixels are its own, so compare golden captures made on the same kind of machine), and as root it adds --no-sandbox.
+// PYTHON is the interpreter that runs serve.py there. On Windows nothing changes.
 import {spawn} from 'node:child_process';
 import {existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-export const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const WIN = process.platform === 'win32';
+function findChrome() {
+  if (WIN) return 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+  const pw = '/opt/pw-browsers';   // (Playwright's browsers: what a cloud session has)
+  try { for (const d of readdirSync(pw).filter(d => /^chromium-\d+$/.test(d)).sort().reverse()) { const x = join(pw, d, 'chrome-linux', 'chrome'); if (existsSync(x)) return x; } } catch {}
+  for (const x of ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']) if (existsSync(x)) return x;
+  return 'google-chrome';
+}
+export const CHROME = process.env.CHROME || findChrome();
+export const PYTHON = process.env.PYTHON || (WIN ? 'python' : 'python3');
+// the tools' flags as this machine needs them (see OFF WINDOWS above)
+export function hostArgs(args) {
+  if (WIN) return args;
+  const out = args.flatMap(a => a === '--use-angle=d3d11' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [a]);
+  if (process.getuid?.() === 0 && !out.includes('--no-sandbox')) out.unshift('--no-sandbox');
+  return out;
+}
 export const PROFILES = join(tmpdir(), 'riftbound-chrome');
 // none of these touch rendering or timing: they stop the browser's own downloads and services
 const OFF = ['OptimizationHints', 'OptimizationHintsFetching', 'OptimizationGuideModelDownloading', 'OptimizationTargetPrediction',
@@ -24,14 +44,17 @@ export const LEAN = ['--no-first-run', '--no-default-browser-check', '--disable-
   '--disable-sync', '--disable-breakpad', '--disable-crash-reporter', '--disable-domain-reliability', '--metrics-recording-only'];
 
 const nap = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const dead = (dir, ageMs, now) => { try { return !existsSync(join(dir, 'lockfile')) && now - statSync(dir).mtimeMs > ageMs; } catch { return false; } };
+// (Chrome's lock: `lockfile` on Windows, the `SingletonLock` link elsewhere)
+// (a dangling link, which existsSync calls missing: hence the listing)
+const locked = dir => existsSync(join(dir, 'lockfile')) || readdirSync(dir).includes('SingletonLock');
+const dead = (dir, ageMs, now) => { try { return !locked(dir) && now - statSync(dir).mtimeMs > ageMs; } catch { return false; } };
 const rm = dir => { try { rmSync(dir, {recursive: true, force: true}); } catch {} };
 
 // remove the profiles no Chrome is using: ours after 10 minutes, any other Chrome profile in %TEMP% after 2 hours
 export function sweep() {
   const now = Date.now(), tmp = tmpdir();
   try { for (const e of readdirSync(PROFILES)) { const d = join(PROFILES, e); if (dead(d, 10 * 60e3, now)) rm(d); } } catch {}
-  try {
+  if (WIN) try {   // (only on Windows: elsewhere the temp folder is shared with other programs' live browsers)
     for (const e of readdirSync(tmp, {withFileTypes: true})) {
       if (!e.isDirectory() || e.name === 'claude' || e.name === 'riftbound-chrome') continue;
       const d = join(tmp, e.name); if (existsSync(join(d, 'Local State')) && dead(d, 2 * 3600e3, now)) rm(d);
@@ -53,7 +76,7 @@ export function launch(tag, args, {exe = CHROME, stdio = 'ignore'} = {}) {
   sweep(); mkdirSync(PROFILES, {recursive: true});
   const dir = mkdtempSync(join(PROFILES, tag + '-')), DF = '--disable-features=';
   const off = [...OFF, ...args.filter(a => a.startsWith(DF)).flatMap(a => a.slice(DF.length).split(','))];
-  const proc = spawn(exe, [...LEAN, DF + off.join(','), '--user-data-dir=' + dir, ...args.filter(a => !a.startsWith(DF))], {stdio});
+  const proc = spawn(exe, [...LEAN, DF + off.join(','), '--user-data-dir=' + dir, ...hostArgs(args.filter(a => !a.startsWith(DF)))], {stdio});
   let gone = false;
   return {proc, dir, kill() { if (gone) return; gone = true; try { proc.kill(); } catch {} removeProfile(dir); }};
 }

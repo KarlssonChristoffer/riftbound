@@ -30,6 +30,7 @@
 // COMP_FS, mistAt(P) is the local density (the medium, more inside the mist). F.at(x, y, h) -> the mist's veil there on the CPU
 // (0..1, without the noise: a reading for other systems, not the drawn pixel). BUDGET: ~0.01 ms a frame (the shader: ~0.05 ms).
 import {flags} from '../core/flags.js';
+import {HAZE} from '../render/lighting.js';   // (THE FAR HAZE's switch: the dev row below)
 import {clamp, smooth, lerp} from '../core/mathx.js';
 import {WORLD, TERRAIN_ON, terrainField} from '../world/layout.js';   // (the field's bounds: the world's; its ground: the bare terrain)
 
@@ -89,6 +90,8 @@ TUNE.vol = {
   sun: [.26, .24, .2], lobe: 1.6,   // the sun it scatters (x the sun's colour and strength), up to lobe x that looking toward the sun
   airCarry: .35, airReach: 2.4, airSmoke: .6,    // THE AIR (render/air.js): the noise carried this many s of its velocity, how high up its
                                // CLEAR thins the mist (m), its SMOKE's density as mist
+  near: {r: 5.5, k: .85},      // ROUND HIM: the mist low down thins to (1 - k) within r m of the player (smoothly from half of it), so
+                               // the ground and the tracks on it read in thick mist (render/mistvol.js uNear)
   bright: .7,                  // never lighter than this (its colour's luminance): a veil, not a light
   // AT NIGHT (eased in as the ambient light dims from lum dark[0] to dark[1]: dusk into night, a black storm part way) the mist
   // catches light: the moon's colour on its tops instead of the sun's warm one (x moon), a moonlit sheen on all of it (x the
@@ -114,8 +117,11 @@ export async function create(host) {
   const G = host.G;
   if (!G.setMist) return {name: 'mist', on: false};
   const VOL = flags.get('mist') !== 'flat' && !!G.setMistVol;   // the volume (render/mistvol.js); else the old flat sheet
-  const F = {name: 'mist', label: 'Mist (world fog)', ambient: true, on: flags.get('mist') !== '0', TUNE, medium: 0, ms: 0, vol: VOL,
-    toggle() { F.on = !F.on; }};
+  // OFF by default (the user, 2026-11-07: the morning mist as a toggle in the menu, Esc > Graphics > World, instead of always on);
+  // ?mist=1 (or flat) starts it on
+  const F = {name: 'mist', label: 'Morning mist', ambient: true, on: flags.get('mist') === '1' || flags.get('mist') === 'flat', TUNE, medium: 0, ms: 0, vol: VOL,
+    toggle() { F.on = !F.on; },
+    dev: {group: 'Nature', rows: () => [{label: 'Far haze (the weather\'s fog over the picture)', get: () => HAZE.on, set: v => { HAZE.on = v; }}]}};
   // ---- the water's stretches (segments with a half width and their water's height), rebuilt when the world is
   const SEG = new Float32Array(MAX_SEG * 8); let nSeg = 0, ver = 0, segWorld = null, segBiome = '', wdA = 0, wdB = 0;   // (wdA..wdB: the West Downs' hollows)
   function put(x0, z0, x1, z1, hw, h) { if (nSeg >= MAX_SEG) return; const j = nSeg++ * 8; SEG[j] = x0; SEG[j + 1] = z0; SEG[j + 2] = x1; SEG[j + 3] = z1; SEG[j + 4] = hw; SEG[j + 5] = h; }
@@ -182,12 +188,14 @@ export async function create(host) {
         const e = FL.lakeEdge(x, y), f = 1 - smooth(clamp(-e / V.reach, 0, 1));
         if (e > 0) hol = 0; if (f > near) { near = f; wh = fwh; }
       }
+      // the upland's mire (world/mire.js): a bog breathes mist as the water does, thickest at dawn and dusk (docs/MIRE.md)
+      const MR = FL?.mire; if (MR && x > MR.box[0] && y > MR.box[1] && x < MR.box[2] && y < MR.box[3]) { const mk = MR.k(x, y); if (mk > near) { near = mk; wh = MR.h; } }
       data[k * 4] = H[k]; data[k * 4 + 1] = hol; data[k * 4 + 2] = near; data[k * 4 + 3] = wh;
     }
     G.mistField({x0, z0, w, h, res, data});
   }
   // ---- the volume's numbers now (into OV): the clock, the weather, the wind, the biome
-  const OV = {sigma: 0, film: 0, filmH: 0, fill: 0, water: 0, rise: 0, scale: 0, cover: 0, drift: [0, 0], churn: 0, stretch: 1, wind: [1, 0],
+  const OV = {near: [0, 0, 0, 0], sigma: 0, film: 0, filmH: 0, fill: 0, water: 0, rise: 0, scale: 0, cover: 0, drift: [0, 0], churn: 0, stretch: 1, wind: [1, 0],
     band: 4, steps: 12, g: .5, deep: .6, shade: [0, 0, 0], lamp: 0, lampR: .55, lampMax: .3, lobe: 1.6, bright: .62, sun: [0, 0, 0], amax: .8, levels: 4, seam: .12, tones: 2, billow: .5,
     under: null};
   // TWO LIGHTS (the header): the under side's amounts and colours (OV.under while two lights show), the sky's amounts (the medium's,
@@ -311,6 +319,7 @@ export async function create(host) {
       OV.wind[0] = wx; OV.wind[1] = wz;
       OV.drift[0] = -(ex * wx + ez * wz) / V.stretch * V.scale; OV.drift[1] = -(-ex * wz + ez * wx) * V.scale;
       OV.air = G.air; OV.airCarry = V.airCarry; OV.airReach = V.airReach; OV.airSmoke = V.airSmoke;   // (the moving air: docs/exp/air.md)
+      const P = host.player; if (P) { OV.near[0] = P.x; OV.near[1] = P.y; OV.near[2] = V.near.r; OV.near[3] = V.near.k; }   // (round him)
       G.setMistVol(OV);
       O.max = -1e3;   // (G.setMist below still lays the far haze; COMP_FS draws no veil under -1e3 m)
     }

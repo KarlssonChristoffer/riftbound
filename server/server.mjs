@@ -1,12 +1,26 @@
 // THE CO-OP SERVER (docs/MULTIPLAYER.md): one process that serves the game's files and hosts the room.
-//   node server/server.mjs [--port 8320] [--seed 1234] [--host 0.0.0.0] [--assets D:/Game] [--hour 9] [--daymin 20] [--uncanny] [--nshift 1] [--quiet]
+//   node server/server.mjs [--port 8320] [--seed 1234] [--host 0.0.0.0] [--assets D:/Game] [--hour 9] [--daymin 20] [--uncanny] [--nshift 1] [--regrow 1] [--snuffers n] [--strikes 1] [--treefire 0] [--heat 1] [--smelt 1] [--wardrobe] [--thief often]
+//     [--xprate 1] [--importcap 10] [--data dir] [--movelvl 0] [--season summer] [--dev] [--quiet]
+//   --season: the season the world stays in (summer by default; spring / autumn / winter); turn: the year turns as it used to
 //   --hour: the world's clock at the start (in-game hours since the start: 9 the first morning, 22 its night); --daymin: real
 //   minutes per in-game day (0 stops the clock); --uncanny: the uncanny forest on (docs/UNCANNY.md; off without it); --nshift: how strong the night shift is (docs/UNCANNY.md; 0 = none)
+//   --regrow: a factor on how long picked patches take to grow back (docs/FORAGING.md; 0.05 to test)
+//   --snuffers: how many soot things live in the cave (docs/CAVELIFE.md; its roosts' count by default, 0 none)
+//   --strikes: a factor on how often natural lightning comes down in a storm (docs/WEATHER.md; ?strikes= offline); --treefire 0: struck trees
+//   don't burn (they char at once)
+//   --heat / --smelt: factors on a furnace's pump and on a charge's time (docs/WORKSHOP.md; --smelt 0.1 to test), as ?heat= / ?smelt=
+//   --wardrobe: anyone may wear any piece (dev; without it only the free kinds and the clothes you made: docs/WORKSHOP.md)
+//   --xprate: a factor on every XP grant (docs/SKILLS.md; 'raw': content/skills.js RATE ignored); --importcap: the level a first join
+//   may bring from the browser's own save (10); --data: keep the players' records (server/players.mjs) in <dir>/players.json
+//   across restarts (an opt-in dev switch: off, nothing is written to disk); --movelvl N: every player counts as at least level N
+//   for the skills' moves (a test server); --dev: the Sandbox's Skills rows work on this server (every skill to its next move's
+//   level, back to level 1: the asker's own record)
 // then open http://localhost:8320/src/?mp=1 in two (or more) windows: everyone who opens it joins the same world.
 //   GET  /mp/session   {v, seed, players}: the world's seed, read by the page BEFORE it builds the world (core/session.js)
 //   WS   /mp           the room (room.mjs): join, state, acts, snapshots
-//   GET  anything else a file under the repo (no cache, like serve.py); --assets: a second root for files the repo doesn't
-//        have (the git-ignored renders in concepts/sprites/out and audio/forge/out when running from a git worktree)
+//   GET  anything else a file under the repo's src/, concepts/, audio/, assets/ (no cache, like serve.py); --assets: a second root for files the repo doesn't
+//        have (the git-ignored renders in concepts/sprites/out and audio/forge/out when running from a git worktree); then, for
+//        concepts/sprites/out, the stand-ins in assets/standin/
 // No dependencies: node's http server + server/ws.mjs. The seed is random unless given (--seed or RIFT_SEED); it lives as long
 // as the process, so a restart is a new forest unless the seed is passed again.
 import http from 'node:http';
@@ -15,44 +29,81 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {attachWs} from './ws.mjs';
 import {createRoom} from './room.mjs';
+import {createPlayers} from './players.mjs';
+import {SKILLS, IMPORT_CAP} from '../src/content/skills.js';
+import {readFileSync, writeFileSync, mkdirSync, renameSync} from 'node:fs';
 import {VERSION, PATH, PORT, CLOCK} from '../src/net/protocol.js';
+import {TUNE as WXT} from '../src/sim/wxclock.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (name, d) => { const i = process.argv.indexOf('--' + name); return i > 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d; };
 const port = +arg('port', process.env.PORT || PORT), host = arg('host', '0.0.0.0');
 const seed = (+arg('seed', process.env.RIFT_SEED ?? NaN) >>> 0) || (Math.random() * 4294967296 >>> 0) || 1;
 const assets = arg('assets', null), quiet = process.argv.includes('--quiet'), uncanny = process.argv.includes('--uncanny');
-const hour = +arg('hour', CLOCK.hour), daymin = +arg('daymin', CLOCK.daymin), nshift = +arg('nshift', 1);
+const thief = arg('thief', '');   // --thief often: the fox comes for food within an in-game hour of it going down (sim/foxden.js)
+const hour = +arg('hour', CLOCK.hour), daymin = +arg('daymin', CLOCK.daymin), nshift = +arg('nshift', 1), regrow = +arg('regrow', 1), snuffers = arg('snuffers', null);
+const strikes = +arg('strikes', 1), treefire = arg('treefire', '1') !== '0';
+const season = arg('season', WXT.keep), keepS = season === 'turn' ? null : season;   // --season summer (the default, sim/wxclock.js TUNE.keep) | spring | autumn | winter: the world stays in it; turn: the year turns
 const log = quiet ? () => {} : (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+const xprate = arg('xprate', '1') === 'raw' ? 'raw' : +arg('xprate', 1), importCap = +arg('importcap', IMPORT_CAP), data = arg('data', null);
+const movelvl = Math.max(0, +arg('movelvl', 0) | 0), dev = process.argv.includes('--dev');
+
+// THE PLAYERS' RECORDS (server/players.mjs): in memory; with --data also in <dir>/players.json, read now and written 5 s after a change
+let players = null, flushPlayers = () => {};
+{
+  const file = data ? path.resolve(data, 'players.json') : null;
+  let load = null, writeT = null;
+  if (file) { try { load = JSON.parse(readFileSync(file, 'utf8')); } catch {} }
+  const write = () => { writeT = null; try { mkdirSync(path.dirname(file), {recursive: true}); writeFileSync(file + '.tmp', JSON.stringify(players.toJSON())); renameSync(file + '.tmp', file); } catch (e) { log('players: not written:', e.message); } };
+  players = createPlayers({SKILLS, importCap: isFinite(importCap) ? importCap : IMPORT_CAP, load, onChange: () => { if (file && !writeT) writeT = setTimeout(write, 5000); }});
+  if (file) log(`players: ${players.size} records from ${file}`);
+  flushPlayers = () => { if (writeT) { clearTimeout(writeT); write(); } };
+}
 
 // the forest's trees (src/world/forest.js, the same generator the clients run): the room checks a felled tree exists and is in reach;
-// and its uncanny plan (world/uncanny.js): the room runs the secrets and the night elk from it
-let trees = null, unc = null;
+// its small things (F.decor: the patches a pick asks for, docs/FORAGING.md); its cave's veins (docs/MINING.md); and its uncanny plan (world/uncanny.js): the room runs
+// the secrets and the night elk from it
+let trees = null, decor = null, veins = null, cave = null, unc = null, forest = null, fauna = null, plan = null;
 try {
-  const [W, Un] = await Promise.all([import('../src/world/forest.js'), import('../src/world/uncanny.js')]);
-  const F = W.forestPlan(seed); trees = F.trees; log(`forest ${seed}: ${trees.size} trees`);
+  const [W, Un, Fa] = await Promise.all([import('../src/world/forest.js'), import('../src/world/uncanny.js'), import('../src/world/fauna.js')]);
+  const F = forest = plan = W.forestPlan(seed); trees = F.trees; decor = F.decor; veins = F.cave?.veins || null; cave = F.cave || null; log(`forest ${seed}: ${trees.size} trees, ${veins?.length ?? 0} veins, ${cave?.soot?.length ?? 0} soot roosts, ${cave?.hollows?.length ?? 0} hollow walls`);
   if (uncanny) unc = Un.uncannyPlan(F, {shift: isFinite(nshift) ? nshift : 1});
+  fauna = Fa.faunaPlan(F);   // (the fox's dens: server/animals.mjs, sim/foxden.js)
   if (unc) log(`uncanny forest: heron ${unc.heron ? 'yes' : 'no'}, stones ${unc.stones ? 'yes' : 'no'}, marks ${unc.marks.length}, elk ${unc.elk ? 'yes' : 'no'} · clock ${hour} h, ${daymin} min a day`);
 }
 catch (e) { log('forest: not loaded (acts are not checked against the trees, no uncanny forest):', e.message); }
 
-const room = createRoom({seed, trees, unc, hour: isFinite(hour) ? hour : CLOCK.hour, daymin: isFinite(daymin) ? daymin : CLOCK.daymin, log});
+const workshop = {heat: +arg('heat', 1) > 0 ? +arg('heat', 1) : 1, smelt: +arg('smelt', 1) > 0 ? +arg('smelt', 1) : 1, wardrobe: process.argv.includes('--wardrobe')};
+const room = createRoom({seed, trees, decor, veins, cave, forest, plan, strikes: strikes > 0 ? strikes : 1, treefire, snuffers: snuffers === null ? undefined : Math.max(0, +snuffers || 0), regrow: regrow > 0 ? regrow : 1, unc, hour: isFinite(hour) ? hour : CLOCK.hour, season: keepS, daymin: isFinite(daymin) ? daymin : CLOCK.daymin, log, workshop, fauna, thief,
+  players, xprate: xprate === 'raw' || xprate > 0 ? xprate : 1, importCap, movelvl, dev});
 const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.glb': 'model/gltf-binary',
   '.bin': 'application/octet-stream', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8'};
+room.usePlan(plan);   // (the keepsakes' shelves: the dolls' open ground, docs/KEEPSAKES.md)
 
+// what it serves: the page's own folders only, never a dot-named one (.git, .env, .claude) nor the server's, the tools' or
+// tmp/ (a --data dir there holds the players' records)
+const SERVED = new Set(['src', 'concepts', 'audio', 'assets']);
+const servable = rel => { const seg = rel.split('/').filter(Boolean); return seg.length > 0 && SERVED.has(seg[0]) && !seg.some(x => x.startsWith('.')); };
 async function file(root, rel) {
+  if (!servable(rel)) return null;
   const p = path.resolve(root, '.' + rel);
   if (p !== root && !p.startsWith(root + path.sep)) return null;   // (no way out of the root)
   try { let s = await stat(p), q = p; if (s.isDirectory()) { q = path.join(p, 'index.html'); s = await stat(q); } return s.isFile() ? {data: await readFile(q), ext: path.extname(q).toLowerCase()} : null; }
   catch { return null; }
 }
+// the art a clone doesn't have (concepts/sprites/out: on the dev PC, or from Git LFS) falls back to the stand-ins in assets/standin/
+// (plain blocks, tools: /mnt/project-files/tools/standin/gen_standins.py): a fresh clone or a ZIP download starts with them
+// (an art file that is a Git LFS pointer, as in a ZIP made without the LFS objects, counts as missing)
+const ART = '/concepts/sprites/out/', STANDIN = path.join(ROOT, 'assets', 'standin');
+const lfsPointer = f => f && f.data.length < 300 && f.data.toString('latin1', 0, 24) === 'version https://git-lfs.', real = f => lfsPointer(f) ? null : f;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x'), rel = decodeURIComponent(url.pathname);
-  const head = {'Cache-Control': 'no-store, must-revalidate', 'Access-Control-Allow-Origin': '*'};
-  if (rel === PATH + '/session') { res.writeHead(200, {...head, 'Content-Type': 'application/json'}); res.end(JSON.stringify({v: VERSION, seed, players: room.size})); return; }
+  const head = {'Cache-Control': 'no-store, must-revalidate'};
+  // (the session: a page served elsewhere may ask, so it alone is open to any origin)
+  if (rel === PATH + '/session') { res.writeHead(200, {...head, 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}); res.end(JSON.stringify({v: VERSION, seed, players: room.size})); return; }
   if (rel === '/') { res.writeHead(302, {Location: '/src/?mp=1'}); res.end(); return; }
-  const f = await file(ROOT, rel) || (assets ? await file(path.resolve(assets), rel) : null);
+  const f = real(await file(ROOT, rel)) || (assets ? real(await file(path.resolve(assets), rel)) : null) || (rel.startsWith(ART) ? await file(STANDIN, rel) : null);
   if (!f) { res.writeHead(404, head); res.end('not found'); return; }
   res.writeHead(200, {...head, 'Content-Type': TYPES[f.ext] || 'application/octet-stream'}); res.end(f.data);
 });
@@ -60,5 +111,5 @@ attachWs(server, PATH, conn => room.connect(conn));
 server.listen(port, host, () => {
   console.log(`Riftbound co-op server · seed ${seed} · http://localhost:${port}/src/?mp=1 (open it in two windows)${assets ? ' · assets from ' + assets : ''}`);
 });
-const stop = () => { room.stop(); server.close(); process.exit(0); };
+const stop = () => { room.stop(); flushPlayers(); server.close(); process.exit(0); };
 process.on('SIGINT', stop); process.on('SIGTERM', stop);

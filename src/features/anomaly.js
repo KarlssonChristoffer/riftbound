@@ -15,7 +15,7 @@
 //   motion    the view's own clock (F.view, ambient: it goes on behind the menu and in photo mode's living world; a still
 //             photo freezes it). No Math.random anywhere (no draw from the shared generator: golden stays put elsewhere)
 // ?anomaly=0: none (on by default in the sandbox); Dev > World: the toggle, Space warp, HD glow; Sandbox > Places: go there.
-// FEATURE CONTRACT (main.js): view, frame, lights, biomeChanged, toggle, menu, settings; ambient.
+// FEATURE CONTRACT (main.js): view, frame, lights, biomeChanged, toggle, menu, settings; ambient. F.spot: where it stands (read only).
 // OWNS: F.on, the spot, its clock, the tear's / specks' meshes (tear.js, specks.js), the decal canvas, its light record.
 // READS: the game's mode (sandbox), host.elev / inStream / layout / entities.near (place.js), host.biome, host.zoom,
 //   host.G (toScreenInto, onScreen, fx, compU), host.env (season).
@@ -74,6 +74,7 @@ export async function create(host) {
     palette();
   }
 
+  Object.defineProperty(F, 'spot', {get: () => F.on ? spot : null});   // (where it stands, {x, y, g}, once placed: features/story.js films it and counts it a place)
   F.toggle = () => { F.on = !F.on; };
   F.biomeChanged = () => { spotWorld = null; };   // (found again at the next view: after every feature has built its pieces)
   F.settings = () => [{label: 'Space warp', options: ['on', 'off'], get: () => warp ? 'on' : 'off', set: v => { warp = v === 'on'; }},

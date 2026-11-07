@@ -73,7 +73,7 @@ export function createWindAudio(ac, dest, rnd = R) {
   // whoosh: the gust around the player
   const wbp = biq('bandpass', 260, .7), wlp = biq('lowpass', 950, .6), wg = ac.createGain(); wg.gain.value = 0;
   loop(PK[2], rnd()).connect(wbp); wbp.connect(wlp); wlp.connect(wg); wg.connect(pan(0));
-  let tickAcc = 0, alive = true;
+  let tickAcc = 0, setAcc = 1, alive = true;   // (setAcc: the levels are set 30 times a second, not every frame: they glide anyway)
   const set = (p, v, tc = TUNE.smooth) => p.setTargetAtTime(v, ac.currentTime, tc);
   function tick(t, e, panC) {
     const s = ac.createBufferSource(); s.buffer = BU; s.playbackRate.value = .8 + R() * .5;
@@ -98,9 +98,10 @@ export function createWindAudio(ac, dest, rnd = R) {
       if (!alive) return;
       const e = s ? Math.max(0, s.e || 0) : 0, panC = s ? clamp(s.pan || 0, -1, 1) : 0, st = s ? s.strength || 0 : 0;
       const lv = TUNE.rustle * (1 - Math.exp(-.8 * e));
+      if ((setAcc += dt) >= 1 / 30) { setAcc = 0;
       for (const v of voices) { set(v.amt.gain, lv); if (v.p.pan) set(v.p.pan, clamp(panC * .75 + v.side * .3, -.9, .9), .3); set(v.bp.frequency, 600 + 180 * Math.min(2, e), .4); }
       const k = clamp((st - .6) / 1.9, 0, 1) ** 1.3;
-      set(wg.gain, TUNE.whoosh * k); set(wbp.frequency, 170 + 430 * clamp(st / 2.6, 0, 1), .5);
+      set(wg.gain, TUNE.whoosh * k); set(wbp.frequency, 170 + 430 * clamp(st / 2.6, 0, 1), .5); }
       tickAcc += dt * TUNE.ticks * clamp(e - .15, 0, 2) ** 1.5;
       const t = ac.currentTime + .02;
       for (let i = 0; tickAcc >= 1 && i < 4; i++) { tickAcc -= 1; tick(t + R() * .04, e, panC); }

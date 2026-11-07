@@ -1281,7 +1281,7 @@ export async function create(host) {
   }
 
   // ================================================================ public
-  const EMPTY = [];
+  const EMPTY = [], LOUT = [], LREC = [];
   function setBiome(id) {
     biome = id; B = BIOME[id] || BIOME.ruins; seedField(); needDecor = true;
     fst.clear(); flames.clear(); parts.length = 0; fol = null;
@@ -1371,8 +1371,11 @@ export async function create(host) {
     },
     lights() {
       if (!W.on || needDecor) return EMPTY;
-      const out = [];
-      for (const L of lanterns) if (vis(L.x, L.y, 4)) out.push({x: L.bx, y: L.by, h: L.bz - .12, color: L.pal.light, radius: 3, intensity: .8, flicker: .3, id: L.id});
+      const out = LOUT; out.length = 0;   // (kept records, read at once by render/lighting.js)
+      for (const L of lanterns) if (vis(L.x, L.y, 4)) {
+        const o = LREC[out.length] ??= {};
+        o.x = L.bx; o.y = L.by; o.h = L.bz - .12; o.color = L.pal.light; o.radius = 3; o.intensity = .8; o.flicker = .3; o.id = L.id; out.push(o);
+      }
       return out;
     },
     // the cloak: the arena's CLOTH_PARAMS overrides at the player, turned into his view frame (the rig runs there)

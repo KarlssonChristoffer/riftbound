@@ -1,0 +1,149 @@
+{
+ "Plank": [
+  "wood",
+  {}
+ ],
+ "Beam": [
+  "wood",
+  {
+   "bias": 0.08
+  }
+ ],
+ "Board": [
+  "wood",
+  {
+   "bias": -0.05
+  }
+ ],
+ "Stave": [
+  "wood",
+  {}
+ ],
+ "Lid": [
+  "wood",
+  {
+   "bias": 0.05
+  }
+ ],
+ "Iron": [
+  "metal",
+  {
+   "bias": 0.05
+  }
+ ],
+ "Rivet": [
+  "metal",
+  {
+   "bias": 0.2,
+   "thin": true
+  }
+ ],
+ "Clay": [
+  "clay",
+  {}
+ ],
+ "Band": [
+  "clay",
+  {
+   "bias": -0.22
+  }
+ ],
+ "Rim": [
+  "clay",
+  {
+   "bias": 0.1
+  }
+ ],
+ "Stone": [
+  "stone",
+  {}
+ ],
+ "Drum": [
+  "stone",
+  {}
+ ],
+ "Cap": [
+  "stone",
+  {
+   "bias": -0.06
+  }
+ ],
+ "Rock": [
+  "rock",
+  {}
+ ],
+ "Pebble": [
+  "rock",
+  {
+   "bias": -0.05
+  }
+ ],
+ "Paint": [
+  "red",
+  {}
+ ],
+ "Hazard": [
+  "haz",
+  {}
+ ],
+ "HazDark": [
+  "haz",
+  {
+   "fixed": 3
+  }
+ ],
+ "Gold": [
+  "gold",
+  {
+   "bias": 0.1
+  }
+ ],
+ "Coin": [
+  "gold",
+  {
+   "bias": 0.15
+  }
+ ],
+ "Hole": [
+  "void",
+  {
+   "fixed": 2,
+   "seam": false
+  }
+ ],
+ "Fuse": [
+  "rope",
+  {
+   "thin": true
+  }
+ ],
+ "Block": [
+  "stone",
+  {}
+ ],
+ "Coping": [
+  "stone",
+  {
+   "bias": -0.1
+  }
+ ],
+ "Merlon": [
+  "stone",
+  {
+   "bias": 0.03
+  }
+ ],
+ "Rune": [
+  "rune",
+  {
+   "seam": false
+  }
+ ],
+ "Crack": [
+  "crack",
+  {
+   "seam": false,
+   "thin": true
+  }
+ ]
+}

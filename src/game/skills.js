@@ -4,6 +4,7 @@
 //   sk.gain(id, n) -> the new level if this XP raised it, else 0 / sk.level(id) / sk.xp(id) / sk.span(id) -> {at, next}:
 //   the XP the level began at and the next one's (next = at: the last level)
 //   sk.levelAt(xp) / sk.toJSON() -> {id: xp} / sk.load(o) / sk.ver (bumps on every gain: caches)
+//   sk.set(id, xp) -> the new level if it went up, else 0 (co-op: the server's word on his XP, server/players.mjs)
 // OWNS: the XP, the source 'skills' in host.mods.
 export function createSkills(SKILLS, CURVE, mods) {
   const xp = {};
@@ -25,6 +26,12 @@ export function createSkills(SKILLS, CURVE, mods) {
       const L0 = levelAt(xp[id]); xp[id] += n; ver++;
       const L1 = levelAt(xp[id]); if (L1 === L0) return 0;
       apply(); return L1;
+    },
+    set(id, n) {
+      if (!(id in xp) || !(n >= 0) || n === xp[id]) return 0;
+      const L0 = levelAt(xp[id]); xp[id] = n; ver++;
+      const L1 = levelAt(n); if (L1 !== L0) apply();
+      return L1 > L0 ? L1 : 0;
     },
     level: id => levelAt(xp[id] || 0),
     xp: id => xp[id] || 0,

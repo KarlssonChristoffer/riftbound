@@ -234,6 +234,29 @@ steps, banks: leg IK, knob `feet`) and the jumps are clips made for the live mod
 drop and runs on. Shift+Alt+7 flips the new movement off / on. The movement course that measures it (feet against the
 ground, slide, pops, a station for each move) and the numbers: [livemove.md](livemove.md).
 
+## Natural motion up close (2026-11-07)
+
+Christoffer: "for stel och omänsklig i sina rörelser, syns tydligt i 3rd person". The pixel knobs (`all`: 16 facings, the
+clips' 6-13 fps, poses held until a pixel moves, the anchor on whole pixels) are what keep him calm from the game's high
+camera, and exactly what reads as a robot from behind his shoulder. So the knobs now follow the camera (`?motion`, default
+`auto`): the new `natural` preset in third / first person (and in the pose co-op peers see then), the pixel knobs from the
+high camera; `?motion=natural` everywhere, `?motion=pixel` the old look everywhere. `natural` (NAT in livehero.js):
+
+- **facing**: free in the world, not 16 steps; on the move the way he really goes (only within .75 of a facing step of the
+  sim's, never against it), on a critically damped spring (13 rad/s; 28 with the gun out or in a roll / leap)
+- **curves**: a clip's frames joined by Catmull-Rom curves through the frame before and the one after the next (no corner at
+  every key of an 8-frame walk)
+- **gaits**: walk / run / sprint cross-faded over .3 s on the shared stride phase (the same foot down), not cut
+- **blend**: a switch (standing -> walking, a stop) blends over at least .2 s
+- **lead**: turning, the head leads and the chest follows (the facing spring's speed)
+- **breath**: standing he breathes, faster and deeper after a run
+- Fixes that were 3P-only bugs for every preset: the lean into acceleration (FLOW's and the move lean) skipped every frame
+  the yaw changed, so the mouse turning the chase camera wiped it out; it is worked out in the world's frame now. The duster
+  (runtime cloth) lost his motion on those frames too (it hung still while he ran and the mouse turned); last frame's spot is
+  turned with the camera now.
+- **Co-op**: peers drew a sent pose as it came (20 a second); they now blend the two snapshots round the render time
+  (features/coop/look.js mixPose), so a friend's body moves as smoothly as it was drawn.
+
 ## Measurements
 
 ### The shimmer meter

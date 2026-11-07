@@ -321,6 +321,7 @@ export function createLassoLook(host, lsim) {
       POP.size = z * 2; POP.alpha = a; for (let k = 0; k < 3; k++) { host.point(p.x, p.y, top + .1 - k * .07, col, POP); }   // a little drop marker over it
       POP.size = z; host.point(p.x - .1, p.y, top + .08, col, POP); host.point(p.x + .1, p.y, top + .08, col, POP);
     } else if (A.kind === 'prop' && A.who) dashRing(A.who.x, A.who.y, (A.who.z || 0) + .03, (A.who.r || .3) + .2, col, 18, crawl, a);
+    else if (A.kind === 'animal' && A.who) dashRing(A.who.x, A.who.y, A.who.z + .03, A.who.hitR + .18, col, 18, crawl, a);   // (an animal: a ring at its feet, no marker over it)
     else if (A.kind === 'anchor') {
       const k = .16 + .04 * Math.sin(T * 9);
       ring(A.x, A.y, A.h, k, Math.cos(host.yaw), -Math.sin(host.yaw), 0, 0, 0, 1, 12, T * 3, 0);   // a ring facing you round the point

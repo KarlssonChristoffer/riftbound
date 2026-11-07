@@ -44,6 +44,7 @@ import {towerPlan, towerCols, inTower} from './watchtower.js';
 import {BROOK, BRIDGE as BROOK_BRIDGE, lay as layBrook, inBrookPool, gapsOn as brookGaps, away as brookAway} from './brook.js';   // the West Downs' brook
 import {SESSION} from '../core/session.js';   // the forest's seed (?seed, ?forest=1, or the co-op server's)
 import {forestPlan, lay as layForest, RECT as FOREST_RECT} from './forest.js';   // the seeded forest north of the Proving Grounds
+import {fjallPlan} from './fjall.js';   // the fjäll north and east of the home world (FJALL, at the end)
 
 // WORLD: the bounds of everything (m): the ground, the camera, the spatial grid, the nav and the renderer's world-wide maps
 // cover it. Its origin (x0, y0) may go below 0 when the world grows; WM / HM = its size. GROUNDS: the Proving Grounds' own
@@ -88,7 +89,8 @@ const FOREST_S = 3.2;
 const inForest = (x, y, m) => !!FOREST && x > WORLD.x0 + 1.4 + m && x < WORLD.x1 - 1 - m && y > FOREST_RECT.y0 + 1.4 + m && y < FOREST_S - m;
 //   the CAVE's band (its rock walls are steep: the walkers keep to its open)
 const inCave = (x, y) => !!CAVE && CAVE.inBand(x, y);
-export const walkable = (x, y) => (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1) || inDowns(x, y, 0) || inForest(x, y, 0) || inCave(x, y);
+let FJ = null;   // THE FJÄLL (world/fjall.js, docs/FJALL.md): its plan, made at the end of this module (FJALL); it owns the ground outside WORLD
+export const walkable = (x, y) => (FJ !== null && (FJ.owns(x, y) || FJ.inGate(x, y))) ? FJ.walk(x, y) : (x > PLAY.x0 - 3 && x < PLAY.x1 + 3 && y > PLAY.y0 - 3 && y < PLAY.y1 + 3) || (x > TRAIL.x0 && x < TRAIL.x1 && y > TRAIL.y0 && y < TRAIL.y1) || inDowns(x, y, 0) || inForest(x, y, 0) || inCave(x, y);
 export const roamable = (x, y) => (x > PLAY.x0 + .35 && x < PLAY.x1 - .35 && y > PLAY.y0 + .35 && y < PLAY.y1 - .35) || (x > TRAIL.x0 + .5 && x < TRAIL.x1 - .5 && y > TRAIL.y0 + .5 && y < TRAIL.y1 - .4)
   || inDowns(x, y, .5) || (!!DOWNS && x >= DOWNS.x1 - .1 && x < PLAY.x0 + .4 && Math.abs(y - (PLAY.y0 + PLAY.y1) / 2) < 1.3)   // (the downs and the west gate between them and the arena)
   || inForest(x, y, .5);
@@ -108,8 +110,10 @@ export const STREAM = {
   removeStone(o) { const i = STREAM.stones.indexOf(o); if (i >= 0) STREAM.stones.splice(i, 1); },
 };
 STREAM.stones[0].x = STREAM.cx(23.4) - .5; STREAM.stones[1].x = STREAM.cx(23.4) + .55;
+// the lake's ice (features/ice.js sets ICE.solid(x, y) -> true where the ice holds him; null: none): no water there for the sim
+export const ICE = {solid: null};
 export const inStream = (x, y) => {
-  if (FOREST !== null && y < 0) return FOREST.inDeep(x, y);   // (the forest's lake past the shelf you wade: deep water, world/forest.js)
+  if (FOREST !== null && y < 0) return FOREST.inDeep(x, y) && !(ICE.solid !== null && ICE.solid(x, y));   // (the forest's lake past the shelf you wade: deep water, world/forest.js; frozen: none)
   if (y < STREAM.y0 || y > STREAM.y1) return false;
   if (Math.abs(x - STREAM.cx(y)) > STREAM.w(y) / 2) return inPool(x, y) || inBrookPool(x, y);   // (the plateau's pool is deep water too; so is the brook's, brook.js)
   return !STREAM.stones.some(s => Math.hypot(x - s.x, (y - s.y) * 1.3) < s.r);   // stones are dry footing
@@ -121,9 +125,9 @@ export const inStream = (x, y) => {
 const BOX = {x0: 43, y0: 2.8, x1: 60, y1: 11, h: 2.4,
   climbs: [{x: 51.5, w: 1.2}]};         // climb spot on the south face (x = centre, w = width)
 export const PLATEAUS = TERRAIN_ON ? [] : [BOX];
-export const elev = (x, y) => { for (const p of PLATEAUS) if (x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) return p.h; if (!TERRAIN_ON) return 0; const h = terrainField().H(x, y), d = deckAt(x, y); return d > h ? d : h; };
+export const elev = (x, y) => { if (FJ !== null && FJ.owns(x, y)) return FJ.H(x, y); for (const p of PLATEAUS) if (x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) return p.h; if (!TERRAIN_ON) return 0; const h = terrainField().H(x, y), d = deckAt(x, y); return d > h ? d : h; };
 // too steep to walk up (walkable terrain: a terrace's cliff, a ramp's side); never on flat ground, the plateau's top or a bridge's deck
-export const steep = (x, y) => TERRAIN_ON && !PLATEAUS.some(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) && terrainField().steep(x, y) && deckAt(x, y) < -1e8;
+export const steep = (x, y) => FJ !== null && FJ.owns(x, y) ? FJ.steep(x, y) : TERRAIN_ON && !PLATEAUS.some(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) && terrainField().steep(x, y) && deckAt(x, y) < -1e8;
 // BRIDGES (walkable terrain): footbridges, a deck from a to b (its ends on the banks) w m wide, rising arch m in the middle; deckAt(x, y)
 // -> the deck's height there or -1e9 off every deck. elev takes the deck where it lies above the ground (what is under it stays: a
 // creek runs on below; nothing walks under a deck). Set up with the creek's bed (below): ends, heights, the box to test first
@@ -138,7 +142,7 @@ function deckAt(x, y) {
   return -1e9;
 }
 // on the open ground: not a plateau's top, not a cliff (spawn spots, scatter, caches: "where elev === 0" in the flat world, exactly)
-export const onGround = (x, y) => TERRAIN_ON ? !PLATEAUS.some(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) && !terrainField().steep(x, y) : elev(x, y) === 0;
+export const onGround = (x, y) => FJ !== null && FJ.owns(x, y) ? !FJ.steep(x, y) : TERRAIN_ON ? !PLATEAUS.some(p => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) && !terrainField().steep(x, y) : elev(x, y) === 0;
 // two heights the same level: equal in the flat world, within `tol` m on walkable terrain
 export const sameLevel = (a, b, tol = .3) => TERRAIN_ON ? Math.abs(a - b) <= tol : a === b;
 
@@ -567,6 +571,12 @@ if (TOWER_PLAN) { BRIDGES.push(TOWER_PLAN.deck); CLIMBS.push(TOWER_PLAN.climb); 
 // buildLayout adds its colliders and the prop that carries the roof; roofY: the roof's underside (m), the walls' top over the highest
 // ground under them. The cutaway reads it for "is he under a roof"
 export const HUT = FOREST && TERRAIN_ON && flags.get('hut') !== '0' ? hutPlan(FOREST.clearing, sampler(TERRAIN, terrainMask)) : null;
+// THE FJÄLL (world/fjall.js, docs/FJALL.md; ?fjall=0 off): north and east of the woods, in one world with them. Its plan, from the seed and
+// the home ground along WORLD's edges (it eases into it there); its height field arrives from the paint worker (features/fjall.js:
+// FJALL.adopt). It owns every point of its region outside WORLD: elev / steep / onGround / walkable ask it there (above)
+export const FJALL = FJ = FOREST && TERRAIN_ON && flags.get('fjall') !== '0' ? fjallPlan(SESSION.seed, {home: {x0: WORLD.x0, y0: WORLD.y0, x1: WORLD.x1, y1: WORLD.y1}, homeH: (x, y) => terrainField().H(x, y)}) : null;
+// the camera's bounds at (x, y) (render/camera.js): the fjäll's region out there, WORLD at home
+export const viewBounds = (x, y) => FJ !== null ? FJ.view(x, y, WORLD) : WORLD;
 function hutPlan(c, ground) {
   const x0 = c.x - 2.5, x1 = c.x + 2.5, y0 = c.y - 2, y1 = c.y + 2, d = .45, e = d / 2, door = 1.15, L = x1 - x0 + d, h = 2.35;
   let g = -1e9; for (let x = x0 - e; x <= x1 + e + 1e-6; x += .5) for (const y of [y0, y1]) g = Math.max(g, ground(x, y));

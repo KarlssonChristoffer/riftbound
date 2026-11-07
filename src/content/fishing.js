@@ -13,13 +13,13 @@
 //            each does and how it reads in the gear card (statWords)
 //   TUNE     the cast, the wait, the hook, the fight: features/fishing.js reads these
 //   roll(rng, o) -> {id, cm, kg, wait, nibbles}   the catch for a cast (o: water, part, rain, deep, luck, find, size, lure,
-//            perfect, spot, bait): the game offline and the server in co-op draw the same way
+//            perfect, spot, bait, season: 'winter' takes WINTER's weights): the game offline and the server in co-op draw the same way
 //   SPOT     fishing spots: rises and bubbles on the water (features/fishing.js finds them; a cast into one bites sooner, rarer)
 //            spotAt(a, b, slot, seed, out) (the cell's spot), spotNear(x, y, slot, seed) (the server's check of a cast's word)
+//   COME     the lingon's fish that come to your legs (a hand grab: roll's o.hand)
 //   BAITS    what goes on the hook (cut from small fish at the pack panel; one a cast while you have it): prey weights
-//   MEALS    fish cooked and eaten at a burning campfire: a buff for a while (notes in host.mods, source 'fishing.meal')
 //   ANGLER   the fishing set: ANGLER.n fishing pieces worn at once give its notes (source 'fishing.set')
-//   castNotes(o) -> notes   the notes a cast is rolled with besides the gear's: the skill's, the set's, the meal's (the server
+//   castNotes(o) -> notes   the notes a cast is rolled with besides the gear's: the skill's, the set's, the meal's (content/meals.js; the server
 //            builds the same from what it knows; the client has them in host.mods)
 import {hash3} from '../core/mathx.js';
 export const WATERS = {1: 'river', 2: 'stream', 3: 'river', 4: 'stream', 5: 'stream', 6: 'stream', 7: 'lake', 8: 'river'};
@@ -28,6 +28,13 @@ export const DEEP = 3;   // m from the shore: the lake's deep water (char, zande
 export const RARITY_W = {common: 60, fine: 26, rare: 10, masterwork: 3.4, mythic: .6};   // the base odds by rarity (before luck)
 export const RARITY_TIER = {common: 0, fine: 1, rare: 2, masterwork: 3, mythic: 4};
 
+// WINTER (docs/WINTER.md): through the ice (env.season 'winter', o.season) the lake's fish bite as in the cold: a weight x per
+// catch (a number, or by part of the day: {night: 2}, the rest 1)
+export const WINTER = {perch: 1.3, burbot: {night: 2}, char: 1.5, pike: 1.2, bream: .3, tench: .3};
+// THE JIG (features/fishing.js, at a hole in the ice): small lifts of the rod in a slow rhythm; only while it jigs does the wait run.
+// A lift sooner than fast s after the last spooks it (+ spook s); each good lift (fast .. slow s after the last) keeps it working
+// for keep s. The bite is struck as usual (the strike: an up-stroke)
+export const JIG = {fast: .55, slow: 1.9, keep: 1.4, spook: 1.2, reach: 2.2};
 export const TUNE = {
   cast: {min: 2.5, max: 9, period: 1.5, perfect: .93, luck: .15, fly: .55, arc: 1.4},   // m; a charge's up-and-down (s); the
                                                                                        // perfect top; its luck; the bobber's flight (s), its arc (m)
@@ -223,18 +230,23 @@ export const catchIcon = id => ICONS[id] ??= CATCHES[id].rows ? {rows: CATCHES[i
 // ---------------------------------------------------------------- the roll: what bites, when, how big
 // rng: () -> [0, 1) (the caller's own seeded generator). o: {water ('lake' | 'stream' | 'river'), part (env.part), rain (bool),
 // deep (m from the shore), luck, find (chances added), size (mul), lure (mul on the wait), night (share off the wait at night),
-// perfect (bool: a perfect cast), spot (bool: cast on a fishing spot: SPOT), bait (a BAITS id: its prey bite more)}
+// perfect (bool: a perfect cast), spot (bool: cast on a fishing spot: SPOT), bait (a BAITS id: its prey bite more), hand (a fish
+// grabbed by hand: COME; no finds, common and fine fish only), cls (a SHADOW class: a cast at a shadow's nose: a fish of its
+// rarities, no find, unless the water has none of them), quick (the shadow's bite: SHADOW.bite s, no nibbles)}
 // -> {id, cm, kg, wait (s), nibbles: [s ...] (before wait)}
 export function roll(rng, o) {
   const luck = (o.luck || 0) + (o.perfect ? TUNE.cast.luck : 0) + (o.spot ? SPOT.luck : 0), prey = o.bait ? BAITS[o.bait]?.prey : null;
-  const isFind = rng() < TUNE.find + (o.find || 0);
+  const cls = SHADOW.cls[o.cls] || null;
+  const isFind = !o.hand && rng() < TUNE.find + (o.find || 0) && !cls;
   let total = 0; const pick = [];
-  for (const id of CATCH_IDS) {
-    const c = CATCHES[id]; if (!!c.find !== isFind || !c.where.includes(o.water)) continue;
+  for (let pass = cls ? 0 : 1; pass < 2 && !total; pass++) for (const id of CATCH_IDS) {   // (pass 0: the shadow's class only)
+    const c = CATCHES[id]; if (!!c.find !== isFind || !c.where.includes(o.water) || (!pass && !cls.rar.includes(c.rarity))) continue;
+    if (o.hand && (RARITY_TIER[c.rarity] || 0) > 1) continue;   // (a fish grabbed by hand in the shallows: common and fine ones only)
     let w = (RARITY_W[c.rarity] || 1) * Math.pow(1 + Math.max(0, luck), RARITY_TIER[c.rarity] || 0) * (c.when[o.part] ?? 1);
     if (o.rain && c.rain) w *= c.rain;
     if (prey && prey[id]) w *= prey[id];
     if (c.deep && (o.deep || 0) < DEEP) w /= c.deep * 2;   // (a deep-water fish near the shore: rarely)
+    if (o.season === 'winter' && WINTER[id]) { const k = WINTER[id]; w *= typeof k === 'number' ? k : (k[o.part] ?? 1); }   // (through the ice)
     if (w > 0) { pick.push(id, w); total += w; }
   }
   let id = pick[0] || 'old_boot';
@@ -243,14 +255,14 @@ export function roll(rng, o) {
   const cm = Math.round(Math.min(c.cm[1] * 1.15, (c.cm[0] + (c.cm[1] - c.cm[0]) * u * u) * (o.size || 1)) * 10) / 10;
   const kg = Math.round(c.kg * (cm / 10) ** 3 * 100) / 100;
   const nightK = o.part === 'night' ? 1 - Math.min(.8, o.night || 0) : 1;
-  const wait = (TUNE.wait[0] + (TUNE.wait[1] - TUNE.wait[0]) * rng()) * (o.lure || 1) * nightK * (o.spot ? SPOT.lure : 1);
-  const n = Math.floor(TUNE.nibble[0] + (TUNE.nibble[1] + 1 - TUNE.nibble[0]) * rng()), nibbles = [];
+  const u2 = rng(), wait = o.quick ? SHADOW.bite[0] + (SHADOW.bite[1] - SHADOW.bite[0]) * u2 : (TUNE.wait[0] + (TUNE.wait[1] - TUNE.wait[0]) * u2) * (o.lure || 1) * nightK * (o.spot ? SPOT.lure : 1);
+  const n = o.quick ? (rng(), 0) : Math.floor(TUNE.nibble[0] + (TUNE.nibble[1] + 1 - TUNE.nibble[0]) * rng()), nibbles = [];
   for (let i = 0; i < n; i++) nibbles.push(Math.round(wait * (.25 + .65 * rng()) * 100) / 100);
   nibbles.sort((a, b) => a - b);
   return {id, cm, kg, wait: Math.round(wait * 100) / 100, nibbles};
 }
 
-// ---------------------------------------------------------------- fishing spots, bait, meals, the angler's set
+// ---------------------------------------------------------------- fishing spots, bait, the angler's set
 // SPOTS: the water is cut in cells of `cell` m; in each slot of `slot` s a cell holds a spot with chance `p`, at a hashed
 // place in it (it must be water `edge` m from the bank). Casting within `r` m of one: the wait x lure, + luck. One catch
 // from a spot spends it (for you). The slot clock is the world's (co-op: the server's), so friends see the same spots.
@@ -271,6 +283,55 @@ export function spotNear(x, y, slot, seed, slack = .5) {
   return false;
 }
 
+// FISH COME TO YOU (content/meals.js fish_lingon: the 'fish.come' note; features/fishing.js): stand still (under `slow` m/s) in shallow
+// water `still` s and n fish slide in from `from` m out over `arrive` s and circle your shins at `ring` m; when one turns past your
+// feet it flashes silver for `flash` s (one every `turn` s): E then grabs it, no rod (a hand catch: roll's hand: common and fine only).
+// A miss scatters them for `scatter` s. With a rod, a cast within `rod` m of you counts as a fishing spot. Burnt ('fish.come' < 0): they
+// flee you and gather round the nearest other player standing in water within `friend` m. The server takes a grab within `reach` m.
+export const COME = {slow: .3, still: 2, n: [3, 6], from: [8, 12], arrive: 4, ring: [.6, 1.2], flash: .25, turn: [1.1, 2.1], scatter: 5, rod: 4, friend: 15, reach: 1.5, flee: 7};
+// SHADOWS (Fishing 5, docs/SKILLS.md; one drawing for every brief: features/fishing.js draws them, other features ask it,
+// shadowsNear): each live spot has one fish circling under it, all from the spot's hash, so every client and the server see the
+// same one at the same clock. cls: its class (w: the share of spots, len: m long, rar: the rarities a cast at its nose
+// rolls from); orbit: m round the spot (under SPOT.edge: it stays over the water), speed: m/s along it; a bobber landing within
+// `nose` m of its head and `cone` deg of its heading draws it (a quick bite: `bite` s, no nibbles); within `spook` m of its
+// body it bolts (the wait + TUNE.spook) and is gone for you till the slot turns
+export const SHADOW = {
+  cls: {small: {w: 60, len: .25, rar: ['common']}, medium: {w: 30, len: .5, rar: ['fine']}, large: {w: 10, len: .9, rar: ['rare', 'masterwork', 'mythic']}},
+  orbit: [.35, .7], speed: [.22, .45], nose: 1.2, cone: 70, spook: .4, bite: [.8, 2],
+};
+const SH_CLS = Object.keys(SHADOW.cls), SH_W = SH_CLS.reduce((s, k) => s + SHADOW.cls[k].w, 0);
+// the shadow under spot cell (a, b) in slot `slot` of world `seed` at clock t (s: the slot clock's) -> writes {x, y (its middle),
+// hx, hy (unit: its heading), cls, len, sx, sy (the spot)} to out and returns true, or false: no spot there. Pure (the server's too)
+export function shadowAt(a, b, slot, seed, t, out) {
+  if (!spotAt(a, b, slot, seed, out)) return false;
+  out.sx = out.x; out.sy = out.y;
+  const h = k => hash3(a * 3 + k, b * 5 - k, (slot * 7 + seed + k) | 0);
+  let u = h(1) * SH_W, cls = SH_CLS[0]; for (const k of SH_CLS) { u -= SHADOW.cls[k].w; if (u <= 0) { cls = k; break; } }
+  const r = SHADOW.orbit[0] + (SHADOW.orbit[1] - SHADOW.orbit[0]) * h(2), v = SHADOW.speed[0] + (SHADOW.speed[1] - SHADOW.speed[0]) * h(3);
+  const dir = h(4) < .5 ? -1 : 1, th = h(5) * Math.PI * 2 + dir * v / r * t;
+  out.x = out.sx + Math.cos(th) * r; out.y = out.sy + Math.sin(th) * r;
+  out.hx = -Math.sin(th) * dir; out.hy = Math.cos(th) * dir; out.cls = cls; out.len = SHADOW.cls[cls].len;
+  return true;
+}
+// a bobber at (x, y) and the shadow `s` (shadowAt's out) -> 'nose' (just ahead of it: it bites) | 'spook' (on it: it bolts) | ''
+export function shadowCast(s, x, y, slack = 0) {
+  const nx = s.x + s.hx * s.len / 2, ny = s.y + s.hy * s.len / 2, dx = x - nx, dy = y - ny, d = Math.hypot(dx, dy);
+  if (Math.hypot(x - s.x, y - s.y) <= SHADOW.spook + s.len / 2) return 'spook';
+  if (d <= SHADOW.nose + slack && (dx * s.hx + dy * s.hy) / (d || 1) >= Math.cos(SHADOW.cone / 2 * Math.PI / 180)) return 'nose';
+  return '';
+}
+// the server's check of a cast at (x, y): the shadows of the spots round it (this slot and the one before) at each of the clock
+// times ts (s: a little latency's worth back) -> the first verdict that isn't '' ('nose' | 'spook'), with its class in out.cls
+const SHQ = {x: 0, y: 0, sx: 0, sy: 0, hx: 0, hy: 0, cls: '', len: 0};
+export function shadowVerdict(x, y, slot, seed, ts, out = SHQ) {
+  const a0 = Math.floor(x / SPOT.cell), b0 = Math.floor(y / SPOT.cell);
+  for (const t of ts) for (let s = slot - 1; s <= slot; s++) for (let a = a0 - 1; a <= a0 + 1; a++) for (let b = b0 - 1; b <= b0 + 1; b++) {
+    if (!shadowAt(a, b, s, seed, t, out)) continue;
+    const v = shadowCast(out, x, y, .25); if (v) return v;
+  }
+  return '';
+}
+
 export const COMMON_FISH = ['perch', 'roach', 'bleak', 'minnow'];
 // BAITS: id -> {name, from (catches it is cut from), n (baits per fish), prey (weight x by catch), desc}
 export const BAITS = {
@@ -280,32 +341,16 @@ export const BAITS = {
     icon: ['............', '............', '..aa........', '.abba.......', '.abbbaa.....', '..abbbbaa...', '...aabbbbaa.', '.....aabbbba', '.......aabba', '.........aa.', '............', '............'],
     pal: {a: '#5a3a3a', b: '#d89a8a'}},
 };
-// MEALS: cooked at a burning campfire (the pack panel's Cook list), eaten at once: a buff for `dur` s. One meal at a time.
-//   need: [{ids, n}] (n of ONE of ids: the one you have most of), notes (host.mods), say (what it does, in words)
-const ANY_FISH = ['perch', 'roach', 'bleak', 'minnow', 'pike', 'trout', 'bream', 'tench', 'zander', 'grayling', 'char', 'burbot'];
-export const MEALS = {
-  fish_stick: {name: 'Fish on a stick', need: [{ids: COMMON_FISH, n: 2}], dur: 240,
-    notes: [{stat: 'player.speed', mul: 1.06}, {stat: 'fish.reel', mul: 1.1}], say: 'move 6% faster, reel 10% faster'},
-  fish_soup: {name: 'Angler\'s soup', need: [{ids: ANY_FISH, n: 3}], dur: 300,
-    notes: [{stat: 'fish.lure', mul: .8}, {stat: 'fish.luck', add: .05}], say: 'bites 20% sooner, fishing luck +5%'},
-  trout_bark: {name: 'Trout in birch bark', need: [{ids: ['trout', 'grayling'], n: 1}], dur: 300,
-    notes: [{stat: 'fish.hook', add: .2}, {stat: 'fish.cast', mul: 1.15}, {stat: 'player.speed', mul: 1.04}], say: 'more time to strike, cast 15% further, move 4% faster'},
-  pike_stew: {name: 'Pike stew', need: [{ids: ['pike'], n: 1}, {ids: COMMON_FISH, n: 1}], dur: 300,
-    notes: [{stat: 'game.hurt', mul: .9}, {stat: 'woodcut.power', mul: 1.15}, {stat: 'fish.line', mul: 1.15}], say: 'take 10% less harm, chop 15% harder, a stronger line'},
-  smoked_eel: {name: 'Smoked eel', need: [{ids: ['eel'], n: 1}], dur: 420,
-    notes: [{stat: 'light.lanternR', mul: 1.3}, {stat: 'fish.night', add: .3}, {stat: 'fish.luck', add: .05}], say: 'your lantern reaches 30% further, night bites much sooner, luck +5%'},
-  salmon_plank: {name: 'Salmon on a plank', need: [{ids: ['salmon', 'char'], n: 1}], dur: 420,
-    notes: [{stat: 'fish.luck', add: .12}, {stat: 'fish.double', add: .06}, {stat: 'player.speed', mul: 1.05}], say: 'fishing luck +12%, a 6% chance of two fish, move 5% faster'},
-};
 // the angler's set: ANGLER.n or more fishing pieces worn (any slots) -> its notes
 export const ANGLER = {n: 4, name: 'Angler\'s set', notes: [{stat: 'fish.luck', add: .08}, {stat: 'fish.double', add: .05}, {stat: 'fish.hook', add: .15}],
   say: 'fishing luck +8%, a 5% chance of two fish, more time to strike'};
-// the notes a cast is rolled with besides the gear's own (the server: it knows the set and the level; the meal is the client's word)
-export function castNotes({lvl = 1, pieces = 0, meal = '', per = []}) {
+// the notes a cast is rolled with besides the gear's own (the server: it knows the set and the level; the meal is the client's word:
+// its notes, content/meals.js mealNotes)
+export function castNotes({lvl = 1, pieces = 0, meal = [], per = []}) {
   const out = [];
   for (const q of per) out.push(q.mul !== undefined ? {stat: q.stat, mul: 1 + q.mul * (lvl - 1)} : {stat: q.stat, add: (q.add || 0) * (lvl - 1)});
   if (pieces >= ANGLER.n) out.push(...ANGLER.notes);
-  if (MEALS[meal]) out.push(...MEALS[meal].notes);
+  out.push(...meal);
   return out;
 }
 // where and when a catch bites, in a few words (the journal's hint for one not caught yet)

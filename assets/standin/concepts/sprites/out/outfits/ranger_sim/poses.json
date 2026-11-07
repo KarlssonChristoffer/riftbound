@@ -1,0 +1,414 @@
+{
+ "poses": [
+  "apose",
+  "crouch",
+  "lunge",
+  "fall",
+  "land",
+  "reach_up",
+  "skid_a",
+  "skid_b",
+  "draw_m11",
+  "draw_p11",
+  "aim_tw_m45",
+  "aim_tw_m34",
+  "aim_tw_m22",
+  "aim_tw_p22",
+  "aim_tw_p34",
+  "aim_tw_p45",
+  "ws_0_0",
+  "ws_0_1",
+  "ws_0_2",
+  "ws_0_3",
+  "ws_0_4",
+  "ws_0_5",
+  "ws_0_6",
+  "ws_0_7",
+  "rs_0_0",
+  "rs_0_1",
+  "rs_0_2",
+  "rs_0_3",
+  "rs_0_4",
+  "rs_0_5",
+  "rs_0_6",
+  "rs_0_7",
+  "idle.0",
+  "idle.1",
+  "idle.2",
+  "idle.3",
+  "idle.4",
+  "idle.5",
+  "idle.6",
+  "idle.7",
+  "roll.0",
+  "roll.1",
+  "roll.2",
+  "roll.3",
+  "roll.4",
+  "roll.5",
+  "roll.6",
+  "roll.7",
+  "roll.8",
+  "roll.9",
+  "roll.10",
+  "roll.11",
+  "roll.12",
+  "roll.13",
+  "draw.0",
+  "draw.1",
+  "draw.2",
+  "release.0",
+  "release.1",
+  "release.2",
+  "leap.0",
+  "leap.1",
+  "leap.2",
+  "leap.3",
+  "climb.0",
+  "climb.1",
+  "climb.2",
+  "climb.3",
+  "mantle.0",
+  "aim_step_l.0",
+  "aim_step_l.1",
+  "aim_step_l.2",
+  "aim_step_l.3",
+  "aim_step_r.0",
+  "aim_step_r.1",
+  "aim_step_r.2",
+  "aim_step_r.3",
+  "aim_pivot_l.0",
+  "aim_pivot_l.1",
+  "aim_pivot_l.2",
+  "aim_pivot_r.0",
+  "aim_pivot_r.1",
+  "aim_pivot_r.2",
+  "walk.0",
+  "walk.1",
+  "walk.2",
+  "walk.3",
+  "walk.4",
+  "walk.5",
+  "walk.6",
+  "walk.7",
+  "run.0",
+  "run.1",
+  "run.2",
+  "run.3",
+  "run.4",
+  "run.5",
+  "run.6",
+  "run.7",
+  "sprint.0",
+  "sprint.1",
+  "sprint.2",
+  "sprint.3",
+  "sprint.4",
+  "sprint.5",
+  "sprint.6",
+  "sprint.7",
+  "drive.0",
+  "drive.1",
+  "drive.2",
+  "drive.3",
+  "drive.4",
+  "drive.5",
+  "drive.6",
+  "drive.7"
+ ],
+ "w": 96,
+ "h": 80,
+ "pivot": [
+  48,
+  78
+ ],
+ "units_per_px": 0.0327883818891779,
+ "model": "standin",
+ "pitch": 20,
+ "proportions": null,
+ "fwd_px": {
+  "S": [
+   0.0,
+   10.431
+  ],
+  "SSE": [
+   11.671,
+   9.637
+  ],
+  "SE": [
+   21.566,
+   7.376
+  ],
+  "ESE": [
+   28.177,
+   3.992
+  ],
+  "E": [
+   30.499,
+   0.0
+  ],
+  "ENE": [
+   28.177,
+   -3.992
+  ],
+  "NE": [
+   21.566,
+   -7.376
+  ],
+  "NNE": [
+   11.671,
+   -9.637
+  ],
+  "N": [
+   0.0,
+   -10.431
+  ],
+  "NNW": [
+   -11.671,
+   -9.637
+  ],
+  "NW": [
+   -21.566,
+   -7.376
+  ],
+  "WNW": [
+   -28.177,
+   -3.992
+  ],
+  "W": [
+   -30.499,
+   -0.0
+  ],
+  "WSW": [
+   -28.177,
+   3.992
+  ],
+  "SW": [
+   -21.566,
+   7.376
+  ],
+  "SSW": [
+   -11.671,
+   9.637
+  ]
+ },
+ "dirs": [
+  "S",
+  "SSE",
+  "SE",
+  "ESE",
+  "E",
+  "ENE",
+  "NE",
+  "NNE",
+  "N",
+  "NNW",
+  "NW",
+  "WNW",
+  "W",
+  "WSW",
+  "SW",
+  "SSW"
+ ],
+ "cam": {
+  "yaw": 45,
+  "yaw0": 45,
+  "near": 0.0,
+  "far": 4.0
+ },
+ "sim": null,
+ "clips": {
+  "idle": {
+   "frames": 8,
+   "fps": 6,
+   "loop": true
+  },
+  "roll": {
+   "frames": 14,
+   "fps": 28,
+   "loop": false
+  },
+  "draw": {
+   "frames": 3,
+   "fps": 14,
+   "loop": false
+  },
+  "release": {
+   "frames": 3,
+   "fps": 10,
+   "loop": false
+  },
+  "leap": {
+   "frames": 4,
+   "fps": 9,
+   "loop": false
+  },
+  "climb": {
+   "frames": 4,
+   "fps": 7,
+   "loop": true
+  },
+  "mantle": {
+   "frames": 1,
+   "fps": 4,
+   "loop": false
+  },
+  "aim_step_l": {
+   "frames": 4,
+   "fps": 16,
+   "loop": false
+  },
+  "aim_step_r": {
+   "frames": 4,
+   "fps": 16,
+   "loop": false
+  },
+  "aim_pivot_l": {
+   "frames": 3,
+   "fps": 24,
+   "loop": false
+  },
+  "aim_pivot_r": {
+   "frames": 3,
+   "fps": 24,
+   "loop": false
+  },
+  "walk": {
+   "frames": 8,
+   "fps": 10,
+   "loop": true,
+   "planted": [
+    "L",
+    "L",
+    "L",
+    "L",
+    "R",
+    "R",
+    "R",
+    "R"
+   ],
+   "advance": [
+    0.1625,
+    0.1625,
+    0.1625,
+    0.1625,
+    0.1625,
+    0.1625,
+    0.1625,
+    0.1625
+   ],
+   "stride": 1.3,
+   "contacts": [
+    0,
+    4
+   ],
+   "contact_foot": [
+    "L",
+    "R"
+   ]
+  },
+  "run": {
+   "frames": 8,
+   "fps": 13,
+   "loop": true,
+   "planted": [
+    "L",
+    "L",
+    "L",
+    "L",
+    "R",
+    "R",
+    "R",
+    "R"
+   ],
+   "advance": [
+    0.3,
+    0.3,
+    0.3,
+    0.3,
+    0.3,
+    0.3,
+    0.3,
+    0.3
+   ],
+   "stride": 2.4,
+   "contacts": [
+    0,
+    4
+   ],
+   "contact_foot": [
+    "L",
+    "R"
+   ]
+  },
+  "sprint": {
+   "frames": 8,
+   "fps": 15,
+   "loop": true,
+   "planted": [
+    "L",
+    "L",
+    "L",
+    "L",
+    "R",
+    "R",
+    "R",
+    "R"
+   ],
+   "advance": [
+    0.3875,
+    0.3875,
+    0.3875,
+    0.3875,
+    0.3875,
+    0.3875,
+    0.3875,
+    0.3875
+   ],
+   "stride": 3.1,
+   "contacts": [
+    0,
+    4
+   ],
+   "contact_foot": [
+    "L",
+    "R"
+   ]
+  },
+  "drive": {
+   "frames": 8,
+   "fps": 14,
+   "loop": true,
+   "planted": [
+    "L",
+    "L",
+    "L",
+    "L",
+    "R",
+    "R",
+    "R",
+    "R"
+   ],
+   "advance": [
+    0.35,
+    0.35,
+    0.35,
+    0.35,
+    0.35,
+    0.35,
+    0.35,
+    0.35
+   ],
+   "stride": 2.8,
+   "contacts": [
+    0,
+    4
+   ],
+   "contact_foot": [
+    "L",
+    "R"
+   ]
+  }
+ },
+ "standin": true
+}

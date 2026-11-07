@@ -10,7 +10,7 @@
 //   SKY     the puddles' colour by the time of day (depth/art.js PUD_COL: the Proving Grounds' puddles' own)
 // VIEW ONLY: nothing here is read by the sim; no Math.random (the bake is a function of the world).
 //
-// FEATURE CONTRACT (main.js): create(host) -> F: view, toggle, biomeChanged, depth(x, y), ms. ?puddles=0: none.
+// FEATURE CONTRACT (main.js): create(host) -> F: view, toggle, biomeChanged, depth(x, y), ready(x, y), ms. ?puddles=0: none.
 // OWNS: its map and the eased fill. READS: host.world, host.layout.forest (the lake, the streams), host.env (wet, sky), host.time, host.G.
 // EMITS: nothing. BUDGET: view < .005 ms (a setter); the bake at a build, ~10-30 ms (the forest at 2 texels a metre).
 import {flags} from '../core/flags.js';
@@ -84,6 +84,13 @@ export async function create(host) {
     const u = fx - i, v = fy - j, D = M.data, k0 = j * M.w + i;
     const r = ((D[k0] * (1 - u) + D[k0 + 1] * u) * (1 - v) + (D[k0 + M.w] * (1 - u) + D[k0 + M.w + 1] * u) * v) / 255;
     return clamp((r - (1 - .5 * fill) - .03) / .1, 0, 1);
+  };
+  // how readily the ground at x, y holds water (0..1, the bake's own value: a rut, a dip, the floor's low lumps), however full the
+  // puddles are now (features/prints.js: the soft mud round the hollows takes the deepest prints)
+  F.ready = (x, y) => {
+    const M = map; if (!M) return 0;
+    const i = Math.round((x - M.x0) / M.res), j = Math.round((y - M.z0) / M.res);
+    return i < 0 || j < 0 || i >= M.w || j >= M.h ? 0 : M.data[j * M.w + i] / 255;
   };
   F.biomeChanged = () => { built = null; };
   F.toggle = () => { F.on = !F.on; return F.on; };

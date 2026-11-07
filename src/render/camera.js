@@ -42,7 +42,8 @@ export const ZOOM = {ease: 11, notch: 100, min: .12}, FOCUS_H = .9;
 const SMOOTH_IN = 12, SMOOTH_OUT = 3, TURN_HOLD = .12;   // ground sampling: smooth while turning (auto)
 const MIN_WIN = 16;   // px: a window smaller than this either way counts as hidden (the view keeps its size)
 
-export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, flags}) {
+export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD: HOME, opt: optOf, onTurn, flags, bounds = null}) {
+  let WORLD = HOME;   // (the bounds the view keeps to: bounds(x, z) where the target is, world/layout.js viewBounds: the fjäll's region out there)
   const Q = flags;
   let G = null, canvas = null, hdc = null, features = [];
   const VIEW = {w: 480, h: 270, maxW: Math.min(1920, Math.floor(WORLD.WM * PPM / 2) * 2), maxH: Math.min(1080, Math.floor(WORLD.HM * PPMY / 2) * 2)};
@@ -142,6 +143,7 @@ export function createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: optOf, onTurn, 
     let [gx, gz] = toWorld(vx, vy - lift);
     // (ga: airborne, the clamp gives way by his height above where he stood; 0 on the ground)
     // (it may go WORLD.past m past the world's edges, where the ground goes on: near a border the player stays centred)
+    if (bounds) WORLD = bounds(V.x, V.z);
     const pa = WORLD.past || 0, PW = WORLD.WM + 2 * pa, PH = WORLD.HM + 2 * pa;
     gx = ex * 2 >= PW ? WORLD.x0 + WORLD.WM / 2 : Math.min(WORLD.x1 + pa - ex + ga, Math.max(WORLD.x0 - pa + ex - ga, gx));
     gz = ez * 2 >= PH ? WORLD.y0 + WORLD.HM / 2 : Math.min(WORLD.y1 + pa - ez + ga, Math.max(WORLD.y0 - pa + ez - ga, gz));

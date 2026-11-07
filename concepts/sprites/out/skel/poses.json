@@ -1,0 +1,215 @@
+{
+ "poses": [
+  "apose",
+  "idle",
+  "bow_draw",
+  "crouch",
+  "reach_up",
+  "lunge",
+  "turn_l45b",
+  "turn_r45b",
+  "turn_l90a",
+  "turn_r90a",
+  "turn_l90b",
+  "turn_r90b",
+  "turn_l135a",
+  "turn_r135a",
+  "turn_l135b",
+  "turn_r135b",
+  "idle.0",
+  "idle.1",
+  "idle.2",
+  "idle.3",
+  "idle.4",
+  "idle.5",
+  "idle.6",
+  "idle.7",
+  "walk.0",
+  "walk.1",
+  "walk.2",
+  "walk.3",
+  "walk.4",
+  "walk.5",
+  "walk.6",
+  "walk.7",
+  "run.0",
+  "run.1",
+  "run.2",
+  "run.3",
+  "run.4",
+  "run.5",
+  "run.6",
+  "run.7",
+  "roll.0",
+  "roll.1",
+  "roll.2",
+  "roll.3",
+  "roll.4",
+  "roll.5",
+  "draw.0",
+  "draw.1",
+  "draw.2",
+  "release.0",
+  "release.1",
+  "release.2"
+ ],
+ "w": 96,
+ "h": 80,
+ "pivot": [
+  48,
+  78
+ ],
+ "units_per_px": 0.0327883818891779,
+ "model": "skeleton.py",
+ "pitch": 20.0,
+ "proportions": {
+  "height": 1.8,
+  "heads": 3.6,
+  "hip_z": 0.4,
+  "knee_z": 0.21,
+  "ankle_z": 0.045,
+  "hip_w": 0.095,
+  "shoulder_w": 0.2,
+  "upper_arm": 0.27,
+  "fore_arm": 0.24,
+  "hand": 0.13,
+  "arm_down": 45,
+  "waist": 0.14,
+  "chest": 0.19,
+  "pelvis": 0.165
+ },
+ "fwd_px": {
+  "S": [
+   0.0,
+   10.431
+  ],
+  "SE": [
+   21.566,
+   7.376
+  ],
+  "E": [
+   30.499,
+   0.0
+  ],
+  "NE": [
+   21.566,
+   -7.376
+  ],
+  "N": [
+   0.0,
+   -10.431
+  ],
+  "NW": [
+   -21.566,
+   -7.376
+  ],
+  "W": [
+   -30.499,
+   -0.0
+  ],
+  "SW": [
+   -21.566,
+   7.376
+  ]
+ },
+ "clips": {
+  "idle": {
+   "frames": 8,
+   "fps": 6,
+   "loop": true
+  },
+  "walk": {
+   "frames": 8,
+   "fps": 10,
+   "loop": true,
+   "planted": [
+    "L",
+    "L",
+    "L",
+    "L",
+    "R",
+    "R",
+    "R",
+    "R"
+   ],
+   "advance": [
+    0.1259,
+    0.1357,
+    0.1286,
+    0.1216,
+    0.1259,
+    0.1357,
+    0.1286,
+    0.1216
+   ],
+   "stride": 1.0236,
+   "contacts": [
+    0,
+    4
+   ],
+   "contact_foot": [
+    "L",
+    "R"
+   ]
+  },
+  "run": {
+   "frames": 8,
+   "fps": 13,
+   "loop": true,
+   "planted": [
+    "L",
+    "L",
+    "L",
+    "R",
+    "R",
+    "R",
+    "R",
+    "L"
+   ],
+   "advance": [
+    0.2461,
+    0.3081,
+    0.2771,
+    0.2771,
+    0.2461,
+    0.3081,
+    0.2771,
+    0.2771
+   ],
+   "stride": 2.2168,
+   "contacts": [
+    0,
+    4
+   ],
+   "contact_foot": [
+    "L",
+    "R"
+   ]
+  },
+  "roll": {
+   "frames": 6,
+   "fps": 15,
+   "loop": false
+  },
+  "draw": {
+   "frames": 3,
+   "fps": 14,
+   "loop": false
+  },
+  "release": {
+   "frames": 3,
+   "fps": 10,
+   "loop": false
+  }
+ },
+ "dirs": [
+  "S",
+  "SE",
+  "E",
+  "NE",
+  "N",
+  "NW",
+  "W",
+  "SW"
+ ]
+}

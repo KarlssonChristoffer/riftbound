@@ -1,10 +1,9 @@
 // THE MENU (Escape): pause + settings, plain white text in the middle of the screen, over the living world. While it's
 // open the game stands still (main.js runs only the nature features: wind, foliage, wildlife, weather, clouds, fire) and
 // the page blurs it (index.html #pause); drag the backdrop to look around, the wheel zooms, a click on it resumes.
-// TABS: Game (resume, the run's actions), Sandbox (the Proving Grounds' test actions: spawn, place, go to), Graphics,
-// Audio, Controls: what a player sets. Dev (only in dev mode: the sandbox, ?dev=1, the ` key): character / world /
-// renderer A/B, every feature toggle, debug views, tools. A tab shows only while it has rows.
-// GROUPS: a tab lists its rows under group headings (opts.groups: the order); a PAGED tab (opts.paged: Dev) shows one group
+// TABS: Game (resume, the run's actions), Graphics, Audio, Controls: what a player sets. A tab shows only while it has
+// rows. (Test actions, feature toggles, A/B and debug views: the dev menu, dev/devmenu.js, F10 in dev mode)
+// GROUPS: a tab lists its rows under group headings (opts.groups: the order); a PAGED tab (opts.paged) shows one group
 // at a time instead, with a button per group above the rows (remembered on this machine, 'rb.menu'). The body scrolls.
 // ITEMS come from opts.items() (main.js builds them: it owns the state they change), read fresh every time it draws:
 //   {tab, group?, label, key? (a keycap hint), sub? (a setting under the row above: indented),
@@ -18,17 +17,20 @@
 //                                                      'rb.settings'); 'param': unless the URL sets it (?depth=0)}
 // SOUNDS: the forge's wooden UI family (audio/forge/recipes/ui.js) through opts.sound(name): hover, click, confirm,
 // back, open.
-// OWNS: the #pause DOM, the open tab and group, focus, 'rb.settings', 'rb.menu'. READS: opts.items(), opts.dev(), opts.title().
+// OWNS: the #pause DOM, the open tab and group, focus, 'rb.settings', 'rb.menu'. READS: opts.items(), opts.title().
 // BUDGET: nothing per frame; the DOM is rebuilt only when something changes.
-const TABS = [['game', 'Game'], ['sandbox', 'Sandbox'], ['graphics', 'Graphics'], ['audio', 'Audio'], ['controls', 'Controls'], ['dev', 'Dev']];
+import {styleMenu} from './menustyle.js';   // (its pixel look, over index.html's plain one)
+
+const TABS = [['game', 'Game'], ['graphics', 'Graphics'], ['audio', 'Audio'], ['controls', 'Controls']];
 const STORE = 'rb.settings', PAGES = 'rb.menu';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const isSwitch = it => it.options?.length === 2 && it.options.includes('on') && it.options.includes('off');
 const pct = (it, v) => Math.round((v - it.min) / ((it.max - it.min) || 1) * 100) + '%';
 
-export function createMenu({root, items, dev = () => false, title = () => ['Paused', ''], groups = {}, paged = [], sound = () => {},
+export function createMenu({root, items, title = () => ['Paused', ''], groups = {}, paged = [], sound = () => {},
   changed = () => {}, resume = () => {}, look = () => {}, zoom = () => {}}) {
   root.innerHTML = `<div id="menu"></div><div class="m-hint">drag to look around · wheel to zoom · click to resume</div>`;
+  const sizeUI = styleMenu(root);
   const panel = root.querySelector('#menu');
   let open = false, tab = 'game', list = [], hov = '', drag = null, cats = [];
   let saved = {}; try { saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) {}
@@ -38,7 +40,7 @@ export function createMenu({root, items, dev = () => false, title = () => ['Paus
     if (!it.keep || !it.id) return;
     saved[it.id] = it.get(); try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch (e) {}
   }
-  const tabsShown = () => TABS.filter(([id]) => id === 'dev' ? dev() && list.some(it => it.tab === 'dev') : list.some(it => it.tab === id));
+  const tabsShown = () => TABS.filter(([id]) => list.some(it => it.tab === id));
 
   // plain text rows: "Label   On", "Label   ‹ value ›" (sliders too: 10% steps)
   function row(it, i) {
@@ -74,7 +76,7 @@ export function createMenu({root, items, dev = () => false, title = () => ['Paus
         <button class="m-close" data-close title="Resume">Esc</button></header>
       <nav>${tabs.map(([id, name]) => `<button class="m-tab${id === tab ? ' on' : ''}" data-tab="${id}">${name}</button>`).join('')}</nav>
       ${cats.length ? `<div class="m-cats">${cats.map(g => `<button class="m-cat${g === page[tab] ? ' on' : ''}" data-cat="${esc(g)}">${esc(g || 'Other')}</button>`).join('')}</div>` : ''}
-      <div class="m-body">${rows.join('')}${tab === 'dev' ? '<p class="m-note">Test toggles, A/B and debug views. This tab shows in dev mode only (the ` key).</p>' : ''}</div>`;
+      <div class="m-body">${rows.join('')}</div>`;
     panel.querySelector('.m-body').scrollTop = top;
     if (fi !== undefined) panel.querySelector(`[data-i="${fi}"]`)?.focus({preventScroll: true});
     else if (fc !== undefined) catEl(fc)?.focus({preventScroll: true});
@@ -121,6 +123,7 @@ export function createMenu({root, items, dev = () => false, title = () => ['Paus
   return {
     get open() { return open; },
     show() {
+      sizeUI();
       open = true; tab = 'game'; hov = ''; root.classList.remove('hidden'); draw(); sound('open');
       (panel.querySelector('.m-act.main') || panel.querySelector('.m-body [data-i]'))?.focus({preventScroll: true});
     },

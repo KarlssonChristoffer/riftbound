@@ -19,6 +19,8 @@ import {MODELS} from '../../view/livehero.js';
 import {unpackPose} from '../../net/protocol.js';
 import {dress} from '../../view/dress.js';
 import {gearById, setKey} from '../../content/gear.js';
+import {TITLES} from '../../content/skills.js';
+import {hdUnit, hdText} from '../../ui/hdpixel.js';
 
 const SLOTS = 8;
 export function createPeerLook(host, C) {
@@ -29,7 +31,7 @@ export function createPeerLook(host, C) {
   const rigOf = new Map();    // LM -> its rig name (a look's model is only restyled into another look of the same rig)
   const views = new Map();    // peer id -> {LM, body, W, idx, wv, wn, key, tmp}
   const slotUsed = new Uint8Array(SLOTS);
-  const S = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null};
+  const S = {x: 0, y: 0, z: 0, phi: 0, s: '', pose: '', w: null, ls: null, w2: null, u: 0};
 
   function model(name, gear) {
     const n = name in MODELS ? name : 'gunslinger', key = n + '|' + setKey(gear);
@@ -60,19 +62,29 @@ export function createPeerLook(host, C) {
       if (slot < 0) return null;   // (more peers than slots: the rest as stick figures)
       slotUsed[slot] = 1;
       const W = new Float64Array(LM.NB * 7), idle = LM.poseOf('idle.0'); if (idle) W.set(idle.w);
-      v = {LM, body: createLiveBody(LM, rig, slot, G), W, idx: null, wn: null, wv: -1, key: 1, tmp: new Float64Array(64 * 7), gv: q.gv, rig: q.rig};
+      v = {LM, body: createLiveBody(LM, rig, slot, G), W, WA: Float64Array.from(W), WB: Float64Array.from(W), idx: null, wn: null, wv: -1, key: 1, tmp: new Float64Array(64 * 7), gv: q.gv, rig: q.rig};
       views.set(q.id, v);
     }
     v.gv = q.gv; v.rig = q.rig;
     return v;
   }
-  // the peer's sent pose into the body's bone order (bones it didn't send keep the idle's)
-  function takePose(v, q, w) {
+  // the peer's sent pose into the body's bone order, into dst (bones it didn't send keep the idle's)
+  function takePose(v, q, w, dst) {
     if (q.wn !== v.wn) { v.wn = q.wn; v.idx = q.wn ? Int16Array.from(q.wn, b => v.LM.IX[b] ?? -1) : null; }
     if (!v.idx || !w) return false;
     const nb = Math.min(v.idx.length, w.length / 7 | 0, 64); unpackPose(w.subarray(0, nb * 7), v.tmp);
-    for (let j = 0; j < nb; j++) { const b = v.idx[j]; if (b < 0) continue; for (let k = 0; k < 7; k++) v.W[b * 7 + k] = v.tmp[j * 7 + k]; }
-    v.key++; return true;
+    for (let j = 0; j < nb; j++) { const b = v.idx[j]; if (b < 0) continue; for (let k = 0; k < 7; k++) dst[b * 7 + k] = v.tmp[j * 7 + k]; }
+    return true;
+  }
+  // SMOOTH PEERS: the drawn pose between the two snapshots round the render time (sent 20 times a second: shown as they came
+  // it moved in 20 steps a second however smoothly the peer drew it), body space: the turns nlerped, the spots lerped
+  function mixPose(a, b, u, o, nb) {
+    for (let i = 0; i < nb; i++) {
+      const k = i * 7, d = a[k] * b[k] + a[k + 1] * b[k + 1] + a[k + 2] * b[k + 2] + a[k + 3] * b[k + 3], s = d < 0 ? -u : u;
+      let l = 0; for (let j = 0; j < 4; j++) { const x = a[k + j] * (1 - u) + b[k + j] * s; o[k + j] = x; l += x * x; }
+      l = Math.sqrt(l) || 1; for (let j = 0; j < 4; j++) o[k + j] /= l;
+      for (let j = 4; j < 7; j++) o[k + j] = a[k + j] + (b[k + j] - a[k + j]) * u;
+    }
   }
   function drop(id) { const v = views.get(id); if (v?.body) slotUsed[v.body.slot] = 0; views.delete(id); }
 
@@ -87,8 +99,13 @@ export function createPeerLook(host, C) {
       const s = C.sample(q, S); if (!s) continue;
       const v = viewOf(q);
       if (!v) { stick(q, s); continue; }
-      if (s.w && (s.w !== v.lastW || q.wn !== v.wn)) { v.lastW = s.w; if (takePose(v, q, s.w)) v.posed = true; }
-      if (v.posed && s.w) { D.w = v.W; D.key = v.key; D.pose = ''; } else { D.w = null; D.pose = s.pose || 'idle.0'; }
+      if (s.w && (s.w !== v.lastW || q.wn !== v.wn)) { v.lastW = s.w; v.mixed = true; if (takePose(v, q, s.w, v.WA)) v.posed = true; }
+      if (v.posed && s.w) {
+        const w2 = s.w2 && s.w2 !== s.w && s.u > 0 ? s.w2 : null;
+        if (w2) { if (w2 !== v.lastW2) { v.lastW2 = w2; takePose(v, q, w2, v.WB); } mixPose(v.WA, v.WB, s.u, v.W, v.LM.NB); v.key++; v.mixed = true; }
+        else if (v.mixed) { v.W.set(v.WA); v.key++; v.mixed = false; }
+        D.w = v.W; D.key = v.key; D.pose = '';
+      } else { D.w = null; D.pose = s.pose || 'idle.0'; }
       D.phi = s.phi; D.x = D.sx = s.x; D.y = D.sy = s.y; D.z = D.sh = s.z;
       v.body.draw(D, t); drew = true;
       if (s.ls) lasso(q, v, s);
@@ -134,6 +151,8 @@ export function createPeerLook(host, C) {
       const s = C.sample(q, S); if (!s) continue;
       const [sx, sy] = G.toScreen(s.x, s.z + 2.05, s.y);
       q2.strokeStyle = 'rgba(10,10,12,.85)'; q2.strokeText(q.name, sx * sc, sy * sc); q2.fillStyle = q.color || '#fff'; q2.fillText(q.name, sx * sc, sy * sc);
+      const t = q.title && TITLES[q.title]?.name;   // (his title under it, in the pixel font: docs/SKILLS.md)
+      if (t) { const u = hdUnit(); hdText(q2, t, Math.round(sx * sc), Math.round(sy * sc + 11 * u), u, '#e8dcc0', 'center'); q2.font = `600 ${Math.round(11 * dpr)}px "Segoe UI", system-ui, sans-serif`; q2.lineWidth = 3 * dpr; }
     }
     q2.restore();
   }

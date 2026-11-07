@@ -6,6 +6,8 @@
 //     heron    the ring where the heron stood: two players inside it together at night, for a moment (checked here, by tick)
 //     stones   the quiet stones: one player in the middle, the lantern out, standing still a while (the client says so: ask)
 //     marks    the hollow the pale marks lead to: reached with the lantern lit (the client says so: ask)
+//     spring   the stream's spring (docs/KEEPSAKES.md): awake at DUSK, not at night (SEC.dusk hours); one player standing by it a
+//              while (the client says so: ask) hears three notes, and the Fiddle String lies on its stones
 //   const S = createSecrets(U); S.tick(dt, t, players) -> changes [{id, s, by, n}]; S.ask(id, player, t) -> a change | why not
 //   S.st (id -> {s, by, n}); S.toJSON() / S.load(o)
 //   THE NIGHT ELK: by day it walks its way (U.elkAt: the same everywhere from the clock). As the night comes it grows wrong; at night
@@ -22,10 +24,11 @@ export const SECRETS = {
   heron:  {need: 2, r: 1.5, hold: 2.5, keep: 'heron_feather'},   // r: the ring; hold: s two must stand in it together
   stones: {need: 1, r: 1.1, hold: 5, keep: 'warm_stone'},        // r: the middle; hold: s still in the dark (the client counts)
   marks:  {need: 1, r: 1.2, keep: 'bark_doll'},                  // r: from the doll in the hollow
+  spring: {need: 1, r: 2, hold: 4, keep: 'fiddle_string', dusk: true},   // r: from the spring; hold: s by it at dusk (the client counts)
 };
-export const SEC = {recharge: 3, show: 6, night: .9};   // nights a spent one sleeps; s a triggered one shows; nightK it wakes at
+export const SEC = {recharge: 3, show: 6, night: .9, dusk: [18, 21]};   // nights a spent one sleeps; s a triggered one shows; nightK it wakes at; the dusk hours a dusk one is awake
 export const SECRET_IDS = Object.keys(SECRETS);
-export const placeOf = (U, id) => id === 'heron' ? U.heron : id === 'stones' ? U.stones : id === 'marks' ? U.hollow : null;
+export const placeOf = (U, id) => id === 'heron' ? U.heron : id === 'stones' ? U.stones : id === 'marks' ? U.hollow : id === 'spring' ? U.spring : null;
 
 export function createSecrets(U, o = {}) {
   const recharge = o.recharge ?? SEC.recharge, st = {}, changes = [];
@@ -36,9 +39,10 @@ export function createSecrets(U, o = {}) {
     st, get ringT() { return ringT; },
     tick(dt, t, players) {
       changes.length = 0;
-      const n = nightNo(t), night = nightK(t) >= SEC.night;
+      const n = nightNo(t), hr = ((t % 24) + 24) % 24, dusk = hr >= SEC.dusk[0] && hr < SEC.dusk[1];
       for (const id of SECRET_IDS) {
         const q = st[id]; if (!placeOf(U, id)) continue;
+        const night = SECRETS[id].dusk ? dusk : nightK(t) >= SEC.night;
         if (q.s === 'triggered') { if ((q.t -= dt) <= 0) set(id, 'spent'); }
         else if (q.s === 'spent') { if (n - q.n >= recharge) set(id, night ? 'awake' : 'sleeping'); }
         else if (q.s === 'sleeping' && night) set(id, 'awake');

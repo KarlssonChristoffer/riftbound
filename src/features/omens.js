@@ -27,7 +27,7 @@
 // EMITS: omen.begin, omen.end (+ omens/storm.js: omen.strike, player.hit / hurt). BUDGET: sim ~.01-.03 ms a step, view
 //   ~.05 ms (a storm's bolt, the fog's banks); nothing while no omen is up.
 import {flags} from '../core/flags.js';
-import {mulberry32} from '../core/rng.js';
+import {simRandom} from '../core/rng.js';
 import {clearArray} from '../core/mathx.js';
 import {OMENS, TUNE, omenById} from '../content/omens.js';
 import {createKit} from './omens/kit.js';
@@ -49,7 +49,7 @@ export async function create(host) {
   const force = omenById(Q.get('omen'))?.id || null;
   let enabled = Q.get('omens') === '1' || !!force || (Q.get('omens') !== '0' && saved);
   // the sim's own draws (core/rng.js): seeded from the clock, as the game's run is (no Math.random: off, nothing is drawn)
-  const R = mulberry32(((Date.now() % 2147483646) ^ 0x6f6d656e) | 0);
+  const R = simRandom('omens');
   const game = () => host.feature('game'), core = () => host.feature('combat')?.core || null;
   const K = Object.assign(createKit(host), {R, core, game});
   const MOD = {storm: createStorm(host, K), gale: createGale(host, K), riftfog: createFog(host, K), bloodmoon: createBloodMoon(host, K),

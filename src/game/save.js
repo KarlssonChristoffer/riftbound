@@ -24,6 +24,8 @@ export function loadWorld() {
   try { const o = JSON.parse(localStorage.getItem(WORLD_KEY) || 'null'); return o && typeof o === 'object' ? o : null; } catch { return null; }
 }
 export function saveWorld(o) { try { localStorage.setItem(WORLD_KEY, JSON.stringify(o)); return true; } catch { return false; } }
+// a save the game can't read (a version it has no step for): kept aside under its own key before a new world replaces it
+export function stashWorld(o) { try { localStorage.setItem(WORLD_KEY + '.unread', JSON.stringify(o)); return true; } catch { return false; } }
 export function clearWorld() { try { localStorage.removeItem(WORLD_KEY); } catch { /* blocked */ } }
 
 export const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;

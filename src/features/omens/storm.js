@@ -62,7 +62,7 @@ export function createStorm(host, K) {
     if (!rod) {
       let pd = ROD_REACH;
       for (const p of host.entities.near(x, y, ROD_REACH, near)) {
-        const rod = ROD[p.kind], own = rod && (p.kind === 'tower' || p.kind === 'gatepost') ? topOfProp(p) : undefined, top = own !== undefined ? Math.min(rod, own) : rod;   // (a broken tower's own top: world.js)
+        const pr = ROD[p.kind], own = pr && (p.kind === 'tower' || p.kind === 'gatepost') ? topOfProp(p) : undefined, top = own !== undefined ? Math.min(pr, own) : pr;   // (a broken tower's own top: world.js)
         if (!top || p.broken || p.gone) continue;
         const d = hypot2(p.x - x, p.y - y); if (d < pd) { pd = d; bx = p.x; by = p.y; bh = (p.z || 0) + top; rod = p.kind; }
       }

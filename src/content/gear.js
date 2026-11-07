@@ -11,6 +11,12 @@
 //   GEAR       the pieces. Each: id, name, slot, kind, rarity, weight (kg), armor (share of damage taken off), desc, look, and
 //              optionally mods (more modifier notes: host.mods) and soon (what it will do once the game has the system: weather,
 //              fire, sword swings, spells)
+//   BASE       a live model's own clothes by slot (his hat, the duster, the cape and coat tail, trousers, boots), per model:
+//              a piece in a slot REPLACES his own garment there (view/dress.js: the slot's rule first, the piece's own look
+//              over it). {hide [zone], fill {zone: material | '@zone'}, cloth 'off'}: the zones not drawn, the zones drawn in
+//              another material ('@shirt': the colour the model's own shirt has, so bare arms get shirt sleeves), the tail off
+//   bare       a piece that is nothing (No hat, No coat, No cape, Long johns, Barefoot): his own garment off and nothing in its
+//              place (only the slot's BASE rule). A piece like the others: chosen, remembered, sent in co-op, in ?gear= links
 //   look       how it changes the character (view/dress.js):
 //                paint {zone: material}   the zone's parts in that material
 //                hide [zone]              the zone's parts not drawn
@@ -23,9 +29,11 @@
 //                                         fixed (a tone 0..3, unlit), outline (false)}
 // WEIGHT and ARMOR are the two numbers every piece has (game effects through host.mods: features/gear.js): weight past
 // FREE_KG slows you, armor takes a share off the damage you take.
-export const SLOTS = ['head', 'body', 'back', 'hands', 'legs', 'feet', 'main', 'off'];
-export const SLOT_NAMES = {head: 'Head', body: 'Body', back: 'Back', hands: 'Hands', legs: 'Legs', feet: 'Feet', main: 'Main hand', off: 'Off hand'};
-export const KINDS = {clothing: 'Clothing', armor: 'Armour', robe: 'Robe', weapon: 'Weapon', tool: 'Tool', charm: 'Charm', fishing: 'Fishing'};
+export const SLOTS = ['head', 'body', 'back', 'hands', 'legs', 'feet', 'main', 'off', 'charm'];
+export const SLOT_NAMES = {head: 'Head', body: 'Body', back: 'Back', hands: 'Hands', legs: 'Legs', feet: 'Feet', main: 'Main hand', off: 'Off hand', charm: 'Charms'};
+// how many pieces a slot takes (1 unless named): the charms are two keepsakes worn at once (content/keepsakes.js, docs/KEEPSAKES.md)
+export const SLOT_CAP = {charm: 2};
+export const KINDS = {clothing: 'Clothing', armor: 'Armour', robe: 'Robe', weapon: 'Weapon', tool: 'Tool', charm: 'Charm', fishing: 'Fishing', foraging: 'Foraging', mining: 'Mining'};
 export const RARITY = {common: {name: 'Common', col: '#c9c2b2'}, fine: {name: 'Fine', col: '#7ad07a'}, rare: {name: 'Rare', col: '#5aa8ff'},
   masterwork: {name: 'Masterwork', col: '#c27bff'}, mythic: {name: 'Mythic', col: '#ffb84a'}};
 
@@ -77,28 +85,58 @@ export const MATERIALS = {
   felt:       ['#9c9890', '#76726a', '#545049', '#2a2824'],
   netting:    ['#c8c0a8', '#948c74', '#6a6452', '#36332a'],
   rosin:      ['#f2f6ff', '#b8c8f0', '#7486c8', '#2e3870'],
+  // keepsakes (docs/KEEPSAKES.md)
+  warmstone:  ['#f6e6c0', '#d6c6a2', '#a49478', '#544a3a'],
+  gut:        ['#f2e8c4', '#d8c89c', '#a8946a', '#544a32'],
+  // the almanac's last chapter (docs/ALMANAC.md): black glass full of small lights
+  nightglass: ['#d8dcff', '#8a90e0', '#4a4c98', '#16163a'],
 };
 
 // a live model's zones: its json's meta.loadout -> zone -> the parts (model.json parts) it is made of
 export const ZONES = {
   'gunslinger.py': {
-    hat: ['hat', 'brim', 'hatband'], coat: ['cape', 'collar', 'lapel.L', 'lapel.R', 'dsleeve.L', 'dsleeve.R'], collar: ['cape', 'collar'],
+    hat: ['hat', 'brim', 'hatband'], coat: ['cape', 'collar', 'lapel.L', 'lapel.R', 'dsleeve.L', 'dsleeve.R'], collar: ['cape', 'collar'], cape: ['cape'], coatcollar: ['collar'],
     lapels: ['lapel.L', 'lapel.R'], sleeves: ['dsleeve.L', 'dsleeve.R'], vest: ['vest'], shirt: ['shirt'], neck: ['bandana'],
     trousers: ['trousers', 'trousers.L', 'trousers.R'], legs: ['trousers.L', 'trousers.R'], boots: ['boot.L', 'boot.R'], spurs: ['spur.L', 'spur.R'],
     hands: ['hand.L', 'hand.R'], hair: ['hair', 'hair.L', 'hair.R', 'hair.0', 'hair.1', 'hair.2'],
   },
   'outlaw.py': {
-    hat: ['hat', 'brim', 'hatband', 'band'], coat: ['poncho', 'stripe', 'stripe.001', 'sleeve.L', 'sleeve.R'], collar: ['poncho', 'stripe', 'stripe.001'],
+    hat: ['hat', 'brim', 'hatband', 'band'], coat: ['poncho', 'stripe', 'stripe.001', 'sleeve.L', 'sleeve.R'], collar: ['poncho', 'stripe', 'stripe.001'], cape: [], poncho: ['poncho', 'stripe', 'stripe.001'],
     lapels: [], sleeves: ['sleeve.L', 'sleeve.R'], vest: [], shirt: ['shirt'], neck: ['bandana'],
     trousers: ['trousers', 'trousers.L', 'trousers.R', 'seam.L', 'seam.R'], legs: ['trousers.L', 'trousers.R', 'seam.L', 'seam.R'], boots: ['boot.L', 'boot.R'], spurs: ['spur.L', 'spur.R'],
     hands: ['hand.L', 'hand.R'], hair: ['hair', 'hair.L', 'hair.R'],
   },
 };
 
+// his own clothes, slot by slot (2026-10-15): what a piece in the slot (or the slot's bare piece) does to them first
+export const BASE = {
+  'gunslinger.py': {
+    head: {hide: ['hat']},                                          // his hat
+    body: {hide: ['coatcollar', 'lapels'], fill: {sleeves: '@shirt'}},   // the duster (its sleeves become shirt sleeves)
+    back: {hide: ['cape'], cloth: 'off'},                           // the duster's cape and its tail (the runtime cloth)
+    legs: {fill: {trousers: 'linen'}},                              // his trousers (long johns under them)
+    feet: {hide: ['spurs'], fill: {boots: '@hands'}},               // his boots and spurs (bare feet)
+  },
+  'outlaw.py': {
+    head: {hide: ['hat']},
+    body: {hide: ['poncho'], fill: {sleeves: '@shirt'}},
+    back: {cloth: 'off'},
+    legs: {fill: {trousers: 'linen'}},
+    feet: {hide: ['spurs'], fill: {boots: '@hands'}},
+  },
+};
+
+const bare = (id, name, slot, desc) => ({id, name, slot, kind: 'clothing', rarity: 'common', weight: 0, armor: 0, desc, bare: true, look: {}});
 export const GEAR = [
+  // ---- bare: his own garment in the slot off, nothing in its place (BASE). First in each slot's row, after "his own"
+  bare('no_hat', 'No hat', 'head', 'His own hat left off.'),
+  bare('no_coat', 'No coat', 'body', 'His own coat left off: the shirt and vest under it.'),
+  bare('cape_off', 'No cape', 'back', 'His own cape and coat tail left off.'),
+  bare('long_johns', 'Long johns', 'legs', 'His own trousers left off.'),
+  bare('barefoot', 'Barefoot', 'feet', 'His own boots and spurs left off.'),
   // ---- head (shapes on HatHold0: they tip with the hat, and fall off with it)
   {id: 'wool_cap', name: 'Wool cap', slot: 'head', kind: 'clothing', rarity: 'common', weight: .2, armor: 0, desc: 'A knitted cap with a bobble.',
-    soon: 'keeps your head warm in the cold',
+    mods: [{stat: 'body.chill', mul: .85}],
     look: {hide: ['hat'], add: [
       {on: 'HatHold0', part: 'cap', mat: 'wool_blue', shape: 'ball', r: [.232, .24, .2], at: [0, .012, 1.66], o: {sides: 10}},
       {on: 'HatHold0', part: 'cap.fold', mat: 'wool_cream', shape: 'tube', r0: .238, r1: .232, len: .075, at: [0, .012, 1.6], o: {sides: 10}},
@@ -112,7 +150,7 @@ export const GEAR = [
       {on: 'HatHold0', part: 'straw.band', mat: 'red_cloth', shape: 'tube', r0: .193, r1: .19, len: .035, at: [0, .01, 1.695], o: {sides: 10}},
     ]}},
   {id: 'kettle_helm', name: 'Kettle helm', slot: 'head', kind: 'armor', rarity: 'fine', weight: 3, armor: .08, desc: 'An iron dome with a narrow brim. Heavy, and it rings when hit.',
-    soon: 'a lightning rod in thunderstorms',
+    mods: [{stat: 'thunder.iron', add: 1}],
     look: {hide: ['hat'], add: [
       {on: 'HatHold0', part: 'helm', mat: 'iron', shape: 'ball', r: [.225, .235, .17], at: [0, .01, 1.7], o: {sides: 10}},
       {on: 'HatHold0', part: 'helm.brim', mat: 'iron', shape: 'disc', r: .3, len: .022, at: [0, .01, 1.64], o: {sides: 12}},
@@ -135,12 +173,12 @@ export const GEAR = [
     ]}},
   // ---- body
   {id: 'wool_sweater', name: 'Wool sweater', slot: 'body', kind: 'clothing', rarity: 'common', weight: 1.5, armor: .02, desc: 'A thick knitted sweater instead of the duster.',
-    soon: 'warm in the cold; catches fire fast; heavy when soaked',
-    look: {paint: {vest: 'wool_cream', shirt: 'wool_cream', sleeves: 'wool_cream'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    mods: [{stat: 'body.chill', mul: .75}, {stat: 'body.wetHeavy', add: 1}, {stat: 'thunder.smoulder', add: 1}],
+    look: {paint: {vest: 'wool_cream', shirt: 'wool_cream', sleeves: 'wool_cream'}, add: [
       {on: 'Spine2', part: 'sweater.neck', mat: 'wool_cream', shape: 'tube', r0: .1, r1: .085, len: .07, at: [0, .0, 1.235], o: {sides: 10}},
     ]}},
   {id: 'mail_shirt', name: 'Mail shirt', slot: 'body', kind: 'armor', rarity: 'fine', weight: 9, armor: .18, desc: 'Iron rings under the duster. Stops cuts and arrows; you sink in water.',
-    soon: 'draws lightning in thunderstorms',
+    mods: [{stat: 'thunder.iron', add: 1}],
     look: {paint: {vest: 'mail', shirt: 'mail'}}},
   {id: 'smith_apron', name: 'Smith\'s apron', slot: 'body', kind: 'tool', rarity: 'common', weight: 2, armor: .05, desc: 'Thick leather down the front.',
     soon: 'fireproof: stand in a friend\'s fire',
@@ -150,7 +188,7 @@ export const GEAR = [
     ]}},
   // ---- back
   {id: 'fur_cloak', name: 'Wolf-fur cloak', slot: 'back', kind: 'clothing', rarity: 'fine', weight: 3, armor: .04, desc: 'The duster\'s cape and tail in grey fur.',
-    soon: 'warm in the cold',
+    mods: [{stat: 'body.chill', mul: .7}],
     look: {paint: {collar: 'fur'}, cloth: 'fur'}},
   {id: 'bark_pack', name: 'Birch-bark pack', slot: 'back', kind: 'tool', rarity: 'common', weight: 1, armor: 0, desc: 'A woven birch-bark backpack (a näverkont).',
     soon: 'carry more home',
@@ -162,14 +200,14 @@ export const GEAR = [
     ]}},
   // ---- legs
   {id: 'wool_trousers', name: 'Wool trousers', slot: 'legs', kind: 'clothing', rarity: 'common', weight: 1, armor: .01, desc: 'Grey wool breeches.',
-    soon: 'warm in the cold',
+    mods: [{stat: 'body.chill', mul: .85}],
     look: {paint: {trousers: 'wool_grey'}}},
   {id: 'leather_chaps', name: 'Leather chaps', slot: 'legs', kind: 'armor', rarity: 'common', weight: 2, armor: .04, desc: 'Tan leather over both legs.',
     soon: 'thorns and brambles don\'t slow you',
     look: {paint: {legs: 'hide_tan'}}},
   // ---- feet
   {id: 'moose_boots', name: 'Moose-hide boots', slot: 'feet', kind: 'clothing', rarity: 'fine', weight: 1.5, armor: .01, desc: 'Soft, warm boots. Loud on stone.',
-    soon: 'bogs and snow don\'t slow you',
+    mods: [{stat: 'soft.slow', mul: 0}],
     look: {paint: {boots: 'hide_tan'}, hide: ['spurs']}},
   {id: 'bark_shoes', name: 'Birch-bark shoes', slot: 'feet', kind: 'clothing', rarity: 'fine', weight: .3, armor: 0, desc: 'Woven bark shoes (näverskor). Light on your feet.',
     mods: [{stat: 'player.speed', mul: 1.04}],
@@ -194,7 +232,7 @@ export const GEAR = [
       {on: 'HatHold0', part: 'wiz.star', mat: 'gold', shape: 'ball', r: .035, at: [0, -.13, 1.82], o: {fixed: 0}},
     ]}},
   {id: 'hood', name: 'Travelling hood', slot: 'head', kind: 'clothing', rarity: 'common', weight: .4, armor: .01, desc: 'A grey wool hood, the point down your back.',
-    soon: 'rain doesn\'t soak you',
+    mods: [{stat: 'body.soak', mul: .3}],
     look: {hide: ['hat', 'hair'], add: [
       {on: 'HatHold0', part: 'hood', mat: 'wool_grey', shape: 'ball', r: [.245, .25, .245], at: [0, .07, 1.61], o: {sides: 10}},
       {on: 'HatHold0', part: 'hood.tip', mat: 'wool_grey', shape: 'cone', r: .1, len: .22, at: [0, .32, 1.56], rot: [-135, 0, 0], o: {sides: 7}},
@@ -246,22 +284,22 @@ export const GEAR = [
     ]}},
   // ---- body
   {id: 'leather_jerkin', name: 'Leather jerkin', slot: 'body', kind: 'armor', rarity: 'common', weight: 3, armor: .05, desc: 'A sleeveless leather coat over the shirt.',
-    look: {paint: {vest: 'leather', sleeves: 'linen'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'leather', sleeves: 'linen'}, add: [
       {on: 'Hips', part: 'jerkin.belt', mat: 'leather_dk', shape: 'tube', r0: .215, r1: .215, len: .05, at: [0, 0, .82], o: {sides: 10}},
     ]}},
   {id: 'gambeson', name: 'Gambeson', slot: 'body', kind: 'armor', rarity: 'common', weight: 3, armor: .06, desc: 'A quilted linen coat, padded thick.',
     soon: 'warm in the cold',
-    look: {paint: {vest: 'linen', shirt: 'linen', sleeves: 'linen'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'linen', shirt: 'linen', sleeves: 'linen'}, add: [
       {on: 'Hips', part: 'gamb.skirt', mat: 'linen', shape: 'tube', r0: .25, r1: .22, len: .2, at: [0, 0, .7], o: {sides: 10}},
     ]}},
   {id: 'chain_hauberk', name: 'Chain hauberk', slot: 'body', kind: 'armor', rarity: 'fine', weight: 10, armor: .2, desc: 'A long coat of mail, sleeves and skirt.',
     soon: 'draws lightning; you sink in water',
-    look: {paint: {vest: 'mail', shirt: 'mail', sleeves: 'mail'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'mail', shirt: 'mail', sleeves: 'mail'}, add: [
       {on: 'Hips', part: 'hauberk.skirt', mat: 'mail', shape: 'tube', r0: .27, r1: .23, len: .3, at: [0, 0, .62], o: {sides: 12}},
     ]}},
   {id: 'plate_cuirass', name: 'Plate cuirass', slot: 'body', kind: 'armor', rarity: 'rare', weight: 14, armor: .28, desc: 'A steel breastplate, pauldrons and a skirt of lames.',
     soon: 'loud: everything hears you coming',
-    look: {paint: {vest: 'steel', shirt: 'black_iron', sleeves: 'black_iron'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'steel', shirt: 'black_iron', sleeves: 'black_iron'}, add: [
       {on: 'Spine2', part: 'plate.chest', mat: 'steel', shape: 'box', size: [.38, .07, .32], at: [0, -.125, 1.06]},
       {on: 'Spine2', part: 'plate.pL', mat: 'steel', shape: 'ball', r: [.11, .12, .09], at: [.21, 0, 1.2], o: {sides: 8}},
       {on: 'Spine2', part: 'plate.pR', mat: 'steel', shape: 'ball', r: [.11, .12, .09], at: [-.21, 0, 1.2], o: {sides: 8}},
@@ -269,28 +307,28 @@ export const GEAR = [
     ]}},
   {id: 'mage_robe', name: 'Mage\'s robe', slot: 'body', kind: 'robe', rarity: 'rare', weight: 1.5, armor: 0, desc: 'A long blue robe with a gold sash, down to the boots.',
     soon: 'spells are stronger; catches fire',
-    look: {paint: {vest: 'velvet_blue', shirt: 'velvet_blue', sleeves: 'velvet_blue', trousers: 'velvet_blue'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'velvet_blue', shirt: 'velvet_blue', sleeves: 'velvet_blue', trousers: 'velvet_blue'}, add: [
       {on: 'Hips', part: 'robe.skirt', mat: 'velvet_blue', shape: 'tube', r0: .32, r1: .22, len: .72, at: [0, 0, .42], o: {sides: 12}},
       {on: 'Hips', part: 'robe.sash', mat: 'gold', shape: 'tube', r0: .225, r1: .222, len: .045, at: [0, 0, .79], o: {sides: 12}},
       {on: 'Hips', part: 'robe.hem', mat: 'gold', shape: 'tube', r0: .325, r1: .322, len: .035, at: [0, 0, .08], o: {sides: 12}},
     ]}},
   {id: 'monk_robe', name: 'Monk\'s robe', slot: 'body', kind: 'robe', rarity: 'common', weight: 1.2, armor: 0, desc: 'A plain brown robe and a rope belt.',
     soon: 'calm: wild animals let you near',
-    look: {paint: {vest: 'robe_brown', shirt: 'robe_brown', sleeves: 'robe_brown', trousers: 'robe_brown'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'robe_brown', shirt: 'robe_brown', sleeves: 'robe_brown', trousers: 'robe_brown'}, add: [
       {on: 'Hips', part: 'monk.skirt', mat: 'robe_brown', shape: 'tube', r0: .3, r1: .22, len: .7, at: [0, 0, .43], o: {sides: 12}},
       {on: 'Hips', part: 'monk.rope', mat: 'wool_cream', shape: 'tube', r0: .228, r1: .226, len: .03, at: [0, 0, .8], o: {sides: 12}},
       {on: 'Hips', part: 'monk.knot', mat: 'wool_cream', shape: 'box', size: [.03, .03, .2], at: [.08, -.21, .68]},
     ]}},
   {id: 'noble_doublet', name: 'Noble\'s doublet', slot: 'body', kind: 'clothing', rarity: 'masterwork', weight: 1, armor: .01, desc: 'Red velvet with gold buttons.',
     soon: 'nobles talk to you',
-    look: {paint: {vest: 'velvet_red', sleeves: 'velvet_red', shirt: 'linen'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'velvet_red', sleeves: 'velvet_red', shirt: 'linen'}, add: [
       {on: 'Spine2', part: 'doublet.b0', mat: 'gold', shape: 'ball', r: .018, at: [0, -.155, 1.15], o: {fixed: 1}},
       {on: 'Spine2', part: 'doublet.b1', mat: 'gold', shape: 'ball', r: .018, at: [0, -.16, 1.07], o: {fixed: 1}},
       {on: 'Spine2', part: 'doublet.b2', mat: 'gold', shape: 'ball', r: .018, at: [0, -.155, .99], o: {fixed: 1}},
       {on: 'Hips', part: 'doublet.belt', mat: 'leather_dk', shape: 'tube', r0: .215, r1: .215, len: .045, at: [0, 0, .82], o: {sides: 10}},
     ]}},
   {id: 'tunic', name: 'Tunic', slot: 'body', kind: 'clothing', rarity: 'common', weight: .6, armor: 0, desc: 'A green linen tunic and a belt.',
-    look: {paint: {vest: 'green_cloth', shirt: 'green_cloth', sleeves: 'green_cloth'}, hide: ['collar', 'lapels'], cloth: 'off', add: [
+    look: {paint: {vest: 'green_cloth', shirt: 'green_cloth', sleeves: 'green_cloth'}, add: [
       {on: 'Hips', part: 'tunic.skirt', mat: 'green_cloth', shape: 'tube', r0: .24, r1: .22, len: .16, at: [0, 0, .72], o: {sides: 10}},
       {on: 'Hips', part: 'tunic.belt', mat: 'leather_dk', shape: 'tube', r0: .222, r1: .222, len: .04, at: [0, 0, .81], o: {sides: 10}},
     ]}},
@@ -424,6 +462,17 @@ export const GEAR = [
       {on: 'LeftHand', part: 'lant.glass', mat: 'glass', shape: 'tube', r0: .05, r1: .05, len: .11, at: [.7, 0, .69], rot: [0, 135, 0], o: {sides: 6, fixed: 0}},
       {on: 'LeftHand', part: 'lant.base', mat: 'brass', shape: 'tube', r0: .058, r1: .058, len: .025, at: [.743, 0, .647], rot: [0, 135, 0], o: {sides: 6}},
     ]}},
+  // THE NIGHTGLASS LANTERN (the almanac's last chapter, docs/ALMANAC.md): made at the anvil of Nightglass. Its light is dark light:
+  // 'light.nightglass' > 0 tints the lantern cold violet (render/lighting.js), the night veins stay shown in it (features/mining.js),
+  // the soot things don't see it (features/cavelife.js, the co-op state's lt: features/coop.js)
+  {id: 'nightglass_lantern', name: 'Nightglass Lantern', slot: 'off', kind: 'tool', rarity: 'mythic', weight: 1, armor: 0, desc: 'A black iron lantern with a pane of Nightglass. It is lit, and the dark stays dark in it.',
+    mods: [{stat: 'light.lantern', add: 1}, {stat: 'light.nightglass', add: 1}],
+    look: {add: [
+      {on: 'LeftHand', part: 'nglant.ring', mat: 'black_iron', shape: 'tube', r0: .012, r1: .012, len: .07, at: [.625, 0, .765], rot: [0, 135, 0], o: {sides: 5}},
+      {on: 'LeftHand', part: 'nglant.cap', mat: 'black_iron', shape: 'cone', r: .06, len: .05, at: [.657, 0, .733], rot: [0, -45, 0], o: {sides: 6}},
+      {on: 'LeftHand', part: 'nglant.glass', mat: 'nightglass', shape: 'tube', r0: .05, r1: .05, len: .11, at: [.7, 0, .69], rot: [0, 135, 0], o: {sides: 6, fixed: 0}},
+      {on: 'LeftHand', part: 'nglant.base', mat: 'black_iron', shape: 'tube', r0: .058, r1: .058, len: .025, at: [.743, 0, .647], rot: [0, 135, 0], o: {sides: 6}},
+    ]}},
   {id: 'torch', name: 'Torch', slot: 'off', kind: 'tool', rarity: 'common', weight: .8, armor: 0, desc: 'A pitch torch, burning. Lights a small warm circle.',
     mods: [{stat: 'light.lantern', add: 1}, {stat: 'light.lanternR', mul: .8}], soon: 'set things alight',
     look: {add: [
@@ -525,17 +574,89 @@ export const GEAR = [
       {on: 'LeftHand', part: 'net.handle', mat: 'oak', shape: 'tube', r0: .016, r1: .016, len: .36, at: [.688, 0, .702], rot: [0, 135, 0], o: {sides: 5}},
       {on: 'LeftHand', part: 'net.hoop', mat: 'netting', shape: 'disc', r: .15, len: .012, at: [.95, 0, .44], rot: [90, 0, 0], o: {sides: 10}},
     ]}},
+  // ================================================================ foraging gear (2026-10-15, docs/FORAGING.md): its notes are
+  // 'forage.*' (content/forage.js statWords; features/forage.js and the co-op server read them)
+  {id: 'berry_comb', name: 'Berry comb', slot: 'off', kind: 'foraging', rarity: 'fine', weight: .3, armor: 0, desc: 'A birch scoop with a comb of tines along its lip. It strips a shrub as you walk by.',
+    mods: [{stat: 'forage.comb', add: 1}],
+    look: {add: [
+      {on: 'LeftHand', part: 'comb.grip', mat: 'oak', shape: 'tube', r0: .014, r1: .014, len: .12, at: [.66, 0, .73], rot: [0, 135, 0], o: {sides: 5}},
+      {on: 'LeftHand', part: 'comb.scoop', mat: 'birchbark', shape: 'box', size: [.12, .1, .08], at: [.74, 0, .64], rot: [0, 45, 0]},
+      {on: 'LeftHand', part: 'comb.tines', mat: 'steel', shape: 'box', size: [.12, .1, .015], at: [.78, 0, .69], rot: [0, 45, 0]},
+    ]}},
+  // ---- mining (features/mining.js, docs/MINING.md): an old miner's cap, its lantern reaching further down there
+  {id: 'miner_cap', name: 'Miner\'s cap', slot: 'head', kind: 'mining', rarity: 'fine', weight: .5, armor: .02, desc: 'A stiff leather cap with a tin reflector on the front. It knows the way down.',
+    mods: [{stat: 'light.lanternR', mul: 1.3}, {stat: 'mine.extra', add: .05}],
+    look: {hide: ['hat'], add: [
+      {on: 'HatHold0', part: 'minercap', mat: 'leather_dk', shape: 'ball', r: [.236, .244, .2], at: [0, .012, 1.66], o: {sides: 10}},
+      {on: 'HatHold0', part: 'minercap.brim', mat: 'leather_dk', shape: 'box', size: [.36, .1, .018], at: [0, .22, 1.6], rot: [10, 0, 0]},
+      {on: 'HatHold0', part: 'minercap.tin', mat: 'steel', shape: 'disc', r: .07, len: .012, at: [0, -.24, 1.71], rot: [90, 0, 0], o: {sides: 8}},
+    ]}},
+  // ---- charms: the keepsakes (content/keepsakes.js, docs/KEEPSAKES.md), worn two at a time while the pouch holds them (features/
+  // gear.js takes one off when the pouch loses it). The same id as the item; keepsake: true (their cards show what they are, never
+  // what they do: ui/geartip.js); weight 0, no armor, no mods (their rules are features/keepsakes.js's, source 'keepsakes')
+  {id: 'heron_feather', name: 'Heron Feather', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A long grey feather; it was warm when you picked it up.',
+    look: {add: [
+      {on: 'HatHold0', part: 'keep.feather', mat: 'feather', shape: 'box', size: [.018, .04, .27], at: [.19, .05, 1.79], rot: [-18, 0, -24]},
+      {on: 'HatHold0', part: 'keep.feather.tip', mat: 'felt', shape: 'box', size: [.02, .042, .05], at: [.245, .09, 1.91], rot: [-18, 0, -24]},
+    ]}},
+  {id: 'warm_stone', name: 'Warm Stone', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A smooth stone from the quiet ring; it stays warm in your hand.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.stone.cord', mat: 'leather_dk', shape: 'tube', r0: .01, r1: .01, len: .05, at: [.19, -.1, .83], o: {sides: 5}},
+      {on: 'Hips', part: 'keep.stone', mat: 'warmstone', shape: 'ball', r: [.045, .035, .05], at: [.2, -.11, .77], o: {sides: 8}},
+    ]}},
+  {id: 'bark_doll', name: 'Bark Doll', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A little figure of bark and twine, left in the hollow under the roots.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.doll', mat: 'oak', shape: 'box', size: [.06, .04, .11], at: [.13, .21, .78]},
+      {on: 'Hips', part: 'keep.doll.head', mat: 'birchbark', shape: 'ball', r: .035, at: [.13, .21, .865], o: {sides: 7}},
+    ]}},
+  {id: 'tally_stick', name: 'Tally Stick', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A stick cut with rows of notches. Someone was counting something, down here, for a long time.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.tally', mat: 'oak', shape: 'box', size: [.024, .024, .22], at: [-.215, -.03, .8], rot: [0, 8, 0]},
+    ]}},
+  {id: 'full_tally_stick', name: 'Full Tally Stick', slot: 'charm', kind: 'charm', rarity: 'mythic', weight: 0, armor: 0, keepsake: true, desc: 'A stick cut with rows of notches, every one of them filled. It is warm, and it smells of soot.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.tally', mat: 'leather_dk', shape: 'box', size: [.026, .026, .24], at: [-.215, -.03, .8], rot: [0, 8, 0]},
+    ]}},
+  {id: 'big_tooth', name: 'Big Tooth', slot: 'charm', kind: 'charm', rarity: 'rare', weight: 0, armor: 0, keepsake: true, desc: 'A tooth as long as your hand. Nothing you have seen in the woods has teeth like this.',
+    look: {add: [
+      {on: 'Spine2', part: 'keep.tooth.cord', mat: 'leather_dk', shape: 'tube', r0: .012, r1: .012, len: .07, at: [0, -.16, 1.19], o: {sides: 5}},
+      {on: 'Spine2', part: 'keep.tooth', mat: 'bone', shape: 'cone', r: .032, len: .12, at: [0, -.17, 1.07], rot: [180, 0, 0], o: {sides: 6}},
+    ]}},
+  {id: 'fiddle_string', name: 'Fiddle String', slot: 'charm', kind: 'charm', rarity: 'mythic', weight: 0, armor: 0, keepsake: true, desc: 'A gut string from a fiddle, coiled.',
+    look: {add: [
+      {on: 'Hips', part: 'keep.fiddle', mat: 'gut', shape: 'tube', r0: .032, r1: .032, len: .008, at: [-.08, -.215, .79], rot: [90, 0, 0], o: {sides: 8}},
+      {on: 'Hips', part: 'keep.fiddle.peg', mat: 'leather_dk', shape: 'box', size: [.016, .016, .03], at: [-.08, -.222, .835]},
+    ]}},
 ];
 export const GEAR_BY_ID = Object.fromEntries(GEAR.map(g => [g.id, g]));
 export const gearById = id => GEAR_BY_ID[id] || null;
+// WHERE A PIECE COMES FROM (the workshop, docs/WORKSHOP.md): you wear what you own. FREE_KINDS are always yours (a rod, a comb,
+// a miner's cap: their skills need them); a MADE piece is yours once you made one (its made-thing record: features/workshop.js
+// owns, server/workshop.mjs owns): 'anvil' off the Stone Anvil, 'hand' from Tab > Make (content/workshop.js SMITH / HAND). Every
+// other piece is the dev wardrobe's for now (Shift+Tab, ?allgear=1, the server's --wardrobe). A piece in a slot other than
+// BASE_SLOTS (a charm slot to come) is its own feature's to give: never hidden here.
+export const FREE_KINDS = ['fishing', 'foraging', 'mining'];
+export const MADE = {kettle_helm: 'anvil', iron_boots: 'anvil', bark_shoes: 'hand', bark_pack: 'hand', torch: 'hand', nightglass_lantern: 'anvil'};
+for (const id in MADE) if (GEAR_BY_ID[id]) GEAR_BY_ID[id].made = MADE[id];   // (piece.made: 'anvil' | 'hand')
+const BASE_SLOTS = ['head', 'body', 'back', 'hands', 'legs', 'feet', 'main', 'off'];
+// a piece anyone may wear without owning it
+export const freePiece = g => !!g && (FREE_KINDS.includes(g.kind) || !BASE_SLOTS.includes(g.slot));
 
-// a set as asked for (ids, any order, maybe junk) -> the set it can be: known ids, at most one a slot (the later wins), in
-// SLOTS order. The co-op server keeps only what this returns (server/room.mjs), the game too (features/gear.js)
+// a set as asked for (ids, any order, maybe junk) -> the set it can be: known ids, at most one a slot (SLOT_CAP: the charms two,
+// no id twice; the later wins), in SLOTS order. The co-op server keeps only what this returns (server/room.mjs), the game too
+// (features/gear.js)
 export function cleanSet(ids) {
   const by = {};
-  if (Array.isArray(ids)) for (const id of ids) { const g = typeof id === 'string' ? GEAR_BY_ID[id] : null; if (g) by[g.slot] = g.id; }
-  return SLOTS.map(s => by[s]).filter(Boolean);
+  if (Array.isArray(ids)) for (const id of ids) {
+    const g = typeof id === 'string' ? GEAR_BY_ID[id] : null; if (!g) continue;
+    const l = by[g.slot] ??= [], i = l.indexOf(g.id); if (i >= 0) l.splice(i, 1);
+    l.push(g.id); if (l.length > (SLOT_CAP[g.slot] || 1)) l.shift();
+  }
+  return SLOTS.flatMap(s => by[s] || []);
 }
+// is his own cape drawn with these pieces on (content/gear.js entries)? Not when the back slot holds a piece (BASE: it replaces
+// the cape), unless that piece is a cloak (a cloth of its own). The sprite loadouts' runtime cloak follows this (view/hero.js)
+export const capeShown = pieces => { const b = pieces.find(g => g?.slot === 'back'); return !b || !!(b.look?.cloth && b.look.cloth !== 'off'); };
 // a set's numbers: total weight (kg), armor (share, capped), the speed share its weight leaves you
 export function setStats(ids) {
   let kg = 0, armor = 0;

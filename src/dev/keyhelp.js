@@ -1,4 +1,4 @@
-// KEY HELP (dev: F1 shows it with the debug HUD, opt.help): every key, in sections, as keycaps, with what it does and, for
+// KEY HELP (dev: the dev console's Keys tab, dev/devmenu.js): every key, in sections, as keycaps, with what it does and, for
 // a switch, what it's set to now (gold). A row that does nothing right now is dimmed: the bow's keys while you hold the
 // revolver, a feature that's off, a key another one has taken (F is the gadget while the equipment is on).
 // The page's #help (index.html): built once, then only what changed is written (dev/devtools.js drawHud calls it while
@@ -53,7 +53,7 @@ function sections({host, opt, stage, env, hero, cv, perf}) {
       ['Z / X', 'turn', () => SNAP_NAME[cv.snapMode]], ['MMB', 'drag to turn'], ['Home', 'reset the camera'],
       ['Wheel', 'zoom', () => (cv.scale * cv.dz / cv.dsBase).toFixed(2) + 'x']]],
     ['Panels', [
-      ['Esc', 'menu · Dev tab: every switch'], ['F1', 'this help + the debug HUD'],
+      ['Esc', 'menu'], ['F1', 'the debug HUD'], ['F10', 'dev console: every switch, the panels'],
       ['F2', 'cheats', () => onOff(on('cheats'))], ['F3', 'frame profiler', () => onOff(perf.on)], ['F4', 'photo mode'],
       ['F7', 'move feel (Shift: A/B)', () => onOff(on('movefeel'))], ['F8', 'gun feel', () => onOff(on('gunfeel'))], ['Tab', 'gear: what you wear', null, () => !on('pack')], ['Shift+Tab', 'the wardrobe: clothes, paint, stats, items, outfits', () => onOff(on('wardrobe'))], ['M', 'sound', () => on('audio') ? 'on' : 'muted'],
       ['U', 'music', () => onOff(f('audio')?.AU.musicOn)], ['`', 'dev mode']]],
@@ -74,7 +74,7 @@ function sections({host, opt, stage, env, hero, cv, perf}) {
     ['Spawn', [
       ['.', 'an elite with the next affix', null, () => on('affixes')], ['Shift+.', 'its champion', null, () => on('affixes')],
       ['0', 'a gang of gunmen (desert)', null, desert], ['Shift+0', 'one gunman', null, desert],
-      ['E', 'wanted board: take a bounty', null, desert], ['Esc', 'Sandbox tab: elites, shrines, omens', null, sandbox]]],
+      ['E', 'wanted board: take a bounty', null, desert], ['F10', 'dev console: every test action', null, sandbox]]],
     ...(flags.get('live') === '1' ? [['Live hero', [
       ['Shift+7', 'sprite / live body'], ['Shift+8', 'motion preset'], ['Shift+9', 'demo · emote'],
       ['Shift+Alt+7', 'new movement A/B'], ['Shift+Alt+8', 'procedural layers A/B'], ['Shift+Alt+9', 'combat style A/B'], ['Shift+Alt+0', 'reactions A/B']]]] : []),
@@ -92,7 +92,7 @@ export function keyHelp(ctx) {
     const secs = sections(ctx);
     root.innerHTML = `<div class="kh-cols">${secs.map(([title, list]) => `<section><h5>${esc(title)}</h5>${list.map(() =>
       `<div class="kh-row"><span class="kh-k"></span><span class="kh-w"></span><span class="kh-s"></span></div>`).join('')}</section>`).join('')}</div>
-      <div class="kh-foot"><b>gold</b>: what it's set to now · dimmed: does nothing right now · <kbd>F1</kbd> hides this</div>`;
+      <div class="kh-foot"><b>gold</b>: what it's set to now · dimmed: does nothing right now · <kbd>F10</kbd> closes this</div>`;
     const els = root.querySelectorAll('.kh-row');
     let i = 0;
     for (const [, list] of secs) for (const [keys, what, state, active] of list) {

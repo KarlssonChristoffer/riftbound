@@ -7,7 +7,8 @@
 //   material in the icon's mats), and optionally t (a fixed tone 0..3: unshaded), clip [x, y, w, h] (only there), on (only
 //   over the cells of that earlier shape: a band, a trim), tex ('check' | 'rows' | 'cols': a weave in the shade tone).
 // API: gearIcon(g) -> data URL (null: no drawing for it: slotIcon is the fallback); slotIcon(slot, col) -> data URL (the slot's
-//   silhouette, 10 x 10, for "his own"). READS: content/gear.js MATERIALS. OWNS: its cache. BUDGET: ~0.2 ms an icon, once.
+//   silhouette, 10 x 10, for "his own"); a bare piece (content/gear.js: No hat, No coat ...) is the slot's silhouette as a faint
+//   outline, struck through (bareIcon). READS: content/gear.js MATERIALS. OWNS: its cache. BUDGET: ~0.2 ms an icon, once.
 import {MATERIALS} from '../content/gear.js';
 
 const N = 16, INK = '#100b08';
@@ -93,6 +94,7 @@ const ICON = {
   kite_shield: {mats: ['steel', 'velvet_red', 'gold'], s: [{p: [1.5, 1, 14.5, 1, 14.5, 7, 8, 15.5, 1.5, 7], m: 0}, {p: [3, 2.5, 13, 2.5, 13, 6.8, 8, 13.5, 3, 6.8], m: 1}, {r: [7, 3, 2, 9], m: 2}, {r: [4, 5, 8, 2], m: 2}]},
   buckler: {mats: ['steel', 'brass'], s: [{e: [8, 8, 6, 6], m: 0}, {e: [8, 8, 4, 4], m: 1, on: 0}, {e: [8, 8, 3, 3], m: 0}, {e: [8, 8, 1.5, 1.5], m: 1, t: 0}]},
   lantern: {mats: ['brass', 'glass'], s: [{e: [8, 1.5, 2, 1.5], m: 0}, {p: [4, 5, 12, 5, 10, 2.5, 6, 2.5], m: 0}, {r: [4, 5, 8, 9], m: 0}, {r: [5, 6, 6, 7], m: 1, t: 0}, {r: [6, 7, 4, 5], m: 1, t: 1}, {r: [3, 13, 10, 2], m: 0}, {r: [7, 5, 2, 9], m: 0, t: 2, on: 3}]},
+  nightglass_lantern: {mats: ['black_iron', 'nightglass'], s: [{e: [8, 1.5, 2, 1.5], m: 0}, {p: [4, 5, 12, 5, 10, 2.5, 6, 2.5], m: 0}, {r: [4, 5, 8, 9], m: 0}, {r: [5, 6, 6, 7], m: 1, t: 2}, {r: [6, 7, 4, 5], m: 1, t: 3}, {px: [[6, 8], [9, 10]], m: 1, t: 0}, {r: [3, 13, 10, 2], m: 0}]},
   torch: {mats: ['oak', 'black_iron', 'flame'], s: [{l: [4, 15, 9, 7, 2.2], m: 0}, {e: [9.5, 6, 2.6, 1.6], m: 1}, {p: [7, 6, 12, 6, 12.5, 3, 11, 1.5, 10.5, 0, 9, 2, 7.5, 3], m: 2}, {p: [8.5, 5.5, 11, 5.5, 10.5, 3, 9.6, 2], m: 2, t: 0}]},
   spellbook: {mats: ['leather_dk', 'linen', 'gold'], s: [{r: [11, 3, 3, 11], m: 1, tex: 'rows'}, {r: [2, 2, 11, 12], m: 0}, {e: [7.5, 8, 2.4, 2.4], m: 2}, {e: [7.5, 8, 1.1, 1.1], m: 0, t: 3}, {px: [[2, 2], [12, 2], [2, 13], [12, 13]], m: 2}]},
   // fishing gear (docs/FISHING.md): rods from the bottom left to the top right, the line hanging off the tip
@@ -115,6 +117,10 @@ const ICON = {
   angler_mitts: {mats: ['wool_grey', 'hide_tan'], s: [...glove(0).map(o => o.r && o.r[1] <= 3 ? {...o, r: [o.r[0], o.r[1] + 2, o.r[2], o.r[3] - 2]} : o), {r: [4, 4, 8, 1], m: 0, t: 2},
     {px: [[4, 4], [6, 3], [8, 3], [10, 4]], m: 1}]},
   landing_net: {mats: ['oak', 'netting'], s: [{l: [1.5, 15, 7, 9.5, 1.8], m: 0}, {e: [10, 6, 5.5, 5.5], m: 1, tex: 'check'}, {e: [10, 6, 4.3, 4.3], m: 1, t: 3, on: 1}, {e: [10, 6, 4.3, 4.3], m: 1, tex: 'check', on: 2}]},
+  // foraging gear (docs/FORAGING.md): the berry comb, its tines up
+  miner_cap: {mats: ['leather_dk', 'steel'], s: [dome(0, 11), {r: [1, 10, 14, 2], m: 0}, {e: [8, 7, 3, 3], m: 1}]},
+  berry_comb: {mats: ['birchbark', 'steel', 'oak'], s: [{l: [12, 11, 15, 14.5, 2], m: 2}, {r: [2, 6, 11, 8], m: 0, tex: 'rows'}, {r: [2, 13, 11, 1], m: 0, t: 2},
+    {px: [[2, 4], [2, 5], [4, 3], [4, 4], [4, 5], [6, 4], [6, 5], [8, 3], [8, 4], [8, 5], [10, 4], [10, 5], [12, 4], [12, 5]], m: 1}]},
 };
 
 // ---------------------------------------------------------------- drawing
@@ -161,7 +167,7 @@ const cache = new Map();
 export function gearIcon(g) {
   if (!g) return null;
   let u = cache.get(g.id);
-  if (u === undefined) { const def = ICON[g.id]; u = def ? draw(def) : null; cache.set(g.id, u); }
+  if (u === undefined) { const def = ICON[g.id]; u = g.bare ? bareIcon(g.slot) : def ? draw(def) : null; cache.set(g.id, u); }
   return u;
 }
 
@@ -175,6 +181,7 @@ const SLOT_ICONS = {
   hands: ['..#.#.#..', '..#.#.#..', '.#######.', '.#######.', '.######..', '..#####..', '..#####..', '..#####..', '.........'],
   main: ['.......##', '......###', '.....###.', '....###..', '.#.###...', '..###....', '..##.....', '.#..#....', '#........'],
   off: ['.#######.', '#########', '#########', '#########', '.#######.', '.#######.', '..#####..', '...###...', '....#....'],
+  charm: ['.#.....#.', '..#...#..', '...#.#...', '....#....', '...###...', '..#####..', '..#####..', '...###...', '....#....'],   // (a pendant on a cord: the keepsakes)
 };
 const slotCache = new Map();
 export function slotIcon(slot, col) {   // a data URL: the silhouette in col, with a one-pixel ink shadow down-right
@@ -182,5 +189,14 @@ export function slotIcon(slot, col) {   // a data URL: the silhouette in col, wi
   const c = document.createElement('canvas'); c.width = c.height = 10; const q = c.getContext('2d'), rows = SLOT_ICONS[slot] || SLOT_ICONS.body;
   for (const [d, f] of [[1, INK], [0, col]]) { q.fillStyle = f; rows.forEach((r, y) => { for (let x = 0; x < 9; x++) if (r[x] === '#') q.fillRect(x + d, y + d, 1, 1); }); }
   u = c.toDataURL(); slotCache.set(key, u); return u;
+}
+// a bare piece: the slot's silhouette as an outline (only its edge cells) in a faint tone, a stroke across it (his garment off)
+export function bareIcon(slot) {
+  const c = document.createElement('canvas'); c.width = c.height = 10; const q = c.getContext('2d'), rows = SLOT_ICONS[slot] || SLOT_ICONS.body;
+  const on = (x, y) => rows[y]?.[x] === '#';
+  q.fillStyle = '#6b5e50';
+  for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) if (on(x, y) && !(on(x - 1, y) && on(x + 1, y) && on(x, y - 1) && on(x, y + 1))) q.fillRect(x, y, 1, 1);
+  for (const [d, f] of [[1, INK], [0, '#c4573f']]) { q.fillStyle = f; for (let i = 0; i < 9; i++) q.fillRect(i + d, 8 - i + d, 1, 1); }
+  return c.toDataURL();
 }
 export const hasIcon = id => !!ICON[id];

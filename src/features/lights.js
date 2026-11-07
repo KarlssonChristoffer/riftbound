@@ -429,12 +429,15 @@ export async function create(host) {
 
   // ================================================================ fire: what burns, what lights, what catches
   const flameAt = (p) => (p.z || 0) + (p.kind === 'torch' ? TORCH_H : BRAZ_H);
-  function flamePoints() {   // lit flames an arrow can catch from: [x, y, h]
-    const out = [];
-    for (const p of flames) if (!p.unlit && !p.gone && !p.broken) out.push([p.x, p.y, flameAt(p)]);
-    if (F.on) { out.push([camp.x, camp.y, .7]); if (!beacon.unlit) out.push([beacon.x, beacon.y, beacon.z + 1.3]); }
-    for (const [p] of burning) out.push([p.x, p.y, (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8)]);
-    return out;
+  // the lit flames an arrow can catch from, this step: x, y, h in FP (reused: grown, never shrunk), FPn of them. The
+  // campfire and the beacon count whether or not their looks are on (F.on is presentation: key 9 doesn't put a fire out)
+  const FP = []; let FPn = 0;
+  const fpAdd = (x, y, h) => { const i = FPn++ * 3; FP[i] = x; FP[i + 1] = y; FP[i + 2] = h; };
+  function flamePoints() {
+    FPn = 0;
+    for (const p of flames) if (!p.unlit && !p.gone && !p.broken) fpAdd(p.x, p.y, flameAt(p));
+    fpAdd(camp.x, camp.y, .7); if (!beacon.unlit) fpAdd(beacon.x, beacon.y, beacon.z + 1.3);
+    for (const [p] of burning) fpAdd(p.x, p.y, (p.z || 0) + (p.h || 0) + (TOP[p.kind] ?? .8));
   }
   const pals = new Map();   // '#rrggbb' -> the flame's 4 tones (hot core .. dark tip), for sparks
   function palOf(c) { let p = pals.get(c); if (!p) pals.set(c, p = [ART.mixHex(c, '#ffffff', .6), ART.mixHex(c, '#ffffff', .15), c, ART.mixHex(c, '#000000', .35)].map(rgb)); return p; }
@@ -475,14 +478,17 @@ export async function create(host) {
   // ================================================================ simulation
   let aid = 0;
   function stepArrows(dt) {
-    const fp = flamePoints();
+    flamePoints();
     for (const a of host.arrows) {
       if (a.kind === 'bullet') continue;   // a revolver's bullet (sim/player/gun.js) never catches fire
       if (a._lt === undefined) {   // just loosed: next to a flame, it's dipped
         a._lt = 0; a._id = aid++;
-        if (fp.some(([x, y]) => Math.hypot(x - a.x, y - a.y) < 1.5) || candles.some(c => c.lit && F.on && Math.hypot(c.x - a.x, c.y - a.y) < 1.3)) { a.fire = 1; burst(a.x, a.y, a.h, 6, FIRE, .8); }
+        let dip = false;
+        for (let i = 0; i < FPn * 3 && !dip; i += 3) dip = Math.hypot(FP[i] - a.x, FP[i + 1] - a.y) < 1.5;
+        for (let i = 0; i < candles.length && !dip; i++) { const c = candles[i]; dip = c.lit && Math.hypot(c.x - a.x, c.y - a.y) < 1.3; }
+        if (dip) { a.fire = 1; burst(a.x, a.y, a.h, 6, FIRE, .8); }
       }
-      if (!a.fire && !a.stuck) for (const [x, y, h] of fp) if (Math.hypot(x - a.x, y - a.y) < .35 && Math.abs(h - a.h) < .55) { a.fire = 1; burst(a.x, a.y, a.h, 8); break; }
+      if (!a.fire && !a.stuck) for (let i = 0; i < FPn * 3; i += 3) if (Math.hypot(FP[i] - a.x, FP[i + 1] - a.y) < .35 && Math.abs(FP[i + 2] - a.h) < .55) { a.fire = 1; burst(a.x, a.y, a.h, 8); break; }
       // a passing arrow snuffs candles it skims (a fire arrow lights them)
       for (const c of candles) if (!a.stuck && Math.hypot(c.x - a.x, c.y - a.y) < .3 && Math.abs(c.h + .2 - a.h) < .4) { if (a.fire) { c.lit = true; c.relight = 0; } else candleSnuff(c); }
       if (!a.fire) continue;
@@ -898,6 +904,10 @@ export async function create(host) {
       o.t += dt; const P = host.player;
       if (o.t > TOPPLE.back && Math.hypot(P.x - p.x, P.y - p.y) > TOPPLE.away) { toppled.delete(p); p.unlit = false; }
     }
+    // the sim's sparks, smoke and flares (burst, ashPuff, flare from the steps above and the hooks) are aged and capped by
+    // the view; with the view off (key 9, ?views=0, a headless sim) nothing would, so they're capped here too
+    if (parts.length > 1100) parts.splice(0, parts.length - 1100);
+    if (flares.length > 64) flares.splice(0, flares.length - 64);
   };
   // VIEW (ambient: it flickers on behind the pause menu): the flames, sparks and smoke, the campfire, shrooms, wisps
   F.ambient = true;

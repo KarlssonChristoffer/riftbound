@@ -23,13 +23,15 @@ export function createStage({G, ctxO, PPM, PPMH, features, flags: Q}) {
   function cardHook(it, sp) { const w = wind(); return w?.on && w.card ? w.card(it, sp) : null; }
   // ... and leans the 3D trees (world.js leanTree: the lean at the top, whole pixels per vertex in the shader)
   function meshHook(it) { const w = wind(); return w?.on && w.mesh ? w.mesh(it) : null; }
+  // ... and finds the props near an arrow for its tree test (world.js treeHit)
+  const nearHook = (x, y, r, out) => ents.near(x, y, r, out);
   async function setBiome(i) {
     biomeI = ((i % BIOMES.length) + BIOMES.length) % BIOMES.length;
     $('#load').classList.remove('hidden'); $('#load').textContent = 'Building ' + BIOMES[biomeI].name + '…';
     const keep = world?.props;   // props keep their state (broken, opened, moved) across a biome switch
     world?.dispose();
     world = await buildWorld(G, {biome: BIOMES[biomeI], ctxO, PPM, PPMH, props: keep, trees3d, cliffs3d});
-    world.hooks.card = cardHook; world.hooks.mesh = meshHook;   // a rebuilt world has fresh hooks
+    world.hooks.card = cardHook; world.hooks.mesh = meshHook; world.hooks.near = nearHook;   // a rebuilt world has fresh hooks
     ents ??= createEntities(world.props, {x0: WORLD.x0, y0: WORLD.y0, x1: WORLD.x1, y1: WORLD.y1});
     world.setMode(propMode);
     for (const f of features) f.biomeChanged?.();

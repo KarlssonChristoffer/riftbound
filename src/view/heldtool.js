@@ -11,14 +11,32 @@
 //           a few degrees (the hand's rotation in his frame, from the drawn pose: show(id, 'carry', w, o))
 // The shape is made once per tool and hold in its own frame (a along the haft, b toward the bit, t through); placing it is a
 // basis change into the hand's frame, written straight into the attached buffers (no allocation).
-//   const T = createHeldTool(rig, model, J, ramp6); T.show(id | '', hold, w?, o?) each frame (w: the drawn pose, o: the
-//   RightHand's offset in it)
+//   const T = createHeldTool(rig, model, J, ramp6); T.show(id | '', hold, w?, o?, look?) each frame (w: the drawn pose, o: the
+//   RightHand's offset in it; look: a made tool's 'haft:inlay' from features/workshop.js lookOf: its haft's wood, glow shards
+//   set in its head; '' the plain ash haft)
 // OWNS: the attached mesh. READS: J (the model's bones and segments). BUDGET: nothing while still; a carried tool's few hundred
 //   corners re-placed and uploaded (~3 KB) on the frames its hand turns.
 const ASH = ['#e2bc84', '#bd9358', '#8a6638', '#3c2a16'], STEEL = ['#f4f6f8', '#ccd4dc', '#949ca6', '#3a3e44'];   // (a pale ash haft: it reads against dark trousers and the duster)
+// a made tool's haft by its wood (content/workshop.js WOODS: the log's id), and the glow-shard inlay's pale green
+const HAFTS = {
+  birch_log: ['#f6f2e6', '#ddd6c2', '#a89e88', '#3a342c'], log: ['#c89a62', '#9e7442', '#6e4e2a', '#2e2010'], pine_log: ['#e6a86c', '#c07c44', '#86522a', '#3a2010'],
+  aspen_log: ['#d8dcc4', '#b4b89c', '#80846c', '#363a2e'], willow_log: ['#c4b090', '#9c8868', '#6c5c44', '#2e261c'], rowan_log: ['#c8c4b8', '#a09c90', '#706c62', '#302e2a'],
+  deadwood: ['#c4bcae', '#9c9486', '#6c665c', '#2e2b26'],
+};
+const INLAY = ['#f0ffe4', '#b8f0a4', '#6ac080', '#24402c'];
 // the tools a fist can hold: metres along the haft, across it toward the bit (b), through it (the side)
 const TOOLS = {
   axe: {haft: {len: .71, w: .032}, head: {len: .095, eye: .034, bit: .17, flare: .14, thick: .036, poll: .04}},
+  // the miner's pick (docs/MINING.md): a head of two points across the haft, the long one toward the bit (b), both bent a
+  // little back toward the grip (droop m along the haft)
+  pick: {haft: {len: .72, w: .034}, head: {pick: true, len: .07, eye: .03, bit: .22, back: .15, droop: .05, thick: .032}},
+  // the forged ones (features/workshop.js): a heavier, squarer head on the same hafts
+  iron_axe: {haft: {len: .72, w: .033}, head: {len: .1, eye: .036, bit: .185, flare: .16, thick: .04, poll: .05}},
+  iron_pick: {haft: {len: .74, w: .035}, head: {pick: true, len: .075, eye: .032, bit: .24, back: .17, droop: .04, thick: .036}},
+  // the workshop's (features/workshop.js: the jobs without a bag item): the furnace's birch blowpipe (a long tube, a wooden
+  // nozzle) and the smith's hammer (a short haft, a square iron head): a BLOCK head, back and bit either side of the haft
+  pump: {haft: {len: .86, w: .026}, head: {block: true, len: .05, bit: .022, back: .022, thick: .036, fam: 0}},
+  smith: {haft: {len: .4, w: .03}, head: {block: true, len: .075, bit: .055, back: .065, thick: .062}},
 };
 // a hold: where the haft runs (from: metres along it from the grip; it is TOOLS' len long, away from the head) and where the
 // head's middle is; swing: the haft's way in the hand (cant deg from U toward F); carry: the hang's forward lean (deg)
@@ -39,15 +57,18 @@ export function createHeldTool(rig, model, J, ramp6) {
   const g = local(sub(grip.head, H)), F = local(Y), up = local([0, -1, 0]);   // (F: the bone's own axis; U: the thumb, -Y in Blender = his front at rest)
   const U = unit(sub(up, F.map(x => x * dot(up, F))));
   const famOf = name => J.families.find(f => f.name === name);
-  const fams = [{name: 'toolwood', ramp: ramp6(ASH)}, famOf('iron') || {name: 'tooliron', ramp: ramp6(['#9a9aa2', '#6e6e78', '#51515a', '#2a2a30'])}, {name: 'toolsteel', ramp: ramp6(STEEL)}];
-  const MAX = 6 * 36, part = 250;   // (a part of its own: below the cloths' 255 down, above the ones view/dress.js adds after the model's)
+  const fams = [{name: 'toolwood', ramp: ramp6(ASH)}, famOf('iron') || {name: 'tooliron', ramp: ramp6(['#9a9aa2', '#6e6e78', '#51515a', '#2a2a30'])}, {name: 'toolsteel', ramp: ramp6(STEEL)},
+    {name: 'toolinlay', ramp: ramp6(INLAY)}, ...Object.keys(HAFTS).map(k => ({name: 'haft_' + k, ramp: ramp6(HAFTS[k])}))];
+  const HAFT_FAM = Object.fromEntries(Object.keys(HAFTS).map((k, i) => [k, 4 + i]));   // (a wood -> its family's index in fams)
+  const MAX = 8 * 36, part = 250;   // (8 boxes: a pick's 6, an inlay's; a part of its own: below the cloths' 255 down, above the ones view/dress.js adds after the model's)
   const D = rig.attach(model, MAX, fams);
 
   // ---------------------------------------------------------------- the shape, in its own frame (made once per tool + hold)
   const SHAPES = {};
-  function shapeOf(id, hold) {
-    const key = id + ':' + hold; if (SHAPES[key]) return SHAPES[key];
+  function shapeOf(id, hold, look = '') {
+    const key = id + ':' + hold + ':' + look; if (SHAPES[key]) return SHAPES[key];
     const T = TOOLS[id], Hd = HOLDS[hold], P = [], N = [], FAM = [], BIAS = [];
+    const [lw, li] = look.split(':'), hf = HAFT_FAM[lw] ?? 0, inlay = li === '1';   // (a made tool's haft wood and inlay)
     const hexa = (c, fam, bias = 0) => {   // 8 corners (0-3 one end, 4-7 the other, in the same turning order): 12 flat triangles
       const F6 = [[0, 1, 2, 3], [7, 6, 5, 4], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]], mid = [0, 0, 0];
       for (const p of c) for (let k = 0; k < 3; k++) mid[k] += p[k] / 8;
@@ -62,13 +83,31 @@ export function createHeldTool(rig, model, J, ramp6) {
     const box = (a0, a1, b0, b1, t0, B0 = b0, B1 = b1, t1 = t0) => [at(a0, b0, -t0), at(a0, b1, -t0), at(a0, b1, t0), at(a0, b0, t0),
       at(a1, B0, -t1), at(a1, B1, -t1), at(a1, B1, t1), at(a1, B0, t1)];
     const h = T.haft, w = h.w / 2, E = T.head, tip = Hd.head > Hd.from ? Hd.from + h.len : Hd.from - h.len;   // (the knob's end: away from the head)
-    hexa(box(Math.min(Hd.from, tip), Math.max(Hd.from, tip), -w, w, w * .9, -w * .85, w * .85, w * .8), 0, .05);   // the haft
+    hexa(box(Math.min(Hd.from, tip), Math.max(Hd.from, tip), -w, w, w * .9, -w * .85, w * .85, w * .8), hf, .05);   // the haft
+    if (E.block) {   // a block head (the hammer, the pipe's nozzle): one box round the haft's end
+      hexa(box(Hd.head - E.len / 2, Hd.head + E.len / 2, -E.back, E.bit, E.thick / 2), E.fam ?? 1, .05);
+      return SHAPES[key] = {P: Float32Array.from(P), N: Float32Array.from(N), FAM, BIAS, n: Math.min(MAX, P.length / 3)};
+    }
+    if (E.pick) {   // the pick's head: the eye block, then a point each way, tapering and bent back toward the grip
+      const m = Hd.head, l = E.len / 2, t = E.thick / 2, dr = (Hd.head > Hd.from ? -1 : 1) * E.droop;
+      hexa(box(m - l, m + l, -E.eye, E.eye, t), 1, .05);
+      for (const [b0, b1] of [[E.eye, E.bit], [-E.eye, -E.back]]) {
+        const bm = (b0 + b1) * .55, am = m + dr * .35;
+        hexa([at(m - l, b0, -t), at(m + l, b0, -t), at(m + l, b0, t), at(m - l, b0, t),
+          at(am - l * .6, bm, -t * .7), at(am + l * .6, bm, -t * .7), at(am + l * .6, bm, t * .7), at(am - l * .6, bm, t * .7)], 1, 0);
+        hexa([at(am - l * .6, bm, -t * .7), at(am + l * .6, bm, -t * .7), at(am + l * .6, bm, t * .7), at(am - l * .6, bm, t * .7),
+          at(m + dr - l * .12, b1, -t * .15), at(m + dr + l * .12, b1, -t * .15), at(m + dr + l * .12, b1, t * .15), at(m + dr - l * .12, b1, t * .15)], 2, .12);
+      }
+      if (inlay) hexa(box(m - l * .5, m + l * .5, E.eye, E.eye + .05, t * 1.08), 3, .15);   // (glow shards set in the head, either face)
+      return SHAPES[key] = {P: Float32Array.from(P), N: Float32Array.from(N), FAM, BIAS, n: Math.min(MAX, P.length / 3)};
+    }
     const a0 = Hd.head - E.len / 2, a1 = Hd.head + E.len / 2, t = E.thick / 2, fl = E.flare / 2, cb = E.bit - .02, m = Hd.head;
     hexa(box(a0, a1, -E.poll, E.eye, t), 1, .05);                                  // the eye round the haft and the poll behind it
     hexa([at(a0, E.eye, -t), at(a1, E.eye, -t), at(a1, E.eye, t), at(a0, E.eye, t),   // the cheek: flaring along the haft, thinning
       at(m - fl * .9, cb, -t * .35), at(m + fl, cb, -t * .35), at(m + fl, cb, t * .35), at(m - fl * .9, cb, t * .35)], 1, 0);
     hexa([at(m - fl * .9, cb, -t * .35), at(m + fl, cb, -t * .35), at(m + fl, cb, t * .35), at(m - fl * .9, cb, t * .35),   // the ground edge
       at(m - fl, E.bit, -t * .12), at(m + fl * 1.08, E.bit, -t * .12), at(m + fl * 1.08, E.bit, t * .12), at(m - fl, E.bit, t * .12)], 2, .12);
+    if (inlay) hexa(box(a0 + .01, a1 - .01, E.eye + .005, E.eye + .045, t * 1.1), 3, .15);   // (glow shards set in the cheek, either face)
     return SHAPES[key] = {P: Float32Array.from(P), N: Float32Array.from(N), FAM, BIAS, n: Math.min(MAX, P.length / 3)};
   }
   // written into the attached buffers: a point (a, b, t) -> g + A a + Bt b + S t; its normal likewise (no translation)
@@ -85,6 +124,7 @@ export function createHeldTool(rig, model, J, ramp6) {
     if (cur !== S) {   // (a new shape: its families, biases and segment once)
       cur = S;
       for (let i = 0; i < S.n; i++) { nrm[i * 4 + 3] = Math.round(S.BIAS[i] * 100); D.info[i * 4] = seg; D.info[i * 4 + 1] = part; D.info[i * 4 + 2] = D.fam[S.FAM[i]]; D.info[i * 4 + 3] = 0; }
+      D.infoChanged?.();   // (the families went up with the first draw only: another tool's (an axe for a pick, a birch haft) need sending)
     }
     D.update(S.n);
   }
@@ -99,11 +139,12 @@ export function createHeldTool(rig, model, J, ramp6) {
     const tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
     out[0] = x + qw * tx + (qy * tz - qz * ty); out[1] = y + qw * ty + (qz * tx - qx * tz); out[2] = z + qw * tz + (qx * ty - qy * tx);
   }
-  let shown = '', held = '';
+  let shown = '', held = '', looked = '';
   return {
-    show(id, hold = 'carry', w = null, o = 0) {
+    show(id, hold = 'carry', w = null, o = 0, look = '') {
       if (!TOOLS[id]) { if (shown) { shown = ''; held = ''; D.update(0); } return; }
-      const S = shapeOf(id, hold);
+      const S = shapeOf(id, hold, look);
+      if (look !== looked) { looked = look; shown = ''; }   // (another of the same kind: placed again)
       if (hold === 'carry' && w) {
         unrot(w, o, 0, -sl, -cl, V);   // (down, leaning forward)
         if (id === shown && held === hold && V[0] * LA[0] + V[1] * LA[1] + V[2] * LA[2] > TURN) return;

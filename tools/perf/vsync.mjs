@@ -14,7 +14,7 @@
 import {spawn} from 'node:child_process';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {launch} from '../lib/chrome.mjs';
+import {launch, PYTHON} from '../lib/chrome.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
@@ -32,7 +32,7 @@ const SCENARIOS = [
 ].filter(s => !ONLY || ONLY.split(',').some(o => s.name.includes(o)));
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const server = spawn('python', [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore', cwd: ROOT});
+const server = spawn(PYTHON, [join(ROOT, 'serve.py'), String(PORT)], {stdio: 'ignore', cwd: ROOT});
 // a real window (no --headless), full screen without browser UI, never treated as hidden or in the background; its
 // throwaway profile goes with it (tools/lib/chrome.mjs)
 const chrome = launch('vsync', ['--kiosk', '--window-position=0,0', '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist',
