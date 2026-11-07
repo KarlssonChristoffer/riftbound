@@ -64,7 +64,7 @@ export function createLoop(E) {
     const dragYaw = input.takeYaw();
     let ny = cv.yaw + (paused ? pause.pauseTurn(dt) + dragYaw : rot * ROT_SPEED * dt + dragYaw);
     if (!paused && pa.assist) ny = pa.stepAssist(dt, ny);
-    else if (!paused && !rot && !input.dragging && cv.snapMode) ny = cv.snapEase(ny, dt);
+    else if (!paused && !rot && !input.dragging && cv.snapMode && !(views3 ??= E.feat('chasecam'))?.ownsYaw) ny = cv.snapEase(ny, dt);   // (not in a camera view: the mouse turns it freely)
     const y0 = cv.yaw; cv.setYaw(ny); pa.syncPlateaus();
     cv.stepSampling(dt, cv.yaw !== y0);
     if (paused) { pause.stepPaused(dt); return; }   // the game stands still, nature goes on
