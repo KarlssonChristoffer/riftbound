@@ -84,12 +84,12 @@ const TUNE = {
       floor: [.5, .14, .08, .28], moss: [.3, .04, .06, .6], heath: [0, 0, .45, .55], upland: [.3, .4, .2, .1]},
   },
   // THE TUFTS (render/grass.js TUFT_VS: pixel-art tufts of grass on billboards, the "living grass" layer; ?tufts=0 none): a share p of
-  // the sward's tufts (by the ground: meadow, the downs, the forest's grass, its bare earth) also stand up as a sprite (their own
+  // the sward's tufts (by the ground: meadow, the downs, the forest's grass, moss, heath, its bare earth) also stand up as a sprite (their own
   // generator: the blades' layout stays as it was). The look (live, the dev menu): the wind's clock fps (0 smooth), the two noises'
   // divergence (rad), lean at calm / per m/s (heights), the noise per m and its speed, the view sway (px), the max lean, the fake
   // perspective, the pushers' radius x, accents / patches on, the density, the toon smoothing; tick: the pushers sent this often a s
-  tufts: {seed: 37, p: {meadow: .4, west: .38, forest: .32, earth: .08}, arena: .3, max: 300000, tick: 15,
-    look: {fps: 8, div: .5, calm: .3, perMs: .1, scale: .35, speed: 1.6, sway: .6, maxLean: .85, persp: .55, pushR: 1.5, accents: true, patches: true, density: 1, toon: .35, debug: false}},
+  tufts: {seed: 37, p: {meadow: .85, west: .85, forest: .75, earth: .3, moss: .25, heath: .3}, arena: .3, max: 300000, tick: 15,
+    look: {fps: 8, div: .5, calm: .3, perMs: .1, scale: .35, speed: 1.6, sway: .6, maxLean: .85, persp: .55, pushR: 1.5, accents: true, patches: true, density: .85, toon: .35, debug: false}},
 };
 // the cool palette (the default; ?palette=old, world/biomes.js): the wildflowers mostly a bright lavender, a few more of them (the references)
 if (flags.get('palette') !== 'old') Object.assign(TUNE.flowers, {p: .4, lo: .56, cols: ['#e6e0d2', '#e8c650', '#c49cf2', '#e898bc'], w: [.22, .16, .46, .16]});
@@ -145,7 +145,7 @@ export async function create(host) {
       if (r1 * dMax > Rm.d * thin) continue;
       if (hole?.(x, y) || host.inStream(x, y) || lay.inPool?.(x, y, .01, .45) || steep(x, y)) continue;   // (walkable terrain: none on a cliff's face)
       const inArena = x > PLAY.x0 && x < PLAY.x1 && y > PLAY.y0 && y < PLAY.y1;
-      if (TUFTS && ri < 3) tuft(x, y, cd, TT.p.meadow * (inArena ? TT.arena : 1));
+      if (TUFTS) tuft(x, y, cd, (ri < 3 ? TT.p.meadow : TT.p.moss) * (inArena ? TT.arena : 1));
       const tall = TUNE.clump.lo + (TUNE.clump.hi - TUNE.clump.lo) * vnoise(x * TUNE.clump.k, y * TUNE.clump.k, 42);
       const h = (Rm.h[0] + (Rm.h[1] - Rm.h[0]) * r2) * tall * (inArena ? TUNE.arena : 1);
       // a wildflower on this tuft? (meadow grass outside the walls, in a patch)
@@ -198,7 +198,7 @@ export async function create(host) {
       const tallK = TUNE.clump.lo + (TUNE.clump.hi - TUNE.clump.lo) * vnoise(x * TUNE.clump.k, y * TUNE.clump.k, 42);
       const h = kind === 2 ? (T.tall.h[0] + (T.tall.h[1] - T.tall.h[0]) * r2) * (.82 + .18 * tallK) : kind === 1 ? T.ankle.h[0] + (T.ankle.h[1] - T.ankle.h[0]) * r2 : (Rm.h[0] + (Rm.h[1] - Rm.h[0]) * r2) * tallK;
       const bc0 = kind === 2 && LUSH >= 0 ? LUSH * 4 + Math.min(2, cd & 3) : cd;   // (tall: the lush ramp in the ground's light)
-      if (TUFTS && ri < 3) tuft(x, y, bc0, TT.p.west * (kind === 1 ? .5 : 1));
+      if (TUFTS) tuft(x, y, bc0, (ri < 3 ? TT.p.west : TT.p.moss) * (kind === 1 ? .6 : 1));
       let fl = 0;
       if (kind !== 1 && names[ri] === 'grass') {
         const pf = Math.min(1, Math.max(0, (vnoise(x * Fl.k, y * Fl.k, 43) - Fl.lo) / (Fl.hi - Fl.lo)));
@@ -272,7 +272,7 @@ export async function create(host) {
         // on the forest's open floor reads as nothing; a tussock should show)
         const lift = !meadow && !earth ? 1 : 0;
         const bc0 = earth ? (LUSH >= 0 ? LUSH : GRASS) * 4 + Math.min(3, tn + 1) : kind === 2 && LUSH >= 0 ? LUSH * 4 + Math.min(2, tn) : cd - Math.min(lift, tn);
-        if (TUFTS && ri !== MOSS && ri !== HEATH) tuft(x, y, earth || kind === 2 ? bc0 : cd, earth ? TT.p.earth : meadow ? TT.p.meadow : TT.p.forest);   // (in the ground's own tone: its dark pixels outline it)
+        if (TUFTS) tuft(x, y, earth || kind === 2 ? bc0 : cd, earth ? TT.p.earth : meadow ? TT.p.meadow : ri === MOSS ? TT.p.moss : ri === HEATH ? TT.p.heath : TT.p.forest);   // (in the ground's own tone: its dark pixels outline it)
         // a flower: the meadow's in the band, the forest's own beyond it (by what the ground is)
         let fl = 0;
         if (meadow) {
