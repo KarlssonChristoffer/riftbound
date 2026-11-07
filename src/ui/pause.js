@@ -26,6 +26,7 @@ const gfx = (group, label, id, keep = true) => ({tab: 'graphics', group, label, 
 const vol = label => ({tab: 'audio', group: 'Volume', label});
 const CLAIM = {
   depth: {'': gfx('World', 'Clouds, light shafts & reflections', 'depth', 'depth'), 'Foreground silhouettes': gfx('World', 'Foreground foliage', 'fg')},
+  mist: {'': gfx('World', 'Morning mist', 'mist', 'mist')},   // (features/mist.js: off by default since 2026-11-07; ?mist=1)
   weather: {'Weather fx': gfx('World', 'Rain, snow & lightning', 'rain')},
   lights: {'Heat ripple': gfx('Effects', 'Heat shimmer', 'heat')},
   atmos: {'Vignette + haze': gfx('Effects', 'Vignette', 'vignette', 'hd')},

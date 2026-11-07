@@ -64,6 +64,10 @@ export const SHADE = {on: flags.get('shade') !== '0', dark: flags.get('onesun') 
   crest: flags.get('crest') !== '0', rim: .12, rimLow: .45};
 const SKY = [.6, .72, 1];
 const WXL = flags.get('wxlight') !== '0', CHS = ['cloud', 'rain', 'snow', 'fog', 'storm', 'wind'];   // (TWO LIGHTS: sim/env.js's weather channels)
+// THE FAR HAZE (the mood's fog, uFog / uFog2: the weather's fog and the distance laid over the picture; features/mist.js lays it by
+// the ground's distance): OFF for now (the user, 2026-11-07: the haze and the mist clashed with the cloud shadows: "dimman kan vi
+// stänga av just nu"). ?fog=1 or F10 > Nature > Mist puts it back; HAZE.on is live
+export const HAZE = {on: flags.get('fog') === '1'};
 
 export function createLighting({G, host, features, opt}) {
   const sunDir = new THREE.Vector3(), shadowDir = new THREE.Vector3();
@@ -127,6 +131,7 @@ export function createLighting({G, host, features, opt}) {
     const sA = U.uShadowA.value, gap = G.cloudGap ? G.cloudGap() : 1;   // (the cloud shadows take the sun where they lie: the gaps get theirs back, render/clouds.js CLOUD_SUN)
     if (gap !== 1) U.uShadowA.value = Math.min(1, sA * gap);
     U.uFog.value.set(m.fog[0] * sunK, m.fog[1] * sunK, m.fog[2] * sunK, m.fog[3] * sunK);
+    if (!HAZE.on) U.uFog.value.set(0, 0, 0, 0);   // (THE FAR HAZE: off)
     // the god rays: the sun's elevation and colour, the mood's shadow strength (clouds and nightfall in it), the view's cloud (env.light), the mist, wet ground
     if (G.setRays) { RAYS.el = m.sun.el; RAYS.c = sc; RAYS.shadow = sA; RAYS.cloud = env.light.cloud; RAYS.mist = G.mist?.on ? Math.max(env.sky.fog, G.mist.medium) : env.sky.fog; RAYS.wet = env.wet;
       RAYS.sunView = (env.sunView ?? 1 - env.light.cloud * .9) * sunK; RAYS.broken = env.broken; RAYS.t = t; RAYS.env = env; G.setRays(RAYS); }   // (wx-D)
@@ -144,6 +149,7 @@ export function createLighting({G, host, features, opt}) {
       const u = env.moodFor(biome, sides.under, MU ||= env.blankMood()), a2 = u.amb, c2 = u.sun.c || ONE3;
       const sA2 = u.shadow.a > 0 && u.sun.el > 2 ? u.shadow.a : 0, str2 = u.sun.el > 2 ? (u.shadow.a > 0 ? 1 : .45) * (u.sun.k ?? .4) * 2.2 : 0;
       U.uAmb2.value.set(a2[0], a2[1], a2[2]); U.uSunC2.value.set(c2[0], c2[1], c2[2]); U.uFog2.value.set(u.fog[0], u.fog[1], u.fog[2], u.fog[3]);
+      if (!HAZE.on) U.uFog2.value.set(0, 0, 0, 0);   // (THE FAR HAZE: off)
       U.uSun2.value.set(u.sun.k, sA2, str2, sA2 > 0 ? crestRim(u.sun.el) : 0);
       shade(u.shadow.c, sA2, a2, U.uShade2T.value, U.uShade2L.value, U.uShade2H.value);
       const fk2 = lum(u.fill || [0, 0, 0]) / Math.max(.02, lum(a2)) * CHAR.fillK; U.uFill2.value.set(a2[0] * fk2, a2[1] * fk2, a2[2] * fk2);
