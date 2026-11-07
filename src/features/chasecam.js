@@ -46,6 +46,9 @@ export const TUNE = {
   dist: 6, min: 2.5, max: 24,             // m behind the chest: the start, the wheel's range
   pitch: 22, pitchMin: 6, pitchMax: 65,   // deg the camera sits above him (mouse Y)
   sens: .0025,                            // rad per mouse px
+  // the mouse's moves dropped: the first settle ms after the lock is taken, and any one move over spike px (Chrome on
+  // Windows sends the odd huge movementX / Y under pointer lock, the taking click among them: the view jumped round)
+  settle: 80, spike: 400,
   chest: 1.35,                            // m above his feet the camera follows
   shoulder: .55,                          // m to his right, close in (gone by 7 m)
   fov: [55, 38],                          // deg: close .. far
@@ -75,7 +78,8 @@ export async function create(host) {
   let mode = start;   // '' the game's camera, '3p', '1p'
   const F = {name: 'chasecam', label: 'Camera views', on: !!start, cineHd: true, TUNE,
     get hidesBody() { return mode === '1p' && active(); },   // his body is not drawn this frame (first person on the screen: core/loop.js)
-    get current() { return mode; }};   // the view ('view' is the feature contract's hook)
+    get current() { return mode; },   // the view ('view' is the feature contract's hook)
+    get ownsYaw() { return active(); }};   // the mouse holds the heading: core/loop.js doesn't ease it onto the turning steps
   // hud: the game's HUD and prompts draw over this camera (core/loop.js; the cinematic camera's shots have none)
   const CAM = {pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, near: .1, far: 400, air: TUNE.air, hud: true,
     sky: {zen: [0, 0, 0], hor: [0, 0, 0], sun: [1, 1, 1], dir: [0, 1, 0], disk: .032}};
@@ -86,6 +90,11 @@ export async function create(host) {
   const C = {x: 0, y: 0, h: 0}, aimP = {x: 0, y: 0, h: 0}, out = [0, 0, 0];
   const active = () => F.on && G.cine === CAM;
   const locked = () => !!canvas && document.pointerLockElement === canvas;
+  // a window the mouse is wanted in (features/panels.js: the player's window; the dev console, F10; the old pack): the lock
+  // let go while it's open, and the mouse doesn't turn the view behind it
+  let pnl = null, dev = null, pack = null, lockT = -1e9;
+  const uiOpen = () => !!((pnl ??= host.feature('panels') || false) && pnl.isOpen) || !!((dev ??= host.feature('devmenu') || false) && dev.open)
+    || !!((pack ??= host.feature('pack') || false) && pack.open);
 
   function pose(dt) { if (mode === '1p') eyes(dt); else chase(dt); }
   // FIRST PERSON: at his eyes (the draw's lerped spot: no lag), only the height eased (a step up a stone, a dip)
@@ -221,14 +230,16 @@ export async function create(host) {
     // the click that takes the mouse is only that: it doesn't reach core/input.js (no shot, no swing), nor does its let-go
     let eat = false;
     addEventListener('mousedown', e => {
-      if (!active() || locked() || host.paused || host.lock || e.target !== canvas || e.button !== 0) return;
+      if (!active() || locked() || host.paused || host.lock || e.target !== canvas || e.button !== 0 || uiOpen()) return;
       try { canvas.requestPointerLock()?.catch?.(() => {}); } catch {}
       eat = true; e.stopPropagation(); e.preventDefault();
     }, {capture: true});
     addEventListener('mouseup', e => { if (eat && e.button === 0) { eat = false; e.stopPropagation(); } }, {capture: true});
+    document.addEventListener('pointerlockchange', () => { if (locked()) lockT = performance.now(); });
     addEventListener('mousemove', e => {
       if (!active()) return;
-      if (locked() && !host.paused) {
+      const big = Math.max(Math.abs(e.movementX || 0), Math.abs(e.movementY || 0)) > TUNE.spike;
+      if (locked() && !host.paused && !uiOpen() && !big && performance.now() - lockT >= TUNE.settle) {
         if (e.movementX) host.setYaw(host.yaw - e.movementX * TUNE.sens);
         if (mode === '1p') look = clamp(look - e.movementY * TUNE.sens, -TUNE.eye.down * DEG, TUNE.eye.up * DEG);
         else pitch = clamp(pitch + e.movementY * TUNE.sens, TUNE.pitchMin * DEG, TUNE.pitchMax * DEG);
@@ -281,7 +292,7 @@ export async function create(host) {
     frame({dt}) {
       fdt = dt || 0;
       if (!wired) wire();
-      if (host.paused && locked()) document.exitPointerLock();
+      if (locked() && (host.paused || uiOpen())) document.exitPointerLock();
       aim();
     },
     hd(q, sc) {

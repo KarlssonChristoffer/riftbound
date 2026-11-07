@@ -101,7 +101,9 @@ export const PRESETS = {
   all: {step: true, face: 16, hyst: 7, hold: true, snap: true, smear: false},
   allsmear: {step: true, face: 16, hyst: 7, hold: true, snap: true, smear: true},
   free32: {step: false, face: 32, hyst: 7, hold: true, snap: true, smear: false},   // smooth time, 32 facings, the rest on
+  natural: {step: false, face: 0, hyst: 0, hold: false, snap: false, smear: false, nat: true},   // NATURAL MOTION (below): up close
 };
+for (const v of Object.values(PRESETS)) v.nat ??= false;
 for (const v of Object.values(PRESETS)) { v.proc ??= true; v.flow ??= v.proc; v.blend ??= v.flow; v.feet ??= v.proc; v.move ??= v.proc; }   // (blend: TRANSITIONS)   // (every preset but exact: the procedural layers on)
 for (const v of Object.values(PRESETS)) { v.look ??= v.proc; v.hit ??= v.proc; v.mlean ??= v.flow; v.wx ??= v.proc; v.idle ??= v.proc; }   // (REACTIONS: the head's look, the flinches, the lean on the move, the weather, the idles)
 // REACTIONS' numbers (docs/exp/livereact.md). LOOK: the head's turn to what he notices: deg the neck takes (neck), deg
@@ -116,6 +118,20 @@ const FLINCH = {chest: 15, head: 10, arm: 16, rise: .05, dur: .34, knock: 1.6, h
 // MLEAN: the lean on the move with his gun away (FLOW's lean has it while he aims): deg per m/s^2 of acceleration, at most
 // side (into a turn), fwd (setting off), back (stopping); tau s of smoothing, fade s in / out
 const MLEAN = {k: .45, side: 11, fwd: 8, back: 7, tau: .15, fade: .15};
+// NATURAL MOTION (K.nat: the 'natural' preset; by default in third / first person, ?motion=natural everywhere): what makes him
+// move like a person when seen up close, where the pixel knobs (16 facings, the clips' 6-13 fps, held poses) read as a robot:
+//   facing   his facing in the world, not in 16 steps: on the move the way he really goes (when it is within velFace of a
+//            facing step of the sim's: never against it), turned on a critically damped spring (turn rad/s; turnFast with
+//            the gun out or in a move of the sim's own: a roll, a leap)
+//   curves   the clips' frames joined by Catmull-Rom curves (the frame before and the one after the next), not straight lines:
+//            no corner at every key, the arcs a hand or a foot swings through
+//   gaits    walk <-> run <-> sprint cross-faded over `gait` s on the shared stride phase (the same foot down), not cut
+//   blend    a switch (standing -> walking, a stop) blends over at least `blend` s
+//   lead     turning, the head leads (deg per deg/s of turn, at most headMax) and the chest follows (chestLead, chestMax)
+//   breath   standing, he breathes (the chest's pitch, deg, the head held level), faster and deeper after running (exertion
+//            builds over `build` s of running, eases off over `rest` s)
+const NAT = {turn: 13, turnFast: 28, velFace: .75, minSpeed: .35, gait: .3, blend: .2, headLead: .07, headMax: 26, chestLead: .03,
+  chestMax: 9, breath: {hz: .24, hzRun: .55, deg: 1.2, degRun: 3, build: 4, rest: 7}};
 // WEATHER: the hat held in a gust (the wind's strength over hat.on, let go under hat.off after hat.hold s; the left hand on
 // the brim hat.fwd m before the hat's band, hat.side to his left, hat.up over it), leaning into the wind (deg at a gale) with
 // the head down; the rain's hunch (from rain.on, all of it at rain.full: shoulders up, the head down, the chest forward,
@@ -319,6 +335,48 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     if (s2 < 0) return NX;
     NX.name = nm(p.pre, play ? play[s2] : s2); NX.u = Math.min(1, frameT / dur);
     return NX;
+  }
+
+  // NATURAL (K.nat) CURVES: the frame `off` steps from p in its clip's order (a loop wraps, else held at its ends)
+  function seqAt(p, off) {
+    if (p.loco) { const C = CL[p.loco]; if (!C) return ''; const n = C.frames; return nm(p.pre, ((p.i + off) % n + n) % n); }
+    const C = CL[p.clip]; if (!C) return '';
+    const play = C.play, n = play ? play.length : C.frames;
+    let s = play ? play.indexOf(p.i) : p.i; if (s < 0) s = 0;
+    s += off; s = C.loop ? ((s % n) + n) % n : Math.max(0, Math.min(n - 1, s));
+    return nm(p.pre, play ? play[s] : s);
+  }
+  // a Catmull-Rom curve through four local poses at u in [b, c] (the turns' components on b's side, then normalised: the
+  // frames of a clip are close enough for it)
+  function curveLocal(a, b, c, d, u, o) {
+    const u2 = u * u, u3 = u2 * u, w0 = -.5 * u3 + u2 - .5 * u, w1 = 1.5 * u3 - 2.5 * u2 + 1, w2 = -1.5 * u3 + 2 * u2 + .5 * u, w3 = .5 * u3 - .5 * u2;
+    for (let i = 0; i < NB; i++) {
+      const k = i * 7;
+      const sa = a[k] * b[k] + a[k + 1] * b[k + 1] + a[k + 2] * b[k + 2] + a[k + 3] * b[k + 3] < 0 ? -w0 : w0;
+      const sc0 = c[k] * b[k] + c[k + 1] * b[k + 1] + c[k + 2] * b[k + 2] + c[k + 3] * b[k + 3] < 0 ? -1 : 1, sc = sc0 * w2;
+      const sd = (d[k] * c[k] + d[k + 1] * c[k + 1] + d[k + 2] * c[k + 2] + d[k + 3] * c[k + 3]) * sc0 < 0 ? -w3 : w3;
+      let l = 0;
+      for (let j = 0; j < 4; j++) { const v = sa * a[k + j] + w1 * b[k + j] + sc * c[k + j] + sd * d[k + j]; o[k + j] = v; l += v * v; }
+      l = Math.sqrt(l) || 1; for (let j = 0; j < 4; j++) o[k + j] /= l;
+      for (let j = 4; j < 7; j++) o[k + j] = w0 * a[k + j] + w1 * b[k + j] + w2 * c[k + j] + w3 * d[k + j];
+    }
+  }
+  // NATURAL GAITS: walk <-> run <-> sprint cross-faded on the shared stride phase (sim/player/player.js gaitDistance: one
+  // normalised phase for the gaits, the same foot down), the gait he left sampled where the phase is now
+  const GAITS = new Set(['walk', 'run', 'sprint', 'drive']), Lg = new Float64Array(NB * 7);
+  let gbClip = '', gbFrom = '', gbK = 0;
+  function gaitBlend(bp, P, dt) {
+    const c = !bp.fam && GAITS.has(bp.loco) ? bp.loco : '';
+    if (c && gbClip && c !== gbClip) { gbFrom = gbClip; gbK = 1; }
+    gbClip = c;
+    if (!c) { gbK = 0; return; }
+    if (gbK <= 0) return;
+    gbK = Math.max(0, gbK - dt / NAT.gait);
+    const C = CL[gbFrom]; if (!C || !C.cum) { gbK = 0; return; }
+    const at = (((P.ph || 0) % 1) + 1) % 1 * C.stride; let i = 0; while (i < C.frames - 1 && at >= C.cum[i + 1]) i++;
+    const a = C.cum[i], b = C.cum[i + 1] ?? C.stride, u = Math.max(0, Math.min(1, (at - a) / ((b - a) || 1)));
+    const PA = poseOf(nm(gbFrom + '.', i)), PB = poseOf(nm(gbFrom + '.', (i + 1) % C.frames)); if (!PA || !PB) { gbK = 0; return; }
+    blendLocal(PA.l, PB.l, u, Lg); const k = gbK * gbK * (3 - 2 * gbK); blendLocal(Ll, Lg, k, Ltmp); Ll.set(Ltmp);
   }
 
   // ---------------------------------------------------------------- the procedural layers (body space, in Wt)
@@ -554,13 +612,18 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     turnTree(w, ARM_L, R4, w[ARM_L * 7 + 4], w[ARM_L * 7 + 5], w[ARM_L * 7 + 6]);
   }
   // the chest leans into his acceleration (smoothed): sideways into a strafe's change, forward as he sets off. P's velocity
-  // is in the view's frame (his facing there: phiV = his facing - the yaw); a turn of the camera turns it too: that frame skipped
-  let lyaw = NaN;
+  // is in the view's frame, which a turn of the camera turns: taken into the world's (worldV) so that the mouse turning the
+  // third person camera doesn't wipe the lean out every frame (it used to skip any frame the yaw changed: all of them there)
+  const WV = new Float64Array(2);
+  function worldV(P, yaw) {   // P's velocity in the world (the angle convention of the facing: atan2(x, y) + yaw)
+    const vx = P.vx || 0, vy = P.vy || 0, c = Math.cos(yaw), s = Math.sin(yaw);
+    WV[0] = vx * c + vy * s; WV[1] = vy * c - vx * s; return WV;
+  }
   function lean(w, P, dt, phiV, yaw) {
-    const vx = P.vx || 0, vy = P.vy || 0;
-    if (!(lvx === lvx) || yaw !== lyaw || dt <= 0) { lvx = vx; lvy = vy; lyaw = yaw; return; }
+    const v = worldV(P, yaw), vx = v[0], vy = v[1];
+    if (!(lvx === lvx) || dt <= 0) { lvx = vx; lvy = vy; return; }
     const k = 1 - Math.exp(-dt / FLOW.lean.tau); accX += ((vx - lvx) / dt - accX) * k; accY += ((vy - lvy) / dt - accY) * k; lvx = vx; lvy = vy;
-    const c = Math.cos(phiV), s = Math.sin(phiV), bx = c * accX - s * accY, by = -s * accX - c * accY, M = FLOW.lean.max;   // (into his frame)
+    const c = Math.cos(phiV + yaw), s = Math.sin(phiV + yaw), bx = c * accX - s * accY, by = -s * accX - c * accY, M = FLOW.lean.max;   // (into his frame)
     const roll = Math.max(-M, Math.min(M, bx * FLOW.lean.k)), pitch = Math.max(-M, Math.min(M, -by * FLOW.lean.k));
     if (SPINE < 0 || (Math.abs(roll) < .5 && Math.abs(pitch) < .5)) return;
     const o = SPINE * 7;
@@ -722,7 +785,13 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     if (!CLO.tried) clothSetup();
     const R = CLO.rig; if (!R) return;
     // his motion in the view's frame, without the camera's turns (hero.js's clothPos)
-    if (yaw === CLO.lyaw && CLO.lx === CLO.lx) { CLO.g[0] += P.x - CLO.lx; CLO.g[1] += P.y - CLO.ly; }
+    // (a camera turn by d turned P's view-frame spot with it (sim/player/adapter.js turnFrame): last frame's spot is turned the
+    // same way before the step is taken, so the duster still feels him run while the mouse turns the third person camera)
+    if (CLO.lx === CLO.lx) {
+      let lx = CLO.lx, ly = CLO.ly;
+      if (yaw !== CLO.lyaw) { const d = yaw - CLO.lyaw, c = Math.cos(d), s = Math.sin(d); lx = CLO.lx * c - CLO.ly * s; ly = CLO.lx * s + CLO.ly * c; }
+      CLO.g[0] += P.x - lx; CLO.g[1] += P.y - ly;
+    }
     CLO.lx = P.x; CLO.ly = P.y; CLO.lyaw = yaw;
     // the bones the cloths hang from (rows of 3x4) and the capsules, off the drawn pose
     for (let ci = 0; ci < R.cloths.length; ci++) {
@@ -1388,22 +1457,43 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     }
     if (held) for (let i = 0; i < gn && i < GSAVE.length; i++) w[g0 + i] = GSAVE[i];
   }
-  let mlvx = NaN, mlvy = 0, mlax = 0, mlay = 0, mlyaw = NaN, mlK = 0, mlR = 0, mlP = 0;
+  let mlvx = NaN, mlvy = 0, mlax = 0, mlay = 0, mlK = 0, mlR = 0, mlP = 0;
   function mlean(w, P, dt, phiV, yaw, free, sample) {
-    const vx = P.vx || 0, vy = P.vy || 0;
-    if (!(mlvx === mlvx) || yaw !== mlyaw || dt <= 0) { mlvx = vx; mlvy = vy; mlyaw = yaw; return; }   // (a camera turn turns P's velocity: skipped)
+    const v = worldV(P, yaw), vx = v[0], vy = v[1];   // (in the world: a camera turn doesn't reset it, lean() above)
+    if (!(mlvx === mlvx) || dt <= 0) { mlvx = vx; mlvy = vy; return; }
     const k = 1 - Math.exp(-dt / MLEAN.tau); mlax += ((vx - mlvx) / dt - mlax) * k; mlay += ((vy - mlvy) / dt - mlay) * k; mlvx = vx; mlvy = vy;
     const want = K.mlean && free && (P.state === 'move' || P.state === 'idle') ? 1 : 0;
     mlK = want > mlK ? Math.min(want, mlK + dt / MLEAN.fade) : Math.max(want, mlK - dt / MLEAN.fade);
     if (mlK <= 0 || SPINE < 0) { mlR = mlP = 0; return; }
     if (!K.step || sample) {
-      const c = Math.cos(phiV), s = Math.sin(phiV), bx = c * mlax - s * mlay, by = -s * mlax - c * mlay;   // (into his frame)
+      const c = Math.cos(phiV + yaw), s = Math.sin(phiV + yaw), bx = c * mlax - s * mlay, by = -s * mlax - c * mlay;   // (into his frame)
       mlR = Math.max(-MLEAN.side, Math.min(MLEAN.side, bx * MLEAN.k)); mlP = Math.max(-MLEAN.back, Math.min(MLEAN.fwd, -by * MLEAN.k));
     }
     const R = mlR * mlK, Pt = mlP * mlK; if (Math.abs(R) < .5 && Math.abs(Pt) < .5) return;
     const o = SPINE * 7;
     axisAngle(0, 1, 0, R * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);    // (top toward +x: his left)
     axisAngle(1, 0, 0, Pt * DEG, R4); turnTree(w, SPINE, R4, w[o + 4], w[o + 5], w[o + 6]);   // (top toward -y: ahead)
+  }
+  // NATURAL LIFE (K.nat; over the pose, his own frame): turning, the head leads and the chest follows (the facing spring's
+  // speed); standing, he breathes: the chest's pitch, the head held level against it, faster and deeper after a run
+  let exert = 0, brPh = 0;
+  function natLife(w, P, dt, free) {
+    if (!K.nat) return;
+    const sp = P.curSpeed ?? Math.hypot(P.vx || 0, P.vy || 0), B = NAT.breath;
+    exert = sp > 2.3 ? Math.min(1, exert + dt / B.build) : Math.max(0, exert - dt / B.rest);
+    brPh = (brPh + dt * (B.hz + (B.hzRun - B.hz) * exert)) % 1;
+    if (!free) return;
+    const tv = nfV / DEG, cl = Math.max(-NAT.chestMax, Math.min(NAT.chestMax, tv * NAT.chestLead)), hl = Math.max(-NAT.headMax, Math.min(NAT.headMax, tv * NAT.headLead));
+    if (SPINE1 >= 0 && Math.abs(cl) > .2) { const o = SPINE1 * 7; axisAngle(0, 0, 1, cl * DEG, R4); turnTree(w, SPINE1, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    const hb = NECK >= 0 ? NECK : HEAD;
+    if (hb >= 0 && Math.abs(hl - cl) > .2) { const o = hb * 7; axisAngle(0, 0, 1, (hl - cl) * DEG, R4); turnTree(w, hb, R4, w[o + 4], w[o + 5], w[o + 6]); }
+    if (P.state === 'idle' && SPINE2 >= 0) {
+      const a = Math.sin(brPh * TAU) * (B.deg + (B.degRun - B.deg) * exert);
+      if (Math.abs(a) > .05) {
+        const o = SPINE2 * 7; axisAngle(1, 0, 0, -a * DEG, R4); turnTree(w, SPINE2, R4, w[o + 4], w[o + 5], w[o + 6]);   // (in: the chest up and back)
+        if (hb >= 0) { const h = hb * 7; axisAngle(1, 0, 0, a * .8 * DEG, R4); turnTree(w, hb, R4, w[h + 4], w[h + 5], w[h + 6]); }   // (the gaze kept)
+      }
+    }
   }
   // (the hold's extra test: two points .2 m off the head across its length, carried by it, on screen: a turn of the head
   // about its own length (the look) moves no bone's tip, but the face and the hat's brim turn with it)
@@ -1632,8 +1722,24 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
   // ---------------------------------------------------------------- the frame
   // the facing: his facing in the world without the camera's 16-step rounding ((P.face + faceRest) steps + yaw), eased
   // (smooth) or as the sim has it (step), then snapped relative to the camera (K.face) or left free
+  // NATURAL (K.nat): the way he really goes on the move (never against the sim's facing step), on a critically damped
+  // spring (the exact step: stable at any dt); nfV its speed (rad/s: the head's lead reads it)
+  let nfV = 0;
   function facing(P, yaw, dt) {
-    const ND = hero.ND, st = TAU / ND, rest = pa.faceRest ?? 0, tru = (P.face + rest) * st + yaw;
+    const ND = hero.ND, st = TAU / ND, rest = pa.faceRest ?? 0;
+    let tru = (P.face + rest) * st + yaw;
+    if (K.nat) {
+      const vx = P.vx || 0, vy = P.vy || 0, gun = gunOut();
+      if (P.state === 'move' && !gun && !P.turn && vx * vx + vy * vy > NAT.minSpeed * NAT.minSpeed) {
+        const va = Math.atan2(vx, vy) + yaw; if (Math.abs(wrap(va - tru)) < st * NAT.velFace) tru = va;
+      }
+      if (!(wf === wf)) { wf = tru; nfV = 0; return wf; }
+      if (dt <= 0) return wf;
+      const w = gun || (P.state !== 'move' && P.state !== 'idle') ? NAT.turnFast : NAT.turn, x0 = wrap(wf - tru), e = Math.exp(-w * dt), m = (nfV + w * x0) * dt;
+      wf = tru + (x0 + m) * e; nfV = (nfV - w * m) * e;
+      return wf;
+    }
+    nfV = 0;
     if (K.step || !(wf === wf)) wf = tru;
     else { const d = wrap(tru - wf), m = TURN * dt; wf = Math.abs(d) <= m ? tru : wf + Math.sign(d) * m; }
     if (!K.face) return wf;
@@ -1670,11 +1776,16 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // TRANSITIONS: has what is drawn switched? (parse()'s clip names are cached strings: no allocation)
     const tbPrev = tbClip;   // (FISTS: the clip before, for the string's short blend)
     const tbOn = flowOn && K.blend, bclip = parse(baseName).clip, uclip = upName ? parse(upName).clip : '', swap = tbOn && tbHave &&
-      (bclip !== tbClip || layer !== tbLayer || uclip !== tbUp || aiming !== tbAim);
+      (bclip !== tbClip || layer !== tbLayer || uclip !== tbUp || aiming !== tbAim) &&
+      !(K.nat && GAITS.has(bclip) && GAITS.has(tbClip) && layer === tbLayer && uclip === tbUp && aiming === tbAim);   // (NATURAL: a gait change is gaitBlend's)
     tbClip = bclip; tbLayer = layer; tbUp = uclip; tbAim = aiming;
-    if (!K.step) {   // smooth: toward the next frame
-      const nx = next(baseName === f ? p : parse(baseName), P, f), B = nx.name && poseOf(nx.name);
-      if (B) blendLocal(A.l, B.l, nx.u, Ll); else Ll.set(A.l);
+    if (!K.step) {   // smooth: toward the next frame (NATURAL: along a curve through the frames round it)
+      const bp = baseName === f ? p : parse(baseName), nx = next(bp, P, f), B = nx.name && poseOf(nx.name);
+      if (B && K.nat && A.name === baseName) {
+        const A0 = poseOf(seqAt(bp, -1)) || A, B1 = poseOf(seqAt(bp, 2)) || B;
+        curveLocal(A0.l, A.l, B.l, B1.l, nx.u, Ll);
+      } else if (B) blendLocal(A.l, B.l, nx.u, Ll); else Ll.set(A.l);
+      if (K.nat) gaitBlend(bp, P, dt); else gbK = 0;
     } else Ll.set(A.l);
     if (fadeT < 1) { fadeT = Math.min(1, fadeT + dt / fadeDur); blendLocal(Lfrom, Ll, fadeT * fadeT * (3 - 2 * fadeT), Ltmp); Ll.set(Ltmp); }
     fk(Ll, Wt);
@@ -1723,7 +1834,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     // rope), a hit's flinch always
     SEN ??= app.feat('senses');
     const free = proc && !aiming && emS < 0 && K.demo !== 'swing' && idK !== 'fidget' && !lsBusy();   // (a fidget has the head itself; the rope work its own)
-    mlean(Wt, P, dt, phi - yaw, yaw, free && flowOn, sample); look(Wt, P, dt, sample, free); weather(Wt, P, dt, sample, free); wobble(Wt, dt); hiccup(Wt, dt); flinch(Wt, P, dt, aiming);
+    mlean(Wt, P, dt, phi - yaw, yaw, free && flowOn, sample); natLife(Wt, P, dt, free); look(Wt, P, dt, sample, free); weather(Wt, P, dt, sample, free); wobble(Wt, dt); hiccup(Wt, dt); flinch(Wt, P, dt, aiming);
     stats.look = lkK > 0 ? (SEN?.S.look.kind || '') : ''; stats.flinch = flT < flDur ? flT / flDur : -1;   // (dev)
     // 6) the demos
     ropeN = 0;
@@ -1747,10 +1858,10 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     if (show !== Wt) toLocal(Wshow, Ll);   // (Ll: the shown local pose, a clip change's cross-fade starts from it)
     // 7b) TRANSITIONS: a switch or a facing step blends from what was drawn (turned by its facing) to this
     if (tbOn) {
-      if (tbHave && (swap || Math.abs(wrap(phi - tbPhi)) > 4 * DEG)) {   // (a step: not the smooth facing's easing)
+      if (tbHave && (swap || (!K.nat && Math.abs(wrap(phi - tbPhi)) > 4 * DEG))) {   // (a step: not the smooth facing's easing; NATURAL's facing never steps)
         const far = turnedParts(show, phi, TBQ, TBP) * (SCR.ppm || 30) / TB.speed;   // (s the biggest travel takes at TB.speed)
         const hd = GUN >= 0 && gunNear(show) ? barrel(show) + phi : NaN, turn = hd === hd && tbGun === tbGun ? Math.abs(wrap(hd - tbGun)) / DEG / TB.turn : 0;
-        TBF.set(LW); tbT = 0; tbDur = Math.min(TB.max, Math.max(swap ? TB.dur : TB.face, far, turn));
+        TBF.set(LW); tbT = 0; tbDur = Math.min(TB.max, Math.max(swap ? (K.nat ? NAT.blend : TB.dur) : TB.face, far, turn));
         if (swap && bclip.startsWith('fs_') && tbPrev.startsWith('fs_')) tbDur = Math.min(tbDur, FS.blend);   // (FISTS: a string flows)
       }
       tbPhi = phi;
@@ -1835,7 +1946,7 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
     stats, model, poseOf, BN, J,
     wear, get worn() { return GEAR.key; },   // GEAR (docs/GEAR.md)
     // (a knob changed, the body (re)shown: no history carried over)
-    reset() { haveShow = false; prevOk = false; wf = NaN; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false;
+    reset() { haveShow = false; prevOk = false; wf = NaN; nfV = 0; gbK = 0; gbClip = ''; exert = 0; twistShown = NaN; demoA = NaN; lastT = -1; t = 0; stepK = -1; SHOT.t = 0; shotWant = false;
       twistHeld = NaN; aimOn = false; rc = null; lvx = NaN; cbSt = ''; MW.ok = false; tbHave = false; tbT = tbDur = 1; CLO.rig?.reset(); CLO.lx = NaN; feetK = 0; mvPrev = ''; mvAfter = 0; },
     muzzle: () => MW.ok ? MW : null,
     ropeHand: () => LH.ok ? LH : null,   // (LASSO: the drawn rope hands, the spin's circle: host.playerRopeHand)
@@ -1863,6 +1974,20 @@ async function createLiveBody({G, app, hero, pa, mouse, cam, ctxO, url: base, ri
 export async function createLiveHero(o) {
   const slots = o.slots ?? 17, hero = o.hero, only = o.only ?? null;
   const K = {...(PRESETS[flags.get('livek')] || PRESETS.all), demo: ''}, want = flags.get('livedemo') || '';
+  // NATURAL MOTION by the camera (?motion: auto (default) = the 'natural' knobs in third / first person (the pose others see
+  // in co-op too), the pixel knobs (?livek's, else 'all') from the game's own high camera; natural = everywhere; pixel = never).
+  // Switched when the view changes, so a preset picked by hand (Shift+8) holds until then
+  const MOTION = ['natural', 'pixel'].includes(flags.get('motion')) ? flags.get('motion') : 'auto', PIX = {...K};
+  delete PIX.demo;
+  let motionWas = '', CC = null, ccTries = 0;
+  function motionAuto() {
+    if (MOTION === 'pixel') return;
+    if (!CC && ccTries < 600) { ccTries++; CC = o.app.feat?.('chasecam') || null; }   // (the features may load after the body: looked for a while)
+    const m = MOTION === 'natural' || (CC && CC.on && CC.current) ? 'natural' : 'pixel';
+    if (m === motionWas) return;
+    motionWas = m; Object.assign(K, m === 'natural' ? PRESETS.natural : PIX);
+  }
+  motionAuto();
   const bodies = {}, loading = {};
   let on = true, shown = null, rig = null, flashes = null, warmed = null, look = null;   // (look: the gear worn, every body dressed in it)
   const lives = n => n in MODELS && (!only || only.includes(n));   // this loadout is drawn live
@@ -1903,7 +2028,8 @@ export async function createLiveHero(o) {
     get model() { return cur()?.model; }, get J() { return cur()?.J; }, get BN() { return cur()?.BN; }, poseOf: n => cur()?.poseOf(n),
     setLineup(items) { cur()?.setLineup(items); },
     snapshot: () => cur().snapshot(), restore: S => cur().restore(S),
-    compose: (PX, PY, perf, noBody) => cur().compose(PX, PY, perf, noBody), sprite: () => cur().sprite(),
+    compose: (PX, PY, perf, noBody) => { motionAuto(); return cur().compose(PX, PY, perf, noBody); }, sprite: () => cur().sprite(),
+    get motion() { return motionWas || MOTION; },   // (dev: 'natural' | 'pixel', what the knobs follow now)
     get bytes() { return rig?.bytes ?? 0; },
     get atlas() { return hero.atlas; },
     load,   // (dev / tests: a loadout's body now)

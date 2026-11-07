@@ -1,6 +1,10 @@
 // SUN SHAFTS (the user, 2026-11-07: the god rays of early October "never became good"; start over from Red Giraffe's "Pixel
 // Perfect" lighting video and its comments). They replace render/godrays.js (?godrays=1 brings those back for an A/B, and then
-// these step aside) and the cloud beams tried the same day. Two cheap passes after the composite, under any camera:
+// these step aside) and the cloud beams tried the same day. TWO WAYS (TUNE.mode; F10). 'air' (the default since he showed the
+// video's own shots: wide wedges of lit air between shadows, over everything): AIR_FS below, one pass at the art px over the ground and the sky only, marches each
+// pixel's view ray back from its surface and counts air that is sunlit with shade across the sun on most sides (a crown gap,
+// TUNE.beam[0], or a cloud gap, beam[1]); open sunny air has none beside it, so no veil; then the levels as below.
+// 'fleck' (?shafts=fleck), two cheap passes after the composite, under any camera:
 // 1. WHERE THE LIGHT COMES IN (SRC_FS, at half the art resolution): a sunlit spot with shade on BOTH sides of it across the sun,
 //    within TUNE.open m (a gap in a crown, the slot between pillars or trunks, a narrow gap between cloud shadows). Not open sunny
 //    ground: a shaft is light through an opening. Sun = the cloud bands where the sun's ray meets their plane (render/clouds.js,
@@ -27,12 +31,17 @@ import {CLOUD_GLSL, CLOUD_EXTRA} from './clouds.js';
 
 export const TUNE = {
   on: flags.get('shafts') !== '0' && flags.get('godrays') !== '1' && flags.get('godrays') !== '0',
+  mode: flags.get('shafts') === 'fleck' ? 'fleck' : 'air',   // air: lit air between shadows, marched (the video's way); fleck: flecks on the ground drawn out
+  steps: 20,         // air: samples along a pixel's view ray
+  reach: 22,         // air: m of air marched back from the surface toward the camera
+  beam: [1.6, 0],    // air: m to each side a beam needs shade (crown gaps; cloud gaps: 0 = none, they swam as the clouds drifted)
+  gain: 3,           // air: the beam air's share x this before the levels
   open: [1.1, 2.6],  // m: a fleck has shade all round it this far out (nearly every way) and this far (three ways of four)
   len: 7,            // m of the sun's ray a shaft reaches above its spot (a crown's height)
   taps: 28,          // steps a pixel looks back down its line for a source
   maxPx: 70,         // art px: no shaft longer on screen (near the camera in third / first person)
   lv: [.2, .45, .75],   // a pixel's glow (0..1: its source's, fading over the shaft's top part from lv[0] of its length) for levels 1, 2, 3
-  amt: [.08, .15, .24],   // light added per level, x the sun's colour (warmed) x strength
+  amt: [.06, .11, .17],   // light added per level, x the sun's colour (warmed) x strength
   dust: .45,         // how much the dust weakens a source where it is thin (0: every opening alike)
   dustCell: 6,       // m: the dust noise's cell
   dustAt: .5,        // the dust's threshold (higher: fewer strong shafts)
@@ -99,9 +108,69 @@ void main() {
   }
   oc = vec4(src, L ? 1. : 0., 0., 1.);
 }`;
+// AIR (TUNE.mode 'air', the video's way): march this pixel's view ray back from its surface toward the camera; a sample
+// counts when it is sunlit AND has shade across the sun on most sides (a beam: light through a gap in the crowns, or wider,
+// between cloud shadows). Open sunny air has no shade beside it (no veil), shaded air no sun. r: the beam air's share.
+const AIR_FS = `${COMMON}
+uniform sampler2D tN, tS, tSS;
+uniform mat4 uLightPV, uLightPVS;
+uniform float uSBias, uSOn;
+uniform vec4 uSh;        // beam widths (m: crowns, clouds), the shadow bias, the dust's amount
+uniform vec4 uSh2;       // the dust: 1 / cell, threshold, drift (m: x, z)
+uniform vec4 uSa;        // steps, reach (m), gain, debug
+uniform vec3 uLv;        // the levels' thresholds
+uniform vec3 uCol[3];    // the levels' colours
+out vec4 oc;
+${CLOUD_GLSL}
+bool shadowed(vec3 X) {
+  vec3 a = (uLightPV * vec4(X, 1.)).xyz * .5 + .5;
+  if (all(greaterThanEqual(a.xy, vec2(0.))) && all(lessThanEqual(a.xy, vec2(1.))) && a.z - uSh.z > textureLod(tS, a.xy, 0.).r) return true;
+  if (uSOn < .5) return false;
+  vec3 b = (uLightPVS * vec4(X, 1.)).xyz * .5 + .5;
+  return all(greaterThanEqual(b.xy, vec2(0.))) && all(lessThanEqual(b.xy, vec2(1.))) && b.z - uSh.z * uSBias > textureLod(tSS, b.xy, 0.).r;
+}
+bool lit(vec3 X) {
+  if (uCl.x > .5) {
+    vec3 G = X - vec3(uSunDir.x, 0., uSunDir.z) * (X.y / max(uSunDir.y, .5)), c = cloudAt(ivec2(0), G);
+    if ((1. - cloudBlock(c)) * c.z < .5) return false;
+  }
+  return !shadowed(X);
+}
+float dustAt(vec3 X) {
+  vec2 p = (X.xz + uSh2.zw) * uSh2.x, f = floor(p), t = p - f; t = t * t * (3. - 2. * t); ivec2 i = ivec2(f);
+  float n = mix(mix(cfH(i, 43), cfH(i + ivec2(1, 0), 43), t.x), mix(cfH(i + ivec2(0, 1), 43), cfH(i + ivec2(1, 1), 43), t.x), t.y);
+  return 1. - uSh.w * (1. - smoothstep(uSh2.y - .12, uSh2.y + .12, n));
+}
+float shade4(vec3 X, vec3 a, vec3 b, float w) {
+  return (lit(X + a * w) ? 0. : 1.) + (lit(X - a * w) ? 0. : 1.) + (lit(X + b * w) ? 0. : 1.) + (lit(X - b * w) ? 0. : 1.);
+}
+void main() {
+  ivec2 ip = ivec2(gl_FragCoord.xy);
+  float d = texelFetch(tD, ip, 0).r;
+  if (d <= .99999 && normalize(texelFetch(tN, ip, 0).xyz).y < .55) discard;   // (only the air over the ground and the sky: never a wash over a crown, a trunk, a figure)
+  vec3 C = worldAt(ip, 0.), F = worldAt(ip, min(d, .99999)), v = F - C;
+  float L = length(v); v /= max(L, 1e-4);
+  float reach = min(uSa.y, L);
+  vec3 P = d > .99999 ? C + v * uSa.y : F;   // (the sky: the air out to the reach)
+  vec3 a = normalize(vec3(-uSunDir.z, 0., uSunDir.x)), b = normalize(cross(uSunDir, a));
+  float n = uSa.x, g = 0.;
+  for (int i = 0; i < 48; i++) {
+    if (float(i) >= n) break;
+    vec3 X = P - v * (reach * (float(i) + .5) / n);
+    if (!lit(X)) continue;
+    float k = smoothstep(2.5, 3.5, shade4(X, a, b, uSh.x));
+    if (k < 1. && uSh.y > .5) k = max(k, smoothstep(2.5, 3.5, shade4(X, a, b, uSh.y)));
+    if (k > 0.) g += k * dustAt(X);
+  }
+  g = min(1., g / n * uSa.z);
+  if (uSa.w > .5) { oc = vec4(g, 0., g, 0.); return; }
+  float lv = dot(step(uLv, vec3(g)), vec3(1.));
+  if (lv < .5) discard;
+  oc = vec4(uCol[int(lv) - 1], 0.);
+}`;
 const SHAFT_FS = `${COMMON}
 uniform sampler2D tSrc;
-uniform vec4 uSf;        // the shaft's length (m), taps, debug, its longest on screen (px)
+uniform vec4 uSf;        // the shaft's length (m), taps (0: TUNE.mode 'air', the glow is read as it is), debug, its longest on screen (px)
 uniform vec3 uLv;        // the levels' thresholds
 uniform vec3 uCol[3];    // the levels' colours
 out vec4 oc;
@@ -110,6 +179,13 @@ void main() {
   ivec2 ip = ivec2(gl_FragCoord.xy), sz = textureSize(tSrc, 0);
   float d = texelFetch(tD, ip, 0).r;
   if (uSf.z > .5 && uSf.z < 1.5) { vec2 m = texelFetch(tSrc, min(ip / 2, sz - 1), 0).rg; oc = vec4(m.x, m.y * .25, 0., 0.); return; }   // (TUNE.debug: the sources red, sunny ground green)
+  if (uSf.y < .5) {   // (air: the beam air's share, cut into the levels)
+    float g = texelFetch(tSrc, min(ip / 2, sz - 1), 0).r;
+    if (uSf.z > .5) { oc = vec4(g, 0., g, 0.); return; }
+    float L = dot(step(uLv, vec3(g)), vec3(1.));
+    if (L < .5) discard;
+    oc = vec4(uCol[int(L) - 1], 0.); return;
+  }
   if (uSf.z < 1.5 && texelFetch(tSrc, min(ip / 2, sz - 1), 0).g > .5 && d <= .99999) discard;   // (sunny ground: no shaft shows over it)
   vec3 P = worldAt(ip, min(d, .99999));
   vec4 cb = uPVf * vec4(P + uSunDir * uSf.x, 1.);
@@ -142,11 +218,16 @@ export function createSunShafts({THREE, renderer, raw, tri, cam, compU, rays}) {
   for (const k of ['tTop', 'uCl', 'uClM', 'uClO', 'uClC', 'uClT', 'uFr', 'uFrB', 'uFrK', 'uFrC', 'uFrS', 'uFrQ', ...CLOUD_EXTRA]) SU[k] = compU[k];   // (the clouds: render/clouds.js)
   const FU = {...base, tSrc: {value: srcRT.texture}, uSf: {value: new THREE.Vector4()}, uLv: {value: new THREE.Vector3()},
     uCol: {value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]}};
+  const AU = {...SU, uSa: {value: new THREE.Vector4()}, uLv: null, uCol: null};
   const full = (fs, u, extra) => { const sc = new THREE.Scene(); sc.matrixAutoUpdate = false; const m = new THREE.Mesh(tri, raw(VS, fs, u, {depthTest: false, depthWrite: false, ...extra})); m.frustumCulled = false; m.matrixAutoUpdate = false; sc.add(m); return sc; };
   const srcScene = full(SRC_FS, SU, {});
+
   const shaftScene = full(SHAFT_FS, FU, {transparent: true, blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor});
-  if (TUNE.on) { renderer.compile(srcScene, cam); renderer.compile(shaftScene, cam); }   // (while the page loads: no hitch at the first sunny frame)
+  AU.uLv = FU.uLv; AU.uCol = FU.uCol;
+  const airScene = full(AIR_FS, AU, {transparent: true, blending: THREE.CustomBlending,   // (air: one pass at the art px, straight onto the picture)
+    blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor});
+  if (TUNE.on) { renderer.compile(TUNE.mode === 'air' ? airScene : srcScene, cam); renderer.compile(shaftScene, cam); }   // (while the page loads: no hitch at the first sunny frame)
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   const S = {TUNE, strength: 0, live: false, draw, get enabled() { return TUNE.on && compU.uShadowOn.value > .5; }};
   function draw() {
@@ -164,10 +245,13 @@ export function createSunShafts({THREE, renderer, raw, tri, cam, compU, rays}) {
     const wr = Math.pow(c[0], T.warm) * (1 - gk) + G[0] * gk, wg = Math.pow(c[1], T.warm) * (1 - gk) + G[1] * gk, wb = Math.pow(c[2], T.warm) * (1 - gk) + G[2] * gk;
     for (let i = 0; i < 3; i++) FU.uCol.value[i].set(wr * T.amt[i] * k, wg * T.amt[i] * k, wb * T.amt[i] * k);
     FU.uLv.value.set(T.lv[0], T.lv[1], T.lv[2]);
-    FU.uSf.value.set(Math.max(.5, T.len), Math.max(2, Math.min(64, Math.round(T.taps))), +T.debug || 0, Math.max(4, T.maxPx));
+    const air = T.mode === 'air';
+    FU.uSf.value.set(Math.max(.5, T.len), air ? 0 : Math.max(2, Math.min(64, Math.round(T.taps))), +T.debug || 0, Math.max(4, T.maxPx));
     const now = performance.now() / 1000, P = 256 * Math.max(.5, T.dustCell);
-    SU.uSh.value.set(T.open[0], T.open[1], T.bias, T.dust);
+    SU.uSh.value.set(air ? T.beam[0] : T.open[0], air ? T.beam[1] : T.open[1], T.bias, T.dust);
+    AU.uSa.value.set(Math.max(2, Math.min(48, Math.round(T.steps))), Math.max(1, T.reach), T.gain, +T.debug || 0);
     SU.uSh2.value.set(1 / Math.max(.5, T.dustCell), T.dustAt, -(now * T.dustDrift[0]) % P, -(now * T.dustDrift[1]) % P);
+    if (air) { renderer.render(airScene, cam); S.live = true; return; }
     const W = Math.ceil(compU.uRes.value.x / 2), H = Math.ceil(compU.uRes.value.y / 2);
     if (srcRT.width !== W || srcRT.height !== H) srcRT.setSize(W, H);
     const rt = renderer.getRenderTarget();
