@@ -52,7 +52,7 @@ export const CLOUD_VIEW = FIELD_V2 && flags.get('cloudmap') !== '1';
 // an edge steps texel by texel. BANDS.on (live, F10 > Effects > Depth) switches back to the view dimming without a reload.
 // The sun shafts (render/sunshafts.js) read the same bands.
 export const CLOUDS2 = CLOUD_VIEW && flags.get('clouds2') !== '0';
-export const BANDS = {on: CLOUDS2, n: 3, span: .07, thin: .45,
+export const BANDS = {on: CLOUDS2, n: 3, span: .07, thin: .45, sun: .5 /* the share of the sun the thickest band takes (TUNE.clouds.sun[0] .85 made a passing band flip the whole picture) */,
   scale: 3 /* the bands' clouds this many times smaller than the weather's field (13-50 m: edges cross the view; same speed) */,
   cover: .4 /* the least cover the bands draw (features/depth.js): a clear day still has fair-weather clouds drifting over */,
   mean: .62 /* a cloud's mean share over its ground with these bands (features/depth.js: the gaps' sun back) */};

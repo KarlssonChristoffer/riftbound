@@ -1,7 +1,7 @@
 // SUN SHAFTS (the user, 2026-11-07: the god rays of early October "never became good"; start over from Red Giraffe's "Pixel
 // Perfect" lighting video and its comments). They replace render/godrays.js (?godrays=1 brings those back for an A/B, and then
 // these step aside) and the cloud beams tried the same day. TWO WAYS (TUNE.mode; F10). 'air' (the default since he showed the
-// video's own shots: wide wedges of lit air between shadows, over everything): AIR_FS below, at half the art px, marches each
+// video's own shots: wide wedges of lit air between shadows, over everything): AIR_FS below, one pass at the art px over the ground and the sky only, marches each
 // pixel's view ray back from its surface and counts air that is sunlit with shade across the sun on most sides (a crown gap,
 // TUNE.beam[0], or a cloud gap, beam[1]); open sunny air has none beside it, so no veil; then the levels as below.
 // 'fleck' (?shafts=fleck), two cheap passes after the composite, under any camera:
@@ -34,14 +34,14 @@ export const TUNE = {
   mode: flags.get('shafts') === 'fleck' ? 'fleck' : 'air',   // air: lit air between shadows, marched (the video's way); fleck: flecks on the ground drawn out
   steps: 20,         // air: samples along a pixel's view ray
   reach: 22,         // air: m of air marched back from the surface toward the camera
-  beam: [1.6, 9],    // air: m to each side a beam needs shade (crown gaps, cloud gaps)
-  gain: 4,           // air: the beam air's share x this before the levels
+  beam: [1.6, 0],    // air: m to each side a beam needs shade (crown gaps; cloud gaps: 0 = none, they swam as the clouds drifted)
+  gain: 3,           // air: the beam air's share x this before the levels
   open: [1.1, 2.6],  // m: a fleck has shade all round it this far out (nearly every way) and this far (three ways of four)
   len: 7,            // m of the sun's ray a shaft reaches above its spot (a crown's height)
   taps: 28,          // steps a pixel looks back down its line for a source
   maxPx: 70,         // art px: no shaft longer on screen (near the camera in third / first person)
   lv: [.2, .45, .75],   // a pixel's glow (0..1: its source's, fading over the shaft's top part from lv[0] of its length) for levels 1, 2, 3
-  amt: [.09, .17, .27],   // light added per level, x the sun's colour (warmed) x strength
+  amt: [.06, .11, .17],   // light added per level, x the sun's colour (warmed) x strength
   dust: .45,         // how much the dust weakens a source where it is thin (0: every opening alike)
   dustCell: 6,       // m: the dust noise's cell
   dustAt: .5,        // the dust's threshold (higher: fewer strong shafts)
@@ -117,7 +117,9 @@ uniform mat4 uLightPV, uLightPVS;
 uniform float uSBias, uSOn;
 uniform vec4 uSh;        // beam widths (m: crowns, clouds), the shadow bias, the dust's amount
 uniform vec4 uSh2;       // the dust: 1 / cell, threshold, drift (m: x, z)
-uniform vec4 uSa;        // steps, reach (m), gain, -
+uniform vec4 uSa;        // steps, reach (m), gain, debug
+uniform vec3 uLv;        // the levels' thresholds
+uniform vec3 uCol[3];    // the levels' colours
 out vec4 oc;
 ${CLOUD_GLSL}
 bool shadowed(vec3 X) {
@@ -143,9 +145,9 @@ float shade4(vec3 X, vec3 a, vec3 b, float w) {
   return (lit(X + a * w) ? 0. : 1.) + (lit(X - a * w) ? 0. : 1.) + (lit(X + b * w) ? 0. : 1.) + (lit(X - b * w) ? 0. : 1.);
 }
 void main() {
-  ivec2 ip = ivec2(gl_FragCoord.xy) * 2 + 1, sz = ivec2(uRes);
-  ip = min(ip, sz - 1);
+  ivec2 ip = ivec2(gl_FragCoord.xy);
   float d = texelFetch(tD, ip, 0).r;
+  if (d <= .99999 && normalize(texelFetch(tN, ip, 0).xyz).y < .55) discard;   // (only the air over the ground and the sky: never a wash over a crown, a trunk, a figure)
   vec3 C = worldAt(ip, 0.), F = worldAt(ip, min(d, .99999)), v = F - C;
   float L = length(v); v /= max(L, 1e-4);
   float reach = min(uSa.y, L);
@@ -156,10 +158,15 @@ void main() {
     if (float(i) >= n) break;
     vec3 X = P - v * (reach * (float(i) + .5) / n);
     if (!lit(X)) continue;
-    float k = max(smoothstep(2.5, 3.5, shade4(X, a, b, uSh.x)), smoothstep(2.5, 3.5, shade4(X, a, b, uSh.y)));
+    float k = smoothstep(2.5, 3.5, shade4(X, a, b, uSh.x));
+    if (k < 1. && uSh.y > .5) k = max(k, smoothstep(2.5, 3.5, shade4(X, a, b, uSh.y)));
     if (k > 0.) g += k * dustAt(X);
   }
-  oc = vec4(min(1., g / n * uSa.z), 1., 0., 1.);
+  g = min(1., g / n * uSa.z);
+  if (uSa.w > .5) { oc = vec4(g, 0., g, 0.); return; }
+  float lv = dot(step(uLv, vec3(g)), vec3(1.));
+  if (lv < .5) discard;
+  oc = vec4(uCol[int(lv) - 1], 0.);
 }`;
 const SHAFT_FS = `${COMMON}
 uniform sampler2D tSrc;
@@ -211,11 +218,14 @@ export function createSunShafts({THREE, renderer, raw, tri, cam, compU, rays}) {
   for (const k of ['tTop', 'uCl', 'uClM', 'uClO', 'uClC', 'uClT', 'uFr', 'uFrB', 'uFrK', 'uFrC', 'uFrS', 'uFrQ', ...CLOUD_EXTRA]) SU[k] = compU[k];   // (the clouds: render/clouds.js)
   const FU = {...base, tSrc: {value: srcRT.texture}, uSf: {value: new THREE.Vector4()}, uLv: {value: new THREE.Vector3()},
     uCol: {value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]}};
+  const AU = {...SU, uSa: {value: new THREE.Vector4()}, uLv: null, uCol: null};
   const full = (fs, u, extra) => { const sc = new THREE.Scene(); sc.matrixAutoUpdate = false; const m = new THREE.Mesh(tri, raw(VS, fs, u, {depthTest: false, depthWrite: false, ...extra})); m.frustumCulled = false; m.matrixAutoUpdate = false; sc.add(m); return sc; };
   const srcScene = full(SRC_FS, SU, {});
-  const AU = {...SU, uSa: {value: new THREE.Vector4()}};
-  const airScene = full(AIR_FS, AU, {});
+
   const shaftScene = full(SHAFT_FS, FU, {transparent: true, blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor});
+  AU.uLv = FU.uLv; AU.uCol = FU.uCol;
+  const airScene = full(AIR_FS, AU, {transparent: true, blending: THREE.CustomBlending,   // (air: one pass at the art px, straight onto the picture)
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor});
   if (TUNE.on) { renderer.compile(TUNE.mode === 'air' ? airScene : srcScene, cam); renderer.compile(shaftScene, cam); }   // (while the page loads: no hitch at the first sunny frame)
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -239,12 +249,13 @@ export function createSunShafts({THREE, renderer, raw, tri, cam, compU, rays}) {
     FU.uSf.value.set(Math.max(.5, T.len), air ? 0 : Math.max(2, Math.min(64, Math.round(T.taps))), +T.debug || 0, Math.max(4, T.maxPx));
     const now = performance.now() / 1000, P = 256 * Math.max(.5, T.dustCell);
     SU.uSh.value.set(air ? T.beam[0] : T.open[0], air ? T.beam[1] : T.open[1], T.bias, T.dust);
-    AU.uSa.value.set(Math.max(2, Math.min(48, Math.round(T.steps))), Math.max(1, T.reach), T.gain, 0);
+    AU.uSa.value.set(Math.max(2, Math.min(48, Math.round(T.steps))), Math.max(1, T.reach), T.gain, +T.debug || 0);
     SU.uSh2.value.set(1 / Math.max(.5, T.dustCell), T.dustAt, -(now * T.dustDrift[0]) % P, -(now * T.dustDrift[1]) % P);
+    if (air) { renderer.render(airScene, cam); S.live = true; return; }
     const W = Math.ceil(compU.uRes.value.x / 2), H = Math.ceil(compU.uRes.value.y / 2);
     if (srcRT.width !== W || srcRT.height !== H) srcRT.setSize(W, H);
     const rt = renderer.getRenderTarget();
-    renderer.setRenderTarget(srcRT); renderer.render(air ? airScene : srcScene, cam);
+    renderer.setRenderTarget(srcRT); renderer.render(srcScene, cam);
     renderer.setRenderTarget(rt); renderer.render(shaftScene, cam);
     S.live = true;
   }
