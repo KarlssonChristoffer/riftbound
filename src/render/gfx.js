@@ -31,6 +31,7 @@ import {createMistVol} from './mistvol.js';
 import {createAir} from './air.js';
 import {CLOUD_GLSL, CLOUD_EXTRA} from './clouds.js';
 import {CUT, cutU} from './cut.js';
+import {PIX_LOD} from './pixlod.js';
 
 export const DEG = Math.PI / 180;
 // a uniform-shaped holder whose value is only ever a number (a card's sway: written every frame). Its own class keeps
@@ -135,7 +136,7 @@ float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.54
 float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
-` + LEAF_GONE + `
+` + LEAF_GONE + PIX_LOD + `
 void main() {
   // the season thins the crowns (uLeafK: sim/env.js leafK, 1 = full .. ~.07 = bare): leaves go in clumps of a few cm (a 3D
   // noise in the model's frame, varied per tree by uSeed); the trees' shadow pass drops the same ones (SHADOW_SWAY_FS).
@@ -168,8 +169,12 @@ void main() {
     bool crescent = false;
     if (fFixed < -1.5) { jn = vn3(vPL * 7.5 + vec3(uSeed.x, 0., uSeed.y));
       if (uLeaf.w > .5) {   // leaf clusters (uLeaf): less of the blotchy noise, each cluster's top lit, a crescent under it
+#ifdef CINE
+        d += leafLod(vPL, vW, vec3(uSeed.x, 0., uSeed.y), crescent);   // (a perspective camera: as many px across as in the game's view, render/pixlod.js)
+#else
         vec3 rel; float b = leafCell(vPL / uLeaf.x + vec3(uSeed.x, 0., uSeed.y) * .31, rel);
         d += (jn - .5) * .2 + rel.y * uLeaf.y; crescent = b < uLeaf.z && rel.y < -.05;
+#endif
       } else d += (jn - .5) * .42;
       d += uRip.w * sin(dot(vW.xz, uRip.xy) - uRip.z); }   // wind: bands of light rolling through the leaves (uRip: k along the wind, phase, amount)
     tone = d > .62 ? 0 : d > .12 ? 1 : 2;
@@ -1239,10 +1244,26 @@ vec3 worldAt(ivec2 p, float d) { vec2 ndc = (vec2(p) + .5) / uRes * 2. - 1.; vec
 #ifdef CINE
 // the cinema camera's sky along r: the horizon's band up to the zenith, the sun's glow (wide and warm when it is low) and
 // its disk (whole view pixels, like everything), stars when the zenith is dark, the haze below the horizon
+// PIXEL BANDS (?cinepix=0: smooth): the sky's gradient, the sun's glow and the air by distance in FLAT LEVELS, as the game's mist
+// has them (MIST: levels, dithered only along the edge between two): f (0..1) cut into L levels, the step to the next dithered
+// (4x4 Bayer) over the last ~2.5 px before it; g = how much f changes from this px to the next (where it jumps, an edge: left crisp)
+uniform float uCineBand;
+float bandQ(float f, float g, float L, ivec2 ip) {
+  if (uCineBand < .5) return f;
+  float t = f * L, i = floor(t), gp = g * L;
+  if (gp > .5) return floor(t + .5) / L;
+  float e = clamp(1. - (i + 1. - t) / max(2.5 * gp, 1e-6), 0., 1.);
+  return (i + (bayer(ip) < e ? 1. : 0.)) / L;
+}
+float skyK(vec3 r) { return sqrt(smoothstep(0., .55, max(r.y, 0.))); }
+float sunG(vec3 r) { return pow(max(dot(r, uSunP.xyz), 0.), 5.); }
+float gSkyG = 0., gSunG = 0.; ivec2 gSkyP = ivec2(0);   // (the sky pixel being drawn: its change to the next px; 0 = smooth: reflections)
 vec3 skyAt(vec3 r) {
   float h = max(r.y, 0.), s = dot(r, uSunP.xyz), up = step(-.12, uSunP.y), low = 1. - smoothstep(0., .4, uSunP.y);
-  vec3 c = mix(uSkyH, uSkyZ, sqrt(smoothstep(0., .55, h)));
-  c += uSunCol * (pow(max(s, 0.), 5.) * (.18 + .55 * low) + pow(max(s, 0.), 90.) * .6) * up;
+  float k = skyK(r), gl = sunG(r);
+  if (gSkyG > 0.) { k = bandQ(k, gSkyG, 12., gSkyP); gl = bandQ(gl, gSunG, 6., gSkyP); }
+  vec3 c = mix(uSkyH, uSkyZ, k);
+  c += uSunCol * (gl * (.18 + .55 * low) + pow(max(s, 0.), 90.) * .6) * up;
   if (s > uSunP.w && uSunP.y > -.04 && r.y > -.01) c = uSunCol * 1.25 + vec3(.3, .28, .22);
   float night = clamp(1. - dot(uSkyZ, vec3(2.2)), 0., 1.);
   if (night > 0. && r.y > .04) { vec3 q = floor(r * 230.); float st = hC(q.xy * 1.31 + q.z * 17.3); if (st > .9965) c += vec3(.75, .8, 1.) * night * min(1., (st - .9965) * 400.); }
@@ -1321,7 +1342,15 @@ void main() {
   int code = int(a0.a * 255. + .5), type = code / 4, tone = code - type * 4;
   bool water = type == 1 && tone == 1;   // (tone is only used by meshes otherwise)
 #ifdef CINE
-  if (type == 0) { oc = vec4(clamp(skyAt(normalize(worldAt(ip0, 1.) - uCamP)), 0., 1.), 1.); return; }   // (no screen layers: see render)
+  if (type == 0) {   // (no screen layers: see render)
+    vec3 r0 = normalize(worldAt(ip0, 1.) - uCamP);
+    if (uCineBand > .5) {   // (the change to the next px across and up: bandQ)
+      vec3 rx = normalize(worldAt(ip0 + ivec2(1, 0), 1.) - uCamP), ry = normalize(worldAt(ip0 + ivec2(0, 1), 1.) - uCamP);
+      float k0 = skyK(r0), s0 = sunG(r0);
+      gSkyP = ip0; gSkyG = max(abs(skyK(rx) - k0), abs(skyK(ry) - k0)) + 1e-7; gSunG = max(abs(sunG(rx) - s0), abs(sunG(ry) - s0)) + 1e-7;
+    }
+    oc = vec4(clamp(skyAt(r0), 0., 1.), 1.); return;
+  }
 #else
   if (type == 0) {
     if (uCut.w > 0.) {   // the cutaway's CAP (render/cut.js): what it opened onto nothing is the ground's inside
@@ -1565,7 +1594,13 @@ void main() {
     vec3 v = P - uCamP; float dist = length(v); v /= dist;
     if (water) col = mix(col, skyAt(reflect(v, vec3(0., 1., 0.))), .12 + .55 * pow(1. - clamp(-v.y, 0., 1.), 5.));
     col += fog.rgb * fog.a * clamp(dist / 22., .3, 1.6);
-    col = mix(col, airAt(v), 1. - exp(-dist * uCine.w));
+    float fa = 1. - exp(-dist * uCine.w);
+    if (uCineBand > .5) {   // the air in flat levels (bandQ), its change to the next px from the neighbours' distances (the smaller: an edge isn't a slope)
+      ivec2 qx = min(ip + ivec2(1, 0), ivec2(uRes) - 1), qy = min(ip + ivec2(0, 1), ivec2(uRes) - 1);
+      float ex = exp(-length(worldAt(qx, texelFetch(tD, qx, 0).r) - uCamP) * uCine.w), ey = exp(-length(worldAt(qy, texelFetch(tD, qy, 0).r) - uCamP) * uCine.w);
+      fa = bandQ(fa, min(abs(ex - 1. + fa), abs(ey - 1. + fa)), 8., ip0);
+    }
+    col = mix(col, airAt(v), fa);
   }
 #else
   if (uMist.x > .5) col = mistOver(col, P, pts, sh * shA, N.y, fog, mistC);   // the world's mist + the far haze by depth (MIST above)
@@ -1636,6 +1671,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const gcam = new THREE.Camera();
   // THE CINEMA CAMERA (features/cinema.js: setCine): for the frames it is set, the same passes draw the scene through a free
   // PERSPECTIVE camera instead of the oblique view (at the art's resolution: still pixels). CINE is the shaders' uCine
+  // ?cinepix=0: the perspective camera without the pixel LOD (render/pixlod.js) and the banded sky / air (COMP_FS bandQ): an A/B
+  const PIXLOD = flags.get('cinepix') !== '0';
   const CINE = {value: new THREE.Vector4(0, .15, 400, 0)}, cinePC = new THREE.PerspectiveCamera(40, 16 / 9, .15, 400);
   let cine = null;
   // the materials with `#ifdef CINE` code (cineMat): the cinema camera's own program variant, switched as setCine turns it on
@@ -1698,7 +1735,8 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     lArt: {value: new THREE.Vector3(-.55, .775, .314).normalize()},   // the props' tone light: the sun (setSun, ONE_SUN); ?onesun=0 the pixelizer's top-left light, world-fixed
     ramps: {value: null}, cover: {value: new THREE.Vector3(0, .86, 0)}, emitFam: {value: new THREE.Vector2(-1, -1)},
     smooth: {value: 0},
-    leaf: {value: new THREE.Vector4(.15, .55, .2, flags.get('leafcells') !== '0' ? 1 : 0)},   // the leaf clusters (MESH_FS uLeaf): cell m, top light, crescent width, on
+    leaf: {value: new THREE.Vector4(.15, .55, .2, flags.get('leafcells') !== '0' ? 1 : 0)},
+    cineP: {value: new THREE.Vector4()},   // the perspective camera's pixel LOD (render/pixlod.js): its place, the scale's ratio (cineView; 0 off)   // the leaf clusters (MESH_FS uLeaf): cell m, top light, crescent width, on
     leanX: {value: new THREE.Vector3(1 / PPM, 0, 0)}, leanY: {value: new THREE.Vector3(0, 0, 1 / PPMY)},   // sway: m per art px (setView)
     time: {value: 0},   // s, for the leaves' flutter (render())
     leafK: {value: 1},  // how full the crowns are this season (features/weather.js from sim/env.js leafK)
@@ -1789,7 +1827,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   };
   const meshMat = (obj, seed, sw = null, aut = null) => raw(sw ? MESH_SWAY_VS : MESH_VS, MESH_FS, {...cutU(U), uRamps: U.ramps, uLArt: U.lArt, uObj: {value: obj}, uFlash: {value: 0}, uSeed: {value: seed}, uCover: U.cover, uEmitFam: U.emitFam, uBurn: {value: new THREE.Vector4()},
     uGlowF: {value: new THREE.Vector4(-1, -1, -1, -1)}, uGlowK: {value: new THREE.Vector4()},
-    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uSprayM: {value: new THREE.Matrix4()}, uSprayFix: {value: 0}} : {})},
+    uRip: {value: new THREE.Vector4()}, uLeafK: U.leafK, uLeaf: U.leaf, uCineP: U.cineP, uAutumn: U.autumn, uAut: {value: aut ? autOf(aut) : AUT_NONE}, uAutOn: {value: aut ? 1 : 0}, ...(sw ? {uLean: sw.lean, uFlut: sw.flut, uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uSprayM: {value: new THREE.Matrix4()}, uSprayFix: {value: 0}} : {})},
     sw ? {side: THREE.DoubleSide} : {});   // (a thinned crown shows its clumps' inside: MESH_FS)
   const shadowMeshMat = raw(SHADOW_MESH_VS, SHADOW_FS, {});
   // bed: a surface's OWN water bed ({tex, rect} | null: world/waterbed.js; the West Downs' brook on their canvas), not setWaterLook's (omitted: that one)
@@ -2391,7 +2429,7 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
     uLt2: {value: new THREE.Vector4()}, uAmb2: {value: new THREE.Vector3(1, 1, 1)}, uSunC2: {value: new THREE.Vector3(1, 1, 1)}, uFill2: {value: new THREE.Vector3()},
     uFog2: {value: new THREE.Vector4()}, uSun2: {value: new THREE.Vector4()}, uShade2T: {value: new THREE.Vector4(1, 1, 1, 0)}, uShade2L: {value: new THREE.Vector3()},
     uShade2H: {value: new THREE.Vector3(1, 1, 1)}, uMistC2: {value: new THREE.Vector4()}, uPVf: {value: new THREE.Matrix4()},
-    uCine: CINE, uCamP: {value: new THREE.Vector3()}, uSunP: {value: new THREE.Vector4(0, 1, 0, 1)},   // the cinema camera (setCine)
+    uCine: CINE, uCineBand: {value: PIXLOD ? 1 : 0}, uCamP: {value: new THREE.Vector3()}, uSunP: {value: new THREE.Vector4(0, 1, 0, 1)},   // the cinema camera (setCine)
     uSkyZ: {value: new THREE.Vector3()}, uSkyH: {value: new THREE.Vector3()}, uSunCol: {value: new THREE.Vector3()},
   };
   const compScene = new THREE.Scene();
@@ -2712,6 +2750,7 @@ void main() {
     const f = _cf.subVectors(c.look, c.pos).normalize(), yaw = Math.atan2(-f.x, -f.z);
     view.yaw = yaw; U.camYaw.value = yaw;
     CINE.value.set(1, cinePC.near, cinePC.far, c.air ?? .012);
+    U.cineP.value.set(c.pos.x, c.pos.y, c.pos.z, PIXLOD ? PPM * cineK / (cinePC.projectionMatrix.elements[5] * VH / 2) : 0);   // (render/pixlod.js)
     compU.uCamP.value.copy(c.pos); compU.uView.value.set(-f.x, -f.y, -f.z); compU.uWPx.value.set(PPM, PPM);   // (uView: toward the viewer)
     U.leanX.value.set(Math.cos(yaw) / PPM, 0, -Math.sin(yaw) / PPM); U.leanY.value.set(Math.sin(yaw) / PPMY, 0, Math.cos(yaw) / PPMY);
     const s = c.sky;

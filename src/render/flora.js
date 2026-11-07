@@ -20,7 +20,8 @@
 // BUDGET: CPU: commit() uploads only groups whose instances changed (~16 floats a plant); the per-plant lean is world.js's. GPU: one
 //   instanced draw per shape + its shadow.
 import * as THREE from 'three';
-import {CUT, cutU} from './cut.js';   // the cutaway (a plant goes by its root's height)
+import {CUT, cutU} from './cut.js';
+import {PIX_LOD} from './pixlod.js';   // (a perspective camera: the leaf clusters' size follows the distance)   // the cutaway (a plant goes by its root's height)
 
 const HEAD = `precision highp float; precision highp int;\n`;
 const OUTS = `layout(location = 0) out vec4 o0;\nlayout(location = 1) out vec4 o1;\nlayout(location = 2) out vec4 o2;\n`;
@@ -68,17 +69,17 @@ int stageOf(float kind, float delay, float r1, float e) {
 // ---------------------------------------------------------------- the mesh plants
 const MESH_VS = HEAD + INST + `
 in vec3 position; in vec3 normal; in float aPart; in float aFam; in float aBias; in float aFixed; in float aFlex; in float aPhase;
-flat out vec3 fR; out vec3 vN; out vec3 vNL; out vec3 vPL; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed; flat out vec4 fS; flat out vec4 fA; flat out float fSeed; flat out float fYaw;
+flat out vec3 fR; out vec3 vN; out vec3 vNL; out vec3 vPL; out vec3 vWp; flat out float fPart; flat out float fFam; flat out float fBias; flat out float fFixed; flat out vec4 fS; flat out vec4 fA; flat out float fSeed; flat out float fYaw;
 void main() {
   if (iS.w < .5) { gl_Position = vec4(2., 2., 2., 1.); return; }   // (hidden: off the clip volume)
   fYaw = iT.w; fR = iT.xyz;
   vec3 w = iT.xyz + turn(position * iS.x) + swayOf(aFlex, aPhase);
-  vN = turn(normal); vNL = normal; vPL = position;
+  vN = turn(normal); vNL = normal; vPL = position; vWp = w;
   fPart = aPart; fFam = aFam; fBias = aBias; fFixed = aFixed; fS = iS; fA = iA; fSeed = iL.w;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
 }`;
 const MESH_FS = HEAD + OUTS + NOISE + AUTUMN + CUT + `
-flat in vec3 fR; in vec3 vN; in vec3 vNL; in vec3 vPL; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in vec4 fS; flat in vec4 fA; flat in float fSeed; flat in float fYaw;
+flat in vec3 fR; in vec3 vN; in vec3 vNL; in vec3 vPL; in vec3 vWp; flat in float fPart; flat in float fFam; flat in float fBias; flat in float fFixed; flat in vec4 fS; flat in vec4 fA; flat in float fSeed; flat in float fYaw;
 uniform sampler2D uRamps; uniform vec3 uLArt; uniform vec3 uCover; uniform vec2 uEmitFam; uniform float uLeafK; uniform vec4 uLeaf;
 vec3 h33(vec3 p) { p = fract(p * vec3(.1031, .103, .0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx); }
 float leafCell(vec3 P, out vec3 rel) {   // (gfx.js MESH_FS)
@@ -89,6 +90,7 @@ float leafCell(vec3 P, out vec3 rel) {   // (gfx.js MESH_FS)
   }
   return sqrt(f2) - sqrt(f1);
 }
+` + PIX_LOD + `
 vec3 patchOf(vec3 P) {   // the nearest of a 3D lattice's jittered points: its cell (the autumn patch)
   vec3 qi = floor(P), qf = fract(P), best = qi; float f1 = 9.;
   for (int z = -1; z <= 1; z++) for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
@@ -110,7 +112,13 @@ void main() {
   else {
     float d = dot(n, uLArt) + fBias; bool crescent = false;
     if (fFixed < -1.9) { float jn = vn3(vPL * 7.5 + vec3(sd.x, 0., sd.y));   // (the leaf clusters; -1.75: plain leaves, a fern's fronds)
-      if (uLeaf.w > .5) { vec3 rel; float b = leafCell(vPL / uLeaf.x + vec3(sd.x, 0., sd.y) * .31, rel); d += (jn - .5) * .2 + rel.y * uLeaf.y; crescent = b < uLeaf.z && rel.y < -.05; }
+      if (uLeaf.w > .5) {
+#ifdef CINE
+        d += leafLod(vPL, vWp, vec3(sd.x, 0., sd.y), crescent);   // (render/pixlod.js)
+#else
+        vec3 rel; float b = leafCell(vPL / uLeaf.x + vec3(sd.x, 0., sd.y) * .31, rel); d += (jn - .5) * .2 + rel.y * uLeaf.y; crescent = b < uLeaf.z && rel.y < -.05;
+#endif
+      }
       else d += (jn - .5) * .42; }
     tone = d > .62 ? 0 : d > .12 ? 1 : 2;
     if (crescent) tone = min(tone + 1, 2);
@@ -226,7 +234,7 @@ export function createFlora(G) {
   }
   const ramps = {value: Array.from({length: 16}, () => new THREE.Vector3())};
   const res = {value: new THREE.Vector2(G.VW, G.VH)}, zoom = {value: 1};
-  const meshU = {...cutU(U), uRamps: U.ramps, uLArt: U.lArt, uCover: U.cover, uEmitFam: U.emitFam, uLeafK: U.leafK, uLeaf: U.leaf, uAutumn: U.autumn, uPal: palU,
+  const meshU = {...cutU(U), uRamps: U.ramps, uLArt: U.lArt, uCover: U.cover, uEmitFam: U.emitFam, uLeafK: U.leafK, uLeaf: U.leaf, uCineP: U.cineP, uAutumn: U.autumn, uPal: palU,
     uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time};
   const meshMat = raw(MESH_VS, MESH_FS, meshU, {side: THREE.DoubleSide});
   const shadowMat = raw(SHADOW_VS, SHADOW_FS, {uLeanX: U.leanX, uLeanY: U.leanY, uTime: U.time, uLeafK: U.leafK}, {side: THREE.DoubleSide});
