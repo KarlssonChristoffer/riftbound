@@ -42,8 +42,20 @@ export const CLOUD_SUN = !OLD_CLOUDS && flags.get('cloudsun') !== '0';
 // way it feels standing in a field. cloudAt().x is then the view's share for every point (uCl.w: features/depth.js measures it
 // round the player, eased); the field per pixel only for a deck (a weather change's front and breakup still roll over)
 export const CLOUD_VIEW = FIELD_V2 && flags.get('cloudmap') !== '1';
+// CLOUDS2 (the user, 2026-11-07, after Red Giraffe's "Pixel Perfect" lighting video; ?clouds2=0: the view dimming as before):
+// the cloud shadows lie on the ground again, as SHAPES fixed in the world that roll over it with the wind aloft, but cut into
+// STEPPED BANDS instead of a soft edge (no blur: the pixel look). The field's density over the cover's threshold, in BANDS.n
+// equal steps of BANDS.span density (the first step at the threshold: a thin rim, then thicker inward); the field's thin
+// patches (cfField's .w) pull the deep parts down a step or two (partial cover in the middle of a cloud, bands that merge
+// as the cover changes). The point is the ground (h 0) where the sun's ray to the pixel meets the field's plane (gfx.js
+// cloudSunAt), from its WORLD position (any camera, the first person view too: CL2 below), snapped to the ground texel, so
+// an edge steps texel by texel. BANDS.on (live, F10 > Effects > Depth) switches back to the view dimming without a reload.
+// The god rays through the clouds (render/cloudbeams.js) read the same bands.
+export const CLOUDS2 = CLOUD_VIEW && flags.get('clouds2') !== '0';
+export const BANDS = {on: CLOUDS2, n: 3, span: .07, thin: .45,
+  mean: .62 /* a cloud's mean share over its ground with these bands (features/depth.js: the gaps' sun back) */};
 // the uniforms past the old set (all vec4; gfx.js makes them and setClouds copies o.u[name] into them; godrays.js shares them)
-export const CLOUD_EXTRA = ['uClD', 'uClW', 'uDk', 'uFrE', 'uClQa', 'uClQb', 'uClQc', 'uCfA', 'uCfB', 'uCfC', 'uCfD'];   // (uCf*: the smooth field's offsets)
+export const CLOUD_EXTRA = ['uClD', 'uClW', 'uDk', 'uFrE', 'uClQa', 'uClQb', 'uClQc', 'uCfA', 'uCfB', 'uCfC', 'uCfD', 'uClB'];   // (uCf*: the smooth field's offsets; uClB: CLOUDS2's bands)
 // the smooth field's shadow (THE SHADOW above): m either side of the threshold the edge fades over; the share at the edge; the
 // density in from the threshold where it is full; how much thinner the thin patches are
 export const SOFT = {pen: 1.25, edge: .72, full: .1, thin: .2};
@@ -57,6 +69,17 @@ float cloudSunLv(vec3 c) { return c.x > 1.5 ? 0. : c.x > .5 ? .5 : 1.; }`;
 const F3 = v => v.toFixed(4);
 const VIEW_GLSL = `  if (uDk.x > .5) { float d = cfDensity(g, uClD, uClW.xy); y = d >= q ? 1. : d >= q - uDk.z ? .5 : 0.; }
   return vec3(y > .75 ? 0. : uCl.w, y, 1. - y);   // (CLOUD_VIEW: the view's share, everywhere)
+}
+float cloudBlock(vec3 c) { return c.x * uCl.z; }
+float cloudSunLv(vec3 c) { return 1. - c.x; }`;
+// CLOUDS2: the stepped bands (live: uClB.x; off, the view's share as VIEW_GLSL)
+const BAND_GLSL = `  float c = uCl.w;
+  if (uClB.x > .5) {
+    vec4 F = cfField(g); float d = F.x, e = d - th.x;
+    if (uDk.x > .5) y = d >= q ? 1. : d >= q - uDk.z ? .5 : 0.;
+    c = e < 0. ? 0. : min(uClB.y, floor(e / uClB.z * (1. - uClB.w * F.w)) + 1.) / uClB.y;
+  } else if (uDk.x > .5) { float d = cfDensity(g, uClD, uClW.xy); y = d >= q ? 1. : d >= q - uDk.z ? .5 : 0.; }
+  return vec3(y > .75 ? 0. : c, y, 1. - y);
 }
 float cloudBlock(vec3 c) { return c.x * uCl.z; }
 float cloudSunLv(vec3 c) { return 1. - c.x; }`;
@@ -88,6 +111,7 @@ uniform vec4 uClW;   // (the old field) the warp's drift (m, whole texels), -; t
 uniform vec4 uDk;    // the deck: mode (0 none, 1 everywhere, 2 behind a front's edge), its threshold (mode 1), the rim (density)
 uniform vec4 uFrE;   // a front's second bend: amplitude (m), wave number (rad / m), phase; the approach (m)
 uniform vec4 uClQa, uClQb, uClQc;   // the field's quantiles (core/cloudfield.js QUANT)
+uniform vec4 uClB;   // (CLOUDS2) the bands: on (0: the view's share), steps, density a step, how far the thin patches pull a step down
 ivec2 viewTexel(ivec2 p, vec4 M, vec2 o) {   // view pixel p (GL, y up) -> the top-down map's texel (the pattern's nearest sample)
   vec2 c = vec2(float(p.x) + .5, uRes.y - float(p.y) - .5) - o;
   return ivec2(floor(vec2(M.x * c.x + M.y * c.y, M.z * c.x + M.w * c.y)));
@@ -104,13 +128,14 @@ float frontU(vec2 g) {
   return dot(g, uFr.xy) - uFr.z + uFrB.z * sin(a * uFrB.w + uFrC.w) + uFrE.x * sin(a * uFrE.y + uFrE.z);
 }
 vec3 cloudAt(ivec2 ip, vec3 P) {
-  vec2 g = (vec2(viewTexel(ip, uClM, uClO.xy)) + .5) / uClW.w;
+${CLOUDS2 ? `  vec2 g = (floor(P.xz * uClW.w) + .5) / uClW.w;   // (CLOUDS2: the world point's ground texel, any camera)`
+  : `  vec2 g = (vec2(viewTexel(ip, uClM, uClO.xy)) + .5) / uClW.w;`}
   vec2 th = uClT.xy; float q = 0., y = 0.;
   if (uDk.x > .5) {
     q = uDk.y;
     if (uDk.x > 1.5) { float u = frontU(g); q = coverQ(1. - smoothstep(-uFrB.x, uFrB.y, u)); th = mix(uClT.xy, uClT.zw, 1. - smoothstep(0., uFrE.w, u)); }
   }
-${CLOUD_VIEW ? VIEW_GLSL : FIELD_V2 ? SHARE_GLSL : LEVEL_GLSL}
+${CLOUDS2 ? BAND_GLSL : CLOUD_VIEW ? VIEW_GLSL : FIELD_V2 ? SHARE_GLSL : LEVEL_GLSL}
 `;
 
 // ?wxtrans=0: the old tile and its quantiles (.y absolute: the storm's mask)
@@ -139,4 +164,4 @@ vec3 cloudAt(ivec2 ip, vec3 P) {
 }
 ${LEVELS}
 `;
-export const CLOUD_GLSL = (CLOUD_SUN ? '#define CL_SUN\n' : '') + (OLD_CLOUDS ? OLD_GLSL : NEW_GLSL);
+export const CLOUD_GLSL = (CLOUD_SUN ? '#define CL_SUN\n' : '') + (CLOUDS2 ? '#define CL2\n' : '') + (OLD_CLOUDS ? OLD_GLSL : NEW_GLSL);

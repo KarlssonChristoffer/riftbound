@@ -26,6 +26,7 @@ import {cssRGBA} from '../core/color.js';
 import {createGLStats} from './glstats.js';
 import {createLitterSim} from './litter.js';
 import {createGodrays} from './godrays.js';
+import {createCloudBeams} from './cloudbeams.js';
 import {createMistVol} from './mistvol.js';
 import {createAir} from './air.js';
 import {CLOUD_GLSL, CLOUD_EXTRA} from './clouds.js';
@@ -1295,7 +1296,7 @@ float underAt(vec3 X) {
   return cloudAt(ivec2(floor((c.xy / c.w * .5 + .5) * uRes)), G).y;
 #endif
 }
-#if defined(CL_SUN) && !defined(CINE)
+#if defined(CL_SUN) && (!defined(CINE) || defined(CL2))   // (CL2: render/clouds.js CLOUDS2 reads the world point: any camera)
 #define CL_SUNP
 // (render/clouds.js CLOUD_SUN) the clouds where the sun's ray to X meets their plane, as underAt finds it: level, under, through
 vec3 cloudSunAt(vec3 X) {
@@ -2399,6 +2400,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const dummyCam = new THREE.Camera();
   // GOD RAYS (render/godrays.js): sunbeams marched through the sun's shadow maps, added to the pixel image right after the composite
   const rays = createGodrays({THREE, renderer, raw, tri, cam: dummyCam, compU});   // (not drawn under the cinema camera: they march the oblique view's parallel rays)
+  // GOD RAYS THROUGH THE CLOUDS (render/cloudbeams.js): the view rays marched through the air, each sample's sun ray through the
+  // cloud bands; drawn after the god rays, under any camera (the first person view too). Its strength from the god rays' inputs
+  const beams = createCloudBeams({THREE, renderer, raw, tri, cam: dummyCam, compU, rays});
   // THE MIST AS A VOLUME (render/mistvol.js): marched along the view rays right after the composite, before the god rays (features/mist.js: G.setMistVol, G.mistField)
   const mvol = createMistVol({THREE, renderer, raw, tri, cam: dummyCam, compU, NL});
   // THE AIR (render/air.js): the moving-air field round the view (G.air: features/airfx.js splats into it, the mist and the smoke read it)
@@ -2893,7 +2897,7 @@ void main() {
     const fxN = fxB.add.n + fxB.blend.n, hN = fxB.heat.n;
     let fxX = 0; for (const m of fxExtra) { m.visible = m.userData.frame === frameNo; if (m.visible) fxX++; }
     if (DS > 1 || DZ !== 1 || fxN || fxX || hN) {   // the HD path: the pixel image into outRT, blown up, the soft particles over it
-      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); }
+      renderer.setRenderTarget(outRT); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); } beams.draw();
       if (hN) {
         const B = fxB.heat; B.geo.instanceCount = hN; upload(B.P, hN); upload(B.C, hN);
         fxPxM();
@@ -2906,7 +2910,7 @@ void main() {
         for (const B of fxList) { B.geo.instanceCount = B.n; B.m.visible = B.n > 0; upload(B.P, B.n); upload(B.C, B.n); }
         renderer.render(fxScene, sub.x || sub.y || DZ !== 1 ? hdCamNow() : camera);   // (slid and magnified as the blit did the image: setSubpixel, setDisplay)
       }
-    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); } }
+    } else { renderer.setRenderTarget(post && post.target); renderer.render(compScene, dummyCam); if (!cine) { mvol.draw(); rays.draw(); air.over(); } beams.draw(); }
     if (vgFrame === frameNo) { vgU.uVgS.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS); vgU.uVgP.value = sub.pad * DS; renderer.render(vgScene, dummyCam); }   // the vignette + haze, over all of it (what shows: no pad)
     if (frostK > 0) { frU.uFr.value.set((VW - sub.pad) * DS, (VH - sub.pad) * DS, sub.pad * DS, frostK); frU.uFrD.value = DS; renderer.render(frScene, dummyCam); }   // the frost (setFrost), last
     if (post) post.run(renderer);
@@ -3074,6 +3078,7 @@ void main() {
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
+    cloudBeams: beams,   // (render/cloudbeams.js: features/depth.js's dev rows read its TUNE)
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
