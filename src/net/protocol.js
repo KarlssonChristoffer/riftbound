@@ -92,7 +92,7 @@ export const REACH = 4;
 export const CLOCK = {hour: 9, daymin: 20};
 // the URL switches that change the world's ground, walls and solid things (core/flags.js): everyone in a room must build the
 // same collision world, so the hello carries them (worldFlags) and the room turns away a join whose differ from the room's
-export const WORLD_FLAGS = ['forest', 'world', 'terrain', 'west', 'stones', 'tower', 'brook', 'walls', 'hut', 'decor'];
+export const WORLD_FLAGS = ['forest', 'world', 'terrain', 'west', 'stones', 'tower', 'brook', 'walls', 'hut', 'decor', 'fjall'];
 export const worldFlags = get => WORLD_FLAGS.map(k => get(k)).map((v, i) => v === null || v === undefined ? '' : WORLD_FLAGS[i] + '=' + v).filter(Boolean).join('&');
 export const COLORS = ['#f0c060', '#7ec8e3', '#e98aa8', '#9ad07a', '#c9a0ff', '#ff9f5a', '#6fe0c0', '#e0e070'];
 

@@ -2903,7 +2903,9 @@ void main() {
       if (STATIC_SHADOW && sFollow) {   // a big world: the static box follows the view, on its lattice
         const cx = Math.round(view.T.x / SSTEP) * SSTEP, cz = Math.round(view.T.z / SSTEP) * SSTEP;   // (the box holds the view's footprint: setSun's)
         const hx = reach(fpX + SSTEP / 2 + FP_PAD, sHx, SFOLLOW, SSTEP), hz = reach(fpZ + SSTEP / 2 + FP_PAD, sHz, SFOLLOW, SSTEP);
-        if (cx !== sCx || cz !== sCz || hx !== sHx || hz !== sHz) { sCx = cx; sCz = cz; sHx = hx; sHz = hz; SBOX[0] = cx - hx; SBOX[1] = cx + hx; SBOX[4] = cz - hz; SBOX[5] = cz + hz; sDue = Math.min(sDue, frameNo); }
+        // (out past the world's box, the fjäll (world/fjall.js): its ground climbs to 220 m, so the box's heights follow the view too)
+        const out = view.T.x > world.x1 || view.T.x < world.x0 || view.T.z < world.y0, cy = Math.round(view.T.y / SSTEP) * SSTEP, ylo = out ? cy - 24 : SWORLD[2], yhi = out ? cy + 40 : SWORLD[3];
+        if (cx !== sCx || cz !== sCz || hx !== sHx || hz !== sHz || ylo !== SBOX[2] || yhi !== SBOX[3]) { sCx = cx; sCz = cz; sHx = hx; sHz = hz; SBOX[0] = cx - hx; SBOX[1] = cx + hx; SBOX[2] = ylo; SBOX[3] = yhi; SBOX[4] = cz - hz; SBOX[5] = cz + hz; sDue = Math.min(sDue, frameNo); }
       }
       if (STATIC_SHADOW && (frameNo >= sDue || !sDir.equals(sCast))) {
         for (const S of movers) if (S.back) { S.moving = S.back = false; S.sm.layers.enable(2); S.sm.layers.disable(0); sScene.remove(S.sm); sStatic.add(S.sm); movers.delete(S); }

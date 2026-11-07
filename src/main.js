@@ -57,6 +57,7 @@
 import * as THREE from 'three';
 import {createGfx, DEG} from './render/gfx.js';
 import {WORLD, elev, inStream} from './world/world.js';
+import {viewBounds} from './world/layout.js';
 import {BIOMES} from './world/biomes.js';
 import {MOODS, TIMES} from './content/moods.js';   // the lighting tables (forked from the arena's lighting.js)
 import {createHero, loadLoadout, SET_NAMES} from './view/hero.js';   // the Ranger's card: loadouts, the composite, cloak, hair, armour, HD bow
@@ -109,7 +110,7 @@ const PPM = set.idx.fwd_px.E[0], PPMH = PPM * Math.cos(set.idx.pitch * DEG), PPM
 const ctxO = {PPM, PPMY, PPMH, toS: (x, y, h = 0) => [x * PPM, y * PPMY - h * PPMH], VW: 0, VH: 0};
 // THE CAMERA (render/camera.js): the view's size (window + zoom), the yaw, the target, shake, ground sampling. cv.VW / VH /
 // scale / zoom / yaw are read live from it; a turn of the yaw turns the player's view-frame state with it (turnFrame)
-const cv = createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: () => opt, onTurn: d => pa.turnFrame(d), flags: Q});
+const cv = createCamera({ctxO, PPM, PPMY, PPMH, WORLD, opt: () => opt, onTurn: d => pa.turnFrame(d), flags: Q, bounds: viewBounds});   // (viewBounds: the fjäll's region out there, world/layout.js)
 
 const features = [], events = [];
 const mods = createModifiers();   // game effects as notes on the owners' stats (core/modifiers.js; host.mods)

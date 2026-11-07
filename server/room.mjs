@@ -140,7 +140,7 @@ export function createRoom({seed, trees = null, decor = null, veins = null, cave
 
   function state(p, m) {
     const x = num(m.x, p.x), y = num(m.y, p.y), z = num(m.z, p.z), t = now();
-    if (Math.abs(x) > 2000 || Math.abs(y) > 2000 || Math.abs(z) > 200) return;
+    if (Math.abs(x) > 2000 || Math.abs(y) > 2000 || Math.abs(z) > 600) return;   // (z: the fjäll's summit stands ~220 m up: world/fjall.js)
     // the movement check: the first state places him; after that a move faster than MOVE.maxSpeed (+ slack) is refused
     const dt = Math.min(1, Math.max(1 / TICK_HZ, (t - p.lastT) / 1000)), d = Math.hypot(x - p.x, y - p.y);
     if (p.placed && !m.tp && d > MOVE.maxSpeed * dt + MOVE.slack) {

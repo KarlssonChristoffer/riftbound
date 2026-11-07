@@ -52,7 +52,7 @@ import {stoneMeshes, LIGHTS as STONE_LIGHTS} from './stonecircle.js';   // the W
 import {floorSink, floorGeometry} from './floor3d.js';   // the forest floor's stones, pebbles and twigs in 3D (its tiles, below)
 import {watchtowerRun, colTop} from './watchtower.js';   // the West Downs' watchtower
 import {hutRoof} from './hut.js';   // the roof of the hut in the forest's clearing (layout.js HUT)
-import {TOWER_PLAN, FOREST, HUT, CAVE, ICE} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
+import {TOWER_PLAN, FOREST, HUT, CAVE, ICE, FJALL} from './layout.js';   // (FOREST: the seeded forest's plan, world/forest.js; null without one; CAVE: its cave, world/caves.js)
 import {sample as forestSample, depth as forestDepth, joinRiver, COURSE_KS, courseSpeed, courseDepth, RECT as FOREST_RECT} from './forest.js';
 import {buildCave} from './cave3d.js';   // the forest's cave: its floor and walls in the band north of the forest (docs/CAVES.md)
 import {stepsOf} from './terrain.js';
@@ -658,7 +658,8 @@ export async function buildWorld(G, {biome, ctxO, PPM, PPMH, props: keep = null,
   const FT = 32, FM = 1, forestTiles = [];
   let cave = null;   // the forest's cave (cave3d.js: built with the cliffs, below)
   if (FOREST) {
-    const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - RG, fx1 = WORLD.x1 + RG, fz0 = FOREST_RECT.y0 - RG, fz1 = GROUNDS.y0;   // (the forest's own north edge: the cave's band past it draws itself, cave3d.js)
+    const RG = Math.max(SKIRT, (WORLD.past || 0) + 2), fx0 = WORLD.x0 - (FJALL ? 0 : RG), fx1 = WORLD.x1 + (FJALL ? 0 : RG),   // (the fjäll draws its own ground past the east and west edges: features/fjall.js)
+      fz0 = FOREST_RECT.y0 - RG, fz1 = GROUNDS.y0;   // (the forest's own north edge: the cave's band past it draws itself, cave3d.js)
     const ctxF = {PPM, ground: groundDrawn(), forest: FOREST, layout};
     for (let z0 = fz0; z0 < fz1 - 1e-6; z0 += FT) for (let x0 = fx0; x0 < fx1 - 1e-6; x0 += FT) {
       const x1 = Math.min(fx1, x0 + FT), z1 = Math.min(fz1, z0 + FT), T = {x0, z0, x1, z1, canvas: null, px: null, cx0: x0 - FM, cz0: z0 - FM, floor: FLOOR3D ? floorSink(x0, z0, x1, z1) : null};

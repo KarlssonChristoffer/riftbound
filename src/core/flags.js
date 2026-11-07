@@ -168,6 +168,8 @@ export const FLAG_DOCS = {
   treefire: '0: a tree the lightning strikes doesn\'t burn (it chars at once)',
   firestart: '1: you can carry a burning brand from a campfire and set a tree alight (experimental; also Esc > Sandbox)',
   ice: '1: the forest lake frozen now (mid-winter\'s ice), 0: never frozen (features/ice.js; docs/WINTER.md)',
+  fjall: '0: no fjäll north and east of the woods (world/fjall.js, features/fjall.js; docs/FJALL.md)',
+  fjallat: 'a fjäll place (gate, valley, bridge, stuga, lake, treeline, glacier, summit, tarns, blockhav): start there (features/fjall.js; docs/FJALL.md)',
   mire: '0: the upland mire\'s rules and look off (features/mire.js; the hollow stays: the plan\'s; docs/MIRE.md)',
   wisps: 'often: the mire\'s wisps every night and all day (features/mire.js; docs/MIRE.md)',
   glow: '0: no night glow in the forest; always: glow all day and fireflies all year, for testing (features/glowlife.js: fireflies, foxfire, moonflowers, the elf ring; docs/WORLDLIFE.md)',
