@@ -31,7 +31,9 @@ import {flags} from '../core/flags.js';
 import {CLOUD_GLSL, CLOUD_EXTRA, CLOUDS2, BANDS} from './clouds.js';
 
 export const TUNE = {
-  on: CLOUDS2 && flags.get('cloudbeams') !== '0' && flags.get('godrays') !== '0',
+  // OFF by default (the user, 2026-11-07: "inte snyggt alls": a washed-out haze with the dither over everything, in rain and
+  // mist); F10 > Effects > Depth or ?cloudbeams=1 turns it on to try
+  on: CLOUDS2 && flags.get('cloudbeams') === '1' && flags.get('godrays') !== '0',
   steps: 16,        // samples along each pixel's ray
   air: 16,          // m over the player's feet: the top of the glowing air
   len: 32,          // m: the longest stretch of a ray marched (from its near end)
