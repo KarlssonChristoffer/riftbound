@@ -82,7 +82,7 @@ export function createNetClient({transport, name = '', hello = null}) {
   if (transport.open) transport.onopen();
 
   // "where was q at time t": the two snapshots round the render time, lerped (the facing the short way round); the pose, the
-  // state and the lasso are the older one's (they step). Past the newest: held there (no guessing ahead)
+  // state and the lasso are the older one's (they step; the drawn pose's bones also come with the newer one's, w2 at u). Past the newest: held there (no guessing ahead)
   C.sample = (q, out) => {
     if (!q.n) return null;
     const t = performance.now() + offset - INTERP_MS;
@@ -96,6 +96,7 @@ export function createNetClient({transport, name = '', hello = null}) {
     const d = q.F[b] - q.F[a], df = d - Math.PI * 2 * Math.round(d / (Math.PI * 2));
     out.x = q.X[a] + (q.X[b] - q.X[a]) * u; out.y = q.Y[a] + (q.Y[b] - q.Y[a]) * u; out.z = q.Z[a] + (q.Z[b] - q.Z[a]) * u; out.phi = q.F[a] + df * u;
     out.s = q.S[a]; out.pose = q.P[a]; out.w = q.W[a]; out.ls = q.L[a];
+    out.w2 = q.W[b]; out.u = u;   // (the drawn pose after it and how far toward it: features/coop/look.js blends the two)
     return out;
   };
   C.sendState = o => transport.send(encode({k: 'st', ...o}));
