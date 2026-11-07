@@ -26,7 +26,7 @@ import {cssRGBA} from '../core/color.js';
 import {createGLStats} from './glstats.js';
 import {createLitterSim} from './litter.js';
 import {createGodrays} from './godrays.js';
-import {createCloudBeams} from './cloudbeams.js';
+import {createSunShafts} from './sunshafts.js';
 import {createMistVol} from './mistvol.js';
 import {createAir} from './air.js';
 import {CLOUD_GLSL, CLOUD_EXTRA} from './clouds.js';
@@ -2400,9 +2400,9 @@ export function createGfx(canvas, {VW, VH, PPM, PPMY, PPMH, world}) {   // world
   const dummyCam = new THREE.Camera();
   // GOD RAYS (render/godrays.js): sunbeams marched through the sun's shadow maps, added to the pixel image right after the composite
   const rays = createGodrays({THREE, renderer, raw, tri, cam: dummyCam, compU});   // (not drawn under the cinema camera: they march the oblique view's parallel rays)
-  // GOD RAYS THROUGH THE CLOUDS (render/cloudbeams.js): the view rays marched through the air, each sample's sun ray through the
-  // cloud bands; drawn after the god rays, under any camera (the first person view too). Its strength from the god rays' inputs
-  const beams = createCloudBeams({THREE, renderer, raw, tri, cam: dummyCam, compU, rays});
+  // SUN SHAFTS (render/sunshafts.js, the default since 2026-11-07; the god rays above only with ?godrays=1): sunlit openings drawn
+  // out toward the sun, after the composite, under any camera (first person too). Their strength from the god rays' inputs
+  const beams = createSunShafts({THREE, renderer, raw, tri, cam: dummyCam, compU, rays});
   // THE MIST AS A VOLUME (render/mistvol.js): marched along the view rays right after the composite, before the god rays (features/mist.js: G.setMistVol, G.mistField)
   const mvol = createMistVol({THREE, renderer, raw, tri, cam: dummyCam, compU, NL});
   // THE AIR (render/air.js): the moving-air field round the view (G.air: features/airfx.js splats into it, the mist and the smoke read it)
@@ -3078,7 +3078,7 @@ void main() {
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
-    cloudBeams: beams,   // (render/cloudbeams.js: features/depth.js's dev rows read its TUNE)
+    shafts: beams,   // (render/sunshafts.js: features/depth.js's dev rows read its TUNE and ask if it's on)
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
     godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)

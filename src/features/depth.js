@@ -104,11 +104,24 @@ export async function create(host) {
   const F = {name: 'depth', label: 'Depth (foreground, clouds, shafts, reflections)', key: '7', ambient: true,  on: Q.get('depth') !== '0', ms: 0, TUNE, debug: ''};
   if (Q.get('fg') === '1') TUNE.fg.on = true;
   F.settings = () => [{label: 'Foreground silhouettes', options: ['off', 'on'], get: () => TUNE.fg.on ? 'on' : 'off', set: v => { TUNE.fg.on = v === 'on'; }}];
-  // the dev console's rows (dev/devmenu.js, F10 > Effects > Depth): the cloud shadows' bands (render/clouds.js CLOUDS2), the god
-  // rays through the clouds (render/cloudbeams.js) and the shadow-map god rays (render/godrays.js); their TUNEs are live
-  const beamsT = () => host.G.cloudBeams?.TUNE, raysT = () => host.G.godrays?.TUNE;
+  // the dev console's rows (dev/devmenu.js, F10 > Effects > Depth): the cloud shadows' bands (render/clouds.js CLOUDS2), the sun
+  // shafts (render/sunshafts.js) and the old shadow-map god rays (render/godrays.js); their TUNEs are live
+  const shT = () => host.G.shafts?.TUNE, raysT = () => host.G.godrays?.TUNE;
   const num = (label, obj, key, min, max, step) => ({label, min, max, step, get: () => obj()?.[key] ?? 0, set: v => { const o = obj(); if (o) o[key] = v; }});
+  const arr = (label, obj, key, i, min, max, step) => ({label, min, max, step, get: () => obj()?.[key]?.[i] ?? 0, set: v => { const o = obj(); if (o) o[key][i] = v; }});
   F.dev = {group: 'Effects', rows: () => [
+    {label: 'Sun shafts (new)', get: () => !!shT()?.on, set: v => { const t = shT(); if (t) t.on = v; }},
+    num('Sun shafts: strength', shT, 'k', 0, 3, .1),
+    num('Sun shafts: length (m)', shT, 'len', 1, 20, .5),
+    arr('Sun shafts: fleck, shade all round (m)', shT, 'open', 0, .3, 4, .1),
+    arr('Sun shafts: fleck, shade farther out (m)', shT, 'open', 1, .5, 8, .1),
+    num('Sun shafts: dust', shT, 'dust', 0, 1, .05),
+    num('Sun shafts: dust threshold', shT, 'dustAt', 0, 1, .05),
+    arr('Sun shafts: level 1 at', shT, 'lv', 0, .05, 1, .05),
+    num('Sun shafts: longest on screen (px)', shT, 'maxPx', 10, 200, 5),
+    num('Sun shafts: show (0 look, 1 sources, 2 smear)', shT, 'debug', 0, 2, 1),
+    {label: 'Sun shafts: strength now', text: () => (host.G.shafts?.strength ?? 0).toFixed(2) + (host.G.shafts?.live ? ' (drawn)' : ' (off this frame)')},
+    {label: 'Old god rays (October)', get: () => !!raysT()?.on, set: v => { const t = raysT(); if (t) t.on = v; }},
     ...(CLOUDS2 ? [
       {label: 'Cloud shadows: stepped bands on the ground', get: () => BANDS.on, set: v => { BANDS.on = v; }},
       num('Cloud bands: steps', () => BANDS, 'n', 1, 6, 1),
@@ -117,20 +130,7 @@ export async function create(host) {
       num('Cloud bands: cloud size (x smaller)', () => BANDS, 'scale', .5, 6, .25),
       num('Cloud bands: least cover (a clear day)', () => BANDS, 'cover', 0, .8, .05),
       {label: 'Clouds: share of the sun taken', min: 0, max: 1, step: .05, get: () => TUNE.clouds.sun[0], set: v => { TUNE.clouds.sun[0] = v; }},
-      {label: 'God rays through the clouds', get: () => !!beamsT()?.on, set: v => { const t = beamsT(); if (t) t.on = v; }},
-      num('Cloud beams: strength', beamsT, 'k', 0, 3, .1),
-      num('Cloud beams: gain', beamsT, 'gain', .2, 5, .1),
-      num('Cloud beams: steps', beamsT, 'steps', 4, 48, 2),
-      num('Cloud beams: air height (m)', beamsT, 'air', 2, 40, 1),
-      num('Cloud beams: ray length (m)', beamsT, 'len', 4, 80, 2),
-      num('Cloud beams: levels', beamsT, 'levels', 1, 3, 1),
-      num('Cloud beams: dither', beamsT, 'dither', 0, 1, .25),
-      num('Cloud beams: dust', beamsT, 'dust', 0, 1, .05),
-      num('Cloud beams: dust threshold', beamsT, 'dustAt', 0, 1, .05),
-      {label: 'Cloud beams: cut by tree / wall shadows', get: () => !!beamsT()?.shadows, set: v => { const t = beamsT(); if (t) t.shadows = v; }},
-      {label: 'Cloud beams: strength now', text: () => (host.G.cloudBeams?.strength ?? 0).toFixed(2) + (host.G.cloudBeams?.live ? ' (drawn)' : ' (off this frame)')},
-    ] : [{label: 'Cloud bands and cloud beams', text: () => 'off (?clouds2=0, ?cloudmap=1 or ?cloudfield=0)'}]),
-    {label: 'God rays through crowns and gaps', get: () => !!raysT()?.on, set: v => { const t = raysT(); if (t) t.on = v; }},
+    ] : []),
   ]};
   let T = 0, biome = '', acc = 0;
   const hist = new Float32Array(60); let hN = 0;
@@ -583,7 +583,7 @@ export async function create(host) {
   function drawShafts() {
     // (by day the real sunbeams of render/godrays.js take over where they are on: these painted ones stand at fixed spots and
     // ignore the shadows. At night, with no sun shadow map to march, the painted moonbeams of frost / rift stay)
-    if (!TUNE.shafts.on || (host.G?.godrays?.enabled && timeName() !== 'night')) return 0;
+    if (!TUNE.shafts.on || ((host.G?.godrays?.enabled || host.G?.shafts?.enabled) && timeName() !== 'night')) return 0;   // (render/sunshafts.js too)
     ensureShafts(); if (!SH.col) return 0;
     const z = V.z, reach = (TUNE.shafts.lenMax + 30) * z;
     let n = 0, q = null;

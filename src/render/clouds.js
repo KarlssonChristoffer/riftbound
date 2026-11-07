@@ -50,7 +50,7 @@ export const CLOUD_VIEW = FIELD_V2 && flags.get('cloudmap') !== '1';
 // as the cover changes). The point is the ground (h 0) where the sun's ray to the pixel meets the field's plane (gfx.js
 // cloudSunAt), from its WORLD position (any camera, the first person view too: CL2 below), snapped to the ground texel, so
 // an edge steps texel by texel. BANDS.on (live, F10 > Effects > Depth) switches back to the view dimming without a reload.
-// The god rays through the clouds (render/cloudbeams.js) read the same bands.
+// The sun shafts (render/sunshafts.js) read the same bands.
 export const CLOUDS2 = CLOUD_VIEW && flags.get('clouds2') !== '0';
 export const BANDS = {on: CLOUDS2, n: 3, span: .07, thin: .45,
   scale: 3 /* the bands' clouds this many times smaller than the weather's field (13-50 m: edges cross the view; same speed) */,
