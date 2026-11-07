@@ -2943,9 +2943,10 @@ void main() {
   }
   return {THREE, renderer, gScene, sScene, xScene, camera, sunCam, U, compU, view, stats, get VW() { return VW; }, get VH() { return VH; },
     get frame() { return frameNo; }, extra, shaders: {HEAD, POINT_FS, FX_FS},   // (render/flames.js: its own passes, the same shaders)
+    cloudBeams: beams,   // (render/cloudbeams.js: features/depth.js's dev rows read its TUNE)
     setView, setCine, cineMat, get cine() { return cine; }, setSun, toScreen, toScreenInto, gameToScreen, pxPerM, onScreen, render, card, mesh, surface, line, point, sprite, layer, glayer, touch, dataImage, tex, texData, glStats, QUAD, setGroundDecals,
     fx, heat, setDisplay, resize, fxU, get display() { return DS; }, setPost, setSubpixel, hdShift, sub, setSink,
-    godrays: rays, cloudBeams: beams, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
+    godrays: rays, setRays: rays.set, setMistVol: mvol.set, mistField: mvol.setField, mistVol: mvol, air: air.api,   // (render/mistvol.js: features/mist.js sets it; render/godrays.js: render/lighting.js sets its strength; features/depth.js asks if it's on)
     setOptions, setSmooth, get smooth() { return U.smooth.value; }, setSeason, setGround, setFlash, setPlayer, setCut, setWater, setWaterLook, setPuddles, setPuddleLook, litterSim, setReflect, setClouds, cloudGap, setHaze, setVignette, aoStamp, ao, setAo, get aoEpoch() { return aoEpoch; },
     setMist, get mist() { return mist; }};
 }
